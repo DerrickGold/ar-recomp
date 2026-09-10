@@ -89,6 +89,7 @@ int main(void) {
   scaled_43.visible_width = 256;
   scaled_43.extra_left_right = 0;
   scaled_43.hud_scale_percent = 200;
+  scaled_43.hud_body_y1 = 224;
   const int scaled_43_count = ArHudLayout_BuildPresentationChunks(
       (ArRenderRectI){100, 50, 1024, 896}, &scaled_43, chunks);
   assert(scaled_43_count == kHudPresentationChunkCapacity);
@@ -96,7 +97,13 @@ int main(void) {
   CheckRect(chunks[0].output_destination, 100, 50, 128, 16);
   CheckRect(chunks[1].output_destination, 484, 50, 256, 16);
   CheckRect(chunks[2].output_destination, 996, 50, 128, 16);
-  CheckRect(chunks[6].output_destination, 356, 114, 512, 64);
+  CheckRect(chunks[6].output_destination, 100, 178, 1024, 768);
+  /* The retail "more" arrow begins at source row 164. It follows the scene
+   * 4x projection even while the top HUD is independently fixed at 2x. */
+  assert(chunks[6].output_destination.y +
+             (164 - chunks[6].screen_source.y) *
+                 chunks[6].output_destination.h /
+                 chunks[6].screen_source.h == 706);
   CheckRect(chunks[7].texture_source, 224, 8, 16, 16);
   CheckRect(chunks[7].output_destination, 956, 66, 32, 32);
 

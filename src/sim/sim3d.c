@@ -167,11 +167,16 @@ static bool StandardTownHudCapture(
       (source != SR_PPU_OVERLAY_BG3 &&
        source != SR_PPU_OVERLAY_OBJ) ||
       capture->x0 != 0 || capture->x1 != kActRaiserAuthenticWidth ||
-      capture->y0 != 0 || capture->y1 != kActRaiserSimulationHudHeight ||
+      capture->y0 != 0)
+    return false;
+  if (source == SR_PPU_OVERLAY_BG3) {
+    return capture->y1 == kActRaiserAuthenticHeight &&
+        capture->flags == SR_PPU_OVERLAY_REMOVE_FROM_GAME &&
+        capture->oam_count == 0;
+  }
+  if (capture->y1 != kActRaiserSimulationHudHeight ||
       capture->flags != SR_PPU_OVERLAY_REMOVE_FROM_GAME)
     return false;
-  if (source == SR_PPU_OVERLAY_BG3)
-    return capture->oam_count == 0;
   /* The town menu consumes the leading OAM entries, so the fixed-screen
    * hourglass moves from its ordinary slots 0-3 (observed at 11-14 in
    * runs/20260810-231616 and runs/20260811-145909). The widescreen HUD
@@ -192,6 +197,18 @@ static bool StandardTownHudCapture(
 
 static bool OverlayPolicyConflicts(
     const SrPpuFrameTransactionContext *context) {
+  /* The application composite can exactly reproduce a main-screen BG3 winner
+   * (including windows, supported fixed-colour math, and master brightness).
+   * A subscreen BG3 is an input to another layer's final colour, however, and
+   * cannot be restored by alpha-compositing one late surface. Keep enhanced
+   * SIM observational in that configuration and retain untouched scanout. */
+  const SrPpuOverlayState *bg3 =
+      &context->frame.overlays[SR_PPU_OVERLAY_BG3];
+  if (bg3->y1 > bg3->y0 &&
+      (((context->state.main_screen &
+         (1u << SR_PPU_OVERLAY_BG3)) == 0u) ||
+       (context->state.sub_screen & (1u << SR_PPU_OVERLAY_BG3)) != 0u))
+    return true;
   for (int source = 0; source < SR_PPU_OVERLAY_SOURCE_COUNT; source++) {
     SrPpuOverlayCaptureState capture;
     CaptureStateFromOverlay(&capture, &context->frame.overlays[source]);
@@ -970,6 +987,29 @@ static uint32_t ComposeTownPixelWithoutHud(int x, int y,
   return color & 0x00ffffffu;
 }
 
+static bool ComposeTownBg3WinnerPixel(int x, int y, uint32_t *out_color) {
+  if (!out_color || x < 0 || x >= g_sim3d.width ||
+      y < 0 || y >= g_sim3d.height)
+    return false;
+  const size_t index =
+      (size_t)y * (size_t)g_sim3d.width + (size_t)x;
+  int winner = -1;
+  uint32_t color = 0;
+  for (int plane = 0; plane < kSim3DPlane_Count; plane++) {
+    if ((g_sim3d.captured_plane_mask & (1u << plane)) == 0u)
+      continue;
+    const uint32_t pixel = g_sim3d_layer_pixels[plane][index];
+    if (!(pixel >> 24)) continue;
+    winner = plane;
+    color = pixel;
+  }
+  if (winner != kSim3DPlane_Bg3Low &&
+      winner != kSim3DPlane_Bg3High)
+    return false;
+  *out_color = OpaqueArgb(color);
+  return true;
+}
+
 static void RestoreTownHudPixel(uint8_t *authentic_pixels,
                                 int authentic_pitch, int x, int y,
                                 bool skip_bg3, bool skip_obj) {
@@ -999,24 +1039,19 @@ static void RestoreTownHudPolicy(uint8_t *authentic_pixels,
    * temporarily superseded. BG3's two priority bands are mutually exclusive
    * per source pixel; the exact OAM-range raster was prepared before scanout. */
   if (g_sim3d.hud_bg_pixels && g_sim3d.hud_bg_pitch) {
-    memset(g_sim3d.hud_bg_pixels, 0,
-           (size_t)g_sim3d.hud_bg_pitch * kActRaiserSimulationHudHeight);
     const SrPpuOverlayCaptureState *capture =
         &g_sim3d.prior_captures[SR_PPU_OVERLAY_BG3];
+    memset(g_sim3d.hud_bg_pixels, 0,
+           (size_t)g_sim3d.hud_bg_pitch * (size_t)capture->y1);
     for (int y = capture->y0; y < capture->y1; y++) {
       uint8_t *dst = g_sim3d.hud_bg_pixels +
           (size_t)y * (size_t)g_sim3d.hud_bg_pitch;
       for (int x = capture->x0; x < capture->x1; x++) {
         int texture_x = x + (g_sim3d.width - kActRaiserAuthenticWidth) / 2;
-        size_t index = (size_t)y * (size_t)g_sim3d.width +
-            (size_t)texture_x;
-        uint32_t high =
-            g_sim3d_layer_pixels[kSim3DPlane_Bg3High][index];
-        uint32_t low =
-            g_sim3d_layer_pixels[kSim3DPlane_Bg3Low][index];
-        const uint32_t color = high ? high : low;
-        memcpy(dst + (size_t)texture_x * sizeof(color),
-               &color, sizeof(color));
+        uint32_t color;
+        if (ComposeTownBg3WinnerPixel(texture_x, y, &color))
+          memcpy(dst + (size_t)texture_x * sizeof(color),
+                 &color, sizeof(color));
       }
     }
   }
@@ -1202,7 +1237,7 @@ void Sim3D_FinishCapture(uint8_t *authentic_pixels,
   /* The promoted HUD owns the full width of its own rows, so those rows keep
    * every captured pixel; the same span the authentic-side restore uses. */
   int hud_span_rows = g_sim3d.hud_bg3
-      ? g_sim3d.prior_captures[SR_PPU_OVERLAY_BG3].y1 : 0;
+      ? kActRaiserSimulationHudHeight : 0;
   /* Ground projection consumes the individual planes directly. Building a
    * second full-frame CPU composite in that profile was pure dead work unless
    * a diagnostic reader needed its hash/difference. */
@@ -1318,7 +1353,7 @@ void Sim3D_CaptureOutputSurfaceViews(Sim3DOutputSurfaceViews *views) {
   if (g_sim3d.hud_bg3)
     InitOutputSurfaceView(
         &views->hud_bg, g_sim3d.hud_bg_pixels, g_sim3d.hud_bg_pitch,
-        kActRaiserSimulationHudHeight);
+        (uint32_t)g_sim3d.prior_captures[SR_PPU_OVERLAY_BG3].y1);
   if (g_sim3d.hud_obj)
     InitOutputSurfaceView(
         &views->hud_obj, g_sim3d.hud_obj_pixels, g_sim3d.hud_obj_pitch,

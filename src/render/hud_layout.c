@@ -196,15 +196,21 @@ int ArHudLayout_BuildPresentationChunks(
 
   if (in->hud_body_y1 > height) {
     const int body_height = in->hud_body_y1 - height;
+    /* The status bands are accessibility-scaled, fixed HUD. Everything below
+     * the split remains authored in scene coordinates: dialogue boxes,
+     * menus, and their "more" arrow must land on the same rows as the base
+     * framebuffer regardless of HUD scale. */
+    const double body_scale_x = (double)viewport.w / in->visible_width;
+    const double body_scale_y = (double)viewport.h / in->snes_height;
     const int body_destination_width =
-        ScaledPixels(in->authentic_width, scale_x);
+        ScaledPixels(in->authentic_width, body_scale_x);
     const ArRenderRectI body_source = {
       texture_extra, height, in->authentic_width, body_height,
     };
     const ArRenderRectI body_destination = {
       viewport.x + (viewport.w - body_destination_width) / 2,
-      viewport.y + ScaledPixels(height, scale_y),
-      body_destination_width, ScaledPixels(body_height, scale_y),
+      viewport.y + ScaledCoordinate(height, body_scale_y),
+      body_destination_width, ScaledPixels(body_height, body_scale_y),
     };
     AddChunk(
         chunks, &count, in->hud_bg_texture, body_source,

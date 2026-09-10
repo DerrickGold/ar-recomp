@@ -24,6 +24,7 @@
 #include "action/action_effects.h"
 #include "action/action_bg_tuner.h"
 #include "actraiser_game.h"
+#include "actraiser/actraiser_localization_runtime.h"
 #include "constants.h"
 #include "actraiser_rtl.h"
 #include "snesrecomp/game_runtime.h"
@@ -135,6 +136,7 @@ typedef struct FramePpuView {
   const SnesRunnerApi *api;
   SrRunnerHandle *runner;
   SrPpuFrameSnapshot state;
+  SrPpuStateSnapshot live_state;
 } FramePpuView;
 
 static bool FramePpuView_Capture(
@@ -144,19 +146,24 @@ static bool FramePpuView_Capture(
   view->api = sr_runner_get_api(SR_RUNNER_ABI_VERSION);
   view->runner = RtlGameRunner();
   view->state.struct_size = sizeof(view->state);
+  view->live_state.struct_size = sizeof(view->live_state);
   surfaces->struct_size = sizeof(*surfaces);
   return view->api && view->runner &&
       view->api->struct_size >= SNES_RUNNER_API_PPU_SURFACE_SIZE &&
       (view->api->capabilities &
-       (SR_RUNNER_CAP_PPU_FRAME_STATE |
+       (SR_RUNNER_CAP_PPU_STATE |
+        SR_RUNNER_CAP_PPU_FRAME_STATE |
         SR_RUNNER_CAP_PPU_SURFACE_VIEWS |
         SR_RUNNER_CAP_BORROWED_BYTE_SPANS |
         SR_RUNNER_CAP_BORROWED_U16_SPANS)) ==
-          (SR_RUNNER_CAP_PPU_FRAME_STATE |
+          (SR_RUNNER_CAP_PPU_STATE |
+           SR_RUNNER_CAP_PPU_FRAME_STATE |
            SR_RUNNER_CAP_PPU_SURFACE_VIEWS |
            SR_RUNNER_CAP_BORROWED_BYTE_SPANS |
            SR_RUNNER_CAP_BORROWED_U16_SPANS) &&
       view->api->query_ppu_frame_state(view->runner, &view->state) ==
+          SR_RESULT_OK &&
+      view->api->query_ppu_state(view->runner, &view->live_state) ==
           SR_RESULT_OK &&
       view->api->query_ppu_surfaces(view->runner, surfaces) == SR_RESULT_OK &&
       view->state.overlay_count == SR_PPU_OVERLAY_SOURCE_COUNT &&
@@ -341,6 +348,7 @@ void FrameSlot_SetPendingAnnotatedSim(const SimFrameData *sim) {
  * never do this; it only reads the FrameSlot this produces. */
 void FrameSlot_Capture(FrameSlot *dst) {
   memset(dst, 0, sizeof(*dst));
+  ArLocalizationFrame_Reset(&dst->localization);
   FramePpuView ppu_view;
   const bool have_ppu_view =
       FramePpuView_Capture(&ppu_view, &dst->ppu_surfaces);
@@ -651,6 +659,14 @@ void FrameSlot_Capture(FrameSlot *dst) {
     }
     dst->inidisp = ppu_frame->display_control;
     dst->bg_mode = ppu_frame->bg_mode;
+    const SrPpuBackgroundState *bg3 = &ppu_view.live_state.backgrounds[2];
+    dst->bg3_state_valid = bg3->tilemap_width_tiles != 0u &&
+        bg3->tilemap_height_tiles != 0u;
+    dst->bg3_hscroll = bg3->h_scroll;
+    dst->bg3_vscroll = bg3->v_scroll;
+    dst->bg3_tilemap_base_words = bg3->tilemap_base_word;
+    dst->bg3_tilemap_width_tiles = bg3->tilemap_width_tiles;
+    dst->bg3_tilemap_height_tiles = bg3->tilemap_height_tiles;
 
     _Static_assert(kFrameSlotOverlaySourceCount == SR_PPU_OVERLAY_SOURCE_COUNT,
                    "FrameSlot overlay source count must match the PPU's");
@@ -739,6 +755,18 @@ void FrameSlot_Capture(FrameSlot *dst) {
     }
 
     dst->m7_active = ppu_frame->mode7_override_active != 0u;
+  }
+
+  if (have_ppu_view && dst->bg3_state_valid) {
+    SrBorrowedU16Span vram = {sizeof(vram), 0u, NULL, 0u, 0u};
+    if (ppu_view.api->borrow_u16_memory(
+            ppu_view.runner, SR_MEMORY_VRAM, &vram) == SR_RESULT_OK &&
+        vram.data && vram.lifetime_generation ==
+            ppu_view.state.lifetime_generation)
+      ActRaiserLocalizationRuntime_CaptureFrame(
+          &dst->localization, dst->bg3_tilemap_base_words,
+          dst->bg3_tilemap_width_tiles, dst->bg3_tilemap_height_tiles,
+          vram.data, vram.element_count);
   }
 
   dst->hd_entry_count = 0;

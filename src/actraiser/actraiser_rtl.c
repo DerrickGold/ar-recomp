@@ -31,6 +31,7 @@
 #include "music_replacements.h"
 #include "native_audio_extension.h"
 #include "randomizer.h"
+#include "render/bg3_composite_policy.h"
 #include "dev/native_audio_trace.h"
 #include "dev/hd_tile_census.h"
 #include "dev/sfx_census.h"
@@ -2105,6 +2106,27 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
   frame_policy.hud_player_row_y = hud_player_row_y;
   frame_policy.hud_left_only_y = hud_left_only_y;
 
+  /* Sky Palace and simulation-town localization owns all 224 authentic BG3
+   * rows, not merely the 32-row status band. Flat Diorama has the same
+   * full-layer requirement for action title/pause cards. Resolve that one
+   * capture height here so later renderer-specific setup only rebinds the
+   * destination surface; it must not silently expand policy after another
+   * owner has inspected it. */
+  const bool scoped_text_scene =
+      !survey && map_group == kActRaiserMapGroup_NonAction &&
+      map_number >= kActRaiserSimulationTown_First &&
+      map_number <= kActRaiserNonActionMap_SkyPalace;
+  const bool flat_diorama = !survey && Diorama_IsActiveThisFrame() &&
+      g_settings.diorama_hud_flat;
+  const int bg3_capture_height = ArBg3Composite_CaptureHeight(
+      &(ArBg3CompositeCaptureInputs){
+        .scoped_text_scene = scoped_text_scene,
+        .flat_diorama = flat_diorama,
+        .hud_split_height = hud_split_height,
+        .authentic_height = kActRaiserAuthenticHeight,
+      });
+  const uint32_t bg3_capture_flags = SR_PPU_OVERLAY_REMOVE_FROM_GAME;
+
   ActionBgTuner_BeginFrame();
   s_pending_action_bg_plan = ActRaiser_NativeBgPresentationPlan();
   s_pending_bg_capture_pad_to_budget = false;
@@ -2134,10 +2156,10 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
     ActRaiser_ResolveVerticalMarginPolicy(
         map_group, map_number, &frame_policy);
     if (!ActRaiser_CommitPpuFramePolicy(&frame_policy)) return;
-    if (hud_split_height)
+    if (bg3_capture_height)
       ActRaiser_ClaimOverlayCapture(
           SR_PPU_OVERLAY_BG3, 0, 0, kActRaiserAuthenticWidth,
-          hud_split_height, SR_PPU_OVERLAY_REMOVE_FROM_GAME);
+          bg3_capture_height, bg3_capture_flags);
     if (bind_plan)
       ActRaiserActionBg_BindPlanWithVirtualLayers(
           g_ram, kActRaiserWramSize, &plan,
@@ -2322,10 +2344,10 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
    * state as one validated operation. Provider-dependent corrections are
    * resolved below and published through the matching finalize transaction. */
   if (!ActRaiser_CommitPpuFramePolicy(&frame_policy)) return;
-  if (hud_split_height)
+  if (bg3_capture_height)
     ActRaiser_ClaimOverlayCapture(
         SR_PPU_OVERLAY_BG3, 0, 0, kActRaiserAuthenticWidth,
-        hud_split_height, SR_PPU_OVERLAY_REMOVE_FROM_GAME);
+        bg3_capture_height, bg3_capture_flags);
   if (wide) {
     if (bg_hle_allowed && bg_plan_valid) {
       bg_hle_bindings = ActRaiserActionBg_BindPlanWithVirtualLayers(
@@ -3611,45 +3633,10 @@ static SrResult ActRaiser_DrawPpuFrameTransaction(
             SR_PPU_OUTPUT_OVERLAY, SR_PPU_OVERLAY_BG3, 0u,
             g_hud_bg_pixels, (size_t)width * 4,
             kHostDisplayFramebufferHeight);
-        /* Do NOT issue the generic wide capture here — the line-906
-         * HUD-split-specific capture region (0,0,kActRaiserAuthenticWidth,
-         * hud_split_height) stays the authority for this source's X range;
-         * that wide path is only for the diorama's OWN layers.
-         *
-         * BG3 carries more than the status bar, though: the act-title card
-         * ("FILLMORE / ACT-1", BG3 tilemap rows 8/10 -> y=64..88) and the
-         * pause text are the same layer, just below the split. In flat mode
-         * they stay in the game framebuffer and are simply visible. In
-         * diorama mode that framebuffer becomes the BACKDROP plane, drawn
-         * first and then painted over by the BG2/BG1/OBJ planes — the text
-         * silently disappeared behind the scene. Extend the SAME capture
-         * rectangle down the full authentic height so those rows land in
-         * g_hud_bg_pixels too; present.c draws everything below
-         * hud_split_height as one flat, centered "body" chunk (the HUD
-         * split's three anchored bands are driven by wsHudSplitHeight, not
-         * by this rectangle, so their geometry is unchanged).
-         *
-         * When widescreen policy supplied a split, extend that capture. In
-         * an intentionally unsplit mode such as Wide Raw, flat Diorama still
-         * needs a full BG3 capture so the HUD can be composited in native
-         * screen space rather than inheriting the scene perspective. The
-         * present side recognizes split-height zero plus this full capture as
-         * one unsplit/native chunk. */
-        const SrPpuOverlayCaptureState *bg3_capture =
-            ActRaiser_PpuCapture(SR_PPU_OVERLAY_BG3);
-        if (bg3_capture->y1 > bg3_capture->y0 &&
-            bg3_capture->y1 < kActRaiserAuthenticHeight)
-          ActRaiser_SetPpuOverlayCapture(
-              SR_PPU_OVERLAY_BG3, bg3_capture->x0, bg3_capture->y0,
-              bg3_capture->x1 - bg3_capture->x0,
-              kActRaiserAuthenticHeight - bg3_capture->y0,
-              bg3_capture->flags);
-        else if (bg3_capture->y1 <= bg3_capture->y0 &&
-                 (capture_screens & (1 << SR_PPU_OVERLAY_BG3)))
-          ActRaiser_SetPpuOverlayCapture(
-              SR_PPU_OVERLAY_BG3, 0, 0, kActRaiserAuthenticWidth,
-              kActRaiserAuthenticHeight,
-              SR_PPU_OVERLAY_REMOVE_FROM_GAME);
+        /* Capture extent is already final in
+         * ArBg3Composite_CaptureHeight. Keeping this block to a pure rebind
+         * makes ownership independent of renderer setup order and preserves
+         * the same policy through flat/tilted/flat toggle sequences. */
       } else {
         if (!g_diorama_layer_pixels[SR_PPU_OVERLAY_BG3])
           g_diorama_layer_pixels[SR_PPU_OVERLAY_BG3] =

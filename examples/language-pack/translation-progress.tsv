@@ -1,0 +1,4 @@
+# format=actraiser-language-progress version=1
+# semantic-id<TAB>not_started|wip|done
+sky.action_mode.confirm	wip
+sky.menu.fight_monsters	done

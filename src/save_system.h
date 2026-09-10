@@ -107,6 +107,10 @@ void SaveSystem_ResyncShadow(void);
 void SaveSystem_ResyncShadowRange(size_t offset, size_t size);
 const char *SaveSystem_ActivePath(void);
 SaveBackend SaveSystem_ActiveBackend(void);
+/* Snapshot the current native player name as printable UTF-8/ASCII. This is a
+ * read-only semantic accessor for localization placeholders; callers never
+ * receive the live SRAM pointer or its USA-specific offset. */
+bool SaveSystem_CopyPlayerName(char *destination, size_t capacity);
 
 /* Every request field contains -1 for unchanged or its documented value. A
  * persistent edit backs up and atomically writes the active format before the

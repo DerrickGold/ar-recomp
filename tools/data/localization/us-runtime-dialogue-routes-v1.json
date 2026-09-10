@@ -1,0 +1,3502 @@
+{
+  "format": "actraiser-us-runtime-dialogue-routes",
+  "rom_sha256": "b8055844825653210d252d29a2229f9a3e7e512004e83940620173c57d8723f0",
+  "route_count": 365,
+  "routes": [
+    {
+      "caller_pc24": "$01:876E",
+      "native_page_units": [
+        59
+      ],
+      "semantic_id": "sky.action_mode.unavailable.master_level",
+      "source_pc24": "$01:F001"
+    },
+    {
+      "caller_pc24": "$01:8C32",
+      "native_page_units": [
+        43
+      ],
+      "semantic_id": "variant.western.sim.command_menu.prompt",
+      "source_pc24": "$01:F699"
+    },
+    {
+      "caller_pc24": "$01:8C3E",
+      "native_page_units": [
+        2
+      ],
+      "semantic_id": "variant.western.sim.command_menu.prompt_continuation",
+      "source_pc24": "$01:F6C4"
+    },
+    {
+      "caller_pc24": "$01:869B",
+      "native_page_units": [
+        25
+      ],
+      "semantic_id": "sky.action_mode.unavailable.no_residents",
+      "source_pc24": "$01:F6D1"
+    },
+    {
+      "caller_pc24": "$01:876E",
+      "native_page_units": [
+        21,
+        74
+      ],
+      "semantic_id": "sky.action_mode.unavailable.cannot_land",
+      "source_pc24": "$01:F6EA"
+    },
+    {
+      "caller_pc24": "$01:876E",
+      "native_page_units": [
+        43
+      ],
+      "semantic_id": "sky.action_mode.unavailable.already_cleared",
+      "source_pc24": "$01:F758"
+    },
+    {
+      "caller_pc24": "$01:873A",
+      "native_page_units": [
+        42,
+        1
+      ],
+      "semantic_id": "sky.action_mode.outcome.first_lair",
+      "source_pc24": "$01:F783"
+    },
+    {
+      "caller_pc24": "$01:873A",
+      "native_page_units": [
+        44,
+        1
+      ],
+      "semantic_id": "sky.action_mode.outcome.repeat_lair",
+      "source_pc24": "$01:F7AE"
+    },
+    {
+      "caller_pc24": "$01:873A",
+      "native_page_units": [
+        37,
+        1
+      ],
+      "semantic_id": "sky.action_mode.outcome.final_battle",
+      "source_pc24": "$01:F7DB"
+    },
+    {
+      "caller_pc24": "$01:874B",
+      "native_page_units": [
+        17
+      ],
+      "semantic_id": "sky.action_mode.begin_blessing",
+      "source_pc24": "$01:F801"
+    },
+    {
+      "caller_pc24": "$01:8740",
+      "native_page_units": [
+        12
+      ],
+      "semantic_id": "sky.action_mode.confirm",
+      "source_pc24": "$01:F812"
+    },
+    {
+      "caller_pc24": "$01:876E",
+      "native_page_units": [
+        17
+      ],
+      "semantic_id": "sky.action_mode.cancel_confirm",
+      "source_pc24": "$01:F81E"
+    },
+    {
+      "caller_pc24": "$01:876E",
+      "native_page_units": [
+        37
+      ],
+      "semantic_id": "sky.action_mode.unavailable.no_monsters",
+      "source_pc24": "$01:F82F"
+    },
+    {
+      "caller_pc24": "$01:8794",
+      "native_page_units": [
+        15
+      ],
+      "semantic_id": "sky.magic.choose",
+      "source_pc24": "$01:F854"
+    },
+    {
+      "caller_pc24": "$01:878C",
+      "native_page_units": [
+        13
+      ],
+      "semantic_id": "sky.magic.empty",
+      "source_pc24": "$01:F863"
+    },
+    {
+      "caller_pc24": "$01:87E9",
+      "native_page_units": [
+        17
+      ],
+      "semantic_id": "sky.magic.cancelled",
+      "source_pc24": "$01:F870"
+    },
+    {
+      "caller_pc24": "$01:87E9",
+      "native_page_units": [
+        18,
+        25
+      ],
+      "semantic_id": "sky.magic.selected.fire",
+      "source_pc24": "$01:F881"
+    },
+    {
+      "caller_pc24": "$01:87E9",
+      "native_page_units": [
+        22,
+        27
+      ],
+      "semantic_id": "sky.magic.selected.stardust",
+      "source_pc24": "$01:F8AC"
+    },
+    {
+      "caller_pc24": "$01:87E9",
+      "native_page_units": [
+        18,
+        48
+      ],
+      "semantic_id": "sky.magic.selected.aura",
+      "source_pc24": "$01:F8DD"
+    },
+    {
+      "caller_pc24": "$01:87E9",
+      "native_page_units": [
+        19,
+        37
+      ],
+      "semantic_id": "sky.magic.selected.light",
+      "source_pc24": "$01:F91F"
+    },
+    {
+      "caller_pc24": "$01:84C8",
+      "native_page_units": [
+        21
+      ],
+      "semantic_id": "sim.inventory.choose_item",
+      "source_pc24": "$01:F957"
+    },
+    {
+      "caller_pc24": "$01:84C0",
+      "native_page_units": [
+        19
+      ],
+      "semantic_id": "sim.inventory.empty",
+      "source_pc24": "$01:F96C"
+    },
+    {
+      "caller_pc24": "$01:84F8",
+      "native_page_units": [
+        12
+      ],
+      "semantic_id": "sim.inventory.cancelled",
+      "source_pc24": "$01:F98F"
+    },
+    {
+      "caller_pc24": "$01:8AA0",
+      "native_page_units": [
+        31
+      ],
+      "semantic_id": "system.save.confirm",
+      "source_pc24": "$01:F99B"
+    },
+    {
+      "caller_pc24": "$01:8ABE",
+      "native_page_units": [
+        44
+      ],
+      "semantic_id": "system.save.completed_continue_confirm",
+      "source_pc24": "$01:F9BA"
+    },
+    {
+      "caller_pc24": "$01:8AF1",
+      "native_page_units": [
+        42
+      ],
+      "semantic_id": "system.save.continue",
+      "source_pc24": "$01:F9E6"
+    },
+    {
+      "caller_pc24": "$01:8ACD",
+      "native_page_units": [
+        53,
+        37
+      ],
+      "semantic_id": "system.save.rest_message",
+      "source_pc24": "$01:FA10"
+    },
+    {
+      "caller_pc24": "$01:8AF1",
+      "native_page_units": [
+        17
+      ],
+      "semantic_id": "system.save.cancelled",
+      "source_pc24": "$01:FA6A"
+    },
+    {
+      "caller_pc24": "$01:8AFB",
+      "native_page_units": [
+        25
+      ],
+      "semantic_id": "system.message_speed.choose",
+      "source_pc24": "$01:FA7B"
+    },
+    {
+      "caller_pc24": "$01:8B77",
+      "native_page_units": [
+        13
+      ],
+      "semantic_id": "system.message_speed.sample",
+      "source_pc24": "$01:FAB1"
+    },
+    {
+      "caller_pc24": "$01:8B6A",
+      "native_page_units": [
+        18
+      ],
+      "semantic_id": "system.message_speed.cancelled",
+      "source_pc24": "$01:FABE"
+    },
+    {
+      "caller_pc24": "$01:824A",
+      "native_page_units": [
+        30
+      ],
+      "semantic_id": "sim.development.direction.prompt",
+      "source_pc24": "$01:FAD0"
+    },
+    {
+      "caller_pc24": "$01:8254",
+      "native_page_units": [
+        17
+      ],
+      "semantic_id": "sim.development.direction.cancel_confirm",
+      "source_pc24": "$01:FAEE"
+    },
+    {
+      "caller_pc24": "$01:93BA",
+      "context_pc24": "$01:827F",
+      "native_page_units": [
+        17
+      ],
+      "semantic_id": "dialogue.event.wrapper_06.route_01",
+      "source_pc24": "$01:FAEE"
+    },
+    {
+      "caller_pc24": "$01:93BA",
+      "context_pc24": "$01:827F",
+      "native_page_units": [
+        32
+      ],
+      "semantic_id": "dialogue.event.wrapper_06.route_00",
+      "source_pc24": "$01:FAFF"
+    },
+    {
+      "caller_pc24": "$01:898F",
+      "native_page_units": [
+        21
+      ],
+      "semantic_id": "sim.offerings.unavailable.none",
+      "source_pc24": "$01:FB23"
+    },
+    {
+      "caller_pc24": "$01:88C9",
+      "native_page_units": [
+        40
+      ],
+      "semantic_id": "sim.offerings.choose",
+      "source_pc24": "$01:FB38"
+    },
+    {
+      "caller_pc24": "$01:84AD",
+      "native_page_units": [
+        61
+      ],
+      "semantic_id": "sim.inventory.full",
+      "source_pc24": "$01:FB60"
+    },
+    {
+      "caller_pc24": "$01:898F",
+      "native_page_units": [
+        61
+      ],
+      "semantic_id": "sim.offerings.unavailable.inventory_full",
+      "source_pc24": "$01:FB60"
+    },
+    {
+      "caller_pc24": "$01:8974",
+      "native_page_units": [
+        19
+      ],
+      "semantic_id": "sim.offerings.choose_more",
+      "source_pc24": "$01:FB9D"
+    },
+    {
+      "caller_pc24": "$01:898F",
+      "native_page_units": [
+        15
+      ],
+      "semantic_id": "sim.offerings.unavailable.no_residents",
+      "source_pc24": "$01:FBB0"
+    },
+    {
+      "caller_pc24": "$01:898F",
+      "native_page_units": [
+        49
+      ],
+      "semantic_id": "sim.offerings.completed",
+      "source_pc24": "$01:FBBF"
+    },
+    {
+      "caller_pc24": "$01:898F",
+      "native_page_units": [
+        21
+      ],
+      "semantic_id": "sim.offerings.cancelled",
+      "source_pc24": "$01:FBF0"
+    },
+    {
+      "caller_pc24": "$01:886F",
+      "native_page_units": [
+        41,
+        32
+      ],
+      "semantic_id": "sim.town.gratitude",
+      "source_pc24": "$01:FC06"
+    },
+    {
+      "caller_pc24": "$01:82E4",
+      "native_page_units": [
+        1
+      ],
+      "semantic_id": "sim.miracle.lightning.target_cancel",
+      "source_pc24": "$01:FC4F"
+    },
+    {
+      "caller_pc24": "$01:834F",
+      "native_page_units": [
+        1
+      ],
+      "semantic_id": "sim.miracle.rain.target_cancel",
+      "source_pc24": "$01:FC4F"
+    },
+    {
+      "caller_pc24": "$01:83BA",
+      "native_page_units": [
+        1
+      ],
+      "semantic_id": "sim.miracle.sun.target_cancel",
+      "source_pc24": "$01:FC4F"
+    },
+    {
+      "caller_pc24": "$01:841A",
+      "native_page_units": [
+        1
+      ],
+      "semantic_id": "sim.miracle.earthquake.cancel",
+      "source_pc24": "$01:FC4F"
+    },
+    {
+      "caller_pc24": "$01:847A",
+      "native_page_units": [
+        1
+      ],
+      "semantic_id": "sim.miracle.wind.cancel",
+      "source_pc24": "$01:FC4F"
+    },
+    {
+      "caller_pc24": "$01:93BA",
+      "context_pc24": "$01:82D5",
+      "native_page_units": [
+        30
+      ],
+      "semantic_id": "dialogue.event.wrapper_06.route_02",
+      "source_pc24": "$01:FC7E"
+    },
+    {
+      "caller_pc24": "$01:93BA",
+      "context_pc24": "$01:8340",
+      "native_page_units": [
+        30
+      ],
+      "semantic_id": "dialogue.event.wrapper_06.route_03",
+      "source_pc24": "$01:FC7E"
+    },
+    {
+      "caller_pc24": "$01:93BA",
+      "context_pc24": "$01:83AB",
+      "native_page_units": [
+        30
+      ],
+      "semantic_id": "dialogue.event.wrapper_06.route_04",
+      "source_pc24": "$01:FC7E"
+    },
+    {
+      "caller_pc24": "$01:93BA",
+      "context_pc24": "$01:840B",
+      "native_page_units": [
+        30
+      ],
+      "semantic_id": "dialogue.event.wrapper_06.route_05",
+      "source_pc24": "$01:FC7E"
+    },
+    {
+      "caller_pc24": "$01:93BA",
+      "context_pc24": "$01:846B",
+      "native_page_units": [
+        30
+      ],
+      "semantic_id": "dialogue.event.wrapper_06.route_06",
+      "source_pc24": "$01:FC7E"
+    },
+    {
+      "caller_pc24": "$01:8296",
+      "native_page_units": [
+        50
+      ],
+      "semantic_id": "sim.miracle.lightning.description",
+      "source_pc24": "$01:FC9C"
+    },
+    {
+      "caller_pc24": "$01:82EC",
+      "native_page_units": [
+        26
+      ],
+      "semantic_id": "sim.miracle.lightning.insufficient_sp",
+      "source_pc24": "$01:FCCE"
+    },
+    {
+      "caller_pc24": "$01:82BA",
+      "native_page_units": [
+        25
+      ],
+      "semantic_id": "sim.miracle.lightning.target_prompt",
+      "source_pc24": "$01:FCE8"
+    },
+    {
+      "caller_pc24": "$01:82AF",
+      "native_page_units": [
+        16
+      ],
+      "semantic_id": "sim.miracle.lightning.confirm",
+      "source_pc24": "$01:FD15"
+    },
+    {
+      "caller_pc24": "$01:8301",
+      "native_page_units": [
+        74
+      ],
+      "semantic_id": "sim.miracle.rain.description",
+      "source_pc24": "$01:FD25"
+    },
+    {
+      "caller_pc24": "$01:8357",
+      "native_page_units": [
+        31
+      ],
+      "semantic_id": "sim.miracle.rain.insufficient_sp",
+      "source_pc24": "$01:FD6F"
+    },
+    {
+      "caller_pc24": "$01:8325",
+      "native_page_units": [
+        27
+      ],
+      "semantic_id": "sim.miracle.rain.target_prompt",
+      "source_pc24": "$01:FD8E"
+    },
+    {
+      "caller_pc24": "$01:831A",
+      "native_page_units": [
+        15
+      ],
+      "semantic_id": "sim.miracle.rain.confirm",
+      "source_pc24": "$01:FDB9"
+    },
+    {
+      "caller_pc24": "$01:8437",
+      "native_page_units": [
+        26
+      ],
+      "semantic_id": "sim.miracle.wind.description",
+      "source_pc24": "$01:FDC8"
+    },
+    {
+      "caller_pc24": "$01:8482",
+      "native_page_units": [
+        22
+      ],
+      "semantic_id": "sim.miracle.wind.insufficient_sp",
+      "source_pc24": "$01:FDE2"
+    },
+    {
+      "caller_pc24": "$01:8450",
+      "native_page_units": [
+        16
+      ],
+      "semantic_id": "sim.miracle.wind.confirm",
+      "source_pc24": "$01:FE2A"
+    },
+    {
+      "caller_pc24": "$01:83D7",
+      "native_page_units": [
+        48
+      ],
+      "semantic_id": "sim.miracle.earthquake.description",
+      "source_pc24": "$01:FE3A"
+    },
+    {
+      "caller_pc24": "$01:8422",
+      "native_page_units": [
+        30
+      ],
+      "semantic_id": "sim.miracle.earthquake.insufficient_sp",
+      "source_pc24": "$01:FE6A"
+    },
+    {
+      "caller_pc24": "$01:83F0",
+      "native_page_units": [
+        21
+      ],
+      "semantic_id": "sim.miracle.earthquake.confirm",
+      "source_pc24": "$01:FEC7"
+    },
+    {
+      "caller_pc24": "$01:836C",
+      "native_page_units": [
+        48
+      ],
+      "semantic_id": "sim.miracle.sun.description",
+      "source_pc24": "$01:FEDC"
+    },
+    {
+      "caller_pc24": "$01:83C2",
+      "native_page_units": [
+        26
+      ],
+      "semantic_id": "sim.miracle.sun.insufficient_sp",
+      "source_pc24": "$01:FF0C"
+    },
+    {
+      "caller_pc24": "$01:8390",
+      "native_page_units": [
+        25
+      ],
+      "semantic_id": "sim.miracle.sun.target_prompt",
+      "source_pc24": "$01:FF26"
+    },
+    {
+      "caller_pc24": "$01:8385",
+      "native_page_units": [
+        11
+      ],
+      "semantic_id": "sim.miracle.sun.confirm",
+      "source_pc24": "$01:FF57"
+    },
+    {
+      "caller_pc24": "$01:9330",
+      "context_pc24": "$03:BB8F",
+      "native_page_units": [
+        30
+      ],
+      "semantic_id": "dialogue.event.wrapper_00.call_05.source_01",
+      "source_pc24": "$04:8077"
+    },
+    {
+      "caller_pc24": "$01:9330",
+      "context_pc24": "$03:BB8F",
+      "native_page_units": [
+        21,
+        43
+      ],
+      "semantic_id": "dialogue.event.wrapper_00.call_05.source_00",
+      "source_pc24": "$04:809C"
+    },
+    {
+      "caller_pc24": "$01:9330",
+      "context_pc24": "$03:B6FC",
+      "native_page_units": [
+        46
+      ],
+      "semantic_id": "dialogue.event.wrapper_00.call_03.source_00",
+      "source_pc24": "$04:80DC"
+    },
+    {
+      "caller_pc24": "$01:9358",
+      "context_pc24": "$03:E43A",
+      "native_page_units": [
+        42,
+        1
+      ],
+      "semantic_id": "dialogue.event.wrapper_01.call_03.source_00",
+      "source_pc24": "$04:810F"
+    },
+    {
+      "caller_pc24": "$01:9371",
+      "context_pc24": "$03:E47A",
+      "native_page_units": [
+        29,
+        72
+      ],
+      "semantic_id": "dialogue.event.wrapper_02.call_03.source_00",
+      "source_pc24": "$04:813A"
+    },
+    {
+      "caller_pc24": "$01:9371",
+      "context_pc24": "$03:E471",
+      "native_page_units": [
+        60,
+        45
+      ],
+      "semantic_id": "dialogue.event.wrapper_02.call_02.source_00",
+      "source_pc24": "$04:81A8"
+    },
+    {
+      "caller_pc24": "$01:9330",
+      "context_pc24": "$03:E0BE",
+      "native_page_units": [
+        63
+      ],
+      "semantic_id": "dialogue.event.wrapper_00.call_06.source_00",
+      "source_pc24": "$04:8217"
+    },
+    {
+      "caller_pc24": "$01:9330",
+      "context_pc24": "$03:EF1C",
+      "native_page_units": [
+        63
+      ],
+      "semantic_id": "dialogue.event.wrapper_00.call_09.source_00",
+      "source_pc24": "$04:8217"
+    },
+    {
+      "caller_pc24": "$01:9330",
+      "context_pc24": "$03:F665",
+      "native_page_units": [
+        63
+      ],
+      "semantic_id": "dialogue.event.wrapper_00.call_10.source_00",
+      "source_pc24": "$04:8217"
+    },
+    {
+      "caller_pc24": "$01:9330",
+      "context_pc24": "$03:F6F3",
+      "native_page_units": [
+        63
+      ],
+      "semantic_id": "dialogue.event.wrapper_00.call_11.source_00",
+      "source_pc24": "$04:8217"
+    },
+    {
+      "caller_pc24": "$01:9330",
+      "context_pc24": "$03:F74D",
+      "native_page_units": [
+        63
+      ],
+      "semantic_id": "dialogue.event.wrapper_00.call_14.source_00",
+      "source_pc24": "$04:8217"
+    },
+    {
+      "caller_pc24": "$01:93A3",
+      "context_pc24": "$03:FB78",
+      "native_page_units": [
+        63
+      ],
+      "semantic_id": "dialogue.event.wrapper_04.call_09.source_00",
+      "source_pc24": "$04:8217"
+    },
+    {
+      "caller_pc24": "$01:93A3",
+      "context_pc24": "$03:FBBA",
+      "native_page_units": [
+        63
+      ],
+      "semantic_id": "dialogue.event.wrapper_04.call_10.source_00",
+      "source_pc24": "$04:8217"
+    },
+    {
+      "caller_pc24": "$01:93A3",
+      "context_pc24": "$03:FC04",
+      "native_page_units": [
+        63
+      ],
+      "semantic_id": "dialogue.event.wrapper_04.call_11.source_00",
+      "source_pc24": "$04:8217"
+    },
+    {
+      "caller_pc24": "$01:93A3",
+      "context_pc24": "$03:FC34",
+      "native_page_units": [
+        63
+      ],
+      "semantic_id": "dialogue.event.wrapper_04.call_12.source_00",
+      "source_pc24": "$04:8217"
+    },
+    {
+      "caller_pc24": "$01:9330",
+      "context_pc24": "$03:B713",
+      "native_page_units": [
+        49
+      ],
+      "semantic_id": "dialogue.event.wrapper_00.call_04.source_00",
+      "source_pc24": "$04:825A"
+    },
+    {
+      "caller_pc24": "$01:9358",
+      "context_pc24": "$03:B661",
+      "native_page_units": [
+        42,
+        1
+      ],
+      "semantic_id": "dialogue.event.wrapper_01.call_01.source_00",
+      "source_pc24": "$04:838D"
+    },
+    {
+      "caller_pc24": "$01:9330",
+      "context_pc24": "$03:B6F3",
+      "native_page_units": [
+        1
+      ],
+      "semantic_id": "dialogue.event.wrapper_00.call_02.source_00",
+      "source_pc24": "$04:83B8"
+    },
+    {
+      "caller_pc24": "$01:9330",
+      "context_pc24": "$03:E0F5",
+      "native_page_units": [
+        50
+      ],
+      "semantic_id": "dialogue.event.wrapper_00.call_07.source_00",
+      "source_pc24": "$04:83B9"
+    },
+    {
+      "caller_pc24": "$01:9330",
+      "context_pc24": "$03:E11F",
+      "native_page_units": [
+        80
+      ],
+      "semantic_id": "dialogue.event.wrapper_00.call_08.source_00",
+      "source_pc24": "$04:83EB"
+    },
+    {
+      "caller_pc24": "$01:9358",
+      "context_pc24": "$03:C21F",
+      "native_page_units": [
+        35,
+        1
+      ],
+      "semantic_id": "dialogue.event.wrapper_01.call_02.source_00",
+      "source_pc24": "$04:843B"
+    },
+    {
+      "caller_pc24": "$01:9390",
+      "context_pc24": "$03:C232",
+      "native_page_units": [
+        50,
+        50,
+        66,
+        51,
+        42,
+        60
+      ],
+      "semantic_id": "dialogue.event.wrapper_03.call_01.source_00",
+      "source_pc24": "$04:8463"
+    },
+    {
+      "caller_pc24": "$01:9371",
+      "context_pc24": "$03:C239",
+      "native_page_units": [
+        37
+      ],
+      "semantic_id": "dialogue.event.wrapper_02.call_01.source_00",
+      "source_pc24": "$04:85A2"
+    },
+    {
+      "caller_pc24": "$01:93A3",
+      "context_pc24": "$03:FA24",
+      "native_page_units": [
+        44,
+        112,
+        52
+      ],
+      "semantic_id": "dialogue.event.wrapper_04.call_06.source_00",
+      "source_pc24": "$04:85C8"
+    },
+    {
+      "caller_pc24": "$01:93A3",
+      "context_pc24": "$03:FA59",
+      "native_page_units": [
+        79,
+        80
+      ],
+      "semantic_id": "dialogue.event.wrapper_04.call_07.source_00",
+      "source_pc24": "$04:8698"
+    },
+    {
+      "caller_pc24": "$01:93A3",
+      "context_pc24": "$03:FA93",
+      "native_page_units": [
+        93,
+        20
+      ],
+      "semantic_id": "dialogue.event.wrapper_04.call_08.source_00",
+      "source_pc24": "$04:8737"
+    },
+    {
+      "caller_pc24": "$01:9330",
+      "context_pc24": "$03:F717",
+      "native_page_units": [
+        59
+      ],
+      "semantic_id": "dialogue.event.wrapper_00.call_12.source_00",
+      "source_pc24": "$04:87A8"
+    },
+    {
+      "caller_pc24": "$01:9330",
+      "context_pc24": "$03:F726",
+      "native_page_units": [
+        82
+      ],
+      "semantic_id": "dialogue.event.wrapper_00.call_13.source_00",
+      "source_pc24": "$04:87E3"
+    },
+    {
+      "caller_pc24": "$01:9330",
+      "context_pc24": "$03:FB0B",
+      "native_page_units": [
+        72
+      ],
+      "semantic_id": "dialogue.event.wrapper_00.call_16.source_00",
+      "source_pc24": "$04:8835"
+    },
+    {
+      "caller_pc24": "$01:9330",
+      "context_pc24": "$03:FB18",
+      "native_page_units": [
+        50
+      ],
+      "semantic_id": "dialogue.event.wrapper_00.call_17.source_00",
+      "source_pc24": "$04:887D"
+    },
+    {
+      "caller_pc24": "$01:9330",
+      "context_pc24": "$03:F89B",
+      "native_page_units": [
+        69,
+        60
+      ],
+      "semantic_id": "dialogue.event.wrapper_00.call_15.source_00",
+      "source_pc24": "$04:88AF"
+    },
+    {
+      "caller_pc24": "$01:93B2",
+      "context_pc24": "$01:9CFE",
+      "native_page_units": [
+        50
+      ],
+      "semantic_id": "dialogue.event.wrapper_05.call_09.source_00",
+      "source_pc24": "$04:8930"
+    },
+    {
+      "caller_pc24": "$01:93B2",
+      "context_pc24": "$01:9D75",
+      "native_page_units": [
+        50
+      ],
+      "semantic_id": "dialogue.event.wrapper_05.call_10.source_00",
+      "source_pc24": "$04:8930"
+    },
+    {
+      "caller_pc24": "$01:93B2",
+      "context_pc24": "$01:9EEF",
+      "native_page_units": [
+        50
+      ],
+      "semantic_id": "dialogue.event.wrapper_05.call_21.source_00",
+      "source_pc24": "$04:8930"
+    },
+    {
+      "caller_pc24": "$01:93B2",
+      "context_pc24": "$01:9CCC",
+      "native_page_units": [
+        50
+      ],
+      "semantic_id": "dialogue.event.wrapper_05.call_07.source_00",
+      "source_pc24": "$04:8962"
+    },
+    {
+      "caller_pc24": "$01:93B2",
+      "context_pc24": "$01:9CEE",
+      "native_page_units": [
+        28
+      ],
+      "semantic_id": "dialogue.event.wrapper_05.call_08.source_00",
+      "source_pc24": "$04:8994"
+    },
+    {
+      "caller_pc24": "$01:93A3",
+      "context_pc24": "$01:9D67",
+      "native_page_units": [
+        78
+      ],
+      "semantic_id": "dialogue.event.wrapper_04.call_01.source_00",
+      "source_pc24": "$04:89B0"
+    },
+    {
+      "caller_pc24": "$01:93A3",
+      "context_pc24": "$01:9D44",
+      "native_page_units": [
+        62
+      ],
+      "semantic_id": "dialogue.event.wrapper_04.call_00.source_00",
+      "source_pc24": "$04:89FE"
+    },
+    {
+      "caller_pc24": "$01:93A3",
+      "context_pc24": "$01:9DC3",
+      "native_page_units": [
+        59
+      ],
+      "semantic_id": "dialogue.event.wrapper_04.call_03.source_00",
+      "source_pc24": "$04:8A3C"
+    },
+    {
+      "caller_pc24": "$01:93A3",
+      "context_pc24": "$01:9DBA",
+      "native_page_units": [
+        41
+      ],
+      "semantic_id": "dialogue.event.wrapper_04.call_02.source_00",
+      "source_pc24": "$04:8A77"
+    },
+    {
+      "caller_pc24": "$01:93B2",
+      "context_pc24": "$01:9E11",
+      "native_page_units": [
+        34
+      ],
+      "semantic_id": "dialogue.event.wrapper_05.call_11.source_00",
+      "source_pc24": "$04:8AA0"
+    },
+    {
+      "caller_pc24": "$01:93B2",
+      "context_pc24": "$01:9E18",
+      "native_page_units": [
+        43
+      ],
+      "semantic_id": "dialogue.event.wrapper_05.call_12.source_00",
+      "source_pc24": "$04:8AC2"
+    },
+    {
+      "caller_pc24": "$01:93B2",
+      "context_pc24": "$01:9E44",
+      "native_page_units": [
+        24
+      ],
+      "semantic_id": "dialogue.event.wrapper_05.call_13.source_00",
+      "source_pc24": "$04:8AED"
+    },
+    {
+      "caller_pc24": "$01:93B2",
+      "context_pc24": "$01:9E4B",
+      "native_page_units": [
+        59
+      ],
+      "semantic_id": "dialogue.event.wrapper_05.call_14.source_00",
+      "source_pc24": "$04:8B05"
+    },
+    {
+      "caller_pc24": "$01:93B2",
+      "context_pc24": "$01:9E63",
+      "native_page_units": [
+        41
+      ],
+      "semantic_id": "dialogue.event.wrapper_05.call_15.source_00",
+      "source_pc24": "$04:8B40"
+    },
+    {
+      "caller_pc24": "$01:93B2",
+      "context_pc24": "$01:9E81",
+      "native_page_units": [
+        60
+      ],
+      "semantic_id": "dialogue.event.wrapper_05.call_16.source_00",
+      "source_pc24": "$04:8B69"
+    },
+    {
+      "caller_pc24": "$01:93B2",
+      "context_pc24": "$01:9EB6",
+      "native_page_units": [
+        55,
+        57,
+        47
+      ],
+      "semantic_id": "dialogue.event.wrapper_05.call_18.source_00",
+      "source_pc24": "$04:8BA5"
+    },
+    {
+      "caller_pc24": "$01:93B2",
+      "context_pc24": "$01:9EA4",
+      "native_page_units": [
+        56,
+        59
+      ],
+      "semantic_id": "dialogue.event.wrapper_05.call_17.source_00",
+      "source_pc24": "$04:8C44"
+    },
+    {
+      "caller_pc24": "$01:93B2",
+      "context_pc24": "$01:9EE6",
+      "native_page_units": [
+        55
+      ],
+      "semantic_id": "dialogue.event.wrapper_05.call_20.source_00",
+      "source_pc24": "$04:8CB7"
+    },
+    {
+      "caller_pc24": "$01:93B2",
+      "context_pc24": "$01:9ED0",
+      "native_page_units": [
+        70
+      ],
+      "semantic_id": "dialogue.event.wrapper_05.call_19.source_00",
+      "source_pc24": "$04:8CEE"
+    },
+    {
+      "caller_pc24": "$01:93A3",
+      "context_pc24": "$01:9F3C",
+      "native_page_units": [
+        44
+      ],
+      "semantic_id": "dialogue.event.wrapper_04.call_04.source_00",
+      "source_pc24": "$04:8D34"
+    },
+    {
+      "caller_pc24": "$01:93A3",
+      "context_pc24": "$01:9F4D",
+      "native_page_units": [
+        46,
+        43
+      ],
+      "semantic_id": "dialogue.event.wrapper_04.call_05.source_00",
+      "source_pc24": "$04:8D7D"
+    },
+    {
+      "caller_pc24": "$01:93B2",
+      "context_pc24": "$01:9FAF",
+      "native_page_units": [
+        49
+      ],
+      "semantic_id": "dialogue.event.wrapper_05.call_22.source_00",
+      "source_pc24": "$04:8DD6"
+    },
+    {
+      "caller_pc24": "$01:93B2",
+      "context_pc24": "$01:9FC1",
+      "native_page_units": [
+        56
+      ],
+      "semantic_id": "dialogue.event.wrapper_05.call_23.source_00",
+      "source_pc24": "$04:8E07"
+    },
+    {
+      "caller_pc24": "$01:93B2",
+      "context_pc24": "$01:A00F",
+      "native_page_units": [
+        41
+      ],
+      "semantic_id": "dialogue.event.wrapper_05.call_25.source_00",
+      "source_pc24": "$04:8E3F"
+    },
+    {
+      "caller_pc24": "$01:93B2",
+      "context_pc24": "$01:A01B",
+      "native_page_units": [
+        42
+      ],
+      "semantic_id": "dialogue.event.wrapper_05.call_26.source_00",
+      "source_pc24": "$04:8E68"
+    },
+    {
+      "caller_pc24": "$01:93B2",
+      "context_pc24": "$01:A008",
+      "native_page_units": [
+        58
+      ],
+      "semantic_id": "dialogue.event.wrapper_05.call_24.source_00",
+      "source_pc24": "$04:8E92"
+    },
+    {
+      "caller_pc24": "$01:93B2",
+      "context_pc24": "$01:A04D",
+      "native_page_units": [
+        48
+      ],
+      "semantic_id": "dialogue.event.wrapper_05.call_27.source_00",
+      "source_pc24": "$04:8ECC"
+    },
+    {
+      "caller_pc24": "$01:93B2",
+      "context_pc24": "$01:85CA",
+      "native_page_units": [
+        66,
+        40,
+        69,
+        58,
+        99
+      ],
+      "semantic_id": "dialogue.event.wrapper_05.call_01.source_00",
+      "source_pc24": "$04:8EFC"
+    },
+    {
+      "caller_pc24": "$01:93B2",
+      "context_pc24": "$01:85DA",
+      "native_page_units": [
+        43,
+        73
+      ],
+      "semantic_id": "dialogue.event.wrapper_05.call_02.source_00",
+      "source_pc24": "$04:9048"
+    },
+    {
+      "caller_pc24": "$01:93B2",
+      "context_pc24": "$01:85C1",
+      "native_page_units": [
+        20,
+        83,
+        41
+      ],
+      "semantic_id": "dialogue.event.wrapper_05.call_00.source_00",
+      "source_pc24": "$04:90BC"
+    },
+    {
+      "caller_pc24": "$01:93B2",
+      "context_pc24": "$01:863F",
+      "native_page_units": [
+        92,
+        59,
+        47
+      ],
+      "semantic_id": "dialogue.event.wrapper_05.call_05.source_00",
+      "source_pc24": "$04:914C"
+    },
+    {
+      "caller_pc24": "$01:93B2",
+      "context_pc24": "$01:8619",
+      "native_page_units": [
+        54,
+        55
+      ],
+      "semantic_id": "dialogue.event.wrapper_05.call_04.source_00",
+      "source_pc24": "$04:9212"
+    },
+    {
+      "caller_pc24": "$01:9358",
+      "context_pc24": "$03:862A",
+      "native_page_units": [
+        69,
+        26
+      ],
+      "semantic_id": "dialogue.event.wrapper_01.call_00.source_00",
+      "source_pc24": "$04:927F"
+    },
+    {
+      "caller_pc24": "$01:9390",
+      "context_pc24": "$03:868B",
+      "map_number": 1,
+      "native_page_units": [
+        152
+      ],
+      "semantic_id": "dialogue.event.relay.fillmore",
+      "source_pc24": "$04:92E2"
+    },
+    {
+      "caller_pc24": "$01:9390",
+      "context_pc24": "$03:868B",
+      "map_number": 2,
+      "native_page_units": [
+        134
+      ],
+      "semantic_id": "dialogue.event.relay.bloodpool",
+      "source_pc24": "$04:92F4"
+    },
+    {
+      "caller_pc24": "$01:9390",
+      "context_pc24": "$03:868B",
+      "map_number": 3,
+      "native_page_units": [
+        114
+      ],
+      "semantic_id": "dialogue.event.relay.kasandora",
+      "source_pc24": "$04:9308"
+    },
+    {
+      "caller_pc24": "$01:9390",
+      "context_pc24": "$03:868B",
+      "map_number": 4,
+      "native_page_units": [
+        92
+      ],
+      "semantic_id": "dialogue.event.relay.aitos",
+      "source_pc24": "$04:931E"
+    },
+    {
+      "caller_pc24": "$01:9390",
+      "context_pc24": "$03:868B",
+      "map_number": 5,
+      "native_page_units": [
+        76
+      ],
+      "semantic_id": "dialogue.event.relay.marahna",
+      "source_pc24": "$04:932E"
+    },
+    {
+      "caller_pc24": "$01:9390",
+      "context_pc24": "$03:868B",
+      "map_number": 6,
+      "native_page_units": [
+        51
+      ],
+      "semantic_id": "dialogue.event.relay.northwall",
+      "source_pc24": "$04:9347"
+    },
+    {
+      "caller_pc24": "$01:9371",
+      "context_pc24": "$03:8683",
+      "native_page_units": [
+        21
+      ],
+      "semantic_id": "dialogue.event.wrapper_02.call_00.source_00",
+      "source_pc24": "$04:9365"
+    },
+    {
+      "caller_pc24": "$01:9330",
+      "context_pc24": "$03:82C7",
+      "native_page_units": [
+        29
+      ],
+      "semantic_id": "dialogue.event.wrapper_00.call_01.source_00",
+      "source_pc24": "$04:937A"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        92,
+        32,
+        83,
+        28,
+        93,
+        88
+      ],
+      "selector_x": 37795,
+      "semantic_id": "simulation.event.fillmore.slot_00",
+      "source_pc24": "$04:9523"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        26,
+        74,
+        99,
+        60,
+        62,
+        38
+      ],
+      "selector_x": 37797,
+      "semantic_id": "simulation.event.fillmore.slot_01",
+      "source_pc24": "$04:96C3"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        61,
+        48
+      ],
+      "selector_x": 37799,
+      "semantic_id": "simulation.event.fillmore.slot_02",
+      "source_pc24": "$04:982A"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        73
+      ],
+      "selector_x": 37801,
+      "semantic_id": "simulation.event.fillmore.slot_03",
+      "source_pc24": "$04:9897"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        102,
+        18
+      ],
+      "selector_x": 37803,
+      "semantic_id": "simulation.event.fillmore.slot_04",
+      "source_pc24": "$04:98E0"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        100,
+        29,
+        21
+      ],
+      "selector_x": 37805,
+      "semantic_id": "simulation.event.fillmore.slot_05",
+      "source_pc24": "$04:9958"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        107
+      ],
+      "selector_x": 37807,
+      "semantic_id": "simulation.event.fillmore.slot_06",
+      "source_pc24": "$04:99EE"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        62,
+        49
+      ],
+      "selector_x": 37809,
+      "semantic_id": "simulation.event.fillmore.slot_07",
+      "source_pc24": "$04:9A59"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        57,
+        50,
+        89
+      ],
+      "selector_x": 37811,
+      "semantic_id": "simulation.event.fillmore.slot_08",
+      "source_pc24": "$04:9AC8"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        45,
+        106
+      ],
+      "selector_x": 37813,
+      "semantic_id": "simulation.event.fillmore.slot_09",
+      "source_pc24": "$04:9B8C"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        45,
+        106
+      ],
+      "selector_x": 37815,
+      "semantic_id": "simulation.event.fillmore.slot_10",
+      "source_pc24": "$04:9B8C"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        67,
+        44
+      ],
+      "selector_x": 37817,
+      "semantic_id": "simulation.event.fillmore.slot_11",
+      "source_pc24": "$04:9C23"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        61,
+        35
+      ],
+      "selector_x": 37819,
+      "semantic_id": "simulation.event.fillmore.slot_12",
+      "source_pc24": "$04:9C92"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        49,
+        87,
+        41
+      ],
+      "selector_x": 37821,
+      "semantic_id": "simulation.event.fillmore.slot_13",
+      "source_pc24": "$04:9CF2"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        77
+      ],
+      "selector_x": 37823,
+      "semantic_id": "simulation.event.fillmore.slot_14",
+      "source_pc24": "$04:9DA3"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        77
+      ],
+      "selector_x": 37825,
+      "semantic_id": "simulation.event.fillmore.slot_15",
+      "source_pc24": "$04:9DA3"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        60,
+        51
+      ],
+      "selector_x": 37827,
+      "semantic_id": "simulation.event.fillmore.slot_16",
+      "source_pc24": "$04:9DF0"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        60,
+        51
+      ],
+      "selector_x": 37829,
+      "semantic_id": "simulation.event.fillmore.slot_17",
+      "source_pc24": "$04:9DF0"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        60,
+        51
+      ],
+      "selector_x": 37831,
+      "semantic_id": "simulation.event.fillmore.slot_18",
+      "source_pc24": "$04:9DF0"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        60,
+        51
+      ],
+      "selector_x": 37833,
+      "semantic_id": "simulation.event.fillmore.slot_19",
+      "source_pc24": "$04:9DF0"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        60,
+        51
+      ],
+      "selector_x": 37835,
+      "semantic_id": "simulation.event.fillmore.slot_20",
+      "source_pc24": "$04:9DF0"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        60,
+        51
+      ],
+      "selector_x": 37837,
+      "semantic_id": "simulation.event.fillmore.slot_21",
+      "source_pc24": "$04:9DF0"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        60,
+        51
+      ],
+      "selector_x": 37839,
+      "semantic_id": "simulation.event.fillmore.slot_22",
+      "source_pc24": "$04:9DF0"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        60,
+        51
+      ],
+      "selector_x": 37841,
+      "semantic_id": "simulation.event.fillmore.slot_23",
+      "source_pc24": "$04:9DF0"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        60,
+        51
+      ],
+      "selector_x": 37843,
+      "semantic_id": "simulation.event.fillmore.slot_24",
+      "source_pc24": "$04:9DF0"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        72
+      ],
+      "selector_x": 37845,
+      "semantic_id": "simulation.event.fillmore.slot_25",
+      "source_pc24": "$04:9E5F"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        72
+      ],
+      "selector_x": 37847,
+      "semantic_id": "simulation.event.fillmore.slot_26",
+      "source_pc24": "$04:9E5F"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        72
+      ],
+      "selector_x": 37849,
+      "semantic_id": "simulation.event.fillmore.slot_27",
+      "source_pc24": "$04:9E5F"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        72
+      ],
+      "selector_x": 37851,
+      "semantic_id": "simulation.event.fillmore.slot_28",
+      "source_pc24": "$04:9E5F"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        72
+      ],
+      "selector_x": 37853,
+      "semantic_id": "simulation.event.fillmore.slot_29",
+      "source_pc24": "$04:9E5F"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        72
+      ],
+      "selector_x": 37855,
+      "semantic_id": "simulation.event.fillmore.slot_30",
+      "source_pc24": "$04:9E5F"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        72
+      ],
+      "selector_x": 37983,
+      "semantic_id": "simulation.event.kasandora.slot_30",
+      "source_pc24": "$04:9E5F"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        72
+      ],
+      "selector_x": 38047,
+      "semantic_id": "simulation.event.aitos.slot_30",
+      "source_pc24": "$04:9E5F"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        72
+      ],
+      "selector_x": 38111,
+      "semantic_id": "simulation.event.marahna.slot_30",
+      "source_pc24": "$04:9E5F"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        72
+      ],
+      "selector_x": 38175,
+      "semantic_id": "simulation.event.northwall.slot_30",
+      "source_pc24": "$04:9E5F"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        82
+      ],
+      "selector_x": 37857,
+      "semantic_id": "simulation.event.fillmore.slot_31",
+      "source_pc24": "$04:9EA7"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        82
+      ],
+      "selector_x": 37985,
+      "semantic_id": "simulation.event.kasandora.slot_31",
+      "source_pc24": "$04:9EA7"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        82
+      ],
+      "selector_x": 38049,
+      "semantic_id": "simulation.event.aitos.slot_31",
+      "source_pc24": "$04:9EA7"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        82
+      ],
+      "selector_x": 38113,
+      "semantic_id": "simulation.event.marahna.slot_31",
+      "source_pc24": "$04:9EA7"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        82
+      ],
+      "selector_x": 38177,
+      "semantic_id": "simulation.event.northwall.slot_31",
+      "source_pc24": "$04:9EA7"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        70,
+        70,
+        95,
+        53,
+        48
+      ],
+      "selector_x": 37859,
+      "semantic_id": "simulation.event.bloodpool.slot_00",
+      "source_pc24": "$04:9EF9"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        60,
+        70,
+        47,
+        75,
+        45
+      ],
+      "selector_x": 37861,
+      "semantic_id": "simulation.event.bloodpool.slot_01",
+      "source_pc24": "$04:A049"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        48,
+        78,
+        29
+      ],
+      "selector_x": 37863,
+      "semantic_id": "simulation.event.bloodpool.slot_02",
+      "source_pc24": "$04:A172"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        36,
+        71,
+        41
+      ],
+      "selector_x": 37865,
+      "semantic_id": "simulation.event.bloodpool.slot_03",
+      "source_pc24": "$04:A20D"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        85,
+        39
+      ],
+      "selector_x": 37867,
+      "semantic_id": "simulation.event.bloodpool.slot_04",
+      "source_pc24": "$04:A2A1"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        63,
+        60
+      ],
+      "selector_x": 37869,
+      "semantic_id": "simulation.event.bloodpool.slot_05",
+      "source_pc24": "$04:A31D"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        91,
+        29,
+        57
+      ],
+      "selector_x": 37871,
+      "semantic_id": "simulation.event.bloodpool.slot_06",
+      "source_pc24": "$04:A398"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        57,
+        57,
+        77,
+        91,
+        70,
+        55
+      ],
+      "selector_x": 37873,
+      "semantic_id": "simulation.event.bloodpool.slot_07",
+      "source_pc24": "$04:A449"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        52,
+        60,
+        73,
+        29
+      ],
+      "selector_x": 37875,
+      "semantic_id": "simulation.event.bloodpool.slot_08",
+      "source_pc24": "$04:A5E0"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        55,
+        100,
+        48
+      ],
+      "selector_x": 37877,
+      "semantic_id": "simulation.event.bloodpool.slot_09",
+      "source_pc24": "$04:A6B6"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        48,
+        28,
+        48,
+        78
+      ],
+      "selector_x": 37879,
+      "semantic_id": "simulation.event.bloodpool.slot_10",
+      "source_pc24": "$04:A781"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        80,
+        42
+      ],
+      "selector_x": 37881,
+      "semantic_id": "simulation.event.bloodpool.slot_11",
+      "source_pc24": "$04:A84B"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        80,
+        42
+      ],
+      "selector_x": 37883,
+      "semantic_id": "simulation.event.bloodpool.slot_12",
+      "source_pc24": "$04:A84B"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        80,
+        42
+      ],
+      "selector_x": 37885,
+      "semantic_id": "simulation.event.bloodpool.slot_13",
+      "source_pc24": "$04:A84B"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        80,
+        42
+      ],
+      "selector_x": 37887,
+      "semantic_id": "simulation.event.bloodpool.slot_14",
+      "source_pc24": "$04:A84B"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        80,
+        42
+      ],
+      "selector_x": 37889,
+      "semantic_id": "simulation.event.bloodpool.slot_15",
+      "source_pc24": "$04:A84B"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        80,
+        42
+      ],
+      "selector_x": 37891,
+      "semantic_id": "simulation.event.bloodpool.slot_16",
+      "source_pc24": "$04:A84B"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        80,
+        42
+      ],
+      "selector_x": 37893,
+      "semantic_id": "simulation.event.bloodpool.slot_17",
+      "source_pc24": "$04:A84B"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        80,
+        42
+      ],
+      "selector_x": 37895,
+      "semantic_id": "simulation.event.bloodpool.slot_18",
+      "source_pc24": "$04:A84B"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        80,
+        42
+      ],
+      "selector_x": 37897,
+      "semantic_id": "simulation.event.bloodpool.slot_19",
+      "source_pc24": "$04:A84B"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        80,
+        42
+      ],
+      "selector_x": 37899,
+      "semantic_id": "simulation.event.bloodpool.slot_20",
+      "source_pc24": "$04:A84B"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        80,
+        42
+      ],
+      "selector_x": 37901,
+      "semantic_id": "simulation.event.bloodpool.slot_21",
+      "source_pc24": "$04:A84B"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        80,
+        42
+      ],
+      "selector_x": 37903,
+      "semantic_id": "simulation.event.bloodpool.slot_22",
+      "source_pc24": "$04:A84B"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        80,
+        42
+      ],
+      "selector_x": 37905,
+      "semantic_id": "simulation.event.bloodpool.slot_23",
+      "source_pc24": "$04:A84B"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        80,
+        42
+      ],
+      "selector_x": 37907,
+      "semantic_id": "simulation.event.bloodpool.slot_24",
+      "source_pc24": "$04:A84B"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        47,
+        90
+      ],
+      "selector_x": 37909,
+      "semantic_id": "simulation.event.bloodpool.slot_25",
+      "source_pc24": "$04:A8C5"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        47,
+        90
+      ],
+      "selector_x": 37911,
+      "semantic_id": "simulation.event.bloodpool.slot_26",
+      "source_pc24": "$04:A8C5"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        47,
+        90
+      ],
+      "selector_x": 37913,
+      "semantic_id": "simulation.event.bloodpool.slot_27",
+      "source_pc24": "$04:A8C5"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        47,
+        90
+      ],
+      "selector_x": 37915,
+      "semantic_id": "simulation.event.bloodpool.slot_28",
+      "source_pc24": "$04:A8C5"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        47,
+        90
+      ],
+      "selector_x": 37917,
+      "semantic_id": "simulation.event.bloodpool.slot_29",
+      "source_pc24": "$04:A8C5"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        49,
+        41
+      ],
+      "selector_x": 37919,
+      "semantic_id": "simulation.event.bloodpool.slot_30",
+      "source_pc24": "$04:A94E"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        99,
+        47
+      ],
+      "selector_x": 37921,
+      "semantic_id": "simulation.event.bloodpool.slot_31",
+      "source_pc24": "$04:A9A8"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        86,
+        64,
+        75
+      ],
+      "selector_x": 37923,
+      "semantic_id": "simulation.event.kasandora.slot_00",
+      "source_pc24": "$04:AA3A"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        39,
+        80,
+        64,
+        51
+      ],
+      "selector_x": 37925,
+      "semantic_id": "simulation.event.kasandora.slot_01",
+      "source_pc24": "$04:AB1B"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        75
+      ],
+      "selector_x": 37927,
+      "semantic_id": "simulation.event.kasandora.slot_02",
+      "source_pc24": "$04:AC05"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        30,
+        88,
+        91
+      ],
+      "selector_x": 37929,
+      "semantic_id": "simulation.event.kasandora.slot_03",
+      "source_pc24": "$04:AC50"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        52,
+        55,
+        85,
+        43
+      ],
+      "selector_x": 37931,
+      "semantic_id": "simulation.event.kasandora.slot_04",
+      "source_pc24": "$04:AD21"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        52,
+        55,
+        85,
+        43
+      ],
+      "selector_x": 37933,
+      "semantic_id": "simulation.event.kasandora.slot_05",
+      "source_pc24": "$04:AD21"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        1
+      ],
+      "selector_x": 37935,
+      "semantic_id": "simulation.event.kasandora.slot_06",
+      "source_pc24": "$04:AE0C"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        67,
+        41
+      ],
+      "selector_x": 37937,
+      "semantic_id": "simulation.event.kasandora.slot_07",
+      "source_pc24": "$04:AE0D"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        100,
+        74
+      ],
+      "selector_x": 37939,
+      "semantic_id": "simulation.event.kasandora.slot_08",
+      "source_pc24": "$04:AE79"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        66,
+        82,
+        38
+      ],
+      "selector_x": 37941,
+      "semantic_id": "simulation.event.kasandora.slot_09",
+      "source_pc24": "$04:AF27"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        89,
+        90
+      ],
+      "selector_x": 37943,
+      "semantic_id": "simulation.event.kasandora.slot_10",
+      "source_pc24": "$04:AFE1"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        38,
+        49,
+        65
+      ],
+      "selector_x": 37945,
+      "semantic_id": "simulation.event.kasandora.slot_11",
+      "source_pc24": "$04:B094"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        38,
+        49,
+        65
+      ],
+      "selector_x": 37947,
+      "semantic_id": "simulation.event.kasandora.slot_12",
+      "source_pc24": "$04:B094"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        34,
+        50
+      ],
+      "selector_x": 37949,
+      "semantic_id": "simulation.event.kasandora.slot_13",
+      "source_pc24": "$04:B12C"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        34,
+        50
+      ],
+      "selector_x": 37951,
+      "semantic_id": "simulation.event.kasandora.slot_14",
+      "source_pc24": "$04:B12C"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        34,
+        50
+      ],
+      "selector_x": 37953,
+      "semantic_id": "simulation.event.kasandora.slot_15",
+      "source_pc24": "$04:B12C"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        34,
+        50
+      ],
+      "selector_x": 37955,
+      "semantic_id": "simulation.event.kasandora.slot_16",
+      "source_pc24": "$04:B12C"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        34,
+        50
+      ],
+      "selector_x": 37957,
+      "semantic_id": "simulation.event.kasandora.slot_17",
+      "source_pc24": "$04:B12C"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        34,
+        50
+      ],
+      "selector_x": 37959,
+      "semantic_id": "simulation.event.kasandora.slot_18",
+      "source_pc24": "$04:B12C"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        34,
+        50
+      ],
+      "selector_x": 37961,
+      "semantic_id": "simulation.event.kasandora.slot_19",
+      "source_pc24": "$04:B12C"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        34,
+        50
+      ],
+      "selector_x": 37963,
+      "semantic_id": "simulation.event.kasandora.slot_20",
+      "source_pc24": "$04:B12C"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        34,
+        50
+      ],
+      "selector_x": 37965,
+      "semantic_id": "simulation.event.kasandora.slot_21",
+      "source_pc24": "$04:B12C"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        34,
+        50
+      ],
+      "selector_x": 37967,
+      "semantic_id": "simulation.event.kasandora.slot_22",
+      "source_pc24": "$04:B12C"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        34,
+        50
+      ],
+      "selector_x": 37969,
+      "semantic_id": "simulation.event.kasandora.slot_23",
+      "source_pc24": "$04:B12C"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        34,
+        50
+      ],
+      "selector_x": 37971,
+      "semantic_id": "simulation.event.kasandora.slot_24",
+      "source_pc24": "$04:B12C"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        37,
+        68
+      ],
+      "selector_x": 37973,
+      "semantic_id": "simulation.event.kasandora.slot_25",
+      "source_pc24": "$04:B180"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        37,
+        68
+      ],
+      "selector_x": 37975,
+      "semantic_id": "simulation.event.kasandora.slot_26",
+      "source_pc24": "$04:B180"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        72,
+        60
+      ],
+      "selector_x": 37977,
+      "semantic_id": "simulation.event.kasandora.slot_27",
+      "source_pc24": "$04:B1E9"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        72,
+        60
+      ],
+      "selector_x": 37979,
+      "semantic_id": "simulation.event.kasandora.slot_28",
+      "source_pc24": "$04:B1E9"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        72,
+        60
+      ],
+      "selector_x": 37981,
+      "semantic_id": "simulation.event.kasandora.slot_29",
+      "source_pc24": "$04:B1E9"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        92,
+        64,
+        71
+      ],
+      "selector_x": 37987,
+      "semantic_id": "simulation.event.aitos.slot_00",
+      "source_pc24": "$04:B26D"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        29,
+        52,
+        49
+      ],
+      "selector_x": 37989,
+      "semantic_id": "simulation.event.aitos.slot_01",
+      "source_pc24": "$04:B350"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        83,
+        46,
+        62,
+        97
+      ],
+      "selector_x": 37991,
+      "semantic_id": "simulation.event.aitos.slot_02",
+      "source_pc24": "$04:B3D2"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        62,
+        37
+      ],
+      "selector_x": 37993,
+      "semantic_id": "simulation.event.aitos.slot_03",
+      "source_pc24": "$04:B4F2"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        46,
+        74
+      ],
+      "selector_x": 37995,
+      "semantic_id": "simulation.event.aitos.slot_04",
+      "source_pc24": "$04:B555"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        53
+      ],
+      "selector_x": 37997,
+      "semantic_id": "simulation.event.aitos.slot_05",
+      "source_pc24": "$04:B5CD"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        83
+      ],
+      "selector_x": 37999,
+      "semantic_id": "simulation.event.aitos.slot_06",
+      "source_pc24": "$04:B602"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        38
+      ],
+      "selector_x": 38001,
+      "semantic_id": "simulation.event.aitos.slot_07",
+      "source_pc24": "$04:B655"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        47,
+        69,
+        37
+      ],
+      "selector_x": 38003,
+      "semantic_id": "simulation.event.aitos.slot_08",
+      "source_pc24": "$04:B67B"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        31,
+        81
+      ],
+      "selector_x": 38005,
+      "semantic_id": "simulation.event.aitos.slot_09",
+      "source_pc24": "$04:B714"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        31,
+        81
+      ],
+      "selector_x": 38007,
+      "semantic_id": "simulation.event.aitos.slot_10",
+      "source_pc24": "$04:B714"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        31,
+        81
+      ],
+      "selector_x": 38009,
+      "semantic_id": "simulation.event.aitos.slot_11",
+      "source_pc24": "$04:B714"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        58,
+        62
+      ],
+      "selector_x": 38011,
+      "semantic_id": "simulation.event.aitos.slot_12",
+      "source_pc24": "$04:B784"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        63,
+        70
+      ],
+      "selector_x": 38013,
+      "semantic_id": "simulation.event.aitos.slot_13",
+      "source_pc24": "$04:B7FC"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        63,
+        70
+      ],
+      "selector_x": 38015,
+      "semantic_id": "simulation.event.aitos.slot_14",
+      "source_pc24": "$04:B7FC"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        63,
+        70
+      ],
+      "selector_x": 38017,
+      "semantic_id": "simulation.event.aitos.slot_15",
+      "source_pc24": "$04:B7FC"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        63,
+        70
+      ],
+      "selector_x": 38019,
+      "semantic_id": "simulation.event.aitos.slot_16",
+      "source_pc24": "$04:B7FC"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        63,
+        70
+      ],
+      "selector_x": 38021,
+      "semantic_id": "simulation.event.aitos.slot_17",
+      "source_pc24": "$04:B7FC"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        63,
+        70
+      ],
+      "selector_x": 38023,
+      "semantic_id": "simulation.event.aitos.slot_18",
+      "source_pc24": "$04:B7FC"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        63,
+        70
+      ],
+      "selector_x": 38025,
+      "semantic_id": "simulation.event.aitos.slot_19",
+      "source_pc24": "$04:B7FC"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        63,
+        70
+      ],
+      "selector_x": 38027,
+      "semantic_id": "simulation.event.aitos.slot_20",
+      "source_pc24": "$04:B7FC"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        63,
+        70
+      ],
+      "selector_x": 38029,
+      "semantic_id": "simulation.event.aitos.slot_21",
+      "source_pc24": "$04:B7FC"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        63,
+        70
+      ],
+      "selector_x": 38031,
+      "semantic_id": "simulation.event.aitos.slot_22",
+      "source_pc24": "$04:B7FC"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        63,
+        70
+      ],
+      "selector_x": 38033,
+      "semantic_id": "simulation.event.aitos.slot_23",
+      "source_pc24": "$04:B7FC"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        63,
+        70
+      ],
+      "selector_x": 38035,
+      "semantic_id": "simulation.event.aitos.slot_24",
+      "source_pc24": "$04:B7FC"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        49
+      ],
+      "selector_x": 38037,
+      "semantic_id": "simulation.event.aitos.slot_25",
+      "source_pc24": "$04:B881"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        49
+      ],
+      "selector_x": 38039,
+      "semantic_id": "simulation.event.aitos.slot_26",
+      "source_pc24": "$04:B881"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        49
+      ],
+      "selector_x": 38041,
+      "semantic_id": "simulation.event.aitos.slot_27",
+      "source_pc24": "$04:B881"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        49
+      ],
+      "selector_x": 38043,
+      "semantic_id": "simulation.event.aitos.slot_28",
+      "source_pc24": "$04:B881"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        49
+      ],
+      "selector_x": 38045,
+      "semantic_id": "simulation.event.aitos.slot_29",
+      "source_pc24": "$04:B881"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        19,
+        77,
+        44
+      ],
+      "selector_x": 38051,
+      "semantic_id": "simulation.event.marahna.slot_00",
+      "source_pc24": "$04:B8B2"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        46,
+        54,
+        53,
+        90,
+        35,
+        93,
+        57,
+        46
+      ],
+      "selector_x": 38053,
+      "semantic_id": "simulation.event.marahna.slot_01",
+      "source_pc24": "$04:B93E"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        83,
+        43,
+        60
+      ],
+      "selector_x": 38055,
+      "semantic_id": "simulation.event.marahna.slot_02",
+      "source_pc24": "$04:BB18"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        105,
+        68
+      ],
+      "selector_x": 38057,
+      "semantic_id": "simulation.event.marahna.slot_03",
+      "source_pc24": "$04:BBD2"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        40,
+        67
+      ],
+      "selector_x": 38059,
+      "semantic_id": "simulation.event.marahna.slot_04",
+      "source_pc24": "$04:BC7F"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        61,
+        95,
+        45
+      ],
+      "selector_x": 38061,
+      "semantic_id": "simulation.event.marahna.slot_05",
+      "source_pc24": "$04:BCEA"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        52,
+        41
+      ],
+      "selector_x": 38063,
+      "semantic_id": "simulation.event.marahna.slot_06",
+      "source_pc24": "$04:BDB3"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        46,
+        75,
+        42,
+        42
+      ],
+      "selector_x": 38065,
+      "semantic_id": "simulation.event.marahna.slot_07",
+      "source_pc24": "$04:BE10"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        60,
+        66
+      ],
+      "selector_x": 38067,
+      "semantic_id": "simulation.event.marahna.slot_08",
+      "source_pc24": "$04:BEDD"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        89
+      ],
+      "selector_x": 38069,
+      "semantic_id": "simulation.event.marahna.slot_09",
+      "source_pc24": "$04:BF5B"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        48,
+        93
+      ],
+      "selector_x": 38071,
+      "semantic_id": "simulation.event.marahna.slot_10",
+      "source_pc24": "$04:BFB4"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        66,
+        28
+      ],
+      "selector_x": 38073,
+      "semantic_id": "simulation.event.marahna.slot_11",
+      "source_pc24": "$04:C041"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        66,
+        28
+      ],
+      "selector_x": 38075,
+      "semantic_id": "simulation.event.marahna.slot_12",
+      "source_pc24": "$04:C041"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        66,
+        28
+      ],
+      "selector_x": 38077,
+      "semantic_id": "simulation.event.marahna.slot_13",
+      "source_pc24": "$04:C041"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        66,
+        28
+      ],
+      "selector_x": 38079,
+      "semantic_id": "simulation.event.marahna.slot_14",
+      "source_pc24": "$04:C041"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        66,
+        28
+      ],
+      "selector_x": 38081,
+      "semantic_id": "simulation.event.marahna.slot_15",
+      "source_pc24": "$04:C041"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        66,
+        28
+      ],
+      "selector_x": 38083,
+      "semantic_id": "simulation.event.marahna.slot_16",
+      "source_pc24": "$04:C041"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        66,
+        28
+      ],
+      "selector_x": 38085,
+      "semantic_id": "simulation.event.marahna.slot_17",
+      "source_pc24": "$04:C041"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        66,
+        28
+      ],
+      "selector_x": 38087,
+      "semantic_id": "simulation.event.marahna.slot_18",
+      "source_pc24": "$04:C041"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        66,
+        28
+      ],
+      "selector_x": 38089,
+      "semantic_id": "simulation.event.marahna.slot_19",
+      "source_pc24": "$04:C041"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        66,
+        28
+      ],
+      "selector_x": 38091,
+      "semantic_id": "simulation.event.marahna.slot_20",
+      "source_pc24": "$04:C041"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        66,
+        28
+      ],
+      "selector_x": 38093,
+      "semantic_id": "simulation.event.marahna.slot_21",
+      "source_pc24": "$04:C041"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        66,
+        28
+      ],
+      "selector_x": 38095,
+      "semantic_id": "simulation.event.marahna.slot_22",
+      "source_pc24": "$04:C041"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        66,
+        28
+      ],
+      "selector_x": 38097,
+      "semantic_id": "simulation.event.marahna.slot_23",
+      "source_pc24": "$04:C041"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        66,
+        28
+      ],
+      "selector_x": 38099,
+      "semantic_id": "simulation.event.marahna.slot_24",
+      "source_pc24": "$04:C041"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        39
+      ],
+      "selector_x": 38101,
+      "semantic_id": "simulation.event.marahna.slot_25",
+      "source_pc24": "$04:C09F"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        39
+      ],
+      "selector_x": 38103,
+      "semantic_id": "simulation.event.marahna.slot_26",
+      "source_pc24": "$04:C09F"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        39
+      ],
+      "selector_x": 38105,
+      "semantic_id": "simulation.event.marahna.slot_27",
+      "source_pc24": "$04:C09F"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        39
+      ],
+      "selector_x": 38107,
+      "semantic_id": "simulation.event.marahna.slot_28",
+      "source_pc24": "$04:C09F"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        39
+      ],
+      "selector_x": 38109,
+      "semantic_id": "simulation.event.marahna.slot_29",
+      "source_pc24": "$04:C09F"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        43,
+        95,
+        58
+      ],
+      "selector_x": 38115,
+      "semantic_id": "simulation.event.northwall.slot_00",
+      "source_pc24": "$04:C126"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        62,
+        56
+      ],
+      "selector_x": 38117,
+      "semantic_id": "simulation.event.northwall.slot_01",
+      "source_pc24": "$04:C1EA"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        76
+      ],
+      "selector_x": 38119,
+      "semantic_id": "simulation.event.northwall.slot_02",
+      "source_pc24": "$04:C260"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        102,
+        45
+      ],
+      "selector_x": 38121,
+      "semantic_id": "simulation.event.northwall.slot_03",
+      "source_pc24": "$04:C2AC"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        65,
+        49
+      ],
+      "selector_x": 38123,
+      "semantic_id": "simulation.event.northwall.slot_04",
+      "source_pc24": "$04:C33F"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        71,
+        95,
+        39,
+        69,
+        66
+      ],
+      "selector_x": 38125,
+      "semantic_id": "simulation.event.northwall.slot_05",
+      "source_pc24": "$04:C3B1"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        44,
+        61
+      ],
+      "selector_x": 38127,
+      "semantic_id": "simulation.event.northwall.slot_06",
+      "source_pc24": "$04:C505"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        44,
+        61
+      ],
+      "selector_x": 38129,
+      "semantic_id": "simulation.event.northwall.slot_07",
+      "source_pc24": "$04:C505"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        44,
+        61
+      ],
+      "selector_x": 38131,
+      "semantic_id": "simulation.event.northwall.slot_08",
+      "source_pc24": "$04:C505"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        44,
+        61
+      ],
+      "selector_x": 38133,
+      "semantic_id": "simulation.event.northwall.slot_09",
+      "source_pc24": "$04:C505"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        44,
+        61
+      ],
+      "selector_x": 38135,
+      "semantic_id": "simulation.event.northwall.slot_10",
+      "source_pc24": "$04:C505"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        44,
+        61
+      ],
+      "selector_x": 38137,
+      "semantic_id": "simulation.event.northwall.slot_11",
+      "source_pc24": "$04:C505"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        44,
+        61
+      ],
+      "selector_x": 38139,
+      "semantic_id": "simulation.event.northwall.slot_12",
+      "source_pc24": "$04:C505"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        44,
+        61
+      ],
+      "selector_x": 38141,
+      "semantic_id": "simulation.event.northwall.slot_13",
+      "source_pc24": "$04:C505"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        44,
+        61
+      ],
+      "selector_x": 38143,
+      "semantic_id": "simulation.event.northwall.slot_14",
+      "source_pc24": "$04:C505"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        44,
+        61
+      ],
+      "selector_x": 38145,
+      "semantic_id": "simulation.event.northwall.slot_15",
+      "source_pc24": "$04:C505"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        44,
+        61
+      ],
+      "selector_x": 38147,
+      "semantic_id": "simulation.event.northwall.slot_16",
+      "source_pc24": "$04:C505"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        44,
+        61
+      ],
+      "selector_x": 38149,
+      "semantic_id": "simulation.event.northwall.slot_17",
+      "source_pc24": "$04:C505"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        44,
+        61
+      ],
+      "selector_x": 38151,
+      "semantic_id": "simulation.event.northwall.slot_18",
+      "source_pc24": "$04:C505"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        44,
+        61
+      ],
+      "selector_x": 38153,
+      "semantic_id": "simulation.event.northwall.slot_19",
+      "source_pc24": "$04:C505"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        44,
+        61
+      ],
+      "selector_x": 38155,
+      "semantic_id": "simulation.event.northwall.slot_20",
+      "source_pc24": "$04:C505"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        44,
+        61
+      ],
+      "selector_x": 38157,
+      "semantic_id": "simulation.event.northwall.slot_21",
+      "source_pc24": "$04:C505"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        44,
+        61
+      ],
+      "selector_x": 38159,
+      "semantic_id": "simulation.event.northwall.slot_22",
+      "source_pc24": "$04:C505"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        44,
+        61
+      ],
+      "selector_x": 38161,
+      "semantic_id": "simulation.event.northwall.slot_23",
+      "source_pc24": "$04:C505"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        44,
+        61
+      ],
+      "selector_x": 38163,
+      "semantic_id": "simulation.event.northwall.slot_24",
+      "source_pc24": "$04:C505"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        55,
+        87,
+        88
+      ],
+      "selector_x": 38165,
+      "semantic_id": "simulation.event.northwall.slot_25",
+      "source_pc24": "$04:C56E"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        55,
+        87,
+        88
+      ],
+      "selector_x": 38167,
+      "semantic_id": "simulation.event.northwall.slot_26",
+      "source_pc24": "$04:C56E"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        55,
+        87,
+        88
+      ],
+      "selector_x": 38169,
+      "semantic_id": "simulation.event.northwall.slot_27",
+      "source_pc24": "$04:C56E"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        55,
+        87,
+        88
+      ],
+      "selector_x": 38171,
+      "semantic_id": "simulation.event.northwall.slot_28",
+      "source_pc24": "$04:C56E"
+    },
+    {
+      "caller_pc24": "$01:888C",
+      "native_page_units": [
+        90
+      ],
+      "selector_x": 38173,
+      "semantic_id": "simulation.event.northwall.slot_29",
+      "source_pc24": "$04:C654"
+    },
+    {
+      "caller_pc24": "$01:894E",
+      "native_page_units": [
+        84,
+        63
+      ],
+      "selector_x": 0,
+      "semantic_id": "dialogue.offering.slot_00",
+      "source_pc24": "$04:C6D8"
+    },
+    {
+      "caller_pc24": "$01:894E",
+      "native_page_units": [
+        65
+      ],
+      "selector_x": 2,
+      "semantic_id": "dialogue.offering.slot_01",
+      "source_pc24": "$04:C76B"
+    },
+    {
+      "caller_pc24": "$01:894E",
+      "native_page_units": [
+        65
+      ],
+      "selector_x": 4,
+      "semantic_id": "dialogue.offering.slot_02",
+      "source_pc24": "$04:C76B"
+    },
+    {
+      "caller_pc24": "$01:894E",
+      "native_page_units": [
+        65
+      ],
+      "selector_x": 6,
+      "semantic_id": "dialogue.offering.slot_03",
+      "source_pc24": "$04:C76B"
+    },
+    {
+      "caller_pc24": "$01:894E",
+      "native_page_units": [
+        89
+      ],
+      "selector_x": 8,
+      "semantic_id": "dialogue.offering.slot_04",
+      "source_pc24": "$04:C7AC"
+    },
+    {
+      "caller_pc24": "$01:894E",
+      "native_page_units": [
+        36
+      ],
+      "selector_x": 10,
+      "semantic_id": "dialogue.offering.slot_05",
+      "source_pc24": "$04:C805"
+    },
+    {
+      "caller_pc24": "$01:894E",
+      "native_page_units": [
+        44
+      ],
+      "selector_x": 12,
+      "semantic_id": "dialogue.offering.slot_06",
+      "source_pc24": "$04:C829"
+    },
+    {
+      "caller_pc24": "$01:894E",
+      "native_page_units": [
+        80,
+        80
+      ],
+      "selector_x": 14,
+      "semantic_id": "dialogue.offering.slot_07",
+      "source_pc24": "$04:C855"
+    },
+    {
+      "caller_pc24": "$01:894E",
+      "native_page_units": [
+        90
+      ],
+      "selector_x": 16,
+      "semantic_id": "dialogue.offering.slot_08",
+      "source_pc24": "$04:C8F5"
+    },
+    {
+      "caller_pc24": "$01:894E",
+      "native_page_units": [
+        53,
+        60
+      ],
+      "selector_x": 18,
+      "semantic_id": "dialogue.offering.slot_09",
+      "source_pc24": "$04:C94F"
+    },
+    {
+      "caller_pc24": "$01:894E",
+      "native_page_units": [
+        63,
+        84
+      ],
+      "selector_x": 20,
+      "semantic_id": "dialogue.offering.slot_10",
+      "source_pc24": "$04:C9C0"
+    },
+    {
+      "caller_pc24": "$01:894E",
+      "native_page_units": [
+        77
+      ],
+      "selector_x": 22,
+      "semantic_id": "dialogue.offering.slot_11",
+      "source_pc24": "$04:CA53"
+    },
+    {
+      "caller_pc24": "$01:894E",
+      "native_page_units": [
+        50,
+        65
+      ],
+      "selector_x": 24,
+      "semantic_id": "dialogue.offering.slot_12",
+      "source_pc24": "$04:CAA0"
+    },
+    {
+      "caller_pc24": "$01:894E",
+      "native_page_units": [
+        61,
+        33
+      ],
+      "selector_x": 26,
+      "semantic_id": "dialogue.offering.slot_13",
+      "source_pc24": "$04:CB13"
+    },
+    {
+      "caller_pc24": "$01:894E",
+      "native_page_units": [
+        88
+      ],
+      "selector_x": 28,
+      "semantic_id": "dialogue.offering.slot_14",
+      "source_pc24": "$04:CB71"
+    },
+    {
+      "caller_pc24": "$01:894E",
+      "native_page_units": [
+        41
+      ],
+      "selector_x": 30,
+      "semantic_id": "dialogue.offering.slot_15",
+      "source_pc24": "$04:CBC9"
+    },
+    {
+      "caller_pc24": "$01:894E",
+      "native_page_units": [
+        41
+      ],
+      "selector_x": 32,
+      "semantic_id": "dialogue.offering.slot_16",
+      "source_pc24": "$04:CBC9"
+    },
+    {
+      "caller_pc24": "$01:894E",
+      "native_page_units": [
+        41
+      ],
+      "selector_x": 34,
+      "semantic_id": "dialogue.offering.slot_17",
+      "source_pc24": "$04:CBC9"
+    },
+    {
+      "caller_pc24": "$01:894E",
+      "native_page_units": [
+        76,
+        47
+      ],
+      "selector_x": 36,
+      "semantic_id": "dialogue.offering.slot_18",
+      "source_pc24": "$04:CBF2"
+    },
+    {
+      "caller_pc24": "$01:894E",
+      "native_page_units": [
+        29
+      ],
+      "selector_x": 38,
+      "semantic_id": "dialogue.offering.slot_19",
+      "source_pc24": "$04:CC6D"
+    },
+    {
+      "caller_pc24": "$01:9330",
+      "context_pc24": "$03:8251",
+      "native_page_units": [
+        243
+      ],
+      "semantic_id": "dialogue.event.wrapper_00.call_00.source_00",
+      "source_pc24": "$04:CC9A"
+    },
+    {
+      "caller_pc24": "$01:93B2",
+      "context_pc24": "$01:85EC",
+      "native_page_units": [
+        243
+      ],
+      "semantic_id": "dialogue.event.wrapper_05.call_03.source_00",
+      "source_pc24": "$04:CC9A"
+    },
+    {
+      "caller_pc24": "$01:9330",
+      "context_pc24": "$03:8251",
+      "native_page_units": [
+        477
+      ],
+      "semantic_id": "dialogue.event.wrapper_00.call_00.source_01",
+      "source_pc24": "$04:CD8D"
+    },
+    {
+      "caller_pc24": "$01:9330",
+      "context_pc24": "$03:8251",
+      "native_page_units": [
+        379
+      ],
+      "semantic_id": "dialogue.event.wrapper_00.call_00.source_02",
+      "source_pc24": "$04:CF6A"
+    },
+    {
+      "caller_pc24": "$01:9330",
+      "context_pc24": "$03:8251",
+      "native_page_units": [
+        418
+      ],
+      "semantic_id": "dialogue.event.wrapper_00.call_00.source_03",
+      "source_pc24": "$04:D0E5"
+    },
+    {
+      "caller_pc24": "$01:9330",
+      "context_pc24": "$03:8251",
+      "native_page_units": [
+        311
+      ],
+      "semantic_id": "dialogue.event.wrapper_00.call_00.source_04",
+      "source_pc24": "$04:D287"
+    },
+    {
+      "caller_pc24": "$01:9330",
+      "context_pc24": "$03:8251",
+      "native_page_units": [
+        319
+      ],
+      "semantic_id": "dialogue.event.wrapper_00.call_00.source_05",
+      "source_pc24": "$04:D3BE"
+    },
+    {
+      "caller_pc24": "$01:9330",
+      "context_pc24": "$03:8251",
+      "native_page_units": [
+        690
+      ],
+      "semantic_id": "dialogue.event.wrapper_00.call_00.source_06",
+      "source_pc24": "$04:D4FD"
+    },
+    {
+      "caller_pc24": "$01:93B2",
+      "context_pc24": "$01:884F",
+      "native_page_units": [
+        324
+      ],
+      "semantic_id": "dialogue.event.wrapper_05.call_06.source_00",
+      "source_pc24": "$04:D7AF"
+    }
+  ],
+  "source_profile": "us",
+  "version": 1
+}

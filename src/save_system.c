@@ -81,6 +81,24 @@ typedef struct SaveRuntime {
 
 static SaveRuntime s_runtime;
 
+bool SaveSystem_CopyPlayerName(char *destination, size_t capacity) {
+  if (!destination || !capacity) return false;
+  destination[0] = 0;
+  if (!s_runtime.live || s_runtime.size < kActRaiserSramSize) return false;
+  size_t length = 0;
+  while (length < kActRaiserPlayerNameCharacterLimit) {
+    const uint8_t byte = s_runtime.live[kSavePlayerName + length];
+    if (!byte || byte == 0xffu) break;
+    if (byte < 0x20u || byte > 0x7eu || length + 1u >= capacity) {
+      destination[0] = 0;
+      return false;
+    }
+    destination[length++] = (char)byte;
+  }
+  destination[length] = 0;
+  return length != 0;
+}
+
 static bool Fail(SaveError *error, const char *format, ...) {
   if (error) {
     va_list args;
