@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/DerrickGold/ar-recomp/installer/internal/builder"
+	"github.com/DerrickGold/ar-recomp/installer/internal/desktop"
 )
 
 const manifestFileName = "snesbuild.ini"
@@ -80,6 +81,8 @@ var buildOnlySubtrees = []string{
 var buildOnlyFiles = []string{
 	"tools/snesbuild",
 	"tools/snesbuild.exe",
+	"tools/appimagetool",
+	"tools/appimage-runtime",
 }
 
 // rebuildInputs must ALL exist for a rebuild to be possible. Deliberately the
@@ -120,6 +123,41 @@ func detectInstallState(root, outputDir string) builder.InstallState {
 			BinaryPath: binary,
 			WorkingDir: root,
 		}
+	}
+	// Prefer the native application after a build or when the loose launcher
+	// has been removed. Font probes can still invoke the bundled game directly.
+	for _, suffix := range []string{".app", ".AppImage", ".AppDir"} {
+		path := filepath.Join(outputDir, desktop.Name+suffix)
+		if info, err := os.Stat(path); err != nil || (suffix == ".AppImage" && !info.Mode().IsRegular()) {
+			continue
+		}
+		binary := state.Result.BinaryPath
+		if suffix == ".app" {
+			if runtime.GOOS != "darwin" {
+				continue
+			}
+			layout, err := desktop.Discover(filepath.Join(path, "Contents", "MacOS", "actraiser-builder"), "")
+			if err != nil {
+				continue
+			}
+			binary = layout.Binary
+		} else if suffix == ".AppDir" {
+			if runtime.GOOS != "linux" {
+				continue
+			}
+			layout, err := desktop.Discover(filepath.Join(path, "usr", "bin", "actraiser-builder"), "")
+			if err != nil {
+				continue
+			}
+			binary = layout.Binary
+		} else if runtime.GOOS != "linux" {
+			continue
+		} else if err := desktop.ValidateAppImage(path); err != nil {
+			continue
+		}
+		state.CanLaunch = true
+		state.Result = builder.Result{Message: "Your game is built and ready.", OutputPath: path, BinaryPath: binary, WorkingDir: root}
+		break
 	}
 
 	// CAN REBUILD: every non-regenerable input is present.

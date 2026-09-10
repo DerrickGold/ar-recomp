@@ -23,18 +23,63 @@ HOW TO PLAY
    and only needs to be done one time.
    Your ROM never leaves this computer.
 
-3. Play - when the build finishes, a "run-game" file appears in this folder
-   (run-game.command on macOS, run-game.bat on Windows, run-game.sh on Linux).
-   Press "Play" in the builder now. Later you can either open the run-game file
-   directly, or start run-build again: it notices the game is already built and
-   opens as a launcher, so there is nothing to rebuild and no ROM to choose.
+3. Play - press "Play" in the builder now. Later, open ActRaiserRecomp.app on
+   macOS or ActRaiserRecomp.AppImage on Linux. Windows uses run-game.bat. The
+   older run-game scripts are also kept for compatibility. Starting run-build
+   again detects the game and opens as a launcher without rebuilding.
+
+   The generated app is private: it contains your ROM. Do not distribute it.
+   The Mac app is automatically signed locally; no Apple account is needed.
+
+
+CHOOSE YOUR INSTALLATION TYPE
+-----------------------------
+Generated desktop applications support the two choices below, regardless of
+their platform-specific filename. Legacy run-game scripts continue to use the
+original bundle's data folder.
+
+Portable installation (Builder default)
+  Keep the application, its .portable sidecar, and utils/ together. The Builder
+  creates the sidecar automatically: its name is the complete application
+  filename with .portable appended, and its contents point to utils/.
+
+  Launch the application directly. Existing saves, settings, language packs,
+  music and artwork are used in place from utils/. To move the installation,
+  copy all three together, preserving their names and relative locations.
+  Rebuilding an existing portable install requires no manual sidecar setup or
+  data migration.
+
+Non-portable installation (per-user data)
+  Copy ONLY the application to your preferred location, leaving its .portable
+  sidecar and utils/ behind. Launch that copy directly. Without a sidecar, the
+  application uses your operating system's standard per-user application data
+  directory, even if an old portable data folder is nearby.
+
+  First launch initializes the required files there; later launches reuse that
+  user's saves, settings and assets. Moving or replacing the application does
+  not move this data. Switching types does not automatically transfer or merge
+  saves and settings. The original portable files remain intact.
+
+Do not put writable data inside the application. Exact data locations,
+command-line overrides and launch diagnostics are documented in
+utils/docs/desktop-packaging.md. The Workshop opened through run-build still
+edits the original bundle's utils/ data, not a separate non-portable install.
 
 
 UPGRADING TO A NEWER VERSION
 ----------------------------
-Extract the new package over the top of this folder. Your settings, saves, and
-anything you customised are kept - the new version's settings are merged in
-alongside them, and you will see a line like
+Back up your saves before upgrading.
+
+Portable: extract the newer Builder bundle over this folder and rebuild the
+game. Keep the generated application and sidecar with the existing utils/ data.
+
+Non-portable: generate the updated application with the newer Builder, then
+replace only the application in your chosen location. Leave the new Builder's
+.portable sidecar behind. Your existing per-user data remains in its operating
+system directory and is reused by the updated application.
+
+Shipped defaults are separate from live settings. New settings are merged in
+alongside yours, and you will see a line like
 
       [upgrade] config.ini: 2 new settings added, your values kept
 
@@ -73,9 +118,11 @@ will not start without it.
       utils/snesrecomp-go  runner SDK headers and static library used while building
       utils/third_party    a support library used while building
 
-Do NOT delete anything else in "utils". The game runs from inside that folder,
-so "utils/config.ini", "utils/diorama-layers.ini", "utils/game-assets" and
-"utils/saves" all have to stay.
+For a portable installation, keep the rest of "utils": "utils/config.ini",
+"utils/diorama-layers.ini", "utils/game-assets" and "utils/saves" are live data. The
+Workshop also uses this folder. A non-portable application runs independently
+of it, but copying just the application does NOT copy these saves or settings;
+keep or back up the original data before discarding an old installation.
 
 
 IF SOMETHING GOES WRONG
@@ -110,10 +157,12 @@ copied into the game, its manifest, or a release package.
 LOCALIZATION WORKSHOP
 ---------------------
 To install a published .arlang without the editor, copy the file directly into
-utils/game-assets/languages/packs/ (do not unzip), restart with run-game.*, and
-select its package name under Localization. Keep utils/tools/actraiser-builder: the game
-uses its shared archive reader without opening the GUI. Duplicate enabled IDs,
-including archive/folder duplicates, must be resolved before selection.
+game-assets/languages/packs/ inside the game's data directory (utils/ for a
+portable install). Do not unzip it. Restart the application and select its
+package name under Localization. The application includes its archive helper;
+legacy run-game installs must retain utils/tools/actraiser-builder. Duplicate
+enabled IDs, including archive/folder duplicates, must be resolved before
+selection.
 See utils/docs/language-packs.md for manual install/update/removal, editor-free
 authoring and validation commands. The machine-readable route reference and
 archive schema accompany it; small authored examples live in utils/examples/.
@@ -155,11 +204,12 @@ WHAT THE FOLDERS ARE
 --------------------
 - run-build.*     opens the graphical builder. After the game is built this
                   opens as a launcher instead.
-- run-game.*      created by the build; press it to play, every time.
-- utils/          the build tools AND the files the game itself needs while
-                  running - your settings, saves, manual, and assets live here,
-                  so keep it. See "free up space" above for what is safe to
-                  remove.
+- run-game.*      compatibility launcher using this bundle's utils/ data.
+- ActRaiserRecomp.app / .AppImage  native game application (macOS / Linux).
+- ActRaiserRecomp.app.portable / .AppImage.portable  selects utils/ data.
+- utils/          the build tools, Workshop files and portable game data.
+                  Non-portable applications use per-user data separately.
+                  See "free up space" above for what is safe to remove.
 - utils/defaults/ this version's stock settings, kept separately so upgrading
                   never overwrites yours. Do not edit these; edit the copies in
                   utils/ instead.

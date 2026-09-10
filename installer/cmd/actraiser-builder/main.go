@@ -31,11 +31,24 @@ func main() {
 }
 
 func run(args []string) error {
+	bundledMac := false
+	if executable, err := os.Executable(); err == nil && filepath.Base(filepath.Dir(executable)) == "MacOS" {
+		// Finder invokes CFBundleExecutable without a subcommand. Keep utility
+		// commands available for the game's language/archive and font workflows.
+		bundledMac = true
+		if len(args) == 0 {
+			return runAppLaunch(args)
+		}
+	}
 	if len(args) == 0 {
 		usage()
 		return errors.New("missing command")
 	}
 	switch args[0] {
+	case "package":
+		return runPackage(args[1:])
+	case "app-launch":
+		return runAppLaunch(args[1:])
 	case "gui":
 		return runGUI(args[1:])
 	case "language":
@@ -57,6 +70,9 @@ func run(args []string) error {
 		usage()
 		return nil
 	default:
+		if bundledMac {
+			return runAppLaunch(args)
+		}
 		usage()
 		return fmt.Errorf("unknown command %q", args[0])
 	}
@@ -67,6 +83,8 @@ func usage() {
 
 Commands:
   gui                    Open the ActRaiser Recomp Builder and Workshop
+  package                Create a local .app, AppImage, or AppDir from a built game
+  app-launch             Launch an application (--portable, --global, --data-dir)
   language               Validate, author, package, install, or prepare .arlang packs
   localization-extract   Extract a private source pack or localization evidence
   localization-graphics  Extract regional graphical references to a private ZIP

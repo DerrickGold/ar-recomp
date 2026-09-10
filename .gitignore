@@ -66,6 +66,16 @@ game-assets/manifest.ini
 /build/
 /build-*/
 /release/
+# Private locally generated games contain a ROM and compiled ROM-derived code.
+*.app/
+*.AppDir/
+*.AppImage
+*.portable
+.actraiser-package-*/
+ActRaiserRecomp-previous-*/
+.actraiser-seed.json
+.actraiser-initialize.lock
+/logs/
 /audio-previews/
 /snesrecomp-go/build/
 /installer/build/
