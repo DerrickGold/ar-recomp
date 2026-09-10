@@ -28,6 +28,7 @@ typedef enum DialogueCueKind {
 typedef struct DialogueCue {
   DialogueCueKind kind;
   size_t utf8_offset;
+  uint32_t cluster_offset;
   uint32_t ordinal;
   uint32_t wait_frames;
   char *control_id;
@@ -408,23 +409,6 @@ static bool AppendValue(const ProgramSource *source,
   return AppendBytes(page, text, strlen(text), error);
 }
 
-static uint32_t CountClusters(const char *text, size_t size,
-                              size_t maximum_offset) {
-  size_t offset = 0;
-  uint32_t count = 0;
-  if (maximum_offset > size)
-    maximum_offset = size;
-  while (offset < maximum_offset) {
-    size_t next = 0;
-    if (!ArUnicodeGrapheme_Next(text, size, offset, NULL, &next) ||
-        next > maximum_offset)
-      return UINT32_MAX;
-    offset = next;
-    count++;
-  }
-  return offset == maximum_offset ? count : UINT32_MAX;
-}
-
 static size_t ByteOffsetForClusters(const DialoguePage *page,
                                     uint32_t cluster_count) {
   size_t offset = 0;
@@ -438,6 +422,38 @@ static size_t ByteOffsetForClusters(const DialoguePage *page,
     count++;
   }
   return offset;
+}
+
+/* Resolve cue boundaries once, in the same linear grapheme pass that counts
+ * the page. A control/wait cannot divide a base and accent or a ZWJ sequence:
+ * otherwise native synchronization could publish a half-character cursor. */
+static bool FinalizePage(DialoguePage *page, ArLanguagePackError *error) {
+  size_t offset = 0;
+  uint32_t clusters = 0, cue = 0;
+  for (;;) {
+    while (cue < page->cue_count && page->cues[cue].utf8_offset <= offset) {
+      if (page->cues[cue].utf8_offset != offset) {
+        SetError(error, "dialogue control or wait splits a Unicode grapheme");
+        return false;
+      }
+      page->cues[cue++].cluster_offset = clusters;
+    }
+    if (offset == page->utf8_bytes) break;
+    size_t next = 0;
+    if (!ArUnicodeGrapheme_Next(page->utf8, page->utf8_bytes, offset, NULL, &next) ||
+        next <= offset || next > page->utf8_bytes || clusters == UINT32_MAX) {
+      SetError(error, "dialogue page is not valid UTF-8");
+      return false;
+    }
+    offset = next;
+    ++clusters;
+  }
+  if (cue != page->cue_count) {
+    SetError(error, "dialogue cue lies outside its page");
+    return false;
+  }
+  page->cluster_count = clusters;
+  return true;
 }
 
 static bool BuildProgram(const ProgramSource *source,
@@ -553,14 +569,7 @@ static bool BuildProgram(const ProgramSource *source,
     }
   }
   for (uint32_t i = 0; i < program->page_count; i++) {
-    program->pages[i].cluster_count = CountClusters(
-        program->pages[i].utf8, program->pages[i].utf8_bytes,
-        program->pages[i].utf8_bytes);
-    if (program->pages[i].cluster_count == UINT32_MAX) {
-      SetError(error, "%s: composed page is not valid UTF-8",
-               state->message_id);
-      goto failed;
-    }
+    if (!FinalizePage(&program->pages[i], error)) goto failed;
   }
   *out_program = program;
   return true;
@@ -762,7 +771,7 @@ static void InstallNativeSource(ArDialogueSession *session,
   session->private_native_observation_seen = false;
 }
 
-static bool FindControlCue(DialogueProgram *program, uint32_t ordinal,
+static bool FindControlCue(const DialogueProgram *program, uint32_t ordinal,
                            uint32_t *page_index, uint32_t *cue_index) {
   for (uint32_t page = 0; page < program->page_count; page++) {
     for (uint32_t cue = 0; cue < program->pages[page].cue_count; cue++) {
@@ -776,6 +785,22 @@ static bool FindControlCue(DialogueProgram *program, uint32_t ordinal,
     }
   }
   return false;
+}
+
+bool ArDialogueSession_GetControlPosition(const ArDialogueSession *session,
+                                          uint32_t control_ordinal,
+                                          uint32_t *page_index,
+                                          size_t *utf8_offset) {
+  if (!IsInitialized(session) || !page_index || !utf8_offset ||
+      session->state.resolved_source == kArDialogueResolvedSource_NativeRom)
+    return false;
+  const DialogueProgram *program = session->private_program;
+  uint32_t page = 0, cue = 0;
+  if (!program || !FindControlCue(program, control_ordinal, &page, &cue))
+    return false;
+  *page_index = page;
+  *utf8_offset = program->pages[page].cues[cue].utf8_offset;
+  return true;
 }
 
 static void MapProgramProgress(ArDialogueSession *session,
@@ -797,8 +822,7 @@ static void MapProgramProgress(ArDialogueSession *session,
     DialoguePage *page = &program->pages[anchored_page];
     const size_t offset = page->cues[anchored_cue].utf8_offset;
     session->state.authored_page_index = anchored_page;
-    session->state.revealed_cluster_count =
-        CountClusters(page->utf8, page->utf8_bytes, offset);
+    session->state.revealed_cluster_count = page->cues[anchored_cue].cluster_offset;
     session->state.page_cluster_count = page->cluster_count;
     session->private_revealed_utf8_bytes = offset;
     session->private_cue_index = anchored_cue;
@@ -852,8 +876,7 @@ static void MapProgramProgress(ArDialogueSession *session,
       page_index = anchored_page;
       page = anchor_page;
       revealed_bytes = anchor_offset;
-      revealed =
-          CountClusters(page->utf8, page->utf8_bytes, revealed_bytes);
+      revealed = anchor_page->cues[anchored_cue].cluster_offset;
     }
   }
 
@@ -867,7 +890,7 @@ static void MapProgramProgress(ArDialogueSession *session,
       }
       if (cue->utf8_offset < revealed_bytes) {
         revealed_bytes = cue->utf8_offset;
-        revealed = CountClusters(page->utf8, page->utf8_bytes, revealed_bytes);
+        revealed = cue->cluster_offset;
       }
       break;
     }
@@ -891,6 +914,7 @@ static void MapProgramProgress(ArDialogueSession *session,
 static bool ActivateSelection(ArDialogueSession *session,
                               const ArDialogueContentSelection *selection,
                               const ArDialogueStableState *stable,
+                              size_t maximum_text_bytes,
                               ArLanguagePackError *error) {
   ProgramSource source;
   if (!SelectProgramSource(selection, stable->message_id, &source, error))
@@ -898,11 +922,24 @@ static bool ActivateSelection(ArDialogueSession *session,
   DialogueProgram *program = NULL;
   if (source.resolved_source != kArDialogueResolvedSource_NativeRom &&
       !BuildProgram(&source, stable,
-                    session->private_has_resolver
-                        ? &session->private_resolver
-                        : NULL,
+                    session->private_has_resolver ? &session->private_resolver
+                                                  : NULL,
                     &program, error))
     return false;
+
+  if (program && maximum_text_bytes) {
+    size_t remaining = maximum_text_bytes;
+    for (uint32_t i = 0; i < program->page_count; ++i) {
+      if (program->pages[i].utf8_bytes >= remaining) {
+        SetError(error,
+                 "resolved dialogue exceeds the %zu-byte presentation budget",
+                 maximum_text_bytes);
+        DestroyProgram(program);
+        return false;
+      }
+      remaining -= program->pages[i].utf8_bytes + 1u;
+    }
+  }
 
   DialogueProgram *old_program = (DialogueProgram *)session->private_program;
   const uint32_t old_page = stable->authored_page_index;
@@ -960,6 +997,16 @@ bool ArDialogueSession_Begin(ArDialogueSession *session,
                              const char *semantic_id,
                              const ArDialogueValueResolver *resolver,
                              ArLanguagePackError *error) {
+  return ArDialogueSession_BeginBounded(session, selection, semantic_id,
+                                        resolver, 0, error);
+}
+
+bool ArDialogueSession_BeginBounded(ArDialogueSession *session,
+                                    const ArDialogueContentSelection *selection,
+                                    const char *semantic_id,
+                                    const ArDialogueValueResolver *resolver,
+                                    size_t maximum_text_bytes,
+                                    ArLanguagePackError *error) {
   if (error)
     error->message[0] = 0;
   if (!IsInitialized(session) || !semantic_id ||
@@ -985,7 +1032,8 @@ bool ArDialogueSession_Begin(ArDialogueSession *session,
     scratch.private_resolver = *resolver;
     scratch.private_has_resolver = true;
   }
-  if (!ActivateSelection(&scratch, selection, &stable, error)) {
+  if (!ActivateSelection(&scratch, selection, &stable, maximum_text_bytes,
+                         error)) {
     ArDialogueSession_Destroy(&scratch);
     return false;
   }
@@ -997,13 +1045,20 @@ bool ArDialogueSession_Begin(ArDialogueSession *session,
 bool ArDialogueSession_Switch(ArDialogueSession *session,
                               const ArDialogueContentSelection *selection,
                               ArLanguagePackError *error) {
+  return ArDialogueSession_SwitchBounded(session, selection, 0, error);
+}
+
+bool ArDialogueSession_SwitchBounded(
+    ArDialogueSession *session, const ArDialogueContentSelection *selection,
+    size_t maximum_text_bytes, ArLanguagePackError *error) {
   if (error)
     error->message[0] = 0;
   if (!IsInitialized(session) || !session->state.message_id[0]) {
     SetError(error, "cannot switch an inactive dialogue session");
     return false;
   }
-  return ActivateSelection(session, selection, &session->state, error);
+  return ActivateSelection(session, selection, &session->state,
+                           maximum_text_bytes, error);
 }
 
 bool ArDialogueSession_Next(ArDialogueSession *session,
@@ -1239,7 +1294,8 @@ bool ArDialogueSession_ObserveNativeProgress(
       progress->wait_frames_remaining > progress->wait_frames_total ||
       (session->state.terminal && !progress->terminal) ||
       (progress->terminal &&
-       (progress->control_pending || progress->awaiting_input ||
+       (progress->completed_control_count != anchor_count ||
+        progress->control_pending || progress->awaiting_input ||
         progress->awaiting_page_advance || progress->wait_frames_remaining)) ||
       (progress->control_pending &&
        progress->completed_control_count >= anchor_count)) {
@@ -1281,6 +1337,21 @@ bool ArDialogueSession_SynchronizeNativeProgress(
     SetError(error, "enhanced dialogue program has no pages");
     return false;
   }
+  if (progress->completed_control_count > program->control_count ||
+      progress->completed_control_count < session->state.completed_control_count ||
+      progress->completed_wait_count > kMaximumDialogueCues ||
+      progress->completed_wait_count < session->state.completed_wait_count ||
+      progress->wait_frames_total > 3600 ||
+      progress->wait_frames_remaining > progress->wait_frames_total ||
+      (progress->terminal &&
+       (progress->completed_control_count != program->control_count ||
+        progress->control_pending || progress->awaiting_input ||
+        progress->awaiting_page_advance || progress->wait_frames_remaining)) ||
+      (progress->control_pending &&
+       progress->completed_control_count >= program->control_count)) {
+    SetError(error, "invalid or regressive native control progress");
+    return false;
+  }
 
   uint32_t page_index = progress->authored_page_index;
   if (page_index >= program->page_count) page_index = program->page_count - 1u;
@@ -1298,10 +1369,6 @@ bool ArDialogueSession_SynchronizeNativeProgress(
     if (revealed > page->cluster_count) revealed = page->cluster_count;
   }
 
-  session->state.authored_page_index = page_index;
-  session->state.revealed_cluster_count = revealed;
-  session->state.page_cluster_count = page->cluster_count;
-  session->private_revealed_utf8_bytes = ByteOffsetForClusters(page, revealed);
   session->state.completed_control_count = progress->completed_control_count;
   session->state.completed_wait_count = progress->completed_wait_count;
   session->state.wait_frames_remaining = progress->wait_frames_remaining;
@@ -1310,6 +1377,11 @@ bool ArDialogueSession_SynchronizeNativeProgress(
   session->state.awaiting_input = progress->awaiting_input;
   session->state.awaiting_page_advance = progress->awaiting_page_advance;
   session->state.terminal = progress->terminal;
+  /* The native page ratio is only a reveal estimate. Never reveal past an
+   * unexecuted control or rewind before one already applied; pending native
+   * waits map exactly to their authored anchor. Keep the executable cue cursor
+   * consistent too, so a subsequent source switch/Next cannot replay controls. */
+  MapProgramProgress(session, program, page_index, revealed, page->cluster_count, false);
   session->private_native_observation_seen = true;
   return true;
 }
@@ -1373,7 +1445,7 @@ bool ArDialogueSession_Restore(ArDialogueSession *session,
     scratch.private_resolver = *resolver;
     scratch.private_has_resolver = true;
   }
-  if (!ActivateSelection(&scratch, selection, state, error)) {
+  if (!ActivateSelection(&scratch, selection, state, 0, error)) {
     ArDialogueSession_Destroy(&scratch);
     return false;
   }

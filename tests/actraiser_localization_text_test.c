@@ -150,6 +150,13 @@ static void TestDialogueObservationIsReadOnly(void) {
   CHECK(ActRaiserLocalizationText_CopyObservation(&observation));
   CHECK(observation.yielded_to_menu);
   CHECK(!observation.terminal && !observation.awaiting_page_advance);
+  CHECK(observation.control_pending);
+  const uint16_t completed = observation.completed_control_count;
+  ActRaiserLocalizationText_ObserveReturn();
+  ActRaiserLocalizationText_ObserveReturn(); /* Idempotent, not another yield. */
+  CHECK(ActRaiserLocalizationText_CopyObservation(&observation));
+  CHECK(!observation.control_pending);
+  CHECK(observation.completed_control_count == completed + 1u);
 
   s_bank01[0xFA6B] = 0x00;
   CHECK(!ActRaiser_LocalizationObserveTextByte(&cpu));
@@ -166,6 +173,51 @@ static void TestDialogueObservationIsReadOnly(void) {
   const CpuState before_clear = cpu;
   CHECK(!ActRaiser_LocalizationObserveGeneralClear(&cpu));
   CHECK(memcmp(&before_clear, &cpu, sizeof(cpu)) == 0);
+}
+
+static void TestControlAcknowledgementsAndClearAnchors(void) {
+  ActRaiserLocalizationText_ResetObservation();
+  memset(s_wram, 0, sizeof(s_wram));
+  CpuState cpu = MakeCpu();
+  CHECK(!ActRaiser_LocalizationObserveTextEntry(&cpu));
+  const struct {
+    uint8_t code;
+    uint16_t completed, clear_count, page;
+    bool pending;
+  } steps[] = {
+      {0x05, 0, 1, 0, true},  /* Exposed reset, not yet completed. */
+      {'A',  1, 1, 0, false},
+      {0x03, 1, 1, 0, true},  /* Native fixed delay. */
+      {0x04, 2, 1, 0, true},  /* Delay returned; toggle now pending. */
+      {0x02, 3, 1, 0, false}, /* Continuation isn't a locked anchor. */
+      {'B',  3, 0, 1, false}, /* Clear-style page discards reset identity. */
+      {0x05, 3, 4, 1, true},  /* Reset can identify an intra-page boundary. */
+      {'C',  4, 4, 1, false},
+      {0x01, 4, 4, 1, true},  /* Yield exposed; no invented completion. */
+  };
+  for (size_t index = 0; index < sizeof(steps) / sizeof(steps[0]); ++index) {
+    s_bank01[cpu.Y] = steps[index].code;
+    const CpuState before = cpu;
+    uint8_t before_wram[sizeof(s_wram)];
+    memcpy(before_wram, s_wram, sizeof(before_wram));
+    CHECK(!ActRaiser_LocalizationObserveTextByte(&cpu));
+    CHECK(!memcmp(&before, &cpu, sizeof(cpu)));
+    CHECK(!memcmp(before_wram, s_wram, sizeof(s_wram)));
+    for (int repeat = 0; repeat < 3; ++repeat) {
+      ActRaiserLocalizationTextObservation observation = {.struct_size = sizeof(observation)};
+      CHECK(ActRaiserLocalizationText_CopyObservation(&observation));
+      CHECK(observation.completed_control_count == steps[index].completed);
+      CHECK(observation.control_pending == steps[index].pending);
+      CHECK(observation.window_start_control_count == steps[index].clear_count);
+      CHECK(observation.page_index == steps[index].page);
+    }
+    ++cpu.Y;
+  }
+  CHECK(!ActRaiser_LocalizationObserveTextEntry(&cpu));
+  ActRaiserLocalizationTextObservation observation = {.struct_size = sizeof(observation)};
+  CHECK(ActRaiserLocalizationText_CopyObservation(&observation));
+  CHECK(!observation.completed_control_count && !observation.control_pending &&
+        !observation.window_start_control_count);
 }
 
 static void TestDialogueWrapperContext(void) {
@@ -381,7 +433,37 @@ static void TestEraseFootprints(void) {
   CHECK(s_bank01_reads == 2048);
 }
 
+static void TestDictionaryReturnControls(void) {
+  for (uint8_t code = 0; code <= 5; ++code) {
+    ActRaiserLocalizationText_ResetObservation();
+    CpuState cpu = MakeCpu();
+    const uint16_t first = cpu.Y;
+    s_bank01[first] = 0x80;
+    CHECK(!ActRaiser_LocalizationObserveTextEntry(&cpu));
+    CHECK(!ActRaiser_LocalizationObserveTextByte(&cpu));
+    /* Two dictionary words followed by a returned control. No intervening
+     * function entry occurs in the real $8FFF -> $8FC5 loop. */
+    cpu.Y += 3;
+    cpu.A = (cpu.A & 0xff00u) | code;
+    const CpuState before = cpu;
+    ActRaiserLocalizationText_ObserveDecodedByte(&cpu, first);
+    ActRaiserLocalizationText_ObserveDecodedByte(&cpu, first);
+    CHECK(!memcmp(&cpu, &before, sizeof(cpu)));
+    ActRaiserLocalizationTextObservation observed = {.struct_size = sizeof(observed)};
+    CHECK(ActRaiserLocalizationText_CopyObservation(&observed));
+    CHECK(observed.page_unit_index == 3);
+    CHECK(observed.cursor_pc24 == (0x010000u | (uint16_t)(first + 2)));
+    CHECK(observed.completed_control_count == 0);
+    CHECK(observed.terminal == (code == 0));
+    CHECK(observed.yielded_to_menu == (code == 1));
+    CHECK(observed.awaiting_page_advance == (code == 2));
+    CHECK(observed.control_pending == (code == 1 || code >= 3));
+  }
+}
+
 int main(void) {
+  TestDictionaryReturnControls();
+  TestControlAcknowledgementsAndClearAnchors();
   /* The composer serial deliberately remains monotonic across observation
    * resets. Exercise the zero-origin ring contract before the dialogue test
    * creates the replacement composer used by its terminal-wait assertion. */

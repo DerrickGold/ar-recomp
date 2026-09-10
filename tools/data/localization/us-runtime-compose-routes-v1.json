@@ -408,7 +408,7 @@
         6,
         1,
         12,
-        2
+        1
       ],
       "semantic_id": "city.fillmore.name",
       "source_pc24": "$01:F1CB",
@@ -422,7 +422,7 @@
         6,
         1,
         12,
-        2
+        1
       ],
       "semantic_id": "city.bloodpool.name",
       "source_pc24": "$01:F1D4",
@@ -436,7 +436,7 @@
         6,
         1,
         12,
-        2
+        1
       ],
       "semantic_id": "city.kasandora.name",
       "source_pc24": "$01:F1DE",
@@ -450,7 +450,7 @@
         6,
         1,
         12,
-        2
+        1
       ],
       "semantic_id": "city.aitos.name",
       "source_pc24": "$01:F1E8",
@@ -464,7 +464,7 @@
         6,
         1,
         12,
-        2
+        1
       ],
       "semantic_id": "city.marahna.name",
       "source_pc24": "$01:F1EE",
@@ -478,7 +478,7 @@
         6,
         1,
         12,
-        2
+        1
       ],
       "semantic_id": "city.northwall.name",
       "source_pc24": "$01:F1F6",
@@ -492,7 +492,7 @@
         6,
         1,
         12,
-        2
+        1
       ],
       "semantic_id": "city.death_heim.name",
       "source_pc24": "$01:F200",

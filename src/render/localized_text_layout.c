@@ -1,5 +1,47 @@
 #include "render/localized_text_layout.h"
 
+bool ArLocalizedTextLayout_FitColumns(
+    const int *minimum_widths, const int *preferred_widths, unsigned count,
+    int width, int preferred_gap, int minimum_gap, ArTextTableColumns *out) {
+  if (!minimum_widths || !preferred_widths || !out || !count ||
+      count > kArTextTableMaximumColumns || width <= 0 || minimum_gap < 0 ||
+      preferred_gap < minimum_gap)
+    return false;
+  int64_t minimum = 0;
+  for (unsigned i = 0; i < count; ++i) {
+    if (minimum_widths[i] <= 0 || preferred_widths[i] <= 0) return false;
+    minimum += minimum_widths[i];
+  }
+  if (minimum + (int64_t)(count - 1) * minimum_gap > width) return false;
+  const int maximum_gap = count > 1 ? (int)((width - minimum) / (count - 1)) : 0;
+  const int gap = preferred_gap < maximum_gap ? preferred_gap : maximum_gap;
+  int remaining = (int)(width - minimum - (int64_t)(count - 1) * gap);
+  int64_t weights[kArTextTableMaximumColumns] = {0}, weight_sum = 0;
+  for (unsigned i = 0; i < count; ++i) {
+    const int desired = preferred_widths[i] - (i + 1 < count ? gap : 0);
+    weights[i] = desired > minimum_widths[i] ? desired - minimum_widths[i] : 0;
+    weight_sum += weights[i];
+  }
+  /* If every preferred width is already full, distribute remaining slack
+   * evenly rather than leaving the final column as an accidental sink. */
+  if (!weight_sum) {
+    for (unsigned i = 0; i < count; ++i) weights[i] = 1;
+    weight_sum = count;
+  }
+  ArTextTableColumns result = {.gap = gap};
+  int x = 0;
+  for (unsigned i = 0; i < count; ++i) {
+    const int extra = weight_sum ? (int)((int64_t)remaining * weights[i] / weight_sum) : 0;
+    result.left[i] = x;
+    result.right[i] = x + minimum_widths[i] + extra;
+    x = result.right[i] + (i + 1 < count ? gap : 0);
+    remaining -= extra;
+    weight_sum -= weights[i];
+  }
+  *out = result;
+  return true;
+}
+
 static bool TableColumns(ArLocalizationTextLayoutKind layout,
                         unsigned line, unsigned field_index, unsigned field_count,
                         unsigned *column, unsigned *next_column) {

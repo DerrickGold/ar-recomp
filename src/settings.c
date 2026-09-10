@@ -2230,9 +2230,11 @@ const SettingDesc g_setting_descs[] = {
   ACTION_SETTING("toggle_turbo", "Toggle turbo",
                  "Toggle fast-forward using the configured turbo multiplier."),
   ACTION_SETTING("save_state", "Save state",
-                 "Save quick-state slot 0, matching the F5 hotkey."),
+                 "Capture a debug hardware/RAM snapshot (F5). Inspection "
+                 "only; this is not a resumable save state."),
   ACTION_SETTING("load_state", "Load state",
-                 "Load quick-state slot 0, matching the F7 hotkey."),
+                 "Unsupported debug restore (F7). Requests are rejected "
+                 "without changing game state; use battery saves instead."),
   ACTION_SETTING("warp_now", "Warp now",
                  "Stage the configured raw warp target through the game's transition path."),
   ACTION_SETTING("take_snapshot", "Take snapshot",

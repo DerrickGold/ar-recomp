@@ -11,7 +11,142 @@ EXTRACT = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(EXTRACT)
 
 
+def check_dictionary_consumers():
+    # All data here is synthetic, including the two distinguishable blanks.
+    for release in ('us', 'eu-en', 'de', 'fr'):
+        profile = {'id': release, 'encoding': 'dictionary-12',
+                   'dictionary': 2048}
+        for token in (0x80, 0xFF):
+            for stop in range(12):
+                rom = bytearray(0x20000)
+                entry_start = 2048 + (token & 127) * 12
+                entry = b'A' * stop + b'\x20' + b'B' * (11 - stop)
+                rom[entry_start:entry_start + 12] = entry
+                rom[:3] = bytes((token, ord('Z'), 0))
+                decoder = EXTRACT.Decoder(bytes(rom), profile)
+                for consumer in ('interactive', 'fixed'):
+                    assert decoder.dictionary_bytes(token, consumer=consumer) == \
+                        b'A' * stop + b' '
+                    reader = decoder if consumer == 'interactive' else \
+                        EXTRACT.FixedComposerDecoder(decoder)
+                    decoded = reader.decode_record(0, 3)
+                    assert decoded['end'] == 3 and decoded['terminated']
+                    assert decoded['operations'][0] == {
+                        'op': 'text', 'value': 'A' * stop + ' Z'}
+                # Unlike $20, a zero is not emitted by the fixed reader.
+                entry = b'A' * stop + b'\0' + b'B' * (11 - stop)
+                rom[entry_start:entry_start + 12] = entry
+                decoder = EXTRACT.Decoder(bytes(rom), profile)
+                assert decoder.dictionary_bytes(token, consumer='fixed') == \
+                    b'A' * stop
+                assert decoder.dictionary_bytes(token, consumer='interactive') == \
+                    entry + (b' ' if release in ('de', 'fr') else b'')
+                fixed = EXTRACT.FixedComposerDecoder(decoder).decode_record(0, 3)
+                assert fixed['operations'][0] == {
+                    'op': 'text', 'value': 'A' * stop + 'Z'}
+
+        rom = bytearray(0x20000)
+        entry = b'AB@CD@EF@GHI'
+        rom[2048:2060] = entry
+        rom[:4] = b'\x80\x80Z\0'
+        decoder = EXTRACT.Decoder(bytes(rom), profile)
+        for consumer in ('interactive', 'fixed'):
+            suffix = b' ' if consumer == 'interactive' and \
+                release in ('de', 'fr') else b''
+            assert decoder.dictionary_bytes(0x80, consumer=consumer) == entry + suffix
+            reader = decoder if consumer == 'interactive' else \
+                EXTRACT.FixedComposerDecoder(decoder)
+            visible = (entry.replace(b'@', b' ') + suffix).decode('ascii')
+            assert reader.decode_record(0, 4)['operations'][0] == {
+                'op': 'text', 'value': visible * 2 + 'Z'}
+        for token, consumer in ((0x7F, 'fixed'), (0x100, 'interactive'),
+                                (0x80, 'unknown')):
+            try:
+                decoder.dictionary_bytes(token, consumer=consumer)
+            except ValueError:
+                pass
+            else:
+                raise AssertionError('invalid dictionary invocation accepted')
+        # A space terminates even when followed by a zero/control-looking byte.
+        rom[2048:2060] = b'A \0\x02\x0dBCDEFGH'
+        decoder = EXTRACT.Decoder(bytes(rom), profile)
+        assert decoder.dictionary_bytes(0x80, consumer='fixed') == b'A '
+        assert decoder.dictionary_bytes(0x80, consumer='interactive') == b'A '
+
+        # Every token selects its own twelve-byte slot, not a shifted/adjacent
+        # entry. Distinct synthetic labels exercise all seven index bits.
+        for index in range(128):
+            entry = f'Q{index:03d} '.encode('ascii') + b'Z' * 7
+            rom[2048 + index * 12:2048 + (index + 1) * 12] = entry
+        decoder = EXTRACT.Decoder(bytes(rom), profile)
+        for index in range(128):
+            for consumer in ('interactive', 'fixed'):
+                assert decoder.dictionary_bytes(
+                    index | 0x80, consumer=consumer) == f'Q{index:03d} '.encode('ascii')
+
+    direct = EXTRACT.Decoder(b'\x80\0', {'encoding': 'direct-glyph'})
+    assert EXTRACT.native_dictionary_consumers(
+        {'id': 'jp', 'encoding': 'direct-glyph'}, b'') == {}
+    try:
+        direct.dictionary_bytes(0x80, consumer='fixed')
+    except ValueError:
+        pass
+    else:
+        raise AssertionError('direct glyph source treated as dictionary')
+
+    # Validate both rooted native-reader contracts, including the full-entry
+    # branch. Mutating any instruction/operand must invalidate the profile.
+    prefix = bytes.fromhex(
+        'b9 00 00 30 02 c8 60 c8 8b 5a c2 20 29 7f 00 48 0a 18 '
+        '63 01 0a 0a a8 68 e2 20 a9 04 48 ab a9 0c')
+    for release, interactive, fixed, flag, tail in (
+            ('us', 0x018FC5, 0x02C0DF, 0xF1, False),
+            ('eu-en', 0x018FC5, 0x02C6F8, 0xF2, False),
+            ('de', 0x018FBD, 0x02C701, 0xF2, True),
+            ('fr', 0x018FBD, 0x02C6EA, 0xF2, True)):
+        profile = next(p for p in EXTRACT.ROM_PROFILES.values()
+                       if p['id'] == release)
+        rom = bytearray(0x20000)
+        operand = EXTRACT.offset_to_pc24(profile['dictionary']) & 0xFFFF
+        load = bytes((0xB9, operand & 255, operand >> 8))
+        body = bytes((0xEB, 0xE6, flag)) + load + bytes.fromhex(
+            '9f 00 b0 7f e8 e8 c8 c9 20 f0') + bytes((17 if tail else 9,)) + \
+            bytes.fromhex('eb 48 20 1c 90 68 3a d0 e6')
+        if tail:
+            body += bytes.fromhex('a9 20 9f 00 b0 7f e8 e8')
+        body += bytes.fromhex('7a ab 80') + bytes((0xBA if tail else 0xC2,))
+        fixed_body = b'\xeb' + load + bytes.fromhex(
+            'f0 0f 9f 00 b0 7f e8 e8 c8 c9 20 f0 04 eb 3a d0 eb 7a ab 80 c7')
+        roots = []
+        readers = []
+        census = EXTRACT.CONSUMER_CENSUS_PROFILES[release]
+        for kind, entry, instructions in (
+                ('interactive', interactive, prefix + body),
+                ('composer', fixed, prefix + fixed_body)):
+            offset = EXTRACT.pc24_to_offset(entry)
+            rom[offset:offset + len(instructions)] = instructions
+            root = EXTRACT.pc24_to_offset(census[kind + '_entry_pc24'])
+            rom[root:root + 3] = EXTRACT.routine_call_pattern(entry, 'jsr')
+            roots.append(root)
+            readers.extend(range(offset, offset + len(instructions)))
+        verified = EXTRACT.native_dictionary_consumers(profile, bytes(rom))
+        assert verified['interactive']['append_space_on_full_entry'] == tail
+        assert not verified['fixed']['append_space_on_full_entry']
+        assert verified['fixed']['stop_before_zero']
+        assert not verified['interactive']['stop_before_zero']
+        for offset in readers + roots:
+            invalid = bytearray(rom)
+            invalid[offset] ^= 1
+            try:
+                EXTRACT.native_dictionary_consumers(profile, bytes(invalid))
+            except ValueError:
+                pass
+            else:
+                raise AssertionError(f'changed dictionary reader accepted: {release}')
+
+
 def main():
+    check_dictionary_consumers()
     for release, origin, columns, clear_pc in (
             ('us', 0x04CA, 24, 0x019032),
             ('eu-en', 0x04CA, 24, 0x019032),

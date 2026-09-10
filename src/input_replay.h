@@ -16,8 +16,8 @@ typedef struct InputReplayFrameResult {
  * canonical runner replay container. */
 void InputReplay_Init(void);
 
-/* Bind the loaded/recording artifact to the runner state after boot-time
- * savestate loading is complete. This validates a canonical replay's game and
+/* Bind the loaded/recording artifact to the initialized runner state before
+ * its first tick. This validates a canonical replay's game and
  * initial-state identity and writes the header for a new recording. */
 bool InputReplay_BeginSession(SrRunnerHandle *runner, const char *game_id);
 

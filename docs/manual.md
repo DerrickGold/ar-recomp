@@ -140,7 +140,10 @@ configurable. Camera bindings do nothing outside these modes.
 
 Seven host actions are gamepad-bindable: open settings (default L3), reset
 camera (default R3), pause, fast forward, save state, load state, and compare
-rendering. The comparison action also has a bindable keyboard row; it is
+rendering. The save/load-state bindings are developer-only: capture is for
+inspection, and restore requests are rejected without changing game state.
+Use the game's normal save system to resume play.
+The comparison action also has a bindable keyboard row; it is
 unbound by default on both devices. The pad also drives the settings menu using
 your SNES bindings. Keyboard hotkeys for the other host actions remain fixed so
 a bad rebind cannot lock a desktop player out of the menu.
@@ -328,6 +331,15 @@ For an automated live probe without the overlay, use for example
 applies it through the same registry callback the menu uses. Diagnostic action
 probes use `key=run` (for example `save_state=run`) and may select a temporary
 slot with `AR_QUICKSTATE_SLOT=0..99`.
+
+Debug snapshots are not supported game saves. `F5` / `save_state=run` requests
+a hardware/RAM capture for inspection. `F7`, gamepad load-state bindings, and
+`load_state=run` reject restores before changing memory. The snapshot format
+does not restore the recompiled CPU, suspended game call stack, or host-owned
+dialogue state. `AR_LOADSTATE` therefore fails startup explicitly instead of
+silently starting a recording from the wrong state. For repeatable probes, use
+an input recording and an isolated copy of a normal battery save. Battery-save
+loading is unaffected.
 
 Music/SFX separation follows the SPC driver's logical track provenance, not
 sample number: song tracks `$00-$0E` feed Music and effect tracks `$10/$12`

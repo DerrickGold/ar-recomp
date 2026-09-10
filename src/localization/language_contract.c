@@ -129,11 +129,18 @@ static bool ValidateBody(const ArLanguagePack *pack,
                          const char *diagnostic_id,
                          ArLanguagePackError *error) {
   uint32_t anchor_index = 0;
+  bool yielded = false;
   for (uint32_t i = 0; i < body->operation_count; i++) {
     const ArLanguageOperation *operation =
         ArLanguagePack_GetOperation(pack, body, i);
     if (!operation) {
       SetError(error, "%s: invalid operation range", diagnostic_id);
+      return false;
+    }
+    if (yielded && operation->kind != kArLanguageOperation_End &&
+        operation->kind != kArLanguageOperation_Empty) {
+      SetError(error, "%s: content after a menu yield is unreachable; "
+                      "place it before the yield anchor", diagnostic_id);
       return false;
     }
     if (operation->kind == kArLanguageOperation_Placeholder) {
@@ -164,6 +171,7 @@ static bool ValidateBody(const ArLanguagePack *pack,
         return false;
       }
       anchor_index++;
+      yielded = !strncmp(anchor, "yield.", 6);
     } else if (operation->kind == kArLanguageOperation_Event) {
       const char *event =
           ArLanguagePack_GetString(pack, operation->value.event.id);

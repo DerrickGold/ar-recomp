@@ -174,7 +174,7 @@ ROM by shape; run it after any bank00.cfg handler work.
 | `$02:ADA8` | `VramDma_Upload64Bytes` | Verified | Shared channel-1 64-byte VRAM DMA helper. | [rendering §3](rendering-engine.md#3-the-upload-record-system-tilemap-writes-all-of-them) |
 | `$02:ADC3` | `NmiGraphics_UploadScroll` | Verified | Uploads `$22-$2D` to BG scroll registers as 10-bit values. | [rendering §2](rendering-engine.md#2-the-nmi-graphics-chain-02abf0) |
 | `$02:AEEB` | `NmiGraphics_UploadHudBg3` | Verified | Streams the BG3 HUD from `$7F:B000` every frame and the lower portion when `$F1` requests it. | [rendering §2](rendering-engine.md#2-the-nmi-graphics-chain-02abf0) |
-| `$02:BF60` | `Dialog_DrawByType` | Mapped | Dispatches message-box/text composition by message ID; text and box occupy different BG layers. | [SEAMS function roles](SEAMS.md#function-roles-discovered-decomp-groundwork) |
+| `$02:BF60` | `FixedText_Compose` | Verified | Packed row/column in A, fixed record at `DB:Y`; writes BG3 text, independently of BG2 box artwork. | [dialogue system](dialogue-system.md) |
 
 ### World-map construction and navigation
 
@@ -263,6 +263,30 @@ ROM by shape; run it after any bank00.cfg handler work.
 | `$01:8819` | `TownEvent_Dispatch` | Mapped | Dispatches the event code in `$033E` through the `$F223` table. | [SEAMS function roles](SEAMS.md#function-roles-discovered-decomp-groundwork) |
 | `$03:8700-$03:8711` | `TownState_Dispatch` | Mapped | Per-town state dispatcher keyed by `$7CC9[town]`. | [SEAMS function roles](SEAMS.md#function-roles-discovered-decomp-groundwork) |
 | `$03:E1D2-$03:E1EB` | `TownEventHandler_Dispatch` | Mapped | Per-town, 32-entry event-handler dispatcher with shared continuation `$E1EC`. | [SEAMS function roles](SEAMS.md#function-roles-discovered-decomp-groundwork) |
+
+### Dialogue and fixed-menu text
+
+All addresses here are USA. Detailed contracts and regional cautions are in
+[dialogue-system.md](dialogue-system.md); names remain candidates, not cfg renames.
+
+| Address | Candidate symbol | Status | Contract / observation |
+| --- | --- | --- | --- |
+| `$01:8E29` / `$01:8FC5` | `Dialogue_Run` / `Dialogue_ReadToken` | Mapped | `DB:Y` source; reader loops internally at `$8FFF→8FC5` across dictionary words. Observe returned `A.low`, `Y-1` before caller `$8E57` dispatches a control; entry-only hooks miss it. Interpreter return acknowledges menu yield. |
+| `$01:8F57-$8F5B` / `$02:C526-$C53C` | `Dialogue_InsertLiveName` / `NameEntry_Finish` | Mapped | `$06` selects WRAM `$0288` for `$01:9003`; finish terminates the name and trims native trailing spaces. The next wrapper-05 dialogue has source `$04:8EFC`, caller `$01:93B2`, context `$01:85CA`. This is an acceptance boundary even in native-only presentation; battery SRAM `$1439` may still hold an older name. See [dialogue reference](dialogue-system.md) and [save companions](save-format.md#unicode-player-names-and-emulator-interchange). |
+| `$02:C0DF` | `FixedText_ReadToken` | Verified | Dictionary reader: stop before zero or after emitted space `$20`, maximum 12 glyphs, no added trailing space; unlike interactive `$01:8FC5` it does not delay glyphs |
+| `$01:9032` / `$01:905B` | `Dialogue_ClearWindow` / `Dialogue_AdvanceAndScroll` | Verified | `$0200` selects clear versus retained rows at continuation |
+| `$01:9099` | `Dialogue_ShowContinuation` | Verified | X is the byte offset of the native BG3 continuation cell. Switching to retail inside an adapted native continuation delegates the original body on the same JSR frame; no synthetic confirmation. |
+| `$01:9261` / `$01:8C43` | `Dialogue_ConfirmInput` / `Menu_PollInputFrame` | Verified | Two `$8C43` / `BIT #$C0` loops wait for A/B release then press. Poll calls `$9284`, then loads DP `$A1`. Authored confirmations reuse the original poll body, checking source ownership between frames so removed authored-only prompts can retire. |
+| `$01:9284` | `Menu_UpdateAndWaitFrame` | Verified | Calls `$0192B7` and `$01ACD9` before VBlank polling; required for animations during added pages/pauses. Not a bare host yield. |
+| `$01:8C79` | `Menu_ResolveIndexedText` | Mapped | One-based selector, pointer base two bytes before first entry; retain logical slot when pointers alias |
+| `$02:BF60` | `FixedText_Compose` | Verified | Packed row/column in A, record at `DB:Y`; writes BG3 staging |
+| `$02:C1B7` | `FixedText_EraseRecord` | Verified | Only `$00/$0D` controls; other bytes erase cell plus row above, no yield |
+| `$02:C206` | `Hud_UpdateStatus` | Mapped | Non-action branch clears the 12-tile health row at `$7F:B08C` and supplies `$0286/$0287` to the bar writer |
+| `$02:C375` | `Bg3_FillWords` | Verified | Fill Y words with A at `$7F:B000+X`, preserving X |
+| `$02:C386` | `Hud_DrawHealthBar` | Mapped | Current/max HP in DP `$00/$02`; full tile per two units plus half-tile remainder |
+| `$01:8D92` / `$01:8CA7` | `Choice_RunYesNo` / `Choice_EraseLabels` | Verified | Shared choice close joins at `$8DED`, reaches partial eraser via `$8CB0` |
+| `$01:8CCE` | `Menu_ClearTextRows` | Verified | Clears BG3 bytes `$B100-$B7FF`, retaining status strip |
+| `$02:ABC4/$02:BA41` | `Bg3_ClearGeneralRows` | Verified | Clears BG3 bytes `$B000-$B6FF` |
 
 ### Save, title, transitions, and ending
 

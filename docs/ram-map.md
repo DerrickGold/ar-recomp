@@ -335,7 +335,31 @@ this simple status-copy relationship and remains mapped only at the raw level;
 see [save-format.md](save-format.md) §3.
 
 ### Platformer Score Records ($7E:02B3+)
-24 entries (6 towns x 2 acts x 2 bytes each).
+12 packed-BCD words / 24 bytes (6 towns × 2 acts × 2 bytes), ending at
+`$7E:02CA`. Display appends a decimal zero; these are not binary integers.
+
+## Dialogue and menu scratch (USA)
+
+These meanings are consumer-scoped, not universal labels for reused scratch.
+See [dialogue-system.md](dialogue-system.md) for the control and clear paths.
+
+| Address / register | Meaning in this consumer |
+| --- | --- |
+| `DB:Y` | Interactive or fixed source cursor; caller determines bank |
+| DP `$14` | Packed row/column saved by `$02:BF60` from A; not a global message ID |
+| `$7E:0200` | Dialogue pacing/retained-row mode: `$901C` delays non-space glyphs by this many `$9284` frames; zero selects clear at `$02` continuation, nonzero selects row advancement/scroll. Authored pages retain the same zero/nonzero window policy. |
+| `$7E:0201` | Text presentation-state byte initialized to `$FF` on interpreter entry; not a standalone host page counter |
+| `$7E:0288-$028F` | Eight live native player-name slots read by interactive `$06`; can precede SRAM `$1439` until the next save. `$0290` is terminator/padding. Never UTF-8 storage. |
+| `$7E:034B/$034C/$034D` | Name-entry selected column / row / entered length |
+| `$7F:B000-$B7FF` | 32×32 BG3 tilemap staging; byte offset = `row*64 + column*2` |
+| `$7F:B100-$B7FF` | Whole-menu clear range at `$01:8CCE`; status rows survive |
+| `$7F:B000-$B6FF` | General clear range at `$02:ABC4/$BA41` |
+
+Partial erasure `$02:C1B7` clears each record cell and the cell one row above;
+its footprint is neither of the whole-clear ranges. The NMI upload range can
+be smaller than the allocated/cleared map; do not infer ownership from upload
+length alone. Unicode names and authored dialogue state require separate host
+state and explicit save/load handling, not writes into these native slots.
 
 ## Temple & Gameplay State
 

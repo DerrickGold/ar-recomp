@@ -112,9 +112,13 @@ SaveBackend SaveSystem_ActiveBackend(void);
  * receive the live SRAM pointer or its USA-specific offset. */
 bool SaveSystem_CopyPlayerName(char *destination, size_t capacity);
 /* Optional host extension associated with the active save checksum and native
- * compatibility name. It preserves up to eight Unicode grapheme clusters
- * without changing the retail SRAM format. */
-bool SaveSystem_CopyLocalizedPlayerName(char *destination, size_t capacity);
+ * compatibility name. The caller supplies the current live name, which can
+ * precede battery SRAM during a new game. No UTF-8 is written into SRAM. */
+bool SaveSystem_CopyLocalizedPlayerName(const char *compatibility_name,
+                                        char *destination, size_t capacity);
+/* Stage up to eight Unicode grapheme clusters. Persistence waits until native
+ * SRAM contains the compatibility name; loading another save replaces this
+ * session metadata. The caller must observe native name-entry acceptance. */
 bool SaveSystem_SetLocalizedPlayerName(const char *utf8_name,
                                        const char *compatibility_name);
 

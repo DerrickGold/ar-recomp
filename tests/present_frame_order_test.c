@@ -25,6 +25,7 @@ static ArRenderRectI s_expected_host_viewport;
 static uint8_t s_expected_transition_alpha;
 static int s_expected_stages;
 static uint64_t s_authentic_uploaded_serial;
+static bool s_dialogue_ready;
 static const ArRenderRectI kFallback = {160, 0, 960, 720};
 static const ArRenderRectI kResolved = {161, 1, 958, 718};
 
@@ -91,6 +92,8 @@ void PresentCompositeScene(const FrameSlot *slot, float alpha) {
   CHECK(s_stage++ == 2);
   CHECK(slot == s_expected_slot);
   CHECK(alpha == s_expected_alpha);
+  if (s_dialogue_ready)
+    ArTextPresentation_MarkReady(slot->localization.dialogue_ticket);
 }
 
 bool PresentAuthenticScene(const FrameSlot *slot, ArRenderRectI viewport) {
@@ -178,6 +181,27 @@ int main(void) {
   s_expected_transition_alpha = 0;
   s_expected_stages = 5;
   RunCase(&slot);
+
+  slot.inidisp = 0x0f;
+  slot.localization.dialogue_ticket = 10;
+  s_dialogue_ready = true;
+  RunCase(&slot);
+  CHECK(!ArTextPresentation_Failed(10));
+  s_dialogue_ready = false;
+  RunCase(&slot); /* A visible native fallback must report to the scheduler. */
+  CHECK(ArTextPresentation_Failed(10));
+  slot.localization.dialogue_ticket = 11;
+  slot.inidisp = 0x80;
+  RunCase(&slot);
+  CHECK(!ArTextPresentation_Failed(11));
+  slot.inidisp = 0;
+  RunCase(&slot);
+  CHECK(!ArTextPresentation_Failed(11));
+  slot.inidisp = 0x0f;
+  s_dialogue_ready = true;
+  RunCase(&slot);
+  CHECK(!ArTextPresentation_Failed(11));
+  slot.localization.dialogue_ticket = 0;
 
   /* Authentic bypasses the enhanced compositor while retaining the player's
    * independent CRT configuration. */

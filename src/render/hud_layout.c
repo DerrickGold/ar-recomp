@@ -37,7 +37,7 @@ int ArHudLayout_BuildPresentationChunks(
       (!in->hud_split_height && !in->hud_body_y1) ||
       in->snes_width <= 0 ||
       in->snes_height <= 0 || in->visible_width <= 0 ||
-      in->authentic_width <= 0)
+      in->authentic_width <= 0 || viewport.w <= 0 || viewport.h <= 0)
     return 0;
 
   int count = 0;
@@ -99,6 +99,16 @@ int ArHudLayout_BuildPresentationChunks(
   } else {
     scale_y = in->hud_scale_percent / (double)kHudPercentScale;
     scale_x = scale_y * (in->crt_pixel_aspect ? 7.0 / 6.0 : 1.0);
+  }
+
+  /* Independently anchored groups must still fit their combined native
+   * width. A pinned (density-adjusted) HUD scale can exceed a small window:
+   * then the left health bar intersects the right magic/SP group. Cap only
+   * this projection, retaining the requested scale for a larger viewport. */
+  const double maximum_scale_x = (double)viewport.w / in->authentic_width;
+  if (scale_x > maximum_scale_x) {
+    scale_y *= maximum_scale_x / scale_x;
+    scale_x = maximum_scale_x;
   }
 
   const int height = in->hud_split_height;

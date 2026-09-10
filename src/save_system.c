@@ -111,13 +111,12 @@ bool SaveSystem_CopyPlayerName(char *destination, size_t capacity) {
   return CopyNativePlayerName(destination, capacity);
 }
 
-bool SaveSystem_CopyLocalizedPlayerName(char *destination, size_t capacity) {
+bool SaveSystem_CopyLocalizedPlayerName(const char *compatibility_name,
+                                        char *destination, size_t capacity) {
   if (!destination || !capacity) return false;
   destination[0] = 0;
-  char native_name[kActRaiserPlayerNameStorageBytes];
-  if (!s_runtime.localized_name_valid ||
-      !CopyNativePlayerName(native_name, sizeof(native_name)) ||
-      strcmp(native_name, s_runtime.localized_compatibility))
+  if (!s_runtime.localized_name_valid || !compatibility_name ||
+      strcmp(compatibility_name, s_runtime.localized_compatibility))
     return false;
   const size_t bytes = strlen(s_runtime.localized_name);
   if (!bytes || bytes >= capacity) return false;
@@ -146,15 +145,14 @@ static bool ValidLocalizedName(const char *name, uint8_t *grapheme_count) {
 
 bool SaveSystem_SetLocalizedPlayerName(const char *utf8_name,
                                        const char *compatibility_name) {
-  char native_name[kActRaiserPlayerNameStorageBytes];
-  uint8_t graphemes = 0;
-  if (!ValidLocalizedName(utf8_name, &graphemes) ||
+  if (!s_runtime.live || !ValidLocalizedName(utf8_name, NULL) ||
       !compatibility_name || !compatibility_name[0] ||
-      strlen(compatibility_name) > kActRaiserPlayerNameCharacterLimit ||
-      !CopyNativePlayerName(native_name, sizeof(native_name)) ||
-      strcmp(native_name, compatibility_name))
+      strlen(compatibility_name) > kActRaiserPlayerNameCharacterLimit)
     return false;
-  (void)graphemes;
+  for (const unsigned char *byte = (const unsigned char *)compatibility_name;
+       *byte; ++byte)
+    if (*byte < 0x20u || *byte > 0x7eu)
+      return false;
   if (s_runtime.localized_name_valid &&
       !strcmp(s_runtime.localized_name, utf8_name) &&
       !strcmp(s_runtime.localized_compatibility, compatibility_name))
@@ -627,8 +625,8 @@ static bool WriteLocalizedNameExtension(SaveError *error) {
   char native_name[kActRaiserPlayerNameStorageBytes];
   if (!CopyNativePlayerName(native_name, sizeof(native_name)) ||
       strcmp(native_name, s_runtime.localized_compatibility)) {
-    s_runtime.localized_name_valid = false;
-    s_runtime.localized_name_dirty = false;
+    /* The accepted live name can precede the game's first battery save.
+     * Keep it in host memory without changing the older save or its sidecar. */
     return true;
   }
   char path[kLocalizedNamePathBytes];
@@ -639,6 +637,9 @@ static bool WriteLocalizedNameExtension(SaveError *error) {
       .compatibility_name = s_runtime.localized_compatibility,
       .utf8_name = s_runtime.localized_name,
   };
+  /* A loaded name may not already be dirty when a later native save changes
+   * its checksum. Retain a retry if the companion write fails after SRAM. */
+  s_runtime.localized_name_dirty = true;
   if (!WriteAtomic(path, WriteLocalizedNameBody, &context, error))
     return false;
   s_runtime.localized_name_dirty = false;
@@ -681,7 +682,7 @@ static void LoadLocalizedNameExtension(void) {
   if (!header_read || memcmp(header, kMagic, sizeof(kMagic)) || !body_read ||
       checksum != Save_ComputeChecksum(s_runtime.live) ||
       !CopyNativePlayerName(native_name, sizeof(native_name)) ||
-      strcmp(native_name, compatibility) ||
+      strcmp(native_name, compatibility) || strlen(name) != utf8_bytes ||
       !ValidLocalizedName(name, NULL)) {
     fprintf(stderr,
             "[saves] ignored stale or invalid localized-name extension %s\n",
@@ -774,6 +775,8 @@ bool SaveSystem_LoadActive(SaveError *error) {
   FILE *probe = fopen(path, "rb");
   if (!probe) {
     if (errno == ENOENT) {
+      s_runtime.localized_name_valid = false;
+      s_runtime.localized_name_dirty = false;
       SaveSystem_ResyncShadow();
       fprintf(stderr, "[saves] %s backend: no existing %s; using fresh SRAM\n",
               s_runtime.backend == kSaveBackend_Ini ? "ini" : "native-srm",
@@ -1068,6 +1071,8 @@ bool SaveSystem_ApplyEdits(const SaveEditRequest *edits,
   }
   memcpy(s_runtime.live, scratch, sizeof(scratch));
   SaveSystem_ResyncShadow();
+  if (persist && s_runtime.localized_name_valid)
+    s_runtime.localized_name_dirty = true;
   return true;
 }
 
@@ -1102,6 +1107,9 @@ bool SaveSystem_Import(const char *path, bool auto_backup, SaveError *error) {
   if (!Save_WriteFile(ActiveFormat(), ActivePath(), scratch, error)) return false;
   memcpy(s_runtime.live, scratch, sizeof(scratch));
   SaveSystem_ResyncShadow();
+  /* Import is a save replacement, not a gameplay update. Never carry pending
+   * metadata from the previous game into an unrelated imported image. */
+  LoadLocalizedNameExtension();
   return true;
 }
 

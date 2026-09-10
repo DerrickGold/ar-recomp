@@ -16,6 +16,30 @@ enum {
   kMaximumLogicalLines = 64,
 };
 
+bool ActRaiserLocalizationNameEntry_CopyNativeName(const uint8_t *wram,
+                                                   size_t wram_bytes,
+                                                   char *destination,
+                                                   size_t capacity) {
+  if (!destination || !capacity)
+    return false;
+  destination[0] = 0;
+  if (!wram || wram_bytes < kWramName + kActRaiserLocalizationNameLength)
+    return false;
+  size_t length = 0;
+  while (length < kActRaiserLocalizationNameLength) {
+    const uint8_t byte = wram[kWramName + length];
+    if (!byte || byte == 0xffu)
+      break;
+    if (byte < 0x20u || byte > 0x7eu || length + 1u >= capacity) {
+      destination[0] = 0;
+      return false;
+    }
+    destination[length++] = (char)byte;
+  }
+  destination[length] = 0;
+  return length != 0;
+}
+
 bool ActRaiserLocalizationNameEntry_CaptureCursor(
     uint32_t argb[kActRaiserLocalizationNameCursorPixels],
     uint16_t bg3_tile_base_words,

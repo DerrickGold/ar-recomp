@@ -116,6 +116,12 @@ def main() -> None:
 
     license_text = LICENSE.read_text(encoding="utf-8")
     assert "SIL OPEN FONT LICENSE Version 1.1" in license_text
+    unicode_notice = (ROOT / "third_party/unicode/NOTICE").read_text(encoding="utf-8")
+    assert "UNICODE LICENSE V3" in unicode_notice
+    assert "17.0.0" in unicode_notice and "utf8proc 2.11.3" in unicode_notice
+    utf8proc_license = (ROOT / "third_party/unicode/utf8proc-LICENSE.md").read_text(encoding="utf-8")
+    assert "Public Software Group" in utf8proc_license
+    assert "Unicode data license" in utf8proc_license
 
     cmap = table(data, b"cmap")
     required = (

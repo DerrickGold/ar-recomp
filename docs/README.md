@@ -23,6 +23,8 @@ histories, and retired specifications are intentionally excluded.
   with confidence and evidence.
 - [Rendering engine](rendering-engine.md) — original drawing, streaming, OAM,
   and presentation behavior.
+- [Dialogue and menu text](dialogue-system.md) — native text consumers,
+  source identity, scroll/clear behavior, and replacement boundaries.
 - [Save format](save-format.md) — SRAM layout, checksum, and field encodings.
 - [SNES native audio channels](snes-native-audio-channels.md) — original SPC
   driver channel ownership, request paths, and effect sequence evidence.

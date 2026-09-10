@@ -52,7 +52,7 @@ static void RequestComparisonDrawFailure(const char *stage) {
           ? render_error : "renderer rejected the draw");
 }
 
-ArRenderRectI PresentFrame(const FrameSlot *slot, float alpha,
+static ArRenderRectI DrawFrame(const FrameSlot *slot, float alpha,
                            double presentation_fps) {
   ArRenderRectI image = {0};
   if (!slot || !ArRenderDevice_IsReady(&g_render_device)) return image;
@@ -116,5 +116,19 @@ ArRenderRectI PresentFrame(const FrameSlot *slot, float alpha,
     return image;
   }
   PresentHostUi(slot, image, output_size, presentation_fps);
+  return image;
+}
+
+ArRenderRectI PresentFrame(const FrameSlot *slot, float alpha,
+                           double presentation_fps) {
+  /* Hardware blanking/fades deliberately hide both native and enhanced text;
+   * those are not missing-presentation failures. All visible fallback paths,
+   * including ones that never enter the HUD compositor, report otherwise. */
+  const bool visible =
+      slot && !(slot->inidisp & 0x80) && (slot->inidisp & 0x0f);
+  ArTextPresentation_BeginFrame(visible ? slot->localization.dialogue_ticket
+                                        : 0);
+  const ArRenderRectI image = DrawFrame(slot, alpha, presentation_fps);
+  ArTextPresentation_EndFrame();
   return image;
 }

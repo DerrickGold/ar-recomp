@@ -718,13 +718,18 @@ capability off and both stages fail closed.
 
 ## 11. UI / dialog compose (sim engine)
 
+See [dialogue-system.md](dialogue-system.md) for the two native text grammars,
+retained-row scrolling, partial-menu erasure, source identity, and special-cell
+ownership. Text lifetime is not equivalent to box artwork or scene lifetime.
+
 - Town-map tile *content* (which house/road/bridge tiles exist where) is not
   decided in this engine layer: structure records drive per-record visual step
   programs (`$03:A4B8` construction / `$03:A4A8` rebuild HLEs → `$7F:77E7`
   slots → the `$89F7`/`$8A7E` stepper) that
   edit the town map, which the SEAMS "Sim-mode town-map GRAPHICS pipeline"
   then uploads. See SEAMS town §7 for the record/step system.
-- `$02:BF60`: dialog/message-box draw dispatcher (type in `$14`); its tile
+- `$02:BF60`: fixed-text composer (packed row/column in A, saved in DP `$14`);
+  interactive dialogue is the separate `$01:8E29` interpreter. Its tile
   writes target the BG3/HUD compose buffer at `$7F:B000`, later streamed by
   `$02:AEEB`. It is not a proven direct writer of Sky Palace's BG2 staging.
 - Whole-map UI refreshes = the §3 mega-burst mechanism (record buffers
@@ -1153,11 +1158,28 @@ bundled runtime's widescreen/PPU interfaces:
   the X scale additionally applies the configured 7:6 SNES pixel aspect when
   enabled. `-`/`+` adjust by 25 percent, clamped to 25-400. Authentic 4:3 and
   widescreen-raw never enable extraction and retain the ordinary in-frame HUD.
+- A promoted HUD's effective scale is also capped so its combined authentic
+  width fits the output viewport. This includes the display-density multiplier
+  on a pinned scale and preserves pixel aspect. Otherwise separately anchored
+  left and right groups can overlap (notably the full angel-health bar and
+  magic icon in a small Sky Palace window). Only the projection is capped:
+  the stored preference resumes when there is room, native HP/tile data stays
+  unchanged, and lower dialogue/menu rows retain their scene projection.
+- Enhanced town labels use these same HUD projection chunks, not a second
+  screen-space scale. Their logical erasure mask stays within the label's
+  eight-pixel row, above angel health. Single-line text keeps its requested
+  font size but lowers the fitting floor when a small physical HUD row requires
+  it; the accessibility font preference must not force a native fallback merely
+  because HUD scale is independently small. Repeated presentation reuses the
+  fitted bitmap through the text-surface cache.
 - Renderer-backed F2/`AR_SHOT_AT_GF` captures read the final composited output,
   so scaled-HUD regressions include the host overlay. Pure headless/oracle runs
   bind no overlay surfaces and preserve the historical internal framebuffer
   and deterministic emulated state. Visual automation opts into the real
-  compositor with `AR_HEADLESS_VIDEO=1`; it creates a hidden window backed by
+  compositor with `AR_HEADLESS_VIDEO=1`; add `AR_WS_HEADLESS=1` to exercise
+  configured widescreen geometry (otherwise the oracle-safe authentic width
+  is forced). The boot `[video-geometry]` and `[display]` diagnostics confirm
+  which geometry/profile actually activated. This creates a hidden window backed by
   the same mandatory GPU renderer and D32 pipeline as an interactive run,
   without enabling input or frame pacing. Dummy/offscreen software video
   drivers are intentionally rejected because they cannot exercise SIM3D's

@@ -127,6 +127,10 @@ static void ClearIntersections(
 
 static ArLocalizationTextLayoutKind LayoutForSemanticId(
     const char *semantic_id) {
+  const size_t length = strlen(semantic_id);
+  if (!strncmp(semantic_id, "city.", 5) && length > 10 &&
+      !strcmp(semantic_id + length - 5, ".name"))
+    return kArLocalizationTextLayout_SingleLineLabel;
   if (!strcmp(semantic_id, "status.report.cities_report"))
     return kArLocalizationTextLayout_StatusCities;
   if (!strcmp(semantic_id, "status.report.score_report"))
@@ -153,10 +157,12 @@ static bool ResolveSnapshot(
                     &resolved->source_revision, resolved->inline_objects,
                     kArLocalizationFrameInlineObjectCapacity,
                     &resolved->inline_object_count, error, error_capacity) ||
-      !resolved->utf8_bytes ||
       resolved->utf8_bytes >= sizeof(resolved->utf8) ||
       resolved->utf8[resolved->utf8_bytes] != 0 ||
-      !resolved->cluster_count || !resolved->source_revision ||
+      (!resolved->utf8_bytes &&
+       (resolved->cluster_count || resolved->inline_object_count)) ||
+      (resolved->utf8_bytes && !resolved->cluster_count) ||
+      !resolved->source_revision ||
       resolved->inline_object_count >
           kArLocalizationFrameInlineObjectCapacity) {
     if (error && error_capacity && !error[0])

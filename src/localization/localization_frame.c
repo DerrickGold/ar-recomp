@@ -38,9 +38,9 @@ bool ArLocalizationFrame_SetFont(ArLocalizationFrame *frame,
   if (!frame || frame->abi_version != AR_LOCALIZATION_FRAME_ABI_VERSION ||
       !font_revision || !ArEnhancedTextSettings_IsValid(settings))
     return false;
-  char locale_copy[kArLocalizationFrameLocaleCapacity];
-  char stack_copy[kArLocalizationFrameFontStackCapacity];
-  char path_copy[kArLocalizationFrameFontPathCapacity];
+  char locale_copy[kArLocalizationFrameLocaleCapacity] = {0};
+  char stack_copy[kArLocalizationFrameFontStackCapacity] = {0};
+  char path_copy[kArLocalizationFrameFontPathCapacity] = {0};
   if (!CopyString(locale_copy, sizeof(locale_copy), locale) ||
       !CopyString(stack_copy, sizeof(stack_copy), font_stack_id) ||
       !CopyString(path_copy, sizeof(path_copy), primary_font_path))
@@ -50,6 +50,23 @@ bool ArLocalizationFrame_SetFont(ArLocalizationFrame *frame,
   memcpy(frame->primary_font_path, path_copy, sizeof(path_copy));
   frame->font_revision = font_revision;
   frame->settings = *settings;
+  frame->fallback_font_count = 0;
+  memset(frame->fallback_font_paths, 0, sizeof(frame->fallback_font_paths));
+  return true;
+}
+
+bool ArLocalizationFrame_SetFallbackFonts(
+    ArLocalizationFrame *frame, const char *const *paths, size_t count) {
+  if (!frame || frame->abi_version != AR_LOCALIZATION_FRAME_ABI_VERSION ||
+      !frame->font_revision || count > kArTextPresentationMaximumFallbackFonts ||
+      (count && !paths))
+    return false;
+  char copied[kArTextPresentationMaximumFallbackFonts]
+             [kArLocalizationFrameFontPathCapacity] = {{0}};
+  for (size_t i = 0; i < count; ++i)
+    if (!CopyString(copied[i], sizeof(copied[i]), paths[i])) return false;
+  memcpy(frame->fallback_font_paths, copied, sizeof(copied));
+  frame->fallback_font_count = (uint8_t)count;
   return true;
 }
 
@@ -102,7 +119,9 @@ bool ArLocalizationFrame_AddTextWithObjectsAndLayout(
     const ArLocalizationInlineObjectSnapshot *inline_objects,
     uint8_t inline_object_count) {
   if (!frame || frame->abi_version != AR_LOCALIZATION_FRAME_ABI_VERSION ||
-      !frame->font_revision || !utf8 || !utf8_bytes || !source_revision ||
+      !frame->font_revision || !utf8 || !source_revision ||
+      (!utf8_bytes && (cluster_count || inline_object_count)) ||
+      (utf8_bytes && !cluster_count) ||
       !native_font_pixels || revealed_cluster_count > cluster_count ||
       native_preserve_count > kArLocalizationFrameNativePreserveCapacity ||
       (native_preserve_count && !native_preserves) ||
@@ -113,7 +132,7 @@ bool ArLocalizationFrame_AddTextWithObjectsAndLayout(
       direction < kArTextDirection_Auto ||
       direction > kArTextDirection_RightToLeft ||
       layout < kArLocalizationTextLayout_Flow ||
-      layout > kArLocalizationTextLayout_DialogueWindow ||
+      layout > kArLocalizationTextLayout_SingleLineLabel ||
       frame->snapshot_count >= kArTextCellRecordCapacity ||
       utf8_bytes >= kArLocalizationFrameTextCapacity - frame->text_bytes)
     return false;

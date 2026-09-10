@@ -31,9 +31,76 @@ at launch. That path also defaults presentation to Enhanced unless an explicit
 setting overrides it. A missing or incompatible source retains the prior
 selection. Retail-derived extraction products are not bundled for distribution.
 
-The format and portable session support changing page counts, but the game
-adapter still follows native dialogue progress. Extra authored pages and waits
-are not yet fully playable; do not rely on them for a finished translation yet.
+Before enabling enhanced text, the game tests opening the primary and ordered
+fallback fonts and uploading a rasterized sample. Missing/corrupt font files or
+an unavailable renderer reject the switch without adding dialogue pages or waits;
+the prior selection stays active. Declared fallback fonts are used by the live
+renderer. This readiness test does not verify every character in a translation:
+include appropriately licensed fonts covering your language, run the coverage
+check below, and preview its text.
+
+If a dialogue later cannot be rendered, its remaining text and interaction fall
+back to native for that invocation. Added-only waits/prompts retire; native
+confirmations and game events remain player/game-controlled. Your pack selection
+is retained, and the next message can use enhanced text again.
+
+Scoped dialogue supports adding/removing `@page` boundaries and optional
+`@wait` pauses. The game confirms authored pages before passing native control
+barriers; removed pages do not leave redundant continuation prompts. Keep all
+locked anchors in order, and place added content **before** a final `yield.*`
+anchor, which hands input to the native menu. Content after it is rejected as
+unreachable. Live source changes preserve the current semantic progress: shorter
+messages clamp to a valid page, while additional pages remain reachable before
+unexecuted native control barriers. Switching text rendering during a prompt
+does not answer a native choice or confirm a native continuation. Already
+completed terminal/menu-yield states remain complete. Changing font styling
+does not restart typing. Installed-pack discovery is still separate from this
+runtime behavior. Debug save-state restoration
+is unsupported and is not a language-pack compatibility requirement. This does
+not change normal battery saves or the intended live language-switching behavior.
+`@empty` does work for scoped dialogue and ordinary fixed-menu text: it hides
+the wording while keeping native choices, waits, boxes, and other artwork.
+It does not skip a game event or automatically answer a prompt. Name-entry
+keyboards still require their valid interactive grid and cannot be blanked.
+
+## Checking font coverage
+
+From a source checkout configured with SDL3_ttf enhanced-text support, build
+the font checker and run it against your pack directory:
+
+```sh
+cmake --build build --target actraiser_font_coverage
+python3 tools/check_language_fonts.py --pack path/to/my-language-pack \
+  --sample 'Élise' --out font-coverage.json
+```
+
+The helper is also available with `-DAR_TESTS_ONLY=ON`, so configuring a
+ROM-free checkout does not require generated game code.
+
+This uses the same primary/ordered fallback font backend as the game, without
+opening a window, loading a ROM, or modifying the pack. `--probe` selects a
+helper built elsewhere; `--builtin-font` supplies the bundled primary font's
+path for a relocated setup. Repeated `--sample` arguments test possible player
+names or other dynamic values.
+
+The JSON report identifies missing Unicode code points by script, message ID,
+and source line, and records the tested font paths and SHA-256 hashes. Aliased
+text is checked at its literal definition. Comments, command names and placeholder
+names are not text; unresolved dynamic placeholders are listed separately.
+Exit status is 0 for complete scalar coverage, 1 for missing glyphs, and 2 for
+invalid input or an unavailable font/backend. This is separate from pack semantic
+validation and can also check reference-only regional extracts.
+
+Coverage is advisory, not proof of correct shaping, ligatures, emoji sequences,
+or layout. Layout controls, typed inline objects, and Unicode default-ignorable
+characters do not need standalone glyphs. Combining accents and ordinary spaces
+are checked. Always visually review complex scripts and real dynamic values.
+
+During play, a missing glyph logs a warning without changing dialogue progression.
+Warnings are deduplicated and capped at 64 distinct characters per active font
+stack, with one suppression notice after that. Coverage results are cached and
+checked only when text is rasterized, not on cached menu or reveal frames.
+Use the authoring report to find the corresponding source locations.
 
 ## Directory layout
 
@@ -161,6 +228,9 @@ The extractor converts native cursor resets, text-state changes, fixed delays,
 and yield/continuation points into named locked anchors. Their exact ordered
 list is part of the semantic route contract. Validation rejects a pack that
 adds, removes, renames, or reorders them.
+Do not place an anchor or wait between a base character and its combining
+accent, or inside another multi-codepoint character: session compilation
+rejects controls that split a Unicode grapheme.
 
 Text and authored pages around those anchors are flexible. A translation can
 have more pages than the native message, fewer pages, or be intentionally
@@ -204,6 +274,11 @@ alignment instead. Number formatting is not valid on names or icons.
 
 ## Fixed menu and report rows
 
+Report totals belong in their own explicit cell, for example
+`Resident count | {total_population:04}`. Use `|`, not a run of spaces, to
+separate editable fields. Extraction preserves this boundary from the typed
+value even when a native dictionary word contributes only one trailing space.
+
 Reports use `|` between cells, so a translated cell can contain multiple words:
 
 ```text
@@ -215,6 +290,14 @@ align labels and values with the game's artwork and selectors. Blank rows
 are deliberate. Edit the words inside a cell without adding spaces to align
 it. The speed scale has one cell per digit; its selector stays in the native
 column. Dialogue paragraphs still use word wrapping, not report columns.
+
+Enhanced Cities and Score reports measure the headings and all data rows to
+share horizontal space between columns. Unused space can accommodate a longer
+heading without making that word smaller. Gaps tighten before the table's
+shared font size is reduced; numeric values remain right-aligned in their
+columns. The original box, divider and row positions stay fixed. Report titles,
+the Master status artwork and cursor-driven menus retain their separate layout
+rules. Do not add alignment padding to translations—the renderer handles it.
 
 ## Name-entry keyboard pages
 
@@ -228,6 +311,13 @@ Moving left from the first column or right from the last column cycles to the
 adjacent page. The selector retains its logical row and moves to the opposite
 edge. The renderer reserves an arrow gutter before every key, so variable-width
 letters do not overlap the authentic selection arrow.
+
+Names support up to eight Unicode grapheme clusters. `{master_name}` uses the
+accepted Unicode spelling in later enhanced dialogue, independently of which
+pack is selected. Native rendering keeps the original keyboard-position
+fallback spelling. Unicode is preserved in a separate `.arname` save companion,
+not in the ROM-compatible SRAM name field; see
+[Unicode name persistence](save-format.md#unicode-player-names-and-emulator-interchange).
 
 Use one Unicode grapheme per position. A precomposed letter such as `é` is one
 key; an emoji or a base letter plus combining marks is also one key when it is
@@ -294,6 +384,17 @@ Version 1 rejects rather than truncates content above these limits:
 
 Native locked delays are part of the generated control contract and do not
 consume the author-wait budget.
+
+The scoped Sky Palace/simulation runtime has a smaller presentation limit:
+**16,384 bytes per resolved dialogue**, including substituted values and one
+separator per page. This is a whole-message budget even when pages clear the
+box. A new over-budget invocation uses native text; switching an active message
+to an over-budget candidate keeps the prior selection. Simultaneous menu text
+shares the frame buffer, and a rendered window must also fit the backend's
+4,096-pixel height limit. Those later capacity/layout failures use the native
+fallback described above rather than silently truncating text or leaving
+invisible authored prompts. These are runtime limits, not a claim that every
+pack passing the portable format validator will fit every layout/font setting.
 
 ## Tooling
 

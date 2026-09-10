@@ -1320,6 +1320,13 @@ static int AppBoot_CreateVideo(AppBoot *app) {
   return -1;
 }
 
+static bool PrepareLocalizedFont(void *context,
+                                 const ArTextPresentationFont *font,
+                                 char *error, size_t error_capacity) {
+  return ArLocalizedTextPresenter_PrepareFont(context, font, error,
+                                              error_capacity);
+}
+
 /* Overlay, world map, diorama manifest, the injected overlay hooks (layer editor,
  * manual), input, and music. Injection rather than direct calls is what keeps
  * settings_overlay.c testable with no renderer at all -- see settings_overlay.h. */
@@ -1327,6 +1334,13 @@ static void AppBoot_InstallSubsystems(AppBoot *app) {
   static ArTextBackend localized_text_backend;
   ArSdlTextBackend_Init(&localized_text_backend);
   ArLocalizedTextPresenter_SetBackend(&localized_text_backend);
+  const ArTextPresentationHost text_host = {
+      .struct_size = sizeof(text_host),
+      .abi_version = AR_TEXT_PRESENTATION_ABI_VERSION,
+      .context = &g_render_device,
+      .prepare_font = PrepareLocalizedFont,
+  };
+  ActRaiserLocalizationRuntime_SetPresentationHost(&text_host);
   if (!SettingsOverlay_Init(&g_render_device, g_window,
                             app->rom_data, app->rom_size))
     Die("font atlas creation for settings overlay failed");
@@ -1537,27 +1551,18 @@ static void AppBoot_StartGame(AppBoot *app) {
         "audio buffer or sample-rate setting before launching again.");
   }
 
-  /* AR_LOADSTATE=<slot>: load a savestate at boot (before the main loop), so a
-   * headless/instrumented run can start from a captured moment instead of
-   * replaying from power-on. Runs a few frames first so the game reaches a
-   * stable frame boundary, then loads — matches the F7 hotkey path. */
+  /* Do not silently run a debug replay from power-on when its requested start
+   * state cannot be restored. Runner snapshots omit the recompiled CPU and
+   * suspended game continuation; even a native-font restore is unsafe. */
   { const char *ls = getenv("AR_LOADSTATE");
     if (ls && ls[0]) {
-      int slot = atoi(ls);
-      for (int i = 0; i < 4 && !SessionFatal_Requested(); i++) {
-        RtlRunFrame(0);
-        OracleTrace_CompleteTick();
-      }
-      if (!SessionFatal_Requested()) {
-        RtlSaveLoad(kSaveLoad_Load, slot);
-        FrameSlot_ResetActionEffects();
-        ActRaiserActionBg_Reset();
-        fprintf(stderr, "[loadstate] loaded slot %d at boot\n", slot);
-      }
+      Die("AR_LOADSTATE is unsupported: debug snapshots do not restore "
+          "recompiled game execution. No snapshot was loaded. Unset "
+          "AR_LOADSTATE and use a battery save with an input recording.");
     } }
   /* Canonical replay identity is defined by the state that will execute its
-   * first recorded runner tick, so validate/write the header only after the
-   * optional boot savestate has replaced the power-on state. */
+   * first recorded runner tick. Unsupported boot restores fail before a
+   * misleading replay identity can be validated or written. */
   if (!InputReplay_BeginSession(RtlGameRunner(), RtlGameIdentifier()))
     Die(InputReplay_LastError());
 }
@@ -2248,6 +2253,7 @@ static int AppShutdown(AppBoot *app, char **argv) {
   SimRenderMetadata_TraceClose();
   ActRaiserActionBg_Shutdown();
   ActRaiserLocalizationRuntime_Shutdown();
+  ActRaiserLocalizationRuntime_SetPresentationHost(NULL);
 
   /* Stop the sole audio producer before reading observer-owned capture state
    * or removing subscriptions. The run directory remains live for reports. */

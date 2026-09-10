@@ -8,15 +8,46 @@
 #include "render/text_cell_composite.h"
 #include "deterministic_hash.h"
 
-enum { kSurfaceCacheCapacity = 128, kFontSizeCacheCapacity = 8 };
+enum {
+  kSurfaceCacheCapacity = 128, kFontSizeCacheCapacity = 8,
+  kReportPlanCapacity = 8, kReportMeasureExtent = 4096,
+};
+
+_Static_assert(kSurfaceCacheCapacity >= kArLocalizedPreparedTextCapacity,
+               "a prepared frame must fit without evicting its own text surfaces");
+
+typedef struct ReportPlan {
+  ArTextCacheKey key;
+  ArLocalizationTextLayoutKind layout;
+  ArTextCellRegion region;
+  ArTextTableColumns columns;
+  int font_pixels;
+  bool valid, fits;
+} ReportPlan;
+
+typedef struct PendingFont {
+  ArTextBackendInstance instance;
+  ArTextSurfaceCache cache;
+  char stack[kArLocalizationFrameFontStackCapacity];
+  char path[kArLocalizationFrameFontPathCapacity];
+  char fallbacks[kArTextPresentationMaximumFallbackFonts]
+                [kArLocalizationFrameFontPathCapacity];
+  size_t fallback_count;
+  uint64_t revision, backend_revision;
+} PendingFont;
 
 typedef struct LocalizedTextPresenterState {
   ArTextBackend backend;
+  uint64_t backend_revision, active_backend_revision;
   ArTextBackendInstance instance;
   ArTextSurfaceCache cache;
   bool cache_initialized;
   char active_stack[kArLocalizationFrameFontStackCapacity];
   char active_path[kArLocalizationFrameFontPathCapacity];
+  char active_fallbacks[kArTextPresentationMaximumFallbackFonts]
+                       [kArLocalizationFrameFontPathCapacity];
+  size_t active_fallback_count;
+  PendingFont pending;
   uint64_t active_revision;
   ArRenderTexture name_cursor;
   uint32_t name_cursor_argb[kArLocalizationFrameNameCursorPixels];
@@ -26,17 +57,22 @@ typedef struct LocalizedTextPresenterState {
   ArRenderRectI artwork_ink[kArLocalizationArtwork_Count];
   uint64_t reported_errors[32];
   unsigned next_reported_error;
+  ReportPlan reports[kReportPlanCapacity];
+  unsigned next_report;
 } LocalizedTextPresenterState;
 
 static LocalizedTextPresenterState s_presenter;
 
 static void ReportOnce(const char *operation, const char *detail) {
-  uint64_t key = DeterministicHash_Fnv1a64(
-      DETERMINISTIC_HASH_FNV1A64_OFFSET, operation, strlen(operation));
-  if (detail) key = DeterministicHash_Fnv1a64(key, detail, strlen(detail));
-  if (!key) key = 1;
+  uint64_t key = DeterministicHash_Fnv1a64(DETERMINISTIC_HASH_FNV1A64_OFFSET,
+                                           operation, strlen(operation));
+  if (detail)
+    key = DeterministicHash_Fnv1a64(key, detail, strlen(detail));
+  if (!key)
+    key = 1;
   for (size_t i = 0; i < 32; ++i)
-    if (s_presenter.reported_errors[i] == key) return;
+    if (s_presenter.reported_errors[i] == key)
+      return;
   s_presenter.reported_errors[s_presenter.next_reported_error++ % 32] = key;
   fprintf(stderr, "[localized-text] %s%s%s; native text retained\n",
           operation, detail && detail[0] ? ": " : "",
@@ -44,8 +80,12 @@ static void ReportOnce(const char *operation, const char *detail) {
 }
 
 void ArLocalizedTextPresenter_SetBackend(const ArTextBackend *backend) {
-  s_presenter.backend = ArTextBackend_IsReady(backend)
-      ? *backend : (ArTextBackend){0};
+  const ArTextBackend selected =
+      ArTextBackend_IsReady(backend) ? *backend : (ArTextBackend){0};
+  if (selected.ops != s_presenter.backend.ops ||
+      selected.context != s_presenter.backend.context)
+    ++s_presenter.backend_revision;
+  s_presenter.backend = selected;
 }
 
 static void DestroyResources(ArRenderDevice *device) {
@@ -65,8 +105,12 @@ static void DestroyResources(ArRenderDevice *device) {
   s_presenter.active_stack[0] = 0;
   s_presenter.active_path[0] = 0;
   s_presenter.active_revision = 0;
+  s_presenter.active_fallback_count = 0;
+  memset(s_presenter.active_fallbacks, 0, sizeof(s_presenter.active_fallbacks));
   memset(s_presenter.reported_errors, 0, sizeof(s_presenter.reported_errors));
   s_presenter.next_reported_error = 0;
+  memset(s_presenter.reports, 0, sizeof(s_presenter.reports));
+  s_presenter.next_report = 0;
 }
 
 static void ReportRequestFailure(const ArLocalizationTextSnapshot *snapshot,
@@ -83,48 +127,177 @@ static void ReportRequestFailure(const ArLocalizationTextSnapshot *snapshot,
   ReportOnce("text surface acquisition failed", diagnostic);
 }
 
-static bool ActivateFont(ArRenderDevice *device,
-                         const ArLocalizationFrame *frame) {
-  if (!ArTextBackend_IsReady(&s_presenter.backend) || !frame->font_revision ||
-      !frame->font_stack_id[0] || !frame->primary_font_path[0])
+static bool FontError(char *error, size_t capacity, const char *message) {
+  if (error && capacity)
+    snprintf(error, capacity, "%s", message);
+  return false;
+}
+
+static void DestroyPendingFont(ArRenderDevice *device) {
+  ArTextSurfaceCache_Destroy(&s_presenter.pending.cache, device);
+  ArTextBackendInstance_Destroy(&s_presenter.pending.instance);
+  memset(&s_presenter.pending, 0, sizeof(s_presenter.pending));
+}
+
+static bool ActiveFontMatches(ArRenderDevice *device,
+                              const ArTextPresentationFont *font) {
+  if (!s_presenter.cache_initialized || s_presenter.cache.device != device ||
+      s_presenter.active_backend_revision != s_presenter.backend_revision ||
+      s_presenter.active_revision != font->revision ||
+      s_presenter.active_fallback_count != font->fallback_count ||
+      strcmp(s_presenter.active_stack, font->stack_id) ||
+      strcmp(s_presenter.active_path, font->primary_path))
     return false;
-  if (s_presenter.cache_initialized &&
-      s_presenter.active_revision == frame->font_revision &&
-      !strcmp(s_presenter.active_stack, frame->font_stack_id) &&
-      !strcmp(s_presenter.active_path, frame->primary_font_path))
+  for (size_t i = 0; i < font->fallback_count; ++i)
+    if (strcmp(font->fallback_paths[i], s_presenter.active_fallbacks[i]))
+      return false;
+  return true;
+}
+
+bool ArLocalizedTextPresenter_PrepareFont(ArRenderDevice *device,
+                                          const ArTextPresentationFont *font,
+                                          char *error, size_t error_capacity) {
+  if (error && error_capacity)
+    error[0] = 0;
+  if (!ArRenderDevice_IsReady(device) ||
+      !ArTextBackend_IsReady(&s_presenter.backend))
+    return FontError(error, error_capacity,
+                     "enhanced text backend is unavailable");
+  if (!font ||
+      font->struct_size < offsetof(ArTextPresentationFont, fallback_count) +
+                              sizeof(font->fallback_count) ||
+      font->abi_version != AR_TEXT_PRESENTATION_ABI_VERSION ||
+      !font->revision || !font->stack_id || !font->stack_id[0] ||
+      !font->primary_path || !font->primary_path[0] ||
+      strlen(font->stack_id) >= sizeof(s_presenter.active_stack) ||
+      strlen(font->primary_path) >= sizeof(s_presenter.active_path) ||
+      font->fallback_count > kArTextPresentationMaximumFallbackFonts ||
+      (font->fallback_count && !font->fallback_paths))
+    return FontError(error, error_capacity, "invalid enhanced font selection");
+  for (size_t i = 0; i < font->fallback_count; ++i) {
+    if (!font->fallback_paths[i] || !font->fallback_paths[i][0] ||
+        strlen(font->fallback_paths[i]) >=
+            sizeof(s_presenter.active_fallbacks[i]))
+      return FontError(error, error_capacity, "invalid fallback font path");
+  }
+  if (ActiveFontMatches(device, font))
+    return true;
+  PendingFont *pending = &s_presenter.pending;
+  bool same_pending =
+      pending->cache.device == device &&
+      pending->backend_revision == s_presenter.backend_revision &&
+      pending->revision == font->revision &&
+      pending->fallback_count == font->fallback_count &&
+      !strcmp(pending->stack, font->stack_id) &&
+      !strcmp(pending->path, font->primary_path);
+  for (size_t i = 0; same_pending && i < font->fallback_count; ++i)
+    same_pending = !strcmp(pending->fallbacks[i], font->fallback_paths[i]);
+  if (same_pending)
     return true;
   const ArTextBackendConfig config = {
       .struct_size = sizeof(config),
       .abi_version = AR_TEXT_BACKEND_CONFIG_ABI_VERSION,
-      .font_stack_id = frame->font_stack_id,
-      .primary_font_path = frame->primary_font_path,
-      .font_revision = frame->font_revision,
+      .font_stack_id = font->stack_id,
+      .primary_font_path = font->primary_path,
+      .font_revision = font->revision,
       .cached_size_capacity = kFontSizeCacheCapacity,
+      .fallback_font_paths = font->fallback_paths,
+      .fallback_font_count = font->fallback_count,
   };
   ArTextBackendInstance instance = {0};
-  char error[kArTextRasterErrorCapacity] = {0};
-  if (!ArTextBackendInstance_Create(
-          &instance, &s_presenter.backend, &config,
-          error, sizeof(error))) {
-    ReportOnce("font initialization failed", error);
+  if (!ArTextBackendInstance_Create(&instance, &s_presenter.backend, &config,
+                                    error, error_capacity))
     return false;
-  }
   ArTextSurfaceCache cache = {0};
   if (!ArTextSurfaceCache_Init(&cache, kSurfaceCacheCapacity)) {
     ArTextBackendInstance_Destroy(&instance);
-    ReportOnce("text cache initialization failed", NULL);
+    return FontError(error, error_capacity, "text cache initialization failed");
+  }
+  /* Backend construction may be lazy, opening fonts only for requested sizes.
+   * Exercise shaping, raster allocation, texture creation and upload before
+   * advertising readiness to the game. Keep the warmed font/cache on success.
+   */
+  const ArTextRasterRequest probe = {
+      .struct_size = sizeof(probe),
+      .abi_version = AR_TEXT_RASTER_REQUEST_ABI_VERSION,
+      .utf8 = "Ag",
+      .utf8_bytes = 2,
+      .font_stack_id = font->stack_id,
+      .font_stack_id_bytes = strlen(font->stack_id),
+      .source_revision = 1,
+      .font_revision = font->revision,
+      .style_id = kArTextStyle_RetailBlueWhiteBands,
+      .flags = kArTextRasterFlag_IncludeRevealClusters,
+      .font_pixels = 24,
+      .minimum_font_pixels = 24,
+      .maximum_width = 128,
+      .maximum_height = 128,
+      .filter = kArRenderFilter_Nearest,
+  };
+  ArTextSurface surface;
+  if (!ArTextSurfaceCache_Acquire(&cache, device,
+                                  ArTextBackendInstance_Get(&instance), &probe,
+                                  &surface, error, error_capacity)) {
+    ArTextSurfaceCache_Destroy(&cache, device);
+    ArTextBackendInstance_Destroy(&instance);
     return false;
   }
-  DestroyResources(device);
-  s_presenter.instance = instance;
-  s_presenter.cache = cache;
-  s_presenter.cache_initialized = true;
-  snprintf(s_presenter.active_stack, sizeof(s_presenter.active_stack), "%s",
-           frame->font_stack_id);
-  snprintf(s_presenter.active_path, sizeof(s_presenter.active_path), "%s",
-           frame->primary_font_path);
-  s_presenter.active_revision = frame->font_revision;
+  /* A source can still fail semantic validation after this readiness check.
+   * Keep the active font and all borrowed surfaces intact until a frame with
+   * the approved identity arrives. At most one candidate is retained. */
+  DestroyPendingFont(device);
+  pending->instance = instance;
+  pending->cache = cache;
+  snprintf(pending->stack, sizeof(pending->stack), "%s", font->stack_id);
+  snprintf(pending->path, sizeof(pending->path), "%s", font->primary_path);
+  pending->revision = font->revision;
+  pending->backend_revision = s_presenter.backend_revision;
+  pending->fallback_count = font->fallback_count;
+  for (size_t i = 0; i < font->fallback_count; ++i)
+    snprintf(pending->fallbacks[i], sizeof(pending->fallbacks[i]), "%s",
+             font->fallback_paths[i]);
   return true;
+}
+
+static bool ActivateFont(ArRenderDevice *device,
+                         const ArLocalizationFrame *frame) {
+  if (frame->fallback_font_count > kArTextPresentationMaximumFallbackFonts)
+    return false;
+  const char *fallbacks[kArTextPresentationMaximumFallbackFonts];
+  for (size_t i = 0; i < frame->fallback_font_count; ++i)
+    fallbacks[i] = frame->fallback_font_paths[i];
+  const ArTextPresentationFont font = {
+      .struct_size = sizeof(font),
+      .abi_version = AR_TEXT_PRESENTATION_ABI_VERSION,
+      .stack_id = frame->font_stack_id,
+      .primary_path = frame->primary_font_path,
+      .revision = frame->font_revision,
+      .fallback_paths = fallbacks,
+      .fallback_count = frame->fallback_font_count,
+  };
+  char error[kArTextRasterErrorCapacity] = {0};
+  if (ArLocalizedTextPresenter_PrepareFont(device, &font, error,
+                                           sizeof(error))) {
+    if (!ActiveFontMatches(device, &font)) {
+      PendingFont *pending = &s_presenter.pending;
+      DestroyResources(device);
+      s_presenter.instance = pending->instance;
+      s_presenter.cache = pending->cache;
+      s_presenter.cache_initialized = true;
+      memcpy(s_presenter.active_stack, pending->stack, sizeof(pending->stack));
+      memcpy(s_presenter.active_path, pending->path, sizeof(pending->path));
+      memcpy(s_presenter.active_fallbacks, pending->fallbacks,
+             sizeof(pending->fallbacks));
+      s_presenter.active_fallback_count = pending->fallback_count;
+      s_presenter.active_revision = pending->revision;
+      s_presenter.active_backend_revision = pending->backend_revision;
+      memset(pending, 0,
+             sizeof(*pending)); /* Ownership moved, not duplicated. */
+    }
+    return true;
+  }
+  ReportOnce("font initialization failed", error);
+  return false;
 }
 
 static bool RectangleContains(ArRenderRectI outer, ArRenderRectI inner) {
@@ -516,12 +689,173 @@ static bool ParseTableFields(const char *utf8, size_t utf8_bytes,
   return *field_count != 0;
 }
 
+static bool FieldHasObject(const ArLocalizationFrame *frame,
+                           const ArLocalizationTextSnapshot *snapshot,
+                           const TableField *field) {
+  for (uint8_t i = 0; i < snapshot->inline_object_count; ++i) {
+    const uint32_t end = frame->inline_objects[snapshot->inline_object_offset + i].end_utf8_byte;
+    if (end > field->utf8_offset && end <= field->utf8_offset + field->utf8_bytes)
+      return true;
+  }
+  return false;
+}
+
+static bool TableRequest(const ArLocalizationFrame *frame,
+                         const ArLocalizationTextSnapshot *snapshot,
+                         const char *utf8, const TableField *field,
+                         int base_pixels, int minimum_base_pixels,
+                         int width, int height, bool crop_vertical,
+                         ArTextRasterRequest *request) {
+  *request = (ArTextRasterRequest){
+      .struct_size = sizeof(*request), .abi_version = AR_TEXT_RASTER_REQUEST_ABI_VERSION,
+      .utf8 = utf8 + field->utf8_offset, .utf8_bytes = field->utf8_bytes,
+      .font_stack_id = frame->font_stack_id,
+      .font_stack_id_bytes = strlen(frame->font_stack_id),
+      .source_revision = snapshot->source_revision, .font_revision = frame->font_revision,
+      .style_id = kArTextStyle_RetailBlueWhiteBands,
+      .flags = kArTextRasterFlag_IncludeRevealClusters |
+          (crop_vertical ? kArTextRasterFlag_CropVerticalWhitespace : 0u) |
+          (FieldHasObject(frame, snapshot, field) ? 0u : kArTextRasterFlag_CropHorizontalWhitespace),
+      .direction = snapshot->direction,
+      .alignment = snapshot->direction == kArTextDirection_RightToLeft
+          ? kArTextHorizontalAlignment_Trailing : kArTextHorizontalAlignment_Leading,
+      .font_pixels = base_pixels, .minimum_font_pixels = minimum_base_pixels,
+      .maximum_width = width, .maximum_height = height,
+      .filter = kArRenderFilter_Nearest,
+      .language_bcp47 = frame->locale, .language_bcp47_bytes = strlen(frame->locale),
+  };
+  return ArEnhancedTextSettings_Apply(
+      &frame->settings, base_pixels, minimum_base_pixels, request);
+}
+
+static unsigned ReportColumnCount(ArLocalizationTextLayoutKind layout) {
+  return layout == kArLocalizationTextLayout_StatusCities ? 5
+      : layout == kArLocalizationTextLayout_StatusScore ? 3 : 0;
+}
+
+static bool IsReportColumn(const TableField *field, unsigned columns) {
+  return columns && field->field_count == columns &&
+      (field->logical_line == 3 || field->logical_line >= 7);
+}
+
+/* Measure at one shared size. Oversized cells are not individually shrunk:
+ * first try sharing whitespace, then let the caller fit the whole table.
+ * The same requests are reused for drawing, so a successful first pass does
+ * not create a second set of textures. No cache-owned pointers are retained. */
+static bool MeasureReport(
+    ArRenderDevice *device, const ArLocalizationFrame *frame,
+    const ArLocalizationTextSnapshot *snapshot, const ArTextCellRecord *record,
+    const char *utf8, const TableField *fields, size_t field_count,
+    ArRenderRectI bounds, int font_pixels, ReportPlan *plan, bool *fits) {
+  const unsigned columns = ReportColumnCount(snapshot->layout);
+  int widths[kArTextTableMaximumColumns] = {1, 1, 1, 1, 1};
+  int preferred[kArTextTableMaximumColumns] = {0};
+  *fits = false;
+  bool height_fits = true;
+  for (size_t i = 0; i < field_count; ++i) {
+    const TableField *field = &fields[i];
+    if (!IsReportColumn(field, columns)) continue;
+    if (field->logical_line >= record->region.rows) return false;
+    ArTextRasterRequest request;
+    if (!TableRequest(frame, snapshot, utf8, field, 1, 1,
+                      kReportMeasureExtent, kReportMeasureExtent, false, &request))
+      return false;
+    request.font_pixels = request.minimum_font_pixels = font_pixels;
+    ArTextSurface surface;
+    char error[kArTextRasterErrorCapacity] = {0};
+    if (!ArTextSurfaceCache_Acquire(&s_presenter.cache, device,
+            ArTextBackendInstance_Get(&s_presenter.instance),
+            &request, &surface, error, sizeof(error))) {
+      ReportRequestFailure(snapshot, &request, error);
+      return false;
+    }
+    int width = surface.width;
+    if (FieldHasObject(frame, snapshot, field)) {
+      const int art_width = 2 * (bounds.w / record->region.columns);
+      if (art_width > width) width = art_width;
+    }
+    if (width > widths[field->field_index]) widths[field->field_index] = width;
+    const unsigned end_row = field->logical_line + 2 < record->region.rows
+        ? field->logical_line + 2 : record->region.rows;
+    const int height = bounds.h * (int)end_row / record->region.rows -
+        bounds.h * (int)field->logical_line / record->region.rows;
+    if (surface.height > height) height_fits = false;
+  }
+  if (!height_fits) return true;
+  for (unsigned i = 0; i < columns; ++i) {
+    unsigned column, next_column;
+    if (!ArLocalizedTextLayout_TableColumns(snapshot->layout, 3, i, columns,
+                                            &column, &next_column))
+      return false;
+    preferred[i] = bounds.w * (int)next_column / record->region.columns -
+        bounds.w * (int)column / record->region.columns;
+  }
+  int unit = bounds.w / record->region.columns;
+  if (unit < 1) unit = 1;
+  int minimum_gap = unit / 4;
+  if (minimum_gap < 1) minimum_gap = 1;
+  *fits = ArLocalizedTextLayout_FitColumns(
+      widths, preferred, columns, bounds.w, unit, minimum_gap, &plan->columns);
+  if (*fits) plan->font_pixels = font_pixels;
+  return true;
+}
+
+static bool ResolveReportPlan(
+    ArRenderDevice *device, const ArLocalizationFrame *frame,
+    const ArLocalizationTextSnapshot *snapshot, const ArTextCellRecord *record,
+    const char *utf8, size_t utf8_bytes, const TableField *fields, size_t field_count,
+    ArRenderRectI bounds, int base_pixels, int minimum_base_pixels, ReportPlan *out) {
+  const TableField whole = {.utf8_bytes = utf8_bytes};
+  ArTextRasterRequest request;
+  if (!TableRequest(frame, snapshot, utf8, &whole, base_pixels, minimum_base_pixels,
+                    bounds.w, bounds.h, false, &request))
+    return false;
+  const ArTextCacheKey key = ArTextSurfaceCache_MakeKey(
+      ArTextBackendInstance_Get(&s_presenter.instance), &request);
+  for (unsigned i = 0; i < kReportPlanCapacity; ++i) {
+    const ReportPlan *cached = &s_presenter.reports[i];
+    if (cached->valid && cached->layout == snapshot->layout &&
+        cached->region.columns == record->region.columns &&
+        cached->region.rows == record->region.rows &&
+        ArTextCacheKey_Equals(cached->key, key)) {
+      *out = *cached;
+      return cached->fits;
+    }
+  }
+  ReportPlan result = {.key = key, .layout = snapshot->layout,
+                       .region = record->region, .valid = true};
+  bool fits;
+  if (!MeasureReport(device, frame, snapshot, record, utf8, fields, field_count,
+                      bounds, request.font_pixels, &result, &fits))
+    return false; /* Backend/upload errors remain retryable. */
+  result.fits = fits;
+  if (!fits) {
+    int low = request.minimum_font_pixels, high = request.font_pixels - 1;
+    while (low <= high) {
+      const int candidate = low + (high - low) / 2;
+      ReportPlan attempt = result;
+      if (!MeasureReport(device, frame, snapshot, record, utf8, fields, field_count,
+                          bounds, candidate, &attempt, &fits))
+        return false;
+      if (fits) {
+        result = attempt;
+        result.fits = true;
+        low = candidate + 1;
+      } else high = candidate - 1;
+    }
+  }
+  s_presenter.reports[s_presenter.next_report++ % kReportPlanCapacity] = result;
+  *out = result;
+  if (!result.fits)
+    ReportRequestFailure(snapshot, &request, "report columns cannot fit at minimum font size");
+  return result.fits;
+}
 
 static bool PrepareTable(
     ArRenderDevice *device, const ArLocalizationFrame *frame,
     const ArLocalizationTextSnapshot *snapshot,
     const ArTextCellRecord *record, const char *utf8, size_t utf8_bytes,
-    ArRenderRectI bounds, ArLocalizedPreparedFrame *prepared) {
+    ArRenderRectI bounds, const ReportPlan *report, ArLocalizedPreparedFrame *prepared) {
   TableField fields[kMaximumTableFields];
   size_t field_count = 0;
   unsigned logical_lines = 0;
@@ -541,6 +875,8 @@ static bool PrepareTable(
       ((int)record->region.rows * 8);
   int minimum_base_pixels = base_pixels * 2 / 3;
   if (minimum_base_pixels < 1) minimum_base_pixels = 1;
+  const unsigned report_columns = ReportColumnCount(snapshot->layout);
+  if (report_columns && (!report || !report->fits)) return false;
   const uint8_t initial_text_count = prepared->text_count;
   const uint8_t initial_object_count = prepared->inline_object_count;
   ArRenderRectI speed_labels[2] = {{0}, {0}};
@@ -571,6 +907,11 @@ static bool PrepareTable(
         bounds.w * (int)column / (int)record->region.columns;
     int right = bounds.x +
         bounds.w * (int)next_column / (int)record->region.columns;
+    const bool report_column = IsReportColumn(field, report_columns);
+    if (report_column) {
+      left = bounds.x + report->columns.left[field->field_index];
+      right = bounds.x + report->columns.right[field->field_index];
+    }
     const bool speed_label_row =
         snapshot->layout == kArLocalizationTextLayout_MessageSpeed &&
         field->logical_line == 2 && field->field_count == 3;
@@ -601,50 +942,15 @@ static bool PrepareTable(
       continue;
     }
 
-    bool has_inline_object = false;
-    for (uint8_t object_index = 0;
-         object_index < snapshot->inline_object_count; ++object_index) {
-      const ArLocalizationInlineObjectSnapshot *object =
-          &frame->inline_objects[
-              snapshot->inline_object_offset + object_index];
-      if (object->end_utf8_byte > field->utf8_offset &&
-          object->end_utf8_byte <= field->utf8_offset + field->utf8_bytes) {
-        has_inline_object = true;
-        break;
-      }
-    }
-
-    ArTextRasterRequest request = {
-        .struct_size = sizeof(request),
-        .abi_version = AR_TEXT_RASTER_REQUEST_ABI_VERSION,
-        .utf8 = utf8 + field->utf8_offset,
-        .utf8_bytes = field->utf8_bytes,
-        .font_stack_id = frame->font_stack_id,
-        .font_stack_id_bytes = strlen(frame->font_stack_id),
-        .source_revision = snapshot->source_revision,
-        .font_revision = frame->font_revision,
-        .style_id = kArTextStyle_RetailBlueWhiteBands,
-        .flags = kArTextRasterFlag_IncludeRevealClusters |
-            ((snapshot->layout == kArLocalizationTextLayout_FixedRows &&
-              record->region.rows <= 2)
-                 ? kArTextRasterFlag_CropVerticalWhitespace : 0u) |
-            (has_inline_object
-                 ? 0u : kArTextRasterFlag_CropHorizontalWhitespace),
-        .direction = snapshot->direction,
-        .alignment = snapshot->direction == kArTextDirection_RightToLeft
-            ? kArTextHorizontalAlignment_Trailing
-            : kArTextHorizontalAlignment_Leading,
-        .font_pixels = base_pixels,
-        .minimum_font_pixels = minimum_base_pixels,
-        .maximum_width = right - left,
-        .maximum_height = bottom - top,
-        .filter = kArRenderFilter_Nearest,
-        .language_bcp47 = frame->locale,
-        .language_bcp47_bytes = strlen(frame->locale),
-    };
-    if (!ArEnhancedTextSettings_Apply(
-            &frame->settings, base_pixels, minimum_base_pixels, &request))
+    ArTextRasterRequest request;
+    if (!TableRequest(frame, snapshot, utf8, field, base_pixels, minimum_base_pixels,
+          report_column ? kReportMeasureExtent : right - left,
+          report_column ? kReportMeasureExtent : bottom - top,
+          snapshot->layout == kArLocalizationTextLayout_FixedRows &&
+              record->region.rows <= 2, &request))
       goto fail;
+    if (report_column)
+      request.font_pixels = request.minimum_font_pixels = report->font_pixels;
     ArTextSurface surface;
     char error[kArTextRasterErrorCapacity] = {0};
     if (!ArTextSurfaceCache_Acquire(
@@ -660,6 +966,7 @@ static bool PrepareTable(
       ReportRequestFailure(snapshot, &request, diagnostic);
       goto fail;
     }
+    if (surface.width > right - left || surface.height > bottom - top) goto fail;
     const int x = alignment == kArTextHorizontalAlignment_Center
         ? left + (right - left - surface.width) / 2
         : alignment == kArTextHorizontalAlignment_Trailing
@@ -786,6 +1093,37 @@ fail:
   return false;
 }
 
+static bool PrepareIndicators(
+    ArRenderDevice *device, const ArLocalizationFrame *frame, uint32_t surface_id,
+    unsigned map_width, unsigned map_height, uint16_t hscroll, uint16_t vscroll,
+    unsigned visible_width, unsigned visible_height,
+    const HudPresentationChunk *chunks, size_t chunk_count,
+    ArLocalizedPreparedFrame *prepared) {
+  const uint8_t first = prepared->indicator_count;
+  for (uint8_t index = 0; index < frame->indicator_count; ++index) {
+    const ArLocalizationIndicatorSnapshot *indicator = &frame->indicators[index];
+    if (indicator->surface_id != surface_id) continue;
+    if (prepared->indicator_count >= kArLocalizationFrameIndicatorCapacity)
+      goto failed;
+    ArRenderRectI projected[kArTextCellMaximumProjectedRegions];
+    const size_t count = ArTextCellComposite_ProjectRegion(
+        indicator->region, map_width, map_height, hscroll, vscroll,
+        visible_width, visible_height, projected);
+    ArRenderRectI destination;
+    if (count != 1u ||
+        !ProjectTextDestination(chunks, chunk_count, projected[0], &destination))
+      goto failed;
+    ArRenderTexture texture;
+    if (!PrepareArtwork(device, frame, kArLocalizationArtwork_Continue, &texture)) goto failed;
+    prepared->indicators[prepared->indicator_count++] =
+        (ArLocalizedPreparedIndicator){indicator->kind, destination, texture};
+  }
+  return true;
+failed:
+  prepared->indicator_count = first;
+  return false;
+}
+
 void ArLocalizedTextPresenter_Prepare(
     ArRenderDevice *device, const ArLocalizationFrame *frame,
     bool bg3_state_valid, uint16_t bg3_tilemap_base_words,
@@ -798,209 +1136,239 @@ void ArLocalizedTextPresenter_Prepare(
   memset(prepared, 0, sizeof(*prepared));
   if (!device || !frame ||
       frame->abi_version != AR_LOCALIZATION_FRAME_ABI_VERSION ||
-      !frame->snapshot_count || !bg3_state_valid || !chunks || !chunk_count ||
-      !ActivateFont(device, frame))
+      !frame->snapshot_count || frame->snapshot_count > kArTextCellRecordCapacity ||
+      frame->cells.count > kArTextCellRecordCapacity ||
+      frame->indicator_count > kArLocalizationFrameIndicatorCapacity ||
+      !bg3_state_valid || !chunks || !chunk_count)
     return;
+  /* Empty replacements claim cells without manufacturing a space glyph or
+   * loading a font. Decide font activation before preparing any artwork,
+   * since changing font stacks invalidates the presenter's texture cache. */
+  bool font_ready = false;
+  for (uint8_t index = 0; index < frame->snapshot_count; ++index) {
+    if (frame->snapshots[index].utf8_bytes) {
+      font_ready = ActivateFont(device, frame);
+      break;
+    }
+  }
 
-  for (uint8_t record_index = 0;
-       record_index < frame->cells.count; ++record_index) {
-    const ArTextCellRecord *record = &frame->cells.records[record_index];
-    if (record->destination.background != 3u ||
-        record->destination.screen != kArTextCellScreen_Composited ||
-        record->destination.tilemap_base_words != bg3_tilemap_base_words ||
-        record->snapshot_slot < 0 ||
-        (uint8_t)record->snapshot_slot >= frame->snapshot_count)
-      continue;
-    ArRenderRectI projected[kArTextCellMaximumProjectedRegions];
-    const size_t projected_count = ArTextCellComposite_ProjectRegion(
-        record->region, bg3_map_width_tiles, bg3_map_height_tiles,
-        bg3_hscroll, bg3_vscroll, visible_width, visible_height, projected);
-    if (projected_count != 1u ||
-        prepared->text_count >= kArLocalizedPreparedTextCapacity)
-      continue;
-    ArRenderRectI bounds;
-    if (!ProjectTextDestination(chunks, chunk_count, projected[0], &bounds) ||
-        bounds.w <= 0 || bounds.h <= 0)
-      continue;
-    const uint8_t snapshot_index = (uint8_t)record->snapshot_slot;
-    const ArLocalizationTextSnapshot *snapshot =
-        &frame->snapshots[snapshot_index];
-    size_t utf8_bytes = 0;
-    const char *utf8 = ArLocalizationFrame_GetText(
-        frame, snapshot_index, &utf8_bytes);
-    if (!utf8 || snapshot->surface_id != record->surface_id) continue;
-    ArRenderRectI masks[kArTextCellMaximumChunkPieces];
-    const size_t mask_count = BuildReplacementMasks(
-        snapshot, projected[0], bg3_map_width_tiles,
-        bg3_map_height_tiles, bg3_hscroll, bg3_vscroll,
-        visible_width, visible_height, masks);
-    if (!mask_count || mask_count == SIZE_MAX ||
-        prepared->mask_count + mask_count >
-            sizeof(prepared->masks) / sizeof(prepared->masks[0]))
-      continue;
-
-    if (snapshot->layout != kArLocalizationTextLayout_Flow &&
-        snapshot->layout != kArLocalizationTextLayout_DialogueWindow) {
-      if (!PrepareTable(device, frame, snapshot, record, utf8, utf8_bytes,
-                        bounds, prepared))
+  /* Resolve all cold report fits before retaining any frame-owned surface
+   * references. Font-size probes can evict LRU entries; they must never evict
+   * a HUD/text surface already published into this prepared frame. */
+  ReportPlan reports[kArTextCellRecordCapacity] = {0};
+  for (unsigned pass = 0; pass < 2; ++pass) {
+    for (uint8_t record_index = 0; record_index < frame->cells.count; ++record_index) {
+      const ArTextCellRecord *record = &frame->cells.records[record_index];
+      if (record->destination.background != 3u ||
+          record->destination.screen != kArTextCellScreen_Composited ||
+          record->destination.tilemap_base_words != bg3_tilemap_base_words ||
+          record->snapshot_slot < 0 || (uint8_t)record->snapshot_slot >= frame->snapshot_count)
         continue;
-      memcpy(&prepared->masks[prepared->mask_count], masks,
-             mask_count * sizeof(masks[0]));
+      if (pass == 0 && !ReportColumnCount(frame->snapshots[record->snapshot_slot].layout))
+        continue;
+      ArRenderRectI projected[kArTextCellMaximumProjectedRegions];
+      const size_t projected_count = ArTextCellComposite_ProjectRegion(
+          record->region, bg3_map_width_tiles, bg3_map_height_tiles, bg3_hscroll, bg3_vscroll,
+          visible_width, visible_height, projected);
+      if (projected_count != 1u || prepared->text_count >= kArLocalizedPreparedTextCapacity)
+        continue;
+      ArRenderRectI bounds;
+      if (!ProjectTextDestination(chunks, chunk_count, projected[0], &bounds) || bounds.w <= 0 ||
+          bounds.h <= 0)
+        continue;
+      const uint8_t snapshot_index = (uint8_t)record->snapshot_slot;
+      const ArLocalizationTextSnapshot *snapshot = &frame->snapshots[snapshot_index];
+      size_t utf8_bytes = 0;
+      const char *utf8 = ArLocalizationFrame_GetText(frame, snapshot_index, &utf8_bytes);
+      if (!utf8 || snapshot->surface_id != record->surface_id) continue;
+      if ((utf8_bytes && !font_ready) ||
+          (!utf8_bytes && (snapshot->cluster_count || snapshot->revealed_cluster_count ||
+                           snapshot->revealed_utf8_bytes || snapshot->inline_object_count)))
+        continue;
+      if (pass == 0) {
+        if (!utf8_bytes || !ReportColumnCount(snapshot->layout)) continue;
+        TableField fields[kMaximumTableFields];
+        size_t field_count = 0;
+        unsigned lines = 0;
+        if (snapshot->inline_object_offset > frame->inline_object_count ||
+            snapshot->inline_object_count >
+                frame->inline_object_count - snapshot->inline_object_offset ||
+            !ParseTableFields(utf8, utf8_bytes, fields, kMaximumTableFields, &field_count,
+                              &lines) ||
+            lines > kMaximumTableFields)
+          continue;
+        const int pixels = (snapshot->native_font_pixels * bounds.h + record->region.rows * 4) /
+                           (record->region.rows * 8);
+        const int minimum = pixels * 2 / 3 > 0 ? pixels * 2 / 3 : 1;
+        (void)ResolveReportPlan(device, frame, snapshot, record, utf8, utf8_bytes, fields,
+                                field_count, bounds, pixels, minimum, &reports[record_index]);
+        continue;
+      }
+      ArRenderRectI masks[kArTextCellMaximumChunkPieces];
+      const size_t mask_count =
+          BuildReplacementMasks(snapshot, projected[0], bg3_map_width_tiles, bg3_map_height_tiles,
+                                bg3_hscroll, bg3_vscroll, visible_width, visible_height, masks);
+      if (!mask_count || mask_count == SIZE_MAX ||
+          prepared->mask_count + mask_count > sizeof(prepared->masks) / sizeof(prepared->masks[0]))
+        continue;
+
+      if (!utf8_bytes) {
+        if (!PrepareIndicators(device, frame, record->surface_id, bg3_map_width_tiles,
+                          bg3_map_height_tiles, bg3_hscroll, bg3_vscroll,
+                          visible_width, visible_height, chunks, chunk_count, prepared))
+          continue;
+        memcpy(&prepared->masks[prepared->mask_count], masks, mask_count * sizeof(masks[0]));
+        prepared->mask_count += mask_count;
+        if (snapshot->layout == kArLocalizationTextLayout_DialogueWindow &&
+            snapshot->surface_id == frame->dialogue_surface_id)
+          prepared->ready_dialogue_ticket = frame->dialogue_ticket;
+        continue;
+      }
+
+      const bool single_line = snapshot->layout == kArLocalizationTextLayout_SingleLineLabel;
+      if (!single_line && snapshot->layout != kArLocalizationTextLayout_Flow &&
+          snapshot->layout != kArLocalizationTextLayout_DialogueWindow) {
+        if (!PrepareTable(device, frame, snapshot, record, utf8, utf8_bytes, bounds,
+                          &reports[record_index], prepared))
+          continue;
+        memcpy(&prepared->masks[prepared->mask_count], masks, mask_count * sizeof(masks[0]));
+        prepared->mask_count += mask_count;
+        continue;
+      }
+
+      const bool scrolling = snapshot->layout == kArLocalizationTextLayout_DialogueWindow;
+      ArRenderRectI viewport = bounds;
+      if (scrolling) {
+        /* The claim includes a footer cell for the continuation marker. Reserve
+         * it even while typing so appearing/disappearing arrows never reflow text. */
+        int footer = bounds.h / record->region.rows;
+        if (footer < 1) footer = 1;
+        viewport.h -= footer;
+        if (viewport.h <= 0) continue;
+      }
+      const int base_pixels =
+          (snapshot->native_font_pixels * bounds.h + (int)record->region.rows * 4) /
+          ((int)record->region.rows * 8);
+      /* A one-tile label has a hard vertical limit, including accents and
+       * low-resolution raster quantization. Permit extra fitting there. */
+      int minimum_base_pixels = single_line ? base_pixels / 2 : base_pixels * 2 / 3;
+      if (minimum_base_pixels < 1) minimum_base_pixels = 1;
+      ArTextRasterRequest request = {
+          .struct_size = sizeof(request),
+          .abi_version = AR_TEXT_RASTER_REQUEST_ABI_VERSION,
+          .utf8 = utf8,
+          .utf8_bytes = utf8_bytes,
+          .font_stack_id = frame->font_stack_id,
+          .font_stack_id_bytes = strlen(frame->font_stack_id),
+          .source_revision = snapshot->source_revision,
+          .font_revision = frame->font_revision,
+          .style_id = kArTextStyle_RetailBlueWhiteBands,
+          .flags = kArTextRasterFlag_WrapWords | kArTextRasterFlag_PreserveHardBreaks |
+                   kArTextRasterFlag_CropHorizontalWhitespace |
+                   kArTextRasterFlag_IncludeRevealClusters,
+          .direction = snapshot->direction,
+          .alignment = snapshot->direction == kArTextDirection_RightToLeft
+                           ? kArTextHorizontalAlignment_Trailing
+                           : kArTextHorizontalAlignment_Leading,
+          .font_pixels = base_pixels,
+          .minimum_font_pixels = minimum_base_pixels,
+          .maximum_width = bounds.w,
+          .maximum_height = scrolling ? 4096 : bounds.h,
+          .filter = kArRenderFilter_Nearest,
+          .language_bcp47 = frame->locale,
+          .language_bcp47_bytes = strlen(frame->locale),
+      };
+      if (!ArEnhancedTextSettings_Apply(&frame->settings, base_pixels, minimum_base_pixels,
+                                        &request))
+        continue;
+      if (single_line) {
+        request.flags &= ~(kArTextRasterFlag_WrapWords | kArTextRasterFlag_PreserveHardBreaks);
+        request.flags |= kArTextRasterFlag_CropVerticalWhitespace;
+        /* HUD scale and font scale are independent. Enlarging the preferred
+         * font must not enlarge its fitting floor past a tiny physical row.
+         * Keep the requested size; relax only the minimum when necessary. */
+        const int minimum_for_row = bounds.h / 2 > 0 ? bounds.h / 2 : 1;
+        if (request.minimum_font_pixels > minimum_for_row)
+          request.minimum_font_pixels = minimum_for_row;
+      }
+      if (scrolling) {
+        /* Appending a continuation must not change the font size or horizontal
+         * origin of earlier lines. Height overflow is handled by the viewport. */
+        request.minimum_font_pixels = request.font_pixels;
+        request.flags &= ~kArTextRasterFlag_CropHorizontalWhitespace;
+      }
+      ArTextSurface surface;
+      char error[kArTextRasterErrorCapacity] = {0};
+      if (!ArTextSurfaceCache_Acquire(&s_presenter.cache, device,
+                                      ArTextBackendInstance_Get(&s_presenter.instance), &request,
+                                      &surface, error, sizeof(error))) {
+        ReportRequestFailure(snapshot, &request, error);
+        continue;
+      }
+      uint32_t revealed_clusters = snapshot->revealed_cluster_count;
+      const int scroll_y =
+          scrolling ? ArLocalizedTextLayout_ScrollOffset(&surface, snapshot->revealed_utf8_bytes,
+                                                         viewport.h, &revealed_clusters)
+                    : 0;
+      const ArRenderRectI destination = {
+          bounds.x +
+              (scrolling || single_line
+                   ? (snapshot->direction == kArTextDirection_RightToLeft ? bounds.w - surface.width
+                                                                          : 0)
+                   : (bounds.w - surface.width) / 2),
+          bounds.y - scroll_y + (single_line ? (bounds.h - surface.height) / 2 : 0),
+          surface.width,
+          surface.height,
+      };
+      ArLocalizedPreparedInlineObject prepared_objects[kArLocalizationFrameInlineObjectCapacity];
+      uint8_t prepared_object_count = 0;
+      bool objects_valid =
+          snapshot->inline_object_offset <= frame->inline_object_count &&
+          snapshot->inline_object_count <=
+              frame->inline_object_count - snapshot->inline_object_offset &&
+          snapshot->inline_object_count <=
+              kArLocalizationFrameInlineObjectCapacity - prepared->inline_object_count;
+      for (uint8_t object_index = 0; objects_valid && object_index < snapshot->inline_object_count;
+           ++object_index) {
+        const ArLocalizationInlineObjectSnapshot *object =
+            &frame->inline_objects[snapshot->inline_object_offset + object_index];
+        size_t reveal_index = 0;
+        const ArTextRevealCluster *cluster =
+            FindRevealCluster(&surface, object->end_utf8_byte, &reveal_index);
+        if (!cluster) {
+          objects_valid = false;
+          break;
+        }
+        if (reveal_index >= snapshot->revealed_cluster_count) continue;
+        if (!PrepareInlineObject(device, frame, object->kind, &surface, utf8, utf8_bytes, cluster,
+                                 destination, &prepared_objects[prepared_object_count])) {
+          objects_valid = false;
+          break;
+        }
+        ++prepared_object_count;
+      }
+      if (!objects_valid) continue;
+      if (!PrepareIndicators(device, frame, record->surface_id, bg3_map_width_tiles,
+                              bg3_map_height_tiles, bg3_hscroll, bg3_vscroll,
+                              visible_width, visible_height, chunks, chunk_count, prepared))
+        continue;
+      prepared->texts[prepared->text_count++] = (ArLocalizedPreparedText){
+          .surface = surface,
+          .destination = destination,
+          .revealed_cluster_count = revealed_clusters,
+          .cluster_count = snapshot->cluster_count,
+          .viewport = scrolling ? viewport : (ArRenderRectI){0},
+      };
+      if (prepared_object_count) {
+        memcpy(&prepared->inline_objects[prepared->inline_object_count], prepared_objects,
+               (size_t)prepared_object_count * sizeof(prepared_objects[0]));
+        prepared->inline_object_count += prepared_object_count;
+      }
+      memcpy(&prepared->masks[prepared->mask_count], masks, mask_count * sizeof(masks[0]));
       prepared->mask_count += mask_count;
-      continue;
+      if (scrolling && snapshot->surface_id == frame->dialogue_surface_id)
+        prepared->ready_dialogue_ticket = frame->dialogue_ticket;
     }
-
-    const bool scrolling =
-        snapshot->layout == kArLocalizationTextLayout_DialogueWindow;
-    ArRenderRectI viewport = bounds;
-    if (scrolling) {
-      /* The claim includes a footer cell for the continuation marker. Reserve
-       * it even while typing so appearing/disappearing arrows never reflow text. */
-      int footer = bounds.h / record->region.rows;
-      if (footer < 1) footer = 1;
-      viewport.h -= footer;
-      if (viewport.h <= 0) continue;
-    }
-    const int base_pixels =
-        (snapshot->native_font_pixels * bounds.h +
-         (int)record->region.rows * 4) /
-        ((int)record->region.rows * 8);
-    int minimum_base_pixels = base_pixels * 2 / 3;
-    if (minimum_base_pixels < 1) minimum_base_pixels = 1;
-    ArTextRasterRequest request = {
-        .struct_size = sizeof(request),
-        .abi_version = AR_TEXT_RASTER_REQUEST_ABI_VERSION,
-        .utf8 = utf8,
-        .utf8_bytes = utf8_bytes,
-        .font_stack_id = frame->font_stack_id,
-        .font_stack_id_bytes = strlen(frame->font_stack_id),
-        .source_revision = snapshot->source_revision,
-        .font_revision = frame->font_revision,
-        .style_id = kArTextStyle_RetailBlueWhiteBands,
-        .flags = kArTextRasterFlag_WrapWords |
-                 kArTextRasterFlag_PreserveHardBreaks |
-                 kArTextRasterFlag_CropHorizontalWhitespace |
-                 kArTextRasterFlag_IncludeRevealClusters,
-        .direction = snapshot->direction,
-        .alignment = snapshot->direction == kArTextDirection_RightToLeft
-            ? kArTextHorizontalAlignment_Trailing
-            : kArTextHorizontalAlignment_Leading,
-        .font_pixels = base_pixels,
-        .minimum_font_pixels = minimum_base_pixels,
-        .maximum_width = bounds.w,
-        .maximum_height = scrolling ? 4096 : bounds.h,
-        .filter = kArRenderFilter_Nearest,
-        .language_bcp47 = frame->locale,
-        .language_bcp47_bytes = strlen(frame->locale),
-  };
-    if (!ArEnhancedTextSettings_Apply(
-            &frame->settings, base_pixels, minimum_base_pixels, &request))
-      continue;
-    if (scrolling) {
-      /* Appending a continuation must not change the font size or horizontal
-       * origin of earlier lines. Height overflow is handled by the viewport. */
-      request.minimum_font_pixels = request.font_pixels;
-      request.flags &= ~kArTextRasterFlag_CropHorizontalWhitespace;
-    }
-    ArTextSurface surface;
-    char error[kArTextRasterErrorCapacity] = {0};
-    if (!ArTextSurfaceCache_Acquire(
-            &s_presenter.cache, device,
-            ArTextBackendInstance_Get(&s_presenter.instance),
-            &request, &surface, error, sizeof(error))) {
-      ReportRequestFailure(snapshot, &request, error);
-      continue;
-    }
-    uint32_t revealed_clusters = snapshot->revealed_cluster_count;
-    const int scroll_y = scrolling ? ArLocalizedTextLayout_ScrollOffset(
-        &surface, snapshot->revealed_utf8_bytes, viewport.h, &revealed_clusters) : 0;
-    const ArRenderRectI destination = {
-        bounds.x + (scrolling
-            ? (snapshot->direction == kArTextDirection_RightToLeft
-                ? bounds.w - surface.width : 0)
-            : (bounds.w - surface.width) / 2),
-        bounds.y - scroll_y,
-        surface.width,
-        surface.height,
-    };
-    ArLocalizedPreparedInlineObject prepared_objects[
-        kArLocalizationFrameInlineObjectCapacity];
-    uint8_t prepared_object_count = 0;
-    bool objects_valid =
-        snapshot->inline_object_offset <= frame->inline_object_count &&
-        snapshot->inline_object_count <=
-            frame->inline_object_count - snapshot->inline_object_offset &&
-        snapshot->inline_object_count <=
-            kArLocalizationFrameInlineObjectCapacity -
-                prepared->inline_object_count;
-    for (uint8_t object_index = 0;
-         objects_valid && object_index < snapshot->inline_object_count;
-         ++object_index) {
-      const ArLocalizationInlineObjectSnapshot *object =
-          &frame->inline_objects[
-              snapshot->inline_object_offset + object_index];
-      size_t reveal_index = 0;
-      const ArTextRevealCluster *cluster = FindRevealCluster(
-          &surface, object->end_utf8_byte, &reveal_index);
-      if (!cluster) {
-        objects_valid = false;
-        break;
-      }
-      if (reveal_index >= snapshot->revealed_cluster_count) continue;
-      if (!PrepareInlineObject(
-              device, frame, object->kind, &surface, utf8, utf8_bytes,
-              cluster, destination,
-              &prepared_objects[prepared_object_count])) {
-        objects_valid = false;
-        break;
-      }
-      ++prepared_object_count;
-    }
-    if (!objects_valid) continue;
-    prepared->texts[prepared->text_count++] = (ArLocalizedPreparedText){
-        .surface = surface,
-        .destination = destination,
-        .revealed_cluster_count = revealed_clusters,
-        .cluster_count = snapshot->cluster_count,
-        .viewport = scrolling ? viewport : (ArRenderRectI){0},
-    };
-    if (prepared_object_count) {
-      memcpy(&prepared->inline_objects[prepared->inline_object_count],
-             prepared_objects,
-             (size_t)prepared_object_count * sizeof(prepared_objects[0]));
-      prepared->inline_object_count += prepared_object_count;
-    }
-    for (uint8_t indicator_index = 0;
-         indicator_index < frame->indicator_count; ++indicator_index) {
-      const ArLocalizationIndicatorSnapshot *indicator =
-          &frame->indicators[indicator_index];
-      if (indicator->surface_id != record->surface_id ||
-          prepared->indicator_count >= kArLocalizationFrameIndicatorCapacity)
-        continue;
-      ArRenderRectI projected_indicator[
-          kArTextCellMaximumProjectedRegions];
-      const size_t projected_indicator_count =
-          ArTextCellComposite_ProjectRegion(
-              indicator->region, bg3_map_width_tiles,
-              bg3_map_height_tiles, bg3_hscroll, bg3_vscroll,
-              visible_width, visible_height, projected_indicator);
-      ArRenderRectI indicator_destination;
-      if (projected_indicator_count != 1u ||
-          !ProjectTextDestination(chunks, chunk_count,
-                                  projected_indicator[0],
-                                  &indicator_destination))
-        continue;
-      ArRenderTexture texture;
-      if (!PrepareArtwork(device, frame, kArLocalizationArtwork_Continue,
-                           &texture))
-        continue;
-      prepared->indicators[prepared->indicator_count++] =
-          (ArLocalizedPreparedIndicator){
-              indicator->kind, indicator_destination, texture};
-    }
-    memcpy(&prepared->masks[prepared->mask_count], masks,
-           mask_count * sizeof(masks[0]));
-    prepared->mask_count += mask_count;
   }
 }
 
@@ -1155,6 +1523,7 @@ bool ArLocalizedTextPresenter_Draw(
 }
 
 void ArLocalizedTextPresenter_Reset(ArRenderDevice *device) {
+  DestroyPendingFont(device);
   if (s_presenter.cache_initialized) {
     const ArTextSurfaceCacheStats *stats =
         ArTextSurfaceCache_GetStats(&s_presenter.cache);

@@ -94,6 +94,14 @@ static bool TraceEnabled(void) {
   return s_trace_enabled;
 }
 
+void ActRaiserLocalizationText_ObserveReturn(void) {
+  if (s_text_valid && s_text.yielded_to_menu && s_text.control_pending) {
+    if (s_text.completed_control_count != UINT16_MAX)
+      ++s_text.completed_control_count;
+    s_text.control_pending = false;
+  }
+}
+
 bool ActRaiser_LocalizationObserveTextEntry(CpuState *cpu) {
   if (!cpu) return false;
   uint64_t serial = s_text.serial + 1u;
@@ -142,33 +150,19 @@ bool ActRaiser_LocalizationObserveTextEntry(CpuState *cpu) {
   return false;
 }
 
-bool ActRaiser_LocalizationObserveTextByte(CpuState *cpu) {
-  if (!cpu || !s_text_valid) return false;
-  if (s_pending_page_advance) {
-    ++s_text.page_index;
-    if (!s_pending_page_retains_rows)
-      s_text.window_start_page = s_text.page_index;
-    s_text.page_unit_index = 0;
-    s_pending_page_advance = false;
-    s_text.awaiting_page_advance = false;
-    s_text.continuation_cell_valid = false;
-  }
-  s_text.cursor_pc24 = ((uint32_t)cpu->DB << 16) | cpu->Y;
+static void ObserveCode(CpuState *cpu, uint8_t code) {
   s_text.game_frame = cpu_read16(cpu, 0, kActRaiserWram_GameFrame);
-  const uint8_t code = cpu_read8(cpu, cpu->DB, cpu->Y);
   s_text.yielded_to_menu = false;
-  if (s_text.page_unit_index != UINT16_MAX) ++s_text.page_unit_index;
-  /* The native $02 page operation waits and scrolls before the next reader
-   * entry. Publish the new page only when that following token is reached. */
+  s_text.control_pending = code == 0x01u || code == 0x03u ||
+      code == 0x04u || code == 0x05u;
   if (code == 0x02u) {
     s_pending_page_advance = true;
-    /* $01:8F97 chooses clear ($9032) when this byte is zero; otherwise
-     * it advances a row and $905B copies rows up at the bottom of the box.
-     * Snapshot the choice before waiting, without modifying native state. */
     s_pending_page_retains_rows = cpu_read8(cpu, 0, 0x0200) != 0;
     s_text.awaiting_page_advance = true;
   } else if (code == 0x05u) {
     s_text.window_start_page = s_text.page_index;
+    s_text.window_start_control_count = s_text.completed_control_count == UINT16_MAX
+        ? UINT16_MAX : s_text.completed_control_count + 1u;
   } else if (code == 0x00u) {
     s_text.terminal_compose_serial = s_compose_serial;
     s_text.terminal = true;
@@ -177,10 +171,54 @@ bool ActRaiser_LocalizationObserveTextByte(CpuState *cpu) {
   }
   if (TraceEnabled() && (code == 0x02u || code == 0x00u || code == 0x01u))
     fprintf(stderr, "[localization-page] gf=%u serial=%llu page=%u "
-                    "first=%u units=%u control=%02X retain=%u\n",
+                    "first=%u units=%u control=%02X retain=%u "
+                    "completed=%u pending=%u clear=%u\n",
             s_text.game_frame, (unsigned long long)s_text.serial,
             s_text.page_index, s_text.window_start_page,
-            s_text.page_unit_index, code, (unsigned)s_pending_page_retains_rows);
+            s_text.page_unit_index, code, (unsigned)s_pending_page_retains_rows,
+            s_text.completed_control_count, (unsigned)s_text.control_pending,
+            s_text.window_start_control_count);
+}
+
+void ActRaiserLocalizationText_ObserveDecodedByte(CpuState *cpu,
+                                                 uint16_t first_cursor) {
+  if (!cpu || !s_text_valid ||
+      s_text.cursor_pc24 != (((uint32_t)cpu->DB << 16) | first_cursor)) return;
+  const uint16_t final_cursor = (uint16_t)(cpu->Y - 1u);
+  const uint32_t extra = (uint16_t)(final_cursor - first_cursor);
+  const uint32_t units = s_text.page_unit_index + extra;
+  s_text.page_unit_index = units > UINT16_MAX ? UINT16_MAX : (uint16_t)units;
+  s_text.cursor_pc24 = ((uint32_t)cpu->DB << 16) | final_cursor;
+  ObserveCode(cpu, (uint8_t)cpu->A);
+}
+
+bool ActRaiser_LocalizationObserveTextByte(CpuState *cpu) {
+  if (!cpu || !s_text_valid) return false;
+  /* Do not acknowledge a fixed delay/reset/toggle at exposure time. The
+   * native interpreter may yield before completing it. Re-entry proves the
+   * previous operation returned, without replaying or implementing its effect. */
+  if (s_text.control_pending) {
+    if (s_text.completed_control_count != UINT16_MAX)
+      ++s_text.completed_control_count;
+    s_text.control_pending = false;
+  }
+  if (s_pending_page_advance) {
+    ++s_text.page_index;
+    if (!s_pending_page_retains_rows) {
+      s_text.window_start_page = s_text.page_index;
+      s_text.window_start_control_count = 0;
+    }
+    s_text.page_unit_index = 0;
+    s_pending_page_advance = false;
+    s_text.awaiting_page_advance = false;
+    s_text.continuation_cell_valid = false;
+  }
+  s_text.cursor_pc24 = ((uint32_t)cpu->DB << 16) | cpu->Y;
+  const uint8_t code = cpu_read8(cpu, cpu->DB, cpu->Y);
+  if (s_text.page_unit_index != UINT16_MAX) ++s_text.page_unit_index;
+  /* The native $02 page operation waits and scrolls before the next reader
+   * entry. Publish the new page only when that following token is reached. */
+  ObserveCode(cpu, code);
   return false;
 }
 

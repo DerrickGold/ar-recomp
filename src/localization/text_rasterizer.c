@@ -129,6 +129,57 @@ static void SetError(char *error, size_t capacity, const char *message) {
   if (error && capacity) snprintf(error, capacity, "%s", message);
 }
 
+bool ArTextGlyphNeedsCoverage(uint32_t scalar) {
+  /* Unicode 17.0.0 DerivedCoreProperties.txt: Default_Ignorable_Code_Point.
+   * See third_party/unicode/NOTICE. Keep real combining marks queryable.
+   * U+FFFC is the renderer's typed inline-object placeholder, not font art. */
+  static const uint32_t ranges[][2] = {
+      {0x00ad, 0x00ad},   {0x034f, 0x034f},   {0x061c, 0x061c},
+      {0x115f, 0x1160},   {0x17b4, 0x17b5},   {0x180b, 0x180f},
+      {0x200b, 0x200f},   {0x202a, 0x202e},   {0x2060, 0x206f},
+      {0x3164, 0x3164},   {0xfe00, 0xfe0f},   {0xfeff, 0xfeff},
+      {0xffa0, 0xffa0},   {0xfff0, 0xfff8},   {0x1bca0, 0x1bca3},
+      {0x1d173, 0x1d17a}, {0xe0000, 0xe0fff},
+  };
+  if (scalar == '\n' || scalar == '\r' || scalar == '\t' || scalar == 0xfffc)
+    return false;
+  for (size_t i = 0; i < sizeof(ranges) / sizeof(ranges[0]); ++i) {
+    if (scalar < ranges[i][0])
+      break;
+    if (scalar <= ranges[i][1])
+      return false;
+  }
+  return true;
+}
+
+bool ArTextRasterizer_HasGlyph(const ArTextRasterizer *rasterizer,
+                               uint32_t scalar, bool *provided, char *error,
+                               size_t error_capacity) {
+  if (error && error_capacity)
+    error[0] = 0;
+  if (provided)
+    *provided = false;
+  if (!provided || scalar > 0x10ffff ||
+      (scalar >= 0xd800 && scalar <= 0xdfff) ||
+      !ArTextRasterizer_IsReady(rasterizer)) {
+    SetError(error, error_capacity, "invalid glyph coverage query");
+    return false;
+  }
+  if (rasterizer->ops->struct_size <
+          AR_MEMBER_END(ArTextRasterizerOps, has_glyph) ||
+      !rasterizer->ops->has_glyph) {
+    SetError(error, error_capacity,
+             "glyph coverage is unavailable on this backend");
+    return false;
+  }
+  if (!ArTextGlyphNeedsCoverage(scalar)) {
+    *provided = true;
+    return true;
+  }
+  return rasterizer->ops->has_glyph(rasterizer->context, scalar, provided,
+                                    error, error_capacity);
+}
+
 static bool BitmapValid(const ArTextBitmap *bitmap,
                         const ArTextRasterRequest *request) {
   if (!bitmap ||

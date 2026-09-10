@@ -178,6 +178,18 @@ bool ArDialogueSession_Switch(ArDialogueSession *session,
                               const ArDialogueContentSelection *selection,
                               ArLanguagePackError *error);
 
+/* Production adapters may impose a smaller presentation budget than the
+ * portable compiler. Count resolved UTF-8 plus one separator per authored
+ * page (including captured dynamic values). Zero keeps the portable limits.
+ * Both operations reject over-budget candidates before mutating the session. */
+bool ArDialogueSession_BeginBounded(
+    ArDialogueSession *session, const ArDialogueContentSelection *selection,
+    const char *semantic_id, const ArDialogueValueResolver *resolver,
+    size_t maximum_text_bytes, ArLanguagePackError *error);
+bool ArDialogueSession_SwitchBounded(
+    ArDialogueSession *session, const ArDialogueContentSelection *selection,
+    size_t maximum_text_bytes, ArLanguagePackError *error);
+
 bool ArDialogueSession_Next(ArDialogueSession *session,
                             ArDialogueToken *token,
                             ArLanguagePackError *error);
@@ -200,6 +212,12 @@ bool ArDialogueSession_GetPage(const ArDialogueSession *session,
 bool ArDialogueSession_GetAuthoredPage(const ArDialogueSession *session,
                                        uint32_t page_index,
                                        ArDialoguePageSnapshot *page);
+/* Resolve a locked control to an exact UTF-8 boundary in the selected source.
+ * Read-only and address-free; outputs are unchanged when unavailable. */
+bool ArDialogueSession_GetControlPosition(const ArDialogueSession *session,
+                                          uint32_t control_ordinal,
+                                          uint32_t *page_index,
+                                          size_t *utf8_offset);
 
 /* Valid only while NativeRom is the resolved source. This is transactional:
  * malformed or regressive observations leave the prior state untouched. */
@@ -208,6 +226,7 @@ bool ArDialogueSession_ObserveNativeProgress(
     ArLanguagePackError *error);
 
 /* Synchronize an enhanced presentation to the untouched native interpreter.
+ * Locked controls bound reveal and take precedence over page ratios.
  * Authored pages are mapped by index and clamped when pack/native page counts
  * differ. Native decoder progress is a ratio, never a Unicode byte index. */
 bool ArDialogueSession_SynchronizeNativeProgress(

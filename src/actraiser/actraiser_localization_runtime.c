@@ -8,6 +8,7 @@
 #include "actraiser/actraiser_localization_compose_state.h"
 #include "actraiser/actraiser_localization_name_entry.h"
 #include "actraiser/actraiser_localization_routes.h"
+#include "actraiser/actraiser_localization_schedule.h"
 #include "actraiser/actraiser_localization_text.h"
 #include "actraiser/actraiser_localization_values.h"
 #include "actraiser_game.h"
@@ -33,12 +34,14 @@ _Static_assert(kArEnhancedTextSampling_Crisp == 0 &&
 
 typedef struct DialogueWindow {
   bool valid;
-  uint32_t first_page;
+  uint16_t native_first_page;
+  uint16_t native_clear_control_count;
   uint32_t current_page;
   uint64_t revision;
   size_t bytes;
   size_t current_page_offset;
   uint32_t current_page_clusters;
+  uint32_t current_page_prefix_clusters;
   uint32_t clusters;
   char text[kArLocalizationFrameTextCapacity];
 } DialogueWindow;
@@ -61,15 +64,48 @@ typedef struct LocalizationRuntime {
   ActRaiserLocalizationNameEntryState name_entry;
   ActRaiserLocalizationNameEntryTracker name_tracker;
   uint64_t name_entry_applied_native_revision;
+  uint64_t name_entry_completed_observation_serial;
+  uint64_t name_entry_completed_compose_serial;
   uint64_t compose_observation_serial;
   uint64_t observation_serial;
+  uint64_t failed_observation_serial;
+  uint64_t dialogue_ticket;
+  bool scheduled_dialogue;
+  uint16_t scheduled_window_first_page;
+  uint16_t scheduled_window_clear_control;
+  bool inherited_native_page_wait;
+  uint16_t inherited_native_page;
+  bool native_handoff_valid;
+  uint16_t native_handoff_game_frame;
+  ActRaiserLocalizationTextObservation native_handoff;
   const ActRaiserLocalizationRoute *route;
   char manifest_path[kManifestPathCapacity];
   char native_manifest_path[kManifestPathCapacity];
   char primary_font_path[kArLocalizationFrameFontPathCapacity];
+  char fallback_font_paths[kArTextPresentationMaximumFallbackFonts]
+                          [kArLocalizationFrameFontPathCapacity];
 } LocalizationRuntime;
 
 static LocalizationRuntime s_runtime;
+static ArTextPresentationHost s_presentation_host;
+/* Never reuse a ticket across game resets: retained old frames may outlive the
+ * invocation they describe. This counter carries no emulated game state. */
+static uint64_t s_next_dialogue_ticket;
+
+static void ScheduleFailed(const char *reason);
+
+void ActRaiserLocalizationRuntime_SetPresentationHost(
+    const ArTextPresentationHost *host) {
+  s_presentation_host = (ArTextPresentationHost){0};
+  if (!host || host->struct_size <
+          offsetof(ArTextPresentationHost, prepare_font) + sizeof(host->prepare_font) ||
+      host->abi_version != AR_TEXT_PRESENTATION_ABI_VERSION || !host->prepare_font)
+    return;
+  s_presentation_host = *host;
+}
+
+static bool SynchronizeObservedDialogue(const ArLanguagePack *values_pack,
+                                        ArLanguagePackError *error);
 
 static bool CopyPath(char *destination, size_t capacity, const char *source) {
   const size_t length = source ? strlen(source) : 0;
@@ -78,25 +114,30 @@ static bool CopyPath(char *destination, size_t capacity, const char *source) {
   return true;
 }
 
-static bool ResolveFontPath(const char *manifest_path,
-                            const ArLanguagePackMetadata *metadata,
+static bool ResolveFontPath(const char *manifest_path, const char *font,
                             char *destination, size_t capacity) {
-  if (!manifest_path || !metadata || !destination || !capacity) return false;
-  if (!strcmp(metadata->primary_font, "builtin:actraiser-sans"))
+  if (!manifest_path || !font || !destination || !capacity)
+    return false;
+  if (!strcmp(font, "builtin:actraiser-sans"))
     return CopyPath(destination, capacity,
                     "game-assets/fonts/noto/"
                     "NotoSans-SemiCondensedExtraBold.ttf");
-  if (!strncmp(metadata->primary_font, "builtin:", 8)) return false;
+  if (!strncmp(font, "builtin:", 8))
+    return false;
   const char *slash = strrchr(manifest_path, '/');
 #ifdef _WIN32
   const char *backslash = strrchr(manifest_path, '\\');
-  if (!slash || (backslash && backslash > slash)) slash = backslash;
+  if (!slash || (backslash && backslash > slash))
+    slash = backslash;
 #endif
-  const size_t directory_bytes = slash ? (size_t)(slash - manifest_path + 1) : 0;
-  const size_t font_bytes = strlen(metadata->primary_font);
-  if (directory_bytes + font_bytes >= capacity) return false;
-  if (directory_bytes) memcpy(destination, manifest_path, directory_bytes);
-  memcpy(destination + directory_bytes, metadata->primary_font, font_bytes + 1u);
+  const size_t directory_bytes =
+      slash ? (size_t)(slash - manifest_path + 1) : 0;
+  const size_t font_bytes = strlen(font);
+  if (directory_bytes + font_bytes >= capacity)
+    return false;
+  if (directory_bytes)
+    memcpy(destination, manifest_path, directory_bytes);
+  memcpy(destination + directory_bytes, font, font_bytes + 1u);
   return true;
 }
 
@@ -180,29 +221,96 @@ static bool EnsureConfigured(void) {
     (void)LoadRuntimePack(&s_runtime.selected_pack, s_runtime.manifest_path,
                           false, &error);
   }
-  const ArLanguagePack *pack = content
-      ? &s_runtime.selected_pack : &s_runtime.native_pack;
-  const ArLanguagePackMetadata *metadata = pack->content_revision
-      ? ArLanguagePack_GetMetadata(pack) : NULL;
+  const ArLanguagePack *pack =
+      content ? &s_runtime.selected_pack : &s_runtime.native_pack;
+  const ArLanguagePackMetadata *metadata =
+      pack->content_revision ? ArLanguagePack_GetMetadata(pack) : NULL;
   char font_path[kArLocalizationFrameFontPathCapacity] = {0};
-  if (presentation && (!metadata || !ResolveFontPath(
-          content ? s_runtime.manifest_path : s_runtime.native_manifest_path,
-          metadata, font_path, sizeof(font_path)))) {
+  char fallback_paths[kArTextPresentationMaximumFallbackFonts]
+                     [kArLocalizationFrameFontPathCapacity] = {{0}};
+  const char *fallbacks[kArTextPresentationMaximumFallbackFonts] = {0};
+  if (presentation &&
+      (!metadata || !ResolveFontPath(content ? s_runtime.manifest_path
+                                             : s_runtime.native_manifest_path,
+                                     metadata->primary_font, font_path,
+                                     sizeof(font_path)))) {
     if (!error.message[0])
       snprintf(error.message, sizeof(error.message),
                "requested source or font is unavailable");
     goto reject;
   }
+  if (presentation) {
+    if (metadata->fallback_font_count >
+        kArTextPresentationMaximumFallbackFonts) {
+      snprintf(error.message, sizeof(error.message), "too many fallback fonts");
+      goto reject;
+    }
+    for (uint32_t i = 0; i < metadata->fallback_font_count; ++i) {
+      if (!ResolveFontPath(content ? s_runtime.manifest_path
+                                   : s_runtime.native_manifest_path,
+                           metadata->fallback_fonts[i], fallback_paths[i],
+                           sizeof(fallback_paths[i]))) {
+        snprintf(error.message, sizeof(error.message),
+                 "fallback font path is unavailable");
+        goto reject;
+      }
+      fallbacks[i] = fallback_paths[i];
+    }
+    const ArTextPresentationFont font = {
+        .struct_size = sizeof(font),
+        .abi_version = AR_TEXT_PRESENTATION_ABI_VERSION,
+        .stack_id = metadata->primary_font,
+        .primary_path = font_path,
+        .revision = pack->content_revision,
+        .fallback_paths = fallbacks,
+        .fallback_count = metadata->fallback_font_count,
+    };
+    if (!s_presentation_host.prepare_font ||
+        !s_presentation_host.prepare_font(s_presentation_host.context, &font,
+                                          error.message,
+                                          sizeof(error.message))) {
+      if (!error.message[0])
+        snprintf(error.message, sizeof(error.message),
+                 "enhanced text presentation is unavailable");
+      goto reject;
+    }
+  }
   ArDialogueContentSelection selection;
   MakeSelection(content, presentation, &selection);
+  const bool was_scheduled = ActRaiserLocalizationRuntime_DialogueScheduled();
+  if (!was_scheduled && !SynchronizeObservedDialogue(
+                            s_runtime.pack ? s_runtime.pack : pack, &error))
+    goto reject;
   if (s_runtime.session.state.message_id[0] &&
-      !ArDialogueSession_Switch(&s_runtime.session, &selection, &error))
+      !ArDialogueSession_SwitchBounded(&s_runtime.session, &selection,
+                                       kArLocalizationFrameTextCapacity, &error))
     goto reject;
   s_runtime.content = content;
   s_runtime.presentation = presentation;
+  s_runtime.scheduled_dialogue = presentation && s_runtime.route &&
+                                 s_runtime.session.state.resolved_source !=
+                                     kArDialogueResolvedSource_NativeRom;
+  if (was_scheduled && !s_runtime.scheduled_dialogue) {
+    s_runtime.native_handoff.struct_size = sizeof(s_runtime.native_handoff);
+    s_runtime.native_handoff_valid =
+        ActRaiserLocalizationText_CopyObservation(&s_runtime.native_handoff);
+    s_runtime.native_handoff_game_frame =
+        (uint16_t)(g_ram[kActRaiserWram_GameFrame] |
+                   ((uint16_t)g_ram[kActRaiserWram_GameFrame + 1u] << 8));
+  } else if (s_runtime.scheduled_dialogue) {
+    s_runtime.native_handoff_valid = false;
+  }
+  if (s_runtime.scheduled_window_first_page >
+      s_runtime.session.state.authored_page_index)
+    s_runtime.scheduled_window_first_page =
+        (uint16_t)s_runtime.session.state.authored_page_index;
+  s_runtime.dialogue_window.valid = false;
+  s_runtime.dialogue_ticket = 0;
   if (presentation) {
     s_runtime.pack = pack;
     memcpy(s_runtime.primary_font_path, font_path, sizeof(font_path));
+    memcpy(s_runtime.fallback_font_paths, fallback_paths,
+           sizeof(fallback_paths));
     s_runtime.enabled = true;
   }
   s_runtime.refresh_pending = true;
@@ -216,7 +324,8 @@ reject:
   fprintf(stderr,
           "[localization] selection rejected (%s); prior selection retained\n",
           error.message);
-  g_settings.localization_content = s_runtime.content < 0 ? 0 : s_runtime.content;
+  g_settings.localization_content =
+      s_runtime.content < 0 ? 0 : s_runtime.content;
   g_settings.localization_presentation =
       s_runtime.presentation < 0 ? 0 : s_runtime.presentation;
   return s_runtime.enabled;
@@ -226,19 +335,26 @@ void ActRaiserLocalizationRuntime_ApplySettings(void) {
   (void)EnsureConfigured();
 }
 
-static bool CaptureValues(void) {
+static bool CaptureValuesForPack(const ArLanguagePack *pack) {
   char master_name[kActRaiserLocalizationMasterNameCapacity];
-  if (!SaveSystem_CopyLocalizedPlayerName(
-          master_name, sizeof(master_name)) &&
-      !SaveSystem_CopyPlayerName(master_name, sizeof(master_name)))
+  char native_name[kActRaiserLocalizationNameLength + 1];
+  if (!ActRaiserLocalizationNameEntry_CopyNativeName(
+          g_ram, kActRaiserWramSize, native_name, sizeof(native_name)))
     snprintf(master_name, sizeof(master_name), "Master");
+  else if (!SaveSystem_CopyLocalizedPlayerName(native_name, master_name,
+                                               sizeof(master_name)))
+    snprintf(master_name, sizeof(master_name), "%s", native_name);
   const bool captured = ActRaiserLocalizationValues_Capture(
       &s_runtime.values, g_ram, kActRaiserWramSize,
-      s_runtime.pack, master_name);
+      pack, master_name);
   memset(&s_runtime.name_entry, 0, sizeof(s_runtime.name_entry));
   (void)ActRaiserLocalizationNameEntry_Capture(
       &s_runtime.name_entry, g_ram, kActRaiserWramSize);
   return captured;
+}
+
+static bool CaptureValues(void) {
+  return CaptureValuesForPack(s_runtime.pack);
 }
 
 static uint32_t CountClusters(const char *utf8, size_t bytes) {
@@ -347,25 +463,39 @@ static bool NormalizeText(
   *destination_bytes = written;
   if (object_index != source_object_count) return false;
   *destination_object_count = (uint8_t)object_index;
-  return written != 0;
+  /* A successfully resolved empty message is intentional, not a missing
+   * translation. It still owns its native cells while the UI is alive. */
+  return true;
 }
 
 /* Cache the logical window only when its source/page range changes. Reveal
  * ticks change a byte boundary, not the text, shaping request, or old lines. */
 static bool BuildDialogueWindow(
-    const ArDialoguePageSnapshot *current, uint32_t first_page) {
+    const ArDialoguePageSnapshot *current,
+    const ActRaiserLocalizationTextObservation *observation) {
   DialogueWindow *window = &s_runtime.dialogue_window;
-  if (first_page > current->page_index) first_page = current->page_index;
   if (window->valid && window->revision == current->source_revision &&
-      window->first_page == first_page &&
+      window->native_first_page == observation->window_start_page &&
+      window->native_clear_control_count == observation->window_start_control_count &&
       window->current_page == current->page_index)
     return true;
   window->valid = false;
+  uint32_t first_page = observation->window_start_page;
+  size_t first_offset = 0;
+  if (observation->window_start_control_count) {
+    if (!ArDialogueSession_GetControlPosition(
+          &s_runtime.session, observation->window_start_control_count - 1u,
+          &first_page, &first_offset) || first_page > current->page_index)
+      return false;
+  }
+  if (first_page > current->page_index) first_page = current->page_index;
   window->bytes = 0;
   for (uint32_t index = first_page; index <= current->page_index; ++index) {
     ArDialoguePageSnapshot page;
     if (!ArDialogueSession_GetAuthoredPage(&s_runtime.session, index, &page))
       return false;
+    const size_t source_offset = index == first_page ? first_offset : 0;
+    if (source_offset > page.utf8_bytes) return false;
     if (index != first_page) {
       if (window->bytes + 1u >= sizeof(window->text)) return false;
       window->text[window->bytes++] = '\n';
@@ -373,7 +503,8 @@ static bool BuildDialogueWindow(
     const size_t offset = window->bytes;
     size_t bytes = 0;
     uint8_t object_count = 0;
-    if (!NormalizeText(page.utf8, page.utf8_bytes, NULL, 0, false,
+    if (!NormalizeText(page.utf8 + source_offset, page.utf8_bytes - source_offset,
+                       NULL, 0, false,
                        window->text + offset, sizeof(window->text) - offset,
                        &bytes, NULL, 0, &object_count))
       return false;
@@ -381,14 +512,18 @@ static bool BuildDialogueWindow(
     if (index == current->page_index) {
       window->current_page_offset = offset;
       window->current_page_clusters = CountClusters(window->text + offset, bytes);
+      window->current_page_prefix_clusters = CountClusters(page.utf8, source_offset);
     }
   }
   window->clusters = CountClusters(window->text, window->bytes);
   if (window->clusters == UINT32_MAX) return false;
-  window->first_page = first_page;
+  window->native_first_page = observation->window_start_page;
+  window->native_clear_control_count = observation->window_start_control_count;
   window->current_page = current->page_index;
   window->revision = current->source_revision;
   window->valid = true;
+  s_runtime.dialogue_ticket = s_runtime.scheduled_dialogue
+      ? ++s_next_dialogue_ticket : 0;
   return true;
 }
 
@@ -433,7 +568,8 @@ static bool ClearNameEntryUnderline(
 }
 
 static void ContentSelection(ArDialogueContentSelection *selection) {
-  MakeSelection(s_runtime.content, s_runtime.presentation, selection);
+  MakeSelection(s_runtime.content < 0 ? 0 : s_runtime.content,
+                s_runtime.presentation < 0 ? 0 : s_runtime.presentation, selection);
 }
 
 static void ValueResolver(const ActRaiserLocalizationValues *values,
@@ -789,7 +925,7 @@ static bool ResolveComposeText(
         ? ActRaiserLocalizationValues_ReportRevision(&s_runtime.values)
         : name_entry ? NameEntrySourceRevision(page.source_revision)
                      : page.source_revision;
-    resolved = *cluster_count != UINT32_MAX && *cluster_count != 0 &&
+    resolved = *cluster_count != UINT32_MAX &&
         *source_revision != 0;
   }
   if (!resolved && error_text && error_capacity) {
@@ -823,19 +959,49 @@ static void RefreshNameEntry(void) {
   }
 }
 
-static void StageCanonicalPlayerName(void) {
-  if (ActRaiserLocalizationComposeState_FindObserved(&s_runtime.compose, 5) ||
-      !s_runtime.name_tracker.initialized ||
-      !s_runtime.name_tracker.utf8_name[0] ||
-      !s_runtime.name_tracker.compatibility_name[0])
+static void
+CompleteNameEntry(const ActRaiserLocalizationTextObservation *observation) {
+  if (!observation || !observation->serial)
     return;
-  char saved_name[kActRaiserPlayerNameStorageBytes];
-  if (!SaveSystem_CopyPlayerName(saved_name, sizeof(saved_name)) ||
-      strcmp(saved_name, s_runtime.name_tracker.compatibility_name))
+  const bool completed =
+      observation->serial == s_runtime.name_entry_completed_observation_serial;
+  const ActRaiserLocalizationComposeSnapshot *surface =
+      ActRaiserLocalizationComposeState_FindObserved(&s_runtime.compose, 5);
+  if (observation->map_group != g_ram[kActRaiserWram_MapGroup] ||
+      observation->map_number != g_ram[kActRaiserWram_CurrentMap] ||
+      (surface &&
+       observation->entry_compose_serial < surface->generation_serial))
     return;
-  (void)SaveSystem_SetLocalizedPlayerName(
-      s_runtime.name_tracker.utf8_name,
-      s_runtime.name_tracker.compatibility_name);
+  if (!surface) {
+    if (completed)
+      return;
+    /* Native-only entry has no enhanced composer state. Its identified return
+     * dialogue still retires any prior game's same-spelled Unicode name,
+     * without loading a pack/font or changing native input. */
+    const ActRaiserLocalizationRoute *route =
+        ActRaiserLocalizationRoute_ResolveDialogue(observation);
+    if (!route || strcmp(route->semantic_id,
+                         "dialogue.event.wrapper_05.call_01.source_00"))
+      return;
+  }
+  /* The next interpreter invocation is the observed keyboard return boundary.
+   * Publish before its values are snapshotted, without waiting for SRAM or a
+   * rendered frame. Never infer acceptance from an arbitrary matching save. */
+  char native_name[kActRaiserLocalizationNameLength + 1];
+  if (!completed &&
+      ActRaiserLocalizationNameEntry_CopyNativeName(
+          g_ram, kActRaiserWramSize, native_name, sizeof(native_name))) {
+    const bool tracked =
+        surface && s_runtime.name_tracker.initialized &&
+        !strcmp(native_name, s_runtime.name_tracker.compatibility_name);
+    (void)SaveSystem_SetLocalizedPlayerName(
+        tracked ? s_runtime.name_tracker.utf8_name : native_name, native_name);
+  }
+  s_runtime.name_entry_completed_observation_serial = observation->serial;
+  s_runtime.name_entry_completed_compose_serial =
+      observation->entry_compose_serial;
+  (void)ActRaiserLocalizationComposeState_ReleaseSurface(&s_runtime.compose, 5);
+  s_runtime.name_entry_applied_native_revision = 0;
 }
 
 static void RefreshReports(void) {
@@ -863,12 +1029,354 @@ static void RefreshReports(void) {
   }
 }
 
+static bool SameNativePosition(const ActRaiserLocalizationTextObservation *a,
+                               const ActRaiserLocalizationTextObservation *b) {
+  return a->serial == b->serial && a->cursor_pc24 == b->cursor_pc24 &&
+         a->page_index == b->page_index &&
+         a->page_unit_index == b->page_unit_index &&
+         a->completed_control_count == b->completed_control_count &&
+         a->control_pending == b->control_pending &&
+         a->terminal == b->terminal &&
+         a->yielded_to_menu == b->yielded_to_menu &&
+         a->awaiting_page_advance == b->awaiting_page_advance;
+}
+
+/* Prepare a switch from actual ROM progress, not the previous rendered frame.
+ * With the game paused, enhanced -> retail -> enhanced must not overwrite its
+ * authored progress with the earlier native byte still suspended underneath. */
+static bool SynchronizeObservedDialogue(const ArLanguagePack *values_pack,
+                                        ArLanguagePackError *error) {
+  ActRaiserLocalizationTextObservation observation = {.struct_size =
+                                                          sizeof(observation)};
+  if (!ActRaiserLocalizationText_CopyObservation(&observation))
+    return true;
+  if (observation.serial == s_runtime.failed_observation_serial) {
+    s_runtime.route = NULL;
+    return true; /* Do not resurrect the failed invocation on the next frame. */
+  }
+  const ActRaiserLocalizationRoute *route =
+      ActRaiserLocalizationRoute_ResolveDialogue(&observation);
+  if (!route || observation.map_group != g_ram[kActRaiserWram_MapGroup] ||
+      observation.map_number != g_ram[kActRaiserWram_CurrentMap]) {
+    s_runtime.route = NULL;
+    return true;
+  }
+  if (s_runtime.native_handoff_valid &&
+      s_runtime.native_handoff_game_frame ==
+          (uint16_t)(g_ram[kActRaiserWram_GameFrame] |
+                     ((uint16_t)g_ram[kActRaiserWram_GameFrame + 1u] << 8)) &&
+      SameNativePosition(&observation, &s_runtime.native_handoff))
+    return true;
+  s_runtime.native_handoff_valid = false;
+  if (s_runtime.observation_serial != observation.serial ||
+      !s_runtime.session.state.message_id[0]) {
+    ArDialogueContentSelection selection;
+    ArDialogueValueResolver resolver;
+    ContentSelection(&selection);
+    if (!CaptureValuesForPack(values_pack)) {
+      snprintf(error->message, sizeof(error->message),
+               "native dialogue values could not be captured");
+      return false;
+    }
+    ValueResolver(&s_runtime.values, &resolver);
+    if (!ArDialogueSession_BeginBounded(&s_runtime.session, &selection,
+                                        route->semantic_id, &resolver,
+                                        kArLocalizationFrameTextCapacity, error))
+      return false;
+    s_runtime.observation_serial = observation.serial;
+    s_runtime.route = route;
+  }
+  if (s_runtime.route != route)
+    return true;
+  const uint16_t units =
+      ActRaiserLocalizationRoute_PageUnitCount(route, observation.page_index);
+  ArDialogueNativeProgress progress = {
+      .struct_size = sizeof(progress),
+      .abi_version = AR_DIALOGUE_SESSION_ABI_VERSION,
+      .authored_page_index = observation.page_index,
+      .revealed_unit_count = observation.yielded_to_menu || observation.terminal
+                                 ? units
+                                 : observation.page_unit_index,
+      .page_unit_count = units,
+      .completed_control_count = observation.completed_control_count,
+      /* The ROM does not execute authored @wait cues. Keep their ledger
+       * monotonic, but retire a cancelled presentation wait after ROM progress.
+       */
+      .completed_wait_count = s_runtime.session.state.completed_wait_count,
+      .control_pending = observation.control_pending,
+      .awaiting_input = observation.yielded_to_menu,
+      .awaiting_page_advance = observation.awaiting_page_advance,
+      .terminal = observation.terminal,
+  };
+  if (progress.revealed_unit_count > units)
+    progress.revealed_unit_count = units;
+  const bool native = s_runtime.session.state.resolved_source ==
+                      kArDialogueResolvedSource_NativeRom;
+  if (!(native ? ArDialogueSession_ObserveNativeProgress(&s_runtime.session,
+                                                         &progress, error)
+               : ArDialogueSession_SynchronizeNativeProgress(&s_runtime.session,
+                                                             &progress, error)))
+    return false;
+  s_runtime.inherited_native_page_wait = observation.awaiting_page_advance;
+  s_runtime.inherited_native_page = observation.page_index;
+  s_runtime.scheduled_window_first_page = observation.window_start_page;
+  s_runtime.scheduled_window_clear_control =
+      observation.window_start_control_count <=
+              observation.completed_control_count
+          ? observation.window_start_control_count
+          : 0;
+  s_runtime.dialogue_window.valid = false;
+  return true;
+}
+
+bool ActRaiserLocalizationRuntime_DialogueScheduled(void) {
+  if (ArTextPresentation_Failed(s_runtime.dialogue_ticket))
+    ScheduleFailed("enhanced dialogue window was not presented");
+  return s_runtime.scheduled_dialogue && s_runtime.route &&
+         s_runtime.presentation &&
+         s_runtime.session.state.resolved_source !=
+             kArDialogueResolvedSource_NativeRom;
+}
+
+bool ActRaiserLocalizationRuntime_PageConfirmationPending(void) {
+  return ActRaiserLocalizationRuntime_DialogueScheduled() &&
+         s_runtime.session.state.awaiting_page_advance;
+}
+
+/* Session creation belongs to the interpreter entry, not the first rendered
+ * frame: a clear/delay/yield can precede that frame. Values are snapshotted once
+ * here and the renderer only reads the resulting program. */
+bool ActRaiserLocalizationRuntime_BeginDialogue(
+    const ActRaiserLocalizationTextObservation *observation) {
+  s_runtime.scheduled_dialogue = false;
+  s_runtime.dialogue_ticket = 0;
+  s_runtime.failed_observation_serial = 0;
+  s_runtime.native_handoff_valid = false;
+  s_runtime.inherited_native_page_wait = false;
+  CompleteNameEntry(observation);
+  if (!observation || !EnsureConfigured() || !CaptureValues()) return false;
+  const ActRaiserLocalizationRoute *route =
+      ActRaiserLocalizationRoute_ResolveDialogue(observation);
+  s_runtime.observation_serial = observation->serial;
+  s_runtime.route = NULL;
+  s_runtime.dialogue_window.valid = false;
+  if (!route) return false;
+  ArDialogueContentSelection selection;
+  ArDialogueValueResolver resolver;
+  ContentSelection(&selection);
+  ValueResolver(&s_runtime.values, &resolver);
+  ArLanguagePackError error = {{0}};
+  if (!ArDialogueSession_BeginBounded(&s_runtime.session, &selection,
+                                      route->semantic_id, &resolver,
+                                      kArLocalizationFrameTextCapacity, &error)) {
+    fprintf(stderr, "[localization] %s unavailable (%s); native text retained\n",
+            route->semantic_id, error.message);
+    s_runtime.failed_observation_serial = observation->serial;
+    return false;
+  }
+  s_runtime.route = route;
+  s_runtime.scheduled_window_first_page = 0;
+  s_runtime.scheduled_window_clear_control = 0;
+  s_runtime.scheduled_dialogue = s_runtime.presentation &&
+      s_runtime.session.state.resolved_source != kArDialogueResolvedSource_NativeRom;
+  return s_runtime.scheduled_dialogue;
+}
+
+static void ScheduleFailed(const char *reason) {
+  fprintf(stderr, "[localization] %s scheduling unavailable (%s); "
+                  "native text retained\n",
+          s_runtime.route ? s_runtime.route->semantic_id : "dialogue", reason);
+  s_runtime.scheduled_dialogue = false;
+  s_runtime.failed_observation_serial = s_runtime.observation_serial;
+  s_runtime.dialogue_ticket = 0;
+  s_runtime.dialogue_window.valid = false;
+  s_runtime.route = NULL;
+}
+
+static bool AdvanceScheduledPage(bool retain_rows) {
+  if (!ArDialogueSession_AdvancePage(&s_runtime.session)) return false;
+  if (!retain_rows) {
+    s_runtime.scheduled_window_first_page =
+        (uint16_t)s_runtime.session.state.authored_page_index;
+    s_runtime.scheduled_window_clear_control = 0;
+  }
+  return true;
+}
+
+bool ActRaiserLocalizationRuntime_ContinueDialogue(
+    const ActRaiserLocalizationDialogueHost *host, bool retain_rows) {
+  if (!host || !host->confirm_page ||
+      !ActRaiserLocalizationRuntime_DialogueScheduled()) return false;
+  if (!s_runtime.session.state.awaiting_page_advance)
+    return true; /* No authored page boundary: no redundant native prompt. */
+  if (!host->confirm_page(host->context)) {
+    ScheduleFailed("native page confirmation failed");
+    return false;
+  }
+  /* Host UI may have switched source while the native confirmation yielded. */
+  if (!ActRaiserLocalizationRuntime_DialogueScheduled()) return true;
+  if (!s_runtime.session.state.awaiting_page_advance) return true;
+  return AdvanceScheduledPage(retain_rows);
+}
+
+/* Native glyph tokens supply the usual reveal ratio. A native page boundary
+ * drains only the current authored page; a locked control/end drains added
+ * pages too, without ever acknowledging a control itself. All optional waits
+ * are consumed through Next/TickWait rather than skipped by ratio mapping. */
+static bool PumpDialogue(uint32_t source_revealed, uint32_t source_units,
+                         bool cross_pages, uint8_t text_speed, bool pace,
+                         const ActRaiserLocalizationDialogueHost *host,
+                         ArDialogueToken *last) {
+  ArLanguagePackError error = {{0}};
+  memset(last, 0, sizeof(*last));
+  while (ActRaiserLocalizationRuntime_DialogueScheduled()) {
+    if (s_runtime.session.state.awaiting_page_advance) {
+      if (!cross_pages)
+        return true;
+      if (!ActRaiserLocalizationRuntime_ContinueDialogue(host, text_speed != 0))
+        return false;
+      if (!ActRaiserLocalizationRuntime_DialogueScheduled())
+        return false;
+      pace = true; /* Added pages have no native glyphs to pace their reveal. */
+    }
+    while (s_runtime.session.state.wait_frames_remaining) {
+      if (!host->wait_frame(host->context)) {
+        ScheduleFailed("native animation wait failed");
+        return false;
+      }
+      if (!ActRaiserLocalizationRuntime_DialogueScheduled())
+        return false;
+      ArDialogueSession_TickWait(&s_runtime.session, 1);
+    }
+    const uint32_t target_clusters =
+        source_units
+            ? (uint32_t)(((uint64_t)source_revealed *
+                              s_runtime.session.state.page_cluster_count +
+                          source_units - 1u) /
+                         source_units)
+            : UINT32_MAX;
+    if (target_clusters != UINT32_MAX &&
+        s_runtime.session.state.revealed_cluster_count >= target_clusters)
+      return true;
+    if (!ArDialogueSession_Next(&s_runtime.session, last, &error)) {
+      ScheduleFailed(error.message);
+      return false;
+    }
+    switch (last->kind) {
+    case kArDialogueToken_Grapheme:
+      if (pace && last->first_scalar != ' ' && last->first_scalar != '\n') {
+        /* Match the native $901C delay scale, including instant text. */
+        for (uint8_t tick = 0; tick < text_speed; ++tick) {
+          if (!host->wait_frame(host->context)) {
+            ScheduleFailed("native reveal wait failed");
+            return false;
+          }
+          if (!ActRaiserLocalizationRuntime_DialogueScheduled())
+            return false;
+        }
+      }
+      break;
+    case kArDialogueToken_WaitStarted:
+    case kArDialogueToken_PageComplete:
+      break;
+    default:
+      return true;
+    }
+  }
+  return false;
+}
+
+void ActRaiserLocalizationRuntime_ScheduleByte(
+    const ActRaiserLocalizationTextObservation *observation, uint8_t code,
+    uint8_t text_speed, const ActRaiserLocalizationDialogueHost *host) {
+  if (!observation || !host || !host->wait_frame || !host->confirm_page ||
+      !ActRaiserLocalizationRuntime_DialogueScheduled() ||
+      observation->serial != s_runtime.observation_serial)
+    return;
+  ArDialogueSession *session = &s_runtime.session;
+  if (s_runtime.inherited_native_page_wait &&
+      observation->page_index > s_runtime.inherited_native_page) {
+    /* The original $9099 was already on the native stack at activation. Its
+     * real confirmation pays for this transition; never ask for it twice. */
+    s_runtime.inherited_native_page_wait = false;
+    if (session->state.awaiting_page_advance &&
+        !AdvanceScheduledPage(text_speed != 0)) {
+      ScheduleFailed("inherited native continuation could not advance");
+      return;
+    }
+  }
+  if (observation->completed_control_count >
+      session->state.completed_control_count) {
+    const uint32_t ordinal = session->state.completed_control_count;
+    const char *id = ArLanguageContract_RequiredAnchor(
+        session->state.message_id, kArLanguageSourceProfile_Us, ordinal);
+    if (observation->completed_control_count != ordinal + 1u ||
+        !ArDialogueSession_CompleteControl(session, ordinal)) {
+      ScheduleFailed("native control acknowledgement is out of sequence");
+      return;
+    }
+    if (id && !strncmp(id, "reset_text_cursor.", 18)) {
+      s_runtime.scheduled_window_first_page =
+          (uint16_t)session->state.authored_page_index;
+      s_runtime.scheduled_window_clear_control = (uint16_t)(ordinal + 1u);
+    }
+  }
+  const bool locked = code == 1 || code == 3 || code == 4 || code == 5;
+  if (locked) {
+    const char *expected = ArLanguageContract_RequiredAnchor(
+        session->state.message_id, kArLanguageSourceProfile_Us,
+        observation->completed_control_count);
+    const char *kind = code == 1   ? "yield."
+                       : code == 3 ? "delay."
+                       : code == 4 ? "toggle_text_state."
+                                   : "reset_text_cursor.";
+    if (!expected || strncmp(expected, kind, strlen(kind))) {
+      ScheduleFailed("native control kind disagrees with the source contract");
+      return;
+    }
+  }
+  const bool boundary = locked || code == 0 || code == 2;
+  uint32_t units = 0;
+  uint32_t revealed = 0;
+  if (!boundary) {
+    units = ActRaiserLocalizationRoute_PageUnitCount(s_runtime.route,
+                                                     observation->page_index);
+    if (!units)
+      return;
+    revealed = observation->page_unit_index;
+    if (revealed > units)
+      revealed = units;
+  }
+  ArDialogueToken token;
+  if (!PumpDialogue(revealed, units, locked || code == 0, text_speed, false,
+                    host, &token))
+    return;
+  if (locked && (token.kind != kArDialogueToken_Control ||
+                 token.control_ordinal != observation->completed_control_count))
+    ScheduleFailed("authored and native control barriers disagree");
+  else if (code == 0 && token.kind != kArDialogueToken_End)
+    ScheduleFailed("native end precedes an unexecuted control");
+}
+
+void ActRaiserLocalizationRuntime_ReturnDialogue(void) {
+  if (!ActRaiserLocalizationRuntime_DialogueScheduled()) return;
+  ActRaiserLocalizationTextObservation observation = {
+      .struct_size = sizeof(observation)};
+  if (ActRaiserLocalizationText_CopyObservation(&observation) &&
+      observation.serial == s_runtime.observation_serial &&
+      observation.yielded_to_menu && s_runtime.session.state.control_pending &&
+      !ArDialogueSession_CompleteControl(
+          &s_runtime.session, s_runtime.session.state.completed_control_count))
+    ScheduleFailed("native menu return could not acknowledge yield");
+}
+
 void ActRaiserLocalizationRuntime_CaptureFrame(
     ArLocalizationFrame *frame, uint16_t bg3_tilemap_base_words,
     uint16_t bg3_tile_base_words,
     const uint16_t *vram_words, size_t vram_word_count,
     const uint16_t *cgram_words, size_t cgram_word_count) {
   ArLocalizationFrame_Reset(frame);
+  (void)ActRaiserLocalizationRuntime_DialogueScheduled();
   if (!frame || !EnsureConfigured()) return;
   if (!CaptureValues()) return;
 
@@ -886,6 +1394,12 @@ void ActRaiserLocalizationRuntime_CaptureFrame(
           frame, metadata->locale, metadata->primary_font,
           s_runtime.primary_font_path, s_runtime.pack->content_revision,
           &settings))
+    return;
+  const char *fallbacks[kArTextPresentationMaximumFallbackFonts];
+  for (uint32_t i = 0; i < metadata->fallback_font_count; ++i)
+    fallbacks[i] = s_runtime.fallback_font_paths[i];
+  if (!ArLocalizationFrame_SetFallbackFonts(frame, fallbacks,
+                                            metadata->fallback_font_count))
     return;
   const ArTextDirection direction =
       metadata->direction == kArLanguageDirection_RightToLeft
@@ -915,6 +1429,15 @@ void ActRaiserLocalizationRuntime_CaptureFrame(
       const ActRaiserLocalizationComposeRoute *compose_route =
           ActRaiserLocalizationRoute_ResolveCompose(
               &compose_observations[index]);
+      /* A final keyboard redraw can still be queued when native acceptance
+       * enters dialogue. Do not recreate a retired entry generation later. */
+      if (compose_route && compose_route->surface_id == 5 &&
+          compose_observations[index].serial <=
+              s_runtime.name_entry_completed_compose_serial) {
+        s_runtime.compose_observation_serial =
+            compose_observations[index].serial;
+        continue;
+      }
       /* Moving the retail name-entry cursor redraws both the keyboard and its
        * native cursor record. That is an update to the active generation, not
        * a new name-entry session: resetting here would discard the authored
@@ -939,23 +1462,15 @@ void ActRaiserLocalizationRuntime_CaptureFrame(
   };
   const bool observation_valid =
       ActRaiserLocalizationText_CopyObservation(&observation);
-  const ActRaiserLocalizationComposeSnapshot *name_surface =
-      ActRaiserLocalizationComposeState_FindObserved(&s_runtime.compose, 5);
   /* The name-entry function returns directly into a new dialogue invocation;
    * it does not call another fixed composer to invalidate its old full-screen
    * surface. Order the two observed event streams instead: a newer dialogue
    * whose entry saw this name-entry generation is the exact inverse boundary.
    * Release before appending the frame so no stale keyboard can overlap even
    * the first native fallback frame of the following dialogue. */
-  if (observation_valid && name_surface &&
-      observation.map_group == map_group &&
-      observation.map_number == map_number &&
-      observation.serial != s_runtime.observation_serial &&
-      observation.entry_compose_serial >= name_surface->generation_serial) {
-    (void)ActRaiserLocalizationComposeState_ReleaseSurface(
-        &s_runtime.compose, 5);
-    s_runtime.name_entry_applied_native_revision = 0;
-  }
+  if (observation_valid &&
+      ActRaiserLocalizationComposeState_FindObserved(&s_runtime.compose, 5))
+    CompleteNameEntry(&observation);
   if (s_runtime.refresh_pending) {
     for (uint32_t surface = kActRaiserLocalizationComposeSurfaceFirst;
          surface <= kActRaiserLocalizationComposeSurfaceLast; ++surface) {
@@ -975,7 +1490,6 @@ void ActRaiserLocalizationRuntime_CaptureFrame(
         frame->name_cursor_argb, bg3_tile_base_words,
         vram_words, vram_word_count, cgram_words, cgram_word_count);
   }
-  StageCanonicalPlayerName();
   RefreshReports();
   if (vram_words && vram_word_count >= 0x8000) {
     /* Fixed US report artwork is not language-bearing. Capture its original
@@ -1004,6 +1518,19 @@ void ActRaiserLocalizationRuntime_CaptureFrame(
           &frame->artwork[kArLocalizationArtwork_Continue], bg3_tile_base_words,
           &continuation, 1, vram_words, vram_word_count, cgram_words, cgram_word_count);
     }
+    if (ActRaiserLocalizationRuntime_DialogueScheduled()) {
+      memset(&frame->artwork[kArLocalizationArtwork_Continue], 0,
+             sizeof(frame->artwork[kArLocalizationArtwork_Continue]));
+      if (s_runtime.session.state.awaiting_page_advance) {
+        /* The exact retail arrow tile and blink clock, independently of a
+         * native source-page cursor (added pages have no such cursor). */
+        const uint16_t arrow = g_ram[(uint16_t)(observation.direct_page + 0x88)] & 0x10
+            ? 0x205f : 0x2000;
+        (void)ActRaiserLocalizationArt_Capture(
+            &frame->artwork[kArLocalizationArtwork_Continue], bg3_tile_base_words,
+            &arrow, 1, vram_words, vram_word_count, cgram_words, cgram_word_count);
+      }
+    }
   }
   if (s_runtime.presentation)
     (void)ActRaiserLocalizationComposeState_AppendFrame(
@@ -1023,58 +1550,40 @@ void ActRaiserLocalizationRuntime_CaptureFrame(
   if (!route) return;
 
   ArLanguagePackError error = {{0}};
-  if (s_runtime.observation_serial != observation.serial) {
-    ArDialogueContentSelection selection;
-    ArDialogueValueResolver resolver;
-    ContentSelection(&selection);
-    ValueResolver(&s_runtime.values, &resolver);
-    s_runtime.observation_serial = observation.serial;
-    s_runtime.dialogue_window.valid = false;
-    s_runtime.route = NULL;
-    if (!ArDialogueSession_Begin(&s_runtime.session, &selection,
-                                 route->semantic_id, &resolver, &error)) {
-      fprintf(stderr,
-              "[localization] %s unavailable (%s); native text retained\n",
-              route->semantic_id,
-              error.message[0] ? error.message : "session failed");
-      return;
-    }
-    s_runtime.route = route;
-  }
-  if (s_runtime.route != route) return;
-
-  const uint16_t page_units = ActRaiserLocalizationRoute_PageUnitCount(
-      route, observation.page_index);
-  ArDialogueNativeProgress progress = {
-      .struct_size = sizeof(progress),
-      .abi_version = AR_DIALOGUE_SESSION_ABI_VERSION,
-      .authored_page_index = observation.page_index,
-    .revealed_unit_count = observation.yielded_to_menu
-        ? page_units : observation.page_unit_index,
-    .page_unit_count = page_units,
-    .awaiting_page_advance = observation.awaiting_page_advance,
-    .terminal = observation.terminal,
-  };
-  if (progress.revealed_unit_count > progress.page_unit_count)
-    progress.revealed_unit_count = progress.page_unit_count;
-  if (s_runtime.session.state.resolved_source == kArDialogueResolvedSource_NativeRom) {
-    (void)ArDialogueSession_ObserveNativeProgress(
-        &s_runtime.session, &progress, &error);
+  if (!ActRaiserLocalizationRuntime_DialogueScheduled() &&
+      !SynchronizeObservedDialogue(s_runtime.pack, &error)) {
+    fprintf(
+        stderr,
+        "[localization] %s progress unavailable (%s); native text retained\n",
+        route->semantic_id, error.message);
+    s_runtime.route = NULL; /* One diagnostic/fallback per invocation. */
     return;
   }
-  if (!ArDialogueSession_SynchronizeNativeProgress(
-          &s_runtime.session, &progress, &error))
+  if (s_runtime.route != route || s_runtime.session.state.resolved_source ==
+                                      kArDialogueResolvedSource_NativeRom)
     return;
   ArDialoguePageSnapshot page;
-  if (!ArDialogueSession_GetPage(&s_runtime.session, &page)) return;
+  if (!ArDialogueSession_GetPage(&s_runtime.session, &page))
+    return;
 
-  if (!BuildDialogueWindow(&page, observation.window_start_page)) return;
+  if (ActRaiserLocalizationRuntime_DialogueScheduled()) {
+    observation.window_start_page = s_runtime.scheduled_window_first_page;
+    observation.window_start_control_count = s_runtime.scheduled_window_clear_control;
+    observation.awaiting_page_advance = s_runtime.session.state.awaiting_page_advance;
+  }
+  if (!BuildDialogueWindow(&page, &observation)) {
+    ScheduleFailed("dialogue window exceeds its presentation capacity");
+    return;
+  }
   const DialogueWindow *window = &s_runtime.dialogue_window;
   uint32_t revealed = window->current_page_clusters;
-  if (page.cluster_count) {
-    revealed = (uint32_t)(((uint64_t)page.revealed_cluster_count *
-                           window->current_page_clusters + page.cluster_count - 1u) /
-                          page.cluster_count);
+  if (page.cluster_count > window->current_page_prefix_clusters) {
+    const uint32_t source_clusters = page.cluster_count - window->current_page_prefix_clusters;
+    const uint32_t source_revealed = page.revealed_cluster_count > window->current_page_prefix_clusters
+        ? page.revealed_cluster_count - window->current_page_prefix_clusters : 0;
+    revealed = (uint32_t)(((uint64_t)source_revealed *
+                           window->current_page_clusters + source_clusters - 1u) /
+                          source_clusters);
     if (revealed > window->current_page_clusters)
       revealed = window->current_page_clusters;
   }
@@ -1090,6 +1599,14 @@ void ActRaiserLocalizationRuntime_CaptureFrame(
       frame, route->surface_id, destination, route->region,
       window->text, window->bytes, (uint32_t)reveal_bytes, window->clusters,
       page.source_revision, direction, route->native_font_pixels);
+  if (!added) {
+    ScheduleFailed("dialogue cannot fit in the current frame");
+    return;
+  }
+  if (ActRaiserLocalizationRuntime_DialogueScheduled()) {
+    frame->dialogue_ticket = s_runtime.dialogue_ticket;
+    frame->dialogue_surface_id = route->surface_id;
+  }
   if (added && revealed == window->current_page_clusters &&
       observation.awaiting_page_advance &&
       frame->artwork[kArLocalizationArtwork_Continue].valid) {

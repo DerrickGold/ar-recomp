@@ -285,6 +285,36 @@ This `save.ini` is game data and is separate from the menu-owned
 `settings.ini`. The latter stores runtime preferences such as the chosen save
 backend; it must never contain the SRAM payload.
 
+### Unicode player names and emulator interchange
+
+Unicode names do **not** change the 8 KiB SRAM layout, its native name field,
+or its checksum algorithm. Enhanced name entry retains the original USA
+keyboard's compatibility bytes in WRAM; the game copies those bytes into SRAM
+when saving. These bytes are a fallback spelling, not a general transliteration
+of every supported script.
+
+The full UTF-8 name is stored in a separate companion file by appending
+`.arname` to the active save path: `save.srm.arname` or `save.ini.arname`.
+Copy both files together to retain the enhanced spelling on another Recomp
+installation. A SNES emulator needs only the ordinary `.srm`; it displays the
+native fallback name. The save editor's import/export operations transfer the
+game image, not an imported companion file.
+
+Companions contain `ARNAME1\0`, the native 32-bit checksum (little-endian),
+nine compatibility-name bytes, a 16-bit UTF-8 byte length (little-endian), and
+that many UTF-8 bytes. Names allow up to eight grapheme clusters and 256 UTF-8
+bytes. On load, both checksum and compatibility spelling must match; malformed,
+missing, or stale companions fall back to the native name without rejecting the
+game save. Playing and saving in an emulator can change the checksum and thus
+invalidate the old companion when returning to Recomp.
+
+The accepted name can precede the first battery save. It remains host-owned
+session metadata until SRAM contains its compatibility spelling. Subsequent
+native saves update the companion's checksum association, even with enhanced
+rendering disabled. Each file is replaced atomically, but the two files are
+not one filesystem transaction: a companion write failure is retried, and an
+interruption between writes can lose the enhanced spelling, not corrupt SRAM.
+
 ### 4.1 Lossless INI schema (version 1)
 
 A field-only INI is unsafe until every meaningful byte has been decoded. It
