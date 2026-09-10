@@ -197,8 +197,8 @@ func dispatchReturnTransfer(context *codegen.Context, instruction *cpu65816.Inst
 		return []string{"  goto " + label(key) + ";"}
 	}
 	context.Demands[codegen.Variant{Address: address, M: m & 1, X: x & 1}] = struct{}{}
-	target := fmt.Sprintf("0x%06xu", address)
-	return []string{fmt.Sprintf("  { if (!_hrv) { cpu->host_return_valid = _hrv; cpu_tailcall_inherit_return_context(_entry_s, _hrv); cpu_tailcall_request(%s, _entry_s, %s); RecompStackPop(); return RECOMP_RETURN_TAILCALL; } RecompStackPop(); return cpu_dispatch_pc_from(cpu, %s, _entry_s, %s); }  /* dispatch-ret tail-call: $%04X is registered func %s_M%dX%d */", target, target, target, target, *instruction.DispatchReturn, name, m&1, x&1)}
+	comment := fmt.Sprintf("/* dispatch-ret tail-call: $%04X is registered func %s_M%dX%d */", *instruction.DispatchReturn, name, m&1, x&1)
+	return []string{"  " + tailCallStatement("", comment, &address)}
 }
 
 func emitIndexedIndirectDispatch(context *codegen.Context, instruction *cpu65816.Instruction, local map[decoder.DecodeKey]struct{}) []string {

@@ -16,6 +16,7 @@
 #include "actraiser/actraiser_localization_text_normalize.h"
 #include "actraiser/actraiser_localization_text.h"
 #include "actraiser/actraiser_localization_values.h"
+#include "actraiser/actraiser_localization_world_navigation.h"
 #include "actraiser_game.h"
 #include "deterministic_hash.h"
 #include "localization/dialogue_session.h"
@@ -70,6 +71,7 @@ typedef struct LocalizationRuntime {
   DialogueWindow dialogue_window;
   ActRaiserLocalizationComposeState compose;
   ActRaiserLocalizationValues values;
+  ActRaiserLocalizationWorldNavigation world_navigation;
   ActRaiserLocalizationNameEntryState name_entry;
   ActRaiserLocalizationNameEntryTracker name_tracker;
   uint64_t name_entry_applied_native_revision;
@@ -208,6 +210,7 @@ static bool EnsureConfigured(void) {
     ArDialogueSession_Init(&s_runtime.session);
     ActRaiserLocalizationComposeState_Init(&s_runtime.compose);
     ActRaiserLocalizationNameEntryTracker_Init(&s_runtime.name_tracker);
+    ActRaiserLocalizationWorldNavigation_Init(&s_runtime.world_navigation);
     s_runtime.content = -1;
     s_runtime.selected_content = -1;
     s_runtime.presentation = -1;
@@ -341,6 +344,8 @@ static bool EnsureConfigured(void) {
   s_runtime.refresh_pending = true;
   s_runtime.hud.resolved = false;
   s_runtime.credits.resolved = false;
+  ActRaiserLocalizationWorldNavigation_Invalidate(
+      &s_runtime.world_navigation);
   s_runtime.name_entry_applied_native_revision = 0;
   fprintf(stderr, "[localization] %s: %s\n",
           presentation ? "enhanced" : "native",
@@ -1458,6 +1463,22 @@ void ActRaiserLocalizationRuntime_CaptureFrame(
             route->region.column + route->region.columns / 2u,
             route->region.row + route->region.rows - 1u, 1, 1});
   }
+}
+
+void ActRaiserLocalizationRuntime_AppendWorldNavigationLabel(
+    ArLocalizationFrame *frame, uint16_t active_location,
+    bool native_label_visible,
+    const uint16_t *cgram_words, size_t cgram_word_count) {
+  if (!s_runtime.presentation || !frame) return;
+  char error[kArLanguagePackErrorCapacity] = {0};
+  if (!ActRaiserLocalizationWorldNavigation_Append(
+          &s_runtime.world_navigation, frame, active_location,
+          native_label_visible, cgram_words, cgram_word_count,
+          ResolveComposeText, NULL, error, sizeof(error)) && error[0])
+    fprintf(stderr,
+            "[localization] world-navigation label unavailable (%s); "
+            "native text retained\n",
+            error);
 }
 
 void ActRaiserLocalizationRuntime_Shutdown(void) {

@@ -93,7 +93,7 @@ static void test_reset_and_io(Apu *apu) {
     apu_reset(apu);
     check(apu->romReadable && apu->spc->pc == 0xffc0u,
           "reset selects independently assembled bootstrap");
-    check(apu_cpuRead(apu, 0xffc0u) == 0xe8u &&
+    check(apu_cpuRead(apu, 0xffc0u) == 0xcdu &&
           apu_cpuRead(apu, 0xfffeu) == 0xc0u, "bootstrap bytes and vector");
     apu_cpuWrite(apu, 0xf2u, 0x22u);
     apu_cpuWrite(apu, 0xf3u, 0x5au);

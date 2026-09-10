@@ -82,7 +82,7 @@ static inline void snes_semantic_write_u64(
 void snes_semantic_write_f64(SnesSemanticWriter *writer, double value);
 
 /** Write exactly schema 2 of main-thread-owned emulated hardware state. */
-bool snes_write_semantic_main_state_v2(
+bool snes_write_semantic_main_state_v3(
     const Snes *snes, SnesSemanticWriter *writer);
 /** Append exactly schema 2 of APU-thread-owned hardware state. The caller
  * owns the APU lock; game extension hooks are never visited. */

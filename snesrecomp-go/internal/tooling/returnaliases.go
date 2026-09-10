@@ -16,18 +16,24 @@ const returnAliasWriteLimit = 64
 // Footprints are context observations, not universal summaries for a store PC.
 // Ranges include every candidate byte and are inclusive, BEFORE 24-bit wrap.
 type ShadowReturnWrite struct {
-	PC               uint32           `json:"site_pc"`
-	InstructionBytes string           `json:"instruction_bytes"`
-	Mnemonic         string           `json:"mnemonic"`
-	Mode             string           `json:"addressing_mode"`
-	LiveMX           analysis.MXState `json:"live_mx"`
-	DB               *uint8           `json:"known_DB,omitempty"`
-	Width            int              `json:"width_bytes,omitempty"`
-	Index            string           `json:"index_register,omitempty"`
-	IndexRange       *[2]uint32       `json:"index_range_inclusive,omitempty"`
-	ByteRange        *[2]uint32       `json:"unwrapped_bus_byte_range_inclusive,omitempty"`
-	Status           string           `json:"status"`
-	Reason           string           `json:"reason"`
+	PC               uint32                 `json:"site_pc"`
+	InstructionBytes string                 `json:"instruction_bytes"`
+	Mnemonic         string                 `json:"mnemonic"`
+	Mode             string                 `json:"addressing_mode"`
+	LiveMX           analysis.MXState       `json:"live_mx"`
+	DB               *uint8                 `json:"known_DB,omitempty"`
+	Width            int                    `json:"width_bytes,omitempty"`
+	Index            string                 `json:"index_register,omitempty"`
+	IndexRange       *[2]uint32             `json:"index_range_inclusive,omitempty"`
+	IndexBits        *ShadowReturnIndexBits `json:"index_known_bits,omitempty"`
+	ByteRange        *[2]uint32             `json:"unwrapped_bus_byte_range_inclusive,omitempty"`
+	Status           string                 `json:"status"`
+	Reason           string                 `json:"reason"`
+}
+
+type ShadowReturnIndexBits struct {
+	Mask  uint16 `json:"mask"`
+	Value uint16 `json:"value"`
 }
 
 func auditReturnWrite(s returnValueState, i *cpu65816.Instruction) ShadowReturnWrite {
@@ -73,16 +79,11 @@ func auditReturnWrite(s returnValueState, i *cpu65816.Instruction) ShadowReturnW
 		reg, r.Index = 2, "Y"
 	}
 	if reg != 0 {
-		hi = 0xffff
-		kind, value := s.regs[reg].symbol()
-		if s.key.X == 1 {
-			hi = 0xff
-			// X=1 zeroes the high byte, including at query entry where only
-			// the low byte may have a tracked value.
-			kind, value = s.regs[reg][0].kind, s.regs[reg][0].value&0xff
-		}
-		if kind == returnValueConstant {
-			lo, hi = uint32(value), uint32(value)
+		width := 2 - int(s.key.X)
+		mask, value := returnWordBits(s.regs[reg], width)
+		lo, hi = uint32(value), uint32(value|(^mask&returnWidthMask(width)))
+		if mask != 0 && mask != returnWidthMask(width) {
+			r.IndexBits = &ShadowReturnIndexBits{Mask: mask, Value: value}
 		}
 		r.IndexRange = &[2]uint32{lo, hi}
 	}
@@ -106,6 +107,7 @@ func collectShadowReturnAliases(image romimage.Image, banks []shadowBank, result
 		"native_entry_frame_MX_and_writable_nonaliasing_stack_window_contracts",
 		"interrupt_and_hardware_writes_preserve_the_guest_frame_and_tracked_registers",
 		"ordinary_store_full_byte_ranges_only_unknown_DB_indices_and_wrap_remain_conservative",
+		"immediate_logic_and_accumulator_shifts_preserve_known_bits_not_branch_or_memory_value_guesses",
 		"other_memory_reads_remain_unknown_no_forwarded_WRAM_values",
 		"existing_exact_variants_only_HLE_and_unmodeled_effects_remain_barriers",
 		"context_specific_conditional_returns_not_termination_or_universal_callee_summaries",
@@ -138,6 +140,9 @@ func writeShadowReturnAliases(output io.Writer, r ShadowReturnCalls, verbose boo
 			}
 			if w.IndexRange != nil {
 				index = fmt.Sprintf("%s[$%04X..$%04X]", w.Index, w.IndexRange[0], w.IndexRange[1])
+			}
+			if w.IndexBits != nil {
+				index += fmt.Sprintf(" (bits & $%04X = $%04X)", w.IndexBits.Mask, w.IndexBits.Value)
 			}
 			fmt.Fprintf(output, "  write=%s bytes=%s %s %s M%dX%d width=%d DB=%s index=%s range=%s %s: %s\n", shadowAddress(w.PC), w.InstructionBytes, w.Mnemonic, w.Mode, w.LiveMX.M, w.LiveMX.X, w.Width, db, index, span, w.Status, w.Reason)
 		}

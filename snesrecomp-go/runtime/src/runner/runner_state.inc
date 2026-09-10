@@ -13,6 +13,9 @@ uint32_t sr_runner_transition_game_timing(
 
     if (operation == SR_GAME_TIMING_BEGIN_FRAME_SLICE) {
         snes_beginVblank(snes);
+        /* Scanout also parks the beam in vblank; it must not consume another
+         * mouse packet. Sample input exactly once at the game-frame boundary. */
+        if (snes->autoJoyRead) snes_input_auto_read(snes);
         snes->forceNmi = true;
         snes->nmiAvail = true;
         if (sr_runner_event_enabled(SR_EVENT_MASK_FRAME)) {
@@ -87,8 +90,27 @@ static SrResult query_input_state(
     out_state->frame_counter = snes->abiFrameCounter;
     out_state->packed_buttons[0] = snes->input1_currentState;
     out_state->packed_buttons[1] = snes->input2_currentState;
-    out_state->auto_joypad[0] = SwapInputBits(snes->input1_currentState);
-    out_state->auto_joypad[1] = SwapInputBits(snes->input2_currentState);
+    out_state->auto_joypad[0] = snes_input_auto_result(snes, 0u);
+    out_state->auto_joypad[1] = snes_input_auto_result(snes, 1u);
+    return SR_RESULT_OK;
+}
+
+static SrResult submit_input_device(
+        SrRunnerHandle *runner, const SrInputDeviceRequest *request) {
+    Snes *snes = runner_from_handle(runner);
+    if (snes == NULL || request == NULL ||
+        request->struct_size < SR_INPUT_DEVICE_REQUEST_V2_SIZE ||
+        request->port >= 2u || request->device > SR_INPUT_DEVICE_MOUSE ||
+        request->reserved != 0u ||
+        (request->buttons & ~(SR_MOUSE_BUTTON_LEFT | SR_MOUSE_BUTTON_RIGHT)) != 0u ||
+        (request->device != SR_INPUT_DEVICE_MOUSE &&
+         (request->buttons != 0u || request->delta_x != 0 || request->delta_y != 0)))
+        return SR_RESULT_INVALID_ARGUMENT;
+    if (request->lifetime_generation != snes->abiLifetimeGeneration)
+        return SR_RESULT_STALE_VIEW;
+    if (sr_runner_audio_query_forbidden()) return SR_RESULT_BUSY;
+    snes_input_submit(snes, request->port, request->device, request->buttons,
+                      request->delta_x, request->delta_y);
     return SR_RESULT_OK;
 }
 
@@ -131,7 +153,8 @@ static const SnesRunnerApi k_runner_api = {
         SR_RUNNER_CAP_PPU_FRAME_RESET |
         SR_RUNNER_CAP_PPU_OBJ_CAPTURE |
         SR_RUNNER_CAP_APU_STATE_SNAPSHOT |
-        SR_RUNNER_CAP_SEMANTIC_DIGEST,
+        SR_RUNNER_CAP_SEMANTIC_DIGEST | SR_RUNNER_CAP_INPUT_DEVICES |
+        SR_RUNNER_CAP_EXECUTION_CHECKPOINT | SR_RUNNER_CAP_POLL_WAIT,
     get_component,
     query_generations,
     borrow_memory,
@@ -178,6 +201,7 @@ static const SnesRunnerApi k_runner_api = {
     configure_ppu_obj_capture,
     sr_runner_query_apu_state,
     sr_runner_query_semantic_digest,
+    submit_input_device,
 };
 
 /* Keep synchronized with the source boundary in runner.cmake. */
@@ -215,7 +239,8 @@ static const SrRunnerDescriptor k_runner = {
         SR_RUNNER_CAP_PPU_FRAME_RESET |
         SR_RUNNER_CAP_PPU_OBJ_CAPTURE |
         SR_RUNNER_CAP_APU_STATE_SNAPSHOT |
-        SR_RUNNER_CAP_SEMANTIC_DIGEST,
+        SR_RUNNER_CAP_SEMANTIC_DIGEST | SR_RUNNER_CAP_INPUT_DEVICES |
+        SR_RUNNER_CAP_EXECUTION_CHECKPOINT | SR_RUNNER_CAP_POLL_WAIT,
     .implementation = "portable",
 };
 

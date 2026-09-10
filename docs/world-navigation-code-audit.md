@@ -12,6 +12,26 @@ records the remediation against `427fa7a`, including compact model storage,
 cache-owned recency, presentation ownership separation and measured reuse of
 model projections and cloud-shadow receiver geometry.
 
+Localization follow-up (2026-09-09): the navigation OAM classifier now
+separates its variable location-glyph prefix from the fixed plaque and Palace
+ranges. Each range is rasterized into its own immutable buffer. The game-owned
+localization adapter resolves the selected 1-based `$0341` location to the
+existing `city.*.name` contracts and publishes a frame-ABI-27 screen-space
+record with live OBJ colors. The generic presenter handles fitting, font
+settings, cached upload and logical-leading RTL; the navigation presenter owns
+only authentic-to-output projection, native-layer suppression/fallback, draw
+order and brightness. No filesystem, pack parser, Unicode shaper, SDL object or
+backend handle crosses the game-to-presentation frame. Synthetic OAM coverage
+includes blank and five-through-nine-glyph prefixes, while the captured
+Fillmore fixture pins the observed eight-glyph/12-plaque/9-Palace split.
+Real Cocoa/Metal replay `runs/20260909-210003` renders the built-in USA source
+through the enhanced path at 1792x1344 from fade-in through full brightness;
+`runs/20260909-210206` repeats gf370 with a temporary RTL Arabic Fillmore name
+and Noto Arabic fallback. Inspection confirms native plaque/Palace retention,
+no old-glyph leakage, live palette band/shadow styling, and right-edge logical
+leading alignment. Both runs exit at their requested frame with zero localized
+text failures; these are visual smoke checks, not portable golden fixtures.
+
 ## Findings and follow-ups
 
 1. **Boundary-check coverage gap — confirmed and closed.**

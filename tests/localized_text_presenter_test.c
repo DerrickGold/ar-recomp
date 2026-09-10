@@ -8,6 +8,7 @@
 #include "platform/sdl/text_rasterizer_sdl.h"
 #include "host/font_resources.h"
 #include "actraiser/actraiser_localization_grid.h"
+#include "actraiser/actraiser_localization_world_navigation.h"
 #include "render/localized_text_presenter.h"
 
 static int failures, test_size, test_scale, test_treatment, test_example;
@@ -324,6 +325,66 @@ static void ExerciseSingleLine(ArRenderDevice *device,
       CHECK(((TextureSink *)device->context)->uploads == uploads);
     }
   }
+}
+
+static void ExerciseScreenText(ArRenderDevice *device) {
+  test_case = "authentic screen-space label";
+  ArLocalizationFrame frame;
+  ArLocalizationFrame_Reset(&frame);
+  CHECK(ArLocalizationFrame_SetFont(
+      &frame, "fr", "test", s_test_font, 1, &frame.settings));
+  const char text[] = "Région de l'Été";
+  CHECK(ArLocalizationFrame_AddScreenText(
+      &frame, kActRaiserLocalizationWorldNavigationSurface, 156, 25, 76, 8,
+      text, sizeof(text) - 1, 15, 15, 3,
+      kArTextDirection_LeftToRight, 7,
+      kArLocalizationTextLayout_SingleLineLabel));
+  ArLocalizedPreparedFrame prepared;
+  const ArRenderRectI bounds = {100, 50, 304, 32};
+  CHECK(ArLocalizedTextPresenter_PrepareScreenText(
+      device, &frame, kActRaiserLocalizationWorldNavigationSurface,
+      bounds, &prepared));
+  CHECK(prepared.text_count == 1 && !prepared.mask_count);
+  if (prepared.text_count == 1) {
+    const ArRenderRectI dst = prepared.texts[0].destination;
+    CHECK(dst.x == bounds.x && dst.w <= bounds.w && dst.h <= bounds.h);
+    CHECK(dst.y >= bounds.y && dst.y + dst.h <= bounds.y + bounds.h);
+    const unsigned uploads = ((TextureSink *)device->context)->uploads;
+    CHECK(ArLocalizedTextPresenter_PrepareScreenText(
+        device, &frame, kActRaiserLocalizationWorldNavigationSurface,
+        bounds, &prepared));
+    CHECK(((TextureSink *)device->context)->uploads == uploads);
+    CHECK(ArLocalizedTextPresenter_DrawWithBrightness(
+        device, &prepared, 0.5f));
+    CHECK(fabsf(((TextureSink *)device->context)->last_tint.r - 0.5f) < .001f);
+  }
+
+  ArLocalizationTextLanguage rtl = {
+      .locale = "fr", .direction = kArTextDirection_RightToLeft};
+  CHECK(ArLocalizationFrame_SetTextLanguage(&frame, &rtl));
+  CHECK(ArLocalizedTextPresenter_PrepareScreenText(
+      device, &frame, kActRaiserLocalizationWorldNavigationSurface,
+      bounds, &prepared));
+  CHECK(prepared.text_count == 1);
+  if (prepared.text_count == 1)
+    CHECK(prepared.texts[0].destination.x +
+              prepared.texts[0].destination.w == bounds.x + bounds.w);
+
+  ArLocalizationFrame blank;
+  ArLocalizationFrame_Reset(&blank);
+  CHECK(ArLocalizationFrame_SetFont(
+      &blank, "fr", "test", s_test_font, 1, &blank.settings));
+  CHECK(ArLocalizationFrame_AddScreenText(
+      &blank, kActRaiserLocalizationWorldNavigationSurface,
+      156, 25, 76, 8, "", 0, 0, 0, 4,
+      kArTextDirection_LeftToRight, 7,
+      kArLocalizationTextLayout_SingleLineLabel));
+  CHECK(ArLocalizedTextPresenter_PrepareScreenText(
+      device, &blank, kActRaiserLocalizationWorldNavigationSurface,
+      bounds, &prepared));
+  CHECK(!prepared.text_count);
+  CHECK(!ArLocalizedTextPresenter_PrepareScreenText(
+      device, &blank, 99, bounds, &prepared));
 }
 
 static int ExerciseReport(ArRenderDevice *device, ArEnhancedTextSettings settings,
@@ -1445,6 +1506,7 @@ int main(void) {
   ExerciseMaximumSharedColumns(&device);
   ExerciseCenteredPage(&device);
   ExerciseRtlDialogue(&device);
+  ExerciseScreenText(&device);
   const int sizes[] = {80, 110, 140};
   for (int scale = 2; scale <= 6; scale += 2) {
     for (size_t size = 0; size < 3; ++size) {

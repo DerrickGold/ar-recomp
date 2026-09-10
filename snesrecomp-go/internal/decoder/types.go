@@ -133,16 +133,20 @@ type DataRegion struct {
 }
 
 type Options struct {
-	End                *uint16
-	MaxInstructions    int
-	DispatchHelpers    map[uint32]string
-	IndirectCallTables map[uint32]IndirectCallTable
-	IndirectDispatch   map[uint32]DispatchAuth
-	HLEDispatch        map[uint16]string
-	DataRegions        []DataRegion
-	CalleeExitMX       map[Variant]MX
-	CalleeExitModes    map[Variant][]MX
-	SiblingEntryPCs    map[uint16]struct{}
+	NativeReturnTables bool
+	// Inclusive bus-PC ranges whose authored semantics must not be replaced
+	// by a ROM-only helper contract. Includes HLE and body/width overrides.
+	NativeReturnBarriers [][2]uint32
+	End                  *uint16
+	MaxInstructions      int
+	DispatchHelpers      map[uint32]string
+	IndirectCallTables   map[uint32]IndirectCallTable
+	IndirectDispatch     map[uint32]DispatchAuth
+	HLEDispatch          map[uint16]string
+	DataRegions          []DataRegion
+	CalleeExitMX         map[Variant]MX
+	CalleeExitModes      map[Variant][]MX
+	SiblingEntryPCs      map[uint16]struct{}
 	// InternalResumePCs are address-taken continuation blocks that remain
 	// registered as external entries, but must be decoded into an active
 	// caller region when reached by an internal control-flow edge. This

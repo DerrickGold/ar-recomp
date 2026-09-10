@@ -9,6 +9,7 @@
 #include "cart.h"
 #include "cpu.h"
 #include "dma.h"
+#include "input.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -33,6 +34,10 @@ struct Snes {
     bool disableRender;
     uint32_t ramAdr;
     uint8_t *ram;
+    /* Keep new input state ahead of the aligned ABI block, preserving the
+     * relative alignment and length of the legacy tail beginning at hPos. */
+    SnesInputPort inputPorts[2];
+    bool inputLatch;
     /* ABI view generations live before hPos so the legacy raw savestate tail
      * that begins at hPos retains its exact byte count and layout. */
     uint64_t abiLifetimeGeneration;

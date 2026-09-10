@@ -32,7 +32,7 @@ enum {
      * snapshots cannot be decoded by that layout and must not be accepted as
      * if they were current native snapshots. */
     RTL_SNAPSHOT_LEGACY_VERSION = 11u,
-    RTL_SNAPSHOT_VERSION = 12u,
+    RTL_SNAPSHOT_VERSION = 13u,
     RTL_SNAPSHOT_EXTENDED_AUDIO = 0x00010000u,
     RTL_AUDIO_NATIVE_RATE = 32040,
     RTL_AUDIO_CHUNK = 1024
@@ -378,6 +378,7 @@ void RtlSaveSnapshot(const char *filename) {
     state.base.saving = true;
     state.base.portable = true;
     state.base.failed = false;
+    state.base.format_version = RTL_SNAPSHOT_VERSION;
     state.file = file;
     saveload_u32(&state.base, &magic);
     saveload_u32(&state.base, &version);
@@ -393,6 +394,7 @@ bool RtlLoadSnapshot(const char *filename) {
     uint8 header[8];
     bool portable;
     uint32 legacy_version;
+    uint32 portable_version;
     FILE *file;
     FileSaveLoad state;
     if (filename == NULL || g_snes == NULL) return false;
@@ -404,16 +406,23 @@ bool RtlLoadSnapshot(const char *filename) {
     }
     legacy_version = RTL_SNAPSHOT_LEGACY_VERSION |
         (dsp_extendedVoicesEnabled() ? RTL_SNAPSHOT_EXTENDED_AUDIO : 0u);
+    portable_version = snapshot_version();
     if (!saveload_decode_snapshot_header(
-            header, RTL_SNAPSHOT_MAGIC, snapshot_version(), legacy_version,
+            header, RTL_SNAPSHOT_MAGIC, portable_version, legacy_version,
             &portable)) {
-        fclose(file);
-        return false;
+        portable_version = 12u | (portable_version & RTL_SNAPSHOT_EXTENDED_AUDIO);
+        if (!saveload_decode_snapshot_header(
+                header, RTL_SNAPSHOT_MAGIC, portable_version, legacy_version, &portable)) {
+            fclose(file);
+            return false;
+        }
     }
     state.base.func = file_saveload;
     state.base.saving = false;
     state.base.portable = portable;
     state.base.failed = false;
+    state.base.format_version = (portable ? portable_version : legacy_version) &
+        ~RTL_SNAPSHOT_EXTENDED_AUDIO;
     state.file = file;
     RtlApuLock();
     snes_saveload(g_snes, &state.base);

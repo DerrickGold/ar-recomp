@@ -132,6 +132,7 @@ if(BUILD_TESTING)
         tests/public_header_events_test.c
         tests/public_header_audio_test.c
         tests/public_header_determinism_test.c
+        tests/public_header_input_test.c
         tests/public_header_input_replay_test.c
         tests/public_header_mutation_test.c
         tests/public_header_api_test.c)
@@ -210,6 +211,22 @@ if(BUILD_TESTING)
         COMMAND snesrecomp_runtime_dma_test)
 
     add_executable(snesrecomp_runtime_snes_test tests/snes_test.c)
+    add_executable(snesrecomp_runtime_input_test tests/input_test.c)
+    target_link_libraries(snesrecomp_runtime_input_test PRIVATE snesrecomp_runtime)
+    target_include_directories(snesrecomp_runtime_input_test PRIVATE ${SNESRECOMP_RUNNER_PRIVATE_INCLUDE_DIRS})
+    add_test(NAME snesrecomp_runtime_input COMMAND snesrecomp_runtime_input_test)
+    add_executable(snesrecomp_runtime_boot_protocol_test tests/boot_protocol_test.c)
+    target_link_libraries(snesrecomp_runtime_boot_protocol_test PRIVATE snesrecomp_runtime)
+    target_include_directories(snesrecomp_runtime_boot_protocol_test PRIVATE ${SNESRECOMP_RUNNER_PRIVATE_INCLUDE_DIRS})
+    add_test(NAME snesrecomp_runtime_boot_protocol COMMAND snesrecomp_runtime_boot_protocol_test)
+    foreach(_device_test snesrecomp_runtime_input_test snesrecomp_runtime_boot_protocol_test)
+        if(MSVC)
+            target_compile_options(${_device_test} PRIVATE /W4)
+        else()
+            target_compile_options(${_device_test} PRIVATE
+                -Wall -Wextra -Wpedantic -Wmissing-prototypes -Wstrict-prototypes)
+        endif()
+    endforeach()
     target_link_libraries(snesrecomp_runtime_snes_test PRIVATE
         snesrecomp_runtime)
     add_test(NAME snesrecomp_runtime_snes
@@ -314,7 +331,7 @@ if(BUILD_TESTING)
         COMMAND snesrecomp_runtime_cpu_state_test)
 
     add_executable(snesrecomp_runtime_cpu_infra_test
-        tests/cpu_infra_test.c src/core/common_cpu_infra.c
+        tests/cpu_infra_test.c src/core/common_cpu_infra.c src/core/paired_tail.c
         src/runner/runner_game_module.c src/snes/saveload.c)
     target_include_directories(snesrecomp_runtime_cpu_infra_test PRIVATE
         ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}

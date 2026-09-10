@@ -15,6 +15,7 @@
 #include <string.h>
 #include "present.h"
 #include "action/action_effect_render.h"
+#include "actraiser/actraiser_localization_world_navigation.h"
 #include "constants.h"
 #include "deterministic_hash.h"
 #include "snesrecomp/game/types.h"
@@ -23,6 +24,7 @@
 #include "presentation_outcome.h"
 #include "render/render_device.h"
 #include "render/render_output.h"
+#include "render/localized_text_presenter.h"
 #include "scene3d_math.h"
 #include "sim/sim3d_depth_pass.h"
 #include "sim/sim3d_performance.h"
@@ -188,7 +190,8 @@ typedef struct WorldNavigationReceiverKey {
 
 static struct {
   ArRenderTexture palace;
-  ArRenderTexture ui;
+  ArRenderTexture label;
+  ArRenderTexture plaque;
   bool uploaded;
 } s_world_composition;
 
@@ -338,25 +341,37 @@ void UploadWorldNavigationComposition(const FrameSlot *slot) {
 
   ArRenderTexture palace = EnsureWorldNavigationCompositionTexture(
       &s_world_composition.palace);
-  ArRenderTexture ui = EnsureWorldNavigationCompositionTexture(
-      &s_world_composition.ui);
+  ArRenderTexture plaque = EnsureWorldNavigationCompositionTexture(
+      &s_world_composition.plaque);
+  ArRenderTexture label = composition->label.visible
+      ? EnsureWorldNavigationCompositionTexture(&s_world_composition.label)
+      : ArRenderTexture_Invalid();
   if (!ArRenderTexture_IsValid(palace) ||
-      !ArRenderTexture_IsValid(ui))
+      !ArRenderTexture_IsValid(plaque) ||
+      (composition->label.visible && !ArRenderTexture_IsValid(label)))
     return;
   ArRenderRectI palace_rect = {
     0, 0, composition->palace.width, composition->palace.height,
   };
-  ArRenderRectI ui_rect = {
-    0, 0, composition->ui.width, composition->ui.height,
+  ArRenderRectI plaque_rect = {
+    0, 0, composition->plaque.width, composition->plaque.height,
+  };
+  ArRenderRectI label_rect = {
+    0, 0, composition->label.width, composition->label.height,
   };
   if (!ArRenderDevice_UpdateTexture(
           &g_render_device, palace, &palace_rect,
           g_sim_world_navigation_palace_pixels,
           kSimWorldNavigationCompositionPitch) ||
       !ArRenderDevice_UpdateTexture(
-          &g_render_device, ui, &ui_rect,
-          g_sim_world_navigation_ui_pixels,
-          kSimWorldNavigationCompositionPitch))
+          &g_render_device, plaque, &plaque_rect,
+          g_sim_world_navigation_plaque_pixels,
+          kSimWorldNavigationCompositionPitch) ||
+      (composition->label.visible &&
+       !ArRenderDevice_UpdateTexture(
+           &g_render_device, label, &label_rect,
+           g_sim_world_navigation_label_pixels,
+           kSimWorldNavigationCompositionPitch)))
     return;
   s_world_composition.uploaded = true;
 }
@@ -3056,8 +3071,8 @@ static PresentationOutcome DrawWorldNavigationScene(
 
   /* INIDISP is a master brightness applied after the PPU has composed every
    * layer. Do the same for the host-owned world and all its effects. The
-   * Palace/UI captures are drawn afterward because PpuRasterizeObjRange has
-   * already applied this frame's brightness to their pixels. */
+   * Palace/plaque/label captures are drawn afterward because OBJ range
+   * rasterization already applied this frame's brightness to their pixels. */
   if (!DrawWorldNavigationMasterFade(slot, viewport)) {
     return kPresentationOutcome_CoreFailure;
   }
@@ -3087,7 +3102,9 @@ PresentationOutcome PresentWorldNavigation3D(const FrameSlot *slot) {
   if (!EnsureWorldNavigationResources(slot)) return kPresentationOutcome_CoreFailure;
   if (!composition->empty_animation &&
       (!ArRenderTexture_IsValid(s_world_composition.palace) ||
-       !ArRenderTexture_IsValid(s_world_composition.ui)))
+       !ArRenderTexture_IsValid(s_world_composition.plaque) ||
+       (composition->label.visible &&
+        !ArRenderTexture_IsValid(s_world_composition.label))))
     return kPresentationOutcome_CoreFailure;
 
   const int aspect_width = slot->visible_width *
@@ -3103,6 +3120,36 @@ PresentationOutcome PresentWorldNavigation3D(const FrameSlot *slot) {
   const ArRenderRectI viewport = {
     0, 0, output_frame.viewport.w, output_frame.viewport.h,
   };
+  ArLocalizedPreparedFrame localized_label;
+  bool localized_label_ready = false;
+  if (!composition->empty_animation && composition->label.visible) {
+    const ArLocalizationScreenTextRecord *record =
+        ArLocalizationFrame_FindScreenText(
+            &slot->localization,
+            kActRaiserLocalizationWorldNavigationSurface);
+    if (record &&
+        (unsigned)record->x + record->width <=
+            kSimWorldNavigationCompositionWidth &&
+        (unsigned)record->y + record->height <=
+            kSimWorldNavigationCompositionHeight) {
+      const ArRenderPointF top_left = WorldNavigationAuthenticToOutput(
+          slot, viewport, record->x, record->y);
+      const ArRenderPointF bottom_right = WorldNavigationAuthenticToOutput(
+          slot, viewport, record->x + record->width,
+          record->y + record->height);
+      const int left = (int)lroundf(top_left.x);
+      const int top = (int)lroundf(top_left.y);
+      const ArRenderRectI bounds = {
+          left, top,
+          (int)lroundf(bottom_right.x) - left,
+          (int)lroundf(bottom_right.y) - top,
+      };
+      localized_label_ready = ArLocalizedTextPresenter_PrepareScreenText(
+          &g_render_device, &slot->localization,
+          kActRaiserLocalizationWorldNavigationSurface,
+          bounds, &localized_label);
+    }
+  }
   WorldNavigationProjection projection;
   const PresentationOutcome outcome = DrawWorldNavigationScene(slot, viewport, &projection);
   if (!PresentationOutcome_IsUsable(outcome)) {
@@ -3112,8 +3159,16 @@ PresentationOutcome PresentWorldNavigation3D(const FrameSlot *slot) {
   if (!composition->empty_animation &&
       (!DrawWorldNavigationPalace(slot, viewport, &projection) ||
        !DrawWorldNavigationCompositionLayer(
-           slot, viewport, &composition->ui,
-           s_world_composition.ui, (ArRenderPointF){0}, 1.0f))) {
+           slot, viewport, &composition->plaque,
+           s_world_composition.plaque, (ArRenderPointF){0}, 1.0f) ||
+       (!localized_label_ready && composition->label.visible &&
+        !DrawWorldNavigationCompositionLayer(
+            slot, viewport, &composition->label,
+            s_world_composition.label, (ArRenderPointF){0}, 1.0f)) ||
+       (localized_label_ready &&
+        !ArLocalizedTextPresenter_DrawWithBrightness(
+            &g_render_device, &localized_label,
+            slot->sim.world_navigation_brightness / 15.0f)))) {
     ArRenderOutputFrame_Abort(&output_frame);
     return kPresentationOutcome_CoreFailure;
   }
@@ -3173,8 +3228,11 @@ void PresentWorldNav_ResetResources(void) {
       &g_render_device, s_world_composition.palace);
   s_world_composition.palace = ArRenderTexture_Invalid();
   ArRenderDevice_DestroyTexture(
-      &g_render_device, s_world_composition.ui);
-  s_world_composition.ui = ArRenderTexture_Invalid();
+      &g_render_device, s_world_composition.label);
+  s_world_composition.label = ArRenderTexture_Invalid();
+  ArRenderDevice_DestroyTexture(
+      &g_render_device, s_world_composition.plaque);
+  s_world_composition.plaque = ArRenderTexture_Invalid();
   s_world_composition.uploaded = false;
   s_world_weather.unavailable = false;
   PresentWorldNavSky_Reset();

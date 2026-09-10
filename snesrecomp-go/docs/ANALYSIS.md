@@ -514,6 +514,88 @@ authored sibling boundary that formerly required an implementation-only
 registry tail transfer becomes a local goto; that artificial edge is omitted
 from both semantic builds.
 
+## Verified configuration materialization
+
+`materialize` is the explicit write/adoption counterpart to read-only
+`analyze`. It is available in both the packaged native `snesbuild` driver and
+the development `v2regen` tool; no Python or interpreter is involved.
+
+```sh
+snesbuild materialize --root . --rom game.sfc --cfg-dir recomp \
+  --out-dir build/static-bundle --jobs 8 --allow-stubs
+```
+
+Every relative path is resolved from `--root` (default: current directory).
+The output directory must not exist, its parent must exist, and it must not
+overlap the input cfg or be `src/gen`. There is no force/in-place option.
+Symlinks and special files inside the input tree are rejected. The ROM and
+cfg are snapshotted into private staging; analysis and both regenerations
+consume those same bytes without modifying the source project.
+
+The command performs the following verified transformation:
+
+1. Analyze the full cfg and create the existing ROM-hashed proven-fact database.
+   An authored conflict aborts with the site/reason before publishing anything.
+2. Copy the cfg/support files. Remove only metadata-free canonical `func`
+   declarations covered by persisted routine or exact continuation facts,
+   and authored dispatch declarations with closed, independently **exact**
+   matches. Compatible bounds guards, partial matches, custom names, HLE,
+   unknown/future entry options, and width/stack overrides remain authored.
+   Preserve unchanged lines, line endings, and comments, including inline
+   comments on removed declarations. Record each removed original line and
+   its proof evidence in the manifest.
+3. Reload the persisted DB and regenerate full and reduced cfg with that same
+   DB, exact-M/X policy, and default chunk layout. Rediscovery, ownership,
+   ROM-table, and metadata validation remain enabled. Generate `funcs.h` for
+   both, including canonical declarations supplied by the database.
+4. Require identical generated file sets and bytes, including `funcs.h`, plus
+   matching semantic source hash, final variant count, unresolved count, and
+   stub count. Any difference fails closed. Even a source-layout-only
+   difference is rejected; the semantic hash alone is not this gate.
+5. Exclusively reserve the output directory and publish the verified bundle.
+   `materialization.json` is written last as the completion marker. An I/O
+   failure during publication can leave an incomplete directory without that
+   marker; it must not be adopted. Existing directories are never replaced.
+
+The completed layout is:
+
+```text
+static-bundle/
+  recomp/                 copied cfg/support files, reduced bank declarations
+    funcs.h               regenerated and byte-checked, not copied stale
+  analysis-db.json         required, machine-generated hermetic build input
+  gen/                    verified generated C and headers
+  materialization.json    removals/provenance, ROM and input/output SHA-256s
+```
+
+The manifest and database contain no timestamps or build-machine paths.
+The ROM snapshot is not published. The original cfg (including its original
+`funcs.h`) is untouched. Regenerate from the published inputs with:
+
+```sh
+v2regen regen --rom game.sfc \
+  --cfg-dir build/static-bundle/recomp \
+  --analysis-db build/static-bundle/analysis-db.json \
+  --out-dir build/static-bundle/gen \
+  --funcs-out build/static-bundle/recomp/funcs.h --allow-stubs
+```
+
+Keep cfg and DB together, and configure a test build to use the bundle's
+generated sources and header. Do not run plain `sync-funcs` on the reduced cfg:
+it cannot see database-supplied declarations. Do not re-analyze only the reduced
+cfg and discard the original DB; materialization is a snapshot migration, not
+yet an incremental database-maintenance workflow. Retain the authored source
+and manifest for future changes and rematerialization.
+
+The equality claim is **full versus reduced cfg under the same proven-analysis
+mode**, not default versus proven-analysis generation. It neither proves that
+unresolved sites are cold nor removes existing traps. `--allow-stubs` permits
+those existing markers but never a generated difference. First adoption of
+proven-analysis mode on a game still needs its normal runtime/replay validation.
+Removing cfg declarations after this byte-equality gate introduces no further
+generated behavior change. Conditional return, alias, known-bit, and heuristic
+landing reports are not promoted by this workflow.
+
 ## Entry and transfer invariants
 
 Entry classification and transfer behavior are separate axes:
@@ -1085,14 +1167,34 @@ PHK pushes the active program bank, PHB saves the current tracked DB, and PLB
 uses the byte actually pulled. DB starts unknown and flows through inspected
 calls rather than being assumed equal to PB or preserved by every callee.
 
-For indexed stores, a known register value supplies a singleton range;
-otherwise the live X flag bounds the full index domain to 0–255 or 0–65535.
+For indexed stores, a known register value supplies a singleton range.
+Partial known-bit values supply a conservative minimum/maximum; otherwise
+the live X flag bounds the full index domain to 0–255 or 0–65535.
 The footprint includes every possible destination byte, with the store width
 selected by M or X as appropriate. Bank carry and the second byte count:
 a word store at `$7E:FFFF` stays in WRAM, but one at `$7F:FFFF` reaches the
 bank-$80 low-WRAM mirror and is rejected. Overflowing sums are not masked
 into an apparently safe interval. This pass does not infer bounds from a
 nearby comparison or substitute a likely index value.
+
+Within this query, immediate AND/ORA/EOR and accumulator ASL/LSR/ROL/ROR
+preserve known bits instead of discarding the whole value. For example,
+`AND #$00FF; ASL; ASL; TAX` gives X a 0–1020 range in 16-bit mode, even when
+the original A is unknown. Shifts of constants remain constants. Rotation
+uses the actual tracked incoming carry; a shifted-out bit establishes the
+new carry only if that bit is known. Logical operations preserve carry.
+The ordinary register-transfer and byte-stack model carries these bounds
+through calls, pushes/pulls, and XBA. An 8-bit accumulator operation still
+preserves the hidden B byte; it does not zero-extend A into a wide X/Y.
+Conversely, narrowing X zeroes its high byte even after a later PLP restores
+16-bit index width. See the
+[WDC width/transfer caveats](https://www.westerndesigncenter.com/wdc/documentation/w65c816s.pdf).
+
+No memory read is converted into a guessed constant. Memory-operand logical
+operations remain conservative, incoming-PC/status symbols are not interpreted
+as numeric bit masks, and these bounds do not prune branches or prove loop
+termination. Only the existing report-only stack-alias query uses this domain;
+local return provenance, the earlier call audit, and production analysis do not.
 
 Low-WRAM mirrors, direct-page and indirect operands, unknown DB, hardware
 registers, cartridge writes, RMW instructions, and block moves remain
@@ -1105,7 +1207,10 @@ control effects remain barriers even after a disjoint store.
 
 Each root retains its call checks and adds `write_footprints`, with instruction
 bytes, live M/X, known DB, index domain, inclusive unwrapped byte range, and
-a proof or blocking reason. Footprints are deduplicated context observations,
+a proof or blocking reason. `index_known_bits`, when present, gives a mask and
+value within the live index width: `(index & mask) == value`. The accompanying
+range covers all represented values, including holes due to alignment; its
+endpoints are not samples. Footprints are deduplicated context observations,
 not execution counts or universal store-site summaries. `write_footprint_status_counts`
 and `sites_with_disjoint_write_context` are computed before the 64-footprint
 display limit; `write_footprints_omitted` makes truncation explicit. A site
@@ -1117,6 +1222,8 @@ depth/state/root/program limits, and non-termination caveats still apply.
 Memory barriers suppressed by this exclusion do not become production facts,
 new roots, inline-data skips, cfg edits, or HLE replacements. See
 [stack-alias validation](RETURN_ALIAS_VALIDATION.md).
+For the mask/shift extension and its three-game comparison, see
+[known-bit validation](RETURN_BITS_VALIDATION.md).
 
 ### Indexed-memory RTS targets and writer candidates
 

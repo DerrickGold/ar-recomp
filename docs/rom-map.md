@@ -525,7 +525,10 @@ World-navigation state is likewise explicit. `$02:8213` updates focus
 `$0300/$0302` and zoom target `$0318`; `$02:8384` uploads current matrix
 `$0304-$030A` and focus to the Mode-7 registers. `$01:B6CA` clears `$0341`,
 then selects the first `$01:B73C` rectangle containing the focus; zero means
-the Palace is outside every town border. `$02:AF86` supplies animation by
+the Palace is outside every town border. That same 1-based identity selects
+the native location glyphs and the host `city.*.name` localization key; the
+native OAM is a variable glyph prefix followed by a fixed 6x2 plaque and 3x3
+Palace. `$02:AF86` supplies animation by
 copying one `$0A:B000/B040/B080/B0C0` high-byte plane into both Mode-7 tiles
 `$00` and `$AA`. See
 [rendering-engine.md §13h](rendering-engine.md#13h-world-navigation-full-plane-scene-2026-07-27)

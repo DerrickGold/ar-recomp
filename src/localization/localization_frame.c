@@ -12,6 +12,7 @@ static bool FrameStorageValid(const ArLocalizationFrame *frame) {
           AR_MEMBER_END(ArLocalizationFrame, dialogue_surface_id) &&
       frame->abi_version == AR_LOCALIZATION_FRAME_ABI_VERSION &&
       frame->cells.count <= kArTextCellRecordCapacity &&
+      frame->screen_text_count <= kArLocalizationFrameScreenTextCapacity &&
       frame->snapshot_count <= kArTextCellRecordCapacity &&
       frame->bidi.count <= kArTextMaximumBidiSpans &&
       frame->grid_count <= kArLocalizationFrameGridCapacity &&
@@ -167,6 +168,62 @@ bool ArLocalizationFrame_AddTextWithObjects(
       inline_objects, inline_object_count);
 }
 
+bool ArLocalizationFrame_AddScreenText(
+    ArLocalizationFrame *frame, uint32_t surface_id,
+    uint16_t x, uint16_t y, uint16_t width, uint16_t height,
+    const char *utf8, size_t utf8_bytes,
+    uint32_t revealed_cluster_count, uint32_t cluster_count,
+    uint64_t source_revision, ArTextDirection direction,
+    uint8_t native_font_pixels, ArLocalizationTextLayoutKind layout) {
+  if (!FrameStorageValid(frame) || !frame->font_revision || !surface_id ||
+      !width || !height || !utf8 || !source_revision ||
+      (!utf8_bytes && cluster_count) || (utf8_bytes && !cluster_count) ||
+      revealed_cluster_count > cluster_count || !native_font_pixels ||
+      direction < kArTextDirection_Auto ||
+      direction > kArTextDirection_RightToLeft ||
+      (layout != kArLocalizationTextLayout_SingleLineLabel &&
+       layout != kArLocalizationTextLayout_CenteredLabel &&
+       layout != kArLocalizationTextLayout_RightAlignedLabel &&
+       layout != kArLocalizationTextLayout_LeftAlignedLabel) ||
+      frame->screen_text_count >= kArLocalizationFrameScreenTextCapacity ||
+      frame->snapshot_count >= kArTextCellRecordCapacity ||
+      utf8_bytes >= kArLocalizationFrameTextCapacity - frame->text_bytes ||
+      ArTextCellRecordSet_Find(&frame->cells, surface_id) ||
+      ArLocalizationFrame_FindScreenText(frame, surface_id))
+    return false;
+
+  const uint8_t slot = frame->snapshot_count;
+  const uint32_t offset = frame->text_bytes;
+  memcpy(frame->text + offset, utf8, utf8_bytes);
+  frame->text[offset + utf8_bytes] = 0;
+  frame->text_bytes += (uint32_t)utf8_bytes + 1u;
+  frame->snapshots[slot] = (ArLocalizationTextSnapshot){
+      .style_id = kArTextStyle_RetailBlueWhiteBands,
+      .surface_id = surface_id,
+      .utf8_offset = offset,
+      .utf8_bytes = (uint32_t)utf8_bytes,
+      .revealed_cluster_count = revealed_cluster_count,
+      .cluster_count = cluster_count,
+      .source_revision = source_revision,
+      .language.direction = direction,
+      .layout = layout,
+      .native_font_pixels = native_font_pixels,
+  };
+  memcpy(frame->snapshots[slot].language.locale, frame->locale,
+         sizeof(frame->locale));
+  frame->screen_texts[frame->screen_text_count++] =
+      (ArLocalizationScreenTextRecord){
+          .surface_id = surface_id,
+          .x = x,
+          .y = y,
+          .width = width,
+          .height = height,
+          .snapshot_slot = slot,
+      };
+  frame->snapshot_count++;
+  return true;
+}
+
 /* Grids are compared and hashed as bytes, so the description must pack without
  * padding: a byte no caller wrote would make two identical grids differ. */
 _Static_assert(sizeof(ArLocalizationTextCellRule) == 7,
@@ -225,7 +282,8 @@ static bool SnapshotTextValid(const ArLocalizationFrame *frame,
 bool ArLocalizationFrame_IsValid(const ArLocalizationFrame *frame) {
   if (!FrameStorageValid(frame)) return false;
   if (!frame->snapshot_count) {
-    return !frame->cells.count && !frame->bidi.count && !frame->grid_count &&
+    return !frame->cells.count && !frame->screen_text_count &&
+        !frame->bidi.count && !frame->grid_count &&
         !frame->indicator_count && !frame->inline_object_count &&
         !frame->text_bytes;
   }
@@ -248,6 +306,19 @@ bool ArLocalizationFrame_IsValid(const ArLocalizationFrame *frame) {
         !ArTextCellRecordSet_Claim(&rebuilt, record->surface_id,
             record->destination, record->region, record->snapshot_slot) ||
         rebuilt.count != i + 1u)
+      return false;
+  }
+  for (uint8_t i = 0; i < frame->screen_text_count; ++i) {
+    const ArLocalizationScreenTextRecord *record = &frame->screen_texts[i];
+    if (!record->surface_id || !record->width || !record->height ||
+        record->snapshot_slot >= frame->snapshot_count ||
+        frame->snapshots[record->snapshot_slot].surface_id !=
+            record->surface_id)
+      return false;
+    for (uint8_t previous = 0; previous < i; ++previous)
+      if (frame->screen_texts[previous].surface_id == record->surface_id)
+        return false;
+    if (ArTextCellRecordSet_Find(&frame->cells, record->surface_id))
       return false;
   }
 
@@ -347,6 +418,15 @@ const ArLocalizationTextGrid *ArLocalizationFrame_GetGrid(
       snapshot->grid_index > frame->grid_count)
     return NULL;
   return &frame->grids[snapshot->grid_index - 1u];
+}
+
+const ArLocalizationScreenTextRecord *ArLocalizationFrame_FindScreenText(
+    const ArLocalizationFrame *frame, uint32_t surface_id) {
+  if (!FrameStorageValid(frame) || !surface_id) return NULL;
+  for (uint8_t index = 0; index < frame->screen_text_count; ++index)
+    if (frame->screen_texts[index].surface_id == surface_id)
+      return &frame->screen_texts[index];
+  return NULL;
 }
 
 /* Interns one grid, so a report drawn by several surfaces is published once.

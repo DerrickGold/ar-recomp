@@ -5,7 +5,10 @@
 uint32_t g_sim_world_navigation_palace_pixels[
     kSimWorldNavigationCompositionWidth *
     kSimWorldNavigationCompositionHeight];
-uint32_t g_sim_world_navigation_ui_pixels[
+uint32_t g_sim_world_navigation_label_pixels[
+    kSimWorldNavigationCompositionWidth *
+    kSimWorldNavigationCompositionHeight];
+uint32_t g_sim_world_navigation_plaque_pixels[
     kSimWorldNavigationCompositionWidth *
     kSimWorldNavigationCompositionHeight];
 uint32_t g_sim_sky_palace_mask_pixels[
@@ -106,7 +109,7 @@ bool SimWorldNavigationCapture_Capture(SimFrameData *frame,
   SimWorldNavigationComposition composition;
   /* Partial INIDISP brightness is a supported presentation state. The host
    * world is faded as one complete composition, while these PPU-rasterized
-   * Palace/UI pixels already contain the same master-brightness adjustment.
+   * Palace/plaque/label pixels already contain the same brightness adjustment.
    * Forced blank remains authentic fallback; both paths are fully black. */
   if (!api || !runner ||
       api->struct_size < SNES_RUNNER_API_PPU_OBJ_RASTER_SIZE ||
@@ -146,8 +149,13 @@ bool SimWorldNavigationCapture_Capture(SimFrameData *frame,
       (!CaptureLayer(api, runner, ppu.lifetime_generation,
                      &composition.palace,
                      g_sim_world_navigation_palace_pixels) ||
-       !CaptureLayer(api, runner, ppu.lifetime_generation, &composition.ui,
-                     g_sim_world_navigation_ui_pixels))) {
+       !CaptureLayer(api, runner, ppu.lifetime_generation,
+                     &composition.plaque,
+                     g_sim_world_navigation_plaque_pixels) ||
+       (composition.label.visible &&
+        !CaptureLayer(api, runner, ppu.lifetime_generation,
+                      &composition.label,
+                      g_sim_world_navigation_label_pixels)))) {
     frame->world_navigation_scene.composition =
         (SimWorldNavigationComposition){0};
     frame->view = kSimView_AuthenticFallback;

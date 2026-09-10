@@ -794,6 +794,15 @@ void FrameSlot_Capture(FrameSlot *dst) {
           ppu_view.live_state.backgrounds[2].tile_base_word,
           vram.data, vram.element_count, cgram.data, cgram.element_count,
           mode7_transformed);
+      if (dst->sim.view == kSimView_WorldNavigation &&
+          dst->sim.world_navigation_scene.composition.valid &&
+          !dst->sim.world_navigation_scene.composition.empty_animation) {
+        ActRaiserLocalizationRuntime_AppendWorldNavigationLabel(
+            &dst->localization,
+            dst->sim.world_navigation_scene.active_location,
+            dst->sim.world_navigation_scene.composition.label.visible,
+            cgram.data, cgram.element_count);
+      }
     }
   }
 

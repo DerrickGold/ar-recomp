@@ -96,6 +96,16 @@ void ArLocalizedTextPresenter_Prepare(
     const HudPresentationChunk *chunks, size_t chunk_count,
     ArLocalizedPreparedFrame *prepared);
 
+/* Prepare one authentic-pixel screen-space claim. The owning scene projects
+ * the record's source region into `bounds`; this layer handles only generic
+ * shaping, fitting, direction and cached texture preparation. A successful
+ * intentional blank returns true with no prepared text, allowing the caller
+ * to suppress native glyphs while retaining surrounding native artwork. */
+bool ArLocalizedTextPresenter_PrepareScreenText(
+    ArRenderDevice *device, const ArLocalizationFrame *frame,
+    uint32_t surface_id, ArRenderRectI bounds,
+    ArLocalizedPreparedFrame *prepared);
+
 /* Called while the HUD composite target is active. */
 bool ArLocalizedTextPresenter_Draw(
     ArRenderDevice *device, const ArLocalizedPreparedFrame *prepared);

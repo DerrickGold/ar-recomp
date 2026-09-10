@@ -12,6 +12,7 @@
 #include "present_internal.h"
 #include "present_sim3d_internal.h"
 #include "render/render_output.h"
+#include "render/localized_text_presenter.h"
 #include "settings.h"
 #include "sim/sim3d_depth_pass.h"
 #include "sim/sim_world_navigation_capture.h"
@@ -27,8 +28,38 @@ enum { kWidth = 800, kHeight = 600, kRomBytes = 0x100000, kWramBytes = 0x20000 }
 ArRenderDevice g_render_device;
 uint32_t g_sim_world_navigation_palace_pixels[
     kSimWorldNavigationCompositionWidth * kSimWorldNavigationCompositionHeight];
-uint32_t g_sim_world_navigation_ui_pixels[
+uint32_t g_sim_world_navigation_label_pixels[
     kSimWorldNavigationCompositionWidth * kSimWorldNavigationCompositionHeight];
+uint32_t g_sim_world_navigation_plaque_pixels[
+    kSimWorldNavigationCompositionWidth * kSimWorldNavigationCompositionHeight];
+
+const ArLocalizationScreenTextRecord *ArLocalizationFrame_FindScreenText(
+    const ArLocalizationFrame *frame, uint32_t surface_id) {
+  (void)frame;
+  (void)surface_id;
+  return NULL;
+}
+
+bool ArLocalizedTextPresenter_PrepareScreenText(
+    ArRenderDevice *device, const ArLocalizationFrame *frame,
+    uint32_t surface_id, ArRenderRectI bounds,
+    ArLocalizedPreparedFrame *prepared) {
+  (void)device;
+  (void)frame;
+  (void)surface_id;
+  (void)bounds;
+  if (prepared) memset(prepared, 0, sizeof(*prepared));
+  return false;
+}
+
+bool ArLocalizedTextPresenter_DrawWithBrightness(
+    ArRenderDevice *device, const ArLocalizedPreparedFrame *prepared,
+    float brightness) {
+  (void)device;
+  (void)prepared;
+  (void)brightness;
+  return true;
+}
 
 /* Time is the only substituted host service. Baseline images use zero;
  * motion tests advance just the weather clock while scene/game data stay
@@ -953,12 +984,13 @@ static void TestSynthetic(SDL_Renderer *renderer) {
   composition->empty_animation = false;
   composition->palace = (SimWorldNavigationCompositionLayer){
       .visible = true, .screen_x = 120, .screen_y = 104, .width = 16, .height = 16};
-  composition->ui = (SimWorldNavigationCompositionLayer){
+  composition->plaque = (SimWorldNavigationCompositionLayer){
       .visible = true, .screen_x = 8, .screen_y = 8, .width = 32, .height = 8};
   for (int y = 0; y < 16; y++)
     for (int x = 0; x < 16; x++) g_sim_world_navigation_palace_pixels[y * 256 + x] = 0xffff00ff;
   for (int y = 0; y < 8; y++)
-    for (int x = 0; x < 32; x++) g_sim_world_navigation_ui_pixels[y * 256 + x] = 0xff00ffff;
+    for (int x = 0; x < 32; x++)
+      g_sim_world_navigation_plaque_pixels[y * 256 + x] = 0xff00ffff;
   UploadWorldNavigationComposition(slot);
   slot->sim_manual_orbit_yaw = kPi;
   SDL_Surface *far_marker = Render(renderer, slot, NULL);

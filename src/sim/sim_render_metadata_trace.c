@@ -68,7 +68,8 @@ void SimRenderMetadata_TraceFrame(uint32_t host_frame,
           "\"world_composition_valid\":%s,"
           "\"world_composition_empty\":%s,"
           "\"world_palace\":[%u,%u,%d,%d,%u,%u],"
-          "\"world_ui\":[%u,%u,%d,%d,%u,%u],"
+          "\"world_label\":[%u,%u,%d,%d,%u,%u],"
+          "\"world_plaque\":[%u,%u,%d,%d,%u,%u],"
           "\"build_serial\":%u,\"master_enabled\":%s,"
           "\"requested\":%u,\"effective\":%u,"
           "\"metadata_valid\":%s,\"integrity_flags\":%u,"
@@ -150,12 +151,18 @@ void SimRenderMetadata_TraceFrame(uint32_t host_frame,
           (int)frame->world_navigation_scene.composition.palace.screen_y,
           (unsigned)frame->world_navigation_scene.composition.palace.width,
           (unsigned)frame->world_navigation_scene.composition.palace.height,
-          (unsigned)frame->world_navigation_scene.composition.ui.oam_first,
-          (unsigned)frame->world_navigation_scene.composition.ui.oam_count,
-          (int)frame->world_navigation_scene.composition.ui.screen_x,
-          (int)frame->world_navigation_scene.composition.ui.screen_y,
-          (unsigned)frame->world_navigation_scene.composition.ui.width,
-          (unsigned)frame->world_navigation_scene.composition.ui.height,
+          (unsigned)frame->world_navigation_scene.composition.label.oam_first,
+          (unsigned)frame->world_navigation_scene.composition.label.oam_count,
+          (int)frame->world_navigation_scene.composition.label.screen_x,
+          (int)frame->world_navigation_scene.composition.label.screen_y,
+          (unsigned)frame->world_navigation_scene.composition.label.width,
+          (unsigned)frame->world_navigation_scene.composition.label.height,
+          (unsigned)frame->world_navigation_scene.composition.plaque.oam_first,
+          (unsigned)frame->world_navigation_scene.composition.plaque.oam_count,
+          (int)frame->world_navigation_scene.composition.plaque.screen_x,
+          (int)frame->world_navigation_scene.composition.plaque.screen_y,
+          (unsigned)frame->world_navigation_scene.composition.plaque.width,
+          (unsigned)frame->world_navigation_scene.composition.plaque.height,
           (unsigned)frame->build_serial,
           frame->master_enabled ? "true" : "false",
           (unsigned)frame->requested_features,

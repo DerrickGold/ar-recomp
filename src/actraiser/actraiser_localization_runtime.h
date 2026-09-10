@@ -51,6 +51,13 @@ void ActRaiserLocalizationRuntime_CaptureFrame(
     const uint16_t *vram_words, size_t vram_word_count,
     const uint16_t *cgram_words, size_t cgram_word_count,
     bool mode7_transformed);
+/* Adds the independently captured world-navigation OBJ label after the core
+ * localization frame has been configured. The native glyph range remains the
+ * fallback when no record can be published. */
+void ActRaiserLocalizationRuntime_AppendWorldNavigationLabel(
+    ArLocalizationFrame *frame, uint16_t active_location,
+    bool native_label_visible,
+    const uint16_t *cgram_words, size_t cgram_word_count);
 void ActRaiserLocalizationRuntime_Shutdown(void);
 
 #endif /* ACTRAISER_LOCALIZATION_RUNTIME_H */

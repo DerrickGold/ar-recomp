@@ -1436,6 +1436,10 @@ int main(void) {
                     "borrow capability missing");
     failed |= check((api->capabilities & SR_RUNNER_CAP_CPU_STATE) != 0u,
                     "CPU state capability missing");
+    failed |= check((api->capabilities & SR_RUNNER_CAP_EXECUTION_CHECKPOINT) != 0u,
+                    "execution checkpoint capability missing");
+    failed |= check((api->capabilities & SR_RUNNER_CAP_POLL_WAIT) != 0u,
+                    "poll-wait capability missing");
     failed |= check((api->capabilities & SR_RUNNER_CAP_CPU_MATH_STATE) != 0u,
                     "CPU math state capability missing");
     failed |= check((api->capabilities &
@@ -2206,10 +2210,11 @@ int main(void) {
         void (*old_extension_hook)(Apu *, SaveLoadInfo *) =
             g_apu_extra_saveload_hook;
         static const uint8_t expected_semantic_digest[32] = {
-            0x1f, 0x19, 0x55, 0x9b, 0x77, 0xe9, 0x02, 0xd3,
-            0xa0, 0xb3, 0x43, 0xd9, 0x54, 0x57, 0x4a, 0x3d,
-            0x99, 0xdd, 0xdf, 0x7b, 0x7a, 0x13, 0x08, 0x51,
-            0x6b, 0x27, 0x8e, 0x6c, 0x06, 0x2f, 0x8d, 0x84,
+            /* Semantic schema v3 includes serial controller state. */
+            0x05, 0xc4, 0x1e, 0x44, 0x57, 0xde, 0x46, 0x64,
+            0x4c, 0x41, 0x1f, 0x83, 0xfe, 0x80, 0xae, 0xb6,
+            0xda, 0x43, 0x08, 0xc6, 0x9d, 0xde, 0x03, 0x33,
+            0xc7, 0x01, 0xee, 0x5c, 0xb7, 0xae, 0xf9, 0x9e,
         };
         snes->ppu->objScanlineMasksValid = true;
         snes->ppu->cgramRgbValid = true;
@@ -2243,6 +2248,13 @@ int main(void) {
                                    SR_DETERMINISM_SHA256_SIZE) != 0,
                         "semantic digest ignored WRAM");
         wram[0x4321u] = old_wram;
+        ++snes->inputPorts[0].pending_x;
+        failed |= check(api->query_semantic_digest(
+                            runner, &request, &changed) == SR_RESULT_OK &&
+                            memcmp(first.sha256, changed.sha256,
+                                   SR_DETERMINISM_SHA256_SIZE) != 0,
+                        "semantic digest ignored pending mouse motion");
+        --snes->inputPorts[0].pending_x;
         snes->apu->dsp->sampleRead += 7u;
         second.struct_size = sizeof(second);
         failed |= check(api->query_semantic_digest(

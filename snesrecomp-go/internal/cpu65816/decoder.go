@@ -51,6 +51,11 @@ type Instruction struct {
 	Operand  uint32
 	Length   uint8
 
+	// NativeReturnTable keeps the real JSL/helper execution, but replaces its
+	// lexical continuation with the handler returned in A. Targets are an open
+	// ROM-reference prefix, NOT a proven bound on the live selector.
+	NativeReturnTable *NativeReturnTable
+
 	DispatchEntries []uint32
 	// DispatchCandidateEntries is a report-only extension past a conservative
 	// zero-run bound. It must not drive successors or generated dispatch code
@@ -77,6 +82,11 @@ type Instruction struct {
 	DispatchTransferPC uint32
 	ConstantZFold      bool
 	ConstantZDeadPC    *uint32
+}
+
+type NativeReturnTable struct {
+	TablePC, ReturnPC uint32
+	Targets           []uint32
 }
 
 func (instruction Instruction) String() string {

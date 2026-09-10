@@ -96,6 +96,31 @@ typedef int RtlGameRdnmiReadFunc(const RtlRdnmiReadContext *context);
 typedef bool RtlGameDispatchMissRecoveryFunc(
     uint32_t source_pc24, uint32_t target_pc24);
 typedef void RtlGamePpuDisplayControlWriteFunc(uint8_t value);
+/** Optional synchronous scheduling checkpoint before a compiled basic block.
+ * The adapter may deliver a balanced interrupt or wait for its host scheduler,
+ * but must return to this same activation with the interrupted CPU registers,
+ * widths and host return context restored. Do not abandon/re-dispatch the
+ * active continuation or mutate execution from an observation callback.
+ * Nested compiled blocks still trace but do not re-enter this callback.
+ * Run on the owning execution thread; the table must outlive registration.
+ * Non-local exit is allowed only for terminal shutdown, never frame pacing,
+ * save/load, or later resumption of that abandoned execution.
+ * No callback, and no extra generated code, is required by existing games. */
+typedef void RtlGameExecutionCheckpointFunc(CpuState *cpu, uint32_t pc24);
+
+/** Optional cooperative scheduler boundary on a taken, statically recognized
+ * WRAM load/test self-loop. resume_pc24 is its next load, after the branch;
+ * read_address24/read_width_bytes describe the read already performed. No
+ * additional memory read is made by the runner. This is NOT evidence that a
+ * particular interrupt owns the flag, or that waiting will terminate.
+ * The adapter may advance its scheduler and deliver real interrupts, but must
+ * preserve the interrupted CPU, widths, stack and host-return context and
+ * return to this activation. It must never clear the polled value on behalf
+ * of the ROM, suppress a trap, or longjmp as an ordinary frame boundary.
+ * Shares the checkpoint reentry guard: neither callback runs inside the other.
+ * Without opt-in this is a no-op; no universal frame/NMI policy is imposed. */
+typedef void RtlGamePollWaitFunc(CpuState *cpu, uint32_t resume_pc24,
+                               uint32_t read_address24, uint32_t read_width_bytes);
 
 /** Recompiled execution policy. run_frame is the sole required callback and
  * denotes one host tick, not a universal SNES hardware phase. The game adapter
@@ -110,12 +135,22 @@ typedef struct RtlGameExecutionApi {
     RtlGameRdnmiReadFunc *read_rdnmi;
     RtlGameDispatchMissRecoveryFunc *recover_dispatch_miss;
     RtlGamePpuDisplayControlWriteFunc *ppu_display_control_write;
+    RtlGameExecutionCheckpointFunc *execution_checkpoint;
+    RtlGamePollWaitFunc *poll_wait;
 } RtlGameExecutionApi;
 
 #define RTL_GAME_EXECUTION_API_V2_SIZE                                  \
     ((uint32_t)(offsetof(RtlGameExecutionApi, ppu_display_control_write) + \
                 sizeof(((RtlGameExecutionApi *)0)->                      \
                            ppu_display_control_write)))
+
+#define RTL_GAME_EXECUTION_API_V3_SIZE                                  \
+    ((uint32_t)(offsetof(RtlGameExecutionApi, execution_checkpoint) +    \
+                sizeof(((RtlGameExecutionApi *)0)->execution_checkpoint)))
+
+#define RTL_GAME_EXECUTION_API_V4_SIZE                                  \
+    ((uint32_t)(offsetof(RtlGameExecutionApi, poll_wait) +              \
+                sizeof(((RtlGameExecutionApi *)0)->poll_wait)))
 
 typedef SrResult RtlGameCpuStateQueryFunc(
     void *user_data, SrCpuStateSnapshot *out_state);

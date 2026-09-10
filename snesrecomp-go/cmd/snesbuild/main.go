@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/DerrickGold/snesrecomp-go/internal/languagecli"
+	"github.com/DerrickGold/snesrecomp-go/internal/materialize"
 	"github.com/DerrickGold/snesrecomp-go/internal/project"
 	"github.com/DerrickGold/snesrecomp-go/internal/toolchain"
 	"github.com/DerrickGold/snesrecomp-go/internal/tooling"
@@ -45,6 +46,8 @@ func run(args []string) error {
 		return runRegen(args[1:])
 	case "analyze":
 		return runAnalyze(args[1:])
+	case "materialize":
+		return materialize.RunCommand(args[1:], os.Stdout)
 	case "xref":
 		return runXref(args[1:])
 	case "disasm":
@@ -118,6 +121,7 @@ Commands:
   language    Validate, package, install or describe language packs without the GUI
   regen       Regenerate C and all generated sidecars
   analyze     Compare inferred control-flow facts with authored cfg (read-only)
+  materialize Write an isolated reduced cfg/DB/C bundle after equivalence checks
   xref        Find decoded instruction references to an address (read-only)
   disasm      Disassemble ROM code with live M/X tracking (read-only)
   rom-info    Report cartridge identity, header, and vectors (read-only)

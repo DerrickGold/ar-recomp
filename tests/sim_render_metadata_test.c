@@ -2054,6 +2054,36 @@ static void HideAllNavigationOam(uint16_t oam[256]) {
   }
 }
 
+static void PopulateNavigationComposition(uint16_t oam[256], int label_count) {
+  static const uint8_t palace_x[9] =
+      {104, 120, 136, 104, 120, 136, 104, 120, 136};
+  static const uint8_t palace_y[9] =
+      {81, 81, 81, 97, 97, 97, 113, 113, 113};
+  static const uint8_t palace_tile[9] =
+      {0x06, 0x08, 0x0A, 0x0C, 0x0E, 0x26, 0x60, 0x62, 0x64};
+  HideAllNavigationOam(oam);
+  for (int slot = 0; slot < label_count; slot++) {
+    oam[slot * 2] =
+        (uint16_t)((25u << 8) | (uint8_t)(156 + slot * 8));
+    oam[slot * 2 + 1] = (uint16_t)(0x3000u | (uint8_t)slot);
+  }
+  for (int cell = 0; cell < 12; ++cell) {
+    const int slot = label_count + cell;
+    oam[slot * 2] = (uint16_t)(
+        (17u + (unsigned)(cell / 6) * 8u) << 8 |
+        (144u + (unsigned)(cell % 6) * 16u));
+    oam[slot * 2 + 1] =
+        (uint16_t)(0x3200u | (cell < 6 ? 0x28u : 0x38u));
+  }
+  const int palace_first = label_count + 12;
+  for (int i = 0; i < 9; i++) {
+    oam[(palace_first + i) * 2] =
+        (uint16_t)(palace_x[i] | ((uint16_t)palace_y[i] << 8));
+    oam[(palace_first + i) * 2 + 1] =
+        (uint16_t)(palace_tile[i] | 0x3200u);
+  }
+}
+
 static void TestWorldNavigationOamClassifier(void) {
   uint16_t oam[256];
   SimWorldNavigationComposition composition;
@@ -2062,36 +2092,44 @@ static void TestWorldNavigationOamClassifier(void) {
   CHECK(composition.valid);
   CHECK(composition.empty_animation);
   CHECK(!composition.palace.visible);
-  CHECK(!composition.ui.visible);
+  CHECK(!composition.label.visible);
+  CHECK(!composition.plaque.visible);
 
-  /* Synthetic copy of gf782's ownership shape: 20 packed priority-3 UI
-   * entries, followed by the fixed 3x3 Palace and then hidden OAM. */
-  for (int slot = 0; slot < 20; slot++) {
-    oam[slot * 2] = (uint16_t)((0x11u << 8) | (uint8_t)(0x20 + slot));
-    oam[slot * 2 + 1] = (uint16_t)(0x3000u | (uint8_t)slot);
-  }
-  static const uint8_t palace_x[9] =
-      {104, 120, 136, 104, 120, 136, 104, 120, 136};
-  static const uint8_t palace_y[9] =
-      {81, 81, 81, 97, 97, 97, 113, 113, 113};
-  static const uint8_t palace_tile[9] =
-      {0x06, 0x08, 0x0A, 0x0C, 0x0E, 0x26, 0x60, 0x62, 0x64};
-  for (int i = 0; i < 9; i++) {
-    oam[(20 + i) * 2] =
-        (uint16_t)(palace_x[i] | ((uint16_t)palace_y[i] << 8));
-    oam[(20 + i) * 2 + 1] =
-        (uint16_t)(palace_tile[i] | 0x3200u);
-  }
+  /* Synthetic copy of gf370: eight glyphs, the fixed 6x2 plaque, then the
+   * fixed 3x3 Palace. */
+  PopulateNavigationComposition(oam, 8);
   CHECK(SimWorldNavigationScene_ClassifyOam(oam, &composition));
   CHECK(composition.valid);
   CHECK(!composition.empty_animation);
-  CHECK(composition.ui.visible);
-  CHECK(composition.ui.oam_first == 0);
-  CHECK(composition.ui.oam_count == 20);
+  CHECK(composition.label.visible);
+  CHECK(composition.label.oam_first == 0);
+  CHECK(composition.label.oam_count == 8);
+  CHECK(composition.plaque.visible);
+  CHECK(composition.plaque.oam_first == 8);
+  CHECK(composition.plaque.oam_count == 12);
   CHECK(composition.palace.visible);
   CHECK(composition.palace.oam_first == 20);
   CHECK(composition.palace.oam_count == 9);
 
+  /* The retail destinations do not all have Fillmore's eight glyphs. The
+   * classifier keys the immutable artwork from the back, so every measured
+   * short/long prefix -- and the transition frame with no label -- retains
+   * exact label/plaque/Palace ownership. */
+  static const uint8_t label_counts[] = {0, 5, 6, 7, 8, 9};
+  for (size_t i = 0; i < sizeof(label_counts); ++i) {
+    const uint8_t label_count = label_counts[i];
+    PopulateNavigationComposition(oam, label_count);
+    CHECK(SimWorldNavigationScene_ClassifyOam(oam, &composition));
+    CHECK(composition.valid && !composition.empty_animation);
+    CHECK(composition.label.visible == (label_count != 0));
+    CHECK(composition.label.oam_count == label_count);
+    CHECK(composition.plaque.oam_first == label_count);
+    CHECK(composition.plaque.oam_count == 12);
+    CHECK(composition.palace.oam_first == label_count + 12);
+    CHECK(composition.palace.oam_count == 9);
+  }
+
+  PopulateNavigationComposition(oam, 8);
   oam[20 * 2] ^= 1;  /* Palace no longer fills the fixed 3x3 grid. */
   CHECK(!SimWorldNavigationScene_ClassifyOam(oam, &composition));
   oam[20 * 2] ^= 1;
@@ -2149,8 +2187,10 @@ static void TestCapturedWorldNavigationFixtures(const char *steady_path,
     CHECK(ReadOamFixture(animation_oam_path, animation_oam));
     CHECK(SimWorldNavigationScene_ClassifyOam(steady_oam, &composition));
     CHECK(composition.valid && !composition.empty_animation);
-    CHECK(composition.ui.oam_first == 0);
-    CHECK(composition.ui.oam_count == 20);
+    CHECK(composition.label.oam_first == 0);
+    CHECK(composition.label.oam_count == 8);
+    CHECK(composition.plaque.oam_first == 8);
+    CHECK(composition.plaque.oam_count == 12);
     CHECK(composition.palace.oam_first == 20);
     CHECK(composition.palace.oam_count == 9);
     CHECK(SimWorldNavigationScene_ClassifyOam(animation_oam, &composition));

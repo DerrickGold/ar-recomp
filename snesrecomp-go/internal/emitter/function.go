@@ -322,7 +322,8 @@ func EmitFunction(image rom.Image, bank byte, start uint16, entryM, entryX uint8
 				case ir.CondBranch:
 					fall, taken := successor(block.Successors, 0), successor(block.Successors, 1)
 					if taken != nil {
-						lines = append(lines, fmt.Sprintf("if (%s == %d) { %s }", flagExpression(op.Flag), op.TakeIf, gotoOrTail(context, name, bank, key, *taken, local, options)))
+						poll := memoryPollWait(block, *taken)
+						lines = append(lines, fmt.Sprintf("if (%s == %d) { %s%s }", flagExpression(op.Flag), op.TakeIf, poll, gotoOrTail(context, name, bank, key, *taken, local, options)))
 					}
 					if fall != nil {
 						lines = append(lines, gotoOrTail(context, name, bank, key, *fall, local, options)+" /* fall-through */")
@@ -382,7 +383,24 @@ func EmitFunction(image rom.Image, bank byte, start uint16, entryM, entryX uint8
 						lines = append(lines, emitted...)
 					}
 				case ir.Call:
-					if len(instruction.DispatchEntries) > 0 {
+					if instruction.NativeReturnTable != nil {
+						// Execute the proven native helper, including its real JSL
+						// frame and all register/flag/stack effects. A contains the
+						// selected handler after it consumes the rewritten frame.
+						lines = append(lines, "if (cpu->emulation || cpu->S < 10u || cpu->S > 0x1fffu) {",
+							fmt.Sprintf("  return cpu_trace_unresolved_goto_trap(cpu, 0x%06Xu, 0x%06Xu, \"native return-table requires E=0 and a writable bank-zero WRAM stack\", \"stack contract\");", instruction.Address, instruction.Operand), "}")
+						emitted, emitErr := codegen.EmitOperation(context, op)
+						if emitErr != nil {
+							return result, emitErr
+						}
+						lines = append(lines, emitted...)
+						lines = append(lines, fmt.Sprintf("{ uint32 _handler = 0x%06xu | (uint32)cpu->A; /* native return-table: open target prefix, live M/X */", instruction.Address&0xff0000))
+						lines = append(lines, runtimeTailStatement("_handler", fmt.Sprintf("0x%06xu", instruction.NativeReturnTable.ReturnPC), "/* replace this caller's continuation, never enter inline table data */"), "}")
+						for _, target := range instruction.NativeReturnTable.Targets {
+							demandAllVariants(context, target)
+						}
+						terminated = true
+					} else if len(instruction.DispatchEntries) > 0 {
 						if instruction.DispatchIndexReg == "X" || instruction.DispatchIndexReg == "Y" || instruction.DispatchIndexReg == "A" {
 							lines = append(lines, emitIndirectDispatch(context, instruction, local)...)
 						} else {
@@ -680,17 +698,23 @@ func gotoOrTail(context *codegen.Context, functionName string, bank byte, source
 	return fmt.Sprintf("return cpu_trace_unresolved_goto_trap(cpu, 0x%06X, 0x%06X, \"%s\", \"%s\");", source.PC&0xffffff, targetAddress, functionName, label(target))
 }
 
-// tailCallStatement mirrors the Option-1 cpu->S ABI used by the Python
-// emitter. Same-bank tail transfers need a trampoline: a dispatched frame
+// tailCallStatement preserves the active routine's hardware return frame.
+// Same-bank tail transfers need a trampoline: a dispatched frame
 // yields to the existing driving loop, while a paired root starts a local
-// driving loop. Cross-bank JML transfers use a direct C call because the JSL
+// driving loop that retains its return context across split bodies. Further
+// tails in that same activation yield to the loop rather than nesting it.
+// Cross-bank JML transfers use a direct C call because the JSL
 // wrapper above the chain owns restoring PB.
 func tailCallStatement(callExpression, comment string, trampolinePC *uint32) string {
 	if trampolinePC == nil {
 		return fmt.Sprintf("{ cpu->host_return_valid = _hrv; cpu_tailcall_inherit_return_context(_entry_s, _hrv); RecompReturn _tc = %s; RecompStackPop(); return _tc; }  %s", callExpression, comment)
 	}
 	target := fmt.Sprintf("0x%06xu", *trampolinePC&0xffffff)
-	return fmt.Sprintf("{ if (!_hrv) { cpu->host_return_valid = _hrv; cpu_tailcall_inherit_return_context(_entry_s, _hrv); cpu_tailcall_request(%s, _entry_s, %s); RecompStackPop(); return RECOMP_RETURN_TAILCALL; } RecompStackPop(); return cpu_dispatch_pc_from(cpu, %s, _entry_s, %s); }  %s", target, target, target, target, comment)
+	return runtimeTailStatement(target, target, comment)
+}
+
+func runtimeTailStatement(target, source, comment string) string {
+	return fmt.Sprintf("{ if (!_hrv) { cpu->host_return_valid = _hrv; cpu_tailcall_inherit_return_context(_entry_s, _hrv); cpu_tailcall_request(%s, _entry_s, %s); RecompStackPop(); return RECOMP_RETURN_TAILCALL; } RecompStackPop(); return cpu_dispatch_paired_tail_from(cpu, %s, _entry_s, _hrv, %s); }  %s", target, source, target, source, comment)
 }
 
 func validLoROMCodeAddress(image rom.Image, address uint32) bool {

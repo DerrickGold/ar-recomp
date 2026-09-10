@@ -57,6 +57,7 @@ func TestAuthorLocationKnownRoutes(t *testing.T) {
 		"dialogue.event.wrapper_05.call_02.source_00":   "place.sky.start",
 		"simulation.event.fillmore.slot_00":             "place.fillmore.story",
 		"dialogue.event.relay.northwall":                "place.northwall.story",
+		"city.fillmore.name":                            "place.fillmore.names",
 		"action.stage_name.death_heim":                  "place.death_heim.names",
 		"sky.action_mode.outcome.final_battle":          "place.death_heim.dialogue",
 		"dialogue.ending.slot_00":                       "place.ending.dialogue",
@@ -65,6 +66,9 @@ func TestAuthorLocationKnownRoutes(t *testing.T) {
 		if got := AuthorMessageLocation(id).Group; got != want {
 			t.Errorf("%s: %s want %s", id, got, want)
 		}
+	}
+	if context := AuthorMessageLocation("city.fillmore.name").Context; !strings.Contains(context, "World-navigation labels") {
+		t.Fatal("city-name editor help does not identify the world-navigation surface", context)
 	}
 	for _, id := range []string{"sim.menu.listen", "sim.miracle.rain.confirm", "system.save.confirm"} {
 		locations := AuthorMessageLocations(id)

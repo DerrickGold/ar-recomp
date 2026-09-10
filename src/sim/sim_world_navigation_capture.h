@@ -19,7 +19,10 @@ enum {
 extern uint32_t g_sim_world_navigation_palace_pixels[
     kSimWorldNavigationCompositionWidth *
     kSimWorldNavigationCompositionHeight];
-extern uint32_t g_sim_world_navigation_ui_pixels[
+extern uint32_t g_sim_world_navigation_label_pixels[
+    kSimWorldNavigationCompositionWidth *
+    kSimWorldNavigationCompositionHeight];
+extern uint32_t g_sim_world_navigation_plaque_pixels[
     kSimWorldNavigationCompositionWidth *
     kSimWorldNavigationCompositionHeight];
 /* A separate observational BG1 winner surface for the native Palace. It has
@@ -27,7 +30,7 @@ extern uint32_t g_sim_world_navigation_ui_pixels[
 extern uint32_t g_sim_sky_palace_mask_pixels[
     kSimWorldNavigationPalaceMaxWidth * kSimWorldNavigationPalaceMaxHeight];
 
-/* Captures the two authentic navigation OAM compositions into host-owned
+/* Captures the authentic navigation OAM compositions into host-owned
  * transparent buffers. Partial INIDISP brightness is supported and published
  * for whole-scene fading; forced blank or any structural failure changes a
  * selected navigation frame to AuthenticFallback. All-hidden action-entry OAM

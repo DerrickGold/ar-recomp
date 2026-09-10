@@ -29,8 +29,14 @@ pacing and diagnostic observation enter only through explicit callbacks.
 
 The APU controller follows the public SPC700 I/O and timer register contracts.
 Its recomp bootstrap was assembled specifically for this project and contains
-no vendor IPL ROM; recomp hosts install the uploaded ARAM entry point through
-the existing upload boundary.
+no vendor IPL ROM. It implements the published IPL port handshake, multi-block
+transfer, and execute protocol through the ordinary SPC700 memory operations.
+Recomp hosts can also install ARAM through the existing upload boundary.
+
+The serial pad/mouse device in `src/snes/input.c` is an original implementation
+from the published SNESdev controller protocol. It contains no emulator source
+or game-specific addresses. See [`docs/INPUT_AND_BOOT.md`](docs/INPUT_AND_BOOT.md)
+for protocol sources, input timing, and compatibility limitations.
 
 The SPC700 core is a C implementation of the complete opcode contract first
 implemented independently in this repository's MIT-licensed pure-Go audio

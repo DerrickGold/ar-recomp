@@ -631,6 +631,15 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_localization_frame
         COMMAND actraiser_localization_frame_test)
 
+    add_executable(actraiser_localization_world_navigation_test
+        tests/actraiser_localization_world_navigation_test.c
+        src/actraiser/actraiser_localization_world_navigation.c
+        ${AR_LOCALIZATION_FRAME_SOURCES})
+    target_include_directories(actraiser_localization_world_navigation_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    add_test(NAME actraiser_localization_world_navigation
+        COMMAND actraiser_localization_world_navigation_test)
+
     add_executable(actraiser_localization_routes_test
         tests/actraiser_localization_routes_test.c
         src/actraiser/actraiser_localization_routes.c)
@@ -2117,6 +2126,7 @@ if(BUILD_TESTING)
         src/localization/text_presentation.c
         src/actraiser/actraiser_localization_schedule.c
         src/actraiser/actraiser_localization_runtime.c
+        src/actraiser/actraiser_localization_world_navigation.c
         src/actraiser/actraiser_localization_credits.c
         src/actraiser/actraiser_localization_text.c
         src/actraiser/actraiser_localization_routes.c

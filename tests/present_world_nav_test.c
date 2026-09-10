@@ -1,7 +1,9 @@
 #include "present_internal.h"
 #include "present_sim3d_internal.h"
 #include "present_world_nav_geometry.h"
+#include "actraiser/actraiser_localization_world_navigation.h"
 #include "render/render_device.h"
+#include "render/localized_text_presenter.h"
 #include "settings.h"
 #include "sim/sim_town_terrain.h"
 #include "sim/sim_town_ground_art.h"
@@ -59,8 +61,8 @@ typedef struct FakeBackend {
   bool track_palace_focus;
   int palace_focus_vertices;
   ArRenderPointF palace_focus_uv, palace_focus_position;
-  int palace_draws, ui_draws;
-  ArRenderRectF palace_rect, ui_rect;
+  int palace_draws, ui_draws, label_draws;
+  ArRenderRectF palace_rect, ui_rect, label_rect;
 } FakeBackend;
 
 ArRenderDevice g_render_device;
@@ -340,9 +342,50 @@ ArRenderTexture Sim3DDepthPass_Submit(ArRenderDevice *device,
 uint32_t g_sim_world_navigation_palace_pixels[
     kSimWorldNavigationCompositionWidth *
     kSimWorldNavigationCompositionHeight];
-uint32_t g_sim_world_navigation_ui_pixels[
+uint32_t g_sim_world_navigation_label_pixels[
     kSimWorldNavigationCompositionWidth *
     kSimWorldNavigationCompositionHeight];
+uint32_t g_sim_world_navigation_plaque_pixels[
+    kSimWorldNavigationCompositionWidth *
+    kSimWorldNavigationCompositionHeight];
+
+static bool s_localized_record_available;
+static bool s_localized_prepare_success;
+static int s_localized_draws;
+static float s_localized_brightness;
+static ArRenderRectI s_localized_bounds;
+
+const ArLocalizationScreenTextRecord *ArLocalizationFrame_FindScreenText(
+    const ArLocalizationFrame *frame, uint32_t surface_id) {
+  (void)frame;
+  static const ArLocalizationScreenTextRecord record = {
+      .surface_id = kActRaiserLocalizationWorldNavigationSurface,
+      .x = 156, .y = 25, .width = 76, .height = 8};
+  return s_localized_record_available && surface_id == record.surface_id
+      ? &record : NULL;
+}
+
+bool ArLocalizedTextPresenter_PrepareScreenText(
+    ArRenderDevice *device, const ArLocalizationFrame *frame,
+    uint32_t surface_id, ArRenderRectI bounds,
+    ArLocalizedPreparedFrame *prepared) {
+  (void)device;
+  (void)frame;
+  (void)surface_id;
+  s_localized_bounds = bounds;
+  if (prepared) memset(prepared, 0, sizeof(*prepared));
+  return s_localized_prepare_success;
+}
+
+bool ArLocalizedTextPresenter_DrawWithBrightness(
+    ArRenderDevice *device, const ArLocalizedPreparedFrame *prepared,
+    float brightness) {
+  (void)device;
+  (void)prepared;
+  ++s_localized_draws;
+  s_localized_brightness = brightness;
+  return true;
+}
 
 uint64_t HostClock_Milliseconds(void) { return 0; }
 uint64_t HostClock_Nanoseconds(void) { return 0; }
@@ -431,6 +474,8 @@ static bool DrawTexture(void *context, ArRenderTexture texture,
       backend->palace_draws++; backend->palace_rect = *destination;
     } else if (source->w == 32 && source->h == 8) {
       backend->ui_draws++; backend->ui_rect = *destination;
+    } else if (source->w == 24 && source->h == 8) {
+      backend->label_draws++; backend->label_rect = *destination;
     }
   }
   return true;
@@ -1445,7 +1490,7 @@ static void TestGlobeInspection(void) {
   composition->empty_animation = false;
   composition->palace = (SimWorldNavigationCompositionLayer){
       .visible = true, .screen_x = 120, .screen_y = 104, .width = 16, .height = 16};
-  composition->ui = (SimWorldNavigationCompositionLayer){
+  composition->plaque = (SimWorldNavigationCompositionLayer){
       .visible = true, .screen_x = 8, .screen_y = 8, .width = 32, .height = 8};
   const SimWorldNavigationFrame navigation = slot.sim.world_navigation;
   UploadWorldNavigationComposition(&slot);
@@ -1526,6 +1571,50 @@ static void TestGlobeInspection(void) {
   assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_Complete);
   assert(depth_solid_faces == visible_faces);
   PresentWorldNav_ResetResources();
+}
+
+static void TestLocalizedNavigationLabelHandoff(void) {
+  FakeBackend backend = {
+      .output_width = 1280, .output_height = 720, .track_markers = true};
+  assert(ArRenderDevice_Init(
+      &g_render_device, &kFakeOps, &backend,
+      (ArRenderCapabilities){0}));
+  PresentWorldNav_ResetResources();
+  FrameSlot slot = WorldNavigationSlot();
+  SimWorldNavigationComposition *composition =
+      &slot.sim.world_navigation_scene.composition;
+  composition->empty_animation = false;
+  composition->palace = (SimWorldNavigationCompositionLayer){
+      .visible = true, .screen_x = 120, .screen_y = 104,
+      .width = 16, .height = 16};
+  composition->plaque = (SimWorldNavigationCompositionLayer){
+      .visible = true, .screen_x = 8, .screen_y = 8,
+      .width = 32, .height = 8};
+  composition->label = (SimWorldNavigationCompositionLayer){
+      .visible = true, .screen_x = 156, .screen_y = 25,
+      .width = 24, .height = 8};
+  UploadWorldNavigationComposition(&slot);
+
+  s_localized_record_available = false;
+  s_localized_prepare_success = false;
+  s_localized_draws = 0;
+  assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_Complete);
+  assert(backend.label_draws == 1 && s_localized_draws == 0);
+
+  s_localized_record_available = true;
+  s_localized_prepare_success = true;
+  slot.sim.world_navigation_brightness = 7;
+  assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_Complete);
+  assert(backend.label_draws == 1 && s_localized_draws == 1);
+  assert(fabsf(s_localized_brightness - 7.0f / 15.0f) < .0001f);
+  assert(s_localized_bounds.x == 585 && s_localized_bounds.y == 80);
+  assert(s_localized_bounds.w == 285 && s_localized_bounds.h == 26);
+
+  /* Preparation failure restores the exact captured native glyph layer. */
+  s_localized_prepare_success = false;
+  assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_Complete);
+  assert(backend.label_draws == 2 && s_localized_draws == 1);
+  s_localized_record_available = false;
 }
 
 static void TestPalaceMarkerAutoFitAndRasterBounds(void) {
@@ -1712,6 +1801,7 @@ int main(void) {
   TestLavaUploadRecovery();
   TestAtmosphereEnclosesRaisedTerrain();
   TestGlobeInspection();
+  TestLocalizedNavigationLabelHandoff();
   TestPalaceMarkerAutoFitAndRasterBounds();
   TestAdventAuthoredModelClearance();
   TestTallModelViewportClearance();

@@ -217,7 +217,7 @@ static void write_cart_v2(const Cart *cart, SnesSemanticWriter *writer) {
     snes_semantic_write_bytes(writer, cart->ram, cart->ramSize);
 }
 
-static void write_snes_v2(const Snes *snes, SnesSemanticWriter *writer) {
+static void write_snes_v3(const Snes *snes, SnesSemanticWriter *writer) {
     snes_semantic_write_bytes(writer, "sne2", 4u);
     snes_semantic_write_u16(writer, snes->hPos);
     snes_semantic_write_u16(writer, snes->vPos);
@@ -241,9 +241,24 @@ static void write_snes_v2(const Snes *snes, SnesSemanticWriter *writer) {
     snes_semantic_write_u16(writer, snes->divideResult);
     snes_semantic_write_u32(writer, snes->ramAdr);
     snes_semantic_write_bytes(writer, snes->ram, kSnesWramSize);
+    snes_semantic_write_bytes(writer, "inp3", 4u);
+    snes_semantic_write_bool(writer, snes->inputLatch);
+    for (unsigned port = 0; port < 2u; ++port) {
+        const SnesInputPort *input = &snes->inputPorts[port];
+        snes_semantic_write_u32(writer, input->packet);
+        snes_semantic_write_i32(writer, input->pending_x);
+        snes_semantic_write_i32(writer, input->pending_y);
+        snes_semantic_write_u16(writer, input->auto_result);
+        snes_semantic_write_u8(writer, input->device);
+        snes_semantic_write_u8(writer, input->buttons);
+        snes_semantic_write_u8(writer, input->sensitivity);
+        snes_semantic_write_u8(writer, input->cursor);
+        snes_semantic_write_u8(writer, input->sign_x);
+        snes_semantic_write_u8(writer, input->sign_y);
+    }
 }
 
-bool snes_write_semantic_main_state_v2(
+bool snes_write_semantic_main_state_v3(
         const Snes *snes, SnesSemanticWriter *writer) {
     if (snes == NULL || writer == NULL || writer->write == NULL ||
         snes->dma == NULL || snes->ppu == NULL ||
@@ -254,7 +269,7 @@ bool snes_write_semantic_main_state_v2(
     write_ppu_v2(snes->ppu, writer);
     write_dma_v2(snes->dma, writer);
     write_cart_v2(snes->cart, writer);
-    write_snes_v2(snes, writer);
+    write_snes_v3(snes, writer);
     return !writer->failed;
 }
 
