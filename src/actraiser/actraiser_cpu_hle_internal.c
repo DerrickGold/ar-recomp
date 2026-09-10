@@ -30,6 +30,7 @@ void ActRaiserCpuHle_RequireEntryMode(
     ActRaiserCpuHleEntryMode required_mode) {
   if (EntryModeMatches(cpu, required_mode)) return;
 
+  const char *const routine = routine_name ? routine_name : "unnamed routine";
   const char *requirement = "a valid declared CPU entry mode";
   switch (required_mode) {
     case kActRaiserCpuHleEntryMode_Native16BitIndexes:
@@ -48,9 +49,21 @@ void ActRaiserCpuHle_RequireEntryMode(
       requirement = "D/DB=0 native mode with 8-bit A and 16-bit X/Y";
       break;
   }
-  ActRaiserHleFatal("%s HLE requires %s",
-                    routine_name ? routine_name : "unnamed routine",
-                    requirement);
+  if (!cpu) ActRaiserHleFatal("%s HLE requires %s", routine, requirement);
+
+  /* The gate runs before the HLE touches the stack, so the frame the caller
+   * pushed is still on top: the word at S+1 is a JSR return address, one byte
+   * past that JSR's operand. Reporting it, plus the state actually observed,
+   * turns "something upstream leaked m/x" into one address to disassemble. */
+  const uint16_t return_word =
+      cpu_read16(cpu, k65816StackBank, (uint16_t)(cpu->S + 1u));
+  ActRaiserHleFatal(
+      "%s HLE requires %s, but was entered with e=%u m=%u x=%u "
+      "(P=$%02X DB=$%02X D=$%04X S=$%04X); caller JSR at $%02X:%04X",
+      routine, requirement,
+      (unsigned)cpu->emulation, (unsigned)cpu->m_flag, (unsigned)cpu->x_flag,
+      (unsigned)cpu->P, (unsigned)cpu->DB, (unsigned)cpu->D, (unsigned)cpu->S,
+      (unsigned)cpu->PB, (unsigned)(uint16_t)(return_word - 2u));
 }
 
 uint16_t ActRaiserCpuHle_PushWordAt(

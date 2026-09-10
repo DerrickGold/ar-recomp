@@ -53,7 +53,15 @@ static void WriteAccumulatorLowByte(CpuState *cpu, uint8_t value) {
 /* $03:F497 and $03:F508 differ only in how they obtain the mask's base
  * address and in their final register arrangement. This model deliberately
  * retains the ROM's stack traffic: several unrelated routines inspect stack
- * RAM while debugging, and exact replays compare the full WRAM image. */
+ * RAM while debugging, and exact replays compare the full WRAM image.
+ *
+ * Neither resolver constrains the caller's accumulator width. Both open by
+ * forcing REP #$20 and masking the flag id with AND #$00FF (the REPs are at
+ * $03:F497 and $03:F50B), and both return through SEP #$20, so every wrapper leaves this
+ * family 8-bit whatever it entered as. Requiring an 8-bit entry accumulator
+ * would be a stricter contract than the hardware's: $03:F3F6 sets global flag
+ * 8 with a 16-bit accumulator and SEPs only afterwards, at $03:F3F9. The
+ * indexes must still be 16-bit -- PHY/PLX and TAX/TAY here are word-wide. */
 static void ResolveTownBit(CpuState *cpu,
                            TownBitAddressKind address_kind) {
   const uint16_t entry_accumulator = cpu->A;
@@ -137,8 +145,7 @@ static RecompReturn ResolveTownBitHle(CpuState *cpu,
   if (!cpu) return RECOMP_RETURN_NORMAL;
   cpu_mirrors_to_p(cpu);
   ActRaiserCpuHle_RequireEntryMode(
-      cpu, routine_name,
-      kActRaiserCpuHleEntryMode_Native8BitAccumulator16BitIndexes);
+      cpu, routine_name, kActRaiserCpuHleEntryMode_Native16BitIndexes);
   ResolveTownBit(cpu, address_kind);
   cpu->S = (uint16_t)(cpu->S + k65816RtsStackBytes);
   return RECOMP_RETURN_NORMAL;
@@ -161,8 +168,7 @@ static RecompReturn ApplyTownBitOperation(
   if (!cpu) return RECOMP_RETURN_NORMAL;
   cpu_mirrors_to_p(cpu);
   ActRaiserCpuHle_RequireEntryMode(
-      cpu, routine_name,
-      kActRaiserCpuHleEntryMode_Native8BitAccumulator16BitIndexes);
+      cpu, routine_name, kActRaiserCpuHleEntryMode_Native16BitIndexes);
 
   const uint16_t saved_x = cpu->X;
   const uint16_t saved_y = cpu->Y;

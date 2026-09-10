@@ -327,3 +327,75 @@ func TestAuthorAtomicWriteFailureKeepsDestination(t *testing.T) {
 		t.Fatal("temporary file leaked")
 	}
 }
+
+// A one-message edit must not recompress the pack's fonts. Saving a project
+// with a script-specific font is otherwise dominated by deflating megabytes
+// that did not change.
+func TestAuthorStoreSaveDoesNotRecompressUnchangedFonts(t *testing.T) {
+	font := make([]byte, 4<<20)
+	for i := range font {
+		font[i] = byte(i*7 + i/251)
+	}
+	copy(font, []byte{0, 1, 0, 0}) /* TTF signature; not a readable face. */
+	manifest := strings.Replace(authorPackManifest, "\n[scripts]",
+		"\nfallback = fonts/Large.ttf\n[scripts]", 1)
+	source, err := LoadAuthorPack(packSnapshotFS(map[string][]byte{
+		"pack.ini":        []byte(manifest),
+		"text/sky.artext": []byte(authorConfirm + "\n:: action.hud.act_1\nInvented source label.\n@end\n"),
+		"fonts/Large.ttf": font,
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := source.Manifest().Metadata()
+	m.ID = "community.large-font"
+	m.Name = "Large font English"
+	p, err := NewTranslationProject(source, m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := NewAuthorStore(filepath.Join(t.TempDir(), "projects"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Save(p, ""); err != nil {
+		t.Fatal(err)
+	}
+	deflateCache.Lock()
+	afterFirst := deflateCache.compressions
+	deflateCache.Unlock()
+	if afterFirst == 0 {
+		t.Fatal("the font was never compressed at all")
+	}
+
+	edited, err := p.EditMessage("action.hud.act_1", "Most excellent!\n@end\n", TranslationDone)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Save(edited, p.ProjectRevision()); err != nil {
+		t.Fatal(err)
+	}
+	deflateCache.Lock()
+	afterEdit := deflateCache.compressions
+	deflateCache.Unlock()
+	if afterEdit != afterFirst {
+		t.Fatal("an ordinary edit recompressed unchanged fonts", afterFirst, afterEdit)
+	}
+
+	// The archive is still an ordinary, readable .arproject with the same
+	// content, and stale saves still conflict.
+	reopened, err := store.Open(m.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reopened.ProjectRevision() != edited.ProjectRevision() ||
+		reopened.Pack().RuntimeRevision() != edited.Pack().RuntimeRevision() {
+		t.Fatal("saved project changed")
+	}
+	if !bytes.Equal(reopened.Pack().Files()["fonts/Large.ttf"], font) {
+		t.Fatal("font bytes changed")
+	}
+	if err := store.Save(p, p.ProjectRevision()); !errors.Is(err, ErrProjectConflict) {
+		t.Fatal("stale save accepted", err)
+	}
+}

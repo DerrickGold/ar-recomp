@@ -152,6 +152,7 @@ typedef struct FakeRasterizer {
   int calls;
   int releases;
   bool fail;
+  ArTextRasterFailure fail_kind;
   bool invalid_bitmap;
   bool invalid_cluster_bounds;
   ArTextRasterRequest last_request;
@@ -159,12 +160,14 @@ typedef struct FakeRasterizer {
 } FakeRasterizer;
 
 static bool Rasterize(void *context, const ArTextRasterRequest *request,
-                      ArTextBitmap *bitmap,
+                      ArTextBitmap *bitmap, ArTextRasterFailure *failure,
                       char *error, size_t error_capacity) {
   FakeRasterizer *fake = (FakeRasterizer *)context;
   ++fake->calls;
   fake->last_request = *request;
   if (fake->fail) {
+    *failure = fake->fail_kind ? fake->fail_kind
+                               : kArTextRasterFailure_Deterministic;
     if (error && error_capacity)
       snprintf(error, error_capacity, "fake raster failure");
     return false;
@@ -284,13 +287,13 @@ static void TestAbiValidation(void) {
   ArTextBitmap bitmap;
   char error[256];
   CHECK(!ArTextRasterizer_Rasterize(
-      &rasterizer, &request, &bitmap, error, sizeof(error)));
+      &rasterizer, &request, &bitmap, NULL, error, sizeof(error)));
   CHECK(fake.calls == 1 && fake.releases == 1);
   CHECK(strstr(error, "invalid bitmap") != NULL);
   fake.invalid_bitmap = false;
   fake.invalid_cluster_bounds = true;
   CHECK(!ArTextRasterizer_Rasterize(
-      &rasterizer, &request, &bitmap, error, sizeof(error)));
+      &rasterizer, &request, &bitmap, NULL, error, sizeof(error)));
   CHECK(fake.calls == 2 && fake.releases == 2);
   CHECK(strstr(error, "invalid bitmap") != NULL);
   ArTextRasterizer_Reset(&rasterizer);
@@ -422,6 +425,180 @@ static void TestCacheHitsMissesAndFailureAtomicity(void) {
   const ArTextCacheKey language_key = ArTextSurfaceCache_MakeKey(
       &rasterizer, &language_changed);
   CHECK(!ArTextCacheKey_Equals(old_key, language_key));
+
+  ArTextRasterRequest ink_changed = third_request;
+  ink_changed.band_rgb = 0xffce00;
+  CHECK(!ArTextCacheKey_Equals(old_key, ArTextSurfaceCache_MakeKey(&rasterizer, &ink_changed)));
+  ink_changed = third_request;
+  ink_changed.body_rgb = 0xffff9c;
+  CHECK(!ArTextCacheKey_Equals(old_key, ArTextSurfaceCache_MakeKey(&rasterizer, &ink_changed)));
+  ink_changed = third_request;
+  ink_changed.flags |= kArTextRasterFlag_Italic;
+  CHECK(!ArTextCacheKey_Equals(old_key, ArTextSurfaceCache_MakeKey(&rasterizer, &ink_changed)));
+
+  ArTextSurfaceCache_Destroy(&cache, &device);
+  CHECK(render.destroys == render.creates);
+  ArTextRasterizer_Reset(&rasterizer);
+  ArRenderDevice_Reset(&device);
+}
+
+/* A momentary allocation/resource failure must not become this key's permanent
+ * answer: the player should not have to change locale, font or window size to
+ * get their text back. A deterministic failure still costs one raster. */
+static void TestTransientFailureRecovers(void) {
+  FakeRenderBackend render = {0};
+  ArRenderDevice device;
+  CHECK(ArRenderDevice_Init(&device, &kRenderOps, &render,
+      (ArRenderCapabilities){
+        .maximum_texture_width = 512,
+        .maximum_texture_height = 512,
+      }));
+  FakeRasterizer fake = {0};
+  ArTextRasterizer rasterizer;
+  CHECK(ArTextRasterizer_Init(&rasterizer, &kRasterOps, &fake, 23));
+  ArTextSurfaceCache cache;
+  CHECK(ArTextSurfaceCache_Init(&cache, 4));
+  char error[256];
+
+  ArTextRasterRequest request = Request("Offerings");
+  ArTextSurface surface;
+  fake.fail = true;
+  fake.fail_kind = kArTextRasterFailure_Retryable;
+  CHECK(!ArTextSurfaceCache_Acquire(
+      &cache, &device, &rasterizer, &request, &surface, error, sizeof(error)));
+  CHECK(fake.calls == 1);
+
+  /* The identical request recovers on the next lookup once the backend does,
+   * with no settings, font or window change. */
+  fake.fail = false;
+  CHECK(ArTextSurfaceCache_Acquire(
+      &cache, &device, &rasterizer, &request, &surface, error, sizeof(error)));
+  CHECK(fake.calls == 2 && cache.stats.negative_hits == 0);
+
+  /* A backend that stays broken is asked again with growing backoff, not once
+   * per frame, and the remembered answer is served in between. */
+  ArTextRasterRequest broken = Request("Status");
+  fake.fail = true;
+  const int calls_before = fake.calls;
+  for (int frame = 0; frame < 200; ++frame) {
+    CHECK(!ArTextSurfaceCache_Acquire(
+        &cache, &device, &rasterizer, &broken, &surface, error,
+        sizeof(error)));
+    CHECK(strstr(error, "fake raster failure") != NULL);
+  }
+  const int retries = fake.calls - calls_before;
+  CHECK(retries > 1 && retries < 20);
+  CHECK(cache.stats.negative_hits == (uint64_t)(200 - retries));
+
+  /* One key's transient failures must not crowd another key's answer out of
+   * the bounded negative cache. */
+  fake.fail_kind = kArTextRasterFailure_Deterministic;
+  ArTextRasterRequest impossible = Request("Impossible");
+  CHECK(!ArTextSurfaceCache_Acquire(
+      &cache, &device, &rasterizer, &impossible, &surface, error,
+      sizeof(error)));
+  const int calls_after_impossible = fake.calls;
+  for (int frame = 0; frame < 50; ++frame) {
+    CHECK(!ArTextSurfaceCache_Acquire(
+        &cache, &device, &rasterizer, &impossible, &surface, error,
+        sizeof(error)));
+  }
+  CHECK(fake.calls == calls_after_impossible);
+
+  /* Any successful rasterization is evidence the backend recovered, so the
+   * keys still waiting out a backoff are asked again at once; the
+   * deterministic answer stands. */
+  fake.fail = false;
+  ArTextRasterRequest other = Request("Sky Palace");
+  CHECK(ArTextSurfaceCache_Acquire(
+      &cache, &device, &rasterizer, &other, &surface, error, sizeof(error)));
+  CHECK(ArTextSurfaceCache_Acquire(
+      &cache, &device, &rasterizer, &broken, &surface, error, sizeof(error)));
+  const int calls_after_recovery = fake.calls;
+  CHECK(!ArTextSurfaceCache_Acquire(
+      &cache, &device, &rasterizer, &impossible, &surface, error,
+      sizeof(error)));
+  CHECK(fake.calls == calls_after_recovery);
+
+  ArTextSurfaceCache_Destroy(&cache, &device);
+  ArTextRasterizer_Reset(&rasterizer);
+  ArRenderDevice_Reset(&device);
+}
+
+/* An entry count is not a memory budget, and an impossible field must be
+ * refused before any font work rather than after a full-size raster. */
+static void TestByteBudgetAndOversizeRejection(void) {
+  FakeRenderBackend render = {0};
+  ArRenderDevice device;
+  CHECK(ArRenderDevice_Init(&device, &kRenderOps, &render,
+      (ArRenderCapabilities){
+        .maximum_texture_width = 8192,
+        .maximum_texture_height = 8192,
+      }));
+  FakeRasterizer fake = {0};
+  ArTextRasterizer rasterizer;
+  CHECK(ArTextRasterizer_Init(&rasterizer, &kRasterOps, &fake, 23));
+  ArTextSurfaceCache cache;
+  CHECK(ArTextSurfaceCache_Init(&cache, 8));
+  char error[256];
+  ArTextSurface surface;
+
+  /* Bounds whose bitmap could never be worth keeping are refused with no
+   * rasterization at all. */
+  ArTextRasterRequest huge = Request("Impossible");
+  huge.maximum_width = 60000;
+  huge.maximum_height = 60000;
+  CHECK(!ArTextSurfaceCache_Acquire(
+      &cache, &device, &rasterizer, &huge, &surface, error, sizeof(error)));
+  CHECK(fake.calls == 0 && render.uploads == 0);
+  CHECK(cache.stats.oversize_rejects == 1);
+  CHECK(strstr(error, "per-request texture ceiling") != NULL);
+
+  /* Ordinary entries report what they own, and the peak is not forgotten. */
+  static const char *const kTexts[] = {"Aitos", "Bloodpool", "Fillmore",
+                                       "Kasandora", "Marahna", "Northwall"};
+  ArTextRasterRequest first = Request(kTexts[0]);
+  CHECK(ArTextSurfaceCache_Acquire(
+      &cache, &device, &rasterizer, &first, &surface, error, sizeof(error)));
+  const uint64_t one = cache.stats.texture_bytes;
+  CHECK(one == (uint64_t)surface.width * surface.height * 4);
+  CHECK(cache.stats.peak_texture_bytes == one);
+
+  /* A budget of two entries' worth keeps the cache at that size, evicting the
+   * least recently used, while the peak still records the high-water mark. */
+  ArTextSurfaceCache_SetByteBudget(&cache, one * 2u);
+  for (size_t i = 1; i < sizeof(kTexts) / sizeof(kTexts[0]); ++i) {
+    ArTextRasterRequest request = Request(kTexts[i]);
+    CHECK(ArTextSurfaceCache_Acquire(
+        &cache, &device, &rasterizer, &request, &surface, error,
+        sizeof(error)));
+  }
+  CHECK(cache.stats.texture_bytes <= one * 2u);
+  CHECK(cache.stats.peak_texture_bytes >= cache.stats.texture_bytes);
+  CHECK(cache.stats.evictions > 0);
+  CHECK(render.destroys == (int)cache.stats.evictions);
+
+  /* A frame being prepared never loses a texture it already holds, however
+   * tight the budget: pinned entries are skipped and the budget is exceeded
+   * rather than breaking the frame. */
+  ArTextSurfaceCache_SetByteBudget(&cache, 1);
+  ArTextSurfaceCache_BeginFrame(&cache);
+  ArTextSurface held[4];
+  for (int i = 0; i < 4; ++i) {
+    ArTextRasterRequest request = Request(kTexts[i]);
+    CHECK(ArTextSurfaceCache_Acquire(
+        &cache, &device, &rasterizer, &request, &held[i], error,
+        sizeof(error)));
+  }
+  for (int i = 0; i < 4; ++i) {
+    bool live = false;
+    for (size_t entry = 0; entry < cache.capacity; ++entry)
+      if (cache.entries[entry].valid &&
+          ArRenderTexture_Equals(cache.entries[entry].surface.texture,
+                                 held[i].texture))
+        live = true;
+    CHECK(live);
+  }
 
   ArTextSurfaceCache_Destroy(&cache, &device);
   CHECK(render.destroys == render.creates);
@@ -558,6 +735,8 @@ static void TestInkFormatsAndBounds(void) {
 int main(void) {
   TestAbiValidation();
   TestCacheHitsMissesAndFailureAtomicity();
+  TestTransientFailureRecovers();
+  TestByteBudgetAndOversizeRejection();
   TestPixelationTreatments();
   TestInkFormatsAndBounds();
   if (g_failures) {

@@ -1,5 +1,7 @@
 #include "render/localized_text_layout.h"
 
+#include <string.h>
+
 bool ArLocalizedTextLayout_FitColumns(
     const int *minimum_widths, const int *preferred_widths, unsigned count,
     int width, int preferred_gap, int minimum_gap, ArTextTableColumns *out) {
@@ -42,133 +44,14 @@ bool ArLocalizedTextLayout_FitColumns(
   return true;
 }
 
-static bool TableColumns(ArLocalizationTextLayoutKind layout,
-                        unsigned line, unsigned field_index, unsigned field_count,
-                        unsigned *column, unsigned *next_column) {
-  if (!column || !next_column || !field_count ||
-      field_index >= field_count)
-    return false;
-  if (layout == kArLocalizationTextLayout_StatusCities) {
-    /* City rows occupy five retail columns: name, population, growth,
-     * level, and item count. Header rows reuse those anchors but allow the
-     * Population heading and total to span adjacent data columns. */
-    static const unsigned starts[] = {0, 10, 14, 20, 23, 26};
-    if (field_count == 1) {
-      *column = 0;
-      *next_column = 26;
-      return true;
-    }
-    static const unsigned two_field_slots[] = {0, 3, 5};
-    static const unsigned three_field_slots[] = {0, 1, 3, 5};
-    const unsigned *slots = NULL;
-    if (field_count == 2) slots = two_field_slots;
-    else if (field_count == 3) slots = three_field_slots;
-    else if (field_count != 5)
-      return false;
-    if (slots) {
-      *column = starts[slots[field_index]];
-      *next_column = starts[slots[field_index + 1u]];
-    } else {
-      *column = starts[field_index];
-      *next_column = starts[field_index + 1u];
-    }
-    return true;
-  }
-  if (layout == kArLocalizationTextLayout_StatusScore) {
-    static const unsigned starts[] = {0, 15, 21, 26};
-    if (field_count == 1) {
-      *column = 0;
-      *next_column = 26;
-      return true;
-    }
-    if (field_count == 2) {
-      static const unsigned slots[] = {0, 2, 3};
-      *column = starts[slots[field_index]];
-      *next_column = starts[slots[field_index + 1u]];
-    } else if (field_count == 3) {
-      *column = starts[field_index];
-      *next_column = starts[field_index + 1u];
-    } else {
-      return false;
-    }
-    return true;
-  }
-  if (layout == kArLocalizationTextLayout_StatusMaster) {
-    if (field_count == 1) {
-      *column = line == 1 ? 9 : 0;
-      *next_column = line >= 12 ? 5 : 12;
-    } else if (field_count == 2 && (line == 7 || line == 9)) {
-      *column = field_index ? 7 : 0;
-      *next_column = field_index ? 12 : 7;
-    } else if (field_count == 4 && (line == 3 || line == 5)) {
-      static const unsigned starts[] = {0, 3, 7, 10, 12};
-      *column = starts[field_index];
-      *next_column = starts[field_index + 1];
-    } else return false;
-    return true;
-  }
-  if (layout == kArLocalizationTextLayout_FixedRows &&
-      field_count == 1) {
-    *column = 0;
-    *next_column = 10;
-    return true;
-  }
-  if (layout == kArLocalizationTextLayout_MessageSpeed) {
-    if (line == 0 && field_count == 10) {
-      *column = field_index;
-      *next_column = field_index + 1;
-    } else if (line == 2 && field_count == 3) {
-      static const unsigned starts[] = {0, 4, 6, 10};
-      *column = starts[field_index];
-      *next_column = starts[field_index + 1];
-    } else if (field_count == 1) {
-      *column = 0;
-      *next_column = 10;
-    } else return false;
-    return true;
-  }
-  return false;
-}
-
-bool ArLocalizedTextLayout_TableNumeric(
-    ArLocalizationTextLayoutKind layout, unsigned line,
-    unsigned field_index, unsigned field_count) {
-  if (!field_count || field_index >= field_count) return false;
-  return (layout == kArLocalizationTextLayout_StatusMaster &&
-          (line == 1 || (field_index & 1u))) ||
-      ((layout == kArLocalizationTextLayout_StatusCities ||
-        layout == kArLocalizationTextLayout_StatusScore) &&
-       ((line <= 1 && field_count > 1 && field_index + 1 == field_count) ||
-        (line >= 7 && field_index > 0 &&
-         !(layout == kArLocalizationTextLayout_StatusCities &&
-           field_index == 2))));
-}
-
-bool ArLocalizedTextLayout_TableColumns(
-    ArLocalizationTextLayoutKind layout, unsigned line, unsigned field_index,
-    unsigned field_count, unsigned *column, unsigned *next_column) {
-  if (!TableColumns(layout, line, field_index, field_count, column, next_column))
-    return false;
-  /* A right-aligned value must retain the native blank before its neighbor. */
-  if (ArLocalizedTextLayout_TableNumeric(layout, line, field_index, field_count) &&
-      field_index + 1 < field_count)
-    --*next_column;
-  return *next_column > *column;
-}
-
-ArTextHorizontalAlignment ArLocalizedTextLayout_TableAlignment(
-    ArLocalizationTextLayoutKind layout, unsigned line, unsigned field_index,
-    unsigned field_count, ArTextDirection direction) {
-  if (layout == kArLocalizationTextLayout_MessageSpeed) {
-    if (line == 0 && field_count == 10 && field_index < 10)
-      return kArTextHorizontalAlignment_Center;
-    if (line == 2 && field_count == 3)
-      return field_index == 2 ? kArTextHorizontalAlignment_Trailing
-                             : kArTextHorizontalAlignment_Leading;
-  }
-  return ArLocalizedTextLayout_TableNumeric(layout, line, field_index, field_count) ||
-      direction == kArTextDirection_RightToLeft
-      ? kArTextHorizontalAlignment_Trailing : kArTextHorizontalAlignment_Leading;
+ArRenderRectI ArLocalizedTextLayout_UnionInk(ArRenderRectI a, ArRenderRectI b) {
+  if (!a.w || !a.h) return b;
+  if (!b.w || !b.h) return a;
+  const int left = a.x < b.x ? a.x : b.x;
+  const int top = a.y < b.y ? a.y : b.y;
+  const int right = a.x + a.w > b.x + b.w ? a.x + a.w : b.x + b.w;
+  const int bottom = a.y + a.h > b.y + b.h ? a.y + a.h : b.y + b.h;
+  return (ArRenderRectI){left, top, right - left, bottom - top};
 }
 
 bool ArLocalizedTextLayout_CenterBetween(
@@ -236,6 +119,121 @@ int ArLocalizedTextLayout_ScrollOffset(
   if (bottom <= viewport_height) return 0;
   const int advance = surface->line_advance;
   return ((bottom - viewport_height + advance - 1) / advance) * advance;
+}
+
+/* A cluster is a gutter when its own bytes are exactly the blank the surface
+ * declared between keys. Ink cannot decide this: the finish and backspace keys
+ * are native artwork drawn over placeholder characters that put no ink on the
+ * surface, and grouping by ink alone drops them from their row. */
+static bool ClusterIsSeparator(const ArTextSurface *surface, size_t index,
+                               size_t previous_end, const char *utf8,
+                               size_t utf8_bytes, const char *separator,
+                               size_t separator_bytes) {
+  const size_t end = surface->reveal_clusters[index].end_utf8_byte;
+  return end <= utf8_bytes && end >= previous_end &&
+      end - previous_end == separator_bytes &&
+      memcmp(utf8 + previous_end, separator, separator_bytes) == 0;
+}
+
+/* Where a key sits on the surface. Its ink when it has any, and the shaped
+ * advance box when it does not, so an artwork key still claims its column. */
+static ArRenderRectI ClusterExtent(const ArTextSurface *surface, size_t index) {
+  const ArRenderRectI ink = surface->cluster_ink_bounds[index];
+  if (ink.w > 0 && ink.h > 0) return ink;
+  const ArTextRevealCluster *cluster = &surface->reveal_clusters[index];
+  return (ArRenderRectI){cluster->x, cluster->y, cluster->width,
+                         cluster->height};
+}
+
+bool ArLocalizedTextLayout_KeyCellShifts(
+    const ArTextSurface *surface, const char *utf8, size_t utf8_bytes,
+    const char *separator, size_t separator_bytes, unsigned columns,
+    unsigned trailing_lines, int first_key_center, int key_pitch,
+    int *out_shifts, size_t capacity) {
+  if (!surface || !surface->reveal_clusters || !surface->cluster_ink_bounds ||
+      !utf8 || !utf8_bytes || !separator || !separator_bytes || !out_shifts ||
+      !columns || columns > kArTextLayoutMaximumKeyColumns || !trailing_lines ||
+      key_pitch <= 0 || surface->reveal_cluster_count > capacity ||
+      surface->reveal_cluster_count > kArTextLayoutMaximumClusters)
+    return false;
+  const size_t count = surface->reveal_cluster_count;
+  if (!count) return false;
+  int last_line = -1;
+  for (size_t index = 0; index < count; ++index) {
+    if (surface->reveal_clusters[index].line_index > last_line)
+      last_line = surface->reveal_clusters[index].line_index;
+  }
+  if (last_line < 0 || (unsigned)(last_line + 1) < trailing_lines) return false;
+  /* Cluster ends are monotonic, so one sweep gives each cluster the byte it
+   * starts at without searching the text again per line. */
+  size_t starts[kArTextLayoutMaximumClusters];
+  size_t previous_end = 0;
+  for (size_t index = 0; index < count; ++index) {
+    starts[index] = previous_end;
+    const size_t end = surface->reveal_clusters[index].end_utf8_byte;
+    previous_end = end > previous_end ? end : previous_end;
+  }
+  for (size_t index = 0; index < count; ++index) out_shifts[index] = 0;
+  const int first_keyed = (last_line + 1) - (int)trailing_lines;
+  for (int line = first_keyed; line <= last_line; ++line) {
+    size_t line_first = 0;
+    while (line_first < count &&
+           surface->reveal_clusters[line_first].line_index != line)
+      ++line_first;
+    size_t line_end = line_first;
+    while (line_end < count &&
+           surface->reveal_clusters[line_end].line_index == line)
+      ++line_end;
+
+    /* Find the keys: runs of clusters between the gutters. */
+    size_t key_first[kArTextLayoutMaximumKeyColumns];
+    size_t key_end[kArTextLayoutMaximumKeyColumns];
+    int key_shift[kArTextLayoutMaximumKeyColumns];
+    unsigned key_count = 0;
+    size_t index = line_first;
+    while (index < line_end) {
+      if (ClusterIsSeparator(surface, index, starts[index], utf8, utf8_bytes,
+                             separator, separator_bytes)) {
+        ++index;
+        continue;
+      }
+      if (key_count >= columns) return false;
+      const size_t first = index;
+      ArRenderRectI extent = ClusterExtent(surface, index);
+      int left = extent.x;
+      int right = extent.x + extent.w;
+      while (index < line_end &&
+             !ClusterIsSeparator(surface, index, starts[index], utf8,
+                                 utf8_bytes, separator, separator_bytes)) {
+        extent = ClusterExtent(surface, index);
+        if (extent.x < left) left = extent.x;
+        if (extent.x + extent.w > right) right = extent.x + extent.w;
+        ++index;
+      }
+      key_first[key_count] = first;
+      key_end[key_count] = index;
+      key_shift[key_count] =
+          first_key_center + (int)key_count * key_pitch - (left + right) / 2;
+      ++key_count;
+    }
+    if (key_count != columns) return false;
+
+    /* Every cluster of the line moves with a key, gutters included, and each
+     * gutter is split down the middle between the keys it separates. A glyph
+     * whose ink overhangs its own advance box then stays inside one shifted
+     * run, instead of being cut at the box edge and leaving a stray fragment
+     * behind at the neighbour's offset. */
+    for (unsigned key = 0; key < key_count; ++key) {
+      const size_t from = key ? (key_end[key - 1u] + key_first[key]) / 2u
+                              : line_first;
+      const size_t to = key + 1u < key_count
+          ? (key_end[key] + key_first[key + 1u]) / 2u
+          : line_end;
+      for (size_t member = from; member < to; ++member)
+        out_shifts[member] = key_shift[key];
+    }
+  }
+  return true;
 }
 
 bool ArLocalizedTextLayout_Clip(

@@ -2,6 +2,8 @@
 
 #include <stddef.h>
 #include <stdio.h>
+#include <math.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define AR_MEMBER_END(type, member) \
@@ -93,6 +95,7 @@ bool ArTextRasterRequest_IsValid(const ArTextRasterRequest *request) {
       kArTextRasterFlag_PreserveHardBreaks |
       kArTextRasterFlag_CropHorizontalWhitespace |
       kArTextRasterFlag_CropVerticalWhitespace |
+      kArTextRasterFlag_Italic |
       kArTextRasterFlag_IncludeRevealClusters;
   return request &&
       request->struct_size >= AR_MEMBER_END(
@@ -271,8 +274,11 @@ ArRenderRectI ArTextBitmap_InkBounds(const ArTextBitmap *bitmap,
 bool ArTextRasterizer_Rasterize(const ArTextRasterizer *rasterizer,
                                 const ArTextRasterRequest *request,
                                 ArTextBitmap *out_bitmap,
+                                ArTextRasterFailure *out_failure,
                                 char *error, size_t error_capacity) {
   if (error && error_capacity) error[0] = 0;
+  ArTextRasterFailure failure = kArTextRasterFailure_Deterministic;
+  if (out_failure) *out_failure = failure;
   if (out_bitmap) {
     memset(out_bitmap, 0, sizeof(*out_bitmap));
     out_bitmap->struct_size = sizeof(*out_bitmap);
@@ -283,10 +289,16 @@ bool ArTextRasterizer_Rasterize(const ArTextRasterizer *rasterizer,
     SetError(error, error_capacity, "invalid text rasterization request");
     return false;
   }
-  if (!rasterizer->ops->rasterize(
-          rasterizer->context, request, out_bitmap, error, error_capacity)) {
+  if (!rasterizer->ops->rasterize(rasterizer->context, request, out_bitmap,
+                                  &failure, error, error_capacity)) {
     rasterizer->ops->release_bitmap(rasterizer->context, out_bitmap);
     memset(out_bitmap, 0, sizeof(*out_bitmap));
+    /* A backend that reports failure without classifying it is treated as
+     * deterministic: that keeps a genuinely impossible request from being
+     * retried forever, and no backend loses recovery it used to have. */
+    if (out_failure)
+      *out_failure = failure == kArTextRasterFailure_None
+          ? kArTextRasterFailure_Deterministic : failure;
     return false;
   }
   if (!BitmapValid(out_bitmap, request)) {
@@ -306,4 +318,133 @@ void ArTextRasterizer_ReleaseBitmap(const ArTextRasterizer *rasterizer,
       (bitmap->pixels || bitmap->token))
     rasterizer->ops->release_bitmap(rasterizer->context, bitmap);
   memset(bitmap, 0, sizeof(*bitmap));
+}
+
+static float RetailBlueWeight(float position) {
+  if (position <= 0.22f || position >= 0.78f) return 1.0f;
+  if (position < 0.36f) return (0.36f - position) / 0.14f;
+  if (position > 0.64f) return (position - 0.64f) / 0.14f;
+  return 0.0f;
+}
+
+bool ArTextBitmap_ApplyStyleShadow(void *pixels, int width, int height,
+                                   int pitch_bytes, ArRenderPixelFormat format,
+                                   int offset_x, int offset_y,
+                                   uint32_t shadow_rgb) {
+  if (!pixels || format != kArRenderPixelFormat_Rgba8888 || width <= 0 ||
+      height <= 0 || width > INT32_MAX / 4 || pitch_bytes < width * 4 ||
+      (!offset_x && !offset_y))
+    return false;
+  if (offset_x <= -width || offset_x >= width ||
+      offset_y <= -height || offset_y >= height)
+    return true; /* Shifted clear of the surface: nothing to lay down. */
+
+  /* The source coverage has to be read from a copy: writing shadow into the
+   * surface as we scan would let one shadow pixel seed the next and smear the
+   * whole run sideways. Only the alpha plane is needed. */
+  uint8_t *coverage = (uint8_t *)malloc((size_t)width * (size_t)height);
+  if (!coverage) return false;
+  for (int y = 0; y < height; ++y) {
+    const uint8_t *row =
+        (const uint8_t *)pixels + (size_t)y * (size_t)pitch_bytes;
+    for (int x = 0; x < width; ++x) {
+      uint32_t pixel;
+      memcpy(&pixel, row + (size_t)x * 4u, sizeof(pixel));
+      coverage[(size_t)y * (size_t)width + (size_t)x] =
+          (uint8_t)(pixel & UINT32_C(0xff));
+    }
+  }
+
+  const uint8_t red = (uint8_t)((shadow_rgb >> 16) & 255);
+  const uint8_t green = (uint8_t)((shadow_rgb >> 8) & 255);
+  const uint8_t blue = (uint8_t)(shadow_rgb & 255);
+  for (int y = 0; y < height; ++y) {
+    const int source_y = y - offset_y;
+    if (source_y < 0 || source_y >= height) continue;
+    uint8_t *row = (uint8_t *)pixels + (size_t)y * (size_t)pitch_bytes;
+    for (int x = 0; x < width; ++x) {
+      const int source_x = x - offset_x;
+      if (source_x < 0 || source_x >= width) continue;
+      uint32_t pixel;
+      memcpy(&pixel, row + (size_t)x * 4u, sizeof(pixel));
+      if (pixel & UINT32_C(0xff)) continue; /* Never overwrite a letterform. */
+      const uint8_t alpha =
+          coverage[(size_t)source_y * (size_t)width + (size_t)source_x];
+      if (!alpha) continue;
+      pixel = ((uint32_t)red << 24) | ((uint32_t)green << 16) |
+              ((uint32_t)blue << 8) | alpha;
+      memcpy(row + (size_t)x * 4u, &pixel, sizeof(pixel));
+    }
+  }
+  free(coverage);
+  return true;
+}
+
+bool ArTextBitmap_ApplyStyleBands(void *pixels, int width, int height,
+                                  int pitch_bytes, ArRenderPixelFormat format,
+                                  const ArTextRevealCluster *clusters,
+                                  size_t cluster_count, uint32_t band_rgb,
+                                  uint32_t body_rgb) {
+  if (!pixels || format != kArRenderPixelFormat_Rgba8888 || width <= 0 ||
+      height <= 0 || width > INT32_MAX / 4 || pitch_bytes < width * 4 ||
+      !clusters || !cluster_count)
+    return false;
+
+  /* Retail letters live in independent 8x8 tile cells. The white/blue split
+   * therefore restarts for every character instead of following a shared
+   * typographic baseline: the bottom of an M receives the same lower blue as
+   * the descender of a g. A shaped cluster is the Unicode-safe equivalent of
+   * that cell. It keeps combining marks and ligatures together while avoiding
+   * naïve per-codepoint rendering for Arabic, Indic, and other joined scripts. */
+  for (size_t cluster_index = 0; cluster_index < cluster_count;
+       ++cluster_index) {
+    const ArTextRevealCluster *cluster = &clusters[cluster_index];
+    int left = cluster->x;
+    int top = cluster->y;
+    int right = cluster->x + cluster->width;
+    int bottom = cluster->y + cluster->height;
+    if (left < 0) left = 0;
+    if (top < 0) top = 0;
+    if (right > width) right = width;
+    if (bottom > height) bottom = height;
+    if (right <= left || bottom <= top) continue;
+
+    int first = bottom;
+    int last = -1;
+    for (int y = top; y < bottom; ++y) {
+      const uint8_t *row =
+          (const uint8_t *)pixels + (size_t)y * (size_t)pitch_bytes;
+      for (int x = left; x < right; ++x) {
+        uint32_t pixel;
+        memcpy(&pixel, row + (size_t)x * 4u, sizeof(pixel));
+        if (!(pixel & UINT32_C(0xff))) continue;
+        if (y < first) first = y;
+        if (y > last) last = y;
+      }
+    }
+    if (last < first) continue;
+    const float denominator = last > first ? (float)(last - first) : 1.0f;
+    for (int y = first; y <= last; ++y) {
+      const float blue = RetailBlueWeight((float)(y - first) / denominator);
+      uint8_t rgb[3];
+      for (unsigned c = 0; c < 3; ++c) {
+        const unsigned shift = 16 - c * 8;
+        const float band = (float)((band_rgb >> shift) & 255);
+        const float body = (float)((body_rgb >> shift) & 255);
+        rgb[c] = (uint8_t)floorf(body + blue * (band - body) + 0.5f);
+      }
+      uint8_t *row =
+          (uint8_t *)pixels + (size_t)y * (size_t)pitch_bytes;
+      for (int x = left; x < right; ++x) {
+        uint32_t pixel;
+        memcpy(&pixel, row + (size_t)x * 4u, sizeof(pixel));
+        const uint32_t alpha = pixel & UINT32_C(0xff);
+        if (!alpha) continue;
+        pixel = ((uint32_t)rgb[0] << 24) | ((uint32_t)rgb[1] << 16) |
+            ((uint32_t)rgb[2] << 8) | alpha;
+        memcpy(row + (size_t)x * 4u, &pixel, sizeof(pixel));
+      }
+    }
+  }
+  return true;
 }

@@ -21,15 +21,20 @@ typedef struct ArGeneratedRoute {
   uint16_t placeholder_count;
   uint16_t contract_first;
   uint16_t contract_count;
+  uint16_t maximum_lines;
   uint8_t profile_mask;
   uint8_t canonical_profile;
+  bool optional;
+  ArLanguagePresentationShape shape;
+  uint8_t maximum_pages;
+  uint8_t required_nonempty_lines;
 } ArGeneratedRoute;
 
 #include "localization/language_contract_data.inc"
 
 #define ARRAY_COUNT(array) (sizeof(array) / sizeof((array)[0]))
 
-_Static_assert(ARRAY_COUNT(kGeneratedRoutes) == 531,
+_Static_assert(ARRAY_COUNT(kGeneratedRoutes) == 539,
                "v1 semantic route count changed");
 _Static_assert(ARRAY_COUNT(kGeneratedPlaceholders) == 60,
                "v1 placeholder count changed");
@@ -122,6 +127,84 @@ static const ArLanguageMessage *ResolveAlias(const ArLanguagePack *pack,
   return cursor && !cursor->is_alias ? cursor : NULL;
 }
 
+/* Authored shape as the game will read it: a paragraph break advances two
+ * lines, a page break starts a page, and a line counts as content when it
+ * holds anything other than spaces. */
+typedef struct PresentationScan {
+  uint32_t pages;
+  uint32_t line;       /* current 1-based line within the current page */
+  uint32_t lines_used; /* highest line index that carries content */
+  uint32_t nonempty_lines;
+  bool line_has_content;
+} PresentationScan;
+
+/* Only lines that carry content count towards the field height, so the newline
+ * that ends the last authored line is not a second row. */
+static void ScanContent(PresentationScan *scan) {
+  scan->line_has_content = true;
+  if (scan->line > scan->lines_used) scan->lines_used = scan->line;
+}
+
+static void ScanBreak(PresentationScan *scan, uint32_t advance) {
+  for (uint32_t i = 0; i < advance; ++i) {
+    if (scan->line_has_content) scan->nonempty_lines++;
+    scan->line_has_content = false;
+    scan->line++;
+  }
+}
+
+static void ScanText(PresentationScan *scan, const char *text) {
+  for (const char *cursor = text; cursor && *cursor; ++cursor) {
+    if (*cursor == '\n')
+      ScanBreak(scan, 1);
+    else if (*cursor != ' ' && *cursor != '\t')
+      ScanContent(scan);
+  }
+}
+
+static const char *ShapeName(ArLanguagePresentationShape shape) {
+  return shape == kArLanguagePresentation_Fixed ? "fixed field"
+      : shape == kArLanguagePresentation_Keyboard ? "name-entry keyboard"
+      : shape == kArLanguagePresentation_Inline ? "inline term"
+      : "dialogue";
+}
+
+/* Rejects content the game would silently never display: a page the fixed
+ * composer never advances to, a row past the native field, or a choice count
+ * the native menu cannot show. */
+static bool ValidatePresentation(const ArGeneratedRoute *route,
+                                 PresentationScan *scan,
+                                 const char *diagnostic_id,
+                                 ArLanguagePackError *error) {
+  if (scan->line_has_content) scan->nonempty_lines++;
+  scan->line_has_content = false;
+  if (route->maximum_pages && scan->pages > route->maximum_pages) {
+    SetError(error,
+             "%s: this %s displays %u page(s); pages beyond that are never "
+             "shown, so remove the extra page break(s)",
+             diagnostic_id, ShapeName(route->shape), route->maximum_pages);
+    return false;
+  }
+  if (route->maximum_lines && scan->lines_used > route->maximum_lines) {
+    SetError(error,
+             "%s: this %s reserves %u line(s); the message has %u",
+             diagnostic_id, ShapeName(route->shape), route->maximum_lines,
+             scan->lines_used);
+    return false;
+  }
+  /* A message with no content at all is the documented way to leave a route
+   * to its native lettering; only a partly filled menu is a mistake. */
+  if (route->required_nonempty_lines && scan->nonempty_lines &&
+      scan->nonempty_lines != route->required_nonempty_lines) {
+    SetError(error,
+             "%s: this menu shows exactly %u choice(s); the message has %u",
+             diagnostic_id, route->required_nonempty_lines,
+             scan->nonempty_lines);
+    return false;
+  }
+  return true;
+}
+
 static bool ValidateBody(const ArLanguagePack *pack,
                          const ArGeneratedRoute *route,
                          const ArGeneratedContract *contract,
@@ -130,12 +213,27 @@ static bool ValidateBody(const ArLanguagePack *pack,
                          ArLanguagePackError *error) {
   uint32_t anchor_index = 0;
   bool yielded = false;
+  PresentationScan scan = {1, 1, 0, 0, false};
   for (uint32_t i = 0; i < body->operation_count; i++) {
     const ArLanguageOperation *operation =
         ArLanguagePack_GetOperation(pack, body, i);
     if (!operation) {
       SetError(error, "%s: invalid operation range", diagnostic_id);
       return false;
+    }
+    if (operation->kind == kArLanguageOperation_Text)
+      ScanText(&scan, ArLanguagePack_GetString(pack, operation->value.text));
+    else if (operation->kind == kArLanguageOperation_Placeholder)
+      ScanContent(&scan);
+    else if (operation->kind == kArLanguageOperation_LineBreak)
+      ScanBreak(&scan, 1);
+    else if (operation->kind == kArLanguageOperation_ParagraphBreak)
+      ScanBreak(&scan, 2);
+    else if (operation->kind == kArLanguageOperation_PageBreak) {
+      if (scan.line_has_content) scan.nonempty_lines++;
+      scan.line_has_content = false;
+      scan.pages++;
+      scan.line = 1;
     }
     if (yielded && operation->kind != kArLanguageOperation_End &&
         operation->kind != kArLanguageOperation_Empty) {
@@ -185,7 +283,7 @@ static bool ValidateBody(const ArLanguagePack *pack,
              diagnostic_id, contract->anchor_count, anchor_index);
     return false;
   }
-  return true;
+  return ValidatePresentation(route, &scan, diagnostic_id, error);
 }
 
 bool ArLanguageContract_ValidatePack(const ArLanguagePack *pack,
@@ -235,7 +333,7 @@ bool ArLanguageContract_ValidatePack(const ArLanguagePack *pack,
 
   const uint8_t profile_bit = (uint8_t)(1u << metadata->source_profile);
   for (uint32_t i = 0; i < ARRAY_COUNT(kGeneratedRoutes); i++) {
-    if (!(kGeneratedRoutes[i].profile_mask & profile_bit))
+    if (kGeneratedRoutes[i].optional || !(kGeneratedRoutes[i].profile_mask & profile_bit))
       continue;
     result.required_messages++;
     if (metadata->coverage == kArLanguagePackCoverage_Complete &&
@@ -334,6 +432,20 @@ const char *ArLanguageContract_RequiredAnchor(
   return contract && index < contract->anchor_count
              ? kGeneratedAnchorNames[contract->anchor_first + index]
              : NULL;
+}
+
+bool ArLanguageContract_Presentation(const char *semantic_id,
+                                     ArLanguagePresentationContract *out) {
+  const ArGeneratedRoute *route = FindRoute(semantic_id);
+  if (!route || !out)
+    return false;
+  *out = (ArLanguagePresentationContract){
+      .shape = route->shape,
+      .maximum_pages = route->maximum_pages,
+      .maximum_lines = route->maximum_lines,
+      .required_nonempty_lines = route->required_nonempty_lines,
+  };
+  return true;
 }
 
 ArLanguagePlaceholderKind ArLanguageContract_PlaceholderKind(

@@ -107,31 +107,31 @@ func (d *Decoder) endingGraphicalSurface() (IRObject, error) {
 
 func (d *Decoder) graphicalCensus(census *NativeDestinationCensus, entries []assetEntry) (IRObject, error) {
 	resources := []IRObject{{"id": "font.dialog.native", "classification": "regional_graphical_text_font", "replacement_path": "native_or_enhanced_runtime_font", "source": census.Font}}
-	ready := []IRObject{}
+	enemy := []IRObject{}
 	for _, row := range irRows(census.BG3Buffer, "outside_classifications") {
-		if row["coverage_class"] == "graphical_text" && row["semantic_id"] == "action.hud.ready" {
-			ready = append(ready, row)
+		if row["coverage_class"] == "graphical_text" && row["semantic_id"] == "action.hud.enemy_label" {
+			enemy = append(enemy, row)
 		}
 	}
-	longReady := 0
+	longEnemy := 0
 	templates := []IRObject{}
 	for _, row := range irRows(census.BG3Long, "sites") {
 		if row["coverage_class"] != "graphical_text" {
 			continue
 		}
-		if row["semantic_id"] == "action.hud.ready" {
-			longReady++
+		if row["semantic_id"] == "action.hud.enemy_label" {
+			longEnemy++
 		}
 		if row["classification"] == "classified_graphical_text_template" {
 			templates = append(templates, row)
 		}
 	}
-	if len(ready) != 1 || longReady != 1 {
-		return nil, fmt.Errorf("graphical READY source changed")
+	if len(enemy) != 1 || longEnemy != 1 {
+		return nil, fmt.Errorf("graphical ENEMY source changed")
 	}
-	row := IRObject{"id": ready[0]["semantic_id"], "classification": "graphical_text_tile_strip", "replacement_path": "enhanced_text_or_native_tile_strip"}
+	row := IRObject{"id": enemy[0]["semantic_id"], "classification": "graphical_text_tile_strip", "replacement_path": "enhanced_text_or_native_tile_strip"}
 	for _, key := range []string{"write_site", "destination_range", "tile_word_start", "tile_count"} {
-		row[key] = ready[0][key]
+		row[key] = enemy[0][key]
 	}
 	resources = append(resources, row)
 	expected := map[string]bool{}

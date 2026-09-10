@@ -1,10 +1,15 @@
-#ifndef AR_RENDER_TEXT_CELL_RECORD_H
-#define AR_RENDER_TEXT_CELL_RECORD_H
+#ifndef AR_LOCALIZATION_TEXT_CELL_RECORD_H
+#define AR_LOCALIZATION_TEXT_CELL_RECORD_H
 
 #include <stdbool.h>
 #include <stdint.h>
 
 #define AR_TEXT_CELL_RECORD_ABI_VERSION UINT32_C(1)
+
+/* Where localized text claims cells on a native tilemap. This is part of the
+ * localization contract, consumed by the renderer -- not the other way round:
+ * the game adapter and the frame both name these regions before any renderer
+ * is involved. */
 
 enum {
   kArTextCellRecordCapacity = 16,
@@ -64,4 +69,4 @@ bool ArTextCellDestinationsEqual(ArTextCellDestination a,
                                  ArTextCellDestination b);
 bool ArTextCellRegionsIntersect(ArTextCellRegion a, ArTextCellRegion b);
 
-#endif /* AR_RENDER_TEXT_CELL_RECORD_H */
+#endif /* AR_LOCALIZATION_TEXT_CELL_RECORD_H */

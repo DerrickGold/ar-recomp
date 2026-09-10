@@ -447,10 +447,19 @@ if(BUILD_TESTING)
             src/render/text_surface_cache.c
             src/render/localized_text_layout.c
             src/render/localized_text_presenter.c
-            src/render/text_cell_record.c
+            src/render/localized_text_draw.c
+            src/render/localized_text_artwork.c
+        src/render/localized_text_artwork.c
+        src/render/localized_text_draw.c
+        src/render/localized_text_artwork.c
+            src/localization/text_cell_record.c
             src/render/text_cell_composite.c
             src/render/render_device.c
-            src/platform/sdl/text_rasterizer_sdl.c)
+            src/platform/sdl/text_rasterizer_sdl.c
+            # The renderer itself never links this: the test uses the game's
+            # own menu geometry so its layout results stay comparable, and
+            # separately checks a hand-built grid the game never publishes.
+            src/actraiser/actraiser_localization_grid.c)
         target_include_directories(actraiser_localized_text_presenter_test PRIVATE
             ${CMAKE_SOURCE_DIR}/src)
         target_compile_definitions(actraiser_localized_text_presenter_test PRIVATE
@@ -461,6 +470,24 @@ if(BUILD_TESTING)
         add_test(NAME actraiser_localized_text_presenter
             COMMAND actraiser_localized_text_presenter_test)
     endif()
+
+    # The portable contract a frame snapshot needs on its own: the frame, the
+    # cells it claims, the enhanced-text settings it carries and the rasterizer
+    # contract those name. Tests that build a frame need exactly this set.
+    set(AR_LOCALIZATION_FRAME_SOURCES
+        src/localization/localization_frame.c
+        src/localization/enhanced_text_settings.c
+        src/localization/text_rasterizer.c
+        src/localization/text_cell_record.c)
+
+    add_executable(actraiser_localization_grid_test
+        tests/actraiser_localization_grid_test.c
+        src/actraiser/actraiser_localization_grid.c
+        ${AR_LOCALIZATION_FRAME_SOURCES})
+    target_include_directories(actraiser_localization_grid_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src)
+    add_test(NAME actraiser_localization_grid
+        COMMAND actraiser_localization_grid_test)
 
     add_executable(actraiser_language_pack_runtime_test
         tests/language_pack_test.c
@@ -489,7 +516,7 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_text_cell_record_test
         tests/text_cell_record_test.c
-        src/render/text_cell_record.c)
+        src/localization/text_cell_record.c)
     target_include_directories(actraiser_text_cell_record_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src)
     add_test(NAME actraiser_text_cell_record
@@ -505,10 +532,7 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_localization_frame_test
         tests/localization_frame_test.c
-        src/localization/localization_frame.c
-        src/localization/enhanced_text_settings.c
-        src/localization/text_rasterizer.c
-        src/render/text_cell_record.c)
+        ${AR_LOCALIZATION_FRAME_SOURCES})
     target_include_directories(actraiser_localization_frame_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src)
     add_test(NAME actraiser_localization_frame
@@ -526,11 +550,11 @@ if(BUILD_TESTING)
     add_executable(actraiser_localization_compose_state_test
         tests/actraiser_localization_compose_state_test.c
         src/actraiser/actraiser_localization_compose_state.c
+        src/actraiser/actraiser_localization_grid.c
+        src/actraiser/actraiser_localization_hud.c
+        src/actraiser/actraiser_localization_art.c
         src/actraiser/actraiser_localization_routes.c
-        src/localization/localization_frame.c
-        src/localization/enhanced_text_settings.c
-        src/localization/text_rasterizer.c
-        src/render/text_cell_record.c)
+        ${AR_LOCALIZATION_FRAME_SOURCES})
     target_include_directories(actraiser_localization_compose_state_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
@@ -1343,6 +1367,7 @@ if(BUILD_TESTING)
         src/atomic_replace.c
         src/randomizer.c
         src/settings_overlay.c
+        src/localization/unicode_grapheme.c
         src/settings_overlay_debug_panel.c
         src/render/render_device.c
         src/render/presentation_layout.c
@@ -1798,6 +1823,10 @@ if(BUILD_TESTING)
         src/actraiser/actraiser_localization_text.c
         src/actraiser/actraiser_localization_routes.c
         src/actraiser/actraiser_localization_compose_state.c
+        src/actraiser/actraiser_localization_grid.c
+        src/actraiser/actraiser_localization_name_compose.c
+        src/actraiser/actraiser_localization_text_normalize.c
+        src/actraiser/actraiser_localization_hud.c
         src/actraiser/actraiser_localization_values.c
         src/actraiser/actraiser_localization_name_entry.c
         src/actraiser/actraiser_localization_art.c
@@ -1805,10 +1834,7 @@ if(BUILD_TESTING)
         src/localization/language_pack.c
         src/localization/language_contract.c
         src/localization/unicode_grapheme.c
-        src/localization/localization_frame.c
-        src/localization/enhanced_text_settings.c
-        src/localization/text_rasterizer.c
-        src/render/text_cell_record.c)
+        ${AR_LOCALIZATION_FRAME_SOURCES})
     target_include_directories(actraiser_localization_schedule_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_localization_schedule

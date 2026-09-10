@@ -6,16 +6,24 @@
 #include <stdint.h>
 
 #include "actraiser/actraiser_localization_routes.h"
+#include "actraiser/actraiser_localization_grid.h"
 #include "localization/localization_frame.h"
 
-#define ACTRAISER_LOCALIZATION_COMPOSE_STATE_ABI_VERSION UINT32_C(5)
+#define ACTRAISER_LOCALIZATION_COMPOSE_STATE_ABI_VERSION UINT32_C(6)
 
 enum {
   kActRaiserLocalizationComposeSurfaceFirst = 2,
-  kActRaiserLocalizationComposeSurfaceLast = 9,
-  kActRaiserLocalizationComposeSurfaceCapacity = 8,
+  kActRaiserLocalizationComposeSurfaceLast = 15,
+  kActRaiserLocalizationComposeSurfaceCapacity = 14,
   kActRaiserLocalizationComposeTextCapacity = 4096,
   kActRaiserLocalizationComposeSemanticIdCapacity = 256,
+};
+
+/* Title-screen surfaces, named because the runtime has to retire them when the
+ * Mode 7 layer their lettering belongs to stops being presented flat. */
+enum {
+  kActRaiserLocalizationTitleTextSurface = 14,
+  kActRaiserLocalizationTitleSelectorSurface = 15,
 };
 
 typedef struct ActRaiserLocalizationComposeSnapshot {
@@ -30,6 +38,11 @@ typedef struct ActRaiserLocalizationComposeSnapshot {
   uint16_t native_destination;
   uint8_t native_font_pixels;
   ArLocalizationTextLayoutKind layout;
+  /* Non-None when this surface is one of the game's fixed cell menus. The
+   * geometry is derived once here, when the route and region are decided,
+   * rather than rebuilt for every frame that publishes the surface. */
+  ActRaiserLocalizationMenu menu;
+  ArLocalizationTextGrid grid;
   char semantic_id[kActRaiserLocalizationComposeSemanticIdCapacity];
   uint32_t cluster_count;
   ArLocalizationInlineObjectSnapshot

@@ -78,7 +78,7 @@ func TestNativeLocalizationFreshBuildExtraction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p.Manifest().Metadata().ID != "native-us" || p.Workspace().Stats().MessageCount != 495 {
+	if p.Manifest().Metadata().ID != "native-us" || p.Workspace().Stats().MessageCount != 500 {
 		t.Fatal("incorrect source coverage")
 	}
 	before := p.RuntimeRevision()

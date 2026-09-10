@@ -12,6 +12,8 @@ enum {
   kActRaiserLocalizationNameLength = 8,
   kActRaiserLocalizationNameEntryRows = 5,
   kActRaiserLocalizationNameEntryColumns = 13,
+  /* Native cells per key: a blank for the selector, then the glyph. */
+  kActRaiserLocalizationNameEntryKeyCellColumns = 2,
   kActRaiserLocalizationNameCursorPixels = 8 * 8,
   /* Eight UTF-8 figure spaces plus a terminator is the widest empty field. */
   kActRaiserLocalizationNameEntryDisplayCapacity = 25,

@@ -14,6 +14,12 @@ DEFAULT_OUTPUT = ROOT / 'src' / 'localization' / 'language_contract_data.inc'
 DEFAULT_GO_OUTPUT = (ROOT / 'snesrecomp-go' / 'internal' / 'localizationkit' /
                      'data' / 'author-contracts.json')
 PROFILES = ('us', 'eu-en', 'de', 'fr', 'jp')
+PRESENTATION_SHAPES = {
+    'flow': 'kArLanguagePresentation_Flow',
+    'fixed': 'kArLanguagePresentation_Fixed',
+    'keyboard': 'kArLanguagePresentation_Keyboard',
+    'inline': 'kArLanguagePresentation_Inline',
+}
 PLACEHOLDER_KINDS = {
     'localized_text': 'kArLanguagePlaceholder_LocalizedText',
     'localized_term': 'kArLanguagePlaceholder_LocalizedTerm',
@@ -53,6 +59,15 @@ def generate(catalog_path):
     if [route['id'] for route in routes] != sorted(
             route['id'] for route in routes):
         raise ValueError('semantic routes must be sorted by id')
+    routes = sorted(routes + catalog.get('optional_routes', []), key=lambda r: r['id'])
+    if len({route['id'] for route in routes}) != len(routes):
+        raise ValueError('duplicate semantic route')
+
+    for route in routes:
+        shape = route.get('presentation', {}).get('shape')
+        if shape not in PRESENTATION_SHAPES:
+            raise ValueError(
+                f'{route["id"]}: unknown presentation shape {shape!r}')
 
     route_placeholder_indices = []
     anchor_names = []
@@ -74,11 +89,17 @@ def generate(catalog_path):
                 anchor['id'] for anchor in contract['required_anchors'])
             contracts.append((profile_index, anchor_first,
                               len(contract['required_anchors'])))
+        presentation = route['presentation']
         generated_routes.append((
             route['id'], placeholder_first,
             len(route['allowed_placeholders']), contract_first,
             len(contracts) - contract_first, profile_mask,
-            PROFILES.index(route['canonical_contract_profile'])))
+            PROFILES.index(route['canonical_contract_profile']),
+            int(route.get('optional', False)),
+            PRESENTATION_SHAPES[presentation['shape']],
+            presentation.get('maximum_pages', 0),
+            presentation.get('maximum_lines', 0),
+            presentation.get('required_nonempty_lines', 0)))
 
     if max((len(placeholders), len(contracts), len(anchor_names),
             len(route_placeholder_indices))) > 0xffff:
@@ -115,12 +136,17 @@ def generate(catalog_path):
     lines.extend(['};', '',
                   'static const ArGeneratedRoute kGeneratedRoutes[] = {'])
     for (route_id, placeholder_first, placeholder_count, contract_first,
-         contract_count, profile_mask, canonical_profile) in generated_routes:
+         contract_count, profile_mask, canonical_profile, optional, shape,
+         maximum_pages, maximum_lines,
+         required_nonempty_lines) in generated_routes:
         lines.append(
             f'  {{{c_string(route_id)}, UINT16_C({placeholder_first}), '
             f'UINT16_C({placeholder_count}), UINT16_C({contract_first}), '
-            f'UINT16_C({contract_count}), UINT8_C({profile_mask}), '
-            f'{canonical_profile}}},')
+            f'UINT16_C({contract_count}), UINT16_C({maximum_lines}), '
+            f'UINT8_C({profile_mask}), '
+            f'{canonical_profile}, {optional}, {shape}, '
+            f'UINT8_C({maximum_pages}), '
+            f'UINT8_C({required_nonempty_lines})}},')
     lines.extend(['};', ''])
     return '\n'.join(lines)
 
@@ -136,9 +162,11 @@ def generate_go(catalog_path):
             'id': route['id'],
             'allowed_placeholders': route['allowed_placeholders'],
             'canonical_profile': route['canonical_contract_profile'],
+            **({'optional': True} if route.get('optional') else {}),
+            'presentation': route['presentation'],
             'anchors': {profile: [anchor['id'] for anchor in contract['required_anchors']]
                         for profile, contract in route['contracts'].items()},
-        } for route in catalog['routes']],
+        } for route in sorted(catalog['routes'] + catalog.get('optional_routes', []), key=lambda r: r['id'])],
     }, ensure_ascii=False, sort_keys=True, indent=2) + '\n'
 
 

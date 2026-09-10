@@ -22,11 +22,13 @@ class FontCoverageTest(unittest.TestCase):
         result = subprocess.run([str(RASTER_TEST), '--missing-glyph-warnings'],
                                 capture_output=True, text=True, timeout=30)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stderr.count(' lacks U+'), 128)
-        self.assertEqual(result.stderr.count('warnings suppressed'), 2)
-        self.assertEqual(result.stderr.count('lacks U+F0000;'), 2)
-        self.assertEqual(result.stderr.count('lacks U+F003F;'), 2)
-        self.assertNotIn('lacks U+F0040;', result.stderr)
+        self.assertEqual(result.stderr.count(' has no glyph for U+'), 128)
+        self.assertEqual(result.stderr.count('warnings for font stack'), 2)
+        self.assertEqual(result.stderr.count('no glyph for U+F0000;'), 2)
+        self.assertEqual(result.stderr.count('no glyph for U+F003F;'), 2)
+        self.assertNotIn('no glyph for U+F0040;', result.stderr)
+        # A runtime warning must not send a player to development tooling.
+        self.assertNotIn('check_language_fonts', result.stderr)
 
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(prefix='ar-font-coverage-')

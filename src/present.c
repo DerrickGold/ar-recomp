@@ -546,7 +546,9 @@ void PresentHudOverlayComposited(const FrameSlot *slot,
     /* Discard a failed partial composite. Painting transparent native chunks
      * over it cannot erase already-drawn enhanced ink. After restoring the
      * output target below, draw only the untouched native chunks instead. */
-    if (!masks_valid || !ArLocalizedTextPresenter_Draw(&g_render_device, &localized)) {
+    const float text_brightness = slot->inidisp & 0x80 ? 0.0f : (slot->inidisp & 15) / 15.0f;
+    if (!masks_valid || !ArLocalizedTextPresenter_DrawWithBrightness(
+            &g_render_device, &localized, text_brightness)) {
       target_ready = false;
     } else {
       localized_drawn = true;
@@ -968,16 +970,30 @@ void PresentUpload(const FrameSlot *slot) {
             (int)surface->pitch_bytes, hud.x, hud.y);
     }
     if (ArRenderTexture_IsValid(g_hud_obj_texture)) {
-      int rows = slot->overlay_captures[kFrameSlotOverlay_Obj].y1;
-      if (rows < split_rows) rows = split_rows;
-      const ArRenderRectI hud = {0, 0, slot->snes_width, rows};
+      /* Choose the surface before its extent: the two are not interchangeable.
+       * The promoted-icon surface is described by the promote's own latched
+       * row count, never by overlay_captures[Obj] -- that capture is whatever
+       * policy claimed the single OBJ slot last, and a full-frame scene claim
+       * legitimately overwrites it. Taking the extent from the capture while
+       * taking the pixels from the promoted surface asked for more rows than
+       * that surface has, so PpuSurfaceHolds refused and the icon's texture
+       * was silently never filled. It is the same rule hud_icon_first/count
+       * already follow. */
+      bool promoted_icon = false;
       const SrPpuSurfaceView *surface = BoundPpuSurface(
           &slot->sim3d_output_surfaces.hud_obj);
-      if (!surface)
+      if (!surface) {
         surface = BoundPpuSurface(&slot->hud_obj_surface);
+        promoted_icon = surface != NULL;
+      }
       if (!surface)
         surface = BoundPpuSurface(
             &slot->ppu_surfaces.overlays[SR_PPU_OVERLAY_OBJ][0]);
+      int rows = promoted_icon
+          ? slot->hud_icon_rows
+          : slot->overlay_captures[kFrameSlotOverlay_Obj].y1;
+      if (rows < split_rows) rows = split_rows;
+      const ArRenderRectI hud = {0, 0, slot->snes_width, rows};
       if (PpuSurfaceHolds(surface, hud.w, hud.h))
         UploadChangedSurface(
             g_hud_obj_texture,

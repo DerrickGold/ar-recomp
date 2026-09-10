@@ -14,6 +14,30 @@ typedef enum ArLanguagePlaceholderKind {
   kArLanguagePlaceholder_Icon,
 } ArLanguagePlaceholderKind;
 
+/* How the game presents a route. This is the authoring-time half of what the
+ * runtime actually does with a message, so a pack cannot pass validation with
+ * content the game will never display.
+ *   Flow     -- paginated dialogue: the game advances through every page.
+ *   Fixed    -- one non-scrolling field, card, label or menu row; the composer
+ *               reads the first page only.
+ *   Keyboard -- the paged name-entry alphabet; the game selects pages itself.
+ *   Inline   -- a term substituted into another message; never presented on
+ *               its own line. */
+typedef enum ArLanguagePresentationShape {
+  kArLanguagePresentation_Flow = 0,
+  kArLanguagePresentation_Fixed,
+  kArLanguagePresentation_Keyboard,
+  kArLanguagePresentation_Inline,
+} ArLanguagePresentationShape;
+
+/* Zero means "not constrained by the catalog"; it is never a limit of zero. */
+typedef struct ArLanguagePresentationContract {
+  ArLanguagePresentationShape shape;
+  uint8_t maximum_pages;
+  uint16_t maximum_lines;
+  uint8_t required_nonempty_lines;
+} ArLanguagePresentationContract;
+
 typedef struct ArLanguageContractStats {
   uint32_t validated_messages;
   uint32_t aliases;
@@ -45,5 +69,8 @@ const char *ArLanguageContract_RequiredAnchor(
     const char *semantic_id, ArLanguageSourceProfile profile, uint32_t index);
 ArLanguagePlaceholderKind ArLanguageContract_PlaceholderKind(
     const char *placeholder);
+/* False for an unknown route. */
+bool ArLanguageContract_Presentation(const char *semantic_id,
+                                     ArLanguagePresentationContract *out);
 
 #endif /* AR_LOCALIZATION_LANGUAGE_CONTRACT_H */

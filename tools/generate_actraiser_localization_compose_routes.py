@@ -61,10 +61,61 @@ SURFACE_KINDS = {
         'surface_id': 9, 'destination': 0x0C12,
         'region': [18, 12, 10, 4], 'native_font_pixels': 7,
     },
+    'action_stage': {
+        'surface_id': 10, 'destination': 0x080B,
+        'region': [2, 8, 28, 2], 'native_font_pixels': 7,
+    },
+    'action_act': {
+        'surface_id': 11, 'destination': 0x0A0D,
+        'region': [2, 10, 28, 2], 'native_font_pixels': 7,
+    },
+    'action_clear': {
+        'surface_id': 12, 'destination': 0x0C0D,
+        'region': [2, 12, 28, 2], 'native_font_pixels': 7,
+    },
+    'action_ready': {
+        'surface_id': 13, 'destination': 0x090D,
+        'region': [2, 9, 28, 2], 'native_font_pixels': 7,
+    },
+    'action_time_up': {
+        'surface_id': 13, 'destination': 0x090C,
+        'region': [2, 9, 28, 2], 'native_font_pixels': 7,
+    },
+    'action_pause': {
+        'surface_id': 13, 'destination': 0x0B0D,
+        'region': [2, 11, 28, 2], 'native_font_pixels': 7,
+    },
+    'title_options': {
+        'surface_id': 14, 'destination': 0x1100,
+        'region': [14, 17, 17, 4], 'native_font_pixels': 7,
+    },
+    'title_start': {
+        'surface_id': 14, 'destination': 0x120C,
+        'region': [14, 18, 17, 1], 'native_font_pixels': 7,
+    },
+    'title_professional': {
+        'surface_id': 15, 'destination': 0x110C,
+        'region': [14, 21, 17, 1], 'native_font_pixels': 7,
+    },
 }
 
 
 def kind_for(semantic_id):
+    if semantic_id.startswith('action.stage_name.'):
+        return 'action_stage'
+    if semantic_id in ('action.hud.act_1', 'action.hud.act_2'):
+        return 'action_act'
+    action = {
+        'action.hud.clear': 'action_clear',
+        'action.hud.ready': 'action_ready',
+        'action.hud.pause': 'action_pause',
+        'action.hud.time_up': 'action_time_up',
+        'title.save_choice.labels': 'title_options',
+        'title.start_prompt': 'title_start',
+        'title.selector.professional': 'title_professional',
+    }
+    if semantic_id in action:
+        return action[semantic_id]
     if semantic_id.startswith('sky.menu.magic.') or \
             semantic_id.startswith('sim.menu.possession.'):
         return 'menu_selection'
@@ -134,7 +185,7 @@ def build_manifest(extraction_path, rom_path):
     for semantic_route in extraction['semantic_route_catalog']['routes']:
         semantic_id = semantic_route['id']
         kind = kind_for(semantic_id)
-        if kind is None or semantic_route['route_kind'] != 'consumer_route':
+        if kind is None:
             continue
         route_source = source_for_route(
             semantic_route, records, extractor)

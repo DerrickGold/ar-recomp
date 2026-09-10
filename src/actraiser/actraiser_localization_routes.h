@@ -6,10 +6,12 @@
 
 #include "actraiser/actraiser_localization_text.h"
 
-#include "render/text_cell_record.h"
+#include "localization/text_cell_record.h"
 
-/* Shared by semantic routing and native BG3 capture policy. */
+/* Interactive dialogue scope remains separate from fixed UI/capture scope. */
 bool ActRaiserLocalizationRoute_InScope(uint8_t map_group, uint8_t map_number);
+bool ActRaiserLocalizationRoute_FixedTextInScope(uint8_t map_group,
+                                               uint8_t map_number);
 
 typedef enum ActRaiserLocalizationRouteMatch {
   kActRaiserLocalizationRouteMatch_Caller = 1u << 0,

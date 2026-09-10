@@ -5,10 +5,28 @@ editors and the builder's Languages workspace. A pack contains no ROM
 addresses, dictionary tokens, or font-tile numbers. Version 1 deliberately
 starts fresh; the unreleased prototype format is not supported.
 
-The game currently applies packs to simulation-mode and Sky Palace menus and
-dialogue. The semantic catalog covers the whole game so later integrations can
-use the same packs without another format migration. Unsupported screens keep
-their native presentation for now.
+The game applies packs to simulation-mode and Sky Palace menus/dialogue, action
+HUD labels and counters, action stage cards and pause/stage messages, and the
+US title-screen options. Logo/copyright artwork, ending/credits, sound-test
+presentation and regional-only menu flows remain native. The semantic catalog
+covers the whole game so later integrations can use the same packs.
+
+Action labels use `action.hud.act_label`, `time_label`, `score_label`,
+`player_label` and `enemy_label` (each with the `action.hud.` prefix).
+They are optional additions to the original complete-pack contract. New source
+extractions include them; an older community pack falls back to Native US for
+missing labels. Lives, timer and score remain game-owned numbers, not editable
+script literals. Enhanced counters retain their slanted appearance and labels
+use the game's palette rather than the dialogue palette.
+
+Title `title.save_choice.labels` takes two nonempty lines: Continue and New
+game, in that order. Blank padding rows are ignored; labels stay beside the
+native selector. `title.start_prompt` and `title.selector.professional` supply
+the other US options. These are fitted fields, as are action cards/messages;
+extra authored pages are not an extension of a fixed menu and are rejected —
+see "What each route displays".
+Translating a regional reference's different mode/difficulty menu does not
+automatically replace the US title choices—edit the US semantic routes.
 
 ## Author backups and sharing archives
 
@@ -36,7 +54,9 @@ notice files, not unrelated files in that directory.
 
 The system overlay's **Localization** section separates **Game text** from
 **Enhanced font** settings. Native rendering always uses the unchanged U.S.
-text and font. Enhanced rendering uses the chosen text source and supports
+text and font. Selecting any external pack requires enhanced rendering, even
+an alternative English pack; selecting Native US restores the native/enhanced
+choice. Enhanced rendering uses the chosen text source and supports
 80–140% font size, Crisp/Smooth sampling, and None/Low resolution/Mosaic
 pixelation with strengths 2, 4, 6, or 8. Defaults are 140%, Crisp, and Mosaic 2.
 Choose Pixelation = None for the full-resolution font without a pixelation
@@ -46,7 +66,10 @@ automatically use finer blocks to avoid reducing characters to unreadable dots.
 These settings can be changed during play and are saved with other settings.
 
 The Go builder prepares the local Native US source first in both its CMake-backed
-and hermetic build flows, without replacing an existing source. Its runtime path
+and hermetic build flows, preserving existing source messages. Older native
+baselines gain missing graphical HUD label entries through an atomic update;
+previous source files and translation progress remain intact. Community packs
+are never automatically rewritten. Its runtime path
 is `game-assets/languages/native-us/pack.ini`. The workshop's Languages section
 and Home shortcuts require this complete, valid source: start a build with your
 US ROM and they unlock automatically after extraction, before the rest of the
@@ -206,8 +229,14 @@ keyboards still require their valid interactive grid and cannot be blanked.
 
 ## Checking font coverage
 
-From a source checkout configured with SDL3_ttf enhanced-text support, build
-the font checker and run it against your pack directory:
+The game warns on its standard error when a font stack has no glyph for a
+character your pack uses, naming the stack and the code point; the fix is to
+add a font that covers it under Fonts in the builder's Languages workspace.
+That warning is the only coverage check available from a distribution.
+
+The checker below is a **development tool** and is not part of a released
+build. From a source checkout configured with SDL3_ttf enhanced-text support,
+build it and run it against your pack directory:
 
 ```sh
 cmake --build build --target actraiser_font_coverage
@@ -439,7 +468,36 @@ truncated. Omit the suffix for unpadded numbers. Extracted scripts retain the
 native decimal padding; score fields suppress leading zeroes and use column
 alignment instead. Number formatting is not valid on names or icons.
 
+## What each route displays
+
+Every semantic route has a declared presentation shape, and both the builder
+and the game reject a pack whose content that shape can never display. This is
+checked when a pack is validated, not silently truncated at runtime:
+
+| Shape | Where it appears | Enforced |
+| --- | --- | --- |
+| Dialogue | Simulation, Sky Palace and Temple message windows | Pages, lines and length are yours. |
+| Fixed field | Action cards and messages, HUD labels, title options, menu rows, report tables | One page. The composer reads the first page and never advances, so an extra `@page` is content the player cannot reach. |
+| Keyboard | `name_entry.prompt_and_alphabet` and its regional variants | Multiple `@page` pages are expected; the game selects them. |
+| Inline term | Town names, enemy names, growth states, required master levels | One page and one line. These are substituted into another message, not printed on a line of their own. |
+
+`title.save_choice.labels` additionally shows exactly two choices, so a partly
+filled menu (one choice, or three) is rejected. Leaving the whole message empty
+is still allowed and means "keep the native lettering".
+
+The five optional `action.hud.*_label` routes are single words on a single
+line.
+
+Diagnostics name the message and the source line, so the builder points at the
+line to change before an install rather than after.
+
 ## Fixed menu and report rows
+
+`|` separates cells on the routes that use a fixed row or report layout: the
+status reports, the message-speed scale, the menu rows and the name-entry
+keyboard. On those routes a pipe is always a separator, so a literal `|` is not
+representable there — write the label without it. Everywhere else, including
+all dialogue, a pipe is ordinary text and is printed as written.
 
 Report totals belong in their own explicit cell, for example
 `Resident count | {total_population:04}`. Use `|`, not a run of spaces, to
@@ -466,6 +524,13 @@ columns. The original box, divider and row positions stay fixed. Report titles,
 the Master status artwork and cursor-driven menus retain their separate layout
 rules. Do not add alignment padding to translations—the renderer handles it.
 
+The keyboard's two action keys are the game's own art, not translatable text.
+They are a pair of tiny letters packed into a single tile -- "Ed" for End and
+"Bs" for BackSpace, the second letter subscripted -- and one key cell has no
+room for a word in any font. A pack references them as the `icon` placeholders
+`{icon.name_entry.finish}` and `{icon.name_entry.backspace}`, which keep their
+position in the row; the game supplies the picture.
+
 ## Name-entry keyboard pages
 
 `name_entry.prompt_and_alphabet` may contain multiple keyboard pages separated
@@ -476,8 +541,16 @@ place accented letters or other language-specific symbols on later pages.
 The enhanced name-entry screen displays `< current/total >` above the keyboard.
 Moving left from the first column or right from the last column cycles to the
 adjacent page. The selector retains its logical row and moves to the opposite
-edge. The renderer reserves an arrow gutter before every key, so variable-width
-letters do not overlap the authentic selection arrow.
+edge.
+
+The 13 key columns keep the original fixed pitch: every key owns two native
+cells, a blank for the selection arrow and then the glyph, and the renderer
+centres each key on that grid rather than letting the shaped advance decide.
+Rows therefore line up with each other and with the original whatever letters
+a pack puts on them -- a row of wide capitals cannot creep toward the window
+frame, and a row of narrow ones cannot fall short of it. Keys are still shaped
+in one pass, so every glyph on the keyboard shares one size. A row that does
+not hold exactly 13 keys is laid out as ordinary flowed text instead.
 
 Names support up to eight Unicode grapheme clusters. `{master_name}` uses the
 accepted Unicode spelling in later enhanced dialogue, independently of which

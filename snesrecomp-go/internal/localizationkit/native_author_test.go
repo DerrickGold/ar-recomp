@@ -264,7 +264,11 @@ func TestNativeAuthorCompleteSourceRuntimeParity(t *testing.T) {
 			for _, ref := range refs {
 				ops := []Operation{}
 				// Invented text only; no retail wording in the primary Go/C gate.
-				ops = append(ops, Operation{"op": "text", "value": "Most excellent, élève! 日本語"}, Operation{"op": "line_break"}, Operation{"op": "text", "value": "Party on!"})
+				// Fields the game reserves a single row for get a single row.
+				ops = append(ops, Operation{"op": "text", "value": "Most excellent, élève! 日本語"})
+				if ref.Presentation.MaximumLines != 1 {
+					ops = append(ops, Operation{"op": "line_break"}, Operation{"op": "text", "value": "Party on!"})
+				}
 				for _, anchor := range ref.Anchors {
 					ops = append(ops, Operation{"op": anchor[:strings.LastIndexByte(anchor, '.')]})
 				}

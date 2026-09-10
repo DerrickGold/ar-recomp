@@ -19,13 +19,14 @@ typedef struct FakeBackend {
 } FakeBackend;
 
 static bool Rasterize(void *context, const ArTextRasterRequest *request,
-                      ArTextBitmap *bitmap,
+                      ArTextBitmap *bitmap, ArTextRasterFailure *failure,
                       char *error, size_t error_capacity) {
   (void)context;
   (void)request;
   (void)bitmap;
   (void)error;
   (void)error_capacity;
+  *failure = kArTextRasterFailure_Deterministic;
   return false;
 }
 

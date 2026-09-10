@@ -21,11 +21,14 @@ func (d *Decoder) NativeSourceMetadata() PackMetadata {
 		Direction: "auto", Target: target, SourceProfile: d.profile.ID, Fallback: "native-us", Coverage: "complete"}
 }
 
-// EnsureNativeUSSource never overwrites an existing pack. The build and editor
-// share this entry point; neither invokes Python or guesses a regional profile.
+// EnsureNativeUSSource preserves existing messages, supplementing older native
+// baselines with newly transcribed graphical labels. Community packs are never
+// upgraded here. Build/editor share this path without Python or profile guessing.
 func EnsureNativeUSSource(directory string, rom []byte) (*AuthorPack, error) {
-	if pack, err := OpenNativeUSSource(directory); pack != nil || err != nil {
-		return pack, err
+	if pack, err := OpenNativeUSSource(directory); err != nil {
+		return nil, err
+	} else if pack != nil {
+		return supplementNativeUSSource(directory, pack)
 	}
 	d, err := NewDecoder(rom)
 	if err != nil {
@@ -64,8 +67,10 @@ func OpenNativeUSSource(directory string) (*AuthorPack, error) {
 // InstallNativeUSSource shares the build's non-overwrite policy with a GUI
 // which already holds its validated extraction. No second ROM scan is needed.
 func InstallNativeUSSource(directory string, pack *AuthorPack) (*AuthorPack, error) {
-	if old, err := OpenNativeUSSource(directory); old != nil || err != nil {
-		return old, err
+	if old, err := OpenNativeUSSource(directory); err != nil {
+		return nil, err
+	} else if old != nil {
+		return supplementNativeUSSource(directory, old)
 	}
 	if pack == nil {
 		return nil, fmt.Errorf("native source is required")
@@ -82,4 +87,32 @@ func InstallNativeUSSource(directory string, pack *AuthorPack) (*AuthorPack, err
 		return nil, err
 	}
 	return pack, nil
+}
+
+func supplementNativeUSSource(directory string, old *AuthorPack) (*AuthorPack, error) {
+	pack := old
+	for _, label := range nativeHUDLabels("us") {
+		if view, found := pack.workspace.Message(label.ID); found && view.Present {
+			continue
+		}
+		var err error
+		pack, err = pack.AddMessage(label.ID, pack.manifest.Sources()[0],
+			label.Operations[0].Value+"\n@end\n", TranslationNotStarted)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if pack == old {
+		return old, nil
+	}
+	project, err := NewSourceProject(pack)
+	if err != nil {
+		return nil, err
+	}
+	// The atomic manifest selects a complete new version; old source files and
+	// root progress remain intact and recoverable. Never replace existing IDs.
+	if _, err := installAuthorProject(directory, project, true, old.RuntimeRevision()); err != nil {
+		return nil, err
+	}
+	return OpenNativeUSSource(directory)
 }

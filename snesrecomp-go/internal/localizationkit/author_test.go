@@ -45,7 +45,7 @@ func TestAuthorScriptPreservesSourceAndDiagnosesLines(t *testing.T) {
 }
 
 func TestAuthorScriptWhitespaceEscapesAndBudgets(t *testing.T) {
-	s, err := ParseAuthorScript(":: action.hud.act_1\n@@literal {{brace}}\n# note\n\\#literal  \n\n\u00a0\n@line\nx\u2028y\n@end\n", "a")
+	s, err := ParseAuthorScript(":: dialogue.event.relay.aitos\n@@literal {{brace}}\n# note\n\\#literal  \n\n\u00a0\n@line\nx\u2028y\n@end\n", "a")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,10 +60,10 @@ func TestAuthorScriptWhitespaceEscapesAndBudgets(t *testing.T) {
 		{"bytes", strings.Repeat("é", MaxAuthorTextBytes/2), "x"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			if _, err := ParseAuthorScript(":: action.hud.act_1\n"+test.valid, "a"); err != nil {
+			if _, err := ParseAuthorScript(":: dialogue.event.relay.aitos\n"+test.valid, "a"); err != nil {
 				t.Fatalf("boundary rejected: %v", err)
 			}
-			if _, err := ParseAuthorScript(":: action.hud.act_1\n"+test.valid+test.extra, "a"); err == nil {
+			if _, err := ParseAuthorScript(":: dialogue.event.relay.aitos\n"+test.valid+test.extra, "a"); err == nil {
 				t.Fatal("over-limit accepted")
 			}
 		})
@@ -74,7 +74,7 @@ func TestAuthorScriptWhitespaceEscapesAndBudgets(t *testing.T) {
 }
 
 func TestAuthorContractsAndAliasDependents(t *testing.T) {
-	valid := []string{authorConfirm, ":: action.hud.act_1\n@empty\n", ":: action.hud.act_1\n@alias action.hud.act_2\n:: action.hud.act_2\nExcellent!\n", ":: status.report.master_report\n{master_level:03}\n"}
+	valid := []string{authorConfirm, ":: dialogue.event.relay.aitos\n@empty\n", ":: dialogue.event.relay.aitos\n@alias dialogue.event.relay.bloodpool\n:: dialogue.event.relay.bloodpool\nExcellent!\n", ":: status.report.master_report\n{master_level:03}\n"}
 	for _, text := range valid {
 		s, err := ParseAuthorScript(text, "a")
 		if err != nil {
@@ -92,10 +92,10 @@ func TestAuthorContractsAndAliasDependents(t *testing.T) {
 		strings.Replace(authorConfirm, "{master_name}", "{lair_count}", 1),
 		strings.Replace(authorConfirm, "@anchor reset_text_cursor.00\n", "", 1),
 		strings.Replace(authorConfirm, "@anchor yield.01\n", "@anchor yield.01\n@page\n", 1),
-		":: action.hud.act_1\n@event mutate.game\n",
-		":: action.hud.act_1\n@alias action.hud.act_2\n",
-		":: action.hud.act_1\n@alias action.hud.act_2\n:: action.hud.act_2\n@alias action.hud.act_1\n",
-		":: action.hud.act_1\n@alias sky.action_mode.confirm\n" + authorConfirm,
+		":: dialogue.event.relay.aitos\n@event mutate.game\n",
+		":: dialogue.event.relay.aitos\n@alias dialogue.event.relay.bloodpool\n",
+		":: dialogue.event.relay.aitos\n@alias dialogue.event.relay.bloodpool\n:: dialogue.event.relay.bloodpool\n@alias dialogue.event.relay.aitos\n",
+		":: dialogue.event.relay.aitos\n@alias sky.action_mode.confirm\n" + authorConfirm,
 		":: unknown.semantic\nExcellent!\n",
 	}
 	for _, text := range bad {
@@ -109,7 +109,7 @@ func TestAuthorContractsAndAliasDependents(t *testing.T) {
 		}
 	}
 	refs, err := AuthorReferences("us")
-	if err != nil || len(refs) != 531 {
+	if err != nil || len(refs) != 539 {
 		t.Fatalf("refs: %d %v", len(refs), err)
 	}
 	for i := range refs {
@@ -130,21 +130,21 @@ func TestAuthorContractsAndAliasDependents(t *testing.T) {
 
 func TestAuthorWorkspaceEditReopenTreeAndAtomicFailure(t *testing.T) {
 	sources := map[string]string{
-		"text/a.artext": "# keep header\r\n:: action.hud.act_1\r\n@alias action.hud.act_2\r\n",
-		"text/b.artext": "; editor notes\n:: action.hud.act_2\nMost excellent!\n@end\n\n" + authorConfirm,
+		"text/a.artext": "# keep header\r\n:: dialogue.event.relay.aitos\r\n@alias dialogue.event.relay.bloodpool\r\n",
+		"text/b.artext": "; editor notes\n:: dialogue.event.relay.bloodpool\nMost excellent!\n@end\n\n" + authorConfirm,
 	}
-	progress := "# private review note\r\naction.hud.act_2\twip\r\n"
+	progress := "# private review note\r\ndialogue.event.relay.bloodpool\twip\r\n"
 	w, err := NewAuthorWorkspace("us", "partial", sources, progress)
 	if err != nil {
 		t.Fatal(err)
 	}
 	sources["text/a.artext"] = "poison"
 	oldSources := w.Sources()
-	view, ok := w.Message("action.hud.act_2")
+	view, ok := w.Message("dialogue.event.relay.bloodpool")
 	if !ok || !view.Present || view.Status != TranslationWIP {
 		t.Fatalf("view: %+v", view)
 	}
-	w2, err := w.EditMessage("action.hud.act_2", "; keep my note\nTotally excellent!\n@page\nA second adventure.\n@end\n", TranslationDone)
+	w2, err := w.EditMessage("dialogue.event.relay.bloodpool", "; keep my note\nTotally excellent!\n@page\nA second adventure.\n@end\n", TranslationDone)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,18 +158,18 @@ func TestAuthorWorkspaceEditReopenTreeAndAtomicFailure(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(reopened.Sources(), w2.Sources()) || reopened.ProgressText() != w2.ProgressText() {
 		t.Fatal("save/reopen is not stable", err)
 	}
-	for _, body := range []string{"@alias action.hud.act_1\n", "@empty\n:: action.hud.act_3\n@empty\n", "{master_name}\n", "@anchor reset_text_cursor.00\nHello\n"} {
-		if next, err := w2.EditMessage("action.hud.act_2", body, TranslationDone); err == nil || next != nil {
+	for _, body := range []string{"@alias dialogue.event.relay.aitos\n", "@empty\n:: action.hud.act_3\n@empty\n", "{master_name}\n", "@anchor reset_text_cursor.00\nHello\n"} {
+		if next, err := w2.EditMessage("dialogue.event.relay.bloodpool", body, TranslationDone); err == nil || next != nil {
 			t.Fatalf("unsafe edit accepted: %q", body)
 		}
 	}
-	if _, err := w2.EditMessage("action.hud.act_2", view.Body, "bogus"); err == nil {
+	if _, err := w2.EditMessage("dialogue.event.relay.bloodpool", view.Body, "bogus"); err == nil {
 		t.Fatal("invalid status accepted")
 	}
 	if _, err := w2.EditMessage("missing", view.Body, TranslationWIP); err == nil {
 		t.Fatal("unknown edit accepted")
 	}
-	short, err := w2.EditMessage("action.hud.act_2", "@empty\n", TranslationWIP)
+	short, err := w2.EditMessage("dialogue.event.relay.bloodpool", "@empty\n", TranslationWIP)
 	if err != nil {
 		t.Fatal("intentional shortening failed", err)
 	}
@@ -182,7 +182,7 @@ func TestAuthorWorkspaceEditReopenTreeAndAtomicFailure(t *testing.T) {
 		present += entry.Present
 		done += entry.Done
 	}
-	if total != 531 || present != 3 || done != 1 {
+	if total != 539 || present != 3 || done != 1 {
 		t.Fatalf("tree counts %d %d %d", total, present, done)
 	}
 	children := w2.Children("action.hud")
@@ -193,7 +193,7 @@ func TestAuthorWorkspaceEditReopenTreeAndAtomicFailure(t *testing.T) {
 	if !reflect.DeepEqual(w.Sources(), oldSources) {
 		t.Fatal("editing modified old snapshot")
 	}
-	for _, bad := range []string{"action.hud.act_2\tbogus", "missing\tdone", "action.hud.act_2\twip\naction.hud.act_2\tdone", "\x00", "\xff"} {
+	for _, bad := range []string{"dialogue.event.relay.bloodpool\tbogus", "missing\tdone", "dialogue.event.relay.bloodpool\twip\ndialogue.event.relay.bloodpool\tdone", "\x00", "\xff"} {
 		if _, err := NewAuthorWorkspace("us", "partial", oldSources, bad); err == nil {
 			t.Fatalf("invalid progress accepted: %q", bad)
 		}
@@ -295,27 +295,27 @@ func TestAuthorRuntimeParity(t *testing.T) {
 		authorConfirm,
 		strings.ReplaceAll(authorConfirm, "\n", "\r\n"),
 		"\ufeff" + authorConfirm,
-		":: action.hud.act_1\n\u00a0\n@line\nx\u2028y\n@end\n",
-		":: action.hud.act_1\n@@literal {{braces}}\n\\#not a comment\n\\;nor this\n",
-		":: action.hud.act_1\n@alias action.hud.act_2\n:: action.hud.act_2\nExcellent!\n",
-		":: action.hud.act_1\n@alias action.hud.act_2\n:: action.hud.act_2\n@alias action.hud.act_1\n",
-		":: action.hud.act_1\n@alias action.hud.act_2\n",
-		":: action.hud.act_1\n@empty\nHello\n",
-		":: action.hud.act_1\n@wait 601\n",
-		":: action.hud.act_1\n@wait ١\n",
-		":: action.hud.act_1\n" + strings.Repeat("@page\n", 64),
-		":: action.hud.act_1\n" + strings.Repeat("@wait 600\n", 7),
-		":: action.hud.act_1\n" + strings.Repeat("é", MaxAuthorTextBytes/2+1),
+		":: dialogue.event.relay.aitos\n\u00a0\n@line\nx\u2028y\n@end\n",
+		":: dialogue.event.relay.aitos\n@@literal {{braces}}\n\\#not a comment\n\\;nor this\n",
+		":: dialogue.event.relay.aitos\n@alias dialogue.event.relay.bloodpool\n:: dialogue.event.relay.bloodpool\nExcellent!\n",
+		":: dialogue.event.relay.aitos\n@alias dialogue.event.relay.bloodpool\n:: dialogue.event.relay.bloodpool\n@alias dialogue.event.relay.aitos\n",
+		":: dialogue.event.relay.aitos\n@alias dialogue.event.relay.bloodpool\n",
+		":: dialogue.event.relay.aitos\n@empty\nHello\n",
+		":: dialogue.event.relay.aitos\n@wait 601\n",
+		":: dialogue.event.relay.aitos\n@wait ١\n",
+		":: dialogue.event.relay.aitos\n" + strings.Repeat("@page\n", 64),
+		":: dialogue.event.relay.aitos\n" + strings.Repeat("@wait 600\n", 7),
+		":: dialogue.event.relay.aitos\n" + strings.Repeat("é", MaxAuthorTextBytes/2+1),
 		strings.Replace(authorConfirm, "{master_name}", "{master_name:02}", 1),
 		strings.Replace(authorConfirm, "@anchor yield.01", "@anchor yield.01\n@page", 1),
 		strings.Replace(authorConfirm, "reset_text_cursor.00", `"reset_text_cursor\.00"`, 1),
 		strings.Replace(authorConfirm, "reset_text_cursor.00", `"reset_text_cursor.00"`, 1),
-		":: action.hud.act_1\n" + strings.Repeat("@line\n", 4095),
-		":: action.hud.act_1\n" + strings.Repeat("@line\n", 4096),
-		":: action.hud.act_1\n@end\ntrailing content\n",
-		":: action.hud.act_1\n@empty\n:: action.hud.act_1\n@empty\n",
-		":: action.hud.act_1\n\x00\n",
-		":: action.hud.act_1\n\xff\n",
+		":: dialogue.event.relay.aitos\n" + strings.Repeat("@line\n", 4095),
+		":: dialogue.event.relay.aitos\n" + strings.Repeat("@line\n", 4096),
+		":: dialogue.event.relay.aitos\n@end\ntrailing content\n",
+		":: dialogue.event.relay.aitos\n@empty\n:: dialogue.event.relay.aitos\n@empty\n",
+		":: dialogue.event.relay.aitos\n\x00\n",
+		":: dialogue.event.relay.aitos\n\xff\n",
 	} {
 		t.Run(fmt.Sprintf("edge-%d", i), func(t *testing.T) {
 			authorRuntimeCheck(t, probe, "us", "partial", map[string]string{"text/a.artext": text})
@@ -344,7 +344,7 @@ func TestAuthorRuntimeParity(t *testing.T) {
 	})
 	t.Run("cross-file-alias-edit", func(t *testing.T) {
 		sources := map[string]string{
-			"text/a.artext": ":: action.hud.act_1\n@alias status.report.master_report\n",
+			"text/a.artext": ":: dialogue.event.relay.aitos\n@alias status.report.master_report\n",
 			"text/b.artext": ":: status.report.master_report\nMost excellent!\n@end\n",
 		}
 		w, err := NewAuthorWorkspace("us", "partial", sources, "")
@@ -362,7 +362,7 @@ func TestAuthorRuntimeParity(t *testing.T) {
 }
 
 func FuzzAuthorScript(f *testing.F) {
-	for _, text := range []string{authorConfirm, ":: action.hud.act_1\n@empty\n", ":: a\n{{braces}}", "\ufeff:: a\r\n@@literal\r\n"} {
+	for _, text := range []string{authorConfirm, ":: dialogue.event.relay.aitos\n@empty\n", ":: a\n{{braces}}", "\ufeff:: a\r\n@@literal\r\n"} {
 		f.Add(text)
 	}
 	f.Fuzz(func(t *testing.T, text string) {
@@ -537,6 +537,70 @@ func BenchmarkAuthorWorkspaceEdit(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		if _, err := w.EditMessage("sky.action_mode.confirm", body, TranslationWIP); err != nil {
 			b.Fatal(err)
+		}
+	}
+}
+
+// Fixed menus, cards and labels display exactly what their native surface
+// reserves. Content past that is not a style choice; the game never shows it,
+// so the editor must reject it here rather than let the player find out.
+func TestAuthorPresentationContracts(t *testing.T) {
+	refs, err := AuthorReferences("us")
+	if err != nil {
+		t.Fatal(err)
+	}
+	shapes := map[string]AuthorPresentation{}
+	for _, ref := range refs {
+		shapes[ref.ID] = ref.Presentation
+	}
+	for _, expected := range []struct {
+		id string
+		AuthorPresentation
+	}{
+		{"action.hud.act_1", AuthorPresentation{Shape: "fixed", MaximumPages: 1}},
+		{"action.hud.act_label", AuthorPresentation{Shape: "fixed", MaximumPages: 1, MaximumLines: 1}},
+		{"title.save_choice.labels", AuthorPresentation{Shape: "fixed", MaximumPages: 1, RequiredNonemptyLines: 2}},
+		{"name_entry.prompt_and_alphabet", AuthorPresentation{Shape: "keyboard"}},
+		{"town.name.aitos", AuthorPresentation{Shape: "inline", MaximumPages: 1, MaximumLines: 1}},
+		{"dialogue.event.relay.aitos", AuthorPresentation{Shape: "flow"}},
+	} {
+		if shapes[expected.id] != expected.AuthorPresentation {
+			t.Fatalf("%s: %+v", expected.id, shapes[expected.id])
+		}
+	}
+
+	for _, tc := range []struct{ text, want string }{
+		{":: action.hud.act_1\nFirst card.\n@page\nNever displayed.\n", "pages beyond that are never shown"},
+		{":: action.hud.act_label\nToo\n@line\ntall\n", "reserves 1 line(s); the message has 2"},
+		{":: town.name.aitos\nAitos\n@line\nover two rows\n", "inline term reserves 1 line(s)"},
+		{":: title.save_choice.labels\nContinue\n@line\nNew game\n@line\nA third option\n", "exactly 2 choice(s); the message has 3"},
+		{":: title.save_choice.labels\nContinue\n", "exactly 2 choice(s); the message has 1"},
+	} {
+		s, err := ParseAuthorScript(tc.text, "a")
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = ValidateAuthorScripts("us", "partial", s)
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Fatalf("%q: %v", tc.text, err)
+		}
+	}
+
+	// What must keep working: documented empties, native blank spacer rows,
+	// multipage keyboards, and dialogue of any length.
+	for _, text := range []string{
+		":: title.save_choice.labels\n@empty\n",
+		":: title.mode_select.with_save\nContinue\n@line\n@line\nNew game\n",
+		":: name_entry.prompt_and_alphabet\nA B C\n@page\nD E F\n",
+		":: dialogue.event.relay.aitos\nOne\n@page\nTwo\n@page\nThree\n",
+		":: action.hud.act_1\nACT\n",
+	} {
+		s, err := ParseAuthorScript(text, "a")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := ValidateAuthorScripts("us", "partial", s); err != nil {
+			t.Fatalf("%q: %v", text, err)
 		}
 	}
 }

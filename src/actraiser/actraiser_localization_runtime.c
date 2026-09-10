@@ -1,4 +1,5 @@
 #include "actraiser/actraiser_localization_runtime.h"
+#include "actraiser/actraiser_localization_hud.h"
 #include "actraiser/actraiser_localization_art.h"
 
 #include <stdio.h>
@@ -7,8 +8,10 @@
 
 #include "actraiser/actraiser_localization_compose_state.h"
 #include "actraiser/actraiser_localization_name_entry.h"
+#include "actraiser/actraiser_localization_name_compose.h"
 #include "actraiser/actraiser_localization_routes.h"
 #include "actraiser/actraiser_localization_schedule.h"
+#include "actraiser/actraiser_localization_text_normalize.h"
 #include "actraiser/actraiser_localization_text.h"
 #include "actraiser/actraiser_localization_values.h"
 #include "actraiser_game.h"
@@ -48,6 +51,7 @@ typedef struct DialogueWindow {
 } DialogueWindow;
 
 typedef struct LocalizationRuntime {
+  ActRaiserLocalizationHud hud;
   bool configured;
   bool enabled;
   bool refresh_pending;
@@ -125,21 +129,10 @@ static bool ResolveFontPath(const char *manifest_path, const char *font,
                     "NotoSans-SemiCondensedExtraBold.ttf");
   if (!strncmp(font, "builtin:", 8))
     return false;
-  const char *slash = strrchr(manifest_path, '/');
-#ifdef _WIN32
-  const char *backslash = strrchr(manifest_path, '\\');
-  if (!slash || (backslash && backslash > slash))
-    slash = backslash;
-#endif
-  const size_t directory_bytes =
-      slash ? (size_t)(slash - manifest_path + 1) : 0;
-  const size_t font_bytes = strlen(font);
-  if (directory_bytes + font_bytes >= capacity)
-    return false;
-  if (directory_bytes)
-    memcpy(destination, manifest_path, directory_bytes);
-  memcpy(destination + directory_bytes, font, font_bytes + 1u);
-  return true;
+  /* One host-path contract for every pack member: see
+   * ArLanguagePack_ResolveMemberPath. */
+  return ArLanguagePack_ResolveMemberPath(manifest_path, font, destination,
+                                          capacity);
 }
 
 static void MakeSelection(int content, int presentation,
@@ -331,6 +324,7 @@ static bool EnsureConfigured(void) {
     s_runtime.enabled = true;
   }
   s_runtime.refresh_pending = true;
+  s_runtime.hud.resolved = false;
   s_runtime.name_entry_applied_native_revision = 0;
   fprintf(stderr, "[localization] %s: %s\n",
           presentation ? "enhanced" : "native",
@@ -389,110 +383,6 @@ static uint32_t CountClusters(const char *utf8, size_t bytes) {
   return count;
 }
 
-/* Retail extraction retains doubled spaces at former tile-row boundaries.
- * Enhanced layout owns wrapping, so collapse horizontal ASCII whitespace but
- * preserve explicit authored line breaks. */
-static ArLocalizationInlineObjectKind InlineObjectKind(const char *id) {
-  if (!id) return kArLocalizationInlineObject_None;
-  if (!strcmp(id, "icon.status.life"))
-    return kArLocalizationInlineObject_StatusLife;
-  if (!strcmp(id, "icon.status.population"))
-    return kArLocalizationInlineObject_StatusPopulation;
-  if (!strcmp(id, "icon.ui.speed_direction"))
-    return kArLocalizationInlineObject_SpeedDirection;
-  if (!strcmp(id, "icon.ui.selection_pointer"))
-    return kArLocalizationInlineObject_SelectionPointer;
-  if (!strcmp(id, "icon.name_entry.backspace"))
-    return kArLocalizationInlineObject_NameBackspace;
-  if (!strcmp(id, "icon.name_entry.finish"))
-    return kArLocalizationInlineObject_NameFinish;
-  return kArLocalizationInlineObject_None;
-}
-
-static bool NormalizeText(
-    const char *source, size_t source_bytes,
-    const ArDialogueInlineObject *source_objects, size_t source_object_count,
-    bool preserve_blank_lines,
-    char *destination, size_t capacity, size_t *destination_bytes,
-    ArLocalizationInlineObjectSnapshot *destination_objects,
-    size_t destination_object_capacity, uint8_t *destination_object_count,
-    uint16_t *reveal_offsets) {
-  if (!source || !destination || !capacity || !destination_bytes ||
-      !destination_object_count ||
-      (source_object_count && (!source_objects || !destination_objects)) ||
-      source_object_count > destination_object_capacity ||
-      source_object_count > UINT8_MAX ||
-      (reveal_offsets && (source_bytes > kArLocalizationFrameTextCapacity ||
-                          capacity > UINT16_MAX)))
-    return false;
-  size_t written = 0;
-  size_t object_index = 0;
-  bool pending_space = false;
-  for (size_t index = 0; index < source_bytes; ++index) {
-    if (reveal_offsets) reveal_offsets[index] = (uint16_t)written;
-    const char byte = source[index];
-    if (byte == ' ' || byte == '\t' || byte == '\r') {
-      pending_space = written && destination[written - 1u] != '\n';
-      continue;
-    }
-    if (byte == '\n') {
-      while (written && destination[written - 1u] == ' ') --written;
-      if (written &&
-          (preserve_blank_lines || destination[written - 1u] != '\n')) {
-        if (written + 1u >= capacity) return false;
-        destination[written++] = '\n';
-      }
-      pending_space = false;
-      continue;
-    }
-    if (object_index < source_object_count &&
-        source_objects[object_index].end_utf8_byte == index + 3u) {
-      static const uint8_t kObjectMarker[] = {0xEF, 0xBF, 0xBC};
-      static const uint8_t kFigureSpace[] = {0xE2, 0x80, 0x87};
-      static const uint8_t kEmSpace[] = {0xE2, 0x80, 0x83};
-      const ArLocalizationInlineObjectKind kind =
-          InlineObjectKind(source_objects[object_index].id);
-      if (kind == kArLocalizationInlineObject_None ||
-          index + sizeof(kObjectMarker) > source_bytes ||
-          memcmp(source + index, kObjectMarker, sizeof(kObjectMarker)) ||
-          written + (pending_space ? 1u : 0u) + sizeof(kFigureSpace) >=
-              capacity)
-        return false;
-      if (pending_space) destination[written++] = ' ';
-      pending_space = false;
-      memcpy(destination + written,
-             kind == kArLocalizationInlineObject_StatusLife ? kEmSpace : kFigureSpace,
-             sizeof(kFigureSpace));
-      written += sizeof(kFigureSpace);
-      destination_objects[object_index] =
-          (ArLocalizationInlineObjectSnapshot){kind, (uint32_t)written};
-      ++object_index;
-      index += sizeof(kObjectMarker) - 1u;
-      continue;
-    }
-    if (pending_space) {
-      if (written + 1u >= capacity) return false;
-      destination[written++] = ' ';
-      pending_space = false;
-    }
-    if (written + 1u >= capacity) return false;
-    destination[written++] = byte;
-  }
-  while (written && (destination[written - 1u] == ' ' ||
-                     destination[written - 1u] == '\n'))
-    --written;
-  destination[written] = 0;
-  *destination_bytes = written;
-  if (reveal_offsets) reveal_offsets[source_bytes] = (uint16_t)written;
-  if (object_index != source_object_count) return false;
-  *destination_object_count = (uint8_t)object_index;
-  /* A successfully resolved empty message is intentional, not a missing
-   * translation. It still owns its native cells while the UI is alive. */
-  return true;
-}
-
-/* Cache the logical window only when its source/page range changes. Reveal
- * ticks change a byte boundary, not the text, shaping request, or old lines. */
 static bool BuildDialogueWindow(
     const ArDialoguePageSnapshot *current,
     const ActRaiserLocalizationTextObservation *observation) {
@@ -526,7 +416,7 @@ static bool BuildDialogueWindow(
     const size_t offset = window->bytes;
     size_t bytes = 0;
     uint8_t object_count = 0;
-    if (!NormalizeText(page.utf8 + source_offset, page.utf8_bytes - source_offset,
+    if (!ActRaiserLocalizationText_Normalize(page.utf8 + source_offset, page.utf8_bytes - source_offset,
                        NULL, 0, false,
                        window->text + offset, sizeof(window->text) - offset,
                        &bytes, NULL, 0, &object_count,
@@ -551,46 +441,6 @@ static bool BuildDialogueWindow(
   return true;
 }
 
-/* The logical row immediately before the five keyboard rows is an entry-field
- * underline slot, not translatable wording. Remove the extraction-era dash
- * glyphs while retaining the hard line, then attach semantic underlines to
- * the eight shaped name graphemes independently of keyboard geometry. */
-static bool ClearNameEntryUnderline(
-    char *utf8, size_t *utf8_bytes,
-    ArLocalizationInlineObjectSnapshot *objects, uint8_t object_count) {
-  if (!utf8 || !utf8_bytes || !*utf8_bytes) return false;
-  size_t starts[64];
-  size_t ends[64];
-  size_t line_count = 0;
-  size_t start = 0;
-  for (size_t index = 0; index <= *utf8_bytes; ++index) {
-    if (index != *utf8_bytes && utf8[index] != '\n') continue;
-    if (line_count >= sizeof(starts) / sizeof(starts[0])) return false;
-    starts[line_count] = start;
-    ends[line_count] = index;
-    ++line_count;
-    start = index + 1u;
-  }
-  if (line_count < kActRaiserLocalizationNameEntryRows + 1u) return false;
-  const size_t line =
-      line_count - kActRaiserLocalizationNameEntryRows - 1u;
-  const size_t remove_start = starts[line];
-  const size_t remove_end = ends[line];
-  if (remove_end < remove_start) return false;
-  const size_t removed = remove_end - remove_start;
-  for (uint8_t index = 0; index < object_count; ++index) {
-    if (objects[index].end_utf8_byte > remove_start &&
-        objects[index].end_utf8_byte <= remove_end)
-      return false;
-    if (objects[index].end_utf8_byte > remove_end)
-      objects[index].end_utf8_byte -= (uint32_t)removed;
-  }
-  memmove(utf8 + remove_start, utf8 + remove_end,
-          *utf8_bytes - remove_end + 1u);
-  *utf8_bytes -= removed;
-  return true;
-}
-
 static void ContentSelection(ArDialogueContentSelection *selection) {
   MakeSelection(s_runtime.content < 0 ? 0 : s_runtime.content,
                 s_runtime.presentation < 0 ? 0 : s_runtime.presentation, selection);
@@ -606,166 +456,10 @@ static void ValueResolver(const ActRaiserLocalizationValues *values,
   };
 }
 
-static bool InsertInlineObject(
-    ArLocalizationInlineObjectSnapshot *objects, size_t capacity,
-    uint8_t *count, ArLocalizationInlineObjectSnapshot object) {
-  if (!objects || !count || *count >= capacity ||
-      object.kind == kArLocalizationInlineObject_None ||
-      !object.end_utf8_byte)
-    return false;
-  size_t position = 0;
-  while (position < *count &&
-         objects[position].end_utf8_byte <= object.end_utf8_byte)
-    ++position;
-  if (position < *count) {
-    memmove(&objects[position + 1u], &objects[position],
-            ((size_t)*count - position) * sizeof(objects[0]));
-  }
-  objects[position] = object;
-  ++*count;
-  return true;
-}
-
-static bool InsertNameEntryText(
-    char *utf8, size_t capacity, size_t *utf8_bytes, size_t offset,
-    const char *insertion, size_t insertion_bytes,
-    ArLocalizationInlineObjectSnapshot *objects, uint8_t object_count) {
-  if (!utf8 || !capacity || !utf8_bytes || !insertion || !insertion_bytes ||
-      offset > *utf8_bytes || insertion_bytes >= capacity - *utf8_bytes)
-    return false;
-  memmove(utf8 + offset + insertion_bytes, utf8 + offset,
-          *utf8_bytes - offset + 1u);
-  memcpy(utf8 + offset, insertion, insertion_bytes);
-  *utf8_bytes += insertion_bytes;
-  for (uint8_t index = 0; index < object_count; ++index) {
-    /* An endpoint equal to the insertion point belongs to the preceding
-     * cluster. Only objects attached to following text move. */
-    if (objects[index].end_utf8_byte > offset)
-      objects[index].end_utf8_byte += (uint32_t)insertion_bytes;
-  }
-  return true;
-}
-
-static bool CollectNameEntryLines(const char *utf8, size_t utf8_bytes,
-                                  size_t *starts, size_t *ends,
-                                  size_t capacity, size_t *line_count) {
-  if (!utf8 || !utf8_bytes || !starts || !ends || !capacity || !line_count)
-    return false;
-  size_t count = 0;
-  size_t start = 0;
-  for (size_t index = 0; index <= utf8_bytes; ++index) {
-    if (index != utf8_bytes && utf8[index] != '\n') continue;
-    if (count >= capacity) return false;
-    starts[count] = start;
-    ends[count] = index;
-    ++count;
-    start = index + 1u;
-  }
-  *line_count = count;
-  return true;
-}
-
-/* Enhanced glyphs are variable-width, but the retail name grid reserves a
- * blank tile before every key for its arrow. Retain that visual grammar by
- * expanding each normalized inter-key separator to a four-space gutter. The
- * glyphs remain shaped/VWF; only the navigation affordance has fixed room. */
-static bool ExpandNameEntryKeyGutters(
-    char *utf8, size_t capacity, size_t *utf8_bytes,
-    ArLocalizationInlineObjectSnapshot *objects, uint8_t object_count) {
-  size_t starts[64];
-  size_t ends[64];
-  size_t line_count = 0;
-  if (!CollectNameEntryLines(
-          utf8, *utf8_bytes, starts, ends,
-          sizeof(starts) / sizeof(starts[0]), &line_count) ||
-      line_count < kActRaiserLocalizationNameEntryRows)
-    return false;
-  const size_t first = line_count - kActRaiserLocalizationNameEntryRows;
-  for (size_t line = line_count; line-- > first;) {
-    for (size_t offset = ends[line]; offset-- > starts[line];) {
-      if (utf8[offset] != ' ' || offset == starts[line] ||
-          offset + 1u >= ends[line] || utf8[offset - 1u] == ' ' ||
-          utf8[offset + 1u] == ' ')
-        continue;
-      if (!InsertNameEntryText(
-              utf8, capacity, utf8_bytes, offset, "   ", 3u,
-              objects, object_count))
-        return false;
-    }
-  }
-  return true;
-}
-
-static bool InsertNameEntryPageIndicator(
-    char *utf8, size_t capacity, size_t *utf8_bytes,
-    uint32_t page_index, uint32_t page_count,
-    ArLocalizationInlineObjectSnapshot *objects, uint8_t object_count) {
-  if (page_count <= 1u) return true;
-  size_t starts[64];
-  size_t ends[64];
-  size_t line_count = 0;
-  if (!CollectNameEntryLines(
-          utf8, *utf8_bytes, starts, ends,
-          sizeof(starts) / sizeof(starts[0]), &line_count) ||
-      line_count < kActRaiserLocalizationNameEntryRows)
-    return false;
-  char indicator[64];
-  const int written = snprintf(
-      indicator, sizeof(indicator), "< %u/%u >\n",
-      (unsigned)(page_index + 1u), (unsigned)page_count);
-  if (written <= 0 || (size_t)written >= sizeof(indicator)) return false;
-  return InsertNameEntryText(
-      utf8, capacity, utf8_bytes,
-      starts[line_count - kActRaiserLocalizationNameEntryRows],
-      indicator, (size_t)written, objects, object_count);
-}
-
-static bool InsertNameEntryFieldUnderlines(
-    const char *utf8, size_t utf8_bytes,
-    ArLocalizationInlineObjectSnapshot *objects, size_t capacity,
-    uint8_t *object_count) {
-  if (!utf8 || !utf8_bytes || !objects || !object_count) return false;
-  size_t starts[64];
-  size_t ends[64];
-  size_t line_count = 0;
-  size_t start = 0;
-  for (size_t index = 0; index <= utf8_bytes; ++index) {
-    if (index != utf8_bytes && utf8[index] != '\n') continue;
-    if (line_count >= sizeof(starts) / sizeof(starts[0])) return false;
-    starts[line_count] = start;
-    ends[line_count] = index;
-    ++line_count;
-    start = index + 1u;
-  }
-  if (line_count < kActRaiserLocalizationNameEntryRows + 2u) return false;
-  const size_t name_line =
-      line_count - kActRaiserLocalizationNameEntryRows - 2u;
-  size_t offset = starts[name_line];
-  uint8_t graphemes = 0;
-  while (offset < ends[name_line]) {
-    size_t next = 0;
-    if (!ArUnicodeGrapheme_Next(
-            utf8, utf8_bytes, offset, NULL, &next) ||
-        next <= offset || next > ends[name_line] || next > UINT32_MAX ||
-        !InsertInlineObject(
-            objects, capacity, object_count,
-            (ArLocalizationInlineObjectSnapshot){
-                kArLocalizationInlineObject_NameFieldUnderline,
-                (uint32_t)next}))
-      return false;
-    offset = next;
-    ++graphemes;
-  }
-  return graphemes == kActRaiserLocalizationNameLength;
-}
-
 static uint64_t NameEntrySourceRevision(uint64_t source_revision) {
   uint64_t revision = DeterministicHash_Fnv1a64(
       DETERMINISTIC_HASH_FNV1A64_OFFSET,
       &source_revision, sizeof(source_revision));
-  revision = DeterministicHash_Fnv1a64(
-      revision, &s_runtime.name_entry.revision,
-      sizeof(s_runtime.name_entry.revision));
   revision = DeterministicHash_Fnv1a64(
       revision, &s_runtime.name_tracker.revision,
       sizeof(s_runtime.name_tracker.revision));
@@ -806,7 +500,7 @@ static bool ResolveNameEntryText(
       normalized_objects[kArLocalizationFrameInlineObjectCapacity];
   uint8_t normalized_object_count = 0;
   if (resolved) {
-    resolved = NormalizeText(
+    resolved = ActRaiserLocalizationText_Normalize(
         page.utf8, page.utf8_bytes,
         page.inline_objects, page.inline_object_count, false,
         normalized, sizeof(normalized), &normalized_bytes,
@@ -815,7 +509,7 @@ static bool ResolveNameEntryText(
         &normalized_object_count, NULL);
   }
   if (resolved) {
-    resolved = ClearNameEntryUnderline(
+    resolved = ActRaiserLocalizationNameCompose_ClearUnderlineRow(
         normalized, &normalized_bytes,
         normalized_objects, normalized_object_count);
   }
@@ -849,28 +543,28 @@ static bool ResolveNameEntryText(
         &session, s_runtime.name_tracker.keyboard_page, &page);
   }
   if (resolved) {
-    resolved = NormalizeText(
+    resolved = ActRaiserLocalizationText_Normalize(
         page.utf8, page.utf8_bytes,
         page.inline_objects, page.inline_object_count, false,
         utf8, utf8_capacity, utf8_bytes,
         inline_objects, inline_object_capacity, inline_object_count, NULL);
   }
   if (resolved) {
-    resolved = ClearNameEntryUnderline(
+    resolved = ActRaiserLocalizationNameCompose_ClearUnderlineRow(
         utf8, utf8_bytes, inline_objects, *inline_object_count);
   }
   if (resolved) {
-    resolved = InsertNameEntryFieldUnderlines(
+    resolved = ActRaiserLocalizationNameCompose_InsertFieldUnderlines(
         utf8, *utf8_bytes, inline_objects,
         inline_object_capacity, inline_object_count);
   }
   if (resolved) {
-    resolved = InsertNameEntryPageIndicator(
+    resolved = ActRaiserLocalizationNameCompose_InsertPageIndicator(
         utf8, utf8_capacity, utf8_bytes, page.page_index, page.page_count,
         inline_objects, *inline_object_count);
   }
   if (resolved) {
-    resolved = ExpandNameEntryKeyGutters(
+    resolved = ActRaiserLocalizationNameCompose_ExpandKeyGutters(
         utf8, utf8_capacity, utf8_bytes,
         inline_objects, *inline_object_count);
   }
@@ -878,7 +572,7 @@ static bool ResolveNameEntryText(
     resolved = ActRaiserLocalizationNameEntry_SelectedKeyRange(
         &s_runtime.name_entry, utf8, *utf8_bytes,
         &selected_start, &selected_end) &&
-        InsertInlineObject(
+        ActRaiserLocalizationText_InsertInlineObject(
             inline_objects, inline_object_capacity, inline_object_count,
             (ArLocalizationInlineObjectSnapshot){
                 kArLocalizationInlineObject_NameCursor, selected_end});
@@ -912,6 +606,7 @@ static bool ResolveComposeText(
   const bool name_entry =
       !strcmp(semantic_id, "name_entry.prompt_and_alphabet");
   const bool status_table =
+      !strcmp(semantic_id, "title.save_choice.labels") ||
       !strncmp(semantic_id, "status.report.", 14) ||
       !strcmp(semantic_id, "system.choice.yes_no") ||
       !strcmp(semantic_id, "system.message_speed.scale_labels") ||
@@ -935,7 +630,7 @@ static bool ResolveComposeText(
         &session, &selection, semantic_id, &resolver, &error);
     if (resolved) resolved = ArDialogueSession_GetPage(&session, &page);
     if (resolved) {
-      resolved = NormalizeText(
+      resolved = ActRaiserLocalizationText_Normalize(
           page.utf8, page.utf8_bytes,
           page.inline_objects, page.inline_object_count,
           status_table,
@@ -944,6 +639,18 @@ static bool ResolveComposeText(
     }
   }
   if (resolved) {
+    /* These two source records include the keyboard selector glyph. Its
+     * native BG3 cell is deliberately outside our claim and must not become
+     * a second font-rendered arrow. Other '>' characters remain authored text. */
+    if ((!strcmp(semantic_id, "title.start_prompt") ||
+         !strcmp(semantic_id, "title.selector.professional")) &&
+        *utf8_bytes && utf8[0] == '>') {
+      size_t first = 1;
+      while (first < *utf8_bytes && utf8[first] == ' ') ++first;
+      memmove(utf8, utf8 + first, *utf8_bytes - first);
+      *utf8_bytes -= first;
+      utf8[*utf8_bytes] = 0;
+    }
     *cluster_count = CountClusters(utf8, *utf8_bytes);
     *source_revision = !strncmp(semantic_id, "status.report.", 14)
         ? ActRaiserLocalizationValues_ReportRevision(&s_runtime.values)
@@ -1386,7 +1093,8 @@ void ActRaiserLocalizationRuntime_CaptureFrame(
     ArLocalizationFrame *frame, uint16_t bg3_tilemap_base_words,
     uint16_t bg3_tile_base_words,
     const uint16_t *vram_words, size_t vram_word_count,
-    const uint16_t *cgram_words, size_t cgram_word_count) {
+    const uint16_t *cgram_words, size_t cgram_word_count,
+    bool mode7_transformed) {
   ArLocalizationFrame_Reset(frame);
   (void)ActRaiserLocalizationRuntime_DialogueScheduled();
   if (!frame || !EnsureConfigured()) return;
@@ -1423,6 +1131,21 @@ void ActRaiserLocalizationRuntime_CaptureFrame(
       .screen = kArTextCellScreen_Composited,
       .tilemap_base_words = bg3_tilemap_base_words,
   };
+  /* The title's lettering is drawn inside the Mode 7 image, not over it, so
+   * the game never clears it when an option is chosen -- it spins and shrinks
+   * the whole layer away instead, leaving the tiles and every register this
+   * adapter watches untouched. A flat replacement cannot follow that, so it
+   * has to stop standing in the moment the layer stops being flat. Without
+   * this it sat still while the original flew off, then faded out with the
+   * screen. Only the title surfaces are dropped: elsewhere a transformed
+   * Mode 7 layer is scenery under text that really is composited flat, such
+   * as the city name over the world map. */
+  if (mode7_transformed) {
+    (void)ActRaiserLocalizationComposeState_ReleaseSurface(
+        &s_runtime.compose, kActRaiserLocalizationTitleTextSurface);
+    (void)ActRaiserLocalizationComposeState_ReleaseSurface(
+        &s_runtime.compose, kActRaiserLocalizationTitleSelectorSurface);
+  }
   const uint8_t map_group = g_ram[kActRaiserWram_MapGroup];
   const uint8_t map_number = g_ram[kActRaiserWram_CurrentMap];
   ActRaiserLocalizationComposeState_SetScene(
@@ -1522,6 +1245,26 @@ void ActRaiserLocalizationRuntime_CaptureFrame(
       (void)ActRaiserLocalizationArt_Capture(
         &frame->artwork[kArLocalizationArtwork_SpeedDirection], bg3_tile_base_words,
         speed, 2, vram_words, vram_word_count, cgram_words, cgram_word_count);
+    /* The keyboard's two action keys. They are font characters $7E and $7F --
+     * nominal ASCII slots the game font fills with symbols, the same way the
+     * selector is $3E and the population icon $3A. Palette 0, like every other
+     * BG3 dialogue glyph.
+     *
+     * Read off the real screen, they are not pictograms: each is a pair of
+     * tiny letters packed into one tile, "Ed" for End and "Bs" for BackSpace,
+     * the second letter subscripted. Nothing renders them legibly at that size
+     * except the game's own art, which is why they are captured rather than
+     * drawn. */
+    const uint16_t name_finish[] = {0x007e};
+    const uint16_t name_backspace[] = {0x007f};
+    if (ActRaiserLocalizationComposeState_Find(&s_runtime.compose, 5)) {
+      (void)ActRaiserLocalizationArt_Capture(
+          &frame->artwork[kArLocalizationArtwork_NameFinish], bg3_tile_base_words,
+          name_finish, 1, vram_words, vram_word_count, cgram_words, cgram_word_count);
+      (void)ActRaiserLocalizationArt_Capture(
+          &frame->artwork[kArLocalizationArtwork_NameBackspace], bg3_tile_base_words,
+          name_backspace, 1, vram_words, vram_word_count, cgram_words, cgram_word_count);
+    }
     if (observation_valid && observation.awaiting_page_advance &&
         observation.continuation_cell_valid) {
       const uint16_t continuation = vram_words[
@@ -1547,6 +1290,20 @@ void ActRaiserLocalizationRuntime_CaptureFrame(
   if (s_runtime.presentation)
     (void)ActRaiserLocalizationComposeState_AppendFrame(
         &s_runtime.compose, frame, destination, direction);
+  /* The status bar exists in both shapes: the action bar on an act map, and
+   * the simulation/Sky Palace bar on the non-action maps that have one. Each
+   * field still proves its own template tiles before it replaces anything, so
+   * offering both here cannot put one bar's label on the other's bar. */
+  if (s_runtime.presentation &&
+      ((map_group >= kActRaiserActionMapGroup_First &&
+        map_group <= kActRaiserActionMapGroup_Last) ||
+       (map_group == kActRaiserMapGroup_NonAction &&
+        map_number >= kActRaiserSimulationTown_First &&
+        map_number <= kActRaiserNonActionMap_SkyPalace)))
+    ActRaiserLocalizationHud_Append(&s_runtime.hud, frame, destination, direction,
+        bg3_tile_base_words,
+        vram_words, vram_word_count, cgram_words, cgram_word_count,
+        ResolveComposeText, NULL);
   if (!observation_valid) return;
   /* Opcode $00 enters the native input-acknowledgement loop. Keep presenting
    * its completed page until the game changes scene or a later fixed composer

@@ -3,6 +3,13 @@
 **ROM:** ACTRAISER-USA | LoROM | 1MB (32 banks x 32KB) | SlowROM | No coprocessors
 **Checksum:** 0x83DB | **CRC32:** EAC3358D
 
+Action/title text consumers are mapped in the
+[dialogue reference](dialogue-system.md#action-hud-cards-and-title-options):
+`$00:A851-$A8EF` fixed stage records, `$02:8E7E` packed action HUD template,
+`$00:A4D6` ENEMY strip, `$02:A92F` title HDMA mode/screen bands, and
+`$02:A9A7/$A9D6/$AA60` title choices. These use `$02:BF60` and its inverse
+eraser `$02:C1B7`; they do not enter the interactive dialogue grammar.
+
 ## Interrupt Vectors
 
 | Vector | Address | Purpose |

@@ -1324,8 +1324,8 @@ uses the live window/output ratio (including high-DPI backing scale).
 Independent HUD scale and anchoring are resolved afterward by the chunk
 inverse.
 
-First shipped entry: the title logo. The title screen ($18=00/$19=00) is a
-single Mode-7 BG1 canvas (no OBJ sprites); the intro swirl is a per-scanline
+First shipped entry: the title logo. The title screen ($18=00/$19=00) uses a
+Mode-7 BG1 logo band (no OBJ sprites); the intro swirl is a per-scanline
 HDMA matrix animation on channel 2 that lands on the identity matrix
 (`m7 = [0100 0 0 0100]`), with INIDISP fading `00 -> 0f`. The manifest gate
 (`wram[0018]==0, wram[0019]==0, mode==7, m7==identity`) therefore keeps the
@@ -1333,6 +1333,11 @@ swirl authentic and swaps the artwork band x=[11,248) y=[27,122) — menu text
 at y>=140 is never captured — on the settled frame. `AR_TITLELOG=1` prints
 the per-frame gate inputs used to derive this signature. Parser/evaluator
 unit tests: `tests/hd_manifest_test.c`.
+
+The settled screen is not Mode 7 on every scanline: `$02:A92F` switches the
+lower menu band to Mode 1 BG3 via `$7E:6000/$6800` HDMA mode/screen tables.
+Enhanced title options use that existing BG3 text path, preserve the native
+selector and do not claim the logo/copyright. See [dialogue-system.md](dialogue-system.md#action-hud-cards-and-title-options).
 
 ### 13.2 Stage-B implementation refinement (2026-07-12; retired by BH8)
 

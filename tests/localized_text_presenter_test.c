@@ -6,24 +6,33 @@
 #include <string.h>
 
 #include "platform/sdl/text_rasterizer_sdl.h"
+#include "actraiser/actraiser_localization_grid.h"
 #include "render/localized_text_presenter.h"
 
 static int failures, test_size, test_scale, test_treatment, test_example;
+/* Named so a failure says which screen it was drawing, not just an index. */
+static const char *test_case = "";
 #define CHECK(value) do { if (!(value)) { \
-  fprintf(stderr, "%s:%d: %s (size=%d scale=%d treatment=%d example=%d)\n", \
-      __FILE__, __LINE__, #value, test_size, test_scale, test_treatment, test_example); \
+  fprintf(stderr, "%s:%d: %s (%s: size=%d scale=%d treatment=%d example=%d)\n", \
+      __FILE__, __LINE__, #value, test_case, test_size, test_scale, \
+      test_treatment, test_example); \
   ++failures; \
 } } while (0)
 
+enum { kRecordedDraws = 512 };
 typedef struct TextureSink {
   uintptr_t next;
   unsigned uploads, live;
+  ArRenderColorF last_tint;
+  unsigned draws;
+  ArRenderTextureDesc last_descriptor;
+  ArRenderRectF draw_source[kRecordedDraws];
   bool fail_create, fail_upload;
   bool alive[65536];
 } TextureSink;
 static bool Create(void *context, const ArRenderTextureDesc *desc, ArRenderTexture *out) {
   TextureSink *sink = context;
-  (void)desc;
+  if (desc) sink->last_descriptor = *desc;
   if (sink->fail_create || sink->next + 1 >= sizeof(sink->alive)) return false;
   *out = (ArRenderTexture){++sink->next};
   sink->alive[out->value] = true;
@@ -59,9 +68,15 @@ static bool Clear(void *context, ArRenderColorF color) {
 }
 static bool Draw(void *context, ArRenderTexture texture, const ArRenderRectF *src,
                  const ArRenderRectF *dst, const ArRenderDrawState *state) {
-  const TextureSink *sink = context;
+  TextureSink *sink = context;
   CHECK(!texture.value || (texture.value < sizeof(sink->alive) && sink->alive[texture.value]));
-  (void)src; (void)dst; (void)state; return true;
+  sink->last_tint = state && (state->flags & kArRenderDrawState_Tint)
+      ? state->tint : (ArRenderColorF){1, 1, 1, 1};
+  if (sink->draws < kRecordedDraws)
+    sink->draw_source[sink->draws] =
+        src ? *src : (ArRenderRectF){0, 0, 0, 0};
+  ++sink->draws;
+  (void)dst; return true;
 }
 static bool Geometry(void *context, ArRenderTexture texture,
                      const ArRenderVertex2D *vertices, int count,
@@ -105,6 +120,11 @@ static void Exercise(ArRenderDevice *device, ArEnhancedTextSettings settings,
     "Name\n\n  \u2007Ég  I", /* Selected key, not the blank placeholder. */
     "Name\n\n   Ég \u2007I", /* Same row, selected narrow unaccented key. */
   };
+  static const char *const names[] = {
+    "message speed scale", "message speed scale (fr)", "master status",
+    "cities report", "name entry (accented key)", "name entry (narrow key)",
+  };
+  test_case = names[example];
   const char *text = texts[example];
   const char *placeholder = strstr(text, example == 2 ? "\u2003" : "\u2007");
   const ArLocalizationInlineObjectKind kinds[] = {
@@ -113,11 +133,11 @@ static void Exercise(ArRenderDevice *device, ArEnhancedTextSettings settings,
     kArLocalizationInlineObject_NameCursor,
     kArLocalizationInlineObject_NameCursor,
   };
-  const ArLocalizationTextLayoutKind layouts[] = {
-    kArLocalizationTextLayout_MessageSpeed, kArLocalizationTextLayout_MessageSpeed,
-    kArLocalizationTextLayout_StatusMaster, kArLocalizationTextLayout_StatusCities,
-    kArLocalizationTextLayout_Flow,
-    kArLocalizationTextLayout_Flow,
+  const ActRaiserLocalizationMenu menus[] = {
+    kActRaiserLocalizationMenu_MessageSpeed, kActRaiserLocalizationMenu_MessageSpeed,
+    kActRaiserLocalizationMenu_StatusMaster, kActRaiserLocalizationMenu_StatusCities,
+    kActRaiserLocalizationMenu_None,
+    kActRaiserLocalizationMenu_None,
   };
   const ArTextCellRegion regions[] = {
     {18, 12, 10, 4}, {18, 12, 10, 4}, {10, 6, 12, 17},
@@ -135,11 +155,25 @@ static void Exercise(ArRenderDevice *device, ArEnhancedTextSettings settings,
   const ArLocalizationInlineObjectSnapshot object = {
     kinds[example], (uint32_t)(placeholder - text + 3),
   };
-  CHECK(ArLocalizationFrame_AddTextWithObjectsAndLayout(
-      &frame, 1, (ArTextCellDestination){3, kArTextCellScreen_Composited, 0},
-      regions[example], text, strlen(text), 100, 100, 1,
-      kArTextDirection_LeftToRight, example >= 3 ? 8 : 7, layouts[example],
-      NULL, 0, &object, 1));
+  if (menus[example] != kActRaiserLocalizationMenu_None) {
+    ArLocalizationTextGrid grid;
+    CHECK(ActRaiserLocalizationGrid_Build(menus[example], regions[example],
+                                          &grid));
+    CHECK(ArLocalizationFrame_AddTextWithGrid(
+        &frame, 1, (ArTextCellDestination){3, kArTextCellScreen_Composited, 0},
+        regions[example], text, strlen(text), 100, 100, 1,
+        kArTextDirection_LeftToRight, example >= 3 ? 8 : 7, &grid,
+        NULL, 0, &object, 1));
+  } else {
+    CHECK(ArLocalizationFrame_AddTextWithObjectsAndLayout(
+        &frame, 1, (ArTextCellDestination){3, kArTextCellScreen_Composited, 0},
+        regions[example], text, strlen(text), 100, 100, 1,
+        kArTextDirection_LeftToRight, example >= 3 ? 8 : 7,
+        kArLocalizationTextLayout_Flow, NULL, 0, &object, 1));
+    /* A keyboard states the blank between its keys; the selector is sized to
+     * the room that leaves, not to a fraction of the line. */
+    CHECK(ArLocalizationFrame_SetKeySeparator(&frame, " ", 1));
+  }
   const HudPresentationChunk chunk = {
     .inspector_kind = kInspectorPresentation_HudBg,
     .screen_source = {0, 0, 256, 224}, .texture_source = {0, 0, 256, 224},
@@ -183,6 +217,10 @@ static void Exercise(ArRenderDevice *device, ArEnhancedTextSettings settings,
     }
   }
   const ArRenderRectI placed = prepared.inline_objects[0].destination;
+  if (example >= 4) {
+    /* The selector fits the gutter the game declared, not the line height. */
+    CHECK(placed.h > 0 && placed.h < prepared.texts[0].surface.line_advance);
+  }
   const double art_center = placed.y + (1.0 + 3.0 / 2.0) * placed.h / 8.0;
   CHECK(fabs(art_center - (top + bottom) / 2.0) <= 0.75);
   const ArTextCellRegion region = regions[example];
@@ -204,6 +242,7 @@ static void Exercise(ArRenderDevice *device, ArEnhancedTextSettings settings,
 
 static void ExerciseSingleLine(ArRenderDevice *device,
                                ArEnhancedTextSettings settings, int scale) {
+  test_case = "single line label";
   const char *labels[] = {"ESTUARY", "Région de l'Été", "Upper\nValley"};
   for (size_t label = 0; label < sizeof(labels) / sizeof(labels[0]); ++label) {
     for (int rtl = 0; rtl <= 1; ++rtl) {
@@ -247,6 +286,7 @@ static void ExerciseSingleLine(ArRenderDevice *device,
 static int ExerciseReport(ArRenderDevice *device, ArEnhancedTextSettings settings,
                            int scale, int example) {
   const bool score = example == 1;
+  test_case = score ? "score report" : "cities report";
   char pressure[2048] = "\n\n\nWWWWWWW|WWWW|WWWW|WWWW|WWWW\n\n\n\n";
   if (example >= 2) {
     for (unsigned row = 0; row < 6; ++row) {
@@ -275,11 +315,16 @@ static int ExerciseReport(ArRenderDevice *device, ArEnhancedTextSettings setting
       kArLocalizationInlineObject_StatusPopulation,
       example ? 0 : (uint32_t)(strstr(text, "\u2007") - text + 3),
   };
-  CHECK(ArLocalizationFrame_AddTextWithObjectsAndLayout(
+  const ArTextCellRegion report_region = {3, 6, 26, 20};
+  ArLocalizationTextGrid report_grid;
+  CHECK(ActRaiserLocalizationGrid_Build(
+      score ? kActRaiserLocalizationMenu_StatusScore
+            : kActRaiserLocalizationMenu_StatusCities,
+      report_region, &report_grid));
+  CHECK(ArLocalizationFrame_AddTextWithGrid(
       &frame, 7, (ArTextCellDestination){3, kArTextCellScreen_Composited, 0},
-      (ArTextCellRegion){3, 6, 26, 20}, text, strlen(text), 100, 100, 1,
-      kArTextDirection_LeftToRight, 8,
-      score ? kArLocalizationTextLayout_StatusScore : kArLocalizationTextLayout_StatusCities,
+      report_region, text, strlen(text), 100, 100, 1,
+      kArTextDirection_LeftToRight, 8, &report_grid,
       NULL, 0, example ? NULL : &object, example ? 0 : 1));
   const HudPresentationChunk chunk = {
     .inspector_kind = kInspectorPresentation_HudBg,
@@ -337,6 +382,7 @@ static int ExerciseReport(ArRenderDevice *device, ArEnhancedTextSettings setting
 
 static void ExercisePreflight(ArRenderDevice *device,
                               const ArTextBackend *backend) {
+  test_case = "font preflight";
   TextureSink *sink = device->context;
   char error[kArTextRasterErrorCapacity];
   ArTextPresentationFont font = {
@@ -454,6 +500,7 @@ static void ExercisePreflight(ArRenderDevice *device,
 }
 
 static void ExerciseDialogueFailure(ArRenderDevice *device) {
+  test_case = "dialogue failure";
   ArLocalizedTextPresenter_Reset(device);
   TextureSink *sink = device->context;
   const ArTextCellDestination destination = {3, kArTextCellScreen_Composited,
@@ -514,6 +561,7 @@ static void ExerciseDialogueFailure(ArRenderDevice *device) {
 }
 
 static void ExerciseEmpty(ArRenderDevice *device, const ArTextBackend *backend) {
+  test_case = "empty replacement";
   ArLocalizedTextPresenter_Reset(device);
   ArLocalizedTextPresenter_SetBackend(NULL);
   TextureSink *sink = device->context;
@@ -533,13 +581,28 @@ static void ExerciseEmpty(ArRenderDevice *device, const ArTextBackend *backend) 
   ArLocalizedPreparedFrame prepared;
   /* Empty flow, tables, cursor menus and single-line labels never ask the
    * text backend for an artificial blank texture, even without a backend. */
+  /* A grid with no game behind it: the renderer needs nothing but this
+   * description to claim the cells. */
+  const ArLocalizationTextGrid invented = {
+      .rule_count = 1, .row_height = 2,
+      .rules = {{.first_line = 0, .last_line = 5, .field_count = 1,
+                 .cell_count = 1,
+                 .cells = {{0, 24, kArTextHorizontalAlignment_Leading, true,
+                            false, false}}}}};
   for (int layout = kArLocalizationTextLayout_Flow;
        layout <= kArLocalizationTextLayout_SingleLineLabel; ++layout) {
     frame.snapshot_count = frame.text_bytes = frame.cells.count = 0;
-    CHECK(ArLocalizationFrame_AddTextWithObjectsAndLayout(
-        &frame, 1, destination, region, "", 0, 0, 0, 1,
-        kArTextDirection_LeftToRight, 8, (ArLocalizationTextLayoutKind)layout,
-        &preserve, 1, NULL, 0));
+    frame.grid_count = 0;
+    if (layout == kArLocalizationTextLayout_Grid) {
+      CHECK(ArLocalizationFrame_AddTextWithGrid(
+          &frame, 1, destination, region, "", 0, 0, 0, 1,
+          kArTextDirection_LeftToRight, 8, &invented, &preserve, 1, NULL, 0));
+    } else {
+      CHECK(ArLocalizationFrame_AddTextWithObjectsAndLayout(
+          &frame, 1, destination, region, "", 0, 0, 0, 1,
+          kArTextDirection_LeftToRight, 8, (ArLocalizationTextLayoutKind)layout,
+          &preserve, 1, NULL, 0));
+    }
     ArLocalizedTextPresenter_Prepare(device, &frame, true, 0, 32, 32, 0, 0,
                                     256, 224, &chunk, 1, &prepared);
     CHECK(prepared.mask_count == 2 && prepared.text_count == 0);
@@ -579,6 +642,7 @@ static void ExerciseEmpty(ArRenderDevice *device, const ArTextBackend *backend) 
 }
 
 static void ExerciseHudScaling(ArRenderDevice *device) {
+  test_case = "hud scaling";
   const ArRenderRectI viewports[] = {
       {11, 13, 640, 480},   {11, 13, 1280, 720},  {11, 13, 1280, 800},
       {11, 13, 1920, 1080}, {11, 13, 3440, 1440},
@@ -657,6 +721,329 @@ static void ExerciseHudScaling(ArRenderDevice *device) {
   ArLocalizedTextPresenter_Reset(device);
 }
 
+static void ExerciseActionHudBands(ArRenderDevice *device) {
+  test_case = "action hud bands";
+  const int scales[] = {0, 25, 100, 400};
+  for (unsigned rtl = 0; rtl < 2; ++rtl)
+  for (unsigned wide = 0; wide < 2; ++wide) for (unsigned scale = 0; scale < 4; ++scale) {
+    HudProjectionInputs inputs = {
+      .hud_bg_texture = {1}, .hud_scale_percent = scales[scale],
+      .snes_width = 512, .snes_height = 224, .visible_width = wide ? 352 : 256,
+      .authentic_width = 256, .hud_split_height = 40, .hud_player_row_y = 20,
+      .hud_left_only_y = 28, .hud_left_end = 88, .hud_right_start = 168, .hud_body_y1 = 224,
+    };
+    HudPresentationChunk chunks[kHudPresentationChunkCapacity];
+    const int count = ArHudLayout_BuildPresentationChunks((ArRenderRectI){0, 0, 1280, 896}, &inputs, chunks);
+    ArLocalizationFrame frame;
+    ArLocalizationFrame_Reset(&frame);
+    CHECK(ArLocalizationFrame_SetFont(&frame, "fr", "test", AR_TEST_FONT_PATH, 1, &frame.settings));
+    for (unsigned row = 2; row <= 3; ++row) {
+      CHECK(ArLocalizationFrame_AddTextWithObjectsAndLayout(&frame, row,
+          (ArTextCellDestination){3, kArTextCellScreen_Composited, 0},
+          (ArTextCellRegion){0, row, 6, 1}, "JOUEUR", 6, 6, 6, 1,
+          rtl ? kArTextDirection_RightToLeft : kArTextDirection_LeftToRight,
+          7, kArLocalizationTextLayout_RightAlignedLabel, NULL, 0, NULL, 0));
+      frame.snapshots[frame.snapshot_count - 1].left_inset_pixels = 5;
+      frame.snapshots[frame.snapshot_count - 1].right_inset_pixels = 4;
+      frame.snapshots[frame.snapshot_count - 1].top_inset_pixels = 1;
+    }
+    ArLocalizedPreparedFrame prepared;
+    ArLocalizedTextPresenter_Prepare(device, &frame, true, 0, 32, 32, 0, 252,
+        256, 224, chunks, count, &prepared);
+    CHECK(prepared.text_count == 2 && prepared.mask_count == 2);
+    CHECK(prepared.masks[0].y == 19 && prepared.masks[1].y == 27);
+    for (int i = 0; i < count; ++i) {
+      if (chunks[i].screen_source.y != 20 || chunks[i].screen_source.x) continue;
+      ArRenderRectI field = {0};
+      CHECK(ArTextCellComposite_ProjectToOutput(&chunks[i],
+          (ArRenderRectI){0, 20, 48, 1}, &field) || field.h == 0);
+      const int edge = field.x + field.w - (4 * field.w + 24) / 48;
+      for (unsigned label = 0; label < prepared.text_count; ++label)
+        CHECK(prepared.texts[label].destination.x + prepared.texts[label].destination.w == edge);
+    }
+    const unsigned uploads = ((TextureSink *)device->context)->uploads;
+    ArLocalizedTextPresenter_Prepare(device, &frame, true, 0, 32, 32, 0, 252,
+        256, 224, chunks, count, &prepared);
+    CHECK(((TextureSink *)device->context)->uploads == uploads);
+    /* A disconnected/independently shifted band must not acquire text. */
+    CHECK(ArLocalizedTextPresenter_DrawWithBrightness(device, &prepared, 0.5f));
+    CHECK(((TextureSink *)device->context)->last_tint.r == 0.5f);
+    CHECK(ArLocalizedTextPresenter_DrawWithBrightness(device, &prepared, 0));
+    CHECK(((TextureSink *)device->context)->last_tint.r == 0);
+    CHECK(ArLocalizedTextPresenter_Draw(device, &prepared));
+    CHECK(((TextureSink *)device->context)->last_tint.r == 1);
+    CHECK(((TextureSink *)device->context)->uploads == uploads);
+    for (int i = 0; i < count; ++i)
+      if (chunks[i].screen_source.y == 20) chunks[i].output_destination.x += 30;
+    ArLocalizedTextPresenter_Prepare(device, &frame, true, 0, 32, 32, 0, 252,
+        256, 224, chunks, count, &prepared);
+    if (scales[scale] != 25) CHECK(!prepared.text_count && !prepared.mask_count);
+  }
+  ArLocalizedTextPresenter_Reset(device);
+}
+
+static void ExerciseActionHudGaps(ArRenderDevice *device) {
+  test_case = "action hud gaps";
+  const char *labels[][3] = {
+    {"TIME", "SCORE", "PLAYER"}, {"TEMPS", "SCORE", "JOUEUR"},
+    {"CHRONOMÈTRE", "PUNKTE", "SPIELER"},
+  };
+  for (unsigned language = 0; language < 3; ++language)
+  for (unsigned rtl = 0; rtl < 2; ++rtl)
+  for (int size = 80; size <= 140; size += 30)
+  for (int scale = 1; scale <= 4; scale *= 2) {
+    ArLocalizationFrame frame;
+    ArLocalizationFrame_Reset(&frame);
+    frame.settings.size_percent = size;
+    CHECK(ArLocalizationFrame_SetFont(&frame, "fr", "test", AR_TEST_FONT_PATH, 1, &frame.settings));
+    const struct {
+      ArTextCellRegion cells;
+      const char *text;
+      unsigned left, right;
+      bool trailing;
+    } fields[] = {
+      {{11, 1, 4, 1}, labels[language][0], 0, 6, true},
+      {{15, 1, 3, 1}, "292", 1, 1, false},
+      {{8, 1, 2, 1}, "03", 0, 1, false},
+      {{21, 1, 5, 1}, labels[language][1], 0, 0, false},
+      {{26, 1, 5, 1}, language ? "99999" : "    0", 0, 1, true},
+      {{0, 2, 6, 1}, labels[language][2], 5, 4, true},
+    };
+    for (unsigned i = 0; i < 6; ++i) {
+      CHECK(ArLocalizationFrame_AddTextWithObjectsAndLayout(&frame, i + 1,
+          (ArTextCellDestination){3, kArTextCellScreen_Composited, 0},
+          fields[i].cells, fields[i].text, strlen(fields[i].text), 100, 100, 1,
+          rtl && (i == 0 || i == 3 || i == 5) ? kArTextDirection_RightToLeft :
+          kArTextDirection_LeftToRight, 7, fields[i].trailing ?
+          kArLocalizationTextLayout_RightAlignedLabel : kArLocalizationTextLayout_LeftAlignedLabel,
+          NULL, 0, NULL, 0));
+      ArLocalizationTextSnapshot *snapshot = &frame.snapshots[i];
+      snapshot->left_inset_pixels = fields[i].left;
+      snapshot->right_inset_pixels = fields[i].right;
+      snapshot->top_inset_pixels = 1;
+      snapshot->italic = i == 1 || i == 2 || i == 4;
+    }
+    const HudPresentationChunk chunk = {
+      .inspector_kind = kInspectorPresentation_HudBg,
+      .screen_source = {0, 0, 256, 224}, .texture_source = {0, 0, 256, 224},
+      .output_destination = {0, 0, 256 * scale, 224 * scale},
+    };
+    ArLocalizedPreparedFrame prepared;
+    ArLocalizedTextPresenter_Prepare(device, &frame, true, 0, 32, 32, 0, 252,
+        256, 224, &chunk, 1, &prepared);
+    CHECK(prepared.text_count == 6 && prepared.mask_count == 6);
+    if (prepared.text_count != 6) continue;
+    const ArRenderRectI time = prepared.texts[0].destination;
+    const ArRenderRectI timer = prepared.texts[1].destination;
+    CHECK(timer.x - time.x - time.w == 7 * scale);
+    CHECK(prepared.texts[2].destination.x == 64 * scale); /* beside native x */
+    const ArRenderRectI score_label = prepared.texts[3].destination;
+    CHECK(score_label.x == 168 * scale); /* aligned with the native scrolls */
+    const ArRenderRectI score = prepared.texts[4].destination;
+    CHECK(score.x + score.w == 247 * scale); /* stable for one or five digits */
+    const ArRenderRectI player = prepared.texts[5].destination;
+    CHECK(48 * scale - player.x - player.w == 4 * scale);
+    CHECK(prepared.masks[0].x == 88 && prepared.masks[0].w == 32);
+    CHECK(prepared.masks[5].x == 0 && prepared.masks[5].w == 48);
+    const unsigned uploads = ((TextureSink *)device->context)->uploads;
+    ArLocalizedTextPresenter_Prepare(device, &frame, true, 0, 32, 32, 0, 252,
+        256, 224, &chunk, 1, &prepared);
+    CHECK(((TextureSink *)device->context)->uploads == uploads);
+    /* Invalid gutters fail closed, without masking away the native label. */
+    frame.snapshots[0].right_inset_pixels = 32;
+    ArLocalizedTextPresenter_Prepare(device, &frame, true, 0, 32, 32, 0, 252,
+        256, 224, &chunk, 1, &prepared);
+    CHECK(prepared.text_count == 5 && prepared.mask_count == 5);
+  }
+  ArLocalizedTextPresenter_Reset(device);
+}
+
+static void ExerciseLabelFrame(ArRenderDevice *device) {
+  test_case = "framed label";
+  const char *labels[] = {"ACT", "Étape", ""};
+  for (unsigned label = 0; label < 3; ++label)
+  for (int size = 80; size <= 140; size += 60)
+  for (unsigned rtl = 0; rtl < 2; ++rtl)
+  for (int scale = 1; scale <= 4; scale *= 2) {
+    ArLocalizationFrame frame;
+    ArLocalizationFrame_Reset(&frame);
+    frame.settings.size_percent = size;
+    CHECK(ArLocalizationFrame_SetFont(&frame, "fr", "test", AR_TEST_FONT_PATH, 1, &frame.settings));
+    const size_t bytes = strlen(labels[label]);
+    CHECK(ArLocalizationFrame_AddTextWithObjectsAndLayout(&frame, 1,
+        (ArTextCellDestination){3, kArTextCellScreen_Composited, 0},
+        (ArTextCellRegion){0, 1, 6, 1}, labels[label], bytes, bytes, bytes, 1,
+        rtl ? kArTextDirection_RightToLeft : kArTextDirection_LeftToRight,
+        7, kArLocalizationTextLayout_FramedLabel, NULL, 0, NULL, 0));
+    frame.snapshots[0].left_inset_pixels = 5;
+    frame.snapshots[0].right_inset_pixels = 4;
+    frame.snapshots[0].top_inset_pixels = 1;
+    SetArt(&frame.artwork[kArLocalizationArtwork_LabelFrameLeft], 8);
+    SetArt(&frame.artwork[kArLocalizationArtwork_LabelFrameRight], 7);
+    const HudPresentationChunk chunk = {
+      .inspector_kind = kInspectorPresentation_HudBg,
+      .screen_source = {0, 0, 256, 224}, .texture_source = {0, 0, 256, 224},
+      .output_destination = {0, 0, 256 * scale, 224 * scale},
+    };
+    ArLocalizedPreparedFrame prepared;
+    ArLocalizedTextPresenter_Prepare(device, &frame, true, 0, 32, 32, 0, 252,
+        256, 224, &chunk, 1, &prepared);
+    CHECK(prepared.decoration_count == 2 && prepared.mask_count == 1);
+    CHECK(prepared.text_count == (bytes ? 1 : 0));
+    CHECK(prepared.masks[0].x == 0 && prepared.masks[0].w == 48);
+    if (prepared.decoration_count != 2) continue;
+    const ArRenderRectI left = prepared.decorations[0].destination;
+    const ArRenderRectI right = prepared.decorations[1].destination;
+    CHECK(left.w == 8 * scale && right.w == 7 * scale);
+    CHECK(left.y == 11 * scale && right.y == 11 * scale);
+    CHECK(left.h == 8 * scale && right.h == 8 * scale);
+    CHECK(left.x >= 5 * scale && right.x + right.w <= 44 * scale);
+    CHECK(abs((left.x - 5 * scale) - (44 * scale - right.x - right.w)) <= 1);
+    if (bytes && prepared.text_count) {
+      const ArRenderRectI text = prepared.texts[0].destination;
+      CHECK(left.x + left.w == text.x && right.x == text.x + text.w);
+    } else CHECK(left.x + left.w == right.x);
+    CHECK(ArLocalizedTextPresenter_DrawWithBrightness(device, &prepared, 0.5f));
+    CHECK(((TextureSink *)device->context)->last_tint.r == 0.5f);
+    const unsigned uploads = ((TextureSink *)device->context)->uploads;
+    ArLocalizedTextPresenter_Prepare(device, &frame, true, 0, 32, 32, 0, 252,
+        256, 224, &chunk, 1, &prepared);
+    CHECK(((TextureSink *)device->context)->uploads == uploads);
+    /* Missing native artwork must preserve the complete original panel. */
+    frame.artwork[kArLocalizationArtwork_LabelFrameRight].valid = false;
+    ArLocalizedTextPresenter_Prepare(device, &frame, true, 0, 32, 32, 0, 252,
+        256, 224, &chunk, 1, &prepared);
+    CHECK(!prepared.text_count && !prepared.decoration_count && !prepared.mask_count);
+  }
+  ArLocalizedTextPresenter_Reset(device);
+}
+
+/* The keyboard's action keys are the game's own tiny letter pairs ("Bs",
+ * "Ed"). When that art is captured the object must draw it; the shapes the
+ * draw side falls back to are a last resort for a keyboard composed without
+ * its VRAM, not a second rendering of the same key. */
+static void ExerciseKeyboardActionKeys(ArRenderDevice *device) {
+  test_case = "keyboard action keys";
+  for (int captured = 0; captured <= 1; ++captured) {
+    ArEnhancedTextSettings settings;
+    ArEnhancedTextSettings_Defaults(&settings);
+    ArLocalizationFrame frame;
+    ArLocalizationFrame_Reset(&frame);
+    CHECK(ArLocalizationFrame_SetFont(&frame, "en", "test", AR_TEST_FONT_PATH,
+                                      1, &settings));
+    if (captured) SetArt(&frame.artwork[kArLocalizationArtwork_NameBackspace], 8);
+    static const char kRow[] = "0 1 2 3 . x";
+    const ArLocalizationInlineObjectSnapshot object = {
+      kArLocalizationInlineObject_NameBackspace, (uint32_t)strlen(kRow),
+    };
+    CHECK(ArLocalizationFrame_AddTextWithObjectsAndLayout(
+        &frame, 1, (ArTextCellDestination){3, kArTextCellScreen_Composited, 0},
+        (ArTextCellRegion){3, 7, 27, 16}, kRow, strlen(kRow),
+        (uint32_t)strlen(kRow), (uint32_t)strlen(kRow), 1,
+        kArTextDirection_LeftToRight, 8, kArLocalizationTextLayout_Flow,
+        NULL, 0, &object, 1));
+    const HudPresentationChunk chunk = {
+      .inspector_kind = kInspectorPresentation_HudBg,
+      .screen_source = {0, 0, 256, 224}, .texture_source = {0, 0, 256, 224},
+      .output_destination = {0, 0, 1024, 896},
+    };
+    ArLocalizedPreparedFrame prepared;
+    ArLocalizedTextPresenter_Prepare(device, &frame, true, 0, 32, 32, 0, 0,
+                                     256, 224, &chunk, 1, &prepared);
+    CHECK(prepared.inline_object_count == 1);
+    if (prepared.inline_object_count == 1) {
+      /* Captured art becomes a texture; without it the object still occupies
+       * its key so the fallback has somewhere to draw. */
+      CHECK(ArRenderTexture_IsValid(prepared.inline_objects[0].texture) ==
+            (captured != 0));
+      CHECK(prepared.inline_objects[0].destination.w > 0);
+      if (captured) {
+        /* An 8x8 tile beside HD text is enlarged from its own shape, and
+         * sampled smoothly -- drawing enlarged art sharply would put the
+         * stair steps straight back. */
+        TextureSink *sink = device->context;
+        CHECK(sink->last_descriptor.width > 8 &&
+              sink->last_descriptor.height > 8);
+        CHECK(sink->last_descriptor.width % 8 == 0 &&
+              sink->last_descriptor.width == sink->last_descriptor.height);
+        CHECK(sink->last_descriptor.filter == kArRenderFilter_Linear);
+      }
+    }
+    CHECK(ArLocalizedTextPresenter_Draw(device, &prepared));
+  }
+  ArLocalizedTextPresenter_Reset(device);
+}
+
+/* Partial reveal must cost draw calls per run, not per visible glyph, and the
+ * pixels it submits must still be exactly the revealed clusters. */
+static void ExerciseRevealBatching(ArRenderDevice *device) {
+  test_case = "reveal batching";
+  TextureSink *sink = device->context;
+  ArEnhancedTextSettings settings;
+  ArEnhancedTextSettings_Defaults(&settings);
+  ArLocalizationFrame frame;
+  ArLocalizationFrame_Reset(&frame);
+  CHECK(ArLocalizationFrame_SetFont(&frame, "en", "test", AR_TEST_FONT_PATH, 1,
+                                    &settings));
+  static const char kLine[] =
+      "The Master listens to every town that still remembers him.";
+  const uint32_t clusters = (uint32_t)strlen(kLine);
+  const uint32_t revealed = clusters / 2u;
+  CHECK(ArLocalizationFrame_AddTextWithObjectsAndLayout(
+      &frame, 1, (ArTextCellDestination){3, kArTextCellScreen_Composited, 0},
+      (ArTextCellRegion){2, 18, 28, 5}, kLine, strlen(kLine), revealed,
+      clusters, 1, kArTextDirection_LeftToRight, 8,
+      kArLocalizationTextLayout_Flow, NULL, 0, NULL, 0));
+  const HudPresentationChunk chunk = {
+    .inspector_kind = kInspectorPresentation_HudBg,
+    .screen_source = {0, 0, 256, 224}, .texture_source = {0, 0, 256, 224},
+    .output_destination = {0, 0, 256, 224},
+  };
+  ArLocalizedPreparedFrame prepared;
+  ArLocalizedTextPresenter_Prepare(device, &frame, true, 0, 32, 32, 0, 0, 256,
+                                   224, &chunk, 1, &prepared);
+  CHECK(prepared.text_count == 1);
+  if (prepared.text_count != 1) return;
+  const ArLocalizedPreparedText *text = &prepared.texts[0];
+  size_t visible = text->revealed_cluster_count;
+  if (visible > text->surface.reveal_cluster_count)
+    visible = text->surface.reveal_cluster_count;
+  CHECK(visible > 8 && visible < text->surface.reveal_cluster_count);
+
+  long expected_area = 0;
+  for (size_t i = 0; i < visible; ++i) {
+    const ArTextRevealCluster *cluster = &text->surface.reveal_clusters[i];
+    if (cluster->width > 0 && cluster->height > 0)
+      expected_area += (long)cluster->width * cluster->height;
+  }
+  sink->draws = 0;
+  CHECK(ArLocalizedTextPresenter_Draw(device, &prepared));
+  CHECK(sink->draws > 0 && sink->draws <= kRecordedDraws);
+  /* Only exactly abutting rectangles merge, so runs break wherever shaping
+   * leaves a gap; this line collapses 29 glyph draws to 8. The assertion is
+   * the property that matters: cost scales with runs, not characters. */
+  CHECK(sink->draws * 2u <= visible);
+  long drawn_area = 0;
+  for (unsigned i = 0; i < sink->draws && i < kRecordedDraws; ++i)
+    drawn_area += (long)(sink->draw_source[i].w * sink->draw_source[i].h);
+  CHECK(drawn_area == expected_area);
+
+  /* A completed reveal is still a single draw of the whole surface. */
+  ArLocalizationFrame_Reset(&frame);
+  CHECK(ArLocalizationFrame_SetFont(&frame, "en", "test", AR_TEST_FONT_PATH, 1,
+                                    &settings));
+  CHECK(ArLocalizationFrame_AddTextWithObjectsAndLayout(
+      &frame, 1, (ArTextCellDestination){3, kArTextCellScreen_Composited, 0},
+      (ArTextCellRegion){2, 18, 28, 5}, kLine, strlen(kLine), clusters,
+      clusters, 1, kArTextDirection_LeftToRight, 8,
+      kArLocalizationTextLayout_Flow, NULL, 0, NULL, 0));
+  ArLocalizedTextPresenter_Prepare(device, &frame, true, 0, 32, 32, 0, 0, 256,
+                                   224, &chunk, 1, &prepared);
+  sink->draws = 0;
+  CHECK(ArLocalizedTextPresenter_Draw(device, &prepared));
+  CHECK(sink->draws == 1);
+}
+
 int main(void) {
   TextureSink sink = {0};
   ArRenderDevice device;
@@ -669,6 +1056,11 @@ int main(void) {
   ExerciseDialogueFailure(&device);
   ExerciseEmpty(&device, &backend);
   ExerciseHudScaling(&device);
+  ExerciseActionHudBands(&device);
+  ExerciseActionHudGaps(&device);
+  ExerciseLabelFrame(&device);
+  ExerciseRevealBatching(&device);
+  ExerciseKeyboardActionKeys(&device);
   const int sizes[] = {80, 110, 140};
   for (int scale = 2; scale <= 6; scale += 2) {
     for (size_t size = 0; size < 3; ++size) {

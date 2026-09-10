@@ -1051,7 +1051,8 @@ def parse_progress_text(text, known_ids=None, path='<progress>'):
 
 def validate_messages(messages, catalog, source_profile, coverage='partial',
                       allowed_events=()):
-    route_by_id = {route['id']: route for route in catalog['routes']}
+    route_by_id = {route['id']: route for route in
+                   catalog['routes'] + catalog.get('optional_routes', [])}
     message_by_id = {}
     for message in messages:
         semantic_id = message['id']
@@ -1063,7 +1064,7 @@ def validate_messages(messages, catalog, source_profile, coverage='partial',
     if coverage == 'complete':
         required_ids = {
             route_id for route_id, route in route_by_id.items()
-            if source_profile in route['contracts']
+            if source_profile in route['contracts'] and not route.get('optional')
         }
         missing = sorted(required_ids - set(message_by_id))
         if missing:

@@ -1,0 +1,50 @@
+{
+  "us": {
+    "action.hud.act_label": "ACT",
+    "action.hud.enemy_label": "ENEMY",
+    "action.hud.player_label": "PLAYER",
+    "action.hud.score_label": "SCORE",
+    "action.hud.time_label": "TIME",
+    "sim_sky.hud.angel_label": "ANGEL",
+    "sim_sky.hud.context_label": "SIM",
+    "sim_sky.hud.sp_label": "SP"
+  },
+  "eu-en": {
+    "action.hud.act_label": "ACT",
+    "action.hud.enemy_label": "ENEMY",
+    "action.hud.player_label": "PLAYER",
+    "action.hud.score_label": "SCORE",
+    "action.hud.time_label": "TIME",
+    "sim_sky.hud.angel_label": "ANGEL",
+    "sim_sky.hud.context_label": "SIM",
+    "sim_sky.hud.sp_label": "SP"
+  },
+  "de": {
+    "action.hud.act_label": "ACT",
+    "action.hud.enemy_label": "FEIND",
+    "action.hud.player_label": "SPIELER",
+    "action.hud.score_label": "PUNKTE",
+    "action.hud.time_label": "ZEIT",
+    "sim_sky.hud.angel_label": "ENGEL",
+    "sim_sky.hud.context_label": "SIM",
+    "sim_sky.hud.sp_label": "SP"
+  },
+  "fr": {
+    "action.hud.act_label": "ACT",
+    "action.hud.enemy_label": "ENNEMI",
+    "action.hud.player_label": "JOUEUR",
+    "action.hud.score_label": "SCORE",
+    "action.hud.time_label": "TEMPS",
+    "sim_sky.hud.angel_label": "ANGE",
+    "sim_sky.hud.context_label": "Cité",
+    "sim_sky.hud.sp_label": "PS"
+  },
+  "jp": {
+    "action.hud.act_label": "ACT",
+    "action.hud.enemy_label": "ENEMY",
+    "action.hud.player_label": "PLAYER",
+    "action.hud.score_label": "SCORE",
+    "action.hud.time_label": "TIME",
+    "sim_sky.hud.angel_label": "ANGEL"
+  }
+}

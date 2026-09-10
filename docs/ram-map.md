@@ -354,6 +354,9 @@ See [dialogue-system.md](dialogue-system.md) for the control and clear paths.
 | `$7F:B000-$B7FF` | 32×32 BG3 tilemap staging; byte offset = `row*64 + column*2` |
 | `$7F:B100-$B7FF` | Whole-menu clear range at `$01:8CCE`; status rows survive |
 | `$7F:B000-$B6FF` | General clear range at `$02:ABC4/$BA41` |
+| `$7F:B040-$B0BF` (action) | Two-row HUD template from `$02:8E7E`; lives at `$B050`, timer `$B05E`, score `$B074`; labels use packed graphical lettering |
+| `$7F:B0C0-$B0CB` (action) | ENEMY label strip from `$00:A4D6`, not READY; adjacent health cells are separate artwork |
+| `$7E:6000/$6800` (title) | `$02:A92F` HDMA BGMODE/TM tables: Mode 7 BG1 logo followed by Mode 1 BG3 menu band; not language storage |
 
 Partial erasure `$02:C1B7` clears each record cell and the cell one row above;
 its footprint is neither of the whole-clear ranges. The NMI upload range can

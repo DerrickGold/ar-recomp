@@ -114,8 +114,10 @@ void cpu_write16(CpuState *cpu, uint8 bank, uint16 address, uint16 value) {
   cpu_write8(cpu, bank, (uint16_t)(address + 1u), (uint8_t)(value >> 8));
 }
 static void Capture(void) {
+  /* Flat presentation: this fixture exercises dialogue scheduling, not the
+   * title screen's Mode 7 transform. */
   ActRaiserLocalizationRuntime_CaptureFrame(&s_frame, 0x7800, 0, NULL, 0, NULL,
-                                            0);
+                                            0, false);
   if (strstr(s_frame.text, "Première"))
     s_seen_pages |= 1;
   if (strstr(s_frame.text, "Deuxième"))
@@ -479,6 +481,32 @@ static void TestUnicodeNameHandoff(void) {
     g_ram[0x34d] = 1;
     Capture();
     CHECK(strstr(s_frame.text, "Test keyboard\nÉ"));
+
+    /* Moving the native selector must not reraster the keyboard: the arrow is
+     * a separately drawn native object, so the text keeps its identity and
+     * only the cursor object moves. */
+    CHECK(s_frame.snapshot_count > 0);
+    const uint64_t keyboard_revision = s_frame.snapshots[0].source_revision;
+    uint32_t cursor_before = 0;
+    for (uint8_t i = 0; i < s_frame.inline_object_count; ++i)
+      if (s_frame.inline_objects[i].kind ==
+          kArLocalizationInlineObject_NameCursor)
+        cursor_before = s_frame.inline_objects[i].end_utf8_byte;
+    CHECK(cursor_before != 0);
+    g_ram[0x34b] = (uint8_t)(g_ram[0x34b] + 1u);
+    CHECK(!ActRaiser_LocalizationObserveTextCompose(&keyboard));
+    Capture();
+    CHECK(s_frame.snapshot_count > 0 &&
+          s_frame.snapshots[0].source_revision == keyboard_revision);
+    uint32_t cursor_after = cursor_before;
+    for (uint8_t i = 0; i < s_frame.inline_object_count; ++i)
+      if (s_frame.inline_objects[i].kind ==
+          kArLocalizationInlineObject_NameCursor)
+        cursor_after = s_frame.inline_objects[i].end_utf8_byte;
+    CHECK(cursor_after != cursor_before);
+    g_ram[0x34b] = (uint8_t)(g_ram[0x34b] - 1u);
+    CHECK(!ActRaiser_LocalizationObserveTextCompose(&keyboard));
+    Capture();
     char name[64];
     CHECK(!SaveSystem_CopyLocalizedPlayerName("A", name, sizeof(name)));
     if (native_at_finish)

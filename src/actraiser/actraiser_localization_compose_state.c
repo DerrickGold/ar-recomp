@@ -3,6 +3,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "actraiser/actraiser_localization_name_entry.h"
+
 static bool IsValid(const ActRaiserLocalizationComposeState *state) {
   return state && state->struct_size >= sizeof(*state) &&
       state->abi_version ==
@@ -125,24 +127,44 @@ static void ClearIntersections(
   }
 }
 
+/* Which of the game's fixed cell menus a route draws, if any. Everything the
+ * renderer needs about that menu's shape is derived from this in
+ * actraiser_localization_grid.c; the identity itself never leaves the game. */
+static ActRaiserLocalizationMenu MenuForSemanticId(const char *semantic_id) {
+  if (!strcmp(semantic_id, "status.report.cities_report"))
+    return kActRaiserLocalizationMenu_StatusCities;
+  if (!strcmp(semantic_id, "status.report.score_report"))
+    return kActRaiserLocalizationMenu_StatusScore;
+  if (!strcmp(semantic_id, "status.report.master_report"))
+    return kActRaiserLocalizationMenu_StatusMaster;
+  if (!strcmp(semantic_id, "system.message_speed.scale_labels"))
+    return kActRaiserLocalizationMenu_MessageSpeed;
+  if (!strcmp(semantic_id, "system.choice.yes_no") ||
+      !strncmp(semantic_id, "sky.menu.", 9) ||
+      !strncmp(semantic_id, "sim.menu.", 9))
+    return kActRaiserLocalizationMenu_FixedRows;
+  return kActRaiserLocalizationMenu_None;
+}
+
+/* The name-entry keyboard reserves runs of ASCII blanks between its keys, so
+ * the selector can be sized to the room the font actually leaves. Stating it
+ * here keeps the renderer free of the convention. */
+static const char *KeySeparatorForSemanticId(const char *semantic_id) {
+  return !strncmp(semantic_id, "name_entry.prompt_and_", 22) ? " " : NULL;
+}
+
 static ArLocalizationTextLayoutKind LayoutForSemanticId(
     const char *semantic_id) {
+  if (MenuForSemanticId(semantic_id) != kActRaiserLocalizationMenu_None)
+    return kArLocalizationTextLayout_Grid;
+  if (!strncmp(semantic_id, "action.", 7))
+    return kArLocalizationTextLayout_CenteredLabel;
+  if (!strncmp(semantic_id, "title.", 6))
+    return kArLocalizationTextLayout_SingleLineLabel;
   const size_t length = strlen(semantic_id);
   if (!strncmp(semantic_id, "city.", 5) && length > 10 &&
       !strcmp(semantic_id + length - 5, ".name"))
     return kArLocalizationTextLayout_SingleLineLabel;
-  if (!strcmp(semantic_id, "status.report.cities_report"))
-    return kArLocalizationTextLayout_StatusCities;
-  if (!strcmp(semantic_id, "status.report.score_report"))
-    return kArLocalizationTextLayout_StatusScore;
-  if (!strcmp(semantic_id, "status.report.master_report"))
-    return kArLocalizationTextLayout_StatusMaster;
-  if (!strcmp(semantic_id, "system.message_speed.scale_labels"))
-    return kArLocalizationTextLayout_MessageSpeed;
-  if (!strcmp(semantic_id, "system.choice.yes_no") ||
-      !strncmp(semantic_id, "sky.menu.", 9) ||
-      !strncmp(semantic_id, "sim.menu.", 9))
-    return kArLocalizationTextLayout_FixedRows;
   return kArLocalizationTextLayout_Flow;
 }
 
@@ -202,8 +224,16 @@ bool ActRaiserLocalizationComposeState_Process(
       MarkDialogueReplacement(state, observation->serial);
     return true;
   }
-  InvalidateForDestination(state, observation->destination,
-                           observation->serial);
+  if (ActRaiserLocalizationRoute_InScope(state->map_group, state->map_number))
+    InvalidateForDestination(state, observation->destination,
+                             observation->serial);
+  /* The selector stream erases the optional Professional row when moving
+   * back to Continue/New Game. The arrow cells themselves remain native. */
+  if (!state->map_group && !state->map_number &&
+      observation->destination == 0x110c &&
+      (observation->source_pc24 == 0x02aa34 ||
+       observation->source_pc24 == 0x02aa4a))
+    ClearSurface(state, 15);
   const ActRaiserLocalizationComposeRoute *route =
       ActRaiserLocalizationRoute_ResolveCompose(observation);
   if (!route || !resolve_text) return true;
@@ -215,7 +245,12 @@ bool ActRaiserLocalizationComposeState_Process(
       .native_destination = route->destination,
       .native_font_pixels = route->native_font_pixels,
       .layout = LayoutForSemanticId(route->semantic_id),
+      .menu = MenuForSemanticId(route->semantic_id),
   };
+  if (resolved.menu != kActRaiserLocalizationMenu_None &&
+      !ActRaiserLocalizationGrid_Build(resolved.menu, resolved.region,
+                                       &resolved.grid))
+    return false;
   const size_t semantic_bytes = strlen(route->semantic_id);
   if (!semantic_bytes || semantic_bytes >= sizeof(resolved.semantic_id)) {
     if (error && error_capacity)
@@ -307,20 +342,88 @@ bool ActRaiserLocalizationComposeState_AppendFrame(
     const ActRaiserLocalizationComposeSnapshot *slot =
         &state->surfaces[index];
     if (!slot->active) continue;
-    const bool report_rule =
-        slot->layout == kArLocalizationTextLayout_StatusCities ||
-        slot->layout == kArLocalizationTextLayout_StatusScore;
-    const ArTextCellRegion divider = {
-        slot->region.column, (uint16_t)(slot->region.row + 5),
-        slot->region.columns, 1};
+    if (!strcmp(slot->semantic_id, "title.save_choice.labels")) {
+      /* Two choices, two fixed arrow slots. Ignore ROM padding/blank spacer
+       * rows; an omitted choice still owns an empty replacement so native
+       * lettering cannot leak through. Extra authored rows cannot escape. */
+      size_t start = 0;
+      for (unsigned choice = 0; choice < 2; ++choice) {
+        size_t first = slot->utf8_bytes, end = first;
+        while (start < slot->utf8_bytes) {
+          end = start;
+          while (end < slot->utf8_bytes && slot->utf8[end] != '\n') ++end;
+          first = start;
+          while (first < end && slot->utf8[first] == ' ') ++first;
+          start = end < slot->utf8_bytes ? end + 1 : end;
+          if (first < end) break;
+        }
+        ArTextCellRegion region = slot->region;
+        region.row += choice * 2;
+        region.rows = 1;
+        const uint32_t clusters = first < end ? slot->cluster_count : 0;
+        complete &= ArLocalizationFrame_AddTextWithObjectsAndLayout(
+            frame, 140 + choice, destination, region,
+            slot->utf8 + first, end - first, clusters, clusters,
+            slot->source_revision, direction, slot->native_font_pixels,
+            kArLocalizationTextLayout_SingleLineLabel, NULL, 0, NULL, 0);
+      }
+      continue;
+    }
+    if (slot->menu != kActRaiserLocalizationMenu_None) {
+      /* Rows the grid reserves are the game's own artwork; claim them as
+       * native preserves so the divider under a report's headings is stated
+       * once, by the geometry, rather than repeated here as a row number. */
+      ArTextCellRegion preserves[kArLocalizationFrameNativePreserveCapacity];
+      uint8_t preserve_count = 0;
+      for (uint8_t index = 0; index < slot->grid.rule_count; ++index) {
+        const ArLocalizationTextRowRule *rule = &slot->grid.rules[index];
+        if (!rule->native_reserved ||
+            preserve_count >= kArLocalizationFrameNativePreserveCapacity)
+          continue;
+        const uint16_t rows =
+            (uint16_t)(rule->last_line - rule->first_line + 1u);
+        if (rule->first_line >= slot->region.rows) continue;
+        preserves[preserve_count++] = (ArTextCellRegion){
+            slot->region.column,
+            (uint16_t)(slot->region.row + rule->first_line),
+            slot->region.columns,
+            (uint16_t)(rule->first_line + rows <= slot->region.rows
+                           ? rows : slot->region.rows - rule->first_line)};
+      }
+      if (!ArLocalizationFrame_AddTextWithGrid(
+              frame, slot->surface_id, destination, slot->region,
+              slot->utf8, slot->utf8_bytes,
+              slot->cluster_count, slot->cluster_count,
+              slot->source_revision, direction, slot->native_font_pixels,
+              &slot->grid, preserve_count ? preserves : NULL, preserve_count,
+              slot->inline_objects, slot->inline_object_count))
+        complete = false;
+      continue;
+    }
     if (!ArLocalizationFrame_AddTextWithObjectsAndLayout(
             frame, slot->surface_id, destination, slot->region,
             slot->utf8, slot->utf8_bytes,
             slot->cluster_count, slot->cluster_count,
             slot->source_revision, direction, slot->native_font_pixels,
-            slot->layout,
-            report_rule ? &divider : NULL, report_rule ? 1 : 0,
-            slot->inline_objects, slot->inline_object_count))
+            slot->layout, NULL, 0,
+            slot->inline_objects, slot->inline_object_count)) {
+      complete = false;
+      continue;
+    }
+    const char *separator = KeySeparatorForSemanticId(slot->semantic_id);
+    if (separator &&
+        !ArLocalizationFrame_SetKeySeparator(frame, separator,
+                                             strlen(separator)))
+      complete = false;
+    /* The retail keyboard is a fixed cell grid: every key owns two tiles, one
+     * for the selector and one for its glyph. State that shape so the renderer
+     * can keep the columns aligned between rows, which a proportional font
+     * cannot do on its own. */
+    if (separator &&
+        !ArLocalizationFrame_SetKeyGrid(
+            frame, kActRaiserLocalizationNameEntryColumns,
+            kActRaiserLocalizationNameEntryRows,
+            kActRaiserLocalizationNameEntryKeyCellColumns))
       complete = false;
   }
   return complete;

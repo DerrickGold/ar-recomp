@@ -430,7 +430,7 @@
     $("installed-title").textContent=data.enabled?"Installed — now select it in game":"Updated — this pack is currently disabled";
     $("installed-steps").hidden=!data.enabled;
     if(!data.enabled) feedback("Updated the installed pack, preserving its Disabled setting. Enable it in the package checklist when you want to use it.");
-    $("install-state").textContent = "Installed at " + data.path + ". Restart the game, select this pack, and enable Enhanced text rendering.";
+    $("install-state").textContent = "Installed at " + data.path + ". Restart the game and select this pack; enhanced text rendering turns on automatically for community packs.";
     phase="installed"; workflowView();
   }
   $("install").addEventListener("click", () => run(async () => {

@@ -38,7 +38,7 @@ func (d *Decoder) outsideBG3(site int, role string) (IRObject, error) {
 			row["tile_word_start"] = localString(word(raw))
 		}
 		row["classification"], row["coverage_class"] = "classified_graphical_text", "graphical_text"
-		row["semantic_id"], row["destination_range"], row["tile_count"] = "action.hud.ready", "$7F:B0C0-$7F:B0CB", 6
+		row["semantic_id"], row["destination_range"], row["tile_count"] = "action.hud.enemy_label", "$7F:B0C0-$7F:B0CB", 6
 	case "dialogue_surface_clear":
 		valid = expect(-6, "a90020a20001") && expect(4, "e8e8e00008d0f5")
 		row["destination_range"], row["value"] = "$7F:B100-$7F:B7FF", "$2000"

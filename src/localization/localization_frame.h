@@ -8,9 +8,9 @@
 #include "localization/enhanced_text_settings.h"
 #include "localization/text_rasterizer.h"
 #include "localization/text_presentation.h"
-#include "render/text_cell_record.h"
+#include "localization/text_cell_record.h"
 
-#define AR_LOCALIZATION_FRAME_ABI_VERSION UINT32_C(13)
+#define AR_LOCALIZATION_FRAME_ABI_VERSION UINT32_C(20)
 
 enum {
   kArLocalizationFrameTextCapacity = 16 * 1024,
@@ -23,6 +23,16 @@ enum {
   kArLocalizationFrameNameCursorExtent = 8,
   kArLocalizationFrameNameCursorPixels = 8 * 8,
   kArLocalizationArtworkPixels = 16 * 8,
+  /* Cells in one row of a grid layout, and rows shapes one grid may declare.
+   * A grid is derived from the game's own menu geometry, so these bound what
+   * the game may publish, not what the renderer can imagine. */
+  kArLocalizationGridMaximumCells = 10,
+  kArLocalizationGridMaximumRules = 16,
+  kArLocalizationFrameGridCapacity = 4,
+  /* Row rule wildcards. */
+  kArLocalizationGridAnyLine = 255,
+  kArLocalizationGridAnyFieldCount = 0,
+  kArLocalizationFrameKeySeparatorCapacity = 7,
 };
 
 typedef enum ArLocalizationArtworkKind {
@@ -30,6 +40,12 @@ typedef enum ArLocalizationArtworkKind {
   kArLocalizationArtwork_Life,
   kArLocalizationArtwork_Population,
   kArLocalizationArtwork_SpeedDirection,
+  kArLocalizationArtwork_LabelFrameLeft,
+  kArLocalizationArtwork_LabelFrameRight,
+  /* The name-entry keyboard's own action glyphs. Absent when the keyboard is
+   * not on screen; the presenter then draws its own shapes instead. */
+  kArLocalizationArtwork_NameFinish,
+  kArLocalizationArtwork_NameBackspace,
   kArLocalizationArtwork_Count,
 } ArLocalizationArtworkKind;
 
@@ -68,18 +84,81 @@ typedef struct ArLocalizationInlineObjectSnapshot {
   uint32_t end_utf8_byte;
 } ArLocalizationInlineObjectSnapshot;
 
+/* How the renderer presents a surface. These are rendering shapes, not game
+ * screens: nothing here names a particular menu, and the renderer cannot tell
+ * a status report from a message-speed scale. Cell geometry for Grid arrives
+ * with the snapshot as an ArLocalizationTextGrid. */
 typedef enum ArLocalizationTextLayoutKind {
   kArLocalizationTextLayout_Flow = 0,
-  kArLocalizationTextLayout_StatusCities,
-  kArLocalizationTextLayout_StatusScore,
-  kArLocalizationTextLayout_StatusMaster,
-  kArLocalizationTextLayout_FixedRows,
-  kArLocalizationTextLayout_MessageSpeed,
+  /* Fixed cells positioned by the accompanying grid description. */
+  kArLocalizationTextLayout_Grid,
   kArLocalizationTextLayout_DialogueWindow,
   /* One fitted line, anchored to the leading edge and vertically centered
    * inside its claim. It must never wrap into neighboring native content. */
   kArLocalizationTextLayout_SingleLineLabel,
+  /* Fitted one-line card, centered in a safe cell region (not word wrapped). */
+  kArLocalizationTextLayout_CenteredLabel,
+  /* Physical right edge, independent of Unicode paragraph direction. */
+  kArLocalizationTextLayout_RightAlignedLabel,
+  /* Physical left edge, independent of Unicode paragraph direction. */
+  kArLocalizationTextLayout_LeftAlignedLabel,
+  /* Centered fitted label with native artwork bookends, not font brackets. */
+  kArLocalizationTextLayout_FramedLabel,
 } ArLocalizationTextLayoutKind;
+
+/* One cell of a row. Columns are native cell units relative to the owning
+ * region, half-open [start, end); the renderer scales them into output pixels
+ * and solves the fitting. Any native blank a right-aligned value keeps before
+ * its neighbour is already part of `end`. */
+typedef struct ArLocalizationTextCellRule {
+  uint8_t start;
+  uint8_t end;
+  /* An ArTextHorizontalAlignment. Narrowed to a byte so this structure has no
+   * padding: grids are compared and hashed whole, and padding a caller never
+   * wrote would make two identical grids look different. */
+  uint8_t alignment;
+  /* Leading becomes trailing when the paragraph runs right to left. A cell
+   * whose position is physical (a scale tick, an anchored value) clears this. */
+  uint8_t follows_direction;
+  /* Reserve a native pixel beside adjacent artwork on that side. */
+  uint8_t gutter_leading;
+  uint8_t gutter_trailing;
+} ArLocalizationTextCellRule;
+
+/* Rules are searched in order; the first whose line range and row shape match
+ * wins, so a specific rule precedes its general fallback. An unmatched row is
+ * rejected, exactly as unknown geometry was before. */
+typedef struct ArLocalizationTextRowRule {
+  uint8_t first_line;
+  uint8_t last_line;
+  /* Row shape this rule describes, or kArLocalizationGridAnyFieldCount. */
+  uint8_t field_count;
+  uint8_t cell_count;
+  /* The game draws this row itself -- a divider, a rule, native artwork. The
+   * renderer claims nothing on it. */
+  uint8_t native_reserved;
+  /* This row's cells line up with the grid's shared fitted columns. */
+  uint8_t shared_columns;
+  ArLocalizationTextCellRule cells[kArLocalizationGridMaximumCells];
+} ArLocalizationTextRowRule;
+
+/* Renderer-neutral description of a fixed cell layout, published by the game
+ * adapter with the snapshot it belongs to. */
+/* Every member is a byte, so the whole description packs without padding and
+ * can be compared and hashed as bytes. */
+typedef struct ArLocalizationTextGrid {
+  uint8_t rule_count;
+  /* Rows marked shared_columns are measured together and share one set of
+   * fitted column widths. Zero disables shared fitting. */
+  uint8_t shared_column_count;
+  /* Line whose cell rule seeds the preferred shared widths. */
+  uint8_t shared_template_line;
+  /* Native rows one text row occupies. */
+  uint8_t row_height;
+  /* Tight single-row cells may discard transparent top/bottom padding. */
+  uint8_t crop_rows;
+  ArLocalizationTextRowRule rules[kArLocalizationGridMaximumRules];
+} ArLocalizationTextGrid;
 
 typedef struct ArLocalizationTextSnapshot {
   uint32_t surface_id;
@@ -93,8 +172,46 @@ typedef struct ArLocalizationTextSnapshot {
    * shaped ligatures do not consume the wrong number of reveal steps. */
   uint32_t revealed_utf8_bytes;
   uint64_t source_revision;
+  uint32_t style_id;
+  uint32_t band_rgb;
+  uint32_t body_rgb;
+  /* The game's third ink, drawn beside every stroke. Published separately
+   * from the two band endpoints because it is not part of the gradient: it
+   * sits behind the letter rather than in it. Disabled when the surface has
+   * no such shade. */
+  uint32_t shadow_rgb;
+  bool shadow_enabled;
+  bool italic;
+  /* Logical (8-pixel-cell) physical gutters, scaled with the claim, independent
+   * of shaping direction. Masking still covers the complete native field. */
+  uint8_t left_inset_pixels;
+  uint8_t right_inset_pixels;
+  uint8_t top_inset_pixels;
   ArTextDirection direction;
   ArLocalizationTextLayoutKind layout;
+  /* One-based index into the frame's grid table; zero for a non-grid layout. */
+  uint8_t grid_index;
+  /* Blank the game reserves between selectable keys, when this surface has
+   * any. A selector object is sized to the narrowest run of it, so the arrow
+   * cannot cover the previous key. Empty when the surface has no keys; the
+   * renderer never assumes a particular spacing character. */
+  uint8_t key_separator_bytes;
+  char key_separator[kArLocalizationFrameKeySeparatorCapacity];
+  /* Uniform key pitch. Non-zero means the last `key_trailing_lines` lines of
+   * this text are a row of `key_columns` equal cells spanning the claim, and
+   * each key is centred in its own cell rather than placed by the advance the
+   * shaper accumulated. Proportional glyphs otherwise make every line a
+   * different width, so columns that the native fixed cell grid kept aligned
+   * drift apart from line to line. The text is still shaped once, so every
+   * key keeps one glyph size. Zero columns leaves the text flowed. */
+  uint8_t key_columns;
+  uint8_t key_trailing_lines;
+  /* Native cells one key occupies, counted in the region's own columns. The
+   * retail keyboard gives every key two: a blank for the selector, then the
+   * glyph. Stating it keeps the pitch equal to the native one even when the
+   * claim is wider than the keyboard, and leaves the selector the same room
+   * the game did. */
+  uint8_t key_cell_columns;
   uint8_t native_font_pixels;
   uint8_t native_preserve_count;
   uint8_t inline_object_offset;
@@ -111,6 +228,10 @@ typedef struct ArLocalizationFrame {
   ArTextCellRecordSet cells;
   ArLocalizationTextSnapshot snapshots[kArTextCellRecordCapacity];
   uint8_t snapshot_count;
+  /* Interned grid descriptions; snapshots reference them by index so a report
+   * shared by several surfaces is published once. */
+  ArLocalizationTextGrid grids[kArLocalizationFrameGridCapacity];
+  uint8_t grid_count;
   ArLocalizationIndicatorSnapshot
       indicators[kArLocalizationFrameIndicatorCapacity];
   uint8_t indicator_count;
@@ -139,6 +260,10 @@ typedef struct ArLocalizationFrame {
 } ArLocalizationFrame;
 
 void ArLocalizationFrame_Reset(ArLocalizationFrame *frame);
+/* Same, for storage the caller has already zeroed -- a freshly cleared frame
+ * slot. Stamps the header without clearing tens of kilobytes a second time.
+ * Passing anything else leaves stale content behind. */
+void ArLocalizationFrame_InitCleared(ArLocalizationFrame *frame);
 bool ArLocalizationFrame_AddDialogueWindow(
     ArLocalizationFrame *frame, uint32_t surface_id,
     ArTextCellDestination destination, ArTextCellRegion region,
@@ -178,6 +303,21 @@ bool ArLocalizationFrame_AddTextWithObjects(
     uint8_t native_preserve_count,
     const ArLocalizationInlineObjectSnapshot *inline_objects,
     uint8_t inline_object_count);
+/* Grid layouts publish their own cell geometry: the renderer positions cells
+ * from `grid` and never needs to know which menu it is drawing. The grid is
+ * copied and interned; identical grids share one table entry. */
+bool ArLocalizationFrame_AddTextWithGrid(
+    ArLocalizationFrame *frame, uint32_t surface_id,
+    ArTextCellDestination destination, ArTextCellRegion region,
+    const char *utf8, size_t utf8_bytes,
+    uint32_t revealed_cluster_count, uint32_t cluster_count,
+    uint64_t source_revision, ArTextDirection direction,
+    uint8_t native_font_pixels, const ArLocalizationTextGrid *grid,
+    const ArTextCellRegion *native_preserves,
+    uint8_t native_preserve_count,
+    const ArLocalizationInlineObjectSnapshot *inline_objects,
+    uint8_t inline_object_count);
+/* Non-grid layouts only; a Grid layout without geometry is rejected. */
 bool ArLocalizationFrame_AddTextWithObjectsAndLayout(
     ArLocalizationFrame *frame, uint32_t surface_id,
     ArTextCellDestination destination, ArTextCellRegion region,
@@ -191,9 +331,27 @@ bool ArLocalizationFrame_AddTextWithObjectsAndLayout(
     uint8_t inline_object_count);
 /* Indicators are semantic, fixed-cell UI objects owned by an existing text
  * surface. They carry no backend handle or ROM tile identity. */
+/* Declares the blank between selectable keys on the most recently added
+ * surface. Call it straight after publishing a keyboard. */
+bool ArLocalizationFrame_SetKeySeparator(ArLocalizationFrame *frame,
+                                         const char *utf8, size_t utf8_bytes);
+/* Declares a uniform key pitch on the most recently added surface: its last
+ * `trailing_lines` lines each hold `columns` keys, and every key occupies
+ * `cell_columns` of the region's native columns. Call it straight after
+ * publishing a keyboard whose native rows were a fixed grid. */
+bool ArLocalizationFrame_SetKeyGrid(ArLocalizationFrame *frame,
+                                    uint8_t columns, uint8_t trailing_lines,
+                                    uint8_t cell_columns);
 bool ArLocalizationFrame_AddIndicator(
     ArLocalizationFrame *frame, uint32_t surface_id,
     ArLocalizationIndicatorKind kind, ArTextCellRegion region);
+/* Cell rule for one parsed row, or NULL when the grid does not describe it. */
+const ArLocalizationTextRowRule *ArLocalizationGrid_FindRow(
+    const ArLocalizationTextGrid *grid, unsigned line, unsigned field_count);
+const ArLocalizationTextGrid *ArLocalizationFrame_GetGrid(
+    const ArLocalizationFrame *frame,
+    const ArLocalizationTextSnapshot *snapshot);
+
 const char *ArLocalizationFrame_GetText(
     const ArLocalizationFrame *frame, uint8_t snapshot_index,
     size_t *utf8_bytes);

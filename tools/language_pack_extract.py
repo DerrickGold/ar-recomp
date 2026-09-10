@@ -1322,7 +1322,7 @@ def classify_outside_bg3_write(rom, site_pc24, role):
                 f'status tile strip changed at {pc24_string(site_pc24)}')
         row['classification'] = 'classified_graphical_text'
         row['coverage_class'] = 'graphical_text'
-        row['semantic_id'] = 'action.hud.ready'
+        row['semantic_id'] = 'action.hud.enemy_label'
         row['language_bearing_candidate'] = False
         row['destination_range'] = '$7F:B0C0-$7F:B0CB'
         row['tile_word_start'] = f'${u16(rom, offset - 2):04X}'
@@ -1701,26 +1701,26 @@ def build_graphical_text_census(profile, rom, consumer_census):
         row for row in consumer_census['bg3_direct_long_writes']['sites']
         if row.get('coverage_class') == 'graphical_text'
     ]
-    ready_rows = [
+    enemy_rows = [
         row for row in base_graphical
-        if row.get('semantic_id') == 'action.hud.ready'
+        if row.get('semantic_id') == 'action.hud.enemy_label'
     ]
-    direct_ready_rows = [
+    direct_enemy_rows = [
         row for row in direct_graphical
-        if row.get('semantic_id') == 'action.hud.ready'
+        if row.get('semantic_id') == 'action.hud.enemy_label'
     ]
-    if len(ready_rows) != 1 or len(direct_ready_rows) != 1:
+    if len(enemy_rows) != 1 or len(direct_enemy_rows) != 1:
         raise ValueError(
-            f"{profile['id']}: action READY graphical source changed")
-    ready = ready_rows[0]
+            f"{profile['id']}: action ENEMY graphical source changed")
+    enemy = enemy_rows[0]
     resources.append({
-        'id': ready['semantic_id'],
+        'id': enemy['semantic_id'],
         'classification': 'graphical_text_tile_strip',
         'replacement_path': 'enhanced_text_or_native_tile_strip',
-        'write_site': ready['write_site'],
-        'destination_range': ready['destination_range'],
-        'tile_word_start': ready['tile_word_start'],
-        'tile_count': ready['tile_count'],
+        'write_site': enemy['write_site'],
+        'destination_range': enemy['destination_range'],
+        'tile_word_start': enemy['tile_word_start'],
+        'tile_count': enemy['tile_count'],
     })
 
     expected_regions = {

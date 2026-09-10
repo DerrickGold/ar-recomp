@@ -235,6 +235,84 @@ all-blank frame. Missing or invalid content remains native; it must not be
 confused with a successfully resolved empty replacement. This presentation
 contract does not acknowledge native input or skip interpreter controls.
 
+## Action HUD, cards and title options
+
+Action maps (groups 1–7) and the title scene (`$18/$19 = 00/00`) use the
+existing fixed composer, not the interactive dialogue scheduler. The fixed
+route census has 89 entries. Source observations retain the native control
+flow, and `$02:C1B7`/whole-map clears retire active and dormant replacements.
+
+| USA fixed source | Packed destination | Purpose |
+| --- | --- | --- |
+| `$00:A851-$A8B2` (seven records) | `$080B` | Stage name |
+| `$00:A8CB/$A8D1` | `$0A0D` | Act 1 / Act 2 |
+| `$00:A8D8` | `$0C0D` | Clear |
+| `$00:A8DF/$A8E6` | `$090D/$090C` | Ready / Time up |
+| `$00:A8EF` | `$0B0D` | Pause; `$02:BF37` erases it on resume |
+| `$02:A9A7` | `$1100` | Continue / New game |
+| `$02:A9D6` | `$120C` | Start, with its native selector |
+| `$02:AA60` | `$110C` | Professional option on the fifth source row |
+
+Title `$02:A92F` installs HDMA mode/screen tables at `$7E:6000/$6800`.
+The logo band uses Mode 7 BG1; the lower options band uses Mode 1 BG3
+(`BGMODE=$09`, `TM=$04`). It is not BG2 text over the Mode-7 logo. Options
+retain columns 12 (native arrow) and 14 (wording); Continue/New game occupy
+rows 17/19, Start row 18, Professional row 21. The two ordinary selector
+streams `$02:AA34/$AA4A` clear Professional ownership. Native padding and
+selector `>` are not new font glyphs. Copyright `$02:A9DE` is not claimed.
+Other ROMs' mode/difficulty menus are separate semantic routes, not automatic
+translations of the US Continue/New game workflow.
+
+The action HUD template `$02:8E7E` uploads to `$7F:B040-$B0BF`. Its packed
+graphical labels are not ASCII: TIME uses tiles `$01-$04`, SCORE `$05-$08,$04`,
+PLAYER `$09-$0E`, ACT `$22-$27`. `$00:A4D6` writes ENEMY `$0F-$14` at
+`$7F:B0C0-$B0CB`; earlier research mislabeled that strip READY. READY is the
+separate fixed record above. Five optional `action.hud.*_label` contracts
+make these transcriptions editable without invalidating older complete packs.
+Japanese font source `$14:F2A6` has byte-identical English lettering at
+`$60-$73`, selected by template `$02:8D27` and ENEMY writer `$00:A495`.
+ACT and numeral tiles are at their ordinary indices. French/German packed
+lettering is transcribed separately after ROM identity/census validation.
+
+The runtime checks these exact destination cells before claiming labels.
+Lives (row 1 columns 8–9), time (15–17) and score (26–30) use the native
+writer's final `$30-$39` digit/blank cells, retaining BCD formatting and zero
+padding. Labels/health bars are not inferred by scanning arbitrary glyphs.
+The selected tile's CGRAM palette supplies 2bpp ink index 2 (edge band) and
+3 (body), with per-character banding; ACT uses a solid body colour. Numerals
+request italic shaping, labels stay upright. Heart, multiplier, health bars,
+and magic artwork stay in the native HUD. ACT's asymmetric ornaments also use
+native pixels: the left end spans strip x=5–12 (tiles `$22/$23`), and the right
+x=37–43 (tiles `$26/$27`). Their unequal top/bottom strokes extend into the
+adjacent letter tiles; retaining only the two outer tiles truncates the artwork
+into square-bracket fragments. The adapter captures each complete end from VRAM,
+excluding letter pixels, and claims the six-cell label/frame together. The
+presenter fits the text between the original-size ornaments and places them
+against its ink bounds; no font bracket substitute or glyph stretching is used.
+Missing artwork retains the entire native panel, not a partially replaced frame.
+
+Frame ABI 16 passes palette RGB endpoints, italic style and physical left/right/top
+gutters to the renderer-neutral presenter. HUD lettering retains its blank first
+tile scanline, preventing larger glyphs from touching the preceding row.
+Raster request ABI 6 includes palette
+endpoints and italic in cache identity. Right alignment is independent of
+Unicode direction. The font backend resets both primary and fallback styles
+on each raster request; unchanged menus/counters reuse cached surfaces. Master
+INIDISP brightness is applied to enhanced text/artwork at draw time, not baked
+into its raster cache or applied twice to already-shaded native HUD pixels.
+Proportional HUD labels anchor to their related graphics: TIME retains six
+pixels of right padding, PLAYER/ENEMY four pixels before their health bars.
+SCORE stays physically left-aligned at column 21 with the native scroll icons,
+independently of Unicode shaping direction.
+Lives/timer align left toward the multiplier/label; only score stays right-aligned
+in its reserved digit field. This avoids widening the native gaps as glyph widths
+or font size change. These physical gutters do not mirror with shaping direction,
+do not move native graphics, and do not stretch the font. PLAYER/ENEMY also retain
+their five-pixel left gutter. Their tile claims
+cross the HUD's y=20/y=28 band boundaries by one scanline: projection can join
+contiguous pieces only when their output horizontal placements agree, including
+zero-height slivers at small HUD scales. No join bridges independent anchors.
+
 ## Source identity and dynamic cells
 
 `$01:8C79` resolves a one-based selected item against a pointer base two bytes

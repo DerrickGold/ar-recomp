@@ -1,7 +1,11 @@
 # Noto Sans bundled primary font
 
 `NotoSans-SemiCondensedExtraBold.ttf` is the default Latin, Greek, and Cyrillic
-face for localized game text and the host overlay.
+face for localized game text. It is a broad Latin/Greek/Cyrillic face, not a
+universal Unicode font: a pack in another script must supply its own font.
+
+The settings overlay does **not** use it. The overlay still draws its own
+bitmap atlases and has not been migrated to this font stack.
 
 Provenance:
 

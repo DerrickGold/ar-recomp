@@ -2,9 +2,15 @@ if(NOT DEFINED GAME_SOURCE_ROOT)
     message(FATAL_ERROR "GAME_SOURCE_ROOT is required")
 endif()
 
+# The portable localization core is held to the same rule as src/render: pack
+# loading, contracts, sessions, grapheme handling and the rasterizer/backend
+# contracts must not name an SDL type. Desktop enumeration lives in
+# src/platform/sdl/pack_discovery_sdl.c, not here.
 file(GLOB_RECURSE _portable_render_files
     "${GAME_SOURCE_ROOT}/render/*.c"
-    "${GAME_SOURCE_ROOT}/render/*.h")
+    "${GAME_SOURCE_ROOT}/render/*.h"
+    "${GAME_SOURCE_ROOT}/localization/*.c"
+    "${GAME_SOURCE_ROOT}/localization/*.h")
 list(APPEND _portable_render_files
     "${GAME_SOURCE_ROOT}/presentation_upload_mirror.c"
     "${GAME_SOURCE_ROOT}/presentation_upload_mirror.h"
@@ -77,6 +83,57 @@ list(APPEND _portable_render_files
     "${GAME_SOURCE_ROOT}/diorama/diorama.h"
     "${GAME_SOURCE_ROOT}/diorama/diorama_frame_generation.h"
     "${GAME_SOURCE_ROOT}/diorama/diorama_projection.c")
+
+# Dependency direction: the portable render and localization layers may not
+# depend on the game, and may not name one of its screens. Cell geometry for a
+# fixed menu arrives as an ArLocalizationTextGrid published by the game
+# adapter, so nothing here needs to know which menu it is drawing.
+file(GLOB_RECURSE _game_neutral_files
+    "${GAME_SOURCE_ROOT}/render/*.c"
+    "${GAME_SOURCE_ROOT}/render/*.h"
+    "${GAME_SOURCE_ROOT}/localization/*.c"
+    "${GAME_SOURCE_ROOT}/localization/*.h")
+set(_game_knowledge_violations "")
+foreach(_file IN LISTS _game_neutral_files)
+    file(READ "${_file}" _contents)
+    if(_contents MATCHES "#[ 	]*include[ 	]*[<\"]actraiser/" OR
+       _contents MATCHES "ActRaiser[A-Za-z0-9_]*" OR
+       _contents MATCHES "kArLocalizationTextLayout_(StatusCities|StatusScore|StatusMaster|MessageSpeed|FixedRows)")
+        list(APPEND _game_knowledge_violations "${_file}")
+    endif()
+endforeach()
+if(_game_knowledge_violations)
+    list(JOIN _game_knowledge_violations "\n  " _formatted)
+    message(FATAL_ERROR
+        "Portable render/localization code depends on the game:\n  ${_formatted}\n"
+        "Publish what the renderer needs as an ArLocalizationTextGrid from "
+        "src/actraiser instead of naming a screen here.")
+endif()
+
+# Layer direction inside the portable code: the renderer consumes the
+# localization contract, not the other way round. The one exception is
+# render_types.h, the shared pixel/rectangle vocabulary the rasterizer contract
+# deliberately speaks so upload code needs no native graphics header.
+set(_layer_violations "")
+file(GLOB_RECURSE _localization_files
+    "${GAME_SOURCE_ROOT}/localization/*.c"
+    "${GAME_SOURCE_ROOT}/localization/*.h")
+foreach(_file IN LISTS _localization_files)
+    file(READ "${_file}" _contents)
+    string(REGEX MATCHALL "#[ 	]*include[ 	]*.render/[A-Za-z0-9_]+[.]h"
+           _render_includes "${_contents}")
+    foreach(_include IN LISTS _render_includes)
+        if(NOT _include MATCHES "render/render_types[.]h")
+            list(APPEND _layer_violations "${_file}: ${_include}")
+        endif()
+    endforeach()
+endforeach()
+if(_layer_violations)
+    list(JOIN _layer_violations "\n  " _formatted)
+    message(FATAL_ERROR
+        "Localization code depends on the renderer:\n  ${_formatted}\n"
+        "The renderer consumes the localization contract, not the reverse.")
+endif()
 
 set(_violations "")
 foreach(_file IN LISTS _portable_render_files)
