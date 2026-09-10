@@ -1,7 +1,7 @@
 # Language pack authoring format
 
 ActRaiser language packs are UTF-8 directories designed for ordinary text
-editors and the builder's Localization workspace. A pack contains no ROM
+editors and the builder's Languages workspace. A pack contains no ROM
 addresses, dictionary tokens, or font-tile numbers. Version 1 deliberately
 starts fresh; the unreleased prototype format is not supported.
 
@@ -9,6 +9,28 @@ The game currently applies packs to simulation-mode and Sky Palace menus and
 dialogue. The semantic catalog covers the whole game so later integrations can
 use the same packs without another format migration. Unsupported screens keep
 their native presentation for now.
+
+## Author backups and sharing archives
+
+The builder uses `.arproject` for private, resumable author backups and
+`.arlang` for publishable translations. Both are bounded ZIP archives with a
+root `package.json` identifying the format, version and archive kind, and the
+same human-editable `pack.ini` and script files described below.
+
+Backups retain progress, comments, notes and the local source template. Do not
+publish ROM-derived backups. A publication contains reviewed translations
+(Done, optionally WIP), declared font dependencies and explicit `notices/`
+license files. It omits private notes, progress and unchanged source-template
+messages; omitted routes use the game's native fallback. Publication requires
+the author's explicit confirmation of redistribution rights. This is not a
+legal determination or a substitute for reviewing your content and licenses.
+
+Import validates paths, sizes, manifest dependencies and game semantic contracts
+before accepting a project. Project saves reject stale revisions and conflicting
+IDs. Runtime installation stages a complete immutable version before replacing
+its manifest; existing versions are retained for recovery. A directory import
+reads only declared scripts/fonts and the defined progress, author metadata and
+notice files, not unrelated files in that directory.
 
 ## Current runtime controls
 
@@ -23,13 +45,131 @@ Pixelation strength is an upper bound: small windows and tightly fitted text
 automatically use finer blocks to avoid reducing characters to unreadable dots.
 These settings can be changed during play and are saved with other settings.
 
-Automatic pack discovery and the builder's updated installation flow are not
-connected yet. For now, Native US enhanced text requires a locally generated
-complete pack at `game-assets/languages/native-us/pack.ini`; the optional
-Configured pack source is supplied by the `AR_LOCALIZATION_PACK` manifest path
-at launch. That path also defaults presentation to Enhanced unless an explicit
-setting overrides it. A missing or incompatible source retains the prior
-selection. Retail-derived extraction products are not bundled for distribution.
+The Go builder prepares the local Native US source first in both its CMake-backed
+and hermetic build flows, without replacing an existing source. Its runtime path
+is `game-assets/languages/native-us/pack.ini`. The workshop's Languages section
+and Home shortcuts require this complete, valid source: start a build with your
+US ROM and they unlock automatically after extraction, before the rest of the
+build finishes. A later build failure does not relock the editor. A pre-existing
+valid source is recognized on opening the workshop, without requiring the ROM.
+Incomplete or invalid sources remain locked with an explanation; saved projects
+are not removed. Regional references can then be extracted within Languages.
+
+Both build flows and the GUI use the same Go extraction and authoring library.
+The browser sends edits to that library; it has no separate ROM decoder or pack
+parser. Game-side C compatibility is tested directly against Go output. Python
+is optional development tooling, not a builder, editor, or runtime dependency.
+
+Enhanced-text builds require SDL3_ttf as well as SDL3. Supported standalone
+bundles carry the font-rendering SDK and preserve its license notices under
+`utils/licenses/SDL3_ttf`, even when build tools are removed. Generic Linux
+builds use matching system development packages. The builder checks for missing
+headers/link libraries and known wrong-architecture binaries before compiling.
+
+Open **Languages** in the builder sidebar. **Install a language pack** and
+**Create a translation** are the two primary workflows; **Open a project or
+backup**, **Clone a language pack**, and **Extract a ROM reference** are below
+them. Choose a workflow to see only its relevant steps. The package library
+combines editable projects and installed packs, is sorted by package name, and
+can be searched by name, locale or ID. Filter to installed packages or workshop
+projects that are not installed. Home also
+offers shortcuts to up to four saved projects (name order, not recency).
+Opening a project or saving edits changes the workshop project only;
+it does **not** install or update the game's copy. **Import & install** explicitly
+does both. Cloning creates a new stable
+package ID, retaining the original contributor credits, progress and content.
+Switching sidebar sections preserves unsaved message text and asset selections;
+closing the workshop or changing projects asks before discarding unsaved work.
+This is not autosave: save messages and details before closing your browser.
+
+The default tree follows playthrough order: Title, Sky Palace, Fillmore,
+Bloodpool, Kasandora, Aitos, Marahna, Northwall, Death Heim, End Credits.
+Each location expands into categories such as story dialogue, menus, miracles,
+reports and save prompts. **[shared]** links in multiple towns refer to one
+message and one progress status, not separate translations. Overall progress
+counts each semantic ID once; location totals include their shared links.
+Unlocated dormant/regional data stays reachable under Sky Palace → Additional
+regional & table references, explicitly marked as reference-only. Technical
+message-ID navigation remains available from **Organize by**.
+
+The dialogue after Continue is under **Sky Palace → Introduction, name entry &
+Continue → Resume saved game — welcome back after Continue**. Search checks
+translation text, friendly labels, technical IDs and
+your local source reference, even for messages absent from the current pack.
+The extracted native US reference is selected automatically when available.
+Mark messages Not started, WIP or Done as you work. The sticky **Save progress**
+button (also Cmd+S / Ctrl+S) saves pending message text/status, metadata, private
+notes and public notices in one validated project save. Invalid input leaves
+the entire pending change unsaved, with an error beside the Save action.
+The **Messages** and **Details & credits** tabs keep the working area compact
+without discarding pending edits. **Languages** returns to the package library and warns before
+discarding unsaved work.
+Route-specific value pickers insert supported placeholders; the shared Go
+validator checks edits and their native control anchors before saving. Native
+sources are read-only: create a translation from US, and use another extracted
+release as a reference. **Reference language** and **Extract reference ROM…**
+remain available inside the editor; changing or extracting a reference does
+not discard drafts or switch away from the current project. Source and edited
+scripts are side by side on wide screens, stacked on narrower screens. The
+source heading identifies the reference actually used, including native US
+fallback when needed. Identical extracted references can be reused without
+overwriting projects. The tree includes cross-release/future-phase routes,
+so its total is larger than the number of messages native to one ROM.
+
+Open **Pack actions** for **Download private backup**, or **Export for sharing** →
+**Export language pack** for publication. These prepare an explicit download
+link. **Install a language pack** branches into **Import new pack** and **Install
+already imported**. The default import opens a native folder chooser and loads
+the folder's declared files for preview automatically. Archives/backups and a
+manual path are secondary options. Selecting a source does not change the
+workshop or game until confirmed. Imports support a distinct side-by-side ID or
+explicit replacement of the project with the incoming ID, never an unrelated
+open project. **Import & install**, or **Pack actions → Install in game** →
+**Install for this game**, installs all supplied translations under
+`game-assets/languages/packs/<package-id>/pack.ini`. Restart the game to refresh
+the installed catalog, then select the package by name in the system overlay.
+Local installation includes every supplied message regardless of review status;
+it neither asks for redistribution rights nor re-filters a publisher's content.
+Publication remains separate: the publisher confirms rights and chooses whether
+to include WIP, while Not started and unchanged source templates are omitted.
+Multiple packs with the same locale or name remain distinct by their stable ID;
+selection survives package-name changes and catalog reordering. Text-source
+choices are visible in both rendering modes, but Native still displays original
+USA text/font; Enhanced applies the chosen translation.
+
+The library defaults to an installed-package checklist. Enable/disable choices
+save immediately; restart the game to apply them. Unchecking a package keeps
+its files and project but hides it from the runtime selector by renaming
+`pack.ini` to `disabled-pack.ini`. Checking it validates its declared dependencies
+and restores `pack.ini`. Only one of these manifests may exist at a time.
+Updating a disabled pack preserves its disabled state. Original US text remains
+available independently; the game uses one selected language, not a merged stack.
+
+The library's **Uninstall…** action removes an enabled or disabled package from discovery
+after confirmation; restart the game afterward. It never deletes the editable
+project or the native US source. Installed data and a renamed `uninstalled-*.ini`
+manifest are retained in the package folder for recovery, so uninstall does not
+reclaim disk space. Review and install again to restore the pack. Concurrent
+replacement or a changed manifest requires a library refresh before removal.
+
+Paths are relative to the builder's explicit project root, which is `utils/` in
+a distribution—not the executable directory. Resumable projects live under
+`game-assets/languages/projects/`. Extracted retail scripts and regional ROMs
+are local-only, not bundled. The optional development `Configured pack` source
+still accepts `AR_LOCALIZATION_PACK`; it does not replace installed discovery.
+
+The editor's script preview shows logical pages and controls, not exact in-game
+wrapping, font size, mosaic, scroll timing or keyboard geometry. It does not
+certify font coverage/shaping. Test those in game before publishing. Directory
+imports and archives retain declared fonts; new translations use the bundled
+font. A missing or incompatible selected pack retains the prior working source.
+
+Authorship is stored in `author` and `license`. Preserve original contributor
+credits when adapting a pack, add your contributions, and use public
+`notices/CREDITS.txt` for longer attribution. Those fields/notices survive
+publication, import, editing and installation. Private working notes are kept
+only in backups. Metadata records attribution, not verified authorship or a
+cryptographic revision history.
 
 Before enabling enhanced text, the game tests opening the primary and ordered
 fallback fonts and uploading a rasterized sample. Missing/corrupt font files or
@@ -54,8 +194,9 @@ messages clamp to a valid page, while additional pages remain reachable before
 unexecuted native control barriers. Switching text rendering during a prompt
 does not answer a native choice or confirm a native continuation. Already
 completed terminal/menu-yield states remain complete. Changing font styling
-does not restart typing. Installed-pack discovery is still separate from this
-runtime behavior. Debug save-state restoration
+does not restart typing. Installing a new pack requires a restart to refresh
+the catalog; switching between already discovered packs does not.
+Debug save-state restoration
 is unsupported and is not a language-pack compatibility requirement. This does
 not change normal battery saves or the intended live language-switching behavior.
 `@empty` does work for scoped dialogue and ordinary fixed-menu text: it hides
@@ -149,8 +290,8 @@ source = text/simulation.artext
 ```
 
 - `id` is the stable package identity. Locale is metadata, so several packages
-  can target the same locale. Discovery will sort by autonym, package name, and
-  package ID.
+  can target the same locale. Discovery sorts by package name and then package
+  ID, independently of locale or autonym.
 - `locale` is a BCP-47 language tag such as `en-CA`, `fr-FR`, or `ja-JP`.
 - `name` is the package name; `autonym` is the language's own display name.
 - `direction` is `ltr`, `rtl`, or `auto`.
@@ -163,8 +304,22 @@ source = text/simulation.artext
   to untouched native ROM rendering.
 - `coverage = partial` permits per-message fallback. `complete` requires every
   catalog message available in the declared source profile.
-- `source` and pack-relative font rows may repeat. Paths must be portable,
-  relative, and unable to escape the pack directory.
+- `source` and fallback-font rows may repeat for distinct references. Paths
+  must be UTF-8, pack-relative, and at most 511 bytes. Use `/` separators;
+  absolute paths, backslashes, empty/`.`/`..` components, control characters,
+  and `< > : " | ? *` are rejected. Components must not end in a dot or space,
+  or use Windows device names such as `NUL`, `CON`, or `COM1`, even with an
+  extension. `builtin:` font identifiers are not filesystem paths.
+- Keep referenced filenames distinct without relying on letter case, and do
+  not use the same path for different kinds of file (for example, a script and
+  a font). The builder's pack reader rejects conflicting paths, symlinks and
+  nonregular files. It reads only declared scripts/fonts and optional
+  `translation-progress.tsv` from the selected pack root.
+
+The builder's pack reader limits a manifest to 256 KiB, each script or progress
+file to 16 MiB, each local font to 64 MiB, and the combined snapshot to 256 MiB.
+These are file-loading safeguards, not a guarantee that a pack fits every
+runtime font or layout budget.
 
 Unknown sections, keys, values, commands, and duplicate IDs are errors. A
 failed load never partially activates a pack.
@@ -204,6 +359,12 @@ only happens during export; loading an edited pack never reinterprets `@line`.
 Existing packs must be re-extracted or edited to gain these breaks; back up
 translations before replacing generated files.
 
+Native menu records also contain runs of blank cells used to erase previous
+tile contents. Extraction omits an otherwise blank inline run, but preserves
+its `@line` positions and all spaces adjoining actual text or placeholders.
+Those native clearing cells are not paragraphs to translate. An entirely
+textless source uses `@empty` with any required native anchors.
+
 The supported commands are:
 
 | Command | Meaning |
@@ -221,6 +382,12 @@ The supported commands are:
 Use `@@` at the beginning of a text line to display a literal `@`. Use `\#` or
 `\;` for a literal leading comment marker. Double braces (`{{` and `}}`) emit
 literal braces.
+
+Physical source lines use LF, CRLF or CR separators. Nonbreaking spaces and
+Unicode line/paragraph-separator characters remain text; use `@line`, `@page`
+or a blank physical line for explicit authoring boundaries. Quoting a command
+argument does not relax its identifier rules; do not escape punctuation inside
+quoted anchor IDs.
 
 ## Locked anchors and safe extension
 
@@ -398,7 +565,7 @@ pack passing the portable format validator will fit every layout/font setting.
 
 ## Tooling
 
-The low-level tools operate on local extraction products:
+These optional source-checkout tools operate on local extraction products:
 
 ```sh
 python3 tools/language_pack_extract.py \
@@ -418,6 +585,7 @@ python3 tools/language_pack_v1.py validate \
   --catalog game-assets/languages/sources/semantic-catalog.json
 ```
 
-The builder will wrap these operations, create the U.S. starting source, show
-messages in a navigable tree, offer contextual placeholder/control pickers,
-and save progress incrementally.
+The shipped builder implements extraction, validation and authoring in Go,
+creates the U.S. starting source, and provides the tree editor and contextual
+placeholder/control pickers described above. The Python tools here are optional
+source-checkout references, not a dependency of the builder or game.

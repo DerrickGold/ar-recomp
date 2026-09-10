@@ -253,6 +253,9 @@ struct SettingDesc {
    * of teaching Settings_IsDebugOnly key strings. Must remain a tail field for
    * the positional-row compatibility described above. */
   bool player_visible;
+  /* Dynamic enum catalogs can display names while persisting stable keys. */
+  long (*enum_maximum)(void);
+  SettingFormatFn serialize;
 };
 
 typedef enum {
@@ -657,6 +660,20 @@ bool Settings_Save(const char *path);
  * All runtime writes go through these functions so range normalization,
  * profile invalidation, callbacks, and sticky/restart results stay uniform. */
 const SettingDesc *Settings_Find(const char *key);
+long Settings_Maximum(const SettingDesc *desc);
+
+enum { kSettingsLocalizationMaximumPacks = 128 };
+typedef struct SettingsLocalizationPack {
+  char id[97];
+  char name[193];
+  char locale[33];
+  char manifest[1024];
+} SettingsLocalizationPack;
+/* Register once before Settings_InitWithFile. Discovery is platform-owned;
+ * settings only owns bounded, copied identities and presentation labels. */
+bool Settings_SetLocalizationPacks(const SettingsLocalizationPack *packs,
+                                    size_t count);
+const char *Settings_LocalizationPackPath(int content);
 bool Settings_IsAvailable(const SettingDesc *desc);
 bool Settings_IsMenuVisible(const SettingDesc *desc);
 /* True for a developer-only row: the fine numeric tuning dials of the diorama

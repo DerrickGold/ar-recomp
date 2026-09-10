@@ -273,6 +273,11 @@ static void TestRejectedInputs(void) {
   ExpectFailure(kManifest, (const uint8_t *)cycle, sizeof(cycle) - 1, true,
                 "alias cycle");
 
+  static const char quoted_anchor[] =
+      ":: sky.demo\n@anchor \"reset_text_cursor\\.00\"\nHello\n";
+  ExpectFailure(kManifest, (const uint8_t *)quoted_anchor,
+                sizeof(quoted_anchor) - 1, true, "stable anchor id");
+
   ExpectFailure(kManifest, (const uint8_t *)kScript, sizeof(kScript) - 1,
                 false, "Fallback.ttf");
 
@@ -283,6 +288,20 @@ static void TestRejectedInputs(void) {
   memcpy(source, "../x/sky.artext", strlen("../x/sky.artext"));
   ExpectFailure(unsafe_manifest, (const uint8_t *)kScript,
                 sizeof(kScript) - 1, true, "portable and relative");
+
+  static const char *const bad_fonts[] = {
+      "font.ttf:stream", "C:font.ttf", "fonts/./font.ttf", "NUL.ttf",
+      "nul .ttf", "LPT\xC2\xB3.ttf", "fonts/end./font.ttf", "bad?.ttf"};
+  const char *font = strstr(kManifest, "fonts/Fallback.ttf");
+  CHECK(font != NULL);
+  for (size_t i = 0; i < sizeof(bad_fonts) / sizeof(bad_fonts[0]); i++) {
+    const int length = snprintf(unsafe_manifest, sizeof(unsafe_manifest),
+        "%.*s%s%s", (int)(font - kManifest), kManifest, bad_fonts[i],
+        font + strlen("fonts/Fallback.ttf"));
+    CHECK(length > 0 && (size_t)length < sizeof(unsafe_manifest));
+    ExpectFailure(unsafe_manifest, (const uint8_t *)kScript,
+                  sizeof(kScript) - 1, true, "portable and relative");
+  }
 }
 
 static void TestTransactionalReload(void) {
@@ -423,10 +442,108 @@ static void TestSemanticContracts(void) {
   ArLanguagePack_Destroy(&pack);
 }
 
-static int ValidatePackFromFile(const char *manifest_path) {
+static void PrintJsonString(const char *value) {
+  putchar('"');
+  for (const unsigned char *p = (const unsigned char *)value; *p; p++) {
+    if (*p == '"' || *p == '\\')
+      printf("\\%c", *p);
+    else if (*p < 0x20)
+      printf("\\u%04x", (unsigned)*p);
+    else
+      putchar(*p);
+  }
+  putchar('"');
+}
+
+/* Development-only probe of the production loader and contract validator.
+ * No second parser or game executable/ROM is involved. */
+static void DumpPack(const ArLanguagePack *pack) {
+  static const char *const kinds[] = {
+      "text", "placeholder", "line", "paragraph", "page", "wait",
+      "anchor", "event", "empty", "end"};
+  putchar('[');
+  for (uint32_t i = 0; i < ArLanguagePack_MessageCount(pack); i++) {
+    const ArLanguageMessage *message = ArLanguagePack_GetMessage(pack, i);
+    if (i) putchar(',');
+    printf("{\"id\":");
+    PrintJsonString(ArLanguagePack_GetString(pack, message->id));
+    printf(",\"source_line\":%u", message->source_line);
+    if (message->is_alias) {
+      printf(",\"alias\":");
+      PrintJsonString(ArLanguagePack_GetString(pack, message->alias));
+    }
+    printf(",\"operations\":[");
+    for (uint32_t j = 0; j < message->operation_count; j++) {
+      const ArLanguageOperation *op = ArLanguagePack_GetOperation(pack, message, j);
+      if (j) putchar(',');
+      printf("{\"op\":");
+      PrintJsonString(kinds[op->kind]);
+      printf(",\"source_line\":%u", op->source_line);
+      if (op->kind == kArLanguageOperation_Text) {
+        printf(",\"value\":");
+        PrintJsonString(ArLanguagePack_GetString(pack, op->value.text));
+      } else if (op->kind == kArLanguageOperation_Placeholder) {
+        printf(",\"name\":");
+        PrintJsonString(ArLanguagePack_GetString(pack, op->value.placeholder));
+        if (op->minimum_digits)
+          printf(",\"minimum_digits\":%u", op->minimum_digits);
+      } else if (op->kind == kArLanguageOperation_Anchor) {
+        printf(",\"id\":");
+        PrintJsonString(ArLanguagePack_GetString(pack, op->value.anchor));
+      } else if (op->kind == kArLanguageOperation_WaitFrames) {
+        printf(",\"frames\":%u", op->value.wait_frames);
+      }
+      putchar('}');
+    }
+    printf("]}");
+  }
+  puts("]");
+}
+
+static void DumpMetadata(const ArLanguagePackMetadata *m) {
+  static const char *const directions[] = {"auto", "ltr", "rtl"};
+  static const char *const targets[] = {"us-runtime", "reference-only"};
+  static const char *const profiles[] = {"us", "eu-en", "de", "fr", "jp"};
+  static const char *const coverages[] = {"partial", "complete"};
+  printf("{\"metadata\":{");
+#define FIELD(name, value) do { printf("\"%s\":", name); PrintJsonString(value); } while (0)
+  FIELD("id", m->package_id); printf(",");
+  FIELD("locale", m->locale); printf(",");
+  FIELD("name", m->display_name); printf(",");
+  FIELD("autonym", m->autonym); printf(",");
+  FIELD("author", m->author); printf(",");
+  FIELD("license", m->license); printf(",");
+  FIELD("direction", directions[m->direction]); printf(",");
+  FIELD("target", targets[m->target]); printf(",");
+  FIELD("source_profile", profiles[m->source_profile]); printf(",");
+  FIELD("fallback", m->fallback); printf(",");
+  FIELD("coverage", coverages[m->coverage]);
+  printf("},\"fonts\":{");
+  FIELD("primary", m->primary_font);
+  printf(",\"fallback\":[");
+  for (uint32_t i = 0; i < m->fallback_font_count; i++) {
+    if (i) printf(",");
+    PrintJsonString(m->fallback_fonts[i]);
+  }
+  printf("]}");
+#undef FIELD
+}
+
+static int ValidatePackFromFile(const char *manifest_path, int mode) {
   ArLanguagePackIo io;
   ArLanguagePackFileIo_Init(&io);
   ArLanguagePackError error;
+  if (mode == 3) {
+    ArLanguagePackMetadata metadata;
+    uint64_t revision;
+    if (!ArLanguagePack_ReadMetadata(&io, manifest_path, &metadata, &revision, &error)) {
+      fprintf(stderr, "%s\n", error.message);
+      return EXIT_FAILURE;
+    }
+    DumpMetadata(&metadata);
+    printf(",\"revision\":\"%016llx\"}\n", (unsigned long long)revision);
+    return EXIT_SUCCESS;
+  }
   ArLanguagePack pack;
   ArLanguagePack_Init(&pack);
   if (!ArLanguagePack_Load(&pack, &io, manifest_path, &error)) {
@@ -440,17 +557,32 @@ static int ValidatePackFromFile(const char *manifest_path) {
     ArLanguagePack_Destroy(&pack);
     return EXIT_FAILURE;
   }
-  printf("validated %u messages (%u aliases; %u required)\n",
-         stats.validated_messages, stats.aliases, stats.required_messages);
+  if (mode == 2) {
+    DumpMetadata(ArLanguagePack_GetMetadata(&pack));
+    printf(",\"revision\":\"%016llx\",\"messages\":",
+           (unsigned long long)pack.content_revision);
+    DumpPack(&pack);
+    puts("}");
+  } else if (mode == 1)
+    DumpPack(&pack);
+  else
+    printf("validated %u messages (%u aliases; %u required)\n",
+           stats.validated_messages, stats.aliases, stats.required_messages);
   ArLanguagePack_Destroy(&pack);
   return EXIT_SUCCESS;
 }
 
 int main(int argc, char **argv) {
   if (argc == 2)
-    return ValidatePackFromFile(argv[1]);
+    return ValidatePackFromFile(argv[1], 0);
+  if (argc == 3 && !strcmp(argv[1], "--dump"))
+    return ValidatePackFromFile(argv[2], 1);
+  if (argc == 3 && !strcmp(argv[1], "--inspect"))
+    return ValidatePackFromFile(argv[2], 2);
+  if (argc == 3 && !strcmp(argv[1], "--metadata"))
+    return ValidatePackFromFile(argv[2], 3);
   if (argc != 1) {
-    fprintf(stderr, "usage: %s [pack.ini]\n", argv[0]);
+    fprintf(stderr, "usage: %s [--dump|--inspect|--metadata] [pack.ini]\n", argv[0]);
     return EXIT_FAILURE;
   }
   TestMetadataFastPath();

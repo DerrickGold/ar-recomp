@@ -421,6 +421,9 @@ else()
         "the run script will fall back to a system SDL3")
 endif()
 
+# SDL3_ttf shares the selected SDK, but its own version/checksum is pinned in Go.
+include(${CMAKE_CURRENT_SOURCE_DIR}/sdl-ttf.cmake)
+
 # ── One-click run script per platform ────────────────────────────────────────
 if(SNESBUILD_GOOS STREQUAL "darwin")
     set(_run_script scripts/run-build.command)
@@ -436,12 +439,12 @@ set(SNESBUILD_ARCH_NAME "${_arch_name}")
 set(SNESBUILD_RUN_SCRIPT "${_run_script_name}")
 if(SNESBUILD_SDL3_BUNDLED)
     set(SNESBUILD_SDL_NOTE
-        "- SDL3 is included in this bundle; no system package is required.")
+        "- SDL3 and SDL3_ttf are included. The Steam Deck build uses SteamOS runtime dependencies.")
 else()
     set(SNESBUILD_SDL_NOTE
-"- Linux says SDL3 is missing: install it with your package manager, then try
-  again. Package names vary: Fedora 39+ uses SDL3-devel; Arch uses sdl3.
-  Ubuntu 22.04 / Debian 12 need a newer release, PPA, or source build.")
+"- Generic Linux builds require development packages for SDL3 and SDL3_ttf.
+  Install both for your architecture using your package manager or a source
+  build, then try again. The dependency scan reports which one is missing.")
 endif()
 configure_file(README.txt.in ${CMAKE_BINARY_DIR}/README.txt @ONLY)
 
@@ -533,6 +536,8 @@ install(FILES ${GAME_ROOT}/LICENSE
 install(FILES
     ${GAME_ROOT}/docs/README.md
     ${GAME_ROOT}/docs/manual.md
+    ${GAME_ROOT}/docs/builder-workshop.md
+    ${GAME_ROOT}/docs/language-pack-format.md
     ${GAME_ROOT}/docs/progress.md
     ${GAME_ROOT}/docs/SEAMS.md
     ${GAME_ROOT}/docs/ram-map.md
@@ -569,6 +574,14 @@ install(FILES
 install(FILES ${_runtime_archive}
     DESTINATION utils/snesrecomp-go/runtime/lib/${_runtime_zig_target})
 
+# The shared licensed font is the only localization content distributed by
+# default. Retail prose/source projects and ROM-owned graphics remain local.
+install(FILES
+    ${GAME_ROOT}/game-assets/fonts/noto/NotoSans-SemiCondensedExtraBold.ttf
+    ${GAME_ROOT}/game-assets/fonts/noto/OFL.txt
+    ${GAME_ROOT}/game-assets/fonts/noto/README.md
+    DESTINATION utils/game-assets/fonts/noto)
+
 # game-assets: initially empty HD/music folders. The bundled manual and optional
 # HD title are already embedded in snesbuild; the manual is materialized when the
 # builder starts, while the title is installed only from the Assets-tab toggle.
@@ -586,6 +599,12 @@ install(DIRECTORY ${_zig_stage}/${_zig_release} DESTINATION utils/tools/toolchai
     USE_SOURCE_PERMISSIONS)
 if(SNESBUILD_SDL3_BUNDLED)
     install(DIRECTORY ${_sdl_stage}/ DESTINATION utils/tools/sdl3 USE_SOURCE_PERMISSIONS)
+    # Keep notices outside the optional compiler SDK too: slimming removes
+    # tools/sdl3, but the game's copied shared libraries remain in use.
+    install(DIRECTORY ${_sdl_stage}/licenses/SDL3_ttf/
+        DESTINATION utils/licenses/SDL3_ttf)
+    install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/licenses/sdl-ttf/
+        DESTINATION utils/licenses/SDL3_ttf)
 endif()
 
 # ── Post-package leak gate ───────────────────────────────────────────────────

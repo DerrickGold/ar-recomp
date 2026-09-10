@@ -1522,7 +1522,12 @@ static void TestLocalizationPreferences(void) {
   setenv("AR_LOCALIZATION_PRESENTATION", "Native", 1);
   Settings_Init();
   CHECK(g_settings.localization_content == 1);
-  CHECK(g_settings.localization_presentation == 0);
+  CHECK(g_settings.localization_presentation == 1);
+  CHECK(!mode->available());
+  CHECK(Settings_SetText(mode, "Native") == kSettingChange_Unchanged);
+  CHECK(Settings_SetText(source, "Native US") == kSettingChange_Applied);
+  CHECK(mode->available());
+  CHECK(Settings_SetText(mode, "Native") == kSettingChange_Applied);
   ClearSettingsEnv();
   setenv("AR_LOCALIZATION_PRESENTATION", "Enhanced", 1);
   setenv("AR_LOCALIZATION_CONTENT", "Native US", 1);
@@ -1538,7 +1543,48 @@ static void TestLocalizationPreferences(void) {
   ClearSettingsEnv();
 }
 
+static void TestLocalizationPackIdentity(void) {
+  ClearSettingsEnv();
+  SettingsLocalizationPack packs[2] = {
+    {.id="community.stellar", .name="Stellar English", .locale="en-US", .manifest="game-assets/languages/packs/community.stellar/pack.ini"},
+    {.id="community.excellent", .name="Excellent English", .locale="en-US", .manifest="game-assets/languages/packs/community.excellent/pack.ini"},
+  };
+  CHECK(Settings_SetLocalizationPacks(packs, 2));
+  Settings_Init();
+  const SettingDesc *source = Settings_Find("localization_content");
+  CHECK(Settings_Maximum(source) == 3);
+  CHECK(Settings_IsMenuVisible(source)); /* Visible with Native rendering. */
+  CHECK(Settings_SetText(source, "community.stellar") == kSettingChange_Applied);
+  CHECK(g_settings.localization_content == 3);
+  CHECK(g_settings.localization_presentation == 1);
+  const SettingDesc *mode = Settings_Find("localization_presentation");
+  CHECK(!mode->available());
+  CHECK(Settings_SetLong(mode, 0) == kSettingChange_Unchanged);
+  CHECK(strstr(Settings_LocalizationPackPath(3), "community.stellar"));
+  char text[512];
+  Settings_FormatValue(source, text, sizeof(text));
+  CHECK(strstr(text, "Stellar English") && strstr(text, "en-US"));
+  source->serialize(text, sizeof(text), source->field);
+  CHECK(!strcmp(text, "community.stellar"));
+  /* Rename/reorder the package: the persistent key still chooses its ID. */
+  snprintf(packs[0].name, sizeof(packs[0].name), "A Stellar English");
+  CHECK(Settings_SetLocalizationPacks(packs, 2));
+  Settings_Init();
+  CHECK(Settings_SetText(source, text) == kSettingChange_Applied);
+  CHECK(g_settings.localization_content == 2);
+  CHECK(strstr(Settings_LocalizationPackPath(2), "community.stellar"));
+  CHECK(Settings_SetText(source, "community.missing") == kSettingChange_Rejected);
+  CHECK(g_settings.localization_content == 2);
+  snprintf(packs[1].id, sizeof(packs[1].id), "COMMUNITY.STELLAR");
+  CHECK(!Settings_SetLocalizationPacks(packs, 2));
+  CHECK(Settings_Maximum(source) == 3);
+  CHECK(Settings_SetLocalizationPacks(NULL, 0));
+  Settings_Init();
+  CHECK(Settings_Maximum(source) == 1);
+}
+
 int main(void) {
+  TestLocalizationPackIdentity();
   TestLocalizationPreferences();
   TestPersistenceCanBeDisabled();
   TestUserDataFile();

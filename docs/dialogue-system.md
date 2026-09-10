@@ -66,14 +66,35 @@ for example, the page break in the Sky Palace magic descriptions follows a
 dictionary token. The reader wrapper observes its returned `A.low` and final
 `Y-1` before `$8E57` dispatches that code. Source-byte progress includes the
 dictionary-chain cursor delta; it is still not an expanded glyph count. The
-native decoder and its glyph pacing are not reimplemented.
+native decoder remains authoritative. Do not derive enhanced typing from a
+ratio of source bytes to translated characters: compressed words would reveal
+in bursts separated by their hidden native glyph delays.
+
+For an active enhanced dialogue only, the `$01:9278` delay entry is adapted
+when M=1 and its stacked JSR return is `$9026` (the call from glyph helper
+`$01:901C`). Each expanded non-space native glyph supplies one reveal
+opportunity. The adapter reveals one authored Unicode grapheme, then calls the
+original `$9284` once per `$0200` frame. Whitespace adds no delay; speed zero
+remains instant. Remaining authored text at a native page/control/end boundary
+uses that same clock. A shorter translation skips the surplus native glyph
+delays instead of pausing after its text has finished. All other `$9278`
+callers, fixed scripted delays, native mode and native control effects remain
+unchanged. The leaf reproduces A.low=0, C=Z=1, N=0 and its two-byte RTS stack
+consumption, preserving the high accumulator and other registers.
+
+The cached dialogue window maps authored UTF-8 byte boundaries directly to
+normalized display offsets. Whitespace trimming and reflow must not create
+another reveal ratio. This bounded lookup is constant-time per capture and
+does not re-shape or re-rasterize text at every character. Optional
+`AR_LOCALIZATION_REVEAL_TRACE=1` diagnostics report frame/reveal-offset changes
+without logging dialogue content.
 
 Enhanced sessions consume authored text with `Next`, `TickWait`, and
 `AdvancePage`, stopping at native control barriers. A native `$02` drains the
 current authored page and confirms only if an authored page boundary remains;
 the caller still performs its native clear/scroll. At a locked control or
 source end, additional pages are confirmed before the native effect executes.
-Added-page typing and optional waits call the original `$9284` per-frame work;
+All enhanced typing and optional waits call the original `$9284` per-frame work;
 page confirmation reproduces `$9261`'s two `$8C43` / `BIT #$C0` loops
 (release, then press), calling the original `$8C43` input-frame body at every
 poll. This lets a source change retire an authored-only prompt between frames
@@ -114,7 +135,7 @@ observations distinguish that round trip from actual execution in retail mode;
 after native progress, the session resynchronizes at the native semantic anchor.
 Source contraction clamps the window to its valid page range. Active optional
 waits retain their remaining duration on enhanced-source changes, and reveal
-targets are recomputed against the new page length after a yielding callback.
+continues from the switched session's valid grapheme boundary after a yielding callback.
 Completed terminal/menu-yield states do not reopen earlier pages or repeat game
 events. Styling changes rebuild presentation only, not the dialogue program.
 
@@ -325,6 +346,16 @@ Report totals are typed fields, not whitespace-delimited words. Export inserts
 explicit cell separators before `total_population` / `total_score` regardless
 of whether the preceding dictionary word contributes zero, one, or several
 spaces. This avoids merging a total into a label when native padding changes.
+
+Blank-cell clearing runs must remain distinct from prose. For example, the
+Western `sim.menu.choice.miracles` source includes a padded blank row, and the
+Japanese `title.selector.continue` source has blank runs between explicit row
+advances. Author conversion removes only a complete inline run of ASCII spaces
+or tabs; row advances and locked controls remain. Spaces adjacent to a visible
+label or typed value remain content. This makes explicit the blank-row padding
+already discarded by the author parser; it does not change native erase logic.
+Some native routes also rely on an implicit source end, which the author parser
+materializes as the same terminal operation as explicit `@end`.
 
 ## Replacement boundaries
 

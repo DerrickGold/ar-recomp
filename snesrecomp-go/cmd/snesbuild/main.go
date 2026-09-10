@@ -202,6 +202,7 @@ func (values *stringList) Set(value string) error {
 
 type buildFlags struct {
 	root, buildDir, toolchainDir, cmake, config, generator, prefixPath string
+	rom                                                                string
 	jobs                                                               int
 	buildOnly                                                          bool
 	cmakeArgs                                                          stringList
@@ -228,6 +229,9 @@ func toolchainCacheDir(root string) string {
 func (values *buildFlags) hermeticOptions() (project.HermeticOptions, error) {
 	paths := project.DefaultPaths(values.root)
 	paths.BuildDir, paths.ToolchainDir = values.buildDir, values.toolchainDir
+	if values.rom != "" {
+		paths.ROM = values.rom
+	}
 	zigPath := values.zig
 	if zigPath == "" {
 		located, err := toolchain.Locate(toolchainCacheDir(values.root))
@@ -248,6 +252,7 @@ func (values *buildFlags) hermeticOptions() (project.HermeticOptions, error) {
 func addBuildFlags(flags *flag.FlagSet) *buildFlags {
 	values := &buildFlags{}
 	flags.StringVar(&values.root, "root", ".", "game project root")
+	flags.StringVar(&values.rom, "rom", "game.sfc", "ROM path used for local source extraction, relative to project root")
 	flags.StringVar(&values.buildDir, "build-dir", "build", "native build directory")
 	flags.StringVar(&values.toolchainDir, "toolchain-dir", "snesrecomp-go", "snesrecomp-go module directory")
 	flags.StringVar(&values.cmake, "cmake", "cmake", "CMake executable")
@@ -264,6 +269,9 @@ func addBuildFlags(flags *flag.FlagSet) *buildFlags {
 func (values *buildFlags) options() project.BuildOptions {
 	paths := project.DefaultPaths(values.root)
 	paths.BuildDir, paths.ToolchainDir = values.buildDir, values.toolchainDir
+	if values.rom != "" {
+		paths.ROM = values.rom
+	}
 	return project.BuildOptions{
 		Paths: paths, CMakeCommand: values.cmake, Config: values.config,
 		Generator: values.generator, PrefixPath: values.prefixPath, Jobs: values.jobs,
@@ -988,6 +996,9 @@ func runBuild(args []string) error {
 		return err
 	}
 	if values.hermetic {
+		if err := project.PrepareBuildLocalization(values.options().Paths, os.Stdout); err != nil {
+			return err
+		}
 		options, err := values.hermeticOptions()
 		if err != nil {
 			return err
@@ -1005,11 +1016,15 @@ func runAll(args []string) error {
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
+	if err := project.PrepareBuildLocalization(regenValues.options().Paths, os.Stdout); err != nil {
+		return err
+	}
 	if _, err := project.Regenerate(regenValues.options()); err != nil {
 		return err
 	}
 	buildValues.root = regenValues.root
 	buildValues.toolchainDir = regenValues.toolchainDir
+	buildValues.rom = regenValues.rom
 	if buildValues.hermetic {
 		options, err := buildValues.hermeticOptions()
 		if err != nil {
@@ -1042,6 +1057,8 @@ func runToolchain(args []string) error {
 	goos := flags.String("goos", runtime.GOOS, "target OS for `pin`")
 	goarch := flags.String("goarch", runtime.GOARCH, "target architecture for `pin`")
 	sdl := flags.Bool("sdl", false, "print the SDL3 pin (url sha archive kind) instead of the Zig pin")
+	sdlTtf := flags.Bool("sdl-ttf", false, "print the SDL3_ttf pin (url sha archive kind)")
+	steamDeckTtf := flags.Bool("steam-deck-sdl-ttf", false, "print Steam Deck SDL3_ttf header/runtime pins")
 	steamDeckSDL := flags.Bool(
 		"steam-deck-sdl", false,
 		"print Steam Deck SDL3 header/runtime pins instead of the Zig pin")
@@ -1053,8 +1070,27 @@ func runToolchain(args []string) error {
 		return err
 	}
 	if subcommand == "pin" {
-		if *sdl && *steamDeckSDL {
-			return fmt.Errorf("--sdl and --steam-deck-sdl are mutually exclusive")
+		selected := 0
+		for _, enabled := range []bool{*sdl, *sdlTtf, *steamDeckSDL, *steamDeckTtf} {
+			if enabled {
+				selected++
+			}
+		}
+		if selected > 1 {
+			return fmt.Errorf("SDL pin selectors are mutually exclusive")
+		}
+		if *steamDeckTtf {
+			hURL, hSHA, hArchive, rURL, rSHA, rArchive := toolchain.SteamDeckSDL3TtfPins()
+			fmt.Printf("%s %s %s %s %s %s\n", hURL, hSHA, hArchive, rURL, rSHA, rArchive)
+			return nil
+		}
+		if *sdlTtf {
+			url, sha, archive, kind, err := toolchain.SDL3TtfPin(*goos, *goarch)
+			if err != nil {
+				return err
+			}
+			fmt.Printf("%s %s %s %s\n", url, sha, archive, kind)
+			return nil
 		}
 		if *steamDeckSDL {
 			headersURL, headersSHA, headersArchive,
@@ -1287,6 +1323,15 @@ func runDoctor(args []string) error {
 		fmt.Printf("%-15s not found (%s; hermetic builds need it)\n", "snesbuild.ini", manifestPath)
 	} else {
 		fmt.Printf("%-15s ok (%d game sources, target %s)\n", "snesbuild.ini", len(manifest.Sources), manifest.Name)
+		if manifest.UseSDL3 && manifest.UsesSDL3Ttf() {
+			check := project.PreflightSDL3Ttf(resolved, "")
+			if check.Status == project.PreflightFail {
+				fmt.Printf("%-15s MISSING (%s)\n%-15s -> %s\n", "SDL3_ttf", check.Detail, "", check.Remedy)
+				buildMissing = true
+			} else {
+				fmt.Printf("%-15s ok (%s)\n", "SDL3_ttf", check.Detail)
+			}
+		}
 		for _, warning := range project.ManifestDriftWarnings(resolved.Root, manifest) {
 			fmt.Printf("%-15s WARNING %s\n", "snesbuild.ini", warning)
 		}

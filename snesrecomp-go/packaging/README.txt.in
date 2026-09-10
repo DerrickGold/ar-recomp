@@ -18,8 +18,9 @@ HOW TO PLAY
       Windows  - double-click  run-build.bat
       Linux    - run           ./run-build.sh
 
-2. Your browser opens the private local builder. Choose your ROM, then press
-   "Build game". This takes a few minutes and only needs to be done one time.
+2. Your browser opens the private local workshop. Choose "Build your game" on
+   Home, select your ROM, then press "Build game". This takes a few minutes
+   and only needs to be done one time.
    Your ROM never leaves this computer.
 
 3. Play - when the build finishes, a "run-game" file appears in this folder
@@ -90,10 +91,10 @@ IF SOMETHING GOES WRONG
 
 OPTIONAL: YOUR OWN MUSIC AND HD GRAPHICS
 ----------------------------------------
-This package starts with the ROM's original music and graphics. Open the Assets
-tab in the builder to toggle the included high-resolution title art or browse
-to an Ogg Vorbis file for any music track, then press Save assets. All 17 ROM
-song images are listed; currently unknown names use an "Unidentified track NN"
+This package starts with the ROM's original music and graphics. Open Assets
+in the sidebar and choose Music or Title artwork. Select a music track and
+browse to an Ogg Vorbis file, then press Save changes. All 17 ROM song images
+are listed; currently unknown names use a "Track NN"
 label so you can extract and listen to them before naming them.
 The builder copies those files into "utils/game-assets" and updates
 "manifest.ini" for you. Advanced packs can still add their own files and
@@ -104,6 +105,40 @@ original-audio previews" on Assets. The bundled pure-Go audio renderer creates
 local 30-second WAVs so each original track can be played beside the selected
 replacement. These previews stay in your computer's user cache; they are not
 copied into the game, its manifest, or a release package.
+
+
+LOCALIZATION WORKSHOP
+---------------------
+Open Languages in the sidebar to install a shared language pack, create your
+own translation, resume or clone a project, or extract a read-only source from
+a clean US, EU,
+German, French or Japanese ROM. The build also prepares your local US source.
+Create a named translation from US, browse/search messages, and save each as
+Not started, WIP or Done. Regional sources can be selected as references.
+
+Author backups (.arproject) keep your progress, notes and local source template;
+keep ROM-derived backups private. Language pack exports (.arlang) include your
+reviewed translations, author credits and license notices. Import packs or
+backups to resume editing; duplicate locales remain separate by package ID.
+The GUI and build use the same Go extraction/validation code. No Python needed.
+
+Install a reviewed pack, restart the game, then select its name in the overlay's
+Localization menu. Enhanced text uses the selected source. Native rendering
+keeps original USA text/font. The editor preview is a script preview, not final
+in-game font layout; visually check translations before sharing them.
+Opening/importing and saving only change your workshop copy. Use the explicit
+Pack actions → Install in game workflow to update the installed version the game uses.
+Local installation keeps all supplied translations; redistribution consent and
+WIP filtering belong to Export for sharing. Import new pack opens a folder
+chooser; Install already imported lets you choose saved work. Installed packs
+have enable/disable checkboxes in Languages. Unchecking keeps their files and
+progress but hides them from the game's language selector after restart.
+
+Workshop projects and installed packs live under utils/game-assets/languages.
+The shared font and its license are under utils/game-assets/fonts. Regional
+ROMs and extracted scripts are never included in the distribution. See
+utils/docs/language-pack-format.md for authoring, controls, fonts and credits.
+See utils/docs/builder-workshop.md for navigation and the optional Home scene.
 
 
 WHAT THE FOLDERS ARE

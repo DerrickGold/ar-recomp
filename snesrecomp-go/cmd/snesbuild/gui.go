@@ -88,6 +88,12 @@ func buildFromGUI(
 	paths := project.DefaultPaths(root)
 	paths.ROM = romPath
 	paths.ToolchainDir = values.toolchainDir
+	// Language editing needs only the US source, not a working compiler or
+	// completed regeneration. Publish it first; status polls unlock the editor
+	// from the validated on-disk pack even if a later build phase fails.
+	if err := project.PrepareBuildLocalization(paths, output); err != nil {
+		return buildgui.Result{}, err
+	}
 
 	// Scan the host's dependencies BEFORE regeneration and the compile. Every
 	// check is milliseconds; the build behind it is minutes, and a missing or

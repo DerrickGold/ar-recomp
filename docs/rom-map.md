@@ -143,6 +143,13 @@ HP at `+8` and death score at `+9`. `tools/act_content.py --tables` decodes all 
 | `$06:A000+` | `0x32000+` | Conditional 128-byte dynamic action effect-overlay windows selected from polymorphic object `+38`; uploaded to VRAM `$2D80` only for objects with `+30 & $0040` and an idle upload descriptor. Not a universal spell-ID table |
 | `$06:A400+` | `0x32400+` | Selected action-magic character windows used by `$02:BC9E`: 256 bytes at `$A400 + (id-1)*$80` for IDs 1-4, uploaded to VRAM `$2D40`. **VRAM word `$2D40` IS OBJ tile `$D4`** at the action OBSEL base (`obsel=$01` → objTileAdr1 = word `$2000`; `$2000 + $D4*16 = $2D40`), so the window lands on tiles `$D4-$D7` — the four 8×8 sprites of the HUD magic icon — and continues into `$D8-$DB`. Verified byte-exact 2026-08-05: ROM `$06:A400` tiles 0-3 decode identically to VRAM tiles `$D4-$D7` in a live Magical Fire snapshot. **Open:** the stated copy size (256 bytes) is twice the per-ID stride (`$80`), so consecutive IDs overlap in ROM and the copy spills past the icon into `$D8-$DB`; the DMA length has not been re-read from `$02:BC9E`, so one of the two figures may be a transcription slip |
 | `$07:8000-$9FFF` | `0x38000-0x39FFF` | Common action OBJ atlas, 8192 bytes copied to VRAM `$2000-$2FFF` at level entry |
+| `$06:8000/$82BF`; `$06:8030/$803A/$80CC` | `0x30000/0x302BF`; `0x30030/0x3003A/0x300CC` | Master animation header / visual pointer table; idle state `$00`, walk `$02`, standing sword `$08`. Visuals: idle `$04`; walk `$00,$00,$00,$00,$00,$01,$02,$03`; sword `$0B-$0F`. Four-byte rows contain visual, stored duration, dX, dY; the walking/standing attack handlers use DEC/BMI, so a stored zero is one displayed tick. |
+| `$06:805B/$8168/$80C7`; `$00:98D9/$9B95/$99BB` | `0x3005B/0x30168/0x300C7`; `0x018D9/0x01B95/0x019BB` | Master moving jump state `$03` (11 rows, visual `$36`), early moving-jump sword state `$0C` (15 rows, visuals `$36,$16,$19-$1C`), and fall state `$07` (visual `$16`). `$9B95` changes the state without clearing the existing sequence index, preserving jump progress. The native early-jump sword program's first seven rows occupy 21 DEC/BMI ticks before its sword-arc rows. Workshop choreography samples the complete program from launch; its paths, hit times and jump curves are authored UI motion, not a port of the controller/physics. |
+| `$00:9810-$981B`; `$00:95F0/$8D68` | `0x01810-0x0181B`; `0x015F0/0x00D68` | Master spawn record supplies `$09` to object `+$28.high`. The action emitter XORs `$0100`: raw composition bank-zero parts therefore use OBJ bank 0, palette 4 (`$0800`), with sword-trail parts using palette 5. This is not the same transform as a raw enemy composition. Seven-byte parts retain separate normal/flipped offsets; signed extent bytes anchor all poses to the same world position. |
+| `$10:8000`; `$19:D695`; `$1C:CEF8` | `0x80000`; `0xCD695`; `0xE4EF8` | Fillmore `$01/$01` enemy CHR (8192 decoded bytes → VRAM `$3000`), animation/composition blob (→ `$7E:4000`), and 128-byte palette slice (→ CGRAM `$80`). Type `$09` / handler `$00:AC9A` starts at state `$1D`, selecting bird visuals `$1F-$22`. These four compositions use only this enemy sheet/palette, and have been independently extracted in both facings. |
+| `$00:ACE7/$C576`; `$00:A9E6/$AA29` | `0x02CE7/0x04576`; `0x029E6/0x02A29` | Fillmore type `$1B` club-wielder branches to the shared walker: alternates states `$00/$01` (visuals `$12/$13`, eight ticks each). Type `$02` leaper uses rest state `$2E` (visuals `$2A,$29`) and short advancing hop `$31` (six rows, visuals `$2A,$2C`). These reviewed sprites use the same `$19:D695` blob and ordinary enemy sheet/palette as the bird. Normal facing travels left; H-flipped travels right. |
+| `$07:EFC7`; `$13:B12F`; `$0B:8000`; `$00:AD51-$AD78` | `0x3EFC7`; `0x9B12F`; `0x58000`; `0x02D51-0x02D78` | First Fillmore boss (centaur) has a separate 5353-byte decoded animation/composition blob at `$7E:5000` and 8192-byte decoded CHR upload at VRAM `$4000`. Its entry sets OBSEL `$09` (second OBJ name table now `$4000`, not ordinary `$3000`) and schedules 128 palette bytes from `$0B:8000` to CGRAM `$80-$BF`. Selected states: idle `$10` → visual `$06`; walk `$00` → `$0C,$0F,$12,$15`; charge `$01` → `$0E,$11,$14,$17`; cast `$02` → `$0A,$09,$08,$07,$0B,$09,$07`. Body compositions reach 45 parts and signed extents of 72 pixels above / 64 below the world anchor, so a 96px regular actor cell is insufficient. Workshop uses a centred 160px cell and does not include the separate spear/lightning child actors. |
+| Fillmore `$01/$01` BG selections | CHR `0x74000/0x78000`; metatiles `0xD41CA/0xDD687`; maps `0xAF131/0xD0704`; palettes `0xAFF80/0x2FF80` | Workshop forest = BG2 page `(0,0)`; grass/ground = BG1 page `(0,2)`. Each 256×256 sparse image agrees pixel-for-pixel with game-side `ActionRoomScene_Load/LookupTile`, including big-endian metatile definitions, mask `$ECFF`, layer attributes `$0100/$1000`, flips, palette slices and transparent index zero. Workshop repetition/parallax is decorative, not native map traversal or raster playback. |
 | `$07:C000+` | `0x3C000+` | Magical Fire and Magical Stardust animation state tables, four-byte sequence entries, and seven-byte OAM compositions. Compositions OBSERVED live (2026-08-05): Stardust flight `$C13F` (state 0, visual 0, 16x16), Stardust burst `$C14B` at visual 1 (8x8) growing to `$C199` at visual 4 (32x32); Fire bloom `$C352` (state 3, visual $12, 52x25). Useful as identity anchors — the animation pointer alone cannot tell Fire from Stardust, since both live in this bank. |
 | `$07:C800+` | `0x3C800+` | Magical Aura and Magical Light animation state tables and OAM compositions; Light includes two authored 16x224 beam columns |
 | `$07:D040-$D09F` | `0x3D040-0x3D09F` | Action OBJ palettes, 96 bytes copied to CGRAM `$C0-$EF` |
@@ -275,6 +282,8 @@ to mistake for their neighbours.
 | Address(es) | Identity | Notes |
 |---|---|---|
 | `$A627-$A792` | Angel directional/pose frames | **Not** an angel signal on their own — borrowed by miracle effect records |
+| `$A589-$A5BC` | Four directional angel animation programs | Four 4-tick poses per direction; `$A627/$A67B/$A6CF/$A705` are the respective first compositions. Preserve part origins rather than tight-cropping each pose |
+| `$A7C5`, `$EC40/$EC6E` | Navigation palace animation and compositions | Two 96-tick, 48×48 frames. Map `$00/$09` asset entry at file `$0282EF` selects raw OBJ chars at file `$02CE7F` → VRAM word `$4000`; palette at file `$0E4093` → CGRAM `$80`. Parts use OBJ palette 1 |
 | `$D233-$D302` | Position/direction cursor family | class-`$11` town position controller |
 | `$D967/$D972/$D97D/$D988` | Angel arrow vertical/horizontal A/B | record `$0B0A` |
 | `$D993` | 64x64 hollow path/area selection square | palette 6, class-`$09` record; a **second** map-plane cursor outside `$D233-$D302` |
@@ -522,7 +531,20 @@ using Quintet's standard LZSS compression algorithm.
 ActRaiser uses **Quintet's standard LZSS** with a 256-byte sliding window.
 The same compression is used across other Quintet games (Soul Blazer, Illusion of Gaia, Terranigma).
 
+For ActRaiser, tokens share one MSB-first bit stream: a set control bit selects
+an 8-bit literal; a clear bit selects an 8-bit ring offset and a 4-bit length
+minus two. The ring starts filled with `$20`, with its write cursor at `$EF`;
+matches may overlap their own output and wrap the ring. A blob's decoded-size
+word precedes the stream. Do not decode tokens as byte-aligned records.
+
+The diagnostic `compressed_byte_count` in localization source IR preserves
+`tools/quintet_lzss.py`'s stream-cursor convention: `floor(bits_read / 8) + 1`,
+excluding the two-byte size header. On an exactly byte-aligned ending it counts
+one beyond the consumed stream. It is not an exact source-blob span for copying
+or rewriting ROM bytes; use the actual bit count and header format for that.
+
 Decompression state in RAM:
+
 - Sliding window buffer: $7E:2000-$7E:20FF (256 bytes)
 - Input pointer: $7E:00A5-$7E:00A7
 - Window position: $7E:00AF-$7E:00B0

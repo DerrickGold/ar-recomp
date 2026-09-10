@@ -20,13 +20,14 @@ import (
 // include, define, link) repeat, one entry per line, and keep file order.
 // Paths are relative to the project root.
 type Manifest struct {
-	Name     string   // executable name
-	Std      string   // C standard, e.g. "c11"
-	Sources  []string // game translation units (generated sources are globbed separately)
-	Includes []string // game include directories
-	Defines  []string // NAME or NAME=VALUE
-	Link     []string // extra linker arguments, e.g. -lm
-	UseSDL3  bool     // discover SDL3 headers/libs and link -lSDL3
+	Name         string   // executable name
+	Std          string   // C standard, e.g. "c11"
+	Sources      []string // game translation units (generated sources are globbed separately)
+	Includes     []string // game include directories
+	Defines      []string // NAME or NAME=VALUE
+	Link         []string // extra linker arguments, e.g. -lm
+	UseSDL3      bool     // discover SDL3 headers/libs and link -lSDL3
+	Localization string   // optional game-owned native source extraction
 }
 
 // ManifestFileName is the expected file name at the project root.
@@ -61,6 +62,11 @@ func LoadManifest(path string) (Manifest, error) {
 			manifest.Name = value
 		case "std":
 			manifest.Std = value
+		case "localization":
+			if value != "actraiser-us" {
+				return Manifest{}, fmt.Errorf("unsupported localization pipeline %q", value)
+			}
+			manifest.Localization = value
 		case "source":
 			manifest.Sources = append(manifest.Sources, value)
 		case "include":

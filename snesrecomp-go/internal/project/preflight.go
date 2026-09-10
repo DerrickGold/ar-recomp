@@ -77,6 +77,9 @@ func Preflight(options PreflightOptions) []PreflightCheck {
 	}
 	if manifestErr == nil && manifest.UseSDL3 {
 		checks = append(checks, PreflightSDL3(paths, options.Target))
+		if manifest.UsesSDL3Ttf() {
+			checks = append(checks, PreflightSDL3Ttf(paths, options.Target))
+		}
 	}
 	return checks
 }

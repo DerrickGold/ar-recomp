@@ -61,6 +61,71 @@ static int InferDisplayMode(void);
 static const char *const kLocalizationContentLabels[] = {
   "Native US", "Configured pack",
 };
+static SettingsLocalizationPack s_localization_packs[kSettingsLocalizationMaximumPacks];
+static size_t s_localization_pack_count;
+
+static int LocalizationNameCompare(const char *a, const char *b) {
+  for (;;) {
+    unsigned char left = (unsigned char)*a++, right = (unsigned char)*b++;
+    if (left >= 'A' && left <= 'Z') left += 'a' - 'A';
+    if (right >= 'A' && right <= 'Z') right += 'a' - 'A';
+    if (left != right || !left) return (int)left - (int)right;
+  }
+}
+
+static int CompareLocalizationPacks(const void *left, const void *right) {
+  const SettingsLocalizationPack *a = left, *b = right;
+  int cmp = LocalizationNameCompare(a->name, b->name);
+  return cmp ? cmp : strcmp(a->id, b->id);
+}
+
+bool Settings_SetLocalizationPacks(const SettingsLocalizationPack *packs,
+                                    size_t count) {
+  if ((!packs && count) || count > kSettingsLocalizationMaximumPacks) return false;
+  for (size_t i = 0; i < count; ++i) {
+    const SettingsLocalizationPack *p = &packs[i];
+    if (!p->id[0] || !p->name[0] || !p->locale[0] || !p->manifest[0] ||
+        !memchr(p->id, 0, sizeof(p->id)) ||
+        !memchr(p->name, 0, sizeof(p->name)) ||
+        !memchr(p->locale, 0, sizeof(p->locale)) ||
+        !memchr(p->manifest, 0, sizeof(p->manifest))) return false;
+    for (size_t j = 0; j < i; ++j)
+      if (!LocalizationNameCompare(p->id, packs[j].id)) return false;
+  }
+  if (count) memcpy(s_localization_packs, packs, count * sizeof(*packs));
+  s_localization_pack_count = count;
+  qsort(s_localization_packs, count, sizeof(*packs), CompareLocalizationPacks);
+  return true;
+}
+
+const char *Settings_LocalizationPackPath(int content) {
+  if (content == 1) return getenv("AR_LOCALIZATION_PACK");
+  return content >= 2 && (size_t)(content - 2) < s_localization_pack_count
+      ? s_localization_packs[content - 2].manifest : NULL;
+}
+
+static long LocalizationContentMaximum(void) { return (long)s_localization_pack_count + 1; }
+static bool ParseLocalizationContent(const char *text, void *field) {
+  for (int i = 0; i < 2; ++i) {
+    if (!strcmp(text, kLocalizationContentLabels[i]) ||
+        (text[0] == '0' + i && !text[1])) { *(int *)field = i; return true; }
+  }
+  for (size_t i = 0; i < s_localization_pack_count; ++i)
+    if (!strcmp(text, s_localization_packs[i].id)) { *(int *)field = (int)i + 2; return true; }
+  return false;
+}
+static int SerializeLocalizationContent(char *buffer, int size, const void *field) {
+  int value = *(const int *)field;
+  return snprintf(buffer, size, "%s", value >= 2 && (size_t)(value - 2) < s_localization_pack_count
+      ? s_localization_packs[value - 2].id : kLocalizationContentLabels[value == 1]);
+}
+static int FormatLocalizationContent(char *buffer, int size, const void *field) {
+  int value = *(const int *)field;
+  if (value < 2 || (size_t)(value - 2) >= s_localization_pack_count)
+    return SerializeLocalizationContent(buffer, size, field);
+  const SettingsLocalizationPack *p = &s_localization_packs[value - 2];
+  return snprintf(buffer, size, "%s (%s) [%s]", p->name, p->locale, p->id);
+}
 static const char *const kLocalizationPresentationLabels[] = {
   "Native", "Enhanced",
 };
@@ -71,6 +136,23 @@ static const char *const kLocalizationPixelationLabels[] = {
 
 static bool EnhancedTextSelected(void) {
   return g_settings.localization_presentation == 1;
+}
+
+static bool TextPresentationSelectable(void) {
+  return g_settings.localization_content == 0;
+}
+
+static int SerializeLocalizationPresentation(char *buffer, int size,
+                                             const void *field) {
+  return snprintf(buffer, size, "%s",
+                  kLocalizationPresentationLabels[*(const int *)field != 0]);
+}
+
+static int FormatLocalizationPresentation(char *buffer, int size,
+                                          const void *field) {
+  return snprintf(buffer, size, "%s", TextPresentationSelectable()
+      ? kLocalizationPresentationLabels[*(const int *)field != 0]
+      : "Enhanced (required by pack)");
 }
 
 static bool TextPixelationSelected(void) {
@@ -1076,17 +1158,21 @@ static void RandoChanged(const SettingDesc *desc) {
 
 const SettingDesc g_setting_descs[] = {
   { "localization_content", "AR_LOCALIZATION_CONTENT", "Text source",
-    "Native US uses your locally extracted USA text. Configured pack is the "
-    "development source; installed-pack selection is still in development.",
+    "Select an installed translation by package name. Packs sharing a locale "
+    "remain separate. External packs require enhanced rendering; the built-in "
+    "USA source supports both native and enhanced fonts.",
     kSettingType_Enum, kApply_Passive, kSettingCat_Localization,
-    &g_settings.localization_content, 0, 0, 1, 1, false,
-    kLocalizationContentLabels, 2, NULL, NULL, NULL, NULL, true },
+    &g_settings.localization_content, 0, 0, kSettingsLocalizationMaximumPacks + 1, 1, false,
+    kLocalizationContentLabels, 2, NULL, NULL, ParseLocalizationContent, FormatLocalizationContent, true,
+    .enum_maximum = LocalizationContentMaximum, .serialize = SerializeLocalizationContent },
   { "localization_presentation", "AR_LOCALIZATION_PRESENTATION", "Text rendering",
-    "Native retains the untouched USA text and font. Enhanced renders scoped "
-    "Sky Palace and simulation text with the selected source and font settings.",
+    "Native retains the untouched USA text and font. External packs require "
+    "Enhanced to display their text. Select Native US to use native rendering.",
     kSettingType_Enum, kApply_Passive, kSettingCat_Localization,
     &g_settings.localization_presentation, 0, 0, 1, 1, false,
-    kLocalizationPresentationLabels, 2, NULL, NULL, NULL, NULL, true },
+    kLocalizationPresentationLabels, 2, TextPresentationSelectable, NULL, NULL,
+    FormatLocalizationPresentation, true,
+    .serialize = SerializeLocalizationPresentation },
   { "localization_font_scale_percent", "AR_LOCALIZATION_FONT_SCALE_PERCENT",
     "Font size (%)", "Enhanced text size. Layout fits within its safe box.",
     kSettingType_Int, kApply_Passive, kSettingCat_LocalizationFont,
@@ -2620,12 +2706,19 @@ bool Settings_GetLong(const SettingDesc *desc, long *value) {
   return false;
 }
 
+long Settings_Maximum(const SettingDesc *desc) {
+  return desc && desc->enum_maximum ? desc->enum_maximum() : desc ? desc->maxval : 0;
+}
+
 static long NormalizeLong(const SettingDesc *desc, long value) {
+  if (desc->field == &g_settings.localization_presentation &&
+      g_settings.localization_content != 0)
+    return 1;
   if (desc->type == kSettingType_Bool) return value != 0;
   if (desc->field == &g_settings.display_mode && !g_ws_active)
     return kDisplayMode_43;
   if (value < desc->minval) value = desc->minval;
-  if (value > desc->maxval) value = desc->maxval;
+  if (value > Settings_Maximum(desc)) value = Settings_Maximum(desc);
   if (desc->step > 1)
     value = desc->minval +
             ((value - desc->minval) / desc->step) * desc->step;
@@ -2634,6 +2727,10 @@ static long NormalizeLong(const SettingDesc *desc, long value) {
 
 static SettingChangeResult FinishChange(const SettingDesc *desc,
                                         bool sticky_disable) {
+  /* Apply the coupled source/rendering invariant before the runtime observer
+   * sees the selection, so pack/font validation remains one transaction. */
+  if (g_settings.localization_content != 0)
+    g_settings.localization_presentation = 1;
   if (desc->on_change) desc->on_change(desc);
   SettingChangeResult result = sticky_disable
       ? kSettingChange_AppliedStickyDisable
@@ -3145,6 +3242,9 @@ void Settings_InitWithFile(const char *path) {
                           Settings_UsesLegacyEnvironmentSyntax(desc));
   }
 
+  if (g_settings.localization_content != 0)
+    g_settings.localization_presentation = 1;
+
   /* Finalization waits until main has derived the boot framebuffer budget from
    * the resolved aspect settings. Keep a truthful placeholder in the meantime. */
   g_settings.display_mode = s_boot_display_rank
@@ -3274,7 +3374,8 @@ bool Settings_Save(const char *path) {
     if (desc->field == &g_settings.display_mode &&
         g_settings.display_mode == kDisplayMode_Custom)
       continue;
-    Settings_FormatValue(desc, value, sizeof(value));
+    if (desc->serialize) desc->serialize(value, sizeof(value), desc->field);
+    else Settings_FormatValue(desc, value, sizeof(value));
     success = fprintf(file, "%s = %s\n", desc->key, value) >= 0;
   }
   if (fflush(file) != 0 || ferror(file)) success = false;

@@ -36,6 +36,7 @@ identity are the perishable, expensive-to-rederive parts.
 | Music / event | `LDA #id; COP` → `$035A`; COP vector `$FFE4→$8526`; hook `ActRaiser_CopHook` | APU ports `$2140-43` | "play music / fire event N" | event/song id (A → `$035A`) — song images via the `$02:C7E5` pointer table + inline script pointers (see below) | 🟢 |
 | Sound effect | `LDA #id; BRK` → `$035B`; BRK vector `$FFE6→$852F`; hook `ActRaiser_BrkHook` | APU ports | "play SFX N" | sfx id (A → `$035B`) | 🟢 |
 | Dialogue glyph blip | message glyph helper `$01:901C`; non-space request block `$01:902D` does `LDA #$07; COP` | `$035A` request path | "glyph printed" | exact call site + id `$07`; `audio_dialog_blip` suppresses only this site because `$07` is reused elsewhere | 🟢 |
+| Enhanced dialogue reveal clock | conditional `$01:9278`, M=1 and stacked return `$9026` from `$01:901C` only | `$0200` frames per visible grapheme; original `$01:9284` menu/Mode7/OAM/VBlank work | pace authored text independently of compressed source words | active scheduled dialogue only; preserves original fixed delays and native mode; A.low=0, C=Z=1, N=0, RTS consumes two bytes | [Dialogue timing contract](dialogue-system.md#native-dialogue-boundaries) |
 | Song upload (image identity) | `$02:9964` HLE — stage 1 (`$9A56` block image) + stage 2 (BRR streaming) | APU ports + ARAM | "load song N's sequence + instruments" | image src addr = song identity (`06:AC00` = common sample bank, `1A:94B8` = title = song 7); song table `$02:C7E5` (17 entries, 3-byte ptrs, all enumerated in `game-assets/manifest.ini`); more pointers inline in the `[$A2]` command scripts read via `$02:B4C0` | 🟢 |
 | **BRR sample bank (per-sample!)** | stage 2 of the `$9964` HLE (`RtlUploadSpcImageFromDpInternal`, common_rtl.c) | ARAM `$3000-$6E67` (common) / `$795F+` (per-song) | "install instrument waveforms" | chunk pool at ROM `$08:8000` — length-prefixed `[len16][BRR data]` chunks, selected by index; script = image terminator's target word (lo byte = count, hi byte onward = chunk indices); dest base = WRAM `$0358` | 🟢 |
 | Sample directory (DSP `DIR`) | uploaded as image blocks targeting ARAM `$2C00` (`DIR` page = `$2C`) | DSP `$5D` | "sample N lives at ARAM addr X, loops at Y" | 4-byte entries `{start16, loop16}` per srcn; common srcn `00-0B`, per-song `0C+` (block target `$2C30`) | 🟢 |
@@ -1813,6 +1814,24 @@ The level-entry loader `$02:BC9E` establishes a common resident atlas:
 - use magic selector `$02AC` with the bank-6 table/source rooted at `$06:A400`
   and upload 128 words to reserved OBJ target `$2D40`.
 
+This is only the common sheet, not every enemy graphic. Fillmore `$01/$01`'s
+asset script also decompresses file `$080000` to the separate VRAM `$3000`
+enemy sheet, with palette file `$0E4EF8` at CGRAM `$80`. The `$0CD695`
+animation blob selects its bird visuals `$1F-$22` for state `$1D`.
+The Master instead uses the common sheet/palette through the `$0900` spawn
+attribute and emitter XOR `$0100`. ROM-only workshop extraction now verifies
+these two distinct ownership paths; see the [ROM map](rom-map.md#sprite-identity-and-action-obj-assets).
+
+Boss setup can also switch the active enemy name table and palette without
+reloading the common Master sheet. The first Fillmore boss `$00:AD51` selects
+OBSEL `$09` and schedules `$0B:8000` into CGRAM `$80-$BF`; its separate CHR was
+prepared at VRAM `$4000` by the room script (file `$09B12F`), with compositions
+from file `$03EFC7` at `$7E:5000`. Looking only at the room's ordinary enemy
+palette or assuming bank-one always means `$3000` miscolours/misidentifies this
+actor. Its body uses up to 45 seven-byte parts and much larger anchor extents
+than the Master. The workshop's centaur profile resolves these inputs explicitly;
+it does not emulate boss AI, switch live VRAM, or drive the native game.
+
 A later effect path at `$00:96C3-$96F5` is gated by object flag `$30 & $0040`
 and descriptor-idle `$D5==0`. It derives a bank-6 source from object `$38`
 (`$A000 + ((selector << 8) / 2)` in the ROM's word-address arithmetic), arms
@@ -2100,12 +2119,13 @@ Swapping an enemy = byte 3. Two mechanical constraints:
 
 ### 5. Can enemies move between regions? (the loading constraint)
 
-Three different asset layers have to line up, and only two of them are global:
+Three different asset layers have to line up. The renderer and common atlas
+are shared, but the complete enemy sheet is not global:
 
 | Layer | Scope | Where |
 |---|---|---|
 | Behaviour/handler | **per region** — the type index means something different in each of the 8 tables | `$00:95DD` tables; handlers all live in bank `$00`, so the *code* is reachable from anywhere |
-| OBJ tile atlas | **global** — `$02:BC9E` copies the same ROM `$07:8000-$9FFF` (8 KB) into VRAM `$2000`-`$2FFF` and the same palettes `$07:D040-$D09F` into CGRAM `$C0-$EF`, at every act entry, unconditionally | `$02:BC9E`, called from `$00:8366` |
+| OBJ tile atlas | **mixed** — `$02:BC9E` copies the common ROM `$07:8000-$9FFF` (8 KB) into VRAM `$2000-$2FFF` and palettes `$07:D040-$D09F` into CGRAM `$C0-$EF`. The room script separately supplies the enemy sheet at `$3000-$3FFF` and its palette at CGRAM `$80-$BF`; Fillmore `$01/$01` sources are file `$080000/$0E4EF8`. | `$02:BC9E` plus script commands 7/6 |
 | Animation + composition data | **per act** — LZSS-compressed, loaded by one command of the per-map asset script (below). `$02:B69C` reads a flag + a 3-byte pointer, takes the decompressed size from the blob's own first word, and decompresses to `$7E:4000` (flag 0) or `$7E:5000` (flag nonzero) | `$02:B69C` → `$02:C5C9` |
 
 Object records name their animation table by `(base $16, bank $18)`. Act enemies use
@@ -2129,9 +2149,12 @@ Formats for (c), both established:
   `[frameId, duration, dX, dY]`, `frameId = $FF` ends/loops.
 - **Composition record** (`$00:8D68`): `+0` word = X extents (normal/flipped) → `$0A`/`$0E`;
   `+2` word = Y extents → `$0C`/`$10`; `+4` byte = part count; then N × 7-byte parts
-  `[flags(bit0 = 16×16), Xnormal, Xflipped, Ynormal, Yflipped, tile+attr word]`. Tile ids ≥ `$100`
-  resolve into the global `$07:8000` atlas (`ROM $07:8000 + (tile - $100) * 32`) — verified by
-  rendering the statue.
+  `[flags(bit0 = 16×16), Xnormal, Xflipped, Ynormal, Yflipped, tile+attr word]`.
+  Resolve the rendered bank only after XOR-ing object `+$28` and `$0100`.
+  For ordinary enemy compositions with object bank-select bit clear, raw tile
+  ids ≥ `$100` resolve into common `$07:8000` (`ROM $07:8000 + (tile - $100) * 32`),
+  while raw ids below `$100` select the room sheet. The Master starts with the
+  object bank-select bit set, so raw ids below `$100` select the common sheet.
 
 #### The per-map asset script (mapped 2026-08-02) — this is what decides the allow-list
 

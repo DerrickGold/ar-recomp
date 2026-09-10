@@ -50,14 +50,14 @@ func TestAudioPreviewROMDiscoveryChecksBundleAndUtils(t *testing.T) {
 	if err := os.WriteFile(outer, []byte("rom"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if got := findAudioPreviewROM(utils); got != outer {
+	if got := findWorkshopROM(utils); got != outer {
 		t.Fatalf("outer ROM = %q, want %q", got, outer)
 	}
 	inner := filepath.Join(utils, "user-rom.sfc")
 	if err := os.WriteFile(inner, []byte("new rom"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if got := findAudioPreviewROM(utils); got != inner {
+	if got := findWorkshopROM(utils); got != inner {
 		t.Fatalf("inner ROM = %q, want %q", got, inner)
 	}
 }

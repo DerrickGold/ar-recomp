@@ -11,6 +11,8 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CATALOG = (
     ROOT / 'tools' / 'data' / 'localization' / 'semantic-catalog-v1.json')
 DEFAULT_OUTPUT = ROOT / 'src' / 'localization' / 'language_contract_data.inc'
+DEFAULT_GO_OUTPUT = (ROOT / 'snesrecomp-go' / 'internal' / 'localizationkit' /
+                     'data' / 'author-contracts.json')
 PROFILES = ('us', 'eu-en', 'de', 'fr', 'jp')
 PLACEHOLDER_KINDS = {
     'localized_text': 'kArLanguagePlaceholder_LocalizedText',
@@ -123,22 +125,42 @@ def generate(catalog_path):
     return '\n'.join(lines)
 
 
+def generate_go(catalog_path):
+    """Only portable author contracts; no native layouts/addresses or prose."""
+    catalog = json.loads(catalog_path.read_bytes())
+    # Run the existing schema/order checks before either consumer is emitted.
+    generate(catalog_path)
+    return json.dumps({
+        'placeholders': catalog['placeholders'],
+        'routes': [{
+            'id': route['id'],
+            'allowed_placeholders': route['allowed_placeholders'],
+            'canonical_profile': route['canonical_contract_profile'],
+            'anchors': {profile: [anchor['id'] for anchor in contract['required_anchors']]
+                        for profile, contract in route['contracts'].items()},
+        } for route in catalog['routes']],
+    }, ensure_ascii=False, sort_keys=True, indent=2) + '\n'
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--catalog', type=Path, default=DEFAULT_CATALOG)
     parser.add_argument('--out', type=Path, default=DEFAULT_OUTPUT)
+    parser.add_argument('--go-out', type=Path, default=DEFAULT_GO_OUTPUT)
     parser.add_argument('--check', action='store_true')
     args = parser.parse_args()
-    output = generate(args.catalog)
+    outputs = {args.out: generate(args.catalog), args.go_out: generate_go(args.catalog)}
     if args.check:
-        if not args.out.is_file() or args.out.read_text(encoding='utf-8') != output:
-            raise SystemExit(
-                f'{args.out}: generated language contract data is stale')
+        for path, output in outputs.items():
+            if not path.is_file() or path.read_text(encoding='utf-8') != output:
+                raise SystemExit(
+                    f'{path}: generated language contract data is stale')
         print('language contract data is current')
         return
-    args.out.parent.mkdir(parents=True, exist_ok=True)
-    args.out.write_text(output, encoding='utf-8')
-    print(f'wrote {args.out}')
+    for path, output in outputs.items():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(output, encoding='utf-8')
+        print(f'wrote {path}')
 
 
 if __name__ == '__main__':

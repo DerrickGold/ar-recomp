@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"debug/elf"
 	"debug/macho"
+	"debug/pe"
 	"encoding/hex"
 	"fmt"
 	"io"
@@ -144,9 +145,6 @@ func HermeticBuild(options HermeticOptions) (string, error) {
 	if options.Optimize == "" {
 		options.Optimize = "-O2"
 	}
-	if options.ZigPath == "" {
-		return "", fmt.Errorf("hermetic build requires a Zig toolchain (see `snesbuild toolchain`)")
-	}
 	manifestPath := options.ManifestPath
 	if manifestPath == "" {
 		manifestPath = filepath.Join(paths.Root, ManifestFileName)
@@ -154,6 +152,12 @@ func HermeticBuild(options HermeticOptions) (string, error) {
 	manifest, err := LoadManifest(manifestPath)
 	if err != nil {
 		return "", err
+	}
+	if err := prepareBuildLocalization(paths, manifestPath, options.Stdout); err != nil {
+		return "", err
+	}
+	if options.ZigPath == "" {
+		return "", fmt.Errorf("hermetic build requires a Zig toolchain (see `snesbuild toolchain`)")
 	}
 	// Source lists that disagree produce either a link failure thousands of
 	// object files later or a silently different binary from the developer
@@ -206,6 +210,8 @@ func HermeticBuild(options HermeticOptions) (string, error) {
 	}
 	targetOS := TargetOS(options.Target)
 	sdlBundled := false
+	sdlExplicit := options.SDLIncludeDir != "" || options.SDLLibDir != ""
+	ttfLibDir := ""
 	if manifest.UseSDL3 {
 		if options.SDLIncludeDir == "" || options.SDLLibDir == "" {
 			includeDir, libDir, bundled, sdlErr := resolveSDL3(options)
@@ -229,6 +235,15 @@ func HermeticBuild(options HermeticOptions) (string, error) {
 		}
 		fmt.Fprintf(options.Stdout, "hermetic: SDL3 headers %s, libraries %s%s\n",
 			options.SDLIncludeDir, options.SDLLibDir, map[bool]string{true: " (bundled)", false: ""}[sdlBundled])
+		if manifest.UsesSDL3Ttf() {
+			ttfInclude, lib, ttfErr := resolveSDL3Ttf(options, !sdlBundled && !sdlExplicit)
+			if ttfErr != nil {
+				return "", ttfErr
+			}
+			includeDirs = append(includeDirs, ttfInclude)
+			ttfLibDir = lib
+			fmt.Fprintf(options.Stdout, "hermetic: SDL3_ttf headers %s, libraries %s\n", ttfInclude, lib)
+		}
 	}
 
 	compileArgs := []string{"cc"}
@@ -430,6 +445,9 @@ func HermeticBuild(options HermeticOptions) (string, error) {
 			linkArgs = append(linkArgs, "-lcomdlg32")
 		}
 	}
+	if ttfLibDir != "" && ttfLibDir != options.SDLLibDir {
+		linkArgs = append(linkArgs, "-L"+ttfLibDir)
+	}
 	linkArgs = append(linkArgs, manifest.Link...)
 	command := exec.Command(options.ZigPath, linkArgs...)
 	output, err := command.CombinedOutput()
@@ -566,9 +584,13 @@ type sdlCandidate struct {
 // A file we cannot parse (a linker script, a dangling symlink, a stub written
 // by a test) reports known=false so discovery stays permissive there.
 func sdlLibraryArchitectureMatches(path string) (matches, known bool) {
+	return sdlLibraryArchitectureMatchesTarget(path, runtime.GOARCH)
+}
+
+func sdlLibraryArchitectureMatchesTarget(path, goarch string) (matches, known bool) {
 	if file, err := elf.Open(path); err == nil {
 		defer file.Close()
-		class, machine, supported := elfArchitectureForGOARCH(runtime.GOARCH)
+		class, machine, supported := elfArchitectureForGOARCH(goarch)
 		if !supported {
 			return false, false
 		}
@@ -576,13 +598,13 @@ func sdlLibraryArchitectureMatches(path string) (matches, known bool) {
 	}
 	if file, err := macho.Open(path); err == nil {
 		defer file.Close()
-		cpu, supported := machoArchitectureForGOARCH(runtime.GOARCH)
+		cpu, supported := machoArchitectureForGOARCH(goarch)
 		return supported && file.Cpu == cpu, supported
 	}
 	// A universal (fat) dylib is compatible when any slice matches.
 	if fat, err := macho.OpenFat(path); err == nil {
 		defer fat.Close()
-		cpu, supported := machoArchitectureForGOARCH(runtime.GOARCH)
+		cpu, supported := machoArchitectureForGOARCH(goarch)
 		if !supported {
 			return false, false
 		}
@@ -592,6 +614,11 @@ func sdlLibraryArchitectureMatches(path string) (matches, known bool) {
 			}
 		}
 		return false, true
+	}
+	if file, err := pe.Open(path); err == nil {
+		defer file.Close()
+		machine, supported := map[string]uint16{"amd64": pe.IMAGE_FILE_MACHINE_AMD64, "arm64": pe.IMAGE_FILE_MACHINE_ARM64, "386": pe.IMAGE_FILE_MACHINE_I386}[goarch]
+		return supported && file.Machine == machine, supported
 	}
 	return false, false
 }
@@ -631,17 +658,30 @@ func machoArchitectureForGOARCH(goarch string) (macho.Cpu, bool) {
 // is what makes the "not found" error explain itself instead of leaving the
 // caller to decode a linker message.
 func sdlLibDirLibs(dir string) (usable, wrongArchitecture []string) {
+	return sharedLibraryDirLibs(dir, "SDL3")
+}
+
+func sharedLibraryDirLibs(dir, name string) (usable, wrongArchitecture []string) {
+	return targetSharedLibraryDirLibs(dir, name, runtime.GOARCH)
+}
+
+func targetSharedLibraryDirLibs(dir, name, goarch string) (usable, wrongArchitecture []string) {
 	if dir == "" {
 		// Guard the glob: joining onto "" would search the working directory.
 		return nil, nil
 	}
-	for _, pattern := range []string{"libSDL3*.dylib", "libSDL3*.so*"} {
+	// Match only this library, never SDL3_ttf/SDL3_image as proof of SDL3.
+	for _, pattern := range []string{"lib" + name + ".dylib", "lib" + name + ".[0-9]*.dylib", "lib" + name + ".so", "lib" + name + ".so.*", name + ".dll"} {
 		matches, err := filepath.Glob(filepath.Join(dir, pattern))
 		if err != nil {
 			continue
 		}
 		for _, match := range matches {
-			switch okay, known := sdlLibraryArchitectureMatches(match); {
+			info, err := os.Stat(match)
+			if err != nil || !info.Mode().IsRegular() || info.Size() == 0 {
+				continue
+			}
+			switch okay, known := sdlLibraryArchitectureMatchesTarget(match, goarch); {
 			case okay || !known:
 				usable = append(usable, match)
 			default:

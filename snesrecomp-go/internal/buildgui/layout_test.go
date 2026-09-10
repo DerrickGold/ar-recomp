@@ -21,24 +21,37 @@ func renderPage(t *testing.T) string {
 	return response.Body.String()
 }
 
-/* The shell is a three-tab layout with a sticky progress dock. Each piece is
- * asserted because the page is a single Go string constant: an editing slip
- * cannot be caught by the compiler, only here. */
-func TestPageHasTabShellAndDock(t *testing.T) {
+func renderFrontendSource(t *testing.T) string {
+	t.Helper()
 	body := renderPage(t)
+	for _, name := range []string{"web/app.js", "web/theme.css", "web/scene.js"} {
+		data, err := frontendFiles.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body += "\n" + string(data)
+	}
+	return body
+}
+
+// Assert the embedded markup and behavior together without depending on inline
+// script/style tags. The browser independently validates the served resources.
+func TestPageHasTabShellAndHeaderBuildStatus(t *testing.T) {
+	body := renderFrontendSource(t)
 	for _, want := range []string{
 		`role="tablist"`,
 		`id="tab-build"`, `id="tab-assets"`, `id="tab-manual"`,
+		`id="tab-localization"`, `id="panel-localization"`,
 		`id="panel-build"`, `id="panel-assets"`, `id="panel-manual"`,
-		`id="dock"`, `id="dock-phase"`, `id="dock-pct"`, `id="dock-launch"`,
+		`id="dock"`, `id="workspace-status"`, `id="dock-pct"`, `id="dock-launch"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("page is missing %s", want)
 		}
 	}
-	// Build is the landing tab; Assets and Manual start hidden.
-	if !strings.Contains(body, `id="tab-build" role="tab" aria-selected="true"`) {
-		t.Error("the Build tab should be selected on load")
+	// Home is the landing tab; work panels are mounted but initially hidden.
+	if !strings.Contains(body, `id="tab-home" role="tab" aria-selected="true"`) {
+		t.Error("the Home tab should be selected on load")
 	}
 	if !strings.Contains(body, `id="panel-manual" role="tabpanel" aria-labelledby="tab-manual" hidden`) {
 		t.Error("the Manual panel should start hidden")
@@ -49,7 +62,7 @@ func TestPageHasTabShellAndDock(t *testing.T) {
 }
 
 func TestAssetsTabHasTitleToggleAndIdentifiedTrackPickers(t *testing.T) {
-	body := renderPage(t)
+	body := renderFrontendSource(t)
 	for _, want := range []string{
 		`id="title-toggle"`, `id="save-assets"`, `src="title-logo.png"`,
 		`id="generate-previews"`, `class="original-audio"`,
@@ -82,7 +95,7 @@ func TestAssetsTabHasTitleToggleAndIdentifiedTrackPickers(t *testing.T) {
 // never emptied by a page, so the revert needs a control and a companion field
 // of its own -- without the hidden field the button press is lost on submit.
 func TestAssetsTabCanSaveFromTheTopAndRevertASlot(t *testing.T) {
-	body := renderPage(t)
+	body := renderFrontendSource(t)
 	for _, want := range []string{
 		`id="asset-bar"`, `id="save-assets-top"`, `id="discard-assets"`,
 		`id="asset-bar-note"`, `class="asset-bar"`,
@@ -94,7 +107,7 @@ func TestAssetsTabCanSaveFromTheTopAndRevertASlot(t *testing.T) {
 		}
 	}
 	// The toolbar is only useful if it follows the reader down the list.
-	if !strings.Contains(body, ".asset-bar {\n  position:sticky; top:0;") {
+	if !strings.Contains(body, ".asset-bar {\n  position:sticky;\n  top:var(--workspace-header-h);") {
 		t.Error("the asset toolbar is not sticky")
 	}
 	for _, id := range []string{"song-00", "song-16", "title-theme"} {
@@ -104,28 +117,35 @@ func TestAssetsTabCanSaveFromTheTopAndRevertASlot(t *testing.T) {
 	}
 }
 
-// The colonnade frames the WINDOW. Sized to the document it became a bare shaft
-// sliding past on a long page, with its capital and plinth screens away.
-func TestColonnadeIsPinnedToTheViewport(t *testing.T) {
-	body := renderPage(t)
-	if !strings.Contains(body, ".colonnade { position:fixed; top:0; bottom:0;") {
-		t.Error("the colonnade should be fixed to the viewport, not the document")
+// Shared atmosphere stays behind every menu and stops when the app is hidden.
+func TestSceneIsOptionalAndVisibilityAware(t *testing.T) {
+	body := renderFrontendSource(t)
+	for _, want := range []string{`id="scene-motion"`, `id="palace-scene"`, `id="ambient-scene"`, `id="scene-setting"`, `"visibilitychange",sync`, `"workshop:navigate",sync`, `prefers-reduced-motion: reduce`, `cancelAnimationFrame(raf)`, `"auto", "animated", "still", "off"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("scene is missing %s", want)
+		}
 	}
 }
 
-// The dock is fixed over the content, so the runway reserved beneath the page
-// has to match its REAL height -- a fixed guess is too small once its text
-// wraps, and build output disappears underneath it.
-func TestDockClearanceIsMeasuredNotGuessed(t *testing.T) {
-	body := renderPage(t)
-	if !strings.Contains(body, "padding-bottom:calc(var(--dock-h) + 28px)") {
-		t.Error("the page does not reserve a gap beneath the dock")
+// Build controls share the header; sticky editor/asset bars account for its
+// actual height, including wrapping. No footer may cover the work surface.
+func TestHeaderClearanceIsMeasuredNotGuessed(t *testing.T) {
+	body := renderFrontendSource(t)
+	header := strings.Index(body, `<header class="workspace-bar">`)
+	if header < 0 {
+		t.Fatal("workspace header is missing")
 	}
-	if !strings.Contains(body, `setProperty("--dock-h",dock.offsetHeight+"px")`) {
-		t.Error("the dock's height is never measured")
+	end := strings.Index(body[header:], "</header>") + header
+	for _, id := range []string{`id="dock"`, `id="dock-pct"`, `id="dock-launch"`} {
+		if at := strings.Index(body, id); at < header || at > end {
+			t.Errorf("%s is outside the header", id)
+		}
 	}
-	if !strings.Contains(body, "new ResizeObserver(syncDockHeight).observe(dock)") {
-		t.Error("the reserved height is not refreshed when the dock reflows")
+	if strings.Contains(body, "--dock-h") || strings.Contains(body, `id="bar"`) {
+		t.Error("obsolete footer clearance/progress bar remains")
+	}
+	if !strings.Contains(body, `setProperty("--workspace-header-h",workspaceHeader.offsetHeight+"px")`) || !strings.Contains(body, "new ResizeObserver(syncHeaderHeight).observe(workspaceHeader)") {
+		t.Error("sticky controls do not track header reflow")
 	}
 }
 
@@ -154,7 +174,7 @@ func TestAssetsTabCoversEverySongTableImage(t *testing.T) {
  * chosen. There must now be exactly one idle status element, and the checklist
  * must start collapsed. */
 func TestIdlePageHasOneStatusAndNoVisibleChecklist(t *testing.T) {
-	body := renderPage(t)
+	body := renderFrontendSource(t)
 	if strings.Contains(body, `id="phase"`) || strings.Contains(body, `id="pct"`) {
 		t.Error("the duplicate in-panel phase/percent elements are back")
 	}
@@ -164,25 +184,50 @@ func TestIdlePageHasOneStatusAndNoVisibleChecklist(t *testing.T) {
 	if count := strings.Count(body, `id="state"`); count != 1 {
 		t.Errorf("found %d status lines, want exactly 1", count)
 	}
-	// The dock is furniture while idle, so it must start closed.
+	// Percentage stays hidden until a build starts; Run uses detected readiness.
 	if !strings.Contains(body, `id="dock" data-open="false"`) {
 		t.Error("the dock should start closed")
 	}
 }
 
-/* The cover art belongs to the header now, so it is visible on BOTH tabs
- * without needing a section of its own. */
-func TestCoverArtIsInTheHeader(t *testing.T) {
-	body := renderPage(t)
-	masthead := strings.Index(body, `class="masthead"`)
-	tablist := strings.Index(body, `role="tablist"`)
-	art := strings.Index(body, `src="boxart.webp"`)
-	if masthead < 0 || tablist < 0 || art < 0 {
-		t.Fatal("masthead, tablist or cover art missing")
+func TestMusicUsesSearchableDropdown(t *testing.T) {
+	body := renderFrontendSource(t)
+	for _, want := range []string{`id="asset-track-toggle"`, `aria-controls="asset-track-options"`, `id="asset-track-options" hidden`, `trackSearch.addEventListener("input",filterTracks)`, `event.key==="Escape"`, `event.key==="Enter"`, `id="generate-previews" type="button"`} {
+		if !strings.Contains(body, want) {
+			t.Error("missing music affordance", want)
+		}
 	}
-	if !(masthead < art && art < tablist) {
-		t.Errorf("cover art at %d should sit inside the masthead (%d) above the tabs (%d)",
-			art, masthead, tablist)
+	if strings.Contains(body, "asset-list-panel") {
+		t.Error("old permanent track sidebar remains")
+	}
+}
+
+// The manual retains the original art without repeating it over every tool.
+func TestCoverArtIsInTheManual(t *testing.T) {
+	body := renderFrontendSource(t)
+	manual := strings.Index(body, `id="panel-manual"`)
+	art := strings.Index(body, `src="boxart.webp"`)
+	if manual < 0 || art < manual {
+		t.Fatal("cover art should be in the manual panel")
+	}
+}
+
+func TestWorkbenchNavigationPreservesMountedDrafts(t *testing.T) {
+	body := renderFrontendSource(t)
+	for _, want := range []string{`class="skip-link"`, `"popstate",route`, `"hashchange",route`, `"ArrowDown","ArrowUp","Home","End"`, `id="asset-track-list"`, `id="asset-search"`, `function syncAssetSelection()`, `id="home-projects"`, `id="loc-library"`, `window.localizationOpenProject?.(row.id)`, `new FormData(assetForm)`, `window.localizationHasEdits?.()`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("workbench missing %s", want)
+		}
+	}
+}
+
+func TestExistingBuildResumesProgressOnPageLoad(t *testing.T) {
+	body := renderFrontendSource(t)
+	if !strings.Contains(body, "polling=true; stepsBox.hidden=false;") {
+		t.Fatal("an already-running build must resume polling and show its steps")
+	}
+	if !strings.Contains(body, "if(closed||launching) return;") {
+		t.Fatal("the Play affordances must share an in-flight launch guard")
 	}
 }
 
@@ -190,7 +235,7 @@ func TestCoverArtIsInTheHeader(t *testing.T) {
  * cannot refetch 8 MB or lose the reader's page, srcless so a user who never
  * opens the Manual tab never pays for it. */
 func TestManualFrameIsMountedButNotPreloaded(t *testing.T) {
-	body := renderPage(t)
+	body := renderFrontendSource(t)
 	frame := strings.Index(body, `id="manual-frame"`)
 	if frame < 0 {
 		t.Fatal("manual iframe missing")

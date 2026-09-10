@@ -111,6 +111,27 @@ static ActRaiserLocalizationDialogueHost Host(CpuState *cpu) {
   return (ActRaiserLocalizationDialogueHost){cpu, WaitFrame, ConfirmPage};
 }
 
+bool ActRaiser_LocalizationScheduleGlyphDelay(CpuState *cpu) {
+  return cpu && cpu->PB == 1 && cpu->m_flag == 1 &&
+      cpu_read16(cpu, 0, (uint16_t)(cpu->S + 1u)) == 0x9026 &&
+      ActRaiserLocalizationRuntime_DialogueScheduled();
+}
+
+RecompReturn ActRaiser_LocalizationGlyphDelay(CpuState *cpu) {
+  const ActRaiserLocalizationDialogueHost host = Host(cpu);
+  ActRaiserLocalizationRuntime_RevealGlyph((uint8_t)cpu->A, &host);
+  /* $9278 CMP #0 / JSR $9284 / DEC A loop: A.low=0, C=Z=1,
+   * N=0, high accumulator and all other registers preserved; consume RTS.
+   * Each authored glyph uses $9284 itself, so neither menu animation nor
+   * native word-expansion callbacks can introduce a second reveal clock. */
+  cpu->A &= 0xff00u;
+  cpu->_flag_C = cpu->_flag_Z = 1;
+  cpu->_flag_N = 0;
+  cpu->P = (uint8_t)((cpu->P & ~0x83u) | 0x03u);
+  cpu->S = (uint16_t)(cpu->S + 2u);
+  return RECOMP_RETURN_NORMAL;
+}
+
 bool ActRaiser_LocalizationScheduleEntry(CpuState *cpu) {
   if (s_entering_native) {
     s_entering_native = false;

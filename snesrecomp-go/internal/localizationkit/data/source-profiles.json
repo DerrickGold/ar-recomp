@@ -1,0 +1,1060 @@
+[
+  {
+    "branch_joins": {
+      "100203": 5,
+      "100326": 5,
+      "100748": 5,
+      "101102": 2
+    },
+    "composer_end": 182779,
+    "composer_entry": 181634,
+    "continuations": [
+      {
+        "call": 101435,
+        "parent": 128691,
+        "source": 128722
+      }
+    ],
+    "dialogue_bank": 4,
+    "dictionary_proof": {
+      "fixed": 182017,
+      "interactive": 102333,
+      "trailing_space": true,
+      "upload_flag": 242
+    },
+    "direct_table": {
+      "address": 127606,
+      "ids": [
+        "give_oracle",
+        "listen",
+        "take_offering"
+      ],
+      "increment": 2
+    },
+    "dynamic": [
+      {
+        "address": 128138,
+        "id": "master_report"
+      },
+      {
+        "address": 128228,
+        "id": "cities_report"
+      },
+      {
+        "address": 128464,
+        "id": "score_report"
+      }
+    ],
+    "ending_table": 314812,
+    "flow": {
+      "choice_descriptor": null,
+      "choice_load_sites": [],
+      "choice_yield_call": 101435,
+      "sample_call": 101236,
+      "selector_call": 101154
+    },
+    "groups": [
+      {
+        "count": 7,
+        "id": "action_ui"
+      },
+      {
+        "count": 4,
+        "id": "sim_and_sky_menu"
+      },
+      {
+        "count": 2,
+        "id": "sound_test"
+      },
+      {
+        "count": 5,
+        "id": "title_and_mode"
+      },
+      {
+        "count": 2,
+        "id": "city_and_pause"
+      },
+      {
+        "count": 1,
+        "id": "generated_value"
+      },
+      {
+        "count": 2,
+        "id": "name_entry"
+      }
+    ],
+    "handler_table": 299942,
+    "id": "de",
+    "indexed_direct": [],
+    "interactive_call_count": 59,
+    "interactive_end": 102605,
+    "interactive_entry": 101929,
+    "menu_end": 65522,
+    "menu_start": 61243,
+    "name_entry": [
+      {
+        "address": 126779,
+        "id": "prompt_and_alphabet"
+      },
+      {
+        "address": 126956,
+        "id": "selection_cursor"
+      }
+    ],
+    "nonadjacent": [
+      "conditional_immediate",
+      "nested_handler_table",
+      "offering_pointer_table",
+      "yield_continuation",
+      "dialogue_wrapper",
+      "dialogue_wrapper",
+      "dialogue_wrapper",
+      "dialogue_wrapper",
+      "dialogue_wrapper",
+      "dialogue_wrapper",
+      "dialogue_wrapper"
+    ],
+    "numeric": 128115,
+    "offering_table": 313264,
+    "relay": {
+      "count": 6,
+      "entry": 231045
+    },
+    "space_delimited_words": true,
+    "tables": [
+      {
+        "address": 127081,
+        "count": 4,
+        "id": "selected_magic",
+        "increment": 1
+      },
+      {
+        "address": 127169,
+        "count": 20,
+        "id": "selected_possession",
+        "increment": 1
+      },
+      {
+        "address": 127504,
+        "count": 7,
+        "id": "city_name",
+        "increment": 0
+      },
+      {
+        "address": 127665,
+        "count": 8,
+        "id": "sky_root",
+        "increment": 0
+      },
+      {
+        "address": 127695,
+        "count": 4,
+        "id": "sky_choice",
+        "increment": 0
+      },
+      {
+        "address": 127861,
+        "count": 15,
+        "id": "sim_root",
+        "increment": 0
+      },
+      {
+        "address": 127891,
+        "count": 6,
+        "id": "sim_choice",
+        "increment": 0
+      }
+    ],
+    "wrappers": [
+      {
+        "count": 18,
+        "entry": 103188,
+        "kind": "jsl",
+        "source_bank": 4
+      },
+      {
+        "count": 4,
+        "entry": 103228,
+        "kind": "jsl",
+        "source_bank": 4
+      },
+      {
+        "count": 4,
+        "entry": 103262,
+        "kind": "jsl",
+        "source_bank": 4
+      },
+      {
+        "count": 2,
+        "entry": 103293,
+        "kind": "jsl",
+        "source_bank": 4
+      },
+      {
+        "count": 13,
+        "entry": 103318,
+        "kind": "jsl",
+        "source_bank": 4
+      },
+      {
+        "count": 28,
+        "entry": 103336,
+        "kind": "jsr",
+        "source_bank": 4
+      },
+      {
+        "count": 6,
+        "entry": 103348,
+        "kind": "jsr",
+        "source_bank": 1
+      }
+    ]
+  },
+  {
+    "branch_joins": {
+      "100203": 5,
+      "100326": 5,
+      "100748": 5,
+      "101102": 2
+    },
+    "composer_end": 182770,
+    "composer_entry": 181625,
+    "continuations": [
+      {
+        "call": 101435,
+        "parent": 128673,
+        "source": 128716
+      }
+    ],
+    "dialogue_bank": 4,
+    "dictionary_proof": {
+      "fixed": 182008,
+      "interactive": 102341,
+      "trailing_space": false,
+      "upload_flag": 242
+    },
+    "direct_table": {
+      "address": 127531,
+      "ids": [
+        "give_oracle",
+        "listen",
+        "take_offering"
+      ],
+      "increment": 2
+    },
+    "dynamic": [
+      {
+        "address": 128140,
+        "id": "master_report"
+      },
+      {
+        "address": 128228,
+        "id": "cities_report"
+      },
+      {
+        "address": 128452,
+        "id": "score_report"
+      }
+    ],
+    "ending_table": 314506,
+    "flow": {
+      "choice_descriptor": null,
+      "choice_load_sites": [],
+      "choice_yield_call": 101435,
+      "sample_call": 101236,
+      "selector_call": 101154
+    },
+    "groups": [
+      {
+        "count": 7,
+        "id": "action_ui"
+      },
+      {
+        "count": 4,
+        "id": "sim_and_sky_menu"
+      },
+      {
+        "count": 2,
+        "id": "sound_test"
+      },
+      {
+        "count": 5,
+        "id": "title_and_mode"
+      },
+      {
+        "count": 2,
+        "id": "city_and_pause"
+      },
+      {
+        "count": 1,
+        "id": "generated_value"
+      },
+      {
+        "count": 2,
+        "id": "name_entry"
+      }
+    ],
+    "handler_table": 299927,
+    "id": "eu-en",
+    "indexed_direct": [],
+    "interactive_call_count": 59,
+    "interactive_end": 102605,
+    "interactive_entry": 101929,
+    "menu_end": 65429,
+    "menu_start": 61243,
+    "name_entry": [
+      {
+        "address": 126779,
+        "id": "prompt_and_alphabet"
+      },
+      {
+        "address": 126950,
+        "id": "selection_cursor"
+      }
+    ],
+    "nonadjacent": [
+      "conditional_immediate",
+      "nested_handler_table",
+      "offering_pointer_table",
+      "yield_continuation",
+      "dialogue_wrapper",
+      "dialogue_wrapper",
+      "dialogue_wrapper",
+      "dialogue_wrapper",
+      "dialogue_wrapper",
+      "dialogue_wrapper",
+      "dialogue_wrapper"
+    ],
+    "numeric": 128117,
+    "offering_table": 313006,
+    "relay": {
+      "count": 6,
+      "entry": 231045
+    },
+    "space_delimited_words": true,
+    "tables": [
+      {
+        "address": 127055,
+        "count": 4,
+        "id": "selected_magic",
+        "increment": 1
+      },
+      {
+        "address": 127118,
+        "count": 20,
+        "id": "selected_possession",
+        "increment": 1
+      },
+      {
+        "address": 127429,
+        "count": 7,
+        "id": "city_name",
+        "increment": 0
+      },
+      {
+        "address": 127610,
+        "count": 8,
+        "id": "sky_root",
+        "increment": 0
+      },
+      {
+        "address": 127640,
+        "count": 4,
+        "id": "sky_choice",
+        "increment": 0
+      },
+      {
+        "address": 127828,
+        "count": 15,
+        "id": "sim_root",
+        "increment": 0
+      },
+      {
+        "address": 127858,
+        "count": 6,
+        "id": "sim_choice",
+        "increment": 0
+      }
+    ],
+    "wrappers": [
+      {
+        "count": 18,
+        "entry": 103188,
+        "kind": "jsl",
+        "source_bank": 4
+      },
+      {
+        "count": 4,
+        "entry": 103228,
+        "kind": "jsl",
+        "source_bank": 4
+      },
+      {
+        "count": 4,
+        "entry": 103262,
+        "kind": "jsl",
+        "source_bank": 4
+      },
+      {
+        "count": 2,
+        "entry": 103293,
+        "kind": "jsl",
+        "source_bank": 4
+      },
+      {
+        "count": 13,
+        "entry": 103318,
+        "kind": "jsl",
+        "source_bank": 4
+      },
+      {
+        "count": 28,
+        "entry": 103336,
+        "kind": "jsr",
+        "source_bank": 4
+      },
+      {
+        "count": 6,
+        "entry": 103348,
+        "kind": "jsr",
+        "source_bank": 1
+      }
+    ]
+  },
+  {
+    "branch_joins": {
+      "100128": 5,
+      "100251": 5,
+      "100713": 5,
+      "100997": 2
+    },
+    "composer_end": 299796,
+    "composer_entry": 298838,
+    "continuations": [],
+    "dialogue_bank": 2,
+    "dictionary_proof": null,
+    "direct_table": null,
+    "dynamic": [
+      {
+        "address": 127834,
+        "id": "master_report"
+      },
+      {
+        "address": 127928,
+        "id": "cities_report"
+      }
+    ],
+    "ending_table": null,
+    "flow": {
+      "choice_descriptor": 128282,
+      "choice_load_sites": [
+        101655,
+        101750
+      ],
+      "choice_yield_call": null,
+      "sample_call": 101131,
+      "selector_call": 101049
+    },
+    "groups": [
+      {
+        "count": 1,
+        "id": "generated_value"
+      },
+      {
+        "count": 7,
+        "id": "action_ui"
+      },
+      {
+        "count": 4,
+        "id": "sim_and_sky_menu"
+      },
+      {
+        "count": 2,
+        "id": "sound_test"
+      },
+      {
+        "count": 6,
+        "id": "title_and_mode"
+      },
+      {
+        "count": 2,
+        "id": "city_and_pause"
+      },
+      {
+        "count": 1,
+        "id": "generated_value"
+      },
+      {
+        "count": 2,
+        "id": "name_entry"
+      }
+    ],
+    "handler_table": 176667,
+    "id": "jp",
+    "indexed_direct": [
+      {
+        "address": 127321,
+        "id": "offering_action",
+        "ids": [
+          "give_oracle",
+          "listen",
+          "take_offering"
+        ],
+        "native_index": 812,
+        "table": 127327
+      }
+    ],
+    "interactive_call_count": 60,
+    "interactive_end": 102413,
+    "interactive_entry": 101802,
+    "menu_end": 65456,
+    "menu_start": 60724,
+    "name_entry": [
+      {
+        "address": 126260,
+        "id": "prompt_and_hiragana"
+      },
+      {
+        "address": 126459,
+        "id": "prompt_and_katakana"
+      },
+      {
+        "address": 126658,
+        "id": "selection_cursor"
+      }
+    ],
+    "nonadjacent": [
+      "conditional_immediate",
+      "nested_handler_table",
+      "offering_pointer_table",
+      "dialogue_wrapper",
+      "dialogue_wrapper",
+      "dialogue_wrapper",
+      "dialogue_wrapper",
+      "dialogue_wrapper",
+      "dialogue_wrapper",
+      "dialogue_wrapper"
+    ],
+    "numeric": 127811,
+    "offering_table": 188518,
+    "relay": {
+      "count": 6,
+      "entry": 230965
+    },
+    "space_delimited_words": false,
+    "tables": [
+      {
+        "address": 126741,
+        "count": 4,
+        "id": "selected_magic",
+        "increment": 1
+      },
+      {
+        "address": 126792,
+        "count": 20,
+        "id": "selected_possession",
+        "increment": 1
+      },
+      {
+        "address": 127065,
+        "count": 7,
+        "id": "city_name",
+        "increment": 0
+      },
+      {
+        "address": 127382,
+        "count": 8,
+        "id": "sky_root",
+        "increment": 0
+      },
+      {
+        "address": 127412,
+        "count": 4,
+        "id": "sky_choice",
+        "increment": 0
+      },
+      {
+        "address": 127566,
+        "count": 15,
+        "id": "sim_root",
+        "increment": 0
+      },
+      {
+        "address": 127596,
+        "count": 6,
+        "id": "sim_choice",
+        "increment": 0
+      }
+    ],
+    "wrappers": [
+      {
+        "count": 19,
+        "entry": 103081,
+        "kind": "jsl",
+        "source_bank": 2
+      },
+      {
+        "count": 4,
+        "entry": 103121,
+        "kind": "jsl",
+        "source_bank": 2
+      },
+      {
+        "count": 4,
+        "entry": 103155,
+        "kind": "jsl",
+        "source_bank": 2
+      },
+      {
+        "count": 2,
+        "entry": 103186,
+        "kind": "jsl",
+        "source_bank": 2
+      },
+      {
+        "count": 13,
+        "entry": 103211,
+        "kind": "jsl",
+        "source_bank": 2
+      },
+      {
+        "count": 28,
+        "entry": 103229,
+        "kind": "jsr",
+        "source_bank": 2
+      },
+      {
+        "count": 7,
+        "entry": 103241,
+        "kind": "jsr",
+        "source_bank": 1
+      }
+    ]
+  },
+  {
+    "branch_joins": {
+      "100203": 5,
+      "100326": 5,
+      "100748": 5,
+      "101102": 2
+    },
+    "composer_end": 182756,
+    "composer_entry": 181611,
+    "continuations": [
+      {
+        "call": 101435,
+        "parent": 128746,
+        "source": 128793
+      }
+    ],
+    "dialogue_bank": 4,
+    "dictionary_proof": {
+      "fixed": 181994,
+      "interactive": 102333,
+      "trailing_space": true,
+      "upload_flag": 242
+    },
+    "direct_table": {
+      "address": 127543,
+      "ids": [
+        "give_oracle",
+        "listen",
+        "take_offering"
+      ],
+      "increment": 2
+    },
+    "dynamic": [
+      {
+        "address": 128142,
+        "id": "master_report"
+      },
+      {
+        "address": 128232,
+        "id": "cities_report"
+      },
+      {
+        "address": 128502,
+        "id": "score_report"
+      }
+    ],
+    "ending_table": 314707,
+    "flow": {
+      "choice_descriptor": null,
+      "choice_load_sites": [],
+      "choice_yield_call": 101435,
+      "sample_call": 101236,
+      "selector_call": 101154
+    },
+    "groups": [
+      {
+        "count": 7,
+        "id": "action_ui"
+      },
+      {
+        "count": 4,
+        "id": "sim_and_sky_menu"
+      },
+      {
+        "count": 2,
+        "id": "sound_test"
+      },
+      {
+        "count": 5,
+        "id": "title_and_mode"
+      },
+      {
+        "count": 2,
+        "id": "city_and_pause"
+      },
+      {
+        "count": 1,
+        "id": "generated_value"
+      },
+      {
+        "count": 2,
+        "id": "name_entry"
+      }
+    ],
+    "handler_table": 300143,
+    "id": "fr",
+    "indexed_direct": [],
+    "interactive_call_count": 59,
+    "interactive_end": 102605,
+    "interactive_entry": 101929,
+    "menu_end": 65464,
+    "menu_start": 61243,
+    "name_entry": [
+      {
+        "address": 126779,
+        "id": "prompt_and_alphabet"
+      },
+      {
+        "address": 126953,
+        "id": "selection_cursor"
+      }
+    ],
+    "nonadjacent": [
+      "conditional_immediate",
+      "nested_handler_table",
+      "offering_pointer_table",
+      "yield_continuation",
+      "dialogue_wrapper",
+      "dialogue_wrapper",
+      "dialogue_wrapper",
+      "dialogue_wrapper",
+      "dialogue_wrapper",
+      "dialogue_wrapper",
+      "dialogue_wrapper"
+    ],
+    "numeric": 128119,
+    "offering_table": 313028,
+    "relay": {
+      "count": 6,
+      "entry": 231045
+    },
+    "space_delimited_words": true,
+    "tables": [
+      {
+        "address": 127053,
+        "count": 4,
+        "id": "selected_magic",
+        "increment": 1
+      },
+      {
+        "address": 127124,
+        "count": 20,
+        "id": "selected_possession",
+        "increment": 1
+      },
+      {
+        "address": 127441,
+        "count": 7,
+        "id": "city_name",
+        "increment": 0
+      },
+      {
+        "address": 127614,
+        "count": 8,
+        "id": "sky_root",
+        "increment": 0
+      },
+      {
+        "address": 127644,
+        "count": 4,
+        "id": "sky_choice",
+        "increment": 0
+      },
+      {
+        "address": 127826,
+        "count": 15,
+        "id": "sim_root",
+        "increment": 0
+      },
+      {
+        "address": 127856,
+        "count": 6,
+        "id": "sim_choice",
+        "increment": 0
+      }
+    ],
+    "wrappers": [
+      {
+        "count": 18,
+        "entry": 103188,
+        "kind": "jsl",
+        "source_bank": 4
+      },
+      {
+        "count": 4,
+        "entry": 103228,
+        "kind": "jsl",
+        "source_bank": 4
+      },
+      {
+        "count": 4,
+        "entry": 103262,
+        "kind": "jsl",
+        "source_bank": 4
+      },
+      {
+        "count": 2,
+        "entry": 103293,
+        "kind": "jsl",
+        "source_bank": 4
+      },
+      {
+        "count": 13,
+        "entry": 103318,
+        "kind": "jsl",
+        "source_bank": 4
+      },
+      {
+        "count": 28,
+        "entry": 103336,
+        "kind": "jsr",
+        "source_bank": 4
+      },
+      {
+        "count": 6,
+        "entry": 103348,
+        "kind": "jsr",
+        "source_bank": 1
+      }
+    ]
+  },
+  {
+    "branch_joins": {
+      "100203": 5,
+      "100326": 5,
+      "100748": 5,
+      "101102": 2
+    },
+    "composer_end": 181209,
+    "composer_entry": 180064,
+    "continuations": [
+      {
+        "call": 101435,
+        "parent": 128665,
+        "source": 128708
+      }
+    ],
+    "dialogue_bank": 4,
+    "dictionary_proof": {
+      "fixed": 180447,
+      "interactive": 102341,
+      "trailing_space": false,
+      "upload_flag": 241
+    },
+    "direct_table": {
+      "address": 127523,
+      "ids": [
+        "give_oracle",
+        "listen",
+        "take_offering"
+      ],
+      "increment": 2
+    },
+    "dynamic": [
+      {
+        "address": 128132,
+        "id": "master_report"
+      },
+      {
+        "address": 128220,
+        "id": "cities_report"
+      },
+      {
+        "address": 128444,
+        "id": "score_report"
+      }
+    ],
+    "ending_table": 314506,
+    "flow": {
+      "choice_descriptor": null,
+      "choice_load_sites": [],
+      "choice_yield_call": 101435,
+      "sample_call": 101236,
+      "selector_call": 101154
+    },
+    "groups": [
+      {
+        "count": 1,
+        "id": "generated_value"
+      },
+      {
+        "count": 7,
+        "id": "action_ui"
+      },
+      {
+        "count": 4,
+        "id": "sim_and_sky_menu"
+      },
+      {
+        "count": 2,
+        "id": "sound_test"
+      },
+      {
+        "count": 6,
+        "id": "title_and_mode"
+      },
+      {
+        "count": 2,
+        "id": "city_and_pause"
+      },
+      {
+        "count": 1,
+        "id": "generated_value"
+      },
+      {
+        "count": 2,
+        "id": "name_entry"
+      }
+    ],
+    "handler_table": 299927,
+    "id": "us",
+    "indexed_direct": [],
+    "interactive_call_count": 59,
+    "interactive_end": 102605,
+    "interactive_entry": 101929,
+    "menu_end": 65432,
+    "menu_start": 61243,
+    "name_entry": [
+      {
+        "address": 126779,
+        "id": "prompt_and_alphabet"
+      },
+      {
+        "address": 126950,
+        "id": "selection_cursor"
+      }
+    ],
+    "nonadjacent": [
+      "conditional_immediate",
+      "nested_handler_table",
+      "offering_pointer_table",
+      "yield_continuation",
+      "dialogue_wrapper",
+      "dialogue_wrapper",
+      "dialogue_wrapper",
+      "dialogue_wrapper",
+      "dialogue_wrapper",
+      "dialogue_wrapper",
+      "dialogue_wrapper"
+    ],
+    "numeric": 128109,
+    "offering_table": 313006,
+    "relay": {
+      "count": 6,
+      "entry": 231045
+    },
+    "space_delimited_words": true,
+    "tables": [
+      {
+        "address": 127055,
+        "count": 4,
+        "id": "selected_magic",
+        "increment": 1
+      },
+      {
+        "address": 127118,
+        "count": 20,
+        "id": "selected_possession",
+        "increment": 1
+      },
+      {
+        "address": 127421,
+        "count": 7,
+        "id": "city_name",
+        "increment": 0
+      },
+      {
+        "address": 127602,
+        "count": 8,
+        "id": "sky_root",
+        "increment": 0
+      },
+      {
+        "address": 127632,
+        "count": 4,
+        "id": "sky_choice",
+        "increment": 0
+      },
+      {
+        "address": 127820,
+        "count": 15,
+        "id": "sim_root",
+        "increment": 0
+      },
+      {
+        "address": 127850,
+        "count": 6,
+        "id": "sim_choice",
+        "increment": 0
+      }
+    ],
+    "wrappers": [
+      {
+        "count": 18,
+        "entry": 103188,
+        "kind": "jsl",
+        "source_bank": 4
+      },
+      {
+        "count": 4,
+        "entry": 103228,
+        "kind": "jsl",
+        "source_bank": 4
+      },
+      {
+        "count": 4,
+        "entry": 103262,
+        "kind": "jsl",
+        "source_bank": 4
+      },
+      {
+        "count": 2,
+        "entry": 103293,
+        "kind": "jsl",
+        "source_bank": 4
+      },
+      {
+        "count": 13,
+        "entry": 103318,
+        "kind": "jsl",
+        "source_bank": 4
+      },
+      {
+        "count": 28,
+        "entry": 103336,
+        "kind": "jsr",
+        "source_bank": 4
+      },
+      {
+        "count": 6,
+        "entry": 103348,
+        "kind": "jsr",
+        "source_bank": 1
+      }
+    ]
+  }
+]

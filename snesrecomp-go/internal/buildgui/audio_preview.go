@@ -56,27 +56,6 @@ func previewVersionToken(path string) string {
 		strconv.FormatInt(info.ModTime().UnixNano(), 36)
 }
 
-func findAudioPreviewROM(root string) string {
-	candidates := []string{
-		filepath.Join(root, "user-rom.sfc"),
-		filepath.Join(root, "game.sfc"),
-	}
-	// A packaged builder runs from <bundle>/utils while the installed ROM may
-	// live beside the game executable one level up.
-	parent := filepath.Dir(root)
-	if parent != root {
-		candidates = append(candidates,
-			filepath.Join(parent, "user-rom.sfc"),
-			filepath.Join(parent, "game.sfc"))
-	}
-	for _, candidate := range candidates {
-		if regularPath(candidate) {
-			return candidate
-		}
-	}
-	return ""
-}
-
 func audioPreviewCacheRoot(options Options) (string, error) {
 	if options.AudioPreviewCacheDir != "" {
 		return filepath.Abs(options.AudioPreviewCacheDir)
@@ -107,7 +86,7 @@ func (app *application) currentAudioPreviewStatus() audioPreviewStatus {
 		paths[id] = path
 	}
 	app.previewMu.Unlock()
-	status.ROMAvailable = findAudioPreviewROM(app.options.ProjectRoot) != ""
+	status.ROMAvailable = findWorkshopROM(app.options.ProjectRoot) != ""
 	status.Tracks = make([]audioPreviewTrackStatus, 0, len(assetTracks))
 	for _, track := range assetTracks {
 		path, ready := paths[track.ID]
@@ -127,7 +106,7 @@ func (app *application) writeAudioPreviewStatus(response http.ResponseWriter) {
 
 func (app *application) startAudioPreviews(response http.ResponseWriter,
 	request *http.Request) {
-	romPath := findAudioPreviewROM(app.options.ProjectRoot)
+	romPath := findWorkshopROM(app.options.ProjectRoot)
 	if romPath == "" {
 		writeJSONError(response, http.StatusConflict,
 			"select a ROM on the Build tab before generating original-audio previews")
