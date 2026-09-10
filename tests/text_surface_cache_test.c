@@ -155,6 +155,7 @@ typedef struct FakeRasterizer {
   bool invalid_bitmap;
   bool invalid_cluster_bounds;
   ArTextRasterRequest last_request;
+  int line_advance;
 } FakeRasterizer;
 
 static bool Rasterize(void *context, const ArTextRasterRequest *request,
@@ -191,7 +192,7 @@ static bool Rasterize(void *context, const ArTextRasterRequest *request,
     .format = kArRenderPixelFormat_Rgba8888,
     .ascent = 11,
     .descent = 3,
-    .line_advance = 16,
+    .line_advance = fake->line_advance ? fake->line_advance : 16,
     .reveal_clusters = &fake->cluster,
     .reveal_cluster_count = 1,
     .token = 1,
@@ -321,6 +322,11 @@ static void TestCacheHitsMissesAndFailureAtomicity(void) {
   CHECK(first.reveal_cluster_count == 1);
   CHECK(first.reveal_clusters != &fake.cluster);
   CHECK(first.reveal_clusters[0].end_utf8_byte == strlen("Menu"));
+  CHECK(first.ink_bounds.x == 1 && first.ink_bounds.w == 7);
+  CHECK(first.ink_bounds.y == 0 && first.ink_bounds.h == 16);
+  CHECK(first.cluster_ink_bounds != NULL);
+  CHECK(!memcmp(&first.ink_bounds, &first.cluster_ink_bounds[0],
+                sizeof(first.ink_bounds)));
   CHECK(fake.calls == 1 && fake.releases == 1);
   CHECK(render.creates == 1 && render.uploads == 1);
   CHECK(render.last_descriptor.usage == kArRenderTextureUsage_Static);
@@ -331,6 +337,7 @@ static void TestCacheHitsMissesAndFailureAtomicity(void) {
       &cache, &device, &rasterizer, &first_request,
       &same, error, sizeof(error)));
   CHECK(ArRenderTexture_Equals(first.texture, same.texture));
+  CHECK(first.cluster_ink_bounds == same.cluster_ink_bounds);
   CHECK(fake.calls == 1 && render.uploads == 1);
 
   ArTextRasterRequest second_request = Request("Status");
@@ -379,6 +386,22 @@ static void TestCacheHitsMissesAndFailureAtomicity(void) {
   CHECK(stats && stats->rasterize_calls == 4);
   CHECK(stats && stats->upload_calls == 3);
   CHECK(stats && stats->failures == 1);
+
+  for (unsigned i = 0; i < 120; ++i) {
+    CHECK(!ArTextSurfaceCache_Acquire(
+        &cache, &device, &rasterizer, &failed_request,
+        &failed, error, sizeof(error)));
+    CHECK(strstr(error, "fake raster failure") != NULL);
+  }
+  CHECK(fake.calls == calls_before_repeat);
+  CHECK(stats->negative_hits == 120);
+  /* Retry after any relevant layout/content/font change, without needing a
+   * restart, while successful entries remain independent of failed work. */
+  failed_request.maximum_width += 10;
+  CHECK(ArTextSurfaceCache_Acquire(
+      &cache, &device, &rasterizer, &failed_request,
+      &failed, error, sizeof(error)));
+  CHECK(fake.calls == calls_before_repeat + 1);
 
   ArTextRasterRequest font_changed = third_request;
   ++font_changed.font_revision;
@@ -437,6 +460,9 @@ static void TestPixelationTreatments(void) {
   CHECK(low_surface.ascent == 22 && low_surface.line_advance == 32);
   CHECK(low_surface.reveal_clusters[0].width == 16);
   CHECK(low_surface.reveal_clusters[0].height == 32);
+  CHECK(low_surface.ink_bounds.x == 2 && low_surface.ink_bounds.w == 14);
+  CHECK(low_surface.ink_bounds.h == 32);
+  CHECK(low_surface.cluster_ink_bounds[0].x == 2);
   CHECK(render.uploaded_pixels[0] == render.uploaded_pixels[1]);
   CHECK(render.uploaded_pixels[0] == render.uploaded_pixels[64]);
   CHECK(render.uploaded_pixels[2] != render.uploaded_pixels[0]);
@@ -451,6 +477,9 @@ static void TestPixelationTreatments(void) {
   CHECK(fake.last_request.font_pixels == 24);
   CHECK(fake.last_request.maximum_width == 256);
   CHECK(mosaic_surface.width == 8 && mosaic_surface.height == 16);
+  /* Sampling x=1 fills the first block: final ink differs from source ink. */
+  CHECK(mosaic_surface.ink_bounds.x == 0 && mosaic_surface.ink_bounds.w == 8);
+  CHECK(mosaic_surface.cluster_ink_bounds[0].w == 8);
   CHECK(render.uploaded_pixels[0] == render.uploaded_pixels[1]);
   CHECK(render.uploaded_pixels[0] == render.uploaded_pixels[64]);
   CHECK(render.uploaded_pixels[2] != render.uploaded_pixels[0]);
@@ -464,15 +493,73 @@ static void TestPixelationTreatments(void) {
   CHECK(!ArTextCacheKey_Equals(
       mosaic_key, ArTextSurfaceCache_MakeKey(&rasterizer, &mosaic)));
 
+  fake.line_advance = 8;
+  ++mosaic.source_revision;
+  mosaic.pixelation_size = 4;
+  CHECK(ArTextSurfaceCache_Acquire(
+      &cache, &device, &rasterizer, &mosaic,
+      &mosaic_surface, error, sizeof(error)));
+  CHECK(render.uploaded_pixels[0] != render.uploaded_pixels[1]);
+  CHECK(render.uploaded_pixels[0] != render.uploaded_pixels[64]);
+  ++low.source_revision;
+  low.font_pixels = low.minimum_font_pixels = 10;
+  low.pixelation_size = 4;
+  CHECK(ArTextSurfaceCache_Acquire(
+      &cache, &device, &rasterizer, &low,
+      &low_surface, error, sizeof(error)));
+  CHECK(fake.last_request.font_pixels == 10);
+  CHECK(low_surface.width == 8 && low_surface.height == 16);
+
   ArTextSurfaceCache_Destroy(&cache, &device);
   ArTextRasterizer_Reset(&rasterizer);
   ArRenderDevice_Reset(&device);
+}
+
+static void TestInkFormatsAndBounds(void) {
+  const ArRenderPixelFormat formats[] = {
+    kArRenderPixelFormat_Argb8888, kArRenderPixelFormat_Abgr8888,
+    kArRenderPixelFormat_Rgba8888, kArRenderPixelFormat_Rgba4444,
+    kArRenderPixelFormat_A8, kArRenderPixelFormat_Rgb565,
+  };
+  for (size_t i = 0; i < sizeof(formats) / sizeof(formats[0]); ++i) {
+    uint8_t storage[8 * 32] = {0}; /* Deliberately padded pitch. */
+    const int bytes = i < 3 ? 4 : i == 4 ? 1 : 2;
+    for (int y = 3; y < 6; ++y) {
+      for (int x = 2; x < 5; ++x) {
+        uint8_t *pixel = storage + y * 32 + x * bytes;
+        if (bytes == 4) {
+          const uint32_t word = i < 2 ? UINT32_C(0x80000000) : UINT32_C(0x80);
+          memcpy(pixel, &word, sizeof(word));
+        } else if (bytes == 2) {
+          const uint16_t word = 8;
+          memcpy(pixel, &word, sizeof(word));
+        } else *pixel = 128;
+      }
+    }
+    ArTextBitmap bitmap = {.pixels = storage, .width = 7, .height = 8,
+                          .pitch_bytes = 32, .format = formats[i]};
+    ArRenderRectI ink = ArTextBitmap_InkBounds(&bitmap, (ArRenderRectI){0, 0, 7, 8});
+    if (formats[i] == kArRenderPixelFormat_Rgb565) {
+      CHECK(ink.x == 0 && ink.y == 0 && ink.w == 7 && ink.h == 8);
+    } else {
+      CHECK(ink.x == 2 && ink.y == 3 && ink.w == 3 && ink.h == 3);
+      ink = ArTextBitmap_InkBounds(&bitmap, (ArRenderRectI){3, 4, 4, 4});
+      CHECK(ink.x == 3 && ink.y == 4 && ink.w == 2 && ink.h == 2);
+      ink = ArTextBitmap_InkBounds(&bitmap, (ArRenderRectI){0, 0, 2, 2});
+      CHECK(ink.w == 0 && ink.h == 0);
+    }
+    CHECK(!ArTextBitmap_InkBounds(&bitmap, (ArRenderRectI){-1, 0, 2, 2}).h);
+    CHECK(!ArTextBitmap_InkBounds(&bitmap, (ArRenderRectI){1, 0, INT32_MAX, 2}).h);
+    bitmap.pitch_bytes = 1;
+    CHECK(!ArTextBitmap_InkBounds(&bitmap, (ArRenderRectI){0, 0, 7, 8}).h);
+  }
 }
 
 int main(void) {
   TestAbiValidation();
   TestCacheHitsMissesAndFailureAtomicity();
   TestPixelationTreatments();
+  TestInkFormatsAndBounds();
   if (g_failures) {
     fprintf(stderr, "%d text-surface cache test(s) failed\n", g_failures);
     return 1;

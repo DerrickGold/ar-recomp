@@ -14,10 +14,14 @@ static ActRaiserLocalizationTextObservation s_text = {
 };
 static bool s_text_valid;
 static bool s_pending_page_advance;
+static bool s_pending_page_retains_rows;
 static ActRaiserLocalizationComposeObservation
     s_compose[kComposeObservationCapacity];
 static uint64_t s_compose_serial;
 static size_t s_compose_count;
+static uint32_t s_pending_source_table_pc24;
+static uint16_t s_pending_source_selector;
+static bool s_pending_source_selector_valid;
 static uint32_t s_wrapper_context_pc24;
 static uint32_t s_wrapper_text_caller_pc24;
 static bool s_wrapper_context_valid;
@@ -115,9 +119,11 @@ bool ActRaiser_LocalizationObserveTextEntry(CpuState *cpu) {
     .selector_x = cpu->X,
     .map_group = cpu_read8(cpu, 0, kActRaiserWram_MapGroup),
     .map_number = cpu_read8(cpu, 0, kActRaiserWram_CurrentMap),
+    .entry_compose_serial = s_compose_serial,
   };
   s_text_valid = true;
   s_pending_page_advance = false;
+  s_pending_page_retains_rows = false;
   if (TraceEnabled()) {
     fprintf(stderr,
             "[localization-text] serial=%llu gf=%u map=%02X/%02X "
@@ -140,22 +146,166 @@ bool ActRaiser_LocalizationObserveTextByte(CpuState *cpu) {
   if (!cpu || !s_text_valid) return false;
   if (s_pending_page_advance) {
     ++s_text.page_index;
+    if (!s_pending_page_retains_rows)
+      s_text.window_start_page = s_text.page_index;
     s_text.page_unit_index = 0;
     s_pending_page_advance = false;
+    s_text.awaiting_page_advance = false;
+    s_text.continuation_cell_valid = false;
   }
   s_text.cursor_pc24 = ((uint32_t)cpu->DB << 16) | cpu->Y;
   s_text.game_frame = cpu_read16(cpu, 0, kActRaiserWram_GameFrame);
   const uint8_t code = cpu_read8(cpu, cpu->DB, cpu->Y);
+  s_text.yielded_to_menu = false;
   if (s_text.page_unit_index != UINT16_MAX) ++s_text.page_unit_index;
   /* The native $02 page operation waits and scrolls before the next reader
    * entry. Publish the new page only when that following token is reached. */
-  if (code == 0x02u)
+  if (code == 0x02u) {
     s_pending_page_advance = true;
-  else if (code == 0x00u) {
+    /* $01:8F97 chooses clear ($9032) when this byte is zero; otherwise
+     * it advances a row and $905B copies rows up at the bottom of the box.
+     * Snapshot the choice before waiting, without modifying native state. */
+    s_pending_page_retains_rows = cpu_read8(cpu, 0, 0x0200) != 0;
+    s_text.awaiting_page_advance = true;
+  } else if (code == 0x05u) {
+    s_text.window_start_page = s_text.page_index;
+  } else if (code == 0x00u) {
     s_text.terminal_compose_serial = s_compose_serial;
     s_text.terminal = true;
+  } else if (code == 0x01u) {
+    s_text.yielded_to_menu = true;
+  }
+  if (TraceEnabled() && (code == 0x02u || code == 0x00u || code == 0x01u))
+    fprintf(stderr, "[localization-page] gf=%u serial=%llu page=%u "
+                    "first=%u units=%u control=%02X retain=%u\n",
+            s_text.game_frame, (unsigned long long)s_text.serial,
+            s_text.page_index, s_text.window_start_page,
+            s_text.page_unit_index, code, (unsigned)s_pending_page_retains_rows);
+  return false;
+}
+
+bool ActRaiser_LocalizationObserveIndexedComposeSource(CpuState *cpu) {
+  if (!cpu) return false;
+  const uint16_t native_selector = cpu->A & UINT16_C(0x007F);
+  const uint16_t native_base =
+      cpu_read16(cpu, 0, (uint16_t)(cpu->D + 8u));
+  /* The helper receives a one-based selection and adds its doubled value to
+   * an address two bytes before the first pointer. Normalize both values to
+   * the extraction catalog's first-entry table and zero-based slot. */
+  s_pending_source_table_pc24 = ((uint32_t)cpu->DB << 16) |
+      (uint16_t)(native_base + 2u);
+  s_pending_source_selector = native_selector
+      ? (uint16_t)(native_selector - 1u) : 0;
+  s_pending_source_selector_valid = native_selector != 0;
+  return false;
+}
+
+bool ActRaiser_LocalizationObserveContinuation(CpuState *cpu) {
+  if (cpu && s_text_valid && s_text.awaiting_page_advance &&
+      cpu->X < 0x0800 && !(cpu->X & 1)) {
+    s_text.continuation_cell = cpu->X / 2;
+    s_text.continuation_cell_valid = true;
   }
   return false;
+}
+
+static bool ObserveSurfaceClear(CpuState *cpu, uint8_t first_column,
+                                uint8_t first_row, uint8_t column_count,
+                                uint8_t row_count) {
+  if (!cpu) return false;
+  /* Native US dialogue owns columns 5..28, rows 19..24. A small choice
+   * window above it may close while that dialogue remains on screen. */
+  const bool clears_dialogue = first_column < 29 && first_row < 25 &&
+      first_column + column_count > 5 && first_row + row_count > 19;
+  if (!++s_compose_serial) ++s_compose_serial;
+  const size_t slot = (size_t)((s_compose_serial - 1u) %
+                               kComposeObservationCapacity);
+  s_compose[slot] = (ActRaiserLocalizationComposeObservation){
+      .struct_size = sizeof(s_compose[slot]),
+      .abi_version = ACTRAISER_LOCALIZATION_COMPOSE_OBSERVATION_ABI_VERSION,
+      .serial = s_compose_serial,
+      .game_frame = cpu_read16(cpu, 0, kActRaiserWram_GameFrame),
+      .map_group = cpu_read8(cpu, 0, kActRaiserWram_MapGroup),
+      .map_number = cpu_read8(cpu, 0, kActRaiserWram_CurrentMap),
+      .clear_first_column = first_column,
+      .clear_column_count = column_count,
+      .clear_first_row = first_row,
+      .clear_row_count = row_count,
+      .clears_dialogue = clears_dialogue,
+  };
+  if (s_compose_count < kComposeObservationCapacity) ++s_compose_count;
+  if (clears_dialogue) {
+    s_text_valid = false;
+    s_pending_page_advance = false;
+  }
+  if (TraceEnabled())
+    fprintf(stderr, "[localization-clear] serial=%llu gf=%u "
+            "columns=%u+%u rows=%u+%u dialogue=%u\n",
+            (unsigned long long)s_compose_serial,
+            s_compose[slot].game_frame, first_column, column_count,
+            first_row, row_count, clears_dialogue);
+  return false;
+}
+
+static void ObserveEraseSpan(CpuState *cpu, uint32_t cell, uint32_t count) {
+  /* $C1E9/$C1ED erase each cell and the cell one row above it. Split at
+   * physical row boundaries instead of using a bounding rectangle that could
+   * invalidate untouched neighbors. Writes outside BG3's 32x32 map do not
+   * belong to any localization surface. */
+  while (count && cell < 32u * 33u) {
+    const uint32_t row = cell / 32u;
+    const uint32_t column = cell % 32u;
+    const uint32_t width = count < 32u - column ? count : 32u - column;
+    const uint32_t first_row = row ? row - 1u : 0;
+    const uint32_t rows = row && row < 32 ? 2 : 1;
+    (void)ObserveSurfaceClear(cpu, (uint8_t)column, (uint8_t)first_row,
+                             (uint8_t)width, (uint8_t)rows);
+    cell += width;
+    count -= width;
+  }
+}
+
+bool ActRaiser_LocalizationObserveTextErase(CpuState *cpu) {
+  /* All five decoded native callers use 16-bit indices. An unsupported
+   * entry width must not invent a 16-bit footprint for an 8-bit cursor. */
+  if (!cpu || cpu->x_flag) return false;
+  /* Mirror only $02:C1B7's write footprint: A = row/column, DB:Y = record.
+   * Unlike the text composer, this routine interprets just $00 and $0D;
+   * every other byte erases one cell. Do not decode words/placeholders here.
+   * This bounded, read-only scan runs only on native erasure, never per frame. */
+  uint32_t line_cell = (cpu->A >> 8) * 32u + (cpu->A & 0xffu);
+  uint32_t count = 0;
+  enum { kEraseRecordByteLimit = 2048 };
+  for (uint32_t index = 0;
+       index < kEraseRecordByteLimit && line_cell < 32u * 33u; ++index) {
+    const uint16_t address = (uint16_t)(cpu->Y + index);
+    const bool wram = cpu->DB == 0x7e || cpu->DB == 0x7f ||
+        ((cpu->DB & 0x7f) < 0x40 && address < 0x2000);
+    /* Observation must not duplicate MMIO side effects if a bad/changed
+     * record pointer leaves ROM/WRAM. All audited callers use these regions. */
+    if (!wram && address < 0x8000) break;
+    const uint8_t byte = cpu_read8(cpu, cpu->DB, address);
+    if (byte == 0 || byte == 0x0d) {
+      ObserveEraseSpan(cpu, line_cell, count);
+      if (!byte) return false;
+      line_cell += 32u;
+      count = 0;
+    } else {
+      ++count;
+    }
+  }
+  ObserveEraseSpan(cpu, line_cell, count);
+  return false;
+}
+
+bool ActRaiser_LocalizationObserveMenuClear(CpuState *cpu) {
+  /* $01:8CCE clears $7F:B100..B7FF, preserving the status strip. */
+  return ObserveSurfaceClear(cpu, 0, 4, 32, 28);
+}
+
+bool ActRaiser_LocalizationObserveGeneralClear(CpuState *cpu) {
+  /* $02:ABC4/$BA41 clear $7F:B000..B6FF (28 complete rows). */
+  return ObserveSurfaceClear(cpu, 0, 0, 32, 28);
 }
 
 bool ActRaiser_LocalizationObserveTextCompose(CpuState *cpu) {
@@ -165,23 +315,34 @@ bool ActRaiser_LocalizationObserveTextCompose(CpuState *cpu) {
   s_compose_serial = serial;
   const size_t slot =
       (size_t)((serial - 1u) % kComposeObservationCapacity);
+  const uint32_t caller_pc24 = ReadLongCallSite(cpu);
+  const bool indexed_source = s_pending_source_selector_valid &&
+      caller_pc24 == UINT32_C(0x018C93);
   s_compose[slot] = (ActRaiserLocalizationComposeObservation){
     .struct_size = sizeof(s_compose[slot]),
     .abi_version = ACTRAISER_LOCALIZATION_COMPOSE_OBSERVATION_ABI_VERSION,
     .serial = serial,
     .source_pc24 = ((uint32_t)cpu->DB << 16) | cpu->Y,
-    .caller_pc24 = ReadLongCallSite(cpu),
+    .caller_pc24 = caller_pc24,
     .destination = cpu->A,
+    .source_table_pc24 = indexed_source
+        ? s_pending_source_table_pc24 : 0,
+    .source_selector = indexed_source
+        ? s_pending_source_selector : 0,
     .game_frame = cpu_read16(cpu, 0, kActRaiserWram_GameFrame),
     .map_group = cpu_read8(cpu, 0, kActRaiserWram_MapGroup),
     .map_number = cpu_read8(cpu, 0, kActRaiserWram_CurrentMap),
   };
+  s_pending_source_table_pc24 = 0;
+  s_pending_source_selector = 0;
+  s_pending_source_selector_valid = false;
   if (s_compose_count < kComposeObservationCapacity) ++s_compose_count;
   if (TraceEnabled()) {
     const ActRaiserLocalizationComposeObservation *event = &s_compose[slot];
     fprintf(stderr,
             "[localization-compose] serial=%llu gf=%u map=%02X/%02X "
-            "source=$%02X:%04X destination=%02X/%02X caller=$%02X:%04X\n",
+            "source=$%02X:%04X destination=%02X/%02X caller=$%02X:%04X "
+            "table=$%02X:%04X selector=%u\n",
             (unsigned long long)event->serial, event->game_frame,
             event->map_group, event->map_number,
             (unsigned)(event->source_pc24 >> 16),
@@ -189,7 +350,10 @@ bool ActRaiser_LocalizationObserveTextCompose(CpuState *cpu) {
             (unsigned)(event->destination >> 8),
             (unsigned)(event->destination & 0xffu),
             (unsigned)(event->caller_pc24 >> 16),
-            (unsigned)(event->caller_pc24 & 0xffffu));
+            (unsigned)(event->caller_pc24 & 0xffffu),
+            (unsigned)(event->source_table_pc24 >> 16),
+            (unsigned)(event->source_table_pc24 & 0xffffu),
+            event->source_selector);
   }
   return false;
 }
@@ -237,15 +401,6 @@ bool ActRaiserLocalizationText_CopyComposeObservations(
   return true;
 }
 
-bool ActRaiserLocalizationText_TerminalWasReplaced(
-    const ActRaiserLocalizationTextObservation *observation) {
-  return observation &&
-      observation->abi_version ==
-          ACTRAISER_LOCALIZATION_TEXT_OBSERVATION_ABI_VERSION &&
-      observation->terminal &&
-      s_compose_serial != observation->terminal_compose_serial;
-}
-
 void ActRaiserLocalizationText_ResetObservation(void) {
   const uint64_t text_serial = s_text.serial;
   memset(&s_text, 0, sizeof(s_text));
@@ -254,9 +409,13 @@ void ActRaiserLocalizationText_ResetObservation(void) {
   s_text.serial = text_serial;
   s_text_valid = false;
   s_pending_page_advance = false;
+  s_pending_page_retains_rows = false;
   s_wrapper_context_pc24 = 0;
   s_wrapper_text_caller_pc24 = 0;
   s_wrapper_context_valid = false;
+  s_pending_source_table_pc24 = 0;
+  s_pending_source_selector = 0;
+  s_pending_source_selector_valid = false;
   memset(s_compose, 0, sizeof(s_compose));
   s_compose_count = 0;
 }

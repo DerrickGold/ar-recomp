@@ -183,6 +183,8 @@ typedef enum {
   kSettingCat_RandoEnemies,  /* Randomizer: enemy stats and type shuffling */
   kSettingCat_RandoItems,    /* Randomizer: statue drops and placement */
   kSettingCat_RandoSim,      /* Randomizer: sim-mode monster lairs */
+  kSettingCat_Localization,
+  kSettingCat_LocalizationFont,
   kSettingCat_Count,
 } SettingCategory;
 
@@ -271,6 +273,14 @@ typedef struct SettingsPin {
 } SettingsPin;
 
 typedef struct Settings {
+  /* Content and presentation are independent; catalogue selection replaces
+   * the development-pack choice without changing the presentation contract. */
+  int localization_content;
+  int localization_presentation;
+  int localization_font_scale_percent;
+  int localization_font_sampling;
+  int localization_font_pixelation;
+  int localization_font_pixel_size;
   int display_mode;
   /* Absolute host-output HUD scale percent. 0 follows the game's current
    * presentation scale; 100 means one output pixel per SNES pixel vertically. */

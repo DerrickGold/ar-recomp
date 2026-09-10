@@ -61,22 +61,25 @@ static bool BeginResolvedFrame(
     ArRenderDevice *device, ArRenderRectI viewport,
     int output_width, int output_height,
     ArRenderColorF margin_color, ArRenderColorF scene_color,
-    ArRenderOutputFrame *frame) {
+    bool full_output_prepared, ArRenderOutputFrame *frame) {
   if (!frame || !ValidViewport(viewport, output_width, output_height))
     return false;
 
   const bool viewport_is_output =
       viewport.x == 0 && viewport.y == 0 &&
       viewport.w == output_width && viewport.h == output_height;
-  bool prepared = ArRenderDevice_SetClipRect(device, NULL);
+  bool prepared = full_output_prepared ||
+      ArRenderDevice_SetClipRect(device, NULL);
   if (viewport_is_output) {
-    prepared = prepared && ArRenderDevice_SetViewport(device, NULL) &&
+    prepared = prepared &&
+        (full_output_prepared || ArRenderDevice_SetViewport(device, NULL)) &&
         ArRenderDevice_Clear(device, scene_color);
   } else {
     const ArRenderRectF scene_rectangle = {
       0.0f, 0.0f, (float)viewport.w, (float)viewport.h,
     };
-    prepared = prepared && ArRenderDevice_SetViewport(device, NULL) &&
+    prepared = prepared &&
+        (full_output_prepared || ArRenderDevice_SetViewport(device, NULL)) &&
         ArRenderDevice_Clear(device, margin_color) &&
         ArRenderDevice_SetViewport(device, &viewport) &&
         (ColorsEqual(margin_color, scene_color) ||
@@ -113,7 +116,7 @@ bool ArRenderOutputFrame_Begin(
     return false;
   return BeginResolvedFrame(
       device, viewport, output_width, output_height,
-      margin_color, scene_color, frame);
+      margin_color, scene_color, true, frame);
 }
 
 bool ArRenderOutputFrame_BeginAspectFit(
@@ -132,7 +135,7 @@ bool ArRenderOutputFrame_BeginAspectFit(
     return false;
   return BeginResolvedFrame(
       device, viewport, output_width, output_height,
-      margin_color, scene_color, frame);
+      margin_color, scene_color, false, frame);
 }
 
 bool ArRenderOutputFrame_EnterFullOutput(ArRenderOutputFrame *frame) {

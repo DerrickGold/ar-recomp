@@ -111,6 +111,12 @@ SaveBackend SaveSystem_ActiveBackend(void);
  * read-only semantic accessor for localization placeholders; callers never
  * receive the live SRAM pointer or its USA-specific offset. */
 bool SaveSystem_CopyPlayerName(char *destination, size_t capacity);
+/* Optional host extension associated with the active save checksum and native
+ * compatibility name. It preserves up to eight Unicode grapheme clusters
+ * without changing the retail SRAM format. */
+bool SaveSystem_CopyLocalizedPlayerName(char *destination, size_t capacity);
+bool SaveSystem_SetLocalizedPlayerName(const char *utf8_name,
+                                       const char *compatibility_name);
 
 /* Every request field contains -1 for unchanged or its documented value. A
  * persistent edit backs up and atomically writes the active format before the

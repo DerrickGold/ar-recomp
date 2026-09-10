@@ -762,11 +762,19 @@ void FrameSlot_Capture(FrameSlot *dst) {
     if (ppu_view.api->borrow_u16_memory(
             ppu_view.runner, SR_MEMORY_VRAM, &vram) == SR_RESULT_OK &&
         vram.data && vram.lifetime_generation ==
-            ppu_view.state.lifetime_generation)
+            ppu_view.state.lifetime_generation) {
+      SrBorrowedU16Span cgram = {sizeof(cgram), 0u, NULL, 0u, 0u};
+      if (ppu_view.api->borrow_u16_memory(
+              ppu_view.runner, SR_MEMORY_CGRAM, &cgram) != SR_RESULT_OK ||
+          cgram.lifetime_generation != ppu_view.state.lifetime_generation) {
+        cgram.data = NULL;
+        cgram.element_count = 0;
+      }
       ActRaiserLocalizationRuntime_CaptureFrame(
           &dst->localization, dst->bg3_tilemap_base_words,
-          dst->bg3_tilemap_width_tiles, dst->bg3_tilemap_height_tiles,
-          vram.data, vram.element_count);
+          ppu_view.live_state.backgrounds[2].tile_base_word,
+          vram.data, vram.element_count, cgram.data, cgram.element_count);
+    }
   }
 
   dst->hd_entry_count = 0;

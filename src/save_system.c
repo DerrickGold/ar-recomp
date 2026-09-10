@@ -2,6 +2,7 @@
 
 #include "byte_order.h"
 #include "atomic_replace.h"
+#include "localization/unicode_grapheme.h"
 #include "text_parse_utils.h"
 
 #include <ctype.h>
@@ -66,6 +67,9 @@ enum {
   kSaveBackupPathBytes =
       kSaveRuntimePathBytes + kSaveBackupSuffixCapacity,
   kSaveCopyBufferBytes = 4096,
+  kLocalizedNameCapacity = 257,
+  kLocalizedNamePathBytes = kSaveRuntimePathBytes + 16,
+  kLocalizedNameMagicBytes = 8,
 };
 
 typedef struct SaveRuntime {
@@ -77,11 +81,15 @@ typedef struct SaveRuntime {
   uint8_t shadow[kActRaiserSramSize];
   bool shadow_valid;
   bool backup_taken;
+  bool localized_name_valid;
+  bool localized_name_dirty;
+  char localized_compatibility[kActRaiserPlayerNameStorageBytes];
+  char localized_name[kLocalizedNameCapacity];
 } SaveRuntime;
 
 static SaveRuntime s_runtime;
 
-bool SaveSystem_CopyPlayerName(char *destination, size_t capacity) {
+static bool CopyNativePlayerName(char *destination, size_t capacity) {
   if (!destination || !capacity) return false;
   destination[0] = 0;
   if (!s_runtime.live || s_runtime.size < kActRaiserSramSize) return false;
@@ -97,6 +105,68 @@ bool SaveSystem_CopyPlayerName(char *destination, size_t capacity) {
   }
   destination[length] = 0;
   return length != 0;
+}
+
+bool SaveSystem_CopyPlayerName(char *destination, size_t capacity) {
+  return CopyNativePlayerName(destination, capacity);
+}
+
+bool SaveSystem_CopyLocalizedPlayerName(char *destination, size_t capacity) {
+  if (!destination || !capacity) return false;
+  destination[0] = 0;
+  char native_name[kActRaiserPlayerNameStorageBytes];
+  if (!s_runtime.localized_name_valid ||
+      !CopyNativePlayerName(native_name, sizeof(native_name)) ||
+      strcmp(native_name, s_runtime.localized_compatibility))
+    return false;
+  const size_t bytes = strlen(s_runtime.localized_name);
+  if (!bytes || bytes >= capacity) return false;
+  memcpy(destination, s_runtime.localized_name, bytes + 1u);
+  return true;
+}
+
+static bool ValidLocalizedName(const char *name, uint8_t *grapheme_count) {
+  if (grapheme_count) *grapheme_count = 0;
+  if (!name || !name[0]) return false;
+  const size_t bytes = strlen(name);
+  if (bytes >= kLocalizedNameCapacity) return false;
+  size_t offset = 0;
+  uint8_t count = 0;
+  while (offset < bytes) {
+    size_t next = 0;
+    if (!ArUnicodeGrapheme_Next(name, bytes, offset, NULL, &next) ||
+        next <= offset || count >= kActRaiserPlayerNameCharacterLimit)
+      return false;
+    offset = next;
+    ++count;
+  }
+  if (grapheme_count) *grapheme_count = count;
+  return count != 0;
+}
+
+bool SaveSystem_SetLocalizedPlayerName(const char *utf8_name,
+                                       const char *compatibility_name) {
+  char native_name[kActRaiserPlayerNameStorageBytes];
+  uint8_t graphemes = 0;
+  if (!ValidLocalizedName(utf8_name, &graphemes) ||
+      !compatibility_name || !compatibility_name[0] ||
+      strlen(compatibility_name) > kActRaiserPlayerNameCharacterLimit ||
+      !CopyNativePlayerName(native_name, sizeof(native_name)) ||
+      strcmp(native_name, compatibility_name))
+    return false;
+  (void)graphemes;
+  if (s_runtime.localized_name_valid &&
+      !strcmp(s_runtime.localized_name, utf8_name) &&
+      !strcmp(s_runtime.localized_compatibility, compatibility_name))
+    return true;
+  snprintf(s_runtime.localized_name, sizeof(s_runtime.localized_name), "%s",
+           utf8_name);
+  snprintf(s_runtime.localized_compatibility,
+           sizeof(s_runtime.localized_compatibility), "%s",
+           compatibility_name);
+  s_runtime.localized_name_valid = true;
+  s_runtime.localized_name_dirty = true;
+  return true;
 }
 
 static bool Fail(SaveError *error, const char *format, ...) {
@@ -512,6 +582,119 @@ static SaveFileFormat ActiveFormat(void) {
       ? kSaveFileFormat_Ini : kSaveFileFormat_NativeSrm;
 }
 
+typedef struct LocalizedNameWriteContext {
+  uint32_t save_checksum;
+  const char *compatibility_name;
+  const char *utf8_name;
+} LocalizedNameWriteContext;
+
+static bool LocalizedNamePath(char *path, size_t capacity) {
+  if (!path || !capacity || !s_runtime.live) return false;
+  const int written = snprintf(path, capacity, "%s.arname", ActivePath());
+  return written > 0 && (size_t)written < capacity;
+}
+
+static bool WriteLocalizedNameBody(FILE *file, const void *context,
+                                   SaveError *error) {
+  static const uint8_t kMagic[kLocalizedNameMagicBytes] = {
+      'A', 'R', 'N', 'A', 'M', 'E', '1', 0};
+  const LocalizedNameWriteContext *name =
+      (const LocalizedNameWriteContext *)context;
+  uint8_t header[kLocalizedNameMagicBytes + 4 +
+                 kActRaiserPlayerNameStorageBytes + 2] = {0};
+  memcpy(header, kMagic, sizeof(kMagic));
+  ByteOrder_WriteLe32(header + kLocalizedNameMagicBytes,
+                      name->save_checksum);
+  const size_t compatibility_bytes = strlen(name->compatibility_name);
+  memcpy(header + kLocalizedNameMagicBytes + 4,
+         name->compatibility_name, compatibility_bytes);
+  const size_t utf8_bytes = strlen(name->utf8_name);
+  ByteOrder_WriteLe16(
+      header + kLocalizedNameMagicBytes + 4 +
+          kActRaiserPlayerNameStorageBytes,
+      (uint16_t)utf8_bytes);
+  if (fwrite(header, 1, sizeof(header), file) != sizeof(header) ||
+      fwrite(name->utf8_name, 1, utf8_bytes, file) != utf8_bytes)
+    return Fail(error, "error writing localized player name");
+  return true;
+}
+
+static bool WriteLocalizedNameExtension(SaveError *error) {
+  if (!s_runtime.localized_name_valid) {
+    s_runtime.localized_name_dirty = false;
+    return true;
+  }
+  char native_name[kActRaiserPlayerNameStorageBytes];
+  if (!CopyNativePlayerName(native_name, sizeof(native_name)) ||
+      strcmp(native_name, s_runtime.localized_compatibility)) {
+    s_runtime.localized_name_valid = false;
+    s_runtime.localized_name_dirty = false;
+    return true;
+  }
+  char path[kLocalizedNamePathBytes];
+  if (!LocalizedNamePath(path, sizeof(path)))
+    return Fail(error, "localized-name path exceeds runtime limit");
+  const LocalizedNameWriteContext context = {
+      .save_checksum = Save_ComputeChecksum(s_runtime.live),
+      .compatibility_name = s_runtime.localized_compatibility,
+      .utf8_name = s_runtime.localized_name,
+  };
+  if (!WriteAtomic(path, WriteLocalizedNameBody, &context, error))
+    return false;
+  s_runtime.localized_name_dirty = false;
+  return true;
+}
+
+static void LoadLocalizedNameExtension(void) {
+  s_runtime.localized_name_valid = false;
+  s_runtime.localized_name_dirty = false;
+  char path[kLocalizedNamePathBytes];
+  if (!LocalizedNamePath(path, sizeof(path))) return;
+  FILE *file = fopen(path, "rb");
+  if (!file) return;
+  static const uint8_t kMagic[kLocalizedNameMagicBytes] = {
+      'A', 'R', 'N', 'A', 'M', 'E', '1', 0};
+  uint8_t header[kLocalizedNameMagicBytes + 4 +
+                 kActRaiserPlayerNameStorageBytes + 2] = {0};
+  const bool header_read =
+      fread(header, 1, sizeof(header), file) == sizeof(header);
+  const uint32_t checksum = header_read
+      ? ByteOrder_ReadLe32(header + kLocalizedNameMagicBytes) : 0;
+  char compatibility[kActRaiserPlayerNameStorageBytes];
+  if (header_read) {
+    memcpy(compatibility, header + kLocalizedNameMagicBytes + 4,
+           sizeof(compatibility));
+    compatibility[sizeof(compatibility) - 1u] = 0;
+  } else {
+    compatibility[0] = 0;
+  }
+  const uint16_t utf8_bytes = header_read
+      ? ByteOrder_ReadLe16(
+            header + kLocalizedNameMagicBytes + 4 +
+                kActRaiserPlayerNameStorageBytes)
+      : 0;
+  char name[kLocalizedNameCapacity] = {0};
+  const bool body_read = utf8_bytes && utf8_bytes < sizeof(name) &&
+      fread(name, 1, utf8_bytes, file) == utf8_bytes && fgetc(file) == EOF;
+  fclose(file);
+  char native_name[kActRaiserPlayerNameStorageBytes];
+  if (!header_read || memcmp(header, kMagic, sizeof(kMagic)) || !body_read ||
+      checksum != Save_ComputeChecksum(s_runtime.live) ||
+      !CopyNativePlayerName(native_name, sizeof(native_name)) ||
+      strcmp(native_name, compatibility) ||
+      !ValidLocalizedName(name, NULL)) {
+    fprintf(stderr,
+            "[saves] ignored stale or invalid localized-name extension %s\n",
+            path);
+    return;
+  }
+  snprintf(s_runtime.localized_compatibility,
+           sizeof(s_runtime.localized_compatibility), "%s", compatibility);
+  snprintf(s_runtime.localized_name, sizeof(s_runtime.localized_name), "%s",
+           name);
+  s_runtime.localized_name_valid = true;
+}
+
 bool SaveSystem_Attach(uint8_t *live_sram, size_t size,
                        SaveBackend backend,
                        const char *native_path, const char *ini_path,
@@ -602,6 +785,7 @@ bool SaveSystem_LoadActive(SaveError *error) {
   fclose(probe);
   if (!Save_LoadFile(ActiveFormat(), path, s_runtime.live, error)) return false;
   SaveSystem_ResyncShadow();
+  LoadLocalizedNameExtension();
   fprintf(stderr, "[saves] loaded %s backend from %s\n",
           s_runtime.backend == kSaveBackend_Ini ? "ini" : "native-srm", path);
   return true;
@@ -613,7 +797,7 @@ bool SaveSystem_WriteActive(SaveError *error) {
   if (!Save_WriteFile(ActiveFormat(), ActivePath(), s_runtime.live, error))
     return false;
   SaveSystem_ResyncShadow();
-  return true;
+  return WriteLocalizedNameExtension(error);
 }
 
 bool SaveSystem_AutoPersistIfChanged(SaveError *error) {
@@ -623,7 +807,9 @@ bool SaveSystem_AutoPersistIfChanged(SaveError *error) {
     SaveSystem_ResyncShadow();
     return true;
   }
-  if (!memcmp(s_runtime.shadow, s_runtime.live, kActRaiserSramSize)) return true;
+  if (!memcmp(s_runtime.shadow, s_runtime.live, kActRaiserSramSize))
+    return !s_runtime.localized_name_dirty ||
+        WriteLocalizedNameExtension(error);
   if (!SaveSystem_WriteActive(error)) return false;
   fprintf(stderr, "[saves] battery SRAM changed -> wrote %s\n", ActivePath());
   return true;

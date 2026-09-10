@@ -308,6 +308,7 @@ static void TestRuntimeTransactions(void) {
   invalid_edits.item_slots[3] = 1;
   CHECK(!SaveSystem_ApplyEdits(&invalid_edits, true, false, false, &error));
   CHECK(!memcmp(before_invalid, live, sizeof(live)));
+
   SaveEditRequest_Clear(&invalid_edits);
   for (int i = 0; i < 4; i++) invalid_edits.magic_slots[i] = 0;
   invalid_edits.equipped_magic = 4;
@@ -370,11 +371,61 @@ static void TestRuntimeTransactions(void) {
   remove("actraiser-save-active-test.ini.tmp");
 }
 
+static void TestLocalizedNameExtension(void) {
+  static const char native_path[] = "actraiser-name-extension-test.srm";
+  static const char ini_path[] = "actraiser-name-extension-test.ini";
+  static const char localized_path[] =
+      "actraiser-name-extension-test.srm.arname";
+  remove(native_path); remove(ini_path); remove(localized_path);
+
+  uint8_t live[kActRaiserSramSize];
+  MakeFixture(live);
+  memcpy(live + 0x1439, "ELISE\0\0\0\0", 9);
+  Save_RecomputeChecksum(live);
+  SaveError error = {{0}};
+  CHECK(SaveSystem_Attach(live, sizeof(live), kSaveBackend_NativeSrm,
+                          native_path, ini_path, &error));
+  CHECK(SaveSystem_WriteActive(&error));
+
+  /* Unicode names remain associated with the exact retail save and native
+   * compatibility mirror without changing the SRAM image. */
+  static const char localized_name[] = "E\xCC\x81lise";
+  CHECK(SaveSystem_SetLocalizedPlayerName(localized_name, "ELISE"));
+  CHECK(SaveSystem_AutoPersistIfChanged(&error));
+  char unicode_name[64];
+  CHECK(SaveSystem_CopyLocalizedPlayerName(
+      unicode_name, sizeof(unicode_name)));
+  CHECK(!strcmp(unicode_name, localized_name));
+  memset(live, 0, sizeof(live));
+  CHECK(SaveSystem_Attach(live, sizeof(live), kSaveBackend_NativeSrm,
+                          native_path, ini_path, &error));
+  CHECK(SaveSystem_LoadActive(&error));
+  CHECK(SaveSystem_CopyLocalizedPlayerName(
+      unicode_name, sizeof(unicode_name)));
+  CHECK(!strcmp(unicode_name, localized_name));
+
+  /* Replacing the native save invalidates the checksum-bound extension. */
+  live[0x1200] ^= 1;
+  Save_RecomputeChecksum(live);
+  CHECK(Save_WriteFile(kSaveFileFormat_NativeSrm, native_path, live, &error));
+  memset(live, 0, sizeof(live));
+  CHECK(SaveSystem_Attach(live, sizeof(live), kSaveBackend_NativeSrm,
+                          native_path, ini_path, &error));
+  CHECK(SaveSystem_LoadActive(&error));
+  CHECK(!SaveSystem_CopyLocalizedPlayerName(
+      unicode_name, sizeof(unicode_name)));
+
+  remove(native_path); remove(ini_path); remove(localized_path);
+  remove("actraiser-name-extension-test.srm.tmp");
+  remove("actraiser-name-extension-test.srm.arname.tmp");
+}
+
 int main(void) {
   TestChecksumAndFields();
   TestNativeAndIniCodecs();
   TestLegacyMigration();
   TestRuntimeTransactions();
+  TestLocalizedNameExtension();
   if (s_failures) {
     fprintf(stderr, "save system tests: %d failure(s)\n", s_failures);
     return 1;

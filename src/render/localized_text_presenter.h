@@ -13,20 +13,41 @@
 enum {
   kArLocalizedPreparedMaskCapacity =
       kArTextCellRecordCapacity * kArTextCellMaximumChunkPieces,
+  kArLocalizedPreparedTextCapacity = 64,
 };
+
+typedef struct ArLocalizedPreparedIndicator {
+  ArLocalizationIndicatorKind kind;
+  ArRenderRectI destination;
+  ArRenderTexture texture;
+} ArLocalizedPreparedIndicator;
+
+typedef struct ArLocalizedPreparedInlineObject {
+  ArLocalizationInlineObjectKind kind;
+  ArRenderRectI destination;
+  ArRenderTexture texture;
+} ArLocalizedPreparedInlineObject;
 
 typedef struct ArLocalizedPreparedText {
   ArTextSurface surface;
   ArRenderRectI destination;
   uint32_t revealed_cluster_count;
   uint32_t cluster_count;
+  /* Empty for ordinary fixed text; dialogue is clipped to this software window. */
+  ArRenderRectI viewport;
 } ArLocalizedPreparedText;
 
 typedef struct ArLocalizedPreparedFrame {
-  ArLocalizedPreparedText texts[kArTextCellRecordCapacity];
+  ArLocalizedPreparedText texts[kArLocalizedPreparedTextCapacity];
   uint8_t text_count;
   ArRenderRectI masks[kArLocalizedPreparedMaskCapacity];
   size_t mask_count;
+  ArLocalizedPreparedIndicator
+      indicators[kArLocalizationFrameIndicatorCapacity];
+  uint8_t indicator_count;
+  ArLocalizedPreparedInlineObject
+      inline_objects[kArLocalizationFrameInlineObjectCapacity];
+  uint8_t inline_object_count;
 } ArLocalizedPreparedFrame;
 
 /* The host injects a portable factory once. No SDL type crosses this API. */

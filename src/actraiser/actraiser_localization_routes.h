@@ -5,12 +5,11 @@
 #include <stdint.h>
 
 #include "actraiser/actraiser_localization_text.h"
+
 #include "render/text_cell_record.h"
 
-enum {
-  kActRaiserLocalizationMaximumNativePreserves = 8,
-  kActRaiserLocalizationMaximumPreservedTileWords = 4,
-};
+/* Shared by semantic routing and native BG3 capture policy. */
+bool ActRaiserLocalizationRoute_InScope(uint8_t map_group, uint8_t map_number);
 
 typedef enum ActRaiserLocalizationRouteMatch {
   kActRaiserLocalizationRouteMatch_Caller = 1u << 0,
@@ -32,29 +31,36 @@ typedef struct ActRaiserLocalizationRoute {
   uint8_t native_page_count;
   uint16_t native_page_units[8];
   uint8_t native_font_pixels;
-  uint8_t preserved_tile_word_count;
-  uint16_t preserved_tile_words[
-      kActRaiserLocalizationMaximumPreservedTileWords];
   uint8_t match_flags;
   uint8_t map_number;
 } ActRaiserLocalizationRoute;
 
+typedef enum ActRaiserLocalizationComposeRouteMatch {
+  kActRaiserLocalizationComposeRouteMatch_SourceTable = 1u << 0,
+  kActRaiserLocalizationComposeRouteMatch_Selector = 1u << 1,
+} ActRaiserLocalizationComposeRouteMatch;
+
+/* Persistent fixed-composer surfaces use one stable surface ID per ownership
+ * slot. A later route for that slot replaces it without exposing USA-ROM
+ * identity to the renderer or language pack. */
+typedef struct ActRaiserLocalizationComposeRoute {
+  uint32_t source_pc24;
+  uint32_t source_table_pc24;
+  const char *semantic_id;
+  uint32_t surface_id;
+  ArTextCellRegion region;
+  uint16_t destination;
+  uint16_t source_selector;
+  uint8_t native_font_pixels;
+  uint8_t match_flags;
+} ActRaiserLocalizationComposeRoute;
+
 const ActRaiserLocalizationRoute *ActRaiserLocalizationRoute_ResolveDialogue(
     const ActRaiserLocalizationTextObservation *observation);
+const ActRaiserLocalizationComposeRoute *
+ActRaiserLocalizationRoute_ResolveCompose(
+    const ActRaiserLocalizationComposeObservation *observation);
 uint16_t ActRaiserLocalizationRoute_PageUnitCount(
     const ActRaiserLocalizationRoute *route, uint32_t native_page_index);
-
-/* Locate native non-text cells embedded in a route's ownership rectangle.
- * Tile identity includes palette/priority and ignores only H/V flip flags.
- * SIZE_MAX means malformed/capacity failure and must retain native rendering. */
-size_t ActRaiserLocalizationRoute_FindNativePreserves(
-    const ActRaiserLocalizationRoute *route,
-    uint16_t tilemap_base_words,
-    unsigned tilemap_width_tiles,
-    unsigned tilemap_height_tiles,
-    const uint16_t *vram_words,
-    size_t vram_word_count,
-    ArTextCellRegion *preserves,
-    size_t preserve_capacity);
 
 #endif /* ACTRAISER_LOCALIZATION_ROUTES_H */

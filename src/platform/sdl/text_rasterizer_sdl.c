@@ -212,9 +212,10 @@ static bool ApplyRetailTextBands(
   return true;
 }
 
-static SDL_Surface *CropHorizontalWhitespace(SDL_Surface *surface,
-                                             int *removed_left) {
+static SDL_Surface *CropWhitespace(SDL_Surface *surface, ArTextRasterFlags flags,
+                                    int *removed_left, int *removed_top) {
   if (removed_left) *removed_left = 0;
+  if (removed_top) *removed_top = 0;
   const SDL_PixelFormatDetails *details = surface
       ? SDL_GetPixelFormatDetails(surface->format) : NULL;
   if (!surface || surface->format != SDL_PIXELFORMAT_RGBA8888 ||
@@ -222,6 +223,8 @@ static SDL_Surface *CropHorizontalWhitespace(SDL_Surface *surface,
     return NULL;
   int first = surface->w;
   int last = -1;
+  int top = surface->h;
+  int bottom = -1;
   for (int y = 0; y < surface->h; ++y) {
     const uint8_t *row =
         (const uint8_t *)surface->pixels + (size_t)y * surface->pitch;
@@ -233,15 +236,26 @@ static SDL_Surface *CropHorizontalWhitespace(SDL_Surface *surface,
       if (!alpha) continue;
       if (x < first) first = x;
       if (x > last) last = x;
+      if (y < top) top = y;
+      if (y > bottom) bottom = y;
     }
   }
   if (last < first) return NULL;
-  if (first == 0 && last + 1 == surface->w) return surface;
+  if (!(flags & kArTextRasterFlag_CropHorizontalWhitespace)) {
+    first = 0;
+    last = surface->w - 1;
+  }
+  if (!(flags & kArTextRasterFlag_CropVerticalWhitespace)) {
+    top = 0;
+    bottom = surface->h - 1;
+  }
+  if (first == 0 && last + 1 == surface->w &&
+      top == 0 && bottom + 1 == surface->h) return surface;
 
   SDL_Surface *cropped = SDL_CreateSurface(
-      last - first + 1, surface->h, SDL_PIXELFORMAT_RGBA8888);
+      last - first + 1, bottom - top + 1, SDL_PIXELFORMAT_RGBA8888);
   if (!cropped) return NULL;
-  const SDL_Rect source = {first, 0, cropped->w, cropped->h};
+  const SDL_Rect source = {first, top, cropped->w, cropped->h};
   const SDL_Rect destination = {0, 0, cropped->w, cropped->h};
   SDL_SetSurfaceBlendMode(surface, SDL_BLENDMODE_NONE);
   if (!SDL_BlitSurface(surface, &source, cropped, &destination)) {
@@ -249,6 +263,7 @@ static SDL_Surface *CropHorizontalWhitespace(SDL_Surface *surface,
     return NULL;
   }
   if (removed_left) *removed_left = first;
+  if (removed_top) *removed_top = top;
   return cropped;
 }
 
@@ -348,12 +363,12 @@ static bool BuildRevealClusters(
 
 static size_t ClampRevealClusters(ArTextRevealCluster *clusters,
                                   size_t count, int removed_left,
-                                  int width, int height) {
+                                  int removed_top, int width, int height) {
   size_t kept = 0;
   for (size_t index = 0; index < count; ++index) {
     ArTextRevealCluster cluster = clusters[index];
     int left = cluster.x - removed_left;
-    int top = cluster.y;
+    int top = cluster.y - removed_top;
     int right = left + cluster.width;
     int bottom = top + cluster.height;
     if (left < 0) left = 0;
@@ -503,9 +518,11 @@ static RasterAttemptResult RasterizeAtSize(
   }
 
   int removed_left = 0;
-  if (request->flags & kArTextRasterFlag_CropHorizontalWhitespace) {
-    SDL_Surface *cropped = CropHorizontalWhitespace(
-        attempt->surface, &removed_left);
+  int removed_top = 0;
+  if (request->flags & (kArTextRasterFlag_CropHorizontalWhitespace |
+                        kArTextRasterFlag_CropVerticalWhitespace)) {
+    SDL_Surface *cropped = CropWhitespace(
+        attempt->surface, request->flags, &removed_left, &removed_top);
     if (!cropped) {
       SetError(error, error_capacity, "cannot crop rasterized text");
       DestroyRasterAttempt(attempt);
@@ -525,7 +542,7 @@ static RasterAttemptResult RasterizeAtSize(
   if (attempt->reveal_clusters) {
     attempt->reveal_cluster_count = ClampRevealClusters(
         attempt->reveal_clusters, attempt->reveal_cluster_count,
-        removed_left, attempt->surface->w, attempt->surface->h);
+        removed_left, removed_top, attempt->surface->w, attempt->surface->h);
     if (!attempt->reveal_cluster_count) {
       SetError(error, error_capacity,
                "text reveal metadata lies outside the rasterized surface");
@@ -533,7 +550,7 @@ static RasterAttemptResult RasterizeAtSize(
       return kRasterAttempt_Error;
     }
   }
-  attempt->ascent = TTF_GetFontAscent(set->primary);
+  attempt->ascent = TTF_GetFontAscent(set->primary) - removed_top;
   attempt->descent = TTF_GetFontDescent(set->primary);
   attempt->line_advance = TTF_GetFontLineSkip(set->primary);
   return kRasterAttempt_Success;

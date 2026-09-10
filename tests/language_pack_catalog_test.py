@@ -28,7 +28,14 @@ def main():
     assert catalog['route_count'] == 531
     assert catalog['all_release_route_count'] == 472
     assert catalog['regional_or_release_variant_route_count'] == 59
-    assert catalog['placeholder_count'] == 58
+    assert catalog['placeholder_count'] == 60
+    by_id = {route['id']: route for route in catalog['routes']}
+    assert 'icon.status.population' in by_id[
+        'status.report.cities_report']['allowed_placeholders']
+    assert 'icon.ui.selection_pointer' not in by_id[
+        'status.report.cities_report']['allowed_placeholders']
+    assert 'icon.ui.speed_direction' in by_id[
+        'system.message_speed.scale_labels']['allowed_placeholders']
     assert catalog['release_order'] == ['us', 'eu-en', 'de', 'fr', 'jp']
     assert catalog['limits'] == {
         'authored_pages_per_message': PACK.MAX_AUTHORED_PAGES,

@@ -906,6 +906,10 @@ def growth_lookup_semantics(index_start, pointer_table):
 ROM_PROFILES = {
     'b8055844825653210d252d29a2229f9a3e7e512004e83940620173c57d8723f0': {
         'id': 'us',
+        # $01:8F4B emits this ROM prefix, then the name and a space tile.
+        # The fixed composer inserts the plain name instead.
+        'dialogue_name_prefix': 0x0F048,
+        'dialogue_name_separator': ' ',
         'locale': 'en-US',
         'label': 'USA English',
         'encoding': 'dictionary-12',
@@ -947,6 +951,8 @@ ROM_PROFILES = {
     },
     '146a68436fa9dbe728ddc7355821384765325e356cb8b9b193a4f22333ed52a0': {
         'id': 'eu-en',
+        'dialogue_name_prefix': 0x0F048,
+        'dialogue_name_separator': ' ',
         'locale': 'en-GB',
         'label': 'Europe English',
         'encoding': 'dictionary-12',
@@ -988,6 +994,7 @@ ROM_PROFILES = {
     },
     '01923db83e0e8b19d476483649d956e3e24cfc918ca04a6aa04faa29ba8e4c41': {
         'id': 'de',
+        'dialogue_name_prefix': 0x0F062,
         'locale': 'de-DE',
         'label': 'Europe German',
         'encoding': 'dictionary-12',
@@ -1029,6 +1036,7 @@ ROM_PROFILES = {
     },
     '6cc2cadfcb4fba4c1abb2a1d06b49b840bec65d75acaa0ac8831576442e7e96a': {
         'id': 'fr',
+        'dialogue_name_prefix': 0x0F043,
         'locale': 'fr-FR',
         'label': 'Europe French',
         'encoding': 'dictionary-12',
@@ -2321,6 +2329,33 @@ def pointer_targets(rom, table_pc24, count, target_bank):
     return targets
 
 
+def native_dialogue_layout(profile, rom):
+    """Read cell geometry from the verified native clear loop, not HD bounds."""
+    entry = CONSUMER_CENSUS_PROFILES[profile['id']]['interactive_entry_pc24']
+    offset = pc24_to_offset(entry)
+    if rom[offset + 14] != 0xA2 or rom[offset + 17] != 0x20:
+        raise ValueError('unrecognized dialogue cursor/clear entry')
+    clear_pc = (entry & 0xFF0000) | u16(rom, offset + 18)
+    clear = pc24_to_offset(clear_pc)
+    if (rom[clear:clear + 2] != bytes.fromhex('da a2') or
+            rom[clear + 4:clear + 12] != bytes.fromhex('a9 06 48 da a9 00 eb a9') or
+            rom[clear + 13:clear + 20] != bytes.fromhex('eb 9f 00 b0 7f e8 e8')):
+        raise ValueError('unrecognized dialogue clear-loop geometry')
+    origin = u16(rom, clear + 2)
+    columns = rom[clear + 12]
+    if (origin & 1 or origin >= 0x800 or not 1 <= columns <= 32 or
+            (origin & 63) // 2 + columns > 32):
+        raise ValueError('invalid native dialogue row extent')
+    return {
+        'column': (origin & 63) // 2, 'row': origin // 64,
+        'columns': columns, 'glyph_advance_cells': 1,
+        # Japanese does not have reliable space-delimited word boundaries.
+        # Keep its authored breaks until its line-breaking rules are modeled.
+        'space_delimited_words': profile['id'] != 'jp',
+        'clear_routine_pc24': pc24_string(clear_pc),
+    }
+
+
 def build_consumer_census(profile, rom):
     """Census the two known BG3 consumers and every direct buffer write.
 
@@ -3542,7 +3577,21 @@ class Decoder:
                                   'confidence': 'mapped'})
                 continue
             if code == 0x06:
+                # Decode addressing words from the supplied ROM, never from
+                # hardcoded English or the runtime's plain player-name value.
+                prefix = self.profile.get('dialogue_name_prefix')
+                if prefix is not None:
+                    record = FixedComposerDecoder(self).decode_record(
+                        prefix, min(prefix + 32, len(self.rom)))
+                    for operation in record['operations']:
+                        if operation['op'] == 'text':
+                            append_operation(operation)
+                        elif operation['op'] != 'end':
+                            raise ValueError('non-text dialogue name prefix')
                 append_operation({'op': 'insert_master_name'})
+                separator = self.profile.get('dialogue_name_separator')
+                if separator:
+                    append_operation({'op': 'text', 'value': separator})
                 continue
             if code == 0x0D:
                 append_operation({'op': 'line_break'})
@@ -3635,6 +3684,18 @@ class FixedComposerDecoder:
         self.profile = decoder.profile
         self.glyphs = decoder.glyphs
         self.icon_glyphs = decoder.icon_glyphs
+        census = CONSUMER_CENSUS_PROFILES.get(self.profile.get('id'), {})
+        population = dict(census.get('composer_dynamic_sources', ())).get(
+            'cities_report')
+        self.population_source = pc24_to_offset(population) if population else None
+        self.speed_source = None
+        flow = census.get('composer_flow_sources')
+        if flow:
+            call = flow['message_speed_selector_call_site']
+            selector = direct_y_source(self.rom, call)
+            if selector is not None:
+                self.speed_source = pc24_to_offset(
+                    source_pc24(call >> 16, selector) + 6)
 
     def decode_record(self, start, limit):
         position = start
@@ -3670,6 +3731,16 @@ class FixedComposerDecoder:
 
         def emit_glyph(code):
             icon = self.icon_glyphs.get(code)
+            # The same code can be punctuation in the dialogue atlas and a
+            # pictogram in fixed reports. Classify at the proven consumer.
+            population_codes = (0x5B, 0x5C) if self.profile.get('id') == 'fr' \
+                else (0x3A, 0x3B)
+            speed_codes = (0x1D, 0x1C) if self.profile.get('id') == 'jp' \
+                else (0x3D, 0x3C)
+            if start == self.population_source and code in population_codes:
+                icon = icon_part('status.population', population_codes.index(code), 2)
+            elif start == self.speed_source and code in speed_codes:
+                icon = icon_part('ui.speed_direction', speed_codes.index(code), 2)
             if icon is not None:
                 append_operation({
                     'op': 'insert_icon',
@@ -5366,6 +5437,7 @@ def inspect_rom(path):
         'runtime_compatibility': 'requires_semantic_alignment_and_author_draft',
         'locale': profile['locale'],
         'source': source,
+        'native_dialogue_layout': native_dialogue_layout(profile, rom),
         'capabilities': {
             'dialogue_unicode': True,
             'native_glyphs_losslessly_preserved': True,

@@ -1,0 +1,1079 @@
+{
+  "format": "actraiser-us-runtime-compose-routes",
+  "rom_sha256": "b8055844825653210d252d29a2229f9a3e7e512004e83940620173c57d8723f0",
+  "route_count": 73,
+  "routes": [
+    {
+      "destination": 1795,
+      "native_font_pixels": 8,
+      "region": [
+        3,
+        7,
+        27,
+        16
+      ],
+      "semantic_id": "name_entry.prompt_and_alphabet",
+      "source_pc24": "$01:EF3B",
+      "surface_id": 5,
+      "surface_kind": "name_entry"
+    },
+    {
+      "destination": 2578,
+      "native_font_pixels": 7,
+      "region": [
+        18,
+        10,
+        10,
+        2
+      ],
+      "semantic_id": "sky.menu.magic.fire",
+      "source_pc24": "$01:F058",
+      "source_selector": 0,
+      "source_table_pc24": "$01:F04F",
+      "surface_id": 3,
+      "surface_kind": "menu_selection"
+    },
+    {
+      "destination": 2578,
+      "native_font_pixels": 7,
+      "region": [
+        18,
+        10,
+        10,
+        2
+      ],
+      "semantic_id": "sky.menu.magic.stardust",
+      "source_pc24": "$01:F064",
+      "source_selector": 1,
+      "source_table_pc24": "$01:F04F",
+      "surface_id": 3,
+      "surface_kind": "menu_selection"
+    },
+    {
+      "destination": 2578,
+      "native_font_pixels": 7,
+      "region": [
+        18,
+        10,
+        10,
+        2
+      ],
+      "semantic_id": "sky.menu.magic.aura",
+      "source_pc24": "$01:F074",
+      "source_selector": 2,
+      "source_table_pc24": "$01:F04F",
+      "surface_id": 3,
+      "surface_kind": "menu_selection"
+    },
+    {
+      "destination": 2578,
+      "native_font_pixels": 7,
+      "region": [
+        18,
+        10,
+        10,
+        2
+      ],
+      "semantic_id": "sky.menu.magic.light",
+      "source_pc24": "$01:F080",
+      "source_selector": 3,
+      "source_table_pc24": "$01:F04F",
+      "surface_id": 3,
+      "surface_kind": "menu_selection"
+    },
+    {
+      "destination": 2578,
+      "native_font_pixels": 7,
+      "region": [
+        18,
+        10,
+        10,
+        2
+      ],
+      "semantic_id": "sim.menu.possession.slot_00",
+      "source_pc24": "$01:F0B7",
+      "source_selector": 0,
+      "source_table_pc24": "$01:F08E",
+      "surface_id": 3,
+      "surface_kind": "menu_selection"
+    },
+    {
+      "destination": 2578,
+      "native_font_pixels": 7,
+      "region": [
+        18,
+        10,
+        10,
+        2
+      ],
+      "semantic_id": "sim.menu.possession.slot_01",
+      "source_pc24": "$01:F0C4",
+      "source_selector": 1,
+      "source_table_pc24": "$01:F08E",
+      "surface_id": 3,
+      "surface_kind": "menu_selection"
+    },
+    {
+      "destination": 2578,
+      "native_font_pixels": 7,
+      "region": [
+        18,
+        10,
+        10,
+        2
+      ],
+      "semantic_id": "sim.menu.possession.slot_02",
+      "source_pc24": "$01:F0D5",
+      "source_selector": 2,
+      "source_table_pc24": "$01:F08E",
+      "surface_id": 3,
+      "surface_kind": "menu_selection"
+    },
+    {
+      "destination": 2578,
+      "native_font_pixels": 7,
+      "region": [
+        18,
+        10,
+        10,
+        2
+      ],
+      "semantic_id": "sim.menu.possession.slot_03",
+      "source_pc24": "$01:F0E2",
+      "source_selector": 3,
+      "source_table_pc24": "$01:F08E",
+      "surface_id": 3,
+      "surface_kind": "menu_selection"
+    },
+    {
+      "destination": 2578,
+      "native_font_pixels": 7,
+      "region": [
+        18,
+        10,
+        10,
+        2
+      ],
+      "semantic_id": "sim.menu.possession.slot_04",
+      "source_pc24": "$01:F0F0",
+      "source_selector": 4,
+      "source_table_pc24": "$01:F08E",
+      "surface_id": 3,
+      "surface_kind": "menu_selection"
+    },
+    {
+      "destination": 2578,
+      "native_font_pixels": 7,
+      "region": [
+        18,
+        10,
+        10,
+        2
+      ],
+      "semantic_id": "sim.menu.possession.slot_05",
+      "source_pc24": "$01:F0FC",
+      "source_selector": 5,
+      "source_table_pc24": "$01:F08E",
+      "surface_id": 3,
+      "surface_kind": "menu_selection"
+    },
+    {
+      "destination": 2578,
+      "native_font_pixels": 7,
+      "region": [
+        18,
+        10,
+        10,
+        2
+      ],
+      "semantic_id": "sim.menu.possession.slot_06",
+      "source_pc24": "$01:F109",
+      "source_selector": 6,
+      "source_table_pc24": "$01:F08E",
+      "surface_id": 3,
+      "surface_kind": "menu_selection"
+    },
+    {
+      "destination": 2578,
+      "native_font_pixels": 7,
+      "region": [
+        18,
+        10,
+        10,
+        2
+      ],
+      "semantic_id": "sim.menu.possession.slot_07",
+      "source_pc24": "$01:F11C",
+      "source_selector": 7,
+      "source_table_pc24": "$01:F08E",
+      "surface_id": 3,
+      "surface_kind": "menu_selection"
+    },
+    {
+      "destination": 2578,
+      "native_font_pixels": 7,
+      "region": [
+        18,
+        10,
+        10,
+        2
+      ],
+      "semantic_id": "sim.menu.possession.slot_08",
+      "source_pc24": "$01:F129",
+      "source_selector": 8,
+      "source_table_pc24": "$01:F08E",
+      "surface_id": 3,
+      "surface_kind": "menu_selection"
+    },
+    {
+      "destination": 2578,
+      "native_font_pixels": 7,
+      "region": [
+        18,
+        10,
+        10,
+        2
+      ],
+      "semantic_id": "sim.menu.possession.slot_09",
+      "source_pc24": "$01:F135",
+      "source_selector": 9,
+      "source_table_pc24": "$01:F08E",
+      "surface_id": 3,
+      "surface_kind": "menu_selection"
+    },
+    {
+      "destination": 2578,
+      "native_font_pixels": 7,
+      "region": [
+        18,
+        10,
+        10,
+        2
+      ],
+      "semantic_id": "sim.menu.possession.slot_10",
+      "source_pc24": "$01:F143",
+      "source_selector": 10,
+      "source_table_pc24": "$01:F08E",
+      "surface_id": 3,
+      "surface_kind": "menu_selection"
+    },
+    {
+      "destination": 2578,
+      "native_font_pixels": 7,
+      "region": [
+        18,
+        10,
+        10,
+        2
+      ],
+      "semantic_id": "sim.menu.possession.slot_11",
+      "source_pc24": "$01:F158",
+      "source_selector": 11,
+      "source_table_pc24": "$01:F08E",
+      "surface_id": 3,
+      "surface_kind": "menu_selection"
+    },
+    {
+      "destination": 2578,
+      "native_font_pixels": 7,
+      "region": [
+        18,
+        10,
+        10,
+        2
+      ],
+      "semantic_id": "sim.menu.possession.slot_12",
+      "source_pc24": "$01:F158",
+      "source_selector": 12,
+      "source_table_pc24": "$01:F08E",
+      "surface_id": 3,
+      "surface_kind": "menu_selection"
+    },
+    {
+      "destination": 2578,
+      "native_font_pixels": 7,
+      "region": [
+        18,
+        10,
+        10,
+        2
+      ],
+      "semantic_id": "sim.menu.possession.slot_13",
+      "source_pc24": "$01:F16D",
+      "source_selector": 13,
+      "source_table_pc24": "$01:F08E",
+      "surface_id": 3,
+      "surface_kind": "menu_selection"
+    },
+    {
+      "destination": 2578,
+      "native_font_pixels": 7,
+      "region": [
+        18,
+        10,
+        10,
+        2
+      ],
+      "semantic_id": "sim.menu.possession.slot_14",
+      "source_pc24": "$01:F17F",
+      "source_selector": 14,
+      "source_table_pc24": "$01:F08E",
+      "surface_id": 3,
+      "surface_kind": "menu_selection"
+    },
+    {
+      "destination": 2578,
+      "native_font_pixels": 7,
+      "region": [
+        18,
+        10,
+        10,
+        2
+      ],
+      "semantic_id": "sim.menu.possession.slot_15",
+      "source_pc24": "$01:F194",
+      "source_selector": 15,
+      "source_table_pc24": "$01:F08E",
+      "surface_id": 3,
+      "surface_kind": "menu_selection"
+    },
+    {
+      "destination": 2578,
+      "native_font_pixels": 7,
+      "region": [
+        18,
+        10,
+        10,
+        2
+      ],
+      "semantic_id": "sim.menu.possession.slot_16",
+      "source_pc24": "$01:F194",
+      "source_selector": 16,
+      "source_table_pc24": "$01:F08E",
+      "surface_id": 3,
+      "surface_kind": "menu_selection"
+    },
+    {
+      "destination": 2578,
+      "native_font_pixels": 7,
+      "region": [
+        18,
+        10,
+        10,
+        2
+      ],
+      "semantic_id": "sim.menu.possession.slot_17",
+      "source_pc24": "$01:F194",
+      "source_selector": 17,
+      "source_table_pc24": "$01:F08E",
+      "surface_id": 3,
+      "surface_kind": "menu_selection"
+    },
+    {
+      "destination": 2578,
+      "native_font_pixels": 7,
+      "region": [
+        18,
+        10,
+        10,
+        2
+      ],
+      "semantic_id": "sim.menu.possession.slot_18",
+      "source_pc24": "$01:F1A1",
+      "source_selector": 18,
+      "source_table_pc24": "$01:F08E",
+      "surface_id": 3,
+      "surface_kind": "menu_selection"
+    },
+    {
+      "destination": 2578,
+      "native_font_pixels": 7,
+      "region": [
+        18,
+        10,
+        10,
+        2
+      ],
+      "semantic_id": "sim.menu.possession.slot_19",
+      "source_pc24": "$01:F1B0",
+      "source_selector": 19,
+      "source_table_pc24": "$01:F08E",
+      "surface_id": 3,
+      "surface_kind": "menu_selection"
+    },
+    {
+      "destination": 262,
+      "native_font_pixels": 7,
+      "region": [
+        6,
+        1,
+        12,
+        2
+      ],
+      "semantic_id": "city.fillmore.name",
+      "source_pc24": "$01:F1CB",
+      "surface_id": 4,
+      "surface_kind": "city_name"
+    },
+    {
+      "destination": 262,
+      "native_font_pixels": 7,
+      "region": [
+        6,
+        1,
+        12,
+        2
+      ],
+      "semantic_id": "city.bloodpool.name",
+      "source_pc24": "$01:F1D4",
+      "surface_id": 4,
+      "surface_kind": "city_name"
+    },
+    {
+      "destination": 262,
+      "native_font_pixels": 7,
+      "region": [
+        6,
+        1,
+        12,
+        2
+      ],
+      "semantic_id": "city.kasandora.name",
+      "source_pc24": "$01:F1DE",
+      "surface_id": 4,
+      "surface_kind": "city_name"
+    },
+    {
+      "destination": 262,
+      "native_font_pixels": 7,
+      "region": [
+        6,
+        1,
+        12,
+        2
+      ],
+      "semantic_id": "city.aitos.name",
+      "source_pc24": "$01:F1E8",
+      "surface_id": 4,
+      "surface_kind": "city_name"
+    },
+    {
+      "destination": 262,
+      "native_font_pixels": 7,
+      "region": [
+        6,
+        1,
+        12,
+        2
+      ],
+      "semantic_id": "city.marahna.name",
+      "source_pc24": "$01:F1EE",
+      "surface_id": 4,
+      "surface_kind": "city_name"
+    },
+    {
+      "destination": 262,
+      "native_font_pixels": 7,
+      "region": [
+        6,
+        1,
+        12,
+        2
+      ],
+      "semantic_id": "city.northwall.name",
+      "source_pc24": "$01:F1F6",
+      "surface_id": 4,
+      "surface_kind": "city_name"
+    },
+    {
+      "destination": 262,
+      "native_font_pixels": 7,
+      "region": [
+        6,
+        1,
+        12,
+        2
+      ],
+      "semantic_id": "city.death_heim.name",
+      "source_pc24": "$01:F200",
+      "surface_id": 4,
+      "surface_kind": "city_name"
+    },
+    {
+      "destination": 1298,
+      "native_font_pixels": 7,
+      "region": [
+        18,
+        5,
+        10,
+        2
+      ],
+      "semantic_id": "sim.menu.offering_action.give_oracle",
+      "source_pc24": "$01:F22B",
+      "surface_id": 2,
+      "surface_kind": "menu_heading"
+    },
+    {
+      "destination": 1298,
+      "native_font_pixels": 7,
+      "region": [
+        18,
+        5,
+        10,
+        2
+      ],
+      "semantic_id": "sim.menu.offering_action.listen",
+      "source_pc24": "$01:F23F",
+      "surface_id": 2,
+      "surface_kind": "menu_heading"
+    },
+    {
+      "destination": 1298,
+      "native_font_pixels": 7,
+      "region": [
+        18,
+        5,
+        10,
+        2
+      ],
+      "semantic_id": "sim.menu.offering_action.take_offering",
+      "source_pc24": "$01:F24F",
+      "surface_id": 2,
+      "surface_kind": "menu_heading"
+    },
+    {
+      "destination": 1298,
+      "native_font_pixels": 7,
+      "region": [
+        18,
+        5,
+        10,
+        2
+      ],
+      "semantic_id": "sky.menu.choice.movement",
+      "source_pc24": "$01:F298",
+      "surface_id": 2,
+      "surface_kind": "menu_heading"
+    },
+    {
+      "destination": 1298,
+      "native_font_pixels": 7,
+      "region": [
+        18,
+        5,
+        10,
+        2
+      ],
+      "semantic_id": "sky.menu.movement",
+      "source_pc24": "$01:F2A5",
+      "surface_id": 2,
+      "surface_kind": "menu_heading"
+    },
+    {
+      "destination": 1298,
+      "native_font_pixels": 7,
+      "region": [
+        18,
+        5,
+        10,
+        2
+      ],
+      "semantic_id": "sky.menu.observe_people",
+      "source_pc24": "$01:F2B8",
+      "surface_id": 2,
+      "surface_kind": "menu_heading"
+    },
+    {
+      "destination": 1298,
+      "native_font_pixels": 7,
+      "region": [
+        18,
+        5,
+        10,
+        2
+      ],
+      "semantic_id": "sky.menu.choice.fight",
+      "source_pc24": "$01:F2CA",
+      "surface_id": 2,
+      "surface_kind": "menu_heading"
+    },
+    {
+      "destination": 1298,
+      "native_font_pixels": 7,
+      "region": [
+        18,
+        5,
+        10,
+        2
+      ],
+      "semantic_id": "sky.menu.fight_monsters",
+      "source_pc24": "$01:F2D1",
+      "surface_id": 2,
+      "surface_kind": "menu_heading"
+    },
+    {
+      "destination": 1298,
+      "native_font_pixels": 7,
+      "region": [
+        18,
+        5,
+        10,
+        2
+      ],
+      "semantic_id": "sky.menu.select_magic",
+      "source_pc24": "$01:F2E0",
+      "surface_id": 2,
+      "surface_kind": "menu_heading"
+    },
+    {
+      "destination": 1298,
+      "native_font_pixels": 7,
+      "region": [
+        18,
+        5,
+        10,
+        2
+      ],
+      "semantic_id": "sky.menu.choice.status",
+      "source_pc24": "$01:F2F1",
+      "surface_id": 2,
+      "surface_kind": "menu_heading"
+    },
+    {
+      "destination": 1298,
+      "native_font_pixels": 7,
+      "region": [
+        18,
+        5,
+        10,
+        2
+      ],
+      "semantic_id": "sky.menu.status_master",
+      "source_pc24": "$01:F2F8",
+      "surface_id": 2,
+      "surface_kind": "menu_heading"
+    },
+    {
+      "destination": 1298,
+      "native_font_pixels": 7,
+      "region": [
+        18,
+        5,
+        10,
+        2
+      ],
+      "semantic_id": "sky.menu.status_cities",
+      "source_pc24": "$01:F305",
+      "surface_id": 2,
+      "surface_kind": "menu_heading"
+    },
+    {
+      "destination": 1298,
+      "native_font_pixels": 7,
+      "region": [
+        18,
+        5,
+        10,
+        2
+      ],
+      "semantic_id": "sky.menu.choice.other",
+      "source_pc24": "$01:F312",
+      "surface_id": 2,
+      "surface_kind": "menu_heading"
+    },
+    {
+      "destination": 1298,
+      "native_font_pixels": 7,
+      "region": [
+        18,
+        5,
+        10,
+        2
+      ],
+      "semantic_id": "sky.menu.progress_log",
+      "source_pc24": "$01:F319",
+      "surface_id": 2,
+      "surface_kind": "menu_heading"
+    },
+    {
+      "destination": 1298,
+      "native_font_pixels": 7,
+      "region": [
+        18,
+        5,
+        10,
+        2
+      ],
+      "semantic_id": "sky.menu.message_speed",
+      "source_pc24": "$01:F322",
+      "surface_id": 2,
+      "surface_kind": "menu_heading"
+    },
+    {
+      "destination": 1298,
+      "native_font_pixels": 7,
+      "region": [
+        18,
+        5,
+        10,
+        2
+      ],
+      "semantic_id": "sim.menu.choice.movement",
+      "source_pc24": "$01:F376",
+      "surface_id": 2,
+      "surface_kind": "menu_heading"
+    },
+    {
+      "destination": 1298,
+      "native_font_pixels": 7,
+      "region": [
+        18,
+        5,
+        10,
+        2
+      ],
+      "semantic_id": "sim.menu.return_to_palace",
+      "source_pc24": "$01:F383",
+      "surface_id": 2,
+      "surface_kind": "menu_heading"
+    },
+    {
+      "destination": 1298,
+      "native_font_pixels": 7,
+      "region": [
+        18,
+        5,
+        10,
+        2
+      ],
+      "semantic_id": "sim.menu.sky_palace_movement",
+      "source_pc24": "$01:F394",
+      "surface_id": 2,
+      "surface_kind": "menu_heading"
+    },
+    {
+      "destination": 1298,
+      "native_font_pixels": 7,
+      "region": [
+        18,
+        5,
+        10,
+        2
+      ],
+      "semantic_id": "sim.menu.choice.direct_people",
+      "source_pc24": "$01:F3A7",
+      "surface_id": 2,
+      "surface_kind": "menu_heading"
+    },
+    {
+      "destination": 1298,
+      "native_font_pixels": 7,
+      "region": [
+        18,
+        5,
+        10,
+        2
+      ],
+      "semantic_id": "sim.menu.building_direction",
+      "source_pc24": "$01:F3B8",
+      "surface_id": 2,
+      "surface_kind": "menu_heading"
+    },
+    {
+      "destination": 1298,
+      "native_font_pixels": 7,
+      "region": [
+        18,
+        5,
+        10,
+        2
+      ],
+      "semantic_id": "sim.menu.listen",
+      "source_pc24": "$01:F3C6",
+      "surface_id": 2,
+      "surface_kind": "menu_heading"
+    },
+    {
+      "destination": 1298,
+      "native_font_pixels": 7,
+      "region": [
+        18,
+        5,
+        10,
+        2
+      ],
+      "semantic_id": "sim.menu.choice.miracles",
+      "source_pc24": "$01:F3D4",
+      "surface_id": 2,
+      "surface_kind": "menu_heading"
+    },
+    {
+      "destination": 1298,
+      "native_font_pixels": 7,
+      "region": [
+        18,
+        5,
+        10,
+        2
+      ],
+      "semantic_id": "sim.menu.lightning",
+      "source_pc24": "$01:F3DA",
+      "surface_id": 2,
+      "surface_kind": "menu_heading"
+    },
+    {
+      "destination": 1298,
+      "native_font_pixels": 7,
+      "region": [
+        18,
+        5,
+        10,
+        2
+      ],
+      "semantic_id": "sim.menu.rain",
+      "source_pc24": "$01:F3DF",
+      "surface_id": 2,
+      "surface_kind": "menu_heading"
+    },
+    {
+      "destination": 1298,
+      "native_font_pixels": 7,
+      "region": [
+        18,
+        5,
+        10,
+        2
+      ],
+      "semantic_id": "sim.menu.sun",
+      "source_pc24": "$01:F3E9",
+      "surface_id": 2,
+      "surface_kind": "menu_heading"
+    },
+    {
+      "destination": 1298,
+      "native_font_pixels": 7,
+      "region": [
+        18,
+        5,
+        10,
+        2
+      ],
+      "semantic_id": "sim.menu.wind",
+      "source_pc24": "$01:F3F2",
+      "surface_id": 2,
+      "surface_kind": "menu_heading"
+    },
+    {
+      "destination": 1298,
+      "native_font_pixels": 7,
+      "region": [
+        18,
+        5,
+        10,
+        2
+      ],
+      "semantic_id": "sim.menu.earthquake",
+      "source_pc24": "$01:F3FC",
+      "surface_id": 2,
+      "surface_kind": "menu_heading"
+    },
+    {
+      "destination": 1298,
+      "native_font_pixels": 7,
+      "region": [
+        18,
+        5,
+        10,
+        2
+      ],
+      "semantic_id": "sim.menu.choice.offerings",
+      "source_pc24": "$01:F40A",
+      "surface_id": 2,
+      "surface_kind": "menu_heading"
+    },
+    {
+      "destination": 1298,
+      "native_font_pixels": 7,
+      "region": [
+        18,
+        5,
+        10,
+        2
+      ],
+      "semantic_id": "sim.menu.take_offering",
+      "source_pc24": "$01:F40F",
+      "surface_id": 2,
+      "surface_kind": "menu_heading"
+    },
+    {
+      "destination": 1298,
+      "native_font_pixels": 7,
+      "region": [
+        18,
+        5,
+        10,
+        2
+      ],
+      "semantic_id": "sim.menu.use_offering",
+      "source_pc24": "$01:F41F",
+      "surface_id": 2,
+      "surface_kind": "menu_heading"
+    },
+    {
+      "destination": 1298,
+      "native_font_pixels": 7,
+      "region": [
+        18,
+        5,
+        10,
+        2
+      ],
+      "semantic_id": "sim.menu.choice.status",
+      "source_pc24": "$01:F430",
+      "surface_id": 2,
+      "surface_kind": "menu_heading"
+    },
+    {
+      "destination": 1298,
+      "native_font_pixels": 7,
+      "region": [
+        18,
+        5,
+        10,
+        2
+      ],
+      "semantic_id": "sim.menu.status_master",
+      "source_pc24": "$01:F437",
+      "surface_id": 2,
+      "surface_kind": "menu_heading"
+    },
+    {
+      "destination": 1298,
+      "native_font_pixels": 7,
+      "region": [
+        18,
+        5,
+        10,
+        2
+      ],
+      "semantic_id": "sim.menu.status_cities",
+      "source_pc24": "$01:F444",
+      "surface_id": 2,
+      "surface_kind": "menu_heading"
+    },
+    {
+      "destination": 1298,
+      "native_font_pixels": 7,
+      "region": [
+        18,
+        5,
+        10,
+        2
+      ],
+      "semantic_id": "sim.menu.choice.other",
+      "source_pc24": "$01:F451",
+      "surface_id": 2,
+      "surface_kind": "menu_heading"
+    },
+    {
+      "destination": 1298,
+      "native_font_pixels": 7,
+      "region": [
+        18,
+        5,
+        10,
+        2
+      ],
+      "semantic_id": "sim.menu.progress_log",
+      "source_pc24": "$01:F458",
+      "surface_id": 2,
+      "surface_kind": "menu_heading"
+    },
+    {
+      "destination": 1298,
+      "native_font_pixels": 7,
+      "region": [
+        18,
+        5,
+        10,
+        2
+      ],
+      "semantic_id": "sim.menu.message_speed",
+      "source_pc24": "$01:F461",
+      "surface_id": 2,
+      "surface_kind": "menu_heading"
+    },
+    {
+      "destination": 1546,
+      "native_font_pixels": 7,
+      "region": [
+        10,
+        6,
+        12,
+        17
+      ],
+      "semantic_id": "status.report.master_report",
+      "source_pc24": "$01:F484",
+      "surface_id": 6,
+      "surface_kind": "status_master"
+    },
+    {
+      "destination": 1539,
+      "native_font_pixels": 8,
+      "region": [
+        3,
+        6,
+        26,
+        20
+      ],
+      "semantic_id": "status.report.cities_report",
+      "source_pc24": "$01:F4DC",
+      "surface_id": 7,
+      "surface_kind": "status_table"
+    },
+    {
+      "destination": 1539,
+      "native_font_pixels": 8,
+      "region": [
+        3,
+        6,
+        26,
+        20
+      ],
+      "semantic_id": "status.report.score_report",
+      "source_pc24": "$01:F5BC",
+      "surface_id": 7,
+      "surface_kind": "status_table"
+    },
+    {
+      "destination": 2839,
+      "native_font_pixels": 7,
+      "region": [
+        23,
+        11,
+        6,
+        5
+      ],
+      "semantic_id": "system.choice.yes_no",
+      "source_pc24": "$01:F6C8",
+      "surface_id": 8,
+      "surface_kind": "flow_choice"
+    },
+    {
+      "destination": 3090,
+      "native_font_pixels": 7,
+      "region": [
+        18,
+        12,
+        10,
+        4
+      ],
+      "semantic_id": "system.message_speed.scale_labels",
+      "source_pc24": "$01:FA9A",
+      "surface_id": 9,
+      "surface_kind": "flow_speed"
+    }
+  ],
+  "source_profile": "us",
+  "version": 1
+}

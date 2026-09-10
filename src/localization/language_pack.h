@@ -64,6 +64,9 @@ typedef struct ArLanguageString {
 typedef struct ArLanguageOperation {
   ArLanguageOperationKind kind;
   uint32_t source_line;
+  /* Optional decimal formatting on a number placeholder: {value:03}.
+   * A minimum width never truncates a larger number. Zero means unpadded. */
+  uint8_t minimum_digits;
   union {
     ArLanguageString text;
     ArLanguageString placeholder;

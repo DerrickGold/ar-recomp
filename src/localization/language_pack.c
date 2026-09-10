@@ -760,6 +760,18 @@ static bool AppendInline(ScriptState *state, const char *value, uint32_t line,
       }
       memcpy(name, cursor + 1, name_size);
       name[name_size] = 0;
+      uint8_t minimum_digits = 0;
+      char *format = strchr(name, ':');
+      if (format) {
+        if (format[1] != '0' || format[2] < '1' || format[2] > '9' ||
+            format[3]) {
+          SetError(error, "%s:%u: number format must be 01 through 09",
+                   state->path, line);
+          return false;
+        }
+        minimum_digits = (uint8_t)(format[2] - '0');
+        *format = 0;
+      }
       if (!IsIdentifier(name)) {
         SetError(error, "%s:%u: invalid placeholder '%s'", state->path, line,
                  name);
@@ -768,6 +780,7 @@ static bool AppendInline(ScriptState *state, const char *value, uint32_t line,
       ArLanguageOperation operation = {0};
       operation.kind = kArLanguageOperation_Placeholder;
       operation.source_line = line;
+      operation.minimum_digits = minimum_digits;
       if (!AddString(state->pack, name, &operation.value.placeholder, error) ||
           !AddOperation(state, operation, error))
         return false;

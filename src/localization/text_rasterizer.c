@@ -92,6 +92,7 @@ bool ArTextRasterRequest_IsValid(const ArTextRasterRequest *request) {
       kArTextRasterFlag_WrapWords |
       kArTextRasterFlag_PreserveHardBreaks |
       kArTextRasterFlag_CropHorizontalWhitespace |
+      kArTextRasterFlag_CropVerticalWhitespace |
       kArTextRasterFlag_IncludeRevealClusters;
   return request &&
       request->struct_size >= AR_MEMBER_END(
@@ -161,6 +162,59 @@ static bool BitmapValid(const ArTextBitmap *bitmap,
   }
   return bitmap->width <= INT32_MAX / bytes_per_pixel &&
       bitmap->pitch_bytes >= bitmap->width * bytes_per_pixel;
+}
+
+ArRenderRectI ArTextBitmap_InkBounds(const ArTextBitmap *bitmap,
+                                    ArRenderRectI region) {
+  if (!bitmap || !bitmap->pixels || bitmap->width <= 0 || bitmap->height <= 0 ||
+      region.x < 0 || region.y < 0 || region.w <= 0 || region.h <= 0 ||
+      region.w > bitmap->width || region.h > bitmap->height ||
+      region.x > bitmap->width - region.w ||
+      region.y > bitmap->height - region.h)
+    return (ArRenderRectI){0};
+  int bytes = 0;
+  uint32_t alpha_mask = 0;
+  switch (bitmap->format) {
+    case kArRenderPixelFormat_Argb8888:
+    case kArRenderPixelFormat_Abgr8888:
+      bytes = 4; alpha_mask = UINT32_C(0xff000000); break;
+    case kArRenderPixelFormat_Rgba8888:
+      bytes = 4; alpha_mask = UINT32_C(0xff); break;
+    case kArRenderPixelFormat_Rgba4444:
+      bytes = 2; alpha_mask = UINT32_C(0xf); break;
+    case kArRenderPixelFormat_Rgb565: bytes = 2; break;
+    case kArRenderPixelFormat_A8: bytes = 1; alpha_mask = UINT32_C(0xff); break;
+    default: return (ArRenderRectI){0};
+  }
+  if (bitmap->width > INT32_MAX / bytes ||
+      bitmap->pitch_bytes < bitmap->width * bytes ||
+      (size_t)bitmap->height > SIZE_MAX / (size_t)bitmap->pitch_bytes)
+    return (ArRenderRectI){0};
+  if (!alpha_mask) return region;
+  int left = region.x + region.w, right = region.x;
+  int top = region.y + region.h, bottom = region.y;
+  for (int y = region.y; y < region.y + region.h; ++y) {
+    const uint8_t *row = (const uint8_t *)bitmap->pixels +
+        (size_t)y * (size_t)bitmap->pitch_bytes;
+    for (int x = region.x; x < region.x + region.w; ++x) {
+      const uint8_t *source = row + (size_t)x * (size_t)bytes;
+      uint32_t pixel;
+      if (bytes == 4) memcpy(&pixel, source, sizeof(pixel));
+      else if (bytes == 2) {
+        uint16_t packed;
+        memcpy(&packed, source, sizeof(packed));
+        pixel = packed;
+      } else pixel = *source;
+      if (!(pixel & alpha_mask)) continue;
+      if (x < left) left = x;
+      if (x + 1 > right) right = x + 1;
+      if (y < top) top = y;
+      if (y + 1 > bottom) bottom = y + 1;
+    }
+  }
+  return right > left && bottom > top
+      ? (ArRenderRectI){left, top, right - left, bottom - top}
+      : (ArRenderRectI){0};
 }
 
 bool ArTextRasterizer_Rasterize(const ArTextRasterizer *rasterizer,

@@ -12,6 +12,38 @@ SPEC.loader.exec_module(EXTRACT)
 
 
 def main():
+    for release, origin, columns, clear_pc in (
+            ('us', 0x04CA, 24, 0x019032),
+            ('eu-en', 0x04CA, 24, 0x019032),
+            ('de', 0x04C8, 25, 0x019032),
+            ('fr', 0x04C8, 25, 0x019032),
+            ('jp', 0x04CA, 22, 0x018F72)):
+        rom = bytearray(0x10000)
+        entry = EXTRACT.pc24_to_offset(EXTRACT.CONSUMER_CENSUS_PROFILES[
+            release]['interactive_entry_pc24'])
+        rom[entry + 14:entry + 20] = bytes((
+            0xA2, origin & 255, origin >> 8, 0x20, clear_pc & 255,
+            (clear_pc >> 8) & 255))
+        clear = EXTRACT.pc24_to_offset(clear_pc)
+        rom[clear:clear + 20] = (bytes((0xDA, 0xA2, origin & 255, origin >> 8)) +
+            bytes.fromhex('a9 06 48 da a9 00 eb a9') + bytes((columns,)) +
+            bytes.fromhex('eb 9f 00 b0 7f e8 e8'))
+        layout = EXTRACT.native_dialogue_layout({'id': release}, bytes(rom))
+        assert layout['columns'] == columns
+        assert layout['column'] == (origin & 63) // 2
+        assert layout['row'] == 19
+        assert layout['space_delimited_words'] == (release != 'jp')
+        for offset, replacement in ((entry + 14, 0), (clear + 4, 0),
+                                    (clear + 12, 32), (clear + 2, 0xCB)):
+            invalid = bytearray(rom)
+            invalid[offset] = replacement
+            try:
+                EXTRACT.native_dialogue_layout({'id': release}, bytes(invalid))
+            except ValueError:
+                pass
+            else:
+                raise AssertionError('unverified geometry accepted')
+
     assert EXTRACT.pc24_to_offset(0x01F04F) == 0xF04F
     assert EXTRACT.offset_to_pc24(0xF04F) == 0x01F04F
     assert EXTRACT.routine_call_pattern(0x018E29, 'jsr') == bytes.fromhex(
@@ -325,6 +357,24 @@ def main():
         {'op': 'line_break'},
         {'op': 'end', 'native_cursor_after': '$00:800F'},
     ]
+
+    # Dialogue adds the regional ROM salutation and its implicit separator;
+    # reports/name entry deliberately keep the fixed composer's plain value.
+    name_rom = bytes((6, ord('n'), 0, ord('T'), 0x40, 0))
+    name_decoder = EXTRACT.Decoder(name_rom, {
+        'encoding': 'direct-glyph', 'dialogue_name_prefix': 3,
+        'dialogue_name_separator': ' ',
+    })
+    name_ops = name_decoder.decode_record(0)['operations']
+    assert name_ops[:4] == [
+        {'op': 'text', 'value': 'T '},
+        {'op': 'insert_master_name'},
+        {'op': 'text', 'value': ' '},
+        {'op': 'text', 'value': 'n'},
+    ]
+    fixed_name = EXTRACT.FixedComposerDecoder(name_decoder).decode_record(
+        0, len(name_rom))
+    assert fixed_name['operations'][0] == {'op': 'insert_master_name'}
 
     dynamic_messages = [{
         'id': 'dynamic.values',

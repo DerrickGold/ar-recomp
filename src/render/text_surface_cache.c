@@ -88,11 +88,14 @@ void ArTextSurfaceCache_Destroy(ArTextSurfaceCache *cache,
         ArRenderDevice_DestroyTexture(
             owner, cache->entries[i].surface.texture);
         free((void *)cache->entries[i].surface.reveal_clusters);
+        free((void *)cache->entries[i].surface.cluster_ink_bounds);
       }
     }
   } else {
-    for (size_t i = 0; i < cache->capacity; ++i)
+    for (size_t i = 0; i < cache->capacity; ++i) {
       free((void *)cache->entries[i].surface.reveal_clusters);
+      free((void *)cache->entries[i].surface.cluster_ink_bounds);
+    }
   }
   free(cache->entries);
   memset(cache, 0, sizeof(*cache));
@@ -259,12 +262,27 @@ bool ArTextSurfaceCache_Acquire(
     }
   }
 
+  for (size_t i = 0; i < kArTextNegativeCacheCapacity; ++i) {
+    const ArTextSurfaceFailure *failure = &cache->failures[i];
+    if (failure->valid && ArTextCacheKey_Equals(failure->key, key)) {
+      ++cache->stats.hits;
+      ++cache->stats.negative_hits;
+      SetError(error, error_capacity, failure->error);
+      return false;
+    }
+  }
+
   ++cache->stats.misses;
   ++cache->stats.rasterize_calls;
   ArTextRasterRequest raster_request = *request;
   int metric_scale = 1;
   if (request->pixelation == kArTextPixelation_LowResolution) {
     metric_scale = request->pixelation_size;
+    /* The requested block is an upper bound: retain at least eight source
+     * samples per em in small windows/accessibility-size combinations. */
+    int maximum_scale = request->font_pixels / 8;
+    if (maximum_scale < 1) maximum_scale = 1;
+    if (metric_scale > maximum_scale) metric_scale = maximum_scale;
     raster_request.font_pixels =
         (request->font_pixels + metric_scale / 2) / metric_scale;
     if (raster_request.font_pixels < 1) raster_request.font_pixels = 1;
@@ -292,6 +310,12 @@ bool ArTextSurfaceCache_Acquire(
           rasterizer, &raster_request, &bitmap,
           raster_error, sizeof(raster_error))) {
     ++cache->stats.failures;
+    ArTextSurfaceFailure *failure = &cache->failures[
+        cache->next_failure++ % kArTextNegativeCacheCapacity];
+    failure->valid = true;
+    failure->key = key;
+    SetError(failure->error, sizeof(failure->error),
+             raster_error[0] ? raster_error : "text rasterization failed");
     SetError(error, error_capacity,
              raster_error[0] ? raster_error : "text rasterization failed");
     return false;
@@ -302,7 +326,7 @@ bool ArTextSurfaceCache_Acquire(
   int upload_width = bitmap.width;
   int upload_height = bitmap.height;
   int upload_pitch = bitmap.pitch_bytes;
-  if (request->pixelation == kArTextPixelation_LowResolution) {
+  if (request->pixelation == kArTextPixelation_LowResolution && metric_scale > 1) {
     if (!UpscaleNearest(&bitmap, metric_scale, &treated_pixels,
                         &upload_width, &upload_height, &upload_pitch) ||
         upload_width > request->maximum_width ||
@@ -316,7 +340,11 @@ bool ArTextSurfaceCache_Acquire(
     }
     upload_pixels = treated_pixels;
   } else if (request->pixelation == kArTextPixelation_Mosaic) {
-    if (!ApplyMosaic(&bitmap, request->pixelation_size,
+    /* Use actual fitted metrics, not the requested size: an automatically
+     * fitted heading can be much smaller than its surrounding dialogue. */
+    int block = bitmap.line_advance / 8;
+    if (block > request->pixelation_size) block = request->pixelation_size;
+    if (block > 1 && !ApplyMosaic(&bitmap, block,
                      &treated_pixels, &upload_pitch)) {
       ArTextRasterizer_ReleaseBitmap(rasterizer, &bitmap);
       ++cache->stats.failures;
@@ -324,7 +352,7 @@ bool ArTextSurfaceCache_Acquire(
                "cannot apply text mosaic treatment");
       return false;
     }
-    upload_pixels = treated_pixels;
+    if (treated_pixels) upload_pixels = treated_pixels;
   }
 
   if (!TextureExtentSupported(device, upload_width, upload_height)) {
@@ -346,6 +374,7 @@ bool ArTextSurfaceCache_Acquire(
   };
   ArRenderTexture texture = ArRenderTexture_Invalid();
   ArTextRevealCluster *reveal_clusters = NULL;
+  ArRenderRectI *cluster_ink_bounds = NULL;
   if (bitmap.reveal_cluster_count) {
     if (bitmap.reveal_cluster_count >
         SIZE_MAX / sizeof(*reveal_clusters)) {
@@ -357,7 +386,11 @@ bool ArTextSurfaceCache_Acquire(
     }
     reveal_clusters = (ArTextRevealCluster *)malloc(
         bitmap.reveal_cluster_count * sizeof(*reveal_clusters));
-    if (!reveal_clusters) {
+    cluster_ink_bounds = (ArRenderRectI *)calloc(
+        bitmap.reveal_cluster_count, sizeof(*cluster_ink_bounds));
+    if (!reveal_clusters || !cluster_ink_bounds) {
+      free(reveal_clusters);
+      free(cluster_ink_bounds);
       free(treated_pixels);
       ArTextRasterizer_ReleaseBitmap(rasterizer, &bitmap);
       ++cache->stats.failures;
@@ -377,6 +410,17 @@ bool ArTextSurfaceCache_Acquire(
       }
     }
   }
+  const ArTextBitmap treated_bitmap = {
+    .pixels = upload_pixels, .width = upload_width, .height = upload_height,
+    .pitch_bytes = upload_pitch, .format = bitmap.format,
+  };
+  const ArRenderRectI ink_bounds = ArTextBitmap_InkBounds(
+      &treated_bitmap, (ArRenderRectI){0, 0, upload_width, upload_height});
+  for (size_t index = 0; index < bitmap.reveal_cluster_count; ++index) {
+    const ArTextRevealCluster *cluster = &reveal_clusters[index];
+    cluster_ink_bounds[index] = ArTextBitmap_InkBounds(&treated_bitmap,
+        (ArRenderRectI){cluster->x, cluster->y, cluster->width, cluster->height});
+  }
   ++cache->stats.upload_calls;
   const bool created = ArRenderDevice_CreateTexture(
       device, &descriptor, &texture);
@@ -390,7 +434,9 @@ bool ArTextSurfaceCache_Acquire(
     .ascent = bitmap.ascent * metric_scale,
     .descent = bitmap.descent * metric_scale,
     .line_advance = bitmap.line_advance * metric_scale,
+    .ink_bounds = ink_bounds,
     .reveal_clusters = reveal_clusters,
+    .cluster_ink_bounds = cluster_ink_bounds,
     .reveal_cluster_count = bitmap.reveal_cluster_count,
   };
   free(treated_pixels);
@@ -398,6 +444,7 @@ bool ArTextSurfaceCache_Acquire(
   if (!created || !uploaded) {
     ArRenderDevice_DestroyTexture(device, texture);
     free(reveal_clusters);
+    free(cluster_ink_bounds);
     ++cache->stats.failures;
     SetError(error, error_capacity,
              ArRenderDevice_LastError(device));
@@ -409,6 +456,7 @@ bool ArTextSurfaceCache_Acquire(
   if (victim->valid) {
     ArRenderDevice_DestroyTexture(device, victim->surface.texture);
     free((void *)victim->surface.reveal_clusters);
+    free((void *)victim->surface.cluster_ink_bounds);
     ++cache->stats.evictions;
   }
   *victim = (ArTextSurfaceCacheEntry){

@@ -21,9 +21,13 @@ typedef struct ArTextSurface {
   int ascent;
   int descent;
   int line_advance;
+  /* Actual post-pixelation ink, measured once on cache miss. Empty regions
+   * represent spaces; never use padded line/reveal rectangles as ink bounds. */
+  ArRenderRectI ink_bounds;
   /* Entry-owned immutable metadata. Valid until this cache entry is evicted
    * or the cache is destroyed. */
   const ArTextRevealCluster *reveal_clusters;
+  const ArRenderRectI *cluster_ink_bounds;
   size_t reveal_cluster_count;
 } ArTextSurface;
 
@@ -35,6 +39,7 @@ typedef struct ArTextSurfaceCacheStats {
   uint64_t upload_calls;
   uint64_t evictions;
   uint64_t failures;
+  uint64_t negative_hits;
 } ArTextSurfaceCacheStats;
 
 typedef struct ArTextSurfaceCacheEntry {
@@ -43,12 +48,21 @@ typedef struct ArTextSurfaceCacheEntry {
   bool valid;
 } ArTextSurfaceCacheEntry;
 
+enum { kArTextNegativeCacheCapacity = 16 };
+typedef struct ArTextSurfaceFailure {
+  ArTextCacheKey key;
+  char error[kArTextRasterErrorCapacity];
+  bool valid;
+} ArTextSurfaceFailure;
+
 typedef struct ArTextSurfaceCache {
   ArTextSurfaceCacheEntry *entries;
   size_t capacity;
   uint64_t clock;
   ArRenderDevice *device;
   ArTextSurfaceCacheStats stats;
+  ArTextSurfaceFailure failures[kArTextNegativeCacheCapacity];
+  unsigned next_failure;
 } ArTextSurfaceCache;
 
 /* Cache keys include UTF-8 bytes, font-stack identity/revision, shaping and
@@ -66,7 +80,10 @@ void ArTextSurfaceCache_Destroy(ArTextSurfaceCache *cache,
 /* Presenter-thread API. On a hit this performs no font work, allocation, or
  * texture upload. On a miss the replacement texture is fully rasterized and
  * uploaded before an LRU entry is evicted, so failure leaves the old cache
- * usable. */
+ * usable. Failed raster requests have a separate bounded negative cache, so
+ * static layout failures do not repeat font work or evict usable textures.
+ * A changed request/font/backend revision retries; destroy/init also clears
+ * failures (including after device recreation). Upload failures are retried. */
 bool ArTextSurfaceCache_Acquire(
     ArTextSurfaceCache *cache,
     ArRenderDevice *device,

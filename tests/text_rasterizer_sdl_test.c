@@ -173,6 +173,42 @@ static void TestRasterization(void) {
   CHECK(saw_blue && saw_white);
   ArTextRasterizer_ReleaseBitmap(rasterizer, &bitmap);
 
+  /* Tight menu rows fit visible ink, including accents/descenders, without
+   * reducing the font just to accommodate transparent typographic padding. */
+  request = Request("Égj");
+  request.flags |= kArTextRasterFlag_IncludeRevealClusters;
+  ArTextBitmap padded;
+  CHECK(ArTextRasterizer_Rasterize(
+      rasterizer, &request, &padded, error, sizeof(error)));
+  request.flags |= kArTextRasterFlag_CropVerticalWhitespace;
+  CHECK(ArTextRasterizer_Rasterize(
+      rasterizer, &request, &bitmap, error, sizeof(error)));
+  const int removed_top = padded.ascent - bitmap.ascent;
+  CHECK(removed_top >= 0 && bitmap.height < padded.height);
+  CHECK(bitmap.width == padded.width && bitmap.line_advance == padded.line_advance);
+  CHECK(bitmap.reveal_cluster_count == padded.reveal_cluster_count);
+  for (int y = 0; y < padded.height; ++y) {
+    const uint8_t *row = (const uint8_t *)padded.pixels + y * padded.pitch_bytes;
+    if (y >= removed_top && y < removed_top + bitmap.height) {
+      CHECK(!memcmp(row, (const uint8_t *)bitmap.pixels +
+          (y - removed_top) * bitmap.pitch_bytes, (size_t)bitmap.width * 4));
+    } else {
+      for (int x = 0; x < padded.width; ++x) {
+        uint32_t pixel;
+        uint8_t alpha;
+        memcpy(&pixel, row + x * 4, sizeof(pixel));
+        SDL_GetRGBA(pixel, details, NULL, NULL, NULL, NULL, &alpha);
+        CHECK(alpha == 0);
+      }
+    }
+  }
+  request.maximum_height = bitmap.height;
+  ArTextRasterizer_ReleaseBitmap(rasterizer, &bitmap);
+  ArTextRasterizer_ReleaseBitmap(rasterizer, &padded);
+  CHECK(ArTextRasterizer_Rasterize(
+      rasterizer, &request, &bitmap, error, sizeof(error)));
+  ArTextRasterizer_ReleaseBitmap(rasterizer, &bitmap);
+
   /* A user-selected accessibility size may make a long translated heading
    * wrap beyond its retail-height box. The backend chooses the largest size
    * that fits, but never below the caller's authored-size floor. */

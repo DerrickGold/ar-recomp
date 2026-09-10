@@ -6,7 +6,6 @@
 #include "actraiser_game.h"
 
 static int failures;
-static uint16_t vram_words[32768];
 #define CHECK(expression) do {                                             \
   if (!(expression)) {                                                     \
     fprintf(stderr, "%s:%d: check failed: %s\n",                          \
@@ -23,6 +22,19 @@ static ActRaiserLocalizationTextObservation Observation(uint32_t source,
   value.abi_version = ACTRAISER_LOCALIZATION_TEXT_OBSERVATION_ABI_VERSION;
   value.source_pc24 = source;
   value.caller_pc24 = caller;
+  value.map_number = kActRaiserNonActionMap_SkyPalace;
+  return value;
+}
+
+static ActRaiserLocalizationComposeObservation Compose(uint32_t source,
+                                                       uint16_t destination) {
+  ActRaiserLocalizationComposeObservation value;
+  memset(&value, 0, sizeof(value));
+  value.struct_size = sizeof(value);
+  value.abi_version =
+      ACTRAISER_LOCALIZATION_COMPOSE_OBSERVATION_ABI_VERSION;
+  value.source_pc24 = source;
+  value.destination = destination;
   value.map_number = kActRaiserNonActionMap_SkyPalace;
   return value;
 }
@@ -51,19 +63,6 @@ int main(void) {
   CHECK(ActRaiserLocalizationRoute_PageUnitCount(route, 0) == 20);
   CHECK(ActRaiserLocalizationRoute_PageUnitCount(route, 1) == 83);
   CHECK(ActRaiserLocalizationRoute_PageUnitCount(route, 2) == 41);
-  vram_words[0x5800u + 21u * 32u + 15u] = 0xA05Fu;
-  ArTextCellRegion preserves[2];
-  CHECK(ActRaiserLocalizationRoute_FindNativePreserves(
-            route, 0x5800, 32, 32, vram_words,
-            sizeof(vram_words) / sizeof(vram_words[0]),
-            preserves, 2) == 1);
-  CHECK(preserves[0].column == 15 && preserves[0].row == 21 &&
-        preserves[0].columns == 1 && preserves[0].rows == 1);
-  CHECK(ActRaiserLocalizationRoute_FindNativePreserves(
-            route, 0x5800, 32, 32, vram_words,
-            sizeof(vram_words) / sizeof(vram_words[0]),
-            preserves, 0) == SIZE_MAX);
-
   observation = Observation(0x01FA6A, 0x018AF1);
   route = ActRaiserLocalizationRoute_ResolveDialogue(&observation);
   CHECK(route && !strcmp(route->semantic_id, "system.save.cancelled"));
@@ -71,6 +70,15 @@ int main(void) {
   route = ActRaiserLocalizationRoute_ResolveDialogue(&observation);
   CHECK(route && !strcmp(route->semantic_id,
                           "system.message_speed.choose"));
+  observation = Observation(0x01FC06, 0x01886F);
+  observation.map_number = kActRaiserNonActionMap_Temple;
+  route = ActRaiserLocalizationRoute_ResolveDialogue(&observation);
+  CHECK(route && !strcmp(route->semantic_id, "sim.town.gratitude"));
+  observation.map_number = kActRaiserNonActionMap_WorldMap;
+  CHECK(!ActRaiserLocalizationRoute_ResolveDialogue(&observation));
+  observation.map_number = kActRaiserNonActionMap_Temple;
+  observation.map_group = 1;
+  CHECK(!ActRaiserLocalizationRoute_ResolveDialogue(&observation));
   observation = Observation(0x01FAB1, 0x018B77);
   route = ActRaiserLocalizationRoute_ResolveDialogue(&observation);
   CHECK(route && !strcmp(route->semantic_id,
@@ -112,6 +120,52 @@ int main(void) {
   observation.map_group = 0;
   observation = Observation(0x049049, 0x0193B2);
   CHECK(!ActRaiserLocalizationRoute_ResolveDialogue(&observation));
+
+  ActRaiserLocalizationComposeObservation compose =
+      Compose(0x01F298, 0x0512);
+  const ActRaiserLocalizationComposeRoute *compose_route =
+      ActRaiserLocalizationRoute_ResolveCompose(&compose);
+  CHECK(compose_route &&
+        !strcmp(compose_route->semantic_id, "sky.menu.choice.movement"));
+  CHECK(compose_route && compose_route->surface_id == 2);
+  CHECK(compose_route && compose_route->region.column == 18 &&
+        compose_route->region.row == 5 &&
+        compose_route->region.columns == 10 &&
+        compose_route->region.rows == 2);
+
+  /* Indexed sources require the table identity and logical selector captured
+   * before the native pointer resolver destroys them. */
+  compose = Compose(0x01F064, 0x0A12);
+  CHECK(!ActRaiserLocalizationRoute_ResolveCompose(&compose));
+  compose.source_table_pc24 = 0x01F04F;
+  compose.source_selector = 1;
+  compose_route = ActRaiserLocalizationRoute_ResolveCompose(&compose);
+  CHECK(compose_route &&
+        !strcmp(compose_route->semantic_id, "sky.menu.magic.stardust"));
+  compose.source_pc24 = 0x01F158;
+  compose.source_table_pc24 = 0x01F08E;
+  compose.source_selector = 11;
+  compose_route = ActRaiserLocalizationRoute_ResolveCompose(&compose);
+  CHECK(compose_route &&
+        !strcmp(compose_route->semantic_id, "sim.menu.possession.slot_11"));
+  compose.source_selector = 12;
+  compose_route = ActRaiserLocalizationRoute_ResolveCompose(&compose);
+  CHECK(compose_route &&
+        !strcmp(compose_route->semantic_id, "sim.menu.possession.slot_12"));
+
+  compose = Compose(0x01F4DC, 0x0603);
+  compose_route = ActRaiserLocalizationRoute_ResolveCompose(&compose);
+  CHECK(compose_route &&
+        !strcmp(compose_route->semantic_id,
+                "status.report.cities_report"));
+  compose.destination = 0x0512;
+  CHECK(!ActRaiserLocalizationRoute_ResolveCompose(&compose));
+  compose.destination = 0x0603;
+  compose.map_group = 1;
+  CHECK(!ActRaiserLocalizationRoute_ResolveCompose(&compose));
+  compose.map_group = 0;
+  compose.abi_version = 0;
+  CHECK(!ActRaiserLocalizationRoute_ResolveCompose(&compose));
   puts("localization route checks passed");
   return failures ? 1 : 0;
 }
