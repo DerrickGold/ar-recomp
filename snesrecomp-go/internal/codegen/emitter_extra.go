@@ -332,6 +332,17 @@ func emitReturn(context *Context, op ir.Return) []string {
 	}
 	lines = append(lines,
 		fmt.Sprintf("    return RECOMP_RETURN_NORMAL;  /* %s owned callee-clean return; retain native S */ }", label),
+	)
+	if op.OwnFrameWord && !op.Long {
+		lines = append(lines,
+			"  if (_hrv && cpu_accept_return_word_relocation(cpu, _entry_s, _ret_s, _rpc24, _return_origin)) {",
+		)
+		if context.CurrentExitM != nil && context.CurrentExitX != nil {
+			lines = append(lines, fmt.Sprintf("    sr_exit_mx_check(cpu, %d, %d, \"%s\", 0x%06xu);", *context.CurrentExitM&1, *context.CurrentExitX&1, context.CurrentName, source))
+		}
+		lines = append(lines, "    return RECOMP_RETURN_NORMAL; /* witnessed own-frame word relocation; retain native S */ }")
+	}
+	lines = append(lines,
 		"  if (_ret_s != _entry_s && cpu_resolve_ancestor_skip(_ret_s) >= 0) {",
 		"    cpu_trace_mark_nlr_exit(BD_EXIT_KIND_TRAMPOLINE);",
 		"    if (cpu_dispatch_has_entry(cpu, _rpc24)) {",

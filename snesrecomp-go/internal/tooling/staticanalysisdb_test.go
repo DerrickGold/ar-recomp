@@ -105,7 +105,7 @@ func TestStaticAnalysisDatabaseRejectsNonStaticEvidenceAndUnknownFields(t *testi
 	}
 }
 
-func TestStaticAnalysisDatabaseAcceptsV17FactsAfterInventoryOnlyReportChange(t *testing.T) {
+func TestStaticAnalysisDatabaseAcceptsV17V18V19FactsAfterReportOnlyChanges(t *testing.T) {
 	options, _ := shadowHLEInventoryFixture(t)
 	identity, err := shadowROMIdentity(options.ROMPath)
 	if err != nil {
@@ -119,15 +119,18 @@ func TestStaticAnalysisDatabaseAcceptsV17FactsAfterInventoryOnlyReportChange(t *
 			Evidence: []analysis.Evidence{{Source: "static.fixture", Confidence: analysis.ConfidenceProven}},
 		}},
 	}
-	path := filepath.Join(t.TempDir(), "v17.json")
-	if err := WriteStaticAnalysisDatabaseFile(path, database); err != nil {
-		t.Fatal(err)
+	path := filepath.Join(t.TempDir(), "compatible.json")
+	for _, version := range []int{17, 18, 19} {
+		database.ShadowReportVersion = version
+		if err := WriteStaticAnalysisDatabaseFile(path, database); err != nil {
+			t.Fatal(err)
+		}
+		loaded, err := LoadStaticAnalysisDatabaseFile(path, options.ROMPath)
+		if err != nil || loaded.ShadowReportVersion != version || len(loaded.DispatchFacts) != 1 {
+			t.Fatalf("v%d database rejected/rewritten: %+v, %v", version, loaded, err)
+		}
 	}
-	loaded, err := LoadStaticAnalysisDatabaseFile(path, options.ROMPath)
-	if err != nil || loaded.ShadowReportVersion != 17 || len(loaded.DispatchFacts) != 1 {
-		t.Fatalf("v17 database rejected/rewritten: %+v, %v", loaded, err)
-	}
-	for _, version := range []int{16, 19} {
+	for _, version := range []int{16, shadowReportVersion + 1} {
 		database.ShadowReportVersion = version
 		if err := WriteStaticAnalysisDatabaseFile(path, database); err == nil {
 			t.Fatalf("accepted incompatible report version %d", version)

@@ -99,6 +99,20 @@ int cpu_accept_adjusted_return(CpuState *cpu, uint16 entry_stack,
                               uint16 return_stack, uint32 target,
                               uint8 frame_bytes);
 
+/* Generated, single-basic-block return-word relocation contract. Capture
+ * immediately after a native two-byte pull from this call's incoming frame.
+ * The emitter must preserve that register through the matching push and RTS,
+ * with every intervening store proved disjoint ordinary WRAM. This evidence
+ * is stronger than matching a PC at an arbitrary (possibly ancestor) S. */
+CpuReturnScope *cpu_capture_return_word(CpuState *cpu, uint16 entry_stack,
+                                      uint16 source_stack, uint16 word,
+                                      uint8 width);
+int cpu_return_word_store_disjoint(const CpuState *cpu, uint8 bank,
+                                   uint16 address, uint8 width);
+int cpu_accept_return_word_relocation(CpuState *cpu, uint16 entry_stack,
+                                     uint16 return_stack, uint32 target,
+                                     const CpuReturnScope *origin);
+
 static inline uint8 cpu_read_b(const CpuState *cpu) {
     return (uint8)(cpu->A >> 8);
 }

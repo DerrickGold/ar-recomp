@@ -20,7 +20,7 @@ import (
 	romimage "github.com/DerrickGold/snesrecomp-go/internal/rom"
 )
 
-const shadowReportVersion = 18
+const shadowReportVersion = 19
 
 const (
 	shadowUnresolvedGeneric              = "generic_dynamic_target"
@@ -176,6 +176,7 @@ type ShadowReport struct {
 	ReturnProvenance     ShadowReturnProvenance      `json:"return_address_provenance"`
 	ReturnCalls          ShadowReturnCalls           `json:"return_call_contracts"`
 	ReturnAliases        ShadowReturnCalls           `json:"return_stack_aliases"`
+	FrameLifetimes       ShadowFrameLifetimes        `json:"return_frame_lifetimes"`
 	DispatchSites        []ShadowDispatchSite        `json:"dispatch_sites,omitempty"`
 	Unresolved           []ShadowUnresolvedSite      `json:"unresolved_sites,omitempty"`
 	DecodeIssues         []ShadowDecodeIssue         `json:"decode_issues,omitempty"`
@@ -276,6 +277,7 @@ type shadowDecodeResult struct {
 	bankRecipe       *shadowDBRecipe
 	returnAudit      shadowReturnAuditResult
 	returnValues     *ShadowReturnValueEntry
+	frameLifetimes   []ShadowFrameLifetimeEntry
 	issue            *ShadowDecodeIssue
 }
 
@@ -396,6 +398,7 @@ func AnalyzeAuthoredShadow(options ShadowAnalysisOptions) (ShadowReport, error) 
 		Unresolved:           unresolved,
 		DecodeIssues:         issues,
 		ReturnAudit:          collectShadowReturnAudit(decodeResults),
+		FrameLifetimes:       collectShadowFrameLifetimes(decodeResults),
 		ReturnProvenance:     collectShadowReturnProvenance(decodeResults),
 		ReturnCalls:          collectShadowReturnCalls(image, banks, decodeResults),
 		Limitations: []string{
@@ -683,10 +686,11 @@ func runShadowDecodePass(image romimage.Image, banks []shadowBank, entries map[b
 					instructions:     shadowDecodedInstructions(item.bank.ID, item.entry.Start, graph),
 					pointerProducers: collectShadowPointerProducers(image, graph, regions),
 					storedReads:      storedReads, storedWrites: storedWrites,
-					callInputs:   collectShadowDirectCallInputs(graph),
-					bankRecipe:   &shadowDBRecipe{end: item.entry.End, regions: regions, exitMX: calleeExitMX},
-					returnAudit:  auditShadowReturns(graph, item.bank.Config),
-					returnValues: collectShadowReturnValues(graph, item.bank.Config),
+					callInputs:     collectShadowDirectCallInputs(graph),
+					bankRecipe:     &shadowDBRecipe{end: item.entry.End, regions: regions, exitMX: calleeExitMX},
+					returnAudit:    auditShadowReturns(graph, item.bank.Config),
+					frameLifetimes: auditShadowFrameLifetimes(graph, item.bank.Config),
+					returnValues:   collectShadowReturnValues(graph, item.bank.Config),
 				}
 			}
 		}()
@@ -3055,6 +3059,7 @@ func writeShadowText(output io.Writer, report ShadowReport, verbose bool) {
 	writeShadowReturnProvenance(output, report.ReturnProvenance, verbose)
 	writeShadowReturnCalls(output, report.ReturnCalls, verbose)
 	writeShadowReturnAliases(output, report.ReturnAliases, verbose)
+	writeShadowFrameLifetimes(output, report.FrameLifetimes, verbose)
 	if evidence := report.DispatchEvidence; evidence != nil {
 		fmt.Fprintf(output, "runtime triage: %d unresolved site(s) observed, %d unobserved; evidence observations=%d overflow=%t trace_sha256=%s\n",
 			summary.ObservedUnresolvedSites, summary.UnobservedUnresolvedSites,

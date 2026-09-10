@@ -708,6 +708,58 @@ int cpu_accept_adjusted_return(CpuState *cpu, uint16 entry_stack,
     return 1;
 }
 
+CpuReturnScope *cpu_capture_return_word(CpuState *cpu, uint16 entry_stack,
+                                      uint16 source_stack, uint16 word,
+                                      uint8 width) {
+    CpuReturnScope *scope = g_cpu_return_scope;
+    if (scope == NULL || scope->cpu != cpu || cpu->emulation || width != 2u ||
+        scope->frame_bytes != 2u || scope->entry_stack != entry_stack ||
+        source_stack != entry_stack || (uint32)source_stack + 2u != cpu->S ||
+        cpu->S > 0x1fffu ||
+        scope->continuation != (((uint32)cpu->PB << 16) |
+                               (uint16)(word + 1u)))
+        return NULL;
+    return scope;
+}
+
+int cpu_return_word_store_disjoint(const CpuState *cpu, uint8 bank,
+                                   uint16 address, uint8 width) {
+    uint32 physical;
+    /* Only ordinary WRAM, never a hardware write that could arm a DMA or
+     * interrupt with further memory effects. Do not guess a mapper's SRAM. */
+    if (cpu->emulation || (width != 1u && width != 2u) ||
+        (uint32)address + width > 0x10000u || cpu->S > 0x1ffdu)
+        return 0;
+    if (bank == 0x7eu || bank == 0x7fu) {
+        physical = ((uint32)(bank - 0x7eu) << 16) | address;
+    } else if ((bank & 0x40u) == 0u && (uint32)address + width <= 0x2000u) {
+        physical = address;
+    } else {
+        return 0;
+    }
+    return physical + width <= (uint32)cpu->S + 1u ||
+           physical > (uint32)cpu->S + 2u;
+}
+
+int cpu_accept_return_word_relocation(CpuState *cpu, uint16 entry_stack,
+                                     uint16 return_stack, uint32 target,
+                                     const CpuReturnScope *origin) {
+    CpuReturnScope *scope = g_cpu_return_scope;
+    if (origin == NULL || origin != scope || scope->cpu != cpu ||
+        cpu->emulation || scope->frame_bytes != 2u ||
+        scope->entry_stack != entry_stack ||
+        scope->continuation != (target & 0xffffffu) ||
+        return_stack <= entry_stack ||
+        (uint32)return_stack + 2u != cpu->S || cpu->S > 0x1fffu)
+        return 0;
+    /* The native code explicitly moved THIS call's return word, not an
+     * ancestor's equal-valued PC. Its actual cleanup can consume a caller
+     * frame too; resuming this exact continuation is still what RTS does.
+     * Do not extend the PC-only acceptance rule or rebase ancestor limits. */
+    scope->adjusted_return = 1u;
+    return 1;
+}
+
 int cpu_resolve_ancestor_skip(uint16 return_stack) {
     int frame;
     if (g_recomp_stack_top < 2 ||

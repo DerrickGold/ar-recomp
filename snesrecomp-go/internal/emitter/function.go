@@ -312,11 +312,20 @@ func EmitFunction(image rom.Image, bank byte, start uint16, entryM, entryX uint8
 	blockLines := make(map[decoder.DecodeKey][]string, len(order))
 	for _, key := range order {
 		block := controlFlow.Blocks[key]
+		wordShuttle := findReturnWordShuttle(block, options)
 		var lines []string
 		terminated := false
-		for _, pair := range lowered[key] {
+		for instructionIndex, pair := range lowered[key] {
 			instruction := pair.decoded.Instruction
 			context.CurrentSite = instruction.Address & 0xffffff
+			if wordShuttle != nil {
+				if instructionIndex == wordShuttle.pull {
+					lines = append(lines, "{ /* witnessed native return-word shuttle */", "uint16 _return_word_s = cpu->S;")
+				}
+				if instructionIndex > wordShuttle.push && returnWordGuardedStore(instruction) {
+					lines = append(lines, returnWordStoreGuard(instruction, pair.decoded.Key.M))
+				}
+			}
 			for _, operation := range pair.ops {
 				switch op := operation.(type) {
 				case ir.CondBranch:
@@ -417,6 +426,7 @@ func EmitFunction(image rom.Image, bank byte, start uint16, entryM, entryX uint8
 						lines = append(lines, emitted...)
 					}
 				case ir.Return:
+					op.OwnFrameWord = wordShuttle != nil
 					if instruction.DispatchKind == "rts_trick" {
 						lines = append(lines, emitRTSDispatchGuard(instruction, local)...)
 					}
@@ -434,6 +444,12 @@ func EmitFunction(image rom.Image, bank byte, start uint16, entryM, entryX uint8
 					lines = append(lines, emitted...)
 				}
 			}
+			if wordShuttle != nil && instructionIndex == wordShuttle.pull {
+				lines = append(lines, fmt.Sprintf("CpuReturnScope *_return_origin = cpu_capture_return_word(cpu, _entry_s, _return_word_s, cpu->%s, (uint8)(2u - cpu->%s_flag));", wordShuttle.register, wordShuttle.widthFlag))
+			}
+		}
+		if wordShuttle != nil {
+			lines = append(lines, "} /* native return-word shuttle */")
 		}
 		if !terminated {
 			switch len(block.Successors) {

@@ -1095,7 +1095,77 @@ static void test_return_ownership(void) {
     check(!g_cpu_return_scope,"explicit reset scope leaves no dangling owner");
 }
 
+static void test_return_word_relocation(void) {
+    CpuState cpu = {0}, other = {0};
+    CpuReturnScope owner, nested;
+    CpuReturnScope *word;
+    WatchdogFrameStart();
+    cpu.S = 0x1ff0;
+    cpu_return_scope_begin(&owner, &cpu, 0x008123, 0x1ff5, 2);
+    cpu.S = 0x1ff2;
+    word = cpu_capture_return_word(&cpu, 0x1ff0, 0x1ff0, 0x8122, 2);
+    check(word == &owner, "capture witnesses this call's original word");
+    check(!cpu_capture_return_word(&cpu,0x1ff0,0x1ff0,0x8122,1) &&
+          !cpu_capture_return_word(&cpu,0x1ff0,0x1ff0,0x8123,2) &&
+          !cpu_capture_return_word(&cpu,0x1fee,0x1ff0,0x8122,2) &&
+          !cpu_capture_return_word(&other,0x1ff0,0x1ff0,0x8122,2),
+          "capture rejects wrong width/value/entry/CPU");
+    cpu.PB=1;
+    check(!cpu_capture_return_word(&cpu,0x1ff0,0x1ff0,0x8122,2),
+          "short return must preserve live PB");
+    cpu.PB=0; cpu.S=0x1ff7;
+    check(!cpu_capture_return_word(&cpu,0x1ff0,0x1ff5,0x8122,2),
+          "same-valued ancestor word is not this call's origin");
+    cpu.S=0x1ffc;
+    check(!cpu_accept_adjusted_return(&cpu,0x1ff0,0x1ffa,0x008123,2),
+          "PC-only rule still protects the caller boundary");
+    check(cpu_accept_return_word_relocation(&cpu,0x1ff0,0x1ffa,0x008123,word) &&
+          owner.adjusted_return && owner.caller_stack_limit==0x1ff5,
+          "witnessed original word preserves exact continuation and native cleanup without rebasing limits");
+    owner.adjusted_return=0;
+    check(!cpu_accept_return_word_relocation(&cpu,0x1ff0,0x1ffa,0x008123,NULL) &&
+          !cpu_accept_return_word_relocation(&cpu,0x1ff0,0x1ffa,0x008124,word) &&
+          !cpu_accept_return_word_relocation(&cpu,0x1ff0,0x1ffa,0x018123,word) &&
+          !cpu_accept_return_word_relocation(&cpu,0x1fee,0x1ffa,0x008123,word) &&
+          !cpu_accept_return_word_relocation(&other,0x1ff0,0x1ffa,0x008123,word),
+          "relocation rejects missing/wrong ownership or target");
+    cpu.emulation=1;
+    check(!cpu_accept_return_word_relocation(&cpu,0x1ff0,0x1ffa,0x008123,word),
+          "emulation is not a native word relocation");
+    cpu.emulation=0; cpu.S=0;
+    check(!cpu_accept_return_word_relocation(&cpu,0x1ff0,0xfffe,0x008123,word),
+          "wrapped relocation is rejected");
+    cpu.S=0x2000;
+    check(!cpu_accept_return_word_relocation(&cpu,0x1ff0,0x1ffe,0x008123,word),
+          "relocated frame must remain WRAM");
+    cpu.S=0x1fe0; cpu_return_scope_begin(&nested,&cpu,0x008123,0x1ff0,2);
+    cpu.S=0x1ffc;
+    check(!cpu_accept_return_word_relocation(&cpu,0x1fe0,0x1ffa,0x008123,word),
+          "an ancestor witness cannot authorize an inner same-PC return");
+    cpu_return_scope_end(&nested);
+    cpu.S=0x1ffa;
+    check(cpu_return_word_store_disjoint(&cpu,0,0x100,2) &&
+          cpu_return_word_store_disjoint(&cpu,0x80,0x100,1) &&
+          cpu_return_word_store_disjoint(&cpu,0x7e,0x3000,2) &&
+          cpu_return_word_store_disjoint(&cpu,0x7f,0x1ffb,2),
+          "ordinary disjoint WRAM writes preserve the pushed word");
+    check(!cpu_return_word_store_disjoint(&cpu,0,0x1ffb,1) &&
+          !cpu_return_word_store_disjoint(&cpu,0x80,0x1ffc,1) &&
+          !cpu_return_word_store_disjoint(&cpu,0x7e,0x1ffa,2) &&
+          !cpu_return_word_store_disjoint(&cpu,0,0x420b,1) &&
+          !cpu_return_word_store_disjoint(&cpu,0x40,0x100,2) &&
+          !cpu_return_word_store_disjoint(&cpu,0,0x1fff,2) &&
+          !cpu_return_word_store_disjoint(&cpu,0x7e,0xffff,2),
+          "aliasing, hardware, mapper-dependent and wrapping writes invalidate the witness");
+    WatchdogFrameStart();
+    cpu.S=0x1ffc;
+    check(!cpu_accept_return_word_relocation(&cpu,0x1ff0,0x1ffa,0x008123,word),
+          "watchdog invalidation cannot resurrect a return-word witness");
+    cpu_return_scope_end(&owner);
+}
+
 int main(void) {
+    test_return_word_relocation();
     test_registration_and_initialization();
     test_indirect_pointer();
     test_block_history();
