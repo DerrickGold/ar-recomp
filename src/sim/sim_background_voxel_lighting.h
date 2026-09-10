@@ -37,5 +37,11 @@ void SimBackgroundVoxelLighting_VertexBrightnesses(
     uint8_t directional_brightness,
     SimBackgroundVoxelShading shading,
     uint8_t out[4]);
+/* The compact compiled-surface cache needs only the model's vertical bounds,
+ * not its authoring storage, to reproduce the same contact-light response. */
+void SimBackgroundVoxelLighting_VertexBrightnessesInRange(
+    const SimBackgroundVoxelModelFace *face, float min_z, float max_z,
+    uint8_t directional_brightness, SimBackgroundVoxelShading shading,
+    uint8_t out[4]);
 
 #endif  /* SIM_BACKGROUND_VOXEL_LIGHTING_H */

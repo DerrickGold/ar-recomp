@@ -131,10 +131,17 @@ and it is loaded at startup.
 
 ### Camera control
 
-In diorama mode and 3D town Free Cam, the right stick orbits, the triggers zoom,
+In diorama mode, 3D towns and 3D world navigation, the right stick orbits, the triggers zoom,
 and R3 recentres. The mouse equivalents are right-drag, wheel, and middle-click.
 All seven pad inputs are re-bindable; sensitivity, deadzone, and invert-Y are
-configurable. Camera bindings do nothing outside these modes.
+configurable. Dynamic town orbit returns to its baseline on release.
+World navigation allows full-globe inspection in either town camera mode and
+smoothly centers the planet while orbiting. Release returns the orbit to the
+Palace travel direction; deliberate zoom-out keeps the centered framing until
+you zoom back in or reset. Its zoom/reset state lasts only for that world-map
+visit and does not overwrite the town camera settings.
+Entering and leaving towns still uses the existing game menus.
+Camera bindings do nothing outside these modes.
 
 ### Host actions on the pad
 

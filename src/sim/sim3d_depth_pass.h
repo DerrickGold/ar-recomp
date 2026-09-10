@@ -8,7 +8,7 @@
 
 typedef enum Sim3DDepthPassLayer {
   /* Invisible terrain geometry is submitted first and writes only depth.  The
-   * textured town ground remains in the SDL color pass, while this layer lets
+   * textured town ground remains in the ordinary color pass, while this layer lets
    * the same hills and cliff skirts reject solid models hidden behind them. */
   kSim3DDepthPass_DepthOccluder,
   kSim3DDepthPass_Solid,
@@ -21,6 +21,20 @@ typedef enum Sim3DDepthPassLayer {
    * still test against the shared depth target, but use a no-depth-write
    * pipeline so smoke/glow cannot punch transparent holes through mountains. */
   kSim3DDepthPass_Effect,
+  /* Colored world surfaces share opaque depth with authored town models.
+   * Blur/haze overlays test that surface depth without replacing it. These
+   * values are appended to preserve existing project-private layer IDs. */
+  kSim3DDepthPass_Ground,
+  kSim3DDepthPass_GroundBlur,
+  kSim3DDepthPass_GroundHaze,
+  /* World weather shares one repeating atlas. Shadows sample the exact
+   * ground mesh; cloud bodies test opaque depth without writing it. */
+  kSim3DDepthPass_CloudShadow,
+  kSim3DDepthPass_Cloud,
+  /* Independent globe cutouts can coexist with the active town's atlas. */
+  kSim3DDepthPass_WorldMountain,
+  /* Sorted translucent density slices; independent atlas, no depth writes. */
+  kSim3DDepthPass_VolumeCloud,
   kSim3DDepthPassLayerCount,
 } Sim3DDepthPassLayer;
 
@@ -38,8 +52,8 @@ bool Sim3DDepthPass_Require(ArRenderDevice *device);
 
 /* A viewport-sized, transparent color target paired with a real D32 depth
  * attachment. Geometry is collected by material so texture changes cost a
- * handful of draws; draw order inside and between those groups is resolved by
- * the GPU depth test, not by backend painter ordering. */
+ * handful of draws. Opaque visibility is resolved by GPU depth, not painter
+ * ordering; transparent overlays test depth without replacing it. */
 bool Sim3DDepthPass_Begin(ArRenderDevice *device, int width, int height,
                           ArRenderFilter output_filter);
 /* Ordinary backend textures are not necessarily valid sampling resources for
@@ -50,6 +64,14 @@ bool Sim3DDepthPass_Begin(ArRenderDevice *device, int width, int height,
 bool Sim3DDepthPass_UploadMountainAtlasRegions(
     ArRenderDevice *device, const uint32_t *argb_pixels,
     int width, int height, int pitch,
+    const ArRenderRectI *regions, int region_count);
+/* Independent pass-owned atlas storage for Mountain, WorldMountain, Ground,
+ * GroundBlur, Cloud or VolumeCloud.
+ * The layer is semantic material identity, never a native texture handle.
+ * Uses the same ARGB/pitch/dirty-region contract as the mountain wrapper. */
+bool Sim3DDepthPass_UploadAtlasRegions(
+    ArRenderDevice *device, Sim3DDepthPassLayer layer,
+    const uint32_t *argb_pixels, int width, int height, int pitch,
     const ArRenderRectI *regions, int region_count);
 bool Sim3DDepthPass_AppendQuad(Sim3DDepthPassLayer layer,
                                const Sim3DDepthVertex vertices[4]);

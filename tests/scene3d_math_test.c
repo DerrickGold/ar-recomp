@@ -4,6 +4,7 @@
 #include <math.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <string.h>
 
 static int failures;
 
@@ -16,6 +17,114 @@ static int failures;
 
 static bool Near(float actual, float expected) {
   return fabsf(actual - expected) < 0.001f;
+}
+
+static void CheckClippedPolygon(const Scene3DClipPoint input[3],
+                                 const Scene3DClippedPolygon *polygon) {
+  CHECK(polygon->count == 0 || (polygon->count >= 3 &&
+        polygon->count <= kScene3DClippedPolygonCapacity));
+  double winding = 0;
+  for (int i = 0; i < polygon->count; i++) {
+    const Scene3DClippedVertex *v = &polygon->vertices[i];
+    const Scene3DClippedVertex *next = &polygon->vertices[(i + 1) % polygon->count];
+    CHECK(v->point.w > 0 && isfinite(v->point.w));
+    CHECK(fabsf(v->point.x) <= v->point.w + .00001f);
+    CHECK(fabsf(v->point.y) <= v->point.w + .00001f);
+    CHECK(fabsf(v->point.z) <= v->point.w + .00001f);
+    float x = 0, y = 0, z = 0, w = 0, weight = 0;
+    for (int p = 0; p < 3; p++) {
+      CHECK(v->weights[p] >= 0 && v->weights[p] <= 1);
+      weight += v->weights[p];
+      x += input[p].x * v->weights[p];
+      y += input[p].y * v->weights[p];
+      z += input[p].z * v->weights[p];
+      w += input[p].w * v->weights[p];
+    }
+    CHECK(fabsf(weight - 1) < .00001f);
+    CHECK(fabsf(v->point.x - x) < .00001f);
+    CHECK(fabsf(v->point.y - y) < .00001f);
+    CHECK(fabsf(v->point.z - z) < .00001f);
+    CHECK(fabsf(v->point.w - w) < .00001f);
+    winding += (double)v->weights[1] * next->weights[2] -
+        (double)next->weights[1] * v->weights[2];
+  }
+  CHECK(winding >= -.000001);
+}
+
+static float ClipTestCoordinate(uint32_t *state) {
+  *state = *state * UINT32_C(1664525) + UINT32_C(1013904223);
+  return (float)(*state >> 8) * (6.0f / 16777216.0f) - 3;
+}
+
+static void TestHomogeneousClipping(void) {
+  Scene3DClipPoint triangle[3] = {
+    {-.5f, -.5f, 0, 1}, {.5f, -.5f, 0, 1}, {0, .5f, 0, 1},
+  };
+  Scene3DClippedPolygon polygon;
+  CHECK(Scene3D_ClipTriangle(triangle, &polygon));
+  CHECK(polygon.count == 3);
+  for (int i = 0; i < 3; i++) {
+    CHECK(!memcmp(&triangle[i], &polygon.vertices[i].point, sizeof(triangle[i])));
+    for (int p = 0; p < 3; p++) CHECK(polygon.vertices[i].weights[p] == (i == p));
+  }
+  CheckClippedPolygon(triangle, &polygon);
+  /* Cross the near plane, then each side/far plane, while preserving winding
+   * and source weights for exact shared opaque/shadow receiver geometry. */
+  triangle[2].z = -2;
+  CHECK(Scene3D_ClipTriangle(triangle, &polygon));
+  CHECK(polygon.count == 4);
+  CheckClippedPolygon(triangle, &polygon);
+  for (int axis = 0; axis < 3; axis++) {
+    for (int sign = -1; sign <= 1; sign += 2) {
+      triangle[2] = (Scene3DClipPoint){0, .5f, 0, 1};
+      if (axis == 0) triangle[2].x = sign * 2;
+      if (axis == 1) triangle[2].y = sign * 2;
+      if (axis == 2) triangle[2].z = sign * 2;
+      CHECK(Scene3D_ClipTriangle(triangle, &polygon));
+      CHECK(polygon.count >= 3);
+      CheckClippedPolygon(triangle, &polygon);
+    }
+  }
+  /* All-behind and on-plane endpoints must not generate a divide by zero or
+   * duplicate intersection vertices. */
+  for (int i = 0; i < 3; i++) triangle[i].w = -1;
+  CHECK(Scene3D_ClipTriangle(triangle, &polygon) && polygon.count == 0);
+  triangle[0] = (Scene3DClipPoint){-1, -1, -1, 1};
+  triangle[1] = (Scene3DClipPoint){1, -1, -1, 1};
+  triangle[2] = (Scene3DClipPoint){0, 1, -2, 1};
+  CHECK(Scene3D_ClipTriangle(triangle, &polygon) && polygon.count == 0);
+  triangle[2] = (Scene3DClipPoint){0, 1, 0, 1};
+  CHECK(Scene3D_ClipTriangle(triangle, &polygon) && polygon.count == 3);
+  CheckClippedPolygon(triangle, &polygon);
+
+  uint32_t state = UINT32_C(0x51a7c1);
+  for (int attempt = 0; attempt < 10000; attempt++) {
+    for (int i = 0; i < 3; i++) {
+      triangle[i].x = ClipTestCoordinate(&state);
+      triangle[i].y = ClipTestCoordinate(&state);
+      triangle[i].z = ClipTestCoordinate(&state);
+      triangle[i].w = ClipTestCoordinate(&state);
+    }
+    CHECK(Scene3D_ClipTriangle(triangle, &polygon));
+    CheckClippedPolygon(triangle, &polygon);
+    Scene3DClippedPolygon repeated;
+    CHECK(Scene3D_ClipTriangle(triangle, &repeated));
+    CHECK(!memcmp(&polygon, &repeated, sizeof(polygon)));
+  }
+  triangle[0].x = NAN;
+  CHECK(!Scene3D_ClipTriangle(triangle, &polygon) && polygon.count == 0);
+  triangle[0].x = INFINITY;
+  CHECK(!Scene3D_ClipTriangle(triangle, &polygon) && polygon.count == 0);
+  CHECK(!Scene3D_ClipTriangle(NULL, &polygon) && polygon.count == 0);
+  CHECK(!Scene3D_ClipTriangle(triangle, NULL));
+  const float identity[16] = {1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
+  Scene3DClipPoint point = {0};
+  CHECK(Scene3D_TransformToClip(identity, 2, 3, 4, &point));
+  CHECK(point.x == 2 && point.y == 3 && point.z == 4 && point.w == 1);
+  CHECK(!Scene3D_TransformToClip(identity, NAN, 3, 4, &point));
+  CHECK(point.x == 2 && point.y == 3 && point.z == 4 && point.w == 1);
+  CHECK(!Scene3D_TransformToClip(NULL, 2, 3, 4, &point));
+  CHECK(!Scene3D_TransformToClip(identity, 2, 3, 4, NULL));
 }
 
 static Scene3DPoint ProjectWorldPoint(const float matrix[16],
@@ -67,6 +176,7 @@ static void CheckClipDepthPreservesPainterOrder(
 }
 
 int main(void) {
+  TestHomogeneousClipping();
   const int width = 256, height = 224;
   const float aspect = (float)width / (float)height;
   Scene3DCamera camera = {

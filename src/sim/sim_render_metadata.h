@@ -7,6 +7,7 @@
 
 #include "constants.h"
 #include "sim_world_navigation_scene.h"
+#include "sim_world_navigation_towns.h"
 #include "snesrecomp/runner.h"
 #include "snesrecomp/game/types.h"
 
@@ -85,11 +86,13 @@ typedef enum SimRenderFeature {
 typedef enum SimViewKind {
   kSimView_None,
   kSimView_Enhanced,
-  /* Inter-town map $09: full developed world with a forced perpendicular
-   * ground camera. Scripted in-plane rotation remains allowed. */
+  /* Inter-town map $09: full developed world. Its authentic affine remains
+   * the navigation control signal, then feeds the shared oblique 3D camera. */
   kSimView_WorldNavigation,
   kSimView_AuthenticPicker,
   kSimView_AuthenticFallback,
+  /* Native Palace foreground with an independently framed globe backdrop. */
+  kSimView_SkyPalace,
 } SimViewKind;
 
 /* Per-frame D2 capture result. Kept in the frame-owned metadata contract so
@@ -976,6 +979,10 @@ typedef struct SimFrameData {
    * developed-map serial. Presentation consumes this value copy; invalid means
    * authentic Mode 7 must own the frame. */
   SimWorldNavigationScene world_navigation_scene;
+  /* All six developed settlements reduced to immutable navigation LOD
+   * objects. Their full active-town pixels remain a separate near-view asset;
+   * these semantics are sufficient for globe-scale 3D silhouettes. */
+  SimWorldNavigationTowns world_navigation_towns;
   uint32_t build_serial;
   uint32_t integrity_flags;
   bool atlas_valid;
@@ -1003,8 +1010,9 @@ typedef struct SimFrameData {
   uint64_t separated_hash;
   uint32_t separated_backdrop_argb;
   bool object_half_add;
-  /* Simulation-town perspective camera only. World navigation keeps these
-   * zero and consumes world_navigation_scene's forced top-down affine map. */
+  /* Shared town/navigation perspective camera. Navigation first uses its
+   * captured affine for focus, in-plane rotation and zoom, then places that
+   * plane through this same oblique camera so town entry has no pose seam. */
   int16_t projection_pitch_mrad, projection_yaw_mrad;
   uint16_t projection_distance_x100;
   /* Audited town relief magnitude, independent of actor/model height. */
@@ -1089,6 +1097,13 @@ typedef struct SimFrameData {
    * shared, but these never depend on the simulation-town master. */
   uint8_t world_navigation_lighting;
   uint8_t world_navigation_clouds;
+  uint8_t sky_palace_volumetric_clouds;
+  uint8_t world_navigation_cloud_shadows;
+  uint8_t world_navigation_atmosphere;
+  uint8_t world_navigation_models;
+  uint8_t world_navigation_relief;
+  uint8_t world_navigation_ground_detail;
+  uint8_t world_navigation_mountains;
   uint8_t world_navigation_backdrop;
   uint8_t world_navigation_haze;
   /* Whether the lit window's bottom edge is inset by the maximum draw lift. */
@@ -1215,6 +1230,12 @@ void SimRenderMetadata_CaptureFrame(
     SimRenderFeatureMask requested_features,
     uint32_t diagnostic_layer_mask,
     SimRenderFeatureMask implemented_features);
+
+/* Optional Palace specialization after ordinary frame capture. The caller
+ * resolves both settings gates; game-thread semantic values are copied, not
+ * borrowed by presentation. Other map kinds are unchanged. */
+void SimRenderMetadata_CaptureSkyPalaceFrame(
+    SimFrameData *dst, const uint8 *wram, bool enabled);
 
 /* Deterministic metadata evidence.  The trace is inert unless
  * AR_SIM3D_D1_TRACE names an output JSONL file. */

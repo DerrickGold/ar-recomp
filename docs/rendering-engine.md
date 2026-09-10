@@ -2447,9 +2447,9 @@ published through `sim.projection_*` like any other tuning — two `Sim3DTuning`
 sites read it, and a camera that differed between them would be a genuinely
 confusing bug.
 
-Consequences worth stating: the right-drag is inert in Dynamic Cam, because it
-edits a pose the projection is not built from and a silent no-op is worse than
-no response; "Reset camera" restores the pose of the mode in use rather than
+Right-drag in Dynamic Cam adds a temporary orbit around its dedicated baseline
+and returns on release; it does not rewrite the saved Free Cam orientation.
+"Reset camera" restores the pose of the mode in use rather than
 always the free one; and a mode change **snaps** rather than eases, since
 easing across it swings the camera between two unrelated poses and reads as a
 knock instead of a switch.
@@ -2494,19 +2494,31 @@ every stage — ground, billboards, shadows, the cull boundary, the shroud —
 sees one camera. Adjusting the matrix afterwards would leave object anchors on
 the old one.
 
-## 13h. World-navigation full-plane scene (2026-07-27)
+## 13h. World-navigation globe scene (updated 2026-09-08)
+
+Current status: native detailed town ground/water animation, bounded mountain
+backs and boundary joins, the overhead Aitos crater/lava cap, full orbital
+inspection and raised-geometry-safe Advent descent are implemented. Existing
+town-entry/return menus and fade-covered loading are replay-verified; custom
+seamless entry/exit and globe-under-SIM remain deferred. Physical input and
+representative non-Metal acceptance are still open. The subsections below
+retain the implementation history and historical measurements; later
+follow-ups supersede their earlier open-work notes and performance numbers.
+See [the focused code-quality audit](world-navigation-code-audit.md) for current
+boundary, cache-failure, sanitizer and repeated-benchmark evidence.
 
 Map `$09` reuses the owned developed world image but not the simulation-town
-scene graph. `SimWorldNavigationScene_Build` publishes exactly one 1024x1024
-texture serial and one four-corner plane over world-map tile coordinates
-`[0,128) x [0,128)`. There is no captured town rectangle to extend, so this
-path has no `kSimUnderlayMarginPixels`, full-town canvas, separated BG planes,
-semantic town records, object atlas, sprite cull window, focus-falloff mesh, or
-cloud shroud.
+scene graph. `SimWorldNavigationScene_Build` publishes one 1024x1024 texture
+serial and the bounds over world-map tile coordinates `[0,128) x [0,128)`.
+Presentation tessellates that extent at one vertex per world tile, the same
+topology in which one world tile is one simulation-town cell. There is no
+captured town rectangle to extend, so this path has no
+`kSimUnderlayMarginPixels`, resident set of six full-town canvases, separated
+BG planes, or sprite cull window. All-town semantic object records are captured
+separately from retained simulation data.
 
-The camera is an affine top-down transform, not the town's perspective camera.
-The captured signed 8.8 Mode-7 matrix maps screen deltas to texture-source
-deltas:
+The captured signed 8.8 Mode-7 matrix remains the authoritative navigation
+control. It maps screen deltas to texture-source deltas:
 
 ```text
 [source x - focus x]   1     [ A  B ] [screen x - 128]
@@ -2516,29 +2528,82 @@ deltas:
 
 Scene construction inverts that 2x2 matrix once on the game thread and carries
 the resulting six-value source-to-authentic-screen affine map in the immutable
-`SimFrameData`. This keeps steady movement, zoom, and the action-entry spin on
-one exact camera model; the present path does not infer a transform from PPU
-registers and does not read live WRAM.
+`SimFrameData`. Presentation derives scale and heading from that map, and
+uses the captured focus to rotate fixed spherical coordinates into the
+oblique camera's frame. Movement no longer reshapes the terrain. The source point under the
+Palace remains the projection origin, so adding perspective does not slide the
+navigation cursor away from its destination.
+
+`SimWorldNavigationTerrain_*` registers each audited 32x32 town heightfield at
+the exact origin already proven by the developed-map compositor. Navigation
+adds datum offsets `{0,3,4,4,0,4}` in Fillmore..Northwall order: Fillmore's
+main plain is already 4 units, while Bloodpool is 1 and Kasandora is below 1.
+This raises low plains to a shared world altitude without changing native town
+terrain or flattening its local cliffs. Four cells on each side of town borders
+blend the registered fields. Unknown lowlands continue that common plain,
+rather than sinking into gaps between rectangular town windows.
+
+Ocean-connected broad water is flood-classified separately from narrow rivers
+and inland lakes. Its coastal envelope returns the combined field to sea datum
+over four cells. Mountains are a separate additive layer because the native
+town renderer also keeps mountains separate from its floor heightfield. Rock
+coverage comes from the original world atlas's `$40-$45` palette ramp, not
+luminance contrast: desert sand, snow plains and roofs cannot become peaks.
+Distance inside connected rock silhouettes builds continuous ridges, shoulders
+and saddles on both sides of town boundaries. `SimWorldMap_GeographySerial`
+invalidates this field only on tilemap changes, not every water-animation tick.
+
+A fixed stereographic chart now registers the authored continent on a complete
+sphere. `SimWorldNavigationGlobe_*` maps source tiles to persistent unit-sphere
+directions and exposes the inverse mapping, with an orthonormal focus/heading
+frame. Palace movement rotates that frame, rather than warping every town
+around a moving center. The conformal chart preserves local square blocks;
+its metric also scales model height to retain the authored proportions. A
+closed ocean sphere fills the uncharted hemisphere. This preserves native
+bounded travel and destination coordinates. Temporary full-globe orbital
+inspection is now implemented (acceptance notes below); seamless full-town
+descent remains unfinished and entry/exit still uses the existing menus.
+Per-vertex normals include both globe curvature and relief, so navigation light
+is no longer a uniform tint.
 
 The full map is mandatory content for this view. It is not conditional on the
 town Ground projection or World map underlay stage toggles, and the independent
 `AR_SIM3D_WORLD_NAV` master does not require `AR_SIM3D`. Compatible
 lighting/weather/colour tuning is reused by two navigation-specific effect
 gates: `AR_SIM3D_WORLD_NAV_LIGHTING` (on by default) and
-`AR_SIM3D_WORLD_NAV_CLOUDS` (off by default). The latter reuses the town
-renderer's procedural field over the complete world with no sprite-window
-hole, cull cover, or underlay margin. Navigation uploads a padded 2x2 repeat
-and samples each drifting bank with one affine quad, avoiding both
-backend-dependent UV wrapping and geometry join seams. Light
+`AR_SIM3D_WORLD_NAV_CLOUDS` (on by default). The latter reuses the town
+renderer's density/tint language with no sprite-window hole or underlay margin.
+Navigation now samples a continuous 3D noise field on the full unit sphere,
+including unmapped ocean. Three 512x256 spherical banks share a padded 1024x768
+atlas: longitude endpoints agree, pole rows are constant, and quad UVs unwrap
+across longitude zero. Rigid field rotation supplies drift without sliding a
+rectangular texture past the poles. A 48-ring/96-sector visible shell replaces
+the old map-bound 48x48 mesh and its prominent rectangular coverage edge. Light
 direction/elevation, shadow darkness/softness, cloud density/altitude, and
 drift remain immutable frame values. Cloud bodies use `$0316` as a camera
 height axis: the default deck is above the camera at near `$0206`, crossed
 smoothly during zoom, and visible at middle/far `$040A/$0562`. Ground shadows
-remain visible below the deck.
+remain visible below the deck. Shadow displacement is in UV space over the
+exact cached 128x128 colored ground mesh and the complete ocean sphere, so
+coverage does not stop at the map edge. All shadow banks share one material
+draw; bodies share another and fade only at their true spherical tangent.
+Fully hidden back-side ocean shadow quads are culled, and cloud coordinates
+are reused across softness samples. Ground coordinates also remain cached
+while the field rotation is unchanged. Cloud/body/shadow settings stay live.
 
-The town atmospheric backdrop is also shared. Navigation uses its synthetic
-horizon because an affine top-down camera has no perspective horizon, filling
-every pixel exposed past the finite map during wide output and spin. `$0341`
+Navigation uses its own deep-navy space gradient and deterministic starfield;
+the close-town sky is unchanged. A blue atmospheric rim encloses the globe,
+and aerial haze remains blue rather than blending terrain into black space.
+The cloud deck and outer air envelope derive from the cached global terrain
+maximum, including the landscape-height multiplier and separately authored
+native mountain rise, rather than the old fixed
+four-unit plain. Clouds clear that maximum by at least 0.35 world tile and the
+outer shell clears the clouds by another 0.75 tile. The common sea-relative
+datum prevents the shell from changing size as focus moves between towns.
+Its blue interior continues down to the ocean silhouette without a detached
+halo/black gap. Regression coverage checks projected terrain enclosure from
+all six towns at 0%, 50%, 100% and 150% landscape height.
+`$0341`
 provides the authoritative active location: `$01:B6CA` selects one of seven
 256x256 source regions from ROM table `$01:B73C`, the same selection used for
 the label/destination. A world-space mesh keeps that region fully sharp and
@@ -2547,11 +2612,1666 @@ surrounding world. `$01:B6CA` clears `$0341` before scanning; when the Palace
 is outside all borders, zero removes the clear-region cutout and the complete
 world remains hazed.
 
-A 2048x2048 high-fidelity world remains research. At that scale one world cell
-can receive its native 16x16 town footprint and each 32x32 town can occupy a
-512x512 window, but production must not switch until all six ROM tilesets,
-palettes, metatile translations, animated/development cells, seams, and far
-zoom mips can be reconstructed deterministically.
+Navigation now uploads a 2048x2048 Scale2x reconstruction, with compatible
+shades feathered into the original world material at boundaries. Different
+live materials always win: the pristine red lake must never bleed into a
+cleansed blue Bloodpool shoreline, nor sand back into reclaimed land. This improves
+sampling but is not six native 512x512 town canvases; reconstructing every
+town's tileset, palette, metatile and animation at full native fidelity remains
+open work.
+
+`SimWorldNavigationTowns_Capture` publishes the shared voxel identities for
+houses, factories, windmills, bridges, sanctuaries, landmarks and per-cell
+foliage. Presentation uses the actual town model cache, proportions, regional
+palettes and connected-tree variants, with projected-size LOD and a shared D32
+colored terrain/ocean/model depth pass. There is no separate generic box/pyramid proxy
+renderer. Building light is deliberately restrained to retain palette identity
+at globe scale. Fields and unsupported plot kinds retain their developed map
+art. Source-vs-footprint offsets keep angled town structures registered on the
+top-down map without baking an angled screenshot into the globe.
+
+Ground and models must use the same native `$7F:6B18` town-enable words.
+Active structure records can survive a progress reset even though the loader
+clears that town's ground. Never infer an unlocked town from those stale
+records. Populated-save visual replays use
+`tests/fixtures/sim3d/world-navigation-settings.ini` with `save_edit_armed=Off`,
+not the sim-actions fixture that resets five towns to Act 1. With a temporary
+copy of `backup-testing-2.srm`, the correct loader publishes 2623 changed world
+tiles; the reset fixture published only 551. The original save is untouched.
+Regressions cover stale records, rock-vs-sand/snow classification, town-boundary
+continuity, elevated plains, ocean/inland-water distinction and wave-invariant
+relief. The remaining orbital-inspection/descent work still requires acceptance
+testing; the performance follow-up below covers the current navigation view.
+
+#### Navigation performance follow-up
+
+`AR_PERF=1` now includes navigation artwork upload, terrain projection, authored
+model compilation/shading, model projection, depth submission and weather in
+the existing portable SIM performance counters. Measurements use the same
+populated temporary save, 1792x1344 output, Quality preset, 100% landscape
+height, all cloud layers and the gf400-800 navigation tour.
+
+The old Debug path (`runs/20260907-214746/`) spent about 54ms per stationary
+frame recompiling models, rising above 200ms in flight. A 512-entry cache was
+thrashing across several towns. The shared CPU cache now reserves working-set
+headroom before any borrowed model pointers are obtained. Sixteen-way sets
+reduce collision churn; storage grows on demand, is bounded at 8192 entries,
+and is released by the existing resource reset. Allocation failure preserves
+the smaller functional cache. This exchanges bounded CPU memory for retention,
+without introducing backend types or changing the runner/frame ABI.
+
+Cloud layers share four projected 49x49 grids (three shadow offsets and one
+deck) per presentation instead of projecting every repeated quad corner in
+every layer. Layer UVs, opacity, triangle count and wind remain unchanged.
+Model columns reuse exact spherical normals at repeated XY coordinates;
+position and depth use one matrix projection. Ground color and depth share
+one vertex projection, cached until camera, viewport, light or geography
+changes. Scale2x skips redundant blending and per-neighbor bounds work while
+retaining the same output, checked against a scalar reference at every texel.
+
+The optimized `play` build (`runs/20260907-215835/`) measured 67-99 fps through
+the populated tour, around 8.3-13.6ms presentation time in the logged windows.
+This is not an apples-to-apples compiler comparison with the old Debug
+numbers: the final Debug replay (`runs/20260907-220013/`) separately measured
+20-40 fps / 24-48ms presentation time, up from 3-8 fps before optimization.
+The play build
+still has a roughly 212ms first-entry compilation/upload hitch. Persistent
+GPU geometry and staged warm-up are future opportunities; neither reducing
+model detail nor dropping clouds/objects was used to obtain that initial result.
+
+#### Overview LOD and opaque occlusion follow-up
+
+The navigation LOD policy now biases toward the actual town **Low** models,
+not replacement proxies: projected footprint below 32 pixels uses Low,
+32-64 uses Balanced, 64-96 High, and 96 or more Ultra. The global town detail
+setting remains an upper bound. Existing viewport, distance and subpixel
+object rejection runs before model compilation; surviving geometry is
+depth-tested per fragment, not CPU occlusion-query culled. The navigation
+test checks that an overview-sized factory hits the shared Low model cache
+even when the global setting permits Ultra.
+
+Previously, only an invisible copy of the terrain participated in D32 while
+its colored surface and ocean used painter-ordered 2D draws. That let rear
+slopes paint through nearer slopes and omitted the ocean from building
+occlusion. Navigation now batches the **colored** ground, mountain relief,
+ocean and authored models into one depth target. Ground blur and regional
+haze use the same projected vertices/depth with depth writes disabled, so
+the old rear-slope haze cannot paint through a foreground ridge either.
+The fixed-coordinate sphere follow-up below also moves clouds into shared depth;
+the atmospheric envelope remains a backdrop silhouette.
+
+Ground and downsampled blur atlases have separate pass-owned material slots
+from the native town mountain atlas. The existing mountain upload wrapper
+and layer IDs are preserved; the portable contract exposes ARGB pixels,
+rectangles and semantic layers only. Native texture/transfer ownership stays
+in the backend, and all slots are released by its resource reset. No shader,
+runner ABI or frame-layout change was needed for this depth follow-up.
+The GPU integration test reverses overlapping terrain submission order,
+checks hidden/visible buildings and mountain atlas isolation, verifies
+equal-depth haze and occluded overlays, and repeats across resource reset.
+
+The same populated play tour (`runs/20260907-221650/`) now reports 104-108 fps
+in the steady flight windows, with 5.9-8.0ms presentation time at 1792x1344.
+This includes all cloud layers and uses the newly permitted overview LOD
+policy. Bloodpool and Kasandora captures at gf500/gf700 verify occlusion and
+retained town appearance. These are local Metal measurements, not claims
+of tested performance on every supported GPU backend.
+
+#### Fixed-coordinate sphere and low-end controls
+
+The current sphere tour (`runs/20260907-223456/`, gf400-2200) visits all six
+town regions with fixed geography, a closed ocean, tangent-bounded atmosphere,
+depth-tested clouds and exact-ground cloud shadows. At 1792x1344 on local
+Metal, the play build measured 97-105 fps / 7.1-9.2ms presentation windows.
+Cloud shadows now cost more geometry than the former painter overlay, but
+reuse cached terrain projection and batch into one draw. The chart transform
+uses rational arithmetic instead of per-point trigonometric compression.
+
+All optional stages can be switched at runtime. Defaults keep the complete
+scene. Navigation-specific gates do not change settings inside SIM towns:
+
+| Setting key | Work skipped when Off |
+|---|---|
+| `sim3d_world_navigation_lighting` | Terrain lighting, model relighting, color grading and directional cloud shadows |
+| `sim3d_world_navigation_clouds` | Cloud atlas creation, cloud geometry and cloud shadows |
+| `sim3d_world_navigation_cloud_shadows` | Shadow geometry/submission, while retaining visible cloud bodies |
+| `sim3d_world_navigation_atmosphere` | Atmospheric envelope generation/drawing |
+| `sim3d_world_navigation_towns` | Authored model compilation, projection and submission; live ground art remains |
+| `sim3d_world_navigation_relief` | Heightfield preparation/sampling; the base globe remains spherical |
+| `sim3d_world_navigation_ground_detail` | Native town-ground composition; overview artwork remains (native mountains can still need the shared source decoder) |
+| `sim3d_world_navigation_mountains` | Native mountain scene/atlas preparation and projection; inferred overview relief remains |
+| `sim3d_cull_haze` (shared) | Regional haze and blurred-ground layers |
+| `sim3d_backdrop` (shared) | Space gradient/starfield |
+
+The corresponding navigation environment aliases are `AR_SIM3D_WORLD_NAV_`
+followed by `LIGHTING`, `CLOUDS`, `CLOUD_SHADOWS`, `ATMOSPHERE`, `TOWNS`,
+`RELIEF`, `GROUND_DETAIL`, or `MOUNTAINS`. Ground and mountains share decoded
+source variants; disabling one does not disable the other. The shared haze stage switch is `AR_SIM3D_CULL_HAZE_STAGE`, not
+the numeric `AR_SIM3D_CULL_HAZE` strength. The town quality preset also caps
+navigation models (Off disables them); Custom detail/style controls remain
+available when only the navigation master is enabled. Town-only LOD/facing/
+shading controls are not misleadingly enabled for a mode that does not use them.
+
+`tests/fixtures/sim3d/world-navigation-low-settings.ini` provides a non-editing
+low-end replay configuration. In `runs/20260907-224325/`, the same populated
+gf400-800 tour retained live map/navigation with one depth draw, no cloud or
+model work, and 1.8-1.9ms presentation windows (116-117 fps under display pacing).
+This is a selectable reduced-effects profile, not the full-quality benchmark.
+Tests pin disabled-stage work counts, Low model reuse, live restoration,
+chart round-trip/conformality/rigid-distance invariants and GPU cloud occlusion.
+The production replay `runs/20260907-224635/` additionally switches clouds Off
+at gf420 and back On at gf620 without restarting: cloud time drops to 0ms,
+depth batches drop from six to four, then both cloud batches return. Town 3D
+is disabled throughout, verifying the navigation controls remain independent.
+
+#### Native-resolution ground and perspective separation
+
+Fallback checkpoint `a41b1e4` preserves the complete pre-native-ground globe.
+The detailed-ground stage adds 16x16-pixel native terrain cells inside the
+existing 2048x2048 atlas, without taking screenshots or requiring town visits.
+`SimTownGroundArt` copies bounded immutable ROM assets at startup and lazily
+decodes only requested variants. Stock map-00 asset scripts select raw
+big-endian metatile definitions at file `$0C881A`, character banks at `$060000`
+and `$064000`, and palettes at `$0E3B93` (temperate) / `$0E3D93` (Northwall).
+The native `$02:C58C` gate selects the second character bank at development
+tier 2 or greater. Traversal bit `$0200` is cleared before decoding, and
+transparent character index zero preserves the existing globe texel.
+
+The game-side town capture publishes row-major terrain for all six enabled
+towns, the native tier byte and model-source ownership masks. These are value
+snapshots, not WRAM/PPU pointers. Masked buildings and trees receive the native
+plain tile; bridges receive their native river tile (`$41` north-south, `$3A`
+east-west). When models are disabled, their overview glyphs remain instead.
+Unresolved structure markers retain existing art. The atlas cache watches this
+ground snapshot separately from Mode-7's image serial: source changes and live
+toggle changes repaint; camera movement and animated model poses do not.
+
+Mountain tiles are **not** ordinary ground material. Their authored slopes and
+silhouettes already encode perspective. `SimBackgroundMountains_TileFlags`
+excludes mountain cells from the native-ground overlay. Cliff faces are also
+excluded unless the owned-corner geometry described below is active; only then
+can their native art follow the correct inclined surface and closed walls.
+The independent native-mountain stage below can replace
+their overview relief and artwork with actual inclined geometry. Seamless
+descent still requires a matched camera/terrain registration and visual
+acceptance across boundaries, not just identical local mountain mesh formulas.
+The native town CHR strip now animates through immutable phase variants as
+described below; the existing world-water source remains independent. Aitos's
+native lava palette pulse is now reproduced independently as described below;
+other town palette effects and seamless animation-phase handoff remain open.
+
+`actraiser_sim_town_ground_art_test` compares every pixel of all 256 terrain
+metatiles in all four variants against the existing town-canvas renderer, using
+synthetic assets in CTest; passing a local ROM path runs the same oracle on real
+assets without committing ROM-derived fixtures. Composition tests cover exact
+registration, feathering, padding, bridge restoration, disabled/unresolved
+models, exclusion of mountain faces, and geometry-gated cliff artwork. Presenter tests cover
+native-source revisions with an unchanged Mode-7 serial, tier changes, no
+camera-triggered uploads and live toggle restoration. The ground addition
+raised the suite to 142 tests; the mountain/cloud follow-up below raises it to 143.
+
+The populated-save six-town tour `runs/20260907-231919/` covers gf400-2200
+with native ground enabled; `runs/20260907-232440/` is the otherwise matched
+overview-only control. Both use the play build, local Metal at 1792x1344 and
+all effects. The 18 steady presentation windows average 8.36ms with native
+ground (7.3-9.3ms; 97-104 fps) versus 8.19ms without it (7.3-9.0ms;
+98-105 fps). This is local diagnostic evidence, not a cross-platform budget;
+the one-time entry frame remains about 105-120ms. Geometry and six depth draws
+are unchanged. The native overlay shares the existing atlas upload rather
+than adding a draw or a per-town GPU texture.
+
+Live-switch replay `runs/20260907-232607/` disables detailed ground at gf420
+and restores it at gf620. Its gf500 capture is byte-identical to the Off
+control and gf700 is byte-identical to the On control, with no restart.
+The original `backup-testing-2.srm` and isolated replay copy retain SHA-256
+`480a8375b6255ad681202986640c5b06889458125ec0f82641a0e4fb425c0d45`.
+Visual inspection covers the six town regions, native shores/paths and
+snow, model ground cleanup and the still-overview mountain faces. Native
+ground is an independently switchable integration step, not final mountain
+or descent acceptance. These earlier timings precede the full-sphere cloud and
+native-mountain stages below.
+
+#### Shared native mountains and globe-wide weather
+
+`SimBackgroundMountainMesh` now owns the existing town renderer's inclined
+plane, tapered stack and fitted silhouette-wall construction. It emits local
+coordinates and source UVs through a portable callback; town projection, lean,
+live source lookup and crater effects remain with the town renderer. Navigation
+uses the same complete audited object stamps from immutable row-major retained
+terrain, copies native cutouts with the same semantic silhouette masks, and
+retains Low faces/walls for the overview. Native volcano rise remains 1.12x.
+Unknown topology keeps its prior overview fallback rather than guessing stamps.
+
+The native scene owns a separate 512x512 globe mountain atlas. Its appended
+`WorldMountain` depth material can coexist with the active town's `Mountain`
+material, avoiding an atlas-ownership collision during future combined views.
+The game/runner ABI and backend texture handles do not enter these modules.
+Native source/tier changes rebuild; camera motion and Mode-7 water animation
+only reproject. Disabling the stage releases its CPU scene and restores ground
+art/height ownership. Allocation or upload failure keeps the overview surface.
+The original inferred mountain bump is removed under accepted native footprints
+and a feathered shoulder, and mountain cells receive clean native ground/snow
+so the old perspective stamp is not doubled underneath the raised model.
+
+Native-mountain tour `runs/20260907-234057/` verifies the first integration.
+The full-sphere weather tour `runs/20260907-234936/` covers gf400-2200 across all
+six regions, including the previously uncovered ocean around Northwall.
+Its late performance windows overlap a development build and are not an
+isolated performance result.
+
+The final isolated tour, `runs/20260907-235836/`, completes gf2210 with all
+native stages and weather enabled at 1792x1344 on local Metal. Its 19 steady
+presentation windows average 9.25 ms (7.8–10.3 ms), with 87–102 fps, seven
+depth draws and roughly 1.00–1.05 million vertices per present. First-entry
+maximum is 98 ms; steady globe-wide weather costs 3.14–3.19 ms. Seven exact
+frame comparisons spanning all six regions and the final frame are byte-for-
+byte identical to the pre-culling weather tour: opaque-planet shadow culling
+and stationary-field ground-UV memoization preserve those rendered pixels.
+These are local replay measurements, not a cross-platform frame-rate promise.
+
+Live weather replay `runs/20260908-000105/` disables clouds at gf420 and restores
+them at gf620. Steady cloud work becomes 0.000 ms and depth draws drop from
+seven to five while disabled, then return to seven and 3.171 ms. Restored
+gf700 is byte-identical to the isolated always-on tour. Both the source
+`backup-testing-2.srm` and isolated retained save keep the SHA-256 above.
+
+Drift-enabled replay `runs/20260908-000507/` completes gf1210, with visible
+coverage beyond Northwall's map boundary and 84–102 fps (8.2–10.7 ms steady
+presentation, 3.43–3.46 ms steady weather after the entry window). An additional
+atlas regression caught and corrected one-texel phase drift in padded longitude
+samples: endpoint-inclusive source rows repeat every width-minus-one intervals,
+not every width texels. The presenter upload test checks that exact period in
+every atlas row, in addition to the spherical-source continuity tests.
+The post-correction drift replay `runs/20260908-000834/` also completes gf1210
+with nine screenshots, 84–101 fps, 8.1–10.7 ms steady presentation and seven
+depth draws. Debug/play builds and all 143 tests pass after the correction.
+
+Tests cover local mesh height/contact and fitted walls across all four town
+quality levels; native scene ownership, masks, atlas cutouts, malformed-town
+fallback and resource destruction; row-major/paged classifier equality;
+independent live stage restoration, source-tier invalidation, camera cache
+hits and upload failure; and removal/restoration of inferred mountain relief.
+The GPU test verifies simultaneous native town and globe mountain textures,
+front/back depth relationships and reset. Spherical-cloud tests cover exact
+longitude/pole continuity, UV seam unwrapping, bounded coordinates over every
+hemisphere and density variation. Production-presenter tests verify full-ocean
+shadow submission and unchanged independent effect gates. All 143 tests pass.
+
+#### Native mountain boundary registration
+
+`SimWorldNavigationMountainTransition` now builds a retained 12-cell transition
+around accepted native mountain source footprints. The nearby inferred ridge
+envelope approaches the native scene's maximum local rise through the globe
+metric, then smoothly returns to the original broad-range profile farther away.
+Town floor datums and ocean/river/lake heights are unchanged. Unsupported town
+windows keep their original terrain exactly; a four-cell exterior fade approaches
+that constraint without a new border step.
+
+The material pass derives six-tone ramps from the already silhouette-masked
+native mountain atlas, retaining its brown/snow palette identities. A categorical
+`SimWorldMap_MountainShades` copy identifies only the developed map's authored
+rock texels; it never classifies mountains from brightness or converts sand,
+snow, water, roads or structures into rock. Overlapping town influences blend
+continuously. Sparse 16x16 material patches cover only non-town rock cells, and
+are blended into the existing world atlas without another GPU draw or material.
+No perspective-authored mountain sprite is projected flat onto that surface.
+
+Both ridge factors and material patches are rebuilt only on native-source or
+geography changes. Camera motion and water animation reuse them. Disabling native
+mountains, resource reset or transition-build failure restores the old surrounding
+surface. The transition has no native renderer handles or runner-private state.
+Tests cover mixed rock/non-rock cells, exact preservation of untouched pixels and
+padding, multi-town colour interpolation, smooth height constraints, malformed
+inputs, source destruction, unchanged inland-water heights, full height restoration
+and geography invalidation without native atlas re-upload. All 143 tests pass.
+
+Initial populated-save tour `runs/20260908-002006/` covers all six regions at
+gf400–2200 with seven depth draws. Northwall/Bloodpool captures demonstrate the
+snow/brown material transition and reduced surrounding ridge exaggeration.
+Final isolated tour `runs/20260908-002550/` completes gf2210 after the smooth
+fallback constraint refinement: 19 steady windows average 9.43 ms (8.3–10.5 ms),
+86–99 fps at 1792x1344 on local Metal, with seven depth draws. First-entry maximum
+is 118 ms. The transition adds CPU source preparation/composition, not a new GPU
+batch; this is local measurement rather than a cross-platform performance claim.
+Live replay `runs/20260908-002638/` switches native mountains Off at gf420 and
+On at gf620. Disabled gf500/gf600 are byte-identical to always-off control
+`runs/20260908-002715/`; restored gf700/gf800 are byte-identical to the final
+always-on tour. Source/retained save hashes remain unchanged. Debug/play builds,
+all 143 tests and `git diff --check` pass. The earlier overview-only checkpoint
+`a41b1e4` remains available independently of this native-ground/mountain/weather
+checkpoint.
+
+#### Native cliff topology on the globe
+
+The shared 129x129 overview grid could not represent the two distinct heights
+at an authored cliff edge. It implicitly borrowed the southeast cell's corner
+for both sides, turning town cliff bands into ramps. The portable
+`SimWorldNavigationTerrain_TownCellCorners` now evaluates the same world datum,
+coast, mountain contribution and four-cell town-border grading while keeping
+the requested town cell's exact corner ownership. Town terrain data is unchanged.
+
+`SimWorldNavigationCliffs` retains sparse replacement caps and closed skirts;
+the six stock towns require 167 caps and 155 skirts, not a second full mesh.
+Shared-grid cells remain unchanged elsewhere. Opposing height intervals use
+`SimTownTerrain_ClipVisibleHigherEdge`, the town renderer's crossing-edge rule,
+so a height reversal cannot create a self-crossing wall. Skirts borrow the
+authored face's rock material, never the higher plateau's grass; cave skirts
+sample the stone jamb rather than smearing the dark entrance. Cap UVs have
+half-texel insets to prevent opposite-side material bleed. Native face artwork
+uses the existing immutable ROM provider and 2048px atlas.
+
+Presentation replaces the corresponding grid cells in **every** ground pass.
+Opaque D32, cloud shadows, blur and haze reuse identical projected vertices;
+model anchors sample the owned cap heights. Geometry, projection, and spherical
+cloud UVs are cached separately. The atmosphere bound includes all owned
+corners and restores when the stage is disabled. There are no new material
+passes or backend dependencies, no game-state writes and no new ABI settings.
+The existing detailed-ground and relief controls gate this stage; zero
+landscape height, disabled towns, missing art and resource failure preserve
+the overview fallback. Camera and water animation do not rebuild topology.
+
+Verification: all 143 tests pass, including six-town corner ownership,
+bounded sparse geometry, closed/non-crossing skirt endpoints, conditional
+native face composition and exact opaque/effect vertex correspondence through
+live ground/relief toggles. Debug and play builds pass. The isolated populated
+save tour `runs/20260908-004737/` covers all six regions at 1792x1344 on local
+Metal: 19 steady presentation windows average 9.52 ms (8.2–10.8 ms), 85–101 fps,
+and seven depth draws; first-entry maximum is 109 ms. This is close to the
+9.43 ms pre-cliff checkpoint, not a claim of a performance improvement.
+Live toggle replay `runs/20260908-005150/` turns detailed ground Off at gf420
+and On at gf620. Disabled gf500/gf600 are byte-identical to always-off control
+`runs/20260908-005235/`; restored gf700/gf800 are byte-identical to the always-on
+tour. Source and isolated-save SHA256 values remain unchanged. Checkpoint
+`0b66d88` retains the earlier native-ground/mountain/weather integration.
+
+#### Native town-water animation
+
+All six stock SIM asset scripts select video profile 2. Its `$24/$08`
+configuration at file `$01098D/$01098E` selects four `$100`-byte CHR slices
+on an eight-game-tick cadence. `$02:BAF5` retains the loaded sheet at
+`$7F:B800`; `$02:BC56` selects a slice and `$02:AF30` uploads it to VRAM
+word zero. The globe art provider reproduces that bounded replacement from
+its owned immutable character banks, not another town's live VRAM or DMA state.
+Only characters 0–7 animate. Stock affected metatiles are `$25/$2E/$2F/$35/$37`
+(water/shore), `$60/$68` (waterfalls) and `$B4`. Other river characters are
+static and are not given invented texture scrolling.
+
+`SimTownGroundArt_AnimatedMetatile` lazily decodes only affected metatiles for
+the requested native character/palette variant and phase. Phase zero and
+unaffected cells retain the static cache; all extra stock phases/variants
+together need at most 96 KiB. Unknown profile bytes or phase allocation failure
+keep static native art. Navigation selects `((uint16_t)(game_frame - 1) / 8) & 3`
+from the captured game clock. This preserves native cadence, not the phase
+offset of the last resident town; seamless descent will need explicit handoff.
+Detailed-ground Off disables this stage. No new settings/frame ABI fields,
+GPU material passes, backend dependencies or emulated-memory access are added.
+Phase changes invalidate ground pixels, not cliff topology, mountain textures,
+terrain heights or model geometry. Camera movement and frozen clocks do not
+cause extra animation uploads.
+
+Verification expands the independent town-canvas oracle to every pixel of all
+256 metatiles, four variants and four phases, using synthetic sources in CTest
+and the local ROM separately. Six-town composition checks isolate changed
+water texels, preserve static shore quadrants and destination padding, and
+reject invalid phases without output changes. Presenter checks cover the
+eight-tick boundary, phase wrap, frozen clocks, disabled-stage work and stable
+mountain uploads/geometry. Native SIM snapshots in `runs/20260908-011005/`
+at gf900/908/916/924 independently match ROM phases 3/0/1/2 byte-for-byte;
+the retained `$7F:B800` page matches the original character bank in all four.
+All 143 tests pass with macOS GPU access, and Debug/Release builds pass.
+
+The isolated six-town Metal tour `runs/20260908-011739/` at 1792x1344
+averages 9.48 ms across 19 steady presentation windows (8.2–10.6 ms),
+85–101 fps, and seven depth draws. Ground uploads remain approximately one
+per eight game ticks; adding town phases does not double the existing world
+water upload cadence. This is comparable to the preceding static-town-water
+cliff run, not a claimed speedup. Toggle replay `runs/20260908-011850/`
+disables detailed ground at gf420 and restores it at gf620: gf500/gf600
+match the earlier always-off control `runs/20260908-005235/` byte-for-byte,
+and gf700/gf800 match the new always-on tour. Both source and isolated-save
+SHA256 hashes remain unchanged. These are local checks, not low-end or
+cross-platform performance guarantees.
+
+#### Native ridge backs and protected town ground
+
+The globe's native inclined fronts and fitted side walls previously left
+the back of each ridge open. Rear slopes now follow the original per-column
+opaque silhouette, using the same native transform, art and palette. The
+front occupies 62% of the original stamp depth; the rear uses the remaining
+38%, ending on the original silhouette rather than extending a reflected
+peak into neighboring roads or water. Linear skyline runs merge within half
+a native pixel and never cross an atlas-cell boundary.
+
+Geometry is then clipped against retained town occupancy, including a different
+town across a boundary. Only mountain ground without a reserved model footprint
+can receive a rear slope. Disabled/unknown town windows and all non-mountain
+cells remain protected. Polygons crossing a forbidden cell are clipped at the
+cell edge; checking only their vertices would incorrectly span buildings.
+Wholly safe polygons retain their original quad, avoiding needless subdivision.
+Existing native fronts and side walls are unchanged. The optional mountain
+stage still owns one atlas/material pass, and source/model-mask changes rebuild
+the retained geometry through its existing cache key. No frame/settings ABI,
+backend dependency, live WRAM read or native gameplay write is added.
+
+Tests invert the rear transform against the independent silhouette masks,
+check every ground cell spanned by each polygon, reserve alternating building
+footprints beneath synthetic rock, and verify original front/wall vertices
+remain byte-identical. The optional local-ROM/WRAM oracle in
+`actraiser_sim_world_navigation_materials_test` checks the populated save without
+committing derived assets. The six-region snapshot contains five accepted
+mountain-bearing towns (Marahna has no native mountain objects): 3,509 existing
+front/wall quads plus 3,936 retained rear pieces. This closes the rear surfaces;
+it does not yet claim final geometric/material continuity with every surrounding
+inferred range or unrestricted orbital acceptance.
+
+The captured-data test also reserves Aitos's southern border as model
+footprints: 207 Kasandora rear pieces originally crossing that row are clipped
+away, proving that the originating town's mask alone is not the clearance rule.
+All 143 tests and both builds pass. Six-region visual/performance replay
+`runs/20260908-013623/` averages 10.03 ms across 20 steady presentation windows
+(8.9–11.2 ms, 82–97 fps at 1792x1344 on local Metal), with the same seven depth
+draws. The preceding checkpoint averaged 9.48 ms; this added geometry is not
+being presented as a free performance improvement. Live mountain Off at gf420
+and On at gf620 in `runs/20260908-013912/` restores gf700/gf800 byte-for-byte
+against the always-on tour. Source/isolated-save hashes remain unchanged.
+Checkpoint `1521524` preserves the state before rear closure.
+
+#### Protected native-to-overview height joins
+
+Native peaks now anchor on a separately sampled registered floor, excluding
+the independently inferred rock rise. This prevents a join from lifting its
+own native reference mesh. On the populated navigation snapshot the previous
+double lift was small (72 native vertices, maximum 0.0221 world units); it was
+not the main cause of the coarse range mismatch.
+
+The optional transition samples opaque native mesh edges at shared town-border
+grid vertices, converts their rise through the globe metric, and fits a
+four-cell exterior rock band to those constraints. In this snapshot, 61
+anchors constrain 304 vertices. Every adjacent town cell must be enabled,
+recognized mountain ground with no reserved model footprint. Interior town
+vertices, building/road/water cells, and unsupported towns keep zero join
+weight. Thus even a shared corner cannot tilt a protected cell. Propagation
+stays within supported rock; transparent atlas margins never seed a plateau.
+Premultiplied targets avoid a second fade during interpolation. The presenter
+converts physical native rise to relief units when the landscape-height
+setting changes, preserving native proportions and the floor reference.
+
+These are retained portable fields, not new draw passes or frame ABI fields.
+Native globe normals, floor anchors and rise are cached across camera motion;
+projected vertices are also retained for unchanged camera, viewport and
+lighting. Allocation failure uses the same uncached geometry. Water animation
+does not rebuild either cache. Tests cover exact anchor heights, zero influence
+on all protected-cell corners, transparent/unsupported edges, live occupancy,
+copied-field ownership, invalid input, landscape scaling, and exact projection
+restoration after camera, lighting, viewport and native-stage changes.
+
+Both builds and all 143 tests pass. Six-region visual/performance replay
+`runs/20260908-020642/` averages 9.47 ms over 19 steady presentation windows
+(8.0–10.2 ms, 88–101 fps at 1792x1344 on local Metal), with seven depth draws.
+This recovers the small rear-closure cost in this run, not a cross-platform
+speed guarantee. Mountain Off/On replay `runs/20260908-020858/` restores
+gf700/gf800 byte-for-byte against the always-on tour. The local materials
+oracle accepts a navigation-mode WRAM snapshot (`$18/$19=00/09`), using its
+native tilemap only as diagnostic input; production retains HLE map ownership.
+The broad inferred ridge profiles and low-resolution material remain visibly
+different from native peaks. Shared-grid height constraints reduce selected
+gaps, but are not a fully welded silhouette or final perspective acceptance.
+
+#### Original-stamp exterior continuation experiment
+
+Checkpoint `1ae188f` preserves the accepted original-art mismatch before this
+experiment. The globe can now complete the missing east/west columns of the
+same native mountain stamps, retaining their Low front transform, fitted side
+walls, silhouette-following rear slopes, original texels and palette. This is
+not a replacement proxy or a new synthetic mountain pattern. Original town
+faces remain unchanged. New polygons are clipped against whole semantic rock
+cells outside **every** registered town window; neighboring mountain cells are
+also excluded because that town owns its own geometry. Water, non-rock and
+unknown town ground cannot receive these continuations.
+
+The addition is transactional: failure restores the original atlas, faces,
+maximum rise and relief ownership. It waits for developed-map publication,
+then follows geography and captured town-source changes. The cache separately
+tracks developed availability, including a publication with unchanged pixels
+and serial. Water animation and camera movement do not rebuild the scene.
+There is no new frame/settings ABI field, backend resource type or draw pass.
+The existing native-mountain switch still restores the overview fallback.
+
+The populated snapshot adds 573 exterior faces (270 fronts/walls, 303 rear
+pieces). The new physical footprint excludes the old boundary-height fit:
+otherwise that inferred fill rises through the completed native slopes. All
+61 previous shared-border anchors in this snapshot touch completed footprints,
+so their inferred join weights become zero; the height-only join remains available at uncompleted
+edges in other supported layouts. Broad inferred ridge silhouettes and their
+lower-resolution material are still visibly different. This improves some
+hard stamp cuts, not every mountain seam or camera angle.
+
+Tests verify original face preservation, failed-addition rollback, original
+rear-transform correspondence, complete polygon clearance, a live non-rock
+lane through added slopes, unavailable/unchanged developed-map publication,
+no-op fallback without rock and exclusion from height-fit ownership. The
+six-region Metal replay `runs/20260908-022527/` averages 9.47 ms over 19 steady
+presentation windows (8.0–10.4 ms, 87–101 fps, 1792x1344), with seven depth
+draws. This is comparable to checkpoint `1ae188f`, not a claimed speedup or
+low-end guarantee. Toggle replay `runs/20260908-022756/` matches its always-on
+gf700/gf800 exactly; Off gf500/gf600 matches the pre-experiment fallback
+`runs/20260908-020858/` byte-for-byte. Source and isolated save hashes remain
+unchanged. Entry/exit continues to use the existing menus.
+
+#### Incremental world/town animation uploads
+
+Town water and the overview's waves advance together in normal navigation;
+optimizing only an unchanged-overview town phase does not reduce live flight
+work. Navigation now tracks geography separately from animated image serials.
+An animation-only change reconstructs the affected cells from current source
+pixels, then reapplies the native overlay, mountain cleanup and exterior
+material patches only to those cells. The water mask includes both developed
+and baseline wave tiles and their cardinal Scale2x neighbours. It does not
+consume the shared world-map bake's dirty state. Town-only phase changes are
+also supported, including reversed/wrapped clocks and static source variants.
+
+Each rebuilt cell starts from its original feathered Scale2x background;
+blending over the previous phase would accumulate shoreline colour errors and
+leave trails when texels become transparent. The mask is portable cell data;
+presentation groups horizontal/vertical runs for the existing regional atlas
+upload API. More than 256 tiny runs switch to a 16x16 grid of upload blocks,
+not lower-resolution art. Unchanged retained pixels inside those rectangles
+are copied exactly. No extra persistent image cache, backend types, shaders,
+settings or frame ABI fields are added. Geography/settings/source changes and
+resource resets retain a full rebake; failed GPU updates invalidate the image
+key so even a clock rewind retries with a complete upload.
+
+Both builds and all 143 tests pass. Differential tests compare complete padded
+2048px atlases against fresh full bakes through all phases, alpha changes,
+feather edges, source-stencil boundaries and detail/model/cliff gates. Masked
+mountain/material tests protect untouched pixels; the presenter maintains a
+mock GPU atlas and checks every pixel after partial/coarse uploads and failed
+upload recovery. Full flight `runs/20260908-025304/` matches all 19 gf400–2200
+screenshots from the pre-optimization `runs/20260908-022527/` byte-for-byte.
+The live mountain Off/On replay `runs/20260908-025406/` matches every gf400–800
+capture from `runs/20260908-022756/`; source and isolated-save hashes are unchanged.
+
+At 1792x1344 on local Metal, 18 steady presentation windows average 8.92 ms
+(7.6–9.7 ms, 92–106 fps), compared with the earlier tour's 9.47 ms. Steady
+artwork update time averages 0.764 ms versus 1.293 ms; each ordinary wave
+upload is 12.125 MiB rather than 16 MiB. Seven depth draws and all geometry,
+weather and image detail are unchanged. The 125 ms first-entry maximum still
+includes the full initial build; this pass does not fix that hitch or establish
+cross-platform/low-end performance guarantees.
+
+#### Conservative weather viewport culling
+
+The nine soft-shadow samples previously rebuilt and submitted every mapped
+receiver, including terrain entirely outside the output target. Navigation
+now retains per-vertex screen-edge outcodes alongside projected terrain,
+native cliff and spherical shell vertices. A weather face is skipped only
+when all four corners lie beyond the same edge, with a one-pixel guard band.
+A face crossing the viewport is retained even if none of its corners is
+inside. This works on the actual screen-space triangles consumed by the
+depth pass, not an approximate world-space bounding sphere or horizon test.
+All visible vertices, UVs, alpha, cloud banks, nine softness samples and
+opaque/depth relationships stay unchanged. Ground/cliff outcodes follow their
+existing geometry/projection keys; ocean and cloud shell outcodes follow each
+new shell projection. No backend, settings or frame ABI changes are needed.
+
+Presenter regressions independently derive visible receivers from the opaque
+geometry's screen bounds, require all nine shadow samples for each overlapping
+terrain/cliff face, and reject submitted fully offscreen weather. They cover
+wide and close views, focus/pitch changes, output resizing, below-cloud views,
+and disabled-effect controls. Both builds and all 143 tests pass. Six-town
+replay `runs/20260908-030003/` matches all 19 gf400–2200 screenshots from
+`runs/20260908-025304/` byte-for-byte. At the same 1792x1344 local Metal settings,
+18 steady windows average 7.92 ms (6.1–9.6 ms, 93–109 fps), versus 8.92 ms
+before this culling pass. Steady cloud work averages 2.47 ms versus 3.19 ms;
+submitted vertices average about 836,000 rather than 1,049,000 per frame.
+The seven depth draws remain. First-entry maximum is still 115 ms, not a
+solved warm-up hitch. These deterministic comparisons freeze cloud drift;
+they are not a moving-weather or cross-platform performance guarantee.
+Live clouds Off at gf420 and On at gf620 in `runs/20260908-030315/` skip both
+weather batches while disabled, then restore gf700/gf800 exactly to the
+always-on capture. Source and isolated saves retain their original hashes.
+
+#### Globe inspection and view-driven town visibility
+
+`Sim3DCamera` owns a separate, visit-local globe orbit and zoom. Existing
+right-drag/right-stick actions rotate the globe's orthonormal frame through a
+full yaw turn and either pole; release returns the orbit to the native travel
+view with the shared damped camera helper (0.65-second return parameter).
+Wheel/triggers adjust distance within the existing 2–20 range, and
+middle-click/R3 clears the visit's orbit and zoom. Leaving navigation or
+disabling its master clears this temporary state. It works independently of
+the town master and Free/Dynamic town mode without changing persisted poses,
+native WRAM coordinates or save data. Retained-frame refresh also copies this
+host-owned camera state while emulation is paused; the captured game scene
+remains immutable. The initial orbit reused the captured camera fields; the
+centering refinement below adds one application-owned `FrameSlot` float, not
+a runner ABI field or renderer/backend type.
+
+The Palace remains the original billboard, offset to its actual travel
+location as the globe rotates and omitted on the far hemisphere. Destination
+UI stays fixed. This is not a depth-clipped 3D Palace model or an automatic
+town-entry gesture. In particular, geographic haze still follows the native
+active-region selector rather than the inspection direction.
+
+Town model selection now uses the same projected footprint/viewport thresholds
+at zero and nonzero orbit. Native focus-distance cutoffs and active-label
+promotion no longer make visible buildings appear or disappear when a drag
+starts, ends, or crosses a destination label. The Low/Balanced/High/Ultra LOD
+thresholds and user quality ceiling are unchanged. The compiled model bounds,
+including roof overhangs and tree crowns, supply a conservative angular cap and
+maximum radial height. A pure globe helper rejects the cap only beyond both
+eye and object tangent horizons. Its occluder is inscribed below the inset,
+faceted opaque ocean mesh, not the larger nominal sphere. Tall buildings at
+the limb stay eligible; mountains and buildings still use shared GPU depth
+for precise per-pixel occlusion. Fully hidden models skip face projection and
+submission, though their cached geometry is still looked up for exact bounds.
+
+Tests cover full rotations and poles, camera state isolation in both town
+modes, reset/zoom limits, unchanged native navigation state, stable UI,
+Palace return, zero artwork reuploads during orbit, and identical object
+selection across tiny positive/negative/zero orbit and destination changes.
+The horizon test uses an independent segment/sphere intersection oracle over
+near/far eyes, multiple heights, cap widths and all angular separations.
+`runs/20260908-032452/` confirms all 19 normal-travel screenshots (gf400–2200)
+match `runs/20260908-030003/` exactly with the committed inspection camera at
+rest, before the view-selection adjustment. Manual mouse/pad acceptance and
+orbital GPU screenshot coverage were still pending at that point; the Mac was
+locked, so algebraic/mock-render tests were not visual acceptance. The GPU
+coverage follow-up below now addresses the rendering side of that gap.
+
+The view-selection follow-up in `runs/20260908-032849/` completes the same
+six-town replay and restores distant models that the old source-distance
+cutoffs omitted (visible along the western limb from Marahna). Its 18 steady
+windows average 8.53 ms (6.8–10.5 ms), compared with 7.93 ms (6.2–9.7 ms) in
+the immediately preceding run. This is additional visible geometry, not a
+performance win; first-entry maximum is still 122 ms. The unchanged save
+hashes and deterministic clocks are verified. These runs do not yet prove
+orbital horizon culling on the real GPU or its cross-platform performance.
+
+#### Full-presenter orbital GPU verification
+
+`actraiser_present_world_nav_gpu_test` links the actual navigation presenter,
+art providers, authored model compiler/cache, production SDL GPU backend,
+shipped shaders and D32 pass. Only host time is frozen. Shared cloud-bank
+constants and the unchanged `SimShadowLight` calculation now live in
+`present_sim3d_environment.c`, linked by the game and both presenter tests;
+neither test duplicates the atmosphere style. The new source is in the common
+build manifest and the portable renderer-boundary audit. No live game input,
+settings persistence, runner internals or save writes are linked into the test.
+
+The normal CTest case needs no ROM: a synthetic green continent/blue ocean
+pins real GPU near/far geometry, an authored factory visible above the front
+surface but invisible through the planet, cloud cover over the far ocean,
+both poles and mixed-axis orbit, exact return to the starting image, and exact
+restoration after a GPU resource reset. Distinct synthetic Palace/UI colours
+verify billboard motion, far-side disappearance, fixed UI and exact return.
+Unavailable GPU hosts report skip code 77 rather than a false pass.
+
+For local-art acceptance, the same binary accepts an explicit read-only 1 MiB
+ROM and a 128 KiB WRAM dump taken during world navigation, plus an existing
+output directory for PPM captures:
+
+```sh
+cmake --build build --target actraiser_present_world_nav_gpu_test
+ctest --test-dir build -R '^actraiser_present_world_nav_gpu$' --output-on-failure
+globe_capture_dir=$(mktemp -d)
+./build/actraiser_present_world_nav_gpu_test ./ar.sfc \
+  ./runs/20260908-032849/dump_wram.bin "$globe_capture_dir"
+```
+
+The local Metal run in `/private/tmp/actraiser-globe-gpu.JEUVij/` captures all
+six enabled towns and 1048 semantic objects at an explicit frozen middle zoom.
+Front, east, back, west, north, south and mixed-axis images render successfully;
+`captured-restored.ppm` equals `captured-front.ppm` pixel-for-pixel. Inspection
+of those images confirms native terrain/model rotation and cloud cover over
+unmapped ocean. The native-art fixture omits Palace/text captures and geographic
+haze to expose the geometry; synthetic markers test that composition separately.
+This is rendering evidence, not a live mouse/pad or moving-weather acceptance
+test, and it is not a cross-platform performance result. The images also expose
+remaining camera framing work: the town-style aim places the globe low in the
+viewport at some zooms. Source and isolated testing saves retain their hashes.
+Both Debug/Release builds and all 145 tests pass. The extraction-only gameplay
+replay `runs/20260908-034816/` retains all 19 gf400–2200 screenshots byte-for-byte
+against `runs/20260908-032849/`; sharing the environment definitions changes
+neither the normal travel image nor the chosen town model detail.
+
+#### Smooth globe inspection framing
+
+Checkpoint `b9be38a` preserves the current original-art mountain appearance and
+the initial centering implementation. Inspection now aims at the planet center
+instead of the tilted town tangent above it. Target translation and camera
+distance change together to preserve the center's axial depth, with the actual
+eye reconstructed from the same view matrix. Horizon culling, shared GPU depth,
+cloud projection and atmosphere therefore see the same camera; this is not a
+screen-space offset. Zero blend is an exact no-op, with no override of the
+player's zoom distance.
+
+The host owns an explicit 0..1 focus blend, captured as
+`sim_world_inspection_blend` alongside orbit state and refreshed for retained
+frames. It approaches inspection with a 0.16-second exponential time constant
+and returns with 0.65 seconds; this is frame-rate independent, with the tiny
+tail snapped to the target. Holding orbit targets full centering independently
+of angle wrap. A positive visit-local zoom offset uses smoothstep over the first
+distance unit, so deliberate zoom-out keeps centered framing after release;
+returning to the original distance or resetting restores travel framing. This
+state clears on leaving navigation/master disable and is never persisted.
+
+The original Palace billboard subtracts the unmodified travel screen center
+when applying its projected location. Subtracting the newly projected tangent
+origin instead would cancel reframing and leave it detached from the terrain.
+The destination UI remains screen-space. Camera tests cover full-turn wrap,
+invalid time steps, one large versus many small updates, intermediate/full
+zoom-out focus, reset and visit isolation. The production GPU test measures
+the atmospheric envelope converging to the viewport center at distances 3, 5
+and 10, with exact image restoration at zero blend. It also verifies near/far
+authored-building occlusion with the reframed eye, Palace translation without
+orbit, and unchanged UI masks on both axes. Billboard translation may change
+coverage by one raster row due to fractional pixel alignment, not scaling.
+
+The populated Metal captures in
+`/private/tmp/actraiser-globe-framing.Jhdjfe/` cover centered front, east, back,
+west, both poles and mixed-axis views with all six towns/1048 objects. Visual
+inspection confirms that the planet no longer sits against the bottom edge,
+and native terrain/model and full-ocean weather rotation still render. Exact
+front/return equality is preserved. Debug and Release game builds succeed;
+the expanded GPU checks pass. Normal six-town travel in
+`runs/20260908-040418/` matches all 19 gf400–2200 screenshots from
+`runs/20260908-034816/` byte-for-byte, and both source/isolated-save SHA256 values
+remain `480a8375b6255ad681202986640c5b06889458125ec0f82641a0e4fb425c0d45`.
+This closes the frozen-render framing check, not live mouse/pad acceptance,
+moving-weather acceptance, mountain-boundary polish or cross-platform testing.
+
+#### Density-shaped atmospheric halo and cloud limb
+
+Centered orbital captures exposed a broad, nearly constant-opacity outer ring.
+The halo now follows the view ray's closest approach to the planet, normalized
+between sea radius and the existing atmosphere radius. Its art-directed opacity
+is `0.32 * exp(-1.5*h) * (1-h)^2`, clamped at sea level and zero outside the
+envelope. This concentrates blue air near the surface and tapers smoothly to
+space with zero slope at the outer edge. It is an inexpensive artistic profile,
+not a physical scattering simulation. Cloud bodies separately fade with the
+actual normal-to-eye cosine over the last 0..0.5 facing band, rather than a tiny
+fraction of cap angle that collapses into a sharp projected rim.
+
+Both profiles are pure portable scene helpers. The presenter evaluates them
+once per camera-tangent ring (49 times per enabled shell), not per sector or
+fragment. No new shader, texture, draw pass, setting, ABI field or frame-state
+dependency is introduced. Ocean/terrain geometry, source art, native mountain
+footprints, cloud UVs, shadow receivers and all shell heights are unchanged.
+The whole-world maximum still sets cloud/atmosphere clearance; the change
+softens appearance without lowering the deck into mountains or restoring map
+boundary edges. Atmosphere and clouds retain their independent controls.
+
+Pure tests cover finite bounds, monotonic falloff, endpoint smoothness and
+invalid inputs. Presenter tests additionally inspect every atmosphere ring's
+opacity while retaining the raised-terrain enclosure sweep. The real GPU test
+checks the sky pixels beyond a synthetic ocean edge for monotonic falloff and
+bounded raster steps, plus exact restoration after Atmosphere Off. Existing
+cloud toggle, full-world coverage, camera, building-depth and UI tests pass.
+Both builds and all 145 tests pass. Seven no-atmosphere/no-cloud synthetic
+captures remain byte-identical to the framing baseline.
+
+Native orbital comparisons in `/private/tmp/actraiser-globe-atmosphere.osdoqF/`
+were inspected at centered front, both sides, far side, both poles and mixed
+orbit. The six-town Release replay `runs/20260908-041820/` retains the same
+seven depth draws and averages 8.46 ms over 18 steady windows (6.5–10.6 ms),
+versus 8.51 ms (6.6–10.7 ms) in `runs/20260908-040418/`. This is comparable local
+Metal cost, not a speedup claim; first-entry maximum remains 119 ms. These
+captures freeze cloud drift and do not replace moving-weather or cross-platform
+acceptance. Both original/isolated saves retain their recorded SHA256 values.
+Live Atmosphere Off at gf420 and On at gf620 in `runs/20260908-042021/` changes
+the intervening gf500/gf600 captures, leaves clouds active, and restores
+gf700/gf800 byte-for-byte to the always-on replay.
+
+#### Continued mountain edge limits and sampler validation
+
+Checkpoint `ca36a38` preserves the next experimental edge field without
+rewriting the earlier `b9be38a` original-art fallback. Continued native stamps
+now constrain nearby inferred rock using their actual opaque, oblique edge
+samples. Integer-aligned boundary sampling found no usable anchors in the
+populated map: these fronts and rear contacts generally lie between vertices.
+The replacement samples the closest edge inside the boundary vertex's four
+audited rock cells, including the native atlas alpha and local globe metric.
+
+Only the first completely unowned exterior rock vertices receive limits; a
+four-cell connected-rock blend returns to the original inferred profile.
+Every corner touching a town window, native replacement footprint or non-rock
+cell remains unchanged. Roads, water, building reservations, original native
+fronts/rears and their floor datum are not altered. Targets are copied and
+premultiplied by weight before interpolation, then applied with a minimum:
+the field can lower an oversized inferred ridge but cannot raise one through
+native geometry. Disabling native mountains, invalid input or resource reset
+disables the field through the existing terrain invalidation path. It adds
+retained application-owned grids, not meshes, textures, draw calls, frame-slot
+fields, runner ABI changes or backend-specific work.
+
+The captured six-town geometry audit finds 79 limit anchors, 306 supported
+vertices and 215 actually lowered vertices (maximum 1.1098 world units at
+100% relief). Original exact town-boundary joins have zero usable anchors
+after continuation ownership, and are not counted as successful matching.
+The audit checks every protected footprint corner and the neighboring Aitos
+building row behind 207 crossing Kasandora rear faces. Synthetic tests cover
+fractional edge coordinates, transparent source texels, disabled towns,
+non-rock barriers, copied fields, interpolation and invalid inputs. These are
+local height limits, not a welded surface or a replacement for the visible
+original-art silhouette/material mismatch.
+
+Post-checkpoint validation caught an incorrect floor-query optimization:
+`HeightOwned` returned early whenever a caller requested its floor output,
+but the full sampler requests both floor and total height. The existing test
+correctly failed; that checkpoint must not be treated as a passing sampler
+baseline. The corrected private `FloorOwned` separates floor-only work from
+full height evaluation. Expanded tests require full-sample height, floor and
+derivatives to agree with the separate query APIs for fractional, clamped,
+mountain, town, lake and river points, with each optional constraint enabled.
+
+Both builds and all 145 tests pass after that correction. Native GPU captures
+in `/private/tmp/actraiser-globe-edge-verified.CwOXDy/` include all six towns
+and 1048 semantic objects, with exact front/return restoration. The Release
+flight `runs/20260908-045033/` completes gf2210 and all 19 captures; the six
+named town views were inspected. Its 18 steady presentation windows average
+8.49 ms (6.5–10.5 ms), versus 8.46 ms before the edge limits, with the same
+seven depth draws. This is comparable local Metal cost, not a speedup claim;
+first-entry maximum is still 111 ms. Live native-mountain Off/On in
+`runs/20260908-045151/` changes gf500/gf600 and restores gf700/gf800 exactly
+to the always-on run. Entry and exit still use the existing menus.
+
+The retained terrain mesh also does not consume the full sampler's slope
+derivatives. `SimWorldNavigationTerrain_SampleHeights` returns just total
+height, floor and authored influence; the full sampler shares that evaluation
+and retains its four additional derivative queries. The presenter uses the
+smaller query, removing 66,564 unused neighboring height evaluations per
+129x129 rebuild, without changing topology, LOD, source art or normal lighting.
+This is application-local portable C, not a new runner/render-device contract.
+After this query change, both builds and all 145 tests pass. All 19 GPU captures
+in `/private/tmp/actraiser-globe-height-query.Wo04eQ/` and all 19 six-town flight
+captures in `runs/20260908-045550/` match their corrected pre-optimization
+baselines byte-for-byte. The 18 steady presentation windows average 8.53 ms
+(6.6–10.8 ms); first-entry maximum is 115 ms. Removing unused queries does not
+establish a measurable end-to-end speedup or resolve the initial warm-up hitch.
+Final live toggle replay `runs/20260908-045656/` also matches all five gf400–800
+captures from `runs/20260908-045151/`, including both fallback and restored
+native views. Source and isolated saves retain SHA256
+`480a8375b6255ad681202986640c5b06889458125ec0f82641a0e4fb425c0d45`.
+
+#### Cold-build profiling and exact-work reductions
+
+The existing `AR_PERF`/`AR_SIM3D_PERF` profiler now emits a separate
+`[sim3d-perf-max]` line with the largest individual scope call in its rolling
+window. Means remain summed time per presentation; maxima include nested work
+and are not additive, nor must one call exceed a whole presentation's mean.
+The navigation presenter also breaks cold setup into mountains, cliffs/terrain
+and art when the combined setup exceeds 5 ms. These diagnostics are dormant
+without the existing profiling switch and introduce no frame/runner ABI fields.
+
+Navigation now attributes the previously unscoped preparation and shells too:
+`world-prepare` sums terrain-field preparation and the projection/model-height
+envelope, `world-atmosphere` measures the atmospheric cap, and `world-ocean`
+includes depth-pass setup plus closed-ocean projection/submission. Existing
+`backdrop` and `depth-mountain` scopes cover space and mountain projection.
+Every scope closes before either success or early failure; a profiled presenter
+test exercises failed space/atmosphere draws and depth setup. These remain
+CPU-side inclusive scopes, not GPU timestamps. Lightweight output/UI work is
+still outside these scopes; named times need not sum to total presentation.
+The work counters record explicitly instrumented draws, not every driver call.
+
+The closed ocean preserves its 9,120 original triangle-shaped quads but now
+submits them in 143 groups through the existing `AppendQuads` value-copy
+contract. A bounded 9 KiB stack buffer replaces per-triangle calls; vertex
+order, duplicate triangle corners, geometry, materials and depth draw count
+are unchanged. First/second-batch failures and complete retry recovery are
+covered by the ordinary and profiling-enabled presenter tests.
+
+Two complete ABBA–ABBA comparisons were retained after competing machine load
+affected the first set. In the independent four-per-variant repeat, the ocean
+scope improved from median 0.16826 ms (0.16809–0.17488) to 0.15124 ms
+(0.15091–0.15199). This is about 0.017 ms, not a 10% whole-frame improvement.
+Total-presentation ranges overlap, so no overall FPS gain is claimed. All
+19 replay images match across all 16 flights, and the sanitizer GPU sweep's
+246 images match the pre-batching reference. Details and reproducible manifests
+are in `docs/world-navigation-code-audit.md`.
+
+Local entry audit `runs/20260908-050151/` measured 25.153 ms in mountain setup,
+13.941 ms in cliffs/terrain, 17.229 ms in art, and a 29.965 ms cloud scope peak.
+This made the remaining stall attributable instead of hiding it in the rolling
+mean. Mountain material preparation now identifies each cell's contributing
+towns once: a bilinear field with four exactly zero corners contributes nothing
+at any pixel in the cell. All nonzero contributors retain their original order,
+weights and native ramps, including arbitrarily small influences. No geometric
+pruning, palette approximation or change to protected mountain footprints is
+involved.
+
+Cloud baking now computes each longitude's sine/cosine once in fixed 512-column
+blocks and evaluates each pole once. It keeps the original five-octave noise,
+coordinates, density, resolution and tint. The 4 KiB temporary trigonometric
+arrays are bounded regardless of input dimensions; there is no heap cache,
+VLA, SIMD requirement, new artwork or renderer coupling. The expanded pure test
+crosses two block boundaries, compares coincident directions at different bake
+widths and protects row padding. A separate local comparison against the cloud
+source in `ca36a38` checks 668,184 texels plus row padding at four dimensions and
+four scales (including all three shipped banks): every byte is identical.
+
+Debug/Release builds and all 145 tests pass. All 19 GPU captures in
+`/private/tmp/actraiser-globe-cold-build.Q7VzEW/` and all 19 six-town flight
+captures in `runs/20260908-050716/` match their pre-optimization baselines
+byte-for-byte. The populated mountain audit retains its face counts, 79 limit
+anchors and protected Aitos building row. In that flight, mountain setup is
+18.074 ms and the cloud peak 23.898 ms; total first-entry maximum is 102 ms
+versus 124 ms in the instrumented baseline. These local observations include
+driver variability and do not establish a cross-platform latency guarantee.
+Steady presentation remains comparable at 8.49 ms across 18 windows
+(6.6–10.5 ms), with seven depth draws. The entry hitch remains despite lower
+setup CPU costs; art preparation, terrain/cliffs and first GPU submission still
+contribute, and the sampled total latency is not a stable speedup guarantee.
+Repeat entry in `runs/20260908-051030/` measured mountain setup at 16.529 ms
+and cloud peak at 26.299 ms, with total entry maximum 113 ms, illustrating that
+the end-to-end maximum is still variable. Its live mountain Off/On sequence
+matches all five gf400–800 captures from the previous build exactly. The
+source and isolated saves keep their recorded hashes. Cold-setup reporting
+uses the same enable predicate as mountain construction, so an intentionally
+disabled stage is not mistaken for a missing cache on every water update.
+Final guard verification `runs/20260908-051315/` retains the same five captures
+and emits only the two genuine cold/re-enabled setup reports. All 145 tests
+pass again after the guard cleanup; the original checkpoint remains unchanged.
+Its total entry maximum is 122 ms (mountains 18.363 ms, cloud peak 27.491 ms),
+so the observed post-change entry range is 102–122 ms, not a fixed 102 ms.
+
+#### Moving weather and polar chart continuity
+
+Checkpoint `992c6c8` preserves the current original-art mountain mismatch and
+the weather-motion diagnostic before further experiments. The longer optional
+GPU sweep found a real cloud-body jump at 150992–151008 ms: one rotating bank's
+south pole crossed a mesh cell, changing the four-corner longitude unwrap and
+producing a 21-level RGB step. Disabling shadows reproduced it. Static captures,
+clock-wrap checks alone and the previous shorter sweeps did not expose it.
+
+Cloud-body triangles crossing longitude quadrants are now clipped into
+continuous charts using application-local C math. Poles have separate chart
+coordinates, while their atlas texels remain identical. Canonical shared-edge
+interpolation and double-precision intermediate weights avoid the single-pixel
+raster cracks found during implementation. Unaffected cells retain their old
+geometry and mapping; shadow receivers retain the exact original opaque mesh
+and depth. Child faces are viewport-culled and submitted in bounded 128-quad
+batches. The synthetic presenter test caps added body faces at 25% and retains
+its original submission-call budget. No new noise, textures, shaders, renderer
+contracts, runner ABI fields, terrain heights or mountain footprints are added.
+Only body directions get an additional retained cache (about 162 KiB total).
+
+Pure tests cover 46,080 rotated spherical cells, both poles, signed zero,
+chart-plane degeneracies, positive winding, complete non-overlapping coverage,
+bounded UVs and bit-identical projected cuts under reversed traversal. The GPU
+test now includes the failing times in its regular five-view checks, plus
+isolated bodies/shadows, repeat/reset/rewind stability, unchanged Palace/UI
+masks, zero drift, zero density and weather disabled. The opt-in
+`--weather-sequence` still captures 30 seconds at half-second intervals, with
+adjacent 16 ms probes at every sample; it is not a low-frame-rate-only check.
+The verified sweep has 122 small-step probes across synthetic and native scenes.
+The 60 sequence probes stay at 3–4 RGB levels; all probes stay within the original
+12-level / 0.25 mean thresholds (largest observed mean 0.09117). This verifies
+these sampled cameras and times, not every resolution or possible camera path.
+
+Native captures and the six-second timelapse are in
+`/private/tmp/actraiser-weather-final.9yzOHV/`. The nine weather-free synthetic
+baseline captures are byte-identical; weather-bearing images change at most
+0.257% of pixels as their chart interpolation is corrected. All six named town
+views from the moving-weather Release flight `runs/20260908-055008/` were
+inspected. Its 19 steady presentation windows average 9.30 ms (6.9–11.1 ms),
+with seven depth draws. The frozen-weather control `runs/20260908-055128/`
+averages 9.03 ms (7.0–11.3 ms), versus the earlier 8.49 ms pre-clipping run:
+this is a visual correctness improvement, not a performance win. Entry still
+peaks at 107–113 ms in those two flights. Live clouds Off/On in
+`runs/20260908-055231/` changes gf500/gf600 and restores gf700/gf800 byte-for-byte
+to the frozen control; disabling weather removes both weather draws. That run
+has a 126 ms entry peak, further illustrating the unresolved warm-up variability.
+Both source and isolated save hashes remain unchanged. The user-facing entry
+and exit flow still uses the existing menus; the fallback commit is untouched.
+Final Debug/Release builds and all 145 tests pass, including a 100%-opacity
+interpolation check. The final 122-probe GPU sweep also passes. Rounding color
+only once changes just one channel level at one pixel in each of two images
+relative to the preceding 89-image capture set; the other 87 are byte-identical.
+The full material/terrain/native-footprint oracle also passes AddressSanitizer
+and UndefinedBehaviorSanitizer with the read-only ROM/WRAM inputs, retaining
+the protected building-row and continued-edge counts above.
+
+#### Exact artwork working set and terrain influence rejection
+
+Checkpoint `380772a` preserves the weather fix and the artwork working-set
+reduction: the Scale2x compositor uses three bounded source rows (12,312 bytes)
+instead of a 4 MiB scratch allocation. Adjacent dirty cells share their halo;
+incompatible material changes bypass the spatial feather lookup. Atlas size,
+pixel rules, native overlays and upload masks remain unchanged. The dormant
+`world-animation` and `world-transfer` performance scopes separate composition
+from atlas transfer without changing upload accounting. This reduces scratch
+memory; the replay timings did not establish an end-to-end frame speedup.
+
+Terrain sampling now rejects a town only outside its complete four-cell
+feather, where its contribution is exactly zero. The previous implementation
+still resolved and sampled all six towns at every point. Nonzero weights,
+accumulation order, owned cliff corners, coast grading and mountain constraints
+retain their original arithmetic. This adds no cache, allocation, settings,
+renderer coupling or runner ABI field, and changes no terrain or artwork.
+
+The independent CTest fallback oracle evaluates every half-tile point across
+and beyond the world, floats immediately on either side of all town feather
+edges, overlapping influences and all 24,576 town-cell corners. A separate
+local comparison against the checkpoint source verifies byte-identical full
+samples (including slopes/ownership) and every owned corner in five states:
+fallback, native world prior, replacement/transition, join and continuation
+limit. Its alternating 32-iteration process-CPU benchmark measures the shared
+129x129 mesh at 1.271 -> 0.521 ms and six-town owned corners at 2.061 -> 1.059 ms.
+These are isolated sampler results, not a claim of halving total entry time.
+The comparison and sanitizer artifacts are in
+`/private/tmp/actraiser-terrain-influence.Ul54VI/`.
+
+Local Metal replay `runs/20260908-062045/` matches all 19 six-town captures
+from `runs/20260908-060601/` byte-for-byte. Steady presentation averages 8.88 ms
+over 19 windows (6.9–11.0 ms), with seven depth draws. Terrain/cliff setup is
+12.249 ms versus 15.374 ms in the immediate checkpoint control
+`runs/20260908-061847/`; total entry still reaches 121 ms versus 109 ms in that
+control because other cold stages vary. The entry hitch remains unresolved.
+Debug/Release builds, all 145 tests, and the terrain AddressSanitizer/
+UndefinedBehaviorSanitizer check pass. Original mountain art and the existing
+menu-based entry/exit flow remain intact; `380772a` is not amended.
+The native 122-probe GPU/weather sweep also passes, with all 89 captures
+byte-identical to `/private/tmp/actraiser-art-final.yIVTlS/`. The ROM/WRAM
+mountain-clearance oracle retains the 573 exterior faces, 215 lowered relief
+vertices and protection from 207 Kasandora rear faces at Aitos's building row.
+Source and isolated-save hashes remain unchanged.
+
+#### Bounded cloud-noise reuse during initial bake
+
+The spherical cloud bake now evaluates one octave across a fixed longitude
+block at a time. Latitude's lattice row and interpolation weight are constant
+within that loop. Adjacent samples in the same X/Z noise cell reuse its eight
+hash values; crossing a cell recomputes them. Each latitude, octave and block
+resets that small cache. The five-octave accumulation, interpolation order,
+density/tint rules, 512x256 layer size, pole values and duplicated seam texels
+are unchanged. Temporary working storage is about 6 KiB (up from 4 KiB), not
+a persistent cache or new allocation. No settings, ABI or renderer API changes.
+
+A scalar oracle checks every output texel and destination padding across 42
+size/scale combinations, including the three production scales, minimum
+dimensions, multi-block widths and the maximum supported scale. Separate
+32-iteration alternating process-CPU measurements against checkpoint source
+in `/private/tmp/actraiser-cloud-bake.jNzELU/` report 5.691 -> 4.204 ms at scale
+4, 5.748 -> 3.809 ms at 2.7 and 5.698 -> 4.704 ms at 6.3: 17–34% less bake CPU
+time locally, not a cross-platform guarantee or a steady-frame speedup.
+
+Release replay `runs/20260908-062944/` retains all 19 six-town images exactly
+against `runs/20260908-062045/`. The first cloud scope peaks at 22.510 ms versus
+28.706 ms; total entry is 105 ms versus 121 ms, with other cold stages also
+varying. Entry is still a hitch, not a solved one-frame load. Steady presentation
+averages 8.85 ms over 19 windows (7.0–10.6 ms), with seven depth draws, essentially
+unchanged from 8.88 ms. Debug/Release builds and all 145 tests pass; the full
+material/native-mountain oracle also passes AddressSanitizer and
+UndefinedBehaviorSanitizer. Source and isolated-save hashes remain unchanged.
+The 122-probe native GPU/weather sweep passes; all 89 captures are byte-identical
+to `/private/tmp/actraiser-terrain-influence.Ul54VI/`, including moving poles,
+disabled effects and below-cloud views. The rollback checkpoint is unchanged.
+
+#### Repeated flight benchmarks before selecting an optimization
+
+Do not accept or dismiss an option on one replay. Run at least three full,
+identical flights per candidate, interleave/rotate their order, and keep builds,
+tests and other benchmark jobs out of the measurement interval. Freeze weather
+for frame comparisons; validate moving weather separately. Report each run and
+the median/range across runs, with cold-entry peaks separate from steady flight.
+If the difference overlaps observed noise, retain the option for more testing
+instead of claiming a win or regression. Presentation time is not whole-frame
+time and must not be converted directly into an FPS claim.
+
+A shifted-coordinate cache was initially dismissed after one short flight;
+that was insufficient evidence. It was restored as a separate candidate beside
+a new indexed cloud-shadow prototype. Nine 2,210-frame six-town flights used
+the order baseline/cache/indexed, cache/indexed/baseline, indexed/baseline/cache.
+The three release executables shared compiler flags and all objects except
+the presenter, including the same indexed-capable depth backend. No effects,
+triangles, nine-sample shadow softness, draw order or shaders were changed.
+Neither prototype is enabled in the retained implementation.
+
+The following are medians (min–max) of three independent local Metal runs.
+Steady presentation averages are weighted by the frame counts in logged
+post-entry windows; cloud/submit scopes exclude their first cold window.
+
+| Variant | Steady presentation ms | Cloud preparation ms | Depth submit ms |
+| --- | --- | --- | --- |
+| Baseline | 9.03 (9.02–9.05) | 2.83 (2.81–2.84) | 1.10 (1.10–1.12) |
+| Coordinate cache | 9.23 (9.17–9.41) | 3.03 (3.01–3.08) | 1.12 (1.08–1.17) |
+| Indexed shadows | 9.36 (9.28–9.44) | 3.59 (3.56–3.63) | 0.76 (0.73–0.78) |
+
+Indexed geometry reduces submitted vertices from about 861k to 542k per
+presentation, retaining seven draws and the same triangles, but its CPU
+preparation overhead outweighs the lower submission cost. Both candidates
+are slower in all three runs on this machine. This is evidence against these
+implementations here, not against coordinate reuse or indexed meshes on all
+hardware. Cold-entry peaks vary from 87 to 130 ms even for the baseline and
+are not evidence of a candidate-specific startup improvement.
+
+All 171 captures match the baseline and `runs/20260908-062944/` byte-for-byte.
+Baseline runs: `065126`, `065425`, `065535`; cache: `065207`, `065329`, `065601`;
+indexed: `065236`, `065358`, `065506` (all under `runs/20260908-*/`).
+The candidates, replay manifest, analysis script and re-applicable patches
+are preserved locally in `/private/tmp/actraiser-cloud-coordinates.BkmZjl/`.
+The indexed prototype also passed its focused GPU pixel test for mixed
+indexed/ordinary geometry, occlusion and resource reset, and the presenter
+contract test. Its private API/backend additions were removed from the active
+worktree with the prototype; the verified terrain/cloud-bake optimizations
+above remain. No checkpoint was amended and no new commit was made.
+The retained path rebuilds in Debug and Release and passes all 145 tests;
+both the original save and isolated replay save retain their starting hashes.
+
+#### Value-copy depth conversion
+
+The depth backend now snapshots each incoming `Sim3DDepthVertex` into a local
+value before assigning the GPU vertex's fields. The arithmetic and data layout
+are unchanged. This gives the compiler the complete input before destination
+stores, allowing grouped color/UV transfers without interleaved scalar alias
+dependencies. Local release disassembly confirms those grouped transfers.
+It is ordinary C11, not platform SIMD, pointer casts, a layout alias, or a new
+`restrict` contract. No interface, shader, runner ABI, settings, allocation or
+retained working-set change is needed. The same conversion serves town and
+globe rendering.
+
+Eight full 2,210-frame flights compare the retained scalar-load implementation
+with the value-copy implementation in A/B/B/A, A/B/B/A order, with no competing
+build/test jobs. All other release objects and settings are unchanged. As above,
+figures are the median (min–max) across independent runs, with frame-weighted
+logged steady windows and the first cold cloud window excluded.
+
+| Variant | Steady presentation ms | Cloud preparation ms | Depth submit ms |
+| --- | --- | --- | --- |
+| Baseline, four runs | 8.77 (8.72–8.83) | 2.78 (2.78–2.79) | 0.97 (0.96–0.98) |
+| Value copy, four runs | 7.91 (7.90–7.95) | 2.37 (2.37–2.38) | 0.97 (0.96–0.98) |
+
+This is a repeatable local 9.8% reduction in steady presentation time, not
+a whole-frame FPS or cross-platform guarantee. The cloud preparation scope
+includes the vertex conversion and drops about 14.7%; GPU submission itself
+does not materially change. Seven draws and about 861k vertices remain. Entry
+still peaks at 98–99 ms in the optimized flights; that hitch is not resolved.
+
+Baseline runs are `070432`, `070552`, `070720`, `070840`; optimized runs are
+`070500`, `070526`, `070748`, `070813` (all under `runs/20260908-*/`). All 152
+captures match each other and `runs/20260908-062944/` exactly. The 122-probe
+native GPU/weather sweep passes, and all 89 native/weather images are
+byte-identical to `/private/tmp/actraiser-cloud-bake.jNzELU/`. Executables,
+run manifest, analysis and captures are in
+`/private/tmp/actraiser-depth-conversion.Yiyluw/`.
+
+The GPU regression now compares 2,053 varied translucent quads as individual
+calls, uneven 127-quad chunks and one complete batch, across retained buffers
+and renderer reset. It exceeds both initial CPU/GPU capacities, overwrites
+caller storage before submission, verifies foreground occlusion, and checks
+every output pixel against the single-quad rendering. Debug/Release builds,
+all 145 tests and the depth GPU test under AddressSanitizer/UndefinedBehaviorSanitizer
+pass. Both save hashes and checkpoint `380772a` remain unchanged. No custom
+entry/exit handling or globe-under-SIM composition was added in this pass.
+
+#### Block atlas conversion inside the SDL backend
+
+Atlas uploads now use `SDL_ConvertPixels` for each packed dirty rectangle
+instead of assigning four destination bytes per texel in a scalar loop.
+`SDL_PIXELFORMAT_ARGB8888` describes the caller's native-endian integer values;
+`SDL_PIXELFORMAT_RGBA32` describes the GPU's RGBA byte order on either endian
+host. The adapter still owns that translation and reuses the same textures,
+transfer buffers, region ordering and cycling rules. The portable ARGB/pitch/
+region interface and runner ABI do not change. Conversion failures unmap the
+transfer buffer and return failure before any GPU copy is submitted.
+
+A scalar comparison verifies all output bytes, alpha and untouched padding
+across 210 size/stride combinations, including odd byte pitches and one-pixel
+dimensions. Thirty-two alternating process-CPU pairs measure 2048x2048
+conversion at 0.794 -> 0.439 ms, 1024x768 at 0.124 -> 0.070 ms and 512x512 at
+0.040 -> 0.024 ms locally. These isolated conversions exclude allocation and
+GPU submission; the full-flight comparison below is the acceptance gate.
+
+Eight identical 2,210-frame release flights run in A/B/B/A, A/B/B/A order,
+with no competing build/test jobs. Both variants include the verified value-copy
+depth conversion. Medians (min–max) across four runs each use the same logged,
+frame-weighted steady-window method as above.
+
+| Variant | Steady presentation ms | Average world-transfer ms | First world-transfer peak ms |
+| --- | --- | --- | --- |
+| Baseline | 7.92 (7.91–7.93) | 0.306 (0.305–0.307) | 5.88 (5.30–6.24) |
+| Block conversion | 7.74 (7.72–7.79) | 0.109 (0.108–0.110) | 2.54 (2.27–3.08) |
+
+Steady presentation improves about 2.3% locally, with identical art, sample
+counts and seven draws. Cloud preparation and GPU submission remain essentially
+unchanged. Cold-entry peaks have medians 100.5 -> 94.0 ms and ranges 96–113 ->
+89–96 ms, but mountain/cliff/other cold stages also vary: do not attribute the
+entire 6.5 ms difference to conversion or call the hitch solved.
+
+Baseline runs: `071815`, `071933`, `072020`, `072137`; optimized: `071840`,
+`071907`, `072046`, `072112` (all under `runs/20260908-*/`). All 152 captures
+match the baseline and `runs/20260908-062944/` exactly. The 122-probe native
+GPU/weather sweep passes, with all 89 captures byte-identical to
+`/private/tmp/actraiser-depth-conversion.Yiyluw/`. The comparison executables,
+manifest, analysis, scalar oracle and captures are in
+`/private/tmp/actraiser-atlas-transfer.fOAgXe/`.
+
+The GPU regression now compares a fully populated reference atlas against
+multi-rectangle and individually submitted updates in reverse order. Source
+rows have an odd padded pitch; unrequested source texels deliberately differ,
+and caller storage is overwritten before drawing. Every output pixel must
+agree across retained resources and reset. Debug/Release builds, all 145 tests
+and the depth GPU suite under AddressSanitizer/UndefinedBehaviorSanitizer pass.
+The original and isolated save hashes, original mountain art and menu behavior
+are unchanged; checkpoint `380772a` is untouched and this pass is uncommitted.
+
+#### Six-town visual acceptance matrix
+
+The frozen-scene GPU test accepts `--town-matrix` alongside
+`--weather-sequence`. It focuses each enabled retained town at near, oblique
+middle and centred whole-globe views at 800x600, plus a close 1792x1344 view.
+Each view exercises the authored Low model cap, a reduced-effects profile,
+and ten independent switches: lighting, clouds, shadows, atmosphere, models,
+relief, detailed ground, mountains, space backdrop and haze. Every switch and
+profile must restore the full image exactly; resource resets must also be
+pixel-exact without changing captured navigation/town data or the map serial.
+
+The HD test compares each town's own objects against zero objects while keeping
+model-owned ground cleanup and all other metadata identical. Merely disabling
+the global models switch is insufficient: neighboring towns and changes to
+source-art cleanup could falsely demonstrate that the focused town has models.
+With the read-only `runs/20260908-032849/dump_wram.bin` fixture, isolated objects
+change these numbers of pixels locally on Metal:
+
+| Town | Captured objects | Pixels changed by its isolated models |
+| --- | --- | --- |
+| Fillmore | 251 | 150,299 |
+| Bloodpool | 241 | 147,156 |
+| Kasandora | 192 | 92,713 |
+| Aitos | 157 | 83,856 |
+| Marahna | 205 | 60,406 |
+| Northwall | 2 | 3,559 |
+
+Object counts include native-art-only plot classes, and occluded objects need
+not contribute pixels. At 800x600 all 18 Low-cap images match their full-cap
+counterparts: the projected-size selector already uses Low. All six HD views
+show detail-cap differences, exercising finer authored geometry. This is
+coverage of these sampled views, not every LOD threshold or possible save.
+
+The initial HD attempt exposed faulty test plumbing: resizing without a full
+frame-present lifecycle kept a smaller hidden GPU output alive and stretched
+its last row/column into the enlarged readback. This falsely suggested that
+Northwall's models were invisible. The test now completes frame presentation,
+retires the previous-size output after resizing, and verifies distinct corner
+markers plus the centre pixel before accepting captures. Ordinary ROM-free
+CTest also covers larger, smaller and widescreen output sizes, exact resource
+rebuilds at each size, and restoration of the original image. No production
+town capture, model placement or renderer behavior was changed to fix this
+test-only failure.
+
+The corrected sweep in `/private/tmp/actraiser-town-matrix-verified.Q67KWR/`
+passes all 24 views and 122 adjacent-16-ms weather probes, saving 227 captures
+(138 town-matrix images plus the prior 89 synthetic/native/weather images).
+All prior 89 images are byte-identical to the atlas-transfer validation above.
+All ten switches visibly affect every matrix view and restore exactly. Visual
+inspection of all six HD town captures confirms populated Kasandora ground,
+the clean blue Bloodpool shoreline and visible Northwall models; the accepted
+original-art mountain seams and steep native cliff edges remain. Captures are
+local diagnostic artifacts, not distributable ROM-derived golden fixtures or
+proof of other GPU backends. Existing menus and checkpoint `380772a` remain
+unchanged. The regular 145-test suite, including the new resize coverage, passes.
+The final rerun in `/private/tmp/actraiser-town-matrix-final.r79ZMm/` reproduces
+all 227 images exactly. The same complete sweep, compiled with
+AddressSanitizer/UndefinedBehaviorSanitizer, passes in
+`/private/tmp/actraiser-town-matrix-sanitized.MDALvO/`. Compared with Debug,
+that separately optimized build matches 191 images exactly; the other 36
+differ by at most one RGB level over 68 pixels total (1–12 pixels per image).
+The comparison script is retained with the final captures. All within-build
+toggle/reset restoration assertions remain exact; no thresholds were relaxed.
+Both save files retain their starting hashes. The Release build also passes;
+this test/documentation-only audit makes no new performance claim.
+
+The original-art mountain seams and steep native cliff edges are retained as
+accepted. New zoom-triggered entry/exit gestures and continuous full-town
+descent are deferred by request; the existing menus remain authoritative.
+Broader cliff/camera acceptance and other live palette effects still need
+coverage. The shared local mesh does not make the two camera-dependent
+presentations identical.
+
+#### Loading behind the native fade
+
+A remaining entry cost is acceptable when it is hidden by the existing black
+transition; prioritize smooth visible flight over eliminating every cold-start
+millisecond. The navigation presenter deliberately prepares and draws the
+complete scene at master brightness zero. Returning early on that black frame
+would postpone model compilation, atlas uploads and GPU pipeline preparation
+until the visible fade-in, defeating this loading opportunity.
+
+The unchanged Release replay in `runs/20260908-075928/` captures every frame
+340–390 together with public PPU snapshots. The previous screen reaches black
+at gf351; globe setup occurs at gf353 with INIDISP zero. The complete output
+remains exactly black through gf354. The first visible frame is gf355 at
+brightness 1, followed by the original fifteen-level fade, reaching full
+brightness at gf369. The Palace and labels fade with the world. The analysis
+script and inspected first/full-brightness previews are in
+`/private/tmp/actraiser-fade-audit.4W0Ngm/`. Dense screenshots and snapshots
+perturb frame timing, so this is sequencing/visibility evidence, not another
+performance benchmark.
+
+Regression tests now require authored model compilation and native mountain
+uploads while brightness is zero, with no repeated uploads at the visible
+step. The actual GPU test resets render/model resources, verifies a fully
+black frame with models/weather enabled, then checks all fifteen fade levels:
+monotonic bounded RGB, no further model misses or relights for the frozen scene,
+and exact restoration of the full-brightness image. The same check runs on
+synthetic and read-only native town data. No new fade timer, gameplay pause,
+runner ABI, asynchronous loader or custom town entry/exit handling is added.
+This verifies the captured normal entry, not arbitrary mid-flight settings
+changes or device-loss recovery; those still need separate latency handling.
+All 145 tests pass. The native GPU check in
+`/private/tmp/actraiser-black-entry-native.0vchMh/` also passes, preserving all
+29 existing baseline captures exactly. Both save hashes and checkpoint
+`380772a` are unchanged; this follow-up changes only tests and documentation.
+
+#### Existing menu round trip
+
+The populated-save replay in `runs/20260908-111902/` enters Fillmore using
+**Observe the People**, opens the native town menu, and selects **Return to Sky
+Palace**. It returns directly to enhanced globe navigation. The control in
+`runs/20260908-112052/` uses the identical input/save/settings with only
+`AR_SIM3D_WORLD_NAV=0`. All 77 sampled complete WRAM, VRAM, CGRAM, OAM/high-OAM
+and public-PPU snapshots match exactly, including both transition windows.
+Final WRAM/SRAM and the rendered town at gf1000 also match exactly: visiting
+the globe does not change this town view or game state.
+
+Town rendering becomes ready at gf643 with brightness zero; the native town
+fade starts at gf645. On return, every captured pixel is black at gf1199–1202.
+Globe presentation resumes at gf1201, before first visible gf1203, and reaches
+full brightness at gf1217. All thirteen preceding town-fade/black images are
+byte-identical to the flat-navigation control. Native initialization repeats
+gf1200 across several host ticks in both runs; game-frame screenshots retain
+only the last image for that number, so this is not a host-tick latency
+measurement. No new waits, fade timers, gameplay hooks or renderer changes
+were needed. Both original and isolated saves retain their starting hash.
+
+The exact pad replay, construction/verification scripts and reproduction notes
+are retained with the enhanced run. The camera, globe-coordinate and presenter
+regressions also pass, including Free/Dynamic visit isolation and transient
+orbit/zoom reset. This verifies Fillmore's native menu round trip, not every
+town event or physical input device. Live mouse acceptance remains unverified
+while the Mac is locked; no gamepad was connected for these replays.
+
+#### Tall models at viewport edges
+
+The footprint-based screen margin could reject a model whose raised crown
+still intersected the viewport. A read-only probe using the populated six-town
+capture and native Aitos Advent camera samples reproduced this at 400% object
+height and a supported -1300 mrad pitch, with relief disabled. For example,
+the Aitos tree at (26,2) has an anchor at y=652.90 with a 49.31px margin at
+gf1210/zoom450, yet crown vertices remain visible above y=600 and clear of
+the opaque globe.
+
+The same sweep at yaw +650 mrad also finds a normal-height Marahna tree at
+(24,19) during gf1315/zoom30: its anchor is y=614.24, its old margin 13.96px,
+and twelve crown vertices are inside the viewport. This is a small edge pop,
+not missing whole towns. The updated bound retains these candidates across
+the checked yaw -650/0/+650, pitch -575/-1000/-1300, heights 100/400 and 25
+native camera samples; globe visibility is independently checked with
+segment/sphere intersections, rather than assuming on-screen means unoccluded.
+
+Retained authoring bounds now include XY overhangs and minimum/maximum height
+across allowed LODs and windmill poses. The chart metric bounds each model's
+angular extent. A conservative sphere contains that angular cap and its full
+radial height interval; normalized viewport side planes may reject it only
+when the entire sphere is outside. This extra check runs only after the old
+cheap margin would reject an object. Existing subpixel thresholds, quality
+ceilings, shared cache, whole-globe horizon rejection and GPU depth remain
+unchanged. Measurement stays portable; camera-dependent bounds remain in the
+presenter. Three direct model test targets now link the existing
+`actraiser_math` abstraction explicitly, including platforms with separate libm.
+
+The portable test submits all castle faces when its anchor is at y=799.64
+but spires enter the 600px viewport, still rejects the genuinely offscreen
+100%-height variant, and checks repeat/reset/height restoration. The GPU test
+compares visible spire pixels with a zero-area-footprint control at identical
+projection, then verifies repeat/reset equality. Restoring only the old
+viewport rejection in a temporary binary makes that GPU test fail. Native
+GPU weather/flight coverage and the new edge case also pass ASan/UBSan.
+
+Four isolated Release flights per variant in ABBA–ABBA order
+(`runs/20260908-103902/`, `104046/`, `104259/`, `104414/`, `104457/`,
+`104748/`, `104826/`, `104910/`) retain all 19 sampled normal-flight images
+byte-for-byte within and across builds. Weighted steady presentation medians
+are 8.206 ms (8.186–8.270) before and 8.184 ms (8.173–8.193) after, with
+overlapping ranges and seven draws in both variants. The 0.022 ms difference
+is not treated as a speedup. Cold presentation peaks have medians 100.5 and
+103.5 ms with overlapping 92–112 and 99–109 ms ranges; cold work remains under
+the existing black loading opportunity. The complete 145-test suite passes.
+
+#### Native Advent clearance over raised terrain
+
+The existing Aitos Act 2 Advent is a separate path from the deferred custom
+globe/town entry controls. Its original Mode-7 matrix approaches zero while
+the view is still visible. Applying that unbounded flat-map magnification to
+a raised globe brings geometry through the eye plane: the preserved Release
+build fails its atmosphere projection at game frame 1301 in
+`runs/20260908-083017/`, before the native fade. Disabling atmosphere alone
+also allows late volcanic faces to cross the projection plane.
+
+During the captured empty-OAM Advent composition, the presenter now smoothly
+limits scene magnification using the globe radius, terrain/mountain envelope,
+cloud/atmosphere clearance, focused ground datum and camera direction. The
+soft limit starts at 50% of the safe scale, with a continuous first derivative,
+and leaves the enclosing sphere at least 0.25 view units ahead of the eye
+(the projection near plane is 0.1). This is a minimum-clearance approach to
+black, not a new landing animation or exact contact with a destination summit.
+It does not flatten mountains, move buildings, change WRAM, pause gameplay,
+advance the fade or add a backend/runner ABI.
+
+The guard also includes independently scaled authored town models. With relief
+and mountains disabled, cloud altitude zero and a straight-down camera at
+distance 3, the previous terrain-only envelope let the 400%-height Bloodpool
+castle cross the near plane at native zoom 30 (gf1315, still brightness 5):
+200 of its 556 Ultra face vertices were behind the 0.1 near plane. The retained
+authored-height envelope leaves all 556 in front, with minimum eye distance
+0.681 there and 0.394 at final zoom 10. This changes only the empty-OAM approach
+when models exceed the existing envelope; it does not raise clouds or alter
+ordinary flight projection.
+
+`SimBackgroundVoxelModel_HeightBound` uses the existing authoring functions
+before buried-face removal and corner AO. It bounds all allowed distance LODs
+and all three windmill poses without adding offscreen models to the shared
+geometry cache. The presenter retains per-object bounds, invalidating only
+changed captured objects or detail/style; stable captures need one byte
+comparison. Height percentage, camera and landscape changes reuse those
+unscaled bounds. The chart metric is at most one, so authored height times the
+shared proportions bounds every radial model column. Preparation also runs
+during ordinary travel/black loading, not just at the first visible Advent
+frame. No live town state, GPU handles or new runner ABI cross this boundary.
+
+The model tests compare the bound with compiled geometry across kinds, seeds,
+regional houses, detail/style combinations and construction/animation states.
+The presenter test requires every castle face to reach the depth pass during
+forward/reversed zooms and heights 100–400%, all four LOD ceilings/styles,
+repeated frames, changed objects, disable/enable and resource reset. Merely
+checking a successful presentation would miss the original silently dropped
+faces. The hidden far hemisphere may pass the far plane at the final top-down
+zoom; normal GPU clipping handles it, while the near-side model stays intact.
+
+Four isolated Release flights per variant, in ABBA–ABBA order
+(`runs/20260908-100928/`, `101035/`, `101104/`, `101213/`, `101255/`,
+`101327/`, `101415/`, `101440/`), retain all 19 sampled images byte-for-byte
+within and across builds. Weighted steady presentation medians are 8.143 ms
+(8.035–8.214) before and 8.178 ms (8.116–8.240) after: a 0.035 ms difference
+inside overlapping run ranges, not a speedup claim. Draw count remains seven.
+Initial presentation peaks have medians 85 and 91.5 ms respectively; retained
+height authoring adds cold work under the existing black loading opportunity.
+
+The final native replay `runs/20260908-101546/` matches
+`runs/20260908-093115/` in all 25 complete gf1200–1320 game-state snapshots
+and all 31 consecutive gf1290–1320 images. Default Advent timing/appearance
+therefore remain unchanged, including black at gf1320 and Act 2 at gf1323.
+All 145 tests pass; both the portable presenter regression and native GPU
+weather/flight suite also pass AddressSanitizer/UndefinedBehaviorSanitizer.
+
+The ordinary replay `saves/aitos-r4-natural.rec`, using an isolated copy of the
+existing action-routes seed, succeeds with the capped volcano in
+`runs/20260908-093115/`: the globe
+remains active through gf1320, which is fully black; Aitos Act 2 enters at
+gf1323. All nine overlapping complete WRAM/public-PPU snapshots at
+gf1280–1320 (every five frames) match the authentic-renderer control
+`runs/20260908-083225/` exactly, including VRAM, CGRAM and OAM. All 25 snapshots
+from gf1200–1320 also match the earlier guarded replay
+`runs/20260908-084302/` and timing-only replay `runs/20260908-090906/`.
+The final replay captures every frame from gf1290 through black; inspected
+gf1300/1315 images retain the single opening while the native spin/fade continues.
+These readback-heavy runs
+verify rendering and sequencing, not performance.
+
+The GPU regression reuses seven real late-descent matrix/brightness samples
+over Aitos, Fillmore hills and Marahna's plateau, at landscape heights 0%,
+100% and 400%. Each visible frame must render successfully, held frames must
+match exactly, and the final frame must be entirely black. Captured towns and
+map serial must remain unchanged. It passes on both synthetic and populated
+native scenes, including AddressSanitizer/UndefinedBehaviorSanitizer on Metal.
+This covers those terrain/camera samples, not every possible combination of
+independently exaggerated building heights or future destination models.
+
+The first guard used an exponential ease-out, which reached 99.74% of its
+safe scale at brightness 10 and visually exhausted the descent too early.
+`SimWorldNavigationScene_AdventScale` now uses a reciprocal continuation:
+for raw scale above half the limit, output is `limit - (limit/2)^2/raw`.
+The ROM's `$02:849B` loop subtracts four zoom units each tick and derives its
+fifteen fade levels from that same zoom. Because raw scale is reciprocal zoom,
+the new curve retains finite approach motion through the existing fade,
+without waiting at a clamped height. Scale and its first derivative match at
+the join. Tests cover the join, monotonic/equal late progress, multiple limits,
+invalid inputs and frozen/reversed clocks. Matrix quantization can still vary
+the per-tick displacement; this is a safe continuing approach through black,
+not exact physical contact with the volcano entrance or a new entry system.
+
+#### Native Aitos lava palette animation
+
+The original `$02:AF69` routine writes CGRAM entry `$21` in SIM town 4,
+folding bit `$20` of the game-frame byte into a 64-tick red triangle wave.
+The globe reproduces that cadence from its captured frame, using the same
+completed-tick convention as town CHR animation. It does not borrow the
+currently resident town's PPU palette. `SimTownGroundArt_ColorIndexMask`
+decodes source palette identities; RGB equality is never used to identify lava.
+The native town fixture has 51 silhouette-visible texels in crown metatiles
+`$70/$71` using this entry. The globe instead animates the 84 index-zero texels
+in its single overhead opening; both paths keep alpha, UVs and geometry fixed.
+
+The portable mountain scene keeps two bounded masks, changes only those
+texels and reports a dirty rectangle. The overhead cap transfers 16×16 ARGB
+pixels (1 KiB); native-art fallback transfers at most 32×16 (2 KiB), through
+the existing atlas-region interface. Held clocks
+and identical turnaround colours skip uploads; failed transfers retain the
+dirty rectangle for retry, including after a clock rewind. Disabling native
+mountains skips this work. Initial colour is folded into the normal cold atlas
+upload. Ground-transition rock colours are derived before applying the pulse,
+so a resource reset cannot recolour cached terrain based on its entry phase.
+
+The independent town-canvas oracle verifies source-index masks across every
+metatile and all four native variants. Material tests check 132 clock states,
+rollover, frozen frames and unchanged non-lava texels/scene ownership; the
+fake-backend test verifies 1-KiB cap transfers, failure/rewind recovery, unchanged
+geometry and no ground-atlas invalidation. Native GPU resource restoration
+and sanitizer checks pass. Exact animation-phase handoff to live SIM remains
+part of the deferred transition work.
+
+Before the overhead cap, four independent Release flights per build,
+interleaved ABBA–ABBA with the
+same isolated save/replay/settings, are recorded in
+`/private/tmp/actraiser-native-lava.AIGLid/runs.json` with the analysis script.
+Weighted steady presentation medians are 7.804 ms (range 7.776–7.909) before
+and 7.807 ms (7.792–7.876) after the lava/Advent changes. This is no measurable
+whole-frame regression in this sample, not a speedup or an FPS measurement.
+World-transfer cost rises from 0.110 to 0.130 ms; draws remain seven per
+presentation. The separate cold peaks overlap at 89–104 versus 90–96 ms.
+All 76 captures per build repeat exactly within that build; eleven of the
+nineteen sampled views differ across builds, as expected for animated lava.
+
+#### Single overhead Aitos crater
+
+The angled town crown was visible on both the front and folded rear, making
+two separate openings. Globe construction now removes that first crown row
+from both faces and bridges the summit with one horizontal cap. Its texture
+uses the original top-down Mode-7 stamp `$A6/$A7/$B6/$B7` (world cells
+24,43 through 25,44), copied through the portable owned-output
+`SimWorldMap_CopyTileArt` provider. The overhead outline and rim are retained;
+the surrounding `$40..$45` rock shades map into the native Aitos rock palette.
+Shoulder strips keep native town rock UVs rather than stretching the overhead
+tile across the whole mountain. No generated replacement art or backend API
+is required, and town-mode meshes are unchanged.
+
+The summit is 32×28 native pixels, 1.68 world-tile units above its floor.
+Shoulder depth tapers toward the original silhouette, and rear ground contacts
+remain at their original source columns. Roof and rear share edge vertices
+and pass through the same cell-level polygon clipping against all six towns'
+terrain/model occupancy. The cap occupies an unused 16×16 corner of the
+existing 512×512 mountain atlas; ground-transition palette extraction skips
+that reserved cell. Missing overhead art falls back to the original native
+crown, rather than failing navigation.
+
+Native material tests verify exactly one 896-square-pixel cap, 32 central
+strips, no old `$70/$71` UVs, the ROM's opening/rim pixels, native rock colours,
+all 84 animated texels, original rear contacts and protected cells underneath
+the new roof. The legacy 51-texel fallback remains tested. World-map tests
+cover all 256 copied tiles, optional indices, unavailable inputs, owned
+lifetime and unchanged publication serials. GPU captures inspect four
+approach directions plus overhead, with exact held-frame restoration.
+All 145 regression tests pass, alongside the populated Metal scene under
+AddressSanitizer/UndefinedBehaviorSanitizer and the real Advent replay above.
+
+Four Release flights per build, ABBA–ABBA, compare the timing-only build to
+the cap in `/private/tmp/actraiser-advent-timing.JAfw0Q/runs.json` (analysis:
+`/private/tmp/actraiser-native-lava.AIGLid/analyze.py` with that directory as
+its argument). Weighted steady presentation medians are 7.841 ms
+(7.823–7.874) before and 7.855 ms (7.836–7.875) after: a 0.013-ms difference
+inside the overlapping run ranges, not a meaningful regression or an FPS
+claim. Draws remain seven, and average submitted vertices increase about
+0.24%. Cold peaks span 95–105 ms versus 78–98 ms; no cold-load speedup is
+claimed. All 76 captures per build repeat exactly within that build.
+
+#### View-driven town LOD stability
+
+The ROM-free GPU test now follows a single real, finished factory across
+camera distances and output sizes. It identifies the rendered tier through
+the existing shared model-cache counters, without adding presenter diagnostics
+or changing a production interface. The near view selects Low at 800×600,
+High at 1792×1344, and Ultra at 2688×2016. A 1792×1344 distance sweep crosses
+High/Balanced and Balanced/Low, including adjacent camera ticks on either side.
+Matching the user ceiling to the selected tier preserves every pixel; lowering
+it removes visible detail. Reversing the sweep restores every saved frame
+exactly, including three stationary frames per distance as the game clock
+advances. Once all four model keys are warm, these return/hold frames generate
+no additional model misses or relights. Captured town/navigation data and the
+map serial remain unchanged.
+
+These are discrete native model variants, not smoothly morphed geometry.
+The isolated diagnostic in `/private/tmp/actraiser-lod-motion.PrA5NQ/`
+locates switches at distance-x100 205→206 and 409→410 for this fixture.
+Same-camera comparisons against the next-lower cap change 342 and 94 pixels
+respectively immediately before those switches. Inspected factory crops show
+architectural details disappearing at the first boundary; this must not be
+described as seamless LOD. No cross-fade, hysteresis, replacement geometry or
+runtime optimization is introduced by this audit. It establishes deterministic
+selection/cache behavior for this model, not temporal acceptance of every
+authored object or GPU backend.
+
+All 145 tests pass, as does the updated AddressSanitizer/UndefinedBehaviorSanitizer
+GPU test (including the black-entry regression). The read-only populated-town
+check in `/private/tmp/actraiser-lod-native.T1OqaR/` passes and reproduces all
+29 prior captures byte-for-byte. Both save hashes remain unchanged. This is
+correctness coverage, not a performance benchmark.
+
+The same portable authored-model cache remains shared with town rendering.
+Presentation memoization consumes captured scene/camera settings only and
+continues through `ArRenderDevice`/`Sim3DDepthPass`; it does not introduce SDL,
+Metal or runner-private dependencies. Rendering the globe under the active
+SIM town is not wired yet: that future composition should reserve resources
+before borrowing models and share a scene/depth pass, not call the standalone
+navigation presenter (which owns its viewport, clear, Palace and UI).
+
+Visual follow-up `runs/20260907-213220/shot_500.ppm` verifies the populated
+Bloodpool shoreline without pre-cleansing red bleed, cloud bodies enabled,
+and the navigation-only space backdrop. The matching gf400 capture covers
+Fillmore; the plain/border grading pass was exercised through Aitos at gf800
+in `runs/20260907-212325/`. These are local diagnostic captures, not portable
+golden fixtures.
 
 The game thread classifies navigation OAM separately from town records. Steady
 navigation owns 20 packed priority-3 label/frame sprites followed by the
@@ -2566,6 +4286,97 @@ black master-fade overlay with exact 17/255 steps, then draws Palace/UI pixels
 whose PPU rasterization already applied the same brightness. A gf380-451 replay
 shows the view selected at brightness 0 before fade-in, retained through all
 15 steps and the complete fade-out, and released only after the black endpoint.
+
+#### Enhanced Sky Palace horizon view
+
+`sim3d_sky_palace` (`AR_SIM3D_SKY_PALACE`) defaults on but is available and
+active only with `sim3d_world_navigation`. Map `$07` retains its native
+foreground and menu/gameplay state. Its background shows the developed globe
+from a low-orbit horizon camera, with Palace-only blue daylight
+and drifting sky clouds. Map `$09` keeps its space backdrop. Globe terrain,
+town models, native mountains, cloud body/shadows and effect controls are
+shared, not copied into a second scene implementation.
+
+The game-side producer claims an unused BG1 observational main-screen-winner
+capture. It never requests `RemoveFromGame`, and does not displace existing
+HD/dump captures. The adapter validates public PPU/frame snapshots and their
+generation, compatible Mode-1/color math, and exact capture flags/extents.
+During slot upload, presentation composes a bounded ARGB foreground from the
+native main surface and winner mask: white winners become transparent;
+everything else retains native RGB and opaque alpha, including black menus.
+The original main texture remains available for same-frame fallback. Retained
+frames use uploaded textures, never borrowed producer pixels. Device reset
+destroys the Palace texture and clears publication validity.
+
+The extracted globe scene stage leaves output target/viewport and native UI
+ownership with its caller. Its Palace camera uses six-plane homogeneous
+clipping from portable `scene3d_math`; exact clipped ground also supplies
+shadow/haze receivers. Navigation keeps its former projection path. The sky
+gradient uses ten vertices, holding a richer indigo-blue through the native
+roof/HUD into the visible windows, then reaching pale blue at the projected
+horizon. The Palace uses a **3x diameter** globe: a 144-tile chart radius and
+12-unit physical radius, retaining the former 4/48-unit town tile scale,
+3-unit minimum camera altitude and 1.05-radian vertical field of view. Keeping
+altitude and local scale fixed makes the horizon gentler; proportionally
+scaling the camera too would preserve the old curve. Global terrain/model/air
+bounds still raise the eye if required by effect settings. The camera aims
+slightly above the sea tangent (about 53% down the viewport), leaving more sky
+around the angel. The horizon veil is narrower and less opaque so nearby
+terrain keeps its color. Navigation retains its original 48-tile chart and camera.
+The globe rotates independently to put the selected region's raised centre
+just below the sea horizon, about 56.5% down the viewport above the menu.
+Presentation consumes captured region bounds (travel focus is the fallback),
+not game memory or a duplicate town-location table. A near ray/sphere
+intersection accounts for the region's terrain height without scaling relief
+or moving native destination coordinates.
+The chosen radius is presentation-owned. Explicit-radius portable globe and
+mountain-transition functions have no mode/global-state dependency, and their
+default wrappers preserve navigation behavior. Radius participates in private
+projection, mountain, cliff, model-bound and weather-normal cache keys.
+Switching Palace/navigation rebuilds chart-dependent surfaces from native art
+(including pre-animation mountain colors), but retains compiled town models
+and cloud atlases. Selecting another Palace town changes orientation only.
+No runner ABI, frame schema, settings option or backend contract was added.
+The revised sky deck uses twelve self-shadowed density volumes, each represented
+by sixteen sorted depth-tested slices. An appended `VolumeCloud` material
+owns a 384×960 atlas; it reuses the existing portable shader and no-depth-write
+pipeline. No new shader, render target or runner ABI was added. The separate
+`sim3d_sky_palace_volumetric` / `AR_SIM3D_SKY_PALACE_VOLUMETRIC` toggle selects
+one precomposited slice per bank for low-end systems. Zero drift freezes both
+cloud decks; clouds off removes both. Three middle and three fuller lower
+banks drift across the globe at different speeds, behind the native angel
+and palace, while three horizon banks and three staggered upper banks fill
+the sky. The upper deck expands coverage through the high windows using
+existing baked shapes; it adds no atlas, shader, pass, or setting. The decks repeat
+offscreen and reuse the same four baked shapes. Low-end backdrop off uses flat blue.
+Atmosphere off also removes the new artistic horizon-mist band. Native UI
+stays above every effect; Palace depth composition uses premultiplied alpha
+to preserve soft cloud edges. See the audit for cache and weather limitations.
+
+Source/contract/performance findings are recorded in
+[`world-navigation-code-audit.md`](world-navigation-code-audit.md). The real
+PPU regression verifies native pixel parity through brightness changes and
+foreground/winner ownership. Randomized clipping and fake-backend tests cover
+frustum safety, exact receivers, and caller-owned output. Sanitized Metal
+verification retains all 246 prior navigation reference captures exactly and
+adds six Palace views, clock motion/freeze, shadow toggles, reset recovery and
+return-to-navigation image parity.
+
+Native 4:3 snapshots at gf420/500/750 in `runs/20260908-134843/` match the
+original Palace control `runs/20260908-130529/` for WRAM, VRAM, CGRAM, OAM,
+high OAM and public PPU registers. The earlier daylight/moving-weather preview
+is `runs/20260908-135558/sky-palace-preview.gif` (480×360, 763 KiB).
+It predates the density-volume cloud revision; the revised native still is
+`runs/20260908-151754/sky-palace-volumetric.png`. The new effect's six-run
+quality comparison and sanitized/reference checks are in the code audit.
+Live on/off restores the original 4:3 gf500/gf600 captures byte-for-byte in
+`runs/20260908-135709/`. True 16:9 capture/toggle coverage uses
+`AR_WS_HEADLESS=1` and 43-column margins in `runs/20260908-140012/`.
+Its off-state gf500/gf600 images and unchanged navigation gf400 match the
+always-native Palace control `runs/20260908-140107/` exactly. The final full
+suite passes all 148 tests. Both original and isolated populated save hashes
+remain unchanged.
+These captures are correctness checks, not performance measurements.
 
 ## 13i. Vertical extend — widescreen's transpose (2026-08-03, symmetric 2026-08-10)
 

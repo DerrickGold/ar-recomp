@@ -64,6 +64,7 @@ void SimRenderMetadata_TraceFrame(uint32_t host_frame,
           "\"world_texture_serial\":%u,"
           "\"world_texture_size\":[%u,%u],"
           "\"world_source_to_screen\":[%.9g,%.9g,%.9g,%.9g,%.9g,%.9g],"
+          "\"world_towns\":[%u,%u,%s],"
           "\"world_composition_valid\":%s,"
           "\"world_composition_empty\":%s,"
           "\"world_palace\":[%u,%u,%d,%d,%u,%u],"
@@ -81,6 +82,8 @@ void SimRenderMetadata_TraceFrame(uint32_t host_frame,
           "\"shadow_opacity_pct\":%u,"
           "\"shadow_softness_pct\":%u,\"light\":[%u,%u],"
           "\"world_effects\":[%u,%u,%u,%u],"
+          "\"world_optional_stages\":{\"cloud_shadows\":%u,\"atmosphere\":%u,"
+          "\"models\":%u,\"relief\":%u,\"ground_detail\":%u,\"mountains\":%u},"
           "\"picker_topdown\":%s,"
           "\"backdrop_argb\":%u,\"object_half_add\":%s,"
           "\"source_count\":%u,\"zero_oam_sources\":%u,"
@@ -135,6 +138,9 @@ void SimRenderMetadata_TraceFrame(uint32_t host_frame,
           (double)frame->world_navigation_scene.source_to_screen[3],
           (double)frame->world_navigation_scene.source_to_screen[4],
           (double)frame->world_navigation_scene.source_to_screen[5],
+          (unsigned)frame->world_navigation_towns.object_count,
+          (unsigned)frame->world_navigation_towns.enabled_town_mask,
+          frame->world_navigation_towns.overflow ? "true" : "false",
           frame->world_navigation_scene.composition.valid ? "true" : "false",
           frame->world_navigation_scene.composition.empty_animation
               ? "true" : "false",
@@ -177,6 +183,12 @@ void SimRenderMetadata_TraceFrame(uint32_t host_frame,
           (unsigned)frame->world_navigation_clouds,
           (unsigned)frame->world_navigation_backdrop,
           (unsigned)frame->world_navigation_haze,
+          (unsigned)frame->world_navigation_cloud_shadows,
+          (unsigned)frame->world_navigation_atmosphere,
+          (unsigned)frame->world_navigation_models,
+          (unsigned)frame->world_navigation_relief,
+          (unsigned)frame->world_navigation_ground_detail,
+          (unsigned)frame->world_navigation_mountains,
           AR_SIM3D_PICKER_TOPDOWN ? "true" : "false",
           (unsigned)frame->separated_backdrop_argb,
           frame->object_half_add ? "true" : "false",

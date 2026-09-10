@@ -23,6 +23,11 @@ typedef enum Sim3DPerformanceStage {
   kSim3DPerformance_Effects,
   kSim3DPerformance_Cloud,
   kSim3DPerformance_HostUi,
+  kSim3DPerformance_WorldAnimation,
+  kSim3DPerformance_WorldTransfer,
+  kSim3DPerformance_WorldPrepare,
+  kSim3DPerformance_WorldAtmosphere,
+  kSim3DPerformance_WorldOcean,
   kSim3DPerformanceStage_Count,
 } Sim3DPerformanceStage;
 
@@ -43,7 +48,8 @@ void Sim3DPerformance_AddDraw(uint64_t vertices, uint64_t indices);
 void Sim3DPerformance_AddUpload(uint64_t bytes);
 
 /* One completed enhanced Sim 3D presentation. Reports and resets a rolling
- * one-second window when profiling is enabled. */
+ * one-second window when profiling is enabled. Means sum all scopes per
+ * presentation; maxima measure one scope call (inclusive of nested work). */
 void Sim3DPerformance_EndPresentation(void);
 
 #endif /* AR_SIM3D_PERFORMANCE_H */

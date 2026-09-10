@@ -23,6 +23,7 @@ bool SimWorldMapBuild_Init(const uint8_t *rom_data, size_t rom_size);
  * town underlays continue the same eight-tick cycle from the global game
  * clock. It never observes $7E:C000 or PPU VRAM and the production path
  * mutates no emulator state. */
-void SimWorldMap_BuildIfNeeded(void);
+/* Palace reuse is explicitly requested by the application settings gate. */
+void SimWorldMap_BuildIfNeeded(bool sky_palace_enabled);
 
 #endif /* SIM_WORLD_MAP_BUILD_H */

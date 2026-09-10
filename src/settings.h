@@ -435,14 +435,23 @@ typedef struct Settings {
    * also extends projectile lifetime and can increase world-record pressure,
    * so this is intentionally labelled gameplay-affecting. */
   int sim_view_range;
-  /* Inter-town map $09 as a forced-top-down 3D scene. Independent of the town
-   * master because it has no town canvas, separated layers, or free camera. */
+  /* Inter-town map $09 as an oblique relief globe. Independent of the town
+   * master, but it deliberately shares the town camera pose so arrival does
+   * not jump between incompatible perspectives. */
   bool sim3d_world_navigation;
+  bool sim3d_sky_palace; /* Globe behind the native Palace; navigation gate required. */
+  bool sim3d_sky_palace_volumetric;
   /* World-navigation effects have their own stage gates. They share compatible
    * numeric tuning with town 3D, but never inherit its master or its
    * sprite-window/cull assumptions. */
   bool sim3d_world_navigation_lighting;
   bool sim3d_world_navigation_clouds;
+  bool sim3d_world_navigation_cloud_shadows;
+  bool sim3d_world_navigation_atmosphere;
+  bool sim3d_world_navigation_towns;
+  bool sim3d_world_navigation_relief;
+  bool sim3d_world_navigation_ground_detail;
+  bool sim3d_world_navigation_mountains;
   /* The enhanced renderer's stages. These toggles are the only stored form:
    * there is no feature mask setting and no A/B profile pair. Comparing two
    * builds of the scene means toggling stages across separate runs, which is

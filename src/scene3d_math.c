@@ -1,11 +1,116 @@
 #include "scene3d_math.h"
 
 #include <math.h>
+#include <string.h>
 
 const float kScene3DMinimumProjectionDepth = 0.0001f;
 /* Below this the camera is looking straight down and the ground has no depth
  * gradient to take a direction from. */
 static const float kMinimumGroundDepthGradient = 0.0001f;
+
+bool Scene3D_TransformToClip(const float matrix[16], float x, float y, float z,
+                            Scene3DClipPoint *out_point) {
+  if (!matrix || !out_point) return false;
+  const Scene3DClipPoint point = {
+    matrix[0] * x + matrix[4] * y + matrix[8] * z + matrix[12],
+    matrix[1] * x + matrix[5] * y + matrix[9] * z + matrix[13],
+    matrix[2] * x + matrix[6] * y + matrix[10] * z + matrix[14],
+    matrix[3] * x + matrix[7] * y + matrix[11] * z + matrix[15],
+  };
+  if (!isfinite(point.x) || !isfinite(point.y) ||
+      !isfinite(point.z) || !isfinite(point.w)) return false;
+  *out_point = point;
+  return true;
+}
+
+static double ClipPlaneDistance(Scene3DClipPoint point, int plane) {
+  const double coordinate = plane / 2 == 0 ? point.x
+      : plane / 2 == 1 ? point.y : point.z;
+  return (double)point.w + (plane & 1 ? -coordinate : coordinate);
+}
+
+static Scene3DClippedVertex ClipIntersection(
+    const Scene3DClippedVertex *a, const Scene3DClippedVertex *b,
+    double distance_a, double distance_b, int plane) {
+  const double t = distance_a / (distance_a - distance_b);
+  const double s = 1.0 - t;
+  Scene3DClippedVertex out = {
+    .point = {
+      (float)(s * a->point.x + t * b->point.x),
+      (float)(s * a->point.y + t * b->point.y),
+      (float)(s * a->point.z + t * b->point.z),
+      (float)(s * a->point.w + t * b->point.w),
+    },
+  };
+  /* Place the intersection exactly on this plane despite float rounding. */
+  const float boundary = plane & 1 ? out.point.w : -out.point.w;
+  if (plane / 2 == 0) out.point.x = boundary;
+  else if (plane / 2 == 1) out.point.y = boundary;
+  else out.point.z = boundary;
+  for (int i = 0; i < 3; i++)
+    out.weights[i] = (float)(s * a->weights[i] + t * b->weights[i]);
+  return out;
+}
+
+static bool AppendClippedVertex(Scene3DClippedPolygon *polygon,
+                                Scene3DClippedVertex vertex) {
+  if (polygon->count == kScene3DClippedPolygonCapacity) return false;
+  polygon->vertices[polygon->count++] = vertex;
+  return true;
+}
+
+bool Scene3D_ClipTriangle(const Scene3DClipPoint input[3],
+                          Scene3DClippedPolygon *out_polygon) {
+  if (!out_polygon) return false;
+  *out_polygon = (Scene3DClippedPolygon){0};
+  if (!input) return false;
+  Scene3DClippedPolygon polygons[2] = {{.count = 3}, {0}};
+  unsigned common_outside = 0x3fu, any_outside = 0;
+  for (int i = 0; i < 3; i++) {
+    const Scene3DClipPoint point = input[i];
+    if (!isfinite(point.x) || !isfinite(point.y) ||
+        !isfinite(point.z) || !isfinite(point.w)) return false;
+    polygons[0].vertices[i].point = point;
+    polygons[0].vertices[i].weights[i] = 1;
+    unsigned outside = 0;
+    for (int plane = 0; plane < 6; plane++)
+      if (ClipPlaneDistance(point, plane) < 0) outside |= 1u << plane;
+    common_outside &= outside;
+    any_outside |= outside;
+  }
+  if (common_outside) return true;
+  int current = 0;
+  for (int plane = 0; plane < 6 && any_outside; plane++) {
+    if (!(any_outside & (1u << plane))) continue;
+    const Scene3DClippedPolygon *source = &polygons[current];
+    Scene3DClippedPolygon *destination = &polygons[1 - current];
+    destination->count = 0;
+    for (int i = 0; i < source->count; i++) {
+      const Scene3DClippedVertex *a = &source->vertices[
+          i ? i - 1 : source->count - 1];
+      const Scene3DClippedVertex *b = &source->vertices[i];
+      const double da = ClipPlaneDistance(a->point, plane);
+      const double db = ClipPlaneDistance(b->point, plane);
+      /* Strict crossings exclude on-plane endpoints: emitting the endpoint
+       * twice can inflate a degenerate polygon beyond the geometric bound. */
+      if ((da < 0 && db > 0) || (da > 0 && db < 0))
+        if (!AppendClippedVertex(destination,
+                ClipIntersection(a, b, da, db, plane))) return false;
+      if (db >= 0 && !AppendClippedVertex(destination, *b)) return false;
+    }
+    if (destination->count < 3) return true;
+    current = 1 - current;
+  }
+  const Scene3DClippedPolygon *result = &polygons[current];
+  /* A homogeneous point at the eye has no perspective divide. Such an
+   * endpoint is not a drawable area and must never reach screen geometry. */
+  for (int i = 0; i < result->count; i++)
+    if (result->vertices[i].point.w <= 0) return false;
+  out_polygon->count = result->count;
+  memcpy(out_polygon->vertices, result->vertices,
+      (size_t)result->count * sizeof(result->vertices[0]));
+  return true;
+}
 
 static void Mat4Mul(const float a[16], const float b[16], float out[16]) {
   for (int column = 0; column < 4; column++) {

@@ -1698,6 +1698,65 @@ static void TestFullAddSubscreenWinnerCapture(void) {
  * isolated BG2 pixels. Put BG1 high-priority art over the right half and prove
  * the exported mask is white only where BG2 remains drawable; its untouched
  * region is opaque black so SDL_BLENDMODE_MUL actually erases effect RGB. */
+static void TestSkyPalaceWinnerCapture(void) {
+  Ppu *ppu = ppu_init();
+  Snes snes = {0};
+  CHECK(ppu);
+  if (!ppu) return;
+  snes.ppu = ppu;
+  snes.abiLifetimeGeneration = 7;
+  sr_runner_bind_ppu_services(&snes, true);
+  static uint8_t native[kW * kH * 4], reference[sizeof(native)];
+  static uint32_t mask[kW * 240], foreground[kW * kH];
+  ppu_reset(ppu);
+  ppu->bgmode = 9;
+  ppu->screenEnabled[0] = 0x17;
+  ppu->cgram[0x11] = bgr555(31, 0, 0);
+  ppu->cgram[0x21] = 0; /* Native black foreground must not become a hole. */
+  set_solid_4bpp_tile(ppu, 1, 1);
+  set_solid_4bpp_tile(ppu, 2, 1);
+  ppu->bgXsc[0] = 0x20;
+  ppu->bgXsc[1] = 0x24;
+  for (int tile = 0; tile < 1024; tile++) {
+    ppu->vram[0x2000 + tile] = 1 | (1 << 10);
+    ppu->vram[0x2400 + tile] = (tile % 32) < 16 ? 2 | (2 << 10) | (1 << 13) : 0;
+  }
+  for (int brightness = 0; brightness <= 15; brightness += 5) {
+    ppu->inidisp = brightness;
+    PpuBeginDrawing(ppu, native, kW * 4, 0);
+    PpuClearOverlayCaptures(ppu);
+    for (int line = 0; line <= kH; line++) ppu_runLine(ppu, line);
+    memcpy(reference, native, sizeof(reference));
+    CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg1, (uint8_t *)mask, kW * 4));
+    CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg1, 0, 0, kW, kH,
+        kPpuOverlayFlag_MarkMainScreenWinner));
+    for (int line = 0; line <= kH; line++) ppu_runLine(ppu, line);
+    CHECK(!memcmp(reference, native, sizeof(native)));
+    SimFrameData frame = {.view = kSimView_SkyPalace};
+    frame.world_navigation_scene.valid = true;
+    CHECK(SimWorldNavigationCapture_Capture(&frame, sr_runner_handle(&snes)));
+    CHECK(frame.view == kSimView_SkyPalace);
+    CHECK(frame.world_navigation_brightness == brightness);
+    CHECK(SimWorldNavigationPalace_ComposeForeground(foreground, kW * 4,
+        native, kW * 4, (uint8_t *)mask, kW * 4, kW, kH));
+    CHECK(foreground[10 * kW + 16] == 0xff000000u);
+    CHECK(foreground[10 * kW + 240] == 0);
+    CHECK(mask[10 * kW + 16] == 0xff000000u);
+    CHECK(mask[10 * kW + 240] == 0xffffffffu);
+  }
+  SimFrameData frame = {.view = kSimView_SkyPalace};
+  PpuClearOverlayCaptures(ppu);
+  CHECK(!SimWorldNavigationCapture_Capture(&frame, sr_runner_handle(&snes)));
+  CHECK(frame.view == kSimView_AuthenticFallback);
+  CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg1, 0, 0, kW, kH,
+      kPpuOverlayFlag_MarkMainScreenWinner | kPpuOverlayFlag_RemoveFromGame));
+  frame.view = kSimView_SkyPalace;
+  CHECK(!SimWorldNavigationCapture_Capture(&frame, sr_runner_handle(&snes)));
+  CHECK(frame.view == kSimView_AuthenticFallback);
+  sr_runner_bind_ppu_services(&snes, false);
+  ppu_free(ppu);
+}
+
 static void TestMainScreenWinnerMask(void) {
   Ppu *ppu = ppu_init();
   CHECK(ppu != NULL);
@@ -2912,6 +2971,7 @@ int main(void) {
   TestSubscreenOnlyOverlayCapture();
   TestFullAddSubscreenWinnerCapture();
   TestMainScreenWinnerMask();
+  TestSkyPalaceWinnerCapture();
   TestBg3NativeParityComposite();
   TestVerticalMarginLayerClip();
   TestVerticalMarginBottomLayerClip();

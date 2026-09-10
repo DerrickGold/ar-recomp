@@ -114,10 +114,19 @@ void SimBackgroundVoxelLighting_VertexBrightnesses(
     uint8_t directional_brightness,
     SimBackgroundVoxelShading shading,
     uint8_t out[4]) {
+  SimBackgroundVoxelLighting_VertexBrightnessesInRange(
+      model ? face : NULL, model ? model->min_z : 0, model ? model->max_z : 0,
+      directional_brightness, shading, out);
+}
+
+void SimBackgroundVoxelLighting_VertexBrightnessesInRange(
+    const SimBackgroundVoxelModelFace *face, float min_z, float max_z,
+    uint8_t directional_brightness, SimBackgroundVoxelShading shading,
+    uint8_t out[4]) {
   if (!out) return;
   for (int point = 0; point < 4; point++)
     out[point] = directional_brightness;
-  if (!face || !model ||
+  if (!face ||
       shading < kSimBackgroundVoxelShading_AmbientOcclusion)
     return;
   float face_min_z = face->points[0].z;
@@ -129,8 +138,8 @@ void SimBackgroundVoxelLighting_VertexBrightnesses(
   for (int point = 0; point < 4; point++) {
     float factor = 1.0f;
     if (face_max_z - face_min_z > kLightingGeometryEpsilon) {
-      float height = face->points[point].z - model->min_z;
-      float range = model->max_z - model->min_z;
+      float height = face->points[point].z - min_z;
+      float range = max_z - min_z;
       float normalized = range > kLightingGeometryEpsilon
           ? height / range : 1.0f;
       if (normalized < 0.0f) normalized = 0.0f;
@@ -140,7 +149,7 @@ void SimBackgroundVoxelLighting_VertexBrightnesses(
        * and let the renderer interpolate the gradient without extra geometry. */
       factor = kGroundContactFloor +
           kGroundContactRange * sqrtf(normalized);
-    } else if (face_max_z < model->max_z * kLowLedgeHeightFraction) {
+    } else if (face_max_z < max_z * kLowLedgeHeightFraction) {
       /* Low horizontal ledges sit underneath other mass and receive less sky. */
       factor = kLowLedgeLightFactor;
     }

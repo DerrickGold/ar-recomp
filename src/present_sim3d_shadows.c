@@ -63,21 +63,7 @@ static int32_t s_sim_shadow_indices[kSimShadowMaxIndices];
  * the shadow sideways, where the eye reads the offset as lateral position
  * instead. Both angles are player settings, so this is a starting point rather
  * than a constraint. */
-const float kPi = 3.14159265f;
-
-void SimShadowLight(const FrameSlot *slot, float *light_x,
-                           float *light_y) {
-  float elevation = (float)slot->sim.light_elevation_deg * kPi / 180.0f;
-  float azimuth = (float)slot->sim.light_azimuth_deg * kPi / 180.0f;
-  float sine = sinf(elevation);
-  /* cot(elevation), clamped so a near-horizon light cannot throw a shadow to
-   * infinity and blow out the mask. */
-  float shear = sine > 0.05f ? cosf(elevation) / sine : 20.0f;
-  if (shear > 4.0f) shear = 4.0f;
-  if (shear < 0.0f) shear = 0.0f;
-  *light_x = shear * cosf(azimuth);
-  *light_y = shear * sinf(azimuth);
-}
+/* SimShadowLight is shared with navigation in present_sim3d_environment.c. */
 /* Footprint shrink per world unit of height. A caster on the standard 24px
  * flight plane sits at height_world = 24/224, so 6.0 puts its shadow at
  * 1/(1 + 24/224*6) = ~61% -- enough to read as "up there" without the shadow

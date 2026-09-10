@@ -55,6 +55,9 @@ typedef struct SimBackgroundMountainCaps {
 uint8_t SimBackgroundMountains_TileFlags(uint8_t town, uint8_t tile);
 void SimBackgroundMountains_Classify(
     uint8_t town, const uint8_t *wram, SimBackgroundMountainField *out);
+/* Same classifier for immutable, row-major 32x32 terrain snapshots. */
+void SimBackgroundMountains_ClassifyCells(
+    uint8_t town, const uint8_t *cells, SimBackgroundMountainField *out);
 bool SimBackgroundMountains_CellOccupied(
     const SimBackgroundMountainField *field, int x, int y);
 bool SimBackgroundMountains_TileSource(

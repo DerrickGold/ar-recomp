@@ -81,6 +81,7 @@
 #include "sim/sim_background_voxels.h"
 #include "sim/sim_town_canvas.h"
 #include "sim/sim_world_map.h"
+#include "sim/sim_town_ground_art.h"
 #include "sim/sim3d.h"
 #include "constants.h"
 #include "platform/sdl/render_sdl.h"
@@ -465,7 +466,8 @@ static void DrawAndPresentFrame(HostDisplayPresentMode present_mode,
   /* Own the developed world tilemap instead of observing $7E:C000, which acts
    * and towns both reuse as unrelated scratch. This runs only on the game
    * thread, after an emulated tick reached a stable frame boundary. */
-  SimWorldMap_BuildIfNeeded();
+  SimWorldMap_BuildIfNeeded(
+      g_settings.sim3d_world_navigation && g_settings.sim3d_sky_palace);
   /* #16: function-scope so the annotated sim outlives the block below and can
    * be published to FrameSlot_Capture around the HostDisplay_SubmitFrame tail. */
   SimFrameData sim;
@@ -478,6 +480,8 @@ static void DrawAndPresentFrame(HostDisplayPresentMode present_mode,
         g_settings.sim3d_world_navigation,
         Settings_Sim3DRequestedFeatures(),
         g_settings.sim3d_diagnostic_layers, Sim3D_ImplementedFeatures());
+    SimRenderMetadata_CaptureSkyPalaceFrame(&sim, g_ram,
+        g_settings.sim3d_world_navigation && g_settings.sim3d_sky_palace);
     Sim3DTuning tuning = BuildSim3DTuning();
     Sim3D_AnnotateFrame(&sim, &tuning);
     SimWorldNavigationCapture_Capture(&sim, RtlGameRunner());
@@ -1366,6 +1370,8 @@ static void AppBoot_InstallSubsystems(AppBoot *app) {
    * data. Failure is not fatal: consumers retain the authentic presentation. */
   if (SimWorldMap_Init(app->rom_data, app->rom_size))
     SimWorldMapBuild_Init(app->rom_data, app->rom_size);
+  if (!SimTownGroundArt_Init(app->rom_data, app->rom_size))
+    fprintf(stderr, "[world-navigation] native town ground unavailable\n");
   if (!Diorama_InitRomBackdrops(app->rom_data, app->rom_size))
     fprintf(stderr, "[diorama] named ROM backdrops unavailable\n");
   if (!ActRaiserActionBg_InitRoomScenes(app->rom_data, app->rom_size))
@@ -2284,6 +2290,7 @@ static int AppShutdown(AppBoot *app, char **argv) {
   NativeAudioTrace_Shutdown();
   HdReplacementHost_Shutdown();
   PresentRendererResources_Reset();
+  SimTownGroundArt_Shutdown();
   DioramaFrameGeneration_Shutdown();
   Diorama_Shutdown(&g_render_device);
   DestroyDioramaTextures();

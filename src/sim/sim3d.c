@@ -1372,12 +1372,18 @@ void Sim3D_LogViewTransition(const SimFrameData *frame) {
     kLoggedView_AuthenticFallback,
     kLoggedView_EnhancedInvalid,
     kLoggedView_Enhanced,
+    kLoggedView_WorldNavigation,
+    kLoggedView_SkyPalace,
   };
   static int previous = kLoggedView_Unknown;
   static uint16_t previous_game_frame;
   if (!frame) return;
   int current = frame->view == kSimView_None
       ? kLoggedView_None
+      : frame->view == kSimView_WorldNavigation
+          ? kLoggedView_WorldNavigation
+      : frame->view == kSimView_SkyPalace
+          ? kLoggedView_SkyPalace
       : frame->view != kSimView_Enhanced
           ? kLoggedView_AuthenticFallback
           : frame->separated_valid
@@ -1386,6 +1392,8 @@ void Sim3D_LogViewTransition(const SimFrameData *frame) {
     static const char *const names[] = {
       "none", "authentic (view fallback)",
       "authentic (enhanced capture invalid)", "enhanced",
+      "world navigation 3D",
+      "Sky Palace globe",
     };
     if (previous != kLoggedView_Unknown)
       fprintf(stderr,
@@ -1590,6 +1598,13 @@ void Sim3D_AnnotateFrame(SimFrameData *frame, const Sim3DTuning *tuning) {
       tuning->world_navigation_lighting ? 1 : 0;
   frame->world_navigation_clouds =
       tuning->world_navigation_clouds ? 1 : 0;
+  frame->world_navigation_cloud_shadows = tuning->world_navigation_cloud_shadows ? 1 : 0;
+  frame->sky_palace_volumetric_clouds = tuning->sky_palace_volumetric_clouds ? 1 : 0;
+  frame->world_navigation_atmosphere = tuning->world_navigation_atmosphere ? 1 : 0;
+  frame->world_navigation_models = tuning->world_navigation_models ? 1 : 0;
+  frame->world_navigation_relief = tuning->world_navigation_relief ? 1 : 0;
+  frame->world_navigation_ground_detail = tuning->world_navigation_ground_detail ? 1 : 0;
+  frame->world_navigation_mountains = tuning->world_navigation_mountains ? 1 : 0;
   frame->world_navigation_backdrop =
       tuning->world_navigation_backdrop ? 1 : 0;
   frame->world_navigation_haze =
@@ -1618,17 +1633,12 @@ void Sim3D_AnnotateFrame(SimFrameData *frame, const Sim3DTuning *tuning) {
   frame->separated_screen_sub = g_sim3d.screen_sub;
   frame->separated_brightness = g_sim3d.brightness;
   frame->object_half_add = g_sim3d.object_half_add;
-  /* These three settings own only the simulation-town perspective camera.
-   * World navigation is driven by its captured affine scene and must not
-   * appear to inherit a free/dynamic town pose merely because both views
-   * share this tuning annotation pass. */
-  if (frame->view == kSimView_WorldNavigation) {
-    frame->projection_pitch_mrad = 0;
-    frame->projection_yaw_mrad = 0;
-    frame->projection_distance_x100 = 0;
-  } else {
-    frame->projection_pitch_mrad = (int16_t)pitch_mrad;
-    frame->projection_yaw_mrad = (int16_t)yaw_mrad;
-    frame->projection_distance_x100 = (uint16_t)distance_x100;
-  }
+  /* Navigation deliberately shares the town camera pose. Its captured Mode-7
+   * affine remains the authoritative focus, in-plane rotation and zoom, but
+   * treating that affine as the final camera is what made the world flat and
+   * guaranteed a perspective jump on town entry. Both views now place their
+   * ground through the same oblique projection vocabulary. */
+  frame->projection_pitch_mrad = (int16_t)pitch_mrad;
+  frame->projection_yaw_mrad = (int16_t)yaw_mrad;
+  frame->projection_distance_x100 = (uint16_t)distance_x100;
 }

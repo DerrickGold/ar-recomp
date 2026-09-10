@@ -74,6 +74,11 @@ typedef struct SimBackgroundVoxelModel {
   SimBackgroundVoxelModelBox boxes[kSimBackgroundVoxelModelMaxBoxes];
 } SimBackgroundVoxelModel;
 
+typedef struct SimBackgroundVoxelModelBounds {
+  float min_x, min_y, min_z;
+  float max_x, max_y, max_z;
+} SimBackgroundVoxelModelBounds;
+
 uint16_t SimBackgroundVoxelModel_FaceBudget(
     SimBackgroundVoxelDetail detail);
 
@@ -92,5 +97,24 @@ void SimBackgroundVoxelModel_BuildStyled(
     SimBackgroundVoxelDetail detail,
     SimBackgroundVoxelStyle style,
     SimBackgroundVoxelModel *out);
+
+/* Conservative height in authentic town pixels, across Low through the
+ * requested maximum detail and all three windmill poses. Other objects keep
+ * their captured construction phase. Uses the same authored geometry before
+ * surface optimization; no render-cache or backend side effects. Intended
+ * for retained scene bounds, not per-frame model compilation. Null/unknown
+ * objects return zero; invalid detail/style use BuildStyled's defaults. */
+float SimBackgroundVoxelModel_HeightBound(
+    const SimBackgroundVoxelObject *object,
+    SimBackgroundVoxelDetail maximum_detail,
+    SimBackgroundVoxelStyle style);
+
+/* Same retained, all-LOD/all-windmill-pose envelope as HeightBound, including
+ * roof/crown/blade overhangs. False with zero bounds for missing geometry. */
+bool SimBackgroundVoxelModel_MeasureBounds(
+    const SimBackgroundVoxelObject *object,
+    SimBackgroundVoxelDetail maximum_detail,
+    SimBackgroundVoxelStyle style,
+    SimBackgroundVoxelModelBounds *out);
 
 #endif  /* SIM_BACKGROUND_VOXEL_MODELS_H */

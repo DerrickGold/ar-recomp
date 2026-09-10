@@ -838,14 +838,23 @@ static bool Sim3DGroundEnabled(void) {
 }
 static bool Sim3DLandscapeHeightAvailable(void) {
 #if AR_SIM3D_TERRAIN_ELEVATION
-  return Sim3DGroundEnabled() &&
-      g_settings.sim3d_voxel_preset != kSimBackgroundVoxelPreset_Off;
+  return g_settings.sim3d_world_navigation ||
+      (Sim3DGroundEnabled() &&
+       g_settings.sim3d_voxel_preset != kSimBackgroundVoxelPreset_Off);
 #else
   return false;
 #endif
 }
 static bool Sim3DVoxelCustomEnabled(void) {
   return Sim3DGroundEnabled() &&
+      g_settings.sim3d_voxel_preset == kSimBackgroundVoxelPreset_Custom;
+}
+static bool Sim3DOrWorldNavigationModelsAvailable(void) {
+  return Sim3DGroundEnabled() ||
+      (g_settings.sim3d_world_navigation && g_settings.sim3d_world_navigation_towns);
+}
+static bool Sim3DOrWorldNavigationModelCustomEnabled(void) {
+  return Sim3DOrWorldNavigationModelsAvailable() &&
       g_settings.sim3d_voxel_preset == kSimBackgroundVoxelPreset_Custom;
 }
 static bool Sim3DBillboardsAvailable(void) {
@@ -925,6 +934,10 @@ static bool Sim3DCloudShroudEnabled(void) {
 static bool WorldNavigation3DEnabled(void) {
   return g_settings.sim3d_world_navigation;
 }
+static bool SkyPalaceCloudsAvailable(void) {
+  return WorldNavigation3DEnabled() && g_settings.sim3d_sky_palace &&
+      g_settings.sim3d_world_navigation_clouds;
+}
 static bool WorldNavigationLightingAvailable(void) {
   return WorldNavigation3DEnabled() &&
       g_settings.sim3d_world_navigation_lighting;
@@ -939,12 +952,14 @@ static bool Sim3DOrWorldNavigationLightingAvailable(void) {
 static bool Sim3DOrWorldNavigationShadowAvailable(void) {
   return Sim3DShadowsEnabled() ||
       (WorldNavigationLightingAvailable() &&
-       g_settings.sim3d_world_navigation_clouds);
+       g_settings.sim3d_world_navigation_clouds &&
+       g_settings.sim3d_world_navigation_cloud_shadows);
 }
 static bool Sim3DOrWorldNavigationSoftShadowAvailable(void) {
   return Sim3DSoftShadowsEnabled() ||
       (WorldNavigationLightingAvailable() &&
-       g_settings.sim3d_world_navigation_clouds);
+       g_settings.sim3d_world_navigation_clouds &&
+       g_settings.sim3d_world_navigation_cloud_shadows);
 }
 static bool Sim3DOrWorldNavigationCloudsAvailable(void) {
   return Sim3DCloudShroudEnabled() || WorldNavigationCloudsAvailable();
@@ -1281,15 +1296,27 @@ const SettingDesc g_setting_descs[] = {
     .modern_env = true, .player_visible = true },
   BOOL_SETTING_MODERN(sim3d_world_navigation, "AR_SIM3D_WORLD_NAV",
                "World navigation 3D",
-               "Render inter-town Sky Palace navigation as a full-world 3D "
-               "scene with a forced top-down camera.",
+               "Render inter-town Sky Palace navigation on a full relief "
+               "globe with fixed town geography and an angled 3D camera.",
                kSettingCat_Simulation, 0, false, NULL,
                NULL),
+  BOOL_SETTING_MODERN(sim3d_sky_palace, "AR_SIM3D_SKY_PALACE",
+               "Sky Palace globe backdrop",
+               "Look across the globe from cloud level behind the native "
+               "Sky Palace pillars, angel and menus. Requires World navigation 3D.",
+               kSettingCat_Simulation, 1, false,
+               WorldNavigation3DEnabled, NULL),
+  BOOL_SETTING_MODERN(sim3d_sky_palace_volumetric, "AR_SIM3D_SKY_PALACE_VOLUMETRIC",
+               "Sky Palace volumetric clouds",
+               "Render lit cloud volumes around the Palace horizon. Disable "
+               "for cheaper single-layer clouds. Clouds, density and drift "
+               "controls apply to both modes.",
+               kSettingCat_Simulation, 1, false, SkyPalaceCloudsAvailable, NULL),
   BOOL_SETTING_MODERN(sim3d_world_navigation_lighting,
                "AR_SIM3D_WORLD_NAV_LIGHTING",
                "World navigation lighting",
-               "Apply top-down colour treatment and directional cloud shadows "
-               "to the inter-town world. Uses the shared light controls and "
+               "Light the globe and its relief and add directional cloud "
+               "shadows to the inter-town world. Uses the shared controls and "
                "does not require Simulation town 3D.",
                kSettingCat_Simulation, 1, false,
                WorldNavigation3DEnabled, NULL),
@@ -1300,7 +1327,54 @@ const SettingDesc g_setting_descs[] = {
                "The authentic zoom controls whether the camera is above the "
                "cloud deck: bodies are visible while zoomed out and fade "
                "away as the Palace descends below them.",
-               kSettingCat_Simulation, 0, false,
+               kSettingCat_Simulation, 1, false,
+               WorldNavigation3DEnabled, NULL),
+  BOOL_SETTING_MODERN(sim3d_world_navigation_cloud_shadows,
+               "AR_SIM3D_WORLD_NAV_CLOUD_SHADOWS",
+               "World navigation cloud shadows",
+               "Cast cloud shadows onto the globe. Disable this separately "
+               "to keep visible cloud cover with less rendering work. "
+               "Requires world navigation lighting and clouds.",
+               kSettingCat_Simulation, 1, false,
+               WorldNavigation3DEnabled, NULL),
+  BOOL_SETTING_MODERN(sim3d_world_navigation_atmosphere,
+               "AR_SIM3D_WORLD_NAV_ATMOSPHERE",
+               "World navigation atmosphere",
+               "Draw the blue atmospheric envelope around the planet. "
+               "Disable it independently of clouds, haze and the space backdrop.",
+               kSettingCat_Simulation, 1, false,
+               WorldNavigation3DEnabled, NULL),
+  BOOL_SETTING_MODERN(sim3d_world_navigation_towns,
+               "AR_SIM3D_WORLD_NAV_TOWNS",
+               "World navigation town models",
+               "Embed authored 3D buildings and vegetation for developed towns. "
+               "Off skips model compilation and drawing, retaining the live "
+               "town map artwork on the globe. Does not change town 3D settings.",
+               kSettingCat_Simulation, 1, false,
+               WorldNavigation3DEnabled, NULL),
+  BOOL_SETTING_MODERN(sim3d_world_navigation_relief,
+               "AR_SIM3D_WORLD_NAV_RELIEF",
+               "World navigation terrain relief",
+               "Raise mountains and town terrain above the globe. Off skips "
+               "heightfield preparation and sampling while keeping spherical "
+               "navigation. Does not flatten terrain inside simulation towns.",
+               kSettingCat_Simulation, 1, false,
+               WorldNavigation3DEnabled, NULL),
+  BOOL_SETTING_MODERN(sim3d_world_navigation_ground_detail,
+               "AR_SIM3D_WORLD_NAV_GROUND_DETAIL",
+               "World navigation detailed ground",
+               "Use native-resolution town ground with live paths, shorelines "
+               "and terrain. Off skips this ground blend; native mountains "
+               "may still use the shared source atlas. Does not change town 3D settings.",
+               kSettingCat_Simulation, 1, false,
+               WorldNavigation3DEnabled, NULL),
+  BOOL_SETTING_MODERN(sim3d_world_navigation_mountains,
+               "AR_SIM3D_WORLD_NAV_MOUNTAINS",
+               "World navigation native mountains",
+               "Use the town mountains' native cutouts, inclined faces and "
+               "side walls on the globe. Off retains overview relief and "
+               "skips native mountain work; landscape relief must also be enabled.",
+               kSettingCat_Simulation, 1, false,
                WorldNavigation3DEnabled, NULL),
   /* The enhanced renderer, stage by stage. Each is an ordinary toggle so a
    * stage can be turned on or off by name; `kSim3DShippedFeatures` is the one
@@ -1325,19 +1399,20 @@ const SettingDesc g_setting_descs[] = {
     "models and basic lighting. Balanced adds authored architecture, AO and "
     "pixel-clean edges. Quality enables the complete geometry, palette and "
     "Smooth 2x treatment. Custom exposes every control below without presets "
-    "overwriting those stored values.",
+    "overwriting those stored values. Globe navigation shares the model "
+    "detail/style limit; its effects have independent switches.",
     kSettingType_Enum, kApply_Passive, kSettingCat_Simulation,
     &g_settings.sim3d_voxel_preset, kSimBackgroundVoxelPreset_Balanced,
     kSimBackgroundVoxelPreset_Off, kSimBackgroundVoxelPreset_Custom, 1,
     false, kSimVoxelPresetLabels, kSimBackgroundVoxelPreset_Count,
-    Sim3DGroundEnabled, NULL, NULL, NULL,
+    Sim3DOrWorldNavigationModelsAvailable, NULL, NULL, NULL,
     .modern_env = true, .player_visible = true },
   { "sim3d_landscape_height_pct", "AR_SIM3D_LANDSCAPE_HEIGHT",
     "Landscape height (%)",
     "Scale the audited town relief independently from buildings and flying "
-    "objects. 100 keeps the full landscape, 50 gives half-height hills, and "
-    "0 makes the audited surface flat. Flying objects keep their authored "
-    "clearance above the resulting landscape.",
+    "objects. World navigation embeds the same heights and blends them into "
+    "the surrounding globe. 100 keeps the full landscape, 50 gives half-"
+    "height hills, and 0 makes the relief flat.",
     kSettingType_Int, kApply_Passive, kSettingCat_Simulation,
     &g_settings.sim3d_landscape_height_pct,
     kSimTownTerrainLandscapeHeightDefaultPct,
@@ -1356,7 +1431,7 @@ const SettingDesc g_setting_descs[] = {
     &g_settings.sim3d_voxel_detail, kSimBackgroundVoxelDetail_High,
     kSimBackgroundVoxelDetail_Low, kSimBackgroundVoxelDetail_Ultra, 1, false,
     kSimVoxelDetailLabels, kSimBackgroundVoxelDetail_Count,
-    Sim3DVoxelCustomEnabled, NULL, NULL, NULL,
+    Sim3DOrWorldNavigationModelCustomEnabled, NULL, NULL, NULL,
     .modern_env = true, .player_visible = true },
   { "sim3d_voxel_lod", "AR_SIM3D_VOXEL_LOD", "Voxel detail scaling",
     "Fixed uses the selected model detail everywhere. Adaptive treats model "
@@ -1391,7 +1466,7 @@ const SettingDesc g_setting_descs[] = {
     &g_settings.sim3d_voxel_style, kSimBackgroundVoxelStyle_Varied,
     kSimBackgroundVoxelStyle_Basic, kSimBackgroundVoxelStyle_Varied, 1,
     false, kSimVoxelStyleLabels, kSimBackgroundVoxelStyle_Count,
-    Sim3DVoxelCustomEnabled, NULL, NULL, NULL,
+    Sim3DOrWorldNavigationModelCustomEnabled, NULL, NULL, NULL,
     .modern_env = true, .player_visible = true },
   { "sim3d_voxel_facing", "AR_SIM3D_VOXEL_FACING", "Voxel camera facing",
     "Shared lean tilts every model equally toward the camera. Per-model lean "

@@ -98,10 +98,12 @@ void Sim3D_FinishCapture(uint8_t *authentic_pixels,
 
 SimRenderFeatureMask Sim3D_ImplementedFeatures(void);
 
-/* Host-side camera controls for the enhanced simulation-town view. Render
+/* Host-side camera controls for enhanced towns and globe navigation. Render
  * textures remain host-owned, so availability accepts their current readiness
  * rather than reaching into main.c. In Dynamic mode, zoom edits the persisted
- * baseline while orbit is a transient offset that decays after release. */
+ * baseline while orbit is a transient offset that decays after release.
+ * Globe inspection uses a separate visit-local orbit/zoom, never town settings;
+ * orbit returns on release in either town-camera mode. Reset restores travel. */
 bool Sim3DCamera_ControlsAvailable(bool textures_ready);
 
 /* Camera fields are host-owned presentation state rather than emulated scene
@@ -115,6 +117,7 @@ typedef struct Sim3DCameraPresentationState {
   int distance_x100;
   float orbit_yaw;
   float orbit_pitch;
+  float world_inspection_blend;
 } Sim3DCameraPresentationState;
 
 void Sim3DCamera_CapturePresentationState(
@@ -166,6 +169,13 @@ typedef struct Sim3DTuning {
   int cloud_drift_pct;
   int world_navigation_lighting;
   int world_navigation_clouds;
+  int sky_palace_volumetric_clouds;
+  int world_navigation_cloud_shadows;
+  int world_navigation_atmosphere;
+  int world_navigation_models;
+  int world_navigation_relief;
+  int world_navigation_ground_detail;
+  int world_navigation_mountains;
   int world_navigation_backdrop;
   int world_navigation_haze;
   int cull_lift_inset;

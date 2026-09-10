@@ -8,6 +8,36 @@ uint32_t g_sim_world_navigation_palace_pixels[
 uint32_t g_sim_world_navigation_ui_pixels[
     kSimWorldNavigationCompositionWidth *
     kSimWorldNavigationCompositionHeight];
+uint32_t g_sim_sky_palace_mask_pixels[
+    kSimWorldNavigationPalaceMaxWidth * kSimWorldNavigationPalaceMaxHeight];
+
+static bool CaptureSkyPalace(SimFrameData *frame, SrRunnerHandle *runner) {
+  const SnesRunnerApi *api = sr_runner_get_api(SR_RUNNER_ABI_VERSION);
+  SrPpuStateSnapshot ppu = {.struct_size = SR_PPU_STATE_SNAPSHOT_V2_SIZE};
+  SrPpuFrameSnapshot captured = {.struct_size = SR_PPU_FRAME_SNAPSHOT_V2_SIZE};
+  const uint64_t required = SR_RUNNER_CAP_PPU_STATE | SR_RUNNER_CAP_PPU_FRAME_STATE;
+  bool ready = api && runner && api->struct_size >= SNES_RUNNER_API_PPU_FRAME_STATE_SIZE &&
+      (api->capabilities & required) == required &&
+      api->query_ppu_state && api->query_ppu_frame_state &&
+      api->query_ppu_state(runner, &ppu) == SR_RESULT_OK &&
+      api->query_ppu_frame_state(runner, &captured) == SR_RESULT_OK &&
+      SimWorldNavigationPalace_PpuSupported(&ppu) &&
+      captured.struct_size >= SR_PPU_FRAME_SNAPSHOT_V2_SIZE &&
+      captured.overlay_count > SR_PPU_OVERLAY_BG1 &&
+      captured.lifetime_generation == ppu.lifetime_generation &&
+      (captured.display_control & 0x80) == 0;
+  if (ready) {
+    const SrPpuOverlayState *mask = &captured.overlays[SR_PPU_OVERLAY_BG1];
+    ready = mask->flags == SR_PPU_OVERLAY_MARK_MAIN_SCREEN_WINNER &&
+        (mask->content_band_mask & 1u) != 0 &&
+        mask->x0 == -(int)captured.margin_budget &&
+        mask->x1 == kActRaiserAuthenticWidth + captured.margin_budget &&
+        mask->y0 == 0 && mask->y1 == kActRaiserAuthenticHeight;
+  }
+  frame->world_navigation_brightness = ready ? captured.display_control & 15 : 0;
+  if (!ready) frame->view = kSimView_AuthenticFallback;
+  return ready;
+}
 
 static bool CaptureLayer(const SnesRunnerApi *api, SrRunnerHandle *runner,
                          uint64_t lifetime_generation,
@@ -62,6 +92,8 @@ static uint32_t BackdropArgbFullBrightness(uint16_t color) {
 
 bool SimWorldNavigationCapture_Capture(SimFrameData *frame,
                                        SrRunnerHandle *runner) {
+  if (frame && frame->view == kSimView_SkyPalace)
+    return CaptureSkyPalace(frame, runner);
   const SnesRunnerApi *api = sr_runner_get_api(SR_RUNNER_ABI_VERSION);
   SrPpuStateSnapshot ppu = {SR_PPU_STATE_SNAPSHOT_V2_SIZE, 0u};
   SrBorrowedU16Span oam = {sizeof(oam), 0u, NULL, 0u, 0u};

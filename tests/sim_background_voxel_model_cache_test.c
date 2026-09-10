@@ -19,21 +19,21 @@ int main(void) {
     .record_slot = 3,
   };
   SimBackgroundVoxelModelCache_Reset();
-  const SimBackgroundVoxelModel *first = SimBackgroundVoxelModelCache_Get(
+  const SimBackgroundVoxelModelView *first = SimBackgroundVoxelModelCache_Get(
       &house, kSimBackgroundVoxelDetail_High,
-      kSimBackgroundVoxelStyle_Varied, 1, NULL, NULL);
-  const SimBackgroundVoxelModel *second = SimBackgroundVoxelModelCache_Get(
+      kSimBackgroundVoxelStyle_Varied, NULL, NULL);
+  const SimBackgroundVoxelModelView *second = SimBackgroundVoxelModelCache_Get(
       &house, kSimBackgroundVoxelDetail_High,
-      kSimBackgroundVoxelStyle_Varied, 2, NULL, NULL);
+      kSimBackgroundVoxelStyle_Varied, NULL, NULL);
   CHECK(first && first == second && first->face_count > 0);
   SimBackgroundVoxelModelCacheStats stats =
       SimBackgroundVoxelModelCache_Stats();
   CHECK(stats.misses == 1 && stats.hits == 1 && stats.evictions == 0);
 
   house.record_slot = 4;
-  const SimBackgroundVoxelModel *variant = SimBackgroundVoxelModelCache_Get(
+  const SimBackgroundVoxelModelView *variant = SimBackgroundVoxelModelCache_Get(
       &house, kSimBackgroundVoxelDetail_High,
-      kSimBackgroundVoxelStyle_Varied, 3, NULL, NULL);
+      kSimBackgroundVoxelStyle_Varied, NULL, NULL);
   CHECK(variant && variant != first);
   stats = SimBackgroundVoxelModelCache_Stats();
   CHECK(stats.misses == 2 && stats.hits == 1);
@@ -42,20 +42,20 @@ int main(void) {
    * must never alias an otherwise identical house model. */
   house.town = 3;
   house.development_level = 1;
-  const SimBackgroundVoxelModel *early_kasandora =
+  const SimBackgroundVoxelModelView *early_kasandora =
       SimBackgroundVoxelModelCache_Get(
           &house, kSimBackgroundVoxelDetail_High,
-          kSimBackgroundVoxelStyle_Varied, 4, NULL, NULL);
+          kSimBackgroundVoxelStyle_Varied, NULL, NULL);
   house.development_level = 2;
-  const SimBackgroundVoxelModel *developed_kasandora =
+  const SimBackgroundVoxelModelView *developed_kasandora =
       SimBackgroundVoxelModelCache_Get(
           &house, kSimBackgroundVoxelDetail_High,
-          kSimBackgroundVoxelStyle_Varied, 5, NULL, NULL);
+          kSimBackgroundVoxelStyle_Varied, NULL, NULL);
   house.town = 2;
-  const SimBackgroundVoxelModel *developed_bloodpool =
+  const SimBackgroundVoxelModelView *developed_bloodpool =
       SimBackgroundVoxelModelCache_Get(
           &house, kSimBackgroundVoxelDetail_High,
-          kSimBackgroundVoxelStyle_Varied, 6, NULL, NULL);
+          kSimBackgroundVoxelStyle_Varied, NULL, NULL);
   CHECK(early_kasandora && developed_kasandora && developed_bloodpool);
   CHECK(early_kasandora != developed_kasandora);
   CHECK(developed_kasandora != developed_bloodpool);
@@ -76,16 +76,16 @@ int main(void) {
     .bridge_bank_a_x = 8,
     .bridge_bank_b_x = 12,
   };
-  const SimBackgroundVoxelModel *short_bridge =
+  const SimBackgroundVoxelModelView *short_bridge =
       SimBackgroundVoxelModelCache_Get(
           &bridge, kSimBackgroundVoxelDetail_High,
-          kSimBackgroundVoxelStyle_Basic, 7, NULL, NULL);
+          kSimBackgroundVoxelStyle_Basic, NULL, NULL);
   CHECK(short_bridge && short_bridge->max_x == 50.0f);
   bridge.bridge_bank_b_x = 14;
-  const SimBackgroundVoxelModel *long_bridge =
+  const SimBackgroundVoxelModelView *long_bridge =
       SimBackgroundVoxelModelCache_Get(
           &bridge, kSimBackgroundVoxelDetail_High,
-          kSimBackgroundVoxelStyle_Basic, 8, NULL, NULL);
+          kSimBackgroundVoxelStyle_Basic, NULL, NULL);
   CHECK(long_bridge && long_bridge->max_x == 82.0f);
   stats = SimBackgroundVoxelModelCache_Stats();
   CHECK(stats.misses == 2 && stats.hits == 0);
@@ -103,15 +103,15 @@ int main(void) {
     .record_slot = 9,
     .visual_state = kSimStructureVisualState_Finished,
   };
-  const SimBackgroundVoxelModel *finished_state =
+  const SimBackgroundVoxelModelView *finished_state =
       SimBackgroundVoxelModelCache_Get(
           &state_house, kSimBackgroundVoxelDetail_Balanced,
-          kSimBackgroundVoxelStyle_Basic, 8, NULL, NULL);
+          kSimBackgroundVoxelStyle_Basic, NULL, NULL);
   state_house.visual_state = kSimStructureVisualState_Construction0;
-  const SimBackgroundVoxelModel *construction_state =
+  const SimBackgroundVoxelModelView *construction_state =
       SimBackgroundVoxelModelCache_Get(
           &state_house, kSimBackgroundVoxelDetail_Balanced,
-          kSimBackgroundVoxelStyle_Basic, 9, NULL, NULL);
+          kSimBackgroundVoxelStyle_Basic, NULL, NULL);
   CHECK(finished_state && construction_state &&
         finished_state != construction_state);
   stats = SimBackgroundVoxelModelCache_Stats();
@@ -134,14 +134,14 @@ int main(void) {
     };
     CHECK(SimBackgroundVoxelModelCache_Get(
         &objects[i], kSimBackgroundVoxelDetail_Low,
-        kSimBackgroundVoxelStyle_Basic, 10, NULL, NULL) != NULL);
+        kSimBackgroundVoxelStyle_Basic, NULL, NULL) != NULL);
   }
   stats = SimBackgroundVoxelModelCache_Stats();
   uint32_t first_pass_misses = stats.misses;
   for (int i = 0; i < kDevelopedTownObjects; i++)
     CHECK(SimBackgroundVoxelModelCache_Get(
         &objects[i], kSimBackgroundVoxelDetail_Low,
-        kSimBackgroundVoxelStyle_Basic, 11, NULL, NULL) != NULL);
+        kSimBackgroundVoxelStyle_Basic, NULL, NULL) != NULL);
   stats = SimBackgroundVoxelModelCache_Stats();
   CHECK(first_pass_misses == kDevelopedTownObjects);
   if (stats.hits < kDevelopedTownObjects * 9 / 10)
@@ -160,9 +160,9 @@ int main(void) {
     .biome = kSimBackgroundVoxelBiome_Temperate,
   };
   const SimBackgroundVoxelModelShading *lit_first = NULL;
-  const SimBackgroundVoxelModel *lit_model = SimBackgroundVoxelModelCache_Get(
+  const SimBackgroundVoxelModelView *lit_model = SimBackgroundVoxelModelCache_Get(
       &house, kSimBackgroundVoxelDetail_High,
-      kSimBackgroundVoxelStyle_Varied, 20, &noon, &lit_first);
+      kSimBackgroundVoxelStyle_Varied, &noon, &lit_first);
   CHECK(lit_model && lit_first && lit_model->face_count > 0);
   stats = SimBackgroundVoxelModelCache_Stats();
   CHECK(stats.relights == 0);
@@ -170,7 +170,7 @@ int main(void) {
   const SimBackgroundVoxelModelShading *lit_again = NULL;
   CHECK(SimBackgroundVoxelModelCache_Get(
       &house, kSimBackgroundVoxelDetail_High,
-      kSimBackgroundVoxelStyle_Varied, 21, &noon, &lit_again) == lit_model);
+      kSimBackgroundVoxelStyle_Varied, &noon, &lit_again) == lit_model);
   stats = SimBackgroundVoxelModelCache_Stats();
   CHECK(lit_again == lit_first && stats.relights == 0);
 
@@ -179,13 +179,13 @@ int main(void) {
    * depends only on the light's elevation, so swinging the azimuth leaves it
    * untouched and any single face is a coin toss. */
   static uint8_t before[kSimBackgroundVoxelModelMaxFaces][4];
-  memcpy(before, lit_first->brightness, sizeof(before));
+  memcpy(before, lit_first->brightness, (size_t)lit_model->face_count * 4);
   SimBackgroundVoxelModelShadingKey dusk = noon;
   dusk.light_azimuth_deg = 135;
   const SimBackgroundVoxelModelShading *relit = NULL;
   CHECK(SimBackgroundVoxelModelCache_Get(
       &house, kSimBackgroundVoxelDetail_High,
-      kSimBackgroundVoxelStyle_Varied, 22, &dusk, &relit) == lit_model);
+      kSimBackgroundVoxelStyle_Varied, &dusk, &relit) == lit_model);
   stats = SimBackgroundVoxelModelCache_Stats();
   CHECK(relit && stats.relights == 1);
   CHECK(memcmp(before, relit->brightness,
@@ -196,7 +196,7 @@ int main(void) {
   snow.biome = kSimBackgroundVoxelBiome_Snow;
   CHECK(SimBackgroundVoxelModelCache_Get(
       &house, kSimBackgroundVoxelDetail_High,
-      kSimBackgroundVoxelStyle_Varied, 23, &snow, &relit) == lit_model);
+      kSimBackgroundVoxelStyle_Varied, &snow, &relit) == lit_model);
   stats = SimBackgroundVoxelModelCache_Stats();
   CHECK(stats.relights == 2);
 
@@ -204,7 +204,7 @@ int main(void) {
   const SimBackgroundVoxelModelShading *none = lit_first;
   CHECK(SimBackgroundVoxelModelCache_Get(
       &house, kSimBackgroundVoxelDetail_High,
-      kSimBackgroundVoxelStyle_Varied, 24, NULL, &none) == lit_model);
+      kSimBackgroundVoxelStyle_Varied, NULL, &none) == lit_model);
   stats = SimBackgroundVoxelModelCache_Stats();
   CHECK(none == NULL && stats.relights == 2);
 
@@ -212,6 +212,49 @@ int main(void) {
   stats = SimBackgroundVoxelModelCache_Stats();
   CHECK(stats.misses == 0 && stats.hits == 0 && stats.evictions == 0);
   CHECK(stats.relights == 0);
+
+  /* Multi-town working sets preserve the same authored data when storage
+   * grows, and retain thousands of identities without per-frame recompiles. */
+  const SimBackgroundVoxelModelView *before_growth = SimBackgroundVoxelModelCache_Get(
+      &house, kSimBackgroundVoxelDetail_Low,
+      kSimBackgroundVoxelStyle_Varied, NULL, NULL);
+  const SimBackgroundVoxelModelView saved_model = *before_growth;
+  SimBackgroundVoxelModelFace saved_faces[kSimBackgroundVoxelModelMaxFaces];
+  memcpy(saved_faces, before_growth->faces,
+      before_growth->face_count * sizeof(*saved_faces));
+  CHECK(SimBackgroundVoxelModelCache_Reserve(4096));
+  const SimBackgroundVoxelModelView *after_growth = SimBackgroundVoxelModelCache_Get(
+      &house, kSimBackgroundVoxelDetail_Low,
+      kSimBackgroundVoxelStyle_Varied, NULL, NULL);
+  CHECK(memcmp(&saved_model, after_growth, sizeof(saved_model)) == 0);
+  CHECK(memcmp(saved_faces, after_growth->faces,
+      after_growth->face_count * sizeof(*saved_faces)) == 0);
+  CHECK(SimBackgroundVoxelModelCache_Stats().hits == 1);
+  enum { kGlobeObjects = 1600 };
+  for (int pass = 0; pass < 2; pass++) {
+    for (int i = 0; i < kGlobeObjects; i++) {
+      SimBackgroundVoxelObject globe_object = {
+        .town = (uint8_t)(i / 320 + 1),
+        .kind = kSimBackgroundVoxel_House,
+        .cell_x = (uint8_t)(i & 31),
+        .cell_y = (uint8_t)((i >> 5) & 31),
+        .record_slot = (uint8_t)i,
+        .group = (uint16_t)i,
+      };
+      CHECK(SimBackgroundVoxelModelCache_Get(
+          &globe_object, kSimBackgroundVoxelDetail_Low,
+          kSimBackgroundVoxelStyle_Varied, NULL, NULL));
+    }
+  }
+  stats = SimBackgroundVoxelModelCache_Stats();
+  CHECK(stats.hits >= 1 + kGlobeObjects);
+  CHECK(stats.evictions == 0);
+  CHECK(stats.capacity == 4096);
+  CHECK(stats.storage_bytes < 20 * 1024 * 1024);
+  printf("compact cache: %u entries, %zu bytes with %d Low models\n",
+      stats.capacity, stats.storage_bytes, kGlobeObjects);
+  SimBackgroundVoxelModelCache_Reset();
+  CHECK(SimBackgroundVoxelModelCache_Stats().hits == 0);
 
   if (failures) {
     fprintf(stderr, "%d sim background voxel cache checks failed\n", failures);

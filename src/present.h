@@ -284,8 +284,13 @@ typedef struct FrameSlot {
    * active; this only says whether the reactive offsets apply on top. */
   int sim_camera_mode;
   int sim_dyncam_strength;
+  /* In world navigation these same presentation-owned offsets rotate the
+   * whole globe for inspection; town reactive lean is never applied there. */
   float sim_manual_orbit_yaw;
   float sim_manual_orbit_pitch;
+  /* Host-owned 0..1 blend from local travel aim to the planet centre.
+   * Independent of yaw wrapping and zero outside world navigation. */
+  float sim_world_inspection_blend;
   float sim_dyncam_lean_yaw;
   float sim_dyncam_lean_pitch;
   bool sim_dyncam_event_hit;

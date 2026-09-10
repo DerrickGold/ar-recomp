@@ -38,6 +38,7 @@
 #include "dev/sfx_census.h"
 #include "sim/sim_render_atlas.h"
 #include "sim/sim3d.h"
+#include "sim/sim_world_navigation_capture.h"
 #include "sim/sim_visual_patches.h"
 #include "snesrecomp/game/cpu.h"
 #include "snesrecomp/game/generated_support.h"
@@ -3753,6 +3754,25 @@ static SrResult ActRaiser_DrawPpuFrameTransaction(
             width, kActRaiserAuthenticHeight,
             SR_PPU_OVERLAY_MARK_MAIN_SCREEN_WINNER);
       }
+    }
+  }
+
+  /* Palace replaces only actual BG1 main-screen winners. The public mask
+   * leaves native scanout/HUD untouched and never takes an existing HD/dump
+   * claim. Binding/capture policy is owned here, before the normal scanout. */
+  if (g_settings.sim3d_world_navigation && g_settings.sim3d_sky_palace &&
+      !g_diorama_frame_active && !g_diorama_dump_pending &&
+      map_group == kActRaiserMapGroup_NonAction &&
+      map_number == kActRaiserNonActionMap_SkyPalace) {
+    const SrPpuOverlayCaptureState *bg1 = ActRaiser_PpuCapture(SR_PPU_OVERLAY_BG1);
+    const int width = kActRaiserAuthenticWidth + 2 * g_ws_extra;
+    if (bg1 && (bg1->x1 <= bg1->x0 || bg1->y1 <= bg1->y0) &&
+        width <= kSimWorldNavigationPalaceMaxWidth &&
+        ActRaiser_BindPpuOutput(SR_PPU_OUTPUT_OVERLAY, SR_PPU_OVERLAY_BG1, 0u,
+            (uint8_t *)g_sim_sky_palace_mask_pixels, (size_t)width * sizeof(uint32_t),
+            kSimWorldNavigationPalaceMaxHeight)) {
+      ActRaiser_SetPpuOverlayCapture(SR_PPU_OVERLAY_BG1, -g_ws_extra, 0,
+          width, kActRaiserAuthenticHeight, SR_PPU_OVERLAY_MARK_MAIN_SCREEN_WINNER);
     }
   }
 

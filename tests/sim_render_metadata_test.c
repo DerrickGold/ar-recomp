@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "actraiser_game.h"
+#include "sim_town_layout.h"
 #include "sim_world_map.h"
 
 static int failures;
@@ -80,6 +81,108 @@ static void TestFeatureDependencies(void) {
       all, all, kSimView_Enhanced, true, false);
   CHECK(!(resolved & kSimFeature_EffectLighting));
   CHECK(!(resolved & kSimFeature_Particles));
+}
+
+static void SetTownCell(
+    uint8 *wram, uint8_t town, int x, int y, uint8_t value) {
+  wram[SimTownLayout_CellMapIndex(town, x, y)] = value;
+}
+
+static const SimWorldNavigationTownObject *FindNavigationTownObject(
+    const SimWorldNavigationTowns *towns, uint8_t town, uint8_t kind,
+    uint8_t x, uint8_t y) {
+  for (uint16_t i = 0; i < towns->object_count; i++) {
+    const SimWorldNavigationTownObject *object = &towns->objects[i];
+    if (object->town == town && object->kind == kind &&
+        object->cell_x == x && object->cell_y == y)
+      return object;
+  }
+  return NULL;
+}
+
+static void TestWorldNavigationAllTownObjects(void) {
+  enum {
+    kDevelopmentTiersWram = 0x16B18,
+    kStructureRecordsWram = 0x16BE7,
+    kStructureRecordsPerTownBytes = 0x200,
+  };
+  uint8 wram[kActRaiserWramSize] = {0};
+  Write16(wram, kDevelopmentTiersWram, 2);
+  Write16(wram, kDevelopmentTiersWram + 2, 1);
+
+  uint8 *fillmore = wram + kStructureRecordsWram;
+  fillmore[0] = 4;
+  fillmore[1] = 5;
+  fillmore[2] = 0x80 | 0x20;
+  fillmore[4] = 10;
+  fillmore[5] = 11;
+  fillmore[6] = 0x80 | 0x03;
+  uint8 *bloodpool = fillmore + kStructureRecordsPerTownBytes;
+  bloodpool[0] = 7;
+  bloodpool[1] = 8;
+  bloodpool[2] = 0x80 | 0x01;
+  SetTownCell(wram, 2, 7, 8, 0xE2);
+  /* A stale active record can survive a save-progress reset. Its town's
+   * ground is disabled, so it must never leak onto the globe. */
+  uint8 *kasandora = bloodpool + kStructureRecordsPerTownBytes;
+  kasandora[0] = 1;
+  kasandora[1] = 1;
+  kasandora[2] = 0x80;
+  SetTownCell(wram, 3, 0, 0, 0xEB);
+
+  SetTownCell(wram, 1, 13, 13, 0xC2);
+  SetTownCell(wram, 1, 14, 13, 0xC3);
+  SetTownCell(wram, 1, 13, 14, 0xCA);
+  SetTownCell(wram, 1, 14, 14, 0xCB);
+  SetTownCell(wram, 1, 0, 0, 0x02);
+  SetTownCell(wram, 1, 1, 0, 0x03);
+  SetTownCell(wram, 1, 2, 0, 0x05);
+  SetTownCell(wram, 1, 4, 0, 0x09);
+
+  SimWorldNavigationTowns towns;
+  SimWorldNavigationTowns_Capture(wram, &towns);
+  CHECK(towns.enabled_town_mask == 0x03);
+  CHECK(!towns.overflow);
+  const SimWorldNavigationTownObject *house = FindNavigationTownObject(
+      &towns, 1, kSimBackgroundVoxel_House, 4, 5);
+  CHECK(house != NULL);
+  if (house) CHECK(house->development_level == 2);
+  CHECK(FindNavigationTownObject(
+      &towns, 1, kSimBackgroundVoxel_Windmill, 10, 11) != NULL);
+  CHECK(FindNavigationTownObject(
+      &towns, 2, kSimBackgroundVoxel_Bridge, 7, 8) != NULL);
+  CHECK(FindNavigationTownObject(
+      &towns, 3, kSimBackgroundVoxel_House, 1, 1) == NULL);
+  CHECK(FindNavigationTownObject(
+      &towns, 1, kSimBackgroundVoxel_Cathedral, 13, 13) != NULL);
+  const SimWorldNavigationTownObject *trees = FindNavigationTownObject(
+      &towns, 1, kSimBackgroundVoxel_Tree, 0, 0);
+  CHECK(trees != NULL);
+  if (trees) {
+    CHECK(trees->footprint_cells_w == 1 && trees->footprint_cells_d == 1);
+    CHECK(trees->tree_edges & kSimBackgroundTreeEdge_East);
+  }
+  CHECK(FindNavigationTownObject(
+      &towns, 1, kSimBackgroundVoxel_Tree, 1, 0) != NULL);
+  CHECK(FindNavigationTownObject(
+      &towns, 1, kSimBackgroundVoxel_BroadTree, 2, 0) != NULL);
+  CHECK(FindNavigationTownObject(
+      &towns, 1, kSimBackgroundVoxel_Palm, 4, 0) != NULL);
+
+  Write16(wram, kDevelopmentTiersWram + 4, 1);
+  SimWorldNavigationTowns_Capture(wram, &towns);
+  CHECK(towns.enabled_town_mask == 0x07);
+  CHECK(towns.ground.enabled_town_mask == towns.enabled_town_mask);
+  CHECK(towns.ground.development_tier[2] == 1);
+  for (uint8_t town = 1; town <= 3; town++)
+    for (int y = 0; y < 32; y++)
+      for (int x = 0; x < 32; x++)
+        CHECK(towns.ground.terrain[town - 1][y * 32 + x] ==
+              wram[SimTownLayout_CellMapIndex(town, x, y)]);
+  CHECK(towns.ground.object_rows[0][0] & 1u); /* tree source */
+  CHECK(towns.ground.object_rows[0][13] & (1u << 13)); /* cathedral */
+  CHECK(FindNavigationTownObject(
+      &towns, 3, kSimBackgroundVoxel_House, 1, 1) != NULL);
 }
 
 static void TestLightningMiracleEffectCapture(void) {
@@ -1535,6 +1638,41 @@ static void MakeDevelopedWorldMapAvailable(void) {
   free(rom);
 }
 
+static void TestSkyPalaceFrameContract(void) {
+  uint8 *wram = calloc(1, 0x20000);
+  CHECK(wram);
+  if (!wram) return;
+  MakeDevelopedWorldMapAvailable();
+  wram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_NonAction;
+  wram[kActRaiserWram_CurrentMap] = kActRaiserNonActionMap_SkyPalace;
+  wram[kActRaiserWram_WorldFocusX + 1] = 2;
+  wram[kActRaiserWram_WorldFocusY + 1] = 2;
+  /* The Palace must not require or rewrite a meaningful Mode-7 matrix. */
+  SimFrameData frame;
+  SimRenderMetadata_CaptureFrame(&frame, wram, false, true,
+      kSimFeature_All, 0, kSimFeature_All);
+  CHECK(frame.view == kSimView_None);
+  SimRenderMetadata_CaptureSkyPalaceFrame(&frame, wram, false);
+  CHECK(frame.view == kSimView_None);
+  SimRenderMetadata_CaptureSkyPalaceFrame(&frame, wram, true);
+  CHECK(frame.view == kSimView_SkyPalace);
+  CHECK(frame.master_enabled && frame.world_navigation_scene.valid);
+  CHECK(frame.world_navigation.matrix[0] == 0);
+  CHECK(frame.world_navigation.focus_x == 512 && frame.world_navigation.focus_y == 512);
+  CHECK(frame.underlay_serial == SimWorldMap_Serial());
+  CHECK(!frame.world_navigation_scene.composition.valid);
+  wram[kActRaiserWram_WorldFocusX + 1] = 4;
+  SimRenderMetadata_CaptureSkyPalaceFrame(&frame, wram, true);
+  CHECK(frame.view == kSimView_AuthenticFallback);
+  CHECK(!frame.world_navigation_scene.valid);
+  wram[kActRaiserWram_CurrentMap] = kActRaiserNonActionMap_WorldMap;
+  frame.view = kSimView_WorldNavigation;
+  SimRenderMetadata_CaptureSkyPalaceFrame(&frame, wram, true);
+  CHECK(frame.view == kSimView_WorldNavigation);
+  SimWorldMap_Shutdown();
+  free(wram);
+}
+
 static void CheckSteadyWorldNavigation(const uint8 *wram) {
   SimFrameData frame;
   SimRenderMetadata_CaptureFrame(
@@ -1771,6 +1909,84 @@ static void TestWorldNavigationFrameContract(void) {
 }
 
 static void TestWorldNavigationCloudCeiling(void) {
+  /* Flat worlds and exaggerated relief both remain inside the cloud deck
+   * and outer air shell. These are absolute sea-relative heights: no camera
+   * focus or current-town datum may influence the clearance. */
+  const int landscape_percent[] = {0, 50, 100, 150};
+  const uint16_t cloud_altitudes[] = {0, 96, 512};
+  for (size_t i = 0; i < sizeof(landscape_percent) / sizeof(landscape_percent[0]); i++) {
+    const float peak = 10.0f * landscape_percent[i] / 100.0f;
+    for (size_t j = 0; j < sizeof(cloud_altitudes) / sizeof(cloud_altitudes[0]); j++) {
+      const SimWorldNavigationAtmosphereHeights heights =
+          SimWorldNavigationScene_AtmosphereHeights(peak, cloud_altitudes[j]);
+      CHECK(isfinite(heights.cloud_tiles) && isfinite(heights.outer_tiles));
+      CHECK(heights.cloud_tiles >= peak + 0.35f);
+      CHECK(heights.outer_tiles >= heights.cloud_tiles + 0.75f);
+    }
+  }
+  CHECK(SimWorldNavigationScene_AtmosphereHeights(-1.0f, 0).cloud_tiles == 0.35f);
+  CHECK(SimWorldNavigationScene_AtmosphereHeights(NAN, 0).cloud_tiles == 0.35f);
+
+  /* Advent: native zoom falls four units per tick, including all fifteen
+   * fade levels. Preserve the early path and its velocity at the join, then
+   * require continued, equal-sized progress through black rather than an
+   * exponential ease-out that visually finishes before the game does. */
+  const float advent_limits[] = {.02f, .1f, .202709f, 1, 100};
+  for (size_t i = 0; i < sizeof(advent_limits) / sizeof(advent_limits[0]); i++) {
+    const float limit = advent_limits[i], start = limit * .5f;
+    CHECK(SimWorldNavigationScene_AdventScale(start * .25f, limit) == start * .25f);
+    CHECK(SimWorldNavigationScene_AdventScale(start, limit) == start);
+    const float delta = start * .0005f;
+    const float right = SimWorldNavigationScene_AdventScale(start + delta, limit);
+    CHECK(fabsf((right - start) / delta - 1) < .002f);
+    float previous = 0, step = 0;
+    for (int tick = 0; tick <= 15; tick++) {
+      const float zoom = 70 - tick * 4;
+      const float scale = SimWorldNavigationScene_AdventScale(limit * 100 / zoom, limit);
+      CHECK(scale > previous && scale < limit);
+      if (tick == 1) step = scale - previous;
+      if (tick > 1) CHECK(fabsf((scale - previous) - step) < limit * .000001f);
+      CHECK(SimWorldNavigationScene_AdventScale(limit * 100 / zoom, limit) == scale);
+      previous = scale;
+    }
+    /* Frozen/reversed clocks need no history or wall-clock interpolation. */
+    for (int tick = 15; tick >= 0; tick--) {
+      const float zoom = 70 - tick * 4;
+      const float scale = SimWorldNavigationScene_AdventScale(limit * 100 / zoom, limit);
+      CHECK(fabsf(scale - limit * (1 - zoom / 400)) < limit * .000001f);
+    }
+  }
+  CHECK(SimWorldNavigationScene_AdventScale(0, 1) == 0);
+  CHECK(SimWorldNavigationScene_AdventScale(-1, 1) == 0);
+  CHECK(SimWorldNavigationScene_AdventScale(1, 0) == 0);
+  CHECK(SimWorldNavigationScene_AdventScale(1, -1) == 0);
+  CHECK(SimWorldNavigationScene_AdventScale(NAN, 1) == 0);
+  CHECK(SimWorldNavigationScene_AdventScale(1, INFINITY) == 0);
+
+  float previous_air = 1, previous_cloud = 0;
+  for (int step = 0; step <= 100; step++) {
+    const float t = step / 100.0f;
+    const float air = SimWorldNavigationScene_AtmosphereOpacity(t);
+    const float cloud = SimWorldNavigationScene_CloudLimbOpacity(t);
+    CHECK(isfinite(air) && air >= 0 && air <= .32f && air <= previous_air);
+    CHECK(isfinite(cloud) && cloud >= previous_cloud && cloud <= 1);
+    previous_air = air; previous_cloud = cloud;
+  }
+  CHECK(SimWorldNavigationScene_AtmosphereOpacity(-1) == .32f);
+  CHECK(SimWorldNavigationScene_AtmosphereOpacity(1) == 0);
+  CHECK(SimWorldNavigationScene_AtmosphereOpacity(2) == 0);
+  CHECK(SimWorldNavigationScene_AtmosphereOpacity(.5f) < .064f);
+  CHECK(SimWorldNavigationScene_AtmosphereOpacity(.999f) < .000001f);
+  CHECK(SimWorldNavigationScene_AtmosphereOpacity(NAN) == 0);
+  CHECK(SimWorldNavigationScene_AtmosphereOpacity(INFINITY) == 0);
+  CHECK(SimWorldNavigationScene_CloudLimbOpacity(-1) == 0);
+  CHECK(SimWorldNavigationScene_CloudLimbOpacity(0) == 0);
+  CHECK(SimWorldNavigationScene_CloudLimbOpacity(.25f) == .5f);
+  CHECK(SimWorldNavigationScene_CloudLimbOpacity(.5f) == 1);
+  CHECK(SimWorldNavigationScene_CloudLimbOpacity(2) == 1);
+  CHECK(SimWorldNavigationScene_CloudLimbOpacity(NAN) == 0);
+  CHECK(SimWorldNavigationScene_CloudLimbOpacity(INFINITY) == 0);
+
   const uint16_t altitude = kSimCloudAltitudeDefaultPx;
   CHECK(SimWorldNavigationScene_CloudVisibility(
             kSimWorldNavigationZoomNear, altitude) == 0.0f);
@@ -2892,6 +3108,7 @@ static void TestEruptionScriptWalk(void) {
 
 int main(int argc, char **argv) {
   TestFeatureDependencies();
+  TestWorldNavigationAllTownObjects();
   TestLightningMiracleEffectCapture();
   TestTownCreationLightningEffectCapture();
   TestEnemyLightningAndFireEffectCapture();
@@ -2920,6 +3137,7 @@ int main(int argc, char **argv) {
   TestAtlasFailureFallback();
   TestShadowCasterSelection();
   TestWorldNavigationFrameContract();
+  TestSkyPalaceFrameContract();
   TestWorldNavigationCloudCeiling();
   TestWorldNavigationOamClassifier();
   if ((argc == 4 || argc == 6) && strcmp(argv[1], "--fixtures") == 0)

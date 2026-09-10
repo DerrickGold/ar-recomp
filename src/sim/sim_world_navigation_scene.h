@@ -59,8 +59,10 @@ typedef struct SimWorldNavigationComposition {
 /* Immutable Step-3 scene contract.
  *
  * This is intentionally not a simulation-town profile. It owns one complete
- * developed-world texture and one four-corner ground plane. There is no town
- * canvas, captured BG stack, object atlas, cull window, or underlay margin.
+ * developed-world texture and the bounds of its ground. Presentation expands
+ * those bounds into the per-tile curved relief mesh. There is no resident set
+ * of six town canvases, captured BG stack, object atlas, cull window, or
+ * underlay margin.
  *
  * `source_to_screen` maps a point in the 1024x1024 world texture to authentic
  * 256x224 screen coordinates:
@@ -96,6 +98,13 @@ bool SimWorldNavigationScene_Build(
     const SimWorldNavigationFrame *navigation,
     uint32_t developed_texture_serial);
 
+/* The Palace keeps native world focus/location but owns a separate camera.
+ * Its world bounds and source coordinates do not depend on stale Mode-7
+ * matrix registers while the native Palace is using Mode 1. */
+bool SimWorldNavigationScene_BuildSkyPalace(
+    SimWorldNavigationScene *out, uint16_t focus_x, uint16_t focus_y,
+    uint16_t active_location, uint32_t developed_texture_serial);
+
 /* Pure projection helper shared by tests and the Step-4 renderer. Coordinates
  * are world-texture pixels and authentic screen pixels respectively. */
 bool SimWorldNavigationScene_ProjectSource(
@@ -109,6 +118,32 @@ bool SimWorldNavigationScene_ProjectSource(
  * so terrain can still show moving cover while the camera is below the deck. */
 float SimWorldNavigationScene_CloudVisibility(
     uint16_t zoom_current, uint16_t cloud_altitude_px);
+
+/* Raised-scene scale for the native Advent. Preserves the early flat-map
+ * scale, then continues linearly in its reciprocal (the native zoom/time
+ * coordinate), with matching velocity at the join and no pre-black stop.
+ * The result is bounded by maximum_scale. Invalid inputs return zero. */
+float SimWorldNavigationScene_AdventScale(float flat_scale, float maximum_scale);
+
+typedef struct SimWorldNavigationAtmosphereHeights {
+  float cloud_tiles;
+  float outer_tiles;
+} SimWorldNavigationAtmosphereHeights;
+
+/* Radial heights above sea level in world-tile units. The terrain maximum
+ * must already include the landscape-height setting. Both layers clear the
+ * entire globe, not just the town under the camera, so flying between towns
+ * cannot make the atmosphere expand/contract or expose a distant peak. */
+SimWorldNavigationAtmosphereHeights SimWorldNavigationScene_AtmosphereHeights(
+    float maximum_terrain_tiles, uint16_t cloud_altitude_px);
+
+/* Art-directed optical profiles, independent of projection/backend units.
+ * Atmosphere height is the view ray's closest approach above sea level,
+ * normalized by the full envelope thickness. Cloud facing is the cosine
+ * between its outward normal and the direction toward the actual eye.
+ * Both fade to zero at the silhouette without shrinking either shell. */
+float SimWorldNavigationScene_AtmosphereOpacity(float height_fraction);
+float SimWorldNavigationScene_CloudLimbOpacity(float facing);
 
 /* Black-overlay alpha that reproduces INIDISP's 0..15 master brightness over
  * a full-intensity host composition. 255 is black; zero is full brightness. */

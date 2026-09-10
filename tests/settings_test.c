@@ -108,7 +108,7 @@ static void TestDefaultsAndMetadata(void) {
    * off: the PPU has a single path, so the setting selected between a modern
    * renderer and a legacy one that no longer exists. Localization adds six
    * source, presentation, and enhanced-font preferences. */
-  CHECK(g_setting_desc_count == 280);
+  CHECK(g_setting_desc_count == 288);
   for (int i = 0; i < g_setting_desc_count; i++) {
     const SettingDesc *a = &g_setting_descs[i];
     CHECK(a->key && a->key[0] && a->label && a->tooltip);
@@ -171,8 +171,18 @@ static void TestDefaultsAndMetadata(void) {
           range->player_visible);
   }
   CHECK(!g_settings.sim3d_world_navigation);
+  CHECK(g_settings.sim3d_sky_palace);
+  CHECK(g_settings.sim3d_sky_palace_volumetric);
+  CHECK(!Settings_IsAvailable(Settings_Find("sim3d_sky_palace_volumetric")));
+  CHECK(!Settings_IsAvailable(Settings_Find("sim3d_sky_palace")));
   CHECK(g_settings.sim3d_world_navigation_lighting);
-  CHECK(!g_settings.sim3d_world_navigation_clouds);
+  CHECK(g_settings.sim3d_world_navigation_clouds);
+  CHECK(g_settings.sim3d_world_navigation_cloud_shadows);
+  CHECK(g_settings.sim3d_world_navigation_atmosphere);
+  CHECK(g_settings.sim3d_world_navigation_towns);
+  CHECK(g_settings.sim3d_world_navigation_relief);
+  CHECK(g_settings.sim3d_world_navigation_ground_detail);
+  CHECK(g_settings.sim3d_world_navigation_mountains);
   /* The stage toggles are what the player's master switch resolves, so a
    * landed stage missing from these defaults is dead in normal play. They must
    * agree with kSim3DShippedFeatures; bump both as each visual gate passes. */
@@ -471,13 +481,46 @@ static void TestSim3DEnvironmentLabels(void) {
   setenv("AR_SIM3D_WORLD_NAV", "on", 1);
   setenv("AR_SIM3D_WORLD_NAV_LIGHTING", "off", 1);
   setenv("AR_SIM3D_WORLD_NAV_CLOUDS", "on", 1);
+  setenv("AR_SIM3D_WORLD_NAV_CLOUD_SHADOWS", "off", 1);
+  setenv("AR_SIM3D_WORLD_NAV_ATMOSPHERE", "off", 1);
+  setenv("AR_SIM3D_WORLD_NAV_TOWNS", "off", 1);
+  setenv("AR_SIM3D_WORLD_NAV_RELIEF", "off", 1);
+  setenv("AR_SIM3D_WORLD_NAV_GROUND_DETAIL", "off", 1);
+  setenv("AR_SIM3D_WORLD_NAV_MOUNTAINS", "off", 1);
   setenv("AR_SIM3D_SHADOWS", "off", 1);
   setenv("AR_SIM3D_HEIGHT", "off", 1);
   setenv("AR_SIM3D_PITCH", "350", 1);
   Settings_Init();
   CHECK(g_settings.sim3d_mode);
   CHECK(g_settings.sim3d_world_navigation);
+  CHECK(!g_settings.sim3d_world_navigation_cloud_shadows);
+  CHECK(!g_settings.sim3d_world_navigation_atmosphere);
+  CHECK(!g_settings.sim3d_world_navigation_towns);
+  CHECK(!g_settings.sim3d_world_navigation_relief);
+  CHECK(!g_settings.sim3d_world_navigation_ground_detail);
+  CHECK(!g_settings.sim3d_world_navigation_mountains);
+  const char *navigation_gates[] = {
+    "sim3d_sky_palace",
+    "sim3d_sky_palace_volumetric",
+    "sim3d_world_navigation_cloud_shadows", "sim3d_world_navigation_atmosphere",
+    "sim3d_world_navigation_towns", "sim3d_world_navigation_relief",
+    "sim3d_world_navigation_ground_detail",
+    "sim3d_world_navigation_mountains",
+  };
+  for (unsigned i = 0; i < sizeof(navigation_gates) / sizeof(navigation_gates[0]); i++) {
+    const SettingDesc *desc = Settings_Find(navigation_gates[i]);
+    CHECK(desc && Settings_IsMenuVisible(desc) && desc->type == kSettingType_Bool);
+    CHECK(Settings_IsAvailable(desc) && !Settings_IsDebugOnly(desc));
+  }
   CHECK(!g_settings.sim3d_world_navigation_lighting);
+  const SettingDesc *volume_clouds = Settings_Find("sim3d_sky_palace_volumetric");
+  CHECK(Settings_IsAvailable(volume_clouds));
+  g_settings.sim3d_sky_palace = false;
+  CHECK(!Settings_IsAvailable(volume_clouds));
+  g_settings.sim3d_sky_palace = true;
+  g_settings.sim3d_world_navigation_clouds = false;
+  CHECK(!Settings_IsAvailable(volume_clouds));
+  g_settings.sim3d_world_navigation_clouds = true;
   CHECK(g_settings.sim3d_world_navigation_clouds);
   CHECK(Settings_IsAvailable(
       Settings_Find("sim3d_world_navigation_lighting")));
@@ -486,6 +529,14 @@ static void TestSim3DEnvironmentLabels(void) {
   /* Shared atmosphere rows must remain usable when navigation is the only
    * 3D master. Town-only cull shape controls stay unavailable. */
   g_settings.sim3d_mode = false;
+  g_settings.sim3d_world_navigation_towns = true;
+  CHECK(Settings_IsAvailable(Settings_Find("sim3d_voxel_preset")));
+  const int old_preset = g_settings.sim3d_voxel_preset;
+  g_settings.sim3d_voxel_preset = kSimBackgroundVoxelPreset_Custom;
+  CHECK(Settings_IsAvailable(Settings_Find("sim3d_voxel_detail")));
+  CHECK(Settings_IsAvailable(Settings_Find("sim3d_voxel_style")));
+  CHECK(!Settings_IsAvailable(Settings_Find("sim3d_voxel_lod")));
+  g_settings.sim3d_voxel_preset = old_preset;
   CHECK(Settings_IsAvailable(Settings_Find("sim3d_backdrop")));
   CHECK(Settings_IsAvailable(
       Settings_Find("sim3d_backdrop_strength_pct")));
@@ -496,6 +547,13 @@ static void TestSim3DEnvironmentLabels(void) {
       Settings_Find("sim3d_cull_haze_lead_px")));
   CHECK(Settings_IsAvailable(
       Settings_Find("sim3d_underlay_defocus_pct")));
+#if AR_SIM3D_TERRAIN_ELEVATION
+  CHECK(Settings_IsAvailable(
+      Settings_Find("sim3d_landscape_height_pct")));
+#else
+  CHECK(!Settings_IsAvailable(
+      Settings_Find("sim3d_landscape_height_pct")));
+#endif
   CHECK(!Settings_IsAvailable(Settings_Find("sim3d_cull_dim_pct")));
   CHECK(!Settings_IsAvailable(Settings_Find("sim3d_cull_corner_px")));
   g_settings.sim3d_mode = true;

@@ -54,6 +54,8 @@ static struct {
   bool water_source_valid;
   uint32_t palette[kWorldPaletteEntries];
   uint32_t serial;
+  uint32_t geography_serial;
+  uint8_t mountain_pixels[kWorldTileCount];
   /* One flag per tile (tilemap is one byte per tile, so this is indexed
    * identically). A tile is dirty when its tilemap byte changed since it was
    * last baked; Init marks all of them so the first bake is a full one. */
@@ -69,6 +71,14 @@ static struct {
    * simulation development over it. */
   uint8_t baseline[kSimWorldMapBytes];
 } g_world;
+
+bool SimWorldMap_CopyTileArt(uint8_t tile, uint32_t pixels[64], uint8_t indices[64]) {
+  if (!g_world.available || !pixels) return false;
+  const uint8_t *source = g_world.tiles + tile * kWorldTileBytes;
+  for (int p = 0; p < kWorldTileBytes; p++) pixels[p] = g_world.palette[source[p]];
+  if (indices) memcpy(indices, source, kWorldTileBytes);
+  return true;
+}
 
 static uint32_t ExpandBgr555(uint16_t value) {
   unsigned r = (value & 0x1F) << 3;
@@ -94,6 +104,12 @@ bool SimWorldMap_Init(const uint8_t *rom_data, size_t rom_size) {
   /* Retain the pristine base for every owned build. */
   memcpy(g_world.baseline, g_world.tilemap, sizeof(g_world.baseline));
   memcpy(g_world.tiles, rom_data + kWorldTilesRomOffset, sizeof(g_world.tiles));
+  for (int tile = 0; tile < kWorldTileCount; tile++)
+    for (int pixel = 0; pixel < kWorldTileBytes; pixel++) {
+      const uint8_t material = g_world.tiles[tile * kWorldTileBytes + pixel];
+      if (material >= 0x40 && material <= 0x45)
+        g_world.mountain_pixels[tile]++;
+    }
   memcpy(g_world.water_frames, rom_data + kWorldWaterFramesRomOffset,
          sizeof(g_world.water_frames));
   for (int i = 0; i < kWorldPaletteEntries; i++) {
@@ -106,6 +122,7 @@ bool SimWorldMap_Init(const uint8_t *rom_data, size_t rom_size) {
   memset(g_world.dirty, 1, sizeof(g_world.dirty));
   g_world.available = true;
   g_world.serial = 1;
+  g_world.geography_serial = 1;
   return true;
 }
 
@@ -132,6 +149,7 @@ int SimWorldMap_PublishBuiltTilemap(const uint8_t *tilemap) {
   }
   if (!changed) return 0;
   if (++g_world.serial == 0) g_world.serial = 1;
+  if (++g_world.geography_serial == 0) g_world.geography_serial = 1;
   return changed;
 }
 
@@ -170,8 +188,61 @@ uint32_t SimWorldMap_Serial(void) {
   return g_world.available ? g_world.serial : 0;
 }
 
+bool SimWorldMap_WaterAnimationCells(uint8_t *cells) {
+  if (!cells || !g_world.available) return false;
+  memset(cells, 0, kSimWorldMapBytes);
+  for (int y = 0; y < kSimWorldMapTiles; y++)
+    for (int x = 0; x < kSimWorldMapTiles; x++) {
+      const int at = y * kSimWorldMapTiles + x;
+      const uint8_t a = g_world.tilemap[at], b = g_world.baseline[at];
+      if (a != kWorldWaterTileFirst && a != kWorldWaterTileSecond &&
+          b != kWorldWaterTileFirst && b != kWorldWaterTileSecond) continue;
+      cells[at] = 1;
+      if (x > 0) cells[at - 1] = 1;
+      if (x + 1 < kSimWorldMapTiles) cells[at + 1] = 1;
+      if (y > 0) cells[at - kSimWorldMapTiles] = 1;
+      if (y + 1 < kSimWorldMapTiles) cells[at + kSimWorldMapTiles] = 1;
+    }
+  return true;
+}
+
+uint32_t SimWorldMap_GeographySerial(void) {
+  return g_world.available ? g_world.geography_serial : 0;
+}
+
+float SimWorldMap_MountainCoverage(int tile_x, int tile_y) {
+  if (!g_world.available || tile_x < 0 || tile_y < 0 ||
+      tile_x >= kSimWorldMapTiles || tile_y >= kSimWorldMapTiles)
+    return 0.0f;
+  const uint8_t tile = g_world.tilemap[tile_y * kSimWorldMapTiles + tile_x];
+  return g_world.mountain_pixels[tile] / (float)kWorldTileBytes;
+}
+
 bool SimWorldMap_DevelopedAvailable(void) {
   return g_world.available && g_world.developed;
+}
+
+bool SimWorldMap_MountainShades(int tile_x, int tile_y, uint8_t shades[64]) {
+  if (!shades || !g_world.available || tile_x < 0 || tile_y < 0 ||
+      tile_x >= kSimWorldMapTiles || tile_y >= kSimWorldMapTiles) return false;
+  unsigned luminance[6];
+  uint8_t rank[6];
+  for (int i = 0; i < 6; i++) {
+    const uint32_t c = g_world.palette[0x40 + i];
+    luminance[i] = ((c >> 16) & 255u) * 3 + ((c >> 8) & 255u) * 6 + (c & 255u);
+  }
+  for (int i = 0; i < 6; i++) {
+    rank[i] = 1;
+    for (int j = 0; j < 6; j++)
+      if (luminance[j] < luminance[i] || (luminance[j] == luminance[i] && j < i))
+        rank[i]++;
+  }
+  const uint8_t tile = g_world.tilemap[tile_y * kSimWorldMapTiles + tile_x];
+  for (int i = 0; i < 64; i++) {
+    const uint8_t material = g_world.tiles[tile * 64 + i];
+    shades[i] = material >= 0x40 && material <= 0x45 ? rank[material - 0x40] : 0;
+  }
+  return true;
 }
 
 /* The retained pristine ROM tilemap. Exposed as the pure builder's immutable
@@ -230,6 +301,27 @@ const uint32_t *SimWorldMap_BakedPixels(void) {
   if (!g_world.available) return NULL;
   RefreshPersistentImage();
   return g_world.pixels;
+}
+
+bool SimWorldMap_BakeBaseline(uint32_t *pixels, int pitch_pixels) {
+  if (!g_world.available || !pixels || pitch_pixels < kSimWorldMapPixels)
+    return false;
+  for (int tile_y = 0; tile_y < kSimWorldMapTiles; tile_y++) {
+    for (int tile_x = 0; tile_x < kSimWorldMapTiles; tile_x++) {
+      const int tile_index = tile_y * kSimWorldMapTiles + tile_x;
+      const uint8_t tile = g_world.baseline[tile_index];
+      const uint8_t *art = g_world.tiles + (size_t)tile * kWorldTileBytes;
+      for (int row = 0; row < kSimWorldMapTilePixels; row++) {
+        uint32_t *out = pixels +
+            (size_t)(tile_y * kSimWorldMapTilePixels + row) * pitch_pixels +
+            tile_x * kSimWorldMapTilePixels;
+        const uint8_t *source = art + row * kSimWorldMapTilePixels;
+        for (int column = 0; column < kSimWorldMapTilePixels; column++)
+          out[column] = g_world.palette[source[column]];
+      }
+    }
+  }
+  return true;
 }
 
 bool SimWorldMap_Downsample(uint32_t *pixels, int pitch_pixels, int divisor) {

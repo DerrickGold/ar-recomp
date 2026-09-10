@@ -276,6 +276,13 @@ Sim3DTuning BuildSim3DTuning(void) {
           g_settings.sim3d_world_navigation_lighting,
       .world_navigation_clouds =
           g_settings.sim3d_world_navigation_clouds,
+      .sky_palace_volumetric_clouds = g_settings.sim3d_sky_palace_volumetric,
+      .world_navigation_cloud_shadows = g_settings.sim3d_world_navigation_cloud_shadows,
+      .world_navigation_atmosphere = g_settings.sim3d_world_navigation_atmosphere,
+      .world_navigation_models = g_settings.sim3d_world_navigation_towns,
+      .world_navigation_relief = g_settings.sim3d_world_navigation_relief,
+      .world_navigation_ground_detail = g_settings.sim3d_world_navigation_ground_detail,
+      .world_navigation_mountains = g_settings.sim3d_world_navigation_mountains,
       .world_navigation_backdrop = g_settings.sim3d_backdrop,
       .world_navigation_haze = g_settings.sim3d_cull_haze,
       .cull_lift_inset = g_settings.sim3d_cull_lift_inset,
@@ -289,10 +296,13 @@ Sim3DTuning BuildSim3DTuning(void) {
 }
 
 static void CaptureSimDynamicCamera(FrameSlot *dst, bool in_town) {
-  dst->sim_camera_mode = g_settings.sim3d_camera_mode;
+  Sim3DCameraPresentationState camera;
+  Sim3DCamera_CapturePresentationState(&camera);
+  dst->sim_camera_mode = camera.mode;
   dst->sim_dyncam_strength = g_settings.sim3d_reactive_strength;
-  Sim3DCamera_GetDynamicOrbit(&dst->sim_manual_orbit_yaw,
-                              &dst->sim_manual_orbit_pitch);
+  dst->sim_manual_orbit_yaw = camera.orbit_yaw;
+  dst->sim_manual_orbit_pitch = camera.orbit_pitch;
+  dst->sim_world_inspection_blend = camera.world_inspection_blend;
 
   /* Outside a town there is no angel record to read: the memory holds
    * whatever the action stage left there. Reporting a neutral camera and
@@ -524,6 +534,8 @@ void FrameSlot_Capture(FrameSlot *dst) {
         g_settings.sim3d_world_navigation,
         Settings_Sim3DRequestedFeatures(),
         g_settings.sim3d_diagnostic_layers, Sim3D_ImplementedFeatures());
+    SimRenderMetadata_CaptureSkyPalaceFrame(&dst->sim, g_ram,
+        g_settings.sim3d_world_navigation && g_settings.sim3d_sky_palace);
     Sim3DTuning tuning = BuildSim3DTuning();
     Sim3D_AnnotateFrame(&dst->sim, &tuning);
     SimWorldNavigationCapture_Capture(

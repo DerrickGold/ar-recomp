@@ -1,6 +1,6 @@
 # ActRaiser Recomp — Project Status and Roadmap
 
-Last updated: 2026-08-23
+Last updated: 2026-09-08
 
 This document is the authoritative summary of project status, play-test
 coverage, and remaining release work. Implementation details, investigation
@@ -83,8 +83,64 @@ column records the additional 3D-presentation playthrough.
 | Runtime settings | ✅ | The in-game settings overlay and persistent configuration are implemented and working. |
 | Battery save codec and editor | ✅ | Native save import, export, editing, backup, round-trip preservation, and in-game use are confirmed working. |
 | Replacement music | 🟡 | Manifest-driven OGG playback and looping are implemented. Complete an in-game listening pass, identify the remaining unnamed tracks, and validate fades. |
-| World-navigation 3D | ✅ | The current top-down world presentation is confirmed complete. No further work is planned for the current roadmap. |
+| World-navigation 3D | 🟡 | Full spherical navigation embeds actual town models with shared palettes/LOD/depth, live native ground/water animation, raised ranges, aligned plains, protected mountain backs and native cliff geometry. Full-globe clouds, atmosphere, space, ten effect switches and visit-local orbital inspection are implemented. Aitos uses a single overhead crater cap with native lava animation; Advent clearance includes terrain/model heights. Existing town-entry/return menus and loading fades are retained and replay-verified. The code-quality follow-up adds boundary regression guards, complete major-stage CPU attribution, exact lighting/ocean optimizations and failed-atlas-upload recovery. Full CTest: 147 tests; sanitized Metal sweep: 246 exact-reference images. Repeated optimized full-quality flights average about 8.02 ms CPU presentation at 1792×1344; this is not a cross-platform FPS guarantee. Custom seamless entry/exit and globe-under-SIM are deferred. Physical camera/controller and non-Metal GPU acceptance remain open. Stable checkpoint: `4f1741b`; earlier fallback `380772a`. Evidence: `rendering-engine.md` §13h and `world-navigation-code-audit.md`. |
 | Build and platform targets | 🟡 | macOS arm64 and Steam Deck bundles are confirmed end to end. macOS x86_64, generic Linux, and Windows bundles build but still need representative launch testing; signing and notarization remain release work. |
+
+World-navigation follow-up (2026-09-08): the separate enhanced Sky Palace
+setting now uses the shared developed globe behind the native foreground,
+with a Palace-only blue daylight gradient and moving sky clouds. Inter-town
+navigation retains space. Public observational capture, bounded homogeneous
+clipping and same-frame native fallback preserve layer/ABI ownership. The
+final suite passes **148 tests**; sanitized Metal retains all **246** prior
+navigation images exactly and verifies six additional Palace viewpoints,
+cloud motion/freeze, shadow toggles and reset/return parity. Native 4:3/16:9
+on/off restores original Palace images exactly. Existing cloud shadows were
+audited separately with four on/four off flights; their measured ~2.65 ms
+CPU presentation cost is a quality-toggle tradeoff, not a claimed optimization.
+Three additional eight-flight navigation series retained a small fast-path
+cleanup and rejected a more complex cache layout; the Palace-capable renderer
+still adds approximately .14 ms / 1.8% CPU presentation time in the retained
+comparison. All 19 flight images remain exact; noisy runs are preserved.
+See the code-audit document for scope, evidence and remaining platform checks.
+
+Palace visual revision (2026-09-08): the stretched sky-noise deck is replaced
+by optional lit density-volume clouds, with a cheap single-layer fallback.
+The gradient reaches pale blue at the visible horizon; an atmosphere-gated
+mist band and correct premultiplied cloud composition soften the view.
+Existing portable shader/depth contracts are reused, without a runner ABI
+change. All 148 tests pass; the sanitized Metal sweep retains the 246
+navigation references exactly. Three serial runs per cloud quality mode
+measure about 6.6 ms CPU presentation here; the .02 ms median difference is
+smaller than run noise, not a GPU/FPS guarantee. Native screenshot:
+`runs/20260908-151754/sky-palace-volumetric.png`.
+The passing-cloud follow-up fills the middle/lower view with two staggered
+drifting decks in front of the globe and behind the angel/palace. The small
+color-corrected motion preview is
+`runs/20260908-153916/passing-clouds-corrected.gif` (575 KiB).
+
+Palace framing/color follow-up (2026-09-08): a Palace-only camera adjustment
+lowers the globe, leaves more sky around the angel and retains authored scale
+and safety bounds. Rich indigo-blue now reaches the visible windows; a narrower
+horizon veil reduces color wash. The native daylight comparison is
+`runs/20260908-155946/daylight-comparison.gif` (571 KiB, full-frame palette),
+with true 16:9 inspected separately. All 148 CTests and the sanitized Metal
+sweep pass; all 246 navigation references remain exact. Six counterbalanced
+checkpoint/refined runs measure a small repeatable +0.239 ms median CPU
+presentation cost (3.6%), retained for the revised framing. Details and all
+run evidence are in `world-navigation-code-audit.md`. The later ActRaiser
+2–inspired orbital A/B remains an isolated prototype in `runs/20260908-162052/`;
+the user chose the daylight base.
+
+Selected-town framing (2026-09-08): the globe now rotates the captured selected
+region's raised centre near the visible horizon above the Palace menus. The
+daylight camera/colors, authored relief and native travel state are unchanged.
+Three repeating upper banks add high-window cloud coverage through existing
+atlas, depth and quality controls. All 148 CTests pass, plus final focused and
+sanitized native checks; all 246 navigation references remain exact. Six serial
+checkpoint/current runs measure +0.781 ms median CPU presentation (11.2%) for
+the extra visible content, retained as an explicit visual-cost tradeoff.
+Native 4:3/16:9 and all six towns were inspected. Preview:
+`runs/20260908-164237/selected-town-daylight.gif` (601 KiB).
 
 ### Quality-of-life enhancements
 

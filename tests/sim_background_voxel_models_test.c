@@ -132,6 +132,18 @@ static bool SameBounds(const SimBackgroundVoxelModel *a,
       a->max_y == b->max_y && a->max_z == b->max_z;
 }
 
+static void CheckMeasuredBounds(const SimBackgroundVoxelObject *object,
+                                SimBackgroundVoxelDetail detail,
+                                SimBackgroundVoxelStyle style,
+                                const SimBackgroundVoxelModel *model) {
+  SimBackgroundVoxelModelBounds bounds;
+  const bool valid = SimBackgroundVoxelModel_MeasureBounds(object, detail, style, &bounds);
+  CHECK(valid || !model->face_count);
+  if (!model->face_count) return;
+  CHECK(bounds.min_x <= model->min_x && bounds.min_y <= model->min_y && bounds.min_z <= model->min_z);
+  CHECK(bounds.max_x >= model->max_x && bounds.max_y >= model->max_y && bounds.max_z >= model->max_z);
+}
+
 static int UniqueVariedModels(SimBackgroundVoxelKind kind,
                               SimBackgroundVoxelDetail detail) {
   uint64_t hashes[8] = {0};
@@ -194,6 +206,18 @@ static SimBackgroundVoxelModel BuildRegionalHouse(uint8_t town,
 }
 
 int main(void) {
+  CHECK(SimBackgroundVoxelModel_HeightBound(NULL,
+      kSimBackgroundVoxelDetail_Ultra, kSimBackgroundVoxelStyle_Varied) == 0.0f);
+  const SimBackgroundVoxelObject unknown = {.kind = UINT8_MAX};
+  CHECK(SimBackgroundVoxelModel_HeightBound(&unknown,
+      kSimBackgroundVoxelDetail_Ultra, kSimBackgroundVoxelStyle_Varied) == 0.0f);
+  SimBackgroundVoxelModelBounds invalid = {1, 2, 3, 4, 5, 6};
+  CHECK(!SimBackgroundVoxelModel_MeasureBounds(&unknown,
+      kSimBackgroundVoxelDetail_Ultra, kSimBackgroundVoxelStyle_Varied, &invalid));
+  const SimBackgroundVoxelModelBounds zero = {0};
+  CHECK(!memcmp(&invalid, &zero, sizeof(zero)));
+  CHECK(!SimBackgroundVoxelModel_MeasureBounds(&unknown,
+      kSimBackgroundVoxelDetail_Ultra, kSimBackgroundVoxelStyle_Varied, NULL));
   SimBackgroundVoxelModel house = Build(
       kSimBackgroundVoxel_House, kSimBackgroundVoxelDetail_Balanced);
   CHECK(house.min_x >= 0.0f && house.max_x <= 16.0f);
@@ -700,6 +724,11 @@ int main(void) {
           CHECK(model.face_count <=
                 SimBackgroundVoxelModel_FaceBudget(
                     (SimBackgroundVoxelDetail)detail));
+          CHECK(SimBackgroundVoxelModel_HeightBound(&object,
+              (SimBackgroundVoxelDetail)detail, (SimBackgroundVoxelStyle)style) >=
+              model.max_z);
+          CheckMeasuredBounds(&object, (SimBackgroundVoxelDetail)detail,
+              (SimBackgroundVoxelStyle)style, &model);
         }
       }
     }
@@ -731,6 +760,49 @@ int main(void) {
           CHECK(regional.face_count <=
                 SimBackgroundVoxelModel_FaceBudget(
                     (SimBackgroundVoxelDetail)detail));
+          CHECK(SimBackgroundVoxelModel_HeightBound(&object,
+              (SimBackgroundVoxelDetail)detail, (SimBackgroundVoxelStyle)style) >=
+              regional.max_z);
+          CheckMeasuredBounds(&object, (SimBackgroundVoxelDetail)detail,
+              (SimBackgroundVoxelStyle)style, &regional);
+        }
+
+  /* Retained height bounds must survive LOD changes and animated/unfinished
+   * variants without rebuilding on every windmill tick. */
+  for (int kind = kSimBackgroundVoxel_House; kind <= kSimBackgroundVoxel_Factory; kind++)
+    for (int flags = 0; flags <= kSimBackgroundVoxel_AlternateFacing; flags++)
+      for (int style = kSimBackgroundVoxelStyle_Basic;
+           style < kSimBackgroundVoxelStyle_Count; style++)
+        for (int phase = 0; phase < 3; phase++) {
+          SimBackgroundVoxelObject object = {
+            .kind = (uint8_t)kind, .flags = (uint8_t)flags, .town = 6,
+            .development_level = 2, .animation_phase = (uint8_t)phase,
+          };
+          const SimBackgroundVoxelObject captured = object;
+          float prior_height = 0.0f;
+          for (int detail = kSimBackgroundVoxelDetail_Low;
+               detail < kSimBackgroundVoxelDetail_Count; detail++) {
+            const float height = SimBackgroundVoxelModel_HeightBound(
+                &object, (SimBackgroundVoxelDetail)detail, (SimBackgroundVoxelStyle)style);
+            SimBackgroundVoxelModel model;
+            SimBackgroundVoxelModel_BuildStyled(&object, (SimBackgroundVoxelDetail)detail,
+                (SimBackgroundVoxelStyle)style, &model);
+            CHECK(height >= prior_height && height >= model.max_z);
+            CheckMeasuredBounds(&object, (SimBackgroundVoxelDetail)detail,
+                (SimBackgroundVoxelStyle)style, &model);
+            prior_height = height;
+            if (kind == kSimBackgroundVoxel_Windmill) {
+              SimBackgroundVoxelObject other_pose = object;
+              other_pose.animation_phase = (uint8_t)((phase + 1) % 3);
+              CHECK(height == SimBackgroundVoxelModel_HeightBound(&other_pose,
+                  (SimBackgroundVoxelDetail)detail, (SimBackgroundVoxelStyle)style));
+            }
+          }
+          CHECK(!memcmp(&object, &captured, sizeof(object)));
+          CHECK(SimBackgroundVoxelModel_HeightBound(&object,
+              (SimBackgroundVoxelDetail)-1, (SimBackgroundVoxelStyle)-1) ==
+              SimBackgroundVoxelModel_HeightBound(&object,
+                  kSimBackgroundVoxelDetail_High, kSimBackgroundVoxelStyle_Varied));
         }
 
   /* Houses are the most numerous object in a developed town, so a regional
