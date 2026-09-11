@@ -91,20 +91,20 @@ continuing:
 
 ### 1. Download the builder for your platform
 
-Download the archive for your machine from
-**[Releases](https://github.com/DerrickGold/ar-recomp/releases)** and unpack it
-anywhere.
+Download the Builder for your machine from
+**[Releases](https://github.com/DerrickGold/ar-recomp/releases)**. Put it in a
+writable folder where you want your game created; unpack ZIP/tar downloads first.
 
 | Platform | Bundle |
 |---|---|
-| macOS (Apple Silicon / Intel) | `actraiser-recomp-macos-arm64.tar.xz` / `-macos-x86_64.tar.xz` |
-| Windows (x64 / ARM64) | `actraiser-recomp-windows-x86_64.zip` / `-windows-arm64.zip` |
+| macOS (Apple Silicon / Intel) | `ActRaiserRecompBuilder-macos-arm64.app.zip` / `ActRaiserRecompBuilder-macos-x86_64.app.zip` |
+| Windows (x64 / ARM64) | `ActRaiserRecompBuilder-windows-x86_64.exe` / `ActRaiserRecompBuilder-windows-arm64.exe` |
 | Linux (x64 / ARM64) | `actraiser-recomp-linux-x86_64.tar.xz` / `-linux-arm64.tar.xz` |
-| Steam Deck | `actraiser-recomp-steam-deck-x86_64.tar.xz` |
+| Steam Deck | `ActRaiserRecompBuilder-steam-deck.AppImage` |
 
 Each bundle contains the buildable project, a pinned Zig C/C++ toolchain, and
 matched SDL3/SDL3_ttf headers and libraries for its platform. A SHA-256 sidecar
-is included for each archive. Players do not need system SDL development
+is included for each download. Players do not need system SDL development
 packages; the Builder selects its bundled SDK ahead of any system SDL.
 
 Installer packaging automatically selects the latest stable **3.x** SDL3 and
@@ -119,23 +119,21 @@ the archive's README lists them, and the Builder checks before compiling.
 Normal AppImage launching also needs a working FUSE setup (for example,
 Debian's `fuse3` package). `APPIMAGE_EXTRACT_AND_RUN=1` is the no-FUSE fallback.
 
-The macOS arm64 and Steam Deck bundles have been tested end to end. The macOS
-x86_64, Windows, and generic Linux archives are cross-built from the same
-project but still need representative launch testing. Reports from those
-platforms are welcome whether the build succeeds or fails.
+The desktop Builder uses the same Workshop as the generic Linux browser-based
+Builder. Cross-building a release does not qualify every target: Windows and
+macOS Intel still need representative native testing, and Steam Deck testing is
+in progress. See the [verification record](installer/desktop-shell/VERIFICATION.md)
+for completed checks and remaining gaps.
 
-![An unpacked bundle folder: a run-build script, a README, and a utils folder](/assets/builder-run-script.png)
+### 2. Open the Builder and pick your ROM
 
-### 2. Run `run-build` and pick your ROM
+Open `ActRaiserRecompBuilder.app` on macOS or the downloaded Builder `.exe` on
+Windows. On Steam Deck, switch to Desktop Mode, mark the AppImage executable in
+its file properties, and open it. For a generic Linux archive, run
+`./run-build.sh` to open the Workshop in your browser.
 
-Double-click `run-build.command` on macOS or `run-build.bat` on Windows. On
-Linux, run `./run-build.sh`. The script opens a private builder in your browser,
-served only on the loopback interface and protected by a per-process token.
-Choose your ROM and press **Build game**.
-
-The builder generates and compiles the game's C code locally. Its page
-communicates only with `127.0.0.1`, so the ROM never leaves your machine. The
-initial build usually takes a few minutes.
+Choose your ROM and press **Build game**. The Builder generates and compiles the
+game's C code; the initial build usually takes a few minutes.
 
 ![The local builder in three stages: the ROM picker with a Build game button; the build running with a step list and a progress dock at 38%; and the finished build showing the original instruction manual with a Launch game button](/assets/builder-stages.webp)
 
@@ -148,7 +146,7 @@ When the build finishes, press **Play**. On macOS the builder creates
 `ActRaiserRecomp.app`; on Linux it creates `ActRaiserRecomp.AppImage`. Open that
 application for later sessions without a terminal. Windows continues to use
 `run-game.bat`; the older `run-game` scripts remain available on all platforms.
-Running `run-build` again detects the existing game and opens as a launcher.
+Opening the Builder again detects the existing game and opens as a launcher.
 
 These applications are generated locally and contain your ROM; they are not
 public release artifacts. macOS signing is automatic and local, with no Apple
@@ -163,41 +161,65 @@ instructions apply regardless of its platform-specific filename. Legacy
 
 #### Portable installation (Builder default)
 
-Keep the application, its `.portable` sidecar, and `utils/` together. The Builder
-creates the sidecar automatically: it is a small file named after the complete
-application filename, with `.portable` appended, that points to `utils/`.
+The desktop Builder creates an `ActRaiserRecomp/` folder beside its own
+application. Keep that whole output folder: it contains the playable application,
+its automatically generated `.portable` sidecar, and its runtime data. The
+sidecar is named after the complete application filename with `.portable`
+appended; `.` inside it selects the immediate output directory. Launch the game
+application directly, and move the whole folder to relocate it without needing
+the Builder's tools. Workshop edits affect the data in this output folder.
 
-Launch the application directly. It uses the existing saves, settings, language
-packs, music, and artwork in `utils/`. To move the installation, copy all three
-together, preserving their names and relative locations. No manual sidecar
-setup or data migration is needed when rebuilding an existing portable install.
+Older archive-based `run-build` installs retain their existing layout: their
+sidecar points to `utils/`. Keep the application, sidecar and `utils/` together;
+rebuilding through that legacy entry point continues using those saves/settings.
+Windows game builds currently use a portable executable folder and launcher.
 
 #### Non-portable installation (per-user data)
 
-Copy **only the application** to your preferred location, leaving its `.portable`
-sidecar and `utils/` behind, then launch that copy directly. Without a sidecar,
+For a generated macOS/Linux game application, copy **only the application** to
+your preferred location, leaving its `.portable` sidecar and portable data
+behind, then launch that copy directly. Without a sidecar,
 the application uses your operating system's standard per-user application data
-directory, even if an old portable data folder happens to be nearby.
+directory under `ActRaiserRecomp/game`, even if an old portable data folder
+happens to be nearby. The desktop Builder uses the same application-data parent
+but keeps its own files under `ActRaiserRecomp/installer`.
 
 On first launch it initializes the required files there; later launches reuse
 that user's saves, settings, and assets. Moving or replacing the application
 does not move this data. Switching installation types does not automatically
 transfer or merge saves and settings; the original portable files remain intact.
 
-The Workshop opened through `run-build` still edits the original bundle's
-`utils/`, not a separate non-portable installation. See
+The Workshop edits its portable output (or `utils/` for legacy `run-build`),
+not a separate non-portable game installation. Older global game data stored
+directly under `ActRaiserRecomp` is imported non-destructively into `game/` on
+first use; original files remain intact. See
 [desktop packaging](docs/desktop-packaging.md) for exact data locations,
 advanced overrides, and source-checkout commands.
 
 ### 4. Upgrading later
 
-Back up your saves before upgrading. For a portable installation, extract the
-newer Builder bundle over the existing folder and rebuild the game. Keep the
-generated application and sidecar with the existing `utils/` data.
+Back up your saves before upgrading. Keep the portable game's output folder and
+rebuild into that same destination; runtime edits and saves are preserved.
+For legacy archive installs, keep the application and sidecar with their
+existing `utils/` data. When moving to the desktop Builder, put it beside the
+old installation: its first-launch dialog detects known data folders and offers
+an import into the new game output. You can also choose a different folder or
+use **Import previous installation…** in the sidebar later. Preview the files,
+close both games, and save your Workshop edits before confirming. Originals
+are copied, never moved or deleted; destination saves/settings and modified
+assets win conflicts. The dialog reports conflicts and the build log records
+them. Importing the same source again is blocked, so old saves are not repeatedly
+restored. Reload other open Workshop tabs after an import.
+
+Choosing **Start fresh / not now** is remembered for this output folder, but
+manual import remains available. This imports runtime data, not old executables,
+build tools, or ROMs. Browser-only appearance preferences are not installation
+files and cannot be recovered from an old folder. Desktop Builder workspace upgrades have separate
+[payload-identity restrictions](installer/desktop-shell/README.md).
 
 For a non-portable installation, generate the updated application with the newer
 Builder, then replace only the application in your chosen location. Leave the
-new Builder's `.portable` sidecar behind. Your existing per-user data stays in
+generated game's `.portable` sidecar behind. Your existing per-user data stays in
 its operating-system directory and is reused by the updated application.
 
 Shipped defaults are stored separately from live settings. On the next launch,
@@ -206,11 +228,14 @@ saves, authored diorama rooms, and custom asset entries remain in place.
 
 ### 5. Optionally, reclaim the space
 
-Most of the bundle's size comes from the toolchain. After a successful build,
-the builder can remove it and reports how much space will be recovered. The
-game, settings, saves, music, and graphics remain in place, and `run-build`
-continues to work as a launcher. Download the bundle again if you later need
-to rebuild.
+The desktop Builder's `ActRaiserRecomp/` output is independent of its build
+tools. Keep that whole game folder, including its sidecar and data, to continue
+playing without the Builder.
+
+For generic Linux archive installs, the Builder can remove the toolchain after
+a successful build and reports how much space will be recovered. The game,
+settings, saves, music, and graphics remain in place, and `run-build` continues
+to work as a launcher. Download the archive again if you later need to rebuild.
 
 <details>
 <summary>Building and testing from a source checkout instead</summary>

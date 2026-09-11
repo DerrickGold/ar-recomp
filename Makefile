@@ -1,11 +1,14 @@
-# Root convenience targets for producing the distributable game bundles.
+# Root convenience targets for producing desktop and generic Linux Builders.
 #
 # `make release` cross-builds every platform's self-contained bundle and
-# writes them (plus SHA-256 sidecars) into ./release/. Bundles are named
-# actraiser-recomp-<platform>.{tar.xz,zip}. Requires Go and CMake; the C
+# writes them (plus SHA-256 sidecars) into ./release/: macOS .app.zip, Windows
+# .exe, Steam Deck .AppImage, and generic Linux .tar.xz. Requires Go and CMake; the C
 # toolchain and supported SDL3 redistributables are downloaded and bundled by
-# the packaging project, so no compiler/SDL install is needed to PRODUCE the
-# bundles.
+# the packaging project. Desktop releases also need native host packaging tools;
+# macOS can cross-build all release targets without a VM.
+# See installer/desktop-shell/README.md for prerequisites and validation limits.
+# DESKTOP=0 explicitly requests legacy archives instead of the default matrix.
+# Steam Deck enforces glibc 2.36; full device/game qualification is separate.
 #
 # The equivalent pure-CMake command (run from the packaging directory) is:
 #   cd installer/packaging && cmake --workflow --preset release
@@ -60,6 +63,7 @@
 
 PACKAGING := installer/packaging
 PLATFORMS := macos-arm64 macos-x86_64 linux-x86_64 linux-arm64 windows-x86_64 windows-arm64 steam-deck
+DESKTOP ?= 1
 ROM ?= ar.sfc
 
 # Regenerable artifacts, grouped. Never lists the ROM, saves/*.srm, recordings,
@@ -98,21 +102,13 @@ dev: config.ini
 	cmake --build --preset play
 	@echo "Built ./build-release/ActRaiserRecomp — run it with: ./build-release/ActRaiserRecomp $(ROM) --config config.ini"
 
+RELEASE_OPTIONS = -DBUILDER_LEGACY_ARCHIVES=$(if $(filter 0,$(DESKTOP)),ON,OFF) -DBUILDER_KEEP_BUILD=$(if $(KEEP_BUILD),ON,OFF)
+
 release:
-	@for p in $(PLATFORMS); do \
-	  echo "=== packaging $$p ==="; \
-	  ( cd $(PACKAGING) && cmake --workflow --preset package-$$p ) || exit 1; \
-	  [ -n "$(KEEP_BUILD)" ] || rm -rf $(PACKAGING)/build/$$p; \
-	done
-	@rm -rf release/_CPack_Packages
-	@[ -n "$(KEEP_BUILD)" ] || rm -rf $(PACKAGING)/build
-	@echo "Bundles written to $(CURDIR)/release/"
+	cmake "-DBUILDER_PLATFORMS=$(PLATFORMS)" $(RELEASE_OPTIONS) -P $(PACKAGING)/release.cmake
 
 $(addprefix release-,$(PLATFORMS)): release-%:
-	( cd $(PACKAGING) && cmake --workflow --preset package-$* )
-	@rm -rf release/_CPack_Packages
-	@[ -n "$(KEEP_BUILD)" ] || rm -rf $(PACKAGING)/build/$*
-	@echo "Bundle written to $(CURDIR)/release/"
+	cmake -DBUILDER_PLATFORMS=$* $(RELEASE_OPTIONS) -P $(PACKAGING)/release.cmake
 
 # Cross-target link check. `zig cc` carries libc headers and a linker for every
 # target it supports, so the compile and the link are the real ones for that

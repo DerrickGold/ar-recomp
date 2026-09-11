@@ -4,10 +4,11 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/DerrickGold/snesrecomp-go/internal/subprocess"
 )
 
 type BuildOptions struct {
@@ -94,7 +95,7 @@ func applyBuildDefaults(options *BuildOptions) {
 
 func runExternal(name string, args []string, directory string, stdout, stderr io.Writer) error {
 	fmt.Fprintf(stdout, "+ %s %s\n", name, strings.Join(args, " "))
-	command := exec.Command(name, args...)
+	command := subprocess.Command(name, args...)
 	command.Dir = directory
 	command.Stdout = stdout
 	command.Stderr = stderr

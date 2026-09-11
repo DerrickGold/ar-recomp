@@ -1,0 +1,48 @@
+cmake_minimum_required(VERSION 3.25)
+if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin" OR BUILDER_LINUX_CROSS)
+    include("${CMAKE_CURRENT_LIST_DIR}/package-linux-cross.cmake")
+    return()
+endif()
+if(NOT CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux")
+    message(FATAL_ERROR "The Linux Builder must be packaged on a native Linux maintainer host")
+endif()
+if(NOT BUILDER_DIST_BUILD OR NOT BUILDER_OUTPUT)
+    message(FATAL_ERROR "Set BUILDER_DIST_BUILD to a configured native installer build and BUILDER_OUTPUT to a new .AppImage path")
+endif()
+get_filename_component(BUILDER_DIST_BUILD "${BUILDER_DIST_BUILD}" ABSOLUTE)
+get_filename_component(BUILDER_OUTPUT "${BUILDER_OUTPUT}" ABSOLUTE)
+find_program(_go go REQUIRED)
+file(STRINGS "${BUILDER_DIST_BUILD}/CMakeCache.txt" _target_os REGEX "^SNESBUILD_GOOS:STRING=")
+file(STRINGS "${BUILDER_DIST_BUILD}/CMakeCache.txt" _target_arch REGEX "^SNESBUILD_GOARCH:STRING=")
+file(STRINGS "${BUILDER_DIST_BUILD}/CMakeCache.txt" _target_deck REGEX "^SNESBUILD_STEAM_DECK:BOOL=")
+set(_abi_options)
+if(_target_deck STREQUAL "SNESBUILD_STEAM_DECK:BOOL=ON")
+    set(_abi_options --glibc-max 2.36)
+endif()
+execute_process(COMMAND "${_go}" env GOHOSTARCH OUTPUT_VARIABLE _host_arch
+    OUTPUT_STRIP_TRAILING_WHITESPACE COMMAND_ERROR_IS_FATAL ANY)
+if(NOT _target_os STREQUAL "SNESBUILD_GOOS:STRING=linux" OR
+   NOT _target_arch STREQUAL "SNESBUILD_GOARCH:STRING=${_host_arch}")
+    message(FATAL_ERROR "Builder requires a native linux/${_host_arch} installer payload")
+endif()
+if(EXISTS "${BUILDER_OUTPUT}")
+    message(FATAL_ERROR "Choose a new BUILDER_OUTPUT path; existing apps are never replaced")
+endif()
+string(RANDOM LENGTH 12 ALPHABET abcdef0123456789 _suffix)
+set(_stage "${BUILDER_DIST_BUILD}/builder-shell-${_suffix}")
+file(MAKE_DIRECTORY "${_stage}")
+execute_process(COMMAND "${CMAKE_COMMAND}" --build "${BUILDER_DIST_BUILD}" --parallel 2
+    COMMAND_ERROR_IS_FATAL ANY)
+execute_process(COMMAND "${CMAKE_COMMAND}" --install "${BUILDER_DIST_BUILD}" --prefix "${_stage}/payload"
+    OUTPUT_VARIABLE _install_log COMMAND_ERROR_IS_FATAL ANY)
+set(_tags production,webkit2_41)
+if(BUILDER_SMOKE_TEST)
+    string(APPEND _tags ",smoketest")
+endif()
+execute_process(COMMAND "${_go}" -C "${CMAKE_CURRENT_LIST_DIR}" build -tags "${_tags}" -trimpath
+    -ldflags "-s -w" -o "${_stage}/shell" . COMMAND_ERROR_IS_FATAL ANY)
+execute_process(COMMAND "${_go}" -C "${CMAKE_CURRENT_LIST_DIR}" run ./cmd/package
+    --source "${_stage}/payload" --shell "${_stage}/shell" --output "${BUILDER_OUTPUT}"
+    ${_abi_options}
+    COMMAND_ERROR_IS_FATAL ANY)
+message(STATUS "Builder artifact: ${BUILDER_OUTPUT}")

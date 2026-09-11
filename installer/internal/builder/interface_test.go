@@ -26,6 +26,27 @@ func interfacePOST(app *application, path, data string) *httptest.ResponseRecord
 	return w
 }
 
+func TestWorkshopCopyDoesNotDescribeBrowserTransport(t *testing.T) {
+	for _, old := range []string{"127.0.0.1", "builder.build.privacy", "builder.assets.privacy", "builder.privacy.short", "builder.home.local", "your browser's own reader"} {
+		if strings.Contains(pageHTML, old) {
+			t.Fatalf("obsolete player-facing copy: %s", old)
+		}
+	}
+	entries, err := interfacecatalog.Entries()
+	if err != nil {
+		t.Fatal(err)
+	}
+	messages := make(map[string][]string, len(entries))
+	for _, entry := range entries {
+		messages[entry.Key] = entry.Text
+	}
+	for _, key := range []string{"builder.home.rom", "builder.assets.restart_note", "builder.closed_note", "builder.help.manual_help", "builder.help.open_manual"} {
+		if len(messages[key]) != len(interfacecatalog.Locales()) {
+			t.Fatalf("missing translated replacement copy: %s", key)
+		}
+	}
+}
+
 func TestInterfacePreferenceIsIndependentAndDurable(t *testing.T) {
 	root := t.TempDir()
 	app := newApplication(context.Background(), Options{ProjectRoot: root}, "first")

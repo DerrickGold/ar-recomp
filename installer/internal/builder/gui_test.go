@@ -150,7 +150,8 @@ func TestBuilderPageEscapesTitleAndSetsLocalSecurityHeaders(t *testing.T) {
 }
 
 func TestLockedLogWriterKeepsBoundedTail(t *testing.T) {
-	app := newApplication(context.Background(), Options{}, "secret")
+	var full bytes.Buffer
+	app := newApplication(context.Background(), Options{Stdout: &full}, "secret")
 	writer := &lockedLogWriter{app: app}
 	payload := append(bytes.Repeat([]byte("a"), maxLogBytes+32), []byte("tail")...)
 	written, err := writer.Write(payload)
@@ -159,6 +160,9 @@ func TestLockedLogWriterKeepsBoundedTail(t *testing.T) {
 	}
 	if written != len(payload) {
 		t.Fatalf("Write returned %d, want %d", written, len(payload))
+	}
+	if !bytes.Equal(full.Bytes(), payload) {
+		t.Fatal("persistent session log lost the beginning of the compiler output")
 	}
 	if app.log.Len() != maxLogBytes ||
 		!strings.HasSuffix(app.log.String(), "tail") {

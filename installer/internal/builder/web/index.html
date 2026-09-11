@@ -23,6 +23,7 @@
     <button class="tab" id="tab-manual" role="tab" aria-selected="false" aria-controls="panel-manual" tabindex="-1"><span class="nav-icon" aria-hidden="true">▤</span><span data-i18n="builder.nav.help">Help &amp; manual</span></button>
   </div>
   <div class="sidebar-bottom">
+    <button type="button" id="import-install-open" hidden data-i18n="builder.import.open">Import previous installation…</button>
     <label for="interface-language" data-i18n="interface.language">Interface language</label>
     <select id="interface-language" aria-describedby="interface-language-status"><option value="en">English</option><option value="fr">Français</option><option value="de">Deutsch</option><option value="ja">日本語</option></select>
     <p id="interface-language-status" class="local-note" role="status" hidden></p>
@@ -30,7 +31,6 @@
     <select id="scene-motion"><option value="auto" data-i18n="builder.motion.auto">Follow system</option><option value="animated" data-i18n="builder.motion.animated">Animated scene</option><option value="still" data-i18n="builder.motion.still">Still scene</option><option value="off" data-i18n="builder.motion.off">Scene off</option></select>
     <label for="scene-setting" data-i18n="builder.scenery">Scenery</label>
     <select id="scene-setting"><option value="fillmore" data-i18n="builder.scenery.fillmore">Fillmore · the Master’s patrol</option><option value="palace" data-i18n="builder.scenery.palace">Sky Palace · angel patrol</option></select>
-    <p class="local-note"><span aria-hidden="true">●</span><span class="local-copy" data-i18n="builder.privacy.short">Local. Private. Yours.</span></p>
     <button id="close" class="quiet" type="button" data-i18n="builder.close">Close workshop</button>
   </div>
 </aside>
@@ -39,7 +39,7 @@
   <header class="workspace-bar"><div id="dock" data-open="false" data-kind="idle"><span id="workspace-status" class="status-badge" role="status" data-i18n="builder.checking">Checking installation…</span><span id="track" role="progressbar" aria-label="Build progress" data-i18n-aria="builder.progress" aria-valuemin="0" aria-valuemax="100" hidden><span id="dock-pct" aria-hidden="true">0%</span></span><button id="dock-launch" type="button" hidden disabled data-i18n="builder.run">▶ Run game</button></div></header>
   <section class="panel" id="panel-home" role="tabpanel" aria-labelledby="tab-home">
     <div class="home-hero">
-      <div class="hero-copy"><h1 data-i18n="builder.home.title">Shape the land.&#10;Make it yours.</h1><p class="lede" data-i18n="builder.home.intro">Build ActRaiser, give its people a new voice, and tune the adventure to your liking.</p><div class="actions"><button id="home-primary" type="button" disabled data-i18n="builder.home.checking">Checking your game…</button></div><p id="home-game-note" class="muted" data-i18n="builder.home.local">Everything stays on this computer.</p></div>
+      <div class="hero-copy"><h1 data-i18n="builder.home.title">Shape the land.&#10;Make it yours.</h1><p class="lede" data-i18n="builder.home.intro">Build ActRaiser, give its people a new voice, and tune the adventure to your liking.</p><div class="actions"><button id="home-primary" type="button" disabled data-i18n="builder.home.checking">Checking your game…</button></div><p id="home-game-note" class="muted" data-i18n="builder.home.rom">Choose your US ActRaiser ROM to build the game.</p></div>
       <div class="scene-stage"><canvas id="palace-scene" width="640" height="420" aria-label="A small illustrated palace floating above the clouds" data-i18n-aria="builder.scene.placeholder_aria"></canvas><span class="scene-caption" id="scene-caption" data-i18n="builder.scene.placeholder">A quiet moment above the clouds</span></div>
     </div>
     <div class="section-heading"><h2 data-i18n="builder.home.customize">Choose your path</h2></div>
@@ -120,8 +120,6 @@
       <summary data-i18n="builder.build.log">Build log</summary>
       <pre id="log" data-i18n="builder.build.select_rom">Select your ROM to begin.</pre>
     </details>
-    <p class="privacy" data-i18n="builder.build.privacy">Your ROM is copied only into this local folder and is never uploaded.
-    This page talks only to the builder on 127.0.0.1.</p>
   </section>
 
   <section class="panel" id="panel-assets" role="tabpanel" aria-labelledby="tab-assets" hidden>
@@ -179,8 +177,7 @@
 
 
       <div id="asset-state" role="status" hidden></div>
-      <p class="privacy" data-i18n="builder.assets.privacy">Replacement files stay on this computer and are never uploaded.
-      Saved changes take effect the next time the game starts.</p>
+      <p class="section-note" data-i18n="builder.assets.restart_note">Saved changes take effect the next time the game starts.</p>
     </form>
   </section>
 
@@ -189,8 +186,8 @@
     <div class="page-heading"><div><p class="eyebrow" data-i18n="builder.help.eyebrow">GUIDANCE FROM THE SKY PALACE</p><h1 data-i18n="builder.nav.help">Help &amp; manual</h1><p data-i18n="builder.help.intro">The original instruction booklet, plus practical guidance for the workshop.</p></div></div>
     <details class="workshop-help"><summary data-i18n="builder.help.projects">How do workshop projects and installed packs differ?</summary><p data-i18n="builder.help.projects_help">Opening a pack makes an editable workshop copy. Saving keeps your work, but does not update the game. Install your saved pack from the editor, restart the game, then select its package name in the game’s localization settings. Translated packs use enhanced text rendering.</p></details>
     <div class="manual-bar">
-      <p data-i18n="builder.help.manual_help">The original English 40-page instruction booklet — your browser's own reader handles paging, zoom and search. Changing the interface language does not translate the scanned booklet.</p>
-      <a class="linkbtn" href="manual.pdf" target="_blank" rel="noreferrer" data-i18n="builder.help.open_tab">Open in a new tab</a>
+      <p data-i18n="builder.help.manual_help">The original English 40-page instruction booklet. Changing the interface language does not translate the scanned booklet.</p>
+      <a class="linkbtn" href="manual.pdf" target="_blank" rel="noreferrer" data-i18n="builder.help.open_manual">Open manual</a>
     </div>
     <iframe id="manual-frame" title="ActRaiser instruction booklet" data-i18n-title="builder.help.manual_title"></iframe>
     <details class="blurb"><summary data-i18n="builder.help.about">About ActRaiser</summary><img class="manual-cover" src="boxart.webp" width="760" height="555" loading="lazy" alt="Original ActRaiser box artwork" data-i18n-alt="builder.help.box_art">
@@ -208,6 +205,21 @@
 </main>
 
 <script src="builder/scene.js" type="module"></script>
+<dialog id="import-install" aria-labelledby="import-install-title">
+  <h2 id="import-install-title" data-i18n="builder.import.title">Bring your previous game with you</h2>
+  <p data-i18n="builder.import.help">Import saves, settings, Workshop preferences, and custom assets. Originals stay untouched. Existing user files win; untouched shipped assets may be replaced. ROMs and build tools are not copied.</p>
+  <p id="import-install-detected" hidden data-i18n="builder.import.detected">Previous installation found. Review it before importing.</p>
+  <label for="import-install-source" data-i18n="builder.import.source">Previous installation or data folder</label>
+  <input id="import-install-source" type="text" autocomplete="off" spellcheck="false">
+  <select id="import-install-candidates" hidden aria-label="Detected data folders" data-i18n-aria="builder.import.candidates"></select>
+  <div class="import-actions"><button type="button" id="import-install-choose" data-i18n="builder.import.choose">Choose folder…</button><button type="button" id="import-install-preview" data-i18n="builder.import.preview">Review import</button></div>
+  <p><span data-i18n="builder.import.destination">Game output:</span> <span id="import-install-destination"></span></p>
+  <p id="import-install-status" role="status" aria-live="polite"></p>
+  <details id="import-install-details" hidden><summary data-i18n="builder.import.files">Files and conflicts</summary><pre id="import-install-files"></pre></details>
+  <label class="import-confirm"><input type="checkbox" id="import-install-confirm"><span data-i18n="builder.import.confirm">Both games are closed, and I have saved my Workshop edits. Other open Workshop tabs must be reloaded after import.</span></label>
+  <div class="import-actions"><button type="button" id="import-install-apply" disabled data-i18n="builder.import.apply">Import into game output</button><button type="button" id="import-install-skip" data-i18n="builder.import.skip">Start fresh / not now</button><button type="button" id="import-install-reload" hidden data-i18n="builder.import.reload">Reload Workshop</button></div>
+</dialog>
 <script src="builder/app.js" defer></script>
+<script src="builder/install-import.js" defer></script>
 </body>
 </html>

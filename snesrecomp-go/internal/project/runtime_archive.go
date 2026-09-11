@@ -6,13 +6,14 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/DerrickGold/snesrecomp-go/internal/subprocess"
 )
 
 const runtimeArchiveObjectCacheVersion = "4"
@@ -294,7 +295,7 @@ func BuildRuntimeArchive(options RuntimeArchiveOptions) (string, error) {
 			args := runtimeSourceCompileArgs(compileArgs, item.source)
 			args = append(args, runtimeDebugObjectArgs(runtimeDir, options.Target, item.source)...)
 			args = append(args, "-c", item.source, "-o", item.object)
-			command := exec.Command(options.ZigPath, args...)
+			command := subprocess.Command(options.ZigPath, args...)
 			command.Dir = runtimeDir
 			output, err := command.CombinedOutput()
 			// The runner also compiles with -w, so this is silent on a healthy

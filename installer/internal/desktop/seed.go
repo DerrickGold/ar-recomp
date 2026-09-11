@@ -36,6 +36,12 @@ func InitializeData(resources, root string) error {
 		return err
 	}
 	defer unlock()
+	return initializeDataLocked(resources, root)
+}
+
+// The caller owns the initialization lock. Portable output preparation uses
+// the same lock for its one-time import and seed publication.
+func initializeDataLocked(resources, root string) error {
 	previous := map[string]string{}
 	statePath := filepath.Join(root, seedStateName)
 	if err := safeDestination(root, seedStateName); err != nil {
@@ -56,7 +62,7 @@ func InitializeData(resources, root string) error {
 		next[key] = value
 	}
 	seed := filepath.Join(resources, "seed")
-	err = filepath.WalkDir(seed, func(path string, entry fs.DirEntry, walkErr error) error {
+	err := filepath.WalkDir(seed, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}

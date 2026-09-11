@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/DerrickGold/ar-recomp/installer/internal/interfacecatalog"
+	"github.com/DerrickGold/ar-recomp/installer/internal/subprocess"
 )
 
 var errDirectoryChooserUnavailable = errors.New("no native folder chooser available")
@@ -23,11 +24,16 @@ func choosePackDirectory(ctx context.Context, language string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	return chooseDirectoryWithPrompt(ctx, prompt)
+}
+
+func chooseDirectoryWithPrompt(ctx context.Context, prompt string) (string, error) {
 	name, args := directoryPickerCommand(runtime.GOOS, prompt, func(name string) bool { _, err := exec.LookPath(name); return err == nil })
 	if name == "" {
 		return "", errDirectoryChooserUnavailable
 	}
 	command := exec.CommandContext(ctx, name, args...)
+	subprocess.Configure(command)
 	command.Env = append(os.Environ(), "AR_BUILDER_FOLDER_PROMPT="+prompt)
 	output, err := command.Output()
 	if ctx.Err() != nil {

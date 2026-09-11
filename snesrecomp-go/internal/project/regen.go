@@ -7,13 +7,13 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
 
 	"github.com/DerrickGold/snesrecomp-go/internal/regen"
+	"github.com/DerrickGold/snesrecomp-go/internal/subprocess"
 	"github.com/DerrickGold/snesrecomp-go/internal/tooling"
 )
 
@@ -204,7 +204,7 @@ func uncoveredLines(data []byte) []string {
 }
 
 func runGoTests(goCommand, toolchainDir string, stdout, stderr io.Writer) error {
-	command := exec.Command(goCommand, "test", "./...")
+	command := subprocess.Command(goCommand, "test", "./...")
 	command.Dir = toolchainDir
 	command.Stdout = stdout
 	command.Stderr = stderr

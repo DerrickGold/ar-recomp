@@ -38,15 +38,19 @@ An empty sidecar means `.`. Global storage is:
 
 | OS | Data directory |
 | --- | --- |
-| macOS | `~/Library/Application Support/ActRaiserRecomp` |
-| Linux | `$XDG_DATA_HOME/ActRaiserRecomp`, or `~/.local/share/ActRaiserRecomp` |
+| macOS | `~/Library/Application Support/ActRaiserRecomp/game` |
+| Linux | `$XDG_DATA_HOME/ActRaiserRecomp/game`, or `~/.local/share/ActRaiserRecomp/game` |
 
 Relative XDG variables are ignored. Diagnostics currently remain under the same
 data root (`runs/` when enabled), preserving the game's existing contract.
 Separating disposable diagnostics into the OS cache directory is follow-up work.
 
-The Builder's portable output writes a sidecar pointing to the existing project
-data (`utils/` in downloaded bundles), so existing saves/settings stay in use.
+The desktop Builder writes a self-contained playable `ActRaiserRecomp/` child
+beside its outer application, with a `.` sidecar selecting that output folder.
+Its Workshop edits the output's runtime assets directly; build inputs remain
+in the separate installer workspace. Legacy archive launchers still write a
+sidecar pointing to the existing project data (`utils/` in downloaded bundles),
+so those installs retain their existing saves/settings.
 Copy the app together with its sidecar and data to move a portable installation.
 Copying just the app uses global storage. `--global` explicitly ignores a sidecar.
 For ordinary launches without overrides, absence of a sidecar intentionally
@@ -60,7 +64,16 @@ launch copies missing seed files. Later launches update only untouched seeded
 files; edited and deliberately deleted files remain user-owned. Shipped
 `defaults/` always follows the current application and the existing INI upgrade
 merges it into live settings. Initialization errors stop launch. There is no
-automatic migration or deletion of another installation's data.
+automatic migration or deletion of another portable installation's data.
+
+Older global installs used `ActRaiserRecomp` itself. On first launch using the
+new `game/` child, a recognized old global seed history triggers a one-time,
+non-destructive import of saves, settings, defaults and runtime assets. Existing
+files in `game/` win, original files remain in place, and the import is not
+repeated after initialization. Builder data under `installer/` is never imported.
+The desktop Builder uses the same OS application-data parent, with its own
+`installer/workspace` child (and Windows runtime/profile children). See the
+[Builder storage and output contract](../installer/desktop-shell/README.md).
 
 ## Artifact contract
 

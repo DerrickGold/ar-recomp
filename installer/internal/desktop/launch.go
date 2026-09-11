@@ -9,6 +9,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/DerrickGold/ar-recomp/installer/internal/appdata"
 )
 
 type LaunchOptions struct {
@@ -89,6 +91,15 @@ func Launch(options LaunchOptions) error {
 	if err != nil {
 		return err
 	}
+	global, globalErr := appdata.Directory(runtime.GOOS, "game", os.Getenv)
+	if globalErr == nil {
+		global, globalErr = resolveDataPath(global)
+	}
+	if globalErr == nil && options.DataDir == "" && root == global {
+		if err := importLegacyGlobalData(root); err != nil {
+			return err
+		}
+	}
 	if err := InitializeData(layout.Resources, root); err != nil {
 		return err
 	}
@@ -156,31 +167,32 @@ func gameArguments(args []string, cwd, root, resources string) ([]string, error)
 	return result, nil
 }
 
-func rejectPackageData(layout Layout, root string) (string, error) {
-	// Resolve existing ancestors as well as the leaf so a symlink cannot send
-	// portable data into the signed app or a mounted AppImage.
-	resolve := func(path string) (string, error) {
-		var tail []string
-		for {
-			resolved, err := filepath.EvalSymlinks(path)
-			if err == nil {
-				for i := len(tail) - 1; i >= 0; i-- {
-					resolved = filepath.Join(resolved, tail[i])
-				}
-				return resolved, nil
+// resolveDataPath resolves existing ancestors even when the data directory has
+// not been created yet. It does not create or modify anything.
+func resolveDataPath(path string) (string, error) {
+	var tail []string
+	for {
+		resolved, err := filepath.EvalSymlinks(path)
+		if err == nil {
+			for i := len(tail) - 1; i >= 0; i-- {
+				resolved = filepath.Join(resolved, tail[i])
 			}
-			if !errors.Is(err, os.ErrNotExist) {
-				return "", err
-			}
-			parent := filepath.Dir(path)
-			if parent == path {
-				return "", err
-			}
-			tail = append(tail, filepath.Base(path))
-			path = parent
+			return resolved, nil
 		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return "", err
+		}
+		parent := filepath.Dir(path)
+		if parent == path {
+			return "", err
+		}
+		tail = append(tail, filepath.Base(path))
+		path = parent
 	}
-	resolved, err := resolve(root)
+}
+
+func rejectPackageData(layout Layout, root string) (string, error) {
+	resolved, err := resolveDataPath(root)
 	if err != nil {
 		return "", err
 	}
@@ -189,7 +201,7 @@ func rejectPackageData(layout Layout, root string) (string, error) {
 	if filepath.Base(filepath.Dir(layout.Resources)) == "share" {
 		packageRoot = filepath.Dir(packageRoot)
 	}
-	packageRoot, err = resolve(packageRoot)
+	packageRoot, err = resolveDataPath(packageRoot)
 	if err != nil {
 		return "", err
 	}

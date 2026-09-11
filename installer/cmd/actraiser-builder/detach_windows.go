@@ -3,6 +3,8 @@ package main
 import (
 	"os/exec"
 	"syscall"
+
+	"github.com/DerrickGold/ar-recomp/installer/internal/subprocess"
 )
 
 // detachFromBuilder gives the launched game its own console process group, so a
@@ -19,4 +21,5 @@ func detachFromBuilder(command *exec.Cmd) {
 	command.SysProcAttr = &syscall.SysProcAttr{
 		CreationFlags: createNewProcessGroup,
 	}
+	subprocess.Configure(command)
 }

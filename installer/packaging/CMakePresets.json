@@ -7,7 +7,7 @@
       "hidden": true,
       "binaryDir": "${sourceDir}/build/${presetName}"
     },
-    { "name": "release", "displayName": "All platform bundles (orchestrator)", "binaryDir": "${sourceDir}/build/orchestrator" },
+    { "name": "release", "displayName": "Desktop and generic Linux releases (orchestrator)", "binaryDir": "${sourceDir}/build/orchestrator" },
     { "name": "macos-arm64", "inherits": "base", "displayName": "snesbuild macOS arm64", "cacheVariables": { "SNESBUILD_GOOS": "darwin", "SNESBUILD_GOARCH": "arm64" } },
     { "name": "macos-x86_64", "inherits": "base", "displayName": "snesbuild macOS x86_64", "cacheVariables": { "SNESBUILD_GOOS": "darwin", "SNESBUILD_GOARCH": "amd64" } },
     { "name": "linux-x86_64", "inherits": "base", "displayName": "snesbuild Linux x86_64", "cacheVariables": { "SNESBUILD_GOOS": "linux", "SNESBUILD_GOARCH": "amd64" } },
@@ -94,7 +94,7 @@
     },
     {
       "name": "release",
-      "displayName": "Build every platform bundle into release/",
+      "displayName": "Build desktop and generic Linux releases into release/",
       "steps": [
         { "type": "configure", "name": "release" },
         { "type": "build", "name": "release" }

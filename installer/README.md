@@ -70,6 +70,24 @@ cd installer/packaging
 cmake --workflow --preset release
 ```
 
+The default release has seven downloads: macOS `.app.zip` and Windows `.exe`
+for ARM64 and x86-64, the Steam Deck `.AppImage`, and generic Linux `.tar.xz`
+archives for ARM64 and x86-64. macOS can build all seven without a VM. See the
+[desktop release prerequisites and qualification limits](desktop-shell/README.md#one-command-releases-from-macos).
+`make release DESKTOP=0` explicitly opts into the old archive-only flow. The
+normal release does not also compress redundant macOS, Windows or Deck archives.
+Make and the CMake orchestrator share `packaging/release.cmake`; successful
+publication prunes only the selected target's superseded generated release.
+
 Each bundle places `actraiser-builder[.exe]` and `snesbuild[.exe]` together in
 `utils/tools/`. The launcher passes the sibling path explicitly, preserving the
 module and executable boundary in installed packages.
+
+## Desktop shell prototype
+
+The [Go desktop shell](desktop-shell/README.md) explores native Builder
+artifacts for macOS (`.app`), Linux (`.AppImage`) and Windows (`.exe`) while
+retaining the same Workshop frontend and headless helper. It has its own Go
+module and shares the existing offline installer payload. Root `make release`
+uses these artifacts for macOS, Windows and Steam Deck, retaining the generic
+Linux archives; no CI is added. Documented runtime/UX release gates still apply.

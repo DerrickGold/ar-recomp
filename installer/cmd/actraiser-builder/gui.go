@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -12,13 +13,17 @@ import (
 	"strings"
 
 	"github.com/DerrickGold/ar-recomp/installer/internal/builder"
+	"github.com/DerrickGold/ar-recomp/installer/internal/desktop"
 )
 
 type guiFlags struct {
 	root, outputDir, toolchainDir, optimize, snesbuild string
 	appFormat, appImageTool, appImageRuntime           string
+	readyFile                                          string
+	importSearchDir                                    string
 	jobs                                               int
 	allowStubs, noOpen                                 bool
+	standaloneOutput                                   bool
 }
 
 func runGUI(args []string) error {
@@ -26,6 +31,8 @@ func runGUI(args []string) error {
 	values := guiFlags{}
 	flags.StringVar(&values.root, "root", ".", "game project root")
 	flags.StringVar(&values.outputDir, "output-dir", "", "playable output folder (default: project root)")
+	flags.BoolVar(&values.standaloneOutput, "standalone-output", false, "keep all playable data in output-dir, independent of build inputs")
+	flags.StringVar(&values.importSearchDir, "import-search-dir", "", "folder beside the desktop Builder to check for previous installations")
 	flags.StringVar(&values.toolchainDir, "toolchain-dir", "snesrecomp-go", "snesrecomp-go module directory")
 	flags.StringVar(&values.optimize, "optimize", "-O2", "hermetic optimization level")
 	flags.StringVar(&values.snesbuild, "snesbuild", "", "trusted snesbuild executable (default: bundled sibling, source build, then PATH)")
@@ -35,6 +42,7 @@ func runGUI(args []string) error {
 	flags.IntVar(&values.jobs, "jobs", runtime.NumCPU(), "parallel generation/build workers")
 	flags.BoolVar(&values.allowStubs, "allow-stubs", false, "complete despite the inherited hard-stub backlog")
 	flags.BoolVar(&values.noOpen, "no-open", false, "print the local URL without opening a browser")
+	flags.StringVar(&values.readyFile, "ready-file", "", "create a private JSON session descriptor for a desktop host")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -54,11 +62,32 @@ func runGUI(args []string) error {
 		return err
 	}
 
+	dataRoot := root
+	if values.standaloneOutput {
+		dataRoot = outputDir
+		if values.importSearchDir == "" {
+			values.importSearchDir = filepath.Dir(outputDir)
+		}
+		if err := builder.PrepareRuntimeAssets(root); err != nil {
+			return err
+		}
+		if err := desktop.PreparePortableData(root, dataRoot); err != nil {
+			return err
+		}
+	}
+	fmt.Fprintf(os.Stdout, "Build workspace: %s\nGame output: %s\n", root, outputDir)
 	return builder.Run(context.Background(), builder.Options{
-		Title:       "ActRaiser Recomp Builder",
-		ProjectRoot: root,
-		OpenBrowser: !values.noOpen,
-		Stdout:      os.Stdout,
+		Title:           "ActRaiser Recomp Builder",
+		ProjectRoot:     dataRoot,
+		ImportSearchDir: values.importSearchDir,
+		OpenBrowser:     !values.noOpen,
+		Stdout:          os.Stdout,
+		Ready: func(address string) error {
+			if values.readyFile == "" {
+				return nil
+			}
+			return writeGUIReadyFile(values.readyFile, address)
+		},
 		Build: func(ctx context.Context, romPath string, output io.Writer) (builder.Result, error) {
 			return buildFromGUI(ctx, values, root, outputDir, romPath, output)
 		},
@@ -67,7 +96,11 @@ func runGUI(args []string) error {
 		// rebuild whose inputs have been cleaned away. See install_state.go for
 		// the two file sets and why they differ.
 		Detect: func() builder.InstallState {
-			return detectInstallState(root, outputDir)
+			state := detectInstallState(root, outputDir)
+			if values.standaloneOutput {
+				state.Result.WorkingDir = dataRoot
+			}
+			return state
 		},
 		MeasureSlim: func() int64 {
 			return measureSlimBytes(root)
@@ -76,6 +109,28 @@ func runGUI(args []string) error {
 			return slimInstall(root, outputDir, output)
 		},
 	})
+}
+
+func writeGUIReadyFile(path, address string) error {
+	data, err := json.Marshal(struct {
+		Schema int    `json:"schema"`
+		URL    string `json:"url"`
+	}{1, address})
+	if err != nil {
+		return err
+	}
+	// Only create the host's new private file; never follow or replace a
+	// pre-existing path. The host owns its directory and removes it on exit.
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if err != nil {
+		return err
+	}
+	_, writeErr := f.Write(append(data, '\n'))
+	closeErr := f.Close()
+	if writeErr != nil {
+		return writeErr
+	}
+	return closeErr
 }
 
 // launchBuiltGame starts the game.

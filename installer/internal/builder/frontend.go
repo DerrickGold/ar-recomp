@@ -16,12 +16,13 @@ var frontendFiles embed.FS
 
 func serveFrontend(w http.ResponseWriter, r *http.Request, endpoint string) {
 	files := map[string]string{
-		"builder/theme.css":      "web/theme.css",
-		"builder/app.js":         "web/app.js",
-		"builder/file-input.js":  "web/file-input.js",
-		"builder/i18n.js":        "web/i18n.js",
-		"builder/scene.js":       "web/scene.js",
-		"builder/encounters.mjs": "web/encounters.mjs",
+		"builder/theme.css":         "web/theme.css",
+		"builder/app.js":            "web/app.js",
+		"builder/install-import.js": "web/install-import.js",
+		"builder/file-input.js":     "web/file-input.js",
+		"builder/i18n.js":           "web/i18n.js",
+		"builder/scene.js":          "web/scene.js",
+		"builder/encounters.mjs":    "web/encounters.mjs",
 	}
 	path, ok := files[endpoint]
 	if !ok || r.Method != http.MethodGet {

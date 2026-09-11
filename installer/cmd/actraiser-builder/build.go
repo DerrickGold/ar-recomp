@@ -45,7 +45,12 @@ func buildFromGUI(ctx context.Context, values guiFlags, root, outputDir, romPath
 	if err := ctx.Err(); err != nil {
 		return builder.Result{}, err
 	}
-	if err := prepareNativeUS(root, romPath, output); err != nil {
+	dataRoot := root
+	if values.standaloneOutput {
+		dataRoot = outputDir
+	}
+	fmt.Fprintf(output, "Build workspace: %s\nGame output: %s\nRuntime data: %s\n", root, outputDir, dataRoot)
+	if err := prepareNativeUS(dataRoot, romPath, output); err != nil {
 		return builder.Result{}, err
 	}
 	snesbuild, err := discoverSnesbuild(values.snesbuild, root)
@@ -73,7 +78,7 @@ func buildFromGUI(ctx context.Context, values guiFlags, root, outputDir, romPath
 	buildResult, err := runSnesbuild(ctx, snesbuild, output,
 		"build", "--root", root, "--rom", romPath,
 		"--toolchain-dir", values.toolchainDir, "--jobs", fmt.Sprint(values.jobs),
-		"--optimize", values.optimize, "--hermetic")
+		"--optimize", values.optimize, "--hermetic", "--verbose")
 	if err != nil {
 		return builder.Result{}, err
 	}
@@ -82,7 +87,7 @@ func buildFromGUI(ctx context.Context, values guiFlags, root, outputDir, romPath
 		return builder.Result{}, err
 	}
 	installResult, err := runSnesbuild(ctx, snesbuild, output,
-		"install", "--root", root, "--binary", binary, "--rom", romPath,
+		"install", "--root", dataRoot, "--binary", binary, "--rom", romPath,
 		"--destination", outputDir)
 	if err != nil {
 		return builder.Result{}, err
@@ -95,6 +100,15 @@ func buildFromGUI(ctx context.Context, values guiFlags, root, outputDir, romPath
 	if err != nil {
 		return builder.Result{}, err
 	}
+	if values.standaloneOutput {
+		executable, err := os.Executable()
+		if err != nil {
+			return builder.Result{}, err
+		}
+		if err := desktop.InstallArchiveHelper(executable, outputDir); err != nil {
+			return builder.Result{}, err
+		}
+	}
 	if values.appFormat != "folder" && (runtime.GOOS == "darwin" || runtime.GOOS == "linux") {
 		executable, err := os.Executable()
 		if err != nil {
@@ -102,7 +116,7 @@ func buildFromGUI(ctx context.Context, values guiFlags, root, outputDir, romPath
 		}
 		builder.ReportBuildProgress(output, builder.BuildProgress{PhaseID: "install", Message: "Creating desktop application"})
 		artifact, err := desktop.Package(ctx, desktop.PackageOptions{
-			Binary: binary, Builder: executable, ROM: romPath, Root: root,
+			Binary: binary, Builder: executable, ROM: romPath, Root: root, DataRoot: dataRoot,
 			Destination: outputDir, Format: values.appFormat, Version: version,
 			AppImageTool: values.appImageTool, AppImageRuntime: values.appImageRuntime,
 			Replace: true, Output: output,
@@ -110,7 +124,7 @@ func buildFromGUI(ctx context.Context, values guiFlags, root, outputDir, romPath
 		if err != nil {
 			return builder.Result{}, err
 		}
-		if err := desktop.WritePortableMarker(artifact.Path, root); err != nil {
+		if err := desktop.WritePortableMarker(artifact.Path, dataRoot); err != nil {
 			return builder.Result{}, err
 		}
 		if artifact.Backup != "" {
@@ -120,7 +134,7 @@ func buildFromGUI(ctx context.Context, values guiFlags, root, outputDir, romPath
 	}
 	return builder.Result{
 		Message:    "Build complete — your playable game is ready.",
-		OutputPath: launcher, BinaryPath: installedBinary, WorkingDir: root,
+		OutputPath: launcher, BinaryPath: installedBinary, WorkingDir: dataRoot,
 	}, nil
 }
 
