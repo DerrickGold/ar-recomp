@@ -6,7 +6,7 @@
 #include "host_display.h"
 #include "host_display_pacing.h"
 
-static const uint64_t kEmulationFrameIntervalNs = 16639267ull;
+static const uint64_t kEmulationFrameIntervalNs = 16639263ull;
 static const int kMaximumCatchupFrames = 3;
 static int s_failure_count;
 

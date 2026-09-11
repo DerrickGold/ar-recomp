@@ -251,6 +251,19 @@ void NativeAudioTraceModel_ExtendedDisposition(
   }
 }
 
+void NativeAudioTraceModel_ExtendedPolicy(
+    uint64_t serial, uint64_t other_serial,
+    NativeAudioRequestOutcome outcome, uint64_t cycle) {
+  NativeAudioRequestRecord *r = FindMutable(serial);
+  if (!r || !(r->flags & kNativeAudioFlag_ExtendedTransport) ||
+      r->outcome != kNativeAudioOutcome_Pending ||
+      outcome < kNativeAudioOutcome_BlockedSelf ||
+      outcome > kNativeAudioOutcome_SequenceUnavailable) return;
+  r->replaced_by_serial = other_serial;
+  r->active_lanes = 0;
+  SetOutcome(r, outcome, cycle);
+}
+
 void NativeAudioTraceModel_ExtendedSequenceStart(
     uint64_t serial, uint8_t lane, uint8_t virtual_voice, uint64_t cycle) {
   NativeAudioRequestRecord *r = FindMutable(serial);
@@ -277,7 +290,8 @@ void NativeAudioTraceModel_ExtendedCancel(
   NativeAudioRequestRecord *r = FindMutable(serial);
   if (!r) return;
   r->active_lanes = 0;
-  SetOutcome(r, kNativeAudioOutcome_CanceledSongTransition, cycle);
+  if (r->outcome == kNativeAudioOutcome_Pending)
+    SetOutcome(r, kNativeAudioOutcome_CanceledSongTransition, cycle);
 }
 
 void NativeAudioTraceModel_CpuPortWrite(
@@ -602,7 +616,8 @@ const char *NativeAudioTrace_OutcomeName(NativeAudioRequestOutcome outcome) {
     "overwritten_mailbox", "coalesced_port_duplicate", "overwritten_port",
     "rejected_dual_busy", "retriggered_lane", "replaced_lane",
     "canceled_song_transition", "coalesced_extended_duplicate",
-    "extended_fifo_overflow", "completed"
+    "extended_fifo_overflow", "completed", "blocked_self", "restarted_self",
+    "replaced_self", "replaced_pending", "capacity_drop", "sequence_unavailable"
   };
   return outcome < kNativeAudioOutcome_Count ? names[outcome] : "unknown";
 }

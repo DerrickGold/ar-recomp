@@ -1405,8 +1405,15 @@ static void TestSim3DWidescreenHudCaptureHandoff(void) {
         (size_t)kBodyProbeY * width + extra + kBg3OccludedX] = 0xffffffffu;
     g_sim3d_layer_pixels[kSim3DPlane_Bg1Low][
         (size_t)kBodyProbeY * width + extra + kBg3OccludedX] = 0xffff0000u;
+    /* An empty promoted footprint must keep the PPU pixel, not rebuild it
+     * from separated planes that need not represent all hardware colour math. */
+    const size_t untouched = (size_t)150 * width + extra + 70;
+    g_sim3d_layer_pixels[kSim3DPlane_Bg3Low][untouched] = 0;
+    g_sim3d_layer_pixels[kSim3DPlane_Bg3High][untouched] = 0;
+    authentic[untouched] = 0x00123456u;
     Sim3D_FinishCapture(
         (uint8_t *)authentic, width * (int)sizeof(uint32_t), 1);
+    CHECK(authentic[untouched] == 0x00123456u);
     CHECK(ppu->overlayCaptures[kPpuOverlaySource_Bg3].x0 == 0);
     CHECK(ppu->overlayCaptures[kPpuOverlaySource_Bg3].x1 ==
           kActRaiserAuthenticWidth);

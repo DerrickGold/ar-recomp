@@ -200,6 +200,7 @@ static void write_apu_v2(const Apu *apu, SnesSemanticWriter *writer) {
     snes_semantic_write_u64(writer, apu->sampleClock);
     snes_semantic_write_u64(writer, apu->cycleClock);
     snes_semantic_write_u64(writer, apu->timelineTargetCycles);
+    snes_semantic_write_u32(writer, apu->timelineCycleRemainder);
     snes_semantic_write_u64(writer, apu->portClock);
     for (index = 0u; index < 4u; ++index)
         snes_semantic_write_u64(writer, apu->portLastTarget[index]);

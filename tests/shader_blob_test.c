@@ -44,7 +44,9 @@ typedef struct {
 #include "shaders/rim_frag.h"
 #include "shaders/sim3d_depth_frag.h"
 #include "shaders/sim3d_depth_vert.h"
+#include "shaders/sim3d_spherical_vert.h"
 #include "shaders/sim_shadow_blur_frag.h"
+#include "shaders/sim_cloud_frag.h"
 
 static int s_failures;
 #define CHECK(expr) do { \
@@ -90,11 +92,20 @@ static const struct {
                       kSim3dDepthVertSPV, kSim3dDepthVertSPVSize,
                       kSim3dDepthVertDXIL, kSim3dDepthVertDXILSize },
                       SDL_GPU_SHADERSTAGE_VERTEX, 0, 0 },
+  { "sim3d_spherical_vertex",
+                    { kSim3dSphericalVertMSL, kSim3dSphericalVertMSLSize,
+                      kSim3dSphericalVertSPV, kSim3dSphericalVertSPVSize,
+                      kSim3dSphericalVertDXIL, kSim3dSphericalVertDXILSize },
+                      SDL_GPU_SHADERSTAGE_VERTEX, 0, 1 },
   { "sim_shadow_blur",
                     { kSimShadowBlurFragMSL, kSimShadowBlurFragMSLSize,
                       kSimShadowBlurFragSPV, kSimShadowBlurFragSPVSize,
                       kSimShadowBlurFragDXIL, kSimShadowBlurFragDXILSize },
                       SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1 },
+  { "sim_cloud", { kSimCloudFragMSL, kSimCloudFragMSLSize,
+                   kSimCloudFragSPV, kSimCloudFragSPVSize,
+                   kSimCloudFragDXIL, kSimCloudFragDXILSize },
+                   SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1 },
 };
 static const int kShaderCount = (int)(sizeof(kShaders) / sizeof(kShaders[0]));
 

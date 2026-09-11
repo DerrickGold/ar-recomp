@@ -204,7 +204,7 @@ static void test_saveload(Apu *apu) {
     SaveLoadInfo info = {capture_save};
     g_apu_extra_saveload_hook = capture_extra;
     apu_saveload(apu, &info);
-    check(save_calls == 12u && extra_save_calls == 1u,
+    check(save_calls == 13u && extra_save_calls == 1u,
           "APU core and scheduler save spans plus extension hook");
 }
 

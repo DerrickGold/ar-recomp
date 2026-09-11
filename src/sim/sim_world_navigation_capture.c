@@ -1,5 +1,6 @@
 #include "sim_world_navigation_capture.h"
 
+#include <stdio.h>
 #include <string.h>
 
 uint32_t g_sim_world_navigation_palace_pixels[
@@ -13,6 +14,36 @@ uint32_t g_sim_world_navigation_plaque_pixels[
     kSimWorldNavigationCompositionHeight];
 uint32_t g_sim_sky_palace_mask_pixels[
     kSimWorldNavigationPalaceMaxWidth * kSimWorldNavigationPalaceMaxHeight];
+
+typedef enum NavigationCaptureFailure {
+  kNavigationCapture_Ok,
+  kNavigationCapture_Api,
+  kNavigationCapture_Memory,
+  kNavigationCapture_Mode,
+  kNavigationCapture_Blank,
+  kNavigationCapture_Oam,
+  kNavigationCapture_Palace,
+  kNavigationCapture_Plaque,
+  kNavigationCapture_Label,
+} NavigationCaptureFailure;
+
+/* Producer-thread diagnostics only; never part of the immutable frame ABI.
+ * Report reason changes, not every rejected frame of a native transition. */
+static NavigationCaptureFailure s_navigation_failure;
+
+static bool NavigationCaptureFailed(SimFrameData *frame, NavigationCaptureFailure reason) {
+  static const char *const names[] = {
+    "none", "ppu-api", "borrowed-memory", "not-mode7", "forced-blank",
+    "oam-layout", "palace-raster", "plaque-raster", "label-raster",
+  };
+  if (reason != s_navigation_failure)
+    fprintf(stderr, "[world-navigation-capture] gf=%u fallback=%s\n",
+        (unsigned)frame->game_frame, names[reason]);
+  s_navigation_failure = reason;
+  frame->world_navigation_scene.composition = (SimWorldNavigationComposition){0};
+  frame->view = kSimView_AuthenticFallback;
+  return false;
+}
 
 static bool CaptureSkyPalace(SimFrameData *frame, SrRunnerHandle *runner) {
   const SnesRunnerApi *api = sr_runner_get_api(SR_RUNNER_ABI_VERSION);
@@ -95,15 +126,19 @@ static uint32_t BackdropArgbFullBrightness(uint16_t color) {
 
 bool SimWorldNavigationCapture_Capture(SimFrameData *frame,
                                        SrRunnerHandle *runner) {
-  if (frame && frame->view == kSimView_SkyPalace)
+  if (frame && frame->view == kSimView_SkyPalace) {
+    s_navigation_failure = kNavigationCapture_Ok;
     return CaptureSkyPalace(frame, runner);
+  }
   const SnesRunnerApi *api = sr_runner_get_api(SR_RUNNER_ABI_VERSION);
   SrPpuStateSnapshot ppu = {SR_PPU_STATE_SNAPSHOT_V2_SIZE, 0u};
   SrBorrowedU16Span oam = {sizeof(oam), 0u, NULL, 0u, 0u};
   SrBorrowedU16Span cgram = {sizeof(cgram), 0u, NULL, 0u, 0u};
   if (!frame || frame->view != kSimView_WorldNavigation ||
-      !frame->world_navigation_scene.valid)
+      !frame->world_navigation_scene.valid) {
+    s_navigation_failure = kNavigationCapture_Ok;
     return false;
+  }
 
   frame->world_navigation_brightness = 0u;
   SimWorldNavigationComposition composition;
@@ -118,26 +153,25 @@ bool SimWorldNavigationCapture_Capture(SimFrameData *frame,
         SR_RUNNER_CAP_PPU_OBJ_RASTER)) !=
           (SR_RUNNER_CAP_PPU_STATE | SR_RUNNER_CAP_BORROWED_U16_SPANS |
            SR_RUNNER_CAP_PPU_OBJ_RASTER) ||
-      api->query_ppu_state(runner, &ppu) != SR_RESULT_OK) {
-    frame->world_navigation_scene.composition =
-        (SimWorldNavigationComposition){0};
-    frame->view = kSimView_AuthenticFallback;
-    return false;
-  }
+      !api->query_ppu_state || !api->borrow_u16_memory ||
+      !api->rasterize_ppu_obj_range ||
+      api->query_ppu_state(runner, &ppu) != SR_RESULT_OK)
+    return NavigationCaptureFailed(frame, kNavigationCapture_Api);
   frame->world_navigation_brightness = ppu.brightness;
   if (api->borrow_u16_memory(runner, SR_MEMORY_OAM, &oam) != SR_RESULT_OK ||
       api->borrow_u16_memory(runner, SR_MEMORY_CGRAM, &cgram) != SR_RESULT_OK ||
+      !oam.data || !cgram.data ||
       oam.element_count < SR_PPU_OAM_WORD_COUNT ||
       cgram.element_count < SR_PPU_CGRAM_WORD_COUNT ||
       oam.lifetime_generation != ppu.lifetime_generation ||
-      cgram.lifetime_generation != ppu.lifetime_generation ||
-      ppu.bg_mode != 7u || (ppu.flags & SR_PPU_STATE_FORCED_BLANK) != 0u ||
-      !SimWorldNavigationScene_ClassifyOam(oam.data, &composition)) {
-    frame->world_navigation_scene.composition =
-        (SimWorldNavigationComposition){0};
-    frame->view = kSimView_AuthenticFallback;
-    return false;
-  }
+      cgram.lifetime_generation != ppu.lifetime_generation)
+    return NavigationCaptureFailed(frame, kNavigationCapture_Memory);
+  if (ppu.bg_mode != 7u)
+    return NavigationCaptureFailed(frame, kNavigationCapture_Mode);
+  if ((ppu.flags & SR_PPU_STATE_FORCED_BLANK) != 0u)
+    return NavigationCaptureFailed(frame, kNavigationCapture_Blank);
+  if (!SimWorldNavigationScene_ClassifyOam(oam.data, &composition))
+    return NavigationCaptureFailed(frame, kNavigationCapture_Oam);
 
   /* Unlike town separated capture, navigation has no reason to inherit the
    * most recently captured town's backdrop. Snapshot the live Mode-7 PPU
@@ -145,22 +179,18 @@ bool SimWorldNavigationCapture_Capture(SimFrameData *frame,
    * the complete host world after its effects have been composed. */
   frame->separated_backdrop_argb = BackdropArgbFullBrightness(cgram.data[0]);
 
-  if (!composition.empty_animation &&
-      (!CaptureLayer(api, runner, ppu.lifetime_generation,
-                     &composition.palace,
-                     g_sim_world_navigation_palace_pixels) ||
-       !CaptureLayer(api, runner, ppu.lifetime_generation,
-                     &composition.plaque,
-                     g_sim_world_navigation_plaque_pixels) ||
-       (composition.label.visible &&
-        !CaptureLayer(api, runner, ppu.lifetime_generation,
-                      &composition.label,
-                      g_sim_world_navigation_label_pixels)))) {
-    frame->world_navigation_scene.composition =
-        (SimWorldNavigationComposition){0};
-    frame->view = kSimView_AuthenticFallback;
-    return false;
+  if (!composition.empty_animation) {
+    if (!CaptureLayer(api, runner, ppu.lifetime_generation,
+            &composition.palace, g_sim_world_navigation_palace_pixels))
+      return NavigationCaptureFailed(frame, kNavigationCapture_Palace);
+    if (!CaptureLayer(api, runner, ppu.lifetime_generation,
+            &composition.plaque, g_sim_world_navigation_plaque_pixels))
+      return NavigationCaptureFailed(frame, kNavigationCapture_Plaque);
+    if (composition.label.visible && !CaptureLayer(api, runner, ppu.lifetime_generation,
+            &composition.label, g_sim_world_navigation_label_pixels))
+      return NavigationCaptureFailed(frame, kNavigationCapture_Label);
   }
+  s_navigation_failure = kNavigationCapture_Ok;
   frame->world_navigation_scene.composition = composition;
   return true;
 }

@@ -7,6 +7,8 @@ endif()
 # contracts must not name an SDL type. Desktop enumeration lives in
 # src/platform/sdl/pack_discovery_sdl.c, not here.
 file(GLOB_RECURSE _portable_render_files
+    "${GAME_SOURCE_ROOT}/performance*.c"
+    "${GAME_SOURCE_ROOT}/performance*.h"
     "${GAME_SOURCE_ROOT}/present_world_nav*.c"
     "${GAME_SOURCE_ROOT}/present_world_nav*.h"
     "${GAME_SOURCE_ROOT}/render/*.c"
@@ -22,6 +24,8 @@ file(GLOB_RECURSE _portable_render_files
     "${GAME_SOURCE_ROOT}/sim/sim_background_voxel_*.c"
     "${GAME_SOURCE_ROOT}/sim/sim_background_voxel_*.h")
 list(APPEND _portable_render_files
+    "${GAME_SOURCE_ROOT}/sim/sim_background_voxels.c"
+    "${GAME_SOURCE_ROOT}/sim/sim_background_voxels.h"
     "${GAME_SOURCE_ROOT}/presentation_upload_mirror.c"
     "${GAME_SOURCE_ROOT}/presentation_upload_mirror.h"
     "${GAME_SOURCE_ROOT}/hd_replacement_host.c"
@@ -41,6 +45,7 @@ list(APPEND _portable_render_files
     "${GAME_SOURCE_ROOT}/diorama/diorama_performance.c"
     "${GAME_SOURCE_ROOT}/diorama/diorama_performance.h"
     "${GAME_SOURCE_ROOT}/host/host_clock.h"
+    "${GAME_SOURCE_ROOT}/host/parallel_work.h"
     "${GAME_SOURCE_ROOT}/dev/dev_tools.c"
     "${GAME_SOURCE_ROOT}/dev/dev_tools.h"
     "${GAME_SOURCE_ROOT}/dev/dev_tools_readback.h"
@@ -56,6 +61,8 @@ list(APPEND _portable_render_files
     "${GAME_SOURCE_ROOT}/present_sim3d_environment.c"
     "${GAME_SOURCE_ROOT}/present_sim3d_clouds.c"
     "${GAME_SOURCE_ROOT}/present_sim3d_clouds.h"
+    "${GAME_SOURCE_ROOT}/present_sim3d_underlay.c"
+    "${GAME_SOURCE_ROOT}/present_sim3d_underlay.h"
     "${GAME_SOURCE_ROOT}/present_sim3d_effects.c"
     "${GAME_SOURCE_ROOT}/present_sim3d_effects.h"
     "${GAME_SOURCE_ROOT}/present_sim3d_project.c"
@@ -80,6 +87,7 @@ list(APPEND _portable_render_files
     "${GAME_SOURCE_ROOT}/sim/sim3d_performance.c"
     "${GAME_SOURCE_ROOT}/sim/sim3d_performance.h"
     "${GAME_SOURCE_ROOT}/sim/sim_shadow_effect_backend.h"
+    "${GAME_SOURCE_ROOT}/sim/sim_cloud_effect_backend.h"
     "${GAME_SOURCE_ROOT}/sim/sim_background_mountain_render.c"
     "${GAME_SOURCE_ROOT}/sim/sim_background_mountain_render.h"
     "${GAME_SOURCE_ROOT}/sim/sim_background_voxel_renderer.c"

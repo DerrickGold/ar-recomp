@@ -360,10 +360,10 @@ bool SimWorldNavigationScene_ClassifyOam(
   const int plaque_first = palace_first - kPlaqueOamCount;
   if (!PlaqueSignatureAt(oam, plaque_first)) return false;
 
-  /* The variable-length location glyphs precede the fixed plaque. Validate
-   * their measured row and ordering so unrelated priority-3 objects cannot be
-   * mistaken for replaceable text. */
-  int previous_x = kSimWorldNavigationLabelX - 1;
+  /* Native glyph traversal is not screen order: Kasandora, for example,
+   * emits its x=204 glyph after x=220. Validate ownership and distinct
+   * anchors without reordering OAM (which would change overlap priority). */
+  bool occupied_x[kSimWorldNavigationLabelWidth] = {false};
   for (int slot = 0; slot < plaque_first; slot++) {
     const uint16_t position = oam[slot * kOamWordsPerSlot];
     const uint16_t attributes =
@@ -375,10 +375,11 @@ bool SimWorldNavigationScene_ClassifyOam(
             kUiRequiredPriority ||
         (attributes >> 8) != kLabelAttributesHigh ||
         y != kSimWorldNavigationLabelY || x < kSimWorldNavigationLabelX ||
-        x >= kSimWorldNavigationLabelX + kSimWorldNavigationLabelWidth ||
-        x <= previous_x)
+        x >= kSimWorldNavigationLabelX + kSimWorldNavigationLabelWidth)
       return false;
-    previous_x = x;
+    const int column = x - kSimWorldNavigationLabelX;
+    if (occupied_x[column]) return false;
+    occupied_x[column] = true;
   }
   for (int slot = palace_first + kPalaceOamCount;
        slot < kOamSlotCount; slot++)

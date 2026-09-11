@@ -35,7 +35,7 @@ static inline HostDisplayPresentMode HostDisplay_EmulatedFramePresentMode(
  * as texture column 0 means screen x = -ws_extra on the horizontal axis. */
 enum { kHostDisplayFramebufferHeight = 352 };
 
-/* 262 scanlines * 1364 master-clock dots / 21.477272 MHz = 60.0988 Hz. */
+/* Mean NTSC field period, including the alternate field's four-cycle short line. */
 extern const uint64_t kHostDisplayEmulationFrameIntervalNs;
 
 void HostDisplay_SetWidescreenRuntimeAllowed(bool allowed);

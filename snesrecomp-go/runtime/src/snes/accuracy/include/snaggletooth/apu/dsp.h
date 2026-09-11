@@ -1,7 +1,7 @@
 #pragma once
 
 // Adapted from Snaggletooth include/snaggletooth/apu/dsp.h at commit
-// 65668997ed58fe78cfcef1e53c0020bd92d0d287.
+// 321cb3eddde1fe0474eab31e5a88d32f413a7ff6.
 // Copyright (c) 2026 Eric Tomasso. SPDX-License-Identifier: MIT.
 // See runtime/licenses/Snaggletooth-LICENSE.txt.
 
@@ -27,11 +27,16 @@
 // is set — is scaled by the voice's 11-bit envelope into the internal
 // -4000h..+3FFFh amplitude, then by its signed per-voice left/right volume, and
 // the eight results are summed with a 16-bit clamp after every addition. The
-// summed mix is then scaled by the signed master volume (MVOLL/MVOLR, a
-// truncating multiply where the -128 product wraps), the echo unit's output is
-// added through the echo volume (EVOLL/EVOLR), and, when FLG bit 6 is set, the
-// frame is muted to silence — mute stops the emitted frame only; every voice, the
-// noise generator, the envelopes and the echo unit keep advancing.
+// summed mix is then scaled by the signed master volume (MVOLL/MVOLR), the echo
+// unit's output is added through the echo volume (EVOLL/EVOLR), and, when FLG
+// bit 6 is set, the frame is muted to silence — mute stops the emitted frame
+// only; every voice, the noise generator, the envelopes and the echo unit keep
+// advancing.
+//
+// Every volume multiply — MVOL, EVOL, EFB, and each FIR coefficient — yields a
+// 16-bit result and wraps. A coefficient of -128 is the one value whose product
+// can leave that range, which is why the additions, not the products, are where
+// the chain saturates.
 //
 // The echo unit is a delay line in APU RAM: each sample it reads the oldest 4-byte
 // entry of a ring buffer based at ESA*100h, runs a per-channel 8-tap FIR filter
@@ -81,7 +86,8 @@ enum class EnvPhase : std::uint8_t { Attack, Decay, Sustain, Release };
 // The envelope fields carry the 11-bit level (0..0x7FF), its phase, the 5-sample
 // post-key-on startup countdown (during which the voice outputs silence and the
 // envelope holds still — the stream advances from the countdown's second call
-// on, the first performing only the start-address read, crossing whole sample
+// on, the first decoding nothing while the start pointer and the prime wait
+// for the next sample's directory and load slots, crossing whole sample
 // positions while the fractional remainder is discarded, so the first sounding
 // sample interpolates from index 0), and the Bent-Increase
 // reference — the value the selected mode computed last sample, which the GAIN
@@ -124,34 +130,100 @@ struct VoiceState {
   SampleWindow window{};
   // The decoded-sample ring between the decoder and the window. BRR data is
   // decoded four samples at a time, ahead of the cursor: a key-on primes the
-  // first three groups — twelve samples — and each group-aligned consume
-  // schedules the decode of the group eight stream samples ahead, performed
-  // at the voice's NEXT sample (the schedule below carries it). So the
-  // bytes behind a sample are read from RAM seven to eleven samples before
-  // it sounds, and a RAM write after that read does not reach the samples
-  // already decoded (`Misc/brr not always decoding` rewrites a parked voice's
-  // block and the voice still plays its twelve primed samples; `Order/pitch
-  // after brr` rewrites the header sample by sample under a moving voice and
-  // reads which shift each group took). The ring holds the decoded,
-  // not-yet-consumed samples; a state seeded without priming (count 0) decodes
-  // at consumption instead — the hardware never runs unprimed, but
-  // directly-seeded mid-stream states have no ring to pop.
+  // first three groups — twelve samples, every byte read at the prime — and
+  // the consumption of a group's third sample schedules the decode of the
+  // group two on (the schedule below carries it), so a group's bytes are read
+  // from RAM several samples before its first sample sounds, and a RAM write
+  // after that read does not reach the samples already decoded (`Misc/brr not
+  // always decoding` rewrites a parked voice's block and the voice still plays
+  // its twelve primed samples; `Order/pitch after brr` rewrites the header
+  // sample by sample under a moving voice and reads which shift each group
+  // took). The ring holds the decoded, not-yet-consumed samples; a state
+  // seeded without priming (count 0) decodes at consumption instead — the
+  // hardware never runs unprimed, but directly-seeded mid-stream states have
+  // no ring to pop.
   std::array<std::int16_t, 12> pending{};
   std::uint8_t pendingHead = 0;
   std::uint8_t pendingCount = 0;
-  // The group decodes the cursor's last advance scheduled — one per group
-  // boundary it crossed, each naming the block the group lies in and its
-  // first in-block sample index. They run at the start of the voice's next
-  // advance, reading the header and data bytes from RAM then — one sample
-  // after the crossing, and before the cursor moves again. A modulated step
-  // can carry the cursor across two boundaries in one sample (the position
-  // clamps at 7FFFh, seven samples on), so the schedule holds two.
+  // The group decodes the cursor's advances have scheduled, each naming the
+  // block the group lies in and its first in-block sample index. A group's
+  // three bytes are read from RAM in three slots: the header at the
+  // scheduling itself (the compute that consumed the third sample of the
+  // group two back), held here; the first data byte at the voice's BRR load
+  // slot in the next sample (five slots before voice 0's compute, the compute
+  // slot itself for the other voices), also held here; and the second data
+  // byte at the voice's S4 slot of that sample, one after the compute. The
+  // first two samples decode at that compute and the last two at the S4 —
+  // unless the advance would otherwise consume past the ring, when the S4
+  // half decodes at the compute too. A CPU write that lands between a byte's
+  // read and the next reaches the later byte and not the earlier one
+  // (`Timing/Voice/V3 BRR.header.03`, `BRR.sample.lsb`, `BRR.sample.msb` and
+  // `Order/pitch after brr` measure the three slots).
+  // A modulated step can carry the cursor across two boundaries in one
+  // sample (the position clamps at 7FFFh, seven samples on), so the schedule
+  // holds two; a pair scheduled together decodes in full at the compute.
+  // bytesLoaded is clear for a decode the slot schedule has not loaded — a
+  // state's first, frame-at-once sample and the single-voice call — which
+  // read the data bytes at the decode.
   struct GroupDecode {
     std::uint16_t address = 0;
     std::uint8_t offset = 0;
+    std::uint8_t header = 0;
+    std::uint8_t firstByte = 0;
+    bool bytesLoaded = false;
+    // Samples of the group already decoded: the compute decodes the first two
+    // (the loaded first byte's) and the voice's S4 slot the last two, reading
+    // the second data byte from RAM there — each half ahead of any sample the
+    // cursor can reach (see decodeGroupAhead).
+    std::uint8_t decodedSamples = 0;
+    // Set when the header was read at the group's scheduling itself (the
+    // trigger-2 form): the load slot then supplies only the first data byte.
+    bool headerCaptured = false;
   };
-  std::array<GroupDecode, 2> scheduledDecodes{};
+  std::array<GroupDecode, 3> scheduledDecodes{};
   std::uint8_t scheduledDecodeCount = 0;
+  // The header the voice's BRR load slot read for this sample's end/loop
+  // check; headerLoaded is clear while no load slot has run (a state's first,
+  // frame-at-once sample and the single-voice call read RAM at the check).
+  std::uint8_t loadedHeader = 0;
+  bool headerLoaded = false;
+  // The loop address the voice's directory slot read this sample — the entry
+  // `DIR`/`VxSRCN` select, read at T22 for voice 0 and one slot before the
+  // compute for voices 1-7 — which the decoder's loop jump at the compute then
+  // takes. A write to the directory landing after that slot reaches the next
+  // sample's read, not this jump (`Timing/Voice/V2 dir.loop.lsb`/`.msb`).
+  // loopPointerLoaded is clear while no directory slot has run (a state's
+  // first, frame-at-once sample and the single-voice call read the directory
+  // at the jump).
+  std::uint16_t loopPointer = 0;
+  bool loopPointerLoaded = false;
+  // The `VxSRCN` value the voice's source slot read this sample — T18 for
+  // voice 0, T21 for voice 1, T(3v-6) for voices 2-7, four slots before the
+  // directory slot (twelve for voice 1, whose source slot is in the previous
+  // sample) — which both directory reads select the entry with. A `VxSRCN`
+  // write landing after that slot reaches the next sample's read
+  // (`Timing/Voice/V1 srcn.start`/`.loop`). srcnLoaded is clear while no
+  // source slot has run (a state's first, frame-at-once sample, the
+  // single-voice call and the un-slotted restart read the register live).
+  std::uint8_t srcn = 0;
+  bool srcnLoaded = false;
+  // The `VxPITCHL` byte the voice's directory slot read this sample — T22 for
+  // voice 0, T(3v-2) for voices 1-7 — joined at the next slot by `VxPITCHH`
+  // into pitchPending (`Timing/Voice/V2 pitchl`, `V3 pitchh`).
+  std::uint8_t pitchLow = 0;
+  // The pair the voice's pitch slots read this sample, or a key-on's scheduled
+  // capture: it becomes DspState::pitchLatch — the step the compute's advance
+  // takes — once this sample's compute has run, so it reaches the NEXT
+  // sample's advance (see DspState::pitchLatch).
+  std::uint16_t pitchPending = 0;
+  bool pitchPendingValid = false;
+  // The `VxADSR1` the voice's directory slot read this sample, which the
+  // compute's envelope step runs under: a write landing after that slot
+  // reaches the next sample's step (`Timing/Voice/V2 adsr0.0F`/`.70`/`.80`).
+  // adsr1Loaded is clear while no directory slot has run (a state's first,
+  // frame-at-once sample and the single-voice call read the register live).
+  std::uint8_t adsr1 = 0;
+  bool adsr1Loaded = false;
   // The decoder's filter history — the two most recently DECODED samples,
   // which run ahead of the window's consumed taps.
   std::int16_t decodePrev1 = 0;
@@ -160,16 +232,10 @@ struct VoiceState {
   EnvPhase phase = EnvPhase::Release;
   std::uint8_t konDelay = 0;
   std::uint8_t computesSinceKeyOn = 0xFF;
-  // The compute count the keying poll found on this voice when it armed a full
-  // restart — read by the restart to decide whether the startup walks (below),
-  // since the counter itself restarts at the poll, a sample before the voice's
-  // compute applies the key-on. 0xFF is the saturated count: a voice that has
-  // played for longer than the counter can hold, or was never keyed. A state
-  // keyed directly (keyOnVoice) leaves it at 0, a young voice.
-  std::uint8_t computesAtRestart = 0;
-  // Samples left before the per-sample pitch capture resumes for this voice —
-  // armed to seven by every consumed key-on, so the hold is anchored to the
-  // poll and uniform across the eight voices (see DspState::pitchLatch).
+  // Computes left before the voice's pitch slots read the register pair again
+  // — armed to the six of the silent span by every consumed key-on and counted
+  // down at each compute, so the seventh compute's reads are the first live
+  // ones for every voice (see DspState::pitchLatch).
   std::uint8_t pitchCaptureHold = 0;
   // A full restart the keying poll consumed, waiting for the voice's own
   // compute. The poll arms the countdown and the counter at once, but the
@@ -177,18 +243,25 @@ struct VoiceState {
   // sample from them — the final pre-key-on sample, which still sounds — and
   // then applies the restart (see pollKeying).
   bool restartPending = false;
+  // A restart the voice's compute applied, whose stream has not been read
+  // yet: the start pointer is read at the voice's directory slot of the next
+  // sample — T22 for voice 0, T(3v-2) for voices 1-7 (`Timing/Voice/V2
+  // dir.start.lsb`/`.msb`) — and the start block's first three groups at that
+  // sample's BRR load slot, ahead of its compute. Clear on a state without a
+  // slot schedule, which reads both at the restart.
+  bool startPending = false;
   // Whether this key-on's silent span advances the stream. A key-on that
-  // interrupts a sounding voice keyed on recently — envelope above 0 when the
-  // restart applies, and computesAtRestart not yet saturated — walks its fresh
-  // stream through the silent span and the first live compute at the captured
-  // pitch (`KON/kon decoding when another kon`: a voice re-keyed 21 samples
-  // after its key-on). A key-on of a silent voice holds the stream at the
-  // primed start until the first live compute has read it, so that sample
-  // interpolates the stream's first four samples at fraction 0 (`Misc/brr addr
-  // wrap-around`) — and so does a re-key of a voice that has sounded for about
-  // a second (`Random/brr before playing`: seven re-keys of a voice at direct
-  // gain $7F0, every one held). The ROMs bound the window between those two
-  // ages; the saturating count is where this model draws it.
+  // interrupts a voice whose level stands above zero while its old OUTPUT is
+  // silent walks its fresh stream through the silent span and the first live
+  // compute at the captured pitch (`KON/kon decoding when another kon`: the
+  // interrupted startup's output has not sounded yet). A re-key of a voice
+  // whose old output was sounding holds the stream at the primed start until
+  // the first live compute has read it, so that sample interpolates the
+  // stream's first four samples at fraction 0 — whatever the voice's age
+  // (`Random/brr before playing`: seven re-keys of a $7F0 voice after about a
+  // second, every one held; `Timing/Voice/V3 BRR.sample.*`: young, loud
+  // re-keys, every row's reads on the held cadence) — and so does a key-on at
+  // level zero (`Misc/brr addr wrap-around`).
   bool startupWalks = false;
   std::uint16_t bentGainRef = 0;
 };
@@ -201,6 +274,15 @@ struct StereoFrame {
 
   [[nodiscard]] bool operator==(const StereoFrame&) const noexcept = default;
 };
+
+// The stamp a DSP-written register carries before the CPU has ever written it
+// (see DspState::cycleCount).
+inline constexpr std::uint64_t kNoCpuWrite = ~std::uint64_t{0};
+[[nodiscard]] constexpr std::array<std::uint64_t, 8> noCpuWrites() noexcept {
+  std::array<std::uint64_t, 8> stamps{};
+  stamps.fill(kNoCpuWrite);
+  return stamps;
+}
 
 // The S-DSP's state as a value: snapshot by copy, restore by assignment. The
 // 128-byte register file the CPU reaches through DSPADDR/DSPDATA lives here
@@ -235,6 +317,32 @@ struct DspState {
   // set. Two writes between polls arm only the second.
   std::uint8_t internalKon = 0;
 
+  // The bits the last poll keyed on. They are struck from internalKon at T30 of
+  // the next polling sample — one slot before that poll reads — and the strike
+  // takes a CPU write issued in the two cycles before it with them, so a KON
+  // write at T28 or T29 of a polling sample keys nothing on while one at T30
+  // reaches the poll a slot later. A write older than those two cycles stands,
+  // whichever sample it landed in. spc_dsp6 `Timing/Misc/29 kon cleared` keys
+  // all eight voices and writes KON again one cycle later per row, reading how
+  // long each row takes to reach the echo tape; `KON/kon decoding when another
+  // kon` writes a whole sample ahead of the strike and is untouched by it.
+  std::uint8_t consumedKon = 0;
+
+  // The four registers that describe every voice at once, each read once a
+  // sample at its own slot rather than by the voice work that consumes it:
+  // PMON at T28, and NON, EON and DIR together at T29. So one CPU write reaches
+  // all eight voices on the same sample, and the voices whose compute precedes
+  // the read — every voice but 0 — carry the previous sample's value into it.
+  // spc_dsp6 `Timing/Misc/27 pmon`, `28 non` and `28 eon` pulse the register
+  // for five cycles at one slot per row: the ROM's rows are the same for all
+  // eight voices, and a per-voice read fits them at no slot and no pulse width.
+  // `28 dir` is the same act one register on — fullsnes reads NON, EON and DIR
+  // in one line of its register array and Anomie loads the three in one step.
+  std::uint8_t latchedPmon = 0;
+  std::uint8_t latchedNon = 0;
+  std::uint8_t latchedEon = 0;
+  std::uint8_t latchedDir = 0;
+
   // The extra stage of the VxENVX read-back pipeline: each voice's S9 slot writes
   // the value computed one sample earlier and stages the fresh one, so a CPU read
   // of VxENVX lags the envelope compute by one sample more than the in-slot
@@ -248,8 +356,41 @@ struct DspState {
   // sample's T3, so a CPU read at the sample boundary still sees the old value
   // (spc_dsp6 `Order/endx after final brr decode` reads every voice's bit
   // clear on one sample and set on the next, voice 0 included). A key-on's
-  // clear and the register's acknowledge write both drop a staged set.
+  // clear, landing at the same slot, drops a staged set; the register's
+  // acknowledge write does not — the set still lands, unless the acknowledge
+  // was issued in the two cycles before the slot (endxWriteCycle), in which
+  // case the DSP's write is the one lost.
   std::uint8_t preparedEndx = 0;
+
+  // ENDX clears a key-on has scheduled, one bit per voice: a slot-scheduled
+  // restart clears the voice's bit at its S7 slot — four slots after the
+  // compute that applied it — not at the compute itself. spc_dsp6
+  // `Timing/Voice/V7 endx cleared` reads the bit per cycle after a key-on and
+  // sees it standing through the compute slot, clear from S7 on, for every
+  // voice. A clear pending at S7 wins over a set staged for the same slot.
+  std::uint8_t pendingEndxClear = 0;
+
+  // DSP clock cycles run — one per stepDspCycle call, counted before the slot
+  // runs — and, per DSP-written register, the count at the CPU's last write to
+  // it (kNoCpuWrite until one lands; cpuWriteDspRegister stamps them). The
+  // DSP writes VxOUTX at S8, VxENVX at S9 and ENDX at S7, but a CPU write to
+  // the register issued in the two cycles before that slot survives it: the
+  // DSP's write is lost and the register keeps the CPU's byte. spc_dsp6
+  // `Timing/Voice/V8 outx`, `V9 envx` and `V7 endx set` each write the
+  // register at one slot per row and read it five cycles later; the DSP's
+  // value shows for exactly three consecutive rows, ending two slots short
+  // of its write slot (Anomie: "a write up to 2 cycles earlier will overwrite
+  // the new value"). A write three or more cycles ahead is overwritten as
+  // before. Plain values — a snapshot carries a write still standing.
+  std::uint64_t cycleCount = 0;
+  std::array<std::uint64_t, 8> outxWriteCycle = noCpuWrites();
+  std::array<std::uint64_t, 8> envxWriteCycle = noCpuWrites();
+  std::uint64_t endxWriteCycle = kNoCpuWrite;
+  // The same two-cycle window governs the internal key-on twice over: the T30
+  // strike takes a KON write issued inside it (see consumedKon), and a key-on
+  // the poll takes from a write issued inside it is never absorbed into a
+  // standing startup.
+  std::uint64_t konWriteCycle = kNoCpuWrite;
 
   // The one shared noise generator's 15-bit level, in the internal sample range
   // -4000h..+3FFFh, seeded to -4000h at power-on and reset. A voice whose NON bit
@@ -268,7 +409,11 @@ struct DspState {
   // echo write bursts to that lag, flipping ESA mid-ring and counting on the
   // in-flight sample still landing at the old base. The per-channel FIR history
   // holds the last eight entries read from the buffer, newest at echoFirPos; the
-  // two channels filter separately with the same coefficients. All plain value
+  // two channels filter separately with the same coefficients. echoFirCoeff holds
+  // the eight coefficients as the sample captured them — FIR0 at T23, FIR1 and
+  // FIR2 at T24, FIR3 to FIR5 at T25, FIR6 and FIR7 at T26 — so a CPU write to
+  // one of them reaches this sample's filter only if it lands before that
+  // coefficient's own slot. All plain value
   // fields — the snapshot carries them; power-on and reset default them to zero,
   // and a seeded state's first (frame-at-once) sample reads the live registers
   // and warms the applied values at its close.
@@ -277,6 +422,7 @@ struct DspState {
   std::uint8_t echoAppliedEsa = 0;
   std::array<std::int16_t, 8> echoFirLeft{};
   std::array<std::int16_t, 8> echoFirRight{};
+  std::array<std::int8_t, 8> echoFirCoeff{};
   std::uint8_t echoFirPos = 0;
 
   // The eight voices' streaming state, beside the register file.
@@ -309,11 +455,13 @@ struct DspState {
   std::int32_t echoSendRight = 0;
   StereoFrame slotFrame{};
 
-  // The echo write in flight: the echo unit computes its feedback value when it
-  // runs at T24, but the buffer bytes land at the write slots — the left word at
-  // T30, the right word at T31 — so a CPU read of the entry between those slots
-  // still sees the old sample. Plain values: the snapshot carries a write caught
-  // between its compute and its slots.
+  // The echo write in flight. echoWriteEntry is the ring entry this sample owns,
+  // fixed when the left word is read at T23 and addressed by the right read, by
+  // the feedback, and by the write itself. The feedback value is computed at T27,
+  // where EFB is read, but the buffer bytes land at the write slots — the left
+  // word at T30, the right word at T31 — so a CPU read of the entry between those
+  // slots still sees the old sample. Plain values: the snapshot carries a write
+  // caught between its compute and its slots.
   bool echoWritePending = false;
   std::uint16_t echoWriteEntry = 0;
   std::array<std::uint8_t, 4> echoWriteBytes{};
@@ -334,44 +482,47 @@ struct DspState {
   // VxOUTX and VxENVX are computed at a voice's S3 slot but do not become readable
   // in the register file until its later output slots (S8/S9). These hold the
   // computed-but-not-yet-visible bytes; a CPU read before the visibility slot sees
-  // the previous sample's value, and a CPU write up to that slot overwrites the
-  // pending one. Voice 0's visibility slots fall in the following frame, so its
-  // OUTX/ENVX ride one frame behind, matching its output.
+  // the previous sample's value, and a CPU write issued up to two cycles
+  // before that slot outlives the slot's own write (cycleCount below). Voice
+  // 0's visibility slots fall in the following frame, so its OUTX/ENVX ride
+  // one frame behind, matching its output.
   std::array<std::uint8_t, 8> preparedOutx{};
   std::array<std::uint8_t, 8> preparedEnvx{};
 
-  // The effective-pitch capture. A voice's stream advance does not read
-  // VxPITCHL/H live: the register pairs are captured for all eight voices at
-  // the first slot of every sample, and a capture reaches a voice's advance one
-  // full sample later. Voice 0's T31 compute is the only one late enough to see
-  // its own sample's capture (pitchLatch); voices 1-7 advance by the previous
-  // sample's (pitchLatchOld). Every consumed key-on suspends the capture for
-  // seven samples (pitchCaptureHold) and schedules one of its own at the next
-  // poll-parity sample (pitchReloadPending/pitchReloadAge) — so a bare pitch
-  // write during the hold never reaches the stream, while one riding a key-on
-  // lands through that scheduled capture, quantized to the keying poll's
-  // every-other-sample grid. A freshly seeded state captures the register
-  // values before its first sample, keeping that frame byte-identical to the
-  // frame-at-once model. Measured against spc_dsp6: `KON/kon then change
-  // pitch`'s bare one-sample pitch pulse leaves nothing during the hold and
-  // exactly one sample's advance after it — every alignment, which an
-  // every-other-sample capture cannot produce — while `KON/kon decoding when
-  // another kon`'s mid-startup freezes, each riding a KON write, land
-  // poll-quantized in pairs.
+  // The step each voice's next compute advances by. A voice's stream advance
+  // does not read VxPITCHL/H at the compute: a live voice reads them at its
+  // own slots each sample — VxPITCHL at the directory slot (T22 for voice 0,
+  // T(3v-2) for voices 1-7) and VxPITCHH one slot later (T23; the compute
+  // slot itself for voices 1-7, read before the compute runs in it) — and
+  // the pair read in one sample is the step of the NEXT sample's advance: the
+  // hardware advances the position after the sample's output is formed, one
+  // step after the read, and this model advances before it interpolates. So a
+  // write landing after a voice's pitch slots reaches the advance two
+  // computes on (`Timing/Voice/V2 pitchl`, `V3 pitchh`: a five-cycle pulse is
+  // caught by each voice at exactly those slots). Every consumed key-on
+  // suspends the voice's slot reads for seven samples
+  // (VoiceState::pitchCaptureHold) and schedules one capture of its own at
+  // the next poll-parity sample's first slot (pitchReloadPending) — landing
+  // in voice 0's compute that sample and in voices 1-7's the sample after —
+  // so a bare pitch write during the hold never reaches the stream, while one
+  // riding a key-on lands through that scheduled capture, quantized to the
+  // keying poll's every-other-sample grid. A freshly seeded state captures
+  // the register values before its first sample, keeping that frame
+  // byte-identical to the frame-at-once model. Measured against spc_dsp6:
+  // `KON/kon then change pitch`'s bare one-sample pitch pulse leaves nothing
+  // during the hold and exactly one sample's advance after it — every
+  // alignment — while `KON/kon decoding when another kon`'s mid-startup
+  // freezes, each riding a KON write, land poll-quantized in pairs.
   std::array<std::uint16_t, 8> pitchLatch{};
-  std::array<std::uint16_t, 8> pitchLatchOld{};
 
   // One bit per voice: a consumed key-on scheduled the voice's pitch capture
-  // for the next poll-parity sample's start (see pollKeying). The capture
-  // propagates like any other: pitchReloadAge marks the sample after it, when
-  // the captured value ages into pitchLatchOld for voices 1-7 to consume.
+  // for the next poll-parity sample's start (see pollKeying).
   std::uint8_t pitchReloadPending = 0;
-  std::uint8_t pitchReloadAge = 0;
 
-  // The echo unit's FIR output for the frame, computed when the buffer is read
-  // (slot T24) and added to the master-scaled mix through the echo volume at the
-  // left/right output slots (T27/T28); the write-back lands at T30/T31 and the
-  // ring advance at T31.
+  // The echo unit's FIR output for the frame, filtered at T26 once the last two
+  // coefficients are captured and added to the master-scaled mix through the echo
+  // volume at the left/right output slots (T27/T28); the feedback is computed at
+  // T27, the write-back lands at T30/T31 and the ring advance at T31.
   int echoFirOutLeft = 0;
   int echoFirOutRight = 0;
 
@@ -453,8 +604,8 @@ void startVoice(DspState& dsp, std::span<const std::uint8_t, 65536> ram,
 // through the stream — following block chaining and loop jumps, and setting
 // ENDX as the decoder leaves an end block. Returns the freshly interpolated 15-bit sample, exactly as
 // interpolatedSample reads it. This single-voice call reads the pitch registers
-// live; the whole-DSP sample paths instead read the every-other-sample capture
-// (see DspState::pitchLatch), which this call neither takes nor consumes.
+// live; the whole-DSP sample paths instead read the pair at the voice's pitch
+// slots (see DspState::pitchLatch), which this call neither takes nor consumes.
 std::int16_t stepVoice(DspState& dsp, std::span<const std::uint8_t, 65536> ram,
                        std::size_t voice) noexcept;
 
@@ -542,6 +693,18 @@ SlotResult stepDspCycle(DspState& dsp, std::span<const std::uint8_t, 65536> ram)
 // redundant and unlike the runner's extended-hardware topology.
 SlotResult stepDspVoiceCycle(DspState& dsp,
                              std::span<const std::uint8_t, 65536> ram) noexcept;
+
+// A CPU write to DSP register `reg` through DSPDATA (a `reg` above $7F is
+// ignored, as the machine ignores it). The value is
+// stored; an ENDX ($7C) write stores nothing and acknowledges every end flag
+// instead (a set still staged for its voice's S7 slot is left to land); a KON
+// ($4C) write also arms the internal key-on the next poll consumes. A write to
+// a register the DSP itself writes — VxOUTX, VxENVX, ENDX — is stamped with
+// the DSP clock (DspState::cycleCount), so the DSP's own write at the voice's
+// S8/S9/S7 slot in the following two cycles loses to it. The machine routes
+// every DSPDATA write here; a direct `dsp[reg] = value` store neither arms nor
+// stamps.
+void cpuWriteDspRegister(DspState& dsp, std::uint8_t reg, std::uint8_t value) noexcept;
 
 // Runs the KON/KOFF poll. On even-indexed samples it reads the KON ($4C) and
 // KOFF ($5C) registers: a set KON bit latches internal-KON and keys the voice on

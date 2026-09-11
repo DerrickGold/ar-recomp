@@ -70,12 +70,16 @@ cd installer/packaging
 cmake --workflow --preset release
 ```
 
-The default release has seven downloads: macOS `.app.zip` and Windows `.exe`
-for ARM64 and x86-64, the Steam Deck `.AppImage`, and generic Linux `.tar.xz`
-archives for ARM64 and x86-64. macOS can build all seven without a VM. See the
+The default release runs seven platform builds and publishes twelve downloads:
+direct macOS, Windows and Steam Deck artifacts; portable archive companions for
+those five desktop artifacts; and generic Linux `.tar.xz` archives for ARM64 and
+x86-64. Each portable companion reuses its direct artifact and adds a
+`BuilderData` sidecar without compiling the payload again. macOS can build all
+seven targets without a VM. See the
 [desktop release prerequisites and qualification limits](desktop-shell/README.md#one-command-releases-from-macos).
 `make release DESKTOP=0` explicitly opts into the old archive-only flow. The
-normal release does not also compress redundant macOS, Windows or Deck archives.
+normal release does not also build the redundant legacy macOS, Windows or Deck
+full-distribution archives.
 Make and the CMake orchestrator share `packaging/release.cmake`; successful
 publication prunes only the selected target's superseded generated release.
 

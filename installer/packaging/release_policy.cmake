@@ -2,6 +2,23 @@
 include_guard(GLOBAL)
 set(BUILDER_ALL_PLATFORMS macos-arm64 macos-x86_64 linux-x86_64 linux-arm64 windows-x86_64 windows-arm64 steam-deck)
 
+# Portable desktop downloads are packaging-only companions to the normal
+# artifact. Their contents use the stable, unsuffixed application name so its
+# adjacent .portable marker keeps working independently of the release filename.
+function(builder_portable_release_name platform out_name)
+    if(NOT platform IN_LIST BUILDER_ALL_PLATFORMS)
+        message(FATAL_ERROR "Unknown release target: ${platform}")
+    endif()
+    if(platform MATCHES "^macos-" OR platform MATCHES "^windows-")
+        set(_suffix .zip)
+    else()
+        # Preserve the AppImage executable bit through ordinary Linux archive
+        # extraction. This also supports direct low-level linux-* publishers.
+        set(_suffix .tar.xz)
+    endif()
+    set(${out_name} "ActRaiserRecompBuilder-${platform}-portable${_suffix}" PARENT_SCOPE)
+endfunction()
+
 function(builder_release_layout platform legacy out_kind out_name out_retired)
     if(NOT platform IN_LIST BUILDER_ALL_PLATFORMS)
         message(FATAL_ERROR "Unknown release target: ${platform}")
@@ -42,7 +59,12 @@ function(builder_prune_replaced_release platform directory)
     if(IS_SYMLINK "${directory}" OR NOT IS_DIRECTORY "${directory}")
         message(FATAL_ERROR "Release directory must be a real directory: ${directory}")
     endif()
-    foreach(_leaf "${_replacement}" "${_replacement}.sha256")
+    set(_published "${_replacement}" "${_replacement}.sha256")
+    if(_kind STREQUAL "desktop")
+        builder_portable_release_name("${platform}" _portable)
+        list(APPEND _published "${_portable}" "${_portable}.sha256")
+    endif()
+    foreach(_leaf IN LISTS _published)
         if(NOT EXISTS "${directory}/${_leaf}" OR IS_DIRECTORY "${directory}/${_leaf}" OR IS_SYMLINK "${directory}/${_leaf}")
             message(FATAL_ERROR "Refusing to prune before replacement publication: ${_leaf}")
         endif()

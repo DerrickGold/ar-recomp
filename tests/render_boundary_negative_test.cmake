@@ -20,6 +20,12 @@ if(NOT _result STREQUAL "0")
 endif()
 
 set(_cases
+    "performance_metrics.c"
+    "performance_overlay.c"
+    "performance_boundary_probe.h"
+    "host/parallel_work.h"
+    "sim/sim_cloud_effect_backend.h"
+    "present_sim3d_underlay.c"
     "present_world_nav_geometry.c"
     "present_world_nav_sky.c"
     "present_world_nav_boundary_probe.h"
@@ -27,6 +33,8 @@ set(_cases
     # New headers must be covered without adding an explicit filename.
     "sim/sim_world_navigation_boundary_probe.h"
     "sim/sim_town_ground_art.c"
+    "sim/sim_background_voxels.c"
+    "sim/sim_background_voxels.h"
     "sim/sim_background_voxel_model_cache.h")
 foreach(_relative IN LISTS _cases)
     set(_path "${_scratch}/${_relative}")

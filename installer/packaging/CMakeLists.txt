@@ -55,7 +55,7 @@ if(NOT SNESBUILD_GOOS AND NOT SNESBUILD_GOARCH)
             "-DSNESBUILD_SDL3_TTF_VERSION=${SNESBUILD_SDL3_TTF_VERSION}"
             -DSNESBUILD_SDL_LOCKFILE=
             -P "${CMAKE_CURRENT_SOURCE_DIR}/release.cmake"
-        COMMENT "Building desktop Builders and generic Linux archives into release/"
+        COMMENT "Building desktop Builders, portable companions, and generic Linux archives into release/"
         VERBATIM)
     return()
 elseif(NOT SNESBUILD_GOOS OR NOT SNESBUILD_GOARCH)

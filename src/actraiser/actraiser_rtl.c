@@ -20,6 +20,7 @@
 #include "diorama/diorama.h"
 #include "diorama/diorama_layer_order.h"
 #include "diorama/diorama_performance.h"
+#include "performance_metrics.h"
 #include "diorama/diorama_planes.h"
 #include "deterministic_hash.h"
 #include "display_geometry.h"
@@ -893,8 +894,8 @@ static void ActRaiser_BrkHook(CpuState *cpu) {
       kNativeAudioRequest_Sfx, id, true, g_last_recomp_func,
       site, game_frame,
       (uint16_t)cpu->X, (uint16_t)cpu->Y);
-  const bool extended = NativeAudioExtension_QueueRequest(
-      false, id, site, game_frame, (uint16_t)cpu->X, (uint16_t)cpu->Y,
+  const bool extended = NativeAudioExtension_QueueGameRequest(
+      g_ram, kSnesWramSize, false, id, site, game_frame, (uint16_t)cpu->X, (uint16_t)cpu->Y,
       trace_serial);
   if (!extended)
     cpu_write8(cpu, 0x00, kActRaiserWram_BrkSoundRequest, id);
@@ -964,9 +965,11 @@ static void ActRaiser_CopHook(CpuState *cpu) {
       g_last_recomp_func, site,
       ActRaiser_ReadWram16(kActRaiserWram_GameFrame),
       (uint16_t)cpu->X, (uint16_t)cpu->Y);
+  if (suppress_dialog_blip)
+    NativeAudioExtension_ObserveGameState(g_ram, kSnesWramSize);
   const bool extended = !suppress_dialog_blip &&
-      NativeAudioExtension_QueueRequest(
-          true, id, site,
+      NativeAudioExtension_QueueGameRequest(
+          g_ram, kSnesWramSize, true, id, site,
           ActRaiser_ReadWram16(kActRaiserWram_GameFrame),
           (uint16_t)cpu->X, (uint16_t)cpu->Y, trace_serial);
   if (!suppress_dialog_blip && !extended)
@@ -3328,6 +3331,7 @@ static SrResult ActRaiser_DrawPpuFrameTransaction(
     const SrPpuFrameTransactionContext *context);
 
 void ActRaiserDrawPpuFrame(void) {
+  const PerformanceScope pipeline = PerformanceMetrics_Begin(kPerformance_Ppu);
   const uint8_t map_group = g_ram[kActRaiserWram_MapGroup];
   const uint8_t map_number = g_ram[kActRaiserWram_CurrentMap];
   const bool action = ActRaiser_IsActionMapGroup(map_group);
@@ -3387,6 +3391,7 @@ void ActRaiserDrawPpuFrame(void) {
     SessionFatal_Request(
         "The runner does not provide coherent PPU frame access. Restart "
         "after rebuilding the game and runner together.");
+    PerformanceMetrics_End(pipeline);
     return;
   }
   const SrPpuFrameTransactionRequest request = {
@@ -3399,6 +3404,7 @@ void ActRaiserDrawPpuFrame(void) {
         "The runner rejected ActRaiser's PPU frame transaction. Restart "
         "after rebuilding the game and runner together.");
   }
+  PerformanceMetrics_End(pipeline);
 }
 
 static SrResult ActRaiser_DrawPpuFrameTransaction(
@@ -3417,6 +3423,7 @@ static SrResult ActRaiser_DrawPpuFrameTransaction(
   (void)user_data;
   (void)runner;
   if (!context) return SR_RESULT_INVALID_ARGUMENT;
+  PerformanceScope pipeline = PerformanceMetrics_Begin(kPerformance_PpuSetup);
   ppu = &context->state;
   for (uint32_t source = 0; source < SR_PPU_OVERLAY_SOURCE_COUNT; source++)
     frame_access.captures[source] =
@@ -3898,6 +3905,8 @@ static SrResult ActRaiser_DrawPpuFrameTransaction(
   ActRaiser_DioramaHudObjPrepare();
 
   DioramaPerformance_End(producer_setup_performance);
+  PerformanceMetrics_End(pipeline);
+  pipeline = PerformanceMetrics_Begin(kPerformance_PpuScanout);
   DioramaPerformanceScope scanout_performance = {0};
   if (profile_diorama)
     scanout_performance =
@@ -3927,6 +3936,8 @@ static SrResult ActRaiser_DrawPpuFrameTransaction(
            authentic_camera_flags);
   ActRaiser_AuthenticCaptureFrameCompleted(authentic_frame_valid);
   DioramaPerformance_End(scanout_performance);
+  PerformanceMetrics_End(pipeline);
+  pipeline = PerformanceMetrics_Begin(kPerformance_PpuFinish);
   DioramaPerformanceScope producer_finish_performance = {0};
   if (profile_diorama)
     producer_finish_performance =
@@ -4019,6 +4030,7 @@ static SrResult ActRaiser_DrawPpuFrameTransaction(
    * above. */
   ActRaiser_WidescreenSkyPalaceRestore(s_runner);
   DioramaPerformance_End(producer_finish_performance);
+  PerformanceMetrics_End(pipeline);
   s_ppu_frame_access = NULL;
   return SR_RESULT_OK;
 }
@@ -4581,6 +4593,7 @@ static bool ActRaiser_ControlGameTiming(
 }
 
 void RunOneFrameOfGame(void) {
+  NativeAudioExtension_ObserveGameState(g_ram, kSnesWramSize);
   if (!g_game_started) {
     /* config.ini and process environment layers are final by this point. */
     (void)ActRaiser_GetDeveloperEnvironment();

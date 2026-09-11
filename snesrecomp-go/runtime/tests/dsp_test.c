@@ -288,6 +288,119 @@ static void test_state_ring_and_resampling(void) {
     dsp_setExtendedVoicesEnabled(false);
 }
 
+static void exercise_slot_writes(Dsp *dsp) {
+    for (unsigned cycle = 0; cycle < 32u * 24u; ++cycle) {
+        const int voice = (cycle & 1) ? 15 : 6;
+        if (cycle % 17 == 0) write_voice(dsp, voice, 2, (uint8_t)cycle);
+        if (cycle % 29 == 0) write_voice(dsp, voice, 5, (uint8_t)cycle);
+        if (cycle % 31 == 0) control_voice(dsp, voice, 0x4c, true);
+        if (cycle % 37 == 0) dsp_write(dsp, 0x7c, 0xff);
+        if (cycle % 41 == 0) dsp_write(dsp, 0x0f, (uint8_t)cycle);
+        dsp_clock(dsp);
+    }
+}
+
+static void test_every_slot_continuation(void) {
+    uint8_t ram[0x10000], saved_ram[0x10000], expected_ram[0x10000];
+    MemoryState *saved = calloc(1, sizeof(*saved));
+    MemoryState *expected = calloc(1, sizeof(*expected));
+    MemoryState *actual = calloc(1, sizeof(*actual));
+    check(saved && expected && actual, "mid-slot state allocation");
+    if (!saved || !expected || !actual) goto done;
+    dsp_setExtendedVoicesEnabled(true);
+    for (unsigned slot = 0; slot < 32; ++slot) {
+        Dsp *dsp = new_dsp(ram);
+        if (!dsp) break;
+        install_looping_brr(ram, 2, 0x300);
+        dsp_write(dsp, 0x5d, 2);
+        dsp_write(dsp, 0x6c, 0); /* shared echo writes enabled */
+        dsp_write(dsp, 0x6d, 0x80);
+        dsp_write(dsp, 0x7d, 1);
+        dsp_write(dsp, 0x0f, 0x40);
+        configure_voice(dsp, 6, kDspVoiceBus_Music, true);
+        configure_voice(dsp, 15, kDspVoiceBus_Sfx, true);
+        exercise_slot_writes(dsp);
+        for (unsigned i = 0; i < slot; ++i) dsp_clock(dsp);
+        saved->offset = 0; saved->loading = false;
+        saved->info = (SaveLoadInfo){.func=transfer_state, .portable=true, .saving=true};
+        dsp_saveload(dsp, &saved->info);
+        memcpy(saved_ram, ram, sizeof(ram));
+        exercise_slot_writes(dsp);
+        memcpy(expected_ram, ram, sizeof(ram));
+        expected->offset = 0; expected->loading = false;
+        expected->info = saved->info;
+        dsp_saveload(dsp, &expected->info);
+        saved->offset = 0; saved->loading = true; saved->info.saving = false;
+        dsp_saveload(dsp, &saved->info);
+        memcpy(ram, saved_ram, sizeof(ram));
+        exercise_slot_writes(dsp);
+        actual->offset = 0; actual->loading = false;
+        actual->info = expected->info;
+        dsp_saveload(dsp, &actual->info);
+        check(!saved->info.failed && !actual->info.failed &&
+                  expected->offset == actual->offset &&
+                  memcmp(expected->bytes, actual->bytes, actual->offset) == 0 &&
+                  memcmp(expected_ram, ram, sizeof(ram)) == 0,
+              "every slot restores CPU-write races, BRR latches, shared echo and PCM");
+        dsp_free(dsp);
+    }
+    dsp_setExtendedVoicesEnabled(false);
+done:
+    free(saved); free(expected); free(actual);
+}
+
+static void test_effect_bank_slot_and_echo_parity(void) {
+    dsp_setExtendedVoicesEnabled(true);
+    for (int bank = 1; bank < 5; ++bank) {
+        for (int lane = 6; lane <= 7; ++lane) {
+            uint8_t native_ram[0x10000], extra_ram[0x10000];
+            Dsp *native = new_dsp(native_ram), *extra = new_dsp(extra_ram);
+            if (!native || !extra) { dsp_free(native); dsp_free(extra); continue; }
+            const int voice = bank * 8 + lane;
+            install_looping_brr(native_ram, 2, 0x300);
+            install_looping_brr(extra_ram, 2, 0x300);
+            for (int i = 0; i < 2; ++i) {
+                Dsp *dsp = i ? extra : native;
+                dsp_write(dsp, 0x5d, 2); dsp_write(dsp, 0x6c, 0);
+                dsp_write(dsp, 0x6d, 0x80); dsp_write(dsp, 0x7d, 1);
+                dsp_write(dsp, 0x0f, 0x40); dsp_write(dsp, 0x0d, 0x20);
+                dsp_write(dsp, 0x2c, 0x30); dsp_write(dsp, 0x3c, 0x30);
+            }
+            for (unsigned i = 0; i < 173; ++i) {
+                dsp_clock(native); dsp_clock(extra);
+            }
+            configure_voice(native, lane, kDspVoiceBus_Sfx, true);
+            configure_voice(extra, voice, kDspVoiceBus_Sfx, true);
+            for (unsigned cycle = 0; cycle < 8192; ++cycle) {
+                if (cycle % 197 == 0) {
+                    write_voice(native, lane, 2, (uint8_t)cycle);
+                    write_voice(extra, voice, 2, (uint8_t)cycle);
+                }
+                if (cycle == 400 || cycle == 3400) {
+                    control_voice(native, lane, 0x4c, false);
+                    control_voice(extra, voice, 0x4c, false);
+                    control_voice(native, lane, 0x5c, true);
+                    control_voice(extra, voice, 0x5c, true);
+                }
+                if (cycle == 2700 || cycle == 5800) {
+                    control_voice(native, lane, 0x5c, false);
+                    control_voice(extra, voice, 0x5c, false);
+                    control_voice(native, lane, 0x4c, true);
+                    control_voice(extra, voice, 0x4c, true);
+                }
+                dsp_clock(native); dsp_clock(extra);
+            }
+            check(native->sampleWrite == extra->sampleWrite &&
+                      memcmp(native->sampleBuffer, extra->sampleBuffer,
+                             native->sampleWrite * 2u * sizeof(int16_t)) == 0 &&
+                      memcmp(native_ram, extra_ram, sizeof(native_ram)) == 0,
+                  "effect banks retain native slot, dormant re-key and shared echo parity");
+            dsp_free(native); dsp_free(extra);
+        }
+    }
+    dsp_setExtendedVoicesEnabled(false);
+}
+
 int main(void) {
     dsp_setExtendedVoicesEnabled(false);
     dsp_setMusicBusMuted(false);
@@ -296,6 +409,8 @@ int main(void) {
     test_registers_keying_and_startup();
     test_buses_and_parallel_virtual_bank();
     test_state_ring_and_resampling();
+    test_every_slot_continuation();
+    test_effect_bank_slot_and_echo_parity();
     if (failures != 0) {
         fprintf(stderr, "runtime DSP: %d failure(s)\n", failures);
         return 1;

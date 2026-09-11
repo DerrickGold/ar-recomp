@@ -9,6 +9,9 @@
 
 #include <stdio.h>
 #include <string.h>
+#ifdef AR_TEST_THREADED_ROWS
+#include "host/parallel_work.h"
+#endif
 
 enum {
   kWramBytes = 0x20000,
@@ -29,6 +32,42 @@ static int failures;
     failures++; \
   } \
 } while (0)
+
+static bool s_reverse_rows;
+static unsigned s_dispatched_refreshes;
+#ifdef AR_TEST_THREADED_ROWS
+static HostParallelWork *s_test_work;
+#endif
+
+static void DispatchTestRows(void *context, size_t count,
+    SimBackgroundRowRange range, void *work) {
+  (void)context;
+  s_dispatched_refreshes++;
+#ifdef AR_TEST_THREADED_ROWS
+  HostParallelWork_Run(s_test_work, count, 17, range, work);
+#else
+  /* Deliberately cut across 16-pixel cells and visit the tail first. The same
+   * fixture assertions cover atlas alpha, bridge fallbacks, mountain scratch,
+   * sparse dirty rectangles, topology changes and quiet pixel revisions. */
+  while (count) {
+    const size_t first = count > 17 ? count - 17 : 0;
+    range(work, first, count);
+    count = first;
+  }
+#endif
+}
+
+static void BuildForTest(uint8_t town, const uint8_t *wram,
+    const uint32_t *pixels, const uint8_t *opacity, uint32_t serial,
+    uint32_t layout_serial, bool wind_stops_all) {
+  if (s_reverse_rows)
+    SimBackgroundVoxels_BuildWithRows(town, wram, pixels, opacity,
+        serial, layout_serial, wind_stops_all, DispatchTestRows, NULL);
+  else
+    SimBackgroundVoxels_Build(town, wram, pixels, opacity,
+        serial, layout_serial, wind_stops_all);
+}
+#define SimBackgroundVoxels_Build BuildForTest
 
 static size_t CellIndex(int x, int y) {
   int quadrant = (y >= 16 ? 2 : 0) + (x >= 16 ? 1 : 0);
@@ -1105,7 +1144,11 @@ static void CheckStoneBridgeClassificationAndInpaint(void) {
   CHECK((atlas[water] >> 24) == 0xFF);
 }
 
-int main(void) {
+int main(int argc, char **argv) {
+  s_reverse_rows = argc == 2 && !strcmp(argv[1], "--dispatch-rows");
+#ifdef AR_TEST_THREADED_ROWS
+  s_test_work = HostParallelWork_Create(3);
+#endif
   static uint8_t wram[kWramBytes];
   static uint16_t vram[kVramWords];
   static uint32_t pixels[kSimTownCanvasPixels * kSimTownCanvasPixels];
@@ -1434,6 +1477,11 @@ int main(void) {
   CheckIndependentSceneAndPixelPublications();
   CheckStoneBridgeClassificationAndInpaint();
   CheckCleanMountainAtlasPublication();
+
+  if (s_reverse_rows) CHECK(s_dispatched_refreshes > 0);
+#ifdef AR_TEST_THREADED_ROWS
+  HostParallelWork_Destroy(s_test_work);
+#endif
 
   if (failures) {
     fprintf(stderr, "%d sim background voxel checks failed\n", failures);

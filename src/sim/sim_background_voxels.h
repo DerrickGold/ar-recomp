@@ -2,6 +2,7 @@
 #define SIM_BACKGROUND_VOXELS_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "sim_background_mountains.h"
@@ -66,6 +67,20 @@ void SimBackgroundVoxels_Build(uint8_t town, const uint8_t *wram,
                                uint32_t canvas_serial,
                                uint32_t canvas_layout_serial,
                                bool wind_stops_all);
+
+/* Optional synchronous row execution supplied by the application owner. Each
+ * index must run exactly once in disjoint ranges, and all callbacks must join
+ * before dispatch returns. The builder prepares immutable pixel/mask inputs;
+ * workers only write their own output rows, never read WRAM, mutate caches or
+ * publish serials. No callback may re-enter Build/Reset. NULL uses the same
+ * row kernel serially. This seam owns no threads or platform resources. */
+typedef void (*SimBackgroundRowRange)(void *work, size_t first, size_t end);
+typedef void (*SimBackgroundRowDispatch)(void *context, size_t count,
+    SimBackgroundRowRange range, void *work);
+void SimBackgroundVoxels_BuildWithRows(uint8_t town, const uint8_t *wram,
+    const uint32_t *canvas_pixels, const uint8_t *canvas_source_opacity,
+    uint32_t canvas_serial, uint32_t canvas_layout_serial, bool wind_stops_all,
+    SimBackgroundRowDispatch dispatch, void *context);
 
 uint32_t SimBackgroundVoxels_Serial(void);
 uint32_t SimBackgroundVoxels_SceneSerial(void);

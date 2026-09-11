@@ -225,6 +225,76 @@ static void TestCopyTileArt(void) {
   free(rom);
 }
 
+/* Independent byte/palette oracle: unlike the uniform-tile fixture, every
+ * row and column differs. Exercise both full-output contracts, dirty live
+ * tiles, both water destinations, and invalidation on a palette reload. */
+static void TestDecodedTileParity(void) {
+  uint8_t *rom = BuildRom();
+  CHECK(rom);
+  for (int i = 0; i < kSimWorldMapBytes; ++i)
+    rom[kTilemapOffset + i] = (uint8_t)(i * 13 + i / 128);
+  for (int i = 0; i < 256 * 64; ++i)
+    rom[kTilesOffset + i] = (uint8_t)(i * 17 + i / 64);
+  for (int i = 0; i < 4 * 64; ++i)
+    rom[kWaterFramesOffset + i] = (uint8_t)(i * 19 + i / 64);
+  enum { kPitch = kSimWorldMapPixels + 7 };
+  const size_t bytes = (size_t)kPitch * kSimWorldMapPixels * sizeof(uint32_t);
+  uint32_t *baseline = malloc(bytes), *live = malloc(bytes);
+  CHECK(baseline && live);
+  for (int reload = 0; reload < 2; ++reload) {
+    uint32_t palette[256];
+    for (int i = 0; i < 256; ++i) {
+      const unsigned packed = (i * 137 + reload * 7103) & 0x7fff;
+      rom[kPaletteOffset + 2 * i] = (uint8_t)packed;
+      rom[kPaletteOffset + 2 * i + 1] = (uint8_t)(packed >> 8);
+      const unsigned r = packed & 31, g = (packed >> 5) & 31, b = packed >> 10;
+      palette[i] = 0xff000000u | ((r * 8 + r / 4) << 16) |
+          ((g * 8 + g / 4) << 8) | (b * 8 + b / 4);
+    }
+    CHECK(SimWorldMap_Init(rom, kRomSize));
+    uint8_t map[kSimWorldMapBytes];
+    memcpy(map, rom + kTilemapOffset, sizeof(map));
+    map[7] = 0xaa; map[800] = 0; map[1324] = 79;
+    CHECK(SimWorldMap_PublishBuiltTilemap(map) > 0);
+    for (int phase = -1; phase < 4; ++phase) {
+      if (phase >= 0) CHECK(SimWorldMap_SetWaterAnimationSource(0xb000 + phase * 64) > 0);
+      for (int tile = 0; tile < 256; ++tile) {
+        const uint8_t *source = phase >= 0 && (tile == 0 || tile == 0xaa)
+            ? rom + kWaterFramesOffset + phase * 64 : rom + kTilesOffset + tile * 64;
+        uint32_t pixels[64]; uint8_t indices[64];
+        CHECK(SimWorldMap_CopyTileArt((uint8_t)tile, pixels, indices));
+        CHECK(!memcmp(indices, source, sizeof(indices)));
+        for (int p = 0; p < 64; ++p) CHECK(pixels[p] == palette[source[p]]);
+      }
+      /* Neither output may assume that the destination retained old pixels. */
+      memset(baseline, 0xa5, bytes); memset(live, 0xa5, bytes);
+      CHECK(SimWorldMap_BakeBaseline(baseline, kPitch));
+      CHECK(SimWorldMap_Bake(live, kPitch));
+      const uint32_t *borrowed = SimWorldMap_BakedPixels();
+      CHECK(borrowed);
+      for (int y = 0; y < kSimWorldMapPixels; ++y) {
+        for (int x = 0; x < kPitch; ++x) {
+          const size_t at = (size_t)y * kPitch + x;
+          if (x >= kSimWorldMapPixels) {
+            CHECK(baseline[at] == 0xa5a5a5a5u && live[at] == 0xa5a5a5a5u);
+            continue;
+          }
+          const size_t cell = (size_t)(y / 8) * 128 + x / 8;
+          for (int kind = 0; kind < 2; ++kind) {
+            const uint8_t tile = kind ? map[cell] : rom[kTilemapOffset + cell];
+            const uint8_t *source = phase >= 0 && (tile == 0 || tile == 0xaa)
+                ? rom + kWaterFramesOffset + phase * 64 : rom + kTilesOffset + tile * 64;
+            CHECK((kind ? live : baseline)[at] == palette[source[(y % 8) * 8 + x % 8]]);
+          }
+          CHECK(live[at] == borrowed[(size_t)y * kSimWorldMapPixels + x]);
+        }
+      }
+    }
+  }
+  free(live); free(baseline); free(rom);
+  SimWorldMap_Shutdown();
+}
+
 static void TestMountainMaterialCoverage(void) {
   uint8_t *rom = BuildRom();
   /* No RGB heuristic: sand and snow remain flat despite their contrast. */
@@ -795,6 +865,7 @@ static void TestCapturedFixtures(const char *rom_path, const char *act_path,
 int main(int argc, char **argv) {
   TestUnavailableRom();
   TestCopyTileArt();
+  TestDecodedTileParity();
   TestTownWindows();
   TestBuiltTilemapPublication();
   TestWaterAnimation();

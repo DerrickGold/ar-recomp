@@ -1,6 +1,7 @@
 #include <SDL3/SDL.h>
 
 #include <stdint.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -15,6 +16,7 @@ enum {
 };
 
 static int failures;
+static uint64_t geometry_upload_bytes;
 #define CHECK(expression) do {                                           \
   if (!(expression)) {                                                   \
     fprintf(stderr, "%s:%d: %s (%s)\n", __FILE__, __LINE__,             \
@@ -29,6 +31,7 @@ void Sim3DPerformance_AddDraw(uint64_t vertices, uint64_t indices) {
   (void)vertices;
   (void)indices;
 }
+void Sim3DPerformance_AddGeometryUpload(uint64_t bytes) { geometry_upload_bytes += bytes; }
 
 static SDL_Renderer *CreateProductionRenderer(SDL_Window *window) {
   SDL_PropertiesID properties = SDL_CreateProperties();
@@ -351,6 +354,289 @@ static void TestBatchCopyAndGrowth(
   Sim3DDepthPass_Reset(render_device);
 }
 
+
+static void TestRetainedSamples(ArRenderDevice *device, SDL_Renderer *renderer) {
+  const uint32_t texels[] = {0xffff0000, 0xff00ff00, 0xff0000ff, 0xffffffff};
+  const ArRenderRectI region = {0, 0, 2, 2};
+  Sim3DDepthMesh *mesh = NULL;
+  uint32_t reference[kTestWidth * kTestHeight];
+  for (int variant = 0; variant < 4; ++variant) {
+    if (variant == 3) Sim3DDepthPass_Reset(device); /* opaque handle survives reset */
+    CHECK(Sim3DDepthPass_UploadAtlasRegions(device, kSim3DDepthPass_Cloud,
+        texels, 2, 2, 8, &region, 1));
+    CHECK(Sim3DDepthPass_Begin(device, kTestWidth, kTestHeight, kArRenderFilter_Nearest));
+    geometry_upload_bytes = 0;
+    CHECK(AppendRect(kSim3DDepthPass_DepthOccluder, 0, 0, 9, kTestHeight,
+        .2f, (ArRenderColorF){1, 1, 1, 1}));
+    Sim3DDepthVertex quad[4];
+    MakeRect(quad, 0, 0, kTestWidth, kTestHeight, .65f, (ArRenderColorF){1, 1, 1, 1});
+    Sim3DDepthPosition positions[4];
+    for (int p = 0; p < 4; ++p) positions[p] = (Sim3DDepthPosition){quad[p].x, quad[p].y, quad[p].depth};
+    if (variant) {
+      if (!mesh) mesh = Sim3DDepthPass_CreateMesh();
+      CHECK(mesh);
+      CHECK(Sim3DDepthPass_MeshReady(mesh) == (variant == 2));
+      if (variant != 2) CHECK(Sim3DDepthPass_UpdateMesh(mesh, positions, 1));
+      memset(positions, 0, sizeof(positions)); /* update copied the caller's array */
+      CHECK(Sim3DDepthPass_MeshReady(mesh));
+    }
+    for (int sample = 0; sample < 3; ++sample) {
+      const ArRenderColorF color = {.3f + sample * .2f, .8f - sample * .15f, .6f,
+          sample == 1 ? .57f : .21f};
+      ArRenderPointF uv[4];
+      for (int p = 0; p < 4; ++p) {
+        uv[p] = (ArRenderPointF){quad[p].uv.x * .7f + sample * .15f, quad[p].uv.y};
+      }
+      if (variant) {
+        CHECK(!Sim3DDepthPass_AppendMeshSample(kSim3DDepthPass_Solid, mesh, uv, 1, color));
+        CHECK(!Sim3DDepthPass_AppendMeshSample(kSim3DDepthPass_CloudShadow, mesh, uv, 2, color));
+        CHECK(Sim3DDepthPass_AppendMeshSample(kSim3DDepthPass_CloudShadow, mesh, uv, 1, color));
+        CHECK(!Sim3DDepthPass_UpdateMesh(mesh, positions, 1)); /* queued geometry is immutable */
+        CHECK(!Sim3DDepthPass_AppendQuad(kSim3DDepthPass_CloudShadow, quad));
+      } else {
+        Sim3DDepthVertex ordinary[4];
+        memcpy(ordinary, quad, sizeof(ordinary));
+        for (int p = 0; p < 4; ++p) { ordinary[p].uv = uv[p]; ordinary[p].color = color; }
+        CHECK(Sim3DDepthPass_AppendQuad(kSim3DDepthPass_CloudShadow, ordinary));
+      }
+      memset(uv, 0, sizeof(uv)); /* queued UVs must also be copied */
+    }
+    ArRenderTexture result = Sim3DDepthPass_Submit(device, ArRenderTexture_Invalid());
+    CHECK(ArRenderTexture_IsValid(result));
+    /* 4 ordinary vertices, three 4-UV streams/colors, positions only on publication. */
+    CHECK(geometry_upload_bytes == (variant ? 160 + 3 * (32 + 16) + (variant == 2 ? 0 : 64) : 640));
+    CHECK(SDL_SetRenderTarget(renderer, ArSdlRenderBackend_UnwrapTexture(result)));
+    SDL_Surface *raw = SDL_RenderReadPixels(renderer, NULL);
+    SDL_Surface *pixels = raw ? SDL_ConvertSurface(raw, SDL_PIXELFORMAT_ARGB8888) : NULL;
+    CHECK(pixels);
+    if (pixels) for (int y = 0; y < kTestHeight; ++y) {
+      const uint8_t *row = (const uint8_t *)pixels->pixels + y * pixels->pitch;
+      if (!variant) memcpy(reference + y * kTestWidth, row, kTestWidth * 4);
+      else CHECK(!memcmp(reference + y * kTestWidth, row, kTestWidth * 4));
+    }
+    SDL_DestroySurface(pixels); SDL_DestroySurface(raw);
+    CHECK(SDL_SetRenderTarget(renderer, NULL));
+  }
+  CHECK(Sim3DDepthPass_Begin(device, kTestWidth + 8, kTestHeight, kArRenderFilter_Nearest));
+  CHECK(!Sim3DDepthPass_MeshReady(mesh)); /* viewport changes need reprojection */
+  Sim3DDepthPosition position[4] = {{0,0,.4f}, {4,0,.4f}, {4,4,.4f}, {0,4,.4f}};
+  ArRenderPointF uv[4] = {{0}};
+  CHECK(!Sim3DDepthPass_UpdateMesh(mesh, position, SIZE_MAX));
+  CHECK(Sim3DDepthPass_UpdateMesh(mesh, position, 1));
+  CHECK(Sim3DDepthPass_AppendMeshSample(kSim3DDepthPass_CloudShadow, mesh, uv, 1, (ArRenderColorF){1,1,1,1}));
+  Sim3DDepthPass_DestroyMesh(mesh); /* queued destruction fails closed, never dereferences freed storage */
+  CHECK(!ArRenderTexture_IsValid(Sim3DDepthPass_Submit(device, ArRenderTexture_Invalid())));
+  /* Grow both position and UV storage beyond their initial capacities, then
+   * shrink the mesh; a held draw uploads only the used UVs and one color. */
+  CHECK(Sim3DDepthPass_Begin(device, kTestWidth, kTestHeight, kArRenderFilter_Nearest));
+  mesh = Sim3DDepthPass_CreateMesh();
+  enum { kLargeQuads = 4097, kLargeVertices = kLargeQuads * 4 };
+  Sim3DDepthPosition *large = malloc(kLargeVertices * sizeof(*large));
+  ArRenderPointF *large_uv = calloc(kLargeVertices, sizeof(*large_uv));
+  CHECK(mesh && large && large_uv);
+  if (mesh && large && large_uv) {
+    for (int i = 0; i < kLargeVertices; ++i) large[i] = position[i % 4];
+    for (int pass = 0; pass < 3; ++pass) {
+      const size_t quads = pass == 0 ? kLargeQuads : 1;
+      CHECK(Sim3DDepthPass_Begin(device, kTestWidth, kTestHeight, kArRenderFilter_Nearest));
+      geometry_upload_bytes = 0;
+      if (pass < 2) CHECK(Sim3DDepthPass_UpdateMesh(mesh, large, quads));
+      CHECK(Sim3DDepthPass_AppendMeshSample(kSim3DDepthPass_CloudShadow, mesh, large_uv,
+          quads, (ArRenderColorF){0, 0, 0, .5f}));
+      CHECK(ArRenderTexture_IsValid(Sim3DDepthPass_Submit(device, ArRenderTexture_Invalid())));
+      CHECK(geometry_upload_bytes == quads * 4 * (pass < 2 ? 24 : 8) + 16);
+    }
+  }
+  free(large); free(large_uv);
+  Sim3DDepthPass_DestroyMesh(mesh);
+  Sim3DDepthPass_Reset(device);
+}
+
+/* Independent CPU oracle, including wrap of ALL original corners, clamp
+ * before clip interpolation, and the old difference-form arithmetic. */
+static void SphericalReference(const Sim3DDepthSphericalQuad *quad,
+    const Sim3DDepthSphericalSample *sample, Sim3DDepthVertex out[4]) {
+  const float pi = 3.14159265358979323846f;
+  ArRenderPointF uv[4];
+  float minimum = 1, maximum = 0;
+  for (int p = 0; p < 4; ++p) {
+    const float *n = quad->normals[p], *r = sample->rotation;
+    const float x = n[0] * r[0] + n[2] * r[1];
+    const float z = n[2] * r[0] - n[0] * r[1];
+    const float y = n[1] * r[2] + z * r[3];
+    const float zz = z * r[2] - n[1] * r[3];
+    uv[p] = (ArRenderPointF){(atan2f(zz, x) + pi) / (2 * pi) + sample->offset.x,
+      acosf(fminf(1, fmaxf(-1, y))) / pi + sample->offset.y};
+    uv[p].x -= floorf(uv[p].x);
+    minimum = fminf(minimum, uv[p].x); maximum = fmaxf(maximum, uv[p].x);
+  }
+  for (int p = 0; p < 4; ++p) {
+    if (maximum - minimum > .5f && uv[p].x < .5f) uv[p].x += 1;
+    uv[p].x = (sample->atlas.x + uv[p].x * (sample->atlas.w - 1) + .5f) / sample->texture_size.x;
+    uv[p].y = (sample->atlas.y + fminf(1, fmaxf(0, uv[p].y)) * (sample->atlas.h - 1) + .5f) /
+        sample->texture_size.y;
+  }
+  for (int p = 0; p < 4; ++p) {
+    ArRenderPointF mapped = uv[p];
+    if (quad->triangle) {
+      mapped = uv[0];
+      for (int j = 0; j < 2; ++j) {
+        mapped.x += quad->weights[p][j] * (uv[quad->triangle + j].x - uv[0].x);
+        mapped.y += quad->weights[p][j] * (uv[quad->triangle + j].y - uv[0].y);
+      }
+    }
+    out[p] = (Sim3DDepthVertex){quad->positions[p].x, quad->positions[p].y,
+      quad->positions[p].depth, sample->color, mapped};
+  }
+}
+
+static void TestSphericalSamples(ArRenderDevice *device, SDL_Renderer *renderer) {
+  enum { kQuads = 4, kChartWidth = 33, kChartHeight = 17, kWidth = kChartWidth * 2,
+    kHeight = kChartHeight * 3 };
+  uint32_t texels[kWidth * kHeight];
+  for (int y = 0; y < kHeight; ++y) for (int x = 0; x < kWidth; ++x)
+    texels[y * kWidth + x] = AtlasTestPixel(x % kChartWidth, y, 137);
+  const ArRenderRectI full = {0, 0, kWidth, kHeight};
+  Sim3DDepthSphericalQuad quads[kQuads] = {0};
+  for (int i = 0; i < kQuads; ++i) {
+    Sim3DDepthVertex rect[4];
+    MakeRect(rect, (float)(i * 8), 0, (float)(i * 8 + 8), kTestHeight, .5f,
+        (ArRenderColorF){1, 1, 1, 1});
+    quads[i].triangle = i % 3;
+    for (int p = 0; p < 4; ++p) {
+      quads[i].positions[p] = (Sim3DDepthPosition){rect[p].x, rect[p].y, rect[p].depth};
+      const float longitude = 3.10f + p * .04f - i * 2.13f;
+      const float latitude = .13f + i * .86f + (p / 2) * .24f;
+      quads[i].normals[p][0] = sinf(latitude) * cosf(longitude);
+      quads[i].normals[p][1] = cosf(latitude);
+      quads[i].normals[p][2] = sinf(latitude) * sinf(longitude);
+      quads[i].weights[p][0] = .1f + (p & 1) * .35f;
+      quads[i].weights[p][1] = .15f + (p / 2) * .3f;
+    }
+  }
+  /* Exact pole and signed-zero input are kept off the longitude seam in the
+   * test texture's repeated chart; GPU atan(0,0) must never produce NaNs. */
+  quads[3].normals[0][0] = quads[3].normals[0][2] = 0;
+  quads[3].normals[0][1] = 1;
+  Sim3DDepthMesh *mesh = NULL;
+  unsigned maximum_error = 0, changed = 0;
+  for (int frame = 0; frame < 24; ++frame) {
+    Sim3DDepthSphericalSample sample = {
+      .rotation = {cosf(frame * .41f), sinf(frame * .41f), cosf(frame * .19f), sinf(frame * .19f)},
+      .offset = {frame * .067f - .31f, (frame % 5 - 2) * .13f},
+      .texture_size = {kWidth, kHeight}, .atlas = {0, 0, kChartWidth, kChartHeight},
+      .color = {.7f, .9f, .8f, .6f},
+    };
+    uint32_t reference[kTestWidth * kTestHeight];
+    for (int variant = 0; variant < 2; ++variant) {
+      if (frame == 12 && variant == 0) Sim3DDepthPass_Reset(device);
+      CHECK(Sim3DDepthPass_UploadAtlasRegions(device, kSim3DDepthPass_Cloud,
+          texels, kWidth, kHeight, kWidth * 4, &full, 1));
+      CHECK(Sim3DDepthPass_Begin(device, kTestWidth, kTestHeight, kArRenderFilter_Nearest));
+      CHECK(AppendRect(kSim3DDepthPass_DepthOccluder, 0, 0, 3, kTestHeight, .1f,
+          (ArRenderColorF){1, 1, 1, 1}));
+      geometry_upload_bytes = 0;
+      if (variant) {
+        if (!mesh) mesh = Sim3DDepthPass_CreateSphericalMesh();
+        CHECK(mesh);
+        CHECK(Sim3DDepthPass_MeshReady(mesh) == (frame != 0 && frame != 12));
+        if (!Sim3DDepthPass_MeshReady(mesh)) {
+          CHECK(!Sim3DDepthPass_UpdateSphericalMesh(mesh, quads, SIZE_MAX));
+          Sim3DDepthSphericalQuad copied[kQuads];
+          memcpy(copied, quads, sizeof(copied));
+          CHECK(Sim3DDepthPass_UpdateSphericalMesh(mesh, copied, kQuads));
+          memset(copied, 0, sizeof(copied)); /* publication must copy */
+        }
+        CHECK(!Sim3DDepthPass_UpdateMesh(mesh, quads[0].positions, 1));
+      }
+      for (int bank = 0; bank < 3; ++bank) {
+        sample.atlas.y = bank * kChartHeight;
+        if (variant) {
+          CHECK(!Sim3DDepthPass_AppendSphericalSample(kSim3DDepthPass_Solid, mesh, &sample));
+          CHECK(Sim3DDepthPass_AppendSphericalSample(kSim3DDepthPass_CloudShadow, mesh, &sample));
+          CHECK(!Sim3DDepthPass_UpdateSphericalMesh(mesh, quads, kQuads));
+        } else {
+          Sim3DDepthVertex ordinary[kQuads * 4];
+          for (int i = 0; i < kQuads; ++i) SphericalReference(&quads[i], &sample, ordinary + i * 4);
+          CHECK(Sim3DDepthPass_AppendQuads(kSim3DDepthPass_CloudShadow, ordinary, kQuads));
+        }
+      }
+      ArRenderTexture result = Sim3DDepthPass_Submit(device, ArRenderTexture_Invalid());
+      CHECK(ArRenderTexture_IsValid(result));
+      if (variant) CHECK(geometry_upload_bytes == 160 + 48 + ((frame == 0 || frame == 12) ? kQuads * 160 : 0));
+      CHECK(SDL_SetRenderTarget(renderer, ArSdlRenderBackend_UnwrapTexture(result)));
+      SDL_Surface *raw = SDL_RenderReadPixels(renderer, NULL);
+      SDL_Surface *pixels = raw ? SDL_ConvertSurface(raw, SDL_PIXELFORMAT_ARGB8888) : NULL;
+      CHECK(pixels);
+      if (pixels) for (int y = 0; y < kTestHeight; ++y) for (int x = 0; x < kTestWidth; ++x) {
+        const uint32_t pixel = ReadArgb(pixels, x, y);
+        if (!variant) reference[y * kTestWidth + x] = pixel;
+        else {
+          const uint32_t expected = reference[y * kTestWidth + x];
+          changed += pixel != expected;
+          for (int shift = 0; shift < 32; shift += 8) {
+            const unsigned difference = (unsigned)abs((int)((pixel >> shift) & 255) - (int)((expected >> shift) & 255));
+            if (difference > maximum_error) maximum_error = difference;
+          }
+          if (x < 3) CHECK(pixel == 0); /* unchanged depth rejection */
+        }
+      }
+      SDL_DestroySurface(pixels); SDL_DestroySurface(raw);
+      CHECK(SDL_SetRenderTarget(renderer, NULL));
+    }
+  }
+  printf("spherical samples: max channel error=%u/255, changed pixels=%u/12288\n", maximum_error, changed);
+  CHECK(maximum_error <= 2); /* cross-device transcendental/UNORM rounding, not geometry changes */
+  CHECK(Sim3DDepthPass_Begin(device, kTestWidth, kTestHeight, kArRenderFilter_Nearest));
+  Sim3DDepthSphericalSample sample = {.rotation = {1,0,1,0}, .texture_size = {kWidth,kHeight},
+    .atlas = {0,0,kChartWidth,kChartHeight}, .color = {1,1,1,.5f}};
+  sample.offset.x = NAN;
+  CHECK(!Sim3DDepthPass_AppendSphericalSample(kSim3DDepthPass_CloudShadow, mesh, &sample));
+  sample.offset.x = 0; sample.atlas.x = 1;
+  CHECK(!Sim3DDepthPass_AppendSphericalSample(kSim3DDepthPass_CloudShadow, mesh, &sample));
+  sample.atlas.x = 0;
+  sample.color.a = INFINITY;
+  CHECK(!Sim3DDepthPass_AppendSphericalSample(kSim3DDepthPass_CloudShadow, mesh, &sample));
+  sample.color.a = .5f;
+  CHECK(Sim3DDepthPass_AppendSphericalSample(kSim3DDepthPass_CloudShadow, mesh, &sample));
+  memset(&sample, 0, sizeof(sample));
+  Sim3DDepthPass_DestroyMesh(mesh);
+  CHECK(!ArRenderTexture_IsValid(Sim3DDepthPass_Submit(device, ArRenderTexture_Invalid())));
+  /* Instance buffers use a different stride from ordinary retained positions.
+   * Grow, shrink, reuse, invalidate viewport, and reject malformed provenance. */
+  CHECK(Sim3DDepthPass_Begin(device, kTestWidth, kTestHeight, kArRenderFilter_Nearest));
+  mesh = Sim3DDepthPass_CreateSphericalMesh();
+  enum { kLargeQuads = 4097 };
+  Sim3DDepthSphericalQuad *large = malloc(kLargeQuads * sizeof(*large));
+  CHECK(mesh && large);
+  if (mesh && large) {
+    for (int i = 0; i < kLargeQuads; ++i) large[i] = quads[i % kQuads];
+    sample = (Sim3DDepthSphericalSample){.rotation = {1,0,1,0}, .texture_size = {kWidth,kHeight},
+      .atlas = {0,0,kChartWidth,kChartHeight}, .color = {1,1,1,.01f}};
+    for (int pass = 0; pass < 3; ++pass) {
+      const size_t count = pass ? kQuads : kLargeQuads;
+      CHECK(Sim3DDepthPass_Begin(device, kTestWidth, kTestHeight, kArRenderFilter_Nearest));
+      geometry_upload_bytes = 0;
+      if (pass < 2) CHECK(Sim3DDepthPass_UpdateSphericalMesh(mesh, large, count));
+      CHECK(Sim3DDepthPass_AppendSphericalSample(kSim3DDepthPass_CloudShadow, mesh, &sample));
+      CHECK(ArRenderTexture_IsValid(Sim3DDepthPass_Submit(device, ArRenderTexture_Invalid())));
+      CHECK(geometry_upload_bytes == (pass < 2 ? count * 160 : 0) + 16);
+    }
+    CHECK(Sim3DDepthPass_Begin(device, kTestWidth + 8, kTestHeight, kArRenderFilter_Nearest));
+    CHECK(!Sim3DDepthPass_MeshReady(mesh));
+    large[0].triangle = 3;
+    CHECK(!Sim3DDepthPass_UpdateSphericalMesh(mesh, large, 1));
+    large[0].triangle = 0; large[0].normals[0][1] = NAN;
+    CHECK(!Sim3DDepthPass_UpdateSphericalMesh(mesh, large, 1));
+    large[0] = quads[0]; large[0].weights[0][1] = INFINITY;
+    CHECK(!Sim3DDepthPass_UpdateSphericalMesh(mesh, large, 1));
+    CHECK(!Sim3DDepthPass_AppendSphericalSample(kSim3DDepthPass_CloudShadow, mesh, &sample));
+  }
+  free(large);
+  Sim3DDepthPass_DestroyMesh(mesh);
+  Sim3DDepthPass_Reset(device);
+}
+
 int main(void) {
   if (!SDL_Init(SDL_INIT_VIDEO)) {
     fprintf(stderr, "SIM3D GPU test skipped: SDL video unavailable: %s\n",
@@ -442,6 +728,8 @@ int main(void) {
   TestColoredTerrainOcclusion(&render_device, renderer);
   TestAtlasRegionPacking(&render_device, renderer);
   TestBatchCopyAndGrowth(&render_device, renderer);
+  TestRetainedSamples(&render_device, renderer);
+  TestSphericalSamples(&render_device, renderer);
   ArRenderDevice_Reset(&render_device);
   SDL_DestroyRenderer(renderer);
   SDL_DestroyWindow(window);

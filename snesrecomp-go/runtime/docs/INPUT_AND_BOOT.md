@@ -83,16 +83,13 @@ and [S-SMP initialization](https://snes.nesdev.org/wiki/S-SMP).
 
 ## Save states and deterministic hashes
 
-Portable snapshots advance from version 12 to 13 to include device type,
+The input update advanced portable snapshots from version 12 to 13 to include device type,
 buttons, pending motion, sensitivity, sign, packet, serial cursor, automatic
-results, and latch. Version 12 and native-layout version 11 remain readable;
-their missing serial state resets while retaining the host-selected device.
-If an old snapshot was executing the former built-in bootstrap, loading
-restarts initialization at `$FFC0`: old firmware PCs are not valid new
-instruction boundaries. Uploaded SPC programs and hidden-ROM ARAM execution
-are not redirected. Mid-upload version-13 snapshots retain exact state.
+results, and latch. The subsequent audio update uses version 14 and rejects
+older quick states because their DSP/timeline layouts differ. Current snapshots
+retain the exact input, bootstrap, and mid-upload state.
 
-Semantic digest schema advances from 2 to 3 because this new input state
-affects execution. Compare hashes only within the same schema. The golden
+Input advanced semantic digest schema from 2 to 3; the current audio update
+advances it to 4. Compare hashes only within the same schema. The golden
 fixture is updated deliberately; WRAM, SRAM, CPU, and semantic dispatch hashes
 can still be compared independently across this change.

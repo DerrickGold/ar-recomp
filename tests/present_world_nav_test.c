@@ -16,6 +16,7 @@
 #include "sim/sim_background_voxel_model_cache.h"
 
 #include <assert.h>
+#include <SDL3/SDL.h> /* Test-only control of the platform helper cap. */
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -49,6 +50,10 @@ typedef struct FakeBackend {
   int ground_index_count;
   ArRenderVertex2D ground_vertices[4];
   bool check_map_edge_opacity;
+  bool hash_ground;
+  uint64_t ground_hash;
+  bool hash_geometry;
+  uint64_t geometry_hash;
   unsigned opaque_edge_land, faded_edge_water;
   bool check_atmosphere_enclosure;
   bool atmosphere_seen;
@@ -69,6 +74,8 @@ ArRenderDevice g_render_device;
 static FakeBackend *s_backend;
 
 static int depth_solid_faces;
+static bool hash_models;
+static uint64_t model_hash;
 static int depth_terrain_faces;
 static int depth_world_mountain_faces;
 static int depth_width, depth_height;
@@ -201,6 +208,7 @@ bool Sim3DDepthPass_Begin(ArRenderDevice *device, int width, int height,
   far_volume_min_depth = 1;
   volume_previous_depth = 1;
   depth_world_mountain_hash = UINT64_C(14695981039346656037);
+  s_backend->ground_hash = UINT64_C(14695981039346656037);
   memset(depth_surface, 0, sizeof(depth_surface));
   depth_collecting = !depth_begin_failure;
   return depth_collecting;
@@ -221,7 +229,17 @@ bool Sim3DDepthPass_AppendQuad(Sim3DDepthPassLayer layer,
     if (layer == kSim3DDepthPass_CloudShadow || layer == kSim3DDepthPass_GroundHaze ||
         layer == kSim3DDepthPass_GroundBlur) CheckDepthSurface(&vertices[i], false);
   }
-  if (layer == kSim3DDepthPass_Solid) depth_solid_faces++;
+  if (layer == kSim3DDepthPass_Solid) {
+    depth_solid_faces++;
+    if (hash_models) for (int p = 0; p < 4; ++p) {
+      const Sim3DDepthVertex *v = &vertices[p];
+      const float values[] = {v->x, v->y, v->depth, v->uv.x, v->uv.y,
+        v->color.r, v->color.g, v->color.b, v->color.a};
+      const uint8_t *bytes = (const uint8_t *)values;
+      for (size_t i = 0; i < sizeof(values); ++i)
+        model_hash = (model_hash ^ bytes[i]) * UINT64_C(1099511628211);
+    }
+  }
   if (layer == kSim3DDepthPass_VolumeCloud) {
     assert(QuadTouchesViewport(vertices));
     for (int p = 0; p < 4; p++) {
@@ -258,6 +276,14 @@ bool Sim3DDepthPass_AppendQuad(Sim3DDepthPassLayer layer,
     }
   }
   if (layer == kSim3DDepthPass_Ground && vertices[0].uv.x >= 0.0f) {
+    if (s_backend->hash_ground) for (int p = 0; p < 4; ++p) {
+      const Sim3DDepthVertex *v = &vertices[p];
+      const float values[] = {v->x, v->y, v->depth, v->uv.x, v->uv.y,
+        v->color.r, v->color.g, v->color.b, v->color.a};
+      const uint8_t *bytes = (const uint8_t *)values;
+      for (size_t i = 0; i < sizeof(values); ++i)
+        s_backend->ground_hash = (s_backend->ground_hash ^ bytes[i]) * UINT64_C(1099511628211);
+    }
     if (s_backend->check_map_edge_opacity) {
       const int x = (int)lroundf(vertices[0].uv.x * 128);
       const int y = (int)lroundf(vertices[0].uv.y * 128);
@@ -300,6 +326,30 @@ bool Sim3DDepthPass_AppendQuad(Sim3DDepthPassLayer layer,
   }
   return true;
 }
+
+/* This lightweight adapter deliberately declines the optional retained-mesh
+ * optimization, exercising the exact ordinary-geometry fallback. The GPU
+ * integration suite covers the production split-input implementation. */
+Sim3DDepthMesh *Sim3DDepthPass_CreateMesh(void) { return NULL; }
+Sim3DDepthMesh *Sim3DDepthPass_CreateSphericalMesh(void) { return NULL; }
+bool Sim3DDepthPass_UpdateSphericalMesh(Sim3DDepthMesh *mesh,
+    const Sim3DDepthSphericalQuad *quads, size_t count) {
+  (void)mesh; (void)quads; (void)count; return false;
+}
+bool Sim3DDepthPass_AppendSphericalSample(Sim3DDepthPassLayer layer,
+    Sim3DDepthMesh *mesh, const Sim3DDepthSphericalSample *sample) {
+  (void)layer; (void)mesh; (void)sample; return false;
+}
+bool Sim3DDepthPass_MeshReady(const Sim3DDepthMesh *mesh) { (void)mesh; return false; }
+bool Sim3DDepthPass_UpdateMesh(Sim3DDepthMesh *mesh,
+    const Sim3DDepthPosition *positions, size_t count) {
+  (void)mesh; (void)positions; (void)count; return false;
+}
+bool Sim3DDepthPass_AppendMeshSample(Sim3DDepthPassLayer layer,
+    Sim3DDepthMesh *mesh, const ArRenderPointF *uv, size_t count, ArRenderColorF color) {
+  (void)layer; (void)mesh; (void)uv; (void)count; (void)color; return false;
+}
+void Sim3DDepthPass_DestroyMesh(Sim3DDepthMesh *mesh) { assert(!mesh); }
 
 bool Sim3DDepthPass_AppendQuads(Sim3DDepthPassLayer layer,
                                const Sim3DDepthVertex *vertices, size_t count) {
@@ -486,9 +536,16 @@ static bool DrawGeometry(void *context, ArRenderTexture texture,
                          const int32_t *indices, int index_count,
                          const ArRenderDrawState *state) {
   FakeBackend *backend = context;
-  (void)indices;
-  (void)index_count;
   (void)state;
+  if (backend->hash_geometry) for (int i = 0; i < index_count; ++i) {
+    assert(indices[i] >= 0 && indices[i] < vertex_count);
+    const ArRenderVertex2D *v = &vertices[indices[i]];
+    const float values[] = {v->position.x, v->position.y,
+        v->color.r, v->color.g, v->color.b, v->color.a, v->tex_coord.x, v->tex_coord.y};
+    const unsigned char *bytes = (const unsigned char *)values;
+    for (size_t b = 0; b < sizeof(values); ++b)
+      backend->geometry_hash = (backend->geometry_hash ^ bytes[b]) * UINT64_C(1099511628211);
+  }
   backend->draw_geometry_count++;
   if (!ArRenderTexture_IsValid(texture) && vertex_count == 12 && index_count == 18) {
     assert(state && (state->flags & kArRenderDrawState_Blend));
@@ -942,6 +999,111 @@ static void TestGroundCacheInvalidation(void) {
   slot.sim.projection_yaw_mrad = 600;
   assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_Complete);
   assert(backend.ground_vertices[1].position.y == old_y); /* Town pose never tilts navigation. */
+}
+
+static void TestGroundWorkerParity(void) {
+  SDL_Environment *environment = SDL_GetEnvironment();
+  const char *previous = SDL_GetEnvironmentVariable(environment, "AR_RENDER_WORKERS");
+  char *saved = previous ? SDL_strdup(previous) : NULL;
+  assert(!previous || saved);
+  enum { kCases = 16 };
+  uint64_t expected[kCases];
+  for (int mode = 0; mode < 2; ++mode) {
+    PresentWorldNav_ResetResources();
+    assert(SDL_SetEnvironmentVariable(environment, "AR_RENDER_WORKERS", mode ? "3" : "0", true));
+    FakeBackend backend = {.output_width = 800, .output_height = 600, .hash_ground = true};
+    assert(ArRenderDevice_Init(&g_render_device, &kFakeOps, &backend, (ArRenderCapabilities){0}));
+    FrameSlot slot = WorldNavigationSlot();
+    for (int i = 0; i < kCases; ++i) {
+      slot.sim.view = i & 1 ? kSimView_SkyPalace : kSimView_WorldNavigation;
+      slot.sim.world_navigation_lighting = (i / 2) & 1;
+      slot.sim.world_navigation_relief = (i / 4) & 1;
+      slot.sim.landscape_height_pct = 60 + i * 10;
+      slot.sim.light_azimuth_deg = i * 21;
+      slot.sim.light_elevation_deg = 20 + i * 3;
+      slot.sim.world_navigation.focus_x = 400 + i * 7;
+      slot.sim.world_navigation.focus_y = 450 + i * 5;
+      slot.sim_manual_orbit_yaw = i * .03f;
+      const ArRenderRectI viewport = {0, 0, 640 + i * 4, 480 + i * 3};
+      backend.output_width = viewport.w; backend.output_height = viewport.h;
+      if (slot.sim.view == kSimView_WorldNavigation) UploadWorldNavigationComposition(&slot);
+      assert((slot.sim.view == kSimView_SkyPalace ? PresentWorldNavigationBackdrop(&slot, viewport)
+          : PresentWorldNavigation3D(&slot)) == kPresentationOutcome_Complete);
+      assert(backend.ground_hash != UINT64_C(14695981039346656037));
+      if (!mode) expected[i] = backend.ground_hash;
+      else assert(expected[i] == backend.ground_hash);
+      const uint64_t held = backend.ground_hash;
+      assert((slot.sim.view == kSimView_SkyPalace ? PresentWorldNavigationBackdrop(&slot, viewport)
+          : PresentWorldNavigation3D(&slot)) == kPresentationOutcome_Complete);
+      assert(held == backend.ground_hash);
+    }
+    PresentWorldNav_ResetResources(); /* joins before the fake backend leaves scope */
+  }
+  if (saved) assert(SDL_SetEnvironmentVariable(environment, "AR_RENDER_WORKERS", saved, true));
+  else assert(SDL_UnsetEnvironmentVariable(environment, "AR_RENDER_WORKERS"));
+  SDL_free(saved);
+}
+
+static void TestModelWorkerParity(void) {
+  SDL_Environment *environment = SDL_GetEnvironment();
+  const char *previous = SDL_GetEnvironmentVariable(environment, "AR_RENDER_WORKERS");
+  char *saved = previous ? SDL_strdup(previous) : NULL;
+  assert(!previous || saved);
+  enum { kCases = 8, kRepeats = 4 };
+  uint64_t expected[kCases][kRepeats];
+  for (int mode = 0; mode < 2; ++mode) {
+    PresentWorldNav_ResetResources();
+    assert(SDL_SetEnvironmentVariable(environment, "AR_RENDER_WORKERS", mode ? "3" : "0", true));
+    FakeBackend backend = {.output_width = 1792, .output_height = 1344};
+    assert(ArRenderDevice_Init(&g_render_device, &kFakeOps, &backend, (ArRenderCapabilities){0}));
+    FrameSlot slot = WorldNavigationSlot();
+    slot.sim.world_navigation_models = slot.sim.background_voxel_enabled = true;
+    slot.sim.world_navigation_towns.object_count = 256;
+    for (int i = 0; i < 256; ++i) {
+      slot.sim.world_navigation_towns.objects[i] = (SimBackgroundVoxelObject){
+        .town = 2, .kind = i % 3 == 0 ? kSimBackgroundVoxel_Windmill :
+            i % 3 == 1 ? kSimBackgroundVoxel_Factory : kSimBackgroundVoxel_BroadTree,
+        .cell_x = 8 + i % 16, .cell_y = 8 + i / 16,
+        .record_slot = (uint16_t)i,
+        .source_cells_w = 2, .source_cells_h = 2,
+        .footprint_cells_w = 2, .footprint_cells_d = 2,
+        .visual_state = kSimStructureVisualState_Finished,
+      };
+    }
+    hash_models = true;
+    for (int c = 0; c < kCases; ++c) {
+      slot.sim.view = c & 1 ? kSimView_SkyPalace : kSimView_WorldNavigation;
+      slot.sim.world_navigation_lighting = (c / 2) & 1;
+      slot.sim.background_voxel_detail = c < 4 ? kSimBackgroundVoxelDetail_Low : kSimBackgroundVoxelDetail_Ultra;
+      slot.sim.world_navigation_relief = (c / 4) & 1;
+      slot.sim.light_azimuth_deg = c * 43;
+      slot.sim.world_navigation.active_location = 2;
+      slot.sim_manual_orbit_yaw = c * .02f;
+      const ArRenderRectI viewport = {0, 0, 1792 - c * 16, 1344 - c * 8};
+      backend.output_width = viewport.w; backend.output_height = viewport.h;
+      for (int frame = 0; frame < kRepeats; ++frame) {
+        slot.sim.game_frame = frame == 3 ? 0 : 12 * frame;
+        model_hash = UINT64_C(14695981039346656037);
+        const SimBackgroundVoxelModelCacheStats before = SimBackgroundVoxelModelCache_Stats();
+        if (slot.sim.view == kSimView_WorldNavigation) UploadWorldNavigationComposition(&slot);
+        assert((slot.sim.view == kSimView_SkyPalace ? PresentWorldNavigationBackdrop(&slot, viewport)
+            : PresentWorldNavigation3D(&slot)) == kPresentationOutcome_Complete);
+        assert(depth_solid_faces > 1000);
+        if (!frame) {
+          const SimBackgroundVoxelModelCacheStats after = SimBackgroundVoxelModelCache_Stats();
+          assert(after.hits + after.misses - before.hits - before.misses >= 128);
+        }
+        if (!mode) expected[c][frame] = model_hash;
+        else assert(expected[c][frame] == model_hash);
+      }
+      assert(expected[c][0] == expected[c][3]); /* cached rewind, same static spans */
+    }
+    hash_models = false;
+    PresentWorldNav_ResetResources();
+  }
+  if (saved) assert(SDL_SetEnvironmentVariable(environment, "AR_RENDER_WORKERS", saved, true));
+  else assert(SDL_UnsetEnvironmentVariable(environment, "AR_RENDER_WORKERS"));
+  SDL_free(saved);
 }
 
 static void TestMapEdgeLandOpacity(void) {
@@ -1652,6 +1814,44 @@ static void TestPalaceMarkerAutoFitAndRasterBounds(void) {
   PresentWorldNav_ResetResources();
 }
 
+static void TestAtmosphereDrawCache(void) {
+  PresentWorldNav_ResetResources();
+  FakeBackend backend = {.output_width = 800, .output_height = 600, .hash_geometry = true};
+  assert(ArRenderDevice_Init(&g_render_device, &kFakeOps, &backend, (ArRenderCapabilities){0}));
+  FrameSlot slot = WorldNavigationSlot();
+  slot.sim.view = kSimView_SkyPalace;
+  slot.sim.world_navigation_clouds = slot.sim.sky_palace_volumetric_clouds = false;
+  slot.sim.world_navigation_cloud_shadows = false;
+  for (int variant = 0; variant < 4; ++variant) {
+    const ArRenderRectI viewport = {0, 0, 800 + variant * 40, 600 + variant * 20};
+    slot.sim.cloud_altitude_px = 80 + variant * 40;
+    uint64_t expected = 0;
+    int cold_draws = 0;
+    for (int frame = 0; frame < 4; ++frame) {
+      backend.geometry_hash = UINT64_C(14695981039346656037);
+      const int before = backend.draw_geometry_count;
+      assert(PresentWorldNavigationBackdrop(&slot, viewport) == kPresentationOutcome_Complete);
+      const int draws = backend.draw_geometry_count - before;
+      if (!frame) { expected = backend.geometry_hash; cold_draws = draws; }
+      else assert(backend.geometry_hash == expected);
+      if (frame >= 2) assert(draws < cold_draws);
+    }
+    /* A cached submission failure remains a core failure; retry/reset must
+     * neither expose partial cached triangles nor lose the atmosphere. */
+    backend.fail_geometry_call = backend.draw_geometry_count + 2;
+    assert(PresentWorldNavigationBackdrop(&slot, viewport) == kPresentationOutcome_CoreFailure);
+    backend.fail_geometry_call = 0;
+    backend.geometry_hash = UINT64_C(14695981039346656037);
+    assert(PresentWorldNavigationBackdrop(&slot, viewport) == kPresentationOutcome_Complete);
+    assert(backend.geometry_hash == expected);
+    PresentWorldNav_ResetResources();
+    backend.geometry_hash = UINT64_C(14695981039346656037);
+    assert(PresentWorldNavigationBackdrop(&slot, viewport) == kPresentationOutcome_Complete);
+    assert(backend.geometry_hash == expected);
+  }
+  PresentWorldNav_ResetResources();
+}
+
 static void TestSkyPalaceClippingAndOwnership(void) {
   PresentWorldNav_ResetResources();
   FakeBackend backend = {.output_width = 1280, .output_height = 720,
@@ -1775,6 +1975,10 @@ static void TestShadowClipPlanParity(void) {
         Sim3DDepthVertex actual[4];
         WorldNavigationApplyShadowPlan(&plans[q], uv, color, actual);
         assert(!memcmp(actual, expected + q * 4, sizeof(actual)));
+        ArRenderPointF streamed[4];
+        WorldNavigationApplyShadowUV(&plans[q], uv, streamed);
+        for (int p = 0; p < 4; ++p)
+          assert(!memcmp(&streamed[p], &expected[q * 4 + p].uv, sizeof(streamed[p])));
       }
       assert(WorldNavigationPrepareClipPlan(input, NULL, viewport, plans, &count) && count == 1);
       Sim3DDepthVertex uncut[4];
@@ -1795,6 +1999,8 @@ int main(void) {
   TestOceanBatchFailureRecovery();
   TestSpaceAndCloudCover();
   TestGroundCacheInvalidation();
+  TestGroundWorkerParity();
+  TestModelWorkerParity();
   TestOptionalStagesSkipWorkAndRestore();
   TestDetailedGroundLiveInvalidation();
   TestNativeMountainRestoration();
@@ -1806,6 +2012,7 @@ int main(void) {
   TestAdventAuthoredModelClearance();
   TestTallModelViewportClearance();
   TestSkyPalaceClippingAndOwnership();
+  TestAtmosphereDrawCache();
   TestMapEdgeLandOpacity();
   AssertPerformanceScopeRestored();
   SimWorldMap_Shutdown();

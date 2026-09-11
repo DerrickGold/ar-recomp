@@ -53,4 +53,13 @@ typedef struct SimWorldNavigationTowns {
 void SimWorldNavigationTowns_Capture(
     const uint8_t *wram, SimWorldNavigationTowns *out);
 
+/* Producer-owner-thread memoized form. Compares all classification inputs by
+ * value, never retains WRAM pointers, and always copies a complete output.
+ * The pure Capture entry point remains available for independent callers and
+ * reference validation. One bounded application cache is shared by the two
+ * mutually exclusive globe modes; it is not part of the frame/runner ABI. */
+void SimWorldNavigationTowns_CaptureCached(
+    const uint8_t *wram, SimWorldNavigationTowns *out);
+void SimWorldNavigationTowns_ResetCache(void);
+
 #endif  /* SIM_WORLD_NAVIGATION_TOWNS_H */

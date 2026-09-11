@@ -3,6 +3,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <stddef.h>
 
 #include "snesrecomp/game_audio.h"
 
@@ -15,6 +16,47 @@ uint8_t NativeAudioExtension_RoutedGlobalMask(
 bool NativeAudioExtension_ShouldBypassMusicSuppression(
     uint16_t spc_pc, uint8_t logical_track, uint8_t track_mask,
     uint8_t ownership_mask);
+
+/* Policies apply only to the same nonzero source key AND effect ID/kind.
+ * ReplaceSelf waits for the old KOF release; RestartSelf immediately resets
+ * the sequence at the next driver tick. LatestPending keeps only one successor.
+ * None can reserve another effect's destination or block another emitter. */
+typedef enum NativeAudioOverlapPolicy {
+  kNativeAudio_Independent = 0,
+  kNativeAudio_BlockSelf,
+  kNativeAudio_RestartSelf,
+  kNativeAudio_ReplaceSelf,
+  kNativeAudio_LatestPending,
+} NativeAudioOverlapPolicy;
+
+typedef enum NativeAudioDisposition {
+  kNativeAudioDisposition_BlockedSelf = 0,
+  kNativeAudioDisposition_RestartedSelf,
+  kNativeAudioDisposition_ReplacedSelf,
+  kNativeAudioDisposition_ReplacedPending,
+  kNativeAudioDisposition_CapacityDrop,
+  kNativeAudioDisposition_SequenceUnavailable,
+} NativeAudioDisposition;
+
+typedef struct NativeAudioRequest {
+  uint64_t source_key; /* stable emitter lifetime; zero means unclassified */
+  uint64_t trace_serial;
+  uint32_t caller_pc;
+  uint32_t game_frame; /* diagnostic only, never part of emitter identity */
+  uint16_t actor_x, actor_y; /* diagnostic CPU registers, not world coordinates */
+  uint8_t id, event_request, policy;
+} NativeAudioRequest;
+
+/* Game-thread-only WRAM capture. Tick observations and QueueGameRequest retain
+ * full lifecycle observation; WRAM reads occur outside the audio mutex. */
+void NativeAudioExtension_ObserveGameState(const uint8_t *wram, size_t size);
+bool NativeAudioExtension_QueueGameRequest(
+    const uint8_t *wram, size_t size, bool event_request, uint8_t id,
+    uint32_t caller_pc, uint32_t game_frame, uint16_t actor_x, uint16_t actor_y,
+    uint64_t trace_serial);
+bool NativeAudioExtension_QueueIdentifiedRequest(const NativeAudioRequest *request);
+extern void (*g_native_audio_extension_trace_policy_hook)(
+    uint64_t trace_serial, uint64_t other_serial, NativeAudioDisposition disposition);
 
 /* Capture a game-side BRK/COP sound request before the native depth-one WRAM
  * mailbox can overwrite it. Returns true only when extended mode owns the
@@ -54,7 +96,7 @@ void NativeAudioExtension_OnSpcUpload(
     RtlAudioExtensionContext *context, uint32_t source24);
 
 /* Install the restart-class optional bridge. Safe before SnesInit; the DSP
- * core stores enablement globally and initializes its virtual pool on reset. */
+ * core stores enablement globally and initializes its virtual banks on reset. */
 void NativeAudioExtension_Install(void);
 bool NativeAudioExtension_IsEnabled(void);
 

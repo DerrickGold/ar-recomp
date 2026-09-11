@@ -12,6 +12,7 @@
 #include <string.h>
 
 #include "sim_town_canvas.h"
+#include "snes_bgr555.h"
 
 static int s_failures;
 #define CHECK(expression)                                                  \
@@ -371,11 +372,63 @@ static void TestRejectsMissingSources(void) {
   CHECK(SimTownCanvas_Serial() == 0);
 }
 
+static uint32_t RandomWord(uint32_t *seed) {
+  *seed = *seed * UINT32_C(1664525) + UINT32_C(1013904223);
+  return *seed;
+}
+
+static void TestDecodedCacheAgainstReference(void) {
+  SimTownCanvas_Reset();
+  SetupSources();
+  uint32_t seed = 7;
+  for (int i = 0; i < 128; i++) g_cgram[i] = (uint16_t)RandomWord(&seed);
+  for (int i = 0; i < 1024 * 16; i++) g_vram[i] = (uint16_t)RandomWord(&seed);
+  for (int y = 0; y < 64; y++)
+    for (int x = 0; x < 64; x++) SetTile(x, y, (uint16_t)(RandomWord(&seed) >> 8));
+  for (int frame = 0; frame < 20; frame++) {
+    const int brightness = frame % 16;
+    const uint32_t backdrop = RandomWord(&seed) | 0xff000000u;
+    for (int i = 0; i < 23; i++) {
+      const unsigned character_word = RandomWord(&seed) % (1024 * 16);
+      const unsigned palette_color = RandomWord(&seed) % 128;
+      g_vram[character_word] = (uint16_t)RandomWord(&seed);
+      g_cgram[palette_color] = (uint16_t)RandomWord(&seed);
+    }
+    /* Alternate display changes and character/palette-only changes. */
+    for (int pass = 0; pass < 2; pass++) {
+      if (pass) g_vram[RandomWord(&seed) % (1024 * 16)] ^= 0xffffu;
+      SimTownCanvas_Render(1, g_wram, g_vram, g_cgram, brightness, backdrop);
+      for (int y = 0; y < 512; y++)
+        for (int x = 0; x < 512; x++) {
+          const int tx = x / 8, ty = y / 8;
+          const int quadrant = (ty >= 32 ? 2 : 0) + (tx >= 32 ? 1 : 0);
+          const int word = quadrant * kSimTownQuadrantWords + (ty & 31) * 32 + (tx & 31);
+          const uint8_t *map = g_wram + kSimTownTilemapWram + word * 2;
+          const uint16_t entry = (uint16_t)(map[0] | map[1] << 8);
+          const int px = (entry & 0x4000) ? 7 - (x % 8) : x % 8;
+          const int py = (entry & 0x8000) ? 7 - (y % 8) : y % 8;
+          const uint16_t *art = g_vram + (entry & 1023) * 16;
+          unsigned index = 0;
+          for (int bit = 0; bit < 4; bit++)
+            index |= ((art[py + (bit / 2) * 8] >> (7 - px + (bit % 2) * 8)) & 1u) << bit;
+          const uint16_t color = g_cgram[((entry >> 10) & 7) * 16 + index];
+          const uint32_t expected = index ? 0xff000000u |
+              (uint32_t)ExpandColor5(color & 31, brightness) << 16 |
+              (uint32_t)ExpandColor5((color >> 5) & 31, brightness) << 8 |
+              ExpandColor5((color >> 10) & 31, brightness) : backdrop;
+          CHECK(CanvasAt(x, y) == expected);
+          CHECK(SourceOpacityAt(x, y) == (index != 0));
+        }
+    }
+  }
+}
+
 int main(void) {
   g_wram = malloc(kWramSize);
   g_vram = malloc(kVramWords * sizeof(uint16_t));
   TestQuadrantAddressing();
   TestFlips();
+  TestDecodedCacheAgainstReference();
   TestChangeDetection();
   TestIndependentSourceRevisions();
   TestMarahnaEarthquakeCanvasPublication();

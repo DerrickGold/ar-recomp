@@ -9,6 +9,9 @@
 #include "sim_town_ground_art.h"
 #include "sim_town_terrain.h"
 
+_Static_assert(sizeof(SimWorldNavigationArtAnimation) <= 320 * 1024,
+    "prepared animation work must stay within its 320 KiB budget");
+
 static float Smoothstep(float value) {
   if (value <= 0.0f) return 0.0f;
   if (value >= 1.0f) return 1.0f;
@@ -208,18 +211,20 @@ bool SimWorldNavigationArt_OverlayTownGround(
   return true;
 }
 
-bool SimWorldNavigationArt_UpdateAnimation(
+bool SimWorldNavigationArt_PrepareAnimation(
+    SimWorldNavigationArtAnimation *work,
     uint32_t *out_pixels, int out_pitch_pixels,
     const uint32_t *developed_pixels, int developed_pitch_pixels,
     const uint32_t *baseline_pixels, int baseline_pitch_pixels,
     const uint8_t *world_cells,
     const SimWorldNavigationTownGround *ground, bool models_enabled, bool cliff_geometry,
-    uint8_t previous_phase, uint8_t animation_phase,
-    SimWorldNavigationArtChanges *changes) {
+    uint8_t previous_phase, uint8_t animation_phase) {
+  if (!work) return false;
+  work->ready = false;
   if (!out_pixels || out_pitch_pixels < kSimWorldNavigationArtPixels ||
       !developed_pixels || developed_pitch_pixels < kSimWorldMapPixels ||
       !baseline_pixels || baseline_pitch_pixels < kSimWorldMapPixels ||
-      !changes || (ground && !SimTownGroundArt_Available()) ||
+      (ground && !SimTownGroundArt_Available()) ||
       previous_phase >= kSimTownGroundAnimationFrames ||
       animation_phase >= kSimTownGroundAnimationFrames) return false;
   /* Resolve allocations before touching the retained image. Identical/static
@@ -229,10 +234,14 @@ bool SimWorldNavigationArt_UpdateAnimation(
         (!SimTownGroundArt_AnimatedMetatile(town, ground->development_tier[town - 1], 8, previous_phase) ||
          !SimTownGroundArt_AnimatedMetatile(town, ground->development_tier[town - 1], 8, animation_phase)))
       return false;
+  work->output = out_pixels; work->output_pitch = out_pitch_pixels;
+  work->developed = developed_pixels; work->developed_pitch = developed_pitch_pixels;
+  work->baseline = baseline_pixels; work->baseline_pitch = baseline_pitch_pixels;
+  SimWorldNavigationArtChanges *changes = &work->changes;
   memset(changes, 0, sizeof(*changes));
+  memset(work->overlay, 0, sizeof(work->overlay));
   if (world_cells) memcpy(changes->cells, world_cells, sizeof(changes->cells));
-  unsigned feather[kSimTownCells * kSimTownCellPixels];
-  GroundFeather(feather);
+  GroundFeather(work->feather);
   for (uint8_t town = 1; ground && town <= kSimTownCount; town++) {
     if (!(ground->enabled_town_mask & (1u << (town - 1)))) continue;
     int ox, oy;
@@ -245,36 +254,55 @@ bool SimWorldNavigationArt_UpdateAnimation(
             town, ground->development_tier[town - 1], tile, previous_phase);
         const uint32_t *after = SimTownGroundArt_AnimatedMetatile(
             town, ground->development_tier[town - 1], tile, animation_phase);
+        const int at = (oy + y) * kSimWorldMapTiles + ox + x;
+        work->overlay[at].pixels = after;
+        work->overlay[at].x = (uint8_t)x; work->overlay[at].y = (uint8_t)y;
         if (before == after || !memcmp(before, after,
             kSimTownCellPixels * kSimTownCellPixels * sizeof(*after))) continue;
         changes->cells[(oy + y) * kSimWorldMapTiles + ox + x] = 1;
       }
   }
-  for (int y = 0; y < kSimWorldMapTiles; y++)
+  work->ready = true;
+  return true;
+}
+
+void SimWorldNavigationArt_RenderAnimationRows(
+    const SimWorldNavigationArtAnimation *work, size_t first, size_t end) {
+  if (!work || !work->ready || first >= end || end > kSimWorldMapTiles) return;
+  for (size_t y = first; y < end; y++) {
     for (int x = 0; x < kSimWorldMapTiles;) {
-      if (!changes->cells[y * kSimWorldMapTiles + x]) { x++; continue; }
+      if (!work->changes.cells[y * kSimWorldMapTiles + x]) { x++; continue; }
       const int first = x;
-      while (x < kSimWorldMapTiles && changes->cells[y * kSimWorldMapTiles + x]) x++;
-      uint32_t *out = out_pixels + (size_t)y * kSimTownCellPixels * out_pitch_pixels + first * kSimTownCellPixels;
-      RebuildGroundRectangle(out, out_pitch_pixels, first * kSimWorldMapTilePixels,
+      while (x < kSimWorldMapTiles && work->changes.cells[y * kSimWorldMapTiles + x]) x++;
+      uint32_t *out = work->output + y * kSimTownCellPixels * work->output_pitch + first * kSimTownCellPixels;
+      RebuildGroundRectangle(out, work->output_pitch, first * kSimWorldMapTilePixels,
           y * kSimWorldMapTilePixels, (x - first) * kSimWorldMapTilePixels, kSimWorldMapTilePixels,
-          developed_pixels, developed_pitch_pixels, baseline_pixels, baseline_pitch_pixels);
+          work->developed, work->developed_pitch, work->baseline, work->baseline_pitch);
     }
-  for (uint8_t town = 1; ground && town <= kSimTownCount; town++) {
-    if (!(ground->enabled_town_mask & (1u << (town - 1)))) continue;
-    int ox, oy;
-    if (!SimWorldMap_OriginForTown(town, &ox, &oy)) continue;
-    for (int y = 0; y < kSimTownCells; y++)
-      for (int x = 0; x < kSimTownCells; x++) {
-        if (!changes->cells[(oy + y) * kSimWorldMapTiles + ox + x]) continue;
-        uint8_t tile;
-        if (!GroundTile(ground, town, x, y, models_enabled, cliff_geometry, &tile)) continue;
-        const uint32_t *pixels = SimTownGroundArt_AnimatedMetatile(
-            town, ground->development_tier[town - 1], tile, animation_phase);
-        uint32_t *out = out_pixels + (size_t)(oy + y) * kSimTownCellPixels * out_pitch_pixels +
-            (ox + x) * kSimTownCellPixels;
-        OverlayGroundCell(out, out_pitch_pixels, pixels, x, y, feather);
-      }
+    for (int x = 0; x < kSimWorldMapTiles; ++x) {
+      const size_t at = y * kSimWorldMapTiles + x;
+      if (!work->changes.cells[at] || !work->overlay[at].pixels) continue;
+      uint32_t *out = work->output + y * kSimTownCellPixels * work->output_pitch + x * kSimTownCellPixels;
+      OverlayGroundCell(out, work->output_pitch, work->overlay[at].pixels,
+          work->overlay[at].x, work->overlay[at].y, work->feather);
+    }
   }
+}
+
+bool SimWorldNavigationArt_UpdateAnimation(
+    uint32_t *out_pixels, int out_pitch_pixels,
+    const uint32_t *developed_pixels, int developed_pitch_pixels,
+    const uint32_t *baseline_pixels, int baseline_pitch_pixels,
+    const uint8_t *world_cells,
+    const SimWorldNavigationTownGround *ground, bool models_enabled, bool cliff_geometry,
+    uint8_t previous_phase, uint8_t animation_phase,
+    SimWorldNavigationArtChanges *changes) {
+  SimWorldNavigationArtAnimation work;
+  if (!changes || !SimWorldNavigationArt_PrepareAnimation(&work,
+          out_pixels, out_pitch_pixels, developed_pixels, developed_pitch_pixels,
+          baseline_pixels, baseline_pitch_pixels, world_cells, ground,
+          models_enabled, cliff_geometry, previous_phase, animation_phase)) return false;
+  SimWorldNavigationArt_RenderAnimationRows(&work, 0, kSimWorldMapTiles);
+  *changes = work.changes;
   return true;
 }

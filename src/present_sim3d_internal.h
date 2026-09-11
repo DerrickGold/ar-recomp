@@ -37,10 +37,6 @@ extern const float kPi;
 int InsertSimGroundCoordinate(float *coordinates, int count, int capacity,
                               float coordinate);
 void SimShadowLight(const FrameSlot *slot, float *light_x, float *light_y);
-ArRenderTexture EnsureSimUnderlayTexture(const FrameSlot *slot);
-/* Returns the optional blur only when it represents the requested world-map
- * revision. Consumers must never infer freshness from allocation alone. */
-ArRenderTexture SimUnderlayBlurTexture(uint32_t serial);
 void DrawSimBackdrop(const FrameSlot *slot, ArRenderRectI viewport,
                      const float matrix[16]);
 

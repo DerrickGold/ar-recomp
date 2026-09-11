@@ -109,7 +109,7 @@ static void TestDefaultsAndMetadata(void) {
    * renderer and a legacy one that no longer exists. Localization adds six
    * source, presentation, and enhanced-font preferences, plus an independent
    * host interface language. */
-  CHECK(g_setting_desc_count == 289);
+  CHECK(g_setting_desc_count == 290);
   for (int i = 0; i < g_setting_desc_count; i++) {
     const SettingDesc *a = &g_setting_descs[i];
     CHECK(a->key && a->key[0] && a->label && a->tooltip);
@@ -150,6 +150,12 @@ static void TestDefaultsAndMetadata(void) {
     g_settings.diorama_mode = false;
   }
   CHECK(!g_settings.show_fps);
+  CHECK(g_settings.performance_overlay == 0);
+  const SettingDesc *performance = Settings_Find("performance_overlay");
+  CHECK(performance && Settings_IsAvailable(performance) && Settings_IsMenuVisible(performance));
+  CHECK(Settings_SetText(performance, "Detailed") == kSettingChange_Applied);
+  CHECK(g_settings.performance_overlay == 2);
+  CHECK(Settings_SetText(performance, "Off") == kSettingChange_Applied);
   CHECK(!g_settings.ignore_aspect_ratio);
   CHECK(g_settings.audio_enabled);
   CHECK(g_settings.audio_frequency == kAudioFrequency_Auto);
@@ -1492,12 +1498,15 @@ static void TestVideoSettingAudit(void) {
   CHECK(Settings_IgnoreAspectRatio());
   CHECK(g_settings.refresh_mode == kRefreshMode_Uncapped);
   g_settings.show_fps = true;
+  g_settings.performance_overlay = 2;
   CHECK(Settings_Save(saved_path));
   CHECK(!FileContains(saved_path, "ignore_aspect_ratio ="));
   CHECK(!FileContains(saved_path, "uncapped_framerate ="));
   CHECK(FileContains(saved_path, "show_fps = On"));
+  CHECK(FileContains(saved_path, "performance_overlay = Detailed"));
   Settings_InitWithFile(saved_path);
   CHECK(g_settings.show_fps);
+  CHECK(g_settings.performance_overlay == 2);
 
   CHECK(WriteTextFile(
       legacy_path,

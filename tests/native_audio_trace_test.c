@@ -324,6 +324,22 @@ static void TestExtendedPairAndUploadCancel(void) {
          kNativeAudioOutcome_CanceledSongTransition);
 }
 
+static void TestExtendedPolicyOutcomes(void) {
+  NativeAudioTraceModel_Reset();
+  for (int outcome = kNativeAudioOutcome_BlockedSelf;
+       outcome <= kNativeAudioOutcome_SequenceUnavailable; ++outcome) {
+    uint64_t serial = NativeAudioTraceModel_PostExtendedRequest(
+        kNativeAudioRequest_Sfx, 0x10, "policy", 0, 1, 0, 0, 1);
+    NativeAudioTraceModel_ExtendedSequenceStart(serial, 1, 15, 2);
+    NativeAudioTraceModel_ExtendedPolicy(serial, 999, outcome, 3);
+    NativeAudioTraceModel_ExtendedSequenceEnd(serial, 1, 4);
+    NativeAudioTraceModel_ExtendedCancel(serial, 5);
+    assert(Request(serial)->outcome == outcome);
+    assert(Request(serial)->replaced_by_serial == 999);
+    assert(Request(serial)->active_lanes == 0);
+  }
+}
+
 int main(void) {
   TestMailboxOverwrite();
   TestMailboxDuplicateCoalescing();
@@ -343,6 +359,7 @@ int main(void) {
   TestMusicSuppressionIsAttributedToLaneOwner();
   TestExtendedTransportLifecycle();
   TestExtendedPairAndUploadCancel();
+  TestExtendedPolicyOutcomes();
   puts("native audio trace tests passed");
   return 0;
 }

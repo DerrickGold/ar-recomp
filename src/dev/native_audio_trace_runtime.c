@@ -126,6 +126,19 @@ static void OnExtendedDisposition(
       RtlApuCycleCount());
 }
 
+static void OnExtendedPolicy(
+    uint64_t serial, uint64_t other_serial, NativeAudioDisposition disposition) {
+  static const NativeAudioRequestOutcome outcomes[] = {
+    kNativeAudioOutcome_BlockedSelf, kNativeAudioOutcome_RestartedSelf,
+    kNativeAudioOutcome_ReplacedSelf, kNativeAudioOutcome_ReplacedPending,
+    kNativeAudioOutcome_CapacityDrop,
+    kNativeAudioOutcome_SequenceUnavailable,
+  };
+  if ((unsigned)disposition < sizeof(outcomes) / sizeof(outcomes[0]))
+    NativeAudioTraceModel_ExtendedPolicy(
+        serial, other_serial, outcomes[disposition], RtlApuCycleCount());
+}
+
 static void OnExtendedStart(
     uint64_t serial, uint8_t lane, uint8_t virtual_voice) {
   NativeAudioTraceModel_ExtendedSequenceStart(
@@ -174,6 +187,7 @@ bool NativeAudioTrace_Init(SrRunnerHandle *runner) {
       return false;
     }
     g_native_audio_extension_trace_disposition_hook = OnExtendedDisposition;
+    g_native_audio_extension_trace_policy_hook = OnExtendedPolicy;
     g_native_audio_extension_trace_start_hook = OnExtendedStart;
     g_native_audio_extension_trace_end_hook = OnExtendedEnd;
     g_native_audio_extension_trace_cancel_hook = OnExtendedCancel;
@@ -219,6 +233,8 @@ void NativeAudioTrace_Shutdown(void) {
   s_runner_api = NULL;
   if (g_native_audio_extension_trace_disposition_hook == OnExtendedDisposition)
     g_native_audio_extension_trace_disposition_hook = NULL;
+  if (g_native_audio_extension_trace_policy_hook == OnExtendedPolicy)
+    g_native_audio_extension_trace_policy_hook = NULL;
   if (g_native_audio_extension_trace_start_hook == OnExtendedStart)
     g_native_audio_extension_trace_start_hook = NULL;
   if (g_native_audio_extension_trace_end_hook == OnExtendedEnd)
@@ -419,6 +435,8 @@ void NativeAudioTrace_Report(void) {
           "song-cancelled=%llu suppressed=%llu "
           "native-retriggers=%llu "
           "extended-coalesced=%llu extended-overflow=%llu "
+          "self-blocked=%llu self-restarted=%llu self-replaced=%llu "
+          "pending-replaced=%llu capacity-drop=%llu sequence-unavailable=%llu "
           "pending=%llu dsp-writes=%llu "
           "music-updates-suppressed=%llu unattributed=%llu\n",
           (unsigned long long)stats.requests,
@@ -442,6 +460,12 @@ void NativeAudioTrace_Report(void) {
               kNativeAudioOutcome_CoalescedExtendedDuplicate],
           (unsigned long long)stats.outcome[
               kNativeAudioOutcome_ExtendedFifoOverflow],
+          (unsigned long long)stats.outcome[kNativeAudioOutcome_BlockedSelf],
+          (unsigned long long)stats.outcome[kNativeAudioOutcome_RestartedSelf],
+          (unsigned long long)stats.outcome[kNativeAudioOutcome_ReplacedSelf],
+          (unsigned long long)stats.outcome[kNativeAudioOutcome_ReplacedPending],
+          (unsigned long long)stats.outcome[kNativeAudioOutcome_CapacityDrop],
+          (unsigned long long)stats.outcome[kNativeAudioOutcome_SequenceUnavailable],
           (unsigned long long)stats.outcome[kNativeAudioOutcome_Pending],
           (unsigned long long)stats.dsp_writes,
           (unsigned long long)stats.music_updates_suppressed,

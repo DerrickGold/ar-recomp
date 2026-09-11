@@ -41,6 +41,11 @@ static struct {
   uint8_t tilemap[kSimTownCanvasTiles * kSimTownCanvasTiles * 2];
   uint16_t cgram[kBgPaletteColorCount];
   uint16_t chars[kCharWords];
+  /* Decode each changed character once, not once per occurrence in the
+   * 4096-cell canvas (or every cleaned mountain/bridge metatile). Palette and
+   * backdrop remain independent so fades never require re-decoding indices. */
+  uint8_t decoded[kTileCount][8 * 8];
+  uint32_t palette[kBgPaletteColorCount];
   /* Half-open horizontal span for each tile row; x1<=x0 means clean. */
   int dirty_x0[kSimTownCanvasTiles], dirty_x1[kSimTownCanvasTiles];
   uint32_t pixels[kSimTownCanvasPixels * kSimTownCanvasPixels];
@@ -115,19 +120,24 @@ static uint16_t TilemapEntry(const uint8_t *tilemap, int tile_x, int tile_y) {
   return (uint16_t)(tilemap[word * 2] | (tilemap[word * 2 + 1] << 8));
 }
 
-static unsigned TilePixelIndex(const uint16_t *chars, uint16_t entry,
-                               int pixel_x, int pixel_y) {
-  const uint16_t *art = chars + (size_t)(entry & 0x3FF) * kTileWords;
+static unsigned TilePixelIndex(uint16_t entry, int pixel_x, int pixel_y) {
   bool flip_x = (entry & 0x4000) != 0, flip_y = (entry & 0x8000) != 0;
   int source_x = flip_x ? 7 - pixel_x : pixel_x;
   int source_y = flip_y ? 7 - pixel_y : pixel_y;
-  uint16_t low = art[source_y];
-  uint16_t high = art[source_y + 8];
-  int shift = 7 - source_x;
-  return ((low >> shift) & 1) |
-      (((low >> (shift + 8)) & 1) << 1) |
-      (((high >> shift) & 1) << 2) |
-      (((high >> (shift + 8)) & 1) << 3);
+  return g_canvas.decoded[entry & 0x3FF][source_y * 8 + source_x];
+}
+
+static void DecodeCharacter(int tile, const uint16_t *chars) {
+  const uint16_t *art = chars + (size_t)tile * kTileWords;
+  for (int y = 0; y < 8; y++) {
+    const uint16_t low = art[y], high = art[y + 8];
+    for (int x = 0; x < 8; x++) {
+      const int shift = 7 - x;
+      g_canvas.decoded[tile][y * 8 + x] = (uint8_t)(
+          ((low >> shift) & 1) | (((low >> (shift + 8)) & 1) << 1) |
+          (((high >> shift) & 1) << 2) | (((high >> (shift + 8)) & 1) << 3));
+    }
+  }
 }
 
 static void MarkDirtyTile(int tile_x, int tile_y) {
@@ -142,17 +152,16 @@ static void MarkDirtyTile(int tile_x, int tile_y) {
 }
 
 static void RenderTile(int tile_x, int tile_y, uint16_t entry,
-                       const uint16_t *chars, const uint32_t *palette,
                        uint32_t opaque_backdrop) {
   const uint32_t *bank =
-      palette + ((entry >> 10) & 7) * kPaletteColorsPerBank;
+      g_canvas.palette + ((entry >> 10) & 7) * kPaletteColorsPerBank;
   for (int row = 0; row < 8; row++) {
     uint32_t *out = g_canvas.pixels +
         (size_t)(tile_y * 8 + row) * kSimTownCanvasPixels + tile_x * 8;
     uint8_t *source_opaque = g_canvas.source_opaque +
         (size_t)(tile_y * 8 + row) * kSimTownCanvasPixels + tile_x * 8;
     for (int column = 0; column < 8; column++) {
-      unsigned index = TilePixelIndex(chars, entry, column, row);
+      unsigned index = TilePixelIndex(entry, column, row);
       source_opaque[column] = index != 0;
       /* Colour zero is transparent on hardware and the backdrop shows
        * through it; matching that keeps the canvas opaque everywhere so it
@@ -165,9 +174,6 @@ static void RenderTile(int tile_x, int tile_y, uint16_t entry,
 bool SimTownCanvas_RenderTerrainMetatile(
     const uint8 *wram, uint8_t metatile, uint32_t out_pixels[16 * 16]) {
   if (!wram || !out_pixels || !g_canvas.have_source) return false;
-  uint32_t palette[kBgPaletteColorCount];
-  for (int i = 0; i < kBgPaletteColorCount; i++)
-    palette[i] = PaletteArgb(g_canvas.cgram[i], g_canvas.brightness);
   uint32_t opaque_backdrop = g_canvas.backdrop | 0xFF000000u;
   const uint8_t *definition = wram + kTerrainDefinitionsWram +
       (size_t)metatile * kTerrainDefinitionBytes;
@@ -175,14 +181,13 @@ bool SimTownCanvas_RenderTerrainMetatile(
     uint16_t entry = (uint16_t)(definition[quadrant * 2] |
         (definition[quadrant * 2 + 1] << 8));
     entry &= kTerrainDefinitionVisualMask;
-    const uint32_t *bank = palette +
+    const uint32_t *bank = g_canvas.palette +
         ((entry >> 10) & 7) * kPaletteColorsPerBank;
     int x0 = (quadrant & 1) * 8;
     int y0 = (quadrant >> 1) * 8;
     for (int row = 0; row < 8; row++)
       for (int column = 0; column < 8; column++) {
-        unsigned index = TilePixelIndex(
-            g_canvas.chars, entry, column, row);
+        unsigned index = TilePixelIndex(entry, column, row);
         out_pixels[(y0 + row) * 16 + x0 + column] =
             index ? bank[index] : opaque_backdrop;
       }
@@ -234,9 +239,12 @@ void SimTownCanvas_Render(uint8_t town, const uint8 *wram,
     }
   }
 
-  uint32_t palette[kBgPaletteColorCount];
-  for (int i = 0; i < kBgPaletteColorCount; i++)
-    palette[i] = PaletteArgb(cgram[i], brightness);
+  if (palette_changed || full_repaint)
+    for (int i = 0; i < kBgPaletteColorCount; i++)
+      g_canvas.palette[i] = PaletteArgb(cgram[i], brightness);
+  if (chars_changed)
+    for (int tile = 0; tile < kTileCount; tile++)
+      if (full_repaint || changed_chars[tile]) DecodeCharacter(tile, live_chars);
   uint32_t opaque_backdrop = backdrop_argb | 0xFF000000u;
   bool pixels_changed = false;
   bool tilemap_visual_changed = source_changed;
@@ -255,7 +263,7 @@ void SimTownCanvas_Render(uint8_t town, const uint8 *wram,
       if (!redraw && palette_changed)
         redraw = changed_palettes[(entry >> 10) & 7];
       if (!redraw) continue;
-      RenderTile(tile_x, tile_y, entry, live_chars, palette, opaque_backdrop);
+      RenderTile(tile_x, tile_y, entry, opaque_backdrop);
       if (!full_repaint) MarkDirtyTile(tile_x, tile_y);
       pixels_changed = true;
     }

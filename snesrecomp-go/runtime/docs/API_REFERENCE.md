@@ -483,15 +483,25 @@ not observable through the extended-voice API.
 
 ### APU timing ownership and profiling
 
-`RtlRunFrame` advances a serialized APU target by
-`RTL_APU_TIMELINE_CYCLES_PER_TICK` (17,088 slots, or 534 native stereo frames)
-once per 60 Hz game tick. `RtlRenderAudio` may advance the same APU first when
+`RtlRunFrame` advances a serialized APU target by the rational NTSC interval
+`357366 * 5632 / 118125` APU cycles per game tick (about 60.0988 Hz).
+`game/audio_timing.h` defines the shared nominal 1.024 MHz APU / 32 kHz PCM
+clock; fractional cycles carry between ticks. Display refresh is independent.
+`RtlRenderAudio` may advance the same APU first when
 an active consumer needs PCM. Timeline advancement executes only the positive
 gap between the target and the actual semantic APU clock, so it never repeats
 consumer work. With no consumer, the game tick owns the full gap; headless and
 windowed execution therefore use the same target clock. Host wall time and
 audio callback block size do not enter emulated port scheduling. The target,
-actual cycle clock, DSP slot, and scheduled writes are save-state data.
+fractional cycle remainder, actual cycle clock, DSP slot, and scheduled writes
+are save-state data. Production yields the audio lock at most every 256 APU
+cycles and rechecks the clock after reacquiring it. This bounds a producer's
+lock-holding work without skipping DSP slots or repeating callback work.
+
+Snapshot version 14 includes the new DSP bus latches and rational phase;
+older quick states are rejected, not interpreted under a different layout.
+Semantic digest schema 4 includes these execution-affecting fields. The public
+runner ABI remains V2; digest schema and snapshot versions are separate.
 
 `RtlAdvanceApuTimeline` is exposed for a custom loop that intentionally bypasses
 `RtlRunFrame`; normal integrations must not call both for the same tick.

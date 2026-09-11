@@ -7,6 +7,9 @@
 #include <string.h>
 
 #include "host/host_clock.h"
+#include "performance_metrics.h"
+
+_Static_assert((int)kPerformance_ActionCount == (int)kDioramaPerformanceStage_Count, "Action metric stage mapping");
 
 enum { kDioramaPerformanceWindowNs = 1000000000 };
 
@@ -59,7 +62,7 @@ _Static_assert(
         kDioramaPerformanceStage_Count,
     "every Diorama performance stage needs a report label");
 
-bool DioramaPerformance_Enabled(void) {
+static bool LogEnabled(void) {
   enum { kUnknown, kDisabled, kEnabled };
   int state = atomic_load_explicit(&s_enabled_state, memory_order_acquire);
   if (state != kUnknown) return state == kEnabled;
@@ -71,6 +74,10 @@ bool DioramaPerformance_Enabled(void) {
       memory_order_release, memory_order_acquire);
   return atomic_load_explicit(
       &s_enabled_state, memory_order_acquire) == kEnabled;
+}
+
+bool DioramaPerformance_Enabled(void) {
+  return LogEnabled() || PerformanceMetrics_Enabled();
 }
 
 static uint64_t DioramaPerformanceNow(void) {
@@ -92,6 +99,9 @@ void DioramaPerformance_End(DioramaPerformanceScope scope) {
   if (!scope.active) return;
   const uint64_t elapsed_ns =
       HostClock_Nanoseconds() - scope.started_ns;
+  PerformanceMetrics_Record(PerformanceMetrics_Epoch(),
+      (PerformanceStage)(kPerformance_ActionFirst + scope.stage), elapsed_ns);
+  if (!LogEnabled()) return;
   LockPerformanceData();
   DioramaPerformanceCounter *counter = &s_data.counters[scope.stage];
   counter->elapsed_ns += elapsed_ns;
@@ -101,7 +111,8 @@ void DioramaPerformance_End(DioramaPerformanceScope scope) {
 
 void DioramaPerformance_AddPlaneSync(bool succeeded, bool uploaded,
                                      uint64_t uploaded_bytes) {
-  if (!DioramaPerformance_Enabled()) return;
+  if (succeeded && uploaded) PerformanceMetrics_Add(kPerformanceCount_UploadBytes, uploaded_bytes);
+  if (!LogEnabled()) return;
   LockPerformanceData();
   s_data.plane_syncs++;
   if (!succeeded) {
@@ -114,7 +125,7 @@ void DioramaPerformance_AddPlaneSync(bool succeeded, bool uploaded,
 }
 
 void DioramaPerformance_SetRasterViewport(int width, int height) {
-  if (!DioramaPerformance_Enabled()) return;
+  if (!LogEnabled()) return;
   if (width < 0) width = 0;
   if (height < 0) height = 0;
   atomic_store_explicit(&s_viewport_width, width, memory_order_release);
@@ -122,7 +133,7 @@ void DioramaPerformance_SetRasterViewport(int width, int height) {
 }
 
 void DioramaPerformance_SetViewport(int width, int height) {
-  if (!DioramaPerformance_Enabled()) return;
+  if (!LogEnabled()) return;
   DioramaPerformance_SetRasterViewport(width, height);
   LockPerformanceData();
   if (width > 0 && height > 0)
@@ -131,7 +142,7 @@ void DioramaPerformance_SetViewport(int width, int height) {
 }
 
 void DioramaPerformance_SetPlane(int plane) {
-  if (!DioramaPerformance_Enabled()) return;
+  if (!LogEnabled()) return;
   atomic_store_explicit(&s_current_plane, plane, memory_order_release);
 }
 
@@ -229,7 +240,13 @@ static uint64_t DrawCoveragePixels(
 void DioramaPerformance_AddDraw(
     bool succeeded, const ArRenderVertex2D *vertices, int vertex_count,
     const int32_t *indices, int index_count, ArRenderBlendMode blend) {
-  if (!DioramaPerformance_Enabled()) return;
+  if (succeeded) {
+    PerformanceMetrics_Add(kPerformanceCount_Draws, 1);
+    if (vertex_count > 0) PerformanceMetrics_Add(kPerformanceCount_Vertices, (uint64_t)vertex_count);
+  }
+  /* The interactive overlay must not run the expensive CPU triangle-coverage
+   * estimator. Retain that opt-in analysis only for the legacy log profiler. */
+  if (!LogEnabled()) return;
   const int width = atomic_load_explicit(
       &s_viewport_width, memory_order_acquire);
   const int height = atomic_load_explicit(
@@ -330,7 +347,7 @@ static void DioramaPerformanceReport(const DioramaPerformanceData *data,
 }
 
 void DioramaPerformance_PresentCompleted(void) {
-  if (!DioramaPerformance_Enabled()) return;
+  if (!LogEnabled()) return;
   const uint64_t now = DioramaPerformanceNow();
   DioramaPerformanceData snapshot;
   bool report = false;
@@ -347,5 +364,5 @@ void DioramaPerformance_PresentCompleted(void) {
   }
   UnlockPerformanceData();
 
-  if (report) DioramaPerformanceReport(&snapshot, window_ns);
+  if (report && LogEnabled()) DioramaPerformanceReport(&snapshot, window_ns);
 }

@@ -6,6 +6,23 @@
 
 enum { kArgb8888BytesPerPixel = (int)sizeof(uint32_t) };
 
+/* Byte pointers can have arbitrary alignment and pitch. Let memcmp use the
+ * platform's block implementation without introducing aliasing/alignment or
+ * CPU-instruction requirements into this portable upload policy. */
+static size_t EqualPrefix(const uint8_t *a, const uint8_t *b, size_t bytes) {
+  size_t at = 0;
+  while (bytes - at >= 32 && !memcmp(a + at, b + at, 32)) at += 32;
+  while (at < bytes && a[at] == b[at]) at++;
+  return at;
+}
+
+static size_t EqualSuffixStart(const uint8_t *a, const uint8_t *b,
+                               size_t first, size_t end) {
+  while (end - first >= 32 && !memcmp(a + end - 32, b + end - 32, 32)) end -= 32;
+  while (end > first && a[end - 1] == b[end - 1]) end--;
+  return end;
+}
+
 void PresentationUploadMirror_Reset(PresentationUploadMirror *mirror) {
   if (!mirror) return;
   free(mirror->pixels);
@@ -44,20 +61,19 @@ bool PresentationUploadMirror_FindDirtyRect(
     if (memcmp(current_row, previous_row, row_bytes) == 0)
       continue;
 
-    size_t first_byte = 0;
-    while (first_byte < row_bytes &&
-           current_row[first_byte] == previous_row[first_byte])
-      first_byte++;
-    size_t last_byte = row_bytes;
-    while (last_byte > first_byte &&
-           current_row[last_byte - 1] == previous_row[last_byte - 1])
-      last_byte--;
-    const int row_x0 = (int)(first_byte / kArgb8888BytesPerPixel);
-    const int row_x1 = (int)(
-        (last_byte + (size_t)kArgb8888BytesPerPixel - 1u) /
-        (size_t)kArgb8888BytesPerPixel);
-    if (row_x0 < x0) x0 = row_x0;
-    if (row_x1 > x1) x1 = row_x1;
+    /* Only pixels outside the accumulated horizontal bounds can expand the
+     * rectangle. In particular, a full-width change needs no more edge scans.
+     * Keep checking whole rows to preserve exact vertical bounds. */
+    if (x0) {
+      const size_t first_byte = EqualPrefix(current_row, previous_row,
+          (size_t)x0 * kArgb8888BytesPerPixel);
+      x0 = (int)(first_byte / kArgb8888BytesPerPixel);
+    }
+    if (x1 < width) {
+      const size_t last_byte = EqualSuffixStart(current_row, previous_row,
+          (size_t)x1 * kArgb8888BytesPerPixel, row_bytes);
+      x1 = (int)((last_byte + kArgb8888BytesPerPixel - 1u) / kArgb8888BytesPerPixel);
+    }
     if (y < y0) y0 = y;
     y1 = y + 1;
   }

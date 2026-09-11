@@ -27,6 +27,7 @@ when regenerating on a non-Windows host, for example:
 Binding convention (SDL_gpu.h, "Shader Resources") — the authored GLSL must
 match it or the shader will compile and then silently misbehave:
 
+    vertex stage: set 0 = sampled textures, set 1 = uniform buffers
     fragment stage: set 2 = sampled textures, set 3 = uniform buffers
 
 Usage:
@@ -200,11 +201,13 @@ def verify_msl_bindings(source_path, msl):
 def verify_hlsl_bindings(source_path, hlsl):
     """Pin SDL_GPU's D3D12 register-space and semantic conventions."""
     source = source_path.read_text()
+    resource_space = 0 if shader_stage(source_path) == "vert" else 2
     expected = ["TEXCOORD0"]
     if "sampler" in source:
-        expected.extend(["register(t0, space2)", "register(s0, space2)"])
+        expected.extend([f"register(t0, space{resource_space})",
+                         f"register(s0, space{resource_space})"])
     if re.search(r"\buniform\s+(?!sampler)", source):
-        expected.append("register(b0, space3)")
+        expected.append(f"register(b0, space{resource_space + 1})")
     missing = [token for token in expected if token not in hlsl]
     if missing:
         die(

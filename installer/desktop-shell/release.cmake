@@ -1,7 +1,8 @@
 # Called after configuring the matching payload; no CLI archive is required.
-# Direct packagers never overwrite; this release publisher replaces
-# only its explicitly named generated deliverables, after a successful build.
+# Direct packagers never overwrite; this release publisher replaces only its
+# explicitly named direct and portable deliverables after one successful build.
 cmake_minimum_required(VERSION 3.25)
+include("${CMAKE_CURRENT_LIST_DIR}/portable-release.cmake")
 set(_platforms macos-arm64 macos-x86_64 linux-x86_64 linux-arm64 windows-x86_64 windows-arm64 steam-deck)
 if(NOT BUILDER_PLATFORM IN_LIST _platforms)
     message(FATAL_ERROR "Unknown BUILDER_PLATFORM: ${BUILDER_PLATFORM}")
@@ -30,14 +31,20 @@ else()
     set(_published_ext .exe)
 endif()
 set(_filename "ActRaiserRecompBuilder-${BUILDER_PLATFORM}${_published_ext}")
-foreach(_path "${_release}" "${_release}/${_filename}" "${_release}/${_filename}.sha256")
+builder_portable_release_name("${BUILDER_PLATFORM}" _portable_filename)
+foreach(_path "${_release}"
+        "${_release}/${_filename}" "${_release}/${_filename}.sha256"
+        "${_release}/${_portable_filename}" "${_release}/${_portable_filename}.sha256")
     if(IS_SYMLINK "${_path}")
         message(FATAL_ERROR "Refusing release symlink: ${_path}")
     endif()
 endforeach()
-if(IS_DIRECTORY "${_release}/${_filename}" OR IS_DIRECTORY "${_release}/${_filename}.sha256")
-    message(FATAL_ERROR "Release output collides with a directory")
-endif()
+foreach(_leaf "${_filename}" "${_filename}.sha256"
+        "${_portable_filename}" "${_portable_filename}.sha256")
+    if(IS_DIRECTORY "${_release}/${_leaf}")
+        message(FATAL_ERROR "Release output collides with a directory: ${_leaf}")
+    endif()
+endforeach()
 string(RANDOM LENGTH 12 ALPHABET abcdef0123456789 _suffix)
 set(_stage "${_build}/desktop-release-${_suffix}")
 file(MAKE_DIRECTORY "${_stage}" "${_release}")
@@ -51,9 +58,18 @@ if(_kind STREQUAL "macos")
     execute_process(COMMAND "${_ditto}" -c -k --keepParent --sequesterRsrc "${_app}" "${_artifact}"
         COMMAND_ERROR_IS_FATAL ANY)
 endif()
+builder_create_portable_release("${_kind}" "${BUILDER_PLATFORM}" "${_app}"
+    "${_stage}" _portable_artifact _portable_filename)
 file(SHA256 "${_artifact}" _sha)
-file(WRITE "${_stage}/checksum" "${_sha}  ${_filename}\n")
+file(WRITE "${_stage}/${_filename}.sha256" "${_sha}  ${_filename}\n")
+file(SHA256 "${_portable_artifact}" _portable_sha)
+file(WRITE "${_stage}/${_portable_filename}.sha256"
+    "${_portable_sha}  ${_portable_filename}\n")
 file(RENAME "${_artifact}" "${_release}/${_filename}")
-file(RENAME "${_stage}/checksum" "${_release}/${_filename}.sha256")
+file(RENAME "${_stage}/${_filename}.sha256" "${_release}/${_filename}.sha256")
+file(RENAME "${_portable_artifact}" "${_release}/${_portable_filename}")
+file(RENAME "${_stage}/${_portable_filename}.sha256"
+    "${_release}/${_portable_filename}.sha256")
 file(REMOVE_RECURSE "${_stage}")
 message(STATUS "Desktop release: ${_release}/${_filename}")
+message(STATUS "Portable release: ${_release}/${_portable_filename}")

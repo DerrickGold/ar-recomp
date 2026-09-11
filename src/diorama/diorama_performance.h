@@ -30,7 +30,9 @@ typedef struct DioramaPerformanceScope {
 } DioramaPerformanceScope;
 
 /* AR_ACTION_PERF=1 enables this profiler independently. AR_PERF=1 enables it
- * beside the existing whole-runtime and SIM profilers for recorded A/B runs. */
+ * beside the existing whole-runtime and SIM profilers for recorded A/B runs.
+ * The interactive pipeline collector also uses lightweight stage/work hooks,
+ * but never enables the legacy CPU triangle-coverage estimator. */
 bool DioramaPerformance_Enabled(void);
 DioramaPerformanceScope DioramaPerformance_Begin(
     DioramaPerformanceStage stage);

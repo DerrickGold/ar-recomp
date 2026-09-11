@@ -45,7 +45,7 @@ preview package. It does not derive from the inherited C runner.
 The slot-accurate S-DSP core in `src/snes/accuracy/dsp.cpp` and its associated
 header/generated tables are adapted from Eric Tomasso's Snaggletooth source at
 exact commit
-`65668997ed58fe78cfcef1e53c0020bd92d0d287`. That source is MIT licensed; its
+`321cb3eddde1fe0474eab31e5a88d32f413a7ff6`. That source is MIT licensed; its
 copyright and grant are retained verbatim in
 `licenses/Snaggletooth-LICENSE.txt` and installed with every runner SDK.
 
@@ -57,12 +57,17 @@ same BRR, Gaussian, envelope, noise, and 32-slot execution rules, then join at
 a bounded output/echo boundary. They are an explicitly documented extension,
 not a claim that original hardware contained a monolithic 40-voice mixer.
 Local performance adaptations replace the imported slot-table scans with an
-equivalent direct slot dispatch, provide a voice-only slot entry point for the
-parallel banks, and compile the core and bridge as one private translation
+equivalent compile-time-specialized 32-slot dispatch, provide a voice-only slot
+entry point for the parallel banks, and compile the core and bridge as one private translation
 unit. The imported arithmetic, keying, register-visibility, BRR, envelope,
-noise, native echo, and slot-order contracts remain covered by the upstream
-1,606-test suite. Dormant virtual banks fast-forward only their shared timeline
+noise, native echo, and slot-order contracts are checked by all 237 upstream
+DSP tests (2026-09-11), run against the adapted core. The refreshed tranche
+includes scheduled BRR/pitch/ADSR reads, CPU-write visibility races,
+PMON/NON/EON/DIR latches, echo FIR timing, and filter-history corrections.
+Dormant virtual banks fast-forward only their shared timeline
 on KON; all active voice state continues through the same slot engine.
+Slot specialization removes repeated schedule tests and address calculations;
+it does not skip silent voices, latch updates, RAM reads, or hardware cycles.
 
 The engine-neutral shadow-verifier design is derived from Jrickey's reusable
 recomp verifier under its MIT OR Apache-2.0 grant; its attribution is retained

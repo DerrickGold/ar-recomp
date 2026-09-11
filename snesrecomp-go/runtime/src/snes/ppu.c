@@ -1958,12 +1958,14 @@ static bool source_visible_on_screen(const Ppu *ppu, int source, bool sub,
 
 /* The packed capture path resolves MarkFullAddSubscreen itself (see the
  * full-add export in render_native_capture_line), so such a line no longer has
- * to be handed to the per-pixel reference sampler.  The two winner-mask
- * policies still need the reference screen resolves. */
+ * to be handed to the per-pixel reference sampler. Pure main-winner masks
+ * use pre-removal packed sources even alongside ordinary extraction. Owning-
+ * screen masks and combined policies retain the reference resolves. */
 static bool capture_needs_reference_sampler(
         const PpuOverlayCapture *capture) {
-    return (capture->flags & (kPpuOverlayFlag_MarkMainScreenWinner |
-                              kPpuOverlayFlag_MarkOwningScreenWinner)) != 0u;
+    return (capture->flags & kPpuOverlayFlag_MarkOwningScreenWinner) != 0u ||
+        ((capture->flags & kPpuOverlayFlag_MarkMainScreenWinner) != 0u &&
+         capture->flags != kPpuOverlayFlag_MarkMainScreenWinner);
 }
 
 static bool capture_is_deferred(const PpuOverlayCapture *capture) {
@@ -2377,10 +2379,11 @@ static bool native_fast_eligible(const Ppu *ppu, int screen_y,
     for (int source = 0; source < kPpuOverlaySource_Count; ++source) {
         const PpuOverlayCapture *capture_policy =
             &ppu->overlayCaptures[source];
-        if (capture_surface_bound(ppu, source) &&
-            native_capture_intersects(capture_policy, screen_y) &&
-            capture_needs_reference_sampler(capture_policy))
-            return false;
+        if (!capture_surface_bound(ppu, source) ||
+            capture_policy->x1 <= capture_policy->x0 ||
+            screen_y < capture_policy->y0 || screen_y >= capture_policy->y1)
+            continue;
+        if (capture_needs_reference_sampler(capture_policy)) return false;
     }
     return true;
 }
@@ -3611,7 +3614,9 @@ static void native_write_overlay_packed(
         ? plan->bands[band - 1] : plan->primary;
     if (destination == plan->primary) band = 0;
     color = ppu->cgram[palette];
-    if ((plan->capture->flags &
+    if (plan->capture->flags == kPpuOverlayFlag_MarkMainScreenWinner) {
+        argb = 0xffffffffu;
+    } else if ((plan->capture->flags &
          kPpuOverlayFlag_ApplyBgFixedColorSubtract) != 0u &&
         source < kPpuOverlaySource_Obj) {
         color = color_math(color, ppu->fixedColor, true, false);
@@ -3806,7 +3811,8 @@ static bool render_native_capture_line(Ppu *ppu, int screen_y,
     bool output_needs_sub = PPU_addSubscreen(ppu) || PPU_pseudoHires(ppu) ||
         PPU_mode(ppu) == 5 || PPU_mode(ppu) == 6;
     bool source_needs_sub[kPpuOverlaySource_Count];
-    uint8_t full_add_mask = 0u;
+    uint8_t full_add_mask = 0u, main_winner_mask = 0u;
+    bool removes_source = false;
     int obj_offset = authentic ? ppu->authenticObjOffsetX : 0;
     int left = authentic ? 0 : -ppu->extraLeftCur;
     int right = authentic ? kPpuXPixels
@@ -3841,6 +3847,15 @@ static bool render_native_capture_line(Ppu *ppu, int screen_y,
         if (source_capture_line && (source_capture->flags &
                 kPpuOverlayFlag_MarkFullAddSubscreen) != 0u)
             full_add_mask |= (uint8_t)(1u << source);
+        if (source_capture_line && (source_capture->flags &
+                kPpuOverlayFlag_RemoveFromGame) != 0u)
+            removes_source = true;
+        if (capture_surface_bound(ppu, source) &&
+                source_capture->x1 > source_capture->x0 &&
+                screen_y >= source_capture->y0 && screen_y < source_capture->y1 &&
+                source_capture->flags ==
+                kPpuOverlayFlag_MarkMainScreenWinner)
+            main_winner_mask |= (uint8_t)(1u << source);
     }
     /* The full-add export compares the complete pre-removal subscreen winner
      * against the main-screen winner, so every source on such a line needs its
@@ -4066,7 +4081,7 @@ static bool render_native_capture_line(Ppu *ppu, int screen_y,
             uint16_t source_main = layer_main[layer][index];
             uint16_t source_sub = source_needs_sub[layer]
                 ? layer_sub[layer][index] : 0u;
-            if ((full_add_mask & (1u << layer)) == 0u) {
+            if (((full_add_mask | main_winner_mask) & (1u << layer)) == 0u) {
                 uint16_t captured = owner_sub ? source_sub : source_main;
                 if (captured != 0u)
                     native_write_overlay_packed(
@@ -4121,7 +4136,7 @@ static bool render_native_capture_line(Ppu *ppu, int screen_y,
                     uint16_t captured = (owner_sub ? show_sub : show_main)
                         ? native_obj_cache_pixel(obj_capture_cache, x) : 0u;
                     if (captured != 0u &&
-                        (full_add_mask & (1u << layer)) == 0u)
+                        ((full_add_mask | main_winner_mask) & (1u << layer)) == 0u)
                         native_write_overlay_packed(
                             ppu, layer, x, captured, 0xffu,
                             &overlay_plans[layer]);
@@ -4142,6 +4157,37 @@ static bool render_native_capture_line(Ppu *ppu, int screen_y,
                 if (output_needs_sub && source_sub > sub_pixels[index])
                     sub_pixels[index] = source_sub;
             }
+        }
+    }
+    /* Observational masks see pre-removal winners, including native text/OBJ
+     * subsequently extracted by the host. Reuse resolved packed sources;
+     * sampling the original screen again costs five source fetches per pixel.
+     * With no removal the final main winners already describe that screen. */
+    if (main_winner_mask != 0u) {
+        const uint16_t *winners = main_pixels;
+        if (removes_source) {
+            const int begin = left + kPpuExtraLeftRight;
+            const int end = right + kPpuExtraLeftRight;
+            for (int index = begin; index < end; ++index) original_main[index] = backdrop;
+            for (int source = 0; source < kPpuOverlaySource_Count; ++source) {
+                if ((source_mask & (1u << source)) == 0u) continue;
+                for (int index = begin; index < end; ++index)
+                    if (layer_main[source][index] > original_main[index])
+                        original_main[index] = layer_main[source][index];
+            }
+            winners = original_main;
+        }
+        for (int x = left; x < right; ++x) {
+            int index = x + kPpuExtraLeftRight;
+            uint16_t winner = winners[index];
+            unsigned source = native_pixel_layer(winner);
+            if (source >= kPpuOverlaySource_Count ||
+                (main_winner_mask & (1u << source)) == 0u ||
+                !capture_active(&ppu->overlayCaptures[source], x, screen_y))
+                continue;
+            native_write_overlay_packed(ppu, (int)source, x, winner,
+                source < 2u ? bands[source][index] : 0xffu,
+                &overlay_plans[source]);
         }
     }
     /* MarkFullAddSubscreen: export whichever source wins the COMPLETE

@@ -53,6 +53,9 @@ static struct {
   uint16_t water_source;
   bool water_source_valid;
   uint32_t palette[kWorldPaletteEntries];
+  /* Expand each source tile once, not once per placement in the 128x128
+   * map. Only the two animated water sources change after ROM loading. */
+  uint32_t tile_pixels[kWorldTileCount][kWorldTileBytes];
   uint32_t serial;
   uint32_t geography_serial;
   uint8_t mountain_pixels[kWorldTileCount];
@@ -76,7 +79,7 @@ static struct {
 bool SimWorldMap_CopyTileArt(uint8_t tile, uint32_t pixels[64], uint8_t indices[64]) {
   if (!g_world.available || !pixels) return false;
   const uint8_t *source = g_world.tiles + tile * kWorldTileBytes;
-  for (int p = 0; p < kWorldTileBytes; p++) pixels[p] = g_world.palette[source[p]];
+  memcpy(pixels, g_world.tile_pixels[tile], sizeof(g_world.tile_pixels[tile]));
   if (indices) memcpy(indices, source, kWorldTileBytes);
   return true;
 }
@@ -97,6 +100,12 @@ static bool OnlyOpenWater(const uint8_t pixels[kWorldTileBytes]) {
   for (int p = 0; p < kWorldTileBytes; p++)
     if (pixels[p] != 0x10 && pixels[p] != 0x11) return false;
   return true;
+}
+
+static void ExpandTilePixels(unsigned tile) {
+  const uint8_t *source = g_world.tiles + tile * kWorldTileBytes;
+  for (int p = 0; p < kWorldTileBytes; ++p)
+    g_world.tile_pixels[tile][p] = g_world.palette[source[p]];
 }
 
 bool SimWorldMap_Init(const uint8_t *rom_data, size_t rom_size) {
@@ -135,6 +144,7 @@ bool SimWorldMap_Init(const uint8_t *rom_data, size_t rom_size) {
     g_world.palette[i] =
         ExpandBgr555((uint16_t)(entry[0] | ((uint16_t)entry[1] << 8)));
   }
+  for (unsigned tile = 0; tile < kWorldTileCount; ++tile) ExpandTilePixels(tile);
   /* Force the first bake to be a full one: everything is "dirty" relative to
    * the (undefined) contents of the persistent pixels buffer. */
   memset(g_world.dirty, 1, sizeof(g_world.dirty));
@@ -187,6 +197,8 @@ int SimWorldMap_SetWaterAnimationSource(uint16_t source) {
          g_world.water_frames[frame], kWorldTileBytes);
   memcpy(g_world.tiles + kWorldWaterTileSecond * kWorldTileBytes,
          g_world.water_frames[frame], kWorldTileBytes);
+  ExpandTilePixels(kWorldWaterTileFirst);
+  ExpandTilePixels(kWorldWaterTileSecond);
   g_world.water_source = source;
   g_world.water_source_valid = true;
 
@@ -276,10 +288,9 @@ const uint8_t *SimWorldMap_Baseline(void) {
   return g_world.available ? g_world.baseline : NULL;
 }
 
-/* Palette-expand only the tiles that changed since their last bake into the
- * persistent CPU image, then clear their flags. This is the expensive part
- * (a palette lookup per pixel), and it is the whole point of the dirty
- * tracking: a single-tile edit touches 64 pixels, not 1,048,576.
+/* Copy only the tiles that changed since their last bake into the persistent
+ * CPU image, then clear their flags. A single-tile edit touches 64 pixels,
+ * not 1,048,576; palette expansion is shared by repeated tile placements.
  *
  * Idempotent, so both Bake and Downsample can call it: the second call in a
  * frame finds nothing dirty and does no work. Downsample must not skip it —
@@ -290,15 +301,13 @@ static void RefreshPersistentImage(void) {
     for (int tile_x = 0; tile_x < kSimWorldMapTiles; tile_x++) {
       int tile_index = tile_y * kSimWorldMapTiles + tile_x;
       if (!g_world.dirty[tile_index]) continue;
-      const uint8_t *art =
-          g_world.tiles + g_world.tilemap[tile_index] * kWorldTileBytes;
+      const uint32_t *art = g_world.tile_pixels[g_world.tilemap[tile_index]];
       for (int row = 0; row < kSimWorldMapTilePixels; row++) {
         uint32_t *out = g_world.pixels +
             (size_t)(tile_y * kSimWorldMapTilePixels + row) * kSimWorldMapPixels +
             tile_x * kSimWorldMapTilePixels;
-        const uint8_t *source = art + row * kSimWorldMapTilePixels;
-        for (int column = 0; column < kSimWorldMapTilePixels; column++)
-          out[column] = g_world.palette[source[column]];
+        memcpy(out, art + row * kSimWorldMapTilePixels,
+               kSimWorldMapTilePixels * sizeof(*out));
       }
       g_world.dirty[tile_index] = 0;
     }
@@ -335,14 +344,13 @@ bool SimWorldMap_BakeBaseline(uint32_t *pixels, int pitch_pixels) {
     for (int tile_x = 0; tile_x < kSimWorldMapTiles; tile_x++) {
       const int tile_index = tile_y * kSimWorldMapTiles + tile_x;
       const uint8_t tile = g_world.baseline[tile_index];
-      const uint8_t *art = g_world.tiles + (size_t)tile * kWorldTileBytes;
+      const uint32_t *art = g_world.tile_pixels[tile];
       for (int row = 0; row < kSimWorldMapTilePixels; row++) {
         uint32_t *out = pixels +
             (size_t)(tile_y * kSimWorldMapTilePixels + row) * pitch_pixels +
             tile_x * kSimWorldMapTilePixels;
-        const uint8_t *source = art + row * kSimWorldMapTilePixels;
-        for (int column = 0; column < kSimWorldMapTilePixels; column++)
-          out[column] = g_world.palette[source[column]];
+        memcpy(out, art + row * kSimWorldMapTilePixels,
+               kSimWorldMapTilePixels * sizeof(*out));
       }
     }
   }

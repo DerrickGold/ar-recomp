@@ -2,6 +2,7 @@
 #define SIM3D_H
 
 #include "sim_background_voxel_quality.h"
+#include "sim_background_voxels.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -201,7 +202,8 @@ bool Sim3D_TownCanvasNeedsPpuView(const SimFrameData *frame);
 void Sim3D_RenderTownCanvas(const SimFrameData *frame, const uint8 *wram,
                             const SrPpuStateSnapshot *ppu,
                             const SrBorrowedU16Span *vram,
-                            const SrBorrowedU16Span *cgram);
+                            const SrBorrowedU16Span *cgram,
+                            SimBackgroundRowDispatch dispatch, void *context);
 /* Pure painter-order reference used by focused tests. `plane_mask==0` means
  * every plane; otherwise bit P controls Sim3DPlane P. */
 void Sim3D_ComposeFlatPixels(

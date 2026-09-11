@@ -648,6 +648,7 @@ static const char *const kRefreshModeLabels[] = {
   "Limit",
   "Unlimited",
 };
+static const char *const kPerformanceOverlayLabels[] = {"Off", "Summary", "Detailed"};
 
 static const char *const kInterpolationSourceLabels[] = {
   "Native 60 Hz",
@@ -1288,6 +1289,14 @@ const SettingDesc g_setting_descs[] = {
                "Show completed host presents per second in the top-right. Use "
                "Refresh rate: Unlimited to measure maximum rendering throughput.",
                kSettingCat_Display, 0, false, NULL, NULL),
+  { "performance_overlay", "AR_PERFORMANCE_OVERLAY", "Performance overlay",
+    "Show CPU pipeline timings, frame pacing and worker activity. Detailed "
+    "adds nested stage timings; reports are also written to the run log. GPU "
+    "execution time is unavailable on this renderer, not inferred from CPU waits.",
+    kSettingType_Enum, kApply_Passive, kSettingCat_Display,
+    &g_settings.performance_overlay, 0, 0, 2, 1, false,
+    kPerformanceOverlayLabels, 3,
+    NULL, NULL, NULL, NULL, .modern_env = true },
   BOOL_SETTING_MODERN(sim3d_mode, "AR_SIM3D", "Simulation town 3D",
                "Tilt the simulation-town map into a projected ground plane. "
                "Map pickers stay in the tilted space too (build with "
@@ -2148,8 +2157,8 @@ const SettingDesc g_setting_descs[] = {
     NULL, NULL, ParseAudioVolume, FormatAudioVolume, .modern_env = true },
   { "audio_extended_channels", "AR_EXTENDED_AUDIO_CHANNELS",
     "Extended sound channels",
-    "Keep all eight music voices while queued native effects use a pool of "
-    "32 added voices. Takes effect after restart.",
+    "Keep all eight music voices and use four added hardware-style effect "
+    "banks. Repeated sounds can restart their own lane. Takes effect after restart.",
     kSettingType_Bool, kApply_Restart, kSettingCat_Audio,
     &g_settings.audio_extended_channels, 0, 0, 1, 1, false, NULL, 0,
     NULL, NULL, NULL, NULL, .modern_env = true },

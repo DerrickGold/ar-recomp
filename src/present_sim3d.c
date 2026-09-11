@@ -14,6 +14,7 @@
 #include "present_sim3d_effects.h"
 #include "present_sim3d_shadows.h"
 #include "present_sim3d_terrain.h"
+#include "present_sim3d_underlay.h"
 
 #include <math.h>
 #include <stdatomic.h>
@@ -796,27 +797,9 @@ enum {
    * features together. */
   kSimTownExtentFeatherPixels =
       kSimWorldMapTilePixels * kSimWorldMapTownScale,
-  /* Box-downsample factor for the out-of-focus copy of the world map. Four
-   * is enough to lose the 8x8 tile grid -- the detail that reads as "nearby"
-   * -- while keeping coastlines and landmasses legible as shapes. */
-  kSimUnderlayBlurDivisor = 4,
-  kSimUnderlayBlurPixels = kSimWorldMapPixels / kSimUnderlayBlurDivisor,
 };
 
 
-static ArRenderTexture s_sim_underlay_texture;
-/* Downsampled copy of the same bake, upscaled with linear filtering to stand
- * in for a blur. The far field is out of focus rather than merely dim: a
- * distant thing that is sharp reads as a small thing nearby, which is exactly
- * the wrong statement about ground the camera can never reach. */
-static ArRenderTexture s_sim_underlay_blur_texture;
-static uint32_t
-    s_sim_underlay_blur_pixels[kSimUnderlayBlurPixels *
-                               kSimUnderlayBlurPixels];
-static uint32_t s_sim_underlay_serial;
-static uint32_t s_sim_underlay_blur_serial;
-static bool s_sim_underlay_alloc_failed;
-static bool s_sim_underlay_blur_unavailable;
 static ArRenderTexture s_sim_canvas_texture;
 static uint32_t s_sim_canvas_uploaded_serial;
 typedef enum SimCanvasUploadState {
@@ -827,34 +810,6 @@ typedef enum SimCanvasUploadState {
   kSimCanvasUpload_Unavailable,
 } SimCanvasUploadState;
 static SimCanvasUploadState s_sim_canvas_upload_state;
-
-static void DisableSimUnderlayBlur(void) {
-  ArRenderDevice_DestroyTexture(
-      &g_render_device, s_sim_underlay_blur_texture);
-  s_sim_underlay_blur_texture = ArRenderTexture_Invalid();
-  s_sim_underlay_blur_serial = 0;
-  s_sim_underlay_blur_unavailable = true;
-}
-
-static void RefreshSimUnderlayBlur(uint32_t serial) {
-  if (!ArRenderTexture_IsValid(s_sim_underlay_blur_texture) || !serial)
-    return;
-  const bool downsampled = SimWorldMap_Downsample(
-      s_sim_underlay_blur_pixels, kSimUnderlayBlurPixels,
-      kSimUnderlayBlurDivisor);
-  const bool refreshed = downsampled && ArRenderDevice_UpdateTexture(
-      &g_render_device, s_sim_underlay_blur_texture, NULL,
-      s_sim_underlay_blur_pixels,
-      kSimUnderlayBlurPixels * (int)sizeof(uint32_t));
-  if (refreshed) {
-    s_sim_underlay_blur_serial = serial;
-    Sim3DPerformance_AddUpload(
-        (uint64_t)kSimUnderlayBlurPixels * kSimUnderlayBlurPixels *
-        sizeof(uint32_t));
-  } else {
-    DisableSimUnderlayBlur();
-  }
-}
 
 typedef enum SimGroundMeshCacheKind {
   kSimGroundMeshCache_UnderlayBlur,
@@ -1035,82 +990,6 @@ void UploadSimTownCanvas(void) {
     s_sim_canvas_uploaded_serial = serial;
 }
 
-/* Rebuilt only when the baked image would differ, which the serial reports.
- * The image is town-independent — only where it is sampled changes when the
- * player moves between towns — so a town change costs nothing here. */
-ArRenderTexture EnsureSimUnderlayTexture(const FrameSlot *slot) {
-  const bool sharp_current =
-      ArRenderTexture_IsValid(s_sim_underlay_texture) &&
-      s_sim_underlay_serial == slot->sim.underlay_serial;
-  const bool blur_current =
-      !ArRenderTexture_IsValid(s_sim_underlay_blur_texture) ||
-      s_sim_underlay_blur_serial == slot->sim.underlay_serial;
-  if (sharp_current && blur_current)
-    return s_sim_underlay_texture;
-  if (s_sim_underlay_alloc_failed) return ArRenderTexture_Invalid();
-
-  if (!ArRenderTexture_IsValid(s_sim_underlay_texture)) {
-    const ArRenderTextureDesc desc = {
-      .width = kSimWorldMapPixels,
-      .height = kSimWorldMapPixels,
-      .format = kArRenderPixelFormat_Argb8888,
-      .usage = kArRenderTextureUsage_Streaming,
-      .filter = kArRenderFilter_Nearest,
-      .blend = kArRenderBlendMode_Alpha,
-    };
-    if (!ArRenderDevice_CreateTexture(
-            &g_render_device, &desc, &s_sim_underlay_texture)) {
-      s_sim_underlay_alloc_failed = true;
-      fprintf(stderr, "[sim3d-underlay] world map texture unavailable: %s\n",
-              ArRenderDevice_LastError(&g_render_device));
-      return ArRenderTexture_Invalid();
-    }
-  }
-
-  if (!ArRenderTexture_IsValid(s_sim_underlay_blur_texture) &&
-      !s_sim_underlay_blur_unavailable) {
-    const ArRenderTextureDesc desc = {
-      .width = kSimUnderlayBlurPixels,
-      .height = kSimUnderlayBlurPixels,
-      .format = kArRenderPixelFormat_Argb8888,
-      .usage = kArRenderTextureUsage_Streaming,
-      .filter = kArRenderFilter_Linear,
-      .blend = kArRenderBlendMode_Alpha,
-    };
-    if (ArRenderDevice_CreateTexture(
-            &g_render_device, &desc, &s_sim_underlay_blur_texture)) {
-      /* Linear is the whole trick: the box-downsampled image scaled back up
-       * with bilinear filtering is a cheap, stable blur, and it costs one
-       * texture rather than a multi-tap pass over the full 1024 square. */
-    } else {
-      DisableSimUnderlayBlur();
-    }
-  }
-
-  if (sharp_current) {
-    /* Only the optional blur is stale. Refresh it from the persistent CPU
-     * image without rebaking or relocking the already-current sharp texture. */
-    RefreshSimUnderlayBlur(slot->sim.underlay_serial);
-    return s_sim_underlay_texture;
-  }
-
-  const uint32_t *pixels = SimWorldMap_BakedPixels();
-  if (!pixels || !ArRenderDevice_UpdateTexture(
-          &g_render_device, s_sim_underlay_texture, NULL, pixels,
-          kSimWorldMapPixels * (int)sizeof(uint32_t)))
-    return ArRenderTexture_Invalid();
-  Sim3DPerformance_AddUpload(
-      (uint64_t)kSimWorldMapPixels * kSimWorldMapPixels * sizeof(uint32_t));
-  RefreshSimUnderlayBlur(slot->sim.underlay_serial);
-  s_sim_underlay_serial = slot->sim.underlay_serial;
-  return s_sim_underlay_texture;
-}
-
-ArRenderTexture SimUnderlayBlurTexture(uint32_t serial) {
-  return serial && s_sim_underlay_blur_serial == serial
-      ? s_sim_underlay_blur_texture
-      : ArRenderTexture_Invalid();
-}
 
 /* Draws one texture as an extension of the ground plane. `texture_x_at_zero`
  * is the captured-texture column that samples the texture's left edge, and
@@ -1503,7 +1382,11 @@ static void DrawSimWorldUnderlay(const FrameSlot *slot, ArRenderRectI source,
   if (!slot->sim.underlay_serial ||
       slot->sim.underlay_haze_pct >= kPercentScale)
     return;
-  ArRenderTexture texture = EnsureSimUnderlayTexture(slot);
+  const bool want_blur = slot->sim.underlay_defocus_pct != 0 &&
+      (slot->sim.effective_features & kSimFeature_CullHaze) != 0;
+  const SimUnderlayTextures textures = PresentSim3DUnderlay_Prepare(
+      &g_render_device, slot->sim.underlay_serial, want_blur);
+  ArRenderTexture texture = textures.sharp;
   if (!ArRenderTexture_IsValid(texture)) return;
   /* Two captured pixels per world-map pixel: the world map is the town at
    * half linear resolution. */
@@ -1551,10 +1434,8 @@ static void DrawSimWorldUnderlay(const FrameSlot *slot, ArRenderRectI source,
    * to and the far field would go transparent instead of dark. */
   SimCullFade blurred_dim = focus;
   blurred_dim.fade = 0.0f;
-  ArRenderTexture blur = SimUnderlayBlurTexture(slot->sim.underlay_serial);
-  bool defocus = ArRenderTexture_IsValid(blur) &&
-      slot->sim.underlay_defocus_pct != 0 &&
-      (slot->sim.effective_features & kSimFeature_CullHaze) != 0;
+  ArRenderTexture blur = textures.blurred;
+  bool defocus = ArRenderTexture_IsValid(blur);
   if (defocus) {
     DrawSimGroundExtension(blur, texture_x_at_zero,
                            texture_y_at_zero, span, hazed, source, viewport,
@@ -1991,8 +1872,10 @@ static PresentationOutcome RenderSimProfile(
   if (clouds) {
     Sim3DPerformanceScope performance =
         Sim3DPerformance_Begin(kSim3DPerformance_Cloud);
-    DrawSimCloudShroud(slot, source, viewport, matrix);
+    outcome = PresentationOutcome_Combine(outcome,
+        DrawSimCloudShroud(slot, source, viewport, matrix));
     Sim3DPerformance_End(performance);
+    if (!PresentationOutcome_IsUsable(outcome)) return outcome;
   }
 
   if (billboards) {
@@ -2156,15 +2039,7 @@ void PresentSim3D_ResetResources(void) {
   s_sim_rim_unavailable = false;
   atomic_store_explicit(
       &s_sim_rim_mask_supported, 1, memory_order_relaxed);
-  ArRenderDevice_DestroyTexture(&g_render_device, s_sim_underlay_texture);
-  s_sim_underlay_texture = ArRenderTexture_Invalid();
-  ArRenderDevice_DestroyTexture(
-      &g_render_device, s_sim_underlay_blur_texture);
-  s_sim_underlay_blur_texture = ArRenderTexture_Invalid();
-  s_sim_underlay_serial = 0;
-  s_sim_underlay_blur_serial = 0;
-  s_sim_underlay_alloc_failed = false;
-  s_sim_underlay_blur_unavailable = false;
+  PresentSim3DUnderlay_ResetResources(&g_render_device);
   ArRenderDevice_DestroyTexture(&g_render_device, s_sim_canvas_texture);
   s_sim_canvas_texture = ArRenderTexture_Invalid();
   s_sim_canvas_uploaded_serial = 0;

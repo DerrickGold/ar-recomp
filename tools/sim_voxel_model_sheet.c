@@ -53,6 +53,7 @@ void Sim3DPerformance_AddDraw(uint64_t vertices, uint64_t indices) {
   (void)vertices;
   (void)indices;
 }
+void Sim3DPerformance_AddGeometryUpload(uint64_t bytes) { (void)bytes; }
 
 static SDL_Renderer *CreateProductionRenderer(SDL_Window *window) {
   SDL_PropertiesID properties = SDL_CreateProperties();

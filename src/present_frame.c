@@ -9,6 +9,7 @@
 #include "render_comparison.h"
 #include "session_fatal.h"
 #include "settings.h"
+#include "performance_metrics.h"
 
 extern ArRenderDevice g_render_device;
 
@@ -28,13 +29,19 @@ static CrtPostConfig CurrentCrtConfig(void) {
 
 static bool BeginCrtPost(void) {
   const CrtPostConfig config = CurrentCrtConfig();
-  return CrtPost_Begin(&g_render_device, &config);
+  const PerformanceScope performance = PerformanceMetrics_Begin(kPerformance_PostProcess);
+  const bool result = CrtPost_Begin(&g_render_device, &config);
+  PerformanceMetrics_End(performance);
+  return result;
 }
 
 static ArRenderRectI EndCrtPost(int scan_columns, int scan_lines,
                                 ArRenderRectI image) {
-  return CrtPost_End(
+  const PerformanceScope performance = PerformanceMetrics_Begin(kPerformance_PostProcess);
+  const ArRenderRectI result = CrtPost_End(
       &g_render_device, scan_columns, scan_lines, image);
+  PerformanceMetrics_End(performance);
+  return result;
 }
 
 static bool AuthenticFrameSynchronized(const FrameSlot *slot) {
@@ -115,7 +122,9 @@ static ArRenderRectI DrawFrame(const FrameSlot *slot, float alpha,
     RequestComparisonDrawFailure("transition overlay");
     return image;
   }
+  const PerformanceScope ui = PerformanceMetrics_Begin(kPerformance_HostUi);
   PresentHostUi(slot, image, output_size, presentation_fps);
+  PerformanceMetrics_End(ui);
   return image;
 }
 
