@@ -64,6 +64,7 @@
 #include "host/host_display.h"
 #include "host/host_display_pacing.h"
 #include "host/host_input.h"
+#include "host/parallel_work.h"
 #include "manual/manual_reader.h"
 #include "ini_upgrade_apply.h"
 #include "input_replay.h"
@@ -86,6 +87,7 @@
 #include "sim/sim_town_ground_art.h"
 #include "sim/sim3d.h"
 #include "constants.h"
+#include "performance_metrics.h"
 #include "platform/sdl/render_sdl.h"
 #include "platform/sdl/text_rasterizer_sdl.h"
 #include "host/font_resources.h"
@@ -316,6 +318,7 @@ static bool RunOneRecompiledFrame(uint32 live_inputs, bool *stop_running) {
     *stop_running = true;
     return false;
   }
+  PerformanceMetrics_Add(kPerformanceCount_Ticks, 1);
   return true;
 }
 
@@ -326,7 +329,7 @@ static bool RunOneRecompiledFrame(uint32 live_inputs, bool *stop_running) {
  * it (§3.5 — "wrap the per-tick RtlRunFrame"). Called once per outer
  * iteration by the headless loop (§3.6) and 0-N times per outer iteration by
  * the non-headless fixed-timestep accumulator loop (§3.1). */
-static void RunOneEmulatedTick(bool *stop_running) {
+static void RunOneEmulatedTickWork(bool *stop_running) {
   extern uint8 g_ram[];
   static int perf_on = -1;
   if (perf_on < 0) perf_on = getenv("AR_PERF") ? 1 : 0;
@@ -460,6 +463,12 @@ static void RunOneEmulatedTick(bool *stop_running) {
   }
 }
 
+static void RunOneEmulatedTick(bool *stop_running) {
+  const PerformanceScope performance = PerformanceMetrics_Begin(kPerformance_Emulation);
+  RunOneEmulatedTickWork(stop_running);
+  PerformanceMetrics_End(performance);
+}
+
 /* Per-outer-iteration draw + present (§3.5 — "PPM screenshot capture" and
  * the draw step both stay per-outer-iteration, not per-tick: even if the
  * accumulator ran several catch-up ticks this iteration, we draw/present
@@ -472,6 +481,22 @@ static void RunOneEmulatedTick(bool *stop_running) {
  * one-tick-per-iteration cadence (§3.6):
  * pure headless skips submission, while headless-video submits that tick to
  * its unpaced hidden compositor. */
+/* Producer-side work is owned here, not by the pure SIM classifier or the
+ * render backend. This group is independent of presentation's helpers; both
+ * stages synchronously join, so their jobs cannot oversubscribe one another. */
+static HostParallelWork *s_town_pixel_work;
+static bool s_town_pixel_work_attempted;
+
+static void DispatchTownPixelRows(void *context, size_t count,
+    SimBackgroundRowRange range, void *work) {
+  (void)context;
+  if (!s_town_pixel_work_attempted) {
+    s_town_pixel_work_attempted = true;
+    s_town_pixel_work = HostParallelWork_Create(3);
+  }
+  HostParallelWork_Run(s_town_pixel_work, count, 64, range, work);
+}
+
 static void DrawAndPresentFrame(HostDisplayPresentMode present_mode,
                                 float alpha) {
   extern uint8 g_ram[];
@@ -487,11 +512,14 @@ static void DrawAndPresentFrame(HostDisplayPresentMode present_mode,
   /* Own the developed world tilemap instead of observing $7E:C000, which acts
    * and towns both reuse as unrelated scratch. This runs only on the game
    * thread, after an emulated tick reached a stable frame boundary. */
+  PerformanceScope pipeline = PerformanceMetrics_Begin(kPerformance_WorldMap);
   SimWorldMap_BuildIfNeeded(
       g_settings.sim3d_world_navigation && g_settings.sim3d_sky_palace);
+  PerformanceMetrics_End(pipeline);
   /* #16: function-scope so the annotated sim outlives the block below and can
    * be published to FrameSlot_Capture around the HostDisplay_SubmitFrame tail. */
   SimFrameData sim;
+  pipeline = PerformanceMetrics_Begin(kPerformance_Metadata);
   {
     extern int snes_frame_counter;
     SimPhase0Trace_Frame((uint32)snes_frame_counter, g_ram,
@@ -506,6 +534,8 @@ static void DrawAndPresentFrame(HostDisplayPresentMode present_mode,
     Sim3DTuning tuning = BuildSim3DTuning();
     Sim3D_AnnotateFrame(&sim, &tuning);
     SimWorldNavigationCapture_Capture(&sim, RtlGameRunner());
+    PerformanceMetrics_End(pipeline);
+    pipeline = PerformanceMetrics_Begin(kPerformance_TownCanvas);
     /* This site runs for every drawn frame, including headless runs that never
      * call HostDisplay_SubmitFrame or FrameSlot_Capture. */
     SrPpuStateSnapshot town_ppu;
@@ -518,9 +548,11 @@ static void DrawAndPresentFrame(HostDisplayPresentMode present_mode,
         &sim, g_ram,
         have_town_ppu_view ? &town_ppu : NULL,
         have_town_ppu_view ? &town_vram : NULL,
-        have_town_ppu_view ? &town_cgram : NULL);
+        have_town_ppu_view ? &town_cgram : NULL,
+        DispatchTownPixelRows, NULL);
     sim.town_canvas_serial = SimTownCanvas_Serial();
     sim.background_voxel_serial = SimBackgroundVoxels_Serial();
+    PerformanceMetrics_End(pipeline);
     Sim3D_LogViewTransition(&sim);
     SceneInspector_SetSimFrameData(&sim);
     /* g_pixels is bound apron-wide; offset past the apron so the trace sees
@@ -695,6 +727,7 @@ static void DrawAndPresentFrame(HostDisplayPresentMode present_mode,
  * multiplying SRAM scans or host/APU policy checks by presentation throughput
  * both wastes work and contaminates the rendering measurement. */
 static void RunPostTickHousekeeping(void) {
+  const PerformanceScope performance = PerformanceMetrics_Begin(kPerformance_Housekeeping);
   extern uint8 g_ram[];
   /* Surface audio-chunk drops the callback counted (R12). Reported here, off
    * the audio thread, and coalesced so a sustained problem cannot spam. */
@@ -802,6 +835,7 @@ static void RunPostTickHousekeeping(void) {
       first_write_failure_ms = 0;
     }
   }
+  PerformanceMetrics_End(performance);
 }
 
 /* One application-level host-pause edge owns both transport layers. The order
@@ -2160,7 +2194,16 @@ static void AppRunMainLoop(AppBoot *app) {
       HostDisplay_EmulatedFramePresentMode(
           app->headless, app->headless_video);
   while (running) {
+    static int pipeline_log = -1;
+    if (pipeline_log < 0) {
+      const char *value = getenv("AR_PIPELINE_PERF");
+      pipeline_log = value && value[0] && value[0] != '0';
+    }
+    PerformanceMetrics_Configure(g_settings.performance_overlay != 0 || pipeline_log,
+        g_settings.performance_overlay != 0 || pipeline_log);
+    const PerformanceScope events = PerformanceMetrics_Begin(kPerformance_Events);
     AppLoop_PumpEvents(app, &running);
+    PerformanceMetrics_End(events);
 
     if (RuntimeSettings_LifecycleRequest() != kRuntimeLifecycle_None ||
         SessionFatal_Requested()) {
@@ -2219,7 +2262,11 @@ static void AppRunMainLoop(AppBoot *app) {
        * and repaints follow Refresh rate too. The fixed sleep remains only as
        * the anti-spin fallback when nothing presents (hidden window,
        * headless). */
-      if (!presented) SDL_Delay(emulation_frame_interval_ms);
+      if (!presented) {
+        const PerformanceScope pacing = PerformanceMetrics_Begin(kPerformance_Pacing);
+        SDL_Delay(emulation_frame_interval_ms);
+        PerformanceMetrics_End(pacing);
+      }
       last_time_ns = SDL_GetTicksNS();
       continue;
     }
@@ -2248,8 +2295,11 @@ static void AppRunMainLoop(AppBoot *app) {
       if (pace) {
         uint64_t now = SDL_GetTicks();
         uint64_t elapsed = now - last_tick;
-        if (elapsed < emulation_frame_interval_ms)
+        if (elapsed < emulation_frame_interval_ms) {
+          const PerformanceScope pacing = PerformanceMetrics_Begin(kPerformance_Pacing);
           SDL_Delay((Uint32)(emulation_frame_interval_ms - elapsed));
+          PerformanceMetrics_End(pacing);
+        }
         last_tick = SDL_GetTicks();
       }
       continue;
@@ -2393,6 +2443,9 @@ static int AppShutdown(AppBoot *app, char **argv) {
                           ? "restart" : "exit");
   SimPhase0Trace_Close();
   SimRenderMetadata_TraceClose();
+  HostParallelWork_Destroy(s_town_pixel_work);
+  s_town_pixel_work = NULL;
+  s_town_pixel_work_attempted = false;
   ActRaiserActionBg_Shutdown();
   ActRaiserLocalizationRuntime_Shutdown();
   ActRaiserLocalizationRuntime_SetPresentationHost(NULL);

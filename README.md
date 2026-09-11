@@ -95,14 +95,23 @@ Download the Builder for your machine from
 **[Releases](https://github.com/DerrickGold/ar-recomp/releases)**. Put it in a
 writable folder where you want your game created; unpack ZIP/tar downloads first.
 
-| Platform | Bundle |
-|---|---|
-| macOS (Apple Silicon / Intel) | `ActRaiserRecompBuilder-macos-arm64.app.zip` / `ActRaiserRecompBuilder-macos-x86_64.app.zip` |
-| Windows (x64 / ARM64) | `ActRaiserRecompBuilder-windows-x86_64.exe` / `ActRaiserRecompBuilder-windows-arm64.exe` |
-| Linux (x64 / ARM64) | `actraiser-recomp-linux-x86_64.tar.xz` / `-linux-arm64.tar.xz` |
-| Steam Deck | `ActRaiserRecompBuilder-steam-deck.AppImage` |
+| Platform | Recommended portable bundle | Per-user-storage artifact |
+|---|---|---|
+| macOS (Apple Silicon / Intel) | `ActRaiserRecompBuilder-macos-arm64-portable.zip` / `-macos-x86_64-portable.zip` | `ActRaiserRecompBuilder-macos-arm64.app.zip` / `-macos-x86_64.app.zip` |
+| Windows (x64 / ARM64) | `ActRaiserRecompBuilder-windows-x86_64-portable.zip` / `-windows-arm64-portable.zip` | `ActRaiserRecompBuilder-windows-x86_64.exe` / `-windows-arm64.exe` |
+| Linux (x64 / ARM64) | `actraiser-recomp-linux-x86_64.tar.xz` / `-linux-arm64.tar.xz` | — |
+| Steam Deck | `ActRaiserRecompBuilder-steam-deck-portable.tar.xz` | `ActRaiserRecompBuilder-steam-deck.AppImage` |
 
-Each bundle contains the buildable project, a pinned Zig C/C++ toolchain, and
+The recommended desktop downloads extract as one folder containing the Builder
+and its matching `.portable` file. Keep them together: on first launch the
+Builder creates `BuilderData` beside itself and keeps its project, compiler
+inputs and build state there. Copying only the application—or downloading the
+direct artifact in the last column—uses the operating system's per-user data
+directory instead. The portable archives wrap the exact same built application
+as the direct artifacts; they are not separate builds. AppImage bundles use
+tar.xz so extraction preserves the executable bit.
+
+Each Builder contains the buildable project, a pinned Zig C/C++ toolchain, and
 matched SDL3/SDL3_ttf headers and libraries for its platform. A SHA-256 sidecar
 is included for each download. Players do not need system SDL development
 packages; the Builder selects its bundled SDK ahead of any system SDL.
@@ -181,8 +190,10 @@ your preferred location, leaving its `.portable` sidecar and portable data
 behind, then launch that copy directly. Without a sidecar,
 the application uses your operating system's standard per-user application data
 directory under `ActRaiserRecomp/game`, even if an old portable data folder
-happens to be nearby. The desktop Builder uses the same application-data parent
-but keeps its own files under `ActRaiserRecomp/installer`.
+happens to be nearby. A direct desktop Builder without its portable sidecar uses
+the same application-data parent and keeps its own files under
+`ActRaiserRecomp/installer`. The recommended portable Builder bundle instead
+keeps those files in its adjacent `BuilderData` directory.
 
 On first launch it initializes the required files there; later launches reuse
 that user's saves, settings, and assets. Moving or replacing the application

@@ -4,6 +4,7 @@
 #include "sim_town_terrain.h"
 
 #include "sim_town_canvas.h"
+#include "performance_metrics.h"
 
 #include <limits.h>
 #include <stdio.h>
@@ -987,27 +988,33 @@ static uint32_t ComposeTownPixelWithoutHud(int x, int y,
   return color & 0x00ffffffu;
 }
 
+static bool TownBg3HasPixel(size_t index) {
+  return ((g_sim3d.captured_plane_mask & (1u << kSim3DPlane_Bg3Low)) &&
+          (g_sim3d_layer_pixels[kSim3DPlane_Bg3Low][index] >> 24)) ||
+      ((g_sim3d.captured_plane_mask & (1u << kSim3DPlane_Bg3High)) &&
+       (g_sim3d_layer_pixels[kSim3DPlane_Bg3High][index] >> 24));
+}
+
 static bool ComposeTownBg3WinnerPixel(int x, int y, uint32_t *out_color) {
   if (!out_color || x < 0 || x >= g_sim3d.width ||
       y < 0 || y >= g_sim3d.height)
     return false;
   const size_t index =
       (size_t)y * (size_t)g_sim3d.width + (size_t)x;
-  int winner = -1;
-  uint32_t color = 0;
-  for (int plane = 0; plane < kSim3DPlane_Count; plane++) {
+  if (!TownBg3HasPixel(index)) return false;
+  /* Painter order's last opaque plane wins. Do not read the remaining planes
+   * once that winner is known; most of the full-height HUD rectangle is empty. */
+  for (int plane = kSim3DPlane_Count - 1; plane >= 0; plane--) {
     if ((g_sim3d.captured_plane_mask & (1u << plane)) == 0u)
       continue;
     const uint32_t pixel = g_sim3d_layer_pixels[plane][index];
     if (!(pixel >> 24)) continue;
-    winner = plane;
-    color = pixel;
+    if (plane != kSim3DPlane_Bg3Low && plane != kSim3DPlane_Bg3High)
+      return false;
+    *out_color = OpaqueArgb(pixel);
+    return true;
   }
-  if (winner != kSim3DPlane_Bg3Low &&
-      winner != kSim3DPlane_Bg3High)
-    return false;
-  *out_color = OpaqueArgb(color);
-  return true;
+  return false;
 }
 
 static void RestoreTownHudPixel(uint8_t *authentic_pixels,
@@ -1034,6 +1041,7 @@ static void RestoreTownHudPixel(uint8_t *authentic_pixels,
 static void RestoreTownHudPolicy(uint8_t *authentic_pixels,
                                  int authentic_pitch) {
   if (!g_sim3d.hud_handoff || !g_sim3d.runner) return;
+  const PerformanceScope performance = PerformanceMetrics_Begin(kPerformance_SimHud);
 
   /* Recreate the two standard host HUD surfaces that the full-plane capture
    * temporarily superseded. BG3's two priority bands are mutually exclusive
@@ -1093,6 +1101,12 @@ static void RestoreTownHudPolicy(uint8_t *authentic_pixels,
         bool skip_obj = g_sim3d.hud_obj &&
             g_sim3d_hud_obj_mask[
                 (size_t)y * (size_t)g_sim3d.width + (size_t)x] != 0;
+        /* Full-plane scanout already produced the correct authentic pixel
+         * when neither promoted source exists here. Keep that pixel verbatim,
+         * including its hardware colour math, and avoid a ten-plane rebuild. */
+        if (!skip_obj && !TownBg3HasPixel(
+                (size_t)y * (size_t)g_sim3d.width + (size_t)x))
+          continue;
         RestoreTownHudPixel(authentic_pixels, authentic_pitch, x, y,
                             true, skip_obj);
       }
@@ -1122,6 +1136,7 @@ static void RestoreTownHudPolicy(uint8_t *authentic_pixels,
     (void)ExchangeCapturePolicy(
         g_sim3d.api, g_sim3d.runner, g_sim3d.lifetime_generation,
         g_sim3d.active_captures, g_sim3d.prior_captures);
+  PerformanceMetrics_End(performance);
 }
 
 /* Colour-math layer bit for a captured plane, matching CGADSUB's own layout
@@ -1227,7 +1242,10 @@ void Sim3D_FinishCapture(uint8_t *authentic_pixels,
 
   /* Before anything reads the planes, including the authentic rebuild inside
    * RestoreTownHudPolicy and any armed diagnostic comparison. */
+  PerformanceScope performance = PerformanceMetrics_Begin(kPerformance_SimColor);
   ApplyFixedColorAdd();
+  PerformanceMetrics_End(performance);
+  performance = PerformanceMetrics_Begin(kPerformance_SimDiagnostics);
 
   bool dump_armable = DemoArtifactsArmable();
   bool trace_armed = SimRenderMetadata_TraceArmed();
@@ -1265,6 +1283,7 @@ void Sim3D_FinishCapture(uint8_t *authentic_pixels,
    * pixels the recomposition got wrong. Since the gate stopped vetoing this is
    * the only way to see them, the frame itself having been kept. */
   MaybeDumpDemoArtifacts(authentic_pixels, authentic_pitch, game_frame);
+  PerformanceMetrics_End(performance);
 
   bool atlas_ready = SimRenderMetadata_AtlasReady();
   if (!atlas_ready && !g_sim3d.raw_obj_planes) {
@@ -1434,7 +1453,8 @@ bool Sim3D_TownCanvasNeedsPpuView(const SimFrameData *frame) {
 void Sim3D_RenderTownCanvas(const SimFrameData *frame, const uint8 *wram,
                             const SrPpuStateSnapshot *ppu,
                             const SrBorrowedU16Span *vram,
-                            const SrBorrowedU16Span *cgram) {
+                            const SrBorrowedU16Span *cgram,
+                            SimBackgroundRowDispatch dispatch, void *context) {
   if (!frame || !frame->town) {
     /* Leaving a town drops the canvas: it is town-space, and the next town
      * would otherwise inherit this one's ground. */
@@ -1460,17 +1480,22 @@ void Sim3D_RenderTownCanvas(const SimFrameData *frame, const uint8 *wram,
       vram->lifetime_generation != ppu->lifetime_generation ||
       cgram->lifetime_generation != ppu->lifetime_generation)
     return;
+  PerformanceScope performance = PerformanceMetrics_Begin(kPerformance_CanvasRaster);
   SimTownCanvas_Render(frame->town, wram, vram->data, cgram->data,
                        ppu->brightness, g_sim3d.backdrop_argb);
+  PerformanceMetrics_End(performance);
+  performance = PerformanceMetrics_Begin(kPerformance_CanvasEnhance);
   if (frame->background_voxel_enabled) {
-    SimBackgroundVoxels_Build(frame->town, wram, SimTownCanvas_Pixels(),
+    SimBackgroundVoxels_BuildWithRows(frame->town, wram, SimTownCanvas_Pixels(),
                               SimTownCanvas_SourceOpacity(),
                               SimTownCanvas_Serial(),
                               SimTownCanvas_TilemapSerial(),
-                              frame->background_voxel_wind_hold != 0);
+                              frame->background_voxel_wind_hold != 0,
+                              dispatch, context);
   } else if (SimBackgroundVoxels_Serial()) {
     SimBackgroundVoxels_Reset();
   }
+  PerformanceMetrics_End(performance);
 }
 
 SimRenderFeatureMask Sim3D_ImplementedFeatures(void) {

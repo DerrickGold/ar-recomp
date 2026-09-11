@@ -146,6 +146,7 @@ typedef struct FrameSlot {
   int obj_apron;
   int hud_scale_percent;
   bool show_fps;
+  int performance_overlay;
 
   /* Diorama gate (D14 — Diorama_IsActiveThisFrame() result for this frame). */
   bool diorama_active;

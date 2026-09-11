@@ -12,7 +12,7 @@ extern "C" {
 #endif
 
 #define SR_DETERMINISM_SHA256_SIZE 32u
-#define SR_DETERMINISM_SEMANTIC_SCHEMA_VERSION 3u
+#define SR_DETERMINISM_SEMANTIC_SCHEMA_VERSION 4u
 
 /** Requests the runner-owned hardware digest at an emulation-thread safe
  * point. `flags` is reserved and must be zero. Game-authored HLE/native

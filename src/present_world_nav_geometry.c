@@ -123,20 +123,28 @@ bool WorldNavigationPrepareClipPlan(const Sim3DDepthVertex input[4], const Scene
   return ClipQuad(input, clip, viewport, output, count, plans);
 }
 
-void WorldNavigationApplyShadowPlan(const WorldNavigationClipPlan *plan,
-    const ArRenderPointF uv[4], ArRenderColorF color, Sim3DDepthVertex output[4]) {
+void WorldNavigationApplyShadowUV(const WorldNavigationClipPlan *plan,
+    const ArRenderPointF uv[4], ArRenderPointF output[4]) {
   for (int p = 0; p < 4; p++) {
-    output[p] = (Sim3DDepthVertex){.x = plan->points[p].x, .y = plan->points[p].y,
-        .depth = plan->points[p].depth, .color = color, .uv = uv[p]};
+    output[p] = uv[p];
     if (plan->triangle) {
-      output[p].uv = uv[0];
+      output[p] = uv[0];
       for (int i = 0; i < 2; i++) {
         const float w = plan->points[p].weights[i];
-        output[p].uv.x += w * (uv[plan->triangle + i].x - uv[0].x);
-        output[p].uv.y += w * (uv[plan->triangle + i].y - uv[0].y);
+        output[p].x += w * (uv[plan->triangle + i].x - uv[0].x);
+        output[p].y += w * (uv[plan->triangle + i].y - uv[0].y);
       }
     }
   }
+}
+
+void WorldNavigationApplyShadowPlan(const WorldNavigationClipPlan *plan,
+    const ArRenderPointF uv[4], ArRenderColorF color, Sim3DDepthVertex output[4]) {
+  ArRenderPointF mapped[4];
+  WorldNavigationApplyShadowUV(plan, uv, mapped);
+  for (int p = 0; p < 4; ++p)
+    output[p] = (Sim3DDepthVertex){.x = plan->points[p].x, .y = plan->points[p].y,
+        .depth = plan->points[p].depth, .color = color, .uv = mapped[p]};
 }
 
 bool WorldNavigationAppendClippedQuad(

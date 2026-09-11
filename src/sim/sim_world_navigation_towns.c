@@ -419,3 +419,48 @@ void SimWorldNavigationTowns_Capture(
     if (out->overflow) return;
   }
 }
+
+/* Keep source dependencies beside the classifier that consumes them. Neither
+ * frame metadata nor the presenter needs to know these WRAM ranges. Including
+ * all four structure bytes conservatively invalidates for action-only changes
+ * as well; that avoids encoding a second interpretation of record ownership. */
+static struct {
+  uint8_t cells[kSimTownCount * kSimTownCellMapBytes];
+  uint8_t structures[kSimTownCount * kStructureRecordsPerTownBytes];
+  uint8_t development[kSimTownCount * 2];
+  SimWorldNavigationTowns scene;
+  bool valid;
+} s_capture_cache;
+_Static_assert(sizeof(s_capture_cache) <= 192 * 1024,
+    "bounded navigation capture cache");
+
+void SimWorldNavigationTowns_ResetCache(void) {
+  s_capture_cache.valid = false;
+}
+
+void SimWorldNavigationTowns_CaptureCached(
+    const uint8_t *wram, SimWorldNavigationTowns *out) {
+  if (!out) return;
+  if (!wram) {
+    SimWorldNavigationTowns_ResetCache();
+    SimWorldNavigationTowns_Capture(NULL, out);
+    return;
+  }
+  if (!s_capture_cache.valid ||
+      memcmp(s_capture_cache.cells, wram + kSimTownCellMapsWram,
+          sizeof(s_capture_cache.cells)) ||
+      memcmp(s_capture_cache.structures, wram + kStructureRecordsWram,
+          sizeof(s_capture_cache.structures)) ||
+      memcmp(s_capture_cache.development, wram + kDevelopmentTiersWram,
+          sizeof(s_capture_cache.development))) {
+    SimWorldNavigationTowns_Capture(wram, &s_capture_cache.scene);
+    memcpy(s_capture_cache.cells, wram + kSimTownCellMapsWram,
+        sizeof(s_capture_cache.cells));
+    memcpy(s_capture_cache.structures, wram + kStructureRecordsWram,
+        sizeof(s_capture_cache.structures));
+    memcpy(s_capture_cache.development, wram + kDevelopmentTiersWram,
+        sizeof(s_capture_cache.development));
+    s_capture_cache.valid = true;
+  }
+  *out = s_capture_cache.scene;
+}

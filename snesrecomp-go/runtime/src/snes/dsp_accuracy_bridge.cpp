@@ -49,21 +49,6 @@ void resetBank(DspState& state) noexcept {
   state.regs[0x6C] = 0xE0;
 }
 
-void acknowledgeEndx(DspState& state) noexcept {
-  state.regs[kDspEndx] = 0;
-  state.preparedEndx = 0;
-}
-
-void writeRegister(DspState& state, std::uint8_t address,
-                   std::uint8_t value) noexcept {
-  address &= 0x7F;
-  if (address == kDspEndx) {
-    acknowledgeEndx(state);
-    return;
-  }
-  state.regs[address] = value;
-  if (address == kDspKon) state.internalKon = value;
-}
 
 bool isVirtualSharedRegister(std::uint8_t address) noexcept {
   return std::find(kVirtualSharedRegisters.begin(),
@@ -76,6 +61,8 @@ void syncVirtualTimeline(DspState& bank, const DspState& native) noexcept {
     bank.regs[address] = native.regs[address];
   bank.globalCounter = native.globalCounter;
   bank.sampleIndex = native.sampleIndex;
+  bank.cycleCount = native.cycleCount;
+  bank.latchedDir = native.latchedDir;
   bank.noiseLevel = native.noiseLevel;
   bank.slotCursor = native.slotCursor;
   bank.primed = native.primed;
@@ -144,7 +131,7 @@ bool bankIsQuiescent(const DspState& state) noexcept {
   for (int voice = 0; voice < kVoicesPerBank; ++voice) {
     const VoiceState& source = state.voices[voice];
     if (source.envelope != 0 || source.phase != EnvPhase::Release ||
-        source.konDelay != 0 || source.restartPending ||
+        source.konDelay != 0 || source.restartPending || source.startPending ||
         state.voiceAmplitude[voice] != 0 ||
         state.modulatorAmplitude[voice] != 0)
       return false;
@@ -178,6 +165,11 @@ void saveloadVoice(SaveLoadInfo *info, VoiceState& voice) {
   for (auto& decode : voice.scheduledDecodes) {
     saveload_u16(info, &decode.address);
     saveload_u8(info, &decode.offset);
+    saveload_u8(info, &decode.header);
+    saveload_u8(info, &decode.firstByte);
+    saveload_bool(info, &decode.bytesLoaded);
+    saveload_u8(info, &decode.decodedSamples);
+    saveload_bool(info, &decode.headerCaptured);
   }
   saveload_u8(info, &voice.scheduledDecodeCount);
   saveload_i16(info, &voice.decodePrev1);
@@ -189,11 +181,22 @@ void saveloadVoice(SaveLoadInfo *info, VoiceState& voice) {
     voice.phase = static_cast<EnvPhase>(phase & 3u);
   saveload_u8(info, &voice.konDelay);
   saveload_u8(info, &voice.computesSinceKeyOn);
-  saveload_u8(info, &voice.computesAtRestart);
   saveload_u8(info, &voice.pitchCaptureHold);
   saveload_bool(info, &voice.restartPending);
   saveload_bool(info, &voice.startupWalks);
   saveload_u16(info, &voice.bentGainRef);
+  saveload_u8(info, &voice.loadedHeader);
+  saveload_bool(info, &voice.headerLoaded);
+  saveload_u16(info, &voice.loopPointer);
+  saveload_bool(info, &voice.loopPointerLoaded);
+  saveload_u8(info, &voice.srcn);
+  saveload_bool(info, &voice.srcnLoaded);
+  saveload_u8(info, &voice.pitchLow);
+  saveload_u16(info, &voice.pitchPending);
+  saveload_bool(info, &voice.pitchPendingValid);
+  saveload_u8(info, &voice.adsr1);
+  saveload_bool(info, &voice.adsr1Loaded);
+  saveload_bool(info, &voice.startPending);
 }
 
 void saveloadBank(SaveLoadInfo *info, DspState& state) {
@@ -209,6 +212,9 @@ void saveloadBank(SaveLoadInfo *info, DspState& state) {
   saveload_u8(info, &state.echoAppliedEsa);
   for (auto& sample : state.echoFirLeft) saveload_i16(info, &sample);
   for (auto& sample : state.echoFirRight) saveload_i16(info, &sample);
+  saveload_bytes(info, state.echoFirCoeff.data(), state.echoFirCoeff.size());
+  for (auto& stamp : state.outxWriteCycle) saveload_u64(info, &stamp);
+  for (auto& stamp : state.envxWriteCycle) saveload_u64(info, &stamp);
   saveload_u8(info, &state.echoFirPos);
   for (auto& voice : state.voices) saveloadVoice(info, voice);
   saveload_u8(info, &state.slotCursor);
@@ -227,15 +233,22 @@ void saveloadBank(SaveLoadInfo *info, DspState& state) {
   saveload_bytes(info, state.preparedOutx.data(), state.preparedOutx.size());
   saveload_bytes(info, state.preparedEnvx.data(), state.preparedEnvx.size());
   for (auto& pitch : state.pitchLatch) saveload_u16(info, &pitch);
-  for (auto& pitch : state.pitchLatchOld) saveload_u16(info, &pitch);
   saveload_u8(info, &state.pitchReloadPending);
-  saveload_u8(info, &state.pitchReloadAge);
   saveloadInt(info, state.echoFirOutLeft);
   saveloadInt(info, state.echoFirOutRight);
   saveload_bool(info, &state.echoGateLeft);
   saveload_bool(info, &state.echoGateRight);
   saveload_u8(info, &state.echoLatchedEsa);
   saveload_u8(info, &state.echoLatchedEdl);
+  saveload_u8(info, &state.consumedKon);
+  saveload_u8(info, &state.latchedPmon);
+  saveload_u8(info, &state.latchedNon);
+  saveload_u8(info, &state.latchedEon);
+  saveload_u8(info, &state.latchedDir);
+  saveload_u8(info, &state.pendingEndxClear);
+  saveload_u64(info, &state.cycleCount);
+  saveload_u64(info, &state.endxWriteCycle);
+  saveload_u64(info, &state.konWriteCycle);
 }
 
 /* Schema 2 is intentionally spelled out separately from saveloadBank. A
@@ -262,6 +275,11 @@ void semanticVoiceV2(SnesSemanticWriter *writer, const VoiceState& voice) {
   for (const auto& decode : voice.scheduledDecodes) {
     snes_semantic_write_u16(writer, decode.address);
     snes_semantic_write_u8(writer, decode.offset);
+    snes_semantic_write_u8(writer, decode.header);
+    snes_semantic_write_u8(writer, decode.firstByte);
+    snes_semantic_write_bool(writer, decode.bytesLoaded);
+    snes_semantic_write_u8(writer, decode.decodedSamples);
+    snes_semantic_write_bool(writer, decode.headerCaptured);
   }
   snes_semantic_write_u8(writer, voice.scheduledDecodeCount);
   snes_semantic_write_i16(writer, voice.decodePrev1);
@@ -271,11 +289,22 @@ void semanticVoiceV2(SnesSemanticWriter *writer, const VoiceState& voice) {
       writer, static_cast<std::uint8_t>(voice.phase));
   snes_semantic_write_u8(writer, voice.konDelay);
   snes_semantic_write_u8(writer, voice.computesSinceKeyOn);
-  snes_semantic_write_u8(writer, voice.computesAtRestart);
   snes_semantic_write_u8(writer, voice.pitchCaptureHold);
   snes_semantic_write_bool(writer, voice.restartPending);
   snes_semantic_write_bool(writer, voice.startupWalks);
   snes_semantic_write_u16(writer, voice.bentGainRef);
+  snes_semantic_write_u8(writer, voice.loadedHeader);
+  snes_semantic_write_bool(writer, voice.headerLoaded);
+  snes_semantic_write_u16(writer, voice.loopPointer);
+  snes_semantic_write_bool(writer, voice.loopPointerLoaded);
+  snes_semantic_write_u8(writer, voice.srcn);
+  snes_semantic_write_bool(writer, voice.srcnLoaded);
+  snes_semantic_write_u8(writer, voice.pitchLow);
+  snes_semantic_write_u16(writer, voice.pitchPending);
+  snes_semantic_write_bool(writer, voice.pitchPendingValid);
+  snes_semantic_write_u8(writer, voice.adsr1);
+  snes_semantic_write_bool(writer, voice.adsr1Loaded);
+  snes_semantic_write_bool(writer, voice.startPending);
 }
 
 void semanticBankV2(SnesSemanticWriter *writer, const DspState& state) {
@@ -294,6 +323,9 @@ void semanticBankV2(SnesSemanticWriter *writer, const DspState& state) {
     snes_semantic_write_i16(writer, sample);
   for (const auto sample : state.echoFirRight)
     snes_semantic_write_i16(writer, sample);
+  snes_semantic_write_bytes(writer, state.echoFirCoeff.data(), state.echoFirCoeff.size());
+  for (auto stamp : state.outxWriteCycle) snes_semantic_write_u64(writer, stamp);
+  for (auto stamp : state.envxWriteCycle) snes_semantic_write_u64(writer, stamp);
   snes_semantic_write_u8(writer, state.echoFirPos);
   for (const auto& voice : state.voices) semanticVoiceV2(writer, voice);
   snes_semantic_write_u8(writer, state.slotCursor);
@@ -320,10 +352,7 @@ void semanticBankV2(SnesSemanticWriter *writer, const DspState& state) {
       writer, state.preparedEnvx.data(), state.preparedEnvx.size());
   for (const auto pitch : state.pitchLatch)
     snes_semantic_write_u16(writer, pitch);
-  for (const auto pitch : state.pitchLatchOld)
-    snes_semantic_write_u16(writer, pitch);
   snes_semantic_write_u8(writer, state.pitchReloadPending);
-  snes_semantic_write_u8(writer, state.pitchReloadAge);
   snes_semantic_write_i32(
       writer, static_cast<std::int32_t>(state.echoFirOutLeft));
   snes_semantic_write_i32(
@@ -332,6 +361,15 @@ void semanticBankV2(SnesSemanticWriter *writer, const DspState& state) {
   snes_semantic_write_bool(writer, state.echoGateRight);
   snes_semantic_write_u8(writer, state.echoLatchedEsa);
   snes_semantic_write_u8(writer, state.echoLatchedEdl);
+  snes_semantic_write_u8(writer, state.consumedKon);
+  snes_semantic_write_u8(writer, state.latchedPmon);
+  snes_semantic_write_u8(writer, state.latchedNon);
+  snes_semantic_write_u8(writer, state.latchedEon);
+  snes_semantic_write_u8(writer, state.latchedDir);
+  snes_semantic_write_u8(writer, state.pendingEndxClear);
+  snes_semantic_write_u64(writer, state.cycleCount);
+  snes_semantic_write_u64(writer, state.endxWriteCycle);
+  snes_semantic_write_u64(writer, state.konWriteCycle);
 }
 
 }  // namespace
@@ -373,7 +411,7 @@ extern "C" void sr_dsp_accuracy_write(SrDspAccuracy *accuracy,
                                         std::uint8_t value) {
   if (accuracy == nullptr) return;
   address &= 0x7F;
-  writeRegister(accuracy->banks[0], address, value);
+  snaggletooth::cpuWriteDspRegister(accuracy->banks[0], address, value);
   if (isVirtualSharedRegister(address)) {
     for (int bank = 1; bank < kBankCount; ++bank)
       accuracy->banks[bank].regs[address] = value;
@@ -388,10 +426,11 @@ extern "C" void sr_dsp_accuracy_write_hardware_mask(
   address &= 0x7F;
   const std::uint8_t combined = static_cast<std::uint8_t>(
       (native.regs[address] & ~update_mask) | (value & update_mask));
-  native.regs[address] = combined;
+  const std::uint8_t pendingKon = native.internalKon;
+  snaggletooth::cpuWriteDspRegister(native, address, combined);
   if (address == kDspKon) {
     native.internalKon = static_cast<std::uint8_t>(
-        (native.internalKon & ~update_mask) | (value & update_mask));
+        (pendingKon & ~update_mask) | (value & update_mask));
   }
 }
 
@@ -418,23 +457,19 @@ extern "C" void sr_dsp_accuracy_write_virtual_control(
   if (global_address != 0x2D && global_address != 0x3D &&
       global_address != kDspKon && global_address != kDspKoff &&
       global_address != 0x4D) return;
-  if (enabled)
-    state.regs[global_address] |= bit;
-  else
-    state.regs[global_address] &= static_cast<std::uint8_t>(~bit);
-  if (global_address == kDspKon) {
-    if (enabled)
-      state.internalKon |= bit;
-    else
-      state.internalKon &= static_cast<std::uint8_t>(~bit);
-  }
   const std::uint8_t bankBit = static_cast<std::uint8_t>(1u << bank);
   if (global_address == kDspKon && enabled &&
       (accuracy->activeBankMask & bankBit) == 0) {
     syncVirtualTimeline(state, accuracy->banks[0]);
-    state.internalKon |= bit;
     accuracy->activeBankMask |= bankBit;
   }
+  const std::uint8_t pendingKon = state.internalKon;
+  const std::uint8_t value = enabled ? state.regs[global_address] | bit
+      : state.regs[global_address] & static_cast<std::uint8_t>(~bit);
+  snaggletooth::cpuWriteDspRegister(state, global_address, value);
+  if (global_address == kDspKon)
+    state.internalKon = enabled ? pendingKon | bit
+        : pendingKon & static_cast<std::uint8_t>(~bit);
 }
 
 extern "C" SrDspAccuracyFrame sr_dsp_accuracy_clock(
@@ -476,7 +511,7 @@ extern "C" SrDspAccuracyFrame sr_dsp_accuracy_clock(
     }
   }
 
-  if (slot == 24 && virtualBankMask != 0) {
+  if (slot == 23 && virtualBankMask != 0) {
     for (int bank = 1; bank < kBankCount; ++bank) {
       if ((virtualBankMask & (1u << bank)) == 0) continue;
       native.echoSendLeft = clamp16(

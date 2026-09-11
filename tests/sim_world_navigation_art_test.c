@@ -279,9 +279,23 @@ static void TestAnimatedGroundComposition(void) {
           developed[at + 7] ^= 0x00603018u;
           baseline_pixels[at + source_pitch] ^= 0x00100808u;
         }
-        CHECK(SimWorldNavigationArt_UpdateAnimation(first, pitch,
+        if (p % 2) {
+          SimWorldNavigationArtAnimation work;
+          CHECK(SimWorldNavigationArt_PrepareAnimation(&work, first, pitch,
+              developed, source_pitch, baseline_pixels, source_pitch,
+              NULL, detailed ? &ground : NULL, models, cliffs, previous, phases[p]));
+          /* Uneven, reordered ranges reproduce the full-bake oracle below.
+           * Neighbouring source rows are immutable, not another job's output. */
+          SimWorldNavigationArt_RenderAnimationRows(&work, 64, 128);
+          SimWorldNavigationArt_RenderAnimationRows(&work, 1, 63);
+          SimWorldNavigationArt_RenderAnimationRows(&work, 0, 1);
+          SimWorldNavigationArt_RenderAnimationRows(&work, 63, 64);
+          SimWorldNavigationArt_RenderAnimationRows(&work, 0, 0);
+          SimWorldNavigationArt_RenderAnimationRows(&work, 0, 129);
+          changes = work.changes;
+        } else CHECK(SimWorldNavigationArt_UpdateAnimation(first, pitch,
             developed, source_pitch, baseline_pixels, source_pitch,
-            p % 2 ? NULL : world_cells, detailed ? &ground : NULL,
+            world_cells, detailed ? &ground : NULL,
             models, cliffs, previous, phases[p], &changes));
         CHECK(SimWorldNavigationArt_Build(second, pitch, developed, source_pitch,
             baseline_pixels, source_pitch));
@@ -301,6 +315,16 @@ static void TestAnimatedGroundComposition(void) {
         developed, source_pitch, baseline_pixels, source_pitch,
         NULL, &ground, true, true, 0, 4, &changes));
     CHECK(!memcmp(&changes, &unchanged, sizeof(changes)));
+    CHECK(!memcmp(first, second, count * sizeof(*first)));
+    SimWorldNavigationArtAnimation work;
+    CHECK(SimWorldNavigationArt_PrepareAnimation(&work, first, pitch,
+        developed, source_pitch, baseline_pixels, source_pitch,
+        NULL, &ground, true, true, 0, 1));
+    CHECK(!SimWorldNavigationArt_PrepareAnimation(&work, first, pitch,
+        developed, source_pitch, baseline_pixels, source_pitch,
+        NULL, &ground, true, true, 0, 4));
+    CHECK(!work.ready);
+    SimWorldNavigationArt_RenderAnimationRows(&work, 0, kSimWorldMapTiles);
     CHECK(!memcmp(first, second, count * sizeof(*first)));
   }
   free(developed);

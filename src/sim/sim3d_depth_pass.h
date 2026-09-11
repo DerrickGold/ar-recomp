@@ -45,6 +45,64 @@ typedef struct Sim3DDepthVertex {
   ArRenderPointF uv;
 } Sim3DDepthVertex;
 
+typedef struct Sim3DDepthMesh Sim3DDepthMesh;
+typedef struct Sim3DDepthPosition { float x, y, depth; } Sim3DDepthPosition;
+
+/* Optional retained screen-space quad geometry. The caller owns the opaque
+ * mesh, all calls belong to the presentation thread, and Reset invalidates
+ * its GPU contents without freeing the caller's handle. Ready also checks
+ * the current viewport. Republish after camera/geometry changes or !Ready.
+ * Updates copy positions; appends copy UVs/colors, never borrowing arrays.
+ *
+ * Create/Update/Append require an active pass. Update must precede the first
+ * append of this mesh in that pass. Only transparent layers accept samples;
+ * ordinary and retained appends cannot mix within a material in one pass.
+ * Sample order is preserved. Destroying an already queued mesh aborts that
+ * pass rather than leaving dangling commands. Create/Update failure allows
+ * an ordinary-geometry fallback before queuing samples. Submit retains the
+ * ordinary path's failure contract for final GPU allocation/transfer errors. */
+Sim3DDepthMesh *Sim3DDepthPass_CreateMesh(void);
+bool Sim3DDepthPass_MeshReady(const Sim3DDepthMesh *mesh);
+bool Sim3DDepthPass_UpdateMesh(Sim3DDepthMesh *mesh,
+    const Sim3DDepthPosition *positions, size_t quad_count);
+bool Sim3DDepthPass_AppendMeshSample(Sim3DDepthPassLayer layer,
+    Sim3DDepthMesh *mesh, const ArRenderPointF *uv, size_t quad_count,
+    ArRenderColorF color);
+void Sim3DDepthPass_DestroyMesh(Sim3DDepthMesh *mesh);
+
+/* Optional spherical atlas mapping on the GPU. Positions are already clipped
+ * screen-space quads, exactly as for UpdateMesh. Normals describe the FOUR
+ * original corners in texture-sphere space. triangle=0 selects those corners
+ * directly; 1/2 reconstructs UVs from original triangle {0,1,2}/{0,2,3}, using
+ * the two nonzero-corner clipping weights for each output vertex. Wrapping
+ * and latitude clamping happen BEFORE this difference-form interpolation.
+ * No camera, game state, clock, atlas policy or native GPU handle is borrowed.
+ *
+ * Spherical meshes use only UpdateSphericalMesh/AppendSphericalSample; ordinary
+ * meshes use UpdateMesh/AppendMeshSample. Lifetime/reset/failure rules above
+ * apply to both. Atlas rectangles describe one longitude/latitude chart in
+ * texels; the texture must also contain its repeated longitude copy. */
+typedef struct Sim3DDepthSphericalQuad {
+  Sim3DDepthPosition positions[4];
+  float normals[4][3];
+  float weights[4][2];
+  unsigned triangle;
+} Sim3DDepthSphericalQuad;
+
+typedef struct Sim3DDepthSphericalSample {
+  float rotation[4]; /* cos/sin longitude, cos/sin latitude */
+  ArRenderPointF offset; /* normalized chart displacement, after rotation */
+  ArRenderRectI atlas;
+  ArRenderPointF texture_size;
+  ArRenderColorF color;
+} Sim3DDepthSphericalSample;
+
+Sim3DDepthMesh *Sim3DDepthPass_CreateSphericalMesh(void);
+bool Sim3DDepthPass_UpdateSphericalMesh(Sim3DDepthMesh *mesh,
+    const Sim3DDepthSphericalQuad *quads, size_t quad_count);
+bool Sim3DDepthPass_AppendSphericalSample(Sim3DDepthPassLayer layer,
+    Sim3DDepthMesh *mesh, const Sim3DDepthSphericalSample *sample);
+
 /* Creates the shaders/pipeline and verifies D32 support. Call during video
  * startup so an unsupported backend is a launch error, never a missing-scene
  * fallback discovered after entering SIM mode. */

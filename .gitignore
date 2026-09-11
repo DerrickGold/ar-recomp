@@ -47,7 +47,7 @@ game-assets/manifest.ini
 *.bin
 *.rec
 # Game-owned extraction commands emit private ZIPs containing ROM-derived
-# scripts/graphics. Release ZIPs are generated below release/, too; neither
+# scripts/graphics. Release archives are generated below release/, too; neither
 # kind belongs in source control.
 *.zip
 # Private author backups and locally exported translations can contain retail

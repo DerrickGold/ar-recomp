@@ -4,10 +4,9 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-/* Presentation-side Sim 3D profiling. The counters are dormant unless either
- * AR_PERF or AR_SIM3D_PERF is present in the environment. Keeping the switch
- * here gives focused terrain work a useful profiler without forcing the much
- * broader emulator instrumentation on. */
+/* Presentation-side Sim 3D profiling. The interactive pipeline collector uses
+ * these lightweight stage/work hooks. AR_PERF or AR_SIM3D_PERF additionally
+ * enables the legacy focused report, independently of the overlay. */
 typedef enum Sim3DPerformanceStage {
   kSim3DPerformance_Upload,
   kSim3DPerformance_Backdrop,
@@ -46,6 +45,8 @@ void Sim3DPerformance_End(Sim3DPerformanceScope scope);
  * vertex/index arrays can pass zero for both counts. */
 void Sim3DPerformance_AddDraw(uint64_t vertices, uint64_t indices);
 void Sim3DPerformance_AddUpload(uint64_t bytes);
+/* Vertex stream traffic, separate from texture atlas uploads. */
+void Sim3DPerformance_AddGeometryUpload(uint64_t bytes);
 
 /* One completed enhanced Sim 3D presentation. Reports and resets a rolling
  * one-second window when profiling is enabled. Means sum all scopes per

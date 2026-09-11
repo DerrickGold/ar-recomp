@@ -217,6 +217,59 @@ static void TestWorldNavigationSanctuaryVariants(void) {
   }
 }
 
+static void CheckCachedNavigationScene(const uint8 *wram) {
+  SimWorldNavigationTowns expected, actual;
+  SimWorldNavigationTowns_Capture(wram, &expected);
+  for (int repeat = 0; repeat < 3; repeat++) {
+    memset(&actual, 0xa5, sizeof(actual));
+    SimWorldNavigationTowns_CaptureCached(wram, &actual);
+    CHECK(!memcmp(&expected, &actual, sizeof(expected)));
+  }
+}
+
+static void TestWorldNavigationCaptureCache(void) {
+  uint8 wram[kActRaiserWramSize] = {0};
+  SimWorldNavigationTowns_ResetCache();
+  CheckCachedNavigationScene(wram);
+  for (uint8 town = 1; town <= 6; town++) {
+    Write16(wram, 0x16B18 + (town - 1) * 2, 1);
+    for (int y = 0; y < 32; y++)
+      for (int x = 0; x < 32; x++)
+        SetTownCell(wram, town, x, y, (x + y) % 7 ? 0x00 : 0x02);
+    CheckCachedNavigationScene(wram);
+    for (int page = 0; page < 4; page++) {
+      const int x = page & 1 ? 16 : 0, y = page & 2 ? 16 : 0;
+      for (int edge = 0; edge < 2; edge++) {
+        SetTownCell(wram, town, x + edge * 15, y + edge * 15, 0x09);
+        CheckCachedNavigationScene(wram);
+      }
+    }
+    for (int slot = 0; slot < 128; slot += 127) {
+      uint8 *record = wram + 0x16BE7 + (town - 1) * 0x200 + slot * 4;
+      record[0] = 5; record[1] = 7; record[2] = 0x80;
+      CheckCachedNavigationScene(wram);
+      for (int byte = 0; byte < 4; byte++) {
+        record[byte] ^= 1;
+        CheckCachedNavigationScene(wram);
+      }
+    }
+    /* Both bytes participate in development gating, including high-byte-only
+     * states. Unrelated game-clock/OAM changes must leave the semantic output. */
+    Write16(wram, 0x16B18 + (town - 1) * 2, 0x100);
+    CheckCachedNavigationScene(wram);
+    Write16(wram, 0x16B18 + (town - 1) * 2, 0);
+    CheckCachedNavigationScene(wram);
+    wram[kActRaiserWram_GameFrame]++;
+    CheckCachedNavigationScene(wram);
+  }
+  CheckCachedNavigationScene(NULL);
+  CheckCachedNavigationScene(wram);
+  SimWorldNavigationTowns_ResetCache();
+  CheckCachedNavigationScene(wram);
+  SimWorldNavigationTowns_CaptureCached(wram, NULL);
+  SimWorldNavigationTowns_ResetCache();
+}
+
 static void TestLightningMiracleEffectCapture(void) {
   uint8 wram[kActRaiserWramSize] = {0};
   wram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_NonAction;
@@ -2129,6 +2182,34 @@ static void TestWorldNavigationOamClassifier(void) {
     CHECK(composition.palace.oam_count == 9);
   }
 
+  /* Captured Kasandora gf614: the last glyph is inserted back at x=204.
+   * Preserve the original ranges and sprite priority for every traversal,
+   * including reverse order, not just this one nine-glyph permutation. */
+  static const uint8_t kasandora_x[] = {156, 164, 172, 180, 188, 196, 212, 220, 204};
+  for (int reverse = 0; reverse < 2; ++reverse) {
+    PopulateNavigationComposition(oam, 9);
+    for (int i = 0; i < 9; ++i)
+      oam[i * 2] = (uint16_t)(25u << 8 | kasandora_x[reverse ? 8 - i : i]);
+    uint16_t original[256];
+    memcpy(original, oam, sizeof(original));
+    CHECK(SimWorldNavigationScene_ClassifyOam(oam, &composition));
+    CHECK(memcmp(original, oam, sizeof(original)) == 0);
+    CHECK(composition.label.oam_count == 9);
+    CHECK(composition.plaque.oam_first == 9);
+    CHECK(composition.palace.oam_first == 21);
+  }
+  PopulateNavigationComposition(oam, 9);
+  oam[8 * 2] = oam[7 * 2];  /* A duplicate anchor remains unsupported. */
+  CHECK(!SimWorldNavigationScene_ClassifyOam(oam, &composition));
+  PopulateNavigationComposition(oam, 9);
+  oam[8 * 2] = (25u << 8) | 232u; /* Outside label ownership. */
+  CHECK(!SimWorldNavigationScene_ClassifyOam(oam, &composition));
+  oam[8 * 2] = (24u << 8) | 220u;
+  CHECK(!SimWorldNavigationScene_ClassifyOam(oam, &composition));
+  PopulateNavigationComposition(oam, 9);
+  oam[8 * 2 + 1] = 0x3200; /* Plaque palette is not a label glyph. */
+  CHECK(!SimWorldNavigationScene_ClassifyOam(oam, &composition));
+
   PopulateNavigationComposition(oam, 8);
   oam[20 * 2] ^= 1;  /* Palace no longer fills the fixed 3x3 grid. */
   CHECK(!SimWorldNavigationScene_ClassifyOam(oam, &composition));
@@ -3182,6 +3263,7 @@ int main(int argc, char **argv) {
   TestFeatureDependencies();
   TestWorldNavigationAllTownObjects();
   TestWorldNavigationSanctuaryVariants();
+  TestWorldNavigationCaptureCache();
   TestLightningMiracleEffectCapture();
   TestTownCreationLightningEffectCapture();
   TestEnemyLightningAndFireEffectCapture();

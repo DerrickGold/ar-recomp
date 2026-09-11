@@ -788,6 +788,59 @@ static void TestTownLodMotion(SDL_Renderer *renderer, const FrameSlot *slot) {
   free(probe);
 }
 
+static void TestAnimatedTownCache(SDL_Renderer *renderer, const FrameSlot *slot) {
+  ResizeTestOutput(renderer, 1792, 1344);
+  FrameSlot *probe = malloc(sizeof(*probe));
+  CHECK(probe);
+  InitSlot(probe);
+  probe->sim.world_navigation_models = true;
+  probe->sim.world_navigation_towns.object_count = 5;
+  for (int i = 0; i < 5; ++i)
+    probe->sim.world_navigation_towns.objects[i] = (SimBackgroundVoxelObject){
+      .town = 2, .kind = i & 1 ? kSimBackgroundVoxel_Factory : kSimBackgroundVoxel_Windmill,
+      .cell_x = 11 + i * 2, .cell_y = 15,
+      .source_cells_w = 2, .source_cells_h = 2,
+      .footprint_cells_w = 2, .footprint_cells_d = 2,
+      .visual_state = kSimStructureVisualState_Finished,
+    };
+  probe->sim.world_navigation.zoom_current = probe->sim.world_navigation.zoom_target =
+      kSimWorldNavigationZoomNear;
+  probe->sim.world_navigation.matrix[0] = probe->sim.world_navigation.matrix[3] =
+      kSimWorldNavigationZoomNear;
+  probe->sim.projection_distance_x100 = 200;
+  BuildScene(probe);
+  SDL_Surface *reference[3];
+  for (int phase = 0; phase < 3; ++phase) {
+    PresentWorldNav_ResetResources();
+    UploadWorldNavigationComposition(probe);
+    probe->sim.game_frame = (uint16_t)(phase * 12);
+    reference[phase] = Render(renderer, probe, NULL);
+  }
+  CHECK(Differences(reference[0], reference[1]) > 0);
+  CHECK(Differences(reference[1], reference[2]) > 0);
+  PresentWorldNav_ResetResources();
+  UploadWorldNavigationComposition(probe);
+  const int phases[] = {0, 0, 0, 1, 2, 1, 0, 2};
+  for (size_t i = 0; i < sizeof(phases) / sizeof(phases[0]); ++i) {
+    probe->sim.game_frame = (uint16_t)(phases[i] * 12);
+    const SimBackgroundVoxelModelCacheStats before = SimBackgroundVoxelModelCache_Stats();
+    SDL_Surface *image = Render(renderer, probe, NULL);
+    CHECK(Differences(image, reference[phases[i]]) == 0);
+    SDL_DestroySurface(image);
+    if (i >= 2) {
+      /* Both static factories stay cached across forward/backward phase
+       * changes. Animated models retain their interleaved submission order. */
+      const uint64_t hits = SimBackgroundVoxelModelCache_Stats().hits - before.hits;
+      CHECK(hits == 3);
+    }
+  }
+  for (int phase = 0; phase < 3; ++phase) SDL_DestroySurface(reference[phase]);
+  PresentWorldNav_ResetResources();
+  UploadWorldNavigationComposition(slot);
+  ResizeTestOutput(renderer, kWidth, kHeight);
+  free(probe);
+}
+
 static void TestAdventClearance(SDL_Renderer *renderer, const FrameSlot *slot) {
   FrameSlot *probe = malloc(sizeof(*probe));
   CHECK(probe);
@@ -1047,6 +1100,7 @@ static void TestSynthetic(SDL_Renderer *renderer) {
   TestOutputResizing(renderer, slot);
   TestColdBlackEntry(renderer, slot);
   TestTownLodMotion(renderer, slot);
+  TestAnimatedTownCache(renderer, slot);
   TestAdventClearance(renderer, slot);
   TestTallModelViewport(renderer, slot);
   free(slot);

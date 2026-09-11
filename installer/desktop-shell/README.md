@@ -64,6 +64,10 @@ Workspace selection is independent of the process working directory:
 - A sidecar named `<artifact>.portable` contains a dedicated relative directory,
   for example `BuilderData`. Keep the artifact, sidecar and that directory
   together when moving a portable Builder.
+- Public `*-portable.zip` and `*-portable.tar.xz` downloads include that sidecar
+  with `BuilderData` already selected. The directory itself is created and
+  checksum-initialized on first launch. Direct `.exe`, `.AppImage`, and macOS
+  app-only ZIP downloads omit it and therefore use per-user storage.
 - Without the sidecar, all platforms share the `ActRaiserRecomp` application
   namespace. Builder files live under `installer/`: macOS uses
   `~/Library/Application Support/ActRaiserRecomp/installer/workspace`, Linux uses
@@ -430,19 +434,32 @@ No Docker, Linux VM, Node, Electron or Wails CLI is used by the release build.
 Here “native host build” means macOS tools **cross-compile** target executables;
 it does not mean Linux/Windows programs run on macOS.
 
-`release/` receives seven deliverables, each with a SHA-256 sidecar:
+`release/` receives twelve deliverables, each with a SHA-256 sidecar:
 
-- `ActRaiserRecompBuilder-macos-{arm64,x86_64}.app.zip` (each contains the
-  ad-hoc-signed `ActRaiserRecompBuilder.app`).
-- `ActRaiserRecompBuilder-steam-deck.AppImage` (candidate; device testing required).
-- `ActRaiserRecompBuilder-windows-{arm64,x86_64}.exe` (unsigned).
+- Five direct, per-user-storage artifacts:
+  `ActRaiserRecompBuilder-macos-{arm64,x86_64}.app.zip`,
+  `ActRaiserRecompBuilder-windows-{arm64,x86_64}.exe`, and
+  `ActRaiserRecompBuilder-steam-deck.AppImage` (candidate; device testing required).
+- Five recommended portable companions:
+  `ActRaiserRecompBuilder-macos-{arm64,x86_64}-portable.zip`,
+  `ActRaiserRecompBuilder-windows-{arm64,x86_64}-portable.zip`, and
+  `ActRaiserRecompBuilder-steam-deck-portable.tar.xz`.
 - `actraiser-recomp-linux-{arm64,x86_64}.tar.xz` (generic browser-based Builder).
 
-The redundant macOS/Windows/Deck archives and generic Linux Builder AppImages
-are no longer default release outputs. Low-level packaging entrypoints remain
-available for diagnostics. The Deck image enforces a glibc 2.36 ceiling over the
-complete payload. Bundling SDL alone would not fix GTK/WebKit's baseline.
-Real SteamOS acceptance is not inferred from cross-builds.
+Each portable companion is compressed from the already-built direct artifact;
+the release driver does not configure, compile, or assemble the embedded
+payload a second time. It extracts as one platform-named folder containing the
+stable application name and its matching `.portable` sidecar. The marker
+contains `BuilderData`; no empty workspace directory ships. macOS and Windows
+use ZIP, while the AppImage uses tar.xz to retain its executable mode.
+
+The redundant legacy macOS/Windows/Deck full-distribution archives and generic
+Linux Builder AppImages are no longer default release outputs. Portable desktop
+companions are lightweight wrappers around the native artifacts, not a second
+payload build. Low-level packaging entrypoints remain available for diagnostics.
+The Deck image enforces a glibc 2.36 ceiling over the complete payload. Bundling
+SDL alone would not fix GTK/WebKit's baseline. Real SteamOS acceptance is not
+inferred from cross-builds.
 
 `make release-linux-arm64`, etc. build one target. `make release DESKTOP=0`
 retains the original archive-only workflow on any supported maintainer host.
@@ -457,14 +474,16 @@ cmake -DBUILDER_PRINT_PLAN=ON -P installer/packaging/release.cmake
 ```
 
 The release publisher stages into a fresh directory, then replaces only the
-explicitly named generated artifact and checksum. Only after success does it
-remove that target's superseded release and checksum. Per-target build trees
+explicitly named generated artifacts and checksums. Only after both the direct
+artifact and portable companion are published does it remove that target's
+superseded release and checksum. Per-target build trees
 are removed unless `KEEP_BUILD=1` (CMake: `SNESBUILD_KEEP_BUILD=ON`); download
 caches and the host compiler are retained. Direct packaging commands still
-refuse existing outputs. Existing portable workspaces are never touched.
-No portable sidecar ships by default with the Builder: place a matching
-`<artifact>.portable` containing `BuilderData` next to it to opt into portable
-storage. This applies after extracting the macOS ZIP, not next to the ZIP itself.
+refuse existing outputs. Existing portable workspaces are never touched. The
+sidecar lives beside the application inside the extracted portable folder, not
+beside the outer archive. Deleting that marker opts the extracted application
+into per-user storage; adding the same marker beside a direct artifact opts it
+into portable storage.
 
 ### Linux SDK cross-build
 

@@ -1,6 +1,11 @@
 # SNES native audio channels and ActRaiser effect ownership
 
-Status: ROM-static channel map, the opt-in 40-voice scheduler, shipped-effect
+Current revision (2026-09-11): rational audio clock, refreshed DSP accuracy,
+destination-constrained banks, and identity-aware overlap policies are
+implemented. The August replay results below describe the earlier allocator,
+not validation of this revision.
+
+Historical August status: ROM-static channel map, the opt-in 40-voice scheduler, shipped-effect
 control audit, isolated PCM parity, coupled action-stage/high-bit collision
 replays, and complete late-game boss-rush coverage are done; runtime sound-name
 labeling and a single title-to-ending frequency census are still partial.
@@ -10,6 +15,151 @@ This document is authoritative for native channel allocation, effect-lane
 ownership, loss mechanisms, and extended-channel design. `SEAMS.md` owns the
 external audio hooks, port protocol, and replacement-audio integration and
 links here instead of repeating these tables.
+
+## September clock and ownership contract
+
+The former fixed 534-frame game tick produced about 32,092.76 native frames
+per second while the output resampler consumed 32,040. That mismatch added
+about 99 ms of queued latency per minute; the 90 Hz display made the dialogue
+symptom particularly visible but did not own the audio clock.
+
+The runner now uses nominal 1.024 MHz APU / 32 kHz DSP clocks and carries the
+fractional `357366 * 5632 / 118125` APU cycles between NTSC game ticks. Both
+game-driven and callback-driven production advance the same timeline. The
+producer releases the audio lock every 256 cycles and rechecks progress.
+Display cadence remains independent; no DSP slots are omitted.
+
+Bank zero remains the authentic eight voices (music-only in extended mode).
+Four added eight-voice banks preserve the destination index of each effect:
+event voice 6 maps to 14/22/30/38, ordinary voice 7 to 15/23/31/39. Another
+bank is selected only when that destination is occupied or reserved. Other
+destinations are never borrowed, and playing effects never migrate. High-bit
+events reserve voices 6 and 7 together in one bank until both release flushes
+finish. Thus the runner still supports 40 voices, but this game's adapter
+uses eight additional effect lanes, not 32 arbitrary effect slots.
+
+`NativeAudioRequest` carries an explicit emitter key, effect ID/kind, overlap
+policy, and separate diagnostic metadata. `kOverlapRules` is the game-owned
+policy table; exact producer-site rules precede effect-wide defaults.
+
+| Policy | Same emitter and same effect | Other emitters/effects |
+|---|---|---|
+| Independent | May overlap; exact same-frame producer duplicates coalesce | Independent |
+| BlockSelf | Ignore the new request while active/pending | Independent |
+| RestartSelf | Restart on the owned destination at the next driver tick | Independent |
+| ReplaceSelf | Release the old instance before starting its replacement on that destination | Independent |
+| LatestPending | Finish the active instance; retain only the newest pending self-request | Independent |
+
+Dialogue `$01:902D` / COP `$07`, lightning `$10` (including paired COP `$90`),
+and the per-frame paired effect at `$01:CCBC` / COP `$8F` use RestartSelf.
+The game adapter observes native action objects and simulation records at
+ticks and request sites. Scene changes, observed inactive-to-active changes,
+and source-class changes produce new keys. Mutable positions, frame counters,
+script cursors, and lightning countdowns do not. The targeted miracle owns
+its `$01:C8E8`/`$01:CB40` bolts and `$01:CCBC` effect separately from enemy/town emitters. Unknown sources fall
+back to Independent. These observations cannot distinguish an identical
+record freed and reused entirely between observations; a future producer
+with that lifecycle should supply an explicit lifetime key via
+`QueueIdentifiedRequest` rather than use inferred record identity.
+
+Self-owned pending requests reserve only their destination(s), and the
+scheduler scans past them for unrelated work. General capacity pressure drops
+the new request on its first allocation attempt instead of accumulating late
+sounds. Trace outcomes distinguish `blocked_self`, `restarted_self`,
+`replaced_self`, `replaced_pending`, `capacity_drop`, `sequence_unavailable`,
+and FIFO overflow. An absent sequence pointer is not a channel-capacity failure.
+
+The DSP import is pinned to Snaggletooth
+[`321cb3eddde1fe0474eab31e5a88d32f413a7ff6`](https://github.com/etroimcasso/Snaggletooth/commit/321cb3eddde1fe0474eab31e5a88d32f413a7ff6).
+Scheduled BRR/pitch/ADSR reads, CPU-write races, shared-control latches,
+echo FIR timing, and filter history now include that tranche's corrections.
+Local direct slot dispatch, dormant-bank skipping, and the single shared echo
+path remain. All 237 upstream DSP tests pass against the adapted core.
+
+Snapshot version 14 saves the new DSP latches, rational phase, source keys,
+pending reservations, and policies. Older quick states are rejected. The
+public runner ABI stays V2; semantic digest schema is independently version 4.
+Regression tests cover three minutes of playback at 60/44.1 kHz, 90/48 kHz,
+and 120/48 kHz, all 32 save/load slot phases, native/extended effect-lane PCM
+and echo parity, dormant re-keying, pair reservations, and self-policy routing.
+The 6,000-frame `sim_actions` and 4,000-frame `aitos_wide` headless replays
+also pass with extended mode explicitly verified in their launch logs. Their
+2,149 requests include 1,828 replaced pending copies, 106 self-restarts,
+206 completions, five still active at shutdown, and four capacity drops.
+There are no FIFO overflows or music-suppression events. The four capacity
+drops (BRK `$1A`/`$1F`, COP `$03`) are explicit consequences of the destination
+cap, not sounds left to play late. Adding the measured paired-effect policies
+reduced capacity drops from 71 to four without enlarging the banks.
+Steam Deck listening and long real-time gameplay remain hardware validation,
+not a claim established by synthetic or accelerated headless tests.
+
+Validation commands: runtime `ctest` (36/36), focused application
+audio/display/settings/private-boundary `ctest` (12/12), standalone
+ASan/UBSan extension and trace tests, and the upstream DSP suite (237/237).
+The full release game builds. The broader application run still has four
+non-audio failures: `present_world_nav`, `present_world_nav_profiled`,
+`sim_background_voxel_model_cache_storage`, and `shader_blob` (no display in
+this environment). Those unrelated rendering paths were not changed here.
+
+### September performance cleanup
+
+The slot scheduler now specializes the 32 fixed slots at compile time, including
+the native/shared-echo distinction. Every active bank still executes every DSP
+cycle and all voice, BRR, register-visibility, and keying operations. This saves
+schedule dispatch work without making silent-voice state approximate. Fully
+dormant banks retain the existing sleep/wake behavior.
+
+The focused benchmark now uses the shared 32 kHz constant, drains the PCM ring
+during warmup and measurement (avoiding the full-ring/drop path), and exercises
+looping filtered BRR, packed versus destination-constrained effects, paired
+effects, and shared echo. It prints PCM-ring checksums as a comparison guard.
+
+Five alternating adjacent before/after pairs, 500,000 samples per case after
+10,000 warmup samples, on the local macOS arm64 host with Apple Clang 17 and
+`RelWithDebInfo`, gave these median DSP-only costs:
+
+| Workload | Before cleanup, ns/sample | After, ns/sample | Reduction |
+|---|---:|---:|---:|
+| Eight native BRR voices | 522.65 | 408.11 | 21.9% |
+| Eight native + four packed effects | 921.40 | 684.84 | 25.7% |
+| Eight native + four destination-constrained effects | 1931.20 | 1368.19 | 29.2% |
+| Eight native + four paired effects | 1947.98 | 1388.45 | 28.7% |
+| Destination-constrained effects with echo | 1937.82 | 1369.10 | 29.3% |
+
+All before/after PCM checksums matched. These compare the refreshed accurate
+core immediately before this cleanup, not the older August mixer. The local
+benchmark's text segment grew by 16 KiB with specialization. Results are not
+Steam Deck measurements or whole-game FPS improvements. Reproduce current
+cases with `./build-tests/actraiser_dsp_voice_benchmark 500000`.
+
+Game-adapter cleanup preserves the existing request and tick observation
+frequency, including observing other actors during singleton/dialogue requests.
+The game thread captures WRAM outside the audio mutex; `QueueGameRequest`
+publishes that observation and enqueues under one outer lock. Explicitly keyed
+requests and the pre-observed request API likewise no longer nest queue locks.
+Inferred-lifetime limitations described above are unchanged.
+
+Allocation caches per-destination pending reservation counts for one pass and
+compacts surviving requests once, in order. Consumed reservations are released
+before considering later requests; ending paired lanes remain reserved until
+both release flushes finish. Runtime searches visit the eight usable effect
+slots, not all 32 backing slots. Reservation caches are transient, and the V14
+serialized layout/ring origin and runner V2 ABI are unchanged.
+
+Tests additionally cover full 128-request bursts with interleaved retained
+owners, reservation release after an unavailable sequence, retained request
+order through save/load, identical serialized state for combined versus split
+observation/submission, and non-nested request locks. All 237 upstream DSP,
+36 runtime, and 12 focused application tests pass; extension and trace tests
+also pass ASan/UBSan. The two gameplay replays retain the same request outcomes,
+voice assignments, four capacity drops, and final WRAM/SRAM/dispatch artifacts.
+Replay start/end cycle stamps are not used as PCM-equivalence evidence; slot
+continuation/parity tests and the focused DSP checksums cover that boundary.
+
+The 256-cycle production chunk is deliberately unchanged. Comparing callback
+wait distributions and underruns at 256/512/1024 cycles requires real-time
+device testing. Native lifetime-generation hooks and dormant per-voice skipping
+remain separate, higher-risk work rather than prerequisites for these savings.
 
 This note answers two separate questions:
 
@@ -491,9 +641,9 @@ virtual lanes, bitwise mask preservation, independent SFX gain/echo, and
 serialization. The later Phase-2 replay below naturally exercises simultaneous
 voices 8 and 9.
 
-### Phase 2: queued, polyphonic effects — implemented
+### Phase 2: queued, polyphonic effects — August implementation (superseded)
 
-Current extended mode implements the requested “do not drop or suppress
+The August extended mode implemented the requested “do not drop or suppress
 effects” behavior as follows:
 
 1. Capture BRK/COP requests at the software-interrupt hook with a monotonically
@@ -588,7 +738,10 @@ APIs generally expose the PCM sink, not a portable SNES-style BRR/envelope/echo
 accelerator, so moving voice state into the device would sacrifice exactness
 without a useful general hardware-offload path.
 
-A released virtual voice now sleeps when its envelope is at zero and it has no
+Historical August measurements (before the slot-accurate core; see the September
+performance section above for current measurements):
+
+A released virtual voice sleeps when its envelope is at zero and it has no
 pending KON/KOF. Native voices remain cycle-exact, and the next virtual KON
 wakes the voice through the existing reset path before rendering. On the local
 Apple host, a five-million-frame release benchmark reports approximately 0.21%

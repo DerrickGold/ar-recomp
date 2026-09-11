@@ -1606,6 +1606,7 @@ static void BeginBuild(void) {
 
 void SimRenderMetadata_Reset(void) {
   memset(&g_sim_metadata, 0, sizeof(g_sim_metadata));
+  SimWorldNavigationTowns_ResetCache();
   SimRenderMetadata_ResetHeightSlew();
   ResetEffectLifetimes();
 }
@@ -2355,7 +2356,7 @@ void SimRenderMetadata_CaptureSkyPalaceFrame(
     return;
   dst->master_enabled = true;
   CaptureWorldNavigationState(dst, wram);
-  SimWorldNavigationTowns_Capture(wram, &dst->world_navigation_towns);
+  SimWorldNavigationTowns_CaptureCached(wram, &dst->world_navigation_towns);
   dst->underlay_serial = SimWorldMap_DevelopedAvailable() ? SimWorldMap_Serial() : 0;
   dst->view = SimWorldNavigationScene_BuildSkyPalace(
       &dst->world_navigation_scene, dst->world_navigation.focus_x,
@@ -2414,7 +2415,7 @@ void SimRenderMetadata_CaptureFrame(
       ReadMirror16(wram, kActRaiserWram_SimMiracleActorDone);
   if (world_navigation) {
     CaptureWorldNavigationState(dst, wram);
-    SimWorldNavigationTowns_Capture(wram, &dst->world_navigation_towns);
+    SimWorldNavigationTowns_CaptureCached(wram, &dst->world_navigation_towns);
   }
 
   if (town) {

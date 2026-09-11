@@ -569,6 +569,7 @@ void FrameSlot_Capture(FrameSlot *dst) {
   dst->hud_scale_percent =
       Settings_ScalePercentToOutput(g_settings.hud_scale_percent);
   dst->show_fps = g_settings.show_fps;
+  dst->performance_overlay = g_settings.performance_overlay;
 
   dst->diorama_active = g_diorama_frame_active;
   dst->diorama_plane_request_mask = 0;

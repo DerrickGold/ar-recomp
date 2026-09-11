@@ -124,6 +124,7 @@ void apu_reset(Apu *apu) {
     apu->sampleClock = 0u;
     apu->cycleClock = 0u;
     apu->timelineTargetCycles = 0u;
+    apu->timelineCycleRemainder = 0u;
     memset(apu->inPorts, 0, sizeof(apu->inPorts));
     memset(apu->outPorts, 0, sizeof(apu->outPorts));
     memset(apu->timer, 0, sizeof(apu->timer));
@@ -208,6 +209,8 @@ void apu_saveload(Apu *apu, SaveLoadInfo *info) {
         info->func(info, &apu->cycleClock, sizeof(apu->cycleClock));
         info->func(info, &apu->timelineTargetCycles,
                    sizeof(apu->timelineTargetCycles));
+        info->func(info, &apu->timelineCycleRemainder,
+                   sizeof(apu->timelineCycleRemainder));
         info->func(info, &apu->portClock, sizeof(apu->portClock));
         info->func(info, &apu->portClockNs, sizeof(apu->portClockNs));
         info->func(info, apu->portLastTarget, sizeof(apu->portLastTarget));
@@ -249,6 +252,7 @@ void apu_saveload(Apu *apu, SaveLoadInfo *info) {
     saveload_u64(info, &apu->sampleClock);
     saveload_u64(info, &apu->cycleClock);
     saveload_u64(info, &apu->timelineTargetCycles);
+    saveload_u32(info, &apu->timelineCycleRemainder);
     saveload_u64(info, &apu->portClock);
     saveload_u64(info, &apu->portClockNs);
     for (unsigned index = 0; index < 4u; ++index)

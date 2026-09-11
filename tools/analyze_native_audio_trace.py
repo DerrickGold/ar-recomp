@@ -26,6 +26,8 @@ GENUINE_DROP_OUTCOMES = (
     "rejected_dual_busy",
     "replaced_lane",
     "extended_fifo_overflow",
+    "capacity_drop",
+    "sequence_unavailable",
 )
 
 RETRIGGER_OUTCOME = "retriggered_lane"
@@ -39,6 +41,13 @@ DUPLICATE_OUTCOMES = (
 DELIBERATE_OUTCOMES = (
     "suppressed_setting",
     "canceled_song_transition",
+)
+
+SELF_POLICY_OUTCOMES = (
+    "blocked_self",
+    "restarted_self",
+    "replaced_self",
+    "replaced_pending",
 )
 
 UNRESOLVED_OUTCOMES = (
@@ -85,7 +94,7 @@ def print_overview(rows: list[dict[str, str]]) -> None:
     outcomes = count_outcomes(rows)
     genuine = sum(outcomes[name] for name in GENUINE_DROP_OUTCOMES)
     duplicates = sum(outcomes[name] for name in DUPLICATE_OUTCOMES)
-    deliberate = sum(outcomes[name] for name in DELIBERATE_OUTCOMES)
+    deliberate = sum(outcomes[name] for name in DELIBERATE_OUTCOMES + SELF_POLICY_OUTCOMES)
     unresolved = sum(outcomes[name] for name in UNRESOLVED_OUTCOMES)
     retriggers = outcomes[RETRIGGER_OUTCOME]
     print(
@@ -107,7 +116,7 @@ def print_effect_table(rows: list[dict[str, str]]) -> None:
 
     headers = (
         "kind", "id", "posts", "done", "mbox", "port", "busy", "lane",
-        "fifo", "dupes", "restart", "open", "rekeys", "music-skips",
+        "fifo", "capacity", "unavailable", "self-policy", "dupes", "restart", "open", "rekeys", "music-skips",
     )
     print("\n" + " ".join(f"{header:>11}" for header in headers))
     for key in sorted(grouped):
@@ -118,6 +127,9 @@ def print_effect_table(rows: list[dict[str, str]]) -> None:
             outcomes["overwritten_mailbox"], outcomes["overwritten_port"],
             outcomes["rejected_dual_busy"], outcomes["replaced_lane"],
             outcomes["extended_fifo_overflow"],
+            outcomes["capacity_drop"],
+            outcomes["sequence_unavailable"],
+            sum(outcomes[name] for name in SELF_POLICY_OUTCOMES),
             sum(outcomes[name] for name in DUPLICATE_OUTCOMES),
             outcomes[RETRIGGER_OUTCOME],
             sum(outcomes[name] for name in UNRESOLVED_OUTCOMES),
@@ -137,7 +149,7 @@ def print_drop_ranking(rows: list[dict[str, str]]) -> None:
     for key, group in grouped.items():
         outcomes = count_outcomes(group)
         duplicates = sum(outcomes[name] for name in DUPLICATE_OUTCOMES)
-        cues = len(group) - duplicates
+        cues = len(group) - duplicates - sum(outcomes[name] for name in SELF_POLICY_OUTCOMES)
         drops = sum(outcomes[name] for name in GENUINE_DROP_OUTCOMES)
         drop_rate = drops / cues if cues else 0.0
         ranked.append((drops, drop_rate, cues, key, outcomes, duplicates))
@@ -145,7 +157,7 @@ def print_drop_ranking(rows: list[dict[str, str]]) -> None:
 
     headers = (
         "kind", "id", "cues", "done", "drops", "drop%", "mbox", "port",
-        "busy", "lane", "fifo", "restart", "dupes", "open", "music-skips",
+        "busy", "lane", "fifo", "capacity", "unavailable", "restart", "dupes", "open", "music-skips",
     )
     print("\ndrop-prone ranking (true duplicates excluded from cues):")
     print(" ".join(f"{header:>11}" for header in headers))
@@ -155,6 +167,8 @@ def print_drop_ranking(rows: list[dict[str, str]]) -> None:
             f"{drop_rate * 100:.1f}", outcomes["overwritten_mailbox"],
             outcomes["overwritten_port"], outcomes["rejected_dual_busy"],
             outcomes["replaced_lane"], outcomes["extended_fifo_overflow"],
+            outcomes["capacity_drop"],
+            outcomes["sequence_unavailable"],
             outcomes[RETRIGGER_OUTCOME], duplicates,
             sum(outcomes[name] for name in UNRESOLVED_OUTCOMES),
             sum(integer(row, "music_updates_suppressed")

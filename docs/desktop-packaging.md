@@ -51,6 +51,16 @@ Its Workshop edits the output's runtime assets directly; build inputs remain
 in the separate installer workspace. Legacy archive launchers still write a
 sidecar pointing to the existing project data (`utils/` in downloaded bundles),
 so those installs retain their existing saves/settings.
+
+Public desktop Builder releases offer both storage choices without duplicating
+the build. The direct macOS app ZIP, Windows executable, and Steam Deck AppImage
+omit a Builder sidecar and use per-user storage. Their recommended portable
+companions wrap that same already-built artifact plus a matching sidecar whose
+contents are `BuilderData`; first launch creates that sibling directory. The
+macOS/Windows wrappers are ZIP files. The AppImage wrapper is tar.xz so its
+executable mode survives extraction. These Builder markers do not alter the
+generated game's independent portable/global selection.
+
 Copy the app together with its sidecar and data to move a portable installation.
 Copying just the app uses global storage. `--global` explicitly ignores a sidecar.
 For ordinary launches without overrides, absence of a sidecar intentionally

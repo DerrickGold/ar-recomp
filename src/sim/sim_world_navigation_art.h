@@ -2,6 +2,7 @@
 #define SIM_WORLD_NAVIGATION_ART_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "sim_world_map.h"
@@ -45,6 +46,39 @@ bool SimWorldNavigationArt_OverlayTownGround(
 typedef struct SimWorldNavigationArtChanges {
   uint8_t cells[kSimWorldMapBytes];
 } SimWorldNavigationArtChanges;
+
+/* Prepared pixel work, not a renderer resource. Preparation resolves borrowed
+ * atlas tiles on their owner before execution. Keep all input pixels and the
+ * town-art module unchanged until every requested row range has completed;
+ * do not retain the plan across source updates/reset. Output must not alias
+ * inputs. Disjoint world-cell row ranges write disjoint output pixel rows,
+ * without atlas lookups, allocation, global mutation or thread dependencies.
+ * Caller owns this fixed ~280 KiB value and may reuse its storage. */
+typedef struct SimWorldNavigationArtAnimation {
+  uint32_t *output;
+  const uint32_t *developed, *baseline;
+  int output_pitch, developed_pitch, baseline_pitch;
+  SimWorldNavigationArtChanges changes;
+  struct {
+    const uint32_t *pixels;
+    uint8_t x, y;
+  } overlay[kSimWorldMapBytes];
+  unsigned feather[kSimTownCells * kSimTownCellPixels];
+  bool ready;
+} SimWorldNavigationArtAnimation;
+
+bool SimWorldNavigationArt_PrepareAnimation(
+    SimWorldNavigationArtAnimation *work,
+    uint32_t *out_pixels, int out_pitch_pixels,
+    const uint32_t *developed_pixels, int developed_pitch_pixels,
+    const uint32_t *baseline_pixels, int baseline_pitch_pixels,
+    const uint8_t *world_cells,
+    const SimWorldNavigationTownGround *ground, bool models_enabled, bool cliff_geometry,
+    uint8_t previous_phase, uint8_t animation_phase);
+/* Empty/out-of-range or unprepared requests do nothing. Ranges are [first,end)
+ * within kSimWorldMapTiles, not pixel rows. Publication belongs to the caller. */
+void SimWorldNavigationArt_RenderAnimationRows(
+    const SimWorldNavigationArtAnimation *work, size_t first, size_t end);
 
 /* Animation-only update of an already composed atlas. Geography and model/
  * cliff gates must match its full bake. world_cells optionally identifies

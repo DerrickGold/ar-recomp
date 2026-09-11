@@ -11,6 +11,7 @@
 #include "settings_overlay.h"
 #include "settings_overlay_localization.h"
 #include "settings_overlay_layers_localization.h"
+#include "performance_overlay.h"
 #include "platform/sdl/render_sdl_internal.h"
 #include "sim/sim_town_terrain.h"
 #ifdef AR_OVERLAY_UI_FONT
@@ -1042,6 +1043,43 @@ static void CheckLayerEditorSection(void) {
   ActionBgTuner_ResetSession();
 }
 
+static void CheckPerformanceOverlay(ArRenderDevice *device, SDL_Renderer *renderer,
+                                     SDL_Surface *surface) {
+  PerformanceSnapshot sample = {.revision = 1, .ready = true, .fps = 40,
+      .frame_mean_ms = 25, .frame_p95_ms = 27, .frame_max_ms = 29};
+  sample.context = (PerformanceContext){.scene = kPerformanceScene_World,
+      .width = surface->w, .height = surface->h, .map_number = 9};
+  for (int i = 0; i < kPerformanceStage_Count; i++)
+    sample.stages[i] = (PerformanceValue){.mean_ms = .25, .maximum_ms = .5, .calls = 40};
+  const ArRenderExtentI output = {surface->w, surface->h};
+  for (int level = 0; level <= 2; level++) {
+    CHECK(SDL_SetRenderLogicalPresentation(renderer, 0, 0, SDL_LOGICAL_PRESENTATION_DISABLED));
+    CHECK(SDL_SetRenderViewport(renderer, NULL));
+    CHECK(SDL_SetRenderClipRect(renderer, NULL));
+    SDL_SetRenderDrawColor(renderer, 32, 24, 16, 255);
+    CHECK(SDL_RenderClear(renderer));
+    CHECK(PerformanceOverlay_Render(device, &sample, level, output));
+    CHECK(SDL_RenderPresent(renderer));
+    PerformanceOverlayModel model;
+    PerformanceOverlay_Build(&sample, level, output, &model);
+    int changed = 0, glyph = 0;
+    for (int y = 0; y < surface->h; y++)
+      for (int x = 0; x < surface->w; x++) {
+        Uint8 r, g, b, a;
+        CHECK(SDL_ReadSurfacePixel(surface, x, y, &r, &g, &b, &a));
+        if (r == 32 && g == 24 && b == 16) continue;
+        changed++;
+        glyph += r > 128 && g > 128 && b > 128;
+        CHECK(x >= model.panel.x && x < model.panel.x + model.panel.w);
+        CHECK(y >= model.panel.y && y < model.panel.y + model.panel.h);
+      }
+    CHECK(level ? changed > 100 && glyph > 30 : changed == 0);
+  }
+  const char *preview = getenv("AR_PERFORMANCE_OVERLAY_PREVIEW");
+  if (preview && *preview) CHECK(SDL_SaveBMP(surface, preview));
+  PerformanceOverlay_Reset(device);
+}
+
 int main(int argc, char **argv) {
   if (argc == 2 && !strcmp(argv[1], "--dump-layer-help")) {
     s_dump_catalog = true;
@@ -1099,6 +1137,7 @@ int main(int argc, char **argv) {
   CHECK(SettingsOverlay_ReloadTextures(rom_data, rom_size));
   SettingsOverlay_SetInspectorInfoProvider(InspectorInfo);
   free(rom_data);
+  CheckPerformanceOverlay(&render_device, renderer, surface);
 
   /* Output-space text is shared by the manual and the FPS counter. Keep a
    * real software-renderer regression around the batched glyph path so a bad

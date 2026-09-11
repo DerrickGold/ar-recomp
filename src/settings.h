@@ -311,6 +311,7 @@ typedef struct Settings {
   int refresh_mode;         /* RefreshMode */
   int frame_limit_fps;      /* target FPS when refresh_mode == Limit */
   bool show_fps;            /* completed host presents, top-right overlay */
+  int performance_overlay; /* 0 off, 1 summary, 2 detailed pipeline diagnostics */
 
   /* Audio controls. The SDL callback consumes an atomic mirror of the master
    * value; the game-thread COP hook reads the dialogue toggle directly. */

@@ -34,9 +34,12 @@
 #include "platform/sdl/render_sdl.h"
 #include "present_cadence_metrics.h"
 #include "snesrecomp/runner.h"
+#include "snesrecomp/game/audio_timing.h"
 #include "settings.h"
 #include "constants.h"
 #include "render/render_device.h"
+#include "performance_metrics.h"
+#include "render_comparison.h"
 
 extern SDL_Window *g_window;
 extern ArRenderDevice g_render_device;
@@ -52,7 +55,7 @@ extern uint8_t g_hud_bg_pixels[
 extern uint8_t g_hud_obj_pixels[
     SR_PPU_SURFACE_MAX_WIDTH * 4 * kHostDisplayFramebufferHeight];
 
-const uint64_t kHostDisplayEmulationFrameIntervalNs = 16639267ull;
+const uint64_t kHostDisplayEmulationFrameIntervalNs = RTL_NTSC_FRAME_INTERVAL_NS;
 int g_active_pixel_aspect = kPixelAspect_Crt43;
 
 enum {
@@ -231,8 +234,14 @@ static uint64_t PresentIntervalNs(HostDisplayPresentMode mode) {
  * while the overlay is hidden, and restarts across cadence changes so the
  * first visible result cannot mix menu/paused/old-refresh timing. */
 static bool CompletePresent(HostDisplayPresentMode mode) {
+  const PerformanceScope pacing = PerformanceMetrics_Begin(kPerformance_Pacing);
   ThrottlePresent(PresentIntervalNs(mode));
-  if (!ArRenderDevice_Present(&g_render_device)) {
+  PerformanceMetrics_End(pacing);
+  const PerformanceScope swap = PerformanceMetrics_Begin(kPerformance_Swap);
+  const bool swapped = ArRenderDevice_Present(&g_render_device);
+  PerformanceMetrics_End(swap);
+  if (!swapped) {
+    PerformanceMetrics_Add(kPerformanceCount_FailedPresents, 1);
     if (!s_present_failure_reported) {
       fprintf(stderr, "[display] frame present failed: %s\n",
               ArRenderDevice_LastError(&g_render_device));
@@ -243,6 +252,7 @@ static bool CompletePresent(HostDisplayPresentMode mode) {
   s_present_failure_reported = false;
 
   const uint64_t completed_at_ns = SDL_GetTicksNS();
+  PerformanceMetrics_PresentCompleted(completed_at_ns);
   const HostDisplayPacingOptions options = CurrentPacingOptions();
   if (HostDisplayPacing_RecordVsyncPresent(
           &s_vsync_guard,
@@ -616,6 +626,26 @@ static bool PresentPerformanceEnabled(void) {
   return enabled != 0;
 }
 
+static void PerformanceContextForFrame(const FrameSlot *slot, HostDisplayPresentMode mode) {
+  if (!PerformanceMetrics_Enabled()) return;
+  PerformanceContext context = {
+    .scene = slot->diorama_active ? kPerformanceScene_Action : kPerformanceScene_Native,
+    .host_mode = mode == kHostDisplayPresent_Menu ? 2 : mode == kHostDisplayPresent_Paused ? 1 : 0,
+    .map_group = slot->diorama_map_group, .map_number = slot->diorama_map_number,
+    .refresh_mode = g_settings.refresh_mode,
+    .limit_fps = g_settings.refresh_mode == kRefreshMode_Limit ? g_settings.frame_limit_fps : 0,
+    .vsync = HostDisplayStatus_VsyncActive(),
+  };
+  if (slot->sim.view == kSimView_Enhanced) context.scene = kPerformanceScene_Town;
+  if (slot->sim.view == kSimView_WorldNavigation) context.scene = kPerformanceScene_World;
+  if (slot->sim.view == kSimView_SkyPalace) context.scene = kPerformanceScene_Palace;
+  if (RenderComparison_PresentView() != kRenderComparison_Enhanced) context.host_mode = 3;
+  (void)ArRenderDevice_GetOutputSize(&g_render_device, &context.width, &context.height);
+  PerformanceMetrics_SetContext(&context);
+  if (slot->sim.view == kSimView_AuthenticFallback)
+    PerformanceMetrics_Add(kPerformanceCount_Fallbacks, 1);
+}
+
 bool HostDisplay_SubmitFrame(HostDisplayPresentMode mode, float alpha) {
   if (mode == kHostDisplayPresent_None ||
       !ArRenderDevice_IsReady(&g_render_device) ||
@@ -627,18 +657,25 @@ bool HostDisplay_SubmitFrame(HostDisplayPresentMode mode, float alpha) {
   const bool game_tick = mode == kHostDisplayPresent_GameTick ||
                          mode == kHostDisplayPresent_HeadlessVideo;
   FrameSlot slot;
+  PerformanceScope pipeline = PerformanceMetrics_Begin(kPerformance_Capture);
   FrameSlot_Capture(&slot);
+  PerformanceMetrics_End(pipeline);
+  PerformanceContextForFrame(&slot, mode);
   const uint64_t render_start_ms =
       performance_enabled ? SDL_GetTicks() : 0;
+  pipeline = PerformanceMetrics_Begin(kPerformance_Upload);
   PresentUpload(&slot);
+  PerformanceMetrics_End(pipeline);
 
   if (game_tick) {
     s_retained_frame.slot = slot;
     s_retained_frame.valid = true;
   }
+  pipeline = PerformanceMetrics_Begin(kPerformance_Presentation);
   PresentFrame(&slot,
                game_tick ? alpha : kPresentationFrameGenerationPhaseNone,
                HostDisplay_FramesPerSecond());
+  PerformanceMetrics_End(pipeline);
 
   const uint64_t vsync_start_ms =
       performance_enabled ? SDL_GetTicks() : 0;
@@ -681,11 +718,16 @@ bool HostDisplay_TryRepresentFrame(float alpha,
       performance_enabled ? SDL_GetTicks() : 0;
   RefreshRetainedDioramaCamera(&s_retained_frame.slot);
   RefreshRetainedSimCamera(&s_retained_frame.slot);
+  s_retained_frame.slot.performance_overlay = g_settings.performance_overlay;
+  PerformanceContextForFrame(&s_retained_frame.slot, kHostDisplayPresent_GameTick);
 
+  const PerformanceScope pipeline = PerformanceMetrics_Begin(kPerformance_Presentation);
   PresentFrame(&s_retained_frame.slot,
                use_interpolation
                    ? alpha : kPresentationFrameGenerationPhaseNone,
                HostDisplay_FramesPerSecond());
+  PerformanceMetrics_End(pipeline);
+  PerformanceMetrics_Add(kPerformanceCount_Represents, 1);
   const uint64_t vsync_start_ms =
       performance_enabled ? SDL_GetTicks() : 0;
   if (!CompletePresent(kHostDisplayPresent_GameTick)) return false;
@@ -703,7 +745,9 @@ void HostDisplay_YieldIfNoPresent(bool presented,
   if (presented) return;
   if (!window_hidden && produced_frame)
     s_no_present_no_sleep_iteration_count++;
+  const PerformanceScope pacing = PerformanceMetrics_Begin(kPerformance_Pacing);
   SDL_Delay(1);
+  PerformanceMetrics_End(pacing);
 }
 
 PresentCadenceMetrics PresentCadence_GetMetrics(void) {

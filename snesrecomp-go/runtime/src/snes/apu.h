@@ -60,6 +60,7 @@ struct Apu {
      * timelineTargetCycles is the runner-owned game-tick target. */
     uint64_t cycleClock;
     uint64_t timelineTargetCycles;
+    uint32_t timelineCycleRemainder;
     uint64_t portClock;
     uint64_t portClockNs;
     uint64_t portLastTarget[4];

@@ -4,6 +4,18 @@ These results describe the `builder-desktop-shell` prototype, not a
 release qualification. The production installer/game-artifact work was merged
 locally into `main` at `1b785490` before this exploration. Nothing was pushed.
 
+## Portable Builder release companions
+
+The release publisher now derives a portable companion from each already-built
+macOS, Windows and Steam Deck desktop artifact. This is an archive-only step:
+it copies the validated application, adds the exact adjacent `.portable` marker
+with `BuilderData`, and compresses the enclosing folder without rebuilding the
+payload. Policy tests cover all five names, require both variants before old
+release pruning, inspect ZIP/tar.xz contents, and verify that AppImage extraction
+retains an executable bit. Full rebuilt-artifact and native-platform acceptance
+remain part of the next release qualification; the historical seven-artifact
+results below predate these five additional wrappers.
+
 ## Open issue: launching the game from the Workshop
 
 The user reports `SDL_Init failed: No available video device` when pressing

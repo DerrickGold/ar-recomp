@@ -6,6 +6,9 @@
 #include <string.h>
 
 #include "host/host_clock.h"
+#include "performance_metrics.h"
+
+_Static_assert((int)kPerformance_SimCount == (int)kSim3DPerformanceStage_Count, "SIM metric stage mapping");
 
 enum {
   kNoPerformanceStage = -1,
@@ -28,6 +31,7 @@ static Sim3DPerformanceCounters
 static int s_current_stage = kNoPerformanceStage;
 static uint64_t s_window_started_ns;
 static uint64_t s_presentations;
+static uint64_t s_geometry_upload_bytes;
 
 static const char *const kStageNames[] = {
   "upload", "backdrop", "underlay", "terrain", "depth-voxel",
@@ -40,11 +44,15 @@ _Static_assert(
         kSim3DPerformanceStage_Count,
     "every SIM 3D performance stage needs a report label");
 
-bool Sim3DPerformance_Enabled(void) {
+static bool LogEnabled(void) {
   static int enabled = -1;
   if (enabled < 0)
     enabled = (getenv("AR_PERF") || getenv("AR_SIM3D_PERF")) ? 1 : 0;
   return enabled != 0;
+}
+
+bool Sim3DPerformance_Enabled(void) {
+  return LogEnabled() || PerformanceMetrics_Enabled();
 }
 
 Sim3DPerformanceScope Sim3DPerformance_Begin(
@@ -67,6 +75,8 @@ void Sim3DPerformance_End(Sim3DPerformanceScope scope) {
   uint64_t now_ns = HostClock_Nanoseconds();
   Sim3DPerformanceCounters *counter = &s_counters[scope.stage];
   const uint64_t elapsed_ns = now_ns - scope.started_ns;
+  PerformanceMetrics_Record(PerformanceMetrics_Epoch(),
+      (PerformanceStage)(kPerformance_SimFirst + scope.stage), elapsed_ns);
   counter->elapsed_ns += elapsed_ns;
   if (elapsed_ns > counter->maximum_ns) counter->maximum_ns = elapsed_ns;
   counter->calls++;
@@ -74,6 +84,8 @@ void Sim3DPerformance_End(Sim3DPerformanceScope scope) {
 }
 
 void Sim3DPerformance_AddDraw(uint64_t vertices, uint64_t indices) {
+  PerformanceMetrics_Add(kPerformanceCount_Draws, 1);
+  PerformanceMetrics_Add(kPerformanceCount_Vertices, vertices);
   if (!Sim3DPerformance_Enabled() ||
       s_current_stage < 0 || s_current_stage >= kSim3DPerformanceStage_Count)
     return;
@@ -84,6 +96,7 @@ void Sim3DPerformance_AddDraw(uint64_t vertices, uint64_t indices) {
 }
 
 void Sim3DPerformance_AddUpload(uint64_t bytes) {
+  PerformanceMetrics_Add(kPerformanceCount_UploadBytes, bytes);
   /* Upload helpers are shared by flat/action presentations. Count them only
    * while the enhanced-SIM upload scope is active, otherwise an action-stage
    * frame rendered before entering a town pollutes the first SIM report. */
@@ -136,6 +149,8 @@ static void ReportPerformance(uint64_t window_ns) {
           (double)draws / divisor, (double)vertices / divisor,
           (double)indices / divisor, upload->uploads,
           (double)upload->upload_bytes / (1024.0 * 1024.0));
+  fprintf(stderr, " vertex-upload-MiB/present=%.3f",
+      (double)s_geometry_upload_bytes / divisor / (1024.0 * 1024.0));
   for (int stage = 0; stage < kSim3DPerformanceStage_Count; stage++) {
     const Sim3DPerformanceCounters *counter = &s_counters[stage];
     if (!counter->draws) continue;
@@ -146,6 +161,13 @@ static void ReportPerformance(uint64_t window_ns) {
   fputc('\n', stderr);
 }
 
+void Sim3DPerformance_AddGeometryUpload(uint64_t bytes) {
+  PerformanceMetrics_Add(kPerformanceCount_DepthUploadBytes, bytes);
+  if (Sim3DPerformance_Enabled() && s_current_stage >= 0 &&
+      s_current_stage < kSim3DPerformanceStage_Count)
+    s_geometry_upload_bytes += bytes;
+}
+
 void Sim3DPerformance_EndPresentation(void) {
   if (!Sim3DPerformance_Enabled()) return;
   uint64_t now_ns = HostClock_Nanoseconds();
@@ -153,8 +175,9 @@ void Sim3DPerformance_EndPresentation(void) {
   s_presentations++;
   uint64_t window_ns = now_ns - s_window_started_ns;
   if (window_ns < (uint64_t)kPerformanceWindowNs) return;
-  ReportPerformance(window_ns);
+  if (LogEnabled()) ReportPerformance(window_ns);
   memset(s_counters, 0, sizeof(s_counters));
+  s_geometry_upload_bytes = 0;
   s_presentations = 0;
   s_window_started_ns = now_ns;
 }

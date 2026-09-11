@@ -1231,6 +1231,97 @@ static void test_native_capture_path_parity(void) {
     compare_native_capture_path(false, 1u, 1u, -1, true, true, 0x10);
 }
 
+static void compare_main_winner_masks(uint8_t mode, int extra, int variant, bool authentic) {
+    enum { kRows = 32, kPlanes = 4 };
+    const int width = kPpuXPixels + extra * 2;
+    const size_t bytes = (size_t)width * kRows * sizeof(uint32_t);
+    Ppu *ppu[2] = {ppu_init(), ppu_init()};
+    uint32_t *pixels[2] = {calloc(1, bytes), calloc(1, bytes)};
+    uint32_t *original[2] = {calloc(1, bytes), calloc(1, bytes)};
+    uint32_t *planes[2][kPpuOverlaySource_Count][kPlanes] = {{{0}}};
+    CHECK(ppu[0] && ppu[1] && pixels[0] && pixels[1] && original[0] && original[1]);
+    if (!ppu[0] || !ppu[1] || !pixels[0] || !pixels[1] || !original[0] || !original[1])
+        goto cleanup;
+    for (int implementation = 0; implementation < 2; ++implementation) {
+        Ppu *p = ppu[implementation];
+        setup_native_fast_fixture(p, mode, variant == 1 ? 0xf0u : 0u, mode == 1);
+        PpuSetExtraSpace(p, extra);
+        if (variant == 1) p->inidisp = 7; /* Mask white is independent of fade. */
+        if (variant == 2) {
+            p->screenEnabled[0] &= (uint8_t)~2u;
+            p->screenEnabled[1] |= 2u;
+            p->mosaic = 0x31u;
+        }
+        for (int source = 0; source < kPpuOverlaySource_Count; ++source) {
+            for (int band = 0; band < kPlanes; ++band) {
+                planes[implementation][source][band] = calloc(1, bytes);
+                CHECK(planes[implementation][source][band]);
+                if (!planes[implementation][source][band]) goto cleanup;
+            }
+            CHECK(PpuBindOverlaySurface(p, (PpuOverlaySource)source,
+                (uint8_t *)planes[implementation][source][0], width * sizeof(uint32_t)));
+            for (int band = 1; band < (source == kPpuOverlaySource_Obj ? 4 : 3); ++band)
+                CHECK(PpuBindOverlayPrioSurface(p, (PpuOverlaySource)source,
+                    (uint8_t)band, (uint8_t *)planes[implementation][source][band]));
+            /* Partial rectangles, native priority planes, and windowed main/
+             * subscreen competition must agree with reference capture. */
+            int left = source == kPpuOverlaySource_Bg3 ? 19 : -extra;
+            int extent = source == kPpuOverlaySource_Bg3 ? 181 : width;
+            unsigned flags = kPpuOverlayFlag_MarkMainScreenWinner;
+            if (variant == 3 && source == kPpuOverlaySource_Bg2)
+                flags = kPpuOverlayFlag_RemoveFromGame; /* masks retain pre-removal winners */
+            if (variant == 4 && (source == kPpuOverlaySource_Bg3 ||
+                    source == kPpuOverlaySource_Obj))
+                flags = kPpuOverlayFlag_RemoveFromGame; /* native text and HUD extraction */
+            if (variant == 5 && source == kPpuOverlaySource_Bg2)
+                flags = kPpuOverlayFlag_MarkFullAddSubscreen;
+            CHECK(PpuSetOverlayCapture(p, (PpuOverlaySource)source,
+                left, 1, extent,
+                variant == 4 && source == kPpuOverlaySource_Obj ? 8 : kRows - 2,
+                (uint8_t)flags));
+        }
+        const bool filtered_obj = variant == 2 || variant == 4;
+        CHECK(PpuSetOverlayOamRange(p, filtered_obj ? 1 : 0, filtered_obj ? 2 : 128));
+        PpuBeginDrawing(p, (uint8_t *)pixels[implementation], width * sizeof(uint32_t),
+            implementation ? kPpuRenderFlags_ReferencePixelRenderer : 0);
+        if (authentic)
+            CHECK(PpuBindAuthenticSurface(p, (uint8_t *)original[implementation],
+                width * sizeof(uint32_t)));
+        ppu_runLine(p, 0);
+        for (int line = 1; line <= kRows; ++line) ppu_runLine(p, line);
+    }
+    CHECK(!memcmp(pixels[0], pixels[1], bytes));
+    CHECK(!memcmp(original[0], original[1], bytes));
+    CHECK(!memcmp(&ppu[0]->bgBuffers[0], &ppu[1]->bgBuffers[0], sizeof(ppu[0]->bgBuffers[0])));
+    for (int source = 0; source < kPpuOverlaySource_Count; ++source) {
+        CHECK(ppu[0]->overlayRenderContentMask[source] == ppu[1]->overlayRenderContentMask[source]);
+        for (int band = 0; band < kPlanes; ++band) {
+            if (memcmp(planes[0][source][band], planes[1][source][band], bytes)) {
+                fprintf(stderr, "winner mask mismatch mode=%u extra=%d variant=%d source=%d band=%d\n",
+                    mode, extra, variant, source, band);
+                CHECK(false);
+            }
+        }
+    }
+cleanup:
+    for (int implementation = 0; implementation < 2; ++implementation) {
+        for (int source = 0; source < kPpuOverlaySource_Count; ++source)
+            for (int band = 0; band < kPlanes; ++band) free(planes[implementation][source][band]);
+        free(pixels[implementation]);
+        free(original[implementation]);
+        ppu_free(ppu[implementation]);
+    }
+}
+
+static void test_main_winner_masks(void) {
+    for (uint8_t mode = 0; mode <= 7; ++mode)
+        for (int wide = 0; wide < 2; ++wide)
+            for (int variant = 0; variant < 6; ++variant)
+                for (int authentic = 0; authentic < 2; ++authentic)
+                    compare_main_winner_masks(mode, wide ? kPpuExtraLeftRight : 0,
+                        variant, authentic != 0);
+}
+
 static void test_unbound_capture_fails_open(void) {
     enum { kRows = 32 };
     const size_t pixel_count = (size_t)kPpuXPixels * kRows;
@@ -1775,6 +1866,7 @@ int main(void) {
         test_mode6_offset_geometry();
         test_native_fast_path_parity();
         test_native_capture_path_parity();
+        test_main_winner_masks();
         test_unbound_capture_fails_open();
         test_native_virtual_fast_path_parity();
         test_native_virtual_capture_path_parity();

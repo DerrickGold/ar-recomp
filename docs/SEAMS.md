@@ -40,7 +40,7 @@ identity are the perishable, expensive-to-rederive parts.
 | Song upload (image identity) | `$02:9964` HLE — stage 1 (`$9A56` block image) + stage 2 (BRR streaming) | APU ports + ARAM | "load song N's sequence + instruments" | image src addr = song identity (`06:AC00` = common sample bank, `1A:94B8` = title = song 7); song table `$02:C7E5` (17 entries, 3-byte ptrs, all enumerated in `game-assets/manifest.ini`); more pointers inline in the `[$A2]` command scripts read via `$02:B4C0` | 🟢 |
 | **BRR sample bank (per-sample!)** | stage 2 of the `$9964` HLE (`RtlUploadSpcImageFromDpInternal`, common_rtl.c) | ARAM `$3000-$6E67` (common) / `$795F+` (per-song) | "install instrument waveforms" | chunk pool at ROM `$08:8000` — length-prefixed `[len16][BRR data]` chunks, selected by index; script = image terminator's target word (lo byte = count, hi byte onward = chunk indices); dest base = WRAM `$0358` | 🟢 |
 | Sample directory (DSP `DIR`) | uploaded as image blocks targeting ARAM `$2C00` (`DIR` page = `$2C`) | DSP `$5D` | "sample N lives at ARAM addr X, loops at Y" | 4-byte entries `{start16, loop16}` per srcn; common srcn `00-0B`, per-song `0C+` (block target `$2C30`) | 🟢 |
-| Final PCM out | `RtlRenderAudio` (common_rtl.c) → continuous `dsp_getSamplesResampled` + MSU-1/OGG mix → SDL `AudioCallback` | host audio | "the mixed stereo stream" | native DSP stays 32.04 kHz; actual SDL rate controls time-based resampling, so frequency/buffer changes preserve pitch; native voices are tagged Music/SFX before summation, replacement OGG joins Music, `audio_master_volume` applies atomic post-mix gain, and `audio_enabled` applies an atomic post-mix mute without stopping any cursor | 🟢 |
+| Final PCM out | `RtlRenderAudio` (common_rtl.c) → continuous `dsp_getSamplesResampled` + MSU-1/OGG mix → SDL `AudioCallback` | host audio | "the mixed stereo stream" | native DSP stays 32 kHz; actual SDL rate controls time-based resampling, so frequency/buffer changes preserve pitch; native voices are tagged Music/SFX before summation, replacement OGG joins Music, `audio_master_volume` applies atomic post-mix gain, and `audio_enabled` applies an atomic post-mix mute without stopping any cursor | 🟢 |
 | Raw APU port write | `RtlApuWrite` (`$2140-$2143`) | APU I/O | low-level handshake / param | — | 🔴 |
 | **Voice key-on observation** | `SR_AUDIO_TRACE_DSP_KEY_ON` (public filtered runner trace event) | DSP `KON` | "voice C started sample S" | `(voice_index, voice_source_number, voice_brr_address, voice_volume_left/right, voice_pitch)` for native voices 0..7 and extended voices 8..39. Called on whichever thread is cycling the APU with the APU lock held, after the BRR start is resolved from `DIR` | 🟢 |
 
@@ -168,8 +168,10 @@ values and nonzero port-2 ids to catch them in play.
    `dsp_getSamplesResampled` boundary inside `RtlRenderAudio` (44.1 kHz stereo
    S16 by default; the settings registry offers restart-class
    32.04/44.1/48 kHz `AudioFreq` presets plus `AudioSamples`). The native FIFO
-   advances at 32.04 kHz based on callback duration, not one fixed 534-frame
-   block per SDL callback. OGG and MSU-1 use the same elapsed-time rule. This
+   advances at a nominal 32 kHz from the shared rational NTSC/APU clock,
+   resampled to the selected output rate (including the legacy 32.04 kHz
+   output preset). Callback demand and game ticks advance one shared timeline;
+   display refresh does not set the audio rate. OGG and MSU-1 use the same elapsed-time rule. This
    fixes the former callback-rate-dependent pitch/tempo change while retaining
    fractional source-frame carry across callbacks.
    Resampling quality, interpolation upgrades (the DSP's gaussian filter lives in
@@ -182,12 +184,15 @@ values and nonzero port-2 ids to catch them in play.
    the pre-sum logical-track seam for `audio_music_volume` /
    `audio_sfx_volume`. Native dry contributions and echo sends are scaled per
    tagged voice; replacement OGG follows Music. With restart-class
-   `audio_extended_channels`, BRK/COP requests enter a 128-entry host FIFO and
+   `audio_extended_channels`, BRK/COP requests enter a bounded 128-entry scheduler and
    isolated copies of the original `$10/$12` sequencer state render through
-   serialized DSP voices 8-39. Physical voices 0-7 remain music-only. The same
+   corresponding voice-6/7 destinations in four added banks (14/15 through
+   38/39). Identity-aware policies restart or block only the same source's
+   same effect. Capacity drops are immediate rather than stale backlog.
+   Physical voices 0-7 remain music-only. The same
    bus labels and shared echo mixer cover all 40 voices; authentic-off remains
    the original eight-voice loop. The serial trace distinguishes native loss,
-   extended duplicate coalescing/FIFO overflow, and intentional song swaps.
+   deliberate self-policy outcomes, capacity/FIFO overflow, and intentional song swaps.
 
 The verified common sample directory, effect sequence identities, and external
 audio seams are summarized in this section; scheduler diagnostics remain

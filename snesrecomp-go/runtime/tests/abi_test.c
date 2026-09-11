@@ -58,7 +58,7 @@ static uint8_t s_virtual_context;
 static uint8_t s_apu_snapshot_ram[SR_APU_RAM_BYTE_COUNT];
 static uint8_t s_dsp_snapshot_registers[SR_DSP_REGISTER_BYTE_COUNT];
 static int16_t s_discard_audio[
-    RTL_APU_TIMELINE_FRAMES_PER_TICK * 2u];
+    RTL_APU_TICK_MAX_FRAMES * 2u];
 
 typedef struct TestObserver {
     unsigned count;
@@ -1804,72 +1804,51 @@ int main(void) {
     RtlAdvanceApuTimeline();
     RtlApuProfileRead(&apu_profile);
     failed |= check(
-        apu_cycle_count(snes->apu) == RTL_APU_TIMELINE_CYCLES_PER_TICK &&
-            snes->apu->timelineTargetCycles ==
-                RTL_APU_TIMELINE_CYCLES_PER_TICK &&
-            snes->apu->sampleClock == RTL_APU_TIMELINE_FRAMES_PER_TICK &&
-            apu_profile.apu_cycles_total ==
-                RTL_APU_TIMELINE_CYCLES_PER_TICK &&
-            apu_profile.apu_cycles_timeline ==
-                RTL_APU_TIMELINE_CYCLES_PER_TICK &&
-            apu_profile.apu_cycles_unattributed == 0u,
-        "headless APU timeline tick mismatch");
+        apu_cycle_count(snes->apu) == 17038u &&
+        snes->apu->timelineTargetCycles == 17038u &&
+        snes->apu->sampleClock == 532u &&
+        apu_profile.apu_cycles_timeline == 17038u &&
+        apu_profile.apu_cycles_unattributed == 0u,
+        "rational headless APU tick mismatch");
 
     apu_reset(snes->apu);
     RtlApuProfileReset();
-    for (uint32_t index = 0u;
-         index < RTL_APU_TIMELINE_CYCLES_PER_TICK + 96u; ++index)
+    for (uint32_t index = 0u; index < 17134u; ++index)
         apu_cycle(snes->apu);
     sr_runner_record_apu_profile_cycles(
-        SR_APU_PROFILE_CYCLE_AUDIO_DEMAND,
-        RTL_APU_TIMELINE_CYCLES_PER_TICK + 96u, 0u);
+        SR_APU_PROFILE_CYCLE_AUDIO_DEMAND, 17134u, 0u);
     RtlAdvanceApuTimeline();
     failed |= check(
-        apu_cycle_count(snes->apu) ==
-                RTL_APU_TIMELINE_CYCLES_PER_TICK + 96u &&
-            snes->apu->timelineTargetCycles ==
-                RTL_APU_TIMELINE_CYCLES_PER_TICK,
-        "timeline double-advanced an APU already ahead from audio demand");
+        apu_cycle_count(snes->apu) == 17134u &&
+        snes->apu->timelineTargetCycles == 17038u,
+        "timeline double-advanced an ahead audio consumer");
     RtlAdvanceApuTimeline();
     RtlApuProfileRead(&apu_profile);
     failed |= check(
-        apu_cycle_count(snes->apu) ==
-                2u * RTL_APU_TIMELINE_CYCLES_PER_TICK &&
-            snes->apu->sampleClock ==
-                2u * RTL_APU_TIMELINE_FRAMES_PER_TICK &&
-            apu_profile.apu_cycles_audio_demand ==
-                RTL_APU_TIMELINE_CYCLES_PER_TICK + 96u &&
-            apu_profile.apu_cycles_timeline ==
-                RTL_APU_TIMELINE_CYCLES_PER_TICK - 96u &&
-            apu_profile.apu_cycles_unattributed == 0u,
-        "timeline did not deterministically rejoin an ahead audio consumer");
+        apu_cycle_count(snes->apu) == 34077u &&
+        snes->apu->sampleClock == 1064u &&
+        apu_profile.apu_cycles_audio_demand == 17134u &&
+        apu_profile.apu_cycles_timeline == 16943u,
+        "rational timeline did not rejoin an ahead audio consumer");
 
     apu_reset(snes->apu);
-    RtlSetAudioOutputRate(32040);
+    RtlSetAudioOutputRate(32000);
     RtlApuProfileReset();
-    RtlRenderAudio(s_discard_audio, RTL_APU_TIMELINE_FRAMES_PER_TICK, 2);
+    RtlRenderAudio(s_discard_audio, 533, 2);
     RtlAdvanceApuTimeline();
     failed |= check(
-        apu_cycle_count(snes->apu) ==
-                RTL_APU_TIMELINE_CYCLES_PER_TICK + 64u &&
-            snes->apu->timelineTargetCycles ==
-                RTL_APU_TIMELINE_CYCLES_PER_TICK &&
-            snes->apu->sampleClock ==
-                RTL_APU_TIMELINE_FRAMES_PER_TICK + 2u,
+        apu_cycle_count(snes->apu) == 17120u &&
+        snes->apu->timelineTargetCycles == 17038u &&
+        snes->apu->sampleClock == 535u,
         "discard-pumped audio was double-advanced by the timeline");
     RtlAdvanceApuTimeline();
     RtlApuProfileRead(&apu_profile);
     failed |= check(
-        apu_cycle_count(snes->apu) ==
-                2u * RTL_APU_TIMELINE_CYCLES_PER_TICK &&
-            snes->apu->sampleClock ==
-                2u * RTL_APU_TIMELINE_FRAMES_PER_TICK &&
-            apu_profile.apu_cycles_audio_demand ==
-                RTL_APU_TIMELINE_CYCLES_PER_TICK + 64u &&
-            apu_profile.apu_cycles_timeline ==
-                RTL_APU_TIMELINE_CYCLES_PER_TICK - 64u &&
-            apu_profile.apu_cycles_unattributed == 0u,
-        "discard-pumped audio did not deterministically rejoin the timeline");
+        apu_cycle_count(snes->apu) == 34077u &&
+        snes->apu->sampleClock == 1064u &&
+        apu_profile.apu_cycles_audio_demand == 17120u &&
+        apu_profile.apu_cycles_timeline == 16957u,
+        "discard-pumped audio did not rejoin the rational timeline");
     snes->abiAudioFrameCounter = 0u;
 
     apu_reset(snes->apu);
@@ -2210,11 +2189,12 @@ int main(void) {
         void (*old_extension_hook)(Apu *, SaveLoadInfo *) =
             g_apu_extra_saveload_hook;
         static const uint8_t expected_semantic_digest[32] = {
-            /* Semantic schema v3 includes serial controller state. */
-            0x05, 0xc4, 0x1e, 0x44, 0x57, 0xde, 0x46, 0x64,
-            0x4c, 0x41, 0x1f, 0x83, 0xfe, 0x80, 0xae, 0xb6,
-            0xda, 0x43, 0x08, 0xc6, 0x9d, 0xde, 0x03, 0x33,
-            0xc7, 0x01, 0xee, 0x5c, 0xb7, 0xae, 0xf9, 0x9e,
+            /* Schema v4 adds rational audio phase and DSP bus latches.
+             * This is independent of the unchanged public ABI V2. */
+            0x7b, 0x2e, 0x7e, 0x78, 0x33, 0xa5, 0x30, 0xa3,
+            0xdb, 0x53, 0xf1, 0xc8, 0xc5, 0x1a, 0xb2, 0x66,
+            0x33, 0x47, 0x95, 0x5b, 0x30, 0x97, 0x77, 0x6f,
+            0xcd, 0x30, 0x6c, 0x42, 0xb4, 0xeb, 0xf9, 0xa0,
         };
         snes->ppu->objScanlineMasksValid = true;
         snes->ppu->cgramRgbValid = true;

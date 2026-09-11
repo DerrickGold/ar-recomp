@@ -7,7 +7,7 @@ files, and documentation are licensed under [`LICENSE`](LICENSE), copyright
 
 The S-DSP accuracy core contains adaptations from Eric Tomasso's
 [Snaggletooth](https://github.com/etroimcasso/Snaggletooth) at commit
-[`65668997ed58fe78cfcef1e53c0020bd92d0d287`](https://github.com/etroimcasso/Snaggletooth/commit/65668997ed58fe78cfcef1e53c0020bd92d0d287).
+[`321cb3eddde1fe0474eab31e5a88d32f413a7ff6`](https://github.com/etroimcasso/Snaggletooth/commit/321cb3eddde1fe0474eab31e5a88d32f413a7ff6).
 Those portions remain copyright (c) 2026 Eric Tomasso and are licensed under
 the upstream MIT terms reproduced in
 [`licenses/Snaggletooth-LICENSE.txt`](licenses/Snaggletooth-LICENSE.txt).

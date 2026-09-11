@@ -35,6 +35,8 @@ bool WorldNavigationPrepareClipPlan(const Sim3DDepthVertex input[4],
     WorldNavigationClipPlan plans[kWorldNavigationClippedQuads], size_t *count);
 void WorldNavigationApplyShadowPlan(const WorldNavigationClipPlan *plan,
     const ArRenderPointF uv[4], ArRenderColorF color, Sim3DDepthVertex output[4]);
+void WorldNavigationApplyShadowUV(const WorldNavigationClipPlan *plan,
+    const ArRenderPointF uv[4], ArRenderPointF output[4]);
 
 bool WorldNavigationProjectClippedPoint(
     const WorldNavigationProjection *projection, ArRenderRectI viewport,

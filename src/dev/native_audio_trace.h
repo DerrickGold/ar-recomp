@@ -33,6 +33,12 @@ typedef enum NativeAudioRequestOutcome {
   kNativeAudioOutcome_CoalescedExtendedDuplicate,
   kNativeAudioOutcome_ExtendedFifoOverflow,
   kNativeAudioOutcome_Completed,
+  kNativeAudioOutcome_BlockedSelf,
+  kNativeAudioOutcome_RestartedSelf,
+  kNativeAudioOutcome_ReplacedSelf,
+  kNativeAudioOutcome_ReplacedPending,
+  kNativeAudioOutcome_CapacityDrop,
+  kNativeAudioOutcome_SequenceUnavailable,
   kNativeAudioOutcome_Count,
 } NativeAudioRequestOutcome;
 
@@ -149,6 +155,9 @@ uint64_t NativeAudioTraceModel_PostExtendedRequest(
 void NativeAudioTraceModel_ExtendedDisposition(
     uint64_t serial, uint64_t existing_serial,
     int coalesced, int overflow, uint64_t cycle);
+void NativeAudioTraceModel_ExtendedPolicy(
+    uint64_t serial, uint64_t other_serial,
+    NativeAudioRequestOutcome outcome, uint64_t cycle);
 void NativeAudioTraceModel_ExtendedSequenceStart(
     uint64_t serial, uint8_t lane, uint8_t virtual_voice, uint64_t cycle);
 void NativeAudioTraceModel_ExtendedSequenceEnd(

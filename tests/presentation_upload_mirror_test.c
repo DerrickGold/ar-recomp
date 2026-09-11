@@ -42,10 +42,55 @@ static void TestSingleChangedByteStillUploadsWholePixel(void) {
   assert(dirty.x == 1 && dirty.y == 0 && dirty.w == 1 && dirty.h == 1);
 }
 
+static uint32_t Random(uint32_t *state) {
+  *state = *state * 1664525u + 1013904223u;
+  return *state;
+}
+
+static void TestAgainstByteOracle(void) {
+  uint8_t current[4096], previous[4096];
+  uint32_t state = 0x273951u;
+  for (int pass = 0; pass < 3000; pass++) {
+    const int width = 1 + (int)(Random(&state) % 97);
+    const int height = 1 + (int)(Random(&state) % 9);
+    const int cp = width * 4 + (int)(Random(&state) % 7);
+    const int pp = width * 4 + (int)(Random(&state) % 7);
+    const int ca = (int)(Random(&state) % 4), pa = (int)(Random(&state) % 4);
+    memset(current, 0xa5, sizeof(current));
+    memset(previous, 0x5a, sizeof(previous));
+    for (int y = 0; y < height; y++) {
+      for (int x = 0; x < width * 4; x++) {
+        const uint8_t value = (uint8_t)Random(&state);
+        current[ca + y * cp + x] = previous[pa + y * pp + x] = value;
+        if (pass % 5 && Random(&state) % (pass % 3 ? 173 : 3) == 0)
+          current[ca + y * cp + x] ^= 1;
+      }
+    }
+    int x0 = width, x1 = 0, y0 = height, y1 = 0;
+    for (int y = 0; y < height; y++)
+      for (int x = 0; x < width * 4; x++) {
+        if (current[ca + y * cp + x] == previous[pa + y * pp + x]) continue;
+        if (x / 4 < x0) x0 = x / 4;
+        if (x / 4 + 1 > x1) x1 = x / 4 + 1;
+        if (y < y0) y0 = y;
+        y1 = y + 1;
+      }
+    ArRenderRectI dirty;
+    const bool changed = PresentationUploadMirror_FindDirtyRect(
+        current + ca, cp, previous + pa, pp, width, height, &dirty);
+    assert(changed == (x0 < width));
+    const ArRenderRectI expected = changed
+        ? (ArRenderRectI){x0, y0, x1 - x0, y1 - y0} : (ArRenderRectI){0};
+    assert(dirty.x == expected.x && dirty.y == expected.y &&
+           dirty.w == expected.w && dirty.h == expected.h);
+  }
+}
+
 int main(void) {
   TestIdenticalRegionIsClean();
   TestDirtyBoundsSpanEveryChangedPixel();
   TestSingleChangedByteStillUploadsWholePixel();
+  TestAgainstByteOracle();
   puts("presentation_upload_mirror_test: ok");
   return 0;
 }

@@ -424,6 +424,13 @@ endif() # NOT AR_TESTS_ONLY
 
 if(BUILD_TESTING)
     find_package(Python3 QUIET COMPONENTS Interpreter)
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME actraiser_pipeline_performance_tool
+            COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_SOURCE_DIR}/tests/pipeline_performance_tool_test.py)
+        set_tests_properties(actraiser_pipeline_performance_tool PROPERTIES
+            ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
+    endif()
     if(Python3_Interpreter_FOUND AND TARGET actraiser_font_coverage)
         add_test(NAME actraiser_language_font_coverage
             COMMAND ${Python3_EXECUTABLE}
@@ -908,6 +915,8 @@ if(BUILD_TESTING)
         COMMAND actraiser_sim_world_navigation_palace_test)
 
     set(AR_WORLD_NAV_TEST_SOURCES
+        src/performance_metrics.c
+        src/platform/sdl/parallel_work_sdl.c
         src/sim/sim3d_performance.c
         src/present_sim3d_environment.c
         src/present_world_nav.c
@@ -982,6 +991,33 @@ if(BUILD_TESTING)
         COMMAND actraiser_present_world_nav_gpu_test)
     set_tests_properties(actraiser_present_world_nav_gpu PROPERTIES
         ENVIRONMENT "SDL_AUDIODRIVER=dummy" SKIP_RETURN_CODE 77)
+
+    add_executable(actraiser_parallel_work_test tests/parallel_work_test.c
+        src/platform/sdl/parallel_work_sdl.c src/performance_metrics.c
+        src/platform/sdl/host_clock_sdl.c)
+    target_include_directories(actraiser_parallel_work_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    target_link_libraries(actraiser_parallel_work_test PRIVATE SDL3::SDL3)
+    add_test(NAME actraiser_parallel_work COMMAND actraiser_parallel_work_test)
+
+    add_executable(actraiser_performance_metrics_test
+        tests/performance_metrics_test.c src/performance_metrics.c
+        src/performance_overlay.c src/render/render_device.c)
+    target_include_directories(actraiser_performance_metrics_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    target_link_libraries(actraiser_performance_metrics_test PRIVATE SDL3::SDL3 actraiser_math)
+    add_test(NAME actraiser_performance_metrics COMMAND actraiser_performance_metrics_test)
+
+    add_executable(actraiser_present_sim3d_clouds_test
+        tests/present_sim3d_clouds_test.c src/present_sim3d_clouds.c
+        src/present_sim3d_environment.c src/scene3d_math.c)
+    target_include_directories(actraiser_present_sim3d_clouds_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    target_link_libraries(actraiser_present_sim3d_clouds_test PRIVATE actraiser_math)
+    add_test(NAME actraiser_present_sim3d_clouds COMMAND actraiser_present_sim3d_clouds_test)
+
+    add_executable(actraiser_present_sim3d_underlay_test
+        tests/present_sim3d_underlay_test.c src/present_sim3d_underlay.c)
+    target_include_directories(actraiser_present_sim3d_underlay_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    add_test(NAME actraiser_present_sim3d_underlay COMMAND actraiser_present_sim3d_underlay_test)
 
     add_executable(actraiser_sim_world_navigation_globe_test
         tests/sim_world_navigation_globe_test.c
@@ -1130,6 +1166,26 @@ if(BUILD_TESTING)
         actraiser_math)
     add_test(NAME actraiser_sim_background_voxels
         COMMAND actraiser_sim_background_voxels_test)
+    add_test(NAME actraiser_sim_background_voxels_reverse_rows
+        COMMAND actraiser_sim_background_voxels_test --dispatch-rows)
+
+    # Exercise every pixel-publication fixture with real host helpers too;
+    # the normal classification test and domain module stay platform-free.
+    get_target_property(SIM_BACKGROUND_TEST_SOURCES
+        actraiser_sim_background_voxels_test SOURCES)
+    add_executable(actraiser_sim_background_parallel_test
+        ${SIM_BACKGROUND_TEST_SOURCES}
+        src/platform/sdl/parallel_work_sdl.c src/performance_metrics.c
+        src/platform/sdl/host_clock_sdl.c)
+    target_compile_definitions(actraiser_sim_background_parallel_test PRIVATE
+        AR_TEST_THREADED_ROWS=1)
+    target_include_directories(actraiser_sim_background_parallel_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src/sim
+        ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    target_link_libraries(actraiser_sim_background_parallel_test PRIVATE
+        SDL3::SDL3 actraiser_math)
+    add_test(NAME actraiser_sim_background_parallel
+        COMMAND actraiser_sim_background_parallel_test --dispatch-rows)
 
     add_executable(actraiser_sim_background_voxel_landmarks_test
         tests/sim_background_voxel_landmarks_test.c
@@ -1641,6 +1697,7 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_settings_overlay_test
         tests/settings_overlay_test.c
+        src/performance_metrics.c src/performance_overlay.c
         src/settings_overlay_localization.c
         src/settings_overlay_layers_localization.c
         src/localization/ui_catalog.c
@@ -1744,6 +1801,7 @@ if(BUILD_TESTING)
     # and GPU-free while guarding the order that keeps UI above pillar bars.
     add_executable(actraiser_present_frame_order_test
         tests/present_frame_order_test.c
+        src/performance_metrics.c src/platform/sdl/host_clock_sdl.c
         src/present_frame.c
         src/localization/text_presentation.c
         src/render_comparison.c
@@ -1900,6 +1958,7 @@ if(BUILD_TESTING)
         src/platform/sdl/crt_post_sdl.c
         src/platform/sdl/diorama_effect_backend_sdl.c
         src/platform/sdl/sim_shadow_effect_backend_sdl.c
+        src/platform/sdl/sim_cloud_effect_backend_sdl.c
         src/platform/sdl/render_sdl.c
         src/render/render_device.c
         src/session_fatal.c
@@ -1936,6 +1995,7 @@ if(BUILD_TESTING)
     # BLENDMODE_BLEND black-screen regression with genuine emulator output.
     add_executable(actraiser_ppu_render_pipeline_test
         tests/ppu_render_pipeline_test.c
+        src/performance_metrics.c src/platform/sdl/host_clock_sdl.c
         src/sim/sim3d.c
         src/sim/sim_background_voxel_preset.c
         src/sim/sim_render_metadata.c

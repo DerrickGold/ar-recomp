@@ -28,13 +28,11 @@
 
 enum {
     RTL_SNAPSHOT_MAGIC = 0x52544c53u,
-    /* The accurate DSP changes the raw native APU/DSP layout.  Version 9
-     * snapshots cannot be decoded by that layout and must not be accepted as
-     * if they were current native snapshots. */
-    RTL_SNAPSHOT_LEGACY_VERSION = 11u,
-    RTL_SNAPSHOT_VERSION = 13u,
+    /* Rational clocks, bank ownership and the refreshed DSP change serialized
+     * state. Reject older layouts before mutating the running machine. */
+    RTL_SNAPSHOT_LEGACY_VERSION = 14u,
+    RTL_SNAPSHOT_VERSION = 14u,
     RTL_SNAPSHOT_EXTENDED_AUDIO = 0x00010000u,
-    RTL_AUDIO_NATIVE_RATE = 32040,
     RTL_AUDIO_CHUNK = 1024
 };
 
@@ -410,12 +408,8 @@ bool RtlLoadSnapshot(const char *filename) {
     if (!saveload_decode_snapshot_header(
             header, RTL_SNAPSHOT_MAGIC, portable_version, legacy_version,
             &portable)) {
-        portable_version = 12u | (portable_version & RTL_SNAPSHOT_EXTENDED_AUDIO);
-        if (!saveload_decode_snapshot_header(
-                header, RTL_SNAPSHOT_MAGIC, portable_version, legacy_version, &portable)) {
-            fclose(file);
-            return false;
-        }
+        fclose(file);
+        return false;
     }
     state.base.func = file_saveload;
     state.base.saving = false;
@@ -608,20 +602,26 @@ void rtl_accumulate_apu_catchup(void) {
 
 void RtlAdvanceApuTimeline(void) {
     Apu *apu;
-    uint64_t before;
-    uint64_t cycles;
+    uint64_t target;
     if (g_snes == NULL || g_snes->apu == NULL) return;
     RtlApuLock();
     apu = g_snes->apu;
-    apu->timelineTargetCycles += RTL_APU_TIMELINE_CYCLES_PER_TICK;
-    before = apu_cycle_count(apu);
-    cycles = apu->timelineTargetCycles > before
-        ? apu->timelineTargetCycles - before : 0u;
-    audio_trace_set_producer(AUDIO_TRACE_PRODUCER_CPU);
-    for (uint64_t index = 0u; index < cycles; ++index) apu_cycle(apu);
-    audio_trace_set_producer(AUDIO_TRACE_PRODUCER_UNKNOWN);
-    sr_runner_record_apu_profile_cycles(
-        SR_APU_PROFILE_CYCLE_TIMELINE, cycles, 0u);
+    apu->timelineTargetCycles +=
+        RtlAudioNextTickCycles(&apu->timelineCycleRemainder);
+    target = apu->timelineTargetCycles;
+    while (apu_cycle_count(apu) < target) {
+        uint64_t cycles = target - apu_cycle_count(apu);
+        if (cycles > RTL_APU_PRODUCTION_CHUNK_CYCLES)
+            cycles = RTL_APU_PRODUCTION_CHUNK_CYCLES;
+        audio_trace_set_producer(AUDIO_TRACE_PRODUCER_CPU);
+        for (uint64_t index = 0u; index < cycles; ++index) apu_cycle(apu);
+        audio_trace_set_producer(AUDIO_TRACE_PRODUCER_UNKNOWN);
+        sr_runner_record_apu_profile_cycles(
+            SR_APU_PROFILE_CYCLE_TIMELINE, cycles, 0u);
+        RtlApuUnlock();
+        RtlApuLock();
+        /* The audio consumer may have filled the rest while unlocked. */
+    }
     RtlApuUnlock();
 }
 
@@ -743,7 +743,7 @@ void RtlApuWrite(uint16 address, uint8 value) {
     if (apu->portLastValid[port] && value != apu->portLastVal[port]) {
         uint64_t floor = apu->portLastTarget[port] + APU_PORT_MIN_DWELL;
         uint64_t ceiling = produced +
-            8u * RTL_APU_TIMELINE_FRAMES_PER_TICK;
+            8u * RTL_APU_TICK_MAX_FRAMES;
         if (target < floor) target = floor < ceiling ? floor : ceiling;
     }
     apu->portLastTarget[port] = target;
@@ -957,7 +957,7 @@ void RtlRenderAudio(int16 *audio_buffer, int samples, int channels) {
             dsp = g_snes->apu->dsp;
             available = dsp->sampleWrite - dsp->sampleRead;
             if (available < needed) {
-                int cycle_budget = 256;
+                int cycle_budget = RTL_APU_PRODUCTION_CHUNK_CYCLES;
                 const uint64_t cycle_start = snes_apu_cycle_count();
                 audio_trace_set_producer(AUDIO_TRACE_PRODUCER_AUDIO);
                 while (cycle_budget-- > 0 &&

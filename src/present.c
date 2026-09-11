@@ -37,6 +37,8 @@
 #include "sim/sim_background_voxel_renderer.h"
 #include "sim/sim3d.h"
 #include "sim/sim3d_performance.h"
+#include "performance_metrics.h"
+#include "performance_overlay.h"
 #include "sim/sim_world_navigation_palace.h"
 
 /* kPixelAspect_Crt43 and kDioramaCam_Free/kDioramaCam_Dynamic are plain enum
@@ -1966,8 +1968,21 @@ void PresentHostUi(const FrameSlot *slot, ArRenderRectI viewport,
   PresentActionBgExtentGuides(slot, viewport);
   PresentSceneInspector(slot, viewport);
   PresentCheatBadge(slot, viewport);
+  const PerformanceScope settings = PerformanceMetrics_Begin(kPerformance_SettingsUi);
   SettingsOverlay_Render(viewport);
+  PerformanceMetrics_End(settings);
   PresentFpsCounter(slot, output_size, presentation_fps);
+  if (slot->performance_overlay) {
+    const PerformanceScope overlay = PerformanceMetrics_Begin(kPerformance_Overlay);
+    PerformanceSnapshot snapshot;
+    PerformanceMetrics_Snapshot(&snapshot);
+    if (!PerformanceOverlay_Render(&g_render_device, &snapshot,
+            slot->performance_overlay, output_size))
+      SessionFatal_Request("Performance overlay could not restore the render target.");
+    PerformanceMetrics_End(overlay);
+  } else {
+    PerformanceOverlay_Reset(&g_render_device);
+  }
 }
 
 /* Called from the host render-target/device-reset event handlers and once
@@ -1987,6 +2002,7 @@ void PresentHostUi(const FrameSlot *slot, ArRenderRectI viewport,
  * does not emit _DEVICE_RESET at all — this is a Windows-D3D and
  * Vulkan-backed (Steam Deck) bug. */
 void PresentRendererResources_Reset(void) {
+  PerformanceOverlay_Reset(&g_render_device);
   ResetSim3DUploadMirrors();
   ResetActionUploadMirrors();
   ArRenderDevice_DestroyTexture(&g_render_device, s_sky_palace_foreground_texture);

@@ -2910,10 +2910,10 @@
   {
     "key": "setting.audio_extended_channels.help",
     "text": [
-      "Keep all eight music voices while queued native effects use a pool of 32 added voices. Takes effect after restart.",
-      "Conserve les huit voix musicales et attribue aux effets natifs une réserve de 32 voix supplémentaires. Prend effet après redémarrage.",
-      "Behält alle acht Musikstimmen und nutzt 32 zusätzliche Stimmen für native Effekte. Wirksam nach Neustart.",
-      "音楽の8音を維持したまま、ネイティブ効果音に追加32音のプールを使います。再起動後に反映されます。"
+      "Keep all eight music voices and use four added hardware-style effect banks. Repeated sounds can restart their own lane. Takes effect after restart.",
+      "Conserve les huit voix musicales et ajoute quatre banques d'effets de type matériel. Un son répété peut redémarrer sa propre voie. Prend effet après redémarrage.",
+      "Behält alle acht Musikstimmen und ergänzt vier hardwareähnliche Effektbänke. Wiederholte Klänge können ihre eigene Spur neu starten. Wirksam nach Neustart.",
+      "音楽の8音を維持し、実機と同じ構成の効果音バンクを4つ追加します。同じ効果音は自身のチャンネルで再開できます。再起動後に反映されます。"
     ]
   },
   {
@@ -4361,6 +4361,11 @@
   {"key":"setting.refresh_mode.value.3","text":["Unlimited","Illimité","Unbegrenzt","無制限"]},
   {"key":"setting.frame_limit_fps.label","text":["Frame limit","Limite d’images/s","Bildratenlimit","フレームレート上限"]},
   {"key":"setting.show_fps.label","text":["FPS counter","Compteur d’images/s","FPS-Anzeige","FPS表示"]},
+  {"key":"setting.performance_overlay.label","text":["Performance overlay","Diagnostic des performances","Leistungsdiagnose","パフォーマンス診断"]},
+  {"key":"setting.performance_overlay.value.0","text":["Off","Désactivé","Aus","オフ"]},
+  {"key":"setting.performance_overlay.value.1","text":["Summary","Résumé","Übersicht","概要"]},
+  {"key":"setting.performance_overlay.value.2","text":["Detailed","Détaillé","Detailliert","詳細"]},
+  {"key":"setting.performance_overlay.help","text":["Show CPU pipeline timings, frame pacing and worker activity. Detailed adds nested stage timings; reports are also written to the run log. GPU execution time is unavailable on this renderer, not inferred from CPU waits.","Affiche les durées CPU, la cadence et l’activité des threads. Le mode détaillé ajoute les étapes imbriquées. Les rapports sont aussi enregistrés dans le journal. La durée GPU est indisponible et n’est pas déduite des attentes CPU.","Zeigt CPU-Zeiten, Bildtakt und Worker-Aktivität. Detailliert ergänzt verschachtelte Phasen; Berichte stehen auch im Laufprotokoll. GPU-Ausführungszeiten sind nicht verfügbar und werden nicht aus CPU-Wartezeiten abgeleitet.","CPU処理時間、フレーム間隔、ワーカーの稼働状況を表示します。詳細では内部の処理段階も表示し、実行ログにも記録します。この描画方式ではGPU実行時間を取得できないため、CPU待機時間から推定はしません。"]},
   {"key":"setting.sim3d_mode.label","text":["Simulation town 3D","Villes de simulation en 3D","Simulationsstadt in 3D","町の3D表示"]},
   {"key":"setting.sim_view_range.label","text":["Extended actor range","Portée des acteurs étendue","Erweiterter Akteursbereich","キャラクターの動作範囲拡張"]},
   {"key":"setting.sim3d_world_navigation.label","text":["World navigation 3D","Navigation du monde en 3D","Weltnavigation in 3D","世界移動の3D表示"]},

@@ -73,11 +73,11 @@ bool RtlRunFrame(uint32 inputs);
 void RtlSetAudioOutputRate(int hz);
 int RtlGetAudioOutputRate(void);
 void RtlRenderAudio(int16 *audio_buffer, int samples, int channels);
-#define RTL_APU_TIMELINE_FRAMES_PER_TICK UINT32_C(534)
-#define RTL_APU_TIMELINE_CYCLES_PER_TICK UINT32_C(17088)
-/* Advance the serialized 60 Hz APU target by one game tick. One APU cycle is
- * one S-DSP slot, so 17,088 cycles complete 534 native stereo frames. The
- * operation executes only cycles not already produced by an audio consumer. */
+#include "snesrecomp/game/audio_timing.h"
+/* Advance the serialized rational NTSC target by one native game tick. This
+ * executes only cycles not already produced by an audio consumer, releasing
+ * the audio lock between bounded production chunks. Presentation-only frames
+ * must never call this operation. */
 void RtlAdvanceApuTimeline(void);
 /* Read the monotonic semantic APU clock under the runner's audio lock. This
  * is an observation only; loading or resetting emulated state may move the
