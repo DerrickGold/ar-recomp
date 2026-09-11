@@ -23,6 +23,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/DerrickGold/ar-recomp/installer/internal/desktop"
 	lk "github.com/DerrickGold/ar-recomp/installer/internal/localization"
 )
 
@@ -56,8 +57,15 @@ type Options struct {
 	ProjectRoot string
 	OpenBrowser bool
 	Stdout      io.Writer
-	Build       func(context.Context, string, io.Writer) (Result, error)
-	Launch      func(Result) error
+	// ImportSearchDir is the folder containing the outer desktop artifact, never
+	// Finder's CWD. Empty disables installation import for legacy CLI callers.
+	ImportSearchDir string
+	// Ready publishes the private session URL after the server starts listening.
+	// Desktop hosts use this instead of scraping human-readable log output.
+	// Returning an error aborts startup. It must return promptly.
+	Ready  func(string) error
+	Build  func(context.Context, string, io.Writer) (Result, error)
+	Launch func(Result) error
 	// Detect reports what this copy of the bundle can currently do: launch an
 	// already-built game, run a rebuild, or reclaim space by removing the
 	// build-only files. Called at session start and again on every status poll,
@@ -155,6 +163,16 @@ func Run(ctx context.Context, options Options) error {
 	}
 	address := "http://" + listener.Addr().String() + "/" + token + "/"
 	fmt.Fprintf(options.Stdout, "builder GUI: %s\n", address)
+	serveError := make(chan error, 1)
+	go func() {
+		serveError <- server.Serve(listener)
+	}()
+	if options.Ready != nil {
+		if err := options.Ready(address); err != nil {
+			_ = server.Close()
+			return fmt.Errorf("publish builder session: %w", err)
+		}
+	}
 	if options.OpenBrowser {
 		if openErr := options.openURL(address); openErr != nil {
 			fmt.Fprintf(options.Stdout,
@@ -162,11 +180,6 @@ func Run(ctx context.Context, options Options) error {
 				openErr)
 		}
 	}
-
-	serveError := make(chan error, 1)
-	go func() {
-		serveError <- server.Serve(listener)
-	}()
 
 	var runError error
 	select {
@@ -232,10 +245,13 @@ type status struct {
 }
 
 type application struct {
-	ctx     context.Context
-	options Options
-	prefix  string
-	closed  chan struct{}
+	dataGate          sync.RWMutex
+	installImportMu   sync.Mutex
+	installImportPlan *desktop.ImportPlan
+	ctx               context.Context
+	options           Options
+	prefix            string
+	closed            chan struct{}
 	// Asset saves are synchronous, but two browser tabs can still submit at the
 	// same time. Serializing the read/merge/install transaction prevents the
 	// second request from rebuilding a manifest from stale text.
@@ -364,6 +380,17 @@ func (app *application) ServeHTTP(response http.ResponseWriter, request *http.Re
 		return
 	}
 	endpoint := strings.TrimPrefix(request.URL.Path, app.prefix)
+	if strings.HasPrefix(endpoint, "installation-import/") {
+		app.serveInstallImport(response, request, strings.TrimPrefix(endpoint, "installation-import/"))
+		return
+	}
+	// Import changes many runtime files together. Refuse concurrent editor
+	// requests, rather than allowing an old in-memory manifest to overwrite it.
+	if !app.dataGate.TryRLock() {
+		writeJSONError(response, http.StatusConflict, "an installation import is running; try again shortly")
+		return
+	}
+	defer app.dataGate.RUnlock()
 	if endpoint == "interface/preferences" {
 		app.serveInterfacePreferences(response, request)
 		return
@@ -658,12 +685,17 @@ type lockedLogWriter struct {
 
 func (writer *lockedLogWriter) Write(data []byte) (int, error) {
 	originalLength := len(data)
-	if len(data) > maxLogBytes {
-		data = data[len(data)-maxLogBytes:]
-	}
 	app := writer.app
 	app.mu.Lock()
 	defer app.mu.Unlock()
+	// The browser keeps a bounded tail; the desktop host's session log keeps
+	// the full compiler history, including diagnostics before that tail.
+	if app.options.Stdout != nil {
+		_, _ = app.options.Stdout.Write(data)
+	}
+	if len(data) > maxLogBytes {
+		data = data[len(data)-maxLogBytes:]
+	}
 	if app.log.Len()+len(data) > maxLogBytes {
 		excess := app.log.Len() + len(data) - maxLogBytes
 		existing := app.log.Bytes()

@@ -220,7 +220,6 @@ code {
   font-size:7px;
   margin-right:5px
 }
-.local-note .local-copy { color:inherit; font-size:inherit; margin:0; }
 .home-hero h1 { white-space:pre-line; }
 .sidebar-bottom #close {
   width:100%;
@@ -306,7 +305,7 @@ body[data-scene-motion=off] #workshop-atmosphere { visibility:hidden }
   gap:10px;
   margin-top:20px
 }
-.privacy {
+.section-note {
   color:#8190a3;
   font-size:11px;
   line-height:1.7;
@@ -1293,7 +1292,7 @@ pre {
   h1 {
     font-size:28px
   }
-  .privacy {
+  .section-note {
     margin-top:22px
   }
 }
@@ -1304,3 +1303,14 @@ pre {
     scroll-behavior:auto!important
   }
 }
+/* Shared desktop/browser installation import. Keep long paths and file lists
+   contained, including on the Steam Deck's 1280x800 display. */
+#import-install{width:min(44rem,calc(100vw - 2rem));max-height:85vh;overflow:auto;border:1px solid #64758c;border-radius:12px;padding:1.5rem;background:#142235;color:#eef3fa;box-shadow:0 24px 80px #0009}
+#import-install::backdrop{background:#0009}
+#import-install p,#import-install-destination{overflow-wrap:anywhere}
+#import-install-source,#import-install-candidates{display:block;width:100%;margin:.5rem 0;padding:.6rem;background:#0b1727;color:inherit;border:1px solid #64758c}
+#import-install-candidates[hidden]{display:none}
+#import-install .import-actions{display:flex;flex-wrap:wrap;gap:.6rem;margin:1rem 0}
+#import-install button{padding:.6rem .8rem}
+#import-install .import-confirm{display:flex;align-items:flex-start;gap:.7rem;margin:1rem 0}
+#import-install-files{max-height:12rem;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font-size:.8rem}

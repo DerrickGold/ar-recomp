@@ -9,9 +9,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/DerrickGold/ar-recomp/installer/internal/appdata"
 )
 
-const Name = "ActRaiserRecomp"
+const Name = appdata.Name
 const markerName = "actraiser-app.json"
 const ROMName = "user-rom.sfc"
 
@@ -140,23 +142,7 @@ func ResolveDataDirectory(layout Layout, options StorageOptions, cwd, goos strin
 			return "", fmt.Errorf("read portable marker: %w", err)
 		}
 	}
-	if goos == "linux" {
-		if path := env("XDG_DATA_HOME"); filepath.IsAbs(path) {
-			return filepath.Join(path, Name), nil
-		}
-	}
-	home := env("HOME")
-	if !filepath.IsAbs(home) {
-		return "", errors.New("cannot resolve application data: HOME must name an absolute directory")
-	}
-	switch goos {
-	case "darwin":
-		return filepath.Join(home, "Library", "Application Support", Name), nil
-	case "linux":
-		return filepath.Join(home, ".local", "share", Name), nil
-	default:
-		return "", fmt.Errorf("desktop applications are not supported on %s", goos)
-	}
+	return appdata.Directory(goos, "game", env)
 }
 
 func localPath(path string, allowDot bool) bool {

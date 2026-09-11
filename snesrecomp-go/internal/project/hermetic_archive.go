@@ -3,9 +3,10 @@ package project
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/DerrickGold/snesrecomp-go/internal/subprocess"
 )
 
 // createObjectArchive packages the exact object list for one hermetic link
@@ -74,7 +75,7 @@ func writeObjectArchive(zigPath, targetOS, archivePath string, objects []string)
 		stagingPath,
 		"@" + responsePath,
 	}
-	output, err := exec.Command(zigPath, args...).CombinedOutput()
+	output, err := subprocess.Command(zigPath, args...).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("archive %d objects: %w\n%s", len(objects), err, strings.TrimSpace(string(output)))
 	}

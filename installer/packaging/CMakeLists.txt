@@ -5,13 +5,13 @@
 #  * Orchestrator (no -DSNESBUILD_GOOS): defines a `release` target that
 #    builds every platform bundle by invoking the per-platform presets, so
 #    one command from the repo root produces all of them into release/.
-#      cmake --workflow --preset release          (from the repo root)
+#      cmake --workflow --preset release          (from installer/packaging)
 #
 #  * Single platform (-DSNESBUILD_GOOS/-GOARCH, set by the package-* presets):
 #    cross-builds actraiser-builder and snesbuild, stages the target's pinned build dependencies
 #    (Zig, SDL3 and SDL3_ttf for every supported platform), and
 #    assembles a STANDALONE bundle with the authored game project and a
-#    target-specific prebuilt runner SDK so a user needs only this archive and
+#    target-specific prebuilt runner SDK so a user needs only the Builder and
 #    their own ROM — no repo checkout or developer tools. Go and Zig
 #    cross-compile every target from any host.
 #
@@ -34,41 +34,29 @@ option(SNESBUILD_STEAM_DECK
     "Build the standalone x86_64 Steam Deck bundle with Valve's SDL3 runtime"
     OFF)
 
-set(SNESBUILD_ALL_PRESETS
-    macos-arm64 macos-x86_64 linux-x86_64 linux-arm64
-    windows-x86_64 windows-arm64 steam-deck)
+include("${CMAKE_CURRENT_SOURCE_DIR}/release_policy.cmake")
+set(SNESBUILD_ALL_PRESETS "${BUILDER_ALL_PLATFORMS}")
 
 # ── Orchestrator mode ────────────────────────────────────────────────────────
 if(NOT SNESBUILD_GOOS AND NOT SNESBUILD_GOARCH)
+    option(SNESBUILD_DESKTOP "Desktop release matrix; OFF explicitly produces legacy archives" ON)
+    option(SNESBUILD_KEEP_BUILD "Retain per-platform release build trees" OFF)
     if(SNESBUILD_SDL_LOCKFILE)
         message(FATAL_ERROR "SDL lock files are target-specific; use one with a single-platform preset")
     endif()
-    get_filename_component(_release_dir ${CMAKE_CURRENT_SOURCE_DIR}/../../release ABSOLUTE)
+    set(_legacy ON)
+    if(SNESBUILD_DESKTOP)
+        set(_legacy OFF)
+    endif()
     add_custom_target(release
-        COMMENT "Building every platform bundle into release/")
-    foreach(_preset IN LISTS SNESBUILD_ALL_PRESETS)
-        # Package the platform, then immediately drop its build tree (a fresh
-        # ~180 MB Zig extraction lives there) so intermediate data does not
-        # accumulate. The download cache (../cache) is untouched, so a re-run
-        # re-extracts in seconds without re-downloading. The orchestrator's own
-        # build dir (build/orchestrator) is left alone — it is in use here.
-        add_custom_command(TARGET release POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E echo "=== packaging ${_preset} ==="
-            COMMAND ${CMAKE_COMMAND} --preset ${_preset}
-                -DSNESBUILD_SDL3_VERSION=${SNESBUILD_SDL3_VERSION}
-                -DSNESBUILD_SDL3_TTF_VERSION=${SNESBUILD_SDL3_TTF_VERSION}
-                -DSNESBUILD_SDL_LOCKFILE=
-            COMMAND ${CMAKE_COMMAND} --build --preset ${_preset}
-            COMMAND ${CMAKE_CPACK_COMMAND} --preset ${_preset}
-            COMMAND ${CMAKE_COMMAND} -E rm -rf ${CMAKE_CURRENT_SOURCE_DIR}/build/${_preset}
-            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-            VERBATIM)
-    endforeach()
-    # CPack leaves its per-package staging tree in the output directory; drop
-    # it once every bundle is built so release/ holds only the deliverables.
-    add_custom_command(TARGET release POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E rm -rf ${_release_dir}/_CPack_Packages
-        COMMENT "Cleaning CPack staging")
+        COMMAND "${CMAKE_COMMAND}" "-DBUILDER_PLATFORMS=${SNESBUILD_ALL_PRESETS}"
+            "-DBUILDER_LEGACY_ARCHIVES=${_legacy}" "-DBUILDER_KEEP_BUILD=${SNESBUILD_KEEP_BUILD}"
+            "-DSNESBUILD_SDL3_VERSION=${SNESBUILD_SDL3_VERSION}"
+            "-DSNESBUILD_SDL3_TTF_VERSION=${SNESBUILD_SDL3_TTF_VERSION}"
+            -DSNESBUILD_SDL_LOCKFILE=
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/release.cmake"
+        COMMENT "Building desktop Builders and generic Linux archives into release/"
+        VERBATIM)
     return()
 elseif(NOT SNESBUILD_GOOS OR NOT SNESBUILD_GOARCH)
     message(FATAL_ERROR "Set both SNESBUILD_GOOS and SNESBUILD_GOARCH, or neither "

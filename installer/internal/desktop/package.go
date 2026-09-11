@@ -16,7 +16,10 @@ import (
 
 type PackageOptions struct {
 	Binary, Builder, ROM, Root, Destination string
-	Version                                 string
+	// DataRoot contains Workshop runtime assets, separately from build inputs.
+	// Empty preserves the existing folder-bundle contract (Root).
+	DataRoot string
+	Version  string
 	// Format is app, appimage, or appdir. Empty selects the host's application.
 	Format                        string
 	AppImageTool, AppImageRuntime string
@@ -102,8 +105,17 @@ func Package(ctx context.Context, options PackageOptions) (Artifact, error) {
 	if err := atomicWrite(filepath.Join(resources, markerName), manifest, 0644); err != nil {
 		return Artifact{}, err
 	}
-	if err := stageResources(options.Root, resources); err != nil {
+	dataRoot := options.DataRoot
+	if dataRoot == "" {
+		dataRoot = options.Root
+	}
+	if err := stageResources(dataRoot, resources); err != nil {
 		return Artifact{}, err
+	}
+	if dataRoot != options.Root {
+		if err := stageNotices(options.Root, resources); err != nil {
+			return Artifact{}, err
+		}
 	}
 	if options.Format == "app" {
 		if err := packageMacOS(ctx, options, app, bin, libraries); err != nil {
@@ -145,6 +157,21 @@ func Package(ctx context.Context, options PackageOptions) (Artifact, error) {
 }
 
 func stageResources(root, resources string) error {
+	if err := stageSeed(root, resources); err != nil {
+		return err
+	}
+	seed := filepath.Join(resources, "seed")
+	for _, leaf := range []string{"languages/native-us/pack.ini", "fonts/noto/NotoSans-SemiCondensedExtraBold.ttf", "fonts/noto/NotoSansJP-Bold.otf", "fonts/noto/NotoSansArabic-Bold.ttf", "fonts/noto/NotoSansHebrew-Bold.ttf", "fonts/noto/OFL.txt", "fonts/noto/NotoSansJP-OFL.txt"} {
+		if _, err := fileHash(filepath.Join(seed, "game-assets", leaf)); err != nil {
+			return fmt.Errorf("required runtime content %s: %w", leaf, err)
+		}
+	}
+	return stageNotices(root, resources)
+}
+
+// stageSeed also supports first launch, before the ROM-derived language pack
+// exists. Package performs the stricter completed-game validation above.
+func stageSeed(root, resources string) error {
 	seed := filepath.Join(resources, "seed")
 	defaults := filepath.Join(root, "defaults")
 	if info, err := os.Stat(defaults); err == nil && info.IsDir() {
@@ -177,11 +204,10 @@ func stageResources(root, resources string) error {
 			return err
 		}
 	}
-	for _, leaf := range []string{"languages/native-us/pack.ini", "fonts/noto/NotoSans-SemiCondensedExtraBold.ttf", "fonts/noto/NotoSansJP-Bold.otf", "fonts/noto/NotoSansArabic-Bold.ttf", "fonts/noto/NotoSansHebrew-Bold.ttf", "fonts/noto/OFL.txt", "fonts/noto/NotoSansJP-OFL.txt"} {
-		if _, err := fileHash(filepath.Join(seed, "game-assets", leaf)); err != nil {
-			return fmt.Errorf("required runtime content %s: %w", leaf, err)
-		}
-	}
+	return nil
+}
+
+func stageNotices(root, resources string) error {
 	// Notices survive removal of build machinery and travel with the app.
 	for _, leaf := range []string{"licenses", "docs/GAME-LICENSE.txt", "LICENSE", "LICENSE_SCOPE.md", "ATTRIBUTION.md", "THIRD_PARTY_NOTICES.md", "ACTRAISER-THIRD-PARTY-NOTICES.md", "snesrecomp-go/runtime/LICENSE", "snesrecomp-go/runtime/NOTICE.md", "snesrecomp-go/runtime/PROVENANCE.md", "snesrecomp-go/runtime/licenses", "third_party/sheenbidi/LICENSE", "third_party/unicode/NOTICE", "third_party/unicode/utf8proc-LICENSE.md", "installer/THIRD_PARTY_NOTICES.md", "installer/packaging/licenses/sdl-ttf", "installer/packaging/licenses/appimage"} {
 		from := filepath.Join(root, leaf)

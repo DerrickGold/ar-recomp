@@ -19,6 +19,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/DerrickGold/snesrecomp-go/internal/subprocess"
 )
 
 // PinnedZigVersion is the stable Zig release used by platforms without a
@@ -205,7 +207,7 @@ func bundledZigPath() string {
 }
 
 func probeVersion(path string) (string, error) {
-	output, err := exec.Command(path, "version").Output()
+	output, err := subprocess.Command(path, "version").Output()
 	if err != nil {
 		return "", fmt.Errorf("not runnable: %w", err)
 	}
@@ -329,7 +331,7 @@ func extract(archivePath, destination string) error {
 	if strings.HasSuffix(archivePath, ".zip") {
 		return extractZip(archivePath, destination)
 	}
-	command := exec.Command("tar", "-xf", archivePath, "-C", destination)
+	command := subprocess.Command("tar", "-xf", archivePath, "-C", destination)
 	var stderr bytes.Buffer
 	command.Stderr = &stderr
 	if err := command.Run(); err != nil {

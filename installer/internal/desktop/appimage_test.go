@@ -154,7 +154,7 @@ func TestAppImageAcceptance(t *testing.T) {
 		}
 	}
 	portable := filepath.Join(destination, "utils")
-	global := filepath.Join(xdg, Name)
+	global := filepath.Join(xdg, Name, "game")
 	t.Run("global-without-sidecar-does-not-import-nearby-data", func(t *testing.T) {
 		put(t, filepath.Join(portable, "saves/save.srm"), "player save")
 		paths := imageRun(t, nil, "--print-paths")

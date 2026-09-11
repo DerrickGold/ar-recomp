@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	lk "github.com/DerrickGold/ar-recomp/installer/internal/localization"
+	"github.com/DerrickGold/ar-recomp/installer/internal/subprocess"
 	"io"
 	"os"
 	"os/exec"
@@ -97,6 +98,7 @@ func Run(ctx context.Context, binary, builtin string, fonts []lk.FontCoverageSou
 		fmt.Fprintf(&query, "%04X\n", scalar)
 	}
 	command := exec.CommandContext(ctx, binary, args...)
+	subprocess.Configure(command)
 	command.Dir = dir
 	command.Stdin = strings.NewReader(query.String())
 	stdout := &fontProbeOutput{remaining: len(scalars)*12 + 32}

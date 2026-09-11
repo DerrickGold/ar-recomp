@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/DerrickGold/snesrecomp-go/internal/subprocess"
 	"github.com/DerrickGold/snesrecomp-go/internal/toolchain"
 )
 
@@ -77,7 +78,7 @@ func resolveSDL3Ttf(options HermeticOptions, allowSystem bool) (string, string, 
 	}
 	if pkg, err := exec.LookPath("pkg-config"); err == nil {
 		directory := func(name string) string {
-			data, err := exec.Command(pkg, "--variable="+name, "sdl3-ttf").Output()
+			data, err := subprocess.Command(pkg, "--variable="+name, "sdl3-ttf").Output()
 			if err != nil {
 				return ""
 			}

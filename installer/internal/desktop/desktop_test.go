@@ -37,8 +37,8 @@ func TestStorageSelectionPreservesPortableDataAndIgnoresWritability(t *testing.T
 		name, goos, want string
 		options          StorageOptions
 	}{
-		{"writable app still global", "darwin", filepath.Join(env["HOME"], "Library", "Application Support", Name), StorageOptions{}},
-		{"invalid XDG falls back", "linux", filepath.Join(env["HOME"], ".local", "share", Name), StorageOptions{}},
+		{"writable app still global", "darwin", filepath.Join(env["HOME"], "Library", "Application Support", Name, "game"), StorageOptions{}},
+		{"invalid XDG falls back", "linux", filepath.Join(env["HOME"], ".local", "share", Name, "game"), StorageOptions{}},
 		{"portable means caller cwd", "darwin", cwd, StorageOptions{Portable: true}},
 		{"explicit relative path", "linux", filepath.Join(cwd, "profile"), StorageOptions{DataDir: "profile"}},
 	} {
@@ -221,5 +221,30 @@ func TestLinuxDependenciesIncludeTransitiveLibrariesAndRejectMissingOnes(t *test
 	}
 	if _, err := parseLdd("libSDL3_ttf.so.0 => not found\n"); err == nil {
 		t.Fatal("missing library accepted")
+	}
+}
+
+func TestLinuxDependenciesAcceptSteamOSMappedInterpreterOnly(t *testing.T) {
+	for _, loader := range []string{
+		"/lib64/ld-linux-x86-64.so.2 => /usr/lib64/ld-linux-x86-64.so.2 (0x00007fa961048000)",
+		"/lib/ld-linux-aarch64.so.1 => /usr/lib/ld-linux-aarch64.so.1 (0xffff)",
+		"/lib64/ld-linux-x86-64.so.2 => /usr/lib64/ld-2.40.so (0xffff)",
+	} {
+		deps, err := parseLdd("libSDL3.so.0 => /sdk/lib/libSDL3.so.0 (0x123)\n" + loader + "\n")
+		if err != nil || len(deps) != 1 || deps["libSDL3.so.0"] != "/sdk/lib/libSDL3.so.0" {
+			t.Fatalf("mapped loader: %s: %v %v", loader, deps, err)
+		}
+	}
+	for _, line := range []string{
+		"/lib64/ld-linux-x86-64.so.2 => not found",
+		"/lib64/ld-linux-x86-64.so.2 => relative/loader (0xffff)",
+		"relative/ld-linux-x86-64.so.2 => /lib64/ld-linux-x86-64.so.2 (0xffff)",
+		"/sdk/libSDL3.so.0 => /sdk/libSDL3.so.0 (0xffff)",
+		"/lib/libc.so.6 => /usr/lib/libc.so.6 (0xffff)",
+		"/tmp/unknown-loader => /tmp/unknown-loader (0xffff)",
+	} {
+		if _, err := parseLdd(line); err == nil {
+			t.Fatalf("unsafe/unresolved dependency accepted: %s", line)
+		}
 	}
 }

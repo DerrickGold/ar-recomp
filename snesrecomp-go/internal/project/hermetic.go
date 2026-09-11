@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/DerrickGold/snesrecomp-go/internal/fsutil"
+	"github.com/DerrickGold/snesrecomp-go/internal/subprocess"
 )
 
 // HermeticOptions drives the CMake-free build path. A distribution links its
@@ -340,6 +341,10 @@ func HermeticBuild(options HermeticOptions) (string, error) {
 	var failed atomic.Bool
 	var completed atomic.Int64
 	completed.Store(int64(cached))
+	var active atomic.Int64
+	stopCompileActivity := buildActivity(tools, options.Verbose, 10*time.Second, func() string {
+		return fmt.Sprintf("compiling: %d/%d complete, %d active, elapsed %.0fs", completed.Load(), len(sources), active.Load(), time.Since(started).Seconds())
+	})
 	var firstError error
 	var errorOnce sync.Once
 	semaphore := make(chan struct{}, options.Jobs)
@@ -359,11 +364,14 @@ func HermeticBuild(options HermeticOptions) (string, error) {
 			if options.Verbose {
 				tools.printf("  cc %s\n", item.source)
 			}
+			unitStarted := time.Now()
+			active.Add(1)
+			defer active.Add(-1)
 			args := compileArgs
 			if item.runner {
 				args = runtimeSourceCompileArgs(runnerCompileArgs, item.source)
 			}
-			command := exec.Command(options.ZigPath, append(append([]string(nil), args...), "-c", item.source, "-o", item.object)...)
+			command := subprocess.Command(options.ZigPath, append(append([]string(nil), args...), "-c", item.source, "-o", item.object)...)
 			output, err := command.CombinedOutput()
 			// Emitted whether or not the unit failed -- -w keeps a healthy
 			// compile silent, so anything a tool does say here is worth reading.
@@ -376,12 +384,17 @@ func HermeticBuild(options HermeticOptions) (string, error) {
 				})
 				return
 			}
+			count := int(completed.Add(1))
+			if options.Verbose {
+				tools.printf("  compiled [%d/%d] %s (%.1fs)\n", count, len(sources), item.source, time.Since(unitStarted).Seconds())
+			}
 			if options.Progress != nil {
-				options.Progress(int(completed.Add(1)), len(sources))
+				options.Progress(count, len(sources))
 			}
 		}(item)
 	}
 	waitGroup.Wait()
+	stopCompileActivity()
 	if firstError != nil {
 		return "", firstError
 	}
@@ -410,6 +423,12 @@ func HermeticBuild(options HermeticOptions) (string, error) {
 	for _, source := range sources {
 		objects = append(objects, filepath.Join(objectDir, objectName(paths.Root, source)))
 	}
+	linkStarted := time.Now()
+	stopLinkActivity := buildActivity(tools, options.Verbose, 10*time.Second, func() string {
+		return fmt.Sprintf("archiving/linking %s: elapsed %.0fs", manifest.Name, time.Since(linkStarted).Seconds())
+	})
+	defer stopLinkActivity()
+	tools.printf("hermetic: archiving %d game objects\n", len(objects)-runnerSourceCount)
 	runtimeArchive := runner.Archive
 	if runtimeArchive == "" {
 		runtimeArchive = filepath.Join(outputDir, runtimeArchiveName(targetOS))
@@ -417,7 +436,7 @@ func HermeticBuild(options HermeticOptions) (string, error) {
 			objects[:runnerSourceCount]); err != nil {
 			return "", err
 		}
-		fmt.Fprintf(options.Stdout, "hermetic: built runner archive %s; linking game\n",
+		tools.printf("hermetic: built runner archive %s; linking game\n",
 			runtimeArchive)
 	}
 	gameArchive, cleanupArchive, err := createObjectArchive(
@@ -459,7 +478,8 @@ func HermeticBuild(options HermeticOptions) (string, error) {
 		linkArgs = append(linkArgs, "-L"+ttfLibDir)
 	}
 	linkArgs = append(linkArgs, manifest.Link...)
-	command := exec.Command(options.ZigPath, linkArgs...)
+	tools.printf("hermetic: linking %s\n", binary)
+	command := subprocess.Command(options.ZigPath, linkArgs...)
 	output, err := command.CombinedOutput()
 	tools.block("link "+filepath.Base(binary), output)
 	if err != nil {
@@ -471,10 +491,10 @@ func HermeticBuild(options HermeticOptions) (string, error) {
 			return "", copyErr
 		}
 		for _, name := range copied {
-			fmt.Fprintf(options.Stdout, "hermetic: bundled SDL runtime %s copied beside the binary\n", name)
+			tools.printf("hermetic: bundled SDL runtime %s copied beside the binary\n", name)
 		}
 	}
-	fmt.Fprintf(options.Stdout, "hermetic: built %s\n", binary)
+	tools.printf("hermetic: built %s\n", binary)
 	return binary, nil
 }
 
@@ -777,8 +797,8 @@ func discoverSDL3() (includeDir, libDir string, bundled bool, err error) {
 		}
 	}
 	if pkgConfig, lookErr := exec.LookPath("pkg-config"); lookErr == nil {
-		includeOut, includeErr := exec.Command(pkgConfig, "--cflags-only-I", "sdl3").Output()
-		libOut, libErr := exec.Command(pkgConfig, "--libs-only-L", "sdl3").Output()
+		includeOut, includeErr := subprocess.Command(pkgConfig, "--cflags-only-I", "sdl3").Output()
+		libOut, libErr := subprocess.Command(pkgConfig, "--libs-only-L", "sdl3").Output()
 		if includeErr == nil && libErr == nil {
 			include := firstFlagValue(string(includeOut), "-I")
 			lib := firstFlagValue(string(libOut), "-L")
@@ -860,7 +880,7 @@ func discoverSDL3() (includeDir, libDir string, bundled bool, err error) {
 // --cflags-only-I / --libs-only-L come back empty because pkg-config elided a
 // path it considers part of the default search set.
 func pkgConfigVariable(pkgConfig, name string) string {
-	out, err := exec.Command(pkgConfig, "--variable="+name, "sdl3").Output()
+	out, err := subprocess.Command(pkgConfig, "--variable="+name, "sdl3").Output()
 	if err != nil {
 		return ""
 	}

@@ -123,7 +123,18 @@ func parseLdd(output string) (map[string]string, error) {
 			value = value[:end]
 		}
 		path := strings.TrimSpace(value)
-		if name == "" || filepath.Base(name) != name || !filepath.IsAbs(path) {
+		if name == "" || !filepath.IsAbs(path) {
+			return nil, fmt.Errorf("unrecognized ldd dependency: %s", line)
+		}
+		// SteamOS/Arch can print the ELF interpreter as an absolute-path
+		// mapping (e.g. /lib64/ld-linux-x86-64.so.2 => /usr/lib64/...).
+		// It belongs to the host, just like the unmapped loader line above.
+		// Only permit known interpreters here; ordinary dependencies must
+		// still have a relocatable SONAME, never an absolute/path-like name.
+		if filepath.IsAbs(name) && linuxLoader(filepath.Base(name)) {
+			continue
+		}
+		if filepath.Base(name) != name {
 			return nil, fmt.Errorf("unrecognized ldd dependency: %s", line)
 		}
 		if glibcLibrary(name) {
@@ -134,8 +145,15 @@ func parseLdd(output string) (map[string]string, error) {
 	return result, nil
 }
 
+func linuxLoader(name string) bool {
+	return name == "ld-linux-x86-64.so.2" || name == "ld-linux-aarch64.so.1"
+}
+
 func glibcLibrary(name string) bool {
-	for _, value := range []string{"libc.so.6", "libm.so.6", "libpthread.so.0", "libdl.so.2", "librt.so.1", "libresolv.so.2", "libutil.so.1", "libanl.so.1", "ld-linux-x86-64.so.2", "ld-linux-aarch64.so.1"} {
+	if linuxLoader(name) {
+		return true
+	}
+	for _, value := range []string{"libc.so.6", "libm.so.6", "libpthread.so.0", "libdl.so.2", "librt.so.1", "libresolv.so.2", "libutil.so.1", "libanl.so.1"} {
 		if name == value {
 			return true
 		}
