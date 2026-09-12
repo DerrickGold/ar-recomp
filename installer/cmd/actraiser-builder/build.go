@@ -15,6 +15,7 @@ import (
 	"sync"
 
 	"github.com/DerrickGold/ar-recomp/installer/internal/builder"
+	"github.com/DerrickGold/ar-recomp/installer/internal/buildworkspace"
 	"github.com/DerrickGold/ar-recomp/installer/internal/desktop"
 	"github.com/DerrickGold/ar-recomp/installer/internal/localization"
 )
@@ -49,7 +50,27 @@ func buildFromGUI(ctx context.Context, values guiFlags, root, outputDir, romPath
 	if values.standaloneOutput {
 		dataRoot = outputDir
 	}
-	fmt.Fprintf(output, "Build workspace: %s\nGame output: %s\nRuntime data: %s\n", root, outputDir, dataRoot)
+	var scratch string
+	var environment []string
+	if values.buildWorkspace != "" {
+		if !values.standaloneOutput {
+			return builder.Result{}, errors.New("bundled builds require a standalone game output")
+		}
+		if err := buildworkspace.Separate(root, values.buildWorkspace, outputDir); err != nil {
+			return builder.Result{}, err
+		}
+		var err error
+		scratch, err = buildworkspace.Scratch(values.buildWorkspace, values.inputID, romPath)
+		if err != nil {
+			return builder.Result{}, err
+		}
+		environment = append(os.Environ(), "ZIG_GLOBAL_CACHE_DIR="+filepath.Join(scratch, "zig-global"), "ZIG_LOCAL_CACHE_DIR="+filepath.Join(scratch, "zig-local"))
+		fmt.Fprintf(output, "Bundled inputs: %s\nPrivate build scratch: %s\n", root, scratch)
+	}
+	run := func(executable string, output io.Writer, args ...string) (commandResult, error) {
+		return runSnesbuildAt(ctx, executable, scratch, environment, output, args...)
+	}
+	fmt.Fprintf(output, "Build inputs: %s\nGame output: %s\nRuntime data: %s\n", root, outputDir, dataRoot)
 	if err := prepareNativeUS(dataRoot, romPath, output); err != nil {
 		return builder.Result{}, err
 	}
@@ -66,25 +87,44 @@ func buildFromGUI(ctx context.Context, values guiFlags, root, outputDir, romPath
 
 	regenArgs := []string{"regen", "--root", root, "--rom", romPath,
 		"--toolchain-dir", values.toolchainDir, "--jobs", fmt.Sprint(values.jobs)}
+	if scratch != "" {
+		regenArgs = append(regenArgs, "--out-dir", filepath.Join(scratch, "generated"), "--funcs-out", filepath.Join(scratch, "include", "funcs.h"), "--metadata-out", filepath.Join(scratch, "metadata.json"), "--rts-report", filepath.Join(scratch, "rts.txt"), "--rts-previous", filepath.Join(scratch, "rts.previous.txt"))
+		if err := os.MkdirAll(filepath.Join(scratch, "include"), 0700); err != nil {
+			return builder.Result{}, err
+		}
+	}
 	if values.allowStubs {
 		regenArgs = append(regenArgs, "--allow-stubs")
 	}
-	if _, err := runSnesbuild(ctx, snesbuild, output, regenArgs...); err != nil {
+	if _, err := run(snesbuild, output, regenArgs...); err != nil {
 		return builder.Result{}, err
 	}
-	if err := prepareBuildToolchain(ctx, snesbuild, root, output); err != nil {
-		return builder.Result{}, err
+	if scratch != "" {
+		if _, err := run(snesbuild, output, "toolchain", "status", "--root", root, "--cache-dir", filepath.Join(scratch, "toolchain")); err != nil {
+			return builder.Result{}, fmt.Errorf("bundled compiler unavailable (no download attempted): %w", err)
+		}
+	} else {
+		if err := prepareBuildToolchain(ctx, snesbuild, root, output); err != nil {
+			return builder.Result{}, err
+		}
 	}
-	buildResult, err := runSnesbuild(ctx, snesbuild, output,
+	buildArgs := []string{
 		"build", "--root", root, "--rom", romPath,
 		"--toolchain-dir", values.toolchainDir, "--jobs", fmt.Sprint(values.jobs),
-		"--optimize", values.optimize, "--hermetic", "--verbose")
+		"--optimize", values.optimize, "--hermetic", "--verbose"}
+	if scratch != "" {
+		buildArgs = append(buildArgs, "--generated-dir", filepath.Join(scratch, "generated"), "--funcs-header", filepath.Join(scratch, "include", "funcs.h"), "--build-dir", filepath.Join(scratch, "objects"), "--input-id", values.inputID)
+	}
+	buildResult, err := run(snesbuild, output, buildArgs...)
 	if err != nil {
 		return builder.Result{}, err
 	}
 	binary, err := oneArtifact(buildResult, "game-binary")
 	if err != nil {
 		return builder.Result{}, err
+	}
+	if scratch != "" {
+		return publishBundledGame(ctx, values, root, outputDir, romPath, binary, output)
 	}
 	installResult, err := runSnesbuild(ctx, snesbuild, output,
 		"install", "--root", dataRoot, "--binary", binary, "--rom", romPath,
@@ -136,6 +176,46 @@ func buildFromGUI(ctx context.Context, values guiFlags, root, outputDir, romPath
 		Message:    "Build complete — your playable game is ready.",
 		OutputPath: launcher, BinaryPath: installedBinary, WorkingDir: dataRoot,
 	}, nil
+}
+
+// Publish a single player artifact. Legacy generic archives retain their
+// separate loose-binary/launcher installation path above.
+func publishBundledGame(ctx context.Context, values guiFlags, root, outputDir, romPath, binary string, output io.Writer) (builder.Result, error) {
+	helper, err := os.Executable()
+	if err != nil {
+		return builder.Result{}, err
+	}
+	if values.appFormat == "folder" || runtime.GOOS == "windows" {
+		installed, err := desktop.InstallGameFolder(binary, helper, romPath, outputDir)
+		if err != nil {
+			return builder.Result{}, err
+		}
+		return builder.Result{Message: "Build complete — your playable game is ready.", OutputPath: installed, BinaryPath: installed, WorkingDir: outputDir}, nil
+	}
+	builder.ReportBuildProgress(output, builder.BuildProgress{PhaseID: "install", Message: "Creating desktop application"})
+	artifact, err := desktop.Package(ctx, desktop.PackageOptions{
+		Binary: binary, Builder: helper, ROM: romPath, Root: root, DataRoot: outputDir,
+		Destination: outputDir, Format: values.appFormat, Version: version,
+		AppImageTool: values.appImageTool, AppImageRuntime: values.appImageRuntime,
+		Replace: true, Output: output,
+	})
+	if err != nil {
+		return builder.Result{}, err
+	}
+	if err := desktop.WritePortableMarker(artifact.Path, outputDir); err != nil {
+		return builder.Result{}, err
+	}
+	if artifact.Backup != "" {
+		fmt.Fprintf(output, "Previous application retained at %s\n", artifact.Backup)
+	}
+	probe := artifact.Path
+	if strings.HasSuffix(probe, ".app") {
+		probe = filepath.Join(probe, "Contents", "MacOS", desktop.Name)
+	}
+	if strings.HasSuffix(probe, ".AppDir") {
+		probe = filepath.Join(probe, "usr", "bin", desktop.Name)
+	}
+	return builder.Result{Message: "Build complete — your playable game is ready.", OutputPath: artifact.Path, BinaryPath: probe, WorkingDir: outputDir}, nil
 }
 
 // Fetch fills a cache; it does not discover the compiler carried beside the
@@ -256,8 +336,13 @@ func validateExecutable(path string) (string, error) {
 }
 
 func runSnesbuild(ctx context.Context, executable string, output io.Writer, args ...string) (commandResult, error) {
+	return runSnesbuildAt(ctx, executable, "", nil, output, args...)
+}
+
+func runSnesbuildAt(ctx context.Context, executable, directory string, environment []string, output io.Writer, args ...string) (commandResult, error) {
 	args = append(args, "--event-format", "jsonl")
 	command := exec.Command(executable, args...)
+	command.Dir, command.Env = directory, environment
 	configureBuildProcess(command)
 	stdout, err := command.StdoutPipe()
 	if err != nil {

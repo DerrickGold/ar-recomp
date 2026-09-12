@@ -23,6 +23,7 @@
     <button class="tab" id="tab-manual" role="tab" aria-selected="false" aria-controls="panel-manual" tabindex="-1"><span class="nav-icon" aria-hidden="true">▤</span><span data-i18n="builder.nav.help">Help &amp; manual</span></button>
   </div>
   <div class="sidebar-bottom">
+    <button type="button" id="game-folder-open" hidden data-i18n="builder.output.change">Change game folder…</button>
     <button type="button" id="import-install-open" hidden data-i18n="builder.import.open">Import previous installation…</button>
     <label for="interface-language" data-i18n="interface.language">Interface language</label>
     <select id="interface-language" aria-describedby="interface-language-status"><option value="en">English</option><option value="fr">Français</option><option value="de">Deutsch</option><option value="ja">日本語</option></select>
@@ -221,5 +222,7 @@
 </dialog>
 <script src="builder/app.js" defer></script>
 <script src="builder/install-import.js" defer></script>
+<dialog id="game-folder-dialog" aria-labelledby="game-folder-title"><h2 id="game-folder-title" data-i18n="builder.output.change">Change game folder…</h2><p data-i18n="builder.output.next_launch">Changes take effect after you close and reopen the Builder. This session keeps its current folder.</p><iframe id="game-folder-frame" title="Choose game folder" data-i18n-title="builder.output.choose" style="width:100%;height:65vh;border:0"></iframe><button type="button" id="game-folder-dismiss" data-i18n="builder.output.close">Close</button></dialog>
+<script src="builder/game-folder.js" defer></script>
 </body>
 </html>

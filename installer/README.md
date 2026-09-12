@@ -87,9 +87,9 @@ Each bundle places `actraiser-builder[.exe]` and `snesbuild[.exe]` together in
 `utils/tools/`. The launcher passes the sibling path explicitly, preserving the
 module and executable boundary in installed packages.
 
-## Desktop shell prototype
+## Desktop application
 
-The [Go desktop shell](desktop-shell/README.md) explores native Builder
+The [Go desktop shell](desktop-shell/README.md) provides native Builder
 artifacts for macOS (`.app`), Linux (`.AppImage`) and Windows (`.exe`) while
 retaining the same Workshop frontend and headless helper. It has its own Go
 module and shares the existing offline installer payload. Root `make release`

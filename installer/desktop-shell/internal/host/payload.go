@@ -1,4 +1,4 @@
-// Package host is independent of Wails: payload staging and the local-server
+// Package host is independent of Wails: payload verification and the local-server
 // boundary remain testable without a graphical session or a webview SDK.
 package host
 
@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/DerrickGold/ar-recomp/installer/internal/appdata"
+	"github.com/DerrickGold/ar-recomp/installer/internal/buildworkspace"
 )
 
 const Name = "ActRaiserRecompBuilder"
@@ -142,150 +143,30 @@ func requiredFiles(goos string) []string {
 	return []string{"utils/tools/" + executableName("actraiser-builder", goos), "utils/tools/" + executableName("snesbuild", goos), "utils/snesbuild.ini", "utils/defaults/config.ini", "utils/tools/sdl3/include/SDL3/SDL.h"}
 }
 
-// Prepare installs into a new dedicated workspace atomically. This spike
-// deliberately refuses an in-place payload-version change: implementing
-// conflict-aware upgrades is separate work, not permission to overwrite edits.
-func Prepare(payload, workspace string, progress func(string)) error {
-	if err := ValidateWorkspace(workspace, payload); err != nil {
-		return err
-	}
-	data, err := os.ReadFile(filepath.Join(payload, manifestName))
-	if err != nil {
-		return err
-	}
-	var m Manifest
-	if err = json.Unmarshal(data, &m); err != nil {
-		return err
-	}
-	if err = validateManifest(m); err != nil {
-		return err
-	}
-	if m.OS != runtime.GOOS || m.Arch != runtime.GOARCH {
-		return fmt.Errorf("payload is %s/%s, this host is %s/%s", m.OS, m.Arch, runtime.GOOS, runtime.GOARCH)
-	}
-	id := fmt.Sprintf("%x\n", sha256.Sum256(data))
-	if info, err := os.Lstat(workspace); err == nil {
-		if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-			return errors.New("workspace must be a real directory, not a symlink")
-		}
-		stamp, err := os.ReadFile(filepath.Join(workspace, ".builder-payload"))
-		if err != nil || string(stamp) != id {
-			return errors.New("workspace belongs to another payload or is not managed by this prototype; choose a new workspace path (existing files were not changed)")
-		}
-		return nil
-	} else if !os.IsNotExist(err) {
-		return err
-	}
-	parent := filepath.Dir(workspace)
-	if err = os.MkdirAll(parent, 0700); err != nil {
-		return err
-	}
-	physicalPayload, err := filepath.EvalSymlinks(payload)
-	if err != nil {
-		return err
-	}
-	tmp, err := os.MkdirTemp(parent, ".actraiser-workspace-")
-	if err != nil {
-		return err
-	}
-	defer os.RemoveAll(tmp) // Only the staging directory created above.
-	for i, entry := range m.Files {
-		if i%250 == 0 && progress != nil {
-			progress(fmt.Sprintf("Preparing build tools: %d / %d files", i, len(m.Files)))
-		}
-		from := filepath.Join(payload, filepath.FromSlash(entry.Path))
-		resolved, err := filepath.EvalSymlinks(from)
-		if err != nil {
-			return err
-		}
-		if rel, err := filepath.Rel(physicalPayload, resolved); err != nil || !filepath.IsLocal(rel) {
-			return fmt.Errorf("payload path escapes application: %s", entry.Path)
-		}
-		info, err := os.Lstat(from)
-		if err != nil {
-			return err
-		}
-		if !info.Mode().IsRegular() {
-			return fmt.Errorf("non-regular payload input: %s", entry.Path)
-		}
-		to := filepath.Join(tmp, filepath.FromSlash(entry.Path))
-		if err = os.MkdirAll(filepath.Dir(to), 0700); err != nil {
-			return err
-		}
-		if err = copyVerified(from, to, entry); err != nil {
-			return err
-		}
-	}
-	if err = os.WriteFile(filepath.Join(tmp, ".builder-payload"), []byte(id), 0600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, workspace)
-}
-
 // ValidateWorkspace checks physical paths before creating any directories.
 // Missing path components are resolved through their nearest existing ancestor,
 // so a symlink cannot redirect a new workspace into the immutable application.
+// This is a one-way containment check; callers requiring fully disjoint inputs,
+// scratch and output use buildworkspace.Separate instead.
 func ValidateWorkspace(workspace string, immutableRoots ...string) error {
 	if !filepath.IsAbs(workspace) {
 		return errors.New("workspace must be absolute")
 	}
-	physical, err := resolveFuturePath(workspace)
+	physical, err := buildworkspace.Physical(workspace)
 	if err != nil {
 		return err
 	}
 	for _, root := range immutableRoots {
-		root, err := filepath.Abs(root)
-		if err != nil {
-			return err
-		}
 		// Some callers compare two future writable directories (output and
 		// workspace). Both sides need identical ancestor resolution; requiring
 		// the second to exist prevented every brand-new desktop installation.
-		root, err = resolveFuturePath(root)
+		root, err := buildworkspace.Physical(root)
 		if err != nil {
 			return err
 		}
 		if rel, err := filepath.Rel(root, physical); err == nil && (rel == "." || filepath.IsLocal(rel)) {
 			return errors.New("workspace cannot be inside the application or its payload")
 		}
-	}
-	return nil
-}
-
-func resolveFuturePath(path string) (string, error) {
-	if _, err := os.Lstat(path); err == nil {
-		return filepath.EvalSymlinks(path)
-	} else if !os.IsNotExist(err) {
-		return "", err
-	}
-	parent, err := resolveFuturePath(filepath.Dir(path))
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(parent, filepath.Base(path)), nil
-}
-
-func copyVerified(from, to string, entry File) error {
-	in, err := os.Open(from)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
-	out, err := os.OpenFile(to, os.O_CREATE|os.O_EXCL|os.O_WRONLY, os.FileMode(entry.Mode))
-	if err != nil {
-		return err
-	}
-	h := sha256.New()
-	n, copyErr := io.Copy(io.MultiWriter(out, h), io.LimitReader(in, entry.Size+1))
-	closeErr := out.Close()
-	if copyErr != nil {
-		return copyErr
-	}
-	if closeErr != nil {
-		return closeErr
-	}
-	if n != entry.Size || hex.EncodeToString(h.Sum(nil)) != entry.SHA256 {
-		return fmt.Errorf("payload checksum mismatch: %s", entry.Path)
 	}
 	return nil
 }
@@ -313,7 +194,7 @@ func DefaultWorkspace(artifact, override string) (string, error) {
 }
 
 // AuxiliaryDirectory keeps global browser/runtime data within the installer
-// namespace without pre-creating the workspace before Prepare can own it.
+// namespace without pre-creating the workspace before PrepareSession can own it.
 // Explicit and portable workspaces retain their established sibling layout.
 func AuxiliaryDirectory(workspace, kind string) string {
 	base, err := appdata.Directory(runtime.GOOS, "installer", os.Getenv)

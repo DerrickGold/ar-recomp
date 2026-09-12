@@ -49,7 +49,8 @@ run_probe() {
 # forcing extraction. The same artifact's FUSE-free fallback is tested below.
 unset APPIMAGE_EXTRACT_AND_RUN
 run_probe portable-mounted
-test -d "$test_root/Portable Builder/Builder Data/utils/tools"
+test -f "$test_root/Portable Builder/Builder Data/.builder-workspace"
+test ! -e "$test_root/Portable Builder/Builder Data/utils"
 test -f "$test_root/Portable Builder/ActRaiserRecomp/.actraiser-import.json"
 test ! -e "$XDG_DATA_HOME/ActRaiserRecomp/installer"
 unset AR_BUILDER_SMOKE_ROM
@@ -58,7 +59,8 @@ image="$test_root/Relocated Builder/Renamed Builder.AppImage"
 run_probe relocated-mounted
 mv "$image.portable" "$image.portable.saved"
 run_probe global-mounted
-test -d "$XDG_DATA_HOME/ActRaiserRecomp/installer/workspace/utils/tools"
+test -f "$XDG_DATA_HOME/ActRaiserRecomp/installer/workspace/.builder-workspace"
+test ! -e "$XDG_DATA_HOME/ActRaiserRecomp/installer/workspace/utils"
 export APPIMAGE_EXTRACT_AND_RUN=1
 run_probe global-extracted
 original_hash=$(cut -d ' ' -f 1 "$test_root/image.sha256")

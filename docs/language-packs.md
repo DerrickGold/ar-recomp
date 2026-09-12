@@ -7,6 +7,25 @@ defines the complete script syntax and game constraints.
 
 ## Install a shared `.arlang` file
 
+The recommended Workshop flow is the same on macOS, Linux and Windows:
+
+1. Build the game, then close it before changing its installed languages.
+2. Open **Languages → Add a language pack** and choose the `.arlang` file, or
+   drop it into the Workshop. Add one package at a time; **do not unzip it**.
+3. Review its language, credits and any conflicts, then choose **Import & install**.
+   Replacing a saved project or installed pack requires explicit confirmation.
+4. Use **Manage installed packs** to toggle packs on or off without deleting them.
+5. Restart the game and select the enabled package in the system overlay's
+   Localization settings.
+
+Private `.arproject` backups and compatible legacy ZIPs remain under **Author
+backup or legacy archive** in the import workflow. Unpacked authoring folders
+are available under **Advanced: unpacked language folder**.
+
+### Manual installation in a legacy bundle
+
+For older bundles with a `utils/` directory and `run-game` scripts:
+
 1. Close the game.
 2. Copy the `.arlang` file into `utils/game-assets/languages/packs/` in your
    downloaded game folder. Create `packs/` if needed. **Do not unzip it.**

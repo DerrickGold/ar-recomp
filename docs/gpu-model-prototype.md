@@ -125,8 +125,11 @@ still rejects nonfinite/overflow-prone transforms. Camera changes do not
 re-upload vertices. No per-range CPU index or per-object GPU draw was added.
 
 This policy has its own lazy vertex/fragment shaders, generated for MSL,
-SPIR-V and DXIL. Screen-linear (`noperspective`) color interpolation avoids
+SPIR-V and DXIL. Screen-linear color interpolation avoids
 silently switching the existing authored shading to perspective interpolation.
+The initial implementation used native `noperspective`; the subsequent
+[Vulkan clipping correction](gpu-surface-prototype.md#vulkan-clipping-issue-found-during-validation)
+implements the same affine policy explicitly for behind-eye intersections.
 However, the legacy CPU clipper interpolates newly generated edge colors in
 homogeneous space and then rasterizes them affinely. Its clipped-edge colors,
 triangulation and projection/depth rounding need not match hardware clipping

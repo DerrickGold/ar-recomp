@@ -1,14 +1,29 @@
 # The builder workshop
 
-You can install a shared `.arlang` without opening the workshop: copy it into
-`utils/game-assets/languages/packs/`, restart through `run-game.*`, and select its
-name in Localization. See [installation and external authoring](language-packs.md)
+Choose or drop a shared `.arlang` in the Workshop to review and install it,
+then manage it using the installed-package checklist. Direct archive copies
+in the game's language-pack directory are also supported. See
+[installation and external authoring](language-packs.md)
 for archive/folder layouts, updates, command-line tools and AI-ready references.
 The installed-package checklist manages directly copied archives too.
 
-Open your package's `run-build` launcher to enter the local workshop. It runs
-in your browser, but talks only to the builder on this computer. No account,
-upload, online service, Python, Node.js or package manager is needed to use it.
+Open `ActRaiserRecompBuilder.app` on macOS, `ActRaiserRecompBuilder.AppImage`
+on Linux, or `ActRaiserRecompBuilder.exe` on Windows to enter the Workshop.
+The generic Linux builder's `run-build` launcher opens the same interface in
+your browser.
+
+On the desktop Builder's first launch, **Choose game folder** lets you review
+the exact playable output directory before any game files are initialized.
+The default is a portable `ActRaiserRecomp/` folder beside the Builder. Existing
+installations can be updated after explicit confirmation; saves, settings,
+language packs and custom assets are preserved, and the folder is never cleared.
+For an old `utils/` installation, choose a new game folder and use **Import
+previous installation** to bring its data forward.
+
+The Builder remembers your selection. **Change game folder…** in the sidebar
+changes it for the next launch only: finish or save your work, then close and
+reopen the Builder. Changing folders does not move or copy the previous game.
+The generic Linux browser launcher keeps its existing output/command-line flow.
 
 **Interface language** in the sidebar selects English, French, German or
 Japanese independently of game text and of the locale you are translating.
@@ -83,10 +98,13 @@ translation projects are preserved while the section is locked.
 
 ## Language projects are not installed packs
 
-Choose **Install a language pack**, then **Import new pack** or **Install already
-imported**. For a new pack, **Choose folder…** opens your system's folder chooser.
-Select the folder containing `pack.ini`; its declared files load automatically
-into a preview. Archive import and manual folder paths are secondary options.
+Use **Languages → Add a language pack** to choose an `.arlang` file, or drop it
+into the Workshop from any section. Add one pack at a time; no unzipping is
+needed. **Install a language pack** also opens this package-first flow, with
+**Install already imported** available for saved projects. Author backups
+(`.arproject`) and compatible legacy ZIPs have a secondary import option;
+**Advanced: unpacked language folder** retains **Choose folder…** and manual
+paths for authors. Selecting or dropping a package opens a preview only.
 Only **Import & install** writes the workshop copy and installs it. Matching
 package IDs require explicit replacement; a distinct ID lets you keep both.
 

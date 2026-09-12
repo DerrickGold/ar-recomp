@@ -28,6 +28,9 @@ import (
 // game. End users need neither CMake nor a system compiler. See
 // docs/PROJECT_INTEGRATION.md for the snesbuild.ini contract.
 type HermeticOptions struct {
+	// InputID is a caller-verified digest of the immutable source/toolkit tree.
+	// It keeps cache keys independent of an AppImage's transient mount path.
+	InputID string
 	Paths
 	ManifestPath  string // defaults to <root>/snesbuild.ini
 	ZigPath       string // required: resolved zig executable
@@ -138,6 +141,11 @@ func HermeticBuild(options HermeticOptions) (string, error) {
 		return "", err
 	}
 	options.Paths = paths
+	if options.InputID != "" {
+		if err := validateImmutableOutputs(options); err != nil {
+			return "", err
+		}
+	}
 	if options.Stdout == nil {
 		options.Stdout = io.Discard
 	}
@@ -207,6 +215,11 @@ func HermeticBuild(options HermeticOptions) (string, error) {
 	}
 
 	includeDirs := append([]string(nil), runner.PublicIncludes...)
+	// Generated declarations may live outside the read-only source root. Give
+	// them precedence over any stale funcs.h shipped in a legacy project tree.
+	if paths.FuncsHeader != "" {
+		includeDirs = append([]string{filepath.Dir(paths.FuncsHeader)}, includeDirs...)
+	}
 	for _, include := range manifest.Includes {
 		includeDirs = append(includeDirs, resolveUnder(paths.Root, include))
 	}
@@ -279,8 +292,7 @@ func HermeticBuild(options HermeticOptions) (string, error) {
 
 	// Runtime-private include roots and flags invalidate only runtime objects.
 	// The game side has its own cache key and never receives private includes.
-	gameFlagsDigest := sha256.Sum256([]byte(options.ZigPath + "\x00" +
-		strings.Join(compileArgs, "\x00")))
+	gameFlagsDigest := sha256.Sum256([]byte(immutableCacheKey(options, options.ZigPath+"\x00"+strings.Join(compileArgs, "\x00"))))
 	gameFlagsHash := hex.EncodeToString(gameFlagsDigest[:])
 	gameFlagsPath := filepath.Join(outputDir, "game-flags.sha256")
 	runnerFlagsPath := filepath.Join(outputDir, "runner-flags.sha256")
@@ -289,21 +301,19 @@ func HermeticBuild(options HermeticOptions) (string, error) {
 	runnerFlagsHash := ""
 	runnerFlagsChanged := false
 	if runnerSourceCount > 0 {
-		runnerFlagsDigest := sha256.Sum256([]byte(options.ZigPath + "\x00" +
-			runtimeArchiveObjectCacheVersion + "\x00" +
-			strings.Join(runnerCompileArgs, "\x00")))
+		runnerFlagsDigest := sha256.Sum256([]byte(immutableCacheKey(options, options.ZigPath+"\x00"+runtimeArchiveObjectCacheVersion+"\x00"+strings.Join(runnerCompileArgs, "\x00"))))
 		runnerFlagsHash = hex.EncodeToString(runnerFlagsDigest[:])
 		previousRunnerFlags, _ := os.ReadFile(runnerFlagsPath)
 		runnerFlagsChanged = strings.TrimSpace(string(previousRunnerFlags)) != runnerFlagsHash
 	}
 
-	newestGameHeader := newestHeaderTime(includeDirs, paths.BuildDir)
+	newestGameHeader := newestHeaderTime(mutableIncludeDirs(options, includeDirs), paths.BuildDir)
 	newestRunnerHeader := time.Time{}
 	if runnerSourceCount > 0 {
 		runnerHeaderDirs := append([]string(nil), runner.SourceManifest.PublicIncludes...)
 		runnerHeaderDirs = append(runnerHeaderDirs,
 			runner.SourceManifest.PrivateIncludes...)
-		newestRunnerHeader = newestHeaderTime(runnerHeaderDirs, paths.BuildDir)
+		newestRunnerHeader = newestHeaderTime(mutableIncludeDirs(options, runnerHeaderDirs), paths.BuildDir)
 	}
 
 	type job struct {
@@ -321,7 +331,7 @@ func HermeticBuild(options HermeticOptions) (string, error) {
 			flagsChanged = runnerFlagsChanged
 			newestHeader = newestRunnerHeader
 		}
-		if !flagsChanged && objectFresh(source, object, newestHeader) {
+		if !flagsChanged && immutableObjectFresh(options, source, object, newestHeader) {
 			cached++
 			continue
 		}

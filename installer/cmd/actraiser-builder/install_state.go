@@ -154,6 +154,10 @@ func detectInstallState(root, outputDir string) builder.InstallState {
 			continue
 		} else if err := desktop.ValidateAppImage(path); err != nil {
 			continue
+		} else {
+			// The AppImage forwards the bounded font-probe protocol directly;
+			// no duplicate loose game binary is needed for language tools.
+			binary = path
 		}
 		state.CanLaunch = true
 		state.Result = builder.Result{Message: "Your game is built and ready.", OutputPath: path, BinaryPath: binary, WorkingDir: root}

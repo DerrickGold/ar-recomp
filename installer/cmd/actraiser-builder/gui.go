@@ -13,10 +13,12 @@ import (
 	"strings"
 
 	"github.com/DerrickGold/ar-recomp/installer/internal/builder"
+	"github.com/DerrickGold/ar-recomp/installer/internal/buildworkspace"
 	"github.com/DerrickGold/ar-recomp/installer/internal/desktop"
 )
 
 type guiFlags struct {
+	buildWorkspace, inputID                            string
 	root, outputDir, toolchainDir, optimize, snesbuild string
 	appFormat, appImageTool, appImageRuntime           string
 	readyFile                                          string
@@ -29,6 +31,8 @@ type guiFlags struct {
 func runGUI(args []string) error {
 	flags := flag.NewFlagSet("gui", flag.ContinueOnError)
 	values := guiFlags{}
+	flags.StringVar(&values.buildWorkspace, "build-workspace", "", "private scratch directory; enables read-only bundled source")
+	flags.StringVar(&values.inputID, "input-id", "", "verified bundled payload identity")
 	flags.StringVar(&values.root, "root", ".", "game project root")
 	flags.StringVar(&values.outputDir, "output-dir", "", "playable output folder (default: project root)")
 	flags.BoolVar(&values.standaloneOutput, "standalone-output", false, "keep all playable data in output-dir, independent of build inputs")
@@ -63,19 +67,36 @@ func runGUI(args []string) error {
 	}
 
 	dataRoot := root
+	if values.buildWorkspace != "" {
+		values.buildWorkspace, err = filepath.Abs(values.buildWorkspace)
+		if err != nil {
+			return err
+		}
+		if !values.standaloneOutput || !buildworkspace.ValidID(values.inputID) {
+			return fmt.Errorf("read-only bundled builds require --standalone-output and a verified --input-id")
+		}
+		if err := buildworkspace.Separate(root, values.buildWorkspace, outputDir); err != nil {
+			return err
+		}
+		if err := buildworkspace.Prepare(values.buildWorkspace); err != nil {
+			return err
+		}
+	}
 	if values.standaloneOutput {
 		dataRoot = outputDir
 		if values.importSearchDir == "" {
 			values.importSearchDir = filepath.Dir(outputDir)
 		}
-		if err := builder.PrepareRuntimeAssets(root); err != nil {
-			return err
+		if values.buildWorkspace == "" {
+			if err := builder.PrepareRuntimeAssets(root); err != nil {
+				return err
+			}
 		}
-		if err := desktop.PreparePortableData(root, dataRoot); err != nil {
+		if err := desktop.PreparePortableData(root, dataRoot, builder.RuntimeSeedAssets()); err != nil {
 			return err
 		}
 	}
-	fmt.Fprintf(os.Stdout, "Build workspace: %s\nGame output: %s\n", root, outputDir)
+	fmt.Fprintf(os.Stdout, "Build inputs: %s\nBuild workspace: %s\nGame output: %s\n", root, values.buildWorkspace, outputDir)
 	return builder.Run(context.Background(), builder.Options{
 		Title:           "ActRaiser Recomp Builder",
 		ProjectRoot:     dataRoot,
@@ -97,15 +118,24 @@ func runGUI(args []string) error {
 		// the two file sets and why they differ.
 		Detect: func() builder.InstallState {
 			state := detectInstallState(root, outputDir)
+			if values.buildWorkspace != "" {
+				state.CanSlim = false
+			}
 			if values.standaloneOutput {
 				state.Result.WorkingDir = dataRoot
 			}
 			return state
 		},
 		MeasureSlim: func() int64 {
+			if values.buildWorkspace != "" {
+				return 0
+			}
 			return measureSlimBytes(root)
 		},
 		Slim: func(output io.Writer) error {
+			if values.buildWorkspace != "" {
+				return fmt.Errorf("bundled inputs are read-only; only private build caches may be removed")
+			}
 			return slimInstall(root, outputDir, output)
 		},
 	})

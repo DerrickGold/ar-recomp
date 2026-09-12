@@ -65,7 +65,8 @@ function Invoke-Probe([string]$Label, [string]$Executable, [string]$Workspace) {
         }
         if ($env:AR_BUILDER_SMOKE_ROM -and $log -notmatch 'PASS .*full game build') { throw 'Full build did not PASS.' }
         if (-not $runtimeSeen) { throw 'Did not observe the bundled WebView2 process; runtime selection is unverified.' }
-        if (-not (Test-Path -LiteralPath (Join-Path $Workspace 'utils/tools/snesbuild.exe'))) { throw 'Wrong workspace or missing tools.' }
+        if (-not (Test-Path -LiteralPath (Join-Path $Workspace '.builder-workspace'))) { throw 'Wrong workspace or missing ownership marker.' }
+        if (Test-Path -LiteralPath (Join-Path $Workspace 'utils')) { throw 'Bundled inputs were copied into the workspace.' }
         if (-not (Test-Path -LiteralPath $expectedProfile)) { throw 'Expected separate WebView2 profile was not created.' }
         if (-not (Test-Path -LiteralPath (Join-Path (Split-Path $Executable) 'ActRaiserRecomp/game-assets'))) { throw 'Game output is not beside the Builder.' }
         Write-Host "PASS: $Label renderer, bundled runtime and workspace"

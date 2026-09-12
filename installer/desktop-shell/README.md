@@ -43,6 +43,9 @@ general plugin system or a frontend framework rewrite is not needed for this.
 
 ## Payload and workspace contract
 
+The [read-only inputs and writable data design](FIRST_RUN_PLAN.md) describes
+the implemented split and its acceptance checks. Rebuild the Builder to use it.
+
 The clean CMake install tree is bundled under `Contents/Resources/payload` on
 macOS. Linux placement is `usr/share/ActRaiserRecompBuilder/payload` in
 the AppDir. Windows appends a compressed installer payload and Fixed Version
@@ -50,9 +53,12 @@ WebView2 runtime to an ordinary GUI-subsystem PE executable. The bootstrap
 checks and extracts that archive before starting Wails; no runtime download
 or system WebView2 installation is required by this packaging path.
 
-First launch copies checksum-verified payload files through a temporary sibling
-directory into a dedicated writable workspace. Nothing builds inside a signed
-`.app` or mounted AppImage. Absolute/escaping paths, symlink inputs, known
+First launch verifies the payload and creates a marker-only writable workspace.
+The backend, compiler and source are read directly from the application payload;
+generated C/headers, metadata, objects and compiler caches go into the workspace.
+Windows uses its verified extracted runtime without a second workspace copy.
+Nothing writes build products inside a signed `.app` or mounted AppImage.
+Absolute/escaping paths, symlink inputs, known
 mutable inputs, ROM files and checksum mismatches are rejected. This manifest
 is an integrity check, not a substitute for publisher authentication. Always
 stage from CMake, never from a player's live install. macOS `._*` transfer
@@ -66,7 +72,7 @@ Workspace selection is independent of the process working directory:
   together when moving a portable Builder.
 - Public `*-portable.zip` and `*-portable.tar.xz` downloads include that sidecar
   with `BuilderData` already selected. The directory itself is created and
-  checksum-initialized on first launch. Direct `.exe`, `.AppImage`, and macOS
+  initialized with an ownership marker on first launch. Direct `.exe`, `.AppImage`, and macOS
   app-only ZIP downloads omit it and therefore use per-user storage.
 - Without the sidecar, all platforms share the `ActRaiserRecomp` application
   namespace. Builder files live under `installer/`: macOS uses
@@ -79,28 +85,49 @@ Workspace selection is independent of the process working directory:
 - `--jobs 1` limits compilation to one worker on low-memory machines; the 4 GiB
   Linux test VM needs this. Automatic memory-aware sizing remains future work.
 
-Game output is **independent of Builder workspace mode**. The desktop Builder
-creates an `ActRaiserRecomp/` child beside the outer `.app`, `.AppImage`, or
-`.exe`, not inside its private workspace or application resources. Finder's
-working directory and an AppImage's temporary mount directory are not used.
-`--output-dir /absolute/folder` overrides this destination. A read-only location
-reports an error; move the Builder to a writable folder or specify an output.
-Translocated macOS apps require relocating the app with Finder and relaunching,
-or an explicit output directory; temporary translocation paths are not output.
+Game output is **independent of Builder workspace mode**. First launch presents
+**Choose game folder**, before starting the backend or seeding any game files.
+The suggested destination is an `ActRaiserRecomp/` child beside the outer `.app`,
+`.AppImage`, or `.exe`. Browse or enter the **exact output directory**: selecting
+a folder does not append another child. Review the destination, then continue.
+Non-empty folders require explicit confirmation; recognized games offer
+**Update existing installation**. Unrelated files are never cleared. Unrecognized
+folders with conflicting executable/DLL filenames are refused. Legacy `utils/`
+installs should use a new game folder, then **Import previous installation**.
+
+The choice is saved as `game-output.json` in the Builder workspace. Paths below
+the Builder's containing folder are relative to that folder, so the Builder,
+workspace and game can move together; other destinations are absolute. Missing
+previously initialized folders or invalid preferences prompt again. A newly
+chosen empty destination can be created on the next launch. **Change game
+folder…** in the sidebar saves a choice for the **next launch**, preserving the
+current build/editor session and all its unsaved drafts. Close and reopen the
+Builder to activate it; use data import separately if moving an existing game.
+
+Finder's working directory and an AppImage's temporary mount are not used.
+`--output-dir /absolute/folder` bypasses the interactive choice for scripted
+runs and does not replace the saved preference. Startup errors return interactive
+users to the chooser. Translocated macOS apps can choose an explicit destination
+in the UI; temporary translocation paths are never offered as the default.
 
 The generated game is portable by default: its `.portable` sidecar contains
 `.` and its saves, settings, assets, ROM and archive helper remain inside that
 output folder. Workshop asset/language edits target this playable data directly;
-compiler inputs and intermediates stay in the Builder workspace. Move the whole
+authored inputs stay in the Builder and intermediates in its workspace. Move the whole
 output folder to move the game without the Builder. macOS/Linux users can copy
 only the game application without its sidecar to use global `ActRaiserRecomp/game`
 data instead. Windows currently generates a portable `.exe` **folder**, not a
 self-contained game application with the macOS/Linux global-launcher contract.
+Application packages are staged before replacement; the previous macOS/Linux
+application is retained as a backup. Direct-executable folder updates stage all
+binaries/dependencies before publishing and roll back already replaced files if
+a later installation step fails. If rollback itself fails, its recovery path is
+reported and retained. Close the game and other Builders using that output first.
 
-Old `ActRaiserRecompBuilder` prototype workspaces are not deleted or silently
-upgraded. Keep a backup of their `utils` runtime assets, author projects and
-settings; those can be transferred to the new output folder. `--workspace`
-can still select an existing workspace when its payload identity matches.
+Old `ActRaiserRecompBuilder` prototype workspaces are not deleted. Keep a backup
+of their `utils` runtime assets, author projects and settings; those can be
+imported into the new output folder. Recognized `.builder-payload` workspaces
+are accepted without copying/merging their old source into the current bundle.
 Legacy `run-build` archive launchers keep their existing `utils/` data contract.
 
 Build logs show each compilation start/completion, unit counts and elapsed time,
@@ -108,9 +135,9 @@ plus a status line every ten seconds during long compilation/linking phases.
 The UI retains a bounded tail; the full log is retained under the workspace's
 `logs/` directory. Compiler diagnostic blocks remain grouped by source file.
 
-Unlike the existing game's sidecar, the prototype Builder sidecar does not
-accept `.` or an empty value: it must own a separate tools/workspace directory.
-It never silently adopts a legacy install. The generated game retains its
+Unlike the game's sidecar, the Builder sidecar does not
+accept `.` or an empty value: it must own a separate build workspace directory.
+It never silently adopts an unmanaged directory. The generated game retains its
 existing portable/global rules; Builder storage and game storage are separate
 choices. Browser-engine caches can also exist outside the build workspace.
 Linux's WebKit profile uses the distinct `ActRaiserRecompBuilderWebView` name:
@@ -121,12 +148,23 @@ alone is applied too late. Fully portable webview-profile
 handling remains a release gate; the sidecar currently relocates build/project
 data, not every browser-engine file.
 
-Repeated launches of the **same payload** preserve workspace edits. Concurrent
-sessions are rejected with a workspace lock. A different payload version or an
-unmanaged directory is refused, not overwritten. Conflict-aware upgrades,
-repair after cleanup, workspace selection/migration and editor unsaved-state
-integration remain release gates. First-run
-copying is not yet cancellable mid-file.
+Repeated launches preserve workspace files. Concurrent sessions are rejected
+with a workspace lock. New payload versions select new build caches keyed by
+payload and ROM hashes; they do not require resetting the workspace. Unmanaged
+directories are refused, not overwritten. Existing source/tool copies and old
+caches are retained, not auto-deleted. The legacy destructive cleanup action is
+disabled for desktop sessions. Dedicated cache cleanup, recovery/storage UI and
+editor unsaved-state integration remain release gates.
+
+Closing the native window asks **Yes/No**: Yes requests shutdown, while No (or
+dismissing the dialog) leaves the Workshop open. Repeated close requests share
+one confirmation, and a running build still blocks shutdown with an explanation.
+After approval, the shell lets the backend drain requests and clean up its
+helpers before exiting and releasing the workspace lock. A separately launched
+game is not terminated. First-run payload verification is cancellable, including
+between file chunks; cancellation does not publish a partial workspace.
+Windows executable/runtime extraction before the window
+appears still has no cancellation UI.
 
 ### Resetting a test workspace
 
@@ -137,9 +175,10 @@ There are two distinct startup checks:
   The OS releases the lock when the process exits, including after a crash;
   the mere presence of the file is not a stale lock. Do not delete it while a
   Builder is running, since that can bypass mutual exclusion.
-- **Workspace belongs to another payload or is not managed**: the directory
-  exists, but `.builder-payload` is missing or does not match the current
-  embedded payload. This also rejects an empty directory you created manually.
+- **Workspace is not managed**: the directory exists without a valid
+  `.builder-workspace` marker or recognized legacy `.builder-payload` stamp.
+  This also rejects an empty directory you created manually. A different
+  payload version alone is no longer an error.
 
 Close the Builder, then rename the exact workspace directory as a backup and
 relaunch. Leave the original workspace path absent so the Builder can initialize
@@ -150,8 +189,8 @@ the adjacent `ActRaiserRecomp/` game output does not reset this workspace.
 
 Alternatively, launch with `--workspace /absolute/new/workspace` for testing.
 This override applies only to that launch. Keep the playable game output and
-its saves intact; it is separate from the compiler workspace. A changed payload
-currently needs this fresh-workspace procedure even if only the Builder changed.
+its saves intact; it is separate from the compiler workspace. Updating the
+Builder does not need this reset procedure. Run Build again to update the game.
 
 ## Build the macOS prototype
 

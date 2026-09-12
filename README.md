@@ -104,8 +104,10 @@ writable folder where you want your game created; unpack ZIP/tar downloads first
 
 The recommended desktop downloads extract as one folder containing the Builder
 and its matching `.portable` file. Keep them together: on first launch the
-Builder creates `BuilderData` beside itself and keeps its project, compiler
-inputs and build state there. Copying only the application—or downloading the
+Builder creates `BuilderData` beside itself for generated build files, compiler
+caches and logs. Source and tools are read from the Builder's own payload;
+Windows uses a verified extracted runtime cache without a second source/tool
+copy in `BuilderData`. Copying only the application—or downloading the
 direct artifact in the last column—uses the operating system's per-user data
 directory instead. The portable archives wrap the exact same built application
 as the direct artifacts; they are not separate builds. AppImage bundles use
@@ -134,12 +136,23 @@ macOS Intel still need representative native testing, and Steam Deck testing is
 in progress. See the [verification record](installer/desktop-shell/VERIFICATION.md)
 for completed checks and remaining gaps.
 
-### 2. Open the Builder and pick your ROM
+### 2. Choose the game folder and your ROM
 
 Open `ActRaiserRecompBuilder.app` on macOS or the downloaded Builder `.exe` on
 Windows. On Steam Deck, switch to Desktop Mode, mark the AppImage executable in
 its file properties, and open it. For a generic Linux archive, run
 `./run-build.sh` to open the Workshop in your browser.
+
+On the desktop Builder's first launch, review **Choose game folder**. It defaults
+to `ActRaiserRecomp/` beside the Builder, or you can select an exact destination.
+Choose **Update existing installation** to rebuild an existing game; non-empty
+folders require confirmation. Saves, settings, language packs and custom assets
+are preserved. For older `utils/` installations, choose a new game folder and
+use **Import previous installation** to copy your data forward.
+
+The destination is remembered. **Change game folder…** in the sidebar selects
+the folder for the next launch without affecting the current session; close and
+reopen the Builder to use it. Changing folders does not move existing data.
 
 Choose your ROM and press **Build game**. The Builder generates and compiles the
 game's C code; the initial build usually takes a few minutes.
@@ -225,8 +238,10 @@ restored. Reload other open Workshop tabs after an import.
 Choosing **Start fresh / not now** is remembered for this output folder, but
 manual import remains available. This imports runtime data, not old executables,
 build tools, or ROMs. Browser-only appearance preferences are not installation
-files and cannot be recovered from an old folder. Desktop Builder workspace upgrades have separate
-[payload-identity restrictions](installer/desktop-shell/README.md).
+files and cannot be recovered from an old folder. A newer desktop Builder uses
+its own bundled source/tools and a fresh versioned build cache without resetting
+the workspace. Old workspace files remain untouched; see the
+[workspace and upgrade contract](installer/desktop-shell/README.md).
 
 For a non-portable installation, generate the updated application with the newer
 Builder, then replace only the application in your chosen location. Leave the

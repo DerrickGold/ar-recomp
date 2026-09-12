@@ -41,11 +41,11 @@ static const char *const kStageNames[] = {
   "world-prepare", "world-atmosphere", "world-ocean",
 };
 static const char *const kPathNames[] = {
-  "cpu-project", "cpu-stage", "gpu-reuse", "publish", "opt-out", "limit", "rejected",
+  "cpu-project", "cpu-stage", "gpu-reuse", "publish", "opt-out", "limit", "rejected", "cpu-reuse",
 };
 _Static_assert(sizeof(kPathNames) / sizeof(*kPathNames) == kSim3DPath_Count,
     "every geometry path needs a label");
-_Static_assert(kPerformanceCount_GeometryRejected - kPerformanceCount_CpuProject + 1 ==
+_Static_assert(kPerformanceCount_CpuGeometryReuse - kPerformanceCount_CpuProject + 1 ==
     kSim3DPath_Count, "geometry path metrics mapping");
 _Static_assert(
     sizeof(kStageNames) / sizeof(kStageNames[0]) ==
@@ -181,6 +181,11 @@ void Sim3DPerformance_AddGeometryUpload(uint64_t bytes) {
   if (Sim3DPerformance_Enabled() && s_current_stage >= 0 &&
       s_current_stage < kSim3DPerformanceStage_Count)
     s_geometry_upload_bytes += bytes;
+}
+
+void Sim3DPerformance_AddGeometryCopy(uint64_t bytes, uint64_t calls) {
+  PerformanceMetrics_Add(kPerformanceCount_DepthCopyBytes, bytes);
+  PerformanceMetrics_Add(kPerformanceCount_DepthCopyCalls, calls);
 }
 
 void Sim3DPerformance_EndPresentation(void) {

@@ -218,6 +218,7 @@ typedef struct WorldNavigationReceiverKey {
   WorldNavigationProjection projection;
   ArRenderRectI viewport;
   uint32_t terrain_serial, cliff_serial;
+  bool gpu_grid;
 } WorldNavigationReceiverKey;
 
 static struct {
@@ -261,6 +262,8 @@ static struct {
   bool projection_ready;
   bool projection_unavailable;
   WorldNavigationMountainProjectionKey projection_key;
+  uint32_t geometry_revision;
+  WorldNavigationQuadStream draw;
 } s_world_mountains;
 
 static struct {
@@ -319,12 +322,49 @@ static struct {
   WorldNavigationGroundSample samples[kWorldNavigationTerrainVertexCount];
   WorldNavigationGroundSampleKey sample_key;
   bool samples_ready;
-  Sim3DDepthMesh *ground_mesh;
-  WorldNavigationGroundKey retained_key;
-  uint32_t retained_cliff_serial;
-  bool retained_key_ready, ground_mesh_published, ground_mesh_unavailable, ground_mesh_attempted;
-  bool ground_mesh_opt_out;
 } s_world_terrain;
+
+/* Ground and native mountain cutouts are separate materials in one bounded
+ * mesh. Their projected source is immutable on a held view; animated atlas
+ * pixels and weather samples are deliberately not part of this cache. */
+static struct {
+  Sim3DDepthMesh *mesh;
+  Sim3DDepthGeometryRange ranges[2];
+  WorldNavigationGroundKey retained_key;
+  uint32_t cliff_serial, mountain_revision;
+  bool key_ready, published, unavailable, attempted, opt_out, mountains_retained;
+} s_world_surfaces;
+
+/* Shared land/cliff source owner replaces (never adds to) the world's opaque
+ * retention slot. Ocean/mountain cutouts still use their CPU path. */
+enum {
+  kWorldNavigationGridChunkCells = 16,
+  kWorldNavigationGridChunkAxis = kWorldNavigationTerrainCells / kWorldNavigationGridChunkCells,
+  kWorldNavigationGridChunks = kWorldNavigationGridChunkAxis * kWorldNavigationGridChunkAxis,
+  kWorldNavigationSurfaceChunks = kWorldNavigationGridChunks + 1, /* ordered cliff tail */
+  kWorldNavigationSurfaceMaximumQuads = 65536,
+};
+_Static_assert(kWorldNavigationTerrainCells % kWorldNavigationGridChunkCells == 0 &&
+    (kWorldNavigationSurfaceChunks + 1) / 2 <= 64,
+    "Adjacent source chunks merge into at most 64 selected runs");
+static struct {
+  Sim3DDepthMesh *mesh;
+  WorldNavigationGroundSampleKey key;
+  float height_ratio;
+  struct {
+    WorldNavigationRadialBounds bounds;
+    Sim3DDepthMeshRange range;
+  } chunks[kWorldNavigationSurfaceChunks];
+  Sim3DDepthRadialTransform selection_transform;
+  bool cull, cull_unavailable, selection_ready;
+  bool attempted, enabled, unavailable, ready, drawn;
+} s_world_gpu_grid;
+
+static struct { bool attempted, enabled; } s_world_clip_cache;
+
+static size_t WorldNavigationShadowSamples(const FrameSlot *slot, uint64_t elapsed_ms,
+    Sim3DDepthSphericalSample samples[kSimCloudLayerCount * 3]);
+static bool EnsureWorldNavigationCloudTexture(void);
 
 /* One presentation-owned fork/join group for immutable geometry math. It is
  * independent of weather enablement; jobs never overlap or own resources. */
@@ -344,6 +384,7 @@ static struct {
   WorldNavigationShellGeometry ocean;
   WorldNavigationShellGeometry atmosphere;
   WorldNavigationAtmosphereDrawCache atmosphere_draw;
+  WorldNavigationQuadStream ocean_draw;
   bool indices_ready;
   float longitude_cos[kWorldNavigationOceanSectors];
   float longitude_sin[kWorldNavigationOceanSectors];
@@ -377,6 +418,7 @@ static struct {
 } s_world_weather;
 
 static void DestroyWorldNavigationMountainProjection(void) {
+  WorldNavigationQuadStream_Reset(&s_world_mountains.draw);
   free(s_world_mountains.projection);
   s_world_mountains.projection = NULL;
   s_world_mountains.projection_capacity = 0;
@@ -499,6 +541,7 @@ static void InvalidateWorldNavigationArtPublication(void) {
 }
 
 static void RefreshWorldNavigationMountainGeometry(void) {
+  ++s_world_mountains.geometry_revision;
   const bool joined = s_world_mountains.transition_ready &&
       s_world_mountains.relief_pct > 0;
   SimWorldNavigationTerrain_SetMountainJoin(
@@ -962,9 +1005,10 @@ static void PrepareWorldNavigationTerrain(void) {
   s_world_terrain.serial = world_serial;
 }
 
-static float WorldNavigationTerrainHeightAtImpl(float source_x, float source_y,
+/* Read-only after owner preparation; source-building workers share the frozen
+ * height/cap arrays only until their bounded fork/join completes. */
+static float WorldNavigationTerrainHeightAtPrepared(float source_x, float source_y,
                                                 float *authored_weight, bool floor_only) {
-  PrepareWorldNavigationTerrain();
   float tile_x = source_x / (float)kSimWorldMapTilePixels;
   float tile_y = source_y / (float)kSimWorldMapTilePixels;
   if (tile_x < 0.0f) tile_x = 0.0f;
@@ -1013,6 +1057,12 @@ static float WorldNavigationTerrainHeightAtImpl(float source_x, float source_y,
         (authored_south - authored_north) * v;
   }
   return north + (south - north) * v;
+}
+
+static float WorldNavigationTerrainHeightAtImpl(float source_x, float source_y,
+    float *authored_weight, bool floor_only) {
+  PrepareWorldNavigationTerrain();
+  return WorldNavigationTerrainHeightAtPrepared(source_x,source_y,authored_weight,floor_only);
 }
 
 static float WorldNavigationTerrainHeightAt(float source_x, float source_y,
@@ -1399,6 +1449,268 @@ typedef struct WorldNavigationGroundWork {
   bool *valid;
 } WorldNavigationGroundWork;
 
+typedef struct WorldNavigationGridSourceWork {
+  const WorldNavigationGroundSample *samples;
+  Sim3DDepthSurfaceVertex *vertices;
+  float height_ratio;
+} WorldNavigationGridSourceWork;
+
+static void WorldNavigationSourceShadeNormal(const WorldNavigationGroundSample *s,
+    float height_ratio, float out[3]) {
+  float point[3][3], tx[3], ty[3];
+  for (int p = 0; p < 3; ++p) for (int axis = 0; axis < 3; ++axis)
+    point[p][axis] = s->normal[p][axis] * (1 + s->height[p] * height_ratio);
+  for (int axis = 0; axis < 3; ++axis) {
+    tx[axis] = point[1][axis] - point[0][axis];
+    ty[axis] = point[2][axis] - point[0][axis];
+  }
+  float normal[3] = {ty[1]*tx[2]-ty[2]*tx[1], ty[2]*tx[0]-ty[0]*tx[2], ty[0]*tx[1]-ty[1]*tx[0]};
+  const float length = sqrtf(normal[0]*normal[0]+normal[1]*normal[1]+normal[2]*normal[2]);
+  for (int axis = 0; axis < 3; ++axis)
+    out[axis] = length > 0 ? normal[axis]/length : s->normal[0][axis];
+}
+
+static void BuildWorldNavigationGridSourceRange(void *context, size_t first, size_t end) {
+  WorldNavigationGridSourceWork *work = context;
+  for (size_t i = first; i < end; ++i) {
+    const WorldNavigationGroundSample *s = &work->samples[i];
+    Sim3DDepthSurfaceVertex *v = &work->vertices[i];
+    *v = (Sim3DDepthSurfaceVertex){.elevation = {s->height[0], 0},
+      .color = {1,1,1,s->edge_alpha},
+      .uv = {(i % kWorldNavigationTerrainAxis) / (float)kWorldNavigationTerrainCells,
+             (i / kWorldNavigationTerrainAxis) / (float)kWorldNavigationTerrainCells}};
+    memcpy(v->normal, s->normal[0], sizeof(v->normal));
+    WorldNavigationSourceShadeNormal(s,work->height_ratio,v->shade_normal);
+  }
+}
+
+typedef struct WorldNavigationCliffSourceWork {
+  const SimWorldNavigationCliffFace *faces;
+  Sim3DDepthSurfaceVertex *vertices;
+  ArRenderPointF *mask_uv;
+  bool *valid;
+  float chart_radius, height_ratio;
+} WorldNavigationCliffSourceWork;
+
+static void BuildWorldNavigationCliffSourceRange(void *context, size_t first, size_t end) {
+  WorldNavigationCliffSourceWork *work = context;
+  for (size_t i = first; i < end; ++i) {
+    const SimWorldNavigationCliffFace *face = &work->faces[i];
+    work->valid[i] = true;
+    for (unsigned p = 0; p < 4; ++p) {
+      WorldNavigationGroundSample sample = {0};
+      for (unsigned s = 0; s < 3; ++s) {
+        const float x = face->x[p] + (s == 1 ? .5f : 0);
+        const float y = face->y[p] + (s == 2 ? .5f : 0);
+        work->valid[i] &= SimWorldNavigationGlobe_SampleAtRadius(work->chart_radius,
+            x,y,sample.normal[s],NULL);
+        sample.height[s] = WorldNavigationTerrainHeightAtPrepared(
+            x*kSimWorldMapTilePixels,y*kSimWorldMapTilePixels,NULL,false);
+      }
+      Sim3DDepthSurfaceVertex *v = &work->vertices[i*4+p];
+      *v = (Sim3DDepthSurfaceVertex){.elevation = {face->height[p],0},
+        .color = {face->shade,face->shade,face->shade,1}, .uv = {face->u[p],face->v[p]}};
+      memcpy(v->normal,sample.normal[0],sizeof(v->normal));
+      WorldNavigationSourceShadeNormal(&sample,work->height_ratio,v->shade_normal);
+      work->mask_uv[i*4+p] = (ArRenderPointF){face->x[p]/kWorldNavigationTerrainCells,
+        face->y[p]/kWorldNavigationTerrainCells};
+    }
+  }
+}
+
+static WorldNavigationRadialBounds WorldNavigationSourceBounds(
+    const Sim3DDepthSurfaceVertex *vertices, size_t quads) {
+  WorldNavigationRadialBounds bounds = {0};
+  for (size_t i = 0; i < quads*4; ++i) {
+    const Sim3DDepthSurfaceVertex *v = &vertices[i];
+    if (!i) {
+      memcpy(bounds.normal_min,v->normal,sizeof(bounds.normal_min));
+      memcpy(bounds.normal_max,v->normal,sizeof(bounds.normal_max));
+      bounds.height_min = bounds.height_max = v->elevation[0];
+    } else {
+      for (unsigned axis = 0; axis < 3; ++axis) {
+        bounds.normal_min[axis] = fminf(bounds.normal_min[axis],v->normal[axis]);
+        bounds.normal_max[axis] = fmaxf(bounds.normal_max[axis],v->normal[axis]);
+      }
+      bounds.height_min = fminf(bounds.height_min,v->elevation[0]);
+      bounds.height_max = fmaxf(bounds.height_max,v->elevation[0]);
+    }
+  }
+  return bounds;
+}
+
+static bool WorldNavigationGpuGridEnabled(void) {
+  if (!s_world_gpu_grid.attempted) {
+    const char *enabled = getenv("AR_SIM3D_WORLD_GPU_GRID");
+    /* Normal GPU world path; retain one explicit compatibility opt-out. */
+    s_world_gpu_grid.enabled = !enabled || strcmp(enabled, "0");
+    const char *cull = getenv("AR_SIM3D_WORLD_GPU_GRID_CULL");
+    /* Reduce offscreen GPU work by default within the source-grid path;
+     * keep an opt-out for backend comparisons and memory-constrained hosts. */
+    s_world_gpu_grid.cull = !cull || strcmp(cull,"0");
+    s_world_gpu_grid.attempted = true;
+  }
+  return s_world_gpu_grid.enabled && !s_world_gpu_grid.unavailable;
+}
+
+static bool WorldNavigationClipCacheEnabled(void) {
+  if (!s_world_clip_cache.attempted) {
+    const char *enabled = getenv("AR_SIM3D_WORLD_CLIP_CACHE");
+    s_world_clip_cache.enabled = !enabled || strcmp(enabled,"0");
+    s_world_clip_cache.attempted = true;
+  }
+  /* The ordinary path already retains these surfaces on the GPU. Cache CPU
+   * streams only where the source grid occupies that existing opaque slot. */
+  return s_world_clip_cache.enabled && WorldNavigationGpuGridEnabled();
+}
+
+static bool DrawWorldNavigationGpuGrid(const FrameSlot *slot,
+    const WorldNavigationProjection *projection, uint64_t elapsed_ms) {
+  if (!WorldNavigationGpuGridEnabled()) return false;
+  if (!PrepareWorldNavigationGroundSamples(projection)) goto unavailable;
+  /* Avoid camera-scale floating noise in the source key. Above the radius
+   * floor the ratio is exactly a scene setting divided by chart radius. */
+  const float ratio = projection->globe_radius_world > .25f
+      ? (slot->sim.world_navigation_relief ? slot->sim.landscape_height_pct / (float)kPercentScale : 0) /
+          projection->chart_radius_tiles
+      : projection->height_world_per_unit / projection->globe_radius_world;
+  if (!s_world_gpu_grid.mesh) {
+    Sim3DDepthPass_DestroyMesh(s_world_surfaces.mesh);
+    s_world_surfaces.mesh = NULL; s_world_surfaces.published = false;
+    s_world_gpu_grid.mesh = Sim3DDepthPass_CreateSurfaceMesh();
+  }
+  if (!s_world_gpu_grid.mesh) goto unavailable;
+  if (!s_world_gpu_grid.ready || !Sim3DDepthPass_MeshReady(s_world_gpu_grid.mesh) ||
+      memcmp(&s_world_gpu_grid.key, &s_world_terrain.sample_key, sizeof(s_world_gpu_grid.key)) ||
+      ratio != s_world_gpu_grid.height_ratio) {
+    const size_t cliff_count = s_world_terrain.cliffs.face_count;
+    const size_t grid_capacity = kWorldNavigationTerrainCells*kWorldNavigationTerrainCells;
+    if (cliff_count > kWorldNavigationSurfaceMaximumQuads-grid_capacity) goto unavailable;
+    const size_t capacity = grid_capacity+cliff_count;
+    Sim3DDepthSurfaceVertex *points = malloc(kWorldNavigationTerrainVertexCount*sizeof(*points));
+    Sim3DDepthSurfaceVertex *quads = malloc(capacity*4*sizeof(*quads));
+    ArRenderPointF *mask_uv = malloc(capacity*4*sizeof(*mask_uv));
+    bool *valid = cliff_count ? malloc(cliff_count*sizeof(*valid)) : NULL;
+    if (!points || !quads || !mask_uv || (cliff_count && !valid)) {
+      free(points); free(quads); free(mask_uv); free(valid); goto unavailable;
+    }
+    WorldNavigationGridSourceWork work = {s_world_terrain.samples, points, ratio};
+    HostParallelWork_Run(WorldNavigationWorkers(), kWorldNavigationTerrainVertexCount, 2048,
+        BuildWorldNavigationGridSourceRange, &work);
+    size_t count = 0;
+    unsigned chunk = 0;
+    for (int cy = 0; cy < kWorldNavigationTerrainCells; cy += kWorldNavigationGridChunkCells)
+      for (int cx = 0; cx < kWorldNavigationTerrainCells; cx += kWorldNavigationGridChunkCells, ++chunk) {
+        const size_t first = count;
+        for (int y = cy; y < cy+kWorldNavigationGridChunkCells; ++y)
+          for (int x = cx; x < cx+kWorldNavigationGridChunkCells; ++x) {
+            if (s_world_terrain.cliffs.replacement[y*kWorldNavigationTerrainCells+x]) continue;
+            const int at = WorldNavigationTerrainVertexIndex(x,y);
+            const int corners[4] = {at,at+1,at+kWorldNavigationTerrainAxis+1,at+kWorldNavigationTerrainAxis};
+            for (int p = 0; p < 4; ++p) {
+              const Sim3DDepthSurfaceVertex *v = &points[corners[p]];
+              quads[count*4+p] = *v;
+              mask_uv[count*4+p] = v->uv;
+            }
+            ++count;
+          }
+        s_world_gpu_grid.chunks[chunk].bounds = WorldNavigationSourceBounds(quads+first*4,count-first);
+        s_world_gpu_grid.chunks[chunk].range = (Sim3DDepthMeshRange){first,count-first};
+      }
+    if (cliff_count) PrepareWorldNavigationTerrain();
+    WorldNavigationCliffSourceWork cliffs = {s_world_terrain.cliffs.faces,
+      quads+count*4,mask_uv+count*4,valid,projection->chart_radius_tiles,ratio};
+    HostParallelWork_Run(WorldNavigationWorkers(),cliff_count,256,BuildWorldNavigationCliffSourceRange,&cliffs);
+    bool ok = true;
+    for (size_t i = 0; i < cliff_count; ++i) ok &= valid[i];
+    s_world_gpu_grid.chunks[chunk].bounds = WorldNavigationSourceBounds(quads+count*4,cliff_count);
+    s_world_gpu_grid.chunks[chunk].range = (Sim3DDepthMeshRange){count,cliff_count};
+    count += cliff_count;
+    ok = ok && Sim3DDepthPass_UpdateSurfaceMeshWithMask(s_world_gpu_grid.mesh,quads,mask_uv,count);
+    free(points); free(quads); free(mask_uv); free(valid);
+    if (!ok) goto unavailable;
+    s_world_gpu_grid.key = s_world_terrain.sample_key;
+    s_world_gpu_grid.height_ratio = ratio; s_world_gpu_grid.ready = true;
+    s_world_gpu_grid.selection_ready = false;
+    Sim3DPerformance_AddPath(kSim3DPath_Publish);
+  }
+  Sim3DDepthSurfaceTransform t = {.radial = {.sphere_radius = projection->globe_radius_world,
+      .reference_height = projection->reference_height_units, .height_scale = projection->height_world_per_unit},
+      .ambient = slot->sim.world_navigation_lighting ? kWorldNavigationTerrainAmbient : 1,
+      .diffuse = slot->sim.world_navigation_lighting ? 1-kWorldNavigationTerrainAmbient : 0};
+  memcpy(t.radial.matrix, projection->matrix, sizeof(t.radial.matrix));
+  memcpy(t.radial.basis[0], projection->globe_frame.right, sizeof(t.radial.basis[0]));
+  memcpy(t.radial.basis[1], projection->globe_frame.up, sizeof(t.radial.basis[1]));
+  memcpy(t.radial.basis[2], projection->globe_frame.outward, sizeof(t.radial.basis[2]));
+  if (s_world_gpu_grid.cull && !s_world_gpu_grid.cull_unavailable &&
+      (!s_world_gpu_grid.selection_ready || memcmp(&s_world_gpu_grid.selection_transform,&t.radial,sizeof(t.radial)))) {
+    Sim3DDepthMeshRange ranges[(kWorldNavigationSurfaceChunks+1)/2] = {0};
+    size_t count = 0;
+    bool culled = false;
+    for (unsigned i = 0; i < kWorldNavigationSurfaceChunks; ++i) {
+      const Sim3DDepthMeshRange r = s_world_gpu_grid.chunks[i].range;
+      if (!r.quad_count) continue;
+      if (WorldNavigationRadialBoundsOutside(&s_world_gpu_grid.chunks[i].bounds,&t.radial)) {
+        culled = true; continue;
+      }
+      if (count && ranges[count-1].first_quad+ranges[count-1].quad_count == r.first_quad)
+        ranges[count-1].quad_count += r.quad_count;
+      else ranges[count++] = r;
+    }
+    /* A single zero-length range explicitly selects nothing; NULL/zero means
+     * the whole source. Adjacent chunks merge without adding draw calls. */
+    const bool ok = Sim3DDepthPass_SelectSurfaceMesh(s_world_gpu_grid.mesh,
+        culled ? ranges : NULL, culled ? (count ? count : 1) : 0);
+    if (!ok) {
+      if (!Sim3DDepthPass_SelectSurfaceMesh(s_world_gpu_grid.mesh,NULL,0)) goto unavailable;
+      s_world_gpu_grid.cull_unavailable = true;
+      Sim3DPerformance_AddPath(kSim3DPath_Rejected);
+      fprintf(stderr,"[world-navigation] GPU grid selection unavailable; drawing full source\n");
+    }
+    s_world_gpu_grid.selection_transform = t.radial;
+    s_world_gpu_grid.selection_ready = true;
+  }
+  const float azimuth = slot->sim.light_azimuth_deg * kPi/180, elevation = slot->sim.light_elevation_deg * kPi/180;
+  const float light[3] = {-cosf(azimuth)*cosf(elevation), -sinf(azimuth)*cosf(elevation), sinf(elevation)};
+  for (int axis = 0; axis < 3; ++axis)
+    t.light[axis] = t.radial.basis[0][axis]*light[0] + t.radial.basis[1][axis]*light[1] + t.radial.basis[2][axis]*light[2];
+  Sim3DDepthSphericalSample shadows[kSimCloudLayerCount*3];
+  const size_t shadow_count = WorldNavigationShadowSamples(slot, elapsed_ms, shadows);
+  if (shadow_count && !EnsureWorldNavigationCloudTexture()) goto unavailable;
+  Sim3DDepthSurfaceOverlay overlays[2]; size_t overlay_count = 0;
+  if (slot->sim.world_navigation_haze) {
+    const SimWorldNavigationScene *scene = &slot->sim.world_navigation_scene;
+    const Sim3DDepthSurfaceOverlay mask = {
+      .clear_rect = {scene->active_region_x / (float)kSimWorldMapPixels,
+        scene->active_region_y / (float)kSimWorldMapPixels,
+        scene->active_region_width / (float)kSimWorldMapPixels,
+        scene->active_region_height / (float)kSimWorldMapPixels},
+      .feather = scene->active_region_valid ? fmaxf(1, slot->sim.cull_haze_lead_px*.5f) / kSimWorldMapPixels : 0,
+    };
+    if (slot->sim.underlay_defocus_pct) {
+      if (!EnsureWorldNavigationBlur(slot)) goto unavailable;
+      overlays[overlay_count] = mask;
+      overlays[overlay_count].layer = kSim3DDepthPass_GroundBlur;
+      overlays[overlay_count++].color = (ArRenderColorF){1,1,1,slot->sim.underlay_defocus_pct/(float)kPercentScale};
+    }
+    if (slot->sim.underlay_haze_pct) {
+      overlays[overlay_count] = mask;
+      overlays[overlay_count].layer = kSim3DDepthPass_GroundHaze;
+      overlays[overlay_count++].color = (ArRenderColorF){.24f,.37f,.56f,slot->sim.underlay_haze_pct/(float)kPercentScale*.35f};
+    }
+  }
+  if (!Sim3DDepthPass_AppendSurfaceLayers(s_world_gpu_grid.mesh, &t, shadows, shadow_count, overlays, overlay_count))
+    goto unavailable;
+  Sim3DPerformance_AddPath(kSim3DPath_GpuReuse);
+  return true;
+unavailable:
+  Sim3DDepthPass_DestroyMesh(s_world_gpu_grid.mesh); s_world_gpu_grid.mesh = NULL;
+  s_world_gpu_grid.unavailable = true; s_world_gpu_grid.ready = false;
+  Sim3DPerformance_AddPath(kSim3DPath_Rejected);
+  fprintf(stderr, "[world-navigation] GPU world source rejected; retaining CPU surfaces\n");
+  return false;
+}
+
 static void ProjectWorldNavigationGroundRange(void *context, size_t first, size_t end) {
   WorldNavigationGroundWork *work = context;
   const WorldNavigationProjection *projection = &work->projection;
@@ -1477,6 +1789,8 @@ static bool PrepareWorldNavigationSphereShell(
   geometry->ready = false;
   const bool atmosphere = kind == kWorldNavigationShell_Atmosphere;
   const bool cloud = kind == kWorldNavigationShell_Cloud;
+  if (kind == kWorldNavigationShell_Ocean)
+    WorldNavigationQuadStream_Invalidate(&s_world_shells.ocean_draw);
   if (atmosphere) {
     s_world_shells.atmosphere_draw.ready = s_world_shells.atmosphere_draw.repeated = false;
     s_world_shells.atmosphere_draw.quad_count = 0;
@@ -1692,6 +2006,16 @@ static bool DrawWorldNavigationSphereShell(
         s_world_shells.indices,
         kWorldNavigationOceanIndexCount, &state);
   }
+  WorldNavigationQuadStream *cache = &s_world_shells.ocean_draw;
+  const bool memoize = WorldNavigationClipCacheEnabled();
+  if (memoize && cache->ready) {
+    Sim3DPerformance_AddPath(kSim3DPath_CpuReuse);
+    return !cache->quad_count || Sim3DDepthPass_AppendQuads(kSim3DDepthPass_Ground,
+        cache->vertices,cache->quad_count);
+  }
+  WorldNavigationQuadStream *capture = memoize && cache->repeated && !cache->unavailable ? cache : NULL;
+  cache->repeated = true;
+  if (capture) capture->quad_count = 0;
   /* Bound stack use while amortizing backend reservation/conversion calls.
    * Keep each original triangle, including its duplicate fourth corner,
    * and the original submission order. No backend storage is borrowed. */
@@ -1717,14 +2041,16 @@ static bool DrawWorldNavigationSphereShell(
           clip_batch[batch_count * 4 + p] = clip_vertices[at[p]];
         }
         if (++batch_count == kOceanBatchQuads) {
-          if (!WorldNavigationAppendProjectedQuads(kSim3DDepthPass_Ground,
-                  batch, clip_batch, batch_count, viewport)) return false;
+          if (!WorldNavigationAppendCachedProjectedQuads(kSim3DDepthPass_Ground,
+                  batch, clip_batch, batch_count, viewport, capture)) return false;
           batch_count = 0;
         }
       }
     }
-    return !batch_count || WorldNavigationAppendProjectedQuads(kSim3DDepthPass_Ground,
-        batch, clip_batch, batch_count, viewport);
+    const bool ok = WorldNavigationAppendCachedProjectedQuads(kSim3DDepthPass_Ground,
+        batch, clip_batch, batch_count, viewport, capture);
+    cache->ready = ok && capture && !cache->unavailable;
+    return ok;
   }
   for (int i = 0; i < kWorldNavigationOceanIndexCount; i += 3) {
     Sim3DDepthVertex *triangle = batch + batch_count * 4;
@@ -1733,13 +2059,16 @@ static bool DrawWorldNavigationSphereShell(
     }
     triangle[3] = triangle[2];
     if (++batch_count == kOceanBatchQuads) {
-      if (!Sim3DDepthPass_AppendQuads(kSim3DDepthPass_Ground, batch, batch_count))
+      if (!WorldNavigationAppendCachedProjectedQuads(kSim3DDepthPass_Ground,
+              batch,NULL,batch_count,viewport,capture))
         return false;
       batch_count = 0;
     }
   }
-  return !batch_count ||
-      Sim3DDepthPass_AppendQuads(kSim3DDepthPass_Ground, batch, batch_count);
+  const bool ok = WorldNavigationAppendCachedProjectedQuads(kSim3DDepthPass_Ground,
+      batch,NULL,batch_count,viewport,capture);
+  cache->ready = ok && capture && !cache->unavailable;
+  return ok;
 }
 static bool DrawWorldNavigationSpaceBackdrop(ArRenderRectI viewport) {
   enum { kStarCount = 256, kVertexCount = 4 + kStarCount * 4,
@@ -1888,10 +2217,16 @@ static WorldNavigationGroundKey WorldNavigationGroundKeyFor(
 
 static bool DrawWorldNavigationGround(
     const FrameSlot *slot, ArRenderRectI viewport,
-    const WorldNavigationProjection *projection) {
+    const WorldNavigationProjection *projection, uint64_t elapsed_ms) {
   if (!slot->sim.world_navigation_scene.valid || slot->visible_width <= 0 || slot->snes_height <= 0)
     return false;
   if (projection->height_world_per_unit > 0.0f) PrepareWorldNavigationTerrain();
+  const bool gpu_grid = DrawWorldNavigationGpuGrid(slot, projection, elapsed_ms);
+  if (s_world_gpu_grid.drawn != gpu_grid) s_world_terrain.projection_ready = false;
+  s_world_gpu_grid.drawn = gpu_grid;
+  /* All ground consumers now share the source; no projected cliff arrays
+   * are consumed by overlays or weather while this group is active. */
+  if (gpu_grid) return true;
   const WorldNavigationGroundKey key = WorldNavigationGroundKeyFor(slot, viewport, projection);
   if (!s_world_terrain.projection_ready ||
       memcmp(&key, &s_world_terrain.projection_key, sizeof(key)) != 0) {
@@ -1910,17 +2245,19 @@ static bool DrawWorldNavigationGround(
       light[1] = -sinf(azimuth) * horizontal;
       light[2] = sinf(elevation);
     }
-    if (!PrepareWorldNavigationGroundSamples(projection)) return false;
-    bool valid[kWorldNavigationTerrainVertexCount];
-    WorldNavigationGroundWork work = {
-      .samples = s_world_terrain.samples, .projection = *projection, .viewport = viewport,
-      .light = {light[0], light[1], light[2]}, .lighting = slot->sim.world_navigation_lighting,
-      .vertices = s_world_terrain.vertices, .depth = s_world_terrain.depth,
-      .clip = s_world_terrain.clip, .outside = s_world_terrain.outside, .valid = valid,
-    };
-    HostParallelWork_Run(WorldNavigationWorkers(), kWorldNavigationTerrainVertexCount, 2048,
-        ProjectWorldNavigationGroundRange, &work);
-    for (int i = 0; i < kWorldNavigationTerrainVertexCount; ++i) if (!valid[i]) return false;
+    {
+      if (!PrepareWorldNavigationGroundSamples(projection)) return false;
+      bool valid[kWorldNavigationTerrainVertexCount];
+      WorldNavigationGroundWork work = {
+        .samples = s_world_terrain.samples, .projection = *projection, .viewport = viewport,
+        .light = {light[0], light[1], light[2]}, .lighting = slot->sim.world_navigation_lighting,
+        .vertices = s_world_terrain.vertices, .depth = s_world_terrain.depth,
+        .clip = s_world_terrain.clip, .outside = s_world_terrain.outside, .valid = valid,
+      };
+      HostParallelWork_Run(WorldNavigationWorkers(), kWorldNavigationTerrainVertexCount, 2048,
+          ProjectWorldNavigationGroundRange, &work);
+      for (int i = 0; i < kWorldNavigationTerrainVertexCount; ++i) if (!valid[i]) return false;
+    }
     for (size_t i = 0; i < s_world_terrain.cliffs.face_count; i++) {
       const SimWorldNavigationCliffFace *face = &s_world_terrain.cliffs.faces[i];
       WorldNavigationCliffProjection *projected = &s_world_terrain.cliff_projection[i];
@@ -1948,56 +2285,77 @@ static bool DrawWorldNavigationGround(
       WorldNavigationAppendCliffLayer(kSim3DDepthPass_Ground, slot, projection, viewport);
 }
 
-static bool DrawWorldNavigationGroundLayers(const FrameSlot *slot, ArRenderRectI viewport,
-    const WorldNavigationProjection *projection) {
+static bool DrawWorldNavigationMountains(const FrameSlot *slot, ArRenderRectI viewport,
+    const WorldNavigationProjection *projection);
+
+static bool DrawWorldNavigationSurfaceLayers(const FrameSlot *slot, ArRenderRectI viewport,
+    const WorldNavigationProjection *projection, uint64_t elapsed_ms) {
   const Sim3DPerformanceScope ocean = Sim3DPerformance_Begin(kSim3DPerformance_WorldOcean);
   bool ok = Sim3DDepthPass_Begin(&g_render_device, viewport.w, viewport.h, kArRenderFilter_Linear);
   const WorldNavigationGroundKey key = WorldNavigationGroundKeyFor(slot, viewport, projection);
-  const bool repeated = s_world_terrain.retained_key_ready &&
-      s_world_terrain.retained_cliff_serial == s_world_terrain.cliff_serial &&
-      !memcmp(&key, &s_world_terrain.retained_key, sizeof(key));
-  if (!s_world_terrain.ground_mesh_attempted) {
+  const bool repeated = s_world_surfaces.key_ready &&
+      s_world_surfaces.cliff_serial == s_world_terrain.cliff_serial &&
+      s_world_surfaces.mountain_revision == s_world_mountains.geometry_revision &&
+      !memcmp(&key, &s_world_surfaces.retained_key, sizeof(key));
+  if (!s_world_surfaces.attempted) {
     const char *enabled = getenv("AR_SIM3D_RETAINED_GROUND");
-    s_world_terrain.ground_mesh_attempted = true;
+    s_world_surfaces.attempted = true;
     /* Same shader/geometry as ordinary submission; keep a startup opt-out
      * for driver diagnosis without changing saved graphics quality. */
-    s_world_terrain.ground_mesh_opt_out = enabled && strcmp(enabled, "0") == 0;
-    s_world_terrain.ground_mesh_unavailable = s_world_terrain.ground_mesh_opt_out;
+    s_world_surfaces.opt_out = enabled && strcmp(enabled, "0") == 0;
+    s_world_surfaces.unavailable = s_world_surfaces.opt_out;
   }
-  /* The retained material contains ocean THEN mainland/cliff quads, already
-   * clipped by the reference path. CPU surface arrays must remain valid for
-   * weather/haze consumers even though this draw no longer resubmits them. */
-  const bool retained = ok && !s_world_terrain.ground_mesh_unavailable && repeated &&
-      s_world_terrain.ground_mesh_published && s_world_terrain.projection_ready &&
-      s_world_shells.ocean.ready && Sim3DDepthPass_MeshReady(s_world_terrain.ground_mesh) &&
-      Sim3DDepthPass_AppendGeometryMesh(kSim3DDepthPass_Ground, s_world_terrain.ground_mesh);
+  /* Preserve ocean THEN mainland/cliff order within Ground, plus the separate
+   * WorldMountain material. The adapter's atomic append queues all ranges or
+   * none, so resource pressure cannot duplicate only half of the surfaces.
+   * CPU arrays remain valid for exact-depth weather/haze consumers. */
+  const bool retained = ok && !WorldNavigationGpuGridEnabled() && !s_world_surfaces.unavailable && repeated &&
+      s_world_surfaces.published && s_world_terrain.projection_ready &&
+      s_world_shells.ocean.ready && Sim3DDepthPass_MeshReady(s_world_surfaces.mesh) &&
+      Sim3DDepthPass_AppendGeometryRanges(s_world_surfaces.mesh, s_world_surfaces.ranges, 2);
   if (!retained) {
     Sim3DPerformance_AddPath(kSim3DPath_CpuStage);
-    if (s_world_terrain.ground_mesh_unavailable)
-      Sim3DPerformance_AddPath(s_world_terrain.ground_mesh_opt_out ? kSim3DPath_OptOut : kSim3DPath_Rejected);
-    s_world_terrain.ground_mesh_published = false;
+    if (s_world_surfaces.unavailable)
+      Sim3DPerformance_AddPath(s_world_surfaces.opt_out ? kSim3DPath_OptOut : kSim3DPath_Rejected);
+    s_world_surfaces.published = false;
     ok = ok && DrawWorldNavigationSphereShell(viewport, projection, kWorldNavigationShell_Ocean);
   }
   Sim3DPerformance_End(ocean);
   if (!ok) return false;
   if (retained) {
     Sim3DPerformance_AddPath(kSim3DPath_GpuReuse);
-    return true;
+  } else {
+    const Sim3DPerformanceScope terrain = Sim3DPerformance_Begin(kSim3DPerformance_Terrain);
+    ok = DrawWorldNavigationGround(slot, viewport, projection, elapsed_ms);
+    Sim3DPerformance_End(terrain);
   }
-
-  const Sim3DPerformanceScope terrain = Sim3DPerformance_Begin(kSim3DPerformance_Terrain);
-  ok = DrawWorldNavigationGround(slot, viewport, projection);
-  if (ok && repeated && !s_world_terrain.ground_mesh_unavailable) {
-    if (!s_world_terrain.ground_mesh) s_world_terrain.ground_mesh = Sim3DDepthPass_CreateGeometryMesh();
-    s_world_terrain.ground_mesh_published = s_world_terrain.ground_mesh &&
-        Sim3DDepthPass_CaptureGeometryMesh(kSim3DDepthPass_Ground, s_world_terrain.ground_mesh);
-    if (!s_world_terrain.ground_mesh_published) s_world_terrain.ground_mesh_unavailable = true;
-    Sim3DPerformance_AddPath(s_world_terrain.ground_mesh_published ? kSim3DPath_Publish : kSim3DPath_Rejected);
+  if (ok && (!retained || !s_world_surfaces.mountains_retained)) {
+    const Sim3DPerformanceScope mountain = Sim3DPerformance_Begin(kSim3DPerformance_DepthMountain);
+    ok = DrawWorldNavigationMountains(slot, viewport, projection);
+    Sim3DPerformance_End(mountain);
   }
-  s_world_terrain.retained_key_ready = ok;
-  s_world_terrain.retained_key = key;
-  s_world_terrain.retained_cliff_serial = s_world_terrain.cliff_serial;
-  Sim3DPerformance_End(terrain);
+  if (ok && !retained && !s_world_gpu_grid.drawn && repeated && !s_world_surfaces.unavailable) {
+    const Sim3DPerformanceScope publication = Sim3DPerformance_Begin(kSim3DPerformance_Terrain);
+    const Sim3DDepthPassLayer layers[] = {kSim3DDepthPass_Ground, kSim3DDepthPass_WorldMountain};
+    if (!s_world_surfaces.mesh) s_world_surfaces.mesh = Sim3DDepthPass_CreateGeometryMesh();
+    s_world_surfaces.mountains_retained = s_world_surfaces.mesh &&
+        Sim3DDepthPass_CaptureGeometryLayers(s_world_surfaces.mesh, layers, 2, s_world_surfaces.ranges);
+    s_world_surfaces.published = s_world_surfaces.mountains_retained;
+    if (!s_world_surfaces.published && s_world_surfaces.mesh) {
+      /* An unusually large cutout set must not evict the old ground-only
+       * optimization. Both captures reject before modifying queued draws. */
+      s_world_surfaces.ranges[1] = (Sim3DDepthGeometryRange){.layer = kSim3DDepthPass_WorldMountain};
+      s_world_surfaces.published = Sim3DDepthPass_CaptureGeometryLayers(
+          s_world_surfaces.mesh, layers, 1, s_world_surfaces.ranges);
+    }
+    if (!s_world_surfaces.published) s_world_surfaces.unavailable = true;
+    Sim3DPerformance_AddPath(s_world_surfaces.published ? kSim3DPath_Publish : kSim3DPath_Rejected);
+    Sim3DPerformance_End(publication);
+  }
+  s_world_surfaces.key_ready = ok;
+  s_world_surfaces.retained_key = key;
+  s_world_surfaces.cliff_serial = s_world_terrain.cliff_serial;
+  s_world_surfaces.mountain_revision = s_world_mountains.geometry_revision;
   return ok;
 }
 
@@ -2439,6 +2797,17 @@ static bool DrawWorldNavigationMountains(
   key.lighting = slot->sim.world_navigation_lighting;
   const bool project = !cached || !s_world_mountains.projection_ready ||
       memcmp(&key, &s_world_mountains.projection_key, sizeof(key));
+  WorldNavigationQuadStream *cache = &s_world_mountains.draw;
+  if (project) WorldNavigationQuadStream_Invalidate(cache);
+  const bool memoize = cached && WorldNavigationClipCacheEnabled();
+  if (memoize && cache->ready) {
+    Sim3DPerformance_AddPath(kSim3DPath_CpuReuse);
+    return !cache->quad_count || Sim3DDepthPass_AppendQuads(kSim3DDepthPass_WorldMountain,
+        cache->vertices,cache->quad_count);
+  }
+  WorldNavigationQuadStream *capture = memoize && cache->repeated && !cache->unavailable ? cache : NULL;
+  cache->repeated = true;
+  if (capture) capture->quad_count = 0;
   if (cached && project) {
     WorldNavigationMountainWork work = {.projection = *projection, .viewport = viewport,
       .lighting = slot->sim.world_navigation_lighting, .faces = s_world_mountains.scene.faces,
@@ -2466,8 +2835,8 @@ static bool DrawWorldNavigationMountains(
               viewport, projection, vertices, clip + count * 4);
     }
     if (valid && ++count == 64) {
-      if (!WorldNavigationAppendProjectedQuads(kSim3DDepthPass_WorldMountain, batch,
-              projection->clip_frustum ? clip : NULL, count, viewport))
+      if (!WorldNavigationAppendCachedProjectedQuads(kSim3DDepthPass_WorldMountain, batch,
+              projection->clip_frustum ? clip : NULL, count, viewport, capture))
         return false;
       count = 0;
     }
@@ -2476,8 +2845,10 @@ static bool DrawWorldNavigationMountains(
     s_world_mountains.projection_key = key;
     s_world_mountains.projection_ready = true;
   }
-  return !count || WorldNavigationAppendProjectedQuads(kSim3DDepthPass_WorldMountain, batch,
-      projection->clip_frustum ? clip : NULL, count, viewport);
+  const bool ok = WorldNavigationAppendCachedProjectedQuads(kSim3DDepthPass_WorldMountain, batch,
+      projection->clip_frustum ? clip : NULL, count, viewport, capture);
+  cache->ready = ok && capture && !cache->unavailable;
+  return ok;
 }
 
 typedef struct WorldNavigationViewportPlanes {
@@ -2868,6 +3239,7 @@ static bool DrawWorldNavigationActiveRegionHaze(
   if (!slot->sim.world_navigation_haze ||
       (!slot->sim.underlay_defocus_pct && !slot->sim.underlay_haze_pct))
     return true;
+  if (s_world_gpu_grid.drawn) return true;
   /* The atmosphere must share every terrain vertex. The former sparse
    * rectangular overlay cut across the curved ocean and left large straight
    * edges, which made the sphere look like a map pasted onto a blue ball. */
@@ -3244,6 +3616,7 @@ static bool PrepareWorldNavigationReceivers(const WorldNavigationProjection *pro
   memset(&key, 0, sizeof(key));
   key.projection = *projection; key.viewport = viewport;
   key.terrain_serial = s_world_terrain.serial; key.cliff_serial = s_world_terrain.cliff_serial;
+  key.gpu_grid = s_world_gpu_grid.drawn;
   if (s_world_weather.receivers_ready &&
       !memcmp(&key, &s_world_weather.receiver_key, sizeof(key))) return true;
   Sim3DPerformance_AddPath(kSim3DPath_CpuProject);
@@ -3253,7 +3626,7 @@ static bool PrepareWorldNavigationReceivers(const WorldNavigationProjection *pro
   s_world_weather.receiver_count = 0;
   Sim3DDepthVertex input[4];
   Scene3DClipPoint clip[4];
-  for (int y = 0; y < kWorldNavigationTerrainCells; y++)
+  if (!s_world_gpu_grid.drawn) for (int y = 0; y < kWorldNavigationTerrainCells; y++)
     for (int x = 0; x < kWorldNavigationTerrainCells; x++) {
       if (s_world_terrain.cliffs.replacement[y * kWorldNavigationTerrainCells + x]) continue;
       const int start = y * kWorldNavigationTerrainAxis + x;
@@ -3268,7 +3641,7 @@ static bool PrepareWorldNavigationReceivers(const WorldNavigationProjection *pro
       if (!CacheWorldNavigationReceiver(kWorldNavigationReceiver_Ground, 0, at, input,
               projection->clip_frustum ? clip : NULL, viewport)) goto unavailable;
     }
-  for (size_t i = 0; i < s_world_terrain.cliffs.face_count; i++) {
+  if (!s_world_gpu_grid.drawn) for (size_t i = 0; i < s_world_terrain.cliffs.face_count; i++) {
     const WorldNavigationCliffProjection *face = &s_world_terrain.cliff_projection[i];
     if (face->outside[0] & face->outside[1] & face->outside[2] & face->outside[3]) continue;
     const int at[4] = {0, 1, 2, 3};
@@ -3381,6 +3754,7 @@ static bool AppendWorldNavigationReceivers(int bank,
     const SimWorldNavigationCloudRotation *rotation,
     const WorldNavigationProjection *projection, ArRenderRectI viewport,
     float offset_u, float offset_v, ArRenderColorF color) {
+  if (!s_world_weather.receiver_count) return true;
   if (PrepareWorldNavigationSphericalMesh(projection)) {
     const Sim3DDepthSphericalSample sample = {
       .rotation = {rotation->cos_u, rotation->sin_u, rotation->cos_v, rotation->sin_v},
@@ -3436,12 +3810,11 @@ static bool AppendWorldNavigationReceivers(int bank,
   return !count || Sim3DDepthPass_AppendQuads(kSim3DDepthPass_CloudShadow, vertices, count);
 }
 
-static bool DrawWorldNavigationCloudLayer(
+static bool DrawWorldNavigationCloudBody(
     ArRenderRectI viewport,
     const WorldNavigationProjection *projection,
     const SimCloudLayer *layer, uint64_t elapsed_ms, float drift,
-    float source_offset_x, float source_offset_y,
-    bool follow_terrain, ArRenderColorF colour) {
+    ArRenderColorF colour) {
   const int bank = (int)(layer - kSimCloudLayers);
   if (bank < 0 || bank >= kSimCloudLayerCount) return false;
   const float phase_u = layer->offset_x +
@@ -3450,16 +3823,8 @@ static bool DrawWorldNavigationCloudLayer(
       Scene3D_WrappedTextureOffset(elapsed_ms, layer->drift_y, drift);
   const SimWorldNavigationCloudRotation rotation =
       SimWorldNavigationClouds_Rotation(phase_u, phase_v);
-  const float offset_u = source_offset_x / kSimWorldMapPixels;
-  const float offset_v = source_offset_y / kSimWorldMapPixels;
-  if (!follow_terrain)
-    return AppendWorldNavigationCloudGrid(bank, kWorldNavigationCloudSurface_Body, viewport, projection, &rotation, 0, 0, colour);
-  if (PrepareWorldNavigationReceivers(projection, viewport))
-    return AppendWorldNavigationReceivers(bank, &rotation, projection, viewport, offset_u, offset_v, colour);
-  /* Reuse exact opaque vertices on both mapped land and the complete ocean
-   * sphere. There is no rectangular fade or camera-relative cloud boundary. */
-  return AppendWorldNavigationCloudGrid(bank, kWorldNavigationCloudSurface_Ground, viewport, projection, &rotation, offset_u, offset_v, colour) &&
-      AppendWorldNavigationCloudGrid(bank, kWorldNavigationCloudSurface_Ocean, viewport, projection, &rotation, offset_u, offset_v, colour);
+  return AppendWorldNavigationCloudGrid(bank, kWorldNavigationCloudSurface_Body,
+      viewport, projection, &rotation, 0, 0, colour);
 }
 
 
@@ -3472,9 +3837,43 @@ static PresentationOutcome OmitWorldNavigationWeather(const char *reason) {
   return kPresentationOutcome_OptionalOmitted;
 }
 
+/* Immutable per-presentation shadow parameters shared by the GPU source grid
+ * and the remaining CPU-projected ocean/cliff receivers. */
+static size_t WorldNavigationShadowSamples(const FrameSlot *slot, uint64_t elapsed_ms,
+    Sim3DDepthSphericalSample samples[kSimCloudLayerCount * 3]) {
+  if (!slot->sim.world_navigation_clouds || !slot->sim.cloud_opacity_pct ||
+      !slot->sim.world_navigation_cloud_shadows || !slot->sim.world_navigation_lighting ||
+      !slot->sim.shadow_opacity_pct) return 0;
+  float light_x, light_y; SimShadowLight(slot, &light_x, &light_y);
+  const float shadow_x = light_x * slot->sim.cloud_altitude_px / 8.0f;
+  const float shadow_y = light_y * slot->sim.cloud_altitude_px / 8.0f;
+  const float blur = slot->sim.shadow_softness_pct * .08f;
+  const int count = blur > .01f ? 3 : 1;
+  const float px = -sinf(slot->sim.light_azimuth_deg * kPi/180), py = cosf(slot->sim.light_azimuth_deg * kPi/180);
+  const float opacity = slot->sim.cloud_opacity_pct / (float)kPercentScale;
+  const float drift = slot->sim.cloud_drift_pct / (float)kPercentScale;
+  size_t used = 0;
+  for (int bank = 0; bank < kSimCloudLayerCount; ++bank) {
+    const SimCloudLayer *layer = &kSimCloudLayers[bank];
+    const SimWorldNavigationCloudRotation r = SimWorldNavigationClouds_Rotation(
+        layer->offset_x + Scene3D_WrappedTextureOffset(elapsed_ms, layer->drift_x, drift),
+        layer->offset_y + Scene3D_WrappedTextureOffset(elapsed_ms, layer->drift_y, drift));
+    for (int i = 0; i < count; ++i) {
+      const float spread = count == 1 ? 0 : (i-1)*blur;
+      const float weight = count == 1 ? 1 : i == 1 ? .5f : .25f;
+      samples[used++] = (Sim3DDepthSphericalSample){.rotation = {r.cos_u,r.sin_u,r.cos_v,r.sin_v},
+        .offset = {(shadow_x+px*spread)/kSimWorldMapPixels, (shadow_y+py*spread)/kSimWorldMapPixels},
+        .atlas = {0,bank*kSimWorldNavigationCloudHeight,kSimWorldNavigationCloudWidth,kSimWorldNavigationCloudHeight},
+        .texture_size = {kSimWorldNavigationCloudWidth*2,kSimWorldNavigationCloudHeight*kSimCloudLayerCount},
+        .color = {0,0,0,opacity*layer->weight*(slot->sim.shadow_opacity_pct/(float)kPercentScale)*.35f*weight}};
+    }
+  }
+  return used;
+}
+
 static PresentationOutcome DrawWorldNavigationWeather(
     const FrameSlot *slot, ArRenderRectI viewport,
-    const WorldNavigationProjection *projection) {
+    const WorldNavigationProjection *projection, uint64_t elapsed_ms) {
   if (!slot->sim.world_navigation_clouds ||
       !slot->sim.cloud_opacity_pct)
     return kPresentationOutcome_Complete;
@@ -3490,51 +3889,30 @@ static PresentationOutcome DrawWorldNavigationWeather(
       slot->sim.cloud_altitude_px);
   const float drift =
       (float)slot->sim.cloud_drift_pct / (float)kPercentScale;
-  const uint64_t elapsed_ms = HostClock_Milliseconds();
 
   /* A cloud's altitude is invisible to an orthographic top-down camera until
    * it casts a displaced shadow. Reuse the town light's world-space shear so
    * the shadow rotates and zooms with the scripted Mode-7 event. The
    * procedural alpha already supplies a soft edge; the softness dial spreads
    * three low-alpha samples across the light-perpendicular axis. */
-  if (slot->sim.world_navigation_cloud_shadows && slot->sim.world_navigation_lighting &&
-      slot->sim.shadow_opacity_pct) {
-    float light_x = 0.0f, light_y = 0.0f;
-    SimShadowLight(slot, &light_x, &light_y);
-    const float shadow_x =
-        light_x * (float)slot->sim.cloud_altitude_px / 8.0f;
-    const float shadow_y =
-        light_y * (float)slot->sim.cloud_altitude_px / 8.0f;
-    const float blur =
-        (float)slot->sim.shadow_softness_pct * 0.08f;
-    const int sample_count = blur > 0.01f ? 3 : 1;
-    const float perpendicular_x = -sinf(
-        (float)slot->sim.light_azimuth_deg * kPi / 180.0f);
-    const float perpendicular_y = cosf(
-        (float)slot->sim.light_azimuth_deg * kPi / 180.0f);
-    for (unsigned layer_index = 0;
-         layer_index <
-             (size_t)kSimCloudLayerCount;
-         layer_index++) {
-      const SimCloudLayer *layer = &kSimCloudLayers[layer_index];
-      for (int sample = 0; sample < sample_count; sample++) {
-        const float spread =
-            sample_count == 1 ? 0.0f : (float)(sample - 1) * blur;
-        const float sample_weight =
-            sample_count == 1 ? 1.0f : sample == 1 ? 0.5f : 0.25f;
-        const float alpha = opacity * layer->weight *
-            ((float)slot->sim.shadow_opacity_pct / (float)kPercentScale) *
-            0.35f * sample_weight;
-        if (!DrawWorldNavigationCloudLayer(
-                viewport, projection, layer, elapsed_ms, drift,
-                shadow_x + perpendicular_x * spread,
-                shadow_y + perpendicular_y * spread,
-                true,
-                (ArRenderColorF){0.0f, 0.0f, 0.0f, alpha}))
-          return OmitWorldNavigationWeather(
-              ArRenderDevice_LastError(&g_render_device));
-      }
-    }
+  Sim3DDepthSphericalSample shadows[kSimCloudLayerCount * 3];
+  const size_t shadow_count = WorldNavigationShadowSamples(slot, elapsed_ms, shadows);
+  const bool receivers = shadow_count && PrepareWorldNavigationReceivers(projection, viewport);
+  for (size_t i = 0; i < shadow_count; ++i) {
+    const Sim3DDepthSphericalSample *sample = &shadows[i];
+    const int bank = (int)sample->atlas.y / kSimWorldNavigationCloudHeight;
+    const SimWorldNavigationCloudRotation rotation = {
+      sample->rotation[0], sample->rotation[1], sample->rotation[2], sample->rotation[3]};
+    const bool drawn = receivers
+        ? AppendWorldNavigationReceivers(bank, &rotation, projection, viewport,
+            sample->offset.x, sample->offset.y, sample->color)
+        /* Never restage CPU shadows over GPU land: their depth must match. */
+        : !s_world_gpu_grid.drawn &&
+          AppendWorldNavigationCloudGrid(bank, kWorldNavigationCloudSurface_Ground,
+              viewport, projection, &rotation, sample->offset.x, sample->offset.y, sample->color) &&
+          AppendWorldNavigationCloudGrid(bank, kWorldNavigationCloudSurface_Ocean,
+              viewport, projection, &rotation, sample->offset.x, sample->offset.y, sample->color);
+    if (!drawn) return OmitWorldNavigationWeather(ArRenderDevice_LastError(&g_render_device));
   }
 
   if (slot->sim.view == kSimView_SkyPalace &&
@@ -3549,9 +3927,8 @@ static PresentationOutcome DrawWorldNavigationWeather(
          layer_index < (size_t)kSimCloudLayerCount;
          layer_index++) {
       const SimCloudLayer *layer = &kSimCloudLayers[layer_index];
-      if (!DrawWorldNavigationCloudLayer(
+      if (!DrawWorldNavigationCloudBody(
               viewport, projection, layer, elapsed_ms, drift,
-              0.0f, 0.0f, false,
               (ArRenderColorF){
                 1.0f, 1.0f, 1.0f,
                 opacity * layer->weight * body_visibility,
@@ -3687,6 +4064,7 @@ static PresentationOutcome DrawWorldNavigationScene(
   const Sim3DPerformanceScope projection_performance =
       Sim3DPerformance_Begin(kSim3DPerformance_WorldPrepare);
   const bool projection_ok = PrepareWorldNavigationProjection(slot, viewport, projection);
+  const uint64_t elapsed_ms = HostClock_Milliseconds();
   Sim3DPerformance_End(projection_performance);
   if (!projection_ok) {
     return kPresentationOutcome_CoreFailure;
@@ -3713,18 +4091,14 @@ static PresentationOutcome DrawWorldNavigationScene(
       return kPresentationOutcome_CoreFailure;
     }
   }
-  if (!DrawWorldNavigationGroundLayers(slot, viewport, projection)) {
+  if (!DrawWorldNavigationSurfaceLayers(slot, viewport, projection, elapsed_ms)) {
     return kPresentationOutcome_CoreFailure;
   }
   if (!DrawWorldNavigationActiveRegionHaze(
           slot, viewport, projection)) {
     return kPresentationOutcome_CoreFailure;
   }
-  const Sim3DPerformanceScope mountain_performance =
-      Sim3DPerformance_Begin(kSim3DPerformance_DepthMountain);
-  const bool mountains_ok = DrawWorldNavigationMountains(slot, viewport, projection);
-  Sim3DPerformance_End(mountain_performance);
-  if (!mountains_ok || !DrawWorldNavigationTowns(slot, viewport, projection)) {
+  if (!DrawWorldNavigationTowns(slot, viewport, projection)) {
     return kPresentationOutcome_CoreFailure;
   }
   /* Whole-world weather follows the same curved perspective surface as the
@@ -3733,7 +4107,7 @@ static PresentationOutcome DrawWorldNavigationScene(
   Sim3DPerformanceScope weather_performance =
       Sim3DPerformance_Begin(kSim3DPerformance_Cloud);
   outcome = PresentationOutcome_Combine(
-      outcome, DrawWorldNavigationWeather(slot, viewport, projection));
+      outcome, DrawWorldNavigationWeather(slot, viewport, projection, elapsed_ms));
   Sim3DPerformance_End(weather_performance);
   Sim3DPerformanceScope submit =
       Sim3DPerformance_Begin(kSim3DPerformance_DepthSubmit);
@@ -3878,11 +4252,12 @@ void PresentWorldNav_ResetResources(void) {
   s_world_models.gpu_source_capacity = 0;
   s_world_models.gpu_sources_unavailable = false;
   s_world_models.gpu_current_ready = false;
-  Sim3DDepthPass_DestroyMesh(s_world_terrain.ground_mesh);
-  s_world_terrain.ground_mesh = NULL;
-  s_world_terrain.ground_mesh_published = s_world_terrain.ground_mesh_unavailable = false;
-  s_world_terrain.ground_mesh_attempted = s_world_terrain.retained_key_ready = false;
-  s_world_terrain.ground_mesh_opt_out = false;
+  Sim3DDepthPass_DestroyMesh(s_world_surfaces.mesh);
+  memset(&s_world_surfaces, 0, sizeof(s_world_surfaces));
+  Sim3DDepthPass_DestroyMesh(s_world_gpu_grid.mesh);
+  memset(&s_world_gpu_grid, 0, sizeof(s_world_gpu_grid));
+  memset(&s_world_clip_cache, 0, sizeof(s_world_clip_cache));
+  WorldNavigationQuadStream_Reset(&s_world_shells.ocean_draw);
   free(s_world_shells.atmosphere_draw.vertices);
   free(s_world_shells.atmosphere_draw.indices);
   s_world_shells.atmosphere_draw = (WorldNavigationAtmosphereDrawCache){0};

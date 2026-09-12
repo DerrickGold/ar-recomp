@@ -214,6 +214,80 @@ bool Sim3DDepthPass_UpdateSphericalMesh(Sim3DDepthMesh *mesh,
 bool Sim3DDepthPass_AppendSphericalSample(Sim3DDepthPassLayer layer,
     Sim3DDepthMesh *mesh, const Sim3DDepthSphericalSample *sample);
 
+/* Shared radial surface source used by globe views.
+ * One camera-independent quad stream drives BOTH textured Ground and optional
+ * spherical CloudShadow samples. Every draw uses identical homogeneous
+ * positions/triangles and hardware clipping. Colors AND UVs are screen-linear;
+ * this is not a bit-exact replacement for legacy CPU-clipped attributes.
+ *
+ * normal is the chart-space unit direction used for radial placement and
+ * spherical atlas coordinates. elevation is {anchor source units, extra rise
+ * source units}; extra_scale converts the latter to world units. shade_normal
+ * is a unit (or zero) source-space lighting normal. Ground RGB is multiplied
+ * by ambient + diffuse * max(0, dot(shade_normal, light)); alpha is unchanged.
+ * Light must be unit or zero, with ambient/diffuse each in [0,1]. The caller
+ * supplies light in this same space, without a backend lighting
+ * model, chart policy, map identity, game clock or borrowed data.
+ *
+ * Update copies all source data; Ready survives camera/viewport changes.
+ * Append copies the complete transform and sample array, atomically queues
+ * one Ground draw plus all shadows, or queues NOTHING. Ground follows opaque
+ * call ordering; shadows use the existing separate effect budget/no-depth-write
+ * policy and may coexist with retained spherical samples, not ordinary shadow
+ * geometry. Shadows ignore source color/lighting, using each sample's color.
+ * The handle consumes ONE existing opaque slot. Existing vertex budgets,
+ * reset/queued-update/destroy rules apply; no source selection is inferred.
+ * Uses the existing Ground/Cloud atlas publication and sampler policy.
+ * radial.variant must be zero. The scene still owns coarse culling, source
+ * revisions and fallback BEFORE queuing any part of this surface. */
+typedef struct Sim3DDepthSurfaceVertex {
+  float normal[3], elevation[2], shade_normal[3];
+  ArRenderColorF color;
+  ArRenderPointF uv;
+} Sim3DDepthSurfaceVertex;
+typedef struct Sim3DDepthSurfaceTransform {
+  Sim3DDepthRadialTransform radial;
+  float extra_scale, light[3], ambient, diffuse;
+} Sim3DDepthSurfaceTransform;
+Sim3DDepthMesh *Sim3DDepthPass_CreateSurfaceMesh(void);
+bool Sim3DDepthPass_UpdateSurfaceMesh(Sim3DDepthMesh *mesh,
+    const Sim3DDepthSurfaceVertex *vertices, size_t quad_count);
+/* Optional independent overlay-mask coordinates, one per source vertex.
+ * NULL preserves ordinary texture-UV masking. Copies both arrays; invalid
+ * mask coordinates reject the whole update before changing retained data.
+ * Mask coordinates must be finite and within [-16,16]. Texture sampling and
+ * spherical shadows are unaffected; no scene/map interpretation is inferred. */
+bool Sim3DDepthPass_UpdateSurfaceMeshWithMask(Sim3DDepthMesh *mesh,
+    const Sim3DDepthSurfaceVertex *vertices, const ArRenderPointF *mask_uv,
+    size_t quad_count);
+/* Optional ordered selection, copied before returning. At most 64 ranges,
+ * total quads within the original source budget. One zero-length range draws
+ * nothing; NULL/zero restores the full source. Source updates restore full selection. Rejection
+ * leaves the old selection intact; queued updates are forbidden. The backend
+ * compacts selected ranges on the GPU only when selection/source changes, so
+ * each material remains one draw and no source vertices return to the CPU. */
+bool Sim3DDepthPass_SelectSurfaceMesh(Sim3DDepthMesh *mesh,
+    const Sim3DDepthMeshRange *ranges, size_t range_count);
+bool Sim3DDepthPass_AppendSurfaceMesh(Sim3DDepthMesh *mesh,
+    const Sim3DDepthSurfaceTransform *transform,
+    const Sim3DDepthSphericalSample *shadows, size_t shadow_count);
+/* Optional screen-linear overlays use the SAME source/position/depth path.
+ * clear_rect and feather are in source UV units: opacity ramps smoothly with
+ * Euclidean distance outside the rectangle. Zero feather means full coverage.
+ * GroundBlur multiplies lit source RGBA by color; GroundHaze replaces RGB by
+ * color, retaining source alpha. At most one of each layer, no depth writes.
+ * The entire ground/shadow/overlay group is atomic and shares existing budgets. */
+typedef struct Sim3DDepthSurfaceOverlay {
+  Sim3DDepthPassLayer layer;
+  ArRenderRectF clear_rect;
+  float feather;
+  ArRenderColorF color;
+} Sim3DDepthSurfaceOverlay;
+bool Sim3DDepthPass_AppendSurfaceLayers(Sim3DDepthMesh *mesh,
+    const Sim3DDepthSurfaceTransform *transform,
+    const Sim3DDepthSphericalSample *shadows, size_t shadow_count,
+    const Sim3DDepthSurfaceOverlay *overlays, size_t overlay_count);
+
 /* Creates the shaders/pipeline and verifies D32 support. Call during video
  * startup so an unsupported backend is a launch error, never a missing-scene
  * fallback discovered after entering SIM mode. */

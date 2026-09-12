@@ -1,5 +1,5 @@
-/* Private globe/Palace projection vocabulary. No resource ownership, live
- * game state or backend storage crosses this presentation-only seam. */
+/* Private globe/Palace projection vocabulary and owned CPU draw streams.
+ * No live game state or backend storage crosses this presentation-only seam. */
 #ifndef PRESENT_WORLD_NAV_GEOMETRY_H
 #define PRESENT_WORLD_NAV_GEOMETRY_H
 #include "scene3d_math.h"
@@ -21,6 +21,32 @@ typedef struct WorldNavigationProjection {
 } WorldNavigationProjection;
 
 enum { kWorldNavigationClippedQuads = 2 * (kScene3DClippedPolygonCapacity - 2) };
+
+/* Optional copy of the exact post-clip stream. The presentation owner decides
+ * when inputs repeat, invalidates on every projection/source change, and marks
+ * ready only after a complete successful capture. No renderer memory is read.
+ * Capacity/allocation failure discards this cache, never the ordinary draw. */
+enum { kWorldNavigationQuadStreamMaximum = 32768 };
+typedef struct WorldNavigationQuadStream {
+  Sim3DDepthVertex *vertices;
+  size_t quad_count, capacity;
+  bool ready, repeated, unavailable;
+} WorldNavigationQuadStream;
+void WorldNavigationQuadStream_Invalidate(WorldNavigationQuadStream *stream);
+void WorldNavigationQuadStream_Reset(WorldNavigationQuadStream *stream);
+bool WorldNavigationAppendCachedProjectedQuads(Sim3DDepthPassLayer layer,
+    const Sim3DDepthVertex *input, const Scene3DClipPoint *clip, size_t count,
+    ArRenderRectI viewport, WorldNavigationQuadStream *capture);
+
+/* Conservative bounds of source vertex directions/base elevations (no extra
+ * displacement, as used by the land grid), not a sampled
+ * silhouette. Reject only when an entire radial bound is outside a clip plane;
+ * uncertainty (including nonfinite input) retains the geometry. */
+typedef struct WorldNavigationRadialBounds {
+  float normal_min[3], normal_max[3], height_min, height_max;
+} WorldNavigationRadialBounds;
+bool WorldNavigationRadialBoundsOutside(const WorldNavigationRadialBounds *bounds,
+    const Sim3DDepthRadialTransform *transform);
 
 /* Reusable receiver geometry. A clipped quad is a triangle fan represented
  * in the existing four-vertex submission format; triangle selects the two

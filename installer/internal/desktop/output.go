@@ -3,6 +3,7 @@ package desktop
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 )
@@ -11,7 +12,7 @@ import (
 // workspace. Workshop edits subsequently target this folder directly, so new
 // assets/languages work without rebuilding and never depend on a symlink back
 // into the installer's private tools. Existing saves and settings always win.
-func PreparePortableData(source, destination string) error {
+func PreparePortableData(source, destination string, embedded ...fs.FS) error {
 	if !filepath.IsAbs(source) || !filepath.IsAbs(destination) {
 		return errors.New("portable source and output must be absolute")
 	}
@@ -49,7 +50,7 @@ func PreparePortableData(source, destination string) error {
 		return err
 	}
 	defer os.RemoveAll(stage)
-	if err := stageSeed(source, stage); err != nil {
+	if err := stageSeed(source, stage, embedded...); err != nil {
 		return err
 	}
 	// Notices must also accompany Windows/folder outputs, which do not have

@@ -31,46 +31,6 @@ func fixture(t *testing.T) string {
 	}
 	return root
 }
-func TestWorkspacePreservesEditsAndRejectsUnmanagedOrChangedPayload(t *testing.T) {
-	payload := fixture(t)
-	work := filepath.Join(t.TempDir(), "workspace")
-	if err := Prepare(payload, work, nil); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(work, "utils", "snesbuild.ini"), []byte("edited"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err := Prepare(payload, work, nil); err != nil {
-		t.Fatal(err)
-	}
-	data, _ := os.ReadFile(filepath.Join(work, "utils", "snesbuild.ini"))
-	if string(data) != "edited" {
-		t.Fatal("user edit overwritten")
-	}
-	if err := Prepare(payload, t.TempDir(), nil); err == nil {
-		t.Fatal("accepted unmanaged directory")
-	}
-	if err := os.WriteFile(filepath.Join(payload, "utils", "snesbuild.ini"), []byte("new"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err := WriteManifest(payload, runtime.GOOS, runtime.GOARCH); err != nil {
-		t.Fatal(err)
-	}
-	if err := Prepare(payload, work, nil); err == nil {
-		t.Fatal("silently overwrote another payload")
-	}
-}
-func TestCorruptPayloadNeverPublishesWorkspace(t *testing.T) {
-	payload := fixture(t)
-	work := filepath.Join(t.TempDir(), "workspace")
-	os.WriteFile(filepath.Join(payload, "utils", "snesbuild.ini"), []byte("corrupt"), 0600)
-	if err := Prepare(payload, work, nil); err == nil {
-		t.Fatal("accepted corruption")
-	}
-	if _, err := os.Stat(work); !os.IsNotExist(err) {
-		t.Fatal("published incomplete workspace")
-	}
-}
 func TestRejectPrivateFilesAndEscapingPaths(t *testing.T) {
 	for _, leaf := range []string{"utils/user-rom.sfc", "utils/ar.smc", "utils/settings.ini", "utils/src/gen/bank00.c", "utils/game-assets/manifest.ini", "._utils", "utils/.DS_Store"} {
 		t.Run(leaf, func(t *testing.T) {

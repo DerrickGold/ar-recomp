@@ -1306,7 +1306,8 @@ pre {
 /* Shared desktop/browser installation import. Keep long paths and file lists
    contained, including on the Steam Deck's 1280x800 display. */
 #import-install{width:min(44rem,calc(100vw - 2rem));max-height:85vh;overflow:auto;border:1px solid #64758c;border-radius:12px;padding:1.5rem;background:#142235;color:#eef3fa;box-shadow:0 24px 80px #0009}
-#import-install::backdrop{background:#0009}
+#import-install::backdrop,#game-folder-dialog::backdrop{background:#0009}
+#game-folder-dialog{width:min(54rem,calc(100vw - 2rem));max-height:90vh;overflow:auto;border:1px solid #64758c;border-radius:12px;padding:1.5rem;background:#142235;color:#eef3fa;box-shadow:0 24px 80px #0009}
 #import-install p,#import-install-destination{overflow-wrap:anywhere}
 #import-install-source,#import-install-candidates{display:block;width:100%;margin:.5rem 0;padding:.6rem;background:#0b1727;color:inherit;border:1px solid #64758c}
 #import-install-candidates[hidden]{display:none}

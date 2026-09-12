@@ -104,6 +104,194 @@ function setupEditor(){
 }
 const packageInfo={key:"edition-folder",id:"community.same-locale",name:"Français {name} <b>1234</b>",locale:"en-CA",project:true,installed:true,enabled:true,installedName:"Installed <i>edition</i>",installedRevision:"keep-revision"};
 const snapshot={sourceAvailable:true,root:"/tmp/My translations",project:null};
+const sharedPack={name:"Community 日本語.ARLANG",size:128};
+const sharedPreview={token:"shared-preview",metadata:{...packageInfo,author:"Community team",license:"CC-BY-4.0"},messages:2};
+function dragEvent(s,files=[sharedPack],extra={}){
+  return {target:s.root,dataTransfer:{types:["Files"],files},prevented:false,preventDefault(){this.prevented=true;},...extra};
+}
+function importResponder(s,preview=sharedPreview){
+  s.respond(endpoint=>{
+    if(endpoint==="state")return snapshot;
+    if(endpoint==="projects"||endpoint==="catalog")return [];
+    if(endpoint==="import")return preview;
+    throw Error("unexpected endpoint "+endpoint);
+  });
+}
+
+test("install starts with arlang and keeps folder/backup sources secondary",async()=>{
+  const s=setupEditor();importResponder(s);
+  await s.context.window.localizationActivate();
+  assert.equal(s.node("library-section").hidden,false);
+  assert.equal(s.node("quick-import").elements.file.getAttribute("accept"),".arlang");
+  await s.root.querySelector('[data-loc-flow="install"]').fire("click");
+  assert.equal(s.node("import-source").hidden,false);
+  assert.equal(s.node("import").elements.file.getAttribute("accept"),".arlang");
+  assert.equal(s.root.querySelector('[data-loc-install="import"]').getAttribute("aria-pressed"),"true");
+  assert.equal(!!s.node("folder-options").open,false);
+  assert.equal(!!s.node("archive-options").open,false);
+  assert.equal(s.node("import-backup").elements.file.getAttribute("accept"),".arproject,.zip");
+  assert.ok(!s.requests.some(r=>["choose-directory","directory","import"].includes(r.endpoint)));
+});
+
+test("quick picker and global drop open the same detached preview before any install",async()=>{
+  for(const method of ["picker","drop"]){
+    const s=setupEditor();importResponder(s);
+    let navigations=0;s.context.window.workshopOpenLanguages=()=>{navigations++;return true;};
+    if(method==="picker"){
+      const input=s.node("quick-import").elements.file;
+      input.files=[sharedPack];input.value="C:\\fakepath\\Community.ARLANG";
+      await input.fire("change");assert.equal(input.value,"");
+    }else{
+      const event=dragEvent(s);
+      await s.doc.fire("dragenter",event);assert.equal(s.node("drop-overlay").hidden,false);
+      await s.doc.fire("drop",event);
+    }
+    assert.equal(navigations,1);
+    assert.deepEqual(s.requests.map(r=>r.endpoint),["state","projects","catalog","import"]);
+    const upload=s.requests.at(-1).data;
+    assert.equal(upload.get("file"),sharedPack);assert.equal(upload.get("intent"),"preview");
+    assert.equal(s.node("import-preview").hidden,false);
+    assert.equal(s.node("import-name").textContent,packageInfo.name);
+    assert.equal(s.doc.activeElement,s.node("import-name"));
+    assert.equal(s.node("accept-import").disabled,false);
+    assert.equal(s.node("drop-overlay").hidden,true);
+  }
+});
+
+test("dropped conflicts require explicit choices; installed packs remain toggleable",async()=>{
+  const s=setupEditor();importResponder(s,{...sharedPreview,existingProject:{name:"Previous edition",revision:"prior-project"},installed:true});
+  await s.doc.fire("drop",dragEvent(s));
+  assert.equal(s.node("accept-import").disabled,true);
+  s.node("replace-project").checked=true;await s.node("replace-project").fire("input");
+  assert.equal(s.node("accept-import").disabled,true);
+  s.node("import-replace-installed").checked=true;await s.node("import-replace-installed").fire("input");
+  assert.equal(s.node("accept-import").disabled,false);
+  s.respond((endpoint,data)=>{
+    if(endpoint==="accept-import"){
+      assert.deepEqual(data,{importToken:sharedPreview.token,newID:"",replace:true,expected:"prior-project"});return projectSnapshot();
+    }
+    if(endpoint==="projects"||endpoint==="tree")return [];
+    if(endpoint==="installation")return {installed:true};
+    if(endpoint==="install"){
+      assert.equal(data.replace,true);return {path:"/game/languages/packs/edition",enabled:false,report:{messages:2}};
+    }
+    if(endpoint==="catalog")return [{...packageInfo,enabled:false}];
+    throw Error(endpoint);
+  });
+  await s.node("accept-import").fire("click");
+  assert.equal(s.node("installed").hidden,false);
+  assert.equal(s.node("installed-title").textContent,s.ui.text("builder.language.updated_disabled"));
+  await s.node("installed-home").fire("click");
+  let enabled=false;
+  s.respond((endpoint,data)=>{
+    if(endpoint==="set-enabled"){
+      assert.deepEqual(data,{id:packageInfo.id,directory:packageInfo.key,expected:packageInfo.installedRevision,enabled:!enabled});
+      enabled=data.enabled;return {enabled};
+    }
+    assert.equal(endpoint,"catalog");return [{...packageInfo,enabled}];
+  });
+  for(const checked of [true,false]){
+    const toggle=s.node("library").querySelector("input");toggle.checked=checked;await toggle.fire("change");
+    await new Promise(resolve=>setImmediate(resolve));
+    assert.equal(enabled,checked);assert.equal(s.node("library").querySelector("input").checked,checked);
+  }
+  assert.ok(!s.requests.some(r=>r.endpoint==="uninstall"));
+});
+
+test("invalid or multiple drops show localized guidance without requests or draft loss",async()=>{
+  const s=setupEditor();await openEditorMessage(s);
+  s.node("body").value="My unsaved draft";await s.node("body").fire("input");
+  const before=s.requests.length;
+  for(const [files,key] of [
+    [[{name:"notes.txt",size:50}],"package_types"],
+    [[{name:"backup.arproject",size:50}],"package_types"],
+    [[{name:"empty.arlang",size:0}],"archive_size"],
+    [[{name:"oversized.arlang",size:257*1024*1024+1}],"archive_size"],
+    [[sharedPack,sharedPack],"one_archive"]
+  ]){
+    await s.doc.fire("drop",dragEvent(s,files));
+    assert.equal(s.node("drop-overlay").hidden,false);
+    for(const locale of ["fr","de","ja","en"]){
+      s.picker.value=locale;await s.picker.fire("change");
+      assert.equal(s.node("drop-message").textContent,s.ui.text("builder.language."+key));
+    }
+    assert.equal(s.requests.length,before);assert.equal(s.confirmations.length,0);
+    assert.equal(s.node("body").value,"My unsaved draft");assert.equal(s.context.window.localizationHasEdits(),true);
+  }
+  await s.node("dismiss-drop").fire("click");assert.equal(s.node("drop-overlay").hidden,true);
+});
+
+test("cancelled draft confirmation and unavailable game data prevent drop import",async()=>{
+  const s=setupEditor();await openEditorMessage(s);
+  s.node("body").value="Keep this";await s.node("body").fire("input");
+  s.context.window.confirm=()=>false;
+  const before=s.requests.length;
+  await s.doc.fire("drop",dragEvent(s));
+  assert.equal(s.requests.length,before);assert.equal(s.node("body").value,"Keep this");
+  assert.equal(s.context.window.localizationHasEdits(),true);
+  s.context.window.confirm=()=>true;s.context.window.workshopOpenLanguages=()=>false;
+  await s.doc.fire("drop",dragEvent(s));
+  assert.equal(s.requests.length,before);assert.equal(s.context.window.localizationHasEdits(),true);
+  assert.equal(s.node("drop-message").textContent,s.ui.text("builder.language.build_required"));
+});
+
+test("busy drops cannot supersede an in-flight preview and the same picker file can retry",async()=>{
+  const s=setupEditor();importResponder(s);await s.context.window.localizationActivate();
+  let release;const pending=new Promise(resolve=>{release=resolve;});
+  s.response(async endpoint=>{assert.equal(endpoint,"import");await pending;return {ok:true,json:async()=>sharedPreview};});
+  const input=s.node("quick-import").elements.file;input.files=[sharedPack];
+  const first=input.fire("change");
+  await s.doc.fire("drop",dragEvent(s,[{...sharedPack,name:"second.arlang"}]));
+  assert.equal(s.node("drop-message").textContent,s.ui.text("builder.language.drop_busy"));
+  release();await first;
+  assert.equal(s.requests.filter(r=>r.endpoint==="import").length,1);
+  importResponder(s);await input.fire("change");
+  assert.equal(s.requests.filter(r=>r.endpoint==="import").length,2);
+  assert.equal(input.value,"");
+});
+
+test("text drags and native file controls are not intercepted; closed sessions do not upload",async()=>{
+  const s=setupEditor();let prevented=0;
+  const event=dragEvent(s,[],{dataTransfer:{types:["text/plain"],files:[]},preventDefault(){prevented++;}});
+  await s.doc.fire("dragover",event);await s.doc.fire("drop",event);assert.equal(prevented,0);
+  const native=dragEvent(s,[sharedPack],{target:s.node("import").elements.file,preventDefault(){prevented++;}});
+  await s.doc.fire("dragenter",dragEvent(s));assert.equal(s.node("drop-overlay").hidden,false);
+  await s.doc.fire("dragover",native);await s.doc.fire("drop",native);
+  assert.equal(prevented,0);assert.equal(s.node("drop-overlay").hidden,true);
+  await s.doc.fire("workshop:closed");
+  await s.doc.fire("drop",dragEvent(s,[sharedPack],{preventDefault(){prevented++;}}));
+  assert.equal(prevented,1);assert.equal(s.requests.length,0);
+});
+
+test("invalid archive contents leave a retryable picker and do not install",async()=>{
+  const s=setupEditor();importResponder(s);await s.context.window.localizationActivate();
+  s.response(async endpoint=>{
+    assert.equal(endpoint,"import");return {ok:false,status:400,json:async()=>({error:"invalid ZIP archive"})};
+  });
+  const input=s.node("quick-import").elements.file;input.files=[sharedPack];input.value="selected.arlang";
+  await input.fire("change");
+  assert.equal(input.value,"");assert.equal(input.disabled,false);
+  assert.equal(s.node("import-preview").hidden,true);assert.equal(s.node("accept-import").disabled,true);
+  assert.ok(s.node("feedback").textContent.includes("invalid ZIP archive"));
+  importResponder(s);
+  // Some webviews expose the files on drop without a populated types list.
+  let prevented=false;
+  await s.doc.fire("drop",dragEvent(s,[sharedPack],{dataTransfer:{files:[sharedPack]},preventDefault(){prevented=true;}}));
+  assert.equal(prevented,true);assert.equal(s.node("import-preview").hidden,false);
+  assert.equal(s.requests.filter(r=>r.endpoint==="import").length,2);
+  assert.ok(!s.requests.some(r=>["accept-import","install"].includes(r.endpoint)));
+});
+
+test("backup picker remains available to edit, with no automatic installation",async()=>{
+  const s=setupEditor();importResponder(s);await s.context.window.localizationActivate();
+  await s.root.querySelector('[data-loc-flow="edit"]').fire("click");
+  assert.equal(s.node("archive-options").open,true);
+  const input=s.node("import-backup").elements.file;input.files=[{name:"work.arproject",size:100}];
+  await input.fire("change");
+  assert.equal(s.requests.at(-1).endpoint,"import");
+  assert.equal(s.node("accept-import").textContent,s.ui.text("builder.language.import_edit"));
+  assert.ok(!s.requests.some(r=>["accept-import","install"].includes(r.endpoint)));
+});
 
 test("chooser recovery uses typed translated copy and preserves literal details",async()=>{
   const s=setupEditor(),detail="platform 100% {name} 日本語";

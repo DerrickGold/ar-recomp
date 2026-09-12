@@ -186,10 +186,13 @@ in-game font layout; visually check translations before sharing them.
 Opening/importing and saving only change your workshop copy. Use the explicit
 Pack actions → Install in game workflow to update the installed version the game uses.
 Local installation keeps all supplied translations; redistribution consent and
-WIP filtering belong to Export for sharing. Import new pack opens a folder
-chooser; Install already imported lets you choose saved work. Installed packs
-have enable/disable checkboxes in Languages. Unchecking keeps their files and
-progress but hides them from the game's language selector after restart.
+WIP filtering belong to Export for sharing. Under Import new pack, choose an
+.arlang file, or drop one .arlang at a time into the Workshop from any section.
+Review the package, then choose Import & install. Unpacked folders
+remain available under Advanced: unpacked language folder. Install already
+imported lets you choose saved work. Installed packs have enable/disable
+checkboxes in Languages. Unchecking keeps their files and progress but hides
+them from the game's language selector after restart.
 
 Workshop projects and installed packs live under utils/game-assets/languages.
 The shared and Japanese interface fonts and their licenses are under

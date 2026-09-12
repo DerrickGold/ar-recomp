@@ -2,9 +2,10 @@ package builder
 
 import (
 	"bytes"
-	_ "embed"
+	"embed"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -57,6 +58,19 @@ var titleLogoPNG []byte
 //
 //go:embed assets/manifest.ini
 var assetManifestTemplate []byte
+
+//go:embed assets/manual.pdf assets/manifest.ini
+var runtimeSeedAssets embed.FS
+
+// RuntimeSeedAssets supplies files absent from the read-only source payload
+// directly from the backend, without materializing a temporary source tree.
+func RuntimeSeedAssets() fs.FS {
+	assets, err := fs.Sub(runtimeSeedAssets, "assets")
+	if err != nil {
+		panic(err)
+	} // The embedded directory is fixed at compile time.
+	return assets
+}
 
 // PrepareRuntimeAssets supplies the same embedded runtime files for GUI builds
 // and explicit desktop packaging. Existing player files keep precedence.

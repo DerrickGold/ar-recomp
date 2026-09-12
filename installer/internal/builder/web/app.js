@@ -69,6 +69,9 @@ function selectTab(tab,{history=true,focus=true,activate=true}={}){
   return true;
 }
 tabs.forEach(t=>t.addEventListener("click",()=>selectTab(t)));
+// File drops use the same navigation/readiness gate without starting a second
+// asynchronous language activation while the import controller is loading.
+window.workshopOpenLanguages = () => selectTab(languageTab,{activate:false});
 document.querySelectorAll("[data-nav]").forEach(button=>button.addEventListener("click",()=>selectTab(document.getElementById("tab-"+button.dataset.nav))));
 let routed=false;
 function route(){
