@@ -93,6 +93,19 @@ static int depth_near_volume_faces;
 static int depth_upper_volume_faces;
 static float near_volume_max_depth, far_volume_min_depth;
 static bool depth_collecting;
+/* This contract fixture deliberately exercises optional-cache failure and
+ * the mutable publication path. Real snapshots are tested by both GPU suites. */
+Sim3DDepthAtlasCache *Sim3DDepthPass_CreateAtlasCache(void) { return NULL; }
+bool Sim3DDepthPass_HasAtlasVersion(const Sim3DDepthAtlasCache *cache, unsigned version) {
+  (void)cache; (void)version; return false;
+}
+bool Sim3DDepthPass_SelectAtlasVersion(Sim3DDepthAtlasCache *cache, unsigned version) {
+  return !cache && version == 0;
+}
+bool Sim3DDepthPass_CaptureAtlasVersion(Sim3DDepthAtlasCache *cache, unsigned version) {
+  (void)cache; (void)version; return false;
+}
+void Sim3DDepthPass_DestroyAtlasCache(Sim3DDepthAtlasCache *cache) { assert(!cache); }
 enum { kDepthSurfaceSlots = 131072 };
 static struct { bool used, terrain; float point[3]; } depth_surface[kDepthSurfaceSlots];
 
@@ -347,6 +360,10 @@ bool Sim3DDepthPass_UpdateSurfaceMeshWithMask(Sim3DDepthMesh *mesh,
     const Sim3DDepthSurfaceVertex *vertices, const ArRenderPointF *mask_uv, size_t count) {
   (void)mask_uv; return Sim3DDepthPass_UpdateSurfaceMesh(mesh,vertices,count);
 }
+bool Sim3DDepthPass_AppendSurfaceBatches(Sim3DDepthMesh *mesh,
+    const Sim3DDepthSurfaceBatch *batches, size_t count) {
+  (void)mesh; (void)batches; (void)count; return false;
+}
 bool Sim3DDepthPass_AppendSurfaceLayers(Sim3DDepthMesh *mesh,
     const Sim3DDepthSurfaceTransform *t, const Sim3DDepthSphericalSample *s, size_t ns,
     const Sim3DDepthSurfaceOverlay *o, size_t no) {
@@ -409,6 +426,16 @@ bool Sim3DDepthPass_AppendGeometryRanges(Sim3DDepthMesh *mesh,
   (void)mesh; (void)ranges; (void)count; return false;
 }
 Sim3DDepthMesh *Sim3DDepthPass_CreateSphericalMesh(void) { return NULL; }
+Sim3DDepthMesh *Sim3DDepthPass_CreateSphericalBodyMesh(void) { return NULL; }
+bool Sim3DDepthPass_UpdateSphericalBodyMesh(Sim3DDepthMesh *mesh,
+    const Sim3DDepthSphericalBodyVertex *vertices, size_t count) {
+  (void)mesh; (void)vertices; (void)count; return false;
+}
+bool Sim3DDepthPass_AppendSphericalBodies(Sim3DDepthMesh *mesh,
+    const Sim3DDepthSphericalBodyTransform *transform,
+    const Sim3DDepthSphericalSample *samples, size_t count) {
+  (void)mesh; (void)transform; (void)samples; (void)count; return false;
+}
 bool Sim3DDepthPass_UpdateSphericalMesh(Sim3DDepthMesh *mesh,
     const Sim3DDepthSphericalQuad *quads, size_t count) {
   (void)mesh; (void)quads; (void)count; return false;
@@ -2251,7 +2278,7 @@ static void TestRadialBounds(void) {
   assert(rejected>100 && retained>100);
 }
 
-static void TestQuadStream(void) {
+static void TestClippedBatch(void) {
   FakeBackend backend={0};
   ArRenderDevice device={.context=&backend};
   const ArRenderRectI viewport={0,0,640,480};
@@ -2263,53 +2290,28 @@ static void TestQuadStream(void) {
       {.25f,.5f,.75f,1},{p*.1f,p*.2f}};
   Sim3DDepthVertex expected[kWorldNavigationClippedQuads*4]; size_t produced;
   assert(WorldNavigationClipQuad(source,clip,viewport,expected,&produced) && produced>1);
-  WorldNavigationQuadStream cache={0};
   assert(Sim3DDepthPass_Begin(&device,640,480,kArRenderFilter_Linear));
-  /* Cross both the submission batch and cache growth boundaries. */
-  for (unsigned i=0;i<1100;++i)
-    assert(WorldNavigationAppendCachedProjectedQuads(kSim3DDepthPass_WorldMountain,
-        source,clip,1,viewport,&cache));
-  assert(cache.quad_count==1100*produced && cache.capacity>=cache.quad_count);
-  for (size_t i=0;i<1100;++i)
-    assert(!memcmp(cache.vertices+i*produced*4,expected,produced*4*sizeof(*expected)));
+  /* Cross the clipped submission batch boundary without a second CPU cache. */
+  Sim3DDepthVertex batch[65*4]; Scene3DClipPoint clips[65*4];
+  for (unsigned i=0;i<65;++i) {
+    memcpy(batch+i*4,source,sizeof(source));
+    memcpy(clips+i*4,clip,sizeof(clip));
+    assert(Sim3DDepthPass_AppendQuads(kSim3DDepthPass_WorldMountain,expected,produced));
+  }
   const uint64_t hash=depth_world_mountain_hash;
-  memset(source,0,sizeof(source)); /* Cache owns its exact copied values. */
   assert(Sim3DDepthPass_Begin(&device,640,480,kArRenderFilter_Linear));
-  assert(Sim3DDepthPass_AppendQuads(kSim3DDepthPass_WorldMountain,cache.vertices,cache.quad_count));
+  assert(WorldNavigationAppendClippedQuads(kSim3DDepthPass_WorldMountain,batch,clips,65,viewport));
   assert(depth_world_mountain_hash==hash);
-  const size_t capacity=cache.capacity;
-  cache.ready=cache.repeated=true;
-  WorldNavigationQuadStream_Invalidate(&cache);
-  assert(!cache.ready && !cache.repeated && !cache.quad_count && cache.capacity==capacity);
-  memcpy(source,expected,sizeof(source));
-  assert(WorldNavigationAppendCachedProjectedQuads(kSim3DDepthPass_WorldMountain,
-      source,NULL,1,viewport,&cache));
-  assert(cache.quad_count==1 && !memcmp(cache.vertices,source,sizeof(source)));
-  /* A rejected optional cache must still submit the complete ordinary draw. */
-  cache.quad_count=kWorldNavigationQuadStreamMaximum;
   const int faces=depth_world_mountain_faces;
-  assert(WorldNavigationAppendCachedProjectedQuads(kSim3DDepthPass_WorldMountain,
-      source,NULL,1,viewport,&cache));
-  assert(depth_world_mountain_faces==faces+1 && cache.unavailable);
-  assert(!cache.vertices && !cache.capacity && !cache.quad_count && !cache.ready);
-  assert(WorldNavigationAppendCachedProjectedQuads(kSim3DDepthPass_WorldMountain,
-      source,NULL,1,viewport,&cache));
-  assert(cache.unavailable && !cache.vertices); /* No per-frame allocation retry. */
-  WorldNavigationQuadStream_Reset(&cache);
-  assert(!cache.unavailable);
-  /* Empty clipped output is a valid stream; failed submission is not. */
+  /* Empty clipped output succeeds; a failed ordinary submission does not. */
   Scene3DClipPoint invisible[4]={{2,0,0,1},{3,0,0,1},{3,1,0,1},{2,1,0,1}};
-  assert(WorldNavigationAppendCachedProjectedQuads(kSim3DDepthPass_WorldMountain,
-      source,invisible,1,viewport,&cache));
-  assert(!cache.quad_count && !cache.unavailable);
+  assert(WorldNavigationAppendClippedQuads(kSim3DDepthPass_WorldMountain,source,invisible,1,viewport));
+  assert(depth_world_mountain_faces==faces);
   for (int p=0;p<4;++p) source[p].uv=(ArRenderPointF){-1,-1};
   assert(Sim3DDepthPass_Begin(&device,640,480,kArRenderFilter_Linear));
   depth_fail_ocean_batch=1;
-  assert(!WorldNavigationAppendCachedProjectedQuads(kSim3DDepthPass_Ground,
-      source,NULL,1,viewport,&cache));
-  assert(!cache.quad_count && !cache.ready);
+  assert(!WorldNavigationAppendProjectedQuads(kSim3DDepthPass_Ground,source,NULL,1,viewport));
   depth_fail_ocean_batch=0;
-  WorldNavigationQuadStream_Reset(&cache);
   Sim3DDepthPass_Submit(&device,ArRenderTexture_Invalid());
 }
 
@@ -2317,7 +2319,7 @@ int main(void) {
   /* These counters/vertex oracles exercise the complete compatibility path.
    * The default's declining-adapter behavior is checked separately below. */
   setenv("AR_SIM3D_WORLD_GPU_GRID", "0", 1);
-  TestQuadStream();
+  TestClippedBatch();
   TestRadialBounds();
   TestRadialModelDefault();
   TestRadialModelResidency();

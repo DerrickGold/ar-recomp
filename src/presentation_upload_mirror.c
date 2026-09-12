@@ -11,17 +11,33 @@ enum { kArgb8888BytesPerPixel = (int)sizeof(uint32_t) };
 /* Byte pointers can have arbitrary alignment and pitch. Let memcmp use the
  * platform's block implementation without introducing aliasing/alignment or
  * CPU-instruction requirements into this portable upload policy. */
-static size_t EqualPrefix(const uint8_t *a, const uint8_t *b, size_t bytes) {
+static size_t EqualPrefix(const uint8_t *a, const uint8_t *b, size_t bytes, uint64_t *scanned) {
   size_t at = 0;
-  while (bytes - at >= 32 && !memcmp(a + at, b + at, 32)) at += 32;
-  while (at < bytes && a[at] == b[at]) at++;
+  while (bytes - at >= 32) {
+    *scanned += 64;
+    if (memcmp(a + at, b + at, 32)) break;
+    at += 32;
+  }
+  while (at < bytes) {
+    *scanned += 2;
+    if (a[at] != b[at]) break;
+    at++;
+  }
   return at;
 }
 
 static size_t EqualSuffixStart(const uint8_t *a, const uint8_t *b,
-                               size_t first, size_t end) {
-  while (end - first >= 32 && !memcmp(a + end - 32, b + end - 32, 32)) end -= 32;
-  while (end > first && a[end - 1] == b[end - 1]) end--;
+                               size_t first, size_t end, uint64_t *scanned) {
+  while (end - first >= 32) {
+    *scanned += 64;
+    if (memcmp(a + end - 32, b + end - 32, 32)) break;
+    end -= 32;
+  }
+  while (end > first) {
+    *scanned += 2;
+    if (a[end - 1] != b[end - 1]) break;
+    end--;
+  }
   return end;
 }
 
@@ -52,38 +68,48 @@ bool PresentationUploadMirror_FindDirtyRect(
 
   const size_t row_bytes =
       (size_t)width * (size_t)kArgb8888BytesPerPixel;
-  /* The read volume this comparison costs, charged whether or not anything
-   * turns out to have changed. It is the traffic a producer-side dirty signal
-   * would remove, so it belongs in the counters beside the bytes uploaded. */
-  PerformanceMetrics_Add(kPerformanceCount_ScanBytes,
-      (uint64_t)row_bytes * (uint64_t)height * 2u);
-  int x0 = width;
-  int y0 = height;
-  int x1 = 0;
-  int y1 = 0;
+  /* Count BOTH comparison operands, including edge refinements, but not rows
+   * skipped by the exact-bounds shortcut. This is requested comparison volume,
+   * not DRAM traffic: libc may exit early and the CPU may reuse cached lines. */
+  uint64_t scanned = 0;
+  int x0 = width, y0 = height, x1 = 0, y1 = 0;
   for (int y = 0; y < height; y++) {
     const uint8_t *current_row = current + (size_t)y * (size_t)current_pitch;
     const uint8_t *previous_row =
         previous + (size_t)y * (size_t)previous_pitch;
-    if (memcmp(current_row, previous_row, row_bytes) == 0)
-      continue;
-
+    scanned += (uint64_t)row_bytes * 2;
+    if (!memcmp(current_row,previous_row,row_bytes)) continue;
     /* Only pixels outside the accumulated horizontal bounds can expand the
-     * rectangle. In particular, a full-width change needs no more edge scans.
-     * Keep checking whole rows to preserve exact vertical bounds. */
+     * rectangle. Full horizontal coverage ends the loop entirely. */
     if (x0) {
       const size_t first_byte = EqualPrefix(current_row, previous_row,
-          (size_t)x0 * kArgb8888BytesPerPixel);
+          (size_t)x0 * kArgb8888BytesPerPixel, &scanned);
       x0 = (int)(first_byte / kArgb8888BytesPerPixel);
     }
     if (x1 < width) {
       const size_t last_byte = EqualSuffixStart(current_row, previous_row,
-          (size_t)x1 * kArgb8888BytesPerPixel, row_bytes);
+          (size_t)x1 * kArgb8888BytesPerPixel, row_bytes, &scanned);
       x1 = (int)((last_byte + kArgb8888BytesPerPixel - 1u) / kArgb8888BytesPerPixel);
     }
     if (y < y0) y0 = y;
     y1 = y + 1;
+    if (!x0 && x1 == width) {
+      /* Horizontal bounds are final. Only the bottom dirty row can enlarge
+       * this rectangle now; don't compare the already enclosed interior.
+       * Keep the forward scan for narrow/sparse changes: reversing all clean
+       * suffixes unconditionally harms streaming locality on those images. */
+      int bottom = height;
+      while (bottom > y1) {
+        scanned += (uint64_t)row_bytes * 2;
+        if (memcmp(current + (size_t)(bottom - 1) * current_pitch,
+            previous + (size_t)(bottom - 1) * previous_pitch,row_bytes)) break;
+        --bottom;
+      }
+      y1 = bottom;
+      break;
+    }
   }
+  PerformanceMetrics_Add(kPerformanceCount_ScanBytes,scanned);
   if (x0 == width) {
     *dirty = (ArRenderRectI){0};
     return false;

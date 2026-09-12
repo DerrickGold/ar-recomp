@@ -31,12 +31,16 @@ layout(set = 1, binding = 0, std140) uniform SurfaceView {
     vec4 tint;
     vec4 mask_rect;
     vec4 mask;
+    vec4 shadow_basis[3];
 };
 layout(location = 0) out vec4 vertex_color;
 layout(location = 1) out vec2 texture_uv;
 
 const float pi = 3.14159265358979323846;
 vec2 coordinate(vec3 n) {
+    if (material.z != 0.0) {
+        n = vec3(dot(shadow_basis[0].xyz,n), dot(shadow_basis[1].xyz,n), dot(shadow_basis[2].xyz,n));
+    }
     precise float x = n.x * rotation.x + n.z * rotation.y;
     precise float z = n.z * rotation.x - n.x * rotation.y;
     precise float y = n.y * rotation.z + z * rotation.w;

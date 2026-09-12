@@ -34,6 +34,10 @@ void Sim3DPerformance_AddDraw(uint64_t vertices, uint64_t indices) {
 }
 void Sim3DPerformance_AddGeometryUpload(uint64_t bytes) { geometry_upload_bytes += bytes; }
 static uint64_t geometry_copy_bytes, geometry_copy_calls;
+static uint64_t atlas_copy_bytes, atlas_copy_calls;
+void Sim3DPerformance_AddAtlasCopy(uint64_t bytes) {
+  atlas_copy_bytes += bytes; ++atlas_copy_calls;
+}
 void Sim3DPerformance_AddGeometryCopy(uint64_t bytes, uint64_t calls) {
   geometry_copy_bytes += bytes; geometry_copy_calls += calls;
 }
@@ -1063,6 +1067,154 @@ static void TestRadialModels(ArRenderDevice *device, SDL_Renderer *renderer) {
   Sim3DDepthPass_Reset(device);
 }
 
+static void TestSphericalBodies(ArRenderDevice *device, SDL_Renderer *renderer) {
+  Sim3DDepthPass_Reset(device);
+  CHECK(!Sim3DDepthPass_CreateSphericalBodyMesh());
+  CHECK(Sim3DDepthPass_Begin(device,32,16,kArRenderFilter_Nearest));
+  Sim3DDepthMesh *mesh = Sim3DDepthPass_CreateSphericalBodyMesh();
+  CHECK(mesh); if (!mesh) return;
+  const float z = sqrtf(.5f);
+  const Sim3DDepthSphericalBodyVertex source[4] = {
+    {{-.5f,-.5f,z},.75f}, {{.5f,-.5f,z},.75f},
+    {{.5f,.5f,z},.75f}, {{-.5f,.5f,z},.75f},
+  };
+  Sim3DDepthSphericalBodyVertex upload[4]; memcpy(upload,source,sizeof(upload));
+  CHECK(!Sim3DDepthPass_UpdateSphericalBodyMesh(mesh,source,SIZE_MAX));
+  CHECK(!Sim3DDepthPass_UpdateSphericalBodyMesh(mesh,source,0));
+  upload[0].normal[0] = NAN;
+  CHECK(!Sim3DDepthPass_UpdateSphericalBodyMesh(mesh,upload,1));
+  memcpy(upload,source,sizeof(upload)); upload[0].opacity = 2;
+  CHECK(!Sim3DDepthPass_UpdateSphericalBodyMesh(mesh,upload,1));
+  memcpy(upload,source,sizeof(upload));
+  CHECK(Sim3DDepthPass_UpdateSphericalBodyMesh(mesh,upload,1));
+  memset(upload,0,sizeof(upload)); /* Adapter owns the copied source. */
+  unsigned checked = 0;
+  for (unsigned phase = 0; phase < 3; ++phase) {
+    if (phase == 2) Sim3DDepthPass_Reset(device);
+    const int width = phase ? 64 : 32;
+    uint32_t atlas[64*32];
+    for (int y = 0; y < 32; ++y) for (int x = 0; x < 64; ++x) {
+      /* Smooth, periodic longitude with constant pole rows, in two banks. */
+      const float u = (x%32)/31.f, v = (y%16)/15.f;
+      const unsigned shade = (unsigned)((120 + 60*cosf(u*6.283185307f)*sinf(v*3.141592654f)) / (y < 16 ? 1 : 2));
+      atlas[y*64+x] = 0xff000000u | (shade*0x010101u);
+    }
+    const ArRenderRectI full = {0,0,64,32};
+    CHECK(Sim3DDepthPass_UploadAtlasRegions(device,kSim3DDepthPass_Cloud,atlas,64,32,256,&full,1));
+    for (unsigned test = 0; test < 12; ++test) {
+      CHECK(Sim3DDepthPass_Begin(device,width,16,kArRenderFilter_Nearest));
+      const bool publish = !Sim3DDepthPass_MeshReady(mesh);
+      if (publish) CHECK(Sim3DDepthPass_UpdateSphericalBodyMesh(mesh,source,1));
+      const float perspective = test&1 ? .4f : 0;
+      Sim3DDepthSphericalBodyTransform t = {
+        .matrix = {2,0,0,perspective, 0,2,0,0, 0,0,0,0, 0,0,0,1},
+        .basis = {{1,0,0},{0,1,0},{0,0,1}}, .radius = 1,
+        .texture_basis = {{1,0,0},{0,1,0},{0,0,1}},
+      };
+      if (test%6/2 == 1) { /* Pole strictly INSIDE both original triangles. */
+        const float pole[3][3] = {{1,0,0},{0,0,1},{0,1,0}};
+        memcpy(t.texture_basis,pole,sizeof(pole));
+      }
+      if (test%6/2 == 2) { /* Longitude seam crosses the face interior. */
+        const float seam[3][3] = {{0,0,-1},{0,1,0},{1,0,0}};
+        memcpy(t.texture_basis,seam,sizeof(seam));
+      }
+      Sim3DDepthSphericalSample sample = {.rotation = {1,0,1,0},
+        .atlas = {0,phase&1 ? 16 : 0,32,16}, .texture_size = {64,32}, .color = {1,1,1,.5f}};
+      if (test >= 6) {
+        const float wind[4] = {.6f,.8f,.8f,.6f}; memcpy(sample.rotation,wind,sizeof(wind));
+        sample.offset = (ArRenderPointF){.17f,-.1f};
+      }
+      CHECK(AppendRect(kSim3DDepthPass_DepthOccluder,0,0,width/4,16,.25f,(ArRenderColorF){1,1,1,1}));
+      const uint64_t bytes = geometry_upload_bytes;
+      CHECK(Sim3DDepthPass_AppendSphericalBodies(mesh,&t,&sample,1));
+      memset(&sample,0,sizeof(sample)); /* Includes copied atlas/tint/transform. */
+      Sim3DDepthSphericalBodyTransform original = t; memset(&t,0,sizeof(t));
+      CHECK(!Sim3DDepthPass_UpdateSphericalBodyMesh(mesh,source,1));
+      CHECK(!AppendRect(kSim3DDepthPass_Cloud,0,0,width,16,.5f,(ArRenderColorF){1,1,1,1}));
+      SDL_Surface *actual = ReadPass(device,renderer); CHECK(actual);
+      CHECK(geometry_upload_bytes-bytes == 160 + ((publish || (!phase && !test)) ? sizeof(source) : 0));
+      if (actual) for (int y = 0; y < 16; ++y) for (int x = 0; x < width; ++x) {
+        const double sx = 2*(x+.5)/width-1, sy = 1-2*(y+.5)/16;
+        const double nx = sx/(2-perspective*sx), w = 1+perspective*nx, ny = sy*w/2;
+        const uint8_t *pixel = (uint8_t *)actual->pixels+y*actual->pitch+x*4;
+        if (x < width/4 || fabs(nx) > .5 || fabs(ny) > .5) { CHECK(pixel[3] == 0); continue; }
+        const double n[3] = {nx,ny,z}; double mapped[3] = {0};
+        for (unsigned r = 0; r < 3; ++r) for (unsigned c = 0; c < 3; ++c)
+          mapped[r] += original.texture_basis[r][c]*n[c];
+        const double length = sqrt(nx*nx+ny*ny+z*z);
+        if (test >= 6) {
+          const double xx = mapped[0]*.6+mapped[2]*.8, zz = mapped[2]*.6-mapped[0]*.8;
+          const double yy = mapped[1]*.8+zz*.6;
+          mapped[2] = zz*.8-mapped[1]*.6; mapped[0] = xx; mapped[1] = yy;
+        }
+        double u = (atan2(mapped[2],mapped[0])+3.141592653589793)/6.283185307179586 + (test >= 6 ? .17 : 0);
+        u -= floor(u);
+        const double v = fmin(1,fmax(0,acos(fmin(1,fmax(-1,mapped[1]/length)))/3.141592653589793 - (test >= 6 ? .1 : 0)));
+        const double tx = u*31, ty = v*15;
+        const int ix = (int)floor(tx), iy = (int)floor(ty);
+        const int jx = ix < 31 ? ix+1 : ix, jy = iy < 15 ? iy+1 : iy;
+        const double fx = tx-ix, fy = ty-iy;
+        const int bank = phase&1 ? 16*64 : 0;
+        const double a = (atlas[bank+iy*64+ix]&255)*(1-fx)+(atlas[bank+iy*64+jx]&255)*fx;
+        const double b = (atlas[bank+jy*64+ix]&255)*(1-fx)+(atlas[bank+jy*64+jx]&255)*fx;
+        const double expected = (a*(1-fy)+b*fy)*.375;
+        CHECK(abs((int)pixel[3]-96) <= 1);
+        for (unsigned c = 0; c < 3; ++c) CHECK(fabs(pixel[c]-expected) <= 2);
+        ++checked;
+      }
+      SDL_DestroySurface(actual);
+    }
+  }
+  CHECK(checked > 3000);
+  CHECK(Sim3DDepthPass_Begin(device,32,16,kArRenderFilter_Nearest));
+  Sim3DDepthSphericalBodyTransform t = {.matrix = {1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1},
+    .basis = {{1,0,0},{0,1,0},{0,0,1}}, .texture_basis = {{1,0,0},{0,1,0},{0,0,1}}, .radius = 1};
+  Sim3DDepthSphericalSample samples[2] = {
+    {.rotation = {1,0,1,0}, .atlas = {0,0,32,16}, .texture_size = {64,32}, .color = {1,1,1,.5f}},
+    {.rotation = {1,0,1,0}, .atlas = {0,0,32,16}, .texture_size = {64,32}, .color = {1,1,1,.5f}},
+  };
+  /* Later far translucent samples remain visible through earlier near ones.
+   * They must blend in call order, without writing depth. */
+  uint32_t white[64*32]; for (unsigned i = 0; i < 64*32; ++i) white[i] = 0xffffffffu;
+  const ArRenderRectI full = {0,0,64,32};
+  CHECK(Sim3DDepthPass_UploadAtlasRegions(device,kSim3DDepthPass_Cloud,white,64,32,256,&full,1));
+  Sim3DDepthSphericalBodyTransform near = t; near.matrix[10] = 0; near.matrix[14] = -.5f;
+  Sim3DDepthSphericalSample red = samples[0]; red.color = (ArRenderColorF){1,0,0,.5f};
+  CHECK(Sim3DDepthPass_AppendSphericalBodies(mesh,&near,&red,1));
+  near.matrix[14] = .5f; red.color = (ArRenderColorF){0,0,1,.5f};
+  CHECK(Sim3DDepthPass_AppendSphericalBodies(mesh,&near,&red,1));
+  SDL_Surface *ordered = ReadPass(device,renderer); CHECK(ordered);
+  if (ordered) {
+    const uint8_t *pixel = (uint8_t *)ordered->pixels+8*ordered->pitch+16*4;
+    CHECK(abs((int)pixel[0]-60) <= 1 && pixel[1] == 0 &&
+        abs((int)pixel[2]-96) <= 1 && abs((int)pixel[3]-155) <= 1);
+  }
+  SDL_DestroySurface(ordered);
+  CHECK(Sim3DDepthPass_Begin(device,32,16,kArRenderFilter_Nearest));
+  for (unsigned bad = 0; bad < 6; ++bad) {
+    Sim3DDepthSphericalBodyTransform invalid = t;
+    if (bad == 0) invalid.matrix[0] = NAN;
+    if (bad == 1) invalid.radius = FLT_MAX;
+    if (bad == 2) invalid.radius = 0;
+    if (bad == 3) invalid.texture_basis[0][0] = 2;
+    if (bad == 4) invalid.basis[0][1] = 1;
+    if (bad == 5) invalid.centre[2] = INFINITY;
+    CHECK(!Sim3DDepthPass_AppendSphericalBodies(mesh,&invalid,samples,2));
+  }
+  samples[1].rotation[0] = 2;
+  CHECK(!Sim3DDepthPass_AppendSphericalBodies(mesh,&t,samples,2));
+  samples[1].rotation[0] = 1;
+  CHECK(!Sim3DDepthPass_AppendSphericalBodies(mesh,&t,samples,SIZE_MAX));
+  CHECK(!Sim3DDepthPass_AppendSphericalBodies(mesh,&t,samples,0));
+  /* Invalid groups consumed no slots; 64 samples fit, not 63. */
+  for (unsigned i = 0; i < 32; ++i) CHECK(Sim3DDepthPass_AppendSphericalBodies(mesh,&t,samples,2));
+  CHECK(!Sim3DDepthPass_AppendSphericalBodies(mesh,&t,samples,1));
+  Sim3DDepthPass_DestroyMesh(mesh);
+  CHECK(!ArRenderTexture_IsValid(Sim3DDepthPass_Submit(device,ArRenderTexture_Invalid())));
+  Sim3DDepthPass_Reset(device);
+}
+
 static void TestColoredTerrainOcclusion(
     ArRenderDevice *render_device, SDL_Renderer *renderer) {
   const ArRenderColorF white = {1, 1, 1, 1};
@@ -1173,6 +1325,99 @@ static uint32_t AtlasTestPixel(int x, int y, unsigned seed) {
       (((x * 23u + y * 7u + seed) & 255u) << 16) |
       (((x * 13u + y * 61u + seed) & 255u) << 8) |
       ((x * 3u + y * 37u + seed) & 255u);
+}
+
+static SDL_Surface *ReadGroundAtlas(ArRenderDevice *device, SDL_Renderer *renderer) {
+  CHECK(AppendRect(kSim3DDepthPass_Ground, 0, 0, 32, 16, .5f,
+      (ArRenderColorF){1,1,1,1}));
+  SDL_Surface *surface = ReadPass(device, renderer);
+  CHECK(surface);
+  return surface;
+}
+
+static void TestAtlasVersions(ArRenderDevice *device, SDL_Renderer *renderer) {
+  Sim3DDepthPass_Reset(device);
+  CHECK(!Sim3DDepthPass_CreateAtlasCache());
+  CHECK(Sim3DDepthPass_Require(device));
+  Sim3DDepthAtlasCache *cache = Sim3DDepthPass_CreateAtlasCache();
+  CHECK(cache && !Sim3DDepthPass_CreateAtlasCache());
+  CHECK(!Sim3DDepthPass_CaptureAtlasVersion(cache, 0));
+  CHECK(!Sim3DDepthPass_HasAtlasVersion(NULL, 0));
+  CHECK(!Sim3DDepthPass_SelectAtlasVersion(cache, 0));
+  const ArRenderRectI full = {0,0,2,2};
+  uint32_t pixels[4] = {0xff102030,0xff405060,0xff708090,0xffa0b0c0};
+  SDL_Surface *reference[kSim3DDepthAtlasVersionLimit] = {0};
+  const uint64_t bytes = atlas_copy_bytes, calls = atlas_copy_calls;
+  for (unsigned v = 0; v < kSim3DDepthAtlasVersionLimit; ++v) {
+    const ArRenderRectI patch = {(int)(v % 2), (int)(v / 2 % 2),1,1};
+    pixels[v % 4] = 0xff103050 + v * 0x090603;
+    CHECK(Sim3DDepthPass_UploadAtlasRegions(device, kSim3DDepthPass_Ground,
+        pixels, 2, 2, 8, v ? &patch : &full, 1));
+    CHECK(Sim3DDepthPass_CaptureAtlasVersion(cache, v));
+    CHECK(Sim3DDepthPass_HasAtlasVersion(cache, v));
+    CHECK(Sim3DDepthPass_Begin(device, 32, 16, kArRenderFilter_Nearest));
+    reference[v] = ReadGroundAtlas(device, renderer);
+  }
+  CHECK(atlas_copy_calls - calls == kSim3DDepthAtlasVersionLimit);
+  CHECK(atlas_copy_bytes - bytes == kSim3DDepthAtlasVersionLimit * 16);
+  CHECK(!Sim3DDepthPass_CaptureAtlasVersion(cache, kSim3DDepthAtlasVersionLimit));
+  CHECK(!Sim3DDepthPass_HasAtlasVersion(cache, kSim3DDepthAtlasVersionLimit));
+  uint32_t oversized[2049] = {0};
+  const ArRenderRectI wide = {0,0,2049,1};
+  CHECK(Sim3DDepthPass_UploadAtlasRegions(device, kSim3DDepthPass_Ground,
+      oversized, 2049, 1, sizeof(oversized), &wide, 1));
+  CHECK(!Sim3DDepthPass_CaptureAtlasVersion(cache, 0)); /* Prior version survives. */
+  CHECK(Sim3DDepthPass_UploadAtlasRegions(device, kSim3DDepthPass_Ground,
+      pixels, 2, 2, 8, &full, 1));
+  for (unsigned frame = 0; frame < 48; ++frame) {
+    unsigned v = frame * 7 % kSim3DDepthAtlasVersionLimit;
+    CHECK(Sim3DDepthPass_Begin(device, 32, 16, kArRenderFilter_Nearest));
+    CHECK(Sim3DDepthPass_SelectAtlasVersion(cache, v));
+    CHECK(!Sim3DDepthPass_SelectAtlasVersion(cache, kSim3DDepthAtlasVersionLimit));
+    CHECK(AppendRect(kSim3DDepthPass_Ground, 0,0,32,16,.5f,(ArRenderColorF){1,1,1,1}));
+    CHECK(!Sim3DDepthPass_SelectAtlasVersion(NULL, 0));
+    CHECK(!Sim3DDepthPass_CaptureAtlasVersion(cache, v));
+    SDL_Surface *actual = ReadPass(device, renderer);
+    CHECK(actual && reference[v]);
+    if (actual && reference[v]) for (int y = 0; y < 16; ++y)
+      CHECK(!memcmp((uint8_t *)actual->pixels + y * actual->pitch,
+          (uint8_t *)reference[v]->pixels + y * reference[v]->pitch, 32 * 4));
+    SDL_DestroySurface(actual);
+  }
+  /* Selection cannot leak into another pass / town scene. */
+  CHECK(Sim3DDepthPass_Begin(device, 32, 16, kArRenderFilter_Nearest));
+  SDL_Surface *base = ReadGroundAtlas(device, renderer);
+  if (base && reference[15]) for (int y = 0; y < 16; ++y)
+    CHECK(!memcmp((uint8_t *)base->pixels + y * base->pitch,
+        (uint8_t *)reference[15]->pixels + y * reference[15]->pitch, 32 * 4));
+  SDL_DestroySurface(base);
+  /* A selected retained sample is just as immutable as an ordinary batch. */
+  CHECK(Sim3DDepthPass_Begin(device, 32, 16, kArRenderFilter_Nearest));
+  Sim3DDepthMesh *mesh = Sim3DDepthPass_CreateGeometryMesh();
+  Sim3DDepthVertex quad[4];
+  MakeRect(quad,0,0,32,16,.5f,(ArRenderColorF){1,1,1,1});
+  CHECK(Sim3DDepthPass_UpdateGeometryMesh(mesh,quad,1));
+  CHECK(Sim3DDepthPass_SelectAtlasVersion(cache,0));
+  CHECK(Sim3DDepthPass_AppendGeometryMesh(kSim3DDepthPass_Ground,mesh));
+  CHECK(!Sim3DDepthPass_SelectAtlasVersion(cache,1));
+  CHECK(!Sim3DDepthPass_CaptureAtlasVersion(cache,1));
+  Sim3DDepthPass_DestroyAtlasCache(cache);
+  CHECK(!ArRenderTexture_IsValid(Sim3DDepthPass_Submit(device,ArRenderTexture_Invalid())));
+  Sim3DDepthPass_DestroyMesh(mesh);
+  cache = Sim3DDepthPass_CreateAtlasCache();
+  CHECK(cache && Sim3DDepthPass_CaptureAtlasVersion(cache,0));
+  Sim3DDepthPass_Reset(device);
+  CHECK(!Sim3DDepthPass_HasAtlasVersion(cache,0));
+  CHECK(Sim3DDepthPass_Require(device));
+  CHECK(Sim3DDepthPass_UploadAtlasRegions(device, kSim3DDepthPass_Ground,
+      pixels,2,2,8,&full,1));
+  CHECK(Sim3DDepthPass_CaptureAtlasVersion(cache,0));
+  CHECK(Sim3DDepthPass_Begin(device,32,16,kArRenderFilter_Nearest));
+  CHECK(Sim3DDepthPass_SelectAtlasVersion(cache,0));
+  base = ReadGroundAtlas(device,renderer); SDL_DestroySurface(base);
+  Sim3DDepthPass_DestroyAtlasCache(cache);
+  for (unsigned i = 0; i < kSim3DDepthAtlasVersionLimit; ++i) SDL_DestroySurface(reference[i]);
+  Sim3DDepthPass_Reset(device);
 }
 
 static void TestAtlasRegionPacking(
@@ -1860,7 +2105,7 @@ static void TestSurfaceShadowMapping(ArRenderDevice *device, SDL_Renderer *rende
   CHECK(Sim3DDepthPass_Begin(device, 64, 64, kArRenderFilter_Nearest));
   Sim3DDepthMesh *mesh = Sim3DDepthPass_CreateSurfaceMesh(); CHECK(mesh);
   if (!mesh) return;
-  for (unsigned frame = 0; frame < 28; ++frame) {
+  for (unsigned frame = 0; frame < 56; ++frame) {
     Sim3DDepthSurfaceVertex source[4]; SurfaceVertices(source);
     for (unsigned p = 0; p < 4; ++p) source[p].color.a = 0;
     if (frame >= 14) { /* exact pole, including guarded atan(0,0) in frame 14 */
@@ -1870,6 +2115,10 @@ static void TestSurfaceShadowMapping(ArRenderDevice *device, SDL_Renderer *rende
     Sim3DDepthSurfaceTransform t = SurfaceTransform();
     t.radial.matrix[10] = .25f; t.radial.matrix[3] = .4f;
     t.radial.matrix[12] = (frame % 3) * .01f;
+    if (frame >= 28) {
+      const float c = cosf(frame*.07f), s = sinf(frame*.07f);
+      memcpy(t.shadow_basis,(float[3][3]){{c,0,s},{0,1,0},{-s,0,c}},sizeof(t.shadow_basis));
+    }
     const float phase = (float)(frame % 14);
     Sim3DDepthSphericalSample sample = {
       .rotation = {cosf(phase*.41f), sinf(phase*.41f), cosf(phase*.19f), sinf(phase*.19f)},
@@ -1898,6 +2147,11 @@ static void TestSurfaceShadowMapping(ArRenderDevice *device, SDL_Renderer *rende
           quad.positions[p] = (Sim3DDepthPosition){32*(1+clip[0]/clip[3]),
               32*(1-clip[1]/clip[3]), .5f+.5f*clip[2]/clip[3]};
           memcpy(quad.normals[p], source[p].normal, sizeof(source[p].normal));
+          if (frame >= 28) for (unsigned r = 0; r < 3; ++r) {
+            quad.normals[p][r] = 0;
+            for (unsigned c = 0; c < 3; ++c)
+              quad.normals[p][r] += t.shadow_basis[r][c]*source[p].normal[c];
+          }
         }
         Sim3DDepthVertex ordinary[4]; SphericalReference(&quad, &sample, ordinary);
         CHECK(Sim3DDepthPass_AppendQuads(kSim3DDepthPass_CloudShadow, ordinary, 1));
@@ -2075,6 +2329,189 @@ static void TestSurfaceSelection(ArRenderDevice *device, SDL_Renderer *renderer)
   }
   Sim3DDepthPass_DestroyMesh(mesh); Sim3DDepthPass_DestroyMesh(reference);
   Sim3DDepthPass_Reset(device);
+}
+
+static void TestSurfaceBatches(ArRenderDevice *device, SDL_Renderer *renderer) {
+  Sim3DDepthPass_Reset(device);
+  CHECK(Sim3DDepthPass_Begin(device,64,64,kArRenderFilter_Nearest));
+  Sim3DDepthMesh *mesh = Sim3DDepthPass_CreateSurfaceMesh();
+  Sim3DDepthMesh *reference[2] = {Sim3DDepthPass_CreateSurfaceMesh(),Sim3DDepthPass_CreateSurfaceMesh()};
+  CHECK(mesh && reference[0] && reference[1]);
+  const uint32_t texels[8] = {0xffffffff,0xff8070a0,0xffffffff,0xff8070a0,
+    0xff4060a0,0xffa04070,0xff4060a0,0xffa04070};
+  const ArRenderRectI full = {0,0,4,2};
+  CHECK(Sim3DDepthPass_UploadAtlasRegions(device,kSim3DDepthPass_Cloud,texels,4,2,16,&full,1));
+  CHECK(Sim3DDepthPass_UploadAtlasRegions(device,kSim3DDepthPass_Ground,texels,4,2,16,&full,1));
+  CHECK(Sim3DDepthPass_UploadAtlasRegions(device,kSim3DDepthPass_GroundBlur,texels,4,2,16,&full,1));
+  Sim3DDepthSurfaceVertex source[12]; ArRenderPointF mask[12];
+  for (unsigned q = 0; q < 3; ++q) {
+    SurfaceVertices(source+q*4);
+    for (unsigned p = 0; p < 4; ++p) {
+      source[q*4+p].color = (ArRenderColorF){.2f+.2f*q,.8f-.2f*q,.4f,.75f};
+      source[q*4+p].uv = (ArRenderPointF){p*.2f,q*.25f};
+      mask[q*4+p] = (ArRenderPointF){q*.2f,p*.3f};
+    }
+  }
+  Sim3DDepthSphericalSample shadow = {.rotation={1,0,1,0},.texture_size={4,2},
+    .atlas={0,0,2,2},.color={0,0,0,.25f}};
+  Sim3DDepthSurfaceOverlay overlays[2] = {
+    {.layer=kSim3DDepthPass_GroundBlur,.color={1,1,1,.25f},.clear_rect={.2f,.2f,.3f,.3f},.feather=.5f},
+    {.layer=kSim3DDepthPass_GroundHaze,.color={.2f,.4f,.8f,.25f},.feather=.5f}};
+  for (unsigned frame = 0; frame < 6; ++frame) {
+    const bool selected = frame&1;
+    const size_t source_quad[2] = {selected ? 2 : 0,selected ? 0 : 2};
+    SDL_Surface *expected = NULL;
+    for (unsigned combined = 0; combined < 2; ++combined) {
+      CHECK(Sim3DDepthPass_Begin(device,64,64,kArRenderFilter_Nearest));
+      CHECK(AppendRect(kSim3DDepthPass_Ground,0,0,64,64,.99f,(ArRenderColorF){.1f,.2f,.3f,1}));
+      Sim3DDepthSurfaceBatch batches[2];
+      for (unsigned i = 0; i < 2; ++i) {
+        batches[i] = (Sim3DDepthSurfaceBatch){.layer = kSim3DDepthPass_Ground,
+          .range = {selected ? i : source_quad[i],1},
+          .transform = SurfaceTransform(), .shadows=&shadow,.shadow_count=1,
+          .overlays=overlays,.overlay_count=2};
+        batches[i].transform.radial.matrix[12] = i ? .25f : -.15f;
+        batches[i].transform.radial.matrix[13] = i*.12f;
+        if (i) memcpy(batches[i].transform.shadow_basis,
+            (float[3][3]){{0,0,1},{0,1,0},{-1,0,0}},sizeof(batches[i].transform.shadow_basis));
+        if (frame == 2) batches[i].range.quad_count = i;
+        if (frame >= 4) {
+          batches[i].transform.radial.matrix[3] = .8f;
+          batches[i].transform.radial.matrix[15] = .25f;
+          batches[i].transform.radial.matrix[10] = 0;
+        }
+      }
+      const uint64_t bytes = geometry_upload_bytes;
+      if (combined) {
+        CHECK(Sim3DDepthPass_UpdateSurfaceMeshWithMask(mesh,source,mask,3));
+        const Sim3DDepthMeshRange ranges[2] = {{2,1},{0,1}};
+        CHECK(Sim3DDepthPass_SelectSurfaceMesh(mesh,selected ? ranges : NULL,selected ? 2 : 0));
+        for (unsigned bad = 0; bad < 5; ++bad) {
+          Sim3DDepthSurfaceBatch invalid[2]; memcpy(invalid,batches,sizeof(invalid));
+          if (bad == 0) invalid[1].range.first_quad = SIZE_MAX;
+          if (bad == 1) invalid[1].transform.shadow_basis[2][0] = NAN;
+          if (bad == 2) invalid[1].transform.shadow_basis[2][0] = -2;
+          if (bad == 3) memcpy(invalid[1].transform.shadow_basis[2],invalid[1].transform.shadow_basis[0],3*sizeof(float));
+          if (bad == 4) invalid[1].shadow_count = 65;
+          CHECK(!Sim3DDepthPass_AppendSurfaceBatches(mesh,invalid,2));
+        }
+        /* Rejections cannot mark the source queued. */
+        CHECK(Sim3DDepthPass_SelectSurfaceMesh(mesh,selected ? ranges : NULL,selected ? 2 : 0));
+        CHECK(Sim3DDepthPass_AppendSurfaceBatches(mesh,batches,2));
+        memset(batches,0,sizeof(batches)); /* All transforms/ranges are copied. */
+      } else for (unsigned i = 0; i < 2; ++i) if (batches[i].range.quad_count) {
+        CHECK(Sim3DDepthPass_UpdateSurfaceMeshWithMask(reference[i],source+source_quad[i]*4,mask+source_quad[i]*4,1));
+        CHECK(Sim3DDepthPass_AppendSurfaceLayers(reference[i],&batches[i].transform,
+            &shadow,1,overlays,2));
+      }
+      SDL_Surface *actual = ReadPass(device,renderer);
+      if (!combined) expected = actual;
+      else {
+        CheckSurfacePixels(actual,expected,0,600+frame);
+        CHECK(geometry_upload_bytes-bytes == 160+3*256);
+        SDL_DestroySurface(actual);
+      }
+    }
+    SDL_DestroySurface(expected);
+  }
+  CHECK(Sim3DDepthPass_Begin(device,64,64,kArRenderFilter_Nearest));
+  CHECK(Sim3DDepthPass_SelectSurfaceMesh(mesh,NULL,0));
+  Sim3DDepthSurfaceBatch budgets[64];
+  for (unsigned i = 0; i < 64; ++i)
+    budgets[i] = (Sim3DDepthSurfaceBatch){.layer=kSim3DDepthPass_Ground,
+      .range={0,1},.transform=SurfaceTransform(),
+      .shadows=&shadow,.shadow_count=1,.overlays=overlays,.overlay_count=2};
+  CHECK(!Sim3DDepthPass_AppendSurfaceBatches(mesh,budgets,65));
+  CHECK(!Sim3DDepthPass_AppendSurfaceBatches(mesh,budgets,22)); /* 66 effects: atomic rejection. */
+  CHECK(Sim3DDepthPass_SelectSurfaceMesh(mesh,NULL,0));
+  for (unsigned i = 0; i < 64; ++i) budgets[i].shadow_count = budgets[i].overlay_count = 0;
+  CHECK(Sim3DDepthPass_AppendSurfaceBatches(mesh,budgets,64));
+  CHECK(!Sim3DDepthPass_AppendSurfaceBatches(mesh,budgets,1));
+  const uint64_t draws = draw_calls;
+  SDL_Surface *actual = ReadPass(device,renderer); CHECK(actual); SDL_DestroySurface(actual);
+  CHECK(draw_calls-draws == 64);
+  Sim3DDepthPass_DestroyMesh(reference[0]); Sim3DDepthPass_DestroyMesh(reference[1]);
+  Sim3DDepthPass_DestroyMesh(mesh); Sim3DDepthPass_Reset(device);
+}
+
+/* Independent ordinary-geometry oracle for native cutouts. Different atlas
+ * contents expose a wrong material; sharp alpha holes expose a wrong sampler
+ * or depth pipeline. Both town and globe materials retain ordinary ordering. */
+static void TestSurfaceCutouts(ArRenderDevice *device, SDL_Renderer *renderer) {
+  Sim3DDepthPass_Reset(device);
+  CHECK(Sim3DDepthPass_Begin(device,64,64,kArRenderFilter_Nearest));
+  Sim3DDepthMesh *mesh = Sim3DDepthPass_CreateSurfaceMesh(); CHECK(mesh);
+  uint32_t texels[64], ground[64];
+  for (unsigned p = 0; p < 64; ++p) {
+    texels[p] = ((p/8 + p%8)&1) ? 0xff20d040 : 0;
+    ground[p] = 0xffff0000;
+  }
+  const ArRenderRectI full = {0,0,8,8};
+  CHECK(Sim3DDepthPass_UploadAtlasRegions(device,kSim3DDepthPass_Ground,ground,8,8,32,&full,1));
+  CHECK(Sim3DDepthPass_UploadAtlasRegions(device,kSim3DDepthPass_Mountain,texels,8,8,32,&full,1));
+  CHECK(Sim3DDepthPass_UploadAtlasRegions(device,kSim3DDepthPass_WorldMountain,texels,8,8,32,&full,1));
+  Sim3DDepthSurfaceVertex source[8]; SurfaceVertices(source); SurfaceVertices(source+4);
+  const ArRenderPointF uv[4] = {{.07f,.09f},{.91f,.08f},{.87f,.92f},{.06f,.88f}};
+  for (unsigned p = 0; p < 4; ++p) {
+    source[4+p].uv = uv[p];
+    source[4+p].elevation[1] += p*.03125f;
+  }
+  CHECK(Sim3DDepthPass_UpdateSurfaceMesh(mesh,source,2));
+  for (unsigned state = 0; state < 8; ++state) {
+    const Sim3DDepthPassLayer layer = state&1 ? kSim3DDepthPass_Mountain : kSim3DDepthPass_WorldMountain;
+    Sim3DDepthSurfaceTransform t = SurfaceTransform();
+    t.ambient = state&2 ? .90f : 1; t.diffuse = 0;
+    if (state&4) t.radial.matrix[3] = .45f;
+    SDL_Surface *expected = NULL;
+    for (unsigned gpu = 0; gpu < 2; ++gpu) {
+      CHECK(Sim3DDepthPass_Begin(device,64,64,kArRenderFilter_Nearest));
+      CHECK(AppendRect(layer,0,0,64,64,.99f,(ArRenderColorF){.1f,.2f,.3f,1}));
+      CHECK(AppendRect(kSim3DDepthPass_Solid,24,24,34,34,.1f,(ArRenderColorF){1,1,1,1}));
+      if (gpu) {
+        const Sim3DDepthMeshRange selection = {1,1};
+        CHECK(Sim3DDepthPass_SelectSurfaceMesh(mesh,state&2 ? &selection : NULL,state&2 ? 1 : 0));
+        Sim3DDepthSurfaceBatch batch = {.layer=layer,.range={state&2 ? 0 : 1,1},.transform=t};
+        const uint64_t bytes = geometry_upload_bytes;
+        CHECK(Sim3DDepthPass_AppendSurfaceBatches(mesh,&batch,1));
+        memset(&batch,0,sizeof(batch));
+        CHECK(AppendRect(layer,0,0,64,64,.85f,(ArRenderColorF){.3f,.1f,.4f,1}));
+        SDL_Surface *actual = ReadPass(device,renderer);
+        CheckSurfacePixels(actual,expected,0,700+state);
+        CHECK(geometry_upload_bytes-bytes == 3*160+(!state ? 2*256 : 0));
+        SDL_DestroySurface(actual);
+      } else {
+        Sim3DDepthVertex vertices[4];
+        for (unsigned p = 0; p < 4; ++p) {
+          const Sim3DDepthModelVertex v = SurfaceReference(&source[4+p],&t);
+          Scene3DPoint screen; float depth;
+          CHECK(Scene3D_ProjectWorldPointWithDepth(t.radial.matrix,v.position[0],v.position[1],
+              v.position[2],64,64,&screen,&depth));
+          vertices[p] = (Sim3DDepthVertex){screen.x,screen.y,depth,v.color,source[4+p].uv};
+        }
+        CHECK(Sim3DDepthPass_AppendQuad(layer,vertices));
+        CHECK(AppendRect(layer,0,0,64,64,.85f,(ArRenderColorF){.3f,.1f,.4f,1}));
+        expected = ReadPass(device,renderer);
+      }
+    }
+    SDL_DestroySurface(expected);
+  }
+  CHECK(Sim3DDepthPass_Begin(device,64,64,kArRenderFilter_Nearest));
+  CHECK(Sim3DDepthPass_SelectSurfaceMesh(mesh,NULL,0));
+  Sim3DDepthSurfaceBatch batches[2] = {
+    {.layer=kSim3DDepthPass_Ground,.range={0,1},.transform=SurfaceTransform()},
+    {.layer=kSim3DDepthPass_WorldMountain,.range={1,1},.transform=SurfaceTransform()}};
+  for (unsigned bad = 0; bad < 4; ++bad) {
+    Sim3DDepthSurfaceBatch invalid[2]; memcpy(invalid,batches,sizeof(invalid));
+    if (bad == 0) invalid[1].layer = kSim3DDepthPass_DepthOccluder;
+    if (bad == 1) invalid[1].layer = kSim3DDepthPass_GroundBlur;
+    if (bad == 2) invalid[1].shadow_count = 1;
+    if (bad == 3) invalid[1].overlay_count = 1;
+    CHECK(!Sim3DDepthPass_AppendSurfaceBatches(mesh,invalid,2));
+    CHECK(Sim3DDepthPass_SelectSurfaceMesh(mesh,NULL,0)); /* Still not queued. */
+  }
+  CHECK(Sim3DDepthPass_AppendSurfaceBatches(mesh,batches,2));
+  SDL_Surface *actual = ReadPass(device,renderer); CHECK(actual); SDL_DestroySurface(actual);
+  Sim3DDepthPass_DestroyMesh(mesh); Sim3DDepthPass_Reset(device);
 }
 
 static void TestSurfaceContracts(ArRenderDevice *device, SDL_Renderer *renderer) {
@@ -2336,9 +2773,11 @@ int main(void) {
   Sim3DDepthPass_Reset(&render_device);
   TestColoredTerrainOcclusion(&render_device, renderer);
   TestAtlasRegionPacking(&render_device, renderer);
+  TestAtlasVersions(&render_device, renderer);
   TestBatchCopyAndGrowth(&render_device, renderer);
   TestRetainedSamples(&render_device, renderer);
   TestSphericalSamples(&render_device, renderer);
+  TestSphericalBodies(&render_device, renderer);
   TestModelMesh(&render_device, renderer);
   TestHardwareClippedModels(&render_device, renderer);
   TestRadialModels(&render_device, renderer);
@@ -2347,6 +2786,8 @@ int main(void) {
   TestSurfaceShadowMapping(&render_device, renderer);
   TestSurfaceOverlays(&render_device, renderer);
   TestSurfaceSelection(&render_device, renderer);
+  TestSurfaceBatches(&render_device, renderer);
+  TestSurfaceCutouts(&render_device, renderer);
   TestSurfaceContracts(&render_device, renderer);
   TestRetainedWorldSurfaces(&render_device, renderer);
   TestSolidRanges(&render_device, renderer, false);

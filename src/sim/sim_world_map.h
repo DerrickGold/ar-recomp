@@ -47,6 +47,7 @@ enum {
 enum {
   kWorldWaterSourceFirst = 0xB000,
   kWorldWaterSourceStride = 0x40,
+  kWorldWaterFrameCount = 4,
 };
 
 /* Loads the ROM blobs. Safe to call with a short/absent ROM: the module then
@@ -75,6 +76,10 @@ int SimWorldMap_PublishBuiltTilemap(const uint8_t *tilemap);
  * Returns the number of visible tilemap cells dirtied, or zero for an invalid
  * or already-current source. */
 int SimWorldMap_SetWaterAnimationSource(uint16_t source);
+
+/* Current validated animation identity, not a clock approximation. Unknown
+ * initial ROM art is not frame zero. Failure leaves the output unchanged. */
+bool SimWorldMap_WaterAnimationFrame(uint8_t *frame);
 
 /* Marks cells whose developed OR baseline pixels can change with a wave
  * phase, including the one-cell halo needed by Scale2x. Does not consume the

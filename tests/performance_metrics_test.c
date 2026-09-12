@@ -134,11 +134,13 @@ static void TestToggleAndWindow(void) {
     PerformanceMetrics_Record(PerformanceMetrics_Epoch(), kPerformance_Emulation, 2000000);
     PerformanceMetrics_Add(kPerformanceCount_Ticks, 2);
     PerformanceMetrics_Add(kPerformanceCount_CpuProject, 3);
-    PerformanceMetrics_Add(kPerformanceCount_CpuGeometryReuse, 2);
     PerformanceMetrics_Add(kPerformanceCount_GpuReuse, 4);
     PerformanceMetrics_Add(kPerformanceCount_GeometryRejected, 5);
     PerformanceMetrics_Add(kPerformanceCount_DepthCopyBytes, 2097152);
     PerformanceMetrics_Add(kPerformanceCount_DepthCopyCalls, 3);
+    PerformanceMetrics_Add(kPerformanceCount_AtlasReuse, 1);
+    PerformanceMetrics_Add(kPerformanceCount_AtlasCopyBytes, 4194304);
+    PerformanceMetrics_Add(kPerformanceCount_AtlasCopyCalls, 2);
     PerformanceMetrics_PresentCompleted((uint64_t)i * 10000000);
     PerformanceMetrics_Snapshot(&snapshot);
     CHECK(snapshot.ready == (i == 100));
@@ -151,11 +153,13 @@ static void TestToggleAndWindow(void) {
   CHECK(snapshot.stages[kPerformance_Ppu].calls == 0);
   NEAR(snapshot.counts[kPerformanceCount_Ticks], 2);
   NEAR(snapshot.counts[kPerformanceCount_CpuProject], 3);
-  NEAR(snapshot.counts[kPerformanceCount_CpuGeometryReuse], 2);
   NEAR(snapshot.counts[kPerformanceCount_GpuReuse], 4);
   NEAR(snapshot.counts[kPerformanceCount_GeometryRejected], 5);
   NEAR(snapshot.counts[kPerformanceCount_DepthCopyBytes], 2097152);
   NEAR(snapshot.counts[kPerformanceCount_DepthCopyCalls], 3);
+  NEAR(snapshot.counts[kPerformanceCount_AtlasReuse], 1);
+  NEAR(snapshot.counts[kPerformanceCount_AtlasCopyBytes], 4194304);
+  NEAR(snapshot.counts[kPerformanceCount_AtlasCopyCalls], 2);
   NEAR(snapshot.counts[kPerformanceCount_Fallbacks], 0);
   const uint64_t revision = snapshot.revision;
   PerformanceMetrics_Configure(true, false);
@@ -172,11 +176,13 @@ static void TestToggleAndWindow(void) {
   PerformanceMetrics_Snapshot(&snapshot);
   CHECK(snapshot.ready && snapshot.presents == 2);
   NEAR(snapshot.counts[kPerformanceCount_CpuProject], 0);
-  NEAR(snapshot.counts[kPerformanceCount_CpuGeometryReuse], 0);
   NEAR(snapshot.counts[kPerformanceCount_GpuReuse], 0);
   NEAR(snapshot.counts[kPerformanceCount_GeometryRejected], 0);
   NEAR(snapshot.counts[kPerformanceCount_DepthCopyBytes], 0);
   NEAR(snapshot.counts[kPerformanceCount_DepthCopyCalls], 0);
+  NEAR(snapshot.counts[kPerformanceCount_AtlasReuse], 0);
+  NEAR(snapshot.counts[kPerformanceCount_AtlasCopyBytes], 0);
+  NEAR(snapshot.counts[kPerformanceCount_AtlasCopyCalls], 0);
   NEAR(snapshot.stages[kPerformance_Upload].mean_ms, 3);
   NEAR(snapshot.stages[kPerformance_Upload].maximum_ms, 6);
   CHECK(!snapshot.stages[kPerformance_Emulation].calls);
@@ -234,12 +240,17 @@ static void TestOverlayLayout(void) {
   PerformanceSnapshot snapshot = {.ready = true, .fps = 40, .frame_mean_ms = 25};
   snapshot.counts[kPerformanceCount_DepthCopyBytes] = 2097152;
   snapshot.counts[kPerformanceCount_DepthCopyCalls] = 3;
+  snapshot.counts[kPerformanceCount_AtlasReuse] = 1;
+  snapshot.counts[kPerformanceCount_AtlasCopyBytes] = 4194304;
+  snapshot.counts[kPerformanceCount_AtlasCopyCalls] = 2;
   PerformanceOverlayModel copy_model;
   PerformanceOverlay_Build(&snapshot, 2, (ArRenderExtentI){1280,800}, &copy_model);
-  bool copy_line = false;
-  for (int i = 0; i < copy_model.line_count; ++i)
+  bool copy_line = false, atlas_line = false;
+  for (int i = 0; i < copy_model.line_count; ++i) {
     copy_line |= !strcmp(copy_model.lines[i].text, "GPU copy 2.00 MiB / 3.0 calls");
-  CHECK(copy_line);
+    atlas_line |= !strcmp(copy_model.lines[i].text, "Atlas hit 1.0 copy 4.00MiB/2.0");
+  }
+  CHECK(copy_line && atlas_line);
   const ArRenderExtentI sizes[] = {{1280,800}, {800,1280}, {640,480}, {560,390}, {320,240}, {240,120}, {0,0}};
   for (int i = 0; i < kPerformanceStage_Count; i++) {
     const char *name = PerformanceMetrics_StageName((PerformanceStage)i);

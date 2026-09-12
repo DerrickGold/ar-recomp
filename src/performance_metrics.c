@@ -142,11 +142,15 @@ static void Publish(uint64_t now) {
         out->counts[kPerformanceCount_ScanBytes] / 1048576,
         out->counts[kPerformanceCount_UploadBytes] / 1048576,
         out->counts[kPerformanceCount_MirrorReallocs]);
-    fprintf(stderr, "[pipeline-path] cpu-project=%.2f cpu-stage=%.2f gpu-reuse=%.2f publish=%.2f opt-out=%.2f limit=%.2f rejected=%.2f cpu-reuse=%.2f (events/present, not view fallbacks)\n",
+    fprintf(stderr, "[pipeline-atlas] reuse=%.2f copy-MiB=%.3f copy-calls=%.2f (per-present; copies are GPU-only)\n",
+        out->counts[kPerformanceCount_AtlasReuse],
+        out->counts[kPerformanceCount_AtlasCopyBytes] / 1048576,
+        out->counts[kPerformanceCount_AtlasCopyCalls]);
+    fprintf(stderr, "[pipeline-path] cpu-project=%.2f cpu-stage=%.2f gpu-reuse=%.2f publish=%.2f opt-out=%.2f limit=%.2f rejected=%.2f (events/present, not view fallbacks)\n",
         out->counts[kPerformanceCount_CpuProject], out->counts[kPerformanceCount_CpuStage],
         out->counts[kPerformanceCount_GpuReuse], out->counts[kPerformanceCount_GeometryPublish],
         out->counts[kPerformanceCount_GeometryOptOut], out->counts[kPerformanceCount_GeometryLimit],
-        out->counts[kPerformanceCount_GeometryRejected], out->counts[kPerformanceCount_CpuGeometryReuse]);
+        out->counts[kPerformanceCount_GeometryRejected]);
   }
   memset(s_window.elapsed, 0, sizeof(s_window.elapsed));
   memset(s_window.maximum, 0, sizeof(s_window.maximum));
