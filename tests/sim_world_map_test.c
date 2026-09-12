@@ -131,11 +131,15 @@ static void TestWaterAnimation(void) {
   CHECK(SimWorldMap_Bake(pixels, kSimWorldMapPixels));
   CHECK(pixels[FirstPixelForTile(0)] == ColorForTile(0x00));
   CHECK(pixels[FirstPixelForTile(1)] == ColorForTile(0xAA));
+  uint8_t phase = 99;
+  CHECK(!SimWorldMap_WaterAnimationFrame(&phase) && phase == 99);
+  CHECK(!SimWorldMap_WaterAnimationFrame(NULL));
 
   uint32_t serial = SimWorldMap_Serial();
   const uint32_t geography_serial = SimWorldMap_GeographySerial();
   const int water_cells = 129; /* 128 synthetic tile-$00 cells plus tile 1. */
   CHECK(SimWorldMap_SetWaterAnimationSource(0xB000) == water_cells);
+  CHECK(SimWorldMap_WaterAnimationFrame(&phase) && phase == 0);
   CHECK(SimWorldMap_Serial() != serial);
   CHECK(SimWorldMap_GeographySerial() == geography_serial);
   CHECK(SimWorldMap_Bake(pixels, kSimWorldMapPixels));
@@ -147,9 +151,11 @@ static void TestWaterAnimation(void) {
   CHECK(SimWorldMap_SetWaterAnimationSource(0xAFC0) == 0);
   CHECK(SimWorldMap_SetWaterAnimationSource(0xB001) == 0);
   CHECK(SimWorldMap_SetWaterAnimationSource(0xB100) == 0);
+  CHECK(SimWorldMap_WaterAnimationFrame(&phase) && phase == 0);
   CHECK(SimWorldMap_Serial() == serial);
 
   CHECK(SimWorldMap_SetWaterAnimationSource(0xB0C0) == water_cells);
+  CHECK(SimWorldMap_WaterAnimationFrame(&phase) && phase == 3);
   CHECK(SimWorldMap_Bake(pixels, kSimWorldMapPixels));
   CHECK(pixels[FirstPixelForTile(0)] == ColorForTile(0x14));
   CHECK(pixels[FirstPixelForTile(1)] == ColorForTile(0x14));
@@ -182,6 +188,8 @@ static void TestUnavailableRom(void) {
   CHECK(!SimWorldMap_DevelopedAvailable());
   CHECK(SimWorldMap_Serial() == 0);
   CHECK(SimWorldMap_GeographySerial() == 0);
+  uint8_t phase = 99;
+  CHECK(!SimWorldMap_WaterAnimationFrame(&phase) && phase == 99);
   CHECK(SimWorldMap_MountainCoverage(0, 0) == 0.0f);
   CHECK(SimWorldMap_Baseline() == NULL);
   CHECK(SimWorldMap_BakedPixels() == NULL);

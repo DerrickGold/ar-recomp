@@ -1,11 +1,14 @@
 # Shared GPU surface prototype — 2026-09-12
 
-Status: **default shared land/cliff renderer** in navigation and Sky Palace.
+Status: **default shared ocean/land/cliff/mountain renderer** in navigation and Sky Palace.
 Ground, blur, haze and cloud-shadow samples share GPU placement, including the
 [registered cliff source](gpu-cliff-source.md). The hybrid cliff switch is removed.
 `AR_SIM3D_WORLD_GPU_GRID=0` selects the complete compatibility renderer, also used
-automatically if source setup fails. Ocean, mountains and cloud bodies remain
-on their existing paths. Model offload and multicore support remain available.
+automatically if source setup fails. The [ocean integration](gpu-ocean-source.md)
+now shares that source and depth-matched weather using independently transformed
+ranges. [Native mountain cutouts](gpu-mountain-source.md) now share that allocation
+with their own material/transform; both old CPU stream caches are retired.
+Cloud bodies remain on their existing path. Model offload and multicore support remain available.
 The historical experiments/results below predate this default promotion.
 
 ## Contract and ownership
@@ -271,4 +274,7 @@ their former GPU residency or resolve the moving-camera integration gate.
 
 Investigate isolated CPU/GPU coverage differences, repeat quiet local cohorts,
 and measure GPU/present cost and cold source construction on Deck as the
-remaining surfaces are integrated. This is not async compute or GPU-driven visibility.
+remaining surfaces are integrated. The [ocean source](gpu-ocean-source.md) now
+removes its CPU projection, clipping, stream cache and receiver staging without
+adding an opaque handle; mountain materials remain. This is not async compute
+or GPU-driven visibility.

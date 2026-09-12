@@ -1,12 +1,12 @@
 # GPU-world CPU stream reuse — 2026-09-12
 
-Status: enabled by default **inside the default GPU land/cliff path**.
-`AR_SIM3D_WORLD_CLIP_CACHE=0` disables this cache;
-`AR_SIM3D_WORLD_GPU_GRID_CULL=0` independently disables the now-default coarse
-culling. These are startup diagnostics, not saved graphics-quality settings.
-`AR_SIM3D_WORLD_GPU_GRID=0` requests the complete compatibility renderer, which
-retains its more complete held-view GPU surface cache. The historical measurements
-below predate promotion of the shared land/cliff path.
+Status: **retired**. [GPU ocean](gpu-ocean-source.md) and
+[GPU mountain source](gpu-mountain-source.md) replace both CPU stream caches.
+Their allocations, capture/replay helpers, `AR_SIM3D_WORLD_CLIP_CACHE` toggle and
+unused `cpu-reuse` counter/overlay column have been removed. The complete
+compatibility renderer still retains its held-view **GPU** surface cache.
+The measurements and implementation account below describe the historical
+intermediate optimization, not the current shipping path.
 
 ## What changes
 
@@ -136,12 +136,6 @@ Reproduction uses `tools/compare_pipeline_performance.py`, the manifest
 variants set `AR_SIM3D_WORLD_GPU_GRID=1` and `AR_SIM3D_WORLD_GPU_GRID_CULL=1`.
 The Deck script, pinned binary and guards are in the evidence directory.
 
-The subsequent [cliff-source prototype](gpu-cliff-source.md) integrates cliffs
-and their ground/blur/haze/shadow consumers into one GPU source, now enabled by
-default. This exact CPU cache remains unchanged for ocean and mountains.
-
-Remaining: integrate ocean and its exact-depth receivers into shared
-GPU source transforms, then mountain materials within the existing handle and
-sample budgets. Remove remaining recurring uploads and split-material overhead
-there; do not add further CPU visibility complexity without measured benefit.
-Continue auditing the documented isolated CPU/GPU coverage differences.
+Subsequent source offloads retired this cache in stages: [cliffs](gpu-cliff-source.md),
+[ocean](gpu-ocean-source.md), then [mountains](gpu-mountain-source.md). Current
+limitations and remaining uploads are recorded in those follow-up reports.

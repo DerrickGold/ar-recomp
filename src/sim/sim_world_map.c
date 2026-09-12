@@ -18,7 +18,6 @@ enum {
    * tiles the ROM blob holds, this is how many colours a pixel can name. */
   kWorldPaletteEntries = 256,
   kWorldTileBytes = 64,
-  kWorldWaterFrameCount = 4,
   /* kWorldWaterSourceFirst / kWorldWaterSourceStride are shared with the
    * builder — see sim_world_map.h. */
   kWorldWaterTileFirst = 0x00,
@@ -216,6 +215,13 @@ int SimWorldMap_SetWaterAnimationSource(uint16_t source) {
 
 uint32_t SimWorldMap_Serial(void) {
   return g_world.available ? g_world.serial : 0;
+}
+
+bool SimWorldMap_WaterAnimationFrame(uint8_t *frame) {
+  if (!frame || !g_world.available || !g_world.water_source_valid) return false;
+  *frame = (uint8_t)((g_world.water_source - kWorldWaterSourceFirst) /
+      kWorldWaterSourceStride);
+  return true;
 }
 
 bool SimWorldMap_WaterAnimationCells(uint8_t *cells) {

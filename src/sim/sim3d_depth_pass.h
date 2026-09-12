@@ -214,14 +214,42 @@ bool Sim3DDepthPass_UpdateSphericalMesh(Sim3DDepthMesh *mesh,
 bool Sim3DDepthPass_AppendSphericalSample(Sim3DDepthPassLayer layer,
     Sim3DDepthMesh *mesh, const Sim3DDepthSphericalSample *sample);
 
+/* Continuous spherical body mapping. Unlike exact-depth shadow receivers,
+ * these transparent shells sample normalized, perspective-interpolated sphere
+ * directions per fragment: longitude seams/poles need no moving CPU splits.
+ * Source quads retain unit directions and screen-linear opacity. Placement is
+ * radius * basis * normal + centre; texture_basis maps SOURCE normals into the
+ * texture sphere before each sample's rotation. Both bases are orthonormal.
+ * The matrix uses -W..W clip Z; hardware owns clipping, not the caller.
+ *
+ * One existing effect handle, camera/viewport-independent Ready, copied values,
+ * bounded source/sample budgets and the same reset/queued-update rules. Only
+ * Cloud material is supported (its existing atlas, linear sampler, no depth
+ * writes). Append validates ALL samples atomically; rejection queues nothing
+ * and permits complete ordinary fallback. No ordinary Cloud appends may mix.
+ * This is continuous mapping, not bit-identical legacy affine atlas mapping. */
+typedef struct Sim3DDepthSphericalBodyVertex {
+  float normal[3], opacity;
+} Sim3DDepthSphericalBodyVertex;
+typedef struct Sim3DDepthSphericalBodyTransform {
+  float matrix[16], basis[3][3], centre[3], radius, texture_basis[3][3];
+} Sim3DDepthSphericalBodyTransform;
+Sim3DDepthMesh *Sim3DDepthPass_CreateSphericalBodyMesh(void);
+bool Sim3DDepthPass_UpdateSphericalBodyMesh(Sim3DDepthMesh *mesh,
+    const Sim3DDepthSphericalBodyVertex *vertices, size_t quad_count);
+bool Sim3DDepthPass_AppendSphericalBodies(Sim3DDepthMesh *mesh,
+    const Sim3DDepthSphericalBodyTransform *transform,
+    const Sim3DDepthSphericalSample *samples, size_t sample_count);
+
 /* Shared radial surface source used by globe views.
  * One camera-independent quad stream drives BOTH textured Ground and optional
  * spherical CloudShadow samples. Every draw uses identical homogeneous
  * positions/triangles and hardware clipping. Colors AND UVs are screen-linear;
  * this is not a bit-exact replacement for legacy CPU-clipped attributes.
  *
- * normal is the chart-space unit direction used for radial placement and
- * spherical atlas coordinates. elevation is {anchor source units, extra rise
+ * normal is the source-space unit direction used for radial placement and,
+ * by default, spherical atlas coordinates (see shadow_basis below).
+ * elevation is {anchor source units, extra rise
  * source units}; extra_scale converts the latter to world units. shade_normal
  * is a unit (or zero) source-space lighting normal. Ground RGB is multiplied
  * by ambient + diffuse * max(0, dot(shade_normal, light)); alpha is unchanged.
@@ -248,6 +276,10 @@ typedef struct Sim3DDepthSurfaceVertex {
 typedef struct Sim3DDepthSurfaceTransform {
   Sim3DDepthRadialTransform radial;
   float extra_scale, light[3], ambient, diffuse;
+  /* Optional orthonormal source-to-shadow coordinate frame. All zeros mean
+   * identity, preserving the ordinary chart-space source. Placement/lighting
+   * are unaffected. Lets a rigidly oriented source sample another sphere frame. */
+  float shadow_basis[3][3];
 } Sim3DDepthSurfaceTransform;
 Sim3DDepthMesh *Sim3DDepthPass_CreateSurfaceMesh(void);
 bool Sim3DDepthPass_UpdateSurfaceMesh(Sim3DDepthMesh *mesh,
@@ -288,6 +320,28 @@ bool Sim3DDepthPass_AppendSurfaceLayers(Sim3DDepthMesh *mesh,
     const Sim3DDepthSphericalSample *shadows, size_t shadow_count,
     const Sim3DDepthSurfaceOverlay *overlays, size_t overlay_count);
 
+/* Independently transformed/materialled ranges in ONE retained source. Ranges
+ * address the current selected stream (or full source when not selected).
+ * Valid empty ranges draw nothing. Copies all inputs; validates every range,
+ * transform, layer and combined budget before queuing ANY batch. At most 64
+ * batches, within the existing geometry/effect budgets and opaque handle count.
+ * Range order is draw order within each layer; ordinary insertion order is kept.
+ * layer must explicitly be Ground, Mountain or WorldMountain. Cutouts use their
+ * own atlas and nearest sampler, with the same alpha/depth policy as ordinary
+ * geometry. Only Ground accepts shadows/overlays: those do not sample cutout
+ * alpha and would otherwise fill transparent holes. */
+typedef struct Sim3DDepthSurfaceBatch {
+  Sim3DDepthPassLayer layer;
+  Sim3DDepthMeshRange range;
+  Sim3DDepthSurfaceTransform transform;
+  const Sim3DDepthSphericalSample *shadows;
+  size_t shadow_count;
+  const Sim3DDepthSurfaceOverlay *overlays;
+  size_t overlay_count;
+} Sim3DDepthSurfaceBatch;
+bool Sim3DDepthPass_AppendSurfaceBatches(Sim3DDepthMesh *mesh,
+    const Sim3DDepthSurfaceBatch *batches, size_t batch_count);
+
 /* Creates the shaders/pipeline and verifies D32 support. Call during video
  * startup so an unsupported backend is a launch error, never a missing-scene
  * fallback discovered after entering SIM mode. */
@@ -316,6 +370,24 @@ bool Sim3DDepthPass_UploadAtlasRegions(
     ArRenderDevice *device, Sim3DDepthPassLayer layer,
     const uint32_t *argb_pixels, int width, int height, int pitch,
     const ArRenderRectI *regions, int region_count);
+
+/* Optional owner-thread snapshots of the Ground atlas. One cache may exist,
+ * with at most 16 immutable versions, each at most 2048x2048 RGBA8 (256 MiB
+ * total). Callers own content/revision identities; the adapter only copies
+ * a successfully published mutable atlas, entirely on the GPU. Capture is
+ * atomic and does not select a different version. Each Begin restores the
+ * mutable atlas. Select requires an active pass; Select(NULL, 0) restores the
+ * mutable atlas and failed selection leaves the binding unchanged.
+ * Binding/capture cannot change after Ground has been queued in a pass.
+ * Reset releases GPU payloads but preserves the handle for recapture.
+ * Destroying a queued selection invalidates that pass, not borrowed memory. */
+typedef struct Sim3DDepthAtlasCache Sim3DDepthAtlasCache;
+enum { kSim3DDepthAtlasVersionLimit = 16 };
+Sim3DDepthAtlasCache *Sim3DDepthPass_CreateAtlasCache(void);
+bool Sim3DDepthPass_HasAtlasVersion(const Sim3DDepthAtlasCache *cache, unsigned version);
+bool Sim3DDepthPass_CaptureAtlasVersion(Sim3DDepthAtlasCache *cache, unsigned version);
+bool Sim3DDepthPass_SelectAtlasVersion(Sim3DDepthAtlasCache *cache, unsigned version);
+void Sim3DDepthPass_DestroyAtlasCache(Sim3DDepthAtlasCache *cache);
 bool Sim3DDepthPass_AppendQuad(Sim3DDepthPassLayer layer,
                                const Sim3DDepthVertex vertices[4]);
 /* Appends contiguous groups of four vertices while preserving the same

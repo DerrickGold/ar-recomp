@@ -49,6 +49,8 @@ void Sim3DPerformance_AddUpload(uint64_t bytes);
 void Sim3DPerformance_AddGeometryUpload(uint64_t bytes);
 /* GPU-local geometry copies, not CPU uploads or GPU elapsed time. */
 void Sim3DPerformance_AddGeometryCopy(uint64_t bytes, uint64_t calls);
+void Sim3DPerformance_AddAtlasCopy(uint64_t bytes);
+void Sim3DPerformance_AddAtlasReuse(void);
 
 /* Coarse path decisions, never per vertex. These are event counts, not
  * percentages or mutually exclusive frame outcomes. CPU projection is normal
@@ -57,7 +59,7 @@ void Sim3DPerformance_AddGeometryCopy(uint64_t bytes, uint64_t calls);
 typedef enum Sim3DPerformancePath {
   kSim3DPath_CpuProject, kSim3DPath_CpuStage, kSim3DPath_GpuReuse,
   kSim3DPath_Publish, kSim3DPath_OptOut, kSim3DPath_Limit,
-  kSim3DPath_Rejected, kSim3DPath_CpuReuse, kSim3DPath_Count,
+  kSim3DPath_Rejected, kSim3DPath_Count,
 } Sim3DPerformancePath;
 void Sim3DPerformance_AddPath(Sim3DPerformancePath path);
 

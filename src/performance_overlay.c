@@ -153,12 +153,14 @@ void PerformanceOverlay_Build(const PerformanceSnapshot *snapshot, int level,
       work[kPerformanceCount_UploadSkipped], work[kPerformanceCount_MirrorReallocs]);
   Line(model, 1, 29, "Jobs %.1f / helpers %.1f", work[kPerformanceCount_WorkJobs], work[kPerformanceCount_HelperJobs]);
   Line(model, 1, 30, "Fallback %.2f / failed %.2f", work[kPerformanceCount_Fallbacks], work[kPerformanceCount_FailedPresents]);
-  Line(model, 1, 31, "CPU proj/stage/reuse %.0f/%.0f/%.0f", work[kPerformanceCount_CpuProject],
-      work[kPerformanceCount_CpuStage], work[kPerformanceCount_CpuGeometryReuse]);
+  Line(model, 1, 31, "CPU project/stage %.0f / %.0f", work[kPerformanceCount_CpuProject],
+      work[kPerformanceCount_CpuStage]);
   Line(model, 1, 32, "GPU reuse/publish %.1f / %.1f", work[kPerformanceCount_GpuReuse], work[kPerformanceCount_GeometryPublish]);
   Line(model, 1, 33, "Opt/limit/reject %.1f/%.1f/%.1f", work[kPerformanceCount_GeometryOptOut],
       work[kPerformanceCount_GeometryLimit], work[kPerformanceCount_GeometryRejected]);
-  Line(model, 0, 34, "Full details: run log");
+  Line(model, 0, 34, "Atlas hit %.1f copy %.2fMiB/%.1f",
+      work[kPerformanceCount_AtlasReuse], work[kPerformanceCount_AtlasCopyBytes] / 1048576,
+      work[kPerformanceCount_AtlasCopyCalls]);
   Line(model, 1, 34, "GPU copy %.2f MiB / %.1f calls",
       work[kPerformanceCount_DepthCopyBytes] / 1048576, work[kPerformanceCount_DepthCopyCalls]);
 }

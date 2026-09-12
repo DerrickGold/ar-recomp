@@ -5,10 +5,15 @@ following the user's acceptance of the measured performance/memory tradeoff.
 `AR_SIM3D_WORLD_GPU_GRID=0` requests the complete compatibility path; unsupported
 or failed GPU source setup also falls back there automatically. The hybrid
 GPU-land/CPU-cliff branch and `AR_SIM3D_WORLD_GPU_CLIFFS` switch are removed.
-Grid culling and held CPU stream reuse remain on by default. No saved quality
+Grid culling remains on by default. No saved quality
 setting, authored art, model LOD or worker-count default changes. The measurements
 below record the earlier opt-in checkpoint, including its isolated pixel changes;
 promotion does not claim those old CPU/GPU differences disappeared.
+
+The subsequent [shared ocean source](gpu-ocean-source.md) and
+[mountain source](gpu-mountain-source.md) are also default and remove both CPU
+stream caches, their obsolete toggle and partial shadow-receiver branches. The
+implementation/measurement sections below describe the earlier cliff checkpoint.
 
 Default/cleanup validation: all 165 app tests pass. The Metal world fixture now
 compares an explicitly enabled source against the unset/default path across all

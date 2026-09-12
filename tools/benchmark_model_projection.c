@@ -47,6 +47,7 @@ void Sim3DPerformance_AddDraw(uint64_t vertices, uint64_t indices) {
 }
 void Sim3DPerformance_AddGeometryUpload(uint64_t bytes) { upload_bytes += bytes; }
 void Sim3DPerformance_AddGeometryCopy(uint64_t bytes, uint64_t calls) { (void)bytes; (void)calls; }
+void Sim3DPerformance_AddAtlasCopy(uint64_t bytes) { (void)bytes; }
 
 static bool BuildScene(Scene *scene) {
   scene->vertices = malloc(kMaxVertices * sizeof(*scene->vertices));

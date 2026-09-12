@@ -1,4 +1,5 @@
 #include "presentation_upload_mirror.h"
+#include "performance_metrics.h"
 
 #include <assert.h>
 #include <stdint.h>
@@ -48,11 +49,11 @@ static uint32_t Random(uint32_t *state) {
 }
 
 static void TestAgainstByteOracle(void) {
-  uint8_t current[4096], previous[4096];
+  uint8_t current[32768], previous[32768];
   uint32_t state = 0x273951u;
   for (int pass = 0; pass < 3000; pass++) {
     const int width = 1 + (int)(Random(&state) % 97);
-    const int height = 1 + (int)(Random(&state) % 9);
+    const int height = 1 + (int)(Random(&state) % 73);
     const int cp = width * 4 + (int)(Random(&state) % 7);
     const int pp = width * 4 + (int)(Random(&state) % 7);
     const int ca = (int)(Random(&state) % 4), pa = (int)(Random(&state) % 4);
@@ -86,11 +87,36 @@ static void TestAgainstByteOracle(void) {
   }
 }
 
+static void TestWideBoundsSkipInteriorAndReportComparisons(void) {
+  enum { kRow = 256, kRows = 16 };
+  uint8_t current[kRow*kRows] = {0}, previous[kRow*kRows] = {0};
+  for (unsigned changed = 0; changed < 2; ++changed) {
+    if (changed) {
+      current[0] = current[kRow-1] = 1;
+      current[(kRows-1)*kRow+17] = 1;
+    }
+    PerformanceMetrics_Configure(true,false);
+    ArRenderRectI dirty;
+    assert(PresentationUploadMirror_FindDirtyRect(current,kRow,previous,kRow,kRow/4,kRows,&dirty) == (changed != 0));
+    PerformanceMetrics_PresentCompleted(1);
+    PerformanceMetrics_PresentCompleted(UINT64_C(1000000001));
+    PerformanceSnapshot sample; PerformanceMetrics_Snapshot(&sample);
+    /* Two full-row comparisons plus two failing 32-byte edge blocks and
+     * their byte refinements. Clean images compare every row once. Counts
+     * describe requested operands, not libc's actual early-exit reads. */
+    const double bytes = changed ? 2*kRow*2 + 2*(32*2+2) : kRow*kRows*2;
+    assert(sample.ready && sample.counts[kPerformanceCount_ScanBytes] == bytes/2);
+    if (changed) assert(dirty.x == 0 && dirty.y == 0 && dirty.w == kRow/4 && dirty.h == kRows);
+    PerformanceMetrics_Configure(false,false);
+  }
+}
+
 int main(void) {
   TestIdenticalRegionIsClean();
   TestDirtyBoundsSpanEveryChangedPixel();
   TestSingleChangedByteStillUploadsWholePixel();
   TestAgainstByteOracle();
+  TestWideBoundsSkipInteriorAndReportComparisons();
   puts("presentation_upload_mirror_test: ok");
   return 0;
 }

@@ -39,6 +39,12 @@ action coverage analysis.
   upload hooks. The two upload values are texture and depth-geometry bytes per
   present. They exclude host UI and uninstrumented backend-internal traffic;
   they are not total device draw counts or measured GPU bandwidth.
+- **Scan MiB** counts bytes requested by exact change-detection comparisons,
+  including both inputs and horizontal edge refinements. Skipped rows are not
+  charged. This is not measured DRAM traffic: `memcmp` may stop at an early
+  mismatch and the CPU may reuse cached lines. Before the conditional-bounds
+  optimization, this counter charged the full image pair on every scan and
+  omitted edge refinements; compare old/new logs with that distinction in mind.
 - **Fallback / failed** count authentic-fallback selections and rejected host
   presents accumulated per successful present. Existing view-transition logs
   still carry fallback detail. A fatal run with no later successful present may
@@ -47,6 +53,11 @@ action coverage analysis.
   staging paths. **GPU reuse / publish** count retained range/sample uses and
   successful geometry publications. These are coarse events per present, not
   vertex counts or percentages: several batches can occur in one frame.
+- **Atlas hit / copy** reports reused world-ground animation versions and
+  GPU-only texture-copy MiB/calls per present. Copies occur when a new version
+  is first published; warm hits avoid CPU art rebuilding and texture uploads.
+  These bytes are separate from geometry copies and host uploads. They are
+  submitted work, not measured GPU bandwidth or VRAM residency.
 - **Opt / limit / reject** distinguish explicit optimization opt-outs, known
   caller-side draw-budget guards, and optional resource/API rejection. A reject
   does not identify a driver fault: it can include an allocation or adapter
@@ -78,10 +89,10 @@ Native in-game menus still receive the normal detailed panel.
 2. Note the Deck power limit, refresh/limiter settings, output resolution and
    graphics preset. Repeat with the same camera/content where practical.
 3. Share that run's diagnostics ZIP. The once-per-second `[pipeline-perf]`,
-   `[pipeline-stage]`, `[pipeline-work]` and `[pipeline-path]` lines preserve more precision and
-   history than a screenshot. The console prints the `runs/...` directory on
+   `[pipeline-stage]`, `[pipeline-work]`, `[pipeline-atlas]` and `[pipeline-path]`
+   lines preserve more precision and history than a screenshot. The console prints the `runs/...` directory on
    exit. An overlay screenshot taken during entry can be paired with its log
-  to distinguish a cold asset build from sustained per-frame work.
+   to distinguish a cold asset build from sustained per-frame work.
 
 For stage-attributed geometry-path events, `AR_SIM3D_PERF=1` additionally logs
 `[sim3d-path]` rows. The overlay is an aggregate for the current scene. Town

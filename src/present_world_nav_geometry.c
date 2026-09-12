@@ -2,7 +2,6 @@
 
 #include <math.h>
 #include <float.h>
-#include <stdlib.h>
 #include <string.h>
 
 bool WorldNavigationRadialBoundsOutside(const WorldNavigationRadialBounds *b,
@@ -216,46 +215,6 @@ bool WorldNavigationAppendClippedQuad(
 bool WorldNavigationAppendClippedQuads(
     Sim3DDepthPassLayer layer, const Sim3DDepthVertex *input,
     const Scene3DClipPoint *clip, size_t count, ArRenderRectI viewport) {
-  return WorldNavigationAppendCachedProjectedQuads(layer,input,clip,count,viewport,NULL);
-}
-
-void WorldNavigationQuadStream_Invalidate(WorldNavigationQuadStream *stream) {
-  stream->ready = stream->repeated = false;
-  stream->quad_count = 0;
-}
-
-void WorldNavigationQuadStream_Reset(WorldNavigationQuadStream *stream) {
-  free(stream->vertices);
-  *stream = (WorldNavigationQuadStream){0};
-}
-
-static bool AppendStreamBatch(Sim3DDepthPassLayer layer,
-    const Sim3DDepthVertex *vertices, size_t quads, WorldNavigationQuadStream *capture) {
-  if (!quads) return true;
-  if (!Sim3DDepthPass_AppendQuads(layer,vertices,quads)) return false;
-  if (!capture || capture->unavailable) return true;
-  if (quads > kWorldNavigationQuadStreamMaximum-capture->quad_count) goto unavailable;
-  const size_t needed = capture->quad_count+quads;
-  if (needed > capture->capacity) {
-    size_t capacity = capture->capacity ? capture->capacity : 1024;
-    while (capacity < needed) capacity *= 2;
-    void *memory = realloc(capture->vertices,capacity*4*sizeof(*capture->vertices));
-    if (!memory) goto unavailable;
-    capture->vertices = memory; capture->capacity = capacity;
-  }
-  memcpy(capture->vertices+capture->quad_count*4,vertices,quads*4*sizeof(*vertices));
-  capture->quad_count = needed;
-  return true;
-unavailable:
-  WorldNavigationQuadStream_Reset(capture);
-  capture->unavailable = true; /* Optional cache: retry only at owner reset. */
-  return true;
-}
-
-bool WorldNavigationAppendCachedProjectedQuads(Sim3DDepthPassLayer layer,
-    const Sim3DDepthVertex *input, const Scene3DClipPoint *clip, size_t count,
-    ArRenderRectI viewport, WorldNavigationQuadStream *capture) {
-  if (!clip) return AppendStreamBatch(layer,input,count,capture);
   enum { kBatch = 64 };
   Sim3DDepthVertex batch[kBatch * 4], clipped[kWorldNavigationClippedQuads * 4];
   size_t used = 0;
@@ -266,10 +225,10 @@ bool WorldNavigationAppendCachedProjectedQuads(Sim3DDepthPassLayer layer,
     for (size_t at = 0; at < produced; at++) {
       memcpy(batch + used++ * 4, clipped + at * 4, 4 * sizeof(*batch));
       if (used == kBatch) {
-        if (!AppendStreamBatch(layer,batch,used,capture)) return false;
+        if (!Sim3DDepthPass_AppendQuads(layer,batch,used)) return false;
         used = 0;
       }
     }
   }
-  return AppendStreamBatch(layer,batch,used,capture);
+  return !used || Sim3DDepthPass_AppendQuads(layer,batch,used);
 }

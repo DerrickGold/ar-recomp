@@ -34,7 +34,6 @@ typedef enum PerformanceCount {
   kPerformanceCount_GpuReuse, kPerformanceCount_GeometryPublish,
   kPerformanceCount_GeometryOptOut, kPerformanceCount_GeometryLimit,
   kPerformanceCount_GeometryRejected,
-  kPerformanceCount_CpuGeometryReuse, /* cached CPU stream; still uploaded */
   /* Upload traffic, counted at the render-device boundary so EVERY subsystem
    * is included rather than only the ones that remembered to report. These are
    * deterministic mechanism counters, not timings: they mean the same thing on
@@ -42,9 +41,12 @@ typedef enum PerformanceCount {
    * the host's own milliseconds are not comparable to the target's. */
   kPerformanceCount_UploadCalls,      /* texture-update calls issued */
   kPerformanceCount_UploadSkipped,    /* uploads avoided by change detection */
-  kPerformanceCount_ScanBytes,        /* bytes READ to discover what changed */
+  kPerformanceCount_ScanBytes,        /* requested comparison bytes, both inputs;
+                                      * includes edge scans, not measured DRAM reads */
   kPerformanceCount_MirrorReallocs,   /* upload-mirror storage reallocations */
   kPerformanceCount_DepthCopyBytes, kPerformanceCount_DepthCopyCalls,
+  kPerformanceCount_AtlasReuse, kPerformanceCount_AtlasCopyBytes,
+  kPerformanceCount_AtlasCopyCalls,
   kPerformanceCount_Count,
 } PerformanceCount;
 
