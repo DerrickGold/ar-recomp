@@ -3,6 +3,7 @@
 #include "present_world_nav_sky.h"
 #include "present_sim3d_internal.h"
 #include "sim/sim_world_navigation_sky_clouds.h"
+#include "sim/sim3d_performance.h"
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -174,6 +175,7 @@ bool PresentWorldNavSky_DrawClouds(ArRenderDevice *device, const FrameSlot *slot
   }
   orders[volume].count = count;
   const float horizon = PresentWorldNavSky_Horizon(viewport, projection);
+  Sim3DPerformance_AddPath(kSim3DPath_CpuProject);
   Sim3DDepthVertex vertices[kBanks * kSlices * 4];
   Scene3DClipPoint clips[kBanks * kSlices * 4];
   for (int i = 0; i < count; i++) {

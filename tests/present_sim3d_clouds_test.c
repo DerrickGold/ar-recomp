@@ -12,6 +12,8 @@ ArRenderDevice g_render_device;
 static unsigned projections, coverage_calls, draws, creates, unbinds;
 static bool fail_create, fail_projection, gpu, fail_bind, fail_unbind, fail_draw;
 static uint64_t clock_ms = 123456, geometry_hash;
+static unsigned paths[kSim3DPath_Count];
+void Sim3DPerformance_AddPath(Sim3DPerformancePath path) { paths[path]++; }
 
 uint64_t HostClock_Milliseconds(void) { return clock_ms; }
 void Sim3DPerformance_AddDraw(uint64_t vertices, uint64_t indices) {
@@ -187,6 +189,25 @@ int main(void) {
   fail_create = false;
   assert(Draw(&slot, source, viewport, matrix) == kPresentationOutcome_Complete);
   assert(projections == vertices);
+  const uint64_t fallback_reference = geometry_hash;
+  /* A fresh GPU-only projection must be sufficient to construct the exact
+   * fallback later, without projecting/covering the camera a second time. */
+  PresentSim3DClouds_ResetResources();
+  gpu = true;
+  const unsigned before_fallback = paths[kSim3DPath_CpuStage];
+  assert(Draw(&slot, source, viewport, matrix) == kPresentationOutcome_Complete);
+  assert(projections == vertices && draws == 1);
+  assert(paths[kSim3DPath_CpuStage] == before_fallback);
+  fail_bind = true;
+  assert(Draw(&slot, source, viewport, matrix) == kPresentationOutcome_Complete);
+  assert(!projections && !coverage_calls && draws == 3);
+  assert(paths[kSim3DPath_CpuStage] == before_fallback + 1);
+  assert(geometry_hash == fallback_reference);
+  fail_bind = false;
+  assert(Draw(&slot, source, viewport, matrix) == kPresentationOutcome_Complete);
+  gpu = false;
+  assert(Draw(&slot, source, viewport, matrix) == kPresentationOutcome_Complete);
+  assert(!projections && geometry_hash == fallback_reference);
   PresentSim3DClouds_ResetResources();
   puts("present_sim3d_clouds_test: PASS");
   return 0;

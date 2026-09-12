@@ -1144,8 +1144,37 @@ static void compare_native_capture_path(bool deferred, uint8_t mode,
     ppu_runLine(fast, 0);
     ppu_runLine(reference, 0);
     for (int line = 1; line <= kRows; ++line) {
+        /* Capture colors are a line-local plan, never a frame palette cache.
+         * Exercise live brightness, CGRAM and fixed-color writes between
+         * scanlines while the independent pixel renderer is the oracle. */
+        Ppu *versions[] = {fast, reference};
+        for (size_t version = 0; version < 2; ++version) {
+            Ppu *ppu = versions[version];
+            ppu_write(ppu, 0x00, (uint8_t)(line & 15));
+            ppu_write(ppu, 0x21, (uint8_t)(line * 5));
+            ppu_write(ppu, 0x22, (uint8_t)(line * 13));
+            ppu_write(ppu, 0x22, (uint8_t)(line & 0x7f));
+            ppu_write(ppu, 0x32, (uint8_t)(0xe0 | (line & 31)));
+            /* Rebind one priority band between lines: alias the primary,
+             * omit it, then restore it. Both capture paths must preserve
+             * primary fallback and its observable content bits. */
+            if (line == 8 || line == 16 || line == 24) {
+                for (int source = 0; source < kPpuOverlaySource_Count; ++source) {
+                    int plane = line == 8 ? 0 : 2;
+                    uint32_t *pixels = version == 0
+                        ? fast_overlay[source][plane]
+                        : reference_overlay[source][plane];
+                    CHECK(PpuBindOverlayPrioSurface(ppu,
+                        (PpuOverlaySource)source, 2,
+                        line == 16 ? NULL : (uint8_t *)pixels));
+                }
+            }
+        }
         ppu_runLine(fast, line);
         ppu_runLine(reference, line);
+        CHECK(memcmp(fast->overlayRenderContentMask,
+                     reference->overlayRenderContentMask,
+                     sizeof(fast->overlayRenderContentMask)) == 0);
     }
     CHECK(memcmp(fast_pixels, reference_pixels,
                  pixel_count * sizeof(uint32_t)) == 0);

@@ -949,7 +949,7 @@ void PresentUpload(const FrameSlot *slot) {
     DioramaPerformanceScope frame_analysis =
         DioramaPerformance_Begin(kDioramaPerformance_FrameAnalysis);
     DioramaFrameGeneration_Capture(
-        &g_render_device, slot, pixels, pitch_bytes,
+        &g_render_device, slot, g_diorama_textures, pixels, pitch_bytes,
         upload.changed_plane_mask);
     DioramaPerformance_End(frame_analysis);
   } else if (PresentationConsumesMainPpuTexture(slot)) {

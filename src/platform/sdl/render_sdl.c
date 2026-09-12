@@ -133,8 +133,46 @@ static bool UpdateTexture(void *context, ArRenderTexture texture,
       ArSdlRenderBackend_UnwrapTexture(texture), rect, pixels, pitch_bytes);
 }
 
+static bool EnsureOutputTarget(ArSdlRenderBackend *backend) {
+  if (!backend->output_window) return true;
+  int width = 0, height = 0;
+  if (!SDL_GetWindowSizeInPixels(backend->output_window, &width, &height)) return false;
+  /* Minimized windows can have no drawable extent. Keep their last complete
+   * target; swapchain acquisition can skip the final blit until restored. */
+  if (width <= 0 || height <= 0) return backend->output_target != NULL;
+  if (backend->output_target && width == backend->output_width && height == backend->output_height)
+    return true;
+  const SDL_GPUTextureFormat format = SDL_GetGPUSwapchainTextureFormat(
+      backend->gpu_device, backend->output_window);
+  SDL_Texture *target = SDL_CreateTexture(backend->renderer,
+      SDL_GetPixelFormatFromGPUTextureFormat(format), SDL_TEXTUREACCESS_TARGET, width, height);
+  if (!target) return false;
+  if (!SDL_SetTextureBlendMode(target, SDL_BLENDMODE_NONE) ||
+      !SDL_SetTextureScaleMode(target, SDL_SCALEMODE_LINEAR)) {
+    SDL_DestroyTexture(target);
+    return false;
+  }
+  /* Resize only when selecting/querying the logical default output. Its old
+   * handle is never exported through a portable saved-target state. */
+  SDL_Texture *old = backend->output_target;
+  if (SDL_GetRenderTarget(backend->renderer) == old &&
+      !SDL_SetRenderTarget(backend->renderer, target)) {
+    SDL_DestroyTexture(target);
+    return false;
+  }
+  backend->output_target = target;
+  backend->output_width = width;
+  backend->output_height = height;
+  if (old) SDL_DestroyTexture(old);
+  return true;
+}
+
 static bool SetRenderTarget(void *context, ArRenderTexture target) {
   ArSdlRenderBackend *backend = context;
+  if (!ArRenderTexture_IsValid(target) && backend->output_window) {
+    if (!EnsureOutputTarget(backend)) return false;
+    return SDL_SetRenderTarget(backend->renderer, backend->output_target);
+  }
   return SDL_SetRenderTarget(
       backend->renderer, ArSdlRenderBackend_UnwrapTexture(target));
 }
@@ -148,6 +186,12 @@ static bool UseOutputCoordinates(void *context) {
 static bool GetOutputSize(void *context, int *width, int *height) {
   ArSdlRenderBackend *backend = context;
   SDL_Texture *target = SDL_GetRenderTarget(backend->renderer);
+  if (backend->output_window && target == backend->output_target) {
+    if (!EnsureOutputTarget(backend)) return false;
+    *width = backend->output_width;
+    *height = backend->output_height;
+    return true;
+  }
   if (!target)
     return SDL_GetRenderOutputSize(backend->renderer, width, height);
   float target_width = 0.0f;
@@ -187,9 +231,10 @@ static bool CaptureRenderTargetState(void *context,
   if (!backend || !backend->renderer || !state) return false;
   SDL_Rect viewport;
   if (!SDL_GetRenderViewport(backend->renderer, &viewport)) return false;
+  SDL_Texture *target = SDL_GetRenderTarget(backend->renderer);
   *state = (ArRenderTargetState){
     .target = ArSdlRenderBackend_BorrowTexture(
-        SDL_GetRenderTarget(backend->renderer)),
+        target == backend->output_target ? NULL : target),
     .viewport = {viewport.x, viewport.y, viewport.w, viewport.h},
     .viewport_set = SDL_RenderViewportSet(backend->renderer),
     .clip_enabled = SDL_RenderClipEnabled(backend->renderer),
@@ -214,8 +259,7 @@ static bool RestoreRenderTargetState(
   const SDL_Rect clip = {
     state->clip.x, state->clip.y, state->clip.w, state->clip.h,
   };
-  bool restored = SDL_SetRenderTarget(
-      backend->renderer, ArSdlRenderBackend_UnwrapTexture(state->target));
+  bool restored = SetRenderTarget(context, state->target);
   restored = SDL_SetRenderViewport(
       backend->renderer, state->viewport_set ? &viewport : NULL) && restored;
   restored = SDL_SetRenderClipRect(
@@ -411,7 +455,36 @@ static bool DrawGeometry(void *context, ArRenderTexture texture,
 
 static bool Present(void *context) {
   ArSdlRenderBackend *backend = context;
-  return SDL_RenderPresent(backend->renderer);
+  if (!backend->output_window) return SDL_RenderPresent(backend->renderer);
+  if (SDL_GetRenderTarget(backend->renderer) != backend->output_target)
+    return SDL_SetError("ordered GPU present requires the default output target");
+  if (!SDL_RenderPresent(backend->renderer)) return false;
+  SDL_GPUTexture *source = SDL_GetPointerProperty(SDL_GetTextureProperties(backend->output_target),
+      SDL_PROP_TEXTURE_GPU_TEXTURE_POINTER, NULL);
+  if (!source) return SDL_SetError("ordered GPU output target has no native texture");
+  SDL_GPUCommandBuffer *commands = SDL_AcquireGPUCommandBuffer(backend->gpu_device);
+  if (!commands) return false;
+  SDL_GPUTexture *swapchain = NULL;
+  Uint32 width = 0, height = 0;
+  if (!SDL_WaitAndAcquireGPUSwapchainTexture(commands, backend->output_window,
+          &swapchain, &width, &height)) {
+    SDL_CancelGPUCommandBuffer(commands);
+    return false;
+  }
+  /* A hidden/minimized window can acquire successfully without an image.
+   * Still submit: SDL's Vulkan backend uses this swapchain-requesting buffer
+   * to retire preceding offscreen work and recycle its resources. Cancelling
+   * it indefinitely leaves completed work retained and forces buffer growth.
+   * This adds neither a blit nor a fence/readback wait when no image exists. */
+  if (!swapchain) return SDL_SubmitGPUCommandBuffer(commands);
+  const SDL_GPUBlitInfo blit = {
+    .source = {.texture = source, .w = (Uint32)backend->output_width,
+        .h = (Uint32)backend->output_height},
+    .destination = {.texture = swapchain, .w = width, .h = height},
+    .load_op = SDL_GPU_LOADOP_DONT_CARE, .filter = SDL_GPU_FILTER_LINEAR,
+  };
+  SDL_BlitGPUTexture(commands, &blit);
+  return SDL_SubmitGPUCommandBuffer(commands);
 }
 
 static const char *LastError(void *context) {
@@ -442,6 +515,25 @@ SDL_Renderer *ArSdlRenderBackend_Renderer(const ArRenderDevice *device) {
   if (!device || device->ops != &kSdlRenderOps || !device->context)
     return NULL;
   return ((ArSdlRenderBackend *)device->context)->renderer;
+}
+
+bool ArSdlRenderBackend_SubmitPending(const ArRenderDevice *device) {
+  SDL_Renderer *renderer = ArSdlRenderBackend_Renderer(device);
+  if (!renderer) return false;
+  const ArSdlRenderBackend *backend = device->context;
+  /* Preserve the explicit recording-failure check before submission: SDL's
+   * RenderPresent does not propagate its internal command-flush result. */
+  if (!SDL_FlushRenderer(renderer)) return false;
+  return !backend->output_window || SDL_RenderPresent(renderer);
+}
+
+bool ArSdlRenderBackend_WindowOutputSize(const ArRenderDevice *device,
+    int *width, int *height) {
+  SDL_Renderer *renderer = ArSdlRenderBackend_Renderer(device);
+  if (!renderer || !width || !height) return false;
+  const ArSdlRenderBackend *backend = device->context;
+  return backend->output_window ? SDL_GetWindowSizeInPixels(backend->output_window, width, height)
+      : SDL_GetRenderOutputSize(renderer, width, height);
 }
 
 bool ArSdlRenderBackend_Bind(ArRenderDevice *device,
@@ -493,6 +585,34 @@ bool ArSdlRenderBackend_Bind(ArRenderDevice *device,
       device, &kSdlRenderOps, backend, capabilities);
 }
 
+static SDL_GPUDevice *CreateOutputGpuDevice(SDL_Window *window) {
+  /* Match the SDL GPU renderer's compatibility baseline. Taking ownership of
+   * submission must not silently require unused clip-distance, anisotropic
+   * sampling or indirect-draw features on lower-end Vulkan/D3D12 devices.
+   * Hardware frustum clipping does not require shader clip-distance outputs. */
+  SDL_PropertiesID props = SDL_CreateProperties();
+  if (!props) return NULL;
+  bool configured =
+      SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_DEBUGMODE_BOOLEAN,
+          SDL_GetHintBoolean(SDL_HINT_RENDER_GPU_DEBUG, false)) &&
+      SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_PREFERLOWPOWER_BOOLEAN,
+          SDL_GetHintBoolean(SDL_HINT_RENDER_GPU_LOW_POWER, false)) &&
+      SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_SHADERS_SPIRV_BOOLEAN, true) &&
+      SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_SHADERS_DXIL_BOOLEAN, true) &&
+      SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_SHADERS_MSL_BOOLEAN, true) &&
+      SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_D3D12_ALLOW_FEWER_RESOURCE_SLOTS_BOOLEAN, true) &&
+      SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_FEATURE_CLIP_DISTANCE_BOOLEAN, false) &&
+      SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_FEATURE_DEPTH_CLAMPING_BOOLEAN, false) &&
+      SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_FEATURE_INDIRECT_DRAW_FIRST_INSTANCE_BOOLEAN, false) &&
+      SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_FEATURE_ANISOTROPY_BOOLEAN, false) &&
+      SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_METAL_ALLOW_MACFAMILY1_BOOLEAN, false);
+  if (configured && (SDL_GetWindowFlags(window) & SDL_WINDOW_VULKAN))
+    configured = SDL_SetStringProperty(props, SDL_PROP_GPU_DEVICE_CREATE_NAME_STRING, "vulkan");
+  SDL_GPUDevice *gpu = configured ? SDL_CreateGPUDeviceWithProperties(props) : NULL;
+  SDL_DestroyProperties(props);
+  return gpu;
+}
+
 bool ArSdlRenderBackend_CreateForWindow(ArRenderDevice *device,
                                         SDL_Window *window) {
   if (!device || !window) {
@@ -508,6 +628,35 @@ bool ArSdlRenderBackend_CreateForWindow(ArRenderDevice *device,
   if (!backend) {
     SDL_SetError("out of memory creating SDL render backend");
     return false;
+  }
+
+  const char *ordered = getenv("AR_SDL_GPU_ORDERED");
+  if (!ordered || strcmp(ordered, "0") != 0) {
+    SDL_GPUDevice *gpu = CreateOutputGpuDevice(window);
+    if (!gpu) { free(backend); return false; }
+    if (!SDL_ClaimWindowForGPUDevice(gpu, window)) {
+      SDL_DestroyGPUDevice(gpu); free(backend); return false;
+    }
+    if (!SDL_SetGPUSwapchainParameters(gpu, window,
+            SDL_GPU_SWAPCHAINCOMPOSITION_SDR, SDL_GPU_PRESENTMODE_VSYNC)) {
+      SDL_ReleaseWindowFromGPUDevice(gpu, window);
+      SDL_DestroyGPUDevice(gpu); free(backend); return false;
+    }
+    SDL_Renderer *renderer = SDL_CreateGPURenderer(gpu, NULL);
+    if (!renderer || !ArSdlRenderBackend_Bind(device, backend, renderer)) {
+      if (renderer) SDL_DestroyRenderer(renderer);
+      SDL_ReleaseWindowFromGPUDevice(gpu, window);
+      SDL_DestroyGPUDevice(gpu); free(backend); return false;
+    }
+    backend->output_window = window;
+    backend->output_present_mode = SDL_GPU_PRESENTMODE_VSYNC;
+    backend->owns_renderer = backend->owns_context = backend->owns_gpu_device = true;
+    if (!EnsureOutputTarget(backend) || !SetRenderTarget(backend, ArRenderTexture_Invalid())) {
+      ArSdlRenderBackend_Destroy(device);
+      return false;
+    }
+    SDL_Log("[render] ordered GPU interop enabled (offscreen SDL + one swapchain present)");
+    return true;
   }
 
   SDL_PropertiesID properties = SDL_CreateProperties();
@@ -555,9 +704,16 @@ void ArSdlRenderBackend_Destroy(ArRenderDevice *device) {
   SDL_Renderer *renderer = backend->renderer;
   const bool owns_renderer = backend->owns_renderer;
   const bool owns_context = backend->owns_context;
+  SDL_GPUDevice *gpu = backend->owns_gpu_device ? backend->gpu_device : NULL;
+  SDL_Window *window = backend->output_window;
+  if (backend->output_target) SDL_DestroyTexture(backend->output_target);
   ArRenderDevice_Reset(device);
   memset(backend, 0, sizeof(*backend));
   if (owns_renderer) SDL_DestroyRenderer(renderer);
+  if (gpu) {
+    SDL_ReleaseWindowFromGPUDevice(gpu, window);
+    SDL_DestroyGPUDevice(gpu);
+  }
   if (owns_context) free(backend);
 }
 
@@ -568,6 +724,19 @@ bool ArSdlRenderBackend_SetVSync(ArRenderDevice *device, int requested,
   if (!renderer) {
     SDL_SetError("SDL render backend is not ready");
     return false;
+  }
+  ArSdlRenderBackend *backend = device->context;
+  if (backend->output_window) {
+    if (requested != 0 && requested != 1)
+      return SDL_SetError("ordered GPU output supports vsync 0 or 1");
+    SDL_GPUPresentMode mode = requested ? SDL_GPU_PRESENTMODE_VSYNC : SDL_GPU_PRESENTMODE_IMMEDIATE;
+    if (!requested && !SDL_WindowSupportsGPUPresentMode(backend->gpu_device, backend->output_window, mode))
+      mode = SDL_GPU_PRESENTMODE_MAILBOX;
+    const bool applied = SDL_SetGPUSwapchainParameters(backend->gpu_device, backend->output_window,
+        SDL_GPU_SWAPCHAINCOMPOSITION_SDR, mode);
+    if (applied) backend->output_present_mode = mode;
+    if (active) *active = backend->output_present_mode == SDL_GPU_PRESENTMODE_VSYNC;
+    return applied;
   }
   const bool applied = SDL_SetRenderVSync(renderer, requested);
   int actual = 0;

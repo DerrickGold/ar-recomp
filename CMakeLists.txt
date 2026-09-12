@@ -491,7 +491,8 @@ if(BUILD_TESTING)
         src/localization/text_backend.c
         src/localization/text_rasterizer.c
         src/render/text_surface_cache.c
-        src/render/render_device.c)
+        src/render/render_device.c
+        src/performance_metrics.c)
     target_include_directories(actraiser_text_surface_cache_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src)
     target_link_libraries(actraiser_text_surface_cache_test PRIVATE
@@ -551,7 +552,8 @@ if(BUILD_TESTING)
             # own menu geometry so its layout results stay comparable, and
             # separately checks a hand-built grid the game never publishes.
             src/actraiser/actraiser_localization_grid.c
-            src/localization/language_row_shape.c)
+            src/localization/language_row_shape.c
+        src/performance_metrics.c)
         target_include_directories(actraiser_localized_text_presenter_test PRIVATE
             ${CMAKE_SOURCE_DIR}/src)
         target_compile_definitions(actraiser_localized_text_presenter_test PRIVATE
@@ -785,6 +787,7 @@ if(BUILD_TESTING)
     add_executable(actraiser_consolidated_utils_test
         tests/consolidated_utils_test.c
         src/manifest_utils.c
+        src/performance_metrics.c
     )
     target_include_directories(actraiser_consolidated_utils_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
@@ -868,6 +871,7 @@ if(BUILD_TESTING)
         tests/presentation_upload_mirror_test.c
         src/presentation_upload_mirror.c
         src/render/render_device.c
+        src/performance_metrics.c
     )
     target_include_directories(actraiser_presentation_upload_mirror_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
@@ -881,6 +885,7 @@ if(BUILD_TESTING)
         src/render/render_device.c
         src/render/presentation_layout.c
         src/render/render_output.c
+        src/performance_metrics.c
     )
     target_include_directories(actraiser_render_device_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
@@ -921,6 +926,7 @@ if(BUILD_TESTING)
         src/present_sim3d_environment.c
         src/present_world_nav.c
         src/present_world_nav_geometry.c
+        src/present_world_nav_model_mesh.c
         src/present_world_nav_sky.c
         src/sim/sim_world_navigation_globe.c
         src/sim/sim_world_navigation_mountains.c
@@ -969,10 +975,16 @@ if(BUILD_TESTING)
         AR_SIM3D_TERRAIN_ELEVATION=${AR_SIM3D_TERRAIN_ELEVATION_VALUE})
     add_test(NAME actraiser_present_world_nav
         COMMAND actraiser_present_world_nav_test)
+    set_tests_properties(actraiser_present_world_nav PROPERTIES
+        ENVIRONMENT "AR_SIM3D_WORLD_GPU_MODELS=0")
     add_test(NAME actraiser_present_world_nav_profiled
         COMMAND actraiser_present_world_nav_test)
     set_tests_properties(actraiser_present_world_nav_profiled PROPERTIES
         ENVIRONMENT "AR_SIM3D_PERF=1")
+    add_test(NAME actraiser_present_world_nav_radial_fallback
+        COMMAND actraiser_present_world_nav_test)
+    set_tests_properties(actraiser_present_world_nav_radial_fallback PROPERTIES
+        ENVIRONMENT "AR_SIM3D_WORLD_GPU_MODELS=1")
 
     # Full presenter + production shaders/depth, without a live game/runner.
     # Synthetic data is portable; an optional local ROM/WRAM pair also permits
@@ -1076,6 +1088,7 @@ if(BUILD_TESTING)
         tests/render_sdl_state_test.c
         src/render/render_device.c
         src/platform/sdl/render_sdl.c
+        src/performance_metrics.c
     )
     target_include_directories(actraiser_render_sdl_state_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
@@ -1086,6 +1099,13 @@ if(BUILD_TESTING)
     )
     add_test(NAME actraiser_render_sdl_state
         COMMAND actraiser_render_sdl_state_test)
+
+    add_executable(actraiser_render_sdl_present_test
+        tests/render_sdl_present_test.c
+        src/render/render_device.c src/performance_metrics.c)
+    target_include_directories(actraiser_render_sdl_present_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    target_link_libraries(actraiser_render_sdl_present_test PRIVATE SDL3::SDL3 actraiser_math)
+    add_test(NAME actraiser_render_sdl_present COMMAND actraiser_render_sdl_present_test)
 
     add_executable(actraiser_camera_orbit_test
         tests/camera_orbit_test.c
@@ -1962,6 +1982,7 @@ if(BUILD_TESTING)
         src/platform/sdl/render_sdl.c
         src/render/render_device.c
         src/session_fatal.c
+        src/performance_metrics.c
     )
     target_include_directories(actraiser_render_effect_backends_sdl_test
         PRIVATE ${CMAKE_SOURCE_DIR}/src)
@@ -2276,6 +2297,17 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_presentation_frame_generation
         COMMAND actraiser_presentation_frame_generation_test)
 
+    add_executable(actraiser_presentation_frame_generation_oracle_test
+        tests/presentation_frame_generation_oracle_test.c
+        src/presentation_frame_generation.c
+    )
+    target_include_directories(actraiser_presentation_frame_generation_oracle_test
+        PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    target_link_libraries(actraiser_presentation_frame_generation_oracle_test
+        PRIVATE actraiser_math)
+    add_test(NAME actraiser_presentation_frame_generation_oracle
+        COMMAND actraiser_presentation_frame_generation_oracle_test)
+
     add_executable(actraiser_diorama_depth_shapes_test
         tests/diorama_depth_shapes_test.c
         src/diorama/diorama_depth_shapes.c
@@ -2295,6 +2327,7 @@ if(BUILD_TESTING)
         src/render/render_device.c
         src/render/presentation_layout.c
         src/platform/sdl/render_sdl.c
+        src/performance_metrics.c
     )
     target_include_directories(actraiser_diorama_frame_generation_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
@@ -2319,9 +2352,12 @@ if(BUILD_TESTING)
     # their native shader blob and synchronization path.
     add_executable(actraiser_sim3d_depth_pass_gpu_test
         tests/sim3d_depth_pass_gpu_test.c
+        src/scene3d_math.c
+        src/present_world_nav_geometry.c
         src/render/render_device.c
         src/platform/sdl/render_sdl.c
         src/platform/sdl/sim3d_depth_pass_sdl.c
+        src/performance_metrics.c
     )
     target_include_directories(actraiser_sim3d_depth_pass_gpu_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src)
@@ -2332,6 +2368,30 @@ if(BUILD_TESTING)
     set_tests_properties(actraiser_sim3d_depth_pass_gpu PROPERTIES
         ENVIRONMENT "SDL_AUDIODRIVER=dummy"
         SKIP_RETURN_CODE 77)
+
+    # Opt-in architectural benchmark; not used by shipping game views.
+    add_executable(actraiser_model_projection_benchmark
+        tools/benchmark_model_projection.c
+        src/scene3d_math.c
+        src/present_world_nav_geometry.c
+        src/render/render_device.c
+        src/platform/sdl/render_sdl.c
+        src/platform/sdl/sim3d_depth_pass_sdl.c
+        src/platform/sdl/parallel_work_sdl.c
+        src/platform/sdl/host_clock_sdl.c
+        src/performance_metrics.c
+        src/sim/sim_background_voxel_model_cache.c
+        src/sim/sim_background_voxel_models.c
+        src/sim/sim_background_voxel_region.c
+        src/sim/sim_background_voxel_lighting.c
+        src/sim/sim_background_voxel_surface.c
+        src/sim/sim_background_voxel_biome.c
+        src/sim/sim_background_voxel_palette.c
+        src/sim/sim_background_voxel_proportions.c
+        src/sim/sim_world_navigation_globe.c)
+    target_include_directories(actraiser_model_projection_benchmark PRIVATE
+        ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    target_link_libraries(actraiser_model_projection_benchmark PRIVATE SDL3::SDL3 actraiser_math)
 
     # Geometry of the framebuffer margin-gap
     # fill. Pure, so it needs neither SDL nor the PPU.

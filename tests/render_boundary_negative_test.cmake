@@ -28,6 +28,8 @@ set(_cases
     "present_sim3d_underlay.c"
     "present_world_nav_geometry.c"
     "present_world_nav_sky.c"
+    "present_world_nav_model_mesh.c"
+    "present_world_nav_model_mesh.h"
     "present_world_nav_boundary_probe.h"
     "sim/sim_world_navigation_globe.c"
     # New headers must be covered without adding an explicit filename.

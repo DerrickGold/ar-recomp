@@ -65,7 +65,7 @@ typedef struct SimCloudMeshKey {
  * This is presentation-owned storage, never borrowed by asynchronous work. */
 static struct {
   SimCloudMeshKey key;
-  bool ready, indices_ready, visible;
+  bool ready, indices_ready, visible, fallback_ready;
   ArRenderVertex2D vertices[kSimCloudLayerCount][kSimCloudVertexCount];
   ArRenderPointF base_uv[kSimCloudLayerCount][kSimCloudVertexCount];
   ArRenderVertex2D gpu_vertices[kSimCloudVertexCount];
@@ -103,9 +103,11 @@ static void PrepareSimCloudMesh(const SimCloudMeshKey *key) {
     s_sim_cloud_mesh.indices_ready = true;
   }
   if (s_sim_cloud_mesh.ready && SameCloudMesh(&s_sim_cloud_mesh.key, key)) return;
+  Sim3DPerformance_AddPath(kSim3DPath_CpuProject);
   s_sim_cloud_mesh.key = *key;
   s_sim_cloud_mesh.ready = true;
   s_sim_cloud_mesh.visible = false;
+  s_sim_cloud_mesh.fallback_ready = false;
   const float span = (float)(kSimWorldMapPixels * kSimWorldMapTownScale);
   for (int row = 0; row <= kSimCloudRows; row++) {
     const float y = key->bounds[2] + (key->bounds[3] - key->bounds[2]) *
@@ -127,21 +129,28 @@ static void PrepareSimCloudMesh(const SimCloudMeshKey *key) {
         {projected.x, projected.y}, {1, 1, 1, cover * key->opacity},
         {(x - key->origin[0]) / span, (y - key->origin[1]) / span},
       };
-      for (int layer = 0; layer < kSimCloudLayerCount; layer++) {
-        const ArRenderPointF uv = {
-          ((x - key->origin[0]) / span) * kSimCloudLayers[layer].scale +
-              kSimCloudLayers[layer].offset_x,
-          ((y - key->origin[1]) / span) * kSimCloudLayers[layer].scale +
-              kSimCloudLayers[layer].offset_y,
-        };
-        s_sim_cloud_mesh.base_uv[layer][at] = uv;
-        s_sim_cloud_mesh.vertices[layer][at] = (ArRenderVertex2D){
-          {projected.x, projected.y},
-          {1.0f, 1.0f, 1.0f, cover * key->opacity * kSimCloudLayers[layer].weight}, uv,
-        };
-      }
     }
   }
+}
+
+static void PrepareSimCloudFallback(void) {
+  if (s_sim_cloud_mesh.fallback_ready) return;
+  Sim3DPerformance_AddPath(kSim3DPath_CpuStage);
+  /* The GPU already samples all banks in one draw. Build the three legacy
+   * arrays only if that effect is unavailable, preserving the original float
+   * operation order from the shared, unscaled UVs and coverage alpha. */
+  for (int layer = 0; layer < kSimCloudLayerCount; ++layer)
+    for (int at = 0; at < kSimCloudVertexCount; ++at) {
+      ArRenderVertex2D vertex = s_sim_cloud_mesh.gpu_vertices[at];
+      vertex.tex_coord.x = vertex.tex_coord.x * kSimCloudLayers[layer].scale +
+          kSimCloudLayers[layer].offset_x;
+      vertex.tex_coord.y = vertex.tex_coord.y * kSimCloudLayers[layer].scale +
+          kSimCloudLayers[layer].offset_y;
+      vertex.color.a *= kSimCloudLayers[layer].weight;
+      s_sim_cloud_mesh.base_uv[layer][at] = vertex.tex_coord;
+      s_sim_cloud_mesh.vertices[layer][at] = vertex;
+    }
+  s_sim_cloud_mesh.fallback_ready = true;
 }
 
 /* Deterministic value noise. A hash rather than rand() so the field is
@@ -382,6 +391,7 @@ PresentationOutcome DrawSimCloudShroud(const FrameSlot *slot, ArRenderRectI sour
       return drawn ? kPresentationOutcome_Complete : kPresentationOutcome_OptionalOmitted;
     }
   }
+  PrepareSimCloudFallback();
   PresentationOutcome outcome = kPresentationOutcome_Complete;
   for (unsigned layer = 0;
        layer < (size_t)kSimCloudLayerCount; layer++) {

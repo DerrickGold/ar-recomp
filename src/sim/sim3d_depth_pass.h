@@ -70,6 +70,117 @@ bool Sim3DDepthPass_AppendMeshSample(Sim3DDepthPassLayer layer,
     ArRenderColorF color);
 void Sim3DDepthPass_DestroyMesh(Sim3DDepthMesh *mesh);
 
+/* Retained, already projected opaque-material geometry, with colors and UVs.
+ * Update copies the same values as AppendQuads; Ready includes the viewport.
+ * Range appends can interleave with ordinary appends in exact per-material call
+ * order (including equal-depth/alpha behavior). Range/availability rejection
+ * queues nothing, so that range can use ordinary geometry instead. Updates
+ * after any range is queued are rejected. All other ownership/reset rules
+ * above apply. Supports Solid, Ground, Mountain, WorldMountain, DepthOccluder
+ * and ShadowReceiver, each with its original material/depth policy. Other
+ * layers keep their existing sample contracts. No new shader/projection policy. */
+/* Opaque geometry handles/ranges have separate bounded budgets: exhausting
+ * this optional cache cannot consume transparent-effect handle/sample slots. */
+Sim3DDepthMesh *Sim3DDepthPass_CreateGeometryMesh(void);
+bool Sim3DDepthPass_UpdateGeometryMesh(Sim3DDepthMesh *mesh,
+    const Sim3DDepthVertex *vertices, size_t quad_count);
+bool Sim3DDepthPass_AppendGeometryMeshRange(Sim3DDepthPassLayer layer, Sim3DDepthMesh *mesh,
+    size_t first_quad, size_t quad_count);
+bool Sim3DDepthPass_AppendGeometryMesh(Sim3DDepthPassLayer layer, Sim3DDepthMesh *mesh);
+/* Copy the complete ordinary material batch collected so far, without
+ * changing queued draws. This is a CPU-owned staging copy, NOT GPU readback.
+ * Rejects empty, sampled, failed or over-budget batches and queued handles.
+ * The caller owns the cache key and must capture only a complete material. */
+bool Sim3DDepthPass_CaptureGeometryMesh(Sim3DDepthPassLayer layer, Sim3DDepthMesh *mesh);
+typedef struct Sim3DDepthGeometryRange {
+  Sim3DDepthPassLayer layer;
+  size_t first_quad, quad_count;
+} Sim3DDepthGeometryRange;
+/* Copy several complete ordinary layers into ONE owned mesh. Empty layers
+ * produce empty ranges; an entirely empty set rejects. Layers must be unique,
+ * supported, and unsampled. Neither draws nor output ranges change on failure.
+ * The caller certifies source revisions and owns the returned range values. */
+bool Sim3DDepthPass_CaptureGeometryLayers(Sim3DDepthMesh *mesh,
+    const Sim3DDepthPassLayer *layers, size_t layer_count,
+    Sim3DDepthGeometryRange *ranges);
+/* Atomic optional append: validate all ranges and reserve the complete draw
+ * budget before queuing anything. Rejection permits an ordinary full-batch
+ * fallback without drawing any layer twice. Empty ranges are skipped. */
+bool Sim3DDepthPass_AppendGeometryRanges(Sim3DDepthMesh *mesh,
+    const Sim3DDepthGeometryRange *ranges, size_t range_count);
+
+/* Experimental, untextured model-space solids. No shipping view opts in yet.
+ * Unlike screen-space meshes, these survive viewport/camera changes. Geometry
+ * and colors are copied on Update; Append copies a column-major transform
+ * (-W..W clip Z, as Scene3D math uses). Solid depth/blend rules are unchanged.
+ * Only this mesh kind accepts these calls. Reset/destroy/queued-update rules
+ * apply. Appends interleave with ordinary/retained Solid ranges in call order.
+ *
+ * The adapter conservatively tests the retained AABB against all six planes.
+ * A clipped/behind-eye/nonfinite transform is rejected without queuing work:
+ * use ordinary geometry for those cases. This deliberately preserves affine
+ * attributes until clipped-edge equivalence is established. No pixel-clean
+ * snapping or per-model facing policy is inferred by the platform layer. */
+typedef struct Sim3DDepthModelVertex {
+  float position[3];
+  ArRenderColorF color;
+} Sim3DDepthModelVertex;
+Sim3DDepthMesh *Sim3DDepthPass_CreateModelMesh(void);
+/* Separate experimental policy: retain homogeneous W and let the GPU clip
+ * partially visible or behind-eye primitives before perspective division.
+ * Uses screen-linear color interpolation; clipped-edge shading/roundoff need
+ * not reproduce the legacy CPU clipper bit-for-bit. Same Update/Append and
+ * bounded opaque ownership/order rules. No shipping view opts in yet. Fully
+ * invisible objects should still be coarsely culled by the scene owner. */
+Sim3DDepthMesh *Sim3DDepthPass_CreateHardwareClippedModelMesh(void);
+bool Sim3DDepthPass_UpdateModelMesh(Sim3DDepthMesh *mesh,
+    const Sim3DDepthModelVertex *vertices, size_t quad_count);
+bool Sim3DDepthPass_AppendModelMesh(Sim3DDepthMesh *mesh,
+    const float matrix[16]);
+
+/* Optional camera-independent radial solids. The scene supplies chart-space
+ * unit normals, an anchor elevation in source units, and an additional rise
+ * in world units. The adapter rotates each normal, computes
+ *   radius = sphere_radius + reference_height * height_scale
+ *   rise = (anchor - reference_height) * height_scale + extra_rise
+ *   world = radius * (normal - {0,0,1}) + normal * rise
+ * and projects with matrix, retaining homogeneous W for hardware clipping.
+ * No map, town, LOD, lighting, animation clock or chart policy enters the
+ * adapter. Colors are screen-linear, as with hardware-clipped model meshes.
+ *
+ * variant=0 is always visible; other integer tags (1..65535) draw only when
+ * matching the transform's variant. All four corners must have the same tag.
+ * This permits bounded precompiled poses in ONE ordered batch, without a draw
+ * per object. Unit normals tolerate 0.001 rounding error. Update/Append copy
+ * all inputs, obey the opaque budgets/ordering/reset rules, and reject invalid
+ * or overflowing data without queuing any work. Ready is viewport-independent.
+ * The caller still owns whole-object culling and source revision validation. */
+typedef struct Sim3DDepthRadialVertex {
+  float normal[3];
+  float elevation[2]; /* anchor in source units, extra rise in world units */
+  ArRenderColorF color;
+  float variant;
+} Sim3DDepthRadialVertex;
+typedef struct Sim3DDepthRadialTransform {
+  float matrix[16];
+  float basis[3][3]; /* rows: right, up, outward */
+  float sphere_radius, reference_height, height_scale;
+  unsigned variant;
+} Sim3DDepthRadialTransform;
+Sim3DDepthMesh *Sim3DDepthPass_CreateRadialMesh(void);
+bool Sim3DDepthPass_UpdateRadialMesh(Sim3DDepthMesh *mesh,
+    const Sim3DDepthRadialVertex *vertices, size_t quad_count);
+typedef struct Sim3DDepthMeshRange { size_t first_quad, quad_count; } Sim3DDepthMeshRange;
+/* Optional ordered index selection within the published source mesh. Copies
+ * ranges before returning; never reuploads source vertices. Total selected
+ * quads must fit the same bounded vertex budget. UpdateRadialMesh restores
+ * the default whole-mesh selection. Rejected selection updates leave the old
+ * selection intact; queued updates are rejected. Reset invalidates both. */
+bool Sim3DDepthPass_SelectRadialMesh(Sim3DDepthMesh *mesh,
+    const Sim3DDepthMeshRange *ranges, size_t range_count);
+bool Sim3DDepthPass_AppendRadialMesh(Sim3DDepthMesh *mesh,
+    const Sim3DDepthRadialTransform *transform);
+
 /* Optional spherical atlas mapping on the GPU. Positions are already clipped
  * screen-space quads, exactly as for UpdateMesh. Normals describe the FOUR
  * original corners in texture-sphere space. triangle=0 selects those corners

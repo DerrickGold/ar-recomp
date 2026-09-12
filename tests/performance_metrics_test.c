@@ -133,6 +133,9 @@ static void TestToggleAndWindow(void) {
   for (int i = 0; i <= 100; i++) {
     PerformanceMetrics_Record(PerformanceMetrics_Epoch(), kPerformance_Emulation, 2000000);
     PerformanceMetrics_Add(kPerformanceCount_Ticks, 2);
+    PerformanceMetrics_Add(kPerformanceCount_CpuProject, 3);
+    PerformanceMetrics_Add(kPerformanceCount_GpuReuse, 4);
+    PerformanceMetrics_Add(kPerformanceCount_GeometryRejected, 5);
     PerformanceMetrics_PresentCompleted((uint64_t)i * 10000000);
     PerformanceMetrics_Snapshot(&snapshot);
     CHECK(snapshot.ready == (i == 100));
@@ -144,6 +147,10 @@ static void TestToggleAndWindow(void) {
   CHECK(snapshot.stages[kPerformance_Emulation].calls == 101);
   CHECK(snapshot.stages[kPerformance_Ppu].calls == 0);
   NEAR(snapshot.counts[kPerformanceCount_Ticks], 2);
+  NEAR(snapshot.counts[kPerformanceCount_CpuProject], 3);
+  NEAR(snapshot.counts[kPerformanceCount_GpuReuse], 4);
+  NEAR(snapshot.counts[kPerformanceCount_GeometryRejected], 5);
+  NEAR(snapshot.counts[kPerformanceCount_Fallbacks], 0);
   const uint64_t revision = snapshot.revision;
   PerformanceMetrics_Configure(true, false);
   PerformanceMetrics_Snapshot(&snapshot);
@@ -158,6 +165,9 @@ static void TestToggleAndWindow(void) {
   PerformanceMetrics_PresentCompleted(3000000000);
   PerformanceMetrics_Snapshot(&snapshot);
   CHECK(snapshot.ready && snapshot.presents == 2);
+  NEAR(snapshot.counts[kPerformanceCount_CpuProject], 0);
+  NEAR(snapshot.counts[kPerformanceCount_GpuReuse], 0);
+  NEAR(snapshot.counts[kPerformanceCount_GeometryRejected], 0);
   NEAR(snapshot.stages[kPerformance_Upload].mean_ms, 3);
   NEAR(snapshot.stages[kPerformance_Upload].maximum_ms, 6);
   CHECK(!snapshot.stages[kPerformance_Emulation].calls);
@@ -201,6 +211,17 @@ static void TestParallelAndCapacity(void) {
 }
 
 static void TestOverlayLayout(void) {
+  CHECK(!strcmp(PerformanceMetrics_SceneName(kPerformanceScene_ActionFlat), "Action 2D"));
+  PerformanceSnapshot flat = {.ready = true, .context.scene = kPerformanceScene_ActionFlat};
+  PerformanceOverlayModel flat_model;
+  PerformanceOverlay_Build(&flat, 2, (ArRenderExtentI){1280, 800}, &flat_model);
+  bool flat_heading = false, flat_help = false;
+  for (int line = 0; line < flat_model.line_count; line++) {
+    flat_heading |= !strcmp(flat_model.lines[line].text, "ACTION 2D");
+    flat_help |= !strcmp(flat_model.lines[line].text, "No 3D compositor is active.");
+    CHECK(!strstr(flat_model.lines[line].text, "SIM/WORLD"));
+  }
+  CHECK(flat_heading && flat_help);
   PerformanceSnapshot snapshot = {.ready = true, .fps = 40, .frame_mean_ms = 25};
   const ArRenderExtentI sizes[] = {{1280,800}, {800,1280}, {640,480}, {560,390}, {320,240}, {240,120}, {0,0}};
   for (int i = 0; i < kPerformanceStage_Count; i++) {

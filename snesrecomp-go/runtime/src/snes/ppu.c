@@ -3558,10 +3558,10 @@ static void native_merge_packed_span(
 }
 
 typedef struct NativeOverlayLinePlan {
-    PpuOverlayCapture *capture;
     uint32_t *primary;
     uint32_t *bands[3];
     uint8_t priority_for_rank[16];
+    uint32_t colors[kPpuCgramEntries];
     int origin;
 } NativeOverlayLinePlan;
 
@@ -3569,8 +3569,12 @@ static void native_overlay_line_plan(Ppu *ppu, int source, int screen_y,
                                      NativeOverlayLinePlan *plan) {
     PpuOverlayCapture *capture = &ppu->overlayCaptures[source];
     int row;
-    memset(plan, 0, sizeof(*plan));
-    plan->capture = capture;
+    /* The palette is filled below only for bound rows; clearing it first
+     * would add a redundant kilobyte store per source on every scanline. */
+    plan->primary = NULL;
+    plan->origin = 0;
+    memset(plan->bands, 0, sizeof(plan->bands));
+    memset(plan->priority_for_rank, 0, sizeof(plan->priority_for_rank));
     for (uint8_t priority = 0u; priority < 4u; ++priority)
         plan->priority_for_rank[
             layer_rank(ppu, source, priority) & 15u] = priority;
@@ -3588,6 +3592,29 @@ static void native_overlay_line_plan(Ppu *ppu, int source, int screen_y,
                 ppu->overlayRenderBands[source][band] +
                 (size_t)row * ppu->overlayRenderPitch[source]);
     }
+    /* Capture policy, brightness and fixed color are constant for this line.
+     * Resolve them once per palette entry, not once per exported pixel. This
+     * is line-local: HDMA/IRQ/CGRAM changes are observed on the next line and
+     * the reference sampler remains independent. No frame cache or ABI state. */
+    for (unsigned palette = 0; palette < kPpuCgramEntries; ++palette) {
+        uint32_t argb;
+        if (capture->flags == kPpuOverlayFlag_MarkMainScreenWinner) {
+            argb = 0xffffffffu;
+        } else if ((capture->flags & kPpuOverlayFlag_ApplyBgFixedColorSubtract) != 0u &&
+                   source < kPpuOverlaySource_Obj) {
+            argb = color_argb(ppu,
+                color_math(ppu->cgram[palette], ppu->fixedColor, true, false));
+        } else {
+            argb = 0xff000000u | ppu->cgramRgb[palette];
+        }
+        if ((capture->flags & kPpuOverlayFlag_MarkObjColorMath) != 0u &&
+            source == kPpuOverlaySource_Obj && ((palette - 0x80u) >> 4) >= 4u)
+            argb = (argb & 0x00ffffffu) | 0x80000000u;
+        if ((capture->flags & kPpuOverlayFlag_MarkBgHalfAdd) != 0u &&
+            source < kPpuOverlaySource_Obj)
+            argb = (argb & 0x00ffffffu) | 0x80000000u;
+        plan->colors[palette] = argb;
+    }
 }
 
 static void native_write_overlay_packed(
@@ -3598,8 +3625,6 @@ static void native_write_overlay_packed(
     unsigned priority = plan->priority_for_rank[rank & 15u];
     int band;
     uint32_t *destination;
-    uint16_t color;
-    uint32_t argb;
     if (plan->primary == NULL) return;
     if (source == kPpuOverlaySource_Obj) {
         band = (int)priority;
@@ -3613,27 +3638,7 @@ static void native_write_overlay_packed(
     destination = band > 0 && band <= 3 && plan->bands[band - 1] != NULL
         ? plan->bands[band - 1] : plan->primary;
     if (destination == plan->primary) band = 0;
-    color = ppu->cgram[palette];
-    if (plan->capture->flags == kPpuOverlayFlag_MarkMainScreenWinner) {
-        argb = 0xffffffffu;
-    } else if ((plan->capture->flags &
-         kPpuOverlayFlag_ApplyBgFixedColorSubtract) != 0u &&
-        source < kPpuOverlaySource_Obj) {
-        color = color_math(color, ppu->fixedColor, true, false);
-        argb = color_argb(ppu, color);
-    } else {
-        argb = 0xff000000u | ppu->cgramRgb[palette];
-    }
-    if ((plan->capture->flags &
-         kPpuOverlayFlag_MarkObjColorMath) != 0u &&
-        source == kPpuOverlaySource_Obj &&
-        ((palette - 0x80u) >> 4) >= 4u)
-        argb = (argb & 0x00ffffffu) | 0x80000000u;
-    if ((plan->capture->flags &
-         kPpuOverlayFlag_MarkBgHalfAdd) != 0u &&
-        source < kPpuOverlaySource_Obj)
-        argb = (argb & 0x00ffffffu) | 0x80000000u;
-    destination[plan->origin + x] = argb;
+    destination[plan->origin + x] = plan->colors[palette];
     ppu->overlayRenderContentMask[source] |= (uint8_t)(1u << band);
 }
 

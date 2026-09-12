@@ -111,7 +111,11 @@ void DioramaPerformance_End(DioramaPerformanceScope scope) {
 
 void DioramaPerformance_AddPlaneSync(bool succeeded, bool uploaded,
                                      uint64_t uploaded_bytes) {
-  if (succeeded && uploaded) PerformanceMetrics_Add(kPerformanceCount_UploadBytes, uploaded_bytes);
+  /* Upload bytes are counted at the render-device boundary now, so every
+   * subsystem is included and none is counted twice. The plane-local totals
+   * below remain for the focused diorama profiler. */
+  if (succeeded && !uploaded)
+    PerformanceMetrics_Add(kPerformanceCount_UploadSkipped, 1);
   if (!LogEnabled()) return;
   LockPerformanceData();
   s_data.plane_syncs++;

@@ -1,6 +1,7 @@
 #ifndef AR_DIORAMA_COVERAGE_H
 #define AR_DIORAMA_COVERAGE_H
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
@@ -53,18 +54,36 @@ static inline DioramaCoverageMask DioramaCoverage_Dilate(
 
 static inline DioramaCoverageMask DioramaCoverage_FromArgb8888(
     const uint8_t *pixels, size_t pitch_bytes, int width, int height) {
-  if (!pixels || !pitch_bytes || width <= 0 || height <= 0) return 0;
+  if (!pixels || width <= 0 || height <= 0 ||
+      (size_t)width > SIZE_MAX / sizeof(uint32_t) ||
+      pitch_bytes < (size_t)width * sizeof(uint32_t) ||
+      (size_t)height > SIZE_MAX / pitch_bytes) return 0;
   DioramaCoverageMask occupied = 0;
-  for (int y = 0; y < height; y++) {
-    const uint32_t *row =
-        (const uint32_t *)(pixels + (size_t)y * pitch_bytes);
-    const int cell_row = y * kDioramaCoverageRows / height;
-    for (int x = 0; x < width; x++) {
-      if ((row[x] >> 24) == 0u) continue;
-      const int cell_column = x * kDioramaCoverageColumns / width;
-      const int cell =
-          cell_row * kDioramaCoverageColumns + cell_column;
-      occupied |= UINT64_C(1) << cell;
+  /* Coverage asks whether ANY pixel in a cell has alpha. Stop at the first
+   * one instead of dividing coordinates and setting the same bit for every
+   * opaque texel. Ceil boundaries exactly invert floor(x * columns / width),
+   * including uneven extents and images smaller than the grid. */
+  for (int cell_row = 0; cell_row < kDioramaCoverageRows; cell_row++) {
+    const int y0 = (int)(((uint64_t)cell_row * height + kDioramaCoverageRows - 1) /
+                         kDioramaCoverageRows);
+    const int y1 = (int)(((uint64_t)(cell_row + 1) * height + kDioramaCoverageRows - 1) /
+                         kDioramaCoverageRows);
+    for (int cell_column = 0; cell_column < kDioramaCoverageColumns; cell_column++) {
+      const int x0 = (int)(((uint64_t)cell_column * width + kDioramaCoverageColumns - 1) /
+                           kDioramaCoverageColumns);
+      const int x1 = (int)(((uint64_t)(cell_column + 1) * width + kDioramaCoverageColumns - 1) /
+                           kDioramaCoverageColumns);
+      bool found = false;
+      for (int y = y0; y < y1 && !found; y++) {
+        const uint8_t *row = pixels + (size_t)y * pitch_bytes;
+        for (int x = x0; x < x1; x++) {
+          uint32_t pixel;
+          memcpy(&pixel, row + (size_t)x * sizeof(pixel), sizeof(pixel));
+          if (pixel >> 24) { found = true; break; }
+        }
+      }
+      if (found) occupied |= UINT64_C(1) <<
+          (cell_row * kDioramaCoverageColumns + cell_column);
     }
   }
   return DioramaCoverage_Dilate(occupied);

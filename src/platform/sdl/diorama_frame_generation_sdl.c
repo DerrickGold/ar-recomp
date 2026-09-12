@@ -112,16 +112,19 @@ static bool EnsurePlaneBuffers(DioramaFrameGenerationPlane *plane) {
   return plane->previous_pixels && plane->current_pixels;
 }
 
+/* Scale mode is passed explicitly rather than inferred from the access type.
+ * The endpoints are sampled by the warp and must stay LINEAR even though they
+ * are now render targets; deriving it from the access would silently switch
+ * them to NEAREST and change every generated frame. */
 static SDL_Texture *CreatePlaneTexture(SDL_Renderer *renderer,
                                        SDL_TextureAccess access,
+                                       SDL_ScaleMode scale_mode,
                                        int width, int height, int plane) {
   SDL_Texture *texture = SDL_CreateTexture(
       renderer, SDL_PIXELFORMAT_ARGB8888,
       access, width, height);
   if (!texture) return NULL;
-  if (!SDL_SetTextureScaleMode(
-          texture, access == SDL_TEXTUREACCESS_TARGET
-              ? SDL_SCALEMODE_NEAREST : SDL_SCALEMODE_LINEAR) ||
+  if (!SDL_SetTextureScaleMode(texture, scale_mode) ||
       !SDL_SetTextureBlendMode(
           texture, plane == kDioramaPlane_Backdrop
               ? SDL_BLENDMODE_NONE : SDL_BLENDMODE_BLEND)) {
@@ -138,17 +141,25 @@ static bool EnsurePlaneTextures(SDL_Renderer *renderer, int plane_index,
       plane->texture_width != region->width ||
       plane->texture_height != region->height)
     DestroyPlaneTextures(plane);
+  /* The endpoints are filled by copying the already-uploaded compositor
+   * texture on the GPU rather than by a second upload of the same pixels, so
+   * they are render targets. Frame generation already required target
+   * textures for `generated_texture`, so this adds no new device requirement
+   * and needs no separate fallback. */
   if (!plane->previous_texture)
     plane->previous_texture =
-        CreatePlaneTexture(renderer, SDL_TEXTUREACCESS_STREAMING,
+        CreatePlaneTexture(renderer, SDL_TEXTUREACCESS_TARGET,
+                           SDL_SCALEMODE_LINEAR,
                            region->width, region->height, plane_index);
   if (!plane->current_texture)
     plane->current_texture =
-        CreatePlaneTexture(renderer, SDL_TEXTUREACCESS_STREAMING,
+        CreatePlaneTexture(renderer, SDL_TEXTUREACCESS_TARGET,
+                           SDL_SCALEMODE_LINEAR,
                            region->width, region->height, plane_index);
   if (!plane->generated_texture)
     plane->generated_texture =
         CreatePlaneTexture(renderer, SDL_TEXTUREACCESS_TARGET,
+                           SDL_SCALEMODE_NEAREST,
                            kFrameSlotLayerTextureWidth,
                            kFrameSlotLayerTextureHeight, plane_index);
   const bool ready = plane->previous_texture && plane->current_texture &&
@@ -194,13 +205,14 @@ static void CopySurfaceRegion(
 
 void DioramaFrameGeneration_Capture(
     ArRenderDevice *device, const FrameSlot *slot,
+    const ArRenderTexture source_textures[kDioramaPlane_Count],
     const uint8_t *const pixels[kDioramaPlane_Count],
     const size_t pitch_bytes[kDioramaPlane_Count],
     uint32_t changed_plane_mask) {
   SDL_Renderer *renderer = ArSdlRenderBackend_Renderer(device);
   s_pair_timestamp_ns = 0;
   s_pair_mask = 0;
-  if (!renderer || !slot || !pixels || !pitch_bytes ||
+  if (!renderer || !slot || !source_textures || !pixels || !pitch_bytes ||
       !slot->diorama_active ||
       !slot->interp_setting_enabled || !slot->capture_ticks ||
       slot->turbo_active || (slot->inidisp & 0x80u) != 0) {
@@ -237,6 +249,10 @@ void DioramaFrameGeneration_Capture(
 
   const bool continuous =
       KeysAreContinuous(&s_last_key, &current, slot->capture_ticks);
+  /* Endpoint copies bind their own render target. Capture the caller's once
+   * and restore it after the loop so no plane's early exit can leave the
+   * renderer pointing at a private texture. */
+  SDL_Texture *const entry_target = SDL_GetRenderTarget(renderer);
   for (int plane_index = 0; plane_index < kDioramaPlane_Count;
        plane_index++) {
     DioramaFrameGenerationPlane *plane = &s_planes[plane_index];
@@ -284,14 +300,40 @@ void DioramaFrameGeneration_Capture(
 
     /* Keep both private endpoints capture-sized. Linear warping can then
      * sample their physical texture edge without touching the stale padding
-     * carried by the fixed-size compositor textures. Swapping means this is
-     * still one endpoint upload per captured plane, not two. */
+     * carried by the fixed-size compositor textures. Swapping means only one
+     * endpoint is refreshed per captured plane, not two. */
     SDL_Texture *texture_swap = plane->previous_texture;
     plane->previous_texture = plane->current_texture;
     plane->current_texture = texture_swap;
-    if (!SDL_UpdateTexture(
-            plane->current_texture, NULL, plane->current_pixels,
-            kFrameSlotLayerTextureWidth * (int)sizeof(uint32_t))) {
+    /* Diorama_Upload has already sent exactly these pixels to the compositor
+     * texture earlier in this same presentation. Uploading them a second time
+     * duplicated the whole transfer -- and on backends with a large per-call
+     * cost the duplicate was more expensive than the bytes. Copy the valid
+     * region on the GPU instead. Copying only the region is also what made the
+     * private endpoint necessary in the first place: it leaves the compositor
+     * texture's fixed-size padding behind. */
+    SDL_Texture *source =
+        ArSdlRenderBackend_UnwrapTexture(source_textures[plane_index]);
+    if (!source) {
+      plane->current_valid = false;
+      continue;
+    }
+    /* An exact copy, not a composite: the source's own blend mode would
+     * otherwise alpha-blend these texels over an undefined target. */
+    SDL_BlendMode source_blend = SDL_BLENDMODE_NONE;
+    const bool had_blend = SDL_GetTextureBlendMode(source, &source_blend);
+    const SDL_FRect source_rect = {
+      (float)region.x, 0.0f, (float)region.width, (float)region.height,
+    };
+    const SDL_FRect destination_rect = {
+      0.0f, 0.0f, (float)region.width, (float)region.height,
+    };
+    const bool copied =
+        SDL_SetTextureBlendMode(source, SDL_BLENDMODE_NONE) &&
+        SDL_SetRenderTarget(renderer, plane->current_texture) &&
+        SDL_RenderTexture(renderer, source, &source_rect, &destination_rect);
+    if (had_blend) (void)SDL_SetTextureBlendMode(source, source_blend);
+    if (!copied) {
       plane->current_valid = false;
       continue;
     }
@@ -308,6 +350,8 @@ void DioramaFrameGeneration_Capture(
         mode, &plane->motion);
     if (plane->pair_valid) s_pair_mask |= 1u << plane_index;
   }
+  if (SDL_GetRenderTarget(renderer) != entry_target)
+    (void)SDL_SetRenderTarget(renderer, entry_target);
   s_pair_timestamp_ns = s_pair_mask ? slot->timestamp_ns : 0;
   s_last_key = current;
 }

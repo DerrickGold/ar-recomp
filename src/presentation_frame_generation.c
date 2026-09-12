@@ -286,19 +286,60 @@ static MotionSearchResult FindGlobalMotion(
   unsigned best_cost = UINT_MAX;
   /* Exhaust the small 15x15 search on a coarse grid. The former three-step
    * hill climb was faster but could settle in a diagonal local minimum on
-   * high-frequency pixel art and move an entire background the wrong way. */
-  for (int dy = -kPresentationFrameGenerationSearchRadius;
-       dy <= kPresentationFrameGenerationSearchRadius; dy++) {
-    for (int dx = -kPresentationFrameGenerationSearchRadius;
-         dx <= kPresentationFrameGenerationSearchRadius; dx++) {
-      const MotionVector candidate = {dx, dy};
-      const unsigned cost = GlobalCost(
-          source, target, source_pitch, target_pitch,
-          width, height, dx, dy, kGlobalMotionCoarseSampleStep);
-      if (BetterMotion(cost, candidate, best_cost, best)) {
-        best = candidate;
-        best_cost = cost;
+   * high-frequency pixel art and move an entire background the wrong way.
+   *
+   * The exhaustive search is kept; only its memory access order changes.
+   * Scoring one candidate at a time walked the whole plane 225 times, and at
+   * a 16-pixel stride every sample landed on its own cache line, so the pair
+   * of surfaces was streamed 225 times over. Accumulating all 225 candidates
+   * per sample instead reads each source pixel once and takes every target
+   * from the 15x15 neighbourhood already around it.
+   *
+   * The result is bit-identical, not merely equivalent: the same terms are
+   * summed into the same accumulators, and unsigned addition is associative
+   * and commutative (including on wrap), so reordering cannot change a cost.
+   * BetterMotion is a total order over distinct candidates, so the winner
+   * does not depend on visit order either. */
+  enum {
+    kSearchSpan = kPresentationFrameGenerationSearchRadius * 2 + 1,
+    kSearchCandidates = kSearchSpan * kSearchSpan,
+  };
+  unsigned costs[kSearchCandidates];
+  for (int index = 0; index < kSearchCandidates; index++) {
+    const int dy = index / kSearchSpan - kPresentationFrameGenerationSearchRadius;
+    const int dx = index % kSearchSpan - kPresentationFrameGenerationSearchRadius;
+    costs[index] =
+        (unsigned)(AbsInt(dx) + AbsInt(dy)) * kMotionDistancePenalty;
+  }
+  for (int y = kPresentationFrameGenerationSearchRadius;
+       y < height - kPresentationFrameGenerationSearchRadius;
+       y += kGlobalMotionCoarseSampleStep) {
+    const uint32_t *source_row = source + (size_t)y * (size_t)source_pitch;
+    for (int x = kPresentationFrameGenerationSearchRadius;
+         x < width - kPresentationFrameGenerationSearchRadius;
+         x += kGlobalMotionCoarseSampleStep) {
+      const uint32_t sample = source_row[x];
+      unsigned *cost_row = costs;
+      for (int dy = -kPresentationFrameGenerationSearchRadius;
+           dy <= kPresentationFrameGenerationSearchRadius;
+           dy++, cost_row += kSearchSpan) {
+        const uint32_t *target_row =
+            target + (size_t)(y + dy) * (size_t)target_pitch + x;
+        for (int dx = 0; dx < kSearchSpan; dx++)
+          cost_row[dx] += PixelDifference(
+              sample,
+              target_row[dx - kPresentationFrameGenerationSearchRadius]);
       }
+    }
+  }
+  for (int index = 0; index < kSearchCandidates; index++) {
+    const MotionVector candidate = {
+      index % kSearchSpan - kPresentationFrameGenerationSearchRadius,
+      index / kSearchSpan - kPresentationFrameGenerationSearchRadius,
+    };
+    if (BetterMotion(costs[index], candidate, best_cost, best)) {
+      best = candidate;
+      best_cost = costs[index];
     }
   }
   /* Re-score the coarse winner and its immediate neighbours on twice the

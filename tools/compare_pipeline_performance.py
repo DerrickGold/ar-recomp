@@ -25,11 +25,14 @@ RENDER_STAGES = (
 )
 
 
-def summarize_log(log: str, scene: str, windows: int = 5) -> dict:
+def summarize_log(log: str, scene: str, windows: int = 5, map_id: str | None = None) -> dict:
     """Weight samples by presents; reject short/missing or malformed evidence."""
     samples = []
     for block in log.split("[pipeline-perf]")[1:]:
         if not block.startswith(f" scene={scene} "):
+            continue
+        if map_id is not None and not re.search(
+                rf" map={re.escape(map_id)}(?:\s|$)", block.splitlines()[0]):
             continue
         count = re.search(r" frames=(\d+)(?:\s|$)", block.splitlines()[0])
         if not count or not int(count[1]):
@@ -78,6 +81,46 @@ def resolve(path: str) -> Path:
     return (candidate if candidate.is_absolute() else ROOT / candidate).resolve()
 
 
+def validate_run_completion(log: str, expected_ticks: int) -> dict:
+    """A zero process exit code is not proof that the graphics run completed."""
+    failure = re.search(r"\bVK_ERROR_[A-Z_]+\b|Wayland display connection closed", log)
+    if failure:
+        raise ValueError(f"Graphics failure ({failure[0]}); discard comparison")
+    cadence = re.findall(
+        r"\[present-cadence\] tick-presents=(\d+) re-presents=(\d+)(?:\s|$)", log)
+    # This harness forces headless-video: exactly one tick/present per loop,
+    # with no idle frame-generation re-presents. Early replay/window exits
+    # can otherwise leave enough settled samples and a successful exit code.
+    if not cadence or tuple(map(int, cadence[-1])) != (expected_ticks, 0):
+        raise ValueError("Incomplete headless presentation schedule; discard comparison")
+    return {"tick_presents": expected_ticks, "re_presents": 0}
+
+
+def run_evidence(log: str) -> dict:
+    match = re.search(r"\[run-dir\] (runs/\d+-\d+)(?:\s|$)", log)
+    if not match:
+        raise ValueError("Missing run bundle")
+    run_dir = ROOT / match[1]
+    return {"run_dir": str(run_dir),
+            "final_wram_sha256": digest(run_dir / "dump_wram.bin")}
+
+
+def capture_evidence(run_dir: Path, start: int, end: int, every: int) -> dict:
+    expected = {f"shot_{frame}.ppm" for frame in range(start, end + 1)
+                if frame % every == 0}
+    images = {path.name: digest(path) for path in run_dir.glob("shot_*.ppm")}
+    if not expected or images.keys() != expected:
+        raise ValueError("Composite capture schedule incomplete or unexpected")
+    return images
+
+
+def verify_runs(results: list[dict], captures: bool = False) -> None:
+    if not results or len({r["final_wram_sha256"] for r in results}) != 1:
+        raise ValueError("Simulation state differs; discard comparison")
+    if captures and any(r["images"] != results[0]["images"] for r in results[1:]):
+        raise ValueError("Final composite pixels differ; inspect captures")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--control", required=True, type=Path)
@@ -88,7 +131,14 @@ def main() -> None:
                         default=ROOT / "tests/fixtures/sim3d/checkpoints.json")
     parser.add_argument("--checkpoint", default="D7-voxel-town")
     parser.add_argument("--scene", default="Town 3D")
+    parser.add_argument("--control-scene", help="Previous label when comparing an instrumentation rename")
+    parser.add_argument("--map", dest="map_id", help="Exact hexadecimal group/room, e.g. 04/04")
     parser.add_argument("--quit-frames", type=int, default=1800)
+    parser.add_argument("--verify-only", action="store_true",
+                        help="Two untimed runs comparing exact composite pixels and WRAM")
+    parser.add_argument("--capture-from", type=int, default=400)
+    parser.add_argument("--capture-to", type=int, default=1700)
+    parser.add_argument("--capture-every", type=int, default=100)
     parser.add_argument("--timeout", type=int, default=180)
     parser.add_argument("--control-workers", type=int, choices=range(4), default=3)
     parser.add_argument("--candidate-workers", type=int, choices=range(4), default=3)
@@ -99,7 +149,19 @@ def main() -> None:
     args = parser.parse_args()
     if args.quit_frames < 1 or args.timeout < 1:
         parser.error("Frame limit and timeout must be positive")
+    if (args.capture_from < 0 or args.capture_to < args.capture_from or
+            args.capture_to > 65535 or args.capture_every < 1 or
+            args.capture_to // args.capture_every <
+            (args.capture_from + args.capture_every - 1) // args.capture_every):
+        parser.error("Capture schedule must include at least one 16-bit game frame")
     checkpoint = json.loads(args.manifest.read_text())["checkpoints"][args.checkpoint]
+    map_id = args.map_id or checkpoint.get("map")
+    if map_id is not None and not re.fullmatch(r"[0-9a-fA-F]{2}/[0-9a-fA-F]{2}", map_id):
+        parser.error("Map must be two hexadecimal bytes, e.g. 04/04")
+    if map_id is not None:
+        map_id = map_id.lower()
+    if args.control_scene and map_id is None:
+        parser.error("--control-scene requires a room filter to exclude unrelated scenes")
     replay = resolve(checkpoint["replay"])
     settings = resolve(checkpoint["settings"])
     seed_path = resolve(checkpoint.get("sram_base64") or checkpoint["sram"])
@@ -111,7 +173,7 @@ def main() -> None:
         raise ValueError("SRAM fixture length/hash mismatch")
     binaries = {"control": args.control.resolve(), "candidate": args.candidate.resolve()}
     inputs = [*binaries.values(), args.rom.resolve(), args.config.resolve(),
-              args.manifest.resolve(), replay, settings, seed_path]
+              args.manifest.resolve(), replay, settings, seed_path, Path(__file__).resolve()]
     hashes = {str(path): digest(path) for path in inputs}
     overrides = {}
     for item in args.set:
@@ -139,17 +201,28 @@ def main() -> None:
                AR_SETTINGS_PATH=str(isolated_settings), AR_PIPELINE_PERF="1",
                AR_PERFORMANCE_OVERLAY="Off", AR_REFRESH_MODE="Unlimited",
                AR_QUIT_FRAMES=str(args.quit_frames))
-    for name in ("AR_INPUT_RECORD", "AR_SHOT_EVERY", "AR_SHOT_FRAMES",
-                 "AR_PERF", "AR_SIM3D_PERF", "AR_DUMP_EVERY"):
+    for name in tuple(env):
+        if name.startswith("AR_SHOT_"):
+            env.pop(name)
+    for name in ("AR_INPUT_RECORD", "AR_PERF", "AR_ACTION_PERF", "AR_SIM3D_PERF", "AR_DUMP_EVERY"):
         env.pop(name, None)
+    if args.verify_only:
+        env.pop("AR_PIPELINE_PERF")
+        env.update(AR_SIM3D_CLOUD_DRIFT="0", AR_SHOT_REQUIRE_COMPOSITE="1",
+                   AR_SHOT_FROM=str(args.capture_from), AR_SHOT_TO=str(args.capture_to),
+                   AR_SHOT_EVERY=str(args.capture_every))
     results = []
-    report = {"schema": "actraiser-pipeline-comparison-v1", "scene": args.scene,
+    report = {"schema": "actraiser-pipeline-comparison-v1", "scene": args.scene, "map": map_id,
+              "control_scene": args.control_scene or args.scene,
               "input_sha256": hashes, "seed_sha256": seed_hash,
               "environment": {k: v for k, v in env.items() if k.startswith("AR_")},
               "workers": {"control": args.control_workers,
-                          "candidate": args.candidate_workers}, "runs": results}
+                          "candidate": args.candidate_workers},
+              "verification": args.verify_only, "runs": results}
     print(f"Evidence: {output}", flush=True)
-    for index, variant in enumerate(("control", "candidate", "candidate", "control") * 2):
+    order = (("control", "candidate") if args.verify_only else
+             ("control", "candidate", "candidate", "control") * 2)
+    for index, variant in enumerate(order):
         if any(digest(Path(path)) != expected for path, expected in hashes.items()):
             raise RuntimeError("Benchmark inputs changed; discard this comparison")
         env["AR_RENDER_WORKERS"] = str(report["workers"][variant])
@@ -163,12 +236,31 @@ def main() -> None:
                            timeout=args.timeout)
         if any(digest(Path(path)) != expected for path, expected in hashes.items()):
             raise RuntimeError("Benchmark inputs changed during run")
-        result = summarize_log(log_path.read_text(), args.scene)
+        scene = args.control_scene if variant == "control" and args.control_scene else args.scene
+        log = log_path.read_text()
+        completion = validate_run_completion(log, args.quit_frames)
+        result = run_evidence(log)
+        result.update(completion)
+        if args.verify_only:
+            if "capture=failed" in log or "capture=native-framebuffer" in log:
+                raise ValueError("Strict composite capture failed")
+            result["images"] = capture_evidence(
+                Path(result["run_dir"]), args.capture_from, args.capture_to, args.capture_every)
+        else:
+            result.update(summarize_log(log, scene, map_id=map_id))
         result.update(variant=variant, log=str(log_path))
         results.append(result)
         (output / "results.json").write_text(json.dumps(report, indent=2) + "\n")
-        print(f"{index + 1}/8 {variant}: {result['stages']['render CPU']:.4f} ms render CPU",
-              flush=True)
+        message = (f"{len(result['images'])} composite captures" if args.verify_only else
+                   f"{result['stages']['render CPU']:.4f} ms render CPU")
+        print(f"{index + 1}/{len(order)} {variant}: {message}", flush=True)
+    verify_runs(results, captures=args.verify_only)
+    if args.verify_only:
+        report["summary"] = {"byte_identical_captures": len(results[0]["images"]),
+                             "identical_final_wram": True}
+        (output / "results.json").write_text(json.dumps(report, indent=2) + "\n")
+        print(json.dumps(report["summary"]), flush=True)
+        return
     report["summary"] = aggregate(results)
     (output / "results.json").write_text(json.dumps(report, indent=2) + "\n")
     before = report["summary"]["control"]["render CPU"]["median_ms"]

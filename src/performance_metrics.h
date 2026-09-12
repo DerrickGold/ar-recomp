@@ -30,13 +30,26 @@ typedef enum PerformanceCount {
   kPerformanceCount_UploadBytes, kPerformanceCount_DepthUploadBytes,
   kPerformanceCount_WorkJobs, kPerformanceCount_HelperJobs,
   kPerformanceCount_Fallbacks, kPerformanceCount_FailedPresents,
+  kPerformanceCount_CpuProject, kPerformanceCount_CpuStage,
+  kPerformanceCount_GpuReuse, kPerformanceCount_GeometryPublish,
+  kPerformanceCount_GeometryOptOut, kPerformanceCount_GeometryLimit,
+  kPerformanceCount_GeometryRejected,
+  /* Upload traffic, counted at the render-device boundary so EVERY subsystem
+   * is included rather than only the ones that remembered to report. These are
+   * deterministic mechanism counters, not timings: they mean the same thing on
+   * every platform, which is what makes them usable as a regression gate when
+   * the host's own milliseconds are not comparable to the target's. */
+  kPerformanceCount_UploadCalls,      /* texture-update calls issued */
+  kPerformanceCount_UploadSkipped,    /* uploads avoided by change detection */
+  kPerformanceCount_ScanBytes,        /* bytes READ to discover what changed */
+  kPerformanceCount_MirrorReallocs,   /* upload-mirror storage reallocations */
   kPerformanceCount_Count,
 } PerformanceCount;
 
 typedef enum PerformanceScene {
   kPerformanceScene_Native, kPerformanceScene_Action,
   kPerformanceScene_Town, kPerformanceScene_World,
-  kPerformanceScene_Palace, kPerformanceScene_Count,
+  kPerformanceScene_Palace, kPerformanceScene_ActionFlat, kPerformanceScene_Count,
 } PerformanceScene;
 
 typedef struct PerformanceContext {

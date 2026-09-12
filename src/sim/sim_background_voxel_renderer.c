@@ -78,6 +78,25 @@ typedef struct SimBackgroundSolidProjectionBuilder {
   bool failed;
 } SimBackgroundSolidProjectionBuilder;
 
+/* One handle per pass, not per material: together with the globe's two
+ * retained batches this stays inside the depth adapter's four-handle budget.
+ * Only geometry is retained. Atlases, shadow masks and volcano effects remain
+ * live, and the two passes keep their original actor/compositing boundaries. */
+static const Sim3DDepthPassLayer kRetainedTownLayers[] = {
+  kSim3DDepthPass_DepthOccluder, kSim3DDepthPass_Solid,
+  kSim3DDepthPass_Mountain, kSim3DDepthPass_ShadowReceiver,
+};
+enum { kRetainedTownLayerCount =
+    sizeof(kRetainedTownLayers) / sizeof(kRetainedTownLayers[0]) };
+
+typedef struct SimBackgroundRetainedPass {
+  Sim3DDepthMesh *mesh;
+  SimBackgroundSolidProjectionKey key;
+  Sim3DDepthGeometryRange ranges[kRetainedTownLayerCount];
+  bool observed, attempted, valid, has_shadow;
+  uint8_t shadow_opacity_pct;
+} SimBackgroundRetainedPass;
+
 static struct {
   ArRenderTexture ground;
   uint32_t uploaded_serial;
@@ -93,6 +112,7 @@ static struct {
   size_t projected_solid_capacity;
   SimBackgroundSolidProjectionKey projected_solid_key;
   bool projected_solids_valid;
+  SimBackgroundRetainedPass solid_pass, shadow_pass;
   SimBackgroundGeometryBatch batch;
 } g_renderer_state;
 
@@ -100,12 +120,9 @@ static bool SameRenderRect(ArRenderRectI a, ArRenderRectI b) {
   return a.x == b.x && a.y == b.y && a.w == b.w && a.h == b.h;
 }
 
-static bool SolidProjectionCacheMatches(
+static bool ProjectionKeyMatches(const SimBackgroundSolidProjectionKey *key,
     const SimBackgroundVoxelRenderParams *params, uint32_t scene_serial) {
-  const SimBackgroundSolidProjectionKey *key =
-      &g_renderer_state.projected_solid_key;
-  return g_renderer_state.projected_solids_valid &&
-      key->scene_serial == scene_serial &&
+  return key->scene_serial == scene_serial &&
       key->detail == params->detail && key->lod == params->lod &&
       key->shading == params->shading && key->style == params->style &&
       key->facing == params->facing &&
@@ -124,10 +141,14 @@ static bool SolidProjectionCacheMatches(
              sizeof(key->texture_to_clip)) == 0;
 }
 
-static void SaveSolidProjectionCacheKey(
+static bool SolidProjectionCacheMatches(
     const SimBackgroundVoxelRenderParams *params, uint32_t scene_serial) {
-  SimBackgroundSolidProjectionKey *key =
-      &g_renderer_state.projected_solid_key;
+  return g_renderer_state.projected_solids_valid && ProjectionKeyMatches(
+      &g_renderer_state.projected_solid_key, params, scene_serial);
+}
+
+static void SaveProjectionKey(SimBackgroundSolidProjectionKey *key,
+    const SimBackgroundVoxelRenderParams *params, uint32_t scene_serial) {
   *key = (SimBackgroundSolidProjectionKey){
     .scene_serial = scene_serial,
     .detail = params->detail,
@@ -150,6 +171,57 @@ static void SaveSolidProjectionCacheKey(
   memcpy(key->matrix, params->matrix, sizeof(key->matrix));
   memcpy(key->texture_to_clip, params->texture_to_clip,
          sizeof(key->texture_to_clip));
+}
+
+static bool PrepareRetainedPass(SimBackgroundRetainedPass *cache,
+    const SimBackgroundVoxelRenderParams *params, uint32_t scene_serial) {
+  static int enabled = -1;
+  if (enabled < 0) {
+    const char *value = getenv("AR_SIM3D_TOWN_RETAINED");
+    enabled = !value || strcmp(value, "0") != 0;
+  }
+  if (!enabled) {
+    Sim3DPerformance_AddPath(kSim3DPath_OptOut);
+    return false;
+  }
+  const bool has_shadow = ArRenderTexture_IsValid(params->shadow_mask);
+  if (!cache->observed || !ProjectionKeyMatches(&cache->key, params, scene_serial) ||
+      cache->has_shadow != has_shadow ||
+      cache->shadow_opacity_pct != params->shadow_opacity_pct) {
+    SaveProjectionKey(&cache->key, params, scene_serial);
+    cache->has_shadow = has_shadow;
+    cache->shadow_opacity_pct = params->shadow_opacity_pct;
+    cache->observed = true;
+    cache->attempted = cache->valid = false;
+    /* Wait for a repeated projection before spending a publication. Continuous
+     * camera motion must not pay for a second, never-reused upload each frame. */
+    return false;
+  }
+  if (cache->valid && !Sim3DDepthPass_MeshReady(cache->mesh))
+    cache->attempted = cache->valid = false; /* Backend resource reset. */
+  return true;
+}
+
+static bool AppendRetainedPass(SimBackgroundRetainedPass *cache) {
+  if (!cache->valid) {
+    if (cache->attempted) Sim3DPerformance_AddPath(kSim3DPath_Rejected);
+    return false;
+  }
+  const bool ok = Sim3DDepthPass_AppendGeometryRanges(
+      cache->mesh, cache->ranges, kRetainedTownLayerCount);
+  Sim3DPerformance_AddPath(ok ? kSim3DPath_GpuReuse : kSim3DPath_Rejected);
+  return ok;
+}
+
+static void CaptureRetainedPass(SimBackgroundRetainedPass *cache) {
+  if (cache->attempted) return;
+  /* Failure is optional and latched for this key; the already collected
+   * ordinary pass remains complete. Never partially queue retained ranges. */
+  cache->attempted = true;
+  if (!cache->mesh) cache->mesh = Sim3DDepthPass_CreateGeometryMesh();
+  cache->valid = cache->mesh && Sim3DDepthPass_CaptureGeometryLayers(
+      cache->mesh, kRetainedTownLayers, kRetainedTownLayerCount, cache->ranges);
+  Sim3DPerformance_AddPath(cache->valid ? kSim3DPath_Publish : kSim3DPath_Rejected);
 }
 
 static bool RetainProjectedSolidFace(
@@ -1012,7 +1084,7 @@ static void CollectDepthGeometry(
               entry->anchor_lift, entry->depth_lift, &builder);
   }
   if (!builder.failed) {
-    SaveSolidProjectionCacheKey(params, scene_serial);
+    SaveProjectionKey(&g_renderer_state.projected_solid_key, params, scene_serial);
     g_renderer_state.projected_solids_valid = true;
   } else {
     g_renderer_state.projected_solid_count = 0;
@@ -1112,8 +1184,15 @@ static void DrawDepthLayers(
     GroundDepthRange(&draw_params, &visible_minimum, &visible_maximum);
   Sim3DPerformanceScope project_performance =
       Sim3DPerformance_Begin(kSim3DPerformance_DepthProject);
-  CollectDepthGeometry(&draw_params, &list, mountain_relief_count,
-                       scene_serial, solid_projection_cached);
+  SimBackgroundRetainedPass *cache = &g_renderer_state.solid_pass;
+  const bool stable = PrepareRetainedPass(cache, &draw_params, scene_serial);
+  if (!solid_projection_cached || !stable || !AppendRetainedPass(cache)) {
+    Sim3DPerformance_AddPath(solid_projection_cached ? kSim3DPath_CpuStage : kSim3DPath_CpuProject);
+    CollectDepthGeometry(&draw_params, &list, mountain_relief_count,
+                         scene_serial, solid_projection_cached);
+    if (stable && g_renderer_state.projected_solids_valid)
+      CaptureRetainedPass(cache);
+  }
   Sim3DPerformance_End(project_performance);
   Sim3DPerformanceScope submit_performance =
       Sim3DPerformance_Begin(kSim3DPerformance_DepthSubmit);
@@ -1151,7 +1230,14 @@ void SimBackgroundVoxelRenderer_DrawTerrainShadow(
   /* This pass deliberately contains no model geometry. It runs at BG1Low so
    * the clipped mask darkens only the ground; later actor/model ranks retain
    * the authentic painter relationship and cover it normally. */
-  SimBackgroundVoxelTerrainDepth_Append(&draw_params);
+  SimBackgroundRetainedPass *cache = &g_renderer_state.shadow_pass;
+  const bool stable = PrepareRetainedPass(
+      cache, &draw_params, SimBackgroundVoxels_SceneSerial());
+  if (!stable || !AppendRetainedPass(cache)) {
+    Sim3DPerformance_AddPath(kSim3DPath_CpuStage);
+    SimBackgroundVoxelTerrainDepth_Append(&draw_params);
+    if (stable) CaptureRetainedPass(cache);
+  }
   ArRenderTexture shadow_composite = Sim3DDepthPass_Submit(
       device, draw_params.shadow_mask);
   CompositeDepthTarget(device, shadow_composite, params);
@@ -1381,6 +1467,10 @@ void SimBackgroundVoxelRenderer_DrawShadowMask(
 
 void SimBackgroundVoxelRenderer_Reset(ArRenderDevice *device) {
   ArRenderDevice_DestroyTexture(device, g_renderer_state.ground);
+  Sim3DDepthPass_DestroyMesh(g_renderer_state.solid_pass.mesh);
+  Sim3DDepthPass_DestroyMesh(g_renderer_state.shadow_pass.mesh);
+  g_renderer_state.solid_pass = (SimBackgroundRetainedPass){0};
+  g_renderer_state.shadow_pass = (SimBackgroundRetainedPass){0};
   Sim3DDepthPass_Reset(device);
   g_renderer_state.ground = ArRenderTexture_Invalid();
   g_renderer_state.uploaded_serial = 0;

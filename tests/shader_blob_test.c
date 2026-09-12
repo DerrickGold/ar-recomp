@@ -45,6 +45,7 @@ typedef struct {
 #include "shaders/sim3d_depth_frag.h"
 #include "shaders/sim3d_depth_vert.h"
 #include "shaders/sim3d_spherical_vert.h"
+#include "shaders/sim3d_model_vert.h"
 #include "shaders/sim_shadow_blur_frag.h"
 #include "shaders/sim_cloud_frag.h"
 
@@ -96,6 +97,11 @@ static const struct {
                     { kSim3dSphericalVertMSL, kSim3dSphericalVertMSLSize,
                       kSim3dSphericalVertSPV, kSim3dSphericalVertSPVSize,
                       kSim3dSphericalVertDXIL, kSim3dSphericalVertDXILSize },
+                      SDL_GPU_SHADERSTAGE_VERTEX, 0, 1 },
+  { "sim3d_model_vertex",
+                    { kSim3dModelVertMSL, kSim3dModelVertMSLSize,
+                      kSim3dModelVertSPV, kSim3dModelVertSPVSize,
+                      kSim3dModelVertDXIL, kSim3dModelVertDXILSize },
                       SDL_GPU_SHADERSTAGE_VERTEX, 0, 1 },
   { "sim_shadow_blur",
                     { kSimShadowBlurFragMSL, kSimShadowBlurFragMSLSize,
