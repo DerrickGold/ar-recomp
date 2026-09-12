@@ -30,9 +30,16 @@ type Backend struct {
 	log        *os.File
 	mu         sync.Mutex
 	err        error
+	stopOnce   sync.Once
 }
 
-func StartBackend(ctx context.Context, workspace, outputDir string, jobs int, artifactDirectory ...string) (*Backend, error) {
+// StartBundledBackend runs tools directly from the verified payload, with a
+// separate writable workspace for logs and derived build products.
+func StartBundledBackend(ctx context.Context, workspace, payload, inputID, outputDir string, jobs int, artifactDirectory ...string) (*Backend, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	root := filepath.Join(payload, "utils")
 	private, err := os.MkdirTemp("", "actraiser-builder-session-")
 	if err != nil {
 		return nil, err
@@ -51,11 +58,16 @@ func StartBackend(ctx context.Context, workspace, outputDir string, jobs int, ar
 	if err != nil {
 		return nil, err
 	}
-	root := filepath.Join(workspace, "utils")
 	ready := filepath.Join(private, "ready.json")
-	b.command = exec.CommandContext(ctx, filepath.Join(root, "tools", executableName("actraiser-builder", runtime.GOOS)), "gui",
+	// ctx cancels startup only. After readiness, Stop owns the backend lifetime.
+	// CommandContext would kill it as soon as OnShutdown cancels initialization,
+	// before the backend can drain requests and stop its own helper processes.
+	b.command = exec.Command(filepath.Join(root, "tools", executableName("actraiser-builder", runtime.GOOS)), "gui",
 		"--root", root, "--output-dir", outputDir, "--standalone-output", "--snesbuild", filepath.Join(root, "tools", executableName("snesbuild", runtime.GOOS)), "--no-open", "--ready-file", ready, "--allow-stubs")
 	configureCommand(b.command)
+	if inputID != "" {
+		b.command.Args = append(b.command.Args, "--build-workspace", workspace, "--input-id", inputID)
+	}
 	if len(artifactDirectory) != 0 {
 		b.command.Args = append(b.command.Args, "--import-search-dir", artifactDirectory[0])
 	}
@@ -69,6 +81,9 @@ func StartBackend(ctx context.Context, workspace, outputDir string, jobs int, ar
 	// GUI processes from an AppImage inherit webview library overrides. Do not
 	// leak those into the headless build driver or the generated game's loader.
 	b.command.Env = backendEnvironment(os.Environ())
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if err = b.command.Start(); err != nil {
 		return nil, err
 	}
@@ -151,12 +166,15 @@ func ValidateAddress(schema int, address string) (*url.URL, error) {
 }
 
 func (b *Backend) RequestClose() error {
-	select {
-	case <-b.Done:
+	if b.exited() {
 		return nil
-	default:
 	}
-	client := &http.Client{Timeout: 3 * time.Second, Transport: &http.Transport{Proxy: nil}}
+	if b.URL == nil {
+		return errors.New("Builder has not published its session address yet")
+	}
+	transport := &http.Transport{Proxy: nil}
+	defer transport.CloseIdleConnections()
+	client := &http.Client{Timeout: 3 * time.Second, Transport: transport}
 	response, err := client.Post(b.URL.String()+"close", "application/json", nil)
 	if err != nil {
 		return err
@@ -170,18 +188,40 @@ func (b *Backend) RequestClose() error {
 }
 
 func (b *Backend) Stop() {
+	b.stopOnce.Do(b.stop)
+}
+
+func (b *Backend) exited() bool {
+	select {
+	case <-b.Done:
+		return true
+	default:
+		return false
+	}
+}
+
+func (b *Backend) stop() {
 	if b.command != nil && b.command.Process != nil {
 		select {
 		case <-b.Done:
 		default:
 			if b.URL != nil {
 				_ = b.RequestClose()
+				// The backend gives active HTTP handlers five seconds to drain.
+				// Allow that grace period before using the last-resort kill.
+				select {
+				case <-b.Done:
+				case <-time.After(7 * time.Second):
+					_ = b.command.Process.Kill()
+				}
+			} else {
+				// Startup failed/cancelled before a close endpoint was available.
+				_ = b.command.Process.Kill()
 			}
 			select {
 			case <-b.Done:
-			case <-time.After(3 * time.Second):
-				_ = b.command.Process.Kill()
-				<-b.Done
+			case <-time.After(2 * time.Second):
+				fmt.Fprintln(os.Stderr, "Builder shutdown: timed out waiting for the terminated backend")
 			}
 		}
 	}
@@ -190,7 +230,7 @@ func (b *Backend) Stop() {
 	}
 	if b.sessionDir != "" {
 		_ = os.RemoveAll(b.sessionDir)
-	} // Exact private directory made by StartBackend.
+	} // Exact private directory made by StartBundledBackend.
 }
 
 // Bridge keeps the renderer on its app origin. It can only reach the single
@@ -201,6 +241,13 @@ type Bridge struct {
 	message     string
 	failed      bool
 	rendererURL string
+	output      *OutputSelection
+}
+
+func (h *Bridge) SetOutputSelection(selection *OutputSelection) {
+	h.mu.Lock()
+	h.output = selection
+	h.mu.Unlock()
 }
 
 func (h *Bridge) SetRendererURL(address string) { h.mu.Lock(); h.rendererURL = address; h.mu.Unlock() }
@@ -240,17 +287,25 @@ func (h *Bridge) Bootstrap(w http.ResponseWriter, r *http.Request) {
 
 func (h *Bridge) serveHTTP(w http.ResponseWriter, r *http.Request, allowProxy bool) {
 	h.mu.RLock()
-	proxy, message, failed, rendererURL := h.proxy, h.message, h.failed, h.rendererURL
+	proxy, message, failed, rendererURL, output := h.proxy, h.message, h.failed, h.rendererURL, h.output
 	h.mu.RUnlock()
+	if strings.HasPrefix(r.URL.Path, "/__shell/output/") {
+		if !allowProxy || output == nil {
+			http.NotFound(w, r)
+			return
+		}
+		output.ServeHTTP(w, r)
+		return
+	}
 	if r.URL.Path == "/__shell/status" {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")
-		_ = json.NewEncoder(w).Encode(map[string]any{"ready": proxy != nil, "message": message, "failed": failed, "url": rendererURL})
+		_ = json.NewEncoder(w).Encode(map[string]any{"ready": proxy != nil, "message": message, "failed": failed, "url": rendererURL, "chooseOutput": output != nil && output.NeedsChoice()})
 		return
 	}
 	if r.URL.Path == "/__shell/start.js" {
 		w.Header().Set("Content-Type", "text/javascript")
-		io.WriteString(w, `async function poll(){try{const s=await(await fetch('__shell/status',{cache:'no-store'})).json();document.getElementById('status').textContent=s.message||'Starting…';if(s.ready){if(s.url)location.replace(s.url);else location.reload();return;}if(s.failed)return;}catch(e){}setTimeout(poll,300);}poll();`)
+		io.WriteString(w, `async function poll(){try{const s=await(await fetch('__shell/status',{cache:'no-store'})).json();document.getElementById('status').textContent=s.message||'Starting…';if(s.url&&!location.href.startsWith(s.url)){location.replace(s.url);return;}if(s.chooseOutput){location.replace('__shell/output/');return;}if(s.ready){if(s.url)location.replace(s.url);else location.reload();return;}if(s.failed)return;}catch(e){}setTimeout(poll,300);}poll();`)
 		return
 	}
 	if proxy != nil && allowProxy {

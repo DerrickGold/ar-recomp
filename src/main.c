@@ -919,6 +919,11 @@ static int AppBoot_ParseArgs(AppBoot *app, int argc, char **argv) {
         snesrecomp_abspath(app->config_path, config_abs, sizeof config_abs))
       app->config_path = config_abs;
     snesrecomp_anchor_to_exe_dir();
+    /* A folder release is directly executable (not dependent on a generated
+     * .bat/.command wrapper). Explicit ROM arguments still take precedence. */
+    if (!app->rom_path &&
+        snesrecomp_exe_dir_path("user-rom.sfc", rom_abs, sizeof rom_abs))
+      app->rom_path = rom_abs;
   }
 
   /* Per-run artifact ringfence (runs/<ts>/): must run before anything prints

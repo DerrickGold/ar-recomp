@@ -198,6 +198,7 @@ func (values *stringList) Set(value string) error {
 }
 
 type buildFlags struct {
+	generatedDir, funcsHeader, inputID                                 string
 	root, buildDir, toolchainDir, cmake, config, generator, prefixPath string
 	rom                                                                string
 	jobs                                                               int
@@ -209,6 +210,9 @@ type buildFlags struct {
 }
 
 func addHermeticFlags(flags *flag.FlagSet, values *buildFlags) {
+	flags.StringVar(&values.generatedDir, "generated-dir", "src/gen", "generated C directory, separate from read-only source")
+	flags.StringVar(&values.funcsHeader, "funcs-header", "recomp/funcs.h", "generated function declarations used by the compiler")
+	flags.StringVar(&values.inputID, "input-id", "", "verified immutable input identity supplied by the desktop host")
 	flags.BoolVar(&values.hermetic, "hermetic", false, "build with the pinned Zig toolchain instead of CMake")
 	flags.StringVar(&values.zig, "zig", "", "Zig executable (default: $SNESBUILD_ZIG, project cache, then PATH)")
 	flags.StringVar(&values.sdlInclude, "sdl-include", "", "SDL3 header directory (default: auto-discover)")
@@ -230,6 +234,12 @@ func (values *buildFlags) hermeticOptions() (project.HermeticOptions, error) {
 func (values *buildFlags) hermeticOptionsWithWriters(stdout, stderr io.Writer) (project.HermeticOptions, error) {
 	paths := project.DefaultPaths(values.root)
 	paths.BuildDir, paths.ToolchainDir = values.buildDir, values.toolchainDir
+	if values.generatedDir != "" {
+		paths.GeneratedDir = values.generatedDir
+	}
+	if values.funcsHeader != "" {
+		paths.FuncsHeader = values.funcsHeader
+	}
 	if values.rom != "" {
 		paths.ROM = values.rom
 	}
@@ -243,7 +253,8 @@ func (values *buildFlags) hermeticOptionsWithWriters(stdout, stderr io.Writer) (
 		zigPath = located.Path
 	}
 	return project.HermeticOptions{
-		Paths: paths, ZigPath: zigPath, Jobs: values.jobs, Optimize: values.optimize,
+		InputID: values.inputID,
+		Paths:   paths, ZigPath: zigPath, Jobs: values.jobs, Optimize: values.optimize,
 		SDLIncludeDir: values.sdlInclude, SDLLibDir: values.sdlLib, Target: values.target,
 		Verbose: values.verbose,
 		Stdout:  stdout, Stderr: stderr,

@@ -67,7 +67,7 @@ func enableSmokeTest(app *options.App) {
 			io.WriteString(w, smokeScript)
 			return
 		}
-		if r.URL.Path != "/" || r.Method != "GET" {
+		if (r.URL.Path != "/" && r.URL.Path != "/__shell/output/") || r.Method != "GET" {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -78,12 +78,36 @@ func enableSmokeTest(app *options.App) {
 		}
 		w.Header().Del("Content-Length")
 		w.WriteHeader(recorded.Code)
-		io.WriteString(w, strings.Replace(recorded.Body.String(), "</body>", `<script src="__shell/smoke.js" defer></script></body>`, 1))
+		script := "__shell/smoke.js"
+		if r.URL.Path == "/__shell/output/" {
+			script = "../../__shell/smoke.js"
+		}
+		io.WriteString(w, strings.Replace(recorded.Body.String(), "</body>", `<script src="`+script+`" defer></script></body>`, 1))
 	})
 }
 
 const smokeScript = `
 window.addEventListener('DOMContentLoaded', async () => {
+  if (document.querySelector('#folder-form')) {
+    // Disposable player harnesses exercise first-launch consent too. Never
+    // bypass this in production; this entire hook requires the smoketest tag.
+    try {
+      const directory=document.querySelector('#directory');
+      for(let i=0;i<200&&directory.disabled;i++)await new Promise(resolve=>setTimeout(resolve,25));
+      if(!directory.value||directory.disabled)throw new Error('output chooser did not become ready');
+      document.querySelector('#folder-form').dispatchEvent(new Event('submit',{cancelable:true}));
+      const review=document.querySelector('#review');
+      for(let i=0;i<200&&review.hidden;i++)await new Promise(resolve=>setTimeout(resolve,25));
+      if(review.hidden)throw new Error('destination review failed: '+document.querySelector('#status').textContent);
+      if(!document.querySelector('#confirm-label').hidden){const confirm=document.querySelector('#confirm');confirm.checked=true;confirm.dispatchEvent(new Event('change'));}
+      const apply=document.querySelector('#apply');
+      if(apply.disabled)throw new Error('reviewed destination remains disabled');
+      apply.click(); // The real controller persists consent and resumes startup.
+    } catch(error) {
+      await fetch('../../__shell/smoke-result',{method:'POST',body:'FAIL output chooser: '+error.message});
+    }
+    return;
+  }
   if (!document.querySelector('#build-form')) return; // Bootstrap reloads us.
   const check = (ok, message) => { if (!ok) throw new Error(message); };
   let outcome;

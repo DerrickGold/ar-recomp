@@ -4,7 +4,37 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"testing/fstest"
 )
+
+func TestPortableDataSeedsEmbeddedAssetsWithoutWritingSource(t *testing.T) {
+	source, output := t.TempDir(), filepath.Join(t.TempDir(), Name)
+	nativePackageFixture(t, source)
+	for _, leaf := range []string{"manual.pdf", "manifest.ini"} {
+		if err := os.Remove(filepath.Join(source, "game-assets", leaf)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	assets := fstest.MapFS{"manual.pdf": {Data: []byte("embedded manual")}, "manifest.ini": {Data: []byte("embedded manifest")}}
+	if err := PreparePortableData(source, output, assets); err != nil {
+		t.Fatal(err)
+	}
+	if read(t, filepath.Join(output, "game-assets", "manual.pdf")) != "embedded manual" {
+		t.Fatal("embedded seed missing")
+	}
+	put(t, filepath.Join(output, "game-assets", "manifest.ini"), "user edit")
+	if err := PreparePortableData(source, output, assets); err != nil {
+		t.Fatal(err)
+	}
+	if read(t, filepath.Join(output, "game-assets", "manifest.ini")) != "user edit" {
+		t.Fatal("user edit overwritten")
+	}
+	for _, leaf := range []string{"manual.pdf", "manifest.ini"} {
+		if _, err := os.Stat(filepath.Join(source, "game-assets", leaf)); !os.IsNotExist(err) {
+			t.Fatalf("source modified: %s %v", leaf, err)
+		}
+	}
+}
 
 func TestStandaloneDataSurvivesWorkspaceRemovalAndPreservesEdits(t *testing.T) {
 	source, parent := t.TempDir(), t.TempDir()

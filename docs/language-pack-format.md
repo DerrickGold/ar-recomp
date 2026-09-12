@@ -158,8 +158,12 @@ installers also include matching pinned headers and libraries; only source
 checkouts use system development packages. The builder checks for missing
 headers/link libraries and known wrong-architecture binaries before compiling.
 
-Open **Languages** in the builder sidebar. **Install a language pack** and
-**Create a translation** are the two primary workflows; **Open a project or
+Open **Languages** in the builder sidebar. **Add a language pack** accepts a
+shared `.arlang` file directly above the installed library. You can also drop
+one `.arlang` at a time into the Workshop from another sidebar section; this
+opens Languages and a review, not an automatic installation. Build the game
+first to make language tools available. **Install a language pack** and
+**Create a translation** offer the guided workflows; **Open a project or
 backup**, **Clone a language pack**, and **Extract a ROM reference** are below
 them. Choose a workflow to see only its relevant steps. The package library
 combines editable projects and installed packs, is sorted by package name, and
@@ -172,7 +176,7 @@ does both. Cloning creates a new stable
 package ID, retaining the original contributor credits, progress and content.
 Switching sidebar sections preserves unsaved message text and asset selections;
 closing the workshop or changing projects asks before discarding unsaved work.
-This is not autosave: save messages and details before closing your browser.
+This is not autosave: save messages and details before closing the Workshop.
 
 The default tree follows playthrough order: Title, Sky Palace, Fillmore,
 Bloodpool, Kasandora, Aitos, Marahna, Northwall, Death Heim, End Credits.
@@ -210,10 +214,12 @@ so its total is larger than the number of messages native to one ROM.
 
 Open **Pack actions** for **Download private backup**, or **Export for sharing** →
 **Export language pack** for publication. These prepare an explicit download
-link. **Install a language pack** branches into **Import new pack** and **Install
-already imported**. The default import opens a native folder chooser and loads
-the folder's declared files for preview automatically. Archives/backups and a
-manual path are secondary options. Selecting a source does not change the
+link. **Install a language pack** defaults to **Import new pack**, with an
+`.arlang` file picker and drag-and-drop; no extraction is necessary. **Install
+already imported** remains available for saved projects. **Author backup or
+legacy archive** accepts `.arproject` and compatible `.zip` files. **Advanced:
+unpacked language folder** retains the native folder chooser and manual path.
+Selecting or dropping a source does not change the
 workshop or game until confirmed. Imports support a distinct side-by-side ID or
 explicit replacement of the project with the incoming ID, never an unrelated
 open project. **Import & install**, or **Pack actions → Install in game** →
@@ -228,6 +234,11 @@ Multiple packs with the same locale or name remain distinct by their stable ID;
 selection survives package-name changes and catalog reordering. Selecting an
 external pack forces enhanced rendering; only Native US offers the original
 text/font mode.
+
+After installation, **Manage installed packs** returns to the library. Its
+checkboxes enable or disable packs without deleting translations or authoring
+progress. Updating a disabled pack keeps it disabled. Restart the game after
+changing the installed catalog, then select an enabled pack in the game.
 
 Players can also copy a published `.arlang` directly into that `packs/` directory.
 The game prepares it on startup through the same Go archive reader, with no GUI.

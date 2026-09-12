@@ -171,7 +171,7 @@ func stageResources(root, resources string) error {
 
 // stageSeed also supports first launch, before the ROM-derived language pack
 // exists. Package performs the stricter completed-game validation above.
-func stageSeed(root, resources string) error {
+func stageSeed(root, resources string, embedded ...fs.FS) error {
 	seed := filepath.Join(resources, "seed")
 	defaults := filepath.Join(root, "defaults")
 	if info, err := os.Stat(defaults); err == nil && info.IsDir() {
@@ -201,6 +201,16 @@ func stageSeed(root, resources string) error {
 	}
 	for _, leaf := range []string{"manual.pdf", "manifest.ini"} {
 		if err := copyFileAtomic(filepath.Join(root, "game-assets", leaf), filepath.Join(seed, "game-assets", leaf), 0644); err != nil {
+			if errors.Is(err, os.ErrNotExist) && len(embedded) > 0 {
+				data, readErr := fs.ReadFile(embedded[0], leaf)
+				if readErr != nil {
+					return readErr
+				}
+				if writeErr := atomicWrite(filepath.Join(seed, "game-assets", leaf), data, 0644); writeErr != nil {
+					return writeErr
+				}
+				continue
+			}
 			return err
 		}
 	}

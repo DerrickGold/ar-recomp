@@ -4,6 +4,79 @@ These results describe the `builder-desktop-shell` prototype, not a
 release qualification. The production installer/game-artifact work was merged
 locally into `main` at `1b785490` before this exploration. Nothing was pushed.
 
+This is a historical verification record, with newer follow-ups first. Older
+sections describe the implementation and artifacts tested at that time, not
+the current storage contract. In particular, full workspace payload copies
+have been superseded by the read-only-input flow below. See the
+[README](README.md) for current behavior and release gates.
+
+## Read-only inputs and marker-only workspaces — 2026-09-12
+
+This follow-up implements the [storage split](FIRST_RUN_PLAN.md). It does not
+claim that the older files in `release/` have been updated.
+
+- A freshly staged macOS ARM64 Builder app was made recursively read-only.
+  Its real bundled backend accepted the private local ROM through the same HTTP
+  endpoint as the Workshop, regenerated all C/declarations into external
+  scratch, compiled/linked the full game, and produced a signed portable app.
+  All payload checksums remained unchanged after both builds; no source/tools
+  tree appeared in the workspace and no loose executable/launcher/helper copy
+  accompanied the native game app.
+- The warm build reported **zero translation units to compile**. Player settings
+  survived the rebuild, and reopening the backend rediscovered the installed
+  app. After stopping the backend and relocating the game directory, the
+  installed helper's font-coverage protocol passed and the real game completed
+  a bounded two-frame headless launch. The full cold/warm test took 232 seconds
+  on this host, not a general build-time or startup benchmark. The private test
+  game/workspace were automatically removed; the source ROM was not changed.
+- ROM-free real-Zig tests enforce read-only authored inputs, external generated
+  header precedence, cache reuse after renaming the input bundle, and cache
+  invalidation after header/content-identity changes. An unchanged `funcs.h`
+  no longer gets rewritten merely by regeneration.
+- Regression coverage checks marker-only startup, changed payloads in existing
+  and legacy workspaces, preservation of old files, corruption/cancellation,
+  symlink/overlap refusal, bundled-backend execution with writable CWD,
+  embedded asset seeding and folder-only runtime publication.
+- Installer tests, shell internal/command race tests, selected Builder/desktop
+  race suites and vet passed on macOS. The freshly built helper also passed
+  the synthetic portable/global app relocation test. The read-only validation
+  Builder passed deep/strict signature verification after the full build.
+  Production Windows x64/ARM64 shells, Linux x64/ARM64 host test executables,
+  and backend/build-driver compile probes for all four targets passed. These
+  do not qualify native Windows/Linux behavior or a rebuilt release matrix.
+- Linux and Windows player scripts now require `.builder-workspace` and reject
+  an unexpected workspace `utils/` copy. Native Steam Deck/Windows acceptance
+  of this change remains outstanding; Windows still requires its initial
+  verified runtime extraction, without a second source/tool workspace copy.
+- The old destructive desktop cleanup is disabled. Dedicated cache cleanup,
+  recovery/storage UI and the separately reported Deck Play issue remain open.
+
+## Native close and backend cleanup — 2026-09-12
+
+- Corrected a native-dialog contract mismatch: Wails 2.15 Linux/Windows
+  question dialogs return `Yes`/`No` regardless of custom labels, while the
+  shell previously accepted only `Close`. macOS now uses the same labels.
+  Overlapping window/menu quit requests are guarded; cancelling can be retried,
+  and an approved close cannot open another confirmation.
+- Startup cancellation no longer immediately kills an already-ready backend.
+  Shutdown allows its five-second HTTP drain before the bounded kill fallback;
+  repeated cleanup is safe. Games remain detached and are not tree-killed.
+  First-run workspace copies now check cancellation between chunks and remove
+  unpublished staging directories. Windows pre-window self-extraction is
+  separate and still lacks cancellation UI.
+- The desktop-shell internal/command and Builder backend/driver race suites
+  pass on macOS ARM64. New tests cover affirmative/negative/dismissed dialogs,
+  busy-backend retries, concurrent close requests, backend exit during dialogs,
+  cancellation/relaunch, and a real backend subprocess waiting for an owned
+  helper to finish cleanup beyond the old three-second timeout.
+- Production shell compile probes pass for macOS ARM64 and Windows x64/ARM64.
+  The host test executables also cross-compile for Linux x64/ARM64; shell vet
+  passes. These are not rebuilt public releases or native Linux/Windows tests.
+  Interactive dialog acceptance remains pending: the Mac was locked, and a
+  native probe with an old cached payload failed before opening the Workshop
+  because that backend predates `--standalone-output`. The isolated probe was
+  stopped; it does not count as a passing native close test.
+
 ## Portable Builder release companions
 
 The release publisher now derives a portable companion from each already-built
@@ -399,7 +472,7 @@ Apple-only library/framework linkage were rechecked after the transport change.
   workspace, but macOS/Linux browser-engine files can still use OS data/cache
   locations. Automatic double-click fallback on a Linux desktop without FUSE
   is not implemented; the explicit extract-and-run fallback is verified.
-- Upgrade/migration/repair, cancellation during payload copying, untrusted
+- Upgrade/migration/repair, Windows pre-window extraction cancellation, untrusted
   filesystem races, release notices, publisher signing and notarization.
 
 Use the [README](README.md) for repeatable commands and the remaining release

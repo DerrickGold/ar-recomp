@@ -127,11 +127,13 @@ static void Publish(uint64_t now) {
     for (int i = 0; i < kPerformanceStage_Count; i++) if (out->stages[i].calls)
       fprintf(stderr, "[pipeline-stage] %s mean-ms=%.4f peak-call-ms=%.4f calls=%" PRIu64 "\n",
           kNames[i], out->stages[i].mean_ms, out->stages[i].maximum_ms, out->stages[i].calls);
-    fprintf(stderr, "[pipeline-work] ticks=%.2f repre=%.2f draws=%.1f vertices=%.0f upload-MiB=%.3f depth-MiB=%.3f jobs=%.2f helpers=%.2f fallback=%.2f failed=%.2f (per-present)\n",
+    fprintf(stderr, "[pipeline-work] ticks=%.2f repre=%.2f draws=%.1f vertices=%.0f upload-MiB=%.3f depth-MiB=%.3f depth-copy-MiB=%.3f depth-copy-calls=%.2f jobs=%.2f helpers=%.2f fallback=%.2f failed=%.2f (per-present)\n",
         out->counts[kPerformanceCount_Ticks], out->counts[kPerformanceCount_Represents],
         out->counts[kPerformanceCount_Draws], out->counts[kPerformanceCount_Vertices],
         out->counts[kPerformanceCount_UploadBytes] / 1048576,
         out->counts[kPerformanceCount_DepthUploadBytes] / 1048576,
+        out->counts[kPerformanceCount_DepthCopyBytes] / 1048576,
+        out->counts[kPerformanceCount_DepthCopyCalls],
         out->counts[kPerformanceCount_WorkJobs], out->counts[kPerformanceCount_HelperJobs],
         out->counts[kPerformanceCount_Fallbacks], out->counts[kPerformanceCount_FailedPresents]);
     fprintf(stderr, "[pipeline-traffic] upload-calls=%.2f skipped=%.2f scan-MiB=%.3f upload-MiB=%.3f mirror-realloc=%.2f (per-present)\n",
@@ -140,11 +142,11 @@ static void Publish(uint64_t now) {
         out->counts[kPerformanceCount_ScanBytes] / 1048576,
         out->counts[kPerformanceCount_UploadBytes] / 1048576,
         out->counts[kPerformanceCount_MirrorReallocs]);
-    fprintf(stderr, "[pipeline-path] cpu-project=%.2f cpu-stage=%.2f gpu-reuse=%.2f publish=%.2f opt-out=%.2f limit=%.2f rejected=%.2f (events/present, not view fallbacks)\n",
+    fprintf(stderr, "[pipeline-path] cpu-project=%.2f cpu-stage=%.2f gpu-reuse=%.2f publish=%.2f opt-out=%.2f limit=%.2f rejected=%.2f cpu-reuse=%.2f (events/present, not view fallbacks)\n",
         out->counts[kPerformanceCount_CpuProject], out->counts[kPerformanceCount_CpuStage],
         out->counts[kPerformanceCount_GpuReuse], out->counts[kPerformanceCount_GeometryPublish],
         out->counts[kPerformanceCount_GeometryOptOut], out->counts[kPerformanceCount_GeometryLimit],
-        out->counts[kPerformanceCount_GeometryRejected]);
+        out->counts[kPerformanceCount_GeometryRejected], out->counts[kPerformanceCount_CpuGeometryReuse]);
   }
   memset(s_window.elapsed, 0, sizeof(s_window.elapsed));
   memset(s_window.maximum, 0, sizeof(s_window.maximum));

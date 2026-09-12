@@ -1,6 +1,7 @@
 package tooling
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -131,10 +132,16 @@ func SyncFuncsWithEntryFacts(cfgDir, outputPath string, entryFacts []analysis.En
 	source.WriteString(" * snesrecomp-go/runtime/src/core/common_cpu_infra.c.\n")
 	source.WriteString(" */\nvoid WatchdogCheck(void);\n")
 
+	// Regeneration runs before every Builder rebuild. Keep an unchanged
+	// declaration header's timestamp so it doesn't invalidate all objects.
+	contents := []byte(source.String())
+	if previous, err := os.ReadFile(outputPath); err == nil && bytes.Equal(previous, contents) {
+		return len(items), nil
+	}
 	if err := os.MkdirAll(filepath.Dir(outputPath), 0o755); err != nil {
 		return 0, fmt.Errorf("create funcs header directory: %w", err)
 	}
-	if err := os.WriteFile(outputPath, []byte(source.String()), 0o644); err != nil {
+	if err := os.WriteFile(outputPath, contents, 0o644); err != nil {
 		return 0, fmt.Errorf("write funcs header: %w", err)
 	}
 	return len(items), nil

@@ -49,7 +49,8 @@
     else raw("flow-title","");
     label("flow-steps",workflow === "install" ? installPath === "existing" ? "builder.language.steps_existing" : "builder.language.steps_import" : workflow === "clone" ? "builder.language.steps_clone" : "builder.language.steps_edit");
     $("install-state").hidden = phase !== "review";
-    $("install-choice").hidden = home || workflow !== "install" || !choose || !!installPath;
+    $("install-choice").hidden = home || workflow !== "install" || !choose;
+    for(const button of panel.querySelectorAll("[data-loc-install]")) button.setAttribute("aria-pressed",String(button.dataset.locInstall===installPath));
     $("project-picker").hidden = home || !choose || !(workflow === "install" && installPath === "existing" || ["edit","clone"].includes(workflow));
     label("project-picker-label",workflow === "install" ? "builder.language.imported_packs" : "builder.language.choose_saved");
     label("open",workflow === "install" ? "builder.language.review_install" : workflow === "clone" ? "builder.language.choose_base" : "builder.language.open_edit");
@@ -471,6 +472,7 @@
     label("import-warning",p.installError?"builder.language.import_not_installable":"builder.language.import_kept",{detail:p.installError});
     workflowView(); feedback("");
     $("import-preview").scrollIntoView({block:"nearest"});
+    $("import-name").focus({preventScroll:true});
   }
   async function loadDirectory(directory) {
     if(!directory.trim()||!discard()) return;
@@ -485,12 +487,73 @@
   }));
   submit("directory",data=>loadDirectory(data.get("directory")));
   $("directory").elements.directory.addEventListener("change",event=>{ const path=event.target.value; run(()=>loadDirectory(path)); });
-  $("import").addEventListener("submit",event=>event.preventDefault());
-  $("import").elements.file.addEventListener("change",event=>{
-    const file=event.target.files[0]; if(!file) return;
-    const data=new FormData(); data.set("file",file); data.set("intent","preview");
-    run(async()=>{ if(discard()) await previewImport("import",data); });
+  let dragDepth=0;
+  function clearDrop() { dragDepth=0; $("drop-overlay").hidden=true; }
+  function dropNotice(key) {
+    label("drop-message",key); $("drop-overlay").dataset.notice="true";
+    $("dismiss-drop").hidden=false; $("drop-overlay").hidden=false;
+  }
+  $("dismiss-drop").addEventListener("click",clearDrop);
+  function importFiles(files, install=false, backup=false) {
+    if(closed || !files.length) return Promise.resolve();
+    if(busy) { dropNotice("builder.language.drop_busy"); return Promise.resolve(); }
+    // One detached server preview per session; never silently install only the
+    // first item of a multi-file drop or overwrite a preview still loading.
+    if(files.length!==1) { dropNotice("builder.language.one_archive"); return Promise.resolve(); }
+    const file=files[0], extension=file.name.split(".").pop().toLowerCase();
+    if(!(backup?["arproject","zip"]:["arlang"]).includes(extension)) {
+      dropNotice(backup?"builder.language.backup_types":"builder.language.package_types"); return Promise.resolve();
+    }
+    if(!file.size || file.size>257*1024*1024) { dropNotice("builder.language.archive_size"); return Promise.resolve(); }
+    return run(async()=>{
+      if(!discard()) return;
+      if(install) {
+        if(window.workshopOpenLanguages && !window.workshopOpenLanguages()) { dropNotice("builder.language.build_required"); return; }
+        if(!loaded) await adopt(await json("state"));
+        dirty=detailsDirty=noticeDirty=fontsDirty=false; fontUploads.clear();
+        workflow="install"; phase="choose"; installPath="import"; editorTab="messages";
+        $("download").hidden=true;
+      }
+      clearDrop();
+      const data=new FormData(); data.set("file",file); data.set("intent","preview");
+      await previewImport("import",data);
+    });
+  }
+  for(const id of ["quick-import","import","import-backup"]) {
+    const form=$(id), input=form.elements.file;
+    form.addEventListener("submit",event=>event.preventDefault());
+    input.addEventListener("change",()=>importFiles([...input.files],id==="quick-import",id==="import-backup").finally(()=>{
+      // A failed/cancelled selection must be selectable again without first
+      // choosing a different file. The preview already owns its uploaded bytes.
+      input.value=""; window.workshopFileInputs?.refresh(input);
+    }));
+  }
+  const fileDrag=event=>[...(event.dataTransfer?.types||[])].includes("Files") || event.dataTransfer?.files?.length>0;
+  const fileTarget=event=>event.target?.closest?.('input[type="file"],.file-control');
+  document.addEventListener("dragenter",event=>{
+    if(!fileDrag(event) || fileTarget(event)) return;
+    event.preventDefault(); ++dragDepth;
+    if(closed || busy) return;
+    label("drop-message","builder.language.drop_prompt"); $("drop-overlay").dataset.notice="false";
+    $("dismiss-drop").hidden=true; $("drop-overlay").hidden=false;
   });
+  document.addEventListener("dragover",event=>{
+    if(!fileDrag(event)) return;
+    if(fileTarget(event)) { clearDrop(); return; }
+    event.preventDefault(); event.dataTransfer.dropEffect=closed||busy?"none":"copy";
+  });
+  document.addEventListener("dragleave",event=>{
+    if(!fileDrag(event)) return;
+    if(--dragDepth<=0) clearDrop();
+  });
+  document.addEventListener("dragend",clearDrop);
+  document.addEventListener("drop",event=>{
+    clearDrop();
+    if(!fileDrag(event) || fileTarget(event)) return; // ROM/font controls keep native drop behavior.
+    event.preventDefault();
+    return importFiles([...(event.dataTransfer.files||[])],true);
+  });
+  document.addEventListener("keydown",event=>{ if(event.key==="Escape") clearDrop(); });
   for(const id of ["replace-project","import-new-id","import-replace-installed"]) $(id).addEventListener("input",syncImportPreview);
   $("accept-import").addEventListener("click",()=>run(async()=>{
     if(!importPreview) return;
@@ -613,7 +676,8 @@
   }));
   for (const button of panel.querySelectorAll("[data-loc-flow]")) button.addEventListener("click", () => run(async () => {
     if (!discard()) return;
-    dirty=detailsDirty=noticeDirty=fontsDirty=false; fontUploads.clear(); workflow=button.dataset.locFlow; phase="choose"; installPath=""; importPreview=null; editorTab="messages";
+    dirty=detailsDirty=noticeDirty=fontsDirty=false; fontUploads.clear(); workflow=button.dataset.locFlow; phase="choose"; installPath=workflow==="install"?"import":""; importPreview=null; editorTab="messages";
+    $("archive-options").open=workflow==="edit";
     $("download").hidden=true; feedback(""); workflowView(); await projects();
   }));
   for(const button of panel.querySelectorAll("[data-loc-install]")) button.addEventListener("click",()=>run(async()=>{
@@ -666,6 +730,7 @@
   window.localizationOpenProject = openProject;
   window.localizationHasEdits = hasEdits;
   document.addEventListener("workshop:closed", () => {
+    clearDrop();
     closed=true; dirty=detailsDirty=noticeDirty=fontsDirty=false; fontUploads.clear();
     for(const control of panel.querySelectorAll("button,input,textarea,select")) control.disabled=true;
   });

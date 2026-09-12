@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/DerrickGold/ar-recomp/installer/internal/buildworkspace"
 )
 
 func TestOutputBesideOuterArtifactRegardlessOfWorkspace(t *testing.T) {
@@ -82,5 +84,19 @@ func TestFreshWorkspaceAndOutputContainmentUsesExistingAncestors(t *testing.T) {
 	}
 	if _, err := os.Stat(output); !os.IsNotExist(err) {
 		t.Fatal("validation created output")
+	}
+}
+
+func TestWorkspaceContainmentRemainsOneWay(t *testing.T) {
+	parent := t.TempDir()
+	child := filepath.Join(parent, "future-input")
+	if err := ValidateWorkspace(parent, child); err != nil {
+		t.Fatalf("one-way output check rejected an ancestor: %v", err)
+	}
+	if err := ValidateWorkspace(child, parent); err == nil {
+		t.Fatal("one-way output check accepted a nested destination")
+	}
+	if err := buildworkspace.Separate(parent, child); err == nil {
+		t.Fatal("session separation accepted overlapping input/output")
 	}
 }

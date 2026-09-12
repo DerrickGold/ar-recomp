@@ -1,7 +1,64 @@
 #include "present_world_nav_geometry.h"
 
 #include <math.h>
+#include <float.h>
+#include <stdlib.h>
 #include <string.h>
+
+bool WorldNavigationRadialBoundsOutside(const WorldNavigationRadialBounds *b,
+    const Sim3DDepthRadialTransform *t) {
+  if (!b || !t || !isfinite(b->height_min) || !isfinite(b->height_max) ||
+      b->height_min > b->height_max || !isfinite(t->sphere_radius) ||
+      !isfinite(t->height_scale) || !isfinite(t->reference_height) ||
+      t->sphere_radius <= 0 || t->height_scale < 0) return false;
+  for (int i = 0; i < 16; ++i) if (!isfinite(t->matrix[i])) return false;
+  for (int i = 0; i < 3; ++i) {
+    if (!isfinite(b->normal_min[i]) || !isfinite(b->normal_max[i]) ||
+        b->normal_min[i] > b->normal_max[i]) return false;
+    for (int j = 0; j < 3; ++j) if (!isfinite(t->basis[i][j])) return false;
+  }
+  const double low_r = t->sphere_radius + (double)b->height_min*t->height_scale;
+  const double high_r = t->sphere_radius + (double)b->height_max*t->height_scale;
+  const double centre = t->sphere_radius + (double)t->reference_height*t->height_scale;
+  double low[3], high[3];
+  for (int axis = 0; axis < 3; ++axis) {
+    double nlow = 0, nhigh = 0, magnitude = 0;
+    for (int j = 0; j < 3; ++j) {
+      const double a = (double)t->basis[axis][j]*b->normal_min[j];
+      const double z = (double)t->basis[axis][j]*b->normal_max[j];
+      nlow += fmin(a,z); nhigh += fmax(a,z); magnitude += fmax(fabs(a),fabs(z));
+    }
+    const double products[4] = {nlow*low_r,nlow*high_r,nhigh*low_r,nhigh*high_r};
+    low[axis] = high[axis] = products[0];
+    for (int j = 1; j < 4; ++j) {
+      low[axis] = fmin(low[axis],products[j]); high[axis] = fmax(high[axis],products[j]);
+    }
+    /* Bound the shader's individual float operations, including cancellation
+     * between reference radius and rise. This is intentionally looser than
+     * ideal double-precision AABB math; uncertain edges stay on the GPU. */
+    const double scale = fabs(t->sphere_radius) + fabs((double)t->reference_height*t->height_scale) +
+        fmax(fabs(b->height_min),fabs(b->height_max))*t->height_scale;
+    const double pad = 64*FLT_EPSILON*(1+magnitude)*scale + 64*FLT_MIN;
+    if (pad > FLT_MAX/64 || !isfinite(pad)) return false;
+    low[axis] -= (axis == 2 ? centre : 0) + pad;
+    high[axis] += pad - (axis == 2 ? centre : 0);
+  }
+  bool outside = false;
+  for (int plane = 0; plane < 6; ++plane) {
+    const int axis = plane/2;
+    const double sign = plane & 1 ? -1 : 1;
+    double maximum = (double)t->matrix[15] + sign*t->matrix[12+axis];
+    double magnitude = fabs(t->matrix[15]) + fabs(t->matrix[12+axis]);
+    for (int j = 0; j < 3; ++j) {
+      const double a = (double)t->matrix[j*4+3] + sign*t->matrix[j*4+axis];
+      maximum += fmax(a*low[j],a*high[j]);
+      magnitude += (fabs(t->matrix[j*4+3])+fabs(t->matrix[j*4+axis])) * fmax(fabs(low[j]),fabs(high[j]));
+    }
+    if (magnitude > FLT_MAX/64 || !isfinite(magnitude)) return false;
+    outside |= maximum < -64*FLT_EPSILON*magnitude-64*FLT_MIN;
+  }
+  return outside;
+}
 
 bool WorldNavigationProjectClippedPoint(
     const WorldNavigationProjection *projection, ArRenderRectI viewport,
@@ -159,6 +216,46 @@ bool WorldNavigationAppendClippedQuad(
 bool WorldNavigationAppendClippedQuads(
     Sim3DDepthPassLayer layer, const Sim3DDepthVertex *input,
     const Scene3DClipPoint *clip, size_t count, ArRenderRectI viewport) {
+  return WorldNavigationAppendCachedProjectedQuads(layer,input,clip,count,viewport,NULL);
+}
+
+void WorldNavigationQuadStream_Invalidate(WorldNavigationQuadStream *stream) {
+  stream->ready = stream->repeated = false;
+  stream->quad_count = 0;
+}
+
+void WorldNavigationQuadStream_Reset(WorldNavigationQuadStream *stream) {
+  free(stream->vertices);
+  *stream = (WorldNavigationQuadStream){0};
+}
+
+static bool AppendStreamBatch(Sim3DDepthPassLayer layer,
+    const Sim3DDepthVertex *vertices, size_t quads, WorldNavigationQuadStream *capture) {
+  if (!quads) return true;
+  if (!Sim3DDepthPass_AppendQuads(layer,vertices,quads)) return false;
+  if (!capture || capture->unavailable) return true;
+  if (quads > kWorldNavigationQuadStreamMaximum-capture->quad_count) goto unavailable;
+  const size_t needed = capture->quad_count+quads;
+  if (needed > capture->capacity) {
+    size_t capacity = capture->capacity ? capture->capacity : 1024;
+    while (capacity < needed) capacity *= 2;
+    void *memory = realloc(capture->vertices,capacity*4*sizeof(*capture->vertices));
+    if (!memory) goto unavailable;
+    capture->vertices = memory; capture->capacity = capacity;
+  }
+  memcpy(capture->vertices+capture->quad_count*4,vertices,quads*4*sizeof(*vertices));
+  capture->quad_count = needed;
+  return true;
+unavailable:
+  WorldNavigationQuadStream_Reset(capture);
+  capture->unavailable = true; /* Optional cache: retry only at owner reset. */
+  return true;
+}
+
+bool WorldNavigationAppendCachedProjectedQuads(Sim3DDepthPassLayer layer,
+    const Sim3DDepthVertex *input, const Scene3DClipPoint *clip, size_t count,
+    ArRenderRectI viewport, WorldNavigationQuadStream *capture) {
+  if (!clip) return AppendStreamBatch(layer,input,count,capture);
   enum { kBatch = 64 };
   Sim3DDepthVertex batch[kBatch * 4], clipped[kWorldNavigationClippedQuads * 4];
   size_t used = 0;
@@ -169,10 +266,10 @@ bool WorldNavigationAppendClippedQuads(
     for (size_t at = 0; at < produced; at++) {
       memcpy(batch + used++ * 4, clipped + at * 4, 4 * sizeof(*batch));
       if (used == kBatch) {
-        if (!Sim3DDepthPass_AppendQuads(layer, batch, used)) return false;
+        if (!AppendStreamBatch(layer,batch,used,capture)) return false;
         used = 0;
       }
     }
   }
-  return !used || Sim3DDepthPass_AppendQuads(layer, batch, used);
+  return AppendStreamBatch(layer,batch,used,capture);
 }

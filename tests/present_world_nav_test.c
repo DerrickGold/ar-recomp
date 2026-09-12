@@ -333,6 +333,25 @@ bool Sim3DDepthPass_AppendQuad(Sim3DDepthPassLayer layer,
  * integration suite covers the production split-input implementation. */
 Sim3DDepthMesh *Sim3DDepthPass_CreateMesh(void) { return NULL; }
 Sim3DDepthMesh *Sim3DDepthPass_CreateGeometryMesh(void) { return NULL; }
+static unsigned surface_mesh_attempts;
+Sim3DDepthMesh *Sim3DDepthPass_CreateSurfaceMesh(void) { ++surface_mesh_attempts; return NULL; }
+bool Sim3DDepthPass_SelectSurfaceMesh(Sim3DDepthMesh *mesh,
+    const Sim3DDepthMeshRange *ranges, size_t count) {
+  (void)mesh; (void)ranges; (void)count; return false;
+}
+bool Sim3DDepthPass_UpdateSurfaceMesh(Sim3DDepthMesh *mesh,
+    const Sim3DDepthSurfaceVertex *vertices, size_t count) {
+  (void)mesh; (void)vertices; (void)count; return false;
+}
+bool Sim3DDepthPass_UpdateSurfaceMeshWithMask(Sim3DDepthMesh *mesh,
+    const Sim3DDepthSurfaceVertex *vertices, const ArRenderPointF *mask_uv, size_t count) {
+  (void)mask_uv; return Sim3DDepthPass_UpdateSurfaceMesh(mesh,vertices,count);
+}
+bool Sim3DDepthPass_AppendSurfaceLayers(Sim3DDepthMesh *mesh,
+    const Sim3DDepthSurfaceTransform *t, const Sim3DDepthSphericalSample *s, size_t ns,
+    const Sim3DDepthSurfaceOverlay *o, size_t no) {
+  (void)mesh; (void)t; (void)s; (void)ns; (void)o; (void)no; return false;
+}
 struct Sim3DDepthMesh { bool ready; };
 static struct Sim3DDepthMesh radial_mesh;
 static bool radial_accept, radial_reject_selection;
@@ -380,6 +399,14 @@ bool Sim3DDepthPass_AppendGeometryMesh(Sim3DDepthPassLayer layer, Sim3DDepthMesh
 }
 bool Sim3DDepthPass_CaptureGeometryMesh(Sim3DDepthPassLayer layer, Sim3DDepthMesh *mesh) {
   (void)layer; (void)mesh; return false;
+}
+bool Sim3DDepthPass_CaptureGeometryLayers(Sim3DDepthMesh *mesh,
+    const Sim3DDepthPassLayer *layers, size_t count, Sim3DDepthGeometryRange *ranges) {
+  (void)mesh; (void)layers; (void)count; (void)ranges; return false;
+}
+bool Sim3DDepthPass_AppendGeometryRanges(Sim3DDepthMesh *mesh,
+    const Sim3DDepthGeometryRange *ranges, size_t count) {
+  (void)mesh; (void)ranges; (void)count; return false;
 }
 Sim3DDepthMesh *Sim3DDepthPass_CreateSphericalMesh(void) { return NULL; }
 bool Sim3DDepthPass_UpdateSphericalMesh(Sim3DDepthMesh *mesh,
@@ -892,6 +919,7 @@ static void TestSpaceAndCloudCover(void) {
   FakeBackend backend = {.output_width = 1280, .output_height = 720};
   assert(ArRenderDevice_Init(&g_render_device, &kFakeOps, &backend,
                             (ArRenderCapabilities){0}));
+  PresentWorldNav_ResetResources();
   FrameSlot slot = WorldNavigationSlot();
   slot.sim.world_navigation_backdrop = true;
   slot.sim.world_navigation_clouds = true;
@@ -941,6 +969,7 @@ static void TestSpaceAndCloudCover(void) {
   slot.sim.cloud_opacity_pct = 100;
   assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_Complete);
   assert(depth_cloud_faces > 0); /* Chart interpolation must keep alpha in [0,1]. */
+  PresentWorldNav_ResetResources();
 }
 
 static void TestAdventAuthoredModelClearance(void) {
@@ -2131,7 +2160,165 @@ static void TestRadialModelResidency(void) {
   SimBackgroundVoxelModelCache_Reset();
 }
 
+static float BoundsRandom(uint32_t *state) {
+  *state = *state * 1664525u + 1013904223u;
+  return (*state >> 8) / 16777216.0f;
+}
+
+static void TestRadialBounds(void) {
+  const WorldNavigationRadialBounds point = {.normal_min={0,0,1},.normal_max={0,0,1}};
+  const Sim3DDepthRadialTransform identity = {
+    .matrix={1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1},
+    .basis={{1,0,0},{0,1,0},{0,0,1}}, .sphere_radius=1,.height_scale=1,
+  };
+  assert(!WorldNavigationRadialBoundsOutside(&point,&identity));
+  for (int plane=0;plane<6;++plane) {
+    Sim3DDepthRadialTransform t=identity;
+    const int axis=plane/2; const float sign=plane&1?-1:1;
+    t.matrix[12+axis]=sign*2;
+    assert(WorldNavigationRadialBoundsOutside(&point,&t));
+    t.matrix[12+axis]=sign;
+    assert(!WorldNavigationRadialBoundsOutside(&point,&t)); /* Exactly on the plane. */
+    t.matrix[12+axis]=sign*nextafterf(1,2);
+    assert(!WorldNavigationRadialBoundsOutside(&point,&t)); /* Uncertain rounding edge. */
+  }
+  Sim3DDepthRadialTransform t=identity;
+  t.matrix[14]=-2;
+  assert(WorldNavigationRadialBoundsOutside(&point,&t));
+  WorldNavigationRadialBounds raised=point; raised.height_max=2;
+  assert(!WorldNavigationRadialBoundsOutside(&raised,&t)); /* Raised land can enter view. */
+  raised.height_min=3;
+  assert(!WorldNavigationRadialBoundsOutside(&raised,&t)); /* Invalid bounds retain source. */
+  raised=point; raised.normal_max[1]=NAN;
+  assert(!WorldNavigationRadialBoundsOutside(&raised,&t));
+  t.matrix[1]=INFINITY;
+  assert(!WorldNavigationRadialBoundsOutside(&point,&t));
+  assert(!WorldNavigationRadialBoundsOutside(NULL,&identity));
+  assert(!WorldNavigationRadialBoundsOutside(&point,NULL));
+
+  /* Independent source-point oracle using the shader's float/FMA operation
+   * order. Every rejected bound must put ALL of its points outside a common
+   * clip plane. Include rotations, negative heights, cancellation at large
+   * radius, nonuniform projections, and negative/near-zero W. */
+  uint32_t random=0x72616469u;
+  unsigned rejected=0, retained=0;
+  for (unsigned trial=0;trial<4096;++trial) {
+    float source[16][4]; WorldNavigationRadialBounds b={0};
+    const float longitude=BoundsRandom(&random)*6.28f, latitude=(BoundsRandom(&random)-.5f)*3;
+    for (unsigned p=0;p<16;++p) {
+      const float lon=longitude+(BoundsRandom(&random)-.5f)*.25f;
+      const float lat=latitude+(BoundsRandom(&random)-.5f)*.25f;
+      source[p][0]=cosf(lon)*cosf(lat); source[p][1]=sinf(lat);
+      source[p][2]=sinf(lon)*cosf(lat); source[p][3]=(BoundsRandom(&random)-.5f)*8;
+      for (int axis=0;axis<3;++axis) {
+        b.normal_min[axis]=p?fminf(b.normal_min[axis],source[p][axis]):source[p][axis];
+        b.normal_max[axis]=p?fmaxf(b.normal_max[axis],source[p][axis]):source[p][axis];
+      }
+      b.height_min=p?fminf(b.height_min,source[p][3]):source[p][3];
+      b.height_max=p?fmaxf(b.height_max,source[p][3]):source[p][3];
+    }
+    t=identity;
+    const float radius[]={.25f,2,96,288,1000000};
+    t.sphere_radius=radius[trial%5]; t.reference_height=(BoundsRandom(&random)-.5f)*8;
+    t.height_scale=BoundsRandom(&random)*2;
+    const float angle=BoundsRandom(&random)*6.28f;
+    t.basis[0][0]=t.basis[2][2]=cosf(angle);
+    t.basis[0][2]=sinf(angle); t.basis[2][0]=-sinf(angle);
+    for (int axis=0;axis<3;++axis) {
+      t.matrix[axis*5]=(.25f+BoundsRandom(&random)*2)/t.sphere_radius;
+      t.matrix[12+axis]=(BoundsRandom(&random)-.5f)*4;
+    }
+    t.matrix[11]=(BoundsRandom(&random)-.5f)*2/t.sphere_radius;
+    t.matrix[15]=(BoundsRandom(&random)-.25f)*2;
+    if (!WorldNavigationRadialBoundsOutside(&b,&t)) { ++retained; continue; }
+    ++rejected; uint8_t common=63;
+    for (unsigned p=0;p<16;++p) {
+      float world[3], clip[4];
+      const float r=fmaf(t.reference_height,t.height_scale,t.sphere_radius);
+      const float rise=(source[p][3]-t.reference_height)*t.height_scale;
+      for (int axis=0;axis<3;++axis) {
+        const float n=fmaf(t.basis[axis][2],source[p][2],
+            fmaf(t.basis[axis][0],source[p][0],t.basis[axis][1]*source[p][1]));
+        world[axis]=fmaf(n,rise,r*(n-(axis==2?1:0)));
+      }
+      for (int axis=0;axis<4;++axis)
+        clip[axis]=fmaf(t.matrix[8+axis],world[2],
+            fmaf(t.matrix[axis],world[0],t.matrix[4+axis]*world[1]))+t.matrix[12+axis];
+      common &= WorldNavigationClipOutside((Scene3DClipPoint){clip[0],clip[1],clip[2],clip[3]});
+    }
+    assert(common);
+  }
+  assert(rejected>100 && retained>100);
+}
+
+static void TestQuadStream(void) {
+  FakeBackend backend={0};
+  ArRenderDevice device={.context=&backend};
+  const ArRenderRectI viewport={0,0,640,480};
+  const Scene3DClipPoint clip[4]={{-1.5f,-.4f,0,1},{.5f,-.4f,0,1},
+      {.5f,.4f,0,1},{-1.5f,.4f,0,1}};
+  Sim3DDepthVertex source[4];
+  for (unsigned p=0;p<4;++p) source[p]=(Sim3DDepthVertex){
+      (clip[p].x*.5f+.5f)*viewport.w,(1-clip[p].y*.5f-.5f)*viewport.h,.5f,
+      {.25f,.5f,.75f,1},{p*.1f,p*.2f}};
+  Sim3DDepthVertex expected[kWorldNavigationClippedQuads*4]; size_t produced;
+  assert(WorldNavigationClipQuad(source,clip,viewport,expected,&produced) && produced>1);
+  WorldNavigationQuadStream cache={0};
+  assert(Sim3DDepthPass_Begin(&device,640,480,kArRenderFilter_Linear));
+  /* Cross both the submission batch and cache growth boundaries. */
+  for (unsigned i=0;i<1100;++i)
+    assert(WorldNavigationAppendCachedProjectedQuads(kSim3DDepthPass_WorldMountain,
+        source,clip,1,viewport,&cache));
+  assert(cache.quad_count==1100*produced && cache.capacity>=cache.quad_count);
+  for (size_t i=0;i<1100;++i)
+    assert(!memcmp(cache.vertices+i*produced*4,expected,produced*4*sizeof(*expected)));
+  const uint64_t hash=depth_world_mountain_hash;
+  memset(source,0,sizeof(source)); /* Cache owns its exact copied values. */
+  assert(Sim3DDepthPass_Begin(&device,640,480,kArRenderFilter_Linear));
+  assert(Sim3DDepthPass_AppendQuads(kSim3DDepthPass_WorldMountain,cache.vertices,cache.quad_count));
+  assert(depth_world_mountain_hash==hash);
+  const size_t capacity=cache.capacity;
+  cache.ready=cache.repeated=true;
+  WorldNavigationQuadStream_Invalidate(&cache);
+  assert(!cache.ready && !cache.repeated && !cache.quad_count && cache.capacity==capacity);
+  memcpy(source,expected,sizeof(source));
+  assert(WorldNavigationAppendCachedProjectedQuads(kSim3DDepthPass_WorldMountain,
+      source,NULL,1,viewport,&cache));
+  assert(cache.quad_count==1 && !memcmp(cache.vertices,source,sizeof(source)));
+  /* A rejected optional cache must still submit the complete ordinary draw. */
+  cache.quad_count=kWorldNavigationQuadStreamMaximum;
+  const int faces=depth_world_mountain_faces;
+  assert(WorldNavigationAppendCachedProjectedQuads(kSim3DDepthPass_WorldMountain,
+      source,NULL,1,viewport,&cache));
+  assert(depth_world_mountain_faces==faces+1 && cache.unavailable);
+  assert(!cache.vertices && !cache.capacity && !cache.quad_count && !cache.ready);
+  assert(WorldNavigationAppendCachedProjectedQuads(kSim3DDepthPass_WorldMountain,
+      source,NULL,1,viewport,&cache));
+  assert(cache.unavailable && !cache.vertices); /* No per-frame allocation retry. */
+  WorldNavigationQuadStream_Reset(&cache);
+  assert(!cache.unavailable);
+  /* Empty clipped output is a valid stream; failed submission is not. */
+  Scene3DClipPoint invisible[4]={{2,0,0,1},{3,0,0,1},{3,1,0,1},{2,1,0,1}};
+  assert(WorldNavigationAppendCachedProjectedQuads(kSim3DDepthPass_WorldMountain,
+      source,invisible,1,viewport,&cache));
+  assert(!cache.quad_count && !cache.unavailable);
+  for (int p=0;p<4;++p) source[p].uv=(ArRenderPointF){-1,-1};
+  assert(Sim3DDepthPass_Begin(&device,640,480,kArRenderFilter_Linear));
+  depth_fail_ocean_batch=1;
+  assert(!WorldNavigationAppendCachedProjectedQuads(kSim3DDepthPass_Ground,
+      source,NULL,1,viewport,&cache));
+  assert(!cache.quad_count && !cache.ready);
+  depth_fail_ocean_batch=0;
+  WorldNavigationQuadStream_Reset(&cache);
+  Sim3DDepthPass_Submit(&device,ArRenderTexture_Invalid());
+}
+
 int main(void) {
+  /* These counters/vertex oracles exercise the complete compatibility path.
+   * The default's declining-adapter behavior is checked separately below. */
+  setenv("AR_SIM3D_WORLD_GPU_GRID", "0", 1);
+  TestQuadStream();
+  TestRadialBounds();
   TestRadialModelDefault();
   TestRadialModelResidency();
   TestShadowClipPlanParity();
@@ -2144,6 +2331,16 @@ int main(void) {
   TestAuthoredTownModelsUseSharedCacheAndDepth();
   TestOceanBatchFailureRecovery();
   TestSpaceAndCloudCover();
+  /* An unavailable GPU adapter must preserve the complete ordinary world,
+   * including all land/ocean shadow samples, and stop retrying each frame. */
+  unsetenv("AR_SIM3D_WORLD_GPU_GRID");
+  {
+    PresentWorldNav_ResetResources();
+    const unsigned attempts = surface_mesh_attempts;
+    TestSpaceAndCloudCover();
+    assert(surface_mesh_attempts == attempts + 1);
+  }
+  setenv("AR_SIM3D_WORLD_GPU_GRID", "0", 1);
   TestGroundCacheInvalidation();
   TestGroundWorkerParity();
   TestModelWorkerParity();

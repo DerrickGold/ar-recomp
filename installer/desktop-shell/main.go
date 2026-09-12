@@ -43,6 +43,7 @@ func main() {
 	var mu sync.Mutex
 	var backend *host.Backend
 	var unlock func()
+	var closeGuard host.CloseGuard
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	var startup sync.WaitGroup
@@ -57,7 +58,7 @@ func main() {
 		BackgroundColour: options.NewRGB(24, 27, 36),
 		AssetServer:      &assetserver.Options{Handler: bridge}, Menu: appMenu,
 		// WebKit uses GLib's program name for its default on-disk profile.
-		// It must not create the global build workspace before Prepare owns it.
+		// It must not create the global build workspace before PrepareSession owns it.
 		Linux:   &linux.Options{ProgramName: host.Name + "WebView", WebviewGpuPolicy: linux.WebviewGpuPolicyOnDemand},
 		Windows: winOptions,
 		// No frontend Go bindings, remote content, telemetry, or updater.
@@ -89,34 +90,14 @@ func main() {
 					bridge.Fail(err)
 					return
 				}
-				output, err := host.DefaultOutputDirectory(artifact, *outputDir)
-				if err != nil {
-					bridge.Fail(err)
-					return
-				}
-				if err = host.ValidateWorkspace(output, *payload); err != nil {
-					bridge.Fail(err)
-					return
-				}
-				if err = host.ValidateWorkspace(output, work); err != nil {
-					bridge.Fail(fmt.Errorf("game output must be separate from the Builder workspace: %w", err))
-					return
-				}
-				if err = host.ValidateWorkspace(work, output); err != nil {
-					bridge.Fail(fmt.Errorf("Builder workspace must be outside game output: %w", err))
-					return
-				}
 				if container != "" {
 					if err = host.ValidateWorkspace(work, container); err != nil {
 						bridge.Fail(err)
 						return
 					}
-					if err = host.ValidateWorkspace(output, container); err != nil {
-						bridge.Fail(err)
-						return
-					}
 				}
-				if err = host.Prepare(*payload, work, bridge.Progress); err != nil {
+				inputID, err := host.PrepareSession(ctx, *payload, work, bridge.Progress)
+				if err != nil {
 					bridge.Fail(err)
 					return
 				}
@@ -128,16 +109,40 @@ func main() {
 				mu.Lock()
 				unlock = release
 				mu.Unlock()
-				bridge.Progress("Starting the local Workshop…")
-				bridge.Progress("Game output: " + output)
-				b, err := host.StartBackend(ctx, work, output, *jobs, filepath.Dir(artifact))
+				selection := host.NewOutputSelection(artifact, work, *payload, container)
+				selection.SetChooser(func() (string, error) {
+					return wruntime.OpenDirectoryDialog(appctx, wruntime.OpenDialogOptions{
+						Title: "Choose the exact ActRaiserRecomp game output folder", CanCreateDirectories: true})
+				})
+				bridge.SetOutputSelection(selection)
+				output, err := selection.Initial(ctx, *outputDir)
 				if err != nil {
 					bridge.Fail(err)
 					return
 				}
+				var b *host.Backend
+				for {
+					bridge.Progress("Starting the local Workshop… Game output: " + output)
+					b, err = host.StartBundledBackend(ctx, work, *payload, inputID, output, *jobs, filepath.Dir(artifact))
+					if err == nil {
+						break
+					}
+					if ctx.Err() != nil || *outputDir != "" {
+						bridge.Fail(err)
+						return
+					}
+					selection.Retry(err)
+					output, err = selection.Wait(ctx)
+					if err != nil {
+						return
+					}
+				}
 				mu.Lock()
 				backend = b
 				mu.Unlock()
+				if err := selection.Started(); err != nil {
+					bridge.Progress("Could not finalize the saved destination: " + err.Error())
+				}
 				bridge.Connect(b.URL)
 				go func() {
 					<-b.Done
@@ -154,26 +159,21 @@ func main() {
 			mu.Lock()
 			b := backend
 			mu.Unlock()
-			if b == nil {
-				return false
-			}
-			select {
-			case <-b.Done:
-				return false
-			default:
-			}
-			answer, err := wruntime.MessageDialog(appctx, wruntime.MessageDialogOptions{
-				Type: wruntime.QuestionDialog, Title: "Close Workshop?", Message: "Save any editor changes before closing. A running build must finish first.", Buttons: []string{"Cancel", "Close"}, DefaultButton: "Cancel", CancelButton: "Cancel"})
-			if err != nil || answer != "Close" {
-				return true
-			}
-			if err = b.RequestClose(); err != nil {
-				_, _ = wruntime.MessageDialog(appctx, wruntime.MessageDialogOptions{Type: wruntime.WarningDialog, Title: "Builder is busy", Message: err.Error()})
-				return true
-			}
-			return false
+			return closeGuard.BeforeClose(b, func() (string, error) {
+				// Linux/Windows Wails question dialogs use native Yes/No buttons
+				// and ignore custom labels. Use that same contract on macOS.
+				return wruntime.MessageDialog(appctx, wruntime.MessageDialogOptions{
+					Type: wruntime.QuestionDialog, Title: "Close Workshop?",
+					Message: "Close the Workshop? Save any editor changes first. A running build must finish before closing.",
+					Buttons: []string{host.CloseNegative, host.CloseAffirmative}, DefaultButton: host.CloseNegative, CancelButton: host.CloseNegative})
+			}, func(err error) {
+				_, _ = wruntime.MessageDialog(appctx, wruntime.MessageDialogOptions{
+					Type: wruntime.WarningDialog, Title: "Workshop could not close", Message: err.Error()})
+			})
 		},
 		OnShutdown: func(context.Context) {
+			// Cancel initialization, not the running backend: Stop owns its
+			// graceful HTTP shutdown and must let in-flight helpers unwind.
 			cancel()
 			startup.Wait()
 			mu.Lock()

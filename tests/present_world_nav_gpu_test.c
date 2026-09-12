@@ -1043,6 +1043,119 @@ static void TestGroundCacheRevisions(SDL_Renderer *renderer, const FrameSlot *sl
   free(map); free(probe);
 }
 
+static void InitSyntheticBloodpoolArt(void) {
+  uint8_t *rom = calloc(kRomBytes, 1);
+  CHECK(rom);
+  rom[0x1098D] = 0x24; rom[0x1098E] = 8;
+  rom[0xE3B95] = 31;
+  for (int bank = 0; bank < 2; ++bank) for (int y = 0; y < 8; ++y) {
+    rom[0x60000 + bank * 0x4000 + 32 + y * 2] = 255;
+    rom[0x60000 + bank * 0x4000 + 0x200 + 32 + y * 2] = 255;
+  }
+  CHECK(SimTownGroundArt_Init(rom, kRomBytes));
+  free(rom);
+}
+
+static void TestRetainedMountainSurfaces(SDL_Renderer *renderer, const FrameSlot *slot) {
+  enum { kStates = 11 };
+  /* Synthetic Bloodpool rock: same public ROM decoder/town inputs as the
+   * portable mountain-restoration fixture, no copyrighted pixels. */
+  static const uint32_t rows[32] = {
+    0xFFFFFFFFu, 0xFFFC3C3Fu, 0xFFF0000Fu, 0xFFC00003u, 0xF0000000u,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0x00000600u, 0x00000F00u, 0x00006F00u, 0x0000FF80u, 0x0000FFE0u, 0x0000FFF8u,
+  };
+  FrameSlot *probe = malloc(sizeof(*probe));
+  CHECK(probe);
+  InitSyntheticBloodpoolArt();
+  const char *incoming = SDL_getenv("AR_SIM3D_RETAINED_GROUND");
+  char *saved = incoming ? SDL_strdup(incoming) : NULL;
+  CHECK(!incoming || saved);
+  SDL_Surface *reference[kStates] = {0};
+  PerformanceSnapshot measured[3];
+  for (int mode = 0; mode < 3; ++mode) {
+    if (!mode) CHECK(!SDL_setenv_unsafe("AR_SIM3D_RETAINED_GROUND", "0", 1));
+    else CHECK(!SDL_unsetenv_unsafe("AR_SIM3D_RETAINED_GROUND")); /* Shipping default. */
+    PresentWorldNav_ResetResources();
+    ResizeTestOutput(renderer, kWidth, kHeight);
+    InitSlot(probe);
+    probe->sim.world_navigation_mountains = true;
+    probe->sim.world_navigation_clouds = probe->sim.world_navigation_cloud_shadows = true;
+    probe->sim.cloud_drift_pct = 100;
+    SimWorldNavigationTownGround *ground = &probe->sim.world_navigation_towns.ground;
+    ground->enabled_town_mask = 2;
+    for (int y = 0; y < 32; ++y) for (int x = 0; x < 32; ++x)
+      ground->terrain[1][y * 32 + x] = rows[y] & (1u << x) ? 0x89 : 8;
+    int ox, oy;
+    CHECK(SimWorldMap_OriginForTown(2, &ox, &oy));
+    probe->sim.world_navigation.focus_x = (ox + 16) * kSimWorldMapTilePixels;
+    probe->sim.world_navigation.focus_y = (oy + 16) * kSimWorldMapTilePixels;
+    probe->sim.world_navigation.active_location = 2;
+    Sim3DDepthMesh *pressure[4] = {0};
+    if (mode == 2) {
+      CHECK(Sim3DDepthPass_Begin(&g_render_device, kWidth, kHeight, kArRenderFilter_Nearest));
+      for (int i = 0; i < 4; ++i) CHECK((pressure[i] = Sim3DDepthPass_CreateGeometryMesh()));
+      CHECK(!Sim3DDepthPass_CreateGeometryMesh());
+    }
+    for (int state = 0; state < kStates; ++state) {
+      switch (state) {
+        case 1: probe->sim.world_navigation_lighting = true; break;
+        case 2: weather_time_ms = 1500; break; /* Wind must not invalidate opaque source. */
+        case 3: probe->sim.landscape_height_pct = 250; break;
+        case 4: probe->sim.world_navigation_mountains = false; break;
+        case 5: probe->sim.world_navigation_mountains = true; break;
+        case 6: probe->sim_manual_orbit_yaw = .5f; break;
+        case 7: probe->sim.view = kSimView_SkyPalace; break;
+        case 8: ground->terrain[1][27 * 32 + 8] = 8; break;
+        case 9: ground->terrain[1][27 * 32 + 8] = 0x89; break;
+        case 10: ResizeTestOutput(renderer, 960, 540); break;
+      }
+      BuildScene(probe);
+      UploadWorldNavigationComposition(probe);
+      for (int frame = 0; frame < 4; ++frame) {
+        if (!state && frame == 2) PerformanceMetrics_Configure(true, false);
+        SDL_Surface *actual = Render(renderer, probe, NULL);
+        if (!mode && !frame) reference[state] = actual;
+        else { CHECK(Differences(actual, reference[state]) == 0); SDL_DestroySurface(actual); }
+        if (!state && frame >= 2) PerformanceMetrics_PresentCompleted(
+            1 + (frame - 2) * UINT64_C(1000000000));
+      }
+      if (!state) {
+        PerformanceMetrics_Snapshot(&measured[mode]);
+        PerformanceMetrics_Configure(false, false);
+        CHECK(measured[mode].ready);
+      }
+    }
+    for (int i = 0; i < 4; ++i) Sim3DDepthPass_DestroyMesh(pressure[i]);
+    weather_time_ms = 0;
+  }
+  CHECK(Differences(reference[3], reference[4]) > 100);
+  CHECK(Differences(reference[1], reference[2]) > 100);
+  CHECK(Differences(reference[7], reference[8]) > 0);
+  CHECK(Differences(reference[3], reference[5]) == 0);
+  CHECK(Differences(reference[7], reference[9]) == 0);
+  CHECK(measured[1].counts[kPerformanceCount_DepthUploadBytes] <
+      measured[0].counts[kPerformanceCount_DepthUploadBytes]);
+  for (int mode = 1; mode < 3; ++mode) {
+    CHECK(measured[mode].counts[kPerformanceCount_Draws] == measured[0].counts[kPerformanceCount_Draws]);
+    CHECK(measured[mode].counts[kPerformanceCount_Vertices] == measured[0].counts[kPerformanceCount_Vertices]);
+  }
+  CHECK(measured[2].counts[kPerformanceCount_DepthUploadBytes] ==
+      measured[0].counts[kPerformanceCount_DepthUploadBytes]);
+  printf("retained ground/mountains: upload %.0f -> %.0f; unchanged draws %.0f; exact cold/warm/pressure images\n",
+      measured[0].counts[kPerformanceCount_DepthUploadBytes],
+      measured[1].counts[kPerformanceCount_DepthUploadBytes], measured[1].counts[kPerformanceCount_Draws]);
+  for (int state = 0; state < kStates; ++state) SDL_DestroySurface(reference[state]);
+  if (saved) CHECK(!SDL_setenv_unsafe("AR_SIM3D_RETAINED_GROUND", saved, 1));
+  else CHECK(!SDL_unsetenv_unsafe("AR_SIM3D_RETAINED_GROUND"));
+  SDL_free(saved);
+  PresentWorldNav_ResetResources();
+  SimTownGroundArt_Shutdown();
+  ResizeTestOutput(renderer, kWidth, kHeight);
+  UploadWorldNavigationComposition(slot);
+  free(probe);
+}
+
 static void TestAdventClearance(SDL_Renderer *renderer, const FrameSlot *slot) {
   FrameSlot *probe = malloc(sizeof(*probe));
   CHECK(probe);
@@ -1150,7 +1263,114 @@ static void TestTallModelViewport(SDL_Renderer *renderer, const FrameSlot *slot)
   free(probe);
 }
 
+static void TestGpuGridRevisions(SDL_Renderer *renderer, const FrameSlot *slot) {
+  enum { kStates = 17 };
+  const char *incoming = SDL_getenv("AR_SIM3D_WORLD_GPU_GRID");
+  char *saved = incoming ? SDL_strdup(incoming) : NULL;
+  CHECK(!incoming || saved);
+  const char *incoming_cull = SDL_getenv("AR_SIM3D_WORLD_GPU_GRID_CULL");
+  char *saved_cull = incoming_cull ? SDL_strdup(incoming_cull) : NULL;
+  CHECK(!incoming_cull || saved_cull);
+  const char *incoming_cache = SDL_getenv("AR_SIM3D_WORLD_CLIP_CACHE");
+  char *saved_cache = incoming_cache ? SDL_strdup(incoming_cache) : NULL;
+  CHECK(!incoming_cache || saved_cache);
+  InitSyntheticBloodpoolArt();
+  FrameSlot *probe = malloc(sizeof(*probe));
+  uint8_t *map = malloc(kSimWorldMapBytes);
+  CHECK(probe && map);
+  SDL_Surface *reference[kStates] = {0};
+  bool compacted = false, reused = false;
+  for (unsigned warm = 0; warm < 3; ++warm) {
+    /* Default and explicitly enabled source must draw identically. */
+    if (warm) CHECK(!SDL_unsetenv_unsafe("AR_SIM3D_WORLD_GPU_GRID"));
+    else CHECK(!SDL_setenv_unsafe("AR_SIM3D_WORLD_GPU_GRID","1",1));
+    if (warm == 1) CHECK(!SDL_unsetenv_unsafe("AR_SIM3D_WORLD_GPU_GRID_CULL")); /* Default culls. */
+    else CHECK(!SDL_setenv_unsafe("AR_SIM3D_WORLD_GPU_GRID_CULL",warm ? "1" : "0",1));
+    if (warm == 1) CHECK(!SDL_unsetenv_unsafe("AR_SIM3D_WORLD_CLIP_CACHE"));
+    else CHECK(!SDL_setenv_unsafe("AR_SIM3D_WORLD_CLIP_CACHE",warm ? "1" : "0",1));
+    PresentWorldNav_ResetResources();
+    InitSlot(probe);
+    probe->sim.world_navigation_towns.ground.enabled_town_mask = 2;
+    memset(probe->sim.world_navigation_towns.ground.terrain[1],8,kSimTownCells*kSimTownCells);
+    probe->sim.world_navigation_lighting = true;
+    probe->sim.world_navigation_clouds = probe->sim.world_navigation_cloud_shadows = true;
+    probe->sim.world_navigation_haze = true;
+    probe->sim.underlay_defocus_pct = probe->sim.underlay_haze_pct = 40;
+    probe->sim.cull_haze_lead_px = 128;
+    memcpy(map,SimWorldMap_Baseline(),kSimWorldMapBytes);
+    SimWorldMap_PublishBuiltTilemap(map);
+    for (unsigned state = 0; state < kStates; ++state) {
+      switch (state) {
+        case 1: probe->sim.light_azimuth_deg = 45; break;
+        case 2: probe->sim.landscape_height_pct = 300; break;
+        case 3: probe->sim.world_navigation_ground_detail = true; break;
+        case 4: probe->sim_manual_orbit_yaw = .4f; break;
+        case 5: probe->sim.view = kSimView_SkyPalace; break;
+        case 6: probe->sim.world_navigation_cloud_shadows = false; break;
+        case 7: probe->sim.world_navigation_haze = false; break;
+        case 8: probe->sim.world_navigation_relief = false; break;
+        case 9:
+          for (int y = 60; y < 68; ++y) memset(map+y*128+60,0,8);
+          CHECK(SimWorldMap_PublishBuiltTilemap(map) > 0); break;
+        case 10:
+          memcpy(map,SimWorldMap_Baseline(),kSimWorldMapBytes);
+          CHECK(SimWorldMap_PublishBuiltTilemap(map) > 0); break;
+        case 11:
+          probe->sim.world_navigation_cloud_shadows = probe->sim.world_navigation_haze = true;
+          probe->sim.world_navigation_relief = true; break;
+        case 12:
+          probe->sim.view = kSimView_WorldNavigation;
+          probe->sim.world_navigation.zoom_current = 50;
+          probe->sim.world_navigation.matrix[0] = probe->sim.world_navigation.matrix[3] = 50;
+          break;
+        case 13: ResizeTestOutput(renderer,960,540); break;
+        case 14: ResizeTestOutput(renderer,kWidth,kHeight); break;
+        case 15: probe->sim.world_navigation_lighting = false; break;
+        case 16: probe->sim.world_navigation_lighting = true; break;
+      }
+      if (warm != 2) PresentWorldNav_ResetResources();
+      BuildScene(probe); UploadWorldNavigationComposition(probe);
+      PerformanceMetrics_Configure(true,false);
+      for (unsigned frame = 0; frame < 3; ++frame) {
+        SDL_Surface *actual = Render(renderer,probe,NULL);
+        if (!warm && !frame) reference[state] = actual;
+        else { CHECK(Differences(actual,reference[state]) == 0); SDL_DestroySurface(actual); }
+        PerformanceMetrics_PresentCompleted(1 + frame*UINT64_C(1000000000));
+        PerformanceSnapshot sample; PerformanceMetrics_Snapshot(&sample);
+        compacted |= sample.counts[kPerformanceCount_DepthCopyCalls] > 0;
+      }
+      PerformanceSnapshot measured; PerformanceMetrics_Snapshot(&measured);
+      CHECK(measured.ready && measured.counts[kPerformanceCount_GpuReuse] > 0);
+      CHECK(measured.counts[kPerformanceCount_GeometryRejected] == 0);
+      reused |= measured.counts[kPerformanceCount_CpuGeometryReuse] > 0;
+      if (!warm) CHECK(measured.counts[kPerformanceCount_DepthCopyCalls] == 0);
+      if (!warm) CHECK(measured.counts[kPerformanceCount_CpuGeometryReuse] == 0);
+      PerformanceMetrics_Configure(false,false);
+    }
+  }
+  CHECK(compacted && reused);
+  for (unsigned state = 0; state < kStates; ++state) SDL_DestroySurface(reference[state]);
+  if (saved) CHECK(!SDL_setenv_unsafe("AR_SIM3D_WORLD_GPU_GRID",saved,1));
+  else CHECK(!SDL_unsetenv_unsafe("AR_SIM3D_WORLD_GPU_GRID"));
+  SDL_free(saved); free(map); free(probe);
+  if (saved_cull) CHECK(!SDL_setenv_unsafe("AR_SIM3D_WORLD_GPU_GRID_CULL",saved_cull,1));
+  else CHECK(!SDL_unsetenv_unsafe("AR_SIM3D_WORLD_GPU_GRID_CULL"));
+  SDL_free(saved_cull);
+  if (saved_cache) CHECK(!SDL_setenv_unsafe("AR_SIM3D_WORLD_CLIP_CACHE",saved_cache,1));
+  else CHECK(!SDL_unsetenv_unsafe("AR_SIM3D_WORLD_CLIP_CACHE"));
+  SDL_free(saved_cache);
+  SimTownGroundArt_Shutdown();
+  PresentWorldNav_ResetResources(); UploadWorldNavigationComposition(slot);
+  puts("Default GPU land/cliffs: exact explicit/unculled/cold/warm settings, geography, view and Advent revisions; CPU streams reused");
+}
+
 static void TestSynthetic(SDL_Renderer *renderer) {
+  /* Legacy projected-geometry/cache oracles intentionally use compatibility.
+   * TestGpuGridRevisions below explicitly clears this to verify the default. */
+  const char *incoming_grid = SDL_getenv("AR_SIM3D_WORLD_GPU_GRID");
+  char *saved_grid = incoming_grid ? SDL_strdup(incoming_grid) : NULL;
+  CHECK(!incoming_grid || saved_grid);
+  CHECK(!SDL_setenv_unsafe("AR_SIM3D_WORLD_GPU_GRID","0",1));
   uint8_t *rom = calloc(kRomBytes, 1);
   CHECK(rom);
   /* A green central continent in blue ocean. Only public immutable decoder
@@ -1319,13 +1539,18 @@ static void TestSynthetic(SDL_Renderer *renderer) {
   UploadWorldNavigationComposition(slot);
   TestRadialTownResidency(renderer, slot);
   TestGroundCacheRevisions(renderer, slot);
+  TestRetainedMountainSurfaces(renderer, slot);
   TestAdventClearance(renderer, slot);
   TestTallModelViewport(renderer, slot);
+  TestGpuGridRevisions(renderer, slot);
   free(slot);
   PresentWorldNav_ResetResources();
   Sim3DDepthPass_Reset(&g_render_device);
   SimBackgroundVoxelModelCache_Reset();
   SimWorldMap_Shutdown();
+  if (saved_grid) CHECK(!SDL_setenv_unsafe("AR_SIM3D_WORLD_GPU_GRID",saved_grid,1));
+  else CHECK(!SDL_unsetenv_unsafe("AR_SIM3D_WORLD_GPU_GRID"));
+  SDL_free(saved_grid);
 }
 
 static uint8_t *ReadFile(const char *path, size_t size) {

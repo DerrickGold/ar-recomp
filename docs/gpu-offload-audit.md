@@ -67,6 +67,17 @@ is now enabled by default for offline testing; terrain and moving SIM integratio
 
 ## Follow-through and evidence
 
+### Shared surface boundary and Vulkan clipping correction
+
+The [shared surface prototype](gpu-surface-prototype.md) now retains source
+quads for a common GPU Ground/CloudShadow transform. An opt-in live land grid
+now includes blur/haze in that same transform; ocean/cliffs/mountains remain
+on their current path. Repeated local timing and upload/draw tradeoffs are
+recorded in the prototype document; this is not yet a default-path promotion.
+Validation also found and fixed pre-existing Vulkan
+behind-eye affine attribute loss in the current model shaders, without a CPU
+fallback. Existing default paths and multicore support remain available.
+
 ### Implemented: grouped SIM retention and lazy cloud fallback
 
 Town solid models, mountain relief, invisible terrain depth and shadow
@@ -142,6 +153,12 @@ See [ordered-gpu-submission.md](ordered-gpu-submission.md) for lifecycle,
 same-frame correctness, compatibility and performance evidence.
 
 ### Remaining integration work
+
+Held globe ground and native mountain cutouts now share the existing retained
+surface handle. This removes repeated mountain staging/uploads without changing
+shaders, art, depth or resource budgets; moving camera projection is unchanged.
+See [gpu-world-surfaces.md](gpu-world-surfaces.md) for exact-pixel tests, repeated
+Mac results and short guarded Vulkan verification.
 
 The whole-model work now has a default-on radial source/ordered-index path
 in navigation and Sky Palace. See [gpu-world-models.md](gpu-world-models.md) for

@@ -9,12 +9,10 @@ layout(set = 1, binding = 0, std140) uniform RadialView {
     vec4 basis[3];
     vec4 radial; // sphere radius, reference elevation, height scale, variant
 };
-layout(location = 0) noperspective out vec4 vertex_color;
-layout(location = 1) out vec2 texture_uv;
+layout(location = 0) out vec4 vertex_color;
 
 void main() {
     vertex_color = in_color;
-    texture_uv = vec2(-1.0);
     if (in_variant != 0.0 && in_variant != radial.w) {
         // Every vertex of an inactive quad takes this branch. It degenerates
         // outside the frustum, contributing neither color nor depth.
@@ -38,4 +36,5 @@ void main() {
     clip = clip + matrix[3];
     precise float depth = clip.z * 0.5 + clip.w * 0.5;
     gl_Position = vec4(clip.xy, depth, clip.w);
+    vertex_color = in_color * clip.w;
 }

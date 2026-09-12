@@ -67,6 +67,23 @@ func Launch(options LaunchOptions) error {
 	if err != nil {
 		return err
 	}
+	if len(options.GameArgs) > 0 && options.GameArgs[0] == "--font-coverage-v1" {
+		// A language editor needs the installed game's exact font backend,
+		// including when it lives only inside an AppImage. This protocol is
+		// headless: preserve stdin/stdout and do not seed game data or log over
+		// its machine-readable response. Font paths are already absolute.
+		command := exec.Command(layout.Binary, options.GameArgs...)
+		command.Stdin, command.Stdout, command.Stderr = os.Stdin, os.Stdout, os.Stderr
+		command.Env = os.Environ()
+		if runtime.GOOS == "linux" {
+			path := layout.Libraries
+			if inherited := os.Getenv("LD_LIBRARY_PATH"); inherited != "" {
+				path += ":" + inherited
+			}
+			command.Env = append(command.Env, "LD_LIBRARY_PATH="+path)
+		}
+		return command.Run()
+	}
 	cwd, err := os.Getwd()
 	if err != nil {
 		return err

@@ -6,8 +6,7 @@ layout(set = 1, binding = 0, std140) uniform ModelView {
     mat4 matrix;
     vec4 viewport; // Same private layout as the legacy model experiment.
 };
-layout(location = 0) noperspective out vec4 vertex_color;
-layout(location = 1) out vec2 texture_uv;
+layout(location = 0) out vec4 vertex_color;
 
 void main() {
     precise vec4 clip = matrix[1] * in_position.y;
@@ -18,6 +17,8 @@ void main() {
     // vertices behind the eye remain finite inputs to hardware clipping.
     precise float depth = clip.z * 0.5 + clip.w * 0.5;
     gl_Position = vec4(clip.xy, depth, clip.w);
-    vertex_color = in_color;
-    texture_uv = vec2(-1.0);
+    // Carry affine attributes through ordinary perspective interpolation.
+    // This remains finite through hardware clip intersections at W=0, where
+    // native noperspective interpolation can lose even constant colors.
+    vertex_color = in_color * clip.w;
 }

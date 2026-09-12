@@ -52,7 +52,8 @@ run_probe() {
 export APPIMAGE_EXTRACT_AND_RUN=1
 run_probe portable "$image"
 workspace="$test_root/Portable Builder/Builder Data"
-test -d "$workspace/utils/tools"
+test -f "$workspace/.builder-workspace"
+test ! -e "$workspace/utils"
 test ! -e "$XDG_DATA_HOME/ActRaiserRecomp/installer"
 game_output="$test_root/Portable Builder/ActRaiserRecomp"
 test -d "$game_output/game-assets"
@@ -68,7 +69,8 @@ run_probe relocated "$image"
 test ! -e "$XDG_DATA_HOME/ActRaiserRecomp/installer"
 mv "$image.portable" "$image.portable.saved"
 run_probe global "$image"
-test -d "$XDG_DATA_HOME/ActRaiserRecomp/installer/workspace/utils/tools"
+test -f "$XDG_DATA_HOME/ActRaiserRecomp/installer/workspace/.builder-workspace"
+test ! -e "$XDG_DATA_HOME/ActRaiserRecomp/installer/workspace/utils"
 if test -c /dev/fuse && test -r /dev/fuse && test -w /dev/fuse &&
     { command -v fusermount3 >/dev/null 2>&1 || command -v fusermount >/dev/null 2>&1; }; then
     unset APPIMAGE_EXTRACT_AND_RUN
