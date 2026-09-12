@@ -14,6 +14,7 @@
 #include "render/render_output.h"
 #include "render/localized_text_presenter.h"
 #include "settings.h"
+#include "performance_metrics.h"
 #include "sim/sim3d_depth_pass.h"
 #include "sim/sim_world_navigation_capture.h"
 #include "sim/sim_town_ground_art.h"
@@ -788,17 +789,18 @@ static void TestTownLodMotion(SDL_Renderer *renderer, const FrameSlot *slot) {
   free(probe);
 }
 
-static void TestAnimatedTownCache(SDL_Renderer *renderer, const FrameSlot *slot) {
+static void TestAnimatedTownCache(SDL_Renderer *renderer, const FrameSlot *slot, bool dense) {
   ResizeTestOutput(renderer, 1792, 1344);
   FrameSlot *probe = malloc(sizeof(*probe));
   CHECK(probe);
   InitSlot(probe);
   probe->sim.world_navigation_models = true;
-  probe->sim.world_navigation_towns.object_count = 5;
-  for (int i = 0; i < 5; ++i)
+  probe->sim.world_navigation_towns.object_count = dense ? 144 : 5;
+  for (int i = 0; i < probe->sim.world_navigation_towns.object_count; ++i)
     probe->sim.world_navigation_towns.objects[i] = (SimBackgroundVoxelObject){
       .town = 2, .kind = i & 1 ? kSimBackgroundVoxel_Factory : kSimBackgroundVoxel_Windmill,
-      .cell_x = 11 + i * 2, .cell_y = 15,
+      .cell_x = dense ? (i % 12) * 2 + 4 : 11 + i * 2,
+      .cell_y = dense ? (i / 12) * 2 + 4 : 15,
       .source_cells_w = 2, .source_cells_h = 2,
       .footprint_cells_w = 2, .footprint_cells_d = 2,
       .visual_state = kSimStructureVisualState_Finished,
@@ -808,6 +810,12 @@ static void TestAnimatedTownCache(SDL_Renderer *renderer, const FrameSlot *slot)
   probe->sim.world_navigation.matrix[0] = probe->sim.world_navigation.matrix[3] =
       kSimWorldNavigationZoomNear;
   probe->sim.projection_distance_x100 = 200;
+  if (dense) {
+    probe->sim.projection_distance_x100 = 500;
+    probe->sim.background_voxel_detail = kSimBackgroundVoxelDetail_Low;
+    probe->sim.world_navigation_lighting = true;
+    probe->sim.world_navigation_clouds = probe->sim.world_navigation_cloud_shadows = true;
+  }
   BuildScene(probe);
   SDL_Surface *reference[3];
   for (int phase = 0; phase < 3; ++phase) {
@@ -818,27 +826,221 @@ static void TestAnimatedTownCache(SDL_Renderer *renderer, const FrameSlot *slot)
   }
   CHECK(Differences(reference[0], reference[1]) > 0);
   CHECK(Differences(reference[1], reference[2]) > 0);
-  PresentWorldNav_ResetResources();
-  UploadWorldNavigationComposition(probe);
-  const int phases[] = {0, 0, 0, 1, 2, 1, 0, 2};
-  for (size_t i = 0; i < sizeof(phases) / sizeof(phases[0]); ++i) {
-    probe->sim.game_frame = (uint16_t)(phases[i] * 12);
-    const SimBackgroundVoxelModelCacheStats before = SimBackgroundVoxelModelCache_Stats();
-    SDL_Surface *image = Render(renderer, probe, NULL);
-    CHECK(Differences(image, reference[phases[i]]) == 0);
-    SDL_DestroySurface(image);
-    if (i >= 2) {
-      /* Both static factories stay cached across forward/backward phase
-       * changes. Animated models retain their interleaved submission order. */
-      const uint64_t hits = SimBackgroundVoxelModelCache_Stats().hits - before.hits;
-      CHECK(hits == 3);
+  const char *incoming = SDL_getenv("AR_SIM3D_RETAINED_SOLIDS");
+  char *saved = incoming ? SDL_strdup(incoming) : NULL;
+  CHECK(!incoming || saved);
+  const char *incoming_ground = SDL_getenv("AR_SIM3D_RETAINED_GROUND");
+  char *saved_ground = incoming_ground ? SDL_strdup(incoming_ground) : NULL;
+  CHECK(!incoming_ground || saved_ground);
+  PerformanceSnapshot measured[5];
+  for (int retained = 0; retained < 5; ++retained) {
+    CHECK(SDL_setenv_unsafe("AR_SIM3D_RETAINED_SOLIDS", retained ? "1" : "0", 1) == 0);
+    CHECK(SDL_setenv_unsafe("AR_SIM3D_RETAINED_GROUND", retained >= 2 ? "1" : "0", 1) == 0);
+    if (retained == 4) {
+      CHECK(SDL_unsetenv_unsafe("AR_SIM3D_RETAINED_SOLIDS") == 0);
+      CHECK(SDL_unsetenv_unsafe("AR_SIM3D_RETAINED_GROUND") == 0);
     }
+    PresentWorldNav_ResetResources();
+    UploadWorldNavigationComposition(probe);
+    Sim3DDepthMesh *pressure[4] = {0};
+    if (retained == 3) {
+      CHECK(Sim3DDepthPass_Begin(&g_render_device, 1792, 1344, kArRenderFilter_Nearest));
+      for (int i = 0; i < 4; ++i) {
+        pressure[i] = Sim3DDepthPass_CreateGeometryMesh();
+        CHECK(pressure[i]);
+      }
+      CHECK(!Sim3DDepthPass_CreateGeometryMesh());
+    }
+    const int phases[] = {0, 0, 0, 1, 2, 1, 0, 2};
+    for (size_t i = 0; i < sizeof(phases) / sizeof(phases[0]); ++i) {
+      if (i == 3) PerformanceMetrics_Configure(true, false);
+      probe->sim.game_frame = (uint16_t)(phases[i] * 12);
+      const SimBackgroundVoxelModelCacheStats before = SimBackgroundVoxelModelCache_Stats();
+      SDL_Surface *image = Render(renderer, probe, NULL);
+      CHECK(Differences(image, reference[phases[i]]) == 0);
+      SDL_DestroySurface(image);
+      if (i == 3 || i == 4) PerformanceMetrics_PresentCompleted(1 + (i - 3) * UINT64_C(1000000000));
+      if (i == 4) {
+        PerformanceMetrics_Snapshot(&measured[retained]);
+        PerformanceMetrics_Configure(false, false);
+      }
+      if (i >= 2) {
+        /* Both static factories stay cached across forward/backward phase
+         * changes. Animated models retain their interleaved submission order. */
+        const uint64_t hits = SimBackgroundVoxelModelCache_Stats().hits - before.hits;
+        CHECK(dense ? hits == 72 : hits == 3);
+      }
+    }
+    CHECK(measured[retained].ready);
+    for (int i = 0; i < 4; ++i) Sim3DDepthPass_DestroyMesh(pressure[i]);
   }
+  CHECK(dense ? measured[1].counts[kPerformanceCount_DepthUploadBytes] ==
+      measured[0].counts[kPerformanceCount_DepthUploadBytes]
+      : measured[1].counts[kPerformanceCount_DepthUploadBytes] <
+      measured[0].counts[kPerformanceCount_DepthUploadBytes]);
+  if (dense) CHECK(measured[1].counts[kPerformanceCount_Draws] == measured[0].counts[kPerformanceCount_Draws]);
+  CHECK(measured[1].counts[kPerformanceCount_Vertices] == measured[0].counts[kPerformanceCount_Vertices]);
+  CHECK(measured[2].counts[kPerformanceCount_DepthUploadBytes] <
+      measured[1].counts[kPerformanceCount_DepthUploadBytes]);
+  CHECK(measured[2].counts[kPerformanceCount_Vertices] == measured[1].counts[kPerformanceCount_Vertices]);
+  CHECK(measured[2].counts[kPerformanceCount_Draws] == measured[1].counts[kPerformanceCount_Draws]);
+  CHECK(measured[3].counts[kPerformanceCount_DepthUploadBytes] == measured[0].counts[kPerformanceCount_DepthUploadBytes]);
+  CHECK(measured[3].counts[kPerformanceCount_Draws] == measured[0].counts[kPerformanceCount_Draws]);
+  CHECK(measured[3].counts[kPerformanceCount_Vertices] == measured[0].counts[kPerformanceCount_Vertices]);
+  CHECK(measured[4].counts[kPerformanceCount_DepthUploadBytes] == measured[2].counts[kPerformanceCount_DepthUploadBytes]);
+  CHECK(measured[4].counts[kPerformanceCount_Draws] == measured[2].counts[kPerformanceCount_Draws]);
+  CHECK(measured[4].counts[kPerformanceCount_Vertices] == measured[2].counts[kPerformanceCount_Vertices]);
+  printf("ordered retained factories (dense=%d): upload %.0f -> %.0f bytes/present; unchanged vertices %.0f\n",
+      (int)dense,
+      measured[0].counts[kPerformanceCount_DepthUploadBytes],
+      measured[1].counts[kPerformanceCount_DepthUploadBytes],
+      measured[1].counts[kPerformanceCount_Vertices]);
+  printf("retained ground: upload %.0f -> %.0f bytes/present; unchanged draws %.0f\n",
+      measured[1].counts[kPerformanceCount_DepthUploadBytes],
+      measured[2].counts[kPerformanceCount_DepthUploadBytes],
+      measured[2].counts[kPerformanceCount_Draws]);
+  if (saved) CHECK(SDL_setenv_unsafe("AR_SIM3D_RETAINED_SOLIDS", saved, 1) == 0);
+  else CHECK(SDL_unsetenv_unsafe("AR_SIM3D_RETAINED_SOLIDS") == 0);
+  SDL_free(saved);
+  if (saved_ground) CHECK(SDL_setenv_unsafe("AR_SIM3D_RETAINED_GROUND", saved_ground, 1) == 0);
+  else CHECK(SDL_unsetenv_unsafe("AR_SIM3D_RETAINED_GROUND") == 0);
+  SDL_free(saved_ground);
   for (int phase = 0; phase < 3; ++phase) SDL_DestroySurface(reference[phase]);
   PresentWorldNav_ResetResources();
   UploadWorldNavigationComposition(slot);
   ResizeTestOutput(renderer, kWidth, kHeight);
   free(probe);
+}
+
+static void TestRadialTownResidency(SDL_Renderer *renderer, const FrameSlot *slot) {
+  const char *incoming = SDL_getenv("AR_SIM3D_WORLD_GPU_MODELS");
+  char *saved = incoming ? SDL_strdup(incoming) : NULL;
+  CHECK(!incoming || saved);
+  /* Exercise the shipping default, not an opt-in-only shader path. */
+  CHECK(!SDL_unsetenv_unsafe("AR_SIM3D_WORLD_GPU_MODELS"));
+  ResizeTestOutput(renderer, 1792, 1344);
+  FrameSlot *probe = malloc(sizeof(*probe));
+  CHECK(probe);
+  InitSlot(probe);
+  probe->sim.world_navigation_models = probe->sim.world_navigation_lighting = true;
+  probe->sim.world_navigation_towns.object_count = 144;
+  for (int i = 0; i < 144; ++i) probe->sim.world_navigation_towns.objects[i] = (SimBackgroundVoxelObject){
+    .town = 2, .kind = i & 1 ? kSimBackgroundVoxel_Factory : kSimBackgroundVoxel_Windmill,
+    .cell_x = (i % 12) * 2 + 4, .cell_y = (i / 12) * 2 + 4,
+    .source_cells_w = 2, .source_cells_h = 2, .footprint_cells_w = 2, .footprint_cells_d = 2,
+    .visual_state = kSimStructureVisualState_Finished,
+  };
+  probe->sim.background_voxel_detail = kSimBackgroundVoxelDetail_Low;
+  probe->sim.projection_distance_x100 = 500;
+  const int phases[] = {0,0,0,1,2,1,0,2};
+  for (unsigned view = 0; view < 2; ++view) {
+    probe->sim.view = view ? kSimView_SkyPalace : kSimView_WorldNavigation;
+    BuildScene(probe);
+    SDL_Surface *reference[3];
+    for (unsigned phase = 0; phase < 3; ++phase) {
+      PresentWorldNav_ResetResources();
+      UploadWorldNavigationComposition(probe);
+      probe->sim.game_frame = (uint16_t)(phase * 12);
+      reference[phase] = Render(renderer, probe, NULL);
+    }
+    CHECK(Differences(reference[0], reference[1]) > 0);
+    CHECK(Differences(reference[1], reference[2]) > 0);
+    for (unsigned i = 0; i < sizeof(phases) / sizeof(*phases); ++i) {
+      if (i == 3) PerformanceMetrics_Configure(true, false);
+      probe->sim.game_frame = (uint16_t)(phases[i] * 12);
+      const SimBackgroundVoxelModelCacheStats before = SimBackgroundVoxelModelCache_Stats();
+      SDL_Surface *actual = Render(renderer, probe, NULL);
+      CHECK(!Differences(actual, reference[phases[i]]));
+      SDL_DestroySurface(actual);
+      CHECK(before.hits == SimBackgroundVoxelModelCache_Stats().hits);
+      CHECK(before.misses == SimBackgroundVoxelModelCache_Stats().misses);
+      if (i == 3 || i == 4) PerformanceMetrics_PresentCompleted(1 + (i - 3) * UINT64_C(1000000000));
+      if (i == 4) {
+        PerformanceSnapshot measured;
+        PerformanceMetrics_Snapshot(&measured);
+        PerformanceMetrics_Configure(false, false);
+        CHECK(measured.ready && measured.counts[kPerformanceCount_GpuReuse] > 0);
+        CHECK(measured.counts[kPerformanceCount_GeometryRejected] == 0);
+        CHECK(measured.counts[kPerformanceCount_GeometryLimit] == 0);
+        CHECK(measured.counts[kPerformanceCount_GeometryPublish] == 0);
+        CHECK(measured.counts[kPerformanceCount_Draws] <= 15); /* No per-windmill draws. */
+      }
+    }
+    for (unsigned p = 0; p < 3; ++p) SDL_DestroySurface(reference[p]);
+  }
+  PresentWorldNav_ResetResources();
+  if (saved) CHECK(!SDL_setenv_unsafe("AR_SIM3D_WORLD_GPU_MODELS", saved, 1));
+  else CHECK(!SDL_unsetenv_unsafe("AR_SIM3D_WORLD_GPU_MODELS"));
+  SDL_free(saved);
+  UploadWorldNavigationComposition(slot);
+  ResizeTestOutput(renderer, kWidth, kHeight);
+  free(probe);
+}
+
+static void TestGroundCacheRevisions(SDL_Renderer *renderer, const FrameSlot *slot) {
+  enum { kStates = 12 };
+  FrameSlot *probe = malloc(sizeof(*probe));
+  uint8_t *map = malloc(kSimWorldMapBytes);
+  CHECK(probe && map);
+  const char *incoming = SDL_getenv("AR_SIM3D_RETAINED_GROUND");
+  char *saved = incoming ? SDL_strdup(incoming) : NULL;
+  CHECK(!incoming || saved);
+  SDL_Surface *reference[kStates] = {0};
+  for (int retained = 0; retained < 2; ++retained) {
+    CHECK(SDL_setenv_unsafe("AR_SIM3D_RETAINED_GROUND", retained ? "1" : "0", 1) == 0);
+    PresentWorldNav_ResetResources();
+    InitSlot(probe);
+    memcpy(map, SimWorldMap_Baseline(), kSimWorldMapBytes);
+    SimWorldMap_PublishBuiltTilemap(map);
+    for (int state = 0; state < kStates; ++state) {
+      switch (state) {
+        case 1: probe->sim.world_navigation_lighting = true; break;
+        case 2: probe->sim.light_azimuth_deg = 45; break;
+        case 3: probe->sim.landscape_height_pct = 300; break;
+        case 4: probe->sim.world_navigation_ground_detail = true; break;
+        case 5: probe->sim_manual_orbit_yaw = .4f; break;
+        case 6: probe->sim.view = kSimView_SkyPalace; break;
+        case 7:
+          probe->sim.view = kSimView_WorldNavigation;
+          probe->sim_manual_orbit_yaw = 0;
+          break;
+        case 8:
+          /* Replace central synthetic land with ocean. Geography, not just
+           * texture content, must invalidate retained opacity and relief. */
+          for (int y = 60; y < 68; ++y) memset(map + y * 128 + 60, 0, 8);
+          CHECK(SimWorldMap_PublishBuiltTilemap(map) > 0);
+          break;
+        case 9:
+          memcpy(map, SimWorldMap_Baseline(), kSimWorldMapBytes);
+          CHECK(SimWorldMap_PublishBuiltTilemap(map) > 0);
+          break;
+        case 10: probe->sim.world_navigation_relief = false; break;
+        case 11: InitSlot(probe); break;
+      }
+      BuildScene(probe);
+      UploadWorldNavigationComposition(probe);
+      /* Do not reset between changes. Compare cold publication, first
+       * repetition and warm reuse against the ordinary reference path. */
+      for (int frame = 0; frame < 4; ++frame) {
+        SDL_Surface *actual = Render(renderer, probe, NULL);
+        if (!retained && !frame) reference[state] = actual;
+        else {
+          CHECK(Differences(actual, reference[state]) == 0);
+          SDL_DestroySurface(actual);
+        }
+      }
+    }
+  }
+  CHECK(Differences(reference[0], reference[11]) == 0);
+  CHECK(Differences(reference[7], reference[8]) > 100);
+  CHECK(Differences(reference[7], reference[9]) == 0);
+  for (int state = 0; state < kStates; ++state) SDL_DestroySurface(reference[state]);
+  if (saved) CHECK(SDL_setenv_unsafe("AR_SIM3D_RETAINED_GROUND", saved, 1) == 0);
+  else CHECK(SDL_unsetenv_unsafe("AR_SIM3D_RETAINED_GROUND") == 0);
+  SDL_free(saved);
+  PresentWorldNav_ResetResources();
+  UploadWorldNavigationComposition(slot);
+  free(map); free(probe);
 }
 
 static void TestAdventClearance(SDL_Renderer *renderer, const FrameSlot *slot) {
@@ -1099,8 +1301,24 @@ static void TestSynthetic(SDL_Renderer *renderer) {
   TestWeatherMotion(renderer, slot, "synthetic", true);
   TestOutputResizing(renderer, slot);
   TestColdBlackEntry(renderer, slot);
+  /* These three fixtures specifically certify the CPU projected-cache
+   * fallback and its exact legacy counters. Keep their opt-out explicit. */
+  const char *incoming_models = SDL_getenv("AR_SIM3D_WORLD_GPU_MODELS");
+  char *saved_models = incoming_models ? SDL_strdup(incoming_models) : NULL;
+  CHECK(!incoming_models || saved_models);
+  CHECK(!SDL_setenv_unsafe("AR_SIM3D_WORLD_GPU_MODELS", "0", 1));
+  PresentWorldNav_ResetResources();
+  UploadWorldNavigationComposition(slot);
   TestTownLodMotion(renderer, slot);
-  TestAnimatedTownCache(renderer, slot);
+  TestAnimatedTownCache(renderer, slot, false);
+  TestAnimatedTownCache(renderer, slot, true);
+  if (saved_models) CHECK(!SDL_setenv_unsafe("AR_SIM3D_WORLD_GPU_MODELS", saved_models, 1));
+  else CHECK(!SDL_unsetenv_unsafe("AR_SIM3D_WORLD_GPU_MODELS"));
+  SDL_free(saved_models);
+  PresentWorldNav_ResetResources();
+  UploadWorldNavigationComposition(slot);
+  TestRadialTownResidency(renderer, slot);
+  TestGroundCacheRevisions(renderer, slot);
   TestAdventClearance(renderer, slot);
   TestTallModelViewport(renderer, slot);
   free(slot);

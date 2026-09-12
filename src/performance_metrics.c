@@ -42,7 +42,9 @@ const char *PerformanceMetrics_StageName(PerformanceStage stage) {
   return stage >= 0 && stage < kPerformanceStage_Count ? kNames[stage] : "unknown";
 }
 const char *PerformanceMetrics_SceneName(PerformanceScene scene) {
-  static const char *const names[] = {"Native/menu", "Action 3D", "Town 3D", "World 3D", "Sky Palace"};
+  static const char *const names[kPerformanceScene_Count] = {
+    "Native/menu", "Action 3D", "Town 3D", "World 3D", "Sky Palace", "Action 2D",
+  };
   return scene >= 0 && scene < kPerformanceScene_Count ? names[scene] : "unknown";
 }
 uint32_t PerformanceMetrics_Epoch(void) { return atomic_load_explicit(&s_epoch, memory_order_relaxed); }
@@ -132,6 +134,17 @@ static void Publish(uint64_t now) {
         out->counts[kPerformanceCount_DepthUploadBytes] / 1048576,
         out->counts[kPerformanceCount_WorkJobs], out->counts[kPerformanceCount_HelperJobs],
         out->counts[kPerformanceCount_Fallbacks], out->counts[kPerformanceCount_FailedPresents]);
+    fprintf(stderr, "[pipeline-traffic] upload-calls=%.2f skipped=%.2f scan-MiB=%.3f upload-MiB=%.3f mirror-realloc=%.2f (per-present)\n",
+        out->counts[kPerformanceCount_UploadCalls],
+        out->counts[kPerformanceCount_UploadSkipped],
+        out->counts[kPerformanceCount_ScanBytes] / 1048576,
+        out->counts[kPerformanceCount_UploadBytes] / 1048576,
+        out->counts[kPerformanceCount_MirrorReallocs]);
+    fprintf(stderr, "[pipeline-path] cpu-project=%.2f cpu-stage=%.2f gpu-reuse=%.2f publish=%.2f opt-out=%.2f limit=%.2f rejected=%.2f (events/present, not view fallbacks)\n",
+        out->counts[kPerformanceCount_CpuProject], out->counts[kPerformanceCount_CpuStage],
+        out->counts[kPerformanceCount_GpuReuse], out->counts[kPerformanceCount_GeometryPublish],
+        out->counts[kPerformanceCount_GeometryOptOut], out->counts[kPerformanceCount_GeometryLimit],
+        out->counts[kPerformanceCount_GeometryRejected]);
   }
   memset(s_window.elapsed, 0, sizeof(s_window.elapsed));
   memset(s_window.maximum, 0, sizeof(s_window.maximum));

@@ -4,6 +4,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "performance_metrics.h"
+
 enum { kArgb8888BytesPerPixel = (int)sizeof(uint32_t) };
 
 /* Byte pointers can have arbitrary alignment and pitch. Let memcmp use the
@@ -50,6 +52,11 @@ bool PresentationUploadMirror_FindDirtyRect(
 
   const size_t row_bytes =
       (size_t)width * (size_t)kArgb8888BytesPerPixel;
+  /* The read volume this comparison costs, charged whether or not anything
+   * turns out to have changed. It is the traffic a producer-side dirty signal
+   * would remove, so it belongs in the counters beside the bytes uploaded. */
+  PerformanceMetrics_Add(kPerformanceCount_ScanBytes,
+      (uint64_t)row_bytes * (uint64_t)height * 2u);
   int x0 = width;
   int y0 = height;
   int x1 = 0;
@@ -85,20 +92,31 @@ bool PresentationUploadMirror_FindDirtyRect(
   return true;
 }
 
+/* Grow-only: a changed extent invalidates the CONTENTS but keeps the
+ * allocation when it already fits. Freeing and reallocating made every
+ * dimension change cost a full reallocation and a complete re-upload on every
+ * mirror at once, which is a frame-time spike rather than a steady cost.
+ * Capacity is tracked separately from extent so a shrink cannot later read
+ * beyond what was allocated. */
 static bool EnsureStorage(PresentationUploadMirror *mirror,
                           int width, int height) {
   const size_t row_bytes =
       (size_t)width * (size_t)kArgb8888BytesPerPixel;
   if (row_bytes > SIZE_MAX / (size_t)height) return false;
+  const size_t needed = row_bytes * (size_t)height;
   if (mirror->width != width || mirror->height != height) {
-    free(mirror->pixels);
-    mirror->pixels = NULL;
     mirror->width = width;
     mirror->height = height;
     mirror->valid = false;
   }
-  if (!mirror->pixels)
-    mirror->pixels = malloc(row_bytes * (size_t)height);
+  if (!mirror->pixels || mirror->capacity_bytes < needed) {
+    free(mirror->pixels);
+    mirror->pixels = malloc(needed);
+    mirror->capacity_bytes = mirror->pixels ? needed : 0;
+    mirror->valid = false;
+    if (mirror->pixels)
+      PerformanceMetrics_Add(kPerformanceCount_MirrorReallocs, 1);
+  }
   return mirror->pixels != NULL;
 }
 

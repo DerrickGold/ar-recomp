@@ -24,6 +24,7 @@ typedef struct Sim3DPerformanceCounters {
   uint64_t indices;
   uint64_t uploads;
   uint64_t upload_bytes;
+  uint64_t paths[kSim3DPath_Count];
 } Sim3DPerformanceCounters;
 
 static Sim3DPerformanceCounters
@@ -39,6 +40,13 @@ static const char *const kStageNames[] = {
   "shadow", "billboard", "effects", "cloud", "host-ui", "world-animation", "world-transfer",
   "world-prepare", "world-atmosphere", "world-ocean",
 };
+static const char *const kPathNames[] = {
+  "cpu-project", "cpu-stage", "gpu-reuse", "publish", "opt-out", "limit", "rejected",
+};
+_Static_assert(sizeof(kPathNames) / sizeof(*kPathNames) == kSim3DPath_Count,
+    "every geometry path needs a label");
+_Static_assert(kPerformanceCount_GeometryRejected - kPerformanceCount_CpuProject + 1 ==
+    kSim3DPath_Count, "geometry path metrics mapping");
 _Static_assert(
     sizeof(kStageNames) / sizeof(kStageNames[0]) ==
         kSim3DPerformanceStage_Count,
@@ -161,6 +169,13 @@ static void ReportPerformance(uint64_t window_ns) {
   fputc('\n', stderr);
 }
 
+void Sim3DPerformance_AddPath(Sim3DPerformancePath path) {
+  if (path < 0 || path >= kSim3DPath_Count) return;
+  PerformanceMetrics_Add((PerformanceCount)(kPerformanceCount_CpuProject + path), 1);
+  if (LogEnabled() && s_current_stage >= 0 && s_current_stage < kSim3DPerformanceStage_Count)
+    ++s_counters[s_current_stage].paths[path];
+}
+
 void Sim3DPerformance_AddGeometryUpload(uint64_t bytes) {
   PerformanceMetrics_Add(kPerformanceCount_DepthUploadBytes, bytes);
   if (Sim3DPerformance_Enabled() && s_current_stage >= 0 &&
@@ -175,7 +190,20 @@ void Sim3DPerformance_EndPresentation(void) {
   s_presentations++;
   uint64_t window_ns = now_ns - s_window_started_ns;
   if (window_ns < (uint64_t)kPerformanceWindowNs) return;
-  if (LogEnabled()) ReportPerformance(window_ns);
+  if (LogEnabled()) {
+    ReportPerformance(window_ns);
+    for (int stage = 0; stage < kSim3DPerformanceStage_Count; ++stage) {
+      bool any = false;
+      for (int path = 0; path < kSim3DPath_Count; ++path)
+        any |= s_counters[stage].paths[path] != 0;
+      if (!any) continue;
+      fprintf(stderr, "[sim3d-path] stage=%s", kStageNames[stage]);
+      for (int path = 0; path < kSim3DPath_Count; ++path)
+        fprintf(stderr, " %s=%.2f", kPathNames[path],
+            (double)s_counters[stage].paths[path] / (double)s_presentations);
+      fprintf(stderr, " (events/present)\n");
+    }
+  }
   memset(s_counters, 0, sizeof(s_counters));
   s_geometry_upload_bytes = 0;
   s_presentations = 0;

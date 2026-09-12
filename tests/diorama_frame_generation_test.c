@@ -150,6 +150,13 @@ int main(void) {
   CHECK(current_pixels[8 * kSurfaceWidth + kApron + 11] == 0xff0000ffu);
   const uint8_t *planes[kDioramaPlane_Count] = {0};
   size_t plane_pitches[kDioramaPlane_Count] = {0};
+  /* Endpoints are now copied from the compositor texture on the GPU, so the
+   * source texture has to hold this frame's pixels BEFORE Capture runs --
+   * exactly the order Diorama_Upload establishes in the real path. */
+  ArRenderTexture sources[kDioramaPlane_Count] = {0};
+  sources[kDioramaPlane_Backdrop] =
+      ArSdlRenderBackend_BorrowTexture(current);
+  const SDL_Rect source_rect = {kApron, 0, kDisplayWidth, kHeight};
   planes[kDioramaPlane_Backdrop] = (uint8_t *)previous_pixels;
   plane_pitches[kDioramaPlane_Backdrop] =
       kSurfaceWidth * sizeof(uint32_t);
@@ -165,19 +172,21 @@ int main(void) {
   slot.diorama_plane_request_mask = 1u << kDioramaPlane_Backdrop;
   slot.diorama_plane_content_mask = slot.diorama_plane_request_mask;
   slot.timestamp_ns = 1000000;
+  CHECK(SDL_UpdateTexture(
+      current, &source_rect, &previous_pixels[kApron],
+      kSurfaceWidth * sizeof(uint32_t)));
   DioramaFrameGeneration_Capture(
-      &render_device, &slot, planes, plane_pitches,
+      &render_device, &slot, sources, planes, plane_pitches,
       1u << kDioramaPlane_Backdrop);
 
   planes[kDioramaPlane_Backdrop] = (uint8_t *)current_pixels;
   slot.timestamp_ns += 16666667;
-  DioramaFrameGeneration_Capture(
-      &render_device, &slot, planes, plane_pitches,
-      1u << kDioramaPlane_Backdrop);
-  SDL_Rect endpoint_rect = {kApron, 0, kDisplayWidth, kHeight};
   CHECK(SDL_UpdateTexture(
-      current, &endpoint_rect, &current_pixels[kApron],
+      current, &source_rect, &current_pixels[kApron],
       kSurfaceWidth * sizeof(uint32_t)));
+  DioramaFrameGeneration_Capture(
+      &render_device, &slot, sources, planes, plane_pitches,
+      1u << kDioramaPlane_Backdrop);
 
   CHECK(SDL_SetRenderTarget(renderer, scene));
   CHECK(SDL_SetRenderLogicalPresentation(
@@ -226,7 +235,7 @@ int main(void) {
       renderer, 0, 0, SDL_LOGICAL_PRESENTATION_DISABLED));
   CHECK(SDL_SetRenderViewport(renderer, NULL));
   CHECK(SDL_SetRenderClipRect(renderer, NULL));
-  SDL_Surface *readback = SDL_RenderReadPixels(renderer, &endpoint_rect);
+  SDL_Surface *readback = SDL_RenderReadPixels(renderer, &source_rect);
   CHECK(readback != NULL);
   SDL_Surface *argb = readback
       ? SDL_ConvertSurface(readback, SDL_PIXELFORMAT_ARGB8888) : NULL;
@@ -276,7 +285,7 @@ int main(void) {
    * It must not create a redundant private pair or generated plane. */
   slot.timestamp_ns += 16666667;
   DioramaFrameGeneration_Capture(
-      &render_device, &slot, planes, plane_pitches, 0);
+      &render_device, &slot, sources, planes, plane_pitches, 0);
   memset(resolved, 0, sizeof(resolved));
   CHECK(DioramaFrameGeneration_Prepare(
       &render_device, &slot, 0.5f, raw,
@@ -289,7 +298,7 @@ int main(void) {
   slot.timestamp_ns += 16666667;
   slot.diorama_map_number++;
   DioramaFrameGeneration_Capture(
-      &render_device, &slot, planes, plane_pitches, 0);
+      &render_device, &slot, sources, planes, plane_pitches, 0);
   memset(resolved, 0, sizeof(resolved));
   CHECK(DioramaFrameGeneration_Prepare(
       &render_device, &slot, 0.5f, raw,

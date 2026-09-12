@@ -48,6 +48,17 @@ void Sim3DPerformance_AddUpload(uint64_t bytes);
 /* Vertex stream traffic, separate from texture atlas uploads. */
 void Sim3DPerformance_AddGeometryUpload(uint64_t bytes);
 
+/* Coarse path decisions, never per vertex. These are event counts, not
+ * percentages or mutually exclusive frame outcomes. CPU projection is normal
+ * work, not an authentic-view fallback. Rejected covers optional resource/API
+ * rejection; only an explicit caller-side budget guard reports Limit. */
+typedef enum Sim3DPerformancePath {
+  kSim3DPath_CpuProject, kSim3DPath_CpuStage, kSim3DPath_GpuReuse,
+  kSim3DPath_Publish, kSim3DPath_OptOut, kSim3DPath_Limit,
+  kSim3DPath_Rejected, kSim3DPath_Count,
+} Sim3DPerformancePath;
+void Sim3DPerformance_AddPath(Sim3DPerformancePath path);
+
 /* One completed enhanced Sim 3D presentation. Reports and resets a rolling
  * one-second window when profiling is enabled. Means sum all scopes per
  * presentation; maxima measure one scope call (inclusive of nested work). */

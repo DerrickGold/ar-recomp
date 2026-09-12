@@ -43,11 +43,23 @@ action coverage analysis.
   presents accumulated per successful present. Existing view-transition logs
   still carry fallback detail. A fatal run with no later successful present may
   end before these pending counters publish; its failure log remains authoritative.
+- **CPU project / stage** count detailed geometry preparations and CPU buffer
+  staging paths. **GPU reuse / publish** count retained range/sample uses and
+  successful geometry publications. These are coarse events per present, not
+  vertex counts or percentages: several batches can occur in one frame.
+- **Opt / limit / reject** distinguish explicit optimization opt-outs, known
+  caller-side draw-budget guards, and optional resource/API rejection. A reject
+  does not identify a driver fault: it can include an allocation or adapter
+  budget limit. These counters do **not** mean the view became authentic.
+  Normal camera-dependent CPU work is counted as project/stage, not rejection.
 
 The shared pipeline covers input/events, emulation, PPU preparation/scanout/
 finish, world-map building, SIM metadata, canvas raster/enhancement, frame
 snapshot, upload, presentation, CRT, host/settings UI, pacing and housekeeping.
-The right column adds 19 SIM/world stages or 13 action stages. Emulation includes
+The right column adds 19 SIM/world stages or 13 enhanced-action stages. Flat
+action is labeled **Action 2D**, separately from **Native/menu** and **Action 3D**;
+its scanout/upload/drawing costs are in the main pipeline, not an inactive 3D
+compositor. Emulation includes
 game/runner/APU work on the owner thread; it does not time the separate audio
 callback. If emulation is dominant, the existing restart-time
 `SNESRECOMP_APU_PROFILE` diagnostic is the next drill-down, not a guessed GPU fix.
@@ -66,10 +78,15 @@ Native in-game menus still receive the normal detailed panel.
 2. Note the Deck power limit, refresh/limiter settings, output resolution and
    graphics preset. Repeat with the same camera/content where practical.
 3. Share that run's diagnostics ZIP. The once-per-second `[pipeline-perf]`,
-   `[pipeline-stage]` and `[pipeline-work]` lines preserve more precision and
+   `[pipeline-stage]`, `[pipeline-work]` and `[pipeline-path]` lines preserve more precision and
    history than a screenshot. The console prints the `runs/...` directory on
    exit. An overlay screenshot taken during entry can be paired with its log
-   to distinguish a cold asset build from sustained per-frame work.
+  to distinguish a cold asset build from sustained per-frame work.
+
+For stage-attributed geometry-path events, `AR_SIM3D_PERF=1` additionally logs
+`[sim3d-path]` rows. The overlay is an aggregate for the current scene. Town
+solids/depth/relief and ground shadows use `AR_SIM3D_TOWN_RETAINED=0` as a
+restart-time diagnostic opt-out; quality/effect settings remain independent.
 
 Do not conclude that a high present/wait time is wasted work: it can be normal
 VSync/limiter behavior or GPU backpressure. Compare the same scene with its

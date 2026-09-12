@@ -2,6 +2,7 @@
 #define AR_PRESENTATION_UPLOAD_MIRROR_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "render/render_device.h"
@@ -12,6 +13,9 @@
  * surface. */
 typedef struct PresentationUploadMirror {
   uint8_t *pixels;
+  /* Allocated size, which can exceed the current extent: storage is grow-only
+   * so a changed extent costs an invalidation, not a reallocation. */
+  size_t capacity_bytes;
   ArRenderTexture texture;
   int width, height;
   int destination_x, destination_y;

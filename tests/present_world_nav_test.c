@@ -1,6 +1,7 @@
 #include "present_internal.h"
 #include "present_sim3d_internal.h"
 #include "present_world_nav_geometry.h"
+#include "present_world_nav_model_mesh.h"
 #include "actraiser/actraiser_localization_world_navigation.h"
 #include "render/render_device.h"
 #include "render/localized_text_presenter.h"
@@ -331,6 +332,55 @@ bool Sim3DDepthPass_AppendQuad(Sim3DDepthPassLayer layer,
  * optimization, exercising the exact ordinary-geometry fallback. The GPU
  * integration suite covers the production split-input implementation. */
 Sim3DDepthMesh *Sim3DDepthPass_CreateMesh(void) { return NULL; }
+Sim3DDepthMesh *Sim3DDepthPass_CreateGeometryMesh(void) { return NULL; }
+struct Sim3DDepthMesh { bool ready; };
+static struct Sim3DDepthMesh radial_mesh;
+static bool radial_accept, radial_reject_selection;
+static unsigned radial_publications, radial_selections, radial_appends;
+static size_t radial_vertices;
+static unsigned radial_variants;
+Sim3DDepthMesh *Sim3DDepthPass_CreateRadialMesh(void) { return radial_accept ? &radial_mesh : NULL; }
+bool Sim3DDepthPass_UpdateRadialMesh(Sim3DDepthMesh *mesh,
+    const Sim3DDepthRadialVertex *vertices, size_t count) {
+  assert(radial_accept && mesh == &radial_mesh && vertices && count);
+  radial_vertices = count * 4;
+  radial_variants = 0;
+  for (size_t i = 0; i < count * 4; ++i) {
+    assert(vertices[i].variant >= 0 && vertices[i].variant <= 3);
+    radial_variants |= 1u << (unsigned)vertices[i].variant;
+  }
+  ++radial_publications;
+  radial_mesh.ready = true;
+  return true;
+}
+bool Sim3DDepthPass_AppendRadialMesh(Sim3DDepthMesh *mesh,
+    const Sim3DDepthRadialTransform *transform) {
+  assert(radial_accept && mesh == &radial_mesh && mesh->ready && transform);
+  ++radial_appends;
+  return true;
+}
+bool Sim3DDepthPass_SelectRadialMesh(Sim3DDepthMesh *mesh,
+    const Sim3DDepthMeshRange *ranges, size_t count) {
+  assert(radial_accept && mesh == &radial_mesh && mesh->ready && ranges && count);
+  for (size_t i = 0; i < count; ++i)
+    assert(ranges[i].quad_count && ranges[i].first_quad + ranges[i].quad_count <= radial_vertices / 4);
+  ++radial_selections;
+  return !radial_reject_selection;
+}
+bool Sim3DDepthPass_UpdateGeometryMesh(Sim3DDepthMesh *mesh,
+    const Sim3DDepthVertex *vertices, size_t count) {
+  (void)mesh; (void)vertices; (void)count; return false;
+}
+bool Sim3DDepthPass_AppendGeometryMeshRange(Sim3DDepthPassLayer layer,
+    Sim3DDepthMesh *mesh, size_t first, size_t count) {
+  (void)layer; (void)mesh; (void)first; (void)count; return false;
+}
+bool Sim3DDepthPass_AppendGeometryMesh(Sim3DDepthPassLayer layer, Sim3DDepthMesh *mesh) {
+  (void)layer; (void)mesh; return false;
+}
+bool Sim3DDepthPass_CaptureGeometryMesh(Sim3DDepthPassLayer layer, Sim3DDepthMesh *mesh) {
+  (void)layer; (void)mesh; return false;
+}
 Sim3DDepthMesh *Sim3DDepthPass_CreateSphericalMesh(void) { return NULL; }
 bool Sim3DDepthPass_UpdateSphericalMesh(Sim3DDepthMesh *mesh,
     const Sim3DDepthSphericalQuad *quads, size_t count) {
@@ -340,7 +390,9 @@ bool Sim3DDepthPass_AppendSphericalSample(Sim3DDepthPassLayer layer,
     Sim3DDepthMesh *mesh, const Sim3DDepthSphericalSample *sample) {
   (void)layer; (void)mesh; (void)sample; return false;
 }
-bool Sim3DDepthPass_MeshReady(const Sim3DDepthMesh *mesh) { (void)mesh; return false; }
+bool Sim3DDepthPass_MeshReady(const Sim3DDepthMesh *mesh) {
+  return radial_accept && mesh == &radial_mesh && radial_mesh.ready;
+}
 bool Sim3DDepthPass_UpdateMesh(Sim3DDepthMesh *mesh,
     const Sim3DDepthPosition *positions, size_t count) {
   (void)mesh; (void)positions; (void)count; return false;
@@ -349,7 +401,10 @@ bool Sim3DDepthPass_AppendMeshSample(Sim3DDepthPassLayer layer,
     Sim3DDepthMesh *mesh, const ArRenderPointF *uv, size_t count, ArRenderColorF color) {
   (void)layer; (void)mesh; (void)uv; (void)count; (void)color; return false;
 }
-void Sim3DDepthPass_DestroyMesh(Sim3DDepthMesh *mesh) { assert(!mesh); }
+void Sim3DDepthPass_DestroyMesh(Sim3DDepthMesh *mesh) {
+  assert(!mesh || mesh == &radial_mesh);
+  if (mesh) radial_mesh.ready = false;
+}
 
 bool Sim3DDepthPass_AppendQuads(Sim3DDepthPassLayer layer,
                                const Sim3DDepthVertex *vertices, size_t count) {
@@ -1987,7 +2042,98 @@ static void TestShadowClipPlanParity(void) {
     }
 }
 
+static void TestRadialModelDefault(void) {
+  const char *incoming = SDL_getenv("AR_SIM3D_WORLD_GPU_MODELS");
+  char *saved = incoming ? SDL_strdup(incoming) : NULL;
+  assert(!incoming || saved);
+  assert(!SDL_unsetenv_unsafe("AR_SIM3D_WORLD_GPU_MODELS"));
+  WorldNavigationModelMesh_Reset();
+  assert(WorldNavigationModelMesh_Enabled());
+  assert(!SDL_setenv_unsafe("AR_SIM3D_WORLD_GPU_MODELS", "0", 1));
+  assert(WorldNavigationModelMesh_Enabled()); /* Read once per resource generation. */
+  WorldNavigationModelMesh_Reset();
+  assert(!WorldNavigationModelMesh_Enabled());
+  assert(!SDL_setenv_unsafe("AR_SIM3D_WORLD_GPU_MODELS", "1", 1));
+  WorldNavigationModelMesh_Reset();
+  assert(WorldNavigationModelMesh_Enabled());
+  if (saved) assert(!SDL_setenv_unsafe("AR_SIM3D_WORLD_GPU_MODELS", saved, 1));
+  else assert(!SDL_unsetenv_unsafe("AR_SIM3D_WORLD_GPU_MODELS"));
+  SDL_free(saved);
+  WorldNavigationModelMesh_Reset();
+}
+
+static void TestRadialModelResidency(void) {
+  WorldNavigationModelMesh_Reset();
+  radial_accept = true;
+  WorldNavigationModelSource sources[2] = {0};
+  for (unsigned i = 0; i < 2; ++i) {
+    sources[i].object = (SimBackgroundVoxelObject){
+      .town = 2, .kind = i ? kSimBackgroundVoxel_Factory : kSimBackgroundVoxel_Windmill,
+      .cell_x = 10 + i * 2, .cell_y = 10, .source_cells_w = 2, .source_cells_h = 2,
+      .footprint_cells_w = 2, .footprint_cells_d = 2, .visual_state = kSimStructureVisualState_Finished,
+    };
+    sources[i].object_index = (uint16_t)i;
+    sources[i].detail = kSimBackgroundVoxelDetail_Low;
+    sources[i].source_x = 256 + i * 32; sources[i].source_y = 128;
+    sources[i].centre_x = sources[i].centre_y = kSimTownCellPixels;
+    sources[i].anchor_height = 2;
+  }
+  WorldNavigationModelSourceStyle style = {0};
+  style.chart_radius_tiles = 96; style.tile_world = 1; style.height_percent = 100;
+  style.lighting = true; style.light_azimuth = 45; style.light_elevation = 60;
+  Sim3DDepthRadialTransform transform = {.variant = 1};
+  assert(WorldNavigationModelMesh_Draw(sources, 2, &style, &transform));
+  assert(radial_publications == 1 && radial_selections == 1 && radial_appends == 1);
+  assert(radial_variants == 15); /* Static and all three actual windmill models. */
+  const size_t first_vertices = radial_vertices;
+  for (unsigned frame = 0; frame < 8; ++frame) {
+    transform.matrix[12] = (float)frame; transform.variant = frame % 3 + 1;
+    assert(WorldNavigationModelMesh_Draw(sources, 2, &style, &transform));
+  }
+  assert(radial_publications == 1 && radial_selections == 1);
+  assert(WorldNavigationModelMesh_Repeat(&transform));
+  assert(radial_publications == 1 && radial_selections == 1);
+  /* Culling and reordering only replace the small index selection. */
+  assert(WorldNavigationModelMesh_Draw(sources + 1, 1, &style, &transform));
+  assert(radial_publications == 1 && radial_selections == 2);
+  WorldNavigationModelSource reversed[] = {sources[1], sources[0]};
+  assert(WorldNavigationModelMesh_Draw(reversed, 2, &style, &transform));
+  assert(radial_publications == 1 && radial_selections == 3);
+  sources[0].detail = kSimBackgroundVoxelDetail_Balanced;
+  assert(WorldNavigationModelMesh_Draw(sources, 2, &style, &transform));
+  assert(radial_publications == 2 && radial_vertices > first_vertices);
+  sources[0].detail = kSimBackgroundVoxelDetail_Low;
+  assert(WorldNavigationModelMesh_Draw(sources, 2, &style, &transform));
+  assert(radial_publications == 2); /* Returning LOD is already resident. */
+  radial_mesh.ready = false; /* Renderer reset: republish source AND indices. */
+  assert(!WorldNavigationModelMesh_Repeat(&transform));
+  assert(WorldNavigationModelMesh_Draw(sources, 2, &style, &transform));
+  assert(radial_publications == 3);
+  style.model_revision++;
+  assert(WorldNavigationModelMesh_Draw(sources, 2, &style, &transform));
+  assert(radial_publications == 4 && radial_vertices == first_vertices);
+  style.light_azimuth++;
+  assert(WorldNavigationModelMesh_Draw(sources, 2, &style, &transform));
+  assert(radial_publications == 5);
+  const unsigned appends = radial_appends;
+  radial_reject_selection = true;
+  assert(!WorldNavigationModelMesh_Draw(sources + 1, 1, &style, &transform));
+  assert(!WorldNavigationModelMesh_Draw(sources + 1, 1, &style, &transform));
+  assert(radial_appends == appends); /* No partial GPU draw before fallback. */
+  radial_reject_selection = false;
+  WorldNavigationModelMesh_Reset();
+  assert(WorldNavigationModelMesh_Draw(sources, 2, &style, &transform));
+  assert(radial_appends == appends + 1);
+  WorldNavigationModelMesh_Reset();
+  radial_accept = false;
+  assert(!WorldNavigationModelMesh_Draw(sources, 2, &style, &transform));
+  WorldNavigationModelMesh_Reset();
+  SimBackgroundVoxelModelCache_Reset();
+}
+
 int main(void) {
+  TestRadialModelDefault();
+  TestRadialModelResidency();
   TestShadowClipPlanParity();
   TestTownReliefRegistration();
   uint8_t *rom = calloc(1, 0x100000);

@@ -13,10 +13,13 @@ typedef struct FrameSlot FrameSlot;
  * a reusable motion field for every continuous previous/current pair.
  * `changed_plane_mask` is the subset whose synchronized upload changed; an
  * unchanged plane with a valid retained endpoint bypasses its CPU copy,
- * private upload, motion analysis, and synthesis. No live game state is read:
+ * endpoint refresh, motion analysis, and synthesis. `source_textures` are the
+ * compositor textures Diorama_Upload has already filled this presentation;
+ * endpoints are copied from them on the GPU rather than uploaded again. No live game state is read:
  * the FrameSlot and pixel pointers are the complete input. */
 void DioramaFrameGeneration_Capture(
     ArRenderDevice *device, const FrameSlot *slot,
+    const ArRenderTexture source_textures[kDioramaPlane_Count],
     const uint8_t *const pixels[kDioramaPlane_Count],
     const size_t pitch_bytes[kDioramaPlane_Count],
     uint32_t changed_plane_mask);

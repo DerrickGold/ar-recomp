@@ -181,7 +181,7 @@ bool CrtPost_Begin(ArRenderDevice *device, const CrtPostConfig *config) {
   }
 
   int width = 0, height = 0;
-  if (!renderer || !SDL_GetRenderOutputSize(renderer, &width, &height) ||
+  if (!renderer || !ArSdlRenderBackend_WindowOutputSize(device, &width, &height) ||
       !EnsureScene(renderer, width, height)) {
     SessionFatal_Request(
         "CRT processing was enabled, but its %dx%d render target could not "

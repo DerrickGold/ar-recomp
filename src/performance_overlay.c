@@ -128,19 +128,35 @@ void PerformanceOverlay_Build(const PerformanceSnapshot *snapshot, int level,
   for (size_t i = 0; i < sizeof(main_stages) / sizeof(*main_stages); i++)
     Stage(model, snapshot, 0, 6 + (int)i, main_stages[i]);
   const bool action = context->scene == kPerformanceScene_Action;
+  const bool flat_action = context->scene == kPerformanceScene_ActionFlat;
   const int first = action ? kPerformance_ActionFirst : kPerformance_SimFirst;
   const int count = action ? kPerformance_ActionCount : kPerformance_SimCount;
-  Line(model, 1, 5, "%s             AVG   PEAK", action ? "ACTION 3D" : "SIM/WORLD");
-  for (int i = 0; i < count; i++) Stage(model, snapshot, 1, 6 + i, (PerformanceStage)(first + i));
+  if (flat_action) {
+    Line(model, 1, 5, "ACTION 2D");
+    Line(model, 1, 6, "Scanout, upload and drawing");
+    Line(model, 1, 7, "are in the main pipeline.");
+    Line(model, 1, 8, "No 3D compositor is active.");
+  } else {
+    Line(model, 1, 5, "%s             AVG   PEAK", action ? "ACTION 3D" : "SIM/WORLD");
+    for (int i = 0; i < count; i++) Stage(model, snapshot, 1, 6 + i, (PerformanceStage)(first + i));
+  }
   const double *work = snapshot->counts;
   Line(model, 1, 26, "Scene batches %.0f / verts %.0f", work[kPerformanceCount_Draws], work[kPerformanceCount_Vertices]);
-  Line(model, 1, 27, "Scene upload %.2f + %.2f MiB",
-      work[kPerformanceCount_UploadBytes] / 1048576, work[kPerformanceCount_DepthUploadBytes] / 1048576);
-  Line(model, 1, 28, "Jobs %.1f / helpers %.1f", work[kPerformanceCount_WorkJobs], work[kPerformanceCount_HelperJobs]);
-  Line(model, 1, 29, "Fallback %.2f / failed %.2f", work[kPerformanceCount_Fallbacks], work[kPerformanceCount_FailedPresents]);
-  Line(model, 1, 30, "Counts above are per present.");
-  Line(model, 1, 31, "*Helpers sum parallel work.");
-  Line(model, 1, 32, "Scene counts exclude host UI.");
+  /* Upload calls sit beside the byte count because a per-call cost can dwarf
+   * a per-byte one: bytes alone cannot say whether a stage is transfer-bound
+   * or call-bound, and the two want opposite fixes. */
+  Line(model, 1, 27, "Scene upload %.2f + %.2f MiB / %.0f calls",
+      work[kPerformanceCount_UploadBytes] / 1048576, work[kPerformanceCount_DepthUploadBytes] / 1048576,
+      work[kPerformanceCount_UploadCalls]);
+  Line(model, 1, 28, "Scan %.2f MiB / skip %.0f / realloc %.0f",
+      work[kPerformanceCount_ScanBytes] / 1048576,
+      work[kPerformanceCount_UploadSkipped], work[kPerformanceCount_MirrorReallocs]);
+  Line(model, 1, 29, "Jobs %.1f / helpers %.1f", work[kPerformanceCount_WorkJobs], work[kPerformanceCount_HelperJobs]);
+  Line(model, 1, 30, "Fallback %.2f / failed %.2f", work[kPerformanceCount_Fallbacks], work[kPerformanceCount_FailedPresents]);
+  Line(model, 1, 31, "CPU project/stage %.1f / %.1f", work[kPerformanceCount_CpuProject], work[kPerformanceCount_CpuStage]);
+  Line(model, 1, 32, "GPU reuse/publish %.1f / %.1f", work[kPerformanceCount_GpuReuse], work[kPerformanceCount_GeometryPublish]);
+  Line(model, 1, 33, "Opt/limit/reject %.1f/%.1f/%.1f", work[kPerformanceCount_GeometryOptOut],
+      work[kPerformanceCount_GeometryLimit], work[kPerformanceCount_GeometryRejected]);
   Line(model, 0, 34, "Full details: run log");
   Line(model, 1, 34, "p95: up to 512 intervals");
 }
