@@ -3,9 +3,13 @@
 
 #include <stddef.h>
 #include "sim_background_mountain_mesh.h"
+#include "sim_background_mountain_objects.h"
 #include "sim_world_navigation_towns.h"
 
 enum {
+  kSimWorldNavigationMountainMaximumFaces = kSimTownCount * kSimBackgroundMountainMaxObjects *
+      kSimBackgroundMountainObjectMaxRows * kSimBackgroundMountainObjectMaxColumns *
+      (3 + kSimTownCellPixels),
   kSimWorldNavigationMountainAtlasPixels = 512,
   /* Native mountain stamps never use tile $FF. Reserve its last bank for
    * the single 16x16 overhead crater, without enlarging the shared atlas. */

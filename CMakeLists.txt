@@ -928,6 +928,7 @@ if(BUILD_TESTING)
         COMMAND actraiser_sim_world_navigation_palace_test)
 
     set(AR_WORLD_NAV_TEST_SOURCES
+        src/sim/sim3d_mesh_set.c
         src/performance_metrics.c
         src/platform/sdl/parallel_work_sdl.c
         src/sim/sim3d_performance.c
@@ -993,6 +994,7 @@ if(BUILD_TESTING)
         actraiser_math
     )
     target_compile_definitions(actraiser_present_world_nav_test PRIVATE
+        AR_WORLD_NAV_CACHE_TESTING=1
         AR_SIM3D_TERRAIN_ELEVATION=${AR_SIM3D_TERRAIN_ELEVATION_VALUE})
     add_test(NAME actraiser_present_world_nav
         COMMAND actraiser_present_world_nav_test)
@@ -2385,6 +2387,7 @@ if(BUILD_TESTING)
     # A host with no GPU renderer skips; Metal/Vulkan/D3D12 runners exercise
     # their native shader blob and synchronization path.
     add_executable(actraiser_sim3d_depth_pass_gpu_test
+        src/sim/sim3d_mesh_set.c
         tests/sim3d_depth_pass_gpu_test.c
         src/scene3d_math.c
         src/present_world_nav_geometry.c

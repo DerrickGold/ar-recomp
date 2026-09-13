@@ -1661,11 +1661,9 @@ void Sim3D_AnnotateFrame(SimFrameData *frame, const Sim3DTuning *tuning) {
   frame->separated_screen_sub = g_sim3d.screen_sub;
   frame->separated_brightness = g_sim3d.brightness;
   frame->object_half_add = g_sim3d.object_half_add;
-  /* Navigation deliberately shares the town camera pose. Its captured Mode-7
-   * affine remains the authoritative focus, in-plane rotation and zoom, but
-   * treating that affine as the final camera is what made the world flat and
-   * guaranteed a perspective jump on town entry. Both views now place their
-   * ground through the same oblique projection vocabulary. */
+  /* The camera snapshot resolves town and navigation controls separately.
+   * Navigation uses native affine zoom with a visit-local inspection offset;
+   * it must not inherit the persisted town camera's distance or tilt. */
   frame->projection_pitch_mrad = (int16_t)pitch_mrad;
   frame->projection_yaw_mrad = (int16_t)yaw_mrad;
   frame->projection_distance_x100 = (uint16_t)distance_x100;

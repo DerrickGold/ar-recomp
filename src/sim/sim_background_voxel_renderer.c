@@ -11,6 +11,7 @@
 #include "constants.h"
 #include "scene3d_math.h"
 #include "sim3d_depth_pass.h"
+#include "sim3d_mesh_set.h"
 #include "sim_background_bridge.h"
 #include "sim_background_mountain_render.h"
 #include "sim_background_voxel_biome.h"
@@ -93,14 +94,17 @@ typedef struct SimBackgroundSourceModelKey {
   uint8_t shading, style, town, light_elevation_deg;
 } SimBackgroundSourceModelKey;
 static struct {
-  Sim3DDepthMesh *mesh;
+  Sim3DMeshSet meshes;
   Sim3DDepthLinearVertex *vertices;
   size_t count, capacity;
   SimBackgroundSourceModelKey key;
   SimBackgroundSourceSelection selection[kSimBackgroundMaxObjects];
   uint16_t selection_count;
-  bool valid;
+  bool observed, valid, rejected;
 } s_source_models;
+enum { kSourceModelMaximumVertices = kSimBackgroundMaxObjects * kSimBackgroundVoxelModelMaxFaces * 4 };
+_Static_assert(kSourceModelMaximumVertices / 4 <= kSim3DMeshSetMaximumQuads,
+    "every live town model must fit the partitioned source contract");
 _Static_assert(kSimBackgroundVoxelKindCount + 1 <= kSim3DDepthLinearAxisCount,
     "SIM axes must fit the backend-neutral displacement table");
 
@@ -300,9 +304,10 @@ static void AppendSolidFace(
     if (builder->failed) return;
     if (s_source_models.count + 4 > s_source_models.capacity) {
       size_t capacity = s_source_models.capacity ? s_source_models.capacity * 2 : 4096;
-      /* Same bounded source size as the private depth adapter. A rejected
-       * optional publication leaves the complete ordinary path available. */
-      if (capacity > kSim3DDepthMaximumSourceQuads * 4u) { builder->failed = true; return; }
+      /* Bound by the complete legal scene, not one GPU allocation. Uploads
+       * are partitioned without lowering LOD or omitting visible faces. */
+      if (capacity > kSourceModelMaximumVertices) capacity = kSourceModelMaximumVertices;
+      if (capacity < s_source_models.count + 4) { builder->failed = true; return; }
       Sim3DDepthLinearVertex *source = realloc(s_source_models.vertices,
           capacity * sizeof(*source));
       if (!source) { builder->failed = true; return; }
@@ -1173,7 +1178,7 @@ static void CollectSolidGeometry(
 static bool SourceModelKeyMatches(const SimBackgroundVoxelRenderParams *params,
     const SimBackgroundVisibleModelList *list, uint32_t serial) {
   const SimBackgroundSourceModelKey *key = &s_source_models.key;
-  if (!s_source_models.valid || key->scene_serial != serial ||
+  if (!s_source_models.observed || key->scene_serial != serial ||
       key->shading != params->shading || key->style != params->style ||
       key->town != params->town || key->landscape_height_pct != params->landscape_height_pct ||
       key->light_azimuth_deg != params->light_azimuth_deg ||
@@ -1187,10 +1192,28 @@ static bool SourceModelKeyMatches(const SimBackgroundVoxelRenderParams *params,
 
 static bool DrawSourceModels(const SimBackgroundVoxelRenderParams *params,
     const SimBackgroundVisibleModelList *list, uint32_t serial) {
-  if (!list->count) return true; /* An empty cull is not a backend failure. */
+  if (!list->count) {
+    /* Empty views need no source residency and are not backend failures. */
+    if (s_source_models.meshes.count) Sim3DMeshSet_Destroy(&s_source_models.meshes);
+    s_source_models.observed = s_source_models.valid = s_source_models.rejected = false;
+    s_source_models.count = 0;
+    return true;
+  }
   const bool matching = SourceModelKeyMatches(params, list, serial);
-  if (!matching || !Sim3DDepthPass_MeshReady(s_source_models.mesh)) {
+  if (matching && s_source_models.rejected) return false;
+  if (!matching || !s_source_models.valid || !Sim3DMeshSet_Ready(&s_source_models.meshes)) {
     s_source_models.valid = false;
+    s_source_models.observed = true;
+    s_source_models.rejected = true; /* Cleared only after a complete publication. */
+    s_source_models.key = (SimBackgroundSourceModelKey){
+      .scene_serial = serial, .landscape_height_pct = params->landscape_height_pct,
+      .light_azimuth_deg = params->light_azimuth_deg, .shading = params->shading,
+      .style = params->style, .town = params->town, .light_elevation_deg = params->light_elevation_deg,
+    };
+    s_source_models.selection_count = list->count;
+    for (unsigned i = 0; i < list->count; ++i)
+      s_source_models.selection[i] = (SimBackgroundSourceSelection){
+        list->entries[i].index, list->entries[i].detail};
     s_source_models.count = 0;
     SimBackgroundSolidProjectionBuilder builder = {.source_space = true};
     SimBackgroundVoxelRenderParams source_params = *params;
@@ -1203,20 +1226,10 @@ static bool DrawSourceModels(const SimBackgroundVoxelRenderParams *params,
           (SimBackgroundVoxelDetail)entry->detail, &builder);
     }
     if (builder.failed) return false;
-    if (!s_source_models.count) return true;
-    if (!s_source_models.mesh) s_source_models.mesh = Sim3DDepthPass_CreateLinearMesh();
-    if (!s_source_models.mesh || !Sim3DDepthPass_UpdateLinearMesh(s_source_models.mesh,
+    if (!Sim3DMeshSet_UpdateLinear(&s_source_models.meshes,
             s_source_models.vertices, s_source_models.count / 4)) return false;
-    s_source_models.key = (SimBackgroundSourceModelKey){
-      .scene_serial = serial, .landscape_height_pct = params->landscape_height_pct,
-      .light_azimuth_deg = params->light_azimuth_deg, .shading = params->shading,
-      .style = params->style, .town = params->town, .light_elevation_deg = params->light_elevation_deg,
-    };
-    s_source_models.selection_count = list->count;
-    for (unsigned i = 0; i < list->count; ++i)
-      s_source_models.selection[i] = (SimBackgroundSourceSelection){
-        list->entries[i].index, list->entries[i].detail};
     s_source_models.valid = true;
+    s_source_models.rejected = false;
     Sim3DPerformance_AddPath(kSim3DPath_Publish);
   }
   Sim3DDepthLinearTransform transform = {
@@ -1235,7 +1248,7 @@ static bool DrawSourceModels(const SimBackgroundVoxelRenderParams *params,
     transform.axes[kind+1][1] = axes[kind].y_per_height;
     transform.axes[kind+1][2] = axes[kind].height_scale;
   }
-  if (!Sim3DDepthPass_AppendLinearMesh(s_source_models.mesh, &transform)) return false;
+  if (!Sim3DMeshSet_AppendLinear(&s_source_models.meshes, &transform)) return false;
   Sim3DPerformance_AddPath(kSim3DPath_GpuReuse);
   return true;
 }
@@ -1346,8 +1359,9 @@ static void DrawDepthLayers(
     }
     if (!DrawSourceModels(&draw_params, &list, scene_serial)) {
       Sim3DPerformance_AddPath(kSim3DPath_Rejected);
-      Sim3DPerformance_AddPath(kSim3DPath_CpuProject);
-      CollectSolidGeometry(&draw_params, &list, scene_serial, false);
+      const bool cached = SolidProjectionCacheMatches(&draw_params, scene_serial);
+      Sim3DPerformance_AddPath(cached ? kSim3DPath_CpuStage : kSim3DPath_CpuProject);
+      CollectSolidGeometry(&draw_params, &list, scene_serial, cached);
     }
   } else if (!solid_projection_cached || !stable || !AppendRetainedPass(cache)) {
     Sim3DPerformance_AddPath(solid_projection_cached ? kSim3DPath_CpuStage : kSim3DPath_CpuProject);
@@ -1632,7 +1646,7 @@ void SimBackgroundVoxelRenderer_Reset(ArRenderDevice *device) {
   ArRenderDevice_DestroyTexture(device, g_renderer_state.ground);
   Sim3DDepthPass_DestroyMesh(g_renderer_state.solid_pass.mesh);
   Sim3DDepthPass_DestroyMesh(g_renderer_state.shadow_pass.mesh);
-  Sim3DDepthPass_DestroyMesh(s_source_models.mesh);
+  Sim3DMeshSet_Destroy(&s_source_models.meshes);
   free(s_source_models.vertices);
   memset(&s_source_models, 0, sizeof(s_source_models));
   g_renderer_state.solid_pass = (SimBackgroundRetainedPass){0};
