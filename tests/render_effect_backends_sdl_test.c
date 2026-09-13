@@ -278,9 +278,25 @@ int main(void) {
   TestSimShadowEffect(&device);
   TestSimCloudEffect(&device, renderer);
   TestCrtPost(&device);
+  /* Reset/recreate other effects first: shader pointer reuse must never select
+   * a stale pipeline for the cloud composite. Repeat to cover both orders. */
+  TestSimCloudEffect(&device, renderer);
 
-  ArRenderDevice_Reset(&device);
+  ArSdlRenderBackend_Destroy(&device);
   SDL_DestroyRenderer(renderer);
+  /* The shipping adapter submits through an offscreen renderer, unlike the
+   * externally owned renderer above. Exercise warm-up and pixel parity there
+   * too, including restoration of its adapter-owned default target. */
+  CHECK(ArSdlRenderBackend_CreateForWindow(&device, window));
+  if (ArRenderDevice_IsReady(&device)) {
+    renderer = ArSdlRenderBackend_Renderer(&device);
+    TestDioramaEffects(&device);
+    TestSimShadowEffect(&device);
+    TestSimCloudEffect(&device, renderer);
+    TestCrtPost(&device);
+    TestSimCloudEffect(&device, renderer);
+    ArSdlRenderBackend_Destroy(&device);
+  }
   SDL_DestroyWindow(window);
   SDL_Quit();
 

@@ -950,7 +950,7 @@ static void TestIntegrityFallback(void) {
         (kSimFeature_SeparatedComposite | kSimFeature_GroundProjection |
          kSimFeature_Backdrop | kSimFeature_PickerExitEase |
          kSimFeature_WorldUnderlay | kSimFeature_CloudShroud |
-         kSimFeature_CullHaze));
+         kSimFeature_CullHaze | kSimFeature_GlobeUnderlay));
 }
 
 static void TestMapPlaneSelectorTrait(void) {
@@ -1721,6 +1721,41 @@ static void MakeDevelopedWorldMapAvailable(void) {
   if (baseline) SimWorldMap_PublishBuiltTilemap(baseline);
   CHECK(SimWorldMap_DevelopedAvailable());
   free(rom);
+}
+
+static void TestConnectedWorldFrameContract(void) {
+  uint8 *wram = calloc(1, kActRaiserWramSize);
+  SimFrameData *frame = malloc(sizeof(*frame));
+  CHECK(wram && frame);
+  MakeDevelopedWorldMapAvailable();
+  wram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_NonAction;
+  Write16(wram, 0x16B18, 1);
+  SetTownCell(wram, 1, 5, 5, 0x02);
+  for (uint8_t town = 1; town <= kSimTownCount; ++town) {
+    wram[kActRaiserWram_CurrentMap] = town;
+    SimRenderMetadata_CaptureFrame(frame, wram, true, false,
+        kSim3DShippedFeatures, 0, kSim3DShippedFeatures);
+    CHECK(frame->effective_features & kSimFeature_GlobeUnderlay);
+    CHECK(frame->world_navigation_towns.enabled_town_mask & 1);
+    SimWorldNavigationTowns expected;
+    SimWorldNavigationTowns_Capture(wram, &expected);
+    CHECK(!memcmp(&frame->world_navigation_towns, &expected, sizeof(expected)));
+    const SimRenderFeatureMask required[] = {kSimFeature_GlobeUnderlay,
+        kSimFeature_WorldUnderlay, kSimFeature_GroundProjection,
+        kSimFeature_SeparatedComposite};
+    for (unsigned i = 0; i < sizeof(required)/sizeof(required[0]); ++i) {
+      SimRenderMetadata_CaptureFrame(frame, wram, true, false,
+          kSim3DShippedFeatures & ~required[i], 0, kSim3DShippedFeatures);
+      CHECK(!(frame->effective_features & kSimFeature_GlobeUnderlay));
+      CHECK(!frame->world_navigation_towns.enabled_town_mask);
+      CHECK(!frame->world_navigation_towns.object_count);
+    }
+    SimRenderMetadata_CaptureFrame(frame, wram, false, false,
+        kSim3DShippedFeatures, 0, kSim3DShippedFeatures);
+    CHECK(!frame->world_navigation_towns.enabled_town_mask);
+  }
+  free(frame); free(wram);
+  SimWorldMap_Shutdown();
 }
 
 static void TestSkyPalaceFrameContract(void) {
@@ -3292,6 +3327,7 @@ int main(int argc, char **argv) {
   TestAtlasFailureFallback();
   TestShadowCasterSelection();
   TestWorldNavigationFrameContract();
+  TestConnectedWorldFrameContract();
   TestSkyPalaceFrameContract();
   TestWorldNavigationCloudCeiling();
   TestWorldNavigationOamClassifier();

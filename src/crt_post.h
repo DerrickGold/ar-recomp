@@ -27,6 +27,9 @@ typedef struct CrtPostConfig {
  * the frame and session cleanly. */
 bool CrtPost_Begin(ArRenderDevice *device, const CrtPostConfig *config);
 
+/* Video-boot probe, independent of whether the user currently enables CRT. */
+bool CrtPost_Prepare(ArRenderDevice *device);
+
 /* Resolve the scene target to the platform's default output. Safe to call
  * unconditionally; returns `image` unchanged if Begin did not engage.
  *

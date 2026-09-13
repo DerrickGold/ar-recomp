@@ -1,0 +1,166 @@
+world navigation renderer=gpu gpu=metal
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/synthetic-ground-light-0.ppm
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/synthetic-ground-light-1.ppm
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/synthetic-ground-light-2.ppm
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/synthetic-ground-light-3.ppm
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/synthetic-ground-light-4.ppm
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/synthetic-ground-light-5.ppm
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/synthetic-front.ppm
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/synthetic-back.ppm
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/synthetic-model.ppm
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/synthetic-back-clouds.ppm
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/synthetic-markers.ppm
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/synthetic-markers-orbit.ppm
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/synthetic-markers-travel.ppm
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/synthetic-markers-centred.ppm
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/synthetic-centred.ppm
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/synthetic-atmosphere-profile.ppm
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/synthetic-weather-0.ppm
+weather small step: time=151008 max=4 mean=0.22807 at=(607,227)
+weather small step: time=153508 max=3 mean=0.23040 at=(382,10)
+weather small step: time=166675 max=4 mean=0.23988 at=(190,149)
+weather small step: time=3600008 max=8 mean=0.23643 at=(222,304)
+weather small step: time=576000008 max=9 mean=0.23091 at=(103,410)
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/synthetic-weather-1.ppm
+weather small step: time=151008 max=3 mean=0.20754 at=(300,1)
+weather small step: time=153508 max=3 mean=0.20757 at=(258,0)
+weather small step: time=166675 max=3 mean=0.21257 at=(398,20)
+weather small step: time=3600008 max=4 mean=0.22506 at=(255,296)
+weather small step: time=576000008 max=6 mean=0.22649 at=(103,189)
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/synthetic-weather-2.ppm
+weather small step: time=151008 max=3 mean=0.13163 at=(518,92)
+weather small step: time=153508 max=3 mean=0.13272 at=(541,6)
+weather small step: time=166675 max=3 mean=0.13289 at=(261,89)
+weather small step: time=3600008 max=3 mean=0.12273 at=(287,15)
+weather small step: time=576000008 max=3 mean=0.12537 at=(488,30)
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/synthetic-weather-3.ppm
+weather small step: time=151008 max=3 mean=0.13611 at=(315,67)
+weather small step: time=153508 max=4 mean=0.13602 at=(83,284)
+weather small step: time=166675 max=3 mean=0.13245 at=(698,137)
+weather small step: time=3600008 max=3 mean=0.12448 at=(673,122)
+weather small step: time=576000008 max=3 mean=0.12555 at=(271,8)
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/synthetic-weather-4.ppm
+weather small step: time=151008 max=4 mean=0.21497 at=(247,488)
+weather small step: time=153508 max=3 mean=0.21543 at=(211,56)
+weather small step: time=166675 max=4 mean=0.20532 at=(464,552)
+weather small step: time=3600008 max=3 mean=0.17168 at=(161,61)
+weather small step: time=576000008 max=3 mean=0.21263 at=(164,70)
+weather small step: time=151008 max=2 mean=0.01075 at=(356,11)
+weather small step: time=151008 max=3 mean=0.01099 at=(600,531)
+weather small step: time=151008 max=2 mean=0.00758 at=(187,22)
+weather small step: time=151008 max=3 mean=0.00765 at=(205,555)
+weather small step: time=151008 max=3 mean=0.01120 at=(682,286)
+weather small step: time=151008 max=4 mean=0.20586 at=(247,488)
+ordered retained factories (dense=0): upload 2047040 -> 1995840 bytes/present; unchanged vertices 51176
+retained ground: upload 1995840 -> 52320 bytes/present; unchanged draws 6
+ordered retained factories (dense=1): upload 5267200 -> 5267200 bytes/present; unchanged vertices 778384
+retained ground: upload 5267200 -> 1186560 bytes/present; unchanged draws 11
+retained ground/mountains: upload 6272000 -> 4164320; unchanged draws 3; exact cold/warm/pressure images
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/synthetic-tall-viewport.ppm
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/synthetic-tall-viewport-ground.ppm
+Default GPU world surfaces: exact serial/helper, explicit/unculled/cold/warm settings, geography, mountain and Advent revisions; no CPU ocean/mountain work
+world atlas: 16 animation pairs, cold/incremental/revisited/reset images exact
+SIM globe retained image mode=0: warm vertices=81272 draws=3
+SIM globe retained image mode=1: warm vertices=0 draws=0
+SIM globe retained image mode=2: warm vertices=0 draws=0
+SIM globe image cache: exact direct/cached pixels across 23 invalidation states, five repeats, mutable/versioned atlases; continuous-change scene traffic unchanged
+captured towns mask=3f objects=1049
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/captured-marahna-sanctuary-off.ppm
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/captured-marahna-sanctuary-on.ppm
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/captured-sim-underlay-town-1-view-0.ppm
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/captured-sim-underlay-town-1-view-1.ppm
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/captured-sim-underlay-town-1-view-2.ppm
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/captured-sim-underlay-town-2-view-0.ppm
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/captured-sim-underlay-town-2-view-1.ppm
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/captured-sim-underlay-town-2-view-2.ppm
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/captured-sim-underlay-town-3-view-0.ppm
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/captured-sim-underlay-town-3-view-1.ppm
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/captured-sim-underlay-town-3-view-2.ppm
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/captured-sim-underlay-town-4-view-0.ppm
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/captured-sim-underlay-town-4-view-1.ppm
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/captured-sim-underlay-town-4-view-2.ppm
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/captured-sim-underlay-town-5-view-0.ppm
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/captured-sim-underlay-town-5-view-1.ppm
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/captured-sim-underlay-town-5-view-2.ppm
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/captured-sim-underlay-town-6-view-0.ppm
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/captured-sim-underlay-town-6-view-1.ppm
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/captured-sim-underlay-town-6-view-2.ppm
+SIM connected world: six native towns, default/bounded camera/relief-off, direct-cache parity and navigation return exact
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/captured-mountain-fit-0-0.ppm
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/captured-mountain-fit-0-1.ppm
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/captured-mountain-fit-0-2.ppm
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/captured-mountain-fit-1-0.ppm
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/captured-mountain-fit-1-1.ppm
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/captured-mountain-fit-1-2.ppm
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/captured-ground-light-0.ppm
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/captured-ground-light-1.ppm
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/captured-ground-light-2.ppm
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/captured-ground-light-3.ppm
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/captured-ground-light-4.ppm
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/captured-ground-light-5.ppm
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/captured-volcano-cap-0.ppm
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/captured-volcano-cap-1.ppm
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/captured-volcano-cap-2.ppm
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/captured-volcano-cap-3.ppm
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/captured-volcano-cap-4.ppm
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/captured-front.ppm
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/captured-centred-front.ppm
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/captured-east.ppm
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/captured-back.ppm
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/captured-west.ppm
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/captured-north.ppm
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/captured-south.ppm
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/captured-tilted.ppm
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/captured-restored.ppm
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/captured-weather-0.ppm
+weather small step: time=151008 max=4 mean=0.22334 at=(550,273)
+weather small step: time=153508 max=3 mean=0.22646 at=(266,4)
+weather small step: time=166675 max=4 mean=0.22829 at=(432,254)
+weather small step: time=3600008 max=4 mean=0.22218 at=(142,198)
+weather small step: time=576000008 max=4 mean=0.22462 at=(370,177)
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/captured-weather-1.ppm
+weather small step: time=151008 max=3 mean=0.21361 at=(542,26)
+weather small step: time=153508 max=4 mean=0.21399 at=(734,305)
+weather small step: time=166675 max=4 mean=0.22149 at=(665,276)
+weather small step: time=3600008 max=4 mean=0.23150 at=(575,160)
+weather small step: time=576000008 max=3 mean=0.22467 at=(507,29)
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/captured-weather-2.ppm
+weather small step: time=151008 max=3 mean=0.12910 at=(307,0)
+weather small step: time=153508 max=3 mean=0.13028 at=(639,57)
+weather small step: time=166675 max=3 mean=0.13051 at=(749,306)
+weather small step: time=3600008 max=3 mean=0.12213 at=(273,4)
+weather small step: time=576000008 max=3 mean=0.12491 at=(536,60)
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/captured-weather-3.ppm
+weather small step: time=151008 max=3 mean=0.13702 at=(217,81)
+weather small step: time=153508 max=3 mean=0.13615 at=(153,36)
+weather small step: time=166675 max=3 mean=0.13451 at=(68,218)
+weather small step: time=3600008 max=3 mean=0.12278 at=(164,30)
+weather small step: time=576000008 max=3 mean=0.12452 at=(649,73)
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/captured-weather-4.ppm
+weather small step: time=151008 max=3 mean=0.21619 at=(322,113)
+weather small step: time=153508 max=3 mean=0.21490 at=(232,61)
+weather small step: time=166675 max=4 mean=0.20048 at=(679,415)
+weather small step: time=3600008 max=3 mean=0.16771 at=(677,126)
+weather small step: time=576000008 max=3 mean=0.21805 at=(633,69)
+weather small step: time=151008 max=3 mean=0.01219 at=(697,178)
+weather small step: time=151008 max=3 mean=0.01134 at=(635,153)
+weather small step: time=151008 max=2 mean=0.00767 at=(321,0)
+weather small step: time=151008 max=2 mean=0.00765 at=(564,1)
+weather small step: time=151008 max=3 mean=0.01180 at=(436,177)
+weather small step: time=151008 max=3 mean=0.20644 at=(322,113)
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/palace-town-1.ppm
+weather small step: time=1193 max=4 mean=0.13189 at=(639,90)
+weather small step: time=31628 max=5 mean=0.11194 at=(158,132)
+weather small step: time=62063 max=4 mean=0.11428 at=(36,91)
+weather small step: time=2326 max=5 mean=0.13170 at=(279,167)
+weather small step: time=24644 max=5 mean=0.12029 at=(584,127)
+weather small step: time=46963 max=5 mean=0.10385 at=(565,177)
+weather small step: time=66672 max=5 mean=0.11089 at=(55,117)
+weather small step: time=100008 max=5 mean=0.12319 at=(265,123)
+weather small step: time=576000008 max=5 mean=0.13384 at=(550,111)
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/palace-town-2.ppm
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/palace-town-3.ppm
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/palace-town-4.ppm
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/palace-town-5.ppm
+capture /private/tmp/actraiser-connected-release.yXOBZW/gpu-captures/palace-town-6.ppm
+present_world_nav_gpu_test: PASS

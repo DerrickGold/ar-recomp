@@ -43,9 +43,9 @@ static inline const char *GpuShaderBlob_FormatName(
  * shader creation outright — tests/shader_blob_test.c asserts exactly that,
  * so the rule stays load-bearing rather than accidental.
  *
- * Returns NULL on any failure, having already reported it. Callers are
- * expected to fall back to their pre-shader path; a missing shader must never
- * be fatal. */
+ * Returns NULL on failure, having already reported it. The application decides
+ * feature availability at boot; selected core paths must not silently change
+ * the presentation if a later operation fails. */
 static inline SDL_GPUShader *GpuShaderBlob_Create(
     SDL_GPUDevice *device, const GpuShaderBlobs *blobs, const char *label,
     SDL_GPUShaderStage stage, Uint32 num_samplers,

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"sync"
 
 	"github.com/DerrickGold/ar-recomp/installer/desktop-shell/internal/host"
+	"github.com/DerrickGold/ar-recomp/installer/desktop-shell/internal/winbundle"
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/menu"
 	"github.com/wailsapp/wails/v2/pkg/options"
@@ -20,6 +22,13 @@ import (
 )
 
 func main() {
+	if err := runDesktop(); err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, errAlreadyRunning) {
+		showStartupError(err)
+		os.Exit(1)
+	}
+}
+
+func runDesktop() error {
 	payload := flag.String("payload", "", "development-only: clean manifested installer tree")
 	workspace := flag.String("workspace", "", "dedicated writable workspace; default: sidecar or per-user app data")
 	outputDir := flag.String("output-dir", "", "playable game folder (default: ActRaiserRecomp beside this Builder)")
@@ -27,25 +36,31 @@ func main() {
 	jobs := flag.Int("jobs", 0, "build workers (0 uses builder default; use 1 on low-memory machines)")
 	flag.Parse()
 	if *jobs < 0 {
-		fmt.Fprintln(os.Stderr, "--jobs must not be negative")
-		os.Exit(1)
+		return fmt.Errorf("--jobs must not be negative")
 	}
-	if err := prepareEmbedded(payload, workspace, webview); err != nil {
-		showStartupError(err)
-		os.Exit(1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	splash, err := beginStartup(*workspace, cancel)
+	if err != nil {
+		return err
 	}
+	defer splash.Close()
+	if err := prepareEmbedded(ctx, payload, workspace, webview, splash.Update); err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	splash.Update(winbundle.Progress{Stage: "Opening the Builder window"})
 	winOptions, err := webviewOptions(*workspace, *payload, *webview)
 	if err != nil {
-		showStartupError(err)
-		os.Exit(1)
+		return err
 	}
 	bridge := &host.Bridge{}
 	var mu sync.Mutex
 	var backend *host.Backend
 	var unlock func()
 	var closeGuard host.CloseGuard
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 	var startup sync.WaitGroup
 	startup.Add(1)
 	appMenu := menu.NewMenu()
@@ -61,10 +76,19 @@ func main() {
 		// It must not create the global build workspace before PrepareSession owns it.
 		Linux:   &linux.Options{ProgramName: host.Name + "WebView", WebviewGpuPolicy: linux.WebviewGpuPolicyOnDemand},
 		Windows: winOptions,
+		OnDomReady: func(appctx context.Context) {
+			splash.Handoff()
+			if ctx.Err() != nil {
+				wruntime.Quit(appctx)
+			}
+		},
 		// No frontend Go bindings, remote content, telemetry, or updater.
 		OnStartup: func(appctx context.Context) {
 			go func() {
 				defer startup.Done()
+				if ctx.Err() != nil {
+					return
+				}
 				bridge.Progress("Locating the Builder payload…")
 				executable, err := os.Executable()
 				if err != nil {
@@ -190,15 +214,13 @@ func main() {
 	enableSmokeTest(appOptions)
 	rendererURL, stopRenderer, err := host.StartRenderer(appOptions.AssetServer.Handler)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		return err
 	}
 	defer stopRenderer()
 	bridge.SetRendererURL(rendererURL)
 	appOptions.AssetServer.Handler = http.HandlerFunc(bridge.Bootstrap)
-	err = wails.Run(appOptions)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+	if err := ctx.Err(); err != nil {
+		return err
 	}
+	return wails.Run(appOptions)
 }

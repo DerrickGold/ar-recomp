@@ -30,13 +30,17 @@ void SimBackgroundMountainMesh_StackTile(
   float y0 = destination_cell_y * kSimTownCellPixels;
   float x1 = x0 + kSimTownCellPixels;
   float y1 = y0 + kSimTownCellPixels;
-  float u0 = source_cell_x * kSimTownCellPixels /
+  /* Sample between this tile's outermost texel centres. Exact atlas-cell
+   * boundaries can round into adjacent art even with nearest filtering,
+   * leaving thin mountain-coloured lines above peaks and across tile joins.
+   * Inset UVs only: the geometry must retain its shared cell edges. */
+  float u0 = (source_cell_x * kSimTownCellPixels + 0.5f) /
       (float)context->atlas_pixels;
-  float v0 = source_cell_y * kSimTownCellPixels /
+  float v0 = (source_cell_y * kSimTownCellPixels + 0.5f) /
       (float)context->atlas_pixels;
-  float u1 = (source_cell_x + 1) * kSimTownCellPixels /
+  float u1 = ((source_cell_x + 1) * kSimTownCellPixels - 0.5f) /
       (float)context->atlas_pixels;
-  float v1 = (source_cell_y + 1) * kSimTownCellPixels /
+  float v1 = ((source_cell_y + 1) * kSimTownCellPixels - 0.5f) /
       (float)context->atlas_pixels;
   float source_x[4] = {x0, x1, x1, x0};
   float source_y[4] = {y0, y0, y1, y1};

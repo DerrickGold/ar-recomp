@@ -1,4 +1,5 @@
 #include "sim_world_navigation_palace.h"
+#include "sim_ppu_color_math.h"
 
 #include <stddef.h>
 #include <string.h>
@@ -8,8 +9,8 @@ bool SimWorldNavigationPalace_PpuSupported(const SrPpuStateSnapshot *ppu) {
       ppu->bg_mode_control == 9 && ppu->main_screen == 0x17 &&
       ppu->sub_screen == 0 &&
       (ppu->flags & SR_PPU_STATE_FORCED_BLANK) == 0 &&
-      ppu->color_math_control == 0 && ppu->fixed_color == 0 &&
-      (ppu->color_math_designation & 0xc0) == 0;
+      SimPpuColorMath_IsNoOp(ppu->color_math_control,
+          ppu->color_math_designation, ppu->fixed_color);
 }
 
 bool SimWorldNavigationPalace_ComposeForeground(

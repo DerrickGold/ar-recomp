@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "gpu_shader_blob.h"
+#include "gpu_render_preparation.h"
 #include "platform/sdl/render_sdl_internal.h"
 #include "shaders/sim_shadow_blur_frag.h"
 
@@ -47,18 +48,21 @@ static bool EnsureBlur(ArRenderDevice *device) {
   SDL_GPUDevice *gpu = RendererGpuDevice(renderer);
   if (!gpu) return false;
   s_blur.device = gpu;
-  s_blur.shader = GpuShaderBlob_CreateFragment(
-      gpu, &kSimShadowBlurBlobs, "SIM shadow blur", 1, 1);
+  s_blur.shader = ArSdlRenderBackend_FragmentShader(
+      device, &kSimShadowBlurBlobs, "SIM shadow blur", 1, 1);
   if (!s_blur.shader) return false;
 
   SDL_GPURenderStateCreateInfo state_info;
   SDL_zero(state_info);
   state_info.fragment_shader = s_blur.shader;
   s_blur.state = SDL_CreateGPURenderState(renderer, &state_info);
-  if (!s_blur.state) {
+  const float warm_uniforms[4] = {1, 1, 1, 0};
+  if (!s_blur.state || !GpuRenderPreparation_Warm(device, s_blur.state,
+          warm_uniforms, sizeof(warm_uniforms), false)) {
+    SDL_DestroyGPURenderState(s_blur.state);
+    s_blur.state = NULL;
     fprintf(stderr, "[sim3d-d4] shadow blur render state failed: %s\n",
             SDL_GetError());
-    SDL_ReleaseGPUShader(gpu, s_blur.shader);
     s_blur.shader = NULL;
     return false;
   }
@@ -103,7 +107,5 @@ void SimShadowEffectBackend_Reset(ArRenderDevice *device) {
     (void)SDL_SetGPURenderState(renderer, NULL);
   if (same_device)
     SDL_DestroyGPURenderState(s_blur.state);
-  if (same_device && current_device && s_blur.shader)
-    SDL_ReleaseGPUShader(current_device, s_blur.shader);
   memset(&s_blur, 0, sizeof(s_blur));
 }

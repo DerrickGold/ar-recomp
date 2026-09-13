@@ -28,6 +28,7 @@
 #include "render/render_output.h"
 #include "render/localized_text_presenter.h"
 #include "scene3d_math.h"
+#include "sim/sim3d_camera_limits.h"
 #include "sim/sim3d_depth_pass.h"
 #include "sim/sim3d_performance.h"
 #include "sim/sim_background_bridge.h"
@@ -46,6 +47,7 @@
 #include "sim/sim_world_navigation_cliffs.h"
 #include "sim/sim_town_ground_art.h"
 #include "sim/sim3d.h"
+#include "present_sim_globe_mapping.h"
 
 #ifndef AR_SIM3D_TERRAIN_ELEVATION
 #define AR_SIM3D_TERRAIN_ELEVATION 0
@@ -56,6 +58,8 @@
 #include "settings.h"
 extern ArRenderDevice g_render_device;
 #include "present_sim3d_internal.h"
+#include "present_sim_globe.h"
+#include "present_retained_image.h"
 
 
 typedef struct WorldNavigationModelBounds {
@@ -70,6 +74,32 @@ typedef struct WorldNavigationCliffProjection {
   uint8_t outside[4];
 } WorldNavigationCliffProjection;
 static void PrepareWorldNavigationTerrain(void);
+static struct {
+  Sim3DDepthMesh *surface;
+  SimGlobeMapping map;
+  uint32_t geography, mountains, cliffs;
+  uint16_t height_percent;
+  size_t quads, mountain_first;
+  bool ready;
+} s_sim_globe;
+
+typedef struct SimGlobeImageKey {
+  SimGlobeMapping map;
+  float matrix[16];
+  int width, height, light_azimuth, light_elevation, atlas_version;
+  uint64_t art_revision, mountain_atlas_revision;
+  uint32_t geography, cliffs, mountains;
+  uint16_t height_percent;
+  uint8_t style, wind_pose;
+  bool models, lighting;
+  SimWorldNavigationTowns towns;
+} SimGlobeImageKey;
+static struct {
+  PresentRetainedImage image;
+  SimGlobeImageKey key;
+  bool observed;
+  uint64_t frames, hits, captures;
+} s_sim_globe_image;
 
 enum {
   kWorldNavigationTerrainCells = kSimWorldMapTiles,
@@ -232,6 +262,7 @@ static struct {
 
 static struct {
   uint32_t serial;
+  uint64_t image_revision;
   uint32_t geography;
   SimWorldNavigationTownGround sources;
   bool detailed;
@@ -254,6 +285,7 @@ static struct {
   SimWorldNavigationTownGround sources;
   bool ready;
   SimWorldNavigationMountainAtlasUpdate lava_upload;
+  uint64_t atlas_revision;
   bool active;
   bool developed;
   SimWorldNavigationMountainTransition transition;
@@ -546,6 +578,7 @@ static bool EnsureWorldNavigationCloudTexture(void) {
  * atlas. Invalidating it does not discard usable old GPU resources, but
  * prevents a cache hit or an incremental patch until a full upload succeeds. */
 static void InvalidateWorldNavigationArtPublication(void) {
+  ++s_world_art.image_revision;
   s_world_art.serial = 0;
   Sim3DDepthPass_DestroyAtlasCache(s_world_art.atlas_cache);
   s_world_art.atlas_cache = NULL;
@@ -618,6 +651,7 @@ static void UpdateWorldNavigationLava(const FrameSlot *slot) {
   /* A failed upload leaves the last GPU palette usable. Retain the dirty
    * rectangle for retry, even if the clock freezes or reverses next frame. */
   if (uploaded) {
+    ++s_world_mountains.atlas_revision;
     Sim3DPerformance_AddUpload((uint64_t)region.w * region.h * sizeof(uint32_t));
     s_world_mountains.lava_upload = (SimWorldNavigationMountainAtlasUpdate){0};
   }
@@ -860,6 +894,7 @@ static bool EnsureWorldNavigationArt(const FrameSlot *slot) {
       }
       s_world_art.phase = phase;
       s_world_art.serial = slot->sim.underlay_serial;
+      ++s_world_art.image_revision;
       CaptureWorldNavigationArtVersion(slot, phase);
       return true;
     }
@@ -4384,6 +4419,353 @@ static PresentationOutcome DrawWorldNavigationScene(
   return outcome;
 }
 
+/* Connected SIM background. Keep the shared terrain/art/model GPU resource
+ * owner here: making another renderer would duplicate both uploads and cache
+ * invalidation policy. The separate private entry contract receives the SIM
+ * matrix and never invokes the navigation camera, scene or UI compositor.
+ * Live SIM retains all actor/priority/depth ownership above this background. */
+void PresentSimGlobe_ClampCamera(Scene3DCamera *camera) {
+  if (!camera) return;
+  camera->distance = fminf(camera->distance, 4.5f);
+  /* Keep the authored SIM facade's full low-angle range. The connected
+   * background bounds travel/side rotation, not how far we can look across
+   * the active town. Use the same pitch limit as the other SIM layers. */
+  camera->tilt_x = fmaxf(camera->tilt_x,
+      (float)kSim3DCameraPitchMinimumMrad / (float)kPermilleScale);
+  camera->tilt_y = fmaxf(-.35f, fminf(.35f, camera->tilt_y));
+}
+
+#if AR_SIM_GLOBE_TESTING
+static bool s_sim_globe_retain_images = true;
+void PresentSimGlobe_TestRetainImages(bool enabled) {
+  s_sim_globe_retain_images = enabled;
+  PresentRetainedImage_Reset(&s_sim_globe_image.image, &g_render_device);
+  s_sim_globe_image.observed = false;
+}
+#endif
+static bool SimGlobeOwnsPoint(const SimGlobeMapping *map, float x, float y, float inset) {
+  return x >= map->origin_x+inset && x <= map->origin_x+32-inset &&
+      y >= map->origin_y+inset && y <= map->origin_y+32-inset;
+}
+
+static bool SimGlobeNearby(const SimGlobeMapping *map, float x, float y) {
+  return x >= map->origin_x-24 && x <= map->origin_x+56 &&
+      y >= map->origin_y-24 && y <= map->origin_y+56;
+}
+
+static bool SimGlobeEmbedVertex(const SimGlobeMapping *map, float x, float y,
+    float extra_scale, Sim3DDepthSurfaceVertex *v) {
+  float shade[3];
+  SimWorldNavigationGlobe_TransformNormal(&map->frame, v->shade_normal, shade);
+  memcpy(v->shade_normal, shade, sizeof(shade));
+  return SimGlobeMapping_Encode(map, x, y, v->elevation[0],
+      v->elevation[1]*extra_scale, v->normal, v->elevation);
+}
+
+static bool SimGlobeBuildSurface(const FrameSlot *slot,
+    const WorldNavigationProjection *projection, const SimGlobeMapping *map) {
+  const uint32_t geography = SimWorldMap_GeographySerial();
+  if (s_sim_globe.ready && Sim3DDepthPass_MeshReady(s_sim_globe.surface) &&
+      !memcmp(map,&s_sim_globe.map,sizeof(*map)) &&
+      s_sim_globe.geography == geography &&
+      s_sim_globe.mountains == s_world_mountains.geometry_revision &&
+      s_sim_globe.cliffs == s_world_terrain.cliff_serial &&
+      s_sim_globe.height_percent == slot->sim.height_scale_x100) return true;
+  if (!PrepareWorldNavigationGroundSamples(projection)) return false;
+  const size_t cliffs = s_world_terrain.cliffs.face_count;
+  const size_t mountains = s_world_mountains.active ? s_world_mountains.scene.face_count : 0;
+  const size_t fixed = kWorldNavigationOceanQuads + kWorldNavigationTerrainCells*kWorldNavigationTerrainCells;
+  if (cliffs > kWorldNavigationSurfaceMaximumQuads-fixed ||
+      mountains > kWorldNavigationSurfaceMaximumQuads-fixed-cliffs) return false;
+  Sim3DDepthSurfaceVertex *vertices = malloc((fixed+cliffs+mountains)*4*sizeof(*vertices));
+  Sim3DDepthSurfaceVertex *points = malloc(kWorldNavigationTerrainVertexCount*sizeof(*points));
+  if (!vertices || !points) { free(vertices); free(points); return false; }
+  ArRenderPointF *ocean_mask = malloc(kWorldNavigationOceanQuads*4*sizeof(*ocean_mask));
+  bool ok = ocean_mask && BuildWorldNavigationOceanSource(vertices, ocean_mask);
+  free(ocean_mask);
+  const float ratio = map->landscape/map->chart_radius;
+  WorldNavigationGridSourceWork work = {s_world_terrain.samples, points, ratio};
+  HostParallelWork_Run(WorldNavigationWorkers(), kWorldNavigationTerrainVertexCount, 2048,
+      BuildWorldNavigationGridSourceRange, &work);
+  for (int y = 0; ok && y < kWorldNavigationTerrainAxis; ++y)
+    for (int x = 0; ok && x < kWorldNavigationTerrainAxis; ++x)
+      ok = SimGlobeEmbedVertex(map,x,y,0,&points[WorldNavigationTerrainVertexIndex(x,y)]);
+  size_t count = kWorldNavigationOceanQuads;
+  for (int y = 0; ok && y < kWorldNavigationTerrainCells; ++y)
+    for (int x = 0; x < kWorldNavigationTerrainCells; ++x) {
+      /* One covered cell underlaps the alpha-feathered canvas edge; no town
+       * buildings, cliffs or mountain replacements are drawn a second time. */
+      if (SimGlobeOwnsPoint(map,x+.5f,y+.5f,1) ||
+          s_world_terrain.cliffs.replacement[y*kWorldNavigationTerrainCells+x]) continue;
+      const int at = WorldNavigationTerrainVertexIndex(x,y);
+      const int corners[4] = {at,at+1,at+kWorldNavigationTerrainAxis+1,at+kWorldNavigationTerrainAxis};
+      for (int p = 0; p < 4; ++p) vertices[count*4+p] = points[corners[p]];
+      ++count;
+    }
+  for (size_t i = 0; ok && i < cliffs; ++i) {
+    const SimWorldNavigationCliffFace *f = &s_world_terrain.cliffs.faces[i];
+    float cx = 0, cy = 0;
+    for (int p = 0; p < 4; ++p) { cx += f->x[p]*.25f; cy += f->y[p]*.25f; }
+    if (SimGlobeOwnsPoint(map,cx,cy,0)) continue;
+    for (int p = 0; p < 4; ++p) {
+      Sim3DDepthSurfaceVertex *v = &vertices[count*4+p];
+      *v = (Sim3DDepthSurfaceVertex){.uv = {f->u[p],f->v[p]},
+          .color = {f->shade,f->shade,f->shade,1},.elevation = {f->height[p],0}};
+      ok &= SimGlobeEmbedVertex(map,f->x[p],f->y[p],0,v);
+    }
+    ++count;
+  }
+  const size_t mountain_first = count;
+  for (size_t i = 0; ok && i < mountains; ++i) {
+    const SimWorldNavigationMountainFace *f = &s_world_mountains.scene.faces[i];
+    float cx = 0, cy = 0;
+    for (int p = 0; p < 4; ++p) { cx += f->x[p]*.25f; cy += f->y[p]*.25f; }
+    if (f->town == slot->sim.town || SimGlobeOwnsPoint(map,cx,cy,0) ||
+        !SimGlobeNearby(map,cx,cy)) continue;
+    for (int p = 0; p < 4; ++p) {
+      Sim3DDepthSurfaceVertex *v = &vertices[count*4+p];
+      const float shade = f->brightness[p]/255.0f;
+      *v = (Sim3DDepthSurfaceVertex){.uv = {f->uv[p].x,f->uv[p].y},
+          .color = {shade,shade,shade,1}};
+      float normal[3], metric;
+      ok &= SimWorldNavigationGlobe_SampleAtRadius(map->chart_radius,f->x[p],f->y[p],normal,&metric);
+      v->elevation[0] = WorldNavigationTerrainHeightAtPrepared(
+          f->x[p]*kSimWorldMapTilePixels,f->y[p]*kSimWorldMapTilePixels,NULL,true);
+      v->elevation[1] = f->z[p]*metric;
+      ok &= SimGlobeEmbedVertex(map,f->x[p],f->y[p],
+          slot->sim.height_scale_x100/(100.0f*map->metric),v);
+    }
+    ++count;
+  }
+  if (ok && !s_sim_globe.surface) s_sim_globe.surface = Sim3DDepthPass_CreateSurfaceMesh();
+  ok = ok && s_sim_globe.surface &&
+      Sim3DDepthPass_UpdateSurfaceMesh(s_sim_globe.surface,vertices,count);
+  free(vertices); free(points);
+  if (!ok) {
+    fprintf(stderr,"[sim-globe-underlay] surface publication rejected quads=%zu mesh=%p\n",count,(void *)s_sim_globe.surface);
+    return false;
+  }
+  s_sim_globe.map = *map; s_sim_globe.geography = geography;
+  s_sim_globe.mountains = s_world_mountains.geometry_revision;
+  s_sim_globe.cliffs = s_world_terrain.cliff_serial;
+  s_sim_globe.height_percent = slot->sim.height_scale_x100;
+  s_sim_globe.quads = count; s_sim_globe.mountain_first = mountain_first;
+  s_sim_globe.ready = true;
+  if (Sim3DPerformance_Enabled())
+    fprintf(stderr,"[sim-globe-underlay] source town=%u quads=%zu mountains=%zu (active town excluded)\n",
+        slot->sim.town,count,count-mountain_first);
+  return true;
+}
+
+static void SimGlobeImageKeyBuild(SimGlobeImageKey *key, const FrameSlot *slot,
+    const SimGlobeMapping *map, const float matrix[16], ArRenderRectI viewport) {
+  memset(key, 0, sizeof(*key));
+  key->map = *map;
+  memcpy(key->matrix, matrix, sizeof(key->matrix));
+  key->width = viewport.w; key->height = viewport.h;
+  key->art_revision = s_world_art.image_revision;
+  key->atlas_version = s_world_art.displayed_version;
+  key->geography = SimWorldMap_GeographySerial();
+  key->cliffs = s_world_terrain.cliff_serial;
+  key->mountains = s_world_mountains.geometry_revision;
+  /* Active Aitos' animated crater belongs to SIM, never to this underlay. */
+  key->mountain_atlas_revision = slot->sim.town == 4 ? 0 : s_world_mountains.atlas_revision;
+  key->height_percent = slot->sim.height_scale_x100;
+  key->light_azimuth = slot->sim.light_azimuth_deg;
+  key->light_elevation = slot->sim.light_elevation_deg;
+  key->models = slot->sim.world_navigation_models;
+  key->lighting = slot->sim.world_navigation_lighting;
+  key->style = slot->sim.background_voxel_style;
+  if (key->models) {
+    key->wind_pose = (unsigned)((slot->sim.game_frame / 12) % 3) + 1;
+    /* Compare owned semantic data, not hashes or frame/WRAM pointers. Source
+     * changes, removals, variants and rewinds cannot resurrect stale models. */
+    key->towns = slot->sim.world_navigation_towns;
+  }
+}
+
+static PresentationOutcome DrawSimGlobeImage(const FrameSlot *slot,
+    ArRenderRectI viewport, ArRenderTexture composite, bool cache_hit) {
+  const ArRenderRectF destination = {viewport.x,viewport.y,viewport.w,viewport.h};
+  const bool focus = (slot->sim.effective_features & kSimFeature_CullHaze) != 0;
+  const float opacity = focus ? 1.0f-slot->sim.underlay_haze_pct/100.0f : 1.0f;
+  const float light = focus ? 1.0f-slot->sim.cull_dim_pct/100.0f : 1.0f;
+  const ArRenderDrawState state = {
+    .flags = kArRenderDrawState_Blend | kArRenderDrawState_Tint,
+    .blend = kArRenderBlendMode_AlphaPremultiplied,
+    .tint = {opacity*light,opacity*light,opacity*light,opacity},
+  };
+  ++s_sim_globe_image.frames;
+  s_sim_globe_image.hits += cache_hit;
+  if (Sim3DPerformance_Enabled() && s_sim_globe_image.frames % 300 == 0)
+    fprintf(stderr, "[sim-globe-cache] frames=%llu hits=%llu captures=%llu\n",
+        (unsigned long long)s_sim_globe_image.frames,
+        (unsigned long long)s_sim_globe_image.hits,
+        (unsigned long long)s_sim_globe_image.captures);
+  return ArRenderDevice_DrawTextureWithState(&g_render_device,composite,NULL,&destination,&state)
+      ? kPresentationOutcome_Complete : kPresentationOutcome_CoreFailure;
+}
+
+PresentationOutcome PresentSimGlobeUnderlay(const FrameSlot *slot, ArRenderRectI source,
+    ArRenderRectI viewport, const Scene3DCamera *camera, const float matrix[16],
+    PresentSimGlobeView *out_view) {
+  if (!slot || !camera || !matrix || source.w <= 0 || source.h <= 0 ||
+      viewport.w <= 0 || viewport.h <= 0 ||
+      !EnsureWorldNavigationResources(slot)) return kPresentationOutcome_CoreFailure;
+  /* The private GPU model cache now holds embedded sources. A later return
+   * to navigation must not repeat its old projection key over these meshes. */
+  s_world_models.gpu_current_ready = false;
+  s_world_models.projection_key_ready = false;
+  const float ox = slot->sim.underlay_origin_tile_x, oy = slot->sim.underlay_origin_tile_y;
+  SimGlobeMapping map;
+  if (!SimGlobeMapping_Build(slot->sim.town, ox, oy, WorldNavigationChartRadius(slot),
+          slot->sim.world_navigation_relief && slot->sim.landscape_height_pct
+              ? WorldNavigationTerrainHeightAt((ox+16)*kSimWorldMapTilePixels,(oy+16)*kSimWorldMapTilePixels,NULL) : 0,
+          slot->sim.world_navigation_relief ? slot->sim.landscape_height_pct/100.0f : 0, &map))
+    return kPresentationOutcome_CoreFailure;
+  /* Globe relief is independently optional. Its shoreline still meets the
+   * active town's actual elevation, including builds with flat SIM terrain. */
+#if AR_SIM3D_TERRAIN_ELEVATION
+  map.town_landscape = slot->sim.landscape_height_pct / (float)kPercentScale;
+#else
+  map.town_landscape = 0;
+#endif
+  WorldNavigationProjection projection = {.chart_radius_tiles = map.chart_radius,
+      .globe_radius_world = map.radius,.height_world_per_unit = map.landscape > 0 ? 1 : 0,.clip_frustum = true,
+      .tile_world = 1/map.metric,
+      .globe_frame = {.right = {1,0,0},.up = {0,1,0},.outward = {0,0,1}}};
+  const float aspect = (float)viewport.w/viewport.h;
+  const float scale[3] = {16*aspect/source.w,16.0f/source.h,16.0f/source.h};
+  const float offset[3] = {
+      ((slot->sim.underlay_screen_x0-slot->sim.camera_x+256.0f-source.x)/source.w-.5f)*aspect,
+      .5f-(256.0f-slot->sim.camera_y-source.y)/source.h,0};
+  for (int row = 0; row < 4; ++row) {
+    for (int col = 0; col < 3; ++col) projection.matrix[col*4+row] = matrix[col*4+row]*scale[col];
+    projection.matrix[12+row] = matrix[12+row];
+    for (int col = 0; col < 3; ++col) projection.matrix[12+row] += matrix[col*4+row]*offset[col];
+  }
+  for (int i = 0; i < 3; ++i)
+    projection.camera_world[i] = (-camera->distance*matrix[i*4+3]-offset[i])/scale[i];
+  if (out_view) {
+    *out_view = (PresentSimGlobeView){.map = map};
+    memcpy(out_view->matrix, projection.matrix, sizeof(out_view->matrix));
+    memcpy(out_view->camera, projection.camera_world, sizeof(out_view->camera));
+  }
+  bool image_cache = !s_sim_globe_image.image.unavailable;
+#if AR_SIM_GLOBE_TESTING
+  image_cache &= s_sim_globe_retain_images;
+#endif
+  SimGlobeImageKey image_key;
+  bool retain_image = false;
+  if (image_cache) {
+    SimGlobeImageKeyBuild(&image_key,slot,&map,projection.matrix,viewport);
+    const bool same_image = s_sim_globe_image.observed &&
+        !memcmp(&image_key,&s_sim_globe_image.key,sizeof(image_key));
+    const bool held_view = s_sim_globe_image.observed &&
+        s_sim_globe_image.key.width == viewport.w &&
+        s_sim_globe_image.key.height == viewport.h &&
+        !memcmp(s_sim_globe_image.key.matrix,projection.matrix,sizeof(projection.matrix));
+    const PresentRetainedImageAction action = PresentRetainedImage_Choose(
+        &s_sim_globe_image.image,same_image,held_view);
+    if (action == kPresentRetainedImage_Reuse)
+      return DrawSimGlobeImage(slot,viewport,s_sim_globe_image.image.texture,true);
+    s_sim_globe_image.observed = true;
+    /* Retain only after a repeat, or after the previous retained image paid
+     * for its copy with a hit. Continuous camera/lighting/lava changes then
+     * use the direct path, instead of making never-reused copies each frame. */
+    retain_image = action == kPresentRetainedImage_RenderAndCapture;
+    s_sim_globe_image.key = image_key;
+  }
+  if (!Sim3DDepthPass_Begin(&g_render_device,viewport.w,viewport.h,kArRenderFilter_Linear)) goto failed;
+  if (!SimGlobeBuildSurface(slot,&projection,&map)) goto failed;
+  bool ok = s_world_art.displayed_version < 0 || Sim3DDepthPass_SelectAtlasVersion(
+      s_world_art.atlas_cache,(unsigned)s_world_art.displayed_version);
+  Sim3DDepthSurfaceTransform t = {.radial = {.sphere_radius = map.radius,.height_scale = 1},
+      .ambient = slot->sim.world_navigation_lighting ? .76f : 1,
+      .diffuse = slot->sim.world_navigation_lighting ? .24f : 0};
+  memcpy(t.radial.matrix,projection.matrix,sizeof(t.radial.matrix));
+  for (int i = 0; i < 3; ++i) t.radial.basis[i][i] = 1;
+  const float azimuth = slot->sim.light_azimuth_deg*kPi/180, elevation = slot->sim.light_elevation_deg*kPi/180;
+  t.light[0] = -cosf(azimuth)*cosf(elevation); t.light[1] = -sinf(azimuth)*cosf(elevation); t.light[2] = sinf(elevation);
+  Sim3DDepthSurfaceBatch batches[3] = {
+    {.layer = kSim3DDepthPass_Ground,.range = {0,kWorldNavigationOceanQuads}},
+    {.layer = kSim3DDepthPass_Ground,.range = {kWorldNavigationOceanQuads,s_sim_globe.mountain_first-kWorldNavigationOceanQuads},.transform = t},
+    {.layer = kSim3DDepthPass_WorldMountain,.range = {s_sim_globe.mountain_first,s_sim_globe.quads-s_sim_globe.mountain_first},.transform = t}};
+  batches[2].transform.ambient = .90f; batches[2].transform.diffuse = 0;
+  WorldNavigationProjection ocean = projection;
+  ocean.reference_height_units = map.reference_height*map.landscape/map.metric;
+  ok = ok && WorldNavigationOceanTransform(&ocean,&batches[0].transform) &&
+      Sim3DDepthPass_AppendSurfaceBatches(s_sim_globe.surface,batches,3);
+  if (!ok) fprintf(stderr,"[sim-globe-underlay] surface batch rejected\n");
+  if (ok && slot->sim.world_navigation_models) {
+    const SimWorldNavigationTowns *towns = &slot->sim.world_navigation_towns;
+    if (towns->overflow || towns->object_count > kSimWorldNavigationTownObjectCapacity) ok = false;
+    if (ok && towns->object_count > s_world_models.gpu_source_capacity) {
+      void *buffer = realloc(s_world_models.gpu_sources,towns->object_count*sizeof(WorldNavigationModelSource));
+      if (!buffer) ok = false;
+      else { s_world_models.gpu_sources = buffer; s_world_models.gpu_source_capacity = towns->object_count; }
+    }
+    WorldNavigationModelSource *sources = s_world_models.gpu_sources;
+    size_t count = 0;
+    for (int i = 0; ok && i < towns->object_count; ++i) {
+      const SimWorldNavigationTownObject *object = &towns->objects[i];
+      if (object->town == slot->sim.town || object->kind >= kSimBackgroundVoxelKindCount) continue;
+      const SimBackgroundBridgeBounds bounds = WorldNavigationObjectBounds(object);
+      int tx, ty;
+      if (!SimWorldMap_OriginForTown(object->town,&tx,&ty)) { ok = false; break; }
+      const float x = tx+(bounds.origin_x+bounds.width*.5f)/16;
+      const float y = ty+(bounds.origin_y+bounds.depth*.5f)/16;
+      if (!SimGlobeNearby(&map,x,y) || SimGlobeOwnsPoint(&map,x,y,0)) continue;
+      WorldNavigationModelSource *s = &sources[count++];
+      memset(s,0,sizeof(*s)); s->object = *object;
+      if (object->kind == kSimBackgroundVoxel_Windmill) s->object.animation_phase = 0;
+      s->detail = kSimBackgroundVoxelDetail_Low; s->object_index = i;
+      s->source_x = tx*kSimWorldMapTilePixels+bounds.origin_x*.5f;
+      s->source_y = ty*kSimWorldMapTilePixels+bounds.origin_y*.5f;
+      s->centre_x = bounds.width*.5f; s->centre_y = bounds.depth*.5f;
+      s->anchor_height = map.landscape > 0
+          ? WorldNavigationTerrainHeightAt(x*kSimWorldMapTilePixels,y*kSimWorldMapTilePixels,NULL) : 0;
+    }
+    WorldNavigationModelSourceStyle style;
+    memset(&style,0,sizeof(style));
+    style.embedding = map; style.surface_revision = SimWorldMap_GeographySerial();
+    style.chart_radius_tiles = map.chart_radius; style.tile_world = 1/map.metric;
+    style.height_percent = slot->sim.height_scale_x100;
+    style.light_azimuth = slot->sim.light_azimuth_deg; style.light_elevation = slot->sim.light_elevation_deg;
+    style.style = slot->sim.background_voxel_style; style.lighting = slot->sim.world_navigation_lighting;
+    t.radial.variant = (unsigned)((slot->sim.game_frame / 12) % 3) + 1;
+    if (ok && count) ok = WorldNavigationModelMesh_Enabled() &&
+        WorldNavigationModelMesh_Draw(sources,count,&style,&t.radial);
+    if (!ok) fprintf(stderr,"[sim-globe-underlay] models rejected count=%zu\n",count);
+  }
+  ArRenderTexture composite = Sim3DDepthPass_Submit(&g_render_device,ArRenderTexture_Invalid());
+  if (!ArRenderTexture_IsValid(composite)) fprintf(stderr,"[sim-globe-underlay] composite rejected\n");
+  if (!ok || !ArRenderTexture_IsValid(composite)) goto failed;
+  /* Focus belongs to the completed background, including mountains and
+   * neighbouring models, not just its ground atlas. The live town is drawn
+   * afterwards at its normal lighting. Reuse the ordinary SIM haze/dim
+   * controls without another target, geometry upload or full-screen pass.
+   * Premultiplied input requires opacity on RGB as well as on alpha. */
+  if (image_cache && retain_image) {
+    const PresentationOutcome captured = PresentRetainedImage_Capture(
+        &s_sim_globe_image.image,&g_render_device,composite,viewport.w,viewport.h);
+    if (captured == kPresentationOutcome_CoreFailure) return captured;
+    if (captured == kPresentationOutcome_Complete) {
+      s_sim_globe_image.key = image_key;
+      composite = s_sim_globe_image.image.texture;
+      ++s_sim_globe_image.captures;
+    }
+    /* Optional copy/allocation rejection retains the complete direct image.
+     * A lost caller target is fatal, never a fallback drawn to unknown state. */
+  }
+  return DrawSimGlobeImage(slot,viewport,composite,false);
+failed:
+  if (Sim3DDepthPass_IsCollecting())
+    (void)Sim3DDepthPass_Submit(&g_render_device,ArRenderTexture_Invalid());
+  fprintf(stderr,"[sim-globe-underlay] selected connected world could not be rendered\n");
+  return kPresentationOutcome_CoreFailure;
+}
+
 PresentationOutcome PresentWorldNavigationBackdrop(
     const FrameSlot *slot, ArRenderRectI viewport) {
   if (!slot || slot->sim.view != kSimView_SkyPalace ||
@@ -4487,6 +4869,10 @@ PresentationOutcome PresentWorldNavigation3D(const FrameSlot *slot) {
  * keeps the town half and calls this; see the comment on
  * PresentRendererResources_Reset in present.c for why any of it exists. */
 void PresentWorldNav_ResetResources(void) {
+  Sim3DDepthPass_DestroyMesh(s_sim_globe.surface);
+  memset(&s_sim_globe, 0, sizeof(s_sim_globe));
+  PresentRetainedImage_Reset(&s_sim_globe_image.image,&g_render_device);
+  memset(&s_sim_globe_image,0,sizeof(s_sim_globe_image));
   WorldNavigationModelMesh_Reset();
   free(s_world_models.gpu_sources);
   s_world_models.gpu_sources = NULL;

@@ -4,6 +4,7 @@
 #include <SDL3/SDL.h>
 
 #include "platform/sdl/render_sdl.h"
+#include "platform/sdl/gpu_shader_blob.h"
 
 typedef struct ArSdlRenderBackend {
   SDL_Renderer *renderer;
@@ -19,11 +20,19 @@ typedef struct ArSdlRenderBackend {
   bool owns_renderer;
   bool owns_context;
   bool owns_gpu_device;
+  struct ArSdlFragmentShaderEntry *fragment_shaders;
 } ArSdlRenderBackend;
 
 /* Native interop shared only by SDL-owned adapters and their focused tests.
  * Game-side presentation must use ArRenderDevice and opaque textures instead. */
 SDL_Renderer *ArSdlRenderBackend_Renderer(const ArRenderDevice *device);
+/* Borrow a device/renderer-lifetime shader. SDL's pipeline cache keys custom
+ * fragment shaders by pointer; recycling that pointer during an effect reset
+ * can select a different effect's old pipeline. Release only at backend
+ * teardown, after all effect states have been reset, never in an effect. */
+SDL_GPUShader *ArSdlRenderBackend_FragmentShader(ArRenderDevice *device,
+    const GpuShaderBlobs *blobs, const char *label,
+    Uint32 samplers, Uint32 uniform_buffers);
 /* Submit preceding SDL commands before a custom GPU consumer/target reuse.
  * Ordered mode uses offscreen Present (no swapchain, fence wait or readback).
  * Legacy externally bound/window renderers retain their Flush behavior. */

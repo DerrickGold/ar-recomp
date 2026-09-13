@@ -31,7 +31,11 @@ enum {
   kSim3DDepthInitialCpuVertexCapacity = 4096,
   kSim3DDepthInitialGpuVertexCapacity = 8192,
   kMaximumRetainedMeshes = 16,
-  kMaximumGeometryMeshes = 4,
+  /* Navigation surface/models, the hybrid underlay and both retained town
+   * passes may coexist. Four slots starved the second town cache, forcing
+   * otherwise static geometry through CPU staging every frame. Storage is
+   * allocated only for published meshes; effect/sample budgets stay separate. */
+  kMaximumGeometryMeshes = 8,
   kMaximumRetainedVertices = 256 * 1024,
   /* Optional opaque caching must not consume the existing weather budget.
    * Keep both domains bounded without making callers budget backend slots. */
@@ -356,8 +360,8 @@ static bool CreateSurfacePipelines(void) {
   return g_depth_pass.surface_pipeline[0] && g_depth_pass.surface_pipeline[1];
 }
 
-/* Optional and lazy: compile only when the scene requests the capability,
- * never in ordinary startup or by turning failure into a view fallback. */
+/* Prepared at video boot/reset. Attempts are retained so a rejected variant
+ * cannot trigger shader compilation or capability discovery during gameplay. */
 static bool CreateModelPipeline(unsigned variant) {
   const bool hardware_clipping = variant != 0, radial = variant == 2;
   if (g_depth_pass.model_pipeline_attempted[variant])
@@ -810,6 +814,19 @@ bool Sim3DDepthPass_Require(ArRenderDevice *device) {
 const char *Sim3DDepthPass_LastError(void) {
   const char *error = SDL_GetError();
   return error && error[0] ? error : "required SDL_GPU depth pass unavailable";
+}
+
+Sim3DPreparedPipelines Sim3DDepthPass_PreparePipelines(ArRenderDevice *device) {
+  Sim3DPreparedPipelines ready = {0};
+  ready.depth = Sim3DDepthPass_Require(device);
+  if (!ready.depth) return ready;
+  const bool models = CreateModelPipeline(0);
+  const bool clipped = CreateModelPipeline(1);
+  ready.models = models && clipped;
+  ready.radial = CreateModelPipeline(2);
+  ready.surfaces = CreateSurfacePipelines();
+  ready.spherical_body = CreateBodyPipeline();
+  return ready;
 }
 
 static bool GroundIsQueued(void) {

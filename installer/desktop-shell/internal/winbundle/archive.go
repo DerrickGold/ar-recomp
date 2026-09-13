@@ -6,6 +6,7 @@ package winbundle
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"debug/pe"
 	"encoding/binary"
@@ -83,6 +84,13 @@ func PEInfo(reader io.ReaderAt, size int64) (arch string, subsystem uint16, cont
 }
 
 func Open(filename string) (_ *Archive, err error) {
+	return OpenContext(context.Background(), filename, nil)
+}
+
+func OpenContext(ctx context.Context, filename string, progress ProgressFunc) (_ *Archive, err error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	f, err := os.Open(filename)
 	if err != nil {
 		return nil, err
@@ -148,9 +156,11 @@ func Open(filename string) (_ *Archive, err error) {
 	p.Close()
 	section := io.NewSectionReader(f, int64(offset), int64(length))
 	h := sha256.New()
-	if _, err = io.Copy(h, section); err != nil {
+	packageMeter := newMeter(ctx, progress, "Checking bundled package", int64(length))
+	if _, err = packageMeter.copy(h, section); err != nil {
 		return nil, err
 	}
+	packageMeter.report(true)
 	if !bytes.Equal(h.Sum(nil), footer[32:]) {
 		return nil, errors.New("embedded archive checksum mismatch")
 	}
@@ -164,6 +174,9 @@ func Open(filename string) (_ *Archive, err error) {
 	var m Manifest
 	entries := map[string]*zip.File{}
 	for _, item := range z.File {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if !host.WindowsPath(item.Name) || !item.Mode().IsRegular() || item.UncompressedSize64 > uint64(maxExpanded) {
 			return nil, fmt.Errorf("unsafe archive entry %s", item.Name)
 		}
@@ -198,6 +211,9 @@ func Open(filename string) (_ *Archive, err error) {
 	seen := map[string]bool{}
 	var total int64
 	for _, entry := range m.Files {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		key := strings.ToLower(entry.Path)
 		item := entries[key]
 		digest, hashErr := hex.DecodeString(entry.SHA256)
@@ -246,6 +262,14 @@ func validateRuntime(r Runtime) error {
 // prior destination. The optional callback grants Windows runtime permissions
 // on the new staging tree, not on any pre-existing user directory.
 func (a *Archive) Extract(destination string, prepare func(string) error) error {
+	return a.ExtractContext(context.Background(), destination, prepare, nil)
+}
+
+func (a *Archive) ExtractContext(ctx context.Context, destination string, prepare func(string) error, progress ProgressFunc) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	m := newMeter(ctx, progress, "Extracting bundled tools and browser", a.expandedSize())
 	if _, err := os.Lstat(destination); !os.IsNotExist(err) {
 		return fmt.Errorf("extraction destination exists or cannot be checked: %s", destination)
 	}
@@ -268,6 +292,9 @@ func (a *Archive) Extract(destination string, prepare func(string) error) error 
 		byName[f.Name] = f
 	}
 	for _, entry := range a.Manifest.Files {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if err = root.MkdirAll(filepath.FromSlash(path.Dir(entry.Path)), 0700); err != nil {
 			return err
 		}
@@ -281,7 +308,7 @@ func (a *Archive) Extract(destination string, prepare func(string) error) error 
 			return err
 		}
 		h := sha256.New()
-		n, copyErr := io.Copy(io.MultiWriter(out, h), io.LimitReader(in, entry.Size+1))
+		n, copyErr := m.copy(io.MultiWriter(out, h), io.LimitReader(in, entry.Size+1))
 		closeErr := out.Close()
 		in.Close()
 		if copyErr != nil {
@@ -294,21 +321,43 @@ func (a *Archive) Extract(destination string, prepare func(string) error) error 
 			return fmt.Errorf("checksum mismatch: %s", entry.Path)
 		}
 	}
+	m.report(true)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if prepare != nil {
+		newMeter(ctx, progress, "Applying browser permissions", 0)
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if err = prepare(filepath.Join(stage, "webview")); err != nil {
 			return err
 		}
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	if err = root.WriteFile(".bundle-id", []byte(a.ID+"\n"), 0600); err != nil {
 		return err
 	}
 	root.Close()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	return os.Rename(stage, destination)
 }
 
 // VerifyDirectory checks cached bytes on every launch; a stamp alone is not
 // sufficient for executable runtime files. It never repairs or deletes edits.
 func (a *Archive) VerifyDirectory(directory string) error {
+	return a.VerifyDirectoryContext(context.Background(), directory, nil)
+}
+
+func (a *Archive) VerifyDirectoryContext(ctx context.Context, directory string, progress ProgressFunc) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	m := newMeter(ctx, progress, "Verifying prepared files", a.expandedSize())
 	info, err := os.Lstat(directory)
 	if err != nil {
 		return err
@@ -327,6 +376,9 @@ func (a *Archive) VerifyDirectory(directory string) error {
 	}
 	expected := map[string]bool{".bundle-id": true}
 	for _, entry := range a.Manifest.Files {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		expected[entry.Path] = true
 		info, err := root.Lstat(filepath.FromSlash(entry.Path))
 		if err != nil {
@@ -340,7 +392,7 @@ func (a *Archive) VerifyDirectory(directory string) error {
 			return err
 		}
 		h := sha256.New()
-		n, err := io.Copy(h, io.LimitReader(f, entry.Size+1))
+		n, err := m.copy(h, io.LimitReader(f, entry.Size+1))
 		f.Close()
 		if err != nil {
 			return err
@@ -349,7 +401,11 @@ func (a *Archive) VerifyDirectory(directory string) error {
 			return fmt.Errorf("modified runtime cache file: %s", entry.Path)
 		}
 	}
+	m.report(true)
 	return fs.WalkDir(root.FS(), ".", func(name string, d fs.DirEntry, err error) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if err != nil {
 			return err
 		}

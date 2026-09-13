@@ -236,6 +236,7 @@ static void TestCloudCharts(void) {
 typedef struct MeshCapture {
   unsigned count;
   float x[7][4], y[7][4], z[7][4];
+  SimBackgroundMountainMeshUV uv[7][4];
 } MeshCapture;
 
 static void CaptureMesh(
@@ -247,6 +248,7 @@ static void CaptureMesh(
   memcpy(out->x[out->count], x, sizeof(out->x[0]));
   memcpy(out->y[out->count], y, sizeof(out->y[0]));
   memcpy(out->z[out->count], z, sizeof(out->z[0]));
+  memcpy(out->uv[out->count], uv, sizeof(out->uv[0]));
   for (int p = 0; p < 4; p++) {
     assert(isfinite(x[p]) && isfinite(y[p]) && isfinite(z[p]));
     assert(uv[p].x >= 0 && uv[p].x <= 1 && uv[p].y >= 0 && uv[p].y <= 1);
@@ -278,6 +280,62 @@ static void TestSharedMesh(void) {
     assert(capture.count == relief.stack_layer_count + 1u);
     assert(capture.z[capture.count - 1][0] > 0);
     assert(capture.z[capture.count - 1][2] == 0 && capture.z[capture.count - 1][3] == 0);
+  }
+}
+
+static void TestMountainTileSampling(void) {
+  const int atlas_sizes[] = {512, 1024};
+  const int source_cells[][2] = {{0, 0}, {7, 13}, {31, 31}};
+  for (int detail = kSimBackgroundVoxelDetail_Low;
+       detail <= kSimBackgroundVoxelDetail_Ultra; detail++) {
+    SimBackgroundMountainRelief relief;
+    SimBackgroundMountainRelief_Resolve((SimBackgroundVoxelDetail)detail, &relief);
+    for (size_t a = 0; a < sizeof(atlas_sizes) / sizeof(atlas_sizes[0]); a++)
+      for (size_t cell = 0; cell < sizeof(source_cells) / sizeof(source_cells[0]); cell++) {
+        const int sx = source_cells[cell][0], sy = source_cells[cell][1];
+        MeshCapture capture[2] = {{0}};
+        for (int mirrored = 0; mirrored < 2; mirrored++) {
+          SimBackgroundMountainMeshContext context = {
+            .relief = &relief, .height_scale = 1, .atlas_pixels = atlas_sizes[a],
+            .stack_direction = {0, -1}, .emit = CaptureMesh, .user = &capture[mirrored],
+          };
+          SimBackgroundMountainMesh_StackTile(
+              &context, 64, 64, 64, 64, 1, 0, sx, sy,
+              mirrored ? kSimBackgroundMountainCapTile_MirrorX : 0);
+          assert(capture[mirrored].count == relief.stack_layer_count);
+          for (unsigned face = 0; face < capture[mirrored].count; face++)
+            for (int p = 0; p < 4; p++) {
+              const bool right = (p == 1 || p == 2) != (mirrored != 0);
+              const float u = capture[mirrored].uv[face][p].x * atlas_sizes[a];
+              const float v = capture[mirrored].uv[face][p].y * atlas_sizes[a];
+              /* Every LOD/copy samples texel centres, never the neighbouring
+               * tile. Nearest filtering alone did not prevent edge leakage. */
+              assert(u == sx * 16 + (right ? 15.5f : .5f));
+              assert(v == sy * 16 + (p >= 2 ? 15.5f : .5f));
+            }
+        }
+        /* Mirroring changes the art only, not the joined mesh vertices. */
+        assert(!memcmp(capture[0].x, capture[1].x, sizeof(capture[0].x)));
+        assert(!memcmp(capture[0].y, capture[1].y, sizeof(capture[0].y)));
+        assert(!memcmp(capture[0].z, capture[1].z, sizeof(capture[0].z)));
+      }
+  }
+}
+
+static void CheckMountainSceneSampling(const SimWorldNavigationMountainScene *scene) {
+  for (size_t at = 0; at < scene->face_count; at++) {
+    const SimWorldNavigationMountainFace *face = &scene->faces[at];
+    const float atlas = kSimWorldNavigationMountainAtlasPixels;
+    const float u0 = floorf(face->uv[0].x * atlas / 16) * 16;
+    const float v0 = floorf(face->uv[0].y * atlas / 16) * 16;
+    for (int p = 0; p < 4; p++) {
+      const float u = face->uv[p].x * atlas - u0;
+      const float v = face->uv[p].y * atlas - v0;
+      /* Includes clipped rear strips, exterior continuations and volcano
+       * roofs. Interpolation must stay inside one tile's texel centres. */
+      assert(u >= .5f - .0001f && u <= 15.5f + .0001f);
+      assert(v >= .5f - .0001f && v <= 15.5f + .0001f);
+    }
   }
 }
 
@@ -319,8 +377,26 @@ static void CheckRearClearance(const SimWorldNavigationTownGround *ground,
   }
 }
 
+static bool IsIsolatedInteriorPeak(const SimBackgroundMountainObjectList *objects,
+                                   unsigned index) {
+  const SimBackgroundMountainObject *a = &objects->objects[index];
+  if (a->flags & kSimBackgroundMountainObject_Volcano) return false;
+  const int bounds[4] = {a->cell_x, a->cell_y,
+      a->cell_x + a->width_cells, a->cell_y + a->height_cells};
+  if (bounds[0] <= 0 || bounds[1] <= 0 || bounds[2] >= 32 || bounds[3] >= 32) return false;
+  for (unsigned i = 0; i < objects->count; i++) {
+    if (i == index) continue;
+    const SimBackgroundMountainObject *b = &objects->objects[i];
+    const int x_separation = bounds[0] >= b->cell_x + b->width_cells || bounds[2] <= b->cell_x;
+    const int y_separation = bounds[1] >= b->cell_y + b->height_cells || bounds[3] <= b->cell_y;
+    if (!x_separation && !y_separation) return false;
+  }
+  return true;
+}
+
 static void CheckRearSlopes(const SimWorldNavigationTownGround *ground,
                             const SimWorldNavigationMountainScene *scene) {
+  CheckMountainSceneSampling(scene);
   CheckRearClearance(ground, scene);
   size_t rear = 0, front = 0, contacts = 0;
   for (uint8_t town = 1; town <= kSimTownCount; town++) {
@@ -333,6 +409,15 @@ static void CheckRearSlopes(const SimWorldNavigationTownGround *ground,
     assert(SimBackgroundMountainObjects_Build(&field, &caps, &objects));
     int ox, oy;
     assert(SimWorldMap_OriginForTown(town, &ox, &oy));
+    unsigned isolated = 0;
+    for (unsigned i = 0; i < objects.count; i++)
+      if (IsIsolatedInteriorPeak(&objects, i)) {
+        const SimBackgroundMountainObject *object = &objects.objects[i];
+        printf("compact mountain: town=%u cell=(%d,%d) size=%ux%u rear-scale=0.70\n",
+            town, object->cell_x, object->cell_y, object->width_cells, object->height_cells);
+        isolated++;
+      }
+    printf("rear-fit policy town=%u: isolated=%u protected=%u\n", town, isolated, objects.count-isolated);
     for (size_t at = 0; at < scene->face_count; at++) {
       const SimWorldNavigationMountainFace *face = &scene->faces[at];
       if (face->town != town) continue;
@@ -357,16 +442,17 @@ static void CheckRearSlopes(const SimWorldNavigationTownGround *ground,
                 FirstOpaqueRow(object, c < width ? c : width - 1));
           }
           if (scene->overhead_crater && (object->flags & kSimBackgroundMountainObject_Volcano)) {
-            /* The cap widens the summit, but keeps the original ground
+            /* The compact rear halves the run to the original ground
              * contact. Interpolate the rear plane independently from its
              * two source-column endpoints, including clipped vertices. */
             const float rise = fminf((object->height_cells - 1) * 16,
                 object->height_cells * 16 - crest);
             const float height = rise * .30f * scale / 16;
-            const float contact = oy + object->cell_y + crest / 16;
+            const float original_contact = oy + object->cell_y + crest / 16;
             const float front_y = oy + object->cell_y + object->height_cells - rise * .62f / 16;
             const float fraction = rise / ((object->height_cells - 1) * 16);
-            const float back_y = front_y - 28.0f / 16 * fraction * fraction;
+            const float back_y = front_y - 14.0f / 16 * fraction * fraction;
+            const float contact = (original_contact + back_y) * .5f;
             if (face->summit_roof) {
               if (fabsf(face->z[p] - height) > .00002f ||
                   face->y[p] < back_y - .0001f || face->y[p] > front_y + .0001f) {
@@ -385,18 +471,22 @@ static void CheckRearSlopes(const SimWorldNavigationTownGround *ground,
           }
           if (face->summit_roof) { matched = false; break; }
           crest = object->cell_y + crest / 16;
+          const float fit_scale = IsIsolatedInteriorPeak(&objects, object_index) ? .70f : 1;
+          const float ridge = object->cell_y + object->height_cells -
+              (object->cell_y + object->height_cells - crest) * .62f;
+          const float contact = ridge + (crest - ridge) * fit_scale;
           /* Independent inverse of the fold: native z gives distance from
            * the front contact; the rear's remaining 38% must recover the
            * original opaque contour, not extend into another ground cell. */
-          const float recovered = face->y[p] - oy - face->z[p] / (.30f * scale) * .38f;
+          const float recovered = face->y[p] - oy - face->z[p] / (.30f * scale) * .38f * fit_scale;
           /* Cell clipping adds interpolated vertices along an accepted
            * linear skyline span (at most half a source pixel of error). */
-          if (fabsf(recovered - crest) > .5f / 16 + .00002f) { matched = false; break; }
+          if (fabsf(recovered - contact) > .5f / 16 + .00002f) { matched = false; break; }
         }
       }
       assert(matched);
       for (int p = 0; p < 4; p++) {
-        if (face->summit_roof) assert(face->brightness[p] == 255);
+        if (face->summit_roof) assert(face->brightness[p] >= 235 && face->brightness[p] <= 255);
         else assert(face->brightness[p] >= 190 && face->brightness[p] <= 235);
         if (!face->exterior) assert(face->x[p] >= ox && face->x[p] <= ox + 32);
         assert(face->z[p] >= 0 && face->z[p] <= scene->maximum_rise);
@@ -938,13 +1028,27 @@ static void TestLavaPalette(void) {
   }
 }
 
+static int CompareCraterShade(const void *a, const void *b) {
+  const uint32_t left = *(const uint32_t *)a, right = *(const uint32_t *)b;
+  return (left > right) - (left < right);
+}
+
 static void CheckOverheadCrater(const SimWorldNavigationMountainScene *scene,
                                 const uint8_t *rom, uint8_t tier) {
   assert(scene->overhead_crater && scene->lava_tiles == 1 && !scene->lava_ready);
   const uint8_t tiles[4] = {0xA6, 0xA7, 0xB6, 0xB7};
   const uint32_t *rock = SimTownGroundArt_Metatile(4, tier, 0x89);
-  assert(rock);
-  unsigned lava = 0;
+  const uint32_t *right_rock = SimTownGroundArt_Metatile(4, tier, 0x8A);
+  assert(rock && right_rock);
+  uint32_t shades[256];
+  unsigned shades_count = 0;
+  for (unsigned p = 0; p < 256; ++p) if (rock[p] >> 24) shades[shades_count++] = rock[p];
+  assert(shades_count);
+  qsort(shades,shades_count,sizeof(*shades),CompareCraterShade);
+  unsigned unique = 1;
+  for (unsigned p = 1; p < shades_count; ++p)
+    if (shades[p] != shades[unique-1]) shades[unique++] = shades[p];
+  unsigned lava = 0, blended = 0, matched_edges = 0;
   for (int y = 0; y < 16; y++)
     for (int x = 0; x < 16; x++) {
       const int tile = tiles[y / 8 * 2 + x / 8], p = y % 8 * 8 + x % 8;
@@ -954,9 +1058,23 @@ static void CheckOverheadCrater(const SimWorldNavigationMountainScene *scene,
       assert(!scene->lava_mask[1][y * 16 + x]);
       lava += index == 0;
       if (index >= 0x40 && index <= 0x45) {
-        bool native = false;
-        for (int q = 0; q < 256; q++) native |= actual == rock[q];
-        assert(native && actual >> 24 == 255);
+        const uint32_t authored = shades[(index-0x40)*(unique-1)/5];
+        const unsigned column = (x*31+7)/15;
+        const uint32_t slope = (column < 16 ? rock : right_rock)[column%16];
+        const double radius = hypot((x-7.5)/7.5,(y-7.5)/7.5);
+        const double t = fmin(1,fmax(0,(1-radius)/.25));
+        const double weight = t*t*(3-2*t);
+        assert(actual >> 24 == 255); /* Rounded colour, never a cutout hole. */
+        for (unsigned shift = 0; shift < 24; shift += 8) {
+          const double a = (slope >> shift)&255u, b = (authored >> shift)&255u;
+          const int expected = (int)floor(a+(b-a)*weight+.5);
+          assert(abs((int)((actual>>shift)&255u)-expected) <= 1);
+        }
+        if (!x || x == 15 || !y || y == 15) {
+          assert(actual == (slope | 0xff000000u));
+          ++matched_edges;
+        }
+        blended += actual != authored;
       } else {
         const unsigned bgr = rom[0xE3F93 + index * 2] | rom[0xE3F94 + index * 2] << 8;
         const unsigned r = bgr & 31, g = bgr >> 5 & 31, b = bgr >> 10 & 31;
@@ -966,6 +1084,9 @@ static void CheckOverheadCrater(const SimWorldNavigationMountainScene *scene,
       }
     }
   assert(lava > 0 && lava < 256);
+  assert(blended > 20 && matched_edges == 60);
+  printf("rounded crater rock: %u texels blended, %u perimeter texels match native crest; rim/opening unchanged\n",
+      blended,matched_edges);
   double area = 0;
   unsigned roof_faces = 0, cap_faces = 0;
   for (size_t at = 0; at < scene->face_count; at++) {
@@ -986,6 +1107,7 @@ static void CheckOverheadCrater(const SimWorldNavigationMountainScene *scene,
     double signed_area = 0;
     for (int p = 0; p < 4; p++) {
       assert(fabsf(face->z[p] - 1.68f) < .00001f);
+      assert(face->brightness[p] == (p < 2 ? 255 : 235));
       assert(face->uv[p].x * 512 >= 496.5f && face->uv[p].x * 512 <= 511.5f);
       assert(face->uv[p].y * 512 >= 496.5f && face->uv[p].y * 512 <= 511.5f);
       signed_area += (double)face->x[p] * face->y[(p + 1) % 4] -
@@ -993,12 +1115,78 @@ static void CheckOverheadCrater(const SimWorldNavigationMountainScene *scene,
     }
     area += fabs(signed_area) * .5 * 256;
   }
-  /* Exactly one 32x28 summit, not a second cap on the back or duplicate
+  /* Exactly one slimmer 32x14 summit, not a second cap on the back or duplicate
    * coincident polygons. Other roof strips carry native shoulder art. */
   assert(cap_faces == 32 && roof_faces > cap_faces);
-  assert(fabs(area - 32 * 28) < .01);
+  assert(fabs(area - 32 * 14) < .01);
   printf("native Aitos overhead crater: %u lava texels, %u cap faces, %.2f pixel area\n",
       lava, cap_faces, area);
+}
+
+static void CheckCompactVolcanoGroundAndSeal(const SimWorldNavigationTownGround *ground,
+                                            const SimWorldNavigationMountainScene *scene) {
+  /* Each inferred roof strip must still meet an actual rear-slope vertex,
+   * not merely another point on an independently approximated silhouette. */
+  unsigned sealed = 0;
+  for (size_t at = 0; at < scene->face_count; ++at) {
+    const SimWorldNavigationMountainFace *roof = &scene->faces[at];
+    if (!roof->summit_roof) continue;
+    for (int p = 2; p < 4; ++p) {
+      if (roof->z[p] <= 0) continue;
+      bool joined = false;
+      for (size_t rear_at = 0; rear_at < scene->face_count && !joined; ++rear_at) {
+        const SimWorldNavigationMountainFace *rear = &scene->faces[rear_at];
+        if (!rear->rear_slope || rear->summit_roof || rear->town != roof->town) continue;
+        for (int q = 0; q < 4; ++q)
+          if (fabsf(roof->x[p]-rear->x[q]) < .00001f &&
+              fabsf(roof->y[p]-rear->y[q]) < .00001f && fabsf(roof->z[p]-rear->z[q]) < .00001f) {
+            assert(roof->brightness[p] == rear->brightness[q]);
+            joined = true;
+          }
+      }
+      assert(joined);
+      ++sealed;
+    }
+  }
+  assert(sealed >= 64);
+
+  /* The two old crown-source cells are exposed by the shorter rear. Keep
+   * source cleanup ownership there, even though the mesh foot moved inward.
+   * Both full and dirty-cell refreshes must restore native grass, not the old
+   * overhead crater/rock; adjacent pixels must remain untouched. */
+  int ox,oy; assert(SimWorldMap_OriginForTown(4,&ox,&oy));
+  const uint32_t *plain = SimTownGroundArt_Metatile(4,ground->development_tier[3],8);
+  uint32_t *pixels = malloc(2048u*2048*sizeof(*pixels));
+  assert(pixels && plain);
+  uint8_t dirty[kSimWorldMapBytes] = {0};
+  const int cells[][2] = {{8,8}, {9,8}, {13,13}, {14,13}, {27,20}, {28,20}};
+  for (unsigned i = 0; i < sizeof(cells)/sizeof(cells[0]); ++i) {
+    const int at = (oy+cells[i][1])*128+ox+cells[i][0];
+    assert(scene->replacement[at] == 4);
+    dirty[at] = 1;
+  }
+  for (int incremental = 0; incremental < 2; ++incremental) {
+    memset(pixels,0x5a,2048u*2048*sizeof(*pixels));
+    assert(SimWorldNavigationMountains_ClearGround(pixels,2048,ground,8,incremental ? dirty : NULL));
+    for (unsigned i = 0; i < sizeof(cells)/sizeof(cells[0]); ++i)
+      for (int py = 0; py < 16; ++py) for (int px = 0; px < 16; ++px) {
+      assert(plain[py*16+px] >> 24);
+      assert(pixels[((oy+cells[i][1])*16+py)*2048+(ox+cells[i][0])*16+px] == plain[py*16+px]);
+    }
+    assert(pixels[0] == 0x5a5a5a5au);
+  }
+  free(pixels);
+  assert(SimWorldNavigationTerrain_RebuildWorldPrior(SimWorldMap_BakedPixels(),1024,
+      SimWorldMap_GeographySerial()));
+  SimWorldNavigationTerrain_SetMountainReplacement(scene->replacement);
+  for (unsigned i = 0; i < sizeof(cells)/sizeof(cells[0]); ++i)
+    for (int x = 0; x <= 4; ++x) for (int y = 0; y <= 4; ++y) {
+    const float wx = ox+cells[i][0]+x*.25f, wy = oy+cells[i][1]+y*.25f;
+    assert(fabsf(SimWorldNavigationTerrain_HeightUnits(wx,wy) -
+        SimWorldNavigationTerrain_FloorHeightUnits(wx,wy)) < .00001f);
+  }
+  SimWorldNavigationTerrain_SetMountainReplacement(NULL);
+  printf("compact volcano: %u roof/rear joins sealed; vacated crown-source cells restore grass and floor height\n",sealed);
 }
 
 static void TestCapturedMountainScene(const char *rom_path, const char *wram_path) {
@@ -1033,6 +1221,7 @@ static void TestCapturedMountainScene(const char *rom_path, const char *wram_pat
   }
   assert(scene.town_mask == expected);
   CheckOverheadCrater(&scene, rom, ground.development_tier[3]);
+  CheckCompactVolcanoGroundAndSeal(&ground,&scene);
   CheckLavaPalette(&scene);
   CheckRearSlopes(&ground, &scene);
   assert(wram[0x18] == 0 && wram[0x19] == 9);
@@ -1047,6 +1236,20 @@ static void TestCapturedMountainScene(const char *rom_path, const char *wram_pat
   printf("native exterior continuations: %zu faces\n", scene.exterior_face_count);
   CheckExteriorClearance(&scene);
   CheckRearSlopes(&ground, &scene);
+  const char *audit_path = getenv("AR_TEST_MOUNTAIN_AUDIT");
+  if (audit_path) {
+    FILE *audit = fopen(audit_path, "w");
+    assert(audit);
+    for (size_t at = 0; at < scene.face_count; at++) {
+      const SimWorldNavigationMountainFace *face = &scene.faces[at];
+      fprintf(audit, "%u %u %u %u", face->town, face->rear_slope, face->summit_roof, face->exterior);
+      for (int p = 0; p < 4; p++)
+        fprintf(audit, " %.9g %.9g %.9g %.9g %.9g %u", face->x[p], face->y[p], face->z[p],
+            face->uv[p].x, face->uv[p].y, face->brightness[p]);
+      fputc('\n', audit);
+    }
+    assert(!ferror(audit) && fclose(audit) == 0);
+  }
   assert(SimWorldNavigationTerrain_RebuildWorldPrior(SimWorldMap_BakedPixels(), 1024,
       SimWorldMap_GeographySerial()));
   SimWorldNavigationMountainTransition transition = {0};
@@ -1196,6 +1399,7 @@ static void TestSkyCloudVolume(void) {
 }
 
 int main(int argc, char **argv) {
+  TestMountainTileSampling();
   TestSkyCloudVolume();
   TestCloudBakeExact();
   TestCloudSphere();

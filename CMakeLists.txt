@@ -925,6 +925,8 @@ if(BUILD_TESTING)
         src/sim/sim3d_performance.c
         src/present_sim3d_environment.c
         src/present_world_nav.c
+        src/present_sim_globe_mapping.c
+        src/present_retained_image.c
         src/present_world_nav_geometry.c
         src/present_world_nav_model_mesh.c
         src/present_world_nav_sky.c
@@ -963,6 +965,17 @@ if(BUILD_TESTING)
     )
     add_executable(actraiser_present_world_nav_test
         tests/present_world_nav_test.c ${AR_WORLD_NAV_TEST_SOURCES})
+    add_executable(actraiser_present_retained_image_test
+        tests/present_retained_image_test.c src/present_retained_image.c)
+    target_include_directories(actraiser_present_retained_image_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    add_test(NAME actraiser_present_retained_image COMMAND actraiser_present_retained_image_test)
+
+    add_executable(actraiser_present_sim_globe_mapping_test
+        tests/present_sim_globe_mapping_test.c src/present_sim_globe_mapping.c
+        src/sim/sim_world_navigation_globe.c src/sim/sim_town_terrain.c)
+    target_include_directories(actraiser_present_sim_globe_mapping_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    target_link_libraries(actraiser_present_sim_globe_mapping_test PRIVATE actraiser_math)
+    add_test(NAME actraiser_present_sim_globe_mapping COMMAND actraiser_present_sim_globe_mapping_test)
     target_include_directories(actraiser_present_world_nav_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
@@ -998,6 +1011,7 @@ if(BUILD_TESTING)
     target_link_libraries(actraiser_present_world_nav_gpu_test PRIVATE
         SDL3::SDL3 actraiser_math)
     target_compile_definitions(actraiser_present_world_nav_gpu_test PRIVATE
+        AR_SIM_GLOBE_TESTING=1
         AR_SIM3D_TERRAIN_ELEVATION=${AR_SIM3D_TERRAIN_ELEVATION_VALUE})
     add_test(NAME actraiser_present_world_nav_gpu
         COMMAND actraiser_present_world_nav_gpu_test)
@@ -1020,7 +1034,8 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_present_sim3d_clouds_test
         tests/present_sim3d_clouds_test.c src/present_sim3d_clouds.c
-        src/present_sim3d_environment.c src/scene3d_math.c)
+        src/present_sim3d_environment.c src/scene3d_math.c
+        src/sim/sim_world_navigation_globe.c)
     target_include_directories(actraiser_present_sim3d_clouds_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     target_link_libraries(actraiser_present_sim3d_clouds_test PRIVATE actraiser_math)
@@ -1819,6 +1834,17 @@ if(BUILD_TESTING)
     # Scene -> CRT resolve -> host UI sequencing. The tiny present_frame.c
     # orchestrator is linked against test stubs so this remains deterministic
     # and GPU-free while guarding the order that keeps UI above pillar bars.
+    add_executable(actraiser_presentation_view_test
+        tests/presentation_view_test.c src/presentation_view.c src/present_sky_palace.c)
+    target_include_directories(actraiser_presentation_view_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    add_test(NAME actraiser_presentation_view COMMAND actraiser_presentation_view_test)
+
+    add_executable(actraiser_render_preparation_test
+        tests/render_preparation_test.c src/render_preparation.c)
+    target_include_directories(actraiser_render_preparation_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    add_test(NAME actraiser_render_preparation COMMAND actraiser_render_preparation_test)
+
     add_executable(actraiser_present_frame_order_test
         tests/present_frame_order_test.c
         src/performance_metrics.c src/platform/sdl/host_clock_sdl.c

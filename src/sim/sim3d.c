@@ -2,6 +2,7 @@
 #include "sim_background_voxels.h"
 #include "sim_background_voxel_preset.h"
 #include "sim_town_terrain.h"
+#include "sim_ppu_color_math.h"
 
 #include "sim_town_canvas.h"
 #include "performance_metrics.h"
@@ -436,11 +437,11 @@ static SrResult PrepareCaptureFromPpuView(
     g_sim3d.status = kSim3DCapture_UnsupportedPpu;
     return SR_RESULT_OK;
   }
-  /* With fixed color zero, no half/subtract, no subscreen, and no color
-   * window clipping, the PPU's fast path proves color math is a no-op. */
-  bool no_op_color_math = ppu->color_math_control == 0 &&
-      ppu->fixed_color == 0 &&
-      (ppu->color_math_designation & 0xc0) == 0;
+  /* No designated layers leave even a nonzero fixed colour unused. Otherwise
+   * retain the proven zero-add/no-half/no-subtract profile. Subscreen and
+   * colour-window ownership are validated separately. */
+  bool no_op_color_math = SimPpuColorMath_IsNoOp(
+      ppu->color_math_control, ppu->color_math_designation, ppu->fixed_color);
 
   /* The sun miracle: a plain fixed-colour add, ramping, onto BG1 alone
    * (measured cgwsel=$00 cgadsub=$01 fixed=$0001 screen=$15/$00). cgwsel zero

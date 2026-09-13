@@ -108,8 +108,8 @@ static void TestDefaultsAndMetadata(void) {
    * off: the PPU has a single path, so the setting selected between a modern
    * renderer and a legacy one that no longer exists. Localization adds six
    * source, presentation, and enhanced-font preferences, plus an independent
-   * host interface language. */
-  CHECK(g_setting_desc_count == 290);
+   * host interface language. Connected SIM adds one default-on underlay row. */
+  CHECK(g_setting_desc_count == 291);
   for (int i = 0; i < g_setting_desc_count; i++) {
     const SettingDesc *a = &g_setting_descs[i];
     CHECK(a->key && a->key[0] && a->label && a->tooltip);
@@ -190,6 +190,8 @@ static void TestDefaultsAndMetadata(void) {
   CHECK(g_settings.sim3d_world_navigation_relief);
   CHECK(g_settings.sim3d_world_navigation_ground_detail);
   CHECK(g_settings.sim3d_world_navigation_mountains);
+  CHECK(g_settings.sim3d_globe_underlay);
+  CHECK(!Settings_IsAvailable(Settings_Find("sim3d_globe_underlay")));
   /* The stage toggles are what the player's master switch resolves, so a
    * landed stage missing from these defaults is dead in normal play. They must
    * agree with kSim3DShippedFeatures; bump both as each visual gate passes. */
@@ -570,13 +572,40 @@ static void TestSim3DEnvironmentLabels(void) {
   CHECK(Settings_Sim3DRequestedFeatures() ==
         (kSimFeature_SeparatedComposite | kSimFeature_GroundProjection |
          kSimFeature_ObjectBillboards | kSimFeature_SoftShadows |
-         kSimFeature_RimLight | kSimFeature_WorldUnderlay |
+         kSimFeature_RimLight | kSimFeature_WorldUnderlay | kSimFeature_GlobeUnderlay |
          kSimFeature_CloudShroud | kSimFeature_CullHaze |
          kSimFeature_Backdrop | kSimFeature_EffectLighting |
          kSimFeature_Particles));
   CHECK(g_settings.sim3d_tilt_x_mrad ==
         kSim3DCameraPitchMaximumMrad);
   ClearSettingsEnv();
+}
+
+static void TestConnectedWorldDefaults(void) {
+  ClearSettingsEnv();
+  Settings_Init();
+  const SettingDesc *globe = Settings_Find("sim3d_globe_underlay");
+  CHECK(globe && globe->defval == 1 && !Settings_IsDebugOnly(globe));
+  CHECK(g_settings.sim3d_globe_underlay && !Settings_IsAvailable(globe));
+  g_settings.sim3d_mode = true;
+  CHECK(Settings_IsAvailable(globe));
+  CHECK(!g_settings.sim3d_world_navigation); /* independent opt-in */
+  CHECK(Settings_IsAvailable(Settings_Find("sim3d_world_navigation_towns")));
+  CHECK(Settings_Sim3DRequestedFeatures() & kSimFeature_GlobeUnderlay);
+  CHECK(Settings_SetText(globe, "Off") == kSettingChange_Applied);
+  CHECK(!(Settings_Sim3DRequestedFeatures() & kSimFeature_GlobeUnderlay));
+  CHECK(!Settings_IsAvailable(Settings_Find("sim3d_world_navigation_towns")));
+  CHECK(Settings_SetText(globe, "On") == kSettingChange_Applied);
+  g_settings.sim3d_voxel_preset = kSimBackgroundVoxelPreset_Off;
+  CHECK(!Settings_IsAvailable(globe));
+  CHECK(!(Settings_Sim3DRequestedFeatures() & kSimFeature_GlobeUnderlay));
+  g_settings.sim3d_voxel_preset = kSimBackgroundVoxelPreset_Balanced;
+  g_settings.sim3d_world_underlay = false;
+  CHECK(!Settings_IsAvailable(globe));
+  g_settings.sim3d_world_underlay = true;
+  g_settings.sim3d_ground_projection = false;
+  CHECK(!Settings_IsAvailable(globe));
+  Settings_Init();
 }
 
 static bool WriteTextFile(const char *path, const char *text) {
@@ -1694,6 +1723,42 @@ static void DumpInterfaceInventory(void) {
   puts("\n]");
 }
 
+static void TestHardwareCapabilities(void) {
+  ClearSettingsEnv();
+  Settings_Init();
+  const SettingDesc *town = Settings_Find("sim3d_mode");
+  const SettingDesc *crt = Settings_Find("crt_enabled");
+  CHECK(Settings_SetLong(town, 1) != kSettingChange_Rejected);
+  CHECK(Settings_SetLong(crt, 1) != kSettingChange_Rejected);
+  Settings_ApplyRenderCapabilities(kRenderFeature_All & ~kRenderFeature_Depth & ~kRenderFeature_Crt);
+  CHECK(!g_settings.sim3d_mode && !g_settings.crt_enabled);
+  CHECK(!Settings_IsAvailable(town) && !Settings_IsAvailable(crt));
+  CHECK(Settings_HardwareUnavailableReason(town) != NULL);
+  CHECK(!Settings_IsAvailable(Settings_Find("crt_curvature_x100")));
+  CHECK(Settings_SetLong(town, 1) == kSettingChange_Rejected);
+  CHECK(Settings_SetText(crt, "On") == kSettingChange_Rejected);
+  CHECK(!Settings_RenderCapabilitiesRetained(0));
+  CHECK(Settings_RenderCapabilitiesRetained(kRenderFeature_All));
+  Settings_SetPersistenceEnabled(true);
+  const char *path = "actraiser-settings-hardware-test.ini";
+  CHECK(Settings_Save(path));
+  CHECK(FileContains(path, "sim3d_mode = On"));
+  CHECK(FileContains(path, "crt_enabled = On"));
+  remove(path);
+  /* A later boot on capable hardware restores the requested configuration. */
+  Settings_ApplyRenderCapabilities(kRenderFeature_All);
+  CHECK(g_settings.sim3d_mode && g_settings.crt_enabled);
+  CHECK(Settings_HardwareUnavailableReason(town) == NULL);
+  Settings_ApplyRenderCapabilities(kRenderFeature_All & ~kRenderFeature_Crt);
+  (void)Settings_SetLong(crt, 0); /* explicit user change clears the saved intent */
+  Settings_ApplyRenderCapabilities(kRenderFeature_All);
+  CHECK(!g_settings.crt_enabled);
+  Settings_ApplyRenderCapabilities(0);
+  Settings_Init(); /* fresh boot loads intent without stale hardware gating */
+  CHECK(Settings_HardwareUnavailableReason(town) == NULL);
+  CHECK(Settings_SetLong(town, 1) != kSettingChange_Rejected);
+}
+
 int main(int argc,char **argv) {
   if(argc==2&&!strcmp(argv[1],"--dump-ui-catalog")) {DumpInterfaceInventory();return 0;}
   TestLocalizationPackIdentity();
@@ -1704,6 +1769,7 @@ int main(int argc,char **argv) {
   TestEffectAvailabilityFollowsRendererSupport();
   TestScalePercentToOutput();
   TestDefaultsAndMetadata();
+  TestConnectedWorldDefaults();
   TestVideoSettingAudit();
   TestSim3DEnvironmentLabels();
   TestConfigSettingsEnvironmentPrecedence();
@@ -1713,6 +1779,7 @@ int main(int argc,char **argv) {
   TestCheatsCanBeStagedOutsideTheirRuntimeMode();
   TestNoWideBudget();
   TestInputBindings();
+  TestHardwareCapabilities();
   ClearSettingsEnv();
   Settings_SetChangeObserver(NULL);
   Settings_SetActionObserver(NULL);

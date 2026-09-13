@@ -105,6 +105,10 @@ static bool AppendSource(const WorldNavigationModelSource *source,
               (source->source_y + y * source_scale) / kSimWorldMapTilePixels, v->normal, NULL)) return false;
       v->elevation[0] = source->anchor_height;
       v->elevation[1] = point->z * height_scale;
+      if (style->embedding.town && !SimGlobeMapping_Encode(&style->embedding,
+              (source->source_x+x*source_scale)/kSimWorldMapTilePixels,
+              (source->source_y+y*source_scale)/kSimWorldMapTilePixels,
+              v->elevation[0], v->elevation[1], v->normal, v->elevation)) return false;
       const float shade = style->lighting ? .74f + .18f * shading->brightness[face][p] / 255.0f : .88f;
       v->color = (ArRenderColorF){
         ((argb >> 16) & 255) / 255.0f * shade, ((argb >> 8) & 255) / 255.0f * shade,

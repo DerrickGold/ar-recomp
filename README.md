@@ -113,6 +113,11 @@ directory instead. The portable archives wrap the exact same built application
 as the direct artifacts; they are not separate builds. AppImage bundles use
 tar.xz so extraction preserves the executable bit.
 
+On Windows, a startup window shows progress while the bundled tools and browser
+are prepared or checked. The first launch can take a few minutes on slower
+machines. You can cancel safely; opening the Builder again for the same workspace
+brings the existing window forward instead of starting another copy.
+
 Each Builder contains the buildable project, a pinned Zig C/C++ toolchain, and
 matched SDL3/SDL3_ttf headers and libraries for its platform. A SHA-256 sidecar
 is included for each download. Players do not need system SDL development
