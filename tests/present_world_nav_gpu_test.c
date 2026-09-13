@@ -11,6 +11,7 @@
 #include "platform/sdl/render_sdl_internal.h"
 #include "present_internal.h"
 #include "present_sim3d_internal.h"
+#include "present_sim_globe.h"
 #include "render/render_output.h"
 #include "render/localized_text_presenter.h"
 #include "settings.h"
@@ -843,13 +844,13 @@ static void TestAnimatedTownCache(SDL_Renderer *renderer, const FrameSlot *slot,
     }
     PresentWorldNav_ResetResources();
     UploadWorldNavigationComposition(probe);
-    Sim3DDepthMesh *pressure[4] = {0};
+    Sim3DDepthMesh *pressure[32] = {0};
+    unsigned pressure_count = 0;
     if (retained == 3) {
       CHECK(Sim3DDepthPass_Begin(&g_render_device, 1792, 1344, kArRenderFilter_Nearest));
-      for (int i = 0; i < 4; ++i) {
-        pressure[i] = Sim3DDepthPass_CreateGeometryMesh();
-        CHECK(pressure[i]);
-      }
+      while (pressure_count < 32 && (pressure[pressure_count] = Sim3DDepthPass_CreateGeometryMesh()))
+        ++pressure_count;
+      CHECK(pressure_count >= 5 && pressure_count < 32);
       CHECK(!Sim3DDepthPass_CreateGeometryMesh());
     }
     const int phases[] = {0, 0, 0, 1, 2, 1, 0, 2};
@@ -873,7 +874,7 @@ static void TestAnimatedTownCache(SDL_Renderer *renderer, const FrameSlot *slot,
       }
     }
     CHECK(measured[retained].ready);
-    for (int i = 0; i < 4; ++i) Sim3DDepthPass_DestroyMesh(pressure[i]);
+    for (unsigned i = 0; i < pressure_count; ++i) Sim3DDepthPass_DestroyMesh(pressure[i]);
   }
   CHECK(dense ? measured[1].counts[kPerformanceCount_DepthUploadBytes] ==
       measured[0].counts[kPerformanceCount_DepthUploadBytes]
@@ -1096,10 +1097,13 @@ static void TestRetainedMountainSurfaces(SDL_Renderer *renderer, const FrameSlot
     probe->sim.world_navigation.focus_x = (ox + 16) * kSimWorldMapTilePixels;
     probe->sim.world_navigation.focus_y = (oy + 16) * kSimWorldMapTilePixels;
     probe->sim.world_navigation.active_location = 2;
-    Sim3DDepthMesh *pressure[4] = {0};
+    Sim3DDepthMesh *pressure[32] = {0};
+    unsigned pressure_count = 0;
     if (mode == 2) {
       CHECK(Sim3DDepthPass_Begin(&g_render_device, kWidth, kHeight, kArRenderFilter_Nearest));
-      for (int i = 0; i < 4; ++i) CHECK((pressure[i] = Sim3DDepthPass_CreateGeometryMesh()));
+      while (pressure_count < 32 && (pressure[pressure_count] = Sim3DDepthPass_CreateGeometryMesh()))
+        ++pressure_count;
+      CHECK(pressure_count >= 5 && pressure_count < 32);
       CHECK(!Sim3DDepthPass_CreateGeometryMesh());
     }
     for (int state = 0; state < kStates; ++state) {
@@ -1131,7 +1135,7 @@ static void TestRetainedMountainSurfaces(SDL_Renderer *renderer, const FrameSlot
         CHECK(measured[mode].ready);
       }
     }
-    for (int i = 0; i < 4; ++i) Sim3DDepthPass_DestroyMesh(pressure[i]);
+    for (unsigned i = 0; i < pressure_count; ++i) Sim3DDepthPass_DestroyMesh(pressure[i]);
     weather_time_ms = 0;
   }
   CHECK(Differences(reference[3], reference[4]) > 100);
@@ -1430,6 +1434,152 @@ static void TestWorldAtlasVersions(SDL_Renderer *renderer, const FrameSlot *slot
   puts("world atlas: 16 animation pairs, cold/incremental/revisited/reset images exact");
 }
 
+static SDL_Surface *RenderSimGlobe(SDL_Renderer *renderer, const FrameSlot *slot,
+    const Scene3DCamera *camera, ArRenderRectI source) {
+  int width, height;
+  CHECK(ArRenderDevice_GetOutputSize(&g_render_device,&width,&height));
+  CHECK(ArRenderDevice_UseOutputCoordinates(&g_render_device));
+  CHECK(ArRenderDevice_SetRenderTarget(&g_render_device,ArRenderTexture_Invalid()));
+  CHECK(ArRenderDevice_SetViewport(&g_render_device,NULL));
+  CHECK(ArRenderDevice_SetClipRect(&g_render_device,NULL));
+  CHECK(ArRenderDevice_Clear(&g_render_device,(ArRenderColorF){.2f,.4f,.8f,1}));
+  float matrix[16];
+  Scene3D_BuildViewProjection(camera,width,height,matrix);
+  PresentSimGlobeView view = {0};
+  CHECK(PresentSimGlobeUnderlay(slot,source,(ArRenderRectI){0,0,width,height},camera,matrix,&view)
+      == kPresentationOutcome_Complete);
+  /* Placement is republished on retained-image hits for the later shroud. */
+  CHECK(view.map.town == slot->sim.town && view.map.radius > 0 && view.map.metric > 0);
+  CHECK(view.map.origin_x == slot->sim.underlay_origin_tile_x);
+  CHECK(view.map.origin_y == slot->sim.underlay_origin_tile_y);
+  CHECK(fabsf(Scene3D_ClipDepth(view.matrix,view.camera[0],view.camera[1],view.camera[2])) < .0001f);
+  SDL_Surface *readback = SDL_RenderReadPixels(renderer,NULL);
+  CHECK(readback);
+  SDL_Surface *result = SDL_ConvertSurface(readback,SDL_PIXELFORMAT_ARGB8888);
+  SDL_DestroySurface(readback);
+  CHECK(result && SDL_RenderPresent(renderer));
+  return result;
+}
+
+static void TestSimGlobeImage(SDL_Renderer *renderer) {
+  enum { kStates = 23, kRepeats = 5 };
+  const char *grid = SDL_getenv("AR_SIM3D_WORLD_GPU_GRID");
+  char *saved_grid = grid ? SDL_strdup(grid) : NULL;
+  CHECK(!grid || saved_grid);
+  SDL_Surface *reference[kStates] = {0};
+  PerformanceSnapshot continuous[3];
+  uint8_t original[kSimWorldMapBytes], changed[kSimWorldMapBytes];
+  memcpy(original,SimWorldMap_Baseline(),sizeof(original));
+  FrameSlot *probe = malloc(sizeof(*probe)); CHECK(probe);
+  InitSyntheticBloodpoolArt(true);
+  for (int mode = 0; mode < 3; ++mode) {
+    PresentSimGlobe_TestRetainImages(mode != 0);
+    CHECK(!SDL_setenv_unsafe("AR_SIM3D_WORLD_GPU_GRID",mode == 1 ? "0" : "1",1));
+    PresentWorldNav_ResetResources();
+    ResizeTestOutput(renderer,kWidth,kHeight);
+    SimWorldMap_PublishBuiltTilemap(original);
+    InitSlot(probe);
+    probe->sim.town = 4;
+    int ox,oy; CHECK(SimWorldMap_OriginForTown(4,&ox,&oy));
+    probe->sim.underlay_origin_tile_x = ox; probe->sim.underlay_origin_tile_y = oy;
+    probe->sim.world_navigation_ground_detail = true;
+    probe->sim.world_navigation_models = true;
+    probe->sim.world_navigation_lighting = true;
+    probe->sim.world_navigation_towns.ground.enabled_town_mask = 2;
+    memset(probe->sim.world_navigation_towns.ground.terrain[1],8,32*32);
+    probe->sim.world_navigation_towns.object_count = 1;
+    probe->sim.world_navigation_towns.objects[0] = (SimBackgroundVoxelObject){
+      .town = 2, .kind = kSimBackgroundVoxel_Windmill, .cell_x = 20, .cell_y = 20,
+      .source_cells_w = 2, .source_cells_h = 2,
+      .footprint_cells_w = 2, .footprint_cells_d = 2,
+      .visual_state = kSimStructureVisualState_Finished};
+    Scene3DCamera camera = {-.75f,0,4.5f,.4f};
+    ArRenderRectI source = {0,0,360,224};
+    for (int state = 0; state < kStates; ++state) {
+      switch (state) {
+        case 1: probe->sim.game_frame += 12; break;
+        case 2: probe->sim.game_frame = 0; break; /* rewind */
+        case 3: probe->sim.light_azimuth_deg = 30; break;
+        case 4: probe->sim.world_navigation_lighting = false; break;
+        case 5: probe->sim.world_navigation_towns.objects[0].cell_x++; break;
+        case 6: probe->sim.world_navigation_models = false; break;
+        case 7: probe->sim.world_navigation_models = true;
+                probe->sim.background_voxel_style = kSimBackgroundVoxelStyle_Basic; break;
+        case 8: probe->sim.height_scale_x100 = 150; break;
+        case 9: probe->sim.landscape_height_pct = 50; break;
+        case 10: probe->sim.world_navigation_mountains = true;
+                 probe->sim.world_navigation_towns.ground.terrain[1][0] = 0x89; break;
+        case 11: camera.tilt_y = .25f; break;
+        case 12: probe->sim.camera_x = 16; probe->sim.camera_y = 24; break;
+        case 13: source.x = -16; source.w = 384; break;
+        case 14: ResizeTestOutput(renderer,640,480); break;
+        case 15: probe->sim.effective_features |= kSimFeature_CullHaze;
+                 probe->sim.underlay_haze_pct = 40; probe->sim.cull_dim_pct = 35; break;
+        case 16: probe->sim.underlay_haze_pct = 100; break;
+        case 17: probe->sim.effective_features &= ~kSimFeature_CullHaze; break;
+        case 18: probe->sim.town = 1;
+                 CHECK(SimWorldMap_OriginForTown(1,&ox,&oy));
+                 probe->sim.underlay_origin_tile_x = ox; probe->sim.underlay_origin_tile_y = oy; break;
+        case 19: PresentWorldNav_ResetResources(); break;
+        case 20: memcpy(changed,original,sizeof(changed));
+                 changed[40*128+40] ^= 1;
+                 SimWorldMap_PublishBuiltTilemap(changed);
+                 probe->sim.underlay_serial = SimWorldMap_Serial(); break;
+        case 21: probe->sim.world_navigation_towns.object_count = 0; break;
+        case 22: probe->sim.world_navigation_towns.ground.enabled_town_mask = 0; break;
+      }
+      for (int repeat = 0; repeat < kRepeats; ++repeat) {
+        if (repeat == 3) PerformanceMetrics_Configure(true,false);
+        SDL_Surface *actual = RenderSimGlobe(renderer,probe,&camera,source);
+        if (!mode && !repeat) reference[state] = actual;
+        else { CHECK(Differences(actual,reference[state]) == 0); SDL_DestroySurface(actual); }
+        if (repeat >= 3) PerformanceMetrics_PresentCompleted(
+            1 + (repeat-3)*UINT64_C(1000000000));
+      }
+      PerformanceSnapshot measured; PerformanceMetrics_Snapshot(&measured);
+      CHECK(measured.ready);
+      /* Prove reuse actually bypasses scene submission, not merely that two
+       * versions of the same direct rendering happen to match. */
+      if (mode) CHECK(measured.counts[kPerformanceCount_Vertices] <= 8);
+      else CHECK(measured.counts[kPerformanceCount_Vertices] > 20000);
+      if (state == 0) printf("SIM globe retained image mode=%d: warm vertices=%.0f draws=%.0f\n",
+          mode,measured.counts[kPerformanceCount_Vertices],measured.counts[kPerformanceCount_Draws]);
+      PerformanceMetrics_Configure(false,false);
+    }
+    /* A stationary camera does not justify copying an image when lighting
+     * and animated models change every frame. Allow the first failed
+     * prediction, then require identical direct-path draw traffic. */
+    for (int frame = 0; frame < 8; ++frame) {
+      probe->sim.world_navigation_lighting = true;
+      probe->sim.light_azimuth_deg = frame*15;
+      probe->sim.game_frame += 12;
+      if (frame == 2) PerformanceMetrics_Configure(true,false);
+      SDL_Surface *actual = RenderSimGlobe(renderer,probe,&camera,source);
+      SDL_DestroySurface(actual);
+      if (frame >= 2) PerformanceMetrics_PresentCompleted(
+          1 + (frame-2)*UINT64_C(200000000));
+    }
+    PerformanceMetrics_Snapshot(&continuous[mode]);
+    CHECK(continuous[mode].ready);
+    PerformanceMetrics_Configure(false,false);
+  }
+  CHECK(continuous[0].counts[kPerformanceCount_Draws] == continuous[1].counts[kPerformanceCount_Draws]);
+  CHECK(continuous[0].counts[kPerformanceCount_Vertices] == continuous[1].counts[kPerformanceCount_Vertices]);
+  CHECK(continuous[0].counts[kPerformanceCount_Draws] == continuous[2].counts[kPerformanceCount_Draws]);
+  CHECK(continuous[0].counts[kPerformanceCount_Vertices] == continuous[2].counts[kPerformanceCount_Vertices]);
+  for (int state = 0; state < kStates; ++state) SDL_DestroySurface(reference[state]);
+  free(probe);
+  PresentWorldNav_ResetResources();
+  SimWorldMap_PublishBuiltTilemap(original);
+  SimTownGroundArt_Shutdown();
+  ResizeTestOutput(renderer,kWidth,kHeight);
+  PresentSimGlobe_TestRetainImages(true);
+  if (saved_grid) CHECK(!SDL_setenv_unsafe("AR_SIM3D_WORLD_GPU_GRID",saved_grid,1));
+  else CHECK(!SDL_unsetenv_unsafe("AR_SIM3D_WORLD_GPU_GRID"));
+  SDL_free(saved_grid);
+  puts("SIM globe image cache: exact direct/cached pixels across 23 invalidation states, five repeats, mutable/versioned atlases; continuous-change scene traffic unchanged");
+}
+
 static void TestSynthetic(SDL_Renderer *renderer) {
   /* Legacy projected-geometry/cache oracles intentionally use compatibility.
    * TestGpuGridRevisions below explicitly clears this to verify the default. */
@@ -1614,6 +1764,7 @@ static void TestSynthetic(SDL_Renderer *renderer) {
   TestTallModelViewport(renderer, slot);
   TestGpuGridRevisions(renderer, slot);
   TestWorldAtlasVersions(renderer, slot);
+  TestSimGlobeImage(renderer);
   free(slot);
   PresentWorldNav_ResetResources();
   Sim3DDepthPass_Reset(&g_render_device);
@@ -1863,6 +2014,42 @@ static void TestVolcanoCapViews(SDL_Renderer *renderer, const FrameSlot *slot) {
   free(probe);
 }
 
+static void TestMountainFitViews(SDL_Renderer *renderer, const FrameSlot *slot) {
+  if (!(slot->sim.world_navigation_towns.enabled_town_mask & 8)) return;
+  FrameSlot *probe = malloc(sizeof(*probe));
+  CHECK(probe);
+  const int centres[2][2] = {{14, 15}, {28, 22}};
+  const int16_t matrices[3][4] = {{64, 0, 0, 64}, {0, -64, 64, 0}, {-64, 0, 0, -64}};
+  int ox, oy;
+  CHECK(SimWorldMap_OriginForTown(4, &ox, &oy));
+  const uint32_t serial = SimWorldMap_Serial();
+  ResizeTestOutput(renderer, 1280, 960);
+  for (int peak = 0; peak < 2; peak++) for (int view = 0; view < 3; view++) {
+    memcpy(probe, slot, sizeof(*probe));
+    probe->sim.world_navigation.focus_x = (ox + centres[peak][0]) * kSimWorldMapTilePixels;
+    probe->sim.world_navigation.focus_y = (oy + centres[peak][1]) * kSimWorldMapTilePixels;
+    probe->sim.world_navigation.active_location = 4;
+    probe->sim.world_navigation.zoom_current = probe->sim.world_navigation.zoom_target = 130;
+    memcpy(probe->sim.world_navigation.matrix, matrices[view], sizeof(matrices[view]));
+    probe->sim.game_frame = 17;
+    probe->sim.world_navigation_brightness = 15;
+    probe->sim.projection_distance_x100 = 220;
+    probe->sim.projection_pitch_mrad = -575;
+    probe->sim_manual_orbit_yaw = probe->sim_manual_orbit_pitch = 0;
+    BuildScene(probe);
+    char name[48];
+    CHECK(snprintf(name, sizeof(name), "captured-mountain-fit-%d-%d", peak, view) > 0);
+    SDL_Surface *image = Render(renderer, probe, name);
+    SDL_Surface *held = Render(renderer, probe, NULL);
+    CHECK(Differences(image, held) == 0);
+    SDL_DestroySurface(image); SDL_DestroySurface(held);
+  }
+  CHECK(SimWorldMap_Serial() == serial);
+  ResizeTestOutput(renderer, kWidth, kHeight);
+  UploadWorldNavigationComposition(slot);
+  free(probe);
+}
+
 static void TestCapturedMarahnaSanctuary(SDL_Renderer *renderer, const FrameSlot *slot) {
   const SimWorldNavigationTowns *towns = &slot->sim.world_navigation_towns;
   if (!(towns->enabled_town_mask & (1u << 4))) return;
@@ -1910,6 +2097,56 @@ static void TestCapturedMarahnaSanctuary(SDL_Renderer *renderer, const FrameSlot
   free(probe);
 }
 
+static void TestCapturedSimGlobe(SDL_Renderer *renderer, FrameSlot *navigation) {
+  const struct { Scene3DCamera camera; bool relief; } views[] = {
+    {{-.575f, 0, 3, .4f}, true},
+    {{-.85f, .35f, 4.5f, .4f}, true},
+    {{-.85f, .35f, 4.5f, .4f}, false},
+    {{-1.35f, 0, 3, .4f}, true},
+    {{-1.35f, .35f, 4.5f, .4f}, true},
+    {{-1.35f, -.35f, 4.5f, .4f}, true},
+    {{-1.35f, 0, 2, .4f}, true},
+    {{-1.35f, .35f, 4.5f, .4f}, false},
+  };
+  FrameSlot *probe = malloc(sizeof(*probe));
+  CHECK(probe);
+  SDL_Surface *before = Render(renderer,navigation,NULL);
+  for (uint8_t town = 1; town <= kSimTownCount; ++town) {
+    *probe = *navigation;
+    probe->sim.view = kSimView_Enhanced;
+    probe->sim.town = town;
+    int ox, oy; CHECK(SimWorldMap_OriginForTown(town,&ox,&oy));
+    probe->sim.underlay_origin_tile_x = ox;
+    probe->sim.underlay_origin_tile_y = oy;
+    probe->sim.camera_x = 128; probe->sim.camera_y = 144;
+    for (unsigned view = 0; view < sizeof(views)/sizeof(views[0]); ++view) {
+      Scene3DCamera camera = views[view].camera;
+      PresentSimGlobe_ClampCamera(&camera);
+      const ArRenderRectI source = {0,0,360,224};
+      probe->sim.world_navigation_relief = views[view].relief;
+      PresentSimGlobe_TestRetainImages(false);
+      SDL_Surface *direct = RenderSimGlobe(renderer,probe,&camera,source);
+      char name[80];
+      snprintf(name,sizeof(name),"captured-sim-underlay-town-%u-view-%u",town,view);
+      SaveImage(direct,name);
+      PresentSimGlobe_TestRetainImages(true);
+      for (int repeat = 0; repeat < 4; ++repeat) {
+        SDL_Surface *cached = RenderSimGlobe(renderer,probe,&camera,source);
+        CHECK(Differences(direct,cached) == 0);
+        SDL_DestroySurface(cached);
+      }
+      SDL_DestroySurface(direct);
+    }
+    /* This holds navigation's original camera key across an intervening
+     * embedded-model publication. Repeat must never draw SIM-local meshes. */
+    SDL_Surface *returned = Render(renderer,navigation,NULL);
+    CHECK(Differences(before,returned) == 0);
+    SDL_DestroySurface(returned);
+  }
+  SDL_DestroySurface(before); free(probe);
+  puts("SIM connected world: six native towns, eight default/low-angle/bounded/relief-off views, direct-cache parity and navigation return exact");
+}
+
 static void TestCaptured(SDL_Renderer *renderer, const char *rom_path, const char *wram_path) {
   uint8_t *rom = ReadFile(rom_path, kRomBytes), *wram = ReadFile(wram_path, kWramBytes);
   CHECK(wram[0x18] == 0 && wram[0x19] == 9); /* Navigation dump, not shared action scratch. */
@@ -1932,6 +2169,8 @@ static void TestCaptured(SDL_Renderer *renderer, const char *rom_path, const cha
   slot->sim.world_navigation_atmosphere = slot->sim.world_navigation_backdrop = true;
   BuildScene(slot);
   TestCapturedMarahnaSanctuary(renderer, slot);
+  TestCapturedSimGlobe(renderer, slot);
+  TestMountainFitViews(renderer, slot);
   TestGroundLightDirections(renderer, slot, "captured");
   TestColdBlackEntry(renderer, slot);
   TestVolcanoCapViews(renderer, slot);

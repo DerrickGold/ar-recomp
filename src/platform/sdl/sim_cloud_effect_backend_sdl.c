@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "gpu_shader_blob.h"
+#include "gpu_render_preparation.h"
 #include "platform/sdl/render_sdl_internal.h"
 #include "shaders/sim_cloud_frag.h"
 
@@ -40,13 +41,16 @@ bool SimCloudEffectBackend_IsAvailable(ArRenderDevice *device) {
   if (override && !strcmp(override, "0")) return false;
   s_cloud.device = CloudDevice(renderer);
   if (!s_cloud.device) return false;
-  s_cloud.shader = GpuShaderBlob_CreateFragment(s_cloud.device, &kCloudBlobs,
+  s_cloud.shader = ArSdlRenderBackend_FragmentShader(device, &kCloudBlobs,
       "SIM cloud banks", 1, 1);
   if (!s_cloud.shader) return false;
   const SDL_GPURenderStateCreateInfo info = {.fragment_shader = s_cloud.shader};
   s_cloud.state = SDL_CreateGPURenderState(renderer, &info);
-  if (!s_cloud.state) {
-    SDL_ReleaseGPUShader(s_cloud.device, s_cloud.shader);
+  const float warm_uniforms[12] = {1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1};
+  if (!s_cloud.state || !GpuRenderPreparation_Warm(device, s_cloud.state,
+          warm_uniforms, sizeof(warm_uniforms), true)) {
+    SDL_DestroyGPURenderState(s_cloud.state);
+    s_cloud.state = NULL;
     s_cloud.shader = NULL;
   }
   return s_cloud.state != NULL;
@@ -83,7 +87,6 @@ void SimCloudEffectBackend_Reset(ArRenderDevice *device) {
   if (renderer) (void)SDL_SetGPURenderState(renderer, NULL);
   if (!s_cloud.device || CloudDevice(renderer) == s_cloud.device) {
     SDL_DestroyGPURenderState(s_cloud.state);
-    if (s_cloud.shader) SDL_ReleaseGPUShader(s_cloud.device, s_cloud.shader);
   }
   memset(&s_cloud, 0, sizeof(s_cloud));
 }

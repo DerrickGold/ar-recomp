@@ -76,6 +76,15 @@ static bool ObjectCell(const SimBackgroundMountainObject *object, int x, int y) 
       y < object->height_cells && (object->row_occupied_mask[y] & (1u << x));
 }
 
+static uint32_t BlendCraterRock(uint32_t slope, uint32_t crater, float weight) {
+  uint32_t result = UINT32_C(0xFF000000);
+  for (unsigned shift = 0; shift < 24; shift += 8) {
+    const float a = (slope >> shift) & 255u, b = (crater >> shift) & 255u;
+    result |= (uint32_t)(a + (b-a)*weight + .5f) << shift;
+  }
+  return result;
+}
+
 static bool LoadOverheadCrater(SimWorldNavigationMountainScene *scene, uint8_t tier) {
   /* The intact overhead opening is the 2x2 $A6/$A7/$B6/$B7 stamp at
    * Aitos world cells (24,43)..(25,44). Source tile identity is immutable;
@@ -89,9 +98,10 @@ static bool LoadOverheadCrater(SimWorldNavigationMountainScene *scene, uint8_t t
    * attached slopes. Sorting these brown shades preserves the categorical
    * world $40..$45 dark-to-light ordering, independent of animation. */
   const uint32_t *rock = SimTownGroundArt_Metatile(4, tier, 0x89);
+  const uint32_t *right_rock = SimTownGroundArt_Metatile(4, tier, 0x8A);
   uint32_t shades[16];
   int shade_count = 0;
-  if (!rock) return false;
+  if (!rock || !right_rock) return false;
   for (int p = 0; p < 256; p++) {
     const uint32_t color = rock[p];
     if (!(color >> 24)) continue;
@@ -108,8 +118,21 @@ static bool LoadOverheadCrater(SimWorldNavigationMountainScene *scene, uint8_t t
     for (int x = 0; x < 16; x++) {
       const int tile = y / 8 * 2 + x / 8, p = y % 8 * 8 + x % 8;
       const uint8_t index = indices[tile][p];
-      const uint32_t color = shade_count && index >= 0x40 && index <= 0x45
+      uint32_t color = shade_count && index >= 0x40 && index <= 0x45
           ? shades[(index - 0x40) * (shade_count - 1) / 5] : pixels[tile][p];
+      if (index >= 0x40 && index <= 0x45) {
+        /* A rounded material inset, not a transparent hole in the summit.
+         * The surrounding rock continues the actual $89/$8A front crest;
+         * its outer texels meet the roof/slopes instead of exposing a square
+         * world-tile palette boundary. Preserve every native rim/lava texel.
+         * This 16x16 bake is done only when the source scene is rebuilt. */
+        const int column = (x * 31 + 7) / 15;
+        const uint32_t slope = (column < 16 ? rock : right_rock)[column & 15];
+        const float radius = hypotf((x-7.5f)/7.5f,(y-7.5f)/7.5f);
+        float weight = fminf(1,fmaxf(0,(1.0f-radius)/.25f));
+        weight = weight*weight*(3-2*weight);
+        color = BlendCraterRock(slope,color,weight);
+      }
       scene->atlas[(kSimWorldNavigationCraterAtlasY + y) * kAtlas +
           kSimWorldNavigationCraterAtlasX + x] = color;
       /* World index zero is the black opening, not transparency. Retain
@@ -375,10 +398,12 @@ static void VolcanoProfile(const SimBackgroundMountainObject *object,
   const float rise = fminf(cut_rise, object->height_cells * 16.0f - crest);
   const float shoulder = rise / cut_rise;
   *front = baseline - rise * mesh->relief->face_depth_scale;
-  /* The 32-pixel-wide crown gets a 28-pixel-deep top. Shoulder depth
+  /* Keep the native 32-pixel front join, with a slimmer 14-pixel-deep top.
+   * The authored front stays fixed, and roof/rear vertices share this exact
+   * profile. BackObject separately shortens the inferred rear run. Shoulder depth
    * tapers to zero at the native silhouette, staying inside its original
    * rear ground contact. This adds no land behind the mountain footprint. */
-  *back = *front - 28.0f * shoulder * shoulder;
+  *back = *front - 14.0f * shoulder * shoulder;
   *height = rise * mesh->relief->face_height_scale * mesh->height_scale;
 }
 
@@ -391,7 +416,9 @@ static void VolcanoRoof(const SimBackgroundMountainObject *object,
   float top_front, top_back, top_height;
   VolcanoProfile(object, mesh, 16, &top_front, &top_back, &top_height);
   const float cap_left = (object->cell_x + object->width_cells * .5f) * 16 - 16;
-  const uint8_t brightness[4] = {255, 255, 255, 255};
+  /* Match the front plane and the top edge of the reconstructed rear. */
+  const uint8_t brightness[4] = {255, 255, 235, 235};
+  const uint8_t alpha[4] = {255, 255, 255, 255};
   for (int column = 0; column < width; column++) {
     float x[4], y[4], z[4];
     SimBackgroundMountainMeshUV uv[4];
@@ -419,25 +446,47 @@ static void VolcanoRoof(const SimBackgroundMountainObject *object,
         const int sy = ((tile >> 4) + (variant >> 1) * 16) * 16;
         uv[p] = (SimBackgroundMountainMeshUV){
           (sx + fminf(15.5f, fmaxf(.5f, at - cx * 16))) / kAtlas,
-          (sy + (p < 2 ? 8.5f : 14.5f)) / kAtlas,
+          (sy + fminf(15.5f,fmaxf(.5f,crest[at]-cy*16))) / kAtlas,
         };
       }
     }
-    EmitRearClipped(mesh, x, y, z, uv, brightness, brightness);
+    EmitRearClipped(mesh, x, y, z, uv, brightness, alpha);
   }
 }
 
+static float RearFitScale(const SimBackgroundMountainObjectList *objects,
+                          const SimBackgroundMountainObject *object) {
+  /* Trial only on isolated, interior stamps. Keep connected ranges and town
+   * continuations at their audited contacts: moving those independently can
+   * uncover a seam or invalidate the terrain's cross-town support anchors.
+   * Overlapping stamps retain their original silhouette fit. */
+  const int right = object->cell_x + object->width_cells;
+  const int bottom = object->cell_y + object->height_cells;
+  if (object->flags & kSimBackgroundMountainObject_Volcano ||
+      object->cell_x <= 0 || object->cell_y <= 0 ||
+      right >= kSimTownCells || bottom >= kSimTownCells) return 1;
+  for (unsigned at = 0; at < objects->count; at++) {
+    const SimBackgroundMountainObject *other = &objects->objects[at];
+    if (other == object) continue;
+    if (right > other->cell_x && object->cell_x < other->cell_x + other->width_cells &&
+        bottom > other->cell_y && object->cell_y < other->cell_y + other->height_cells)
+      return 1;
+  }
+  return .70f;
+}
+
 static void BackObject(const SimBackgroundMountainObject *object,
-                       const SimBackgroundMountainMeshContext *mesh, unsigned variant) {
+                       const SimBackgroundMountainMeshContext *mesh, unsigned variant,
+                       float fit_scale) {
   FaceWriter *writer = mesh->user;
   const int width = object->width_cells * kSimTownCellPixels;
   float crest[kCrestColumns + 1];
   ObjectCrest(object, crest);
   const float baseline = (object->cell_y + object->height_cells) * (float)kSimTownCellPixels;
-  /* The front uses 62% of the original stamp depth. Its rear receives only
-   * the remaining 38%, placing every rear ground contact on the original
-   * silhouette rather than extending a mirrored peak over nearby roads or
-   * water. This also keeps the inferred-relief replacement footprint valid. */
+  /* Before optional fitting, the front uses 62% of the original stamp depth
+   * and the rear receives the remaining 38%. The rear foot starts at the
+   * original silhouette. fit_scale only pulls it inward, leaving the ridge
+   * fixed; the existing source cleanup footprint remains conservative. */
   const float rear_depth = (1 - mesh->relief->face_depth_scale) / mesh->relief->face_depth_scale;
   static const uint8_t brightness[4] = {235, 235, 190, 190};
   static const uint8_t alpha[4] = {255, 255, 255, 255};
@@ -476,16 +525,26 @@ static void BackObject(const SimBackgroundMountainObject *object,
               row, baseline, mesh->relief, 0, 0, &x[p], &y[p], &z[p]);
           const float crest_y = baseline - (baseline - peak) * mesh->relief->face_depth_scale;
           y[p] = crest_y - (y[p] - crest_y) * rear_depth;
+          if (fit_scale < 1) y[p] = crest_y + (y[p] - crest_y) * fit_scale;
           z[p] *= mesh->height_scale;
           if (writer->capped_volcano) {
             float front, back, height;
             VolcanoProfile(object, mesh, crest[column], &front, &back, &height);
-            const float contact = object->cell_y * 16 + crest[column];
+            /* The smaller crown does not need the old silhouette's long
+             * rear apron. Pull its foot halfway towards the roof edge; the
+             * summit remains fixed and every point stays inside the previous
+             * rear footprint. Clip the new polygon against occupancy below,
+             * after this fit, so compression cannot bypass building masks. */
+            const float old_contact = object->cell_y * 16 + crest[column];
+            const float contact = (old_contact + back) * .5f;
             y[p] = height > 0 ? contact + (back - contact) * z[p] / height : contact;
           }
+          /* Match the shared front's texel-centre mapping, including partial
+           * skyline strips. Clip interpolation then stays inside this tile
+           * instead of sampling neighbouring mountain art at its edges. */
           uv[p] = (SimBackgroundMountainMeshUV){
-            (sx * 16 + column - cx * 16) / mesh->atlas_pixels,
-            (sy * 16 + source_y - cy * 16) / mesh->atlas_pixels,
+            (sx * 16 + .5f + (column - cx * 16) * (15.0f / 16.0f)) / mesh->atlas_pixels,
+            (sy * 16 + .5f + (source_y - cy * 16) * (15.0f / 16.0f)) / mesh->atlas_pixels,
           };
         }
         if (writer->exterior) {
@@ -548,6 +607,9 @@ bool SimWorldNavigationMountains_Build(
           const int sx = (tile & 15) + (variant & 1) * 16;
           const int sy = (tile >> 4) + (variant >> 1) * 16;
           const int wx = writer.origin_x + cx, wy = writer.origin_y + cy;
+          /* This is SOURCE cleanup ownership, not a tight geometry bound.
+           * Keep it even where a compact rear exposes ground, otherwise the
+           * original overhead mountain art/inferred relief would reappear. */
           if (wx >= 0 && wy >= 0 && wx < kSimWorldMapTiles && wy < kSimWorldMapTiles)
             out->replacement[wy * kSimWorldMapTiles + wx] = town;
           if (writer.capped_volcano && y == 0) continue;
@@ -560,7 +622,7 @@ bool SimWorldNavigationMountains_Build(
                   &mesh, baseline, rise, cx, cy, sx, sy, tile, side != 0);
         }
       writer.rear_slope = true;
-      BackObject(object, &mesh, variant);
+      BackObject(object, &mesh, variant, RearFitScale(&objects, object));
       if (writer.capped_volcano) {
         writer.summit_roof = true;
         VolcanoRoof(object, &mesh, variant);
@@ -625,7 +687,7 @@ bool SimWorldNavigationMountains_ContinueEdges(
               SimBackgroundMountainMesh_SkirtTile(&mesh, baseline, rise, cx, cy, sx, sy, writer.tile, side != 0);
         }
       writer.rear_slope = true;
-      BackObject(object, &mesh, writer.variant);
+      BackObject(object, &mesh, writer.variant, RearFitScale(&objects, object));
       writer.rear_slope = false;
     }
   }

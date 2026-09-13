@@ -2316,7 +2316,8 @@ SimRenderFeatureMask Sim3D_ResolveFeatureMask(
    * the extension there is no out-of-range ground to mark, and the finite
    * town's own edge already says everything there is to say. */
   if (!(features & kSimFeature_WorldUnderlay))
-    features &= ~(kSimFeature_CloudShroud | kSimFeature_CullHaze);
+    features &= ~(kSimFeature_CloudShroud | kSimFeature_CullHaze |
+                  kSimFeature_GlobeUnderlay);
   /* The backdrop is a gradient anchored to the projected horizon. The flat
    * view has no horizon to anchor to, and the flat clear it would replace is
    * already correct there. */
@@ -2506,6 +2507,11 @@ void SimRenderMetadata_CaptureFrame(
   dst->effective_features = Sim3D_ResolveFeatureMask(
       dst->requested_features, implemented_features, dst->view,
       dst->master_enabled, dst->metadata_valid);
+  /* Capture owned semantic neighbours only for an eligible SIM frame. No
+   * environment/settings reads, borrowed WRAM, or extra work on the off path. */
+  if (dst->underlay_serial &&
+      (dst->effective_features & kSimFeature_GlobeUnderlay))
+    SimWorldNavigationTowns_CaptureCached(wram, &dst->world_navigation_towns);
   if (!dst->effect_metadata_valid)
     dst->effective_features &= ~(kSimFeature_EffectLighting |
                                  kSimFeature_Particles);

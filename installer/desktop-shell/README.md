@@ -407,6 +407,23 @@ caches are byte-verified on warm launches too; modified/conflicting caches are
 refused rather than repaired or overwritten. Windows path/device-name hazards,
 archive corruption, wrong architectures and ROM-bearing payloads are rejected.
 
+Windows shows a small native startup window **before reading or extracting the
+embedded archive**, without needing WebView2. It displays the current stage,
+per-stage byte percentage where available, and a live elapsed-time indicator.
+The window stays responsive during verification, extraction and permission
+setup, then hands off when the main UI is ready. Cancel (or the close button)
+stops startup and removes the incomplete extraction stage; it does not delete
+an existing verified cache. A Windows permission operation already in progress
+must finish before cancellation can clean up. Warm launches show verification
+progress too; the integrity checks are unchanged.
+
+Opening the Builder again for the same workspace in the same Windows login
+session brings its startup/main window forward instead of starting another
+extraction. A native lifetime guard is held until shutdown and automatically
+released when the process exits or crashes—there is no new lock file to clear.
+Different workspaces can still run independently. This cannot show feedback
+before Windows finishes loading/scanning the executable itself.
+
 The runtime cache uses an explicit current-user/SYSTEM DACL, with sandbox
 read/execute grants limited to the extracted WebView2 tree. The prototype
 requires a local ACL-capable filesystem such as NTFS, not a network share or
@@ -629,6 +646,29 @@ does not install dependencies or disconnect the network; disconnect the VM
 before running for an offline test. A full-build PASS does not launch the
 generated Windows game. The harness and Windows-only ACL/console tests have
 not yet been executed natively; PowerShell syntax/execution is also pending.
+
+The startup-window tests are separate and require a visible Windows desktop.
+Cross-compile on the maintainer host (use `amd64` for x86-64):
+
+```sh
+GOOS=windows GOARCH=arm64 go -C installer/desktop-shell test -c -o /tmp/actraiser-startup-arm64.test.exe .
+```
+
+Copy the test executable to Windows, then run:
+
+```powershell
+$env:AR_BUILDER_TEST_SPLASH = '1'
+.\actraiser-startup-arm64.test.exe -test.v -test.timeout=1m '-test.run=^(TestStartupInstanceIdentity|TestNativeStartupSplashLifecycle)$'
+Remove-Item Env:AR_BUILDER_TEST_SPLASH
+```
+
+This checks visible-before-return startup, progress updates, duplicate-launch
+exclusion, cancellation, handoff, and releasing the guard for relaunch. No ROM,
+WebView2 installation or extracted payload is required. For release acceptance,
+also try a packaged executable with a fresh workspace, cancel during extraction
+and relaunch, then double-click again during startup and after the main window
+appears. Check focus, keyboard access, high-DPI display scaling, and warm-cache
+startup. Cross-compilation alone does not validate native window behavior.
 
 The repeatable Linux player check refuses system Go/CMake/compilers and
 GTK3/WebKit/SDL3, tests paths with spaces, portable relocation, global storage,

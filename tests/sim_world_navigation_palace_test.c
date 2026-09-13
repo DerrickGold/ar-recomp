@@ -27,6 +27,11 @@ static void TestPpuGate(void) {
   ppu.sub_screen = 0;
   ppu.fixed_color = 1;
   assert(!SimWorldNavigationPalace_PpuSupported(&ppu));
+  ppu.color_math_designation = 0;
+  assert(SimWorldNavigationPalace_PpuSupported(&ppu));
+  ppu.color_math_designation = 0xc0; /* no layers: half/subtract are inert too */
+  assert(SimWorldNavigationPalace_PpuSupported(&ppu));
+  ppu.color_math_designation = 1;
   ppu.fixed_color = 0;
   ppu.color_math_control = 2;
   assert(!SimWorldNavigationPalace_PpuSupported(&ppu));

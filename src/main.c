@@ -27,6 +27,7 @@
 #include "snesrecomp/game/generated_support.h"
 #include "config.h"
 #include "crt_post.h"
+#include "render_preparation.h"
 #include "settings.h"
 #include "session_recovery.h"
 #include "localization/pack_discovery.h"
@@ -1361,16 +1362,21 @@ static int AppBoot_CreateVideo(AppBoot *app) {
      * GPU renderer is a baseline requirement rather than an optional shader
      * effects switch. Hidden capture windows use the same backend: a software
      * renderer would produce screenshots from a different visibility model.
-     * SPIR-V feeds Vulkan, DXIL feeds D3D12, and MSL feeds Metal; unsupported
-     * machines fail at launch instead of silently returning to painter
-     * sorting. */
+     * SPIR-V feeds Vulkan, DXIL feeds D3D12, and MSL feeds Metal. Individual
+     * feature requirements are prepared and gated before gameplay below. */
     g_gpu_shaders_requested = true;
     g_settings.gpu_shaders_enabled = true;  /* legacy config/UI mirror */
     if (!ArSdlRenderBackend_CreateForWindow(
             &g_render_device, g_window))
       Die("SDL GPU render backend creation failed");
-    if (!Sim3DDepthPass_Require(&g_render_device))
-      Die(Sim3DDepthPass_LastError());
+    RenderFeatureMask prepared_features = 0;
+    const uint64_t preparation_started = SDL_GetTicks();
+    if (!RenderPreparation_Prepare(&g_render_device, &prepared_features))
+      Die("Graphics startup preparation failed; unable to safely prepare the renderer");
+    Settings_ApplyRenderCapabilities(prepared_features);
+    fprintf(stderr, "[graphics-prepare] completed in %llu ms; cpu-cores=%d system-ram=%d MB\n",
+        (unsigned long long)(SDL_GetTicks() - preparation_started),
+        SDL_GetNumLogicalCPUCores(), SDL_GetSystemRAM());
     g_gpu_shaders_active = true;
     /* Apply the selected refresh policy after renderer creation. Hidden-video
      * automation requests vsync off and uses no host throttle; a platform
@@ -1821,6 +1827,7 @@ static void AppLoop_PumpEvents(AppBoot *app, bool *running) {
         case SDL_EVENT_RENDER_DEVICE_RESET:
           HostDisplay_ResetVsyncPacing();
           if (event.type == SDL_EVENT_RENDER_DEVICE_RESET) {
+            CrtPost_Shutdown(&g_render_device);
             Diorama_ResetRendererResources(&g_render_device);
             DestroyDioramaTextures();
             CreateDioramaTextures();
@@ -1840,6 +1847,14 @@ static void AppLoop_PumpEvents(AppBoot *app, bool *running) {
            * contents for the rest of the session (a settled town never bumps
            * the underlay serial). Drop them so the next present re-bakes. */
           PresentRendererResources_Reset();
+          {
+            RenderFeatureMask prepared_features = 0;
+            if (!RenderPreparation_Prepare(&g_render_device, &prepared_features) ||
+                !Settings_RenderCapabilitiesRetained(prepared_features))
+              SessionFatal_RequestKind(kSessionFailure_GraphicsReset,
+                  "graphics reset could not restore the prepared feature set; "
+                  "restart the game to recheck hardware support");
+          }
           HostInput_RequestPausedRedraw();
           /* R17/C2: the retained re-present slot copies opaque HD texture
            * handles. The host reload just destroyed and recreated every one,

@@ -3958,6 +3958,9 @@ static void DrawMenuFooter(const MenuLayout *layout, const MenuChrome *c,
     FillLogicalRect(layout, description_x, header_y + 10,
                     bottom_width - 24, 1, structure_dim);
     const char *help = SettingsOverlay_LocalizedHelp(InterfaceLocale(), selected);
+    const char *hardware_help = Settings_HardwareUnavailableReason(selected);
+    if (hardware_help) help = ArUiCatalog_Text(InterfaceLocale(),
+        "overlay.hardware_unavailable", hardware_help);
     if (selected->field == &g_settings.interface_language &&
         !ArUiTextRenderer_IsReady(&s_ui_text)) help = Ui("overlay.font_unavailable");
     DrawWrappedSmallText(layout, description_x, header_y + 14,

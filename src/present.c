@@ -18,6 +18,7 @@
 #include "action/action_bg_tuner.h"
 #include "action/action_effect_projection.h"
 #include "present.h"
+#include "present_sky_palace.h"
 #include "action/action_effect_render.h"
 #include "constants.h"
 #include "crt_post.h"
@@ -844,7 +845,8 @@ static void UploadActionWinnerMask(ArRenderTexture *texture, int mirror,
 
 /* Consume borrowed capture pixels only during the slot's upload lifetime.
  * Retained presentations use the published texture, never the producer's
- * mutable mask. Keep g_texture intact for a same-frame native fallback. */
+ * mutable mask. Invalid foreground is a selected-scene failure, not native
+ * fallback permission. */
 static void UploadSkyPalaceForeground(const FrameSlot *slot) {
   s_sky_palace_foreground_valid = false;
   if (slot->sim.view != kSimView_SkyPalace || slot->diorama_active ||
@@ -2439,15 +2441,24 @@ void PresentCompositeScene(const FrameSlot *slot, float alpha) {
   const ArRenderRectF destination = {
     0.0f, 0.0f, (float)viewport.w, (float)viewport.h,
   };
-  /* The backdrop never owns/restores an output target. A failed optional
-   * Palace pass can therefore be covered by the untouched native frame;
-   * output restoration below remains a fatal error in either mode. */
-  const bool palace_drawn = slot->sim.view == kSimView_SkyPalace &&
-      s_sky_palace_foreground_valid &&
-      PresentationOutcome_IsUsable(PresentWorldNavigationBackdrop(slot, local_viewport)) &&
-      ArRenderDevice_DrawTexture(&g_render_device, s_sky_palace_foreground_texture,
-          &source, &destination);
-  if (!palace_drawn && !ArRenderDevice_DrawTexture(
+  if (slot->sim.view == kSimView_SkyPalace) {
+    const PresentationOutcome palace = PresentSkyPalace_Draw(
+        &g_render_device, slot, local_viewport,
+        s_sky_palace_foreground_valid ? s_sky_palace_foreground_texture
+                                     : ArRenderTexture_Invalid(),
+        &source, &destination);
+    if (!PresentationOutcome_IsUsable(palace)) {
+      ArRenderOutputFrame_Abort(&output_frame);
+      CancelActionHeat();
+      SessionFatal_Request(
+          "The selected Sky Palace renderer could not complete its %s (%s). "
+          "Restart the game; if this repeats, report the graphics settings "
+          "and update your graphics driver.",
+          s_sky_palace_foreground_valid ? "scene" : "foreground capture/upload",
+          ArRenderDevice_LastError(&g_render_device));
+      return;
+    }
+  } else if (!ArRenderDevice_DrawTexture(
           &g_render_device, g_texture, &source, &destination)) {
     ArRenderOutputFrame_Abort(&output_frame);
     CancelActionHeat();

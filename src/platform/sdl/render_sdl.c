@@ -6,6 +6,13 @@
 #include <stdlib.h>
 #include <string.h>
 
+typedef struct ArSdlFragmentShaderEntry {
+  const GpuShaderBlobs *blobs;
+  Uint32 samplers, uniform_buffers;
+  SDL_GPUShader *shader;
+  struct ArSdlFragmentShaderEntry *next;
+} ArSdlFragmentShaderEntry;
+
 _Static_assert(sizeof(int32_t) == sizeof(int),
                "SDL geometry indices require 32-bit int");
 _Static_assert(sizeof(ArRenderVertex2D) == sizeof(SDL_Vertex),
@@ -536,6 +543,29 @@ bool ArSdlRenderBackend_WindowOutputSize(const ArRenderDevice *device,
       : SDL_GetRenderOutputSize(renderer, width, height);
 }
 
+SDL_GPUShader *ArSdlRenderBackend_FragmentShader(ArRenderDevice *device,
+    const GpuShaderBlobs *blobs, const char *label,
+    Uint32 samplers, Uint32 uniform_buffers) {
+  if (!device || device->ops != &kSdlRenderOps || !device->context || !blobs)
+    return NULL;
+  ArSdlRenderBackend *backend = device->context;
+  if (!backend->gpu_device) return NULL;
+  for (ArSdlFragmentShaderEntry *entry = backend->fragment_shaders; entry; entry = entry->next)
+    if (entry->blobs == blobs && entry->samplers == samplers &&
+        entry->uniform_buffers == uniform_buffers) return entry->shader;
+  ArSdlFragmentShaderEntry *entry = calloc(1, sizeof(*entry));
+  if (!entry) { SDL_OutOfMemory(); return NULL; }
+  entry->shader = GpuShaderBlob_CreateFragment(backend->gpu_device, blobs, label,
+      samplers, uniform_buffers);
+  if (!entry->shader) { free(entry); return NULL; }
+  entry->blobs = blobs;
+  entry->samplers = samplers;
+  entry->uniform_buffers = uniform_buffers;
+  entry->next = backend->fragment_shaders;
+  backend->fragment_shaders = entry;
+  return entry->shader;
+}
+
 bool ArSdlRenderBackend_Bind(ArRenderDevice *device,
                              ArSdlRenderBackend *backend,
                              SDL_Renderer *renderer) {
@@ -575,6 +605,13 @@ bool ArSdlRenderBackend_Bind(ArRenderDevice *device,
       properties, SDL_PROP_RENDERER_GPU_DEVICE_POINTER, NULL) : NULL;
   backend->gpu_device = gpu;
   if (gpu) {
+    const SDL_PropertiesID gpu_properties = SDL_GetGPUDeviceProperties(gpu);
+    SDL_Log("[graphics-capabilities] backend=%s device=%s driver=%s version=%s shader-formats=$%x",
+        SDL_GetGPUDeviceDriver(gpu),
+        SDL_GetStringProperty(gpu_properties, SDL_PROP_GPU_DEVICE_NAME_STRING, "unreported"),
+        SDL_GetStringProperty(gpu_properties, SDL_PROP_GPU_DEVICE_DRIVER_NAME_STRING, "unreported"),
+        SDL_GetStringProperty(gpu_properties, SDL_PROP_GPU_DEVICE_DRIVER_VERSION_STRING, "unreported"),
+        (unsigned)SDL_GetGPUShaderFormats(gpu));
     capabilities.flags |= kArRenderCapability_CustomShaders;
     if (SDL_GPUTextureSupportsFormat(
             gpu, SDL_GPU_TEXTUREFORMAT_D32_FLOAT, SDL_GPU_TEXTURETYPE_2D,
@@ -707,6 +744,13 @@ void ArSdlRenderBackend_Destroy(ArRenderDevice *device) {
   SDL_GPUDevice *gpu = backend->owns_gpu_device ? backend->gpu_device : NULL;
   SDL_Window *window = backend->output_window;
   if (backend->output_target) SDL_DestroyTexture(backend->output_target);
+  /* No more draw states may be used after backend teardown. */
+  while (backend->fragment_shaders) {
+    ArSdlFragmentShaderEntry *entry = backend->fragment_shaders;
+    backend->fragment_shaders = entry->next;
+    SDL_ReleaseGPUShader(backend->gpu_device, entry->shader);
+    free(entry);
+  }
   ArRenderDevice_Reset(device);
   memset(backend, 0, sizeof(*backend));
   if (owns_renderer) SDL_DestroyRenderer(renderer);

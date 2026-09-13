@@ -31,6 +31,28 @@ typedef enum NavigationCaptureFailure {
  * Report reason changes, not every rejected frame of a native transition. */
 static NavigationCaptureFailure s_navigation_failure;
 
+typedef enum PalaceCaptureFailure {
+  kPalaceCapture_Ok, kPalaceCapture_Api, kPalaceCapture_Query,
+  kPalaceCapture_Ppu, kPalaceCapture_Snapshot, kPalaceCapture_Blank,
+  kPalaceCapture_Mask,
+} PalaceCaptureFailure;
+static PalaceCaptureFailure s_palace_failure;
+
+static bool PalaceCaptureResult(SimFrameData *frame, PalaceCaptureFailure reason) {
+  static const char *const names[] = {
+    "none", "ppu-api", "ppu-query", "ppu-profile", "frame-snapshot",
+    "forced-blank", "foreground-ownership",
+  };
+  if (reason != s_palace_failure)
+    fprintf(stderr, "[sky-palace-capture] gf=%u fallback=%s\n",
+        (unsigned)frame->game_frame, names[reason]);
+  s_palace_failure = reason;
+  if (reason == kPalaceCapture_Ok) return true;
+  frame->world_navigation_brightness = 0;
+  frame->view = kSimView_AuthenticFallback;
+  return false;
+}
+
 static bool NavigationCaptureFailed(SimFrameData *frame, NavigationCaptureFailure reason) {
   static const char *const names[] = {
     "none", "ppu-api", "borrowed-memory", "not-mode7", "forced-blank",
@@ -50,27 +72,32 @@ static bool CaptureSkyPalace(SimFrameData *frame, SrRunnerHandle *runner) {
   SrPpuStateSnapshot ppu = {.struct_size = SR_PPU_STATE_SNAPSHOT_V2_SIZE};
   SrPpuFrameSnapshot captured = {.struct_size = SR_PPU_FRAME_SNAPSHOT_V2_SIZE};
   const uint64_t required = SR_RUNNER_CAP_PPU_STATE | SR_RUNNER_CAP_PPU_FRAME_STATE;
-  bool ready = api && runner && api->struct_size >= SNES_RUNNER_API_PPU_FRAME_STATE_SIZE &&
-      (api->capabilities & required) == required &&
-      api->query_ppu_state && api->query_ppu_frame_state &&
-      api->query_ppu_state(runner, &ppu) == SR_RESULT_OK &&
-      api->query_ppu_frame_state(runner, &captured) == SR_RESULT_OK &&
-      SimWorldNavigationPalace_PpuSupported(&ppu) &&
-      captured.struct_size >= SR_PPU_FRAME_SNAPSHOT_V2_SIZE &&
-      captured.overlay_count > SR_PPU_OVERLAY_BG1 &&
-      captured.lifetime_generation == ppu.lifetime_generation &&
-      (captured.display_control & 0x80) == 0;
-  if (ready) {
-    const SrPpuOverlayState *mask = &captured.overlays[SR_PPU_OVERLAY_BG1];
-    ready = mask->flags == SR_PPU_OVERLAY_MARK_MAIN_SCREEN_WINNER &&
-        (mask->content_band_mask & 1u) != 0 &&
-        mask->x0 == -(int)captured.margin_budget &&
-        mask->x1 == kActRaiserAuthenticWidth + captured.margin_budget &&
-        mask->y0 == 0 && mask->y1 == kActRaiserAuthenticHeight;
-  }
-  frame->world_navigation_brightness = ready ? captured.display_control & 15 : 0;
-  if (!ready) frame->view = kSimView_AuthenticFallback;
-  return ready;
+  if (!api || !runner || api->struct_size < SNES_RUNNER_API_PPU_FRAME_STATE_SIZE ||
+      (api->capabilities & required) != required ||
+      !api->query_ppu_state || !api->query_ppu_frame_state)
+    return PalaceCaptureResult(frame, kPalaceCapture_Api);
+  if (api->query_ppu_state(runner, &ppu) != SR_RESULT_OK ||
+      api->query_ppu_frame_state(runner, &captured) != SR_RESULT_OK)
+    return PalaceCaptureResult(frame, kPalaceCapture_Query);
+  if (ppu.flags & SR_PPU_STATE_FORCED_BLANK)
+    return PalaceCaptureResult(frame, kPalaceCapture_Blank);
+  if (!SimWorldNavigationPalace_PpuSupported(&ppu))
+    return PalaceCaptureResult(frame, kPalaceCapture_Ppu);
+  if (captured.struct_size < SR_PPU_FRAME_SNAPSHOT_V2_SIZE ||
+      captured.overlay_count <= SR_PPU_OVERLAY_BG1 ||
+      captured.lifetime_generation != ppu.lifetime_generation)
+    return PalaceCaptureResult(frame, kPalaceCapture_Snapshot);
+  if (captured.display_control & 0x80)
+    return PalaceCaptureResult(frame, kPalaceCapture_Blank);
+  const SrPpuOverlayState *mask = &captured.overlays[SR_PPU_OVERLAY_BG1];
+  if (mask->flags != SR_PPU_OVERLAY_MARK_MAIN_SCREEN_WINNER ||
+      (mask->content_band_mask & 1u) == 0 ||
+      mask->x0 != -(int)captured.margin_budget ||
+      mask->x1 != kActRaiserAuthenticWidth + captured.margin_budget ||
+      mask->y0 != 0 || mask->y1 != kActRaiserAuthenticHeight)
+    return PalaceCaptureResult(frame, kPalaceCapture_Mask);
+  frame->world_navigation_brightness = captured.display_control & 15;
+  return PalaceCaptureResult(frame, kPalaceCapture_Ok);
 }
 
 static bool CaptureLayer(const SnesRunnerApi *api, SrRunnerHandle *runner,
@@ -130,6 +157,7 @@ bool SimWorldNavigationCapture_Capture(SimFrameData *frame,
     s_navigation_failure = kNavigationCapture_Ok;
     return CaptureSkyPalace(frame, runner);
   }
+  s_palace_failure = kPalaceCapture_Ok;
   const SnesRunnerApi *api = sr_runner_get_api(SR_RUNNER_ABI_VERSION);
   SrPpuStateSnapshot ppu = {SR_PPU_STATE_SNAPSHOT_V2_SIZE, 0u};
   SrBorrowedU16Span oam = {sizeof(oam), 0u, NULL, 0u, 0u};

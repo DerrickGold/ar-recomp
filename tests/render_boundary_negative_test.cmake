@@ -30,6 +30,10 @@ set(_cases
     "present_world_nav_sky.c"
     "present_world_nav_model_mesh.c"
     "present_world_nav_model_mesh.h"
+    "present_sky_palace.c"
+    "presentation_view.c"
+    "render_preparation.c"
+    "render_preparation_boundary_probe.h"
     "present_world_nav_boundary_probe.h"
     "sim/sim_world_navigation_globe.c"
     # New headers must be covered without adding an explicit filename.

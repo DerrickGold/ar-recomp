@@ -347,6 +347,13 @@ bool Sim3DDepthPass_AppendSurfaceBatches(Sim3DDepthMesh *mesh,
  * fallback discovered after entering SIM mode. */
 bool Sim3DDepthPass_Require(ArRenderDevice *device);
 
+typedef struct Sim3DPreparedPipelines {
+  bool depth, models, radial, surfaces, spherical_body;
+} Sim3DPreparedPipelines;
+/* Prepare every authored pipeline variant before the first scene. Call again
+ * after a device reset; ordinary mesh creation only visits cached outcomes. */
+Sim3DPreparedPipelines Sim3DDepthPass_PreparePipelines(ArRenderDevice *device);
+
 /* A viewport-sized, transparent color target paired with a real D32 depth
  * attachment. Geometry is collected by material so texture changes cost a
  * handful of draws. Opaque visibility is resolved by GPU depth, not painter

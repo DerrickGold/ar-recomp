@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "gpu_shader_blob.h"
+#include "gpu_render_preparation.h"
 #include "platform/sdl/render_sdl_internal.h"
 #include "shaders/blur_frag.h"
 #include "shaders/dof_edge_frag.h"
@@ -41,7 +42,6 @@ static const char *const kEffectNames[kDioramaEffect_Count] = {
 typedef struct DioramaEffectBackendState {
   SDL_Renderer *renderer;
   SDL_GPUDevice *device;
-  SDL_GPUShader *shaders[kDioramaEffect_Count];
   SDL_GPURenderState *states[kDioramaEffect_Count];
   bool init_attempted[kDioramaEffect_Count];
   bool available[kDioramaEffect_Count];
@@ -92,8 +92,8 @@ static bool EnsureEffect(ArRenderDevice *device,
   }
   s_effects.device = gpu;
 
-  SDL_GPUShader *shader = GpuShaderBlob_CreateFragment(
-      gpu, &kEffectBlobs[effect], kEffectNames[effect], 1, 1);
+  SDL_GPUShader *shader = ArSdlRenderBackend_FragmentShader(
+      device, &kEffectBlobs[effect], kEffectNames[effect], 1, 1);
   if (!shader) return false;
 
   SDL_GPURenderStateCreateInfo state_info;
@@ -101,14 +101,15 @@ static bool EnsureEffect(ArRenderDevice *device,
   state_info.fragment_shader = shader;
   SDL_GPURenderState *state = SDL_CreateGPURenderState(
       renderer, &state_info);
-  if (!state) {
+  const float warm_uniforms[9] = {1, 1, 1, 0, 1, 0, 1, 0, 1};
+  const Uint32 warm_bytes = effect == kDioramaEffect_DofEdge ? sizeof(warm_uniforms) : 4 * sizeof(float);
+  if (!state || !GpuRenderPreparation_Warm(device, state, warm_uniforms, warm_bytes, false)) {
     fprintf(stderr, "[gpu-fx] %s render state creation failed: %s\n",
             kEffectNames[effect], SDL_GetError());
-    SDL_ReleaseGPUShader(gpu, shader);
+    SDL_DestroyGPURenderState(state);
     return false;
   }
 
-  s_effects.shaders[effect] = shader;
   s_effects.states[effect] = state;
   s_effects.available[effect] = true;
   fprintf(stderr, "[gpu-fx] %s shader ready\n", kEffectNames[effect]);
@@ -211,12 +212,6 @@ void DioramaEffectBackend_Reset(ArRenderDevice *device) {
   if (same_device) {
     for (int effect = 0; effect < kDioramaEffect_Count; effect++)
       SDL_DestroyGPURenderState(s_effects.states[effect]);
-  }
-  if (same_device && current_device) {
-    for (int effect = 0; effect < kDioramaEffect_Count; effect++) {
-      if (s_effects.shaders[effect])
-        SDL_ReleaseGPUShader(current_device, s_effects.shaders[effect]);
-    }
   }
   memset(&s_effects, 0, sizeof(s_effects));
 }

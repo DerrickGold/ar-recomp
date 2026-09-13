@@ -3,6 +3,7 @@
 #define PRESENT_WORLD_NAV_MODEL_MESH_H
 #include "sim/sim3d_depth_pass.h"
 #include "sim/sim_background_voxel_models.h"
+#include "present_sim_globe_mapping.h"
 
 typedef struct WorldNavigationModelSource {
   SimBackgroundVoxelObject object;
@@ -12,6 +13,7 @@ typedef struct WorldNavigationModelSource {
 } WorldNavigationModelSource;
 
 typedef struct WorldNavigationModelSourceStyle {
+  SimGlobeMapping embedding; /* town=0 preserves the ordinary globe source */
   uint32_t model_revision, surface_revision;
   float chart_radius_tiles, tile_world;
   int height_percent, light_azimuth, light_elevation;

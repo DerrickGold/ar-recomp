@@ -10,6 +10,7 @@
  * present.c internals to this file, never live game state. */
 
 #include "present_sim3d_internal.h"
+#include "present_sim_globe.h"
 #include "present_sim3d_clouds.h"
 #include "present_sim3d_effects.h"
 #include "present_sim3d_shadows.h"
@@ -1462,7 +1463,7 @@ static void DrawSimTownCanvas(const FrameSlot *slot, ArRenderRectI source,
                               ArRenderRectI viewport, const float matrix[16],
                               bool cull_fade, int lift_inset,
                               const ArRenderRectF *exclude,
-                              bool background_voxels) {
+                              bool background_voxels, bool continuous_underlay) {
   if (!slot->sim.town_canvas_serial) return;
   ArRenderTexture canvas = ArRenderTexture_Invalid();
   if (background_voxels) {
@@ -1494,7 +1495,7 @@ static void DrawSimTownCanvas(const FrameSlot *slot, ArRenderRectI source,
     .extent_y0 = extent_y0,
     .extent_x1 = extent_x0 + (float)kSimTownCanvasPixels,
     .extent_y1 = extent_y0 + (float)kSimTownCanvasPixels,
-    .extent_feather = (float)kSimTownExtentFeatherPixels,
+    .extent_feather = continuous_underlay ? 0.0f : (float)kSimTownExtentFeatherPixels,
     .margin_left = slot->sim.sprite_margin_left,
     .margin_right = slot->sim.sprite_margin_right,
     .margin_top = slot->sim.sprite_margin_top,
@@ -1659,6 +1660,9 @@ static PresentationOutcome RenderSimProfile(
    * matrix afterwards would leave the object anchors on the old one. */
   ApplySimDynamicCamera(slot, &camera);
   ClampSimCameraPitch(&camera);
+  const bool globe_underlay = underlay && background_voxels &&
+      (features & kSimFeature_GlobeUnderlay) != 0;
+  if (globe_underlay) PresentSimGlobe_ClampCamera(&camera);
 
   /* Object anchors must use the exact same view/projection transform as the
    * ground mesh. Keeping the matrix at profile scope also prevents camera
@@ -1690,11 +1694,30 @@ static PresentationOutcome RenderSimProfile(
   /* Straight after the backdrop clear and before any captured layer: the
    * extension is ground the town is standing on the middle of, so everything
    * the town itself draws belongs on top of it. */
+  bool globe_underlay_drawn = false;
+  PresentSimGlobeView globe_view = {0};
   if (underlay) {
     Sim3DPerformanceScope performance =
         Sim3DPerformance_Begin(kSim3DPerformance_Underlay);
-    DrawSimWorldUnderlay(slot, source, viewport, matrix, lift_inset);
+    if (globe_underlay) {
+      const PresentationOutcome result = PresentSimGlobeUnderlay(
+          slot, source, viewport, &camera, matrix, &globe_view);
+      if (result != kPresentationOutcome_Complete) {
+        Sim3DPerformance_End(performance);
+        return kPresentationOutcome_CoreFailure;
+      }
+      globe_underlay_drawn = true;
+    } else {
+      DrawSimWorldUnderlay(slot, source, viewport, matrix, lift_inset);
+    }
     Sim3DPerformance_End(performance);
+  }
+  /* With the globe behind a complete SIM town, the town boundary is the
+   * focus boundary. Do not fade holes in its opaque backing at the smaller
+   * native sprite window; background focus has already been composited. */
+  if (globe_underlay_drawn) {
+    cull_haze = false;
+    fade_ground_planes = false;
   }
   if (underlay || background_voxels) {
     /* Keep the canvas as the opaque backing for transparent BG1 priority
@@ -1713,7 +1736,7 @@ static PresentationOutcome RenderSimProfile(
         Sim3DPerformance_Begin(kSim3DPerformance_Terrain);
     DrawSimTownCanvas(slot, source, viewport, matrix, cull_haze, lift_inset,
                       live_ground_enabled ? &live_ground : NULL,
-                      background_voxels);
+                      background_voxels, globe_underlay_drawn);
     Sim3DPerformance_End(performance);
   }
 
@@ -1873,7 +1896,8 @@ static PresentationOutcome RenderSimProfile(
     Sim3DPerformanceScope performance =
         Sim3DPerformance_Begin(kSim3DPerformance_Cloud);
     outcome = PresentationOutcome_Combine(outcome,
-        DrawSimCloudShroud(slot, source, viewport, matrix));
+        DrawSimCloudShroud(slot, source, viewport, matrix,
+            globe_underlay_drawn ? &globe_view : NULL));
     Sim3DPerformance_End(performance);
     if (!PresentationOutcome_IsUsable(outcome)) return outcome;
   }

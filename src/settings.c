@@ -807,6 +807,7 @@ static const struct {
   { kSimFeature_EffectLighting, &g_settings.sim3d_effect_lighting },
   { kSimFeature_Particles, &g_settings.sim3d_particles },
   { kSimFeature_WorldUnderlay, &g_settings.sim3d_world_underlay },
+  { kSimFeature_GlobeUnderlay, &g_settings.sim3d_globe_underlay },
   { kSimFeature_CloudShroud, &g_settings.sim3d_cloud_shroud },
   { kSimFeature_CullHaze, &g_settings.sim3d_cull_haze },
   { kSimFeature_Backdrop, &g_settings.sim3d_backdrop },
@@ -819,6 +820,10 @@ SimRenderFeatureMask Settings_Sim3DRequestedFeatures(void) {
   SimRenderFeatureMask mask = 0;
   for (int i = 0; i < kSim3DStageToggleCount; i++)
     if (*kSim3DStageToggles[i].field) mask |= kSim3DStageToggles[i].bit;
+  /* A complete authored town facade is required. Do not capture neighbours
+   * for an underlay that the presenter cannot use. */
+  if (g_settings.sim3d_voxel_preset == kSimBackgroundVoxelPreset_Off)
+    mask &= ~kSimFeature_GlobeUnderlay;
   return mask;
 }
 
@@ -929,6 +934,14 @@ static bool Sim3DWorldUnderlayAvailable(void) {
 static bool Sim3DWorldUnderlayEnabled(void) {
   return Sim3DWorldUnderlayAvailable() && g_settings.sim3d_world_underlay;
 }
+static bool Sim3DGlobeUnderlayAvailable(void) {
+  return Sim3DWorldUnderlayEnabled() &&
+      g_settings.sim3d_voxel_preset != kSimBackgroundVoxelPreset_Off;
+}
+static bool WorldGlobeAvailable(void) {
+  return g_settings.sim3d_world_navigation ||
+      (Sim3DGlobeUnderlayAvailable() && g_settings.sim3d_globe_underlay);
+}
 static bool Sim3DCloudShroudAvailable(void) {
   return Sim3DWorldUnderlayEnabled() &&
       Sim3DStageImplemented(kSimFeature_CloudShroud);
@@ -944,7 +957,7 @@ static bool SkyPalaceCloudsAvailable(void) {
       g_settings.sim3d_world_navigation_clouds;
 }
 static bool WorldNavigationLightingAvailable(void) {
-  return WorldNavigation3DEnabled() &&
+  return WorldGlobeAvailable() &&
       g_settings.sim3d_world_navigation_lighting;
 }
 static bool WorldNavigationCloudsAvailable(void) {
@@ -956,13 +969,13 @@ static bool Sim3DOrWorldNavigationLightingAvailable(void) {
 }
 static bool Sim3DOrWorldNavigationShadowAvailable(void) {
   return Sim3DShadowsEnabled() ||
-      (WorldNavigationLightingAvailable() &&
+      (WorldNavigation3DEnabled() && WorldNavigationLightingAvailable() &&
        g_settings.sim3d_world_navigation_clouds &&
        g_settings.sim3d_world_navigation_cloud_shadows);
 }
 static bool Sim3DOrWorldNavigationSoftShadowAvailable(void) {
   return Sim3DSoftShadowsEnabled() ||
-      (WorldNavigationLightingAvailable() &&
+      (WorldNavigation3DEnabled() && WorldNavigationLightingAvailable() &&
        g_settings.sim3d_world_navigation_clouds &&
        g_settings.sim3d_world_navigation_cloud_shadows);
 }
@@ -1335,9 +1348,9 @@ const SettingDesc g_setting_descs[] = {
                "World navigation lighting",
                "Light the globe and its relief and add directional cloud "
                "shadows to the inter-town world. Uses the shared controls and "
-               "does not require Simulation town 3D.",
+               "also lights the connected SIM underlay.",
                kSettingCat_Simulation, 1, false,
-               WorldNavigation3DEnabled, NULL),
+               WorldGlobeAvailable, NULL),
   BOOL_SETTING_MODERN(sim3d_world_navigation_clouds,
                "AR_SIM3D_WORLD_NAV_CLOUDS",
                "World navigation clouds",
@@ -1369,7 +1382,7 @@ const SettingDesc g_setting_descs[] = {
                "Off skips model compilation and drawing, retaining the live "
                "town map artwork on the globe. Does not change town 3D settings.",
                kSettingCat_Simulation, 1, false,
-               WorldNavigation3DEnabled, NULL),
+               WorldGlobeAvailable, NULL),
   BOOL_SETTING_MODERN(sim3d_world_navigation_relief,
                "AR_SIM3D_WORLD_NAV_RELIEF",
                "World navigation terrain relief",
@@ -1377,7 +1390,7 @@ const SettingDesc g_setting_descs[] = {
                "heightfield preparation and sampling while keeping spherical "
                "navigation. Does not flatten terrain inside simulation towns.",
                kSettingCat_Simulation, 1, false,
-               WorldNavigation3DEnabled, NULL),
+               WorldGlobeAvailable, NULL),
   BOOL_SETTING_MODERN(sim3d_world_navigation_ground_detail,
                "AR_SIM3D_WORLD_NAV_GROUND_DETAIL",
                "World navigation detailed ground",
@@ -1385,7 +1398,7 @@ const SettingDesc g_setting_descs[] = {
                "and terrain. Off skips this ground blend; native mountains "
                "may still use the shared source atlas. Does not change town 3D settings.",
                kSettingCat_Simulation, 1, false,
-               WorldNavigation3DEnabled, NULL),
+               WorldGlobeAvailable, NULL),
   BOOL_SETTING_MODERN(sim3d_world_navigation_mountains,
                "AR_SIM3D_WORLD_NAV_MOUNTAINS",
                "World navigation native mountains",
@@ -1393,7 +1406,7 @@ const SettingDesc g_setting_descs[] = {
                "side walls on the globe. Off retains overview relief and "
                "skips native mountain work; landscape relief must also be enabled.",
                kSettingCat_Simulation, 1, false,
-               WorldNavigation3DEnabled, NULL),
+               WorldGlobeAvailable, NULL),
   /* The enhanced renderer, stage by stage. Each is an ordinary toggle so a
    * stage can be turned on or off by name; `kSim3DShippedFeatures` is the one
    * list of stages with a shipped implementation, and the defaults here must
@@ -1562,6 +1575,16 @@ const SettingDesc g_setting_descs[] = {
                "empty space. Needs the ground projection; distance fade is "
                "set by World map haze.",
                kSettingCat_Simulation, 1, false, Sim3DWorldUnderlayAvailable,
+               NULL),
+  BOOL_SETTING_MODERN(sim3d_globe_underlay, "AR_SIM3D_GLOBE_UNDERLAY",
+               "Connected world underlay",
+               "Show the globe and nearby low-detail towns behind the active "
+               "3D town, preserving its authored terrain and actors. Limits "
+               "camera zoom and orbit to the local area. Uses world terrain, "
+               "lighting and model settings, with SIM haze and cloud shroud. "
+               "Off uses the cheaper flat world map. Requires 3D town models "
+               "and World map underlay; does not enable world navigation.",
+               kSettingCat_Simulation, 1, false, Sim3DGlobeUnderlayAvailable,
                NULL),
   BOOL_SETTING_MODERN(sim3d_cloud_shroud, "AR_SIM3D_CLOUDS", "Cloud shroud",
                "Cover the extended ground with drifting cloud banks. Sprites "
@@ -2698,10 +2721,71 @@ const SettingDesc *Settings_Find(const char *key) {
   return index >= 0 ? &g_setting_descs[index] : NULL;
 }
 
+static struct HardwareSetting {
+  bool *field;
+  RenderFeatureMask required;
+  bool suppressed, requested;
+} s_hardware_settings[] = {
+  {&g_settings.sim3d_mode, kRenderFeature_Depth},
+  {&g_settings.sim3d_world_navigation, kRenderFeature_Depth},
+  {&g_settings.sim3d_globe_underlay, kRenderFeature_ConnectedGlobe},
+  {&g_settings.gpu_fx_rim, kRenderFeature_DioramaRim},
+  {&g_settings.gpu_fx_dof, kRenderFeature_DioramaBlur | kRenderFeature_DioramaDof},
+  {&g_settings.gpu_fx_shadow, kRenderFeature_DioramaBlur},
+  {&g_settings.crt_enabled, kRenderFeature_Crt},
+  {&g_settings.sim3d_rim_light, kRenderFeature_SimRim},
+  {&g_settings.sim3d_effect_lighting, kRenderFeature_Effects},
+  {&g_settings.sim3d_particles, kRenderFeature_Effects},
+  {&g_settings.sim3d_soft_shadows, kRenderFeature_SimSoftShadows},
+  {&g_settings.action_effect_lighting, kRenderFeature_Effects},
+  {&g_settings.action_effect_particles, kRenderFeature_Effects},
+};
+static bool s_hardware_known;
+static RenderFeatureMask s_hardware_supported;
+
+static struct HardwareSetting *HardwareSettingFor(const SettingDesc *desc) {
+  if (!desc) return NULL;
+  for (size_t i = 0; i < sizeof(s_hardware_settings) / sizeof(s_hardware_settings[0]); ++i)
+    if (desc->field == s_hardware_settings[i].field) return &s_hardware_settings[i];
+  return NULL;
+}
+
+const char *Settings_HardwareUnavailableReason(const SettingDesc *desc) {
+  if (!s_hardware_known || !desc) return NULL;
+  const struct HardwareSetting *setting = HardwareSettingFor(desc);
+  const RenderFeatureMask required = desc->category == kSettingCat_Crt
+      ? kRenderFeature_Crt : setting ? setting->required : 0;
+  return (s_hardware_supported & required) == required ? NULL
+      : "Unavailable on this graphics device (startup capability check).";
+}
+
+void Settings_ApplyRenderCapabilities(uint32_t supported) {
+  s_hardware_known = true;
+  s_hardware_supported = supported & kRenderFeature_All;
+  for (size_t i = 0; i < sizeof(s_hardware_settings) / sizeof(s_hardware_settings[0]); ++i) {
+    struct HardwareSetting *setting = &s_hardware_settings[i];
+    if (setting->suppressed) *setting->field = setting->requested;
+    setting->requested = *setting->field;
+    setting->suppressed = (supported & setting->required) != setting->required;
+    if (!setting->suppressed) continue;
+    *setting->field = false;
+    for (int row = 0; row < g_setting_desc_count; ++row)
+      if (g_setting_descs[row].field == setting->field) {
+        fprintf(stderr, "[graphics-capabilities] %s blocked (required=$%x prepared=$%x)\n",
+            g_setting_descs[row].key, setting->required, s_hardware_supported);
+        break;
+      }
+  }
+}
+
+bool Settings_RenderCapabilitiesRetained(uint32_t supported) {
+  return !s_hardware_known || (supported & s_hardware_supported) == s_hardware_supported;
+}
+
 bool Settings_IsAvailable(const SettingDesc *desc) {
   /* Cheat values are intentionally stageable from every game state. Their
    * runtime hooks decide when an effect applies; editing is never mode-gated. */
-  return desc &&
+  return desc && !Settings_HardwareUnavailableReason(desc) &&
          (desc->category == kSettingCat_Cheats ||
           !desc->available || desc->available());
 }
@@ -2838,6 +2922,11 @@ SettingChangeResult Settings_SetLong(const SettingDesc *desc, long value) {
   long old_value;
   if (!Settings_GetLong(desc, &old_value)) return kSettingChange_Rejected;
   value = NormalizeLong(desc, value);
+  struct HardwareSetting *hardware = HardwareSettingFor(desc);
+  if (hardware && s_hardware_known && Settings_HardwareUnavailableReason(desc)) {
+    if (value != 0) return kSettingChange_Rejected;
+    hardware->requested = false;
+  }
   if (old_value == value) return kSettingChange_Unchanged;
 
   switch (desc->type) {
@@ -3303,6 +3392,14 @@ static bool Settings_LoadInternal(const char *path, bool boot, int rank,
 void Settings_InitWithFile(const char *path) {
   SettingsChangeObserver observer = s_change_observer;
   s_change_observer = NULL;
+  /* Startup owns hardware discovery. Never carry a previous initialization's
+   * effective values or suppressed preferences into a freshly loaded config. */
+  s_hardware_known = false;
+  s_hardware_supported = 0;
+  for (size_t i = 0; i < sizeof(s_hardware_settings) / sizeof(s_hardware_settings[0]); ++i) {
+    s_hardware_settings[i].suppressed = false;
+    s_hardware_settings[i].requested = false;
+  }
   memset(&g_settings, 0, sizeof(g_settings));
   s_boot_display_rank = 0;
   s_boot_widescreen_rank = 0;
@@ -3468,7 +3565,10 @@ bool Settings_Save(const char *path) {
     if (desc->field == &g_settings.display_mode &&
         g_settings.display_mode == kDisplayMode_Custom)
       continue;
-    if (desc->serialize) desc->serialize(value, sizeof(value), desc->field);
+    const struct HardwareSetting *hardware = HardwareSettingFor(desc);
+    if (hardware && hardware->suppressed)
+      snprintf(value, sizeof(value), "%s", hardware->requested ? "On" : "Off");
+    else if (desc->serialize) desc->serialize(value, sizeof(value), desc->field);
     else Settings_FormatValue(desc, value, sizeof(value));
     success = fprintf(file, "%s = %s\n", desc->key, value) >= 0;
   }

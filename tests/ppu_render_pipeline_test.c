@@ -1033,6 +1033,41 @@ static void TestSim3DFlatComposition(void) {
   CHECK(output[1] == 0xff112233u); /* alpha-zero capture cannot cover */
 }
 
+static void TestSim3DInertColorMath(void) {
+  Ppu *ppu = ppu_init();
+  CHECK(ppu != NULL);
+  if (!ppu) return;
+  uint8_t pixels[kW * 4], reference[kW * 4];
+  for (int brightness = 1; brightness <= 15; brightness++) {
+    setup_virtual_bg(ppu, 0, pixels, sizeof(pixels));
+    ppu->bgmode = 9;
+    ppu->screenEnabled[0] = 0x17;
+    ppu->screenEnabled[1] = 0;
+    ppu->inidisp = brightness;
+    ppu->cgwsel = ppu->cgadsub = 0;
+    ppu->fixedColor = 0;
+    render_first_line(ppu);
+    memcpy(reference, pixels, sizeof(reference));
+    for (int flags = 0; flags <= 0xc0; flags += 0x40) {
+      ppu->cgadsub = flags; /* no designated layers */
+      ppu->fixedColor = bgr555(3, 7, 15);
+      render_first_line(ppu);
+      CHECK(!memcmp(reference, pixels, sizeof(reference)));
+      const Sim3DCaptureRequest request = {
+        .town = true, .master_enabled = true, .renderer_ready = true,
+        .requested_features = kSimFeature_SeparatedComposite | kSimFeature_GroundProjection,
+        .width = kW, .height = 1,
+      };
+      Sim3D_BeginFrame();
+      CHECK(Sim3D_PrepareCapture(TestRunnerForPpu(ppu), &request));
+      Sim3D_BeginFrame();
+      PpuClearOverlayBindings(ppu);
+      PpuClearOverlayCaptures(ppu);
+    }
+  }
+  ppu_free(ppu);
+}
+
 static void TestSim3DFlatCompositionDemand(void) {
   Ppu *ppu = ppu_init();
   CHECK(ppu != NULL);
@@ -3005,6 +3040,7 @@ int main(void) {
   TestObjRangeScanoutCapture();
   TestSemanticAtlasPacking();
   TestSim3DFlatComposition();
+  TestSim3DInertColorMath();
   TestSim3DFlatCompositionDemand();
   TestSim3DPlaneTextureUploadMask();
   TestSim3DRawObjCaptureFallbackContract();

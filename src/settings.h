@@ -477,6 +477,7 @@ typedef struct Settings {
   bool sim3d_effect_lighting;
   bool sim3d_particles;
   bool sim3d_world_underlay;
+  bool sim3d_globe_underlay;
   bool sim3d_cloud_shroud;
   bool sim3d_cull_haze;
   bool sim3d_backdrop;
@@ -688,6 +689,11 @@ bool Settings_SetLocalizationPacks(const SettingsLocalizationPack *packs,
                                     size_t count);
 const char *Settings_LocalizationPackPath(int content);
 bool Settings_IsAvailable(const SettingDesc *desc);
+/* Video boot/reset publishes tested semantic features. Unsupported switches
+ * are blocked for this session without overwriting the saved preference. */
+void Settings_ApplyRenderCapabilities(uint32_t supported);
+bool Settings_RenderCapabilitiesRetained(uint32_t supported);
+const char *Settings_HardwareUnavailableReason(const SettingDesc *desc);
 bool Settings_IsMenuVisible(const SettingDesc *desc);
 /* True for a developer-only row: the fine numeric tuning dials of the diorama
  * and town 3D renderers, their internal layer/stage A/B toggles, and the scene

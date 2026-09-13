@@ -80,7 +80,10 @@ typedef enum SimRenderFeature {
    * are separate gates so either half can be A/B tested independently. */
   kSimFeature_EffectLighting = 1u << 12,
   kSimFeature_Particles = 1u << 13,
-  kSimFeature_All = (1u << 14) - 1,
+  /* Connected globe behind the existing full-town SIM facade. The flat
+   * WorldUnderlay remains the disabled/resource-failure fallback. */
+  kSimFeature_GlobeUnderlay = 1u << 14,
+  kSimFeature_All = (1u << 15) - 1,
 } SimRenderFeature;
 
 typedef enum SimViewKind {
@@ -229,7 +232,8 @@ enum {
       kSimFeature_Shadows | kSimFeature_SoftShadows | kSimFeature_RimLight |
       kSimFeature_WorldUnderlay | kSimFeature_CloudShroud |
       kSimFeature_CullHaze | kSimFeature_Backdrop |
-      kSimFeature_EffectLighting | kSimFeature_Particles,
+      kSimFeature_EffectLighting | kSimFeature_Particles |
+      kSimFeature_GlobeUnderlay,
 };
 
 /* Default D4a shadow darkness, percent of full black. The landscape pass has

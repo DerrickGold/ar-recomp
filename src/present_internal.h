@@ -55,8 +55,8 @@ bool SubmitEffectBatch(EffectBatch *batch, ArRenderBlendMode blend);
 PresentationOutcome PresentSim3D(const FrameSlot *slot);
 PresentationOutcome PresentWorldNavigation3D(const FrameSlot *slot);
 /* Sky Palace only: draw the shared globe into a caller-owned local viewport.
- * Does not change output target/viewport or compose native UI. On failure the
- * caller can cover the partial backdrop with its untouched native frame. */
+ * Does not change output target/viewport or compose native UI. Core failures
+ * must abort the selected scene, never switch to the native framebuffer. */
 PresentationOutcome PresentWorldNavigationBackdrop(
     const FrameSlot *slot, ArRenderRectI viewport);
 void UploadSimTownCanvas(void);

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -16,7 +17,7 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-func prepareEmbedded(payload, workspace, browser *string) error {
+func prepareEmbedded(ctx context.Context, payload, workspace, browser *string, progress winbundle.ProgressFunc) error {
 	if *payload != "" {
 		return nil
 	} // Explicit developer mode retains the existing path.
@@ -24,7 +25,7 @@ func prepareEmbedded(payload, workspace, browser *string) error {
 	if err != nil {
 		return err
 	}
-	a, err := winbundle.Open(executable)
+	a, err := winbundle.OpenContext(ctx, executable, progress)
 	if errors.Is(err, winbundle.ErrNoBundle) {
 		return errors.New("This development shell has no embedded payload. Use --payload or build the packaged Windows executable.")
 	}
@@ -51,6 +52,12 @@ func prepareEmbedded(payload, workspace, browser *string) error {
 		return errors.New("Fixed WebView2 cannot run from a mapped network drive; choose a local workspace")
 	}
 	cache := host.AuxiliaryDirectory(work, "runtime")
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if progress != nil {
+		progress(winbundle.Progress{Stage: "Preparing the runtime cache"})
+	}
 	if err = host.ValidateWorkspace(cache, executable); err != nil {
 		return err
 	}
@@ -64,13 +71,13 @@ func prepareEmbedded(payload, workspace, browser *string) error {
 	defer release()
 	dir := filepath.Join(cache, a.ID)
 	if _, err = os.Lstat(dir); os.IsNotExist(err) {
-		if err = a.Extract(dir, grantWebviewReadAccess); err != nil {
+		if err = a.ExtractContext(ctx, dir, grantWebviewReadAccess, progress); err != nil {
 			return fmt.Errorf("prepare bundled tools/WebView2: %w", err)
 		}
 	} else if err != nil {
 		return err
 	}
-	if err = a.VerifyDirectory(dir); err != nil {
+	if err = a.VerifyDirectoryContext(ctx, dir, progress); err != nil {
 		return fmt.Errorf("runtime cache is incomplete or modified; choose a new workspace (existing files were not changed): %w", err)
 	}
 	*payload = filepath.Join(dir, "payload")

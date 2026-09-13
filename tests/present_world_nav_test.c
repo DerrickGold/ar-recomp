@@ -1,5 +1,6 @@
 #include "present_internal.h"
 #include "present_sim3d_internal.h"
+#include "present_sim_globe.h"
 #include "present_world_nav_geometry.h"
 #include "present_world_nav_model_mesh.h"
 #include "actraiser/actraiser_localization_world_navigation.h"
@@ -93,6 +94,7 @@ static int depth_near_volume_faces;
 static int depth_upper_volume_faces;
 static float near_volume_max_depth, far_volume_min_depth;
 static bool depth_collecting;
+bool Sim3DDepthPass_IsCollecting(void) { return depth_collecting; }
 /* This contract fixture deliberately exercises optional-cache failure and
  * the mutable publication path. Real snapshots are tested by both GPU suites. */
 Sim3DDepthAtlasCache *Sim3DDepthPass_CreateAtlasCache(void) { return NULL; }
@@ -2392,6 +2394,25 @@ static void TestClippedBatch(void) {
 }
 
 int main(void) {
+  Scene3DCamera camera = {-.575f,0,3,.4f};
+  const Scene3DCamera original_camera = camera;
+  PresentSimGlobe_ClampCamera(&camera);
+  assert(!memcmp(&camera,&original_camera,sizeof(camera)));
+  const float supported_pitches[] = {-.575f, -.85f, -1.0f, -1.2f, -1.35f};
+  for (unsigned i = 0; i < sizeof(supported_pitches)/sizeof(supported_pitches[0]); ++i) {
+    camera = (Scene3DCamera){supported_pitches[i], .2f, 3, .4f};
+    const Scene3DCamera requested = camera;
+    PresentSimGlobe_ClampCamera(&camera);
+    assert(!memcmp(&camera, &requested, sizeof(camera)));
+  }
+  camera = (Scene3DCamera){-1.4f,2,10,.4f};
+  PresentSimGlobe_ClampCamera(&camera);
+  assert(camera.tilt_x == -1.35f && camera.tilt_y == .35f && camera.distance == 4.5f);
+  camera.tilt_y = -2;
+  PresentSimGlobe_ClampCamera(&camera);
+  assert(camera.tilt_y == -.35f);
+  assert(PresentSimGlobeUnderlay(NULL,(ArRenderRectI){0},(ArRenderRectI){0},
+      &camera,NULL,NULL) == kPresentationOutcome_CoreFailure);
   /* These counters/vertex oracles exercise the complete compatibility path.
    * The default's declining-adapter behavior is checked separately below. */
   setenv("AR_SIM3D_WORLD_GPU_GRID", "0", 1);

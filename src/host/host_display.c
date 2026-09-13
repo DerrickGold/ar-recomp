@@ -29,6 +29,7 @@
 #include "host_display_status.h"
 #include "present.h"
 #include "presentation_frame_generation.h"
+#include "presentation_view.h"
 #include "platform/sdl/presentation_device_sdl.h"
 #include "platform/sdl/presentation_geometry_sdl.h"
 #include "platform/sdl/render_sdl.h"
@@ -636,16 +637,13 @@ static void PerformanceContextForFrame(const FrameSlot *slot, HostDisplayPresent
     .limit_fps = g_settings.refresh_mode == kRefreshMode_Limit ? g_settings.frame_limit_fps : 0,
     .vsync = HostDisplayStatus_VsyncActive(),
   };
-  if (!slot->diorama_active &&
-      ActRaiser_IsActionMap(slot->diorama_map_group, slot->diorama_map_number))
-    context.scene = kPerformanceScene_ActionFlat;
-  if (slot->sim.view == kSimView_Enhanced) context.scene = kPerformanceScene_Town;
-  if (slot->sim.view == kSimView_WorldNavigation) context.scene = kPerformanceScene_World;
-  if (slot->sim.view == kSimView_SkyPalace) context.scene = kPerformanceScene_Palace;
+  const PresentationViewDecision view = PresentationView_Resolve(
+      slot, RenderComparison_PresentView());
+  context.scene = view.scene;
   if (RenderComparison_PresentView() != kRenderComparison_Enhanced) context.host_mode = 3;
   (void)ArRenderDevice_GetOutputSize(&g_render_device, &context.width, &context.height);
   PerformanceMetrics_SetContext(&context);
-  if (slot->sim.view == kSimView_AuthenticFallback)
+  if (view.unexpected_native)
     PerformanceMetrics_Add(kPerformanceCount_Fallbacks, 1);
 }
 

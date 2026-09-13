@@ -349,7 +349,9 @@ static void TestIndependentRetainedBudgets(ArRenderDevice *device, SDL_Renderer 
     ++opaque_count;
   while (effect_count < 32 && (effects[effect_count] = Sim3DDepthPass_CreateMesh()))
     ++effect_count;
-  CHECK(opaque_count == 4 && effect_count == 16);
+  /* Hybrid SIM needs navigation surface/models + underlay + two town caches.
+   * Exhaust the bounded pool rather than hard-coding its private capacity. */
+  CHECK(opaque_count >= 5 && opaque_count < 32 && effect_count == 16);
   if (!opaque_count || !effect_count) goto cleanup;
   Sim3DDepthVertex solid[4];
   MakeRect(solid, 0, 0, 32, 16, .5f, (ArRenderColorF){.2f,.7f,.4f,1});
@@ -2634,12 +2636,15 @@ static void TestSurfaceContracts(ArRenderDevice *device, SDL_Renderer *renderer)
   accepted = 1;
   while (accepted < 128 && Sim3DDepthPass_AppendSurfaceMesh(mesh,&t,NULL,0)) ++accepted;
   CHECK(accepted == 64); /* Overlays share the existing effect budget. */
-  /* Existing four opaque handles are shared, not expanded by the prototype. */
+  /* Surfaces and ordinary geometry share one bounded opaque pool. */
   CHECK(Sim3DDepthPass_Begin(device, 32, 16, kArRenderFilter_Nearest));
-  Sim3DDepthMesh *extra[3];
-  for (unsigned i = 0; i < 3; ++i) { extra[i] = Sim3DDepthPass_CreateGeometryMesh(); CHECK(extra[i]); }
+  Sim3DDepthMesh *extra[32] = {0};
+  unsigned extra_count = 0;
+  while (extra_count < 32 && (extra[extra_count] = Sim3DDepthPass_CreateGeometryMesh()))
+    ++extra_count;
+  CHECK(extra_count >= 4 && extra_count < 32);
   CHECK(!Sim3DDepthPass_CreateSurfaceMesh());
-  for (unsigned i = 0; i < 3; ++i) Sim3DDepthPass_DestroyMesh(extra[i]);
+  for (unsigned i = 0; i < extra_count; ++i) Sim3DDepthPass_DestroyMesh(extra[i]);
   /* Exercise instance-buffer growth, shrink, and zero-upload camera/wind reuse. */
   enum { kLargeQuads = 4097 };
   Sim3DDepthSurfaceVertex *large = malloc(kLargeQuads * sizeof(source)); CHECK(large);
@@ -2717,6 +2722,9 @@ int main(void) {
   CHECK(ArSdlRenderBackend_Bind(
       &render_device, &render_backend, renderer));
   CHECK(Sim3DDepthPass_Require(&render_device));
+  const Sim3DPreparedPipelines prepared = Sim3DDepthPass_PreparePipelines(&render_device);
+  CHECK(prepared.depth && prepared.models && prepared.radial &&
+      prepared.surfaces && prepared.spherical_body);
   CHECK(Sim3DDepthPass_Begin(
       &render_device, kTestWidth, kTestHeight, kArRenderFilter_Nearest));
   /* The invisible near quad writes only depth over the left half. The farther

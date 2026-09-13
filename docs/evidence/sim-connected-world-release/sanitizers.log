@@ -1,0 +1,3 @@
+mapping: 45738 point/round-trip/ownership checks passed
+retained image policy: reuse, moving view, continuous changes, bounded misprediction and recovery passed
+retained image: copy, reuse, resize, rejection, state-loss and reset passed

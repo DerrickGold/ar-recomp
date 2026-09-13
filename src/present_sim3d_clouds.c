@@ -58,6 +58,8 @@ typedef struct SimCloudMeshKey {
   ArRenderRectI source, viewport;
   float matrix[16];
   float bounds[4], origin[2], altitude, clear[4], inset, falloff, opacity;
+  bool curved;
+  PresentSimGlobeView globe;
 } SimCloudMeshKey;
 
 /* Projection/coverage belong to the camera, not the drifting texture. Keep
@@ -65,7 +67,8 @@ typedef struct SimCloudMeshKey {
  * This is presentation-owned storage, never borrowed by asynchronous work. */
 static struct {
   SimCloudMeshKey key;
-  bool ready, indices_ready, visible, fallback_ready;
+  bool ready, visible, fallback_ready;
+  int index_count;
   ArRenderVertex2D vertices[kSimCloudLayerCount][kSimCloudVertexCount];
   ArRenderPointF base_uv[kSimCloudLayerCount][kSimCloudVertexCount];
   ArRenderVertex2D gpu_vertices[kSimCloudVertexCount];
@@ -79,29 +82,105 @@ static bool SameCloudRect(ArRenderRectI a, ArRenderRectI b) {
   return a.x == b.x && a.y == b.y && a.w == b.w && a.h == b.h;
 }
 
+static bool SameCloudGlobe(const PresentSimGlobeView *a, const PresentSimGlobeView *b) {
+  return !memcmp(a->matrix, b->matrix, sizeof(a->matrix)) &&
+      !memcmp(a->camera, b->camera, sizeof(a->camera)) &&
+      !memcmp(&a->map.frame, &b->map.frame, sizeof(a->map.frame)) &&
+      a->map.radius == b->map.radius && a->map.chart_radius == b->map.chart_radius &&
+      a->map.metric == b->map.metric && a->map.reference_height == b->map.reference_height &&
+      a->map.landscape == b->map.landscape;
+}
+
 static bool SameCloudMesh(const SimCloudMeshKey *a, const SimCloudMeshKey *b) {
   return SameCloudRect(a->source, b->source) && SameCloudRect(a->viewport, b->viewport) &&
       !memcmp(a->matrix, b->matrix, sizeof(a->matrix)) &&
       !memcmp(a->bounds, b->bounds, sizeof(a->bounds)) &&
       !memcmp(a->origin, b->origin, sizeof(a->origin)) &&
       a->altitude == b->altitude && !memcmp(a->clear, b->clear, sizeof(a->clear)) &&
-      a->inset == b->inset && a->falloff == b->falloff && a->opacity == b->opacity;
+      a->inset == b->inset && a->falloff == b->falloff && a->opacity == b->opacity &&
+      a->curved == b->curved && (!a->curved || SameCloudGlobe(&a->globe, &b->globe));
+}
+
+/* Screen-grid ray/shell intersections remove the finite flat shroud's edge.
+ * This is a sampling mesh, not a second scene renderer: one cached grid still
+ * feeds the existing three-bank GPU effect (or the portable three draws).
+ * Only camera/placement changes rebuild it; drift never casts rays. */
+static bool CurvedCloudVertex(const SimCloudMeshKey *key, int column, int row,
+                              ArRenderVertex2D *out) {
+  const PresentSimGlobeView *view = &key->globe;
+  const SimGlobeMapping *map = &view->map;
+  const float nx = 2.0f * column / kSimCloudColumns - 1;
+  const float ny = 1 - 2.0f * row / kSimCloudRows;
+  const float *m = view->matrix;
+  float a[3], b[3], direction[3];
+  for (int i = 0; i < 3; ++i) {
+    a[i] = m[i*4] - nx*m[i*4+3];
+    b[i] = m[i*4+1] - ny*m[i*4+3];
+  }
+  direction[0] = a[1]*b[2] - a[2]*b[1];
+  direction[1] = a[2]*b[0] - a[0]*b[2];
+  direction[2] = a[0]*b[1] - a[1]*b[0];
+  const float length = hypotf(hypotf(direction[0], direction[1]), direction[2]);
+  if (!(length > 0) || !isfinite(length) || !(map->metric > 0)) return false;
+  const float forward = m[3]*direction[0] + m[7]*direction[1] + m[11]*direction[2];
+  for (int i = 0; i < 3; ++i) direction[i] *= (forward < 0 ? -1 : 1) / length;
+
+  const float reference = map->reference_height * map->landscape / map->metric;
+  const float centre_z = -map->radius - reference;
+  /* The shell's top retains the original SIM cloud altitude, above the
+   * active town's maximum terrain, while its centre matches the globe. */
+  const float radius = map->radius + reference + key->altitude * key->source.h / 16;
+  if (!(radius > 0) || !isfinite(radius)) return false;
+  const float eye[3] = {view->camera[0], view->camera[1], view->camera[2] - centre_z};
+  const float along = eye[0]*direction[0] + eye[1]*direction[1] + eye[2]*direction[2];
+  const float eye_squared = eye[0]*eye[0] + eye[1]*eye[1] + eye[2]*eye[2];
+  const float discriminant = along*along - eye_squared + radius*radius;
+  float visibility = 0, distance = fmaxf(0, -along);
+  if (discriminant >= 0) {
+    const float root = sqrtf(discriminant);
+    distance = -along-root;
+    if (distance <= 0) distance = -along+root; /* View from below the clouds. */
+    if (distance > 0) {
+      /* Feather the tangent instead of exposing a hard tessellated limb. */
+      const float edge = fminf(1, root / (radius * .04f));
+      visibility = edge*edge*(3-2*edge);
+      const float ground_discriminant = along*along-eye_squared+map->radius*map->radius;
+      if (ground_discriminant >= 0) {
+        const float ground_distance = -along-sqrtf(ground_discriminant);
+        if (ground_distance > 0 && ground_distance < distance) visibility = 0;
+      }
+    }
+  }
+  float normal[3];
+  float normal_length = 0;
+  for (int i = 0; i < 3; ++i) {
+    normal[i] = eye[i] + distance*direction[i];
+    normal_length += normal[i]*normal[i];
+  }
+  normal_length = sqrtf(normal_length);
+  if (!(normal_length > 0) || !isfinite(normal_length)) return false;
+  for (int i = 0; i < 3; ++i) normal[i] /= normal_length;
+  float chart_normal[3];
+  for (int i = 0; i < 3; ++i)
+    chart_normal[i] = map->frame.right[i]*normal[0] +
+        map->frame.up[i]*normal[1] + map->frame.outward[i]*normal[2];
+  float tile_x = 0, tile_y = 0;
+  if (!SimWorldNavigationGlobe_SourceAtRadius(map->chart_radius, chart_normal, &tile_x, &tile_y))
+    visibility = 0;
+  const float texture_x = key->origin[0] + tile_x*16;
+  const float texture_y = key->origin[1] + tile_y*16;
+  const float cover = Sim3D_CloudCoverage(texture_x, texture_y,
+      key->clear[0], key->clear[1], key->clear[2], key->clear[3], key->inset, key->falloff);
+  *out = (ArRenderVertex2D){
+    {key->viewport.x + (nx+1)*.5f*key->viewport.w,
+     key->viewport.y + (1-ny)*.5f*key->viewport.h},
+    {1, 1, 1, visibility*cover*key->opacity},
+    {tile_x / kSimWorldMapTiles, tile_y / kSimWorldMapTiles},
+  };
+  return true;
 }
 
 static void PrepareSimCloudMesh(const SimCloudMeshKey *key) {
-  if (!s_sim_cloud_mesh.indices_ready) {
-    int at = 0;
-    for (int row = 0; row < kSimCloudRows; row++)
-      for (int column = 0; column < kSimCloudColumns; column++) {
-        const int top_left = row * (kSimCloudColumns + 1) + column;
-        const int bottom_left = top_left + kSimCloudColumns + 1;
-        const int32_t cell[6] = {top_left, top_left + 1, bottom_left + 1,
-                                top_left, bottom_left + 1, bottom_left};
-        memcpy(&s_sim_cloud_mesh.indices[at], cell, sizeof(cell));
-        at += 6;
-      }
-    s_sim_cloud_mesh.indices_ready = true;
-  }
   if (s_sim_cloud_mesh.ready && SameCloudMesh(&s_sim_cloud_mesh.key, key)) return;
   Sim3DPerformance_AddPath(kSim3DPath_CpuProject);
   s_sim_cloud_mesh.key = *key;
@@ -113,6 +192,15 @@ static void PrepareSimCloudMesh(const SimCloudMeshKey *key) {
     const float y = key->bounds[2] + (key->bounds[3] - key->bounds[2]) *
         (float)row / (float)kSimCloudRows;
     for (int column = 0; column <= kSimCloudColumns; column++) {
+      const int at = row * (kSimCloudColumns + 1) + column;
+      if (key->curved) {
+        if (!CurvedCloudVertex(key, column, row, &s_sim_cloud_mesh.gpu_vertices[at])) {
+          s_sim_cloud_mesh.visible = false;
+          return;
+        }
+        if (s_sim_cloud_mesh.gpu_vertices[at].color.a > 0) s_sim_cloud_mesh.visible = true;
+        continue;
+      }
       const float x = key->bounds[0] + (key->bounds[1] - key->bounds[0]) *
           (float)column / (float)kSimCloudColumns;
       const float cover = Sim3D_CloudCoverage(x, y, key->clear[0], key->clear[1],
@@ -124,13 +212,29 @@ static void PrepareSimCloudMesh(const SimCloudMeshKey *key) {
         return;
       }
       if (cover > 0.0f) s_sim_cloud_mesh.visible = true;
-      const int at = row * (kSimCloudColumns + 1) + column;
       s_sim_cloud_mesh.gpu_vertices[at] = (ArRenderVertex2D){
         {projected.x, projected.y}, {1, 1, 1, cover * key->opacity},
         {(x - key->origin[0]) / span, (y - key->origin[1]) / span},
       };
     }
   }
+  s_sim_cloud_mesh.index_count = 0;
+  for (int row = 0; row < kSimCloudRows; row++)
+    for (int column = 0; column < kSimCloudColumns; column++) {
+      const int top = row * (kSimCloudColumns + 1) + column;
+      const int bottom = top + kSimCloudColumns + 1;
+      const int32_t cell[6] = {top, top+1, bottom+1, top, bottom+1, bottom};
+      for (int triangle = 0; triangle < 2; ++triangle) {
+        const int32_t *indices = &cell[triangle*3];
+        /* Do not run three texture samples over wholly clear town/sky pixels.
+         * The retained topology changes only when coverage/projection does. */
+        if (key->curved && s_sim_cloud_mesh.gpu_vertices[indices[0]].color.a == 0 &&
+            s_sim_cloud_mesh.gpu_vertices[indices[1]].color.a == 0 &&
+            s_sim_cloud_mesh.gpu_vertices[indices[2]].color.a == 0) continue;
+        memcpy(&s_sim_cloud_mesh.indices[s_sim_cloud_mesh.index_count], indices, 3*sizeof(*indices));
+        s_sim_cloud_mesh.index_count += 3;
+      }
+    }
 }
 
 static void PrepareSimCloudFallback(void) {
@@ -258,7 +362,8 @@ static ArRenderTexture EnsureSimCloudTexture(void) {
 }
 
 PresentationOutcome DrawSimCloudShroud(const FrameSlot *slot, ArRenderRectI source,
-                        ArRenderRectI viewport, const float matrix[16]) {
+                        ArRenderRectI viewport, const float matrix[16],
+                        const PresentSimGlobeView *globe) {
   if (!slot->sim.underlay_serial || !slot->sim.cloud_opacity_pct ||
       source.w <= 0 || source.h <= 0)
     return kPresentationOutcome_Complete;
@@ -287,36 +392,38 @@ PresentationOutcome DrawSimCloudShroud(const FrameSlot *slot, ArRenderRectI sour
 
   float x0 = texture_x_at_zero, x1 = texture_x_at_zero + span;
   float y0 = texture_y_at_zero, y1 = texture_y_at_zero + span;
-  float margin = (float)kSimUnderlayMarginPixels;
-  if (x0 < source.x - margin) x0 = (float)source.x - margin;
-  if (x1 > source.x + source.w + margin)
-    x1 = (float)(source.x + source.w) + margin;
-  if (y0 < source.y - margin) y0 = (float)source.y - margin;
-  if (y1 > source.y + source.h + margin)
-    y1 = (float)(source.y + source.h) + margin;
-  if (x1 - x0 < 1.0f || y1 - y0 < 1.0f) return kPresentationOutcome_Complete;
+  if (!globe) {
+    float margin = (float)kSimUnderlayMarginPixels;
+    if (x0 < source.x - margin) x0 = (float)source.x - margin;
+    if (x1 > source.x + source.w + margin)
+      x1 = (float)(source.x + source.w) + margin;
+    if (y0 < source.y - margin) y0 = (float)source.y - margin;
+    if (y1 > source.y + source.h + margin)
+      y1 = (float)(source.y + source.h) + margin;
+    if (x1 - x0 < 1.0f || y1 - y0 < 1.0f) return kPresentationOutcome_Complete;
 
-  float aspect = (float)viewport.w / (float)viewport.h;
-  float world_y0 = 0.5f - (y0 - source.y) / source.h;
-  float world_y1 = 0.5f - (y1 - source.y) / source.h;
-  for (int corner = 0; corner < 2; corner++) {
-    float texture_x = corner ? x1 : x0;
-    float world_x = ((texture_x - source.x) / source.w - 0.5f) * aspect;
-    float boundary = 0.0f;
-    bool increasing = false;
-    if (!Scene3D_DepthBoundaryY(matrix, world_x, altitude,
-                                kSimUnderlayMinClipDepth, &boundary,
-                                &increasing))
-      continue;
-    if (increasing) {
-      if (world_y1 < boundary) world_y1 = boundary;
-    } else if (world_y0 > boundary) {
-      world_y0 = boundary;
+    float aspect = (float)viewport.w / (float)viewport.h;
+    float world_y0 = 0.5f - (y0 - source.y) / source.h;
+    float world_y1 = 0.5f - (y1 - source.y) / source.h;
+    for (int corner = 0; corner < 2; corner++) {
+      float texture_x = corner ? x1 : x0;
+      float world_x = ((texture_x - source.x) / source.w - 0.5f) * aspect;
+      float boundary = 0.0f;
+      bool increasing = false;
+      if (!Scene3D_DepthBoundaryY(matrix, world_x, altitude,
+                                  kSimUnderlayMinClipDepth, &boundary,
+                                  &increasing))
+        continue;
+      if (increasing) {
+        if (world_y1 < boundary) world_y1 = boundary;
+      } else if (world_y0 > boundary) {
+        world_y0 = boundary;
+      }
     }
+    if (world_y0 - world_y1 < 1.0f / source.h) return kPresentationOutcome_Complete;
+    y0 = source.y + (0.5f - world_y0) * source.h;
+    y1 = source.y + (0.5f - world_y1) * source.h;
   }
-  if (world_y0 - world_y1 < 1.0f / source.h) return kPresentationOutcome_Complete;
-  y0 = source.y + (0.5f - world_y0) * source.h;
-  y1 = source.y + (0.5f - world_y1) * source.h;
 
   float clear_x0 = (float)slot->sim.cloud_clear_x0;
   float clear_x1 = (float)slot->sim.cloud_clear_x1;
@@ -357,7 +464,9 @@ PresentationOutcome DrawSimCloudShroud(const FrameSlot *slot, ArRenderRectI sour
     .bounds = {x0, x1, y0, y1}, .origin = {texture_x_at_zero, texture_y_at_zero},
     .altitude = altitude, .clear = {clear_x0, clear_x1, clear_y0, clear_y1},
     .inset = inset, .falloff = falloff, .opacity = opacity,
+    .curved = globe != NULL,
   };
+  if (globe) key.globe = *globe;
   memcpy(key.matrix, matrix, sizeof(key.matrix));
   PrepareSimCloudMesh(&key);
   if (!s_sim_cloud_mesh.visible) return kPresentationOutcome_Complete;
@@ -384,10 +493,10 @@ PresentationOutcome DrawSimCloudShroud(const FrameSlot *slot, ArRenderRectI sour
     bool drawn = false;
     if (bound) drawn = ArRenderDevice_DrawGeometryWithState(&g_render_device, texture,
         s_sim_cloud_mesh.gpu_vertices, kSimCloudVertexCount,
-        s_sim_cloud_mesh.indices, kSimCloudIndexCount, &draw_state);
+        s_sim_cloud_mesh.indices, s_sim_cloud_mesh.index_count, &draw_state);
     if (!SimCloudEffectBackend_Unbind(&g_render_device)) return kPresentationOutcome_CoreFailure;
     if (bound) {
-      if (drawn) Sim3DPerformance_AddDraw(kSimCloudVertexCount, kSimCloudIndexCount);
+      if (drawn) Sim3DPerformance_AddDraw(kSimCloudVertexCount, s_sim_cloud_mesh.index_count);
       return drawn ? kPresentationOutcome_Complete : kPresentationOutcome_OptionalOmitted;
     }
   }
@@ -406,9 +515,9 @@ PresentationOutcome DrawSimCloudShroud(const FrameSlot *slot, ArRenderRectI sour
     }
     if (ArRenderDevice_DrawGeometryWithState(
             &g_render_device, texture, vertices, kSimCloudVertexCount,
-            s_sim_cloud_mesh.indices, kSimCloudIndexCount, &draw_state)) {
+            s_sim_cloud_mesh.indices, s_sim_cloud_mesh.index_count, &draw_state)) {
       Sim3DPerformance_AddDraw(
-          kSimCloudVertexCount, kSimCloudIndexCount);
+          kSimCloudVertexCount, s_sim_cloud_mesh.index_count);
     } else outcome = kPresentationOutcome_OptionalOmitted;
   }
   return outcome;

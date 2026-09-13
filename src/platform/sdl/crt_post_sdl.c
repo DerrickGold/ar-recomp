@@ -1,4 +1,5 @@
 #include "crt_post.h"
+#include "gpu_render_preparation.h"
 
 #include <SDL3/SDL.h>
 #include <stdio.h>
@@ -143,22 +144,32 @@ static bool EnsureShader(ArRenderDevice *device, SDL_Renderer *renderer) {
     return false;
   }
 
-  s_shader = GpuShaderBlob_CreateFragment(
-      s_gpu_device, &kCrtBlobs, "CRT", 1, 1);
+  s_shader = ArSdlRenderBackend_FragmentShader(
+      device, &kCrtBlobs, "CRT", 1, 1);
   if (!s_shader) return false;
 
   SDL_GPURenderStateCreateInfo info;
   SDL_zero(info);
   info.fragment_shader = s_shader;
   s_state = SDL_CreateGPURenderState(renderer, &info);
-  if (!s_state) {
+  const CrtUniforms warm_uniforms = {
+    .output_w = 8, .output_h = 8, .image_w = 8, .image_h = 8,
+    .scan_lines = 224, .scan_columns = 256, .brightness = 1,
+  };
+  if (!s_state || !GpuRenderPreparation_Warm(device, s_state,
+          &warm_uniforms, sizeof(warm_uniforms), false)) {
+    SDL_DestroyGPURenderState(s_state);
+    s_state = NULL;
     fprintf(stderr, "[crt] render state creation failed: %s\n", SDL_GetError());
-    SDL_ReleaseGPUShader(s_gpu_device, s_shader);
     s_shader = NULL;
     return false;
   }
   fprintf(stderr, "[crt] shader ready\n");
   return true;
+}
+
+bool CrtPost_Prepare(ArRenderDevice *device) {
+  return EnsureShader(device, ArSdlRenderBackend_Renderer(device));
 }
 
 bool CrtPost_Begin(ArRenderDevice *device, const CrtPostConfig *config) {
@@ -338,10 +349,7 @@ void CrtPost_Shutdown(ArRenderDevice *device) {
     SDL_DestroyGPURenderState(s_state);
     s_state = NULL;
   }
-  if (s_shader && s_gpu_device) {
-    SDL_ReleaseGPUShader(s_gpu_device, s_shader);
-    s_shader = NULL;
-  }
+  s_shader = NULL; /* Borrowed from the renderer-lifetime shader cache. */
   ReleaseScene();
   s_renderer = NULL;
   s_gpu_device = NULL;
