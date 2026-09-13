@@ -1195,7 +1195,7 @@ bundled runtime's widescreen/PPU interfaces:
   shadow pass traverses against its offset to preserve original coverage
   without allocating a temporary alpha plane; invalid inputs remain distinct
   from retryable font/resource failures.
-- Text raster requests (ABI 11) may accent the shaped cluster containing a
+- Text raster requests (ABI 12) may accent the shaped cluster containing a
   logical UTF-8 grapheme end; zero disables the accent. Its RGB and logical
   offset participate in cache identity. The portable color pass preserves alpha
   and complete ligatures/combining marks, independent of visual direction;
@@ -1231,14 +1231,17 @@ bundled runtime's widescreen/PPU interfaces:
   snapshot, independent of the selected font stack/default locale. Both grid
   requests and flowed dialogue/labels use that source locale and direction;
   the existing raster cache identity includes them. A changed frame default
-  cannot reinterpret cached fallback text. Raster request ABI 11 additionally
+  cannot reinterpret cached fallback text. Raster request ABI 12 additionally
   borrows bounded logical source ranges for inserted names/numbers/terms. The
   session/frame/composer carry these beside UTF-8, not as control characters in
   it. Grid requests include their offset into the source. The backend inserts
   private isolate controls and maps every shaped endpoint back to original
   bytes, retaining the unchanged reveal clock and native anchors. Cache keys
-  include ranges, direction and slice offset. Browser carets, interface font
-  coverage and all-script visual qualification remain separate requirements.
+  include ranges, direction and slice offset. ABI 12 also borrows authored
+  preferred-break bits. The backend resolves those one-byte spaces against the
+  actual proportional font and wrap width before shaping, so source/reveal and
+  bidi byte offsets remain stable. Browser carets, interface font coverage and
+  all-script visual qualification remain separate requirements.
   CRLF is one hard break; CR, NEL and U+2029 terminate paragraphs without
   rasterizing separator glyphs. U+2028 splits physical lines inside the same
   resolved paragraph, retaining its base. Both bidi and ordinary Latin requests

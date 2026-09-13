@@ -22,6 +22,7 @@ typedef SrResult SrRunnerPpuObjPartsRasterProvider(
     SrPpuObjRasterResult *out_result);
 typedef SrResult SrRunnerPpuScanoutProvider(
     Snes *snes, const SrPpuScanoutRequest *request,
+    const SrPpuBackgroundViewRequest *view,
     SrPpuScanoutResult *out_result);
 
 /* Private composition hooks connecting the hardware model, generated-game

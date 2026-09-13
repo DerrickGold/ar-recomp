@@ -85,8 +85,8 @@ func EmitAuthorScript(messages []AuthorMessage, path string) (*AuthorScript, err
 				}
 				inline.WriteByte('}')
 				continue
-			case "line", "paragraph", "page", "empty", "end":
-				value = "@" + op.Op
+			case "line", "preferred_line", "paragraph", "page", "empty", "end":
+				value = "@" + strings.ReplaceAll(op.Op, "_", "-")
 			case "wait":
 				value = fmt.Sprintf("@wait %d", op.Frames)
 			case "anchor", "event":

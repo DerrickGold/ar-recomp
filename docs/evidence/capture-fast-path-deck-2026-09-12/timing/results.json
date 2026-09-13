@@ -1,0 +1,912 @@
+{
+  "schema": "actraiser-pipeline-comparison-v1",
+  "scene": "Action 3D",
+  "map": "04/04",
+  "platform": {
+    "machine": "x86_64",
+    "kernel": "6.16.12-valve24.5-1-neptune-616-gb2f7cfe85e45",
+    "files": {
+      "/etc/os-release": "NAME=\"SteamOS\"\nPRETTY_NAME=\"SteamOS\"\nVERSION_CODENAME=holo\nID=steamos\nID_LIKE=arch\nANSI_COLOR=\"1;35\"\nHOME_URL=\"https://www.steampowered.com/\"\nDOCUMENTATION_URL=\"https://support.steampowered.com/\"\nSUPPORT_URL=\"https://support.steampowered.com/\"\nBUG_REPORT_URL=\"https://support.steampowered.com/\"\nLOGO=steamos\nVARIANT_ID=steamdeck\nVERSION_ID=3.8.16\nBUILD_ID=20260716.1\nSTEAMOS_DEFAULT_UPDATE_BRANCH=stable",
+      "/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor": "powersave",
+      "/sys/class/drm/card0/device/power_dpm_force_performance_level": "auto",
+      "/sys/class/drm/card0/device/hwmon/hwmon6/power1_cap": "15000000",
+      "/sys/class/power_supply/ACAD/online": "1",
+      "/sys/class/power_supply/BAT1/capacity": "99",
+      "/sys/class/power_supply/BAT1/status": "Not charging"
+    },
+    "display_environment": {
+      "XDG_RUNTIME_DIR": "/run/user/1000",
+      "WAYLAND_DISPLAY": "wayland-0",
+      "LD_LIBRARY_PATH": "/home/deck/argame"
+    },
+    "library_and_installed_binary_sha256": {
+      "/home/deck/argame/libSDL3.so.0.4.14": "4f0b58199bb42cf428e2494db80902613c65a55a3aaf133756c17ff6d38e4a1f",
+      "/home/deck/argame/libSDL3_ttf.so.0.2.2": "72858e150f38ac96241a470156e820b50efc488b7179b2d5ecea22240cd621cd",
+      "/home/deck/argame/ActRaiserRecomp": "a38e659a0fa535983d565f5d4b3ddb28223e018a554cf1d9ec91e8acb97e7ee1"
+    }
+  },
+  "control_scene": "Action 3D",
+  "input_sha256": {
+    "/home/deck/argame/capture-fast-path-20260912.XW1iYR/control": "a9da71e2647eb852bf01b342be57d0a6d29c42257f3f562cad9fb0df709020c1",
+    "/home/deck/argame/capture-fast-path-20260912.XW1iYR/candidate": "b60d989debd14ba9303f332a4f2124ebcb4221ff8b7e76e36e4467606064a314",
+    "/home/deck/argame/ar.sfc": "b8055844825653210d252d29a2229f9a3e7e512004e83940620173c57d8723f0",
+    "/home/deck/argame/capture-fast-path-20260912.XW1iYR/config.ini": "ef6d73c178a87c7641f2fe966f546b21947327ec1efb437b16f1d0d972f71d25",
+    "/home/deck/argame/capture-fast-path-20260912.XW1iYR/tests/fixtures/benchmark/action-render-checkpoints.json": "b33cfbe34b5c3ca14ce95ae8aa91d408c3b318448607f1b843d3a36d8a77b8d5",
+    "/home/deck/argame/capture-fast-path-20260912.XW1iYR/saves/aitos-r4-natural.rec": "bd1e7b576e0c11529844175173ee16127a3a9781af021105f66b978d6b7509e4",
+    "/home/deck/argame/capture-fast-path-20260912.XW1iYR/tests/fixtures/benchmark/action-render-settings.ini": "fafb87f1ebb836a346e29de96581cdb027df216e8d4bd159d9c82756197fd4a0",
+    "/home/deck/argame/capture-fast-path-20260912.XW1iYR/tests/fixtures/benchmark/action-routes-seed.srm.b64": "a7e45b854c8ff80ad91566fb8d4c8678068be77486193b4d10645c9a7e848d83",
+    "/home/deck/argame/capture-fast-path-20260912.XW1iYR/tools/compare_pipeline_performance.py": "07f8564546b5679a85ddec4364d9f4e5876d2332e37d2f04447b96bf35aa5087"
+  },
+  "seed_sha256": "11dcdfb6c28cbf97f4ccd5f3c8ba1cf831f1864d029d6f8aaf67ad962ab79858",
+  "environment": {
+    "AR_WS_HEADLESS": "1",
+    "AR_EXTENDED_ASPECT_RATIO": "16:10",
+    "AR_ASPECT_PAR": "Square pixels",
+    "AR_DISPLAY_MODE": "2",
+    "AR_ACTION_BG_HLE": "1",
+    "AR_MOONJUMP": "1",
+    "AR_NO_KNOCKBACK": "1",
+    "AR_RANGED_SWORD": "1",
+    "AR_DIORAMA_AT": "1330",
+    "AR_INTERP_ENABLE": "0",
+    "AR_SHOW_FPS": "Off",
+    "AR_AUDIO_VOLUME": "0",
+    "AR_WINDOW_MODE": "Windowed",
+    "AR_WINDOW_SCALE": "3",
+    "AR_HEADLESS": "1",
+    "AR_HEADLESS_VIDEO": "1",
+    "AR_ENABLE_RUN_DIR": "1",
+    "AR_INPUT_REPLAY": "/home/deck/argame/capture-fast-path-20260912.XW1iYR/saves/aitos-r4-natural.rec",
+    "AR_SAVE_NATIVE_PATH": "/home/deck/argame/capture-fast-path-20260912.XW1iYR/timing-aitos/seed.srm",
+    "AR_SETTINGS_PATH": "/home/deck/argame/capture-fast-path-20260912.XW1iYR/timing-aitos/settings.ini",
+    "AR_PIPELINE_PERF": "1",
+    "AR_PERFORMANCE_OVERLAY": "Off",
+    "AR_REFRESH_MODE": "Unlimited",
+    "AR_QUIT_FRAMES": "3000"
+  },
+  "workers": {
+    "control": 3,
+    "candidate": 3
+  },
+  "verification": false,
+  "runs": [
+    {
+      "run_dir": "/home/deck/argame/capture-fast-path-20260912.XW1iYR/runs/20260912-170912",
+      "final_wram_sha256": "c97d01974a22892ec1c5d208eb0dcba636f5567eb8d5d770ab31a5f5bf275187",
+      "tick_presents": 3000,
+      "re_presents": 0,
+      "frames": 720,
+      "windows": 5,
+      "stages": {
+        "CRT/resolve": 0.0010991666666666667,
+        "PPU + capture": 4.121855138888889,
+        "PPU finish": 0.01204638888888889,
+        "PPU scanout": 4.050158888888888,
+        "PPU setup": 0.029285416666666668,
+        "SIM metadata": 0.02557388888888889,
+        "action DOF": 0.07483416666666667,
+        "action analysis": 0.0007183333333333333,
+        "action callback": 0.03616347222222222,
+        "action finish": 0.011786944444444444,
+        "action host-post": 0.05031013888888889,
+        "action mesh": 0.004263888888888888,
+        "action scanout": 4.049560694444445,
+        "action setup": 0.029044999999999998,
+        "action submit": 0.01152763888888889,
+        "action supersample": 0.0398675,
+        "action synthesis": 0.0005,
+        "action total": 0.2409538888888889,
+        "action upload": 1.1276873611111111,
+        "emulation": 0.9814631944444444,
+        "events/input": 0.02707583333333333,
+        "frame snapshot": 0.050236666666666666,
+        "host UI": 0.002138472222222222,
+        "housekeeping": 0.00201375,
+        "pacing/sleep": 0.0005549999999999999,
+        "present/wait": 0.2501052777777778,
+        "presentation": 0.2526163888888889,
+        "render CPU": 5.675346944444445,
+        "settings UI": 0.0007183333333333333,
+        "town canvas": 0.0012,
+        "upload": 1.2233077777777779,
+        "world map build": 0.0005570833333333333
+      },
+      "variant": "control",
+      "log": "/home/deck/argame/capture-fast-path-20260912.XW1iYR/timing-aitos/0-control.log",
+      "guard": {
+        "initial": {
+          "available_bytes": 12613894144,
+          "gpu_bytes": 409800704,
+          "temperature_c": 46.0,
+          "cpu0_khz": 1616376
+        },
+        "final": {
+          "available_bytes": 12563746816,
+          "gpu_bytes": 409800704,
+          "temperature_c": 50.0,
+          "cpu0_khz": 1699383
+        },
+        "minimum_available_bytes": 12495511552,
+        "peak_gpu_bytes": 561455104,
+        "peak_temperature_c": 53.0,
+        "seconds": 14.785097289000987,
+        "returncode": 0,
+        "abort_reason": null
+      }
+    },
+    {
+      "run_dir": "/home/deck/argame/capture-fast-path-20260912.XW1iYR/runs/20260912-170927",
+      "final_wram_sha256": "c97d01974a22892ec1c5d208eb0dcba636f5567eb8d5d770ab31a5f5bf275187",
+      "tick_presents": 3000,
+      "re_presents": 0,
+      "frames": 811,
+      "windows": 5,
+      "stages": {
+        "CRT/resolve": 0.0009996300863131936,
+        "PPU + capture": 3.557013563501849,
+        "PPU finish": 0.009984093711467325,
+        "PPU scanout": 3.4936890258939584,
+        "PPU setup": 0.027734525277435265,
+        "SIM metadata": 0.023854870530209616,
+        "action DOF": 0.0694533908754624,
+        "action analysis": 0.0025110974106041925,
+        "action callback": 0.033665844636251545,
+        "action finish": 0.009705055487053022,
+        "action host-post": 0.04614895191122072,
+        "action mesh": 0.005665844636251541,
+        "action scanout": 3.4931890258939577,
+        "action setup": 0.027514549938347718,
+        "action submit": 0.009968680641183723,
+        "action supersample": 0.03998014796547473,
+        "action synthesis": 0.00041960542540073984,
+        "action total": 0.2304214549938348,
+        "action upload": 0.9616254007398274,
+        "emulation": 0.9740434032059186,
+        "events/input": 0.02383933415536375,
+        "frame snapshot": 0.04851418002466091,
+        "host UI": 0.0018197287299630087,
+        "housekeeping": 0.0015580764488286067,
+        "pacing/sleep": 0.0004395807644882861,
+        "present/wait": 0.23066399506781754,
+        "presentation": 0.24608692971639953,
+        "render CPU": 4.926771023427867,
+        "settings UI": 0.000580517879161529,
+        "town canvas": 0.0010593094944512946,
+        "upload": 1.0497225647348951,
+        "world map build": 0.0005196054254007398
+      },
+      "variant": "candidate",
+      "log": "/home/deck/argame/capture-fast-path-20260912.XW1iYR/timing-aitos/1-candidate.log",
+      "guard": {
+        "initial": {
+          "available_bytes": 12543410176,
+          "gpu_bytes": 409800704,
+          "temperature_c": 50.0,
+          "cpu0_khz": 1555358
+        },
+        "final": {
+          "available_bytes": 12590649344,
+          "gpu_bytes": 409800704,
+          "temperature_c": 55.0,
+          "cpu0_khz": 3499803
+        },
+        "minimum_available_bytes": 12464267264,
+        "peak_gpu_bytes": 571617280,
+        "peak_temperature_c": 55.0,
+        "seconds": 12.812323281003046,
+        "returncode": 0,
+        "abort_reason": null
+      }
+    },
+    {
+      "run_dir": "/home/deck/argame/capture-fast-path-20260912.XW1iYR/runs/20260912-170940",
+      "final_wram_sha256": "c97d01974a22892ec1c5d208eb0dcba636f5567eb8d5d770ab31a5f5bf275187",
+      "tick_presents": 3000,
+      "re_presents": 0,
+      "frames": 826,
+      "windows": 5,
+      "stages": {
+        "CRT/resolve": 0.0009207021791767554,
+        "PPU + capture": 3.5049221549636806,
+        "PPU finish": 0.009644309927360775,
+        "PPU scanout": 3.4446383777239706,
+        "PPU setup": 0.027,
+        "SIM metadata": 0.02096646489104116,
+        "action DOF": 0.06052300242130751,
+        "action analysis": 0.002205326876513317,
+        "action callback": 0.03418498789346247,
+        "action finish": 0.009444309927360775,
+        "action host-post": 0.04055314769975787,
+        "action mesh": 0.004035230024213075,
+        "action scanout": 3.4440806295399513,
+        "action setup": 0.02678002421307506,
+        "action submit": 0.009112469733656174,
+        "action supersample": 0.03503995157384988,
+        "action synthesis": 0.0004199757869249395,
+        "action total": 0.20508087167070216,
+        "action upload": 0.9837881355932202,
+        "emulation": 0.97488401937046,
+        "events/input": 0.02301452784503632,
+        "frame snapshot": 0.044024334140435835,
+        "host UI": 0.0019414043583535108,
+        "housekeeping": 0.0013817191283292977,
+        "pacing/sleep": 0.00042046004842615013,
+        "present/wait": 0.20497094430992738,
+        "presentation": 0.21487493946731234,
+        "render CPU": 4.850574576271186,
+        "settings UI": 0.0006,
+        "town canvas": 0.0009204600484261501,
+        "upload": 1.0644069007263923,
+        "world map build": 0.0004593220338983051
+      },
+      "variant": "candidate",
+      "log": "/home/deck/argame/capture-fast-path-20260912.XW1iYR/timing-aitos/2-candidate.log",
+      "guard": {
+        "initial": {
+          "available_bytes": 12576501760,
+          "gpu_bytes": 409800704,
+          "temperature_c": 52.0,
+          "cpu0_khz": 1722844
+        },
+        "final": {
+          "available_bytes": 12613623808,
+          "gpu_bytes": 409800704,
+          "temperature_c": 52.0,
+          "cpu0_khz": 2630685
+        },
+        "minimum_available_bytes": 12517212160,
+        "peak_gpu_bytes": 571617280,
+        "peak_temperature_c": 54.0,
+        "seconds": 12.597682497995265,
+        "returncode": 0,
+        "abort_reason": null
+      }
+    },
+    {
+      "run_dir": "/home/deck/argame/capture-fast-path-20260912.XW1iYR/runs/20260912-170953",
+      "final_wram_sha256": "c97d01974a22892ec1c5d208eb0dcba636f5567eb8d5d770ab31a5f5bf275187",
+      "tick_presents": 3000,
+      "re_presents": 0,
+      "frames": 797,
+      "windows": 5,
+      "stages": {
+        "CRT/resolve": 0.0007398996235884567,
+        "PPU + capture": 3.8588092848180677,
+        "PPU finish": 0.009981430363864492,
+        "PPU scanout": 3.7979811794228358,
+        "PPU setup": 0.02679585947302384,
+        "SIM metadata": 0.021546047678795484,
+        "action DOF": 0.0572077791718946,
+        "action analysis": 0.0006194479297365119,
+        "action callback": 0.03177001254705144,
+        "action finish": 0.009721831869510665,
+        "action host-post": 0.04197189460476788,
+        "action mesh": 0.004079046424090339,
+        "action scanout": 3.7975012547051445,
+        "action setup": 0.02659585947302384,
+        "action submit": 0.009075533249686324,
+        "action supersample": 0.03544617314930991,
+        "action synthesis": 0.0004,
+        "action total": 0.19751304893350063,
+        "action upload": 0.9009342534504391,
+        "emulation": 0.9467161856963613,
+        "events/input": 0.021857590966122963,
+        "frame snapshot": 0.04386549560853199,
+        "host UI": 0.0018595984943538268,
+        "housekeeping": 0.0013592220828105394,
+        "pacing/sleep": 0.0004,
+        "present/wait": 0.202207904642409,
+        "presentation": 0.20554943538268508,
+        "render CPU": 5.097037641154329,
+        "settings UI": 0.0006194479297365119,
+        "town canvas": 0.0010194479297365119,
+        "upload": 0.9657479297365119,
+        "world map build": 0.0005
+      },
+      "variant": "control",
+      "log": "/home/deck/argame/capture-fast-path-20260912.XW1iYR/timing-aitos/3-control.log",
+      "guard": {
+        "initial": {
+          "available_bytes": 12595138560,
+          "gpu_bytes": 409800704,
+          "temperature_c": 52.0,
+          "cpu0_khz": 1659822
+        },
+        "final": {
+          "available_bytes": 12581498880,
+          "gpu_bytes": 409800704,
+          "temperature_c": 53.0,
+          "cpu0_khz": 3499753
+        },
+        "minimum_available_bytes": 12496990208,
+        "peak_gpu_bytes": 571617280,
+        "peak_temperature_c": 53.0,
+        "seconds": 12.823294417998113,
+        "returncode": 0,
+        "abort_reason": null
+      }
+    },
+    {
+      "run_dir": "/home/deck/argame/capture-fast-path-20260912.XW1iYR/runs/20260912-171006",
+      "final_wram_sha256": "c97d01974a22892ec1c5d208eb0dcba636f5567eb8d5d770ab31a5f5bf275187",
+      "tick_presents": 3000,
+      "re_presents": 0,
+      "frames": 764,
+      "windows": 5,
+      "stages": {
+        "CRT/resolve": 0.0008392670157068063,
+        "PPU + capture": 3.964547382198953,
+        "PPU finish": 0.010509685863874345,
+        "PPU scanout": 3.901446858638743,
+        "PPU setup": 0.027524476439790578,
+        "SIM metadata": 0.023261387434554973,
+        "action DOF": 0.06245065445026178,
+        "action analysis": 0.0006777486910994765,
+        "action callback": 0.03493128272251309,
+        "action finish": 0.010251308900523561,
+        "action host-post": 0.04520065445026178,
+        "action mesh": 0.003918848167539267,
+        "action scanout": 3.9009858638743458,
+        "action setup": 0.027284031413612565,
+        "action submit": 0.009543979057591623,
+        "action supersample": 0.034248298429319375,
+        "action synthesis": 0.0004193717277486911,
+        "action total": 0.20473036649214657,
+        "action upload": 1.0226764397905759,
+        "emulation": 0.9681739528795811,
+        "events/input": 0.022651832460732987,
+        "frame snapshot": 0.04538089005235602,
+        "host UI": 0.001980890052356021,
+        "housekeeping": 0.0014366492146596858,
+        "pacing/sleep": 0.00045837696335078535,
+        "present/wait": 0.22207774869109945,
+        "presentation": 0.21345327225130892,
+        "render CPU": 5.340208769633508,
+        "settings UI": 0.0006392670157068062,
+        "town canvas": 0.001018979057591623,
+        "upload": 1.0920286649214659,
+        "world map build": 0.0005181937172774869
+      },
+      "variant": "control",
+      "log": "/home/deck/argame/capture-fast-path-20260912.XW1iYR/timing-aitos/4-control.log",
+      "guard": {
+        "initial": {
+          "available_bytes": 12566720512,
+          "gpu_bytes": 409800704,
+          "temperature_c": 52.0,
+          "cpu0_khz": 1702569
+        },
+        "final": {
+          "available_bytes": 12567490560,
+          "gpu_bytes": 409800704,
+          "temperature_c": 53.0,
+          "cpu0_khz": 3499486
+        },
+        "minimum_available_bytes": 12483407872,
+        "peak_gpu_bytes": 571617280,
+        "peak_temperature_c": 55.0,
+        "seconds": 13.217575670998485,
+        "returncode": 0,
+        "abort_reason": null
+      }
+    },
+    {
+      "run_dir": "/home/deck/argame/capture-fast-path-20260912.XW1iYR/runs/20260912-171019",
+      "final_wram_sha256": "c97d01974a22892ec1c5d208eb0dcba636f5567eb8d5d770ab31a5f5bf275187",
+      "tick_presents": 3000,
+      "re_presents": 0,
+      "frames": 785,
+      "windows": 5,
+      "stages": {
+        "CRT/resolve": 0.0011,
+        "PPU + capture": 3.6611769426751595,
+        "PPU finish": 0.010554012738853504,
+        "PPU scanout": 3.5917020382165608,
+        "PPU setup": 0.028715031847133757,
+        "SIM metadata": 0.025660254777070065,
+        "action DOF": 0.07224891719745223,
+        "action analysis": 0.0008198726114649682,
+        "action callback": 0.034278853503184714,
+        "action finish": 0.0102743949044586,
+        "action host-post": 0.05019847133757962,
+        "action mesh": 0.004340764331210191,
+        "action scanout": 3.5912020382165606,
+        "action setup": 0.02847528662420382,
+        "action submit": 0.01075732484076433,
+        "action supersample": 0.039463949044585986,
+        "action synthesis": 0.0004198726114649682,
+        "action total": 0.23060292993630574,
+        "action upload": 1.0404287898089173,
+        "emulation": 0.9742312101910828,
+        "events/input": 0.026118471337579618,
+        "frame snapshot": 0.05170802547770701,
+        "host UI": 0.002059745222929936,
+        "housekeeping": 0.001897579617834395,
+        "pacing/sleep": 0.0005407643312101911,
+        "present/wait": 0.23942828025477708,
+        "presentation": 0.24056140127388534,
+        "render CPU": 5.108673503184713,
+        "settings UI": 0.0007398726114649681,
+        "town canvas": 0.0011597452229299362,
+        "upload": 1.1279071337579618,
+        "world map build": 0.0005
+      },
+      "variant": "candidate",
+      "log": "/home/deck/argame/capture-fast-path-20260912.XW1iYR/timing-aitos/5-candidate.log",
+      "guard": {
+        "initial": {
+          "available_bytes": 12555628544,
+          "gpu_bytes": 409800704,
+          "temperature_c": 52.0,
+          "cpu0_khz": 1573825
+        },
+        "final": {
+          "available_bytes": 12563099648,
+          "gpu_bytes": 409800704,
+          "temperature_c": 51.0,
+          "cpu0_khz": 1702569
+        },
+        "minimum_available_bytes": 12450701312,
+        "peak_gpu_bytes": 571518976,
+        "peak_temperature_c": 54.0,
+        "seconds": 13.028349208994769,
+        "returncode": 0,
+        "abort_reason": null
+      }
+    },
+    {
+      "run_dir": "/home/deck/argame/capture-fast-path-20260912.XW1iYR/runs/20260912-171033",
+      "final_wram_sha256": "c97d01974a22892ec1c5d208eb0dcba636f5567eb8d5d770ab31a5f5bf275187",
+      "tick_presents": 3000,
+      "re_presents": 0,
+      "frames": 746,
+      "windows": 5,
+      "stages": {
+        "CRT/resolve": 0.001,
+        "PPU + capture": 3.7424375335120645,
+        "PPU finish": 0.011199865951742627,
+        "PPU scanout": 3.6701596514745307,
+        "PPU setup": 0.02975402144772118,
+        "SIM metadata": 0.025946782841823057,
+        "action DOF": 0.0765583109919571,
+        "action analysis": 0.0007587131367292226,
+        "action callback": 0.04403619302949061,
+        "action finish": 0.010918766756032173,
+        "action host-post": 0.050095710455764074,
+        "action mesh": 0.004123726541554959,
+        "action scanout": 3.6694798927613945,
+        "action setup": 0.02945402144772118,
+        "action submit": 0.011262600536193032,
+        "action supersample": 0.04354343163538874,
+        "action synthesis": 0.0004,
+        "action total": 0.2592166219839142,
+        "action upload": 1.1757486595174262,
+        "emulation": 1.0118782841823057,
+        "events/input": 0.02733485254691689,
+        "frame snapshot": 0.050071179624664876,
+        "host UI": 0.0022994638069705094,
+        "housekeeping": 0.0021158176943699733,
+        "pacing/sleep": 0.000539946380697051,
+        "present/wait": 0.2674946380697051,
+        "presentation": 0.2766450402144772,
+        "render CPU": 5.379539410187667,
+        "settings UI": 0.0006198391420911528,
+        "town canvas": 0.0011,
+        "upload": 1.2828001340482575,
+        "world map build": 0.000538739946380697
+      },
+      "variant": "candidate",
+      "log": "/home/deck/argame/capture-fast-path-20260912.XW1iYR/timing-aitos/6-candidate.log",
+      "guard": {
+        "initial": {
+          "available_bytes": 12546277376,
+          "gpu_bytes": 409800704,
+          "temperature_c": 51.0,
+          "cpu0_khz": 1702569
+        },
+        "final": {
+          "available_bytes": 12604755968,
+          "gpu_bytes": 409800704,
+          "temperature_c": 52.0,
+          "cpu0_khz": 3499773
+        },
+        "minimum_available_bytes": 12461912064,
+        "peak_gpu_bytes": 571617280,
+        "peak_temperature_c": 54.0,
+        "seconds": 13.325351626001066,
+        "returncode": 0,
+        "abort_reason": null
+      }
+    },
+    {
+      "run_dir": "/home/deck/argame/capture-fast-path-20260912.XW1iYR/runs/20260912-171046",
+      "final_wram_sha256": "c97d01974a22892ec1c5d208eb0dcba636f5567eb8d5d770ab31a5f5bf275187",
+      "tick_presents": 3000,
+      "re_presents": 0,
+      "frames": 726,
+      "windows": 5,
+      "stages": {
+        "CRT/resolve": 0.0010207988980716254,
+        "PPU + capture": 4.11951391184573,
+        "PPU finish": 0.012004683195592288,
+        "PPU scanout": 4.048735399449035,
+        "PPU setup": 0.029163223140495867,
+        "SIM metadata": 0.025850688705234163,
+        "action DOF": 0.07250578512396695,
+        "action analysis": 0.0007601928374655648,
+        "action callback": 0.03563636363636364,
+        "action finish": 0.01174517906336088,
+        "action host-post": 0.05028539944903581,
+        "action mesh": 0.004301101928374656,
+        "action scanout": 4.048074655647383,
+        "action setup": 0.028903719008264463,
+        "action submit": 0.010537741046831955,
+        "action supersample": 0.03906928374655647,
+        "action synthesis": 0.0006205234159779614,
+        "action total": 0.2318625344352617,
+        "action upload": 1.0995075757575759,
+        "emulation": 0.9780865013774104,
+        "events/input": 0.025353719008264462,
+        "frame snapshot": 0.050760606060606055,
+        "host UI": 0.0022,
+        "housekeeping": 0.002196143250688705,
+        "pacing/sleep": 0.0005,
+        "present/wait": 0.24153925619834712,
+        "presentation": 0.24180275482093663,
+        "render CPU": 5.628102341597796,
+        "settings UI": 0.0007596418732782369,
+        "town canvas": 0.0011797520661157024,
+        "upload": 1.1884349862258952,
+        "world map build": 0.0005596418732782369
+      },
+      "variant": "control",
+      "log": "/home/deck/argame/capture-fast-path-20260912.XW1iYR/timing-aitos/7-control.log",
+      "guard": {
+        "initial": {
+          "available_bytes": 12598161408,
+          "gpu_bytes": 409800704,
+          "temperature_c": 51.0,
+          "cpu0_khz": 1614552
+        },
+        "final": {
+          "available_bytes": 12589473792,
+          "gpu_bytes": 409800704,
+          "temperature_c": 51.0,
+          "cpu0_khz": 1699660
+        },
+        "minimum_available_bytes": 12519141376,
+        "peak_gpu_bytes": 571617280,
+        "peak_temperature_c": 54.0,
+        "seconds": 13.779506385006243,
+        "returncode": 0,
+        "abort_reason": null
+      }
+    }
+  ],
+  "summary": {
+    "control": {
+      "CRT/resolve": {
+        "median_ms": 0.0009300329568892158,
+        "min_ms": 0.0007398996235884567,
+        "max_ms": 0.0010991666666666667
+      },
+      "PPU + capture": {
+        "median_ms": 4.042030647022342,
+        "min_ms": 3.8588092848180677,
+        "max_ms": 4.121855138888889
+      },
+      "PPU finish": {
+        "median_ms": 0.011257184529733316,
+        "min_ms": 0.009981430363864492,
+        "max_ms": 0.01204638888888889
+      },
+      "PPU scanout": {
+        "median_ms": 3.9750911290438893,
+        "min_ms": 3.7979811794228358,
+        "max_ms": 4.050158888888888
+      },
+      "PPU setup": {
+        "median_ms": 0.028343849790143223,
+        "min_ms": 0.02679585947302384,
+        "max_ms": 0.029285416666666668
+      },
+      "SIM metadata": {
+        "median_ms": 0.024417638161721933,
+        "min_ms": 0.021546047678795484,
+        "max_ms": 0.025850688705234163
+      },
+      "action DOF": {
+        "median_ms": 0.06747821978711437,
+        "min_ms": 0.0572077791718946,
+        "max_ms": 0.07483416666666667
+      },
+      "action analysis": {
+        "median_ms": 0.0006980410122164049,
+        "min_ms": 0.0006194479297365119,
+        "max_ms": 0.0007601928374655648
+      },
+      "action callback": {
+        "median_ms": 0.035283823179438366,
+        "min_ms": 0.03177001254705144,
+        "max_ms": 0.03616347222222222
+      },
+      "action finish": {
+        "median_ms": 0.01099824398194222,
+        "min_ms": 0.009721831869510665,
+        "max_ms": 0.011786944444444444
+      },
+      "action host-post": {
+        "median_ms": 0.0477430269496488,
+        "min_ms": 0.04197189460476788,
+        "max_ms": 0.05031013888888889
+      },
+      "action mesh": {
+        "median_ms": 0.004171467656489613,
+        "min_ms": 0.003918848167539267,
+        "max_ms": 0.004301101928374656
+      },
+      "action scanout": {
+        "median_ms": 3.9745302597608645,
+        "min_ms": 3.7975012547051445,
+        "max_ms": 4.049560694444445
+      },
+      "action setup": {
+        "median_ms": 0.028093875210938514,
+        "min_ms": 0.02659585947302384,
+        "max_ms": 0.029044999999999998
+      },
+      "action submit": {
+        "median_ms": 0.010040860052211789,
+        "min_ms": 0.009075533249686324,
+        "max_ms": 0.01152763888888889
+      },
+      "action supersample": {
+        "median_ms": 0.037257728447933194,
+        "min_ms": 0.034248298429319375,
+        "max_ms": 0.0398675
+      },
+      "action synthesis": {
+        "median_ms": 0.0004596858638743456,
+        "min_ms": 0.0004,
+        "max_ms": 0.0006205234159779614
+      },
+      "action total": {
+        "median_ms": 0.21829645046370413,
+        "min_ms": 0.19751304893350063,
+        "max_ms": 0.2409538888888889
+      },
+      "action upload": {
+        "median_ms": 1.061092007774076,
+        "min_ms": 0.9009342534504391,
+        "max_ms": 1.1276873611111111
+      },
+      "emulation": {
+        "median_ms": 0.9731302271284957,
+        "min_ms": 0.9467161856963613,
+        "max_ms": 0.9814631944444444
+      },
+      "events/input": {
+        "median_ms": 0.024002775734498723,
+        "min_ms": 0.021857590966122963,
+        "max_ms": 0.02707583333333333
+      },
+      "frame snapshot": {
+        "median_ms": 0.04780877835951135,
+        "min_ms": 0.04386549560853199,
+        "max_ms": 0.050760606060606055
+      },
+      "host UI": {
+        "median_ms": 0.0020596811372891217,
+        "min_ms": 0.0018595984943538268,
+        "max_ms": 0.0022
+      },
+      "housekeeping": {
+        "median_ms": 0.0017251996073298428,
+        "min_ms": 0.0013592220828105394,
+        "max_ms": 0.002196143250688705
+      },
+      "pacing/sleep": {
+        "median_ms": 0.0004791884816753927,
+        "min_ms": 0.0004,
+        "max_ms": 0.0005549999999999999
+      },
+      "present/wait": {
+        "median_ms": 0.23180850244472329,
+        "min_ms": 0.202207904642409,
+        "max_ms": 0.2501052777777778
+      },
+      "presentation": {
+        "median_ms": 0.22762801353612278,
+        "min_ms": 0.20554943538268508,
+        "max_ms": 0.2526163888888889
+      },
+      "render CPU": {
+        "median_ms": 5.4841555556156525,
+        "min_ms": 5.097037641154329,
+        "max_ms": 5.675346944444445
+      },
+      "settings UI": {
+        "median_ms": 0.0006788001745200697,
+        "min_ms": 0.0006194479297365119,
+        "max_ms": 0.0007596418732782369
+      },
+      "town canvas": {
+        "median_ms": 0.0010995999979261071,
+        "min_ms": 0.001018979057591623,
+        "max_ms": 0.0012
+      },
+      "upload": {
+        "median_ms": 1.1402318255736805,
+        "min_ms": 0.9657479297365119,
+        "max_ms": 1.2233077777777779
+      },
+      "world map build": {
+        "median_ms": 0.0005376385253054101,
+        "min_ms": 0.0005,
+        "max_ms": 0.0005596418732782369
+      }
+    },
+    "candidate": {
+      "CRT/resolve": {
+        "median_ms": 0.0009998150431565968,
+        "min_ms": 0.0009207021791767554,
+        "max_ms": 0.0011
+      },
+      "PPU + capture": {
+        "median_ms": 3.6090952530885043,
+        "min_ms": 3.5049221549636806,
+        "max_ms": 3.7424375335120645
+      },
+      "PPU finish": {
+        "median_ms": 0.010269053225160415,
+        "min_ms": 0.009644309927360775,
+        "max_ms": 0.011199865951742627
+      },
+      "PPU scanout": {
+        "median_ms": 3.5426955320552596,
+        "min_ms": 3.4446383777239706,
+        "max_ms": 3.6701596514745307
+      },
+      "PPU setup": {
+        "median_ms": 0.02822477856228451,
+        "min_ms": 0.027,
+        "max_ms": 0.02975402144772118
+      },
+      "SIM metadata": {
+        "median_ms": 0.02475756265363984,
+        "min_ms": 0.02096646489104116,
+        "max_ms": 0.025946782841823057
+      },
+      "action DOF": {
+        "median_ms": 0.07085115403645731,
+        "min_ms": 0.06052300242130751,
+        "max_ms": 0.0765583109919571
+      },
+      "action analysis": {
+        "median_ms": 0.0015125997439891425,
+        "min_ms": 0.0007587131367292226,
+        "max_ms": 0.0025110974106041925
+      },
+      "action callback": {
+        "median_ms": 0.03423192069832359,
+        "min_ms": 0.033665844636251545,
+        "max_ms": 0.04403619302949061
+      },
+      "action finish": {
+        "median_ms": 0.00998972519575581,
+        "min_ms": 0.009444309927360775,
+        "max_ms": 0.010918766756032173
+      },
+      "action host-post": {
+        "median_ms": 0.04812233118349239,
+        "min_ms": 0.04055314769975787,
+        "max_ms": 0.05019847133757962
+      },
+      "action mesh": {
+        "median_ms": 0.004232245436382575,
+        "min_ms": 0.004035230024213075,
+        "max_ms": 0.005665844636251541
+      },
+      "action scanout": {
+        "median_ms": 3.542195532055259,
+        "min_ms": 3.4440806295399513,
+        "max_ms": 3.6694798927613945
+      },
+      "action setup": {
+        "median_ms": 0.027994918281275767,
+        "min_ms": 0.02678002421307506,
+        "max_ms": 0.02945402144772118
+      },
+      "action submit": {
+        "median_ms": 0.010363002740974027,
+        "min_ms": 0.009112469733656174,
+        "max_ms": 0.011262600536193032
+      },
+      "action supersample": {
+        "median_ms": 0.03972204850503036,
+        "min_ms": 0.03503995157384988,
+        "max_ms": 0.04354343163538874
+      },
+      "action synthesis": {
+        "median_ms": 0.000419739018432854,
+        "min_ms": 0.0004,
+        "max_ms": 0.0004199757869249395
+      },
+      "action total": {
+        "median_ms": 0.23051219246507026,
+        "min_ms": 0.20508087167070216,
+        "max_ms": 0.2592166219839142
+      },
+      "action upload": {
+        "median_ms": 1.0121084627010688,
+        "min_ms": 0.9616254007398274,
+        "max_ms": 1.1757486595174262
+      },
+      "emulation": {
+        "median_ms": 0.9745576147807714,
+        "min_ms": 0.9740434032059186,
+        "max_ms": 1.0118782841823057
+      },
+      "events/input": {
+        "median_ms": 0.024978902746471684,
+        "min_ms": 0.02301452784503632,
+        "max_ms": 0.02733485254691689
+      },
+      "frame snapshot": {
+        "median_ms": 0.04929267982466289,
+        "min_ms": 0.044024334140435835,
+        "max_ms": 0.05170802547770701
+      },
+      "host UI": {
+        "median_ms": 0.0020005747906417237,
+        "min_ms": 0.0018197287299630087,
+        "max_ms": 0.0022994638069705094
+      },
+      "housekeeping": {
+        "median_ms": 0.0017278280333315008,
+        "min_ms": 0.0013817191283292977,
+        "max_ms": 0.0021158176943699733
+      },
+      "pacing/sleep": {
+        "median_ms": 0.0004897635725926685,
+        "min_ms": 0.00042046004842615013,
+        "max_ms": 0.0005407643312101911
+      },
+      "present/wait": {
+        "median_ms": 0.2350461376612973,
+        "min_ms": 0.20497094430992738,
+        "max_ms": 0.2674946380697051
+      },
+      "presentation": {
+        "median_ms": 0.24332416549514244,
+        "min_ms": 0.21487493946731234,
+        "max_ms": 0.2766450402144772
+      },
+      "render CPU": {
+        "median_ms": 5.01772226330629,
+        "min_ms": 4.850574576271186,
+        "max_ms": 5.379539410187667
+      },
+      "settings UI": {
+        "median_ms": 0.0006099195710455764,
+        "min_ms": 0.000580517879161529,
+        "max_ms": 0.0007398726114649681
+      },
+      "town canvas": {
+        "median_ms": 0.0010796547472256474,
+        "min_ms": 0.0009204600484261501,
+        "max_ms": 0.0011597452229299362
+      },
+      "upload": {
+        "median_ms": 1.096157017242177,
+        "min_ms": 1.0497225647348951,
+        "max_ms": 1.2828001340482575
+      },
+      "world map build": {
+        "median_ms": 0.0005098027127003699,
+        "min_ms": 0.0004593220338983051,
+        "max_ms": 0.000538739946380697
+      }
+    }
+  }
+}

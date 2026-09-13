@@ -112,6 +112,9 @@ typedef struct FrameSlot {
    * snapshot therefore cannot name these pixels; publish their host-owned
    * surface explicitly beside the frame. */
   SrPpuSurfaceView hud_obj_surface;
+  /* Fixed-width, world-clamped BG view, captured alongside the PPU without
+   * rebinding the gameplay plane. Same synchronous-upload lifetime above. */
+  SrPpuSurfaceView diorama_skybox_surface;
 
   /* Geometry, resolved (D3 — never call Settings_Visible*()/live globals from
    * present-time code; these are the already-resolved results). */

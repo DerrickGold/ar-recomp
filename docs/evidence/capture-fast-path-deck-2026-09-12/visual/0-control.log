@@ -1,0 +1,73 @@
+[Launcher] Config/saves anchored to '/home/deck/argame/capture-fast-path-20260912.XW1iYR/'.
+[run-dir] runs/20260912-171119 (console.log + dumps ringfenced here; AR_NO_RUN_DIR=1 disables)
+[runner-trace] recorder=excluded deep_instrumentation=excluded mode=off
+Loaded ROM: /home/deck/argame/ar.sfc (1048576 bytes)
+[video-geometry] 16:10 square-PAR -> 52 extra columns/side (render width 360)
+[display] AR_DISPLAY_MODE=2 -> widescreen FULL (all corrections)
+[video] driver: wayland (available: x11 wayland offscreen dummy evdev)
+[render] ordered GPU interop enabled (offscreen SDL + one swapchain present)
+[display] GPU frames in flight: 2
+[hd-manifest] [replace:title-logo] game-assets/hd/title-logo.png (2087x754)
+[hd-manifest] [replace:title-swirl] game-assets/hd/title-logo.png (2087x754, mode7)
+[hd-manifest] 2 entries, 2 with art
+[settings-menu] decoded ActRaiser font: $1000 bytes from ROM offset $0BECFB (2725 compressed bytes consumed)
+[settings-menu] decoded native dialog frame: chars ROM $06C000, palette ROM $0E3F73
+[diorama-layers] loaded diorama-layers.ini: 24 room(s), 34 plane override(s)
+[input] no gamepad connected; keyboard bindings active
+[music-manifest] [music:title-theme] game-assets/audio/title.ogg (48000 Hz, 8845689 frames, loop 0..8845689)
+[music-manifest] [music:song-00] game-assets/audio/fillmore.ogg (44100 Hz, 7050707 frames, loop 0..7050707)
+[music-manifest] [music:song-01] game-assets/audio/sky-palace.ogg (48000 Hz, 6389760 frames, loop 0..6389760)
+[music-manifest] [music:song-02] game-assets/audio/bp.ogg (44100 Hz, 5369615 frames, loop 0..5369615)
+[music-manifest] [music:song-08] game-assets/audio/advent.ogg (48000 Hz, 735609 frames, loop 0..735609)
+[music-manifest] [music:song-09] game-assets/audio/act2.ogg (44100 Hz, 6182827 frames, loop 0..6182827)
+[music-manifest] [music:song-10] game-assets/audio/birth-of-the-people.ogg (48000 Hz, 16201213 frames, loop 0..16201213)
+[music-manifest] [music:song-11] game-assets/audio/level-up.ogg (48000 Hz, 451396 frames, loop 0..451396)
+[music-manifest] 17 entries, 8 with audio
+[audio-ext] extended sound channels disabled (authentic 8 voices)
+[saves] loaded native-srm backend from /home/deck/argame/capture-fast-path-20260912.XW1iYR/visual-aitos/seed.srm
+[input-replay] 5009 legacy records, max gf=21845 last gf=4676 from /home/deck/argame/capture-fast-path-20260912.XW1iYR/saves/aitos-r4-natural.rec
+[audio] requested 32040 Hz is below SDL's 44100 device minimum; using 44100 (the setting cannot lower it)
+[audio] stream input 44100 Hz, device 44100 Hz 512-frame buffer (requested 512 frames)
+[widescreen] gf=0 $18=00 $19=00 -> pillarbox clamp=00 mirror=00 repeat=00 bands=0/811c9dc5 normal=00 hud=0/0/0 left-only-y=0 bg-plan=0 source=none/none hle=00
+[music] src=1A:94B8 song=01 -> [music:title-theme] game-assets/audio/title.ogg
+[music] stop [music:title-theme] (driver halt $F0)
+[widescreen] gf=373 $18=00 $19=07 -> WIDE clamp=00 mirror=00 repeat=00 bands=0/811c9dc5 normal=00 hud=32/168/168 left-only-y=32 bg-plan=0 source=none/none hle=00
+[music] src=1C:A988 song=01 -> [music:song-01] game-assets/audio/sky-palace.ogg
+[widescreen] gf=431 $18=00 $19=09 -> WIDE clamp=00 mirror=00 repeat=00 bands=0/811c9dc5 normal=00 hud=0/0/0 left-only-y=0 bg-plan=0 source=none/none hle=00
+[sim-worldmap] HLE built from sim state at gf=431 after world-navigation entry (841 tiles changed)
+[widescreen] gf=690 $18=00 $19=07 -> WIDE clamp=00 mirror=00 repeat=00 bands=0/811c9dc5 normal=00 hud=32/168/168 left-only-y=32 bg-plan=0 source=none/none hle=00
+[music] stop [music:song-01] (driver halt $F0)
+[widescreen] gf=898 $18=00 $19=09 -> WIDE clamp=00 mirror=00 repeat=00 bands=0/811c9dc5 normal=00 hud=0/0/0 left-only-y=0 bg-plan=0 source=none/none hle=00
+[sim-worldmap] HLE built from sim state at gf=898 after world-navigation entry (0 tiles changed)
+[music] src=1C:A7CC song=01 -> [music:song-08] game-assets/audio/advent.ogg
+[music] stop [music:song-08] (driver halt $F0)
+[action-bg-hle] full world-layer provider enabled
+[action-bg-hle] fallback=forced-blank map=04/04 BG1
+[widescreen] gf=1323 $18=04 $19=04 -> WIDE clamp=00 mirror=00 repeat=00 bands=0/811c9dc5 normal=00 hud=40/88/168 left-only-y=28 bg-plan=1 source=world/world hle=00
+[action-fx] first scene accents captured: actors=0/0 decorations=1/1 (lighting=1 particles=1)
+[act-enter] $18=04 $19=04 at game-frame 1323
+[music] src=1B:8554 song=01 authentic — drop game-assets/audio/song-05.ogg to replace ([music:song-05])
+[action-room-scene] ROM-derived world source enabled
+[widescreen] gf=1324 $18=04 $19=04 -> WIDE clamp=00 mirror=00 repeat=00 bands=0/811c9dc5 normal=00 hud=40/88/168 left-only-y=28 bg-plan=1 source=world/world hle=03
+[video-geometry] 16:10 square-PAR -> 120 extra columns/side (render width 496)
+[diorama] ON via AR_DIORAMA_AT at gf=1330
+[gpu-fx] DOF shader ready
+[gpu-fx] rim light shader ready
+[shot] runs/20260912-171119/shot_1400.ppm at gf=1400 (1080x672) margins=120/120 mode=widescreen FULL (all corrections) capture=final-composite
+[action-fx] first BG1-high lava geometry submitted (Diorama, depth-ordered)
+[action-fx] first scene accent geometry submitted: 1 effect(s), 586 vertices / 1548 indices (lighting=1 particles=1)
+[shot] runs/20260912-171119/shot_1600.ppm at gf=1600 (1080x672) margins=120/120 mode=widescreen FULL (all corrections) capture=final-composite
+[shot] runs/20260912-171119/shot_1800.ppm at gf=1800 (1080x672) margins=120/120 mode=widescreen FULL (all corrections) capture=final-composite
+[shot] runs/20260912-171119/shot_2000.ppm at gf=2000 (1080x672) margins=120/120 mode=widescreen FULL (all corrections) capture=final-composite
+[shot] runs/20260912-171119/shot_2200.ppm at gf=2200 (1080x672) margins=120/120 mode=widescreen FULL (all corrections) capture=final-composite
+[shot] runs/20260912-171119/shot_2400.ppm at gf=2400 (1080x672) margins=120/120 mode=widescreen FULL (all corrections) capture=final-composite
+[widescreen] gf=2573 $18=04 $19=05 -> WIDE clamp=00 mirror=00 repeat=02 bands=0/811c9dc5 normal=00 hud=40/88/168 left-only-y=28 bg-plan=1 source=world/viewport hle=00
+[widescreen] gf=2574 $18=04 $19=05 -> WIDE clamp=00 mirror=00 repeat=02 bands=0/811c9dc5 normal=00 hud=40/88/168 left-only-y=28 bg-plan=1 source=world/viewport hle=01
+[present-cadence] tick-presents=3000 re-presents=0 max-represent-alpha=0.000 no-present-no-sleep=0
+[dump] wrote runs/20260912-171119/dump_state.txt + wram/sram/dispatch_log (exit)
+[action-bg-hle] provider-summary frames=1363 preflight={layers:2604,tiles:2458419,mismatches:0,outside:0} eligible=2604 layers=2604 lookups=37327808 batches=1821120 tiles=36882048 outside=445760 band-cache={builds:0,hits:0}
+[action-room-scene] provider-summary layers=2604 live-fallbacks=0
+[action-room-load-hle] summary command5=2 command4=4 bytes=14592
+[action-room-gfx-hle] summary command7=3 command6=3 bytes=24960
+[action-room-video-hle] summary command3=2 bytes=56
+[run-dir] all diagnostics from this run: runs/20260912-171119/  (share with: zip -r report.zip runs/20260912-171119)

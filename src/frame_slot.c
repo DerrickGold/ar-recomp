@@ -668,6 +668,7 @@ void FrameSlot_Capture(FrameSlot *dst) {
       dst->extra_right_cur = (uint8_t)live_right;
       ActRaiser_LiveActionBgPlan(&dst->action_bg_plan,
                                  &dst->bg_capture_pad_to_budget);
+      ActRaiser_LiveDioramaSkybox(&dst->diorama_skybox_surface);
       dst->action_bg_extent_guides = ActionBgTuner_GuidesEnabled();
     }
     dst->inidisp = ppu_frame->display_control;

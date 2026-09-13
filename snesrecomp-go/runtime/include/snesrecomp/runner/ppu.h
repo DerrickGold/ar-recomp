@@ -967,6 +967,38 @@ typedef struct SrPpuScanoutRequest {
 #define SR_PPU_SCANOUT_AUTHENTIC_CAMERA_BG1 UINT32_C(0x00000002)
 #define SR_PPU_SCANOUT_AUTHENTIC_CAMERA_BG2 UINT32_C(0x00000004)
 #define SR_PPU_SCANOUT_PRESENTATION_DIGEST_VALID UINT32_C(0x00000008)
+#define SR_PPU_SCANOUT_BACKGROUND_VIEW_READY UINT32_C(0x00000010)
+
+/** Optional independent, horizontally bounded view of a virtual Mode-1 BG.
+ * The fixed-width window follows the provider camera plus live raster scroll,
+ * clamped to [0, world_width - width]. This does not move the hardware camera,
+ * alter gameplay output, or apply the gameplay canvas's horizontal clipping.
+ * Output matches the source's primary overlay (including priority separation
+ * and transparent fill), not the final main/subscreen composition.
+ *
+ * Only non-mosaic, unclassified virtual BGs with ordinary capture policies
+ * and horizontally uniform windows are supported. Unsupported rows omit READY;
+ * normal scanout still completes. Each row observes the same live palette,
+ * characters and HDMA state as normal scanout. Caller-owned storage is borrowed
+ * only during the call, must not alias any bound PPU output, and is publishable
+ * only when READY is returned. No new fields are added to V2 scanout records. */
+typedef struct SrPpuBackgroundViewRequest {
+    uint32_t struct_size;
+    uint32_t layer;
+    uint32_t world_width;
+    uint32_t world_height;
+    int32_t screen_x0;
+    int32_t screen_y0;
+    uint32_t width;
+    uint32_t height;
+    void *pixels;
+    uint64_t pitch_bytes;
+    uint64_t pixel_byte_size;
+} SrPpuBackgroundViewRequest;
+
+#define SR_PPU_BACKGROUND_VIEW_REQUEST_SIZE                              \
+    ((uint32_t)(offsetof(SrPpuBackgroundViewRequest, pixel_byte_size) +   \
+                sizeof(((SrPpuBackgroundViewRequest *)0)->pixel_byte_size)))
 
 /** Digest produced by the scanout transaction that returned it. It has no
  * lifetime beyond the copied result and never refers to a cached prior frame. */

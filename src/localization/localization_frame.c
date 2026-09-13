@@ -631,6 +631,19 @@ bool ArLocalizationFrame_AddDialogueWindow(
     const char *utf8, size_t utf8_bytes, uint32_t revealed_utf8_bytes,
     uint32_t cluster_count, uint64_t source_revision,
     ArTextDirection direction, uint8_t native_font_pixels) {
+  return ArLocalizationFrame_AddStructuredDialogueWindow(
+      frame, surface_id, destination, region, utf8, utf8_bytes,
+      revealed_utf8_bytes, cluster_count, source_revision, direction,
+      native_font_pixels, NULL);
+}
+
+bool ArLocalizationFrame_AddStructuredDialogueWindow(
+    ArLocalizationFrame *frame, uint32_t surface_id,
+    ArTextCellDestination destination, ArTextCellRegion region,
+    const char *utf8, size_t utf8_bytes, uint32_t revealed_utf8_bytes,
+    uint32_t cluster_count, uint64_t source_revision,
+    ArTextDirection direction, uint8_t native_font_pixels,
+    const uint8_t *structural_boundaries) {
   if (!utf8 || revealed_utf8_bytes > utf8_bytes ||
       (revealed_utf8_bytes < utf8_bytes &&
        ((uint8_t)utf8[revealed_utf8_bytes] & 0xc0u) == 0x80u))
@@ -643,6 +656,12 @@ bool ArLocalizationFrame_AddDialogueWindow(
     return false;
   frame->snapshots[frame->snapshot_count - 1u].revealed_utf8_bytes =
       revealed_utf8_bytes;
+  if (structural_boundaries) {
+    const size_t offset = frame->snapshots[frame->snapshot_count - 1u].utf8_offset;
+    for (size_t i = 0; i < utf8_bytes; ++i)
+      ArTextBoundary_Set(frame->structural_boundaries, offset + i,
+                         ArTextBoundary_Get(structural_boundaries, i));
+  }
   return true;
 }
 

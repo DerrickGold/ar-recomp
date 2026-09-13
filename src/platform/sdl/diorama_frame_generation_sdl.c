@@ -49,7 +49,8 @@ typedef struct DioramaFrameGenerationKey {
   bool valid;
 } DioramaFrameGenerationKey;
 
-static DioramaFrameGenerationPlane s_planes[kDioramaPlane_Count];
+enum { kFrameGenerationPlaneCount = kDioramaPlane_Count + 1 };
+static DioramaFrameGenerationPlane s_planes[kFrameGenerationPlaneCount];
 static DioramaFrameGenerationKey s_last_key;
 static uint64_t s_pair_timestamp_ns;
 static uint32_t s_pair_mask;
@@ -81,7 +82,7 @@ static void DestroyPlaneTextures(DioramaFrameGenerationPlane *plane) {
 }
 
 void DioramaFrameGeneration_Reset(void) {
-  for (int plane = 0; plane < kDioramaPlane_Count; plane++) {
+  for (int plane = 0; plane < kFrameGenerationPlaneCount; plane++) {
     DestroyPlaneTextures(&s_planes[plane]);
     s_planes[plane].current_valid = false;
     s_planes[plane].pair_valid = false;
@@ -96,7 +97,7 @@ void DioramaFrameGeneration_Reset(void) {
 
 void DioramaFrameGeneration_Shutdown(void) {
   DioramaFrameGeneration_Reset();
-  for (int plane = 0; plane < kDioramaPlane_Count; plane++) {
+  for (int plane = 0; plane < kFrameGenerationPlaneCount; plane++) {
     free(s_planes[plane].previous_pixels);
     free(s_planes[plane].current_pixels);
     s_planes[plane].previous_pixels = NULL;
@@ -203,28 +204,44 @@ static void CopySurfaceRegion(
   }
 }
 
-void DioramaFrameGeneration_Capture(
+void DioramaFrameGeneration_CaptureWithSkybox(
     ArRenderDevice *device, const FrameSlot *slot,
-    const ArRenderTexture source_textures[kDioramaPlane_Count],
-    const uint8_t *const pixels[kDioramaPlane_Count],
-    const size_t pitch_bytes[kDioramaPlane_Count],
-    uint32_t changed_plane_mask) {
+    const ArRenderTexture layer_textures[kDioramaPlane_Count],
+    const uint8_t *const layer_pixels[kDioramaPlane_Count],
+    const size_t layer_pitches[kDioramaPlane_Count],
+    uint32_t changed_plane_mask, ArRenderTexture skybox_texture,
+    bool skybox_changed) {
   SDL_Renderer *renderer = ArSdlRenderBackend_Renderer(device);
   s_pair_timestamp_ns = 0;
   s_pair_mask = 0;
-  if (!renderer || !slot || !source_textures || !pixels || !pitch_bytes ||
+  if (!renderer || !slot || !layer_textures || !layer_pixels || !layer_pitches ||
       !slot->diorama_active ||
       !slot->interp_setting_enabled || !slot->capture_ticks ||
       slot->turbo_active || (slot->inidisp & 0x80u) != 0) {
     s_last_key.valid = false;
     return;
   }
+  ArRenderTexture source_textures[kFrameGenerationPlaneCount];
+  const uint8_t *pixels[kFrameGenerationPlaneCount];
+  size_t pitch_bytes[kFrameGenerationPlaneCount];
+  memcpy(source_textures, layer_textures, sizeof(*layer_textures) * kDioramaPlane_Count);
+  memcpy(pixels, layer_pixels, sizeof(*layer_pixels) * kDioramaPlane_Count);
+  memcpy(pitch_bytes, layer_pitches, sizeof(*layer_pitches) * kDioramaPlane_Count);
+  const bool have_skybox = ArRenderTexture_IsValid(skybox_texture) &&
+      slot->diorama_skybox_surface.data;
+  source_textures[kDioramaFrameGenerationSkybox] = skybox_texture;
+  pixels[kDioramaFrameGenerationSkybox] = have_skybox
+      ? slot->diorama_skybox_surface.data : NULL;
+  pitch_bytes[kDioramaFrameGenerationSkybox] =
+      (size_t)slot->diorama_skybox_surface.pitch_bytes;
+  if (skybox_changed) changed_plane_mask |= 1u << kDioramaFrameGenerationSkybox;
 
   const int width = slot->snes_width + slot->obj_apron * 2;
   const int height = slot->snes_height +
       slot->ws_extra_top + slot->ws_extra_bottom;
-  const uint32_t plane_mask = slot->diorama_plane_request_mask &
-      slot->diorama_plane_content_mask;
+  const uint32_t plane_mask = (slot->diorama_plane_request_mask &
+      slot->diorama_plane_content_mask) |
+      (have_skybox ? 1u << kDioramaFrameGenerationSkybox : 0u);
   DioramaFrameGenerationKey current = {
     .timestamp_ns = slot->timestamp_ns,
     .plane_mask = plane_mask,
@@ -253,18 +270,29 @@ void DioramaFrameGeneration_Capture(
    * and restore it after the loop so no plane's early exit can leave the
    * renderer pointing at a private texture. */
   SDL_Texture *const entry_target = SDL_GetRenderTarget(renderer);
-  for (int plane_index = 0; plane_index < kDioramaPlane_Count;
+  for (int plane_index = 0; plane_index < kFrameGenerationPlaneCount;
        plane_index++) {
     DioramaFrameGenerationPlane *plane = &s_planes[plane_index];
     plane->pair_valid = false;
-    if (!(plane_mask & (1u << plane_index)) || !pixels[plane_index] ||
-        pitch_bytes[plane_index] < (size_t)width * sizeof(uint32_t)) {
+    if (!(plane_mask & (1u << plane_index)) || !pixels[plane_index]) {
       plane->current_valid = false;
       continue;
     }
     DioramaPlaneCaptureRegion region;
-    if (!DioramaPlaneCaptureRegion_Resolve(
+    if (plane_index == kDioramaFrameGenerationSkybox) {
+      region = (DioramaPlaneCaptureRegion){
+        0, (int)slot->diorama_skybox_surface.width_pixels,
+        (int)slot->diorama_skybox_surface.height_pixels,
+      };
+    } else if (!DioramaPlaneCaptureRegion_Resolve(
             plane_index, width, height, slot->obj_apron, &region)) {
+      plane->current_valid = false;
+      continue;
+    }
+    if (region.width <= 0 || region.width > kFrameSlotLayerTextureWidth ||
+        region.height <= 0 || region.height > kFrameSlotLayerTextureHeight ||
+        pitch_bytes[plane_index] <
+            (size_t)(region.x + region.width) * sizeof(uint32_t)) {
       plane->current_valid = false;
       continue;
     }
@@ -505,19 +533,26 @@ static bool GeneratePlane(
   return SDL_SetRenderTarget(renderer, old_target) && generated;
 }
 
-uint32_t DioramaFrameGeneration_Prepare(
+uint32_t DioramaFrameGeneration_PrepareWithSkybox(
     ArRenderDevice *device, const FrameSlot *slot, float alpha,
     const ArRenderTexture current_textures[kDioramaPlane_Count],
     uint32_t current_plane_mask,
-    ArRenderTexture resolved_textures[kDioramaPlane_Count]) {
+    ArRenderTexture resolved_textures[kDioramaPlane_Count],
+    ArRenderTexture skybox_texture, ArRenderTexture *resolved_skybox) {
+  if (resolved_skybox) *resolved_skybox = skybox_texture;
   if (!resolved_textures || !current_textures) return 0;
   memcpy(resolved_textures, current_textures,
          sizeof(ArRenderTexture) * kDioramaPlane_Count);
   SDL_Renderer *renderer = ArSdlRenderBackend_Renderer(device);
-  SDL_Texture *native_current_textures[kDioramaPlane_Count];
+  SDL_Texture *native_current_textures[kFrameGenerationPlaneCount];
   for (int plane = 0; plane < kDioramaPlane_Count; plane++)
     native_current_textures[plane] =
         ArSdlRenderBackend_UnwrapTexture(current_textures[plane]);
+  native_current_textures[kDioramaFrameGenerationSkybox] =
+      ArSdlRenderBackend_UnwrapTexture(skybox_texture);
+  current_plane_mask &= (1u << kDioramaPlane_Count) - 1u;
+  if (resolved_skybox && ArRenderTexture_IsValid(skybox_texture))
+    current_plane_mask |= 1u << kDioramaFrameGenerationSkybox;
   if (!renderer || !slot || !slot->diorama_active ||
       !slot->interp_setting_enabled ||
       alpha < 0.0f ||
@@ -535,7 +570,7 @@ uint32_t DioramaFrameGeneration_Prepare(
     return 0;
   }
   uint32_t generated_mask = 0;
-  for (int plane = 0; plane < kDioramaPlane_Count; plane++) {
+  for (int plane = 0; plane < kFrameGenerationPlaneCount; plane++) {
     if (!((s_pair_mask & current_plane_mask) & (1u << plane)) ||
         !native_current_textures[plane])
       continue;
@@ -546,12 +581,35 @@ uint32_t DioramaFrameGeneration_Prepare(
       break;
     }
     if (generated) {
-      resolved_textures[plane] = ArSdlRenderBackend_BorrowTexture(
+      ArRenderTexture generated_texture = ArSdlRenderBackend_BorrowTexture(
           s_planes[plane].generated_texture);
+      if (plane == kDioramaFrameGenerationSkybox)
+        *resolved_skybox = generated_texture;
+      else
+        resolved_textures[plane] = generated_texture;
       generated_mask |= 1u << plane;
     }
   }
   SDL_SetRenderDrawColor(renderer, old_r, old_g, old_b, old_a);
   ArSdlPresentation_PopFullOutput(renderer, &output_state);
   return generated_mask;
+}
+
+void DioramaFrameGeneration_Capture(
+    ArRenderDevice *device, const FrameSlot *slot,
+    const ArRenderTexture textures[kDioramaPlane_Count],
+    const uint8_t *const pixels[kDioramaPlane_Count],
+    const size_t pitches[kDioramaPlane_Count], uint32_t changed) {
+  DioramaFrameGeneration_CaptureWithSkybox(
+      device, slot, textures, pixels, pitches, changed,
+      ArRenderTexture_Invalid(), false);
+}
+
+uint32_t DioramaFrameGeneration_Prepare(
+    ArRenderDevice *device, const FrameSlot *slot, float alpha,
+    const ArRenderTexture textures[kDioramaPlane_Count], uint32_t mask,
+    ArRenderTexture resolved[kDioramaPlane_Count]) {
+  return DioramaFrameGeneration_PrepareWithSkybox(
+      device, slot, alpha, textures, mask, resolved,
+      ArRenderTexture_Invalid(), NULL);
 }

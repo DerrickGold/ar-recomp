@@ -9,7 +9,7 @@
 #include "localization/text_bidi.h"
 
 #define AR_TEXT_RASTERIZER_ABI_VERSION UINT32_C(2)
-#define AR_TEXT_RASTER_REQUEST_ABI_VERSION UINT32_C(11)
+#define AR_TEXT_RASTER_REQUEST_ABI_VERSION UINT32_C(12)
 #define AR_TEXT_BITMAP_ABI_VERSION UINT32_C(4)
 
 enum { kArTextRasterErrorCapacity = 256 };
@@ -112,6 +112,14 @@ typedef struct ArTextRasterRequest {
   /* Grid/row requests borrow the owning source's spans without allocating a
    * list per cell. Backend clips to this view and returns view-local offsets. */
   uint32_t bidi_source_offset;
+  /* Optional global one-bit-per-byte map. A set bit on an ASCII space in
+   * this request asks the backend to keep that native row break only when the
+   * preceding segment still fits on one proportional line. Other set bits are
+   * ignored. The source offset indexes this request into the borrowed map. */
+  const uint8_t *preferred_line_breaks;
+  /* Number of byte positions addressable by the borrowed one-bit map. */
+  size_t preferred_line_break_capacity;
+  uint32_t preferred_line_break_source_offset;
 } ArTextRasterRequest;
 
 typedef struct ArTextRevealCluster {

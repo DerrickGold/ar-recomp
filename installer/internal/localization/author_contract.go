@@ -143,6 +143,9 @@ func (s *presentationScan) operation(op AuthorOperation) {
 		s.content()
 	case "line":
 		s.breakLines(1)
+	case "preferred_line":
+		// Preferred native row breaks affect enhanced-flow layout only. They do
+		// not reserve another authored row in a fixed presentation contract.
 	case "paragraph":
 		s.breakLines(2)
 	case "page":
@@ -350,6 +353,10 @@ func ValidateAuthorScripts(profile, coverage string, scripts ...*AuthorScript) (
 				return fail("content after a menu yield is unreachable; place it before the yield anchor")
 			}
 			switch op.Op {
+			case "preferred_line":
+				if route.presentation(profile).Shape != "flow" {
+					return fail("@preferred-line is only valid in flowing dialogue; use @line in fixed fields")
+				}
 			case "placeholder":
 				if !slices.Contains(route.Allowed, op.Name) {
 					return fail("placeholder {%s} is unavailable on this route", op.Name)

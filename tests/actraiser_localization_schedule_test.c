@@ -715,6 +715,8 @@ static void TestStructuredNormalization(void) {
   ArTextBoundary_Set(source_bits, strstr(source, "É|li") - source + 2, false);
   ArTextBoundary_Set(source_bits, strstr(source, "li\nse") - source + 2, false);
   ArTextBoundary_Set(source_bits, strstr(source, "B|C") - source + 1, false);
+  const size_t preferred_source = (size_t)(strstr(source, "  left") - source);
+  ArTextBoundary_Set(source_bits, preferred_source, true);
   char output[80];
   uint8_t output_bits[AR_TEXT_BOUNDARY_BYTES(sizeof(output))];
   memset(output_bits, 0xff, sizeof(output_bits));
@@ -740,9 +742,10 @@ static void TestStructuredNormalization(void) {
   ArTextBidiSpans_Edit(&mapped,23,3,0);
   CHECK(mapped.spans[0].start == 23 && mapped.spans[0].end == 20+strlen("É|li se"));
   const size_t delimiter = strstr(output, " | ") - output + 1;
+  const size_t preferred = delimiter + 1u;
   for (size_t i = 0; i < bytes; ++i)
     CHECK(ArTextBoundary_Get(output_bits, i) ==
-          (i == delimiter || output[i] == '\n'));
+          (i == delimiter || i == preferred || output[i] == '\n'));
   CHECK(!objects);
   CHECK(ActRaiserLocalizationText_NormalizeStructured(
       "", 0, NULL, 0, true, output, sizeof(output), &bytes,

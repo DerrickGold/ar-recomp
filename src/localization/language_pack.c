@@ -949,6 +949,7 @@ static bool ParseCommand(ScriptState *state, char *line, uint32_t line_number,
     return true;
   const char *command = tokens[0];
   if (strcmp(command, "@line") == 0 ||
+      strcmp(command, "@preferred-line") == 0 ||
       strcmp(command, "@paragraph") == 0 ||
       strcmp(command, "@page") == 0 || strcmp(command, "@empty") == 0 ||
       strcmp(command, "@end") == 0) {
@@ -958,7 +959,9 @@ static bool ParseCommand(ScriptState *state, char *line, uint32_t line_number,
       return false;
     }
     ArLanguageOperationKind kind = kArLanguageOperation_LineBreak;
-    if (strcmp(command, "@paragraph") == 0)
+    if (strcmp(command, "@preferred-line") == 0)
+      kind = kArLanguageOperation_PreferredLineBreak;
+    else if (strcmp(command, "@paragraph") == 0)
       kind = kArLanguageOperation_ParagraphBreak;
     else if (strcmp(command, "@page") == 0) {
       kind = kArLanguageOperation_PageBreak;
@@ -1234,6 +1237,7 @@ static bool ParseScript(ArLanguagePack *pack, char *text, const char *path,
                              message->operation_count - 1]
                 .kind;
         if (last != kArLanguageOperation_LineBreak &&
+            last != kArLanguageOperation_PreferredLineBreak &&
             last != kArLanguageOperation_ParagraphBreak &&
             last != kArLanguageOperation_PageBreak &&
             !AddSimpleOperation(&state, kArLanguageOperation_ParagraphBreak,

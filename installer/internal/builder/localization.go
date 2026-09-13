@@ -350,7 +350,7 @@ func (work *localizationWork) localizationMessageTitle(id string, location lk.Au
 		for _, op := range ops {
 			if op.Op == "text" {
 				text.WriteString(op.Value)
-			} else if op.Op == "line" || op.Op == "paragraph" {
+			} else if op.Op == "line" || op.Op == "preferred_line" || op.Op == "paragraph" {
 				text.WriteByte(' ')
 			} else if op.Op == "placeholder" {
 				text.WriteString("{" + op.Name + "}")

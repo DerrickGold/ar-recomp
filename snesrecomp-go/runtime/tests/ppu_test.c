@@ -1586,7 +1586,7 @@ cleanup:
 
 static void compare_native_virtual_capture(
         PpuWidescreenBandFill fill, PpuWidescreenMotion motion,
-        uint8_t mosaic_size) {
+        uint8_t mosaic_size, bool classified, unsigned scenario) {
     enum {
         kExtraX = 16,
         kExtraY = 8,
@@ -1599,9 +1599,9 @@ static void compare_native_virtual_capture(
     PpuVirtualTilemapBinding binding = {
         .lookup = virtual_parity_lookup,
         .lookup_span = virtual_parity_span_lookup,
-        .band_lookup = virtual_parity_band_lookup,
+        .band_lookup = classified ? virtual_parity_band_lookup : NULL,
         .context = &fixture,
-        .camera_x = -23,
+        .camera_x = scenario == 0u ? -23 : -25 + (int)scenario,
         .camera_y = 11,
         .hscroll_anchor = 5u,
         .vscroll_anchor = 9u,
@@ -1619,6 +1619,43 @@ static void compare_native_virtual_capture(
         reference_pixels == NULL) goto cleanup;
     setup_native_fast_fixture(fast, 1u, 0u, true);
     setup_native_fast_fixture(reference, 1u, 0u, true);
+    uint8_t capture_flags = kPpuOverlayFlag_RemoveFromGame;
+    if (scenario == 3u)
+        capture_flags |= kPpuOverlayFlag_MarkFullAddSubscreen;
+    if (scenario == 4u)
+        capture_flags |= kPpuOverlayFlag_MarkBgHalfAdd;
+    if (scenario == 6u)
+        capture_flags = kPpuOverlayFlag_MarkMainScreenWinner;
+    Ppu *sources[2] = {fast, reference};
+    for (int i = 0; i < 2; ++i) {
+        Ppu *ppu = sources[i];
+        if (scenario != 0u && scenario != 6u)
+            ppu->screenWindowed[0] = ppu->screenWindowed[1] = 0u;
+        if (scenario != 0u) {
+            ppu->cgwsel = 0x02u;
+            ppu->cgadsub = 0x1fu;
+        }
+        if (scenario == 1u) { /* Main-only, no color math. */
+            ppu->screenEnabled[1] &= (uint8_t)~1u;
+            ppu->cgwsel = ppu->cgadsub = 0u;
+        } else if (scenario == 2u) { /* Subscreen-owned even without math. */
+            ppu->screenEnabled[0] &= (uint8_t)~1u;
+            ppu->cgwsel = ppu->cgadsub = 0u;
+        } else if (scenario == 3u) { /* Subscreen full-add export. */
+            ppu->screenEnabled[0] &= (uint8_t)~1u;
+        } else if (scenario == 4u) {
+            ppu->cgadsub |= 0x40u; /* Half-add. */
+        } else if (scenario == 5u) {
+            ppu->cgwsel = 0u;
+            ppu->cgadsub |= 0x80u; /* Fixed-color subtraction. */
+        } else if (scenario == 7u) {
+            /* A dormant large-tile virtual BG2 must not send BG1's capture
+             * (or the rest of the scanline) to the reference renderer. */
+            ppu->bgmode |= 0x20u;
+            ppu->screenEnabled[0] &= (uint8_t)~2u;
+            ppu->screenEnabled[1] &= (uint8_t)~2u;
+        }
+    }
     if (mosaic_size > 1u) {
         fast->mosaic = reference->mosaic =
             (uint8_t)(((mosaic_size - 1u) << 4) | 0x01u);
@@ -1628,7 +1665,10 @@ static void compare_native_virtual_capture(
     PpuSetExtraVerticalSpace(fast, kExtraY, kExtraY);
     PpuSetExtraVerticalSpace(reference, kExtraY, kExtraY);
     CHECK(PpuSetVirtualTilemap(fast, 0u, &binding));
+    if (scenario == 7u) CHECK(PpuSetVirtualTilemap(fast, 1u, &binding));
+    binding.lookup_span = NULL; /* Independent per-pixel provider oracle. */
     CHECK(PpuSetVirtualTilemap(reference, 0u, &binding));
+    if (scenario == 7u) CHECK(PpuSetVirtualTilemap(reference, 1u, &binding));
     if (fill == kPpuWidescreenBandFill_Mirror) {
         PpuSetWidescreenLayerMirror(fast, 1u);
         PpuSetWidescreenLayerMirror(reference, 1u);
@@ -1667,10 +1707,10 @@ static void compare_native_virtual_capture(
     }
     CHECK(PpuSetOverlayCapture(
         fast, kPpuOverlaySource_Bg1, -kExtraX, -kExtraY,
-        kWidth, kHeight, kPpuOverlayFlag_RemoveFromGame));
+        kWidth, kHeight, capture_flags));
     CHECK(PpuSetOverlayCapture(
         reference, kPpuOverlaySource_Bg1, -kExtraX, -kExtraY,
-        kWidth, kHeight, kPpuOverlayFlag_RemoveFromGame));
+        kWidth, kHeight, capture_flags));
     PpuBeginDrawing(fast, (uint8_t *)fast_pixels,
                     kWidth * sizeof(uint32_t), 0u);
     PpuBeginDrawing(reference, (uint8_t *)reference_pixels,
@@ -1679,8 +1719,20 @@ static void compare_native_virtual_capture(
     ppu_runLine(fast, 0);
     ppu_runLine(reference, 0);
     for (int y = -kExtraY; y < kPpuYPixels + kExtraY; ++y) {
+        if (scenario != 0u && y % 7 == 0) {
+            for (int i = 0; i < 2; ++i) {
+                Ppu *ppu = sources[i];
+                ppu_write(ppu, 0x00, (uint8_t)(7 + ((y + kExtraY) & 7)));
+                ppu_write(ppu, 0x21, (uint8_t)(y * 5));
+                ppu_write(ppu, 0x22, (uint8_t)(y * 13));
+                ppu_write(ppu, 0x22, (uint8_t)(y & 0x7f));
+                ppu->hScroll[0] = (uint16_t)((5 + y) & 1023);
+            }
+        }
         ppu_runMarginLine(fast, y + 1);
         ppu_runMarginLine(reference, y + 1);
+        CHECK(fast->overlayRenderContentMask[kPpuOverlaySource_Bg1] ==
+              reference->overlayRenderContentMask[kPpuOverlaySource_Bg1]);
     }
     CHECK(memcmp(fast_pixels, reference_pixels,
                  pixel_count * sizeof(uint32_t)) == 0);
@@ -1694,8 +1746,10 @@ static void compare_native_virtual_capture(
                     reference_overlay[plane][index]) {
                     fprintf(stderr,
                         "virtual capture mismatch fill=%d motion=%d "
+                        "classified=%d scenario=%u "
                         "plane=%d x=%zu y=%zu fast=%08x ref=%08x\n",
-                        (int)fill, (int)motion, plane, index % kWidth,
+                        (int)fill, (int)motion, classified, scenario,
+                        plane, index % kWidth,
                         index / kWidth, fast_overlay[plane][index],
                         reference_overlay[plane][index]);
                     break;
@@ -1726,27 +1780,28 @@ cleanup:
 }
 
 static void test_native_virtual_capture_path_parity(void) {
-    compare_native_virtual_capture(
-        kPpuWidescreenBandFill_RawWrap,
-        kPpuWidescreenMotion_FillRelative, 1u);
-    compare_native_virtual_capture(
-        kPpuWidescreenBandFill_Mirror,
-        kPpuWidescreenMotion_FillRelative, 1u);
-    compare_native_virtual_capture(
-        kPpuWidescreenBandFill_Mirror,
-        kPpuWidescreenMotion_NormalScroll, 1u);
-    compare_native_virtual_capture(
-        kPpuWidescreenBandFill_Repeat,
-        kPpuWidescreenMotion_FillRelative, 1u);
-    compare_native_virtual_capture(
-        kPpuWidescreenBandFill_Clamp,
-        kPpuWidescreenMotion_FillRelative, 1u);
-    compare_native_virtual_capture(
-        kPpuWidescreenBandFill_RawWrap,
-        kPpuWidescreenMotion_FillRelative, 5u);
-    compare_native_virtual_capture(
-        kPpuWidescreenBandFill_Mirror,
-        kPpuWidescreenMotion_NormalScroll, 16u);
+    static const PpuWidescreenBandFill fills[] = {
+        kPpuWidescreenBandFill_RawWrap, kPpuWidescreenBandFill_Mirror,
+        kPpuWidescreenBandFill_Repeat, kPpuWidescreenBandFill_Clamp
+    };
+    for (int classified = 0; classified < 2; ++classified) {
+        /* Full and partial tiles, both flips, transparent provider gaps and
+         * texels, hardware/custom bands, live raster changes, main/sub owners
+         * and the capture policies used by action dioramas. */
+        for (unsigned scenario = 0; scenario <= 7u; ++scenario) {
+            for (size_t i = 0; i < sizeof(fills) / sizeof(fills[0]); ++i)
+                compare_native_virtual_capture(fills[i],
+                    kPpuWidescreenMotion_FillRelative, 1u,
+                    classified != 0, scenario);
+            compare_native_virtual_capture(kPpuWidescreenBandFill_Mirror,
+                kPpuWidescreenMotion_NormalScroll, 1u,
+                classified != 0, scenario);
+        }
+        compare_native_virtual_capture(kPpuWidescreenBandFill_RawWrap,
+            kPpuWidescreenMotion_FillRelative, 5u, classified != 0, 0u);
+        compare_native_virtual_capture(kPpuWidescreenBandFill_Mirror,
+            kPpuWidescreenMotion_NormalScroll, 16u, classified != 0, 0u);
+    }
 }
 
 static void compare_native_vram_margin(
@@ -1873,6 +1928,113 @@ static void test_native_vram_margin_path_parity(void) {
         kPpuWidescreenMotion_FillRelative, true, 16u);
 }
 
+static PpuVirtualTilemapLookupResult background_view_lookup(
+        const void *context, int32_t x, int32_t y, uint16_t *entry) {
+    (void)context;
+    if (x < 0 || x >= 128 || y < 0 || y >= 64)
+        return kPpuVirtualTilemapLookup_Transparent;
+    *entry = (uint16_t)((1 + (x & 3)) | ((y & 7) << 10) |
+        ((x & 4) ? 0x4000 : 0) | ((x & 8) ? 0x8000 : 0) |
+        ((x & 16) ? 0x2000 : 0));
+    return kPpuVirtualTilemapLookup_Found;
+}
+
+static void test_clamped_background_view(void) {
+    enum { kExtra = 120, kWidth = 496, kRows = 16 };
+    static const int cameras[] = {0, 60, 120, 200, 650, 768};
+    static uint32_t main_pixels[2][kWidth * kRows];
+    static uint32_t overlays[2][2][kWidth * kRows];
+    static uint32_t untouched[3][kWidth * kRows];
+    static uint32_t view_pixels[kWidth * kRows + 2];
+    Ppu *sources[2] = {ppu_init(), ppu_init()};
+    CHECK(sources[0] && sources[1]);
+    if (!sources[0] || !sources[1]) goto cleanup;
+    for (unsigned test = 0; test < sizeof(cameras) / sizeof(cameras[0]); ++test) {
+        int left = cameras[test] - kExtra;
+        if (left < 0) left = 0;
+        if (left > 1024 - kWidth) left = 1024 - kWidth;
+        memset(view_pixels, 0xa5, sizeof(view_pixels));
+        for (int i = 0; i < 2; ++i) {
+            Ppu *ppu = sources[i];
+            ppu_reset(ppu);
+            ppu->inidisp = 0x0f;
+            ppu->bgmode = 1;
+            ppu->screenEnabled[0] = 2;
+            /* TMW alone does not mean a window is selected. */
+            ppu->screenWindowed[0] = 2;
+            for (int c = 0; c < 128; ++c)
+                ppu->cgram[c] = (uint16_t)((c * 257) & 0x7fff);
+            for (int tile = 1; tile <= 4; ++tile)
+                for (int y = 0; y < 16; ++y)
+                    ppu->vram[tile * 16 + y] = (uint16_t)(0x1357 * (tile + y));
+            PpuVirtualTilemapBinding binding = {
+                .lookup = background_view_lookup,
+                .camera_x = i ? left + kExtra : cameras[test],
+                .camera_y = 7,
+                .flags = kPpuVirtualTilemapFlag_IncludeAuthentic,
+            };
+            PpuSetExtraSpace(ppu, kExtra);
+            CHECK(PpuSetVirtualTilemap(ppu, 1, &binding));
+            CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg2,
+                (uint8_t *)overlays[i][0], kWidth * 4));
+            CHECK(PpuBindOverlayPrioSurface(ppu, kPpuOverlaySource_Bg2, 1,
+                (uint8_t *)overlays[i][1]));
+            CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg2,
+                -kExtra, 0, kWidth, kRows,
+                kPpuOverlayFlag_RemoveFromGame | kPpuOverlayFlag_MarkBgHalfAdd));
+            if (test & 1u) {
+                ppu->overlayCaptures[1].transparentFillMode =
+                    kPpuOverlayTransparentFill_Cgram;
+                ppu->overlayCaptures[1].transparentFillCgram = 3;
+            }
+            PpuBeginDrawing(ppu, (uint8_t *)main_pixels[i], kWidth * 4, 0);
+            ppu_runLine(ppu, 0);
+        }
+        SrPpuBackgroundViewRequest view = {
+            .struct_size = sizeof(view), .layer = 1,
+            .world_width = 1024, .world_height = 512,
+            .screen_x0 = -kExtra, .width = kWidth, .height = kRows,
+            .pixels = view_pixels + 1, .pitch_bytes = kWidth * 4,
+            .pixel_byte_size = kWidth * kRows * 4,
+        };
+        for (int y = 0; y < kRows; ++y) {
+            int raster_left = cameras[test] + y - kExtra;
+            if (raster_left < 0) raster_left = 0;
+            if (raster_left > 1024 - kWidth) raster_left = 1024 - kWidth;
+            PpuVirtualTilemapBinding reference_binding = sources[1]->virtualTilemap[1];
+            reference_binding.camera_x = raster_left + kExtra - y;
+            CHECK(PpuSetVirtualTilemap(sources[1], 1, &reference_binding));
+            /* Live per-line scroll, palette and brightness must match scanout. */
+            for (int i = 0; i < 2; ++i) {
+                sources[i]->hScroll[1] = (uint16_t)y;
+                ppu_write(sources[i], 0, (uint8_t)(15 - y / 4));
+                ppu_write(sources[i], 0x21, 3);
+                ppu_write(sources[i], 0x22, (uint8_t)y);
+                ppu_write(sources[i], 0x22, 0x7c);
+                ppu_runLine(sources[i], y + 1);
+            }
+            memcpy(untouched[0], main_pixels[0], sizeof(main_pixels[0]));
+            memcpy(untouched[1], overlays[0][0], sizeof(overlays[0][0]));
+            memcpy(untouched[2], overlays[0][1], sizeof(overlays[0][1]));
+            CHECK(PpuRenderBackgroundViewLine(sources[0], &view, y));
+            CHECK(memcmp(untouched[0], main_pixels[0], sizeof(main_pixels[0])) == 0);
+            CHECK(memcmp(untouched[1], overlays[0][0], sizeof(overlays[0][0])) == 0);
+            CHECK(memcmp(untouched[2], overlays[0][1], sizeof(overlays[0][1])) == 0);
+        }
+        CHECK(memcmp(view_pixels + 1, overlays[1][0], sizeof(overlays[1][0])) == 0);
+        CHECK(view_pixels[0] == 0xa5a5a5a5 &&
+              view_pixels[kWidth * kRows + 1] == 0xa5a5a5a5);
+        sources[0]->windowsel = kWindow1Enabled << 4;
+        CHECK(!PpuRenderBackgroundViewLine(sources[0], &view, 0));
+        sources[0]->windowsel = 0;
+        sources[0]->mosaic = 0x12;
+        CHECK(!PpuRenderBackgroundViewLine(sources[0], &view, 0));
+    }
+cleanup:
+    ppu_free(sources[0]);
+    ppu_free(sources[1]);
+}
+
 int main(void) {
     Ppu *ppu = ppu_init();
     CHECK(ppu != NULL);
@@ -1900,6 +2062,7 @@ int main(void) {
         test_native_virtual_fast_path_parity();
         test_native_virtual_capture_path_parity();
         test_native_vram_margin_path_parity();
+        test_clamped_background_view();
         ppu_free(ppu);
     }
     if (failures != 0) {

@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "localization/text_rasterizer.h"
+#include "localization/text_boundaries.h"
 #include "render/render_device.h"
 #include "render/text_surface_cache.h"
 #include "host/font_resources.h"
@@ -300,6 +301,29 @@ static void TestAbiValidation(void) {
 
   ArTextRasterRequest request = Request("Texte");
   CHECK(ArTextRasterRequest_IsValid(&request));
+  uint8_t preferred[AR_TEXT_BOUNDARY_BYTES(16)] = {0};
+  request = Request("A B");
+  const ArTextCacheKey ordinary =
+      ArTextSurfaceCache_MakeKey(&rasterizer, &request);
+  request.preferred_line_breaks = preferred;
+  request.preferred_line_break_capacity = 16;
+  request.preferred_line_break_source_offset = 3;
+  CHECK(ArTextRasterRequest_IsValid(&request));
+  CHECK(ArTextCacheKey_Equals(
+      ordinary, ArTextSurfaceCache_MakeKey(&rasterizer, &request)));
+  ArTextBoundary_Set(preferred, 4, true);
+  CHECK(!ArTextCacheKey_Equals(
+      ordinary, ArTextSurfaceCache_MakeKey(&rasterizer, &request)));
+  request.flags = 0;
+  CHECK(!ArTextRasterRequest_IsValid(&request));
+  request.flags = kArTextRasterFlag_WrapWords |
+                  kArTextRasterFlag_PreserveHardBreaks;
+  request.preferred_line_break_capacity = 5;
+  CHECK(!ArTextRasterRequest_IsValid(&request));
+  request = Request("A B");
+  request.preferred_line_break_source_offset = 3;
+  CHECK(!ArTextRasterRequest_IsValid(&request));
+  request = Request("Texte");
   ArTextBidiSpan span = {0,5,kArTextDirection_Auto};
   request.bidi_spans = &span; request.bidi_span_count = 1;
   CHECK(ArTextRasterRequest_IsValid(&request));
@@ -810,15 +834,17 @@ static void TestPixelationTreatments(void) {
   char error[256];
 
   ArTextRasterRequest low = Request("ABCD");
+  low.font_pixels = low.minimum_font_pixels = 23;
+  low.maximum_width = 255;
   low.pixelation = kArTextPixelation_LowResolution;
   low.pixelation_size = 2;
   ArTextSurface low_surface;
   CHECK(ArTextSurfaceCache_Acquire(
       &cache, &device, &rasterizer, &low,
       &low_surface, error, sizeof(error)));
-  CHECK(fake.last_request.font_pixels == 12);
-  CHECK(fake.last_request.minimum_font_pixels == 12);
-  CHECK(fake.last_request.maximum_width == 128);
+  CHECK(fake.last_request.font_pixels == 11);
+  CHECK(fake.last_request.minimum_font_pixels == 11);
+  CHECK(fake.last_request.maximum_width == 127);
   CHECK(fake.last_request.maximum_height == 32);
   CHECK(fake.last_request.pixelation == kArTextPixelation_None);
   CHECK(low_surface.width == 16 && low_surface.height == 32);

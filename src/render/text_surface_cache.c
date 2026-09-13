@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "deterministic_hash.h"
+#include "localization/text_boundaries.h"
 
 enum { kMaximumTextCacheEntries = 1024 };
 
@@ -56,7 +57,17 @@ static uint64_t HashRequest(uint64_t hash,
     hash = DeterministicHash_Fnv1a64(
         hash, request->language_bcp47, request->language_bcp47_bytes);
   hash = HashU64(hash, (uint64_t)request->utf8_bytes);
-  hash = DeterministicHash_Fnv1a64(hash, request->utf8, request->utf8_bytes);
+  /* Fold preferred-break semantics into the existing text scan. This keeps
+   * cache lookup linear in text bytes rather than adding another full pass. */
+  for (size_t i = 0; i < request->utf8_bytes; ++i) {
+    hash = DeterministicHash_Fnv1a64Byte(hash, (uint8_t)request->utf8[i]);
+    if (request->utf8[i] == ' ')
+      hash = DeterministicHash_Fnv1a64Byte(
+          hash, request->preferred_line_breaks &&
+                        ArTextBoundary_Get(
+                            request->preferred_line_breaks,
+                            request->preferred_line_break_source_offset + i));
+  }
   hash = HashU64(hash, (uint64_t)request->font_stack_id_bytes);
   return DeterministicHash_Fnv1a64(
       hash, request->font_stack_id, request->font_stack_id_bytes);
@@ -492,11 +503,14 @@ bool ArTextSurfaceCache_Acquire(
     int maximum_scale = request->font_pixels / 8;
     if (maximum_scale < 1) maximum_scale = 1;
     if (metric_scale > maximum_scale) metric_scale = maximum_scale;
-    raster_request.font_pixels =
-        (request->font_pixels + metric_scale / 2) / metric_scale;
+    /* Keep the reduced wrap box from becoming proportionally narrower than
+     * the reduced font. Rounding an odd font size up while flooring the box
+     * can introduce an artificial early wrap that the full-size request did
+     * not have. Nearest upscaling still remains inside the original bounds. */
+    raster_request.font_pixels = request->font_pixels / metric_scale;
     if (raster_request.font_pixels < 1) raster_request.font_pixels = 1;
     raster_request.minimum_font_pixels =
-        (request->minimum_font_pixels + metric_scale / 2) / metric_scale;
+        request->minimum_font_pixels / metric_scale;
     if (raster_request.minimum_font_pixels < 1)
       raster_request.minimum_font_pixels = 1;
     if (raster_request.minimum_font_pixels > raster_request.font_pixels)

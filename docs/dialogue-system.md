@@ -230,7 +230,7 @@ Frame ABI 27 owns a 256-range pool; fixed composers retain ranges with their
 cached text. Normalization, retained-page scrolling, name-entry edits, credits
 padding and grid-cell slicing relocate these ranges along with the text.
 
-Raster request ABI 11 carries borrowed source ranges and a slice offset. The
+Raster request ABI 12 carries borrowed source ranges and a slice offset. The
 desktop backend creates layout-only isolate controls, closes them across
 paragraph separators and maps shaped endpoints back to original UTF-8 bytes.
 An inserted value cannot escape its isolate with unmatched controls. No hidden
@@ -273,12 +273,16 @@ its clear routine is `$01:8F72`. The extractor checks the initialization and
 clear-loop instruction shapes before relying on those dimensions.
 
 For Western exports, a short native line whose following whole word would fit
-in the original cell budget is evidence for an intentional hard break. A word
-that would overflow is evidence for a soft wrap. Exact-fit words count as
-fitting. This is an export heuristic, not proof of authorial intent: preserve
-breaks for unknown inserted widths or unverified geometry, and preserve
-Japanese breaks without assuming space-delimited words. Authored `@line`
-remains authoritative; the live renderer must not reinterpret it.
+in the original cell budget is evidence for an intentional break. A word that
+would overflow is evidence for a soft wrap. Exact-fit words count as fitting.
+The former is exported as `@preferred-line`: raster request ABI 12 carries its
+normalized byte position beside the text, and the backend keeps it only when
+the segment before it still fits on one proportional line at the final font
+size and projected width. If that segment already wrapped, the boundary is an
+ordinary space. This is an export heuristic, not proof of authorial intent:
+preserve candidates for unknown inserted widths, but keep hard breaks for
+unverified geometry and Japanese text rather than assuming space-delimited words. Authored
+`@line` remains authoritative and is never reinterpreted.
 
 ## Partial and whole-menu erasure
 
@@ -391,7 +395,7 @@ and physical left/right/top gutters to the renderer-neutral presenter. Native
 labels/capitals use ink rows 1–7; all ten digits use rows 0–7. HUD labels therefore
 use a seven-pixel reference and one-pixel top inset, while counters use an
 eight-pixel reference with no top inset. Town names retain the capital inset.
-Raster request ABI 11 includes all style choices in cache identity.
+Raster request ABI 12 includes all style choices in cache identity.
 Right alignment is independent of
 Unicode direction. The font backend resets both primary and fallback styles
 on each raster request; unchanged menus/counters reuse cached surfaces. Master

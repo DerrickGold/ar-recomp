@@ -615,7 +615,7 @@
     for (const op of ops) {
       if (op.op === "page") newPage();
       else if (op.op === "text") page.append(document.createTextNode(op.value));
-      else if (op.op === "line" || op.op === "paragraph") page.append(document.createTextNode(op.op === "line" ? "\n" : "\n\n"));
+      else if (op.op === "line" || op.op === "preferred_line" || op.op === "paragraph") page.append(document.createTextNode(op.op === "paragraph" ? "\n\n" : "\n"));
       else if (op.op === "placeholder") { const value = document.createElement("span"); value.textContent = "⟦" + op.name + (op.minimum_digits ? ":0" + op.minimum_digits : "") + "⟧"; value.className="loc-preview-value"; contentLanguage(value,{direction:"ltr"}); ui.attribute(value,"title","builder.editor.runtime_value"); page.append(value); }
       else { const control = document.createElement("div"); control.className = "loc-preview-control"; contentLanguage(control,{direction:"ltr"}); control.textContent = op.op + (op.id ? ": " + op.id : ""); if(!op.id&&op.frames)control.append(document.createTextNode(": "),phrase("builder.editor.frames",{count:op.frames})); page.append(control); }
     }

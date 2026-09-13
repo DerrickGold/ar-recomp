@@ -293,11 +293,11 @@ func (p *authorParser) command(line string, number int) error {
 	}
 	op := AuthorOperation{SourceLine: number}
 	switch tokens[0] {
-	case "@line", "@paragraph", "@page", "@empty", "@end":
+	case "@line", "@preferred-line", "@paragraph", "@page", "@empty", "@end":
 		if len(tokens) != 1 {
 			return authorError(p.script.path, number, "%s takes no arguments", tokens[0])
 		}
-		op.Op = tokens[0][1:]
+		op.Op = strings.ReplaceAll(tokens[0][1:], "-", "_")
 		if op.Op == "page" {
 			p.pages++
 			if p.pages > MaxAuthorPages {
@@ -427,7 +427,8 @@ func ParseAuthorScript(text, path string) (*AuthorScript, error) {
 			p.previousText = false
 			if ops := p.current.Operations; len(ops) != 0 {
 				last := ops[len(ops)-1].Op
-				if last != "line" && last != "paragraph" && last != "page" {
+				if last != "line" && last != "preferred_line" &&
+					last != "paragraph" && last != "page" {
 					return p.add(AuthorOperation{Op: "paragraph", SourceLine: number})
 				}
 			}

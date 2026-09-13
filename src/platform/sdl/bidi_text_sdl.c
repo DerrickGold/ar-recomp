@@ -217,15 +217,59 @@ static bool RecordAdvances(const ArSdlBidiLayout *layout, LayoutSource *source,
   return true;
 }
 
+static bool BreakableSpace(uint32_t scalar) {
+  /* Unicode White_Space values whose line-break class permits an ordinary
+   * break. NBSP, figure space and narrow NBSP deliberately remain glue. */
+  return scalar == '\t' || scalar == ' ' || scalar == 0x1680 ||
+      (scalar >= 0x2000 && scalar <= 0x2006) ||
+      (scalar >= 0x2008 && scalar <= 0x200a) || scalar == 0x205f ||
+      scalar == 0x3000;
+}
+
+static size_t BreakableSpaceBefore(const LayoutSource *source, size_t end) {
+  if (!end) return end;
+  size_t start = end - 1u;
+  while (start && ((uint8_t)source->text[start] & 0xc0u) == 0x80u) --start;
+  uint32_t scalar = 0;
+  size_t next = start;
+  return ArUnicode_DecodeScalar(source->text, source->bytes, start,
+                                &scalar, &next) && next == end &&
+                 BreakableSpace(scalar)
+      ? start : end;
+}
+
+static size_t SkipBreakableSpaces(const LayoutSource *source, size_t start,
+                                  size_t end) {
+  while (start < end) {
+    uint32_t scalar = 0;
+    size_t next = start;
+    if (!ArUnicode_DecodeScalar(source->text, end, start, &scalar, &next) ||
+        !BreakableSpace(scalar))
+      break;
+    start = next;
+  }
+  return start;
+}
+
+static size_t TrimBreakableSpaces(const LayoutSource *source, size_t start,
+                                  size_t end) {
+  while (end > start) {
+    const size_t space = BreakableSpaceBefore(source, end);
+    if (space == end) break;
+    end = space;
+  }
+  return end;
+}
+
 /* Retain the existing word-first policy: break at a space when possible,
- * otherwise only at complete shaped clusters. NBSP is deliberately not a break.
+ * otherwise only at complete shaped clusters. Nonbreaking spaces remain glue.
  * Line fragments are reshaped after wrapping, so joining never crosses a line. */
 static size_t WrapEnd(const LayoutSource *source, size_t start, size_t end, int width) {
   int64_t advance = 0;
   size_t last = start, word = start;
   for (size_t i = start + 1; i <= end; ++i) {
     if (source->advances[i] < 0) continue;
-    const bool space = source->text[i - 1] == ' ' || source->text[i - 1] == '\t';
+    const bool space = BreakableSpaceBefore(source, i) != i;
     advance += source->advances[i];
     if (advance > width) {
       if (space) return i; /* discard the break space, not the preceding word */
@@ -254,8 +298,7 @@ static bool LayoutHardLine(ArSdlBidiLayout *layout, LayoutSource *source,
                        : content_end;
     size_t ink_end = stop;
     if (wrap && stop < content_end)
-      while (ink_end > cursor && (source->text[ink_end - 1] == ' ' ||
-                                  source->text[ink_end - 1] == '\t')) --ink_end;
+      ink_end = TrimBreakableSpaces(source, cursor, ink_end);
     const int y = layout->line_count * layout->line_advance;
     first = layout->count;
     if (!ShapeLine(layout, source, paragraph, cursor, ink_end, y,
@@ -267,11 +310,10 @@ static bool LayoutHardLine(ArSdlBidiLayout *layout, LayoutSource *source,
       while (earlier > cursor && source->advances[earlier] < 0) --earlier;
       if (earlier == cursor) break; /* one oversized cluster: caller fits font */
       for (size_t word = earlier; word > cursor; --word)
-        if ((source->text[word - 1] == ' ' || source->text[word - 1] == '\t') &&
+        if (BreakableSpaceBefore(source, word) != word &&
             source->advances[word] >= 0) { earlier = word; break; }
       stop = ink_end = earlier;
-      while (ink_end > cursor && (source->text[ink_end - 1] == ' ' ||
-                                  source->text[ink_end - 1] == '\t')) --ink_end;
+      ink_end = TrimBreakableSpaces(source, cursor, ink_end);
       TruncateRuns(layout, first);
       if (!ShapeLine(layout, source, paragraph, cursor, ink_end, y,
                      layout->line_count, &width)) return false;
@@ -297,9 +339,7 @@ static bool LayoutHardLine(ArSdlBidiLayout *layout, LayoutSource *source,
     if (y + height > layout->height) layout->height = y + height;
     ++layout->line_count;
     cursor = stop;
-    if (wrap)
-      while (cursor < content_end && (source->text[cursor] == ' ' ||
-                                      source->text[cursor] == '\t')) ++cursor;
+    if (wrap) cursor = SkipBreakableSpaces(source, cursor, content_end);
     if (layout->line_count > kMaximumLayoutBytes ||
         (int64_t)layout->line_count * layout->line_advance > INT_MAX)
       return SDL_SetError("too many bidi lines");

@@ -2278,6 +2278,82 @@ static void TestRadialBounds(void) {
   assert(rejected>100 && retained>100);
 }
 
+static void TestAtmosphereOcclusionBounds(void) {
+  WorldNavigationProjection p = {.globe_radius_world=1, .clip_frustum=true};
+  Scene3DCamera camera = {.distance=3, .fov_y=1};
+  p.camera_world[2]=camera.distance;
+  Scene3D_BuildViewProjection(&camera,800,600,p.matrix);
+  const int first = WorldNavigationOccludedShellRings(&p,1.1f,4,48,96);
+  assert(first > 0 && first < 48);
+  assert(!WorldNavigationOccludedShellRings(NULL,1.1f,4,48,96));
+  assert(!WorldNavigationOccludedShellRings(&p,1,4,48,96));
+  assert(!WorldNavigationOccludedShellRings(&p,1.1f,1,48,96));
+  assert(!WorldNavigationOccludedShellRings(&p,NAN,4,48,96));
+  assert(!WorldNavigationOccludedShellRings(&p,1.1f,4,3,3));
+  p.clip_frustum=false;
+  /* Radial navigation uses the same perspective matrix without CPU
+   * triangle clipping. Its opaque GPU ocean still provides this coverage. */
+  assert(WorldNavigationOccludedShellRings(&p,1.1f,4,48,96)==first);
+  p.clip_frustum=true;
+  p.camera_world[2]+=1;
+  assert(!WorldNavigationOccludedShellRings(&p,1.1f,4,48,96));
+  p.camera_world[2]=INFINITY;
+  assert(!WorldNavigationOccludedShellRings(&p,1.1f,4,48,96));
+  p.camera_world[2]=camera.distance;
+  p.matrix[12]+=1; /* Does not project from the supplied eye. */
+  assert(!WorldNavigationOccludedShellRings(&p,1.1f,4,48,96));
+  p.matrix[12]-=1;
+  const float old = p.matrix[14];
+  /* Move the far plane through the planet's centre. It cannot be trusted
+   * as a closed occluder even though its angular silhouette is unchanged. */
+  p.matrix[14] = p.matrix[15] - (p.matrix[11]-p.matrix[10]);
+  assert(!WorldNavigationOccludedShellRings(&p,1.1f,4,48,96));
+  p.matrix[14]=old; p.matrix[0]=NAN;
+  assert(!WorldNavigationOccludedShellRings(&p,1.1f,4,48,96));
+  const double pi = 3.14159265358979323846;
+  int checked=0;
+  for (int probe=0; probe<100; ++probe) {
+    const float radius=.25f+(probe%10)*.75f;
+    const float shell=radius*(1.03f+(probe%7)*.05f);
+    const float distance=shell*(1.2f+(probe%9)*.4f);
+    p.globe_radius_world=radius;
+    camera.distance=distance-radius;
+    p.camera_world[2]=camera.distance;
+    Scene3D_BuildViewProjection(&camera,800,600,p.matrix);
+    const int hidden=WorldNavigationOccludedShellRings(&p,shell,distance,48,96);
+    const double cap=acos((double)shell/distance);
+    const double bound=radius*.9975*cos(pi/48+2*pi/96);
+    /* Independent ray-to-centre distance at triangle interiors, not just
+     * ring vertices. Every rejected original triangle stays in the cone. */
+    for (int ring=0; ring<hidden; ++ring) for (int sample=0; sample<11; ++sample) {
+      double point[3]={0};
+      const double weights[3]={sample/20.0, (10-sample)/20.0, .5};
+      for (int corner=0; corner<3; ++corner) {
+        const double angle=cap*(ring+(corner!=0))/48;
+        const double longitude=corner==2 ? 2*pi/96 : 0;
+        point[0]+=weights[corner]*shell*sin(angle)*cos(longitude);
+        point[1]+=weights[corner]*shell*sin(angle)*sin(longitude);
+        point[2]+=weights[corner]*shell*cos(angle);
+      }
+      const double impact=distance*hypot(point[0],point[1]) /
+          hypot(hypot(point[0],point[1]),distance-point[2]);
+      assert(impact < bound); ++checked;
+    }
+  }
+  assert(checked > 10000);
+  /* Palace-style horizon camera. Backside near-plane intersection alone
+   * must not prevent safe rejection of covered front-screen pixels. */
+  p.globe_radius_world=12; p.camera_world[2]=3;
+  camera=(Scene3DCamera){.tilt_x=-.956f, .distance=0, .fov_y=1.05f};
+  Scene3D_BuildViewProjection(&camera,800,600,p.matrix);
+  for (int row=0; row<4; ++row) p.matrix[12+row]-=p.matrix[8+row]*3;
+  assert(WorldNavigationOccludedShellRings(&p,12.5f,15,48,96)>0);
+  p.camera_world[2]=.001f; camera.tilt_x=0;
+  Scene3D_BuildViewProjection(&camera,800,600,p.matrix);
+  for (int row=0; row<4; ++row) p.matrix[12+row]-=p.matrix[8+row]*.001f;
+  assert(!WorldNavigationOccludedShellRings(&p,12.0001f,12.001f,48,96));
+}
+
 static void TestClippedBatch(void) {
   FakeBackend backend={0};
   ArRenderDevice device={.context=&backend};
@@ -2319,6 +2395,7 @@ int main(void) {
   /* These counters/vertex oracles exercise the complete compatibility path.
    * The default's declining-adapter behavior is checked separately below. */
   setenv("AR_SIM3D_WORLD_GPU_GRID", "0", 1);
+  TestAtmosphereOcclusionBounds();
   TestClippedBatch();
   TestRadialBounds();
   TestRadialModelDefault();

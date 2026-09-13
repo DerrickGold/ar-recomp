@@ -22,6 +22,12 @@ typedef struct WorldNavigationProjection {
 
 enum { kWorldNavigationClippedQuads = 2 * (kScene3DClippedPolygonCapacity - 2) };
 
+/* Whole inner bands of a camera-tangent background shell hidden by the
+ * closed opaque ocean mesh. Keeps the first potentially visible band intact.
+ * Near/far clipping, invalid inputs or uncertain bounds disable rejection. */
+int WorldNavigationOccludedShellRings(const WorldNavigationProjection *projection,
+    float shell_radius, float eye_distance, int rings, int sectors);
+
 /* Conservative bounds of source vertex directions/base elevations (no extra
  * displacement, as used by the land grid), not a sampled
  * silhouette. Reject only when an entire radial bound is outside a clip plane;

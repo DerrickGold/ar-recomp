@@ -630,7 +630,8 @@ static void TestAuthoredBoundaries(void) {
       "{master_name}|{master_level}|left|right\n@end\n"
       ":: status.report.cities_report\n{city_fillmore_growth_state}|{total_population}\n@end\n"
       ":: growth_state.00\nMax|growth\n@end\n"
-      ":: growth_state.01\n@alias growth_state.00\n",
+      ":: growth_state.01\n@alias growth_state.00\n"
+      ":: dialogue.event.relay.aitos\nFirst short\n@preferred-line\nsecond line\n@end\n",
       &error));
   ResolverState values = {.master_name = "É|li\nse"};
   const ArDialogueValueResolver resolver = {
@@ -676,6 +677,12 @@ static void TestAuthoredBoundaries(void) {
   CHECK(page.bidi_spans[0].direction == kArTextDirection_LeftToRight);
   for (size_t i = 0; i < page.utf8_bytes; ++i)
     CHECK(ArTextBoundary_Get(page.structural_boundaries, i) == (i == 10));
+  CHECK(ArDialogueSession_Begin(&session, &selection,
+      "dialogue.event.relay.aitos", &resolver, &error));
+  CHECK(ArDialogueSession_GetPage(&session, &page));
+  CHECK(!strcmp(page.utf8, "First short second line"));
+  for (size_t i = 0; i < page.utf8_bytes; ++i)
+    CHECK(ArTextBoundary_Get(page.structural_boundaries, i) == (i == 11));
   ArDialogueSession_Destroy(&session);
   ArLanguagePack_Destroy(&pack);
 }

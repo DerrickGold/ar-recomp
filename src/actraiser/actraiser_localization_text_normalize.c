@@ -45,6 +45,7 @@ bool ActRaiserLocalizationText_NormalizeStructured(
   size_t written = 0;
   size_t object_index = 0;
   bool pending_space = false;
+  bool pending_boundary = false;
   for (size_t index = 0; index < source_bytes; ++index) {
     if (reveal_offsets) reveal_offsets[index] = (uint16_t)written;
     const char byte = source[index];
@@ -52,6 +53,7 @@ bool ActRaiserLocalizationText_NormalizeStructured(
     if (byte == ' ' || byte == '\t' || byte == '\r' ||
         (destination_boundaries && byte == '\n' && !boundary)) {
       pending_space = written && destination[written - 1u] != '\n';
+      pending_boundary = pending_space && (pending_boundary || boundary);
       continue;
     }
     if (byte == '\n') {
@@ -64,6 +66,7 @@ bool ActRaiserLocalizationText_NormalizeStructured(
         destination[written++] = '\n';
       }
       pending_space = false;
+      pending_boundary = false;
       continue;
     }
     if (object_index < source_object_count &&
@@ -79,8 +82,13 @@ bool ActRaiserLocalizationText_NormalizeStructured(
           written + (pending_space ? 1u : 0u) + sizeof(kFigureSpace) >=
               capacity)
         return false;
-      if (pending_space) destination[written++] = ' ';
+      if (pending_space) {
+        if (destination_boundaries)
+          ArTextBoundary_Set(destination_boundaries, written, pending_boundary);
+        destination[written++] = ' ';
+      }
       pending_space = false;
+      pending_boundary = false;
       memcpy(destination + written,
              kind == kArLocalizationInlineObject_StatusLife ? kEmSpace : kFigureSpace,
              sizeof(kFigureSpace));
@@ -93,8 +101,11 @@ bool ActRaiserLocalizationText_NormalizeStructured(
     }
     if (pending_space) {
       if (written + 1u >= capacity) return false;
+      if (destination_boundaries)
+        ArTextBoundary_Set(destination_boundaries, written, pending_boundary);
       destination[written++] = ' ';
       pending_space = false;
+      pending_boundary = false;
     }
     if (written + 1u >= capacity) return false;
     if (destination_boundaries)

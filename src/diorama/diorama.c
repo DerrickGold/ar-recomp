@@ -1121,7 +1121,7 @@ bool Diorama_SaveLayerManifest(void) {
 /* ── 3D projection ───────────────────────────────────────────────────── */
 
 #define DIORAMA_SUBDIV_X 8
-#define DIORAMA_SUBDIV_Y 6
+#define DIORAMA_SUBDIV_Y kDioramaPlaneSubdivY
 #define DIORAMA_VERTS_PER_LAYER ((DIORAMA_SUBDIV_X + 1) * (DIORAMA_SUBDIV_Y + 1))
 #define DIORAMA_INDICES_PER_LAYER (DIORAMA_SUBDIV_X * DIORAMA_SUBDIV_Y * 6)
 #define DIORAMA_EDGE_BOUNDARY_POINTS \
@@ -2269,12 +2269,14 @@ PresentationOutcome Diorama_Composite(
     const bool bg_transparent_fill_configured[2],
     const uint32_t bg_transparent_fill_argb[2],
     const DioramaCameraPose *cam_pose, float distance_scale,
+    bool center_camera_vertically,
     uint32_t additive_plane_mask,
     const DioramaCoverageMask coverage_masks[kDioramaPlane_Count],
     uint64_t bg2_content_revision, bool bg2_content_dynamic,
     uint8_t effect_obj_priority_mask, uint32_t effect_bg_plane_mask,
     uint8_t map_group, uint8_t map_number, uint8_t layer_section,
     const DioramaBgValidSpanPlan *bg2_valid_spans,
+    const DioramaSkyboxView *skybox_view,
     DioramaPlaneEffectFn plane_effect, void *plane_effect_userdata,
     DioramaProjection *out_projection) {
   const ArRenderRectI viewport = output_viewport;
@@ -2350,8 +2352,27 @@ PresentationOutcome Diorama_Composite(
     bool rom_skybox = false;
     uint64_t skybox_revision = bg2_content_revision;
     bool skybox_dynamic = bg2_content_dynamic;
+    int skybox_apron = obj_apron;
+    int skybox_width = snes_width;
+    DioramaBgValidSpanPlan skybox_spans;
+    const DioramaBgValidSpanPlan *skybox_valid_spans = bg2_valid_spans;
     const int skybox_source =
         DioramaLayerOrder_SkyboxSource(resolved, resolved_count);
+    if (skybox_source == kDioramaLayerSource_Captured && skybox_view &&
+        ArRenderTexture_IsValid(skybox_view->texture) && bg2_valid_spans) {
+      skybox_texture = skybox_view->texture;
+      skybox_revision = skybox_view->revision;
+      skybox_dynamic = skybox_view->dynamic;
+      skybox_apron = 0;
+      skybox_width = skybox_view->width;
+      skybox_spans = *bg2_valid_spans;
+      for (unsigned i = 0; i < skybox_spans.count; ++i) {
+        if (skybox_spans.spans[i].x1 <= skybox_spans.spans[i].x0) continue;
+        skybox_spans.spans[i].x0 = 0;
+        skybox_spans.spans[i].x1 = skybox_width;
+      }
+      skybox_valid_spans = &skybox_spans;
+    }
     if (skybox_source != kDioramaLayerSource_Captured) {
       uint8_t source_group = 0, source_map = 0, source_bg = 0;
       bool transparent_fill_configured = false;
@@ -2390,12 +2411,13 @@ PresentationOutcome Diorama_Composite(
     /* Named ROM art is immutable and supplies its own current pixels. A decode
      * or upload failure falls back to captured BG2, retaining the established
      * current-frame guard so a stale live texture cannot leak into a scene. */
-    if (rom_skybox || pixels[SR_PPU_OVERLAY_BG2]) {
+    if (rom_skybox || pixels[SR_PPU_OVERLAY_BG2] ||
+        (skybox_view && ArRenderTexture_IsValid(skybox_view->texture))) {
       const PresentationOutcome skybox = DrawDioramaSkybox(
           device, skybox_texture,
-          obj_apron, snes_width, snes_height, out_w, out_h, both,
+          skybox_apron, skybox_width, snes_height, out_w, out_h, both,
           both ? kSkyboxBlurRadiusBoth : kSkyboxBlurRadiusOnly,
-          rom_skybox, skybox_revision, skybox_dynamic, bg2_valid_spans);
+          rom_skybox, skybox_revision, skybox_dynamic, skybox_valid_spans);
       outcome = PresentationOutcome_Combine(outcome, skybox);
       if (!PresentationOutcome_IsUsable(skybox)) {
         return DioramaCompositeCoreFailure(&output_frame);
@@ -2473,19 +2495,28 @@ PresentationOutcome Diorama_Composite(
   float mvp[16];
   BuildViewProjection(&cam, out_w, out_h, mvp);
 
-  /* Re-center around the AUTHENTIC band. Meshes are symmetric around wy=0,
-   * while the captured source may have different numbers of rows above and
-   * below the authentic 224. Their difference, not their sum, is the required
-   * pin: equal margins naturally remain centred; a top-heavy capture shifts up
-   * and a bottom-heavy capture shifts down.
-   *
-   * Folded into the MVP rather than passed to each mesh builder so that the
-   * layers, thickness skirts, depth shapes, shoebox AND
-   * Diorama_ProjectCapturedPoint (which projects through this same matrix)
-   * cannot disagree about it. Column-major post-multiply by translate(0,d,0):
-   * only the last column changes, by d times the second. d is 0 when there is
-   * no vertical margin, leaving the matrix untouched. */
-  {
+  if (center_camera_vertically) {
+    /* BG1 defines the scene aperture. Resolve its geometry even on an empty
+     * capture frame so transient pixels/visibility cannot move the camera.
+     * Layer-order Z is authored around 0.5; meshes use z - 0.5. */
+    float focal_z = DioramaBg1ReferenceZ() - 0.5f;
+    float focal_rake = 0.0f, focal_bow = 0.0f;
+    for (int i = 0; i < resolved_count; i++) {
+      if (resolved[i].plane != SR_PPU_OVERLAY_BG1) continue;
+      focal_z = resolved[i].z - 0.5f;
+      focal_rake = resolved[i].rake;
+      focal_bow = resolved[i].bow;
+      break;
+    }
+    Diorama_CenterCameraVertically(
+        mvp, aspect_x, height_scale, focal_z, focal_rake, focal_bow,
+        (float)authentic_y0 / tex_h,
+        (float)(authentic_y0 + kActRaiserAuthenticHeight) / tex_h);
+  } else {
+    /* Free Cam retains its authored framing and margin pin. Meshes are
+     * symmetric around wy=0, while the capture can have different numbers of
+     * rows above/below the authentic 224. Translate world Y by their half
+     * difference, limited by the existing centering/crop policy. */
     float bottom_rows = tex_h - (float)authentic_y0 -
         (float)kActRaiserAuthenticHeight;
     float pin = 0.5f * ((float)authentic_y0 - bottom_rows) /

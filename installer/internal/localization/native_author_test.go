@@ -54,21 +54,22 @@ func TestNativeAuthorWrappingAndControls(t *testing.T) {
 		name, category string
 		before, after  []Operation
 		soft           bool
+		breakOp        string
 	}{
-		{"overflow", "angel_dialogue", []Operation{text("ABCDEFGHI")}, []Operation{text("next word")}, true},
-		{"exact-fit", "angel_dialogue", []Operation{text("ABCDEFG")}, []Operation{text("next word")}, false},
-		{"short", "angel_dialogue", []Operation{text("Sir Dude")}, []Operation{text("Go")}, false},
-		{"unknown-name", "angel_dialogue", []Operation{text("Sir "), {"op": "insert_master_name"}}, []Operation{text("next word")}, false},
-		{"unknown-lookup", "angel_dialogue", []Operation{text("ABCDEFGHI")}, []Operation{{"op": "insert_indexed_text", "value": "selected_town"}}, false},
-		{"decimal", "town_dialogue", []Operation{text("ABCDEFG"), {"op": "format_number", "value": "master_level", "width": 3}}, []Operation{text("next")}, true},
-		{"bcd-unknown", "town_dialogue", []Operation{text("ABCDEFG"), {"op": "format_number", "value": "total_score", "width": 0x83}}, []Operation{text("next")}, false},
-		{"icon", "angel_dialogue", []Operation{text("ABCDEFG"), {"op": "insert_icon", "value": "ui.heart"}}, []Operation{text("next")}, true},
-		{"native-accent", "angel_dialogue", []Operation{text("e\u0301ABCDEF")}, []Operation{text("next")}, false},
-		{"unknown-mark", "angel_dialogue", []Operation{text("ABCDEFGHI\ufe0f")}, []Operation{text("next")}, false},
-		{"ending-preserved", "ending_text", []Operation{text("ABCDEFGHI")}, []Operation{text("next")}, false},
-		{"post-offering-preserved", "post_offering_or_ending_native", []Operation{text("ABCDEFGHI")}, []Operation{text("next")}, false},
-		{"menu-preserved", "fixed_composer", []Operation{text("ABCDEFGHI")}, []Operation{text("next")}, false},
-		{"no-next-word", "angel_dialogue", []Operation{text("ABCDEFGHI")}, nil, false},
+		{"overflow", "angel_dialogue", []Operation{text("ABCDEFGHI")}, []Operation{text("next word")}, true, ""},
+		{"exact-fit", "angel_dialogue", []Operation{text("ABCDEFG")}, []Operation{text("next word")}, false, "preferred_line"},
+		{"short", "angel_dialogue", []Operation{text("Sir Dude")}, []Operation{text("Go")}, false, "preferred_line"},
+		{"unknown-name", "angel_dialogue", []Operation{text("Sir "), {"op": "insert_master_name"}}, []Operation{text("next word")}, false, "preferred_line"},
+		{"unknown-lookup", "angel_dialogue", []Operation{text("ABCDEFGHI")}, []Operation{{"op": "insert_indexed_text", "value": "selected_town"}}, false, "preferred_line"},
+		{"decimal", "town_dialogue", []Operation{text("ABCDEFG"), {"op": "format_number", "value": "master_level", "width": 3}}, []Operation{text("next")}, true, ""},
+		{"bcd-unknown", "town_dialogue", []Operation{text("ABCDEFG"), {"op": "format_number", "value": "total_score", "width": 0x83}}, []Operation{text("next")}, false, "preferred_line"},
+		{"icon", "angel_dialogue", []Operation{text("ABCDEFG"), {"op": "insert_icon", "value": "ui.heart"}}, []Operation{text("next")}, true, ""},
+		{"native-accent", "angel_dialogue", []Operation{text("e\u0301ABCDEF")}, []Operation{text("next")}, false, "preferred_line"},
+		{"unknown-mark", "angel_dialogue", []Operation{text("ABCDEFGHI\ufe0f")}, []Operation{text("next")}, false, "preferred_line"},
+		{"ending-preserved", "ending_text", []Operation{text("ABCDEFGHI")}, []Operation{text("next")}, false, "line"},
+		{"post-offering-preserved", "post_offering_or_ending_native", []Operation{text("ABCDEFGHI")}, []Operation{text("next")}, false, "line"},
+		{"menu-preserved", "fixed_composer", []Operation{text("ABCDEFGHI")}, []Operation{text("next")}, false, "line"},
+		{"no-next-word", "angel_dialogue", []Operation{text("ABCDEFGHI")}, nil, false, "preferred_line"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ops := append(append(append([]Operation{}, tc.before...), line), tc.after...)
@@ -79,9 +80,14 @@ func TestNativeAuthorWrappingAndControls(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			hasLine := slices.ContainsFunc(converted, func(op AuthorOperation) bool { return op.Op == "line" })
-			if hasLine == tc.soft {
-				t.Fatalf("line intent changed: %+v", converted)
+			breakOp := ""
+			for _, op := range converted {
+				if op.Op == "line" || op.Op == "preferred_line" {
+					breakOp = op.Op
+				}
+			}
+			if breakOp != tc.breakOp {
+				t.Fatalf("line intent changed: got %q in %+v", breakOp, converted)
 			}
 			after, _ := json.Marshal(route)
 			if string(before) != string(after) {
@@ -94,6 +100,14 @@ func TestNativeAuthorWrappingAndControls(t *testing.T) {
 					}
 				}
 			}
+			if tc.breakOp == "preferred_line" {
+				unprofiled, err := nativeAuthorOperations(route, nil)
+				if err != nil || !slices.ContainsFunc(unprofiled, func(op AuthorOperation) bool {
+					return op.Op == "line"
+				}) {
+					t.Fatalf("unprofiled geometry did not preserve a hard break: %+v %v", unprofiled, err)
+				}
+			}
 		})
 	}
 	// Leading/trailing placeholders must not consume their adjacent separators;
@@ -103,7 +117,7 @@ func TestNativeAuthorWrappingAndControls(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []AuthorOperation{{Op: "anchor", ID: "reset_text_cursor.00"}, {Op: "placeholder", Name: "master_name"}, {Op: "text", Value: " , go"}, {Op: "line"}, {Op: "page"}, {Op: "text", Value: " now "}, {Op: "placeholder", Name: "master_level", MinimumDigits: 3}, {Op: "anchor", ID: "delay.01"}, {Op: "anchor", ID: "toggle_text_state.02"}, {Op: "anchor", ID: "yield.03"}, {Op: "end"}}
+	want := []AuthorOperation{{Op: "anchor", ID: "reset_text_cursor.00"}, {Op: "placeholder", Name: "master_name"}, {Op: "text", Value: " , go"}, {Op: "preferred_line"}, {Op: "page"}, {Op: "text", Value: " now "}, {Op: "placeholder", Name: "master_level", MinimumDigits: 3}, {Op: "anchor", ID: "delay.01"}, {Op: "anchor", ID: "toggle_text_state.02"}, {Op: "anchor", ID: "yield.03"}, {Op: "end"}}
 	if !slices.Equal(ops, want) {
 		t.Fatalf("lost boundary/placeholder/control: %+v", ops)
 	}

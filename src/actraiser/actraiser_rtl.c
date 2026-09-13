@@ -3243,6 +3243,9 @@ static int s_live_margin_top;
 static int s_live_margin_bottom;
 static ActionBgPlan s_live_action_bg_plan;
 static bool s_live_bg_capture_pad_to_budget;
+static uint32_t s_diorama_skybox_pixels[
+    SR_PPU_SURFACE_MAX_WIDTH * SR_PPU_SURFACE_MAX_HEIGHT];
+static SrPpuSurfaceView s_live_diorama_skybox;
 
 /* Sim3D reports renderer-local contract state; this host seam owns the policy
  * decision to end the session. Keeping that conversion beside the capture
@@ -3423,6 +3426,7 @@ static SrResult ActRaiser_DrawPpuFrameTransaction(
   (void)user_data;
   (void)runner;
   if (!context) return SR_RESULT_INVALID_ARGUMENT;
+  s_live_diorama_skybox = (SrPpuSurfaceView){0};
   PerformanceScope pipeline = PerformanceMetrics_Begin(kPerformance_PpuSetup);
   ppu = &context->state;
   for (uint32_t source = 0; source < SR_PPU_OVERLAY_SOURCE_COUNT; source++)
@@ -3904,6 +3908,52 @@ static SrResult ActRaiser_DrawPpuFrameTransaction(
    * writes the selected range to the HUD surface while each line is fetched. */
   ActRaiser_DioramaHudObjPrepare();
 
+  /* A finite scrolling background needs its own fixed-size view at world
+   * edges. The normal BG capture remains registered to the gameplay camera.
+   * Named ROM, repeated, mirrored and row-banded skies retain their policies. */
+  SrPpuBackgroundViewRequest skybox_view = {0};
+  const ActionBgLayerPlan *sky_layer = &s_pending_action_bg_plan.layer[1];
+  const DioramaRoomOverride *sky_room = ActRaiser_CurrentVirtualLayerRoom();
+  const DioramaPlaneOverride *backdrop_override = sky_room
+      ? &sky_room->planes[kDioramaPlane_Backdrop] : NULL;
+  const bool skybox_capable = scanout_ready &&
+      scanout_api->struct_size >= SNES_RUNNER_API_PPU_BACKGROUND_VIEW_SIZE &&
+      (scanout_api->capabilities & SR_RUNNER_CAP_PPU_BACKGROUND_VIEW) != 0u &&
+      scanout_api->run_ppu_scanout_with_background_view;
+  if (skybox_capable && profile_diorama && g_settings.diorama_margin_fix &&
+      g_settings.diorama_skybox != kDioramaSky_Off &&
+      sky_layer->valid && sky_layer->source == kActionBgSource_WorldMap &&
+      !sky_layer->wrap_world_x && sky_layer->band_count == 0 &&
+      sky_layer->default_edge == kActionBgEdge_LiveWorld &&
+      (!backdrop_override || !backdrop_override->set_source ||
+       backdrop_override->source == kDioramaLayerSource_Captured) &&
+      (!sky_room || !DioramaLayerOrder_VirtualLayerHasClassification(
+          &sky_room->virtual_layers[1]))) {
+    unsigned left = context->frame.margin_budget;
+    unsigned right = left;
+    if (sky_layer->horizontal_extent.mode == kActionBgExtent_Fixed) {
+      if (left > sky_layer->horizontal_extent.left)
+        left = sky_layer->horizontal_extent.left;
+      if (right > sky_layer->horizontal_extent.right)
+        right = sky_layer->horizontal_extent.right;
+    }
+    unsigned width = kActRaiserAuthenticWidth + left + right;
+    if (width > sky_layer->world_width) width = sky_layer->world_width;
+    skybox_view = (SrPpuBackgroundViewRequest){
+      .struct_size = sizeof(skybox_view), .layer = SR_PPU_OVERLAY_BG2,
+      .world_width = sky_layer->world_width,
+      .world_height = sky_layer->world_height,
+      .screen_x0 = -(int)left,
+      .screen_y0 = -(int)context->state.margin_top,
+      .width = width,
+      .height = SR_PPU_NATIVE_HEIGHT + context->state.margin_top +
+          context->state.margin_bottom,
+      .pixels = s_diorama_skybox_pixels,
+      .pitch_bytes = width * sizeof(uint32_t),
+      .pixel_byte_size = sizeof(s_diorama_skybox_pixels),
+    };
+  }
+
   DioramaPerformance_End(producer_setup_performance);
   PerformanceMetrics_End(pipeline);
   pipeline = PerformanceMetrics_Begin(kPerformance_PpuScanout);
@@ -3913,8 +3963,23 @@ static SrResult ActRaiser_DrawPpuFrameTransaction(
         DioramaPerformance_Begin(kDioramaPerformance_Scanout);
 
   if (scanout_ready) {
-    scanout_status = scanout_api->run_ppu_scanout(
-        scanout_runner, &scanout_request, &scanout_result);
+    scanout_status = skybox_view.pixels
+        ? scanout_api->run_ppu_scanout_with_background_view(
+            scanout_runner, &scanout_request, &skybox_view, &scanout_result)
+        : scanout_api->run_ppu_scanout(
+            scanout_runner, &scanout_request, &scanout_result);
+  }
+  if (skybox_view.pixels && scanout_status == SR_RESULT_OK &&
+      (scanout_result.flags & SR_PPU_SCANOUT_BACKGROUND_VIEW_READY)) {
+    s_live_diorama_skybox = (SrPpuSurfaceView){
+      .flags = SR_PPU_SURFACE_BOUND | SR_PPU_SURFACE_HAS_CONTENT,
+      .pixel_format = SR_PPU_PIXEL_FORMAT_ARGB8888_U32,
+      .data = (const uint8_t *)skybox_view.pixels,
+      .byte_size = skybox_view.pitch_bytes * skybox_view.height,
+      .pitch_bytes = skybox_view.pitch_bytes,
+      .width_pixels = skybox_view.width, .height_pixels = skybox_view.height,
+      .origin_x = 0, .origin_y = -skybox_view.screen_y0, .scale = 1,
+    };
   }
   if (scanout_status != SR_RESULT_OK) {
     SessionFatal_Request(
@@ -4056,6 +4121,10 @@ bool ActRaiser_LiveActionBgPlan(ActionBgPlan *out,
   if (pad_captured_to_budget)
     *pad_captured_to_budget = s_live_bg_capture_pad_to_budget;
   return s_live_action_bg_plan.valid;
+}
+
+void ActRaiser_LiveDioramaSkybox(SrPpuSurfaceView *out) {
+  if (out) *out = s_live_diorama_skybox;
 }
 
 /* Reload the selector-dependent part of the action OBJ atlas after a live
