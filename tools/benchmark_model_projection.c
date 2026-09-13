@@ -18,6 +18,7 @@
 #include "scene3d_math.h"
 #include "present_world_nav_geometry.h"
 #include "sim/sim3d_depth_pass.h"
+#include "sim3d_depth_reference.h"
 #include "sim/sim_background_voxel_biome.h"
 #include "sim/sim_background_voxel_model_cache.h"
 #include "sim/sim_background_voxel_palette.h"

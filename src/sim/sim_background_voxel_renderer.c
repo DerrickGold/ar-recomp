@@ -76,12 +76,49 @@ _Static_assert(sizeof(SimBackgroundCachedSolidFace) ==
 
 typedef struct SimBackgroundSolidProjectionBuilder {
   bool failed;
+  bool source_space;
+  Sim3DDepthLinearVertex corners[4];
 } SimBackgroundSolidProjectionBuilder;
 
-/* One handle per pass, not per material: together with the globe's two
- * retained batches this stays inside the depth adapter's four-handle budget.
- * Only geometry is retained. Atlases, shadow masks and volcano effects remain
- * live, and the two passes keep their original actor/compositing boundaries. */
+/* Only currently selected model/LOD geometry is published. Camera movement
+ * changes uniforms; an object-set/LOD, terrain, palette or scene change rebuilds
+ * the bounded source. This avoids retaining all four LODs of a developed town. */
+typedef struct SimBackgroundSourceSelection {
+  uint16_t index;
+  uint8_t detail;
+} SimBackgroundSourceSelection;
+typedef struct SimBackgroundSourceModelKey {
+  uint32_t scene_serial;
+  uint16_t landscape_height_pct, light_azimuth_deg;
+  uint8_t shading, style, town, light_elevation_deg;
+} SimBackgroundSourceModelKey;
+static struct {
+  Sim3DDepthMesh *mesh;
+  Sim3DDepthLinearVertex *vertices;
+  size_t count, capacity;
+  SimBackgroundSourceModelKey key;
+  SimBackgroundSourceSelection selection[kSimBackgroundMaxObjects];
+  uint16_t selection_count;
+  bool valid;
+} s_source_models;
+_Static_assert(kSimBackgroundVoxelKindCount + 1 <= kSim3DDepthLinearAxisCount,
+    "SIM axes must fit the backend-neutral displacement table");
+
+static bool SourceModelsEnabled(ArRenderDevice *device) {
+  static int enabled = -1;
+  if (enabled < 0) {
+    const char *value = getenv("AR_SIM3D_TOWN_GPU_MODELS");
+    /* Retain an explicit CPU reference override for diagnostics. */
+    enabled = !value || strcmp(value, "0") != 0;
+  }
+  /* Preparation owns this decision. Do not rebuild a source each frame only
+   * to discover that its pipeline was already rejected at video boot. */
+  return enabled != 0 && Sim3DDepthPass_LinearMeshesAvailable(device);
+}
+
+/* One ordinary handle per pass, not per material. Only geometry is retained;
+ * atlases, shadow masks and volcano effects remain live. Source-space models
+ * have their own handle, preserving these actor/compositing boundaries. */
 static const Sim3DDepthPassLayer kRetainedTownLayers[] = {
   kSim3DDepthPass_DepthOccluder, kSim3DDepthPass_Solid,
   kSim3DDepthPass_Mountain, kSim3DDepthPass_ShadowReceiver,
@@ -259,10 +296,56 @@ static void AppendSolidFace(
           face, &g_renderer_state.palettes[palette_index],
           (SimBackgroundVoxelShading)params->shading, vertices))
     return;
+  if (builder && builder->source_space) {
+    if (builder->failed) return;
+    if (s_source_models.count + 4 > s_source_models.capacity) {
+      size_t capacity = s_source_models.capacity ? s_source_models.capacity * 2 : 4096;
+      /* Same bounded source size as the private depth adapter. A rejected
+       * optional publication leaves the complete ordinary path available. */
+      if (capacity > kSim3DDepthMaximumSourceQuads * 4u) { builder->failed = true; return; }
+      Sim3DDepthLinearVertex *source = realloc(s_source_models.vertices,
+          capacity * sizeof(*source));
+      if (!source) { builder->failed = true; return; }
+      s_source_models.vertices = source;
+      s_source_models.capacity = capacity;
+    }
+    for (unsigned p = 0; p < 4; ++p) {
+      builder->corners[p].color = vertices[p].color;
+      s_source_models.vertices[s_source_models.count++] = builder->corners[p];
+    }
+    return;
+  }
   Sim3DDepthPass_AppendQuad(kSim3DDepthPass_Solid, vertices);
   if (builder && !builder->failed &&
       !RetainProjectedSolidFace(vertices))
     builder->failed = true;
+}
+
+/* Build camera-independent source attributes or execute the reference
+ * projection. All placement/shading callers are shared between the two paths;
+ * in particular foundations and contacts never inherit a facade's lean. */
+static bool BuildSolidVertex(const SimBackgroundVoxelRenderParams *params,
+    const SimBackgroundProjectionAxis *axis, unsigned axis_index,
+    float x, float y, float height, float ground, float depth_ground,
+    SimBackgroundProjectedFace *face, unsigned point,
+    SimBackgroundSolidProjectionBuilder *builder) {
+  if (builder && builder->source_space) {
+    builder->corners[point] = (Sim3DDepthLinearVertex){
+      .position = {x + params->camera_x - params->town_screen_x0,
+                   y + params->camera_y, ground},
+      .displacement = height, .axis = (float)axis_index,
+      .depth_offset = depth_ground - ground,
+    };
+    return !builder->failed;
+  }
+  return SimBackgroundVoxelProject_GroundedVertexWithDepthGround(params, axis,
+      x, y, height, ground, depth_ground, &face->points[point], &face->gpu_depth[point]);
+}
+
+static bool SolidFaceDegenerate(const SimBackgroundProjectedFace *face,
+    const SimBackgroundSolidProjectionBuilder *builder) {
+  return !(builder && builder->source_space) &&
+      SimBackgroundVoxelProject_IsDegenerate(face->points);
 }
 
 static ArRenderTexture CreateGroundTexture(ArRenderDevice *device) {
@@ -638,16 +721,16 @@ static void AppendGroundContact(
     for (int point = 0; point < 4; point++) {
       float terrain_lift = ObjectTerrainLiftPixels(
           object, params, local_x[point], local_y[point]);
-      if (!SimBackgroundVoxelProject_GroundedVertex(
-              params, &kSimBackgroundUprightProjectionAxis,
+      if (!BuildSolidVertex(
+              params, &kSimBackgroundUprightProjectionAxis, 0,
               origin_x + local_x[point], origin_y + local_y[point],
-              kContactLiftPixels, terrain_lift,
-              &face.points[point], &face.gpu_depth[point])) {
+              kContactLiftPixels, terrain_lift, terrain_lift,
+              &face, point, builder)) {
         valid = false;
         break;
       }
     }
-    if (valid && !SimBackgroundVoxelProject_IsDegenerate(face.points))
+    if (valid && !SolidFaceDegenerate(&face, builder))
       AppendSolidFace(&face, palette_index, params, builder);
   }
 }
@@ -689,13 +772,13 @@ static void AppendFoundationFace(
     .brightness = {brightness, brightness, brightness, brightness},
   };
   for (int point = 0; point < 4; point++)
-    if (!SimBackgroundVoxelProject_GroundedVertex(
-            params, &kSimBackgroundUprightProjectionAxis,
+    if (!BuildSolidVertex(
+            params, &kSimBackgroundUprightProjectionAxis, 0,
             origin_x + local_x[point], origin_y + local_y[point],
-            0.0f, absolute_z[point],
-            &face.points[point], &face.gpu_depth[point]))
+            0.0f, absolute_z[point], absolute_z[point],
+            &face, point, builder))
       return;
-  if (!SimBackgroundVoxelProject_IsDegenerate(face.points))
+  if (!SolidFaceDegenerate(&face, builder))
     AppendSolidFace(&face, palette_index, params, builder);
 }
 
@@ -916,6 +999,7 @@ static void DrawModel(
     const SimBackgroundVoxelRenderParams *params,
     const SimBackgroundProjectionAxis *axis,
     float anchor_lift, float depth_lift,
+    SimBackgroundVoxelDetail detail,
     SimBackgroundSolidProjectionBuilder *builder) {
   float origin_x = (float)params->town_screen_x0 - params->camera_x +
       ObjectOriginX(object);
@@ -925,9 +1009,6 @@ static void DrawModel(
           (SimBackgroundVoxelKind)object->kind);
   float center_x = ObjectFootprintWidth(object) * 0.5f;
   float center_y = ObjectFootprintDepth(object) * 0.5f;
-  SimBackgroundVoxelDetail detail = EffectiveDetail(
-      object, params, axis, origin_x, origin_y, proportions,
-      center_x, center_y, anchor_lift);
   /* Shading rides along with the geometry: none of its inputs move with the
    * camera, so the cache resolves it once per model per lighting state. */
   const SimBackgroundVoxelModelShadingKey shading_key = {
@@ -953,10 +1034,9 @@ static void DrawModel(
 #endif
   AppendGroundContact(object, palette_index, params, origin_x, origin_y,
                       proportions, builder);
-  /* Faces are submitted as they are projected on a cache miss and retained by
-   * the renderer as portable projected faces. A settled camera can then replay
-   * them through the same palette/projection submission boundary without
-   * repeating model-space projection on every presentation. */
+  /* Both representations share authored proportions, placement and shading.
+   * The ordinary reference retains projected faces for a settled camera;
+   * source-space publication retains these attributes before camera lean. */
   for (uint16_t face_index = 0; face_index < model->face_count; face_index++) {
     const SimBackgroundVoxelModelFace *source = &model->faces[face_index];
     SimBackgroundProjectedFace face = {
@@ -974,33 +1054,23 @@ static void DrawModel(
               proportions->footprint_scale;
       float local_z = source->points[point].z *
           proportions->height_scale;
-      bool projected;
-      if (object->kind == kSimBackgroundVoxel_Bridge) {
-        projected = SimBackgroundVoxelProject_GroundedVertexWithDepthGround(
-            params, axis,
-            origin_x + local_x, origin_y + local_y,
-            local_z, anchor_lift,
-            depth_lift,
-            &face.points[point], &face.gpu_depth[point]);
-      } else {
-        projected = SimBackgroundVoxelProject_GroundedVertex(
-            params, axis,
-            origin_x + local_x, origin_y + local_y,
-            local_z, anchor_lift,
-            &face.points[point], &face.gpu_depth[point]);
-      }
+      bool projected = BuildSolidVertex(params, axis, object->kind + 1,
+          origin_x + local_x, origin_y + local_y, local_z, anchor_lift,
+          object->kind == kSimBackgroundVoxel_Bridge ? depth_lift : anchor_lift,
+          &face, point, builder);
       if (!projected) {
         valid = false;
         break;
       }
     }
-    if (!valid || SimBackgroundVoxelProject_IsDegenerate(face.points)) continue;
+    if (!valid || SolidFaceDegenerate(&face, builder)) continue;
     AppendSolidFace(&face, palette_index, params, builder);
   }
 }
 
 typedef struct SimBackgroundVisibleModel {
   uint16_t index;
+  uint8_t detail;
   SimBackgroundProjectionAxis axis;
   float anchor_lift;
   float depth_lift;
@@ -1045,17 +1115,18 @@ static void BuildVisibleModelList(
     if (!ObjectMayBeVisible(
             object, params, &entry.axis, entry.anchor_lift))
       continue;
+    entry.detail = EffectiveDetail(object, params, &entry.axis,
+        params->town_screen_x0 - (float)params->camera_x + ObjectOriginX(object),
+        -(float)params->camera_y + ObjectOriginY(object),
+        SimBackgroundVoxelProportions_Get((SimBackgroundVoxelKind)object->kind),
+        center_x, center_y, entry.anchor_lift);
     list->entries[list->count++] = entry;
   }
 }
 
-static void CollectDepthGeometry(
+static void CollectTerrainGeometry(
     const SimBackgroundVoxelRenderParams *params,
-    const SimBackgroundVisibleModelList *list,
-    int mountain_relief_count,
-    uint32_t scene_serial,
-    bool solid_projection_cached) {
-  const SimBackgroundVoxelScene *scene = SimBackgroundVoxels_Scene();
+    int mountain_relief_count) {
   /* Submission order is intentionally immaterial. One opaque mountain draw
    * and one solid-model draw share the same D32 attachment; the GPU resolves
    * visibility per pixel instead of relying on CPU object/face ordering. */
@@ -1063,6 +1134,13 @@ static void CollectDepthGeometry(
   SimBackgroundVoxelTerrainDepth_Append(params);
 #endif
   SimBackgroundMountainRender_SubmitFaces(mountain_relief_count);
+}
+
+static void CollectSolidGeometry(
+    const SimBackgroundVoxelRenderParams *params,
+    const SimBackgroundVisibleModelList *list,
+    uint32_t scene_serial, bool solid_projection_cached) {
+  const SimBackgroundVoxelScene *scene = SimBackgroundVoxels_Scene();
 
   if (solid_projection_cached) {
     if (g_renderer_state.projected_solid_count)
@@ -1081,7 +1159,8 @@ static void CollectDepthGeometry(
     uint16_t index = entry->index;
     const SimBackgroundVoxelObject *object = &scene->objects[index];
     DrawModel(object, index, params, &entry->axis,
-              entry->anchor_lift, entry->depth_lift, &builder);
+              entry->anchor_lift, entry->depth_lift,
+              (SimBackgroundVoxelDetail)entry->detail, &builder);
   }
   if (!builder.failed) {
     SaveProjectionKey(&g_renderer_state.projected_solid_key, params, scene_serial);
@@ -1089,6 +1168,76 @@ static void CollectDepthGeometry(
   } else {
     g_renderer_state.projected_solid_count = 0;
   }
+}
+
+static bool SourceModelKeyMatches(const SimBackgroundVoxelRenderParams *params,
+    const SimBackgroundVisibleModelList *list, uint32_t serial) {
+  const SimBackgroundSourceModelKey *key = &s_source_models.key;
+  if (!s_source_models.valid || key->scene_serial != serial ||
+      key->shading != params->shading || key->style != params->style ||
+      key->town != params->town || key->landscape_height_pct != params->landscape_height_pct ||
+      key->light_azimuth_deg != params->light_azimuth_deg ||
+      key->light_elevation_deg != params->light_elevation_deg ||
+      s_source_models.selection_count != list->count) return false;
+  for (unsigned i = 0; i < list->count; ++i)
+    if (s_source_models.selection[i].index != list->entries[i].index ||
+        s_source_models.selection[i].detail != list->entries[i].detail) return false;
+  return true;
+}
+
+static bool DrawSourceModels(const SimBackgroundVoxelRenderParams *params,
+    const SimBackgroundVisibleModelList *list, uint32_t serial) {
+  if (!list->count) return true; /* An empty cull is not a backend failure. */
+  const bool matching = SourceModelKeyMatches(params, list, serial);
+  if (!matching || !Sim3DDepthPass_MeshReady(s_source_models.mesh)) {
+    s_source_models.valid = false;
+    s_source_models.count = 0;
+    SimBackgroundSolidProjectionBuilder builder = {.source_space = true};
+    SimBackgroundVoxelRenderParams source_params = *params;
+    source_params.camera_x = source_params.camera_y = source_params.town_screen_x0 = 0;
+    const SimBackgroundVoxelScene *scene = SimBackgroundVoxels_Scene();
+    for (unsigned i = 0; i < list->count && !builder.failed; ++i) {
+      const SimBackgroundVisibleModel *entry = &list->entries[i];
+      DrawModel(&scene->objects[entry->index], entry->index, &source_params,
+          &entry->axis, entry->anchor_lift, entry->depth_lift,
+          (SimBackgroundVoxelDetail)entry->detail, &builder);
+    }
+    if (builder.failed) return false;
+    if (!s_source_models.count) return true;
+    if (!s_source_models.mesh) s_source_models.mesh = Sim3DDepthPass_CreateLinearMesh();
+    if (!s_source_models.mesh || !Sim3DDepthPass_UpdateLinearMesh(s_source_models.mesh,
+            s_source_models.vertices, s_source_models.count / 4)) return false;
+    s_source_models.key = (SimBackgroundSourceModelKey){
+      .scene_serial = serial, .landscape_height_pct = params->landscape_height_pct,
+      .light_azimuth_deg = params->light_azimuth_deg, .shading = params->shading,
+      .style = params->style, .town = params->town, .light_elevation_deg = params->light_elevation_deg,
+    };
+    s_source_models.selection_count = list->count;
+    for (unsigned i = 0; i < list->count; ++i)
+      s_source_models.selection[i] = (SimBackgroundSourceSelection){
+        list->entries[i].index, list->entries[i].detail};
+    s_source_models.valid = true;
+    Sim3DPerformance_AddPath(kSim3DPath_Publish);
+  }
+  Sim3DDepthLinearTransform transform = {
+    .offset = {params->town_screen_x0 - (float)params->camera_x,
+               -(float)params->camera_y, 0},
+    .pixel_centers = params->render_scale == kSimBackgroundVoxelRenderScale_PixelClean,
+    .axes = {{0, 0, 1}},
+  };
+  for (unsigned row = 0; row < 4; ++row)
+    for (unsigned col = 0; col < 4; ++col)
+      transform.matrix[col * 4 + row] = params->texture_to_clip[row * 4 + col];
+  SimBackgroundProjectionAxis axes[kSimBackgroundVoxelKindCount];
+  SimBackgroundVoxelProject_ResolveAxes(params, axes);
+  for (unsigned kind = 0; kind < kSimBackgroundVoxelKindCount; ++kind) {
+    transform.axes[kind+1][0] = axes[kind].x_per_height;
+    transform.axes[kind+1][1] = axes[kind].y_per_height;
+    transform.axes[kind+1][2] = axes[kind].height_scale;
+  }
+  if (!Sim3DDepthPass_AppendLinearMesh(s_source_models.mesh, &transform)) return false;
+  Sim3DPerformance_AddPath(kSim3DPath_GpuReuse);
+  return true;
 }
 
 static void GroundDepthRange(
@@ -1166,7 +1315,8 @@ static void DrawDepthLayers(
   if (!BeginDepthTarget(device, params, &draw_params)) return;
 
   const uint32_t scene_serial = SimBackgroundVoxels_SceneSerial();
-  const bool solid_projection_cached =
+  const bool source_models = SourceModelsEnabled(device);
+  const bool solid_projection_cached = !source_models &&
       SolidProjectionCacheMatches(&draw_params, scene_serial);
   SimBackgroundVisibleModelList list = {0};
   Sim3DPerformanceScope cull_performance =
@@ -1186,10 +1336,23 @@ static void DrawDepthLayers(
       Sim3DPerformance_Begin(kSim3DPerformance_DepthProject);
   SimBackgroundRetainedPass *cache = &g_renderer_state.solid_pass;
   const bool stable = PrepareRetainedPass(cache, &draw_params, scene_serial);
-  if (!solid_projection_cached || !stable || !AppendRetainedPass(cache)) {
+  if (source_models) {
+    /* The retained ordinary cache contains only terrain/mountains on this
+     * path. Capture before appending any model, preserving original Solid
+     * depth order and the two actor/compositing boundaries. */
+    if (!stable || !AppendRetainedPass(cache)) {
+      CollectTerrainGeometry(&draw_params, mountain_relief_count);
+      if (stable) CaptureRetainedPass(cache);
+    }
+    if (!DrawSourceModels(&draw_params, &list, scene_serial)) {
+      Sim3DPerformance_AddPath(kSim3DPath_Rejected);
+      Sim3DPerformance_AddPath(kSim3DPath_CpuProject);
+      CollectSolidGeometry(&draw_params, &list, scene_serial, false);
+    }
+  } else if (!solid_projection_cached || !stable || !AppendRetainedPass(cache)) {
     Sim3DPerformance_AddPath(solid_projection_cached ? kSim3DPath_CpuStage : kSim3DPath_CpuProject);
-    CollectDepthGeometry(&draw_params, &list, mountain_relief_count,
-                         scene_serial, solid_projection_cached);
+    CollectTerrainGeometry(&draw_params, mountain_relief_count);
+    CollectSolidGeometry(&draw_params, &list, scene_serial, solid_projection_cached);
     if (stable && g_renderer_state.projected_solids_valid)
       CaptureRetainedPass(cache);
   }
@@ -1469,6 +1632,9 @@ void SimBackgroundVoxelRenderer_Reset(ArRenderDevice *device) {
   ArRenderDevice_DestroyTexture(device, g_renderer_state.ground);
   Sim3DDepthPass_DestroyMesh(g_renderer_state.solid_pass.mesh);
   Sim3DDepthPass_DestroyMesh(g_renderer_state.shadow_pass.mesh);
+  Sim3DDepthPass_DestroyMesh(s_source_models.mesh);
+  free(s_source_models.vertices);
+  memset(&s_source_models, 0, sizeof(s_source_models));
   g_renderer_state.solid_pass = (SimBackgroundRetainedPass){0};
   g_renderer_state.shadow_pass = (SimBackgroundRetainedPass){0};
   Sim3DDepthPass_Reset(device);

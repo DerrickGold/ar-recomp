@@ -9,6 +9,7 @@
 
 #include "platform/sdl/render_sdl_internal.h"
 #include "sim/sim3d_depth_pass.h"
+#include "sim3d_depth_reference.h"
 #include "present_world_nav_geometry.h"
 
 enum {
@@ -780,6 +781,143 @@ static void TestModelMesh(ArRenderDevice *device, SDL_Renderer *renderer) {
   CHECK(Sim3DDepthPass_AppendModelMesh(mesh, identity));
   Sim3DDepthPass_DestroyMesh(mesh);
   CHECK(!ArRenderTexture_IsValid(Sim3DDepthPass_Submit(device, ArRenderTexture_Invalid())));
+  Sim3DDepthPass_Reset(device);
+}
+
+static void TestLinearModels(ArRenderDevice *device, SDL_Renderer *renderer) {
+  Sim3DDepthPass_Reset(device);
+  CHECK(!Sim3DDepthPass_CreateLinearMesh());
+  CHECK(Sim3DDepthPass_Begin(device, 32, 16, kArRenderFilter_Nearest));
+  Sim3DDepthMesh *mesh = Sim3DDepthPass_CreateLinearMesh();
+  Sim3DDepthMesh *reference_mesh = Sim3DDepthPass_CreateHardwareClippedModelMesh();
+  CHECK(mesh && reference_mesh);
+  if (!mesh || !reference_mesh) return;
+  Sim3DDepthLinearVertex source[8];
+  for (unsigned q = 0; q < 2; ++q) for (unsigned p = 0; p < 4; ++p) {
+    source[q*4+p] = (Sim3DDepthLinearVertex){
+      .position = {p == 1 || p == 2 ? .5f : -.5f, p >= 2 ? .5f : -.5f, .125f},
+      .displacement = p >= 2 ? .25f : 0,
+      .color = q ? (ArRenderColorF){0,1,0,1} : (ArRenderColorF){1,0,0,1},
+      .axis = (float)q, .depth_offset = q ? -.25f : 0,
+    };
+  }
+  CHECK(!Sim3DDepthPass_UpdateLinearMesh(mesh, NULL, 2));
+  CHECK(!Sim3DDepthPass_UpdateLinearMesh(mesh, source, 0));
+  CHECK(!Sim3DDepthPass_UpdateLinearMesh(mesh, source, SIZE_MAX));
+  for (unsigned bad = 0; bad < 6; ++bad) {
+    Sim3DDepthLinearVertex invalid[8]; memcpy(invalid, source, sizeof(invalid));
+    if (bad == 0) invalid[0].position[0] = NAN;
+    if (bad == 1) invalid[0].displacement = INFINITY;
+    if (bad == 2) invalid[0].depth_offset = NAN;
+    if (bad == 3) invalid[0].axis = kSim3DDepthLinearAxisCount;
+    if (bad == 4) invalid[0].axis = .5f;
+    if (bad == 5) invalid[0].axis = 1; /* Mixed labels within a face. */
+    CHECK(!Sim3DDepthPass_UpdateLinearMesh(mesh, invalid, 2));
+  }
+  for (unsigned cycle = 0; cycle < 3; ++cycle) {
+    const int width = cycle ? 64 : 32;
+    if (cycle == 2) Sim3DDepthPass_Reset(device);
+    for (unsigned test = 0; test < 12; ++test) {
+      Sim3DDepthLinearTransform t = {
+        .matrix = {1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1},
+        .axes = {{.5f,0,1}, {-.5f,0,1}},
+        .offset = {.03125f, .0625f, 0},
+        .pixel_centers = test < 6,
+      };
+      if (test < 4) t.offset[test / 2] += test & 1 ? .5f : -.5f;
+      if (test == 4) t.matrix[3] = .25f;
+      if (test >= 6 && test < 10) t.matrix[12 + (test-6)/2] = test & 1 ? 1 : -1;
+      if (test == 10) t.matrix[15] = -1;
+      if (test == 11) { t.matrix[3] = 2; t.matrix[15] = .25f; t.matrix[10] = 0; }
+      SDL_Surface *reference = NULL;
+      for (unsigned gpu = 0; gpu < 2; ++gpu) {
+        CHECK(Sim3DDepthPass_Begin(device, width, 16, kArRenderFilter_Nearest));
+        CHECK(AppendRect(kSim3DDepthPass_DepthOccluder, 0, 0, width/4, 16,
+            .125f, (ArRenderColorF){1,1,1,1}));
+        const bool publish = gpu && !Sim3DDepthPass_MeshReady(mesh);
+        const uint64_t bytes = geometry_upload_bytes;
+        if (gpu) {
+          if (publish) {
+            Sim3DDepthLinearVertex copied[8]; memcpy(copied, source, sizeof(copied));
+            CHECK(Sim3DDepthPass_UpdateLinearMesh(mesh, copied, 2));
+            memset(copied, 0, sizeof(copied));
+          }
+          Sim3DDepthLinearTransform copied = t;
+          CHECK(Sim3DDepthPass_AppendLinearMesh(mesh, &copied));
+          memset(&copied, 0, sizeof(copied));
+          CHECK(!Sim3DDepthPass_UpdateLinearMesh(mesh, source, 2));
+        } else if (t.pixel_centers) {
+          /* Independent scalar CPU reference for snapping and dual depth.
+           * Only these fully front-facing cases divide before rasterization. */
+          for (unsigned q = 0; q < 2; ++q) {
+            Sim3DDepthVertex projected[4];
+            for (unsigned p = 0; p < 4; ++p) {
+              const Sim3DDepthLinearVertex *v = &source[q*4+p];
+              float pos[3], clip[4] = {0};
+              for (unsigned c = 0; c < 3; ++c)
+                pos[c] = v->position[c] + t.offset[c] + v->displacement * t.axes[(unsigned)v->axis][c];
+              for (unsigned r = 0; r < 4; ++r) {
+                for (unsigned c = 0; c < 3; ++c) clip[r] += t.matrix[c*4+r] * pos[c];
+                clip[r] += t.matrix[12+r];
+              }
+              const float safety_z = clip[2] + t.matrix[10] * v->depth_offset;
+              const float safety_w = clip[3] + t.matrix[11] * v->depth_offset;
+              projected[p] = (Sim3DDepthVertex){
+                .x = floorf((clip[0]/clip[3]*.5f+.5f)*width)+.5f,
+                .y = floorf((1-(clip[1]/clip[3]*.5f+.5f))*16)+.5f,
+                .depth = fminf(clip[2]/clip[3], safety_z/safety_w)*.5f+.5f,
+                .color = v->color, .uv = {-1,-1},
+              };
+            }
+            CHECK(Sim3DDepthPass_AppendQuad(kSim3DDepthPass_Solid, projected));
+          }
+        } else {
+          Sim3DDepthModelVertex placed[8];
+          for (unsigned i = 0; i < 8; ++i) {
+            for (unsigned c = 0; c < 3; ++c)
+              placed[i].position[c] = source[i].position[c] + t.offset[c] +
+                  source[i].displacement * t.axes[(unsigned)source[i].axis][c];
+            /* In these clipping cases Z has no XY/W coupling, so moving the
+             * depth coordinate is an independent hardware-clipped reference. */
+            placed[i].position[2] += source[i].depth_offset;
+            placed[i].color = source[i].color;
+          }
+          CHECK(Sim3DDepthPass_UpdateModelMesh(reference_mesh, placed, 2));
+          CHECK(Sim3DDepthPass_AppendModelMesh(reference_mesh, t.matrix));
+        }
+        CHECK(AppendRect(kSim3DDepthPass_Solid, width-2, 0, width, 16, 0, (ArRenderColorF){0,0,1,1}));
+        SDL_Surface *actual = ReadPass(device, renderer); CHECK(actual);
+        if (!gpu) reference = actual;
+        else {
+          CHECK(geometry_upload_bytes - bytes == 8*40 + (publish ? sizeof(source) : 0));
+          if (actual && reference) {
+            unsigned different = 0;
+            for (int y = 0; y < 16; ++y) for (int x = 0; x < width; ++x)
+              different += memcmp((uint8_t *)actual->pixels+y*actual->pitch+x*4,
+                  (uint8_t *)reference->pixels+y*reference->pitch+x*4, 4) != 0;
+            if (different) fprintf(stderr, "linear cycle=%u test=%u different=%u\n", cycle, test, different);
+            CHECK(!different);
+          }
+          SDL_DestroySurface(actual);
+        }
+      }
+      SDL_DestroySurface(reference);
+    }
+  }
+  CHECK(Sim3DDepthPass_Begin(device, 32, 16, kArRenderFilter_Nearest));
+  Sim3DDepthLinearTransform t = {.matrix = {1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1}};
+  for (unsigned bad = 0; bad < 4; ++bad) {
+    Sim3DDepthLinearTransform invalid = t;
+    if (bad == 0) invalid.matrix[0] = NAN;
+    if (bad == 1) invalid.axes[15][2] = INFINITY;
+    if (bad == 2) invalid.offset[1] = NAN;
+    if (bad == 3) invalid.matrix[0] = FLT_MAX;
+    CHECK(!Sim3DDepthPass_AppendLinearMesh(mesh, &invalid));
+  }
+  CHECK(Sim3DDepthPass_AppendLinearMesh(mesh, &t));
+  Sim3DDepthPass_DestroyMesh(mesh);
+  CHECK(!ArRenderTexture_IsValid(Sim3DDepthPass_Submit(device, ArRenderTexture_Invalid())));
+  Sim3DDepthPass_DestroyMesh(reference_mesh);
   Sim3DDepthPass_Reset(device);
 }
 
@@ -2173,6 +2311,87 @@ static void TestSurfaceShadowMapping(ArRenderDevice *device, SDL_Renderer *rende
   Sim3DDepthPass_DestroyMesh(mesh); Sim3DDepthPass_Reset(device);
 }
 
+static bool ShadowBatchingExpected(void) {
+  const char *setting = getenv("AR_SIM3D_SHADOW_BATCH");
+  return !setting || strcmp(setting, "0") != 0;
+}
+
+static void TestSurfaceShadowBatches(ArRenderDevice *device, SDL_Renderer *renderer) {
+  const bool batching = ShadowBatchingExpected();
+  Sim3DDepthPass_Reset(device);
+  Sim3DDepthMesh *mesh = NULL;
+  for (unsigned cycle = 0; cycle < 3; ++cycle) {
+    const int width = cycle ? 64 : 32;
+    if (cycle == 2) Sim3DDepthPass_Reset(device);
+    uint32_t atlas[66*51], white[8];
+    for (int y = 0; y < 51; ++y) for (int x = 0; x < 66; ++x)
+      atlas[y*66+x] = AtlasTestPixel(x%33, y, 137);
+    for (unsigned p = 0; p < 8; ++p) white[p] = 0xffffffffu;
+    ArRenderRectI full = {0,0,66,51};
+    CHECK(Sim3DDepthPass_UploadAtlasRegions(device, kSim3DDepthPass_Cloud, atlas, 66,51,66*4,&full,1));
+    full = (ArRenderRectI){0,0,4,2};
+    CHECK(Sim3DDepthPass_UploadAtlasRegions(device, kSim3DDepthPass_Ground, white, 4,2,16,&full,1));
+    for (unsigned test = 0; test < 13; ++test) {
+      Sim3DDepthSurfaceVertex source[8]; SurfaceVertices(source); SurfaceVertices(source+4);
+      const unsigned quads = test == 12 ? 2 : 1; /* Overlapping faces retain black transmittance. */
+      if (test == 11) {
+        source[0].normal[0] = source[0].normal[2] = 0; source[0].normal[1] = 1;
+      }
+      Sim3DDepthSurfaceTransform t = SurfaceTransform();
+      t.ambient = 1; t.diffuse = 0; t.radial.matrix[3] = .4f; t.radial.matrix[10] = .25f;
+      const float phase = test * .41f;
+      if (cycle) memcpy(t.shadow_basis, (float[3][3]){{0,0,1},{0,1,0},{-1,0,0}},sizeof(t.shadow_basis));
+      if (test == 8) t.radial.matrix[12] = .9f;
+      if (test == 9) { t.radial.matrix[2] = 1; t.radial.matrix[14] = -.9f; }
+      if (test == 10) { t.radial.matrix[3] = 2; t.radial.matrix[15] = .125f; t.radial.matrix[10] = 0; }
+      const unsigned count = test < 2 ? test+1 : test == 3 ? 9 : 3;
+      Sim3DDepthSphericalSample shadows[9] = {0};
+      for (unsigned i = 0; i < count; ++i) shadows[i] = (Sim3DDepthSphericalSample){
+        .rotation = {cosf(phase),sinf(phase),cosf(phase*.5f),sinf(phase*.5f)},
+        .offset = {phase*.067f-.31f+i*.02f, (test%5)*.13f-.2f-i*.03f},
+        .texture_size = {66,51}, .atlas = {0,(int)(i/3)*17,33,17},
+        .color = {0,0,0,i%2 ? .33f : .19f},
+      };
+      if (test == 4) shadows[1].color.r = .2f;
+      if (test == 5) memcpy(shadows[1].rotation,(float[4]){1,0,1,0},sizeof(shadows[1].rotation));
+      if (test == 6) shadows[1].atlas.y = 17;
+      if (test == 7) for (unsigned i=0;i<count;++i) shadows[i].color.a = .4f/255; /* All taps below cutoff. */
+      SDL_Surface *expected = NULL;
+      for (unsigned grouped = 0; grouped < 2; ++grouped) {
+        CHECK(Sim3DDepthPass_Begin(device,width,32,kArRenderFilter_Nearest));
+        if (!mesh) mesh = Sim3DDepthPass_CreateSurfaceMesh();
+        CHECK(mesh); if (!mesh) return;
+        if (!grouped) CHECK(Sim3DDepthPass_UpdateSurfaceMesh(mesh,source,quads));
+        CHECK(AppendRect(kSim3DDepthPass_DepthOccluder,0,0,width/3,32,.01f,(ArRenderColorF){1,1,1,1}));
+        const uint64_t bytes = geometry_upload_bytes, draws = draw_calls;
+        if (grouped) {
+          Sim3DDepthSurfaceTransform copy = t;
+          Sim3DDepthSphericalSample taps[9]; memcpy(taps,shadows,sizeof(shadows));
+          CHECK(Sim3DDepthPass_AppendSurfaceMesh(mesh,&copy,taps,count));
+          memset(&copy,0,sizeof(copy)); memset(taps,0,sizeof(taps));
+          CHECK(!Sim3DDepthPass_UpdateSurfaceMesh(mesh,source,quads));
+        } else {
+          /* Each intervening opaque queue entry prevents coalescing. Opaque
+           * white is idempotent, so this independently exercises old GPU draws. */
+          for (unsigned i=0;i<count;++i) CHECK(Sim3DDepthPass_AppendSurfaceMesh(mesh,&t,&shadows[i],1));
+        }
+        SDL_Surface *actual = ReadPass(device,renderer);
+        if (!grouped) expected = actual;
+        else {
+          const unsigned expected_shadows = !batching || (test >= 4 && test <= 6) ? count : (count+2)/3;
+          CHECK(draw_calls-draws == 2+expected_shadows);
+          CHECK(geometry_upload_bytes-bytes == 4*40); /* Only ordinary occluder; source already retained. */
+          CheckSurfacePixels(actual,expected,test == 7 ? 0 : quads == 2 ? 3 : 2, 700+cycle*13+test);
+          SDL_DestroySurface(actual);
+        }
+      }
+      SDL_DestroySurface(expected);
+    }
+  }
+  Sim3DDepthPass_DestroyMesh(mesh); Sim3DDepthPass_Reset(device);
+  printf("surface shadow batching: 39 reference comparisons, enabled=%d\n",batching);
+}
+
 static void TestSurfaceOverlays(ArRenderDevice *device, SDL_Renderer *renderer) {
   const uint32_t white = 0xffffffffu, green = 0xff40c020u;
   const ArRenderRectI full = {0,0,1,1};
@@ -2627,7 +2846,10 @@ static void TestSurfaceContracts(ArRenderDevice *device, SDL_Renderer *renderer)
   CHECK(!AppendRect(kSim3DDepthPass_CloudShadow, 0,0,32,16,.5f, (ArRenderColorF){0,0,0,1}));
   draws = draw_calls;
   pixels = ReadPass(device, renderer); CHECK(pixels);
-  CHECK(draw_calls - draws == 128); SDL_DestroySurface(pixels);
+  CHECK(draw_calls - draws == (ShadowBatchingExpected() ? 86 : 128));
+  /* 64 opaque entries, 63 taps in triples, then one isolated tap. Logical
+   * admission above must still stop at the original 64+64 budgets. */
+  SDL_DestroySurface(pixels);
   CHECK(Sim3DDepthPass_Begin(device, 32,16,kArRenderFilter_Nearest));
   CHECK(!Sim3DDepthPass_AppendSurfaceLayers(mesh,&t,shadows,63,overlays,2));
   CHECK(Sim3DDepthPass_UpdateSurfaceMesh(mesh,source,1));
@@ -2688,6 +2910,35 @@ static void TestSurfaceContracts(ArRenderDevice *device, SDL_Renderer *renderer)
   Sim3DDepthPass_Reset(device);
 }
 
+static void TestPreparedLinearAvailability(ArRenderDevice *device) {
+  Sim3DDepthPass_Reset(device);
+  CHECK(!Sim3DDepthPass_LinearMeshesAvailable(NULL));
+  CHECK(!Sim3DDepthPass_LinearMeshesAvailable(device));
+  Sim3DDepthReference_RejectLinearPreparation(true);
+  Sim3DPreparedPipelines prepared = Sim3DDepthPass_PreparePipelines(device);
+  CHECK(prepared.depth && !prepared.linear_models && prepared.radial &&
+      prepared.surfaces && prepared.spherical_body);
+  Sim3DDepthReference_RejectLinearPreparation(false);
+  for (unsigned frame = 0; frame < 8; ++frame) {
+    CHECK(!Sim3DDepthPass_LinearMeshesAvailable(device));
+    CHECK(!Sim3DDepthPass_PreparePipelines(device).linear_models); /* Failure stays latched. */
+    CHECK(Sim3DDepthPass_Begin(device, 32, 16, kArRenderFilter_Nearest));
+    CHECK(!Sim3DDepthPass_CreateLinearMesh()); /* No hidden retry after fault is removed. */
+    CHECK(AppendRect(kSim3DDepthPass_Solid,0,0,32,16,.5f,(ArRenderColorF){1,1,1,1}));
+    CHECK(ArRenderTexture_IsValid(Sim3DDepthPass_Submit(device, ArRenderTexture_Invalid())));
+  }
+  Sim3DDepthPass_Reset(device);
+  CHECK(!Sim3DDepthPass_LinearMeshesAvailable(device));
+  CHECK(Sim3DDepthPass_PreparePipelines(device).linear_models);
+  CHECK(Sim3DDepthPass_LinearMeshesAvailable(device));
+  ArRenderDevice unbound = {0};
+  CHECK(!Sim3DDepthPass_LinearMeshesAvailable(&unbound));
+  CHECK(Sim3DDepthPass_LinearMeshesAvailable(device)); /* Wrong-device query cannot reset it. */
+  Sim3DDepthPass_Reset(device);
+  CHECK(!Sim3DDepthPass_LinearMeshesAvailable(device));
+  puts("prepared linear meshes: latched failure, ordinary draws, reset recovery PASS");
+}
+
 int main(void) {
   if (!SDL_Init(SDL_INIT_VIDEO)) {
     fprintf(stderr, "SIM3D GPU test skipped: SDL video unavailable: %s\n",
@@ -2721,9 +2972,10 @@ int main(void) {
   ArSdlRenderBackend render_backend = {0};
   CHECK(ArSdlRenderBackend_Bind(
       &render_device, &render_backend, renderer));
+  TestPreparedLinearAvailability(&render_device);
   CHECK(Sim3DDepthPass_Require(&render_device));
   const Sim3DPreparedPipelines prepared = Sim3DDepthPass_PreparePipelines(&render_device);
-  CHECK(prepared.depth && prepared.models && prepared.radial &&
+  CHECK(prepared.depth && prepared.linear_models && prepared.radial &&
       prepared.surfaces && prepared.spherical_body);
   CHECK(Sim3DDepthPass_Begin(
       &render_device, kTestWidth, kTestHeight, kArRenderFilter_Nearest));
@@ -2788,10 +3040,12 @@ int main(void) {
   TestSphericalBodies(&render_device, renderer);
   TestModelMesh(&render_device, renderer);
   TestHardwareClippedModels(&render_device, renderer);
+  TestLinearModels(&render_device, renderer);
   TestRadialModels(&render_device, renderer);
   TestSurfaceGeometry(&render_device, renderer);
   TestSurfaceMaterials(&render_device, renderer);
   TestSurfaceShadowMapping(&render_device, renderer);
+  TestSurfaceShadowBatches(&render_device, renderer);
   TestSurfaceOverlays(&render_device, renderer);
   TestSurfaceSelection(&render_device, renderer);
   TestSurfaceBatches(&render_device, renderer);

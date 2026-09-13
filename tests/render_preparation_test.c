@@ -13,7 +13,9 @@ static bool available = true, fail_create, fail_clear, fail_end, fatal;
 static int creates, destroys, ends, shader_calls;
 static ArRenderTargetBeginResult begin_result = kArRenderTargetBegin_Ready;
 static ArRenderBlendMode rejected_blend = kArRenderBlendMode_Opaque;
-static Sim3DPreparedPipelines pipelines = {true, true, true, true, true};
+static Sim3DPreparedPipelines pipelines = {
+  .depth = true, .linear_models = true, .radial = true, .surfaces = true, .spherical_body = true,
+};
 bool SessionFatal_Requested(void) { return fatal; }
 bool ArRenderDevice_IsReady(const ArRenderDevice *device) { return device != NULL; }
 const ArRenderCapabilities *ArRenderDevice_Capabilities(const ArRenderDevice *device) {
@@ -71,26 +73,32 @@ int main(void) {
   assert(RenderPreparation_Prepare(&device, &features));
   assert(features == kRenderFeature_All && shader_calls == 7 && ends == 1);
   assert(creates == destroys);
+  /* Linear meshes are an acceleration, not a distinct visual setting. A
+   * prepared rejection retains ordinary SIM geometry and unrelated features. */
+  pipelines.linear_models = false;
+  assert(RenderPreparation_Prepare(&device, &features));
+  assert(features == kRenderFeature_All && shader_calls == 14 && ends == 2 && creates == destroys);
+  pipelines.linear_models = true;
   available = false;
   pipelines.radial = false;
   rejected_blend = kArRenderBlendMode_DestinationAlphaMask;
   assert(RenderPreparation_Prepare(&device, &features));
   assert(features == (kRenderFeature_Depth | kRenderFeature_Effects | kRenderFeature_SimSoftShadows));
-  assert(shader_calls == 14 && creates == destroys);
+  assert(shader_calls == 21 && creates == destroys);
   fail_clear = true;
   assert(!RenderPreparation_Prepare(&device, &features));
-  assert(ends == 3 && creates == destroys); /* clear failure still restores */
+  assert(ends == 4 && creates == destroys); /* clear failure still restores */
   fail_clear = false;
   fail_end = true;
   assert(!RenderPreparation_Prepare(&device, &features));
-  assert(ends == 4 && creates == destroys);
+  assert(ends == 5 && creates == destroys);
   fail_end = false;
   begin_result = kArRenderTargetBegin_StateLost;
   assert(!RenderPreparation_Prepare(&device, &features));
-  assert(ends == 4 && creates == destroys); /* never End an unentered target */
+  assert(ends == 5 && creates == destroys); /* never End an unentered target */
   begin_result = kArRenderTargetBegin_Omitted;
   assert(!RenderPreparation_Prepare(&device, &features));
-  assert(ends == 4 && creates == destroys);
+  assert(ends == 5 && creates == destroys);
   fail_create = true;
   assert(!RenderPreparation_Prepare(&device, &features));
   assert(creates == destroys);

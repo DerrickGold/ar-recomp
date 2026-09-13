@@ -23,6 +23,8 @@ static float Noise(float x, float y, float z) {
 }
 
 typedef struct Billow { float x, y, rx, ry; } Billow;
+_Static_assert(kSimSkyCloudWidth - 1 <= UINT8_MAX && kSimSkyCloudHeight - 1 <= UINT8_MAX,
+    "slice-local support bounds must fit their portable coordinates");
 static const Billow kShapes[kSimSkyCloudBanks][6] = {
   {{.15f,.65f,.13f,.16f}, {.28f,.53f,.18f,.28f}, {.44f,.42f,.20f,.34f},
    {.61f,.50f,.18f,.27f}, {.76f,.60f,.15f,.19f}, {.87f,.68f,.10f,.11f}},
@@ -57,6 +59,28 @@ static size_t Texel(int bank, int slice, int x, int y, int pitch) {
   return (size_t)(bank * kSimSkyCloudRows * kSimSkyCloudHeight +
       slice / kSimSkyCloudColumns * kSimSkyCloudHeight + y) * pitch +
       slice % kSimSkyCloudColumns * kSimSkyCloudWidth + x;
+}
+
+bool SimWorldNavigationSkyClouds_Bounds(const uint32_t *pixels, int pitch,
+    int bank, int slice, SimSkyCloudBounds *bounds) {
+  if (!pixels || !bounds || pitch < kSimSkyCloudAtlasWidth ||
+      (size_t)pitch > SIZE_MAX / sizeof(*pixels) / kSimSkyCloudAtlasHeight ||
+      bank < 0 || bank >= kSimSkyCloudBanks || slice < 0 || slice > kSimSkyCloudSlices)
+    return false;
+  int x0 = kSimSkyCloudWidth, y0 = kSimSkyCloudHeight, x1 = -1, y1 = -1;
+  for (int y = 0; y < kSimSkyCloudHeight; ++y)
+    for (int x = 0; x < kSimSkyCloudWidth; ++x) {
+      if (!(pixels[Texel(bank, slice, x, y, pitch)] >> 24)) continue;
+      if (x < x0) x0 = x;
+      if (x > x1) x1 = x;
+      if (y < y0) y0 = y;
+      if (y > y1) y1 = y;
+    }
+  *bounds = x1 < 0 ? (SimSkyCloudBounds){0} : (SimSkyCloudBounds){
+    x0 > 0 ? x0 - 1 : 0, y0 > 0 ? y0 - 1 : 0,
+    x1 + 1 < kSimSkyCloudWidth ? x1 + 1 : kSimSkyCloudWidth - 1,
+    y1 + 1 < kSimSkyCloudHeight ? y1 + 1 : kSimSkyCloudHeight - 1};
+  return true;
 }
 
 bool SimWorldNavigationSkyClouds_Bake(uint32_t *out, int pitch,

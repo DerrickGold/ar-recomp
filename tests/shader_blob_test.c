@@ -46,6 +46,9 @@ typedef struct {
 #include "shaders/sim3d_depth_vert.h"
 #include "shaders/sim3d_spherical_vert.h"
 #include "shaders/sim3d_model_vert.h"
+#include "shaders/sim3d_linear_vert.h"
+#include "shaders/sim3d_shadow_batch_vert.h"
+#include "shaders/sim3d_shadow_batch_frag.h"
 #include "shaders/sim_shadow_blur_frag.h"
 #include "shaders/sim_cloud_frag.h"
 
@@ -67,6 +70,16 @@ static const struct {
   Uint32 samplers;
   Uint32 uniforms;
 } kShaders[] = {
+  { "sim3d_shadow_batch_vertex", { kSim3dShadowBatchVertMSL, kSim3dShadowBatchVertMSLSize,
+      kSim3dShadowBatchVertSPV, kSim3dShadowBatchVertSPVSize,
+      kSim3dShadowBatchVertDXIL, kSim3dShadowBatchVertDXILSize }, SDL_GPU_SHADERSTAGE_VERTEX, 0, 1 },
+  { "sim3d_shadow_batch_fragment", { kSim3dShadowBatchFragMSL, kSim3dShadowBatchFragMSLSize,
+      kSim3dShadowBatchFragSPV, kSim3dShadowBatchFragSPVSize,
+      kSim3dShadowBatchFragDXIL, kSim3dShadowBatchFragDXILSize }, SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 0 },
+  { "sim3d_linear_vertex", { kSim3dLinearVertMSL, kSim3dLinearVertMSLSize,
+                            kSim3dLinearVertSPV, kSim3dLinearVertSPVSize,
+                            kSim3dLinearVertDXIL, kSim3dLinearVertDXILSize },
+                            SDL_GPU_SHADERSTAGE_VERTEX, 0, 1 },
   { "blur",        { kBlurFragMSL, kBlurFragMSLSize,
                      kBlurFragSPV, kBlurFragSPVSize,
                      kBlurFragDXIL, kBlurFragDXILSize },

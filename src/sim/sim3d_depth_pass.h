@@ -47,6 +47,8 @@ typedef struct Sim3DDepthVertex {
 
 typedef struct Sim3DDepthMesh Sim3DDepthMesh;
 typedef struct Sim3DDepthPosition { float x, y, depth; } Sim3DDepthPosition;
+/* Bounded per-source publication contract, shared by all retained mesh kinds. */
+enum { kSim3DDepthMaximumSourceQuads = 64 * 1024 };
 
 /* Optional retained screen-space quad geometry. The caller owns the opaque
  * mesh, all calls belong to the presentation thread, and Reset invalidates
@@ -109,34 +111,35 @@ bool Sim3DDepthPass_CaptureGeometryLayers(Sim3DDepthMesh *mesh,
 bool Sim3DDepthPass_AppendGeometryRanges(Sim3DDepthMesh *mesh,
     const Sim3DDepthGeometryRange *ranges, size_t range_count);
 
-/* Experimental, untextured model-space solids. No shipping view opts in yet.
- * Unlike screen-space meshes, these survive viewport/camera changes. Geometry
- * and colors are copied on Update; Append copies a column-major transform
- * (-W..W clip Z, as Scene3D math uses). Solid depth/blend rules are unchanged.
- * Only this mesh kind accepts these calls. Reset/destroy/queued-update rules
- * apply. Appends interleave with ordinary/retained Solid ranges in call order.
+/* Camera-independent linearly displaced solids. Source position is translated
+ * by offset, then displacement * axes[axis] before the column-major matrix.
+ * Axes are caller-owned geometric vectors, not model/game identities. Optional
+ * depth_offset adds source Z for a second depth probe: use the nearer valid
+ * depth without moving XY. This permits rigid geometry's conservative depth
+ * envelope. Zero preserves ordinary depth. Colors remain screen-linear.
  *
- * The adapter conservatively tests the retained AABB against all six planes.
- * A clipped/behind-eye/nonfinite transform is rejected without queuing work:
- * use ordinary geometry for those cases. This deliberately preserves affine
- * attributes until clipped-edge equivalence is established. No pixel-clean
- * snapping or per-model facing policy is inferred by the platform layer. */
-typedef struct Sim3DDepthModelVertex {
-  float position[3];
+ * Pixel-center snapping is explicit and uses the active depth target size.
+ * Hardware clips partially visible/behind-eye geometry; the caller owns cheap
+ * whole-object culling, LOD, shading, and source revisions. Update/Append copy
+ * data, obey existing opaque budgets and reset/queued-update rules, and reject
+ * invalid/overflowing inputs before any work is queued. No viewport-dependent
+ * source data or native handles cross this seam. */
+enum { kSim3DDepthLinearAxisCount = 16 };
+typedef struct Sim3DDepthLinearVertex {
+  float position[3], displacement;
   ArRenderColorF color;
-} Sim3DDepthModelVertex;
-Sim3DDepthMesh *Sim3DDepthPass_CreateModelMesh(void);
-/* Separate experimental policy: retain homogeneous W and let the GPU clip
- * partially visible or behind-eye primitives before perspective division.
- * Uses screen-linear color interpolation; clipped-edge shading/roundoff need
- * not reproduce the legacy CPU clipper bit-for-bit. Same Update/Append and
- * bounded opaque ownership/order rules. No shipping view opts in yet. Fully
- * invisible objects should still be coarsely culled by the scene owner. */
-Sim3DDepthMesh *Sim3DDepthPass_CreateHardwareClippedModelMesh(void);
-bool Sim3DDepthPass_UpdateModelMesh(Sim3DDepthMesh *mesh,
-    const Sim3DDepthModelVertex *vertices, size_t quad_count);
-bool Sim3DDepthPass_AppendModelMesh(Sim3DDepthMesh *mesh,
-    const float matrix[16]);
+  float axis, depth_offset;
+} Sim3DDepthLinearVertex;
+typedef struct Sim3DDepthLinearTransform {
+  float matrix[16], offset[3];
+  float axes[kSim3DDepthLinearAxisCount][3];
+  bool pixel_centers;
+} Sim3DDepthLinearTransform;
+Sim3DDepthMesh *Sim3DDepthPass_CreateLinearMesh(void);
+bool Sim3DDepthPass_UpdateLinearMesh(Sim3DDepthMesh *mesh,
+    const Sim3DDepthLinearVertex *vertices, size_t quad_count);
+bool Sim3DDepthPass_AppendLinearMesh(Sim3DDepthMesh *mesh,
+    const Sim3DDepthLinearTransform *transform);
 
 /* Optional camera-independent radial solids. The scene supplies chart-space
  * unit normals, an anchor elevation in source units, and an additional rise
@@ -263,6 +266,11 @@ bool Sim3DDepthPass_AppendSphericalBodies(Sim3DDepthMesh *mesh,
  * call ordering; shadows use the existing separate effect budget/no-depth-write
  * policy and may coexist with retained spherical samples, not ordinary shadow
  * geometry. Shadows ignore source color/lighting, using each sample's color.
+ * The backend may coalesce consecutive black shadow samples sharing placement,
+ * rotation and atlas. It preserves per-sample alpha cutoff and multiplicative
+ * transmittance; fewer intermediate UNORM blends can differ by small rounding
+ * amounts. Logical sample budgets and atomic queue/rejection semantics remain
+ * unchanged. Colored samples retain their original GPU draws.
  * The handle consumes ONE existing opaque slot. Existing vertex budgets,
  * reset/queued-update/destroy rules apply; no source selection is inferred.
  * Uses the existing Ground/Cloud atlas publication and sampler policy.
@@ -348,11 +356,16 @@ bool Sim3DDepthPass_AppendSurfaceBatches(Sim3DDepthMesh *mesh,
 bool Sim3DDepthPass_Require(ArRenderDevice *device);
 
 typedef struct Sim3DPreparedPipelines {
-  bool depth, models, radial, surfaces, spherical_body;
+  bool depth, linear_models, radial, surfaces, spherical_body;
 } Sim3DPreparedPipelines;
-/* Prepare every authored pipeline variant before the first scene. Call again
+/* Prepare shipping pipeline variants before the first scene. Call again
  * after a device reset; ordinary mesh creation only visits cached outcomes. */
 Sim3DPreparedPipelines Sim3DDepthPass_PreparePipelines(ArRenderDevice *device);
+/* Read-only, owner-thread capability for this device's prepared linear meshes.
+ * False before preparation, after reset, for another device, or after a failed
+ * preparation. Never compiles, allocates, or retries. Scene owners can select
+ * ordinary geometry before constructing an unavailable retained source. */
+bool Sim3DDepthPass_LinearMeshesAvailable(ArRenderDevice *device);
 
 /* A viewport-sized, transparent color target paired with a real D32 depth
  * attachment. Geometry is collected by material so texture changes cost a

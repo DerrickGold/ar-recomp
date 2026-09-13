@@ -209,6 +209,11 @@ foreach(_file IN LISTS _game_source_files)
         continue()
     endif()
     file(READ "${_file}" _contents)
+    if(_contents MATCHES "sim3d_depth_reference[.]h|Sim3DDepthReference_|Sim3DDepthPass_(CreateModelMesh|CreateHardwareClippedModelMesh|UpdateModelMesh|AppendModelMesh)")
+        message(FATAL_ERROR
+            "Shipping source depends on depth test references: ${_file}\n"
+            "Reference models belong only to focused tests/benchmarks and their test-enabled adapter.")
+    endif()
     if(_contents MATCHES "platform/sdl/render_sdl_internal.h" OR
        _contents MATCHES "ArSdlRenderBackend_(Borrow|Unwrap)Texture" OR
        _contents MATCHES "ArSdlRenderBackend_Renderer")

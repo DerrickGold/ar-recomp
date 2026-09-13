@@ -11,7 +11,18 @@
 static struct {
   bool ready, attempted, lighting;
   float light[3];
+  SimSkyCloudBounds bounds[kSimSkyCloudBanks][kSimSkyCloudSlices + 1];
 } s_clouds;
+
+static bool CloudBoundsEnabled(void) {
+  static int enabled = -1;
+  if (enabled < 0) {
+    const char *value = getenv("AR_SIM3D_SKY_CLOUD_BOUNDS");
+    /* Explicit full-rectangle reference remains available for diagnostics. */
+    enabled = !value || strcmp(value, "0") != 0;
+  }
+  return enabled != 0;
+}
 
 float PresentWorldNavSky_Horizon(ArRenderRectI viewport,
                              const WorldNavigationProjection *projection) {
@@ -89,9 +100,13 @@ static bool EnsureSkyPalaceCloudAtlas(ArRenderDevice *device, const float light[
       sizeof(*pixels));
   if (!pixels) return false;
   const ArRenderRectI region = {0, 0, kSimSkyCloudAtlasWidth, kSimSkyCloudAtlasHeight};
-  const bool ready = SimWorldNavigationSkyClouds_Bake(
-      pixels, kSimSkyCloudAtlasWidth, light, lighting) &&
-      Sim3DDepthPass_UploadAtlasRegions(device, kSim3DDepthPass_VolumeCloud,
+  bool ready = SimWorldNavigationSkyClouds_Bake(
+      pixels, kSimSkyCloudAtlasWidth, light, lighting);
+  for (int bank = 0; ready && bank < kSimSkyCloudBanks; ++bank)
+    for (int slice = 0; ready && slice <= kSimSkyCloudSlices; ++slice)
+      ready = SimWorldNavigationSkyClouds_Bounds(pixels, kSimSkyCloudAtlasWidth,
+          bank, slice, &s_clouds.bounds[bank][slice]);
+  ready = ready && Sim3DDepthPass_UploadAtlasRegions(device, kSim3DDepthPass_VolumeCloud,
           pixels, region.w, region.h, region.w * (int)sizeof(*pixels), &region, 1);
   free(pixels);
   return s_clouds.ready = ready;
@@ -178,12 +193,22 @@ bool PresentWorldNavSky_DrawClouds(ArRenderDevice *device, const FrameSlot *slot
   Sim3DPerformance_AddPath(kSim3DPath_CpuProject);
   Sim3DDepthVertex vertices[kBanks * kSlices * 4];
   Scene3DClipPoint clips[kBanks * kSlices * 4];
+  size_t used = 0;
+  const bool trim = CloudBoundsEnabled();
   for (int i = 0; i < count; i++) {
     const int b = ordered[i].bank, tile = ordered[i].tile;
+    /* Crop positions AND UVs in the same original slice coordinates. Keep
+     * its centre, depth, density samples and global ordering unchanged. */
+    const SimSkyCloudBounds bounds = trim ? s_clouds.bounds[banks[b].bank][tile]
+        : (SimSkyCloudBounds){0, 0, kSimSkyCloudWidth - 1, kSimSkyCloudHeight - 1};
+    if (bounds.x0 == bounds.x1 || bounds.y0 == bounds.y1) continue;
     const float x = centre_x[b];
     const float y = horizon + banks[b].y;
     for (int p = 0; p < 4; p++) {
-      const int dx = p == 1 || p == 2, dy = p >= 2;
+      const float texel_x = p == 1 || p == 2 ? bounds.x1 : bounds.x0;
+      const float texel_y = p >= 2 ? bounds.y1 : bounds.y0;
+      const float dx = texel_x / (kSimSkyCloudWidth - 1);
+      const float dy = texel_y / (kSimSkyCloudHeight - 1);
       const float lateral = ((2 * x - 1) + (dx - .5f) * banks[b].width * 2) *
           banks[b].depth / scale_x;
       const float vertical = ((2 * y - 1) + (dy - .5f) * banks[b].height * 2) *
@@ -193,21 +218,22 @@ bool PresentWorldNavSky_DrawClouds(ArRenderDevice *device, const FrameSlot *slot
         world[c] = projection->camera_world[c] + forward[c] * ordered[i].depth +
             right[c] * lateral + down[c] * vertical;
       Scene3DPoint screen;
-      Sim3DDepthVertex *v = &vertices[i * 4 + p];
+      Sim3DDepthVertex *v = &vertices[used * 4 + p];
       if (!WorldNavigationProjectPoint(projection, viewport, world, &screen,
-              &v->depth, &clips[i * 4 + p])) return false;
+              &v->depth, &clips[used * 4 + p])) return false;
       v->x = screen.x; v->y = screen.y;
       v->color = (ArRenderColorF){1, 1, 1, fminf(1, opacity * 2) * banks[b].opacity};
       v->uv = (ArRenderPointF){
         (tile % kSimSkyCloudColumns * kSimSkyCloudWidth + .5f +
-            dx * (kSimSkyCloudWidth - 1)) / kSimSkyCloudAtlasWidth,
+            texel_x) / kSimSkyCloudAtlasWidth,
         (banks[b].bank * kSimSkyCloudRows * kSimSkyCloudHeight +
             tile / kSimSkyCloudColumns * kSimSkyCloudHeight + .5f +
-            dy * (kSimSkyCloudHeight - 1)) / kSimSkyCloudAtlasHeight};
+            texel_y) / kSimSkyCloudAtlasHeight};
     }
+    ++used;
   }
   return WorldNavigationAppendProjectedQuads(kSim3DDepthPass_VolumeCloud,
-      vertices, clips, count, viewport);
+      vertices, clips, used, viewport);
 }
 
 
