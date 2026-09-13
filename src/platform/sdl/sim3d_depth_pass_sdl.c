@@ -15,12 +15,18 @@
 #include "shaders/sim3d_depth_frag.h"
 #include "shaders/sim3d_depth_vert.h"
 #include "shaders/sim3d_spherical_vert.h"
+#if defined(AR_SIM3D_DEPTH_TEST_REFERENCE)
+#include "sim3d_depth_reference.h"
 #include "shaders/sim3d_model_vert.h"
 #include "shaders/sim3d_model_clipped_vert.h"
+#endif
 #include "shaders/sim3d_model_clipped_frag.h"
+#include "shaders/sim3d_linear_vert.h"
 #include "shaders/sim3d_radial_vert.h"
 #include "shaders/sim3d_surface_vert.h"
 #include "shaders/sim3d_surface_frag.h"
+#include "shaders/sim3d_shadow_batch_vert.h"
+#include "shaders/sim3d_shadow_batch_frag.h"
 #include "shaders/sim3d_spherical_body_vert.h"
 #include "shaders/sim3d_spherical_body_frag.h"
 
@@ -36,7 +42,7 @@ enum {
    * otherwise static geometry through CPU staging every frame. Storage is
    * allocated only for published meshes; effect/sample budgets stay separate. */
   kMaximumGeometryMeshes = 8,
-  kMaximumRetainedVertices = 256 * 1024,
+  kMaximumRetainedVertices = kSim3DDepthMaximumSourceQuads * 4,
   /* Optional opaque caching must not consume the existing weather budget.
    * Keep both domains bounded without making callers budget backend slots. */
   kMaximumEffectSamples = 64,
@@ -44,6 +50,7 @@ enum {
   kMaximumMeshSamples = kMaximumEffectSamples + kMaximumGeometrySamples,
   kMaximumSampleVertices = 2 * 1024 * 1024,
   kMaximumSurfaceRanges = 64,
+  kSurfaceShadowBatchTaps = 3, /* Matched by the 352-byte shader uniform assertion. */
 };
 
 typedef struct Sim3DGpuVertex {
@@ -65,13 +72,40 @@ typedef struct Sim3DSurfaceGpuQuad {
 } Sim3DSurfaceGpuQuad;
 
 typedef enum Sim3DMeshKind {
-  kMeshScreen, kMeshSpherical, kMeshModel, kMeshGeometry, kMeshModelClipped, kMeshRadial, kMeshSurface,
-  kMeshSphericalBody,
+  kMeshScreen, kMeshSpherical, kMeshGeometry, kMeshRadial, kMeshSurface,
+  kMeshSphericalBody, kMeshLinear,
+#if defined(AR_SIM3D_DEPTH_TEST_REFERENCE)
+  kMeshModel, kMeshModelClipped,
+#endif
 } Sim3DMeshKind;
 static bool IsModelMesh(Sim3DMeshKind kind) {
+#if defined(AR_SIM3D_DEPTH_TEST_REFERENCE)
   return kind == kMeshModel || kind == kMeshModelClipped;
+#else
+  (void)kind;
+  return false;
+#endif
 }
+#if defined(AR_SIM3D_DEPTH_TEST_REFERENCE)
 typedef struct Sim3DModelUniform { float matrix[16], viewport[4]; } Sim3DModelUniform;
+#endif
+typedef enum Sim3DModelPipeline {
+  kModelPipeline_Radial,
+  kModelPipeline_Linear,
+#if defined(AR_SIM3D_DEPTH_TEST_REFERENCE)
+  kModelPipeline_ReferenceAffine,
+  kModelPipeline_ReferenceClipped,
+#endif
+  kModelPipelineCount,
+} Sim3DModelPipeline;
+typedef struct Sim3DLinearUniform {
+  float matrix[16], offset[4], axes[kSim3DDepthLinearAxisCount][4], raster[4];
+} Sim3DLinearUniform;
+_Static_assert(sizeof(Sim3DLinearUniform) == 352 &&
+    offsetof(Sim3DLinearUniform, raster) == 336, "std140 linear displacement view");
+_Static_assert(sizeof(Sim3DDepthLinearVertex) == 40 &&
+    offsetof(Sim3DDepthLinearVertex, color) == 16 &&
+    offsetof(Sim3DDepthLinearVertex, axis) == 32, "packed linear displacement vertex");
 typedef struct Sim3DRadialUniform { float matrix[16], basis[3][4], radial[4]; } Sim3DRadialUniform;
 typedef struct Sim3DSurfaceUniform {
   Sim3DRadialUniform view;
@@ -80,6 +114,12 @@ typedef struct Sim3DSurfaceUniform {
   float mask_rect[4], mask[4];
   float shadow_basis[3][4];
 } Sim3DSurfaceUniform;
+typedef struct Sim3DSurfaceShadowBatchUniform {
+  Sim3DSurfaceUniform surface;
+  float taps[kSurfaceShadowBatchTaps][4];
+} Sim3DSurfaceShadowBatchUniform;
+_Static_assert(sizeof(Sim3DSurfaceShadowBatchUniform) == 352 &&
+    offsetof(Sim3DSurfaceShadowBatchUniform, taps) == 304, "std140 three-tap surface shadows");
 typedef struct Sim3DBodyView {
   float matrix[16], basis[3][4], centre_radius[4], texture_basis[3][4], rotation[4];
 } Sim3DBodyView;
@@ -101,9 +141,11 @@ _Static_assert(sizeof(Sim3DDepthRadialVertex) == 40 &&
     offsetof(Sim3DDepthRadialVertex, elevation) == 12 &&
     offsetof(Sim3DDepthRadialVertex, color) == 20 &&
     offsetof(Sim3DDepthRadialVertex, variant) == 36, "packed radial vertex");
+#if defined(AR_SIM3D_DEPTH_TEST_REFERENCE)
 _Static_assert(sizeof(Sim3DModelUniform) == 80, "std140 model transform");
 _Static_assert(sizeof(Sim3DDepthModelVertex) == 7 * sizeof(float) &&
     offsetof(Sim3DDepthModelVertex, color) == 3 * sizeof(float), "packed model vertex");
+#endif
 
 _Static_assert(sizeof(Sim3DSphericalGpuQuad) == 40 * sizeof(float), "Ten packed float4 attributes");
 _Static_assert(sizeof(Sim3DSphericalUniform) == 64, "Four std140 float4 uniforms");
@@ -141,8 +183,11 @@ struct Sim3DDepthMesh {
   int width, height;
   bool dirty, queued;
   Sim3DMeshKind kind;
+#if defined(AR_SIM3D_DEPTH_TEST_REFERENCE)
   float bounds_min[3], bounds_max[3];
+#endif
   float radial_extent[2];
+  float linear_extent[5]; /* absolute position XYZ, displacement, depth offset */
   float surface_uv_extent;
   SDL_GPUBuffer *selection;
   SDL_GPUTransferBuffer *selection_transfer;
@@ -161,7 +206,10 @@ typedef struct Sim3DMeshSample {
   /* Exactly one transform payload is used by a sample's mesh kind. */
   union {
     Sim3DSphericalUniform spherical;
+#if defined(AR_SIM3D_DEPTH_TEST_REFERENCE)
     Sim3DModelUniform model;
+#endif
+    Sim3DLinearUniform linear;
     Sim3DRadialUniform radial;
     Sim3DSurfaceUniform surface;
     Sim3DBodyUniform body;
@@ -171,6 +219,13 @@ typedef struct Sim3DMeshSample {
 /* Handles outlive a renderer reset; only their platform payload is reset.
  * This registry is never published outside the owner thread. */
 static Sim3DDepthMesh *s_meshes;
+
+#if defined(AR_SIM3D_DEPTH_TEST_REFERENCE)
+static bool s_reject_linear_preparation;
+void Sim3DDepthReference_RejectLinearPreparation(bool reject) {
+  s_reject_linear_preparation = reject;
+}
+#endif
 
 static struct {
   SDL_Renderer *renderer;
@@ -183,11 +238,12 @@ static struct {
   SDL_GPUGraphicsPipeline *mesh_pipeline;
   SDL_GPUShader *spherical_shader;
   SDL_GPUGraphicsPipeline *spherical_pipeline;
-  SDL_GPUShader *model_shader[3], *model_clipped_fragment;
-  SDL_GPUGraphicsPipeline *model_pipeline[3];
-  bool model_pipeline_attempted[3];
+  SDL_GPUShader *model_shader[kModelPipelineCount], *model_clipped_fragment;
+  SDL_GPUGraphicsPipeline *model_pipeline[kModelPipelineCount];
+  bool model_pipeline_attempted[kModelPipelineCount];
   SDL_GPUShader *surface_vertex, *surface_fragment;
-  SDL_GPUGraphicsPipeline *surface_pipeline[2]; /* opaque, no-depth-write */
+  SDL_GPUShader *shadow_batch_vertex, *shadow_batch_fragment;
+  SDL_GPUGraphicsPipeline *surface_pipeline[3]; /* opaque, transparent, batched shadows */
   bool surface_pipeline_attempted;
   SDL_GPUShader *body_vertex, *body_fragment;
   SDL_GPUGraphicsPipeline *body_pipeline;
@@ -236,6 +292,7 @@ static const GpuShaderBlobs kSphericalBlobs = {
   kSim3dSphericalVertSPV, kSim3dSphericalVertSPVSize,
   kSim3dSphericalVertDXIL, kSim3dSphericalVertDXILSize,
 };
+#if defined(AR_SIM3D_DEPTH_TEST_REFERENCE)
 static const GpuShaderBlobs kModelBlobs = {
   kSim3dModelVertMSL, kSim3dModelVertMSLSize,
   kSim3dModelVertSPV, kSim3dModelVertSPVSize,
@@ -246,6 +303,7 @@ static const GpuShaderBlobs kModelClippedBlobs = {
   kSim3dModelClippedVertSPV, kSim3dModelClippedVertSPVSize,
   kSim3dModelClippedVertDXIL, kSim3dModelClippedVertDXILSize,
 };
+#endif
 static const GpuShaderBlobs kModelClippedFragmentBlobs = {
   kSim3dModelClippedFragMSL, kSim3dModelClippedFragMSLSize,
   kSim3dModelClippedFragSPV, kSim3dModelClippedFragSPVSize,
@@ -256,6 +314,11 @@ static const GpuShaderBlobs kRadialBlobs = {
   kSim3dRadialVertSPV, kSim3dRadialVertSPVSize,
   kSim3dRadialVertDXIL, kSim3dRadialVertDXILSize,
 };
+static const GpuShaderBlobs kLinearBlobs = {
+  kSim3dLinearVertMSL, kSim3dLinearVertMSLSize,
+  kSim3dLinearVertSPV, kSim3dLinearVertSPVSize,
+  kSim3dLinearVertDXIL, kSim3dLinearVertDXILSize,
+};
 static const GpuShaderBlobs kSurfaceVertexBlobs = {
   kSim3dSurfaceVertMSL, kSim3dSurfaceVertMSLSize,
   kSim3dSurfaceVertSPV, kSim3dSurfaceVertSPVSize,
@@ -265,6 +328,16 @@ static const GpuShaderBlobs kSurfaceFragmentBlobs = {
   kSim3dSurfaceFragMSL, kSim3dSurfaceFragMSLSize,
   kSim3dSurfaceFragSPV, kSim3dSurfaceFragSPVSize,
   kSim3dSurfaceFragDXIL, kSim3dSurfaceFragDXILSize,
+};
+static const GpuShaderBlobs kShadowBatchVertexBlobs = {
+  kSim3dShadowBatchVertMSL, kSim3dShadowBatchVertMSLSize,
+  kSim3dShadowBatchVertSPV, kSim3dShadowBatchVertSPVSize,
+  kSim3dShadowBatchVertDXIL, kSim3dShadowBatchVertDXILSize,
+};
+static const GpuShaderBlobs kShadowBatchFragmentBlobs = {
+  kSim3dShadowBatchFragMSL, kSim3dShadowBatchFragMSLSize,
+  kSim3dShadowBatchFragSPV, kSim3dShadowBatchFragSPVSize,
+  kSim3dShadowBatchFragDXIL, kSim3dShadowBatchFragDXILSize,
 };
 static const GpuShaderBlobs kBodyVertexBlobs = {
   kSim3dSphericalBodyVertMSL, kSim3dSphericalBodyVertMSLSize,
@@ -318,13 +391,18 @@ static bool CreateBodyPipeline(void) {
 
 static bool CreateSurfacePipelines(void) {
   if (g_depth_pass.surface_pipeline_attempted)
-    return g_depth_pass.surface_pipeline[0] && g_depth_pass.surface_pipeline[1];
+    return g_depth_pass.surface_pipeline[0] && g_depth_pass.surface_pipeline[1] && g_depth_pass.surface_pipeline[2];
   g_depth_pass.surface_pipeline_attempted = true;
   g_depth_pass.surface_vertex = GpuShaderBlob_Create(g_depth_pass.device, &kSurfaceVertexBlobs,
       "SIM3D shared radial surface", SDL_GPU_SHADERSTAGE_VERTEX, 0, 1);
   g_depth_pass.surface_fragment = GpuShaderBlob_Create(g_depth_pass.device, &kSurfaceFragmentBlobs,
       "SIM3D affine surface material", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 0);
-  if (!g_depth_pass.surface_vertex || !g_depth_pass.surface_fragment) return false;
+  g_depth_pass.shadow_batch_vertex = GpuShaderBlob_Create(g_depth_pass.device, &kShadowBatchVertexBlobs,
+      "SIM3D batched surface shadows", SDL_GPU_SHADERSTAGE_VERTEX, 0, 1);
+  g_depth_pass.shadow_batch_fragment = GpuShaderBlob_Create(g_depth_pass.device, &kShadowBatchFragmentBlobs,
+      "SIM3D shadow transmittance", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 0);
+  if (!g_depth_pass.surface_vertex || !g_depth_pass.surface_fragment ||
+      !g_depth_pass.shadow_batch_vertex || !g_depth_pass.shadow_batch_fragment) return false;
   const SDL_GPUVertexBufferDescription buffer = {
     0, sizeof(Sim3DSurfaceGpuQuad), SDL_GPU_VERTEXINPUTRATE_INSTANCE, 0,
   };
@@ -357,39 +435,77 @@ static bool CreateSurfacePipelines(void) {
   g_depth_pass.surface_pipeline[0] = SDL_CreateGPUGraphicsPipeline(g_depth_pass.device, &info);
   info.depth_stencil_state.enable_depth_write = false;
   g_depth_pass.surface_pipeline[1] = SDL_CreateGPUGraphicsPipeline(g_depth_pass.device, &info);
-  return g_depth_pass.surface_pipeline[0] && g_depth_pass.surface_pipeline[1];
+  info.vertex_shader = g_depth_pass.shadow_batch_vertex;
+  info.fragment_shader = g_depth_pass.shadow_batch_fragment;
+  info.vertex_input_state.num_vertex_attributes = 8;
+  g_depth_pass.surface_pipeline[2] = SDL_CreateGPUGraphicsPipeline(g_depth_pass.device, &info);
+  return g_depth_pass.surface_pipeline[0] && g_depth_pass.surface_pipeline[1] && g_depth_pass.surface_pipeline[2];
 }
 
 /* Prepared at video boot/reset. Attempts are retained so a rejected variant
  * cannot trigger shader compilation or capability discovery during gameplay. */
-static bool CreateModelPipeline(unsigned variant) {
-  const bool hardware_clipping = variant != 0, radial = variant == 2;
+static bool CreateModelPipeline(Sim3DModelPipeline variant) {
+  if ((unsigned)variant >= kModelPipelineCount) return false;
   if (g_depth_pass.model_pipeline_attempted[variant])
     return g_depth_pass.model_pipeline[variant] != NULL;
   g_depth_pass.model_pipeline_attempted[variant] = true;
-  g_depth_pass.model_shader[variant] = GpuShaderBlob_Create(g_depth_pass.device,
-      radial ? &kRadialBlobs : hardware_clipping ? &kModelClippedBlobs : &kModelBlobs,
-      "SIM3D retained model prototype", SDL_GPU_SHADERSTAGE_VERTEX, 0, 1);
-  if (!g_depth_pass.model_shader[variant]) return false;
-  if (hardware_clipping && !g_depth_pass.model_clipped_fragment) {
-    g_depth_pass.model_clipped_fragment = GpuShaderBlob_Create(g_depth_pass.device,
-        &kModelClippedFragmentBlobs, "SIM3D hardware clipped model prototype",
-        SDL_GPU_SHADERSTAGE_FRAGMENT, 0, 0);
-    if (!g_depth_pass.model_clipped_fragment) return false;
-  }
-  const SDL_GPUVertexBufferDescription buffer = {
-    0, radial ? sizeof(Sim3DDepthRadialVertex) : sizeof(Sim3DDepthModelVertex),
-    SDL_GPU_VERTEXINPUTRATE_VERTEX, 0,
-  };
+#if defined(AR_SIM3D_DEPTH_TEST_REFERENCE)
+  if (variant == kModelPipeline_Linear && s_reject_linear_preparation) return false;
   const SDL_GPUVertexAttribute attributes[] = {
     {0, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, 0},
     {1, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, offsetof(Sim3DDepthModelVertex, color)},
   };
+#endif
   const SDL_GPUVertexAttribute radial_attributes[] = {
     {0, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(Sim3DDepthRadialVertex, normal)},
     {1, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, offsetof(Sim3DDepthRadialVertex, elevation)},
     {2, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, offsetof(Sim3DDepthRadialVertex, color)},
     {3, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT, offsetof(Sim3DDepthRadialVertex, variant)},
+  };
+  const SDL_GPUVertexAttribute linear_attributes[] = {
+    {0, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, offsetof(Sim3DDepthLinearVertex, position)},
+    {1, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, offsetof(Sim3DDepthLinearVertex, color)},
+    {2, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, offsetof(Sim3DDepthLinearVertex, axis)},
+  };
+  const GpuShaderBlobs *blobs;
+  const char *label;
+  const SDL_GPUVertexAttribute *vertex_attributes;
+  Uint32 stride, attribute_count;
+  bool hardware_clipping = true;
+  switch (variant) {
+    case kModelPipeline_Radial:
+      blobs = &kRadialBlobs; label = "SIM3D radial models";
+      vertex_attributes = radial_attributes; attribute_count = 4;
+      stride = sizeof(Sim3DDepthRadialVertex);
+      break;
+    case kModelPipeline_Linear:
+      blobs = &kLinearBlobs; label = "SIM3D linear models";
+      vertex_attributes = linear_attributes; attribute_count = 3;
+      stride = sizeof(Sim3DDepthLinearVertex);
+      break;
+#if defined(AR_SIM3D_DEPTH_TEST_REFERENCE)
+    case kModelPipeline_ReferenceAffine:
+    case kModelPipeline_ReferenceClipped:
+      hardware_clipping = variant == kModelPipeline_ReferenceClipped;
+      blobs = hardware_clipping ? &kModelClippedBlobs : &kModelBlobs;
+      label = "SIM3D test reference models";
+      vertex_attributes = attributes; attribute_count = 2;
+      stride = sizeof(Sim3DDepthModelVertex);
+      break;
+#endif
+    default: return false;
+  }
+  g_depth_pass.model_shader[variant] = GpuShaderBlob_Create(g_depth_pass.device,
+      blobs, label, SDL_GPU_SHADERSTAGE_VERTEX, 0, 1);
+  if (!g_depth_pass.model_shader[variant]) return false;
+  if (hardware_clipping && !g_depth_pass.model_clipped_fragment) {
+    g_depth_pass.model_clipped_fragment = GpuShaderBlob_Create(g_depth_pass.device,
+        &kModelClippedFragmentBlobs, "SIM3D screen-linear model color",
+        SDL_GPU_SHADERSTAGE_FRAGMENT, 0, 0);
+    if (!g_depth_pass.model_clipped_fragment) return false;
+  }
+  const SDL_GPUVertexBufferDescription buffer = {
+    0, stride, SDL_GPU_VERTEXINPUTRATE_VERTEX, 0,
   };
   const SDL_GPUColorTargetDescription color = {
     .format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM,
@@ -405,7 +521,7 @@ static bool CreateModelPipeline(unsigned variant) {
   const SDL_GPUGraphicsPipelineCreateInfo info = {
     .vertex_shader = g_depth_pass.model_shader[variant],
     .fragment_shader = hardware_clipping ? g_depth_pass.model_clipped_fragment : g_depth_pass.fragment_shader,
-    .vertex_input_state = {&buffer, 1, radial ? radial_attributes : attributes, radial ? 4 : 2},
+    .vertex_input_state = {&buffer, 1, vertex_attributes, attribute_count},
     .primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST,
     .rasterizer_state = {
       .fill_mode = SDL_GPU_FILLMODE_FILL, .cull_mode = SDL_GPU_CULLMODE_NONE,
@@ -427,9 +543,12 @@ static SDL_GPUGraphicsPipeline *MeshPipeline(Sim3DMeshKind kind) {
   switch (kind) {
     case kMeshScreen: return g_depth_pass.mesh_pipeline;
     case kMeshSpherical: return g_depth_pass.spherical_pipeline;
-    case kMeshModel: return g_depth_pass.model_pipeline[0];
-    case kMeshModelClipped: return g_depth_pass.model_pipeline[1];
-    case kMeshRadial: return g_depth_pass.model_pipeline[2];
+#if defined(AR_SIM3D_DEPTH_TEST_REFERENCE)
+    case kMeshModel: return g_depth_pass.model_pipeline[kModelPipeline_ReferenceAffine];
+    case kMeshModelClipped: return g_depth_pass.model_pipeline[kModelPipeline_ReferenceClipped];
+#endif
+    case kMeshRadial: return g_depth_pass.model_pipeline[kModelPipeline_Radial];
+    case kMeshLinear: return g_depth_pass.model_pipeline[kModelPipeline_Linear];
     case kMeshSurface: return g_depth_pass.surface_pipeline[0];
     case kMeshGeometry: return g_depth_pass.pipeline;
     case kMeshSphericalBody: return g_depth_pass.body_pipeline;
@@ -820,13 +939,17 @@ Sim3DPreparedPipelines Sim3DDepthPass_PreparePipelines(ArRenderDevice *device) {
   Sim3DPreparedPipelines ready = {0};
   ready.depth = Sim3DDepthPass_Require(device);
   if (!ready.depth) return ready;
-  const bool models = CreateModelPipeline(0);
-  const bool clipped = CreateModelPipeline(1);
-  ready.models = models && clipped;
-  ready.radial = CreateModelPipeline(2);
+  ready.linear_models = CreateModelPipeline(kModelPipeline_Linear);
+  ready.radial = CreateModelPipeline(kModelPipeline_Radial);
   ready.surfaces = CreateSurfacePipelines();
   ready.spherical_body = CreateBodyPipeline();
   return ready;
+}
+
+bool Sim3DDepthPass_LinearMeshesAvailable(ArRenderDevice *device) {
+  SDL_Renderer *renderer = ArSdlRenderBackend_Renderer(device);
+  return renderer && renderer == g_depth_pass.renderer && !g_depth_pass.failed &&
+      g_depth_pass.model_pipeline[kModelPipeline_Linear] != NULL;
 }
 
 static bool GroundIsQueued(void) {
@@ -1126,7 +1249,7 @@ bool Sim3DDepthPass_Begin(ArRenderDevice *device, int width, int height,
 }
 
 static bool IsGeometryMesh(Sim3DMeshKind kind) {
-  return kind == kMeshGeometry || IsModelMesh(kind) || kind == kMeshRadial || kind == kMeshSurface;
+  return kind == kMeshGeometry || IsModelMesh(kind) || kind == kMeshRadial || kind == kMeshSurface || kind == kMeshLinear;
 }
 
 static Sim3DDepthMesh *CreateMesh(Sim3DMeshKind kind) {
@@ -1146,14 +1269,19 @@ static Sim3DDepthMesh *CreateMesh(Sim3DMeshKind kind) {
 Sim3DDepthMesh *Sim3DDepthPass_CreateMesh(void) { return CreateMesh(kMeshScreen); }
 Sim3DDepthMesh *Sim3DDepthPass_CreateSphericalMesh(void) { return CreateMesh(kMeshSpherical); }
 Sim3DDepthMesh *Sim3DDepthPass_CreateGeometryMesh(void) { return CreateMesh(kMeshGeometry); }
+#if defined(AR_SIM3D_DEPTH_TEST_REFERENCE)
 Sim3DDepthMesh *Sim3DDepthPass_CreateModelMesh(void) {
-  return g_depth_pass.collecting && CreateModelPipeline(false) ? CreateMesh(kMeshModel) : NULL;
+  return g_depth_pass.collecting && CreateModelPipeline(kModelPipeline_ReferenceAffine) ? CreateMesh(kMeshModel) : NULL;
 }
 Sim3DDepthMesh *Sim3DDepthPass_CreateHardwareClippedModelMesh(void) {
-  return g_depth_pass.collecting && CreateModelPipeline(true) ? CreateMesh(kMeshModelClipped) : NULL;
+  return g_depth_pass.collecting && CreateModelPipeline(kModelPipeline_ReferenceClipped) ? CreateMesh(kMeshModelClipped) : NULL;
+}
+#endif
+Sim3DDepthMesh *Sim3DDepthPass_CreateLinearMesh(void) {
+  return g_depth_pass.collecting && CreateModelPipeline(kModelPipeline_Linear) ? CreateMesh(kMeshLinear) : NULL;
 }
 Sim3DDepthMesh *Sim3DDepthPass_CreateRadialMesh(void) {
-  return g_depth_pass.collecting && CreateModelPipeline(2) ? CreateMesh(kMeshRadial) : NULL;
+  return g_depth_pass.collecting && CreateModelPipeline(kModelPipeline_Radial) ? CreateMesh(kMeshRadial) : NULL;
 }
 Sim3DDepthMesh *Sim3DDepthPass_CreateSurfaceMesh(void) {
   return g_depth_pass.collecting && CreateSurfacePipelines() ? CreateMesh(kMeshSurface) : NULL;
@@ -1166,8 +1294,11 @@ static Uint32 MeshVertexBytes(const Sim3DDepthMesh *mesh) {
   switch (mesh->kind) {
     case kMeshScreen: return 4 * (Uint32)sizeof(float);
     case kMeshSpherical: return (Uint32)sizeof(Sim3DSphericalGpuQuad) / 4;
+#if defined(AR_SIM3D_DEPTH_TEST_REFERENCE)
     case kMeshModel: case kMeshModelClipped: return sizeof(Sim3DDepthModelVertex);
+#endif
     case kMeshRadial: return sizeof(Sim3DDepthRadialVertex);
+    case kMeshLinear: return sizeof(Sim3DDepthLinearVertex);
     case kMeshSurface: return sizeof(Sim3DSurfaceGpuQuad) / 4;
     case kMeshGeometry: return sizeof(Sim3DGpuVertex);
     case kMeshSphericalBody: return sizeof(Sim3DDepthSphericalBodyVertex);
@@ -1206,7 +1337,7 @@ bool Sim3DDepthPass_MeshReady(const Sim3DDepthMesh *mesh) {
       MeshPipeline(mesh->kind) &&
       mesh->device == g_depth_pass.device && mesh->positions && mesh->count &&
       (IsModelMesh(mesh->kind) || mesh->kind == kMeshRadial || mesh->kind == kMeshSurface ||
-       mesh->kind == kMeshSphericalBody ||
+       mesh->kind == kMeshSphericalBody || mesh->kind == kMeshLinear ||
        (mesh->width == g_depth_pass.width && mesh->height == g_depth_pass.height));
 }
 
@@ -1423,10 +1554,12 @@ bool Sim3DDepthPass_AppendGeometryRanges(Sim3DDepthMesh *mesh,
   return true;
 }
 
+#if defined(AR_SIM3D_DEPTH_TEST_REFERENCE)
 bool Sim3DDepthPass_UpdateModelMesh(Sim3DDepthMesh *mesh,
     const Sim3DDepthModelVertex *vertices, size_t quad_count) {
   if (!g_depth_pass.collecting || !mesh || !IsModelMesh(mesh->kind) ||
-      !CreateModelPipeline(mesh->kind == kMeshModelClipped) ||
+      !CreateModelPipeline(mesh->kind == kMeshModelClipped
+          ? kModelPipeline_ReferenceClipped : kModelPipeline_ReferenceAffine) ||
       !CanUpdateMesh(mesh, quad_count, mesh->kind) || !vertices)
     return false;
   float low[3], high[3];
@@ -1503,11 +1636,89 @@ bool Sim3DDepthPass_AppendModelMesh(Sim3DDepthMesh *mesh, const float matrix[16]
   mesh->queued = true;
   return true;
 }
+#endif
+
+bool Sim3DDepthPass_UpdateLinearMesh(Sim3DDepthMesh *mesh,
+    const Sim3DDepthLinearVertex *vertices, size_t quad_count) {
+  if (!g_depth_pass.collecting || !mesh || mesh->kind != kMeshLinear ||
+      !vertices || !CreateModelPipeline(kModelPipeline_Linear) || !CanUpdateMesh(mesh, quad_count, kMeshLinear)) return false;
+  const Uint32 count = (Uint32)quad_count * 4;
+  float extent[5] = {0};
+  for (Uint32 i = 0; i < count; ++i) {
+    const Sim3DDepthLinearVertex *v = &vertices[i];
+    if (!ValidSampleColor(v->color) || !isfinite(v->axis) || v->axis < 0 ||
+        v->axis >= kSim3DDepthLinearAxisCount || v->axis != floorf(v->axis) ||
+        v->axis != vertices[i & ~3u].axis) return false;
+    const float values[5] = {v->position[0], v->position[1], v->position[2],
+      v->displacement, v->depth_offset};
+    for (unsigned p = 0; p < 5; ++p) {
+      if (!isfinite(values[p])) return false;
+      extent[p] = fmaxf(extent[p], fabsf(values[p]));
+    }
+  }
+  if (!ReserveMesh(mesh, count)) return false;
+  void *mapped = SDL_MapGPUTransferBuffer(g_depth_pass.device, mesh->transfer, true);
+  if (!mapped) return false;
+  memcpy(mapped, vertices, count * sizeof(*vertices));
+  memcpy(mesh->linear_extent, extent, sizeof(extent));
+  PublishMesh(mesh, count);
+  return true;
+}
+
+static bool LinearTransformSafe(const Sim3DDepthMesh *mesh,
+    const Sim3DDepthLinearTransform *t) {
+  if (!t) return false;
+  double position[3];
+  for (unsigned c = 0; c < 3; ++c) {
+    if (!isfinite(t->offset[c])) return false;
+    double axis = 0;
+    for (unsigned i = 0; i < kSim3DDepthLinearAxisCount; ++i) {
+      if (!isfinite(t->axes[i][c])) return false;
+      axis = fmax(axis, fabs((double)t->axes[i][c]));
+    }
+    position[c] = mesh->linear_extent[c] + fabs((double)t->offset[c]) +
+        mesh->linear_extent[3] * axis + (c == 2 ? mesh->linear_extent[4] : 0);
+    if (position[c] > FLT_MAX / 16.0) return false;
+  }
+  /* Reserve headroom for snapping's divide and the alternate depth/W product,
+   * as well as intermediate sums before cancellation. No clip-plane rejection. */
+  const double limit = sqrt((double)FLT_MAX) / 1024;
+  for (unsigned r = 0; r < 4; ++r) {
+    if (!isfinite(t->matrix[12+r])) return false;
+    double magnitude = fabs((double)t->matrix[12+r]);
+    for (unsigned c = 0; c < 3; ++c) {
+      if (!isfinite(t->matrix[c*4+r])) return false;
+      magnitude += fabs((double)t->matrix[c*4+r]) * position[c];
+    }
+    if (magnitude > limit) return false;
+  }
+  return true;
+}
+
+bool Sim3DDepthPass_AppendLinearMesh(Sim3DDepthMesh *mesh,
+    const Sim3DDepthLinearTransform *transform) {
+  if (!Sim3DDepthPass_MeshReady(mesh) || mesh->kind != kMeshLinear ||
+      g_depth_pass.geometry_sample_count == kMaximumGeometrySamples ||
+      !LinearTransformSafe(mesh, transform)) return false;
+  Sim3DMeshSample *sample = &g_depth_pass.samples[g_depth_pass.sample_count++];
+  ++g_depth_pass.geometry_sample_count;
+  *sample = (Sim3DMeshSample){.mesh = mesh, .layer = kSim3DDepthPass_Solid,
+    .count = mesh->count, .ordinary_before = g_depth_pass.lists[kSim3DDepthPass_Solid].count};
+  memcpy(sample->linear.matrix, transform->matrix, sizeof(transform->matrix));
+  memcpy(sample->linear.offset, transform->offset, sizeof(transform->offset));
+  for (unsigned i = 0; i < kSim3DDepthLinearAxisCount; ++i)
+    memcpy(sample->linear.axes[i], transform->axes[i], sizeof(transform->axes[i]));
+  sample->linear.raster[0] = (float)g_depth_pass.width;
+  sample->linear.raster[1] = (float)g_depth_pass.height;
+  sample->linear.raster[2] = transform->pixel_centers ? 1 : 0;
+  mesh->queued = true;
+  return true;
+}
 
 bool Sim3DDepthPass_UpdateRadialMesh(Sim3DDepthMesh *mesh,
     const Sim3DDepthRadialVertex *vertices, size_t quad_count) {
   if (!g_depth_pass.collecting || !mesh || mesh->kind != kMeshRadial || !vertices ||
-      !CreateModelPipeline(2) || !CanUpdateMesh(mesh, quad_count, kMeshRadial))
+      !CreateModelPipeline(kModelPipeline_Radial) || !CanUpdateMesh(mesh, quad_count, kMeshRadial))
     return false;
   const Uint32 count = (Uint32)quad_count * 4;
   float extent[2] = {0};
@@ -2260,6 +2471,60 @@ static bool PrepareMeshSamples(void) {
   return true;
 }
 
+static bool SurfaceShadowBatchingEnabled(void) {
+  static int enabled = -1;
+  if (enabled < 0) {
+    const char *value = getenv("AR_SIM3D_SHADOW_BATCH");
+    enabled = !value || strcmp(value, "0") != 0; /* Diagnostic opt-out; enabled by default. */
+  }
+  return enabled != 0;
+}
+
+static bool IsBatchableSurfaceShadow(const Sim3DMeshSample *sample) {
+  return sample->layer == kSim3DDepthPass_CloudShadow && sample->mesh->kind == kMeshSurface &&
+      sample->surface.material[1] == 1 && sample->surface.spherical.color[0] == 0 &&
+      sample->surface.spherical.color[1] == 0 && sample->surface.spherical.color[2] == 0;
+}
+
+/* Compare named placement/sampling fields, not byte slices spanning unrelated
+ * uniform members. Offsets and opacity are the ONLY per-tap differences; RGB
+ * eligibility is checked separately. Exact bits conservatively preserve the
+ * existing batch choices, including signed zero in geometric inputs. */
+static bool SameSurfaceShadowPlacement(const Sim3DSurfaceUniform *a,
+    const Sim3DSurfaceUniform *b) {
+  return !memcmp(a->view.matrix, b->view.matrix, sizeof(a->view.matrix)) &&
+      !memcmp(a->view.basis, b->view.basis, sizeof(a->view.basis)) &&
+      !memcmp(a->view.radial, b->view.radial, sizeof(a->view.radial)) &&
+      !memcmp(a->light, b->light, sizeof(a->light)) &&
+      !memcmp(a->material, b->material, sizeof(a->material)) &&
+      !memcmp(a->mask_rect, b->mask_rect, sizeof(a->mask_rect)) &&
+      !memcmp(a->mask, b->mask, sizeof(a->mask)) &&
+      !memcmp(a->shadow_basis, b->shadow_basis, sizeof(a->shadow_basis)) &&
+      !memcmp(a->spherical.rotation, b->spherical.rotation, sizeof(a->spherical.rotation)) &&
+      !memcmp(a->spherical.atlas, b->spherical.atlas, sizeof(a->spherical.atlas)) &&
+      a->spherical.offset_extent[2] == b->spherical.offset_extent[2] &&
+      a->spherical.offset_extent[3] == b->spherical.offset_extent[3];
+}
+
+/* Submission-only coalescing: the logical sample queue, copied input ownership,
+ * rejection rules and effect budgets are unchanged. Only consecutive black
+ * samples sharing exact placement/chart/rotation are eligible. Their real-valued
+ * transmittance commutes across overlapping receiver faces; colored samples do
+ * not. Keep unrelated receivers/overlays and ordinary GPU paths untouched. */
+static Uint32 SurfaceShadowBatchSize(Uint32 first) {
+  if (!SurfaceShadowBatchingEnabled()) return 1;
+  const Sim3DMeshSample *a = &g_depth_pass.samples[first];
+  if (!IsBatchableSurfaceShadow(a)) return 1;
+  Uint32 count = 1;
+  for (; count < kSurfaceShadowBatchTaps && first + count < g_depth_pass.sample_count; ++count) {
+    const Sim3DMeshSample *b = &g_depth_pass.samples[first + count];
+    if (!IsBatchableSurfaceShadow(b) || a->mesh != b->mesh ||
+        a->first != b->first || a->count != b->count ||
+        !SameSurfaceShadowPlacement(&a->surface, &b->surface)) break;
+  }
+  return count;
+}
+
 ArRenderTexture Sim3DDepthPass_Submit(
     ArRenderDevice *device, ArRenderTexture shadow_texture) {
   SDL_Renderer *renderer = ArSdlRenderBackend_Renderer(device);
@@ -2512,10 +2777,14 @@ ArRenderTexture Sim3DDepthPass_Submit(
           SDL_DrawGPUIndexedPrimitives(pass, 6, sample->count / 4, 0, 0, 0);
           continue;
         }
+#if defined(AR_SIM3D_DEPTH_TEST_REFERENCE)
         if (IsModelMesh(sample->mesh->kind))
           SDL_PushGPUVertexUniformData(commands, 0, &sample->model, sizeof(sample->model));
+#endif
         if (sample->mesh->kind == kMeshRadial)
           SDL_PushGPUVertexUniformData(commands, 0, &sample->radial, sizeof(sample->radial));
+        if (sample->mesh->kind == kMeshLinear)
+          SDL_PushGPUVertexUniformData(commands, 0, &sample->linear, sizeof(sample->linear));
         if (sample->mesh->selection_count) {
           const SDL_GPUBufferBinding selected = {sample->mesh->selection, 0};
           SDL_BindGPUIndexBuffer(pass, &selected, SDL_GPU_INDEXELEMENTSIZE_32BIT);
@@ -2530,8 +2799,9 @@ ArRenderTexture Sim3DDepthPass_Submit(
       for (Uint32 j = 0; j < g_depth_pass.sample_count; ++j) {
         const Sim3DMeshSample *sample = &g_depth_pass.samples[j];
         if (sample->layer != i) continue;
+        const Uint32 shadow_batch = SurfaceShadowBatchSize(j);
         pipeline = sample->mesh->kind == kMeshSurface
-            ? g_depth_pass.surface_pipeline[1] : MeshPipeline(sample->mesh->kind);
+            ? g_depth_pass.surface_pipeline[shadow_batch > 1 ? 2 : 1] : MeshPipeline(sample->mesh->kind);
         if (pipeline != bound) {
           SDL_BindGPUGraphicsPipeline(pass, pipeline);
           bound = pipeline;
@@ -2550,12 +2820,22 @@ ArRenderTexture Sim3DDepthPass_Submit(
                 ? sample->mesh->selection : sample->mesh->positions,
             sample->mesh->kind == kMeshSurface ? sample->first*MeshVertexBytes(sample->mesh) : 0};
           SDL_BindGPUVertexBuffers(pass, 0, &binding, 1);
-          if (sample->mesh->kind == kMeshSurface)
+          if (shadow_batch > 1) {
+            Sim3DSurfaceShadowBatchUniform uniform = {.surface = sample->surface};
+            for (Uint32 tap = 0; tap < shadow_batch; ++tap) {
+              const Sim3DSphericalUniform *s = &g_depth_pass.samples[j+tap].surface.spherical;
+              uniform.taps[tap][0] = s->offset_extent[0];
+              uniform.taps[tap][1] = s->offset_extent[1];
+              uniform.taps[tap][2] = s->color[3];
+            }
+            SDL_PushGPUVertexUniformData(commands, 0, &uniform, sizeof(uniform));
+          } else if (sample->mesh->kind == kMeshSurface)
             SDL_PushGPUVertexUniformData(commands, 0, &sample->surface, sizeof(sample->surface));
           else
             SDL_PushGPUVertexUniformData(commands, 0, &sample->spherical, sizeof(sample->spherical));
           SDL_DrawGPUIndexedPrimitives(pass, 6,
               (sample->mesh->kind == kMeshSurface ? sample->count : sample->mesh->count) / 4, 0, 0, 0);
+          j += shadow_batch - 1;
           continue;
         }
         const SDL_GPUBufferBinding bindings[] = {
@@ -2607,6 +2887,7 @@ ArRenderTexture Sim3DDepthPass_Submit(
     const Uint32 count = GeometryLayerSupported(sample->layer) || sample->mesh->kind == kMeshSurface
         ? sample->count : sample->mesh->count;
     Sim3DPerformance_AddDraw(count, count / 4 * 6);
+    i += SurfaceShadowBatchSize(i) - 1; /* Count actual draws, not logical taps. */
   }
   for (Sim3DDepthMesh *mesh = s_meshes; mesh; mesh = mesh->next)
     if (mesh->queued) mesh->dirty = mesh->selection_dirty = false;
@@ -2630,20 +2911,24 @@ void Sim3DDepthPass_Reset(ArRenderDevice *device) {
     SDL_ReleaseGPUGraphicsPipeline(g_depth_pass.device, g_depth_pass.spherical_pipeline);
   if (g_depth_pass.spherical_shader)
     SDL_ReleaseGPUShader(g_depth_pass.device, g_depth_pass.spherical_shader);
-  for (unsigned i = 0; i < 2; ++i)
+  for (unsigned i = 0; i < 3; ++i)
     if (g_depth_pass.surface_pipeline[i])
       SDL_ReleaseGPUGraphicsPipeline(g_depth_pass.device, g_depth_pass.surface_pipeline[i]);
   if (g_depth_pass.surface_vertex)
     SDL_ReleaseGPUShader(g_depth_pass.device, g_depth_pass.surface_vertex);
   if (g_depth_pass.surface_fragment)
     SDL_ReleaseGPUShader(g_depth_pass.device, g_depth_pass.surface_fragment);
+  if (g_depth_pass.shadow_batch_vertex)
+    SDL_ReleaseGPUShader(g_depth_pass.device, g_depth_pass.shadow_batch_vertex);
+  if (g_depth_pass.shadow_batch_fragment)
+    SDL_ReleaseGPUShader(g_depth_pass.device, g_depth_pass.shadow_batch_fragment);
   if (g_depth_pass.body_pipeline)
     SDL_ReleaseGPUGraphicsPipeline(g_depth_pass.device,g_depth_pass.body_pipeline);
   if (g_depth_pass.body_vertex)
     SDL_ReleaseGPUShader(g_depth_pass.device,g_depth_pass.body_vertex);
   if (g_depth_pass.body_fragment)
     SDL_ReleaseGPUShader(g_depth_pass.device,g_depth_pass.body_fragment);
-  for (unsigned variant = 0; variant < 3; ++variant) {
+  for (unsigned variant = 0; variant < kModelPipelineCount; ++variant) {
     if (g_depth_pass.model_pipeline[variant])
       SDL_ReleaseGPUGraphicsPipeline(g_depth_pass.device, g_depth_pass.model_pipeline[variant]);
     if (g_depth_pass.model_shader[variant])

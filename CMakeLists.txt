@@ -2386,7 +2386,9 @@ if(BUILD_TESTING)
         src/performance_metrics.c
     )
     target_include_directories(actraiser_sim3d_depth_pass_gpu_test PRIVATE
-        ${CMAKE_SOURCE_DIR}/src)
+        ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/tests/support)
+    target_compile_definitions(actraiser_sim3d_depth_pass_gpu_test PRIVATE
+        AR_SIM3D_DEPTH_TEST_REFERENCE=1)
     target_link_libraries(actraiser_sim3d_depth_pass_gpu_test PRIVATE
         SDL3::SDL3 actraiser_math)
     add_test(NAME actraiser_sim3d_depth_pass_gpu
@@ -2416,7 +2418,9 @@ if(BUILD_TESTING)
         src/sim/sim_background_voxel_proportions.c
         src/sim/sim_world_navigation_globe.c)
     target_include_directories(actraiser_model_projection_benchmark PRIVATE
-        ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+        ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/tests/support ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    target_compile_definitions(actraiser_model_projection_benchmark PRIVATE
+        AR_SIM3D_DEPTH_TEST_REFERENCE=1)
     target_link_libraries(actraiser_model_projection_benchmark PRIVATE SDL3::SDL3 actraiser_math)
 
     # Geometry of the framebuffer margin-gap

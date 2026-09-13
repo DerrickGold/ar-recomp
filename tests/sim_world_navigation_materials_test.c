@@ -9,6 +9,10 @@
 #include "sim/sim_background_mountain_objects.h"
 #include "sim/sim_background_mountain_silhouette.h"
 
+/* These expressions execute the test operations as well as checking them. */
+#ifdef NDEBUG
+#undef NDEBUG
+#endif
 #include <assert.h>
 #include <math.h>
 #include <stdio.h>
@@ -1363,6 +1367,54 @@ static void TestCapturedMountainScene(const char *rom_path, const char *wram_pat
   free(rom);
 }
 
+static size_t SkyCloudTexel(int bank, int slice, int x, int y, int pitch) {
+  return (size_t)(bank * kSimSkyCloudRows * kSimSkyCloudHeight +
+      slice / kSimSkyCloudColumns * kSimSkyCloudHeight + y) * pitch +
+      slice % kSimSkyCloudColumns * kSimSkyCloudWidth + x;
+}
+
+static void TestSkyCloudBounds(void) {
+  const int pitch = kSimSkyCloudAtlasWidth + 3;
+  uint32_t *pixels = calloc((size_t)pitch * kSimSkyCloudAtlasHeight, sizeof(*pixels));
+  assert(pixels);
+  SimSkyCloudBounds bounds = {1, 2, 3, 4};
+  assert(SimWorldNavigationSkyClouds_Bounds(pixels, pitch, 0, 0, &bounds));
+  assert(bounds.x0 == bounds.x1 && bounds.y0 == bounds.y1);
+  /* Alpha 1 counts, including the final precomposited tile and padded pitch. */
+  const int bank = kSimSkyCloudBanks - 1, slice = kSimSkyCloudSlices;
+  pixels[SkyCloudTexel(bank, slice, 12, 9, pitch)] = 0x01ffffff;
+  assert(SimWorldNavigationSkyClouds_Bounds(pixels, pitch, bank, slice, &bounds));
+  assert(bounds.x0 == 11 && bounds.x1 == 13 && bounds.y0 == 8 && bounds.y1 == 10);
+  /* Every nonzero bilinear sample is inside the retained rectangle. */
+  for (int y = 0; y < (kSimSkyCloudHeight - 1) * 4; ++y)
+    for (int x = 0; x < (kSimSkyCloudWidth - 1) * 4; ++x) {
+      const int ix = x / 4, iy = y / 4;
+      const float fx = (x % 4) * .25f, fy = (y % 4) * .25f;
+      float alpha = 0;
+      for (int dy = 0; dy < 2; ++dy)
+        for (int dx = 0; dx < 2; ++dx)
+          alpha += (pixels[SkyCloudTexel(bank, slice, ix+dx, iy+dy, pitch)] >> 24) *
+              (dx ? fx : 1-fx) * (dy ? fy : 1-fy);
+      if (alpha) assert(x * .25f > bounds.x0 && x * .25f < bounds.x1 &&
+                        y * .25f > bounds.y0 && y * .25f < bounds.y1);
+    }
+  pixels[SkyCloudTexel(bank, slice, 0, 0, pitch)] = 0xffffffff;
+  pixels[SkyCloudTexel(bank, slice, kSimSkyCloudWidth-1, kSimSkyCloudHeight-1, pitch)] = 0xffffffff;
+  assert(SimWorldNavigationSkyClouds_Bounds(pixels, pitch, bank, slice, &bounds));
+  assert(bounds.x0 == 0 && bounds.y0 == 0 && bounds.x1 == kSimSkyCloudWidth-1 &&
+         bounds.y1 == kSimSkyCloudHeight-1);
+  const SimSkyCloudBounds before = bounds;
+  assert(!SimWorldNavigationSkyClouds_Bounds(NULL, pitch, 0, 0, &bounds));
+  assert(!SimWorldNavigationSkyClouds_Bounds(pixels, pitch, 0, 0, NULL));
+  assert(!SimWorldNavigationSkyClouds_Bounds(pixels, kSimSkyCloudAtlasWidth-1, 0, 0, &bounds));
+  assert(!SimWorldNavigationSkyClouds_Bounds(pixels, pitch, -1, 0, &bounds));
+  assert(!SimWorldNavigationSkyClouds_Bounds(pixels, pitch, kSimSkyCloudBanks, 0, &bounds));
+  assert(!SimWorldNavigationSkyClouds_Bounds(pixels, pitch, 0, -1, &bounds));
+  assert(!SimWorldNavigationSkyClouds_Bounds(pixels, pitch, 0, kSimSkyCloudSlices+1, &bounds));
+  assert(!memcmp(&bounds, &before, sizeof(bounds)));
+  free(pixels);
+}
+
 static void TestSkyCloudVolume(void) {
   const int pitch = kSimSkyCloudAtlasWidth + 3;
   const size_t bytes = (size_t)pitch * kSimSkyCloudAtlasHeight * sizeof(uint32_t);
@@ -1390,6 +1442,23 @@ static void TestSkyCloudVolume(void) {
       if (!alpha) assert((lit[at] & 0xffffffu) == 0xffffffu);
     }
   assert(covered > 1000 && shaded > 1000);
+  size_t cropped_area = 0, empty = 0;
+  for (int bank = 0; bank < kSimSkyCloudBanks; ++bank)
+    for (int slice = 0; slice <= kSimSkyCloudSlices; ++slice) {
+      SimSkyCloudBounds a, b;
+      assert(SimWorldNavigationSkyClouds_Bounds(lit, pitch, bank, slice, &a));
+      assert(SimWorldNavigationSkyClouds_Bounds(flat, pitch, bank, slice, &b));
+      assert(!memcmp(&a, &b, sizeof(a))); /* Lighting cannot change support. */
+      assert(a.x0 <= a.x1 && a.x1 < kSimSkyCloudWidth && a.y0 <= a.y1 && a.y1 < kSimSkyCloudHeight);
+      empty += a.x0 == a.x1;
+      cropped_area += (a.x1-a.x0) * (a.y1-a.y0);
+      for (int y = 0; y < kSimSkyCloudHeight; ++y)
+        for (int x = 0; x < kSimSkyCloudWidth; ++x)
+          if (lit[SkyCloudTexel(bank, slice, x, y, pitch)] >> 24)
+            assert(x > a.x0 && x < a.x1 && y > a.y0 && y < a.y1);
+    }
+  printf("Sky cloud support: %zu/%u texel-centre area, %zu empty slices\n", cropped_area,
+      kSimSkyCloudBanks * (kSimSkyCloudSlices+1) * (kSimSkyCloudWidth-1) * (kSimSkyCloudHeight-1), empty);
   assert(!SimWorldNavigationSkyClouds_Bake(lit, pitch, (float[3]){NAN, 0, 1}, true));
   assert(!SimWorldNavigationSkyClouds_Bake(lit, pitch, (float[3]){0}, true));
   assert(!SimWorldNavigationSkyClouds_Bake(lit, kSimSkyCloudAtlasWidth - 1, light, true));
@@ -1400,6 +1469,7 @@ static void TestSkyCloudVolume(void) {
 
 int main(int argc, char **argv) {
   TestMountainTileSampling();
+  TestSkyCloudBounds();
   TestSkyCloudVolume();
   TestCloudBakeExact();
   TestCloudSphere();

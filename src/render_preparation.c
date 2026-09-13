@@ -77,9 +77,9 @@ bool RenderPreparation_Prepare(ArRenderDevice *device, RenderFeatureMask *suppor
   ArRenderDevice_DestroyTexture(device, target);
   const ArRenderCapabilities *caps = ArRenderDevice_Capabilities(device);
   fprintf(stderr, "[graphics-prepare] features=$%x texture-limit=%dx%d "
-      "depth=%d models=%d radial=%d surface=%d body=%d cloud-shader=%d shadow-shader=%d\n",
+      "depth=%d linear-models=%d radial=%d surface=%d body=%d cloud-shader=%d shadow-shader=%d\n",
       *supported, caps->maximum_texture_width, caps->maximum_texture_height,
-      depth.depth, depth.models, depth.radial, depth.surfaces, depth.spherical_body,
+      depth.depth, depth.linear_models, depth.radial, depth.surfaces, depth.spherical_body,
       cloud_shader, shadow_shader);
   return ok && !SessionFatal_Requested();
 }

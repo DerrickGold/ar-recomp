@@ -1,4 +1,6 @@
 #version 450
+#extension GL_GOOGLE_include_directive : require
+#include "sim3d_surface_mapping.glsl"
 
 // One original quad per instance. Ground and shadows share the same position
 // computation and diagonal; no independently clipped/retriangulated receiver.
@@ -36,17 +38,8 @@ layout(set = 1, binding = 0, std140) uniform SurfaceView {
 layout(location = 0) out vec4 vertex_color;
 layout(location = 1) out vec2 texture_uv;
 
-const float pi = 3.14159265358979323846;
 vec2 coordinate(vec3 n) {
-    if (material.z != 0.0) {
-        n = vec3(dot(shadow_basis[0].xyz,n), dot(shadow_basis[1].xyz,n), dot(shadow_basis[2].xyz,n));
-    }
-    precise float x = n.x * rotation.x + n.z * rotation.y;
-    precise float z = n.z * rotation.x - n.x * rotation.y;
-    precise float y = n.y * rotation.z + z * rotation.w;
-    precise float zz = z * rotation.z - n.y * rotation.w;
-    float longitude = x == 0.0 && zz == 0.0 ? 0.0 : atan(zz, x);
-    precise vec2 uv = vec2((longitude + pi) / (2.0 * pi), acos(clamp(y, -1.0, 1.0)) / pi);
+    precise vec2 uv = surface_coordinate(n, shadow_basis, material.z, rotation);
     uv += offset_extent.xy;
     uv.x -= floor(uv.x);
     return uv;
@@ -60,21 +53,7 @@ void main() {
     vec2 mask_uv[4] = vec2[4](mask_uv01.xy, mask_uv01.zw, mask_uv23.xy, mask_uv23.zw);
     int corner = gl_VertexIndex;
     vec4 point = points[corner];
-    precise vec3 normal;
-    for (int row = 0; row < 3; ++row) {
-        precise float n = basis[row].y * point.y;
-        n = fma(basis[row].x, point.x, n);
-        normal[row] = fma(basis[row].z, point.z, n);
-    }
-    precise float radius = fma(radial.y, radial.z, radial.x);
-    precise float rise = (point.w - radial.y) * radial.z;
-    rise = rise + shades[corner].w * radial.w;
-    precise vec3 world = radius * (normal - vec3(0.0, 0.0, 1.0));
-    world = fma(normal, vec3(rise), world);
-    precise vec4 clip = matrix[1] * world.y;
-    clip = fma(matrix[0], vec4(world.x), clip);
-    clip = fma(matrix[2], vec4(world.z), clip);
-    clip = clip + matrix[3];
+    precise vec4 clip = surface_clip(point, shades[corner], matrix, basis, radial);
     precise float depth = clip.z * 0.5 + clip.w * 0.5;
     gl_Position = vec4(clip.xy, depth, clip.w);
 
