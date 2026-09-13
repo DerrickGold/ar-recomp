@@ -6,7 +6,7 @@
 #include "sim_town_terrain.h"
 #include "sim_world_navigation_terrain.h"
 
-enum { kCells = kSimWorldMapTiles, kMaxFaces = kCells * kCells * 5 };
+enum { kCells = kSimWorldMapTiles, kMaxFaces = kSimWorldNavigationCliffMaximumFaces };
 
 void SimWorldNavigationCliffs_Destroy(SimWorldNavigationCliffScene *scene) {
   if (!scene) return;

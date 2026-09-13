@@ -14,9 +14,7 @@ enum {
   kAtlas = kSimWorldNavigationMountainAtlasPixels,
   /* Bounded scene budget for fronts, walls and clipped rear strips.
    * Overflow fails the entire optional stage back to overview relief. */
-  kMaxFaces = kSimTownCount * kSimBackgroundMountainMaxObjects *
-      kSimBackgroundMountainObjectMaxRows *
-      kSimBackgroundMountainObjectMaxColumns * (3 + kSimTownCellPixels),
+  kMaxFaces = kSimWorldNavigationMountainMaximumFaces,
 };
 
 typedef struct FaceWriter {

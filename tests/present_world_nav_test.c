@@ -3,6 +3,7 @@
 #include "present_sim_globe.h"
 #include "present_world_nav_geometry.h"
 #include "present_world_nav_model_mesh.h"
+#include "present_world_nav_test.h"
 #include "actraiser/actraiser_localization_world_navigation.h"
 #include "render/render_device.h"
 #include "render/localized_text_presenter.h"
@@ -348,6 +349,19 @@ bool Sim3DDepthPass_AppendQuad(Sim3DDepthPassLayer layer,
  * integration suite covers the production split-input implementation. */
 Sim3DDepthMesh *Sim3DDepthPass_CreateMesh(void) { return NULL; }
 Sim3DDepthMesh *Sim3DDepthPass_CreateGeometryMesh(void) { return NULL; }
+Sim3DDepthMesh *Sim3DDepthPass_CreateLinearMesh(void) { return NULL; }
+bool Sim3DDepthPass_UpdateLinearMesh(Sim3DDepthMesh *mesh,
+    const Sim3DDepthLinearVertex *vertices, size_t count) {
+  (void)mesh; (void)vertices; (void)count; return false;
+}
+bool Sim3DDepthPass_AppendLinearMeshes(Sim3DDepthMesh *const *meshes,
+    size_t count, const Sim3DDepthLinearTransform *transform) {
+  (void)meshes; (void)count; (void)transform; return false;
+}
+bool Sim3DDepthPass_AppendSurfaceMeshBatches(
+    const Sim3DDepthSurfaceMeshBatch *batches, size_t count) {
+  (void)batches; (void)count; return false;
+}
 static unsigned surface_mesh_attempts;
 Sim3DDepthMesh *Sim3DDepthPass_CreateSurfaceMesh(void) { ++surface_mesh_attempts; return NULL; }
 bool Sim3DDepthPass_SelectSurfaceMesh(Sim3DDepthMesh *mesh,
@@ -788,6 +802,143 @@ static FrameSlot WorldNavigationSlot(void) {
   return slot;
 }
 
+static void TestNativeNavigationZoom(void) {
+  FakeBackend backend = {.output_width = 896, .output_height = 784,
+    .track_palace_focus = true};
+  assert(ArRenderDevice_Init(&g_render_device, &kFakeOps, &backend,
+      (ArRenderCapabilities){0}));
+  FrameSlot slot = WorldNavigationSlot();
+  slot.pixel_aspect = kPixelAspect_Square;
+  slot.sim.projection_distance_x100 = 0;
+  slot.sim.world_navigation_models = slot.sim.world_navigation_relief = false;
+  slot.sim.world_navigation_atmosphere = slot.sim.world_navigation_cloud_shadows = false;
+  const int zooms[] = {kSimWorldNavigationZoomNear, kSimWorldNavigationZoomMiddle,
+      kSimWorldNavigationZoomFar};
+  const int focus[][2] = {{64,64}, {96,64}, {32,48}, {48,16}};
+  for (unsigned f = 0; f < sizeof(focus)/sizeof(*focus); ++f) {
+    slot.sim.world_navigation.focus_x = focus[f][0] * kSimWorldMapTilePixels;
+    slot.sim.world_navigation.focus_y = focus[f][1] * kSimWorldMapTilePixels;
+    for (unsigned z = 0; z < sizeof(zooms)/sizeof(*zooms); ++z) {
+      slot.sim.world_navigation.matrix[0] = slot.sim.world_navigation.matrix[3] = zooms[z];
+      assert(SimWorldNavigationScene_Build(&slot.sim.world_navigation_scene,
+          &slot.sim.world_navigation, SimWorldMap_Serial()));
+      slot.sim.world_navigation_scene.composition.valid = true;
+      UploadWorldNavigationComposition(&slot);
+      ArRenderPointF points[3];
+      for (unsigned p = 0; p < 3; ++p) {
+        backend.palace_focus_uv = (ArRenderPointF){
+          (focus[f][0] + (p == 1)) / 128.0f,
+          (focus[f][1] + (p == 2)) / 128.0f};
+        backend.palace_focus_vertices = 0;
+        assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_Complete);
+        assert(backend.palace_focus_vertices);
+        points[p] = backend.palace_focus_position;
+      }
+      const float native_pixels = kSimWorldMapTilePixels * 256.0f / zooms[z] *
+          backend.output_height / kActRaiserAuthenticHeight;
+      for (unsigned p = 1; p < 3; ++p) {
+        const float actual = hypotf(points[p].x - points[0].x, points[p].y - points[0].y);
+        /* Finite tiles curve away from the tangent; the focal scale must
+         * still follow every native zoom, including off-centre towns. */
+        assert(fabsf(actual / native_pixels - 1) < .02f);
+      }
+    }
+  }
+  PresentWorldNav_ResetResources();
+}
+
+static void TestRejectedNavigationModelsStayCached(void) {
+  const char *incoming = SDL_getenv("AR_SIM3D_WORLD_GPU_MODELS");
+  char *saved = incoming ? SDL_strdup(incoming) : NULL;
+  assert(!incoming || saved);
+  assert(!SDL_setenv_unsafe("AR_SIM3D_WORLD_GPU_MODELS", "1", 1));
+  PresentWorldNav_ResetResources();
+  radial_accept = radial_reject_selection = true;
+  FakeBackend backend = {.output_width = 960, .output_height = 720};
+  assert(ArRenderDevice_Init(&g_render_device, &kFakeOps, &backend,
+      (ArRenderCapabilities){0}));
+  FrameSlot slot = WorldNavigationSlot();
+  slot.sim.world_navigation_towns.object_count = 1;
+  slot.sim.world_navigation_towns.objects[0] = (SimBackgroundVoxelObject){
+    .town = 2, .kind = kSimBackgroundVoxel_Factory, .cell_x = 15, .cell_y = 15,
+    .source_cells_w = 2, .source_cells_h = 2, .footprint_cells_w = 2, .footprint_cells_d = 2,
+    .visual_state = kSimStructureVisualState_Finished,
+  };
+  UploadWorldNavigationComposition(&slot);
+  for (unsigned frame = 0; frame < 3; ++frame)
+    assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_Complete);
+  assert(depth_solid_faces > 0 && WorldNavigationModelMesh_Enabled());
+  const unsigned selections = radial_selections;
+  const SimBackgroundVoxelModelCacheStats warm = SimBackgroundVoxelModelCache_Stats();
+  assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_Complete);
+  assert(radial_selections == selections);
+  assert(SimBackgroundVoxelModelCache_Stats().hits == warm.hits);
+  assert(SimBackgroundVoxelModelCache_Stats().misses == warm.misses);
+  radial_reject_selection = false;
+  const unsigned appends = radial_appends;
+  slot.sim.projection_distance_x100 += 100;
+  /* The GPU source selection is unchanged, so a remembered rejection stays
+   * cheap; a source/style revision must make the healthy adapter usable. */
+  slot.sim.light_azimuth_deg++;
+  assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_Complete);
+  assert(radial_appends > appends);
+  PresentWorldNav_ResetResources();
+  radial_accept = false;
+  if (saved) assert(!SDL_setenv_unsafe("AR_SIM3D_WORLD_GPU_MODELS", saved, 1));
+  else assert(!SDL_unsetenv_unsafe("AR_SIM3D_WORLD_GPU_MODELS"));
+  SDL_free(saved);
+  PresentWorldNav_ResetResources();
+}
+
+static void TestCacheBudgetRecovery(void) {
+  const char *incoming = SDL_getenv("AR_SIM3D_WORLD_GPU_MODELS");
+  char *saved = incoming ? SDL_strdup(incoming) : NULL;
+  assert(!incoming || saved);
+  assert(!SDL_setenv_unsafe("AR_SIM3D_WORLD_GPU_MODELS", "0", 1));
+  PresentWorldNav_ResetResources();
+  PresentWorldNav_TestCacheBudgets(0, 0);
+  FakeBackend backend = {.output_width = 960, .output_height = 720};
+  assert(ArRenderDevice_Init(&g_render_device, &kFakeOps, &backend, (ArRenderCapabilities){0}));
+  FrameSlot slot = WorldNavigationSlot();
+  slot.sim.world_navigation_lighting = true;
+  slot.sim.world_navigation_clouds = true;
+  slot.sim.cloud_opacity_pct = 35;
+  slot.sim.shadow_opacity_pct = 35;
+  slot.sim.shadow_softness_pct = 100;
+  slot.sim.world_navigation_towns.object_count = 1;
+  slot.sim.world_navigation_towns.objects[0] = (SimBackgroundVoxelObject){
+    .town = 2, .kind = kSimBackgroundVoxel_Factory, .cell_x = 15, .cell_y = 15,
+    .source_cells_w = 2, .source_cells_h = 2, .footprint_cells_w = 2, .footprint_cells_d = 2,
+    .visual_state = kSimStructureVisualState_Finished,
+  };
+  UploadWorldNavigationComposition(&slot);
+  for (unsigned frame = 0; frame < 3; ++frame)
+    assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_Complete);
+  WorldNavigationCacheTestState state = PresentWorldNav_TestCacheState();
+  assert(state.model_rejected && state.receivers_rejected);
+  assert(depth_solid_faces > 0 && depth_shadow_terrain_faces > 0);
+  /* Returning allocation headroom alone must not cause a per-frame retry. */
+  PresentWorldNav_TestCacheBudgets(8 * 1024 * 1024, 4 * 1024 * 1024);
+  assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_Complete);
+  state = PresentWorldNav_TestCacheState();
+  assert(state.model_rejected && state.receivers_rejected);
+  /* A changed view must recover both caches without a mode/resource reset. */
+  slot.sim.projection_distance_x100 += 100;
+  for (unsigned frame = 0; frame < 3; ++frame)
+    assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_Complete);
+  state = PresentWorldNav_TestCacheState();
+  assert(!state.model_rejected && !state.receivers_rejected);
+  assert(state.model_vertices && state.receivers);
+  const SimBackgroundVoxelModelCacheStats warm = SimBackgroundVoxelModelCache_Stats();
+  assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_Complete);
+  assert(SimBackgroundVoxelModelCache_Stats().hits == warm.hits);
+  assert(SimBackgroundVoxelModelCache_Stats().misses == warm.misses);
+  PresentWorldNav_ResetResources();
+  if (saved) assert(!SDL_setenv_unsafe("AR_SIM3D_WORLD_GPU_MODELS", saved, 1));
+  else assert(!SDL_unsetenv_unsafe("AR_SIM3D_WORLD_GPU_MODELS"));
+  SDL_free(saved);
+}
+
 static void TestAspectFitAndLocalGeometry(void) {
   FakeBackend backend = {
     .output_width = 1280,
@@ -970,6 +1121,11 @@ static void TestSpaceAndCloudCover(void) {
   assert(depth_shadow_terrain_faces == 9 * depth_expected_shadow_terrain_faces);
   assert(depth_shadow_ocean_faces > 0);
   assert(backend.cloud_ocean_shadow_draws > 0 && backend.cloud_ocean_shadow_draws <= 9 * 48);
+  const unsigned attempts = surface_mesh_attempts;
+  for (unsigned repeat = 0; repeat < 2; ++repeat)
+    assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_Complete);
+  assert(surface_mesh_attempts == attempts);
+  backend.space_draws = 1;
   const int body_draws = backend.cloud_body_draws;
   slot.sim.world_navigation.zoom_current = 0x0206;
   assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_Complete);
@@ -2194,6 +2350,67 @@ static float BoundsRandom(uint32_t *state) {
   return (*state >> 8) / 16777216.0f;
 }
 
+static void TestRadialModelCapacityRecovery(void) {
+  WorldNavigationModelMesh_Reset();
+  radial_accept = true;
+  enum { kBatch = 32, kCohorts = 16 };
+  const bool enabled = WorldNavigationModelMesh_Enabled();
+  WorldNavigationModelSource sources[kBatch] = {0};
+  WorldNavigationModelSourceStyle style = {
+    .chart_radius_tiles = 96, .tile_world = 1, .height_percent = 100,
+    .style = kSimBackgroundVoxelStyle_Varied,
+  };
+  Sim3DDepthRadialTransform transform = {.variant = 1};
+  size_t previous_vertices = 0;
+  unsigned compactions = 0;
+  /* Orbit/zoom can visit far more detailed models than one frame needs.
+   * A full historical cache must evict old sources, not disable rendering. */
+  for (unsigned cohort = 0; cohort < kCohorts; ++cohort) {
+    for (unsigned i = 0; i < kBatch; ++i) {
+      sources[i] = (WorldNavigationModelSource){
+        .object = {.town = 2, .kind = kSimBackgroundVoxel_Windmill,
+          .cell_x = i, .cell_y = cohort, .source_cells_w = 2, .source_cells_h = 2,
+          .footprint_cells_w = 2, .footprint_cells_d = 2,
+          .visual_state = kSimStructureVisualState_Finished},
+        .object_index = (uint16_t)(cohort * kBatch + i),
+        .detail = kSimBackgroundVoxelDetail_Ultra,
+        .source_x = 256 + i * 8, .source_y = 256 + cohort * 8,
+        .centre_x = kSimTownCellPixels, .centre_y = kSimTownCellPixels,
+      };
+    }
+    assert(WorldNavigationModelMesh_Draw(sources, kBatch, &style, &transform));
+    if (radial_vertices < previous_vertices) ++compactions;
+    previous_vertices = radial_vertices;
+    const unsigned publications = radial_publications;
+    assert(WorldNavigationModelMesh_Draw(sources, kBatch, &style, &transform));
+    assert(WorldNavigationModelMesh_Repeat(&transform));
+    assert(radial_publications == publications);
+  }
+  assert(compactions > 0);
+  /* An oversized *current* selection can still decline the optional nav
+   * cache. It must not poison a subsequent, smaller SIM embedding. */
+  WorldNavigationModelSource *dense = calloc(kBatch * kCohorts, sizeof(*dense));
+  assert(dense);
+  for (unsigned i = 0; i < kBatch * kCohorts; ++i) {
+    dense[i] = sources[i % kBatch];
+    dense[i].object_index = (uint16_t)i;
+  }
+  assert(!WorldNavigationModelMesh_Draw(dense, kBatch * kCohorts, &style, &transform));
+  const SimBackgroundVoxelModelCacheStats failed = SimBackgroundVoxelModelCache_Stats();
+  assert(!WorldNavigationModelMesh_Draw(dense, kBatch * kCohorts, &style, &transform));
+  assert(SimBackgroundVoxelModelCache_Stats().hits == failed.hits);
+  assert(WorldNavigationModelMesh_Enabled() == enabled);
+  sources[0].detail = kSimBackgroundVoxelDetail_Low;
+  /* Changing only the culled selection must recover too. */
+  assert(WorldNavigationModelMesh_Draw(sources, 1, &style, &transform));
+  style.model_revision++;
+  assert(WorldNavigationModelMesh_Draw(sources, 1, &style, &transform));
+  free(dense);
+  WorldNavigationModelMesh_Reset();
+  radial_accept = false;
+  SimBackgroundVoxelModelCache_Reset();
+}
+
 static void TestRadialBounds(void) {
   const WorldNavigationRadialBounds point = {.normal_min={0,0,1},.normal_max={0,0,1}};
   const Sim3DDepthRadialTransform identity = {
@@ -2421,12 +2638,16 @@ int main(void) {
   TestRadialBounds();
   TestRadialModelDefault();
   TestRadialModelResidency();
+  TestRadialModelCapacityRecovery();
   TestShadowClipPlanParity();
   TestTownReliefRegistration();
   uint8_t *rom = calloc(1, 0x100000);
   assert(rom && SimWorldMap_Init(rom, 0x100000));
   free(rom);
   TestAspectFitAndLocalGeometry();
+  TestNativeNavigationZoom();
+  TestRejectedNavigationModelsStayCached();
+  TestCacheBudgetRecovery();
   TestFailureRestoresFullOutput();
   TestAuthoredTownModelsUseSharedCacheAndDepth();
   TestOceanBatchFailureRecovery();
@@ -2438,7 +2659,7 @@ int main(void) {
     PresentWorldNav_ResetResources();
     const unsigned attempts = surface_mesh_attempts;
     TestSpaceAndCloudCover();
-    assert(surface_mesh_attempts == attempts + 1);
+    assert(surface_mesh_attempts > attempts + 1); /* Changed views may retry. */
   }
   setenv("AR_SIM3D_WORLD_GPU_GRID", "0", 1);
   TestGroundCacheInvalidation();

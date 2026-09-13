@@ -12,6 +12,7 @@
 #include "present_internal.h"
 #include "present_sim3d_internal.h"
 #include "present_sim_globe.h"
+#include "present_world_nav_model_mesh.h"
 #include "render/render_output.h"
 #include "render/localized_text_presenter.h"
 #include "settings.h"
@@ -21,6 +22,7 @@
 #include "sim/sim_world_navigation_capture.h"
 #include "sim/sim_town_ground_art.h"
 #include "sim/sim_background_voxel_model_cache.h"
+#include "sim/sim_world_navigation_mountains.h"
 
 enum { kWidth = 800, kHeight = 600, kRomBytes = 0x100000, kWramBytes = 0x20000 };
 #define CHECK(test) do { if (!(test)) { \
@@ -844,13 +846,13 @@ static void TestAnimatedTownCache(SDL_Renderer *renderer, const FrameSlot *slot,
     }
     PresentWorldNav_ResetResources();
     UploadWorldNavigationComposition(probe);
-    Sim3DDepthMesh *pressure[32] = {0};
+    Sim3DDepthMesh *pressure[128] = {0};
     unsigned pressure_count = 0;
     if (retained == 3) {
       CHECK(Sim3DDepthPass_Begin(&g_render_device, 1792, 1344, kArRenderFilter_Nearest));
-      while (pressure_count < 32 && (pressure[pressure_count] = Sim3DDepthPass_CreateGeometryMesh()))
+      while (pressure_count < 128 && (pressure[pressure_count] = Sim3DDepthPass_CreateGeometryMesh()))
         ++pressure_count;
-      CHECK(pressure_count >= 5 && pressure_count < 32);
+      CHECK(pressure_count >= 40 && pressure_count < 128);
       CHECK(!Sim3DDepthPass_CreateGeometryMesh());
     }
     const int phases[] = {0, 0, 0, 1, 2, 1, 0, 2};
@@ -1097,13 +1099,13 @@ static void TestRetainedMountainSurfaces(SDL_Renderer *renderer, const FrameSlot
     probe->sim.world_navigation.focus_x = (ox + 16) * kSimWorldMapTilePixels;
     probe->sim.world_navigation.focus_y = (oy + 16) * kSimWorldMapTilePixels;
     probe->sim.world_navigation.active_location = 2;
-    Sim3DDepthMesh *pressure[32] = {0};
+    Sim3DDepthMesh *pressure[128] = {0};
     unsigned pressure_count = 0;
     if (mode == 2) {
       CHECK(Sim3DDepthPass_Begin(&g_render_device, kWidth, kHeight, kArRenderFilter_Nearest));
-      while (pressure_count < 32 && (pressure[pressure_count] = Sim3DDepthPass_CreateGeometryMesh()))
+      while (pressure_count < 128 && (pressure[pressure_count] = Sim3DDepthPass_CreateGeometryMesh()))
         ++pressure_count;
-      CHECK(pressure_count >= 5 && pressure_count < 32);
+      CHECK(pressure_count >= 40 && pressure_count < 128);
       CHECK(!Sim3DDepthPass_CreateGeometryMesh());
     }
     for (int state = 0; state < kStates; ++state) {
@@ -1580,6 +1582,87 @@ static void TestSimGlobeImage(SDL_Renderer *renderer) {
   puts("SIM globe image cache: exact direct/cached pixels across 23 invalidation states, five repeats, mutable/versioned atlases; continuous-change scene traffic unchanged");
 }
 
+static void TestNavigationZoomEntry(SDL_Renderer *renderer) {
+  FrameSlot *navigation = malloc(sizeof(*navigation));
+  FrameSlot *town = malloc(sizeof(*town));
+  CHECK(navigation && town);
+  PresentWorldNav_ResetResources();
+  ResizeTestOutput(renderer, 2688, 2016);
+  InitSlot(navigation);
+  navigation->sim.world_navigation_models = navigation->sim.world_navigation_lighting = true;
+  navigation->sim.world_navigation_towns.object_count = 96;
+  for (unsigned i = 0; i < 96; ++i) {
+    navigation->sim.world_navigation_towns.objects[i] = (SimBackgroundVoxelObject){
+      .town = 2, .kind = kSimBackgroundVoxel_Windmill,
+      .cell_x = 4 + (i % 12) * 2, .cell_y = 4 + (i / 12) * 2,
+      .source_cells_w = 2, .source_cells_h = 2,
+      .footprint_cells_w = 2, .footprint_cells_d = 2,
+      .visual_state = kSimStructureVisualState_Finished,
+    };
+  }
+  navigation->sim.world_navigation.zoom_current = navigation->sim.world_navigation.zoom_target =
+      kSimWorldNavigationZoomNear;
+  navigation->sim.world_navigation.matrix[0] = navigation->sim.world_navigation.matrix[3] =
+      kSimWorldNavigationZoomNear;
+  BuildScene(navigation);
+  *town = *navigation;
+  town->sim.view = kSimView_Enhanced;
+  town->sim.town = 4;
+  int ox, oy; CHECK(SimWorldMap_OriginForTown(4, &ox, &oy));
+  town->sim.underlay_origin_tile_x = ox; town->sim.underlay_origin_tile_y = oy;
+  const Scene3DCamera camera = {-.575f,0,2,.4f};
+  const ArRenderRectI source = {0,0,360,224};
+  SDL_Surface *reference = RenderSimGlobe(renderer, town, &camera, source);
+  PresentWorldNav_ResetResources();
+  UploadWorldNavigationComposition(navigation);
+  const int distances[] = {600,450,300,247,200,300,450,200};
+  for (unsigned i = 0; i < sizeof(distances)/sizeof(*distances); ++i) {
+    navigation->sim.projection_distance_x100 = distances[i];
+    SDL_Surface *image = Render(renderer, navigation, NULL);
+    SDL_DestroySurface(image);
+    CHECK(WorldNavigationModelMesh_Enabled());
+  }
+  /* Do not reset any resources between close-up navigation and town entry. */
+  SDL_Surface *entry = RenderSimGlobe(renderer, town, &camera, source);
+  CHECK(Differences(reference, entry) == 0);
+  SDL_DestroySurface(entry); SDL_DestroySurface(reference);
+  /* The connected camera's far bound must still permit an immediately
+   * visible wheel step toward the town. Both renders use the same mapping,
+   * selected town and resident geometry; only the camera distance changes. */
+  Scene3DCamera zoom = {-.575f,0,4.5f,.4f};
+  PresentSimGlobe_ClampCamera(&zoom);
+  SDL_Surface *far = RenderSimGlobe(renderer, town, &zoom, source);
+  zoom.distance -= .25f;
+  PresentSimGlobe_ClampCamera(&zoom);
+  SDL_Surface *near = RenderSimGlobe(renderer, town, &zoom, source);
+  CHECK(Differences(far, near) > 100);
+  SDL_DestroySurface(far); SDL_DestroySurface(near);
+  /* More than one upload of visible terrain, plus two equally large sets
+   * which belong to the active facade or lie beyond the connected window. */
+  enum { kMountainCopies = 65537 };
+  SimWorldNavigationMountainFace *faces = calloc(kMountainCopies * 3, sizeof(*faces));
+  CHECK(faces);
+  for (unsigned group = 0; group < 3; ++group) {
+    SimWorldNavigationMountainFace face = {.town = group == 0 ? town->sim.town : 2};
+    for (unsigned p = 0; p < 4; ++p) {
+      face.x[p] = ox - (group == 1 ? 40 : 2) + ((p == 1 || p == 2) ? .5f : 0);
+      face.y[p] = oy + 16 + (p >= 2 ? .5f : 0);
+      face.z[p] = .1f; face.brightness[p] = 255;
+      face.uv[p] = (SimBackgroundMountainMeshUV){.25f,.25f};
+    }
+    for (unsigned i = 0; i < kMountainCopies; ++i) faces[group*kMountainCopies+i] = face;
+  }
+  CHECK(Sim3DDepthPass_Begin(&g_render_device,2688,2016,kArRenderFilter_Nearest));
+  size_t published = 0, chunks = 0;
+  CHECK(PresentSimGlobe_TestSurfaceSource(town,faces,kMountainCopies*3,&published,&chunks));
+  CHECK(published == kMountainCopies && chunks == 2);
+  free(faces);
+  free(town); free(navigation);
+  PresentWorldNav_ResetResources();
+  ResizeTestOutput(renderer, kWidth, kHeight);
+  puts("close-up navigation -> SIM: 96 animated buildings, eight zoom/LOD changes, cold/transition pixels exact");
+}
+
 static void TestSynthetic(SDL_Renderer *renderer) {
   /* Legacy projected-geometry/cache oracles intentionally use compatibility.
    * TestGpuGridRevisions below explicitly clears this to verify the default. */
@@ -1765,6 +1848,7 @@ static void TestSynthetic(SDL_Renderer *renderer) {
   TestGpuGridRevisions(renderer, slot);
   TestWorldAtlasVersions(renderer, slot);
   TestSimGlobeImage(renderer);
+  TestNavigationZoomEntry(renderer);
   free(slot);
   PresentWorldNav_ResetResources();
   Sim3DDepthPass_Reset(&g_render_device);

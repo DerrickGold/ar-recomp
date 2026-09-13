@@ -1014,9 +1014,9 @@ typedef struct SimFrameData {
   uint64_t separated_hash;
   uint32_t separated_backdrop_argb;
   bool object_half_add;
-  /* Shared town/navigation perspective camera. Navigation first uses its
-   * captured affine for focus, in-plane rotation and zoom, then places that
-   * plane through this same oblique camera so town entry has no pose seam. */
+  /* Resolved presentation camera for this view. Navigation is radial and
+   * uses native affine zoom: distance zero is its scale-matched baseline,
+   * with positive distances reserved for visit-local manual inspection. */
   int16_t projection_pitch_mrad, projection_yaw_mrad;
   uint16_t projection_distance_x100;
   /* Audited town relief magnitude, independent of actor/model height. */

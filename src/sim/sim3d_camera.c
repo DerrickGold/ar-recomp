@@ -20,8 +20,10 @@ enum {
 };
 
 static const float kSim3DCameraDefaultSceneRadius = 0.4f;
-static const float kSim3DCameraDistanceMinimum = 2.0f;
-static const float kSim3DCameraDistanceMaximum = 20.0f;
+static const float kSim3DCameraDistanceMinimum =
+    (float)kSim3DCameraDistanceMinimumX100 / kPercentScale;
+static const float kSim3DCameraDistanceMaximum =
+    (float)kSim3DCameraDistanceMaximumX100 / kPercentScale;
 static const float kSim3DCameraOrbitReturnTimeSeconds = 0.35f;
 
 static bool s_dragging;
@@ -55,6 +57,17 @@ static bool ProfileUsesGround(SimRenderFeatureMask features) {
   return (features & required) == required;
 }
 
+static int TownCameraDistanceMaximum(void) {
+  const SimRenderFeatureMask required = kSimFeature_SeparatedComposite |
+      kSimFeature_GroundProjection | kSimFeature_WorldUnderlay | kSimFeature_GlobeUnderlay;
+  const SimRenderFeatureMask features =
+      Settings_Sim3DRequestedFeatures() & Sim3D_ImplementedFeatures();
+  return g_settings.sim3d_mode &&
+      ActRaiser_IsSimulationTown(g_ram[kActRaiserWram_MapGroup],
+          g_ram[kActRaiserWram_CurrentMap]) && (features & required) == required
+      ? kSim3DConnectedCameraDistanceMaximumX100 : kSim3DCameraDistanceMaximumX100;
+}
+
 bool Sim3DCamera_ControlsAvailable(bool textures_ready) {
   if (WorldNavigationActive()) return textures_ready;
   if (!g_settings.sim3d_mode || !textures_ready ||
@@ -79,17 +92,24 @@ void Sim3DCamera_CapturePresentationState(
     .yaw_mrad = dynamic
         ? g_settings.sim3d_dyncam_baseline_tilt_y_mrad
         : g_settings.sim3d_tilt_y_mrad,
-    .distance_x100 = dynamic
+    .distance_x100 = world ? 0 : dynamic
         ? g_settings.sim3d_dyncam_baseline_distance_x100
         : g_settings.sim3d_distance_x100,
     .orbit_yaw = world ? s_world_orbit.yaw : s_dynamic_orbit.yaw,
     .orbit_pitch = world ? s_world_orbit.pitch : s_dynamic_orbit.pitch,
   };
   if (world && s_world_zoom != 0) {
-    const float base = state->distance_x100 > 0 ? state->distance_x100 / 100.0f
-        : Scene3D_AutoFitDistance(kSim3DCameraDefaultSceneRadius);
-    state->distance_x100 = (int)(fminf(kSim3DCameraDistanceMaximum,
+    /* The native Mode-7 matrix owns navigation zoom. Zero resolves to its
+     * scale-matched camera, never the persisted free/dynamic town distance.
+     * Manual inspection remains a visit-local offset from that baseline. */
+    const float base = Scene3D_AutoFitDistance(kSim3DCameraDefaultSceneRadius);
+    state->distance_x100 = (int)lroundf(fminf(kSim3DCameraDistanceMaximum,
         fmaxf(kSim3DCameraDistanceMinimum, base + s_world_zoom)) * kSim3DCameraDistanceScale);
+  } else if (!world) {
+    /* Resolve old saved poses without rewriting settings during capture.
+     * Reactive motion and the next input must start from the visible pose. */
+    const int maximum = TownCameraDistanceMaximum();
+    if (state->distance_x100 > maximum) state->distance_x100 = maximum;
   }
 }
 
@@ -127,6 +147,7 @@ void Sim3DCamera_Adjust(float yaw_delta, float pitch_delta,
     }
     return;
   }
+  const float maximum_distance = (float)TownCameraDistanceMaximum() / kSim3DCameraDistanceScale;
   if (g_settings.sim3d_camera_mode == kSimCam_Dynamic) {
     const float baseline_yaw =
         (float)g_settings.sim3d_dyncam_baseline_tilt_y_mrad /
@@ -148,9 +169,9 @@ void Sim3DCamera_Adjust(float yaw_delta, float pitch_delta,
             (float)kSim3DCameraDistanceScale
         : Scene3D_AutoFitDistance(kSim3DCameraDefaultSceneRadius);
     distance = ClampFloat(
-        distance + zoom_delta,
+        ClampFloat(distance, kSim3DCameraDistanceMinimum, maximum_distance) + zoom_delta,
         kSim3DCameraDistanceMinimum,
-        kSim3DCameraDistanceMaximum);
+        maximum_distance);
     g_settings.sim3d_dyncam_baseline_distance_x100 =
         (int)(distance * (float)kSim3DCameraDistanceScale);
     MarkSettingsDirty();
@@ -173,9 +194,9 @@ void Sim3DCamera_Adjust(float yaw_delta, float pitch_delta,
             (float)kSim3DCameraDistanceScale
         : Scene3D_AutoFitDistance(kSim3DCameraDefaultSceneRadius);
     distance = ClampFloat(
-        distance + zoom_delta,
+        ClampFloat(distance, kSim3DCameraDistanceMinimum, maximum_distance) + zoom_delta,
         kSim3DCameraDistanceMinimum,
-        kSim3DCameraDistanceMaximum);
+        maximum_distance);
     g_settings.sim3d_distance_x100 =
         (int)(distance * (float)kSim3DCameraDistanceScale);
   }

@@ -47,8 +47,10 @@ typedef struct Sim3DDepthVertex {
 
 typedef struct Sim3DDepthMesh Sim3DDepthMesh;
 typedef struct Sim3DDepthPosition { float x, y, depth; } Sim3DDepthPosition;
-/* Bounded per-source publication contract, shared by all retained mesh kinds. */
+/* Bounded per-source publication contract. Radial solids allow a larger
+ * resident source to retain multiple LODs/poses; storage grows on demand. */
 enum { kSim3DDepthMaximumSourceQuads = 64 * 1024 };
+enum { kSim3DDepthMaximumRadialSourceQuads = 128 * 1024 };
 
 /* Optional retained screen-space quad geometry. The caller owns the opaque
  * mesh, all calls belong to the presentation thread, and Reset invalidates
@@ -349,6 +351,18 @@ typedef struct Sim3DDepthSurfaceBatch {
 } Sim3DDepthSurfaceBatch;
 bool Sim3DDepthPass_AppendSurfaceBatches(Sim3DDepthMesh *mesh,
     const Sim3DDepthSurfaceBatch *batches, size_t batch_count);
+
+/* Multi-source equivalents validate the complete submission before queuing
+ * anything. A caller may partition a large live scene without partial draws
+ * when a later mesh/transform/budget is rejected. Same ownership rules above. */
+typedef struct Sim3DDepthSurfaceMeshBatch {
+  Sim3DDepthMesh *mesh;
+  Sim3DDepthSurfaceBatch batch;
+} Sim3DDepthSurfaceMeshBatch;
+bool Sim3DDepthPass_AppendSurfaceMeshBatches(
+    const Sim3DDepthSurfaceMeshBatch *batches, size_t batch_count);
+bool Sim3DDepthPass_AppendLinearMeshes(Sim3DDepthMesh *const *meshes,
+    size_t mesh_count, const Sim3DDepthLinearTransform *transform);
 
 /* Creates the shaders/pipeline and verifies D32 support. Call during video
  * startup so an unsupported backend is a launch error, never a missing-scene

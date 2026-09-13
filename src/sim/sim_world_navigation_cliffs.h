@@ -4,6 +4,8 @@
 #include <stddef.h>
 #include "sim_world_map.h"
 
+enum { kSimWorldNavigationCliffMaximumFaces = kSimWorldMapTiles * kSimWorldMapTiles * 5 };
+
 /* Sparse replacements for the shared overview grid: only cells with an
  * authored cliff material or a different owned corner need a private cap.
  * All heights are absolute registered world units, not model-local rises. */

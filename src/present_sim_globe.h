@@ -32,5 +32,11 @@ PresentationOutcome PresentSimGlobeUnderlay(const FrameSlot *slot,
 #if AR_SIM_GLOBE_TESTING
 /* Direct-render oracle only; not a shipping setting or environment switch. */
 void PresentSimGlobe_TestRetainImages(bool enabled);
+struct SimWorldNavigationMountainFace;
+/* Temporary synthetic source for capacity tests after a normal SIM draw.
+ * Requires an active depth pass; restores authored sources before returning. */
+bool PresentSimGlobe_TestSurfaceSource(const FrameSlot *slot,
+    struct SimWorldNavigationMountainFace *faces, size_t count,
+    size_t *published_mountains, size_t *chunks);
 #endif
 #endif

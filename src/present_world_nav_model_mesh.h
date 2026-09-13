@@ -26,7 +26,10 @@ bool WorldNavigationModelMesh_Enabled(void);
 /* Sources are already whole-object culled and LOD selected, in draw order.
  * No FrameSlot or compiler view is retained. False queues nothing: the caller
  * can use its existing multicore renderer. Camera/viewport/pose changes alone
- * never republish the source vertices. One bounded opaque handle is owned. */
+ * never republish the source vertices unless the 16 MiB residency cache needs
+ * eviction. Eviction rebuilds the current selection without changing detail.
+ * Content rejection is selection-local, not a permanent device failure.
+ * One bounded opaque handle is owned. */
 bool WorldNavigationModelMesh_Draw(const WorldNavigationModelSource *sources,
     size_t count, const WorldNavigationModelSourceStyle *style,
     const Sim3DDepthRadialTransform *transform);

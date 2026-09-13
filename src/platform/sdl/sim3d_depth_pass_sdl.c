@@ -37,15 +37,16 @@ enum {
   kSim3DDepthInitialCpuVertexCapacity = 4096,
   kSim3DDepthInitialGpuVertexCapacity = 8192,
   kMaximumRetainedMeshes = 16,
-  /* Navigation surface/models, the hybrid underlay and both retained town
-   * passes may coexist. Four slots starved the second town cache, forcing
-   * otherwise static geometry through CPU staging every frame. Storage is
-   * allocated only for published meshes; effect/sample budgets stay separate. */
-  kMaximumGeometryMeshes = 8,
+  /* Two 16-chunk globe surfaces, up to seven live town-model chunks and
+   * ordinary/radial caches can coexist across modes. These are handle limits,
+   * not preallocated GPU storage. Each source still has its own small bound. */
+  kMaximumGeometryMeshes = 64,
   kMaximumRetainedVertices = kSim3DDepthMaximumSourceQuads * 4,
   /* Optional opaque caching must not consume the existing weather budget.
    * Keep both domains bounded without making callers budget backend slots. */
-  kMaximumEffectSamples = 64,
+  /* A split world surface repeats its nine shadow taps/two overlays per
+   * chunk. Leave separate room for the atmosphere/cloud-body samples. */
+  kMaximumEffectSamples = 256,
   kMaximumGeometrySamples = 64,
   kMaximumMeshSamples = kMaximumEffectSamples + kMaximumGeometrySamples,
   kMaximumSampleVertices = 2 * 1024 * 1024,
@@ -1368,7 +1369,8 @@ static bool ReserveMesh(Sim3DDepthMesh *mesh, Uint32 count) {
 static bool CanUpdateMesh(const Sim3DDepthMesh *mesh, size_t quad_count, Sim3DMeshKind kind) {
   return g_depth_pass.collecting && mesh && mesh->kind == kind && MeshPipeline(kind) &&
       !mesh->queued && (!mesh->device || mesh->device == g_depth_pass.device) &&
-      quad_count && quad_count <= kMaximumRetainedVertices / 4;
+      quad_count && quad_count <= (kind == kMeshRadial
+          ? kSim3DDepthMaximumRadialSourceQuads : kSim3DDepthMaximumSourceQuads);
 }
 
 static bool ValidPosition(Sim3DDepthPosition position) {
@@ -1697,21 +1699,31 @@ static bool LinearTransformSafe(const Sim3DDepthMesh *mesh,
 
 bool Sim3DDepthPass_AppendLinearMesh(Sim3DDepthMesh *mesh,
     const Sim3DDepthLinearTransform *transform) {
-  if (!Sim3DDepthPass_MeshReady(mesh) || mesh->kind != kMeshLinear ||
-      g_depth_pass.geometry_sample_count == kMaximumGeometrySamples ||
-      !LinearTransformSafe(mesh, transform)) return false;
-  Sim3DMeshSample *sample = &g_depth_pass.samples[g_depth_pass.sample_count++];
-  ++g_depth_pass.geometry_sample_count;
-  *sample = (Sim3DMeshSample){.mesh = mesh, .layer = kSim3DDepthPass_Solid,
-    .count = mesh->count, .ordinary_before = g_depth_pass.lists[kSim3DDepthPass_Solid].count};
-  memcpy(sample->linear.matrix, transform->matrix, sizeof(transform->matrix));
-  memcpy(sample->linear.offset, transform->offset, sizeof(transform->offset));
-  for (unsigned i = 0; i < kSim3DDepthLinearAxisCount; ++i)
-    memcpy(sample->linear.axes[i], transform->axes[i], sizeof(transform->axes[i]));
-  sample->linear.raster[0] = (float)g_depth_pass.width;
-  sample->linear.raster[1] = (float)g_depth_pass.height;
-  sample->linear.raster[2] = transform->pixel_centers ? 1 : 0;
-  mesh->queued = true;
+  return Sim3DDepthPass_AppendLinearMeshes(&mesh, 1, transform);
+}
+
+bool Sim3DDepthPass_AppendLinearMeshes(Sim3DDepthMesh *const *meshes,
+    size_t mesh_count, const Sim3DDepthLinearTransform *transform) {
+  if (!meshes || !mesh_count ||
+      mesh_count > kMaximumGeometrySamples - g_depth_pass.geometry_sample_count) return false;
+  for (size_t i = 0; i < mesh_count; ++i)
+    if (!Sim3DDepthPass_MeshReady(meshes[i]) || meshes[i]->kind != kMeshLinear ||
+        !LinearTransformSafe(meshes[i], transform)) return false;
+  for (size_t i = 0; i < mesh_count; ++i) {
+    Sim3DDepthMesh *mesh = meshes[i];
+    Sim3DMeshSample *sample = &g_depth_pass.samples[g_depth_pass.sample_count++];
+    ++g_depth_pass.geometry_sample_count;
+    *sample = (Sim3DMeshSample){.mesh = mesh, .layer = kSim3DDepthPass_Solid,
+      .count = mesh->count, .ordinary_before = g_depth_pass.lists[kSim3DDepthPass_Solid].count};
+    memcpy(sample->linear.matrix, transform->matrix, sizeof(transform->matrix));
+    memcpy(sample->linear.offset, transform->offset, sizeof(transform->offset));
+    for (unsigned axis = 0; axis < kSim3DDepthLinearAxisCount; ++axis)
+      memcpy(sample->linear.axes[axis], transform->axes[axis], sizeof(transform->axes[axis]));
+    sample->linear.raster[0] = (float)g_depth_pass.width;
+    sample->linear.raster[1] = (float)g_depth_pass.height;
+    sample->linear.raster[2] = transform->pixel_centers ? 1 : 0;
+    mesh->queued = true;
+  }
   return true;
 }
 
@@ -1748,12 +1760,12 @@ bool Sim3DDepthPass_UpdateRadialMesh(Sim3DDepthMesh *mesh,
 bool Sim3DDepthPass_SelectRadialMesh(Sim3DDepthMesh *mesh,
     const Sim3DDepthMeshRange *ranges, size_t range_count) {
   if (!Sim3DDepthPass_MeshReady(mesh) || mesh->kind != kMeshRadial || mesh->queued ||
-      !ranges || !range_count || range_count > kMaximumRetainedVertices / 4) return false;
+      !ranges || !range_count || range_count > kSim3DDepthMaximumRadialSourceQuads) return false;
   size_t quads = 0;
   for (size_t i = 0; i < range_count; ++i) {
     if (ranges[i].first_quad > mesh->count / 4 ||
         ranges[i].quad_count > mesh->count / 4 - ranges[i].first_quad ||
-        ranges[i].quad_count > kMaximumRetainedVertices / 4 - quads) return false;
+        ranges[i].quad_count > kSim3DDepthMaximumRadialSourceQuads - quads) return false;
     quads += ranges[i].quad_count;
   }
   if (!quads) return false;
@@ -2193,12 +2205,22 @@ static void QueueSurfaceLayers(Sim3DDepthMesh *mesh, Sim3DDepthPassLayer opaque_
 
 bool Sim3DDepthPass_AppendSurfaceBatches(Sim3DDepthMesh *mesh,
     const Sim3DDepthSurfaceBatch *batches, size_t batch_count) {
-  if (!Sim3DDepthPass_MeshReady(mesh) || mesh->kind != kMeshSurface ||
-      !batches || !batch_count || batch_count > kMaximumGeometrySamples) return false;
-  const size_t quads = (mesh->surface_selected ? mesh->selection_count : mesh->count)/4;
+  if (!batches || !batch_count || batch_count > kMaximumGeometrySamples) return false;
+  Sim3DDepthSurfaceMeshBatch source[kMaximumGeometrySamples];
+  for (size_t i = 0; i < batch_count; ++i)
+    source[i] = (Sim3DDepthSurfaceMeshBatch){mesh, batches[i]};
+  return Sim3DDepthPass_AppendSurfaceMeshBatches(source, batch_count);
+}
+
+bool Sim3DDepthPass_AppendSurfaceMeshBatches(
+    const Sim3DDepthSurfaceMeshBatch *batches, size_t batch_count) {
+  if (!batches || !batch_count || batch_count > kMaximumGeometrySamples) return false;
   size_t geometry = 0, effects = 0;
   for (size_t i = 0; i < batch_count; ++i) {
-    const Sim3DDepthSurfaceBatch *b = &batches[i];
+    Sim3DDepthMesh *mesh = batches[i].mesh;
+    if (!Sim3DDepthPass_MeshReady(mesh) || mesh->kind != kMeshSurface) return false;
+    const size_t quads = (mesh->surface_selected ? mesh->selection_count : mesh->count)/4;
+    const Sim3DDepthSurfaceBatch *b = &batches[i].batch;
     if ((b->layer != kSim3DDepthPass_Ground && b->layer != kSim3DDepthPass_Mountain &&
          b->layer != kSim3DDepthPass_WorldMountain) ||
         (b->layer != kSim3DDepthPass_Ground && (b->shadow_count || b->overlay_count)) ||
@@ -2211,7 +2233,8 @@ bool Sim3DDepthPass_AppendSurfaceBatches(Sim3DDepthMesh *mesh,
       effects > kMaximumEffectSamples-(g_depth_pass.sample_count-g_depth_pass.geometry_sample_count))
     return false;
   for (size_t i = 0; i < batch_count; ++i) {
-    const Sim3DDepthSurfaceBatch *b = &batches[i];
+    Sim3DDepthMesh *mesh = batches[i].mesh;
+    const Sim3DDepthSurfaceBatch *b = &batches[i].batch;
     if (b->range.quad_count)
       QueueSurfaceLayers(mesh,b->layer,b->range,&b->transform,b->shadows,b->shadow_count,b->overlays,b->overlay_count);
   }
