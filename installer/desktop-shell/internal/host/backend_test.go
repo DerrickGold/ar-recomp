@@ -16,6 +16,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/DerrickGold/ar-recomp/installer/internal/subprocess"
 )
 
 // Re-exec this test binary in place of the build driver, on every target OS.
@@ -32,6 +34,13 @@ func TestMain(m *testing.M) {
 }
 
 func runCloseTestHelper(mode string) error {
+	for _, arg := range os.Args[1:] {
+		if arg == "--desktop-start-gate" {
+			if err := subprocess.WaitForDesktopGate(os.Stdin); err != nil {
+				return err
+			}
+		}
+	}
 	// Keep a broken test from leaving unbounded subprocesses behind.
 	time.AfterFunc(20*time.Second, func() { os.Exit(2) })
 	if len(os.Args) > 1 && os.Args[1] == "close-test-worker" {

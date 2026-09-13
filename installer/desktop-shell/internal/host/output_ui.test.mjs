@@ -14,7 +14,7 @@ async function setup(current=""){
   const nodes=Object.fromEntries([...html.matchAll(/<(\w+)[^>]*\bid="([^"]+)"/g)].map(([,tag,id])=>[id,new Node(tag)]));
   const requests=[],navigation=[];let response=(endpoint)=>({candidate:"/portable/Game",current});
   const document={getElementById:id=>nodes[id],createElement:tag=>new Node(tag),querySelectorAll:()=>Object.values(nodes).filter(n=>["button","input"].includes(n.tag))};
-  runInNewContext(script,{document,location:{replace:path=>navigation.push(path)},fetch:async(endpoint,options)=>{
+  runInNewContext(script,{window:{},document,location:{replace:path=>navigation.push(path)},fetch:async(endpoint,options)=>{
     const body=options?.body?JSON.parse(options.body):undefined;requests.push({endpoint,body});
     const value=await response(endpoint,body);return {ok:!value.error,status:value.error?400:200,json:async()=>value};
   }});
@@ -27,6 +27,7 @@ test("first launch reviews a destination without accepting it or losing literal 
   s.respond(()=>({directory:"/portable/Game <my files>",revision:"first",existing:false,game:false,entries:[]}));
   await n["folder-form"].fire("submit");
   assert.equal(n["review-path"].textContent,"/portable/Game <my files>");assert.equal(n.apply.disabled,false);
+  assert.match(n["review-description"].textContent,/start a new portable game installation/);
   assert.deepEqual(s.requests.map(r=>r.endpoint),["state","review"]);
   s.respond((endpoint,body)=>{assert.equal(endpoint,"apply");assert.equal(body.revision,"first");return {restartRequired:false};});
   await n.apply.fire("click");assert.deepEqual(s.navigation,["../../"]);
@@ -35,7 +36,9 @@ test("non-empty destinations require confirmation, invalidated by edits",async()
   const s=await setup(),n=s.nodes;
   s.respond(()=>({directory:"/old/Game",revision:"review",existing:true,game:true,entries:["saves","<not HTML>"]}));
   await n["folder-form"].fire("submit");
-  assert.equal(n["review-title"].textContent,"Update existing installation");assert.equal(n.apply.disabled,true);
+  assert.equal(n["review-title"].textContent,"Existing game folder");assert.equal(n.apply.disabled,true);
+  assert.equal(n.apply.textContent,"Open existing installation");
+  assert.match(n["review-description"].textContent,/use its settings, assets, ROM and saves directly; no import is needed/);
   n.confirm.checked=true;await n.confirm.fire("change");assert.equal(n.apply.disabled,false);
   assert.equal(n.entries.children[1].textContent,"<not HTML>");
   n.directory.value="/different";await n.directory.fire("input");

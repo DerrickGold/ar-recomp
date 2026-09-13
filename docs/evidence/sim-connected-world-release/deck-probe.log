@@ -1,6 +1,0 @@
-1/2 explicit: captures complete
-2/2 default: captures complete
-1/4 flat: 210.90 workload FPS; 3.400 ms render CPU; 0.206 ms underlay
-2/4 default: 201.27 workload FPS; 3.463 ms render CPU; 0.332 ms underlay
-3/4 default: 207.03 workload FPS; 3.358 ms render CPU; 0.319 ms underlay
-4/4 flat: 210.67 workload FPS; 3.415 ms render CPU; 0.203 ms underlay

@@ -3,7 +3,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
-output_path="${1:-$repo_root/docs/research/sim-voxel-model-audit/voxel-model-audit-sheet.png}"
+output_path="${1:-$repo_root/development/documentation-archive/docs/research/sim-voxel-model-audit/voxel-model-audit-sheet.png}"
 work_root="${TMPDIR:-/tmp}/actraiser-sim-voxel-model-sheet"
 render_dir="$work_root/renders"
 card_dir="$work_root/cards"

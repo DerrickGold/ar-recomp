@@ -1,3 +1,5 @@
+#include "snesrecomp/support/utf8_fs.h"
+
 #include "dev_tools.h"
 
 #include <errno.h>
@@ -33,7 +35,7 @@ enum {
 
 static void EnsureDirectoryExists(const char *path) {
 #ifdef _WIN32
-  const int result = _mkdir(path);
+  const int result = sr_mkdir(path);
 #else
   const int result = mkdir(path, 0755);
 #endif
@@ -211,7 +213,7 @@ void DevTools_TakeFullSnapshot(const DevToolsContext *context) {
 
   char screenshot_path[344];
   snprintf(screenshot_path, sizeof(screenshot_path), "%s.ppm", prefix);
-  FILE *screenshot = fopen(screenshot_path, "wb");
+  FILE *screenshot = sr_fopen(screenshot_path, "wb");
   if (screenshot) {
     DevToolsCaptureResult result = DevTools_WriteFramebufferPpm(screenshot, context, false);
     if (fclose(screenshot) != 0) result.kind = kDevToolsCapture_Failed;

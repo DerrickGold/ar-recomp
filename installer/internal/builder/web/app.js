@@ -110,10 +110,17 @@ function show(kind,text){
   state.dataset.kind=kind; state.textContent=text;
   workspaceStatus.dataset.kind=kind; workspaceStatus.textContent=text; workspaceStatus.title=text;
 }
-function showKey(kind,key,args={}) {
+function showKey(kind,key,args={},error,operation="Check Builder status") {
   show(kind,ui.text(key,args));
   ui.set(state,key,args); ui.set(workspaceStatus,key,args);
+  const feedback=window.workshopFeedback;
+  if(kind==="failed"){
+    feedback?.show(state,error||new Error(args.detail||ui.text(key,args)),{operation:key==="builder.build.failed"?"Build game":operation,log:key==="builder.build.failed"?log.textContent:"",retry:refresh});
+    if(feedback) ui.set(workspaceStatus,"builder.feedback.failed");
+  }else feedback?.clear(state);
+  const details=document.getElementById("dock-error");if(details)details.hidden=kind!=="failed";
 }
+document.getElementById("dock-error")?.addEventListener("click",()=>{selectTab(buildTab);state.scrollIntoView({block:"center"});state.focus();});
 document.addEventListener("workshop:language",()=>{
   workspaceStatus.title=workspaceStatus.textContent;
   if(lastPaint) paint(lastPaint.progress,lastPaint.kind);
@@ -440,6 +447,7 @@ function paintAssetConfiguration(config){
 }
 
 async function loadAssetConfiguration(){
+  window.workshopFeedback?.clear(assetState);
   assetState.hidden=false;
   assetState.dataset.kind="loading";
   ui.set(assetState,"builder.assets.loading");
@@ -460,10 +468,12 @@ async function loadAssetConfiguration(){
     assetState.hidden=false;
     assetState.dataset.kind="failed";
     ui.set(assetState,"builder.assets.load_failed",{detail:error.message});
+    window.workshopFeedback?.show(assetState,error,{operation:"Load asset configuration",retry:loadAssetConfiguration});
   }
 }
 
 function paintAudioPreviewStatus(status){
+  window.workshopFeedback?.clear(previewState);
   const generating=status.state==="generating";
   generatePreviews.disabled=!status.romAvailable||generating;
   if(!status.romAvailable){
@@ -475,6 +485,7 @@ function paintAudioPreviewStatus(status){
   } else if(status.state==="failed"){
     previewState.dataset.kind="failed";
     ui.set(previewState,status.error?"builder.assets.preview_failed_detail":"builder.assets.preview_failed",{detail:status.error});
+    window.workshopFeedback?.show(previewState,new Error(status.error||"Audio preview generation failed"),{operation:"Extract audio previews"});
   } else if(status.state==="ready"){
     previewState.dataset.kind="ready";
     ui.set(previewState,"builder.assets.previews_ready");
@@ -517,11 +528,13 @@ async function loadAudioPreviewStatus(){
     previewPolling=false;
     previewState.dataset.kind="failed";
     ui.set(previewState,"builder.assets.preview_status_failed",{detail:error.message});
+    window.workshopFeedback?.show(previewState,error,{operation:"Read audio preview status",retry:loadAudioPreviewStatus});
   }
   if(previewPolling) previewTimer=setTimeout(loadAudioPreviewStatus,500);
 }
 
 async function startAudioPreviews(force){
+  window.workshopFeedback?.clear(previewState);
   generatePreviews.disabled=true;
   regeneratePreviews.disabled=true;
   previewState.dataset.kind="loading";
@@ -537,6 +550,7 @@ async function startAudioPreviews(force){
     const key=["builder.assets.need_rom","builder.assets.preview_busy"].includes(error.code)
       ? error.code : "builder.assets.preview_start_failed";
     ui.set(previewState,key,{detail:error.message});
+    window.workshopFeedback?.show(previewState,error,{operation:"Start audio previews"});
     generatePreviews.disabled=false;
     regeneratePreviews.disabled=false;
   }
@@ -787,6 +801,7 @@ document.addEventListener("play",event=>{
 
 assetForm.addEventListener("submit",async event=>{
   event.preventDefault();
+  window.workshopFeedback?.clear(assetState);
   saveAssetsTop.disabled=true; discardAssets.disabled=true;
   ui.set(assetBarNote,"builder.assets.saving");
   assetState.hidden=false;
@@ -804,6 +819,7 @@ assetForm.addEventListener("submit",async event=>{
   } catch(error){
     assetState.dataset.kind="failed";
     ui.set(assetState,"builder.assets.save_failed",{detail:error.message});
+    window.workshopFeedback?.show(assetState,error,{operation:"Save asset replacements"});
   }
   refreshAssetDirtyState();
 });
@@ -893,6 +909,7 @@ function announce(kind,message){
 }
 
 async function responseJSON(response){
+  if(window.workshopFeedback)return window.workshopFeedback.readJSON(response);
   const body=await response.json();
   if(!response.ok){
     const error=new Error(body.error||"Request failed");
@@ -937,7 +954,7 @@ async function refresh(){
       else if(install.canLaunch){ showKey("idle","builder.build.ready_or_rebuild"); launch.disabled=false; }
       else if(install.canRebuild) showKey("idle","builder.build.ready_to_build");
     }
-  } catch(error) { showKey("failed","builder.request_failed",{detail:error.message}); polling=false; announce("failed"); }
+  } catch(error) { showKey("failed","builder.request_failed",{detail:error.message},error); polling=false; announce("failed"); }
   if(polling) setTimeout(refresh,500);
 }
 
@@ -953,7 +970,7 @@ form.addEventListener("submit",async event=>{
   ui.set(dockPhase,"builder.build.preparing_rom"); dockPct.textContent="…"; track.hidden=false; dockLaunch.hidden=true;
   track.removeAttribute("aria-valuenow");
   try { await responseJSON(await fetch("build",{method:"POST",body:new FormData(form)})); polling=true; refresh(); }
-  catch(error){ showKey("failed","builder.request_failed",{detail:error.message}); build.disabled=false; announce("failed"); }
+  catch(error){ showKey("failed","builder.request_failed",{detail:error.message},error,"Start game build"); build.disabled=false; announce("failed"); }
 });
 
 async function doLaunch(){
@@ -964,7 +981,7 @@ async function doLaunch(){
   buttons.forEach(button=>button.disabled=true);
   showKey("idle","builder.build.launching");
   try { await responseJSON(await fetch("launch",{method:"POST"})); showKey("succeeded","builder.build.launched"); }
-  catch(error){ showKey("failed","builder.request_failed",{detail:error.message}); }
+  catch(error){ showKey("failed","builder.request_failed",{detail:error.message},error,"Launch game"); }
   finally { launching=false; if(!closed) buttons.forEach((button,i)=>button.disabled=previous[i]); }
 }
 launch.addEventListener("click",doLaunch);
@@ -983,7 +1000,7 @@ slimButton.addEventListener("click",async()=>{
      * mode without the page having to guess any of it. */
     await refresh();
     showKey("succeeded","builder.build.tools_removed");
-  } catch(error){ showKey("failed","builder.request_failed",{detail:error.message}); }
+  } catch(error){ showKey("failed","builder.request_failed",{detail:error.message},error,"Remove build tools"); }
   slimButton.disabled=false; slimDismiss.disabled=false;
 });
 
@@ -1009,6 +1026,6 @@ closeButton.addEventListener("click",async()=>{
     document.querySelector("#scene-motion").value="still";
     document.querySelector("#scene-motion").dispatchEvent(new Event("change"));
     dock.dataset.open="false";
-  } catch(error){ showKey("failed","builder.request_failed",{detail:error.message}); }
+  } catch(error){ showKey("failed","builder.request_failed",{detail:error.message},error,"Close Workshop"); }
 });
 })();

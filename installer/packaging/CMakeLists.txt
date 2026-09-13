@@ -459,10 +459,8 @@ install(FILES
     ${GAME_ROOT}/third_party/unicode/utf8proc-LICENSE.md
     DESTINATION utils/third_party/unicode)
 
-# Curated game documentation. This is an allowlist by design: public progress,
-# player guidance, and durable reverse-engineering knowledge ship with the
-# buildable source, while research ledgers, implementation plans, debugging
-# journals, and retired specifications remain outside the bundle.
+# Player/modder documentation only. Internal architecture, investigations,
+# acceptance records and plans are local development material, not payload.
 install(FILES ${GAME_ROOT}/LICENSE
     DESTINATION utils/docs RENAME GAME-LICENSE.txt)
 install(FILES
@@ -474,16 +472,15 @@ install(FILES
     ${GAME_ROOT}/docs/language-packs.md
     ${GAME_ROOT}/docs/language-authoring-reference.json
     ${GAME_ROOT}/docs/language-archive.schema.json
-    ${GAME_ROOT}/docs/progress.md
-    ${GAME_ROOT}/docs/SEAMS.md
     ${GAME_ROOT}/docs/ram-map.md
     ${GAME_ROOT}/docs/rom-map.md
     ${GAME_ROOT}/docs/research-symbol-map.md
-    ${GAME_ROOT}/docs/rendering-engine.md
     ${GAME_ROOT}/docs/save-format.md
     ${GAME_ROOT}/docs/sim-object-catalog.md
-    ${GAME_ROOT}/docs/sim-town-terrain.md
     ${GAME_ROOT}/docs/diorama-depth-shapes.md
+    ${GAME_ROOT}/docs/dialogue-system.md
+    ${GAME_ROOT}/docs/snes-native-audio-channels.md
+    ${GAME_ROOT}/docs/performance-overlay.md
     DESTINATION utils/docs)
 # Independently authored syntax/demo artifacts; no retail prose.
 install(DIRECTORY ${GAME_ROOT}/examples/language-pack/ DESTINATION utils/examples/language-pack
@@ -509,7 +506,7 @@ install(FILES
     ${SNESBUILD_MODULE_DIR}/runtime/docs/README.md
     ${SNESBUILD_MODULE_DIR}/runtime/docs/API_REFERENCE.md
     ${SNESBUILD_MODULE_DIR}/runtime/docs/GAME_ENHANCEMENT_INTEGRATION.md
-    ${SNESBUILD_MODULE_DIR}/runtime/docs/RUNTIME.md
+    ${SNESBUILD_MODULE_DIR}/runtime/docs/INPUT_AND_BOOT.md
     DESTINATION utils/snesrecomp-go/runtime/docs)
 install(FILES ${_runtime_archive}
     DESTINATION utils/snesrecomp-go/runtime/lib/${_runtime_zig_target})

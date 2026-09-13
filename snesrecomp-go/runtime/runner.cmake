@@ -74,6 +74,11 @@ function(snesrecomp_configure_runtime_target target)
     endif()
     target_compile_features(${target} PUBLIC c_std_11)
     target_compile_features(${target} PRIVATE cxx_std_20)
+    if(WIN32)
+        # The public ROM picker uses the wide-character common dialog API.
+        # Propagate this for CMake consumers as the hermetic linker does.
+        target_link_libraries(${target} PUBLIC comdlg32)
+    endif()
     if(SNESRECOMP_ENABLE_IPO)
         include(CheckIPOSupported)
         check_ipo_supported(RESULT _snesrecomp_ipo_supported

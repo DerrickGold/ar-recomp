@@ -1,3 +1,5 @@
+#include "snesrecomp/support/utf8_fs.h"
+
 #include "keybinds.h"
 
 #include <ctype.h>
@@ -261,7 +263,7 @@ static void write_player(FILE *file, const char *section,
 }
 
 static void write_defaults(void) {
-    FILE *file = fopen(g_config_path, "wb");
+    FILE *file = sr_fopen(g_config_path, "wb");
     if (file == NULL) {
         return;
     }
@@ -322,7 +324,7 @@ void keybinds_init(const char *executable_path) {
     FILE *file;
     reset_defaults();
     derive_config_path(executable_path);
-    file = fopen(g_config_path, "rb");
+    file = sr_fopen(g_config_path, "rb");
     if (file == NULL) {
         write_defaults();
         return;

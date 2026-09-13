@@ -97,7 +97,7 @@ def validate_run_completion(log: str, expected_ticks: int) -> dict:
 
 
 def run_evidence(log: str) -> dict:
-    match = re.search(r"\[run-dir\] (runs/\d+-\d+)(?:\s|$)", log)
+    match = re.search(r"\[run-dir\] (runs/\d+-\d+(?:-\d+)?)(?:\s|$)", log)
     if not match:
         raise ValueError("Missing run bundle")
     run_dir = ROOT / match[1]

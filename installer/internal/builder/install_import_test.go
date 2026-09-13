@@ -5,12 +5,26 @@ import (
 	"encoding/json"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/DerrickGold/ar-recomp/installer/internal/desktop"
 )
+
+func TestInstallationImportUI(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("optional JS checks need Node; never a builder dependency")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if out, err := exec.CommandContext(ctx, node, "--test", "testdata/install_import.test.mjs").CombinedOutput(); err != nil {
+		t.Fatalf("installation import JS: %v\n%s", err, out)
+	}
+}
 
 func importTestApp(t *testing.T) (*application, string) {
 	t.Helper()

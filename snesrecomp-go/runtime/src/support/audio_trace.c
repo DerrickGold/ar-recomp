@@ -1,3 +1,5 @@
+#include "snesrecomp/support/utf8_fs.h"
+
 #include "audio_audit_internal.h"
 
 #include "snesrecomp/game/apu_sync.h"
@@ -359,7 +361,7 @@ int audio_trace_dump_jsonl(const char *path) {
     FILE *file;
     uint64_t oldest, total, selected = 0u;
     if (path == NULL || path[0] == '\0' || s_events == NULL) return -1;
-    file = fopen(path, "wb");
+    file = sr_fopen(path, "wb");
     if (file == NULL) return -1;
     RtlApuLock();
     total = s_stats.event_count;

@@ -4,6 +4,7 @@
   let plan=null, busy=false, saved=false, current="";
   async function request(endpoint, body) {
     const response=await fetch(endpoint,body===undefined?{cache:"no-store"}:{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+    if(window.workshopFeedback)return window.workshopFeedback.readJSON(response);
     const value=await response.json(); if(!response.ok)throw Error(value.error||String(response.status)); return value;
   }
   function invalidate(){plan=null;$("review").hidden=true;$("confirm").checked=false;$("apply").disabled=true;}
@@ -12,8 +13,8 @@
     $("apply").disabled=busy||saved||!plan||(plan.existing&&!$("confirm").checked);
   }
   async function run(action){
-    if(busy||saved)return;busy=true;controls();$("status").textContent="Working…";
-    try{await action();}catch(error){invalidate();$("status").textContent=error.message;}
+    if(busy||saved)return;busy=true;window.workshopFeedback?.clear($("status"));controls();$("status").textContent="Working…";
+    try{await action();}catch(error){invalidate();$("status").textContent=error.message;window.workshopFeedback?.show($("status"),error,{operation:"Choose game folder"});}
     finally{busy=false;controls();}
   }
   $("directory").addEventListener("input",invalidate);
@@ -25,11 +26,11 @@
   $("folder-form").addEventListener("submit",event=>{event.preventDefault();return run(async()=>{
     invalidate();plan=await request("review",{directory:$("directory").value});$("directory").value=plan.directory;
     $("review-path").textContent=plan.directory;
-    $("review-title").textContent=plan.game?"Update existing installation":plan.existing?"Non-empty destination":"New game folder";
-    $("review-description").textContent=plan.game?"An existing ActRaiserRecomp installation was detected. Its game files can be rebuilt in place.":plan.existing?"This folder contains files but is not a recognized game installation. A dedicated game subfolder is recommended. Existing unrelated files will be left alone.":"This destination is empty or does not exist yet. The Builder will create a portable game installation here.";
+    $("review-title").textContent=plan.game?"Existing game folder":plan.existing?"Non-empty destination":"New game folder";
+    $("review-description").textContent=plan.game?"An existing ActRaiserRecomp installation was detected. The Workshop will use its settings, assets, ROM and saves directly; no import is needed. You can play or rebuild the game from there.":plan.existing?"This folder contains files but is not a recognized game installation. A dedicated game subfolder is recommended. Existing unrelated files will be left alone.":"This destination is empty or does not exist yet. The Builder will start a new portable game installation here. You can optionally import data from another folder later in the Workshop.";
     $("entries").replaceChildren(...(plan.entries||[]).map(name=>{const li=document.createElement("li");li.textContent=name;return li;}));
     $("confirm-label").hidden=!plan.existing;$("review").hidden=false;
-    $("apply").textContent=current?"Save for next launch":plan.game?"Update existing installation":"Use this game folder";
+    $("apply").textContent=current?"Save for next launch":plan.game?"Open existing installation":"Use this game folder";
     $("status").textContent=current?"This session will keep using its current game folder. The new choice takes effect after you close and reopen the Builder.":"Ready to continue. No game files have been changed.";
   });});
   $("apply").addEventListener("click",()=>run(async()=>{

@@ -14,7 +14,8 @@ The recommended Workshop flow is the same on macOS, Linux and Windows:
    drop it into the Workshop. Add one package at a time; **do not unzip it**.
 3. Review its language, credits and any conflicts, then choose **Import & install**.
    Replacing a saved project or installed pack requires explicit confirmation.
-4. Use **Manage installed packs** to toggle packs on or off without deleting them.
+4. Use the installed-pack checklist in **Languages** to toggle packs on or off
+   without deleting them.
 5. Restart the game and select the enabled package in the system overlay's
    Localization settings.
 
@@ -22,14 +23,15 @@ Private `.arproject` backups and compatible legacy ZIPs remain under **Author
 backup or legacy archive** in the import workflow. Unpacked authoring folders
 are available under **Advanced: unpacked language folder**.
 
-### Manual installation in a legacy bundle
+### Manual installation
 
-For older bundles with a `utils/` directory and `run-game` scripts:
+Use the game's writable data directory, not the inside of an application bundle:
 
 1. Close the game.
-2. Copy the `.arlang` file into `utils/game-assets/languages/packs/` in your
-   downloaded game folder. Create `packs/` if needed. **Do not unzip it.**
-3. Start the game with `run-game.command`, `run-game.sh` or `run-game.bat`.
+2. Copy the `.arlang` file into `game-assets/languages/packs/` under that
+   directory. Create `packs/` if needed. **Do not unzip it.**
+3. Start the game normally. Older `utils/` bundles still use their `run-game`
+   script.
 4. Open the system overlay → Localization → Game text and select its package name.
 
 The filename can contain spaces and does not have to match the package name,
@@ -44,28 +46,42 @@ copies of the same ID conflict; neither should be selected until the duplicate
 is removed or disabled. This also applies to a folder and archive with the same
 ID. Do not keep an older `.arlang` beside its replacement under a different name.
 
-The game prepares archives through the retained
-`utils/tools/actraiser-builder` utility;
-it never opens the editor. Keep that executable when moving/slimming a bundle.
-The workshop's build-tool cleanup already retains it. A source CMake build
+The game prepares archives through its bundled `actraiser-builder` helper;
+it never opens the editor. Native game apps carry the helper inside the app;
+folder outputs retain it under `tools/` (`utils/tools/` in older bundles).
+Keep the helper when moving or slimming a folder installation. The Workshop's
+build-tool cleanup already retains it. A source CMake build
 with Go available builds the helper beside the game executable. Other ports
 can provide their own archive adapter; unpacked folders need no helper.
 
 ## Where files belong
 
+The **game data directory** is the folder containing `config.ini`, `saves/`,
+and `game-assets/`:
+
+- **Desktop Builder output:** The game folder selected in the Builder.
+- **Per-user macOS app:** `~/Library/Application Support/ActRaiserRecomp/game/`.
+- **Per-user Linux AppImage:** `$XDG_DATA_HOME/ActRaiserRecomp/game/`, or
+  `~/.local/share/ActRaiserRecomp/game/` when `XDG_DATA_HOME` is unset.
+- **Legacy archive:** The download's `utils/` folder.
+- **Source build:** Normally the repository root.
+
+An explicit data-directory override takes precedence. Native launchers support
+`--print-paths` to report the selected directory without starting the game;
+see [desktop packaging](desktop-packaging.md). Launch a new app once to
+initialize its data before installing packs manually. The Workshop edits the
+game folder selected in the Builder, which may differ from a per-user app's data.
+
+Paths below are relative to that data directory.
+
 | Artifact | Purpose and location |
 | --- | --- |
-| `.arlang` | Reviewed publication; put directly in `utils/game-assets/languages/packs/`. |
-| Unpacked pack | `utils/game-assets/languages/packs/<exact-package-id>/pack.ini` plus its declared files. |
-| Native US source | Generated locally by the game build under `utils/game-assets/languages/native-us/`; retain it for fallback. |
+| `.arlang` | Reviewed publication; put directly in `game-assets/languages/packs/`. |
+| Unpacked pack | `game-assets/languages/packs/<exact-package-id>/pack.ini` plus its declared files. |
+| Native US source | Generated locally by the game build under `game-assets/languages/native-us/`; retain it for fallback. |
 | `.arproject` / `projects/` | Private workshop backups, source templates and progress; not an installed game translation. |
 | `.arlang-cache/` | Disposable prepared archive snapshots inside `packs/`; never publish or edit them. |
 | `.arlang-state/` | Archive enable/disable preferences inside `packs/`, keyed by package ID. |
-
-In a source checkout the game working directory is normally the repository root:
-use `game-assets/languages/packs/` without the `utils/` prefix. In a distribution
-the launcher sets `utils/` as the working directory; placing assets beside the
-game executable instead is incorrect.
 
 An unpacked pack needs only `pack.ini`, every declared `.artext` script and any
 declared local font files. Preserve author/license notices when copying it.
@@ -82,17 +98,16 @@ previous snapshots remain intact for running processes. Disabled archive IDs
 remain disabled after replacement or filename changes.
 
 The builder's Languages checklist can enable/disable or recoverably uninstall
-archives as well as folders. Alternatively, from the distribution root:
+archives as well as folders. Alternatively, use the helper and data directory
+described under [command-line setup](#command-line-setup):
 
 ```sh
-utils/tools/actraiser-builder language disable --root utils --installed my-pack.arlang
-utils/tools/actraiser-builder language enable --root utils --installed my-pack.arlang
-utils/tools/actraiser-builder language uninstall --root utils --installed my-pack.arlang
+"$BUILDER_CLI" language disable --root "$GAME_DATA" --installed my-pack.arlang
+"$BUILDER_CLI" language enable --root "$GAME_DATA" --installed my-pack.arlang
+"$BUILDER_CLI" language uninstall --root "$GAME_DATA" --installed my-pack.arlang
 ```
 
-Windows uses `utils\tools\actraiser-builder.exe`; use the same arguments.
-`--installed`
-names the file or folder **as it appears in `packs/`**, not its display name.
+`--installed` names the file or folder **as it appears in `packs/`**, not its display name.
 Restart afterward. Uninstalling an archive moves it into `packs/.uninstalled/`
 and prints its recovery path. Unpacked installs retain a recovery manifest.
 Editable projects and the Native US source are untouched. With the game closed,
@@ -121,8 +136,10 @@ Use these public resources together:
 - Your own locally extracted US source script for the messages you are translating.
   Follow `[scripts] source` paths in `native-us/pack.ini`; do not edit that baseline.
 
-Examples live under `utils/examples/` in a distribution and under `examples/`
-in a source checkout.
+The links above are available without a source build. Legacy archives include
+them under `utils/docs/` and `utils/examples/`; the macOS Builder carries the
+same files under `Contents/Resources/payload/utils/`. Do not assume a generated
+game app includes the authoring examples.
 
 Create a separate directory, copy the example layout, and choose your own stable
 ID, locale, name, authorship and license. Use `target = us-runtime`,
@@ -148,38 +165,84 @@ or builder interface catalogs.
 
 ## Validate and package without the GUI
 
-The following commands run from the distribution root. In a checkout build
-`installer/build/actraiser-builder`, or use
-`go -C installer run ./cmd/actraiser-builder` from the repository root with
-absolute input/output paths. A built executable resolves ordinary relative
-paths from your shell's current directory; `go -C installer run` starts in the
-`installer/` module instead. Options documented as relative to `--root` still
-resolve from the selected game assets/fallback directory.
+### Command-line setup
+
+The command-line tools are still included; no Go installation is needed when
+using a packaged helper. The desktop Builder's outer executable opens the GUI
+and does not forward `language` commands. Invoke the helper itself:
+
+| Installation | Command-line helper |
+| --- | --- |
+| macOS game app | `ActRaiserRecomp.app/Contents/MacOS/actraiser-builder` |
+| macOS Builder app | `ActRaiserRecompBuilder.app/Contents/Resources/payload/utils/tools/actraiser-builder` |
+| Windows game folder | `tools\actraiser-builder.exe` |
+| Legacy archive | `utils/tools/actraiser-builder` (add `.exe` on Windows) |
+| Extracted Linux game AppImage | `squashfs-root/usr/bin/actraiser-builder` |
+
+For Linux, extract a **game** AppImage into a new temporary directory to access
+its helper. This leaves the original app and game data unchanged:
+
+```sh
+LANGUAGE_TOOLS_DIR=$(mktemp -d)
+cd "$LANGUAGE_TOOLS_DIR"
+/absolute/path/to/ActRaiserRecomp.AppImage --appimage-extract
+BUILDER_CLI="$LANGUAGE_TOOLS_DIR/squashfs-root/usr/bin/actraiser-builder"
+GAME_EXE=/absolute/path/to/ActRaiserRecomp.AppImage
+GAME_DATA=/absolute/path/to/your/game-data-folder
+```
+
+On macOS, set the paths directly, for example:
+
+```sh
+BUILDER_CLI="/absolute/path/to/ActRaiserRecomp.app/Contents/MacOS/actraiser-builder"
+GAME_EXE="/absolute/path/to/ActRaiserRecomp.app/Contents/MacOS/ActRaiserRecomp"
+GAME_DATA="/absolute/path/to/your/game-data-folder"
+```
+
+`GAME_DATA` must contain the built game's fonts and `languages/native-us/`
+under `game-assets/`; it is not the Builder's tool cache or the `.app` directory.
+`GAME_EXE` is the game binary inside a macOS app, the Linux game AppImage, or
+`ActRaiserRecomp.exe` on Windows. For Linux systems without FUSE, set
+`export APPIMAGE_EXTRACT_AND_RUN=1` before font checks or packaging.
+
+The examples below use POSIX shell syntax. In PowerShell, set the same three
+variables to your Windows paths and use `& $BUILDER_CLI` in place of
+`"$BUILDER_CLI"`; the command arguments are the same. Write multi-line commands
+on one line instead of using the shell's `\` continuations.
+
+For a source checkout, build the CLI with
+`go -C installer build -o build/actraiser-builder ./cmd/actraiser-builder`, or
+use `go -C installer run ./cmd/actraiser-builder` with absolute paths.
+Ordinary relative paths resolve from your shell's current directory;
+`go -C installer run` starts in `installer/` instead. Options documented as
+relative to `--root` resolve from the selected game data directory.
+
+### Check and publish
 
 ```sh
 # Grammar, paths, aliases, anchors, placeholders and presentation contracts.
-utils/tools/actraiser-builder language validate --pack /path/to/my-pack
+"$BUILDER_CLI" language validate --pack /path/to/my-pack
 
 # Also check the actual game font stack, including omitted native-US messages.
-utils/tools/actraiser-builder language validate --pack /path/to/my-pack \
-  --root utils --game ./ActRaiserRecomp --sample 'Élise'
+"$BUILDER_CLI" language validate --pack /path/to/my-pack \
+  --root "$GAME_DATA" --game "$GAME_EXE" --sample 'Élise'
 
 # Publish all supplied messages after explicitly reviewing them.
-utils/tools/actraiser-builder language package --pack /path/to/my-pack \
-  --root utils --game ./ActRaiserRecomp --out my-translation.arlang \
+"$BUILDER_CLI" language package --pack /path/to/my-pack \
+  --root "$GAME_DATA" --game "$GAME_EXE" --out /path/to/my-translation.arlang \
   --all-messages --confirm-rights
 
 # Optional validated copy into this installation (no publishing consent needed).
-utils/tools/actraiser-builder language install --root utils --pack my-translation.arlang
+"$BUILDER_CLI" language install --root "$GAME_DATA" --pack /path/to/my-translation.arlang
 
 # Export a fresh ROM-free machine-readable reference for external tools.
-utils/tools/actraiser-builder language reference --out authoring-reference.json
+"$BUILDER_CLI" language reference --out /path/to/authoring-reference.json
 ```
 
-On Windows use `--game .\ActRaiserRecomp.exe`. A game build and its locally
-generated Native US source are required for font checks/publication, not for
-plain semantic validation. JSON validation reports identify the package and
-semantic counts, plus missing glyph locations when `--game` is supplied.
+A game build and its locally generated Native US source are required for
+font checks/publication, not for plain semantic validation. JSON validation
+reports identify the package and semantic counts, plus missing glyph locations
+when `--game` is supplied.
 Commands exit nonzero on failure; output files are not overwritten.
 
 `--all-messages` is an explicit review action, useful for hand-authored directories
@@ -193,8 +256,9 @@ it will not silently replace an unpacked folder.
 The bundled primary font covers broad Latin/Greek/Cyrillic text, not all Unicode.
 Declare and include appropriately licensed TTF/OTF dependencies for other scripts
 and their notices. The interface's Japanese/Arabic/Hebrew fonts are not
-automatically game-pack fallbacks. Coverage uses the same backend as play; still visually check names,
-complex scripts, long labels, line breaks and scrolling before publishing.
+automatically game-pack fallbacks. Coverage uses the same backend as play;
+still visually check names, complex scripts, long labels, line breaks and
+scrolling before publishing.
 
 The validation JSON's `text_coverage` reports supplied and missing IDs by surface,
 separately from review status and font coverage. A `complete` pack can still omit
@@ -222,7 +286,7 @@ builds this container and strips private metadata for you.
 
 ## If a pack is missing or will not activate
 
-Check the `utils/` path, filename extension and hidden-file status, disabled state,
+Check the game data directory, filename extension and hidden-file status, disabled state,
 duplicate IDs, and whether you restarted through the launcher. For folders check
 the exact folder-ID match. Private backups and regional source archives are not
 playable publications. At most 128 enabled packs are selectable; disable extras.

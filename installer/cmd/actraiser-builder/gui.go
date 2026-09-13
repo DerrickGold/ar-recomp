@@ -15,6 +15,7 @@ import (
 	"github.com/DerrickGold/ar-recomp/installer/internal/builder"
 	"github.com/DerrickGold/ar-recomp/installer/internal/buildworkspace"
 	"github.com/DerrickGold/ar-recomp/installer/internal/desktop"
+	"github.com/DerrickGold/ar-recomp/installer/internal/subprocess"
 )
 
 type guiFlags struct {
@@ -31,6 +32,7 @@ type guiFlags struct {
 func runGUI(args []string) error {
 	flags := flag.NewFlagSet("gui", flag.ContinueOnError)
 	values := guiFlags{}
+	desktopGate := flags.Bool("desktop-start-gate", false, "wait for desktop process supervision before initializing")
 	flags.StringVar(&values.buildWorkspace, "build-workspace", "", "private scratch directory; enables read-only bundled source")
 	flags.StringVar(&values.inputID, "input-id", "", "verified bundled payload identity")
 	flags.StringVar(&values.root, "root", ".", "game project root")
@@ -49,6 +51,11 @@ func runGUI(args []string) error {
 	flags.StringVar(&values.readyFile, "ready-file", "", "create a private JSON session descriptor for a desktop host")
 	if err := flags.Parse(args); err != nil {
 		return err
+	}
+	if *desktopGate {
+		if err := subprocess.WaitForDesktopGate(os.Stdin); err != nil {
+			return err
+		}
 	}
 
 	root, err := filepath.Abs(values.root)
@@ -99,6 +106,7 @@ func runGUI(args []string) error {
 	fmt.Fprintf(os.Stdout, "Build inputs: %s\nBuild workspace: %s\nGame output: %s\n", root, values.buildWorkspace, outputDir)
 	return builder.Run(context.Background(), builder.Options{
 		Title:           "ActRaiser Recomp Builder",
+		Version:         version,
 		ProjectRoot:     dataRoot,
 		ImportSearchDir: values.importSearchDir,
 		OpenBrowser:     !values.noOpen,
@@ -190,11 +198,7 @@ func launchBuiltGame(result builder.Result) error {
 		command := exec.Command(path, arguments...)
 		command.Dir = result.WorkingDir
 		detachFromBuilder(command)
-		if err := command.Start(); err != nil {
-			return fmt.Errorf("launch application: %w", err)
-		}
-		go func() { _ = command.Wait() }()
-		return nil
+		return startLoggedGame(command, result.WorkingDir)
 	}
 	if result.BinaryPath == "" {
 		// Older Result (or a host that only knows the script): fall back to the
@@ -220,13 +224,7 @@ func launchBuiltGame(result builder.Result) error {
 	// pressing "Close builder") does not signal the game to death. The previous
 	// `open`/`start` path got this for free; running the binary directly does not.
 	detachFromBuilder(command)
-	if err := command.Start(); err != nil {
-		return fmt.Errorf("launch game: %w", err)
-	}
-	// Reaped in the background so a finished game does not linger as a zombie
-	// for the life of the builder; the GUI deliberately does not wait on it.
-	go func() { _ = command.Wait() }()
-	return nil
+	return startLoggedGame(command, result.WorkingDir)
 }
 
 // launchViaScript is the pre-existing indirect path, kept as a fallback.

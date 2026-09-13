@@ -1,3 +1,5 @@
+#include "snesrecomp/support/utf8_fs.h"
+
 #include "oracle_trace.h"
 
 #include "actraiser_game.h"   /* kActRaiserWram_MapGroup */
@@ -56,7 +58,7 @@ static bool WriteWramSnapshot(const char *relative_path,
                               const uint8_t *wram) {
   char output_path[kOraclePathCapacity];
   RunDirFile(output_path, sizeof(output_path), "%s", relative_path);
-  FILE *output_file = fopen(output_path, "wb");
+  FILE *output_file = sr_fopen(output_path, "wb");
   if (!output_file) return false;
   const size_t written_bytes =
       fwrite(wram, 1, kActRaiserWramSize, output_file);
@@ -158,7 +160,7 @@ static void WriteMxTrace(uint32_t host_frame, const uint8_t *wram) {
     s_mx_trace_initialized = true;
     const char *output_path = getenv("AR_MX_OUT");
     if (output_path && output_path[0])
-      s_mx_trace_file = fopen(output_path, "w");
+      s_mx_trace_file = sr_fopen(output_path, "w");
   }
   if (!s_mx_trace_file) return;
 
@@ -224,7 +226,7 @@ void OracleTrace_Init(SrRunnerHandle *runner) {
     return;
   }
 
-  s_wram_trace_file = fopen(trace_path, "w");
+  s_wram_trace_file = sr_fopen(trace_path, "w");
   if (!s_wram_trace_file) {
     fprintf(stderr, "AR_WRAM_TRACE: cannot open %s\n", trace_path);
     return;

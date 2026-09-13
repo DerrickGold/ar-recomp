@@ -1,0 +1,9 @@
+.workshop-feedback{padding:16px 18px;margin:12px 0 20px;border:1px solid #915951;border-radius:8px;background:#271e29;color:#f0ede5;min-width:0;overflow-wrap:anywhere}
+.workshop-feedback p{margin:0 0 12px;line-height:1.6}
+.workshop-feedback details{margin:8px 0 12px}
+.workshop-feedback summary{cursor:pointer;color:#edcc8c;font-size:14px}
+.workshop-feedback textarea{display:block;width:100%;box-sizing:border-box;resize:vertical;max-height:320px;min-height:130px;margin-top:10px;padding:12px;border:1px solid #64758c;border-radius:6px;background:#101925;color:#f0ede5;font:12px/1.6 ui-monospace,monospace;white-space:pre-wrap;overflow-wrap:anywhere}
+.workshop-feedback .feedback-note,.workshop-feedback .feedback-copy-status{font-size:12px;color:#b8c6d5}
+.feedback-actions{display:flex;flex-wrap:wrap;align-items:stretch;gap:8px}
+.workshop-feedback button{margin:0;min-height:42px;padding:10px 16px;line-height:1.4;font-size:14px;max-width:100%;overflow-wrap:anywhere}
+.workshop-feedback .feedback-copy-status:empty{display:none}

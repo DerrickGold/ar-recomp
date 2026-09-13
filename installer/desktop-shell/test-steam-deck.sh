@@ -65,5 +65,5 @@ export APPIMAGE_EXTRACT_AND_RUN=1
 run_probe global-extracted
 original_hash=$(cut -d ' ' -f 1 "$test_root/image.sha256")
 test "$(sha256sum "$image" | cut -d ' ' -f 1)" = "$original_hash"
-echo 'PASS: SteamOS Desktop Mode renderer, import prompt, media decoder, portable/global storage, relocation, mounted/extracted launch.'
+echo 'PASS: SteamOS Desktop Mode renderer, manual import, media decoder, portable/global storage, relocation, mounted/extracted launch.'
 echo 'Still verify visually: fonts/scaling, folder picker, audible audio, accelerated graphics, controller/touch input and the generated game.'

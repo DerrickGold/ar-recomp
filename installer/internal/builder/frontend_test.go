@@ -13,9 +13,12 @@ func TestFrontendIsEmbeddedAndSessionScoped(t *testing.T) {
 	for path, want := range map[string]int{
 		"/tok/builder/theme.css": 200, "/tok/builder/app.js": 200,
 		"/tok/builder/file-input.js":  200,
+		"/tok/builder/feedback.css":   200,
+		"/tok/builder/feedback.js":    200,
 		"/tok/builder/scene.js":       200,
 		"/tok/builder/encounters.mjs": 200,
 		"/builder/app.js":             404, "/tok/builder/missing.js": 404,
+		"/builder/feedback.js":   404,
 		"/tok/builder/../gui.go": 404,
 	} {
 		w := httptest.NewRecorder()
@@ -31,6 +34,15 @@ func TestFrontendIsEmbeddedAndSessionScoped(t *testing.T) {
 	app.ServeHTTP(w, httptest.NewRequest("GET", "/tok/", nil))
 	if strings.Contains(w.Body.String(), "<script>") || !strings.Contains(w.Header().Get("Content-Security-Policy"), "script-src 'self';") {
 		t.Fatal("frontend regressed to inline scripts")
+	}
+}
+
+func TestFrontendIncludesEscapedBuilderVersion(t *testing.T) {
+	app := newApplication(context.Background(), Options{ProjectRoot: t.TempDir(), Version: `v1"<script>{{TITLE}}`}, "tok")
+	w := httptest.NewRecorder()
+	app.ServeHTTP(w, httptest.NewRequest("GET", "/tok/", nil))
+	if !strings.Contains(w.Body.String(), `name="workshop-version" content="v1&#34;&lt;script&gt;{{TITLE}}"`) {
+		t.Fatal("version metadata missing, unescaped, or recursively expanded")
 	}
 }
 

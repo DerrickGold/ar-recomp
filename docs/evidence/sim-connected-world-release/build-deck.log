@@ -1,7 +1,0 @@
-hermetic: runner portable (source fallback)
-hermetic: SDL3 headers /private/tmp/actraiser-deck-capture.ViJHxd/sdl3/include, libraries /private/tmp/actraiser-deck-capture.ViJHxd/sdl3/lib
-hermetic: SDL3_ttf headers /private/tmp/actraiser-deck-capture.ViJHxd/sdl3/include, libraries /private/tmp/actraiser-deck-capture.ViJHxd/sdl3/lib
-hermetic: 394 translation units (0 cached, 394 to compile, 4 jobs)
-hermetic: compile done in 150.5s; archiving runner
-hermetic: built runner archive /private/tmp/actraiser-connected-release.yXOBZW/deck-build/hermetic/x86_64-linux-gnu/libsnesrecomp_runtime.a; linking game
-hermetic: built /private/tmp/actraiser-connected-release.yXOBZW/deck-build/hermetic/x86_64-linux-gnu/ActRaiserRecomp

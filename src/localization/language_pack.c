@@ -1,3 +1,5 @@
+#include "snesrecomp/support/utf8_fs.h"
+
 #include "localization/language_pack.h"
 
 #include "deterministic_hash.h"
@@ -1547,7 +1549,7 @@ static bool FileRead(void *context, const char *path, size_t maximum_bytes,
                      ArLanguagePackBlob *out_blob, char *error,
                      size_t error_capacity) {
   (void)context;
-  FILE *file = fopen(path, "rb");
+  FILE *file = sr_fopen(path, "rb");
   if (!file) {
     snprintf(error, error_capacity, "could not open file");
     return false;

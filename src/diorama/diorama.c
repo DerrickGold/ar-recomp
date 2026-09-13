@@ -1,3 +1,5 @@
+#include "snesrecomp/support/utf8_fs.h"
+
 #include "diorama.h"
 #include "actraiser_game.h"
 #include "constants.h"
@@ -887,7 +889,7 @@ static const char kLayerManifestLeaf[] = "diorama-layers.ini";
 void Diorama_LoadLayerManifest(void) {
   char path[kHostPathCapacity];
   UserDataFile(path, sizeof path, kLayerManifestLeaf);
-  FILE *file = fopen(path, "r");
+  FILE *file = sr_fopen(path, "r");
   if (!file) {
     /* Absent is legitimate -- an unauthored install renders stock geometry and
      * that is correct. Say so anyway, at one line: this file is CWD-relative,
@@ -1044,7 +1046,7 @@ bool Diorama_SaveLayerManifest(void) {
   enum { kManifestReadMax = 1 << 20 };
   char *existing = NULL;
   long existing_len = 0;
-  FILE *in = fopen(path, "rb");
+  FILE *in = sr_fopen(path, "rb");
   if (in) {
     if (fseek(in, 0, SEEK_END) == 0) {
       existing_len = ftell(in);
@@ -1081,7 +1083,7 @@ bool Diorama_SaveLayerManifest(void) {
   /* Room for the manifest path plus the ".tmp" suffix. */
   char tmp[sizeof(path) + 64];
   snprintf(tmp, sizeof tmp, "%s.tmp", path);
-  FILE *file = fopen(tmp, "wb");
+  FILE *file = sr_fopen(tmp, "wb");
   if (!file) {
     free(out);
     fprintf(stderr, "[diorama-layers] cannot write %s\n", tmp);
@@ -1091,7 +1093,7 @@ bool Diorama_SaveLayerManifest(void) {
   free(out);
   if (put != wrote || fflush(file) != 0) {
     fclose(file);
-    remove(tmp);
+    sr_remove(tmp);
     fprintf(stderr, "[diorama-layers] short write to %s -- original kept\n", tmp);
     return false;
   }
@@ -1104,7 +1106,7 @@ bool Diorama_SaveLayerManifest(void) {
    * contain hand-authored rooms that cannot be reproduced from the table, so
    * "original kept" below must be TRUE. */
   if (!AtomicReplaceFile(tmp, path)) {
-    remove(tmp);
+    sr_remove(tmp);
     fprintf(stderr, "[diorama-layers] could not replace %s -- original kept\n",
             path);
     return false;

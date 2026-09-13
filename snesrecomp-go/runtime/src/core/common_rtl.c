@@ -1,3 +1,5 @@
+#include "snesrecomp/support/utf8_fs.h"
+
 #include "snesrecomp/game/runtime.h"
 
 #include "support/audio_audit_internal.h"
@@ -370,7 +372,7 @@ void RtlSaveSnapshot(const char *filename) {
     FILE *file;
     FileSaveLoad state;
     if (filename == NULL || g_snes == NULL) return;
-    file = fopen(filename, "wb");
+    file = sr_fopen(filename, "wb");
     if (file == NULL) return;
     state.base.func = file_saveload;
     state.base.saving = true;
@@ -396,7 +398,7 @@ bool RtlLoadSnapshot(const char *filename) {
     FILE *file;
     FileSaveLoad state;
     if (filename == NULL || g_snes == NULL) return false;
-    file = fopen(filename, "rb");
+    file = sr_fopen(filename, "rb");
     if (file == NULL) return false;
     if (fread(header, sizeof(header), 1u, file) != 1u) {
         fclose(file);
@@ -641,7 +643,7 @@ static bool write_apu_audit_file(const char *prefix, const char *suffix,
     int close_result;
     if (snprintf(path, sizeof(path), "%s%s", prefix, suffix) >=
         (int)sizeof(path)) return false;
-    file = fopen(path, "wb");
+    file = sr_fopen(path, "wb");
     if (file == NULL) return false;
     transferred = fwrite(data, 1u, size, file);
     close_result = fclose(file);

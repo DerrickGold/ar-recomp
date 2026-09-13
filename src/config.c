@@ -1,3 +1,5 @@
+#include "snesrecomp/support/utf8_fs.h"
+
 #include "config.h"
 #include "settings.h"
 #include <stdio.h>
@@ -6,7 +8,7 @@
 
 void ParseConfigFile(const char *path) {
   if (!path) return;
-  FILE *f = fopen(path, "r");
+  FILE *f = sr_fopen(path, "r");
   if (!f) return;
 
   char line[256];

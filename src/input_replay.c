@@ -1,3 +1,5 @@
+#include "snesrecomp/support/utf8_fs.h"
+
 #include "input_replay.h"
 
 #include "byte_order.h"
@@ -234,7 +236,7 @@ static bool LoadLegacyReplay(FILE *file, const char *path) {
 }
 
 static bool LoadReplayFile(const char *path) {
-  FILE *file = fopen(path, "rb");
+  FILE *file = sr_fopen(path, "rb");
   if (!file) {
     SetError("cannot open configured replay file");
     return false;
@@ -256,7 +258,7 @@ static bool LoadReplayFile(const char *path) {
 }
 
 static void OpenRecordFile(const char *path) {
-  s_record_file = fopen(path, "wb");
+  s_record_file = sr_fopen(path, "wb");
   if (!s_record_file) {
     SetError("cannot open configured input recording");
     s_writer_failed = true;

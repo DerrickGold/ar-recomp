@@ -6,7 +6,7 @@
 # toolchain and supported SDL3 redistributables are downloaded and bundled by
 # the packaging project. Desktop releases also need native host packaging tools;
 # macOS can cross-build all release targets without a VM.
-# See installer/desktop-shell/README.md for prerequisites and validation limits.
+# See docs/desktop-packaging.md for Builder distribution prerequisites.
 # DESKTOP=0 explicitly requests legacy archives instead of the default matrix.
 # Steam Deck enforces glibc 2.36; full device/game qualification is separate.
 #

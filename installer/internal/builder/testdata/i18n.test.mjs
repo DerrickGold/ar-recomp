@@ -152,6 +152,23 @@ function setupAssetApp(){
   return {...s,node,rows,list,requests,urls};
 }
 
+test("launch errors name the action and offer only a read-only status recheck",async()=>{
+  const s=setupAssetApp(), reports=[],requests=[];
+  const failure=new Error("SDL_Init failed: No available video device");
+  failure.code="AR_HTTP_500";failure.status=500;
+  s.context.window.workshopFeedback={clear(){},show:(target,error,options)=>reports.push({target,error,options}),readJSON:async()=>{throw failure;}};
+  s.context.fetch=async(path,options)=>{requests.push({path,method:options?.method||"GET"});return {};};
+  await s.node("launch").fire("click");
+  assert.equal(reports[0].options.operation,"Launch game");
+  assert.equal(reports[0].error,failure);
+  assert.equal(reports[0].target,s.node("state"));
+  assert.equal(s.node("workspace-status").textContent,s.ui.text("builder.feedback.failed"));
+  assert.equal(s.node("launch").disabled,false);
+  await reports[0].options.retry();
+  assert.deepEqual(requests,[{path:"launch",method:"POST"},{path:"status",method:"GET"}]);
+  assert.equal(reports[1].options.operation,"Check Builder status");
+});
+
 test("real asset controller keeps unsaved files, playback, search and form state during language changes",async()=>{
   const s=setupAssetApp(),row=s.rows[0];
   const files=[{name:"custom {count} 日本語.ogg"}];row.file.files=files;

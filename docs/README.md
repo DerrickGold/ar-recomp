@@ -1,45 +1,42 @@
-# ActRaiser game documentation
+# ActRaiser documentation
 
-This directory contains the maintained player documentation and durable
-reverse-engineering knowledge that can support this project or an independent
-ActRaiser decompilation. The hermetic builder distributes an explicit subset
-of these files; implementation plans, debugging journals, resolved-defect
-histories, and retired specifications are intentionally excluded.
+Guides for playing ActRaiser Recompiled, creating replacement content, and
+working with the original game's data. For downloads and build instructions,
+start with the [project README](https://github.com/DerrickGold/ar-recomp#quick-start).
 
-## Player and project status
+## Playing and customizing
 
-- [Manual](manual.md) — running, configuring, and extending the game.
-- [Builder workshop](builder-workshop.md) — building, editing language packs,
-  replacing assets, and navigating the local GUI.
-- [Language pack format](language-pack-format.md) — creating UTF-8 game
-  translations with typed placeholders and safe page/control semantics.
-- [Install and share language packs](language-packs.md) — direct `.arlang`
-  installation, editor-free/AI authoring, CLI validation and publication.
-- [Project progress](progress.md) — public gameplay, subsystem, and platform
-  acceptance status.
+- [Manual](manual.md) — controls, settings, saves, and troubleshooting.
+- [Builder and Workshop](builder-workshop.md) — building the game and replacing
+  artwork, music, and text.
+- [Desktop packages and user data](desktop-packaging.md) — portable installs,
+  save locations, and packaging a local build.
+- [Language packs](language-packs.md) — authoring, validating, installing, and
+  sharing translations.
+- [Language pack format](language-pack-format.md) — UTF-8 scripts, placeholders,
+  and page/control rules.
+- [Performance overlay](performance-overlay.md) — reading measurements and
+  reporting a slow scene.
 
-## Reverse-engineering references
+## Modding references
 
-- [Logic and hardware seams](SEAMS.md) — semantic boundaries, subsystem roles,
-  and hookable game identities.
+The game-data references describe the US ROM unless stated otherwise. Entries
+marked uncertain should not be treated as verified offsets or behavior.
+
 - [RAM map](ram-map.md) and [ROM map](rom-map.md) — known state and data regions.
-- [Semantic symbol map](research-symbol-map.md) — address-to-purpose mappings
-  with confidence and evidence.
-- [Rendering engine](rendering-engine.md) — original drawing, streaming, OAM,
-  and presentation behavior.
-- [Dialogue and menu text](dialogue-system.md) — native text consumers,
-  source identity, scroll/clear behavior, and replacement boundaries.
-- [Save format](save-format.md) — SRAM layout, checksum, and field encodings.
-- [SNES native audio channels](snes-native-audio-channels.md) — original SPC
-  driver channel ownership, request paths, and effect sequence evidence.
-- [Simulation object catalogue](sim-object-catalog.md) — simulation-mode
-  records and visual identities.
-- [Simulation terrain](sim-town-terrain.md) — town-cell elevation and sampling
-  contracts derived from the original maps.
-- [Diorama depth shapes](diorama-depth-shapes.md) — stable authoring and geometry
-  vocabulary used by enhanced presentation.
+- [Symbol map](research-symbol-map.md) — ROM addresses and their known purposes.
+- [Dialogue and menu text](dialogue-system.md) — text encoding, source identities,
+  and replacement boundaries.
+- [Save format](save-format.md) — SRAM layout, checksum, and editable fields.
+- [Native audio channels](snes-native-audio-channels.md) — original SPC driver
+  voices, requests, and effect sequences.
+- [Simulation objects](sim-object-catalog.md) — object records and visual identities.
+- [Action scene editor](https://github.com/DerrickGold/ar-recomp/blob/main/tools/action_editor/README.md) and
+  [diorama depth shapes](diorama-depth-shapes.md) — authoring enhanced room layouts.
 
-Dated implementation ledgers, parity matrices, debugging journals, and retired
-surveys live in the ignored `../development/` tree. Reusable findings must be
-promoted into the maintained references above before they become a public
-contract.
+For other game ports and native extensions, see the
+[recompiler guide](https://github.com/DerrickGold/ar-recomp/tree/main/snesrecomp-go) and
+[runner SDK](../snesrecomp-go/runtime/docs/README.md).
+
+Internal architecture notes, investigations, plans, and validation reports belong
+in the ignored `development/` tree, not in this public documentation set.

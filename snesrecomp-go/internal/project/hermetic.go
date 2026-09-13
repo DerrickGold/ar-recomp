@@ -477,7 +477,7 @@ func HermeticBuild(options HermeticOptions) (string, error) {
 		case "windows":
 			// No rpath equivalent is needed -- Windows searches the
 			// executable's own directory first -- but the ROM picker in
-			// launcher.c calls GetOpenFileNameA, and the common dialog
+			// launcher.c calls GetOpenFileNameW, and the common dialog
 			// library is not one lld links by default. Without this the
 			// Windows link fails on an undefined symbol after every
 			// translation unit has already compiled.

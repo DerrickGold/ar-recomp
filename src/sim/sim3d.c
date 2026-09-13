@@ -1,3 +1,5 @@
+#include "snesrecomp/support/utf8_fs.h"
+
 #include "sim3d.h"
 #include "sim_background_voxels.h"
 #include "sim_background_voxel_preset.h"
@@ -793,7 +795,7 @@ void Sim3D_ComposeFlatPixels(
 
 static bool WritePpm(const char *path, const uint8_t *pixels,
                      int width, int height, int pitch) {
-  FILE *file = fopen(path, "wb");
+  FILE *file = sr_fopen(path, "wb");
   if (!file) return false;
   bool ok = fprintf(file, "P6\n%d %d\n255\n", width, height) > 0;
   for (int y = 0; ok && y < height; y++) {
@@ -889,7 +891,7 @@ static void MaybeDumpDemoArtifacts(const uint8_t *authentic_pixels,
     ok &= WritePpm(plane_path, (const uint8_t *)g_sim3d_layer_pixels[plane],
                    g_sim3d.width, g_sim3d.height, g_sim3d.width * 4);
   }
-  FILE *metadata = fopen(path_json, "w");
+  FILE *metadata = sr_fopen(path_json, "w");
   if (metadata) {
     ok &= fprintf(metadata,
                   "{\"schema\":\"actraiser-sim3d-d2-flat-v1\","

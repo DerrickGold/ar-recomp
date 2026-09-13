@@ -62,6 +62,14 @@ add_library(snesrecomp_sdk_headers INTERFACE)
 target_include_directories(snesrecomp_sdk_headers INTERFACE
     ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
 add_library(snesrecomp::sdk ALIAS snesrecomp_sdk_headers)
+# Small standalone game/test targets also use the header-only UTF-8 filesystem
+# boundary. Only the public SDK headers are visible, never runtime internals.
+include_directories(${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+if(BUILD_TESTING)
+    add_executable(actraiser_utf8_fs_test
+        snesrecomp-go/runtime/tests/utf8_fs_test.c)
+    add_test(NAME actraiser_utf8_fs COMMAND actraiser_utf8_fs_test)
+endif()
 
 # Architecture-specific paths are optional accelerators. The compiler's
 # target macros decide which implementation is available, which is correct

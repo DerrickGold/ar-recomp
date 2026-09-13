@@ -54,6 +54,7 @@ type Result struct {
 // Options configures one local GUI session.
 type Options struct {
 	Title       string
+	Version     string
 	ProjectRoot string
 	OpenBrowser bool
 	Stdout      io.Writer
@@ -431,6 +432,7 @@ func (app *application) ServeHTTP(response http.ResponseWriter, request *http.Re
 		// text for another marker that happens to look like template syntax.
 		page := strings.NewReplacer(
 			"{{TITLE}}", html.EscapeString(app.options.Title),
+			"{{BUILDER_VERSION}}", html.EscapeString(app.options.Version),
 			"{{STEPS}}", renderStepList(),
 			"{{ASSET_TRACKS}}", renderAssetTrackRows(),
 			"{{ASSET_ROW_PROTOTYPE}}", renderAssetRowPrototype(),
@@ -663,15 +665,9 @@ func storeROM(root string, source io.Reader) (destination string, resultErr erro
 
 	destination = filepath.Join(root, "user-rom.sfc")
 	if err := os.Rename(temporaryPath, destination); err != nil {
-		// Windows cannot atomically replace an existing file. This path is
-		// exclusively managed by the GUI, so removing its previous copy is
-		// safe before the second rename.
-		if removeErr := os.Remove(destination); removeErr != nil && !os.IsNotExist(removeErr) {
-			return "", fmt.Errorf("replace local ROM copy: %w", err)
-		}
-		if err := os.Rename(temporaryPath, destination); err != nil {
-			return "", fmt.Errorf("store local ROM copy: %w", err)
-		}
+		// Go uses replace-existing semantics on Windows too. Never delete the
+		// installed copy as a fallback: a lock/quarantine/error must preserve it.
+		return "", fmt.Errorf("replace local ROM copy (previous ROM preserved; close the game and retry): %w", err)
 	}
 	if err := os.Chmod(destination, 0o600); err != nil {
 		return "", fmt.Errorf("protect local ROM copy: %w", err)

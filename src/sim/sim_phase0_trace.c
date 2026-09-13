@@ -1,3 +1,5 @@
+#include "snesrecomp/support/utf8_fs.h"
+
 #include "sim_phase0_trace.h"
 
 #include <stdio.h>
@@ -49,7 +51,7 @@ bool SimPhase0Trace_Open(const char *path) {
   SimPhase0Trace_Close();
   g_sim_phase0_env_checked = true;
   if (!path || !path[0]) return false;
-  g_sim_phase0_trace = fopen(path, "w");
+  g_sim_phase0_trace = sr_fopen(path, "w");
   if (!g_sim_phase0_trace) {
     fprintf(stderr, "[sim3d-phase0] cannot open %s\n", path);
     return false;
@@ -63,7 +65,7 @@ void SimPhase0Trace_InitFromEnvironment(void) {
   g_sim_phase0_env_checked = true;
   const char *path = getenv("AR_SIM3D_TRACE");
   if (!path || !path[0]) return;
-  g_sim_phase0_trace = fopen(path, "w");
+  g_sim_phase0_trace = sr_fopen(path, "w");
   if (!g_sim_phase0_trace) {
     fprintf(stderr, "[sim3d-phase0] cannot open %s\n", path);
     return;

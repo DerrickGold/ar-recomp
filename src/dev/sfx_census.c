@@ -1,3 +1,5 @@
+#include "snesrecomp/support/utf8_fs.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -345,7 +347,7 @@ void SfxCensus_Report(void) {
 
   char path[kSfxCensusPathCapacity];
   RunDirFile(path, sizeof path, "sfx_census.txt");
-  FILE *f = fopen(path, "w");
+  FILE *f = sr_fopen(path, "w");
   if (f) {
     WriteReport(f);
     fclose(f);

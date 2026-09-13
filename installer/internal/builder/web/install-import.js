@@ -8,6 +8,7 @@
   let plan=null, busy=false, exact=false, imported=false;
   async function request(endpoint,body){
     const response=await fetch("installation-import/"+endpoint,body===undefined?{}:{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+    if(window.workshopFeedback)return window.workshopFeedback.readJSON(response);
     const value=await response.json(); if(!response.ok) throw new Error(value.error||String(response.status)); return value;
   }
   function invalidate(){ plan=null; apply.disabled=true; confirm.checked=false; details.hidden=true; }
@@ -18,9 +19,10 @@
   }
   async function run(action){
     if(busy)return; busy=true;
+    window.workshopFeedback?.clear(status);
     for(const control of dialog.querySelectorAll("button,input,select"))control.disabled=true;
     ui.set(status,"builder.import.working");
-    try { await action(); } catch(error){ invalidate(); ui.unbind(status); status.textContent=error.message; }
+    try { await action(); } catch(error){ invalidate(); ui.unbind(status); status.textContent=error.message; window.workshopFeedback?.show(status,error,{operation:"Import previous installation"}); }
     finally { busy=false; for(const control of dialog.querySelectorAll("button,input,select"))control.disabled=imported; reload.disabled=false; node("-skip").disabled=false; apply.disabled=imported||!plan||plan.alreadyImported||!confirm.checked; }
   }
   source.addEventListener("input",()=>{exact=false; invalidate();});
@@ -40,11 +42,12 @@
   apply.addEventListener("click",()=>run(async()=>{
     const result=await request("apply",{revision:plan.revision,confirm:confirm.checked});
     imported=true; reload.hidden=false;
+    apply.hidden=true;node("-skip").hidden=true;
     ui.set(status,"builder.import.done",{copy:result.copy,conflicts:result.conflicts});
   }));
-  const skip=()=>run(async()=>{if(!imported)await request("skip",{}); dialog.close(); if(imported)location.reload();});
-  node("-skip").addEventListener("click",skip);
-  dialog.addEventListener("cancel",event=>{event.preventDefault(); if(!busy)skip();});
+  const close=()=>{if(busy)return; dialog.close(); if(imported)location.reload();};
+  node("-skip").addEventListener("click",close);
+  dialog.addEventListener("cancel",event=>{event.preventDefault(); close();});
   reload.addEventListener("click",()=>location.reload());
   open.addEventListener("click",()=>{dialog.showModal(); source.focus();});
   request("state").then(state=>{
@@ -52,6 +55,8 @@
     node("-destination").textContent=state.destination; choices(state.candidates);
     node("-detected").hidden=!state.candidates?.length;
     if(state.warning){ui.unbind(status); status.textContent=state.warning;}
-    if(!state.decided){dialog.showModal(); source.focus();}
-  }).catch(error=>{open.hidden=false; ui.unbind(status); status.textContent=error.message;});
+    // Folder selection already determines whether to start fresh or reuse an
+    // existing game in place. Nearby installations are suggestions for manual
+    // import, not a second onboarding step or permission to copy their data.
+  }).catch(error=>{open.hidden=false; ui.unbind(status); status.textContent=error.message;window.workshopFeedback?.show(status,error,{operation:"Detect previous installation"});});
 })();

@@ -146,11 +146,14 @@ func ResolveDataDirectory(layout Layout, options StorageOptions, cwd, goos strin
 }
 
 func localPath(path string, allowDot bool) bool {
-	if strings.ContainsAny(path, "\\\r\n\x00") || filepath.IsAbs(path) {
+	// Callers pass native paths from filepath.Rel/Join as well as portable
+	// slash-separated paths. Normalize only the host's separator before rejecting
+	// ambiguous backslashes: '\\' is valid on Windows, but not a separator on Unix.
+	// IsLocal also rejects Windows drive-relative paths, device names and streams.
+	if strings.ContainsAny(filepath.ToSlash(path), "\\\r\n\x00") || !filepath.IsLocal(path) {
 		return false
 	}
-	clean := filepath.Clean(path)
-	return (allowDot || clean != ".") && clean != ".." && !strings.HasPrefix(clean, ".."+string(filepath.Separator))
+	return allowDot || filepath.Clean(path) != "."
 }
 
 // WritePortableMarker binds an app to existing folder-bundle data without

@@ -195,11 +195,19 @@ func PreviewInstallImport(ctx context.Context, source, destination string) (Impo
 	if !recognizedData(p.Source) {
 		return p, errors.New("no recognized ActRaiserRecomp data in that folder; select its data folder or utils directory")
 	}
-	if rel, err := filepath.Rel(p.Destination, p.Source); err != nil || localPath(rel, true) {
+	inside, err := pathWithin(p.Destination, p.Source)
+	if err != nil {
+		return p, err
+	}
+	if inside {
 		return p, errors.New("source must be outside the game output")
 	}
 	for _, leaf := range importLeaves {
-		if rel, err := filepath.Rel(filepath.Join(p.Source, leaf), p.Destination); err == nil && localPath(rel, true) {
+		inside, err := pathWithin(filepath.Join(p.Source, leaf), p.Destination)
+		if err != nil {
+			return p, err
+		}
+		if inside {
 			return p, errors.New("game output overlaps imported data")
 		}
 	}

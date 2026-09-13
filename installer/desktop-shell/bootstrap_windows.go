@@ -5,11 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
-	"syscall"
 	"unsafe"
 
 	"github.com/DerrickGold/ar-recomp/installer/desktop-shell/internal/host"
@@ -136,27 +134,14 @@ func ensureRuntimeCache(directory string) error {
 	if err != nil {
 		return err
 	}
-	if err = windows.SetNamedSecurityInfo(directory, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION, nil, nil, dacl, nil); err != nil {
-		return fmt.Errorf("runtime cache needs a local filesystem supporting Windows ACLs: %w", err)
-	}
-	return os.WriteFile(filepath.Join(directory, ".builder-runtime-cache"), []byte(cacheMarker), 0600)
-}
-
-// Microsoft requires package/ restricted-package read+execute access for
-// unpackaged Fixed WebView2 on Windows 10. Grant only this new runtime tree,
-// not the build workspace, ROM, source SDK or arbitrary parent directories.
-func grantWebviewReadAccess(directory string) error {
-	system, err := windows.GetSystemDirectory()
+	securityPath, err := localSecurityPath(directory)
 	if err != nil {
 		return err
 	}
-	cmd := exec.Command(filepath.Join(system, "icacls.exe"), directory, "/grant", "*S-1-15-2-2:(OI)(CI)(RX)", "*S-1-15-2-1:(OI)(CI)(RX)", "/T", "/Q")
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: windows.CREATE_NO_WINDOW}
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("grant WebView2 sandbox read permissions: %w: %s", err, out)
+	if err = windows.SetNamedSecurityInfo(securityPath, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION, nil, nil, dacl, nil); err != nil {
+		return fmt.Errorf("runtime cache needs a local filesystem supporting Windows ACLs: %w", err)
 	}
-	return nil
+	return os.WriteFile(filepath.Join(directory, ".builder-runtime-cache"), []byte(cacheMarker), 0600)
 }
 
 func showStartupError(err error) {

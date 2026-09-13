@@ -1,3 +1,5 @@
+#include "snesrecomp/support/utf8_fs.h"
+
 #include "sim_render_metadata.h"
 
 #include <stdio.h>
@@ -24,7 +26,7 @@ static void TraceInitFromEnvironment(void) {
   g_sim_d1_trace_env_checked = true;
   const char *path = getenv("AR_SIM3D_D1_TRACE");
   if (!path || !path[0]) return;
-  g_sim_d1_trace = fopen(path, "w");
+  g_sim_d1_trace = sr_fopen(path, "w");
   if (!g_sim_d1_trace) {
     fprintf(stderr, "[sim3d-d1] cannot open %s\n", path);
     return;

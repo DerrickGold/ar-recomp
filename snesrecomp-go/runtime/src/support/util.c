@@ -1,3 +1,5 @@
+#include "snesrecomp/support/utf8_fs.h"
+
 #include "util.h"
 
 #include "snesrecomp/support/file.h"
@@ -76,7 +78,7 @@ uint8_t *snesrecomp_read_whole_file(const char *name, size_t *length) {
     if (length != NULL) {
         *length = 0u;
     }
-    if (name == NULL || (file = fopen(name, "rb")) == NULL) {
+    if (name == NULL || (file = sr_fopen(name, "rb")) == NULL) {
         return NULL;
     }
     if (fseek(file, 0, SEEK_END) != 0 || (file_size = ftell(file)) < 0 ||
@@ -259,4 +261,3 @@ bool ParseBool(const char *value, bool *result) {
     }
     return parsed;
 }
-

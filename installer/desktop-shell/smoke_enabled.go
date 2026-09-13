@@ -116,17 +116,16 @@ window.addEventListener('DOMContentLoaded', async () => {
     check(typeof window.workshopFileInputs === 'object', 'file-input JavaScript did not load');
     const migration = await (await fetch('installation-import/state')).json();
     check(migration.enabled, 'installation import unavailable');
-    // Exercise the real first-launch prompt, then persist a deliberate skip.
-    // Warm launches must retain the manual import action without prompting.
+    // Output selection is the only startup flow, even without an import
+    // receipt. Importing from another folder remains an explicit action.
     for (let i=0; i<100 && document.querySelector('#import-install-open').hidden; i++) await new Promise(resolve=>setTimeout(resolve,25));
     check(!document.querySelector('#import-install-open').hidden, 'import JavaScript did not load');
-    if (!migration.decided) {
-      check(document.querySelector('#import-install').open, 'first-launch import dialog missing');
-      document.querySelector('#import-install-skip').click();
-      for (let i=0; i<100 && document.querySelector('#import-install').open; i++) await new Promise(resolve=>setTimeout(resolve,25));
-      check(!document.querySelector('#import-install').open, 'import skip did not close dialog');
-      check((await (await fetch('installation-import/state')).json()).decided, 'import decision not persisted');
-    }
+    check(!document.querySelector('#import-install').open, 'unexpected duplicate startup import dialog');
+    document.querySelector('#import-install-open').click();
+    check(document.querySelector('#import-install').open, 'manual import dialog did not open');
+    document.querySelector('#import-install-skip').click();
+    check(!document.querySelector('#import-install').open, 'import cancel did not close dialog');
+    check((await (await fetch('installation-import/state')).json()).decided === migration.decided, 'cancelling import wrote a decision');
     const status = await (await fetch('status')).json();
     check(status.state === 'idle' && status.install.canRebuild, 'bundled build inputs unavailable');
     const preferences = await fetch('interface/preferences', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({language: window.workshopI18n.locale})});
@@ -152,7 +151,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     const invalid = await fetch('build', {method: 'POST', body: new FormData()});
     check(invalid.status === 400, 'multipart request did not reach build validation');
     document.querySelector('#tab-home').click();
-    outcome = 'PASS JavaScript, installation import prompt, status, preferences, tabs, PDF bytes, WAV decoding, multipart validation';
+    outcome = 'PASS JavaScript, manual installation import, status, preferences, tabs, PDF bytes, WAV decoding, multipart validation';
     const config = await (await fetch('__shell/smoke-config')).json();
     if (config.fullBuild) {
       const form = new FormData();

@@ -378,11 +378,12 @@
 }
 #panel-localization button {
   font:inherit;
-  font-size:12px;
+  font-size:var(--control-font,14px);
   cursor:pointer;
-  min-height:34px;
+  min-height:var(--control-height,42px);
   border-radius:6px;
-  padding:9px 13px;
+  padding:10px 16px;
+  line-height:1.4;
   border:1px solid var(--line);
   background:#26364a;
   color:var(--ink)
@@ -394,7 +395,7 @@
 #panel-localization button:hover:not(:disabled) {
   background:#30445b
 }
-#panel-localization #loc-save,#panel-localization #loc-install,#panel-localization #loc-publish,#panel-localization #loc-create>button,#panel-localization #loc-pick-directory,#panel-localization #loc-accept-import {
+#panel-localization #loc-save,#panel-localization #loc-install,#panel-localization #loc-publish,#panel-localization #loc-create>button,#panel-localization #loc-accept-import {
   background:var(--gold);
   color:#202735;
   font-weight:600;

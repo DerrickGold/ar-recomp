@@ -1,41 +1,18 @@
 # Portable runner
 
-This directory contains the project-owned portable C replacement runner. It is
-the sole runtime used by project, hermetic, and distribution builds. The
-project-authored sources are MIT licensed; the attributed Snaggletooth S-DSP
-portions retain their compatible upstream MIT notice.
+The portable SNES runner is a standalone library for recompiled games and
+native extensions. Its versioned API provides opaque handles, capability
+queries, and bounded access to emulated state. Public headers live under
+`include/snesrecomp`; headers under `src/` are private.
 
-Current status:
+Building the library requires a C11/C++20 toolchain and CMake, but no SDL,
+ROM, or generated game code. See the [SDK guides](docs/README.md) for API usage,
+[examples](examples/minimal_game/README.md) for an integration sample, and
+[BINARY_SDK.md](BINARY_SDK.md) for the prebuilt distribution layout.
 
-- `runner.cmake` is the sole source and include manifest for source builds.
-- The implementation covers hashing, ROM/SRAM and LoROM/HiROM mapping, 65816
-  generated-code ABI and dispatch, DMA, the SNES bus/register model, PPU,
-  APU/SPC700/S-DSP, MSU-1, frame/audio pacing, save state, diagnostics,
-  widescreen and overlay presentation, key bindings, and launcher utilities.
-- ABI v2 exposes a versioned capability table, opaque component handles,
-  generation counters, bounded frame transactions, and thread-confined memory
-  views. Supported headers live under `include/snesrecomp`; hardware layouts
-  and singleton state remain private under `src`.
-- `cmake -S . -B <build-dir>` from this directory produces the standalone
-  `snesrecomp::runtime` static library from MIT-licensed sources and runs
-  without SDL, a ROM, or generated game code. The public/generated-code ABI is
-  C11; the private attributed S-DSP accuracy device is compiled as C++20.
-
-Repository-ready layout:
-
-- `include/snesrecomp/` is the installed public SDK surface;
-- `src/core/`, `src/runner/`, `src/snes/`, and `src/support/` are private
-  implementation areas;
-- `examples/` contains public-header-only integration fixtures;
-- `tests/` owns standalone conformance and device tests; and
-- [`docs/`](docs/README.md) contains all runner-owned integration and
-  engineering documentation.
-
-The parent `snesrecomp-go` module still supplies the recompiler and project
-build orchestration. The runner does not rely on the parent's source layout
-for its own API boundary, standalone build, tests, provenance, or license.
-The smaller source-free distribution layout is documented in
-[`BINARY_SDK.md`](BINARY_SDK.md).
+The project-authored sources are MIT licensed. Attributed Snaggletooth S-DSP
+portions retain their upstream MIT notice; see [PROVENANCE.md](PROVENANCE.md)
+and [NOTICE.md](NOTICE.md).
 
 ## Build, install, and consume
 
@@ -77,18 +54,6 @@ the exact target-keyed archive automatically. `runner.cmake`, `src/`, private
 headers, examples, and tests are development inputs and are not required in a
 binary SDK distribution.
 
-Design requirements for every replacement subsystem:
-
-- a portable C11 public/core ABI with a private C++20 S-DSP accuracy unit,
-  fixed-width public types, and no compiler, operating-system, graphics, or
-  audio-library types in core headers;
-- host integration through narrow adapters rather than platform conditionals
-  spread through emulation code;
-- no allocation, locking, or mutable one-time initialization in hot paths;
-- deterministic contract tests that can be compiled by Clang/GCC, MSVC, and
-  Zig cross targets; and
-- performance measurements before a replacement becomes the release default.
-
 From the ActRaiserRecomp root, the normal build selects this runner:
 
 ```sh
@@ -126,18 +91,3 @@ cmake -S . -B <build-dir> \
 ```
 
 `auto` is the default; the other accepted values are `32` and `64`.
-
-The historical comparison runner was retired after parity validation. No part
-of it is present here. The complete replacement runner is redistributable under
-MIT-compatible terms; see [`LICENSE`](LICENSE), [`NOTICE.md`](NOTICE.md), and
-[`PROVENANCE.md`](PROVENANCE.md) for the precise authorship boundary.
-
-New game projects should use the producer-oriented widescreen/audio workflow in
-[`docs/GAME_ENHANCEMENT_INTEGRATION.md`](docs/GAME_ENHANCEMENT_INTEGRATION.md).
-The capability matrix, result codes, lifetime rules, and common call sequences
-are in [`docs/API_REFERENCE.md`](docs/API_REFERENCE.md). A compile-checked
-public-only integration starts in [`examples/minimal_game`](examples/minimal_game).
-The same public contracts can be browsed as generated, Javadoc-style HTML by
-configuring with `SNESRECOMP_BUILD_DOCS=ON` and building the
-`snesrecomp_runtime_docs` target. Doxygen is required only for that explicit
-documentation build.

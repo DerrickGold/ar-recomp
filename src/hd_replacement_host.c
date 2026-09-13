@@ -1,3 +1,5 @@
+#include "snesrecomp/support/utf8_fs.h"
+
 #include "action/action_obj_apron.h"
 #include "hd_replacement_host.h"
 
@@ -138,7 +140,7 @@ void HdReplacementHost_LoadTextures(void) {
 
     /* Missing images are the normal "hook available, art not provided"
      * state. A present file that cannot decode is a real error. */
-    FILE *probe = fopen(entry->image, "rb");
+    FILE *probe = sr_fopen(entry->image, "rb");
     if (!probe) continue;
     fclose(probe);
 

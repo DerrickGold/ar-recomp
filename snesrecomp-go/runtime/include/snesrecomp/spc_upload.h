@@ -80,7 +80,12 @@ bool sr_spc_upload_image(const uint8_t *rom, size_t rom_size,
  * reads mirror at `rom_size`, ARAM writes wrap at 64 KiB, and active upload
  * write tracking records every destination byte.
  *
- * @param byte_count Number of bytes to copy; must not exceed 64 KiB.
+ * @param[in] rom Immutable ROM bytes; must not be null.
+ * @param[in] rom_size Number of ROM bytes; must be nonzero.
+ * @param[in] source_offset First ROM byte to copy; reads mirror at rom_size.
+ * @param[in,out] aram Mutable 64 KiB ARAM image; must not be null.
+ * @param[in] destination First ARAM address; writes wrap at 64 KiB.
+ * @param[in] byte_count Number of bytes to copy; must not exceed 64 KiB.
  * @return `true` when all arguments and the requested extent are valid.
  */
 bool sr_spc_upload_copy_rom(const uint8_t *rom, size_t rom_size,

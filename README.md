@@ -9,9 +9,9 @@ The 1990 SNES game from Quintet and Enix alternates between side-scrolling
 action stages and a top-down town simulation. This project targets the USA
 cartridge dump and converts its 65816 machine code into C, which is then linked
 with a hand-written SDL3 runtime. Running the game as native code allows
-widescreen rendering, layered 3D action stages, height-mapped towns, GPU and
-CRT effects, replacement art and music, rebindable controls, and
-an in-game settings menu and manual.
+widescreen rendering, layered 3D action stages, height-mapped towns and a
+3D globe, GPU and CRT effects, replacement art and music, language packs,
+and rebindable controls. An in-game settings menu and manual explain the options.
 
 **[Quick start](#quick-start)** · **[Features](#features)** ·
 **[Manual](docs/manual.md)** · **[Game documentation](docs/README.md)** ·
@@ -26,11 +26,12 @@ an in-game settings menu and manual.
 >
 > Thank you for taking an interest in the project and for sharing it with
 > others. The current build is based on the USA release, which differs from the
-> Japanese version in many ways beyond the language itself. I am working to
-> bring the Japanese version's regional features and Japanese-language support
-> to a future release.
+> Japanese version in many ways beyond the language itself. Language-pack
+> support is now available, including tools for Japanese text. I am continuing
+> work toward Japanese-language coverage and the Japanese version's regional
+> features; language packs alone do not change the game mechanics.
 >
-> 本プロジェクトに関心を寄せていただき、ありがとうございます。また、本作を広めてくださった皆さまにも心より御礼申し上げます。現在のビルドは北米版をベースとしており、日本版とは言語以外にも多くの違いがあります。将来のリリースに向けて、日本版独自の要素への対応と日本語化を進めています。
+> 本プロジェクトに関心を寄せていただき、ありがとうございます。また、本作を広めてくださった皆さまにも心より御礼申し上げます。現在のビルドは北米版をベースとしており、日本版とは言語以外にも多くの違いがあります。日本語のテキストにも対応した言語パック機能が利用できるようになりました。引き続き、日本語化と日本版独自の要素への対応を進めています。なお、言語パックだけではゲームの仕様は日本版に変わりません。
 
 ---
 
@@ -44,10 +45,7 @@ Development is active, and bugs remain.
 | 🟡 | **Simulation mode:** Event coverage is confirmed in Fillmore, Bloodpool, Kasandora, Aitos, and Marahna; Northwall remains to be validated. |
 | 🟡 | **Diorama mode:** Every action route except Northwall has been play-tested, with further room-by-room refinement planned. |
 | 🟡 | **Platforms:** macOS arm64 and Steam Deck are confirmed. macOS x86_64, generic Linux, and Windows still need representative launch testing. |
-| 🟡 | **Localization and regional support:** Multilingual text and optional Japanese-version mechanics are under investigation and early development. |
-
-See [`docs/progress.md`](docs/progress.md) for stage, town, subsystem, and
-platform details.
+| 🟡 | **Localization and regional support:** Enhanced fonts, language packs, and Workshop authoring are available. Translation coverage is ongoing; Japanese-version mechanics remain under investigation. |
 
 ---
 
@@ -70,225 +68,131 @@ also be useful to an independent decompilation effort.
 
 ## Quick start
 
-The downloadable builder needs only your ROM. It includes the compiler and
-other build dependencies, so there is no need to install CMake, SDL, Go, or
-clone the repository.
+**[Download the Builder from GitHub Releases](https://github.com/DerrickGold/ar-recomp/releases)**
+
+The Builder includes the compiler and game dependencies. Building happens
+locally and works offline once you have downloaded it.
 
 ### What you need
 
 Provide your own legally obtained USA cartridge dump. The project does not
-include a ROM, and the builder verifies the file against these values before
-continuing:
+include a ROM, and the Builder verifies your file before continuing.
 
 | | |
 |---|---|
 | Internal title | `ACTRAISER-USA` |
-| Size | 1,048,576 bytes (1MB, no copier header) |
+| Size | 1,048,576 bytes (1 MiB, no copier header) |
 | Internal checksum | `0x83DB` |
 | SHA-256 | `b8055844825653210d252d29a2229f9a3e7e512004e83940620173c57d8723f0` |
 | SHA-1 | `e8365852cc20178d42c93cd188a7ae9af45369d7` |
 | CRC32 | `0xEAC3358D` |
 
-### 1. Download the builder for your platform
+### 1. Download and open the Builder
 
-Download the Builder for your machine from
-**[Releases](https://github.com/DerrickGold/ar-recomp/releases)**. Put it in a
-writable folder where you want your game created; unpack ZIP/tar downloads first.
+Download the bundle for your machine from
+[Releases](https://github.com/DerrickGold/ar-recomp/releases) and extract it
+into a writable folder.
 
-| Platform | Recommended portable bundle | Per-user-storage artifact |
+| Platform | Recommended download | Open |
 |---|---|---|
-| macOS (Apple Silicon / Intel) | `ActRaiserRecompBuilder-macos-arm64-portable.zip` / `-macos-x86_64-portable.zip` | `ActRaiserRecompBuilder-macos-arm64.app.zip` / `-macos-x86_64.app.zip` |
-| Windows (x64 / ARM64) | `ActRaiserRecompBuilder-windows-x86_64-portable.zip` / `-windows-arm64-portable.zip` | `ActRaiserRecompBuilder-windows-x86_64.exe` / `-windows-arm64.exe` |
-| Linux (x64 / ARM64) | `actraiser-recomp-linux-x86_64.tar.xz` / `-linux-arm64.tar.xz` | — |
-| Steam Deck | `ActRaiserRecompBuilder-steam-deck-portable.tar.xz` | `ActRaiserRecompBuilder-steam-deck.AppImage` |
+| macOS (Apple Silicon / Intel) | `ActRaiserRecompBuilder-macos-arm64-portable.zip` / `-macos-x86_64-portable.zip` | `ActRaiserRecompBuilder.app` |
+| Windows (x64 / ARM64) | `ActRaiserRecompBuilder-windows-x86_64-portable.zip` / `-windows-arm64-portable.zip` | The Builder `.exe` |
+| Linux (x64 / ARM64) | `actraiser-recomp-linux-x86_64.tar.xz` / `-linux-arm64.tar.xz` | `./run-build.sh` |
+| Steam Deck | `ActRaiserRecompBuilder-steam-deck-portable.tar.xz` | The Builder `.AppImage` in Desktop Mode |
 
-The recommended desktop downloads extract as one folder containing the Builder
-and its matching `.portable` file. Keep them together: on first launch the
-Builder creates `BuilderData` beside itself for generated build files, compiler
-caches and logs. Source and tools are read from the Builder's own payload;
-Windows uses a verified extracted runtime cache without a second source/tool
-copy in `BuilderData`. Copying only the application—or downloading the
-direct artifact in the last column—uses the operating system's per-user data
-directory instead. The portable archives wrap the exact same built application
-as the direct artifacts; they are not separate builds. AppImage bundles use
-tar.xz so extraction preserves the executable bit.
+Keep the portable desktop Builder and its `.portable` file together; its
+build data goes into the adjacent `BuilderData` folder. App-only downloads
+are also available for macOS, Windows, and Steam Deck and use per-user storage.
+The generic Linux launcher opens the same Workshop in your browser.
 
 On Windows, a startup window shows progress while the bundled tools and browser
 are prepared or checked. The first launch can take a few minutes on slower
 machines. You can cancel safely; opening the Builder again for the same workspace
 brings the existing window forward instead of starting another copy.
 
-Each Builder contains the buildable project, a pinned Zig C/C++ toolchain, and
-matched SDL3/SDL3_ttf headers and libraries for its platform. A SHA-256 sidecar
-is included for each download. Players do not need system SDL development
-packages; the Builder selects its bundled SDK ahead of any system SDL.
+On Linux, mark an AppImage executable if necessary. AppImages need FUSE;
+`APPIMAGE_EXTRACT_AND_RUN=1 ./ActRaiserRecompBuilder-steam-deck.AppImage`
+provides a fallback. Minimal Linux installations may also need the desktop,
+audio, and font libraries listed in the download's README.
 
-Installer packaging automatically selects the latest stable **3.x** SDL3 and
-SDL3_ttf SDKs available from each platform's publisher. Players use those
-included versions offline; the Builder does not download updates. Exact inputs
-are recorded in `utils/licenses/sdl-sdk.lock.json`. Maintainers can
-[override versions or reuse a lock](docs/desktop-packaging.md#sdl-version-policy).
+![The Workshop with an animated Fillmore background and shortcuts to play, languages, assets, and the manual](/assets/builder-workshop.gif)
 
-Linux installers require normal Linux desktop/audio/font runtime libraries.
-Minimal installations may need these OS components added;
-the archive's README lists them, and the Builder checks before compiling.
-Normal AppImage launching also needs a working FUSE setup (for example,
-Debian's `fuse3` package). `APPIMAGE_EXTRACT_AND_RUN=1` is the no-FUSE fallback.
+### 2. Choose a game folder and build
 
-The desktop Builder uses the same Workshop as the generic Linux browser-based
-Builder. Cross-building a release does not qualify every target: Windows and
-macOS Intel still need representative native testing, and Steam Deck testing is
-in progress. See the [verification record](installer/desktop-shell/VERIFICATION.md)
-for completed checks and remaining gaps.
+The desktop Builder first asks where to put the game. Its default is an
+`ActRaiserRecomp/` folder beside the Builder. Select **Update existing
+installation** to rebuild a current game, or choose a new folder when migrating
+an older `utils/` installation.
 
-### 2. Choose the game folder and your ROM
+Open **Build game** in the sidebar, choose your USA ROM, and press **Build game**.
+The Builder extracts the game's data, recompiles its code, and creates the playable
+application. Progress stays visible while you browse the Workshop, including
+its language tools and original instruction manual.
 
-Open `ActRaiserRecompBuilder.app` on macOS or the downloaded Builder `.exe` on
-Windows. On Steam Deck, switch to Desktop Mode, mark the AppImage executable in
-its file properties, and open it. For a generic Linux archive, run
-`./run-build.sh` to open the Workshop in your browser.
-
-On the desktop Builder's first launch, review **Choose game folder**. It defaults
-to `ActRaiserRecomp/` beside the Builder, or you can select an exact destination.
-Choose **Update existing installation** to rebuild an existing game; non-empty
-folders require confirmation. Saves, settings, language packs and custom assets
-are preserved. For older `utils/` installations, choose a new game folder and
-use **Import previous installation** to copy your data forward.
-
-The destination is remembered. **Change game folder…** in the sidebar selects
-the folder for the next launch without affecting the current session; close and
-reopen the Builder to use it. Changing folders does not move existing data.
-
-Choose your ROM and press **Build game**. The Builder generates and compiles the
-game's C code; the initial build usually takes a few minutes.
-
-![The local builder in three stages: the ROM picker with a Build game button; the build running with a step list and a progress dock at 38%; and the finished build showing the original instruction manual with a Launch game button](/assets/builder-stages.webp)
-
-The **Manual** tab includes the original 40-page instruction booklet, which can
-be read while the build runs.
+![Three stages of a local build: ROM selected, compilation in progress, and the completed game ready to play](/assets/builder-build.gif)
 
 ### 3. Play
 
-When the build finishes, press **Play**. On macOS the builder creates
-`ActRaiserRecomp.app`; on Linux it creates `ActRaiserRecomp.AppImage`. Open that
-application for later sessions without a terminal. Windows continues to use
-`run-game.bat`; the older `run-game` scripts remain available on all platforms.
-Opening the Builder again detects the existing game and opens as a launcher.
+Choose **Run game** when the build finishes. Later, open the generated game
+directly:
 
-These applications are generated locally and contain your ROM; they are not
-public release artifacts. macOS signing is automatic and local, with no Apple
-developer account or Xcode required. Linux ARM64 tests cover finished AppImage
-creation and both mounted/extracted launching; the real Builder also compiled
-and launched the game offline with system SDL removed. Graphical desktop
-acceptance and the new x86_64/Steam Deck AppImage path remain unverified.
+| Platform | Playable output |
+|---|---|
+| macOS | `ActRaiserRecomp.app` |
+| Linux / Steam Deck | `ActRaiserRecomp.AppImage` |
+| Windows | `ActRaiserRecomp.exe`; keep its supporting files beside it |
 
-The generated desktop application supports two installation types. The same
-instructions apply regardless of its platform-specific filename. Legacy
-`run-game` scripts continue to use the original bundle's data folder.
+On Windows, double-click `ActRaiserRecomp.exe` directly—no `.bat` launcher is
+required. Keep its DLLs, `user-rom.sfc`, `tools/`, assets, settings and saves in
+the generated game folder; the `.exe` is not a single-file game package.
 
-#### Portable installation (Builder default)
-
-The desktop Builder creates an `ActRaiserRecomp/` folder beside its own
-application. Keep that whole output folder: it contains the playable application,
-its automatically generated `.portable` sidecar, and its runtime data. The
-sidecar is named after the complete application filename with `.portable`
-appended; `.` inside it selects the immediate output directory. Launch the game
-application directly, and move the whole folder to relocate it without needing
-the Builder's tools. Workshop edits affect the data in this output folder.
-
-Older archive-based `run-build` installs retain their existing layout: their
-sidecar points to `utils/`. Keep the application, sidecar and `utils/` together;
-rebuilding through that legacy entry point continues using those saves/settings.
-Windows game builds currently use a portable executable folder and launcher.
-
-#### Non-portable installation (per-user data)
-
-For a generated macOS/Linux game application, copy **only the application** to
-your preferred location, leaving its `.portable` sidecar and portable data
-behind, then launch that copy directly. Without a sidecar,
-the application uses your operating system's standard per-user application data
-directory under `ActRaiserRecomp/game`, even if an old portable data folder
-happens to be nearby. A direct desktop Builder without its portable sidecar uses
-the same application-data parent and keeps its own files under
-`ActRaiserRecomp/installer`. The recommended portable Builder bundle instead
-keeps those files in its adjacent `BuilderData` directory.
-
-On first launch it initializes the required files there; later launches reuse
-that user's saves, settings, and assets. Moving or replacing the application
-does not move this data. Switching installation types does not automatically
-transfer or merge saves and settings; the original portable files remain intact.
-
-The Workshop edits its portable output (or `utils/` for legacy `run-build`),
-not a separate non-portable game installation. Older global game data stored
-directly under `ActRaiserRecomp` is imported non-destructively into `game/` on
-first use; original files remain intact. See
-[desktop packaging](docs/desktop-packaging.md) for exact data locations,
-advanced overrides, and source-checkout commands.
-
-### 4. Upgrading later
-
-Back up your saves before upgrading. Keep the portable game's output folder and
-rebuild into that same destination; runtime edits and saves are preserved.
-For legacy archive installs, keep the application and sidecar with their
-existing `utils/` data. When moving to the desktop Builder, put it beside the
-old installation: its first-launch dialog detects known data folders and offers
-an import into the new game output. You can also choose a different folder or
-use **Import previous installation…** in the sidebar later. Preview the files,
-close both games, and save your Workshop edits before confirming. Originals
-are copied, never moved or deleted; destination saves/settings and modified
-assets win conflicts. The dialog reports conflicts and the build log records
-them. Importing the same source again is blocked, so old saves are not repeatedly
-restored. Reload other open Workshop tabs after an import.
-
-Choosing **Start fresh / not now** is remembered for this output folder, but
-manual import remains available. This imports runtime data, not old executables,
-build tools, or ROMs. Browser-only appearance preferences are not installation
-files and cannot be recovered from an old folder. A newer desktop Builder uses
-its own bundled source/tools and a fresh versioned build cache without resetting
-the workspace. Old workspace files remain untouched; see the
-[workspace and upgrade contract](installer/desktop-shell/README.md).
-
-For a non-portable installation, generate the updated application with the newer
-Builder, then replace only the application in your chosen location. Leave the
-generated game's `.portable` sidecar behind. Your existing per-user data stays in
-its operating-system directory and is reused by the updated application.
-
-Shipped defaults are stored separately from live settings. On the next launch,
-new settings are added without replacing values you have changed; existing
-saves, authored diorama rooms, and custom asset entries remain in place.
-
-### 5. Optionally, reclaim the space
-
-The desktop Builder's `ActRaiserRecomp/` output is independent of its build
-tools. Keep that whole game folder, including its sidecar and data, to continue
-playing without the Builder.
-
-For generic Linux archive installs, the Builder can remove the toolchain after
-a successful build and reports how much space will be recovered. The game,
-settings, saves, music, and graphics remain in place, and `run-build` continues
-to work as a launcher. Download the archive again if you later need to rebuild.
+Keep the whole output folder for a portable installation, including its
+`.portable` file on macOS/Linux, saves, settings, and assets. The game runs
+independently of the Builder. These locally generated applications contain your
+ROM and are not intended for redistribution.
 
 <details>
-<summary>Building and testing from a source checkout instead</summary>
+<summary>Using per-user game storage on macOS or Linux</summary>
 
-For a source build, place the ROM at `ar.sfc` and run `make dev`, or pass a
-different path with `ROM=/path/to/dump.sfc`. The build requires Go 1.24+,
-CMake 3.16+, C and C++ compilers, and SDL3 3.4+. On a fresh checkout, this
-command generates the ROM-derived C, creates a user-owned `config.ini` from the
-stock template if one is not already present, and builds the optimized `play`
-preset in `build-release/`. Generated game code stays local and is not
-committed.
+Copy just the generated `.app` or `.AppImage` to your preferred location,
+leaving its `.portable` file behind. On launch, it initializes data under your
+operating system's application-data directory. Subsequent app updates reuse
+that data.
 
-For the usual edit-and-build loop, run `cmake --build --preset play`. Configure
-and build the Debug test tier with `cmake --preset dev` followed by
-`cmake --build --preset dev`, then run it with `ctest --preset dev`. Test the
-generic toolchain with `go -C snesrecomp-go test ./...` and the ActRaiser
-Builder with `go -C installer test ./...`. Additional checks are available
-through `make check-constants` for high-risk authored constants and
-`make check-cross` for a Windows x86_64 compile-and-link test using the pinned
-Zig and SDL toolchain.
+Moving between portable and per-user storage does not transfer saves
+automatically. The Workshop edits the game folder selected in the Builder.
+See [desktop packaging](docs/desktop-packaging.md) for data locations and
+advanced options.
 
 </details>
+
+### 4. Update or import an existing installation
+
+Select your existing game folder to use its settings, assets, ROM and saves
+directly, or select an empty folder to start fresh.
+
+Back up your saves, then rebuild into the same game folder with the newer
+Builder. Saves, settings, language packs, authored diorama rooms, and custom
+assets are retained. For a per-user macOS or Linux installation, replace only
+the generated application.
+
+To copy data from a different or legacy installation, use **Import previous installation…**,
+review the detected data, and close the game before importing. The Builder
+copies the files and preserves the originals; existing destination saves,
+settings, and modified assets take priority.
+
+**Change game folder…** selects the destination for the next Builder session.
+Save your Workshop work, then close and reopen it to use that folder.
+
+### 5. Keep the game after building
+
+The desktop Builder's output folder is independent of its build tools, so you
+can retain the game without keeping the Builder. Older archive installs offer
+toolchain cleanup under **Storage & build tools**. Keep their `utils/`
+runtime data and retained helper files; download the archive again to rebuild.
+
+See the [Workshop guide](docs/builder-workshop.md) for the full installation,
+asset, and language workflows.
 
 ---
 
@@ -308,17 +212,13 @@ stretching or cropping the original view. Press `F9` to cycle among authentic
 4:3, widescreen raw, and widescreen full, which places the HUD in an
 independently scaled overlay.
 
-Every standard action stage across regions 1–6, along with all of Death Heim,
-has been played through and validated in widescreen.
-
 ![Bloodpool Act 2 in authentic 4:3 above the same scene in 16:9, with the background extending symmetrically into the extra width](/assets/widescreen-comparison.png)
 
 ### Diorama 3D for action stages
 
-The renderer captures the PPU's background layers, sprite plane, and HUD
-separately each frame, then places them on distinct planes in 3D space. BG2
-sits behind BG1, sprites stand between them, and depth shading falls off with
-distance to give the stage the appearance of a physical diorama.
+Diorama mode places action-stage backgrounds and sprites on separate planes
+in 3D space. Depth shading gives the scene the appearance of a physical
+diorama, while the HUD can be scaled independently.
 
 Rooms can be tuned independently:
 
@@ -329,9 +229,13 @@ Rooms can be tuned independently:
 - **Framing:** Vertical extension reveals more of the stage above and below the
   original 224 lines. Skybox and Shoebox walls enclose finite backdrops.
 
-![The diorama camera orbiting a Fillmore stage, layers moving against each other in depth](/assets/diorama.gif)
+![Aitos Act 2 gameplay with separated 3D layers and the dynamic diorama camera](/assets/gameplay-diorama.gif)
 
-![Fillmore Act 1 side by side: flat 2D on the left, the same frame tilted into separated 3D planes on the right](/assets/diorama-comparison.png)
+This Fillmore Act 1 comparison starts with the original 4:3 presentation,
+then shows enhanced widescreen with the camera tilting and pulling back to
+reveal the layers.
+
+![Fillmore Act 1 in original 4:3, followed by enhanced widescreen with a tilted and zoomed-out diorama camera](/assets/fillmore-rendering-comparison.gif)
 
 ### 3D simulation towns
 
@@ -342,76 +246,53 @@ Simulation mode rebuilds each town as an oblique 3D scene:
 - **Scenery:** Region-aware voxel models replace structures and foliage at
   selectable quality levels. Stone bridges span the banks, while mountains
   and volcanoes use camera-aligned relief.
-- **Actors and depth:** People and effects remain billboards grounded against
+- **Actors and depth:** People and effects are billboards grounded against
   the terrain, and flying actors maintain a stable altitude above it. Ridges
   and buildings can occlude objects behind them.
 - **Lighting and interaction:** Objects cast terrain-following shadows, with
-  optional soft blur and rim lighting. The surrounding world map continues
-  beyond the town, and building placement and miracle targeting remain in the
-  tilted view.
+  optional soft blur and rim lighting. Miracles and enemy attacks add local
+  lighting and particles. A connected globe continues beyond the town's borders,
+  and building placement and miracle targeting work in the tilted view.
 
-![Fillmore projected onto a 3D ground plane, trees and structures standing as billboards while the camera moves](/assets/3dtown.gif)
-
-![Aitos rebuilt with elevated terrain, voxel buildings, trees and mountain relief, with the authentic town view inset for comparison](/assets/sim3d-detail.png)
-
-![Zooming out from Fillmore until the whole landmass and its surrounding clouds are visible](/assets/3dtown-zoom.gif)
+![Aitos during a volcanic eruption, with fireball trails and haze, ending with a low-angle view of the voxel buildings and raised terrain](/assets/sim3d-town.gif)
 
 ### 3D world navigation
 
-While the Sky Palace travels between towns, the game renders the full world map
-on a full sphere with fixed geography, a 128×128-cell relief mesh, raised mountain ranges, aligned town
-plains and smoothly graded boundaries. Buildings, landmarks and foliage reuse
-the actual 3D town models and regional palettes. The authentic Mode-7 focus,
-rotation and zoom still drive travel, while lighting, cloud banks and a blue
-atmospheric rim sit against a starfield. Cloud cover wraps the full sphere,
-including unmapped ocean, with seamless spherical noise. Lighting, clouds, cloud shadows,
-atmosphere, town models and terrain relief can be switched off independently
-for lower-end systems. A separate detailed-ground toggle adds native-resolution
-live town paths, shorelines and ground beneath the models, including the native
-four-frame water/waterfall animation. Native cliff bands
-retain their town-owned corner heights, rock artwork and closed side walls;
-turning detailed ground or relief off restores the overview surface. Mountain
-silhouettes are not flattened into that texture. Native mountains now
-reuse the town renderer's inclined faces and fitted side walls, plus rear slopes
-clipped away from buildings and other non-mountain town ground, with their own
-toggle and overview fallback. Missing edge-stamp halves can continue over
-confirmed exterior rock, never into another town. Nearby overworld ranges blend toward those native
-mountain heights and rock palettes; boundary-height joins also protect building
-and non-mountain cells. Right-drag or the right stick inspects the globe,
-including the far side and poles; releasing it returns to the travel view.
-Inspection smoothly centers the planet. The wheel/triggers zoom, with deliberate
-zoom-out retaining that centered framing; middle-click/R3 resets this visit's
-camera without changing the saved town pose. Town entry and exit still use the existing menus.
-Native fades cover town loading, and Advent descent accounts for raised terrain
-and model heights. With world navigation enabled, the separate **Sky Palace
-globe backdrop** setting replaces the Palace's original sky with a downward
-horizon view of the same developed world. A blue daylight gradient and moving
-sky/cloud decks sit behind the untouched native pillars, angel, menus and HUD;
-inter-town navigation keeps its space backdrop. Cloud density, drift and effect
-switches apply here too. Turning this Palace setting off restores the native
-background without disabling globe navigation.
+The Sky Palace travels over a spherical world with raised mountain ranges,
+developed towns, moving clouds, and an atmosphere against the starfield. The
+globe uses the same terrain, buildings, and regional artwork as the town view.
 
-Custom seamless zoom-to-town transitions and globe rendering
-under active SIM towns are deferred. Physical camera/controller acceptance and
-representative non-Metal GPU testing remain open.
+- **Explore:** Right-drag or use the right stick to look around the globe.
+  The wheel or triggers zoom; middle-click or R3 resets the view. Travel and
+  town entry use the original menus.
+- **Sky Palace:** The optional globe backdrop shows the currently selected
+  town below the Palace, with moving clouds behind the original pillars,
+  angel, and menus.
+- **Adjust detail:** Lighting, clouds, atmosphere, town models, ground detail,
+  and mountain relief have separate controls for balancing appearance and
+  performance.
 
-![Approaching Fillmore across the curved world map with cloud banks at the edges](/assets/worldnav-3d.png)
+![Zoomed-out travel over the 3D globe, with moving clouds and the atmosphere visible against space](/assets/globe-travel.gif)
+
+![Clouds drifting over developed Fillmore below the Sky Palace, with roads and buildings visible through the moving cloud layers](/assets/sky-palace-globe.gif)
 
 ### GPU and CRT effects
 
-The SDL GPU renderer adds rim lighting to diorama sprite silhouettes, depth of
-field between layers, and edge anti-aliasing to tilted planes. Particles and
-local illumination extend the original spell and environmental effects in both
-flat and 3D action-stage views. Soft shadow blur is disabled by default because
-it has a known transparency-bleed issue.
+The GPU renderer provides individually adjustable effects:
 
-An optional final CRT pass applies to every presentation mode and provides live
-controls for glass curvature, scanline depth, phosphor mask, colour fringing,
-signal bandwidth, corner falloff, and brightness. Optional frame interpolation
-uses consecutive action-layer captures for smoother output on high-refresh
-displays without changing the game's 60 Hz logic.
+- **Diorama lighting and focus:** Warm rim lighting outlines sprites, depth of
+  field softens distant layers, and edge anti-aliasing smooths tilted planes.
+- **Spell effects:** Particles and local illumination follow action-stage
+  magic in both flat and 3D views.
+- **CRT presentation:** Curved glass, scanlines, and a phosphor mask can be
+  applied to any view, including authentic rendering. **Video → CRT** also
+  controls colour fringing, signal softness, corner shading, and brightness.
+- **Frame interpolation:** Optional intermediate diorama frames smooth motion
+  on high-refresh displays while normal gameplay retains its 60 Hz logic.
 
-![A diorama scene with GPU effects off on the left and rim lighting plus depth of field on the right](/assets/shader-comparison.png)
+![Aitos Act 2 with sprite rim lighting and depth-of-field blur on the distant diorama layers](/assets/gpu-effects.png)
+
+![Fillmore Act 2 in widescreen with curved glass, scanlines, and the CRT phosphor mask enabled](/assets/crt-effects.png)
 
 ### High-resolution Mode 7
 
@@ -423,26 +304,23 @@ original low-resolution sampling.
 
 ### Asset and music replacements
 
-Art replacement uses explicit renderer hooks rather than a generic
-texture-pack system. The stock manifest currently supports the title logo in
-two contexts: the static title screen scales the replacement to the viewport,
-while the animated intro carries it through the original Mode 7 matrix so its
-rotation, zoom, and HDMA warps still apply.
+Art replacement is limited to the title logo on the title screen and in the
+animated intro, where the replacement follows the original rotation, zoom,
+and warp effects.
 
-![The title screen twice: the ROM's original logo on the left, a high-resolution replacement in its place on the right](/assets/hd-title-comparison.png)
+![The replacement title logo with its Recompiled subtitle](/assets/title-hd.png)
 
 Art and music replacements share the user-owned `game-assets/manifest.ini`,
-which is preserved across upgrades. The builder's **Assets** tab provides:
+which is preserved across upgrades. The Workshop's **Assets** section provides:
 
 - previews of the included HD title art and all 17 entries in the ROM's song
   table, including unnamed tracks identified by slot;
 - extracted previews of the original audio; and
-- controls for installing or restoring replacements without removing
-  hand-authored gain, loop, or gate settings from the manifest.
+- controls for installing replacements or restoring the original art and music.
 
-![The local builder's Assets tab with the HD title toggle, original-audio extraction, side-by-side audio previews, and pending Save and Discard controls](/assets/assets-1.png)
+![The Workshop's music controls with original-ROM and replacement audio previews](/assets/assets-1.png)
 
-![The Assets tab's Split by level editor, with per-region variants and replacement previews for a shared action track](/assets/assets-2.png)
+![Split by level offering a separate Bloodpool replacement for music shared with Kasandora](/assets/assets-2.png)
 
 Music replacement supports:
 
@@ -456,6 +334,43 @@ Music replacement supports:
 The SPC driver continues to handle sound effects, while only the instrument
 voices for a replaced song are muted. You can switch between the replacement
 and the original sequencer while a song is playing.
+
+### Languages and enhanced text
+
+Language packs replace the game's text without patching the ROM. Enhanced
+font rendering supports Unicode text, font fallback, and layouts that adapt
+to translated dialogue.
+
+- **Play:** Install an `.arlang` file in the Workshop's **Languages** section,
+  restart the game, and choose it under **Settings → Localization**. The
+  original US text remains available.
+- **Read:** Adjust enhanced font size and choose Crisp or Smooth sampling,
+  with full-resolution, low-resolution, or mosaic rendering independent of
+  the game graphics. The original US script can also use its native font.
+- **Create and share:** Start a translation from the US script, edit messages
+  alongside a reference, check font coverage, and export a language pack from
+  the Workshop. Saving a project and installing it into the game are separate
+  steps.
+
+The Workshop interface supports English, French, German, and Japanese;
+its language is independent of the game's selected pack. Translation coverage
+depends on the pack, and Japanese-version game mechanics are not yet included.
+See the [language-pack guide](docs/language-packs.md) for installation and
+authoring details.
+
+This comparison shows the same dialogue with the native font and five enhanced
+configurations. Enhanced samples use 140% font size; pixelation strengths are
+labelled in output pixels. Open the image at full size to compare the edges.
+
+![Native font compared with full-resolution Crisp and Smooth, low-resolution, and two mosaic settings](/assets/enhanced-font-comparison.png)
+
+The Sky Palace capture below uses text extracted from the original Japanese
+ROM, displayed with enhanced fonts in the US game. It demonstrates a partial
+local language pack, not a complete or bundled Japanese translation.
+
+![ROM-sourced Japanese dialogue and menu text in the Sky Palace above Fillmore](/assets/language-japanese.png)
+
+![Editing an example English rewrite alongside the original US dialogue in the Workshop](/assets/language-workshop.png)
 
 ### Live authentic comparison
 
@@ -479,24 +394,21 @@ either view.
 
 ### Settings overlay
 
-The in-game menu uses ActRaiser's own 2bpp dialog font and the Sky Palace dialog
-frame decoded from the ROM at startup. Its nine sections cover Video, Action
-3D, Town 3D, Audio, Controls, Cheats, Save, Manual, and System, and remain
-accessible from any game state by keyboard or gamepad.
+The in-game menu retains ActRaiser's dialog frames and offers both native and
+enhanced text rendering. It groups display, 3D, audio, localization, controls,
+save, and other settings into sections accessible by keyboard or gamepad.
 
 Each setting includes an explanation, and the manual is also available in-game.
-Changes take effect immediately and are written atomically to `settings.ini`.
-Enabling debug settings also reveals the unvalidated seeded randomizer and the
-action-layer and background authoring tools.
+Settings are saved automatically to `settings.ini`.
 
-![Navigating the settings overlay: moving between sections and tabs, drawn in the game's own dialog font and frame graphics](/assets/overlay.gif)
+![An illustrative tour of the settings overlay using the original dialog font; the current menu also includes localization controls](/assets/overlay.gif)
 
 ### Quality of life
 
 | | |
 |---|---|
 | **Rebindable controls** | Bind every keyboard and gamepad control independently in Settings → Controls. Keyboard bindings use physical key positions, so they remain in place when the keyboard layout changes. |
-| **Full gamepad support** | The default mapping follows a SNES-on-Xbox layout, with support for multiple hotpluggable pads and `gamecontrollerdb.txt`. Bind host actions for the menu, pause, turbo, reset camera, and rendering comparison. Legacy debug snapshot bindings remain available, but restore is unsupported. |
+| **Full gamepad support** | The default mapping follows a SNES-on-Xbox layout, with support for multiple hotpluggable pads and `gamecontrollerdb.txt`. Bind controls for the menu, pause, turbo, camera reset, and rendering comparison. |
 | **Steam Deck** | The dedicated bundle includes Valve's Steam Runtime SDL3. It works with the default Steam Input mapping, or with SDL's HIDAPI Steam driver in desktop mode. L3 opens the menu. |
 | **Camera controls** | The right stick orbits, the triggers zoom, and R3 recentres the view. Sensitivity, deadzone, and invert-Y are configurable, and orbit speed remains consistent across frame rates. |
 | **Turbo** | Press `T` to fast-forward at eight game frames per rendered frame, configurable from 2 to 64. |
@@ -516,30 +428,60 @@ reference.
 
 ## Development
 
-The source tree keeps mechanically generated game banks in `src/gen/` separate
-from the authored game runtime in `src/`. The `installer/` module owns the
-ActRaiser-specific Builder, Workshop, localization/content tools, embedded
-resources, and release packaging. It delegates generic regeneration, compiling,
-and installation to the reusable `snesbuild` executable and portable runner in
-`snesrecomp-go/` through a versioned process contract. Both local CMake builds
-and the hermetic path read their source list from `snesbuild.ini`, which keeps
-the two build paths in sync when an authored file is added.
+### Build from source
+
+For a local build without the packaged Builder, install Go 1.24 or newer,
+CMake 3.25 or newer, GNU Make, a C/C++ toolchain, and the development libraries
+for SDL3 3.4+ and SDL3_ttf 3.2+. On macOS, the compiler comes with Xcode Command
+Line Tools; on Windows, use a compatible native compiler and a shell with Make.
+
+From the repository root, run:
+
+```sh
+make dev ROM=/absolute/path/to/your-usa-rom.sfc
+./build-release/ActRaiserRecomp /absolute/path/to/your-usa-rom.sfc --config config.ini
+```
+
+`make dev` prepares the native US language source, generates the game C files
+if they are missing, and builds the optimized `play` preset. It also creates
+`config.ini` from the stock template if you do not already have one. If your
+ROM is named `ar.sfc` in the repository root, you can omit `ROM=…`.
+
+For subsequent C/C++ changes, use `cmake --build --preset play`. These commands
+produce a development executable; see [desktop packaging](docs/desktop-packaging.md)
+to turn it into a self-contained `.app` or `.AppImage`.
+
+### Layout and testing
+
+`src/gen/` contains mechanically generated game code, while `src/` holds the
+authored runtime. `installer/` contains the Builder, Workshop, content tools,
+and release packaging. Shared recompilation and build tooling lives in
+`snesrecomp-go/`; `snesbuild.ini` defines the runtime source list for both local
+and packaged builds.
 
 | Preset | Purpose |
 |---|---|
-| `play` | Produces an optimized local build in `build-release/` without the trace recorder, deep CPU probes, tests, or default per-run diagnostic bundles. |
+| `play` | Produces an optimized local build in `build-release/` without tests or tracing. |
 | `dev` | Produces a Debug build with the unit-test suite, on-demand trace recorder, and timestamped diagnostics under `runs/`. |
 | `trace` | Extends the Debug build with generated CPU instrumentation. |
 | `asan` | Enables AddressSanitizer and UndefinedBehaviorSanitizer for corruption testing. |
 | `control` | Produces an optimized A/B control build with flat town terrain. |
 
-Regression testing combines CTest, Go tests, deterministic recorded input,
-semantic end-state digests, and manifest-defined replay benchmarks. Before
-reporting performance, the benchmark runner verifies artifact equivalence and
-isolates the saves and settings for each run. It can also compare candidate and
-reference binaries in adjacent A/B pairs. For more information, see the
-source-build instructions under [Quick start](#quick-start), the benchmark
-manifest at [`tools/runner-bench.json`](tools/runner-bench.json), and the
+After the initial source build, configure the test-enabled preset and run the
+C and Go suites:
+
+```sh
+cmake --preset dev
+cmake --build --preset dev
+ctest --preset dev
+go -C installer test ./...
+go -C snesrecomp-go test ./...
+```
+
+Regression testing combines CTest, Go tests, and recorded gameplay replays.
+Replay benchmarks verify equivalent game state before comparing performance.
+For benchmark definitions and development details, see
+[`tools/runner-bench.json`](tools/runner-bench.json), the
 [`installer` documentation](installer/README.md) and
 [`snesrecomp-go` documentation](snesrecomp-go/README.md).
 
@@ -553,10 +495,9 @@ manifest at [`tools/runner-bench.json`](tools/runner-bench.json), and the
 | [`docs/language-pack-format.md`](docs/language-pack-format.md) | UTF-8 translation pack authoring and validation contract |
 | [`docs/language-packs.md`](docs/language-packs.md) | Direct `.arlang` installation, sharing, and editor-free/AI authoring |
 | [`installer/README.md`](installer/README.md) | ActRaiser Builder ownership and developer entry points |
-| [`docs/SEAMS.md`](docs/SEAMS.md) | Logic↔hardware boundary and architecture map |
-| [`docs/progress.md`](docs/progress.md) | Stage, town, and subsystem status |
-| [`docs/rendering-engine.md`](docs/rendering-engine.md) | Rendering, streaming, and OAM architecture |
-| [`docs/sim-town-terrain.md`](docs/sim-town-terrain.md) | Audited town elevation, grounding, depth, and performance contracts |
+| [`docs/diorama-depth-shapes.md`](docs/diorama-depth-shapes.md) | Depth effects for custom action-room layouts |
+| [`docs/save-format.md`](docs/save-format.md) | SRAM fields, checksums, and save editing |
+| [`docs/performance-overlay.md`](docs/performance-overlay.md) | Reading performance information and reporting slow scenes |
 | [`docs/snes-native-audio-channels.md`](docs/snes-native-audio-channels.md) | Original SPC channel ownership and effect sequencing |
 | [`docs/rom-map.md`](docs/rom-map.md) | ROM data regions and cross-release localization evidence |
 

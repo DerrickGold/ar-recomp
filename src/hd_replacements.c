@@ -1,3 +1,5 @@
+#include "snesrecomp/support/utf8_fs.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -122,7 +124,7 @@ static bool EntryComplete(const HdReplacement *entry, const char *path,
 int HdReplacements_Load(const char *path) {
   g_hd_replacement_count = 0;
   memset(g_hd_replacements, 0, sizeof(g_hd_replacements));
-  FILE *f = fopen(path, "r");
+  FILE *f = sr_fopen(path, "r");
   if (!f) return 0;
 
   HdReplacement pending;
