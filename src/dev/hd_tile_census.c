@@ -14,6 +14,8 @@
  *   tile_census.jsonl      one record per unique tile, in sheet order
  *   tile_sheet_<class>.ppm contact sheets, first-seen palette, 2x scale
  */
+#include "snesrecomp/support/utf8_fs.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -458,7 +460,7 @@ static void WriteContactSheet(CensusClass class_, const int *indices,
   if (!count) return;
   char path[320];
   RunDirFile(path, sizeof(path), "tile_sheet_%s.ppm", kClassNames[class_]);
-  FILE *f = fopen(path, "wb");
+  FILE *f = sr_fopen(path, "wb");
   if (!f) return;
   int rows = (count + kCensusSheetColumns - 1) / kCensusSheetColumns;
   int width = kCensusSheetColumns * 16, height = rows * 16;
@@ -490,7 +492,7 @@ static void WriteContactSheet(CensusClass class_, const int *indices,
 static void CensusDump(void) {
   char path[320];
   RunDirFile(path, sizeof(path), "tile_census.jsonl");
-  FILE *jsonl = fopen(path, "w");
+  FILE *jsonl = sr_fopen(path, "w");
 
   int class_counts[kCensusClass_Count] = { 0 };
   int multi_palette[kCensusClass_Count] = { 0 };
@@ -551,7 +553,7 @@ static void CensusDump(void) {
     WriteContactSheet((CensusClass)c, indices[c], class_counts[c]);
 
   RunDirFile(path, sizeof(path), "tile_census.txt");
-  FILE *summary = fopen(path, "w");
+  FILE *summary = sr_fopen(path, "w");
   if (summary) {
     fprintf(summary, "frames surveyed: %u\nunique tiles: %d%s\n",
             g_frames_surveyed, g_record_count,
@@ -606,7 +608,7 @@ static void HdMode7Dump_Frame(const HdTileCensusPpuView *view) {
   unsigned gf = ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
   RunDirFile(path, sizeof(path), "m7_canvas_gf%u_%08x.ppm", gf,
              (unsigned)(hash & 0xffffffffu));
-  FILE *f = fopen(path, "wb");
+  FILE *f = sr_fopen(path, "wb");
   if (!f) return;
   fprintf(f, "P6\n%d %d\n255\n", kMode7CanvasPixelsPerAxis,
           kMode7CanvasPixelsPerAxis);

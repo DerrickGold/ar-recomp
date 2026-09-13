@@ -18,6 +18,8 @@
   --ok:#9ed6ba;
   --bad:#f3a6a0;
   --workspace-header-h:72px;
+  --control-height:42px;
+  --control-font:14px;
   --sidebar-w:216px
 }
 * {
@@ -52,7 +54,10 @@ button {
   color:#202735;
   font-weight:650;
   cursor:pointer;
-  line-height:1.4
+  line-height:1.4;
+  min-height:var(--control-height);
+  max-width:100%;
+  overflow-wrap:anywhere
 }
 button:hover:not(:disabled) {
   filter:brightness(1.1)
@@ -200,6 +205,9 @@ code {
   margin-top:auto;
   padding-top:50px
 }
+.sidebar-tools{display:grid;grid-auto-rows:1fr;gap:8px;margin-bottom:20px;width:100%}
+.sidebar-tools:has(>button:not([hidden])){padding-bottom:16px;border-bottom:1px solid var(--line)}
+.sidebar-tools button{width:100%;text-align:left;font-size:12px;line-height:1.5;padding:10px 12px}
 .sidebar-bottom label {
   font-size:11px;
   font-weight:400;
@@ -1312,6 +1320,18 @@ pre {
 #import-install-source,#import-install-candidates{display:block;width:100%;margin:.5rem 0;padding:.6rem;background:#0b1727;color:inherit;border:1px solid #64758c}
 #import-install-candidates[hidden]{display:none}
 #import-install .import-actions{display:flex;flex-wrap:wrap;gap:.6rem;margin:1rem 0}
-#import-install button{padding:.6rem .8rem}
+#import-install button{min-height:var(--control-height)}
 #import-install .import-confirm{display:flex;align-items:flex-start;gap:.7rem;margin:1rem 0}
 #import-install-files{max-height:12rem;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font-size:.8rem}
+.actions,.import-actions,.asset-bar-actions{align-items:stretch}
+.preview-tools>.workshop-feedback{flex-basis:100%}
+.actions>button,.import-actions>button,.asset-bar-actions>button{flex-shrink:0}
+.dialog-actions{display:flex;align-items:stretch;justify-content:flex-end;flex-wrap:wrap;gap:10px;padding-top:16px;margin-top:20px;border-top:1px solid var(--line)}
+.dialog-actions>.quiet{margin-right:auto}
+#import-install .dialog-actions{position:sticky;bottom:-1.5rem;background:#142235;padding-bottom:1.5rem;margin-bottom:-1.5rem}
+#game-folder-dialog[open]{display:flex;flex-direction:column;height:min(780px,calc(100vh - 32px));max-height:calc(100vh - 32px);overflow:hidden}
+#game-folder-dialog>h2,#game-folder-dialog>p,#game-folder-dialog>.dialog-actions{flex:none}
+#game-folder-frame{display:block;width:100%;flex:1;min-height:0;border:1px solid var(--line);border-radius:8px;background:#101d2b}
+#game-folder-dialog .dialog-actions{margin-top:12px}
+#dock .status-badge{max-width:min(60vw,520px);white-space:normal;overflow-wrap:anywhere}
+@media(max-width:800px){.sidebar-tools{display:flex;flex-wrap:wrap;margin:0}.sidebar-tools button{width:auto;flex:1 1 180px}.sidebar-tools:has(>button:not([hidden])){padding-bottom:12px}.dialog-actions>button:not(:only-child){flex:1 1 150px}}

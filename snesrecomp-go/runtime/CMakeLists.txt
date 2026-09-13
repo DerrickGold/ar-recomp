@@ -64,7 +64,7 @@ install(FILES
     docs/README.md
     docs/API_REFERENCE.md
     docs/GAME_ENHANCEMENT_INTEGRATION.md
-    docs/RUNTIME.md
+    docs/INPUT_AND_BOOT.md
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/doc/snesrecomp-runtime/docs)
 install(DIRECTORY examples/
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/doc/snesrecomp-runtime/examples
@@ -104,6 +104,9 @@ endif()
 include(CTest)
 if(BUILD_TESTING)
     enable_language(CXX)
+    add_executable(snesrecomp_utf8_fs_test tests/utf8_fs_test.c)
+    target_include_directories(snesrecomp_utf8_fs_test PRIVATE include)
+    add_test(NAME snesrecomp_utf8_fs COMMAND snesrecomp_utf8_fs_test)
     add_library(snesrecomp_runtime_minimal_game_example OBJECT
         examples/minimal_game/game_module.c)
     target_include_directories(snesrecomp_runtime_minimal_game_example PRIVATE

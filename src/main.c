@@ -1,3 +1,5 @@
+#include "snesrecomp/support/utf8_fs.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -10,10 +12,11 @@
 #include <SDL3/SDL.h>
 
 #ifdef _WIN32
+#include <SDL3/SDL_main.h> /* SDL supplies UTF-8 argv from the wide command line. */
 #include <process.h>
 #include <direct.h>
 #include <sys/stat.h>
-#define mkdir(path, mode) _mkdir(path)
+#define mkdir(path, mode) sr_mkdir(path)
 #else
 #include <sys/stat.h>
 #include <unistd.h>
@@ -683,7 +686,7 @@ static void DrawAndPresentFrame(HostDisplayPresentMode present_mode,
     if (want) {
       const char *strict = getenv("AR_SHOT_REQUIRE_COMPOSITE");
       const bool require_composite = strict && strict[0] && strcmp(strict, "0");
-      FILE *pf = fopen(fname, "wb");
+      FILE *pf = sr_fopen(fname, "wb");
       if (pf) {
         DevToolsCaptureResult shot_size =
             HostDevTools_WriteFramebufferPpm(pf, require_composite);
@@ -1643,7 +1646,7 @@ static void AppBoot_StartGame(AppBoot *app) {
     memset(g_ram, fill, kActRaiserWramSize);
     const char *wp0 = getenv("AR_WRAM_INIT");
     if (wp0 && wp0[0]) {
-      FILE *f = fopen(wp0, "rb");
+      FILE *f = sr_fopen(wp0, "rb");
       if (f) { size_t n = fread(g_ram, 1, kActRaiserWramSize, f); fclose(f);
         fprintf(stderr, "[wram-init] seeded %zu bytes from %s\n", n, wp0); }
       else fprintf(stderr, "AR_WRAM_INIT: cannot open %s\n", wp0);
@@ -2547,7 +2550,7 @@ static int AppShutdown(AppBoot *app, char **argv) {
   if (RuntimeSettings_LifecycleRequest() == kRuntimeLifecycle_Restart) {
     fprintf(stderr, "[lifecycle] restarting process\n");
 #ifdef _WIN32
-    _execvp(argv[0], (const char *const *)argv);
+    sr_execvp(argv[0], (const char *const *)argv);
 #else
     execvp(argv[0], argv);
 #endif

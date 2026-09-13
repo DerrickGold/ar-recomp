@@ -3,10 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="workshop-version" content="{{BUILDER_VERSION}}">
 <title>{{TITLE}}</title>
 <link rel="stylesheet" href="builder/theme.css">
+<link rel="stylesheet" href="builder/feedback.css">
 <script type="application/json" id="interface-catalog">{{UI_CATALOG}}</script>
 <script src="builder/i18n.js" defer></script>
+<script src="builder/feedback.js" defer></script>
 <script src="builder/file-input.js" defer></script>
 </head>
 <body>
@@ -23,8 +26,8 @@
     <button class="tab" id="tab-manual" role="tab" aria-selected="false" aria-controls="panel-manual" tabindex="-1"><span class="nav-icon" aria-hidden="true">▤</span><span data-i18n="builder.nav.help">Help &amp; manual</span></button>
   </div>
   <div class="sidebar-bottom">
-    <button type="button" id="game-folder-open" hidden data-i18n="builder.output.change">Change game folder…</button>
-    <button type="button" id="import-install-open" hidden data-i18n="builder.import.open">Import previous installation…</button>
+    <div class="sidebar-tools"><button class="quiet" type="button" id="game-folder-open" hidden data-i18n="builder.output.change">Change game folder…</button>
+    <button class="quiet" type="button" id="import-install-open" hidden data-i18n="builder.import.open">Import previous installation…</button></div>
     <label for="interface-language" data-i18n="interface.language">Interface language</label>
     <select id="interface-language" aria-describedby="interface-language-status"><option value="en">English</option><option value="fr">Français</option><option value="de">Deutsch</option><option value="ja">日本語</option></select>
     <p id="interface-language-status" class="local-note" role="status" hidden></p>
@@ -37,7 +40,7 @@
 </aside>
 
 <main id="workspace" tabindex="-1">
-  <header class="workspace-bar"><div id="dock" data-open="false" data-kind="idle"><span id="workspace-status" class="status-badge" role="status" data-i18n="builder.checking">Checking installation…</span><span id="track" role="progressbar" aria-label="Build progress" data-i18n-aria="builder.progress" aria-valuemin="0" aria-valuemax="100" hidden><span id="dock-pct" aria-hidden="true">0%</span></span><button id="dock-launch" type="button" hidden disabled data-i18n="builder.run">▶ Run game</button></div></header>
+  <header class="workspace-bar"><div id="dock" data-open="false" data-kind="idle"><span id="workspace-status" class="status-badge" role="status" data-i18n="builder.checking">Checking installation…</span><span id="track" role="progressbar" aria-label="Build progress" data-i18n-aria="builder.progress" aria-valuemin="0" aria-valuemax="100" hidden><span id="dock-pct" aria-hidden="true">0%</span></span><button id="dock-error" class="secondary" type="button" hidden data-i18n="builder.feedback.view">View error details</button><button id="dock-launch" type="button" hidden disabled data-i18n="builder.run">▶ Run game</button></div></header>
   <section class="panel" id="panel-home" role="tabpanel" aria-labelledby="tab-home">
     <div class="home-hero">
       <div class="hero-copy"><h1 data-i18n="builder.home.title">Shape the land.&#10;Make it yours.</h1><p class="lede" data-i18n="builder.home.intro">Build ActRaiser, give its people a new voice, and tune the adventure to your liking.</p><div class="actions"><button id="home-primary" type="button" disabled data-i18n="builder.home.checking">Checking your game…</button></div><p id="home-game-note" class="muted" data-i18n="builder.home.rom">Choose your US ActRaiser ROM to build the game.</p></div>
@@ -111,7 +114,7 @@
       the repository if you want to rebuild from a ROM.</span>
     </div>
 
-    <div id="state" data-kind="idle" data-i18n="builder.build.ready_to_build">Ready to build &mdash; choose your ROM above</div>
+    <div id="state" role="status" aria-live="polite" tabindex="-1" data-kind="idle" data-i18n="builder.build.ready_to_build">Ready to build &mdash; choose your ROM above</div>
 
     <div id="steps-box" hidden>
       <ol class="steps" id="steps">{{STEPS}}</ol>
@@ -207,22 +210,22 @@
 
 <script src="builder/scene.js" type="module"></script>
 <dialog id="import-install" aria-labelledby="import-install-title">
-  <h2 id="import-install-title" data-i18n="builder.import.title">Bring your previous game with you</h2>
+  <h2 id="import-install-title" data-i18n="builder.import.title">Import from another installation</h2>
   <p data-i18n="builder.import.help">Import saves, settings, Workshop preferences, and custom assets. Originals stay untouched. Existing user files win; untouched shipped assets may be replaced. ROMs and build tools are not copied.</p>
   <p id="import-install-detected" hidden data-i18n="builder.import.detected">Previous installation found. Review it before importing.</p>
   <label for="import-install-source" data-i18n="builder.import.source">Previous installation or data folder</label>
   <input id="import-install-source" type="text" autocomplete="off" spellcheck="false">
   <select id="import-install-candidates" hidden aria-label="Detected data folders" data-i18n-aria="builder.import.candidates"></select>
-  <div class="import-actions"><button type="button" id="import-install-choose" data-i18n="builder.import.choose">Choose folder…</button><button type="button" id="import-install-preview" data-i18n="builder.import.preview">Review import</button></div>
+  <div class="import-actions"><button class="secondary" type="button" id="import-install-choose" data-i18n="builder.import.choose">Choose folder…</button><button class="secondary" type="button" id="import-install-preview" data-i18n="builder.import.preview">Review import</button></div>
   <p><span data-i18n="builder.import.destination">Game output:</span> <span id="import-install-destination"></span></p>
   <p id="import-install-status" role="status" aria-live="polite"></p>
   <details id="import-install-details" hidden><summary data-i18n="builder.import.files">Files and conflicts</summary><pre id="import-install-files"></pre></details>
   <label class="import-confirm"><input type="checkbox" id="import-install-confirm"><span data-i18n="builder.import.confirm">Both games are closed, and I have saved my Workshop edits. Other open Workshop tabs must be reloaded after import.</span></label>
-  <div class="import-actions"><button type="button" id="import-install-apply" disabled data-i18n="builder.import.apply">Import into game output</button><button type="button" id="import-install-skip" data-i18n="builder.import.skip">Start fresh / not now</button><button type="button" id="import-install-reload" hidden data-i18n="builder.import.reload">Reload Workshop</button></div>
+  <div class="dialog-actions"><button class="quiet" type="button" id="import-install-skip" data-i18n="builder.import.skip">Cancel</button><button type="button" id="import-install-apply" disabled data-i18n="builder.import.apply">Import into game output</button><button type="button" id="import-install-reload" hidden data-i18n="builder.import.reload">Reload Workshop</button></div>
 </dialog>
 <script src="builder/app.js" defer></script>
 <script src="builder/install-import.js" defer></script>
-<dialog id="game-folder-dialog" aria-labelledby="game-folder-title"><h2 id="game-folder-title" data-i18n="builder.output.change">Change game folder…</h2><p data-i18n="builder.output.next_launch">Changes take effect after you close and reopen the Builder. This session keeps its current folder.</p><iframe id="game-folder-frame" title="Choose game folder" data-i18n-title="builder.output.choose" style="width:100%;height:65vh;border:0"></iframe><button type="button" id="game-folder-dismiss" data-i18n="builder.output.close">Close</button></dialog>
+<dialog id="game-folder-dialog" aria-labelledby="game-folder-title"><h2 id="game-folder-title" data-i18n="builder.output.change">Change game folder…</h2><p data-i18n="builder.output.next_launch">Changes take effect after you close and reopen the Builder. This session keeps its current folder.</p><iframe id="game-folder-frame" title="Choose game folder" data-i18n-title="builder.output.choose"></iframe><div class="dialog-actions"><button class="secondary" type="button" id="game-folder-dismiss" data-i18n="builder.output.close">Close</button></div></dialog>
 <script src="builder/game-folder.js" defer></script>
 </body>
 </html>

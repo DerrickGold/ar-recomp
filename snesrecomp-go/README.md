@@ -11,31 +11,13 @@ No ROM, generated game code, game assets, memory dumps, or captured gameplay
 data belong in this module. Supply ROMs locally and keep generated C and
 baseline snapshots ignored in each game project.
 
-## Origin and status
+## Credits
 
 The recompiler is a Go port of the Python `snesrecomp` project created by
-Matthew Stanley and subsequently developed by its contributors. The bundled C
-runner under `runtime/` is the project-owned replacement for the retired
-comparison runner, which is not distributed. Its S-DSP accuracy core includes
-an attributed MIT-licensed adaptation from Snaggletooth; the rest of that
-boundary is explicit rather than implied. Exact repositories, the source
-snapshot used for the Go port, contributor credit, prior-project
-acknowledgements, and licensing boundaries are recorded in
-[`ATTRIBUTION.md`](ATTRIBUTION.md) and
-[`runtime/PROVENANCE.md`](runtime/PROVENANCE.md).
-
-The normal recompiler path is Go-only. It covers ROM/config loading, 65816
-decode, control-flow analysis, IR lowering, C emission, variant discovery and
-pruning, deterministic concurrent generation, dispatch output, `funcs.h`
-synchronization, metadata, census tools, link audit, and opcode differential
-testing. The Python implementation is no longer required to generate or build
-a project.
-
-During the port, Go output was verified byte-for-byte against the Python
-implementation for the ActRaiser project and both implementations reached the
-same generated function and hard-stub counts. Those comparison archives were
-intentionally removed because generated C is derived from the user-supplied
-game ROM and should not be redistributed.
+Matthew Stanley and developed by its contributors. See
+[ATTRIBUTION.md](ATTRIBUTION.md) and
+[runtime/PROVENANCE.md](runtime/PROVENANCE.md) for source provenance,
+contributor credits, and licensing boundaries.
 
 ## Requirements
 
@@ -111,8 +93,8 @@ snesrecomp-go/build/snesbuild analyze --root . --rom game.sfc
 # or: v2regen analyze --rom game.sfc --cfg-dir recomp --format json
 ```
 
-See [`docs/ANALYSIS.md`](docs/ANALYSIS.md) for comparison semantics, the
-entry/continuation model, and the cfg-removal validation gate.
+See [`docs/ANALYSIS_USAGE.md`](docs/ANALYSIS_USAGE.md) for interpreting reports
+and safely materializing a reduced configuration.
 
 To write a usable reduced configuration instead of a report, choose a **new**
 isolated directory (its parent must already exist):
@@ -128,7 +110,7 @@ configurations generate byte-identical C and headers in proven-analysis mode.
 It preserves HLE and overrides, never edits the original cfg, and never adopts
 speculative findings. Keep the database with the reduced cfg. `--allow-stubs`
 permits existing diagnostics; it does not waive the equality check or establish
-runtime coverage. See [verified materialization](docs/ANALYSIS.md#verified-configuration-materialization)
+runtime coverage. See [verified materialization](docs/ANALYSIS_USAGE.md#materializing-a-reduced-configuration)
 for the build/adoption contract.
 
 For memory-producer investigation, use the same decoded instruction index
@@ -428,10 +410,9 @@ Run `snesbuild help` or `snesbuild <command> -h` for project-driver options.
 - [`docs/PROJECT_INTEGRATION.md`](docs/PROJECT_INTEGRATION.md): project layout,
   generation pipeline, CMake, runtime hooks, and redistribution rules.
 - [`docs/CFG_FORMAT.md`](docs/CFG_FORMAT.md): supported `bankNN.cfg` syntax.
-- [`docs/TOOLING_MIGRATION.md`](docs/TOOLING_MIGRATION.md): the ownership boundary
-  between reusable Go tooling and project-specific helpers.
-- [`runtime/docs/RUNTIME.md`](runtime/docs/RUNTIME.md): shared runtime boundary, optional
-  features, and current limitations.
+- [Analysis and materialization](docs/ANALYSIS_USAGE.md): read-only reports and
+  verified configuration export.
+- [Runner SDK](runtime/docs/README.md): public APIs and game integration.
 - [`ATTRIBUTION.md`](ATTRIBUTION.md): Python-source provenance, prior work,
   contributor credit, and licensing status.
 - [`LICENSE_SCOPE.md`](LICENSE_SCOPE.md): the original-code grant, explicit

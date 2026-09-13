@@ -31,9 +31,9 @@ documentation rather than copied as stale instructions:
 - the shared-framework/per-game-project model and neutral naming conventions
   are in [`README.md`](README.md) and
   [`docs/PROJECT_INTEGRATION.md`](docs/PROJECT_INTEGRATION.md);
-- runtime responsibilities, MSU-1, host-overlay extraction, shadow audio/color,
-  and trace tripwires are summarized in
-  [`runtime/docs/RUNTIME.md`](runtime/docs/RUNTIME.md);
+- public runner operations and enhancement integration are documented in
+  [`runtime/docs/API_REFERENCE.md`](runtime/docs/API_REFERENCE.md) and
+  [`runtime/docs/GAME_ENHANCEMENT_INTEGRATION.md`](runtime/docs/GAME_ENHANCEMENT_INTEGRATION.md);
 - contributor-facing decoder/config guidance is represented by
   [`docs/CFG_FORMAT.md`](docs/CFG_FORMAT.md) and Go package tests.
 

@@ -1,3 +1,5 @@
+#include "snesrecomp/support/utf8_fs.h"
+
 #include "manual_reader.h"
 
 #include <stdarg.h>
@@ -107,7 +109,7 @@ bool ManualReader_Load(void) {
   if (s_reader.load_attempted) return s_reader.index.count > 0;
   s_reader.load_attempted = true;
 
-  FILE *file = fopen(kManualPath, "rb");
+  FILE *file = sr_fopen(kManualPath, "rb");
   if (!file) {
     SetStatus("No manual: %s not found.", kManualPath);
     return false;

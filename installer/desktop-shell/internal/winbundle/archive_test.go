@@ -8,6 +8,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -259,6 +260,16 @@ func TestFailedExtractionDoesNotPublishAndExtraCacheFileRejected(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer good.Close()
+	permissionsErr := errors.New("synthetic runtime permission failure")
+	if err = good.Extract(dest, func(string) error { return permissionsErr }); !errors.Is(err, permissionsErr) {
+		t.Fatal("permission failure was not returned", err)
+	}
+	if _, err = os.Lstat(dest); !os.IsNotExist(err) {
+		t.Fatal("runtime with incomplete permissions was published", err)
+	}
+	if entries, err := os.ReadDir(filepath.Dir(dest)); err != nil || len(entries) != 0 {
+		t.Fatal("failed extraction left staging files behind", entries, err)
+	}
 	if err = good.Extract(dest, nil); err != nil {
 		t.Fatal(err)
 	}

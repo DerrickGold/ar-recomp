@@ -1,3 +1,5 @@
+#include "snesrecomp/support/utf8_fs.h"
+
 #include "runtime_diagnostics.h"
 
 #include "actraiser_game.h"   /* kActRaiserWram_MapGroup/_CurrentMap */
@@ -171,7 +173,7 @@ static void Diagnostic_WriteDispatchLog(const char *path) {
   unsigned shown;
   unsigned start;
   unsigned index;
-  if (!path || (file = fopen(path, "wb")) == NULL) return;
+  if (!path || (file = sr_fopen(path, "wb")) == NULL) return;
   shown = s_dispatch_history_count < kDispatchHistoryCapacity
               ? s_dispatch_history_count
               : kDispatchHistoryCapacity;
@@ -229,21 +231,21 @@ void DumpDiagState(const char *tag) {
   }
 
   {
-    FILE *wram_file = fopen(s_wram_path, "wb");
+    FILE *wram_file = sr_fopen(s_wram_path, "wb");
     if (wram_file) {
       fwrite(view.wram.data, 1, kActRaiserWramSize, wram_file);
       fclose(wram_file);
     }
   }
   if (view.has_sram) {
-    FILE *sram_file = fopen(s_sram_path, "wb");
+    FILE *sram_file = sr_fopen(s_sram_path, "wb");
     if (sram_file) {
       fwrite(view.sram.data, 1, (size_t)view.sram.byte_size, sram_file);
       fclose(sram_file);
     }
   }
 
-  FILE *state_file = fopen(s_state_path, "w");
+  FILE *state_file = sr_fopen(s_state_path, "w");
   if (state_file) {
     const unsigned stack_count =
         view.execution.stack_depth < SR_EXECUTION_STACK_CAPACITY

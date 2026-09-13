@@ -16,6 +16,7 @@ import (
 	"sync"
 
 	"github.com/DerrickGold/ar-recomp/installer/internal/buildworkspace"
+	"github.com/DerrickGold/ar-recomp/installer/internal/workshopui"
 )
 
 const outputPreferenceName = "game-output.json"
@@ -138,7 +139,7 @@ func (s *OutputSelection) NeedsChoice() bool {
 func (s *OutputSelection) review(path string) (OutputReview, error) {
 	var result OutputReview
 	if !filepath.IsAbs(path) {
-		return result, errors.New("enter an absolute game-folder path")
+		return result, errors.New("Enter the full path to your game folder, or use Choose folder….")
 	}
 	physical, err := buildworkspace.Physical(filepath.Clean(path))
 	if err != nil {
@@ -325,6 +326,16 @@ func outputJSON(w http.ResponseWriter, code int, value any) {
 func (s *OutputSelection) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
+	if r.Method == "GET" && (r.URL.Path == "/__shell/output/feedback.js" || r.URL.Path == "/__shell/output/feedback.css") {
+		name := strings.TrimPrefix(r.URL.Path, "/__shell/output/")
+		data, _ := workshopui.Assets.ReadFile(name)
+		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+		if strings.HasSuffix(name, ".css") {
+			w.Header().Set("Content-Type", "text/css; charset=utf-8")
+		}
+		w.Write(data)
+		return
+	}
 	if r.Method == "GET" && r.URL.Path == "/__shell/output/" {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		io.WriteString(w, outputHTML)

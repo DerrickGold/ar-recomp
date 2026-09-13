@@ -1,3 +1,5 @@
+#include "snesrecomp/support/utf8_fs.h"
+
 #include "save_system.h"
 
 #include "byte_order.h"
@@ -290,7 +292,7 @@ static bool DecodeHexChunk(
 static bool LoadNative(const char *path,
                        uint8_t scratch[kActRaiserSramSize],
                        SaveError *error) {
-  FILE *file = fopen(path, "rb");
+  FILE *file = sr_fopen(path, "rb");
   if (!file) return Fail(error, "cannot read %s: %s", path, strerror(errno));
   size_t size = fread(scratch, 1, kActRaiserSramSize, file);
   int extra = fgetc(file);
@@ -314,7 +316,7 @@ static int FindRegion(const char *key) {
 static bool LoadIni(const char *path,
                     uint8_t scratch[kActRaiserSramSize],
                     SaveError *error) {
-  FILE *file = fopen(path, "r");
+  FILE *file = sr_fopen(path, "r");
   if (!file) return Fail(error, "cannot read %s: %s", path, strerror(errno));
 
   enum { kSection_None, kSection_Meta, kSection_Regions, kSection_Raw } section;
@@ -477,7 +479,7 @@ static bool WriteAtomic(const char *path, WriteBodyFn body,
   if (!temporary) return Fail(error, "out of memory writing %s", path);
   memcpy(temporary, path, length);
   memcpy(temporary + length, ".tmp", 5);
-  FILE *file = fopen(temporary, "wb");
+  FILE *file = sr_fopen(temporary, "wb");
   if (!file) {
     bool result = Fail(error, "cannot write %s: %s", temporary,
                        strerror(errno));
@@ -509,7 +511,7 @@ static bool WriteAtomic(const char *path, WriteBodyFn body,
    * while the (already-synced) file contents survive. Best-effort: a failure
    * here does not invalidate a save that is otherwise written and renamed. */
   if (success) SyncContainingDirectory(path);
-  if (!success) remove(temporary);
+  if (!success) sr_remove(temporary);
   free(temporary);
   return success;
 }
@@ -651,7 +653,7 @@ static void LoadLocalizedNameExtension(void) {
   s_runtime.localized_name_dirty = false;
   char path[kLocalizedNamePathBytes];
   if (!LocalizedNamePath(path, sizeof(path))) return;
-  FILE *file = fopen(path, "rb");
+  FILE *file = sr_fopen(path, "rb");
   if (!file) return;
   static const uint8_t kMagic[kLocalizedNameMagicBytes] = {
       'A', 'R', 'N', 'A', 'M', 'E', '1', 0};
@@ -727,7 +729,7 @@ bool SaveSystem_MigrateLegacyNative(const char *legacy_path,
     return Fail(error, "legacy save path is empty");
 
   const char *active_path = ActivePath();
-  FILE *probe = fopen(active_path, "rb");
+  FILE *probe = sr_fopen(active_path, "rb");
   if (probe) {
     fclose(probe);
     return true;
@@ -736,7 +738,7 @@ bool SaveSystem_MigrateLegacyNative(const char *legacy_path,
     return Fail(error, "cannot inspect %s: %s",
                 active_path, strerror(errno));
 
-  probe = fopen(legacy_path, "rb");
+  probe = sr_fopen(legacy_path, "rb");
   if (!probe) {
     if (errno == ENOENT) return true;
     return Fail(error, "cannot inspect %s: %s",
@@ -772,7 +774,7 @@ bool SaveSystem_LoadActive(SaveError *error) {
   ClearError(error);
   if (!s_runtime.live) return Fail(error, "save system is not attached");
   const char *path = ActivePath();
-  FILE *probe = fopen(path, "rb");
+  FILE *probe = sr_fopen(path, "rb");
   if (!probe) {
     if (errno == ENOENT) {
       s_runtime.localized_name_valid = false;
@@ -831,9 +833,9 @@ SaveBackend SaveSystem_ActiveBackend(void) {
  * Win32 CopyFileA prototype (a hard MSVC/MinGW compile error). */
 static bool BackupCopyFile(const char *source, const char *destination,
                            SaveError *error) {
-  FILE *in = fopen(source, "rb");
+  FILE *in = sr_fopen(source, "rb");
   if (!in) return Fail(error, "cannot read %s: %s", source, strerror(errno));
-  FILE *out = fopen(destination, "wb");
+  FILE *out = sr_fopen(destination, "wb");
   if (!out) {
     fclose(in);
     return Fail(error, "cannot write %s: %s", destination, strerror(errno));
@@ -853,14 +855,14 @@ static bool BackupCopyFile(const char *source, const char *destination,
     success = Fail(error, "error flushing backup %s", destination);
   if (fclose(out) != 0)
     success = Fail(error, "error closing backup %s", destination);
-  if (!success) remove(destination);
+  if (!success) sr_remove(destination);
   return success;
 }
 
 static bool BackupActiveOnce(bool enabled, SaveError *error) {
   if (!enabled || s_runtime.backup_taken) return true;
   const char *path = ActivePath();
-  FILE *probe = fopen(path, "rb");
+  FILE *probe = sr_fopen(path, "rb");
   if (!probe) {
     if (errno == ENOENT) {
       s_runtime.backup_taken = true;

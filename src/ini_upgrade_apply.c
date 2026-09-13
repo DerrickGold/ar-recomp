@@ -1,3 +1,5 @@
+#include "snesrecomp/support/utf8_fs.h"
+
 #include "ini_upgrade_apply.h"
 
 #include <errno.h>
@@ -84,7 +86,7 @@ enum {
  * failure there means skip the leaf either way). */
 static char *ReadWholeFile(const char *path, bool *out_absent) {
   if (out_absent) *out_absent = false;
-  FILE *file = fopen(path, "rb");
+  FILE *file = sr_fopen(path, "rb");
   if (!file) {
     /* ENOENT is the only "absent". Anything else (EACCES, EISDIR, ...) is a
      * file we must not touch. */
@@ -116,12 +118,12 @@ static char *ReadWholeFile(const char *path, bool *out_absent) {
 static bool WriteWholeFile(const char *path, const char *text, size_t length) {
   char temporary[kIniUpgradePathMax];
   snprintf(temporary, sizeof temporary, "%s.tmp", path);
-  FILE *file = fopen(temporary, "wb");
+  FILE *file = sr_fopen(temporary, "wb");
   if (!file) return false;
   size_t put = fwrite(text, 1, length, file);
   if (put != length || fflush(file) != 0) {
     fclose(file);
-    remove(temporary);
+    sr_remove(temporary);
     return false;
   }
   fclose(file);
@@ -130,7 +132,7 @@ static bool WriteWholeFile(const char *path, const char *text, size_t length) {
    * bug it fixes. On failure the live file is untouched, which is what makes the
    * caller's "your file is unchanged" true. */
   if (!AtomicReplaceFile(temporary, path)) {
-    remove(temporary);
+    sr_remove(temporary);
     return false;
   }
   return true;

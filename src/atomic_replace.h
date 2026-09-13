@@ -16,7 +16,7 @@
  * inverse of what an atomic write is for, and both call sites went on to print
  * "your file is unchanged" over a file they had just deleted.
  *
- * MoveFileExA(MOVEFILE_REPLACE_EXISTING) is the actual primitive: a genuine
+ * MoveFileExW(MOVEFILE_REPLACE_EXISTING) is the actual primitive: a genuine
  * atomic replace with no window where neither file exists. save_system.c and
  * settings.c each grew their own private copy of this before it was worth
  * sharing; both now call this one, the single implementation.

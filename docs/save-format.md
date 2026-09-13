@@ -1,115 +1,48 @@
-# ActRaiser Recomp — Battery Save (SRAM) Format
+# ActRaiser save formats
 
-Map of ActRaiser's 8 KiB battery SRAM, for the save codec, persistence backend,
-and player-facing editor documented in [manual.md](manual.md#save-editor). The
-motivation is sim-mode testing: the `AR_WARP` path stages an act transition but
-**cannot reach sim-mode progress state** (population, per-region advancement,
-spells, lairs). Editing the save can.
+ActRaiser's native battery save is an 8 KiB SRAM image. This reference documents
+the US layout and the Recomp's lossless INI alternative. For the in-game editor,
+see the [manual](manual.md#save-editor); for corresponding memory locations,
+see the [RAM map](ram-map.md).
 
-The **file-level contract** and the fields exposed by the editor are settled:
-size, written footprint, fill behavior, checksum, USA offsets, and encodings
-are documented below. The structured INI format still carries a lossless raw
-image so bytes outside the named editor surface remain preserved.
+The starting field map came from
+[RyudoSynbios/game-tools-collection](https://github.com/RyudoSynbios/game-tools-collection/tree/master/src/lib/templates/actraiser/saveEditor).
+That editor declares European offsets and subtracts two bytes for USA saves.
+The offsets below already include the US adjustment. Verified and uncertain
+fields are distinguished; preserve unnamed bytes when editing.
 
-**Provenance — read this before trusting any offset below.** The starting field
-map came from the open-source editor
-([RyudoSynbios/game-tools-collection](https://github.com/RyudoSynbios/game-tools-collection/tree/master/src/lib/templates/actraiser/saveEditor),
-`template.ts` + `utils.ts`). Its declared offsets are the European layout;
-`getRegionOffset()` subtracts two bytes for USA saves. Our earlier audit missed
-that translation and consequently made the whole status block look misaligned.
-Applying it produces a linear SRAM→WRAM correspondence and plausible values in
-all nine repository saves. The editor remains a *hypothesis source*, not an
-authority: fields below also record our fixture, WRAM, or static-code evidence.
+## 1. Geometry and written footprint
 
-Companion docs: [ram-map.md](ram-map.md) (the WRAM side — the game copies
-SRAM→WRAM on load; this is our best oracle for promoting fields to ✅),
-[manual.md](manual.md#save-editor) (how editing is exposed),
-[progress.md](progress.md) (region/act naming).
+| Range | Purpose |
+|---|---|
+| `0x0000`–`0x1d6a` | Save payload written by the game |
+| `0x1d6b`–`0x1feb` | Unwritten fill, included in the checksum |
+| `0x1fec`–`0x1fef` | 32-bit checksum |
+| `0x1ff0`–`0x1fff` | Normally fill; the ending routine writes `ACT` at `0x1ff0`–`0x1ff2` |
 
-**Legend:** ✅ Verified against our ROM and confirmed through in-game use.
+New SRAM uses `AR_SRAM_FILL` (default `0x60`). An all-zero initial image can
+be interpreted as a corrupt or level-0 save. Preserve an existing file's fill
+bytes rather than resetting them.
 
----
+The `ACT` marker lies outside the checksum. Static code at `$02:AA9C`
+writes it after the ending. The editor exposes it as Professional Mode
+Locked/Unlocked, but the exact post-ending unlock behavior still needs an
+in-game round trip to verify. Both codecs preserve these bytes.
 
-## 1. Geometry and written footprint ✅
+## 2. Checksum
 
-8 KiB (`0x2000`) battery SRAM, held in `g_sram` / `g_sram_size`. ActRaiser now
-attaches that canonical image to `src/save_system.c`; the selected backend owns
-load, atomic persistence, explicit editor writes, and shadow synchronization.
+Recompute the checksum after changing the SRAM payload:
 
-| Range | Status | Notes |
-|---|---|---|
-| `0x0000`–`0x1d6a` | **written by the ROM** | the entire real save payload |
-| `0x1d6b`–`0x1feb` | **never written** | retains power-on fill |
-| `0x1fec`–`0x1fef` | **written** | 32-bit checksum (§2) |
-| `0x1ff0`–`0x1fff` | normally retains fill; ending writes `$1ff0-$1ff2` | later static decompilation proved `$02:AA9C` stamps `ACT` after the ending; none of the nine analysed saves had reached that write |
-
-Evidence: across 5 independent saves at different progress levels, `0x1d6b`–
-`0x1feb` is an exact, unbroken run of the power-on fill byte. The last
-non-fill byte is `0x1d6a` in every one.
-
-**Power-on fill.** A never-written cartridge battery is not zero. `AR_SRAM_FILL`
-(default `0x60`, matching snes9x, our reference emulator) fills SRAM at boot
-(`src/main.c:530`) *because ActRaiser validates its save data* — an all-zero SRAM
-is misread as corrupt/level-0. In-repo saves show two fill generations (`0x60`
-and `0x27`), evidence that `AR_SRAM_FILL` was varied across dev runs. The fill
-bytes sit **inside** the checksummed range but their value is semantically dead:
-the game does not read them, and the checksum is simply recomputed over whatever
-is there. An editor must therefore **preserve existing fill bytes rather than
-zeroing them** (zeroing is harmless to validity once the checksum is recomputed,
-but it destroys the fill-generation signal and gratuitously diverges from a
-real cartridge).
-
-The original nine-save footprint alone made `$1ff0` look dead. Later static
-decompilation resolved the apparent contradiction: ending presenter `$02:AA9C`
-does write the third-party `ACT` marker, but none of those saves contains it.
-The marker lies outside the checksum. The editor can stage it explicitly as
-Professional Mode Locked/Unlocked, but a real post-ending round trip is still
-needed to verify the exact user-visible unlock behavior. Both codecs preserve
-it losslessly regardless.
-
----
-
-## 2. Checksum ✅ — verified 9/9
-
-The single load-bearing fact for save editing: **without recomputing this, the
-game rejects the edited save.**
-
-```
+```text
 c1 = XOR of every uint16 word over [0x0000, 0x1fec)     ; little-endian words
 c2 = SUM of every uint16 word over [0x0000, 0x1fec)     ; truncated to 16 bits
-checksum = ((c1 & 0xFFFF) << 16) | (c2 & 0xFFFF)        ; stored little-endian
-stored at 0x1fec, 4 bytes
+checksum = ((c1 & 0xFFFF) << 16) | (c2 & 0xFFFF)
+stored at 0x1fec, 4 bytes, little-endian
 ```
-
-Verified against **all 9** `.srm` files in the repo (`save.srm`, `saves/save.srm`,
-the `.bak` set, and `saves/save.srm - pre act 1`) — every one matches with
-little-endian word reads *and* a little-endian stored uint32. No other
-endianness combination matches any file, so both are settled.
-
-```c
-static uint32 SramChecksum(const uint8 *sram) {
-  uint16 c1 = 0, c2 = 0;
-  for (int i = 0; i < 0x1fec; i += 2) {
-    uint16 w = (uint16)(sram[i] | (sram[i + 1] << 8));
-    c1 ^= w;
-    c2 = (uint16)(c2 + w);
-  }
-  return ((uint32)c1 << 16) | c2;
-}
-```
-
-Side benefit: that 9/9 result independently confirms our recomp's SRAM
-emulation produces checksum-correct saves.
-
-**Not yet verified:** that the *game* accepts a save we wrote with a recomputed
-checksum. That requires a runtime round-trip (§6.3) and is the gating test
-before the editor is trusted.
-
----
 
 ## 3. Field map
 
-### 3.1 Region state ✅ address/encoding
+### 3.1 Region state (verified address and encoding)
 
 The six town states are **not standalone bytes**. For region `r` (`0..5`):
 
@@ -126,12 +59,7 @@ state = base*2 + act2
 | `3` | Act 2 | `1 / 1` |
 | `4` | Act 2 cleared | `2 / 0` |
 
-This explains the raw `$01` values previously mislabeled “Active”: in a blank
-simulation save, Fillmore's `$1200=$01` means Act 1 cleared; Bloodpool's
-`$1202=$01` plus its Act-2 flag means Act 2. The USA flag base is `$13B6`;
-`$13B8` is the European-base offset shown in the external template before its
-region adjustment. `src/save_system.c`, the INI codec, and `tools/srm.py` all
-use the combined model.
+For example, `$1200=$01` means Fillmore Act 1 is cleared.
 
 The region order is Fillmore, Bloodpool, Kasandora, Aitos, Marahna, Northwall.
 Menu labels use **“Town State”** to leave enough room for “Act 2 cleared.”
@@ -202,8 +130,8 @@ ids per town**, bit order **MSB-first** (id `k` → byte `k>>3`, mask `$80 >> (k
 
 The third runtime bitmap (`$7F:9137`, "dispatched this session") is **not** saved, and neither
 is the ambient scene index `$7F:9222 + town*2` — so a freshly loaded save has no ambient
-scenery actors until a town event re-arms it. See ram-map "Story-event bitmaps" and SEAMS
-town §8.
+scenery actors until a town event re-arms it. See
+[RAM map: Story-event bitmaps](ram-map.md#story-event-bitmaps-7f9107-7f914e).
 
 Evidence: in two independent runs (`runs/20260817-180830`, `runs/20260817-184251`) the 48-byte
 SRAM block matches the WRAM block byte-exactly for every town except the one being played,
@@ -212,12 +140,7 @@ which differs only in the bits for events that fired after the last in-game save
 ### 3.4 Town simulation block ✅ — `0x0000`–`0x11ff` (decoded 2026-07-17)
 
 The third-party map starts at `0x1200` and documents nothing below it. The
-block below it is the persistent side of the structure-record system mapped in
-SEAMS town §7 (validated against `save.sim-bloodpool-start.bak.srm`, whose
-Fillmore array decodes to 92 active records = 77 houses + 13 fields + the two
-bridge orientation variants `$91/$81` — matching the FAQ's developed-Fillmore
-profile — while `complete.srm`, a warp-produced save with no sim play, shows
-initial road data and all-`$FFFF` square lists):
+block below it stores the persistent side of the structure-record system:
 
 | SRAM | WRAM live copy | Contents |
 |---|---|---|
@@ -263,19 +186,14 @@ itself never does.
 
 ## 4. Save codec and persistence backends
 
-The runtime must keep one invariant regardless of the disk format:
-**`g_sram` is always the canonical, exact 8 KiB image seen by the game.** A save
-backend only translates between that buffer and durable storage. Game code must
-never know whether the active file is native SRAM or structured INI.
-
-The implemented Phase-6 runtime supports two backends:
+The game supports two save formats:
 
 | Backend | Default path | Purpose |
 |---|---|---|
 | `native-srm` | `saves/save.srm` | Existing behavior and byte-compatible interchange with emulators |
 | `ini` | `saves/save.ini` | Human-readable verified fields plus a lossless copy of the complete SRAM image |
 
-`native-srm` remains the default for backward compatibility. INI mode is an
+`native-srm` is the default. INI mode is an
 explicit setting, not an automatic preference based on which files happen to
 exist. Exactly **one active backend and path** is authoritative per session;
 auto-persist writes only that target. Import/export are separate actions and do
@@ -362,7 +280,7 @@ overrides. Loading proceeds transactionally into a scratch 8 KiB buffer:
 4. Recompute and store the §2 checksum after applying overrides. A checksum
    printed in `[Meta]`, if added for diagnostics, is informational only.
 5. Commit the scratch image between game frames, then re-sync the auto-persist
-   shadow as specified in §5.1.
+   persistence state.
 
 Writing performs the inverse operation from the current `g_sram`: copy the
 whole image, ensure its checksum is current, emit readable verified fields, and
@@ -375,127 +293,16 @@ editable today without pretending the entire semantic map is known, and it
 lets future codec versions promote raw bytes to named fields while remaining
 backward-compatible with version-1 files.
 
-### 4.2 Backend API and ownership
+## 5. Editing safely
 
-Save serialization is a separate subsystem from `SettingDesc[]`. Runtime
-preferences such as `save_backend` belong in `g_settings`; save payload fields
-belong in a verified `SaveFieldDesc[]` registry so menu presentation, INI
-decode/encode, validation, and editing share one field definition without
-treating game data as ordinary app configuration.
+- Back up the save before editing. Recompute its checksum after changing fields.
+- **Apply for session** changes the live game without writing the save to disk.
+  **Apply and save** writes the active backend and takes a timestamped backup
+  when backups are enabled.
+- Do not modify a file while the game is saving to it. For external editing,
+  close the game first.
+- Preserve unknown fields and the raw image when converting between formats.
 
-The implementation boundary should be equivalent to:
-
-```c
-typedef enum SaveBackend {
-  SAVE_BACKEND_NATIVE_SRM,
-  SAVE_BACKEND_INI,
-} SaveBackend;
-
-bool Save_Load(const SaveSpec *spec, uint8 out[0x2000], SaveError *err);
-bool Save_Write(const SaveSpec *spec, const uint8 sram[0x2000], SaveError *err);
-bool Save_Import(const char *path, uint8 out[0x2000], SaveError *err);
-bool Save_Export(const char *path, const uint8 sram[0x2000], SaveError *err);
-uint32 Save_RecomputeChecksum(uint8 sram[0x2000]);
-```
-
-`Save_Load` and import decode into scratch storage and leave the live image
-untouched on any error. `Save_Write` uses a temporary file plus flush/rename so
-a crash cannot leave a truncated active save. Backup, commit, shadow re-sync,
-and logging of the selected backend/path sit above the format adapters and are
-identical for `.srm` and `.ini`.
-
-### 4.3 Runtime implementation (2026-07-16)
-
-`src/save_system.c` now implements this boundary. `src/main.c` attaches the
-canonical `g_sram` buffer after the cartridge power-on fill, snapshots the
-resolved backend, and routes boot load, per-frame change persistence, editor
-actions, and clean shutdown through it. Native remains `saves/save.srm`; INI is
-`saves/save.ini`. `AR_SAVE_NATIVE_PATH`/`AR_SAVE_INI_PATH` are isolated-test
-overrides, not additional authoritative targets.
-
-The test suite proves exact native size/checksum rejection, transactional
-destination preservation on malformed/missing/duplicate INI chunks, unedited
-cross-format byte identity, field-only mutation plus checksum, session-only
-shadow re-sync, and persistent active-backend writes. The codec also validates
-all nine repository fixtures. Persistent edits and subsequent Continue flows
-are also confirmed through regular in-game use (2026-08-23).
-
----
-
-## 5. Editing rules and hazards
-
-### 5.1 Auto-persist/editor interaction — mitigated
-
-The former main-loop implementation diffed `g_sram` and immediately wrote
-`saves/save.srm`. A naïve editor mutation would therefore have made an
-ostensibly session-only edit permanent.
-
-`SaveSystem_ApplyEdits()` now stages mutations in scratch, validates and
-checksums the complete image, and re-syncs the auto-persist shadow after the
-live swap. **Apply for session** consequently leaves disk untouched. **Apply
-and save** takes a timestamped backup (when enabled) and performs an explicit
-atomic active-backend write before the swap. `SaveSystem_AutoPersistIfChanged()`
-continues to preserve game-originated SRAM changes, but only to the backend
-selected at boot.
-
-### 5.2 Checksum is mandatory
-Any write must be followed by a `SramChecksum()` recompute over the mutated
-buffer (§2). Skipping it means the game treats the save as corrupt.
-
-### 5.3 Never edit mid-write
-Only mutate `g_sram` between frames, while the game-side coroutine is yielded,
-and never while the game is in the middle of its own save routine.
-
----
-
-## 6. Verification methodology
-
-We have a better oracle than the third-party map: **our own WRAM map.** The game
-copies SRAM→WRAM when a save is loaded, and [ram-map.md](ram-map.md) already
-documents the WRAM side from cheat work — `$0282/84` SP, `$0286/87` angel HP,
-`$0295` persistent scroll count, `$0299-$029C` spell HAVE flags, `$02AC`
-equipped magic.
-
-### 6.1 WRAM correspondence (best for the 🔴 cluster)
-Load a save, take an `F2` full snapshot (already dumps WRAM + SRAM), and match
-known WRAM values back to SRAM offsets. Because we know what `$0286/87` *means*,
-finding the SRAM bytes that feed it settles the angel-HP/SP/MP block directly —
-without trusting the third-party offsets at all. The alternative (static) route
-is to find the SRAM→WRAM load routine in the ROM via
-`snesbuild xref 0286 --root . --kind write --wram-mirrors` (or the
-corresponding read query).
-
-### 6.2 Known-state diffing (best for §3.4)
-Diff labelled saves at known checkpoints (`save.sim-blank` → `save.sim-bloodpool-start`
-already isolates 752 changed bytes). Capture a save before/after a single
-discrete sim action (seal one lair, gain one population tick) to bisect the
-`0x0000`–`0x07ff` block field-by-field.
-
-### 6.3 Round-trip
-Turn **Allow save edits** on → stage one low-risk field → **Apply and save** →
-**Restart Game** → Continue → confirm the game accepts the save and shows the
-intended value. Repeat representative tests for town state, Status, Magic,
-Items, Scores, Death Heim, and Professional mode. This path is confirmed through
-regular use of the editor. **Apply for session** is intentionally not the
-restart path: its shadow re-sync guarantees that Restart/Exit leaves disk
-unchanged.
-
-### 6.4 Tooling
-`tools/srm.py` is the checked-in command-line companion. Its `check`, `decode`,
-`diff`, `edit`, and `convert` subcommands validate the same exact size/checksum,
-use the same six field offsets, and read/write the version-1 lossless INI. It
-is suitable for fixture research; runtime persistence remains owned by the C
-codec.
-
----
-
-## 7. Open questions
-
-1. **Slot structure.** No mirroring at `0x400`/`0x800`/`0x1000` block sizes
-   (7 of 8 `0x400` blocks unique). Does ActRaiser keep >1 save slot, and if so
-   where? Affects whether the editor needs a slot selector.
-2. **The `0x0000`–`0x07ff` block** (§3.4) — town/terrain state? This is the
-   highest-value unknown.
-3. **City internals.** The reference template disables population, town level,
-   offerings, and construction-speed fields. Derive these from single-action
-   save diffs rather than exposing its dormant offsets.
+The source checkout includes `tools/srm.py`. Its `check`, `decode`, `diff`,
+`edit`, and `convert` commands support the native image and version-1 lossless
+INI format. Run `python3 tools/srm.py --help` for usage.

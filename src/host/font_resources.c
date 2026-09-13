@@ -1,3 +1,5 @@
+#include "snesrecomp/support/utf8_fs.h"
+
 #include "host/font_resources.h"
 
 #include <stdio.h>
@@ -87,7 +89,7 @@ ArFontResourceId ArHostFontResources_RegisterFile(
     Fail(error, capacity, "font resource capacity exhausted");
     return 0;
   }
-  FILE *file = fopen(path, "rb");
+  FILE *file = sr_fopen(path, "rb");
   if (!file) { Fail(error, capacity, "cannot open font file"); return 0; }
   long length = -1;
   if (!fseek(file, 0, SEEK_END)) length = ftell(file);

@@ -1,3 +1,5 @@
+#include "snesrecomp/support/utf8_fs.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -110,7 +112,7 @@ static bool EntryComplete(const MusicReplacement *entry, const char *path,
  * unless the manifest already set loop points. A missing file is the normal
  * "hook available, audio not provided" state and stays silent. */
 static void ProbeEntryFile(MusicReplacement *entry) {
-  FILE *probe = fopen(entry->file, "rb");
+  FILE *probe = sr_fopen(entry->file, "rb");
   if (!probe) return;
   fclose(probe);
 
@@ -167,7 +169,7 @@ int MusicReplacements_Load(const char *manifest_path) {
   g_music_replacement_count = 0;
   memset(g_music_replacements, 0, sizeof(g_music_replacements));
   s_musiclog = getenv("AR_MUSICLOG") != NULL;
-  FILE *f = fopen(manifest_path, "r");
+  FILE *f = sr_fopen(manifest_path, "r");
   if (!f) return 0;
 
   MusicReplacement pending;

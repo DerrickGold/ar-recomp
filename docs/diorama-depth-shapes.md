@@ -27,8 +27,3 @@ forward fills toward the viewer, backward fills away, and both centers the
 interval on the source plane. Explicit copy counts override density; density
 otherwise keeps slice spacing consistent as authored depth changes. Both paths
 are clamped to their draw-budget caps.
-
-Ownership is split intentionally. `diorama_layer_order.h` owns manifest
-grammar, defaults, caps, and resolved authoring state.
-`diorama_depth_shapes.h` owns pure, renderer-independent geometry contracts.
-`diorama.c` only assembles, projects, and draws the meshes.

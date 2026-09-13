@@ -1,3 +1,5 @@
+#include "snesrecomp/support/utf8_fs.h"
+
 #include "settings.h"
 #include "localization/ui_catalog.h"
 #include "text_parse_utils.h"
@@ -3314,7 +3316,7 @@ static bool ApplyBootLayerValue(const SettingDesc *desc, const char *text,
 static bool Settings_LoadInternal(const char *path, bool boot, int rank,
                                   bool missing_ok) {
   if (!path || !path[0]) return true;
-  FILE *file = fopen(path, "r");
+  FILE *file = sr_fopen(path, "r");
   if (!file) {
     if (!missing_ok || errno != ENOENT)
       fprintf(stderr, "[settings] cannot read %s: %s\n", path,
@@ -3543,7 +3545,7 @@ bool Settings_Save(const char *path) {
   memcpy(temporary, path, path_length);
   memcpy(temporary + path_length, ".tmp", 5);
 
-  FILE *file = fopen(temporary, "w");
+  FILE *file = sr_fopen(temporary, "w");
   if (!file) {
     fprintf(stderr, "[settings] cannot write %s: %s\n", temporary,
             strerror(errno));
@@ -3583,7 +3585,7 @@ bool Settings_Save(const char *path) {
   }
   /* Best-effort: make the rename itself durable. */
   if (success) Settings_SyncContainingDirectory(path);
-  if (!success) remove(temporary);
+  if (!success) sr_remove(temporary);
   free(temporary);
   return success;
 }

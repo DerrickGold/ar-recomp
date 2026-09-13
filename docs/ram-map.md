@@ -28,7 +28,7 @@ Direct page and stack in first 8KB ($7E:0000-$7E:1FFF), mirrored at $00-$3F:0000
 | $7E:08BC | 1 | Player **Crest** walking-cycle phase | TAS terminology; interacts with Boost to determine normal/pre-jump movement cadence. Player object `$08A0 + $1C`. |
 | $7E:08C4 | 1 | Player **Boost** walking-speed countdown | Can produce temporary 3 px/frame movement; player object `$08A0 + $24`. Extended `AR_FRAMELOG=1` records both fields with input and position delta. |
 
-### Camera / Scroll — full model in rendering-engine.md §4/§6/§11.1
+### Camera / Scroll
 | Address | Size | Description |
 |---------|------|-------------|
 | $7E:0022 | 2 | BG1/camera X. Action writer/HLE seam `$02:B091`: native clamp `[0,$2E-$100]`; corrected action-wide clamp `[left,$2E-$100-right]` when the complete requested view fits, otherwise native. Town writer `$01:B4C6`: native `[0,$0100]`, corrected-wide `[extra,$0100-extra]` (16:9: `[$002B,$00D5]`, directly validated 2026-07-14). All six scroll regs upload from `$22-$2D` via `$02:ADC3` (10-bit). |
@@ -63,7 +63,7 @@ emulator frame counter: both continue advancing during ActRaiser's native pause.
 
 | Address | Size | Description |
 |---------|------|-------------|
-| $7E:0380 | 512 | OAM shadow: 128 x 4-byte entries (x, y-1, tile, attr); cleared to x=$80,y=$E0 each frame via a stack-push fill. Both details are load-bearing for the diorama vertical band: the y field is 8 bits mod 256 against 224 lines, so the `$E0` park value IS screen -32 and collides with genuine above-screen positions, and a sprite near the screen BOTTOM aliases into the band through the same wrap. `PpuSetObjExactPosition` carries the emitter's un-truncated x AND y beside this table — see rendering-engine.md §13i (the band) and §13j (the apron) |
+| $7E:0380 | 512 | OAM shadow: 128 x 4-byte entries (x, y-1, tile, attr); cleared to x=$80,y=$E0 each frame via a stack-push fill. Both details are load-bearing for the diorama vertical band: the y field is 8 bits mod 256 against 224 lines, so the `$E0` park value IS screen -32 and collides with genuine above-screen positions, and a sprite near the screen BOTTOM aliases into the band through the same wrap. `PpuSetObjExactPosition` carries the emitter's un-truncated x AND y beside this table |
 | $7E:0580 | 32 | OAM high table shadow: 2 bits/sprite (bit0 = x bit 8, bit1 = size), packed 4 sprites/byte |
 | $7E:0000 | 1 | (during sprite build) high-table bit accumulator — bits ROR'd in from the top, flushed every 4 sprites |
 | $7E:000C/$000E | 2 ea | sprite-build counters/scratch; exact ownership is routine-specific. Town `ADAD/AE6F` obtains the part count from byte 0 of the frame definition, not from world record `+0E`. |
@@ -90,7 +90,7 @@ Both offset pairs carry BOTH orientations rather than being negated at runtime,
 which is why an H-flipped part is not simply mirrored about the object origin.
 Bit 0 of +0 is the only route to a part's pixel SIZE: it selects between the two
 entries `OBSEL` picks, so a host that builds a part WITHOUT an OAM slot (the OBJ
-apron channel, rendering-engine.md §13j) must read it here and resolve through
+apron channel) must read it here and resolve through
 `PpuObjSizeForSizeBit` — there is no size information in the tile/attr word.
 
 ### Action objects and magic cohorts (action mode only)
@@ -162,7 +162,7 @@ artwork alone:
 | $7E:0A00+`+0E` | 2 | **Packed form.** Scripted town actors additionally carry their spawn list in the high byte over class `$01` in the low byte, so the field reads as a 16-bit identity rather than a small class index: `$0A01` burning house, `$0E01` volcanic eruption. Runs `20260818-070141`/`073455` see `$0E01` on all eight live eruption records and on nothing else. Effect classifiers gate on the packed word **and** an exact composition, so neither the list nor the art can claim a family alone. |
 | $7E:0A00+`+00` | 2 | **Animation frame timer** for the record's `+$02` script cursor. Decrements once per game frame (measured Δ of -18/-14/-12 across snapshot gaps of 18/14/12) and cycles `+1..+4` on the eruption ground fire's authored four-tick frames. A held (`0`-duration) frame lets it free-run negative, which is why a staged record reaches -70. **It is not an altitude** — the sim town has none, and drawn position is exactly `world - camera`. |
 | $7E:0A00+`+1A/+1C` | 2+2 | **Per-tick map velocity**, X and Y, applied by the record's own class handler; `$01:B44B` is the angel-arrow case. For the volcanic eruption `+1C` names which of the ROM's three phases a record is in: `-8` climbing out of the crater, `+8` falling back onto the town, `0` staged offscreen. Composition follows it exactly — `$E7A6` always reads `+8` and `$E7D0` never does. One record walks all three in turn, so this is a state machine rather than two populations. Recorded here as measurement only: the eruption presentation is keyed on the script's own clock and on which column the record stands in, so nothing in the tree currently reads this field. |
-| $7E:0A00+`+22` | 2 | **Wait counter**, written by actor-script command `$09` (`$01:CE5F`): the command fetches two script bytes, assembles a 16-bit value, `STA $0022,X`, and sets state 2. Decrements once per game frame alongside `+00`. Observed 1..76 on staged eruption records — and the script that drives record `$0FA4` opens `09 4C 00`, i.e. wait $004C = 76, exactly the value seen. It does not encode the landing row; the `$03` run that follows does. **It is the only live source for a wait already in progress**, because `$01:CE5F` advances the cursor past the `$09` before the countdown starts: walking the script from the cursor sees no wait at all, so a wait's remaining frames exist nowhere else. The eruption presentation reads it for exactly that reason — see [SEAMS](SEAMS.md). |
+| $7E:0A00+`+22` | 2 | **Wait counter**, written by actor-script command `$09` (`$01:CE5F`): the command fetches two script bytes, assembles a 16-bit value, `STA $0022,X`, and sets state 2. Decrements once per game frame alongside `+00`. Observed 1..76 on staged eruption records — and the script that drives record `$0FA4` opens `09 4C 00`, i.e. wait $004C = 76, exactly the value seen. It does not encode the landing row; the `$03` run that follows does. **It is the only live source for a wait already in progress**, because `$01:CE5F` advances the cursor past the `$09` before the countdown starts: walking the script from the cursor sees no wait at all, so a wait's remaining frames exist nowhere else. The eruption presentation reads it for exactly that reason. |
 | $7E:0A00+`+14/+16` | 2+2 | **Actor-script base and cursor.** `$01:CFC7` fetches the next command byte and post-increments `+16`; the bank it fetches from is selected by the class byte `+$0E & $00FF` — **zero reads `$7F:0000,X` (RAM), non-zero reads `$0A:0000,X` (ROM)**. Townspeople are class 0 and run generated RAM scripts; the eruption is class `$01`, so its scripts are **static bank-`$0A` ROM data** and are decodable offline. `$7F` = end of script (`$01:CD35` branches to `$B891`); anything else indexes the 18-entry command table `$01:CD6F`. |
 | $7E:0A00+`+1E` | 2 | Per-command step scale/duration written by the command handlers — cmd `$03` sets `$0010`, and one branch of cmd `$04` sets `$0002` after scaling `+1A/+1C` by 8. With cmd `$03`'s `+1C = +1` this yields the measured 16 map pixels of descent per command. |
 | $7E:0A00+`+12` | 2 | Masked `& $7FFF`, the **state** index inside that class's own table. `(class $12, state 6)` is the Blue Dragon's 33-frame building strike. sim3d keys presentation height on the `(class, state)` pair. |
@@ -174,7 +174,7 @@ artwork alone:
 | $7F:9754 | 1+ | nonzero reduces the normal 44-record town world scan to one record. |
 | $7F:9F65/$9F67 | 2+2 | transient town camera shake X/Y. Applied only if resulting camera remains inside `$22<=$0100`, `$24<=$011F`, then cleared. |
 
-### Upload records + NMI descriptors (rendering-engine.md §2/§3/§7/§10)
+### Upload records + NMI descriptors
 | Address | Size | Description |
 |---------|------|-------------|
 | $7E:0076/$0079 (+banks $78/$7B) | 2+1 ea | NMI record-drain pointers — reset EVERY NMI by $02:ACC8 to $3900/$3A02 then $3B04/$3C06 (game-side reads see the resting values; not a game variable) |
@@ -187,7 +187,7 @@ artwork alone:
 | $7E:00F1 | 1 | one-shot flag: re-stream BG3 map rows 4-26 ($7F:B100 -> VRAM $5880) next NMI |
 | $7F:B000-$B6BF | 1728 | HUD/BG3 tilemap compose buffer (rows 0-3 streamed every frame to VRAM $5800; rows 4-26 on $F1) |
 | $7F:0000-$1FFF | 8192 | **Full town BG1 tilemap**, the whole 64x64-tile (512x512 pixel) town, not just the on-screen window. Quadrant-paged: `$03:9B5A/$03:9C43` write each cell's 2x2 tile block at `quadrant*2048 + (cellY & 15)*128 + (cellX & 15)*4`, four words at `+$00/+$02/+$40/+$42`, using terrain/structure definitions respectively. Both HLE wrappers and bridge-side rendering share `ActRaiser_CopyTownMetatile`. Row stride is 32 tiles, quadrant stride 32x32 tiles. A row-major read looks like an unrelated layer — it was mistaken for BG2 twice before `$9C43` was disassembled. This is the authoritative displayed cell artwork across staged construction and Marahna's water-to-land event; the semantic `$7F:2000` value can lead the visible redraw, so presentation observes this range plus live VRAM/CGRAM rather than reconstructing the image from cell ids |
-| $7F:1000-$1FFF | 4096 | (Within the above.) The lower two quadrant pages happen to be the range the graphics orchestrator streams to VRAM; SEAMS' "BG tilemap → VRAM" row describes that upload, not a separate buffer |
+| $7F:1000-$1FFF | 4096 | (Within the above.) The lower two quadrant pages happen to be the range the graphics orchestrator streams to VRAM; this is part of the same buffer |
 | $7E:2100-$28FF | 2048 | Mode-dependent BG1 metatile definitions, 8 bytes (four tilemap words) per ID. In towns, `$03:9B5A` expands this terrain atlas into the live tilemap and `$03:96EF` tests top-left bit `$0200` as its impassable marker. In action rooms, command 5 installs the BG1 rendering/collision definitions here. |
 | $7E:2900-$30FF | 2048 | Action BG2 metatile definitions, 8 bytes (four tilemap words) per ID, installed by command 5. Outside action mode this range is shared and must not be treated as persistent BG2 authority. |
 | $7F:2000-$37FF | 6144 | **Six town terrain cell maps**, one 32x32-cell, `$400`-byte block per town. Each block is quadrant-paged as four 16x16 pages at +0/+256/+512/+768. Values are semantic terrain ids or temporary/special structure marks: terrain redraws expand `$7E:2100` through `$03:9B5A`, while structure rebuilds expand `$7E:3100` through `$03:9C43`; structure records' `+0/+1` cell X/Y address the active block. During staged animation this semantic value may change before the displayed 2x2 words at `$7F:0000`, so it is not a presentation oracle. `$03:9710` computes its index through the shared `ActRaiser_CellMarkIndex` HLE; `$03:96EF` consumes the indexed terrain ID through the traversal-predicate HLE; `$02:865C` consumes all six blocks when stamping the authentic developed world map, while the host's pure `SimWorldMap_ComposeDeveloped` reads the same bytes explicitly. |
@@ -221,7 +221,7 @@ addresses are shared scratch in other game modes.
 | $7E:C000+ | `widthChunks × heightChunks × 256` | BG2 page-major metatile-id map loaded by command 4; `$4A` points here and `$32/$34` hold its pixel dimensions. Only the active prefix is action-owned. The enclosing `$C000-$FFFF` range is reused by the world-map and town paths. |
 | $7F:B800-$BFFF | 4096 | Character-animation source snapshot captured by `$02:BAF5` from VRAM word `$DA`; `$02:BC56/$02:AF30` upload phase-sized windows back to the same target. Continuation profiles intentionally retain the prior capture. |
 
-## Action terrain collision (mapped 2026-08-02 — SEAMS "Content / randomizer seams" §5b)
+## Action terrain collision
 | Address | Size | Description |
 |---------|------|-------------|
 | $7E:0014 / $7E:0016 | 2 each | Collision probe inputs: tile X / tile Y in 16px units, consumed by the oracle `$00:91C3`. These addresses are also reused as generic direct-page scratch elsewhere. |
@@ -273,7 +273,7 @@ in-game “settings mode” byte or PPU page is introduced.
 | $7E:0218 | 2 | Total population |
 | $7E:021A | 2 | Most recently visited town |
 | ... | 2 each | Individual town populations (Fillmore→Northwall) |
-| $7E:021C+2N | 2 each | ↑ the individual populations are recomputed by the structure census `$03:C07F`: sum of per-house people by civ level, +2, − `$7F:9F57+2N` — population is derived from standing house records (SEAMS town §7) |
+| $7E:021C+2N | 2 each | ↑ the individual populations are recomputed by the structure census `$03:C07F`: sum of per-house people by civ level, +2, − `$7F:9F57+2N` — population is derived from standing house records |
 
 ### Growth Rates ($7E:0228-$7E:022D)
 One byte per town. Values:
@@ -380,8 +380,8 @@ state and explicit save/load handling, not writes into these native slots.
 
 | Address | Size | Description |
 |---------|------|-------------|
-| $7E:035A | 1 | Event-effect request port: COP vector `$00:8526` stores A's low byte here (`LDA #id; COP`). Consumed by the NMI tail `$02:AC33` every other frame as the LOW byte of one 16-bit load, forwarded to APU port `$2142`, then zeroed. The serial replay corpus covers `$01/$07/$12/$83/$85/$89/$8A/$90/$94/$9A/$9E/$A0/$A1`; high-bit ids duplicate their low-seven-bit sequence across both native effect lanes. See [SEAMS.md](SEAMS.md#audio--closest-to-a-clean-interface--start-here) for the port protocol. |
-| $7E:035B | 1 | SFX request port: BRK vector `$00:852F` stores A's low byte here (`LDA #id; BRK`). Forwarded as the HIGH byte of the same 16-bit NMI store to APU port `$2143` and zeroed together with `$035A`. **id `$00` = idle/clear, not a sound** — it is by far the most-written value in the early census (754 posts vs 12 key-ons, mostly from `$03:9E6B`), and the NMI forwards zero as "nothing pending". The later serial trace confirms exposed BRK ids `$02/$03/$09/$0C/$10/$1A/$1B/$20/$21` across its staged replay corpus. See [SEAMS.md](SEAMS.md#audio--closest-to-a-clean-interface--start-here) for the external replacement seam. |
+| $7E:035A | 1 | Event-effect request port: COP vector `$00:8526` stores A's low byte here (`LDA #id; COP`). Consumed by the NMI tail `$02:AC33` every other frame as the LOW byte of one 16-bit load, forwarded to APU port `$2142`, then zeroed. The serial replay corpus covers `$01/$07/$12/$83/$85/$89/$8A/$90/$94/$9A/$9E/$A0/$A1`; high-bit ids duplicate their low-seven-bit sequence across both native effect lanes. See [native audio channels](snes-native-audio-channels.md) for the port protocol. |
+| $7E:035B | 1 | SFX request port: BRK vector `$00:852F` stores A's low byte here (`LDA #id; BRK`). Forwarded as the HIGH byte of the same 16-bit NMI store to APU port `$2143` and zeroed together with `$035A`. **id `$00` = idle/clear, not a sound** — it is by far the most-written value in the early census (754 posts vs 12 key-ons, mostly from `$03:9E6B`), and the NMI forwards zero as "nothing pending". The later serial trace confirms exposed BRK ids `$02/$03/$09/$0C/$10/$1A/$1B/$20/$21` across its staged replay corpus. See [native audio channels](snes-native-audio-channels.md) for the external replacement seam. |
 
 ## High RAM ($7F:0000+)
 
@@ -405,12 +405,12 @@ stager) requires all six words == 2 for the all-bosses-done path.
 | $7F:6B9F-$7F:6BAA | X positions (6 towns) |
 | $7F:6BAB-$7F:6BB6 | Y positions (6 towns) |
 
-### Structure records & town capacity (mapped 2026-07-17, SEAMS town §7)
+### Structure records & town capacity
 | Address | Description |
 |---------|-------------|
 | $7F:3800-$7F:53FF | Per-cell flag maps, `$400` per town (32×32 cells; bit0 set at road/build commit `$03:9623`, bit1 at `$03:8E48`, transient pathfinder visited bit2 set at `$03:9A50` and tested by the `$03:96EF` HLE) |
 | $7F:6B26+2N | Per-town population **support capacity** (census `$03:C07F` sum: 32/48/72 per completed support structure, bridges 32) |
-| $7F:6BE7-$7F:77E6 | Per-town **structure-record arrays**, `$200` each (base = `word[$03:DC74+town*2]`): 128 × 4-byte records `{cell X, cell Y, flags/type, action/progress}`. Flags byte: bit7 active, **bit6 not-yet-contributing / per-class visual variant — NOT a construction flag** (the allocator never sets it; on a class-3 windmill it is the "no wind" story state — see SEAMS town §7), bits 4-5 subtype (house civ level / wheat `$10` / bridge orientation), low nibble type class (0 house, 1 bridge, 2 field, 3/4 factory tier). Allocator `$03:9D9F`; the 128-slot exhaustion is the game's 128-structure cap |
+| $7F:6BE7-$7F:77E6 | Per-town **structure-record arrays**, `$200` each (base = `word[$03:DC74+town*2]`): 128 × 4-byte records `{cell X, cell Y, flags/type, action/progress}`. Flags byte: bit7 active, **bit6 not-yet-contributing / per-class visual variant — NOT a construction flag** (the allocator never sets it; on a class-3 windmill it is the "no wind" story state), bits 4-5 subtype (house civ level / wheat `$10` / bridge orientation), low nibble type class (0 house, 1 bridge, 2 field, 3/4 factory tier). Allocator `$03:9D9F`; the 128-slot exhaustion is the game's 128-structure cap |
 | $7F:77E7-$7F:7BE6 | Per-record visual step-machine slots, 128 × 8 bytes (armed by the construction `$03:A4B8` / rebuild `$03:A4A8` HLE pair through one shared resolver/armer, then walked by the `$89F7`/`$8A7E` 8-frame stepper). Completed sidecar bridges bypass this pool: the `$89F0` HLE resolves and replays their single native rebuild draw through the same model. Slot layout, from interpreter `$03:A4F7` (decoded 2026-08-17): `+0` countdown, decremented once per tick, entry executes when it hits 0; `+1` loop repeat counter; `+2` program cursor (bank-`$03` address of the NEXT entry); `+4` loop restart address, set by the program's `$FF` opcode; `+6` address of the CURRENT entry's draw-list pointer word, which `$03:A591` dereferences to redraw. The armer initialises `+0`/`+1`/`+2`/`+4` only, so `+6` is stale until the first tick |
 | $7F:7BE7 | Step/tick scratch variable (record index during scanner passes) |
 | $7F:7BE9 | Scanner gate: nonzero makes `$03:A4A8/$03:A4B8` (arm rebuild/construction visual step) and `$03:A4F7` early-out |
@@ -484,7 +484,7 @@ through SRAM by `$03:A850`. Corrected 2026-08-02 — the arrays are **not** 16 l
 | $7F:9101 | World-state flags. `$02:865C` tests bit 0 before preserving an 8x8 block at world-tilemap offset `$0660`; when clear, that block is zeroed before town development is stamped. `$01:B6CA` also uses bit 0 to decide whether its location scan includes the seventh (Death Heim) rectangle. Bit 1 remains Death Heim-related but is not consumed by the host world-map composer. |
 | $7F:910B | Bloodpool's story-event **prereq** bitmap, byte 0 (= `$9107 + 1*4`). The PAR-derived "bridge technology (bit 0x20)" label is event id 2 of that town — see the event-bitmap table below |
 
-### Story-event bitmaps ($7F:9107-$7F:914E, corrected 2026-08-17 — SEAMS story-event VM)
+### Story-event bitmaps ($7F:9107-$7F:914E)
 
 Three parallel per-town arrays, 4 bytes = **32 event ids** per town, base pointers in ROM at
 `$03:DCA2`/`$DCAE`/`$DCBA`. Bit order is **MSB-first**: id `k` → byte `k>>3`, mask
@@ -503,7 +503,7 @@ separate `$7F:9568+` block above; these bits are consumed by the `$03:DFFB` even
 by every town-event handler in `$03:E6xx-$F3xx` (32 ids/town matches the 32-entry handler
 tables at `$03:E66E`, not 4 lairs/town).
 
-### Story-event and scenery-spawner state ($7F:9202-$7F:9228, mapped 2026-08-17 — SEAMS town §8)
+### Story-event and scenery-spawner state ($7F:9202-$7F:9228)
 
 | Address | Description |
 |---------|-------------|
@@ -532,7 +532,7 @@ Two-byte entries per town tracking accumulated growth from monster defeats and l
 - Bit 0x40: Obstructs building direction selector
 - Bit 0x80 / 0x100: river-crossing bridge state per axis — set when the bridge
   builders `$03:9985/$99CA` allocate a bridge record, checked so a crossing is
-  never re-bridged (SEAMS town §7)
+  never re-bridged
 - Bit 0x200: Shows obstacle layer instead of base
 - Example values: `[29 38]`=straight road up, `[38 F8]`=crossroads, `[3A C8]`=horizontal road
 

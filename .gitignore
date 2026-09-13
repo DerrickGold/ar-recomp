@@ -1,7 +1,6 @@
 # User-supplied HD art / music packs stay out of the repo (assets/ is docs
 # imagery only). The manifest itself IS tracked as a template of discovered
-# replacement hooks — see docs/rendering-engine.md §13.1.1 and docs/SEAMS.md
-# "Audio".
+# replacement hooks — see docs/builder-workshop.md and docs/manual.md.
 # config.ini is the developer's LIVE config: cheats, window size and debug
 # switches accumulate in it during normal work. The tracked copy is the stock
 # template at installer/packaging/templates/config.ini, which is what a
@@ -158,7 +157,7 @@ snesrecomp-go/testdata/baseline/
 
 # Prebuilt libretro cores (e.g. snes9x_libretro.dylib) — platform-specific
 # compiled binaries, not something we build or maintain; users fetch their own
-# from buildbot.libretro.com per tools/oracle/README.md.
+# from buildbot.libretro.com.
 tools/oracle/*.dylib
 tools/oracle/*.so
 tools/oracle/*.dll
@@ -168,10 +167,13 @@ runs/
 # authored-but-unimplemented specs). See archive/README.md. Anchored so it
 # cannot match a nested directory the way the old unanchored `build*/` did.
 /archive/
-# Local game engineering journals, retired specifications, debugging notes,
-# and release-work records. Durable player and reverse-engineering references
-# belong in /docs instead.
+# Internal game, recompiler, and Builder architecture, investigations, plans,
+# checklists, and validation evidence. Player/modder guides belong in /docs.
 /development/
+# Prevent older report generators from reintroducing local evidence as docs.
+/docs/artifacts/
+/docs/evidence/
+/docs/research/
 # Local runner engineering journals, benchmark notes, and retired design
 # audits. Maintained SDK documentation belongs in runtime/docs instead.
 /snesrecomp-go/runtime/development/

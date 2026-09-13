@@ -360,7 +360,7 @@ virtual voice. Voices 8-39 therefore carry overlapping effects while physical
 voices 0-7 remain dedicated to music. Exact duplicate posts from the same
 producer in one game frame are deliberately coalesced. The game-facing audio
 identities and controls are catalogued in
-[`SEAMS.md`](SEAMS.md#audio--closest-to-a-clean-interface--start-here).
+[Native audio channels](snes-native-audio-channels.md).
 
 Custom music (OGG streaming in place of SPC songs) is covered in
 [Asset replacement](#asset-replacement-hd-art--music) below.
@@ -467,7 +467,7 @@ applying when their action or simulation engine becomes active.
 
 ## Enhancements
 
-Overlay section **System → Game**. Background in [`SEAMS.md`](SEAMS.md) town §7.
+Overlay section **System → Game**.
 
 | Key | Effect |
 |---|---|
@@ -525,8 +525,9 @@ matrix, so rotation/zoom/HDMA warps apply to the HD art). The builder's
 **Assets** tab previews the included title treatment and installs or removes it
 with one toggle, updating both title hooks in the manifest. Hand-authored packs
 can still be mapped directly under `game-assets/hd/`. Toggled live by
-`hd_replacements` / `AR_HD_REPLACEMENTS`. Full plane/key/gate reference: the manifest header and
-[`rendering-engine.md`](rendering-engine.md) §13.
+`hd_replacements` / `AR_HD_REPLACEMENTS`. See the manifest header for the
+plane, key, and gate options, or the [Workshop guide](builder-workshop.md)
+for visual authoring.
 
 ### Music (`[music:<name>]` entries, files under `game-assets/audio/`)
 
@@ -576,8 +577,8 @@ two gated entries whose conditions overlap. The gate is sampled once, at song
 start, so gate on state that holds for the whole song — `$18` (region) is
 stable across an act, while `$19` (room) advances within one. Toggled live by `music_replacements` /
 `AR_MUSIC_REPLACEMENTS`; `AR_MUSICLOG=1` adds verbose tracing (uploads, event
-ids, mix peaks). Full key reference: the manifest header and
-[`SEAMS.md`](SEAMS.md) "Audio".
+ids, mix peaks). The manifest header lists the available keys; the
+[Workshop guide](builder-workshop.md) covers importing and assigning tracks.
 
 Note the licensing angle before sharing packs: files ripped from the original
 game (its soundtrack, its art) are copyrighted content and belong in the

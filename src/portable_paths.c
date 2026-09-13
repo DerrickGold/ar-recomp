@@ -5,10 +5,10 @@
 
 #include "constants.h"
 #include "snesrecomp/host/launcher.h"
+#include "snesrecomp/support/utf8_fs.h"
 
 static bool PathExists(const char *path) {
-  struct stat path_info;
-  return stat(path, &path_info) == 0;
+  return sr_path_exists(path);
 }
 
 bool PortablePaths_IsBundle(void) {

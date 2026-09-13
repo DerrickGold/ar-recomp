@@ -355,6 +355,25 @@ func runSnesbuildAt(ctx context.Context, executable, directory string, environme
 	if err := command.Start(); err != nil {
 		return commandResult{}, fmt.Errorf("start snesbuild %s: %w", args[0], err)
 	}
+	var cancelOnce sync.Once
+	stop := func() {
+		cancelOnce.Do(func() {
+			cancelBuildProcess(command)
+			// A descendant may still own an inherited pipe after a broken kill.
+			// Closing our readers bounds cancellation instead of waiting forever.
+			_ = stdout.Close()
+			_ = stderr.Close()
+		})
+	}
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		select {
+		case <-ctx.Done():
+			stop()
+		case <-done:
+		}
+	}()
 
 	result := commandResult{Artifacts: make(map[string][]string)}
 	parseError := make(chan error, 1)
@@ -377,21 +396,27 @@ func runSnesbuildAt(ctx context.Context, executable, directory string, environme
 	var streamErr error
 	select {
 	case <-ctx.Done():
-		cancelBuildProcess(command)
+		stop()
 		scanGroup.Wait()
 		_ = command.Wait()
 		return commandResult{}, ctx.Err()
 	case streamErr = <-parseError:
 		if streamErr != nil {
-			cancelBuildProcess(command)
+			stop()
 			scanGroup.Wait()
 			_ = command.Wait()
+			if err := ctx.Err(); err != nil {
+				return commandResult{}, err
+			}
 			return commandResult{}, streamErr
 		}
 	}
 	<-stderrDone
 	commandErr := command.Wait()
 	scanGroup.Wait()
+	if err := ctx.Err(); err != nil {
+		return commandResult{}, err
+	}
 	if commandErr != nil {
 		return commandResult{}, fmt.Errorf("snesbuild %s failed: %w", args[0], commandErr)
 	}

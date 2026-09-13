@@ -36,6 +36,39 @@ func TestPortableDataSeedsEmbeddedAssetsWithoutWritingSource(t *testing.T) {
 	}
 }
 
+func TestExistingGameFolderIsReusedWithoutImport(t *testing.T) {
+	source, output := t.TempDir(), t.TempDir()
+	nativePackageFixture(t, source)
+	// A recognized older game folder may not have seed or import receipts.
+	// Selecting it must use its data directly, including Workshop preferences.
+	existing := map[string]string{
+		"config.ini":                         "player config",
+		"settings.ini":                       "player settings",
+		"diorama-layers.ini":                 "player room",
+		"user-rom.sfc":                       "synthetic ROM",
+		"saves/save.srm":                     "player save",
+		"game-assets/manifest.ini":           "player assets",
+		"game-assets/workshop-settings.json": `{"language":"ja"}`,
+		"game-assets/hd/custom.txt":          "player art",
+	}
+	for leaf, body := range existing {
+		put(t, filepath.Join(output, leaf), body)
+	}
+	for i := 0; i < 2; i++ {
+		if err := PreparePortableData(source, output); err != nil {
+			t.Fatal(err)
+		}
+		for leaf, want := range existing {
+			if got := read(t, filepath.Join(output, leaf)); got != want {
+				t.Fatalf("launch %d changed existing %s: %q", i, leaf, got)
+			}
+		}
+		if _, err := os.Stat(filepath.Join(output, importStateName)); !os.IsNotExist(err) {
+			t.Fatalf("launch %d created an import decision: %v", i, err)
+		}
+	}
+}
+
 func TestStandaloneDataSurvivesWorkspaceRemovalAndPreservesEdits(t *testing.T) {
 	source, parent := t.TempDir(), t.TempDir()
 	output := filepath.Join(parent, Name)

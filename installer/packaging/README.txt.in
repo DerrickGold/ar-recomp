@@ -5,6 +5,12 @@ This builds and runs the game on your computer from a game ROM you already
 own. The compiler and build tools are included. Platform-specific library and
 runtime requirements are listed below.
 
+This README describes the generic/legacy script-based archive layout with
+run-build and utils/. Current desktop Builder releases open directly as an
+.app, .AppImage or .exe. Their Windows game output also opens directly as
+ActRaiserRecomp.exe with its supporting files; no batch launcher is required.
+See utils/docs/desktop-packaging.md for the desktop Builder's output layout.
+
 
 WHAT YOU NEED
 -------------
@@ -26,9 +32,11 @@ HOW TO PLAY
    Your ROM never leaves this computer.
 
 3. Play - press "Play" in the builder now. Later, open ActRaiserRecomp.app on
-   macOS or ActRaiserRecomp.AppImage on Linux. Windows uses run-game.bat. The
-   older run-game scripts are also kept for compatibility. Starting run-build
-   again detects the game and opens as a launcher without rebuilding.
+   macOS or ActRaiserRecomp.AppImage on Linux. This legacy Windows archive uses
+   run-game.bat to select its utils/ data and ROM; the desktop Builder's new
+   Windows game-folder output does not need it. The older run-game scripts
+   are also kept for compatibility. Starting run-build again detects the game
+   and opens as a launcher without rebuilding.
 
    The generated app is private: it contains your ROM. Do not distribute it.
    The Mac app is automatically signed locally; no Apple account is needed.
@@ -36,9 +44,10 @@ HOW TO PLAY
 
 CHOOSE YOUR INSTALLATION TYPE
 -----------------------------
-Generated desktop applications support the two choices below, regardless of
-their platform-specific filename. Legacy run-game scripts continue to use the
-original bundle's data folder.
+Generated macOS/Linux game applications support the two choices below.
+Legacy run-game scripts continue to use the original bundle's data folder.
+Windows games use a portable folder; copying only the game .exe does not select
+global storage or carry its required libraries and data.
 
 Portable installation (Builder default)
   Keep the application, its .portable sidecar, and utils/ together. The Builder

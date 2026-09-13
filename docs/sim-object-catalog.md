@@ -1,13 +1,7 @@
 # Simulation-mode object catalogue
 
-Status: structurally complete for the simulation-town OAM path; semantic
-grounded/flying labels are intentionally provisional where the ROM does not
-encode a physical role.
-
-This catalogue is built from ROM tables, not from the objects that happened to
-appear in an input recording. The deterministic Fillmore capture is used only
-to supply the exact decoded OBJ characters and palette needed to draw the
-contact sheets.
+This catalogue describes the US ROM's simulation-town OAM records. Object
+identities come from ROM tables; uncertain gameplay labels are marked below.
 
 ## Scope and coverage
 
@@ -43,34 +37,34 @@ The `+$0E` field selects one of these top-level live-record classes. “Unknown�
 means the structural identity is known but the gameplay noun has not yet been
 proven. It does not mean that the record or its state table is missing.
 
-| Class | Handler | States | Current semantic identification | Initial 3D policy |
-|---:|---:|---:|---|---|
-| `$00` | `$CD0C` | 8 | Town actor/person family; observed on construction people | grounded candidate |
-| `$01` | `$CD0C` | 8 | Shares the town-actor state machine | unresolved |
-| `$02` | `$CABD` | 6 | Spawn-list-driven special actor/controller | unresolved |
-| `$03` | `$CC38` | 4 | Spawn-list-driven special actor/controller | unresolved |
-| `$04` | `$CCDA` | 2 | Spawn-list-driven special actor/controller | unresolved |
-| `$05` | `$CA67` | 8 | Special actor/controller | unresolved |
-| `$06` | `$CA92` | 8 | Special actor/controller | unresolved |
-| `$07` | `$C997` | 8 | Special actor/controller | unresolved |
-| `$08` | `$C971` | 2 | Special actor/controller | unresolved |
-| `$09` | `$C8F1` | 2 | Observed in Fillmore; semantic noun unresolved | unresolved |
-| `$0A` | `$C971` | 2 | Shares class `$08` state machine | unresolved |
-| `$0B` | `$C936` | 2 | Special actor/controller | unresolved |
-| `$0C` | `$B904` | 0 | Angel special record observed at `$0AE4`; class handler is a no-op because another subsystem drives it | flying, fixed altitude |
-| `$0D` | `$B904` | 0 | Second no-op/special record class | unresolved |
-| `$0E` | `$C8CD` | 1 | Spawn-list-driven special actor/controller | unresolved |
-| `$0F` | `$C8AA` | 1 | Spawn-list-driven special actor/controller | unresolved |
-| `$10` | `$C880` | 1 | Spawn-list-driven special actor/controller | unresolved |
-| `$11` | `$C7BF` | 2 | Town position/direction controller; observed with direction-cursor composition `$D2C4` | map-plane selector; the picker now stays in the tilted 3D space (`AR_SIM3D_PICKER_TOPDOWN` is compiled out) |
-| `$12` | `$B9EC` | 16 | Blue Dragon | flying; ground-targeted attack effect |
-| `$13` | `$BE4F` | 16 | Napper Bat | flying with dynamic dive/carry phases |
-| `$14` | `$C237` | 16 | Red Demon | flying |
-| `$15` | `$C4E5` | 16 | Skull Head | flying |
-| `$16` | `$B92E` | 1 | Spawn-list/event helper | UI/effect candidate |
-| `$17` | `$B95F` | 1 | Spawn-list/event helper | UI/effect candidate |
-| `$18` | `$B905` | 1 | Timed event helper | non-physical controller candidate |
-| `$19` | `$C1C0` | 1 | Timed world effect using behavior `$2C` | effect candidate |
+| Class | Handler | States | Current semantic identification |
+|---:|---:|---:|---|
+| `$00` | `$CD0C` | 8 | Town actor/person family; observed on construction people |
+| `$01` | `$CD0C` | 8 | Shares the town-actor state machine |
+| `$02` | `$CABD` | 6 | Spawn-list-driven special actor/controller |
+| `$03` | `$CC38` | 4 | Spawn-list-driven special actor/controller |
+| `$04` | `$CCDA` | 2 | Spawn-list-driven special actor/controller |
+| `$05` | `$CA67` | 8 | Special actor/controller |
+| `$06` | `$CA92` | 8 | Special actor/controller |
+| `$07` | `$C997` | 8 | Special actor/controller |
+| `$08` | `$C971` | 2 | Special actor/controller |
+| `$09` | `$C8F1` | 2 | Observed in Fillmore; semantic noun unresolved |
+| `$0A` | `$C971` | 2 | Shares class `$08` state machine |
+| `$0B` | `$C936` | 2 | Special actor/controller |
+| `$0C` | `$B904` | 0 | Angel special record observed at `$0AE4`; class handler is a no-op because another subsystem drives it |
+| `$0D` | `$B904` | 0 | Second no-op/special record class |
+| `$0E` | `$C8CD` | 1 | Spawn-list-driven special actor/controller |
+| `$0F` | `$C8AA` | 1 | Spawn-list-driven special actor/controller |
+| `$10` | `$C880` | 1 | Spawn-list-driven special actor/controller |
+| `$11` | `$C7BF` | 2 | Town position/direction controller; observed with direction-cursor composition `$D2C4` |
+| `$12` | `$B9EC` | 16 | Blue Dragon |
+| `$13` | `$BE4F` | 16 | Napper Bat |
+| `$14` | `$C237` | 16 | Red Demon |
+| `$15` | `$C4E5` | 16 | Skull Head |
+| `$16` | `$B92E` | 1 | Spawn-list/event helper |
+| `$17` | `$B95F` | 1 | Spawn-list/event helper |
+| `$18` | `$B905` | 1 | Timed event helper |
+| `$19` | `$C1C0` | 1 | Timed world effect using behavior `$2C` |
 
 Classes `$12-$15` each have a real 16-entry state table. Their state handlers
 change the behavior identity passed to `$D072`, so a render implementation can
@@ -79,29 +73,27 @@ inventing a general-purpose Z coordinate.
 
 ## Ordinary world visual identities
 
-The complete rendered sheet is generated locally at
-`research/sim-object-catalog/world_visual_ids_01.png`. Visual IDs are grouped
-as follows:
+Visual IDs are grouped as follows:
 
-| Visual IDs | Identification | 3D treatment |
-|---|---|---|
-| `$00` | Control/sentinel entry (`$831C`), not a normal composition | do not draw |
-| `$01-$08` | Blue Dragon bodies and directional frames | flying actor |
-| `$09-$0B` (`$E1BD/$E209/$E255`) | Building-zap lightning animation | ground-targeted effect at the selected building tile |
-| `$0C` | Unreferenced one-part identity; blank in captured tiles | unresolved |
-| `$0D-$14` | Red Demon body/attack frames | flying actor |
-| `$15-$17` (`$E340/$E35A/$E383`) | Palette-1 Red Demon fire, small through large | effect attached to the flying actor |
-| `$18-$1F` | Napper Bat flight/dive frames | flying/dynamic |
-| `$20-$22` | Skull Head bodies | flying |
-| `$23-$25` | Shared explosion/ring sequence | effect; no shadow |
-| `$26` | Unreferenced one-part identity; blank in captured tiles | unresolved |
-| `$27-$2E` | Bat-with-passenger/carrying silhouettes | flying/dynamic; passenger attached |
-| `$2F-$33` | Groups of people sprites | grounded group |
-| `$34-$36` (`$E6CA/$E6D0/$E6D6`) | Runtime-built ground-fire animation; emitted palette 1 is scripted red, palette 2 is post-Lightning blue | map-height ground effect |
-| `$37-$39` | Blue orb effect sequence | effect; no shadow |
-| `$3A-$3C` (`$E71B/$E73A/$E75E`) | Napper plucking people from the ground | semi-grounded/near-ground dynamic phase |
-| `$3D`, `$3F` | Skull Head alternate/helper frames | flying |
-| `$3E` | Fire frame | effect; no shadow |
+| Visual IDs | Identification |
+|---|---|
+| `$00` | Control/sentinel entry (`$831C`), not a normal composition |
+| `$01-$08` | Blue Dragon bodies and directional frames |
+| `$09-$0B` (`$E1BD/$E209/$E255`) | Building-zap lightning animation |
+| `$0C` | Unreferenced one-part identity; blank in captured tiles |
+| `$0D-$14` | Red Demon body/attack frames |
+| `$15-$17` (`$E340/$E35A/$E383`) | Palette-1 Red Demon fire, small through large |
+| `$18-$1F` | Napper Bat flight/dive frames |
+| `$20-$22` | Skull Head bodies |
+| `$23-$25` | Shared explosion/ring sequence |
+| `$26` | Unreferenced one-part identity; blank in captured tiles |
+| `$27-$2E` | Bat-with-passenger/carrying silhouettes |
+| `$2F-$33` | Groups of people sprites |
+| `$34-$36` (`$E6CA/$E6D0/$E6D6`) | Runtime-built ground-fire animation; emitted palette 1 is scripted red, palette 2 is post-Lightning blue |
+| `$37-$39` | Blue orb effect sequence |
+| `$3A-$3C` (`$E71B/$E73A/$E75E`) | Napper plucking people from the ground |
+| `$3D`, `$3F` | Skull Head alternate/helper frames |
+| `$3E` | Fire frame |
 
 Every drawable ordinary visual identity uses OBJ priority 0 on every part.
 The same is true for all 284 spawn-list compositions. Priority therefore
@@ -109,31 +101,29 @@ cannot distinguish people, monsters, the angel, cursors, or effects.
 
 ## Spawn-list/special composition groups
 
-The exhaustive special sheets are generated as
-`research/sim-object-catalog/spawn_compositions_01.png` through `_05.png`.
-They contain these broad groups:
+The special compositions include these groups:
 
-| Composition range | Visible family | Initial 3D treatment |
-|---|---|---|
-| `$A627-$A792` | Angel directional and pose frames | flying, fixed altitude |
-| `$D128-$D22D` | Miracle/menu icons | UI/overlay |
-| `$D233-$D302` | Direction and position cursors | map-plane OBJ (no billboard); switch to authentic top-down selection view while `$7F:9215` is active |
-| `$D32B-$D686` | Town status/thought icons, including disabled variants. **Crawled 2026-08-18** (`sim_object_catalog.py crawl`): the range holds 79 entries, of which **75 are the 16x16 bubbles** (63 single-part, 12 four-part) and **four are 64x64 eight-part map selector squares** — `$D4E5`, `$D4FA`, `$D538`, `$D576` — structurally identical to the `$D233-$D302` cursor family. Those four lie ON the map; `IsMapPlaneCursorComposition` does not reach them, so `IsTownStatusBubbleComposition` excludes them by address. Measured from OAM, a bubble is a 16x32 stack anchored at its TOP and the ROM bounces it about 3px | overlay, lifted onto the owning structure (SEAMS "Structure-anchored overlays") |
-| `$D4F6/$D4F8/$D4FA` | **NOT compositions — bank-`$03` step-PROGRAM addresses.** A structure record whose visual step-machine slot at `$7F:77E7 + idx*8` holds one of these is showing the destroyed-house marker; healthy houses hold `$D5EF`/`$D61F`-range programs. They share no numbering with the bank-`$01` composition table above, and the collision with `$D4FA` there — which is one of the selector squares — is a coincidence that cost a wrong classifier rule in 2026-08-18 | structure state, not art |
-| `$D687-$D988` | Angel action, arrow, cloud, fire, and hourglass effects | split actor/attached effect/overlay by script; the arrow override below is authoritative |
-| `$D967/$D972/$D97D/$D988` | Angel-arrow vertical A/B and horizontal A/B compositions | flying projectile at angel height; record-origin anchor; no shadow |
-| `$E85C-$E93x` | Town-person animation frames | grounded at map height |
-| `$E940-$E961` | Horse animation: two frames facing right, then two facing left | grounded |
-| `$E96C-$E97E` | Dog animation: two frames facing right, then two facing left | grounded |
-| `$E984-$E996` | Sheep animation: two frames facing right, then two facing left | grounded |
-| `$E99C-$E9C6` | Eight sailboat frames: two each facing down, up, right, and left; the paired animation changes the sail | water plane; no flight shadow |
-| `$D993` | 64x64 hollow path/area selection square (palette 6) | map-plane cursor, like `$D233-$D302`; never billboarded |
-| `$D9E5-$DCD2` | Miracle cloud family (see below) | map-plane effect; record-origin anchor; ROM supplies its own shadow |
-| `$E9CC/$EA27/$EA82/$EAEC` | Town-creation lightning frames initialized by selector `$0504`; live records are world process `$000E` with script base `$A8BB` in raw `+$06`; `$E527` is the interleaved offscreen gap | ground-targeted effect; record-origin anchor; no independent altitude or shadow |
-| `$EBE8-$EC09` | People/horse scene metatiles | grounded scene composite, not a flying actor |
-| `$EC14-$EC35` | Angel cloud tiles used by rain, thunder, and other miracles | flying effect |
-| `$EC40/$EC6E` | Two 48×48 navigation Sky Palace frames, each a 3×3 grid of 16×16 parts. `$A7C5` alternates these at 96 ticks per frame. Their tile IDs require the navigation atlas/palette, not the town snapshot | fixed screen-centred navigation object |
-| `$EC9C-$EDF8` | Remaining large aggregate strips/grids and event effects | effect/controller, not one physical actor |
+| Composition range | Visible family |
+|---|---|
+| `$A627-$A792` | Angel directional and pose frames |
+| `$D128-$D22D` | Miracle/menu icons |
+| `$D233-$D302` | Direction and position cursors |
+| `$D32B-$D686` | Town status/thought icons, including disabled variants. the range holds 79 entries, of which **75 are the 16x16 bubbles** (63 single-part, 12 four-part) and **four are 64x64 eight-part map selector squares** — `$D4E5`, `$D4FA`, `$D538`, `$D576` — structurally identical to the `$D233-$D302` cursor family. Those four lie on the map. Measured from OAM, a bubble is a 16x32 stack anchored at its TOP and the ROM bounces it about 3px |
+| `$D4F6/$D4F8/$D4FA` | **NOT compositions — bank-`$03` step-PROGRAM addresses.** A structure record whose visual step-machine slot at `$7F:77E7 + idx*8` holds one of these is showing the destroyed-house marker; healthy houses hold `$D5EF`/`$D61F`-range programs. They share no numbering with the bank-`$01` composition table above, and the collision with `$D4FA` there — which is one of the selector squares — is a coincidence, not a shared identity |
+| `$D687-$D988` | Angel action, arrow, cloud, fire, and hourglass effects |
+| `$D967/$D972/$D97D/$D988` | Angel-arrow vertical A/B and horizontal A/B compositions |
+| `$E85C-$E93x` | Town-person animation frames |
+| `$E940-$E961` | Horse animation: two frames facing right, then two facing left |
+| `$E96C-$E97E` | Dog animation: two frames facing right, then two facing left |
+| `$E984-$E996` | Sheep animation: two frames facing right, then two facing left |
+| `$E99C-$E9C6` | Eight sailboat frames: two each facing down, up, right, and left; the paired animation changes the sail |
+| `$D993` | 64x64 hollow path/area selection square (palette 6) |
+| `$D9E5-$DCD2` | Miracle cloud family (see below) |
+| `$E9CC/$EA27/$EA82/$EAEC` | Town-creation lightning frames initialized by selector `$0504`; live records are world process `$000E` with script base `$A8BB` in raw `+$06`; `$E527` is the interleaved offscreen gap |
+| `$EBE8-$EC09` | People/horse scene metatiles |
+| `$EC14-$EC35` | Angel cloud tiles used by rain, thunder, and other miracles |
+| `$EC40/$EC6E` | Two 48×48 navigation Sky Palace frames, each a 3×3 grid of 16×16 parts. `$A7C5` alternates these at 96 ticks per frame. Their tile IDs require the navigation atlas/palette, not the town snapshot |
+| `$EC9C-$EDF8` | Remaining large aggregate strips/grids and event effects |
 
 The sailboat frame order is:
 
@@ -149,7 +139,7 @@ The sailboat frame order is:
 table `$01:CF2B` **by byte**, so the row is `kind/2` — kind 0 people, 2 horse, 4 dog,
 **6 sheep**, 8 boat, 10 burning-house flame, 12 the `$DD3F` family. The chosen byte is a
 variant index into the spawn-list-6 array `$01:A91C`, packed as `ORA #$0600` and staged
-through `$01:CFF2`. Kinds come from the `$0A:C800` scenery records; see SEAMS town §8.
+through `$01:CFF2`. Kinds come from the `$0A:C800` scenery records.
 
 The animal frame order is:
 
@@ -158,261 +148,3 @@ The animal frame order is:
 | Horse | `$E940` | `$E94B` | `$E956` | `$E961` |
 | Dog | `$E96C` | `$E972` | `$E978` | `$E97E` |
 | Sheep | `$E984` | `$E98A` | `$E990` | `$E996` |
-
-## Classification model for the renderer
-
-The catalogue should use a small semantic enum rather than infer altitude from
-OAM attributes:
-
-```text
-grounded
-grounded_group
-flying_fixed
-flying_dynamic
-flying_projectile
-water_plane
-attached_passenger
-ground_scene_metatile
-ground_targeted_effect
-ground_effect
-semi_grounded
-flying_effect
-world_effect
-ui_overlay
-unresolved
-```
-
-For ordinary motion, `+$1A/+$1C` are planar X/Y velocities applied directly to
-`+$0A/+$0C`; they are not altitude. A fixed flight plane is therefore enough
-for the angel and ordinary enemy travel. Only explicitly mapped state changes
-need a depth curve or attachment rule:
-
-- Every enemy class (`$12-$15`) is a flying type. Napper Bat dive/carry states
-  move between the normal flight plane and near-ground staging;
-  the carried person follows the bat and must not independently become a
-  grounded or floating actor.
-- The angel arrow is its own world record at `$0B0A`. Project its record X/Y
-  through the town ground transform, then apply the same fixed virtual height
-  as the angel. Anchor its billboard at the record origin and do not give it a
-  shadow. Its `+$1A/+$1C` velocity, collision, and `$01:B473` lifetime/culling
-  remain authentic gameplay behavior, not presentation inputs to rewrite.
-- Blue Dragon state 6 moves the record to its selected building/ground target. The entire
-  33-frame state uses the `ground_strike` plane so ordinary body-frame gaps stay attached to the
-  bolt; only `$E1BD/$E209/$E255` are emissive.
-- Napper compositions `$E71B/$E73A/$E75E` are the semi-grounded plucking phase.
-- Red Demon `$E340/$E35A/$E383` fire stays attached to its 24-pixel flight plane.
-  `$E6CA/$E6D0/$E6D6` is a grounded effect in both palette-1 red and palette-2 blue variants;
-  the shared address alone does not identify its colour.
-- Scripted burning houses use packed world identity `$0A01` and the separate palette-1
-  `$DD2D/$DD33/$DD39` family. Each composition is one 16x16 part, so the record-local ground
-  contact is `(8,16)`. Classify it as `ground_effect`/`NoShadow`; do not merge it with the shared
-  red/blue `$E6CA` family. The screen-upright glow and ember source are lifted four authentic
-  pixels to `(8,12)` so both center within the flame silhouette without changing its semantic
-  ground contact.
-- The volcanic eruption story event (fires once a town's region has no lairs left) is packed
-  world identity `$0E01` over three adjacent spawn scripts, measured in run `20260818-070141`.
-  `$01:A853` holds `$E7D0` and `$01:A857` holds `$E7A6` — both are the same two 8x8 tiles
-  `$11C`/`$035` in palette 1, one V-flipped against the other, and both are the *same fireball*:
-  record `$1016` walks `$E7D0`→`$E7A6` and records `$0FA4/$0FCA/$0FF0` walk `$E7A6`→ground fire,
-  each at a fixed `world_x` with increasing `world_y`. A fireball still in the air is
-  `flying_projectile`/`RecordOriginAnchor`/`NoShadow`: terrain must neither raise it nor hide it,
-  and its art is centred on the record origin rather than standing on a foot.
-- **The eruption has no authentic altitude at all.** Record `+$00` is the **animation frame
-  timer** — it decrements once per game frame and cycles `+1..+4` on the ground fire's four-tick
-  frames — and is emphatically not a height; the drawn position is exactly `world - camera`. The
-  enhanced view supplies the altitude outright, in `UpdateProjectileArc`.
-- **`+$1C` named the ROM's three phases, and no longer drives anything.** Run `20260818-073455`
-  pins the record's per-tick map velocity across sixteen frames: `-8` is the crater jet at map
-  column 144 climbing up-map, `+8` is a fireball raining back onto the town (always entering at
-  `y = -16` and descending at constant speed), and `0` is a record staged offscreen running its
-  `+$22` release countdown. `$E7A6` always carries `+8` and `$E7D0` never does, so the two
-  authored frames are the falling and not-falling poses. One record walks all three phases in
-  turn — climb, staged wait, descent — so this is a state machine, not two populations. Velocity
-  says which state a record is in but not where it is going, which is why the arc is keyed on
-  the script instead and the field is documented here rather than plumbed through the producer.
-- **The airborne art is reused too, at the head of the enhanced view's own arc.** The ROM's
-  fireball routine is replaced outright in the projected town, so its billboard is withheld — but
-  `$E7A6`/`$E7D0` are still the right frames, so `DrawSimEffectFireballHeads` draws them at the
-  arc head, turned onto the heading. Art from the suppressed object, position from the effect.
-  Because the ROM parks its records off the top of the map for most of a flight, eruption records
-  are exempt from the producer's vertical sprite window, and a record whose art is still missing
-  borrows a sibling's — every fireball wears the same two compositions.
-- **The eruption's ground fire is the burning house's animation, and needs no new art.**
-  `$01:A85B` cycles `$DD9F/$DDA5/$DDAB` at four ticks a frame, and those are tiles
-  `$086/$088/$08A` in palette 1 — the exact frames `$01:A838` draws a burning building with. The
-  only differences are the anchor (part `x = -8`, so the record-local ground contact is `(0,16)`
-  rather than the house's `(8,16)`) and the cadence. They therefore classify into the house
-  fire's own `HouseFireA/B/C` phase family so both share one lighting ramp; the kind stays
-  separate only so a trace can tell burning ground from a burning house. Counting the palette-2
-  `$E6CA/$E6D0/$E6D6` blue variant, these three tiles have three distinct users — the composition
-  triple, not the tile, is what identifies a family.
-- Selection cursors and miracle targeting are screen/world overlays and should
-  trigger the top-down camera transition rather than participate in shadows.
-- All non-enemy world graphics—people, groups of people, animals, boats, and
-  scene metatiles—are anchored at map height. Boats use the same map-height
-  anchor with a water-plane presentation policy. Ground contact shadows remain
-  an art-direction choice.
-
-## Implemented classifier
-
-D3c transcribes the policy above into `Sim3D_ClassifyObject`
-(`src/sim/sim_render_metadata.c`), a pure function over
-`(tier, record class, semantic state, record address, composition)`. It
-publishes a `SimHeightClass`, a virtual height in authentic SNES pixels
-(`24` for every flight plane, `8` for the Napper ground-pluck phase, `0`
-otherwise), and the anchor/shadow traits consumed by the presenter and the
-Phase 4 shadow pass. Composition overrides are evaluated before record
-semantics, so a classified state can leave its class's default plane.
-
-The table entries are the canonical heights. `sim3d_height_scale_x100` scales
-all of them at presentation time for tuning; change the constants here (and the
-catalogue) rather than the setting when a plane is wrong for every scene.
-
-### Shadow casters (D4a)
-
-`Sim3D_ObjectCastsShadow` selects casters from the classification alone: a
-world-tier object with usable atlas art that is marked neither `MapPlane` nor
-`NoShadow`. Every "no shadow" entry in the tables above therefore takes effect
-by trait, not by a renderer check, and height is not part of the test —
-grounded people, animals, and buildings cast a shadow under their own feet
-exactly like a flying enemy casts one offset along the light.
-
-The consequence for catalogue work is that a new object with no explicit rule
-falls through to `grounded` and *will* cast a shadow. That is the intended
-default for ordinary actors; for a new effect or marker, give it `NoShadow` in
-the classifier at the same time as its plane, or it will paint a silhouette on
-the map.
-
-### Ground contact and plane changes
-
-The ROM already encodes ground contact through the record's world position and
-the composition's art extents, so a presentation height added on top of it can
-break a contact the original art made. Two mechanisms keep that from happening,
-and both are active only while the SIM 3D master is on and the frame resolves
-to the enhanced view:
-
-- **Contact-exact classes never ease.** `ground_effect` and `ground_strike` are
-  positioned by the ROM itself and land on their first frame.
-- **Every other plane change ramps** at `kSimHeightSlewStep` (4 px/frame) per
-  world record. A record absent from the immediately preceding build snaps
-  instead, so a recycled slot never inherits the previous actor's plane.
-
-`SimRenderObject` therefore carries both `classified_height` (the classifier's
-choice this frame) and `virtual_height` (the eased value actually drawn).
-
-### Position cursors are not one contiguous range
-
-`$D233-$D302` is the ROM's cursor family, but it is **not** the complete set.
-`$D993` is a separate 64x64 hollow square — a 4x4 grid of 16px parts with the
-centre four omitted, palette 6 — used as the path/area selection square during
-Direct the People and targeted miracles, and it arrives on a class-`$09`
-record rather than the class-`$11` position controller. It sits immediately
-below the miracle cloud effects (`$D9E5+`, palette 2) and was briefly
-misclassified as one of them, which made it billboard instead of lying on the
-selected square. Both cursor graphics must be map-plane; when checking this,
-note that the yellow structure bracket and the white selection square are
-different compositions and can regress independently.
-
-### Miracle cloud family (`$D9E5-$DCD2`)
-
-Identified 2026-07-22 from live thunder/rain/wind captures rather than from the
-composition crawl, because the effect is only legible while it is running. The
-`$7F:90EB` miracle kind selects the animation; the structure is always the
-same pair of co-located records at one world position:
-
-| Composition | Parts | Bounds (relative to record origin) | Palette | Element |
-|---|---:|---|---:|---|
-| `$D9E5` | 12 | 64x48, y `-16..32` | 2 | cloud alone |
-| `$DA4B/$DAA1/$DAF7/$DB5C` | 17-20 | 64x76-80, y `-16..64` | 2 | cloud + lightning bolt |
-| `$DC77/$DBC1/$DC1C/$DCD2` | 18 | 64x72, y `-16..56` | 2 | cloud + rain streaks |
-| `$DA22` | 8 | 64x32, y `+40..+72` | 7 | the ROM's own ground shadow ellipse |
-
-Two facts drive the policy. The bolt and rain frames are *one composition*
-whose art already spans from the cloud down to the ground, so any presentation
-height detaches the strike from the terrain exactly as it would for the Blue
-Dragon's bolt. And `$DA22` is a separate record drawn 40-72px below the shared
-anchor, so a union-derived foot anchor would place the cloud and its own shadow
-at different ground points. The whole range therefore keeps the ROM's
-record-origin placement, stays on the map plane, and is marked `NoShadow`
-because the ROM already draws one.
-
-A third fact was added 2026-07-22, after a live priority report: the family is
-also `Overhead`. D3b's projected depth sort orders a priority band by the
-record's captured screen row, which is correct for an actor standing on the map
-and wrong for a cloud, whose art hangs above the row its record occupies — a
-tree one row nearer drew over it. `Overhead` puts the object last in its band
-regardless of row, restoring the overlap the ROM's OAM order expressed before
-the sort existed. It is a **sort** trait, not a height: any lift would detach
-the bolt from the terrain it strikes, which is the whole reason this range is
-ground-anchored in the first place.
-
-`$DA22` is excluded. It is the family's own shadow ellipse, and a shadow lies
-on the ground with everything standing there in front of it.
-
-The catalogue's `$EC14-$EC35` "angel cloud tiles used by rain, thunder" entry
-does not describe this path: the observed thunder, rain, and wind miracles use
-the `$D9E5-$DCD2` cloud family. `$D993` is the separate hollow selection-square
-cursor documented above, and `$EC14-$EC35` remains unobserved live.
-
-The angel's `$A627-$A792` pose frames are **not** a reliable angel signal.
-A type-`$04` miracle effect record was observed holding `$A627` during the
-kind-5 miracle while the real angel ran `$A741` on its own record, so only the
-angel record address and class `$0C` select the angel's flight plane.
-
-The Blue Dragon needs the `ground_strike` override because the ROM emits its
-bolt on the dragon's *own* record, alternating with flight frames every frame,
-and drops the record onto the target (`anchor_y` 85 -> 121) while extending the
-bolt art to `local_y` +51. Without the override the lifted body separates from
-the top of its own bolt by the full flight height, strobing at 30 Hz. State 6
-(`$01:B9EC`) is the strike window: 33 frames that bracket every bolt.
-
-Coverage observed in the canonical 12,000-frame Fillmore action replay:
-
-| Class | Fragments | Compositions proven |
-|---|---:|---|
-| `flying` | 25,034 | angel `$A627-$A792`, enemy classes `$12-$15` |
-| `flying_projectile` | 219 | `$D967/$D972/$D97D/$D988` |
-| `ground_effect` | 913 | `$E1BD/$E209/$E255` lightning, `$E6CA/$E6D0/$E6D6` fire |
-| `semi_grounded` | 36 | `$E71B/$E73A/$E75E` |
-| `grounded` | 16,535 | people, groups, scene composites |
-| `map_plane` | 6,183 | `$D233-$D302` selectors |
-| `water_plane` | 0 | Fillmore spawns no sailboats; unit-tested only |
-
-Run `20260803-130945` adds three simultaneous `$0A01/$DD33` burning-house records outside the
-canonical replay counts above. Their exact three-frame family and ground classification are
-unit-tested; the table remains an honest report of the original 12,000-frame replay rather than
-silently mixing datasets.
-
-## Human-reviewed classification reference
-
-The actor-like visual review is complete.
-`research/sim-object-catalog/classification_review_01.png` is retained as a
-fully labeled reference for the people groups, horses, dogs, and sheep. The
-labels use stable visual IDs or composition addresses, and the classifications
-are also emitted in the machine-readable crawl output.
-
-## Reproduction
-
-Create an exact live snapshot at any stable simulation-town frame:
-
-```sh
-AR_HEADLESS=1 \
-AR_INPUT_REPLAY=saves/simdev.rec \
-AR_VRAMDUMP_GF=1000 \
-AR_QUIT_FRAMES=1001 \
-./build-release/ActRaiserRecomp ar.sfc --config config.ini
-```
-
-Then render every statically discovered identity with the bundled Python
-runtime (or any Python containing Pillow):
-
-```sh
-python3 tools/sim_object_catalog.py render \
-  --snapshot runs/<run>/snapshots/vd_gf1000 \
-  --out-dir research/sim-object-catalog
-```
-
-`AR_SIMCAT=1` adds a read-only live probe at the composition-emission seam. It
-logs only stable `(record class, semantic state, composition)` changes and is
-useful for correlating a future recording with this static catalogue; it is not
-required for completeness.

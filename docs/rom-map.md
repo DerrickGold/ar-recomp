@@ -46,7 +46,7 @@ eraser `$02:C1B7`; they do not enter the interactive dialogue grammar.
 - **0x11ACD-0x12621** (2,901 bytes): SPC700 program uploaded to audio RAM.
   This is the `$02:9ACD` boot upload image (block target ARAM `$0400`); the
   upload/playback protocol it speaks on APU port 0 is decoded in
-  docs/SEAMS.md "APU port-0 command protocol".
+  [native audio channels](snes-native-audio-channels.md).
 
 ### Song table and song images ($02:C7E5, decoded 2026-07-16)
 - **0x147E5-0x14817**: 17-entry song pointer table, 3-byte (lo/hi/bank)
@@ -70,9 +70,9 @@ eraser `$02:C1B7`; they do not enter the interactive dialogue grammar.
   (4 lairs per town × 6 towns), installed by `$03:B7C6`:
   `[cellX, cellY, imageId, monsterType, count, respawnDelay(word), worldRecordAddr(word)]`.
   X/Y are 16px town-map cells 0..31. Dump with `tools/act_content.py --lairs`; field
-  semantics in SEAMS "Content / randomizer seams" §6 and ram-map "Monster Lair Data".
+  semantics in [RAM map: Monster Lair Data](ram-map.md#monster-lair-data).
 
-### Action content tables (mapped 2026-08-02 — SEAMS "Content / randomizer seams")
+### Action content tables
 
 | SNES address | File range | Meaning |
 |---|---:|---|
@@ -257,7 +257,7 @@ ram-map "Road Construction Encoding" for the bit layout):
 | Marahna | 0x1DEFA-0x1DF79 |
 | Northwall | 0x1DF7A-0x1DFF9 |
 
-### Town Structure-System Tables (bank $03, mapped 2026-07-17 — SEAMS town §7)
+### Town Structure-System Tables (bank $03)
 | SNES address | File offset | Meaning |
 |---|---:|---|
 | `$03:DC74-$03:DC7F` | `0x1DC74` | Per-town structure-record array base pointers (`$7F:6BE7 + town*0x200`, 128 × 4-byte records each) |
@@ -271,7 +271,7 @@ ram-map "Road Construction Encoding" for the bit layout):
 | `$03:DBBD/$DBCA/$DBD7/$DBE4` | `0x1DBBD` | Windmill construction draw lists: top-left metatiles `$04`/`$06`/`$14`/`$16`. The fourth draws the finished mill, identical to blade frame 2 |
 | `$03:DBF1/$DBFE/$DC0B` | `0x1DBF1` | Windmill blade cycle, top-left metatiles `$24`/`$26`/`$16` — three positions 30° apart in the wheel's 90° visual period. The lower row (`$1E`/`$1F`) is the static mill body in all three |
 | `$03:DC38/$DC45` | `0x1DC38` | Factory-tier draw lists: scaffold `$34`, finished `$36` |
-| `$03:D2FA/$03:D306` | `0x1D2FA` | Development target-site coordinate tables (per SEAMS §5) |
+| `$03:D2FA/$03:D306` | `0x1D2FA` | Development target-site coordinate tables |
 
 **Step-program format** (interpreter `$03:A4F7`, decoded 2026-08-17). A program is a
 sequence of 4-byte entries, each two words. An entry whose first word is `$FD`/`$FE`/`$FF`
@@ -289,7 +289,7 @@ to the record's cell X/Y. This is why a windmill's animation is not tile animati
 has exactly one animated CHR page and it is water (see rendering §7). A mill turns because
 its step program rewrites its own 2×2 block in the BG1 tilemap.
 
-### Town scenery / ambient-actor tables (banks $03/$01/$0A, mapped 2026-08-17 — SEAMS town §8)
+### Town scenery / ambient-actor tables (banks $03/$01/$0A)
 
 The data behind field workers, pen animals, boats and burning-house flames. Everything is
 keyed by *structure class under a fixed absolute map cell*, so these tables are a clean mod
@@ -530,9 +530,7 @@ the native location glyphs and the host `city.*.name` localization key; the
 native OAM is a variable glyph prefix followed by a fixed 6x2 plaque and 3x3
 Palace. `$02:AF86` supplies animation by
 copying one `$0A:B000/B040/B080/B0C0` high-byte plane into both Mode-7 tiles
-`$00` and `$AA`. See
-[rendering-engine.md §13h](rendering-engine.md#13h-world-navigation-full-plane-scene-2026-07-27)
-for the immutable host scene and fade/effects contract.
+`$00` and `$AA`.
 
 ### Graphics & Maps
 | Range | Content |
@@ -551,7 +549,7 @@ Each sample has a 16-bit length header followed by BRR audio data.
 This is the stage-2 chunk pool (`$08:8000`) scanned linearly by the `$02:9964`
 upload HLE: each song image's terminator doubles as a script of chunk indices
 selecting which samples stream into ARAM (common bank = chunks 0-11 → srcn
-`$00-$0B`; per-song instruments land at srcn `$0C+`). See SEAMS "Audio".
+`$00-$0B`; per-song instruments land at srcn `$0C+`). See [native audio channels](snes-native-audio-channels.md).
 
 The resulting common-bank directory is stable and verified 1:1 (DIR page
 `$2C00`, never rewritten at runtime): srcn `00`→`$3000`, `01`→`$3B01`,
@@ -561,7 +559,7 @@ The resulting common-bank directory is stable and verified 1:1 (DIR page
 indefinitely. Music key-ons observed in this range were not intentional
 shared-bank instruments: they came from the fixed bootstrap race that cleared
 the sequencer's `$11FF=$0C` instrument-base byte after the common upload (see
-SEAMS "Audio swap tiers").
+[Workshop guide](builder-workshop.md)).
 
 ### Compressed Data (0x70000+)
 Extensive compressed sprite composition, map arrangement, and tileset data

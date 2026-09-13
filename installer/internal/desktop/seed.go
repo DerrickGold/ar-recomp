@@ -106,7 +106,7 @@ func initializeDataLocked(resources, root string) error {
 		return fmt.Errorf("initialize application data: %w", err)
 	}
 	for _, leaf := range []string{"saves", "game-assets/languages/packs", "game-assets/audio", "game-assets/hd"} {
-		if err := safeDestination(root, filepath.FromSlash(leaf)+"/placeholder"); err != nil {
+		if err := safeDestination(root, filepath.Join(leaf, "placeholder")); err != nil {
 			return err
 		}
 		if err := os.MkdirAll(filepath.Join(root, leaf), 0755); err != nil {

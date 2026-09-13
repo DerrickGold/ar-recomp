@@ -474,19 +474,7 @@ variants; and an unknown track ID that falls back safely.
 - **Including private runner headers:** couples the game to concrete layouts and
   bypasses lifetime, ownership, and validation rules.
 
-## Definition of done for a new game
-
-A game integration is ready when authentic rendering and audio still match the
-unmodified path; no authored source includes `runtime/src`; all provider
-and audio semantics are game-owned; widescreen covers finite, repeating,
-HDMA-heavy, Mode-7, HUD, and sprite scenes found in the title; save/load and
-replay artifacts remain deterministic; and portable plus native performance
-stay within the project's measured gates.
-
-Replay-based A/B gates should consume the complete recording by default. A
-prefix can miss later rooms, streaming phases, or camera states and must require
-an explicit truncation option. Every detector needs a negative control, and
-every diagnostic must fail distinctly when its target path never executed.
+## Recording input and checkpoints
 
 Use the shared `snesrecomp/runner/replay.h` container for new recordings and
 `query_semantic_digest` for runner-hardware checkpoints. The replay container

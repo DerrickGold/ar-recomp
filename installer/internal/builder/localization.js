@@ -25,7 +25,7 @@
     for(const page of $("preview-content").querySelectorAll(".loc-preview-page")) contentLanguage(page,metadata);
   }
   function failure(key,args={}) { const error=new Error(ui.text(key,args)); error.uiKey=key; error.uiArgs=args; return error; }
-  function feedbackKey(key,args={},error=false) { label("feedback",key,args); $("feedback").dataset.error=String(error); }
+  function feedbackKey(key,args={},error=false) { label("feedback",key,args); $("feedback").dataset.error=String(error); if(!error)window.workshopFeedback?.clear($("feedback")); }
   const panel = document.getElementById("panel-localization");
   const statusKeys = {not_started: "builder.editor.not_started", wip: "builder.editor.wip", done: "builder.editor.done"};
   const valueKindKeys = {number:"builder.editor.value_number",localized_term:"builder.editor.value_term",localized_text:"builder.editor.value_text",icon:"builder.editor.value_icon"};
@@ -107,7 +107,7 @@
     }
     if(report.dormant?.length)host.append(phrase("builder.coverage.dormant",{ids:report.dormant.join(", ")},"p"));
   }
-  function feedback(text, error = false) { raw("feedback",text); $("feedback").dataset.error = String(error); }
+  function feedback(text, error = false) { raw("feedback",text); $("feedback").dataset.error = String(error); if(!error)window.workshopFeedback?.clear($("feedback")); }
   function hasEdits() { return dirty || detailsDirty || noticeDirty || fontsDirty; }
   function saveIndicator() {
     const native = state.project?.origin === "native-source";
@@ -136,7 +136,8 @@
     return response;
   }
   async function json(endpoint, data, query) {
-    const result=await (await request(endpoint, data, query)).json();
+    const response=await request(endpoint, data, query);
+    const result=await (window.workshopFeedback?window.workshopFeedback.readJSON(response):response.json());
     if(closed) throw failure("builder.closed");
     return result;
   }
@@ -159,7 +160,10 @@
     for (const [el] of controls) el.disabled = true;
     panel.setAttribute("aria-busy", "true");
     try { await action(); } catch (error) {
-      if(!closed) feedbackKey(error.uiKey||"builder.language.request_failed",error.uiArgs||{detail:error.message},true);
+      if(!closed){
+        feedbackKey(error.uiKey||"builder.language.request_failed",error.uiArgs||{detail:error.message},true);
+        window.workshopFeedback?.show($("feedback"),error,{operation:"Language pack / editor"});
+      }
     }
     finally {
       for (const [el, disabled] of controls) el.disabled = closed || disabled;

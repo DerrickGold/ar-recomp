@@ -1,3 +1,5 @@
+#include "snesrecomp/support/utf8_fs.h"
+
 #include "msu1.h"
 
 #include "snesrecomp/game/apu_sync.h"
@@ -93,13 +95,7 @@ static bool track_filename_base(const char *name, char *base,
 }
 
 static bool path_is_directory(const char *path) {
-    struct stat information;
-    if (stat(path, &information) != 0) return false;
-#ifdef _WIN32
-    return (information.st_mode & _S_IFMT) == _S_IFDIR;
-#else
-    return S_ISDIR(information.st_mode);
-#endif
+    return sr_path_is_directory(path) != 0;
 }
 
 typedef struct BaseCandidate {
@@ -144,15 +140,19 @@ static void resolve_directory_base(void) {
         free(candidates);
         return;
     }
-    WIN32_FIND_DATAA entry;
-    HANDLE search = FindFirstFileA(pattern, &entry);
+    wchar_t *wide_pattern = sr_win_path(pattern);
+    WIN32_FIND_DATAW entry;
+    HANDLE search = wide_pattern ? FindFirstFileW(wide_pattern, &entry) : INVALID_HANDLE_VALUE;
+    free(wide_pattern);
     if (search == INVALID_HANDLE_VALUE) {
         free(candidates);
         return;
     }
     do {
-        count_candidate(candidates, &candidate_count, entry.cFileName);
-    } while (FindNextFileA(search, &entry));
+        char filename[4 * MAX_PATH];
+        if (sr_wide_to_utf8(entry.cFileName, filename, sizeof(filename)))
+            count_candidate(candidates, &candidate_count, filename);
+    } while (FindNextFileW(search, &entry));
     FindClose(search);
 #else
     DIR *stream = opendir(directory);
@@ -241,7 +241,7 @@ static void open_data_file(void) {
     char path[kPathCapacity + 8];
     if (snprintf(path, sizeof(path), "%s.msu", s_msu.base) >=
         (int)sizeof(path)) return;
-    s_msu.data_file = fopen(path, "rb");
+    s_msu.data_file = sr_fopen(path, "rb");
 }
 
 static uint32_t little_u32(const uint8_t bytes[4]) {
@@ -264,7 +264,7 @@ static void load_track(uint16_t track) {
         s_msu.audio_error = true;
         return;
     }
-    FILE *file = fopen(path, "rb");
+    FILE *file = sr_fopen(path, "rb");
     if (file == NULL) {
         s_msu.audio_error = true;
         return;

@@ -18,6 +18,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/DerrickGold/ar-recomp/installer/internal/workshopui"
 )
 
 var tokenPath = regexp.MustCompile(`^/[0-9a-f]{36}/$`)
@@ -84,10 +86,18 @@ func StartBundledBackend(ctx context.Context, workspace, payload, inputID, outpu
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if err = b.command.Start(); err != nil {
+	closeTree, err := startBackendCommand(b.command)
+	if err != nil {
 		return nil, err
 	}
-	go func() { err := b.command.Wait(); b.mu.Lock(); b.err = err; b.mu.Unlock(); close(b.Done) }()
+	go func() {
+		err := b.command.Wait()
+		closeTree()
+		b.mu.Lock()
+		b.err = err
+		b.mu.Unlock()
+		close(b.Done)
+	}()
 	ticker := time.NewTicker(25 * time.Millisecond)
 	defer ticker.Stop()
 	deadline := time.NewTimer(30 * time.Second)
@@ -289,6 +299,16 @@ func (h *Bridge) serveHTTP(w http.ResponseWriter, r *http.Request, allowProxy bo
 	h.mu.RLock()
 	proxy, message, failed, rendererURL, output := h.proxy, h.message, h.failed, h.rendererURL, h.output
 	h.mu.RUnlock()
+	if r.Method == "GET" && (r.URL.Path == "/__shell/feedback.js" || r.URL.Path == "/__shell/feedback.css") {
+		name := strings.TrimPrefix(r.URL.Path, "/__shell/")
+		data, _ := workshopui.Assets.ReadFile(name)
+		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+		if strings.HasSuffix(name, ".css") {
+			w.Header().Set("Content-Type", "text/css; charset=utf-8")
+		}
+		w.Write(data)
+		return
+	}
 	if strings.HasPrefix(r.URL.Path, "/__shell/output/") {
 		if !allowProxy || output == nil {
 			http.NotFound(w, r)
@@ -305,7 +325,7 @@ func (h *Bridge) serveHTTP(w http.ResponseWriter, r *http.Request, allowProxy bo
 	}
 	if r.URL.Path == "/__shell/start.js" {
 		w.Header().Set("Content-Type", "text/javascript")
-		io.WriteString(w, `async function poll(){try{const s=await(await fetch('__shell/status',{cache:'no-store'})).json();document.getElementById('status').textContent=s.message||'Starting…';if(s.url&&!location.href.startsWith(s.url)){location.replace(s.url);return;}if(s.chooseOutput){location.replace('__shell/output/');return;}if(s.ready){if(s.url)location.replace(s.url);else location.reload();return;}if(s.failed)return;}catch(e){}setTimeout(poll,300);}poll();`)
+		io.WriteString(w, `let failures=0;async function poll(){const status=document.getElementById('status');try{const s=await(await fetch('__shell/status',{cache:'no-store'})).json();failures=0;window.workshopFeedback?.clear(status);status.textContent=s.message||'Starting…';if(s.url&&!location.href.startsWith(s.url)){location.replace(s.url);return;}if(s.chooseOutput){location.replace('__shell/output/');return;}if(s.ready){if(s.url)location.replace(s.url);else location.reload();return;}if(s.failed){status.textContent='The Builder could not start.';window.workshopFeedback?.show(status,new Error(s.message),{operation:'Builder startup'});return;}}catch(error){if(++failures>=3){status.textContent='The Builder is not responding.';window.workshopFeedback?.show(status,error,{operation:'Builder startup',retry:()=>{failures=0;return poll();}});return;}}setTimeout(poll,300);}poll();`)
 		return
 	}
 	if proxy != nil && allowProxy {
@@ -313,5 +333,5 @@ func (h *Bridge) serveHTTP(w http.ResponseWriter, r *http.Request, allowProxy bo
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	io.WriteString(w, `<!doctype html><html><head><meta charset="utf-8"><title>ActRaiser Recomp Builder</title></head><body style="background:#181b24;color:#eef0f6;font:18px system-ui;padding:48px"><h1>ActRaiser Recomp Builder</h1><p id="status">Preparing your workspace…</p><script src="__shell/start.js"></script></body></html>`)
+	io.WriteString(w, `<!doctype html><html><head><meta charset="utf-8"><title>ActRaiser Recomp Builder</title><link rel="stylesheet" href="__shell/feedback.css"></head><body style="background:#181b24;color:#eef0f6;font:18px system-ui;padding:32px;max-width:850px;margin:auto"><h1>ActRaiser Recomp Builder</h1><p id="status" role="status">Preparing your workspace…</p><script src="__shell/feedback.js"></script><script src="__shell/start.js"></script></body></html>`)
 }

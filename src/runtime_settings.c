@@ -1,3 +1,5 @@
+#include "snesrecomp/support/utf8_fs.h"
+
 #include "runtime_settings.h"
 
 #include <stdio.h>
@@ -186,7 +188,7 @@ bool RuntimeSettings_HandleAction(const SettingDesc *desc) {
   } else if (!strcmp(desc->key, "save_import")) {
     const char *path = getenv("AR_SAVE_IMPORT");
     if (!path || !path[0]) {
-      FILE *probe = fopen("saves/import.srm", "rb");
+      FILE *probe = sr_fopen("saves/import.srm", "rb");
       if (probe) {
         fclose(probe);
         path = "saves/import.srm";

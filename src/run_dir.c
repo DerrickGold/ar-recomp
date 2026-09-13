@@ -1,3 +1,5 @@
+#include "snesrecomp/support/utf8_fs.h"
+
 #include "run_dir.h"
 
 #include <stdarg.h>
@@ -51,7 +53,7 @@ void RunDirRecordTraceStatus(const char *status) {
   if (!g_enabled || !status) return;
   char path[300];
   RunDirFile(path, sizeof path, "run_info.txt");
-  FILE *f = fopen(path, "a");
+  FILE *f = sr_fopen(path, "a");
   if (!f) return;
   fprintf(f, "--- resolved diagnostics (post-config) ---\n"
              "runner_trace=%s\n", status);
@@ -90,7 +92,7 @@ static void rebase_bare_env(const char *name) {
 static void write_run_info(int argc, char **argv) {
   char path[300];
   RunDirFile(path, sizeof path, "run_info.txt");
-  FILE *f = fopen(path, "w");
+  FILE *f = sr_fopen(path, "w");
   if (!f) return;
   fprintf(f, "cmd:");
   for (int i = 0; i < argc; i++) fprintf(f, " %s", argv[i]);
@@ -173,7 +175,7 @@ static void rebase_bare_env(const char *name) {
 static void write_run_info(int argc, char **argv) {
   char path[300];
   RunDirFile(path, sizeof path, "run_info.txt");
-  FILE *f = fopen(path, "w");
+  FILE *f = sr_fopen(path, "w");
   if (!f) return;
   fprintf(f, "cmd:");
   for (int i = 0; i < argc; i++) fprintf(f, " %s", argv[i]);
@@ -193,14 +195,14 @@ void RunDirInit(int argc, char **argv) {
 
   /* _mkdir returns 0 on create; if it already exists, probe writability
    * (_access mode 02 == write). */
-  if (_mkdir("runs") != 0 && _access("runs", 02) != 0) return;
+  if (sr_mkdir("runs") != 0 && sr_access("runs", 02) != 0) return;
 
   time_t t = time(NULL);
   char ts[32];
   strftime(ts, sizeof ts, "%Y%m%d-%H%M%S", localtime(&t));
   char dir[256];
   snprintf(dir, sizeof dir, "runs/%s", ts);
-  for (int n = 1; _mkdir(dir) != 0; n++) {
+  for (int n = 1; sr_mkdir(dir) != 0; n++) {
     if (n > 99) return;
     snprintf(dir, sizeof dir, "runs/%s-%d", ts, n);
   }

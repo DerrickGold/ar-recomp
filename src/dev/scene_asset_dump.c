@@ -1,3 +1,5 @@
+#include "snesrecomp/support/utf8_fs.h"
+
 #include "scene_asset_dump.h"
 
 #include <errno.h>
@@ -53,7 +55,7 @@ static void BuildPath(char *out, size_t out_size, const char *directory,
 
 static bool MakeDirectory(const char *path) {
 #ifdef _WIN32
-  if (_mkdir(path) == 0 || errno == EEXIST) return true;
+  if (sr_mkdir(path) == 0 || errno == EEXIST) return true;
 #else
   if (mkdir(path, 0755) == 0 || errno == EEXIST) return true;
 #endif
@@ -128,7 +130,7 @@ bool WritePng(const char *path, const uint8_t *rgba,
   at += 4;
   free(raw);
 
-  FILE *file = fopen(path, "wb");
+  FILE *file = sr_fopen(path, "wb");
   if (!file) {
     free(z);
     return false;
@@ -370,7 +372,7 @@ static bool WriteBinary(const char *directory, const char *name,
                         const void *data, size_t size) {
   char path[kSceneAssetPathCapacity];
   BuildPath(path, sizeof(path), directory, name);
-  FILE *file = fopen(path, "wb");
+  FILE *file = sr_fopen(path, "wb");
   bool ok = file && fwrite(data, 1, size, file) == size;
   if (file && fclose(file) != 0) ok = false;
   if (!ok) fprintf(stderr, "[scene-assets] cannot write %s\n", path);
@@ -381,7 +383,7 @@ static bool WriteOamBinary(const char *directory,
                            const SceneAssetDumpSource *source) {
   char path[kSceneAssetPathCapacity];
   BuildPath(path, sizeof(path), directory, "oam.bin");
-  FILE *file = fopen(path, "wb");
+  FILE *file = sr_fopen(path, "wb");
   size_t oam_bytes = (size_t)source->oam.element_count * sizeof(uint16_t);
   size_t high_oam_bytes = (size_t)source->high_oam.byte_size;
   bool ok = file && fwrite(source->oam.data, 1, oam_bytes, file) == oam_bytes &&
@@ -396,7 +398,7 @@ static bool WriteMetadata(const char *directory,
                           const BgDump *backgrounds, int background_count) {
   char path[kSceneAssetPathCapacity];
   BuildPath(path, sizeof(path), directory, "metadata.json");
-  FILE *file = fopen(path, "w");
+  FILE *file = sr_fopen(path, "w");
   if (!file) return false;
   const uint8_t *wram = source->wram.data;
   unsigned game_frame = wram

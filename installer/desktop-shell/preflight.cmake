@@ -32,7 +32,7 @@ list(REMOVE_DUPLICATES _tools)
 foreach(_tool IN LISTS _tools)
     find_program(_found_${_tool} NAMES "${_tool}")
     if(NOT _found_${_tool})
-        message(FATAL_ERROR "Missing native packaging tool '${_tool}'. See installer/desktop-shell/README.md prerequisites, or use DESKTOP=0.")
+        message(FATAL_ERROR "Missing native packaging tool '${_tool}'. See docs/desktop-packaging.md (Building Builder distributions), or use DESKTOP=0.")
     endif()
 endforeach()
 execute_process(COMMAND "${_found_go}" env GOVERSION OUTPUT_VARIABLE _version

@@ -1,3 +1,5 @@
+#include "snesrecomp/support/utf8_fs.h"
+
 #include "native_audio_trace.h"
 
 #include <stdint.h>
@@ -273,7 +275,7 @@ static void WriteRequests(const NativeAudioRequestRecord *records,
                           size_t count) {
   char path[kRuntimePathCapacity];
   RunDirFile(path, sizeof(path), "native_audio_requests.csv");
-  FILE *f = fopen(path, "w");
+  FILE *f = sr_fopen(path, "w");
   if (!f) return;
   fprintf(f,
           "serial,kind,id,effective_id,frame,site,caller,outcome,flags,"
@@ -330,7 +332,7 @@ static void WritePcmIfRequested(void) {
 static void WriteSongEvents(const NativeAudioSongEvent *events, size_t count) {
   char path[kRuntimePathCapacity];
   RunDirFile(path, sizeof(path), "native_audio_song_events.csv");
-  FILE *f = fopen(path, "w");
+  FILE *f = sr_fopen(path, "w");
   if (!f) return;
   fprintf(f, "cycle,frame,event,value,image_src,caller\n");
   for (size_t i = 0; i < count; i++) {
@@ -349,7 +351,7 @@ static void WriteProvenance(const NativeAudioDspProvenance *entries,
                             size_t count) {
   char path[kRuntimePathCapacity];
   RunDirFile(path, sizeof(path), "native_audio_dsp_provenance.csv");
-  FILE *f = fopen(path, "w");
+  FILE *f = sr_fopen(path, "w");
   if (!f) return;
   fprintf(f,
           "spc_pc,spc_x,dsp_addr,track_mask,ownership_mask,writes,"
@@ -370,7 +372,7 @@ static void WriteMusicSuppressions(
     const NativeAudioMusicSuppression *entries, size_t count) {
   char path[kRuntimePathCapacity];
   RunDirFile(path, sizeof(path), "native_audio_music_suppression.csv");
-  FILE *f = fopen(path, "w");
+  FILE *f = sr_fopen(path, "w");
   if (!f) return;
   fprintf(f,
           "spc_pc,spc_x,track_mask,ownership_mask,occurrences,"

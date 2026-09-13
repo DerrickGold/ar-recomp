@@ -27,6 +27,23 @@ def sample(frames, cost, scene="Town 3D"):
 
 
 class PipelinePerformanceTest(unittest.TestCase):
+    def test_numbered_run_directory_collision_suffix(self):
+        original_root = module.ROOT
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                module.ROOT = Path(directory)
+                for name in ('20260912-163604', '20260912-163604-1', '20260912-163604-12'):
+                    path = module.ROOT / 'runs' / name
+                    path.mkdir(parents=True)
+                    (path / 'dump_wram.bin').write_bytes(b'fixture')
+                    result = module.run_evidence(f'[run-dir] runs/{name} (console.log)\n')
+                    self.assertEqual(result['run_dir'], str(path))
+                for name in ('20260912-163604-junk', '20260912-163604-1suffix', '20260912-163604/../escape'):
+                    with self.assertRaises(ValueError):
+                        module.run_evidence(f'[run-dir] runs/{name} (console.log)\n')
+        finally:
+            module.ROOT = original_root
+
     def test_graphics_failure_and_partial_run_cannot_be_timing_evidence(self):
         complete = "[present-cadence] tick-presents=1800 re-presents=0 max-represent-alpha=0\n"
         self.assertEqual(module.validate_run_completion(complete, 1800),

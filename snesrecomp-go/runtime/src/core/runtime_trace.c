@@ -1,3 +1,5 @@
+#include "snesrecomp/support/utf8_fs.h"
+
 #include "runtime_trace.h"
 
 #include "snesrecomp/game/bootstrap.h"
@@ -155,7 +157,7 @@ int sr_trace_open_file(const char *path, int channel_mask,
     s_frame_low = host_frame_low;
     s_frame_high = host_frame_high;
     if (path == NULL || path[0] == '\0') return 0;
-    s_file = fopen(path, "w");
+    s_file = sr_fopen(path, "w");
     if (runner != NULL) sr_trace_bind_runner(runner, 1);
     return s_file != NULL;
 }
@@ -227,7 +229,7 @@ static void initialize_from_environment(void) {
     s_frame_low = low == NULL ? -1 : strtol(low, NULL, 0);
     s_frame_high = high == NULL ? -1 : strtol(high, NULL, 0);
     if (path != NULL && path[0] != '\0') {
-        s_file = fopen(path, "w");
+        s_file = sr_fopen(path, "w");
         if (s_file == NULL) fprintf(stderr, "[sr_trace] cannot open %s\n", path);
         return;
     }
@@ -333,7 +335,7 @@ static void begin_watch_capture(void) {
                  s_capture_number++) >= (int)sizeof(path)) {
         return;
     }
-    s_capture = fopen(path, "w");
+    s_capture = sr_fopen(path, "w");
     if (s_capture == NULL) return;
     const unsigned oldest =
         (s_ring_head + s_ring_capacity - s_ring_count) % s_ring_capacity;
@@ -771,7 +773,7 @@ void sr_trace_flush(const char *reason) {
     if (snprintf(path, sizeof(path), "%s_hf%d_%s%u.jsonl", s_watch_prefix,
                  snes_frame_counter, safe_reason, s_capture_number++) >=
         (int)sizeof(path)) return;
-    FILE *file = fopen(path, "w");
+    FILE *file = sr_fopen(path, "w");
     if (file == NULL) return;
     const unsigned oldest =
         (s_ring_head + s_ring_capacity - s_ring_count) % s_ring_capacity;

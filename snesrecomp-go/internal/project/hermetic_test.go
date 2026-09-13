@@ -71,8 +71,8 @@ func TestForceLoadArchiveArgs(t *testing.T) {
 
 func TestArchiveResponseFileQuoting(t *testing.T) {
 	response, err := archiveResponseFile([]string{
-		filepath.FromSlash("/tmp/plain.o"),
-		filepath.FromSlash("/tmp/build with spaces/quoted\"name.o"),
+		"/tmp/plain.o",
+		"/tmp/build with spaces/quoted\"name.o",
 		`C:\build dir\bank00.o`,
 	})
 	if err != nil {

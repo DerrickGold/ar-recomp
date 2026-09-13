@@ -6,6 +6,8 @@
 #ifdef __APPLE__
 #define _DARWIN_C_SOURCE 1
 #endif
+#include "snesrecomp/support/utf8_fs.h"
+
 #include "actraiser_rtl.h"
 #include "actraiser_game.h"
 #include "actraiser_action_bg.h"
@@ -345,7 +347,7 @@ static bool ActRaiser_PpuShapeTraceActive(unsigned gf) {
         "AR_PPU_SHAPE_MAX", kActRaiserPpuShapeDefaultRecords,
         kActRaiserPpuShapeMaximumRecords);
     if (path && path[0]) {
-      trace->file = fopen(path, "wb");
+      trace->file = sr_fopen(path, "wb");
       if (!trace->file) {
         fprintf(stderr, "[ppu-shape] unable to open %s: %s\n", path,
                 strerror(errno));
@@ -999,7 +1001,7 @@ static void ActRaiser_WritePpuSnapshotMetadata(
   if (!prefix || !ppu) return;
   char path[384];
   snprintf(path, sizeof path, "%s.ppu.json", prefix);
-  FILE *file = fopen(path, "w");
+  FILE *file = sr_fopen(path, "w");
   if (!file) return;
   fprintf(file,
           "{\n"
@@ -1080,7 +1082,7 @@ void ActRaiser_FullSnapshot(const char *prefix) {
   char path[384];
   FILE *f;
   snprintf(path, sizeof path, "%s.wram.bin", prefix);
-  f = fopen(path, "wb");
+  f = sr_fopen(path, "wb");
   if (f) { fwrite(g_ram, 1, kActRaiserWramSize, f); fclose(f); }
   if (s_runner && s_runner_api &&
       ActRaiser_QueryPpuState(&ppu_state) &&
@@ -1095,15 +1097,15 @@ void ActRaiser_FullSnapshot(const char *prefix) {
       s_runner_api->borrow_memory(
           s_runner, SR_MEMORY_HIGH_OAM, &high_oam) == SR_RESULT_OK) {
     snprintf(path, sizeof path, "%s.vram.bin", prefix);
-    f = fopen(path, "wb");
+    f = sr_fopen(path, "wb");
     if (f) { fwrite(vram.data, sizeof(*vram.data),
                     vram.element_count, f); fclose(f); }
     snprintf(path, sizeof path, "%s.cgram.bin", prefix);
-    f = fopen(path, "wb");
+    f = sr_fopen(path, "wb");
     if (f) { fwrite(cgram.data, sizeof(*cgram.data),
                     cgram.element_count, f); fclose(f); }
     snprintf(path, sizeof path, "%s.oam.bin", prefix);
-    f = fopen(path, "wb");
+    f = sr_fopen(path, "wb");
     if (f) { fwrite(oam.data, sizeof(*oam.data),
                     oam.element_count, f); fclose(f); }
     /* The HIGH table, as its own file so the 512-byte .oam.bin layout every
@@ -1115,7 +1117,7 @@ void ActRaiser_FullSnapshot(const char *prefix) {
      * diagnosis on 2026-08-05 (an off-screen staged sprite revealed by the
      * diorama vertical band could not be located from its snapshot). */
     snprintf(path, sizeof path, "%s.highoam.bin", prefix);
-    f = fopen(path, "wb");
+    f = sr_fopen(path, "wb");
     if (f) { fwrite(high_oam.data, 1, high_oam.byte_size, f); fclose(f); }
     ActRaiser_WritePpuSnapshotMetadata(prefix, &ppu_state);
   }

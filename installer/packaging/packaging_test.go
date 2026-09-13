@@ -22,6 +22,13 @@ func TestLocalizationPackageGate(t *testing.T) {
 		t.Fatal(err)
 	}
 	files := []string{
+		"utils/docs/README.md", "utils/docs/manual.md", "utils/docs/builder-workshop.md",
+		"utils/docs/desktop-packaging.md", "utils/docs/ram-map.md", "utils/docs/rom-map.md",
+		"utils/docs/research-symbol-map.md", "utils/docs/save-format.md", "utils/docs/sim-object-catalog.md",
+		"utils/docs/diorama-depth-shapes.md", "utils/docs/dialogue-system.md",
+		"utils/docs/snes-native-audio-channels.md", "utils/docs/performance-overlay.md", "utils/docs/GAME-LICENSE.txt",
+		"utils/snesrecomp-go/runtime/docs/README.md", "utils/snesrecomp-go/runtime/docs/API_REFERENCE.md",
+		"utils/snesrecomp-go/runtime/docs/GAME_ENHANCEMENT_INTEGRATION.md", "utils/snesrecomp-go/runtime/docs/INPUT_AND_BOOT.md",
 		"utils/docs/language-packs.md", "utils/docs/language-pack-format.md",
 		"utils/docs/language-authoring-reference.json", "utils/docs/language-archive.schema.json",
 		"utils/examples/language-pack/pack.ini", "utils/examples/language-pack/text/example.artext",
@@ -82,6 +89,9 @@ func TestLocalizationPackageGate(t *testing.T) {
 		{name: "extracted scenery", add: "utils/game-assets/workshop/us-scene-v1.json"},
 		{name: "private backup", add: "utils/work.arproject"},
 		{name: "private notes", add: "utils/development/tasks.md"},
+		{name: "renderer architecture", add: "utils/docs/rendering-engine.md"},
+		{name: "benchmark evidence", add: "utils/docs/evidence/probe/README.md"},
+		{name: "runtime architecture", add: "utils/snesrecomp-go/runtime/docs/RUNTIME.md"},
 		{name: "missing authoring reference", omit: "utils/docs/language-authoring-reference.json"},
 		{name: "missing example archive", omit: "utils/examples/example.fr-ca.arlang"},
 		{name: "unexpected example script", add: "utils/examples/language-pack/text/retail.artext"},
@@ -125,7 +135,7 @@ func TestLocalizationPackageGate(t *testing.T) {
 				}
 			} else if err == nil {
 				t.Fatal("invalid package accepted")
-			} else if !strings.Contains(string(output), "bundled SDL check") && !strings.Contains(string(output), "SDL3_ttf package check") && !strings.Contains(string(output), "localization distribution check") && !strings.Contains(string(output), "interface font check") && !strings.Contains(string(output), "license check") && !strings.Contains(string(output), "AppImage package check") {
+			} else if !strings.Contains(string(output), "bundled SDL check") && !strings.Contains(string(output), "SDL3_ttf package check") && !strings.Contains(string(output), "localization distribution check") && !strings.Contains(string(output), "documentation distribution check") && !strings.Contains(string(output), "interface font check") && !strings.Contains(string(output), "license check") && !strings.Contains(string(output), "AppImage package check") {
 				t.Fatalf("wrong rejection: %s", output)
 			}
 		})

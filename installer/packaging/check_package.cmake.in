@@ -13,6 +13,16 @@ set(_runtime_source_paths "@SNESBUILD_RUNTIME_SOURCE_PATHS@")
 set(_required_sdl_runtime "@SNESBUILD_REQUIRED_SDL_RUNTIME@")
 set(_required_ttf_runtime "@SNESBUILD_REQUIRED_TTF_RUNTIME@")
 set(_required_ttf_link "@SNESBUILD_REQUIRED_TTF_LINK@")
+# Only player/content-author guides and public SDK references are distributed.
+set(_public_game_docs
+    README.md manual.md builder-workshop.md desktop-packaging.md
+    language-pack-format.md language-packs.md language-authoring-reference.json
+    language-archive.schema.json ram-map.md rom-map.md research-symbol-map.md
+    save-format.md sim-object-catalog.md diorama-depth-shapes.md
+    dialogue-system.md snes-native-audio-channels.md performance-overlay.md
+    GAME-LICENSE.txt)
+set(_public_runtime_docs
+    README.md API_REFERENCE.md GAME_ENHANCEMENT_INTEGRATION.md INPUT_AND_BOOT.md)
 set(_required_license_files
     "utils/LICENSE"
     "utils/LICENSE_SCOPE.md"
@@ -164,6 +174,15 @@ foreach(_package IN LISTS CPACK_PACKAGE_FILES)
     file(GLOB_RECURSE _files LIST_DIRECTORIES false RELATIVE "${_root}" "${_root}/*")
     set(_checked 0)
     foreach(_file IN LISTS _files)
+        if(_file MATCHES "^utils/docs/(.+)$")
+            if(NOT CMAKE_MATCH_1 IN_LIST _public_game_docs)
+                message(FATAL_ERROR "documentation distribution check: non-public document ${_file}")
+            endif()
+        elseif(_file MATCHES "^utils/snesrecomp-go/runtime/docs/(.+)$")
+            if(NOT CMAKE_MATCH_1 IN_LIST _public_runtime_docs)
+                message(FATAL_ERROR "documentation distribution check: non-public SDK document ${_file}")
+            endif()
+        endif()
         string(TOLOWER "${_file}" _localization_path)
         # These two exact, independently authored examples are checked against
         # their source/Go publication in tests. Never exempt an entire directory

@@ -1,12 +1,9 @@
 # ActRaiser Recomp Builder
 
-This module owns the ActRaiser-specific installer, Workshop UI, localization
-authoring and extraction tools, ROM-derived previews, and release packaging.
-The separate `snesrecomp-go/` module owns the reusable recompiler, build driver,
-and portable runtime. This module intentionally does not import any
-`snesrecomp-go/internal` package; it invokes the `snesbuild` executable through
-the versioned JSONL [project integration
-contract](../snesrecomp-go/docs/PROJECT_INTEGRATION.md).
+The Builder builds your local game and provides a Workshop for replacing art,
+music, and text. It also includes command-line tools for language-pack
+authoring, ROM extraction, and packaging. For the desktop download, start with
+the [Quick Start](../README.md#quick-start).
 
 ## Develop from a checkout
 
@@ -61,37 +58,18 @@ options. Public language-pack workflows are documented in
 
 ## Release packaging
 
-ActRaiser bundle recipes and embedded distribution resources live in
-`installer/packaging/`. From the repository root, `make release` builds all
-configured targets; the equivalent direct workflow is:
+From the repository root, `make release` builds the configured Builder downloads.
+See [Building Builder distributions](../docs/desktop-packaging.md#building-builder-distributions)
+for prerequisites. The equivalent direct command is:
 
 ```sh
 cd installer/packaging
 cmake --workflow --preset release
 ```
 
-The default release runs seven platform builds and publishes twelve downloads:
-direct macOS, Windows and Steam Deck artifacts; portable archive companions for
-those five desktop artifacts; and generic Linux `.tar.xz` archives for ARM64 and
-x86-64. Each portable companion reuses its direct artifact and adds a
-`BuilderData` sidecar without compiling the payload again. macOS can build all
-seven targets without a VM. See the
-[desktop release prerequisites and qualification limits](desktop-shell/README.md#one-command-releases-from-macos).
-`make release DESKTOP=0` explicitly opts into the old archive-only flow. The
-normal release does not also build the redundant legacy macOS, Windows or Deck
-full-distribution archives.
-Make and the CMake orchestrator share `packaging/release.cmake`; successful
-publication prunes only the selected target's superseded generated release.
+The downloads include native macOS, Windows, and Steam Deck applications,
+portable companions, and generic Linux archives. `make release DESKTOP=0`
+selects archive-only packaging.
 
-Each bundle places `actraiser-builder[.exe]` and `snesbuild[.exe]` together in
-`utils/tools/`. The launcher passes the sibling path explicitly, preserving the
-module and executable boundary in installed packages.
-
-## Desktop application
-
-The [Go desktop shell](desktop-shell/README.md) provides native Builder
-artifacts for macOS (`.app`), Linux (`.AppImage`) and Windows (`.exe`) while
-retaining the same Workshop frontend and headless helper. It has its own Go
-module and shares the existing offline installer payload. Root `make release`
-uses these artifacts for macOS, Windows and Steam Deck, retaining the generic
-Linux archives; no CI is added. Documented runtime/UX release gates still apply.
+For storage locations, launcher options, and packaging a locally compiled game,
+see [Desktop packages and user data](../docs/desktop-packaging.md).

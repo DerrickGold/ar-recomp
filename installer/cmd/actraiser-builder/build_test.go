@@ -12,6 +12,51 @@ import (
 	"time"
 )
 
+func TestSnesbuildClosedStdoutHelper(t *testing.T) {
+	if os.Getenv("AR_CLOSED_STDOUT_HELPER") != "1" {
+		return
+	}
+	_ = os.Stdout.Close()
+	_ = os.WriteFile(os.Getenv("AR_CLOSED_STDOUT_READY"), []byte("ready"), 0600)
+	time.Sleep(20 * time.Second)
+	os.Exit(0)
+}
+
+func TestSnesbuildCancellationAfterStdoutCloses(t *testing.T) {
+	root := t.TempDir()
+	ready := filepath.Join(root, "ready")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		_, err := runSnesbuildAt(ctx, os.Args[0], root,
+			append(os.Environ(), "AR_CLOSED_STDOUT_HELPER=1", "AR_CLOSED_STDOUT_READY="+ready),
+			&bytes.Buffer{}, "-test.run=^TestSnesbuildClosedStdoutHelper$", "--")
+		done <- err
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, err := os.Stat(ready); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			cancel()
+			<-done
+			t.Fatal("helper did not close stdout")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if err != context.Canceled {
+			t.Fatalf("cancellation = %v", err)
+		}
+	case <-time.After(4 * time.Second):
+		t.Fatal("cancellation hung after stdout closed")
+	}
+}
+
 func TestEventStreamRejectsMalformedAndUnsupportedEvents(t *testing.T) {
 	for _, testCase := range []struct {
 		name, stream, want string

@@ -1,3 +1,5 @@
+#include "snesrecomp/support/utf8_fs.h"
+
 #include "native_audio_pcm_capture.h"
 
 #include <limits.h>
@@ -103,7 +105,7 @@ bool NativeAudioPcmCapture_WriteWav(const NativeAudioPcmCapture *capture,
   memcpy(header + 36, "data", 4);
   ByteOrder_WriteLe32(header + 40, data_bytes);
 
-  FILE *file = fopen(path, "wb");
+  FILE *file = sr_fopen(path, "wb");
   bool success = file &&
       fwrite(header, 1, sizeof(header), file) == sizeof(header);
   const uint64_t first_index =

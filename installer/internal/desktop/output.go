@@ -25,11 +25,11 @@ func PreparePortableData(source, destination string, embedded ...fs.FS) error {
 	if err != nil {
 		return err
 	}
-	relative, err := filepath.Rel(physicalSource, physicalOutput)
+	inside, err := pathWithin(physicalSource, physicalOutput)
 	if err != nil {
 		return err
 	}
-	if localPath(relative, true) {
+	if inside {
 		return errors.New("game output must be outside build inputs")
 	}
 	if err := os.MkdirAll(destination, 0755); err != nil {

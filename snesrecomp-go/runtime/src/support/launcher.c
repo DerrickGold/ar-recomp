@@ -1,3 +1,5 @@
+#include "snesrecomp/support/utf8_fs.h"
+
 #include "snesrecomp/host/launcher.h"
 
 #include "snesrecomp/support/crc32.h"
@@ -13,7 +15,7 @@
 #include <windows.h>
 #include <commdlg.h>
 #include <direct.h>
-#define sr_chdir _chdir
+#define sr_chdir sr_utf8_chdir
 #define sr_getcwd _getcwd
 #elif defined(__APPLE__)
 #include <mach-o/dyld.h>
@@ -47,12 +49,12 @@ static int executable_path(char *output, size_t capacity) {
     }
 #if defined(_WIN32)
     {
-        DWORD length;
-        if (capacity > (size_t)UINT32_MAX) {
-            capacity = UINT32_MAX;
-        }
-        length = GetModuleFileNameA(NULL, output, (DWORD)capacity);
-        return length != 0u && length < capacity;
+        wchar_t *wide = (wchar_t *)malloc(32768u * sizeof(wchar_t));
+        if (wide == NULL) return 0;
+        DWORD length = GetModuleFileNameW(NULL, wide, 32768u);
+        int success = length != 0u && length < 32768u && sr_wide_to_utf8(wide, output, capacity);
+        free(wide);
+        return success;
     }
 #elif defined(__APPLE__)
     {
@@ -110,14 +112,8 @@ int snesrecomp_abspath(const char *path, char *output, size_t capacity) {
     }
 #if defined(_WIN32)
     {
-        char *resolved = (char *)malloc(kPathCapacity);
-        int success;
-        if (resolved == NULL ||
-            _fullpath(resolved, path, kPathCapacity) == NULL) {
-            free(resolved);
-            return 0;
-        }
-        success = copy_path(output, capacity, resolved);
+        wchar_t *resolved = sr_win_path(path);
+        int success = resolved != NULL && sr_wide_to_utf8(resolved, output, capacity);
         free(resolved);
         return success;
     }
@@ -164,17 +160,17 @@ static int directory_is_writable(const char *directory) {
         free(probe);
         return 0;
     }
-    file = fopen(probe, "wb");
+    file = sr_fopen(probe, "wb");
     if (file == NULL) {
         free(probe);
         return 0;
     }
     if (fclose(file) != 0) {
-        remove(probe);
+        sr_remove(probe);
         free(probe);
         return 0;
     }
-    if (remove(probe) != 0) {
+    if (sr_remove(probe) != 0) {
         free(probe);
         return 0;
     }
@@ -219,7 +215,7 @@ static void read_cached_rom(char *output, size_t capacity) {
     size_t length;
     output[0] = '\0';
     if (path == NULL || !rom_config_path(path, kPathCapacity) ||
-        (file = fopen(path, "rb")) == NULL) {
+        (file = sr_fopen(path, "rb")) == NULL) {
         free(path);
         return;
     }
@@ -239,7 +235,7 @@ static void cache_rom(const char *rom_path) {
     char *path = (char *)malloc(kPathCapacity);
     FILE *file;
     if (path == NULL || !rom_config_path(path, kPathCapacity) ||
-        (file = fopen(path, "wb")) == NULL) {
+        (file = sr_fopen(path, "wb")) == NULL) {
         free(path);
         return;
     }
@@ -258,7 +254,7 @@ static uint8_t *read_rom_payload(const char *path, size_t *size) {
     uint8_t *storage;
     uint8_t *payload;
     *size = 0u;
-    file = fopen(path, "rb");
+    file = sr_fopen(path, "rb");
     if (file == NULL || fseek(file, 0, SEEK_END) != 0 ||
         (end = ftell(file)) <= 0 || fseek(file, 0, SEEK_SET) != 0) {
         if (file != NULL) {
@@ -389,20 +385,21 @@ static int pick_rom(char *output, size_t capacity) {
     }
 #if defined(_WIN32)
     {
-        OPENFILENAMEA dialog;
-        if (capacity > UINT32_MAX) {
-            capacity = UINT32_MAX;
-        }
+        OPENFILENAMEW dialog;
+        wchar_t *wide = (wchar_t *)calloc(32768u, sizeof(wchar_t));
+        if (wide == NULL) return 0;
         memset(&dialog, 0, sizeof(dialog));
         output[0] = '\0';
         dialog.lStructSize = sizeof(dialog);
-        dialog.lpstrFilter = "SNES ROMs (*.sfc;*.smc)\0*.sfc;*.smc\0All Files (*.*)\0*.*\0";
-        dialog.lpstrFile = output;
-        dialog.nMaxFile = (DWORD)capacity;
-        dialog.lpstrTitle = "Select SNES ROM";
+        dialog.lpstrFilter = L"SNES ROMs (*.sfc;*.smc)\0*.sfc;*.smc\0All Files (*.*)\0*.*\0";
+        dialog.lpstrFile = wide;
+        dialog.nMaxFile = 32768u;
+        dialog.lpstrTitle = L"Select SNES ROM";
         dialog.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST |
                        OFN_HIDEREADONLY | OFN_NOCHANGEDIR;
-        return GetOpenFileNameA(&dialog) != 0;
+        int success = GetOpenFileNameW(&dialog) != 0 && sr_wide_to_utf8(wide, output, capacity);
+        free(wide);
+        return success;
     }
 #elif defined(__APPLE__)
     return command_picker(

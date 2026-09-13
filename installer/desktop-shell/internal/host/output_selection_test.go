@@ -276,3 +276,28 @@ func TestOutputHTTPGuardsAndChooserCancellation(t *testing.T) {
 		t.Fatal("startup failure cannot recover")
 	}
 }
+
+func TestStartupAndOutputFeedbackAssets(t *testing.T) {
+	s, _ := outputFixture(t)
+	bridge := &Bridge{}
+	bridge.SetOutputSelection(s)
+	for _, name := range []string{"feedback.js", "feedback.css"} {
+		for _, prefix := range []string{"/__shell/", "/__shell/output/"} {
+			w := httptest.NewRecorder()
+			bridge.ServeHTTP(w, httptest.NewRequest("GET", "http://127.0.0.1"+prefix+name, nil))
+			if w.Code != 200 || w.Body.Len() == 0 || !strings.HasPrefix(w.Header().Get("Content-Type"), "text/") {
+				t.Fatalf("%s%s unavailable: %d", prefix, name, w.Code)
+			}
+		}
+		w := httptest.NewRecorder()
+		bridge.Bootstrap(w, httptest.NewRequest("GET", "wails://wails/__shell/"+name, nil))
+		if w.Code != 200 || w.Body.Len() == 0 {
+			t.Fatalf("native bootstrap missing %s", name)
+		}
+		w = httptest.NewRecorder()
+		bridge.Bootstrap(w, httptest.NewRequest("GET", "wails://wails/__shell/output/"+name, nil))
+		if w.Code != 404 {
+			t.Fatal("native bootstrap exposed output route", name)
+		}
+	}
+}

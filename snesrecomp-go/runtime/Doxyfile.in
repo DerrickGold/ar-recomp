@@ -6,7 +6,6 @@ OUTPUT_DIRECTORY       = "@CMAKE_CURRENT_BINARY_DIR@/api-docs"
 INPUT                  = "@CMAKE_CURRENT_SOURCE_DIR@/docs/api-main.dox" \
                          "@CMAKE_CURRENT_SOURCE_DIR@/docs/API_REFERENCE.md" \
                          "@CMAKE_CURRENT_SOURCE_DIR@/docs/GAME_ENHANCEMENT_INTEGRATION.md" \
-                         "@CMAKE_CURRENT_SOURCE_DIR@/docs/RUNTIME.md" \
                          "@CMAKE_CURRENT_SOURCE_DIR@/include/snesrecomp/runner.h" \
                          "@CMAKE_CURRENT_SOURCE_DIR@/include/snesrecomp/runner" \
                          "@CMAKE_CURRENT_SOURCE_DIR@/include/snesrecomp/game.h" \

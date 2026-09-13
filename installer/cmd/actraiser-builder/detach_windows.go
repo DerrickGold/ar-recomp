@@ -19,7 +19,9 @@ import (
 func detachFromBuilder(command *exec.Cmd) {
 	const createNewProcessGroup = 0x00000200
 	command.SysProcAttr = &syscall.SysProcAttr{
-		CreationFlags: createNewProcessGroup,
+		// The desktop host's kill-on-close job permits explicit breakaway.
+		// Keep the player's game outside the Builder/compiler lifetime.
+		CreationFlags: createNewProcessGroup | 0x01000000, // CREATE_BREAKAWAY_FROM_JOB
 	}
 	subprocess.Configure(command)
 }

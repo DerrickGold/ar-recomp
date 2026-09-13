@@ -5,6 +5,7 @@
 param(
     [Parameter(Mandatory = $true)][string]$Builder,
     [string]$Rom,
+    [string]$OtherDriveRoot,
     [string]$ResultsParent = (Get-Location).Path
 )
 $ErrorActionPreference = 'Stop'
@@ -19,7 +20,8 @@ if ($Rom) { $Rom = (Resolve-Path -LiteralPath $Rom).Path }
 $root = Join-Path (Resolve-Path -LiteralPath $ResultsParent).Path ('builder-player-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $root | Out-Null
 Write-Host "Retaining results and any private game data: $root"
-$portable = Join-Path $root 'Portable Builder'
+$unicode = [string][char]0x65e5 + [char]0x672c + '-' + [char]::ConvertFromUtf32(0x1f3ae)
+$portable = Join-Path $root ('Portable Builder ' + $unicode)
 $unrelated = Join-Path $root 'Unrelated CWD'
 New-Item -ItemType Directory -Path $portable, $unrelated | Out-Null
 $exe = Join-Path $portable 'Renamed Builder.exe'
@@ -30,11 +32,14 @@ $savedEnv = @{}
 foreach ($key in @('LOCALAPPDATA', 'AR_BUILDER_SMOKE_ROM', 'AR_USER_DATA_DIR')) {
     $savedEnv[$key] = [Environment]::GetEnvironmentVariable($key, 'Process')
 }
-function Invoke-Probe([string]$Label, [string]$Executable, [string]$Workspace) {
+function Invoke-Probe([string]$Label, [string]$Executable, [string]$Workspace, [string]$GameOutput = '') {
     $stdout = Join-Path $root "$Label.log"
     $stderr = Join-Path $root "$Label.stderr.log"
     # GUI-subsystem executables can still write into explicitly inherited pipes.
-    $process = Start-Process -FilePath $Executable -ArgumentList '--jobs', '1' `
+    $arguments = @('--jobs', '1')
+    if ($GameOutput) { $arguments += @('--output-dir', ('"' + $GameOutput + '"')) }
+    else { $GameOutput = Join-Path (Split-Path $Executable) 'ActRaiserRecomp' }
+    $process = Start-Process -FilePath $Executable -ArgumentList $arguments `
         -WorkingDirectory $unrelated -RedirectStandardOutput $stdout `
         -RedirectStandardError $stderr -PassThru
     $deadline = (Get-Date).AddMinutes(10)
@@ -68,7 +73,7 @@ function Invoke-Probe([string]$Label, [string]$Executable, [string]$Workspace) {
         if (-not (Test-Path -LiteralPath (Join-Path $Workspace '.builder-workspace'))) { throw 'Wrong workspace or missing ownership marker.' }
         if (Test-Path -LiteralPath (Join-Path $Workspace 'utils')) { throw 'Bundled inputs were copied into the workspace.' }
         if (-not (Test-Path -LiteralPath $expectedProfile)) { throw 'Expected separate WebView2 profile was not created.' }
-        if (-not (Test-Path -LiteralPath (Join-Path (Split-Path $Executable) 'ActRaiserRecomp/game-assets'))) { throw 'Game output is not beside the Builder.' }
+        if (-not (Test-Path -LiteralPath (Join-Path $GameOutput 'game-assets'))) { throw 'Game output was not initialized in the selected folder.' }
         Write-Host "PASS: $Label renderer, bundled runtime and workspace"
     } finally {
         if (-not $process.HasExited) {
@@ -78,12 +83,43 @@ function Invoke-Probe([string]$Label, [string]$Executable, [string]$Workspace) {
         $process.Dispose()
     }
 }
+function Invoke-GameProbe([string]$GameOutput) {
+    $game = Join-Path $GameOutput 'ActRaiserRecomp.exe'
+    if (-not (Test-Path -LiteralPath $game)) { throw 'Full build did not produce ActRaiserRecomp.exe.' }
+    $gameEnv = @{}
+    foreach ($key in @('AR_HEADLESS', 'AR_QUIT_FRAMES', 'AR_NO_RUN_DIR', 'SDL_AUDIODRIVER')) {
+        $gameEnv[$key] = [Environment]::GetEnvironmentVariable($key, 'Process')
+    }
+    $process = $null
+    try {
+        $env:AR_HEADLESS = '1'; $env:AR_QUIT_FRAMES = '8'
+        $env:AR_NO_RUN_DIR = '1'; $env:SDL_AUDIODRIVER = 'dummy'
+        $testRom = Join-Path $GameOutput ('test-rom-' + $unicode + '.sfc')
+        Copy-Item -LiteralPath $Rom -Destination $testRom
+        $config = Join-Path $GameOutput 'config.ini'
+        $arguments = @(('"' + $testRom + '"'), '--config', ('"' + $config + '"'))
+        $process = Start-Process -FilePath $game -ArgumentList $arguments -WorkingDirectory $unrelated `
+            -RedirectStandardOutput (Join-Path $root 'game.log') `
+            -RedirectStandardError (Join-Path $root 'game.stderr.log') -PassThru
+        if (-not $process.WaitForExit(60000)) { throw 'Generated game timed out; inspect game.stderr.log.' }
+        $process.WaitForExit()
+        if ($process.ExitCode -ne 0) { throw "Generated game exited $($process.ExitCode); inspect game.stderr.log." }
+        Write-Host 'PASS: generated game startup with Unicode executable/ROM/config paths and unrelated CWD'
+    } finally {
+        if ($process) {
+            if (-not $process.HasExited) { $process.Kill(); $process.WaitForExit() }
+            $process.Dispose()
+        }
+        foreach ($key in $gameEnv.Keys) { [Environment]::SetEnvironmentVariable($key, $gameEnv[$key], 'Process') }
+    }
+}
 try {
     $env:LOCALAPPDATA = Join-Path $root 'Global App Data'
     $env:AR_BUILDER_SMOKE_ROM = $Rom
     [Environment]::SetEnvironmentVariable('AR_USER_DATA_DIR', $null, 'Process')
     $work = Join-Path $portable 'Builder Data'
     Invoke-Probe 'portable' $exe $work
+    if ($Rom) { Invoke-GameProbe (Join-Path $portable 'ActRaiserRecomp') }
     $global = Join-Path $env:LOCALAPPDATA 'ActRaiserRecomp/installer/workspace'
     if (Test-Path -LiteralPath $global) { throw 'Portable launch unexpectedly created a global workspace.' }
     Set-Content -LiteralPath (Join-Path $work 'user-edit.txt') -Value 'preserve me' -Encoding ASCII
@@ -97,9 +133,16 @@ try {
     if (Test-Path -LiteralPath $global) { throw 'Relocated launch unexpectedly used global storage.' }
     Move-Item -LiteralPath "$exe.portable" -Destination "$exe.portable.saved"
     Invoke-Probe 'global' $exe $global
+    if ($OtherDriveRoot) {
+        $other = (Resolve-Path -LiteralPath $OtherDriveRoot).Path
+        if ([IO.Path]::GetPathRoot($other) -eq [IO.Path]::GetPathRoot($exe)) { throw 'OtherDriveRoot must be on another volume than the Builder.' }
+        $crossOutput = Join-Path $other ('ActRaiser-test-' + [guid]::NewGuid().ToString('N'))
+        Write-Host "Retaining cross-drive output: $crossOutput"
+        Invoke-Probe 'cross-drive' $exe $global $crossOutput
+    } else { Write-Host 'SKIP: real cross-drive initialization (supply -OtherDriveRoot)' }
     if ((Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash -ne $originalHash) { throw 'Builder modified its own executable.' }
     Write-Host 'PASS: portable, relocation/edit preservation, global, Fixed WebView2, unchanged executable'
-    Write-Host 'Still requires human checks: visual layout, dialogs, audio, console flashes, and generated game launch.'
+    Write-Host 'Still requires human checks: visual layout, ROM picker, audible audio, console flashes, and visible game rendering.'
 } finally {
     foreach ($key in $savedEnv.Keys) { [Environment]::SetEnvironmentVariable($key, $savedEnv[$key], 'Process') }
 }
