@@ -1963,10 +1963,19 @@
   {
     "key": "setting.sim3d_world_navigation_lighting.help",
     "text": [
-      "Light the globe and its relief and add directional cloud shadows to the inter-town world. Uses the shared controls and does not require Simulation town 3D.",
-      "Éclaire le globe et son relief et ajoute des ombres directionnelles de nuages. Utilise les réglages communs sans nécessiter les villes de simulation en 3D.",
-      "Beleuchtet Globus und Relief und fügt gerichtete Wolkenschatten hinzu. Nutzt gemeinsame Regler und benötigt keine 3D-Simulationsstadt.",
-      "地球と地形を照らし、町間の世界に方向付きの雲の影を加えます。共通の設定を使い、町の3D表示は必要ありません。"
+      "Light the globe and its relief and add directional cloud shadows to the inter-town world. Uses the shared controls and also lights the connected SIM underlay.",
+      "Éclaire le globe et son relief et ajoute des ombres directionnelles de nuages entre les villes. Utilise les réglages communs et éclaire aussi l’arrière-plan connecté du mode simulation.",
+      "Beleuchtet Globus und Relief und fügt gerichtete Wolkenschatten zwischen den Städten hinzu. Nutzt gemeinsame Regler und beleuchtet auch den verbundenen SIM-Weltuntergrund.",
+      "地球と地形を照らし、町間の世界に方向付きの雲の影を加えます。共通の設定を使い、町とつながるSIMモードの背景も照らします。"
+    ]
+  },
+  {
+    "key": "setting.sim3d_globe_underlay.help",
+    "text": [
+      "Show the globe and nearby low-detail towns behind the active 3D town, preserving its authored terrain and actors. Limits camera zoom and orbit to the local area. Uses world terrain, lighting and model settings, with SIM haze and cloud shroud. Off uses the cheaper flat world map. Requires 3D town models and World map underlay; does not enable world navigation.",
+      "Affiche le globe et les villes voisines peu détaillées derrière la ville 3D active, en conservant son terrain et ses personnages. Limite le zoom et la rotation de la caméra aux environs. Utilise les réglages de terrain, d’éclairage et de modèles du monde, avec la brume et les nuages du mode simulation. Désactivé, utilise la carte du monde plate, moins coûteuse. Nécessite les modèles de ville en 3D et la carte du monde en arrière-plan ; n’active pas la navigation du monde.",
+      "Zeigt den Globus und nahe Städte mit geringem Detailgrad hinter der aktiven 3D-Stadt, ohne deren gestaltetes Gelände und Figuren zu verändern. Begrenzt Kamerazoom und Umlauf auf die nähere Umgebung. Nutzt Weltgelände-, Beleuchtungs- und Modelleinstellungen mit SIM-Dunst und Wolkendecke. Aus nutzt die günstigere flache Weltkarte. Benötigt 3D-Stadtmodelle und die Weltkarte als Untergrund; aktiviert nicht die Weltnavigation.",
+      "現在の3Dの町の背後に地球と低精細な近隣の町を表示し、町固有の地形やキャラクターは維持します。カメラのズームと回転は周辺地域に制限されます。世界の地形・照明・モデル設定と、SIMのもや・雲の覆いを使用します。無効時は負荷の低い平面の世界地図を使用します。「町の3Dモデル」と「背景の世界地図」が必要です。世界移動は有効になりません。"
     ]
   },
   {
@@ -4436,6 +4445,7 @@
   {"key":"setting.sim3d_effect_lighting.label","text":["Effect lighting","Éclairage des effets","Effektbeleuchtung","エフェクトの照明"]},
   {"key":"setting.sim3d_particles.label","text":["Effect particles","Particules des effets","Effektpartikel","エフェクトの粒子"]},
   {"key":"setting.sim3d_world_underlay.label","text":["World map underlay","Carte du monde en arrière-plan","Weltkarte als Untergrund","背景の世界地図"]},
+  {"key":"setting.sim3d_globe_underlay.label","text":["Connected world underlay","Monde connecté en arrière-plan","Verbundener Weltuntergrund","町とつながる世界の背景"]},
   {"key":"setting.sim3d_cloud_shroud.label","text":["Cloud shroud","Voile de nuages","Wolkenschleier","雲の覆い"]},
   {"key":"setting.sim3d_cull_haze.label","text":["Local-area haze","Brume de la zone locale","Dunst im lokalen Bereich","周辺範囲のもや"]},
   {"key":"setting.sim3d_camera_mode.label","text":["Camera mode","Mode de caméra","Kameramodus","カメラモード"]},
@@ -5608,6 +5618,7 @@
   {"key":"overlay.reset_section.help","text":["Restore every {section} tab, including hidden developer controls, to the shipped defaults. Press B twice to confirm.","Rétablissez tous les onglets de {section}, y compris les réglages développeur masqués. Appuyez deux fois sur B pour confirmer.","Setze alle Reiter von {section} einschließlich ausgeblendeter Entwickleroptionen zurück. Drücke zur Bestätigung zweimal B.","{section}の全タブを、非表示の開発者設定も含めて初期値に戻します。Bを2回押すと確定します。"]},
   {"key":"overlay.empty_tab","text":["Nothing to configure on this tab.","Aucun réglage dans cet onglet.","Dieser Reiter enthält keine Einstellungen.","このタブに設定項目はありません。"]},
   {"key":"overlay.unavailable","text":["Unavailable in this mode","Indisponible dans ce mode","In diesem Modus nicht verfügbar","このモードでは使用できません"]},
+  {"key":"overlay.hardware_unavailable","text":["Unavailable on this graphics device (startup capability check).","Indisponible sur ce périphérique graphique (vérification des capacités au démarrage).","Auf diesem Grafikgerät nicht verfügbar (Prüfung der Grafikfunktionen beim Start).","起動時の機能チェックにより、このグラフィックスデバイスでは使用できません。"]},
   {"key":"setting.interface_language.label","text":["Interface language","Langue du menu","Menüsprache","メニューの言語"]},
   {"key":"setting.interface_language.help","text":["Choose this settings menu's language independently of game text.","Choisissez la langue de ce menu indépendamment du texte du jeu.","Wähle die Sprache dieses Menüs unabhängig vom Spieltext.","ゲーム内の文章とは別に、この設定メニューの言語を選びます。"]},
   {"key":"setting.localization_content.label","text":["Text source","Source du texte","Textquelle","文章のソース"]},
