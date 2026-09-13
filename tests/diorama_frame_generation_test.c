@@ -306,6 +306,42 @@ int main(void) {
   CHECK(ArRenderTexture_Equals(
       resolved[kDioramaPlane_Backdrop], raw[kDioramaPlane_Backdrop]));
 
+  /* The clamped skybox is independent of the gameplay planes and has no
+   * apron. A compact source pitch must remain valid through interpolation. */
+  CHECK(SDL_SetRenderTarget(renderer, scene));
+  DioramaFrameGeneration_Reset();
+  uint32_t sky_pixels[kDisplayWidth * kHeight];
+  const SDL_Rect sky_rect = {0, 0, kDisplayWidth, kHeight};
+  slot.diorama_plane_request_mask = slot.diorama_plane_content_mask = 0;
+  slot.diorama_skybox_surface = (SrPpuSurfaceView){
+    .data = (const uint8_t *)sky_pixels,
+    .width_pixels = kDisplayWidth, .height_pixels = kHeight,
+    .pitch_bytes = kDisplayWidth * sizeof(uint32_t),
+  };
+  const ArRenderTexture sky_raw = ArSdlRenderBackend_BorrowTexture(current);
+  for (int endpoint = 0; endpoint < 2; ++endpoint) {
+    for (int y = 0; y < kHeight; ++y)
+      for (int x = 0; x < kDisplayWidth; ++x)
+        sky_pixels[y * kDisplayWidth + x] = PatternPixel(x - endpoint * 2, y);
+    CHECK(SDL_UpdateTexture(current, &sky_rect, sky_pixels, kDisplayWidth * 4));
+    slot.timestamp_ns += 16666667;
+    DioramaFrameGeneration_CaptureWithSkybox(
+        &render_device, &slot, sources, planes, plane_pitches, 0, sky_raw, true);
+  }
+  ArRenderTexture sky_resolved;
+  CHECK(DioramaFrameGeneration_PrepareWithSkybox(
+      &render_device, &slot, 0.5f, raw, 0, resolved, sky_raw, &sky_resolved) ==
+      (1u << kDioramaFrameGenerationSkybox));
+  CHECK(!ArRenderTexture_Equals(sky_resolved, sky_raw));
+  CHECK(SDL_GetRenderTarget(renderer) == scene);
+  /* An old caller must not accidentally address the private extra slot. */
+  CHECK(DioramaFrameGeneration_Prepare(
+      &render_device, &slot, 0.5f, raw, UINT32_MAX, resolved) == 0);
+  DioramaFrameGeneration_Reset();
+  CHECK(DioramaFrameGeneration_PrepareWithSkybox(
+      &render_device, &slot, 0.5f, raw, 0, resolved, sky_raw, &sky_resolved) == 0);
+  CHECK(ArRenderTexture_Equals(sky_resolved, sky_raw));
+
 done:
   DioramaFrameGeneration_Shutdown();
   ArRenderDevice_Reset(&render_device);

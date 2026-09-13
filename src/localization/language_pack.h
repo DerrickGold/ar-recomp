@@ -47,6 +47,7 @@ typedef enum ArLanguageOperationKind {
   kArLanguageOperation_Text = 0,
   kArLanguageOperation_Placeholder,
   kArLanguageOperation_LineBreak,
+  kArLanguageOperation_PreferredLineBreak,
   kArLanguageOperation_ParagraphBreak,
   kArLanguageOperation_PageBreak,
   kArLanguageOperation_WaitFrames,

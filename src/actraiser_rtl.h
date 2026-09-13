@@ -45,6 +45,9 @@ void ActRaiser_LiveMargins(int *left, int *right);
  * belonging to those same pixels. Returns false only for an invalid plan. */
 bool ActRaiser_LiveActionBgPlan(ActionBgPlan *out,
                                 bool *pad_captured_to_budget);
+/* Optional host-owned skybox pixels from the same completed scanout. Borrowed
+ * until the next tick/reset, like the other FrameSlot surface products. */
+void ActRaiser_LiveDioramaSkybox(SrPpuSurfaceView *out);
 /* Vertical geometry latched with the last rendered frame. Either pointer may
  * be NULL. */
 void ActRaiser_LiveVerticalMargins(int *top, int *bottom);

@@ -1231,6 +1231,12 @@ void ArLocalizedTextPresenter_Prepare(
           .direction = snapshot->language.direction,
           .bidi_spans = frame->bidi.spans + snapshot->bidi_span_offset,
           .bidi_span_count = snapshot->bidi_span_count,
+          .preferred_line_breaks =
+              scrolling ? frame->structural_boundaries : NULL,
+          .preferred_line_break_capacity =
+              scrolling ? kArLocalizationFrameTextCapacity : 0,
+          .preferred_line_break_source_offset =
+              scrolling ? snapshot->utf8_offset : 0,
           .alignment = right_label ? kArTextHorizontalAlignment_Right
               : left_label ? kArTextHorizontalAlignment_Left
                            : kArTextHorizontalAlignment_Leading,

@@ -566,5 +566,9 @@ void PpuSetWidescreenLayerExtent(Ppu *, uint8_t, uint16_t, uint16_t,
 void PpuSetWidescreenLayerExtentBand(Ppu *, uint8_t, uint8_t, uint8_t,
                                      uint16_t, uint16_t);
 int PpuGetCurrentRenderScale(Ppu *, uint32_t);
+/* Called immediately after the ordinary row, before its HDMA/IRQ advance.
+ * The public boundary validates storage/geometry; false invalidates this
+ * optional view, never the normal scanout. */
+bool PpuRenderBackgroundViewLine(Ppu *, const SrPpuBackgroundViewRequest *, int);
 
 #endif

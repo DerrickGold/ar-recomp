@@ -88,6 +88,7 @@ static bool CopyPlainTerm(const ArLanguagePack *pack, const char *semantic_id,
         bytes = operation->value.text.length;
         break;
       case kArLanguageOperation_LineBreak:
+      case kArLanguageOperation_PreferredLineBreak:
       case kArLanguageOperation_ParagraphBreak:
       case kArLanguageOperation_PageBreak:
         text = " ";

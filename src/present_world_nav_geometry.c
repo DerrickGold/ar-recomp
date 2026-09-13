@@ -4,6 +4,85 @@
 #include <float.h>
 #include <string.h>
 
+int WorldNavigationOccludedShellRings(const WorldNavigationProjection *p,
+    float shell_radius, float eye_distance, int rings, int sectors) {
+  if (!p || rings < 3 || sectors < 3 ||
+      !isfinite(shell_radius) || !isfinite(eye_distance) ||
+      !isfinite(p->globe_radius_world) || p->globe_radius_world <= 0 ||
+      shell_radius <= p->globe_radius_world || eye_distance <= shell_radius ||
+      !isfinite(p->reference_height_units) || !isfinite(p->height_world_per_unit)) return 0;
+  for (int i = 0; i < 16; ++i) if (!isfinite(p->matrix[i])) return 0;
+  const double radius = p->globe_radius_world * .9975;
+  const double centre = -(p->globe_radius_world +
+      (double)p->reference_height_units * p->height_world_per_unit);
+  const double pad = 64 * FLT_EPSILON * (1 + fabs(centre) + radius);
+  for (int axis=0; axis<3; ++axis) if (!isfinite(p->camera_world[axis])) return 0;
+  const double measured_distance=hypot(hypot(p->camera_world[0],p->camera_world[1]),
+      p->camera_world[2]-centre);
+  if (fabs(measured_distance-eye_distance) > pad) return 0;
+  /* Require a perspective matrix with this eye as its projective origin.
+   * Orthographic/inconsistent inputs are not grounds for dropping geometry. */
+  for (int row=0; row<4; ++row) if (row!=2) {
+    double at=p->matrix[12+row], magnitude=fabs(at);
+    for (int axis=0; axis<3; ++axis) {
+      const double term=(double)p->matrix[axis*4+row]*p->camera_world[axis];
+      at+=term; magnitude+=fabs(term);
+    }
+    if (fabs(at) > 64*FLT_EPSILON*(1+magnitude)) return 0;
+  }
+  /* Bound ray distances to the clip planes, not a sphere behind the horizon
+   * camera: that sphere can cross the near plane while every visible front
+   * intersection is safely metres away. All ocean hits lie between D-R and
+   * D+R. The near-plane rectangle's furthest point is one of its corners;
+   * perpendicular distance gives a conservative lower bound for far hits. */
+  double near_normal[3], near_eye=0;
+  for (int sign = -1; sign <= 1; sign += 2) {
+    double normal[3];
+    for (int axis = 0; axis < 3; ++axis)
+      normal[axis] = (double)p->matrix[axis * 4 + 3] + sign * p->matrix[axis * 4 + 2];
+    const double length = hypot(hypot(normal[0],normal[1]),normal[2]);
+    double at_eye=(double)p->matrix[15]+sign*p->matrix[14];
+    for (int axis=0; axis<3; ++axis) at_eye+=normal[axis]*p->camera_world[axis];
+    if (!(length > 0)) return 0;
+    if (sign<0) {
+      if (!(at_eye/length > eye_distance+radius+pad)) return 0;
+    } else {
+      if (!(at_eye<0)) return 0;
+      memcpy(near_normal,normal,sizeof(normal)); near_eye=at_eye;
+    }
+  }
+  for (int corner=0; corner<4; ++corner) {
+    double x[3], y[3];
+    for (int axis=0; axis<3; ++axis) {
+      x[axis]=(double)p->matrix[axis*4]-(corner&1 ? 1 : -1)*p->matrix[axis*4+3];
+      y[axis]=(double)p->matrix[axis*4+1]-(corner&2 ? 1 : -1)*p->matrix[axis*4+3];
+    }
+    double ray[3]={x[1]*y[2]-x[2]*y[1], x[2]*y[0]-x[0]*y[2], x[0]*y[1]-x[1]*y[0]};
+    double forward=0, near_dot=0;
+    for (int axis=0; axis<3; ++axis) forward+=ray[axis]*p->matrix[axis*4+3];
+    const double length=hypot(hypot(ray[0],ray[1]),ray[2]);
+    if (!(length>0) || forward==0) return 0;
+    for (int axis=0; axis<3; ++axis) near_dot+=near_normal[axis]*ray[axis]/length;
+    if (forward<0) near_dot=-near_dot;
+    if (!(near_dot>0) || !(-near_eye/near_dot < eye_distance-radius-pad)) return 0;
+  }
+  /* Every original ocean triangle lies outside this inscribed sphere: its
+   * corner directions span at most one latitude plus one longitude step.
+   * Include float placement error, rather than testing against an ideal
+   * smooth planet that could stick out through the actual mesh. */
+  const double span = 3.14159265358979323846 / rings + 6.28318530717958647692 / sectors;
+  if (span >= 1.57079632679489661923) return 0;
+  const double occluder = radius * cos(span) - pad;
+  if (!(occluder > 0)) return 0;
+  const double cap = acos((double)shell_radius / eye_distance);
+  /* For a ray with impact b, the near-shell polar angle is
+   * asin(b/shell_radius) - asin(b/eye_distance). The apparent cone is convex,
+   * so triangles whose outer ring is inside it are fully hidden too. */
+  const double hidden = asin(occluder / shell_radius) - asin(occluder / eye_distance);
+  const double count = floor(hidden / cap * rings - .0001);
+  return count > 0 && count < rings ? (int)count : 0;
+}
+
 bool WorldNavigationRadialBoundsOutside(const WorldNavigationRadialBounds *b,
     const Sim3DDepthRadialTransform *t) {
   if (!b || !t || !isfinite(b->height_min) || !isfinite(b->height_max) ||

@@ -1,0 +1,3189 @@
+{
+  "schema": "actraiser-visible-deck-probe-v1",
+  "platform": {
+    "machine": "x86_64",
+    "kernel": "6.16.12-valve24.5-1-neptune-616-gb2f7cfe85e45",
+    "files": {
+      "/etc/os-release": "NAME=\"SteamOS\"\nPRETTY_NAME=\"SteamOS\"\nVERSION_CODENAME=holo\nID=steamos\nID_LIKE=arch\nANSI_COLOR=\"1;35\"\nHOME_URL=\"https://www.steampowered.com/\"\nDOCUMENTATION_URL=\"https://support.steampowered.com/\"\nSUPPORT_URL=\"https://support.steampowered.com/\"\nBUG_REPORT_URL=\"https://support.steampowered.com/\"\nLOGO=steamos\nVARIANT_ID=steamdeck\nVERSION_ID=3.8.16\nBUILD_ID=20260716.1\nSTEAMOS_DEFAULT_UPDATE_BRANCH=stable",
+      "/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor": "powersave",
+      "/sys/class/drm/card0/device/power_dpm_force_performance_level": "auto",
+      "/sys/class/drm/card0/device/hwmon/hwmon6/power1_cap": "15000000",
+      "/sys/class/power_supply/ACAD/online": "1",
+      "/sys/class/power_supply/BAT1/capacity": "99",
+      "/sys/class/power_supply/BAT1/status": "Not charging"
+    },
+    "display_environment": {
+      "XDG_RUNTIME_DIR": "/run/user/1000",
+      "WAYLAND_DISPLAY": "wayland-0",
+      "LD_LIBRARY_PATH": "/home/deck/argame"
+    },
+    "library_and_installed_binary_sha256": {
+      "/home/deck/argame/libSDL3.so.0.4.14": "4f0b58199bb42cf428e2494db80902613c65a55a3aaf133756c17ff6d38e4a1f",
+      "/home/deck/argame/libSDL3_ttf.so.0.2.2": "72858e150f38ac96241a470156e820b50efc488b7179b2d5ecea22240cd621cd",
+      "/home/deck/argame/ActRaiserRecomp": "a38e659a0fa535983d565f5d4b3ddb28223e018a554cf1d9ec91e8acb97e7ee1"
+    }
+  },
+  "input_sha256": {
+    "/home/deck/argame/capture-fast-path-20260912.XW1iYR/control": "a9da71e2647eb852bf01b342be57d0a6d29c42257f3f562cad9fb0df709020c1",
+    "/home/deck/argame/capture-fast-path-20260912.XW1iYR/candidate": "b60d989debd14ba9303f332a4f2124ebcb4221ff8b7e76e36e4467606064a314",
+    "/home/deck/argame/capture-fast-path-20260912.XW1iYR/ar.sfc": "b8055844825653210d252d29a2229f9a3e7e512004e83940620173c57d8723f0",
+    "/home/deck/argame/capture-fast-path-20260912.XW1iYR/config.ini": "ef6d73c178a87c7641f2fe966f546b21947327ec1efb437b16f1d0d972f71d25",
+    "/home/deck/argame/capture-fast-path-20260912.XW1iYR/diorama-layers.ini": "e82e8b405e4fbe971cc41283ae3be38f3eb83b9ac5340c9a2201fe28a38aaded",
+    "/home/deck/argame/capture-fast-path-20260912.XW1iYR/tests/fixtures/benchmark/fillmore-skybox-checkpoint.json": "f15a535dd77e545c0f07397b85ef719e5aa3119eb756d29bc35b0adc3398f40b",
+    "/home/deck/argame/capture-fast-path-20260912.XW1iYR/tests/fixtures/benchmark/fillmore-skybox-settings.ini": "8d758440608366f29ada5d461c42cf61d2cc820d4d77b39cda5bdc8619cae128",
+    "/home/deck/argame/capture-fast-path-20260912.XW1iYR/tests/fixtures/benchmark/fillmore-skybox-seed.srm": "d02d7e3fad4bba785c31bb257e9dcf7f3c439e6b9b1d755fc1a9e8b1ec0461f2",
+    "/home/deck/argame/capture-fast-path-20260912.XW1iYR/saves/fillmore-act.rec": "3d40989b29da74501625c815590d1ce6ed9a2984a995d1f96b8952f78ee0c584",
+    "/home/deck/argame/capture-fast-path-20260912.XW1iYR/tools/visible_fillmore_benchmark.py": "c7e51f1fde9822fc9a5539e82ef52b6d4d923b2c1ec6df2825cc366956f599df",
+    "/home/deck/argame/capture-fast-path-20260912.XW1iYR/tools/compare_pipeline_performance.py": "07f8564546b5679a85ddec4364d9f4e5876d2332e37d2f04447b96bf35aa5087"
+  },
+  "environment": {
+    "AR_WARP": "0101",
+    "AR_WARP_AT": "400",
+    "AR_HEADLESS": "0",
+    "AR_HEADLESS_VIDEO": "0",
+    "AR_INPUT_REPLAY": "/home/deck/argame/capture-fast-path-20260912.XW1iYR/saves/fillmore-act.rec",
+    "AR_SAVE_NATIVE_PATH": "/home/deck/argame/capture-fast-path-20260912.XW1iYR/visible-fillmore-interp-vsync/seed.srm",
+    "AR_SETTINGS_PATH": "/home/deck/argame/capture-fast-path-20260912.XW1iYR/visible-fillmore-interp-vsync/settings.ini",
+    "AR_QUIT_FRAMES": "2000",
+    "AR_ENABLE_RUN_DIR": "1",
+    "AR_PIPELINE_PERF": "1",
+    "AR_PERFORMANCE_OVERLAY": "Off",
+    "AR_SHOW_FPS": "On",
+    "AR_AUDIO_VOLUME": "0",
+    "AR_WINDOW_MODE": "Borderless",
+    "AR_REFRESH_MODE": "Vsync",
+    "AR_INTERP_ENABLE": "1",
+    "AR_RENDER_WORKERS": "3"
+  },
+  "runs": [
+    {
+      "windows": 10,
+      "presents": 917,
+      "interval_weighted_fps": 89.99054156744474,
+      "median_window_fps": 90.0,
+      "min_window_fps": 89.9,
+      "max_window_fps": 90.0,
+      "median_window_p95_ms": 11.4265,
+      "ticks_per_present": 0.6649836423118867,
+      "stages": {
+        "action synthesis": {
+          "ms_per_present": 0.0456505997818975,
+          "ms_per_call": 0.0456505997818975,
+          "calls": 917
+        },
+        "action host-post": {
+          "ms_per_present": 0.02901897491821156,
+          "ms_per_call": 0.043552209492635025,
+          "calls": 611
+        },
+        "PPU finish": {
+          "ms_per_present": 0.011394874591057797,
+          "ms_per_call": 0.017101636661211127,
+          "calls": 611
+        },
+        "SIM metadata": {
+          "ms_per_present": 0.014849727371864777,
+          "ms_per_call": 0.022286743044189854,
+          "calls": 611
+        },
+        "action submit": {
+          "ms_per_present": 0.01767404580152672,
+          "ms_per_call": 0.002524863685932388,
+          "calls": 6419
+        },
+        "emulation": {
+          "ms_per_present": 0.23200414394765542,
+          "ms_per_call": 0.34762712418300656,
+          "calls": 612
+        },
+        "present/wait": {
+          "ms_per_present": 4.776030207197383,
+          "ms_per_call": 4.776030207197383,
+          "calls": 917
+        },
+        "PPU setup": {
+          "ms_per_present": 0.029616248636859323,
+          "ms_per_call": 0.04444860883797054,
+          "calls": 611
+        },
+        "PPU scanout": {
+          "ms_per_present": 4.711952998909487,
+          "ms_per_call": 7.07178543371522,
+          "calls": 611
+        },
+        "pacing/sleep": {
+          "ms_per_present": 0.0005900763358778624,
+          "ms_per_call": 0.0005900763358778624,
+          "calls": 917
+        },
+        "frame snapshot": {
+          "ms_per_present": 0.03458953107960741,
+          "ms_per_call": 0.051912602291325695,
+          "calls": 611
+        },
+        "PPU + capture": {
+          "ms_per_present": 4.780208942202835,
+          "ms_per_call": 7.17422520458265,
+          "calls": 611
+        },
+        "world map build": {
+          "ms_per_present": 0.00032988004362050164,
+          "ms_per_call": 0.0004950900163666121,
+          "calls": 611
+        },
+        "CRT/resolve": {
+          "ms_per_present": 0.01376782988004362,
+          "ms_per_call": 0.00688391494002181,
+          "calls": 1834
+        },
+        "action supersample": {
+          "ms_per_present": 0.024576335877862596,
+          "ms_per_call": 0.024576335877862596,
+          "calls": 917
+        },
+        "action DOF": {
+          "ms_per_present": 0.06188124318429662,
+          "ms_per_call": 0.06188124318429662,
+          "calls": 917
+        },
+        "action callback": {
+          "ms_per_present": 0.004191494002181025,
+          "ms_per_call": 0.0008221604278074866,
+          "calls": 4675
+        },
+        "action finish": {
+          "ms_per_present": 0.011194874591057799,
+          "ms_per_call": 0.01680147299509002,
+          "calls": 611
+        },
+        "upload": {
+          "ms_per_present": 0.7311452562704471,
+          "ms_per_call": 1.0973162029459902,
+          "calls": 611
+        },
+        "action mesh": {
+          "ms_per_present": 0.0063773173391494,
+          "ms_per_call": 0.00127546346782988,
+          "calls": 4585
+        },
+        "town canvas": {
+          "ms_per_present": 0.0007099236641221374,
+          "ms_per_call": 0.001065466448445172,
+          "calls": 611
+        },
+        "presentation": {
+          "ms_per_present": 0.3410765539803708,
+          "ms_per_call": 0.3410765539803708,
+          "calls": 917
+        },
+        "action total": {
+          "ms_per_present": 0.31665856052344604,
+          "ms_per_call": 0.31665856052344604,
+          "calls": 917
+        },
+        "host UI": {
+          "ms_per_present": 0.006609596510359869,
+          "ms_per_call": 0.006609596510359869,
+          "calls": 917
+        },
+        "events/input": {
+          "ms_per_present": 0.08963871319520175,
+          "ms_per_call": 0.08963871319520175,
+          "calls": 917
+        },
+        "settings UI": {
+          "ms_per_present": 0.0006299890948745909,
+          "ms_per_call": 0.0006299890948745909,
+          "calls": 917
+        },
+        "action scanout": {
+          "ms_per_present": 4.711602835332607,
+          "ms_per_call": 7.071259901800328,
+          "calls": 611
+        },
+        "action analysis": {
+          "ms_per_present": 0.22325190839694659,
+          "ms_per_call": 0.3350605564648118,
+          "calls": 611
+        },
+        "action upload": {
+          "ms_per_present": 0.3069415485278081,
+          "ms_per_call": 0.4606635024549918,
+          "calls": 611
+        },
+        "action setup": {
+          "ms_per_present": 0.02925627044711014,
+          "ms_per_call": 0.04390834697217676,
+          "calls": 611
+        },
+        "housekeeping": {
+          "ms_per_present": 0.0008298800436205016,
+          "ms_per_call": 0.0012454991816693945,
+          "calls": 611
+        }
+      },
+      "samples": [
+        {
+          "presents": 92,
+          "fps": 90.0,
+          "cadence_ms": 11.108,
+          "p95_ms": 11.5,
+          "ticks_per_present": 0.66,
+          "represents_per_present": 0.34,
+          "stages": {
+            "events/input": {
+              "mean_ms": 0.0541,
+              "calls": 92
+            },
+            "emulation": {
+              "mean_ms": 0.2207,
+              "calls": 61
+            },
+            "PPU + capture": {
+              "mean_ms": 4.8225,
+              "calls": 61
+            },
+            "world map build": {
+              "mean_ms": 0.0003,
+              "calls": 61
+            },
+            "SIM metadata": {
+              "mean_ms": 0.0146,
+              "calls": 61
+            },
+            "town canvas": {
+              "mean_ms": 0.0007,
+              "calls": 61
+            },
+            "frame snapshot": {
+              "mean_ms": 0.0344,
+              "calls": 61
+            },
+            "upload": {
+              "mean_ms": 1.0377,
+              "calls": 61
+            },
+            "presentation": {
+              "mean_ms": 0.3538,
+              "calls": 92
+            },
+            "CRT/resolve": {
+              "mean_ms": 0.0129,
+              "calls": 184
+            },
+            "host UI": {
+              "mean_ms": 0.0064,
+              "calls": 92
+            },
+            "settings UI": {
+              "mean_ms": 0.0006,
+              "calls": 92
+            },
+            "present/wait": {
+              "mean_ms": 4.4665,
+              "calls": 92
+            },
+            "pacing/sleep": {
+              "mean_ms": 0.0006,
+              "calls": 92
+            },
+            "housekeeping": {
+              "mean_ms": 0.0008,
+              "calls": 61
+            },
+            "PPU setup": {
+              "mean_ms": 0.0268,
+              "calls": 61
+            },
+            "PPU scanout": {
+              "mean_ms": 4.7666,
+              "calls": 61
+            },
+            "PPU finish": {
+              "mean_ms": 0.0036,
+              "calls": 61
+            },
+            "action total": {
+              "mean_ms": 0.33,
+              "calls": 92
+            },
+            "action upload": {
+              "mean_ms": 0.3764,
+              "calls": 61
+            },
+            "action analysis": {
+              "mean_ms": 0.3803,
+              "calls": 61
+            },
+            "action setup": {
+              "mean_ms": 0.0264,
+              "calls": 61
+            },
+            "action scanout": {
+              "mean_ms": 4.7661,
+              "calls": 61
+            },
+            "action finish": {
+              "mean_ms": 0.0034,
+              "calls": 61
+            },
+            "action host-post": {
+              "mean_ms": 0.0285,
+              "calls": 61
+            },
+            "action synthesis": {
+              "mean_ms": 0.1081,
+              "calls": 92
+            },
+            "action mesh": {
+              "mean_ms": 0.0059,
+              "calls": 460
+            },
+            "action supersample": {
+              "mean_ms": 0.0233,
+              "calls": 92
+            },
+            "action DOF": {
+              "mean_ms": 0.0312,
+              "calls": 92
+            },
+            "action submit": {
+              "mean_ms": 0.015,
+              "calls": 644
+            },
+            "action callback": {
+              "mean_ms": 0.0006,
+              "calls": 460
+            }
+          }
+        },
+        {
+          "presents": 92,
+          "fps": 90.0,
+          "cadence_ms": 11.11,
+          "p95_ms": 12.098,
+          "ticks_per_present": 0.67,
+          "represents_per_present": 0.34,
+          "stages": {
+            "events/input": {
+              "mean_ms": 0.145,
+              "calls": 92
+            },
+            "emulation": {
+              "mean_ms": 0.27,
+              "calls": 62
+            },
+            "PPU + capture": {
+              "mean_ms": 4.8555,
+              "calls": 61
+            },
+            "world map build": {
+              "mean_ms": 0.0003,
+              "calls": 61
+            },
+            "SIM metadata": {
+              "mean_ms": 0.015,
+              "calls": 61
+            },
+            "town canvas": {
+              "mean_ms": 0.0007,
+              "calls": 61
+            },
+            "frame snapshot": {
+              "mean_ms": 0.0342,
+              "calls": 61
+            },
+            "upload": {
+              "mean_ms": 1.0874,
+              "calls": 61
+            },
+            "presentation": {
+              "mean_ms": 0.3479,
+              "calls": 92
+            },
+            "CRT/resolve": {
+              "mean_ms": 0.0126,
+              "calls": 184
+            },
+            "host UI": {
+              "mean_ms": 0.0067,
+              "calls": 92
+            },
+            "settings UI": {
+              "mean_ms": 0.0006,
+              "calls": 92
+            },
+            "present/wait": {
+              "mean_ms": 4.2495,
+              "calls": 92
+            },
+            "pacing/sleep": {
+              "mean_ms": 0.0006,
+              "calls": 92
+            },
+            "housekeeping": {
+              "mean_ms": 0.0009,
+              "calls": 61
+            },
+            "PPU setup": {
+              "mean_ms": 0.0281,
+              "calls": 61
+            },
+            "PPU scanout": {
+              "mean_ms": 4.7991,
+              "calls": 61
+            },
+            "PPU finish": {
+              "mean_ms": 0.0038,
+              "calls": 61
+            },
+            "action total": {
+              "mean_ms": 0.3244,
+              "calls": 92
+            },
+            "action upload": {
+              "mean_ms": 0.3929,
+              "calls": 61
+            },
+            "action analysis": {
+              "mean_ms": 0.3683,
+              "calls": 61
+            },
+            "action setup": {
+              "mean_ms": 0.0278,
+              "calls": 61
+            },
+            "action scanout": {
+              "mean_ms": 4.7987,
+              "calls": 61
+            },
+            "action finish": {
+              "mean_ms": 0.0036,
+              "calls": 61
+            },
+            "action host-post": {
+              "mean_ms": 0.0291,
+              "calls": 61
+            },
+            "action synthesis": {
+              "mean_ms": 0.1036,
+              "calls": 92
+            },
+            "action mesh": {
+              "mean_ms": 0.0057,
+              "calls": 460
+            },
+            "action supersample": {
+              "mean_ms": 0.0232,
+              "calls": 92
+            },
+            "action DOF": {
+              "mean_ms": 0.0303,
+              "calls": 92
+            },
+            "action submit": {
+              "mean_ms": 0.0149,
+              "calls": 644
+            },
+            "action callback": {
+              "mean_ms": 0.0006,
+              "calls": 460
+            }
+          }
+        },
+        {
+          "presents": 92,
+          "fps": 90.0,
+          "cadence_ms": 11.108,
+          "p95_ms": 12.19,
+          "ticks_per_present": 0.66,
+          "represents_per_present": 0.34,
+          "stages": {
+            "events/input": {
+              "mean_ms": 0.0553,
+              "calls": 92
+            },
+            "emulation": {
+              "mean_ms": 0.3384,
+              "calls": 61
+            },
+            "PPU + capture": {
+              "mean_ms": 4.821,
+              "calls": 61
+            },
+            "world map build": {
+              "mean_ms": 0.0003,
+              "calls": 61
+            },
+            "SIM metadata": {
+              "mean_ms": 0.015,
+              "calls": 61
+            },
+            "town canvas": {
+              "mean_ms": 0.0007,
+              "calls": 61
+            },
+            "frame snapshot": {
+              "mean_ms": 0.0351,
+              "calls": 61
+            },
+            "upload": {
+              "mean_ms": 1.1273,
+              "calls": 61
+            },
+            "presentation": {
+              "mean_ms": 0.3798,
+              "calls": 92
+            },
+            "CRT/resolve": {
+              "mean_ms": 0.0123,
+              "calls": 184
+            },
+            "host UI": {
+              "mean_ms": 0.0062,
+              "calls": 92
+            },
+            "settings UI": {
+              "mean_ms": 0.0006,
+              "calls": 92
+            },
+            "present/wait": {
+              "mean_ms": 4.2279,
+              "calls": 92
+            },
+            "pacing/sleep": {
+              "mean_ms": 0.0006,
+              "calls": 92
+            },
+            "housekeeping": {
+              "mean_ms": 0.0008,
+              "calls": 61
+            },
+            "PPU setup": {
+              "mean_ms": 0.0292,
+              "calls": 61
+            },
+            "PPU scanout": {
+              "mean_ms": 4.7632,
+              "calls": 61
+            },
+            "PPU finish": {
+              "mean_ms": 0.0039,
+              "calls": 61
+            },
+            "action total": {
+              "mean_ms": 0.3567,
+              "calls": 92
+            },
+            "action upload": {
+              "mean_ms": 0.3993,
+              "calls": 61
+            },
+            "action analysis": {
+              "mean_ms": 0.4091,
+              "calls": 61
+            },
+            "action setup": {
+              "mean_ms": 0.0289,
+              "calls": 61
+            },
+            "action scanout": {
+              "mean_ms": 4.7628,
+              "calls": 61
+            },
+            "action finish": {
+              "mean_ms": 0.0037,
+              "calls": 61
+            },
+            "action host-post": {
+              "mean_ms": 0.0291,
+              "calls": 61
+            },
+            "action synthesis": {
+              "mean_ms": 0.1075,
+              "calls": 92
+            },
+            "action mesh": {
+              "mean_ms": 0.0057,
+              "calls": 460
+            },
+            "action supersample": {
+              "mean_ms": 0.0227,
+              "calls": 92
+            },
+            "action DOF": {
+              "mean_ms": 0.0304,
+              "calls": 92
+            },
+            "action submit": {
+              "mean_ms": 0.015,
+              "calls": 644
+            },
+            "action callback": {
+              "mean_ms": 0.0198,
+              "calls": 506
+            }
+          }
+        },
+        {
+          "presents": 92,
+          "fps": 90.0,
+          "cadence_ms": 11.11,
+          "p95_ms": 13.36,
+          "ticks_per_present": 0.66,
+          "represents_per_present": 0.34,
+          "stages": {
+            "events/input": {
+              "mean_ms": 0.1397,
+              "calls": 92
+            },
+            "emulation": {
+              "mean_ms": 0.2831,
+              "calls": 61
+            },
+            "PPU + capture": {
+              "mean_ms": 4.7424,
+              "calls": 61
+            },
+            "world map build": {
+              "mean_ms": 0.0003,
+              "calls": 61
+            },
+            "SIM metadata": {
+              "mean_ms": 0.0147,
+              "calls": 61
+            },
+            "town canvas": {
+              "mean_ms": 0.0007,
+              "calls": 61
+            },
+            "frame snapshot": {
+              "mean_ms": 0.0343,
+              "calls": 61
+            },
+            "upload": {
+              "mean_ms": 1.7834,
+              "calls": 61
+            },
+            "presentation": {
+              "mean_ms": 0.3703,
+              "calls": 92
+            },
+            "CRT/resolve": {
+              "mean_ms": 0.0128,
+              "calls": 184
+            },
+            "host UI": {
+              "mean_ms": 0.006,
+              "calls": 92
+            },
+            "settings UI": {
+              "mean_ms": 0.0006,
+              "calls": 92
+            },
+            "present/wait": {
+              "mean_ms": 3.6385,
+              "calls": 92
+            },
+            "pacing/sleep": {
+              "mean_ms": 0.0006,
+              "calls": 92
+            },
+            "housekeeping": {
+              "mean_ms": 0.0008,
+              "calls": 61
+            },
+            "PPU setup": {
+              "mean_ms": 0.0284,
+              "calls": 61
+            },
+            "PPU scanout": {
+              "mean_ms": 4.6817,
+              "calls": 61
+            },
+            "PPU finish": {
+              "mean_ms": 0.0065,
+              "calls": 61
+            },
+            "action total": {
+              "mean_ms": 0.347,
+              "calls": 92
+            },
+            "action upload": {
+              "mean_ms": 0.5856,
+              "calls": 61
+            },
+            "action analysis": {
+              "mean_ms": 0.9167,
+              "calls": 61
+            },
+            "action setup": {
+              "mean_ms": 0.0281,
+              "calls": 61
+            },
+            "action scanout": {
+              "mean_ms": 4.6814,
+              "calls": 61
+            },
+            "action finish": {
+              "mean_ms": 0.0063,
+              "calls": 61
+            },
+            "action host-post": {
+              "mean_ms": 0.0286,
+              "calls": 61
+            },
+            "action synthesis": {
+              "mean_ms": 0.1086,
+              "calls": 92
+            },
+            "action mesh": {
+              "mean_ms": 0.0057,
+              "calls": 460
+            },
+            "action supersample": {
+              "mean_ms": 0.0222,
+              "calls": 92
+            },
+            "action DOF": {
+              "mean_ms": 0.0312,
+              "calls": 92
+            },
+            "action submit": {
+              "mean_ms": 0.0151,
+              "calls": 644
+            },
+            "action callback": {
+              "mean_ms": 0.0165,
+              "calls": 504
+            }
+          }
+        },
+        {
+          "presents": 91,
+          "fps": 90.0,
+          "cadence_ms": 11.111,
+          "p95_ms": 11.307,
+          "ticks_per_present": 0.67,
+          "represents_per_present": 0.33,
+          "stages": {
+            "events/input": {
+              "mean_ms": 0.0555,
+              "calls": 91
+            },
+            "emulation": {
+              "mean_ms": 0.2103,
+              "calls": 61
+            },
+            "PPU + capture": {
+              "mean_ms": 4.773,
+              "calls": 61
+            },
+            "world map build": {
+              "mean_ms": 0.0004,
+              "calls": 61
+            },
+            "SIM metadata": {
+              "mean_ms": 0.0149,
+              "calls": 61
+            },
+            "town canvas": {
+              "mean_ms": 0.0008,
+              "calls": 61
+            },
+            "frame snapshot": {
+              "mean_ms": 0.0351,
+              "calls": 61
+            },
+            "upload": {
+              "mean_ms": 0.5569,
+              "calls": 61
+            },
+            "presentation": {
+              "mean_ms": 0.3275,
+              "calls": 91
+            },
+            "CRT/resolve": {
+              "mean_ms": 0.014,
+              "calls": 182
+            },
+            "host UI": {
+              "mean_ms": 0.0068,
+              "calls": 91
+            },
+            "settings UI": {
+              "mean_ms": 0.0006,
+              "calls": 91
+            },
+            "present/wait": {
+              "mean_ms": 5.0227,
+              "calls": 91
+            },
+            "pacing/sleep": {
+              "mean_ms": 0.0006,
+              "calls": 91
+            },
+            "housekeeping": {
+              "mean_ms": 0.0009,
+              "calls": 61
+            },
+            "PPU setup": {
+              "mean_ms": 0.0302,
+              "calls": 61
+            },
+            "PPU scanout": {
+              "mean_ms": 4.6981,
+              "calls": 61
+            },
+            "PPU finish": {
+              "mean_ms": 0.0161,
+              "calls": 61
+            },
+            "action total": {
+              "mean_ms": 0.3028,
+              "calls": 91
+            },
+            "action upload": {
+              "mean_ms": 0.285,
+              "calls": 61
+            },
+            "action analysis": {
+              "mean_ms": 0.1383,
+              "calls": 61
+            },
+            "action setup": {
+              "mean_ms": 0.0299,
+              "calls": 61
+            },
+            "action scanout": {
+              "mean_ms": 4.6978,
+              "calls": 61
+            },
+            "action finish": {
+              "mean_ms": 0.0158,
+              "calls": 61
+            },
+            "action host-post": {
+              "mean_ms": 0.0294,
+              "calls": 61
+            },
+            "action synthesis": {
+              "mean_ms": 0.025,
+              "calls": 91
+            },
+            "action mesh": {
+              "mean_ms": 0.0063,
+              "calls": 455
+            },
+            "action supersample": {
+              "mean_ms": 0.0253,
+              "calls": 91
+            },
+            "action DOF": {
+              "mean_ms": 0.0687,
+              "calls": 91
+            },
+            "action submit": {
+              "mean_ms": 0.0189,
+              "calls": 637
+            },
+            "action callback": {
+              "mean_ms": 0.0007,
+              "calls": 455
+            }
+          }
+        },
+        {
+          "presents": 91,
+          "fps": 89.9,
+          "cadence_ms": 11.124,
+          "p95_ms": 11.474,
+          "ticks_per_present": 0.67,
+          "represents_per_present": 0.33,
+          "stages": {
+            "events/input": {
+              "mean_ms": 0.1394,
+              "calls": 91
+            },
+            "emulation": {
+              "mean_ms": 0.218,
+              "calls": 61
+            },
+            "PPU + capture": {
+              "mean_ms": 4.7635,
+              "calls": 61
+            },
+            "world map build": {
+              "mean_ms": 0.0003,
+              "calls": 61
+            },
+            "SIM metadata": {
+              "mean_ms": 0.0151,
+              "calls": 61
+            },
+            "town canvas": {
+              "mean_ms": 0.0007,
+              "calls": 61
+            },
+            "frame snapshot": {
+              "mean_ms": 0.0348,
+              "calls": 61
+            },
+            "upload": {
+              "mean_ms": 0.3423,
+              "calls": 61
+            },
+            "presentation": {
+              "mean_ms": 0.3227,
+              "calls": 91
+            },
+            "CRT/resolve": {
+              "mean_ms": 0.0146,
+              "calls": 182
+            },
+            "host UI": {
+              "mean_ms": 0.0068,
+              "calls": 91
+            },
+            "settings UI": {
+              "mean_ms": 0.0006,
+              "calls": 91
+            },
+            "present/wait": {
+              "mean_ms": 5.1703,
+              "calls": 91
+            },
+            "pacing/sleep": {
+              "mean_ms": 0.0005,
+              "calls": 91
+            },
+            "housekeeping": {
+              "mean_ms": 0.0009,
+              "calls": 61
+            },
+            "PPU setup": {
+              "mean_ms": 0.0311,
+              "calls": 61
+            },
+            "PPU scanout": {
+              "mean_ms": 4.6866,
+              "calls": 61
+            },
+            "PPU finish": {
+              "mean_ms": 0.0161,
+              "calls": 61
+            },
+            "action total": {
+              "mean_ms": 0.2976,
+              "calls": 91
+            },
+            "action upload": {
+              "mean_ms": 0.2075,
+              "calls": 61
+            },
+            "action analysis": {
+              "mean_ms": 0.0027,
+              "calls": 61
+            },
+            "action setup": {
+              "mean_ms": 0.0307,
+              "calls": 61
+            },
+            "action scanout": {
+              "mean_ms": 4.6863,
+              "calls": 61
+            },
+            "action finish": {
+              "mean_ms": 0.0159,
+              "calls": 61
+            },
+            "action host-post": {
+              "mean_ms": 0.0295,
+              "calls": 61
+            },
+            "action synthesis": {
+              "mean_ms": 0.0005,
+              "calls": 91
+            },
+            "action mesh": {
+              "mean_ms": 0.0063,
+              "calls": 455
+            },
+            "action supersample": {
+              "mean_ms": 0.0261,
+              "calls": 91
+            },
+            "action DOF": {
+              "mean_ms": 0.0848,
+              "calls": 91
+            },
+            "action submit": {
+              "mean_ms": 0.0198,
+              "calls": 637
+            },
+            "action callback": {
+              "mean_ms": 0.0006,
+              "calls": 455
+            }
+          }
+        },
+        {
+          "presents": 92,
+          "fps": 90.0,
+          "cadence_ms": 11.109,
+          "p95_ms": 11.279,
+          "ticks_per_present": 0.66,
+          "represents_per_present": 0.34,
+          "stages": {
+            "events/input": {
+              "mean_ms": 0.0565,
+              "calls": 92
+            },
+            "emulation": {
+              "mean_ms": 0.212,
+              "calls": 61
+            },
+            "PPU + capture": {
+              "mean_ms": 4.7287,
+              "calls": 61
+            },
+            "world map build": {
+              "mean_ms": 0.0003,
+              "calls": 61
+            },
+            "SIM metadata": {
+              "mean_ms": 0.0147,
+              "calls": 61
+            },
+            "town canvas": {
+              "mean_ms": 0.0007,
+              "calls": 61
+            },
+            "frame snapshot": {
+              "mean_ms": 0.0343,
+              "calls": 61
+            },
+            "upload": {
+              "mean_ms": 0.3394,
+              "calls": 61
+            },
+            "presentation": {
+              "mean_ms": 0.3267,
+              "calls": 92
+            },
+            "CRT/resolve": {
+              "mean_ms": 0.0147,
+              "calls": 184
+            },
+            "host UI": {
+              "mean_ms": 0.007,
+              "calls": 92
+            },
+            "settings UI": {
+              "mean_ms": 0.0008,
+              "calls": 92
+            },
+            "present/wait": {
+              "mean_ms": 5.2764,
+              "calls": 92
+            },
+            "pacing/sleep": {
+              "mean_ms": 0.0006,
+              "calls": 92
+            },
+            "housekeeping": {
+              "mean_ms": 0.0008,
+              "calls": 61
+            },
+            "PPU setup": {
+              "mean_ms": 0.0304,
+              "calls": 61
+            },
+            "PPU scanout": {
+              "mean_ms": 4.6548,
+              "calls": 61
+            },
+            "PPU finish": {
+              "mean_ms": 0.016,
+              "calls": 61
+            },
+            "action total": {
+              "mean_ms": 0.3013,
+              "calls": 92
+            },
+            "action upload": {
+              "mean_ms": 0.2041,
+              "calls": 61
+            },
+            "action analysis": {
+              "mean_ms": 0.0031,
+              "calls": 61
+            },
+            "action setup": {
+              "mean_ms": 0.03,
+              "calls": 61
+            },
+            "action scanout": {
+              "mean_ms": 4.6545,
+              "calls": 61
+            },
+            "action finish": {
+              "mean_ms": 0.0158,
+              "calls": 61
+            },
+            "action host-post": {
+              "mean_ms": 0.0287,
+              "calls": 61
+            },
+            "action synthesis": {
+              "mean_ms": 0.0005,
+              "calls": 92
+            },
+            "action mesh": {
+              "mean_ms": 0.0064,
+              "calls": 460
+            },
+            "action supersample": {
+              "mean_ms": 0.026,
+              "calls": 92
+            },
+            "action DOF": {
+              "mean_ms": 0.0861,
+              "calls": 92
+            },
+            "action submit": {
+              "mean_ms": 0.02,
+              "calls": 644
+            },
+            "action callback": {
+              "mean_ms": 0.0007,
+              "calls": 460
+            }
+          }
+        },
+        {
+          "presents": 92,
+          "fps": 90.0,
+          "cadence_ms": 11.11,
+          "p95_ms": 11.328,
+          "ticks_per_present": 0.67,
+          "represents_per_present": 0.33,
+          "stages": {
+            "events/input": {
+              "mean_ms": 0.0565,
+              "calls": 92
+            },
+            "emulation": {
+              "mean_ms": 0.2041,
+              "calls": 62
+            },
+            "PPU + capture": {
+              "mean_ms": 4.8034,
+              "calls": 62
+            },
+            "world map build": {
+              "mean_ms": 0.0003,
+              "calls": 62
+            },
+            "SIM metadata": {
+              "mean_ms": 0.0149,
+              "calls": 62
+            },
+            "town canvas": {
+              "mean_ms": 0.0007,
+              "calls": 62
+            },
+            "frame snapshot": {
+              "mean_ms": 0.0347,
+              "calls": 62
+            },
+            "upload": {
+              "mean_ms": 0.3438,
+              "calls": 62
+            },
+            "presentation": {
+              "mean_ms": 0.324,
+              "calls": 92
+            },
+            "CRT/resolve": {
+              "mean_ms": 0.0147,
+              "calls": 184
+            },
+            "host UI": {
+              "mean_ms": 0.0067,
+              "calls": 92
+            },
+            "settings UI": {
+              "mean_ms": 0.0006,
+              "calls": 92
+            },
+            "present/wait": {
+              "mean_ms": 5.2095,
+              "calls": 92
+            },
+            "pacing/sleep": {
+              "mean_ms": 0.0006,
+              "calls": 92
+            },
+            "housekeeping": {
+              "mean_ms": 0.0008,
+              "calls": 62
+            },
+            "PPU setup": {
+              "mean_ms": 0.0304,
+              "calls": 62
+            },
+            "PPU scanout": {
+              "mean_ms": 4.7275,
+              "calls": 62
+            },
+            "PPU finish": {
+              "mean_ms": 0.0161,
+              "calls": 62
+            },
+            "action total": {
+              "mean_ms": 0.2989,
+              "calls": 92
+            },
+            "action upload": {
+              "mean_ms": 0.2071,
+              "calls": 62
+            },
+            "action analysis": {
+              "mean_ms": 0.0026,
+              "calls": 62
+            },
+            "action setup": {
+              "mean_ms": 0.03,
+              "calls": 62
+            },
+            "action scanout": {
+              "mean_ms": 4.7271,
+              "calls": 62
+            },
+            "action finish": {
+              "mean_ms": 0.0159,
+              "calls": 62
+            },
+            "action host-post": {
+              "mean_ms": 0.0291,
+              "calls": 62
+            },
+            "action synthesis": {
+              "mean_ms": 0.0005,
+              "calls": 92
+            },
+            "action mesh": {
+              "mean_ms": 0.0062,
+              "calls": 460
+            },
+            "action supersample": {
+              "mean_ms": 0.0257,
+              "calls": 92
+            },
+            "action DOF": {
+              "mean_ms": 0.0853,
+              "calls": 92
+            },
+            "action submit": {
+              "mean_ms": 0.019,
+              "calls": 644
+            },
+            "action callback": {
+              "mean_ms": 0.0009,
+              "calls": 460
+            }
+          }
+        },
+        {
+          "presents": 92,
+          "fps": 90.0,
+          "cadence_ms": 11.112,
+          "p95_ms": 11.369,
+          "ticks_per_present": 0.66,
+          "represents_per_present": 0.34,
+          "stages": {
+            "events/input": {
+              "mean_ms": 0.1374,
+              "calls": 92
+            },
+            "emulation": {
+              "mean_ms": 0.1814,
+              "calls": 61
+            },
+            "PPU + capture": {
+              "mean_ms": 4.7325,
+              "calls": 61
+            },
+            "world map build": {
+              "mean_ms": 0.0004,
+              "calls": 61
+            },
+            "SIM metadata": {
+              "mean_ms": 0.0148,
+              "calls": 61
+            },
+            "town canvas": {
+              "mean_ms": 0.0007,
+              "calls": 61
+            },
+            "frame snapshot": {
+              "mean_ms": 0.0347,
+              "calls": 61
+            },
+            "upload": {
+              "mean_ms": 0.3411,
+              "calls": 61
+            },
+            "presentation": {
+              "mean_ms": 0.3274,
+              "calls": 92
+            },
+            "CRT/resolve": {
+              "mean_ms": 0.0144,
+              "calls": 184
+            },
+            "host UI": {
+              "mean_ms": 0.0069,
+              "calls": 92
+            },
+            "settings UI": {
+              "mean_ms": 0.0006,
+              "calls": 92
+            },
+            "present/wait": {
+              "mean_ms": 5.2266,
+              "calls": 92
+            },
+            "pacing/sleep": {
+              "mean_ms": 0.0006,
+              "calls": 92
+            },
+            "housekeeping": {
+              "mean_ms": 0.0008,
+              "calls": 61
+            },
+            "PPU setup": {
+              "mean_ms": 0.0306,
+              "calls": 61
+            },
+            "PPU scanout": {
+              "mean_ms": 4.6572,
+              "calls": 61
+            },
+            "PPU finish": {
+              "mean_ms": 0.0161,
+              "calls": 61
+            },
+            "action total": {
+              "mean_ms": 0.3025,
+              "calls": 92
+            },
+            "action upload": {
+              "mean_ms": 0.203,
+              "calls": 61
+            },
+            "action analysis": {
+              "mean_ms": 0.0031,
+              "calls": 61
+            },
+            "action setup": {
+              "mean_ms": 0.0302,
+              "calls": 61
+            },
+            "action scanout": {
+              "mean_ms": 4.6569,
+              "calls": 61
+            },
+            "action finish": {
+              "mean_ms": 0.0159,
+              "calls": 61
+            },
+            "action host-post": {
+              "mean_ms": 0.0291,
+              "calls": 61
+            },
+            "action synthesis": {
+              "mean_ms": 0.0005,
+              "calls": 92
+            },
+            "action mesh": {
+              "mean_ms": 0.0066,
+              "calls": 460
+            },
+            "action supersample": {
+              "mean_ms": 0.0256,
+              "calls": 92
+            },
+            "action DOF": {
+              "mean_ms": 0.0852,
+              "calls": 92
+            },
+            "action submit": {
+              "mean_ms": 0.0193,
+              "calls": 644
+            },
+            "action callback": {
+              "mean_ms": 0.0007,
+              "calls": 460
+            }
+          }
+        },
+        {
+          "presents": 91,
+          "fps": 89.9,
+          "cadence_ms": 11.121,
+          "p95_ms": 11.379,
+          "ticks_per_present": 0.67,
+          "represents_per_present": 0.33,
+          "stages": {
+            "events/input": {
+              "mean_ms": 0.0568,
+              "calls": 91
+            },
+            "emulation": {
+              "mean_ms": 0.1811,
+              "calls": 61
+            },
+            "PPU + capture": {
+              "mean_ms": 4.7591,
+              "calls": 61
+            },
+            "world map build": {
+              "mean_ms": 0.0004,
+              "calls": 61
+            },
+            "SIM metadata": {
+              "mean_ms": 0.0148,
+              "calls": 61
+            },
+            "town canvas": {
+              "mean_ms": 0.0007,
+              "calls": 61
+            },
+            "frame snapshot": {
+              "mean_ms": 0.0343,
+              "calls": 61
+            },
+            "upload": {
+              "mean_ms": 0.3418,
+              "calls": 61
+            },
+            "presentation": {
+              "mean_ms": 0.3302,
+              "calls": 91
+            },
+            "CRT/resolve": {
+              "mean_ms": 0.0147,
+              "calls": 182
+            },
+            "host UI": {
+              "mean_ms": 0.0066,
+              "calls": 91
+            },
+            "settings UI": {
+              "mean_ms": 0.0007,
+              "calls": 91
+            },
+            "present/wait": {
+              "mean_ms": 5.2849,
+              "calls": 91
+            },
+            "pacing/sleep": {
+              "mean_ms": 0.0006,
+              "calls": 91
+            },
+            "housekeeping": {
+              "mean_ms": 0.0008,
+              "calls": 61
+            },
+            "PPU setup": {
+              "mean_ms": 0.031,
+              "calls": 61
+            },
+            "PPU scanout": {
+              "mean_ms": 4.684,
+              "calls": 61
+            },
+            "PPU finish": {
+              "mean_ms": 0.0159,
+              "calls": 61
+            },
+            "action total": {
+              "mean_ms": 0.3049,
+              "calls": 91
+            },
+            "action upload": {
+              "mean_ms": 0.2061,
+              "calls": 61
+            },
+            "action analysis": {
+              "mean_ms": 0.0026,
+              "calls": 61
+            },
+            "action setup": {
+              "mean_ms": 0.0306,
+              "calls": 61
+            },
+            "action scanout": {
+              "mean_ms": 4.6837,
+              "calls": 61
+            },
+            "action finish": {
+              "mean_ms": 0.0158,
+              "calls": 61
+            },
+            "action host-post": {
+              "mean_ms": 0.0291,
+              "calls": 61
+            },
+            "action synthesis": {
+              "mean_ms": 0.0005,
+              "calls": 91
+            },
+            "action mesh": {
+              "mean_ms": 0.009,
+              "calls": 455
+            },
+            "action supersample": {
+              "mean_ms": 0.0257,
+              "calls": 91
+            },
+            "action DOF": {
+              "mean_ms": 0.0862,
+              "calls": 91
+            },
+            "action submit": {
+              "mean_ms": 0.0198,
+              "calls": 637
+            },
+            "action callback": {
+              "mean_ms": 0.0007,
+              "calls": 455
+            }
+          }
+        }
+      ],
+      "run_dir": "/home/deck/argame/capture-fast-path-20260912.XW1iYR/runs/20260912-174133",
+      "final_wram_sha256": "e9077187b73d23a81e9da30cd0e4cf895e5c4391facfcd9e826c50cbbb08ba54",
+      "variant": "control",
+      "log": "/home/deck/argame/capture-fast-path-20260912.XW1iYR/visible-fillmore-interp-vsync/0-control.log",
+      "guard": {
+        "initial": {
+          "available_bytes": 12560666624,
+          "gpu_bytes": 426590208,
+          "temperature_c": 50.0,
+          "cpu0_khz": 2424843
+        },
+        "final": {
+          "available_bytes": 12563279872,
+          "gpu_bytes": 427008000,
+          "temperature_c": 56.0,
+          "cpu0_khz": 1622394
+        },
+        "minimum_available_bytes": 12377456640,
+        "peak_gpu_bytes": 787304448,
+        "peak_temperature_c": 56.0,
+        "seconds": 34.102699732000474,
+        "returncode": 0,
+        "abort_reason": null
+      },
+      "emulation_ticks": 2000,
+      "tick_presents": 1994,
+      "represents": 1002
+    },
+    {
+      "windows": 10,
+      "presents": 916,
+      "interval_weighted_fps": 90.00680117616834,
+      "median_window_fps": 90.0,
+      "min_window_fps": 89.9,
+      "max_window_fps": 90.1,
+      "median_window_p95_ms": 11.349499999999999,
+      "ticks_per_present": 0.6659825327510918,
+      "stages": {
+        "action synthesis": {
+          "ms_per_present": 0.0473646288209607,
+          "ms_per_call": 0.0473646288209607,
+          "calls": 916
+        },
+        "action host-post": {
+          "ms_per_present": 0.029199563318777294,
+          "ms_per_call": 0.04370392156862745,
+          "calls": 612
+        },
+        "PPU finish": {
+          "ms_per_present": 0.011052838427947598,
+          "ms_per_call": 0.01654313725490196,
+          "calls": 612
+        },
+        "SIM metadata": {
+          "ms_per_present": 0.015229585152838428,
+          "ms_per_call": 0.022794607843137256,
+          "calls": 612
+        },
+        "action submit": {
+          "ms_per_present": 0.017958078602620088,
+          "ms_per_call": 0.002565439800374298,
+          "calls": 6412
+        },
+        "emulation": {
+          "ms_per_present": 0.23331965065502183,
+          "ms_per_call": 0.34921699346405227,
+          "calls": 612
+        },
+        "present/wait": {
+          "ms_per_present": 5.218186135371179,
+          "ms_per_call": 5.218186135371179,
+          "calls": 916
+        },
+        "PPU setup": {
+          "ms_per_present": 0.028329257641921398,
+          "ms_per_call": 0.042401307189542485,
+          "calls": 612
+        },
+        "PPU scanout": {
+          "ms_per_present": 4.247675873362446,
+          "ms_per_call": 6.357632516339869,
+          "calls": 612
+        },
+        "pacing/sleep": {
+          "ms_per_present": 0.0005600436681222706,
+          "ms_per_call": 0.0005600436681222706,
+          "calls": 916
+        },
+        "frame snapshot": {
+          "ms_per_present": 0.03544868995633187,
+          "ms_per_call": 0.05305718954248365,
+          "calls": 612
+        },
+        "PPU + capture": {
+          "ms_per_present": 4.313036790393014,
+          "ms_per_call": 6.455460294117647,
+          "calls": 612
+        },
+        "world map build": {
+          "ms_per_present": 0.00033984716157205234,
+          "ms_per_call": 0.0005086601307189542,
+          "calls": 612
+        },
+        "CRT/resolve": {
+          "ms_per_present": 0.013829148471615722,
+          "ms_per_call": 0.006914574235807861,
+          "calls": 1832
+        },
+        "action supersample": {
+          "ms_per_present": 0.024387991266375548,
+          "ms_per_call": 0.024387991266375548,
+          "calls": 916
+        },
+        "action DOF": {
+          "ms_per_present": 0.061264737991266374,
+          "ms_per_call": 0.061264737991266374,
+          "calls": 916
+        },
+        "action callback": {
+          "ms_per_present": 0.00411495633187773,
+          "ms_per_call": 0.0008071306209850108,
+          "calls": 4670
+        },
+        "action finish": {
+          "ms_per_present": 0.010893013100436682,
+          "ms_per_call": 0.01630392156862745,
+          "calls": 612
+        },
+        "upload": {
+          "ms_per_present": 0.7461943231441048,
+          "ms_per_call": 1.1168529411764707,
+          "calls": 612
+        },
+        "action mesh": {
+          "ms_per_present": 0.006400655021834061,
+          "ms_per_call": 0.0012801310043668124,
+          "calls": 4580
+        },
+        "town canvas": {
+          "ms_per_present": 0.0007,
+          "ms_per_call": 0.0010477124183006536,
+          "calls": 612
+        },
+        "presentation": {
+          "ms_per_present": 0.34192194323144104,
+          "ms_per_call": 0.34192194323144104,
+          "calls": 916
+        },
+        "action total": {
+          "ms_per_present": 0.3180028384279476,
+          "ms_per_call": 0.3180028384279476,
+          "calls": 916
+        },
+        "host UI": {
+          "ms_per_present": 0.006219759825327511,
+          "ms_per_call": 0.006219759825327511,
+          "calls": 916
+        },
+        "events/input": {
+          "ms_per_present": 0.09235109170305676,
+          "ms_per_call": 0.09235109170305676,
+          "calls": 916
+        },
+        "settings UI": {
+          "ms_per_present": 0.0006,
+          "ms_per_call": 0.0006,
+          "calls": 916
+        },
+        "action scanout": {
+          "ms_per_present": 4.247265938864629,
+          "ms_per_call": 6.357018954248367,
+          "calls": 612
+        },
+        "action analysis": {
+          "ms_per_present": 0.23192161572052403,
+          "ms_per_call": 0.34712450980392157,
+          "calls": 612
+        },
+        "action upload": {
+          "ms_per_present": 0.3112236899563319,
+          "ms_per_call": 0.46581846405228755,
+          "calls": 612
+        },
+        "action setup": {
+          "ms_per_present": 0.02798919213973799,
+          "ms_per_call": 0.04189232026143791,
+          "calls": 612
+        },
+        "housekeeping": {
+          "ms_per_present": 0.0008899563318777293,
+          "ms_per_call": 0.0013320261437908497,
+          "calls": 612
+        }
+      },
+      "samples": [
+        {
+          "presents": 91,
+          "fps": 90.0,
+          "cadence_ms": 11.112,
+          "p95_ms": 11.435,
+          "ticks_per_present": 0.67,
+          "represents_per_present": 0.33,
+          "stages": {
+            "events/input": {
+              "mean_ms": 0.056,
+              "calls": 91
+            },
+            "emulation": {
+              "mean_ms": 0.2044,
+              "calls": 61
+            },
+            "PPU + capture": {
+              "mean_ms": 4.5231,
+              "calls": 61
+            },
+            "world map build": {
+              "mean_ms": 0.0003,
+              "calls": 61
+            },
+            "SIM metadata": {
+              "mean_ms": 0.0151,
+              "calls": 61
+            },
+            "town canvas": {
+              "mean_ms": 0.0007,
+              "calls": 61
+            },
+            "frame snapshot": {
+              "mean_ms": 0.0353,
+              "calls": 61
+            },
+            "upload": {
+              "mean_ms": 1.0772,
+              "calls": 61
+            },
+            "presentation": {
+              "mean_ms": 0.3674,
+              "calls": 91
+            },
+            "CRT/resolve": {
+              "mean_ms": 0.0132,
+              "calls": 182
+            },
+            "host UI": {
+              "mean_ms": 0.0063,
+              "calls": 91
+            },
+            "settings UI": {
+              "mean_ms": 0.0006,
+              "calls": 91
+            },
+            "present/wait": {
+              "mean_ms": 4.7172,
+              "calls": 91
+            },
+            "pacing/sleep": {
+              "mean_ms": 0.0006,
+              "calls": 91
+            },
+            "housekeeping": {
+              "mean_ms": 0.0009,
+              "calls": 61
+            },
+            "PPU setup": {
+              "mean_ms": 0.0301,
+              "calls": 61
+            },
+            "PPU scanout": {
+              "mean_ms": 4.4637,
+              "calls": 61
+            },
+            "PPU finish": {
+              "mean_ms": 0.0034,
+              "calls": 61
+            },
+            "action total": {
+              "mean_ms": 0.3437,
+              "calls": 91
+            },
+            "action upload": {
+              "mean_ms": 0.4027,
+              "calls": 61
+            },
+            "action analysis": {
+              "mean_ms": 0.4045,
+              "calls": 61
+            },
+            "action setup": {
+              "mean_ms": 0.0297,
+              "calls": 61
+            },
+            "action scanout": {
+              "mean_ms": 4.4633,
+              "calls": 61
+            },
+            "action finish": {
+              "mean_ms": 0.0032,
+              "calls": 61
+            },
+            "action host-post": {
+              "mean_ms": 0.0288,
+              "calls": 61
+            },
+            "action synthesis": {
+              "mean_ms": 0.1112,
+              "calls": 91
+            },
+            "action mesh": {
+              "mean_ms": 0.006,
+              "calls": 455
+            },
+            "action supersample": {
+              "mean_ms": 0.024,
+              "calls": 91
+            },
+            "action DOF": {
+              "mean_ms": 0.0313,
+              "calls": 91
+            },
+            "action submit": {
+              "mean_ms": 0.0164,
+              "calls": 637
+            },
+            "action callback": {
+              "mean_ms": 0.0006,
+              "calls": 455
+            }
+          }
+        },
+        {
+          "presents": 92,
+          "fps": 90.1,
+          "cadence_ms": 11.1,
+          "p95_ms": 11.62,
+          "ticks_per_present": 0.67,
+          "represents_per_present": 0.33,
+          "stages": {
+            "events/input": {
+              "mean_ms": 0.1436,
+              "calls": 92
+            },
+            "emulation": {
+              "mean_ms": 0.2682,
+              "calls": 62
+            },
+            "PPU + capture": {
+              "mean_ms": 4.5213,
+              "calls": 62
+            },
+            "world map build": {
+              "mean_ms": 0.0003,
+              "calls": 62
+            },
+            "SIM metadata": {
+              "mean_ms": 0.0152,
+              "calls": 62
+            },
+            "town canvas": {
+              "mean_ms": 0.0007,
+              "calls": 62
+            },
+            "frame snapshot": {
+              "mean_ms": 0.0353,
+              "calls": 62
+            },
+            "upload": {
+              "mean_ms": 1.1062,
+              "calls": 62
+            },
+            "presentation": {
+              "mean_ms": 0.3544,
+              "calls": 92
+            },
+            "CRT/resolve": {
+              "mean_ms": 0.0129,
+              "calls": 184
+            },
+            "host UI": {
+              "mean_ms": 0.0065,
+              "calls": 92
+            },
+            "settings UI": {
+              "mean_ms": 0.0006,
+              "calls": 92
+            },
+            "present/wait": {
+              "mean_ms": 4.5404,
+              "calls": 92
+            },
+            "pacing/sleep": {
+              "mean_ms": 0.0006,
+              "calls": 92
+            },
+            "housekeeping": {
+              "mean_ms": 0.0009,
+              "calls": 62
+            },
+            "PPU setup": {
+              "mean_ms": 0.0296,
+              "calls": 62
+            },
+            "PPU scanout": {
+              "mean_ms": 4.4624,
+              "calls": 62
+            },
+            "PPU finish": {
+              "mean_ms": 0.0034,
+              "calls": 62
+            },
+            "action total": {
+              "mean_ms": 0.3308,
+              "calls": 92
+            },
+            "action upload": {
+              "mean_ms": 0.3892,
+              "calls": 62
+            },
+            "action analysis": {
+              "mean_ms": 0.3865,
+              "calls": 62
+            },
+            "action setup": {
+              "mean_ms": 0.0292,
+              "calls": 62
+            },
+            "action scanout": {
+              "mean_ms": 4.462,
+              "calls": 62
+            },
+            "action finish": {
+              "mean_ms": 0.0033,
+              "calls": 62
+            },
+            "action host-post": {
+              "mean_ms": 0.0295,
+              "calls": 62
+            },
+            "action synthesis": {
+              "mean_ms": 0.1039,
+              "calls": 92
+            },
+            "action mesh": {
+              "mean_ms": 0.0058,
+              "calls": 460
+            },
+            "action supersample": {
+              "mean_ms": 0.0231,
+              "calls": 92
+            },
+            "action DOF": {
+              "mean_ms": 0.0315,
+              "calls": 92
+            },
+            "action submit": {
+              "mean_ms": 0.0158,
+              "calls": 644
+            },
+            "action callback": {
+              "mean_ms": 0.0009,
+              "calls": 460
+            }
+          }
+        },
+        {
+          "presents": 92,
+          "fps": 90.0,
+          "cadence_ms": 11.108,
+          "p95_ms": 12.123,
+          "ticks_per_present": 0.66,
+          "represents_per_present": 0.34,
+          "stages": {
+            "events/input": {
+              "mean_ms": 0.054,
+              "calls": 92
+            },
+            "emulation": {
+              "mean_ms": 0.2785,
+              "calls": 61
+            },
+            "PPU + capture": {
+              "mean_ms": 4.3438,
+              "calls": 61
+            },
+            "world map build": {
+              "mean_ms": 0.0003,
+              "calls": 61
+            },
+            "SIM metadata": {
+              "mean_ms": 0.0154,
+              "calls": 61
+            },
+            "town canvas": {
+              "mean_ms": 0.0007,
+              "calls": 61
+            },
+            "frame snapshot": {
+              "mean_ms": 0.0357,
+              "calls": 61
+            },
+            "upload": {
+              "mean_ms": 1.1114,
+              "calls": 61
+            },
+            "presentation": {
+              "mean_ms": 0.3854,
+              "calls": 92
+            },
+            "CRT/resolve": {
+              "mean_ms": 0.0132,
+              "calls": 184
+            },
+            "host UI": {
+              "mean_ms": 0.0062,
+              "calls": 92
+            },
+            "settings UI": {
+              "mean_ms": 0.0006,
+              "calls": 92
+            },
+            "present/wait": {
+              "mean_ms": 4.7781,
+              "calls": 92
+            },
+            "pacing/sleep": {
+              "mean_ms": 0.0006,
+              "calls": 92
+            },
+            "housekeeping": {
+              "mean_ms": 0.0008,
+              "calls": 61
+            },
+            "PPU setup": {
+              "mean_ms": 0.0254,
+              "calls": 61
+            },
+            "PPU scanout": {
+              "mean_ms": 4.2922,
+              "calls": 61
+            },
+            "PPU finish": {
+              "mean_ms": 0.0034,
+              "calls": 61
+            },
+            "action total": {
+              "mean_ms": 0.3619,
+              "calls": 92
+            },
+            "action upload": {
+              "mean_ms": 0.3836,
+              "calls": 61
+            },
+            "action analysis": {
+              "mean_ms": 0.4088,
+              "calls": 61
+            },
+            "action setup": {
+              "mean_ms": 0.0251,
+              "calls": 61
+            },
+            "action scanout": {
+              "mean_ms": 4.2918,
+              "calls": 61
+            },
+            "action finish": {
+              "mean_ms": 0.0033,
+              "calls": 61
+            },
+            "action host-post": {
+              "mean_ms": 0.0294,
+              "calls": 61
+            },
+            "action synthesis": {
+              "mean_ms": 0.1066,
+              "calls": 92
+            },
+            "action mesh": {
+              "mean_ms": 0.0061,
+              "calls": 460
+            },
+            "action supersample": {
+              "mean_ms": 0.0236,
+              "calls": 92
+            },
+            "action DOF": {
+              "mean_ms": 0.0303,
+              "calls": 92
+            },
+            "action submit": {
+              "mean_ms": 0.0159,
+              "calls": 644
+            },
+            "action callback": {
+              "mean_ms": 0.0181,
+              "calls": 503
+            }
+          }
+        },
+        {
+          "presents": 92,
+          "fps": 90.1,
+          "cadence_ms": 11.101,
+          "p95_ms": 12.84,
+          "ticks_per_present": 0.66,
+          "represents_per_present": 0.34,
+          "stages": {
+            "events/input": {
+              "mean_ms": 0.1383,
+              "calls": 92
+            },
+            "emulation": {
+              "mean_ms": 0.3288,
+              "calls": 61
+            },
+            "PPU + capture": {
+              "mean_ms": 4.2204,
+              "calls": 61
+            },
+            "world map build": {
+              "mean_ms": 0.0003,
+              "calls": 61
+            },
+            "SIM metadata": {
+              "mean_ms": 0.0154,
+              "calls": 61
+            },
+            "town canvas": {
+              "mean_ms": 0.0007,
+              "calls": 61
+            },
+            "frame snapshot": {
+              "mean_ms": 0.0358,
+              "calls": 61
+            },
+            "upload": {
+              "mean_ms": 1.84,
+              "calls": 61
+            },
+            "presentation": {
+              "mean_ms": 0.3878,
+              "calls": 92
+            },
+            "CRT/resolve": {
+              "mean_ms": 0.013,
+              "calls": 184
+            },
+            "host UI": {
+              "mean_ms": 0.0058,
+              "calls": 92
+            },
+            "settings UI": {
+              "mean_ms": 0.0006,
+              "calls": 92
+            },
+            "present/wait": {
+              "mean_ms": 4.0275,
+              "calls": 92
+            },
+            "pacing/sleep": {
+              "mean_ms": 0.0006,
+              "calls": 92
+            },
+            "housekeeping": {
+              "mean_ms": 0.0008,
+              "calls": 61
+            },
+            "PPU setup": {
+              "mean_ms": 0.0272,
+              "calls": 61
+            },
+            "PPU scanout": {
+              "mean_ms": 4.162,
+              "calls": 61
+            },
+            "PPU finish": {
+              "mean_ms": 0.0059,
+              "calls": 61
+            },
+            "action total": {
+              "mean_ms": 0.3644,
+              "calls": 92
+            },
+            "action upload": {
+              "mean_ms": 0.5902,
+              "calls": 61
+            },
+            "action analysis": {
+              "mean_ms": 0.9536,
+              "calls": 61
+            },
+            "action setup": {
+              "mean_ms": 0.0268,
+              "calls": 61
+            },
+            "action scanout": {
+              "mean_ms": 4.1616,
+              "calls": 61
+            },
+            "action finish": {
+              "mean_ms": 0.0058,
+              "calls": 61
+            },
+            "action host-post": {
+              "mean_ms": 0.0293,
+              "calls": 61
+            },
+            "action synthesis": {
+              "mean_ms": 0.1216,
+              "calls": 92
+            },
+            "action mesh": {
+              "mean_ms": 0.0059,
+              "calls": 460
+            },
+            "action supersample": {
+              "mean_ms": 0.0222,
+              "calls": 92
+            },
+            "action DOF": {
+              "mean_ms": 0.0313,
+              "calls": 92
+            },
+            "action submit": {
+              "mean_ms": 0.0158,
+              "calls": 644
+            },
+            "action callback": {
+              "mean_ms": 0.0175,
+              "calls": 507
+            }
+          }
+        },
+        {
+          "presents": 91,
+          "fps": 89.9,
+          "cadence_ms": 11.12,
+          "p95_ms": 11.324,
+          "ticks_per_present": 0.67,
+          "represents_per_present": 0.33,
+          "stages": {
+            "events/input": {
+              "mean_ms": 0.058,
+              "calls": 91
+            },
+            "emulation": {
+              "mean_ms": 0.2042,
+              "calls": 61
+            },
+            "PPU + capture": {
+              "mean_ms": 4.2563,
+              "calls": 61
+            },
+            "world map build": {
+              "mean_ms": 0.0004,
+              "calls": 61
+            },
+            "SIM metadata": {
+              "mean_ms": 0.0155,
+              "calls": 61
+            },
+            "town canvas": {
+              "mean_ms": 0.0007,
+              "calls": 61
+            },
+            "frame snapshot": {
+              "mean_ms": 0.0363,
+              "calls": 61
+            },
+            "upload": {
+              "mean_ms": 0.5895,
+              "calls": 61
+            },
+            "presentation": {
+              "mean_ms": 0.3342,
+              "calls": 91
+            },
+            "CRT/resolve": {
+              "mean_ms": 0.0141,
+              "calls": 182
+            },
+            "host UI": {
+              "mean_ms": 0.0063,
+              "calls": 91
+            },
+            "settings UI": {
+              "mean_ms": 0.0006,
+              "calls": 91
+            },
+            "present/wait": {
+              "mean_ms": 5.5108,
+              "calls": 91
+            },
+            "pacing/sleep": {
+              "mean_ms": 0.0006,
+              "calls": 91
+            },
+            "housekeeping": {
+              "mean_ms": 0.0008,
+              "calls": 61
+            },
+            "PPU setup": {
+              "mean_ms": 0.0279,
+              "calls": 61
+            },
+            "PPU scanout": {
+              "mean_ms": 4.1863,
+              "calls": 61
+            },
+            "PPU finish": {
+              "mean_ms": 0.016,
+              "calls": 61
+            },
+            "action total": {
+              "mean_ms": 0.3098,
+              "calls": 91
+            },
+            "action upload": {
+              "mean_ms": 0.3014,
+              "calls": 61
+            },
+            "action analysis": {
+              "mean_ms": 0.1484,
+              "calls": 61
+            },
+            "action setup": {
+              "mean_ms": 0.0276,
+              "calls": 61
+            },
+            "action scanout": {
+              "mean_ms": 4.1859,
+              "calls": 61
+            },
+            "action finish": {
+              "mean_ms": 0.0158,
+              "calls": 61
+            },
+            "action host-post": {
+              "mean_ms": 0.0296,
+              "calls": 61
+            },
+            "action synthesis": {
+              "mean_ms": 0.0266,
+              "calls": 91
+            },
+            "action mesh": {
+              "mean_ms": 0.0062,
+              "calls": 455
+            },
+            "action supersample": {
+              "mean_ms": 0.0253,
+              "calls": 91
+            },
+            "action DOF": {
+              "mean_ms": 0.0657,
+              "calls": 91
+            },
+            "action submit": {
+              "mean_ms": 0.0191,
+              "calls": 637
+            },
+            "action callback": {
+              "mean_ms": 0.0009,
+              "calls": 455
+            }
+          }
+        },
+        {
+          "presents": 91,
+          "fps": 90.0,
+          "cadence_ms": 11.113,
+          "p95_ms": 11.375,
+          "ticks_per_present": 0.67,
+          "represents_per_present": 0.33,
+          "stages": {
+            "events/input": {
+              "mean_ms": 0.1401,
+              "calls": 91
+            },
+            "emulation": {
+              "mean_ms": 0.2317,
+              "calls": 61
+            },
+            "PPU + capture": {
+              "mean_ms": 4.2443,
+              "calls": 61
+            },
+            "world map build": {
+              "mean_ms": 0.0004,
+              "calls": 61
+            },
+            "SIM metadata": {
+              "mean_ms": 0.0156,
+              "calls": 61
+            },
+            "town canvas": {
+              "mean_ms": 0.0007,
+              "calls": 61
+            },
+            "frame snapshot": {
+              "mean_ms": 0.0361,
+              "calls": 61
+            },
+            "upload": {
+              "mean_ms": 0.3502,
+              "calls": 61
+            },
+            "presentation": {
+              "mean_ms": 0.3159,
+              "calls": 91
+            },
+            "CRT/resolve": {
+              "mean_ms": 0.0143,
+              "calls": 182
+            },
+            "host UI": {
+              "mean_ms": 0.0061,
+              "calls": 91
+            },
+            "settings UI": {
+              "mean_ms": 0.0006,
+              "calls": 91
+            },
+            "present/wait": {
+              "mean_ms": 5.6645,
+              "calls": 91
+            },
+            "pacing/sleep": {
+              "mean_ms": 0.0005,
+              "calls": 91
+            },
+            "housekeeping": {
+              "mean_ms": 0.0008,
+              "calls": 61
+            },
+            "PPU setup": {
+              "mean_ms": 0.0278,
+              "calls": 61
+            },
+            "PPU scanout": {
+              "mean_ms": 4.1746,
+              "calls": 61
+            },
+            "PPU finish": {
+              "mean_ms": 0.0158,
+              "calls": 61
+            },
+            "action total": {
+              "mean_ms": 0.292,
+              "calls": 91
+            },
+            "action upload": {
+              "mean_ms": 0.2096,
+              "calls": 61
+            },
+            "action analysis": {
+              "mean_ms": 0.0026,
+              "calls": 61
+            },
+            "action setup": {
+              "mean_ms": 0.0275,
+              "calls": 61
+            },
+            "action scanout": {
+              "mean_ms": 4.1742,
+              "calls": 61
+            },
+            "action finish": {
+              "mean_ms": 0.0156,
+              "calls": 61
+            },
+            "action host-post": {
+              "mean_ms": 0.0297,
+              "calls": 61
+            },
+            "action synthesis": {
+              "mean_ms": 0.0008,
+              "calls": 91
+            },
+            "action mesh": {
+              "mean_ms": 0.0064,
+              "calls": 455
+            },
+            "action supersample": {
+              "mean_ms": 0.0244,
+              "calls": 91
+            },
+            "action DOF": {
+              "mean_ms": 0.0856,
+              "calls": 91
+            },
+            "action submit": {
+              "mean_ms": 0.019,
+              "calls": 637
+            },
+            "action callback": {
+              "mean_ms": 0.0006,
+              "calls": 455
+            }
+          }
+        },
+        {
+          "presents": 91,
+          "fps": 89.9,
+          "cadence_ms": 11.122,
+          "p95_ms": 11.302,
+          "ticks_per_present": 0.67,
+          "represents_per_present": 0.33,
+          "stages": {
+            "events/input": {
+              "mean_ms": 0.0591,
+              "calls": 91
+            },
+            "emulation": {
+              "mean_ms": 0.2013,
+              "calls": 61
+            },
+            "PPU + capture": {
+              "mean_ms": 4.259,
+              "calls": 61
+            },
+            "world map build": {
+              "mean_ms": 0.0004,
+              "calls": 61
+            },
+            "SIM metadata": {
+              "mean_ms": 0.0151,
+              "calls": 61
+            },
+            "town canvas": {
+              "mean_ms": 0.0007,
+              "calls": 61
+            },
+            "frame snapshot": {
+              "mean_ms": 0.0353,
+              "calls": 61
+            },
+            "upload": {
+              "mean_ms": 0.3475,
+              "calls": 61
+            },
+            "presentation": {
+              "mean_ms": 0.3208,
+              "calls": 91
+            },
+            "CRT/resolve": {
+              "mean_ms": 0.0145,
+              "calls": 182
+            },
+            "host UI": {
+              "mean_ms": 0.0064,
+              "calls": 91
+            },
+            "settings UI": {
+              "mean_ms": 0.0006,
+              "calls": 91
+            },
+            "present/wait": {
+              "mean_ms": 5.7658,
+              "calls": 91
+            },
+            "pacing/sleep": {
+              "mean_ms": 0.0005,
+              "calls": 91
+            },
+            "housekeeping": {
+              "mean_ms": 0.0011,
+              "calls": 61
+            },
+            "PPU setup": {
+              "mean_ms": 0.0282,
+              "calls": 61
+            },
+            "PPU scanout": {
+              "mean_ms": 4.1883,
+              "calls": 61
+            },
+            "PPU finish": {
+              "mean_ms": 0.0156,
+              "calls": 61
+            },
+            "action total": {
+              "mean_ms": 0.2963,
+              "calls": 91
+            },
+            "action upload": {
+              "mean_ms": 0.2082,
+              "calls": 61
+            },
+            "action analysis": {
+              "mean_ms": 0.0027,
+              "calls": 61
+            },
+            "action setup": {
+              "mean_ms": 0.0279,
+              "calls": 61
+            },
+            "action scanout": {
+              "mean_ms": 4.1878,
+              "calls": 61
+            },
+            "action finish": {
+              "mean_ms": 0.0154,
+              "calls": 61
+            },
+            "action host-post": {
+              "mean_ms": 0.0291,
+              "calls": 61
+            },
+            "action synthesis": {
+              "mean_ms": 0.0006,
+              "calls": 91
+            },
+            "action mesh": {
+              "mean_ms": 0.0064,
+              "calls": 455
+            },
+            "action supersample": {
+              "mean_ms": 0.0257,
+              "calls": 91
+            },
+            "action DOF": {
+              "mean_ms": 0.0857,
+              "calls": 91
+            },
+            "action submit": {
+              "mean_ms": 0.0191,
+              "calls": 637
+            },
+            "action callback": {
+              "mean_ms": 0.0006,
+              "calls": 455
+            }
+          }
+        },
+        {
+          "presents": 92,
+          "fps": 90.0,
+          "cadence_ms": 11.107,
+          "p95_ms": 11.316,
+          "ticks_per_present": 0.66,
+          "represents_per_present": 0.34,
+          "stages": {
+            "events/input": {
+              "mean_ms": 0.0601,
+              "calls": 92
+            },
+            "emulation": {
+              "mean_ms": 0.219,
+              "calls": 61
+            },
+            "PPU + capture": {
+              "mean_ms": 4.2378,
+              "calls": 61
+            },
+            "world map build": {
+              "mean_ms": 0.0003,
+              "calls": 61
+            },
+            "SIM metadata": {
+              "mean_ms": 0.0148,
+              "calls": 61
+            },
+            "town canvas": {
+              "mean_ms": 0.0007,
+              "calls": 61
+            },
+            "frame snapshot": {
+              "mean_ms": 0.0349,
+              "calls": 61
+            },
+            "upload": {
+              "mean_ms": 0.3442,
+              "calls": 61
+            },
+            "presentation": {
+              "mean_ms": 0.318,
+              "calls": 92
+            },
+            "CRT/resolve": {
+              "mean_ms": 0.0144,
+              "calls": 184
+            },
+            "host UI": {
+              "mean_ms": 0.0061,
+              "calls": 92
+            },
+            "settings UI": {
+              "mean_ms": 0.0006,
+              "calls": 92
+            },
+            "present/wait": {
+              "mean_ms": 5.7623,
+              "calls": 92
+            },
+            "pacing/sleep": {
+              "mean_ms": 0.0005,
+              "calls": 92
+            },
+            "housekeeping": {
+              "mean_ms": 0.001,
+              "calls": 61
+            },
+            "PPU setup": {
+              "mean_ms": 0.0286,
+              "calls": 61
+            },
+            "PPU scanout": {
+              "mean_ms": 4.1662,
+              "calls": 61
+            },
+            "PPU finish": {
+              "mean_ms": 0.0154,
+              "calls": 61
+            },
+            "action total": {
+              "mean_ms": 0.294,
+              "calls": 92
+            },
+            "action upload": {
+              "mean_ms": 0.2087,
+              "calls": 61
+            },
+            "action analysis": {
+              "mean_ms": 0.0027,
+              "calls": 61
+            },
+            "action setup": {
+              "mean_ms": 0.0283,
+              "calls": 61
+            },
+            "action scanout": {
+              "mean_ms": 4.1658,
+              "calls": 61
+            },
+            "action finish": {
+              "mean_ms": 0.0152,
+              "calls": 61
+            },
+            "action host-post": {
+              "mean_ms": 0.0284,
+              "calls": 61
+            },
+            "action synthesis": {
+              "mean_ms": 0.0006,
+              "calls": 92
+            },
+            "action mesh": {
+              "mean_ms": 0.0064,
+              "calls": 460
+            },
+            "action supersample": {
+              "mean_ms": 0.0254,
+              "calls": 92
+            },
+            "action DOF": {
+              "mean_ms": 0.0832,
+              "calls": 92
+            },
+            "action submit": {
+              "mean_ms": 0.0199,
+              "calls": 644
+            },
+            "action callback": {
+              "mean_ms": 0.0006,
+              "calls": 460
+            }
+          }
+        },
+        {
+          "presents": 92,
+          "fps": 90.0,
+          "cadence_ms": 11.11,
+          "p95_ms": 11.247,
+          "ticks_per_present": 0.67,
+          "represents_per_present": 0.33,
+          "stages": {
+            "events/input": {
+              "mean_ms": 0.1503,
+              "calls": 92
+            },
+            "emulation": {
+              "mean_ms": 0.181,
+              "calls": 62
+            },
+            "PPU + capture": {
+              "mean_ms": 4.3378,
+              "calls": 62
+            },
+            "world map build": {
+              "mean_ms": 0.0004,
+              "calls": 62
+            },
+            "SIM metadata": {
+              "mean_ms": 0.0149,
+              "calls": 62
+            },
+            "town canvas": {
+              "mean_ms": 0.0007,
+              "calls": 62
+            },
+            "frame snapshot": {
+              "mean_ms": 0.0351,
+              "calls": 62
+            },
+            "upload": {
+              "mean_ms": 0.3496,
+              "calls": 62
+            },
+            "presentation": {
+              "mean_ms": 0.3237,
+              "calls": 92
+            },
+            "CRT/resolve": {
+              "mean_ms": 0.015,
+              "calls": 184
+            },
+            "host UI": {
+              "mean_ms": 0.0064,
+              "calls": 92
+            },
+            "settings UI": {
+              "mean_ms": 0.0006,
+              "calls": 92
+            },
+            "present/wait": {
+              "mean_ms": 5.5984,
+              "calls": 92
+            },
+            "pacing/sleep": {
+              "mean_ms": 0.0006,
+              "calls": 92
+            },
+            "housekeeping": {
+              "mean_ms": 0.0009,
+              "calls": 62
+            },
+            "PPU setup": {
+              "mean_ms": 0.0317,
+              "calls": 62
+            },
+            "PPU scanout": {
+              "mean_ms": 4.2626,
+              "calls": 62
+            },
+            "PPU finish": {
+              "mean_ms": 0.016,
+              "calls": 62
+            },
+            "action total": {
+              "mean_ms": 0.2987,
+              "calls": 92
+            },
+            "action upload": {
+              "mean_ms": 0.2125,
+              "calls": 62
+            },
+            "action analysis": {
+              "mean_ms": 0.0028,
+              "calls": 62
+            },
+            "action setup": {
+              "mean_ms": 0.0313,
+              "calls": 62
+            },
+            "action scanout": {
+              "mean_ms": 4.2622,
+              "calls": 62
+            },
+            "action finish": {
+              "mean_ms": 0.0158,
+              "calls": 62
+            },
+            "action host-post": {
+              "mean_ms": 0.029,
+              "calls": 62
+            },
+            "action synthesis": {
+              "mean_ms": 0.0006,
+              "calls": 92
+            },
+            "action mesh": {
+              "mean_ms": 0.0063,
+              "calls": 460
+            },
+            "action supersample": {
+              "mean_ms": 0.026,
+              "calls": 92
+            },
+            "action DOF": {
+              "mean_ms": 0.0849,
+              "calls": 92
+            },
+            "action submit": {
+              "mean_ms": 0.0197,
+              "calls": 644
+            },
+            "action callback": {
+              "mean_ms": 0.0006,
+              "calls": 460
+            }
+          }
+        },
+        {
+          "presents": 92,
+          "fps": 90.0,
+          "cadence_ms": 11.11,
+          "p95_ms": 11.307,
+          "ticks_per_present": 0.66,
+          "represents_per_present": 0.34,
+          "stages": {
+            "events/input": {
+              "mean_ms": 0.0634,
+              "calls": 92
+            },
+            "emulation": {
+              "mean_ms": 0.2151,
+              "calls": 61
+            },
+            "PPU + capture": {
+              "mean_ms": 4.1869,
+              "calls": 61
+            },
+            "world map build": {
+              "mean_ms": 0.0003,
+              "calls": 61
+            },
+            "SIM metadata": {
+              "mean_ms": 0.0153,
+              "calls": 61
+            },
+            "town canvas": {
+              "mean_ms": 0.0007,
+              "calls": 61
+            },
+            "frame snapshot": {
+              "mean_ms": 0.0347,
+              "calls": 61
+            },
+            "upload": {
+              "mean_ms": 0.3394,
+              "calls": 61
+            },
+            "presentation": {
+              "mean_ms": 0.3113,
+              "calls": 92
+            },
+            "CRT/resolve": {
+              "mean_ms": 0.0137,
+              "calls": 184
+            },
+            "host UI": {
+              "mean_ms": 0.0061,
+              "calls": 92
+            },
+            "settings UI": {
+              "mean_ms": 0.0006,
+              "calls": 92
+            },
+            "present/wait": {
+              "mean_ms": 5.8254,
+              "calls": 92
+            },
+            "pacing/sleep": {
+              "mean_ms": 0.0005,
+              "calls": 92
+            },
+            "housekeeping": {
+              "mean_ms": 0.0009,
+              "calls": 61
+            },
+            "PPU setup": {
+              "mean_ms": 0.0268,
+              "calls": 61
+            },
+            "PPU scanout": {
+              "mean_ms": 4.1187,
+              "calls": 61
+            },
+            "PPU finish": {
+              "mean_ms": 0.0157,
+              "calls": 61
+            },
+            "action total": {
+              "mean_ms": 0.2881,
+              "calls": 92
+            },
+            "action upload": {
+              "mean_ms": 0.2048,
+              "calls": 61
+            },
+            "action analysis": {
+              "mean_ms": 0.0026,
+              "calls": 61
+            },
+            "action setup": {
+              "mean_ms": 0.0265,
+              "calls": 61
+            },
+            "action scanout": {
+              "mean_ms": 4.1183,
+              "calls": 61
+            },
+            "action finish": {
+              "mean_ms": 0.0156,
+              "calls": 61
+            },
+            "action host-post": {
+              "mean_ms": 0.0292,
+              "calls": 61
+            },
+            "action synthesis": {
+              "mean_ms": 0.0006,
+              "calls": 92
+            },
+            "action mesh": {
+              "mean_ms": 0.0085,
+              "calls": 460
+            },
+            "action supersample": {
+              "mean_ms": 0.0242,
+              "calls": 92
+            },
+            "action DOF": {
+              "mean_ms": 0.0834,
+              "calls": 92
+            },
+            "action submit": {
+              "mean_ms": 0.0189,
+              "calls": 644
+            },
+            "action callback": {
+              "mean_ms": 0.0006,
+              "calls": 460
+            }
+          }
+        }
+      ],
+      "run_dir": "/home/deck/argame/capture-fast-path-20260912.XW1iYR/runs/20260912-174208",
+      "final_wram_sha256": "e9077187b73d23a81e9da30cd0e4cf895e5c4391facfcd9e826c50cbbb08ba54",
+      "variant": "candidate",
+      "log": "/home/deck/argame/capture-fast-path-20260912.XW1iYR/visible-fillmore-interp-vsync/1-candidate.log",
+      "guard": {
+        "initial": {
+          "available_bytes": 12544839680,
+          "gpu_bytes": 426590208,
+          "temperature_c": 54.0,
+          "cpu0_khz": 1616252
+        },
+        "final": {
+          "available_bytes": 12534980608,
+          "gpu_bytes": 431202304,
+          "temperature_c": 57.0,
+          "cpu0_khz": 1616469
+        },
+        "minimum_available_bytes": 12357861376,
+        "peak_gpu_bytes": 789446656,
+        "peak_temperature_c": 58.0,
+        "seconds": 34.106215081999835,
+        "returncode": 0,
+        "abort_reason": null
+      },
+      "emulation_ticks": 2000,
+      "tick_presents": 1995,
+      "represents": 1002
+    }
+  ],
+  "identical_final_wram": true,
+  "summary": {
+    "control": {
+      "median_fps": 89.99054156744474,
+      "min_fps": 89.99054156744474,
+      "max_fps": 89.99054156744474,
+      "stages": {
+        "PPU + capture": {
+          "ms_per_present": 4.780208942202835,
+          "ms_per_call": 7.17422520458265
+        },
+        "PPU scanout": {
+          "ms_per_present": 4.711952998909487,
+          "ms_per_call": 7.07178543371522
+        },
+        "action scanout": {
+          "ms_per_present": 4.711602835332607,
+          "ms_per_call": 7.071259901800328
+        },
+        "upload": {
+          "ms_per_present": 0.7311452562704471,
+          "ms_per_call": 1.0973162029459902
+        },
+        "presentation": {
+          "ms_per_present": 0.3410765539803708,
+          "ms_per_call": 0.3410765539803708
+        }
+      }
+    },
+    "candidate": {
+      "median_fps": 90.00680117616834,
+      "min_fps": 90.00680117616834,
+      "max_fps": 90.00680117616834,
+      "stages": {
+        "PPU + capture": {
+          "ms_per_present": 4.313036790393014,
+          "ms_per_call": 6.455460294117647
+        },
+        "PPU scanout": {
+          "ms_per_present": 4.247675873362446,
+          "ms_per_call": 6.357632516339869
+        },
+        "action scanout": {
+          "ms_per_present": 4.247265938864629,
+          "ms_per_call": 6.357018954248367
+        },
+        "upload": {
+          "ms_per_present": 0.7461943231441048,
+          "ms_per_call": 1.1168529411764707
+        },
+        "presentation": {
+          "ms_per_present": 0.34192194323144104,
+          "ms_per_call": 0.34192194323144104
+        }
+      }
+    }
+  }
+}

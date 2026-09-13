@@ -8,6 +8,7 @@
 
 #include "platform/sdl/text_rasterizer_sdl.h"
 #include "host/font_resources.h"
+#include "localization/text_boundaries.h"
 
 #ifndef AR_TEST_FONT_PATH
 #error AR_TEST_FONT_PATH must identify the bundled test font
@@ -72,6 +73,48 @@ static uint64_t BitmapHash(const ArTextBitmap *bitmap) {
   return hash;
 }
 
+static void TestPreferredLineBreaks(const ArTextRasterizer *rasterizer) {
+  static const struct {
+    const char *text;
+    const char *resolved;
+    const char *marker;
+    int width;
+  } cases[] = {
+      {"Sir Derrick continues the adventure.",
+       "Sir Derrick\ncontinues the adventure.", " continues", 300},
+      {"This preceding segment has already wrapped across the window short tail.",
+       "This preceding segment has already wrapped across the window short tail.",
+       " short", 140},
+  };
+  for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+    const size_t at = (size_t)(strstr(cases[i].text, cases[i].marker) -
+                               cases[i].text);
+    uint8_t preferred[AR_TEXT_BOUNDARY_BYTES(128)] = {0};
+    ArTextBoundary_Set(preferred, at, true);
+    ArTextRasterRequest request = Request(cases[i].text);
+    request.flags |= kArTextRasterFlag_IncludeRevealClusters;
+    request.maximum_width = cases[i].width;
+    request.maximum_height = 400;
+    request.preferred_line_breaks = preferred;
+    request.preferred_line_break_capacity = 128;
+    ArTextBitmap actual = {0}, reference = {0};
+    char error[256] = {0};
+    CHECK(ArTextRasterizer_Rasterize(
+        rasterizer, &request, &actual, NULL, error, sizeof(error)));
+    request.utf8 = cases[i].resolved;
+    request.utf8_bytes = strlen(cases[i].resolved);
+    request.preferred_line_breaks = NULL;
+    request.preferred_line_break_capacity = 0;
+    CHECK(ArTextRasterizer_Rasterize(
+        rasterizer, &request, &reference, NULL, error, sizeof(error)));
+    if (actual.pixels && reference.pixels)
+      CHECK(BitmapHash(&actual) == BitmapHash(&reference));
+    if (actual.pixels) ArTextRasterizer_ReleaseBitmap(rasterizer, &actual);
+    if (reference.pixels)
+      ArTextRasterizer_ReleaseBitmap(rasterizer, &reference);
+  }
+}
+
 static uint32_t Pixel(const ArTextBitmap *bitmap, int x, int y) {
   uint32_t pixel = 0;
   if (x >= 0 && y >= 0 && x < bitmap->width && y < bitmap->height)
@@ -84,6 +127,13 @@ static int ClusterX(const ArTextBitmap *bitmap, size_t end) {
   for (size_t i = 0; i < bitmap->reveal_cluster_count; ++i)
     if (bitmap->reveal_clusters[i].end_utf8_byte == end)
       return bitmap->reveal_clusters[i].x;
+  return -1;
+}
+
+static int ClusterLine(const ArTextBitmap *bitmap, size_t end) {
+  for (size_t i = 0; i < bitmap->reveal_cluster_count; ++i)
+    if (bitmap->reveal_clusters[i].end_utf8_byte == end)
+      return bitmap->reveal_clusters[i].line_index;
   return -1;
 }
 
@@ -316,6 +366,21 @@ static void TestBidiLines(const ArTextRasterizer *rasterizer) {
     }
     ArTextRasterizer_ReleaseBitmap(rasterizer, &bitmap);
   }
+  /* RTL word wrapping recognizes breakable Unicode spacing, rather than
+   * splitting the following Latin word as if the spacing were a glyph. */
+  ArTextRasterRequest spaced = Request("مرحبا\xe2\x80\x83" "ABCDEFGHIJ");
+  spaced.flags |= kArTextRasterFlag_IncludeRevealClusters;
+  spaced.direction = kArTextDirection_RightToLeft;
+  spaced.maximum_width = 110;
+  spaced.maximum_height = 600;
+  ArTextBitmap spaced_bitmap = {0};
+  CHECK(ArTextRasterizer_Rasterize(rasterizer, &spaced, &spaced_bitmap,
+                                    NULL, error, sizeof(error)));
+  if (spaced_bitmap.pixels) {
+    const size_t latin_first_end = strlen("مرحبا\xe2\x80\x83") + 1u;
+    CHECK(ClusterLine(&spaced_bitmap, latin_first_end) >= 1);
+    ArTextRasterizer_ReleaseBitmap(rasterizer, &spaced_bitmap);
+  }
 }
 
 /* Compare against an independent, unclipped effect footprint. Every face and
@@ -494,6 +559,7 @@ static void TestRasterization(void) {
   CHECK(rasterizer != NULL);
   TestEffectOwnership(rasterizer);
   TestNumeralStyling(rasterizer);
+  TestPreferredLineBreaks(rasterizer);
 
   /* Pin the fixture's reason for existing: neither non-Latin script is in
    * the base face, and its ordered fallback really does provide it. */

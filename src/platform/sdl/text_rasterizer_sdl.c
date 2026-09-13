@@ -1,4 +1,5 @@
 #include "platform/sdl/text_rasterizer_sdl.h"
+#include "localization/text_boundaries.h"
 #include "localization/unicode_grapheme.h"
 
 #include <stddef.h>
@@ -474,9 +475,7 @@ static bool ConfigureFontForRequest(
   return true;
 }
 
-static char *PrepareText(const ArTextRasterRequest *request) {
-  char *text = (char *)malloc(request->utf8_bytes + 1u);
-  if (!text) return NULL;
+static void ResetPreparedText(const ArTextRasterRequest *request, char *text) {
   memcpy(text, request->utf8, request->utf8_bytes);
   text[request->utf8_bytes] = '\0';
   if (!(request->flags & kArTextRasterFlag_PreserveHardBreaks)) {
@@ -484,7 +483,43 @@ static char *PrepareText(const ArTextRasterRequest *request) {
       if (text[i] == '\r' || text[i] == '\n') text[i] = ' ';
     }
   }
+}
+
+static char *PrepareText(const ArTextRasterRequest *request) {
+  char *text = (char *)malloc(request->utf8_bytes + 1u);
+  if (!text) return NULL;
+  ResetPreparedText(request, text);
   return text;
+}
+
+/* Native extraction can identify a likely intentional row break, but only the
+ * final font stack and projected output bounds can decide whether retaining it
+ * still improves the proportional layout. The byte remains one byte (space or
+ * LF), so reveal offsets and typed bidi spans keep their stable coordinates. */
+static bool ResolvePreferredLineBreaks(
+    TTF_Font *font, const ArTextRasterRequest *request, char *text,
+    int wrap_width) {
+  if (!request->preferred_line_breaks) return true;
+  size_t segment = 0;
+  for (size_t i = 0; i < request->utf8_bytes; ++i) {
+    if (text[i] == '\r' || text[i] == '\n') {
+      segment = i + 1u;
+      continue;
+    }
+    if (text[i] != ' ' ||
+        !ArTextBoundary_Get(request->preferred_line_breaks,
+                            request->preferred_line_break_source_offset + i))
+      continue;
+    int width = 0, height = 0;
+    if (!TTF_GetStringSize(font, text + segment, i - segment,
+                           &width, &height))
+      return false;
+    if (width <= wrap_width) {
+      text[i] = '\n';
+      segment = i + 1u;
+    }
+  }
+  return true;
 }
 
 /* Matches kArTextSurfaceMaximumRequestBytes: no single request is worth more
@@ -521,7 +556,7 @@ static void DestroyRasterAttempt(RasterAttempt *attempt) {
  * identical request can survive; the rest are properties of the request. */
 static RasterAttemptResult RasterizeAtSize(
     SdlTextRasterizerState *state, const ArTextRasterRequest *request,
-    const char *text, int font_pixels, RasterAttempt *attempt,
+    char *text, int font_pixels, RasterAttempt *attempt,
     ArTextRasterFailure *failure, char *error, size_t error_capacity) {
   memset(attempt, 0, sizeof(*attempt));
   /* Classification for the error exits below; the non-error returns clear it,
@@ -553,6 +588,11 @@ static RasterAttemptResult RasterizeAtSize(
   if (wrap_width <= 0) {
     *failure = kArTextRasterFailure_None;
     return kRasterAttempt_ExceedsBounds;
+  }
+  ResetPreparedText(request, text);
+  if (!ResolvePreferredLineBreaks(set->primary, request, text, wrap_width)) {
+    SetError(error, error_capacity, SDL_GetError());
+    return kRasterAttempt_Error;
   }
 
   /* Measure before rendering. A fixed field disables wrapping, so an accepted

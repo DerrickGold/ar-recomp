@@ -100,7 +100,7 @@ bool ArTextRasterRequest_IsValid(const ArTextRasterRequest *request) {
       kArTextRasterFlag_IncludeRevealClusters;
   return request &&
       request->struct_size >= AR_MEMBER_END(
-          ArTextRasterRequest, bidi_source_offset) &&
+          ArTextRasterRequest, preferred_line_break_source_offset) &&
       request->abi_version == AR_TEXT_RASTER_REQUEST_ABI_VERSION &&
       ValidUtf8Buffer(request->utf8, request->utf8_bytes) &&
       ArTextBidiSpans_Valid(request->bidi_spans, request->bidi_span_count,
@@ -123,6 +123,18 @@ bool ArTextRasterRequest_IsValid(const ArTextRasterRequest *request) {
       request->direction <= kArTextDirection_RightToLeft &&
       request->alignment >= kArTextHorizontalAlignment_Leading &&
       request->alignment <= kArTextHorizontalAlignment_Right &&
+      ((!request->preferred_line_breaks &&
+        request->preferred_line_break_capacity == 0 &&
+        request->preferred_line_break_source_offset == 0) ||
+       (request->preferred_line_breaks &&
+        request->preferred_line_break_source_offset <=
+            request->preferred_line_break_capacity &&
+        request->utf8_bytes <= request->preferred_line_break_capacity -
+            request->preferred_line_break_source_offset &&
+        (request->flags & (kArTextRasterFlag_WrapWords |
+                           kArTextRasterFlag_PreserveHardBreaks)) ==
+            (kArTextRasterFlag_WrapWords |
+             kArTextRasterFlag_PreserveHardBreaks))) &&
       (request->flags & ~known_flags) == 0 &&
       (request->filter == kArRenderFilter_Nearest ||
        request->filter == kArRenderFilter_Linear) &&

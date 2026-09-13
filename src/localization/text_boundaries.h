@@ -5,8 +5,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/* One bit per UTF-8 byte. A set bit marks an authored table delimiter (`|`
- * or newline), never punctuation supplied by a dynamic value. Buffers use
+/* One bit per UTF-8 byte. A set bit marks authored presentation structure:
+ * a table delimiter (`|` or newline), or a preferred flowing-dialogue break
+ * on an ASCII space. Dynamic values never create structure. Buffers use
  * ceil(text_capacity / 8) bytes; callers own and bound their storage. */
 #define AR_TEXT_BOUNDARY_BYTES(capacity) (((capacity) + 7u) / 8u)
 

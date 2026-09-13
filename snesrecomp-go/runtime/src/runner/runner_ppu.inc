@@ -1081,9 +1081,59 @@ static SrResult update_ppu_authentic_camera(
     return SR_RESULT_OK;
 }
 
-static SrResult run_ppu_scanout(
+static bool background_view_overlaps(const SrPpuBackgroundViewRequest *view,
+        const void *pixels, uint64_t bytes) {
+    if (pixels == NULL || bytes == 0u) return false;
+    uintptr_t a = (uintptr_t)view->pixels, b = (uintptr_t)pixels;
+    uint64_t size = view->pitch_bytes * view->height;
+    return a <= b ? (uint64_t)(b - a) < size : (uint64_t)(a - b) < bytes;
+}
+
+static bool valid_background_view(const Ppu *ppu,
+        const SrPpuBackgroundViewRequest *view) {
+    if (ppu == NULL || view == NULL ||
+        view->struct_size < SR_PPU_BACKGROUND_VIEW_REQUEST_SIZE ||
+        view->layer >= 2u || view->world_width == 0u ||
+        view->world_width > UINT16_MAX || view->world_height == 0u ||
+        view->world_height > UINT16_MAX || view->width == 0u ||
+        view->width > kPpuBufWidth || view->width > view->world_width ||
+        view->height == 0u || view->height > kPpuBufHeight ||
+        view->screen_x0 < -kPpuExtraLeftRight ||
+        view->screen_x0 > kPpuXPixels ||
+        view->screen_y0 < -(int)ppu->extraTopCur ||
+        (int64_t)view->screen_y0 + view->height >
+            kPpuYPixels + ppu->extraBottomCur ||
+        view->pixels == NULL ||
+        (uintptr_t)view->pixels % _Alignof(uint32_t) != 0u ||
+        view->pitch_bytes < (uint64_t)view->width * sizeof(uint32_t) ||
+        view->pitch_bytes > kPpuSurfaceWidth * sizeof(uint32_t) ||
+        view->pitch_bytes % sizeof(uint32_t) != 0u ||
+        view->pixel_byte_size < view->pitch_bytes * view->height ||
+        view->pitch_bytes * view->height > UINTPTR_MAX - (uintptr_t)view->pixels)
+        return false;
+    if (background_view_overlaps(view, ppu->renderBuffer,
+            (uint64_t)ppu->renderPitch * ppu->renderHeight) ||
+        background_view_overlaps(view, ppu->authenticRenderBuffer,
+            (uint64_t)ppu->authenticRenderPitch * ppu->authenticRenderHeight) ||
+        background_view_overlaps(view, ppu->objRangeCapture.pixels,
+            (uint64_t)ppu->objRangeCapture.pitch * kPpuYPixels))
+        return false;
+    for (int source = 0; source < kPpuOverlaySource_Count; ++source) {
+        uint64_t bytes = (uint64_t)ppu->overlayRenderPitch[source] *
+            ppu->overlayRenderHeight[source];
+        if (background_view_overlaps(view, ppu->overlayRenderBuffer[source], bytes))
+            return false;
+        for (int band = 0; band < 3; ++band)
+            if (background_view_overlaps(view,
+                    ppu->overlayRenderBands[source][band], bytes)) return false;
+    }
+    return true;
+}
+
+static SrResult run_ppu_scanout_with_background_view(
         SrRunnerHandle *runner,
         const SrPpuScanoutRequest *request,
+        const SrPpuBackgroundViewRequest *view,
         SrPpuScanoutResult *out_result) {
     Snes *snes = runner_from_handle(runner);
     if (snes == NULL || request == NULL || out_result == NULL ||
@@ -1096,12 +1146,21 @@ static SrResult run_ppu_scanout(
         return SR_RESULT_INVALID_ARGUMENT;
     if (request->lifetime_generation != snes->abiLifetimeGeneration)
         return SR_RESULT_STALE_VIEW;
+    if (view != NULL && !valid_background_view(snes->ppu, view))
+        return SR_RESULT_INVALID_ARGUMENT;
     memset(out_result, 0, SR_PPU_SCANOUT_RESULT_V2_SIZE);
     out_result->struct_size = SR_PPU_SCANOUT_RESULT_V2_SIZE;
     out_result->lifetime_generation = snes->abiLifetimeGeneration;
     if (s_ppu_scanout_runner != snes || s_ppu_scanout_provider == NULL)
         return SR_RESULT_UNAVAILABLE;
-    return s_ppu_scanout_provider(snes, request, out_result);
+    return s_ppu_scanout_provider(snes, request, view, out_result);
+}
+
+static SrResult run_ppu_scanout(
+        SrRunnerHandle *runner, const SrPpuScanoutRequest *request,
+        SrPpuScanoutResult *out_result) {
+    return run_ppu_scanout_with_background_view(
+        runner, request, NULL, out_result);
 }
 
 static SrResult validate_ppu_output_capacity(

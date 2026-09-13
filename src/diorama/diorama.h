@@ -71,6 +71,19 @@ typedef struct DioramaCameraPresentationState {
 void Diorama_CaptureCameraPresentationState(
     DioramaCameraPresentationState *state);
 
+/* Shared by focal framing and the rendered layer mesh. */
+enum { kDioramaPlaneSubdivY = 6 };
+
+/* Center the projected bounds of the focal mesh vertically. authentic_t0/t1
+ * delimit the native playfield within a capture: when the whole mesh cannot fit,
+ * keep that band visible (or center it if even the native band cannot fit).
+ * Changes only screen Y, preserving perspective, depth and horizontal framing.
+ * Invalid/unprojectable geometry leaves the matrix untouched. */
+bool Diorama_CenterCameraVertically(
+    float matrix[16], float aspect_x, float height_scale,
+    float z_world, float rake, float bow,
+    float authentic_t0, float authentic_t1);
+
 enum { kDioramaObjectPriorityCount = 4 };
 
 typedef struct DioramaPlaneProjection {
@@ -185,6 +198,10 @@ bool Diorama_ProjectCapturedBg2Point(const DioramaProjection *projection,
  * 4th DioramaCameraPose field — that struct is reused verbatim for
  * FrameSlot's settings snapshots (main.c), which have no kick state at all.
  *
+ * center_camera_vertically enables Dynamic Cam's projected focal-plane
+ * framing after the final pose and distance are resolved. Free Cam leaves it
+ * false to retain its authored framing and capture-margin pin.
+ *
  * `viewport` is the aspect-fit game rectangle in physical output pixels. The
  * compositor renders in viewport-local coordinates and restores the full
  * renderer viewport before returning.
@@ -221,6 +238,13 @@ bool Diorama_ProjectCapturedBg2Point(const DioramaProjection *projection,
  *
  * Complete and OptionalOmitted both mean the selected scene is usable;
  * CoreFailure means the caller must stop rather than present a partial view. */
+typedef struct DioramaSkyboxView {
+  ArRenderTexture texture;
+  uint64_t revision;
+  int width;
+  bool dynamic;
+} DioramaSkyboxView;
+
 PresentationOutcome Diorama_Composite(
     ArRenderDevice *device, int snes_width, int snes_height,
     int authentic_y0, int obj_apron,
@@ -230,12 +254,14 @@ PresentationOutcome Diorama_Composite(
     const bool bg_transparent_fill_configured[2],
     const uint32_t bg_transparent_fill_argb[2],
     const DioramaCameraPose *cam_pose, float distance_scale,
+    bool center_camera_vertically,
     uint32_t additive_plane_mask,
     const DioramaCoverageMask coverage_masks[kDioramaPlane_Count],
     uint64_t bg2_content_revision, bool bg2_content_dynamic,
     uint8_t effect_obj_priority_mask, uint32_t effect_bg_plane_mask,
     uint8_t map_group, uint8_t map_number, uint8_t layer_section,
     const DioramaBgValidSpanPlan *bg2_valid_spans,
+    const DioramaSkyboxView *skybox_view,
     DioramaPlaneEffectFn plane_effect, void *plane_effect_userdata,
     DioramaProjection *out_projection);
 

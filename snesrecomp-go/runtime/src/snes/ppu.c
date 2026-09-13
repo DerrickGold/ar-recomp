@@ -2366,7 +2366,10 @@ static bool native_fast_eligible(const Ppu *ppu, int screen_y,
         if (mode == 7 && (visible_layers & (1u << layer)) != 0u &&
             PPU_mosaicEnabled(ppu, layer) && PPU_mosaicSize(ppu) > 1)
             return false;
-        if (mode == 1 && binding->lookup != NULL &&
+        /* A disabled source cannot affect capture or either screen. Its
+         * dormant binding must not deoptimize all the visible sources. */
+        if (mode == 1 && (visible_layers & (1u << layer)) != 0u &&
+            binding->lookup != NULL &&
             (binding->flags & kPpuVirtualTilemapFlag_IncludeAuthentic) != 0u &&
             PPU_bigTiles(ppu, layer))
             return false;
@@ -3900,11 +3903,16 @@ static bool render_native_capture_line(Ppu *ppu, int screen_y,
             if (bpp_for_mode(PPU_mode(ppu), layer) == 0) continue;
             bg_active[layer] = true;
             if (native_virtual_bg_span_eligible(ppu, layer)) {
+                /* Hardware priority needs no custom band output: the scratch
+                 * row already contains its 0xff sentinel. Requesting bands
+                 * without a classifier only rewrites that sentinel and keeps
+                 * otherwise ordinary captures off the whole-tile path. */
                 native_resolve_virtual_bg_span(
                     ppu, layer, screen_y, source_needs_sub[layer],
                     left, right,
                     kPpuExtraLeftRight, layer_main[layer], layer_sub[layer],
-                    layer < 2 ? bands[layer] : NULL);
+                    ppu->virtualTilemap[layer].band_lookup != NULL
+                        ? bands[layer] : NULL);
                 resolved_span[layer] = true;
             } else if (ppu->virtualTilemap[layer].lookup == NULL) {
                 bool mosaic = PPU_mosaicEnabled(ppu, layer) &&
@@ -4689,6 +4697,117 @@ static void render_line(Ppu *ppu, int line) {
         }
     }
     if (!authentic_done) render_authentic(ppu, screen_y);
+}
+
+bool PpuRenderBackgroundViewLine(Ppu *ppu,
+        const SrPpuBackgroundViewRequest *view, int screen_y) {
+    if (screen_y < view->screen_y0 ||
+        screen_y >= view->screen_y0 + (int)view->height) return true;
+    uint32_t *row = (uint32_t *)((uint8_t *)view->pixels +
+        (size_t)(screen_y - view->screen_y0) * (size_t)view->pitch_bytes);
+    memset(row, 0, view->width * sizeof(*row));
+    if (PPU_forcedBlank(ppu)) return true;
+    int layer = (int)view->layer;
+    const PpuVirtualTilemapBinding *binding = &ppu->virtualTilemap[layer];
+    const PpuOverlayCapture *capture = &ppu->overlayCaptures[layer];
+    const unsigned supported_flags = kPpuOverlayFlag_RemoveFromGame |
+        kPpuOverlayFlag_MarkBgHalfAdd | kPpuOverlayFlag_ApplyBgFixedColorSubtract;
+    bool owner_sub = (ppu->screenEnabled[0] & (1u << layer)) == 0u;
+    int window = (ppu->screenWindowed[owner_sub ? 1 : 0] & (1u << layer))
+        ? native_window_uniform(ppu, layer) : 0;
+    PpuWidescreenLayerPolicy policy =
+        PpuResolveWidescreenLayerPolicy(ppu, (uint8_t)layer, screen_y);
+    if (PPU_mode(ppu) != 1 || PPU_bigTiles(ppu, layer) ||
+        (PPU_mosaicEnabled(ppu, layer) && PPU_mosaicSize(ppu) > 1) ||
+        binding->lookup == NULL || binding->band_lookup != NULL ||
+        !(binding->flags & kPpuVirtualTilemapFlag_IncludeAuthentic) ||
+        window < 0 ||
+        !capture_surface_bound(ppu, layer) ||
+        (capture->flags & ~supported_flags) != 0u ||
+        (policy.fill != kPpuWidescreenBandFill_RawWrap &&
+         policy.fill != kPpuWidescreenBandFill_LiveWorld))
+        return false;
+    uint32_t fill = PpuOverlayTransparentFillColor(ppu, (PpuOverlaySource)layer);
+    if (fill != 0u)
+        for (unsigned x = 0; x < view->width; ++x) row[x] = fill;
+    if (window || !(ppu->screenEnabled[owner_sub ? 1 : 0] & (1u << layer)))
+        return true;
+    int64_t world_row = (int64_t)binding->camera_y + screen_y + 1 +
+        wrapped_delta10(ppu->vScroll[layer], binding->vscroll_anchor);
+    if (world_row < 0 || world_row >= view->world_height) return true;
+    int world_y = (int)world_row;
+    int64_t camera_x = (int64_t)binding->camera_x +
+        wrapped_delta10(ppu->hScroll[layer], binding->hscroll_anchor);
+    int64_t left = camera_x + view->screen_x0;
+    int maximum = (int)(view->world_width - view->width);
+    if (left < 0) left = 0;
+    if (left > maximum) left = maximum;
+    int64_t source_x0 = left - camera_x;
+
+    /* Preserve the ordinary primary capture exactly wherever it already
+     * covers this view. Only the newly exposed edge requires tile decoding;
+     * there is no second scanout, register mutation or per-pixel PPU clone. */
+    int extent_y = clamp_int(screen_y, 0, kPpuYPixels - 1);
+    int copy_left = -ppu->extraLeftCur;
+    int copy_right = kPpuXPixels + ppu->extraRightCur;
+    if (ppu->wsLayerExtentLeft[layer][extent_y] != kPpuWidescreenExtentAvailable &&
+        copy_left < -(int)ppu->wsLayerExtentLeft[layer][extent_y])
+        copy_left = -(int)ppu->wsLayerExtentLeft[layer][extent_y];
+    if (ppu->wsLayerExtentRight[layer][extent_y] != kPpuWidescreenExtentAvailable &&
+        copy_right > kPpuXPixels + ppu->wsLayerExtentRight[layer][extent_y])
+        copy_right = kPpuXPixels + ppu->wsLayerExtentRight[layer][extent_y];
+    if (copy_left < capture->x0) copy_left = capture->x0;
+    if (copy_right > capture->x1) copy_right = capture->x1;
+    int64_t copy_begin = copy_left - source_x0;
+    int64_t copy_end = copy_right - source_x0;
+    int begin = copy_begin < 0 ? 0 : copy_begin > view->width
+        ? (int)view->width : (int)copy_begin;
+    int end = copy_end < begin ? begin : copy_end > view->width
+        ? (int)view->width : (int)copy_end;
+    int source_row = overlay_row(capture, screen_y);
+    if (screen_y < capture->y0 || screen_y >= capture->y1 ||
+        source_row < 0 || source_row >= kPpuBufHeight) return false;
+    const uint32_t *captured = (const uint32_t *)(ppu->overlayRenderBuffer[layer] +
+        (size_t)source_row * ppu->overlayRenderPitch[layer]);
+    int origin = surface_origin_x(ppu, ppu->overlayRenderPitch[layer]);
+    if (end > begin)
+        memcpy(row + begin, captured + origin + source_x0 + begin,
+               (size_t)(end - begin) * sizeof(*row));
+    if (begin == 0 && end == (int)view->width) return true;
+
+    NativeOverlayLinePlan colors;
+    if (!ppu->cgramRgbValid) rebuild_cgram_rgb(ppu);
+    native_overlay_line_plan(ppu, layer, screen_y, &colors);
+    for (int side = 0; side < 2; ++side) {
+        int x = side == 0 ? 0 : end;
+        int limit = side == 0 ? begin : (int)view->width;
+        while (x < limit) {
+            int world_x = (int)left + x;
+            int fine_x = world_x & 7;
+            int run = 8 - fine_x;
+            if (run > limit - x) run = limit - x;
+            uint16_t entry = 0;
+            PpuVirtualTilemapLookupResult found = binding->lookup(
+                binding->context, world_x / 8, world_y / 8, &entry);
+            if (found == kPpuVirtualTilemapLookup_FallbackAuthentic) return false;
+            int tile_y = world_y & 7;
+            if (entry & 0x8000u) tile_y = 7 - tile_y;
+            uint32_t decoded = found == kPpuVirtualTilemapLookup_Found
+                ? decoded_4bpp_row(ppu, PPU_bgTileAdr(ppu, layer) +
+                    (entry & 0x3ffu) * 16 + tile_y) : 0u;
+            /* Primary capture excludes priority-1 art when separately bound. */
+            if ((entry & 0x2000u) && ppu->overlayRenderBands[layer][0]) decoded = 0u;
+            for (int i = 0; i < run; ++i) {
+                int px = fine_x + i;
+                if (entry & 0x4000u) px = 7 - px;
+                unsigned pixel = (decoded >> (px * 4)) & 15u;
+                row[x + i] = pixel
+                    ? colors.colors[((entry >> 10) & 7u) * 16u + pixel] : fill;
+            }
+            x += run;
+        }
+    }
+    return true;
 }
 
 void ppu_runLine(Ppu *ppu, int line) {

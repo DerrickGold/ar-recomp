@@ -559,12 +559,16 @@ Ordinary physical lines in one paragraph are joined with wrappable whitespace.
 A blank source line starts a paragraph. Source extraction compares each native
 dialogue line plus the next complete word with the region's native cell width.
 If the word fits (including an exact fit), the exporter keeps the break as
-`@line`; if it overflows, the exporter makes that break wrappable whitespace.
-This preserves short greetings and similar deliberate-looking lines while
-allowing width-induced wraps to adapt to enhanced fonts.
+`@preferred-line`; if it overflows, the exporter makes that break wrappable
+whitespace. At runtime, a preferred break is kept only when the preceding
+segment still fits on one line in the selected proportional font and projected
+output box. If that segment has already wrapped, it becomes ordinary word
+spacing. This preserves short greetings and similar deliberate-looking lines
+without stranding a later short word after an earlier enhanced-font reflow.
 
 This is an inference, not proof of the original author's intent: review the
-exported `@line` commands and add or remove them as appropriate. Unknown dynamic
+exported `@preferred-line` commands and promote them to `@line`, or replace them
+with ordinary spacing, as appropriate. Unknown dynamic
 widths (such as the player name), missing geometry, Japanese text without
 reliable space-delimited words, and unprofiled ending layouts preserve their
 breaks conservatively. Fixed menu/table rows are always kept. This conversion
@@ -583,6 +587,7 @@ The supported commands are:
 | Command | Meaning |
 | --- | --- |
 | `@line` | Intentional hard line break. |
+| `@preferred-line` | Flowing dialogue only: retain the native row break if the preceding proportional segment still fits on one line; otherwise treat it as a space. |
 | blank line or `@paragraph` | Paragraph break. |
 | `@page` | Authored page break. Pages may be added, removed, or reordered. |
 | `@wait N` | Optional presentation delay of 1–600 frames. |
@@ -840,7 +845,8 @@ Native locked delays are part of the generated control contract and do not
 consume the author-wait budget.
 
 Use `@line`/`@paragraph` for structural breaks in fixed fields, tables and name
-entry. Raw NEL/U+2028/U+2029 line-separator controls are rejected there so they
+entry. `@preferred-line` is rejected outside flowing dialogue. Raw
+NEL/U+2028/U+2029 line-separator controls are rejected there so they
 cannot bypass native row/choice boundaries. Flowed dialogue and the shared text
 backend recognize Unicode separators; U+2028 retains its paragraph's bidi base,
 whereas paragraph separators resolve a new base. These controls need no glyph.

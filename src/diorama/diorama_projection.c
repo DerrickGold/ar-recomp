@@ -5,6 +5,90 @@
 #include "diorama_depth_shapes.h"
 #include "scene3d_math.h"
 
+/* A projected triangle reaches its Y extrema at its vertices while entirely
+ * in front of the camera. Across each mesh row only the two side vertices are
+ * needed. At an authentic-band boundary between rows, interpolate the rendered
+ * mesh's depth rather than resampling its underlying curve. */
+static bool CameraVerticalBounds(
+    const float matrix[16], float aspect_x, float height_scale,
+    float z_world, float rake, float bow,
+    float t0, float t1, float *top, float *bottom) {
+  const int subdiv_y = kDioramaPlaneSubdivY;
+  *top = INFINITY;
+  *bottom = -INFINITY;
+  for (int row = -1; row <= subdiv_y + 1; row++) {
+    const float t = row < 0 ? t0 : row > subdiv_y ? t1
+        : (float)row / (float)subdiv_y;
+    if (t < t0 || t > t1) continue;
+    float z;
+    if (row >= 0 && row <= subdiv_y) {
+      z = DioramaTiltedRowDepth(z_world, rake, bow, t);
+    } else {
+      const int lower = (int)floorf(t * (float)subdiv_y);
+      const int upper = lower < subdiv_y ? lower + 1 : lower;
+      const float a = DioramaTiltedRowDepth(
+          z_world, rake, bow, (float)lower / (float)subdiv_y);
+      const float b = DioramaTiltedRowDepth(
+          z_world, rake, bow, (float)upper / (float)subdiv_y);
+      z = a + (b - a) * (t * (float)subdiv_y - (float)lower);
+    }
+    for (int side = 0; side < 2; side++) {
+      Scene3DPoint p;
+      /* A unit viewport gives normalized screen coordinates, independent of
+       * resolution, pixel aspect, or the viewport's output origin. */
+      if (!Scene3D_ProjectWorldPoint(
+              matrix, ((float)side - 0.5f) * aspect_x,
+              (0.5f - t) * height_scale, z, 1, 1, &p))
+        return false;
+      *top = fminf(*top, p.y);
+      *bottom = fmaxf(*bottom, p.y);
+    }
+  }
+  return true;
+}
+
+bool Diorama_CenterCameraVertically(
+    float matrix[16], float aspect_x, float height_scale,
+    float z_world, float rake, float bow,
+    float authentic_t0, float authentic_t1) {
+  if (!matrix || !isfinite(aspect_x) || aspect_x <= 0.0f ||
+      !isfinite(height_scale) || height_scale <= 0.0f ||
+      !isfinite(z_world) || !isfinite(rake) || !isfinite(bow) ||
+      !isfinite(authentic_t0) || !isfinite(authentic_t1) ||
+      authentic_t0 < 0.0f || authentic_t1 > 1.0f ||
+      authentic_t0 >= authentic_t1)
+    return false;
+  for (int i = 0; i < 16; i++)
+    if (!isfinite(matrix[i])) return false;
+
+  float top, bottom;
+  if (!CameraVerticalBounds(matrix, aspect_x, height_scale,
+                           z_world, rake, bow,
+                           0.0f, 1.0f, &top, &bottom))
+    return false;
+  float shift = 0.5f - 0.5f * (top + bottom);
+  if (bottom - top > 1.0f) {
+    float native_top, native_bottom;
+    if (!CameraVerticalBounds(matrix, aspect_x, height_scale,
+                             z_world, rake, bow,
+                             authentic_t0, authentic_t1,
+                             &native_top, &native_bottom))
+      return false;
+    if (native_bottom - native_top <= 1.0f)
+      shift = fmaxf(-native_top, fminf(shift, 1.0f - native_bottom));
+    else
+      shift = 0.5f - 0.5f * (native_top + native_bottom);
+  }
+
+  /* Clip Y += offset * clip W is a uniform screen translation after the
+   * perspective divide. Apply it to the shared matrix so every depth plane,
+   * skirt, aperture and attached effect receives exactly the same shift. */
+  const float clip_shift = -2.0f * shift;
+  for (int c = 0; c < 4; c++)
+    matrix[c * 4 + 1] += clip_shift * matrix[c * 4 + 3];
+  return true;
+}
+
 bool Diorama_PlaneEligible(int plane, bool visible, bool has_texture,
                            bool has_pixels, bool hud_flat, bool skybox_only) {
   if (!visible || !has_texture || !has_pixels) return false;

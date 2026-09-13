@@ -96,6 +96,8 @@ typedef struct WorldNavigationShellGeometry {
   ArRenderRectI viewport;
   bool ready;
   Sim3DDepthVertex points[kWorldNavigationOceanVertexCount];
+  bool occlusion;
+  int first_index, first_vertex;
   Scene3DClipPoint clip[kWorldNavigationOceanVertexCount];
   float normal[kWorldNavigationOceanVertexCount][3];
   float alpha[kWorldNavigationOceanVertexCount];
@@ -391,6 +393,9 @@ static struct {
   float longitude_sin[kWorldNavigationOceanSectors];
   int32_t indices[
       kWorldNavigationOceanIndexCount];
+  /* Navigation submits only the retained atmosphere vertex suffix. Keep
+   * its rebased indices separate from the ocean/cloud topology. */
+  int32_t atmosphere_indices[kWorldNavigationOceanIndexCount];
   ArRenderVertex2D vertices[
       kWorldNavigationOceanVertexCount];
 } s_world_shells;
@@ -1964,7 +1969,9 @@ static bool PrepareWorldNavigationSphereShell(
     ArRenderRectI viewport,
     const WorldNavigationProjection *projection, WorldNavigationShell kind,
     WorldNavigationShellGeometry *geometry) {
-  if (geometry->ready && !memcmp(&geometry->projection, projection, sizeof(*projection)) &&
+  const bool occlusion = kind == kWorldNavigationShell_Atmosphere && WorldNavigationGpuGridEnabled();
+  if (geometry->ready && geometry->occlusion == occlusion &&
+      !memcmp(&geometry->projection, projection, sizeof(*projection)) &&
       !memcmp(&geometry->viewport, &viewport, sizeof(viewport))) return true;
   Sim3DPerformance_AddPath(kSim3DPath_CpuProject);
   geometry->ready = false;
@@ -1986,10 +1993,18 @@ static bool PrepareWorldNavigationSphereShell(
   float outward[3], right[3], up[3], eye_distance;
   if (!WorldNavigationShellFrame(projection,radius,centre_z,outward,right,up,&eye_distance)) return false;
   const float maximum_angle = atmosphere || cloud ? acosf(radius / eye_distance) : kPi;
+  const int first_ring = occlusion ? WorldNavigationOccludedShellRings(projection,
+      radius, eye_distance, kWorldNavigationOceanRings, kWorldNavigationOceanSectors) : 0;
+  geometry->occlusion = occlusion;
+  geometry->first_index = first_ring
+      ? kWorldNavigationOceanSectors * (3 + (first_ring - 1) * 6) : 0;
+  geometry->first_vertex = first_ring ? 1 + (first_ring - 1) * kWorldNavigationOceanSectors : 0;
   Sim3DDepthVertex *depth_vertices = geometry->points;
   Scene3DClipPoint *clip_vertices = geometry->clip;
   int vertex_count = 0;
   for (int ring = 0; ring <= kWorldNavigationOceanRings; ring++) {
+    const int sectors = ring ? kWorldNavigationOceanSectors : 1;
+    if (ring < first_ring) { vertex_count += sectors; continue; }
     const float radial = ring / (float)kWorldNavigationOceanRings;
     const float angle = radial * maximum_angle;
     const float sine = sinf(angle), cosine = cosf(angle);
@@ -2010,7 +2025,6 @@ static bool PrepareWorldNavigationSphereShell(
             (eye_distance * cosine - radius) / ray_length);
       }
     }
-    const int sectors = ring ? kWorldNavigationOceanSectors : 1;
     for (int sector = 0; sector < sectors; sector++) {
       const float cx = s_world_shells.longitude_cos[sector];
       const float sy = s_world_shells.longitude_sin[sector];
@@ -2053,6 +2067,10 @@ static bool PrepareWorldNavigationSphereShell(
       ++vertex_count;
     }
   }
+  if (atmosphere && !projection->clip_frustum)
+    for (int i = geometry->first_index; i < kWorldNavigationOceanIndexCount; ++i)
+      s_world_shells.atmosphere_indices[i - geometry->first_index] =
+          s_world_shells.indices[i] - geometry->first_vertex;
   geometry->projection = *projection;
   geometry->viewport = viewport;
   geometry->ready = true;
@@ -2131,7 +2149,7 @@ static bool DrawWorldNavigationSphereShell(
         for (int p = 0; p < 6; p++) indices[i * 6 + p] = i * 4 + corners[p];
       }
       size_t used = 0;
-      for (int i = 0; i < kWorldNavigationOceanIndexCount; i += 3) {
+      for (int i = geometry->first_index; i < kWorldNavigationOceanIndexCount; i += 3) {
         Sim3DDepthVertex input[4], clipped[kWorldNavigationClippedQuads * 4];
         Scene3DClipPoint clip[4];
         for (int p = 0; p < 4; p++) {
@@ -2165,9 +2183,10 @@ static bool DrawWorldNavigationSphereShell(
     }
     return ArRenderDevice_DrawGeometryWithState(
         &g_render_device, ArRenderTexture_Invalid(),
-        s_world_shells.vertices, kWorldNavigationOceanVertexCount,
-        s_world_shells.indices,
-        kWorldNavigationOceanIndexCount, &state);
+        s_world_shells.vertices + geometry->first_vertex,
+        kWorldNavigationOceanVertexCount - geometry->first_vertex,
+        s_world_shells.atmosphere_indices,
+        kWorldNavigationOceanIndexCount - geometry->first_index, &state);
   }
   /* Bound stack use while amortizing backend reservation/conversion calls.
    * Keep each original triangle, including its duplicate fourth corner,

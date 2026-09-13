@@ -99,6 +99,7 @@ static const char kScript[] =
     ":: sky.demo\n"
     "@anchor reset_text_cursor.00\n"
     "Bienvenue, {master_name}.\n"
+    "@preferred-line\n"
     "Cette ligne continue.  \n"
     "\n"
     "Un paragraphe avec {{accolades}}.\n"
@@ -224,6 +225,8 @@ static void TestFullLoad(void) {
       FindOperation(&pack, demo, kArLanguageOperation_WaitFrames);
   CHECK(wait && wait->value.wait_frames == 30);
   CHECK(FindOperation(&pack, demo, kArLanguageOperation_ParagraphBreak));
+  CHECK(FindOperation(&pack, demo,
+                      kArLanguageOperation_PreferredLineBreak));
   CHECK(FindOperation(&pack, demo, kArLanguageOperation_PageBreak));
   const ArLanguageOperation *end =
       ArLanguagePack_GetOperation(&pack, demo, demo->operation_count - 1);
@@ -633,8 +636,8 @@ static void PrintJsonString(const char *value) {
  * No second parser or game executable/ROM is involved. */
 static void DumpPack(const ArLanguagePack *pack) {
   static const char *const kinds[] = {
-      "text", "placeholder", "line", "paragraph", "page", "wait",
-      "anchor", "event", "empty", "end"};
+      "text", "placeholder", "line", "preferred_line", "paragraph",
+      "page", "wait", "anchor", "event", "empty", "end"};
   putchar('[');
   for (uint32_t i = 0; i < ArLanguagePack_MessageCount(pack); i++) {
     const ArLanguageMessage *message = ArLanguagePack_GetMessage(pack, i);

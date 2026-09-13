@@ -1,0 +1,20 @@
+{
+  "initial": {
+    "available_bytes": 12566720512,
+    "gpu_bytes": 409800704,
+    "temperature_c": 52.0,
+    "cpu0_khz": 1702569
+  },
+  "final": {
+    "available_bytes": 12567490560,
+    "gpu_bytes": 409800704,
+    "temperature_c": 53.0,
+    "cpu0_khz": 3499486
+  },
+  "minimum_available_bytes": 12483407872,
+  "peak_gpu_bytes": 571617280,
+  "peak_temperature_c": 55.0,
+  "seconds": 13.217575670998485,
+  "returncode": 0,
+  "abort_reason": null
+}

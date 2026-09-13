@@ -314,6 +314,16 @@ bool ArLocalizationFrame_AddDialogueWindow(
     const char *utf8, size_t utf8_bytes, uint32_t revealed_utf8_bytes,
     uint32_t cluster_count, uint64_t source_revision,
     ArTextDirection direction, uint8_t native_font_pixels);
+/* Dialogue variant that preserves compiler-authored presentation boundaries.
+ * A boundary on an ASCII space is a preferred native row break; the text
+ * backend decides whether to keep it after measuring the proportional font. */
+bool ArLocalizationFrame_AddStructuredDialogueWindow(
+    ArLocalizationFrame *frame, uint32_t surface_id,
+    ArTextCellDestination destination, ArTextCellRegion region,
+    const char *utf8, size_t utf8_bytes, uint32_t revealed_utf8_bytes,
+    uint32_t cluster_count, uint64_t source_revision,
+    ArTextDirection direction, uint8_t native_font_pixels,
+    const uint8_t *structural_boundaries);
 bool ArLocalizationFrame_SetFont(ArLocalizationFrame *frame,
                                  const char *locale,
                                  const char *font_stack_id,

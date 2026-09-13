@@ -68,6 +68,9 @@ static uint32_t s_diorama_uploaded_plane_mask;
 static DioramaCoverageMask
     s_diorama_coverage_masks[kDioramaPlane_Count];
 static uint64_t s_diorama_bg2_content_revision;
+static DioramaSkyboxView s_diorama_skybox_view;
+static ArRenderTexture s_diorama_skybox_texture;
+static PresentationUploadMirror s_diorama_skybox_mirror;
 static ArRenderTexture s_action_bg1_mask_texture;
 static ArRenderTexture s_action_bg2_mask_texture;
 static ArRenderTexture s_action_plane_effect_target;
@@ -884,6 +887,7 @@ static void UploadSkyPalaceForeground(const FrameSlot *slot) {
 
 void PresentUpload(const FrameSlot *slot) {
   s_sky_palace_foreground_valid = false;
+  s_diorama_skybox_view.texture = ArRenderTexture_Invalid();
   if (!ArRenderDevice_IsReady(&g_render_device) ||
       !ArRenderTexture_IsValid(g_texture)) return;
   Sim3DPerformanceScope performance = {0};
@@ -917,6 +921,54 @@ void PresentUpload(const FrameSlot *slot) {
   }
 
   if (slot->diorama_active) {
+    bool skybox_changed = false;
+    const SrPpuSurfaceView *skybox = BoundPpuSurface(&slot->diorama_skybox_surface);
+    const uint8_t *skybox_pixels = PpuSurfaceRegion(skybox, 0, 0,
+        skybox ? (int)skybox->width_pixels : 0,
+        skybox ? (int)skybox->height_pixels : 0);
+    if (skybox_pixels) {
+      if (!ArRenderTexture_IsValid(s_diorama_skybox_texture)) {
+        const ArRenderTextureDesc desc = {
+          .width = kFrameSlotLayerTextureWidth,
+          .height = kFrameSlotLayerTextureHeight,
+          .format = kArRenderPixelFormat_Argb8888,
+          .usage = kArRenderTextureUsage_Streaming,
+          .filter = kArRenderFilter_Linear, .blend = kArRenderBlendMode_Opaque,
+        };
+        (void)ArRenderDevice_CreateTexture(
+            &g_render_device, &desc, &s_diorama_skybox_texture);
+      }
+      /* The blur prefilter visits the fixed allocation, not just the view.
+       * Initialize its padding, including after a capture extent shrinks. */
+      if (ArRenderTexture_IsValid(s_diorama_skybox_texture) &&
+          (!s_diorama_skybox_mirror.valid ||
+           s_diorama_skybox_mirror.width != (int)skybox->width_pixels ||
+           s_diorama_skybox_mirror.height != (int)skybox->height_pixels)) {
+        uint32_t *empty = calloc(kFrameSlotLayerTextureWidth *
+            kFrameSlotLayerTextureHeight, sizeof(uint32_t));
+        const bool cleared = empty && ArRenderDevice_UpdateTexture(
+            &g_render_device, s_diorama_skybox_texture, NULL, empty,
+            kFrameSlotLayerTextureWidth * sizeof(uint32_t));
+        free(empty);
+        if (!cleared) {
+          ArRenderDevice_DestroyTexture(&g_render_device, s_diorama_skybox_texture);
+          s_diorama_skybox_texture = ArRenderTexture_Invalid();
+        }
+        PresentationUploadMirror_Reset(&s_diorama_skybox_mirror);
+      }
+      PresentationUploadResult result;
+      if (ArRenderTexture_IsValid(s_diorama_skybox_texture) &&
+          PresentationUploadMirror_UploadArgb8888(
+              &s_diorama_skybox_mirror, &g_render_device,
+              s_diorama_skybox_texture, skybox_pixels,
+              (int)skybox->width_pixels, (int)skybox->height_pixels,
+              (int)skybox->pitch_bytes, 0, 0, &result)) {
+        skybox_changed = result.changed;
+        if (result.changed) s_diorama_skybox_view.revision++;
+        s_diorama_skybox_view.texture = s_diorama_skybox_texture;
+        s_diorama_skybox_view.width = (int)skybox->width_pixels;
+      }
+    }
     const uint8_t *pixels[kDioramaPlane_Count];
     size_t pitch_bytes[kDioramaPlane_Count];
     CaptureDioramaPpuSurfaces(slot, pixels, pitch_bytes);
@@ -948,9 +1000,9 @@ void PresentUpload(const FrameSlot *slot) {
         pixels[plane] = NULL;
     DioramaPerformanceScope frame_analysis =
         DioramaPerformance_Begin(kDioramaPerformance_FrameAnalysis);
-    DioramaFrameGeneration_Capture(
+    DioramaFrameGeneration_CaptureWithSkybox(
         &g_render_device, slot, g_diorama_textures, pixels, pitch_bytes,
-        upload.changed_plane_mask);
+        upload.changed_plane_mask, s_diorama_skybox_view.texture, skybox_changed);
     DioramaPerformance_End(frame_analysis);
   } else if (PresentationConsumesMainPpuTexture(slot)) {
     s_diorama_uploaded_plane_mask = 0;
@@ -2002,6 +2054,10 @@ void PresentHostUi(const FrameSlot *slot, ArRenderRectI viewport,
  * does not emit _DEVICE_RESET at all — this is a Windows-D3D and
  * Vulkan-backed (Steam Deck) bug. */
 void PresentRendererResources_Reset(void) {
+  ArRenderDevice_DestroyTexture(&g_render_device, s_diorama_skybox_texture);
+  s_diorama_skybox_texture = ArRenderTexture_Invalid();
+  s_diorama_skybox_view = (DioramaSkyboxView){0};
+  PresentationUploadMirror_Reset(&s_diorama_skybox_mirror);
   PerformanceOverlay_Reset(&g_render_device);
   ResetSim3DUploadMirrors();
   ResetActionUploadMirrors();
@@ -2106,9 +2162,13 @@ void PresentCompositeScene(const FrameSlot *slot, float alpha) {
       current_textures[plane] = g_diorama_textures[plane];
     DioramaPerformanceScope frame_synthesis =
         DioramaPerformance_Begin(kDioramaPerformance_FrameSynthesis);
-    const uint32_t generated_plane_mask = DioramaFrameGeneration_Prepare(
+    DioramaSkyboxView skybox_view = s_diorama_skybox_view;
+    const uint32_t generated_plane_mask = DioramaFrameGeneration_PrepareWithSkybox(
         &g_render_device, slot, alpha, current_textures,
-        s_diorama_uploaded_plane_mask, scene_textures);
+        s_diorama_uploaded_plane_mask, scene_textures,
+        skybox_view.texture, &skybox_view.texture);
+    skybox_view.dynamic =
+        (generated_plane_mask & (1u << kDioramaFrameGenerationSkybox)) != 0;
     DioramaPerformance_End(frame_synthesis);
     /* The existing graphics setting now selects frame-space generation.
      * Prepare fails individual planes closed when either endpoint or pair
@@ -2299,7 +2359,7 @@ void PresentCompositeScene(const FrameSlot *slot, float alpha) {
         slot->visible_width, viewport, scene_textures, pixels,
         slot->diorama_bg_transparent_fill_configured,
         slot->diorama_bg_transparent_fill_argb,
-        &final_cam, distance_scale,
+        &final_cam, distance_scale, dynamic,
         slot->diorama_plane_additive_mask & s_diorama_uploaded_plane_mask,
         slot->interp_setting_enabled ? NULL : s_diorama_coverage_masks,
         s_diorama_bg2_content_revision,
@@ -2307,7 +2367,7 @@ void PresentCompositeScene(const FrameSlot *slot, float alpha) {
          (UINT32_C(1) << SR_PPU_OVERLAY_BG2)) != 0,
         effect_obj_priority_mask, effect_bg_plane_mask,
         slot->diorama_map_group, slot->diorama_map_number,
-        slot->diorama_layer_section, &bg2_valid_spans,
+        slot->diorama_layer_section, &bg2_valid_spans, &skybox_view,
         DrawActionDioramaPlaneEffect, &plane_effect, &action_projection);
     if (!PresentationOutcome_IsUsable(diorama)) {
       CancelActionHeat();

@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "diorama.h"
+#include "scene3d_math.h"
 
 static int g_failures;
 
@@ -40,6 +41,115 @@ static DioramaProjection Projection(void) {
   projection.bg2_plane = projection.bg1_plane;
   projection.object_planes[0] = projection.bg1_plane;
   return projection;
+}
+
+static void FocalBounds(const DioramaProjection *projection,
+                         float t0, float t1, float *top, float *bottom) {
+  *top = INFINITY;
+  *bottom = -INFINITY;
+  for (int row = 0; row <= kDioramaPlaneSubdivY; row++) {
+    const float t = t0 + (t1 - t0) * (float)row / kDioramaPlaneSubdivY;
+    for (int col = 0; col <= 8; col++) {
+      ArRenderPointF p;
+      CHECK(Diorama_ProjectCapturedBg1Point(
+          projection, (float)col * 100.0f / 8.0f, t * 50.0f,
+          &p, NULL, NULL));
+      *top = fminf(*top, p.y);
+      *bottom = fmaxf(*bottom, p.y);
+    }
+  }
+}
+
+static void TestTiltedCameraFraming(void) {
+  const float pitches[] = {-0.7f, -0.2f, 0.0f, 0.2f, 0.7f};
+  const float yaws[] = {-0.6f, 0.0f, 0.6f};
+  const float distances[] = {3.25f, 5.0f, 20.0f};
+  const float aspects[] = {256.0f / 224.0f, 496.0f / 224.0f};
+  for (unsigned p = 0; p < sizeof(pitches) / sizeof(*pitches); p++)
+  for (unsigned y = 0; y < sizeof(yaws) / sizeof(*yaws); y++)
+  for (unsigned d = 0; d < sizeof(distances) / sizeof(*distances); d++)
+  for (unsigned a = 0; a < sizeof(aspects) / sizeof(*aspects); a++)
+  for (int shaped = 0; shaped < 2; shaped++) {
+    DioramaProjection projection = Projection();
+    projection.aspect_x = aspects[a];
+    projection.height_scale = 256.0f / 224.0f;
+    projection.output_width = a ? 1600 : 1200;
+    projection.output_height = 900;
+    projection.output_y = 37;
+    projection.bg1_plane.z_world = shaped ? 0.12f : 0.0f;
+    projection.bg1_plane.rake = shaped ? 0.15f : 0.0f;
+    projection.bg1_plane.bow = shaped ? -0.25f : 0.0f;
+    const Scene3DCamera camera = {
+      pitches[p], yaws[y], distances[d], 0.4f,
+    };
+    Scene3D_BuildViewProjection(&camera, projection.output_width,
+                               projection.output_height, projection.matrix);
+    DioramaProjection before = projection;
+    CHECK(Diorama_CenterCameraVertically(
+        projection.matrix, projection.aspect_x, projection.height_scale,
+        projection.bg1_plane.z_world, projection.bg1_plane.rake,
+        projection.bg1_plane.bow, 0.0f, 1.0f));
+    float top, bottom;
+    FocalBounds(&projection, 0, 1, &top, &bottom);
+    CHECK(Near((top + bottom) * 0.5f,
+               projection.output_y + projection.output_height * 0.5f));
+
+    /* The layer and attached OBJ effects at different depths must move by
+     * the same number of pixels without a scale or perspective change. */
+    float delta = 0.0f;
+    for (int i = 0; i < 3; i++) {
+      before.object_planes[0].z_world = (float)i * 0.2f;
+      projection.object_planes[0] = before.object_planes[0];
+      ArRenderPointF old_point, new_point;
+      float old_sx, old_sy, new_sx, new_sy;
+      CHECK(Diorama_ProjectCapturedPoint(
+          &before, 35, 23, 0, &old_point, &old_sx, &old_sy));
+      CHECK(Diorama_ProjectCapturedPoint(
+          &projection, 35, 23, 0, &new_point, &new_sx, &new_sy));
+      if (i == 0) delta = new_point.y - old_point.y;
+      CHECK(Near(new_point.y - old_point.y, delta));
+      CHECK(Near(new_point.x, old_point.x));
+      CHECK(Near(new_sx, old_sx));
+      CHECK(Near(new_sy, old_sy));
+    }
+    for (int i = 0; i < 16; i++)
+      if (i % 4 != 1) CHECK(projection.matrix[i] == before.matrix[i]);
+  }
+}
+
+static void TestCameraFramingProtectsNativeBand(void) {
+  for (int bottom_heavy = 0; bottom_heavy < 2; bottom_heavy++) {
+    DioramaProjection projection = Projection();
+    projection.height_scale = 288.0f / 224.0f;
+    const float t0 = bottom_heavy ? 0.0f : 64.0f / 288.0f;
+    const float t1 = bottom_heavy ? 224.0f / 288.0f : 1.0f;
+    for (int tight = 0; tight < 2; tight++) {
+      const Scene3DCamera camera = {0.0f, 0.0f, tight ? 2.0f : 2.6f, 0.4f};
+      Scene3D_BuildViewProjection(&camera, 100, 100, projection.matrix);
+      CHECK(Diorama_CenterCameraVertically(
+          projection.matrix, projection.aspect_x, projection.height_scale,
+          0, 0, 0, t0, t1));
+      float top, bottom;
+      FocalBounds(&projection, t0, t1, &top, &bottom);
+      if (tight) {
+        CHECK(Near((top + bottom) * 0.5f, 50.0f));
+      } else {
+        CHECK(top >= -0.001f && bottom <= 100.001f);
+        CHECK(bottom_heavy ? Near(top, 0.0f) : Near(bottom, 100.0f));
+      }
+    }
+  }
+}
+
+static void TestCameraFramingRejectsUnprojectableMesh(void) {
+  DioramaProjection projection = Projection();
+  const Scene3DCamera camera = {0.7f, 0.7f, 0.2f, 0.4f};
+  Scene3D_BuildViewProjection(&camera, 100, 100, projection.matrix);
+  const DioramaProjection before = projection;
+  CHECK(!Diorama_CenterCameraVertically(
+      projection.matrix, 2, 1, 0, 0, 0, 0, 1));
+  CHECK(memcmp(projection.matrix, before.matrix, sizeof(before.matrix)) == 0);
+  CHECK(!Diorama_CenterCameraVertically(NULL, 2, 1, 0, 0, 0, 0, 1));
 }
 
 static void TestRegisteredProjectionAndScale(void) {
@@ -279,6 +389,9 @@ static void TestBgEffectMaskDistinguishesEmptyFromFailedUpload(void) {
 }
 
 int main(void) {
+  TestTiltedCameraFraming();
+  TestCameraFramingProtectsNativeBand();
+  TestCameraFramingRejectsUnprojectableMesh();
   TestRegisteredProjectionAndScale();
   TestPriorityPlaneShapeIsApplied();
   TestOutputViewportOriginIsApplied();

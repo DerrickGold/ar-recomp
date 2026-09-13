@@ -319,6 +319,7 @@ static void scanout_line_context_init(
 
 static SrResult run_ppu_scanout(
         Snes *snes, const SrPpuScanoutRequest *request,
+        const SrPpuBackgroundViewRequest *view,
         SrPpuScanoutResult *out_result) {
     const SnesRunnerApi *api = sr_runner_get_api(SR_RUNNER_ABI_VERSION);
     Ppu *ppu = snes->ppu;
@@ -327,6 +328,7 @@ static SrResult run_ppu_scanout(
     int trigger;
     int line;
     unsigned channel;
+    bool view_ready = view != NULL;
     if (ppu == NULL || dma == NULL || api == NULL)
         return SR_RESULT_UNAVAILABLE;
     if (!PpuOutputSurfacesFitGeometry(
@@ -356,10 +358,15 @@ static SrResult run_ppu_scanout(
             request->line_callback(request->user_data, &context);
         }
         ppu_runLine(ppu, line);
+        if (line > 0 && view_ready)
+            view_ready = PpuRenderBackgroundViewLine(ppu, view, line - 1);
         if (line == 0) {
             int margin;
-            for (margin = ppu->extraTopCur; margin >= 1; --margin)
+            for (margin = ppu->extraTopCur; margin >= 1; --margin) {
                 ppu_runMarginLine(ppu, 1 - margin);
+                if (view_ready)
+                    view_ready = PpuRenderBackgroundViewLine(ppu, view, -margin);
+            }
         }
         for (channel = 0u; channel < SR_DMA_CHANNEL_COUNT; ++channel)
             scanout_hdma_line(snes, &hdma[channel]);
@@ -394,14 +401,19 @@ static SrResult run_ppu_scanout(
             trigger = snes->vIrqEnabled ? (int)snes->vTimer + 1 : -1;
         }
     }
-    for (line = 1; line <= ppu->extraBottomCur; ++line)
+    for (line = 1; line <= ppu->extraBottomCur; ++line) {
         ppu_runMarginLine(ppu, (int)SR_PPU_NATIVE_HEIGHT + line);
+        if (view_ready)
+            view_ready = PpuRenderBackgroundViewLine(
+                ppu, view, (int)SR_PPU_NATIVE_HEIGHT + line - 1);
+    }
     snes_beginVblank(snes);
 
     out_result->final_state.struct_size = sizeof(out_result->final_state);
     (void)api->query_ppu_state(
         sr_runner_handle(snes), &out_result->final_state);
     out_result->flags =
+        (view_ready ? SR_PPU_SCANOUT_BACKGROUND_VIEW_READY : 0u) |
         (PpuAuthenticSurfaceReady(ppu)
             ? SR_PPU_SCANOUT_AUTHENTIC_SURFACE_READY : 0u) |
         (PpuAuthenticCameraFrameReady(

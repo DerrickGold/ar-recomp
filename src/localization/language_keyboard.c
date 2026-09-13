@@ -144,6 +144,7 @@ bool ArLanguageKeyboard_ValidateMessage(const ArLanguagePack *pack,
         if (!AppendByte(&page, *p)) { appended = false; break; }
       }
     } else if (op->kind == kArLanguageOperation_LineBreak ||
+               op->kind == kArLanguageOperation_PreferredLineBreak ||
                op->kind == kArLanguageOperation_ParagraphBreak) {
       appended = AppendByte(&page, '\n'); // keyboard normalization collapses blanks
     } else if (op->kind == kArLanguageOperation_Placeholder) {

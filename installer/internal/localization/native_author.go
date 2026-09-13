@@ -205,6 +205,13 @@ func nativeAuthorOperations(route *NativeSemanticRoute, layout IRObject) ([]Auth
 				if len(ops) > 0 && (ops[len(ops)-1].Op == "text" || ops[len(ops)-1].Op == "placeholder") {
 					ops = append(ops, AuthorOperation{Op: "text", Value: " "})
 				}
+			} else if reflow && layout["space_delimited_words"] == true &&
+				route.Category != "ending_text" &&
+				route.Category != "post_offering_or_ending_native" {
+				// The retail row looks intentional in its fixed-cell font, but an
+				// enhanced proportional font may already have reflowed the preceding
+				// segment. Defer that final choice to the actual font and output box.
+				ops = append(ops, AuthorOperation{Op: "preferred_line"})
 			} else {
 				ops = append(ops, AuthorOperation{Op: "line"})
 			}
@@ -286,8 +293,9 @@ func stripNativePadding(ops []AuthorOperation) []AuthorOperation {
 }
 
 // Native-cell analysis is not a Unicode font measurer. Variable lookups and
-// unrecognized combining marks keep hard breaks. Known native dakuten/accents
-// share their base cell. Japanese and unprofiled ending geometry never reflow.
+// unrecognized combining marks retain a break candidate. Known native
+// dakuten/accents share their base cell. Japanese, fixed and unprofiled
+// geometry remain hard breaks rather than proportional preferred breaks.
 func nativeHardBreaks(route *NativeSemanticRoute, layout IRObject) map[int]bool {
 	hard := map[int]bool{}
 	for i, op := range route.Operations {

@@ -65,6 +65,22 @@ int main(void) {
   CHECK(frame.snapshots[0].language.direction == kArTextDirection_RightToLeft);
   CHECK(!strcmp(frame.locale, "fr-FR") && frame.primary_font == 1);
 
+  ArLocalizationFrame dialogue_frame;
+  ArLocalizationFrame_Reset(&dialogue_frame);
+  CHECK(ArLocalizationFrame_SetFont(
+      &dialogue_frame, "en-US", "test.font", UINT64_C(1), 7,
+      &dialogue_frame.settings));
+  const char preferred_text[] = "First second";
+  uint8_t preferred_breaks[
+      AR_TEXT_BOUNDARY_BYTES(sizeof(preferred_text))] = {0};
+  ArTextBoundary_Set(preferred_breaks, 5, true);
+  CHECK(ArLocalizationFrame_AddStructuredDialogueWindow(
+      &dialogue_frame, 21, destination, (ArTextCellRegion){5, 19, 23, 7},
+      preferred_text, sizeof(preferred_text) - 1, 5, 12, 14,
+      kArTextDirection_LeftToRight, 6, preferred_breaks));
+  CHECK(ArTextBoundary_Get(dialogue_frame.structural_boundaries, 5));
+  CHECK(ArLocalizationFrame_IsValid(&dialogue_frame));
+
   ArLocalizationFrame screen_frame;
   ArLocalizationFrame_Reset(&screen_frame);
   CHECK(ArLocalizationFrame_SetFont(

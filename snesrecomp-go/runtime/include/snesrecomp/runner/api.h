@@ -212,7 +212,18 @@ typedef struct SnesRunnerApi {
     /** Synchronously attach/sample a serial input device at a safe point. */
     SrResult (*submit_input_device)(
         SrRunnerHandle *runner, const SrInputDeviceRequest *request);
+    /** Normal scanout plus an optional bounded BG view; requires
+     * SR_RUNNER_CAP_PPU_BACKGROUND_VIEW. The ordinary scanout entry and its
+     * V2 request/result layouts remain unchanged. */
+    SrResult (*run_ppu_scanout_with_background_view)(
+        SrRunnerHandle *runner, const SrPpuScanoutRequest *request,
+        const SrPpuBackgroundViewRequest *view,
+        SrPpuScanoutResult *out_result);
 } SnesRunnerApi;
+
+#define SNES_RUNNER_API_PPU_BACKGROUND_VIEW_SIZE                          \
+    ((uint32_t)(offsetof(SnesRunnerApi, run_ppu_scanout_with_background_view) + \
+                sizeof(((SnesRunnerApi *)0)->run_ppu_scanout_with_background_view)))
 
 #define SNES_RUNNER_API_V2_BASE_SIZE                                           \
     ((uint32_t)(offsetof(SnesRunnerApi, borrow_is_valid) +                 \

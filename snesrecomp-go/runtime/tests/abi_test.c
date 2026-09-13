@@ -611,6 +611,55 @@ static int test_public_vertical_margin_scanout(
     failed |= check((result.flags &
                          SR_PPU_SCANOUT_PRESENTATION_DIGEST_VALID) == 0u,
                     "scanout without capture flag produced a presentation digest");
+    /* Additive API: old requests/results retain their byte layout. Validate
+     * the optional caller-owned view before any scanout state can change. */
+    static uint32_t view_pixels[256 * kRenderedRows];
+    SrPpuBackgroundViewRequest view = {
+        .struct_size = sizeof(view), .layer = 0,
+        .world_width = 512, .world_height = 512,
+        .screen_y0 = -kTop, .width = 256, .height = kRenderedRows,
+        .pixels = view_pixels, .pitch_bytes = 256 * sizeof(uint32_t),
+        .pixel_byte_size = sizeof(view_pixels),
+    };
+    failed |= check(api->struct_size >= SNES_RUNNER_API_PPU_BACKGROUND_VIEW_SIZE &&
+        (api->capabilities & SR_RUNNER_CAP_PPU_BACKGROUND_VIEW) != 0u &&
+        api->run_ppu_scanout_with_background_view != NULL,
+        "background-view capability/table tail missing");
+    for (int invalid = 0; invalid < 7; ++invalid) {
+        SrPpuBackgroundViewRequest bad = view;
+        if (invalid == 0) bad.struct_size = sizeof(uint32_t);
+        if (invalid == 1) bad.layer = 2;
+        if (invalid == 2) bad.world_width = bad.width - 1;
+        if (invalid == 3) bad.pitch_bytes--;
+        if (invalid == 4) bad.pixel_byte_size--;
+        if (invalid == 5) bad.screen_y0--;
+        if (invalid == 6) bad.pixels = s_main_surface;
+        bool even_frame = snes->ppu->evenFrame;
+        failed |= check(api->run_ppu_scanout_with_background_view(
+            runner, &scanout, &bad, &result) == SR_RESULT_INVALID_ARGUMENT &&
+            snes->ppu->evenFrame == even_frame,
+            "invalid/aliased background view mutated scanout state");
+    }
+    failed |= check(api->run_ppu_scanout_with_background_view(
+        runner, &scanout, &view, &result) == SR_RESULT_OK &&
+        !(result.flags & SR_PPU_SCANOUT_BACKGROUND_VIEW_READY),
+        "unsupported background view should leave ordinary scanout available");
+    snes->ppu->inidisp = 0x80;
+    memset(view_pixels, 0xa5, sizeof(view_pixels));
+    failed |= check(api->run_ppu_scanout_with_background_view(
+        runner, &scanout, &view, &result) == SR_RESULT_OK &&
+        (result.flags & SR_PPU_SCANOUT_BACKGROUND_VIEW_READY),
+        "blank background view was not published");
+    for (unsigned i = 0; i < sizeof(view_pixels) / sizeof(view_pixels[0]); ++i)
+        if (view_pixels[i] != 0) {
+            failed |= check(0, "background view missed a native/margin row");
+            break;
+        }
+    memset(view_pixels, 0xa5, sizeof(view_pixels));
+    failed |= check(api->run_ppu_scanout(runner, &scanout, &result) == SR_RESULT_OK &&
+        !(result.flags & SR_PPU_SCANOUT_BACKGROUND_VIEW_READY) &&
+        view_pixels[0] == 0xa5a5a5a5,
+        "ordinary scanout retained an earlier background-view buffer");
     return failed;
 }
 

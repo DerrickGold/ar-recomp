@@ -74,7 +74,7 @@ func TestAuthorScriptWhitespaceEscapesAndBudgets(t *testing.T) {
 }
 
 func TestAuthorContractsAndAliasDependents(t *testing.T) {
-	valid := []string{authorConfirm, ":: dialogue.event.relay.aitos\n@empty\n", ":: dialogue.event.relay.aitos\n@alias dialogue.event.relay.bloodpool\n:: dialogue.event.relay.bloodpool\nExcellent!\n", ":: status.report.master_report\n{master_level:03}\n"}
+	valid := []string{authorConfirm, ":: dialogue.event.relay.aitos\n@empty\n", ":: dialogue.event.relay.aitos\nFirst short\n@preferred-line\nSecond line\n", ":: dialogue.event.relay.aitos\n@alias dialogue.event.relay.bloodpool\n:: dialogue.event.relay.bloodpool\nExcellent!\n", ":: status.report.master_report\n{master_level:03}\n"}
 	for _, text := range valid {
 		s, err := ParseAuthorScript(text, "a")
 		if err != nil {
@@ -97,6 +97,7 @@ func TestAuthorContractsAndAliasDependents(t *testing.T) {
 		":: dialogue.event.relay.aitos\n@alias dialogue.event.relay.bloodpool\n:: dialogue.event.relay.bloodpool\n@alias dialogue.event.relay.aitos\n",
 		":: dialogue.event.relay.aitos\n@alias sky.action_mode.confirm\n" + authorConfirm,
 		":: unknown.semantic\nExcellent!\n",
+		":: action.hud.act_1\nACT\n@preferred-line\n1\n",
 	}
 	for _, text := range bad {
 		s, err := ParseAuthorScript(text, "a")

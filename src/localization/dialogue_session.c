@@ -340,6 +340,8 @@ static bool AppendPlainMessage(const ArLanguagePack *pack,
       value = ArLanguagePack_GetString(pack, operation->value.text);
     else if (operation->kind == kArLanguageOperation_LineBreak)
       value = "\n";
+    else if (operation->kind == kArLanguageOperation_PreferredLineBreak)
+      value = " ";
     else if (operation->kind == kArLanguageOperation_ParagraphBreak)
       value = "\n\n";
     else if (operation->kind == kArLanguageOperation_PageBreak)
@@ -577,6 +579,12 @@ static bool BuildProgram(const ProgramSource *source,
       if (!AppendLiteral(page, "\n", 1, error))
         goto failed;
       break;
+    case kArLanguageOperation_PreferredLineBreak: {
+      const size_t offset = page->utf8_bytes;
+      if (!AppendBytes(page, " ", 1, error)) goto failed;
+      ArTextBoundary_Set(page->structural_boundaries, offset, true);
+      break;
+    }
     case kArLanguageOperation_ParagraphBreak:
       if (!AppendLiteral(page, "\n\n", 2, error))
         goto failed;

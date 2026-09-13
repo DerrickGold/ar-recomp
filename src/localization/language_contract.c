@@ -298,6 +298,12 @@ static bool ValidateBody(const ArLanguagePack *pack,
       ScanContent(&scan);
     else if (operation->kind == kArLanguageOperation_LineBreak)
       ScanBreak(&scan, 1);
+    else if (operation->kind == kArLanguageOperation_PreferredLineBreak) {
+      if (route->shape != kArLanguagePresentation_Flow) {
+        SetError(error, "%s: @preferred-line is only valid in flowing dialogue; use @line in fixed fields", diagnostic_id);
+        return false;
+      }
+    }
     else if (operation->kind == kArLanguageOperation_ParagraphBreak)
       ScanBreak(&scan, 2);
     else if (operation->kind == kArLanguageOperation_PageBreak) {

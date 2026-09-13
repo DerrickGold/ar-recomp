@@ -1,0 +1,365 @@
+[Launcher] Config/saves anchored to '/home/deck/argame/capture-fast-path-20260912.XW1iYR/'.
+[run-dir] runs/20260912-171019 (console.log + dumps ringfenced here; AR_NO_RUN_DIR=1 disables)
+[runner-trace] recorder=excluded deep_instrumentation=excluded mode=off
+Loaded ROM: /home/deck/argame/ar.sfc (1048576 bytes)
+[video-geometry] 16:10 square-PAR -> 52 extra columns/side (render width 360)
+[display] AR_DISPLAY_MODE=2 -> widescreen FULL (all corrections)
+[video] driver: wayland (available: x11 wayland offscreen dummy evdev)
+[render] ordered GPU interop enabled (offscreen SDL + one swapchain present)
+[display] GPU frames in flight: 2
+[hd-manifest] [replace:title-logo] game-assets/hd/title-logo.png (2087x754)
+[hd-manifest] [replace:title-swirl] game-assets/hd/title-logo.png (2087x754, mode7)
+[hd-manifest] 2 entries, 2 with art
+[settings-menu] decoded ActRaiser font: $1000 bytes from ROM offset $0BECFB (2725 compressed bytes consumed)
+[settings-menu] decoded native dialog frame: chars ROM $06C000, palette ROM $0E3F73
+[diorama-layers] loaded diorama-layers.ini: 24 room(s), 34 plane override(s)
+[input] no gamepad connected; keyboard bindings active
+[music-manifest] [music:title-theme] game-assets/audio/title.ogg (48000 Hz, 8845689 frames, loop 0..8845689)
+[music-manifest] [music:song-00] game-assets/audio/fillmore.ogg (44100 Hz, 7050707 frames, loop 0..7050707)
+[music-manifest] [music:song-01] game-assets/audio/sky-palace.ogg (48000 Hz, 6389760 frames, loop 0..6389760)
+[music-manifest] [music:song-02] game-assets/audio/bp.ogg (44100 Hz, 5369615 frames, loop 0..5369615)
+[music-manifest] [music:song-08] game-assets/audio/advent.ogg (48000 Hz, 735609 frames, loop 0..735609)
+[music-manifest] [music:song-09] game-assets/audio/act2.ogg (44100 Hz, 6182827 frames, loop 0..6182827)
+[music-manifest] [music:song-10] game-assets/audio/birth-of-the-people.ogg (48000 Hz, 16201213 frames, loop 0..16201213)
+[music-manifest] [music:song-11] game-assets/audio/level-up.ogg (48000 Hz, 451396 frames, loop 0..451396)
+[music-manifest] 17 entries, 8 with audio
+[audio-ext] extended sound channels disabled (authentic 8 voices)
+[saves] loaded native-srm backend from /home/deck/argame/capture-fast-path-20260912.XW1iYR/timing-aitos/seed.srm
+[input-replay] 5009 legacy records, max gf=21845 last gf=4676 from /home/deck/argame/capture-fast-path-20260912.XW1iYR/saves/aitos-r4-natural.rec
+[audio] requested 32040 Hz is below SDL's 44100 device minimum; using 44100 (the setting cannot lower it)
+[audio] stream input 44100 Hz, device 44100 Hz 512-frame buffer (requested 512 frames)
+[widescreen] gf=0 $18=00 $19=00 -> pillarbox clamp=00 mirror=00 repeat=00 bands=0/811c9dc5 normal=00 hud=0/0/0 left-only-y=0 bg-plan=0 source=none/none hle=00
+[music] src=1A:94B8 song=01 -> [music:title-theme] game-assets/audio/title.ogg
+[pipeline-perf] scene=Native/menu host=0 map=00/00 output=1080x672 frames=323 fps=321.2 cadence-ms=3.113 p95=5.656 max=6.101 refresh=3 vsync=0 cap=0 gpu-ms=unavailable
+[pipeline-stage] events/input mean-ms=0.0135 peak-call-ms=0.0525 calls=323
+[pipeline-stage] emulation mean-ms=0.9158 peak-call-ms=3.2231 calls=323
+[pipeline-stage] PPU + capture mean-ms=1.2445 peak-call-ms=3.0175 calls=323
+[pipeline-stage] world map build mean-ms=0.0004 peak-call-ms=0.0011 calls=323
+[pipeline-stage] SIM metadata mean-ms=0.0130 peak-call-ms=0.0744 calls=323
+[pipeline-stage] town canvas mean-ms=0.0005 peak-call-ms=0.0079 calls=323
+[pipeline-stage] frame snapshot mean-ms=0.0192 peak-call-ms=0.1255 calls=323
+[pipeline-stage] upload mean-ms=0.6894 peak-call-ms=1.8374 calls=323
+[pipeline-stage] presentation mean-ms=0.0114 peak-call-ms=0.0254 calls=323
+[pipeline-stage] CRT/resolve mean-ms=0.0005 peak-call-ms=0.0013 calls=646
+[pipeline-stage] host UI mean-ms=0.0013 peak-call-ms=0.0024 calls=323
+[pipeline-stage] settings UI mean-ms=0.0004 peak-call-ms=0.0009 calls=323
+[pipeline-stage] present/wait mean-ms=0.1679 peak-call-ms=0.8716 calls=323
+[pipeline-stage] pacing/sleep mean-ms=0.0002 peak-call-ms=0.0008 calls=323
+[pipeline-stage] housekeeping mean-ms=0.0014 peak-call-ms=0.0903 calls=323
+[pipeline-stage] PPU setup mean-ms=0.0027 peak-call-ms=0.0395 calls=323
+[pipeline-stage] PPU scanout mean-ms=1.2325 peak-call-ms=2.9999 calls=323
+[pipeline-stage] PPU finish mean-ms=0.0006 peak-call-ms=0.0071 calls=323
+[pipeline-work] ticks=1.00 repre=0.00 draws=0.0 vertices=0 upload-MiB=4.211 depth-MiB=0.000 depth-copy-MiB=0.000 depth-copy-calls=0.00 jobs=0.00 helpers=0.00 fallback=0.00 failed=0.00 (per-present)
+[pipeline-traffic] upload-calls=0.67 skipped=0.00 scan-MiB=0.630 upload-MiB=4.211 mirror-realloc=0.00 (per-present)
+[pipeline-atlas] reuse=0.00 copy-MiB=0.000 copy-calls=0.00 (per-present; copies are GPU-only)
+[pipeline-path] cpu-project=0.00 cpu-stage=0.00 gpu-reuse=0.00 publish=0.00 opt-out=0.00 limit=0.00 rejected=0.00 (events/present, not view fallbacks)
+[music] stop [music:title-theme] (driver halt $F0)
+[widescreen] gf=373 $18=00 $19=07 -> WIDE clamp=00 mirror=00 repeat=00 bands=0/811c9dc5 normal=00 hud=32/168/168 left-only-y=32 bg-plan=0 source=none/none hle=00
+[music] src=1C:A988 song=01 -> [music:song-01] game-assets/audio/sky-palace.ogg
+[widescreen] gf=431 $18=00 $19=09 -> WIDE clamp=00 mirror=00 repeat=00 bands=0/811c9dc5 normal=00 hud=0/0/0 left-only-y=0 bg-plan=0 source=none/none hle=00
+[sim-worldmap] HLE built from sim state at gf=431 after world-navigation entry (841 tiles changed)
+[widescreen] gf=690 $18=00 $19=07 -> WIDE clamp=00 mirror=00 repeat=00 bands=0/811c9dc5 normal=00 hud=32/168/168 left-only-y=32 bg-plan=0 source=none/none hle=00
+[music] stop [music:song-01] (driver halt $F0)
+[widescreen] gf=898 $18=00 $19=09 -> WIDE clamp=00 mirror=00 repeat=00 bands=0/811c9dc5 normal=00 hud=0/0/0 left-only-y=0 bg-plan=0 source=none/none hle=00
+[sim-worldmap] HLE built from sim state at gf=898 after world-navigation entry (0 tiles changed)
+[music] src=1C:A7CC song=01 -> [music:song-08] game-assets/audio/advent.ogg
+[pipeline-perf] scene=Native/menu host=0 map=00/09 output=1080x672 frames=451 fps=449.9 cadence-ms=2.223 p95=2.496 max=3.230 refresh=3 vsync=0 cap=0 gpu-ms=unavailable
+[pipeline-stage] events/input mean-ms=0.0301 peak-call-ms=0.0936 calls=451
+[pipeline-stage] emulation mean-ms=1.0439 peak-call-ms=2.8239 calls=451
+[pipeline-stage] PPU + capture mean-ms=0.5980 peak-call-ms=0.8740 calls=451
+[pipeline-stage] world map build mean-ms=0.0018 peak-call-ms=0.0363 calls=451
+[pipeline-stage] SIM metadata mean-ms=0.0338 peak-call-ms=0.0625 calls=451
+[pipeline-stage] town canvas mean-ms=0.0006 peak-call-ms=0.0019 calls=451
+[pipeline-stage] frame snapshot mean-ms=0.0239 peak-call-ms=0.0430 calls=451
+[pipeline-stage] upload mean-ms=0.2440 peak-call-ms=0.9838 calls=451
+[pipeline-stage] presentation mean-ms=0.0137 peak-call-ms=0.0445 calls=451
+[pipeline-stage] CRT/resolve mean-ms=0.0006 peak-call-ms=0.0082 calls=902
+[pipeline-stage] host UI mean-ms=0.0020 peak-call-ms=0.0272 calls=451
+[pipeline-stage] settings UI mean-ms=0.0006 peak-call-ms=0.0013 calls=451
+[pipeline-stage] present/wait mean-ms=0.1755 peak-call-ms=0.4638 calls=451
+[pipeline-stage] pacing/sleep mean-ms=0.0003 peak-call-ms=0.0007 calls=451
+[pipeline-stage] housekeeping mean-ms=0.0027 peak-call-ms=0.1725 calls=451
+[pipeline-stage] PPU setup mean-ms=0.0041 peak-call-ms=0.0112 calls=451
+[pipeline-stage] PPU scanout mean-ms=0.5816 peak-call-ms=0.8481 calls=451
+[pipeline-stage] PPU finish mean-ms=0.0007 peak-call-ms=0.0017 calls=451
+[pipeline-work] ticks=1.00 repre=0.00 draws=0.0 vertices=0 upload-MiB=0.479 depth-MiB=0.000 depth-copy-MiB=0.000 depth-copy-calls=0.00 jobs=0.00 helpers=0.00 fallback=0.00 failed=0.00 (per-present)
+[pipeline-traffic] upload-calls=0.86 skipped=0.00 scan-MiB=0.456 upload-MiB=0.479 mirror-realloc=0.00 (per-present)
+[pipeline-atlas] reuse=0.00 copy-MiB=0.000 copy-calls=0.00 (per-present; copies are GPU-only)
+[pipeline-path] cpu-project=0.00 cpu-stage=0.00 gpu-reuse=0.00 publish=0.00 opt-out=0.00 limit=0.00 rejected=0.00 (events/present, not view fallbacks)
+[music] stop [music:song-08] (driver halt $F0)
+[action-bg-hle] full world-layer provider enabled
+[action-bg-hle] fallback=forced-blank map=04/04 BG1
+[widescreen] gf=1323 $18=04 $19=04 -> WIDE clamp=00 mirror=00 repeat=00 bands=0/811c9dc5 normal=00 hud=40/88/168 left-only-y=28 bg-plan=1 source=world/world hle=00
+[action-fx] first scene accents captured: actors=0/0 decorations=1/1 (lighting=1 particles=1)
+[act-enter] $18=04 $19=04 at game-frame 1323
+[music] src=1B:8554 song=01 authentic — drop game-assets/audio/song-05.ogg to replace ([music:song-05])
+[action-room-scene] ROM-derived world source enabled
+[widescreen] gf=1324 $18=04 $19=04 -> WIDE clamp=00 mirror=00 repeat=00 bands=0/811c9dc5 normal=00 hud=40/88/168 left-only-y=28 bg-plan=1 source=world/world hle=03
+[video-geometry] 16:10 square-PAR -> 120 extra columns/side (render width 496)
+[diorama] ON via AR_DIORAMA_AT at gf=1330
+[gpu-fx] DOF shader ready
+[gpu-fx] rim light shader ready
+[action-fx] first BG1-high lava geometry submitted (Diorama, depth-ordered)
+[pipeline-perf] scene=Action 3D host=0 map=04/04 output=1080x672 frames=162 fps=160.3 cadence-ms=6.238 p95=7.211 max=7.359 refresh=3 vsync=0 cap=0 gpu-ms=unavailable
+[pipeline-stage] events/input mean-ms=0.0270 peak-call-ms=0.0884 calls=162
+[pipeline-stage] emulation mean-ms=0.9494 peak-call-ms=1.1248 calls=162
+[pipeline-stage] PPU + capture mean-ms=3.8124 peak-call-ms=5.7245 calls=162
+[pipeline-stage] world map build mean-ms=0.0005 peak-call-ms=0.0014 calls=162
+[pipeline-stage] SIM metadata mean-ms=0.0282 peak-call-ms=0.0428 calls=162
+[pipeline-stage] town canvas mean-ms=0.0012 peak-call-ms=0.0019 calls=162
+[pipeline-stage] frame snapshot mean-ms=0.0547 peak-call-ms=0.0757 calls=162
+[pipeline-stage] upload mean-ms=0.8830 peak-call-ms=2.5704 calls=162
+[pipeline-stage] presentation mean-ms=0.2155 peak-call-ms=1.1837 calls=162
+[pipeline-stage] CRT/resolve mean-ms=0.0011 peak-call-ms=0.0017 calls=324
+[pipeline-stage] host UI mean-ms=0.0021 peak-call-ms=0.0033 calls=162
+[pipeline-stage] settings UI mean-ms=0.0008 peak-call-ms=0.0014 calls=162
+[pipeline-stage] present/wait mean-ms=0.2101 peak-call-ms=0.3307 calls=162
+[pipeline-stage] pacing/sleep mean-ms=0.0005 peak-call-ms=0.0009 calls=162
+[pipeline-stage] housekeeping mean-ms=0.0056 peak-call-ms=0.5970 calls=162
+[pipeline-stage] PPU setup mean-ms=0.0331 peak-call-ms=0.6861 calls=162
+[pipeline-stage] PPU scanout mean-ms=3.7388 peak-call-ms=4.9929 calls=162
+[pipeline-stage] PPU finish mean-ms=0.0106 peak-call-ms=0.0224 calls=162
+[pipeline-stage] action total mean-ms=0.2052 peak-call-ms=1.1692 calls=162
+[pipeline-stage] action upload mean-ms=0.7811 peak-call-ms=1.9866 calls=162
+[pipeline-stage] action analysis mean-ms=0.0008 peak-call-ms=0.0016 calls=162
+[pipeline-stage] action setup mean-ms=0.0328 peak-call-ms=0.6844 calls=162
+[pipeline-stage] action scanout mean-ms=3.7383 peak-call-ms=4.9919 calls=162
+[pipeline-stage] action finish mean-ms=0.0103 peak-call-ms=0.0221 calls=162
+[pipeline-stage] action host-post mean-ms=0.0550 peak-call-ms=0.0814 calls=162
+[pipeline-stage] action synthesis mean-ms=0.0005 peak-call-ms=0.0014 calls=162
+[pipeline-stage] action mesh mean-ms=0.0031 peak-call-ms=0.0026 calls=486
+[pipeline-stage] action supersample mean-ms=0.0286 peak-call-ms=0.3224 calls=162
+[pipeline-stage] action DOF mean-ms=0.0821 peak-call-ms=0.7073 calls=162
+[pipeline-stage] action submit mean-ms=0.0090 peak-call-ms=0.0275 calls=648
+[pipeline-stage] action callback mean-ms=0.0162 peak-call-ms=0.0559 calls=648
+[pipeline-work] ticks=1.00 repre=0.00 draws=4.0 vertices=364 upload-MiB=0.385 depth-MiB=0.000 depth-copy-MiB=0.000 depth-copy-calls=0.00 jobs=0.00 helpers=0.00 fallback=0.00 failed=0.00 (per-present)
+[pipeline-traffic] upload-calls=1.90 skipped=1.19 scan-MiB=4.131 upload-MiB=0.385 mirror-realloc=0.03 (per-present)
+[pipeline-atlas] reuse=0.00 copy-MiB=0.000 copy-calls=0.00 (per-present; copies are GPU-only)
+[pipeline-path] cpu-project=0.00 cpu-stage=0.00 gpu-reuse=0.00 publish=0.00 opt-out=0.00 limit=0.00 rejected=0.00 (events/present, not view fallbacks)
+[action-fx] first scene accent geometry submitted: 1 effect(s), 586 vertices / 1548 indices (lighting=1 particles=1)
+[pipeline-perf] scene=Action 3D host=0 map=04/04 output=1080x672 frames=171 fps=169.9 cadence-ms=5.886 p95=6.622 max=7.069 refresh=3 vsync=0 cap=0 gpu-ms=unavailable
+[pipeline-stage] events/input mean-ms=0.0249 peak-call-ms=0.0466 calls=171
+[pipeline-stage] emulation mean-ms=0.9414 peak-call-ms=1.0925 calls=171
+[pipeline-stage] PPU + capture mean-ms=3.5452 peak-call-ms=4.4598 calls=171
+[pipeline-stage] world map build mean-ms=0.0005 peak-call-ms=0.0054 calls=171
+[pipeline-stage] SIM metadata mean-ms=0.0254 peak-call-ms=0.0423 calls=171
+[pipeline-stage] town canvas mean-ms=0.0011 peak-call-ms=0.0073 calls=171
+[pipeline-stage] frame snapshot mean-ms=0.0516 peak-call-ms=0.0957 calls=171
+[pipeline-stage] upload mean-ms=0.8002 peak-call-ms=1.7150 calls=171
+[pipeline-stage] presentation mean-ms=0.2139 peak-call-ms=0.4667 calls=171
+[pipeline-stage] CRT/resolve mean-ms=0.0011 peak-call-ms=0.0174 calls=342
+[pipeline-stage] host UI mean-ms=0.0020 peak-call-ms=0.0038 calls=171
+[pipeline-stage] settings UI mean-ms=0.0008 peak-call-ms=0.0016 calls=171
+[pipeline-stage] present/wait mean-ms=0.2010 peak-call-ms=0.7605 calls=171
+[pipeline-stage] pacing/sleep mean-ms=0.0006 peak-call-ms=0.0214 calls=171
+[pipeline-stage] housekeeping mean-ms=0.0016 peak-call-ms=0.0278 calls=171
+[pipeline-stage] PPU setup mean-ms=0.0279 peak-call-ms=0.0403 calls=171
+[pipeline-stage] PPU scanout mean-ms=3.4756 peak-call-ms=4.3904 calls=171
+[pipeline-stage] PPU finish mean-ms=0.0137 peak-call-ms=0.0308 calls=171
+[pipeline-stage] action total mean-ms=0.2046 peak-call-ms=0.4585 calls=171
+[pipeline-stage] action upload mean-ms=0.7112 peak-call-ms=1.6078 calls=171
+[pipeline-stage] action analysis mean-ms=0.0007 peak-call-ms=0.0014 calls=171
+[pipeline-stage] action setup mean-ms=0.0276 peak-call-ms=0.0390 calls=171
+[pipeline-stage] action scanout mean-ms=3.4751 peak-call-ms=4.3902 calls=171
+[pipeline-stage] action finish mean-ms=0.0135 peak-call-ms=0.0305 calls=171
+[pipeline-stage] action host-post mean-ms=0.0497 peak-call-ms=0.0833 calls=171
+[pipeline-stage] action synthesis mean-ms=0.0005 peak-call-ms=0.0134 calls=171
+[pipeline-stage] action mesh mean-ms=0.0036 peak-call-ms=0.0289 calls=525
+[pipeline-stage] action supersample mean-ms=0.0269 peak-call-ms=0.1042 calls=177
+[pipeline-stage] action DOF mean-ms=0.0719 peak-call-ms=0.1278 calls=171
+[pipeline-stage] action submit mean-ms=0.0092 peak-call-ms=0.0244 calls=690
+[pipeline-stage] action callback mean-ms=0.0263 peak-call-ms=0.0492 calls=721
+[pipeline-work] ticks=1.00 repre=0.00 draws=4.0 vertices=366 upload-MiB=0.376 depth-MiB=0.000 depth-copy-MiB=0.000 depth-copy-calls=0.00 jobs=0.00 helpers=0.00 fallback=0.00 failed=0.00 (per-present)
+[pipeline-traffic] upload-calls=1.72 skipped=1.34 scan-MiB=3.912 upload-MiB=0.376 mirror-realloc=0.01 (per-present)
+[pipeline-atlas] reuse=0.00 copy-MiB=0.000 copy-calls=0.00 (per-present; copies are GPU-only)
+[pipeline-path] cpu-project=0.00 cpu-stage=0.00 gpu-reuse=0.00 publish=0.00 opt-out=0.00 limit=0.00 rejected=0.00 (events/present, not view fallbacks)
+[pipeline-perf] scene=Action 3D host=0 map=04/04 output=1080x672 frames=160 fps=158.3 cadence-ms=6.318 p95=7.060 max=7.603 refresh=3 vsync=0 cap=0 gpu-ms=unavailable
+[pipeline-stage] events/input mean-ms=0.0255 peak-call-ms=0.0806 calls=160
+[pipeline-stage] emulation mean-ms=0.9549 peak-call-ms=1.3227 calls=160
+[pipeline-stage] PPU + capture mean-ms=3.5675 peak-call-ms=3.8531 calls=160
+[pipeline-stage] world map build mean-ms=0.0005 peak-call-ms=0.0009 calls=160
+[pipeline-stage] SIM metadata mean-ms=0.0260 peak-call-ms=0.0495 calls=160
+[pipeline-stage] town canvas mean-ms=0.0012 peak-call-ms=0.0092 calls=160
+[pipeline-stage] frame snapshot mean-ms=0.0533 peak-call-ms=0.0736 calls=160
+[pipeline-stage] upload mean-ms=1.0952 peak-call-ms=2.0027 calls=160
+[pipeline-stage] presentation mean-ms=0.2637 peak-call-ms=0.6982 calls=160
+[pipeline-stage] CRT/resolve mean-ms=0.0011 peak-call-ms=0.0166 calls=320
+[pipeline-stage] host UI mean-ms=0.0021 peak-call-ms=0.0255 calls=160
+[pipeline-stage] settings UI mean-ms=0.0007 peak-call-ms=0.0011 calls=160
+[pipeline-stage] present/wait mean-ms=0.2448 peak-call-ms=0.9830 calls=160
+[pipeline-stage] pacing/sleep mean-ms=0.0007 peak-call-ms=0.0249 calls=160
+[pipeline-stage] housekeeping mean-ms=0.0019 peak-call-ms=0.0256 calls=160
+[pipeline-stage] PPU setup mean-ms=0.0279 peak-call-ms=0.0506 calls=160
+[pipeline-stage] PPU scanout mean-ms=3.4988 peak-call-ms=3.7662 calls=160
+[pipeline-stage] PPU finish mean-ms=0.0116 peak-call-ms=0.0396 calls=160
+[pipeline-stage] action total mean-ms=0.2536 peak-call-ms=0.6871 calls=160
+[pipeline-stage] action upload mean-ms=1.0079 peak-call-ms=1.8983 calls=160
+[pipeline-stage] action analysis mean-ms=0.0008 peak-call-ms=0.0016 calls=160
+[pipeline-stage] action setup mean-ms=0.0277 peak-call-ms=0.0503 calls=160
+[pipeline-stage] action scanout mean-ms=3.4983 peak-call-ms=3.7660 calls=160
+[pipeline-stage] action finish mean-ms=0.0113 peak-call-ms=0.0393 calls=160
+[pipeline-stage] action host-post mean-ms=0.0508 peak-call-ms=0.0851 calls=160
+[pipeline-stage] action synthesis mean-ms=0.0004 peak-call-ms=0.0011 calls=160
+[pipeline-stage] action mesh mean-ms=0.0050 peak-call-ms=0.0249 calls=800
+[pipeline-stage] action supersample mean-ms=0.0532 peak-call-ms=0.1865 calls=320
+[pipeline-stage] action DOF mean-ms=0.0729 peak-call-ms=0.1802 calls=160
+[pipeline-stage] action submit mean-ms=0.0109 peak-call-ms=0.0240 calls=800
+[pipeline-stage] action callback mean-ms=0.0335 peak-call-ms=0.0597 calls=830
+[pipeline-work] ticks=1.00 repre=0.00 draws=5.0 vertices=427 upload-MiB=0.693 depth-MiB=0.000 depth-copy-MiB=0.000 depth-copy-calls=0.00 jobs=0.00 helpers=0.00 fallback=0.00 failed=0.00 (per-present)
+[pipeline-traffic] upload-calls=2.91 skipped=1.12 scan-MiB=4.161 upload-MiB=0.693 mirror-realloc=0.00 (per-present)
+[pipeline-atlas] reuse=0.00 copy-MiB=0.000 copy-calls=0.00 (per-present; copies are GPU-only)
+[pipeline-path] cpu-project=0.00 cpu-stage=0.00 gpu-reuse=0.00 publish=0.00 opt-out=0.00 limit=0.00 rejected=0.00 (events/present, not view fallbacks)
+[pipeline-perf] scene=Action 3D host=0 map=04/04 output=1080x672 frames=156 fps=154.4 cadence-ms=6.479 p95=6.997 max=7.936 refresh=3 vsync=0 cap=0 gpu-ms=unavailable
+[pipeline-stage] events/input mean-ms=0.0256 peak-call-ms=0.0477 calls=156
+[pipeline-stage] emulation mean-ms=0.9791 peak-call-ms=1.1468 calls=156
+[pipeline-stage] PPU + capture mean-ms=3.6156 peak-call-ms=4.5746 calls=156
+[pipeline-stage] world map build mean-ms=0.0005 peak-call-ms=0.0009 calls=156
+[pipeline-stage] SIM metadata mean-ms=0.0253 peak-call-ms=0.0443 calls=156
+[pipeline-stage] town canvas mean-ms=0.0012 peak-call-ms=0.0105 calls=156
+[pipeline-stage] frame snapshot mean-ms=0.0517 peak-call-ms=0.0712 calls=156
+[pipeline-stage] upload mean-ms=1.1999 peak-call-ms=2.2543 calls=156
+[pipeline-stage] presentation mean-ms=0.2499 peak-call-ms=0.5997 calls=156
+[pipeline-stage] CRT/resolve mean-ms=0.0010 peak-call-ms=0.0013 calls=312
+[pipeline-stage] host UI mean-ms=0.0021 peak-call-ms=0.0209 calls=156
+[pipeline-stage] settings UI mean-ms=0.0007 peak-call-ms=0.0014 calls=156
+[pipeline-stage] present/wait mean-ms=0.2499 peak-call-ms=1.0875 calls=156
+[pipeline-stage] pacing/sleep mean-ms=0.0005 peak-call-ms=0.0009 calls=156
+[pipeline-stage] housekeeping mean-ms=0.0021 peak-call-ms=0.0180 calls=156
+[pipeline-stage] PPU setup mean-ms=0.0292 peak-call-ms=0.0506 calls=156
+[pipeline-stage] PPU scanout mean-ms=3.5431 peak-call-ms=4.4984 calls=156
+[pipeline-stage] PPU finish mean-ms=0.0121 peak-call-ms=0.0482 calls=156
+[pipeline-stage] action total mean-ms=0.2400 peak-call-ms=0.5898 calls=156
+[pipeline-stage] action upload mean-ms=1.1150 peak-call-ms=2.1507 calls=156
+[pipeline-stage] action analysis mean-ms=0.0009 peak-call-ms=0.0195 calls=156
+[pipeline-stage] action setup mean-ms=0.0289 peak-call-ms=0.0498 calls=156
+[pipeline-stage] action scanout mean-ms=3.5426 peak-call-ms=4.4978 calls=156
+[pipeline-stage] action finish mean-ms=0.0118 peak-call-ms=0.0479 calls=156
+[pipeline-stage] action host-post mean-ms=0.0494 peak-call-ms=0.0784 calls=156
+[pipeline-stage] action synthesis mean-ms=0.0004 peak-call-ms=0.0011 calls=156
+[pipeline-stage] action mesh mean-ms=0.0052 peak-call-ms=0.0454 calls=780
+[pipeline-stage] action supersample mean-ms=0.0439 peak-call-ms=0.1871 calls=312
+[pipeline-stage] action DOF mean-ms=0.0713 peak-call-ms=0.1377 calls=156
+[pipeline-stage] action submit mean-ms=0.0110 peak-call-ms=0.0060 calls=780
+[pipeline-stage] action callback mean-ms=0.0372 peak-call-ms=0.0764 calls=780
+[pipeline-work] ticks=1.00 repre=0.00 draws=5.0 vertices=427 upload-MiB=0.916 depth-MiB=0.000 depth-copy-MiB=0.000 depth-copy-calls=0.00 jobs=0.00 helpers=0.00 fallback=0.00 failed=0.00 (per-present)
+[pipeline-traffic] upload-calls=3.34 skipped=0.67 scan-MiB=3.999 upload-MiB=0.916 mirror-realloc=0.00 (per-present)
+[pipeline-atlas] reuse=0.00 copy-MiB=0.000 copy-calls=0.00 (per-present; copies are GPU-only)
+[pipeline-path] cpu-project=0.00 cpu-stage=0.00 gpu-reuse=0.00 publish=0.00 opt-out=0.00 limit=0.00 rejected=0.00 (events/present, not view fallbacks)
+[pipeline-perf] scene=Action 3D host=0 map=04/04 output=1080x672 frames=156 fps=154.4 cadence-ms=6.477 p95=7.062 max=7.350 refresh=3 vsync=0 cap=0 gpu-ms=unavailable
+[pipeline-stage] events/input mean-ms=0.0268 peak-call-ms=0.0685 calls=156
+[pipeline-stage] emulation mean-ms=0.9933 peak-call-ms=1.1858 calls=156
+[pipeline-stage] PPU + capture mean-ms=3.6944 peak-call-ms=4.1905 calls=156
+[pipeline-stage] world map build mean-ms=0.0005 peak-call-ms=0.0009 calls=156
+[pipeline-stage] SIM metadata mean-ms=0.0259 peak-call-ms=0.0401 calls=156
+[pipeline-stage] town canvas mean-ms=0.0011 peak-call-ms=0.0017 calls=156
+[pipeline-stage] frame snapshot mean-ms=0.0531 peak-call-ms=0.0895 calls=156
+[pipeline-stage] upload mean-ms=1.1206 peak-call-ms=1.7336 calls=156
+[pipeline-stage] presentation mean-ms=0.2398 peak-call-ms=0.3332 calls=156
+[pipeline-stage] CRT/resolve mean-ms=0.0012 peak-call-ms=0.0217 calls=312
+[pipeline-stage] host UI mean-ms=0.0020 peak-call-ms=0.0036 calls=156
+[pipeline-stage] settings UI mean-ms=0.0007 peak-call-ms=0.0017 calls=156
+[pipeline-stage] present/wait mean-ms=0.2362 peak-call-ms=0.3321 calls=156
+[pipeline-stage] pacing/sleep mean-ms=0.0005 peak-call-ms=0.0012 calls=156
+[pipeline-stage] housekeeping mean-ms=0.0020 peak-call-ms=0.0195 calls=156
+[pipeline-stage] PPU setup mean-ms=0.0289 peak-call-ms=0.0670 calls=156
+[pipeline-stage] PPU scanout mean-ms=3.6200 peak-call-ms=4.0969 calls=156
+[pipeline-stage] PPU finish mean-ms=0.0138 peak-call-ms=0.0325 calls=156
+[pipeline-stage] action total mean-ms=0.2299 peak-call-ms=0.3206 calls=156
+[pipeline-stage] action upload mean-ms=1.0320 peak-call-ms=1.6575 calls=156
+[pipeline-stage] action analysis mean-ms=0.0008 peak-call-ms=0.0016 calls=156
+[pipeline-stage] action setup mean-ms=0.0286 peak-call-ms=0.0668 calls=156
+[pipeline-stage] action scanout mean-ms=3.6195 peak-call-ms=4.0965 calls=156
+[pipeline-stage] action finish mean-ms=0.0135 peak-call-ms=0.0322 calls=156
+[pipeline-stage] action host-post mean-ms=0.0506 peak-call-ms=0.0736 calls=156
+[pipeline-stage] action synthesis mean-ms=0.0005 peak-call-ms=0.0010 calls=156
+[pipeline-stage] action mesh mean-ms=0.0048 peak-call-ms=0.0027 calls=780
+[pipeline-stage] action supersample mean-ms=0.0428 peak-call-ms=0.0484 calls=312
+[pipeline-stage] action DOF mean-ms=0.0706 peak-call-ms=0.1150 calls=156
+[pipeline-stage] action submit mean-ms=0.0115 peak-call-ms=0.0263 calls=780
+[pipeline-stage] action callback mean-ms=0.0331 peak-call-ms=0.0633 calls=828
+[pipeline-work] ticks=1.00 repre=0.00 draws=5.0 vertices=427 upload-MiB=0.767 depth-MiB=0.000 depth-copy-MiB=0.000 depth-copy-calls=0.00 jobs=0.00 helpers=0.00 fallback=0.00 failed=0.00 (per-present)
+[pipeline-traffic] upload-calls=3.06 skipped=0.97 scan-MiB=4.079 upload-MiB=0.767 mirror-realloc=0.00 (per-present)
+[pipeline-atlas] reuse=0.00 copy-MiB=0.000 copy-calls=0.00 (per-present; copies are GPU-only)
+[pipeline-path] cpu-project=0.00 cpu-stage=0.00 gpu-reuse=0.00 publish=0.00 opt-out=0.00 limit=0.00 rejected=0.00 (events/present, not view fallbacks)
+[pipeline-perf] scene=Action 3D host=0 map=04/04 output=1080x672 frames=160 fps=158.6 cadence-ms=6.304 p95=6.838 max=7.240 refresh=3 vsync=0 cap=0 gpu-ms=unavailable
+[pipeline-stage] events/input mean-ms=0.0265 peak-call-ms=0.0479 calls=160
+[pipeline-stage] emulation mean-ms=0.9736 peak-call-ms=1.1087 calls=160
+[pipeline-stage] PPU + capture mean-ms=3.7008 peak-call-ms=4.3150 calls=160
+[pipeline-stage] world map build mean-ms=0.0005 peak-call-ms=0.0009 calls=160
+[pipeline-stage] SIM metadata mean-ms=0.0254 peak-call-ms=0.0385 calls=160
+[pipeline-stage] town canvas mean-ms=0.0011 peak-call-ms=0.0018 calls=160
+[pipeline-stage] frame snapshot mean-ms=0.0504 peak-call-ms=0.0719 calls=160
+[pipeline-stage] upload mean-ms=1.0222 peak-call-ms=1.5132 calls=160
+[pipeline-stage] presentation mean-ms=0.1986 peak-call-ms=0.3027 calls=160
+[pipeline-stage] CRT/resolve mean-ms=0.0011 peak-call-ms=0.0014 calls=320
+[pipeline-stage] host UI mean-ms=0.0020 peak-call-ms=0.0038 calls=160
+[pipeline-stage] settings UI mean-ms=0.0008 peak-call-ms=0.0014 calls=160
+[pipeline-stage] present/wait mean-ms=0.2253 peak-call-ms=0.8103 calls=160
+[pipeline-stage] pacing/sleep mean-ms=0.0005 peak-call-ms=0.0009 calls=160
+[pipeline-stage] housekeeping mean-ms=0.0015 peak-call-ms=0.0202 calls=160
+[pipeline-stage] PPU setup mean-ms=0.0287 peak-call-ms=0.0635 calls=160
+[pipeline-stage] PPU scanout mean-ms=3.6367 peak-call-ms=4.2425 calls=160
+[pipeline-stage] PPU finish mean-ms=0.0068 peak-call-ms=0.0254 calls=160
+[pipeline-stage] action total mean-ms=0.1889 peak-call-ms=0.2910 calls=160
+[pipeline-stage] action upload mean-ms=0.9341 peak-call-ms=1.4063 calls=160
+[pipeline-stage] action analysis mean-ms=0.0008 peak-call-ms=0.0016 calls=160
+[pipeline-stage] action setup mean-ms=0.0285 peak-call-ms=0.0620 calls=160
+[pipeline-stage] action scanout mean-ms=3.6362 peak-call-ms=4.2421 calls=160
+[pipeline-stage] action finish mean-ms=0.0066 peak-call-ms=0.0251 calls=160
+[pipeline-stage] action host-post mean-ms=0.0496 peak-call-ms=0.0803 calls=160
+[pipeline-stage] action synthesis mean-ms=0.0004 peak-call-ms=0.0010 calls=160
+[pipeline-stage] action mesh mean-ms=0.0032 peak-call-ms=0.0169 calls=488
+[pipeline-stage] action supersample mean-ms=0.0272 peak-call-ms=0.0606 calls=164
+[pipeline-stage] action DOF mean-ms=0.0715 peak-call-ms=0.1150 calls=160
+[pipeline-stage] action submit mean-ms=0.0099 peak-call-ms=0.0250 calls=644
+[pipeline-stage] action callback mean-ms=0.0167 peak-call-ms=0.0529 calls=658
+[pipeline-work] ticks=1.00 repre=0.00 draws=4.0 vertices=366 upload-MiB=0.674 depth-MiB=0.000 depth-copy-MiB=0.000 depth-copy-calls=0.00 jobs=0.00 helpers=0.00 fallback=0.00 failed=0.00 (per-present)
+[pipeline-traffic] upload-calls=2.38 skipped=0.66 scan-MiB=4.196 upload-MiB=0.674 mirror-realloc=0.00 (per-present)
+[pipeline-atlas] reuse=0.00 copy-MiB=0.000 copy-calls=0.00 (per-present; copies are GPU-only)
+[pipeline-path] cpu-project=0.00 cpu-stage=0.00 gpu-reuse=0.00 publish=0.00 opt-out=0.00 limit=0.00 rejected=0.00 (events/present, not view fallbacks)
+[pipeline-perf] scene=Action 3D host=0 map=04/04 output=1080x672 frames=153 fps=151.8 cadence-ms=6.589 p95=7.103 max=7.672 refresh=3 vsync=0 cap=0 gpu-ms=unavailable
+[pipeline-stage] events/input mean-ms=0.0262 peak-call-ms=0.0490 calls=153
+[pipeline-stage] emulation mean-ms=0.9707 peak-call-ms=1.1032 calls=153
+[pipeline-stage] PPU + capture mean-ms=3.7303 peak-call-ms=3.9870 calls=153
+[pipeline-stage] world map build mean-ms=0.0005 peak-call-ms=0.0011 calls=153
+[pipeline-stage] SIM metadata mean-ms=0.0257 peak-call-ms=0.0439 calls=153
+[pipeline-stage] town canvas mean-ms=0.0012 peak-call-ms=0.0057 calls=153
+[pipeline-stage] frame snapshot mean-ms=0.0500 peak-call-ms=0.0724 calls=153
+[pipeline-stage] upload mean-ms=1.2067 peak-call-ms=2.1794 calls=153
+[pipeline-stage] presentation mean-ms=0.2515 peak-call-ms=0.3232 calls=153
+[pipeline-stage] CRT/resolve mean-ms=0.0011 peak-call-ms=0.0014 calls=306
+[pipeline-stage] host UI mean-ms=0.0021 peak-call-ms=0.0191 calls=153
+[pipeline-stage] settings UI mean-ms=0.0008 peak-call-ms=0.0015 calls=153
+[pipeline-stage] present/wait mean-ms=0.2412 peak-call-ms=0.8057 calls=153
+[pipeline-stage] pacing/sleep mean-ms=0.0005 peak-call-ms=0.0009 calls=153
+[pipeline-stage] housekeeping mean-ms=0.0020 peak-call-ms=0.0315 calls=153
+[pipeline-stage] PPU setup mean-ms=0.0289 peak-call-ms=0.0519 calls=153
+[pipeline-stage] PPU scanout mean-ms=3.6625 peak-call-ms=3.9094 calls=153
+[pipeline-stage] PPU finish mean-ms=0.0085 peak-call-ms=0.0291 calls=153
+[pipeline-stage] action total mean-ms=0.2413 peak-call-ms=0.3110 calls=153
+[pipeline-stage] action upload mean-ms=1.1182 peak-call-ms=2.0742 calls=153
+[pipeline-stage] action analysis mean-ms=0.0008 peak-call-ms=0.0019 calls=153
+[pipeline-stage] action setup mean-ms=0.0287 peak-call-ms=0.0517 calls=153
+[pipeline-stage] action scanout mean-ms=3.6620 peak-call-ms=3.9088 calls=153
+[pipeline-stage] action finish mean-ms=0.0082 peak-call-ms=0.0288 calls=153
+[pipeline-stage] action host-post mean-ms=0.0506 peak-call-ms=0.0794 calls=153
+[pipeline-stage] action synthesis mean-ms=0.0004 peak-call-ms=0.0010 calls=153
+[pipeline-stage] action mesh mean-ms=0.0035 peak-call-ms=0.0024 calls=533
+[pipeline-stage] action supersample mean-ms=0.0300 peak-call-ms=0.0416 calls=190
+[pipeline-stage] action DOF mean-ms=0.0750 peak-call-ms=0.1227 calls=153
+[pipeline-stage] action submit mean-ms=0.0105 peak-call-ms=0.0250 calls=649
+[pipeline-stage] action callback mean-ms=0.0517 peak-call-ms=0.0737 calls=649
+[pipeline-work] ticks=1.00 repre=0.00 draws=4.2 vertices=379 upload-MiB=0.964 depth-MiB=0.000 depth-copy-MiB=0.000 depth-copy-calls=0.00 jobs=0.00 helpers=0.00 fallback=0.00 failed=0.00 (per-present)
+[pipeline-traffic] upload-calls=2.99 skipped=0.27 scan-MiB=4.120 upload-MiB=0.964 mirror-realloc=0.00 (per-present)
+[pipeline-atlas] reuse=0.00 copy-MiB=0.000 copy-calls=0.00 (per-present; copies are GPU-only)
+[pipeline-path] cpu-project=0.00 cpu-stage=0.00 gpu-reuse=0.00 publish=0.00 opt-out=0.00 limit=0.00 rejected=0.00 (events/present, not view fallbacks)
+[widescreen] gf=2573 $18=04 $19=05 -> WIDE clamp=00 mirror=00 repeat=02 bands=0/811c9dc5 normal=00 hud=40/88/168 left-only-y=28 bg-plan=1 source=world/viewport hle=00
+[widescreen] gf=2574 $18=04 $19=05 -> WIDE clamp=00 mirror=00 repeat=02 bands=0/811c9dc5 normal=00 hud=40/88/168 left-only-y=28 bg-plan=1 source=world/viewport hle=01
+[present-cadence] tick-presents=3000 re-presents=0 max-represent-alpha=0.000 no-present-no-sleep=0
+[dump] wrote runs/20260912-171019/dump_state.txt + wram/sram/dispatch_log (exit)
+[action-bg-hle] provider-summary frames=1363 preflight={layers:2604,tiles:2458419,mismatches:0,outside:0} eligible=2604 layers=2604 lookups=37327808 batches=1821120 tiles=36882048 outside=445760 band-cache={builds:0,hits:0}
+[action-room-scene] provider-summary layers=2604 live-fallbacks=0
+[action-room-load-hle] summary command5=2 command4=4 bytes=14592
+[action-room-gfx-hle] summary command7=3 command6=3 bytes=24960
+[action-room-video-hle] summary command3=2 bytes=56
+[run-dir] all diagnostics from this run: runs/20260912-171019/  (share with: zip -r report.zip runs/20260912-171019)

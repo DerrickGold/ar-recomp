@@ -50,6 +50,8 @@ typedef struct DialogueWindow {
   size_t current_page_source_offset;
   size_t current_page_source_bytes;
   uint16_t reveal_offsets[kArLocalizationFrameTextCapacity + 1u];
+  uint8_t structural_boundaries[
+      AR_TEXT_BOUNDARY_BYTES(kArLocalizationFrameTextCapacity)];
   uint32_t clusters;
   char text[kArLocalizationFrameTextCapacity];
 } DialogueWindow;
@@ -428,6 +430,8 @@ static bool BuildDialogueWindow(
   }
   if (first_page > current->page_index) first_page = current->page_index;
   window->bytes = 0;
+  memset(window->structural_boundaries, 0,
+         sizeof(window->structural_boundaries));
   window->bidi.count = 0;
   for (uint32_t index = first_page; index <= current->page_index; ++index) {
     ArDialoguePageSnapshot page;
@@ -442,15 +446,26 @@ static bool BuildDialogueWindow(
     const size_t offset = window->bytes;
     size_t bytes = 0;
     uint8_t object_count = 0;
-    if (!ActRaiserLocalizationText_Normalize(page.utf8 + source_offset, page.utf8_bytes - source_offset,
-                       NULL, 0, false,
-                       window->text + offset, sizeof(window->text) - offset,
-                       &bytes, NULL, 0, &object_count,
-                       window->reveal_offsets) ||
+    if (!ActRaiserLocalizationText_Normalize(
+            page.utf8 + source_offset, page.utf8_bytes - source_offset,
+            NULL, 0, false,
+            window->text + offset, sizeof(window->text) - offset,
+            &bytes, NULL, 0, &object_count, window->reveal_offsets) ||
         !ActRaiserLocalizationText_MapBidiSpans(page.bidi_spans, page.bidi_span_count,
             source_offset, page.utf8_bytes - source_offset, window->reveal_offsets,
             window->text + offset, bytes, offset, &window->bidi))
       return false;
+    /* The source slice need not begin on a bitmap-byte boundary, so remap the
+     * relevant bits explicitly instead of copying packed bytes. */
+    for (size_t source_index = 0; source_index < page.utf8_bytes - source_offset;
+         ++source_index) {
+      if (!ArTextBoundary_Get(page.structural_boundaries,
+                              source_offset + source_index))
+        continue;
+      const size_t mapped = window->reveal_offsets[source_index];
+      if (mapped < bytes && window->text[offset + mapped] == ' ')
+        ArTextBoundary_Set(window->structural_boundaries, offset + mapped, true);
+    }
     window->bytes += bytes;
     if (index == current->page_index) {
       window->current_page_offset = offset;
@@ -1437,10 +1452,11 @@ void ActRaiserLocalizationRuntime_CaptureFrame(
     trace_ticket = s_runtime.dialogue_ticket;
     trace_bytes = reveal_bytes;
   }
-  const bool added = ArLocalizationFrame_AddDialogueWindow(
+  const bool added = ArLocalizationFrame_AddStructuredDialogueWindow(
       frame, route->surface_id, destination, route->region,
       window->text, window->bytes, (uint32_t)reveal_bytes, window->clusters,
-      page.source_revision, language.direction, route->native_font_pixels) &&
+      page.source_revision, language.direction, route->native_font_pixels,
+      window->structural_boundaries) &&
       ArLocalizationFrame_SetTextLanguage(frame, &language) &&
       ArLocalizationFrame_SetTextBidiSpans(frame, &window->bidi);
   if (!added) {
