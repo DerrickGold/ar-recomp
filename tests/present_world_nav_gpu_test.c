@@ -2705,8 +2705,8 @@ static void TestDetailedMountainReuse(SDL_Renderer *renderer, FrameSlot *slot,
   SDL_DestroySurface(warm);
   uint64_t revision = PresentSimGlobeMountains_Revision();
   /* Focus is spatial material state: toggling it changes the surroundings,
-   * not native relief or its source-cache revision. Image keys must include
-   * it, including an exact return to the original unmodified setting. */
+   * not native relief or its source-cache revision. Material updates must
+   * include it, including an exact return to the original setting. */
   SDL_Surface *clear=RenderDetailedTown(renderer,slot,&camera,source,false);
   slot->sim.effective_features |= kSimFeature_CullHaze;
   slot->sim.cull_dim_pct=30; slot->sim.underlay_haze_pct=20; slot->sim.cull_haze_lead_px=16;
@@ -2748,6 +2748,43 @@ static void TestDetailedMountainReuse(SDL_Renderer *renderer, FrameSlot *slot,
   }
   *slot = *saved; free(saved);
   puts("detailed mountains: pan/fixed-detail zoom reuse; facing/detail invalidation; all warm/cold images exact");
+}
+
+static void TestDetailedVisibility(SDL_Renderer *renderer, FrameSlot *slot,
+    ArRenderRectI source) {
+  FrameSlot *saved=malloc(sizeof(*saved)); CHECK(saved); *saved=*slot;
+  const Scene3DCamera camera={-.75f,0,4.5f,.4f};
+  slot->sim.camera_x=128; slot->sim.camera_y=128;
+  slot->sim.cull_lift_inset=false;
+  slot->sim.cull_dim_pct=35; slot->sim.cull_haze_pct=10;
+  slot->sim.cull_haze_lead_px=16; slot->sim.cull_corner_px=96;
+  slot->sim.underlay_haze_pct=0;
+  slot->sim.effective_features &= ~kSimFeature_CullHaze;
+  SDL_Surface *off=RenderDetailedTown(renderer,slot,&camera,source,false);
+  slot->sim.effective_features |= kSimFeature_CullHaze;
+  slot->sim.sprite_margin_left=slot->sim.sprite_margin_right=512;
+  slot->sim.sprite_margin_top=slot->sim.sprite_margin_bottom=512;
+  SDL_Surface *wide=RenderDetailedTown(renderer,slot,&camera,source,false);
+  const uint64_t revision=PresentSimGlobeMountains_Revision();
+  slot->sim.sprite_margin_left=slot->sim.sprite_margin_right=80;
+  slot->sim.sprite_margin_top=slot->sim.sprite_margin_bottom=0;
+  SDL_Surface *masked=RenderDetailedTown(renderer,slot,&camera,source,false);
+  CHECK(Differences(wide,masked)>100 && PresentSimGlobeMountains_Revision()==revision);
+  SDL_Surface *held=RenderDetailedTown(renderer,slot,&camera,source,false);
+  CHECK(Differences(masked,held)==0); SDL_DestroySurface(held);
+  char name[80]; snprintf(name,sizeof(name),"visibility-town-%u-sprite-window",slot->sim.town);
+  SaveImage(masked,name);
+  snprintf(name,sizeof(name),"visibility-town-%u-whole-town",slot->sim.town); SaveImage(wide,name);
+  slot->sim.sprite_margin_left=slot->sim.sprite_margin_right=512;
+  slot->sim.sprite_margin_top=slot->sim.sprite_margin_bottom=512;
+  held=RenderDetailedTown(renderer,slot,&camera,source,false);
+  CHECK(Differences(wide,held)==0); SDL_DestroySurface(held);
+  slot->sim.effective_features &= ~kSimFeature_CullHaze;
+  held=RenderDetailedTown(renderer,slot,&camera,source,false);
+  CHECK(Differences(off,held)==0); SDL_DestroySurface(held);
+  SDL_DestroySurface(off); SDL_DestroySurface(wide); SDL_DestroySurface(masked);
+  *slot=*saved; free(saved);
+  puts("detailed visibility: captured sprite margins change ground cue, reversible/off exact, no relief rebuild PASS");
 }
 
 static void TestDetailedCameraLimits(SDL_Renderer *renderer, FrameSlot *slot,
@@ -2965,6 +3002,7 @@ static void CaptureTownPresentation(SDL_Renderer *renderer, FrameSlot *slot,
     }
   }
   TestDetailedMountainReuse(renderer,slot,source);
+  TestDetailedVisibility(renderer,slot,source);
   TestLiveCraterComposition(renderer,slot,source);
   TestDetailedCameraLimits(renderer,slot,source);
   /* Synchronous camera/cloud sweep from an explicit clock and camera, with

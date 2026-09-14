@@ -4789,12 +4789,17 @@ static PresentationOutcome DrawSimGlobeScene(const FrameSlot *slot, ArRenderRect
   ok = ok && Sim3DMeshSet_AppendSurface(&s_sim_globe.surface,batches,3);
   if (!ok) fprintf(stderr,"[sim-globe-underlay] surface batch rejected\n");
   if (ok && detailed_town) {
+    /* Geographic focus marks the selected town; this separate ground cue
+     * follows its smaller live sprite window. Both are draw-time materials,
+     * never reasons to rebuild resident terrain/model sources on a pan. */
+    const Sim3DDepthSurfaceFocus visibility =
+        PresentSimGlobeFocus_ResolveVisibility(&map,&slot->sim,source);
     ok = PresentSimGlobeTerrain_Append(projection.matrix,map.radius,
             SimBackgroundVoxelRenderer_GroundTexture(slot->sim.background_voxel_serial),
-            town_shadow.texture,town_shadow.opacity) &&
+            town_shadow.texture,town_shadow.opacity,&visibility) &&
         PresentSimGlobeMountains_Append(projection.matrix,map.radius) &&
         PresentSimGlobeWater_Append(projection.matrix,map.radius,
-            SimBackgroundVoxelRenderer_GroundTexture(slot->sim.background_voxel_serial),&t.focus);
+            SimBackgroundVoxelRenderer_GroundTexture(slot->sim.background_voxel_serial),&visibility);
     if (ok && content)
       ok=PresentSimGlobeMountains_AppendEffects(projection.matrix,viewport,
           slot->sim.game_frame,slot->sim.background_voxel_detail,slot->sim.background_voxel_style,

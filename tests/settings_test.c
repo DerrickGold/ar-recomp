@@ -657,6 +657,81 @@ static void TestLandscapeHeightDefaultAndPersistence(void) {
   remove(path);
 }
 
+static void TestFogDefaultsAndPersistence(void) {
+  const char *path = "actraiser-settings-fog-default-test.ini";
+  static const struct {
+    const char *key;
+    long shipping;
+    long previous;
+  } changed[] = {
+    {"sim3d_underlay_haze_pct", 20, 40},
+    {"sim3d_cloud_inset_px", 48, 80},
+    {"sim3d_cull_haze_pct", 0, 10},
+    {"sim3d_cull_dim_pct", 30, 35},
+    {"sim3d_cull_corner_px", 0, 96},
+    {"sim3d_underlay_defocus_pct", 0, 40},
+  };
+  ClearSettingsEnv();
+  Settings_SetPersistenceEnabled(true);
+  CHECK(WriteTextFile(path, "# no fog preferences\n"));
+  Settings_InitWithFile(path);
+  CHECK(g_settings.sim3d_cloud_shroud);
+  CHECK(g_settings.sim3d_cull_haze);
+  CHECK(g_settings.sim3d_cull_lift_inset);
+  CHECK(g_settings.sim3d_cloud_opacity_pct == 35);
+  CHECK(g_settings.sim3d_cloud_falloff_px == 96);
+  CHECK(g_settings.sim3d_cull_lead_px == 48);
+  CHECK(g_settings.sim3d_cull_haze_lead_px == 16);
+  CHECK(g_settings.sim3d_cloud_altitude_px == 72);
+  CHECK(g_settings.sim3d_cloud_drift_pct == 100);
+  CHECK(Settings_Save(path));
+  Settings_InitWithFile(path);
+  for (size_t i = 0; i < sizeof(changed) / sizeof(changed[0]); ++i) {
+    const SettingDesc *desc = Settings_Find(changed[i].key);
+    CHECK(desc && desc->type == kSettingType_Int);
+    if (!desc) continue;
+    CHECK(desc->defval == changed[i].shipping);
+    CHECK(*(int *)desc->field == changed[i].shipping);
+    char line[128];
+    snprintf(line, sizeof(line), "%s = %ld\n", changed[i].key, changed[i].shipping);
+    CHECK(FileContains(path, line));
+  }
+
+  /* Explicit pre-update preferences must survive loading and saving. Missing
+   * keys alone inherit the new baseline; this is not a settings migration. */
+  CHECK(WriteTextFile(path,
+      "sim3d_mode = On\n"
+      "sim3d_underlay_haze_pct = 40\n"
+      "sim3d_cloud_inset_px = 80\n"
+      "sim3d_cull_haze_pct = 10\n"
+      "sim3d_cull_dim_pct = 35\n"
+      "sim3d_cull_corner_px = 96\n"
+      "sim3d_underlay_defocus_pct = 40\n"));
+  Settings_InitWithFile(path);
+  CHECK(Settings_Save(path));
+  Settings_InitWithFile(path);
+  for (size_t i = 0; i < sizeof(changed) / sizeof(changed[0]); ++i) {
+    const SettingDesc *desc = Settings_Find(changed[i].key);
+    if (!desc) continue;
+    CHECK(*(int *)desc->field == changed[i].previous);
+    CHECK(Settings_Reset(desc) == kSettingChange_Applied);
+    CHECK(*(int *)desc->field == changed[i].shipping);
+  }
+
+  /* Environment overrides still win, including zero; they must not rewrite
+   * an existing saved preference just because defaults changed. */
+  setenv("AR_SIM3D_CULL_CORNER", "0", 1);
+  setenv("AR_SIM3D_CULL_DIM", "55", 1);
+  Settings_InitWithFile(path);
+  CHECK(g_settings.sim3d_cull_corner_px == 0);
+  CHECK(g_settings.sim3d_cull_dim_pct == 55);
+  ClearSettingsEnv();
+  Settings_InitWithFile(path);
+  CHECK(g_settings.sim3d_cull_corner_px == 96);
+  CHECK(g_settings.sim3d_cull_dim_pct == 35);
+  remove(path);
+}
+
 static void TestConfigSettingsEnvironmentPrecedence(void) {
   static const char config_path[] = "actraiser-settings-config-test.ini";
   static const char settings_path[] = "actraiser-settings-layer-test.ini";
@@ -1804,6 +1879,7 @@ int main(int argc,char **argv) {
   TestVideoSettingAudit();
   TestSim3DEnvironmentLabels();
   TestLandscapeHeightDefaultAndPersistence();
+  TestFogDefaultsAndPersistence();
   TestConfigSettingsEnvironmentPrecedence();
   TestLegacySeedEncodings();
   TestMutationApi();

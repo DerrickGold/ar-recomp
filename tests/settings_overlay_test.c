@@ -1543,7 +1543,8 @@ int main(int argc, char **argv) {
         kSettingChange_Applied);
   CHECK(Settings_SetLong(sim_shadow, sim_shadow->defval - sim_shadow->step) ==
         kSettingChange_Applied);
-  CHECK(Settings_SetLong(sim_corner, 0) == kSettingChange_Applied);
+  CHECK(Settings_SetLong(sim_corner, sim_corner->defval + sim_corner->step) ==
+        kSettingChange_Applied);
   CHECK(Settings_SetLong(volume, 75) == kSettingChange_Applied);
   CHECK(g_settings.sim3d_mode);  /* made non-default by the Scene test above */
   RowToKey("reset_section_defaults");

@@ -246,15 +246,10 @@ enum {
   kSimShadowSoftnessDefaultPct = 50,
   kSimRimStrengthDefaultPct = 10,
 };
-/* How far the world underlay reads as "distant": percent of the way from the
- * underlay's own colours to the scene backdrop it is blended over.
- *
- * Raised once the focus falloff landed. This alpha now applies only to the
- * blurred copy -- the sharp one is drawn over it unhazed where the sprite
- * window is live -- so it is a far-field control rather than a whole-map dim,
- * and it can be pushed much harder without flattening the ground the player
- * is actually working on. */
-enum { kSimUnderlayHazeDefaultPct = 40 };
+/* Distance haze outside the active town/location, as a percentage toward the
+ * scene's haze colour. Keep the surrounding world legible without competing
+ * with the active area. Independent of sprite-window ground darkening. */
+enum { kSimUnderlayHazeDefaultPct = 20 };
 /* Cloud shroud: how opaque the cover becomes at full density, and how far
  * beyond the sprite-drawable edge it takes to get there, in authentic pixels.
  * The ramp is what makes the clouds appear to whisk aside as the camera
@@ -269,52 +264,28 @@ enum {
    * (`Sim3D_CloudCoverage` caps the inset at a quarter of the shorter
    * half-extent regardless, so a large value cannot veil the centre.) */
   kSimCloudFalloffDefaultPx = 96,
-  kSimCloudInsetDefaultPx = 80,
+  kSimCloudInsetDefaultPx = 48,
   /* Cull lead: how far before the sprite-window edge a record's cover reaches
    * full strength. Roughly a large composition's own width, so a record is
    * fully covered while its last parts are still being emitted. */
   kSimCullLeadDefaultPx = 48,
-  /* How far the town ground fades toward the underlay outside the sprite
-   * window, and over how many pixels it gets there.
-   *
-   * 100 is the argument-from-first-principles value: anything less leaves a
-   * blend of bright town ground and dim world map, a third brightness
-   * matching neither, and at 100 the out-of-range ground simply IS the
-   * underlay -- two tiers, no invented middle, and the canvas's own hard
-   * 512x512 rectangle is fully transparent by the time it arrives.
-   *
-   * The shipped default is 10 anyway, chosen by looking at it. The focus
-   * falloff landed after that reasoning and now carries much of the same
-   * distinction: with the far field defocused, a partial fade no longer reads
-   * as a smeared gradient, and keeping the town's own detail out there is
-   * worth more than the theoretical two-tier purity. 10 is a light touch --
-   * just enough to mark the boundary, with the defocus and the out-of-range
-   * darkening doing the rest of the near/far separation. Set it to 100 to get
-   * the argued behaviour back.
-   *
-   * The ramp used to default to 208 on the argument that a step reads as a
-   * hard line across the ground, worse than the patchy cover it replaces.
-   * That held while the fade was the only thing separating near from far, but
-   * the focus falloff and out-of-range darkening now carry that separation,
-   * and a 208px ramp spends most of its length dimming ground the player is
-   * actively working in. 16 (the minimum, one ramp step) keeps the town's own
-   * vision range bright and lets the fade do its job right at the edge. */
-  kSimCullHazeDefaultPct = 10,
+  /* Sprite-window ground fade is optional: the default uses darkening alone
+   * to retain terrain colours. The shared 16px ramp softens the boundary
+   * without dimming a large portion of the playable area. */
+  kSimCullHazeDefaultPct = 0,
   kSimCullHazeLeadDefaultPx = 16,
   /* How far out-of-range ground is taken toward black. Separate from the fade
    * above because they answer different questions: the fade decides which
    * layer is showing, this decides how lit it is. Multiplied into the colour,
    * so it darkens rather than mixing toward the sky the way the underlay's own
    * distance haze does. */
-  kSimCullDimDefaultPct = 35,
-  /* Corner radius of the lit window. Generous, because the shape reads as
-   * deliberate framing at this size and as a rounded rectangle -- something
-   * with corners at all -- below roughly a third of the short half-extent. */
-  kSimCullCornerDefaultPx = 96,
-  /* How much of the defocused world map is allowed to show at full distance.
-   * A partial mix reads as depth; a full one reads as a smear, because the
-   * 4x downsample is a stand-in for a lens blur and not a very good one. */
-  kSimUnderlayDefocusDefaultPct = 40,
+  kSimCullDimDefaultPct = 30,
+  /* Match the rectangular sprite window by default. Corner rounding remains
+   * adjustable independently of the soft edge ramp. */
+  kSimCullCornerDefaultPx = 0,
+  /* Keep distant terrain sharp by default; haze and darkening supply the
+   * near/far distinction. Optional defocus is a percentage blend. */
+  kSimUnderlayDefocusDefaultPct = 0,
   /* Atmospheric backdrop strength: how far the horizon and zenith depart from
    * the scene's own backdrop colour. Zero reproduces the flat fill exactly,
    * which is what the D5a-2 checkpoint compares against. */

@@ -90,3 +90,101 @@ resource guards and analysis are retained under
 present/wait; Deck reports distinguish tick work from re-presentation work.
 The earlier gallery remains under `runs/sim-globe-visual-acceptance/` as immutable
 historical evidence, without keeping the old renderer to regenerate it.
+
+## Follow-up: restore the sprite-window visibility cue
+
+The geographic focus above left the entire active town clear. It did not
+replace the earlier ground dimming at the smaller, panning sprite-emission
+window. That cue is now restored on the detailed curved ground and coastal
+water, using captured margins, rounded corners, lead distance and bottom-edge
+lift compensation. Existing cull-haze, out-of-range ground fade and darkening
+settings control it; disabling the stage leaves the accepted visuals unchanged.
+This is a ground visibility cue, not a change to gameplay exploration, sprite
+culling, model lighting, HUD or clouds. Flat SIM remains unchanged.
+
+The existing surface material evaluates the mask from independent chart
+coordinates. Panning changes uniforms, not source meshes or model-cache keys;
+no extra draw, texture, shader variant or runner ABI is introduced. The portable
+surface contract adds bounded corner/inset distances, using previously unused
+uniform components. Terrain shadow sampling continues to use its original UVs.
+
+Follow-up evidence is in `runs/sim-globe-visibility-20260913/`: 174/174 desktop
+tests pass, including 157,464 samples against the native cull predicate and
+GPU checks for mask motion, off/restore, copied parameters and unchanged draw/
+upload counts. Six-town fixtures retain 205 unaffected captures byte for byte;
+only the six focus captures intentionally change. These are correctness and
+resource-count checks, not a new throughput benchmark.
+Three strict live Aitos replays also complete with identical simulation state:
+the six fog-off composite captures match the preceding build exactly, and the
+fog-on captures show the restored cue alongside actors, clouds and HUD.
+
+## Fog performance acceptance — September 14
+
+Deck-first follow-up: 16 timed runs, four per build in each of two camera
+setups (ABBA ABBA), following two excluded warmups. Both builds use frozen
+`c2b82449` sources and identical generated code; only the candidate includes
+the fog-restoration patch. Concurrent recompiler/settings/event changes were
+excluded. Both keep the haze stage enabled, so this measures the restored
+sprite-window cue rather than disabling the existing geographic focus too.
+
+Real visible Wayland/Vulkan at 1280×800, existing 15 W limit and automatic GPU
+policy, three helpers, Unlimited presentation, the populated Aitos replay,
+3,000 emulation ticks per trial and all effects enabled. Overview uses pitch
+−0.75/distance 4.5/High detail; close-up uses pitch −1.35/yaw 0.35/distance 2,
+Ultra requested, full cloud opacity and rim strength. Adaptive LOD remains on.
+
+| Median | Before restoration | Restored fog | Change |
+| --- | ---: | ---: | ---: |
+| Overview, host presentations/s | 228.85 | 230.59 | +0.76% |
+| Close-up, host presentations/s | 231.86 | 233.33 | +0.63% |
+| Overview, presentation CPU ms/present | 1.0199 | 1.0188 | −0.11% |
+| Close-up, presentation CPU ms/present | 1.0129 | 1.0121 | −0.08% |
+
+No meaningful end-to-end slowdown was observed; the sub-1% throughput changes
+are not a claimed optimization win. Overview trial ranges were 228.52–230.84
+before and 230.40–231.35 after; close-up ranges were 231.66–232.09 before and
+232.54–233.81 after. Median per-window p95 cadence was 11.551→11.569 ms for
+overview and 11.583→11.506 ms for close-up (not pooled frame p95s).
+
+All 16 final WRAM hashes match, with no settled SIM fallback or failed-draw
+windows. Overview submitted vertex counts and draw counts were effectively
+unchanged, with no added depth-copy traffic. Peak temperature was 61°C and
+available RAM stayed above 11.31 GiB. Peak device-wide VRAM+GTT differences
+were small and changed direction between workloads: 884→893 MiB overview,
+921→914 MiB close-up; these are not process-exclusive allocation counts.
+
+SIM re-presents again recorded alpha zero despite interpolation being enabled.
+These rates measure host presentation throughput, not faster simulation or
+230 distinct interpolated game frames per second. Gameplay remains near
+60 ticks/s. CPU scopes are wall time, not isolated GPU shader execution time.
+This follow-up measures these two SIM workloads, not every mode/device. Mac
+performance follow-up was waived by the user based on this Deck acceptance;
+Mac timing has not been repeated for the fog patch.
+
+Evidence, full logs, hashes, resource guards, scripts and build provenance:
+`runs/sim-globe-fog-deck-20260914/`. All benchmark processes exited; the installed
+Deck game and its power policy were left unchanged. No commit is implied.
+
+## Shipping fog defaults — September 14
+
+The shared factory defaults now match the approved values in the developer's
+current settings: 20% world haze, 48px cloud edge overlap, 0% sprite-window ground
+fade, 30% out-of-range darkening, 0px corner rounding and 0% world defocus. The
+unchanged values already match: cloud shroud/local-area haze/lift inset enabled,
+35% cloud opacity, 96px cloud falloff, 48px cull lead, 16px ground ramp, 72px cloud
+altitude and 100% drift. Square corners retain the soft edge ramp; zero ground
+fade does not disable darkening.
+
+These are compiled defaults for missing preferences and explicit reset actions,
+not a migration of saved player choices. The installer does not ship the
+developer's live `settings.ini`, and its stock config template does not override
+these values. Settings tests cover save/reload, explicit older preferences,
+environment precedence and reset; the pure focus test checks that the default
+zero-haze rectangular mask still darkens the ground and preserves alpha. All
+four focused checks (settings, settings overlay, render metadata and globe
+focus) pass after the default changes.
+
+The Deck batch above used the earlier explicit benchmark settings (35%
+darkening, 10% ground fade, 96px corners); it is not a measurement of this exact
+new factory preset. This follow-up changes only constants and introduces no
+new rendering paths, resource contracts or draws.

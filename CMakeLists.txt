@@ -933,6 +933,7 @@ if(BUILD_TESTING)
         COMMAND actraiser_sim_world_navigation_palace_test)
 
     set(AR_WORLD_NAV_TEST_SOURCES
+        src/sim/sim_render_visibility.c
         src/sim/sim3d_mesh_set.c
         src/performance_metrics.c
         src/platform/sdl/parallel_work_sdl.c
@@ -986,6 +987,11 @@ if(BUILD_TESTING)
     target_include_directories(actraiser_present_sim_globe_mapping_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     target_link_libraries(actraiser_present_sim_globe_mapping_test PRIVATE actraiser_math)
     add_test(NAME actraiser_present_sim_globe_mapping COMMAND actraiser_present_sim_globe_mapping_test)
+    add_executable(actraiser_present_sim_globe_focus_test
+        tests/present_sim_globe_focus_test.c src/sim/sim_render_visibility.c)
+    target_include_directories(actraiser_present_sim_globe_focus_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    target_link_libraries(actraiser_present_sim_globe_focus_test PRIVATE actraiser_math)
+    add_test(NAME actraiser_present_sim_globe_focus COMMAND actraiser_present_sim_globe_focus_test)
     add_executable(actraiser_present_sim_globe_water_test
         tests/present_sim_globe_water_test.c src/present_sim_globe_water.c
         src/present_sim_globe_mapping.c src/sim/sim_world_navigation_globe.c
@@ -1054,7 +1060,6 @@ if(BUILD_TESTING)
         src/sim/sim_world_map_compose.c
         src/present_sim3d_terrain.c
         src/present_sim3d_clouds.c
-        src/sim/sim_render_visibility.c
         src/sim/sim_town_canvas.c
         src/sim/sim_structure_visuals.c
         src/sim/sim_background_voxels.c

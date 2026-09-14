@@ -2206,6 +2206,43 @@ static void TestSurfaceFocus(ArRenderDevice *device, SDL_Renderer *renderer) {
   puts("surface focus: clear/half/far coverage, reversible uniforms, no extra draws/uploads PASS");
 }
 
+static void TestSurfaceVisibility(ArRenderDevice *device, SDL_Renderer *renderer) {
+  const ArRenderPointF positions[]={{.5f,.5f},{.5f,.125f},{.5f,0},{.125f,.125f},{1.2f,.5f}};
+  const float weights[]={0,.5f,1,.7928932188f,1};
+  const uint32_t white=0xffffffff;
+  const ArRenderRectI full={0,0,1,1};
+  CHECK(Sim3DDepthPass_UploadAtlasRegions(device,kSim3DDepthPass_Ground,&white,1,1,4,&full,1));
+  Sim3DDepthMesh *mesh=NULL;
+  for (unsigned region=0;region<5;++region) for (unsigned frame=0;frame<4;++frame) {
+    CHECK(Sim3DDepthPass_Begin(device,32,16,kArRenderFilter_Nearest));
+    if (!mesh) mesh=Sim3DDepthPass_CreateSurfaceMesh(); CHECK(mesh);
+    Sim3DDepthSurfaceVertex source[4]; SurfaceVertices(source);
+    ArRenderPointF mask[4];
+    for (unsigned p=0;p<4;++p) {
+      source[p].color=(ArRenderColorF){.4f,.6f,.8f,1}; mask[p]=positions[region];
+    }
+    if (!frame) CHECK(Sim3DDepthPass_UpdateSurfaceMeshWithMask(mesh,source,mask,1));
+    Sim3DDepthSurfaceTransform t=SurfaceTransform(); t.ambient=1; t.diffuse=0;
+    if (frame!=1) t.focus=(Sim3DDepthSurfaceFocus){.clear_rect={frame==2?4:0,0,1,1},
+      .feather=.25f,.corner_radius=.25f,.inset=.25f,.dim=.4f,.haze={.2f,.3f,.5f,.25f}};
+    const uint64_t bytes=geometry_upload_bytes,draws=draw_calls;
+    CHECK(Sim3DDepthPass_AppendSurfaceMesh(mesh,&t,NULL,0));
+    t.focus.clear_rect=(ArRenderRectF){0}; /* queued parameters are copied */
+    SDL_Surface *actual=ReadPass(device,renderer); CHECK(actual);
+    CHECK(draw_calls-draws==1 && geometry_upload_bytes-bytes==(!frame?256:0));
+    if (actual) {
+      Uint8 r,g,b,a; CHECK(SDL_ReadSurfacePixel(actual,16,8,&r,&g,&b,&a));
+      const float w=frame==1?0:frame==2?1:weights[region], h=.25f*w, gain=(1-.4f*w)*(1-h);
+      CHECK(abs((int)r-(int)lroundf(255*(.4f*gain+.2f*h)))<=1);
+      CHECK(abs((int)g-(int)lroundf(255*(.6f*gain+.3f*h)))<=1);
+      CHECK(abs((int)b-(int)lroundf(255*(.8f*gain+.5f*h)))<=1 && a==255);
+    }
+    SDL_DestroySurface(actual);
+  }
+  Sim3DDepthPass_DestroyMesh(mesh); Sim3DDepthPass_Reset(device);
+  puts("surface visibility: rounded/inset mask, pan/off/restore, opaque output, no extra draws/uploads PASS");
+}
+
 static void TestPartitionedSources(ArRenderDevice *device, SDL_Renderer *renderer) {
   enum { kQuads = kSim3DDepthMaximumSourceQuads + 1, kFirst = kQuads - 2 };
   Sim3DDepthSurfaceVertex *surface = calloc(kQuads * 4, sizeof(*surface));
@@ -3209,7 +3246,7 @@ static void TestSurfaceContracts(ArRenderDevice *device, SDL_Renderer *renderer)
   Sim3DDepthSurfaceTransform large_w = t; large_w.radial.matrix[15] = 16;
   CHECK(!Sim3DDepthPass_AppendSurfaceMesh(mesh, &large_w, NULL, 0));
   CHECK(Sim3DDepthPass_UpdateSurfaceMesh(mesh, source, 1));
-  for (unsigned bad = 0; bad < 23; ++bad) {
+  for (unsigned bad = 0; bad < 29; ++bad) {
     Sim3DDepthSurfaceTransform copy = t;
     if (bad == 0) copy.radial.matrix[0] = INFINITY;
     if (bad == 1) copy.radial.basis[0][0] = NAN;
@@ -3234,6 +3271,12 @@ static void TestSurfaceContracts(ArRenderDevice *device, SDL_Renderer *renderer)
     if (bad == 20) copy.focus.clear_rect.y=NAN;
     if (bad == 21) copy.focus.clear_rect.w=-1;
     if (bad == 22) copy.focus.clear_rect.h=17;
+    if (bad == 23) copy.focus.corner_radius=NAN;
+    if (bad == 24) copy.focus.corner_radius=-1;
+    if (bad == 25) copy.focus.corner_radius=17;
+    if (bad == 26) copy.focus.inset=INFINITY;
+    if (bad == 27) copy.focus.inset=-1;
+    if (bad == 28) copy.focus.inset=17;
     CHECK(!Sim3DDepthPass_AppendSurfaceMesh(mesh, &copy, NULL, 0));
     CHECK(Sim3DDepthPass_UpdateSurfaceMesh(mesh,source,1));
   }
@@ -3497,6 +3540,7 @@ int main(void) {
   TestRadialModels(&render_device, renderer);
   TestSurfaceGeometry(&render_device, renderer);
   TestSurfaceFocus(&render_device, renderer);
+  TestSurfaceVisibility(&render_device, renderer);
   TestPartitionedSources(&render_device, renderer);
   TestSurfaceMaterials(&render_device, renderer);
   TestSurfaceShadowMapping(&render_device, renderer);

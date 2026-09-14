@@ -12,6 +12,7 @@ static struct {
   bool valid, published;
   Sim3DMeshSet meshes;
   Sim3DDepthSurfaceVertex *vertices;
+  ArRenderPointF *mask;
   size_t count, tops;
 } s_terrain;
 
@@ -19,6 +20,7 @@ static struct {
 typedef struct TerrainBuilder {
   const SimGlobeMapping *map;
   Sim3DDepthSurfaceVertex *vertices;
+  ArRenderPointF *mask;
   size_t tops, cliffs;
 } TerrainBuilder;
 
@@ -42,6 +44,7 @@ static bool EmbedTerrain(void *user, const float xy[4][2],
     Sim3DDepthSurfaceVertex *v = &b->vertices[index*4+p];
     *v = (Sim3DDepthSurfaceVertex){.uv = {uv[p][0],uv[p][1]},
       .color = {shade[p],shade[p],shade[p],1}};
+    b->mask[index*4+p] = (ArRenderPointF){(map->origin_x+x)/128,(map->origin_y+y)/128};
     if (!SimWorldNavigationTerrain_RegisterTownFloor(map->town,x,y,heights[p],&height) ||
         !SimGlobeMapping_Encode(map,map->origin_x+x,map->origin_y+y,
             height,0,v->normal,v->elevation)) return false;
@@ -58,14 +61,18 @@ bool PresentSimGlobeTerrain_Prepare(const SimGlobeMapping *map, uint32_t geograp
   s_terrain.valid = false;
 #if AR_SIM3D_TERRAIN_ELEVATION
   TerrainBuilder b = {.map = map,
-    .vertices = malloc(kMaximumTerrainQuads*4*sizeof(*b.vertices))};
-  if (!b.vertices) return false;
+    .vertices = malloc(kMaximumTerrainQuads*4*sizeof(*b.vertices)),
+    .mask = malloc(kMaximumTerrainQuads*4*sizeof(*b.mask))};
+  if (!b.vertices || !b.mask) { free(b.vertices); free(b.mask); return false; }
   if (!EmitSimTownTerrainSource(map->town,(uint16_t)(map->town_landscape*100+.5f),EmbedTerrain,&b)) {
-    free(b.vertices); return false;
+    free(b.vertices); free(b.mask); return false;
   }
   free(s_terrain.vertices); s_terrain.vertices = b.vertices;
+  free(s_terrain.mask); s_terrain.mask = b.mask;
   memmove(b.vertices+b.tops*4,b.vertices+kMaximumTerrainTops*4,
       b.cliffs*4*sizeof(*b.vertices));
+  memmove(b.mask+b.tops*4,b.mask+kMaximumTerrainTops*4,
+      b.cliffs*4*sizeof(*b.mask));
   s_terrain.map = *map; s_terrain.geography = geography;
   s_terrain.count = b.tops+b.cliffs; s_terrain.tops = b.tops;
   s_terrain.valid = true; s_terrain.published = false;
@@ -76,18 +83,21 @@ bool PresentSimGlobeTerrain_Prepare(const SimGlobeMapping *map, uint32_t geograp
 }
 
 bool PresentSimGlobeTerrain_Append(const float matrix[16], float radius,
-    ArRenderTexture ground, ArRenderTexture shadow, float shadow_opacity) {
-  if (!s_terrain.valid || !ArRenderTexture_IsValid(ground)) return false;
+    ArRenderTexture ground, ArRenderTexture shadow, float shadow_opacity,
+    const Sim3DDepthSurfaceFocus *focus) {
+  if (!s_terrain.valid || !focus || !ArRenderTexture_IsValid(ground)) return false;
   if (!s_terrain.published) {
     if (!Sim3DMeshSet_UpdateSurface(&s_terrain.meshes,
-            s_terrain.vertices,NULL,s_terrain.count)) return false;
+            s_terrain.vertices,s_terrain.mask,s_terrain.count)) return false;
     free(s_terrain.vertices); s_terrain.vertices = NULL;
+    free(s_terrain.mask); s_terrain.mask = NULL;
     s_terrain.published = true;
   }
   Sim3DDepthSurfaceBatch batch = {.layer = kSim3DDepthPass_Ground,
     .texture = ground,.range = {0,s_terrain.count},
     /* The source already contains SIM's slope/contact/skirt shading. */
-    .transform = {.radial = {.sphere_radius = radius,.height_scale = 1},.ambient = 1}};
+    .transform = {.radial = {.sphere_radius = radius,.height_scale = 1},.ambient = 1,
+      .focus = *focus}};
   memcpy(batch.transform.radial.matrix,matrix,sizeof(batch.transform.radial.matrix));
   for (int i = 0; i < 3; ++i) batch.transform.radial.basis[i][i] = 1;
   if (!ArRenderTexture_IsValid(shadow) || shadow_opacity <= 0)
@@ -103,6 +113,7 @@ bool PresentSimGlobeTerrain_Append(const float matrix[16], float radius,
 
 void PresentSimGlobeTerrain_Reset(void) {
   free(s_terrain.vertices);
+  free(s_terrain.mask);
   Sim3DMeshSet_Destroy(&s_terrain.meshes);
   memset(&s_terrain,0,sizeof(s_terrain));
 }
