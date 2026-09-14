@@ -2100,14 +2100,6 @@ static void ApplyHeightSlew(SimFrameData *dst) {
 }
 
 
-int16_t Sim3D_MaxDrawLift(unsigned height_scale_x100) {
-  long lift = (long)kSimVirtualHeight_Flying * (long)height_scale_x100 /
-      kPercentScale;
-  if (lift < 0) lift = 0;
-  if (lift > 0x7FFF) lift = 0x7FFF;
-  return (int16_t)lift;
-}
-
 int16_t Sim3D_SourceDrawLift(const SimSourceRecord *source,
                              unsigned height_scale_x100) {
   if (!source || source->tier != kSimRecordTier_World) return 0;

@@ -21,6 +21,14 @@ bool Sim3D_HeightClassStandsOnTerrain(SimHeightClass height_class) {
 }
 
 /* Pure visibility masks, shared by metadata validation and presentation. */
+int16_t Sim3D_MaxDrawLift(unsigned height_scale_x100) {
+  long lift = (long)kSimVirtualHeight_Flying * (long)height_scale_x100 /
+      kPercentScale;
+  if (lift < 0) lift = 0;
+  if (lift > 0x7FFF) lift = 0x7FFF;
+  return (int16_t)lift;
+}
+
 float Sim3D_CloudCoverage(float x, float y, float clear_x0, float clear_x1,
                           float clear_y0, float clear_y1, float inset,
                           float falloff) {

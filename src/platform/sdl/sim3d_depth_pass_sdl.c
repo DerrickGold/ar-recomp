@@ -2160,6 +2160,8 @@ static bool SurfaceLayersSafe(Sim3DDepthMesh *mesh,
   if (!ValidSampleColor(focus->haze) || !isfinite(focus->dim) || focus->dim<0 || focus->dim>1 ||
       !isfinite(focus->feather) || focus->feather<0 || focus->feather>16 ||
       (focus->feather && focus->feather<.000001f) ||
+      !isfinite(focus->corner_radius) || focus->corner_radius<0 || focus->corner_radius>16 ||
+      !isfinite(focus->inset) || focus->inset<0 || focus->inset>16 ||
       !isfinite(focus->clear_rect.x) || !isfinite(focus->clear_rect.y) ||
       !isfinite(focus->clear_rect.w) || !isfinite(focus->clear_rect.h) ||
       fabsf(focus->clear_rect.x)>16 || fabsf(focus->clear_rect.y)>16 ||
@@ -2239,6 +2241,7 @@ static void QueueSurfaceLayers(Sim3DDepthMesh *mesh, Sim3DDepthPassLayer opaque_
     uniform.mask_rect[2]=focus->clear_rect.x+focus->clear_rect.w;
     uniform.mask_rect[3]=focus->clear_rect.y+focus->clear_rect.h;
     uniform.mask[0]=focus->feather; uniform.mask[1]=focus->dim;
+    uniform.mask[2]=focus->corner_radius; uniform.mask[3]=focus->inset;
   }
   for (unsigned r = 0; r < 3; ++r) for (unsigned c = 0; c < 3; ++c) {
     uniform.shadow_basis[r][c] = transform->shadow_basis[r][c];

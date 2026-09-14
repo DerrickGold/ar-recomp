@@ -32,7 +32,8 @@ bool PresentSimGlobeTerrain_Prepare(const SimGlobeMapping *map, uint32_t geograp
   assert(!"SIM terrain in navigation-only fixture"); return false;
 }
 bool PresentSimGlobeTerrain_Append(const float matrix[16], float radius,
-    ArRenderTexture ground, ArRenderTexture shadow, float shadow_opacity) {
+    ArRenderTexture ground, ArRenderTexture shadow, float shadow_opacity,
+    const Sim3DDepthSurfaceFocus *focus) {
   assert(!"SIM terrain in navigation-only fixture"); return false;
 }
 void PresentSimGlobeTerrain_Reset(void) {}

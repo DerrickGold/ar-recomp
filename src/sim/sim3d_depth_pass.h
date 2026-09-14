@@ -310,15 +310,18 @@ typedef struct Sim3DDepthSurfaceVertex {
   ArRenderPointF uv;
 } Sim3DDepthSurfaceVertex;
 /* Spatial color treatment in the source's independent mask coordinates.
- * Inside clear_rect the source is unchanged. Smooth distance/feather outside
- * it applies dimming followed by haze, without changing alpha, depth, texture
+ * Smooth signed distance/feather from clear_rect applies dimming then haze.
+ * corner_radius rounds the rectangle (clamped to its smaller half-extent);
+ * inset starts the ramp that far inside its boundary. Zero for both preserves
+ * the ordinary outside-only rectangular falloff. This never changes alpha, depth, texture
  * coverage or geometry. Zero feather treats the whole source uniformly;
  * zero dim and haze.a disable the effect. All values must be finite, rect
- * and feather use the same bounded units as surface overlay masks. */
+ * and distances use the same bounded units as surface overlay masks. */
 typedef struct Sim3DDepthSurfaceFocus {
   ArRenderRectF clear_rect;
   float feather, dim;
   ArRenderColorF haze;
+  float corner_radius, inset;
 } Sim3DDepthSurfaceFocus;
 typedef struct Sim3DDepthSurfaceTransform {
   Sim3DDepthRadialTransform radial;

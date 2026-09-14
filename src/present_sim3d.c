@@ -1859,8 +1859,8 @@ static PresentationOutcome RenderSimProfile(
     }
     Sim3DPerformance_End(performance);
   }
-  /* The globe uses the town boundary for spatial focus. Do not apply a second
-   * native-window fade to its already-composited ground and actors. */
+  /* The globe already applies native-window dimming to its resident ground.
+   * Do not fade the completed composite (which also contains actors and models). */
   if (globe_underlay) {
     cull_haze = false;
     fade_ground_planes = false;

@@ -65,7 +65,14 @@ void main() {
         texture_uv = source_uv[corner];
         if (material.y >= 2.0) {
             vec2 d = max(max(mask_rect.xy - mask_uv[corner], mask_uv[corner] - mask_rect.zw), vec2(0.0));
-            float t = mask.x == 0.0 ? 1.0 : clamp(length(d) / mask.x, 0.0, 1.0);
+            float distance = length(d);
+            if (material.y == 4.0 && (mask.z > 0.0 || mask.w > 0.0)) {
+                vec2 half_extent = (mask_rect.zw - mask_rect.xy) * 0.5;
+                float radius = min(mask.z, min(half_extent.x, half_extent.y));
+                vec2 q = abs(mask_uv[corner] - (mask_rect.xy + half_extent)) - (half_extent - radius);
+                distance = length(max(q, vec2(0.0))) + min(max(q.x, q.y), 0.0) - radius + mask.w;
+            }
+            float t = mask.x == 0.0 ? 1.0 : clamp(distance / mask.x, 0.0, 1.0);
             float coverage = t * t * (3.0 - 2.0 * t);
             if (material.y == 4.0) {
                 vertex_color.rgb *= 1.0 - mask.y * coverage;
