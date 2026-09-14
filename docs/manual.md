@@ -472,6 +472,7 @@ Overlay section **System → Game**.
 | Key | Effect |
 |---|---|
 | `AR_FIX_BRIDGE_LIMIT=1` | bridges stop counting toward a town's 128-structure population cap: completed bridges migrate to a validated sidecar in spare battery-save space while keeping their map mark, rendered metatile, river crossing, and 32-person support. Retroactive on existing towns; persisted only by the game's normal save transaction and sticky once saved. Replaces the withdrawn v1 slot-reuse/lightning designs, which broke town redraws |
+| `AR_FIX_AITOS_EVENT_QUEUE=1` | prevents Aitos's northeast-mountain discovery from repeating the earlier “all monsters defeated” message when those events overlap. The repair is live and save-neutral; turning it off preserves the original-ROM behavior |
 | `AR_BRIDGEFIX_DEBUG=1` | `[bridgefix]` log from the structure-system hooks: migrations/cleanup, bridge allocations, table-full events, and sidecar mark/render passes; `=2` also logs every structure allocation |
 | `AR_TURBO_MULT=<n>` | turbo multiplier, 2–64 (default 8) |
 

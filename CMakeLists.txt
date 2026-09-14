@@ -1629,6 +1629,18 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_town_lair_bits_hle
         COMMAND actraiser_town_lair_bits_hle_test)
 
+    # Exact-state regression for the retail Aitos forced-event latch collision.
+    # Near misses must remain byte-for-byte untouched.
+    add_executable(actraiser_event_bugfixes_test
+        tests/actraiser_event_bugfixes_test.c
+        src/actraiser/actraiser_event_bugfixes.c
+    )
+    target_include_directories(actraiser_event_bugfixes_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+    )
+    add_test(NAME actraiser_event_bugfixes
+        COMMAND actraiser_event_bugfixes_test)
+
     add_executable(actraiser_action_bg_plan_test
         tests/action_bg_plan_test.c
         src/action/action_bg_plan.c

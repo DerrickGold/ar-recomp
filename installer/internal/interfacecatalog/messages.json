@@ -3464,6 +3464,15 @@
     ]
   },
   {
+    "key": "setting.fix_aitos_event_queue.help",
+    "text": [
+      "Prevents the northeast-mountain discovery from repeating Aitos's earlier all-monsters-defeated message when the events overlap. Off reproduces the original game.",
+      "Empêche la découverte de la montagne du nord-est de répéter l'ancien message annonçant la disparition de tous les monstres d'Aitos lorsque les événements se chevauchent. Désactivé reproduit le jeu original.",
+      "Verhindert, dass die Entdeckung am nordöstlichen Berg bei überlappenden Ereignissen Aitos' frühere Meldung über alle besiegten Monster wiederholt. Aus reproduziert das Originalspiel.",
+      "イベントが重なったとき、北東の山の発見で以前の「アイトスから魔物が消えた」というメッセージが再表示される不具合を防ぎます。オフは原作どおりです。"
+    ]
+  },
+  {
     "key": "setting.fix_windmill_wind_stop.help",
     "text": [
       "Aitos's no-wind event only stills the windmills that already existed, so one the town builds during it keeps turning. On, every windmill in the town holds until the Wind miracle restores them. Off reproduces the original game. Affects the enhanced town view only.",
@@ -4604,6 +4613,7 @@
   {"key":"setting.bind_pad_render_compare.label","text":["Compare rendering","Comparer les rendus","Rendering vergleichen","描画を比較"]},
   {"key":"setting.show_debug_settings.label","text":["Show debug settings","Afficher les réglages de débogage","Debug-Einstellungen anzeigen","デバッグ設定を表示"]},
   {"key":"setting.fix_bridge_limit.label","text":["Bridge-free limit","Limite sans les ponts","Limit ohne Brücken","橋を制限数から除外"]},
+  {"key":"setting.fix_aitos_event_queue.label","text":["Correct Aitos messages","Corriger les messages d’Aitos","Aitos-Meldungen korrigieren","アイトスのメッセージ修正"]},
   {"key":"setting.fix_windmill_wind_stop.label","text":["Wind stops every windmill","Le vent arrête tous les moulins","Windstopp für alle Windmühlen","風が止むと全風車を停止"]},
   {"key":"setting.turbo_multiplier.label","text":["Turbo multiplier","Multiplicateur turbo","Turbo-Faktor","ターボ倍率"]},
   {"key":"setting.warp_target.label","text":["Warp target","Destination de téléportation","Teleportziel","ワープ先"]},

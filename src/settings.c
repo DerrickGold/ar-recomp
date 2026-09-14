@@ -2322,6 +2322,12 @@ const SettingDesc g_setting_descs[] = {
                "population cap; they migrate to spare save space and keep "
                "their tiles, crossing, and support.",
                kSettingCat_Enhancements, 0, true, NULL, NULL),
+  BOOL_SETTING(fix_aitos_event_queue, "AR_FIX_AITOS_EVENT_QUEUE",
+               "Correct Aitos messages",
+               "Prevents the northeast-mountain discovery from repeating "
+               "Aitos's earlier all-monsters-defeated message when the "
+               "events overlap. Off reproduces the original game.",
+               kSettingCat_Enhancements, 0, false, NULL, NULL),
   BOOL_SETTING(fix_windmill_wind_stop, "AR_FIX_WINDMILL_WIND_STOP",
                "Wind stops every windmill",
                "Aitos's no-wind event only stills the windmills that already "

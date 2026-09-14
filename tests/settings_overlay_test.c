@@ -1795,6 +1795,9 @@ int main(int argc, char **argv) {
   CHECK(!strcmp(SettingsOverlay_SelectedKey(), "fix_bridge_limit"));
   CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
   CHECK(g_settings.fix_bridge_limit);
+  RowToKey("fix_aitos_event_queue");
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
+  CHECK(g_settings.fix_aitos_event_queue);
 
   /* Inspector is the section's third tab: its first row makes the enabled
    * state explicit, its second dispatches the complete scene-asset dump, and
