@@ -12,6 +12,7 @@
 #include "actraiser_game.h"
 #include "actraiser_action_bg.h"
 #include "actraiser_hle_fatal.h"
+#include "actraiser/actraiser_event_bugfixes.h"
 #include "actraiser/actraiser_localization_routes.h"
 #include "action/action_bg_tuner.h"
 #include "action/action_effects.h"
@@ -4684,6 +4685,11 @@ void RunOneFrameOfGame(void) {
     }
     ActRaiserHleFatal_RegisterHostEscape(ActRaiser_HleFatalEscapeToHost);
   }
+
+  /* This changes only the exact retail-ROM state proven by broken_text.rec;
+   * all event selection and dispatch remains in the native town engine. */
+  if (g_settings.fix_aitos_event_queue)
+    (void)ActRaiser_RepairAitosEventQueueCollision(g_ram, kSnesWramSize);
 
   ActRaiser_ApplyCheats();   /* host-side cheats (live settings, default off) */
 

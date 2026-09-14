@@ -508,7 +508,7 @@ tables at `$03:E66E`, not 4 lairs/town).
 | Address | Description |
 |---------|-------------|
 | $7F:9202 | event-selector scan cursor, `0..$1F` (`$03:E015` loop) |
-| $7F:920E | pending-event latch. Bit 7 set = "run id `& $7F` next"; `$03:DFFB` strips the bit and returns the id. Handlers self-latch, e.g. `$03:EFE5` writes `$87`, `$03:FAE1` writes `$88` |
+| $7F:920E | pending-event latch. Bit 7 set = "run id `& $7F` next"; `$03:DFFA/$E004` strips the bit and returns the id. Handlers self-latch, e.g. Aitos event 1 writes `$81` at `$03:EED8`, `$03:EFE5` writes `$87`, and `$03:FAE1` writes `$88`. In `broken_text.rec`, event 1's `$81` survives after its fired bit is set; event 4 then becomes eligible before the selector runs again, so the forced path returns event 1 and repeats the all-monsters message instead of the mountain discovery. `AR_FIX_AITOS_EVENT_QUEUE` clears only that exact stale-latch/bitmap combination before the next game frame, leaving the native selector to choose event 4. |
 | $7F:9220 | late-bound **pool-allocator pointer** (callee−1) for the scenery/cutscene spawn trampoline `LDA #cont; PHA; LDA $9220; PHA; RTS`. Only three values: `$CA79`→`$03:CA7A` (`$01:B790`, 7-slot `$0E02` pool), `$CA7E`→`$03:CA7F` (`$01:B798`, `$0F0C` pool), `$B67C`→`$03:B67D` |
 | $7F:9222 + town*2 | **active ambient scene index** into `$03:FD0E`; 0 = no ambient actors. Session-only — written solely by story-event handlers (Aitos `$9228`: `$03:EFF6` writes 4, `$03:F030` writes `$15`), never restored from SRAM |
 | $7F:922E | compared against the active index by `$03:FCE8`; no decoded code ever writes it (dead compare) |

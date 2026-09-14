@@ -334,6 +334,9 @@ typedef struct Settings {
    * serialized. */
   bool fix_bridge_limit;  /* migrate completed bridges to the SRAM extension
                              area so they stop consuming 128-cap records */
+  /* Clear the verified stale forced-event latch when Aitos's all-monsters and
+   * northeast-mountain events collide. Off preserves the retail-ROM bug. */
+  bool fix_aitos_event_queue;
   /* Aitos's "no wind" story event stills only the windmills that exist when it
    * fires, so a mill built during it keeps turning. On, every mill in the town
    * holds until the Wind miracle. Presentation only, and only in the enhanced

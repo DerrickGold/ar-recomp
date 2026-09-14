@@ -98,8 +98,9 @@ static void TestDefaultsAndMetadata(void) {
    * keyboard and gamepad binding rows. The sim synthetic-part work added one
    * measured, gameplay-affecting actor-range row. Background voxel polish then
    * added five independent performance boundaries, the audited landscape one
-   * player-facing magnitude row, and the Aitos wind event one Extras row for
-   * whether it stills every windmill or only the ones the ROM stamped. The
+   * player-facing magnitude row, plus two Aitos Extras rows: whether wind
+   * stills every windmill, and whether the stale event-message latch is
+   * repaired. The
    * host FPS overlay adds one Video row, and frame generation adds one explicit
    * 30-to-60 Hz validation cadence. The runtime-only render comparison adds
    * one keyboard and one gamepad binding row, but deliberately no persisted
@@ -109,7 +110,7 @@ static void TestDefaultsAndMetadata(void) {
    * renderer and a legacy one that no longer exists. Localization adds six
    * source, presentation, and enhanced-font preferences, plus an independent
    * host interface language. Connected SIM adds one default-on underlay row. */
-  CHECK(g_setting_desc_count == 291);
+  CHECK(g_setting_desc_count == 292);
   for (int i = 0; i < g_setting_desc_count; i++) {
     const SettingDesc *a = &g_setting_descs[i];
     CHECK(a->key && a->key[0] && a->label && a->tooltip);
@@ -314,6 +315,8 @@ static void TestDefaultsAndMetadata(void) {
   const SettingDesc *stretch = Settings_Find("ignore_aspect_ratio");
   const SettingDesc *legacy_bg_refresh = Settings_Find("ws_bgrefresh");
   const SettingDesc *bridge_limit = Settings_Find("fix_bridge_limit");
+  const SettingDesc *aitos_event_queue =
+      Settings_Find("fix_aitos_event_queue");
   const SettingDesc *save_backend = Settings_Find("save_backend");
   const SettingDesc *save_fillmore = Settings_Find("save_prog_fillmore");
   const SettingDesc *save_page = Settings_Find("save_editor_page");
@@ -385,6 +388,10 @@ static void TestDefaultsAndMetadata(void) {
   Settings_FormatValue(refresh, refresh_value, sizeof(refresh_value));
   CHECK(!strcmp(refresh_value, "Vsync"));
   CHECK(bridge_limit && bridge_limit->category == kSettingCat_Enhancements);
+  CHECK(aitos_event_queue &&
+        aitos_event_queue->category == kSettingCat_Enhancements &&
+        aitos_event_queue->type == kSettingType_Bool &&
+        aitos_event_queue->defval == 0 && !aitos_event_queue->sticky);
   CHECK(inspector && inspector->category == kSettingCat_Inspector);
   CHECK(dump_assets && dump_assets->category == kSettingCat_Inspector &&
         dump_assets->type == kSettingType_Action);
