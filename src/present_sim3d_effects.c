@@ -268,17 +268,14 @@ static const float kEffectCircle32[32][2] = {
 static bool AppendSimEffectGlow(
     EffectBatch *batch, const FrameSlot *slot,
     const SimEffectInstance *effect, const SimEffectStyle *style,
-    ArRenderRectI source, ArRenderRectI viewport,
-    const Scene3DCamera *camera,
-    const float matrix[16]) {
+    const SimSceneProjection *scene) {
   enum { kSegments = 32 };
   if (!EffectBatchReserve(batch, kSegments + 1, kSegments * 3))
     return false;
   Scene3DPoint strike;
   float scale_x, scale_y;
   if (!ProjectSimEffectPoint(
-          slot, effect, &effect->geometry.data.point, source, viewport,
-          camera, matrix, &strike, &scale_x, &scale_y))
+          slot, effect, &effect->geometry.data.point, scene, &strike, &scale_x, &scale_y))
     return true;
   strike.y -= style->glow_origin_lift * scale_y;
 
@@ -342,9 +339,7 @@ static void AppendEffectQuad(EffectBatch *batch, float x, float y,
 static bool AppendSimEffectTrail(
     EffectBatch *batch, const FrameSlot *slot,
     const SimEffectInstance *effect, const SimEffectStyle *style,
-    ArRenderRectI source, ArRenderRectI viewport,
-    const Scene3DCamera *camera,
-    const float matrix[16]) {
+    const SimSceneProjection *scene) {
   if (effect->trail_count < 2) return true;
   unsigned puffs = style->trail_puffs_per_sample;
   if (puffs > kSimMaxTrailPuffsPerSample)
@@ -366,8 +361,7 @@ static bool AppendSimEffectTrail(
     float scale_x, scale_y;
     if (!ProjectSimEffectPointAt(
             slot, effect, effect->trail[i].world_x, effect->trail[i].world_y,
-            &local, source, viewport,
-            camera, matrix, &point, &scale_x, &scale_y))
+            &local, scene, &point, &scale_x, &scale_y))
       continue;
     float output_scale = (fabsf(scale_x) + fabsf(scale_y)) * 0.5f;
     if (output_scale < 0.5f) output_scale = 0.5f;
@@ -431,18 +425,14 @@ static bool AppendSimEffectTrail(
 static bool AppendSimEffectParticles(
     EffectBatch *batch, const FrameSlot *slot,
     const SimEffectInstance *effect, const SimEffectStyle *style,
-    ArRenderRectI source, ArRenderRectI viewport,
-    const Scene3DCamera *camera,
-    const float matrix[16]) {
+    const SimSceneProjection *scene) {
   if (!effect->pulse_generation || effect->ticks_since_visible > 5) return true;
   if (style->particle_motion == kSimEffectParticle_Trail)
-    return AppendSimEffectTrail(batch, slot, effect, style, source, viewport,
-                                camera, matrix);
+    return AppendSimEffectTrail(batch, slot, effect, style, scene);
   Scene3DPoint strike;
   float scale_x, scale_y;
   if (!ProjectSimEffectPoint(
-          slot, effect, &effect->geometry.data.point, source, viewport,
-          camera, matrix, &strike, &scale_x, &scale_y))
+          slot, effect, &effect->geometry.data.point, scene, &strike, &scale_x, &scale_y))
     return true;
   strike.y -= style->particle_origin_lift * scale_y;
   float output_scale = (fabsf(scale_x) + fabsf(scale_y)) * 0.5f;
@@ -498,9 +488,7 @@ static bool AppendSimEffectParticles(
 }
 
 void DrawSimEffectLocalLighting(
-    const FrameSlot *slot, bool lighting, ArRenderRectI source,
-    ArRenderRectI viewport,
-    const Scene3DCamera *camera, const float matrix[16]) {
+    const FrameSlot *slot, bool lighting, const SimSceneProjection *scene) {
   if (!lighting || !slot->sim.effect_visible_count ||
       !EffectRendererAvailable())
     return;
@@ -520,8 +508,7 @@ void DrawSimEffectLocalLighting(
     if (!(effect->flags & kSimEffectFlag_Visible) ||
         !SimEffectStyleFor(effect, &style))
       continue;
-    if (!AppendSimEffectGlow(&batch, slot, effect, &style, source,
-                             viewport, camera, matrix))
+    if (!AppendSimEffectGlow(&batch, slot, effect, &style, scene))
       break;
   }
   if (!batch.index_count && !batch.overflow) return;
@@ -679,9 +666,7 @@ static bool DrawSimFireballHeadFragment(
 }
 
 void DrawSimEffectFireballHeads(
-    const FrameSlot *slot, bool billboards, ArRenderRectI source,
-    ArRenderRectI viewport,
-    const Scene3DCamera *camera, const float matrix[16]) {
+    const FrameSlot *slot, bool billboards, const SimSceneProjection *scene) {
   if (!billboards || !slot->sim.effect_count || !slot->sim.atlas_valid ||
       !ArRenderTexture_IsValid(g_sim_obj_atlas_texture))
     return;
@@ -698,8 +683,7 @@ void DrawSimEffectFireballHeads(
                                    effect->geometry.data.point.height };
     Scene3DPoint anchor;
     float scale_x, scale_y;
-    if (!ProjectSimEffectPoint(slot, effect, &origin, source, viewport,
-                               camera, matrix, &anchor, &scale_x, &scale_y))
+    if (!ProjectSimEffectPoint(slot, effect, &origin, scene, &anchor, &scale_x, &scale_y))
       continue;
 
     /* Heading, resolved in SCREEN space: the same throw leans differently
@@ -721,7 +705,7 @@ void DrawSimEffectFireballHeads(
               slot, effect,
               (uint16_t)(effect->world_x + (int16_t)(effect->travel_x * kStep)),
               (uint16_t)(effect->world_y + (int16_t)(effect->travel_y * kStep)),
-              &ahead, source, viewport, camera, matrix, &tip,
+              &ahead, scene, &tip,
               &ignored_x, &ignored_y)) {
         float dx = tip.x - anchor.x, dy = tip.y - anchor.y;
         if (dx * dx + dy * dy > 0.0001f) {
@@ -770,9 +754,7 @@ void DrawSimEffectFireballHeads(
 }
 
 void DrawSimEffectParticles(
-    const FrameSlot *slot, bool particles, ArRenderRectI source,
-    ArRenderRectI viewport,
-    const Scene3DCamera *camera, const float matrix[16]) {
+    const FrameSlot *slot, bool particles, const SimSceneProjection *scene) {
   if (!particles || !slot->sim.effect_count ||
       !EffectRendererAvailable())
     return;
@@ -795,8 +777,7 @@ void DrawSimEffectParticles(
     const SimEffectInstance *effect = &slot->sim.effects[i];
     SimEffectStyle style;
     if (!SimEffectStyleFor(effect, &style)) continue;
-    if (!AppendSimEffectParticles(&batch, slot, effect, &style, source,
-                                  viewport, camera, matrix))
+    if (!AppendSimEffectParticles(&batch, slot, effect, &style, scene))
       break;
   }
   if (!batch.index_count && !batch.overflow) return;

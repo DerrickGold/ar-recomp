@@ -2628,8 +2628,8 @@ int main(void) {
   camera.tilt_y = -2;
   PresentSimGlobe_ClampCamera(&camera);
   assert(camera.tilt_y == -.35f);
-  assert(PresentSimGlobeUnderlay(NULL,(ArRenderRectI){0},(ArRenderRectI){0},
-      &camera,NULL,NULL) == kPresentationOutcome_CoreFailure);
+  assert(PresentSimGlobeTown(NULL,(ArRenderRectI){0},(ArRenderRectI){0},
+      &camera,NULL,NULL,NULL) == kPresentationOutcome_CoreFailure);
   /* These counters/vertex oracles exercise the complete compatibility path.
    * The default's declining-adapter behavior is checked separately below. */
   setenv("AR_SIM3D_WORLD_GPU_GRID", "0", 1);

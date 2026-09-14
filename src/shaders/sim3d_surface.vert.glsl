@@ -37,6 +37,7 @@ layout(set = 1, binding = 0, std140) uniform SurfaceView {
 };
 layout(location = 0) out vec4 vertex_color;
 layout(location = 1) out vec2 texture_uv;
+layout(location = 2) out vec4 focus_color;
 
 vec2 coordinate(vec3 n) {
     precise vec2 uv = surface_coordinate(n, shadow_basis, material.z, rotation);
@@ -56,6 +57,7 @@ void main() {
     precise vec4 clip = surface_clip(point, shades[corner], matrix, basis, radial);
     precise float depth = clip.z * 0.5 + clip.w * 0.5;
     gl_Position = vec4(clip.xy, depth, clip.w);
+    focus_color = vec4(0.0);
 
     if (material.y != 1.0) {
         float brightness = light.w + material.x * max(0.0, dot(shades[corner].xyz, light.xyz));
@@ -65,12 +67,16 @@ void main() {
             vec2 d = max(max(mask_rect.xy - mask_uv[corner], mask_uv[corner] - mask_rect.zw), vec2(0.0));
             float t = mask.x == 0.0 ? 1.0 : clamp(length(d) / mask.x, 0.0, 1.0);
             float coverage = t * t * (3.0 - 2.0 * t);
-            if (material.y == 2.0) vertex_color *= tint;
+            if (material.y == 4.0) {
+                vertex_color.rgb *= 1.0 - mask.y * coverage;
+                float haze = tint.a * coverage;
+                focus_color = vec4(tint.rgb * haze, haze) * clip.w;
+            } else if (material.y == 2.0) vertex_color *= tint;
             else {
                 vertex_color = vec4(tint.rgb, colors[corner].a * tint.a);
                 texture_uv = vec2(-1.0);
             }
-            vertex_color.a *= coverage;
+            if (material.y != 4.0) vertex_color.a *= coverage;
         }
     } else {
         vec2 uv[4] = vec2[4](coordinate(point0.xyz), coordinate(point1.xyz),

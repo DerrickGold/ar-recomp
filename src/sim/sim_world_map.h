@@ -103,6 +103,10 @@ float SimWorldMap_MountainCoverage(int tile_x, int tile_y);
  * Animated tiles must qualify in every wave phase, so this is geography,
  * not a per-frame RGB classification. */
 bool SimWorldMap_CellIsOpenWater(int tile_x, int tile_y);
+/* Per-texel version of the same semantic test (8x8 bytes, 0 or 1). A pixel
+ * must remain water in every animation phase. Includes mixed coastal cells;
+ * never classifies by RGB. Invalid/unavailable inputs leave output unchanged. */
+bool SimWorldMap_OpenWaterMask(int tile_x, int tile_y, uint8_t mask[64]);
 /* Copy one owned 8x8 world-art tile and optional palette identities. Index
  * zero remains opaque here, just as in Mode 7. Never borrows mutable storage;
  * unavailable/invalid destinations are left unchanged. */

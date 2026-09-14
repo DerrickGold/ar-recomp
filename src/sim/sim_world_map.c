@@ -59,6 +59,7 @@ static struct {
   uint32_t geography_serial;
   uint8_t mountain_pixels[kWorldTileCount];
   bool open_water[kWorldTileCount];
+  uint8_t water_mask[kWorldTileCount][kWorldTileBytes];
   /* One flag per tile (tilemap is one byte per tile, so this is indexed
    * identically). A tile is dirty when its tilemap byte changed since it was
    * last baked; Init marks all of them so the first bake is a full one. */
@@ -93,12 +94,9 @@ static uint32_t ExpandBgr555(uint16_t value) {
   return 0xFF000000u | (r << 16) | (g << 8) | b;
 }
 
-static bool OnlyOpenWater(const uint8_t pixels[kWorldTileBytes]) {
-  /* Authored ocean/wave palette identities, not blue-looking land, snow,
-   * polluted water or a tile-number guess. Mixed shoreline tiles stay solid. */
-  for (int p = 0; p < kWorldTileBytes; p++)
-    if (pixels[p] != 0x10 && pixels[p] != 0x11) return false;
-  return true;
+static bool WaterIndex(uint8_t index) {
+  /* Authored ocean/wave identities, not blue-looking land or polluted water. */
+  return index == 0x10 || index == 0x11;
 }
 
 static void ExpandTilePixels(unsigned tile) {
@@ -130,13 +128,21 @@ bool SimWorldMap_Init(const uint8_t *rom_data, size_t rom_size) {
   memcpy(g_world.water_frames, rom_data + kWorldWaterFramesRomOffset,
          sizeof(g_world.water_frames));
   for (int tile = 0; tile < kWorldTileCount; tile++)
-    g_world.open_water[tile] = OnlyOpenWater(g_world.tiles + tile * kWorldTileBytes);
+    for (int p = 0; p < kWorldTileBytes; p++)
+      g_world.water_mask[tile][p] = WaterIndex(g_world.tiles[tile * kWorldTileBytes + p]);
   /* Classification remains stable across animation: any non-water texel in
    * any wave variant conservatively protects both animated source tiles. */
   for (int frame = 0; frame < kWorldWaterFrameCount; frame++) {
-    const bool water = OnlyOpenWater(g_world.water_frames[frame]);
-    g_world.open_water[kWorldWaterTileFirst] &= water;
-    g_world.open_water[kWorldWaterTileSecond] &= water;
+    for (int p = 0; p < kWorldTileBytes; p++) {
+      const bool water = WaterIndex(g_world.water_frames[frame][p]);
+      g_world.water_mask[kWorldWaterTileFirst][p] &= water;
+      g_world.water_mask[kWorldWaterTileSecond][p] &= water;
+    }
+  }
+  for (int tile = 0; tile < kWorldTileCount; tile++) {
+    g_world.open_water[tile] = true;
+    for (int p = 0; p < kWorldTileBytes; p++)
+      g_world.open_water[tile] &= g_world.water_mask[tile][p] != 0;
   }
   for (int i = 0; i < kWorldPaletteEntries; i++) {
     const uint8_t *entry = rom_data + kWorldPaletteRomOffset + i * 2;
@@ -259,6 +265,14 @@ bool SimWorldMap_CellIsOpenWater(int tile_x, int tile_y) {
       tile_x >= kSimWorldMapTiles || tile_y >= kSimWorldMapTiles)
     return false;
   return g_world.open_water[g_world.tilemap[tile_y * kSimWorldMapTiles + tile_x]];
+}
+
+bool SimWorldMap_OpenWaterMask(int tile_x, int tile_y, uint8_t mask[64]) {
+  if (!g_world.available || !mask || tile_x < 0 || tile_y < 0 ||
+      tile_x >= kSimWorldMapTiles || tile_y >= kSimWorldMapTiles) return false;
+  memcpy(mask, g_world.water_mask[g_world.tilemap[tile_y * kSimWorldMapTiles + tile_x]],
+      kWorldTileBytes);
+  return true;
 }
 
 bool SimWorldMap_DevelopedAvailable(void) {

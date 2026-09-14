@@ -57,15 +57,40 @@ static bool ProfileUsesGround(SimRenderFeatureMask features) {
   return (features & required) == required;
 }
 
-static int TownCameraDistanceMaximum(void) {
+typedef struct TownCameraLimits {
+  int distance_maximum_x100;
+  int yaw_maximum_mrad;
+} TownCameraLimits;
+
+static TownCameraLimits ResolveTownCameraLimits(void) {
   const SimRenderFeatureMask required = kSimFeature_SeparatedComposite |
       kSimFeature_GroundProjection | kSimFeature_WorldUnderlay | kSimFeature_GlobeUnderlay;
   const SimRenderFeatureMask features =
       Settings_Sim3DRequestedFeatures() & Sim3D_ImplementedFeatures();
-  return g_settings.sim3d_mode &&
+  const bool connected = g_settings.sim3d_mode &&
       ActRaiser_IsSimulationTown(g_ram[kActRaiserWram_MapGroup],
-          g_ram[kActRaiserWram_CurrentMap]) && (features & required) == required
-      ? kSim3DConnectedCameraDistanceMaximumX100 : kSim3DCameraDistanceMaximumX100;
+          g_ram[kActRaiserWram_CurrentMap]) && (features & required) == required;
+  return (TownCameraLimits){
+    connected ? kSim3DConnectedCameraDistanceMaximumX100 : kSim3DCameraDistanceMaximumX100,
+    connected ? kSim3DConnectedCameraYawMaximumMrad : kSim3DCameraYawMaximumMrad,
+  };
+}
+
+static int ClampInt(int value, int minimum, int maximum) {
+  if (value < minimum) return minimum;
+  if (value > maximum) return maximum;
+  return value;
+}
+
+static float ClampFloat(float value, float minimum, float maximum) {
+  if (value < minimum) return minimum;
+  if (value > maximum) return maximum;
+  return value;
+}
+
+static float ClampTownOrbitYaw(float baseline, float offset, int maximum_mrad) {
+  const float maximum = (float)maximum_mrad / kMilliradiansPerRadian;
+  return ClampFloat(baseline + offset, -maximum, maximum) - baseline;
 }
 
 bool Sim3DCamera_ControlsAvailable(bool textures_ready) {
@@ -108,21 +133,15 @@ void Sim3DCamera_CapturePresentationState(
   } else if (!world) {
     /* Resolve old saved poses without rewriting settings during capture.
      * Reactive motion and the next input must start from the visible pose. */
-    const int maximum = TownCameraDistanceMaximum();
-    if (state->distance_x100 > maximum) state->distance_x100 = maximum;
+    const TownCameraLimits limits = ResolveTownCameraLimits();
+    if (state->distance_x100 > limits.distance_maximum_x100)
+      state->distance_x100 = limits.distance_maximum_x100;
+    state->yaw_mrad = ClampInt(state->yaw_mrad,
+        -limits.yaw_maximum_mrad, limits.yaw_maximum_mrad);
+    state->orbit_yaw = ClampTownOrbitYaw(
+        (float)state->yaw_mrad / kMilliradiansPerRadian,
+        state->orbit_yaw, limits.yaw_maximum_mrad);
   }
-}
-
-static int ClampInt(int value, int minimum, int maximum) {
-  if (value < minimum) return minimum;
-  if (value > maximum) return maximum;
-  return value;
-}
-
-static float ClampFloat(float value, float minimum, float maximum) {
-  if (value < minimum) return minimum;
-  if (value > maximum) return maximum;
-  return value;
 }
 
 static void MarkSettingsDirty(void) {
@@ -147,19 +166,25 @@ void Sim3DCamera_Adjust(float yaw_delta, float pitch_delta,
     }
     return;
   }
-  const float maximum_distance = (float)TownCameraDistanceMaximum() / kSim3DCameraDistanceScale;
+  const TownCameraLimits limits = ResolveTownCameraLimits();
+  const float maximum_distance = (float)limits.distance_maximum_x100 / kSim3DCameraDistanceScale;
+  const float maximum_yaw = (float)limits.yaw_maximum_mrad / kMilliradiansPerRadian;
   if (g_settings.sim3d_camera_mode == kSimCam_Dynamic) {
     const float baseline_yaw =
-        (float)g_settings.sim3d_dyncam_baseline_tilt_y_mrad /
+        (float)ClampInt(g_settings.sim3d_dyncam_baseline_tilt_y_mrad,
+            -limits.yaw_maximum_mrad, limits.yaw_maximum_mrad) /
         (float)kMilliradiansPerRadian;
     const float baseline_pitch =
         (float)g_settings.sim3d_dyncam_baseline_tilt_x_mrad /
         (float)kMilliradiansPerRadian;
+    /* A saved baseline or held orbit can predate enabling the connected
+     * world. Apply the new limit before the delta, not after invisible travel. */
+    s_dynamic_orbit.yaw = ClampTownOrbitYaw(
+        baseline_yaw, s_dynamic_orbit.yaw, limits.yaw_maximum_mrad);
     CameraOrbit_Adjust(
         &s_dynamic_orbit, yaw_delta, pitch_delta,
         baseline_yaw, baseline_pitch,
-        (float)kSim3DCameraYawMinimumMrad / kMilliradiansPerRadian,
-        (float)kSim3DCameraYawMaximumMrad / kMilliradiansPerRadian,
+        -maximum_yaw, maximum_yaw,
         (float)kSim3DCameraPitchMinimumMrad / kMilliradiansPerRadian,
         (float)kSim3DCameraPitchMaximumMrad / kMilliradiansPerRadian);
 
@@ -178,12 +203,13 @@ void Sim3DCamera_Adjust(float yaw_delta, float pitch_delta,
     return;
   }
 
-  const int yaw_mrad = g_settings.sim3d_tilt_y_mrad +
+  const int yaw_mrad = ClampInt(g_settings.sim3d_tilt_y_mrad,
+      -limits.yaw_maximum_mrad, limits.yaw_maximum_mrad) +
       (int)(yaw_delta * (float)kMilliradiansPerRadian);
   const int pitch_mrad = g_settings.sim3d_tilt_x_mrad +
       (int)(pitch_delta * (float)kMilliradiansPerRadian);
   g_settings.sim3d_tilt_y_mrad = ClampInt(
-      yaw_mrad, kSim3DCameraYawMinimumMrad, kSim3DCameraYawMaximumMrad);
+      yaw_mrad, -limits.yaw_maximum_mrad, limits.yaw_maximum_mrad);
   g_settings.sim3d_tilt_x_mrad = ClampInt(
       pitch_mrad, kSim3DCameraPitchMinimumMrad,
       kSim3DCameraPitchMaximumMrad);
@@ -215,15 +241,19 @@ bool Sim3DCamera_UpdateDynamic(float elapsed_seconds, bool orbit_held) {
     CameraOrbit_Reset(&s_dynamic_orbit);
     return changed;
   }
+  Sim3DCameraPresentationState state;
+  Sim3DCamera_CapturePresentationState(&state);
+  s_dynamic_orbit.yaw = state.orbit_yaw;
   return CameraOrbit_Update(
       &s_dynamic_orbit, elapsed_seconds, orbit_held,
       kSim3DCameraOrbitReturnTimeSeconds);
 }
 
 void Sim3DCamera_GetDynamicOrbit(float *yaw, float *pitch) {
-  const CameraOrbit *orbit = SyncWorldNavigationCamera() ? &s_world_orbit : &s_dynamic_orbit;
-  if (yaw) *yaw = orbit->yaw;
-  if (pitch) *pitch = orbit->pitch;
+  Sim3DCameraPresentationState state;
+  Sim3DCamera_CapturePresentationState(&state);
+  if (yaw) *yaw = state.orbit_yaw;
+  if (pitch) *pitch = state.orbit_pitch;
 }
 
 void Sim3DCamera_Reset(void) {

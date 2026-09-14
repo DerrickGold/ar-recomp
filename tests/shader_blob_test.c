@@ -42,6 +42,7 @@ typedef struct {
 #include "shaders/crt_frag.h"
 #include "shaders/dof_edge_frag.h"
 #include "shaders/rim_frag.h"
+#include "shaders/sim3d_billboard_rim_frag.h"
 #include "shaders/sim3d_depth_frag.h"
 #include "shaders/sim3d_depth_vert.h"
 #include "shaders/sim3d_spherical_vert.h"
@@ -96,6 +97,10 @@ static const struct {
                      kRimFragSPV, kRimFragSPVSize,
                      kRimFragDXIL, kRimFragDXILSize },
                      SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1 },
+  { "billboard rim", { kSim3dBillboardRimFragMSL, kSim3dBillboardRimFragMSLSize,
+                        kSim3dBillboardRimFragSPV, kSim3dBillboardRimFragSPVSize,
+                        kSim3dBillboardRimFragDXIL, kSim3dBillboardRimFragDXILSize },
+                        SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1 },
   { "sim3d_depth_fragment",
                     { kSim3dDepthFragMSL, kSim3dDepthFragMSLSize,
                       kSim3dDepthFragSPV, kSim3dDepthFragSPVSize,

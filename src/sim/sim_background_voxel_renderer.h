@@ -31,6 +31,9 @@ typedef struct SimBackgroundVoxelRenderParams {
    * backend-specific shader behavior. */
   float texture_to_clip[16];
   bool texture_to_clip_valid;
+  /* Static-scene captures may omit independent crater glow/smoke while
+   * comparing geometry. Normal presentation leaves this false. */
+  bool omit_mountain_effects;
   /* Optional screen-space shadow mask. In an elevated town the renderer
    * samples this only on depth-visible terrain tops, so a projected shadow
    * cannot paint a cliff face or ground hidden behind one. */
@@ -81,6 +84,13 @@ void SimBackgroundVoxelRenderer_DrawInterleaved(
  * SIM shadow-mask target. The caller owns mask allocation, blur and opacity. */
 void SimBackgroundVoxelRenderer_DrawShadowMask(
     ArRenderDevice *device, const SimBackgroundVoxelRenderParams *params,
+    float light_x, float light_y);
+/* Same casters into a caller-owned native-town XY target. Facade heights come
+ * from the actual presentation camera; this never prepares/replaces its
+ * shared projection state. Both parameter sets belong to the same scene. */
+void SimBackgroundVoxelRenderer_DrawTownShadowMask(
+    ArRenderDevice *device, const SimBackgroundVoxelRenderParams *town_params,
+    const SimBackgroundVoxelRenderParams *presentation_params,
     float light_x, float light_y);
 /* Where the volcano's crater mouth was drawn on the frame just rendered, in
  * the mountain models' own local space: the exact point the crater glow ring

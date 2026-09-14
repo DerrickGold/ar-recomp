@@ -14,6 +14,7 @@
 #include "platform/sdl/render_sdl_internal.h"
 #include "shaders/sim3d_depth_frag.h"
 #include "shaders/sim3d_depth_vert.h"
+#include "shaders/sim3d_billboard_rim_frag.h"
 #include "shaders/sim3d_spherical_vert.h"
 #if defined(AR_SIM3D_DEPTH_TEST_REFERENCE)
 #include "sim3d_depth_reference.h"
@@ -59,6 +60,18 @@ typedef struct Sim3DGpuVertex {
   float color[4];
   float uv[2];
 } Sim3DGpuVertex;
+
+typedef struct Sim3DBillboardRimUniform {
+  float offset[4];
+  ArRenderColorF color;
+} Sim3DBillboardRimUniform;
+_Static_assert(sizeof(Sim3DBillboardRimUniform)==32 &&
+    offsetof(Sim3DBillboardRimUniform,color)==16,
+    "Directional rim uniform occupies two 16-byte registers");
+typedef struct Sim3DBillboardRun {
+  Uint32 first, count;
+  Sim3DBillboardRimUniform rim;
+} Sim3DBillboardRun;
 
 typedef struct Sim3DSphericalGpuQuad {
   float positions[4][4], normals[4][4], weights[4][2];
@@ -202,6 +215,7 @@ struct Sim3DDepthMesh {
 typedef struct Sim3DMeshSample {
   Sim3DDepthMesh *mesh;
   Sim3DDepthPassLayer layer;
+  SDL_GPUTexture *texture; /* Optional, borrowed only through this submission. */
   Uint32 first, count, ordinary_before;
   ArRenderColorF color;
   /* Exactly one transform payload is used by a sample's mesh kind. */
@@ -236,6 +250,8 @@ static struct {
   SDL_GPUGraphicsPipeline *pipeline;
   SDL_GPUGraphicsPipeline *depth_occluder_pipeline;
   SDL_GPUGraphicsPipeline *effect_pipeline;
+  SDL_GPUShader *billboard_rim_fragment;
+  SDL_GPUGraphicsPipeline *billboard_rim_pipeline;
   SDL_GPUGraphicsPipeline *mesh_pipeline;
   SDL_GPUShader *spherical_shader;
   SDL_GPUGraphicsPipeline *spherical_pipeline;
@@ -262,6 +278,9 @@ static struct {
   SDL_GPUTexture *depth_target;
   Sim3DDepthAtlas atlases[kSim3DDepthPassLayerCount];
   SDL_GPUTexture *selected_ground;
+  SDL_GPUTexture *billboard_texture;
+  Sim3DBillboardRun billboard_runs[kSim3DDepthMaximumBillboardQuads];
+  Uint32 billboard_run_count;
   SDL_GPUTexture *white_texture;
   SDL_Texture *output_texture;
   int width, height;
@@ -287,6 +306,11 @@ static const GpuShaderBlobs kFragmentBlobs = {
   kSim3dDepthFragMSL, kSim3dDepthFragMSLSize,
   kSim3dDepthFragSPV, kSim3dDepthFragSPVSize,
   kSim3dDepthFragDXIL, kSim3dDepthFragDXILSize,
+};
+static const GpuShaderBlobs kBillboardRimBlobs = {
+  kSim3dBillboardRimFragMSL, kSim3dBillboardRimFragMSLSize,
+  kSim3dBillboardRimFragSPV, kSim3dBillboardRimFragSPVSize,
+  kSim3dBillboardRimFragDXIL, kSim3dBillboardRimFragDXILSize,
 };
 static const GpuShaderBlobs kSphericalBlobs = {
   kSim3dSphericalVertMSL, kSim3dSphericalVertMSLSize,
@@ -747,6 +771,23 @@ static bool CreatePipeline(void) {
             SDL_GetError());
     return false;
   }
+
+  /* Prepared with the other depth pipelines at boot, not on the first actor.
+   * Uses the same packed vertices and read-only world depth as ordinary art. */
+  g_depth_pass.billboard_rim_fragment = GpuShaderBlob_CreateFragment(
+      g_depth_pass.device, &kBillboardRimBlobs, "SIM3D billboard rim", 1, 1);
+  if (!g_depth_pass.billboard_rim_fragment) return false;
+  info.fragment_shader = g_depth_pass.billboard_rim_fragment;
+  color_target.blend_state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+  g_depth_pass.billboard_rim_pipeline = SDL_CreateGPUGraphicsPipeline(
+      g_depth_pass.device, &info);
+  if (!g_depth_pass.billboard_rim_pipeline) {
+    fprintf(stderr, "[sim3d-depth] billboard rim pipeline creation failed: %s\n",
+            SDL_GetError());
+    return false;
+  }
+  info.fragment_shader = g_depth_pass.fragment_shader;
+  color_target.blend_state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_SRC_ALPHA;
 
   /* Same shaders and blend/depth rules, split inputs: retained positions,
    * streamed UVs, and one constant color per sample (instance-rate input). */
@@ -1230,6 +1271,8 @@ static bool ReserveList(Sim3DDepthList *list, Uint32 additional) {
 bool Sim3DDepthPass_Begin(ArRenderDevice *device, int width, int height,
                           ArRenderFilter output_filter) {
   g_depth_pass.selected_ground = NULL;
+  g_depth_pass.billboard_texture = NULL;
+  g_depth_pass.billboard_run_count = 0;
   SDL_Renderer *renderer = ArSdlRenderBackend_Renderer(device);
   const SDL_ScaleMode output_scale_mode =
       output_filter == kArRenderFilter_Linear
@@ -2113,13 +2156,24 @@ static bool SurfaceLayersSafe(Sim3DDepthMesh *mesh,
       g_depth_pass.geometry_sample_count == kMaximumGeometrySamples ||
       shadow_count > kMaximumEffectSamples - (g_depth_pass.sample_count - g_depth_pass.geometry_sample_count) ||
       (shadow_count && (!shadows || g_depth_pass.lists[kSim3DDepthPass_CloudShadow].count))) return false;
-  if (overlay_count > 2 || (overlay_count && !overlays) ||
+  const Sim3DDepthSurfaceFocus *focus=&transform->focus;
+  if (!ValidSampleColor(focus->haze) || !isfinite(focus->dim) || focus->dim<0 || focus->dim>1 ||
+      !isfinite(focus->feather) || focus->feather<0 || focus->feather>16 ||
+      (focus->feather && focus->feather<.000001f) ||
+      !isfinite(focus->clear_rect.x) || !isfinite(focus->clear_rect.y) ||
+      !isfinite(focus->clear_rect.w) || !isfinite(focus->clear_rect.h) ||
+      fabsf(focus->clear_rect.x)>16 || fabsf(focus->clear_rect.y)>16 ||
+      focus->clear_rect.w<0 || focus->clear_rect.w>16 ||
+      focus->clear_rect.h<0 || focus->clear_rect.h>16) return false;
+  if (overlay_count > kSim3DDepthMaximumSurfaceOverlays || (overlay_count && !overlays) ||
       overlay_count > kMaximumEffectSamples -
           (g_depth_pass.sample_count - g_depth_pass.geometry_sample_count) - shadow_count) return false;
   unsigned overlay_mask = 0;
   for (size_t i = 0; i < overlay_count; ++i) {
     const Sim3DDepthSurfaceOverlay *o = &overlays[i];
-    if ((o->layer != kSim3DDepthPass_GroundBlur && o->layer != kSim3DDepthPass_GroundHaze) ||
+    if ((o->layer != kSim3DDepthPass_GroundBlur && o->layer != kSim3DDepthPass_GroundHaze &&
+         o->layer != kSim3DDepthPass_ShadowReceiver) ||
+        (o->layer == kSim3DDepthPass_GroundHaze && ArRenderTexture_IsValid(o->texture)) ||
         !ValidSampleColor(o->color) || !isfinite(o->feather) || o->feather < 0 ||
         o->feather > 16 || (o->feather && o->feather < 0.000001f) ||
         !isfinite(o->clear_rect.x) || !isfinite(o->clear_rect.y) ||
@@ -2157,10 +2211,11 @@ static bool SurfaceLayersSafe(Sim3DDepthMesh *mesh,
 }
 
 static void QueueSurfaceLayers(Sim3DDepthMesh *mesh, Sim3DDepthPassLayer opaque_layer,
-    Sim3DDepthMeshRange range,
+    Sim3DDepthMeshRange range, SDL_GPUTexture *texture,
     const Sim3DDepthSurfaceTransform *transform,
     const Sim3DDepthSphericalSample *shadows, size_t shadow_count,
-    const Sim3DDepthSurfaceOverlay *overlays, size_t overlay_count) {
+    const Sim3DDepthSurfaceOverlay *overlays, size_t overlay_count,
+    SDL_GPUTexture *const *overlay_textures) {
   /* All validation/budget checks precede any queue mutation. A malformed
    * final shadow cannot leave an opaque-only surface stranded in the pass. */
   Sim3DSurfaceUniform uniform = {0};
@@ -2174,6 +2229,17 @@ static void QueueSurfaceLayers(Sim3DDepthMesh *mesh, Sim3DDepthPassLayer opaque_
   memcpy(uniform.light, transform->light, sizeof(transform->light));
   uniform.light[3] = transform->ambient;
   uniform.material[0] = transform->diffuse;
+  /* Reuse material registers otherwise reserved for overlays: focus is part
+   * of the base draw, not another pass, vertex stream or shader variant. */
+  const Sim3DDepthSurfaceFocus *focus=&transform->focus;
+  if (focus->dim>0 || focus->haze.a>0) {
+    uniform.material[1]=4;
+    memcpy(uniform.spherical.color,&focus->haze,sizeof(focus->haze));
+    uniform.mask_rect[0]=focus->clear_rect.x; uniform.mask_rect[1]=focus->clear_rect.y;
+    uniform.mask_rect[2]=focus->clear_rect.x+focus->clear_rect.w;
+    uniform.mask_rect[3]=focus->clear_rect.y+focus->clear_rect.h;
+    uniform.mask[0]=focus->feather; uniform.mask[1]=focus->dim;
+  }
   for (unsigned r = 0; r < 3; ++r) for (unsigned c = 0; c < 3; ++c) {
     uniform.shadow_basis[r][c] = transform->shadow_basis[r][c];
     if (transform->shadow_basis[r][c] != 0) uniform.material[2] = 1;
@@ -2186,7 +2252,7 @@ static void QueueSurfaceLayers(Sim3DDepthMesh *mesh, Sim3DDepthPassLayer opaque_
     } else if (i) {
       const Sim3DDepthSurfaceOverlay *o = &overlays[i - shadow_count - 1];
       layer = o->layer;
-      uniform.material[1] = layer == kSim3DDepthPass_GroundBlur ? 2 : 3;
+      uniform.material[1] = layer == kSim3DDepthPass_GroundHaze ? 3 : 2;
       memcpy(uniform.spherical.color, &o->color, sizeof(o->color));
       uniform.mask_rect[0] = o->clear_rect.x; uniform.mask_rect[1] = o->clear_rect.y;
       uniform.mask_rect[2] = o->clear_rect.x + o->clear_rect.w;
@@ -2195,6 +2261,7 @@ static void QueueSurfaceLayers(Sim3DDepthMesh *mesh, Sim3DDepthPassLayer opaque_
     }
     g_depth_pass.samples[g_depth_pass.sample_count++] = (Sim3DMeshSample){
       .mesh = mesh, .layer = layer, .surface = uniform,
+      .texture = !i ? texture : i > shadow_count ? overlay_textures[i-shadow_count-1] : NULL,
       .first = (Uint32)range.first_quad*4, .count = (Uint32)range.quad_count*4,
       .ordinary_before = g_depth_pass.lists[layer].count,
     };
@@ -2216,17 +2283,28 @@ bool Sim3DDepthPass_AppendSurfaceMeshBatches(
     const Sim3DDepthSurfaceMeshBatch *batches, size_t batch_count) {
   if (!batches || !batch_count || batch_count > kMaximumGeometrySamples) return false;
   size_t geometry = 0, effects = 0;
+  SDL_GPUTexture *textures[kMaximumGeometrySamples] = {0};
+  SDL_GPUTexture *overlay_textures[kMaximumGeometrySamples][kSim3DDepthMaximumSurfaceOverlays] = {{0}};
   for (size_t i = 0; i < batch_count; ++i) {
     Sim3DDepthMesh *mesh = batches[i].mesh;
     if (!Sim3DDepthPass_MeshReady(mesh) || mesh->kind != kMeshSurface) return false;
     const size_t quads = (mesh->surface_selected ? mesh->selection_count : mesh->count)/4;
     const Sim3DDepthSurfaceBatch *b = &batches[i].batch;
+    if (ArRenderTexture_IsValid(b->texture)) {
+      textures[i] = GpuTexture(ArSdlRenderBackend_UnwrapTexture(b->texture));
+      if (!textures[i]) return false;
+    }
     if ((b->layer != kSim3DDepthPass_Ground && b->layer != kSim3DDepthPass_Mountain &&
          b->layer != kSim3DDepthPass_WorldMountain) ||
         (b->layer != kSim3DDepthPass_Ground && (b->shadow_count || b->overlay_count)) ||
         b->range.first_quad > quads || b->range.quad_count > quads-b->range.first_quad ||
         !SurfaceLayersSafe(mesh,&b->transform,b->shadows,b->shadow_count,b->overlays,b->overlay_count))
       return false;
+    for (size_t o = 0; o < b->overlay_count; ++o)
+      if (ArRenderTexture_IsValid(b->overlays[o].texture)) {
+        overlay_textures[i][o] = GpuTexture(ArSdlRenderBackend_UnwrapTexture(b->overlays[o].texture));
+        if (!overlay_textures[i][o]) return false;
+      }
     if (b->range.quad_count) { ++geometry; effects += b->shadow_count+b->overlay_count; }
   }
   if (geometry > kMaximumGeometrySamples-g_depth_pass.geometry_sample_count ||
@@ -2236,7 +2314,8 @@ bool Sim3DDepthPass_AppendSurfaceMeshBatches(
     Sim3DDepthMesh *mesh = batches[i].mesh;
     const Sim3DDepthSurfaceBatch *b = &batches[i].batch;
     if (b->range.quad_count)
-      QueueSurfaceLayers(mesh,b->layer,b->range,&b->transform,b->shadows,b->shadow_count,b->overlays,b->overlay_count);
+      QueueSurfaceLayers(mesh,b->layer,b->range,textures[i],&b->transform,b->shadows,b->shadow_count,
+          b->overlays,b->overlay_count,overlay_textures[i]);
   }
   return true;
 }
@@ -2284,6 +2363,58 @@ bool Sim3DDepthPass_AppendQuads(Sim3DDepthPassLayer layer,
 bool Sim3DDepthPass_AppendQuad(Sim3DDepthPassLayer layer,
                                const Sim3DDepthVertex vertices[4]) {
   return Sim3DDepthPass_AppendQuads(layer, vertices, 1);
+}
+
+static bool AppendBillboards(ArRenderTexture atlas,
+    const Sim3DDepthVertex *vertices, size_t quad_count,
+    const Sim3DDepthBillboardRim *rim) {
+  if (!g_depth_pass.collecting || !vertices || !ArRenderTexture_IsValid(atlas) ||
+      g_depth_pass.lists[kSim3DDepthPass_Billboard].count/4 > kSim3DDepthMaximumBillboardQuads ||
+      quad_count > kSim3DDepthMaximumBillboardQuads -
+          g_depth_pass.lists[kSim3DDepthPass_Billboard].count/4) return false;
+  SDL_GPUTexture *texture = GpuTexture(ArSdlRenderBackend_UnwrapTexture(atlas));
+  if (!texture || (g_depth_pass.billboard_texture &&
+                  g_depth_pass.billboard_texture != texture)) return false;
+  const size_t count = quad_count * kSim3DDepthVerticesPerQuad;
+  for (size_t i = 0; i < count; ++i) {
+    const Sim3DDepthVertex *v = &vertices[i];
+    if (!ValidPosition((Sim3DDepthPosition){v->x,v->y,v->depth}) ||
+        !ValidSampleColor(v->color) || !isfinite(v->uv.x) || !isfinite(v->uv.y))
+      return false;
+  }
+  const Sim3DBillboardRun style = {
+    .first=g_depth_pass.lists[kSim3DDepthPass_Billboard].count, .count=(Uint32)count,
+    .rim={.offset={rim && rim->color.a > 0 ? rim->sample_offset.x : 0,
+                  rim && rim->color.a > 0 ? rim->sample_offset.y : 0},
+          .color=rim && rim->color.a > 0 ? rim->color : (ArRenderColorF){0}}};
+  Sim3DBillboardRun *last = g_depth_pass.billboard_run_count
+      ? &g_depth_pass.billboard_runs[g_depth_pass.billboard_run_count-1] : NULL;
+  const bool merge = last && !memcmp(&last->rim,&style.rim,sizeof(style.rim));
+  if (quad_count && !merge &&
+      g_depth_pass.billboard_run_count == kSim3DDepthMaximumBillboardQuads) return false;
+  if (!Sim3DDepthPass_AppendQuads(kSim3DDepthPass_Billboard,vertices,quad_count))
+    return false;
+  if (quad_count) {
+    g_depth_pass.billboard_texture = texture;
+    if (merge) last->count += (Uint32)count;
+    else g_depth_pass.billboard_runs[g_depth_pass.billboard_run_count++] = style;
+  }
+  return true;
+}
+
+bool Sim3DDepthPass_AppendBillboards(ArRenderTexture atlas,
+    const Sim3DDepthVertex *vertices, size_t quad_count) {
+  return AppendBillboards(atlas,vertices,quad_count,NULL);
+}
+
+bool Sim3DDepthPass_AppendRimBillboards(ArRenderTexture atlas,
+    const Sim3DDepthVertex *vertices, size_t quad_count,
+    const Sim3DDepthBillboardRim *rim) {
+  if (!rim || !isfinite(rim->sample_offset.x) || !isfinite(rim->sample_offset.y) ||
+      fabsf(rim->sample_offset.x)>1 || fabsf(rim->sample_offset.y)>1 ||
+      (!rim->sample_offset.x && !rim->sample_offset.y) || !ValidSampleColor(rim->color))
+    return false;
+  return AppendBillboards(atlas,vertices,quad_count,rim);
 }
 
 static bool EnsureGpuBuffers(Uint32 vertex_count) {
@@ -2406,6 +2537,8 @@ static SDL_GPUTexture *TextureForLayer(
       return g_depth_pass.atlases[kSim3DDepthPass_Cloud].texture;
     case kSim3DDepthPass_ShadowReceiver:
       return GpuTexture(shadow_texture);
+    case kSim3DDepthPass_Billboard:
+      return g_depth_pass.billboard_texture;
     case kSim3DDepthPass_GroundHaze:
     case kSim3DDepthPass_Effect:
     case kSim3DDepthPass_DepthOccluder:
@@ -2432,6 +2565,7 @@ static SDL_GPUGraphicsPipeline *PipelineForLayer(Sim3DDepthPassLayer layer) {
     case kSim3DDepthPass_VolumeCloud:
     case kSim3DDepthPass_Effect:
     case kSim3DDepthPass_ShadowReceiver:
+    case kSim3DDepthPass_Billboard:
       return g_depth_pass.effect_pipeline;
     case kSim3DDepthPass_Ground:
     case kSim3DDepthPass_Solid:
@@ -2571,7 +2705,8 @@ ArRenderTexture Sim3DDepthPass_Submit(
   Uint32 needed = total;
   for (Uint32 i = 0; i < g_depth_pass.sample_count; ++i) {
     const Sim3DMeshSample *sample = &g_depth_pass.samples[i];
-    if (!TextureForLayer(sample->layer, native_shadow)) return ArRenderTexture_Invalid();
+    if (!sample->texture && !TextureForLayer(sample->layer, native_shadow))
+      return ArRenderTexture_Invalid();
     if (sample->mesh->count > needed) needed = sample->mesh->count;
   }
   if (!needed || total % kSim3DDepthVerticesPerQuad != 0 ||
@@ -2736,7 +2871,8 @@ ArRenderTexture Sim3DDepthPass_Submit(
     kSim3DDepthPass_GroundBlur, kSim3DDepthPass_GroundHaze,
     kSim3DDepthPass_CloudShadow,
     kSim3DDepthPass_Solid, kSim3DDepthPass_Mountain, kSim3DDepthPass_WorldMountain,
-    kSim3DDepthPass_ShadowReceiver, kSim3DDepthPass_Effect, kSim3DDepthPass_Cloud,
+    kSim3DDepthPass_ShadowReceiver, kSim3DDepthPass_Billboard,
+    kSim3DDepthPass_Effect, kSim3DDepthPass_Cloud,
     kSim3DDepthPass_VolumeCloud,
   };
   _Static_assert(sizeof(order) / sizeof(order[0]) == kSim3DDepthPassLayerCount,
@@ -2758,7 +2894,25 @@ ArRenderTexture Sim3DDepthPass_Submit(
       .texture = texture,
       .sampler = SamplerForLayer((Sim3DDepthPassLayer)i),
     };
-    SDL_BindGPUFragmentSamplers(pass, 0, &texture_binding, 1);
+    if (texture) SDL_BindGPUFragmentSamplers(pass, 0, &texture_binding, 1);
+    SDL_GPUTexture *bound_texture = texture;
+    if (i == kSim3DDepthPass_Billboard) {
+      for (Uint32 j = 0; j < g_depth_pass.billboard_run_count; ++j) {
+        const Sim3DBillboardRun *run = &g_depth_pass.billboard_runs[j];
+        pipeline = run->rim.color.a > 0 ? g_depth_pass.billboard_rim_pipeline
+                                     : g_depth_pass.effect_pipeline;
+        if (pipeline != bound) {
+          SDL_BindGPUGraphicsPipeline(pass,pipeline);
+          bound = pipeline;
+        }
+        if (run->rim.color.a > 0)
+          SDL_PushGPUFragmentUniformData(commands,0,&run->rim,sizeof(run->rim));
+        vertex_binding.offset = (first[i]+run->first)*(Uint32)sizeof(Sim3DGpuVertex);
+        SDL_BindGPUVertexBuffers(pass,0,&vertex_binding,1);
+        SDL_DrawGPUIndexedPrimitives(pass,run->count/4*6,1,0,0,0);
+      }
+      continue;
+    }
     if (OrderedLayerSupported(i) && samples) {
       /* Retained samples mark their insertion point in the ordinary stream.
        * Adjacent ordinary appends remain one draw; no per-face command list
@@ -2772,6 +2926,10 @@ ArRenderTexture Sim3DDepthPass_Submit(
         if (sample && sample->layer != (Sim3DDepthPassLayer)i) continue;
         const Uint32 end = sample ? sample->ordinary_before : g_depth_pass.lists[i].count;
         if (end > cursor) {
+          if (bound_texture != texture) {
+            texture_binding.texture = bound_texture = texture;
+            SDL_BindGPUFragmentSamplers(pass, 0, &texture_binding, 1);
+          }
           if (bound != ordinary_pipeline) {
             SDL_BindGPUGraphicsPipeline(pass, ordinary_pipeline);
             bound = ordinary_pipeline;
@@ -2782,9 +2940,15 @@ ArRenderTexture Sim3DDepthPass_Submit(
         }
         cursor = end;
         if (!sample) break;
+        SDL_GPUTexture *sample_texture = sample->texture ? sample->texture : texture;
+        if (bound_texture != sample_texture) {
+          texture_binding.texture = bound_texture = sample_texture;
+          SDL_BindGPUFragmentSamplers(pass, 0, &texture_binding, 1);
+        }
         pipeline = sample->mesh->kind == kMeshGeometry
             ? ordinary_pipeline : sample->mesh->kind == kMeshSurface
-            ? g_depth_pass.surface_pipeline[GeometryLayerSupported(i) ? 0 : 1]
+            ? g_depth_pass.surface_pipeline[i == kSim3DDepthPass_Ground ||
+                i == kSim3DDepthPass_Mountain || i == kSim3DDepthPass_WorldMountain ? 0 : 1]
             : MeshPipeline(sample->mesh->kind);
         if (bound != pipeline) {
           SDL_BindGPUGraphicsPipeline(pass, pipeline);
@@ -2888,6 +3052,13 @@ ArRenderTexture Sim3DDepthPass_Submit(
   Sim3DPerformance_AddGeometryCopy(vertex_copy_bytes,vertex_copy_calls);
   for (int i = 0; i < kSim3DDepthPassLayerCount; i++) {
     if (!g_depth_pass.lists[i].count) continue;
+    if (i == kSim3DDepthPass_Billboard) {
+      for (Uint32 j = 0; j < g_depth_pass.billboard_run_count; ++j) {
+        const Uint32 count = g_depth_pass.billboard_runs[j].count;
+        Sim3DPerformance_AddDraw(count,count/4*6);
+      }
+      continue;
+    }
     if (OrderedLayerSupported((Sim3DDepthPassLayer)i)) {
       Uint32 cursor = 0;
       for (Uint32 j = 0; j <= g_depth_pass.sample_count; ++j) {
@@ -2973,6 +3144,10 @@ void Sim3DDepthPass_Reset(ArRenderDevice *device) {
   if (g_depth_pass.effect_pipeline)
     SDL_ReleaseGPUGraphicsPipeline(
         g_depth_pass.device, g_depth_pass.effect_pipeline);
+  if (g_depth_pass.billboard_rim_pipeline)
+    SDL_ReleaseGPUGraphicsPipeline(g_depth_pass.device, g_depth_pass.billboard_rim_pipeline);
+  if (g_depth_pass.billboard_rim_fragment)
+    SDL_ReleaseGPUShader(g_depth_pass.device, g_depth_pass.billboard_rim_fragment);
   if (g_depth_pass.vertex_shader)
     SDL_ReleaseGPUShader(g_depth_pass.device, g_depth_pass.vertex_shader);
   if (g_depth_pass.fragment_shader)

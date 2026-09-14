@@ -87,6 +87,10 @@ static void TestTownInfluenceRejection(void) {
           float influence;
           assert(height[p] == ReferenceRegisteredFloor(
               ox + cx + dx[p], oy + cy + dy[p], town, cx, cy, &influence));
+          float registered;
+          assert(SimWorldNavigationTerrain_RegisterTownFloor(town,cx+dx[p],cy+dy[p],
+              SimTownTerrain_CornerUnits(town,cx,cy,p),&registered));
+          assert(fabsf(registered-height[p]) < .00001f);
         }
       }
   }
@@ -175,6 +179,54 @@ static void TestCliffOwnership(void) {
   assert(!SimWorldNavigationTerrain_TownCellCorners(1, -1, 0, h));
   assert(!SimWorldNavigationTerrain_TownCellCorners(1, 0, 32, h));
   assert(!SimWorldNavigationTerrain_TownCellCorners(1, 0, 0, NULL));
+  h[0] = 123;
+  assert(!SimWorldNavigationTerrain_RegisterTownFloor(0,0,0,0,h));
+  assert(!SimWorldNavigationTerrain_RegisterTownFloor(1,-.1f,0,0,h));
+  assert(!SimWorldNavigationTerrain_RegisterTownFloor(1,0,32.1f,0,h));
+  assert(!SimWorldNavigationTerrain_RegisterTownFloor(1,NAN,0,0,h));
+  assert(!SimWorldNavigationTerrain_RegisterTownFloor(1,0,0,INFINITY,h));
+  assert(!SimWorldNavigationTerrain_RegisterTownFloor(1,0,0,0,NULL));
+  assert(h[0] == 123);
+}
+
+static void TestCoastalLandPreserved(void) {
+  uint8_t map[kSimWorldMapBytes];
+  memset(map,4,sizeof(map)); /* Broad connected ocean. */
+  for (int y = 48; y < 65; ++y)
+    for (int x = 48; x < 112; ++x) map[y*128+x] = 0;
+  assert(SimWorldMap_PublishBuiltTilemap(map));
+  assert(SimWorldNavigationTerrain_RebuildWorldPrior(SimWorldMap_BakedPixels(),
+      kSimWorldMapPixels,SimWorldMap_GeographySerial()));
+  /* A coastal connection between two equally registered plains cannot dip
+   * just because there is ocean next to the road. Include the shoreline
+   * vertices, not merely far-inland samples or continuity at a single seam. */
+  for (float x = 76; x <= 82; x += .25f) for (float y = 64; y <= 65; y += .25f) {
+    float influence;
+    const float expected = ReferenceRegisteredFloor(x,y,0,0,0,&influence);
+    assert(fabsf(expected-4) < .00001f);
+    assert(fabsf(SimWorldNavigationTerrain_FloorHeightUnits(x,y)-expected) < .00001f);
+  }
+  memset(map,4,sizeof(map));
+  for (int y = 0; y < 128; ++y)
+    for (int x = 24; x < 128; ++x) map[y*128+x] = 0;
+  assert(SimWorldMap_PublishBuiltTilemap(map));
+  assert(SimWorldNavigationTerrain_RebuildWorldPrior(SimWorldMap_BakedPixels(),
+      kSimWorldMapPixels,SimWorldMap_GeographySerial()));
+  /* Kasandora's authored contour reaches the coast unchanged; no invented
+   * four-cell descent through otherwise flat, buildable land. */
+  for (float x = 24; x <= 30; x += .25f) {
+    const float native = SimTownTerrain_HeightUnitsAt(3,(x-16)*16,16*16)+4;
+    assert(fabsf(SimWorldNavigationTerrain_FloorHeightUnits(x,80)-native) < .00001f);
+  }
+  /* Even inside water-looking artwork, the native town owns its water floor.
+   * Only the inferred ocean outside the town fades to the global sea datum. */
+  assert(SimWorldNavigationTerrain_FloorHeightUnits(20,80) ==
+      SimTownTerrain_HeightUnitsAt(3,4*16,16*16)+4);
+  assert(SimWorldNavigationTerrain_FloorHeightUnits(10,80) == 0);
+  assert(SimWorldNavigationTerrain_FloorHeightUnits(14,80) > 0);
+  assert(SimWorldNavigationTerrain_FloorHeightUnits(14,80) <
+      SimWorldNavigationTerrain_FloorHeightUnits(20,80));
+  puts("coastal registration: level connecting road; native land/water contours preserved; inferred ocean grades outside town");
 }
 
 int main(void) {
@@ -342,6 +394,7 @@ int main(void) {
   assert(SimWorldNavigationTerrain_FloorHeightUnits(NAN, 0) == 0);
   assert(SimWorldNavigationTerrain_FloorHeightUnits(0, INFINITY) == 0);
   assert(!SimWorldNavigationTerrain_RebuildWorldPrior(NULL, 1024, 1));
+  TestCoastalLandPreserved();
   SimWorldMap_Shutdown();
   puts("sim_world_navigation_terrain_test: PASS");
   return 0;

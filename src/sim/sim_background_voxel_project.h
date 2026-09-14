@@ -160,6 +160,11 @@ bool SimBackgroundVoxelProject_GroundedPoint(
 void SimBackgroundVoxelProject_FlushBatch(
     ArRenderDevice *device, SimBackgroundGeometryBatch *batch);
 
+/* Shared palette/brightness resolution for both projected and retained model
+ * sources. No geometry, camera or backend state is needed. */
+void SimBackgroundVoxelProject_FaceColors(uint8_t material,
+    const uint8_t brightness[4], const SimBackgroundVoxelPalette *palette,
+    SimBackgroundVoxelShading shading, ArRenderColorF colors[4]);
 /* Resolves a projected model face into the backend-neutral vertex contract
  * consumed by the shared depth pass. */
 bool SimBackgroundVoxelProject_ResolveFace(

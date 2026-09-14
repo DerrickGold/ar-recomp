@@ -1598,19 +1598,14 @@ static void AppendShadowVolume(
   }
 }
 
-void SimBackgroundVoxelRenderer_DrawShadowMask(
+static void DrawShadowMaskResolved(
     ArRenderDevice *device, const SimBackgroundVoxelRenderParams *params,
-    float light_x, float light_y) {
-  if (!RenderParamsValid(device, params)) return;
-  SimBackgroundVoxelRenderParams prepared_params = *params;
-  SimBackgroundVoxelProject_Prepare(&prepared_params);
-  params = &prepared_params;
+    const SimBackgroundProjectionAxis axes[kSimBackgroundVoxelKindCount],
+    bool cull, float light_x, float light_y) {
   const SimBackgroundVoxelScene *scene = SimBackgroundVoxels_Scene();
   SimBackgroundGeometryBatch *batch = &g_renderer_state.batch;
   batch->vertex_count = 0;
   batch->index_count = 0;
-  SimBackgroundProjectionAxis axes[kSimBackgroundVoxelKindCount];
-  SimBackgroundVoxelProject_ResolveAxes(params, axes);
   for (uint16_t i = 0; i < scene->object_count; i++) {
     const SimBackgroundVoxelObject *object = &scene->objects[i];
     if (object->kind >= kSimBackgroundVoxelKindCount) continue;
@@ -1619,7 +1614,7 @@ void SimBackgroundVoxelRenderer_DrawShadowMask(
     const float center_y = ObjectFootprintDepth(object) * 0.5f;
     const float model_lift = ObjectModelLiftPixels(
         object, params, center_x, center_y);
-    if (!ObjectMayBeVisible(object, params, axis, model_lift)) continue;
+    if (cull && !ObjectMayBeVisible(object, params, axis, model_lift)) continue;
     SimBackgroundShadowBounds bounds[kSimBackgroundMaxShadowVolumes];
     int volume_count = ShadowBounds(object, bounds);
     /* Flush ahead of the caster that would not fit. AppendSolidQuad drops
@@ -1640,6 +1635,33 @@ void SimBackgroundVoxelRenderer_DrawShadowMask(
                          light_x, light_y);
   }
   SimBackgroundVoxelProject_FlushBatch(device, batch);
+}
+
+void SimBackgroundVoxelRenderer_DrawShadowMask(
+    ArRenderDevice *device, const SimBackgroundVoxelRenderParams *params,
+    float light_x, float light_y) {
+  if (!RenderParamsValid(device, params)) return;
+  SimBackgroundVoxelRenderParams prepared = *params;
+  SimBackgroundVoxelProject_Prepare(&prepared);
+  SimBackgroundProjectionAxis axes[kSimBackgroundVoxelKindCount];
+  SimBackgroundVoxelProject_ResolveAxes(&prepared, axes);
+  DrawShadowMaskResolved(device, &prepared, axes, true, light_x, light_y);
+}
+
+void SimBackgroundVoxelRenderer_DrawTownShadowMask(
+    ArRenderDevice *device, const SimBackgroundVoxelRenderParams *town_params,
+    const SimBackgroundVoxelRenderParams *presentation_params,
+    float light_x, float light_y) {
+  if (!RenderParamsValid(device, town_params) ||
+      !RenderParamsValid(device, presentation_params) ||
+      town_params->serial != presentation_params->serial ||
+      town_params->town != presentation_params->town) return;
+  SimBackgroundProjectionAxis axes[kSimBackgroundVoxelKindCount];
+  SimBackgroundVoxelProject_ResolveAxes(presentation_params, axes);
+  /* Resolve the real facade heights without preparing a second camera or
+   * changing the published mountain/contact projection. The whole town fits
+   * this mask, including casters outside the current screen rectangle. */
+  DrawShadowMaskResolved(device, town_params, axes, false, light_x, light_y);
 }
 
 void SimBackgroundVoxelRenderer_Reset(ArRenderDevice *device) {
