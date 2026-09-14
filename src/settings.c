@@ -1140,6 +1140,21 @@ static void RandoChanged(const SettingDesc *desc) {
   { #id, env_name, text, help, kSettingType_Int, kApply_Passive, cat, \
     &g_settings.id, def, lo, hi, 1, false, NULL, 0, active, NULL, \
     parser, NULL }
+/* Rows on System > Game must state whether they repair an original-game bug
+ * or intentionally change authentic behaviour for convenience. Designated
+ * fields keep this metadata independent of SettingDesc's positional tail. */
+#define GAME_CHANGE_BOOL_SETTING(id, env_name, text, help, def, is_sticky, kind) \
+  { .key = #id, .env = env_name, .label = text, .tooltip = help, \
+    .type = kSettingType_Bool, .apply = kApply_Passive, \
+    .category = kSettingCat_Enhancements, .field = &g_settings.id, \
+    .defval = def, .minval = 0, .maxval = 1, .step = 1, \
+    .sticky = is_sticky, .game_change_kind = kind }
+#define GAME_CHANGE_INT_SETTING(id, env_name, text, help, def, lo, hi, parser, kind) \
+  { .key = #id, .env = env_name, .label = text, .tooltip = help, \
+    .type = kSettingType_Int, .apply = kApply_Passive, \
+    .category = kSettingCat_Enhancements, .field = &g_settings.id, \
+    .defval = def, .minval = lo, .maxval = hi, .step = 1, \
+    .parse = parser, .game_change_kind = kind }
 #define ACTION_SETTING(id, text, help) \
   { id, NULL, text, help, kSettingType_Action, kApply_Action, \
     kSettingCat_Extras, NULL, 0, 0, 0, 0, false, NULL, 0, NULL, NULL, \
@@ -2317,28 +2332,31 @@ const SettingDesc g_setting_descs[] = {
                "inspector. Off keeps the menu to the master toggles and major "
                "on/off effects.",
                kSettingCat_Extras, 0, false, NULL, NULL),
-  BOOL_SETTING(fix_bridge_limit, "AR_FIX_BRIDGE_LIMIT", "Bridge-free limit",
-               "Completed bridges stop counting toward the 128-structure "
-               "population cap; they migrate to spare save space and keep "
-               "their tiles, crossing, and support.",
-               kSettingCat_Enhancements, 0, true, NULL, NULL),
-  BOOL_SETTING(fix_aitos_event_queue, "AR_FIX_AITOS_EVENT_QUEUE",
-               "Correct Aitos messages",
-               "Prevents the northeast-mountain discovery from repeating "
-               "Aitos's earlier all-monsters-defeated message when the "
-               "events overlap. Off reproduces the original game.",
-               kSettingCat_Enhancements, 0, false, NULL, NULL),
-  BOOL_SETTING(fix_windmill_wind_stop, "AR_FIX_WINDMILL_WIND_STOP",
-               "Wind stops every windmill",
-               "Aitos's no-wind event only stills the windmills that already "
-               "existed, so one the town builds during it keeps turning. On, "
-               "every windmill in the town holds until the Wind miracle "
-               "restores them. Off reproduces the original game. Affects the "
-               "enhanced town view only.",
-               kSettingCat_Enhancements, 1, false, NULL, NULL),
-  INT_SETTING(turbo_multiplier, "AR_TURBO_MULT", "Turbo multiplier",
-              "Number of game frames advanced per rendered frame while turbo is active.",
-              kSettingCat_Enhancements, 8, 2, 64, ParseTurboMultiplier, NULL),
+  GAME_CHANGE_BOOL_SETTING(
+      fix_bridge_limit, "AR_FIX_BRIDGE_LIMIT", "Bridge-free limit",
+      "Completed bridges stop counting toward the 128-structure population "
+      "cap; they migrate to spare save space and keep their tiles, crossing, "
+      "and support.",
+      0, true, kSettingGameChange_QualityOfLife),
+  GAME_CHANGE_BOOL_SETTING(
+      fix_aitos_event_queue, "AR_FIX_AITOS_EVENT_QUEUE",
+      "Correct Aitos messages",
+      "Prevents the northeast-mountain discovery from repeating Aitos's "
+      "earlier all-monsters-defeated message when the events overlap. Off "
+      "reproduces the original game.",
+      0, false, kSettingGameChange_OriginalBugFix),
+  GAME_CHANGE_BOOL_SETTING(
+      fix_windmill_wind_stop, "AR_FIX_WINDMILL_WIND_STOP",
+      "Wind stops every windmill",
+      "Aitos's no-wind event only stills the windmills that already existed, "
+      "so one the town builds during it keeps turning. On, every windmill in "
+      "the town holds until the Wind miracle restores them. Off reproduces "
+      "the original game. Affects the enhanced town view only.",
+      1, false, kSettingGameChange_OriginalBugFix),
+  GAME_CHANGE_INT_SETTING(
+      turbo_multiplier, "AR_TURBO_MULT", "Turbo multiplier",
+      "Number of game frames advanced per rendered frame while turbo is active.",
+      8, 2, 64, ParseTurboMultiplier, kSettingGameChange_QualityOfLife),
   { "warp_target", "AR_WARP", "Warp target",
     "Raw hexadecimal region/map target used by Warp now; see docs/manual.md for verified values.",
     kSettingType_Custom, kApply_Passive, kSettingCat_Extras,

@@ -469,12 +469,15 @@ applying when their action or simulation engine becomes active.
 
 Overlay section **System → Game**.
 
-| Key | Effect |
-|---|---|
-| `AR_FIX_BRIDGE_LIMIT=1` | bridges stop counting toward a town's 128-structure population cap: completed bridges migrate to a validated sidecar in spare battery-save space while keeping their map mark, rendered metatile, river crossing, and 32-person support. Retroactive on existing towns; persisted only by the game's normal save transaction and sticky once saved. Replaces the withdrawn v1 slot-reuse/lightning designs, which broke town redraws |
-| `AR_FIX_AITOS_EVENT_QUEUE=1` | prevents Aitos's northeast-mountain discovery from repeating the earlier “all monsters defeated” message when those events overlap. The repair is live and save-neutral; turning it off preserves the original-ROM behavior |
-| `AR_BRIDGEFIX_DEBUG=1` | `[bridgefix]` log from the structure-system hooks: migrations/cleanup, bridge allocations, table-full events, and sidecar mark/render passes; `=2` also logs every structure allocation |
-| `AR_TURBO_MULT=<n>` | turbo multiplier, 2–64 (default 8) |
+The menu separates repairs for original-game bugs from intentional quality-of-life changes.
+
+| Type | Key | Effect |
+|---|---|---|
+| Original bug fix | `AR_FIX_AITOS_EVENT_QUEUE=1` | prevents Aitos's northeast-mountain discovery from repeating the earlier “all monsters defeated” message when those events overlap. The repair is live and save-neutral; turning it off preserves the original-ROM behavior |
+| Original bug fix | `AR_FIX_WINDMILL_WIND_STOP=1` | keeps every Aitos windmill stopped during the no-wind event, including windmills built after the event starts. Turning it off preserves the original behavior; this affects the enhanced town view only |
+| Quality of life | `AR_FIX_BRIDGE_LIMIT=1` | bridges stop counting toward a town's 128-structure population cap: completed bridges migrate to a validated sidecar in spare battery-save space while keeping their map mark, rendered metatile, river crossing, and 32-person support. Retroactive on existing towns; persisted only by the game's normal save transaction and sticky once saved. Replaces the withdrawn v1 slot-reuse/lightning designs, which broke town redraws |
+| Quality of life | `AR_TURBO_MULT=<n>` | turbo multiplier, 2–64 (default 8) |
+| Developer diagnostic | `AR_BRIDGEFIX_DEBUG=1` | `[bridgefix]` log from the structure-system hooks: migrations/cleanup, bridge allocations, table-full events, and sidecar mark/render passes; `=2` also logs every structure allocation |
 
 ## Level warp
 

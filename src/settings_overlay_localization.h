@@ -12,6 +12,8 @@ const char *SettingsOverlay_LocalizedLabel(ArUiLocale locale,
                                          const SettingDesc *desc);
 const char *SettingsOverlay_LocalizedHelp(ArUiLocale locale,
                                         const SettingDesc *desc);
+const char *SettingsOverlay_LocalizedGameChangeHeading(
+    ArUiLocale locale, SettingGameChangeKind kind);
 int SettingsOverlay_LocalizedValue(ArUiLocale locale, const SettingDesc *desc,
                                    char *buffer, int capacity);
 

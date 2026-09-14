@@ -176,7 +176,7 @@ typedef enum {
   kSettingCat_InputBinds,        /* one row per (device class, action) */
   kSettingCat_Save,
   kSettingCat_Extras,        /* System > Tools: host commands + debug switch */
-  kSettingCat_Enhancements,  /* System > Game: gameplay QoL (bridge, turbo) */
+  kSettingCat_Enhancements,  /* System > Game: original fixes and gameplay QoL */
   kSettingCat_Inspector,
   kSettingCat_Manual,        /* Manual: open the reader, and how it lays out */
   kSettingCat_RandoSeed,     /* Randomizer: master, seed, and what it applied */
@@ -188,6 +188,16 @@ typedef enum {
   kSettingCat_Interface,
   kSettingCat_Count,
 } SettingCategory;
+
+/* Semantic grouping for the player-facing System > Game tab. This is kept as
+ * descriptor metadata so presentation code never has to infer intent from a
+ * setting key or its translated label. */
+typedef enum {
+  kSettingGameChange_None,
+  kSettingGameChange_OriginalBugFix,
+  kSettingGameChange_QualityOfLife,
+  kSettingGameChange_Count,
+} SettingGameChangeKind;
 
 /* True for every Town 3D tab. Callers that react to "the 3D town presentation
  * changed" (main.c's paused-redraw kick) want the whole group, not one tab. */
@@ -257,6 +267,9 @@ struct SettingDesc {
   /* Dynamic enum catalogs can display names while persisting stable keys. */
   long (*enum_maximum)(void);
   SettingFormatFn serialize;
+  /* Nonzero only for rows in kSettingCat_Enhancements. Kept at the tail so
+   * existing positional descriptor initializers safely default to None. */
+  SettingGameChangeKind game_change_kind;
 };
 
 typedef enum {

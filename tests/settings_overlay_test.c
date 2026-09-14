@@ -513,6 +513,16 @@ static void CheckInterfaceCatalogs(SDL_Renderer *renderer, SDL_Surface *surface)
     CHECK(!strcmp(serialized, native_sampling == 0 ? "Crisp" : "Smooth"));
     CHECK(!strcmp(SettingsOverlay_LocalizedLabel((ArUiLocale)locale, language),
         ArUiCatalog_Text((ArUiLocale)locale, "setting.interface_language.label", NULL)));
+    CHECK(!strcmp(SettingsOverlay_LocalizedGameChangeHeading(
+                      (ArUiLocale)locale,
+                      kSettingGameChange_OriginalBugFix),
+                  ArUiCatalog_Text((ArUiLocale)locale,
+                      "overlay.group.original_bug_fixes", NULL)));
+    CHECK(!strcmp(SettingsOverlay_LocalizedGameChangeHeading(
+                      (ArUiLocale)locale,
+                      kSettingGameChange_QualityOfLife),
+                  ArUiCatalog_Text((ArUiLocale)locale,
+                      "overlay.group.quality_of_life", NULL)));
     /* Traversal, help, and reset prompts use the actual shaped overlay. The
      * same loop also runs in no-TTF builds, which must remain English/readable. */
     for (int tab = 0; tab < 3; ++tab) {
@@ -1790,14 +1800,15 @@ int main(int argc, char **argv) {
   CHECK(s_action_calls == 3);
   CHECK(s_action_desc == Settings_Find("exit_desktop"));
 
-  /* System > Game holds the QoL gameplay enhancements moved off Tools. */
+  /* System > Game groups original bug fixes ahead of QoL changes. Heading rows
+   * are visible but never take the cursor. */
   NavToTab(1);
-  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "fix_bridge_limit"));
-  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
-  CHECK(g_settings.fix_bridge_limit);
-  RowToKey("fix_aitos_event_queue");
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "fix_aitos_event_queue"));
   CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
   CHECK(g_settings.fix_aitos_event_queue);
+  RowToKey("fix_bridge_limit");
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
+  CHECK(g_settings.fix_bridge_limit);
 
   /* Inspector is the section's third tab: its first row makes the enabled
    * state explicit, its second dispatches the complete scene-asset dump, and

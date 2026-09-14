@@ -5616,6 +5616,8 @@
   {"key":"overlay.tab.scores","text":["Scores","Scores","Punkte","スコア"]},
   {"key":"overlay.tab.tools","text":["Tools","Outils","Werkzeuge","ツール"]},
   {"key":"overlay.tab.game","text":["Game","Jeu","Spiel","ゲーム"]},
+  {"key":"overlay.group.original_bug_fixes","text":["Original game bug fixes","Correctifs du jeu original","Fehlerbehebungen des Originalspiels","原作の不具合修正"]},
+  {"key":"overlay.group.quality_of_life","text":["Quality-of-life improvements","Améliorations de confort","Komfortverbesserungen","利便性の向上"]},
   {"key":"overlay.tab.inspector","text":["Inspector","Inspection","Inspektor","検査"]},
   {"key":"overlay.tab.seed","text":["Seed","Graine","Startwert","シード"]},
   {"key":"overlay.tab.enemies","text":["Enemies","Ennemis","Gegner","敵"]},

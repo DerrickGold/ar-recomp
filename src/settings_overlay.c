@@ -76,6 +76,7 @@ static const uint32_t kSteelBlue = ARGB(255, 164, 196, 219);
 static const uint32_t kSteelDim = ARGB(255, 74, 104, 130);
 static const uint32_t kSelectYellow = ARGB(255, 255, 230, 0);
 static const uint32_t kGameGold = ARGB(255, 255, 180, 65);
+static const uint32_t kQualityOfLifeBlue = ARGB(255, 156, 205, 255);
 static const uint32_t kMutedText = ARGB(255, 120, 140, 158);
 static ArUiTextRenderer s_ui_text;
 
@@ -1352,6 +1353,88 @@ static bool ActiveSectionIsCustom(void) {
   return ActiveSection()->custom_rows;
 }
 
+/* System > Game is the one registry-backed tab with semantic subsections.
+ * Descriptor metadata owns the classification; this menu layer only chooses
+ * presentation order and inserts non-selectable heading rows. */
+static const SettingGameChangeKind kGameChangeGroupOrder[] = {
+  kSettingGameChange_OriginalBugFix,
+  kSettingGameChange_QualityOfLife,
+};
+
+typedef struct SettingMenuRow {
+  const SettingDesc *desc;
+  SettingGameChangeKind heading;
+} SettingMenuRow;
+
+static bool ActiveTabUsesGameChangeGroups(void) {
+  return ActiveTab()->category == kSettingCat_Enhancements;
+}
+
+static int GameChangeSettingCount(SettingGameChangeKind kind) {
+  int count = 0;
+  for (int i = 0; i < g_setting_desc_count; i++) {
+    const SettingDesc *desc = &g_setting_descs[i];
+    if (RowBelongsToActiveTab(desc) && desc->game_change_kind == kind) count++;
+  }
+  return count;
+}
+
+static int RegistryMenuRowCount(void) {
+  int count = 0;
+  if (!ActiveTabUsesGameChangeGroups()) {
+    for (int i = 0; i < g_setting_desc_count; i++)
+      if (RowBelongsToActiveTab(&g_setting_descs[i])) count++;
+    return count;
+  }
+
+  for (size_t group = 0;
+       group < sizeof(kGameChangeGroupOrder) / sizeof(kGameChangeGroupOrder[0]);
+       group++) {
+    int settings = GameChangeSettingCount(kGameChangeGroupOrder[group]);
+    if (settings) count += 1 + settings;  /* heading + settings */
+  }
+  /* Keep a malformed future descriptor reachable instead of silently dropping
+   * it. The settings contract test rejects this state, but the release menu
+   * remains fail-open if a downstream build omits the classification. */
+  count += GameChangeSettingCount(kSettingGameChange_None);
+  return count;
+}
+
+static SettingMenuRow RegistryMenuRowAt(int index) {
+  SettingMenuRow none = {0};
+  if (index < 0) return none;
+  if (!ActiveTabUsesGameChangeGroups()) {
+    for (int i = 0; i < g_setting_desc_count; i++) {
+      const SettingDesc *desc = &g_setting_descs[i];
+      if (!RowBelongsToActiveTab(desc)) continue;
+      if (index-- == 0) return (SettingMenuRow){ .desc = desc };
+    }
+    return none;
+  }
+
+  for (size_t group = 0;
+       group < sizeof(kGameChangeGroupOrder) / sizeof(kGameChangeGroupOrder[0]);
+       group++) {
+    const SettingGameChangeKind kind = kGameChangeGroupOrder[group];
+    if (!GameChangeSettingCount(kind)) continue;
+    if (index-- == 0) return (SettingMenuRow){ .heading = kind };
+    for (int i = 0; i < g_setting_desc_count; i++) {
+      const SettingDesc *desc = &g_setting_descs[i];
+      if (!RowBelongsToActiveTab(desc) || desc->game_change_kind != kind)
+        continue;
+      if (index-- == 0) return (SettingMenuRow){ .desc = desc };
+    }
+  }
+  for (int i = 0; i < g_setting_desc_count; i++) {
+    const SettingDesc *desc = &g_setting_descs[i];
+    if (!RowBelongsToActiveTab(desc) ||
+        desc->game_change_kind != kSettingGameChange_None)
+      continue;
+    if (index-- == 0) return (SettingMenuRow){ .desc = desc };
+  }
+  return none;
+}
+
 /* Row-name suffix for SettingsOverlay_SelectedKey, so a test can navigate to
  * "bg2hi.copies" rather than counting keypresses through a list whose shape
  * changes with the active shape. These names are a TEST seam, not the manifest
@@ -1482,10 +1565,7 @@ static int TabSettingRowCount(void) {
     return LayerMenuRows(rows, kLayerMenuRowMax);
   }
   SyncActiveTabPage();
-  int count = 0;
-  for (int i = 0; i < g_setting_desc_count; i++)
-    if (RowBelongsToActiveTab(&g_setting_descs[i])) count++;
-  return count;
+  return RegistryMenuRowCount();
 }
 
 /* Every populated tab ends with the same section-scoped action. Town 3D's
@@ -1538,13 +1618,7 @@ static const SettingDesc *SelectedDesc(void) {
    * missed branch must not let a custom row edit an unrelated setting. */
   if (ActiveSectionIsCustom()) return NULL;
   SyncActiveTabPage();
-  int row = 0;
-  for (int i = 0; i < g_setting_desc_count; i++) {
-    const SettingDesc *desc = &g_setting_descs[i];
-    if (!RowBelongsToActiveTab(desc)) continue;
-    if (row++ == s_row) return desc;
-  }
-  return NULL;
+  return RegistryMenuRowAt(s_row).desc;
 }
 
 static bool SelectedRowIsSectionReset(void) {
@@ -2117,11 +2191,13 @@ static void EnsureSelectedRowVisible(void) {
   if (s_top_row < 0) s_top_row = 0;
 }
 
-/* True when the row at `index` cannot take the cursor. Only the layer editor has
- * such rows (its room caption and its not-in-this-level notice); every registry
- * row is selectable, hence the early false. */
+/* True when the row at `index` cannot take the cursor. Layer captions and the
+ * System > Game subsection headings are presentation-only rows. */
 static bool RowIsUnselectable(int index) {
-  if (!ActiveSectionIsCustom()) return false;
+  if (!ActiveSectionIsCustom()) {
+    if (index < 0 || index >= TabSettingRowCount()) return false;
+    return RegistryMenuRowAt(index).desc == NULL;
+  }
   LayerMenuRow rows[kLayerMenuRowMax];
   int n = LayerMenuRows(rows, kLayerMenuRowMax);
   if (index < 0 || index >= n) return false;
@@ -2129,11 +2205,8 @@ static bool RowIsUnselectable(int index) {
 }
 
 /* Pull the cursor off an unselectable row, forwards. Called wherever the row
- * cursor is (re)seated at 0 -- entering a section, changing tab -- because row 0
- * of the layer editor is the room caption. Registry sections have no such rows,
- * so this is a no-op for them. */
+ * cursor is (re)seated at 0 -- entering a section or changing tab. */
 static void SkipUnselectableRow(void) {
-  if (!ActiveSectionIsCustom()) return;
   int count = TabRowCount();
   if (count <= 0) return;
   for (int i = 0; i < count && RowIsUnselectable(s_row); i++)
@@ -3761,13 +3834,29 @@ static void DrawMenuRows(const MenuLayout *layout, const MenuChrome *c,
     }
   }
 
-  for (int i = 0; !custom_rows && i < g_setting_desc_count; i++) {
-    const SettingDesc *desc = &g_setting_descs[i];
-    if (!RowBelongsToActiveTab(desc)) continue;
+  const int registry_rows = custom_rows ? 0 : RegistryMenuRowCount();
+  for (int i = 0; i < registry_rows; i++) {
+    const SettingMenuRow entry = RegistryMenuRowAt(i);
     int row = row_index++;
     if (row < s_top_row || row >= s_top_row + s_visible_rows) continue;
     drawn_rows++;
     int y = first_row_y + (row - s_top_row) * kRowHeight;
+    if (entry.heading != kSettingGameChange_None) {
+      const char *heading = SettingsOverlay_LocalizedGameChangeHeading(
+          InterfaceLocale(), entry.heading);
+      uint32_t color = s_submenu_open
+          ? (entry.heading == kSettingGameChange_OriginalBugFix
+              ? kGameGold : kQualityOfLifeBlue)
+          : kMutedText;
+      DrawSmallText(layout, label_x, y + 1, heading, color);
+      const int rule_x = label_x + SmallTextWidth(heading) + 7;
+      if (rule_x < value_right)
+        FillLogicalRect(layout, rule_x, y + 5, value_right - rule_x, 1,
+                        s_submenu_open ? ScaleColor(color, 55) : kSteelDim);
+      continue;
+    }
+    const SettingDesc *desc = entry.desc;
+    if (!desc) continue;
     /* Commands are separated from the settings they act on. */
     if (category == kSettingCat_Save &&
         !strcmp(desc->key, "save_apply_session"))

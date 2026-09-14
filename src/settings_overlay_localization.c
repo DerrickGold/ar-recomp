@@ -69,6 +69,22 @@ const char *SettingsOverlay_LocalizedHelp(ArUiLocale locale,
   return desc ? DescriptorText(locale, desc, "help", desc->tooltip) : "";
 }
 
+const char *SettingsOverlay_LocalizedGameChangeHeading(
+    ArUiLocale locale, SettingGameChangeKind kind) {
+  switch (kind) {
+    case kSettingGameChange_OriginalBugFix:
+      return ArUiCatalog_Text(locale, "overlay.group.original_bug_fixes",
+                              "Original game bug fixes");
+    case kSettingGameChange_QualityOfLife:
+      return ArUiCatalog_Text(locale, "overlay.group.quality_of_life",
+                              "Quality-of-life improvements");
+    case kSettingGameChange_None:
+    case kSettingGameChange_Count:
+    default:
+      return "";
+  }
+}
+
 int SettingsOverlay_LocalizedValue(ArUiLocale locale, const SettingDesc *desc,
                                    char *buffer, int capacity) {
   if (!desc || !buffer || capacity <= 0) return 0;

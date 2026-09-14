@@ -115,6 +115,12 @@ static void TestDefaultsAndMetadata(void) {
     const SettingDesc *a = &g_setting_descs[i];
     CHECK(a->key && a->key[0] && a->label && a->tooltip);
     CHECK((a->type == kSettingType_Action) == (a->field == NULL));
+    CHECK(a->game_change_kind >= kSettingGameChange_None &&
+          a->game_change_kind < kSettingGameChange_Count);
+    if (a->category == kSettingCat_Enhancements)
+      CHECK(a->game_change_kind != kSettingGameChange_None);
+    else
+      CHECK(a->game_change_kind == kSettingGameChange_None);
     CHECK(Settings_Find(a->key) == a);
     for (int j = i + 1; j < g_setting_desc_count; j++) {
       CHECK(strcmp(a->key, g_setting_descs[j].key) != 0);
@@ -317,6 +323,9 @@ static void TestDefaultsAndMetadata(void) {
   const SettingDesc *bridge_limit = Settings_Find("fix_bridge_limit");
   const SettingDesc *aitos_event_queue =
       Settings_Find("fix_aitos_event_queue");
+  const SettingDesc *windmill_wind_stop =
+      Settings_Find("fix_windmill_wind_stop");
+  const SettingDesc *turbo = Settings_Find("turbo_multiplier");
   const SettingDesc *save_backend = Settings_Find("save_backend");
   const SettingDesc *save_fillmore = Settings_Find("save_prog_fillmore");
   const SettingDesc *save_page = Settings_Find("save_editor_page");
@@ -387,11 +396,20 @@ static void TestDefaultsAndMetadata(void) {
   char refresh_value[32];
   Settings_FormatValue(refresh, refresh_value, sizeof(refresh_value));
   CHECK(!strcmp(refresh_value, "Vsync"));
-  CHECK(bridge_limit && bridge_limit->category == kSettingCat_Enhancements);
+  CHECK(bridge_limit && bridge_limit->category == kSettingCat_Enhancements &&
+        bridge_limit->game_change_kind ==
+            kSettingGameChange_QualityOfLife);
   CHECK(aitos_event_queue &&
         aitos_event_queue->category == kSettingCat_Enhancements &&
         aitos_event_queue->type == kSettingType_Bool &&
-        aitos_event_queue->defval == 0 && !aitos_event_queue->sticky);
+        aitos_event_queue->defval == 0 && !aitos_event_queue->sticky &&
+        aitos_event_queue->game_change_kind ==
+            kSettingGameChange_OriginalBugFix);
+  CHECK(windmill_wind_stop &&
+        windmill_wind_stop->game_change_kind ==
+            kSettingGameChange_OriginalBugFix);
+  CHECK(turbo && turbo->game_change_kind ==
+                       kSettingGameChange_QualityOfLife);
   CHECK(inspector && inspector->category == kSettingCat_Inspector);
   CHECK(dump_assets && dump_assets->category == kSettingCat_Inspector &&
         dump_assets->type == kSettingType_Action);
