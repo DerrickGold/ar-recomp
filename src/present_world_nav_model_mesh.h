@@ -1,9 +1,10 @@
-/* Presentation-private source cache for the optional radial GPU model path. */
+/* Presentation-private retained sources for globe and active-town models. */
 #ifndef PRESENT_WORLD_NAV_MODEL_MESH_H
 #define PRESENT_WORLD_NAV_MODEL_MESH_H
 #include "sim/sim3d_depth_pass.h"
 #include "sim/sim_background_voxel_models.h"
 #include "present_sim_globe_mapping.h"
+#include "sim/sim_background_voxel_project.h"
 
 typedef struct WorldNavigationModelSource {
   SimBackgroundVoxelObject object;
@@ -19,6 +20,10 @@ typedef struct WorldNavigationModelSourceStyle {
   int height_percent, light_azimuth, light_elevation;
   SimBackgroundVoxelStyle style;
   bool lighting;
+  /* Active SIM publishes each structure's actual authored phase, including
+   * individually stopped windmills; navigation instead selects clock poses. */
+  bool captured_poses;
+  Sim3DDepthSurfaceFocus focus;
 } WorldNavigationModelSourceStyle;
 
 /* Default on; AR_SIM3D_WORLD_GPU_MODELS=0 opts out until resource reset. */
@@ -37,4 +42,18 @@ bool WorldNavigationModelMesh_Draw(const WorldNavigationModelSource *sources,
  * pose uniform may change. Rejects invalidated GPU storage without queuing. */
 bool WorldNavigationModelMesh_Repeat(const Sim3DDepthRadialTransform *transform);
 void WorldNavigationModelMesh_Reset(void);
+
+/* Active continuous-town presentation. Sources must all belong to embedding's
+ * town. Ground positions remain curved; only authored model height uses the
+ * supplied SIM axes. Bridges retain the geometric radial path at the caller.
+ * Static models and the three windmill poses are retained independently;
+ * captured_poses instead updates only a separate small windmill stream using
+ * the supplied individual phases, leaving static buildings resident. No new backend
+ * contract, per-object draw, native state or frame pointer is retained. */
+bool WorldNavigationModelMesh_DrawFacingTown(
+    const WorldNavigationModelSource *sources, size_t count,
+    const WorldNavigationModelSourceStyle *style,
+    SimBackgroundVoxelShading shading,
+    const SimBackgroundProjectionAxis axes[kSimBackgroundVoxelKindCount],
+    const float matrix[16], unsigned wind_pose);
 #endif

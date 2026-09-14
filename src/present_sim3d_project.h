@@ -12,6 +12,7 @@
 #include "present.h"
 #include "render/render_types.h"
 #include "scene3d_math.h"
+#include "present_sim_globe_project.h"
 #include "sim/sim_background_voxel_renderer.h"
 #include "sim/sim_render_metadata.h"
 
@@ -72,16 +73,23 @@ void DrawSimGroundPlane(
  * units are what the projection consumes. */
 float SimHeightWorldUnits(
     ArRenderRectI source, int virtual_height, unsigned height_scale_x100);
+/* Presentation scale about the actor's own anchor, never a depth bias. */
+float SimBillboardHeightPop(ArRenderRectI source, float height_world, unsigned height_pop_pct);
 float SimTerrainGroundHeightWorld(
     const FrameSlot *slot, ArRenderRectI source, float map_x, float map_y);
 float SimTerrainMaximumHeightWorld(
     const FrameSlot *slot, ArRenderRectI source);
+float SimTerrainGroundHeightUnits(const FrameSlot *slot, float map_x, float map_y);
+float SimTerrainMaximumHeightUnits(const FrameSlot *slot);
+float SimTerrainHeightWorld(const FrameSlot *slot, ArRenderRectI source, float units);
 /* The altitude an object's own height is measured from: local terrain for a
  * grounded object, the stable town maximum for a flyer. */
 float SimObjectAltitudeBaseWorld(
     const FrameSlot *slot, const SimRenderObject *object,
     ArRenderRectI source,
     float map_x, float map_y);
+float SimObjectAltitudeBaseUnits(const FrameSlot *slot,
+    const SimRenderObject *object, float map_x, float map_y);
 
 SimBackgroundVoxelRenderParams SimVoxelRenderParams(
     const FrameSlot *slot, ArRenderRectI source, ArRenderRectI viewport,
@@ -99,19 +107,31 @@ bool ProjectSimAnchorAndScale(
 /* The world origin is a parameter rather than a field read, so a caller
  * walking an effect's retained path can project each earlier position
  * without copying the whole instance to move two numbers. */
+/* A borrowed, synchronous view of one presentation's geometry. The captured
+ * SIM projection and optional curved surface travel together; no global
+ * current-camera pointer or alternate game-coordinate system is introduced. */
+typedef struct SimSceneProjection {
+  ArRenderRectI source, viewport;
+  const Scene3DCamera *camera;
+  const float *matrix;
+  const PresentSimGlobeProjection *globe;
+} SimSceneProjection;
+
+bool ProjectSimCurvedAnchor(const FrameSlot *slot,
+    const PresentSimGlobeProjection *globe,
+    float native_x, float native_y, float support_units, float altitude_pixels,
+    bool aerial, PresentSimGlobeProjectedPoint *point);
+
 bool ProjectSimEffectPointAt(
     const FrameSlot *slot, const SimEffectInstance *effect,
     uint16_t world_x, uint16_t world_y,
-    const SimEffectLocalPoint *local, ArRenderRectI source,
-    ArRenderRectI viewport,
-    const Scene3DCamera *camera, const float matrix[16],
+    const SimEffectLocalPoint *local, const SimSceneProjection *scene,
     Scene3DPoint *point, float *scale_x, float *scale_y);
 
 bool ProjectSimEffectPoint(
     const FrameSlot *slot, const SimEffectInstance *effect,
-    const SimEffectLocalPoint *local, ArRenderRectI source,
-    ArRenderRectI viewport,
-    const Scene3DCamera *camera, const float matrix[16], Scene3DPoint *point,
+    const SimEffectLocalPoint *local, const SimSceneProjection *scene,
+    Scene3DPoint *point,
     float *scale_x, float *scale_y);
 
 #endif /* AR_PRESENT_SIM3D_PROJECT_H */

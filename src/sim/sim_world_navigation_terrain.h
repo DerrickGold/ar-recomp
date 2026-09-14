@@ -13,7 +13,9 @@
  * mountain layer (towns render mountains separately from their ground).
  * The authored world rock palette supplies continuous mountain silhouettes
  * both inside and outside towns. Lowlands blend four cells either side of
- * borders; broad ocean-connected water remains at sea datum.
+ * borders. The inferred ocean outside town ownership remains at sea datum;
+ * authored towns retain their native land/water contours instead of acquiring
+ * an additional coast-derived slope through otherwise level ground.
  * The transition is evaluated in world-map tile
  * coordinates: one tile is one town cell, so there is no second scale or
  * hand-authored registration for the two representations to drift between. */
@@ -30,6 +32,13 @@ typedef struct SimWorldNavigationTerrainSample {
    * restrained than known town geography. */
   float authored_weight;
 } SimWorldNavigationTerrainSample;
+
+/* Embed an explicitly owned native terrain height (including either side of
+ * a hard cliff) using the world's existing datum/coast/border registration.
+ * Local XY is in town cells, inclusive [0,32]. No inferred mountain rise is
+ * added; the native town owns its relief objects. No preparation or mutation. */
+bool SimWorldNavigationTerrain_RegisterTownFloor(uint8_t town,
+    float local_x, float local_y, float height, float *out);
 
 /* Retained globe geometry consumes heights and ownership, not derivatives.
  * Keep the cheaper query explicit instead of changing full-sample semantics. */

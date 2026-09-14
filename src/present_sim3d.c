@@ -11,6 +11,8 @@
 
 #include "present_sim3d_internal.h"
 #include "present_sim_globe.h"
+#include "present_sim_globe_project.h"
+#include "present_sim_globe_mountains.h"
 #include "present_sim3d_clouds.h"
 #include "present_sim3d_effects.h"
 #include "present_sim3d_shadows.h"
@@ -24,12 +26,13 @@
 #include <string.h>
 #include "host/host_clock.h"
 #include "render_capabilities.h"
-#include "sim/sim_backdrop_render.h"
 #include "sim/sim_background_voxels.h"
 #include "sim/sim3d.h"
 #include "sim/sim3d_camera_limits.h"
 #include "sim/sim3d_performance.h"
 #include "sim/sim_world_navigation_scene.h"
+#include "sim/sim_render_atlas.h"
+#include "sim/sim3d_depth_pass.h"
 
 /* kPixelAspect_Crt43 and kDioramaCam_Free/kDioramaCam_Dynamic are plain enum
  * constants (not live state) — fine to pull in just for those. */
@@ -115,7 +118,8 @@ typedef enum SimObjectSelectionFilter {
 
 static float SimObjectGroundDepth(
     const FrameSlot *slot, const SimRenderObject *object,
-    ArRenderRectI source, ArRenderRectI viewport, const float matrix[16]) {
+    ArRenderRectI source, ArRenderRectI viewport, const float matrix[16],
+    const PresentSimGlobeProjection *globe) {
   int world_x, world_y;
   SimObjectDrawnWorld(object, &world_x, &world_y);
   float depth_map_y = (float)world_y;
@@ -134,8 +138,13 @@ static float SimObjectGroundDepth(
   float fx = (texture_x - source.x) / source.w;
   float fy = (texture_y - source.y) / source.h;
   float aspect = (float)viewport.w / viewport.h;
-  float ground_height = SimTerrainGroundHeightWorld(
-      slot, source, (float)world_x, depth_map_y);
+  const float ground_units = SimTerrainGroundHeightUnits(slot,world_x,depth_map_y);
+  float ground_height = SimTerrainHeightWorld(slot,source,ground_units);
+  if (globe) {
+    PresentSimGlobeProjectedPoint point;
+    return ProjectSimCurvedAnchor(slot,globe,world_x,depth_map_y,
+        ground_units,mountain_height,false,&point) ? point.clip.w : 0;
+  }
   if (source.h > 0) ground_height += mountain_height / (float)source.h;
   return Scene3D_ClipDepth(
       matrix, (fx - 0.5f) * aspect, 0.5f - fy, ground_height);
@@ -178,7 +187,13 @@ typedef struct SimObjectDrawScene {
   const float *matrix;
   bool project_world;
   bool virtual_height;
+  const PresentSimGlobeProjection *globe;
+  bool depth_billboards;
+  bool rim_light;
 } SimObjectDrawScene;
+
+static Sim3DDepthBillboardRim SimBillboardRim(const FrameSlot *slot,
+    const PresentSimGlobeBillboardAxes *axes);
 
 typedef struct SimObjectDrawFilters {
   SimObjectTierFilter tier;
@@ -188,6 +203,37 @@ typedef struct SimObjectDrawFilters {
   bool depth;
   float minimum_depth, maximum_depth;
 } SimObjectDrawFilters;
+
+static bool DrawSimCurvedMapPlane(const SimObjectDrawScene *scene,
+    const SimRenderObject *object, bool half_add) {
+  const float x0 = object->world_x+object->offset_x+object->local_x0;
+  const float y0 = object->world_y+object->offset_y+object->local_y0;
+  const float x1 = object->world_x+object->offset_x+object->local_x1;
+  const float y1 = object->world_y+object->offset_y+object->local_y1;
+  const float xy[4][2] = {{x0,y0},{x1,y0},{x1,y1},{x0,y1}};
+  const float u0 = (float)object->atlas_x/kSimObjAtlasWidth;
+  const float v0 = (float)object->atlas_y/kSimObjAtlasHeight;
+  const float u1 = (float)(object->atlas_x+object->atlas_w)/kSimObjAtlasWidth;
+  const float v1 = (float)(object->atlas_y+object->atlas_h)/kSimObjAtlasHeight;
+  const ArRenderPointF uv[4] = {{u0,v0},{u1,v0},{u1,v1},{u0,v1}};
+  const ArRenderColorF color = {1,1,1,half_add ? 128.0f/255 : 1};
+  Sim3DDepthVertex depth[4]; ArRenderVertex2D overlay[4];
+  for (int i = 0; i < 4; ++i) {
+    PresentSimGlobeProjectedPoint point;
+    /* A quarter source pixel separates ground decals from their receiver;
+     * it is presentation-only, not another terrain height or path offset. */
+    if (!ProjectSimCurvedAnchor(scene->slot,scene->globe,xy[i][0],xy[i][1],
+            SimTerrainGroundHeightUnits(scene->slot,xy[i][0],xy[i][1]),
+            .25f,false,&point)) return true;
+    depth[i] = (Sim3DDepthVertex){point.screen.x-scene->viewport.x,
+      point.screen.y-scene->viewport.y,point.depth,color,uv[i]};
+    overlay[i] = (ArRenderVertex2D){{point.screen.x,point.screen.y},color,uv[i]};
+  }
+  if (scene->depth_billboards)
+    return Sim3DDepthPass_AppendBillboards(g_sim_obj_atlas_texture,depth,1);
+  const int32_t indices[6] = {0,1,2,0,2,3};
+  return ArRenderDevice_DrawGeometry(&g_render_device,g_sim_obj_atlas_texture,overlay,4,indices,6);
+}
 
 static bool DrawSimObjectPriorityFiltered(
     const SimObjectDrawScene *scene, int priority,
@@ -261,7 +307,7 @@ static bool DrawSimObjectPriorityFiltered(
         continue;
     }
     depth[i] = project_world
-        ? SimObjectGroundDepth(slot, object, source, viewport, matrix)
+        ? SimObjectGroundDepth(slot, object, source, viewport, matrix, scene->globe)
         : 0.0f;
     if (depth_filter &&
         (depth[i] < minimum_depth || depth[i] >= maximum_depth))
@@ -310,7 +356,9 @@ static bool DrawSimObjectPriorityFiltered(
     int record_screen_y = (int16_t)(uint16_t)(
         object->world_y + object->offset_y - slot->sim.camera_y);
     if (project_world && (object->traits & kSimObjectTrait_MapPlane)) {
-      DrawSimMapPlaneObject(slot, object, slot->ws_extra + record_screen_x,
+      if (scene->globe && object->tier == kSimRecordTier_World)
+        success &= DrawSimCurvedMapPlane(scene,object,half_add);
+      else DrawSimMapPlaneObject(slot, object, slot->ws_extra + record_screen_x,
                             record_screen_y, source, viewport, matrix);
       continue;
     }
@@ -331,6 +379,9 @@ static bool DrawSimObjectPriorityFiltered(
     float scale_x = flat_scale_x;
     float scale_y = flat_scale_y;
     float height_world = 0.0f;
+    float gpu_depth = 0.0f;
+    bool ground_billboard = false;
+    PresentSimGlobeBillboardAxes ground_axes;
     Scene3DPoint anchor;
     if (project_world && object->tier == kSimRecordTier_World) {
       const float map_anchor_x =
@@ -357,9 +408,11 @@ static bool DrawSimObjectPriorityFiltered(
       /* Sample terrain where the sheared mountain surface is actually drawn,
        * not at the pre-shear flat-map row. This is invisible on a flat datum
        * but essential when a mountain or volcano is based on a cliff. */
-      height_world = SimObjectAltitudeBaseWorld(
-          slot, object, source, map_anchor_x,
+      const float support_units = SimObjectAltitudeBaseUnits(
+          slot, object, map_anchor_x,
           mountain_surface ? surface_map_y : map_anchor_y);
+      height_world = SimTerrainHeightWorld(slot,source,support_units);
+      const float support_world = height_world;
       height_world += virtual_height
           ? SimHeightWorldUnits(source, object->virtual_height,
                                 slot->sim.height_scale_x100)
@@ -376,7 +429,27 @@ static bool DrawSimObjectPriorityFiltered(
         height_world += SimBackgroundVoxels_StructureHeight(
             (int)object->world_x,
             (int)object->world_y + object->local_y1) / (float)source.h;
-      if (!ProjectSimAnchorAndScale(
+      if (scene->globe) {
+        const bool aerial = object->height_class == kSimHeightClass_Flying ||
+            object->height_class == kSimHeightClass_FlyingProjectile;
+        PresentSimGlobeProjectedPoint point;
+        if (!ProjectSimCurvedAnchor(slot,scene->globe,map_anchor_x,
+                mountain_surface ? surface_map_y : map_anchor_y,
+                support_units,(height_world-support_world)*source.h,aerial,&point)) continue;
+        anchor = point.screen; scale_x = point.pixel_scale[0]; scale_y = point.pixel_scale[1];
+        ground_billboard = scene->depth_billboards && Sim3D_HeightClassStandsOnTerrain(
+            (SimHeightClass)object->height_class) &&
+            !(object->traits & (kSimObjectTrait_Overhead | kSimObjectTrait_StructureOverlay));
+        if (ground_billboard && !PresentSimGlobeProject_GroundBillboardAxes(
+                scene->globe,map_anchor_x,mountain_surface ? surface_map_y : map_anchor_y,
+                &point,&ground_axes)) continue;
+        /* Preserve the classified composition contract: grounded actors test
+         * world depth; authored overhead/strike/projectile art stays readable.
+         * This changes placement, not the ROM-derived visibility classes. */
+        gpu_depth = (object->traits & kSimObjectTrait_Overhead) ||
+            !Sim3D_HeightClassIsOccludable((SimHeightClass)object->height_class)
+            ? 0 : point.depth;
+      } else if (!ProjectSimAnchorAndScale(
               matrix, source, viewport, texture_anchor_x, texture_anchor_y,
               height_world, Scene3D_AutoFitDistance(camera->fov_y),
               &anchor, &scale_x, &scale_y))
@@ -385,6 +458,10 @@ static bool DrawSimObjectPriorityFiltered(
           source, height_world, slot->sim.height_pop_pct);
       scale_x *= height_pop;
       scale_y *= height_pop;
+      if (ground_billboard) {
+        ground_axes.right.x*=height_pop; ground_axes.right.y*=height_pop;
+        ground_axes.down.x*=height_pop; ground_axes.down.y*=height_pop;
+      }
     } else {
       anchor.x = viewport.x +
           (texture_anchor_x - source.x) * flat_scale_x;
@@ -408,13 +485,38 @@ static bool DrawSimObjectPriorityFiltered(
     }
     if (destination.w <= 0.0f || destination.h <= 0.0f) continue;
 
-    /* Travelling art is NOT rotated here. The one family that flies its own
+    /* Flying art is NOT rotated here. The one family that flies its own
      * trajectory -- the eruption fireball -- has its billboard withheld and is
      * drawn instead at the head of its arc by DrawSimEffectFireballHeads,
      * which turns it there. Rotating in this pass as well would be a second
      * implementation of the same angle, reachable by nothing. */
     bool drawn = false;
-    if (pass) {
+    if (scene->depth_billboards && !pass) {
+      const float u0 = atlas.x/kSimObjAtlasWidth, v0 = atlas.y/kSimObjAtlasHeight;
+      const float u1 = (atlas.x+atlas.w)/kSimObjAtlasWidth;
+      const float v1 = (atlas.y+atlas.h)/kSimObjAtlasHeight;
+      const float x0 = destination.x-viewport.x, y0 = destination.y-viewport.y;
+      const float x1 = x0+destination.w, y1 = y0+destination.h;
+      const ArRenderColorF color = {1,1,1,half_add ? 128.0f/255 : 1};
+      Sim3DDepthVertex quad[4] = {
+        {x0,y0,gpu_depth,color,{u0,v0}}, {x1,y0,gpu_depth,color,{u1,v0}},
+        {x1,y1,gpu_depth,color,{u1,v1}}, {x0,y1,gpu_depth,color,{u0,v1}}};
+      if (ground_billboard) {
+        const float left=object->local_x0-foot_dx, right=object->local_x1-foot_dx;
+        const float top=object->local_y0-foot_dy, bottom=object->local_y1-foot_dy;
+        const float local[4][2]={{left,top},{right,top},{right,bottom},{left,bottom}};
+        for (unsigned i=0;i<4;++i) {
+          quad[i].x=anchor.x-viewport.x+local[i][0]*ground_axes.right.x+local[i][1]*ground_axes.down.x;
+          quad[i].y=anchor.y-viewport.y+local[i][0]*ground_axes.right.y+local[i][1]*ground_axes.down.y;
+        }
+      }
+      if (scene->rim_light && slot->sim.rim_strength_pct) {
+        const Sim3DDepthBillboardRim rim = SimBillboardRim(slot,ground_billboard ? &ground_axes : NULL);
+        drawn = Sim3DDepthPass_AppendRimBillboards(g_sim_obj_atlas_texture,quad,1,&rim);
+      } else {
+        drawn = Sim3DDepthPass_AppendBillboards(g_sim_obj_atlas_texture,quad,1);
+      }
+    } else if (pass) {
       const ArRenderDrawState pass_state = {
         .flags = kArRenderDrawState_Tint | kArRenderDrawState_Blend,
         .tint = pass->tint,
@@ -440,6 +542,45 @@ static bool DrawSimObjectPriorityFiltered(
     }
   }
   return success;
+}
+
+typedef struct SimGlobeActorContext {
+  SimObjectDrawScene scene;
+  PresentSimGlobeProjection projection;
+  uint32_t enabled_planes;
+  bool shadows, soft_shadows;
+} SimGlobeActorContext;
+
+static bool PrepareSimGlobeActors(void *userdata, const PresentSimGlobeView *view,
+    PresentSimGlobeGroundShadow *shadow) {
+  SimGlobeActorContext *context = userdata;
+  SimObjectDrawScene *scene = &context->scene;
+  if (!PresentSimGlobeProject_Build(&view->map,view->matrix,scene->source,scene->viewport,
+          Scene3D_AutoFitDistance(scene->camera->fov_y),&context->projection)) return false;
+  scene->globe = &context->projection;
+  if (context->shadows && (context->enabled_planes & (1u << kSim3DPlane_Bg1Low))) {
+    Sim3DPerformanceScope performance = Sim3DPerformance_Begin(kSim3DPerformance_Shadow);
+    const PresentationOutcome outcome = PrepareSimTownShadowMask(scene->slot,
+        scene->virtual_height,context->soft_shadows,scene->source,scene->viewport,
+        scene->matrix,&shadow->texture);
+    Sim3DPerformance_End(performance);
+    if (!PresentationOutcome_IsUsable(outcome)) return false;
+    shadow->opacity = scene->slot->sim.shadow_opacity_pct / (float)kPercentScale;
+  }
+  return true;
+}
+
+static bool AppendSimGlobeActors(void *userdata, const PresentSimGlobeView *view) {
+  (void)view;
+  SimGlobeActorContext *context = userdata;
+  SimObjectDrawScene *scene = &context->scene;
+  if (!scene->project_world || !scene->slot->sim.object_count) return true;
+  const SimObjectDrawFilters filters = {kSimTierFilter_World,kSimObjectOverhead_All,
+    kSimObjectSelection_Exclude,kSimObjectTerrain_Any,false,0,0};
+  for (int priority = 0; priority < 4; ++priority)
+    if ((context->enabled_planes & (1u << Sim3D_ObjPlaneForPriority(priority))) &&
+        !DrawSimObjectPriorityFiltered(scene,priority,&filters,NULL)) return false;
+  return true;
 }
 
 static bool DrawSimObjectPriorityTerrain(
@@ -540,7 +681,8 @@ static void DrawSimVoxelBillboardLayer(
 static void DrawSimSelectionOverlays(
     const FrameSlot *slot, bool virtual_height,
     ArRenderRectI source, ArRenderRectI viewport,
-    const Scene3DCamera *camera, const float matrix[16]) {
+    const Scene3DCamera *camera, const float matrix[16],
+    const PresentSimGlobeProjection *globe) {
   static const SimObjectTierFilter tiers[] = {
     kSimTierFilter_World,
     kSimTierFilter_Fixed,
@@ -559,7 +701,7 @@ static void DrawSimSelectionOverlays(
     for (size_t tier = 0; tier < sizeof(tiers) / sizeof(tiers[0]); tier++) {
       if (!(priority_masks[tier] & (1u << priority))) continue;
       SimObjectDrawScene scene = {
-        slot, source, viewport, camera, matrix, true, virtual_height,
+        slot, source, viewport, camera, matrix, true, virtual_height, globe,
       };
       SimObjectDrawFilters filters = {
         tiers[tier], kSimObjectOverhead_All, kSimObjectSelection_Only,
@@ -650,6 +792,28 @@ static void SimRimOffset(const FrameSlot *slot, float distance,
   if (length < 0.0001f) { *offset_x = 0.0f; *offset_y = -distance; return; }
   *offset_x = x / length * distance;
   *offset_y = y / length * distance;
+}
+
+static Sim3DDepthBillboardRim SimBillboardRim(const FrameSlot *slot,
+    const PresentSimGlobeBillboardAxes *axes) {
+  Sim3DDepthBillboardRim rim={.color=kSimRimColor};
+  /* One native texel stays inside the atlas's one-texel transparent padding.
+   * Share the authored lighting direction, not a second camera transform. */
+  SimRimOffset(slot,1,&rim.sample_offset.x,&rim.sample_offset.y);
+  if (axes) {
+    /* Convert the existing screen-light direction into these sprite axes,
+     * so rotating the art does not rotate the world's lighting. The supplied
+     * basis is nondegenerate and height-pop scales both axes equally. */
+    const float determinant=axes->right.x*axes->down.y-axes->right.y*axes->down.x;
+    const float x=(rim.sample_offset.x*axes->down.y-rim.sample_offset.y*axes->down.x)/determinant;
+    const float y=(axes->right.x*rim.sample_offset.y-axes->right.y*rim.sample_offset.x)/determinant;
+    const float length=hypotf(x,y);
+    rim.sample_offset=(ArRenderPointF){x/length,y/length};
+  }
+  rim.sample_offset.x/=kSimObjAtlasWidth;
+  rim.sample_offset.y/=kSimObjAtlasHeight;
+  rim.color.a=slot->sim.rim_strength_pct/100.0f;
+  return rim;
 }
 
 /* `terrain_filter` matters as much as the sprite draw it accompanies. The rim
@@ -1281,29 +1445,6 @@ static void ClampSimCameraPitch(Scene3DCamera *camera) {
   if (camera->tilt_x > maximum) camera->tilt_x = maximum;
 }
 
-void DrawSimBackdrop(const FrameSlot *slot, ArRenderRectI viewport,
-                     const float matrix[16]) {
-  const SimBackdropRenderInput input = {
-    .backdrop_argb = slot->sim.separated_backdrop_argb,
-    .strength_pct = slot->sim.backdrop_strength_pct,
-    .horizon_pct = slot->sim.backdrop_horizon_pct,
-    .viewport = {viewport.x, viewport.y, viewport.w, viewport.h},
-    .matrix = matrix,
-  };
-  SimBackdropRenderBatch batch;
-  const ArRenderDrawState state = {
-    .flags = kArRenderDrawState_Blend,
-    .blend = kArRenderBlendMode_Opaque,
-  };
-  if (SimBackdropRender_Build(&input, &batch) &&
-      ArRenderDevice_DrawGeometryWithState(
-          &g_render_device, ArRenderTexture_Invalid(),
-          batch.vertices, batch.vertex_count,
-          batch.indices, batch.index_count, &state)) {
-    Sim3DPerformance_AddDraw(
-        (uint64_t)batch.vertex_count, (uint64_t)batch.index_count);
-  }
-}
 
 /* D5a cull-event marker overlay.
  *
@@ -1560,27 +1701,27 @@ static bool SimPlaneIsMenu(int plane) {
  * sim3d height setting first, so the published height is pre-divided by it --
  * without that, raising the setting would lift the fireballs off the crater
  * they are supposed to be coming out of. */
-static void PublishSimCraterAnchor(const FrameSlot *slot) {
-  SimBackgroundCraterAnchor anchor;
-  if (!SimBackgroundVoxelRenderer_CraterAnchor(&anchor) || !anchor.valid) {
+static void PublishSimCraterAnchor(const FrameSlot *slot, const SimBackgroundCraterAnchor *anchor) {
+  if (!anchor->valid) {
     SimRenderMetadata_SetEruptionCraterAnchor(false, 0, 0, 0);
     return;
   }
   unsigned scale = slot->sim.height_scale_x100;
   if (!scale) scale = kPercentScale;
-  float height = anchor.height_pixels * (float)kPercentScale / (float)scale;
+  float height = anchor->height_pixels * (float)kPercentScale / (float)scale;
   SimRenderMetadata_SetEruptionCraterAnchor(
       true,
-      (int16_t)lroundf(anchor.local_x +
+      (int16_t)lroundf(anchor->local_x +
                        (float)slot->sim.underlay_screen_x0 - slot->ws_extra),
-      (int16_t)lroundf(anchor.local_y),
+      (int16_t)lroundf(anchor->local_y),
       (int16_t)lroundf(height));
 }
 
 static PresentationOutcome RenderSimProfile(
     const FrameSlot *slot, SimRenderFeatureMask features,
     ArRenderRectI source, ArRenderRectI viewport,
-    const ArRenderRectI *clip) {
+    const ArRenderRectI *clip, SimBackgroundCraterAnchor *crater) {
+  *crater=(SimBackgroundCraterAnchor){0};
   if (!ArRenderDevice_SetClipRect(&g_render_device, clip))
     return kPresentationOutcome_CoreFailure;
   PresentationOutcome outcome = kPresentationOutcome_Complete;
@@ -1674,6 +1815,12 @@ static PresentationOutcome RenderSimProfile(
       ? slot->sim.diagnostic_layer_mask
       : (1u << kSim3DPlane_Count) - 1;
   uint32_t captured_planes = slot->sim.separated_plane_mask;
+  const PresentSimGlobeProjection *curved_projection = NULL;
+  SimGlobeActorContext globe_actors = {
+    .scene = {.slot=slot,.source=source,.viewport=viewport,.camera=&camera,.matrix=matrix,
+      .project_world=billboards,.virtual_height=virtual_height,.depth_billboards=true,
+      .rim_light=rim_light},
+    .enabled_planes=enabled_planes,.shadows=shadows,.soft_shadows=soft_shadows};
   bool fade_ground_planes = cull_haze &&
       (slot->sim.cull_haze_pct != 0 || slot->sim.cull_dim_pct != 0);
 
@@ -1691,35 +1838,34 @@ static PresentationOutcome RenderSimProfile(
     Sim3DPerformance_End(performance);
   }
 
-  /* Straight after the backdrop clear and before any captured layer: the
-   * extension is ground the town is standing on the middle of, so everything
-   * the town itself draws belongs on top of it. */
-  bool globe_underlay_drawn = false;
+  /* Compose the connected globe and active town in one depth pass before the
+   * HUD, or prepare the flat underlay when the globe setting is disabled. */
   PresentSimGlobeView globe_view = {0};
   if (underlay) {
     Sim3DPerformanceScope performance =
         Sim3DPerformance_Begin(kSim3DPerformance_Underlay);
     if (globe_underlay) {
-      const PresentationOutcome result = PresentSimGlobeUnderlay(
-          slot, source, viewport, &camera, matrix, &globe_view);
+      const PresentSimGlobeContent content = {.prepare=PrepareSimGlobeActors,
+        .append=AppendSimGlobeActors,.userdata=&globe_actors};
+      const PresentationOutcome result = PresentSimGlobeTown(
+          slot,source,viewport,&camera,matrix,&content,&globe_view);
+      curved_projection = &globe_actors.projection;
       if (result != kPresentationOutcome_Complete) {
         Sim3DPerformance_End(performance);
         return kPresentationOutcome_CoreFailure;
       }
-      globe_underlay_drawn = true;
     } else {
       DrawSimWorldUnderlay(slot, source, viewport, matrix, lift_inset);
     }
     Sim3DPerformance_End(performance);
   }
-  /* With the globe behind a complete SIM town, the town boundary is the
-   * focus boundary. Do not fade holes in its opaque backing at the smaller
-   * native sprite window; background focus has already been composited. */
-  if (globe_underlay_drawn) {
+  /* The globe uses the town boundary for spatial focus. Do not apply a second
+   * native-window fade to its already-composited ground and actors. */
+  if (globe_underlay) {
     cull_haze = false;
     fade_ground_planes = false;
   }
-  if (underlay || background_voxels) {
+  if (!globe_underlay && (underlay || background_voxels)) {
     /* Keep the canvas as the opaque backing for transparent BG1 priority
      * pixels. Background voxels instead select the cleaned canvas and replace
      * both captured BG1 ranks, regardless of whether the separate world-map
@@ -1736,7 +1882,7 @@ static PresentationOutcome RenderSimProfile(
         Sim3DPerformance_Begin(kSim3DPerformance_Terrain);
     DrawSimTownCanvas(slot, source, viewport, matrix, cull_haze, lift_inset,
                       live_ground_enabled ? &live_ground : NULL,
-                      background_voxels, globe_underlay_drawn);
+                      background_voxels, globe_underlay);
     Sim3DPerformance_End(performance);
   }
 
@@ -1745,6 +1891,7 @@ static PresentationOutcome RenderSimProfile(
   float town_extent_x0 =
       (float)slot->sim.underlay_screen_x0 - (float)slot->sim.camera_x;
   float town_extent_y0 = -(float)slot->sim.camera_y;
+  const SimSceneProjection effect_projection = {source,viewport,&camera,matrix,curved_projection};
   SimCullFade ground_fade = {
     .lead = slot->sim.cull_haze_lead_px ? slot->sim.cull_haze_lead_px
                                         : kSimCullHazeLeadDefaultPx,
@@ -1769,7 +1916,7 @@ static PresentationOutcome RenderSimProfile(
   };
   for (int plane = 0; plane < kSim3DPlane_Count; plane++) {
     bool voxel_interleave =
-        plane == kSim3DPlane_Obj2 && background_voxels && billboards &&
+        !globe_underlay && plane == kSim3DPlane_Obj2 && background_voxels && billboards &&
         (enabled_planes & (1u << plane));
     /* Ground illumination belongs above the complete visible BG1 ground but
      * below the highest world-object rank. Keeping this seam explicit avoids
@@ -1778,11 +1925,10 @@ static PresentationOutcome RenderSimProfile(
     if (plane == kSim3DPlane_Obj3) {
       Sim3DPerformanceScope performance =
           Sim3DPerformance_Begin(kSim3DPerformance_Effects);
-      DrawSimEffectLocalLighting(slot, effect_lighting, source, viewport,
-                                 &camera, matrix);
+      DrawSimEffectLocalLighting(slot, effect_lighting, &effect_projection);
       Sim3DPerformance_End(performance);
     }
-    if (plane == kSim3DPlane_Obj2 && background_voxels &&
+    if (!globe_underlay && plane == kSim3DPlane_Obj2 && background_voxels &&
         (enabled_planes & (1u << plane)) && !voxel_interleave) {
       SimBackgroundVoxelRenderParams voxel_params =
           SimVoxelRenderParams(slot, source, viewport, matrix);
@@ -1802,6 +1948,7 @@ static PresentationOutcome RenderSimProfile(
           break;
         }
       if (object_priority >= 0) {
+        if (globe_underlay) continue; /* Already in the world's depth pass. */
         if (voxel_interleave) {
           SimVoxelBillboardLayerContext context = {
             .slot = slot,
@@ -1844,6 +1991,7 @@ static PresentationOutcome RenderSimProfile(
     ArRenderTexture texture = g_sim3d_layer_textures[plane];
     if (!ArRenderTexture_IsValid(texture)) continue;
     if (plane == kSim3DPlane_Bg1Low || plane == kSim3DPlane_Bg1High) {
+      if (globe_underlay) continue; /* Native source is embedded once. */
       if (!background_voxels) {
         Sim3DPerformanceScope performance =
             Sim3DPerformance_Begin(kSim3DPerformance_Terrain);
@@ -1883,9 +2031,8 @@ static PresentationOutcome RenderSimProfile(
     Sim3DPerformanceScope performance =
         Sim3DPerformance_Begin(kSim3DPerformance_Effects);
     DrawSimEffectSceneFlash(slot, effect_lighting, viewport);
-    DrawSimEffectParticles(slot, particles, source, viewport, &camera, matrix);
-    DrawSimEffectFireballHeads(slot, billboards, source, viewport, &camera,
-                               matrix);
+    DrawSimEffectParticles(slot, particles, &effect_projection);
+    DrawSimEffectFireballHeads(slot, billboards, &effect_projection);
     Sim3DPerformance_End(performance);
   }
 
@@ -1897,7 +2044,7 @@ static PresentationOutcome RenderSimProfile(
         Sim3DPerformance_Begin(kSim3DPerformance_Cloud);
     outcome = PresentationOutcome_Combine(outcome,
         DrawSimCloudShroud(slot, source, viewport, matrix,
-            globe_underlay_drawn ? &globe_view : NULL));
+            globe_underlay ? &globe_view : NULL));
     Sim3DPerformance_End(performance);
     if (!PresentationOutcome_IsUsable(outcome)) return outcome;
   }
@@ -1906,7 +2053,7 @@ static PresentationOutcome RenderSimProfile(
     Sim3DPerformanceScope performance =
         Sim3DPerformance_Begin(kSim3DPerformance_Billboard);
     DrawSimSelectionOverlays(
-        slot, virtual_height, source, viewport, &camera, matrix);
+        slot, virtual_height, source, viewport, &camera, matrix, curved_projection);
     Sim3DPerformance_End(performance);
   }
 
@@ -1962,6 +2109,11 @@ static PresentationOutcome RenderSimProfile(
    * cover exists where a record is being taken away, and a marker hidden by
    * the very cover under test cannot answer it. */
   DrawSimCullMarkers(slot, source, viewport, matrix, lift_inset);
+  if (background_voxels) {
+    if (globe_underlay) (void)PresentSimGlobeMountains_CraterAnchor(crater);
+    else
+      (void)SimBackgroundVoxelRenderer_CraterAnchor(crater);
+  }
   return outcome;
 }
 
@@ -2025,8 +2177,9 @@ PresentationOutcome PresentSim3D(const FrameSlot *slot) {
     slot->visible_x0, 0, slot->visible_width, slot->snes_height,
   };
 
+  SimBackgroundCraterAnchor crater={0};
   PresentationOutcome outcome = RenderSimProfile(
-      slot, slot->sim.effective_features, source, viewport, &viewport);
+      slot, slot->sim.effective_features, source, viewport, &viewport, &crater);
   if (!ArRenderDevice_SetClipRect(&g_render_device, NULL))
     outcome = kPresentationOutcome_CoreFailure;
   if (!PresentationOutcome_IsUsable(outcome)) {
@@ -2034,7 +2187,7 @@ PresentationOutcome PresentSim3D(const FrameSlot *slot) {
     Sim3DPerformance_EndPresentation();
     return outcome;
   }
-  PublishSimCraterAnchor(slot);
+  PublishSimCraterAnchor(slot,&crater);
 
   /* A full SIM capture temporarily supersedes the normal widescreen town-HUD
    * owners. sim3d.c republishes their exact buffers and removes those pixels

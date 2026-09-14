@@ -229,6 +229,7 @@ static void TestDefaultsAndMetadata(void) {
   CHECK(g_settings.sim3d_distance_x100 == 300);
   CHECK(g_settings.sim3d_landscape_height_pct ==
         kSimTownTerrainLandscapeHeightDefaultPct);
+  CHECK(g_settings.sim3d_landscape_height_pct == 40);
   const SettingDesc *landscape_height =
       Settings_Find("sim3d_landscape_height_pct");
   CHECK(landscape_height &&
@@ -624,6 +625,36 @@ static bool FileContains(const char *path, const char *needle) {
   buffer[size] = 0;
   fclose(file);
   return strstr(buffer, needle) != NULL;
+}
+
+static void TestLandscapeHeightDefaultAndPersistence(void) {
+  const char *path = "actraiser-settings-landscape-default-test.ini";
+  ClearSettingsEnv();
+  Settings_SetPersistenceEnabled(true);
+  CHECK(WriteTextFile(path, "# no landscape preference\n"));
+  Settings_InitWithFile(path);
+  CHECK(g_settings.sim3d_landscape_height_pct == 40);
+  CHECK(Settings_Save(path));
+  CHECK(FileContains(path, "sim3d_landscape_height_pct = 40"));
+
+  /* A new factory baseline must not migrate explicit older preferences. */
+  CHECK(WriteTextFile(path, "sim3d_landscape_height_pct = 100\n"));
+  Settings_InitWithFile(path);
+  CHECK(g_settings.sim3d_landscape_height_pct == 100);
+  CHECK(Settings_Save(path));
+  CHECK(FileContains(path, "sim3d_landscape_height_pct = 100"));
+  setenv("AR_SIM3D_LANDSCAPE_HEIGHT", "75", 1);
+  Settings_InitWithFile(path);
+  CHECK(g_settings.sim3d_landscape_height_pct == 75);
+  ClearSettingsEnv();
+  Settings_InitWithFile(path);
+  CHECK(g_settings.sim3d_landscape_height_pct == 100);
+#if AR_SIM3D_TERRAIN_ELEVATION
+  CHECK(Settings_Reset(Settings_Find("sim3d_landscape_height_pct")) ==
+        kSettingChange_Applied);
+  CHECK(g_settings.sim3d_landscape_height_pct == 40);
+#endif
+  remove(path);
 }
 
 static void TestConfigSettingsEnvironmentPrecedence(void) {
@@ -1772,6 +1803,7 @@ int main(int argc,char **argv) {
   TestConnectedWorldDefaults();
   TestVideoSettingAudit();
   TestSim3DEnvironmentLabels();
+  TestLandscapeHeightDefaultAndPersistence();
   TestConfigSettingsEnvironmentPrecedence();
   TestLegacySeedEncodings();
   TestMutationApi();

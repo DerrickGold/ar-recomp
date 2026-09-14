@@ -377,7 +377,8 @@ static bool TownHeightAt(uint8_t town, float tile_x, float tile_y,
 }
 
 static float FloorOwned(float tile_x, float tile_y, float *authored_weight,
-                        uint8_t owner, int cell_x, int cell_y) {
+                        uint8_t owner, int cell_x, int cell_y,
+                        const float *owned_height) {
   tile_x = Clamp(tile_x, 0.0f, kSimWorldMapTiles);
   tile_y = Clamp(tile_y, 0.0f, kSimWorldMapTiles);
 
@@ -394,7 +395,8 @@ static float FloorOwned(float tile_x, float tile_y, float *authored_weight,
     if (town == owner) {
       int ox, oy;
       SimTownTerrainSample sample;
-      if (SimWorldMap_OriginForTown(town, &ox, &oy) &&
+      if (owned_height) height = *owned_height + kTownDatumOffset[town - 1];
+      else if (SimWorldMap_OriginForTown(town, &ox, &oy) &&
           SimTownTerrain_SampleCell(town, cell_x, cell_y,
               tile_x - ox - cell_x, tile_y - oy - cell_y, &sample))
         height = sample.height_units + kTownDatumOffset[town - 1];
@@ -410,12 +412,18 @@ static float FloorOwned(float tile_x, float tile_y, float *authored_weight,
       ? weighted_height / weight_total : inferred;
   const float coast = s_world_prior_serial
       ? GridHeightAt(s_coast_weight, tile_x, tile_y) : 1.0f;
-  return (town_height * influence + inferred * (1.0f - influence)) * coast;
+  /* The coast prior estimates otherwise unknown terrain. It must not
+   * multiply the authored town contribution: doing so carves false valleys
+   * through level coastal roads and bends lowland towns toward the sea.
+   * Native data already owns coastal slopes, water floors and hard cliffs.
+   * Keep that registered shape intact, grading to the inferred ocean only
+   * as town ownership falls away outside its boundary. */
+  return town_height * influence + inferred * (1.0f - influence) * coast;
 }
 
 static float HeightOwned(float tile_x, float tile_y, float *authored_weight,
                          uint8_t owner, int cell_x, int cell_y, float *floor_height) {
-  const float floor = FloorOwned(tile_x, tile_y, authored_weight, owner, cell_x, cell_y);
+  const float floor = FloorOwned(tile_x, tile_y, authored_weight, owner, cell_x, cell_y, NULL);
   if (floor_height) *floor_height = floor;
   float mountain = GridHeightAt(s_mountain_height, tile_x, tile_y) *
           (1.0f - GridHeightAt(s_mountain_replacement, tile_x, tile_y)) *
@@ -440,7 +448,18 @@ float SimWorldNavigationTerrain_FloorHeightUnits(float tile_x, float tile_y) {
   if (!isfinite(tile_x) || !isfinite(tile_y)) return 0;
   /* Native mountain anchors do not consume inferred rise. Keep this explicit:
    * the full sampler requests both floor and total height from HeightOwned. */
-  return FloorOwned(tile_x, tile_y, NULL, 0, 0, 0);
+  return FloorOwned(tile_x, tile_y, NULL, 0, 0, 0, NULL);
+}
+
+bool SimWorldNavigationTerrain_RegisterTownFloor(uint8_t town,
+    float local_x, float local_y, float height, float *out) {
+  int ox, oy;
+  if (!out || !SimWorldMap_OriginForTown(town,&ox,&oy) ||
+      !isfinite(local_x) || !isfinite(local_y) || !isfinite(height) ||
+      local_x < 0 || local_x > kSimTownCells || local_y < 0 || local_y > kSimTownCells)
+    return false;
+  *out = FloorOwned(ox+local_x,oy+local_y,NULL,town,0,0,&height);
+  return true;
 }
 
 bool SimWorldNavigationTerrain_TownCellCorners(

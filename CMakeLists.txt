@@ -438,6 +438,11 @@ if(BUILD_TESTING)
                 ${CMAKE_SOURCE_DIR}/tests/pipeline_performance_tool_test.py)
         set_tests_properties(actraiser_pipeline_performance_tool PROPERTIES
             ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
+        add_test(NAME actraiser_sim3d_metadata_tool
+            COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_SOURCE_DIR}/tests/sim3d_metadata_tool_test.py)
+        set_tests_properties(actraiser_sim3d_metadata_tool PROPERTIES
+            ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
     endif()
     if(Python3_Interpreter_FOUND AND TARGET actraiser_font_coverage)
         add_test(NAME actraiser_language_font_coverage
@@ -935,9 +940,9 @@ if(BUILD_TESTING)
         src/present_sim3d_environment.c
         src/present_world_nav.c
         src/present_sim_globe_mapping.c
-        src/present_retained_image.c
         src/present_world_nav_geometry.c
         src/present_world_nav_model_mesh.c
+        src/sim/sim_background_voxel_project.c
         src/present_world_nav_sky.c
         src/sim/sim_world_navigation_globe.c
         src/sim/sim_world_navigation_mountains.c
@@ -973,18 +978,40 @@ if(BUILD_TESTING)
         src/sim/sim_town_terrain.c
     )
     add_executable(actraiser_present_world_nav_test
-        tests/present_world_nav_test.c ${AR_WORLD_NAV_TEST_SOURCES})
-    add_executable(actraiser_present_retained_image_test
-        tests/present_retained_image_test.c src/present_retained_image.c)
-    target_include_directories(actraiser_present_retained_image_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
-    add_test(NAME actraiser_present_retained_image COMMAND actraiser_present_retained_image_test)
-
+        tests/present_world_nav_test.c tests/present_world_nav_sim_stubs.c
+        ${AR_WORLD_NAV_TEST_SOURCES})
     add_executable(actraiser_present_sim_globe_mapping_test
         tests/present_sim_globe_mapping_test.c src/present_sim_globe_mapping.c
         src/sim/sim_world_navigation_globe.c src/sim/sim_town_terrain.c)
     target_include_directories(actraiser_present_sim_globe_mapping_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     target_link_libraries(actraiser_present_sim_globe_mapping_test PRIVATE actraiser_math)
     add_test(NAME actraiser_present_sim_globe_mapping COMMAND actraiser_present_sim_globe_mapping_test)
+    add_executable(actraiser_present_sim_globe_water_test
+        tests/present_sim_globe_water_test.c src/present_sim_globe_water.c
+        src/present_sim_globe_mapping.c src/sim/sim_world_navigation_globe.c
+        src/sim/sim_town_terrain.c)
+    target_include_directories(actraiser_present_sim_globe_water_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    target_link_libraries(actraiser_present_sim_globe_water_test PRIVATE actraiser_math)
+    add_test(NAME actraiser_present_sim_globe_water COMMAND actraiser_present_sim_globe_water_test)
+    add_executable(actraiser_present_sim_globe_project_test
+        tests/present_sim_globe_project_test.c src/present_sim_globe_project.c
+        src/present_sim_globe_mapping.c src/scene3d_math.c
+        src/sim/sim_world_navigation_globe.c src/sim/sim_town_terrain.c)
+    target_include_directories(actraiser_present_sim_globe_project_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    target_link_libraries(actraiser_present_sim_globe_project_test PRIVATE actraiser_math)
+    add_test(NAME actraiser_present_sim_globe_project COMMAND actraiser_present_sim_globe_project_test)
+
+    add_executable(actraiser_present_sim3d_project_test
+        tests/present_sim3d_project_test.c src/present_sim3d_project.c
+        src/present_sim3d_geometry.c src/present_sim_globe_project.c
+        src/present_sim_globe_mapping.c src/scene3d_math.c src/render/render_device.c
+        src/sim/sim_render_visibility.c src/sim/sim_world_map.c
+        src/sim/sim_world_navigation_globe.c src/sim/sim_world_navigation_terrain.c
+        src/sim/sim_town_terrain.c)
+    target_include_directories(actraiser_present_sim3d_project_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    target_compile_definitions(actraiser_present_sim3d_project_test PRIVATE AR_SIM3D_TERRAIN_ELEVATION=1)
+    target_link_libraries(actraiser_present_sim3d_project_test PRIVATE actraiser_math)
+    add_test(NAME actraiser_present_sim3d_project COMMAND actraiser_present_sim3d_project_test)
     target_include_directories(actraiser_present_world_nav_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
@@ -1012,8 +1039,30 @@ if(BUILD_TESTING)
     # Full presenter + production shaders/depth, without a live game/runner.
     # Synthetic data is portable; an optional local ROM/WRAM pair also permits
     # frozen populated-town orbital captures without modifying any save.
+    # SIM snapshots additionally validate continuous-globe town presentation
+    # with shared model/mountain/cloud rendering and frozen captures.
     add_executable(actraiser_present_world_nav_gpu_test
         tests/present_world_nav_gpu_test.c ${AR_WORLD_NAV_TEST_SOURCES}
+        src/present_sim3d_geometry.c
+        src/present_sim3d_backdrop.c
+        src/sim/sim_backdrop_render.c
+        src/present_sim_globe_mountains.c
+        src/present_sim_globe_terrain.c
+        src/present_sim_globe_water.c
+        src/present_sim_globe_project.c
+        src/session_fatal.c
+        src/sim/sim_world_map_compose.c
+        src/present_sim3d_terrain.c
+        src/present_sim3d_clouds.c
+        src/sim/sim_render_visibility.c
+        src/sim/sim_town_canvas.c
+        src/sim/sim_structure_visuals.c
+        src/sim/sim_background_voxels.c
+        src/sim/sim_background_voxel_lod.c
+        src/sim/sim_background_voxel_renderer.c
+        src/sim/sim_background_voxel_terrain_depth.c
+        src/sim/sim_background_mountain_render.c
+        src/platform/sdl/sim_cloud_effect_backend_sdl.c
         src/platform/sdl/render_sdl.c
         src/platform/sdl/sim3d_depth_pass_sdl.c)
     target_include_directories(actraiser_present_world_nav_gpu_test PRIVATE
@@ -1680,6 +1729,7 @@ if(BUILD_TESTING)
     add_executable(actraiser_sim_render_metadata_test
         tests/sim_render_metadata_test.c
         src/sim/sim_render_metadata.c
+        src/sim/sim_render_visibility.c
         src/sim/sim_world_map.c
         src/sim/sim_world_navigation_scene.c
         src/sim/sim_world_navigation_towns.c
@@ -2056,6 +2106,7 @@ if(BUILD_TESTING)
         src/sim/sim3d.c
         src/sim/sim_background_voxel_preset.c
         src/sim/sim_render_metadata.c
+        src/sim/sim_render_visibility.c
         src/sim/sim_render_metadata_trace.c
         src/sim/sim_world_map.c
         src/sim/sim_world_navigation_scene.c
@@ -2133,6 +2184,7 @@ if(BUILD_TESTING)
         tests/scene_inspector_test.c
         src/dev/scene_inspector.c
         src/sim/sim_render_metadata.c
+        src/sim/sim_render_visibility.c
         src/sim/sim_world_map.c
         src/sim/sim_world_navigation_scene.c
         src/sim/sim_world_navigation_towns.c

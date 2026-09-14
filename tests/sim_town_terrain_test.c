@@ -16,10 +16,10 @@ static const float kVisibleEdgeTestEpsilonUnits = 0.004f;
 
 static void TestBoundsAndSampling(void) {
   CHECK(SimTownTerrain_ScaledHeightPixels(2.0f, 0.0f) == 0.0f);
-  CHECK(SimTownTerrain_ScaledHeightPixels(
-      2.0f, kSimTownTerrainLandscapeHeightDefaultPct) == 32.0f);
-  CHECK(fabsf(SimTownTerrain_ScaledHeightPixels(2.0f, 40.0f) - 12.8f) <
-        0.0001f);
+  CHECK(SimTownTerrain_ScaledHeightPixels(2.0f, 100.0f) == 32.0f);
+  CHECK(kSimTownTerrainLandscapeHeightDefaultPct == 40);
+  CHECK(fabsf(SimTownTerrain_ScaledHeightPixels(
+      2.0f, kSimTownTerrainLandscapeHeightDefaultPct) - 12.8f) < 0.0001f);
   CHECK(SimTownTerrain_CornerQ8(0, 0, 0, 0) == 0);
   CHECK(SimTownTerrain_CornerQ8(7, 0, 0, 0) == 0);
   CHECK(SimTownTerrain_CornerQ8(1, -1, 0, 0) == 0);

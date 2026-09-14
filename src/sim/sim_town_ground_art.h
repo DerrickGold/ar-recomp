@@ -37,6 +37,15 @@ const uint32_t *SimTownGroundArt_Metatile(
 bool SimTownGroundArt_ColorIndexMask(
     uint8_t town, uint8_t development_tier, uint8_t tile,
     uint8_t color_index, uint8_t *mask);
+/* Conservative semantic full-water classification. Every texel in every
+ * authored animation phase must use water/wave palette identities; shore,
+ * marsh, transparent and land pixels reject it. Cached without pixel atlases. */
+bool SimTownGroundArt_IsOpenWater(uint8_t town, uint8_t development_tier, uint8_t tile);
+/* Stable 16x16 byte mask (0 or 1), including water pixels in mixed shores.
+ * Uses the same all-phase rule as IsOpenWater. Invalid inputs leave output
+ * unchanged. Lazy classification is owner-thread work, not a worker call. */
+bool SimTownGroundArt_OpenWaterMask(uint8_t town, uint8_t development_tier,
+    uint8_t tile, uint8_t mask[256]);
 
 /* Immutable, lazily decoded phase variant. Unaffected metatiles retain the
  * static pointer; only metatiles referencing the animated CHR strip allocate

@@ -106,6 +106,10 @@ static SDL_Surface *ReadPass(ArRenderDevice *device, SDL_Renderer *renderer) {
   return ReadPassWithShadow(device, renderer, ArRenderTexture_Invalid());
 }
 
+static void TestBorrowedBillboards(ArRenderDevice *device, SDL_Renderer *renderer);
+static void TestBillboardRim(ArRenderDevice *device, SDL_Renderer *renderer);
+static void TestBorrowedSurfaceOverlay(ArRenderDevice *device, SDL_Renderer *renderer);
+
 static void TestOrderedSubmission(SDL_Window *window) {
   SDL_unsetenv_unsafe("AR_SDL_GPU_ORDERED");
   ArRenderDevice device = {0};
@@ -142,6 +146,11 @@ static void TestOrderedSubmission(SDL_Window *window) {
   CHECK(restored.clip.x == clip.x && restored.clip.y == clip.y &&
       restored.clip.w == clip.w && restored.clip.h == clip.h);
   CHECK(device.ops->restore_render_target_state(device.context, &saved));
+  /* Borrowed SDL textures require production's ordered producer/consumer
+   * boundary. Exercise the cold first upload without a warmup/present. */
+  TestBorrowedBillboards(&device,renderer);
+  TestBillboardRim(&device,renderer);
+  TestBorrowedSurfaceOverlay(&device,renderer);
   CHECK(Sim3DDepthPass_Require(&device));
   Sim3DDepthMesh *mesh = NULL;
   for (int frame = 0; frame < 48; ++frame) {
@@ -2159,6 +2168,44 @@ static void TestSurfaceGeometry(ArRenderDevice *device, SDL_Renderer *renderer) 
   Sim3DDepthPass_Reset(device);
 }
 
+static void TestSurfaceFocus(ArRenderDevice *device, SDL_Renderer *renderer) {
+  Sim3DDepthMesh *mesh=NULL;
+  const uint32_t white=0xffffffff;
+  const ArRenderRectI full={0,0,1,1};
+  CHECK(Sim3DDepthPass_UploadAtlasRegions(device,kSim3DDepthPass_Ground,&white,1,1,4,&full,1));
+  const float weights[]={0,.5f,1};
+  for (unsigned region=0;region<3;++region) for (unsigned frame=0;frame<3;++frame) {
+    CHECK(Sim3DDepthPass_Begin(device,32,16,kArRenderFilter_Nearest));
+    if (!mesh) mesh=Sim3DDepthPass_CreateSurfaceMesh();
+    CHECK(mesh);
+    Sim3DDepthSurfaceVertex source[4]; SurfaceVertices(source);
+    ArRenderPointF mask[4];
+    for (unsigned p=0;p<4;++p) {
+      source[p].color=(ArRenderColorF){.4f,.6f,.8f,1};
+      mask[p]=(ArRenderPointF){weights[region],.5f};
+    }
+    if (!frame) CHECK(Sim3DDepthPass_UpdateSurfaceMeshWithMask(mesh,source,mask,1));
+    Sim3DDepthSurfaceTransform t=SurfaceTransform(); t.ambient=1; t.diffuse=0;
+    if (frame!=1) t.focus=(Sim3DDepthSurfaceFocus){
+      .clear_rect={0,0,0,1},.feather=1,.dim=.4f,.haze={.2f,.3f,.5f,.25f}};
+    const uint64_t bytes=geometry_upload_bytes,draws=draw_calls;
+    CHECK(Sim3DDepthPass_AppendSurfaceMesh(mesh,&t,NULL,0));
+    t.focus.dim=1; /* queued transform is owned */
+    SDL_Surface *actual=ReadPass(device,renderer); CHECK(actual);
+    CHECK(draw_calls-draws==1 && geometry_upload_bytes-bytes==(!frame?256:0));
+    if (actual) {
+      Uint8 r,g,b,a; CHECK(SDL_ReadSurfacePixel(actual,16,8,&r,&g,&b,&a));
+      const float w=frame!=1 ? weights[region] : 0, h=.25f*w, gain=(1-.4f*w)*(1-h);
+      CHECK(abs((int)r-(int)lroundf(255*(.4f*gain+.2f*h)))<=1);
+      CHECK(abs((int)g-(int)lroundf(255*(.6f*gain+.3f*h)))<=1);
+      CHECK(abs((int)b-(int)lroundf(255*(.8f*gain+.5f*h)))<=1 && a==255);
+    }
+    SDL_DestroySurface(actual);
+  }
+  Sim3DDepthPass_DestroyMesh(mesh); Sim3DDepthPass_Reset(device);
+  puts("surface focus: clear/half/far coverage, reversible uniforms, no extra draws/uploads PASS");
+}
+
 static void TestPartitionedSources(ArRenderDevice *device, SDL_Renderer *renderer) {
   enum { kQuads = kSim3DDepthMaximumSourceQuads + 1, kFirst = kQuads - 2 };
   Sim3DDepthSurfaceVertex *surface = calloc(kQuads * 4, sizeof(*surface));
@@ -2843,6 +2890,294 @@ static void TestSurfaceCutouts(ArRenderDevice *device, SDL_Renderer *renderer) {
   Sim3DDepthPass_DestroyMesh(mesh); Sim3DDepthPass_Reset(device);
 }
 
+static void TestSurfaceMaterialTexture(ArRenderDevice *device, SDL_Renderer *renderer) {
+  Sim3DDepthPass_Reset(device);
+  CHECK(Sim3DDepthPass_Begin(device,64,64,kArRenderFilter_Nearest));
+  const uint32_t white = 0xffffffff, green = 0xff00ff00;
+  const ArRenderRectI full = {0,0,1,1};
+  CHECK(Sim3DDepthPass_UploadAtlasRegions(device,kSim3DDepthPass_Ground,&white,1,1,4,&full,1));
+  const ArRenderTextureDesc desc = {.width=1,.height=1,
+    .format=kArRenderPixelFormat_Argb8888,.usage=kArRenderTextureUsage_Static,
+    .filter=kArRenderFilter_Nearest,.blend=kArRenderBlendMode_Opaque};
+  ArRenderTexture texture = ArRenderTexture_Invalid();
+  CHECK(ArRenderDevice_CreateTexture(device,&desc,&texture));
+  CHECK(ArRenderDevice_UpdateTexture(device,texture,NULL,&green,4));
+  /* A real texture handle from another renderer, not a forged pointer. */
+  SDL_Surface *foreign_surface = SDL_CreateSurface(1,1,SDL_PIXELFORMAT_ARGB8888);
+  SDL_Renderer *foreign_renderer = SDL_CreateSoftwareRenderer(foreign_surface);
+  SDL_Texture *foreign = SDL_CreateTexture(foreign_renderer,SDL_PIXELFORMAT_ARGB8888,
+      SDL_TEXTUREACCESS_STATIC,1,1);
+  CHECK(foreign);
+  Sim3DDepthMesh *mesh = Sim3DDepthPass_CreateSurfaceMesh(); CHECK(mesh);
+  SDL_Surface *expected = NULL;
+  for (unsigned frame = 0; frame < 4; ++frame) {
+    const bool borrowed = frame & 1;
+    CHECK(Sim3DDepthPass_Begin(device,64,64,kArRenderFilter_Nearest));
+    Sim3DDepthSurfaceVertex source[8]; SurfaceVertices(source); SurfaceVertices(source+4);
+    for (unsigned p = 0; p < 8; ++p) {
+      source[p].uv = (ArRenderPointF){.5f,.5f};
+      if (p < 4 && !borrowed) source[p].color = (ArRenderColorF){0,1,0,1};
+    }
+    CHECK(Sim3DDepthPass_UpdateSurfaceMesh(mesh,source,2));
+    Sim3DDepthSurfaceBatch batches[2] = {
+      {.layer=kSim3DDepthPass_Ground,.range={0,1},.transform=SurfaceTransform()},
+      {.layer=kSim3DDepthPass_Ground,.range={1,1},.transform=SurfaceTransform()}};
+    batches[0].transform.radial.matrix[12] = -.3f;
+    batches[1].transform.radial.matrix[12] = .3f;
+    batches[0].transform.radial.matrix[10] = .5f;
+    batches[1].transform.radial.matrix[10] = .5f;
+    if (borrowed) batches[0].texture = texture;
+    Sim3DDepthSurfaceBatch invalid[2]; memcpy(invalid,batches,sizeof(invalid));
+    invalid[1].texture = ArSdlRenderBackend_BorrowTexture(foreign);
+    CHECK(!Sim3DDepthPass_AppendSurfaceBatches(mesh,invalid,2));
+    CHECK(Sim3DDepthPass_UpdateSurfaceMesh(mesh,source,2)); /* Atomic rejection. */
+    CHECK(AppendRect(kSim3DDepthPass_Ground,0,0,64,64,.99f,(ArRenderColorF){.2f,.1f,.3f,1}));
+    CHECK(Sim3DDepthPass_AppendSurfaceBatches(mesh,batches,1));
+    /* Restore the atlas for ordinary data and the following default sample. */
+    CHECK(AppendRect(kSim3DDepthPass_Ground,0,28,64,36,.1f,(ArRenderColorF){.8f,.4f,.3f,1}));
+    CHECK(Sim3DDepthPass_AppendSurfaceBatches(mesh,batches+1,1));
+    memset(batches,0,sizeof(batches));
+    SDL_Surface *actual = ReadPass(device,renderer); CHECK(actual);
+    if (!frame) {
+      expected = actual;
+      unsigned green_pixels = 0, grey_pixels = 0;
+      for (int y = 0; y < 64; ++y) for (int x = 0; x < 64; ++x) {
+        const uint32_t rgb = ReadArgb(actual,x,y) & 0xffffff;
+        green_pixels += (rgb & 0xff00ff) == 0 && (rgb & 0xff00) > 0;
+        grey_pixels += rgb == 0xbfbfbf;
+      }
+      CHECK(green_pixels > 100 && grey_pixels > 100);
+    }
+    else { CheckSurfacePixels(actual,expected,0,780+frame); SDL_DestroySurface(actual); }
+  }
+  SDL_DestroySurface(expected);
+  /* A borrowed-only material needs no layer atlas and remains caller-owned
+   * through backend reset. Publication must recover, not use stale payloads. */
+  Sim3DDepthPass_Reset(device);
+  CHECK(Sim3DDepthPass_Begin(device,64,64,kArRenderFilter_Nearest));
+  Sim3DDepthSurfaceVertex source[4]; SurfaceVertices(source);
+  for (unsigned p = 0; p < 4; ++p) source[p].uv = (ArRenderPointF){.5f,.5f};
+  CHECK(Sim3DDepthPass_UpdateSurfaceMesh(mesh,source,1));
+  Sim3DDepthSurfaceBatch borrowed_only = {.layer=kSim3DDepthPass_Ground,
+    .texture=texture,.range={0,1},.transform=SurfaceTransform()};
+  borrowed_only.transform.radial.matrix[10] = .5f;
+  CHECK(Sim3DDepthPass_AppendSurfaceBatches(mesh,&borrowed_only,1));
+  SDL_Surface *only = ReadPass(device,renderer); CHECK(only);
+  CHECK((ReadArgb(only,32,32) & 0xffffff) == 0x00bf00);
+  SDL_DestroySurface(only);
+  Sim3DDepthPass_DestroyMesh(mesh); Sim3DDepthPass_Reset(device);
+  ArRenderDevice_DestroyTexture(device,texture);
+  SDL_DestroyTexture(foreign); SDL_DestroyRenderer(foreign_renderer); SDL_DestroySurface(foreign_surface);
+}
+
+static void TestBorrowedSurfaceOverlay(ArRenderDevice *device, SDL_Renderer *renderer) {
+  Sim3DDepthPass_Reset(device);
+  const ArRenderTextureDesc desc = {.width=2,.height=1,
+    .format=kArRenderPixelFormat_Argb8888,.usage=kArRenderTextureUsage_Static,
+    .filter=kArRenderFilter_Linear,.blend=kArRenderBlendMode_Alpha};
+  ArRenderTexture mask = ArRenderTexture_Invalid();
+  const uint32_t texels[2] = {0xff000000,0x00000000};
+  CHECK(ArRenderDevice_CreateTexture(device,&desc,&mask));
+  CHECK(ArRenderDevice_UpdateTexture(device,mask,NULL,texels,8));
+  SDL_Surface *foreign_surface = SDL_CreateSurface(1,1,SDL_PIXELFORMAT_ARGB8888);
+  SDL_Renderer *foreign_renderer = SDL_CreateSoftwareRenderer(foreign_surface);
+  SDL_Texture *foreign = SDL_CreateTexture(foreign_renderer,SDL_PIXELFORMAT_ARGB8888,
+      SDL_TEXTUREACCESS_STATIC,1,1);
+  CHECK(foreign);
+  CHECK(Sim3DDepthPass_Begin(device,64,64,kArRenderFilter_Nearest));
+  const uint32_t white = 0xffffffff;
+  const ArRenderRectI full = {0,0,1,1};
+  CHECK(Sim3DDepthPass_UploadAtlasRegions(device,kSim3DDepthPass_Ground,&white,1,1,4,&full,1));
+  Sim3DDepthMesh *mesh = Sim3DDepthPass_CreateSurfaceMesh(); CHECK(mesh);
+  Sim3DDepthSurfaceVertex source[4]; SurfaceVertices(source);
+  for (unsigned p = 0; p < 4; ++p)
+    source[p].uv = (ArRenderPointF){p == 1 || p == 2 ? 1 : 0,.5f};
+  CHECK(Sim3DDepthPass_UpdateSurfaceMesh(mesh,source,1));
+  Sim3DDepthSurfaceOverlay overlay = {.layer=kSim3DDepthPass_ShadowReceiver,
+    .color={1,1,1,.5f},.texture=mask};
+  Sim3DDepthSurfaceBatch batch = {.layer=kSim3DDepthPass_Ground,.range={0,1},
+    .transform=SurfaceTransform(),.overlays=&overlay,.overlay_count=1};
+  batch.transform.ambient=1; batch.transform.diffuse=0;
+  overlay.texture = ArSdlRenderBackend_BorrowTexture(foreign);
+  CHECK(!Sim3DDepthPass_AppendSurfaceBatches(mesh,&batch,1));
+  CHECK(Sim3DDepthPass_UpdateSurfaceMesh(mesh,source,1)); /* No partial queue. */
+  overlay.texture=mask; overlay.layer=kSim3DDepthPass_GroundHaze;
+  CHECK(!Sim3DDepthPass_AppendSurfaceBatches(mesh,&batch,1));
+  CHECK(Sim3DDepthPass_UpdateSurfaceMesh(mesh,source,1));
+  overlay.layer=kSim3DDepthPass_ShadowReceiver;
+  CHECK(Sim3DDepthPass_AppendSurfaceBatches(mesh,&batch,1));
+  memset(&overlay,0,sizeof(overlay)); /* Copied parameters, borrowed resource. */
+  CHECK(AppendRect(kSim3DDepthPass_Solid,0,28,64,36,.1f,(ArRenderColorF){1,0,0,1}));
+  SDL_Surface *pixels = ReadPass(device,renderer); CHECK(pixels);
+  if (pixels) {
+    const unsigned shaded = ReadArgb(pixels,21,20)&0xffffff;
+    CHECK(shaded == 0x7f7f7f || shaded == 0x808080);
+    CHECK((ReadArgb(pixels,42,20)&0xffffff) == 0xffffff);
+    Uint8 r=0,g=0,b=0,a=0;
+    CHECK(SDL_ReadSurfacePixel(pixels,21,32,&r,&g,&b,&a));
+    CHECK(r == 255 && g == 0 && b == 0 && a == 255); /* Occluded receiver. */
+  }
+  SDL_DestroySurface(pixels);
+  Sim3DDepthPass_DestroyMesh(mesh); Sim3DDepthPass_Reset(device);
+  CHECK(ArRenderDevice_UpdateTexture(device,mask,NULL,texels,8)); /* Still owned. */
+  ArRenderDevice_DestroyTexture(device,mask);
+  SDL_DestroyTexture(foreign); SDL_DestroyRenderer(foreign_renderer); SDL_DestroySurface(foreign_surface);
+  puts("borrowed surface overlay: cold upload, UV coverage, depth and ownership PASS");
+}
+
+static void CheckRgb(const SDL_Surface *surface, int x, uint32_t expected) {
+  Uint8 r = 0, g = 0, b = 0, a = 0;
+  CHECK(surface && SDL_ReadSurfacePixel((SDL_Surface *)surface,x,8,&r,&g,&b,&a));
+  if (((uint32_t)r << 16 | (uint32_t)g << 8 | b) != expected || a != 255)
+    fprintf(stderr,"billboard pixel x=%d actual=%02x%02x%02x/%u expected=%06x\n",x,r,g,b,a,expected);
+  CHECK(((uint32_t)r << 16 | (uint32_t)g << 8 | b) == expected && a == 255);
+}
+
+static void TestBorrowedBillboards(ArRenderDevice *device, SDL_Renderer *renderer) {
+  Sim3DDepthPass_Reset(device);
+  const ArRenderTextureDesc desc = {.width=2,.height=1,
+    .format=kArRenderPixelFormat_Argb8888,.usage=kArRenderTextureUsage_Static,
+    .filter=kArRenderFilter_Nearest,.blend=kArRenderBlendMode_Alpha};
+  ArRenderTexture atlas = ArRenderTexture_Invalid(), alternate = ArRenderTexture_Invalid();
+  CHECK(ArRenderDevice_CreateTexture(device,&desc,&atlas));
+  CHECK(ArRenderDevice_CreateTexture(device,&desc,&alternate));
+  const uint32_t pixels[2] = {0x00000000,0xffffffff};
+  CHECK(ArRenderDevice_UpdateTexture(device,atlas,NULL,pixels,sizeof(pixels)));
+  CHECK(ArRenderDevice_UpdateTexture(device,alternate,NULL,pixels,sizeof(pixels)));
+  SDL_Surface *foreign_surface = SDL_CreateSurface(2,1,SDL_PIXELFORMAT_ARGB8888);
+  SDL_Renderer *foreign_renderer = SDL_CreateSoftwareRenderer(foreign_surface);
+  SDL_Texture *foreign = SDL_CreateTexture(foreign_renderer,SDL_PIXELFORMAT_ARGB8888,
+      SDL_TEXTUREACCESS_STATIC,2,1);
+  CHECK(foreign);
+  for (unsigned frame = 0; frame < 3; ++frame) {
+    CHECK(Sim3DDepthPass_Begin(device,32,16,kArRenderFilter_Nearest));
+    CHECK(AppendRect(kSim3DDepthPass_Solid,0,0,32,16,.9f,(ArRenderColorF){0,0,1,1}));
+    CHECK(AppendRect(kSim3DDepthPass_Solid,0,0,8,16,.2f,(ArRenderColorF){1,0,0,1}));
+    Sim3DDepthVertex quad[4], invalid[8];
+    MakeRect(quad,0,0,32,16,.4f,(ArRenderColorF){0,1,0,1});
+    memcpy(invalid,quad,sizeof(quad)); memcpy(invalid+4,quad,sizeof(quad));
+    invalid[7].depth = NAN;
+    CHECK(!Sim3DDepthPass_AppendBillboards(atlas,invalid,2));
+    CHECK(!Sim3DDepthPass_AppendBillboards(atlas,quad,SIZE_MAX));
+    CHECK(!Sim3DDepthPass_AppendBillboards(ArRenderTexture_Invalid(),quad,1));
+    CHECK(!Sim3DDepthPass_AppendBillboards(ArSdlRenderBackend_BorrowTexture(foreign),quad,1));
+    /* Binding is per pass, not a persistent cache. Alternate on the next
+     * frame; a rejected append must not reserve that frame's binding. */
+    ArRenderTexture selected = frame & 1 ? alternate : atlas;
+    CHECK(Sim3DDepthPass_AppendBillboards(selected,quad,1));
+    CHECK(!Sim3DDepthPass_AppendBillboards(frame & 1 ? atlas : alternate,quad,1));
+    MakeRect(quad,12,0,20,16,.6f,(ArRenderColorF){1,1,0,1});
+    for (int i = 0; i < 4; ++i) quad[i].uv.x = .75f;
+    CHECK(Sim3DDepthPass_AppendBillboards(selected,quad,1));
+    memset(quad,0,sizeof(quad)); /* Append owns its complete copy. */
+    /* Later art tests the WORLD, not previous sprites. This is necessary for
+     * native multipart/OAM ordering and for transparent texel holes. */
+    CHECK(AppendRect(kSim3DDepthPass_Effect,20,0,24,16,.7f,(ArRenderColorF){1,0,1,1}));
+    SDL_Surface *actual = ReadPass(device,renderer);
+    CheckRgb(actual,4,0xff0000); CheckRgb(actual,10,0x0000ff);
+    CheckRgb(actual,14,0xffff00); CheckRgb(actual,18,0xffff00);
+    CheckRgb(actual,22,0xff00ff); CheckRgb(actual,28,0x00ff00);
+    SDL_DestroySurface(actual);
+    CHECK(!Sim3DDepthPass_AppendBillboards(selected,quad,1));
+    Sim3DDepthPass_Reset(device);
+  }
+  ArRenderDevice_DestroyTexture(device,atlas); ArRenderDevice_DestroyTexture(device,alternate);
+  SDL_DestroyTexture(foreign); SDL_DestroyRenderer(foreign_renderer); SDL_DestroySurface(foreign_surface);
+}
+
+static void TestBillboardRim(ArRenderDevice *device, SDL_Renderer *renderer) {
+  const ArRenderTextureDesc desc = {.width=5,.height=5,
+    .format=kArRenderPixelFormat_Argb8888,.usage=kArRenderTextureUsage_Streaming,
+    .filter=kArRenderFilter_Nearest,.blend=kArRenderBlendMode_Alpha};
+  ArRenderTexture atlas = ArRenderTexture_Invalid();
+  CHECK(ArRenderDevice_CreateTexture(device,&desc,&atlas));
+  uint32_t pixels[25] = {0};
+  for (int y=1;y<4;++y) for (int x=1;x<4;++x) pixels[y*5+x]=0xff404040;
+  CHECK(ArRenderDevice_UpdateTexture(device,atlas,NULL,pixels,5*sizeof(*pixels)));
+  /* Lit, lit, unlit, lit: adjacent equal styles merge without reordering.
+   * The middle of a sprite stays unchanged, only its opaque edge brightens. */
+  for (unsigned frame=0;frame<3;++frame) {
+    CHECK(Sim3DDepthPass_Begin(device,32,16,kArRenderFilter_Nearest));
+    CHECK(AppendRect(kSim3DDepthPass_Solid,0,0,32,16,.9f,(ArRenderColorF){0,0,1,1}));
+    CHECK(AppendRect(kSim3DDepthPass_Solid,29,0,32,16,.2f,(ArRenderColorF){1,0,0,1}));
+    Sim3DDepthVertex quad[4];
+    MakeRect(quad,0,0,10,10,.4f,(ArRenderColorF){1,1,1,1});
+    Sim3DDepthBillboardRim rim={{0,-.2f},{1,.95f,.7f,.25f}};
+    CHECK(!Sim3DDepthPass_AppendRimBillboards(atlas,quad,1,NULL));
+    for (unsigned bad=0;bad<10;++bad) {
+      Sim3DDepthBillboardRim invalid=rim;
+      if (bad==0) invalid.sample_offset.x=NAN;
+      if (bad==1) invalid.sample_offset.y=INFINITY;
+      if (bad==2) invalid.sample_offset=(ArRenderPointF){0};
+      if (bad==3) invalid.sample_offset.y=-1.01f;
+      if (bad==4) invalid.color.a=-.1f;
+      if (bad==5) invalid.color.a=1.01f;
+      if (bad==6) invalid.color.a=NAN;
+      if (bad==7) invalid.color.a=INFINITY;
+      if (bad==8) invalid.color.r=1.01f;
+      if (bad==9) invalid.color.b=NAN;
+      CHECK(!Sim3DDepthPass_AppendRimBillboards(atlas,quad,1,&invalid));
+    }
+    CHECK(Sim3DDepthPass_AppendRimBillboards(atlas,quad,1,&rim));
+    MakeRect(quad,10,0,20,10,.4f,(ArRenderColorF){1,1,1,1});
+    CHECK(Sim3DDepthPass_AppendRimBillboards(atlas,quad,1,&rim));
+    /* A later unlit piece covers the left half of the earlier lit sprite,
+     * even at a farther depth, just as native multipart OAM demands. */
+    MakeRect(quad,2,2,4,8,.6f,(ArRenderColorF){1,1,1,1});
+    for (int i=0;i<4;++i) quad[i].uv=(ArRenderPointF){.5f,.5f};
+    CHECK(Sim3DDepthPass_AppendBillboards(atlas,quad,1));
+    Sim3DDepthBillboardRim disabled=rim; disabled.color.a=0;
+    MakeRect(quad,20,0,25,10,.4f,(ArRenderColorF){1,1,1,1});
+    CHECK(Sim3DDepthPass_AppendRimBillboards(atlas,quad,1,&disabled));
+    MakeRect(quad,25,0,35,10,.4f,(ArRenderColorF){1,1,1,1});
+    CHECK(Sim3DDepthPass_AppendRimBillboards(atlas,quad,1,&rim));
+    rim.color.a=0; rim.sample_offset.y=.2f; memset(quad,0,sizeof(quad)); /* copied state */
+    const uint64_t draws=draw_calls, bytes=geometry_upload_bytes;
+    SDL_Surface *actual=ReadPass(device,renderer); CHECK(actual);
+    CHECK(draw_calls-draws==4); /* one solid draw, three billboard runs */
+    CHECK(geometry_upload_bytes-bytes==7*4*10*sizeof(float)); /* no style vertex stream */
+    if (actual) {
+      Uint8 r,g,b,a;
+      CHECK(SDL_ReadSurfacePixel(actual,6,3,&r,&g,&b,&a));
+      CHECK(r>=127 && r<=128 && g>=124 && g<=126 && b>=108 && b<=110 && a==255);
+      CHECK(SDL_ReadSurfacePixel(actual,5,5,&r,&g,&b,&a));
+      CHECK(r==64 && g==64 && b==64 && a==255); /* interior */
+      CHECK(SDL_ReadSurfacePixel(actual,6,7,&r,&g,&b,&a));
+      CHECK(r==64 && g==64 && b==64); /* edge facing away from the light */
+      CHECK(SDL_ReadSurfacePixel(actual,3,3,&r,&g,&b,&a));
+      CHECK(r==64 && g==64 && b==64); /* later unlit covers rim */
+      CHECK(SDL_ReadSurfacePixel(actual,21,3,&r,&g,&b,&a));
+      CHECK(r==64 && g==64 && b==64); /* disabled */
+      CHECK(SDL_ReadSurfacePixel(actual,1,1,&r,&g,&b,&a));
+      CHECK(r==0 && g==0 && b==255); /* padding remains transparent */
+      CHECK(SDL_ReadSurfacePixel(actual,30,3,&r,&g,&b,&a));
+      CHECK(r==255 && g==0 && b==0); /* world occludes lit sprite */
+    }
+    SDL_DestroySurface(actual);
+    Sim3DDepthPass_Reset(device);
+  }
+  /* The rim follows all four light directions. A half-alpha body must not
+   * halve the rim contribution, and still blends its background correctly. */
+  const ArRenderPointF directions[]={{.2f,0},{0,-.2f},{-.2f,0},{0,.2f}};
+  const int edges[][2]={{7,5},{5,3},{3,5},{5,7}};
+  for (unsigned direction=0;direction<4;++direction) {
+    CHECK(Sim3DDepthPass_Begin(device,32,16,kArRenderFilter_Nearest));
+    CHECK(AppendRect(kSim3DDepthPass_Solid,0,0,32,16,.9f,(ArRenderColorF){0,0,1,1}));
+    Sim3DDepthVertex quad[4];
+    MakeRect(quad,0,0,10,10,.4f,(ArRenderColorF){1,1,1,.5f});
+    const Sim3DDepthBillboardRim rim={directions[direction],{1,.95f,.7f,.25f}};
+    CHECK(Sim3DDepthPass_AppendRimBillboards(atlas,quad,1,&rim));
+    SDL_Surface *actual=ReadPass(device,renderer); CHECK(actual);
+    Uint8 r,g,b,a;
+    CHECK(SDL_ReadSurfacePixel(actual,edges[direction][0],edges[direction][1],&r,&g,&b,&a));
+    CHECK(r>=95 && r<=97 && g>=92 && g<=94 && b>=202 && b<=206 && a==255);
+    CHECK(SDL_ReadSurfacePixel(actual,edges[(direction+2)%4][0],edges[(direction+2)%4][1],&r,&g,&b,&a));
+    CHECK(r>=31 && r<=33 && g>=31 && g<=33 && b>=158 && b<=161 && a==255);
+    SDL_DestroySurface(actual); Sim3DDepthPass_Reset(device);
+  }
+  ArRenderDevice_DestroyTexture(device,atlas);
+}
+
 static void TestSurfaceContracts(ArRenderDevice *device, SDL_Renderer *renderer) {
   CHECK(Sim3DDepthPass_Begin(device, 32, 16, kArRenderFilter_Nearest));
   Sim3DDepthMesh *mesh = Sim3DDepthPass_CreateSurfaceMesh(); CHECK(mesh);
@@ -2874,7 +3209,7 @@ static void TestSurfaceContracts(ArRenderDevice *device, SDL_Renderer *renderer)
   Sim3DDepthSurfaceTransform large_w = t; large_w.radial.matrix[15] = 16;
   CHECK(!Sim3DDepthPass_AppendSurfaceMesh(mesh, &large_w, NULL, 0));
   CHECK(Sim3DDepthPass_UpdateSurfaceMesh(mesh, source, 1));
-  for (unsigned bad = 0; bad < 13; ++bad) {
+  for (unsigned bad = 0; bad < 23; ++bad) {
     Sim3DDepthSurfaceTransform copy = t;
     if (bad == 0) copy.radial.matrix[0] = INFINITY;
     if (bad == 1) copy.radial.basis[0][0] = NAN;
@@ -2889,7 +3224,18 @@ static void TestSurfaceContracts(ArRenderDevice *device, SDL_Renderer *renderer)
     if (bad == 10) copy.ambient = -1;
     if (bad == 11) copy.diffuse = INFINITY;
     if (bad == 12) { copy.radial.reference_height = FLT_MAX; copy.radial.height_scale = FLT_MAX; }
+    if (bad == 13) copy.focus.feather=NAN;
+    if (bad == 14) copy.focus.feather=1e-10f;
+    if (bad == 15) copy.focus.dim=INFINITY;
+    if (bad == 16) copy.focus.dim=1.01f;
+    if (bad == 17) copy.focus.haze.a=-.1f;
+    if (bad == 18) copy.focus.haze.r=NAN;
+    if (bad == 19) copy.focus.clear_rect.x=FLT_MAX;
+    if (bad == 20) copy.focus.clear_rect.y=NAN;
+    if (bad == 21) copy.focus.clear_rect.w=-1;
+    if (bad == 22) copy.focus.clear_rect.h=17;
     CHECK(!Sim3DDepthPass_AppendSurfaceMesh(mesh, &copy, NULL, 0));
+    CHECK(Sim3DDepthPass_UpdateSurfaceMesh(mesh,source,1));
   }
   Sim3DDepthSphericalSample shadows[256];
   for (unsigned i = 0; i < 256; ++i) shadows[i] = (Sim3DDepthSphericalSample){
@@ -3150,6 +3496,7 @@ int main(void) {
   TestLinearModels(&render_device, renderer);
   TestRadialModels(&render_device, renderer);
   TestSurfaceGeometry(&render_device, renderer);
+  TestSurfaceFocus(&render_device, renderer);
   TestPartitionedSources(&render_device, renderer);
   TestSurfaceMaterials(&render_device, renderer);
   TestSurfaceShadowMapping(&render_device, renderer);
@@ -3157,6 +3504,7 @@ int main(void) {
   TestSurfaceOverlays(&render_device, renderer);
   TestSurfaceSelection(&render_device, renderer);
   TestSurfaceBatches(&render_device, renderer);
+  TestSurfaceMaterialTexture(&render_device, renderer);
   TestSurfaceCutouts(&render_device, renderer);
   TestSurfaceContracts(&render_device, renderer);
   TestRetainedWorldSurfaces(&render_device, renderer);

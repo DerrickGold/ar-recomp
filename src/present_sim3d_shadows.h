@@ -9,12 +9,6 @@
 /* SimShadowLight is declared in present_sim3d_internal.h: the world-map
  * renderer shares it. */
 
-/* Extra billboard scale on top of the perspective scale the lift produces.
- * Paired with the shadow's footprint shrink, a rising actor grows while its
- * shadow shrinks, which is what reads as height -- so the two live together. */
-float SimBillboardHeightPop(
-    ArRenderRectI source, float height_world, unsigned height_pop_pct);
-
 /* Where an object is actually drawn in world units, which is what its shadow
  * has to be cast from. */
 void SimObjectDrawnWorld(
@@ -28,6 +22,14 @@ PresentationOutcome DrawSimShadowMask(
     bool terrain_depth_receiver, ArRenderRectI source,
     ArRenderRectI viewport,
     const float matrix[16]);
+
+/* Prepare, but do not composite, a native-town XY mask for curved terrain.
+ * The borrowed texture remains valid until the next shadow preparation or
+ * resource reset. Must run before entering the world's shared depth pass. */
+PresentationOutcome PrepareSimTownShadowMask(
+    const FrameSlot *slot, bool virtual_height, bool soft_shadows,
+    ArRenderRectI source, ArRenderRectI viewport, const float matrix[16],
+    ArRenderTexture *out_mask);
 
 void PresentSim3DShadows_ResetResources(void);
 

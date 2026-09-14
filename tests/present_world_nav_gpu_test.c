@@ -2,6 +2,7 @@
  * atlases, SDL GPU shaders and shared D32 depth. No runner, live input,
  * settings persistence or save writes. Optional ROM/WRAM inputs are read-only. */
 #include <SDL3/SDL.h>
+#include <float.h>
 #include <math.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -12,17 +13,30 @@
 #include "present_internal.h"
 #include "present_sim3d_internal.h"
 #include "present_sim_globe.h"
+#include "present_sim_globe_mountains.h"
+#include "present_sim_globe_project.h"
+#include "present_sim_globe_terrain.h"
+#include "present_sim_globe_water.h"
 #include "present_world_nav_model_mesh.h"
 #include "render/render_output.h"
 #include "render/localized_text_presenter.h"
 #include "settings.h"
 #include "performance_metrics.h"
 #include "sim/sim3d_depth_pass.h"
+#include "sim/sim3d_camera_limits.h"
 #include "sim/sim3d_performance.h"
 #include "sim/sim_world_navigation_capture.h"
 #include "sim/sim_town_ground_art.h"
 #include "sim/sim_background_voxel_model_cache.h"
 #include "sim/sim_world_navigation_mountains.h"
+#include "sim/sim_world_navigation_terrain.h"
+#include "sim/sim_world_map_compose.h"
+#include "sim/sim_town_canvas.h"
+#include "sim/sim_background_voxels.h"
+#include "sim/sim_background_mountain_render.h"
+#include "present_sim3d_terrain.h"
+#include "present_sim3d_clouds.h"
+#include "session_fatal.h"
 
 enum { kWidth = 800, kHeight = 600, kRomBytes = 0x100000, kWramBytes = 0x20000 };
 #define CHECK(test) do { if (!(test)) { \
@@ -76,6 +90,11 @@ uint64_t HostClock_Nanoseconds(void) { return 0; }
 static const char *output_directory;
 static bool weather_sequence_requested;
 static bool town_matrix_requested;
+static bool sim_globe_prototype_requested;
+static const char *sim_town_snapshot;
+static bool sim_height_sweep_requested;
+static unsigned sim_town_radius_scale = 3;
+static unsigned sim_town_landscape_pct = kSimTownTerrainLandscapeHeightDefaultPct;
 static void ResizeTestOutput(SDL_Renderer *renderer, int width, int height);
 
 static uint32_t Pixel(const SDL_Surface *surface, int x, int y) {
@@ -1436,8 +1455,8 @@ static void TestWorldAtlasVersions(SDL_Renderer *renderer, const FrameSlot *slot
   puts("world atlas: 16 animation pairs, cold/incremental/revisited/reset images exact");
 }
 
-static SDL_Surface *RenderSimGlobe(SDL_Renderer *renderer, const FrameSlot *slot,
-    const Scene3DCamera *camera, ArRenderRectI source) {
+static SDL_Surface *RenderSimGlobePresentation(SDL_Renderer *renderer, const FrameSlot *slot,
+    const Scene3DCamera *camera, ArRenderRectI source, float radius_scale, bool sim_facades) {
   int width, height;
   CHECK(ArRenderDevice_GetOutputSize(&g_render_device,&width,&height));
   CHECK(ArRenderDevice_UseOutputCoordinates(&g_render_device));
@@ -1448,9 +1467,12 @@ static SDL_Surface *RenderSimGlobe(SDL_Renderer *renderer, const FrameSlot *slot
   float matrix[16];
   Scene3D_BuildViewProjection(camera,width,height,matrix);
   PresentSimGlobeView view = {0};
-  CHECK(PresentSimGlobeUnderlay(slot,source,(ArRenderRectI){0,0,width,height},camera,matrix,&view)
-      == kPresentationOutcome_Complete);
-  /* Placement is republished on retained-image hits for the later shroud. */
+  const ArRenderRectI viewport = {0,0,width,height};
+  const PresentationOutcome outcome = sim_facades
+      ? PresentSimGlobe_TestFacingTownScene(slot,source,viewport,camera,matrix,radius_scale,&view)
+      : PresentSimGlobe_TestTownScene(slot,source,viewport,camera,matrix,radius_scale,&view);
+  CHECK(outcome == kPresentationOutcome_Complete);
+  /* Placement is published each frame for the later shroud. */
   CHECK(view.map.town == slot->sim.town && view.map.radius > 0 && view.map.metric > 0);
   CHECK(view.map.origin_x == slot->sim.underlay_origin_tile_x);
   CHECK(view.map.origin_y == slot->sim.underlay_origin_tile_y);
@@ -1463,123 +1485,14 @@ static SDL_Surface *RenderSimGlobe(SDL_Renderer *renderer, const FrameSlot *slot
   return result;
 }
 
-static void TestSimGlobeImage(SDL_Renderer *renderer) {
-  enum { kStates = 23, kRepeats = 5 };
-  const char *grid = SDL_getenv("AR_SIM3D_WORLD_GPU_GRID");
-  char *saved_grid = grid ? SDL_strdup(grid) : NULL;
-  CHECK(!grid || saved_grid);
-  SDL_Surface *reference[kStates] = {0};
-  PerformanceSnapshot continuous[3];
-  uint8_t original[kSimWorldMapBytes], changed[kSimWorldMapBytes];
-  memcpy(original,SimWorldMap_Baseline(),sizeof(original));
-  FrameSlot *probe = malloc(sizeof(*probe)); CHECK(probe);
-  InitSyntheticBloodpoolArt(true);
-  for (int mode = 0; mode < 3; ++mode) {
-    PresentSimGlobe_TestRetainImages(mode != 0);
-    CHECK(!SDL_setenv_unsafe("AR_SIM3D_WORLD_GPU_GRID",mode == 1 ? "0" : "1",1));
-    PresentWorldNav_ResetResources();
-    ResizeTestOutput(renderer,kWidth,kHeight);
-    SimWorldMap_PublishBuiltTilemap(original);
-    InitSlot(probe);
-    probe->sim.town = 4;
-    int ox,oy; CHECK(SimWorldMap_OriginForTown(4,&ox,&oy));
-    probe->sim.underlay_origin_tile_x = ox; probe->sim.underlay_origin_tile_y = oy;
-    probe->sim.world_navigation_ground_detail = true;
-    probe->sim.world_navigation_models = true;
-    probe->sim.world_navigation_lighting = true;
-    probe->sim.world_navigation_towns.ground.enabled_town_mask = 2;
-    memset(probe->sim.world_navigation_towns.ground.terrain[1],8,32*32);
-    probe->sim.world_navigation_towns.object_count = 1;
-    probe->sim.world_navigation_towns.objects[0] = (SimBackgroundVoxelObject){
-      .town = 2, .kind = kSimBackgroundVoxel_Windmill, .cell_x = 20, .cell_y = 20,
-      .source_cells_w = 2, .source_cells_h = 2,
-      .footprint_cells_w = 2, .footprint_cells_d = 2,
-      .visual_state = kSimStructureVisualState_Finished};
-    Scene3DCamera camera = {-.75f,0,4.5f,.4f};
-    ArRenderRectI source = {0,0,360,224};
-    for (int state = 0; state < kStates; ++state) {
-      switch (state) {
-        case 1: probe->sim.game_frame += 12; break;
-        case 2: probe->sim.game_frame = 0; break; /* rewind */
-        case 3: probe->sim.light_azimuth_deg = 30; break;
-        case 4: probe->sim.world_navigation_lighting = false; break;
-        case 5: probe->sim.world_navigation_towns.objects[0].cell_x++; break;
-        case 6: probe->sim.world_navigation_models = false; break;
-        case 7: probe->sim.world_navigation_models = true;
-                probe->sim.background_voxel_style = kSimBackgroundVoxelStyle_Basic; break;
-        case 8: probe->sim.height_scale_x100 = 150; break;
-        case 9: probe->sim.landscape_height_pct = 50; break;
-        case 10: probe->sim.world_navigation_mountains = true;
-                 probe->sim.world_navigation_towns.ground.terrain[1][0] = 0x89; break;
-        case 11: camera.tilt_y = .25f; break;
-        case 12: probe->sim.camera_x = 16; probe->sim.camera_y = 24; break;
-        case 13: source.x = -16; source.w = 384; break;
-        case 14: ResizeTestOutput(renderer,640,480); break;
-        case 15: probe->sim.effective_features |= kSimFeature_CullHaze;
-                 probe->sim.underlay_haze_pct = 40; probe->sim.cull_dim_pct = 35; break;
-        case 16: probe->sim.underlay_haze_pct = 100; break;
-        case 17: probe->sim.effective_features &= ~kSimFeature_CullHaze; break;
-        case 18: probe->sim.town = 1;
-                 CHECK(SimWorldMap_OriginForTown(1,&ox,&oy));
-                 probe->sim.underlay_origin_tile_x = ox; probe->sim.underlay_origin_tile_y = oy; break;
-        case 19: PresentWorldNav_ResetResources(); break;
-        case 20: memcpy(changed,original,sizeof(changed));
-                 changed[40*128+40] ^= 1;
-                 SimWorldMap_PublishBuiltTilemap(changed);
-                 probe->sim.underlay_serial = SimWorldMap_Serial(); break;
-        case 21: probe->sim.world_navigation_towns.object_count = 0; break;
-        case 22: probe->sim.world_navigation_towns.ground.enabled_town_mask = 0; break;
-      }
-      for (int repeat = 0; repeat < kRepeats; ++repeat) {
-        if (repeat == 3) PerformanceMetrics_Configure(true,false);
-        SDL_Surface *actual = RenderSimGlobe(renderer,probe,&camera,source);
-        if (!mode && !repeat) reference[state] = actual;
-        else { CHECK(Differences(actual,reference[state]) == 0); SDL_DestroySurface(actual); }
-        if (repeat >= 3) PerformanceMetrics_PresentCompleted(
-            1 + (repeat-3)*UINT64_C(1000000000));
-      }
-      PerformanceSnapshot measured; PerformanceMetrics_Snapshot(&measured);
-      CHECK(measured.ready);
-      /* Prove reuse actually bypasses scene submission, not merely that two
-       * versions of the same direct rendering happen to match. */
-      if (mode) CHECK(measured.counts[kPerformanceCount_Vertices] <= 8);
-      else CHECK(measured.counts[kPerformanceCount_Vertices] > 20000);
-      if (state == 0) printf("SIM globe retained image mode=%d: warm vertices=%.0f draws=%.0f\n",
-          mode,measured.counts[kPerformanceCount_Vertices],measured.counts[kPerformanceCount_Draws]);
-      PerformanceMetrics_Configure(false,false);
-    }
-    /* A stationary camera does not justify copying an image when lighting
-     * and animated models change every frame. Allow the first failed
-     * prediction, then require identical direct-path draw traffic. */
-    for (int frame = 0; frame < 8; ++frame) {
-      probe->sim.world_navigation_lighting = true;
-      probe->sim.light_azimuth_deg = frame*15;
-      probe->sim.game_frame += 12;
-      if (frame == 2) PerformanceMetrics_Configure(true,false);
-      SDL_Surface *actual = RenderSimGlobe(renderer,probe,&camera,source);
-      SDL_DestroySurface(actual);
-      if (frame >= 2) PerformanceMetrics_PresentCompleted(
-          1 + (frame-2)*UINT64_C(200000000));
-    }
-    PerformanceMetrics_Snapshot(&continuous[mode]);
-    CHECK(continuous[mode].ready);
-    PerformanceMetrics_Configure(false,false);
-  }
-  CHECK(continuous[0].counts[kPerformanceCount_Draws] == continuous[1].counts[kPerformanceCount_Draws]);
-  CHECK(continuous[0].counts[kPerformanceCount_Vertices] == continuous[1].counts[kPerformanceCount_Vertices]);
-  CHECK(continuous[0].counts[kPerformanceCount_Draws] == continuous[2].counts[kPerformanceCount_Draws]);
-  CHECK(continuous[0].counts[kPerformanceCount_Vertices] == continuous[2].counts[kPerformanceCount_Vertices]);
-  for (int state = 0; state < kStates; ++state) SDL_DestroySurface(reference[state]);
-  free(probe);
-  PresentWorldNav_ResetResources();
-  SimWorldMap_PublishBuiltTilemap(original);
-  SimTownGroundArt_Shutdown();
-  ResizeTestOutput(renderer,kWidth,kHeight);
-  PresentSimGlobe_TestRetainImages(true);
-  if (saved_grid) CHECK(!SDL_setenv_unsafe("AR_SIM3D_WORLD_GPU_GRID",saved_grid,1));
-  else CHECK(!SDL_unsetenv_unsafe("AR_SIM3D_WORLD_GPU_GRID"));
-  SDL_free(saved_grid);
-  puts("SIM globe image cache: exact direct/cached pixels across 23 invalidation states, five repeats, mutable/versioned atlases; continuous-change scene traffic unchanged");
+static SDL_Surface *RenderSimGlobeScene(SDL_Renderer *renderer, const FrameSlot *slot,
+    const Scene3DCamera *camera, ArRenderRectI source, float radius_scale) {
+  return RenderSimGlobePresentation(renderer,slot,camera,source,radius_scale,false);
+}
+
+static SDL_Surface *RenderSimGlobe(SDL_Renderer *renderer, const FrameSlot *slot,
+    const Scene3DCamera *camera, ArRenderRectI source) {
+  return RenderSimGlobeScene(renderer,slot,camera,source,3);
 }
 
 static void TestNavigationZoomEntry(SDL_Renderer *renderer) {
@@ -1638,14 +1551,14 @@ static void TestNavigationZoomEntry(SDL_Renderer *renderer) {
   CHECK(Differences(far, near) > 100);
   SDL_DestroySurface(far); SDL_DestroySurface(near);
   /* More than one upload of visible terrain, plus two equally large sets
-   * which belong to the active facade or lie beyond the connected window. */
+   * beyond the bounded SIM neighbourhood on either side. */
   enum { kMountainCopies = 65537 };
   SimWorldNavigationMountainFace *faces = calloc(kMountainCopies * 3, sizeof(*faces));
   CHECK(faces);
   for (unsigned group = 0; group < 3; ++group) {
     SimWorldNavigationMountainFace face = {.town = group == 0 ? town->sim.town : 2};
     for (unsigned p = 0; p < 4; ++p) {
-      face.x[p] = ox - (group == 1 ? 40 : 2) + ((p == 1 || p == 2) ? .5f : 0);
+      face.x[p] = ox + (group == 0 ? 80 : group == 1 ? -40 : -2) + ((p == 1 || p == 2) ? .5f : 0);
       face.y[p] = oy + 16 + (p >= 2 ? .5f : 0);
       face.z[p] = .1f; face.brightness[p] = 255;
       face.uv[p] = (SimBackgroundMountainMeshUV){.25f,.25f};
@@ -1661,6 +1574,285 @@ static void TestNavigationZoomEntry(SDL_Renderer *renderer) {
   PresentWorldNav_ResetResources();
   ResizeTestOutput(renderer, kWidth, kHeight);
   puts("close-up navigation -> SIM: 96 animated buildings, eight zoom/LOD changes, cold/transition pixels exact");
+}
+
+static void TestContinuousTownScene(SDL_Renderer *renderer) {
+#if AR_SIM3D_TERRAIN_ELEVATION
+  /* Every native cliff field must fit the top/side receiver partition,
+   * including fractional clipped cliff endpoints under fused arithmetic. */
+  const unsigned terrain_heights[] = {0,40,100,150};
+  for (uint8_t town = 1; town <= kSimTownCount; ++town) {
+    int ox,oy; CHECK(SimWorldMap_OriginForTown(town,&ox,&oy));
+    for (unsigned h = 0; h < sizeof(terrain_heights)/sizeof(terrain_heights[0]); ++h) {
+      SimGlobeMapping map;
+      CHECK(SimGlobeMapping_Build(town,ox,oy,288,0,terrain_heights[h]/100.0f,&map));
+      CHECK(PresentSimGlobeTerrain_Prepare(&map,SimWorldMap_GeographySerial()));
+      CHECK(PresentSimGlobeTerrain_Prepare(&map,SimWorldMap_GeographySerial()));
+      PresentSimGlobeTerrain_Reset();
+    }
+  }
+  puts("native curved receivers: all six towns at 0/40/100/150% prepare and reuse PASS");
+#endif
+  FrameSlot *slot = malloc(sizeof(*slot)); CHECK(slot);
+  InitSlot(slot);
+  slot->sim.view = kSimView_Enhanced;
+  slot->sim.town = 2;
+  slot->sim.underlay_origin_tile_x = slot->sim.underlay_origin_tile_y = 48;
+  slot->sim.underlay_screen_x0 = 52;
+  slot->sim.camera_x = 128; slot->sim.camera_y = 144;
+  slot->sim.world_navigation_lighting = true;
+  slot->sim.world_navigation_towns.object_count = 1;
+  slot->sim.world_navigation_towns.objects[0] = (SimBackgroundVoxelObject){
+      .town = 2, .kind = kSimBackgroundVoxel_Cathedral,
+      .cell_x = 15, .cell_y = 15, .source_cells_w = 2, .source_cells_h = 2,
+      .footprint_cells_w = 2, .footprint_cells_d = 2,
+      .visual_state = kSimStructureVisualState_Finished};
+  const Scene3DCamera camera = {-.575f,0,3,.4f};
+  const ArRenderRectI source = {0,0,360,224}, viewport = {0,0,kWidth,kHeight};
+  float matrix[16]; Scene3D_BuildViewProjection(&camera,kWidth,kHeight,matrix);
+  CHECK(PresentSimGlobe_TestTownScene(slot,source,viewport,&camera,matrix,0,NULL)
+      == kPresentationOutcome_CoreFailure);
+  CHECK(PresentSimGlobe_TestTownScene(slot,source,viewport,&camera,matrix,NAN,NULL)
+      == kPresentationOutcome_CoreFailure);
+  CHECK(PresentSimGlobe_TestTownScene(slot,source,viewport,&camera,matrix,5,NULL)
+      == kPresentationOutcome_CoreFailure);
+  slot->sim.background_voxel_detail = kSimBackgroundVoxelDetail_Count;
+  CHECK(PresentSimGlobe_TestTownScene(slot,source,viewport,&camera,matrix,2,NULL)
+      == kPresentationOutcome_CoreFailure);
+  slot->sim.background_voxel_detail = kSimBackgroundVoxelDetail_Ultra;
+  slot->sim.world_navigation_models = false;
+  SDL_Surface *without = RenderSimGlobeScene(renderer,slot,&camera,source,2);
+  slot->sim.world_navigation_models = true;
+  SDL_Surface *high = RenderSimGlobeScene(renderer,slot,&camera,source,2);
+  CHECK(Differences(without,high) == 0); /* Navigation cannot remove the active SIM model. */
+  SDL_DestroySurface(without);
+  for (unsigned repeat = 0; repeat < 4; ++repeat) {
+    SDL_Surface *cached = RenderSimGlobeScene(renderer,slot,&camera,source,2);
+    CHECK(Differences(high,cached) == 0);
+    SDL_DestroySurface(cached);
+  }
+  slot->sim.background_voxel_detail = kSimBackgroundVoxelDetail_Low;
+  SDL_Surface *low = RenderSimGlobeScene(renderer,slot,&camera,source,2);
+  CHECK(Differences(high,low) > 20);
+  SDL_DestroySurface(low);
+  slot->sim.background_voxel_detail = kSimBackgroundVoxelDetail_Ultra;
+  SDL_Surface *restored = RenderSimGlobeScene(renderer,slot,&camera,source,2);
+  CHECK(Differences(high,restored) == 0);
+  SDL_DestroySurface(restored);
+  SDL_Surface *larger = RenderSimGlobeScene(renderer,slot,&camera,source,3);
+  CHECK(Differences(high,larger) > 100);
+  SDL_DestroySurface(larger);
+  restored = RenderSimGlobeScene(renderer,slot,&camera,source,2);
+  CHECK(Differences(high,restored) == 0);
+  SDL_DestroySurface(restored); SDL_DestroySurface(high);
+  /* A camera-first art-direction pass must not turn into per-frame source
+   * projection/republication. Count traffic, not wall time or GPU readback. */
+  PerformanceMetrics_Configure(true,false);
+  for (unsigned frame = 0; frame < 6; ++frame) {
+    Scene3DCamera moving = camera;
+    moving.tilt_x -= frame*.08f;
+    SDL_Surface *image = RenderSimGlobeScene(renderer,slot,&moving,source,2);
+    SDL_DestroySurface(image);
+    PerformanceMetrics_PresentCompleted(1+frame*UINT64_C(200000000));
+  }
+  PerformanceSnapshot traffic; PerformanceMetrics_Snapshot(&traffic);
+  CHECK(traffic.ready && traffic.counts[kPerformanceCount_GeometryPublish] == 0);
+  CHECK(traffic.counts[kPerformanceCount_Vertices] > 0);
+  PerformanceMetrics_Configure(false,false);
+  free(slot);
+  PresentWorldNav_ResetResources();
+  puts("continuous town scene: active cathedral present, Low/Ultra selection, direct/cache/revisited radius exact; camera motion republishes no geometry; invalid inputs rejected");
+}
+
+static SDL_Surface *RenderCapturedFacingModels(SDL_Renderer *renderer,
+    const WorldNavigationModelSource *sources, size_t count,
+    const WorldNavigationModelSourceStyle *style,
+    const SimBackgroundProjectionAxis axes[kSimBackgroundVoxelKindCount],
+    const float matrix[16], double *uploaded_bytes) {
+  PerformanceMetrics_Configure(false,false);
+  PerformanceMetrics_Configure(true,false);
+  CHECK(Sim3DDepthPass_Begin(&g_render_device,kWidth,kHeight,kArRenderFilter_Nearest));
+  CHECK(WorldNavigationModelMesh_DrawFacingTown(sources,count,style,
+      kSimBackgroundVoxelShading_MaterialAware,axes,matrix,0));
+  ArRenderTexture result = Sim3DDepthPass_Submit(&g_render_device,ArRenderTexture_Invalid());
+  CHECK(ArRenderTexture_IsValid(result));
+  CHECK(ArRenderDevice_SetRenderTarget(&g_render_device,result));
+  SDL_Surface *raw = SDL_RenderReadPixels(renderer,NULL); CHECK(raw);
+  SDL_Surface *image = SDL_ConvertSurface(raw,SDL_PIXELFORMAT_ARGB8888); CHECK(image);
+  SDL_DestroySurface(raw);
+  CHECK(ArRenderDevice_SetRenderTarget(&g_render_device,ArRenderTexture_Invalid()));
+  PerformanceMetrics_PresentCompleted(1);
+  PerformanceMetrics_PresentCompleted(UINT64_C(1000000001));
+  PerformanceSnapshot traffic; PerformanceMetrics_Snapshot(&traffic); CHECK(traffic.ready);
+  *uploaded_bytes = traffic.counts[kPerformanceCount_DepthUploadBytes]*2;
+  PerformanceMetrics_Configure(false,false);
+  return image;
+}
+
+static void TestCapturedFacingMotion(SDL_Renderer *renderer, const FrameSlot *slot,
+    const Scene3DCamera *camera, ArRenderRectI source) {
+  float matrix[16]; Scene3D_BuildViewProjection(camera,kWidth,kHeight,matrix);
+  PresentSimGlobeView view;
+  CHECK(PresentSimGlobe_TestFacingTownScene(slot,source,(ArRenderRectI){0,0,kWidth,kHeight},
+      camera,matrix,3,&view) == kPresentationOutcome_Complete);
+  const SimBackgroundVoxelRenderParams params = SimVoxelRenderParams(
+      slot,source,(ArRenderRectI){0,0,kWidth,kHeight},matrix);
+  SimBackgroundProjectionAxis axes[kSimBackgroundVoxelKindCount];
+  SimBackgroundVoxelProject_ResolveAxes(&params,axes);
+  enum { kStatic = 24, kCount = kStatic+2 };
+  WorldNavigationModelSource sources[kCount] = {0};
+  for (unsigned i = 0; i < kCount; ++i) {
+    const unsigned x = 8+(i%6)*3, y = 8+(i/6)*3;
+    sources[i] = (WorldNavigationModelSource){
+      .object = {.town=2,.kind=i < kStatic ? kSimBackgroundVoxel_Cathedral : kSimBackgroundVoxel_Windmill,
+        .cell_x=x,.cell_y=y,.source_cells_w=2,.source_cells_h=2,
+        .footprint_cells_w=2,.footprint_cells_d=2,.visual_state=kSimStructureVisualState_Finished},
+      .detail=kSimBackgroundVoxelDetail_Ultra,.object_index=i,
+      .source_x=(view.map.origin_x+x)*8,.source_y=(view.map.origin_y+y)*8,
+      .centre_x=16,.centre_y=16,.anchor_height=4};
+  }
+  sources[kCount-1].object.flags = kSimBackgroundVoxel_UnderConstruction;
+  sources[kCount-1].object.animation_phase = 1;
+  WorldNavigationModelSourceStyle style = {.embedding=view.map,.surface_revision=SimWorldMap_GeographySerial(),
+    .chart_radius_tiles=view.map.chart_radius,.tile_world=1/view.map.metric,
+    .height_percent=100,.light_azimuth=0,.light_elevation=85,
+    .style=kSimBackgroundVoxelStyle_Varied,.lighting=true,.captured_poses=true};
+  WorldNavigationModelMesh_Reset();
+  double cold_bytes, motion_bytes, held_bytes;
+  SDL_Surface *first = RenderCapturedFacingModels(renderer,sources,kCount,&style,axes,view.matrix,&cold_bytes);
+  CHECK(cold_bytes > 0);
+  for (unsigned phase = 1; phase <= 3; ++phase) {
+    sources[kStatic].object.animation_phase = phase%3;
+    /* The adjacent scaffold stays at phase 1, not the moving rotor's phase. */
+    SDL_Surface *warm = RenderCapturedFacingModels(renderer,sources,kCount,&style,axes,view.matrix,&motion_bytes);
+    CHECK(motion_bytes > 0 && motion_bytes < cold_bytes*.20);
+    SDL_Surface *held = RenderCapturedFacingModels(renderer,sources,kCount,&style,axes,view.matrix,&held_bytes);
+    CHECK(held_bytes == 0 && Differences(warm,held) == 0); SDL_DestroySurface(held);
+    WorldNavigationModelMesh_Reset();
+    SDL_Surface *cold = RenderCapturedFacingModels(renderer,sources,kCount,&style,axes,view.matrix,&cold_bytes);
+    CHECK(Differences(warm,cold) == 0);
+    CHECK(phase == 3 ? Differences(first,warm) == 0 : Differences(first,warm) > 0);
+    SDL_DestroySurface(warm); SDL_DestroySurface(cold);
+  }
+  printf("captured facing motion: static + independently phased windmills exact; cold %.0f bytes, rotor tick %.0f bytes, held %.0f bytes\n",
+      cold_bytes,motion_bytes,held_bytes);
+  SDL_DestroySurface(first); WorldNavigationModelMesh_Reset();
+}
+
+static void TestFacingTownScene(SDL_Renderer *renderer) {
+  FrameSlot *slot = malloc(sizeof(*slot)); CHECK(slot);
+  InitSlot(slot);
+  slot->sim.view = kSimView_Enhanced;
+  slot->sim.town = 2;
+  int ox, oy; CHECK(SimWorldMap_OriginForTown(2,&ox,&oy));
+  slot->sim.underlay_origin_tile_x = ox; slot->sim.underlay_origin_tile_y = oy;
+  slot->sim.underlay_screen_x0 = 52;
+  slot->sim.camera_x = 128; slot->sim.camera_y = 144;
+  slot->sim.background_voxel_detail = kSimBackgroundVoxelDetail_Ultra;
+  slot->sim.background_voxel_facing = kSimBackgroundVoxelFacing_PerModel;
+  slot->sim.background_voxel_shading = kSimBackgroundVoxelShading_MaterialAware;
+  slot->sim.world_navigation_lighting = true;
+  slot->sim.world_navigation_models = true;
+  slot->sim.world_navigation_towns.object_count = 2;
+  slot->sim.world_navigation_towns.objects[0] = (SimBackgroundVoxelObject){
+      .town = 2, .kind = kSimBackgroundVoxel_Cathedral,
+      .cell_x = 13, .cell_y = 15, .source_cells_w = 2, .source_cells_h = 2,
+      .footprint_cells_w = 2, .footprint_cells_d = 2,
+      .visual_state = kSimStructureVisualState_Finished};
+  slot->sim.world_navigation_towns.objects[1] = slot->sim.world_navigation_towns.objects[0];
+  slot->sim.world_navigation_towns.objects[1].kind = kSimBackgroundVoxel_Windmill;
+  slot->sim.world_navigation_towns.objects[1].cell_x = 18;
+  const Scene3DCamera camera = {-.75f,0,3,.4f};
+  const ArRenderRectI source = {0,0,360,224};
+  const ArRenderRectI viewport = {0,0,kWidth,kHeight};
+  float matrix[16]; Scene3D_BuildViewProjection(&camera,kWidth,kHeight,matrix);
+  slot->sim.background_voxel_facing = kSimBackgroundVoxelFacing_Count;
+  CHECK(PresentSimGlobe_TestFacingTownScene(slot,source,viewport,&camera,matrix,2,NULL)
+      == kPresentationOutcome_CoreFailure);
+  slot->sim.background_voxel_facing = kSimBackgroundVoxelFacing_PerModel;
+  slot->sim.background_voxel_shading = kSimBackgroundVoxelShading_Count;
+  CHECK(PresentSimGlobe_TestFacingTownScene(slot,source,viewport,&camera,matrix,2,NULL)
+      == kPresentationOutcome_CoreFailure);
+  slot->sim.background_voxel_shading = kSimBackgroundVoxelShading_MaterialAware;
+  TestCapturedFacingMotion(renderer,slot,&camera,source);
+  SDL_Surface *raw = RenderSimGlobeScene(renderer,slot,&camera,source,2);
+  SDL_Surface *facing = RenderSimGlobePresentation(renderer,slot,&camera,source,2,true);
+  CHECK(Differences(raw,facing) > 100);
+  SaveImage(raw,"synthetic-town-radial");
+  SaveImage(facing,"synthetic-town-facades");
+  for (unsigned repeat = 0; repeat < 4; ++repeat) {
+    SDL_Surface *held = RenderSimGlobePresentation(renderer,slot,&camera,source,2,true);
+    CHECK(Differences(facing,held) == 0); SDL_DestroySurface(held);
+  }
+  slot->sim.background_voxel_facing = kSimBackgroundVoxelFacing_Shared;
+  SDL_Surface *standard = RenderSimGlobePresentation(renderer,slot,&camera,source,2,true);
+  CHECK(Differences(facing,standard) > 10); SDL_DestroySurface(standard);
+  slot->sim.background_voxel_facing = kSimBackgroundVoxelFacing_PerModel;
+  slot->sim.background_voxel_shading = kSimBackgroundVoxelShading_Basic;
+  SDL_Surface *basic = RenderSimGlobePresentation(renderer,slot,&camera,source,2,true);
+  CHECK(Differences(facing,basic) > 10); SDL_DestroySurface(basic);
+  slot->sim.background_voxel_shading = kSimBackgroundVoxelShading_MaterialAware;
+  SDL_Surface *restored = RenderSimGlobePresentation(renderer,slot,&camera,source,2,true);
+  CHECK(Differences(facing,restored) == 0); SDL_DestroySurface(restored);
+  slot->sim.world_navigation_lighting = false;
+  SDL_Surface *unlit = RenderSimGlobePresentation(renderer,slot,&camera,source,2,true);
+  CHECK(Differences(facing,unlit) == 0); SDL_DestroySurface(unlit);
+  slot->sim.world_navigation_lighting = true;
+  restored = RenderSimGlobePresentation(renderer,slot,&camera,source,2,true);
+  CHECK(Differences(facing,restored) == 0); SDL_DestroySurface(restored);
+  PerformanceMetrics_Configure(true,false);
+  const uint64_t first_frame = slot->sim.game_frame;
+  for (unsigned frame = 0; frame < 6; ++frame) {
+    Scene3DCamera moving = camera;
+    moving.tilt_x -= frame*.025f; moving.tilt_y += frame*.04f;
+    slot->sim.game_frame = first_frame+frame*12;
+    SDL_Surface *image = RenderSimGlobePresentation(renderer,slot,&moving,source,2,true);
+    SDL_DestroySurface(image);
+    PerformanceMetrics_PresentCompleted(1+frame*UINT64_C(200000000));
+  }
+  PerformanceSnapshot traffic; PerformanceMetrics_Snapshot(&traffic);
+  CHECK(traffic.ready && traffic.counts[kPerformanceCount_GeometryPublish] == 0);
+  CHECK(traffic.counts[kPerformanceCount_Vertices] > 0);
+  PerformanceMetrics_Configure(false,false);
+  slot->sim.game_frame = first_frame+12;
+  SDL_Surface *animated = RenderSimGlobePresentation(renderer,slot,&camera,source,2,true);
+  CHECK(Differences(facing,animated) > 10); SDL_DestroySurface(animated);
+  slot->sim.game_frame = first_frame;
+  restored = RenderSimGlobePresentation(renderer,slot,&camera,source,2,true);
+  CHECK(Differences(facing,restored) == 0); SDL_DestroySurface(restored);
+  restored = RenderSimGlobeScene(renderer,slot,&camera,source,2);
+  CHECK(Differences(raw,restored) == 0); SDL_DestroySurface(restored);
+  SDL_DestroySurface(raw); SDL_DestroySurface(facing);
+  /* A bridge stays on the radial path, even when it belongs to this town. */
+  slot->sim.world_navigation_towns.object_count = 1;
+  slot->sim.world_navigation_towns.objects[0].kind = kSimBackgroundVoxel_Bridge;
+  slot->sim.world_navigation_towns.objects[0].bridge_axis = kSimBackgroundBridgeAxis_EastWest;
+  slot->sim.world_navigation_towns.objects[0].bridge_bank_a_x = 12;
+  slot->sim.world_navigation_towns.objects[0].bridge_bank_b_x = 16;
+  raw = RenderSimGlobeScene(renderer,slot,&camera,source,2);
+  facing = RenderSimGlobePresentation(renderer,slot,&camera,source,2,true);
+  CHECK(Differences(raw,facing) == 0);
+  SDL_DestroySurface(raw); SDL_DestroySurface(facing);
+  /* A visible cathedral just across the western border belongs to Kasandora,
+   * not active Bloodpool. Neither active-town detail nor facades may alter it. */
+  slot->sim.world_navigation_towns.objects[0] = (SimBackgroundVoxelObject){
+      .town = 3, .kind = kSimBackgroundVoxel_Cathedral,
+      .cell_x = 29, .cell_y = 1, .source_cells_w = 2, .source_cells_h = 2,
+      .footprint_cells_w = 2, .footprint_cells_d = 2,
+      .visual_state = kSimStructureVisualState_Finished};
+  const Scene3DCamera wide = {-.75f,0,4.5f,.4f};
+  raw = RenderSimGlobeScene(renderer,slot,&wide,source,2);
+  facing = RenderSimGlobePresentation(renderer,slot,&wide,source,2,true);
+  CHECK(Differences(raw,facing) == 0); SDL_DestroySurface(facing);
+  slot->sim.background_voxel_detail = kSimBackgroundVoxelDetail_Low;
+  facing = RenderSimGlobePresentation(renderer,slot,&wide,source,2,true);
+  CHECK(Differences(raw,facing) == 0); SDL_DestroySurface(facing);
+  slot->sim.world_navigation_models = false;
+  SDL_Surface *ground = RenderSimGlobePresentation(renderer,slot,&wide,source,2,true);
+  CHECK(Differences(raw,ground) > 20);
+  SDL_DestroySurface(raw); SDL_DestroySurface(ground);
+  PresentWorldNav_ResetResources(); free(slot);
+  puts("active town facades: SIM shading/facing, animated windmill, geometric bridges, Low unchanged neighbours, direct/cache/rewind parity; camera and pose changes republish no geometry");
 }
 
 static void TestSynthetic(SDL_Renderer *renderer) {
@@ -1847,8 +2039,9 @@ static void TestSynthetic(SDL_Renderer *renderer) {
   TestTallModelViewport(renderer, slot);
   TestGpuGridRevisions(renderer, slot);
   TestWorldAtlasVersions(renderer, slot);
-  TestSimGlobeImage(renderer);
   TestNavigationZoomEntry(renderer);
+  TestContinuousTownScene(renderer);
+  TestFacingTownScene(renderer);
   free(slot);
   PresentWorldNav_ResetResources();
   Sim3DDepthPass_Reset(&g_render_device);
@@ -2208,12 +2401,10 @@ static void TestCapturedSimGlobe(SDL_Renderer *renderer, FrameSlot *navigation) 
       PresentSimGlobe_ClampCamera(&camera);
       const ArRenderRectI source = {0,0,360,224};
       probe->sim.world_navigation_relief = views[view].relief;
-      PresentSimGlobe_TestRetainImages(false);
       SDL_Surface *direct = RenderSimGlobe(renderer,probe,&camera,source);
       char name[80];
       snprintf(name,sizeof(name),"captured-sim-underlay-town-%u-view-%u",town,view);
       SaveImage(direct,name);
-      PresentSimGlobe_TestRetainImages(true);
       for (int repeat = 0; repeat < 4; ++repeat) {
         SDL_Surface *cached = RenderSimGlobe(renderer,probe,&camera,source);
         CHECK(Differences(direct,cached) == 0);
@@ -2231,11 +2422,582 @@ static void TestCapturedSimGlobe(SDL_Renderer *renderer, FrameSlot *navigation) 
   puts("SIM connected world: six native towns, eight default/low-angle/bounded/relief-off views, direct-cache parity and navigation return exact");
 }
 
+static void CaptureSimGlobePrototype(SDL_Renderer *renderer, FrameSlot *navigation) {
+  FrameSlot *probe = malloc(sizeof(*probe)), *unchanged = malloc(sizeof(*unchanged));
+  CHECK(probe && unchanged);
+  const uint32_t serial = SimWorldMap_Serial();
+  SDL_Surface *navigation_before = Render(renderer,navigation,NULL);
+  const ArRenderRectI source = {0,0,360,224};
+  const float pitches[] = {-.575f,-1.15f};
+  for (uint8_t town = 1; town <= kSimTownCount; ++town) {
+    *probe = *navigation;
+    probe->sim.view = kSimView_Enhanced;
+    probe->sim.town = town;
+    int ox, oy; CHECK(SimWorldMap_OriginForTown(town,&ox,&oy));
+    probe->sim.underlay_origin_tile_x = ox;
+    probe->sim.underlay_origin_tile_y = oy;
+    probe->sim.underlay_screen_x0 = 52;
+    probe->sim.camera_x = 128; probe->sim.camera_y = 144;
+    probe->sim.background_voxel_detail = kSimBackgroundVoxelDetail_Ultra;
+    for (unsigned view = 0; view < sizeof(pitches)/sizeof(*pitches); ++view) {
+      Scene3DCamera camera = {pitches[view],0,4.5f,.4f};
+      SDL_Surface *underlay = RenderSimGlobe(renderer,probe,&camera,source);
+      SDL_Surface *radii[3] = {0};
+      for (unsigned radius = 1; radius <= 3; ++radius) {
+        *unchanged = *probe;
+        SDL_Surface *direct = RenderSimGlobeScene(renderer,probe,&camera,source,radius);
+        char name[96];
+        snprintf(name,sizeof(name),"globe-town-%u-view-%u-radius-%u",town,view,radius);
+        SaveImage(direct,name);
+        for (unsigned repeat = 0; repeat < 4; ++repeat) {
+          SDL_Surface *cached = RenderSimGlobeScene(renderer,probe,&camera,source,radius);
+          CHECK(Differences(direct,cached) == 0);
+          SDL_DestroySurface(cached);
+        }
+        CHECK(!memcmp(probe,unchanged,sizeof(*probe)));
+        radii[radius-1] = direct;
+      }
+      CHECK(Differences(radii[0],radii[1]) > 100);
+      CHECK(Differences(radii[1],radii[2]) > 100);
+      /* Revisit both a smaller radius and the standard 3x globe, without a
+       * reset. Sources and mountain joins must agree. */
+      SDL_Surface *revisit = RenderSimGlobeScene(renderer,probe,&camera,source,1);
+      CHECK(Differences(radii[0],revisit) == 0);
+      SDL_DestroySurface(revisit);
+      SDL_Surface *restored = RenderSimGlobe(renderer,probe,&camera,source);
+      CHECK(Differences(underlay,restored) == 0);
+      SDL_DestroySurface(restored); SDL_DestroySurface(underlay);
+      for (unsigned i = 0; i < 3; ++i) SDL_DestroySurface(radii[i]);
+    }
+    /* Camera-only A/B: keep radius, scale and the authored models identical.
+     * Do not add camera-facing facade deformation before judging this base. */
+    const int camera_pitches[] = {-575,-750,-900,-1050};
+    for (unsigned angle = 0; angle < sizeof(camera_pitches)/sizeof(*camera_pitches); ++angle) {
+      const Scene3DCamera camera = {camera_pitches[angle]/1000.0f,0,4.5f,.4f};
+      *unchanged = *probe;
+      SDL_Surface *direct = RenderSimGlobeScene(renderer,probe,&camera,source,2);
+      char name[96];
+      snprintf(name,sizeof(name),"globe-town-%u-camera-%d-radius-2",town,-camera_pitches[angle]);
+      SaveImage(direct,name);
+      for (unsigned repeat = 0; repeat < 4; ++repeat) {
+        SDL_Surface *held = RenderSimGlobeScene(renderer,probe,&camera,source,2);
+        CHECK(Differences(direct,held) == 0);
+        SDL_DestroySurface(held);
+      }
+      CHECK(!memcmp(probe,unchanged,sizeof(*probe)));
+      SDL_DestroySurface(direct);
+    }
+    /* Approved pitch, identical camera and radius: raw radial models versus
+     * active-town SIM facades/material shading. Neighbours remain Low. */
+    const Scene3DCamera camera = {-.75f,0,4.5f,.4f};
+    probe->sim.background_voxel_facing = kSimBackgroundVoxelFacing_PerModel;
+    probe->sim.background_voxel_shading = kSimBackgroundVoxelShading_MaterialAware;
+    *unchanged = *probe;
+    SDL_Surface *facing = RenderSimGlobePresentation(renderer,probe,&camera,source,2,true);
+    char name[96];
+    snprintf(name,sizeof(name),"globe-town-%u-camera-750-radius-2-sim-facades",town);
+    SaveImage(facing,name);
+    for (unsigned repeat = 0; repeat < 4; ++repeat) {
+      SDL_Surface *held = RenderSimGlobePresentation(renderer,probe,&camera,source,2,true);
+      CHECK(Differences(facing,held) == 0); SDL_DestroySurface(held);
+    }
+    CHECK(!memcmp(probe,unchanged,sizeof(*probe)));
+    SDL_DestroySurface(facing);
+  }
+  SDL_Surface *navigation_after = Render(renderer,navigation,NULL);
+  CHECK(Differences(navigation_before,navigation_after) == 0);
+  CHECK(SimWorldMap_Serial() == serial);
+  SDL_DestroySurface(navigation_before); SDL_DestroySurface(navigation_after);
+  free(probe); free(unchanged);
+  puts("globe town prototype: six towns, two SIM pitches, three radii, four camera-only variants; direct/cache/revisited/navigation parity; captures unchanged");
+}
+
+static void TestCurvedProjectionWithView(const PresentSimGlobeView *view,
+    ArRenderRectI source, ArRenderRectI viewport, const Scene3DCamera *camera) {
+  PresentSimGlobeProjection projection;
+  CHECK(PresentSimGlobeProject_Build(&view->map,view->matrix,source,viewport,
+      Scene3D_AutoFitDistance(camera->fov_y),&projection));
+  /* Sample actual owned cell corners (both sides of cliffs), using precisely
+   * the same registered floor and radial encoding as the GPU terrain source. */
+  for (int y = 0; y < 32; y += 7) for (int x = 0; x < 32; x += 7) {
+    float floors[4];
+    CHECK(SimWorldNavigationTerrain_TownCellCorners(view->map.town,x,y,floors));
+    for (unsigned corner = 0; corner < 4; ++corner) {
+      const float px = (x+(corner == 1 || corner == 2))*16;
+      const float py = (y+(corner == 2 || corner == 3))*16;
+      PresentSimGlobeProjectedPoint point;
+      CHECK(PresentSimGlobeProject_Point(&projection,px,py,floors[corner],0,&point));
+      float normal[3], elevation[2], world[3];
+      CHECK(SimGlobeMapping_Encode(&view->map,view->map.origin_x+px/16,
+          view->map.origin_y+py/16,floors[corner],0,normal,elevation));
+      for (unsigned i = 0; i < 3; ++i)
+        world[i] = normal[i]*(view->map.radius+elevation[0])-(i == 2 ? view->map.radius : 0);
+      Scene3DPoint screen; float depth;
+      CHECK(Scene3D_ProjectWorldPointWithDepth(view->matrix,world[0],world[1],world[2],
+          viewport.w,viewport.h,&screen,&depth));
+      CHECK(fabsf(point.screen.x-viewport.x-screen.x) < .01f);
+      CHECK(fabsf(point.screen.y-viewport.y-screen.y) < .01f);
+      CHECK(fabsf(point.depth-depth) < .000001f);
+    }
+  }
+}
+
+static void SaveTownHeightProfiles(uint8_t town) {
+  if (!output_directory) return;
+  char path[4096];
+  CHECK(snprintf(path,sizeof(path),"%s/town-%u-height-profiles.txt",output_directory,town) < (int)sizeof(path));
+  FILE *file = fopen(path,"w"); CHECK(file);
+  fputs("world_x world_y registered_floor fillmore_native bloodpool_native kasandora_native\n",file);
+  for (int region = 0; region < 2; ++region) {
+    const int y0 = region ? 68 : 48, y1 = region ? 96 : 80;
+    const float x0 = region ? 12 : 74, x1 = region ? 32 : 86;
+    for (int y = y0; y <= y1; y += 2) for (float x = x0; x <= x1; x += .5f)
+      fprintf(file,"%.1f %d %.6f %.6f %.6f %.6f\n",x,y,
+          SimWorldNavigationTerrain_FloorHeightUnits(x,y),
+          SimTownTerrain_HeightUnitsAt(1,(x-80)*16,(y-48)*16),
+          SimTownTerrain_HeightUnitsAt(2,(x-48)*16,(y-48)*16),
+          SimTownTerrain_HeightUnitsAt(3,(x-16)*16,(y-64)*16));
+  }
+  CHECK(!fclose(file));
+}
+
+/* Production scene components, not a hand-drawn approximation of the old
+ * town. Both sides omit actors/UI, cast shadows and independent eruption
+ * effects; they share source state, viewport, camera, detail and clock. */
+typedef struct CraterEffectCheck { unsigned count, stop; } CraterEffectCheck;
+static bool CheckCraterEffect(void *user, const float x[4], const float y[4],
+    const float z[4], const SimBackgroundProjectionAxis *axis, ArRenderColorF color) {
+  CraterEffectCheck *check=user;
+  for (unsigned i=0;i<4;++i) CHECK(isfinite(x[i]) && isfinite(y[i]) && isfinite(z[i]));
+  CHECK(isfinite(axis->height_scale) && color.a>0 && color.a<=1);
+  ++check->count;
+  return !check->stop || check->count<check->stop;
+}
+
+static void TestCurvedCrater(const FrameSlot *slot, ArRenderRectI source,
+    ArRenderRectI viewport, const float matrix[16], const PresentSimGlobeView *view) {
+  SimBackgroundVoxelRenderParams params=SimVoxelRenderParams(slot,source,viewport,matrix);
+  SimBackgroundMountainEffectSource effects;
+  CHECK(SimBackgroundMountainRender_EffectSource(&params,&effects));
+  SimBackgroundCraterAnchor anchor;
+  CHECK(PresentSimGlobeMountains_CraterAnchor(&anchor)==(effects.count!=0));
+  if (!effects.count) { CHECK(!anchor.valid); return; }
+  const SimBackgroundCraterSource *crater=&effects.craters[effects.count-1];
+  const SimGlobeMapping *map=&view->map;
+  float floor,actual[3],reconstructed[3],normal[3],metric;
+  CHECK(SimWorldNavigationTerrain_RegisterTownFloor(map->town,crater->x/16,crater->y/16,
+      SimTownTerrain_HeightUnitsAt(map->town,crater->x,crater->y),&floor));
+  CHECK(SimGlobeMapping_Point(map,map->origin_x+crater->x/16,map->origin_y+crater->y/16,floor,0,actual));
+  CHECK(SimWorldNavigationGlobe_SampleAtRadius(map->chart_radius,map->origin_x+crater->x/16,
+      map->origin_y+crater->y/16,normal,&metric));
+  const float rise=crater->z/16*metric/map->metric;
+  actual[0]+=rise*crater->axis.x_per_height;
+  actual[1]-=rise*crater->axis.y_per_height;
+  actual[2]+=rise*crater->axis.height_scale;
+  CHECK(SimWorldNavigationTerrain_RegisterTownFloor(map->town,anchor.local_x/16,anchor.local_y/16,
+      SimTownTerrain_HeightUnitsAt(map->town,anchor.local_x,anchor.local_y),&floor));
+  CHECK(SimGlobeMapping_Point(map,map->origin_x+anchor.local_x/16,map->origin_y+anchor.local_y/16,
+      floor,anchor.height_pixels/16,reconstructed));
+  for (unsigned i=0;i<3;++i) CHECK(fabsf(actual[i]-reconstructed[i])<.002f);
+  for (unsigned frame=0;frame<48;++frame) {
+    CraterEffectCheck check={0};
+    CHECK(SimBackgroundMountainRender_EmitEffects(&effects,frame,kSimBackgroundVoxelDetail_Ultra,
+        kSimBackgroundVoxelStyle_Architectural,CheckCraterEffect,&check));
+    CHECK(check.count && check.count<=effects.count*28);
+    check=(CraterEffectCheck){0};
+    CHECK(SimBackgroundMountainRender_EmitEffects(&effects,frame,kSimBackgroundVoxelDetail_Low,
+        kSimBackgroundVoxelStyle_Architectural,CheckCraterEffect,&check));
+    CHECK(!check.count);
+  }
+  CraterEffectCheck check={.stop=2};
+  CHECK(!SimBackgroundMountainRender_EmitEffects(&effects,0,kSimBackgroundVoxelDetail_Ultra,
+      kSimBackgroundVoxelStyle_Architectural,CheckCraterEffect,&check) && check.count==2);
+  effects.craters[effects.count-1].x=NAN; check=(CraterEffectCheck){0};
+  CHECK(!SimBackgroundMountainRender_EmitEffects(&effects,0,kSimBackgroundVoxelDetail_Ultra,
+      kSimBackgroundVoxelStyle_Architectural,CheckCraterEffect,&check) && !check.count);
+}
+
+static SDL_Surface *RenderDetailedTownContent(SDL_Renderer *renderer, const FrameSlot *slot,
+    const Scene3DCamera *camera, ArRenderRectI source, bool clouds,
+    const PresentSimGlobeContent *content) {
+  CHECK(!content || sim_town_radius_scale==3);
+  int width, height;
+  CHECK(ArRenderDevice_GetOutputSize(&g_render_device,&width,&height));
+  const ArRenderRectI viewport = {0,0,width,height};
+  CHECK(ArRenderDevice_UseOutputCoordinates(&g_render_device));
+  CHECK(ArRenderDevice_SetRenderTarget(&g_render_device,ArRenderTexture_Invalid()));
+  CHECK(ArRenderDevice_SetViewport(&g_render_device,NULL));
+  CHECK(ArRenderDevice_SetClipRect(&g_render_device,NULL));
+  CHECK(ArRenderDevice_Clear(&g_render_device,(ArRenderColorF){0,0,0,1}));
+  float matrix[16];
+  Scene3D_BuildViewProjection(camera,width,height,matrix);
+  DrawSimBackdrop(slot,viewport,matrix);
+  PresentSimGlobeView view;
+  CHECK((content
+      ? PresentSimGlobeTown(slot,source,viewport,camera,matrix,content,&view)
+      : PresentSimGlobe_TestDetailedTownScene(slot,source,viewport,camera,matrix,sim_town_radius_scale,&view)) ==
+      kPresentationOutcome_Complete);
+  TestCurvedProjectionWithView(&view,source,viewport,camera);
+  TestCurvedCrater(slot,source,viewport,matrix,&view);
+  CHECK(PresentSimGlobeWater_QuadCount()<=(40*40-32*32)*128);
+  if (slot->sim.town==5) CHECK(PresentSimGlobeWater_QuadCount()>0);
+  if (clouds) CHECK(DrawSimCloudShroud(slot,source,viewport,matrix,&view) == kPresentationOutcome_Complete);
+  CHECK(!SessionFatal_Requested());
+  SDL_Surface *readback = SDL_RenderReadPixels(renderer,NULL);
+  CHECK(readback);
+  SDL_Surface *result = SDL_ConvertSurface(readback,SDL_PIXELFORMAT_ARGB8888);
+  SDL_DestroySurface(readback);
+  CHECK(result && SDL_RenderPresent(renderer));
+  return result;
+}
+
+static SDL_Surface *RenderDetailedTown(SDL_Renderer *renderer, const FrameSlot *slot,
+    const Scene3DCamera *camera, ArRenderRectI source, bool clouds) {
+  return RenderDetailedTownContent(renderer,slot,camera,source,clouds,NULL);
+}
+
+static bool CheckCraterContent(void *user, const PresentSimGlobeView *view) {
+  CHECK(view->map.town != 0);
+  ++*(unsigned *)user;
+  return true;
+}
+
+/* Numeric mouth placement alone cannot prove that the live composition
+ * actually submits its smoke/glow. Exercise the real append seam separately
+ * from the deliberately background-only visual comparison. */
+static void TestLiveCraterComposition(SDL_Renderer *renderer, FrameSlot *slot,
+    ArRenderRectI source) {
+  if (slot->sim.town!=4 || sim_town_radius_scale!=3) return;
+  FrameSlot *saved=malloc(sizeof(*saved)); CHECK(saved); *saved=*slot;
+  slot->sim.camera_x=128; slot->sim.camera_y=64;
+  slot->sim.background_voxel_detail=kSimBackgroundVoxelDetail_Ultra;
+  slot->sim.background_voxel_style=kSimBackgroundVoxelStyle_Architectural;
+  slot->sim.game_frame=0;
+  const Scene3DCamera camera={-.75f,0,3.2f,.4f};
+  unsigned calls=0;
+  const PresentSimGlobeContent content={.append=CheckCraterContent,.userdata=&calls};
+  SDL_Surface *bare=RenderDetailedTown(renderer,slot,&camera,source,false);
+  const uint64_t revision=PresentSimGlobeMountains_Revision();
+  SDL_Surface *glow=RenderDetailedTownContent(renderer,slot,&camera,source,false,&content);
+  CHECK(Differences(bare,glow)>0);
+  SDL_Surface *held=RenderDetailedTownContent(renderer,slot,&camera,source,false,&content);
+  CHECK(Differences(glow,held)==0); SDL_DestroySurface(held);
+  SaveImage(glow,"paired-town-4-live-crater-glow-smoke");
+  slot->sim.game_frame=8;
+  SDL_Surface *moving=RenderDetailedTownContent(renderer,slot,&camera,source,false,&content);
+  CHECK(Differences(glow,moving)>0 && PresentSimGlobeMountains_Revision()==revision);
+  CHECK(calls==3); /* Live content must never be skipped by color-image reuse. */
+  SDL_DestroySurface(bare); SDL_DestroySurface(glow); SDL_DestroySurface(moving);
+  slot->sim.background_voxel_detail=kSimBackgroundVoxelDetail_Low;
+  bare=RenderDetailedTown(renderer,slot,&camera,source,false);
+  held=RenderDetailedTownContent(renderer,slot,&camera,source,false,&content);
+  CHECK(Differences(bare,held)==0 && calls==4);
+  SDL_DestroySurface(bare); SDL_DestroySurface(held);
+  *slot=*saved; free(saved);
+  puts("live curved crater: visible glow/smoke, deterministic motion, resident relief, Low omission PASS");
+}
+
+static void TestDetailedMountainReuse(SDL_Renderer *renderer, FrameSlot *slot,
+    ArRenderRectI source) {
+  FrameSlot *saved = malloc(sizeof(*saved)); CHECK(saved); *saved = *slot;
+  Scene3DCamera camera = {-.75f,0,4.5f,.4f};
+  SDL_Surface *warm = RenderDetailedTown(renderer,slot,&camera,source,false);
+  SDL_DestroySurface(warm);
+  uint64_t revision = PresentSimGlobeMountains_Revision();
+  /* Focus is spatial material state: toggling it changes the surroundings,
+   * not native relief or its source-cache revision. Image keys must include
+   * it, including an exact return to the original unmodified setting. */
+  SDL_Surface *clear=RenderDetailedTown(renderer,slot,&camera,source,false);
+  slot->sim.effective_features |= kSimFeature_CullHaze;
+  slot->sim.cull_dim_pct=30; slot->sim.underlay_haze_pct=20; slot->sim.cull_haze_lead_px=16;
+  SDL_Surface *focus=RenderDetailedTown(renderer,slot,&camera,source,false);
+  CHECK(Differences(clear,focus)>0 && PresentSimGlobeMountains_Revision()==revision);
+  for (unsigned repeat=0;repeat<3;++repeat) {
+    SDL_Surface *held=RenderDetailedTown(renderer,slot,&camera,source,false);
+    CHECK(Differences(focus,held)==0); SDL_DestroySurface(held);
+  }
+  char name[80]; snprintf(name,sizeof(name),"paired-town-%u-focus",slot->sim.town);
+  SaveImage(focus,name); SDL_DestroySurface(focus);
+  *slot=*saved;
+  SDL_Surface *restored=RenderDetailedTown(renderer,slot,&camera,source,false);
+  CHECK(Differences(clear,restored)==0);
+  SDL_DestroySurface(clear); SDL_DestroySurface(restored);
+  for (unsigned step = 0; step < 12; ++step) {
+    slot->sim.camera_x = 112+step*3; slot->sim.camera_y = 128+step*4;
+    camera.distance = 3.2f+.1f*step;
+    warm = RenderDetailedTown(renderer,slot,&camera,source,false);
+    CHECK(PresentSimGlobeMountains_Revision() == revision);
+    /* Force the old full-source path as an oracle at every viewpoint. */
+    PresentSimGlobeMountains_Reset();
+    SDL_Surface *cold = RenderDetailedTown(renderer,slot,&camera,source,false);
+    CHECK(Differences(warm,cold) == 0);
+    revision = PresentSimGlobeMountains_Revision();
+    SDL_DestroySurface(warm); SDL_DestroySurface(cold);
+  }
+  for (unsigned change = 0; change < 3; ++change) {
+    if (!change) camera.tilt_y = .2f;
+    else if (change == 1) camera.tilt_x = -.9f;
+    else slot->sim.background_voxel_detail = kSimBackgroundVoxelDetail_Low;
+    warm = RenderDetailedTown(renderer,slot,&camera,source,false);
+    CHECK(PresentSimGlobeMountains_Revision() > revision);
+    PresentSimGlobeMountains_Reset();
+    SDL_Surface *cold = RenderDetailedTown(renderer,slot,&camera,source,false);
+    CHECK(Differences(warm,cold) == 0);
+    revision = PresentSimGlobeMountains_Revision();
+    SDL_DestroySurface(warm); SDL_DestroySurface(cold);
+  }
+  *slot = *saved; free(saved);
+  puts("detailed mountains: pan/fixed-detail zoom reuse; facing/detail invalidation; all warm/cold images exact");
+}
+
+static void TestDetailedCameraLimits(SDL_Renderer *renderer, FrameSlot *slot,
+    ArRenderRectI source) {
+  FrameSlot *saved = malloc(sizeof(*saved)); CHECK(saved); *saved = *slot;
+  FrameSlot *unchanged = malloc(sizeof(*unchanged)); CHECK(unchanged);
+  const float pitches[] = {kSim3DCameraPitchMinimumMrad/1000.0f,
+      kSim3DCameraPitchMaximumMrad/1000.0f};
+  const float yaw = kSim3DConnectedCameraYawMaximumMrad/1000.0f;
+  const float distances[] = {kSim3DCameraDistanceMinimumX100/100.0f,
+      kSim3DConnectedCameraDistanceMaximumX100/100.0f};
+  /* Exercise every camera-bound corner, then change captured settings while
+   * keeping a fixed view. No gameplay/asset state is modified by this sweep. */
+  for (unsigned sample=0;sample<16;++sample) {
+    *slot=*saved;
+    Scene3DCamera camera={-.75f,0,4.5f,.4f};
+    if (sample<8) {
+      camera.tilt_x=pitches[sample&1];
+      camera.tilt_y=(sample&2) ? yaw : -yaw;
+      camera.distance=distances[(sample>>2)&1];
+      slot->sim.camera_x=(sample&2) ? 224 : 32;
+      slot->sim.camera_y=(sample&4) ? 256 : 64;
+    } else {
+      slot->sim.camera_x=128; slot->sim.camera_y=144;
+      switch (sample) {
+        case 8: slot->sim.landscape_height_pct=0; break;
+        case 9: slot->sim.landscape_height_pct=150; break;
+        case 10: slot->sim.background_voxel_detail=kSimBackgroundVoxelDetail_Low; break;
+        case 11:
+          slot->sim.world_navigation_relief=false;
+          slot->sim.world_navigation_models=false;
+          slot->sim.world_navigation_lighting=false;
+          break;
+        case 12: slot->sim.cloud_altitude_px=0; slot->sim.cloud_opacity_pct=100; break;
+        case 13: slot->sim.cloud_altitude_px=256; slot->sim.cloud_opacity_pct=100; break;
+        case 14:
+          slot->sim.effective_features |= kSimFeature_CullHaze;
+          slot->sim.cull_dim_pct=100; slot->sim.underlay_haze_pct=100;
+          break;
+        case 15: slot->sim.cloud_opacity_pct=0; break;
+      }
+    }
+    Scene3DCamera clamped=camera; PresentSimGlobe_ClampCamera(&clamped);
+    CHECK(clamped.tilt_x==camera.tilt_x && clamped.tilt_y==camera.tilt_y &&
+        clamped.distance==camera.distance);
+    weather_time_ms=12000;
+    *unchanged=*slot;
+    SDL_Surface *warm=RenderDetailedTown(renderer,slot,&camera,source,true);
+    SDL_Surface *held=RenderDetailedTown(renderer,slot,&camera,source,true);
+    CHECK(Differences(warm,held)==0); SDL_DestroySurface(held);
+    PresentSimGlobeTerrain_Reset(); PresentSimGlobeMountains_Reset();
+    PresentSimGlobeWater_Reset();
+    SDL_Surface *cold=RenderDetailedTown(renderer,slot,&camera,source,true);
+    if (Differences(warm,cold)) {
+      fprintf(stderr,"camera/settings mismatch town=%u sample=%u pixels=%u\n",
+          slot->sim.town,sample,Differences(warm,cold));
+      SaveImage(warm,"limits-mismatch-warm"); SaveImage(cold,"limits-mismatch-cold");
+    }
+    CHECK(Differences(warm,cold)==0 && !memcmp(slot,unchanged,sizeof(*slot)));
+    if (sample==0 || sample==5) {
+      char name[96]; snprintf(name,sizeof(name),"paired-town-%u-limits-%u",slot->sim.town,sample);
+      SaveImage(warm,name);
+      /* Keep an identical-camera clear reference so cloud coverage can be
+       * distinguished from coastline/terrain material discontinuities. */
+      SDL_Surface *clear=RenderDetailedTown(renderer,slot,&camera,source,false);
+      snprintf(name,sizeof(name),"paired-town-%u-limits-%u-clear",slot->sim.town,sample);
+      SaveImage(clear,name); SDL_DestroySurface(clear);
+    }
+    SDL_DestroySurface(warm); SDL_DestroySurface(cold);
+  }
+  *slot=*saved; free(saved); free(unchanged);
+  puts("continuous SIM limits: 8 camera corners and 8 settings variants; held/cold exact, immutable capture PASS");
+}
+
+static void CaptureLandscapeHeightSweep(SDL_Renderer *renderer, FrameSlot *slot,
+    ArRenderRectI source) {
+  FrameSlot *saved = malloc(sizeof(*saved)); CHECK(saved); *saved = *slot;
+  FrameSlot *unchanged = malloc(sizeof(*unchanged)); CHECK(unchanged);
+  /* Change only the existing ground-height control. In particular, keep
+   * model rise, camera, radius, detail, lighting and weather time identical.
+   * Zero tests flattening/invalidation; the last 100 tests exact restoration. */
+  const uint16_t heights[] = {100,75,50,0,100};
+  const struct { const char *name; int y; float distance; } views[] = {
+    {"overview",144,4.5f},{"north-close",64,3.2f},{"south-edge",256,4.5f}};
+  for (unsigned view = 0; view < sizeof(views)/sizeof(*views); ++view) {
+    slot->sim.camera_x = 128; slot->sim.camera_y = views[view].y;
+    const Scene3DCamera camera = {-.75f,0,views[view].distance,.4f};
+    for (int clouds = 0; clouds < 2; ++clouds) {
+      weather_time_ms = 12000;
+      SDL_Surface *baseline = NULL;
+      for (unsigned step = 0; step < sizeof(heights)/sizeof(*heights); ++step) {
+        slot->sim.landscape_height_pct = heights[step];
+        *unchanged = *slot;
+        /* The first draw after a setting change must not reuse old geometry.
+         * Compare it with explicitly rebuilt detailed sources. */
+        SDL_Surface *warm = RenderDetailedTown(renderer,slot,&camera,source,clouds);
+        for (int repeat = 0; repeat < 4; ++repeat) {
+          SDL_Surface *held = RenderDetailedTown(renderer,slot,&camera,source,clouds);
+          if (Differences(warm,held)) {
+            fprintf(stderr,"height sweep mismatch town=%u view=%u clouds=%d height=%u repeat=%d pixels=%u\n",
+                slot->sim.town,view,clouds,heights[step],repeat,Differences(warm,held));
+            SaveImage(warm,"height-mismatch-first"); SaveImage(held,"height-mismatch-repeat");
+          }
+          CHECK(Differences(warm,held) == 0); SDL_DestroySurface(held);
+        }
+        PresentSimGlobeTerrain_Reset(); PresentSimGlobeMountains_Reset();
+        SDL_Surface *cold = RenderDetailedTown(renderer,slot,&camera,source,clouds);
+        CHECK(Differences(warm,cold) == 0); SDL_DestroySurface(cold);
+        CHECK(!memcmp(slot,unchanged,sizeof(*slot)));
+        if (!step) baseline = warm;
+        if (step < 3) {
+          char name[128];
+          snprintf(name,sizeof(name),"height-town-%u-%s-%s-%u",slot->sim.town,
+              views[view].name,clouds ? "clouds" : "clear",heights[step]);
+          SaveImage(warm,name);
+        }
+        if (step == sizeof(heights)/sizeof(*heights)-1)
+          CHECK(Differences(warm,baseline) == 0);
+        if (step) SDL_DestroySurface(warm);
+      }
+      SDL_DestroySurface(baseline);
+    }
+  }
+  const float maximum = SimTownTerrain_MaximumUnits(slot->sim.town);
+  printf("landscape sweep: town=%u radius=%ux navigation maximum=%.6f units; 100/75/50%%=%.3f/%.3f/%.3f native pixels; warm/cold/zero/restoration PASS\n",
+      slot->sim.town,sim_town_radius_scale,maximum,SimTownTerrain_ScaledHeightPixels(maximum,100),
+      SimTownTerrain_ScaledHeightPixels(maximum,75),SimTownTerrain_ScaledHeightPixels(maximum,50));
+  *slot = *saved; free(saved); free(unchanged);
+}
+
+static void CaptureTownPresentation(SDL_Renderer *renderer, FrameSlot *slot,
+    const uint8_t *rom, const uint8_t *wram) {
+  /* Match video boot: all production paths are prepared before capture. */
+  const Sim3DPreparedPipelines prepared = Sim3DDepthPass_PreparePipelines(&g_render_device);
+  CHECK(prepared.depth && prepared.linear_models && prepared.surfaces && prepared.radial);
+  CHECK(wram[0x18] == 0 && wram[0x19] >= 1 && wram[0x19] <= 6);
+  const uint8_t town = wram[0x19];
+  char path[4096];
+  CHECK(snprintf(path,sizeof(path),"%s.wram.bin",sim_town_snapshot) < (int)sizeof(path));
+  uint8_t *paired_wram = ReadFile(path,kWramBytes);
+  CHECK(!memcmp(paired_wram,wram,kWramBytes)); free(paired_wram);
+  CHECK(snprintf(path,sizeof(path),"%s.vram.bin",sim_town_snapshot) < (int)sizeof(path));
+  uint8_t *vb = ReadFile(path,65536);
+  CHECK(snprintf(path,sizeof(path),"%s.cgram.bin",sim_town_snapshot) < (int)sizeof(path));
+  uint8_t *cb = ReadFile(path,512);
+  uint16_t vram[32768], cgram[256];
+  for (int i = 0; i < 32768; ++i) vram[i] = vb[i*2] | (uint16_t)vb[i*2+1] << 8;
+  for (int i = 0; i < 256; ++i) cgram[i] = cb[i*2] | (uint16_t)cb[i*2+1] << 8;
+  free(vb); free(cb);
+  SimWorldMapRomTables tables;
+  CHECK(SimWorldMap_LoadRomTables(&tables,rom,kRomBytes));
+  uint8_t developed[kSimWorldMapBytes]; uint16_t enabled[kSimTownCount];
+  for (int i = 0; i < kSimTownCount; ++i)
+    enabled[i] = wram[0x16b18+i*2] | (uint16_t)wram[0x16b19+i*2] << 8;
+  CHECK(SimWorldMap_ComposeDeveloped(developed,SimWorldMap_Baseline(),
+      (const uint8_t (*)[kSimWorldMapTownCells])(wram+0x12000),enabled,wram[0x19101],&tables));
+  SimWorldMap_PublishBuiltTilemap(developed);
+  SimWorldMap_SetWaterAnimationSource(kWorldWaterSourceFirst);
+  SimTownCanvas_Render(town,wram,vram,cgram,15,0xff000000);
+  SimBackgroundVoxels_Build(town,wram,SimTownCanvas_Pixels(),SimTownCanvas_SourceOpacity(),
+      SimTownCanvas_Serial(),SimTownCanvas_TilemapSerial(),false);
+  SimBackgroundVoxelRenderer_Upload(&g_render_device);
+  const SimBackgroundVoxelScene *scene = SimBackgroundVoxels_Scene();
+  CHECK(!scene->overflow && scene->object_count && scene->town == town);
+  slot->sim.view = kSimView_Enhanced; slot->sim.town = town;
+  int ox,oy; CHECK(SimWorldMap_OriginForTown(town,&ox,&oy));
+  slot->sim.underlay_origin_tile_x = ox; slot->sim.underlay_origin_tile_y = oy;
+  slot->sim.underlay_serial = SimWorldMap_Serial();
+  slot->sim.underlay_screen_x0 = 52;
+  slot->sim.town_canvas_serial = SimTownCanvas_Serial();
+  slot->sim.background_voxel_serial = SimBackgroundVoxels_Serial();
+  slot->sim.background_voxel_detail = kSimBackgroundVoxelDetail_Ultra;
+  slot->sim.background_voxel_lod = kSimBackgroundVoxelLod_Fixed;
+  slot->sim.background_voxel_render_scale = kSimBackgroundVoxelRenderScale_Native;
+  slot->sim.background_voxel_facing = kSimBackgroundVoxelFacing_PerModel;
+  slot->sim.background_voxel_shading = kSimBackgroundVoxelShading_MaterialAware;
+  slot->sim.landscape_height_pct = sim_town_landscape_pct;
+  slot->sim.game_frame = 1500;
+  slot->sim.light_azimuth_deg = 0; slot->sim.light_elevation_deg = 85;
+  slot->sim.separated_backdrop_argb = 0xff305888;
+  slot->sim.backdrop_strength_pct = 100; slot->sim.backdrop_horizon_pct = 50;
+  slot->sim.cloud_opacity_pct = 55; slot->sim.cloud_altitude_px = 96;
+  slot->sim.cloud_clear_x0 = 52; slot->sim.cloud_clear_x1 = 308;
+  slot->sim.cloud_clear_y0 = 0; slot->sim.cloud_clear_y1 = 224;
+  slot->sim.cloud_inset_px = 24; slot->sim.cloud_falloff_px = 96;
+  slot->sim.cloud_drift_pct = 100;
+  slot->sim.world_navigation_clouds = slot->sim.world_navigation_cloud_shadows = false;
+  slot->sim.world_navigation_atmosphere = slot->sim.world_navigation_backdrop = false;
+  CHECK(SimBackgroundVoxelRenderer_Ready(slot->sim.background_voxel_serial));
+  const ArRenderRectI source = {0,0,360,224};
+  if (sim_height_sweep_requested) {
+    CaptureLandscapeHeightSweep(renderer,slot,source);
+    goto cleanup;
+  }
+  const struct { const char *name; int y; float distance; } views[] = {
+    {"overview",144,4.5f},{"north-close",64,3.2f},{"south-edge",256,4.5f}};
+  FrameSlot *unchanged = malloc(sizeof(*unchanged)); CHECK(unchanged);
+  for (unsigned i = 0; i < sizeof(views)/sizeof(*views); ++i) {
+    slot->sim.camera_x = 128; slot->sim.camera_y = views[i].y;
+    *unchanged = *slot;
+    Scene3DCamera camera = {-.75f,0,views[i].distance,.4f};
+    for (int clouds = 0; clouds < 2; ++clouds) {
+      weather_time_ms = 12000;
+      if (!i && !clouds) SaveTownHeightProfiles(town);
+      char name[128];
+      SDL_Surface *globe = RenderDetailedTown(renderer,slot,&camera,source,clouds);
+      snprintf(name,sizeof(name),"paired-town-%u-%s-%s-continuous",town,views[i].name,clouds?"clouds":"clear");
+      SaveImage(globe,name);
+      for (int repeat = 0; repeat < 4; ++repeat) {
+        SDL_Surface *held = RenderDetailedTown(renderer,slot,&camera,source,clouds);
+        CHECK(Differences(globe,held) == 0); SDL_DestroySurface(held);
+      }
+      CHECK(!memcmp(slot,unchanged,sizeof(*slot)));
+      SDL_DestroySurface(globe);
+    }
+  }
+  TestDetailedMountainReuse(renderer,slot,source);
+  TestLiveCraterComposition(renderer,slot,source);
+  TestDetailedCameraLimits(renderer,slot,source);
+  /* Synchronous camera/cloud sweep from an explicit clock and camera, with
+   * simulation and individual model poses
+   * frozen. This is a presentation clip, not recorded gameplay. */
+  for (unsigned frame = 0; frame < 24; ++frame) {
+    const float phase = frame * (6.28318530718f/24);
+    slot->sim.camera_y = (uint16_t)(144 + lroundf(24*sinf(phase)));
+    const Scene3DCamera camera = {-.75f,.20f*sinf(phase),4.2f+.3f*cosf(phase),.4f};
+    weather_time_ms = 12000+frame*166;
+    *unchanged = *slot;
+    {
+      SDL_Surface *frame_image = RenderDetailedTown(renderer,slot,&camera,source,true);
+      char name[128];
+      snprintf(name,sizeof(name),"paired-town-%u-motion-%02u-continuous",town,frame);
+      SaveImage(frame_image,name); SDL_DestroySurface(frame_image);
+    }
+    CHECK(!memcmp(slot,unchanged,sizeof(*slot)));
+  }
+  free(unchanged);
+cleanup:
+  printf("SIM globe presentation: town=%u models=%u mountain-cells=%u radius=%ux navigation landscape=%u%% PASS\n",
+      town,scene->object_count,scene->mountains.cell_count,sim_town_radius_scale,slot->sim.landscape_height_pct);
+  PresentSim3DClouds_ResetResources();
+  SimBackgroundVoxelRenderer_Reset(&g_render_device);
+  SimBackgroundVoxels_Reset(); SimTownCanvas_Reset();
+}
+
 static void TestCaptured(SDL_Renderer *renderer, const char *rom_path, const char *wram_path) {
   uint8_t *rom = ReadFile(rom_path, kRomBytes), *wram = ReadFile(wram_path, kWramBytes);
-  CHECK(wram[0x18] == 0 && wram[0x19] == 9); /* Navigation dump, not shared action scratch. */
+  CHECK(wram[0x18] == 0 && (sim_town_snapshot || wram[0x19] == 9));
   CHECK(SimWorldMap_Init(rom, kRomBytes) && SimTownGroundArt_Init(rom, kRomBytes));
-  SimWorldMap_PublishBuiltTilemap(wram + 0xC000);
+  if (!sim_town_snapshot) SimWorldMap_PublishBuiltTilemap(wram + 0xC000);
   SimWorldMap_SetWaterAnimationSource((uint16_t)(wram[0xD7] | wram[0xD8] << 8));
   FrameSlot *slot = malloc(sizeof(*slot));
   CHECK(slot);
@@ -2252,6 +3014,14 @@ static void TestCaptured(SDL_Renderer *renderer, const char *rom_path, const cha
   slot->sim.world_navigation_clouds = slot->sim.world_navigation_cloud_shadows = true;
   slot->sim.world_navigation_atmosphere = slot->sim.world_navigation_backdrop = true;
   BuildScene(slot);
+  if (sim_town_snapshot) {
+    CaptureTownPresentation(renderer,slot,rom,wram);
+    goto cleanup;
+  }
+  if (sim_globe_prototype_requested) {
+    CaptureSimGlobePrototype(renderer,slot);
+    goto cleanup;
+  }
   TestCapturedMarahnaSanctuary(renderer, slot);
   TestCapturedSimGlobe(renderer, slot);
   TestMountainFitViews(renderer, slot);
@@ -2284,6 +3054,7 @@ static void TestCaptured(SDL_Renderer *renderer, const char *rom_path, const cha
   if (weather_sequence_requested) CaptureWeatherSequence(renderer, slot);
   if (town_matrix_requested) CaptureTownAcceptanceMatrix(renderer, slot);
   TestSkyPalace(renderer, slot);
+cleanup:
   free(slot); free(wram); free(rom);
   PresentWorldNav_ResetResources();
   Sim3DDepthPass_Reset(&g_render_device);
@@ -2292,17 +3063,127 @@ static void TestCaptured(SDL_Renderer *renderer, const char *rom_path, const cha
   SimWorldMap_Shutdown();
 }
 
+#if AR_SIM3D_TERRAIN_ELEVATION
+typedef struct TerrainSourceAudit {
+  uint8_t town;
+  SimGlobeMapping map;
+  unsigned tops, skirts, calls;
+  bool stop;
+} TerrainSourceAudit;
+
+static bool AuditTerrainSource(void *user, const float xy[4][2],
+    const float height[4], const float uv[4][2], const float shade[4]) {
+  TerrainSourceAudit *a = user;
+  ++a->calls;
+  if (a->stop) return false;
+  const bool top = xy[1][0] > xy[0][0] && xy[3][1] > xy[0][1];
+  if (top) ++a->tops; else ++a->skirts;
+  for (int p = 0; p < 4; ++p) {
+    CHECK(isfinite(height[p]) && isfinite(shade[p]) && shade[p] > 0 && shade[p] <= 1);
+    for (int axis = 0; axis < 2; ++axis) {
+      CHECK(xy[p][axis] >= 0 && xy[p][axis] <= 512);
+      CHECK(uv[p][axis] > 0 && uv[p][axis] < 1);
+    }
+    if (top) {
+      const int cx = (int)xy[0][0]/16, cy = (int)xy[0][1]/16;
+      CHECK(height[p] == SimTownTerrain_CornerUnits(a->town,cx,cy,p));
+      /* The source exports unscaled height, and registration substitutes it
+       * for this town's sampled floor. Neither stage may stack another copy
+       * of town relief, even when a non-100% presentation scale is selected. */
+      const float x = xy[p][0]/16, y = xy[p][1]/16;
+      float floor, point[3], normal[3], encoded[3], elevation[2];
+      CHECK(SimWorldNavigationTerrain_RegisterTownFloor(a->town,x,y,height[p],&floor));
+      if (cx >= 4 && cx < 28 && cy >= 4 && cy < 28) {
+        const float datum[] = {0,3,4,4,0,4};
+        CHECK(fabsf(floor-height[p]-datum[a->town-1]) < .00001f);
+      }
+      const SimGlobeMapping *map = &a->map;
+      CHECK(SimGlobeMapping_Point(map,map->origin_x+x,map->origin_y+y,floor,0,point));
+      CHECK(SimGlobeMapping_Encode(map,map->origin_x+x,map->origin_y+y,floor,0,encoded,elevation));
+      CHECK(SimWorldNavigationGlobe_SampleAtRadius(map->chart_radius,
+          map->origin_x+x,map->origin_y+y,normal,NULL));
+      SimWorldNavigationGlobe_TransformNormal(&map->frame,normal,normal);
+      const float radius = map->radius+floor*map->landscape/map->metric;
+      const float epsilon = 8*FLT_EPSILON*(map->radius+16);
+      for (int axis = 0; axis < 3; ++axis) {
+        const float offset = axis == 2
+            ? map->radius+map->reference_height*map->landscape/map->metric : 0;
+        CHECK(fabsf(point[axis]-(normal[axis]*radius-offset)) < epsilon);
+        CHECK(fabsf(encoded[axis]*(map->radius+elevation[0])-
+            (axis == 2 ? map->radius : 0)-point[axis]) < epsilon);
+      }
+      const float inset_x = p == 1 || p == 2 ? -.5f : .5f;
+      const float inset_y = p >= 2 ? -.5f : .5f;
+      CHECK(uv[p][0] == (xy[p][0]+inset_x)/512);
+      CHECK(uv[p][1] == (xy[p][1]+inset_y)/512);
+    }
+  }
+  return true;
+}
+
+static void TestTerrainSource(void) {
+  for (uint8_t town = 1; town <= 6; ++town) for (int scale = 0; scale <= 150; scale += 25) {
+    TerrainSourceAudit a = {.town=town};
+    int ox,oy; CHECK(SimWorldMap_OriginForTown(town,&ox,&oy));
+    CHECK(SimGlobeMapping_Build(town,ox,oy,192,1.5f,scale/100.0f,&a.map));
+    CHECK(EmitSimTownTerrainSource(town,scale,AuditTerrainSource,&a));
+    CHECK(a.tops == 1024 && a.skirts <= 4096 && a.calls == a.tops+a.skirts);
+  }
+  TerrainSourceAudit a = {.town=4,.stop=true};
+  CHECK(!EmitSimTownTerrainSource(4,100,AuditTerrainSource,&a) && a.calls == 1);
+  CHECK(!EmitSimTownTerrainSource(0,100,AuditTerrainSource,&a));
+  CHECK(!EmitSimTownTerrainSource(7,100,AuditTerrainSource,&a));
+  CHECK(!EmitSimTownTerrainSource(4,151,AuditTerrainSource,&a));
+  CHECK(!EmitSimTownTerrainSource(4,100,NULL,&a));
+  CHECK(a.calls == 1);
+  puts("terrain source: six towns, seven scales; unscaled source, single registered elevation, single scale, GPU radial round trip PASS");
+}
+#endif
+
 int main(int argc, char **argv) {
-  if (argc != 1 && (argc < 4 || argc > 6)) {
-    fprintf(stderr, "usage: %s [ROM navigation-WRAM existing-output-directory [--weather-sequence] [--town-matrix]]\n", argv[0]);
+  if (argc != 1 && (argc < 4 || argc > 10)) {
+    fprintf(stderr, "usage: %s [ROM WRAM existing-output-directory [--weather-sequence] [--town-matrix] [--sim-globe-prototype] | --sim-town SIM-snapshot-prefix [--sim-height-sweep | --sim-landscape-height 0..150] [--sim-radius-scale 1..4]]\n", argv[0]);
     return 1;
   }
   if (argc >= 4) output_directory = argv[3];
+  bool radius_requested = false;
+  bool landscape_requested = false;
   for (int arg = 4; arg < argc; arg++) {
     if (!strcmp(argv[arg], "--weather-sequence")) weather_sequence_requested = true;
     else if (!strcmp(argv[arg], "--town-matrix")) town_matrix_requested = true;
+    else if (!strcmp(argv[arg], "--sim-globe-prototype")) sim_globe_prototype_requested = true;
+    else if (!strcmp(argv[arg], "--sim-town") && arg+1 < argc) sim_town_snapshot = argv[++arg];
+    else if (!strcmp(argv[arg], "--sim-height-sweep")) sim_height_sweep_requested = true;
+    else if (!strcmp(argv[arg], "--sim-landscape-height") && arg+1 < argc) {
+      const char *value = argv[++arg];
+      char *end;
+      const long height = strtol(value,&end,10);
+      if (end == value || *end || height < kSimTownTerrainLandscapeHeightMinimumPct ||
+          height > kSimTownTerrainLandscapeHeightMaximumPct) {
+        fprintf(stderr,"--sim-landscape-height requires a whole percentage from 0 to 150\n");
+        return 1;
+      }
+      sim_town_landscape_pct = (unsigned)height;
+      landscape_requested = true;
+    }
+    else if (!strcmp(argv[arg], "--sim-radius-scale") && arg+1 < argc) {
+      const char *value = argv[++arg];
+      if (value[0] < '1' || value[0] > '4' || value[1]) return 1;
+      sim_town_radius_scale = (unsigned)(value[0]-'0');
+      radius_requested = true;
+    }
     else { fprintf(stderr, "unknown option: %s\n", argv[arg]); return 1; }
   }
+  if (sim_globe_prototype_requested && (weather_sequence_requested || town_matrix_requested)) {
+    fprintf(stderr,"--sim-globe-prototype is a separate scene-only capture mode\n");
+    return 1;
+  }
+  if (sim_town_snapshot && (sim_globe_prototype_requested || weather_sequence_requested || town_matrix_requested)) return 1;
+  if ((sim_height_sweep_requested || radius_requested || landscape_requested) && !sim_town_snapshot) return 1;
+  if (sim_height_sweep_requested && landscape_requested) return 1;
+#if AR_SIM3D_TERRAIN_ELEVATION
+  TestTerrainSource();
+#endif
   if (!SDL_Init(SDL_INIT_VIDEO)) {
     fprintf(stderr, "World navigation GPU test skipped: video unavailable: %s\n", SDL_GetError());
     return 77;
@@ -2312,26 +3193,40 @@ int main(int argc, char **argv) {
     fprintf(stderr, "World navigation GPU test skipped: window unavailable: %s\n", SDL_GetError());
     SDL_Quit(); return 77;
   }
-  SDL_PropertiesID properties = SDL_CreateProperties();
-  CHECK(properties);
-  SDL_SetStringProperty(properties, SDL_PROP_RENDERER_CREATE_NAME_STRING, SDL_GPU_RENDERER);
-  SDL_SetPointerProperty(properties, SDL_PROP_RENDERER_CREATE_WINDOW_POINTER, window);
-  SDL_SetBooleanProperty(properties, SDL_PROP_RENDERER_CREATE_GPU_SHADERS_SPIRV_BOOLEAN, true);
-  SDL_SetBooleanProperty(properties, SDL_PROP_RENDERER_CREATE_GPU_SHADERS_DXIL_BOOLEAN, true);
-  SDL_SetBooleanProperty(properties, SDL_PROP_RENDERER_CREATE_GPU_SHADERS_MSL_BOOLEAN, true);
-  SDL_Renderer *renderer = SDL_CreateRendererWithProperties(properties);
-  SDL_DestroyProperties(properties);
+  SDL_Renderer *renderer = NULL;
+  ArSdlRenderBackend backend = {0};
+  if (sim_town_snapshot) {
+    /* The detailed ground borrows a streaming SDL texture in a custom GPU
+     * pass. Use the game's ordered adapter so its first upload is submitted
+     * before consumption; a legacy Flush-only binding needs a prior present
+     * and would hide cold-entry problems behind reference-view warmup. */
+    SDL_unsetenv_unsafe("AR_SDL_GPU_ORDERED");
+    if (ArSdlRenderBackend_CreateForWindow(&g_render_device,window))
+      renderer = ArSdlRenderBackend_Renderer(&g_render_device);
+  } else {
+    SDL_PropertiesID properties = SDL_CreateProperties();
+    CHECK(properties);
+    SDL_SetStringProperty(properties, SDL_PROP_RENDERER_CREATE_NAME_STRING, SDL_GPU_RENDERER);
+    SDL_SetPointerProperty(properties, SDL_PROP_RENDERER_CREATE_WINDOW_POINTER, window);
+    SDL_SetBooleanProperty(properties, SDL_PROP_RENDERER_CREATE_GPU_SHADERS_SPIRV_BOOLEAN, true);
+    SDL_SetBooleanProperty(properties, SDL_PROP_RENDERER_CREATE_GPU_SHADERS_DXIL_BOOLEAN, true);
+    SDL_SetBooleanProperty(properties, SDL_PROP_RENDERER_CREATE_GPU_SHADERS_MSL_BOOLEAN, true);
+    renderer = SDL_CreateRendererWithProperties(properties);
+    SDL_DestroyProperties(properties);
+    if (renderer) CHECK(ArSdlRenderBackend_Bind(&g_render_device,&backend,renderer));
+  }
   if (!renderer) {
     fprintf(stderr, "World navigation GPU test skipped: %s\n", SDL_GetError());
     SDL_DestroyWindow(window); SDL_Quit(); return 77;
   }
   printf("world navigation renderer=%s gpu=%s\n", SDL_GetRendererName(renderer),
       SDL_GetGPUDeviceDriver(SDL_GetGPURendererDevice(renderer)));
-  ArSdlRenderBackend backend = {0};
-  CHECK(ArSdlRenderBackend_Bind(&g_render_device, &backend, renderer));
-  TestSynthetic(renderer);
+  /* The ROM-free suite remains the default CTest entry. A frozen SIM capture
+   * is independent and can be iterated without re-running orbital weather. */
+  if (!sim_town_snapshot) TestSynthetic(renderer);
   if (argc >= 4) TestCaptured(renderer, argv[1], argv[2]);
-  SDL_DestroyRenderer(renderer);
+  if (sim_town_snapshot) ArSdlRenderBackend_Destroy(&g_render_device);
+  else SDL_DestroyRenderer(renderer);
   SDL_DestroyWindow(window);
   SDL_Quit();
   puts("present_world_nav_gpu_test: PASS");

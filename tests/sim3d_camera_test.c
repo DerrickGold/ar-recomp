@@ -1,4 +1,5 @@
 #include "sim/sim3d.h"
+#include "sim/sim3d_camera_limits.h"
 #include "actraiser_game.h"
 #include "settings.h"
 #include "user_data_dir.h"
@@ -72,6 +73,79 @@ static void TestTownZoomFromVisiblePose(void) {
     Sim3DCamera_Adjust(0, 0, -.25f);
     assert(*distance == 425);
   }
+}
+
+static float CapturedTownYaw(void) {
+  Sim3DCameraPresentationState state;
+  Sim3DCamera_CapturePresentationState(&state);
+  return state.yaw_mrad / 1000.0f +
+      (state.mode == kSimCam_Dynamic ? state.orbit_yaw : 0);
+}
+
+static void ResetTownOrbit(void) {
+  g_settings.sim3d_camera_mode = kSimCam_Free;
+  Sim3DCamera_UpdateDynamic(.1f, false);
+}
+
+static void TestTownRotationFromVisiblePose(void) {
+  const float limit = kSim3DConnectedCameraYawMaximumMrad / 1000.0f;
+  g_settings.sim3d_mode = true;
+  g_ram[kActRaiserWram_CurrentMap] = kActRaiserNonActionMap_Fillmore;
+  requested_features = kSimFeature_All;
+  for (int mode = kSimCam_Free; mode <= kSimCam_Dynamic; ++mode) {
+    for (int sign = -1; sign <= 1; sign += 2) {
+      ResetTownOrbit();
+      g_settings.sim3d_camera_mode = mode;
+      g_settings.sim3d_tilt_y_mrad = g_settings.sim3d_dyncam_baseline_tilt_y_mrad = sign*700;
+      const Settings saved = g_settings;
+      assert(fabsf(CapturedTownYaw() - sign*limit) < .00001f);
+      assert(!memcmp(&saved, &g_settings, sizeof(saved))); /* Capture is not a save migration. */
+      Sim3DCamera_Adjust(-sign*.05f, 0, 0);
+      assert(fabsf(CapturedTownYaw() - sign*(limit-.05f)) < .00001f);
+      Sim3DCamera_Adjust(sign*100, 0, 0);
+      assert(fabsf(CapturedTownYaw() - sign*limit) < .00001f);
+      Sim3DCamera_Adjust(-sign*.05f, 0, 0);
+      assert(fabsf(CapturedTownYaw() - sign*(limit-.05f)) < .00001f);
+      if (mode == kSimCam_Dynamic) {
+        assert(g_settings.sim3d_dyncam_baseline_tilt_y_mrad == sign*700);
+        Sim3DCamera_UpdateDynamic(.035f, false);
+        const float returned = sign*CapturedTownYaw();
+        assert(returned > limit-.05f && returned < limit);
+      }
+    }
+  }
+  /* Enabling the globe while an ordinary dynamic orbit is held must clamp
+   * both the captured view and the next input/return animation immediately. */
+  for (int sign = -1; sign <= 1; sign += 2) {
+    for (int release = 0; release < 2; ++release) {
+      ResetTownOrbit();
+      g_settings.sim3d_camera_mode = kSimCam_Dynamic;
+      g_settings.sim3d_dyncam_baseline_tilt_y_mrad = 0;
+      requested_features &= ~kSimFeature_GlobeUnderlay;
+      Sim3DCamera_Adjust(sign*100, 0, 0);
+      assert(fabsf(CapturedTownYaw() - sign*.7f) < .00001f);
+      requested_features = kSimFeature_All;
+      assert(fabsf(CapturedTownYaw() - sign*limit) < .00001f);
+      float yaw;
+      Sim3DCamera_GetDynamicOrbit(&yaw, NULL);
+      assert(fabsf(yaw - sign*limit) < .00001f);
+      if (release) {
+        assert(Sim3DCamera_UpdateDynamic(.035f, false));
+        assert(sign*CapturedTownYaw() > 0 && sign*CapturedTownYaw() < limit);
+      } else {
+        Sim3DCamera_Adjust(-sign*.05f, 0, 0);
+        assert(fabsf(CapturedTownYaw() - sign*(limit-.05f)) < .00001f);
+      }
+    }
+  }
+  ResetTownOrbit();
+  /* Ordinary SIM retains its wider inspection range and saved pose. */
+  requested_features &= ~kSimFeature_GlobeUnderlay;
+  g_settings.sim3d_tilt_y_mrad = 650;
+  assert(fabsf(CapturedTownYaw() - .65f) < .00001f);
+  Sim3DCamera_Adjust(.05f, 0, 0);
+  assert(g_settings.sim3d_tilt_y_mrad == 700);
+  requested_features = kSimFeature_All;
 }
 
 int main(void) {
@@ -178,6 +252,7 @@ int main(void) {
   }
   assert(settings_writes == 0);
   TestTownZoomFromVisiblePose();
+  TestTownRotationFromVisiblePose();
   puts("sim3d_camera_test: PASS");
   return 0;
 }

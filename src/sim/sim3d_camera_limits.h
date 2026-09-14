@@ -13,9 +13,10 @@ enum {
   kSim3DCameraYawMaximumMrad = 700,
   kSim3DCameraDistanceMinimumX100 = 200,
   kSim3DCameraDistanceMaximumX100 = 2000,
-  /* The connected backdrop is intentionally local. Controls and rendering
-   * must agree on this ceiling or zoom-out creates invisible input travel. */
+  /* The connected backdrop is intentionally local. Controls, captured poses
+   * and rendering must agree, or input creates invisible travel at an edge. */
   kSim3DConnectedCameraDistanceMaximumX100 = 450,
+  kSim3DConnectedCameraYawMaximumMrad = 350,
 };
 
 #endif  /* SIM3D_CAMERA_LIMITS_H */

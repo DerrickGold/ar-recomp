@@ -79,30 +79,6 @@ static int32_t s_sim_shadow_indices[kSimShadowMaxIndices];
  * footprint 1.0, so their silhouettes still meet their own feet. */
 static const float kSimShadowHeightShrink = 6.0f;
 
-/* Extra billboard scale on top of the perspective scale the lift already
- * produces. That true component is only about 1.5% at the standard flight
- * plane -- correct, and far too subtle to read -- so `height_pop_pct` adds a
- * deliberate presentation pop, normalized against the catalogue flight plane
- * so the setting's percentage means what it says. It scales the sprite in
- * place rather than biasing its depth: pulling a flyer toward the camera would
- * move it back down-screen and close the very gap to its own shadow that sells
- * the altitude. Paired with kSimShadowHeightShrink, a rising actor grows while
- * its shadow shrinks, which is what reads as height.
- *
- * The alternative -- shrinking the ground and grounded actors instead -- was
- * considered and rejected: scaling the ground with its actors is just a camera
- * zoom-out (same relative effect, but it reframes the town and fights the
- * distance setting), and shrinking grounded actors alone breaks their
- * footprint against the map tiles they stand on. A flyer has no such fixed
- * reference, so it is the cheap place to put the difference. */
-float SimBillboardHeightPop(ArRenderRectI source, float height_world,
-                                   unsigned height_pop_pct) {
-  if (height_world <= 0.0f || !height_pop_pct || source.h <= 0) return 1.0f;
-  float reference = (float)kSimVirtualHeight_Flying / (float)source.h;
-  if (reference <= 0.0f) return 1.0f;
-  return 1.0f + (height_world / reference) * (float)height_pop_pct /
-      (float)kPercentScale;
-}
 /* How much of a caster's art height becomes ground depth. A billboard has no
  * depth, so shearing its silhouette along the light the way a solid body would
  * collapses it to a sliver under this shallow camera; the silhouette is
@@ -271,11 +247,11 @@ static SimShadowAxisResult BlurSimShadowAxis(
  * is resolution-independent rather than shrinking as the window grows. */
 static PresentationOutcome BlurSimShadowMask(
     ArRenderTexture mask, int w, int h, unsigned softness_pct,
-    bool *mask_valid) {
+    float source_scale, bool *mask_valid) {
   if (mask_valid) *mask_valid = true;
   if (!softness_pct) return kPresentationOutcome_Complete;
   float radius =
-      (float)softness_pct / (float)kPercentScale * (float)h * 0.02f;
+      (float)softness_pct / (float)kPercentScale * (float)h * 0.02f * source_scale;
   if (radius < 0.5f) return kPresentationOutcome_Complete;
   /* D4b's separable blur alone needs the second full-viewport target. Keep a
    * hard-shadow run from reserving it, which is 31.6 MiB at 4K. Allocation
@@ -322,11 +298,12 @@ void SimObjectDrawnWorld(const SimRenderObject *object,
 /* Silhouettes are accumulated into a transparent mask and composited once, so
  * overlapping casters cannot double-darken the ground and the darkened result
  * can never touch sky, dialogs, HUD, or settings. */
-PresentationOutcome DrawSimShadowMask(
+static PresentationOutcome BuildSimShadowMask(
     const FrameSlot *slot, bool virtual_height, bool soft_shadows,
-    bool terrain_depth_receiver, ArRenderRectI source,
-    ArRenderRectI viewport,
-    const float matrix[16]) {
+    ArRenderRectI source, ArRenderRectI viewport, const float matrix[16],
+    const SimBackgroundVoxelRenderParams *presentation_params,
+    ArRenderTexture *out_mask) {
+  *out_mask = ArRenderTexture_Invalid();
   if (!ArRenderTexture_IsValid(g_sim_obj_atlas_texture) ||
       !slot->sim.atlas_valid)
     return kPresentationOutcome_Complete;
@@ -421,7 +398,9 @@ PresentationOutcome DrawSimShadowMask(
     /* Height shrinks the footprint about the caster's ground point, so the
      * classified height and the player's height-scale tuning both feed the
      * shadow's size as well as its offset. */
-    float footprint = Scene3D_ShadowFootprintScale(height_world,
+    const float footprint_height = presentation_params
+        ? height_world * source.h / presentation_params->source.h : height_world;
+    float footprint = Scene3D_ShadowFootprintScale(footprint_height,
                                                    kSimShadowHeightShrink);
     Scene3DPoint corner[4];
     bool shadow_visible = true;
@@ -490,8 +469,12 @@ PresentationOutcome DrawSimShadowMask(
   if (mask_valid && voxel_caster) {
     SimBackgroundVoxelRenderParams voxel_params =
         SimVoxelRenderParams(slot, source, local_viewport, matrix);
-    SimBackgroundVoxelRenderer_DrawShadowMask(
-        &g_render_device, &voxel_params, light_x, light_y);
+    if (presentation_params)
+      SimBackgroundVoxelRenderer_DrawTownShadowMask(
+          &g_render_device, &voxel_params, presentation_params, light_x, light_y);
+    else
+      SimBackgroundVoxelRenderer_DrawShadowMask(
+          &g_render_device, &voxel_params, light_x, light_y);
   }
 
   PresentationOutcome outcome = mask_valid
@@ -500,6 +483,7 @@ PresentationOutcome DrawSimShadowMask(
   if (mask_valid && soft_shadows) {
     const PresentationOutcome blur = BlurSimShadowMask(
         mask, shadow_w, shadow_h, slot->sim.shadow_softness_pct,
+        presentation_params ? (float)presentation_params->source.h/source.h : 1,
         &mask_valid);
     outcome = PresentationOutcome_Combine(outcome, blur);
   }
@@ -509,6 +493,42 @@ PresentationOutcome DrawSimShadowMask(
   if (!target_restored || !PresentationOutcome_IsUsable(outcome))
     return kPresentationOutcome_CoreFailure;
   if (!mask_valid) return kPresentationOutcome_OptionalOmitted;
+  *out_mask = mask;
+  return outcome;
+}
+
+PresentationOutcome PrepareSimTownShadowMask(
+    const FrameSlot *slot, bool virtual_height, bool soft_shadows,
+    ArRenderRectI source, ArRenderRectI viewport, const float matrix[16],
+    ArRenderTexture *out_mask) {
+  if (!slot || !matrix || !out_mask || source.h <= 0 || viewport.h <= 0)
+    return kPresentationOutcome_CoreFailure;
+  const SimBackgroundVoxelRenderParams presentation =
+      SimVoxelRenderParams(slot, source, viewport, matrix);
+  /* Use the same native XY domain as the retained ground's UVs. Height
+   * affects light displacement, never this orthographic mask projection. */
+  const ArRenderRectI town = {
+    slot->sim.underlay_screen_x0 - slot->sim.camera_x,
+    -(int)slot->sim.camera_y, 512, 512};
+  const float top_down[16] = {2,0,0,0, 0,2,0,0, 0,0,0,0, 0,0,0,1};
+  /* At least one texel per source pixel, up to the existing 4M-pixel budget.
+   * This scales with the output like the screen mask without allocating an
+   * unbounded whole-world target when the camera zooms in. */
+  const int size = (int)fminf(2048, fmaxf(512,
+      ceilf(512.0f * viewport.h / source.h)));
+  return BuildSimShadowMask(slot, virtual_height, soft_shadows, town,
+      (ArRenderRectI){0,0,size,size}, top_down, &presentation, out_mask);
+}
+
+PresentationOutcome DrawSimShadowMask(
+    const FrameSlot *slot, bool virtual_height, bool soft_shadows,
+    bool terrain_depth_receiver, ArRenderRectI source,
+    ArRenderRectI viewport, const float matrix[16]) {
+  ArRenderTexture mask;
+  PresentationOutcome outcome = BuildSimShadowMask(slot, virtual_height,
+      soft_shadows, source, viewport, matrix, NULL, &mask);
+  if (!PresentationOutcome_IsUsable(outcome) || !ArRenderTexture_IsValid(mask))
+    return outcome;
 
   /* In an elevated voxel town this texture is consumed later by the same GPU
    * pass that owns terrain/model depth. Leaving it uncomposited here prevents

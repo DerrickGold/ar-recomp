@@ -92,6 +92,9 @@ static void TestOpenWaterMaterial(void) {
   rom[kTilesOffset + 127] = 0x20; /* Just one land texel protects a shore. */
   CHECK(SimWorldMap_Init(rom, kRomSize));
   CHECK(SimWorldMap_CellIsOpenWater(0, 0));
+  uint8_t mask[64];
+  CHECK(SimWorldMap_OpenWaterMask(1,0,mask));
+  for (int p=0;p<64;++p) CHECK(mask[p]==(p!=63));
   CHECK(!SimWorldMap_CellIsOpenWater(1, 0));
   CHECK(SimWorldMap_CellIsOpenWater(0x10, 0));
   CHECK(!SimWorldMap_CellIsOpenWater(0x12, 0)); /* Also blue in this fake palette. */
@@ -102,20 +105,36 @@ static void TestOpenWaterMaterial(void) {
     SimWorldMap_SetWaterAnimationSource(0xB000 + f * 64);
     CHECK(SimWorldMap_CellIsOpenWater(0, 0));
     CHECK(SimWorldMap_GeographySerial() == geography);
+    CHECK(SimWorldMap_OpenWaterMask(0,0,mask));
+    for (int p=0;p<64;++p) CHECK(mask[p]==1);
   }
   uint8_t map[kSimWorldMapBytes];
   memcpy(map, SimWorldMap_Baseline(), sizeof(map));
   map[0] = 1; map[1] = 0xAA;
   CHECK(SimWorldMap_PublishBuiltTilemap(map) == 2);
   CHECK(!SimWorldMap_CellIsOpenWater(0, 0) && SimWorldMap_CellIsOpenWater(1, 0));
+  CHECK(SimWorldMap_OpenWaterMask(0,0,mask));
+  for (int p=0;p<64;++p) CHECK(mask[p]==(p!=63));
   /* A changed/custom animation cannot make the opacity pulse by phase. */
   rom[kWaterFramesOffset + 3 * 64] = 0x20;
   CHECK(SimWorldMap_Init(rom, kRomSize));
   CHECK(!SimWorldMap_CellIsOpenWater(0, 0));
   SimWorldMap_SetWaterAnimationSource(0xB000);
   CHECK(!SimWorldMap_CellIsOpenWater(0, 0));
+  CHECK(SimWorldMap_OpenWaterMask(0,0,mask));
+  for (int p=0;p<64;++p) CHECK(mask[p]==(p!=0));
+  uint8_t original[64];
+  memset(mask,0x5a,sizeof(mask)); memcpy(original,mask,sizeof(mask));
+  CHECK(!SimWorldMap_OpenWaterMask(-1,0,mask));
+  CHECK(!SimWorldMap_OpenWaterMask(0,-1,mask));
+  CHECK(!SimWorldMap_OpenWaterMask(128,0,mask));
+  CHECK(!SimWorldMap_OpenWaterMask(0,128,mask));
+  CHECK(!SimWorldMap_OpenWaterMask(0,0,NULL));
+  CHECK(!memcmp(mask,original,sizeof(mask)));
   SimWorldMap_Shutdown();
   CHECK(!SimWorldMap_CellIsOpenWater(0, 0));
+  CHECK(!SimWorldMap_OpenWaterMask(0,0,mask));
+  CHECK(!memcmp(mask,original,sizeof(mask)));
   free(rom);
 }
 

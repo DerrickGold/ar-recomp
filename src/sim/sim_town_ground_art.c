@@ -39,6 +39,8 @@ static struct {
   int16_t animation_index[kTiles];
   uint32_t *animated[kVariants][kSimTownGroundAnimationFrames - 1];
   bool animation_failed[kVariants];
+  uint8_t open_water[kVariants][kTiles]; /* 0 unknown, 1 other, 2 water */
+  uint16_t water_rows[kVariants][kTiles][kSimTownCellPixels];
 } s_art;
 
 static uint32_t PaletteColor(const uint8_t *rom, size_t at) {
@@ -184,4 +186,42 @@ const uint32_t *SimTownGroundArt_Metatile(
       (development_tier >= 2 ? 1u : 0u);
   return DecodeVariant(variant)
       ? s_art.pixels[variant] + (size_t)tile * kTilePixels : NULL;
+}
+
+static void ClassifyWater(unsigned variant, uint8_t tile) {
+  uint8_t *cached=&s_art.open_water[variant][tile];
+  if (!*cached) {
+    uint16_t *rows=s_art.water_rows[variant][tile];
+    for (unsigned y=0;y<kSimTownCellPixels;++y) rows[y]=UINT16_MAX;
+    uint8_t indices[kTilePixels];
+    const unsigned phases=SimTownGroundArt_AnimationAvailable() ? kSimTownGroundAnimationFrames : 1;
+    for (unsigned phase=0;phase<phases;++phase) {
+      DecodeIndices(variant,tile,phase,indices);
+      /* These are native SIM's ocean/wave identities, not expanded RGB.
+       * $19+ includes foam/beach, $27 marsh, and zero is transparent. */
+      for (unsigned p=0;p<kTilePixels;++p)
+        if (indices[p]!=0x17 && indices[p]!=0x18)
+          rows[p/kSimTownCellPixels] &= (uint16_t)~(1u<<(p%kSimTownCellPixels));
+    }
+    *cached=2;
+    for (unsigned y=0;y<kSimTownCellPixels;++y)
+      if (rows[y]!=UINT16_MAX) *cached=1;
+  }
+}
+
+bool SimTownGroundArt_IsOpenWater(uint8_t town, uint8_t development_tier, uint8_t tile) {
+  if (!s_art.available || town<1 || town>kSimTownCount) return false;
+  const unsigned variant=(town==6 ? 2u : 0u) | (development_tier>=2 ? 1u : 0u);
+  ClassifyWater(variant,tile);
+  return s_art.open_water[variant][tile]==2;
+}
+
+bool SimTownGroundArt_OpenWaterMask(uint8_t town, uint8_t development_tier,
+    uint8_t tile, uint8_t mask[256]) {
+  if (!mask || !s_art.available || town<1 || town>kSimTownCount) return false;
+  const unsigned variant=(town==6 ? 2u : 0u) | (development_tier>=2 ? 1u : 0u);
+  ClassifyWater(variant,tile);
+  for (unsigned p=0;p<kTilePixels;++p)
+    mask[p]=(s_art.water_rows[variant][tile][p/kSimTownCellPixels]>>(p%kSimTownCellPixels))&1u;
+  return true;
 }

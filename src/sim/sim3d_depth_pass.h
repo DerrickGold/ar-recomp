@@ -35,6 +35,9 @@ typedef enum Sim3DDepthPassLayer {
   kSim3DDepthPass_WorldMountain,
   /* Sorted translucent density slices; independent atlas, no depth writes. */
   kSim3DDepthPass_VolumeCloud,
+  /* Caller-ordered pixel-art billboards. Test opaque world depth, never write
+   * it: transparent texels and multipart sprites must not occlude later art. */
+  kSim3DDepthPass_Billboard,
   kSim3DDepthPassLayerCount,
 } Sim3DDepthPassLayer;
 
@@ -44,6 +47,29 @@ typedef struct Sim3DDepthVertex {
   ArRenderColorF color;
   ArRenderPointF uv;
 } Sim3DDepthVertex;
+
+/* Copies a batch of screen-space quads with normalized atlas UVs. One borrowed
+ * atlas per pass, valid on this device and kept alive through Submit. Repeated
+ * appends preserve caller order; changing atlas or invalid inputs rejects the
+ * entire append. Begin releases the binding (not the texture). No texture
+ * copy, persistent atlas cache, shader preparation or backend handle escapes
+ * this contract. Use only these entry points for the Billboard material. */
+bool Sim3DDepthPass_AppendBillboards(ArRenderTexture atlas,
+    const Sim3DDepthVertex *vertices, size_t quad_count);
+/* Directional inward alpha-edge lighting from the borrowed atlas. Offset points
+ * toward the light in normalized UV units; padding must cover its magnitude.
+ * Components are finite in [-1,1], with at least one nonzero. Color is bounded
+ * RGBA; alpha is rim strength, independent of the billboard's color-math alpha.
+ * Style is copied; identical consecutive styles batch without reordering or
+ * additional vertex uploads. Zero strength uses the ordinary material. */
+typedef struct Sim3DDepthBillboardRim {
+  ArRenderPointF sample_offset;
+  ArRenderColorF color;
+} Sim3DDepthBillboardRim;
+bool Sim3DDepthPass_AppendRimBillboards(ArRenderTexture atlas,
+    const Sim3DDepthVertex *vertices, size_t quad_count,
+    const Sim3DDepthBillboardRim *rim);
+enum { kSim3DDepthMaximumBillboardQuads = 4096 };
 
 typedef struct Sim3DDepthMesh Sim3DDepthMesh;
 typedef struct Sim3DDepthPosition { float x, y, depth; } Sim3DDepthPosition;
@@ -283,6 +309,17 @@ typedef struct Sim3DDepthSurfaceVertex {
   ArRenderColorF color;
   ArRenderPointF uv;
 } Sim3DDepthSurfaceVertex;
+/* Spatial color treatment in the source's independent mask coordinates.
+ * Inside clear_rect the source is unchanged. Smooth distance/feather outside
+ * it applies dimming followed by haze, without changing alpha, depth, texture
+ * coverage or geometry. Zero feather treats the whole source uniformly;
+ * zero dim and haze.a disable the effect. All values must be finite, rect
+ * and feather use the same bounded units as surface overlay masks. */
+typedef struct Sim3DDepthSurfaceFocus {
+  ArRenderRectF clear_rect;
+  float feather, dim;
+  ArRenderColorF haze;
+} Sim3DDepthSurfaceFocus;
 typedef struct Sim3DDepthSurfaceTransform {
   Sim3DDepthRadialTransform radial;
   float extra_scale, light[3], ambient, diffuse;
@@ -290,6 +327,7 @@ typedef struct Sim3DDepthSurfaceTransform {
    * identity, preserving the ordinary chart-space source. Placement/lighting
    * are unaffected. Lets a rigidly oriented source sample another sphere frame. */
   float shadow_basis[3][3];
+  Sim3DDepthSurfaceFocus focus;
 } Sim3DDepthSurfaceTransform;
 Sim3DDepthMesh *Sim3DDepthPass_CreateSurfaceMesh(void);
 bool Sim3DDepthPass_UpdateSurfaceMesh(Sim3DDepthMesh *mesh,
@@ -316,15 +354,19 @@ bool Sim3DDepthPass_AppendSurfaceMesh(Sim3DDepthMesh *mesh,
 /* Optional screen-linear overlays use the SAME source/position/depth path.
  * clear_rect and feather are in source UV units: opacity ramps smoothly with
  * Euclidean distance outside the rectangle. Zero feather means full coverage.
- * GroundBlur multiplies lit source RGBA by color; GroundHaze replaces RGB by
- * color, retaining source alpha. At most one of each layer, no depth writes.
+ * GroundBlur/ShadowReceiver multiply sampled RGBA by color; GroundHaze
+ * replaces RGB by color, retaining source alpha. At most one of each layer,
+ * no depth writes. Optional borrowed textures follow SurfaceBatch ownership;
+ * invalid selects the layer's normal atlas/receiver. GroundHaze has no texture.
  * The entire ground/shadow/overlay group is atomic and shares existing budgets. */
 typedef struct Sim3DDepthSurfaceOverlay {
   Sim3DDepthPassLayer layer;
   ArRenderRectF clear_rect;
   float feather;
   ArRenderColorF color;
+  ArRenderTexture texture;
 } Sim3DDepthSurfaceOverlay;
+enum { kSim3DDepthMaximumSurfaceOverlays = 3 };
 bool Sim3DDepthPass_AppendSurfaceLayers(Sim3DDepthMesh *mesh,
     const Sim3DDepthSurfaceTransform *transform,
     const Sim3DDepthSphericalSample *shadows, size_t shadow_count,
@@ -342,6 +384,12 @@ bool Sim3DDepthPass_AppendSurfaceLayers(Sim3DDepthMesh *mesh,
  * alpha and would otherwise fill transparent holes. */
 typedef struct Sim3DDepthSurfaceBatch {
   Sim3DDepthPassLayer layer;
+  /* Optional opaque material texture; invalid selects the layer's atlas.
+   * Borrowed from this pass's render device through Submit, never owned or
+   * retained across passes. Spherical shadows use their own layer atlas;
+   * overlays may borrow an independent texture with this same lifetime.
+   * Filtering and depth/alpha policy remain properties of layer. */
+  ArRenderTexture texture;
   Sim3DDepthMeshRange range;
   Sim3DDepthSurfaceTransform transform;
   const Sim3DDepthSphericalSample *shadows;

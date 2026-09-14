@@ -16,7 +16,8 @@ enum {
   kSimTownTerrainCornerCount = 4,
   kSimTownTerrainQ8Scale = 256,
   kSimTownTerrainLandscapeHeightMinimumPct = 0,
-  kSimTownTerrainLandscapeHeightDefaultPct = kPercentScale,
+  /* Keep the default relief modest; 100% remains the full derived contour. */
+  kSimTownTerrainLandscapeHeightDefaultPct = 40,
   kSimTownTerrainLandscapeHeightMaximumPct = 150,
   kSimTownTerrainLandscapeHeightStepPct = 5,
 };

@@ -79,8 +79,45 @@ CONTACT_EXACT_HEIGHT_CLASSES = ("ground_effect", "ground_strike")
 MAP_PLANE_TRAIT = 1 << 0
 NO_SHADOW_TRAIT = 1 << 2
 SIM_EFFECT_VISIBLE = 1 << 0
+SIM_EFFECT_VOLCANO_FIREBALL = 7
 # kSimHeightSlewStep in sim_render_metadata.h.
 HEIGHT_SLEW_STEP = 4
+
+
+def is_volcano_fireball_source(source: dict) -> bool:
+    """Audited packed identity and airborne art, not arbitrary projectiles.
+
+    This is the explicit exception in CaptureEffectInstances/ApplyHeightSlew:
+    eruption presentation supplies a ballistic position instead of easing
+    toward the classifier's constant 24-pixel flight plane.
+    """
+    return (source.get("tier") == 1 and source.get("type") == 0x0E01 and
+            source.get("composition") in (0xE7D0, 0xE7A6))
+
+
+def is_ballistic_effect(effect: dict, source: dict) -> bool:
+    return (is_volcano_fireball_source(source) and effect.get("kind") == SIM_EFFECT_VOLCANO_FIREBALL and
+            effect.get("kind_name") == "volcano_fireball" and
+            effect.get("record") == source.get("record") and
+            effect.get("composition") == source.get("composition"))
+
+
+def effect_anchor_valid(effect: dict, source: dict) -> bool:
+    world = effect.get("world", [])
+    if not isinstance(world, list) or len(world) != 2 or any(
+            type(v) is not int or not 0 <= v <= 0xFFFF for v in world):
+        return False
+    return is_ballistic_effect(effect, source) or world == [source.get("x"), source.get("y")]
+
+
+def is_ballistic_object(obj: dict, sources: list[dict]) -> bool:
+    index = obj.get("source_index", -1)
+    if type(index) is not int or not 0 <= index < len(sources):
+        return False
+    source = sources[index]
+    return (is_volcano_fireball_source(source) and obj.get("tier") == 1 and
+            obj.get("record") == source.get("record") and
+            obj.get("composition") == source.get("composition"))
 
 
 def load_manifest(path: Path) -> dict:
@@ -363,6 +400,7 @@ def read_d1_metadata(path: Path,
     effect_color_counts: dict[str, dict[str, int]] = {}
     effect_compositions: dict[str, set[int]] = {}
     effect_generations: dict[str, set[int]] = {}
+    ballistic_effect_instances = ballistic_object_instances = 0
     effect_carry: dict[tuple[str, int, int], dict] = {}
     allowed_unpacked = {
         (int(item["game_frame"]), int(item["record"]),
@@ -605,7 +643,8 @@ def read_d1_metadata(path: Path,
                             source["composition"]):
                     issue(line_number,
                           f"effect {effect_index} does not match its source")
-                if world != [int(source["x"]), int(source["y"])]:
+                ballistic_effect_instances += is_ballistic_effect(effect, source)
+                if not effect_anchor_valid(effect, source):
                     issue(line_number,
                           f"effect {effect_index} world anchor drifted")
                 if generation <= 0:
@@ -747,7 +786,9 @@ def read_d1_metadata(path: Path,
                 # plane, and only by the documented step.
                 previous = previous_heights.get(record)
                 contact_exact = height_class in CONTACT_EXACT_HEIGHT_CLASSES
-                if previous is not None and height != previous:
+                ballistic = is_ballistic_object(obj, sources)
+                ballistic_object_instances += ballistic
+                if previous is not None and height != previous and not ballistic:
                     step = abs(height - previous)
                     # Entering a contact class is a deliberate snap: the strike
                     # must be on the ground for its very first frame.
@@ -873,6 +914,8 @@ def read_d1_metadata(path: Path,
         "lifted_object_count": lifted_object_count,
         "height_ramp_step_count": height_ramp_steps,
         "height_slew_violation_count": height_slew_violations,
+        "ballistic_effect_instance_count": ballistic_effect_instances,
+        "ballistic_object_instance_count": ballistic_object_instances,
         "shadow_caster_count": shadow_caster_count,
         "shadow_caster_lifted_count": shadow_caster_lifted_count,
         "shadow_opacity_values": sorted(shadow_opacity_values),

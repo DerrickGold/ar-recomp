@@ -420,30 +420,39 @@ void SimBackgroundVoxelProject_FlushBatch(ArRenderDevice *device,
   FlushBatchTexture(device, batch, ArRenderTexture_Invalid());
 }
 
+void SimBackgroundVoxelProject_FaceColors(uint8_t face_material,
+    const uint8_t face_brightness[4], const SimBackgroundVoxelPalette *palette,
+    SimBackgroundVoxelShading shading, ArRenderColorF colors[4]) {
+  const SimBackgroundVoxelMaterial material = (SimBackgroundVoxelMaterial)face_material;
+  const bool valid_material = palette && material >= 0 &&
+      material < kSimVoxelMaterial_Count;
+  for (int i = 0; i < 4; i++) {
+    int level = shading == kSimBackgroundVoxelShading_MaterialAware
+        ? SimBackgroundVoxelPalette_LevelForBrightness(face_brightness[i])
+        : kSimBackgroundVoxelPaletteBaseLevel;
+    uint32_t argb = valid_material
+        ? palette->material[material][level] : 0xFFFF00FFu;
+    uint8_t brightness =
+        shading == kSimBackgroundVoxelShading_MaterialAware
+            ? 255 : face_brightness[i];
+    colors[i] = VertexColour(argb,brightness);
+  }
+}
+
 bool SimBackgroundVoxelProject_ResolveFace(
     const SimBackgroundProjectedFace *face,
     const SimBackgroundVoxelPalette *palette,
     SimBackgroundVoxelShading shading,
     Sim3DDepthVertex vertices[4]) {
   if (!face || !vertices) return false;
-  const SimBackgroundVoxelMaterial material =
-      (SimBackgroundVoxelMaterial)face->material;
-  const bool valid_material = palette && material >= 0 &&
-      material < kSimVoxelMaterial_Count;
+  ArRenderColorF colors[4];
+  SimBackgroundVoxelProject_FaceColors(face->material,face->brightness,palette,shading,colors);
   for (int i = 0; i < 4; i++) {
-    int level = shading == kSimBackgroundVoxelShading_MaterialAware
-        ? SimBackgroundVoxelPalette_LevelForBrightness(face->brightness[i])
-        : kSimBackgroundVoxelPaletteBaseLevel;
-    uint32_t argb = valid_material
-        ? palette->material[material][level] : 0xFFFF00FFu;
-    uint8_t brightness =
-        shading == kSimBackgroundVoxelShading_MaterialAware
-            ? 255 : face->brightness[i];
     vertices[i] = (Sim3DDepthVertex){
       .x = face->points[i].x,
       .y = face->points[i].y,
       .depth = face->gpu_depth[i],
-      .color = VertexColour(argb, brightness),
+      .color = colors[i],
       .uv = {-1.0f, -1.0f},
     };
   }
