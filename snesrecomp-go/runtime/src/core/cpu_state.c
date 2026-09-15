@@ -6,12 +6,17 @@
 #include "runner_internal.h"
 #include "runner_game_module_internal.h"
 #include "runner_state_internal.h"
+#include "../snes/snes.h"
+#include "../snes/cart.h"
+#include "../snes/cart_map_internal.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 CpuState g_cpu;
+uint32 g_cpu_wait_pc24;
+uint32 g_cpu_wait_resume_pc24;
 void (*g_cpu_brk_hook)(CpuState *cpu);
 void (*g_cpu_cop_hook)(CpuState *cpu);
 
@@ -51,6 +56,12 @@ static int hardware_register(uint8 bank, uint16 address) {
 static int sram_offset(uint8 bank, uint16 address) {
     uint32 offset;
     if (g_sram == NULL || g_sram_size <= 0) return -1;
+    if (g_snes != NULL && g_snes->cart != NULL &&
+        g_snes->cart->type == SR_CART_MAPPING_HIROM) {
+        const SrCartAddress decoded = sr_cart_map_write_inline(
+            SR_CART_MAPPING_HIROM, bank, address, (uint32)g_sram_size);
+        return decoded.region == SR_CART_REGION_SRAM ? (int)decoded.offset : -1;
+    }
     if (((bank >= 0x70u && bank <= 0x7du) ||
          (bank >= 0xf0u && bank <= 0xfdu)) && address < 0x8000u) {
         offset = ((uint32)(bank & 0x0fu) << 15) | address;
@@ -66,7 +77,11 @@ static int sram_offset(uint8 bank, uint16 address) {
 static void pace_hardware(uint16 address) {
     g_main_cpu_cycles_estimate += 256u;
     if (address >= 0x2140u && address <= 0x217fu) {
-        g_apu_pace_cycles_estimate += 256u;
+        // A port access/poll is a short CPU instruction sequence, not 256
+        // CPU cycles. Large catch-up quanta can skip an IPL execute-token
+        // acknowledgement before uploaded code replaces the output latch.
+        // The frame timeline still owns long-term APU/audio advancement.
+        g_apu_pace_cycles_estimate += 8u;
     }
 }
 
@@ -289,11 +304,11 @@ static void dispatch_missing_body_warn(CpuState *cpu, uint32 site_pc24,
 }
 
 static void record_dispatch(uint32 pc24, uint32 source_pc24, CpuState *cpu,
-                            int found, int mirrored, int trapped,
+                            int found, int mirrored, int trapped, int pushed,
                             const char *label) {
     if (sr_runner_event_enabled(SR_EVENT_MASK_DYNAMIC_DISPATCH)) {
         SrRunnerEvent runner_event = {0};
-        int continuation = dispatch_source_is_continuation(cpu, source_pc24);
+        int continuation = !pushed && dispatch_source_is_continuation(cpu, source_pc24);
         runner_event.type = SR_EVENT_DYNAMIC_DISPATCH;
         runner_event.frame_counter = snes_frame_counter >= 0
             ? (uint64)snes_frame_counter : 0u;
@@ -320,7 +335,7 @@ static void record_dispatch(uint32 pc24, uint32 source_pc24, CpuState *cpu,
 void cpu_trace_resolved_dispatch(CpuState *cpu, uint32 pc24,
                                  uint32 source_pc24) {
     record_dispatch(pc24 & 0xffffffu, source_pc24 & 0xffffffu, cpu, 1, 0,
-                    0, NULL);
+                    0, 0, NULL);
 }
 
 void cpu_trace_trapped_dispatch(CpuState *cpu, uint32 pc24,
@@ -331,7 +346,19 @@ void cpu_trace_trapped_dispatch(CpuState *cpu, uint32 pc24,
     pc24 &= 0xffffffu;
     function = dispatch_lookup_mirrored(cpu, pc24, &mirrored);
     record_dispatch(pc24, source_pc24 & 0xffffffu, cpu,
-                    function != NULL, mirrored, 1, NULL);
+                    function != NULL, mirrored, 1, 0, NULL);
+}
+
+void cpu_trace_missing_pushed_target(CpuState *cpu, uint32 pc24,
+                                     uint32 source_pc24) {
+    int mirrored;
+    if (!sr_runner_event_enabled(SR_EVENT_MASK_DYNAMIC_DISPATCH)) return;
+    pc24 &= 0xffffffu;
+    if (dispatch_lookup_mirrored(cpu, pc24, &mirrored) != NULL) return;
+    /* The generated native-stack check proved this word/frame was pushed
+     * below the active caller frame. An RTS/RTL opcode alone must not hide
+     * its missing handler as an ordinary return continuation. */
+    record_dispatch(pc24, source_pc24 & 0xffffffu, cpu, 0, 0, 1, 1, NULL);
 }
 
 static RecompReturn dispatch_once(CpuState *cpu, uint32 pc24,
@@ -346,7 +373,7 @@ static RecompReturn dispatch_once(CpuState *cpu, uint32 pc24,
     function = dispatch_lookup_mirrored(cpu, pc24, &mirrored);
 #if !SNESRECOMP_SEMANTIC_DISPATCH_TRACE
     record_dispatch(pc24, source_pc24, cpu, function != NULL, mirrored,
-                    0, g_last_recomp_func);
+                    0, 0, g_last_recomp_func);
 #endif
     if (function == NULL &&
         !dispatch_source_is_continuation(cpu, source_pc24)) {
@@ -433,6 +460,12 @@ static RecompReturn dispatch_once(CpuState *cpu, uint32 pc24,
         cpu->S = miss_restore_stack;
         return RECOMP_RETURN_NORMAL;
     }
+    /* A registry body may be shared with a mirrored bank, but native PB is
+     * the actual control-flow target. In particular an unpaired RTL can
+     * arrive here with the dispatcher's previous PB still live. Install it
+     * on every driver iteration, after any legacy target redirection, before
+     * the compiled body reads a PB-relative jump table or executes PHK. */
+    cpu->PB = (uint8)(pc24 >> 16);
     cpu->host_return_valid = 0u;
     if (g_dispatch_depth_count < kDispatchDepthCapacity) {
         g_dispatch_depth[g_dispatch_depth_count++] = pc24;

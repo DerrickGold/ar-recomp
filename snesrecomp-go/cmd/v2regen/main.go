@@ -773,7 +773,7 @@ func censusStubs(args []string) error {
 
 func regenerate(args []string) error {
 	flags := flag.NewFlagSet("regen", flag.ContinueOnError)
-	romPath := flags.String("rom", "game.sfc", "headered or headerless LoROM image")
+	romPath := flags.String("rom", "game.sfc", "headered or headerless LoROM/HiROM image")
 	cfgDir := flags.String("cfg-dir", "recomp", "directory containing bankXX.cfg")
 	outDir := flags.String("out-dir", "src/gen", "generated C output directory")
 	jobs := flags.Int("jobs", runtime.NumCPU(), "parallel function workers")
@@ -783,6 +783,17 @@ func regenerate(args []string) error {
 	allowStubs := flags.Bool("allow-stubs", false, "write complete output and report stubs without failing this command")
 	funcsOut := flags.String("funcs-out", "", "optional generated funcs.h path; omit to keep regen output-only")
 	provenAnalysis := flags.Bool("experimental-proven-analysis", false, "apply closed static dispatch facts, exact direct-call M/X, and exact continuation regions in memory (requires an isolated --out-dir)")
+	storedTargets := flags.Bool("experimental-stored-targets", false, "emit open literal handler-slot address references as cold AOT roots; not a closed target proof (use isolated output)")
+	parkedWaits := flags.Bool("experimental-parked-waits", false, "park closed WAI loops; requires a host adapter handling RECOMP_RETURN_PARKED_WAIT and isolated output")
+	internalTails := flags.Bool("experimental-internal-tails", false, "expose existing decoded jump destinations as cold resumable-region entries; no new code discovery (isolated output required)")
+	var observedCensus []string
+	flags.Func("observed-dispatches", "ROM-hashed dispatch-census JSON for experimental native AOT roots, not static proofs (repeatable; isolated output required)", func(path string) error {
+		if strings.TrimSpace(path) == "" {
+			return errors.New("--observed-dispatches needs a census JSON path")
+		}
+		observedCensus = append(observedCensus, path)
+		return nil
+	})
 	analysisDB := flags.String("analysis-db", "", "apply a deterministic ROM-hashed proven-fact database")
 	_ = flags.String("prefix", "", "deprecated compatibility option")
 	if err := flags.Parse(args); err != nil {
@@ -806,13 +817,13 @@ func regenerate(args []string) error {
 		return errors.New("--experimental-proven-analysis and --analysis-db are mutually exclusive")
 	}
 	useProvenAnalysis := *provenAnalysis || strings.TrimSpace(*analysisDB) != ""
-	if useProvenAnalysis {
+	if useProvenAnalysis || *storedTargets || *parkedWaits || *internalTails || len(observedCensus) > 0 {
 		requestedOutput, pathErr := filepath.Abs(*outDir)
 		if pathErr != nil {
 			return fmt.Errorf("resolve --out-dir: %w", pathErr)
 		}
 		if filepath.Base(requestedOutput) == "gen" && filepath.Base(filepath.Dir(requestedOutput)) == "src" {
-			return errors.New("proven analysis requires an isolated --out-dir; refusing to replace src/gen")
+			return errors.New("experimental analysis requires an isolated --out-dir; refusing to replace src/gen")
 		}
 	}
 	if *provenAnalysis {
@@ -852,6 +863,10 @@ func regenerate(args []string) error {
 		ProvenEntryTemplates:          provenEntryTemplates,
 		AllowMatchingAuthoredFacts:    strings.TrimSpace(*analysisDB) != "",
 		ExperimentalExactDirectCallMX: useProvenAnalysis,
+		ExperimentalStoredTargets:     *storedTargets,
+		ExperimentalParkedWaits:       *parkedWaits,
+		ExperimentalInternalTails:     *internalTails,
+		ObservedDispatchCensus:        observedCensus,
 		Progress:                      func(format string, values ...any) { fmt.Printf("v2regen: "+format+"\n", values...) },
 	})
 	fmt.Printf("v2regen: %d banks, %d -> %d variants, %d files (%d changed), %s\n", report.Banks, report.InitialEntries, report.FinalEntries, report.Files, report.ChangedFiles, report.Elapsed.Round(time.Millisecond))
@@ -910,6 +925,7 @@ func emitFunction(args []string) error {
 	}
 	context := codegen.NewContext()
 	context.ROMSize = len(image)
+	context.ROMMapper = image.Mapper()
 	for _, entry := range bankConfig.Entries {
 		if entry.Name != "" {
 			context.Names[uint32(bank)<<16|uint32(entry.Start)] = entry.Name

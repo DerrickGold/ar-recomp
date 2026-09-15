@@ -4,12 +4,14 @@ import (
 	"fmt"
 
 	"github.com/DerrickGold/snesrecomp-go/internal/ir"
+	"github.com/DerrickGold/snesrecomp-go/internal/rom"
 )
 
 // Context owns all state that was module-global in Python codegen.py. Keeping
 // it per emit job makes concurrent function emission race-free.
 type Context struct {
 	ROMSize           int
+	ROMMapper         rom.Mapper
 	Names             map[uint32]string
 	ValidVariants     map[uint32]map[[2]uint8]struct{}
 	ProvenEquivalent  map[uint32]map[[2]uint8]map[[2]uint8]struct{}

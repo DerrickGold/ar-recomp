@@ -45,6 +45,27 @@ func TestDispatchCensusUsesCumulativeMilestoneMaximum(t *testing.T) {
 	}
 }
 
+func TestPushedHandlerMissIsNotHiddenBySemanticReturnEvent(t *testing.T) {
+	trace := strings.Join([]string{
+		`{"ch":"dispatch","site":"018100","target":"018200","m":0,"x":0,"found":1,"continuation":1,"hits":1,"final":1}`,
+		`{"ch":"dispatch","site":"018100","target":"018200","m":0,"x":0,"found":0,"continuation":0,"trapped":1,"hits":1,"final":1}`,
+	}, "\n")
+	r, err := ParseDispatchCensus(strings.NewReader(trace))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.MissingBodies != 1 || r.TrappedSites != 1 || len(r.Observations) != 2 {
+		t.Fatalf("lost explicit software-pushed handler evidence: %+v", r)
+	}
+	var out bytes.Buffer
+	if err := WriteDispatchCensus(&out, r, "text", true); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "func Observed_01_8200_M0X0") {
+		t.Fatal(out.String())
+	}
+}
+
 func TestShadowDispatchEvidenceRanksObservedUnresolvedSites(t *testing.T) {
 	report := ShadowReport{
 		ROM: ShadowROM{SHA256: strings.Repeat("a", 64)},

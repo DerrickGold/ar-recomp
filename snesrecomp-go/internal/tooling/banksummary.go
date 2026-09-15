@@ -66,6 +66,7 @@ type ShadowBankCallCheck struct {
 type shadowDBSummary struct {
 	valid     bool
 	preserves bool
+	constant  *byte // one exact DB on every modeled normal return
 	writes    bool
 	returns   uint8 // RTS=1, RTL=2
 	modes     []analysis.MXState
@@ -183,6 +184,10 @@ type shadowDBState struct {
 }
 
 func evaluateShadowDB(p *shadowDBProgram, summaries map[decoder.Variant]shadowDBSummary, hle map[uint32]bool, query *decoder.Variant) shadowDBEval {
+	return evaluateShadowDBWithStackPolicy(p, summaries, hle, query, false)
+}
+
+func evaluateShadowDBWithStackPolicy(p *shadowDBProgram, summaries map[decoder.Variant]shadowDBSummary, hle map[uint32]bool, query *decoder.Variant, conditionalStack bool) shadowDBEval {
 	r := shadowDBEval{}
 	block := func(pc uint32, reason string) {
 		r.summary.blockers = append(r.summary.blockers, ShadowBankBlocker{PC: pc, Reason: reason})
@@ -272,6 +277,12 @@ func evaluateShadowDB(p *shadowDBProgram, summaries map[decoder.Variant]shadowDB
 		}
 		poison := func() {
 			r.summary.writes = true
+			// Cold target inventory may ask what follows IF native writes
+			// leave the local saved bytes intact. This is not a preservation
+			// proof and is never enabled for published bank summaries.
+			if conditionalStack {
+				return
+			}
 			for i := range state.stack {
 				state.stack[i] = shadowDBUnknown
 			}
@@ -307,6 +318,9 @@ func evaluateShadowDB(p *shadowDBProgram, summaries map[decoder.Variant]shadowDB
 						check.PreservingCount++
 					} else {
 						preserves = false
+						if s.constant != nil && len(c.targets) == 1 {
+							state.db = int16(*s.constant)
+						}
 					}
 					if s.writes {
 						poison()
@@ -317,7 +331,9 @@ func evaluateShadowDB(p *shadowDBProgram, summaries map[decoder.Variant]shadowDB
 				if len(check.Blockers) == 0 && len(c.targets) > 0 {
 					check.Status = "preserves_DB_on_normal_return"
 					if !preserves {
-						state.db = shadowDBUnknown
+						if len(c.targets) != 1 || summaries[c.targets[0]].constant == nil {
+							state.db = shadowDBUnknown
+						}
 						check.Status = "may_change_DB"
 					}
 				}
@@ -461,6 +477,10 @@ func evaluateShadowDB(p *shadowDBProgram, summaries map[decoder.Variant]shadowDB
 	r.summary.modes = slices.Compact(r.summary.modes)
 	r.summary.valid = len(r.summary.blockers) == 0 && len(r.values) > 0
 	r.summary.preserves = r.summary.valid && len(r.values) == 1 && r.values[0] == shadowDBEntry
+	if r.summary.valid && len(r.values) == 1 && r.values[0] >= 0 && r.values[0] <= 255 {
+		b := byte(r.values[0])
+		r.summary.constant = &b
+	}
 	return r
 }
 
@@ -481,6 +501,10 @@ func shadowDBMemoryWrite(op byte, mode cpu65816.AddressingMode) bool {
 }
 
 func buildShadowDBSummaries(programs map[decoder.Variant]*shadowDBProgram, hle map[uint32]bool) map[decoder.Variant]shadowDBSummary {
+	return buildShadowDBSummariesWithStackPolicy(programs, hle, false)
+}
+
+func buildShadowDBSummariesWithStackPolicy(programs map[decoder.Variant]*shadowDBProgram, hle map[uint32]bool, conditionalStack bool) map[decoder.Variant]shadowDBSummary {
 	keys := make([]decoder.Variant, 0, len(programs))
 	for k := range programs {
 		keys = append(keys, k)
@@ -504,7 +528,7 @@ func buildShadowDBSummaries(programs map[decoder.Variant]*shadowDBProgram, hle m
 			if summaries[k].valid {
 				continue
 			}
-			s := evaluateShadowDB(programs[k], summaries, hle, nil).summary
+			s := evaluateShadowDBWithStackPolicy(programs[k], summaries, hle, nil, conditionalStack).summary
 			summaries[k] = s
 			if s.valid {
 				changed = true

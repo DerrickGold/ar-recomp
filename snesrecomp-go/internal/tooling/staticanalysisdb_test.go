@@ -105,7 +105,7 @@ func TestStaticAnalysisDatabaseRejectsNonStaticEvidenceAndUnknownFields(t *testi
 	}
 }
 
-func TestStaticAnalysisDatabaseAcceptsV17V18V19FactsAfterReportOnlyChanges(t *testing.T) {
+func TestStaticAnalysisDatabaseAcceptsV17ThroughV30FactsAfterReportOnlyChanges(t *testing.T) {
 	options, _ := shadowHLEInventoryFixture(t)
 	identity, err := shadowROMIdentity(options.ROMPath)
 	if err != nil {
@@ -120,7 +120,7 @@ func TestStaticAnalysisDatabaseAcceptsV17V18V19FactsAfterReportOnlyChanges(t *te
 		}},
 	}
 	path := filepath.Join(t.TempDir(), "compatible.json")
-	for _, version := range []int{17, 18, 19} {
+	for _, version := range []int{17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31} {
 		database.ShadowReportVersion = version
 		if err := WriteStaticAnalysisDatabaseFile(path, database); err != nil {
 			t.Fatal(err)

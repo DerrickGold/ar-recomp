@@ -57,6 +57,10 @@ type Instruction struct {
 	NativeReturnTable *NativeReturnTable
 
 	DispatchEntries []uint32
+	// DispatchOpen marks automatically recovered JMP targets as an open
+	// inventory, never a bound on the native pointer or selector. Authored
+	// dispatch contracts retain their existing closed-switch semantics.
+	DispatchOpen bool
 	// DispatchCandidateEntries is a report-only extension past a conservative
 	// zero-run bound. It must not drive successors or generated dispatch code
 	// until independent ownership/bounds evidence closes the target set.

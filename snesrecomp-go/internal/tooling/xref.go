@@ -164,7 +164,7 @@ func BuildXref(options XrefOptions) (XrefReport, error) {
 	}
 	return XrefReport{
 		Version: xrefReportVersion, Mode: "decoded_instruction_xref", NoWrite: true,
-		ROM:   ShadowROM{SHA256: hex.EncodeToString(hash[:]), Size: len(image), Mapper: "lorom"},
+		ROM:   ShadowROM{SHA256: hex.EncodeToString(hash[:]), Size: len(image), Mapper: romimage.Image(image).Mapper().String()},
 		Query: options.Query, QueryEnd: options.QueryEnd, AccessFilter: accessFilter,
 		Summary: XrefSummary{
 			References: len(references), RawWordEvidence: len(rawWords), UniqueSourcePCs: len(uniquePCs),

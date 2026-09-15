@@ -7,6 +7,7 @@ import (
 	"github.com/DerrickGold/snesrecomp-go/internal/codegen"
 	"github.com/DerrickGold/snesrecomp-go/internal/config"
 	"github.com/DerrickGold/snesrecomp-go/internal/cpu65816"
+	"github.com/DerrickGold/snesrecomp-go/internal/decoder"
 	"github.com/DerrickGold/snesrecomp-go/internal/rom"
 )
 
@@ -53,6 +54,74 @@ func TestLinearFunction(t *testing.T) {
 		if !strings.Contains(source, fragment) {
 			t.Errorf("source is missing %q:\n%s", fragment, source)
 		}
+	}
+}
+
+func TestOnlyClosedWaitLoopParks(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		code []byte
+		want bool
+	}{
+		{"short loop", []byte{0xcb, 0x80, 0xfd}, true},
+		{"long loop", []byte{0xcb, 0x82, 0xfc, 0xff}, true},
+		{"ordinary continuation", []byte{0xcb, 0x60}, false},
+		{"different target", []byte{0xcb, 0x80, 0x00, 0x60}, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			legacy := emitTestFunction(t, tt.code, FunctionOptions{Name: "Wait"})
+			if strings.Contains(legacy, "return RECOMP_RETURN_PARKED_WAIT;") {
+				t.Fatal("default generation changed the runner return contract")
+			}
+			source := emitTestFunction(t, tt.code, FunctionOptions{Name: "Wait", ParkClosedWaits: true})
+			if strings.Contains(source, "return RECOMP_RETURN_PARKED_WAIT;") != tt.want {
+				t.Fatal(source)
+			}
+			if tt.want && !strings.Contains(source, "g_cpu_wait_resume_pc24 = ((uint32)cpu->PB << 16) | 0x8001u;") {
+				t.Fatal(source)
+			}
+		})
+	}
+}
+
+func TestOrdinaryWaitCannotFallIntoAnotherReachableBlock(t *testing.T) {
+	// BEQ skips the WAI, so the following SEP block is decoded independently.
+	// The WAI path must return; merely marking it terminated emits C fallthrough.
+	for _, park := range []bool{false, true} {
+		source := emitTestFunction(t, []byte{0xf0, 1, 0xcb, 0xe2, 0x20, 0x60},
+			FunctionOptions{Name: "WaitJoin", ParkClosedWaits: park})
+		wait := strings.Index(source, "/* WAI:")
+		join := strings.Index(source, "L_8003_M1X1:")
+		if wait < 0 || join <= wait || !strings.Contains(source[wait:join], "return RECOMP_RETURN_NORMAL;") {
+			t.Fatal(source)
+		}
+	}
+}
+
+func TestSpeculativeBRKCannotPoisonWholeFunction(t *testing.T) {
+	image := make(rom.Image, 0x8000)
+	for i := range image {
+		image[i] = 0x60
+	}
+	// M1 decodes an immediate byte followed by BRK; M0 spans that zero.
+	// After a conditional edge this is local evidence, not entry-width proof.
+	copy(image, []byte{0xd0, 1, 0x60, 0xa9, 1, 0, 0x60})
+	end := uint16(0x8007)
+	g, err := decoder.DecodeFunction(image, 0, 0x8000, 1, 0, decoder.Options{End: &end})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findGarbageEvidence(image, 0, 0x8000, 1, 0, g, &end); len(got) != 0 {
+		t.Fatalf("conditional BRK poisoned entry: %+v", got)
+	}
+	copy(image, []byte{0xa9, 1, 0, 0x60})
+	end = 0x8004
+	g, err = decoder.DecodeFunction(image, 0, 0x8000, 1, 0, decoder.Options{End: &end})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findGarbageEvidence(image, 0, 0x8000, 1, 0, g, &end); len(got) == 0 {
+		t.Fatal("lost straight-line split-immediate evidence")
 	}
 }
 
@@ -131,7 +200,7 @@ func TestUnresolvedIndirectJumpUsesItsOwnDiagnostic(t *testing.T) {
 	source := emitTestFunction(t, []byte{0x6c, 0x34, 0x12},
 		FunctionOptions{Name: "Indirect", UnresolvedAllowed: true})
 	for _, fragment := range []string{
-		"uint16 _trap_address = cpu_read16(cpu, 0x00, (uint16)0x1234u);",
+		"uint16 _trap_address = cpu_read16_bank_wrap(cpu, 0x00, (uint16)0x1234u);",
 		"uint32 _trap_target = ((uint32)cpu->PB << 16) | (uint32)_trap_address;",
 		"cpu_trace_trapped_dispatch(cpu, _trap_target, 0x008000u);",
 		"cpu_trace_unresolved_indirect_jump(cpu, 0x008000)",
@@ -152,7 +221,7 @@ func TestUnresolvedIndexedIndirectJumpCensusUsesLiveX(t *testing.T) {
 		FunctionOptions{Name: "IndirectX", UnresolvedAllowed: true})
 	for _, fragment := range []string{
 		"uint16 _trap_pointer = (uint16)(0x1234u + cpu->X);",
-		"uint16 _trap_address = cpu_read16(cpu, cpu->PB, _trap_pointer);",
+		"uint16 _trap_address = cpu_read16_bank_wrap(cpu, cpu->PB, _trap_pointer);",
 		"uint32 _trap_target = ((uint32)cpu->PB << 16) | (uint32)_trap_address;",
 		"cpu_trace_trapped_dispatch(cpu, _trap_target, 0x008000u);",
 	} {
@@ -167,7 +236,7 @@ func TestUnresolvedLongIndirectJumpCensusReadsBankZeroPointer(t *testing.T) {
 		FunctionOptions{Name: "IndirectLong", UnresolvedAllowed: true})
 	for _, fragment := range []string{
 		"uint16 _trap_pointer = (uint16)0x1234u;",
-		"uint16 _trap_address = cpu_read16(cpu, 0x00, _trap_pointer);",
+		"uint16 _trap_address = cpu_read16_bank_wrap(cpu, 0x00, _trap_pointer);",
 		"uint8 _trap_bank = cpu_read8(cpu, 0x00, (uint16)(_trap_pointer + 2u));",
 		"uint32 _trap_target = ((uint32)_trap_bank << 16) | (uint32)_trap_address;",
 		"cpu_trace_trapped_dispatch(cpu, _trap_target, 0x008000u);",

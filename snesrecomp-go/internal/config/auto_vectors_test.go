@@ -2,6 +2,26 @@ package config
 
 import "testing"
 
+func TestAutoVectorsHiROMKeepsLiveInterruptWidths(t *testing.T) {
+	image := make([]byte, 0x10000)
+	image[0xffd5] = 0x31
+	image[0xffdc], image[0xffdd] = 0xff, 0xff
+	image[0xfffc], image[0xfffd] = 0x00, 0x81
+	image[0xffea], image[0xffeb] = 0x00, 0x82
+	image[0xffee], image[0xffef] = 0x00, 0x83
+	image[0x7ffc], image[0x7ffd] = 0xaa, 0xaa // wrong-map bait
+	entries := AppendAutoVectorEntries(image, nil)
+	if len(entries) != 9 {
+		t.Fatalf("want reset plus four widths for each native interrupt: %+v", entries)
+	}
+	for _, e := range entries {
+		want := map[string]uint16{"I_RESET": 0x8100, "I_NMI": 0x8200, "I_IRQ": 0x8300}[e.Name]
+		if e.Start != want {
+			t.Fatalf("wrong vector: %+v", e)
+		}
+	}
+}
+
 func TestAppendLoROMAutoVectorEntriesUsesLiveNativeInterruptWidths(t *testing.T) {
 	image := make([]byte, 0x8000)
 	image[0x7ffc], image[0x7ffd] = 0x00, 0x80

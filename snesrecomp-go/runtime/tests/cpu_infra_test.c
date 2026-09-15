@@ -1036,6 +1036,16 @@ static void test_return_ownership(void) {
     cpu_return_scope_begin(&outer,&cpu,0x008123,0x1fff,2);
     cpu.S=0x1fd0;
     cpu_return_scope_begin(&inner,&cpu,0x008123,0x1fe0,2);
+    cpu.S=0x1fd2;
+    check(cpu_accept_indirect_return(&cpu,0x1fd0,0x008123),
+          "exact immediate continuation accepts a manually popped native frame");
+    check(!cpu_accept_indirect_return(&cpu,0x1fe0,0x008123) &&
+          !cpu_accept_indirect_return(&cpu,0x1fd0,0x018123) &&
+          !cpu_accept_indirect_return(&other,0x1fd0,0x008123),
+          "indirect continuation never resumes an ancestor, wrong bank or CPU");
+    cpu.S=0x1fd3;
+    check(!cpu_accept_indirect_return(&cpu,0x1fd0,0x008123),
+          "indirect continuation requires the exact post-pop stack");
     cpu.S=0x1fda;
     check(cpu_accept_adjusted_return(&cpu,0x1fd0,0x1fd8,0x008123,2) &&
               inner.adjusted_return && !outer.adjusted_return,
@@ -1164,7 +1174,62 @@ static void test_return_word_relocation(void) {
     cpu_return_scope_end(&owner);
 }
 
+static void test_owned_ancestor_unwind(void) {
+    CpuState cpu={0}, other={0};
+    CpuReturnScope outer, middle, inner;
+    WatchdogFrameStart();
+    cpu.S=0x1ffc;
+    cpu_return_scope_begin(&outer,&cpu,0x818123,0x1ffb,3);
+    cpu.S=0x1ffa;
+    cpu_return_scope_begin(&middle,&cpu,0x818123,0x1ffc,2);
+    cpu.S=0x1ff8;
+    cpu_return_scope_begin(&inner,&cpu,0x008456,0x1ffa,2);
+    cpu.S=0x1fff;
+    check(!cpu_begin_owned_unwind(&cpu,0x1ffc,0x008123,3) &&
+          !cpu_begin_owned_unwind(&cpu,0x1ffc,0x818124,3) &&
+          !cpu_begin_owned_unwind(&other,0x1ffc,0x818123,3) &&
+          !cpu_begin_owned_unwind(&cpu,0x1ffc,0x818123,2),
+          "ancestor needs exact bank, PC, CPU, frame kind and post-pop S");
+    cpu.emulation=1;
+    check(!cpu_begin_owned_unwind(&cpu,0x1ffc,0x818123,3),"no emulation unwind proof");
+    cpu.emulation=0;
+    middle.frame_bytes=0;
+    check(!cpu_begin_owned_unwind(&cpu,0x1ffc,0x818123,3),"reset ownership is an unwind barrier");
+    middle.frame_bytes=2;middle.cpu=&other;
+    check(!cpu_begin_owned_unwind(&cpu,0x1ffc,0x818123,3),"foreign owner is an unwind barrier");
+    middle.cpu=&cpu;middle.entry_stack=0x1ff7;
+    check(!cpu_begin_owned_unwind(&cpu,0x1ffc,0x818123,3),"non-monotone frames are not an unwind proof");
+    middle.entry_stack=0x1ffa;cpu.S=0;
+    check(!cpu_begin_owned_unwind(&cpu,0xfffd,0x818123,3),"wrapped frame cannot match an active owner");
+    cpu.S=0x1fff;
+    check(cpu_begin_owned_unwind(&cpu,0x1ffc,0x818123,3) && cpu.PB==0x81 &&
+          g_cpu_owned_unwind_scope==&outer && !cpu_finish_owned_unwind(&inner,&cpu),
+          "discarded inner frames target exact outer owner, not recursive same-PC middle");
+    cpu_return_scope_end(&inner);
+    check(!cpu_finish_owned_unwind(&middle,&cpu),"intermediate caller cannot consume token");
+    cpu_return_scope_end(&middle);
+    check(cpu_finish_owned_unwind(&outer,&cpu) && outer.adjusted_return &&
+          !g_cpu_owned_unwind_scope && cpu.S==0x1fff,
+          "only exact owner resumes, retaining native post-return S");
+    check(!cpu_finish_owned_unwind(&outer,&cpu),"token consumed once");
+    cpu_return_scope_end(&outer);
+
+    /* Never search beyond a nearer frame at the same S with a different PC. */
+    cpu.S=0x1ffc;cpu_return_scope_begin(&outer,&cpu,0x818123,0x1fff,3);
+    cpu_return_scope_begin(&middle,&cpu,0x818456,0x1fff,3);
+    cpu.S=0x1ffa;cpu_return_scope_begin(&inner,&cpu,0x008456,0x1ffc,2);
+    cpu.S=0x1fff;
+    check(!cpu_begin_owned_unwind(&cpu,0x1ffc,0x818123,3),"nearest equal-stack owner is a barrier");
+    cpu_return_scope_end(&inner);cpu_return_scope_end(&middle);cpu_return_scope_end(&outer);
+    cpu.S=0x1ffc;cpu_return_scope_begin(&outer,&cpu,0x818123,0x1fff,3);
+    cpu.S=0x1ffa;cpu_return_scope_begin(&inner,&cpu,0x008456,0x1ffc,2);
+    cpu.S=0x1fff;check(cpu_begin_owned_unwind(&cpu,0x1ffc,0x818123,3),"pending terminal unwind");
+    WatchdogFrameStart();cpu_return_scope_end(&inner);cpu_return_scope_end(&outer);
+    check(!g_cpu_return_scope && !g_cpu_owned_unwind_scope,"reset cannot retain an abandoned token");
+}
+
 int main(void) {
+    test_owned_ancestor_unwind();
     test_return_word_relocation();
     test_registration_and_initialization();
     test_indirect_pointer();

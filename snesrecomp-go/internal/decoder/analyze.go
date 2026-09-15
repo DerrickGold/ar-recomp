@@ -8,6 +8,9 @@ import (
 
 func AnalyzeExitModes(graph *Graph, callee map[Variant]MX) ([]MX, bool) {
 	seen := map[[2]int8]struct{}{}
+	if HasComputedReturn(graph) || HasOpenDispatch(graph) {
+		return []MX{{0, 0}, {0, 1}, {1, 0}, {1, 1}}, true
+	}
 	for _, decoded := range graph.Instructions {
 		instruction := decoded.Instruction
 		if instruction.Mnemonic == "RTS" || instruction.Mnemonic == "RTL" || instruction.Mnemonic == "RTI" {
@@ -50,6 +53,47 @@ func AnalyzeExitModes(graph *Graph, callee map[Variant]MX) ([]MX, bool) {
 		return result[i].X < result[j].X
 	})
 	return result, true
+}
+
+// HasOpenDispatch detects a target inventory that cannot bound the status
+// returned by an as-yet unknown handler. Known prefix exits are insufficient.
+func HasOpenDispatch(graph *Graph) bool {
+	for _, decoded := range graph.Instructions {
+		if decoded.Instruction.DispatchOpen {
+			return true
+		}
+	}
+	return false
+}
+
+// HasComputedReturn recognizes immediate software-stack transfer edges whose
+// eventual return widths cannot be inferred from the transfer-site status.
+func HasComputedReturn(graph *Graph) bool {
+	// A pushed target consumed by RTS/RTL is another transfer, not the
+	// routine's eventual exit. Its handler may change either width before
+	// returning to our caller. Do not summarize the dispatch-site widths as
+	// the caller's continuation widths.
+	for _, decoded := range graph.Instructions {
+		switch decoded.Instruction.Mnemonic {
+		case "PEI", "PEA", "PER", "PHD":
+		case "PHA":
+			if decoded.Key.M != 0 {
+				continue
+			}
+		case "PHX", "PHY":
+			if decoded.Key.X != 0 {
+				continue
+			}
+		default:
+			continue
+		}
+		for _, next := range decoded.Successors {
+			if ret := graph.Instructions[next]; ret != nil && ret.Instruction.DispatchKind != "rts_trick" && ret.Instruction.Mnemonic == "RTS" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func AnalyzeExitMX(graph *Graph, callee map[Variant]MX) MX {

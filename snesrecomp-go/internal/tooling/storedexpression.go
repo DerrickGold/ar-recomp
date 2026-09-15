@@ -36,9 +36,11 @@ type ShadowStoredOperation struct {
 }
 
 type ShadowStoredFlag struct {
-	Value        *uint8 `json:"value,omitempty"`
-	DefinitionPC uint32 `json:"definition_pc,omitempty"`
-	Reason       string `json:"reason"`
+	Value        *uint8                         `json:"value,omitempty"`
+	DefinitionPC uint32                         `json:"definition_pc,omitempty"`
+	Reason       string                         `json:"reason"`
+	NativeCall   *ShadowCommandStatusDependency `json:"native_call_dependency,omitempty"`
+	EntrySource  *ShadowStoredFlag              `json:"entry_flag_source,omitempty"`
 }
 
 // storedFlag returns only a local constant definition on a unique predecessor
@@ -51,42 +53,50 @@ func (walk shadowPointerWalk) storedFlag(key decoder.DecodeKey, mask byte) Shado
 			return ShadowStoredFlag{Reason: "entry_boundary_or_ambiguous_predecessor"}
 		}
 		key = decoded.Key
-		ins := decoded.Instruction
-		var value uint8
-		defined := false
-		switch {
-		case ins.Mnemonic == "REP" && byte(ins.Operand)&mask != 0:
-			defined = true
-		case ins.Mnemonic == "SEP" && byte(ins.Operand)&mask != 0:
-			defined, value = true, 1
-		case mask == 1 && ins.Mnemonic == "CLC", mask == 8 && ins.Mnemonic == "CLD":
-			defined = true
-		case mask == 1 && ins.Mnemonic == "SEC", mask == 8 && ins.Mnemonic == "SED":
-			defined, value = true, 1
+		if flag, stop := shadowStoredFlagEffect(decoded, mask); stop {
+			return flag
 		}
-		if defined {
-			return ShadowStoredFlag{Value: &value, DefinitionPC: key.PC, Reason: "local_constant_definition"}
-		}
-		switch ins.Mnemonic {
-		case "JSR", "JSL", "PLP", "RTI", "BRK", "COP", "XCE":
-			return ShadowStoredFlag{Reason: "status_barrier_" + ins.Mnemonic}
-		case "ADC", "SBC", "CMP", "CPX", "CPY", "ASL", "LSR", "ROL", "ROR":
-			if mask == 1 {
-				return ShadowStoredFlag{Reason: "carry_clobber_" + ins.Mnemonic}
-			}
-			continue // These do not change decimal mode.
-		case "REP", "SEP", "CLC", "SEC", "CLD", "SED", "PHP", "PHA", "PHX", "PHY", "PHB", "PHD", "PHK", "PEA", "PEI", "PER",
-			"PLA", "PLX", "PLY", "PLB", "PLD", "LDA", "LDX", "LDY", "STA", "STX", "STY", "STZ",
-			"AND", "ORA", "EOR", "BIT", "TRB", "TSB", "INC", "DEC", "INX", "INY", "DEX", "DEY", "XBA",
-			"TAX", "TAY", "TXA", "TYA", "TXY", "TYX", "TCD", "TDC", "TCS", "TSC", "TSX", "TXS":
-			continue
-		}
-		if shadowPointerTransparent(ins) {
-			continue
-		}
-		return ShadowStoredFlag{Reason: "unsupported_status_effect_" + ins.Mnemonic}
 	}
 	return ShadowStoredFlag{Reason: "predecessor_budget"}
+}
+
+// One instruction's C/D effect, shared without changing the legacy walk's
+// boundary behavior. Command queries impose their own external-entry barrier.
+func shadowStoredFlagEffect(decoded *decoder.DecodedInstruction, mask byte) (ShadowStoredFlag, bool) {
+	ins := decoded.Instruction
+	var value uint8
+	defined := false
+	switch {
+	case ins.Mnemonic == "REP" && byte(ins.Operand)&mask != 0:
+		defined = true
+	case ins.Mnemonic == "SEP" && byte(ins.Operand)&mask != 0:
+		defined, value = true, 1
+	case mask == 1 && ins.Mnemonic == "CLC", mask == 8 && ins.Mnemonic == "CLD":
+		defined = true
+	case mask == 1 && ins.Mnemonic == "SEC", mask == 8 && ins.Mnemonic == "SED":
+		defined, value = true, 1
+	}
+	if defined {
+		return ShadowStoredFlag{Value: &value, DefinitionPC: decoded.Key.PC, Reason: "local_constant_definition"}, true
+	}
+	switch ins.Mnemonic {
+	case "JSR", "JSL", "PLP", "RTI", "BRK", "COP", "XCE":
+		return ShadowStoredFlag{Reason: "status_barrier_" + ins.Mnemonic}, true
+	case "ADC", "SBC", "CMP", "CPX", "CPY", "ASL", "LSR", "ROL", "ROR":
+		if mask == 1 {
+			return ShadowStoredFlag{Reason: "carry_clobber_" + ins.Mnemonic}, true
+		}
+		return ShadowStoredFlag{}, false // These do not change decimal mode.
+	case "REP", "SEP", "CLC", "SEC", "CLD", "SED", "PHP", "PHA", "PHX", "PHY", "PHB", "PHD", "PHK", "PEA", "PEI", "PER",
+		"PLA", "PLX", "PLY", "PLB", "PLD", "LDA", "LDX", "LDY", "STA", "STX", "STY", "STZ",
+		"AND", "ORA", "EOR", "BIT", "TRB", "TSB", "INC", "DEC", "INX", "INY", "DEX", "DEY", "XBA",
+		"TAX", "TAY", "TXA", "TYA", "TXY", "TYX", "TCD", "TDC", "TCS", "TSC", "TSX", "TXS":
+		return ShadowStoredFlag{}, false
+	}
+	if shadowPointerTransparent(ins) {
+		return ShadowStoredFlag{}, false
+	}
+	return ShadowStoredFlag{Reason: "unsupported_status_effect_" + ins.Mnemonic}, true
 }
 
 // storedExpression augments an otherwise unknown writer with its symbolic

@@ -29,12 +29,12 @@ func LoROMOffset(bank byte, addr uint16) (int, error) {
 	return int(bank&0x7f)*0x8000 + int(addr-0x8000), nil
 }
 
-// Slice returns length bytes from a LoROM address.
+// Slice returns length contiguous physical bytes from a cartridge ROM address.
 func (image Image) Slice(bank byte, addr uint16, length int) ([]byte, error) {
 	if length < 0 {
 		return nil, fmt.Errorf("negative ROM slice length %d", length)
 	}
-	offset, err := LoROMOffset(bank, addr)
+	offset, err := image.Offset(bank, addr)
 	if err != nil {
 		return nil, err
 	}

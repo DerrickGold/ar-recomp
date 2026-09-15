@@ -152,8 +152,8 @@ func TestDirectCallReturnOwnership(t *testing.T) {
 	}{
 		{"JSR live bank", 0x808123, false, "(((uint32)cpu->PB << 16) | 0x8126u), _entry_s, 2u"},
 		{"JSR PC wrap", 0x80fffd, false, "(((uint32)cpu->PB << 16) | 0x0000u), _entry_s, 2u"},
-		{"JSL full continuation", 0x808123, true, "0x808127u, _entry_s, 3u"},
-		{"JSL PC wrap without bank carry", 0x80fffc, true, "0x800000u, _entry_s, 3u"},
+		{"JSL live mirrored bank", 0x808123, true, "(((uint32)cpu->PB << 16) | 0x8127u), _entry_s, 3u"},
+		{"JSL PC wrap without bank carry", 0x80fffc, true, "(((uint32)cpu->PB << 16) | 0x0000u), _entry_s, 3u"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := NewContext()
@@ -164,7 +164,7 @@ func TestDirectCallReturnOwnership(t *testing.T) {
 				t.Fatal(err)
 			}
 			s := strings.Join(lines, "\n")
-			for _, want := range []string{tc.want, "CpuReturnScope _call_owner;", "cpu_return_scope_end(&_call_owner);", "if (!_call_owner.adjusted_return)"} {
+			for _, want := range []string{tc.want, "CpuReturnScope _call_owner;", "cpu_return_scope_end(&_call_owner);", "if (!_call_owner.adjusted_return)", "if (_r == RECOMP_RETURN_OWNED_UNWIND)", "if (!cpu_finish_owned_unwind(&_call_owner, cpu))", "return _r; /* discard this activation without restoring native S/PB */"} {
 				if !strings.Contains(s, want) {
 					t.Fatalf("missing %q:\n%s", want, s)
 				}
@@ -174,6 +174,9 @@ func TestDirectCallReturnOwnership(t *testing.T) {
 			}
 			if strings.Index(s, "cpu_return_scope_begin") < strings.Index(s, "cpu->host_return_valid = 1") {
 				t.Fatal("scope captured S before hardware frame push")
+			}
+			if tc.long && strings.Index(s, "if (_r == RECOMP_RETURN_OWNED_UNWIND)") > strings.Index(s, "cpu->PB = _saved_pb;") {
+				t.Fatal("outer unwind corrupted the native destination bank")
 			}
 			lines, err = EmitOperation(ctx, ir.Call{Target: &target, Long: tc.long})
 			if err != nil {

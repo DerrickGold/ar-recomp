@@ -14,6 +14,16 @@ type workItem struct {
 	HasPredecessor bool
 }
 
+// InstructionLimitError leaves an explicit failure rather than a partial CFG.
+type InstructionLimitError struct {
+	Entry uint32
+	Limit int
+}
+
+func (e *InstructionLimitError) Error() string {
+	return fmt.Sprintf("v2 decoder exceeded max_insns=%d at function $%06X", e.Limit, e.Entry)
+}
+
 // DecodeFunction performs worklist-driven decoding keyed by PC/M/X/PHP state.
 func DecodeFunction(image rom.Image, bank byte, start uint16, entryM, entryX uint8, options Options) (*Graph, error) {
 	if options.MaxInstructions <= 0 {
@@ -24,7 +34,7 @@ func DecodeFunction(image rom.Image, bank byte, start uint16, entryM, entryX uin
 	worklist := []workItem{{Key: entry, Kind: "entry"}}
 	for len(worklist) > 0 {
 		if len(graph.Instructions) >= options.MaxInstructions {
-			return nil, fmt.Errorf("v2 decoder exceeded max_insns=%d at function $%06X", options.MaxInstructions, Address24(bank, start))
+			return nil, &InstructionLimitError{Address24(bank, start), options.MaxInstructions}
 		}
 		item := worklist[len(worklist)-1]
 		worklist = worklist[:len(worklist)-1]
@@ -47,10 +57,10 @@ func DecodeFunction(image rom.Image, bank byte, start uint16, entryM, entryX uin
 				}
 			}
 		}
-		if pc < 0x8000 {
+		if !image.IsROM(bank, pc) {
 			continue
 		}
-		offset, err := rom.LoROMOffset(bank, pc)
+		offset, err := image.Offset(bank, pc)
 		if err != nil || offset >= len(image) {
 			continue
 		}
@@ -87,7 +97,7 @@ func DecodeFunction(image rom.Image, bank byte, start uint16, entryM, entryX uin
 		} else if handled {
 			continue
 		}
-		if handled := decodeRTSTrick(bank, pc, item.Key, instruction, graph, &worklist, options); handled {
+		if handled := decodeRTSTrick(image, bank, pc, item.Key, instruction, graph, &worklist, options); handled {
 			continue
 		}
 
@@ -146,7 +156,7 @@ func decodeDispatchHelper(image rom.Image, bank byte, start, pc uint16, key Deco
 	tablePC := pc + uint16(instruction.Length)
 	var entries []uint32
 	for len(entries) < 256 && uint32(tablePC)+uint32(entrySize)-1 <= 0xffff {
-		offset, err := rom.LoROMOffset(bank, tablePC)
+		offset, err := image.Offset(bank, tablePC)
 		if err != nil || offset+entrySize > len(image) {
 			break
 		}
@@ -158,7 +168,7 @@ func decodeDispatchHelper(image rom.Image, bank byte, start, pc uint16, key Deco
 				tablePC += uint16(entrySize)
 				continue
 			}
-			if address < 0x8000 || (targetBank >= 0x40 && targetBank < 0x80) || targetIsPadding(image, targetBank, address) {
+			if !image.IsROM(targetBank, address) || targetIsPadding(image, targetBank, address) {
 				break
 			}
 			if inDataRegion(options.DataRegions, targetBank, address) {
@@ -172,7 +182,7 @@ func decodeDispatchHelper(image rom.Image, bank byte, start, pc uint16, key Deco
 				tablePC += uint16(entrySize)
 				continue
 			}
-			if address < 0x8000 || targetIsPadding(image, bank, address) {
+			if !image.IsROM(bank, address) || targetIsPadding(image, bank, address) {
 				break
 			}
 			if inDataRegion(options.DataRegions, bank, address) {
@@ -223,6 +233,11 @@ func decodeIndirectJump(image rom.Image, bank byte, start, pc uint16, key Decode
 	}
 	site := Address24(bank, pc)
 	auth, authorized := options.IndirectDispatch[site]
+	authored := authorized
+	if _, hle := options.HLEDispatch[pc]; hle && !authorized {
+		graph.record(&DecodedInstruction{Key: key, Instruction: instruction})
+		return true, nil // automatic inventories cannot replace an authored HLE
+	}
 	automaticBound := ""
 	var automaticCandidates []uint32
 	if !authorized && instruction.Mode == cpu65816.INDIRX {
@@ -244,14 +259,14 @@ func decodeIndirectJump(image rom.Image, bank byte, start, pc uint16, key Decode
 	}
 	if !authorized && instruction.Mode == cpu65816.INDIR && uint16(instruction.Operand) >= 0x8000 {
 		tablePC := uint16(instruction.Operand)
-		offset, err := rom.LoROMOffset(bank, tablePC)
+		offset, err := image.Offset(bank, tablePC)
 		size := 2
 		if instruction.Length == 4 {
 			size = 3
 		}
 		if err == nil && offset+size <= len(image) {
 			target := uint16(image[offset]) | uint16(image[offset+1])<<8
-			if target >= 0x8000 && !inDataRegion(options.DataRegions, bank, target) && !targetIsPadding(image, bank, target) {
+			if image.IsROM(bank, target) && !inDataRegion(options.DataRegions, bank, target) && !targetIsPadding(image, bank, target) {
 				auth = DispatchAuth{Count: 1, IndexReg: "X", TableBases: []uint16{tablePC}}
 				authorized = true
 			}
@@ -264,6 +279,7 @@ func decodeIndirectJump(image rom.Image, bank byte, start, pc uint16, key Decode
 		entries, ok := resolveDispatch(image, bank, instruction, auth)
 		if ok {
 			instruction.DispatchEntries = entries
+			instruction.DispatchOpen = !authored
 			instruction.DispatchCandidateEntries = automaticCandidates
 			instruction.DispatchKind = "short"
 			if instruction.Length == 4 || len(auth.TableBases) == 3 {
@@ -274,7 +290,7 @@ func decodeIndirectJump(image rom.Image, bank byte, start, pc uint16, key Decode
 			instruction.DispatchMXProven = auth.TargetMXProven
 			instruction.DispatchBound = automaticBound
 			instruction.DispatchTransferPC = instruction.Address & 0xffffff
-			successors := dispatchSuccessors(bank, entries, instruction.M, instruction.X)
+			successors := dispatchSuccessors(image, bank, entries, instruction.M, instruction.X)
 			storeAndQueue(key, instruction, successors, graph, worklist)
 			return true, nil
 		}
@@ -303,7 +319,7 @@ func decodePHADispatch(image rom.Image, bank byte, pc uint16, key DecodeKey, ins
 	}
 	for index, entry := range entries {
 		target := uint16(entry + 1)
-		if entry == 0 || target < 0x8000 {
+		if entry == 0 || !image.IsROM(bank, target) {
 			entries[index] = 0
 		} else {
 			entries[index] = entry&0xff0000 | uint32(target)
@@ -328,8 +344,8 @@ func decodePHADispatch(image rom.Image, bank byte, pc uint16, key DecodeKey, ins
 	if instruction.DispatchTerminal || auth.SEPMask&0x10 != 0 {
 		x = 1
 	}
-	successors := dispatchSuccessors(bank, entries, m, x)
-	if auth.ReturnPC != nil && *auth.ReturnPC >= 0x8000 {
+	successors := dispatchSuccessors(image, bank, entries, m, x)
+	if auth.ReturnPC != nil && image.IsROM(bank, *auth.ReturnPC) {
 		successors = append(successors, labeledSuccessor{DecodeKey{PC: Address24(bank, *auth.ReturnPC), M: m, X: x}, "jump"})
 	}
 	storeAndQueue(key, instruction, successors, graph, worklist)
@@ -341,7 +357,7 @@ func decodePHADispatch(image rom.Image, bank byte, pc uint16, key DecodeKey, ins
 // report the same semantic source edge as the generic RTS dispatcher.
 func phaDispatchTransferPC(image rom.Image, bank byte, pc uint16, m, x uint8) uint32 {
 	transfer := Address24(bank, pc)
-	offset, err := rom.LoROMOffset(bank, pc)
+	offset, err := image.Offset(bank, pc)
 	if err != nil || offset >= len(image) {
 		return transfer
 	}
@@ -351,7 +367,7 @@ func phaDispatchTransferPC(image rom.Image, bank byte, pc uint16, m, x uint8) ui
 	}
 	pc += uint16(pha.Length)
 	for steps := 0; steps < 8; steps++ {
-		offset, err = rom.LoROMOffset(bank, pc)
+		offset, err = image.Offset(bank, pc)
 		if err != nil || offset >= len(image) {
 			return transfer
 		}
@@ -411,7 +427,7 @@ func decodeIndirectJSR(image rom.Image, bank byte, start, pc uint16, key DecodeK
 			instruction.DispatchBound = automaticBound
 			instruction.DispatchTransferPC = instruction.Address & 0xffffff
 			successors := labeledSuccessors(image, instruction, key, bank, options)
-			successors = append(successors, dispatchSuccessors(bank, entries, instruction.M, instruction.X)...)
+			successors = append(successors, dispatchSuccessors(image, bank, entries, instruction.M, instruction.X)...)
 			storeAndQueue(key, instruction, successors, graph, worklist)
 			return true, nil
 		}
@@ -427,7 +443,7 @@ func decodeIndirectJSR(image rom.Image, bank byte, start, pc uint16, key DecodeK
 			if uint32(tablePC)+uint32(entrySize)-1 > 0xffff {
 				break
 			}
-			offset, err := rom.LoROMOffset(bank, tablePC)
+			offset, err := image.Offset(bank, tablePC)
 			if err != nil || offset+entrySize > len(image) {
 				break
 			}
@@ -442,16 +458,19 @@ func decodeIndirectJSR(image rom.Image, bank byte, start, pc uint16, key DecodeK
 		}
 		instruction.DispatchEntries, instruction.DispatchKind = entries, legacy.Kind
 		successors := labeledSuccessors(image, instruction, key, bank, options)
-		successors = append(successors, dispatchSuccessors(bank, entries, instruction.M, instruction.X)...)
+		successors = append(successors, dispatchSuccessors(image, bank, entries, instruction.M, instruction.X)...)
 		storeAndQueue(key, instruction, successors, graph, worklist)
 		return true, nil
 	}
-	graph.record(&DecodedInstruction{Key: key, Instruction: instruction})
-	graph.SuppressedIndirectCalls = append(graph.SuppressedIndirectCalls, SuppressedIndirectCall{site, Address24(bank, start), uint16(instruction.Operand), key.M, key.X})
+	// An unknown table is still a call, not a successful return from this
+	// body. Preserve the real continuation with all possible native widths.
+	instruction.DispatchOpen = true
+	storeAndQueue(key, instruction, labeledSuccessors(image, instruction, key, bank, options), graph, worklist)
+	graph.UnresolvedIndirects = append(graph.UnresolvedIndirects, UnresolvedIndirect{site, Address24(bank, start), instruction.Mnemonic, instruction.Mode, instruction.Operand, key.M, key.X})
 	return true, nil
 }
 
-func decodeRTSTrick(bank byte, pc uint16, key DecodeKey, instruction *cpu65816.Instruction, graph *Graph, worklist *[]workItem, options Options) bool {
+func decodeRTSTrick(image rom.Image, bank byte, pc uint16, key DecodeKey, instruction *cpu65816.Instruction, graph *Graph, worklist *[]workItem, options Options) bool {
 	if instruction.Mnemonic != "RTS" && instruction.Mnemonic != "RTL" {
 		return false
 	}
@@ -465,7 +484,7 @@ func decodeRTSTrick(bank byte, pc uint16, key DecodeKey, instruction *cpu65816.I
 	var successors []labeledSuccessor
 	for _, target := range auth.Targets {
 		instruction.DispatchEntries = append(instruction.DispatchEntries, Address24(bank, target))
-		if target >= 0x8000 {
+		if image.IsROM(bank, target) {
 			successors = append(successors, labeledSuccessor{DecodeKey{PC: Address24(bank, target), M: key.M, X: key.X}, "jump"})
 		}
 	}
@@ -473,7 +492,7 @@ func decodeRTSTrick(bank byte, pc uint16, key DecodeKey, instruction *cpu65816.I
 	return true
 }
 
-func dispatchSuccessors(bank byte, entries []uint32, m, x uint8) []labeledSuccessor {
+func dispatchSuccessors(image rom.Image, bank byte, entries []uint32, m, x uint8) []labeledSuccessor {
 	var successors []labeledSuccessor
 	for _, entry := range entries {
 		if entry == 0 {
@@ -481,7 +500,7 @@ func dispatchSuccessors(bank byte, entries []uint32, m, x uint8) []labeledSucces
 		}
 		targetBank := byte(entry >> 16)
 		target := uint16(entry)
-		if targetBank == bank && target >= 0x8000 {
+		if targetBank == bank && image.IsROM(bank, target) {
 			successors = append(successors, labeledSuccessor{DecodeKey{PC: Address24(bank, target), M: m & 1, X: x & 1}, "jump"})
 		}
 	}

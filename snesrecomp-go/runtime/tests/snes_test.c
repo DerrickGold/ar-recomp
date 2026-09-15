@@ -201,6 +201,78 @@ static void test_synchronous_dma_register(Snes *snes, uint8_t *ram) {
           "$420B retains DMA-to-APU-port routing");
 }
 
+static void test_vblank_oam_reload(Snes *snes, uint8_t *ram) {
+    Ppu *ppu = snes->ppu;
+    ppu->frameOverscan = false;
+    ppu_write(ppu, 0x00u, 0x0fu);
+    ppu_write(ppu, 0x02u, 0u);
+    ppu_write(ppu, 0x03u, 0u);
+    dma_write(snes->dma, 0x4300u, 0u);
+    dma_write(snes->dma, 0x4301u, 4u);
+    dma_write(snes->dma, 0x4304u, 0x7eu);
+    /* A game can rely on the hardware reload instead of rewriting OAMADD
+     * before each frame's 512-byte low + 32-byte high table transfer. */
+    for (unsigned frame = 0u; frame < 3u; ++frame) {
+        for (unsigned i = 0u; i < 544u; ++i)
+            ram[0x1000u + i] = (uint8_t)(i * 37u + frame * 11u);
+        snes_setBeamPosition(snes, 0u, 224u);
+        snes_beginVblank(snes);
+        dma_write(snes->dma, 0x4302u, 0u);
+        dma_write(snes->dma, 0x4303u, 0x10u);
+        dma_write(snes->dma, 0x4305u, 0x20u);
+        dma_write(snes->dma, 0x4306u, 2u);
+        snes_writeReg(snes, 0x420bu, 1u);
+        for (unsigned i = 0u; i < 256u; ++i) {
+            uint16_t expected = (uint16_t)(ram[0x1000u + i * 2u] |
+                (uint16_t)ram[0x1001u + i * 2u] << 8);
+            if (ppu->oam[i] != expected) {
+                check(0, "successive vblank DMA starts at the latched OAM address");
+                break;
+            }
+        }
+        check(memcmp(ppu->highOam, ram + 0x1200u, 32u) == 0,
+              "successive vblank DMA preserves the packed high OAM table");
+        snes_beginVblank(snes);
+        check(ppu->oamAdr == 16u && ppu->oamInHigh && !ppu->oamSecondWrite,
+              "repeated vblank positioning does not restart an OAM transfer");
+    }
+
+    ppu_write(ppu, 0x02u, 0x23u);
+    ppu_write(ppu, 0x03u, 0x81u);
+    ppu_write(ppu, 0x04u, 0xaau);
+    ppu_write(ppu, 0x04u, 0xbbu);
+    ppu_write(ppu, 0x04u, 0xccu);
+    snes_setBeamPosition(snes, 0u, 224u);
+    snes_beginVblank(snes);
+    check(ppu->oamAdr == 0x23u && ppu->oamInHigh && !ppu->oamSecondWrite &&
+              ppu->oamaddl == 0x23u && ppu->oamaddh == 0x81u,
+          "vblank restores the full programmed address and byte phase, not zero");
+
+    ppu_write(ppu, 0x04u, 0x99u);
+    snes_setBeamPosition(snes, 1340u, 224u);
+    (void)snes_readReg(snes, 0x4212u);
+    check(ppu->oamAdr == 0x23u && ppu->oamInHigh && !ppu->oamSecondWrite,
+          "status polling and explicit scanout share the vblank OAM reload");
+
+    ppu_write(ppu, 0x02u, 0x23u);
+    ppu_write(ppu, 0x03u, 0x81u);
+    ppu_write(ppu, 0x04u, 0xddu);
+    ppu_write(ppu, 0x00u, 0x80u);
+    snes_setBeamPosition(snes, 0u, 224u);
+    snes_beginVblank(snes);
+    check(ppu->oamAdr == 0x23u && ppu->oamInHigh && ppu->oamSecondWrite,
+          "forced blank suppresses the OAM address reload");
+
+    ppu_write(ppu, 0x00u, 0x0fu);
+    ppu->frameOverscan = true;
+    snes_setBeamPosition(snes, 0u, 239u);
+    check(ppu->oamSecondWrite, "overscan does not reload OAM before line 240");
+    snes_beginVblank(snes);
+    check(snes->vPos == 240u && ppu->oamAdr == 0x23u && !ppu->oamSecondWrite,
+          "overscan reloads OAM at its own vblank boundary");
+    ppu->frameOverscan = false;
+}
+
 static void test_cartridge(Snes *snes) {
     uint8_t rom[0x8000u];
     memset(rom, 0, sizeof(rom));
@@ -225,6 +297,7 @@ int main(void) {
     test_bus(snes, ram);
     test_apu_bus(snes);
     test_synchronous_dma_register(snes, ram);
+    test_vblank_oam_reload(snes, ram);
     test_cartridge(snes);
     active_snes = NULL;
     snes_free(snes);

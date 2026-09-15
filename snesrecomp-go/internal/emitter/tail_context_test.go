@@ -28,7 +28,7 @@ func TestSplitTailKeepsPairedReturnContext(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, want := range []string{
-			"cpu_dispatch_paired_tail_from(cpu, 0x008006u, _entry_s, _hrv, 0x008006u)",
+			"cpu_dispatch_paired_tail_from(cpu, (((uint32)cpu->PB << 16) | 0x8006u), _entry_s, _hrv, 0x008006u)",
 			"cpu_tailcall_inherit_return_context(_entry_s, _hrv)",
 			"return RECOMP_RETURN_TAILCALL", "/* RTL host return */",
 		} {
@@ -48,7 +48,7 @@ func TestDispatchReturnUsesSplitTailContract(t *testing.T) {
 	pc := uint16(0x8010)
 	instruction := &cpu65816.Instruction{Address: 0x008000, DispatchReturn: &pc}
 	source := strings.Join(dispatchReturnTransfer(context, instruction, nil, 1, 0), "\n")
-	if !strings.Contains(source, "cpu_dispatch_paired_tail_from(cpu, 0x008010u, _entry_s, _hrv, 0x008010u)") {
+	if !strings.Contains(source, "cpu_dispatch_paired_tail_from(cpu, (((uint32)cpu->PB << 16) | 0x8010u), _entry_s, _hrv, 0x008010u)") {
 		t.Fatalf("dispatch return bypasses common tail contract: %s", source)
 	}
 	local := map[decoder.DecodeKey]struct{}{{PC: 0x008010, M: 1, X: 0}: {}}

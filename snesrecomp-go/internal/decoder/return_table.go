@@ -32,10 +32,10 @@ func decodeNativeReturnTable(image rom.Image, call *cpu65816.Instruction, option
 		{"PLP", cpu65816.IMP, 0}, {"RTL", cpu65816.IMP, 0},
 	}
 	for _, step := range steps {
-		if byte(pc>>16) != byte(start>>16) || uint16(pc) < 0x8000 {
+		if byte(pc>>16) != byte(start>>16) || !image.IsROM(byte(pc>>16), uint16(pc)) {
 			return false
 		}
-		offset, err := rom.LoROMOffset(byte(pc>>16), uint16(pc))
+		offset, err := image.Offset(byte(pc>>16), uint16(pc))
 		if err != nil || offset >= len(image) {
 			return false
 		}
@@ -51,7 +51,7 @@ func decodeNativeReturnTable(image rom.Image, call *cpu65816.Instruction, option
 	// Stay within the current LoROM mapper's readable interval; never infer a
 	// wrapping inline table or use a below-$8000 policy as a universal mapper.
 	table := call.Address + 4
-	if table>>16 != call.Address>>16 || uint16(table) < 0x8000 {
+	if table>>16 != call.Address>>16 || !image.IsROM(byte(table>>16), uint16(table)) {
 		return false
 	}
 	evidence := &cpu65816.NativeReturnTable{TablePC: table, ReturnPC: pc - 1}
@@ -65,12 +65,12 @@ func decodeNativeReturnTable(image rom.Image, call *cpu65816.Instruction, option
 		if address+2 > end {
 			break
 		}
-		offset, err := rom.LoROMOffset(byte(table>>16), uint16(address))
+		offset, err := image.Offset(byte(table>>16), uint16(address))
 		if err != nil || offset+2 > len(image) {
 			break
 		}
 		target := uint32(image[offset]) | uint32(image[offset+1])<<8
-		targetOffset, err := rom.LoROMOffset(byte(table>>16), uint16(target))
+		targetOffset, err := image.Offset(byte(table>>16), uint16(target))
 		if err != nil || targetOffset >= len(image) ||
 			inDataRegion(options.DataRegions, byte(table>>16), uint16(target)) ||
 			(target >= uint32(uint16(table)) && target < address+2) {

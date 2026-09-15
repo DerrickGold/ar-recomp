@@ -20,7 +20,7 @@ import (
 	romimage "github.com/DerrickGold/snesrecomp-go/internal/rom"
 )
 
-const shadowReportVersion = 19
+const shadowReportVersion = 31
 
 const (
 	shadowUnresolvedGeneric              = "generic_dynamic_target"
@@ -178,6 +178,10 @@ type ShadowReport struct {
 	ReturnAliases        ShadowReturnCalls           `json:"return_stack_aliases"`
 	FrameLifetimes       ShadowFrameLifetimes        `json:"return_frame_lifetimes"`
 	DispatchSites        []ShadowDispatchSite        `json:"dispatch_sites,omitempty"`
+	CommandStreams       []ShadowCommandStream       `json:"command_streams,omitempty"`
+	DeferredFields       []ShadowDeferredField       `json:"deferred_field_dispatches,omitempty"`
+	CommandStreamRoots   []ShadowCommandRoot         `json:"command_stream_roots,omitempty"`
+	CommandWalks         []ShadowCommandWalk         `json:"command_stream_walks,omitempty"`
 	Unresolved           []ShadowUnresolvedSite      `json:"unresolved_sites,omitempty"`
 	DecodeIssues         []ShadowDecodeIssue         `json:"decode_issues,omitempty"`
 	Limitations          []string                    `json:"limitations,omitempty"`
@@ -274,6 +278,14 @@ type shadowDecodeResult struct {
 	storedReads      []shadowStoredRead
 	storedWrites     []shadowStoredWrite
 	callInputs       []shadowDirectCallInputs
+	commandStreams   []ShadowCommandStream
+	forwardedFields  []decoder.ForwardedIndirectField
+	commandPrefix    ShadowCommandPrefix
+	commandPaths     []shadowCommandPath
+	commandDataPaths []ShadowCommandDataPath
+	commandRoots     []ShadowCommandRoot
+	streamInputs     []shadowStreamInput
+	statusBody       *shadowStatusBody
 	bankRecipe       *shadowDBRecipe
 	returnAudit      shadowReturnAuditResult
 	returnValues     *ShadowReturnValueEntry
@@ -321,6 +333,9 @@ func AnalyzeAuthoredShadow(options ShadowAnalysisOptions) (ShadowReport, error) 
 	if err != nil {
 		return ShadowReport{}, err
 	}
+	if err := image.ValidateMapping(); err != nil {
+		return ShadowReport{}, err
+	}
 	banks, err := loadShadowBanks(options.CFGDir, options.OnlyBank)
 	if err != nil {
 		return ShadowReport{}, err
@@ -354,7 +369,7 @@ func AnalyzeAuthoredShadow(options ShadowAnalysisOptions) (ShadowReport, error) 
 		Version: shadowReportVersion,
 		Mode:    "compare_authored",
 		NoWrite: true,
-		ROM:     ShadowROM{SHA256: hex.EncodeToString(hash[:]), Size: len(image), Mapper: "lorom"},
+		ROM:     ShadowROM{SHA256: hex.EncodeToString(hash[:]), Size: len(image), Mapper: romimage.Image(image).Mapper().String()},
 		Summary: ShadowSummary{
 			ComparisonSummary:              comparisonSummary,
 			InitialVariants:                inferenceStats.initialVariants,
@@ -396,6 +411,9 @@ func AnalyzeAuthoredShadow(options ShadowAnalysisOptions) (ShadowReport, error) 
 		EntryRecovery:        entryRecovery,
 		EntryAblation:        entryAblation,
 		Unresolved:           unresolved,
+		CommandStreams:       mergeShadowCommandStreams(decodeResults),
+		DeferredFields:       mergeShadowDeferredFields(decodeResults),
+		CommandStreamRoots:   resolveShadowCommandRoots(image, decodeResults),
 		DecodeIssues:         issues,
 		ReturnAudit:          collectShadowReturnAudit(decodeResults),
 		FrameLifetimes:       collectShadowFrameLifetimes(decodeResults),
@@ -407,12 +425,22 @@ func AnalyzeAuthoredShadow(options ShadowAnalysisOptions) (ShadowReport, error) 
 			"a compatible guard proves safe coverage of inferred continuations, not that every guarded edge executes",
 			"an authored-only result means unproven, not disproven or runtime-reachable",
 			"tagged-stream handler classification and structural handler candidates are heuristic triage evidence, not a closed target set",
+			"command-stream prefixes describe native operand handling only; independent stream roots, table extent, pointer aliases, and callback return contracts remain unproven",
+			"command-stream root references follow bounded literal, exact-index ROM reads, and exact-address local WRAM store paths; they do not prove interrupt/HLE noninterference, cross-call object lifetimes, masked unknown input domains, all input values, or complete stream grammar",
+			"conditional initializer paths retain bounded decoded predecessor choices and arithmetic flag evidence; branch feasibility and complete input coverage remain unproven, and unknown/decimal arithmetic is not replaced by binary arithmetic",
+			"command input call paths correlate native carry/decimal flags with the same argument history; unknown callees, status restoration, entry loops, and unmatched contexts cannot supply flags, and native path contracts do not prove HLE equivalence",
+			"bounded native callee C/D summaries require complete decoded paths, compatible RTS/RTL and return M/X, and balanced tracked stack depth; they assume ordinary native returns and no stack/control aliasing, do not prove termination or reachability, and never replace HLE or promote generation facts",
+			"native status summaries may compose direct long jumps and decoded ownership-boundary tails using the existing return kind only with no live tracked locals; short-return bank changes, incompatible bodies and cycles remain unproven",
+			"deferred-field forwarding and command operand stores are conditional structural relationships; matching offsets does not prove D/DB/index aliasing, object lifetime, rooted stream values, native/HLE equivalence or a closed target set",
+			"bounded command walks read only existing conditional root references and decoded native refetch paths; unknown data paths, calls, changed cursors/banks, ambiguous owners, HLE/body overrides and bank boundaries stop the walk; ROM operands and decoded-PB candidate addresses are not proven code roots",
+			"non-negative data arms retain bounded native branch alternatives and point-in-time cursor publications; only an actual native refetch edge continues a walk, branch feasibility and cross-invocation cursor/field lifetimes remain unproven, and path budgets never imply completeness",
+			"operand-rooted native callback queries track command-owned saved Y/DB and matched JSR/JSL/PEA return bytes at M0X0; only balanced native refetches with restored entry DB and an exact cursor continue a conditional walk, unknown widths/arithmetic, stack borrowing, ownership/HLE conflicts and budgets stop it, and scout decodes never acquire generation ownership",
 			"dispatch code-island findings are probable review hints; they never create entry points or alter regeneration",
 			"boundary landing-sweep findings are probable or speculative review hints seeded only after confirmed flow terminators; they never create entry points or alter regeneration",
 			"table-first targets require a tightly authored-entry-anchored ROM pointer window plus an existing instruction boundary or bounded stack-balanced decode; they remain review-only and do not prove runtime table bounds",
 			"vector-root entry recovery is a conservative lower bound; not_recovered does not mean unreachable or invalid code",
 			"entry ablation is dependency-graph evidence collected with authored boundaries present; its inclusion-minimal root set is report-only until generated-region equivalence is validated",
-			"the current ROM reader is explicitly LoROM; mapper generalization is a later milestone",
+			"LoROM and HiROM decoding use cartridge-aware offsets; whole-bank speculative scans remain conservative and must not be treated as a complete code census",
 		},
 	}
 	report.ReturnAliases = collectShadowReturnAliases(image, banks, decodeResults, report.ReturnCalls)
@@ -436,6 +464,7 @@ func AnalyzeAuthoredShadow(options ShadowAnalysisOptions) (ShadowReport, error) 
 			return ShadowReport{}, applyErr
 		}
 	}
+	report.CommandWalks = walkShadowCommandStreamsWithCallbacks(image, report.CommandStreams, report.CommandStreamRoots, newShadowCallbackAnalyzer(image, banks, decodeResults, tableSpans))
 	return report, nil
 }
 
@@ -619,7 +648,7 @@ func discoverShadowDecodeResults(image romimage.Image, banks []shadowBank, regio
 }
 
 func appendShadowAutoVectorEntries(image romimage.Image, entries []config.Entry) []config.Entry {
-	return config.AppendLoROMAutoVectorEntries(image, entries)
+	return config.AppendAutoVectorEntries(image, entries)
 }
 
 func runShadowDecodePass(image romimage.Image, banks []shadowBank, entries map[byte][]config.Entry, regions []decoder.DataRegion, calleeExitMX map[decoder.Variant]decoder.MX, jobs int) ([]shadowDecodeResult, map[decoder.Variant]struct{}) {
@@ -675,6 +704,8 @@ func runShadowDecodePass(image romimage.Image, banks []shadowBank, entries map[b
 				demandEvidence := discoverShadowDemandEvidence(item.bank.ID, graph, item.siblings)
 				resumeEdges := discoverShadowSiblingBoundaryEdges(item.bank.ID, graph, item.siblings)
 				storedReads, storedWrites := collectShadowStoredTargets(graph)
+				commandStreams := collectShadowCommandStreams(graph)
+				callInputs := collectShadowDirectCallInputs(graph)
 				output <- shadowDecodeResult{
 					entry: entryVariant,
 					facts: facts, unresolved: graph.UnresolvedIndirects,
@@ -686,11 +717,19 @@ func runShadowDecodePass(image romimage.Image, banks []shadowBank, entries map[b
 					instructions:     shadowDecodedInstructions(item.bank.ID, item.entry.Start, graph),
 					pointerProducers: collectShadowPointerProducers(image, graph, regions),
 					storedReads:      storedReads, storedWrites: storedWrites,
-					callInputs:     collectShadowDirectCallInputs(graph),
-					bankRecipe:     &shadowDBRecipe{end: item.entry.End, regions: regions, exitMX: calleeExitMX},
-					returnAudit:    auditShadowReturns(graph, item.bank.Config),
-					frameLifetimes: auditShadowFrameLifetimes(graph, item.bank.Config),
-					returnValues:   collectShadowReturnValues(graph, item.bank.Config),
+					callInputs:       callInputs,
+					commandStreams:   commandStreams,
+					forwardedFields:  decoder.ForwardedIndirectFields(graph),
+					commandPrefix:    summarizeShadowCommandPrefix(graph, graph.Entry, 0),
+					commandPaths:     collectShadowCommandPaths(graph, item.bank.Config, commandStreams),
+					commandDataPaths: collectShadowCommandDataPaths(graph, item.bank.Config, commandStreams),
+					commandRoots:     collectShadowCommandRoots(graph, commandStreams),
+					streamInputs:     collectShadowStreamInputs(graph, callInputs),
+					statusBody:       collectShadowStatusBody(graph, item.bank.Config),
+					bankRecipe:       &shadowDBRecipe{end: item.entry.End, regions: regions, exitMX: calleeExitMX},
+					returnAudit:      auditShadowReturns(graph, item.bank.Config),
+					frameLifetimes:   auditShadowFrameLifetimes(graph, item.bank.Config),
+					returnValues:     collectShadowReturnValues(graph, item.bank.Config),
 				}
 			}
 		}()
@@ -1079,7 +1118,7 @@ func applyShadowDemands(image romimage.Image, entries map[byte][]config.Entry, b
 	for _, demand := range keys {
 		address := demand.Address & 0xffffff
 		pc := uint16(address)
-		offset, err := romimage.LoROMOffset(byte(address>>16), pc)
+		offset, err := romimage.Image(image).Offset(byte(address>>16), pc)
 		if err != nil || offset < 0 || offset >= len(image) {
 			continue
 		}
@@ -1455,7 +1494,7 @@ func shadowStraightLineReturn(image romimage.Image, bank byte, start, limit uint
 		if shadowInDataRegion(regions, bank, pc) {
 			return 0, false
 		}
-		offset, err := romimage.LoROMOffset(bank, pc)
+		offset, err := romimage.Image(image).Offset(bank, pc)
 		if err != nil || offset < 0 || offset >= len(image) {
 			return 0, false
 		}
@@ -2505,7 +2544,7 @@ func shadowContinuationBeforeHandlerPHA(bank byte, graph *decoder.Graph, predece
 }
 
 func recoverImmediateStoreTargets(image romimage.Image, bank byte, address uint16) ([]uint32, bool) {
-	bankStart, err := romimage.LoROMOffset(bank, 0x8000)
+	bankStart, err := romimage.Image(image).Offset(bank, 0x8000)
 	if err != nil || bankStart < 0 || bankStart >= len(image) {
 		return nil, false
 	}
@@ -2552,7 +2591,7 @@ func recoverBranchSelectedHandlerTables(image romimage.Image, bank byte, graph *
 	if commonEntry == 0 {
 		return nil, false
 	}
-	bankStart, err := romimage.LoROMOffset(bank, 0x8000)
+	bankStart, err := romimage.Image(image).Offset(bank, 0x8000)
 	if err != nil || bankStart < 0 || bankStart >= len(image) {
 		return nil, false
 	}
@@ -2682,7 +2721,7 @@ func recoverSelfDelimitedWordTable(image romimage.Image, bank byte, base uint16,
 			if pc < 0x8000 {
 				return nil, false
 			}
-			offset, offsetErr := romimage.LoROMOffset(bank, pc)
+			offset, offsetErr := romimage.Image(image).Offset(bank, pc)
 			if offsetErr != nil || offset < 0 || offset >= len(image) {
 				return nil, false
 			}
@@ -2885,7 +2924,7 @@ func dedupeShadowCallers(values []ShadowCaller) []ShadowCaller {
 }
 
 func decodeShadowInstruction(image romimage.Image, bank byte, pc uint16, m, x uint8) (*cpu65816.Instruction, error) {
-	offset, err := romimage.LoROMOffset(bank, pc)
+	offset, err := romimage.Image(image).Offset(bank, pc)
 	if err != nil || offset < 0 || offset >= len(image) {
 		if err == nil {
 			err = fmt.Errorf("ROM offset %d outside %d-byte image", offset, len(image))
@@ -3020,6 +3059,16 @@ func writeShadowText(output io.Writer, report ShadowReport, verbose bool) {
 		summary.AuthoredFacts, summary.InferredFacts, summary.ExactMatches, summary.Compatible, summary.PartialMatches, summary.Conflicts, summary.AuthoredOnly, summary.Automatic, summary.GarbageOnly)
 	fmt.Fprintf(output, "read-only variant discovery: %d configured -> %d analyzed variants in %d passes\n",
 		summary.InitialVariants, summary.FinalVariants, summary.VariantPasses)
+	if len(report.CommandStreams) != 0 {
+		fmt.Fprintf(output, "native command layouts: %d contextual shape(s), report-only; no stream roots inferred (details: --verbose or --format json)\n", len(report.CommandStreams))
+	}
+	if len(report.DeferredFields) != 0 {
+		fmt.Fprintf(output, "deferred field forwarding: %d conditional native shape(s); field aliases, lifetimes and target values are not proven (details: --verbose or --format json)\n", len(report.DeferredFields))
+	}
+	if len(report.CommandWalks) != 0 {
+		starts, raw, unique, targets := shadowCommandWalkCounts(report.CommandWalks)
+		fmt.Fprintf(output, "command stream walks: %d conditional path(s) from %d selector/start pairs; %d operand emissions / %d unique load/source pairs; %d open target addresses, no proven code roots (details: --verbose or --format json)\n", len(report.CommandWalks), starts, raw, unique, targets)
+	}
 	fmt.Fprintf(output, "table ownership: %d confirmed data span(s), %d candidate span(s)\n",
 		summary.ConfirmedTableSpans, summary.CandidateTableSpans)
 	fmt.Fprintf(output, "dispatch gap sweep: %d probable unclaimed code island(s) (review-only)\n",
@@ -3114,6 +3163,10 @@ func writeShadowText(output io.Writer, report ShadowReport, verbose bool) {
 					observation.ObservationCount, observation.Found, observation.Continuation, observation.Trapped)
 			}
 		}
+		writeShadowCommandStreams(output, report.CommandStreams)
+		writeShadowDeferredFields(output, report.DeferredFields)
+		writeShadowCommandRoots(output, report.CommandStreamRoots)
+		writeShadowCommandWalks(output, report.CommandWalks)
 		for _, issue := range report.DecodeIssues {
 			fmt.Fprintf(output, "[DECODE-ISSUE] %s M%dX%d %s\n", shadowAddress(issue.FunctionEntry), issue.EntryMX.M, issue.EntryMX.X, issue.Error)
 		}

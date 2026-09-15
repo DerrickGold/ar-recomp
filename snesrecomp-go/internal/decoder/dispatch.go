@@ -15,7 +15,7 @@ func inDataRegion(regions []DataRegion, bank byte, pc uint16) bool {
 }
 
 func targetIsPadding(image rom.Image, bank byte, pc uint16) bool {
-	offset, err := rom.LoROMOffset(bank, pc)
+	offset, err := image.Offset(bank, pc)
 	if err != nil || offset+16 > len(image) {
 		return true
 	}
@@ -29,10 +29,10 @@ func targetIsPadding(image rom.Image, bank byte, pc uint16) bool {
 
 func brkContinuationLooksValid(image rom.Image, bank byte, pc uint16, m, x uint8) bool {
 	for count := 0; count < 8; count++ {
-		if pc < 0x8000 {
+		if !image.IsROM(bank, pc) {
 			return false
 		}
-		offset, err := rom.LoROMOffset(bank, pc)
+		offset, err := image.Offset(bank, pc)
 		if err != nil || offset+3 >= len(image) {
 			return false
 		}
@@ -83,10 +83,10 @@ func ClassifyDispatchHelper(image rom.Image, bank byte, address uint16) string {
 	var instructions []*cpu65816.Instruction
 	pc, m, x := address, uint8(1), uint8(1)
 	for safety := 0; safety < 256; safety++ {
-		if pc < 0x8000 {
+		if !image.IsROM(bank, pc) {
 			return ""
 		}
-		offset, err := rom.LoROMOffset(bank, pc)
+		offset, err := image.Offset(bank, pc)
 		if err != nil || offset >= len(image) {
 			return ""
 		}
@@ -160,14 +160,14 @@ func resolveDispatch(image rom.Image, bank byte, instruction *cpu65816.Instructi
 	if len(auth.TableBases) >= 2 {
 		lo, hi := auth.TableBases[0], auth.TableBases[1]
 		for index := 0; index < auth.Count; index++ {
-			loOff, loErr := rom.LoROMOffset(bank, lo+uint16(index))
-			hiOff, hiErr := rom.LoROMOffset(bank, hi+uint16(index))
+			loOff, loErr := image.Offset(bank, lo+uint16(index))
+			hiOff, hiErr := image.Offset(bank, hi+uint16(index))
 			if loErr != nil || hiErr != nil || loOff >= len(image) || hiOff >= len(image) {
 				return nil, false
 			}
 			address := uint32(image[loOff]) | uint32(image[hiOff])<<8
 			if len(auth.TableBases) == 3 {
-				bankOff, err := rom.LoROMOffset(bank, auth.TableBases[2]+uint16(index))
+				bankOff, err := image.Offset(bank, auth.TableBases[2]+uint16(index))
 				if err != nil || bankOff >= len(image) {
 					return nil, false
 				}
@@ -192,7 +192,7 @@ func resolveDispatch(image rom.Image, bank byte, instruction *cpu65816.Instructi
 		if uint32(tablePC)+uint32(entrySize)-1 > 0xffff {
 			return nil, false
 		}
-		offset, err := rom.LoROMOffset(bank, tablePC)
+		offset, err := image.Offset(bank, tablePC)
 		if err != nil || offset+entrySize > len(image) {
 			return nil, false
 		}
@@ -264,7 +264,7 @@ func autorecoverXTable(image rom.Image, bank byte, instruction *cpu65816.Instruc
 		if uint32(tablePC)+uint32(entrySize)-1 > 0xffff {
 			break
 		}
-		offset, err := rom.LoROMOffset(bank, tablePC)
+		offset, err := image.Offset(bank, tablePC)
 		if err != nil || offset+entrySize > len(image) {
 			break
 		}
@@ -281,7 +281,7 @@ func autorecoverXTable(image rom.Image, bank byte, instruction *cpu65816.Instruc
 			tablePC += uint16(entrySize)
 			continue
 		}
-		if pc < 0x8000 || inDataRegion(regions, targetBank, pc) || targetIsPadding(image, targetBank, pc) {
+		if !image.IsROM(targetBank, pc) || inDataRegion(regions, targetBank, pc) || targetIsPadding(image, targetBank, pc) {
 			break
 		}
 		entries = append(entries, uint32(targetBank)<<16|uint32(pc))
@@ -324,7 +324,7 @@ func autorecoverDP(image rom.Image, bank byte, functionStart, sitePC, dpAddress 
 	m, x := uint8(1), uint8(1)
 	var candidate *winner
 	for scanned := 0; pc < sitePC && scanned < 256; scanned++ {
-		offset, err := rom.LoROMOffset(bank, pc)
+		offset, err := image.Offset(bank, pc)
 		if err != nil || offset >= len(image) {
 			return nil, ""
 		}
@@ -412,27 +412,27 @@ func autorecoverDPCount(image rom.Image, bank byte, bases []uint16, regions []Da
 			if tablePC+1 > 0xffff {
 				break
 			}
-			offset, err := rom.LoROMOffset(bank, uint16(tablePC))
+			offset, err := image.Offset(bank, uint16(tablePC))
 			if err != nil || offset+1 >= len(image) {
 				break
 			}
 			pc = uint16(image[offset]) | uint16(image[offset+1])<<8
 		} else {
-			loOff, e1 := rom.LoROMOffset(bank, bases[0]+uint16(index))
-			hiOff, e2 := rom.LoROMOffset(bank, bases[1]+uint16(index))
+			loOff, e1 := image.Offset(bank, bases[0]+uint16(index))
+			hiOff, e2 := image.Offset(bank, bases[1]+uint16(index))
 			if e1 != nil || e2 != nil || loOff >= len(image) || hiOff >= len(image) {
 				break
 			}
 			pc = uint16(image[loOff]) | uint16(image[hiOff])<<8
 			if len(bases) >= 3 {
-				bankOff, e := rom.LoROMOffset(bank, bases[2]+uint16(index))
+				bankOff, e := image.Offset(bank, bases[2]+uint16(index))
 				if e != nil || bankOff >= len(image) {
 					break
 				}
 				targetBank = image[bankOff]
 			}
 		}
-		if pc < 0x8000 || inDataRegion(regions, targetBank, pc) || targetIsPadding(image, targetBank, pc) {
+		if !image.IsROM(targetBank, pc) || inDataRegion(regions, targetBank, pc) || targetIsPadding(image, targetBank, pc) {
 			break
 		}
 		count++

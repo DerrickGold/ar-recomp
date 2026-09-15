@@ -21,6 +21,7 @@ type BankOptions struct {
 	HLEDispatch       map[uint16]string
 	ExitMX            map[uint32]decoder.MX
 	UnresolvedAllowed bool
+	ParkClosedWaits   bool
 	CollectFunction   func(config.Entry, *FunctionResult)
 }
 
@@ -78,6 +79,7 @@ func EmitBank(image rom.Image, bank byte, entries []config.Entry, options BankOp
 			HLEDispatch:       options.HLEDispatch,
 			ExitMX:            exitMX,
 			UnresolvedAllowed: options.UnresolvedAllowed,
+			ParkClosedWaits:   options.ParkClosedWaits,
 		})
 		if err != nil {
 			return "", fmt.Errorf("emit bank $%02X entry $%04X M%dX%d: %w", bank, entry.Start, entry.EntryMX.M&1, entry.EntryMX.X&1, err)

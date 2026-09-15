@@ -378,6 +378,15 @@ whether the live NMI gate transitioned. Neither function executes the game
 body or NMI handler. `run_ppu_scanout` synchronously consumes the live PPU,
 DMA, HDMA, and IRQ state present at its call site.
 
+The shared beam's visible-to-VBlank transition also reloads the PPU's internal
+OAM address from `$2102/$2103` unless forced blank is active. This happens once
+per transition, including the end of scanout; positioning the beam within the
+same VBlank again does not restart an OAM transfer. Games may rely on this
+hardware reload between sprite DMAs without rewriting OAMADD every frame.
+Do not compensate in game glue by clearing OAM or forcing its address to zero.
+The [SNES Development Manual, OAMADD](https://floating.muncher.se/bot/manual/book1_text.pdf#page=116)
+documents the reload and its forced-blank exception.
+
 Recover the adapter schedule instead of selecting one by convention:
 
 1. Identify the ROM's VBlank wait, `WAI`/`$4210` polling, or WRAM frame gate.

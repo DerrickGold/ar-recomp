@@ -184,6 +184,10 @@ func (walk shadowPointerWalk) indexExpression(at decoder.DecodeKey, reg string, 
 			case "PHB", "PHK", "PLB", "PHD", "PLD", "PHP", "PHA", "PHX", "PHY", "PEA", "PEI", "PER":
 				continue
 			}
+			if (reg != "Y" && (ins.Mnemonic == "INY" || ins.Mnemonic == "DEY")) ||
+				(reg != "X" && (ins.Mnemonic == "INX" || ins.Mnemonic == "DEX")) {
+				continue
+			}
 		}
 		if shadowPointerTransparent(ins) {
 			continue
@@ -222,6 +226,10 @@ func initializerBits(zero, one uint16, op ShadowStoredOperation) (uint16, uint16
 // Only the initializer query uses the longer walk. Calls/joins/loops still
 // stop recovery; the existing producer query and generated facts are unchanged.
 func (walk shadowPointerWalk) initializerBank(at decoder.DecodeKey) ShadowRegisterEvidence {
+	return walk.initializerBankFrom(at, true)
+}
+
+func (walk shadowPointerWalk) initializerBankFrom(at decoder.DecodeKey, allowProgramBank bool) ShadowRegisterEvidence {
 	for range shadowInitializerBankLimit {
 		prev := walk.previous(at)
 		if prev == nil || prev.Instruction == nil {
@@ -232,7 +240,7 @@ func (walk shadowPointerWalk) initializerBank(at decoder.DecodeKey) ShadowRegist
 		case "JSR", "JSL", "RTI", "BRK", "COP", "WAI", "MVN", "MVP":
 			return ShadowRegisterEvidence{UnknownPaths: true}
 		case "PLB":
-			if value, ok := walk.initializerStackByte(at); ok {
+			if value, ok := walk.initializerStackByteFrom(at, allowProgramBank); ok {
 				return ShadowRegisterEvidence{Constants: []ShadowRegisterConstant{{Value: uint16(value), DefinitionPC: at.PC}}}
 			}
 			return ShadowRegisterEvidence{UnknownPaths: true}
@@ -242,6 +250,10 @@ func (walk shadowPointerWalk) initializerBank(at decoder.DecodeKey) ShadowRegist
 }
 
 func (walk shadowPointerWalk) initializerStackByte(at decoder.DecodeKey) (byte, bool) {
+	return walk.initializerStackByteFrom(at, true)
+}
+
+func (walk shadowPointerWalk) initializerStackByteFrom(at decoder.DecodeKey, allowProgramBank bool) (byte, bool) {
 	offset := 0
 	for range 8 {
 		prev := walk.previous(at)
@@ -255,6 +267,9 @@ func (walk shadowPointerWalk) initializerStackByte(at decoder.DecodeKey) (byte, 
 			offset++
 		case "PHK":
 			if offset == 0 {
+				if !allowProgramBank {
+					return 0, false
+				}
 				return byte(at.PC >> 16), true
 			}
 			offset--

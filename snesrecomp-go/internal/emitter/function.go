@@ -31,6 +31,8 @@ type FunctionOptions struct {
 	HLEDispatch       map[uint16]string
 	ExitMX            *decoder.MX
 	UnresolvedAllowed bool
+	// ParkClosedWaits opts into the runner's non-returning WAI contract.
+	ParkClosedWaits   bool
 	RegionBody        *RegionBodyOptions
 	RegionWrapper     *RegionWrapperOptions
 	RegionCalls       map[decoder.ResumeEdge]RegionCall
@@ -77,6 +79,7 @@ type RegionCall struct {
 
 type FunctionResult struct {
 	Source                    string
+	DecodeBudgetStub          bool
 	Graph                     *decoder.Graph
 	CFG                       *cfg.Graph
 	GarbageBRK                *uint16
@@ -140,11 +143,23 @@ func findGarbageEvidence(image rom.Image, bank byte, start uint16, entryM, entry
 		return nil
 	}
 	var brks []uint16
-	for _, key := range graph.Order {
+	// Only a straight-line entry prefix can supply this evidence. A BRK
+	// reached through a conditional/computed edge or after an unknown call
+	// says nothing about the entry width of the other paths in the routine.
+	seen := map[decoder.DecodeKey]bool{}
+	for key := graph.Entry; !seen[key]; {
+		seen[key] = true
 		decoded := graph.Instructions[key]
+		if decoded == nil {
+			break
+		}
 		if decoded.Instruction.Mnemonic == "BRK" {
 			brks = append(brks, uint16(decoded.Key.PC))
 		}
+		if len(decoded.Successors) != 1 || decoded.Instruction.Mnemonic == "JSR" || decoded.Instruction.Mnemonic == "JSL" || len(decoded.Instruction.DispatchEntries) != 0 {
+			break
+		}
+		key = decoded.Successors[0]
 	}
 	if len(brks) == 0 {
 		return nil
@@ -302,6 +317,7 @@ func EmitFunction(image rom.Image, bank byte, start uint16, entryM, entryX uint8
 	if context == nil {
 		context = codegen.NewContext()
 	}
+	context.ROMMapper = image.Mapper()
 	context.CurrentName = name
 	if options.ExitMX != nil && options.ExitMX.M >= 0 && options.ExitMX.X >= 0 {
 		m, x := uint8(options.ExitMX.M)&1, uint8(options.ExitMX.X)&1
@@ -346,9 +362,9 @@ func EmitFunction(image rom.Image, bank byte, start uint16, entryM, entryX uint8
 					} else if instruction.Mnemonic == "JMP" && instruction.Mode == cpu65816.LONG {
 						targetAddress := instruction.Operand & 0xffffff
 						targetName := context.Names[targetAddress]
-						if targetName == "" && !validLoROMCodeAddress(image, targetAddress) {
+						if targetName == "" && !validROMCodeAddress(image, targetAddress) {
 							lines = append(lines, fmt.Sprintf(
-								"return cpu_trace_unresolved_stub_trap(cpu, 0x%06x, \"bank_%02X_%04X\"); /* cross-bank JML target is outside the static LoROM code domain */",
+								"return cpu_trace_unresolved_stub_trap(cpu, 0x%06x, \"bank_%02X_%04X\"); /* cross-bank JML target is outside the mapper's ROM domain */",
 								targetAddress, byte(targetAddress>>16),
 								uint16(targetAddress)))
 							terminated = true
@@ -377,9 +393,23 @@ func EmitFunction(image rom.Image, bank byte, start uint16, entryM, entryX uint8
 					} else if helper := options.HLEDispatch[uint16(instruction.Address)]; helper != "" {
 						lines = append(lines, fmt.Sprintf("{ extern RecompReturn %s(CpuState *cpu); RecompReturn _r = %s(cpu); RecompStackPop(); return _r; } /* hle_dispatch $%06X — host-side dispatcher */", helper, helper, instruction.Address&0xffffff))
 					} else {
-						lines = append(lines, emitTrappedIndirectJump(instruction)...)
+						lines = append(lines, emitRuntimeIndirectJump(instruction)...)
 					}
 					terminated = true
+				case ir.Stop:
+					if op.Wait && options.ParkClosedWaits && parkedWait(image, instruction) {
+						lines = append(lines,
+							fmt.Sprintf("g_cpu_wait_pc24 = ((uint32)cpu->PB << 16) | 0x%04xu;", uint16(instruction.Address)),
+							fmt.Sprintf("g_cpu_wait_resume_pc24 = ((uint32)cpu->PB << 16) | 0x%04xu;", uint16(instruction.Address+1)),
+							"RecompStackPop(); return RECOMP_RETURN_PARKED_WAIT; /* proven non-returning WAI loop */")
+						terminated = true
+					} else {
+						emitted, emitErr := codegen.EmitOperation(context, op)
+						if emitErr != nil {
+							return result, emitErr
+						}
+						lines = append(lines, emitted...)
+					}
 				case ir.PushReg:
 					if len(instruction.DispatchEntries) > 0 {
 						lines = append(lines, emitIndirectDispatch(context, instruction, local)...)
@@ -458,7 +488,38 @@ func EmitFunction(image rom.Image, bank byte, start uint16, entryM, entryX uint8
 			case 0:
 				lines = append(lines, "return RECOMP_RETURN_NORMAL; /* no terminator, no successor */")
 			default:
-				lines = append(lines, gotoOrTail(context, name, bank, key, block.Successors[0], local, options)+" /* conservative multi-successor fall-through */")
+				widthContinuation := true
+				for _, next := range block.Successors {
+					if next.PC != block.Successors[0].PC {
+						widthContinuation = false
+					}
+				}
+				if !widthContinuation {
+					// Computed-call CFGs also list their handler alternatives;
+					// their first successor is the ordinary return continuation.
+					lines = append(lines, gotoOrTail(context, name, bank, key, block.Successors[0], local, options)+" /* dispatch call fall-through */")
+					break
+				}
+				// Multiple post-call decodes describe one native PC with
+				// different possible widths. Never choose a canonical decode.
+				lines = append(lines, "switch (((cpu->m_flag & 1) << 1) | (cpu->x_flag & 1)) { /* live post-call M/X */")
+				seenModes := map[uint8]string{}
+				for _, next := range block.Successors {
+					mode := (next.M&1)<<1 | next.X&1
+					transfer := gotoOrTail(context, name, bank, key, next, local, options)
+					if previous, seen := seenModes[mode]; seen && previous == transfer {
+						// Different abstract PHP histories can leave the region
+						// through the very same live-width handoff. This is one
+						// emitted edge, not a choice between decoded bodies.
+						continue
+					}
+					if next.PC != block.Successors[0].PC || seenModes[mode] != "" {
+						return result, fmt.Errorf("%s ambiguous fall-through successors at $%06X", name, key.PC)
+					}
+					seenModes[mode] = transfer
+					lines = append(lines, fmt.Sprintf("case %d: %s", mode, transfer))
+				}
+				lines = append(lines, fmt.Sprintf("default: RecompStackPop(); return sr_missing_mx_variant_warn(cpu, 0x%06xu, cpu->m_flag, cpu->x_flag, %q);", block.Successors[0].PC, name), "}")
 			}
 		}
 		blockLines[key] = lines
@@ -589,6 +650,24 @@ func emitFunctionEntry(name string, entryPC uint32, entryM, entryX uint8, option
 	return source
 }
 
+// EmitColdRegionEntry exposes an already emitted internal block. No decode,
+// native call-frame push, or ordinary owner-entry code is added. Tail dispatch
+// supplies the active _entry_s/_hrv context through the standard entry envelope.
+// The caller must prove the selector's exact block and closure exist in the
+// helper; it must not add this wrapper as a decode root or sibling boundary.
+func EmitColdRegionEntry(bank byte, entry RegionEntry, helper string, ownerPC uint16) string {
+	pc := decoder.Address24(bank, entry.PC)
+	name := fmt.Sprintf("bank_%02X_%04X_M%dX%d", bank, entry.PC, entry.M, entry.X)
+	lines := emitFunctionEntry(name, pc, entry.M, entry.X, FunctionOptions{}, nil, false)
+	lines = append(lines,
+		"  /* cold internal-tail entry; not an ordinary call root */",
+		fmt.Sprintf("  /* resumable-region owner_pc:$%04X */", ownerPC),
+		fmt.Sprintf("  return %s(cpu, _entry_s, _hrv, %d);", helper, entry.Selector),
+		"}",
+	)
+	return strings.Join(lines, "\n") + "\n"
+}
+
 func emitDecodedBody(order []decoder.DecodeKey, blockLines map[decoder.DecodeKey][]string) []string {
 	var source []string
 	for _, key := range order {
@@ -603,30 +682,33 @@ func emitDecodedBody(order []decoder.DecodeKey, blockLines map[decoder.DecodeKey
 	return source
 }
 
-// emitTrappedIndirectJump records the architectural target before preserving
-// the existing hard unresolved-indirect diagnostic. This is deliberately not
-// an interpreter or production fallback: it only makes an already-failing
-// edge visible to trace census builds.
-func emitTrappedIndirectJump(instruction *cpu65816.Instruction) []string {
+// emitRuntimeIndirectJump computes the native target and either resumes its
+// exact active owner or enters an existing AOT body at live M/X. A missing body
+// is still a hard diagnostic, with its actual target visible to the census.
+func emitRuntimeIndirectJump(instruction *cpu65816.Instruction) []string {
+	return emitRuntimeIndirectJumpWithLocals(instruction, nil)
+}
+
+func emitRuntimeIndirectJumpWithLocals(instruction *cpu65816.Instruction, local map[decoder.DecodeKey]struct{}) []string {
 	site := instruction.Address & 0xffffff
 	operand := uint16(instruction.Operand)
-	lines := []string{"{ /* unresolved IndirectGoto — census target, then preserve the hard diagnostic */"}
+	lines := []string{"{ /* runtime IndirectGoto — live target, AOT registry, hard missing-body guard */"}
 	switch instruction.Opcode {
 	case 0x6c: // JMP (abs): pointer is in bank zero; destination remains in PB.
 		lines = append(lines,
-			fmt.Sprintf("  uint16 _trap_address = cpu_read16(cpu, 0x00, (uint16)0x%04xu);", operand),
+			fmt.Sprintf("  uint16 _trap_address = cpu_read16_bank_wrap(cpu, 0x00, (uint16)0x%04xu);", operand),
 			"  uint32 _trap_target = ((uint32)cpu->PB << 16) | (uint32)_trap_address;",
 		)
 	case 0x7c: // JMP (abs,X): X indexes the pointer in PB, wrapping at 16 bits.
 		lines = append(lines,
 			fmt.Sprintf("  uint16 _trap_pointer = (uint16)(0x%04xu + cpu->X);", operand),
-			"  uint16 _trap_address = cpu_read16(cpu, cpu->PB, _trap_pointer);",
+			"  uint16 _trap_address = cpu_read16_bank_wrap(cpu, cpu->PB, _trap_pointer);",
 			"  uint32 _trap_target = ((uint32)cpu->PB << 16) | (uint32)_trap_address;",
 		)
 	case 0xdc: // JML [abs]: 24-bit pointer is read from bank zero.
 		lines = append(lines,
 			fmt.Sprintf("  uint16 _trap_pointer = (uint16)0x%04xu;", operand),
-			"  uint16 _trap_address = cpu_read16(cpu, 0x00, _trap_pointer);",
+			"  uint16 _trap_address = cpu_read16_bank_wrap(cpu, 0x00, _trap_pointer);",
 			"  uint8 _trap_bank = cpu_read8(cpu, 0x00, (uint16)(_trap_pointer + 2u));",
 			"  uint32 _trap_target = ((uint32)_trap_bank << 16) | (uint32)_trap_address;",
 		)
@@ -635,11 +717,64 @@ func emitTrappedIndirectJump(instruction *cpu65816.Instruction) []string {
 		// Keep a loud target if that lowering contract changes.
 		lines = append(lines, "  uint32 _trap_target = 0x00ffffffu;")
 	}
+	lines = append(lines,
+		"  if (_hrv && cpu_accept_indirect_return(cpu, _entry_s, _trap_target)) {",
+		fmt.Sprintf("    cpu_trace_resolved_dispatch(cpu, _trap_target, 0x%06xu);", site),
+		"    RecompStackPop(); return RECOMP_RETURN_NORMAL; /* resume this call, not a second activation */",
+		"  }",
+	)
+	// Open inventories provide fast local edges, not a closed selector domain.
+	// Match the actual full target and live widths; odd indices, null words,
+	// changed pointers and targets beyond the recovered prefix fall through to
+	// the sparse registry. Never invent a return or push a second activation.
+	seen := make(map[uint32]bool)
+	for _, target := range instruction.DispatchEntries {
+		if target == 0 || seen[target] {
+			continue
+		}
+		seen[target] = true
+		for m := uint8(0); m < 2; m++ {
+			for x := uint8(0); x < 2; x++ {
+				key := decoder.DecodeKey{PC: target, M: m, X: x}
+				if _, found := local[key]; !found {
+					continue
+				}
+				lines = append(lines, fmt.Sprintf("  if (_trap_target == 0x%06xu && cpu->m_flag == %du && cpu->x_flag == %du) {", target, m, x))
+				lines = append(lines, resolvedDispatchTrace("    ", instruction, target)...)
+				lines = append(lines, "    goto "+label(key)+"; /* open dispatch: exact local fast path */", "  }")
+			}
+		}
+	}
 	return append(lines,
+		"  if (cpu_dispatch_has_entry(cpu, _trap_target)) {",
+		"#if SNESRECOMP_SEMANTIC_DISPATCH_TRACE",
+		fmt.Sprintf("    cpu_trace_resolved_dispatch(cpu, _trap_target, 0x%06xu);", site),
+		"#endif",
+		"    cpu->PB = (uint8)(_trap_target >> 16);",
+		runtimeTailStatement("_trap_target", fmt.Sprintf("0x%06xu", site), "/* sparse AOT registry, live M/X; no interpreter */"),
+		"  }",
 		fmt.Sprintf("  cpu_trace_trapped_dispatch(cpu, _trap_target, 0x%06xu);", site),
 		fmt.Sprintf("  return cpu_trace_unresolved_indirect_jump(cpu, 0x%06x);", site),
 		"}",
 	)
+}
+
+func parkedWait(image rom.Image, instruction *cpu65816.Instruction) bool {
+	pc := uint16(instruction.Address)
+	if instruction.Mnemonic != "WAI" || pc > 0xfffc {
+		return false
+	}
+	bytes, err := image.Slice(byte(instruction.Address>>16), pc+1, 3)
+	if err != nil {
+		return false
+	}
+	if bytes[0] == 0x80 {
+		return uint16(int32(pc)+3+int32(int8(bytes[1]))) == pc
+	}
+	if bytes[0] == 0x82 {
+		return uint16(int32(pc)+4+int32(int16(uint16(bytes[1])|uint16(bytes[2])<<8))) == pc
+	}
+	return false
 }
 
 func depthFirstOrder(graph *cfg.Graph) []decoder.DecodeKey {
@@ -725,16 +860,19 @@ func tailCallStatement(callExpression, comment string, trampolinePC *uint32) str
 	if trampolinePC == nil {
 		return fmt.Sprintf("{ cpu->host_return_valid = _hrv; cpu_tailcall_inherit_return_context(_entry_s, _hrv); RecompReturn _tc = %s; RecompStackPop(); return _tc; }  %s", callExpression, comment)
 	}
-	target := fmt.Sprintf("0x%06xu", *trampolinePC&0xffffff)
-	return runtimeTailStatement(target, target, comment)
+	// A split body is not a bank-changing instruction. The registry may name
+	// the canonical mirror, but the transfer must retain the live native PB.
+	target := fmt.Sprintf("(((uint32)cpu->PB << 16) | 0x%04xu)", uint16(*trampolinePC))
+	source := fmt.Sprintf("0x%06xu", *trampolinePC&0xffffff)
+	return runtimeTailStatement(target, source, comment)
 }
 
 func runtimeTailStatement(target, source, comment string) string {
 	return fmt.Sprintf("{ if (!_hrv) { cpu->host_return_valid = _hrv; cpu_tailcall_inherit_return_context(_entry_s, _hrv); cpu_tailcall_request(%s, _entry_s, %s); RecompStackPop(); return RECOMP_RETURN_TAILCALL; } RecompStackPop(); return cpu_dispatch_paired_tail_from(cpu, %s, _entry_s, _hrv, %s); }  %s", target, source, target, source, comment)
 }
 
-func validLoROMCodeAddress(image rom.Image, address uint32) bool {
-	offset, err := rom.LoROMOffset(byte(address>>16), uint16(address))
+func validROMCodeAddress(image rom.Image, address uint32) bool {
+	offset, err := image.Offset(byte(address>>16), uint16(address))
 	return err == nil && offset >= 0 && offset < len(image)
 }
 

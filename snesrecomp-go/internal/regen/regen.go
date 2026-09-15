@@ -20,6 +20,7 @@ import (
 	"github.com/DerrickGold/snesrecomp-go/internal/decoder"
 	"github.com/DerrickGold/snesrecomp-go/internal/emitter"
 	"github.com/DerrickGold/snesrecomp-go/internal/rom"
+	"github.com/DerrickGold/snesrecomp-go/internal/tooling"
 )
 
 type Options struct {
@@ -34,6 +35,10 @@ type Options struct {
 	ProvenEntryTemplates          []analysis.EntryTemplatePlacement
 	AllowMatchingAuthoredFacts    bool
 	ExperimentalExactDirectCallMX bool
+	ExperimentalStoredTargets     bool
+	ExperimentalParkedWaits       bool
+	ExperimentalInternalTails     bool
+	ObservedDispatchCensus        []string
 	Progress                      func(string, ...any)
 }
 
@@ -42,6 +47,9 @@ type Report struct {
 	Functions, Files, ChangedFiles      int
 	Passes, ExitMXRoutes                int
 	UnresolvedIndirects, StubHits       int
+	DecodeBudgetStubs                   int
+	ObservedEntryRoots                  int
+	InternalTailEntries                 int
 	AnalysisFactsApplied                int
 	AnalysisEntryFactsApplied           int
 	AnalysisContinuationFactsApplied    int
@@ -68,40 +76,44 @@ type bankState struct {
 }
 
 type repository struct {
-	image                    rom.Image
-	banks                    []*bankState
-	byBank                   map[byte]*bankState
-	names                    map[uint32]string
-	canonical                map[uint32]map[[2]uint8]struct{}
-	dispatchHelpers          map[uint32]string
-	nativeReturnBarriers     [][2]uint32
-	provenDispatchMX         map[uint32]struct{}
-	provenResumePCs          map[uint32]struct{}
-	provenResumeEdges        map[decoder.Variant]map[decoder.ResumeEdge]struct{}
-	provenContinuationCalls  map[decoder.Variant]map[decoder.ResumeEdge]decoder.Variant
-	flattenedResumeEdges     map[decoder.Variant]map[decoder.ResumeEdge]struct{}
-	dormantEntryRoots        map[decoder.Variant]struct{}
-	templateFreeEntryRoots   map[decoder.Variant]struct{}
-	templateFreeEntryFacts   int
-	templateFreeSynthesized  int
-	staticEntryDiscoveries   map[decoder.Variant]analysis.EntryFact
-	sharedRegionBodies       int
-	sharedRegionWrappers     int
-	sharedRegionFallbacks    int
-	sharedContinuationBodies int
-	sharedContinuationEdges  int
-	sharedContinuationCalls  int
-	exactDirectCallMX        bool
-	exitMX                   map[decoder.Variant]decoder.MX
-	allDataRegions           []decoder.DataRegion
-	forceVariants            map[uint32][2]uint8
-	validVariants            map[uint32]map[[2]uint8]struct{}
-	provenEquivalent         map[uint32]map[[2]uint8]map[[2]uint8]struct{}
-	exactStaticVariants      map[codegen.Variant]struct{}
-	unresolved               map[codegen.Variant]struct{}
-	cumulativeDirty          map[codegen.Variant]struct{}
-	cumulativeEmit           map[codegen.Variant]struct{}
-	cumulativePrune          map[codegen.Variant]struct{}
+	image                     rom.Image
+	experimentalStoredTargets bool
+	parkClosedWaits           bool
+	allowDecodeBudgetStubs    bool
+	banks                     []*bankState
+	byBank                    map[byte]*bankState
+	names                     map[uint32]string
+	canonical                 map[uint32]map[[2]uint8]struct{}
+	dispatchHelpers           map[uint32]string
+	nativeReturnBarriers      [][2]uint32
+	provenDispatchMX          map[uint32]struct{}
+	provenResumePCs           map[uint32]struct{}
+	provenResumeEdges         map[decoder.Variant]map[decoder.ResumeEdge]struct{}
+	provenContinuationCalls   map[decoder.Variant]map[decoder.ResumeEdge]decoder.Variant
+	flattenedResumeEdges      map[decoder.Variant]map[decoder.ResumeEdge]struct{}
+	dormantEntryRoots         map[decoder.Variant]struct{}
+	templateFreeEntryRoots    map[decoder.Variant]struct{}
+	templateFreeEntryFacts    int
+	templateFreeSynthesized   int
+	staticEntryDiscoveries    map[decoder.Variant]analysis.EntryFact
+	sharedRegionBodies        int
+	sharedRegionWrappers      int
+	sharedRegionFallbacks     int
+	sharedContinuationBodies  int
+	sharedContinuationEdges   int
+	sharedContinuationCalls   int
+	exactDirectCallMX         bool
+	exitMX                    map[decoder.Variant]decoder.MX
+	allDataRegions            []decoder.DataRegion
+	forceVariants             map[uint32][2]uint8
+	validVariants             map[uint32]map[[2]uint8]struct{}
+	provenEquivalent          map[uint32]map[[2]uint8]map[[2]uint8]struct{}
+	exactStaticVariants       map[codegen.Variant]struct{}
+	observedVariants          map[codegen.Variant]struct{}
+	unresolved                map[codegen.Variant]struct{}
+	cumulativeDirty           map[codegen.Variant]struct{}
+	cumulativeEmit            map[codegen.Variant]struct{}
+	cumulativePrune           map[codegen.Variant]struct{}
 }
 
 var bankConfigRE = regexp.MustCompile(`(?i)^bank([0-9a-f]+)\.cfg$`)
@@ -118,6 +130,9 @@ const (
 
 func Run(options Options) (Report, error) {
 	started := time.Now()
+	if options.ExperimentalInternalTails && options.OnlyBanks != nil {
+		return Report{}, fmt.Errorf("experimental internal tails requires full regeneration so the sparse registry and region wrappers stay synchronized")
+	}
 	if options.Jobs <= 0 {
 		options.Jobs = runtime.NumCPU()
 	}
@@ -160,6 +175,9 @@ func Run(options Options) (Report, error) {
 		logf("experimental analysis overlay: seeded %d canonical entry template(s) absent from authored cfg", entryFactCounts.seeded)
 	}
 	repo.exactDirectCallMX = options.ExperimentalExactDirectCallMX
+	repo.experimentalStoredTargets = options.ExperimentalStoredTargets
+	repo.parkClosedWaits = options.ExperimentalParkedWaits
+	repo.allowDecodeBudgetStubs = options.ExperimentalStoredTargets && options.AllowStubs
 	report := Report{Banks: len(repo.banks)}
 	report.AnalysisFactsApplied = len(options.ProvenDispatchFacts)
 	report.AnalysisEntryFactsApplied = entryFactCounts.routineRoots
@@ -173,6 +191,12 @@ func Run(options Options) (Report, error) {
 	repo.expandAutoVectors(logf)
 	repo.promoteCrossBankNames()
 	repo.rebuildNames()
+	if report.ObservedEntryRoots, err = repo.applyObservedDispatchCensus(options.ROMPath, options.ObservedDispatchCensus); err != nil {
+		return report, err
+	}
+	if len(options.ObservedDispatchCensus) > 0 {
+		logf("observed census: retained %d exact native M/X root(s); not static proofs; authored cfg unchanged", report.ObservedEntryRoots)
+	}
 	repo.discoverDispatchHelpers(options.Jobs, logf)
 
 	for pass := 0; pass < variantFixpointPassLimit; pass++ {
@@ -241,12 +265,27 @@ func Run(options Options) (Report, error) {
 				variantPrunePassLimit)
 		}
 	}
+	if options.ExperimentalInternalTails {
+		report.InternalTailEntries, err = repo.exposeInternalTails(results)
+		if err != nil {
+			return report, err
+		}
+		logf("experimental internal tails: exposed %d exact decoded jump-entry variant(s); no new decoded roots or closed edge claims", report.InternalTailEntries)
+	}
 	report.FinalEntries, report.Functions = 0, 0
 	for _, bank := range repo.banks {
 		report.FinalEntries += len(bank.Config.Entries)
 	}
 	for _, bankResults := range results {
 		report.Functions += len(bankResults)
+		for _, result := range bankResults {
+			if result.DecodeBudgetStub {
+				report.DecodeBudgetStubs++
+			}
+		}
+	}
+	if report.DecodeBudgetStubs != 0 {
+		logf("%d exact variants exceeded the decode budget and remain hard AOT stubs (experimental --allow-stubs)", report.DecodeBudgetStubs)
 	}
 	report.NativeReturnTables = nativeReturnTableSites(results)
 	for _, site := range report.NativeReturnTables {
@@ -296,6 +335,9 @@ func Run(options Options) (Report, error) {
 func loadRepository(romPath, configDir string) (*repository, error) {
 	image, err := rom.Load(romPath)
 	if err != nil {
+		return nil, err
+	}
+	if err := image.ValidateMapping(); err != nil {
 		return nil, err
 	}
 	paths, err := filepath.Glob(filepath.Join(configDir, "bank*.cfg"))
@@ -368,7 +410,7 @@ func (repo *repository) expandAutoVectors(logf func(string, ...any)) {
 		return
 	}
 	previous := len(bank.Config.Entries)
-	bank.Config.Entries = config.AppendLoROMAutoVectorEntries(
+	bank.Config.Entries = config.AppendAutoVectorEntries(
 		repo.image, bank.Config.Entries)
 	for _, entry := range bank.Config.Entries[previous:] {
 		address := decoder.Address24(0, entry.Start)
@@ -520,6 +562,8 @@ func (repo *repository) discoverVariants(jobs int) (int, error) {
 		demands := make(map[codegen.Variant]variantDemandEvidence)
 		var lock sync.Mutex
 		var firstErr error
+		var graphs []*decoder.Graph
+		var fieldGraphs []*decoder.Graph
 		repo.parallelEntries(jobs, nil, func(bank *bankState, entry config.Entry) {
 			options := repo.decodeOptions(bank, entry)
 			graph, err := decoder.DecodeFunction(repo.image, bank.ID, entry.Start, entry.EntryMX.M, entry.EntryMX.X, options)
@@ -531,7 +575,23 @@ func (repo *repository) discoverVariants(jobs int) (int, error) {
 				starts[sibling.Start] = struct{}{}
 			}
 			local := discoverGraphDemandEvidence(graph, starts, repo.exactDirectCallMX, repo.forceVariants)
+			if filter := os.Getenv("SNESRECOMP_TRACE_DEMAND"); filter != "" {
+				if address, err := strconv.ParseUint(filter, 16, 24); err == nil {
+					for variant, evidence := range local {
+						if variant.Address == uint32(address) {
+							fmt.Fprintf(os.Stderr, "v2regen: discovery $%06X M%dX%d -> $%06X M%dX%d sources=%v\n", graph.Entry.PC, graph.Entry.M, graph.Entry.X, variant.Address, variant.M, variant.X, evidence.Sources)
+						}
+					}
+				}
+			}
 			lock.Lock()
+			if repo.experimentalStoredTargets {
+				graphs = append(graphs, graph)
+				if entry.End == nil && entry.ExitMX == nil && entry.TailCallPC == nil && entry.EntrySOffset == 0 &&
+					len(entryHLEObligations(bank.Config, entry.Start)) == 0 && len(bank.Config.ExcludeRanges) == 0 && len(bank.Config.HLEDispatch) == 0 {
+					fieldGraphs = append(fieldGraphs, graph)
+				}
+			}
 			for demand, evidence := range local {
 				demands[demand] = mergeVariantDemand(demands[demand], evidence)
 			}
@@ -543,7 +603,53 @@ func (repo *repository) discoverVariants(jobs int) (int, error) {
 		if firstErr != nil {
 			return totalAdded, firstErr
 		}
+		if repo.experimentalStoredTargets {
+			addresses := decoder.StoredAddressReferences(repo.image, graphs)
+			addresses = append(addresses, decoder.ForwardedFieldLiteralTargets(repo.image, fieldGraphs)...)
+			addresses = append(addresses, decoder.StackedFieldTableTargetsWithOpenPrefixes(repo.image, graphs, fieldGraphs, repo.allDataRegions)...)
+			addresses = append(addresses, decoder.OpenDispatchColdTargets(repo.image, fieldGraphs, repo.allDataRegions)...)
+			addresses = append(addresses, decoder.StoredTableDispatchTargets(repo.image, fieldGraphs, repo.allDataRegions)...)
+			addresses = append(addresses, decoder.LiteralLongPointerTargets(repo.image, fieldGraphs, repo.allDataRegions)...)
+			// Native stack inventories must not mine a body replaced by an
+			// authored HLE/width/control-flow policy either.
+			for _, graph := range fieldGraphs {
+				addresses = append(addresses, decoder.PushedReturnTargets(graph)...)
+				addresses = append(addresses, decoder.PEIReturnTargets(graph)...)
+			}
+			for _, address := range addresses {
+				for m := uint8(0); m < 2; m++ {
+					for x := uint8(0); x < 2; x++ {
+						v := codegen.Variant{Address: address, M: m, X: x}
+						demands[v] = mergeVariantDemand(demands[v], variantDemandEvidence{})
+					}
+				}
+			}
+		}
 		added := repo.applyDemands(demands)
+		if added == 0 && repo.experimentalStoredTargets {
+			// Reuse conditional native stream analysis only after the cheaper
+			// direct/stored queries settle. New cold targets enter this same
+			// worklist, so all strategies run again on their decoded bodies.
+			configs := make(map[byte]*config.Config, len(repo.banks))
+			for _, bank := range repo.banks {
+				configs[bank.ID] = bank.Config
+			}
+			targets := tooling.FiniteStoredTableTargets(repo.image, configs, graphs, fieldGraphs)
+			values := tooling.AnalyzeColdValueProvenance(repo.image, configs, graphs, fieldGraphs)
+			fmt.Fprintln(os.Stderr, "v2regen:", values.Summary())
+			targets = append(targets, values.Targets...)
+			targets = append(targets, tooling.QueuedCallbackTargets(repo.image, configs, graphs, fieldGraphs)...)
+			inventory := tooling.AnalyzeDecodedCommands(repo.image, configs, graphs, fieldGraphs)
+			cold := make(map[codegen.Variant]variantDemandEvidence)
+			for _, address := range append(targets, inventory.Targets...) {
+				for m := uint8(0); m < 2; m++ {
+					for x := uint8(0); x < 2; x++ {
+						cold[codegen.Variant{Address: address, M: m, X: x}] = variantDemandEvidence{}
+					}
+				}
+			}
+			added = repo.applyDemands(cold)
+		}
 		totalAdded += added
 		if added == 0 {
 			return totalAdded, nil
@@ -695,7 +801,7 @@ func (repo *repository) applyDemands(demands map[codegen.Variant]variantDemandEv
 		evidence := demands[demand]
 		address := demand.Address & 0xffffff
 		pc := uint16(address)
-		offset, offsetErr := rom.LoROMOffset(byte(address>>16), pc)
+		offset, offsetErr := repo.image.Offset(byte(address>>16), pc)
 		if offsetErr != nil || offset < 0 || offset >= len(repo.image) {
 			// The ordinary direct-call emitter diagnoses invalid LoROM
 			// operands inline. Do not create an unreferenced external stub
@@ -769,7 +875,7 @@ func (repo *repository) recordUnresolvedEmittedDemands(
 		for demand := range context.Demands {
 			address := demand.Address & 0xffffff
 			pc := uint16(address)
-			offset, offsetErr := rom.LoROMOffset(byte(address>>16), pc)
+			offset, offsetErr := repo.image.Offset(byte(address>>16), pc)
 			bankID := canonicalBank(repo.byBank, byte(address>>16))
 			if offsetErr != nil || offset < 0 || offset >= len(repo.image) ||
 				repo.byBank[bankID] == nil || repo.inDataRegion(bankID, pc) {
@@ -829,11 +935,14 @@ func (repo *repository) inferExitMX(jobs int) (bool, int) {
 			if err != nil {
 				return
 			}
-			exit := decoder.AnalyzeExitMX(graph, current)
-			if exit.M < 0 || exit.X < 0 {
+			if _, complete := decoder.AnalyzeExitModes(graph, current); !complete {
 				return
 			}
-			if uint8(exit.M)&1 == entry.EntryMX.M&1 && uint8(exit.X)&1 == entry.EntryMX.X&1 {
+			exit := decoder.AnalyzeExitMX(graph, current)
+			if (exit.M < 0 || exit.X < 0) && !computedReturnExitChain(graph, current) {
+				return // unrelated legacy mixed-mode summaries are a separate migration
+			}
+			if exit.M == int8(entry.EntryMX.M&1) && exit.X == int8(entry.EntryMX.X&1) {
 				return
 			}
 			lock.Lock()
@@ -849,6 +958,37 @@ func (repo *repository) inferExitMX(jobs int) (bool, int) {
 	changed := !exitMapsEqual(repo.exitMX, current)
 	repo.exitMX = current
 	return changed, len(current)
+}
+
+// Limit this migration to computed-return/open-target dispatches and callers.
+// Unknown widths propagate through calls until native REP/SEP/PLP proves an
+// exact exit again. Unrelated legacy mixed summaries are not widened here.
+func computedReturnExitChain(graph *decoder.Graph, exits map[decoder.Variant]decoder.MX) bool {
+	if decoder.HasComputedReturn(graph) || decoder.HasOpenDispatch(graph) {
+		return true
+	}
+	for _, d := range graph.Instructions {
+		i := d.Instruction
+		var target uint32
+		switch {
+		case i.Mnemonic == "JSL":
+			target = i.Operand & 0xffffff
+		case i.Mnemonic == "JSR" && i.Mode == cpu65816.ABS:
+			target = i.Address&0xff0000 | i.Operand&0xffff
+		default:
+			continue
+		}
+		key := decoder.Variant{Address: target, M: d.Key.M, X: d.Key.X}
+		exit, found := exits[key]
+		if !found && (byte(target>>16) < 0x40 || byte(target>>16) >= 0x80 && byte(target>>16) < 0xc0) {
+			key.Address ^= 0x800000
+			exit, found = exits[key]
+		}
+		if found && (exit.M < 0 || exit.X < 0) {
+			return true
+		}
+	}
+	return false
 }
 
 func cloneExitMap(source map[decoder.Variant]decoder.MX) map[decoder.Variant]decoder.MX {
@@ -887,7 +1027,10 @@ func (repo *repository) decodeOptions(bank *bankState, current config.Entry) dec
 	options.InternalResumePCs = make(map[uint16]struct{})
 	options.InternalResumeEdges = make(map[decoder.ResumeEdge]struct{})
 	for _, sibling := range bank.Config.Entries {
-		if sibling.Start != current.Start && repo.activeSiblingAddress(bank.ID, sibling.Start) {
+		// Union active variants directly. Looking up whether *some* variant
+		// at this address is active rescans the bank for every sibling and
+		// makes option construction quadratic for each decoded function.
+		if sibling.Start != current.Start && !repo.entryRootDormant(bank.ID, sibling) {
 			options.SiblingEntryPCs[sibling.Start] = struct{}{}
 		}
 	}
@@ -987,23 +1130,6 @@ func (repo *repository) emitFunctions(jobs int, only map[byte]struct{}) (map[byt
 	var firstErr error
 	repo.parallelEntries(jobs, only, func(bank *bankState, entry config.Entry) {
 		index := findEntryIndex(bank.Config.Entries, entry)
-		context := codegen.NewContext()
-		context.ROMSize, context.Names = len(repo.image), repo.names
-		context.ForceVariantAt = repo.forceVariants
-		context.ValidVariants = repo.validVariants
-		context.ProvenEquivalent = repo.provenEquivalent
-		context.ExactDirectCallMX = repo.exactDirectCallMX
-		options := repo.decodeOptions(bank, entry)
-		excludes := make([][2]uint16, 0, len(bank.Config.ExcludeRanges))
-		for _, r := range bank.Config.ExcludeRanges {
-			excludes = append(excludes, [2]uint16{r.Start, r.End})
-		}
-		_, hleSPC := uint16Set(bank.Config.HLESPCUpload)[entry.Start]
-		var exit *decoder.MX
-		if value, found := repo.exitMX[decoder.Variant{Address: decoder.Address24(bank.ID, entry.Start), M: entry.EntryMX.M & 1, X: entry.EntryMX.X & 1}]; found {
-			copy := value
-			exit = &copy
-		}
 		variant := entryVariant(bank.ID, entry)
 		regionCalls := continuationCalls[variant]
 		if regionWrappers[variant] != nil {
@@ -1011,15 +1137,16 @@ func (repo *repository) emitFunctions(jobs int, only map[byte]struct{}) (map[byt
 			// containing owner/helper carries any exact internal call sites.
 			regionCalls = nil
 		}
-		result, err := emitter.EmitFunction(repo.image, bank.ID, entry.Start, entry.EntryMX.M, entry.EntryMX.X, emitter.FunctionOptions{
-			Name: entry.Name, End: entry.End, EntrySOffset: entry.EntrySOffset, Decode: options, Codegen: context,
-			ExcludeRanges: excludes, TailCallPC: entry.TailCallPC, HLESPCUpload: hleSPC,
-			HLEFunction: bank.Config.HLEFunctions[entry.Start], HLEDispatch: bank.Config.HLEDispatch,
-			HLEFunctionIf: bank.Config.HLEFunctionsIf[entry.Start],
-			ExitMX:        exit, UnresolvedAllowed: true,
-			RegionBody: regionBodies[variant], RegionWrapper: regionWrappers[variant],
-			RegionCalls: regionCalls,
-		})
+		emitOptions := repo.functionOptions(bank, entry)
+		emitOptions.RegionBody, emitOptions.RegionWrapper = regionBodies[variant], regionWrappers[variant]
+		emitOptions.RegionCalls = regionCalls
+		context := emitOptions.Codegen
+		result, err := emitter.EmitFunction(repo.image, bank.ID, entry.Start, entry.EntryMX.M, entry.EntryMX.X, emitOptions)
+		if limit, ok := err.(*decoder.InstructionLimitError); ok && repo.allowDecodeBudgetStubs {
+			name := fmt.Sprintf("%s_M%dX%d", entry.Name, entry.EntryMX.M&1, entry.EntryMX.X&1)
+			result = &emitter.FunctionResult{DecodeBudgetStub: true, Source: fmt.Sprintf("/* decode budget exhausted (%d instructions); exact variant remains guarded, never interpreted. */\nRecompReturn %s(CpuState *cpu) {\n  return cpu_trace_unresolved_stub_trap(cpu, 0x%06xu, \"%s: decode budget exhausted\");\n}\n", limit.Limit, name, limit.Entry, name)}
+			err = nil
+		}
 		lock.Lock()
 		defer lock.Unlock()
 		if err != nil {
@@ -1046,6 +1173,34 @@ func (repo *repository) emitFunctions(jobs int, only map[byte]struct{}) (map[byt
 		}
 	}
 	return results, contexts, firstErr
+}
+
+func (repo *repository) functionOptions(bank *bankState, entry config.Entry) emitter.FunctionOptions {
+	context := codegen.NewContext()
+	context.ROMSize, context.Names = len(repo.image), repo.names
+	context.ROMMapper = repo.image.Mapper()
+	context.ForceVariantAt = repo.forceVariants
+	context.ValidVariants = repo.validVariants
+	context.ProvenEquivalent = repo.provenEquivalent
+	context.ExactDirectCallMX = repo.exactDirectCallMX
+	excludes := make([][2]uint16, 0, len(bank.Config.ExcludeRanges))
+	for _, r := range bank.Config.ExcludeRanges {
+		excludes = append(excludes, [2]uint16{r.Start, r.End})
+	}
+	_, hleSPC := uint16Set(bank.Config.HLESPCUpload)[entry.Start]
+	var exit *decoder.MX
+	if value, found := repo.exitMX[entryVariant(bank.ID, entry)]; found {
+		copy := value
+		exit = &copy
+	}
+	return emitter.FunctionOptions{
+		Name: entry.Name, End: entry.End, EntrySOffset: entry.EntrySOffset,
+		Decode: repo.decodeOptions(bank, entry), Codegen: context,
+		ExcludeRanges: excludes, TailCallPC: entry.TailCallPC, HLESPCUpload: hleSPC,
+		HLEFunction: bank.Config.HLEFunctions[entry.Start], HLEDispatch: bank.Config.HLEDispatch,
+		HLEFunctionIf: bank.Config.HLEFunctionsIf[entry.Start], ExitMX: exit, UnresolvedAllowed: true,
+		ParkClosedWaits: repo.parkClosedWaits,
+	}
 }
 
 // routeContinuationCallsThroughResumeOwners mirrors an exact multi-owner call
@@ -1624,12 +1779,9 @@ func (repo *repository) pruneDirtyVariants(results map[byte][]*emitter.FunctionR
 			for _, evidence := range bankResults[index].GarbageEvidence {
 				garbageEvidence[key] = append(garbageEvidence[key], codegen.Variant{Address: key.Address, M: evidence.Sibling[0], X: evidence.Sibling[1]})
 			}
-			for _, marker := range stubMarkers {
-				if strings.Contains(bankResults[index].Source, marker) {
-					hardDirty[key] = struct{}{}
-					break
-				}
-			}
+			// An unresolved control-flow edge is coverage debt, not evidence
+			// of the wrong operand width. A clean-looking sibling must never
+			// erase this exact live-M/X body merely because it has fewer traps.
 		}
 	}
 	for key := range emitted {
@@ -1679,63 +1831,9 @@ func (repo *repository) pruneDirtyVariants(results map[byte][]*emitter.FunctionR
 	for key := range dirty {
 		repo.cumulativeDirty[key] = struct{}{}
 	}
-	if len(pruned) == 0 {
-		// Reference taint is deliberately a separate, later phase. Ordinary
-		// pruning changes generated call routing; propagating against the stale
-		// pre-prune references falsely drops callers whose edges disappear on
-		// the required re-emit.
-		refs := repo.scanDirectReferences(emitted)
-		refPruned := make(map[codegen.Variant]struct{})
-		for {
-			tainted := make(map[codegen.Variant]struct{}, len(repo.cumulativeDirty))
-			for key := range repo.cumulativeDirty {
-				tainted[key] = struct{}{}
-			}
-			emittedNow := make(map[codegen.Variant]struct{}, len(emitted))
-			for key := range emitted {
-				if _, old := repo.cumulativePrune[key]; old {
-					continue
-				}
-				if _, pending := refPruned[key]; pending {
-					continue
-				}
-				emittedNow[key] = struct{}{}
-			}
-			for changed := true; changed; {
-				changed = false
-				for caller, targets := range refs {
-					if _, already := tainted[caller]; already {
-						continue
-					}
-					for target := range targets {
-						_, targetDirty := tainted[target]
-						_, targetEmitted := emittedNow[target]
-						targetBankInSet := repo.byBank[byte(target.Address>>16)] != nil
-						if targetDirty || (targetBankInSet && !targetEmitted) {
-							tainted[caller] = struct{}{}
-							changed = true
-							break
-						}
-					}
-				}
-			}
-			excluded := make(map[codegen.Variant]struct{}, len(repo.cumulativePrune)+len(refPruned))
-			for key := range repo.cumulativePrune {
-				excluded[key] = struct{}{}
-			}
-			for key := range refPruned {
-				excluded[key] = struct{}{}
-			}
-			next := repo.computePrunable(tainted, emittedNow, excluded)
-			if len(next) == 0 {
-				break
-			}
-			for key := range next {
-				refPruned[key] = struct{}{}
-			}
-		}
-		pruned = refPruned
-	}
+	// Do not propagate "wrong width" through C references. A live-M/X call
+	// references several alternatives; a missing alternative does not prove
+	// its caller is invalid. The exact target guard remains the authority.
 	if len(pruned) == 0 {
 		repo.rebuildValidVariants()
 		return 0
@@ -1783,6 +1881,9 @@ func (repo *repository) computePrunable(dirty, emitted, excluded map[codegen.Var
 			continue
 		}
 		if _, required := repo.exactStaticVariants[key]; required {
+			continue
+		}
+		if _, observed := repo.observedVariants[key]; observed {
 			continue
 		}
 		canonical := repo.canonical[key.Address]

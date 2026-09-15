@@ -140,14 +140,7 @@ func emitTransfer(op ir.Transfer) []string {
 
 func emitCall(context *Context, op ir.Call) ([]string, error) {
 	if op.Indirect {
-		if op.SourcePC != nil && op.TableBase != nil {
-			bank := byte(*op.SourcePC >> 16)
-			return []string{
-				fmt.Sprintf("  sr_indirect_suppressed_log(cpu, 0x%06xu, 0x%02xu, 0x%04xu, cpu->X);", *op.SourcePC&0xffffff, bank, *op.TableBase),
-				fmt.Sprintf("/* Call indirect SUPPRESSED: JSR ($%04X,X) at $%06X — cfg-required-dispatch-or-kill, no indirect_call_table authorisation */", *op.TableBase, *op.SourcePC&0xffffff),
-			}, nil
-		}
-		return []string{"/* Call indirect SUPPRESSED — caller dispatches */"}, nil
+		return emitIndirectCall(op)
 	}
 	if op.Target == nil {
 		return []string{"/* Call: target unknown — caller dispatches */"}, nil
@@ -202,7 +195,7 @@ func emitCall(context *Context, op ir.Call) ([]string, error) {
 		continuation := fmt.Sprintf("(((uint32)cpu->PB << 16) | 0x%04xu)", uint16(*op.SourcePC+3))
 		if op.Long {
 			frameBytes = 3
-			continuation = fmt.Sprintf("0x%06xu", (*op.SourcePC&0xff0000)|uint32(uint16(*op.SourcePC+4)))
+			continuation = fmt.Sprintf("(((uint32)cpu->PB << 16) | 0x%04xu)", uint16(*op.SourcePC+4))
 		}
 		lines = append(lines, "  CpuReturnScope _call_owner;",
 			fmt.Sprintf("  cpu_return_scope_begin(&_call_owner, cpu, %s, _entry_s, %du);", continuation, frameBytes))
@@ -243,6 +236,52 @@ func emitCall(context *Context, op ir.Call) ([]string, error) {
 		lines = append(lines, VariantDispatchCases(context, address, baseName, "    ", "")...)
 		lines = append(lines, "  }")
 	}
+	return finishCall(lines, op), nil
+}
+
+func emitIndirectCall(op ir.Call) ([]string, error) {
+	if op.SourcePC == nil || op.TableBase == nil || op.Long {
+		return nil, fmt.Errorf("indirect call requires a native JSR (abs,X) source and table operand")
+	}
+	site := *op.SourcePC & 0xffffff
+	lines := []string{"{ /* native indirect JSR: live PB/X target and M/X registry */", "  uint16 _call_s = cpu->S;"}
+	lines = append(lines, emitReturnFramePush(op)...)
+	lines = append(lines, "  CpuReturnScope _call_owner;",
+		fmt.Sprintf("  cpu_return_scope_begin(&_call_owner, cpu, (((uint32)cpu->PB << 16) | 0x%04xu), _entry_s, 2u);", uint16(site+3)),
+		fmt.Sprintf("  uint16 _indirect_pointer = (uint16)(0x%04xu + cpu->X);", *op.TableBase),
+		"  uint32 _indirect_target = ((uint32)cpu->PB << 16) | cpu_read16_bank_wrap(cpu, cpu->PB, _indirect_pointer);",
+		"  if (!cpu_dispatch_has_entry(cpu, _indirect_target)) {",
+		"    cpu_return_scope_end(&_call_owner);",
+		fmt.Sprintf("    cpu_trace_trapped_dispatch(cpu, _indirect_target, 0x%06xu);", site),
+		fmt.Sprintf("    return cpu_trace_unresolved_goto_trap(cpu, 0x%06xu, _indirect_target, \"unresolved indirect JSR target\", \"AOT call registry\");", site),
+		"  }",
+		"#if SNESRECOMP_SEMANTIC_DISPATCH_TRACE",
+		fmt.Sprintf("  cpu_trace_resolved_dispatch(cpu, _indirect_target, 0x%06xu);", site),
+		"#endif",
+		fmt.Sprintf("  RecompReturn _r = cpu_dispatch_paired_tail_from(cpu, _indirect_target, cpu->S, 1u, 0x%06xu);", site))
+	return finishCall(lines, op), nil
+}
+
+// Both static and dynamic calls own one native call boundary. The callee
+// cannot make a parked/non-local return into an ordinary successful call.
+func finishCall(lines []string, op ir.Call) []string {
+	lines = append(lines, "  if (_r == RECOMP_RETURN_PARKED_WAIT) {")
+	if op.SourcePC != nil {
+		lines = append(lines, "    cpu_return_scope_end(&_call_owner);")
+	}
+	lines = append(lines, "    RecompStackPop(); return _r; /* preserve native parked CPU, including PB/S */", "  }")
+	lines = append(lines, "  if (_r == RECOMP_RETURN_OWNED_UNWIND) {")
+	if op.SourcePC != nil {
+		lines = append(lines,
+			"    if (!cpu_finish_owned_unwind(&_call_owner, cpu)) {",
+			"      cpu_return_scope_end(&_call_owner);",
+			"      return _r; /* discard this activation without restoring native S/PB */",
+			"    }",
+			"    _r = RECOMP_RETURN_NORMAL; /* resume this exact call once */")
+	} else {
+		lines = append(lines, "    return _r; /* no owned continuation at this synthetic call */")
+	}
+	lines = append(lines, "  }")
 	if op.Long {
 		lines = append(lines, "  cpu_trace_pb_change(cpu, 0, cpu->PB, _saved_pb, CPU_TR_RTL);", "  cpu->PB = _saved_pb;")
 	}
@@ -253,21 +292,23 @@ func emitCall(context *Context, op ir.Call) ([]string, error) {
 	if op.SourcePC != nil {
 		lines = append(lines, "  if (!_call_owner.adjusted_return) /* native callee cleanup keeps its actual post-return S */")
 	}
-	return append(lines, "  cpu->S = _call_s;  /* stack-neutrality restore (see _call_s above) */", "}"), nil
+	return append(lines, "  cpu->S = _call_s;  /* stack-neutrality restore (see _call_s above) */", "}")
 }
 
 func invalidLoROMTarget(context *Context, address uint32) bool {
 	if _, named := context.Names[address]; named {
 		return false
 	}
-	pc := uint16(address)
-	if pc < 0x8000 {
+	offset, err := context.ROMMapper.Offset(byte(address>>16), uint16(address))
+	if err != nil {
 		return true
 	}
 	if context.ROMSize <= 0 {
 		return false
 	}
-	offset := int(byte(address>>16)&0x7f)*0x8000 + int(pc-0x8000)
+	if context.ROMMapper.String() == "hirom" && context.ROMSize&(context.ROMSize-1) == 0 {
+		offset &= context.ROMSize - 1
+	}
 	return offset >= context.ROMSize
 }
 
@@ -278,11 +319,11 @@ func emitReturnFramePush(op ir.Call) []string {
 		site = *op.SourcePC & 0xffffff
 	}
 	if op.Long {
-		returnAddress, bank := uint16(0xffff), byte(0xff)
+		returnAddress := uint16(0xffff)
 		if known {
-			returnAddress, bank = uint16(site+3), byte(site>>16)
+			returnAddress = uint16(site + 3)
 		}
-		return []string{"  /* JSL return frame -> cpu->S (Option-1) */", fmt.Sprintf("  cpu_write8(cpu, 0x00, cpu->S, 0x%02x); cpu->S = (uint16)(cpu->S - 1);", bank), fmt.Sprintf("  cpu_write8(cpu, 0x00, cpu->S, 0x%02x); cpu->S = (uint16)(cpu->S - 1);", byte(returnAddress>>8)), fmt.Sprintf("  cpu_write8(cpu, 0x00, cpu->S, 0x%02x); cpu->S = (uint16)(cpu->S - 1);", byte(returnAddress)), "  cpu->host_return_valid = 1;  /* paired host caller */"}
+		return []string{"  /* JSL return frame -> cpu->S (Option-1) */", "  cpu_write8(cpu, 0x00, cpu->S, cpu->PB); cpu->S = (uint16)(cpu->S - 1);", fmt.Sprintf("  cpu_write8(cpu, 0x00, cpu->S, 0x%02x); cpu->S = (uint16)(cpu->S - 1);", byte(returnAddress>>8)), fmt.Sprintf("  cpu_write8(cpu, 0x00, cpu->S, 0x%02x); cpu->S = (uint16)(cpu->S - 1);", byte(returnAddress)), "  cpu->host_return_valid = 1;  /* paired host caller */"}
 	}
 	returnAddress := uint16(0xffff)
 	if known {
@@ -318,6 +359,9 @@ func emitReturn(context *Context, op ir.Return) []string {
 		"#if SNESRECOMP_TRACE",
 		fmt.Sprintf("  dbg_rts_trace(cpu, 0x%06xu, _entry_s, _ret_s, _rpc24, (uint8)_hrv);", source),
 		"#endif",
+		fmt.Sprintf("  if (g_cpu_return_scope && _ret_s > g_cpu_return_scope->entry_stack && cpu_begin_owned_unwind(cpu, _ret_s, _rpc24, %du)) {", frameSize),
+		"    return RECOMP_RETURN_OWNED_UNWIND;",
+		"  }",
 		"  if (_hrv && _ret_s == _entry_s) {",
 	)
 	if context.CurrentExitM != nil && context.CurrentExitX != nil {
@@ -343,6 +387,13 @@ func emitReturn(context *Context, op ir.Return) []string {
 		lines = append(lines, "    return RECOMP_RETURN_NORMAL; /* witnessed own-frame word relocation; retain native S */ }")
 	}
 	lines = append(lines,
+		"  if (_hrv && !cpu->emulation && _ret_s < _entry_s && cpu->S <= _entry_s) {",
+		"#if SNESRECOMP_TRACE",
+		fmt.Sprintf("    cpu_trace_missing_pushed_target(cpu, _rpc24, 0x%06xu);", source),
+		"#endif",
+		"    cpu->PB = _rpb;",
+		fmt.Sprintf("    return cpu_dispatch_paired_tail_from(cpu, _rpc24, _entry_s, _hrv, 0x%06xu); /* pushed target preserves active call ownership */", source),
+		"  }",
 		"  if (_ret_s != _entry_s && cpu_resolve_ancestor_skip(_ret_s) >= 0) {",
 		"    cpu_trace_mark_nlr_exit(BD_EXIT_KIND_TRAMPOLINE);",
 		"    if (cpu_dispatch_has_entry(cpu, _rpc24)) {",

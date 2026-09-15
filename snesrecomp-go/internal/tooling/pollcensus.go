@@ -198,7 +198,7 @@ func BuildPollCensus(options PollCensusOptions) (PollCensusReport, error) {
 	sort.Slice(selectedRegisters, func(i, j int) bool { return selectedRegisters[i] < selectedRegisters[j] })
 	report := PollCensusReport{
 		Version: pollCensusVersion, Mode: "decoded_hardware_poll_census", NoWrite: true,
-		ROM:       ShadowROM{SHA256: hex.EncodeToString(hash[:]), Size: len(image), Mapper: "lorom"},
+		ROM:       ShadowROM{SHA256: hex.EncodeToString(hash[:]), Size: len(image), Mapper: romimage.Image(image).Mapper().String()},
 		Registers: selectedRegisters, InterruptSync: interruptSync, Sites: sites, DecodeIssues: issues,
 		Summary: PollCensusSummary{Sites: len(sites), InitialVariants: stats.initialVariants, FinalVariants: stats.finalVariants, VariantPasses: stats.passes, DecodeIssues: len(issues), InterruptSyncAddresses: len(interruptSync)},
 		Limitations: []string{

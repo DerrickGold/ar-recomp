@@ -2,6 +2,9 @@
 #include "snesrecomp/game/generated_support.h"
 #include "snesrecomp/game/cpu.h"
 #include "runner_internal.h"
+#include "../src/snes/snes.h"
+#include "../src/snes/cart.h"
+#include "../src/snes/cart_map.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -196,9 +199,13 @@ static void test_memory(void) {
           "WRAM low-bank mirror");
     cpu_write8(&cpu, 0x7fu, 0x4321u, 0x77u);
     check(g_ram[0x14321u] == 0x77u, "WRAM high bank");
+    g_ram[0xffffu]=0x12u;g_ram[0u]=0x34u;g_ram[0x10000u]=0x56u;
+    check(cpu_read16_bank_wrap(&cpu,0x7eu,0xffffu)==0x3412u &&
+          cpu_read16(&cpu,0x7eu,0xffffu)==0x5612u,
+          "indirect pointer wraps its bank while ordinary data carries");
     cpu_write16(&cpu, 0x00u, 0x2140u, 0x2211u);
     check(last_register == 0x2140u && last_register_value == 0x2211u &&
-              g_apu_pace_cycles_estimate == 256u,
+              g_apu_pace_cycles_estimate == 8u,
           "hardware-register routing and APU pacing");
     check(cpu_read8(&cpu, 0x80u, 0x2100u) == 0x5au &&
               last_register == 0x2100u,
@@ -268,6 +275,27 @@ static void test_stack_and_dispatch(void) {
               RECOMP_RETURN_SKIP_1 && handler_calls == 4u,
           "flat tail dispatch");
     g_sr_runner_event_mask = 0u;
+}
+
+static void test_hirom_memory_routing(void) {
+    CpuState cpu;
+    Cart cart = {0};
+    Snes snes = {0};
+    cart.type = SR_CART_MAPPING_HIROM;
+    snes.cart = &cart;
+    g_snes = &snes;
+    cpu_state_init(&cpu, g_ram);
+    memset(save_ram, 0, sizeof(save_ram));
+    *RomPtr(0xf00000u) = 0x6du;
+    check(cpu_read8(&cpu, 0xf0u, 0) == 0x6du,
+          "HiROM full-bank ROM read must not hit LoROM SRAM shortcut");
+    cpu_write8(&cpu, 0xf0u, 0, 0xa5u);
+    check(save_ram[0] == 0u && *RomPtr(0xf00000u) == 0x6du,
+          "write to HiROM ROM must not modify SRAM or ROM");
+    cpu_write8(&cpu, 0x30u, 0x6010u, 0x7bu);
+    check(cpu_read8(&cpu, 0xb0u, 0x6010u) == 0x7bu,
+          "HiROM SRAM CPU helpers agree across bank mirrors");
+    g_snes = NULL;
 }
 
 static void test_dispatch_mx_variants(void) {
@@ -360,6 +388,35 @@ static void test_trapped_dispatch_trace_queries_registry_without_execution(void)
               "trapped dispatch preserves target, site, and live state");
     }
     g_sr_runner_event_mask = 0u;
+}
+
+static void test_missing_pushed_return_is_handler_evidence(void) {
+    CpuState cpu;
+    cpu_state_init(&cpu, g_ram);
+    cpu.emulation = 0u;
+    cpu.m_flag = 0u;
+    cpu.x_flag = 1u;
+    cpu.S = 0x01d0u;
+    dispatch_event_count = 0u;
+    handler_calls = 0u;
+    memset(dispatch_events, 0, sizeof(dispatch_events));
+    rom[0x8900u] = 0x6bu; /* $01:8900 RTL: opcode alone is ambiguous. */
+    g_sr_runner_event_mask = SR_EVENT_MASK_DYNAMIC_DISPATCH;
+    cpu_trace_missing_pushed_target(&cpu, 0x018000u, 0x018900u);
+    cpu_trace_missing_pushed_target(&cpu, 0x818000u, 0x018900u);
+    check(dispatch_event_count == 0u && handler_calls == 0u,
+          "known pushed handlers do not add diagnostic/semantic edges");
+    cpu_trace_missing_pushed_target(&cpu, 0x018111u, 0x018900u);
+    check(dispatch_event_count == 1u &&
+              dispatch_events[0].flags == SR_EVENT_DISPATCH_TRAPPED &&
+              dispatch_events[0].pc24 == 0x018111u &&
+              dispatch_events[0].source_pc24 == 0x018900u &&
+              cpu.S == 0x01d0u && handler_calls == 0u,
+          "proven pushed RTL miss is not hidden as a caller continuation");
+    g_sr_runner_event_mask = 0u;
+    cpu_trace_missing_pushed_target(&cpu, 0x018111u, 0x018900u);
+    check(dispatch_event_count == 1u, "pushed miss tracing respects event mask");
+    rom[0x8900u] = 0u;
 }
 
 static void test_missing_dispatch_diagnostic_excludes_continuations(void) {
@@ -456,10 +513,12 @@ static void test_recovered_handler_continuation(void) {
 int main(void) {
     test_registers();
     test_memory();
+    test_hirom_memory_routing();
     test_stack_and_dispatch();
     test_dispatch_mx_variants();
     test_resolved_dispatch_trace_matches_registry();
     test_trapped_dispatch_trace_queries_registry_without_execution();
+    test_missing_pushed_return_is_handler_evidence();
     test_missing_dispatch_diagnostic_excludes_continuations();
     test_recovered_branch_handlers();
     test_recovered_handler_continuation();

@@ -337,6 +337,10 @@ if(BUILD_TESTING)
     add_test(NAME snesrecomp_runtime_cpu_state
         COMMAND snesrecomp_runtime_cpu_state_test)
 
+    add_executable(snesrecomp_runtime_cpu_boot_protocol_test tests/cpu_boot_protocol_test.c)
+    target_link_libraries(snesrecomp_runtime_cpu_boot_protocol_test PRIVATE snesrecomp_runtime)
+    add_test(NAME snesrecomp_runtime_cpu_boot_protocol COMMAND snesrecomp_runtime_cpu_boot_protocol_test)
+
     add_executable(snesrecomp_runtime_cpu_infra_test
         tests/cpu_infra_test.c src/core/common_cpu_infra.c src/core/paired_tail.c
         src/runner/runner_game_module.c src/snes/saveload.c)

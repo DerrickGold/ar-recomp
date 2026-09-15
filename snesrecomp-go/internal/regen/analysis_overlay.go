@@ -10,7 +10,6 @@ import (
 	"github.com/DerrickGold/snesrecomp-go/internal/config"
 	"github.com/DerrickGold/snesrecomp-go/internal/cpu65816"
 	"github.com/DerrickGold/snesrecomp-go/internal/decoder"
-	"github.com/DerrickGold/snesrecomp-go/internal/rom"
 )
 
 // applyProvenDispatchFacts adds an ephemeral dispatch overlay to the loaded
@@ -232,7 +231,7 @@ func (repo *repository) validateFactInstruction(bank byte, fact analysis.Dispatc
 	if len(fact.LiveMX) > 0 {
 		m, x = fact.LiveMX[0].M&1, fact.LiveMX[0].X&1
 	}
-	offset, err := rom.LoROMOffset(bank, uint16(fact.SitePC))
+	offset, err := repo.image.Offset(bank, uint16(fact.SitePC))
 	if err != nil || offset < 0 || offset >= len(repo.image) {
 		return fmt.Errorf("site is outside the ROM mapping")
 	}
@@ -286,7 +285,7 @@ func (repo *repository) provenIndirectDirective(bank byte, fact analysis.Dispatc
 	if len(fact.LiveMX) > 0 {
 		m, x = fact.LiveMX[0].M&1, fact.LiveMX[0].X&1
 	}
-	offset, _ := rom.LoROMOffset(bank, uint16(fact.SitePC))
+	offset, _ := repo.image.Offset(bank, uint16(fact.SitePC))
 	instruction, err := cpu65816.Decode(repo.image, offset, uint16(fact.SitePC), bank, m, x)
 	if err != nil {
 		return config.IndirectDispatch{}, fmt.Errorf("decode site: %w", err)

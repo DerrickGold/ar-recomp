@@ -227,10 +227,17 @@ static uint16_t snes_vblank_start(const Snes *snes) {
 
 void snes_setBeamPosition(
         Snes *snes, uint16_t h_master_cycles, uint16_t v_line) {
+    bool was_vblank;
     if (snes == NULL) return;
+    was_vblank = snes->inVblank;
     snes->hPos = (uint16_t)(h_master_cycles % SNES_SCANLINE_MASTER_CYCLES);
     snes->vPos = (uint16_t)(v_line % SNES_FRAME_SCANLINES);
     snes->inVblank = snes->vPos >= snes_vblank_start(snes);
+    /* The PPU reloads its OAM address at the visible-to-vblank edge unless
+     * forced blank is active. Scanout, polling and game-slice positioning
+     * share this transition; repeated positioning within vblank must not
+     * restart a partially completed OAM transfer. */
+    if (!was_vblank && snes->inVblank) ppu_handleVblank(snes->ppu);
 }
 
 void snes_beginVblank(Snes *snes) {

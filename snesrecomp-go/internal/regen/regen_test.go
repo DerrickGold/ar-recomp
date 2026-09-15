@@ -8,8 +8,10 @@ import (
 
 	"github.com/DerrickGold/snesrecomp-go/internal/analysis"
 	"github.com/DerrickGold/snesrecomp-go/internal/codegen"
+	"github.com/DerrickGold/snesrecomp-go/internal/config"
 	"github.com/DerrickGold/snesrecomp-go/internal/cpu65816"
 	"github.com/DerrickGold/snesrecomp-go/internal/decoder"
+	"github.com/DerrickGold/snesrecomp-go/internal/emitter"
 	"github.com/DerrickGold/snesrecomp-go/internal/rom"
 )
 
@@ -58,6 +60,66 @@ func TestExactStaticVariantCannotBePrunedToCanonicalSibling(t *testing.T) {
 	delete(repo.exactStaticVariants, required)
 	if got := repo.computePrunable(dirty, emitted, nil); len(got) != 1 {
 		t.Fatalf("control variant prune = %+v, want required variant", got)
+	}
+}
+
+func TestUnresolvedEdgeDoesNotProveWrongWidth(t *testing.T) {
+	for _, marker := range stubMarkers {
+		t.Run(marker, func(t *testing.T) {
+			bank := &bankState{ID: 0, Config: &config.Config{Entries: []config.Entry{
+				{Name: "Root", Start: 0x8000, EntryMX: config.MX{M: 0, X: 0}},
+				{Name: "Root", Start: 0x8000, EntryMX: config.MX{M: 1, X: 1}},
+			}}}
+			repo := &repository{banks: []*bankState{bank}, byBank: map[byte]*bankState{0: bank},
+				canonical:       map[uint32]map[[2]uint8]struct{}{0x8000: {{1, 1}: {}}},
+				cumulativeDirty: map[codegen.Variant]struct{}{}, cumulativeEmit: map[codegen.Variant]struct{}{}, cumulativePrune: map[codegen.Variant]struct{}{},
+			}
+			got := repo.pruneDirtyVariants(map[byte][]*emitter.FunctionResult{0: {{Source: marker}, {Source: "return RECOMP_RETURN_NORMAL;"}}})
+			if got != 0 || len(bank.Config.Entries) != 2 {
+				t.Fatalf("coverage debt pruned the exact M/X body: %d", got)
+			}
+		})
+	}
+}
+
+func TestExperimentalDecodeBudgetRemainsHardGuard(t *testing.T) {
+	root := t.TempDir()
+	cfgDir := filepath.Join(root, "cfg")
+	romPath := filepath.Join(root, "fixture.sfc")
+	if err := os.Mkdir(cfgDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cfgDir, "bank00.cfg"), []byte("bank = 00\nfunc Large 8000 entry_mx:0,0\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	image := make([]byte, 0x8000)
+	for i := range image {
+		image[i] = 0xea
+	}
+	image[0x7000] = 0x60
+	if err := os.WriteFile(romPath, image, 0600); err != nil {
+		t.Fatal(err)
+	}
+	options := Options{ROMPath: romPath, ConfigDir: cfgDir, OutputDir: filepath.Join(root, "out"), Jobs: 1, AllowStubs: true}
+	if _, err := Run(options); err == nil {
+		t.Fatal("ordinary regeneration silently accepted exhausted decoding")
+	}
+	options.ExperimentalStoredTargets = true
+	report, err := Run(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.DecodeBudgetStubs != 1 {
+		t.Fatalf("decode guards=%d", report.DecodeBudgetStubs)
+	}
+	source, err := os.ReadFile(filepath.Join(options.OutputDir, "bank00_v2.c"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"Large_M0X0", "cpu_trace_unresolved_stub_trap", "decode budget exhausted"} {
+		if !strings.Contains(string(source), want) {
+			t.Fatalf("missing %s", want)
+		}
 	}
 }
 

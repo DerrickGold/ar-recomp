@@ -44,7 +44,7 @@ func pbCallEnvelope(targetBank byte, callee string) []string {
 		fmt.Sprintf("cpu_trace_pb_change(cpu, 0, _saved_pb, 0x%02x, CPU_TR_JSL);", targetBank),
 		fmt.Sprintf("cpu->PB = 0x%02x;", targetBank),
 		fmt.Sprintf("RecompReturn _r = %s(cpu);", callee),
-		"cpu_trace_pb_change(cpu, 0, cpu->PB, _saved_pb, CPU_TR_RTL);",
+		"if (_r == RECOMP_RETURN_PARKED_WAIT || _r == RECOMP_RETURN_OWNED_UNWIND) { RecompStackPop(); return _r; }", "cpu_trace_pb_change(cpu, 0, cpu->PB, _saved_pb, CPU_TR_RTL);",
 		"cpu->PB = _saved_pb;",
 		"if (_r != RECOMP_RETURN_NORMAL) {",
 		"  cpu_trace_event(cpu, 0, CPU_TR_NLR_PROPAGATE, (uint8)_r, 0);",
@@ -93,6 +93,14 @@ func emitJSLDispatch(context *codegen.Context, instruction *cpu65816.Instruction
 }
 
 func emitIndirectDispatch(context *codegen.Context, instruction *cpu65816.Instruction, local map[decoder.DecodeKey]struct{}) []string {
+	if instruction.DispatchOpen && instruction.Mnemonic == "JMP" {
+		for _, target := range instruction.DispatchEntries {
+			if target != 0 {
+				demandAllVariants(context, target)
+			}
+		}
+		return emitRuntimeIndirectJumpWithLocals(instruction, local)
+	}
 	if instruction.DispatchIndexReg != "A" {
 		return emitIndexedIndirectDispatch(context, instruction, local)
 	}
@@ -154,7 +162,7 @@ func emitIndirectDispatch(context *codegen.Context, instruction *cpu65816.Instru
 			preCall = "cpu_tailcall_inherit_return_context(_entry_s, _hrv); "
 		}
 		lines = append(lines, codegen.VariantDispatchCases(context, address, baseName, "        ", preCall)...)
-		lines = append(lines, "      }", "      cpu_trace_pb_change(cpu, 0, cpu->PB, _saved_pb, CPU_TR_RTL);", "      cpu->PB = _saved_pb;", "      if (_r != RECOMP_RETURN_NORMAL) {", "        cpu_trace_event(cpu, 0, CPU_TR_NLR_PROPAGATE, (uint8)_r, 0);", "        cpu_trace_mark_nlr_exit(BD_EXIT_KIND_SKIP_PROPAGATION);", "        return (_r == RECOMP_RETURN_TAILCALL ? _r : (RecompReturn)((int)_r - 1));", "      }")
+		lines = append(lines, "      }", "      if (_r == RECOMP_RETURN_PARKED_WAIT || _r == RECOMP_RETURN_OWNED_UNWIND) { RecompStackPop(); return _r; }", "      cpu_trace_pb_change(cpu, 0, cpu->PB, _saved_pb, CPU_TR_RTL);", "      cpu->PB = _saved_pb;", "      if (_r != RECOMP_RETURN_NORMAL) {", "        cpu_trace_event(cpu, 0, CPU_TR_NLR_PROPAGATE, (uint8)_r, 0);", "        cpu_trace_mark_nlr_exit(BD_EXIT_KIND_SKIP_PROPAGATION);", "        return (_r == RECOMP_RETURN_TAILCALL ? _r : (RecompReturn)((int)_r - 1));", "      }")
 		if isJSRLike {
 			lines = append(lines, "      break;")
 		} else {
@@ -359,7 +367,7 @@ func dispatchCaseBody(context *codegen.Context, instruction *cpu65816.Instructio
 		if !isJSRLike {
 			lines = append(lines, indent+"cpu_tailcall_inherit_return_context(_entry_s, _hrv);")
 		}
-		lines = append(lines, fmt.Sprintf("%sRecompReturn _r = %s(cpu);", indent, name), indent+"cpu_trace_pb_change(cpu, 0, cpu->PB, _saved_pb, CPU_TR_RTL);", indent+"cpu->PB = _saved_pb;", indent+"if (_r != RECOMP_RETURN_NORMAL) {", indent+"  cpu_trace_event(cpu, 0, CPU_TR_NLR_PROPAGATE, (uint8)_r, 0);", indent+"  cpu_trace_mark_nlr_exit(BD_EXIT_KIND_SKIP_PROPAGATION);", indent+"  return (_r == RECOMP_RETURN_TAILCALL ? _r : (RecompReturn)((int)_r - 1));", indent+"}")
+		lines = append(lines, fmt.Sprintf("%sRecompReturn _r = %s(cpu);", indent, name), indent+"if (_r == RECOMP_RETURN_PARKED_WAIT || _r == RECOMP_RETURN_OWNED_UNWIND) { RecompStackPop(); return _r; }", "cpu_trace_pb_change(cpu, 0, cpu->PB, _saved_pb, CPU_TR_RTL);", indent+"cpu->PB = _saved_pb;", indent+"if (_r != RECOMP_RETURN_NORMAL) {", indent+"  cpu_trace_event(cpu, 0, CPU_TR_NLR_PROPAGATE, (uint8)_r, 0);", indent+"  cpu_trace_mark_nlr_exit(BD_EXIT_KIND_SKIP_PROPAGATION);", indent+"  return (_r == RECOMP_RETURN_TAILCALL ? _r : (RecompReturn)((int)_r - 1));", indent+"}")
 		return lines
 	}
 	demandAllVariants(context, address)
@@ -370,5 +378,5 @@ func dispatchCaseBody(context *codegen.Context, instruction *cpu65816.Instructio
 		pre = "cpu_tailcall_inherit_return_context(_entry_s, _hrv); "
 	}
 	lines = append(lines, codegen.VariantDispatchCases(context, address, base, indent+"  ", pre)...)
-	return append(lines, indent+"}", indent+"cpu_trace_pb_change(cpu, 0, cpu->PB, _saved_pb, CPU_TR_RTL);", indent+"cpu->PB = _saved_pb;", indent+"if (_r != RECOMP_RETURN_NORMAL) {", indent+"  cpu_trace_event(cpu, 0, CPU_TR_NLR_PROPAGATE, (uint8)_r, 0);", indent+"  cpu_trace_mark_nlr_exit(BD_EXIT_KIND_SKIP_PROPAGATION);", indent+"  return (_r == RECOMP_RETURN_TAILCALL ? _r : (RecompReturn)((int)_r - 1));", indent+"}")
+	return append(lines, indent+"}", indent+"if (_r == RECOMP_RETURN_PARKED_WAIT || _r == RECOMP_RETURN_OWNED_UNWIND) { RecompStackPop(); return _r; }", "cpu_trace_pb_change(cpu, 0, cpu->PB, _saved_pb, CPU_TR_RTL);", indent+"cpu->PB = _saved_pb;", indent+"if (_r != RECOMP_RETURN_NORMAL) {", indent+"  cpu_trace_event(cpu, 0, CPU_TR_NLR_PROPAGATE, (uint8)_r, 0);", indent+"  cpu_trace_mark_nlr_exit(BD_EXIT_KIND_SKIP_PROPAGATION);", indent+"  return (_r == RECOMP_RETURN_TAILCALL ? _r : (RecompReturn)((int)_r - 1));", indent+"}")
 }

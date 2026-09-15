@@ -82,15 +82,10 @@ func BuildROMInfo(options ROMInfoOptions) (ROMInfoReport, error) {
 	for _, value := range image {
 		report.ByteSum16 += uint16(value)
 	}
-	candidateOffsets := []struct {
-		offset int
-		mapper string
-	}{{0x7fc0, "lorom"}, {0xffc0, "hirom"}, {0x40ffc0, "exhirom"}}
-	for _, item := range candidateOffsets {
-		if item.offset+0x40 > len(image) {
-			continue
-		}
-		report.HeaderCandidates = append(report.HeaderCandidates, parseROMHeaderCandidate(image, item.offset, item.mapper))
+	for _, item := range image.Headers() {
+		candidate := parseROMHeaderCandidate(image, item.Offset, item.Mapper.String())
+		candidate.Score = item.Score
+		report.HeaderCandidates = append(report.HeaderCandidates, candidate)
 	}
 	if len(report.HeaderCandidates) == 0 {
 		report.Warnings = append(report.Warnings, "ROM is too small to contain a standard SNES header")

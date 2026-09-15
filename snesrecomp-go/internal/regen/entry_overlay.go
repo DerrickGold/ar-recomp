@@ -475,19 +475,6 @@ func (repo *repository) entryRootDormant(bank byte, entry config.Entry) bool {
 	return dormant
 }
 
-func (repo *repository) activeSiblingAddress(bank byte, pc uint16) bool {
-	state := repo.byBank[bank]
-	if state == nil {
-		return false
-	}
-	for _, entry := range state.Config.Entries {
-		if entry.Start == pc && !repo.entryRootDormant(bank, entry) {
-			return true
-		}
-	}
-	return false
-}
-
 func (repo *repository) activateDemandedEntryRoot(bank byte, entry *config.Entry) bool {
 	variant := entryVariant(bank, *entry)
 	if _, dormant := repo.dormantEntryRoots[variant]; !dormant {

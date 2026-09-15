@@ -686,6 +686,42 @@ void cpu_tailcall_request(uint32 pc24, uint16 miss_stack,
 }
 
 CpuReturnScope *g_cpu_return_scope;
+CpuReturnScope *g_cpu_owned_unwind_scope;
+
+int cpu_begin_owned_unwind(CpuState *cpu, uint16 return_stack,
+                           uint32 target, uint8 frame_bytes) {
+    CpuReturnScope *scope = g_cpu_return_scope;
+    if (cpu == NULL || cpu->emulation || g_cpu_owned_unwind_scope != NULL ||
+        scope == NULL || scope->cpu != cpu ||
+        (frame_bytes != 2u && frame_bytes != 3u) ||
+        (uint32)return_stack + frame_bytes != cpu->S || cpu->S > 0x1fffu)
+        return 0;
+    /* Stop at the nearest frame at this stack position. A matching recursive
+     * PC farther up is not evidence. Reset/foreign CPU/non-native owners and
+     * a non-monotone scope chain are barriers, not frames to skip past. */
+    uint16 previous_stack = scope->entry_stack;
+    if (previous_stack >= return_stack) return 0;
+    for (; scope != NULL; scope = scope->previous) {
+        if (scope->cpu != cpu || (scope->frame_bytes != 2u && scope->frame_bytes != 3u) ||
+            scope->entry_stack < previous_stack) return 0;
+        previous_stack = scope->entry_stack;
+        if (scope->entry_stack < return_stack) continue;
+        if (scope->entry_stack != return_stack || scope->frame_bytes != frame_bytes ||
+            scope->continuation != (target & 0xffffffu)) return 0;
+        g_cpu_owned_unwind_scope = scope;
+        cpu->PB = (uint8)(target >> 16);
+        return 1;
+    }
+    return 0;
+}
+
+int cpu_finish_owned_unwind(CpuReturnScope *scope, CpuState *cpu) {
+    if (scope == NULL || scope != g_cpu_owned_unwind_scope ||
+        scope != g_cpu_return_scope || scope->cpu != cpu) return 0;
+    scope->adjusted_return = 1u;
+    g_cpu_owned_unwind_scope = NULL;
+    return 1;
+}
 
 int cpu_accept_adjusted_return(CpuState *cpu, uint16 entry_stack,
                               uint16 return_stack, uint32 target,
@@ -840,6 +876,7 @@ void WatchdogFrameStart(void) {
         g_tailcall_context_valid = false;
         g_sr_paired_tail_driver = NULL;
         g_cpu_return_scope = NULL;
+        g_cpu_owned_unwind_scope = NULL;
     }
 }
 
@@ -868,6 +905,7 @@ void WatchdogFrameStart(void) {
         g_tailcall_context_valid = false;
         g_sr_paired_tail_driver = NULL;
         g_cpu_return_scope = NULL;
+        g_cpu_owned_unwind_scope = NULL;
     }
 }
 void WatchdogFrameEnd(void) {}
@@ -946,6 +984,7 @@ void SnesShutdown(void) {
     clear_published_runner();
     snes_free(snes);
     g_cpu_return_scope = NULL; /* terminal shutdown may abandon reset's C scope */
+    g_cpu_owned_unwind_scope = NULL;
 }
 
 Snes *SnesInit(const uint8 *data, int data_size) {

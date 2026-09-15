@@ -27,10 +27,10 @@ func TestSplitTailNativeExecution(t *testing.T) {
 		t.Skip("native conformance needs CMake and a C/C++ toolchain")
 	}
 	image := make(rom.Image, 0x8000)
-	copy(image, []byte{0xad, 0x10, 0x00, 0xd0, 0x01, 0x6b})     // Head: LDA dp; BNE Body; RTL
-	copy(image[6:], []byte{0xca, 0xd0, 0x03, 0x6b, 0xea, 0xea}) // Body: DEX; BNE Loop; RTL
-	copy(image[12:], []byte{0x20, 0x20, 0x80, 0x80, 0xf5})      // Loop: JSR Child; BRA Body
-	copy(image[32:], []byte{0x80, 0x02, 0xea, 0xea, 0x60})      // Child: BRA ChildRet; RTS
+	copy(image, []byte{0xa5, 0x10, 0xea, 0xd0, 0x01, 0x6b})            // Head: LDA dp; NOP; BNE Body; RTL
+	copy(image[6:], []byte{0xca, 0xd0, 0x03, 0x6b, 0xea, 0xea})        // Body: DEX; BNE Loop; RTL
+	copy(image[12:], []byte{0x20, 0x20, 0x80, 0x80, 0xf5})             // Loop: JSR Child; BRA Body
+	copy(image[32:], []byte{0x80, 0x02, 0xea, 0xea, 0x4b, 0xab, 0x60}) // Child: BRA ChildRet; PHK; PLB; RTS
 	roots := []struct {
 		name string
 		pc   uint16
@@ -53,6 +53,12 @@ func TestSplitTailNativeExecution(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	var bytes strings.Builder
+	for i, b := range image {
+		if b != 0 {
+			fmt.Fprintf(&bytes, "[%d]=%d,", i, b)
+		}
+	}
 	files := map[string]string{
 		"generated.c": source, "funcs.h": "/* synthetic fixture forward declarations are in generated.c */\n",
 		"CMakeLists.txt": `cmake_minimum_required(VERSION 3.20)
@@ -71,31 +77,37 @@ set_property(TARGET tail_contract PROPERTY LINKER_LANGUAGE CXX)
 void RtlApuLock(void) {}
 void RtlApuUnlock(void) {}
 static unsigned continuation_calls;
+static const uint8 fixture_rom[0x8000]={` + bytes.String() + `};
 static RecompReturn forbidden_continuation(CpuState *cpu) {
     (void)cpu; ++continuation_calls; return RECOMP_RETURN_NORMAL;
 }
 const DispatchEntry g_dispatch_table[] = {
 {0x001235u,{forbidden_continuation,forbidden_continuation,forbidden_continuation,forbidden_continuation}},
-` + table.String() + `};
+` + table.String() + `{0x801235u,{forbidden_continuation,forbidden_continuation,forbidden_continuation,forbidden_continuation}}
+};
 const unsigned g_dispatch_table_count=sizeof(g_dispatch_table)/sizeof(g_dispatch_table[0]);
 int main(void) {
- for (unsigned mx=0;mx<4;mx++) for (unsigned taken=0;taken<2;taken++) {
+ g_rom=fixture_rom;
+ for (unsigned mx=0;mx<4;mx++) for (unsigned taken=0;taken<2;taken++) for(unsigned mirror=0;mirror<2;mirror++) {
     CpuState cpu; cpu_state_init(&cpu,g_ram); cpu.emulation=0;
     cpu.P=(uint8)((mx&2?CPU_P_M:0)|(mx&1?CPU_P_X:0)); cpu_p_to_mirrors(&cpu);
     cpu.S=0x1ffcu; cpu.X=(mx&1)?200u:10000u; uint16 old_x=cpu.X;
-    cpu.PB=0; cpu.host_return_valid=1; g_ram[0x10]=(uint8)taken; g_ram[0x11]=0;
-    cpu_write8(&cpu,0,0x1ffd,0x34); cpu_write8(&cpu,0,0x1ffe,0x12); cpu_write8(&cpu,0,0x1fff,0);
+    cpu.PB=mirror?0x80:0; cpu.DB=0xff; cpu.host_return_valid=1; g_ram[0x10]=(uint8)taken; g_ram[0x11]=0;
+    cpu_write8(&cpu,0,0x1ffd,0x34); cpu_write8(&cpu,0,0x1ffe,0x12); cpu_write8(&cpu,0,0x1fff,cpu.PB);
     WatchdogFrameStart();
     RecompReturn result=g_dispatch_table[1].variant[mx](&cpu);
     if(result!=RECOMP_RETURN_NORMAL || continuation_calls || cpu.S!=0x1fff ||
        g_recomp_stack_top!=0 || cpu.X!=(taken?0:old_x) ||
+       cpu.PB!=(mirror?0x80:0) || cpu.DB!=(taken?(mirror?0x80:0):0xff) ||
        cpu.m_flag!=((mx>>1)&1) || cpu.x_flag!=(mx&1)) return 1;
     /* Registry entry is unpaired: its real hardware continuation executes
      * once. A paired C call above must never dispatch that continuation. */
     cpu.S=0x1ffc; cpu.X=3; g_ram[0x10]=1; cpu.host_return_valid=0;
-    result=cpu_dispatch_pc_from(&cpu,0x008000,0x1ffc,0x00abcd);
+    result=cpu_dispatch_pc_from(&cpu,mirror?0x808000:0x008000,0x1ffc,0x00abcd);
     if(result!=RECOMP_RETURN_NORMAL || continuation_calls!=1 || cpu.S!=0x1fff ||
-       g_recomp_stack_top!=0 || cpu.X!=0) return 2;
+       g_recomp_stack_top!=0 || cpu.X!=0 || cpu.PB!=(mirror?0x80:0) || cpu.DB!=(mirror?0x80:0)) {
+      fprintf(stderr,"unpaired mx=%u mirror=%u r=%d calls=%u S=%04x X=%04x PB=%02x DB=%02x depth=%d\n",mx,mirror,result,continuation_calls,cpu.S,cpu.X,cpu.PB,cpu.DB,g_recomp_stack_top);return 2;
+    }
     continuation_calls=0;
  }
  puts("native split tails: all M/X states, taken/untaken, paired/unpaired, long chains and nested calls PASS");

@@ -136,14 +136,21 @@ func normalizeAndValidateStaticAnalysisDatabase(database *StaticAnalysisDatabase
 	if database.Provenance != staticAnalysisDatabaseProvenance {
 		return fmt.Errorf("analysis database provenance %q is not supported", database.Provenance)
 	}
-	// Reports v18 (dispatch inventory) and v19 (frame lifetimes) only add
-	// report-only evidence. Their fact schema, proof requirements, and
-	// generation semantics are unchanged from v17.
+	// Reports v18 (dispatch inventory), v19 (frame lifetimes), v20
+	// (native command prefixes), v21 (stream input references), and v22
+	// (ROM-derived input provenance), v23 (local WRAM input dependencies), and
+	// v24 (conditional initializer paths), v25 (correlated caller flags),
+	// v26 (bounded native status summaries), v27 (native status tails), and
+	// v28 (deferred field relationships), v29 (bounded command walks), and
+	// v30 (conditional native data arms), v31 (owned callback frame queries) only
+	// add report-only evidence. Their fact schema, proof requirements, and
+	// proven-fact generation semantics
+	// are unchanged from v17.
 	// Preserve existing checked-in databases without trusting older schemas.
 	switch database.ShadowReportVersion {
-	case 17, 18, 19:
+	case 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31:
 	default:
-		return fmt.Errorf("analysis database shadow report version %d is not supported (want 17, 18, or 19)", database.ShadowReportVersion)
+		return fmt.Errorf("analysis database shadow report version %d is not supported (want 17 through 31)", database.ShadowReportVersion)
 	}
 	if len(database.ROM.SHA256) != sha256.Size*2 {
 		return fmt.Errorf("analysis database ROM SHA-256 has %d hexadecimal characters, want %d", len(database.ROM.SHA256), sha256.Size*2)
@@ -248,7 +255,7 @@ func shadowROMIdentity(path string) (ShadowROM, error) {
 		return ShadowROM{}, err
 	}
 	hash := sha256.Sum256(image)
-	return ShadowROM{SHA256: hex.EncodeToString(hash[:]), Size: len(image), Mapper: "lorom"}, nil
+	return ShadowROM{SHA256: hex.EncodeToString(hash[:]), Size: len(image), Mapper: romimage.Image(image).Mapper().String()}, nil
 }
 
 func requireJSONEOF(decoder *json.Decoder) error {

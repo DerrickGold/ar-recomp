@@ -39,7 +39,16 @@ typedef enum RecompReturn {
     RECOMP_RETURN_SKIP_2 = 2,
     RECOMP_RETURN_SKIP_3 = 3,
     RECOMP_RETURN_TAILCALL = 0x4000,
+    RECOMP_RETURN_PARKED_WAIT = 0x4001,
+    RECOMP_RETURN_OWNED_UNWIND = 0x4002,
 } RecompReturn;
+
+/* Only emitted for a proven WAI + unconditional branch back to that WAI.
+ * There is no ordinary continuation out of this parked loop. A scheduler may
+ * retire its C activations, retain the complete emulated CPU/stack, and enter
+ * a real interrupt. resume_pc is the hardware PC following WAI. */
+extern uint32 g_cpu_wait_pc24;
+extern uint32 g_cpu_wait_resume_pc24;
 
 /* Generated direct-call ownership, separate from emulated CPU/save state.
  * Records live on the C stack and only cover a synchronous native call.
@@ -57,6 +66,7 @@ typedef struct CpuReturnScope {
     int reset_activation_depth;
 } CpuReturnScope;
 extern CpuReturnScope *g_cpu_return_scope;
+extern CpuReturnScope *g_cpu_owned_unwind_scope;
 extern int g_recomp_stack_top;
 
 /* A reset entry owns no hardware return frame and may initialize S. Hosts
@@ -94,6 +104,31 @@ static inline void cpu_return_scope_begin(CpuReturnScope *scope, CpuState *cpu,
 static inline void cpu_return_scope_end(CpuReturnScope *scope) {
     /* A terminal/reset boundary must not resurrect an invalidated chain. */
     if (g_cpu_return_scope == scope) g_cpu_return_scope = scope->previous;
+    if (g_cpu_owned_unwind_scope == scope) g_cpu_owned_unwind_scope = NULL;
+}
+
+/* An exact native ancestor frame can finish after inner call frames were
+ * deliberately discarded. No new continuation body or host-depth SKIP count
+ * is needed. The matching C call consumes the token; intervening calls/tails
+ * propagate it without restoring S/PB. Ordinary immediate returns are unchanged. */
+int cpu_begin_owned_unwind(CpuState *cpu, uint16 return_stack,
+                           uint32 target, uint8 frame_bytes);
+int cpu_finish_owned_unwind(CpuReturnScope *scope, CpuState *cpu);
+
+/* A native callee may remove its hardware frame and jump to its saved return
+ * PC instead of executing RTS/RTL. Only the immediate active call, its exact
+ * continuation and its exact post-pop S can resume the existing C activation.
+ * Never search ancestors or treat an arbitrary registry function as a resume. */
+static inline int cpu_accept_indirect_return(CpuState *cpu,
+        uint16 entry_stack, uint32 target) {
+    const CpuReturnScope *scope = g_cpu_return_scope;
+    return cpu != NULL && !cpu->emulation && scope != NULL &&
+        scope->cpu == cpu && scope->entry_stack == entry_stack &&
+        (scope->frame_bytes == 2u || scope->frame_bytes == 3u) &&
+        scope->continuation == (target & 0xffffffu) &&
+        (uint32)entry_stack + scope->frame_bytes == cpu->S &&
+        cpu->S <= scope->caller_stack_limit &&
+        scope->caller_stack_limit <= 0x1fffu;
 }
 int cpu_accept_adjusted_return(CpuState *cpu, uint16 entry_stack,
                               uint16 return_stack, uint32 target,
@@ -189,6 +224,14 @@ static inline void cpu_mirrors_to_p(CpuState *cpu) {
 
 uint8 cpu_read8(CpuState *cpu, uint8 bank, uint16 address);
 uint16 cpu_read16(CpuState *cpu, uint8 bank, uint16 address);
+/* Indirect control-flow pointer fetches stay in their pointer bank, unlike
+ * ordinary data words which may carry into the next bank. Keep read order
+ * explicit for bank-zero pointers that overlap side-effecting registers. */
+static inline uint16 cpu_read16_bank_wrap(CpuState *cpu, uint8 bank, uint16 address) {
+    uint8 low = cpu_read8(cpu, bank, address);
+    uint8 high = cpu_read8(cpu, bank, (uint16)(address + 1u));
+    return (uint16)((uint16)low | ((uint16)high << 8));
+}
 void cpu_write8(CpuState *cpu, uint8 bank, uint16 address, uint8 value);
 void cpu_write16(CpuState *cpu, uint8 bank, uint16 address, uint16 value);
 
@@ -356,6 +399,11 @@ void cpu_trace_resolved_dispatch(CpuState *cpu, uint32 pc24,
  * executing it. Generated code calls this immediately before its hard trap. */
 void cpu_trace_trapped_dispatch(CpuState *cpu, uint32 pc24,
                                 uint32 source_pc24);
+/* Trace-only evidence for a missing software-pushed RTS/RTL target, after
+ * generated code has proved the active caller frame remains below it.
+ * Does not execute the target or classify arbitrary returns as handlers. */
+void cpu_trace_missing_pushed_target(CpuState *cpu, uint32 pc24,
+                                     uint32 source_pc24);
 void dbg_rts_trace(CpuState *cpu, uint32 source_pc, uint16 entry_stack,
                    uint16 return_stack, uint32 popped_pc, uint8 hrv);
 void dbg_oam_block_trace(CpuState *cpu, uint32 pc24);

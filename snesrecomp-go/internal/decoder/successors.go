@@ -48,6 +48,15 @@ func labeledSuccessors(image rom.Image, instruction *cpu65816.Instruction, key D
 }
 
 func callSuccessors(image rom.Image, instruction *cpu65816.Instruction, post DecodeKey, bank byte, nextPC uint16, options Options) []labeledSuccessor {
+	if instruction.Opcode == 0xfc && instruction.DispatchOpen {
+		var successors []labeledSuccessor
+		for m := uint8(0); m < 2; m++ {
+			for x := uint8(0); x < 2; x++ {
+				successors = append(successors, labeledSuccessor{DecodeKey{PC: Address24(bank, nextPC), M: m, X: x, PStack: post.PStack, PDepth: post.PDepth}, "fall"})
+			}
+		}
+		return successors
+	}
 	target, hasTarget := uint32(0), false
 	if instruction.Mnemonic == "JSR" && instruction.Length == 3 {
 		target, hasTarget = Address24(bank, uint16(instruction.Operand)), true
@@ -63,7 +72,19 @@ func callSuccessors(image rom.Image, instruction *cpu65816.Instruction, post Dec
 				exit, found = options.CalleeExitMX[Variant{target ^ 0x800000, post.M, post.X}]
 			}
 		}
-		if found && exit.M >= 0 && exit.X >= 0 {
+		if found {
+			if exit.M < 0 || exit.X < 0 {
+				var successors []labeledSuccessor
+				for m := uint8(0); m < 2; m++ {
+					for x := uint8(0); x < 2; x++ {
+						if (exit.M >= 0 && m != uint8(exit.M)&1) || (exit.X >= 0 && x != uint8(exit.X)&1) {
+							continue
+						}
+						successors = append(successors, labeledSuccessor{DecodeKey{PC: Address24(bank, nextPC), M: m, X: x, PStack: post.PStack, PDepth: post.PDepth}, "fall"})
+					}
+				}
+				return successors
+			}
 			returnM, returnX = uint8(exit.M)&1, uint8(exit.X)&1
 		}
 	}
@@ -76,7 +97,7 @@ func callSuccessors(image rom.Image, instruction *cpu65816.Instruction, post Dec
 			}
 		}
 		if found && len(modes) <= 2 {
-			offset, err := rom.LoROMOffset(bank, nextPC)
+			offset, err := image.Offset(bank, nextPC)
 			if err != nil || offset >= len(image) {
 				found = false
 			} else {
