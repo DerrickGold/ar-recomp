@@ -25,6 +25,7 @@ const coldValueContextDepth = 4
 type ColdValueInventory struct {
 	Targets            []uint32
 	IndexedTargets     []uint32
+	IndirectTargets    []uint32
 	LongPointerTargets []uint32
 	Nodes, Evaluations int
 	Boundaries         []string
@@ -58,9 +59,10 @@ type coldValueContext struct {
 	seed   int // one independently rooted native-entry input, not a caller frame
 }
 type coldValueNode struct {
-	query  coldValueQuery
-	values []coldWordValue
-	users  map[int]bool
+	query     coldValueQuery
+	values    []coldWordValue
+	users     map[int]bool
+	saturated bool // unknown/top after cardinality overflow, not an empty seed
 }
 type coldValueRead struct {
 	site coldValueSite
@@ -98,9 +100,18 @@ type coldValueEngine struct {
 func AnalyzeColdValueProvenance(image rom.Image, configs map[byte]*config.Config, graphs, eligible []*decoder.Graph) ColdValueInventory {
 	e := newColdValueEngine(image, configs, graphs, eligible)
 	indexed, pointers := e.consumers()
+	indirect := e.indirectConsumers()
 	e.solve()
 	out := ColdValueInventory{Nodes: len(e.nodes), Evaluations: e.work, Converged: !e.failed}
 	if !e.failed {
+		for _, c := range indirect {
+			for _, v := range e.nodes[c.node].values {
+				pc := uint32(c.bank)<<16 | uint32(v.word)
+				if v.word != 0 && v.word != 0xffff && coldMappedTarget(e.a, pc) {
+					out.IndirectTargets = append(out.IndirectTargets, pc)
+				}
+			}
+		}
 		for _, c := range indexed {
 			for _, v := range e.nodes[c.node].values {
 				if pc := uint32(c.bank)<<16 | uint32(v.word); v.word != 0 && v.word != 0xffff && coldMappedTarget(e.a, pc) {
@@ -152,8 +163,10 @@ func AnalyzeColdValueProvenance(image rom.Image, configs map[byte]*config.Config
 		}
 	}
 	out.IndexedTargets = coldSortedTargets(out.IndexedTargets)
+	out.IndirectTargets = coldSortedTargets(out.IndirectTargets)
 	out.LongPointerTargets = coldSortedTargets(out.LongPointerTargets)
 	out.Targets = coldSortedTargets(append(slices.Clone(out.IndexedTargets), out.LongPointerTargets...))
+	out.Targets = coldSortedTargets(append(out.Targets, out.IndirectTargets...))
 	for s := range e.boundaries {
 		out.Boundaries = append(out.Boundaries, s)
 	}
@@ -254,6 +267,9 @@ func (e *coldValueEngine) solve() {
 		id := e.queue[0]
 		e.queue = e.queue[1:]
 		delete(e.queued, id)
+		if e.nodes[id].saturated {
+			continue
+		}
 		e.current = id
 		e.work++
 		v := e.evaluate(e.nodes[id].query)
@@ -261,6 +277,10 @@ func (e *coldValueEngine) solve() {
 		v = coldWordSet(v)
 		if len(v) > shadowInitializerDomainLimit {
 			e.boundaries["value_cardinality_budget"] = true
+			// A cycle which increments a finite set must not alternate
+			// between overflow->empty and reseeding the same finite set.
+			// This query has reached unknown/top for the rest of this solve.
+			e.nodes[id].saturated = true
 			v = nil
 		}
 		if !slices.Equal(v, e.nodes[id].values) {
@@ -305,6 +325,12 @@ func (e *coldValueEngine) evaluate(q coldValueQuery) []coldWordValue {
 	if q.reg == "read" {
 		return e.read(q)
 	}
+	if q.reg == "carry" {
+		return e.carry(q)
+	}
+	if q.reg == "pointer" {
+		return e.localPointer(q)
+	}
 	if q.reg == "indexed" {
 		i := w.graph.Instructions[q.site.key].Instruction
 		indices := e.values(coldValueQuery{q.site, "X", q.context})
@@ -344,9 +370,20 @@ func (e *coldValueEngine) evaluate(q coldValueQuery) []coldWordValue {
 			e.boundaries["unbound_entry_register"] = true
 		}
 	default:
-		e.boundaries[x.Source.Kind+":"+x.Source.Reason] = true
+		if x.Source.Register == "A" && x.Source.Reason == "unsupported_value_effect_ADC" {
+			v = e.add(coldValueQuery{coldValueSite{q.site.graph, x.sourceKey}, "A", q.context}, false)
+		} else {
+			e.boundaries[x.Source.Kind+":"+x.Source.Reason] = true
+		}
 	}
-	if len(v) == 0 && len(x.DomainValues) != 0 {
+	deferDomain := false
+	if x.Source.Kind == "load" {
+		i := w.graph.Instructions[x.sourceKey].Instruction
+		// An indirect ROM read is a dependency, not an independent mask
+		// seed. Seeding its result can make a cyclic state table prove itself.
+		deferDomain = i.Mode == cpu65816.DPINDIR || i.Mode == cpu65816.INDIRY
+	}
+	if len(v) == 0 && len(x.DomainValues) != 0 && !deferDomain {
 		for _, word := range x.DomainValues {
 			v = append(v, coldWordValue{word: word})
 		}
@@ -413,7 +450,7 @@ func (e *coldValueEngine) read(q coldValueQuery) []coldWordValue {
 	i := d.Instruction
 	reg := ""
 	switch i.Mnemonic {
-	case "LDA":
+	case "LDA", "ADC":
 		reg = "A"
 	case "LDX":
 		reg = "X"
@@ -426,6 +463,9 @@ func (e *coldValueEngine) read(q coldValueQuery) []coldWordValue {
 	}
 	if i.Mode == cpu65816.IMM {
 		return []coldWordValue{{word: uint16(i.Operand)}}
+	}
+	if i.Mode == cpu65816.DPINDIR || i.Mode == cpu65816.INDIRY {
+		return e.indirectRead(q)
 	}
 	conditionalSlotRead := false
 	if i.Mode == cpu65816.ABS && i.Operand < 0x1fff {
@@ -681,5 +721,5 @@ func (e *coldValueEngine) consumers() ([]coldIndexedConsumer, []coldPointerConsu
 }
 
 func (v ColdValueInventory) Summary() string {
-	return fmt.Sprintf("cold values: %d nodes, %d evaluations, %d indexed / %d saved-pointer targets, converged=%t; boundaries=%v; conditions=%v", v.Nodes, v.Evaluations, len(v.IndexedTargets), len(v.LongPointerTargets), v.Converged, v.Boundaries, v.Conditions)
+	return fmt.Sprintf("cold values: %d nodes, %d evaluations, %d indexed / %d saved-pointer / %d indirect targets, converged=%t; boundaries=%v; conditions=%v", v.Nodes, v.Evaluations, len(v.IndexedTargets), len(v.LongPointerTargets), len(v.IndirectTargets), v.Converged, v.Boundaries, v.Conditions)
 }

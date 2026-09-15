@@ -509,6 +509,41 @@ targets from this engine. `converged=true` means the bounded worklist settled,
 **not** complete code coverage or an absence of those boundaries. Other existing
 analysis passes have not all been migrated to this shared model yet.
 
+### Arithmetic and local indirect ROM reads
+
+The shared query also composes word `ADC` values and the carry from earlier
+word additions or accumulator shifts. A local clear/set carry is honored;
+unknown carry stops the query. Known decimal mode is rejected. Unknown decimal
+mode is an explicit `binary_value_arithmetic` condition, never an inferred
+native flag. Repeated reads in `LDA slot; ASL; CLC; ADC slot` retain their
+same-path relationship rather than mixing different selector values. Other
+finite operand combinations remain a cold superset, not exact path facts.
+
+For `LDA (dp)` and `LDA (dp),Y`, a scratch pointer must have a preceding local
+full-word store. The query reads that earlier definition even if the loaded
+handler subsequently overwrites the pointer slot. Partial, indexed, indirect,
+or read-modify-write aliasing stores, calls, unknown bank changes and hardware
+writes stop the local search. Known nonzero D is unsupported here; unknown D
+retains the explicit `direct_pointer_D_zero` condition. Native bank evidence
+is required for the ROM read, and cross-bank reads are not guessed. Cartridge
+mapping determines whether the source and handler are ROM, including HiROM
+windows below `$8000`.
+
+A matching `JMP (abs)` consumer can inventory these words in its own program
+bank. They enter the existing discovery loop with all live M/X variants;
+native pointer reads, stack/continuation behavior, open lookup and hard misses
+remain unchanged. These entries do not become closed dispatch or bank/width
+facts. An indirect result's mask cannot independently seed its own cycle.
+Cardinality overflow is sticky unknown for the remainder of the solve, so a
+growing cycle cannot repeatedly empty and reseed until the work budget expires.
+
+Synthetic tests cover nested record fields, three-byte handler/next-state
+records, chained carry, pointer reuse, unseeded and growing cycles, mapping,
+alias barriers, HLE/data ownership, and subsequent direct-callee discovery
+without observations. Unknown helper bank contracts and global slot lifetime
+remain boundaries; supporting the local shape does not prove every real-game
+initializer that supplies it.
+
 ### Rooted command inputs and rebased cursor fields
 
 The command walker now supplies the shared engine with per-invocation Y and
