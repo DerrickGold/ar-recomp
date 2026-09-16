@@ -70,9 +70,14 @@ int ManualPages_CarveAlbum(const uint8_t *data, size_t size,
  * rather than a document that merely contains images.
  *
  * Tests COMPLETENESS, not existence: at least two pages, the image bytes
- * dominating the container (>= 80%), and every page sharing one geometry. A
- * cover-plus-letterhead PDF fails all three. This predicate is the difference
- * between shipping the user's manual and shipping their letterhead. */
+ * dominating the container (>= 80%), and every page within 5% of the book's
+ * modal geometry. A cover-plus-letterhead PDF fails all three. This predicate
+ * is the difference between shipping the user's manual and shipping their
+ * letterhead.
+ *
+ * The geometry test is a TOLERANCE, not equality: a real flatbed pass over a
+ * booklet drifts a pixel or two per sheet, and demanding exact equality
+ * rejected genuine scans. See kManualAlbumGeometryTolerancePercent. */
 bool ManualPages_LooksLikeAlbum(const ManualPageIndex *index, size_t size);
 
 /* The geometry the whole booklet lays out to: the size shared by the most pages,
@@ -85,9 +90,11 @@ bool ManualPages_LooksLikeAlbum(const ManualPageIndex *index, size_t size);
  * asynchronous decode lands. The index already carries every page's dimensions,
  * so the book's size is known before a single byte is decoded.
  *
- * For an album that passed LooksLikeAlbum this is just page 0's geometry, since
- * uniformity is one of that predicate's tests. It earns its keep on the mixed
- * albums a caller admits deliberately.
+ * It earns its keep on ORDINARY albums, not just the mixed ones a caller admits
+ * deliberately: LooksLikeAlbum tolerates a few pixels of scanner drift, so the
+ * pages of a book that passed it are typically NOT all identical, and page 0 --
+ * a separately scanned cover -- is among the likeliest to differ. LooksLikeAlbum
+ * measures its own tolerance against this vote for that reason.
  *
  * NO ASPECT IS PRIVILEGED. A tall scan, a square one and a wide one are all just
  * a width and a height here; nothing downstream may assume portrait. Returns

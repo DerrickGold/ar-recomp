@@ -122,7 +122,7 @@ The **Interface** tab selects English, French, German or Japanese for the system
 menu, independently of game text and the builder's interface preference.
 Setting labels, descriptions, choices and controller-binding captions are
 translated, as are the manual reader's page counters and control hints (not
-the scanned manual artwork). Saved setting keys/values, package names, player names and
+the installed manual’s own page images). Saved setting keys/values, package names, player names and
 platform-provided keycap/device names retain their original identity.
 
 The system interface owns a separate font stack, not your selected pack's

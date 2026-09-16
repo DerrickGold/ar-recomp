@@ -187,13 +187,23 @@
 
   {{LOCALIZATION}}
   <section class="panel" id="panel-manual" role="tabpanel" aria-labelledby="tab-manual" hidden>
-    <div class="page-heading"><div><p class="eyebrow" data-i18n="builder.help.eyebrow">GUIDANCE FROM THE SKY PALACE</p><h1 data-i18n="builder.nav.help">Help &amp; manual</h1><p data-i18n="builder.help.intro">The original instruction booklet, plus practical guidance for the workshop.</p></div></div>
+    <div class="page-heading"><div><p class="eyebrow" data-i18n="builder.help.eyebrow">GUIDANCE FROM THE SKY PALACE</p><h1 data-i18n="builder.nav.help">Help &amp; manual</h1><p data-i18n="builder.help.intro">Your instruction manual, plus practical guidance for the workshop.</p></div></div>
     <details class="workshop-help"><summary data-i18n="builder.help.projects">How do workshop projects and installed packs differ?</summary><p data-i18n="builder.help.projects_help">Opening a pack makes an editable workshop copy. Saving keeps your work, but does not update the game. Install your saved pack from the editor, restart the game, then select its package name in the game’s localization settings. Translated packs use enhanced text rendering.</p></details>
     <div class="manual-bar">
-      <p data-i18n="builder.help.manual_help">The original English 40-page instruction booklet. Changing the interface language does not translate the scanned booklet.</p>
-      <a class="linkbtn" href="manual.pdf" target="_blank" rel="noreferrer" data-i18n="builder.help.open_manual">Open manual</a>
+      <p data-i18n="builder.help.manual_help">The workshop ships no instruction manual. Install your own PDF and it is read here and in the game, from the Manual entry in the game’s settings.</p>
+      <a class="linkbtn" id="manual-open" href="manual.pdf" target="_blank" rel="noreferrer" data-i18n="builder.help.open_manual" hidden>Open manual</a>
     </div>
-    <iframe id="manual-frame" title="ActRaiser instruction booklet" data-i18n-title="builder.help.manual_title"></iframe>
+    <form id="manual-form" class="manual-install">
+      <label><span data-i18n="builder.help.manual_file">Instruction manual (PDF)</span><input id="manual-file" name="manual" type="file" accept=".pdf,application/pdf" required></label>
+      <div class="manual-actions">
+        <button id="manual-save" data-i18n="builder.help.manual_install">Install manual</button>
+        <button id="manual-remove" type="button" hidden data-i18n="builder.help.manual_remove">Remove manual</button>
+      </div>
+      <p class="loc-help" data-i18n="builder.help.manual_format">The in-game reader needs a scan album: one baseline JPEG per page, all about the same size. Any other PDF still opens in the workshop below.</p>
+      <p id="manual-message" class="manual-message" role="status" hidden></p>
+    </form>
+    <p id="manual-empty" class="manual-empty" data-i18n="builder.help.manual_none" hidden>No manual installed yet. Choose a PDF above to read it here.</p>
+    <iframe id="manual-frame" title="Instruction manual" data-i18n-title="builder.help.manual_title" hidden></iframe>
     <details class="blurb"><summary data-i18n="builder.help.about">About ActRaiser</summary><img class="manual-cover" src="boxart.webp" width="760" height="555" loading="lazy" alt="Original ActRaiser box artwork" data-i18n-alt="builder.help.box_art">
       <h2 data-i18n="builder.help.genre">Action &amp; Simulation</h2>
       <p data-i18n="builder.help.story">Pulse-stopping action sequences combined with a Simulation Mode that lets you
@@ -201,9 +211,9 @@
       Long ago you and your people built a peaceful land; since then the evil Tanzra
       and his Guardians have made it a breeding ground for monsters. Punish Tanzra and
       give your people back the world they knew.</p>
-      <p class="colophon" data-i18n="builder.help.attribution">Text and artwork &copy; 1990&ndash;1992 Quintet / Enix.
-      Reproduced from the retail packaging and manual for reference. This project ships
-      no game code or data &mdash; that is generated on this machine from your own ROM.</p>
+      <p class="colophon" data-i18n="builder.help.attribution">Box artwork and text &copy; 1990&ndash;1992 Quintet / Enix,
+      shown for identification. This project ships no game code, game data or instruction
+      manual &mdash; the game is generated on this machine from your own ROM.</p>
     </details>
   </section>
 </main>

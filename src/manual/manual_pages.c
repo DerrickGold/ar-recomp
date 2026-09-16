@@ -8,7 +8,33 @@
 
 /* ── Album carving ─────────────────────────────────────────────────────────── */
 
-enum { kManualAlbumContentMinimumPercent = 80 };
+enum {
+  kManualAlbumContentMinimumPercent = 80,
+  /* HOW FAR A PAGE MAY DRIFT from the book's geometry and still be a page.
+   *
+   * Requiring EXACT equality was wrong, and rejected real scans. A flatbed pass
+   * over a stapled booklet varies by a pixel or two per sheet -- auto-crop finds
+   * a slightly different edge, the spine lifts the paper -- so a genuine 48-page
+   * album arrives as (say) 1009x1767 for most pages, 1010x1767 for a third of
+   * them, and 1014x1770 for the one that sat crooked. That is one book, and the
+   * old rule called it a document that merely contains images.
+   *
+   * 5% is far wider than that drift (the album above is within 0.5%) and far
+   * narrower than the difference this predicate actually exists to catch: an
+   * embedded figure or letterhead logo is off by tens of percent, usually by a
+   * multiple. Nothing downstream depends on the tolerance being tight, because
+   * the reader lays every page out on a quad sized from NominalGeometry rather
+   * than from the page it happens to have decoded. */
+  kManualAlbumGeometryTolerancePercent = 5,
+};
+
+/* |value - reference| <= reference * tolerance%, in integers. */
+static bool WithinTolerance(uint16_t value, int reference) {
+  const int difference = (int)value - reference;
+  const int magnitude = difference < 0 ? -difference : difference;
+  return magnitude * kPercentScale <=
+         reference * kManualAlbumGeometryTolerancePercent;
+}
 
 /* JPEG SOF0 (baseline) carries the geometry we need. Progressive (SOF2) and the
  * arithmetic-coded variants are deliberately NOT accepted: stb_image decodes
@@ -129,11 +155,19 @@ bool ManualPages_LooksLikeAlbum(const ManualPageIndex *index, size_t size) {
       (uint64_t)size * kManualAlbumContentMinimumPercent)
     return false;
 
-  /* One geometry throughout. A scan album is a stack of identical sheets; mixed
-   * sizes mean logos, figures, or a document that merely embeds photographs. */
-  const uint16_t w = index->pages[0].width, h = index->pages[0].height;
-  for (int i = 1; i < index->count; i++) {
-    if (index->pages[i].width != w || index->pages[i].height != h) return false;
+  /* ONE GEOMETRY THROUGHOUT, to a tolerance. A scan album is a stack of sheets
+   * cut to the same size; logos, figures and embedded photographs are not.
+   *
+   * Measured against the MODAL geometry, not page 0's. The reference has to be
+   * the size the book actually lays out to, and page 0 is a cover -- the sheet
+   * most likely to be the odd one, scanned separately or trimmed differently.
+   * Anchoring on it would judge the whole book by its least typical page. */
+  int w = 0, h = 0;
+  if (!ManualPages_NominalGeometry(index, &w, &h)) return false;
+  for (int i = 0; i < index->count; i++) {
+    if (!WithinTolerance(index->pages[i].width, w) ||
+        !WithinTolerance(index->pages[i].height, h))
+      return false;
   }
   return true;
 }

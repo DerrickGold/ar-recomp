@@ -243,13 +243,49 @@ func TestManualFrameIsMountedButNotPreloaded(t *testing.T) {
 	tagEnd := strings.Index(body[frame:], ">")
 	tag := body[frame : frame+tagEnd]
 	if strings.Contains(tag, "src=") {
-		t.Errorf("manual iframe is preloaded; it should get its src on first open: %s", tag)
+		t.Errorf("manual iframe is preloaded; it should get its src from the "+
+			"status response: %s", tag)
 	}
-	if strings.Contains(tag, "hidden") {
-		t.Error("the iframe itself must not be hidden — its PANEL is, so the " +
-			"frame stays mounted and keeps the reader's page across tab switches")
+	// It now starts hidden because there may BE no manual -- the builder ships
+	// none. The empty state shows instead, and the frame is revealed only once
+	// the server confirms an installed file, so a tree without one never
+	// requests a 404 into a visible viewer.
+	if !strings.Contains(tag, "hidden") {
+		t.Errorf("manual iframe must start hidden; with no manual installed "+
+			"there is nothing to show: %s", tag)
 	}
-	if !strings.Contains(body, `frame.setAttribute("src","manual.pdf")`) {
-		t.Error("nothing assigns the manual src on first open")
+	if !strings.Contains(body, `manualFrame.setAttribute("src",source)`) {
+		t.Error("nothing assigns the manual src from the status response")
+	}
+	// THE PAGE-PRESERVING RULE. paintManualStatus runs on every visit to the
+	// tab, and re-setting src renavigates the frame in some browsers, losing
+	// the page the reader was on. The assignment must be conditional.
+	if !strings.Contains(body, `if(manualFrame.getAttribute("src")!==source)`) {
+		t.Error("the manual src is reassigned unconditionally; a repaint would " +
+			"throw away the reader's page")
+	}
+}
+
+// With no manual installed the tab must offer the install form and the empty
+// state rather than a broken viewer, and must not link out to a file that is
+// not there.
+func TestManualTabOffersInstallAffordances(t *testing.T) {
+	body := renderFrontendSource(t)
+	for _, reference := range []string{
+		`id="manual-form"`, `id="manual-file"`, `id="manual-empty"`,
+		`id="manual-remove"`, `accept=".pdf,application/pdf"`,
+	} {
+		if !strings.Contains(body, reference) {
+			t.Errorf("manual tab is missing %s", reference)
+		}
+	}
+	open := strings.Index(body, `id="manual-open"`)
+	if open < 0 {
+		t.Fatal("manual open link missing")
+	}
+	tag := body[open : open+strings.Index(body[open:], ">")]
+	if !strings.Contains(tag, "hidden") {
+		t.Errorf("the Open manual link must start hidden; there may be no "+
+			"manual to open: %s", tag)
 	}
 }

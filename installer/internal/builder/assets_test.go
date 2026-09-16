@@ -13,7 +13,10 @@ import (
 
 // All assets must actually be embedded. A `go:embed` of a missing file is a
 // compile error, but an empty or truncated file is not -- and either would only
-// show up as a broken image or an unreadable manual in a browser.
+// show up as a broken image in a browser.
+//
+// The instruction manual is deliberately absent from this list: the builder
+// ships none, and the player installs their own. See manual_test.go.
 func TestEmbeddedAssetsArePresentAndWellFormed(t *testing.T) {
 	if len(boxArtWebP) < 4096 {
 		t.Errorf("box art is %d bytes; expected a real image", len(boxArtWebP))
@@ -22,16 +25,6 @@ func TestEmbeddedAssetsArePresentAndWellFormed(t *testing.T) {
 	if !bytes.HasPrefix(boxArtWebP, []byte("RIFF")) ||
 		!bytes.Equal(boxArtWebP[8:12], []byte("WEBP")) {
 		t.Errorf("box art is not a WebP file (prefix %q)", boxArtWebP[:min(12, len(boxArtWebP))])
-	}
-	if len(manualPDF) < 100_000 {
-		t.Errorf("manual is %d bytes; expected the full scanned booklet", len(manualPDF))
-	}
-	if !bytes.HasPrefix(manualPDF, []byte("%PDF-")) {
-		t.Errorf("manual is not a PDF (prefix %q)", manualPDF[:min(8, len(manualPDF))])
-	}
-	// A truncated PDF is the likely corruption; the trailer proves the tail.
-	if !bytes.Contains(manualPDF[max(0, len(manualPDF)-2048):], []byte("%%EOF")) {
-		t.Error("manual PDF has no EOF trailer; it may be truncated")
 	}
 	if len(titleLogoPNG) < 100_000 {
 		t.Errorf("HD title art is %d bytes; expected the full image", len(titleLogoPNG))
@@ -42,34 +35,35 @@ func TestEmbeddedAssetsArePresentAndWellFormed(t *testing.T) {
 	}
 }
 
-func TestBundledManualIsMaterializedForTheGame(t *testing.T) {
+// Preparing a fresh tree must NOT invent a manual. The builder has no booklet
+// to seed, and a file appearing here would be one the player never chose.
+func TestRuntimeAssetsSeedTheManifestButNeverAManual(t *testing.T) {
 	root := t.TempDir()
-	if err := materializeBundledManual(root); err != nil {
+	if err := PrepareRuntimeAssets(root); err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(root, "game-assets", "manual.pdf")
-	got, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
+	if _, err := os.Stat(filepath.Join(root, "game-assets", "manifest.ini")); err != nil {
+		t.Errorf("manifest was not seeded: %v", err)
 	}
-	if !bytes.Equal(got, manualPDF) {
-		t.Fatalf("materialized manual differs: got %d bytes, want %d",
-			len(got), len(manualPDF))
+	if _, err := os.Stat(filepath.Join(root, "game-assets", "manual.pdf")); !os.IsNotExist(err) {
+		t.Errorf("a manual appeared at the runtime path (err = %v); the builder ships none", err)
 	}
 }
 
-func TestBundledManualDoesNotOverwriteASuppliedManual(t *testing.T) {
+// A manual the player already installed must survive preparation, which is what
+// makes the Help tab's copy and a hand-dropped file equivalent.
+func TestRuntimeAssetsLeaveAnInstalledManualAlone(t *testing.T) {
 	root := t.TempDir()
 	directory := filepath.Join(root, "game-assets")
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	path := filepath.Join(directory, "manual.pdf")
-	const supplied = "future user-supplied manual"
+	const supplied = "user-supplied manual"
 	if err := os.WriteFile(path, []byte(supplied), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := materializeBundledManual(root); err != nil {
+	if err := PrepareRuntimeAssets(root); err != nil {
 		t.Fatal(err)
 	}
 	got, err := os.ReadFile(path)
@@ -77,7 +71,7 @@ func TestBundledManualDoesNotOverwriteASuppliedManual(t *testing.T) {
 		t.Fatal(err)
 	}
 	if string(got) != supplied {
-		t.Fatalf("supplied manual was overwritten with %d bytes", len(got))
+		t.Fatalf("installed manual was overwritten with %d bytes", len(got))
 	}
 }
 
@@ -89,7 +83,6 @@ func TestAssetEndpointsServeCorrectTypes(t *testing.T) {
 	}{
 		{"boxart.webp", "image/webp", 4096},
 		{"title-logo.png", "image/png", 100_000},
-		{"manual.pdf", "application/pdf", 100_000},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.endpoint, func(t *testing.T) {
@@ -116,7 +109,9 @@ func TestAssetEndpointsServeCorrectTypes(t *testing.T) {
 // The manual must render in the page rather than download, and must be a
 // tokenless-URL 404 like every other endpoint.
 func TestManualServedInlineAndTokenGated(t *testing.T) {
-	app := newApplication(context.Background(), Options{ProjectRoot: t.TempDir()}, "tok")
+	root := t.TempDir()
+	installManual(t, root, albumPDF(t, 2))
+	app := newApplication(context.Background(), Options{ProjectRoot: root}, "tok")
 	response := httptest.NewRecorder()
 	app.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/tok/manual.pdf", nil))
 	disposition := response.Header().Get("Content-Disposition")
@@ -147,6 +142,7 @@ func TestPageReferencesAssetsAndPermitsTheManualFrame(t *testing.T) {
 	body := response.Body.String()
 	for _, reference := range []string{
 		`src="boxart.webp"`, `src="title-logo.png"`, `href="manual.pdf"`,
+		`id="manual-form"`, `accept=".pdf,application/pdf"`,
 	} {
 		if !strings.Contains(body, reference) {
 			t.Errorf("page does not reference %s", reference)

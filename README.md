@@ -127,7 +127,7 @@ an older `utils/` installation.
 Open **Build game** in the sidebar, choose your USA ROM, and press **Build game**.
 The Builder extracts the game's data, recompiles its code, and creates the playable
 application. Progress stays visible while you browse the Workshop, including
-its language tools and original instruction manual.
+its language tools and your own instruction manual.
 
 ![Three stages of a local build: ROM selected, compilation in progress, and the completed game ready to play](/assets/builder-build.gif)
 
@@ -398,7 +398,9 @@ The in-game menu retains ActRaiser's dialog frames and offers both native and
 enhanced text rendering. It groups display, 3D, audio, localization, controls,
 save, and other settings into sections accessible by keyboard or gamepad.
 
-Each setting includes an explanation, and the manual is also available in-game.
+Each setting includes an explanation. If you install an instruction manual in the
+Builder, a Manual section appears in-game to read it; without one the section is
+simply absent.
 Settings are saved automatically to `settings.ini`.
 
 ![An illustrative tour of the settings overlay using the original dialog font; the current menu also includes localization controls](/assets/overlay.gif)

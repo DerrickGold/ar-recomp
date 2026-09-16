@@ -15,12 +15,18 @@ func TestPortableDataSeedsEmbeddedAssetsWithoutWritingSource(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	assets := fstest.MapFS{"manual.pdf": {Data: []byte("embedded manual")}, "manifest.ini": {Data: []byte("embedded manifest")}}
+	assets := fstest.MapFS{"manifest.ini": {Data: []byte("embedded manifest")}}
 	if err := PreparePortableData(source, output, assets); err != nil {
 		t.Fatal(err)
 	}
-	if read(t, filepath.Join(output, "game-assets", "manual.pdf")) != "embedded manual" {
+	if read(t, filepath.Join(output, "game-assets", "manifest.ini")) != "embedded manifest" {
 		t.Fatal("embedded seed missing")
+	}
+	// The MANUAL has no embedded seed: the builder ships none, so a source
+	// without one packages without one rather than inventing a booklet. The
+	// game reports it missing and runs (src/manual/manual_reader.c).
+	if _, err := os.Stat(filepath.Join(output, "game-assets", "manual.pdf")); !os.IsNotExist(err) {
+		t.Fatalf("a manual was seeded from nowhere: %v", err)
 	}
 	put(t, filepath.Join(output, "game-assets", "manifest.ini"), "user edit")
 	if err := PreparePortableData(source, output, assets); err != nil {
@@ -33,6 +39,52 @@ func TestPortableDataSeedsEmbeddedAssetsWithoutWritingSource(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(source, "game-assets", leaf)); !os.IsNotExist(err) {
 			t.Fatalf("source modified: %s %v", leaf, err)
 		}
+	}
+}
+
+// THE DURABILITY RULE. Under -standalone-output the builder writes an installed
+// manual straight into the data root, which is NOT the source root, and
+// PreparePortableData re-runs from that source on every builder start. A
+// re-seed that reasoned "the source has no manual, so this one should go" would
+// silently delete the file the player chose, on the next launch, with no action
+// from them. Absence in the source means nothing to copy, never something to
+// remove.
+func TestRepreparingKeepsAManualTheSourceDoesNotHave(t *testing.T) {
+	source, output := t.TempDir(), filepath.Join(t.TempDir(), Name)
+	nativePackageFixture(t, source)
+	if err := os.Remove(filepath.Join(source, "game-assets", "manual.pdf")); err != nil {
+		t.Fatal(err)
+	}
+	assets := fstest.MapFS{"manifest.ini": {Data: []byte("embedded manifest")}}
+	if err := PreparePortableData(source, output, assets); err != nil {
+		t.Fatal(err)
+	}
+	// The player installs one through the Help tab, which writes here.
+	put(t, filepath.Join(output, "game-assets", "manual.pdf"), "installed from the workshop")
+	// Every subsequent builder start re-prepares from the same source.
+	for i := 0; i < 3; i++ {
+		if err := PreparePortableData(source, output, assets); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := read(t, filepath.Join(output, "game-assets", "manual.pdf")); got != "installed from the workshop" {
+		t.Fatalf("re-preparing clobbered the installed manual: %q", got)
+	}
+}
+
+// A manual the player installed is theirs and must travel with the package;
+// this is the counterpart to the seeding rule above.
+func TestPortableDataCarriesAnInstalledManual(t *testing.T) {
+	source, output := t.TempDir(), filepath.Join(t.TempDir(), Name)
+	nativePackageFixture(t, source)
+	put(t, filepath.Join(source, "game-assets", "manual.pdf"), "the player's own manual")
+	if err := PreparePortableData(source, output, fstest.MapFS{
+		"manifest.ini": {Data: []byte("embedded manifest")},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if read(t, filepath.Join(output, "game-assets", "manual.pdf")) != "the player's own manual" {
+		t.Fatal("the installed manual did not travel with the package")
 	}
 }
 

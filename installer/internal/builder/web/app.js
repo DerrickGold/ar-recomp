@@ -33,9 +33,10 @@ let activeTab=document.querySelector("#tab-home");
 const scrollPositions=new Map();
 
 /* Tabs. The manual's <iframe> is HIDDEN rather than removed when its tab is not
- * showing: unmounting it would refetch 8 MB and lose the reader's page. It is
- * still created empty and only given its src on first open, so a user who never
- * opens the manual never pays for it. */
+ * showing: unmounting it would refetch the whole PDF and lose the reader's page.
+ * It is still created empty and only given its src once the server confirms a
+ * manual is installed, so a user who never opens the manual never pays for it,
+ * and one with no manual never requests a 404. */
 function selectTab(tab,{history=true,focus=true,activate=true}={}){
   if(!tab||tab.disabled||closed) return false;
   if(activeTab!==tab) scrollPositions.set(activeTab.id,window.scrollY);
@@ -46,10 +47,9 @@ function selectTab(tab,{history=true,focus=true,activate=true}={}){
     t.tabIndex=on?0:-1;
     document.querySelector("#"+t.getAttribute("aria-controls")).hidden=!on;
   }
-  if(tab===document.querySelector("#tab-manual")){
-    const frame=document.querySelector("#manual-frame");
-    if(!frame.getAttribute("src")) frame.setAttribute("src","manual.pdf");
-  }
+  /* Re-read on EVERY visit: the player can install or remove a manual from this
+     same tab, and a hand-dropped game-assets/manual.pdf must show up too. */
+  if(tab===document.querySelector("#tab-manual")) loadManualStatus();
   if(tab===assetTab){
     /* Re-read on EVERY visit, not just the first. The manifest can change under
        a long-lived builder -- edited by hand, or saved from a second tab -- and
@@ -907,6 +907,97 @@ function announce(kind,message){
   if(document.querySelector("#panel-build").hidden)
     buildTab.dataset.badge=(kind==="failed"?"bad":"ok");
 }
+
+/* ── Instruction manual ─────────────────────────────────────────────────────
+ *
+ * The workshop ships no booklet, so everything here is driven by what the player
+ * has installed. The server owns the verdict -- whether a PDF is a page album
+ * the GAME's reader can open is decided by builder/manual.go, which ports the
+ * reader's own predicate, so the page never second-guesses it. */
+const manualForm=document.querySelector("#manual-form");
+const manualFile=document.querySelector("#manual-file");
+const manualFrame=document.querySelector("#manual-frame");
+const manualOpen=document.querySelector("#manual-open");
+const manualEmpty=document.querySelector("#manual-empty");
+const manualRemove=document.querySelector("#manual-remove");
+const manualSave=document.querySelector("#manual-save");
+const manualMessage=document.querySelector("#manual-message");
+
+function paintManualStatus(status){
+  const present=!!status?.present;
+  manualEmpty.hidden=present;
+  manualFrame.hidden=!present;
+  manualOpen.hidden=!present;
+  manualRemove.hidden=!present;
+  if(present){
+    /* ASSIGNED ONLY WHEN IT CHANGES. This paint runs on every visit to the tab,
+       and re-setting src -- even to the identical string -- renavigates the
+       frame in some browsers, which would throw away the page the reader was
+       on. The size is the cache-buster: a newly installed manual almost always
+       differs in length, and one that does not is still replaced because the
+       install path repaints from a fresh status. */
+    const source="manual.pdf?v="+encodeURIComponent(status.bytes);
+    if(manualFrame.getAttribute("src")!==source) manualFrame.setAttribute("src",source);
+  } else {
+    manualFrame.removeAttribute("src");
+  }
+  if(status?.warning){
+    manualMessage.hidden=false;
+    manualMessage.dataset.kind="warning";
+    manualMessage.textContent=status.warning;
+  } else if(present){
+    manualMessage.hidden=false;
+    manualMessage.dataset.kind="succeeded";
+    /* Geometry goes in as ONE preformatted string: the catalog formats numeric
+       arguments for the locale, and a pixel dimension is an identifier rather
+       than a quantity -- "1,024×1,448" reads as two numbers, not a page size. */
+    ui.set(manualMessage,"builder.help.manual_ready",
+      {pages:status.pages,geometry:status.width+"\u00d7"+status.height});
+  } else {
+    manualMessage.hidden=true;
+    manualMessage.removeAttribute("data-kind");
+  }
+}
+
+async function loadManualStatus(){
+  try { paintManualStatus(await responseJSON(await fetch("manual",{cache:"no-store"}))); }
+  catch(error){
+    manualMessage.hidden=false;
+    manualMessage.dataset.kind="failed";
+    manualMessage.textContent=error.message;
+  }
+}
+
+manualForm?.addEventListener("submit",async event=>{
+  event.preventDefault();
+  if(!manualFile.files.length) return;
+  manualSave.disabled=true; manualRemove.disabled=true;
+  manualMessage.hidden=false;
+  manualMessage.dataset.kind="loading";
+  ui.set(manualMessage,"builder.help.manual_installing");
+  try {
+    const status=await responseJSON(
+      await fetch("manual",{method:"POST",body:new FormData(manualForm)}));
+    manualFile.value="";
+    paintManualStatus(status);
+  } catch(error){
+    manualMessage.dataset.kind="failed";
+    manualMessage.textContent=error.message;
+    window.workshopFeedback?.show(manualMessage,error,{operation:"Install manual"});
+  }
+  manualSave.disabled=false; manualRemove.disabled=false;
+});
+
+manualRemove?.addEventListener("click",async()=>{
+  manualSave.disabled=true; manualRemove.disabled=true;
+  try { paintManualStatus(await responseJSON(await fetch("manual",{method:"DELETE"}))); }
+  catch(error){
+    manualMessage.hidden=false;
+    manualMessage.dataset.kind="failed";
+    manualMessage.textContent=error.message;
+  }
+  manualSave.disabled=false; manualRemove.disabled=false;
+});
 
 async function responseJSON(response){
   if(window.workshopFeedback)return window.workshopFeedback.readJSON(response);

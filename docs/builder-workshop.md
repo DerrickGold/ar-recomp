@@ -39,7 +39,7 @@ use the selected interface language. Location groups, introductory-message
 titles and route descriptions are translated too; searching accepts these
 navigation captions in all four interface languages. Original script excerpts, technical build logs,
 manifest identifiers and raw diagnostic details retain their original text.
-The scanned English manual is not translated, and native
+An installed manual is shown as supplied and is not translated, and native
 browser controls (PDF reader, audio player and file chooser) use the browser's
 own language settings. The workshop's native package-folder prompt uses your
 workshop interface language, while its standard buttons follow the operating system.
@@ -65,8 +65,9 @@ results, reference text, font order, coverage results and unsaved credit notices
   it, and compare the original and replacement in the detail pane. Regional
   music variants remain under their parent track. Save changes explicitly;
   the game uses the new configuration on its next launch.
-- **Help & manual** — read the original manual and workshop guidance. The
-  booklet loads only when you open this section.
+- **Help & manual** — install your own instruction manual and read workshop
+  guidance. See [Install your own manual](#install-your-own-manual) below; the
+  manual loads only when you open this section.
 
 The sidebar supports arrow-key navigation, Home and End. Browser Back and
 Forward return to sections without unloading the editor. Unsaved message text
@@ -95,6 +96,39 @@ restore a valid backup, or move the invalid `native-us` folder aside and rebuild
 If a cleaned-up installation lacks the source, restore its generated source
 folder or download the build tools again and build with your US ROM. Existing
 translation projects are preserved while the section is locked.
+
+## Install your own manual
+
+The workshop ships no instruction manual. Choose a PDF under **Help & manual**
+and it is installed to `game-assets/manual.pdf`, which is both where the
+workshop reads it and where the game's own reader looks. **Remove manual**
+clears it again, and installing a second time replaces the first.
+
+Without one, the workshop shows an empty state and the game simply omits its
+Manual section — nothing is broken by not having one.
+
+Two readers, two requirements:
+
+- **In the workshop**, any valid PDF works. It opens in your browser's own PDF
+  viewer, with its page navigation, zoom, search and printing.
+- **In the game**, the reader needs a *scan album*: one baseline JPEG per page,
+  every page within 5% of the book’s most common size, with the page images
+  making up at least 80% of the file. It never parses PDF structure — it carves
+  the page images directly — so a text or vector PDF yields no pages.
+
+  The size rule is a tolerance rather than exact equality, because a real
+  flatbed pass drifts: a genuine 48-page scan may come out mostly 1009×1767
+  with a third of its sheets a pixel wider and one crooked page at 1014×1770.
+  That is one book. An embedded figure or letterhead logo is off by tens of
+  percent, which is what the rule still rejects.
+
+The workshop applies the game's own test when you install a file and tells you
+which of the three rules a PDF fails, so a manual that will not open in the game
+says so at install time rather than in the game's menu. A PDF that fails the
+test is still installed and still readable in the workshop.
+
+To convert a text PDF, export or rasterise it to one baseline JPEG per page at a
+single page size, then recombine those images into a PDF.
 
 ## Language projects are not installed packs
 

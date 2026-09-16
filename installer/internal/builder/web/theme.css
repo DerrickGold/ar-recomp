@@ -1026,6 +1026,41 @@ pre {
   border-radius:6px;
   background:#182638
 }
+.manual-install {
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+  padding:16px;
+  margin-bottom:18px;
+  border:1px solid var(--line);
+  border-radius:6px
+}
+.manual-install label {
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+  font-size:12px
+}
+.manual-actions {
+  display:flex;
+  gap:10px;
+  flex-wrap:wrap
+}
+.manual-message {
+  margin:0;
+  font-size:12px;
+  color:var(--muted)
+}
+.manual-message[data-kind="failed"] { color:var(--bad,#ff8080) }
+.manual-message[data-kind="warning"] { color:var(--warn,#e8b44a) }
+.manual-empty {
+  padding:40px 20px;
+  text-align:center;
+  font-size:13px;
+  color:var(--muted);
+  border:1px dashed var(--line);
+  border-radius:6px
+}
 .manual-cover {
   display:block;
   max-width:280px;

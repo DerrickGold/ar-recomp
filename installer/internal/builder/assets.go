@@ -27,15 +27,6 @@ import (
 //go:embed assets/boxart.webp
 var boxArtWebP []byte
 
-// The scanned instruction manual, served for in-page reading while the build
-// runs (a full build takes minutes). Rendered by the browser's own PDF viewer
-// in an <iframe>: every target platform's default browser has one, so this
-// costs no JavaScript library and gains page navigation, zoom, text search and
-// printing for free.
-//
-//go:embed assets/manual.pdf
-var manualPDF []byte
-
 // The project's current high-resolution title treatment. It stays inside the
 // builder until a player enables it on the Assets tab, so a fresh install still
 // presents the authentic ROM title. Saving the toggle materializes these bytes
@@ -59,7 +50,7 @@ var titleLogoPNG []byte
 //go:embed assets/manifest.ini
 var assetManifestTemplate []byte
 
-//go:embed assets/manual.pdf assets/manifest.ini
+//go:embed assets/manifest.ini
 var runtimeSeedAssets embed.FS
 
 // RuntimeSeedAssets supplies files absent from the read-only source payload
@@ -72,26 +63,15 @@ func RuntimeSeedAssets() fs.FS {
 	return assets
 }
 
-// PrepareRuntimeAssets supplies the same embedded runtime files for GUI builds
-// and explicit desktop packaging. Existing player files keep precedence.
-func PrepareRuntimeAssets(root string) error {
-	if err := materializeBundledManual(root); err != nil {
-		return err
-	}
-	return materializeAssetManifest(root)
-}
-
-// materializeBundledManual makes the builder's copy available to the game at
-// the runtime path it already reads. The live game-assets directory survives a
-// "keep just the game" cleanup, so this is a one-time handoff rather than a
-// build input that has to be retained with the toolchain.
+// PrepareRuntimeAssets supplies the embedded runtime files for GUI builds and
+// explicit desktop packaging. Existing player files keep precedence.
 //
-// An existing file always wins. Today that lets a developer supply a different
-// album by hand; later it is the seam where the builder's converted user manual
-// will land without this fallback overwriting it on the next launch.
-func materializeBundledManual(root string) error {
-	return materializeBundledFile(
-		filepath.Join(root, "game-assets", "manual.pdf"), manualPDF, "manual")
+// The instruction manual is deliberately NOT among them. It used to be seeded
+// here from an embedded scan of the retail booklet; that is the player's own
+// file now, installed from the Help tab and absent until they supply one. See
+// manual.go, and ManualReader_Load for what the game does without it.
+func PrepareRuntimeAssets(root string) error {
+	return materializeAssetManifest(root)
 }
 
 // materializeAssetManifest seeds the live manifest from the template on a
@@ -174,11 +154,4 @@ func serveBoxArt(response http.ResponseWriter, request *http.Request) {
 
 func serveTitleLogo(response http.ResponseWriter, request *http.Request) {
 	serveEmbeddedAsset(response, request, "title-logo.png", "image/png", titleLogoPNG)
-}
-
-// serveManual writes the manual PDF. Content-Disposition is deliberately
-// `inline`: the point is to read it in the page, not to download it.
-func serveManual(response http.ResponseWriter, request *http.Request) {
-	response.Header().Set("Content-Disposition", `inline; filename="ActRaiser-manual.pdf"`)
-	serveEmbeddedAsset(response, request, "manual.pdf", "application/pdf", manualPDF)
 }

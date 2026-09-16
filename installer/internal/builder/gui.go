@@ -118,13 +118,11 @@ func Run(ctx context.Context, options Options) error {
 		}
 		return fmt.Errorf("GUI project root %s is unavailable: %w", root, statErr)
 	}
-	// The manual is already embedded in this executable for the builder's reader.
-	// Materialize the same bytes at the game's runtime path, including in launcher
-	// mode, without adding a duplicate PDF to the distribution archive.
-	if err := materializeBundledManual(root); err != nil {
-		return fmt.Errorf("prepare bundled manual: %w", err)
-	}
-	// Same handoff for the manifest: an install with none gets the template,
+	// No manual is materialized here. The builder ships none, so game-assets/
+	// manual.pdf stays absent until the player installs their own from the Help
+	// tab; both readers treat that as a normal state.
+	//
+	// The manifest is a different case: an install with none gets the template,
 	// and one that already has a manifest keeps every entry in it.
 	if err := materializeAssetManifest(root); err != nil {
 		return fmt.Errorf("prepare asset manifest: %w", err)
@@ -444,7 +442,13 @@ func (app *application) ServeHTTP(response http.ResponseWriter, request *http.Re
 	case endpoint == "title-logo.png" && request.Method == http.MethodGet:
 		serveTitleLogo(response, request)
 	case endpoint == "manual.pdf" && request.Method == http.MethodGet:
-		serveManual(response, request)
+		app.serveManual(response, request)
+	case endpoint == "manual" && request.Method == http.MethodGet:
+		app.writeManualStatus(response)
+	case endpoint == "manual" && request.Method == http.MethodPost:
+		app.saveManual(response, request)
+	case endpoint == "manual" && request.Method == http.MethodDelete:
+		app.removeManual(response)
 	case endpoint == "scene-assets" && request.Method == http.MethodGet:
 		app.serveScenery(response, request, false)
 	case endpoint == "scene-atlas.png" && request.Method == http.MethodGet:

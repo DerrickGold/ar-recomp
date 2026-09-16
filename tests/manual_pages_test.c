@@ -181,6 +181,66 @@ static void TestASingleDominantImageIsNotAnAlbum(void) {
   free(buf);
 }
 
+/* A REAL flatbed pass drifts. The 48-page scan this tolerance was measured from
+ * arrives as 1009x1767 for most sheets, 1010x1767 for a third of them, and
+ * 1014x1770 for the one that sat crooked -- one book, within 0.5%. Demanding
+ * exact equality rejected it outright, which is what the tolerance fixes. */
+static void TestScannerDriftIsStillAnAlbum(void) {
+  unsigned char *buf = (unsigned char *)calloc(1, 1 << 18);
+  CHECK(buf != NULL);
+  if (!buf) return;
+  size_t at = 0;
+  for (int i = 0; i < 8; i++) at = AppendJpeg(buf, at, 1009, 1767, 2048);
+  for (int i = 0; i < 4; i++) at = AppendJpeg(buf, at, 1010, 1767, 2048);
+  at = AppendJpeg(buf, at, 1014, 1770, 2048);
+  ManualPageIndex index;
+  CHECK(ManualPages_CarveAlbum(buf, at, &index) == 13);
+  CHECK(ManualPages_LooksLikeAlbum(&index, at));
+  /* The book lays out to the MODAL size, not the first page's and not the
+   * outlier's. */
+  int w = 0, h = 0;
+  CHECK(ManualPages_NominalGeometry(&index, &w, &h));
+  CHECK(w == 1009);
+  CHECK(h == 1767);
+  free(buf);
+}
+
+/* The tolerance must be measured against the modal geometry rather than page 0,
+ * because page 0 is a cover -- scanned separately, trimmed differently, and so
+ * the likeliest sheet to be the odd one. Anchoring on it would judge the whole
+ * book by its least typical page and reject a perfectly good album. */
+static void TestAnOddCoverDoesNotRejectTheBook(void) {
+  unsigned char *buf = (unsigned char *)calloc(1, 1 << 18);
+  CHECK(buf != NULL);
+  if (!buf) return;
+  size_t at = 0;
+  at = AppendJpeg(buf, at, 1040, 1800, 2048);          /* the cover, off by 3% */
+  for (int i = 0; i < 12; i++) at = AppendJpeg(buf, at, 1009, 1767, 2048);
+  ManualPageIndex index;
+  CHECK(ManualPages_CarveAlbum(buf, at, &index) == 13);
+  CHECK(ManualPages_LooksLikeAlbum(&index, at));
+  int w = 0, h = 0;
+  CHECK(ManualPages_NominalGeometry(&index, &w, &h));
+  CHECK(w == 1009);   /* the body, not the cover */
+  CHECK(h == 1767);
+  free(buf);
+}
+
+/* Drift is a few percent; a figure is off by a multiple. The tolerance must not
+ * have widened far enough to admit one. */
+static void TestAnEmbeddedFigureStillFailsTheTolerance(void) {
+  unsigned char *buf = (unsigned char *)calloc(1, 1 << 18);
+  CHECK(buf != NULL);
+  if (!buf) return;
+  size_t at = 0;
+  for (int i = 0; i < 12; i++) at = AppendJpeg(buf, at, 1009, 1767, 2048);
+  at = AppendJpeg(buf, at, 1120, 1767, 2048);   /* 11% wider: not a sheet */
+  ManualPageIndex index;
+  CHECK(ManualPages_CarveAlbum(buf, at, &index) == 13);
+  CHECK(!ManualPages_LooksLikeAlbum(&index, at));
+  free(buf);
+}
+
 static void TestMixedGeometryIsNotAnAlbum(void) {
   unsigned char *buf = (unsigned char *)calloc(1, 1 << 16);
   CHECK(buf != NULL);
@@ -1668,6 +1728,9 @@ int main(void) {
   TestCarvesEveryPageOfAnAlbum();
   TestLetterheadDocumentIsNotAnAlbum();
   TestASingleDominantImageIsNotAnAlbum();
+  TestScannerDriftIsStillAnAlbum();
+  TestAnOddCoverDoesNotRejectTheBook();
+  TestAnEmbeddedFigureStillFailsTheTolerance();
   TestMixedGeometryIsNotAnAlbum();
   TestVectorDocumentYieldsNothing();
   TestThumbnailEoiDoesNotTruncateAPage();

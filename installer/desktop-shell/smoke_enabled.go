@@ -134,9 +134,32 @@ window.addEventListener('DOMContentLoaded', async () => {
     document.querySelector('#tab-assets').click();
     check(document.querySelector('#tab-assets').getAttribute('aria-selected') === 'true', 'tab navigation did not execute');
     document.querySelector('#tab-manual').click();
-    check(document.querySelector('#manual-frame').getAttribute('src') === 'manual.pdf', 'manual navigation failed');
+    check(document.querySelector('#tab-manual').getAttribute('aria-selected') === 'true', 'manual navigation failed');
+    // The bundle ships NO manual, so the tab must open on the empty state with
+    // nothing loaded into the viewer and no request for a file that is absent.
+    await new Promise(resolve => setTimeout(resolve, 200));
+    check((await (await fetch('manual')).json()).present === false, 'a manual shipped with the bundle');
+    check(!document.querySelector('#manual-frame').getAttribute('src'), 'manual viewer loaded with no manual installed');
+    check(!document.querySelector('#manual-empty').hidden, 'manual empty state not shown');
+    check((await fetch('manual.pdf')).status === 404, 'absent manual did not 404');
+    // Install one through the real endpoint, which is the whole player-facing
+    // path: a two-page synthetic scan album the in-game reader would accept.
+    const page = () => {
+      const sof = [0xFF,0xC0,0x00,0x11,0x08, 0x02,0x00, 0x01,0x80, 0x03, 1,0x11,0,2,0x11,1,3,0x11,1];
+      const sos = [0xFF,0xDA,0x00,0x08,0x01,0x01,0x00,0x00,0x3F,0x00];
+      return [0xFF,0xD8, ...sof, ...sos, ...new Array(512).fill(0x42), 0xFF,0xD9];
+    };
+    const album = new Uint8Array([...new TextEncoder().encode('%PDF-1.4\n'),
+      ...page(), ...page(), ...new TextEncoder().encode('\n%%EOF\n')]);
+    const install = new FormData();
+    install.append('manual', new Blob([album], {type: 'application/pdf'}), 'manual.pdf');
+    const installed = await (await fetch('manual', {method: 'POST', body: install})).json();
+    check(installed.present && installed.pages === 2, 'manual install failed: ' + JSON.stringify(installed));
+    check(installed.inGame, 'a valid scan album was not accepted for the in-game reader');
     const manual = await fetch('manual.pdf', {headers: {Range: 'bytes=0-31'}});
     check(manual.ok && (await manual.text()).startsWith('%PDF'), 'PDF bytes unavailable');
+    // Leave the tree as it was found.
+    check((await (await fetch('manual', {method: 'DELETE'})).json()).present === false, 'manual removal failed');
     const audio = new Audio();
     audio.preload = 'auto'; audio.muted = true;
     await new Promise((resolve, reject) => {
@@ -151,7 +174,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     const invalid = await fetch('build', {method: 'POST', body: new FormData()});
     check(invalid.status === 400, 'multipart request did not reach build validation');
     document.querySelector('#tab-home').click();
-    outcome = 'PASS JavaScript, manual installation import, status, preferences, tabs, PDF bytes, WAV decoding, multipart validation';
+    outcome = 'PASS JavaScript, manual installation import, status, preferences, tabs, manual install/serve/remove, WAV decoding, multipart validation';
     const config = await (await fetch('__shell/smoke-config')).json();
     if (config.fullBuild) {
       const form = new FormData();

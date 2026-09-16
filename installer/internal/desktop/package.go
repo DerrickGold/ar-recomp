@@ -199,19 +199,27 @@ func stageSeed(root, resources string, embedded ...fs.FS) error {
 			return err
 		}
 	}
-	for _, leaf := range []string{"manual.pdf", "manifest.ini"} {
-		if err := copyFileAtomic(filepath.Join(root, "game-assets", leaf), filepath.Join(seed, "game-assets", leaf), 0644); err != nil {
-			if errors.Is(err, os.ErrNotExist) && len(embedded) > 0 {
-				data, readErr := fs.ReadFile(embedded[0], leaf)
-				if readErr != nil {
-					return readErr
-				}
-				if writeErr := atomicWrite(filepath.Join(seed, "game-assets", leaf), data, 0644); writeErr != nil {
-					return writeErr
-				}
-				continue
-			}
+	// The manual is OPTIONAL and carries no embedded fallback: the builder ships
+	// no booklet, so a tree without one packages without one and the game's
+	// reader reports it missing. Copied when the player has installed their own
+	// so a packaged bundle keeps the manual they chose.
+	if err := copyFileAtomic(filepath.Join(root, "game-assets", "manual.pdf"),
+		filepath.Join(seed, "game-assets", "manual.pdf"), 0644); err != nil &&
+		!errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	// The manifest is REQUIRED, and falls back to the embedded template so a
+	// fresh install always has every hook available.
+	if err := copyFileAtomic(filepath.Join(root, "game-assets", "manifest.ini"), filepath.Join(seed, "game-assets", "manifest.ini"), 0644); err != nil {
+		if !errors.Is(err, os.ErrNotExist) || len(embedded) == 0 {
 			return err
+		}
+		data, readErr := fs.ReadFile(embedded[0], "manifest.ini")
+		if readErr != nil {
+			return readErr
+		}
+		if writeErr := atomicWrite(filepath.Join(seed, "game-assets", "manifest.ini"), data, 0644); writeErr != nil {
+			return writeErr
 		}
 	}
 	return nil
