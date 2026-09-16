@@ -64,6 +64,32 @@ int main(void) {
     expect_text(file, "replacement");
     assert(sr_remove(file) == 0);
     assert(!sr_path_exists(file));
+    // A portable bundle chdirs beside its executable, then writes settings.ini
+    // and saves/ by leaf name. On Windows that chdir once left a \\?\ working
+    // directory, which sr_win_path rewrote to \\?\UNC\?\C:\..., so every leaf
+    // open failed with ENOENT.
+    assert(sr_utf8_chdir(root) == 0);
+    write_text("settings.ini.tmp", "leaf");
+    assert(sr_replace_file("settings.ini.tmp", "settings.ini"));
+    expect_text("settings.ini", "leaf");
+    assert(sr_remove("settings.ini") == 0);
+    assert(sr_utf8_chdir("..") == 0);
+#ifdef _WIN32
+    // A working directory can still arrive verbatim from a parent process.
+    wchar_t *home = _wgetcwd(NULL, 0);
+    assert(home && sr_utf8_chdir(root) == 0);
+    wchar_t *anchored = _wgetcwd(NULL, 0);
+    assert(anchored && wcsncmp(anchored, L"\\\\?\\", 4) != 0);
+    free(anchored);
+    wchar_t *verbatim = sr_win_path(".");
+    assert(verbatim && _wchdir(verbatim) == 0);
+    free(verbatim);
+    write_text("verbatim.tmp", "verbatim");
+    expect_text("verbatim.tmp", "verbatim");
+    assert(sr_remove("verbatim.tmp") == 0);
+    assert(_wchdir(home) == 0);
+    free(home);
+#endif
 #ifdef _WIN32
     assert(sr_utf8_to_wide("\xff") == NULL);
     wchar_t *wide = sr_utf8_to_wide(unicode);

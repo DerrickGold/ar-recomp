@@ -57,7 +57,13 @@ static inline wchar_t *sr_win_path(const char *path) {
     free(wide);
     if (!length || length >= count) { free(full); errno = ENAMETOOLONG; return NULL; }
     for (wchar_t *p = full + 8; *p; ++p) if (*p == L'/') *p = L'\\';
-    if (full[8] == L'\\' && full[9] == L'\\') {
+    // A relative path inherits the working directory's form, which can already
+    // be \\?\ or \\.\ (e.g. set by a parent process). Treating that as UNC
+    // would produce \\?\UNC\?\C:\... and every open would fail with ENOENT.
+    if (full[8] == L'\\' && full[9] == L'\\' &&
+        (full[10] == L'?' || full[10] == L'.') && full[11] == L'\\') {
+        memmove(full, full + 8, (wcslen(full + 8) + 1) * sizeof(wchar_t));
+    } else if (full[8] == L'\\' && full[9] == L'\\') {
         memmove(full + 8, full + 10, (wcslen(full + 10) + 1) * sizeof(wchar_t));
         memcpy(full, L"\\\\?\\UNC\\", 8 * sizeof(wchar_t));
     } else {
@@ -92,9 +98,17 @@ static inline int sr_access(const char *path, int mode) {
     free(wide); return result;
 }
 
+// The working directory must not keep the \\?\ prefix: SetCurrentDirectoryW
+// stores it verbatim, so every later relative path and child process would
+// inherit it. The prefix buys nothing here; the current directory stays capped
+// at MAX_PATH unless the process opts into long paths.
 static inline int sr_utf8_chdir(const char *path) {
     wchar_t *wide = sr_win_path(path);
-    int result = wide ? _wchdir(wide) : -1;
+    if (!wide) return -1;
+    wchar_t *plain = wide;
+    if (!wcsncmp(wide, L"\\\\?\\UNC\\", 8)) { plain = wide + 6; plain[0] = L'\\'; }
+    else if (!wcsncmp(wide, L"\\\\?\\", 4)) plain = wide + 4;
+    int result = _wchdir(plain);
     free(wide); return result;
 }
 
