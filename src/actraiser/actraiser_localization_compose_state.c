@@ -144,6 +144,44 @@ static const char *KeySeparatorForSemanticId(const char *semantic_id) {
   return !strncmp(semantic_id, "name_entry.prompt_and_", 22) ? " " : NULL;
 }
 
+/* The name being typed is the only line of a keyboard page that changes as
+ * the player types. Its graphemes carry the field underlines, one per native
+ * tile, so it is the line holding them and has a cell per underline. False
+ * when there is no underlined field, or when its underlines do not share one
+ * line. */
+static bool NameFieldLine(const ActRaiserLocalizationComposeSnapshot *slot,
+                          size_t *line_offset, size_t *line_bytes,
+                          uint8_t *cells) {
+  size_t start = 0;
+  size_t end = 0;
+  uint8_t count = 0;
+  bool found = false;
+  for (uint8_t index = 0; index < slot->inline_object_count; ++index) {
+    const ArLocalizationInlineObjectSnapshot *object =
+        &slot->inline_objects[index];
+    if (object->kind != kArLocalizationInlineObject_NameFieldUnderline)
+      continue;
+    if (!object->end_utf8_byte || object->end_utf8_byte > slot->utf8_bytes)
+      return false;
+    ++count;
+    if (!found) {
+      /* An underline ends its grapheme, whose first byte is on the same line. */
+      start = object->end_utf8_byte - 1u;
+      while (start && slot->utf8[start - 1u] != '\n') --start;
+      end = object->end_utf8_byte;
+      while (end < slot->utf8_bytes && slot->utf8[end] != '\n') ++end;
+      found = true;
+    } else if (object->end_utf8_byte <= start || object->end_utf8_byte > end) {
+      return false;
+    }
+  }
+  if (!found || end == start) return false;
+  *line_offset = start;
+  *line_bytes = end - start;
+  *cells = count;
+  return true;
+}
+
 static ArLocalizationTextLayoutKind LayoutForSemanticId(
     const char *semantic_id) {
   if (MenuForSemanticId(semantic_id) != kActRaiserLocalizationMenu_None)
@@ -456,6 +494,16 @@ bool ActRaiserLocalizationComposeState_AppendFrame(
             kActRaiserLocalizationNameEntryRows,
             kActRaiserLocalizationNameEntryKeyCellColumns))
       complete = false;
+    /* The name keeps the native field's tiles while it is typed: letters sit
+     * in fixed cells and never join, and typing rebuilds only the name rather
+     * than the whole keyboard page. */
+    size_t field_offset = 0;
+    size_t field_bytes = 0;
+    uint8_t field_cells = 0;
+    if (separator &&
+        NameFieldLine(slot, &field_offset, &field_bytes, &field_cells))
+      (void)ArLocalizationFrame_SetLiveLine(frame, field_offset, field_bytes,
+                                            field_cells);
   }
   for (uint8_t i = first_snapshot; i < frame->snapshot_count; ++i)
     ActRaiserLocalizationStyle_Ordinary(&frame->snapshots[i], palette);

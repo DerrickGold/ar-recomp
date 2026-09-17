@@ -11,7 +11,7 @@
 #include "localization/text_cell_record.h"
 #include "localization/text_boundaries.h"
 
-#define AR_LOCALIZATION_FRAME_ABI_VERSION UINT32_C(27)
+#define AR_LOCALIZATION_FRAME_ABI_VERSION UINT32_C(28)
 
 enum {
   kArLocalizationFrameTextCapacity = 16 * 1024,
@@ -37,6 +37,8 @@ enum {
   kArLocalizationGridAnyLine = 255,
   kArLocalizationGridAnyFieldCount = 0,
   kArLocalizationFrameKeySeparatorCapacity = 7,
+  /* Cells a live entry field may declare; the native name field has eight. */
+  kArLocalizationFrameLiveLineMaximumCells = 32,
 };
 
 typedef enum ArLocalizationArtworkKind {
@@ -234,6 +236,19 @@ typedef struct ArLocalizationTextSnapshot {
    * claim is wider than the keyboard, and leaves the selector the same room
    * the game did. */
   uint8_t key_cell_columns;
+  /* One whole line of this text that changes on its own while the rest stays
+   * put, such as a name being typed above its keyboard. Bytes are relative to
+   * this text and exclude the line break; zero bytes means no such line. The
+   * renderer may rasterize the line separately so that editing it does not
+   * rebuild the unchanged page around it. The result looks the same. */
+  uint16_t live_line_utf8_offset;
+  uint16_t live_line_utf8_bytes;
+  /* Non-zero makes the live line an entry field of exactly this many cells,
+   * one grapheme each, like the native tiles a name is typed into. Every
+   * grapheme is shaped on its own and centred in an equal-width cell, so
+   * letters never join or kern and typing one never moves another. A line
+   * whose grapheme count differs is drawn as ordinary text. */
+  uint8_t live_line_cells;
   uint8_t native_font_pixels;
   uint8_t native_preserve_count;
   uint8_t inline_object_offset;
@@ -417,6 +432,14 @@ bool ArLocalizationFrame_SetKeySeparator(ArLocalizationFrame *frame,
 bool ArLocalizationFrame_SetKeyGrid(ArLocalizationFrame *frame,
                                     uint8_t columns, uint8_t trailing_lines,
                                     uint8_t cell_columns);
+/* Marks one complete, non-empty hard line of the most recently added surface
+ * as live (see ArLocalizationTextSnapshot.live_line_utf8_offset), drawn as a
+ * field of `cells` fixed cells when non-zero. The range must start at the
+ * text start or after a line feed, end at the text end or before one, and
+ * contain no line feed. Failure leaves the frame untouched. */
+bool ArLocalizationFrame_SetLiveLine(ArLocalizationFrame *frame,
+                                     size_t utf8_offset, size_t utf8_bytes,
+                                     uint8_t cells);
 bool ArLocalizationFrame_AddIndicator(
     ArLocalizationFrame *frame, uint32_t surface_id,
     ArLocalizationIndicatorKind kind, ArTextCellRegion region);

@@ -1093,7 +1093,401 @@ static void TestEffectPieces(void) {
   }
 }
 
+/* ApplyMosaic's loops as they stood before the band-row rewrite (2026-09-17),
+ * kept verbatim apart from the allocation helpers, as the oracle for the
+ * bytes the cache now uploads. */
+static void ReferenceMosaic(const ArTextBitmap *source, int block_size,
+                            uint8_t *output, int output_pitch) {
+  const int bytes_per_pixel = 4;
+  const uint8_t *input = (const uint8_t *)source->pixels;
+  for (int block_y = 0; block_y < source->height;
+       block_y += block_size) {
+    const int sample_y = block_y + block_size / 2 < source->height
+        ? block_y + block_size / 2 : source->height - 1;
+    for (int block_x = 0; block_x < source->width;
+         block_x += block_size) {
+      const int sample_x = block_x + block_size / 2 < source->width
+          ? block_x + block_size / 2 : source->width - 1;
+      const uint8_t *sample =
+          input + (size_t)sample_y * (size_t)source->pitch_bytes +
+          (size_t)sample_x * (size_t)bytes_per_pixel;
+      const int end_y = block_y + block_size < source->height
+          ? block_y + block_size : source->height;
+      const int end_x = block_x + block_size < source->width
+          ? block_x + block_size : source->width;
+      for (int y = block_y; y < end_y; ++y) {
+        uint8_t *row = output + (size_t)y * (size_t)output_pitch;
+        for (int x = block_x; x < end_x; ++x)
+          memcpy(row + (size_t)x * (size_t)bytes_per_pixel,
+                 sample, (size_t)bytes_per_pixel);
+      }
+    }
+  }
+}
+
+static void TestMosaicMatchesOriginal(void) {
+  FakeRenderBackend render = {0};
+  ArRenderDevice device;
+  CHECK(ArRenderDevice_Init(&device, &kRenderOps, &render,
+      (ArRenderCapabilities){
+        .maximum_texture_width = 512,
+        .maximum_texture_height = 512,
+      }));
+  FakeRasterizer fake = {0};
+  ArTextRasterizer rasterizer;
+  CHECK(ArTextRasterizer_Init(&rasterizer, &kRasterOps, &fake, 23));
+  ArTextSurfaceCache cache;
+  CHECK(ArTextSurfaceCache_Init(&cache, 4));
+  char error[256];
+  static const char kText[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ012345";
+  int compared = 0;
+  /* Every width 2..64 against every block 2..8 covers partial blocks on both
+   * axes and blocks wider than the whole surface. */
+  for (int block = 2; block <= 8; ++block) {
+    fake.line_advance = block * 8;
+    for (size_t length = 1; length <= 32; ++length) {
+      char text[33];
+      memcpy(text, kText, length);
+      text[length] = 0;
+      ArTextRasterRequest request = Request(text);
+      request.pixelation = kArTextPixelation_Mosaic;
+      request.pixelation_size = block;
+      ArTextSurface surface;
+      if (!ArTextSurfaceCache_Acquire(&cache, &device, &rasterizer, &request,
+                                      &surface, error, sizeof(error))) {
+        CHECK(!"mosaic acquire failed");
+        continue;
+      }
+      const ArTextBitmap source = {
+        .pixels = fake.pixels, .width = (int)length * 2, .height = 16,
+        .pitch_bytes = 64 * (int)sizeof(uint32_t),
+        .format = kArRenderPixelFormat_Rgba8888,
+      };
+      uint32_t expected[64 * 16];
+      ReferenceMosaic(&source, block, (uint8_t *)expected, 64 * 4);
+      CHECK(surface.width == source.width && surface.height == 16);
+      for (int y = 0; y < 16; ++y)
+        CHECK(!memcmp(&render.uploaded_pixels[y * 64], &expected[y * 64],
+                      (size_t)source.width * sizeof(uint32_t)));
+      ++compared;
+    }
+  }
+  CHECK(compared == 7 * 32);
+  ArTextSurfaceCache_Destroy(&cache, &device);
+}
+
+/* Returns one scripted bitmap, so a test can choose exact pixels, ownership
+ * and crop offsets. Ownership follows alpha, as the contract requires. */
+typedef struct ScriptedRasterizer {
+  uint32_t *pixels;
+  uint32_t *owners;
+  int width, height, crop_left, crop_top, line_advance;
+  ArTextRevealCluster cluster;
+  ArTextRasterRequest last_request;
+} ScriptedRasterizer;
+
+static bool ScriptedRasterize(void *context, const ArTextRasterRequest *request,
+                              ArTextBitmap *bitmap, ArTextRasterFailure *failure,
+                              char *error, size_t error_capacity) {
+  ScriptedRasterizer *scripted = (ScriptedRasterizer *)context;
+  (void)failure;
+  (void)error;
+  (void)error_capacity;
+  scripted->last_request = *request;
+  for (int i = 0; i < scripted->width * scripted->height; ++i)
+    scripted->owners[i] = (scripted->pixels[i] & 255u) ? 1u : 0u;
+  scripted->cluster = (ArTextRevealCluster){
+      .end_utf8_byte = request->utf8_bytes,
+      .width = scripted->width, .height = scripted->height};
+  *bitmap = (ArTextBitmap){
+      .struct_size = sizeof(*bitmap),
+      .abi_version = AR_TEXT_BITMAP_ABI_VERSION,
+      .pixels = scripted->pixels,
+      .width = scripted->width, .height = scripted->height,
+      .pitch_bytes = scripted->width * 4,
+      .format = kArRenderPixelFormat_Rgba8888,
+      .ascent = 11, .descent = 3, .line_advance = scripted->line_advance,
+      .reveal_clusters = &scripted->cluster, .reveal_cluster_count = 1,
+      .token = 1, .pixel_owners = scripted->owners,
+      .font_pixels = request->font_pixels,
+      .crop_left = scripted->crop_left, .crop_top = scripted->crop_top,
+  };
+  return true;
+}
+
+static void ScriptedRelease(void *context, ArTextBitmap *bitmap) {
+  (void)context;
+  if (bitmap) memset(bitmap, 0, sizeof(*bitmap));
+}
+
+static const ArTextRasterizerOps kScriptedOps = {
+  .struct_size = sizeof(ArTextRasterizerOps),
+  .abi_version = AR_TEXT_RASTERIZER_ABI_VERSION,
+  .rasterize = ScriptedRasterize,
+  .release_bitmap = ScriptedRelease,
+};
+
+/* Keeps the last uploaded texture whole, whatever its size. */
+typedef struct TextureCapture {
+  FakeRenderBackend base;
+  uint32_t pixels[256 * 256];
+  int width, height;
+} TextureCapture;
+
+static bool CaptureCreate(void *context, const ArRenderTextureDesc *descriptor,
+                          ArRenderTexture *texture) {
+  TextureCapture *capture = (TextureCapture *)context;
+  capture->width = descriptor->width;
+  capture->height = descriptor->height;
+  return CreateTexture(&capture->base, descriptor, texture);
+}
+
+static bool CaptureUpdate(void *context, ArRenderTexture texture,
+                          const ArRenderRectI *destination,
+                          const void *pixels, int pitch_bytes) {
+  TextureCapture *capture = (TextureCapture *)context;
+  (void)texture;
+  (void)destination;
+  if (!pixels || capture->width > 256 || capture->height > 256) return false;
+  for (int y = 0; y < capture->height; ++y)
+    memcpy(&capture->pixels[y * capture->width],
+           (const uint8_t *)pixels + (size_t)y * (size_t)pitch_bytes,
+           (size_t)capture->width * sizeof(uint32_t));
+  return true;
+}
+
+static uint32_t NextRandom(uint64_t *state) {
+  *state = *state * UINT64_C(6364136223846793005) + UINT64_C(1442695040888963407);
+  return (uint32_t)(*state >> 33);
+}
+
+/* A line mosaicked on its own must put exactly the pixels on screen that the
+ * same pixels mosaicked inside their page do, once it is aligned to the page's
+ * grid. The page here holds only the line, so the page's whole texture must be
+ * the aligned line's texture, placed by the two origins. */
+static void TestGridAlignedMosaicMatchesPage(void) {
+  static TextureCapture capture;
+  ArRenderBackendOps ops = kRenderOps;
+  ops.create_texture = CaptureCreate;
+  ops.update_texture = CaptureUpdate;
+  ArRenderDevice device;
+  CHECK(ArRenderDevice_Init(&device, &ops, &capture,
+      (ArRenderCapabilities){
+        .maximum_texture_width = 256, .maximum_texture_height = 256}));
+  static ScriptedRasterizer scripted;
+  static uint32_t page_pixels[128 * 96], line_pixels[128 * 96];
+  static uint32_t page_owners[128 * 96], line_owners[128 * 96];
+  static uint32_t page_texture[256 * 256];
+  ArTextRasterizer rasterizer;
+  CHECK(ArTextRasterizer_Init(&rasterizer, &kScriptedOps, &scripted, 31));
+  ArTextSurfaceCache cache;
+  CHECK(ArTextSurfaceCache_Init(&cache, 4));
+  char error[256];
+  uint64_t random = 0x5eed;
+  int compared = 0, unaligned_differences = 0;
+  for (int trial = 0; trial < 700; ++trial) {
+    const int block = 2 + trial % 7;
+    const int width = 48 + (int)(NextRandom(&random) % 64);
+    const int height = 32 + (int)(NextRandom(&random) % 48);
+    const int line_width = 1 + (int)(NextRandom(&random) % 24);
+    const int line_height = 1 + (int)(NextRandom(&random) % 20);
+    /* Clear of the page's far edges by a block: a page clamps its last
+     * partial block's sample to its own edge, which a line inside it never
+     * sees (the presenter's documented condition). */
+    const int line_x = (int)(NextRandom(&random) %
+                             (uint32_t)(width - line_width - block + 1));
+    const int line_y = (int)(NextRandom(&random) %
+                             (uint32_t)(height - line_height - block + 1));
+    memset(page_pixels, 0, sizeof(page_pixels));
+    for (int y = 0; y < line_height; ++y)
+      for (int x = 0; x < line_width; ++x) {
+        const uint32_t value = NextRandom(&random);
+        const uint32_t pixel = (value & 3u) ? value | 1u : 0u;
+        line_pixels[y * line_width + x] = pixel;
+        page_pixels[(line_y + y) * width + line_x + x] = pixel;
+      }
+
+    scripted = (ScriptedRasterizer){
+        .pixels = page_pixels, .owners = page_owners,
+        .width = width, .height = height,
+        .crop_left = (int)(NextRandom(&random) % 11),
+        .crop_top = (int)(NextRandom(&random) % 5),
+        .line_advance = block * 8};
+    ArTextRasterRequest page_request = Request("page");
+    page_request.source_revision = (uint64_t)trial + 100u;
+    page_request.pixelation = kArTextPixelation_Mosaic;
+    page_request.pixelation_size = block;
+    page_request.maximum_height = 256;
+    ArTextSurface page;
+    if (!ArTextSurfaceCache_Acquire(&cache, &device, &rasterizer,
+                                    &page_request, &page, error,
+                                    sizeof(error))) {
+      CHECK(!"page acquire failed");
+      continue;
+    }
+    CHECK(page.mosaic_block == block && page.raster_scale == 1);
+    CHECK(page.origin_x == -scripted.crop_left &&
+          page.origin_y == -scripted.crop_top);
+    CHECK(page.width == width && page.height == height);
+    memcpy(page_texture, capture.pixels,
+           (size_t)width * (size_t)height * sizeof(uint32_t));
+    /* The line's layout origin, in the page's layout coordinates. */
+    const int origin_x = line_x - page.origin_x;
+    const int origin_y = line_y - page.origin_y;
+
+    for (int aligned = 1; aligned >= 0; --aligned) {
+      scripted = (ScriptedRasterizer){
+          .pixels = line_pixels, .owners = line_owners,
+          .width = line_width, .height = line_height,
+          .line_advance = block * 8};
+      ArTextRasterRequest line_request = Request("line");
+      line_request.source_revision = page_request.source_revision;
+      line_request.pixelation = kArTextPixelation_Mosaic;
+      line_request.pixelation_size = block;
+      line_request.maximum_height = 256;
+      if (aligned) {
+        line_request.align_pixelation_grid = true;
+        line_request.pixelation_grid_x = -page.origin_x - origin_x;
+        line_request.pixelation_grid_y = -page.origin_y - origin_y;
+      }
+      ArTextSurface line;
+      if (!ArTextSurfaceCache_Acquire(&cache, &device, &rasterizer,
+                                      &line_request, &line, error,
+                                      sizeof(error))) {
+        CHECK(!"line acquire failed");
+        continue;
+      }
+      if (aligned) {
+        CHECK(line.width % block == 0 && line.height % block == 0);
+        CHECK(line.origin_x >= 0 && line.origin_x < block &&
+              line.origin_y >= 0 && line.origin_y < block);
+        CHECK(line.ascent == 11 + line.origin_y);
+        CHECK(line.reveal_clusters[0].x == line.origin_x &&
+              line.reveal_clusters[0].y == line.origin_y);
+      }
+      /* Texture (u, v) of the line is page texture (u + dx, v + dy). */
+      const int dx = origin_x + page.origin_x - line.origin_x;
+      const int dy = origin_y + page.origin_y - line.origin_y;
+      int mismatches = 0;
+      for (int y = 0; y < height; ++y)
+        for (int x = 0; x < width; ++x) {
+          const int u = x - dx, v = y - dy;
+          const uint32_t expected = page_texture[y * width + x];
+          const bool inside = u >= 0 && v >= 0 && u < line.width &&
+                              v < line.height;
+          const uint32_t actual = inside ? capture.pixels[v * line.width + u] : 0u;
+          if ((expected & 255u) || (actual & 255u))
+            mismatches += expected != actual;
+        }
+      for (int v = 0; v < line.height; ++v)
+        for (int u = 0; u < line.width; ++u) {
+          const int x = u + dx, y = v + dy;
+          if ((x < 0 || y < 0 || x >= width || y >= height) &&
+              (capture.pixels[v * line.width + u] & 255u))
+            ++mismatches;
+        }
+      if (aligned) {
+        CHECK(mismatches == 0);
+        ++compared;
+      } else {
+        unaligned_differences += mismatches != 0;
+      }
+    }
+  }
+  CHECK(compared == 700);
+  /* Positive control: without alignment the same comparison does fail. */
+  CHECK(unaligned_differences > 100);
+  ArTextSurfaceCache_Destroy(&cache, &device);
+  ArTextRasterizer_Reset(&rasterizer);
+  ArRenderDevice_Reset(&device);
+}
+
+/* A line cut from a page keeps the page's fitted size and low-resolution
+ * scale; the backend only sees an ordinary request with no room to fit. */
+static void TestExactRasterSize(void) {
+  static TextureCapture capture;
+  ArRenderBackendOps ops = kRenderOps;
+  ops.create_texture = CaptureCreate;
+  ops.update_texture = CaptureUpdate;
+  ArRenderDevice device;
+  CHECK(ArRenderDevice_Init(&device, &ops, &capture,
+      (ArRenderCapabilities){
+        .maximum_texture_width = 256, .maximum_texture_height = 256}));
+  static ScriptedRasterizer scripted;
+  static uint32_t pixels[16 * 8], owners[16 * 8];
+  for (int i = 0; i < 16 * 8; ++i) pixels[i] = UINT32_C(0xffffffff);
+  ArTextRasterizer rasterizer;
+  CHECK(ArTextRasterizer_Init(&rasterizer, &kScriptedOps, &scripted, 37));
+  ArTextSurfaceCache cache;
+  CHECK(ArTextSurfaceCache_Init(&cache, 4));
+  char error[256];
+
+  ArTextRasterRequest request = Request("line");
+  CHECK(ArTextRasterRequest_IsValid(&request));
+  request.pixelation_grid_x = 3;
+  CHECK(!ArTextRasterRequest_IsValid(&request)); /* grid without alignment */
+  request.align_pixelation_grid = true;
+  CHECK(ArTextRasterRequest_IsValid(&request));
+  request = Request("line");
+  request.raster_font_pixels = -1;
+  CHECK(!ArTextRasterRequest_IsValid(&request));
+  request.raster_font_pixels = 4097;
+  CHECK(!ArTextRasterRequest_IsValid(&request));
+
+  request = Request("line");
+  request.font_pixels = 40;
+  request.minimum_font_pixels = 26;
+  const ArTextCacheKey fitted = ArTextSurfaceCache_MakeKey(&rasterizer, &request);
+  request.raster_font_pixels = 31;
+  CHECK(!ArTextCacheKey_Equals(
+      fitted, ArTextSurfaceCache_MakeKey(&rasterizer, &request)));
+  ArTextRasterRequest aligned = request;
+  aligned.align_pixelation_grid = true;
+  const ArTextCacheKey aligned_key =
+      ArTextSurfaceCache_MakeKey(&rasterizer, &aligned);
+  CHECK(!ArTextCacheKey_Equals(
+      ArTextSurfaceCache_MakeKey(&rasterizer, &request), aligned_key));
+  aligned.pixelation_grid_y = -5;
+  CHECK(!ArTextCacheKey_Equals(
+      aligned_key, ArTextSurfaceCache_MakeKey(&rasterizer, &aligned)));
+  scripted = (ScriptedRasterizer){.pixels = pixels, .owners = owners,
+      .width = 16, .height = 8, .crop_left = 2, .crop_top = 1,
+      .line_advance = 8};
+  ArTextSurface surface;
+  CHECK(ArTextSurfaceCache_Acquire(&cache, &device, &rasterizer, &request,
+                                   &surface, error, sizeof(error)));
+  CHECK(scripted.last_request.font_pixels == 31 &&
+        scripted.last_request.minimum_font_pixels == 31);
+  CHECK(!scripted.last_request.raster_font_pixels &&
+        !scripted.last_request.align_pixelation_grid);
+  CHECK(surface.raster_font_pixels == 31 && surface.raster_scale == 1);
+  CHECK(surface.mosaic_block == 1);
+  CHECK(surface.origin_x == -2 && surface.origin_y == -1);
+
+  /* Low resolution: the scale still comes from the requested size (40 / 8
+   * allows 4), and the exact size is already in rasterized pixels. Grid
+   * alignment is a mosaic matter and changes nothing here. */
+  request.pixelation = kArTextPixelation_LowResolution;
+  request.pixelation_size = 4;
+  request.raster_font_pixels = 7;
+  request.align_pixelation_grid = true;
+  request.pixelation_grid_x = 1;
+  CHECK(ArTextSurfaceCache_Acquire(&cache, &device, &rasterizer, &request,
+                                   &surface, error, sizeof(error)));
+  CHECK(scripted.last_request.font_pixels == 7 &&
+        scripted.last_request.minimum_font_pixels == 7);
+  CHECK(scripted.last_request.maximum_width == request.maximum_width / 4);
+  CHECK(surface.raster_font_pixels == 7 && surface.raster_scale == 4);
+  CHECK(surface.width == 64 && surface.height == 32);
+  CHECK(surface.origin_x == -8 && surface.origin_y == -4);
+  ArTextSurfaceCache_Destroy(&cache, &device);
+  ArTextRasterizer_Reset(&rasterizer);
+  ArRenderDevice_Reset(&device);
+}
+
 int main(void) {
+  TestExactRasterSize();
+  TestGridAlignedMosaicMatchesPage();
   TestEffectPieces();
   TestAbiValidation();
   TestCacheHitsMissesAndFailureAtomicity();
@@ -1102,6 +1496,7 @@ int main(void) {
   TestOwnershipAcrossStatsResetAndEviction();
   TestFramePinsSurviveEntryPressure();
   TestPixelationTreatments();
+  TestMosaicMatchesOriginal();
   TestInkFormatsAndBounds();
   TestInterfaceTextCacheAndLifecycle();
   if (g_failures) {

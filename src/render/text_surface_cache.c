@@ -52,6 +52,10 @@ static uint64_t HashRequest(uint64_t hash,
   hash = HashU32(hash, (uint32_t)request->filter);
   hash = HashU32(hash, (uint32_t)request->pixelation);
   hash = HashU32(hash, (uint32_t)request->pixelation_size);
+  hash = HashU32(hash, (uint32_t)request->raster_font_pixels);
+  hash = HashU32(hash, request->align_pixelation_grid);
+  hash = HashU32(hash, (uint32_t)request->pixelation_grid_x);
+  hash = HashU32(hash, (uint32_t)request->pixelation_grid_y);
   hash = HashU64(hash, (uint64_t)request->language_bcp47_bytes);
   if (request->language_bcp47_bytes)
     hash = DeterministicHash_Fnv1a64(
@@ -211,31 +215,128 @@ static bool ApplyMosaic(const ArTextBitmap *source, int block_size,
                            &output, &output_pitch))
     return false;
   const uint8_t *input = (const uint8_t *)source->pixels;
+  const size_t pixel_bytes = (size_t)bytes_per_pixel;
+  /* Every pixel of a block repeats one sample, so each band's first row is
+   * filled block by block (one pixel, then doubling copies) and copied down
+   * the band. A 4-byte memcpy call per output pixel was a full-page pass on
+   * every enhanced text change; the bytes written are unchanged. */
   for (int block_y = 0; block_y < source->height;
        block_y += block_size) {
     const int sample_y = block_y + block_size / 2 < source->height
         ? block_y + block_size / 2 : source->height - 1;
+    const int end_y = block_y + block_size < source->height
+        ? block_y + block_size : source->height;
+    const uint8_t *sample_row =
+        input + (size_t)sample_y * (size_t)source->pitch_bytes;
+    uint8_t *band_row = output + (size_t)block_y * (size_t)output_pitch;
     for (int block_x = 0; block_x < source->width;
          block_x += block_size) {
       const int sample_x = block_x + block_size / 2 < source->width
           ? block_x + block_size / 2 : source->width - 1;
-      const uint8_t *sample =
-          input + (size_t)sample_y * (size_t)source->pitch_bytes +
-          (size_t)sample_x * (size_t)bytes_per_pixel;
-      const int end_y = block_y + block_size < source->height
-          ? block_y + block_size : source->height;
       const int end_x = block_x + block_size < source->width
           ? block_x + block_size : source->width;
-      for (int y = block_y; y < end_y; ++y) {
-        uint8_t *row = output + (size_t)y * (size_t)output_pitch;
-        for (int x = block_x; x < end_x; ++x)
-          memcpy(row + (size_t)x * (size_t)bytes_per_pixel,
-                 sample, (size_t)bytes_per_pixel);
+      uint8_t *block = band_row + (size_t)block_x * pixel_bytes;
+      const size_t span = (size_t)(end_x - block_x) * pixel_bytes;
+      memcpy(block, sample_row + (size_t)sample_x * pixel_bytes, pixel_bytes);
+      for (size_t filled = pixel_bytes; filled < span;) {
+        const size_t chunk = filled < span - filled ? filled : span - filled;
+        memcpy(block + filled, block, chunk);
+        filled += chunk;
       }
     }
+    for (int y = block_y + 1; y < end_y; ++y)
+      memcpy(output + (size_t)y * (size_t)output_pitch, band_row,
+             (size_t)source->width * pixel_bytes);
   }
   *pixels = output;
   *pitch_bytes = output_pitch;
+  return true;
+}
+
+/* A copy of a bitmap moved onto another surface's mosaic grid and padded out
+ * to whole blocks. Mosaic blocks sample their centre, so a line mosaicked on
+ * its own only matches the same line inside its page when every block covers
+ * the same pixels: the leading padding restores the page's block phase, and
+ * the trailing padding stops a partial last block from sampling its own edge
+ * where the page's block would have sampled beyond the line. */
+typedef struct GridAlignedBitmap {
+  ArTextBitmap bitmap;
+  uint8_t *pixels;
+  uint32_t *owners;
+  ArTextRevealCluster *clusters;
+  int pad_left;
+  int pad_top;
+} GridAlignedBitmap;
+
+static void ReleaseGridAligned(GridAlignedBitmap *aligned) {
+  free(aligned->pixels);
+  free(aligned->owners);
+  free(aligned->clusters);
+  memset(aligned, 0, sizeof(*aligned));
+}
+
+static int PositiveModulo(int64_t value, int modulus) {
+  const int64_t remainder = value % modulus;
+  return (int)(remainder < 0 ? remainder + modulus : remainder);
+}
+
+static bool AlignToPixelationGrid(const ArTextBitmap *source, int block,
+                                  int grid_x, int grid_y,
+                                  GridAlignedBitmap *out) {
+  memset(out, 0, sizeof(*out));
+  const int bytes_per_pixel = BytesPerPixel(source->format);
+  /* The grid is stated against the uncropped layout; this bitmap starts
+   * crop_left/crop_top pixels into it. */
+  const int pad_left = PositiveModulo(
+      (int64_t)source->crop_left - grid_x, block);
+  const int pad_top = PositiveModulo(
+      (int64_t)source->crop_top - grid_y, block);
+  int64_t width = (int64_t)pad_left + source->width;
+  int64_t height = (int64_t)pad_top + source->height;
+  width += PositiveModulo(-width, block);
+  height += PositiveModulo(-height, block);
+  if (bytes_per_pixel <= 0 || width > 65536 || height > 65536 ||
+      (source->reveal_cluster_count &&
+       source->reveal_cluster_count > SIZE_MAX / sizeof(*out->clusters)))
+    return false;
+  const size_t pitch = (size_t)width * (size_t)bytes_per_pixel;
+  out->pixels = (uint8_t *)calloc((size_t)height, pitch);
+  if (source->pixel_owners)
+    out->owners = (uint32_t *)calloc((size_t)width * (size_t)height,
+                                     sizeof(*out->owners));
+  if (source->reveal_cluster_count)
+    out->clusters = (ArTextRevealCluster *)malloc(
+        source->reveal_cluster_count * sizeof(*out->clusters));
+  if (!out->pixels || (source->pixel_owners && !out->owners) ||
+      (source->reveal_cluster_count && !out->clusters)) {
+    ReleaseGridAligned(out);
+    return false;
+  }
+  for (int y = 0; y < source->height; ++y) {
+    memcpy(out->pixels + (size_t)(y + pad_top) * pitch +
+               (size_t)pad_left * (size_t)bytes_per_pixel,
+           (const uint8_t *)source->pixels +
+               (size_t)y * (size_t)source->pitch_bytes,
+           (size_t)source->width * (size_t)bytes_per_pixel);
+    if (out->owners)
+      memcpy(out->owners + (size_t)(y + pad_top) * (size_t)width + pad_left,
+             source->pixel_owners + (size_t)y * (size_t)source->width,
+             (size_t)source->width * sizeof(*out->owners));
+  }
+  for (size_t index = 0; index < source->reveal_cluster_count; ++index) {
+    out->clusters[index] = source->reveal_clusters[index];
+    out->clusters[index].x += pad_left;
+    out->clusters[index].y += pad_top;
+  }
+  out->bitmap = *source;
+  out->bitmap.pixels = out->pixels;
+  out->bitmap.width = (int)width;
+  out->bitmap.height = (int)height;
+  out->bitmap.pitch_bytes = (int)pitch;
+  out->bitmap.pixel_owners = out->owners;
+  out->bitmap.reveal_clusters = out->clusters;
+  out->pad_left = pad_left;
+  out->pad_top = pad_top;
   return true;
 }
 
@@ -527,6 +628,14 @@ bool ArTextSurfaceCache_Acquire(
       return false;
     }
   }
+  /* The backend sees an ordinary request: an exact size is a fit with no
+   * room, and grid alignment happens here, after rasterization. */
+  if (request->raster_font_pixels)
+    raster_request.font_pixels = raster_request.minimum_font_pixels =
+        request->raster_font_pixels;
+  raster_request.raster_font_pixels = 0;
+  raster_request.align_pixelation_grid = false;
+  raster_request.pixelation_grid_x = raster_request.pixelation_grid_y = 0;
   /* Refuse an impossible field before any font work: the backend would
    * otherwise render it at full size and only then discover it cannot fit. */
   if (SurfaceBytes(request->maximum_width, request->maximum_height,
@@ -555,18 +664,41 @@ bool ArTextSurfaceCache_Acquire(
    * reason is still entitled to its remembered answer. */
   ForgetRetryableFailures(cache);
 
-  uint8_t *treated_pixels = NULL;
-  const void *upload_pixels = bitmap.pixels;
-  int upload_width = bitmap.width;
-  int upload_height = bitmap.height;
-  int upload_pitch = bitmap.pitch_bytes;
   int mosaic_block = 1;
+  if (request->pixelation == kArTextPixelation_Mosaic) {
+    /* Use actual fitted metrics, not the requested size: an automatically
+     * fitted heading can be much smaller than its surrounding dialogue. */
+    int block = bitmap.line_advance / 8;
+    if (block > request->pixelation_size) block = request->pixelation_size;
+    if (block > 1) mosaic_block = block;
+  }
+  GridAlignedBitmap aligned = {0};
+  const ArTextBitmap *source = &bitmap;
+  if (mosaic_block > 1 && request->align_pixelation_grid) {
+    if (!AlignToPixelationGrid(&bitmap, mosaic_block,
+                               request->pixelation_grid_x,
+                               request->pixelation_grid_y, &aligned)) {
+      ArTextRasterizer_ReleaseBitmap(rasterizer, &bitmap);
+      ++cache->stats.failures;
+      SetError(error, error_capacity,
+               "cannot align text to its page's mosaic grid");
+      return false;
+    }
+    source = &aligned.bitmap;
+  }
+
+  uint8_t *treated_pixels = NULL;
+  const void *upload_pixels = source->pixels;
+  int upload_width = source->width;
+  int upload_height = source->height;
+  int upload_pitch = source->pitch_bytes;
   if (request->pixelation == kArTextPixelation_LowResolution && metric_scale > 1) {
-    if (!UpscaleNearest(&bitmap, metric_scale, &treated_pixels,
+    if (!UpscaleNearest(source, metric_scale, &treated_pixels,
                         &upload_width, &upload_height, &upload_pitch) ||
         upload_width > request->maximum_width ||
         upload_height > request->maximum_height) {
       free(treated_pixels);
+      ReleaseGridAligned(&aligned);
       ArTextRasterizer_ReleaseBitmap(rasterizer, &bitmap);
       ++cache->stats.failures;
       SetError(error, error_capacity,
@@ -574,25 +706,21 @@ bool ArTextSurfaceCache_Acquire(
       return false;
     }
     upload_pixels = treated_pixels;
-  } else if (request->pixelation == kArTextPixelation_Mosaic) {
-    /* Use actual fitted metrics, not the requested size: an automatically
-     * fitted heading can be much smaller than its surrounding dialogue. */
-    int block = bitmap.line_advance / 8;
-    if (block > request->pixelation_size) block = request->pixelation_size;
-    if (block > 1) mosaic_block = block;
-    if (block > 1 && !ApplyMosaic(&bitmap, block,
-                     &treated_pixels, &upload_pitch)) {
+  } else if (mosaic_block > 1) {
+    if (!ApplyMosaic(source, mosaic_block, &treated_pixels, &upload_pitch)) {
+      ReleaseGridAligned(&aligned);
       ArTextRasterizer_ReleaseBitmap(rasterizer, &bitmap);
       ++cache->stats.failures;
       SetError(error, error_capacity,
                "cannot apply text mosaic treatment");
       return false;
     }
-    if (treated_pixels) upload_pixels = treated_pixels;
+    upload_pixels = treated_pixels;
   }
 
   if (!TextureExtentSupported(device, upload_width, upload_height)) {
     free(treated_pixels);
+    ReleaseGridAligned(&aligned);
     ArTextRasterizer_ReleaseBitmap(rasterizer, &bitmap);
     ++cache->stats.failures;
     SetError(error, error_capacity,
@@ -613,34 +741,36 @@ bool ArTextSurfaceCache_Acquire(
   ArRenderRectI *cluster_ink_bounds = NULL;
   ArTextRevealPiece *reveal_pieces = NULL;
   size_t reveal_piece_count = 0, effect_metadata_bytes = 0;
-  if (bitmap.reveal_cluster_count) {
-    if (bitmap.reveal_cluster_count >
+  if (source->reveal_cluster_count) {
+    if (source->reveal_cluster_count >
         SIZE_MAX / sizeof(*reveal_clusters)) {
       free(treated_pixels);
+      ReleaseGridAligned(&aligned);
       ArTextRasterizer_ReleaseBitmap(rasterizer, &bitmap);
       ++cache->stats.failures;
       SetError(error, error_capacity, "text reveal metadata is too large");
       return false;
     }
     reveal_clusters = (ArTextRevealCluster *)malloc(
-        bitmap.reveal_cluster_count * sizeof(*reveal_clusters));
+        source->reveal_cluster_count * sizeof(*reveal_clusters));
     cluster_ink_bounds = (ArRenderRectI *)calloc(
-        bitmap.reveal_cluster_count, sizeof(*cluster_ink_bounds));
+        source->reveal_cluster_count, sizeof(*cluster_ink_bounds));
     if (!reveal_clusters || !cluster_ink_bounds) {
       free(reveal_clusters);
       free(cluster_ink_bounds);
       free(treated_pixels);
+      ReleaseGridAligned(&aligned);
       ArTextRasterizer_ReleaseBitmap(rasterizer, &bitmap);
       ++cache->stats.failures;
       SetError(error, error_capacity,
                "out of memory caching text reveal metadata");
       return false;
     }
-    memcpy(reveal_clusters, bitmap.reveal_clusters,
-           bitmap.reveal_cluster_count * sizeof(*reveal_clusters));
+    memcpy(reveal_clusters, source->reveal_clusters,
+           source->reveal_cluster_count * sizeof(*reveal_clusters));
     if (metric_scale > 1) {
       for (size_t index = 0;
-           index < bitmap.reveal_cluster_count; ++index) {
+           index < source->reveal_cluster_count; ++index) {
         reveal_clusters[index].x *= metric_scale;
         reveal_clusters[index].y *= metric_scale;
         reveal_clusters[index].width *= metric_scale;
@@ -654,14 +784,15 @@ bool ArTextSurfaceCache_Acquire(
   };
   const ArRenderRectI ink_bounds = ArTextBitmap_InkBounds(
       &treated_bitmap, (ArRenderRectI){0, 0, upload_width, upload_height});
-  for (size_t index = 0; !bitmap.pixel_owners && index < bitmap.reveal_cluster_count; ++index) {
+  for (size_t index = 0; !source->pixel_owners && index < source->reveal_cluster_count; ++index) {
     const ArTextRevealCluster *cluster = &reveal_clusters[index];
     cluster_ink_bounds[index] = ArTextBitmap_InkBounds(&treated_bitmap,
         (ArRenderRectI){cluster->x, cluster->y, cluster->width, cluster->height});
   }
-  if (!BuildRevealPieces(&bitmap, metric_scale, mosaic_block, &reveal_pieces,
+  if (!BuildRevealPieces(source, metric_scale, mosaic_block, &reveal_pieces,
         &reveal_piece_count, &effect_metadata_bytes, cluster_ink_bounds)) {
     free(treated_pixels);free(reveal_clusters);free(cluster_ink_bounds);
+    ReleaseGridAligned(&aligned);
     ArTextRasterizer_ReleaseBitmap(rasterizer, &bitmap);
     ++cache->stats.failures;
     SetError(error, error_capacity, "cannot build bounded text effect reveal geometry");
@@ -677,18 +808,24 @@ bool ArTextSurfaceCache_Acquire(
     .key = key,
     .width = upload_width,
     .height = upload_height,
-    .ascent = bitmap.ascent * metric_scale,
+    .ascent = (bitmap.ascent + aligned.pad_top) * metric_scale,
     .descent = bitmap.descent * metric_scale,
     .line_advance = bitmap.line_advance * metric_scale,
     .paragraph_direction = bitmap.paragraph_direction,
+    .raster_font_pixels = bitmap.font_pixels,
+    .raster_scale = metric_scale,
+    .mosaic_block = mosaic_block,
+    .origin_x = (aligned.pad_left - bitmap.crop_left) * metric_scale,
+    .origin_y = (aligned.pad_top - bitmap.crop_top) * metric_scale,
     .ink_bounds = ink_bounds,
     .reveal_clusters = reveal_clusters,
     .cluster_ink_bounds = cluster_ink_bounds,
-    .reveal_cluster_count = bitmap.reveal_cluster_count,
+    .reveal_cluster_count = source->reveal_cluster_count,
     .reveal_pieces = reveal_pieces,
     .reveal_piece_count = reveal_piece_count,
   };
   free(treated_pixels);
+  ReleaseGridAligned(&aligned);
   ArTextRasterizer_ReleaseBitmap(rasterizer, &bitmap);
   if (!created || !uploaded) {
     ArRenderDevice_DestroyTexture(device, texture);

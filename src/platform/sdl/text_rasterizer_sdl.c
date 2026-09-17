@@ -258,6 +258,21 @@ static bool ApplyRetailTextShadow(
       owners, step, request->shadow_rgb, request->shadow_shape);
 }
 
+static inline bool PixelHasInk(const uint8_t *row, int x, Uint32 alpha_mask) {
+  Uint32 pixel;
+  memcpy(&pixel, row + (size_t)x * 4u, sizeof(pixel));
+  return (pixel & alpha_mask) != 0;
+}
+
+static bool RowHasInk(const SDL_Surface *surface, int y, int from, int to,
+                      Uint32 alpha_mask) {
+  const uint8_t *row =
+      (const uint8_t *)surface->pixels + (size_t)y * surface->pitch;
+  for (int x = from; x < to; ++x)
+    if (PixelHasInk(row, x, alpha_mask)) return true;
+  return false;
+}
+
 static SDL_Surface *CropWhitespace(SDL_Surface *surface, ArTextRasterFlags flags,
                                     int *removed_left, int *removed_top) {
   if (removed_left) *removed_left = 0;
@@ -267,26 +282,38 @@ static SDL_Surface *CropWhitespace(SDL_Surface *surface, ArTextRasterFlags flags
   if (!surface || surface->format != SDL_PIXELFORMAT_RGBA8888 ||
       !surface->pixels || !details || details->bytes_per_pixel != 4u)
     return NULL;
-  int first = surface->w;
+  /* Every enhanced page raster crops, so this runs over the whole surface on
+   * each text change. A per-pixel SDL_GetRGBA call here was the largest single
+   * line of each page raster in a CPU sample of name-entry typing (M2,
+   * 2026-09-17); the packed format's alpha mask gives the same zero test.
+   * Blank edge rows are trimmed first, and an inked row only scans columns
+   * outside the bounds found so far. */
+  const Uint32 alpha_mask = details->Amask;
+  const int width = surface->w;
+  const int height = surface->h;
+  int top = 0;
+  while (top < height && !RowHasInk(surface, top, 0, width, alpha_mask)) ++top;
+  if (top == height) return NULL;
+  int bottom = height - 1;
+  while (!RowHasInk(surface, bottom, 0, width, alpha_mask)) --bottom;
+  int first = width;
   int last = -1;
-  int top = surface->h;
-  int bottom = -1;
-  for (int y = 0; y < surface->h; ++y) {
+  for (int y = top; y <= bottom; ++y) {
     const uint8_t *row =
         (const uint8_t *)surface->pixels + (size_t)y * surface->pitch;
-    for (int x = 0; x < surface->w; ++x) {
-      uint32_t pixel;
-      uint8_t alpha;
-      memcpy(&pixel, row + (size_t)x * 4u, sizeof(pixel));
-      SDL_GetRGBA(pixel, details, NULL, NULL, NULL, NULL, &alpha);
-      if (!alpha) continue;
-      if (x < first) first = x;
-      if (x > last) last = x;
-      if (y < top) top = y;
-      if (y > bottom) bottom = y;
+    for (int x = 0; x < first; ++x) {
+      if (PixelHasInk(row, x, alpha_mask)) {
+        first = x;
+        break;
+      }
+    }
+    for (int x = width - 1; x > last; --x) {
+      if (PixelHasInk(row, x, alpha_mask)) {
+        last = x;
+        break;
+      }
     }
   }
-  if (last < first) return NULL;
   if (!(flags & kArTextRasterFlag_CropHorizontalWhitespace)) {
     first = 0;
     last = surface->w - 1;
@@ -540,6 +567,9 @@ typedef struct RasterAttempt {
   int ascent;
   int descent;
   int line_advance;
+  int font_pixels;
+  int crop_left;
+  int crop_top;
   ArTextDirection paragraph_direction;
 } RasterAttempt;
 
@@ -833,6 +863,9 @@ static RasterAttemptResult RasterizeAtSize(
   attempt->ascent = TTF_GetFontAscent(set->primary) - removed_top;
   attempt->descent = TTF_GetFontDescent(set->primary);
   attempt->line_advance = TTF_GetFontLineSkip(set->primary);
+  attempt->font_pixels = font_pixels;
+  attempt->crop_left = removed_left;
+  attempt->crop_top = removed_top;
   *failure = kArTextRasterFailure_None;
   return kRasterAttempt_Success;
 }
@@ -938,6 +971,9 @@ static bool Rasterize(void *context, const ArTextRasterRequest *request,
     .token = (uintptr_t)token,
     .pixel_owners = best.pixel_owners,
     .paragraph_direction = best.paragraph_direction,
+    .font_pixels = best.font_pixels,
+    .crop_left = best.crop_left,
+    .crop_top = best.crop_top,
   };
   return true;
 }

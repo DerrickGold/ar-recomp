@@ -279,6 +279,18 @@ static bool SnapshotTextValid(const ArLocalizationFrame *frame,
       frame->text[snapshot->utf8_offset + snapshot->utf8_bytes] == 0;
 }
 
+/* A live line is a whole hard line: bounded by the text edges or line feeds,
+ * with none inside. No live line at all is valid too. */
+static bool LiveLineValid(const char *utf8, size_t utf8_bytes,
+                          size_t offset, size_t bytes) {
+  if (!bytes) return !offset;
+  return offset <= utf8_bytes && bytes <= utf8_bytes - offset &&
+      bytes <= UINT16_MAX && offset <= UINT16_MAX &&
+      (!offset || utf8[offset - 1u] == '\n') &&
+      (offset + bytes == utf8_bytes || utf8[offset + bytes] == '\n') &&
+      !memchr(utf8 + offset, '\n', bytes);
+}
+
 bool ArLocalizationFrame_IsValid(const ArLocalizationFrame *frame) {
   if (!FrameStorageValid(frame)) return false;
   if (!frame->snapshot_count) {
@@ -351,7 +363,12 @@ bool ArLocalizationFrame_IsValid(const ArLocalizationFrame *frame) {
         snapshot->bidi_span_count >
             frame->bidi.count - snapshot->bidi_span_offset ||
         snapshot->key_separator_bytes >
-            kArLocalizationFrameKeySeparatorCapacity)
+            kArLocalizationFrameKeySeparatorCapacity ||
+        !LiveLineValid(frame->text + snapshot->utf8_offset,
+                       snapshot->utf8_bytes, snapshot->live_line_utf8_offset,
+                       snapshot->live_line_utf8_bytes) ||
+        snapshot->live_line_cells > kArLocalizationFrameLiveLineMaximumCells ||
+        (snapshot->live_line_cells && !snapshot->live_line_utf8_bytes))
       return false;
     if ((snapshot->layout == kArLocalizationTextLayout_Grid) !=
         (snapshot->grid_index != 0) || snapshot->grid_index > frame->grid_count)
@@ -601,6 +618,24 @@ bool ArLocalizationFrame_SetKeyGrid(ArLocalizationFrame *frame,
   snapshot->key_columns = columns;
   snapshot->key_trailing_lines = trailing_lines;
   snapshot->key_cell_columns = cell_columns;
+  return true;
+}
+
+bool ArLocalizationFrame_SetLiveLine(ArLocalizationFrame *frame,
+                                     size_t utf8_offset, size_t utf8_bytes,
+                                     uint8_t cells) {
+  if (!FrameStorageValid(frame) || !frame->snapshot_count || !utf8_bytes ||
+      cells > kArLocalizationFrameLiveLineMaximumCells)
+    return false;
+  ArLocalizationTextSnapshot *snapshot =
+      &frame->snapshots[frame->snapshot_count - 1u];
+  if (!SnapshotTextValid(frame, snapshot) ||
+      !LiveLineValid(frame->text + snapshot->utf8_offset,
+                     snapshot->utf8_bytes, utf8_offset, utf8_bytes))
+    return false;
+  snapshot->live_line_utf8_offset = (uint16_t)utf8_offset;
+  snapshot->live_line_utf8_bytes = (uint16_t)utf8_bytes;
+  snapshot->live_line_cells = cells;
   return true;
 }
 

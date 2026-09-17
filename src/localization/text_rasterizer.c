@@ -100,8 +100,11 @@ bool ArTextRasterRequest_IsValid(const ArTextRasterRequest *request) {
       kArTextRasterFlag_IncludeRevealClusters;
   return request &&
       request->struct_size >= AR_MEMBER_END(
-          ArTextRasterRequest, preferred_line_break_source_offset) &&
+          ArTextRasterRequest, pixelation_grid_y) &&
       request->abi_version == AR_TEXT_RASTER_REQUEST_ABI_VERSION &&
+      request->raster_font_pixels >= 0 && request->raster_font_pixels <= 4096 &&
+      (request->align_pixelation_grid ||
+       (!request->pixelation_grid_x && !request->pixelation_grid_y)) &&
       ValidUtf8Buffer(request->utf8, request->utf8_bytes) &&
       ArTextBidiSpans_Valid(request->bidi_spans, request->bidi_span_count,
           request->utf8, request->utf8_bytes, request->bidi_source_offset) &&
@@ -209,8 +212,10 @@ bool ArTextRasterizer_HasGlyph(const ArTextRasterizer *rasterizer,
 static bool BitmapValid(const ArTextBitmap *bitmap,
                         const ArTextRasterRequest *request) {
   if (!bitmap ||
-      bitmap->struct_size < AR_MEMBER_END(ArTextBitmap, paragraph_direction) ||
+      bitmap->struct_size < AR_MEMBER_END(ArTextBitmap, crop_top) ||
       bitmap->abi_version != AR_TEXT_BITMAP_ABI_VERSION ||
+      bitmap->font_pixels < 0 || bitmap->font_pixels > 4096 ||
+      bitmap->crop_left < 0 || bitmap->crop_top < 0 ||
       bitmap->paragraph_direction < kArTextDirection_Auto ||
       bitmap->paragraph_direction > kArTextDirection_RightToLeft ||
       !bitmap->pixels || bitmap->width <= 0 || bitmap->height <= 0 ||
@@ -498,14 +503,8 @@ bool ArTextBitmap_SlantAsciiNumerals(ArTextBitmap *b,
       b->width > INT32_MAX / 4 || b->pitch_bytes < b->width * 4 ||
       b->height <= 0 || (uint64_t)b->width * b->height > (UINT64_C(64) << 20) / 16)
     return false;
-  const size_t area = (size_t)b->width * b->height;
   int *bottom = malloc((b->reveal_cluster_count + 1u) * sizeof(*bottom));
-  uint32_t *pixels = calloc(area, sizeof(*pixels));
-  uint32_t *owners = calloc(area, sizeof(*owners));
-  if (!bottom || !pixels || !owners) {
-    free(bottom); free(pixels); free(owners);
-    return false;
-  }
+  if (!bottom) return false;
   bottom[0] = -1;
   size_t start = 0;
   for (size_t i = 0; i < b->reveal_cluster_count; ++i) {
@@ -520,19 +519,42 @@ bool ArTextBitmap_SlantAsciiNumerals(ArTextBitmap *b,
     bottom[i + 1u] = number ? 0 : -1;
     start = end;
   }
+  /* A slanted numeral only moves within its own row, so rows without numeral
+   * ink change only by clearing unowned pixels, and scratch covers just the
+   * numeral rows. This runs on every enhanced page change: rebuilding the
+   * whole page in two full-page buffers was the second-largest line of each
+   * page raster in a CPU sample of name-entry typing (M2, 2026-09-17), where
+   * only the keyboard's digit row holds numerals. Output, pass order and
+   * failure behavior (the bitmap is untouched on false) match the full-page
+   * version this replaced, which tests/text_bitmap_effects_test.c keeps as
+   * its oracle. */
+  int first_row = b->height;
+  int last_row = -1;
   for (int y = 0; y < b->height; ++y)
     for (int x = 0; x < b->width; ++x) {
       const uint32_t owner = b->pixel_owners[(size_t)y * b->width + x];
       if (owner > b->reveal_cluster_count) {
-        free(bottom); free(pixels); free(owners);
+        free(bottom);
         return false;
       }
-      if (owner && bottom[owner] >= 0) bottom[owner] = y;
+      if (owner && bottom[owner] >= 0) {
+        bottom[owner] = y;
+        if (y < first_row) first_row = y;
+        last_row = y;
+      }
     }
+  const size_t band_area = last_row >= first_row
+      ? (size_t)(last_row - first_row + 1) * (size_t)b->width : 0;
+  uint32_t *pixels = band_area ? calloc(band_area, sizeof(*pixels)) : NULL;
+  uint32_t *owners = band_area ? calloc(band_area, sizeof(*owners)) : NULL;
+  if (band_area && (!pixels || !owners)) {
+    free(bottom); free(pixels); free(owners);
+    return false;
+  }
   /* Preserve the upright ink first. A slanted bearing may extend behind its
    * neighbour but may not overwrite that neighbour's letterform. */
   for (int pass = 0; pass < 2; ++pass)
-    for (int y = 0; y < b->height; ++y)
+    for (int y = first_row; y <= last_row; ++y)
       for (int x = 0; x < b->width; ++x) {
         const uint32_t owner = b->pixel_owners[(size_t)y * b->width + x];
         if (!owner || (bottom[owner] >= 0) != (pass != 0)) continue;
@@ -541,7 +563,7 @@ bool ArTextBitmap_SlantAsciiNumerals(ArTextBitmap *b,
           free(bottom); free(pixels); free(owners);
           return false;
         }
-        const size_t at = (size_t)y * b->width + target_x;
+        const size_t at = (size_t)(y - first_row) * b->width + target_x;
         uint32_t pixel;
         memcpy(&pixel, (const uint8_t *)b->pixels +
             (size_t)y * b->pitch_bytes + (size_t)x * 4, 4);
@@ -550,10 +572,18 @@ bool ArTextBitmap_SlantAsciiNumerals(ArTextBitmap *b,
         pixels[at] = pixel;
         owners[at] = owner;
       }
-  for (int y = 0; y < b->height; ++y)
-    memcpy((uint8_t *)b->pixels + (size_t)y * b->pitch_bytes,
-           pixels + (size_t)y * b->width, (size_t)b->width * 4);
-  memcpy((void *)b->pixel_owners, owners, area * sizeof(*owners));
+  for (int y = 0; y < b->height; ++y) {
+    uint8_t *row = (uint8_t *)b->pixels + (size_t)y * b->pitch_bytes;
+    uint32_t *row_owners = (uint32_t *)b->pixel_owners + (size_t)y * b->width;
+    if (y >= first_row && y <= last_row) {
+      const size_t band = (size_t)(y - first_row) * b->width;
+      memcpy(row, pixels + band, (size_t)b->width * 4);
+      memcpy(row_owners, owners + band, (size_t)b->width * sizeof(*owners));
+      continue;
+    }
+    for (int x = 0; x < b->width; ++x)
+      if (!row_owners[x]) memset(row + (size_t)x * 4, 0, 4);
+  }
   free(bottom); free(pixels); free(owners);
   return true;
 }

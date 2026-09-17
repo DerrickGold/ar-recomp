@@ -553,7 +553,68 @@ static void TestAppearance(void) {
   }
 }
 
+/* The keyboard marks the name row as its live entry field: the row whose
+ * graphemes carry the field underlines, a cell per underline, and only while
+ * they all sit on that row. */
+static void TestNameEntryLiveLine(void) {
+  static const char page[] =
+      "Enter name\nAB\xE2\x80\x87\xE2\x80\x87\n\nA B\nC D";
+  const uint32_t name_start = 11;
+  const uint32_t name_ends[] = {12, 13, 16, 19};
+  for (unsigned variant = 0; variant < 4; ++variant) {
+    ActRaiserLocalizationComposeState state;
+    ActRaiserLocalizationComposeState_Init(&state);
+    ActRaiserLocalizationComposeSnapshot *slot = &state.surfaces[0];
+    slot->active = true;
+    slot->surface_id = kActRaiserLocalizationComposeSurfaceFirst;
+    slot->region = (ArTextCellRegion){3, 7, 27, 16};
+    slot->layout = kArLocalizationTextLayout_Flow;
+    slot->native_font_pixels = 8;
+    slot->source_revision = 1;
+    slot->language = (ArLocalizationTextLanguage){.locale = "en-US",
+        .direction = kArTextDirection_LeftToRight};
+    snprintf(slot->semantic_id, sizeof(slot->semantic_id), "%s",
+             variant == 3 ? "sky.menu.magic.fire"
+                          : "name_entry.prompt_and_alphabet");
+    memcpy(slot->utf8, page, sizeof(page));
+    slot->utf8_bytes = sizeof(page) - 1u;
+    slot->cluster_count = (uint32_t)slot->utf8_bytes;
+    uint8_t count = 0;
+    if (variant != 1) {
+      for (size_t i = 0; i < sizeof(name_ends) / sizeof(name_ends[0]); ++i)
+        slot->inline_objects[count++] = (ArLocalizationInlineObjectSnapshot){
+            kArLocalizationInlineObject_NameFieldUnderline, name_ends[i]};
+    }
+    /* A selector on a key is not part of the field. */
+    slot->inline_objects[count++] = (ArLocalizationInlineObjectSnapshot){
+        kArLocalizationInlineObject_NameCursor, (uint32_t)slot->utf8_bytes};
+    if (variant == 2)
+      slot->inline_objects[count - 1u].kind =
+          kArLocalizationInlineObject_NameFieldUnderline;
+    slot->inline_object_count = count;
+    static ArLocalizationFrame frame;
+    ArLocalizationFrame_Reset(&frame);
+    CHECK(ArLocalizationFrame_SetFont(&frame, "en", "test", 1, 1, &frame.settings));
+    const uint16_t palette[4] = {0, 0, 0x7f33, 0x7fff};
+    CHECK(ActRaiserLocalizationComposeState_AppendFrame(&state, &frame,
+        (ArTextCellDestination){3, kArTextCellScreen_Composited, 0}, palette));
+    CHECK(frame.snapshot_count == 1);
+    CHECK(ArLocalizationFrame_IsValid(&frame));
+    const ArLocalizationTextSnapshot *text = &frame.snapshots[0];
+    if (variant == 0) {
+      CHECK(text->live_line_utf8_offset == name_start);
+      CHECK(text->live_line_utf8_bytes == name_ends[3] - name_start);
+      /* One fixed cell per underlined tile. */
+      CHECK(text->live_line_cells == 4);
+    } else {
+      CHECK(!text->live_line_utf8_offset && !text->live_line_utf8_bytes &&
+            !text->live_line_cells);
+    }
+  }
+}
+
 int main(void) {
+  TestNameEntryLiveLine();
   TestAppearance();
   TestSoundTestLifecycle();
   TestActionAndTitle();

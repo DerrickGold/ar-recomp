@@ -27,6 +27,17 @@ typedef struct ArTextSurface {
   int descent;
   int line_advance;
   ArTextDirection paragraph_direction;
+  /* Size the backend rasterized at after fitting, in its own pixels (before
+   * low-resolution enlargement); zero when the backend did not report it. */
+  int raster_font_pixels;
+  /* Output pixels per rasterized pixel: the low-resolution enlargement, or 1. */
+  int raster_scale;
+  /* Mosaic block edge in output pixels, or 1 when no mosaic was applied. */
+  int mosaic_block;
+  /* Texture coordinate of the uncropped layout origin: negative after
+   * whitespace cropping, positive after padding to a page's mosaic grid. */
+  int origin_x;
+  int origin_y;
   /* Actual post-pixelation ink, measured once on cache miss. Empty regions
    * represent spaces; never use padded line/reveal rectangles as ink bounds. */
   ArRenderRectI ink_bounds;

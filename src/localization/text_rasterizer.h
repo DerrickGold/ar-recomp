@@ -9,8 +9,8 @@
 #include "localization/text_bidi.h"
 
 #define AR_TEXT_RASTERIZER_ABI_VERSION UINT32_C(2)
-#define AR_TEXT_RASTER_REQUEST_ABI_VERSION UINT32_C(12)
-#define AR_TEXT_BITMAP_ABI_VERSION UINT32_C(4)
+#define AR_TEXT_RASTER_REQUEST_ABI_VERSION UINT32_C(13)
+#define AR_TEXT_BITMAP_ABI_VERSION UINT32_C(5)
 
 enum { kArTextRasterErrorCapacity = 256 };
 
@@ -120,6 +120,21 @@ typedef struct ArTextRasterRequest {
   /* Number of byte positions addressable by the borrowed one-bit map. */
   size_t preferred_line_break_capacity;
   uint32_t preferred_line_break_source_offset;
+  /* A line cut out of a larger page, rasterized on its own so editing it does
+   * not rebuild the page. Zero fits between minimum_font_pixels and
+   * font_pixels as usual. Non-zero rasterizes at exactly this size, counted
+   * in rasterized pixels (after any low-resolution reduction): the size the
+   * page was fitted at, which the line alone would not choose. font_pixels
+   * still selects the low-resolution scale. */
+  int raster_font_pixels;
+  /* Mosaic blocks of a line drawn over its page must fall where the page's
+   * blocks fell. When set, a block boundary passes through bitmap coordinate
+   * (pixelation_grid_x, pixelation_grid_y), in output pixels relative to the
+   * uncropped layout origin, and the surface is padded out to whole blocks
+   * (see ArTextSurface.origin_x). No effect without an active mosaic. */
+  bool align_pixelation_grid;
+  int pixelation_grid_x;
+  int pixelation_grid_y;
 } ArTextRasterRequest;
 
 typedef struct ArTextRevealCluster {
@@ -158,6 +173,13 @@ typedef struct ArTextBitmap {
    * of a cropped single label. Subsequent auto paragraphs may differ and are
    * aligned internally by the backend. Auto means not supplied by a port. */
   ArTextDirection paragraph_direction;
+  /* Size this bitmap was rasterized at after fitting, or zero when the
+   * backend does not report it. */
+  int font_pixels;
+  /* Blank columns and rows whitespace cropping removed from the left and top
+   * of the laid-out text, so the layout origin is (-crop_left, -crop_top). */
+  int crop_left;
+  int crop_top;
 } ArTextBitmap;
 
 /* Why a rasterization failed, so a caller can tell "this request can never

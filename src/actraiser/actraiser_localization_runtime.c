@@ -500,13 +500,17 @@ static void ValueResolver(const ActRaiserLocalizationValues *values,
   };
 }
 
+/* The typed name is deliberately left out. The composed bytes already carry
+ * it wherever it is drawn, and a revision that changed with every key press
+ * would give the unchanged keyboard around the name a new identity too, so it
+ * could never be reused while only the name line is rebuilt. */
 static uint64_t NameEntrySourceRevision(uint64_t source_revision) {
   uint64_t revision = DeterministicHash_Fnv1a64(
       DETERMINISTIC_HASH_FNV1A64_OFFSET,
       &source_revision, sizeof(source_revision));
   revision = DeterministicHash_Fnv1a64(
-      revision, &s_runtime.name_tracker.revision,
-      sizeof(s_runtime.name_tracker.revision));
+      revision, &s_runtime.name_tracker.keyboard_page,
+      sizeof(s_runtime.name_tracker.keyboard_page));
   return revision ? revision : 1u;
 }
 

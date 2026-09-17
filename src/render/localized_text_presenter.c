@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "localization/enhanced_text_settings.h"
+#include "localization/unicode_grapheme.h"
 #include "render/localized_text_layout.h"
 #include "render/text_cell_composite.h"
 #include "deterministic_hash.h"
@@ -60,6 +61,10 @@ typedef struct LocalizedTextPresenterState {
   unsigned next_reported_error;
   ReportPlan reports[kReportPlanCapacity];
   unsigned next_report;
+  /* A page with its live line blanked, and that page's value spans (see
+   * PrepareLiveLinePage). */
+  char live_line_page[kArLocalizationFrameTextCapacity];
+  ArTextBidiSpans live_line_spans;
 } LocalizedTextPresenterState;
 
 static LocalizedTextPresenterState s_presenter;
@@ -1032,6 +1037,478 @@ static void AppendLabelFrame(ArLocalizedPreparedFrame *prepared,
   prepared->decoration_count += 2;
 }
 
+/* A keyboard's native rows were a fixed cell grid. Proportional glyphs give
+ * every row its own width, so without this the columns drift apart from row
+ * to row and the last key of the widest row ends up against the window frame.
+ * Only placement is regularized: the surface was shaped in one pass, so every
+ * key keeps the same glyph size. Returns the offset of the surface's shifts in
+ * the frame's pool, or -1 when its text flows. */
+static int32_t PrepareKeyShifts(
+    const ArLocalizationTextSnapshot *snapshot, const ArTextCellRecord *record,
+    ArRenderRectI bounds, ArRenderRectI destination,
+    const ArTextSurface *surface, const char *utf8, size_t utf8_bytes,
+    ArLocalizedPreparedFrame *prepared, int *key_pitch_out) {
+  /* Native pitch, not the claim divided by the key count: the claim can be
+   * wider than the keyboard, and dividing it would spread the keys past where
+   * the game put them and crowd the last one against the frame. */
+  const int key_pitch = snapshot->key_cell_columns && record->region.columns
+      ? bounds.w * (int)snapshot->key_cell_columns /
+            (int)record->region.columns
+      : 0;
+  *key_pitch_out = key_pitch;
+  /* The glyph occupies the last native cell of the key and the cells before
+   * it are the selector's room, so its centre sits half a cell in from the
+   * key's trailing edge. Derived from the stated cell count rather than
+   * written as three quarters, which is only the same thing while a key is two
+   * cells wide. */
+  const int cells = snapshot->key_cell_columns;
+  const int first_key_center = (bounds.x - destination.x) +
+      (cells ? key_pitch * (2 * cells - 1) / (2 * cells) : 0);
+  if (!snapshot->key_columns || !snapshot->key_trailing_lines ||
+      key_pitch <= 0 ||
+      surface->reveal_cluster_count >
+          kArLocalizedPreparedClusterShiftCapacity -
+              prepared->cluster_shift_count ||
+      !ArLocalizedTextLayout_KeyCellShifts(
+          surface, utf8, utf8_bytes, snapshot->key_separator,
+          snapshot->key_separator_bytes, snapshot->key_columns,
+          snapshot->key_trailing_lines, first_key_center, key_pitch,
+          &prepared->cluster_shifts[prepared->cluster_shift_count],
+          kArLocalizedPreparedClusterShiftCapacity -
+              prepared->cluster_shift_count))
+    return -1;
+  const int32_t offset = (int32_t)prepared->cluster_shift_count;
+  prepared->cluster_shift_count += surface->reveal_cluster_count;
+  return offset;
+}
+
+/* The page line a hard line starting at `offset` was laid out on. Each
+ * cluster records its line, and every line feed after the last cluster before
+ * `offset` starts exactly one more; line feeds are never inside a cluster. */
+static int LineIndexAt(const ArTextSurface *surface, const char *utf8,
+                       size_t offset) {
+  size_t from = 0;
+  int line = 0;
+  for (size_t index = 0; index < surface->reveal_cluster_count; ++index) {
+    const ArTextRevealCluster *cluster = &surface->reveal_clusters[index];
+    if (cluster->end_utf8_byte > offset) break;
+    from = cluster->end_utf8_byte;
+    line = cluster->line_index;
+  }
+  for (size_t at = from; at < offset; ++at) line += utf8[at] == '\n';
+  return line;
+}
+
+/* Whether a grapheme is white space only: an empty field cell, which puts no
+ * ink on screen and needs no surface of its own. */
+static bool BlankGrapheme(const char *utf8, size_t bytes) {
+  for (size_t offset = 0; offset < bytes;) {
+    uint32_t scalar = 0;
+    if (!ArUnicode_DecodeScalar(utf8, bytes, offset, &scalar, &offset))
+      return false;
+    if (scalar != ' ' && scalar != 0xa0 && scalar != 0x1680 &&
+        !(scalar >= 0x2000 && scalar <= 0x200a) && scalar != 0x202f &&
+        scalar != 0x205f && scalar != 0x3000)
+      return false;
+  }
+  return true;
+}
+
+/* `value` moved to the nearest multiple of `quantum`: a surface placed at a
+ * multiple of the page's low-resolution scale or mosaic block from the page's
+ * own origin keeps its pixels on the page's grid. */
+static int NearestMultiple(int value, int quantum) {
+  if (quantum <= 1) return value;
+  const int64_t shifted = (int64_t)value + quantum / 2;
+  int64_t multiple = shifted / quantum;
+  if (shifted % quantum < 0) --multiple;
+  return (int)(multiple * quantum);
+}
+
+/* The width of one entry-field cell: an em of the page's fitted type, widened
+ * when the widest key below (shading included) would not leave neighbours a
+ * shadow's breadth apart, and rounded up to whole grid steps so every cell
+ * starts on the page's pixel grid. */
+static int FieldCellPitch(const ArLocalizationTextSnapshot *snapshot,
+                          const ArTextSurface *page, int quantum) {
+  const int em = page->raster_font_pixels * page->raster_scale;
+  int widest = 0;
+  if (snapshot->key_trailing_lines && page->cluster_ink_bounds) {
+    int last_line = -1;
+    for (size_t index = 0; index < page->reveal_cluster_count; ++index)
+      if (page->reveal_clusters[index].line_index > last_line)
+        last_line = page->reveal_clusters[index].line_index;
+    const int first_keyed = last_line + 1 - (int)snapshot->key_trailing_lines;
+    for (size_t index = 0; index < page->reveal_cluster_count; ++index)
+      if (page->reveal_clusters[index].line_index >= first_keyed &&
+          page->cluster_ink_bounds[index].w > widest)
+        widest = page->cluster_ink_bounds[index].w;
+  }
+  int pitch = widest + (em + 4) / 8;
+  if (pitch < em) pitch = em;
+  if (quantum > 1) pitch = (pitch + quantum - 1) / quantum * quantum;
+  return pitch;
+}
+
+/* How a live line was laid out: one surface for an ordinary line, or one per
+ * inked cell of an entry field. */
+typedef struct LiveLineLayout {
+  ArLocalizedPreparedText texts[kArLocalizationFrameLiveLineMaximumCells];
+  uint8_t text_count;
+  /* Entry fields only: each cell's grapheme end within the line, the cell
+   * width and the field's left edge. */
+  size_t grapheme_ends[kArLocalizationFrameLiveLineMaximumCells];
+  int pitch;
+  int field_x;
+} LiveLineLayout;
+
+static bool SurfaceMatchesPage(const ArTextSurface *surface,
+                               const ArTextSurface *page) {
+  return surface->raster_font_pixels == page->raster_font_pixels &&
+      surface->raster_scale == page->raster_scale &&
+      surface->mosaic_block == page->mosaic_block &&
+      surface->line_advance == page->line_advance &&
+      surface->descent == page->descent &&
+      surface->paragraph_direction != kArTextDirection_RightToLeft;
+}
+
+/* An entry field (see ArLocalizationTextSnapshot.live_line_cells): every
+ * grapheme is rasterized alone -- so nothing joins or kerns -- and centred in
+ * its own cell. Each surface is keyed by its grapheme alone, so a letter
+ * typed anywhere in the field before costs no rasterization when it returns. */
+static bool PrepareFieldCells(
+    ArRenderDevice *device, const ArLocalizationTextSnapshot *snapshot,
+    const char *line, size_t line_bytes, size_t line_start,
+    const ArTextRasterRequest *request, const ArTextSurface *page,
+    ArRenderRectI page_destination, int line_top, LiveLineLayout *layout) {
+  enum { kCellSpanCapacity = 8 };
+  const int quantum =
+      page->mosaic_block > 1 ? page->mosaic_block : page->raster_scale;
+  layout->pitch = FieldCellPitch(snapshot, page, quantum);
+  layout->field_x = page_destination.x + page->origin_x;
+  const int line_y = page_destination.y + page->origin_y + line_top;
+  size_t offset = 0;
+  uint8_t cell = 0;
+  while (offset < line_bytes) {
+    size_t next = 0;
+    if (cell >= snapshot->live_line_cells ||
+        !ArUnicodeGrapheme_Next(line, line_bytes, offset, NULL, &next) ||
+        next <= offset || next > line_bytes)
+      return false;
+    layout->grapheme_ends[cell] = next;
+    if (!BlankGrapheme(line + offset, next - offset)) {
+      /* The value spans over this grapheme, as its own text sees them. */
+      ArTextBidiSpan spans[kCellSpanCapacity];
+      size_t span_count = 0;
+      const size_t first = line_start + offset, last = line_start + next;
+      for (size_t index = 0; index < request->bidi_span_count; ++index) {
+        const ArTextBidiSpan span = request->bidi_spans[index];
+        if (span.end <= first || span.start >= last) continue;
+        if (span_count == kCellSpanCapacity) return false;
+        spans[span_count++] = (ArTextBidiSpan){
+            (span.start > first ? span.start : (uint32_t)first) - (uint32_t)first,
+            (span.end < last ? span.end : (uint32_t)last) - (uint32_t)first,
+            span.direction};
+      }
+      ArTextRasterRequest cell_request = *request;
+      cell_request.utf8 = line + offset;
+      cell_request.utf8_bytes = next - offset;
+      cell_request.bidi_spans = span_count ? spans : NULL;
+      cell_request.bidi_span_count = span_count;
+      /* One grapheme never wraps, and a wrapping layout is as wide as its
+       * box: without wrapping the surface is the letter's own size. Cropping
+       * would move its origin by the letter's blank edge. */
+      cell_request.flags &= ~(kArTextRasterFlag_CropHorizontalWhitespace |
+                              kArTextRasterFlag_WrapWords |
+                              kArTextRasterFlag_PreserveHardBreaks);
+      cell_request.raster_font_pixels = page->raster_font_pixels;
+      if (page->mosaic_block > 1) {
+        /* Rows follow the page's grid; the cell's column is snapped to it
+         * once the letter's width is known. */
+        cell_request.align_pixelation_grid = true;
+        cell_request.pixelation_grid_y = -page->origin_y - line_top;
+      }
+      ArTextSurface surface;
+      char error[kArTextRasterErrorCapacity] = {0};
+      if (!ArTextSurfaceCache_Acquire(
+              &s_presenter.cache, device,
+              ArTextBackendInstance_Get(&s_presenter.instance), &cell_request,
+              &surface, error, sizeof(error)) ||
+          !SurfaceMatchesPage(&surface, page) || !surface.reveal_cluster_count)
+        return false;
+      /* Centre the letterform itself, not its shading or advance. */
+      int left = surface.reveal_clusters[0].x;
+      int right = left + surface.reveal_clusters[0].width;
+      for (size_t index = 0; index < surface.reveal_cluster_count; ++index) {
+        const ArTextRevealCluster *cluster = &surface.reveal_clusters[index];
+        if (cluster->line_index != 0) return false;
+        if (cluster->x < left) left = cluster->x;
+        if (cluster->x + cluster->width > right) right = cluster->x + cluster->width;
+      }
+      const int cell_left = layout->field_x + (int)cell * layout->pitch;
+      const int centred = cell_left + (layout->pitch - (right - left)) / 2 - left;
+      /* A glyph taller than the font's ascent pushes its own text's line
+       * down; lift it back so every cell shares one baseline. */
+      const int drop = surface.reveal_clusters[0].y - surface.origin_y;
+      layout->texts[layout->text_count++] = (ArLocalizedPreparedText){
+          .surface = surface,
+          .destination = {
+              page_destination.x +
+                  NearestMultiple(centred - page_destination.x, quantum),
+              line_y - surface.origin_y - NearestMultiple(drop, quantum),
+              surface.width, surface.height},
+          .revealed_cluster_count = (uint32_t)surface.reveal_cluster_count,
+          .cluster_count = (uint32_t)surface.reveal_cluster_count,
+          .cluster_shift_offset = -1,
+      };
+    }
+    offset = next;
+    ++cell;
+  }
+  return cell == snapshot->live_line_cells;
+}
+
+/* An ordinary live line: the line alone, drawn exactly where the whole page
+ * would have drawn it. It lays out as it did inside the page -- each hard line
+ * is its own bidi paragraph, shaped and placed from its own glyphs -- once it
+ * is rasterized at the page's fitted size, starts at the page's layout origin
+ * and, under mosaic, samples the page's blocks. */
+static bool PrepareLiveLineAlone(
+    ArRenderDevice *device, const char *line, size_t line_bytes,
+    size_t line_start, const ArTextRasterRequest *request,
+    const ArTextSurface *page, ArRenderRectI page_destination, int line_top,
+    LiveLineLayout *layout) {
+  ArTextRasterRequest line_request = *request;
+  line_request.utf8 = line;
+  line_request.utf8_bytes = line_bytes;
+  /* The page's own spans, viewed from the line's first byte. */
+  line_request.bidi_source_offset = (uint32_t)line_start;
+  /* Cropping would drop a blank line, which has no ink to keep. Wrapping stays
+   * on, so a line too long for the page still breaks and is refused below. */
+  line_request.flags &= ~kArTextRasterFlag_CropHorizontalWhitespace;
+  line_request.raster_font_pixels = page->raster_font_pixels;
+  if (page->mosaic_block > 1) {
+    /* The page's block boundaries, in the line's own layout coordinates. */
+    line_request.align_pixelation_grid = true;
+    line_request.pixelation_grid_x = -page->origin_x;
+    line_request.pixelation_grid_y = -page->origin_y - line_top;
+  }
+  ArTextSurface surface;
+  char error[kArTextRasterErrorCapacity] = {0};
+  if (!ArTextSurfaceCache_Acquire(
+          &s_presenter.cache, device,
+          ArTextBackendInstance_Get(&s_presenter.instance), &line_request,
+          &surface, error, sizeof(error)) ||
+      !SurfaceMatchesPage(&surface, page))
+    return false;
+  for (size_t index = 0; index < surface.reveal_cluster_count; ++index)
+    if (surface.reveal_clusters[index].line_index != 0) return false;
+  /* Both layouts start from the same origin; the line sits `line_top` down. */
+  layout->texts[layout->text_count++] = (ArLocalizedPreparedText){
+      .surface = surface,
+      .destination = {
+          page_destination.x + page->origin_x - surface.origin_x,
+          page_destination.y + page->origin_y + line_top - surface.origin_y,
+          surface.width, surface.height},
+      .revealed_cluster_count = (uint32_t)surface.reveal_cluster_count,
+      .cluster_count = (uint32_t)surface.reveal_cluster_count,
+      .cluster_shift_offset = -1,
+  };
+  return true;
+}
+
+/* Rasterizes a page whose live line (a name being typed) changes on its own as
+ * the page with that line blanked, which stays cached while only the line
+ * changes, plus the line: alone, or as an entry field of fixed cells. Every
+ * other line keeps its placement, key shifts and objects.
+ *
+ * The blank is an inkless figure space inside the line's own value spans, so
+ * the page keeps the layout engine and line count the whole text had, and an
+ * ordinary line is drawn exactly as the whole text would have drawn it while
+ * its ink stays within the other lines' extent, which a name above its
+ * keyboard does.
+ *
+ * False leaves `prepared` as it was, for the caller to rasterize the page
+ * whole: a layout this cannot reproduce (right-to-left paragraphs, a value
+ * span crossing the line's edge or, for an ordinary line, no value span at
+ * all; partial reveal, an accent, a live last line), or any failure. */
+static bool PrepareLiveLinePage(
+    ArRenderDevice *device, const ArLocalizationFrame *frame,
+    const ArLocalizationTextSnapshot *snapshot, const ArTextCellRecord *record,
+    const char *utf8, size_t utf8_bytes, const ArTextRasterRequest *request,
+    ArRenderRectI bounds, uint32_t surface_id, unsigned bg3_map_width_tiles,
+    unsigned bg3_map_height_tiles, uint16_t bg3_hscroll, uint16_t bg3_vscroll,
+    unsigned visible_width, unsigned visible_height,
+    const HudPresentationChunk *chunks, size_t chunk_count,
+    ArLocalizedPreparedFrame *prepared) {
+  static const char kBlank[] = "\xE2\x80\x87"; /* U+2007 FIGURE SPACE */
+  const size_t blank_bytes = sizeof(kBlank) - 1u;
+  const size_t line_start = snapshot->live_line_utf8_offset;
+  const size_t line_bytes = snapshot->live_line_utf8_bytes;
+  const size_t line_end = line_start + line_bytes;
+  const uint8_t cells = snapshot->live_line_cells;
+  if (!line_bytes || line_end >= utf8_bytes ||
+      utf8_bytes - line_bytes + blank_bytes >
+          sizeof(s_presenter.live_line_page) ||
+      cells > kArLocalizationFrameLiveLineMaximumCells ||
+      request->bidi_source_offset ||
+      request->bidi_span_count > kArTextMaximumBidiSpans ||
+      snapshot->language.direction == kArTextDirection_RightToLeft ||
+      request->alignment != kArTextHorizontalAlignment_Leading ||
+      snapshot->revealed_cluster_count < snapshot->cluster_count ||
+      request->accent_end_utf8_byte ||
+      snapshot->inline_object_offset > frame->inline_object_count ||
+      snapshot->inline_object_count >
+          frame->inline_object_count - snapshot->inline_object_offset ||
+      snapshot->inline_object_count >
+          kArLocalizationFrameInlineObjectCapacity -
+              prepared->inline_object_count ||
+      prepared->text_count + 1u + (cells ? cells : 1u) >
+          kArLocalizedPreparedTextCapacity)
+    return false;
+  for (size_t index = 0; index < request->bidi_span_count; ++index) {
+    const ArTextBidiSpan span = request->bidi_spans[index];
+    if (span.start < line_end && span.end > line_start &&
+        (span.start < line_start || span.end > line_end))
+      return false;
+  }
+
+  /* The blank keeps the line and its line feed, so every later line keeps its
+   * index, and so its place. */
+  char *const page = s_presenter.live_line_page;
+  memcpy(page, utf8, line_start);
+  memcpy(page + line_start, kBlank, blank_bytes);
+  memcpy(page + line_start + blank_bytes, utf8 + line_end,
+         utf8_bytes - line_end);
+  const size_t page_bytes = utf8_bytes - line_bytes + blank_bytes;
+  ArTextBidiSpans *const spans = &s_presenter.live_line_spans;
+  spans->count = (uint16_t)request->bidi_span_count;
+  if (spans->count)
+    memcpy(spans->spans, request->bidi_spans,
+           spans->count * sizeof(spans->spans[0]));
+  /* A value span covering the whole line (the typed name) now covers the
+   * blank. A backend chooses its layout engine from the text itself when no
+   * span remains, and the whole text may have chosen differently, so an
+   * ordinary line is only split while a span keeps both on the same one. An
+   * entry field never matched the whole text, so it has nothing to keep. */
+  ArTextBidiSpans_Edit(spans, (uint32_t)line_start, (uint32_t)line_bytes,
+                       (uint32_t)blank_bytes);
+  if (!spans->count && !cells) return false;
+  ArTextRasterRequest page_request = *request;
+  page_request.utf8 = page;
+  page_request.utf8_bytes = page_bytes;
+  page_request.bidi_spans = spans->count ? spans->spans : NULL;
+  page_request.bidi_span_count = spans->count;
+  ArTextSurface page_surface;
+  char error[kArTextRasterErrorCapacity] = {0};
+  if (!ArTextSurfaceCache_Acquire(
+          &s_presenter.cache, device,
+          ArTextBackendInstance_Get(&s_presenter.instance), &page_request,
+          &page_surface, error, sizeof(error)) ||
+      !page_surface.raster_font_pixels ||
+      page_surface.paragraph_direction == kArTextDirection_RightToLeft)
+    return false;
+  const int line_index = LineIndexAt(&page_surface, page, line_start);
+  const int line_top = line_index * page_surface.line_advance;
+  const ArRenderRectI page_destination = {
+      bounds.x + (bounds.w - page_surface.width) / 2, bounds.y,
+      page_surface.width, page_surface.height,
+  };
+  LiveLineLayout layout;
+  layout.text_count = 0;
+  if (cells ? !PrepareFieldCells(device, snapshot, utf8 + line_start,
+                                 line_bytes, line_start, request,
+                                 &page_surface, page_destination, line_top,
+                                 &layout)
+            : !PrepareLiveLineAlone(device, utf8 + line_start, line_bytes,
+                                    line_start, request, &page_surface,
+                                    page_destination, line_top, &layout))
+    return false;
+
+  const size_t first_shift = prepared->cluster_shift_count;
+  int key_pitch = 0;
+  const int32_t cluster_shift_offset = PrepareKeyShifts(
+      snapshot, record, bounds, page_destination, &page_surface, page,
+      page_bytes, prepared, &key_pitch);
+
+  ArLocalizedPreparedInlineObject objects[kArLocalizationFrameInlineObjectCapacity];
+  uint8_t object_count = 0;
+  for (uint8_t index = 0; index < snapshot->inline_object_count; ++index) {
+    const ArLocalizationInlineObjectSnapshot *object =
+        &frame->inline_objects[snapshot->inline_object_offset + index];
+    const uint32_t end = object->end_utf8_byte;
+    bool placed = false;
+    if (end > line_start && end <= line_end && cells) {
+      /* A field's underlines mark its cells, not the letters in them. */
+      uint8_t cell = 0;
+      while (cell < cells && layout.grapheme_ends[cell] != end - line_start)
+        ++cell;
+      if (cell < cells &&
+          object->kind == kArLocalizationInlineObject_NameFieldUnderline) {
+        const ArTextRevealCluster slot = {
+            .end_utf8_byte = end, .line_index = line_index,
+            .x = layout.field_x + (int)cell * layout.pitch - page_destination.x,
+            .width = layout.pitch, .height = page_surface.line_advance};
+        objects[object_count] = (ArLocalizedPreparedInlineObject){
+            .kind = object->kind};
+        placed = ArLocalizedTextLayout_NameUnderline(
+            &page_surface, &slot, page_destination,
+            &objects[object_count].destination);
+      }
+    } else if (end > line_start && end <= line_end) {
+      const ArLocalizedPreparedText *line = &layout.texts[0];
+      const ArTextRevealCluster *cluster = FindRevealCluster(
+          &line->surface, end - (uint32_t)line_start, NULL);
+      placed = cluster && ArLocalizedTextArtwork_PrepareInlineObject(
+          device, frame, snapshot, object->kind, &line->surface,
+          utf8 + line_start, line_bytes, cluster, line->destination, 0,
+          &objects[object_count]);
+    } else {
+      size_t reveal_index = 0;
+      const ArTextRevealCluster *cluster = FindRevealCluster(
+          &page_surface,
+          end > line_end ? end - (uint32_t)line_bytes + (uint32_t)blank_bytes
+                         : end,
+          &reveal_index);
+      ArRenderRectI object_destination = page_destination;
+      if (cluster && cluster_shift_offset >= 0)
+        object_destination.x += prepared->cluster_shifts[
+            (size_t)cluster_shift_offset + reveal_index];
+      placed = cluster && ArLocalizedTextArtwork_PrepareInlineObject(
+          device, frame, snapshot, object->kind, &page_surface, page,
+          page_bytes, cluster, object_destination,
+          cluster_shift_offset >= 0 ? key_pitch / 2 : 0,
+          &objects[object_count]);
+    }
+    if (!placed) {
+      prepared->cluster_shift_count = first_shift;
+      return false;
+    }
+    ++object_count;
+  }
+  if (!PrepareIndicators(device, frame, surface_id, bg3_map_width_tiles,
+                         bg3_map_height_tiles, bg3_hscroll, bg3_vscroll,
+                         visible_width, visible_height, chunks, chunk_count,
+                         prepared)) {
+    prepared->cluster_shift_count = first_shift;
+    return false;
+  }
+  prepared->texts[prepared->text_count++] = (ArLocalizedPreparedText){
+      .surface = page_surface,
+      .destination = page_destination,
+      .revealed_cluster_count = snapshot->revealed_cluster_count,
+      .cluster_count = snapshot->cluster_count,
+      .cluster_shift_offset = cluster_shift_offset,
+  };
+  memcpy(&prepared->texts[prepared->text_count], layout.texts,
+         (size_t)layout.text_count * sizeof(layout.texts[0]));
+  prepared->text_count += layout.text_count;
+  memcpy(&prepared->inline_objects[prepared->inline_object_count], objects,
+         (size_t)object_count * sizeof(objects[0]));
+  prepared->inline_object_count += object_count;
+  return true;
+}
+
 void ArLocalizedTextPresenter_Prepare(
     ArRenderDevice *device, const ArLocalizationFrame *frame,
     bool bg3_state_valid, uint16_t bg3_tilemap_base_words,
@@ -1268,6 +1745,16 @@ void ArLocalizedTextPresenter_Prepare(
         request.minimum_font_pixels = request.font_pixels;
         request.flags &= ~kArTextRasterFlag_CropHorizontalWhitespace;
       }
+      if (!scrolling && !single_line && snapshot->live_line_utf8_bytes &&
+          PrepareLiveLinePage(device, frame, snapshot, record, utf8, utf8_bytes,
+                              &request, bounds, record->surface_id,
+                              bg3_map_width_tiles, bg3_map_height_tiles,
+                              bg3_hscroll, bg3_vscroll, visible_width,
+                              visible_height, chunks, chunk_count, prepared)) {
+        memcpy(&prepared->masks[prepared->mask_count], masks, mask_count * sizeof(masks[0]));
+        prepared->mask_count += mask_count;
+        continue;
+      }
       ArTextSurface surface;
       char error[kArTextRasterErrorCapacity] = {0};
       if (!ArTextSurfaceCache_Acquire(&s_presenter.cache, device,
@@ -1294,42 +1781,10 @@ void ArLocalizedTextPresenter_Prepare(
           surface.width,
           surface.height,
       };
-      /* A keyboard's native rows were a fixed cell grid. Proportional glyphs
-       * give every row its own width, so without this the columns drift apart
-       * from row to row and the last key of the widest row ends up against the
-       * window frame. Only placement is regularized: the surface above was
-       * shaped in one pass, so every key keeps the same glyph size. */
-      int32_t cluster_shift_offset = -1;
-      /* Native pitch, not the claim divided by the key count: the claim can be
-       * wider than the keyboard, and dividing it would spread the keys past
-       * where the game put them and crowd the last one against the frame. */
-      const int key_pitch = snapshot->key_cell_columns && record->region.columns
-          ? bounds.w * (int)snapshot->key_cell_columns /
-                (int)record->region.columns
-          : 0;
-      /* The glyph occupies the last native cell of the key and the cells
-       * before it are the selector's room, so its centre sits half a cell in
-       * from the key's trailing edge. Derived from the stated cell count
-       * rather than written as three quarters, which is only the same thing
-       * while a key is two cells wide. */
-      const int cells = snapshot->key_cell_columns;
-      const int first_key_center = (bounds.x - destination.x) +
-          (cells ? key_pitch * (2 * cells - 1) / (2 * cells) : 0);
-      if (snapshot->key_columns && snapshot->key_trailing_lines &&
-          key_pitch > 0 &&
-          surface.reveal_cluster_count <=
-              kArLocalizedPreparedClusterShiftCapacity -
-                  prepared->cluster_shift_count &&
-          ArLocalizedTextLayout_KeyCellShifts(
-              &surface, utf8, utf8_bytes, snapshot->key_separator,
-              snapshot->key_separator_bytes, snapshot->key_columns,
-              snapshot->key_trailing_lines, first_key_center, key_pitch,
-              &prepared->cluster_shifts[prepared->cluster_shift_count],
-              kArLocalizedPreparedClusterShiftCapacity -
-                  prepared->cluster_shift_count)) {
-        cluster_shift_offset = (int32_t)prepared->cluster_shift_count;
-        prepared->cluster_shift_count += surface.reveal_cluster_count;
-      }
+      int key_pitch = 0;
+      const int32_t cluster_shift_offset = PrepareKeyShifts(
+          snapshot, record, bounds, destination, &surface, utf8, utf8_bytes,
+          prepared, &key_pitch);
 
       ArLocalizedPreparedInlineObject prepared_objects[kArLocalizationFrameInlineObjectCapacity];
       uint8_t prepared_object_count = 0;

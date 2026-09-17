@@ -474,6 +474,14 @@ if(BUILD_TESTING)
     target_include_directories(actraiser_text_backend_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src)
     add_test(NAME actraiser_text_backend COMMAND actraiser_text_backend_test)
+
+    add_executable(actraiser_text_bitmap_effects_test
+        tests/text_bitmap_effects_test.c
+        src/localization/text_rasterizer.c)
+    target_include_directories(actraiser_text_bitmap_effects_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src)
+    add_test(NAME actraiser_text_bitmap_effects
+        COMMAND actraiser_text_bitmap_effects_test)
     target_link_libraries(actraiser_text_backend_test PRIVATE actraiser_font_resources)
 
     add_executable(actraiser_font_resource_test tests/font_resource_test.c)
@@ -577,6 +585,34 @@ if(BUILD_TESTING)
             SDL3::SDL3 SDL3_ttf::SDL3_ttf actraiser_bidi_text actraiser_math actraiser_font_resources)
         add_test(NAME actraiser_localized_text_presenter
             COMMAND actraiser_localized_text_presenter_test)
+
+        add_executable(actraiser_localized_text_live_line_test
+            tests/localized_text_live_line_test.c
+            src/render/hud_layout.c
+            src/localization/text_rasterizer.c
+            src/localization/unicode_grapheme.c
+            src/localization/text_backend.c
+            src/localization/localization_frame.c
+            src/localization/enhanced_text_settings.c
+            src/render/text_surface_cache.c
+            src/render/localized_text_layout.c
+            src/render/localized_text_presenter.c
+            src/render/localized_text_draw.c
+            src/render/localized_text_artwork.c
+            src/localization/text_cell_record.c
+            src/render/text_cell_composite.c
+            src/render/render_device.c
+            src/platform/sdl/text_rasterizer_sdl.c
+            src/performance_metrics.c)
+        target_include_directories(actraiser_localized_text_live_line_test PRIVATE
+            ${CMAKE_SOURCE_DIR}/src)
+        target_compile_definitions(actraiser_localized_text_live_line_test PRIVATE
+            AR_HAS_SDL3_TTF=1
+            "AR_TEST_FONT_PATH=\"${CMAKE_SOURCE_DIR}/game-assets/fonts/noto/NotoSans-SemiCondensedExtraBold.ttf\"")
+        target_link_libraries(actraiser_localized_text_live_line_test PRIVATE
+            SDL3::SDL3 SDL3_ttf::SDL3_ttf actraiser_bidi_text actraiser_math actraiser_font_resources)
+        add_test(NAME actraiser_localized_text_live_line
+            COMMAND actraiser_localized_text_live_line_test)
     endif()
 
     # The portable contract a frame snapshot needs on its own: the frame, the

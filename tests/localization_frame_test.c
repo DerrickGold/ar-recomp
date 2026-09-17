@@ -297,6 +297,63 @@ int main(void) {
         table_frame.snapshots[1].key_separator[0] == ' ');
   CHECK(!ArLocalizationFrame_SetKeySeparator(&table_frame, "", 0));
   CHECK(!ArLocalizationFrame_SetKeySeparator(&table_frame, "        ", 8));
+
+  /* A live line is one whole hard line of the surface just published: the
+   * renderer cuts it out of the page, so a range that splits a line or takes
+   * its line feed with it would move the lines around it. */
+  {
+    static ArLocalizationFrame live;
+    ArLocalizationFrame_Reset(&live);
+    CHECK(ArLocalizationFrame_SetFont(&live, "en", "test.font", UINT64_C(1), 7,
+                                      &frame.settings));
+    CHECK(!ArLocalizationFrame_SetLiveLine(&live, 0, 1, 0));
+    static const char page[] = "Prompt\nNAME\n\nA B";
+    CHECK(ArLocalizationFrame_AddText(
+        &live, 5, destination, (ArTextCellRegion){3, 7, 27, 16},
+        page, sizeof(page) - 1, sizeof(page) - 1, sizeof(page) - 1, 9,
+        kArTextDirection_LeftToRight, 8, NULL, 0));
+    CHECK(live.snapshots[0].live_line_utf8_bytes == 0);
+    CHECK(ArLocalizationFrame_SetLiveLine(&live, 7, 4, 0));
+    CHECK(live.snapshots[0].live_line_utf8_offset == 7 &&
+          live.snapshots[0].live_line_utf8_bytes == 4);
+    CHECK(ArLocalizationFrame_IsValid(&live));
+    static ArLocalizationFrame live_before;
+    live_before = live;
+    CHECK(!ArLocalizationFrame_SetLiveLine(&live, 8, 3, 0));  /* starts inside */
+    CHECK(!ArLocalizationFrame_SetLiveLine(&live, 7, 3, 0));  /* ends inside */
+    CHECK(!ArLocalizationFrame_SetLiveLine(&live, 7, 5, 0));  /* takes the break */
+    CHECK(!ArLocalizationFrame_SetLiveLine(&live, 12, 0, 0)); /* blank line */
+    CHECK(!ArLocalizationFrame_SetLiveLine(&live, 13, 4, 0)); /* past the text */
+    CHECK(!memcmp(&live, &live_before, sizeof(live)));
+    CHECK(!ArLocalizationFrame_SetLiveLine(
+        &live, 7, 4, kArLocalizationFrameLiveLineMaximumCells + 1));
+    CHECK(!memcmp(&live, &live_before, sizeof(live)));
+    CHECK(ArLocalizationFrame_SetLiveLine(&live, 0, 6, 0));
+    CHECK(ArLocalizationFrame_SetLiveLine(&live, 13, 3, 0));
+    CHECK(!live.snapshots[0].live_line_cells);
+    /* An entry field states its cells; the renderer checks them against the
+     * line's graphemes. */
+    CHECK(ArLocalizationFrame_SetLiveLine(&live, 7, 4, 4));
+    CHECK(live.snapshots[0].live_line_cells == 4);
+    CHECK(ArLocalizationFrame_IsValid(&live));
+    static ArLocalizationFrame forged;
+    forged = live;
+    forged.snapshots[0].live_line_utf8_offset = 14;
+    CHECK(!ArLocalizationFrame_IsValid(&forged));
+    forged = live;
+    forged.snapshots[0].live_line_utf8_bytes = 0;
+    CHECK(!ArLocalizationFrame_IsValid(&forged));
+    forged = live;
+    forged.snapshots[0].live_line_utf8_bytes = 400;
+    CHECK(!ArLocalizationFrame_IsValid(&forged));
+    forged = live;
+    forged.snapshots[0].live_line_cells = kArLocalizationFrameLiveLineMaximumCells + 1;
+    CHECK(!ArLocalizationFrame_IsValid(&forged));
+    forged = live;
+    forged.snapshots[0].live_line_utf8_offset = 0;
+    forged.snapshots[0].live_line_utf8_bytes = 0;
+    CHECK(!ArLocalizationFrame_IsValid(&forged)); /* cells without a line */
+  }
   const ArLocalizationFrame table_before = table_frame;
   CHECK(!ArLocalizationFrame_AddTextWithObjectsAndLayout(
       &table_frame, 8, destination, (ArTextCellRegion){30, 6, 2, 2},
