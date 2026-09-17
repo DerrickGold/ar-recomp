@@ -40,6 +40,7 @@
 #include "present_internal.h"
 #include "render/render_device.h"
 #include "render/render_output.h"
+#include "render/upload_rect_run.h"
 
 #ifndef AR_SIM3D_TERRAIN_ELEVATION
 #define AR_SIM3D_TERRAIN_ELEVATION 0
@@ -1063,6 +1064,18 @@ static void SimGroundMeshCacheSetKey(
   cache->valid = true;
 }
 
+static bool UploadSimCanvasRect(ArRenderRectI rect) {
+  if (!ArRenderDevice_UpdateTexture(
+          &g_render_device, s_sim_canvas_texture, &rect,
+          SimTownCanvas_Pixels() + (size_t)rect.y * kSimTownCanvasPixels +
+              (size_t)rect.x,
+          kSimTownCanvasPixels * (int)sizeof(uint32_t)))
+    return false;
+  Sim3DPerformance_AddUpload(
+      (uint64_t)rect.w * (uint64_t)rect.h * sizeof(uint32_t));
+  return true;
+}
+
 /* Uploaded at the frame-slot handoff, like every other game-thread pixel
  * buffer, and only over the region written since the last upload — a still
  * camera in a quiet town uploads nothing at all. */
@@ -1135,21 +1148,22 @@ void UploadSimTownCanvas(void) {
     return;
   }
   int x = 0, y = 0, w = 0, h = 0;
-  const uint32_t *pixels = SimTownCanvas_Pixels();
-  while (SimTownCanvas_TakeDirtyRect(&x, &y, &w, &h)) {
-    const ArRenderRectI destination = {x, y, w, h};
-    if (!ArRenderDevice_UpdateTexture(
-            &g_render_device, s_sim_canvas_texture, &destination,
-            pixels + (size_t)y * kSimTownCanvasPixels + (size_t)x,
-            kSimTownCanvasPixels * (int)sizeof(uint32_t))) {
-      /* Some earlier dirty rectangles may already have landed. Suppress the
-       * mixed-generation texture until one complete upload succeeds. */
-      s_sim_canvas_uploaded_serial = 0;
-      s_sim_canvas_upload_state = kSimCanvasUpload_RetryFull;
-      break;
-    }
-    Sim3DPerformance_AddUpload(
-      (uint64_t)w * (uint64_t)h * sizeof(uint32_t));
+  /* The canvas buffer is the complete current image, so coalesced rectangles
+   * may re-send clean pixels (upload_rect_run.h). */
+  UploadRectRun run = {0};
+  ArRenderRectI destination;
+  bool uploaded = true;
+  while (uploaded && SimTownCanvas_TakeDirtyRect(&x, &y, &w, &h)) {
+    if (UploadRectRun_Add(&run, (ArRenderRectI){x, y, w, h}, &destination))
+      uploaded = UploadSimCanvasRect(destination);
+  }
+  if (uploaded && UploadRectRun_Finish(&run, &destination))
+    uploaded = UploadSimCanvasRect(destination);
+  if (!uploaded) {
+    /* Some earlier dirty rectangles may already have landed. Suppress the
+     * mixed-generation texture until one complete upload succeeds. */
+    s_sim_canvas_uploaded_serial = 0;
+    s_sim_canvas_upload_state = kSimCanvasUpload_RetryFull;
   }
   if (s_sim_canvas_upload_state == kSimCanvasUpload_Valid)
     s_sim_canvas_uploaded_serial = serial;

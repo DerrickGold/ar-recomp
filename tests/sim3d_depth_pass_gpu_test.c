@@ -113,7 +113,7 @@ static void TestBorrowedSurfaceOverlay(ArRenderDevice *device, SDL_Renderer *ren
 static void TestOrderedSubmission(SDL_Window *window) {
   SDL_unsetenv_unsafe("AR_SDL_GPU_ORDERED");
   ArRenderDevice device = {0};
-  CHECK(ArSdlRenderBackend_CreateForWindow(&device, window));
+  CHECK(ArSdlRenderBackend_CreateForWindow(&device, window, NULL));
   if (!ArRenderDevice_IsReady(&device)) return;
   CHECK(((ArSdlRenderBackend *)device.context)->output_window == window);
   SDL_Renderer *renderer = ArSdlRenderBackend_Renderer(&device);
@@ -226,7 +226,7 @@ static void TestOrderedSubmission(SDL_Window *window) {
   CHECK(!ArRenderDevice_IsReady(&device));
   /* Only an explicit diagnostic zero selects the former window renderer. */
   CHECK(SDL_setenv_unsafe("AR_SDL_GPU_ORDERED", "0", 1) == 0);
-  CHECK(ArSdlRenderBackend_CreateForWindow(&device, window));
+  CHECK(ArSdlRenderBackend_CreateForWindow(&device, window, NULL));
   SDL_unsetenv_unsafe("AR_SDL_GPU_ORDERED");
   CHECK(ArRenderDevice_IsReady(&device));
   if (ArRenderDevice_IsReady(&device)) {

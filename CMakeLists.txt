@@ -892,6 +892,16 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_presentation_upload_mirror
         COMMAND actraiser_presentation_upload_mirror_test)
 
+    add_executable(actraiser_upload_rect_run_test
+        tests/upload_rect_run_test.c
+        src/render/upload_rect_run.c
+    )
+    target_include_directories(actraiser_upload_rect_run_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+    )
+    add_test(NAME actraiser_upload_rect_run
+        COMMAND actraiser_upload_rect_run_test)
+
     add_executable(actraiser_render_device_test
         tests/render_device_test.c
         src/presentation_upload_mirror.c
@@ -1065,6 +1075,7 @@ if(BUILD_TESTING)
         src/sim/sim_background_voxels.c
         src/sim/sim_background_voxel_lod.c
         src/sim/sim_background_voxel_renderer.c
+        src/render/upload_rect_run.c
         src/sim/sim_background_voxel_terrain_depth.c
         src/sim/sim_background_mountain_render.c
         src/platform/sdl/sim_cloud_effect_backend_sdl.c

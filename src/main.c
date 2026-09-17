@@ -1255,6 +1255,47 @@ static void AppBoot_CreatePresentationTextures(void) {
   CreateDioramaTextures();
 }
 
+/* SDL GPU driver name for each GpuBackend. */
+static const char *const kGpuBackendDrivers[kGpuBackend_Count] = {
+  [kGpuBackend_Automatic] = NULL,
+  [kGpuBackend_Direct3D12] = "direct3d12",
+  [kGpuBackend_Vulkan] = "vulkan",
+  [kGpuBackend_Metal] = "metal",
+};
+
+/* Publishes the backends this build can offer and returns the SDL driver to
+ * request, or NULL for SDL's own order. A saved choice this platform does not
+ * offer (a settings.ini carried over from another OS) quietly means Automatic
+ * and is kept for that other machine. */
+static const char *SelectGpuDriver(void) {
+  uint32_t offered = 1u << kGpuBackend_Automatic;
+  for (int backend = kGpuBackend_Automatic + 1; backend < kGpuBackend_Count;
+       ++backend) {
+#if defined(__APPLE__)
+    /* SDL's Apple builds compile Vulkan in (3.4.12 lists "metal vulkan"), but
+     * it needs MoltenVK, which is not shipped; Metal is the native API. */
+    if (backend == kGpuBackend_Vulkan) continue;
+#endif
+    if (ArSdlRenderBackend_HasGpuDriver(kGpuBackendDrivers[backend]))
+      offered |= 1u << backend;
+  }
+  Settings_SetGpuBackendsOffered(offered);
+  const int requested = g_settings.gpu_backend;
+  return Settings_ValueAvailable(Settings_Find("gpu_backend"), requested)
+      ? kGpuBackendDrivers[requested] : NULL;
+}
+
+static void PublishActiveGpuBackend(void) {
+  const char *driver = ArSdlRenderBackend_GpuDriver(&g_render_device);
+  for (int backend = kGpuBackend_Automatic + 1; backend < kGpuBackend_Count;
+       ++backend) {
+    if (driver && !SDL_strcasecmp(driver, kGpuBackendDrivers[backend])) {
+      Settings_SetGpuBackendActive(backend);
+      return;
+    }
+  }
+}
+
 /* SDL init, window, renderer, and every presentation texture. The window/renderer
  * body is skipped for a pure-headless run; a headless_video run takes it with a
  * hidden window so the present path still executes for frame capture.
@@ -1370,8 +1411,9 @@ static int AppBoot_CreateVideo(AppBoot *app) {
     g_gpu_shaders_requested = true;
     g_settings.gpu_shaders_enabled = true;  /* legacy config/UI mirror */
     if (!ArSdlRenderBackend_CreateForWindow(
-            &g_render_device, g_window))
+            &g_render_device, g_window, SelectGpuDriver()))
       Die("SDL GPU render backend creation failed");
+    PublishActiveGpuBackend();
     RenderFeatureMask prepared_features = 0;
     const uint64_t preparation_started = SDL_GetTicks();
     if (!RenderPreparation_Prepare(&g_render_device, &prepared_features))

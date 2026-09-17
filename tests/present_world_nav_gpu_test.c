@@ -3239,7 +3239,7 @@ int main(int argc, char **argv) {
      * before consumption; a legacy Flush-only binding needs a prior present
      * and would hide cold-entry problems behind reference-view warmup. */
     SDL_unsetenv_unsafe("AR_SDL_GPU_ORDERED");
-    if (ArSdlRenderBackend_CreateForWindow(&g_render_device,window))
+    if (ArSdlRenderBackend_CreateForWindow(&g_render_device,window,NULL))
       renderer = ArSdlRenderBackend_Renderer(&g_render_device);
   } else {
     SDL_PropertiesID properties = SDL_CreateProperties();

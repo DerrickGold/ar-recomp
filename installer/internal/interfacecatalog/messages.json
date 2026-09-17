@@ -1349,6 +1349,15 @@
     ]
   },
   {
+    "key": "overlay.value.gpu_backend_active",
+    "text": [
+      "{selected} ({active})",
+      "{selected} ({active})",
+      "{selected} ({active})",
+      "{selected}（{active}）"
+    ]
+  },
+  {
     "key": "setting.display_mode.short.0",
     "text": [
       "4:3 AUTH",
@@ -2750,6 +2759,15 @@
       "Le rendu GPU est requis. Ce réglage ne sert qu'à préserver les anciennes configurations ; les effets restent réglables individuellement.",
       "Der GPU-Renderer ist erforderlich. Diese Einstellung erhält nur ältere Konfigurationen; einzelne Effekte bleiben einstellbar.",
       "GPUレンダラーが必要です。この設定は旧設定ファイルの互換性のために残されています。各効果は個別に設定できます。"
+    ]
+  },
+  {
+    "key": "setting.gpu_backend.help",
+    "text": [
+      "Automatic uses the platform default (Direct3D 12 on Windows). Try another API if the game runs slowly or draws incorrectly on this system. If the chosen API cannot start, Automatic is used instead. Takes effect after restart.",
+      "Automatique utilise l’API par défaut de la plateforme (Direct3D 12 sous Windows). Essayez une autre API si le jeu est lent ou s’affiche mal sur ce système. Si l’API choisie ne peut pas démarrer, Automatique est utilisé à la place. Prend effet après redémarrage.",
+      "Automatisch nutzt die Standard-API der Plattform (Direct3D 12 unter Windows). Probiere eine andere API, wenn das Spiel auf diesem System langsam läuft oder fehlerhaft dargestellt wird. Kann die gewählte API nicht starten, wird stattdessen Automatisch verwendet. Wirksam nach Neustart.",
+      "自動はプラットフォームの標準API（WindowsではDirect3D 12）を使用します。このシステムでゲームの動作が重い、または表示がおかしい場合は、別のAPIを試してください。選択したAPIを起動できない場合は、代わりに自動が使用されます。再起動後に反映されます。"
     ]
   },
   {
@@ -4523,6 +4541,11 @@
   {"key":"setting.action_effect_lighting.label","text":["Action spell lighting","Éclairage des sorts d’action","Zauberlicht im Actionmodus","アクションの魔法照明"]},
   {"key":"setting.action_effect_particles.label","text":["Action spell particles","Particules des sorts d’action","Zauberpartikel im Actionmodus","アクションの魔法粒子"]},
   {"key":"setting.gpu_shaders_enabled.label","text":["GPU shader effects","Effets des shaders GPU","GPU-Shadereffekte","GPUシェーダー効果"]},
+  {"key":"setting.gpu_backend.label","text":["Graphics API","API graphique","Grafik-API","グラフィックスAPI"]},
+  {"key":"setting.gpu_backend.value.0","text":["Automatic","Automatique","Automatisch","自動"]},
+  {"key":"setting.gpu_backend.value.1","text":["Direct3D 12","Direct3D 12","Direct3D 12","Direct3D 12"]},
+  {"key":"setting.gpu_backend.value.2","text":["Vulkan","Vulkan","Vulkan","Vulkan"]},
+  {"key":"setting.gpu_backend.value.3","text":["Metal","Metal","Metal","Metal"]},
   {"key":"setting.gpu_fx_rim.label","text":["Rim lighting","Éclairage des contours","Randbeleuchtung","輪郭の照明"]},
   {"key":"setting.gpu_fx_dof.label","text":["Depth of field","Profondeur de champ","Tiefenschärfe","被写界深度"]},
   {"key":"setting.gpu_fx_edgeaa.label","text":["Edge anti-aliasing","Anticrénelage des contours","Kantenglättung","エッジのアンチエイリアス"]},

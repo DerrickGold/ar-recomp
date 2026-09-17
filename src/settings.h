@@ -63,6 +63,20 @@ typedef enum {
   kRefreshMode_Count,
 } RefreshMode;
 
+/* Graphics API behind SDL's GPU renderer, chosen at startup. Automatic keeps
+ * SDL's own order, which on Windows tries Direct3D 12 before Vulkan. Values
+ * are persisted by label and must keep their meaning. A backend is offered in
+ * the menu only where the platform has more than one to choose between
+ * (Settings_SetGpuBackendsOffered); an unusable choice falls back to
+ * Automatic when the renderer is created. */
+typedef enum {
+  kGpuBackend_Automatic = 0,
+  kGpuBackend_Direct3D12,
+  kGpuBackend_Vulkan,
+  kGpuBackend_Metal,
+  kGpuBackend_Count,
+} GpuBackend;
+
 /* Diagnostic source cadence for captured-plane frame generation. Native keeps
  * authentic 60 Hz gameplay. Test30 deliberately runs Diorama logic in slow
  * motion at 30 Hz while presentation remains independently paced, providing a
@@ -270,6 +284,11 @@ struct SettingDesc {
   /* Nonzero only for rows in kSettingCat_Enhancements. Kept at the tail so
    * existing positional descriptor initializers safely default to None. */
   SettingGameChangeKind game_change_kind;
+  /* Enum rows whose options depend on the platform: the menu steps over
+   * values this returns false for, and hides the row when fewer than two
+   * values remain. Stored and parsed values are not filtered, so a preference
+   * synced from another machine survives. NULL offers every value. */
+  bool (*value_available)(long value);
 };
 
 typedef enum {
@@ -323,6 +342,7 @@ typedef struct Settings {
   bool ignore_aspect_ratio;
   int refresh_mode;         /* RefreshMode */
   int frame_limit_fps;      /* target FPS when refresh_mode == Limit */
+  int gpu_backend;          /* GpuBackend; read once at renderer creation */
   bool show_fps;            /* completed host presents, top-right overlay */
   int performance_overlay; /* 0 off, 1 summary, 2 detailed pipeline diagnostics */
 
@@ -711,6 +731,17 @@ void Settings_ApplyRenderCapabilities(uint32_t supported);
 bool Settings_RenderCapabilitiesRetained(uint32_t supported);
 const char *Settings_HardwareUnavailableReason(const SettingDesc *desc);
 bool Settings_IsMenuVisible(const SettingDesc *desc);
+/* Whether the menu may select `value` on this row (see value_available). */
+bool Settings_ValueAvailable(const SettingDesc *desc, long value);
+/* Platform boot publishes the backends its SDL build can create, one bit per
+ * GpuBackend. Automatic is always offered; explicit backends are offered only
+ * when at least two are compiled in, so single-backend platforms hide the row. */
+void Settings_SetGpuBackendsOffered(uint32_t backend_mask);
+/* The GpuBackend the renderer actually runs on, published after creation so
+ * the menu can name what Automatic, or a fallback, resolved to. Automatic
+ * means not yet known. */
+void Settings_SetGpuBackendActive(int backend);
+int Settings_GpuBackendActive(void);
 /* True for a developer-only row: the fine numeric tuning dials of the diorama
  * and town 3D renderers, their internal layer/stage A/B toggles, and the scene
  * inspector tools. Hidden from the menu unless g_settings.show_debug_settings

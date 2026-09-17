@@ -1593,6 +1593,45 @@ int main(int argc, char **argv) {
   CHECK(Settings_AudioFrequencyHz() == 48000);
   CHECK(SettingsOverlay_HandleKey(SDLK_X, true, false));
 
+  /* Graphics API appears only once the platform offers a choice, and stepping
+   * skips backends this build cannot create (Metal on a Windows-like host) in
+   * both directions. The value names what Automatic is running on. */
+  {
+    const SettingDesc *api = Settings_Find("gpu_backend");
+    Settings_SetGpuBackendsOffered((1u << kGpuBackend_Direct3D12) |
+                                   (1u << kGpuBackend_Vulkan));
+    NavToSection(kSection_Video);
+    NavToTab(0);
+    CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+    RowToKey("gpu_backend");
+    CHECK(g_settings.gpu_backend == kGpuBackend_Automatic);
+    CHECK(SettingsOverlay_HandleKey(SDLK_LEFT, true, false));
+    CHECK(g_settings.gpu_backend == kGpuBackend_Vulkan);
+    CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
+    CHECK(g_settings.gpu_backend == kGpuBackend_Automatic);
+    CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
+    CHECK(g_settings.gpu_backend == kGpuBackend_Direct3D12);
+    CHECK(SettingsOverlay_HandleKey(SDLK_LEFT, true, false));
+    CHECK(g_settings.gpu_backend == kGpuBackend_Automatic);
+    char value[128];
+    SettingsOverlay_LocalizedValue(kArUiLocale_English, api, value, sizeof(value));
+    CHECK(!strcmp(value, "Automatic"));
+    Settings_SetGpuBackendActive(kGpuBackend_Direct3D12);
+    SettingsOverlay_LocalizedValue(kArUiLocale_English, api, value, sizeof(value));
+    CHECK(!strcmp(value, "Automatic (Direct3D 12)"));
+    for (int locale = 0; locale < kArUiLocale_Count; ++locale) {
+      SettingsOverlay_LocalizedValue((ArUiLocale)locale, api, value, sizeof(value));
+      CHECK(strstr(value, "Direct3D 12") != NULL);
+    }
+    CHECK(Settings_SetText(api, "Direct3D 12") == kSettingChange_RestartPending);
+    SettingsOverlay_LocalizedValue(kArUiLocale_English, api, value, sizeof(value));
+    CHECK(!strcmp(value, "Direct3D 12"));
+    CHECK(Settings_Reset(api) == kSettingChange_RestartPending);
+    Settings_SetGpuBackendActive(kGpuBackend_Automatic);
+    Settings_SetGpuBackendsOffered(0);
+    CHECK(SettingsOverlay_HandleKey(SDLK_X, true, false));
+  }
+
   /* Hold-to-accelerate lives on Camera sensitivity: a wide 10..400 Int with a
    * base step of 1, so the ramp is actually visible (unlike a 0..100 row whose
    * coarse step would equal its base). A tap steps by one and — proven by the

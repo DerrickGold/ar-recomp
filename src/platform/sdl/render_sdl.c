@@ -622,7 +622,8 @@ bool ArSdlRenderBackend_Bind(ArRenderDevice *device,
       device, &kSdlRenderOps, backend, capabilities);
 }
 
-static SDL_GPUDevice *CreateOutputGpuDevice(SDL_Window *window) {
+static SDL_GPUDevice *CreateOutputGpuDevice(SDL_Window *window,
+                                            const char *gpu_driver) {
   /* Match the SDL GPU renderer's compatibility baseline. Taking ownership of
    * submission must not silently require unused clip-distance, anisotropic
    * sampling or indirect-draw features on lower-end Vulkan/D3D12 devices.
@@ -643,24 +644,29 @@ static SDL_GPUDevice *CreateOutputGpuDevice(SDL_Window *window) {
       SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_FEATURE_INDIRECT_DRAW_FIRST_INSTANCE_BOOLEAN, false) &&
       SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_FEATURE_ANISOTROPY_BOOLEAN, false) &&
       SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_METAL_ALLOW_MACFAMILY1_BOOLEAN, false);
-  if (configured && (SDL_GetWindowFlags(window) & SDL_WINDOW_VULKAN))
-    configured = SDL_SetStringProperty(props, SDL_PROP_GPU_DEVICE_CREATE_NAME_STRING, "vulkan");
+  if (!gpu_driver && (SDL_GetWindowFlags(window) & SDL_WINDOW_VULKAN))
+    gpu_driver = "vulkan";
+  /* The SDL_GPU_DRIVER hint still outranks this property inside SDL. */
+  if (configured && gpu_driver)
+    configured = SDL_SetStringProperty(props, SDL_PROP_GPU_DEVICE_CREATE_NAME_STRING, gpu_driver);
   SDL_GPUDevice *gpu = configured ? SDL_CreateGPUDeviceWithProperties(props) : NULL;
   SDL_DestroyProperties(props);
   return gpu;
 }
 
-bool ArSdlRenderBackend_CreateForWindow(ArRenderDevice *device,
-                                        SDL_Window *window) {
-  if (!device || !window) {
-    SDL_SetError("invalid SDL render backend creation request");
-    return false;
+bool ArSdlRenderBackend_HasGpuDriver(const char *name) {
+  if (!name) return false;
+  const int count = SDL_GetNumGPUDrivers();
+  for (int i = 0; i < count; ++i) {
+    const char *driver = SDL_GetGPUDriver(i);
+    if (driver && !SDL_strcasecmp(driver, name)) return true;
   }
-  if (ArRenderDevice_IsReady(device)) {
-    SDL_SetError("render device already has a backend");
-    return false;
-  }
+  return false;
+}
 
+static bool CreateForWindowWithDriver(ArRenderDevice *device,
+                                      SDL_Window *window,
+                                      const char *gpu_driver) {
   ArSdlRenderBackend *backend = calloc(1, sizeof(*backend));
   if (!backend) {
     SDL_SetError("out of memory creating SDL render backend");
@@ -669,7 +675,7 @@ bool ArSdlRenderBackend_CreateForWindow(ArRenderDevice *device,
 
   const char *ordered = getenv("AR_SDL_GPU_ORDERED");
   if (!ordered || strcmp(ordered, "0") != 0) {
-    SDL_GPUDevice *gpu = CreateOutputGpuDevice(window);
+    SDL_GPUDevice *gpu = CreateOutputGpuDevice(window, gpu_driver);
     if (!gpu) { free(backend); return false; }
     if (!SDL_ClaimWindowForGPUDevice(gpu, window)) {
       SDL_DestroyGPUDevice(gpu); free(backend); return false;
@@ -712,6 +718,10 @@ bool ArSdlRenderBackend_CreateForWindow(ArRenderDevice *device,
           SDL_PROP_RENDERER_CREATE_GPU_SHADERS_DXIL_BOOLEAN, true) &&
       SDL_SetBooleanProperty(properties,
           SDL_PROP_RENDERER_CREATE_GPU_SHADERS_MSL_BOOLEAN, true);
+  /* SDL's GPU renderer forwards its creation properties to the device. */
+  if (configured && gpu_driver)
+    configured = SDL_SetStringProperty(properties,
+        SDL_PROP_GPU_DEVICE_CREATE_NAME_STRING, gpu_driver);
   SDL_Renderer *renderer =
       configured ? SDL_CreateRendererWithProperties(properties) : NULL;
   SDL_DestroyProperties(properties);
@@ -728,6 +738,33 @@ bool ArSdlRenderBackend_CreateForWindow(ArRenderDevice *device,
   backend->owns_renderer = true;
   backend->owns_context = true;
   return true;
+}
+
+bool ArSdlRenderBackend_CreateForWindow(ArRenderDevice *device,
+                                        SDL_Window *window,
+                                        const char *gpu_driver) {
+  if (!device || !window) {
+    SDL_SetError("invalid SDL render backend creation request");
+    return false;
+  }
+  if (ArRenderDevice_IsReady(device)) {
+    SDL_SetError("render device already has a backend");
+    return false;
+  }
+  if (CreateForWindowWithDriver(device, window, gpu_driver)) return true;
+  if (!gpu_driver) return false;
+  /* A chosen API that cannot start must not make the game unlaunchable, which
+   * would also put the menu that undoes the choice out of reach. SDL's own
+   * order is a complete renderer; the capability log names what it picked. */
+  SDL_Log("[render] %s graphics API unavailable (%s); using automatic selection",
+          gpu_driver, SDL_GetError());
+  return CreateForWindowWithDriver(device, window, NULL);
+}
+
+const char *ArSdlRenderBackend_GpuDriver(const ArRenderDevice *device) {
+  if (!device || device->ops != &kSdlRenderOps || !device->context) return NULL;
+  const ArSdlRenderBackend *backend = device->context;
+  return backend->gpu_device ? SDL_GetGPUDeviceDriver(backend->gpu_device) : NULL;
 }
 
 void ArSdlRenderBackend_Destroy(ArRenderDevice *device) {

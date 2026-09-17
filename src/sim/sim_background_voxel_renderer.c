@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "constants.h"
+#include "render/upload_rect_run.h"
 #include "scene3d_math.h"
 #include "sim3d_depth_pass.h"
 #include "sim3d_mesh_set.h"
@@ -367,6 +368,18 @@ static ArRenderTexture CreateGroundTexture(ArRenderDevice *device) {
   return texture;
 }
 
+static bool UploadGroundRect(ArRenderDevice *device, const uint32_t *ground,
+                             int pitch, ArRenderRectI rect) {
+  if (!ArRenderDevice_UpdateTexture(
+          device, g_renderer_state.ground, &rect,
+          ground + (size_t)rect.y * kSimTownCanvasPixels + (size_t)rect.x,
+          pitch))
+    return false;
+  Sim3DPerformance_AddUpload(
+      (uint64_t)rect.w * (uint64_t)rect.h * sizeof(uint32_t));
+  return true;
+}
+
 void SimBackgroundVoxelRenderer_Upload(ArRenderDevice *device) {
   uint32_t serial = SimBackgroundVoxels_Serial();
   if (!ArRenderDevice_IsReady(device) || !serial ||
@@ -392,20 +405,22 @@ void SimBackgroundVoxelRenderer_Upload(ArRenderDevice *device) {
     bool upload_ok = true;
     bool uploaded_region = false;
     if (!created_ground && g_renderer_state.uploaded_ground_serial) {
+      /* Dirty spans are tracked per PIXEL row, so an animated patch arrives as
+       * up to one rectangle per row (95-155 per animation step in Aitos).
+       * `ground` is the complete current image, so coalescing may re-send
+       * clean pixels (upload_rect_run.h). */
+      UploadRectRun run = {0};
+      ArRenderRectI dirty;
       int x, y, width, height;
-      while (SimBackgroundVoxels_TakeGroundDirtyRect(
+      while (upload_ok && SimBackgroundVoxels_TakeGroundDirtyRect(
                  &x, &y, &width, &height)) {
         uploaded_region = true;
-        ArRenderRectI dirty = {x, y, width, height};
-        if (!ArRenderDevice_UpdateTexture(
-                device, g_renderer_state.ground, &dirty,
-                ground + (size_t)y * kSimTownCanvasPixels + x, pitch)) {
-          upload_ok = false;
-          break;
-        }
-        Sim3DPerformance_AddUpload(
-            (uint64_t)width * (uint64_t)height * sizeof(uint32_t));
+        if (UploadRectRun_Add(&run, (ArRenderRectI){x, y, width, height},
+                              &dirty))
+          upload_ok = UploadGroundRect(device, ground, pitch, dirty);
       }
+      if (upload_ok && UploadRectRun_Finish(&run, &dirty))
+        upload_ok = UploadGroundRect(device, ground, pitch, dirty);
     }
     /* A new texture is undefined everywhere. A serial mismatch with no dirty
      * region means a previous partial attempt failed after consuming its

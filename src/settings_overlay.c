@@ -2031,9 +2031,16 @@ static void ChangeSelectedValue(int direction) {
         next = !value;
       } else {
         long step = desc->step > 0 ? desc->step : 1;
-        next = value + (direction < 0 ? -step : step);
-        if (next < desc->minval) next = Settings_Maximum(desc);
-        if (next > Settings_Maximum(desc)) next = desc->minval;
+        /* Step over values this platform cannot select, for at most one
+         * cycle; with nothing else offered the row stays put. */
+        next = value;
+        for (long remaining = Settings_Maximum(desc) - desc->minval + 1;
+             remaining > 0; --remaining) {
+          next += direction < 0 ? -step : step;
+          if (next < desc->minval) next = Settings_Maximum(desc);
+          if (next > Settings_Maximum(desc)) next = desc->minval;
+          if (Settings_ValueAvailable(desc, next)) break;
+        }
       }
       SaveAcceptedChange(Settings_SetLong(desc, next));
       return;

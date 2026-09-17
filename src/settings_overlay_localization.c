@@ -107,6 +107,27 @@ int SettingsOverlay_LocalizedValue(ArUiLocale locale, const SettingDesc *desc,
     if (FormatValue(locale, key, buffer, capacity, args, 2))
       return (int)strlen(buffer);
   }
+  if (desc->field == &g_settings.gpu_backend) {
+    /* Name what Automatic, a fallback from an unusable choice, or a pending
+     * restart is running on right now. */
+    const int selected = g_settings.gpu_backend;
+    const int active = Settings_GpuBackendActive();
+    if (active != kGpuBackend_Automatic && active != selected &&
+        selected >= 0 && selected < desc->enum_count) {
+      char selected_part[32], active_part[32];
+      snprintf(selected_part, sizeof(selected_part), "value.%d", selected);
+      snprintf(active_part, sizeof(active_part), "value.%d", active);
+      const ArUiTextArgument args[] = {
+        {"selected", DescriptorText(locale, desc, selected_part,
+                                    desc->enum_labels[selected])},
+        {"active", DescriptorText(locale, desc, active_part,
+                                  desc->enum_labels[active])},
+      };
+      if (FormatValue(locale, "overlay.value.gpu_backend_active",
+                      buffer, capacity, args, 2))
+        return (int)strlen(buffer);
+    }
+  }
   if (desc->field == &g_settings.interface_language) {
     /* Autonyms stay identifiable even when the currently selected UI language
      * is unfamiliar. Hosts without Unicode can display the serialized code. */

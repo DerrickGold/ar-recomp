@@ -652,6 +652,11 @@ static const char *const kRefreshModeLabels[] = {
 };
 static const char *const kPerformanceOverlayLabels[] = {"Off", "Summary", "Detailed"};
 
+/* Also the settings.ini values: keep these spellings. */
+static const char *const kGpuBackendLabels[kGpuBackend_Count] = {
+  "Automatic", "Direct3D 12", "Vulkan", "Metal",
+};
+
 static const char *const kInterpolationSourceLabels[] = {
   "Native 60 Hz",
   "Test 30 -> 60 Hz",
@@ -1023,6 +1028,35 @@ static bool Sim3DPickerEaseAvailable(void) {
  * only matter once the mandatory GPU renderer is running. */
 extern bool g_gpu_shaders_active;
 static bool GpuShadersActive(void) { return g_gpu_shaders_active; }
+
+/* Automatic only until platform boot publishes its backends, so hosts that
+ * never do (tests, tools) keep the Graphics API row hidden. */
+static uint32_t s_gpu_backends_offered = 1u << kGpuBackend_Automatic;
+
+void Settings_SetGpuBackendsOffered(uint32_t backend_mask) {
+  const uint32_t explicit_backends = backend_mask &
+      ((1u << kGpuBackend_Count) - 1u) & ~(1u << kGpuBackend_Automatic);
+  /* A single compiled backend is exactly what Automatic already selects
+   * (Metal on macOS, Vulkan on Linux and Steam Deck); listing it would be a
+   * choice with no alternative. */
+  const bool several = (explicit_backends & (explicit_backends - 1u)) != 0;
+  s_gpu_backends_offered =
+      (1u << kGpuBackend_Automatic) | (several ? explicit_backends : 0);
+}
+
+static bool GpuBackendOffered(long value) {
+  return value >= 0 && value < kGpuBackend_Count &&
+      ((s_gpu_backends_offered >> value) & 1u) != 0;
+}
+
+static int s_gpu_backend_active = kGpuBackend_Automatic;
+
+void Settings_SetGpuBackendActive(int backend) {
+  s_gpu_backend_active = backend > kGpuBackend_Automatic &&
+      backend < kGpuBackend_Count ? backend : kGpuBackend_Automatic;
+}
+
+int Settings_GpuBackendActive(void) { return s_gpu_backend_active; }
 static bool ActionEffectRendererAvailable(void) {
   return Present_EffectRendererSupported();
 }
@@ -1315,6 +1349,20 @@ const SettingDesc g_setting_descs[] = {
     kSettingType_Int, kApply_Callback, kSettingCat_Display,
     &g_settings.frame_limit_fps, 60, 20, 480, 5, false, NULL, 0,
     FrameLimitActive, NULL, NULL, NULL, .modern_env = true },
+  /* SDL's Direct3D 12 backend makes every upload buffer a committed resource;
+   * its Vulkan backend sub-allocates them. A Windows Town 3D slowdown report
+   * (2026-09-16) pointed at that path, so players can pick the API that suits
+   * their system. */
+  { "gpu_backend", "AR_GPU_BACKEND", "Graphics API",
+    "Automatic uses the platform default (Direct3D 12 on Windows). Try "
+    "another API if the game runs slowly or draws incorrectly on this system. "
+    "If the chosen API cannot start, Automatic is used instead. Takes effect "
+    "after restart.",
+    kSettingType_Enum, kApply_Restart, kSettingCat_Display,
+    &g_settings.gpu_backend, kGpuBackend_Automatic,
+    kGpuBackend_Automatic, kGpuBackend_Metal, 1, false,
+    kGpuBackendLabels, kGpuBackend_Count, NULL, NULL, NULL, NULL,
+    .modern_env = true, .value_available = GpuBackendOffered },
   BOOL_SETTING_MODERN(show_fps, "AR_SHOW_FPS", "FPS counter",
                "Show completed host presents per second in the top-right. Use "
                "Refresh rate: Unlimited to measure maximum rendering throughput.",
@@ -2828,9 +2876,25 @@ static bool Settings_IsLoadOnly(const SettingDesc *desc) {
        desc->field == &g_settings.sim3d_picker_exit_ease);
 }
 
+bool Settings_ValueAvailable(const SettingDesc *desc, long value) {
+  return desc && (!desc->value_available || desc->value_available(value));
+}
+
+static bool OffersSeveralValues(const SettingDesc *desc) {
+  const long step = desc->step > 0 ? desc->step : 1;
+  int offered = 0;
+  for (long value = desc->minval; value <= Settings_Maximum(desc) && offered < 2;
+       value += step)
+    offered += Settings_ValueAvailable(desc, value);
+  return offered >= 2;
+}
+
 bool Settings_IsMenuVisible(const SettingDesc *desc) {
   if (!desc || !desc->key) return false;
   if (Settings_IsLoadOnly(desc)) return false;
+  /* A platform-dependent row with nothing to choose between is not a
+   * setting on this platform. */
+  if (desc->value_available && !OffersSeveralValues(desc)) return false;
   /* Developer-only rows collapse out of the menu unless explicitly enabled.
    * Checked first so a debug row is hidden regardless of its category rules. */
   if (Settings_IsDebugOnly(desc) && !g_settings.show_debug_settings)

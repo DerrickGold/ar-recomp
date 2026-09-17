@@ -109,8 +109,9 @@ static void TestDefaultsAndMetadata(void) {
    * off: the PPU has a single path, so the setting selected between a modern
    * renderer and a legacy one that no longer exists. Localization adds six
    * source, presentation, and enhanced-font preferences, plus an independent
-   * host interface language. Connected SIM adds one default-on underlay row. */
-  CHECK(g_setting_desc_count == 292);
+   * host interface language. Connected SIM adds one default-on underlay row.
+   * The Graphics API choice adds one restart-class Display row. */
+  CHECK(g_setting_desc_count == 293);
   for (int i = 0; i < g_setting_desc_count; i++) {
     const SettingDesc *a = &g_setting_descs[i];
     CHECK(a->key && a->key[0] && a->label && a->tooltip);
@@ -1890,6 +1891,60 @@ static void TestHardwareCapabilities(void) {
   CHECK(Settings_SetLong(town, 1) != kSettingChange_Rejected);
 }
 
+/* The Graphics API row exists only where there is something to choose, never
+ * offers a backend the build cannot create, and persists by label without
+ * discarding a choice another platform made. */
+static void TestGpuBackendChoice(void) {
+  ClearSettingsEnv();
+  Settings_Init();
+  const SettingDesc *api = Settings_Find("gpu_backend");
+  CHECK(api && api->type == kSettingType_Enum && api->apply == kApply_Restart &&
+        api->category == kSettingCat_Display &&
+        api->defval == kGpuBackend_Automatic && api->value_available);
+  if (!api) return;
+  CHECK(g_settings.gpu_backend == kGpuBackend_Automatic);
+
+  /* Nothing published (tests, tools): only Automatic, so no row. */
+  CHECK(!Settings_IsMenuVisible(api));
+  /* One compiled backend is what Automatic already selects. */
+  Settings_SetGpuBackendsOffered((1u << kGpuBackend_Automatic) |
+                                 (1u << kGpuBackend_Metal));
+  CHECK(!Settings_IsMenuVisible(api));
+  CHECK(!Settings_ValueAvailable(api, kGpuBackend_Metal));
+
+  /* Windows: Direct3D 12 and Vulkan. */
+  Settings_SetGpuBackendsOffered((1u << kGpuBackend_Direct3D12) |
+                                 (1u << kGpuBackend_Vulkan));
+  CHECK(Settings_IsMenuVisible(api));
+  CHECK(Settings_ValueAvailable(api, kGpuBackend_Automatic));
+  CHECK(Settings_ValueAvailable(api, kGpuBackend_Direct3D12));
+  CHECK(Settings_ValueAvailable(api, kGpuBackend_Vulkan));
+  CHECK(!Settings_ValueAvailable(api, kGpuBackend_Metal));
+  CHECK(!Settings_ValueAvailable(api, -1));
+  CHECK(!Settings_ValueAvailable(api, kGpuBackend_Count));
+
+  CHECK(Settings_SetText(api, "Vulkan") == kSettingChange_RestartPending);
+  CHECK(g_settings.gpu_backend == kGpuBackend_Vulkan);
+  Settings_SetPersistenceEnabled(true);
+  const char *path = "actraiser-settings-gpu-backend-test.ini";
+  CHECK(Settings_Save(path));
+  CHECK(FileContains(path, "gpu_backend = Vulkan"));
+  remove(path);
+  /* Not offered here, but kept: renderer creation treats it as Automatic. */
+  CHECK(Settings_SetText(api, "Metal") == kSettingChange_RestartPending);
+  CHECK(g_settings.gpu_backend == kGpuBackend_Metal);
+  CHECK(Settings_SetText(api, "OpenGL") == kSettingChange_Rejected);
+
+  Settings_SetGpuBackendActive(kGpuBackend_Count);
+  CHECK(Settings_GpuBackendActive() == kGpuBackend_Automatic);
+  Settings_SetGpuBackendActive(kGpuBackend_Vulkan);
+  CHECK(Settings_GpuBackendActive() == kGpuBackend_Vulkan);
+  Settings_SetGpuBackendActive(kGpuBackend_Automatic);
+  Settings_SetGpuBackendsOffered(0);
+  CHECK(!Settings_IsMenuVisible(api));
+  Settings_Init();
+}
+
 int main(int argc,char **argv) {
   if(argc==2&&!strcmp(argv[1],"--dump-ui-catalog")) {DumpInterfaceInventory();return 0;}
   TestLocalizationPackIdentity();
@@ -1913,6 +1968,7 @@ int main(int argc,char **argv) {
   TestNoWideBudget();
   TestInputBindings();
   TestHardwareCapabilities();
+  TestGpuBackendChoice();
   ClearSettingsEnv();
   Settings_SetChangeObserver(NULL);
   Settings_SetActionObserver(NULL);

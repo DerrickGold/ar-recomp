@@ -287,7 +287,7 @@ int main(void) {
   /* The shipping adapter submits through an offscreen renderer, unlike the
    * externally owned renderer above. Exercise warm-up and pixel parity there
    * too, including restoration of its adapter-owned default target. */
-  CHECK(ArSdlRenderBackend_CreateForWindow(&device, window));
+  CHECK(ArSdlRenderBackend_CreateForWindow(&device, window, NULL));
   if (ArRenderDevice_IsReady(&device)) {
     renderer = ArSdlRenderBackend_Renderer(&device);
     TestDioramaEffects(&device);
@@ -295,6 +295,20 @@ int main(void) {
     TestSimCloudEffect(&device, renderer);
     TestCrtPost(&device);
     TestSimCloudEffect(&device, renderer);
+    const char *driver = ArSdlRenderBackend_GpuDriver(&device);
+    CHECK(driver && ArSdlRenderBackend_HasGpuDriver(driver));
+    ArSdlRenderBackend_Destroy(&device);
+  }
+  CHECK(!ArSdlRenderBackend_HasGpuDriver(NULL));
+  CHECK(!ArSdlRenderBackend_HasGpuDriver("not-a-gpu-driver"));
+  CHECK(ArSdlRenderBackend_GpuDriver(&device) == NULL);
+  /* A Graphics API choice that cannot start must still produce a working
+   * output through SDL's own order, on the same window. */
+  CHECK(ArSdlRenderBackend_CreateForWindow(&device, window, "not-a-gpu-driver"));
+  if (ArRenderDevice_IsReady(&device)) {
+    const char *driver = ArSdlRenderBackend_GpuDriver(&device);
+    CHECK(driver && ArSdlRenderBackend_HasGpuDriver(driver));
+    TestCrtPost(&device);
     ArSdlRenderBackend_Destroy(&device);
   }
   SDL_DestroyWindow(window);
