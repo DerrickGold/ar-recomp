@@ -72,6 +72,9 @@ Apu *apu_init(void);
 void apu_free(Apu *apu);
 void apu_reset(Apu *apu);
 void apu_cycle(Apu *apu);
+/* Bounded, exact advancement with no intervening host access. The scalar
+ * cycle remains the observation/reference path. Does not acquire a lock. */
+void apu_runCycles(Apu *apu, uint32_t cycles);
 uint8_t apu_cpuRead(Apu *apu, uint16_t address);
 void apu_cpuWrite(Apu *apu, uint16_t address, uint8_t value);
 void apu_saveload(Apu *apu, SaveLoadInfo *info);

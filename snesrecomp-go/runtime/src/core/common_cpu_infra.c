@@ -81,6 +81,7 @@ static uint32 audio_voice_count(void) {
 }
 
 static bool s_audio_extension_enabled;
+static RtlGameAudioExtensionSpcOpcodeFilterFunc *s_audio_opcode_filter;
 static RtlGameExecutionCheckpointFunc *s_execution_checkpoint;
 static RtlGamePollWaitFunc *s_poll_wait;
 static bool s_execution_checkpoint_active;
@@ -159,6 +160,7 @@ static void route_game_audio_extension_spc_opcode(
     RtlAudioExtensionContext context;
     if (!s_audio_extension_enabled || g_rtl_game_audio == NULL ||
         g_rtl_game_audio->extension_spc_opcode == NULL || spc == NULL ||
+        (s_audio_opcode_filter != NULL && !s_audio_opcode_filter(opcode_pc)) ||
         !populate_audio_extension_context(spc->apu, &context))
         return;
     g_rtl_game_audio->extension_spc_opcode(&context, opcode_pc);
@@ -390,6 +392,10 @@ static bool game_audio_valid(const RtlGameAudioApi *audio) {
                       audio->extension_save != NULL ||
                       audio->extension_upload != NULL))
         return false;
+    if (audio->struct_size >= RTL_GAME_AUDIO_API_V4_SIZE &&
+        audio->extension_spc_opcode_filter != NULL &&
+        audio->extension_spc_opcode == NULL)
+        return false;
     if (presentation != (audio->apu_port_pace != NULL ||
                          audio->apu_port_write != NULL ||
                          audio->spc_upload_completed != NULL ||
@@ -434,6 +440,10 @@ static SrResult validate_game_module(const RtlGameModule *module) {
 }
 
 static void install_game_hooks(void) {
+    s_audio_opcode_filter = s_audio_extension_enabled &&
+        g_rtl_game_audio != NULL &&
+        g_rtl_game_audio->struct_size >= RTL_GAME_AUDIO_API_V4_SIZE
+        ? g_rtl_game_audio->extension_spc_opcode_filter : NULL;
     s_poll_wait = g_rtl_game_execution != NULL &&
         g_rtl_game_execution->struct_size >= RTL_GAME_EXECUTION_API_V4_SIZE
         ? g_rtl_game_execution->poll_wait : NULL;

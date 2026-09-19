@@ -96,11 +96,37 @@ static void continuation(void) {
     CHECK(g_snes->apu->timelineCycleRemainder == remainder);
     free(saved);
 }
+
+static void exact_callback_demand(void) {
+    static const unsigned sizes[] = {1, 7, 8, 9, 31, 512};
+    int16_t pcm[512 * 2];
+    consume_on_unlock = false;
+    for (unsigned phase = 0; phase < 32; ++phase) {
+        for (unsigned i = 0; i < sizeof(sizes) / sizeof(sizes[0]); ++i) {
+            apu_reset(g_snes->apu);
+            RtlSetAudioOutputRate(32000);
+            for (unsigned c = 0; c < phase; ++c) apu_cycle(g_snes->apu);
+            max_chunk = 0;
+            measure_chunks = true;
+            RtlRenderAudio(pcm, (int)sizes[i], 2);
+            measure_chunks = false;
+            /* Unity-rate resampling needs exactly two lookahead samples.
+             * No batch may run past that demand, even from a partial sample. */
+            CHECK(apu_cycle_count(g_snes->apu) == (sizes[i] + 2u) * 32u);
+            CHECK(g_snes->apu->dspSlot == 0);
+            CHECK(g_snes->apu->dsp->sampleWrite == sizes[i] + 2u);
+            CHECK(g_snes->apu->dsp->sampleRead == sizes[i]);
+            CHECK(max_chunk <= 256u);
+        }
+    }
+}
+
 int main(void) {
     uint8_t *wram = calloc(1, 0x20000);
     g_snes = snes_init(wram);
     if (!g_snes) return 1;
     continuation();
+    exact_callback_demand();
     cadence(60, 44100);
     cadence(90, 48000);
     cadence(120, 48000);

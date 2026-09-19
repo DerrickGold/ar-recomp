@@ -686,6 +686,14 @@ struct SlotResult {
 SlotResult stepDspCycle(DspState& dsp, std::span<std::uint8_t, 65536> ram) noexcept;
 SlotResult stepDspCycle(DspState& dsp, std::span<const std::uint8_t, 65536> ram) noexcept;
 
+namespace detail {
+// Private bridge specialization, instantiated in dsp_accuracy_unit.cpp. The
+// caller dispatches once to the known slot, then keeps banks interleaved.
+template<std::uint8_t Slot, bool ProcessEcho>
+SlotResult stepDspCycleAtSlot(DspState& dsp,
+    std::span<const std::uint8_t, 65536> ram, std::uint8_t* echoRam) noexcept;
+}
+
 // Runner extension-bank path: executes the same voice, register-visibility,
 // envelope, keying, noise and slot schedule, but omits the bank-local echo
 // unit. Extended banks contribute their EON sends to the native bank's one

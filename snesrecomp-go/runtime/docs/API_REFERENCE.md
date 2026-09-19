@@ -442,6 +442,16 @@ for strategy selection, invalidation, fallback, and conformance guidance.
 5. Keep file decoding, replacement streams, track names, and manifests in the
    game/frontend layer.
 
+`RTL_GAME_AUDIO_API_V4_SIZE` adds an optional
+`extension_spc_opcode_filter(opcode_pc)` preflight. It runs before the runner
+constructs a mutable extension context. Returning false skips only the opcode
+callback, not execution or `extension_spc_cycle`. The preflight may maintain
+game-owned bookkeeping (for example, the current instruction's cycle-charge
+latch); it must not access runner state or re-enter the runner. A filter requires
+an opcode callback. V2/V3 audio-table extents and null filters retain the
+unfiltered behavior. Title-specific instruction addresses belong in the game
+adapter, never the runner.
+
 `SrAudioTraceSubscription.event_mask` is required in V2. Use only the event
 classes needed by the diagnostic; opcode events are the highest-volume class,
 and a zero mask is invalid. Every event carries the live SPC PC, current DSP
@@ -482,6 +492,27 @@ its one physical echo pass, so a second delay line would be redundant and is
 not observable through the extended-voice API.
 
 ### APU timing ownership and profiling
+
+The private APU batch path coalesces countdown-only cycles between SPC
+instructions, timer edges, queued-port application at slot 0, and PCM publication
+at slot 31. DSP spans dispatch once on entry, then execute the same ordered slot
+bodies, interleaving all active banks before native echo. This is an execution
+optimization, not a sample-at-once approximation: register races, ARAM reads,
+keying, BRR, envelopes and echo remain slot-accurate. Diagnostic counters or
+audio tracing select the original cycle stepper. Production keeps its existing
+256-cycle lock chunks and stops at the exact PCM demand; snapshot formats and
+public ABI call/borrow lifetimes are unchanged.
+
+Register and voice mirrors retain their existing refresh points. They feed
+source-based mix classification, key-on observations, state queries and saved
+state; they are not merely a debug display cache. Deferring their refresh is a
+separate optimization requiring consumer-by-consumer validation.
+
+The `snesrecomp_runtime_apu_batch` and `snesrecomp_runtime_dsp` tests compare
+batched execution with the scalar reference, including partial samples,
+extended banks, echo RAM, serialized state and PCM. The APU test executable
+also accepts `--benchmark` for an alternating scalar/batched synthetic workload;
+its timings are informational, never a CTest pass/fail threshold.
 
 `RtlRunFrame` advances a serialized APU target by the rational NTSC interval
 `357366 * 5632 / 118125` APU cycles per game tick (about 60.0988 Hz).

@@ -127,7 +127,7 @@ static const RtlGameStateProviderApi kActRaiserStateProviders = {
 };
 
 static const RtlGameAudioApi kActRaiserAudio = {
-  .struct_size = RTL_GAME_AUDIO_API_V2_SIZE,
+  .struct_size = RTL_GAME_AUDIO_API_V4_SIZE,
   .capabilities = RTL_GAME_AUDIO_CAP_SPC_UPLOAD |
                   RTL_GAME_AUDIO_CAP_VOICE_ROUTING |
                   RTL_GAME_AUDIO_CAP_EXTENSION |
@@ -140,6 +140,7 @@ static const RtlGameAudioApi kActRaiserAudio = {
   .state_loaded_routing = &NativeAudioMixer_RouteStateLoaded,
   .extension_dsp_write = &NativeAudioExtension_FilterDspWrite,
   .extension_spc_opcode = &NativeAudioExtension_PatchSpcOpcode,
+  .extension_spc_opcode_filter = &NativeAudioExtension_WantsSpcOpcode,
   .extension_spc_cycle =
       &NativeAudioExtension_AdjustSpcOpcodeCycles,
   .extension_save = &NativeAudioExtension_SaveState,

@@ -98,6 +98,8 @@ void dsp_free(Dsp *dsp);
 void dsp_reset(Dsp *dsp);
 /* One hardware DSP slot. The APU calls this once per master APU cycle. */
 void dsp_clock(Dsp *dsp);
+/* No intervening SPC/host access. Keeps every slot and bank in hardware order. */
+void dsp_clockMany(Dsp *dsp, uint32_t cycles);
 /* Test/offline convenience: advances exactly one 32-slot sample. */
 void dsp_cycle(Dsp *dsp);
 uint8_t dsp_currentSlot(const Dsp *dsp);

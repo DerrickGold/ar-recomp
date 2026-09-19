@@ -112,6 +112,7 @@ static bool TestDspWriteBridge(Apu *apu, uint8_t address, uint8_t *value) {
 }
 
 static void TestSpcOpcodeBridge(Spc *spc, uint16_t opcode_pc) {
+  if (!NativeAudioExtension_WantsSpcOpcode(opcode_pc)) return;
   RtlAudioExtensionContext context = TestAudioContext(spc->apu);
   NativeAudioExtension_PatchSpcOpcode(&context, opcode_pc);
   spc->pc = context.spc_pc;
@@ -865,6 +866,40 @@ static void TestCombinedGameRequestObservation(void) {
   CHECK(s_lock_count == locks);
 }
 
+static void TestOpcodeFilterEquivalence(void) {
+  Apu apu; Spc spc; Dsp dsp;
+  static const uint16_t pcs[] = {0x0da0, 0x1000, 0x0f0b, 0x1001,
+      0x080a, 0x04d4, 0x05b6, 0x080e, 0x0f0b, 0x1234,
+      0x0e7e, 0x0e83, 0x2000};
+  InitFixture(&apu, &spc, &dsp);
+  for (int i = 1; i <= 4; ++i)
+    Queue(i, i, 0x10, false, kNativeAudio_Independent);
+  for (unsigned n = 0; n < sizeof(pcs) / sizeof(pcs[0]); ++n) {
+    TestSaveLoad before = {0}, expected = {0}, actual = {0};
+    before.base = expected.base = actual.base =
+        (SaveLoadInfo){.func = TransferTestState, .portable = true, .saving = true};
+    uint8_t old_ram[0x10000], expected_ram[0x10000];
+    Spc old_spc = spc;
+    memcpy(old_ram, apu.ram, sizeof(old_ram));
+    TestSaveBridge(&apu, &before.base);
+    RtlAudioExtensionContext context = TestAudioContext(&apu);
+    NativeAudioExtension_PatchSpcOpcode(&context, pcs[n]);
+    const int expected_cycles = NativeAudioExtension_AdjustSpcOpcodeCycles(pcs[n], 5);
+    TestSaveBridge(&apu, &expected.base);
+    memcpy(expected_ram, apu.ram, sizeof(expected_ram));
+    before.offset = 0; before.loading = true; before.base.saving = false;
+    TestSaveBridge(&apu, &before.base);
+    memcpy(apu.ram, old_ram, sizeof(old_ram)); spc = old_spc;
+    TestSpcOpcodeBridge(&spc, pcs[n]);
+    CHECK(NativeAudioExtension_AdjustSpcOpcodeCycles(pcs[n], 5) == expected_cycles);
+    TestSaveBridge(&apu, &actual.base);
+    CHECK(expected.offset == actual.offset);
+    CHECK(!memcmp(expected.bytes, actual.bytes, actual.offset));
+    CHECK(!memcmp(expected_ram, apu.ram, sizeof(expected_ram)));
+    CHECK(spc.pc == context.spc_pc && spc.x == context.spc_x && spc.z == (context.spc_z != 0));
+  }
+}
+
 int main(void) {
   TestPureRouting();
   TestInstalledBridge();
@@ -876,6 +911,7 @@ int main(void) {
   TestObservedSources();
   TestBurstCompactionAndReservations();
   TestCombinedGameRequestObservation();
+  TestOpcodeFilterEquivalence();
   CHECK(s_lock_depth == 0);
   CHECK(s_max_lock_depth == 1);
   if (s_failures) {

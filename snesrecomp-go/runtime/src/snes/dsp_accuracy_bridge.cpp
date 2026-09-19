@@ -472,7 +472,9 @@ extern "C" void sr_dsp_accuracy_write_virtual_control(
         : pendingKon & static_cast<std::uint8_t>(~bit);
 }
 
-extern "C" SrDspAccuracyFrame sr_dsp_accuracy_clock(
+// Slot 32 retains the independently dispatched single-cycle reference path.
+template<unsigned Slot>
+static SrDspAccuracyFrame clockAccuracy(
     SrDspAccuracy *accuracy, std::uint8_t *apu_ram, bool extended_enabled,
     bool mix_controls_unity,
     const std::uint8_t voice_gain_percent[kVoiceCount],
@@ -482,7 +484,7 @@ extern "C" SrDspAccuracyFrame sr_dsp_accuracy_clock(
       voice_gain_percent == nullptr || voice_muted == nullptr) return output;
 
   DspState& native = accuracy->banks[0];
-  const std::uint8_t slot = native.slotCursor;
+  const std::uint8_t slot = Slot == 32 ? native.slotCursor : Slot;
   const std::uint8_t virtualBankMask = extended_enabled
       ? static_cast<std::uint8_t>(accuracy->activeBankMask & ~1u) : 0u;
   std::array<SlotResult, kBankCount> result{};
@@ -506,7 +508,11 @@ extern "C" SrDspAccuracyFrame sr_dsp_accuracy_clock(
       if (!mix_controls_unity)
         applySlotVoiceGains(virtualBank, bank, voice_gain_percent,
                             voice_muted, hold);
-      result[bank] = snaggletooth::stepDspVoiceCycle(virtualBank, readonly);
+      if constexpr (Slot == 32)
+        result[bank] = snaggletooth::stepDspVoiceCycle(virtualBank, readonly);
+      else
+        result[bank] = snaggletooth::detail::stepDspCycleAtSlot<Slot, false>(
+            virtualBank, readonly, nullptr);
       restoreVoiceGains(virtualBank, hold);
     }
   }
@@ -525,7 +531,11 @@ extern "C" SrDspAccuracyFrame sr_dsp_accuracy_clock(
   if (!mix_controls_unity)
     applySlotVoiceGains(native, 0, voice_gain_percent, voice_muted,
                         nativeHold);
-  result[0] = snaggletooth::stepDspCycle(native, writable);
+  if constexpr (Slot == 32)
+    result[0] = snaggletooth::stepDspCycle(native, writable);
+  else
+    result[0] = snaggletooth::detail::stepDspCycleAtSlot<Slot, true>(
+        native, readonly, apu_ram);
   restoreVoiceGains(native, nativeHold);
 
   if (!result[0].delivered) return output;
@@ -550,15 +560,8 @@ extern "C" SrDspAccuracyFrame sr_dsp_accuracy_clock(
   return output;
 }
 
-extern "C" void dsp_clock(Dsp *dsp) {
-  if (dsp == nullptr || dsp->accuracy == nullptr) return;
-  auto *accuracy = static_cast<SrDspAccuracy *>(dsp->accuracy);
-  if (accuracy->banks[0].slotCursor == 0) dsp_refreshMixControls(dsp);
-  const SrDspAccuracyFrame frame = sr_dsp_accuracy_clock(
-      accuracy, dsp->apu_ram, g_dsp_extended_voices_enabled,
-      dsp->mixControlsUnity, dsp->voiceGainPercent, dsp->voiceMuted);
-  if (!frame.delivered) return;
-
+static void publishFrame(Dsp *dsp, SrDspAccuracy *accuracy,
+                         const SrDspAccuracyFrame& frame) {
   DspState& native = accuracy->banks[0];
   for (int voice = 0; voice < kVoicesPerBank; ++voice) {
     dsp->ram[voiceRegister(voice, 8)] =
@@ -595,6 +598,147 @@ extern "C" void dsp_clock(Dsp *dsp) {
   audio_trace_on_sample(frame.left, frame.right, dropped ? 1 : 0,
                         dropped ? fill : fill + 1u);
   dsp->evenCycle = !dsp->evenCycle;
+}
+
+extern "C" SrDspAccuracyFrame sr_dsp_accuracy_clock(
+    SrDspAccuracy *accuracy, std::uint8_t *apu_ram, bool extended_enabled,
+    bool mix_controls_unity, const std::uint8_t gains[kVoiceCount],
+    const std::uint8_t muted[kVoiceCount]) {
+  return clockAccuracy<32>(accuracy, apu_ram, extended_enabled,
+                            mix_controls_unity, gains, muted);
+}
+
+extern "C" void dsp_clock(Dsp *dsp) {
+  if (dsp == nullptr || dsp->accuracy == nullptr) return;
+  auto *accuracy = static_cast<SrDspAccuracy *>(dsp->accuracy);
+  if (accuracy->banks[0].slotCursor == 0) dsp_refreshMixControls(dsp);
+  const auto frame = clockAccuracy<32>(accuracy, dsp->apu_ram,
+      g_dsp_extended_voices_enabled, dsp->mixControlsUnity,
+      dsp->voiceGainPercent, dsp->voiceMuted);
+  if (frame.delivered) publishFrame(dsp, accuracy, frame);
+}
+
+template<unsigned Slot>
+static void clockDspSlot(Dsp *dsp, SrDspAccuracy *accuracy) {
+  if constexpr (Slot == 0) dsp_refreshMixControls(dsp);
+  const auto frame = clockAccuracy<Slot>(accuracy, dsp->apu_ram,
+      g_dsp_extended_voices_enabled, dsp->mixControlsUnity,
+      dsp->voiceGainPercent, dsp->voiceMuted);
+  if constexpr (Slot == 31) {
+    if (frame.delivered) publishFrame(dsp, accuracy, frame);
+  }
+}
+
+extern "C" void dsp_clockMany(Dsp *dsp, std::uint32_t cycles) {
+  if (dsp == nullptr || dsp->accuracy == nullptr || cycles == 0) return;
+  auto *accuracy = static_cast<SrDspAccuracy *>(dsp->accuracy);
+  // A single entry dispatch, followed by the same ordered slots for every
+  // bank. Never run a complete virtual bank ahead of shared native echo RAM.
+  while (cycles != 0) {
+    switch (accuracy->banks[0].slotCursor) {
+      case 0: clockDspSlot<0>(dsp, accuracy);
+        if (--cycles == 0) return;
+        [[fallthrough]];
+      case 1: clockDspSlot<1>(dsp, accuracy);
+        if (--cycles == 0) return;
+        [[fallthrough]];
+      case 2: clockDspSlot<2>(dsp, accuracy);
+        if (--cycles == 0) return;
+        [[fallthrough]];
+      case 3: clockDspSlot<3>(dsp, accuracy);
+        if (--cycles == 0) return;
+        [[fallthrough]];
+      case 4: clockDspSlot<4>(dsp, accuracy);
+        if (--cycles == 0) return;
+        [[fallthrough]];
+      case 5: clockDspSlot<5>(dsp, accuracy);
+        if (--cycles == 0) return;
+        [[fallthrough]];
+      case 6: clockDspSlot<6>(dsp, accuracy);
+        if (--cycles == 0) return;
+        [[fallthrough]];
+      case 7: clockDspSlot<7>(dsp, accuracy);
+        if (--cycles == 0) return;
+        [[fallthrough]];
+      case 8: clockDspSlot<8>(dsp, accuracy);
+        if (--cycles == 0) return;
+        [[fallthrough]];
+      case 9: clockDspSlot<9>(dsp, accuracy);
+        if (--cycles == 0) return;
+        [[fallthrough]];
+      case 10: clockDspSlot<10>(dsp, accuracy);
+        if (--cycles == 0) return;
+        [[fallthrough]];
+      case 11: clockDspSlot<11>(dsp, accuracy);
+        if (--cycles == 0) return;
+        [[fallthrough]];
+      case 12: clockDspSlot<12>(dsp, accuracy);
+        if (--cycles == 0) return;
+        [[fallthrough]];
+      case 13: clockDspSlot<13>(dsp, accuracy);
+        if (--cycles == 0) return;
+        [[fallthrough]];
+      case 14: clockDspSlot<14>(dsp, accuracy);
+        if (--cycles == 0) return;
+        [[fallthrough]];
+      case 15: clockDspSlot<15>(dsp, accuracy);
+        if (--cycles == 0) return;
+        [[fallthrough]];
+      case 16: clockDspSlot<16>(dsp, accuracy);
+        if (--cycles == 0) return;
+        [[fallthrough]];
+      case 17: clockDspSlot<17>(dsp, accuracy);
+        if (--cycles == 0) return;
+        [[fallthrough]];
+      case 18: clockDspSlot<18>(dsp, accuracy);
+        if (--cycles == 0) return;
+        [[fallthrough]];
+      case 19: clockDspSlot<19>(dsp, accuracy);
+        if (--cycles == 0) return;
+        [[fallthrough]];
+      case 20: clockDspSlot<20>(dsp, accuracy);
+        if (--cycles == 0) return;
+        [[fallthrough]];
+      case 21: clockDspSlot<21>(dsp, accuracy);
+        if (--cycles == 0) return;
+        [[fallthrough]];
+      case 22: clockDspSlot<22>(dsp, accuracy);
+        if (--cycles == 0) return;
+        [[fallthrough]];
+      case 23: clockDspSlot<23>(dsp, accuracy);
+        if (--cycles == 0) return;
+        [[fallthrough]];
+      case 24: clockDspSlot<24>(dsp, accuracy);
+        if (--cycles == 0) return;
+        [[fallthrough]];
+      case 25: clockDspSlot<25>(dsp, accuracy);
+        if (--cycles == 0) return;
+        [[fallthrough]];
+      case 26: clockDspSlot<26>(dsp, accuracy);
+        if (--cycles == 0) return;
+        [[fallthrough]];
+      case 27: clockDspSlot<27>(dsp, accuracy);
+        if (--cycles == 0) return;
+        [[fallthrough]];
+      case 28: clockDspSlot<28>(dsp, accuracy);
+        if (--cycles == 0) return;
+        [[fallthrough]];
+      case 29: clockDspSlot<29>(dsp, accuracy);
+        if (--cycles == 0) return;
+        [[fallthrough]];
+      case 30: clockDspSlot<30>(dsp, accuracy);
+        if (--cycles == 0) return;
+        [[fallthrough]];
+      case 31: clockDspSlot<31>(dsp, accuracy);
+        if (--cycles == 0) return;
+        break;
+      default:
+        // A malformed legacy state must not leave this loop spinning.
+        dsp_clock(dsp);
+        --cycles;
+        break;
+    }
+  }
 }
 
 extern "C" void sr_dsp_accuracy_copy_registers(

@@ -183,9 +183,7 @@ void snes_catchupApu(Snes *snes) {
     }
     if (g_snes_apu_catchup_profile_hook != NULL)
         g_snes_apu_catchup_profile_hook(true, 0u);
-    for (int index = 0; index < cycles; ++index) {
-        apu_cycle(snes->apu);
-    }
+    apu_runCycles(snes->apu, (uint32_t)cycles);
     snes->apuCatchupCycles -= cycles;
     if (snes->apuCatchupCycles < 0.0) {
         snes->apuCatchupCycles = 0.0;

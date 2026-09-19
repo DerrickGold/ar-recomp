@@ -56,6 +56,9 @@ void dsp_clock(Dsp *dsp) {
     dsp->firBufferIndex = (uint8_t)((dsp->firBufferIndex + 1u) & 31u);
     if (dsp->firBufferIndex == 0u) ++dsp->sampleWrite;
 }
+void dsp_clockMany(Dsp *dsp, uint32_t cycles) {
+    while (cycles-- != 0u) dsp_clock(dsp);
+}
 uint8_t dsp_read(Dsp *dsp, uint8_t address) { return dsp->ram[address]; }
 void dsp_write(Dsp *dsp, uint8_t address, uint8_t value) { dsp->ram[address] = value; }
 void dsp_saveload(Dsp *dsp, SaveLoadInfo *info) { (void)dsp; (void)info; }

@@ -401,6 +401,65 @@ static void test_effect_bank_slot_and_echo_parity(void) {
     dsp_setExtendedVoicesEnabled(false);
 }
 
+static void test_batched_clock_equivalence(void) {
+    static const uint32_t spans[] = {0, 1, 2, 7, 16, 31, 32, 33, 65, 257, 1024};
+    uint8_t ram_a[0x10000], ram_b[0x10000];
+    MemoryState *a = calloc(1, sizeof(*a)), *b = calloc(1, sizeof(*b));
+    check(a && b, "batch test state allocation");
+    if (!a || !b) goto done;
+    for (unsigned start = 0; start < 32; ++start) {
+        Dsp *reference = new_dsp(ram_a), *batched = new_dsp(ram_b);
+        if (!reference || !batched) { dsp_free(reference); dsp_free(batched); break; }
+        dsp_setExtendedVoicesEnabled(true);
+        dsp_setBusGains(100, 100);
+        for (unsigned side = 0; side < 2; ++side) {
+            Dsp *dsp = side ? batched : reference;
+            install_looping_brr(side ? ram_b : ram_a, 2, 0x300);
+            dsp_write(dsp, 0x5d, 2); dsp_write(dsp, 0x6c, 0);
+            dsp_write(dsp, 0x6d, 0x80); dsp_write(dsp, 0x7d, 1);
+            dsp_write(dsp, 0x0f, 0x7f);
+            configure_voice(dsp, 6, kDspVoiceBus_Music, true);
+            for (int voice = 14; voice < 40; voice += 8) {
+                configure_voice(dsp, voice, kDspVoiceBus_Sfx, true);
+                configure_voice(dsp, voice + 1, kDspVoiceBus_Sfx, true);
+                control_voice(dsp, voice + 1, 0x2d, true);
+            }
+            for (unsigned cycle = 0; cycle < start; ++cycle) dsp_clock(dsp);
+        }
+        for (unsigned pass = 0; pass < 4; ++pass) {
+            dsp_setExtendedVoicesEnabled(pass != 1);
+            dsp_setBusGains(pass & 1 ? 63 : 100, pass & 1 ? 39 : 100);
+            for (unsigned i = 0; i < sizeof(spans) / sizeof(spans[0]); ++i) {
+                for (unsigned side = 0; side < 2; ++side) {
+                    Dsp *dsp = side ? batched : reference;
+                    write_voice(dsp, 15, 2, (uint8_t)(i * 31));
+                    control_voice(dsp, 15, 0x3d, (i & 1) != 0);
+                    control_voice(dsp, 14, 0x5c, i > 5);
+                    if (i == 3) control_voice(dsp, 14, 0x4c, true);
+                    dsp_write(dsp, 0x7c, 0xff);
+                    dsp_write(dsp, 0x0f, (uint8_t)(i * 17));
+                    (side ? ram_b : ram_a)[0x304] ^= (uint8_t)i;
+                }
+                for (uint32_t c = 0; c < spans[i]; ++c) dsp_clock(reference);
+                dsp_clockMany(batched, spans[i]);
+                a->offset = b->offset = 0;
+                a->info = b->info = (SaveLoadInfo){.func = transfer_state, .portable = true, .saving = true};
+                dsp_saveload(reference, &a->info); dsp_saveload(batched, &b->info);
+                check(!a->info.failed && !b->info.failed && a->offset == b->offset &&
+                          memcmp(a->bytes, b->bytes, a->offset) == 0 &&
+                          memcmp(ram_a, ram_b, sizeof(ram_a)) == 0 &&
+                          memcmp(reference->ram, batched->ram, sizeof(reference->ram)) == 0 &&
+                          memcmp(reference->channel, batched->channel, sizeof(reference->channel)) == 0,
+                      "batched clocks retain PCM, save state, mirrors and echo RAM at every slot");
+            }
+        }
+        dsp_free(reference); dsp_free(batched);
+    }
+done:
+    free(a); free(b);
+    dsp_setExtendedVoicesEnabled(false); dsp_setBusGains(100, 100);
+}
+
 int main(void) {
     dsp_setExtendedVoicesEnabled(false);
     dsp_setMusicBusMuted(false);
@@ -411,6 +470,7 @@ int main(void) {
     test_state_ring_and_resampling();
     test_every_slot_continuation();
     test_effect_bank_slot_and_echo_parity();
+    test_batched_clock_equivalence();
     if (failures != 0) {
         fprintf(stderr, "runtime DSP: %d failure(s)\n", failures);
         return 1;

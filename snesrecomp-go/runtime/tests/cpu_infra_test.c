@@ -370,6 +370,12 @@ static void route_extension_spc_opcode(
     context->spc_z = 1u;
 }
 
+static unsigned extension_filter_count;
+static bool filter_extension_spc_opcode(uint16_t pc) {
+    ++extension_filter_count;
+    return pc == 0x1234u;
+}
+
 static int route_extension_spc_cycle(uint16_t opcode_pc, int cycles) {
     check(opcode_pc == 0x1234u && cycles == 5,
           "audio-extension cycle context");
@@ -454,6 +460,8 @@ static void test_registration_and_initialization(void) {
         .extension_save = route_extension_save,
         .extension_upload = route_extension_upload,
         .spc_upload_prepare_raw = test_spc_upload_prepare_raw,
+        /* Deliberately outside V3's readable extent. */
+        .extension_spc_opcode_filter = filter_extension_spc_opcode,
     };
     static const RtlGameModule module = {
         .abi_version = RTL_GAME_MODULE_ABI_VERSION,
@@ -608,6 +616,7 @@ static void test_registration_and_initialization(void) {
     check(extension_opcode_count == 1 && test_spc.pc == 0x4567u &&
               test_spc.x == 0x34u && test_spc.z,
           "audio-extension SPC mutation bridge");
+    check(extension_filter_count == 0u, "old audio extent ignores filter tail");
     check(g_spc_opcode_cycle_hook(&test_spc, 0x1234u, 5) == 0,
           "audio-extension cycle bridge");
     {
@@ -696,6 +705,32 @@ static void test_registration_and_initialization(void) {
               g_spc_opcode_cycle_hook == NULL &&
               g_apu_extra_saveload_hook == NULL,
           "disabled audio extension leaves no hot hooks");
+    {
+        RtlGameAudioApi filtered = audio;
+        RtlGameModule filtered_module = module;
+        filtered.struct_size = RTL_GAME_AUDIO_API_V4_SIZE;
+        filtered_module.audio = &filtered;
+        RtlAudioExtensionConfigure(true);
+        check(RtlRegisterGame(&filtered_module) == SR_RESULT_OK,
+              "register optional audio opcode filter");
+        test_spc.pc = 0x1234u; test_spc.x = 0x12u;
+        g_spc_opcode_patch_hook(&test_spc, 0x9999u);
+        check(extension_opcode_count == 1 && test_spc.pc == 0x1234u &&
+                  extension_filter_count == 1u,
+              "filter skips context and mutation for unrelated opcodes");
+        g_spc_opcode_patch_hook(&test_spc, 0x1234u);
+        check(extension_opcode_count == 2 && extension_filter_count == 2u &&
+                  test_spc.pc == 0x4567u,
+              "interested opcode retains mutable context");
+        check(g_spc_opcode_cycle_hook(&test_spc, 0x1234u, 5) == 0,
+              "opcode filtering does not remove cycle charging");
+        filtered.extension_spc_opcode = NULL;
+        check(RtlRegisterGame(&filtered_module) == SR_RESULT_INVALID_ARGUMENT,
+              "reject filter without opcode callback");
+        RtlAudioExtensionConfigure(false);
+        check(RtlRegisterGame(&module) == SR_RESULT_OK,
+              "restore process-lifetime audio table after filter test");
+    }
 }
 
 static void test_indirect_pointer(void) {

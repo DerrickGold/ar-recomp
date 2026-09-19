@@ -1491,6 +1491,28 @@ static void dispatchPrimedSlot(DspState& dsp, std::span<const std::uint8_t, 6553
 // T31 — the same cycle the frame-at-once model delivered on, so a write during the
 // first sample's slots reaches it exactly as before — then primes the schedule for
 // voice 0; every later sample is slot-scheduled.
+template<std::uint8_t Slot, bool ProcessEcho>
+SlotResult detail::stepDspCycleAtSlot(DspState& dsp,
+    std::span<const std::uint8_t, 65536> ram, std::uint8_t* echoRam) noexcept {
+  static_assert(Slot < 32);
+  ++dsp.cycleCount;
+  if (!dsp.primed) {
+    if constexpr (Slot == 31) {
+      dsp.slotFrame = stepDspSampleAtomic(dsp, ram, echoRam, ProcessEcho);
+      dsp.primed = true;
+    }
+  } else {
+    runPrimedSlot<Slot, ProcessEcho>(dsp, ram, echoRam);
+  }
+  dsp.slotCursor = static_cast<std::uint8_t>((Slot + 1) & 31);
+  SlotResult result{};
+  if constexpr (Slot == 31) {
+    result.frame = dsp.slotFrame;
+    result.delivered = true;
+  }
+  return result;
+}
+
 template<bool processEcho>
 static SlotResult stepDspCycleImpl(DspState& dsp, std::span<const std::uint8_t, 65536> ram,
                                    std::uint8_t* echoRam) noexcept {

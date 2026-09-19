@@ -316,6 +316,42 @@ void apu_cycle(Apu *apu) {
     ++apu->cycles;
 }
 
+void apu_runCycles(Apu *apu, uint32_t cycles) {
+    if (apu == NULL) return;
+    /* Preserve all diagnostic observation points, including per-sample trace
+     * callbacks seeing the exact in-flight APU clock/timer state. */
+    if (apu->diagnosticCountersEnabled || audio_trace_enabled() ||
+        sr_runner_audio_trace_enabled(UINT64_MAX)) {
+        while (cycles-- != 0u) apu_cycle(apu);
+        return;
+    }
+    while (cycles != 0u) {
+        uint32_t span = cycles;
+        /* The next opcode may read/write any ARAM byte or run a game hook.
+         * Port apply, timer edges and PCM publication also stay scalar. No
+         * batch crosses any of these boundaries or executes an opcode early. */
+        if (apu->cpuCyclesLeft == 0u || apu->dspSlot == 0u ||
+            apu->dspSlot == 31u || apu->timer[0].cycles == 0u ||
+            apu->timer[1].cycles == 0u || apu->timer[2].cycles == 0u) {
+            apu_cycle(apu);
+            --cycles;
+            continue;
+        }
+        if (span > apu->cpuCyclesLeft) span = apu->cpuCyclesLeft;
+        if (span > 31u - apu->dspSlot) span = 31u - apu->dspSlot;
+        for (unsigned index = 0u; index < 3u; ++index)
+            if (span > apu->timer[index].cycles) span = apu->timer[index].cycles;
+        dsp_clockMany(apu->dsp, span);
+        apu->cpuCyclesLeft = (uint8_t)(apu->cpuCyclesLeft - span);
+        apu->dspSlot = (uint8_t)(apu->dspSlot + span);
+        for (unsigned index = 0u; index < 3u; ++index)
+            apu->timer[index].cycles = (uint8_t)(apu->timer[index].cycles - span);
+        apu->cycleClock += span;
+        apu->cycles += span;
+        cycles -= span;
+    }
+}
+
 uint8_t apu_cpuRead(Apu *apu, uint16_t address) {
     if (apu == NULL) return 0u;
     switch (address) {

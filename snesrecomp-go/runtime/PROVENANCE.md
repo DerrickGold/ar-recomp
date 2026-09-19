@@ -68,6 +68,13 @@ Dormant virtual banks fast-forward only their shared timeline
 on KON; all active voice state continues through the same slot engine.
 Slot specialization removes repeated schedule tests and address calculations;
 it does not skip silent voices, latch updates, RAM reads, or hardware cycles.
+The local span entry point additionally shares the same slot bodies through a
+single entry dispatch and ordered fallthrough, with every bank still interleaved
+per slot. The APU batches only countdown cycles between observable boundaries;
+the original cycle-dispatched path remains the diagnostic and differential-test
+reference. These adaptations change neither the imported signal arithmetic nor
+the snapshot format. Local DSP/APU equivalence tests cover every starting slot,
+mid-sample register/ARAM writes, echo, extended banks and serialized continuation.
 
 The engine-neutral shadow-verifier design is derived from Jrickey's reusable
 recomp verifier under its MIT OR Apache-2.0 grant; its attribution is retained

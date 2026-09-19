@@ -196,6 +196,11 @@ typedef bool RtlGameAudioExtensionDspWriteFunc(
     RtlAudioExtensionContext *context, uint8_t address, uint8_t *value);
 typedef void RtlGameAudioExtensionSpcOpcodeFunc(
     RtlAudioExtensionContext *context, uint16_t opcode_pc);
+/** Optional preflight, called at every opcode before constructing a mutable
+ * context. May update game-owned extension bookkeeping, but must not access
+ * runner state or re-enter the runner. False skips only the opcode callback;
+ * cycle charging still runs. Omission preserves the unfiltered contract. */
+typedef bool RtlGameAudioExtensionSpcOpcodeFilterFunc(uint16_t opcode_pc);
 typedef int RtlGameAudioExtensionSpcCycleFunc(
     uint16_t opcode_pc, int cycles);
 typedef void RtlGameAudioExtensionSaveFunc(RtlAudioSaveContext *context);
@@ -238,6 +243,7 @@ typedef struct RtlGameAudioApi {
     RtlGameSpcUploadCompletedFunc *spc_upload_completed;
     RtlGameAudioMixFunc *mix_output;
     RtlGameSpcUploadPrepareRawFunc *spc_upload_prepare_raw;
+    RtlGameAudioExtensionSpcOpcodeFilterFunc *extension_spc_opcode_filter;
 } RtlGameAudioApi;
 
 #define RTL_GAME_AUDIO_API_V2_SIZE                                      \
@@ -246,6 +252,9 @@ typedef struct RtlGameAudioApi {
 #define RTL_GAME_AUDIO_API_V3_SIZE                                      \
     ((uint32_t)(offsetof(RtlGameAudioApi, spc_upload_prepare_raw) +      \
                 sizeof(((RtlGameAudioApi *)0)->spc_upload_prepare_raw)))
+#define RTL_GAME_AUDIO_API_V4_SIZE                                      \
+    ((uint32_t)(offsetof(RtlGameAudioApi, extension_spc_opcode_filter) + \
+                sizeof(((RtlGameAudioApi *)0)->extension_spc_opcode_filter)))
 
 /** One immutable module is registered before runner creation and remains alive
  * until it is replaced while no runner exists. Optional table pointers must

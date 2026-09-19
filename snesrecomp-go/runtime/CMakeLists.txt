@@ -246,6 +246,13 @@ if(BUILD_TESTING)
     add_test(NAME snesrecomp_runtime_apu
         COMMAND snesrecomp_runtime_apu_test)
 
+    add_executable(snesrecomp_runtime_apu_batch_test
+        tests/apu_batch_test.c tests/apu_sync_stub.c)
+    target_link_libraries(snesrecomp_runtime_apu_batch_test PRIVATE
+        snesrecomp_runtime)
+    add_test(NAME snesrecomp_runtime_apu_batch
+        COMMAND snesrecomp_runtime_apu_batch_test)
+
     add_executable(snesrecomp_runtime_spc_test tests/spc_test.c)
     target_link_libraries(snesrecomp_runtime_spc_test PRIVATE
         snesrecomp_runtime)
@@ -440,6 +447,7 @@ if(BUILD_TESTING)
         snesrecomp_runtime_dma_test
         snesrecomp_runtime_snes_test
         snesrecomp_runtime_apu_test
+        snesrecomp_runtime_apu_batch_test
         snesrecomp_runtime_spc_test
         snesrecomp_runtime_dsp_test
         snesrecomp_runtime_audio_shadow_test

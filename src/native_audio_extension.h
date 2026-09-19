@@ -89,6 +89,7 @@ bool NativeAudioExtension_FilterDspWrite(
     RtlAudioExtensionContext *context, uint8_t address, uint8_t *value);
 void NativeAudioExtension_PatchSpcOpcode(
     RtlAudioExtensionContext *context, uint16_t opcode_pc);
+bool NativeAudioExtension_WantsSpcOpcode(uint16_t opcode_pc);
 int NativeAudioExtension_AdjustSpcOpcodeCycles(
     uint16_t opcode_pc, int cycles);
 void NativeAudioExtension_SaveState(RtlAudioSaveContext *context);

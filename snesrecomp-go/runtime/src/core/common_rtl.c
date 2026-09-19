@@ -616,7 +616,7 @@ void RtlAdvanceApuTimeline(void) {
         if (cycles > RTL_APU_PRODUCTION_CHUNK_CYCLES)
             cycles = RTL_APU_PRODUCTION_CHUNK_CYCLES;
         audio_trace_set_producer(AUDIO_TRACE_PRODUCER_CPU);
-        for (uint64_t index = 0u; index < cycles; ++index) apu_cycle(apu);
+        apu_runCycles(apu, (uint32_t)cycles);
         audio_trace_set_producer(AUDIO_TRACE_PRODUCER_UNKNOWN);
         sr_runner_record_apu_profile_cycles(
             SR_APU_PROFILE_CYCLE_TIMELINE, cycles, 0u);
@@ -959,12 +959,15 @@ void RtlRenderAudio(int16 *audio_buffer, int samples, int channels) {
             dsp = g_snes->apu->dsp;
             available = dsp->sampleWrite - dsp->sampleRead;
             if (available < needed) {
-                int cycle_budget = RTL_APU_PRODUCTION_CHUNK_CYCLES;
+                uint32_t cycle_budget = RTL_APU_PRODUCTION_CHUNK_CYCLES;
+                const uint64_t demand_cycles =
+                    (uint64_t)(needed - available) * RTL_AUDIO_CYCLES_PER_SAMPLE -
+                    g_snes->apu->dspSlot;
+                if (demand_cycles < cycle_budget)
+                    cycle_budget = (uint32_t)demand_cycles;
                 const uint64_t cycle_start = snes_apu_cycle_count();
                 audio_trace_set_producer(AUDIO_TRACE_PRODUCER_AUDIO);
-                while (cycle_budget-- > 0 &&
-                       dsp->sampleWrite - dsp->sampleRead < needed)
-                    apu_cycle(g_snes->apu);
+                apu_runCycles(g_snes->apu, cycle_budget);
                 audio_trace_set_producer(AUDIO_TRACE_PRODUCER_UNKNOWN);
                 sr_runner_record_apu_profile_cycles(
                     SR_APU_PROFILE_CYCLE_AUDIO_DEMAND,

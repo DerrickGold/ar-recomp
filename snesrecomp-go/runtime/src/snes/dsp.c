@@ -413,9 +413,7 @@ uint8_t dsp_currentSlot(const Dsp *dsp) {
 }
 
 void dsp_cycle(Dsp *dsp) {
-    int slot;
-    if (dsp == NULL) return;
-    for (slot = 0; slot < 32; ++slot) dsp_clock(dsp);
+    dsp_clockMany(dsp, 32u);
 }
 
 void dsp_getSamples(Dsp *dsp, int16_t *samples, int sample_count) {

@@ -33,6 +33,9 @@ Apu *apu_init(void) { return (Apu *)calloc(1u, sizeof(Apu)); }
 void apu_free(Apu *apu) { free(apu); }
 void apu_reset(Apu *apu) { memset(apu, 0, sizeof(*apu)); }
 void apu_cycle(Apu *apu) { ++apu->cycles; ++apu_cycles; }
+void apu_runCycles(Apu *apu, uint32_t cycles) {
+    while (cycles-- != 0u) apu_cycle(apu);
+}
 uint8_t apu_cpuRead(Apu *apu, uint16_t address) { return apu->ram[address]; }
 void apu_cpuWrite(Apu *apu, uint16_t address, uint8_t value) { apu->ram[address] = value; }
 void apu_saveload(Apu *apu, SaveLoadInfo *info) { (void)apu; (void)info; }

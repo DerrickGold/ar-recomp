@@ -1060,6 +1060,17 @@ bool NativeAudioExtension_FilterDspWrite(
   return true;
 }
 
+bool NativeAudioExtension_WantsSpcOpcode(uint16_t pc) {
+  /* Keep the serialized per-opcode cycle-charge latch even when this
+   * instruction needs no mutable context. */
+  s_state.current_opcode_free = s_enabled && s_state.scheduler_active &&
+      s_state.current_update_free;
+  return s_enabled && (pc == kEffectDriverEntry ||
+      pc == kEffectUpdateReturn || pc == kEffectCleanupReturn ||
+      pc == kEffectEmptyReturn || pc == 0x080a || pc == 0x04d4 ||
+      pc == 0x05b6 || pc == 0x080e);
+}
+
 void NativeAudioExtension_PatchSpcOpcode(
     RtlAudioExtensionContext *context, uint16_t pc) {
   uint8_t *ram;
