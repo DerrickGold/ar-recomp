@@ -141,6 +141,14 @@ static bool ReserveSource(size_t added) {
   return true;
 }
 
+static ArRenderColorF RadialModelColor(uint32_t argb, bool lighting, uint8_t brightness) {
+  const float shade = lighting ? .74f + .18f * brightness / 255.0f : .88f;
+  return (ArRenderColorF){
+    ((argb >> 16) & 255) / 255.0f * shade, ((argb >> 8) & 255) / 255.0f * shade,
+    (argb & 255) / 255.0f * shade, (argb >> 24) / 255.0f,
+  };
+}
+
 static bool AppendSource(const WorldNavigationModelSource *source,
     const WorldNavigationModelSourceStyle *style, unsigned pose, bool animated) {
   WorldPreparedModel prepared;
@@ -176,11 +184,8 @@ static bool AppendSource(const WorldNavigationModelSource *source,
               (source->source_x+x*source_scale)/kSimWorldMapTilePixels,
               (source->source_y+y*source_scale)/kSimWorldMapTilePixels,
               v->elevation[0], v->elevation[1], v->normal, v->elevation)) return false;
-      const float shade = style->lighting ? .74f + .18f * shading->brightness[face][p] / 255.0f : .88f;
-      v->color = (ArRenderColorF){
-        ((argb >> 16) & 255) / 255.0f * shade, ((argb >> 8) & 255) / 255.0f * shade,
-        (argb & 255) / 255.0f * shade, (argb >> 24) / 255.0f,
-      };
+      v->color = RadialModelColor(argb,style->lighting,
+          shading ? shading->brightness[face][p] : 255);
       if (focus>0) v->color=PresentSimGlobeFocus_Color(&style->focus,focus,v->color);
       v->variant = animated ? (float)(pose + 1) : 0;
     }
@@ -300,7 +305,9 @@ static bool AppendFacingSource(const WorldNavigationModelSource *source,
     const WorldNavigationModelSourceStyle *style, SimBackgroundVoxelShading shading,
     unsigned pose, TownSourceBuilder *builder) {
   WorldPreparedModel prepared;
-  if (!PrepareSourceModel(source,style,pose,shading,&prepared)) return false;
+  const bool bridge = source->object.kind == kSimBackgroundVoxel_Bridge;
+  if (!PrepareSourceModel(source,style,pose,
+          bridge ? kSimBackgroundVoxelShading_AmbientOcclusion : shading,&prepared)) return false;
   const size_t added = (size_t)prepared.model->face_count*4;
   if (added > (size_t)kSim3DMeshSetMaximumQuads*4-builder->count) return false;
   const size_t needed = builder->count+added;
@@ -325,6 +332,11 @@ static bool AppendFacingSource(const WorldNavigationModelSource *source,
     ArRenderColorF colors[4];
     SimBackgroundVoxelProject_FaceColors(material,brightness,&prepared.palette,
         style->lighting ? shading : kSimBackgroundVoxelShading_Basic,colors);
+    if (bridge) {
+      const uint32_t argb = SimBackgroundVoxelPalette_Base(&prepared.palette,material);
+      for (unsigned p = 0; p < 4; ++p)
+        colors[p] = RadialModelColor(argb,style->lighting,brightness[p]);
+    }
     for (unsigned p = 0; p < 4; ++p) {
       const SimBackgroundVoxelModelPoint *point = &authored->points[p];
       const float x = source->centre_x+(point->x-source->centre_x)*prepared.proportions->footprint_scale;
@@ -332,6 +344,22 @@ static bool AppendFacingSource(const WorldNavigationModelSource *source,
       Sim3DDepthLinearVertex *v = &builder->vertices[builder->count++];
       *v = (Sim3DDepthLinearVertex){.color = colors[p],
           .displacement = point->z*prepared.height_scale,.axis = source->object.kind};
+      if (bridge) {
+        /* Bake geometric height along the globe normal. The linear stream is
+         * used only for its independent depth probe: bridges never billboard.
+         * Keep the approach silhouette while protecting the paving from the
+         * higher terrain under the rigid footprint. */
+        const float chart_x = (source->source_x+x*source_scale)/kSimWorldMapTilePixels;
+        const float chart_y = (source->source_y+y*source_scale)/kSimWorldMapTilePixels;
+        float safety[3];
+        if (!SimGlobeMapping_Point(&style->embedding, chart_x, chart_y,
+                source->anchor_height, v->displacement, v->position) ||
+            !SimGlobeMapping_Point(&style->embedding, chart_x, chart_y,
+                source->depth_height, v->displacement, safety)) return false;
+        v->depth_offset = safety[2] - v->position[2];
+        v->displacement = 0;
+        continue;
+      }
       /* The footprint follows the shared globe. Camera-facing height is a
        * separate GPU displacement, never applied to terrain altitude. */
       if (!SimGlobeMapping_Point(&style->embedding,
@@ -357,7 +385,6 @@ bool WorldNavigationModelMesh_DrawFacingTown(
   for (size_t i = 0; i < count; ++i)
     if (sources[i].object.town != style->embedding.town ||
         sources[i].object.kind >= kSimBackgroundVoxelKindCount ||
-        sources[i].object.kind == kSimBackgroundVoxel_Bridge ||
         (unsigned)sources[i].detail >= kDetailCount) return false;
   if (!count) { ResetTownModels(); return true; }
   bool ready = s_town_models.ready;

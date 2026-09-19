@@ -489,13 +489,33 @@ static bool BottomClusterInk(
 }
 
 static void TestNumeralStyling(const ArTextRasterizer *rasterizer) {
-  const char *const samples[] = {"ACT 1", "Étage 9", "日本 2", "العربية 3", "A 1\xcc\x81"};
+  const char *const samples[] = {"ACT 1", "Étage 9", "日本 2", "العربية 3", "A 1\xcc\x81",
+      "Level 300", "Level  \t300", "Level 9 needs 300", "Level\n300",
+      "Level\xe2\x80\x83" "300", "Level\xe3\x80\x80" "300", "Level\r\n300"};
   char error[256];
   for (unsigned i = 0; i < sizeof(samples) / sizeof(samples[0]); ++i) {
     ArTextRasterRequest request = Request(samples[i]);
     request.direction = kArTextDirection_Auto;
     request.flags = kArTextRasterFlag_IncludeRevealClusters;
     request.maximum_width = 2048;
+    const bool wrapped = i == 5 || i == 6 || i == 9 || i == 10;
+    ArTextBidiSpan spans[2];
+    size_t span_count = 0;
+    if (i >= 5) {
+      /* Dialogue values each carry an LTR isolate, even on an English page. */
+      for (size_t at = 0; at < request.utf8_bytes; ++at) {
+        if (samples[i][at] < '0' || samples[i][at] > '9') continue;
+        const size_t start = at;
+        while (at < request.utf8_bytes && samples[i][at] >= '0' && samples[i][at] <= '9') ++at;
+        spans[span_count++] = (ArTextBidiSpan){start, at, kArTextDirection_LeftToRight};
+      }
+      request.bidi_spans = spans;
+      request.bidi_span_count = span_count;
+      if (wrapped) {
+        request.maximum_width = 100;
+        request.flags |= kArTextRasterFlag_WrapWords;
+      }
+    }
     ArTextBitmap plain, slanted;
     CHECK(ArTextRasterizer_Rasterize(rasterizer, &request, &plain, NULL, error, sizeof(error)));
     request.flags |= kArTextRasterFlag_SlantAsciiNumerals;
@@ -505,7 +525,17 @@ static void TestNumeralStyling(const ArTextRasterizer *rasterizer) {
     bool moved = false;
     for (size_t c = 0; c < plain.reveal_cluster_count; ++c) {
       CHECK(!memcmp(&plain.reveal_clusters[c], &slanted.reveal_clusters[c], sizeof(ArTextRevealCluster)));
-      const bool number = i != 4 && plain.reveal_clusters[c].end_utf8_byte == request.utf8_bytes;
+      const size_t end = plain.reveal_clusters[c].end_utf8_byte;
+      /* Expected numeral membership comes from the authored sample, not the
+       * production classifier's inferred start (which may include a gap). */
+      const bool number = i != 4 && end > 0 &&
+          samples[i][end - 1] >= '0' && samples[i][end - 1] <= '9';
+      if (wrapped && number) {
+        CHECK(plain.reveal_clusters[c].y >= plain.reveal_clusters[0].y + plain.line_advance);
+        if (samples[i][end - 1] == '3') {
+          CHECK(c > 0 && plain.reveal_clusters[c - 1].end_utf8_byte < end - 1);
+        }
+      }
       int bottom = -1;
       for (int y = 0; y < plain.height; ++y)
         for (int x = 0; x < plain.width; ++x)

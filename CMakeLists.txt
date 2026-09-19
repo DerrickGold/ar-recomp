@@ -979,6 +979,7 @@ if(BUILD_TESTING)
         COMMAND actraiser_sim_world_navigation_palace_test)
 
     set(AR_WORLD_NAV_TEST_SOURCES
+        src/presentation_upload_mirror.c
         src/sim/sim_render_visibility.c
         src/sim/sim3d_mesh_set.c
         src/performance_metrics.c
@@ -1232,6 +1233,27 @@ if(BUILD_TESTING)
     target_include_directories(actraiser_render_sdl_present_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     target_link_libraries(actraiser_render_sdl_present_test PRIVATE SDL3::SDL3 actraiser_math)
     add_test(NAME actraiser_render_sdl_present COMMAND actraiser_render_sdl_present_test)
+
+    add_executable(actraiser_render_upload_metrics_test
+        tests/render_upload_metrics_test.c
+        src/platform/sdl/render_sdl.c src/render/render_device.c
+        src/presentation_upload_mirror.c src/performance_metrics.c
+        src/sim/sim3d_performance.c src/diorama/diorama_performance.c)
+    target_include_directories(actraiser_render_upload_metrics_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    target_link_libraries(actraiser_render_upload_metrics_test PRIVATE SDL3::SDL3 actraiser_math)
+    add_test(NAME actraiser_render_upload_metrics COMMAND actraiser_render_upload_metrics_test)
+
+    add_executable(actraiser_gpu_texture_upload_layout_test tests/gpu_texture_upload_layout_test.c)
+    target_include_directories(actraiser_gpu_texture_upload_layout_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    add_test(NAME actraiser_gpu_texture_upload_layout COMMAND actraiser_gpu_texture_upload_layout_test)
+
+    add_executable(actraiser_present_sim3d_canvas_test
+        tests/present_sim3d_canvas_test.c src/present_sim3d_canvas.c
+        src/render/render_device.c src/render/upload_rect_run.c)
+    target_include_directories(actraiser_present_sim3d_canvas_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    target_link_libraries(actraiser_present_sim3d_canvas_test PRIVATE actraiser_math)
+    add_test(NAME actraiser_present_sim3d_canvas COMMAND actraiser_present_sim3d_canvas_test)
 
     add_executable(actraiser_camera_orbit_test
         tests/camera_orbit_test.c

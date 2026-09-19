@@ -69,6 +69,31 @@ typedef struct ArLocalizedPreparedFrame {
   uint64_t ready_dialogue_ticket;
 } ArLocalizedPreparedFrame;
 
+/* Why a live field used the whole-page path. Counts include expected layout
+ * limitations as well as failures, so performance regressions are observable. */
+typedef enum ArLocalizedLiveLineResult {
+  kArLiveLine_Prepared,
+  kArLiveLine_UnsupportedLayout,
+  kArLiveLine_InvalidField,
+  kArLiveLine_CapacityExceeded,
+  kArLiveLine_SpanCrossesField,
+  kArLiveLine_MissingValueSpan,
+  kArLiveLine_RasterFailed,
+  kArLiveLine_IncompatibleMetrics,
+  kArLiveLine_FieldWrapped,
+  kArLiveLine_ObjectPlacementFailed,
+  kArLiveLine_IndicatorPlacementFailed,
+  kArLiveLine_ResultCount,
+} ArLocalizedLiveLineResult;
+
+typedef struct ArLocalizedLiveLineStats {
+  uint64_t attempts;
+  uint64_t results[kArLiveLine_ResultCount];
+} ArLocalizedLiveLineStats;
+
+/* Presenter-thread counters since Reset, including successful preparations. */
+ArLocalizedLiveLineStats ArLocalizedTextPresenter_GetLiveLineStats(void);
+
 /* The host injects a portable factory once. No SDL type crosses this API. */
 void ArLocalizedTextPresenter_SetBackend(const ArTextBackend *backend);
 /* Provider/context outlive active and pending backend leases. Reset resources

@@ -3,8 +3,6 @@
 #include <math.h>
 #include <string.h>
 
-#include "performance_metrics.h"
-
 static bool HasRequiredOps(const ArRenderBackendOps *ops) {
   return ops && ops->struct_size >= sizeof(*ops) &&
       ops->create_texture && ops->destroy_texture && ops->update_texture &&
@@ -63,15 +61,8 @@ bool ArRenderDevice_UpdateTexture(ArRenderDevice *device,
   if (!ArRenderDevice_IsReady(device) || !ArRenderTexture_IsValid(texture) ||
       !pixels || pitch_bytes <= 0)
     return false;
-  /* Counted here rather than at each caller so the total covers every
-   * subsystem that uploads, including ones added later. Backends can carry a
-   * large fixed cost per call, so the CALL count is as much a performance
-   * fact as the byte count; a stage dominated by it wants fewer, larger
-   * transfers, which is the opposite of what a byte-only view suggests. */
-  PerformanceMetrics_Add(kPerformanceCount_UploadCalls, 1);
-  if (destination && destination->w > 0 && destination->h > 0)
-    PerformanceMetrics_Add(kPerformanceCount_UploadBytes,
-        (uint64_t)destination->w * (uint64_t)destination->h * 4u);
+  /* Backends count upload traffic: only they know the extent and pixel format
+   * of an opaque texture when destination is NULL. */
   return device->ops->update_texture(
       device->context, texture, destination, pixels, pitch_bytes);
 }

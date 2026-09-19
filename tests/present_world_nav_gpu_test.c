@@ -28,6 +28,9 @@
 #include "sim/sim_world_navigation_capture.h"
 #include "sim/sim_town_ground_art.h"
 #include "sim/sim_background_voxel_model_cache.h"
+#include "sim/sim_background_bridge.h"
+#include "sim/sim_background_voxel_biome.h"
+#include "sim/sim_background_voxel_palette.h"
 #include "sim/sim_world_navigation_mountains.h"
 #include "sim/sim_world_navigation_terrain.h"
 #include "sim/sim_world_map_compose.h"
@@ -1739,6 +1742,122 @@ static void TestCapturedFacingMotion(SDL_Renderer *renderer, const FrameSlot *sl
   SDL_DestroySurface(first); WorldNavigationModelMesh_Reset();
 }
 
+static SDL_Surface *RenderBridgeClearance(SDL_Renderer *renderer,
+    WorldNavigationModelSource source, const WorldNavigationModelSourceStyle *style,
+    const float matrix[16], unsigned mode) {
+  CHECK(Sim3DDepthPass_Begin(&g_render_device,kWidth,kHeight,kArRenderFilter_Nearest));
+  Sim3DDepthMesh *terrain = NULL;
+  if (mode) {
+    /* Real authored Marahna slopes below the bridge, with conspicuous green
+     * ink so even a small triangle punching through the paving is observable. */
+    Sim3DDepthLinearVertex vertices[3*3*4] = {0};
+    size_t count = 0;
+    for (int y = 25; y <= 27; ++y) for (int x = 3; x <= 5; ++x) {
+      const int dx[] = {0,1,1,0}, dy[] = {0,0,1,1};
+      for (unsigned p = 0; p < 4; ++p) {
+        Sim3DDepthLinearVertex *v = &vertices[count++];
+        float height;
+        CHECK(SimWorldNavigationTerrain_RegisterTownFloor(5,x+dx[p],y+dy[p],
+            SimTownTerrain_CornerUnits(5,x,y,p),&height));
+        CHECK(SimGlobeMapping_Point(&style->embedding,
+            style->embedding.origin_x+x+dx[p],style->embedding.origin_y+y+dy[p],
+            height,0,v->position));
+        v->color = (ArRenderColorF){0,1,0,1};
+      }
+    }
+    terrain = Sim3DDepthPass_CreateLinearMesh();
+    CHECK(terrain && Sim3DDepthPass_UpdateLinearMesh(terrain,vertices,count/4));
+    Sim3DDepthLinearTransform transform = {0};
+    memcpy(transform.matrix,matrix,sizeof(transform.matrix));
+    CHECK(Sim3DDepthPass_AppendLinearMesh(terrain,&transform));
+  }
+  if (mode == 1) source.depth_height = source.anchor_height;
+  SimBackgroundProjectionAxis axes[kSimBackgroundVoxelKindCount];
+  for (unsigned i = 0; i < kSimBackgroundVoxelKindCount; ++i)
+    axes[i] = kSimBackgroundUprightProjectionAxis;
+  CHECK(WorldNavigationModelMesh_DrawFacingTown(&source,1,style,
+      kSimBackgroundVoxelShading_Basic,axes,matrix,0));
+  ArRenderTexture result = Sim3DDepthPass_Submit(&g_render_device,ArRenderTexture_Invalid());
+  CHECK(ArRenderTexture_IsValid(result));
+  CHECK(ArRenderDevice_SetRenderTarget(&g_render_device,result));
+  SDL_Surface *raw = SDL_RenderReadPixels(renderer,NULL); CHECK(raw);
+  SDL_Surface *image = SDL_ConvertSurface(raw,SDL_PIXELFORMAT_ARGB8888); CHECK(image);
+  SDL_DestroySurface(raw);
+  CHECK(ArRenderDevice_SetRenderTarget(&g_render_device,ArRenderTexture_Invalid()));
+  Sim3DDepthPass_DestroyMesh(terrain);
+  return image;
+}
+
+static void TestBridgeTerrainClearance(SDL_Renderer *renderer) {
+  int tx, ty;
+  CHECK(SimWorldMap_OriginForTown(5,&tx,&ty));
+  unsigned reproduced = 0;
+  for (unsigned axis = 0; axis < 2; ++axis)
+  for (unsigned scale = 0; scale < 4; ++scale)
+  for (unsigned orbit = 0; orbit < 2; ++orbit) {
+    const float landscape[] = {0,.4f,1,1.5f};
+    WorldNavigationModelSource source = {
+      .object = {.town=5,.kind=kSimBackgroundVoxel_Bridge,.cell_x=4,.cell_y=26,
+        .bridge_axis=axis ? kSimBackgroundBridgeAxis_NorthSouth : kSimBackgroundBridgeAxis_EastWest,
+        .bridge_bank_a_x=axis ? 4 : 3,.bridge_bank_a_y=axis ? 25 : 26,
+        .bridge_bank_b_x=axis ? 4 : 5,.bridge_bank_b_y=axis ? 27 : 26},
+      .detail=kSimBackgroundVoxelDetail_High,
+    };
+    const SimBackgroundBridgeBounds bounds = SimBackgroundBridge_ResolveBounds(&source.object);
+    source.source_x = tx*8+bounds.origin_x*.5f;
+    source.source_y = ty*8+bounds.origin_y*.5f;
+    source.centre_x = bounds.width*.5f; source.centre_y = bounds.depth*.5f;
+    const float cx = (bounds.origin_x+source.centre_x)/16;
+    const float cy = (bounds.origin_y+source.centre_y)/16;
+    float approach, envelope;
+    CHECK(SimBackgroundBridge_TerrainHeights(&source.object,5,&approach,&envelope));
+    CHECK(SimWorldNavigationTerrain_RegisterTownFloor(5,cx,cy,approach,&source.anchor_height));
+    CHECK(SimWorldNavigationTerrain_RegisterTownFloor(5,cx,cy,envelope,&source.depth_height));
+    WorldNavigationModelSourceStyle style = {.chart_radius_tiles=160,
+      .height_percent=100,.style=kSimBackgroundVoxelStyle_Varied};
+    CHECK(SimGlobeMapping_Build(5,tx,ty,160,source.anchor_height,landscape[scale],&style.embedding));
+    style.tile_world = 1/style.embedding.metric;
+    float center[3];
+    CHECK(SimGlobeMapping_Point(&style.embedding,tx+cx,ty+cy,source.anchor_height,0,center));
+    /* Close orthographic views of the same crossing at two orbit angles. */
+    const float yaw = orbit*.8f, c = cosf(yaw), s = sinf(yaw);
+    float matrix[16] = {c*.7f,-s*.6f,-s*.1f,0,
+      s*.7f,c*.6f,c*.1f,0, 0,.4f,-.15f,0, 0,0,0,1};
+    for (unsigned row = 0; row < 3; ++row)
+      matrix[12+row] = -(matrix[row]*center[0]+matrix[4+row]*center[1]+matrix[8+row]*center[2]);
+    SDL_Surface *reference = RenderBridgeClearance(renderer,source,&style,matrix,0);
+    SDL_Surface *unprotected = RenderBridgeClearance(renderer,source,&style,matrix,1);
+    SDL_Surface *protected = RenderBridgeClearance(renderer,source,&style,matrix,2);
+    SimBackgroundVoxelPalette palette;
+    SimBackgroundVoxelPalette_Build(&source.object,SimBackgroundVoxelBiome_ForTown(5),&palette);
+    const uint32_t base = SimBackgroundVoxelPalette_Base(&palette,kSimVoxelMaterial_Paving);
+    const uint32_t paving = 0xff000000u |
+        (uint32_t)roundf(((base >> 16) & 255)*.88f) << 16 |
+        (uint32_t)roundf(((base >> 8) & 255)*.88f) << 8 |
+        (uint32_t)roundf((base & 255)*.88f);
+    unsigned deck_pixels = 0, lost_before = 0, lost_after = 0;
+    if (reference && unprotected && protected)
+      for (int y = 0; y < kHeight; ++y) for (int x = 0; x < kWidth; ++x) {
+        if (Pixel(reference,x,y) != paving) continue;
+        ++deck_pixels;
+        lost_before += Pixel(unprotected,x,y) != paving;
+        lost_after += Pixel(protected,x,y) != paving;
+      }
+    CHECK(deck_pixels > 100);
+    if (lost_after) fprintf(stderr,"bridge axis=%u scale=%u orbit=%u: %u/%u paving pixels lost (unprotected %u)\n",
+        axis,scale,orbit,lost_after,deck_pixels,lost_before);
+    CHECK(lost_after == 0);
+    reproduced += lost_before > 100;
+    if (!axis && scale == 1 && !orbit) {
+      SaveImage(unprotected,"bridge-clipping-before");
+      SaveImage(protected,"bridge-clipping-after");
+    }
+    SDL_DestroySurface(reference); SDL_DestroySurface(unprotected); SDL_DestroySurface(protected);
+  }
+  CHECK(reproduced > 0);
+  WorldNavigationModelMesh_Reset();
+}
+
 static void TestFacingTownScene(SDL_Renderer *renderer) {
   FrameSlot *slot = malloc(sizeof(*slot)); CHECK(slot);
   InitSlot(slot);
@@ -1823,7 +1942,7 @@ static void TestFacingTownScene(SDL_Renderer *renderer) {
   restored = RenderSimGlobeScene(renderer,slot,&camera,source,2);
   CHECK(Differences(raw,restored) == 0); SDL_DestroySurface(restored);
   SDL_DestroySurface(raw); SDL_DestroySurface(facing);
-  /* A bridge stays on the radial path, even when it belongs to this town. */
+  /* A bridge stays geometric, even in the active town's camera-facing stream. */
   slot->sim.world_navigation_towns.object_count = 1;
   slot->sim.world_navigation_towns.objects[0].kind = kSimBackgroundVoxel_Bridge;
   slot->sim.world_navigation_towns.objects[0].bridge_axis = kSimBackgroundBridgeAxis_EastWest;
@@ -2042,6 +2161,7 @@ static void TestSynthetic(SDL_Renderer *renderer) {
   TestNavigationZoomEntry(renderer);
   TestContinuousTownScene(renderer);
   TestFacingTownScene(renderer);
+  TestBridgeTerrainClearance(renderer);
   free(slot);
   PresentWorldNav_ResetResources();
   Sim3DDepthPass_Reset(&g_render_device);

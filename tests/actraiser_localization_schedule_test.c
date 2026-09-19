@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "actraiser/actraiser_localization_runtime.h"
 #include "actraiser/actraiser_localization_compose_state.h"
@@ -98,6 +99,8 @@ static void WriteNativeFixture(bool oversized) {
       fputs("Continue fixture\n@line\nNew fixture\n", file);
     else if (!strcmp(id, "city.fillmore.name"))
       fputs("Town fixture\n", file);
+    else if (!strcmp(id, "action.hud.pause"))
+      fputs("Pause fixture\n", file);
     else if (!strcmp(id, "credits.page_01"))
       fputs("- Credits fixture -\n@line\nA contributor\n", file);
     else if (!speed)
@@ -577,6 +580,53 @@ static void TestTitleTransformHandoff(void) {
   ActRaiserLocalizationText_ResetObservation();
 }
 
+static void TestSimulationPause(void) {
+  ActRaiserLocalizationRuntime_Shutdown();
+  ActRaiserLocalizationText_ResetObservation();
+  memset(g_ram, 0, sizeof(g_ram));
+  /* A synthetic five-cell source lets the real erase observer calculate the
+   * resume footprint. The native string is never the translated font input. */
+  memcpy(g_ram + 0xa8ef, "ABCDE", 6);
+  CpuState pause = {.S = 0x1e0, .DB = 0, .Y = 0xa8ef, .A = 0x0b0d, .ram = g_ram};
+  for (uint8_t town = kActRaiserSimulationTown_First;
+       town <= kActRaiserSimulationTown_Last; ++town) {
+    g_ram[kActRaiserWram_CurrentMap] = town;
+    g_settings.localization_content = 1;
+    g_settings.localization_presentation = 1;
+    CHECK(!ActRaiser_LocalizationObserveTextCompose(&pause));
+    Capture();
+    CHECK(FrameHasText("En pause"));
+    const ArTextCellRecord *owner = ArTextCellRecordSet_Find(&s_frame.cells, 13);
+    CHECK(owner && owner->destination.background == 3 && owner->region.row == 11);
+    CHECK(!ActRaiserLocalizationRuntime_DialogueScheduled());
+    /* Existing packs supply the same entry for both modes; changing content
+     * or fonts during a native pause must refresh without a new compose. */
+    g_settings.localization_content = 0;
+    ActRaiserLocalizationRuntime_ApplySettings();
+    Capture();
+    CHECK(FrameHasText("Pause fixture"));
+    g_settings.localization_presentation = 0;
+    ActRaiserLocalizationRuntime_ApplySettings();
+    Capture();
+    CHECK(!ArTextCellRecordSet_Find(&s_frame.cells, 13));
+    g_settings.localization_content = 1;
+    g_settings.localization_presentation = 1;
+    ActRaiserLocalizationRuntime_ApplySettings();
+    Capture();
+    CHECK(FrameHasText("En pause"));
+    CHECK(!ActRaiser_LocalizationObserveTextErase(&pause));
+    Capture();
+    CHECK(!ArTextCellRecordSet_Find(&s_frame.cells, 13));
+    CHECK(!FrameHasText("En pause"));
+    g_settings.localization_content = 0;
+    ActRaiserLocalizationRuntime_ApplySettings();
+    Capture();
+    CHECK(!FrameHasText("Pause fixture"));
+  }
+  ActRaiserLocalizationRuntime_Shutdown();
+  ActRaiserLocalizationText_ResetObservation();
+}
+
 static void TestUnicodeNameHandoff(void) {
   const char *native_path = AR_TEST_NATIVE_FIXTURE_DIR "/name.srm";
   const char *sidecar_path = AR_TEST_NATIVE_FIXTURE_DIR "/name.srm.arname";
@@ -602,10 +652,48 @@ static void TestUnicodeNameHandoff(void) {
     CHECK(!ActRaiser_LocalizationObserveTextCompose(&keyboard));
     Capture();
     CHECK(strstr(s_frame.text, "Test keyboard"));
+    CHECK(s_frame.snapshot_count > 0);
+    const uint64_t empty_keyboard_revision = s_frame.snapshots[0].source_revision;
+    CHECK(s_frame.snapshots[0].live_line_cells == 8);
+    /* Optional CPU benchmark of the real native-compose/capture path. */
+    if (!native_at_finish && getenv("AR_TEST_NAME_ENTRY_BENCH")) {
+      const clock_t started = clock();
+      for (unsigned move = 0; move < 2000; ++move) {
+        g_ram[0x34b] = (uint8_t)(1 + move % 11);
+        CHECK(!ActRaiser_LocalizationObserveTextCompose(&keyboard));
+        Capture();
+      }
+      fprintf(stderr, "name-entry: 2000 cursor updates took %.2f ms CPU\n",
+              1000.0 * (clock() - started) / CLOCKS_PER_SEC);
+      g_ram[0x34b] = 0;
+      CHECK(!ActRaiser_LocalizationObserveTextCompose(&keyboard));
+      Capture();
+    }
+    /* Page transitions invalidate the lookup, and returning to page one
+     * restores its Unicode key rather than retaining the other alphabet. */
+    g_ram[0x34b] = 12;
+    CHECK(!ActRaiser_LocalizationObserveTextCompose(&keyboard));
+    Capture();
+    CHECK(strstr(s_frame.text, "Second keyboard") && strstr(s_frame.text, "< 2/2 >"));
+    CHECK(s_frame.snapshots[0].live_line_cells == 8);
+    g_ram[0x288] = 'M';
+    g_ram[0x34d] = 1;
+    Capture();
+    CHECK(strstr(s_frame.text, "Second keyboard\nΨ"));
+    g_ram[0x288] = 0;
+    g_ram[0x34d] = 0;
+    Capture();
+    g_ram[0x34b] = 0;
+    CHECK(!ActRaiser_LocalizationObserveTextCompose(&keyboard));
+    Capture();
+    CHECK(strstr(s_frame.text, "Test keyboard") && strstr(s_frame.text, "< 1/2 >"));
+    CHECK(s_frame.snapshots[0].source_revision == empty_keyboard_revision);
     g_ram[0x288] = 'A'; /* The native key at the enhanced É position. */
     g_ram[0x34d] = 1;
     Capture();
     CHECK(strstr(s_frame.text, "Test keyboard\nÉ"));
+    CHECK(s_frame.snapshots[0].source_revision == empty_keyboard_revision);
+    CHECK(s_frame.snapshots[0].live_line_cells == 8);
 
     /* Moving the native selector must not reraster the keyboard: the arrow is
      * a separately drawn native object, so the text keeps its identity and
@@ -1053,6 +1141,7 @@ int main(void) {
   ActRaiserLocalizationRuntime_Shutdown();
   WriteNativeFixture(false);
   TestTitleTransformHandoff();
+  TestSimulationPause();
   TestUnicodeNameHandoff();
   TestCreditsWithoutDialogueObservation();
   TestPartialRtlSources();

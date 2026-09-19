@@ -2,6 +2,7 @@
 #include <stdio.h>
 
 #include "sim_town_terrain.h"
+#include "sim_background_bridge.h"
 
 static int s_failures;
 static const float kVisibleEdgeTestEpsilonUnits = 0.004f;
@@ -278,6 +279,25 @@ static void TestMaximumRect(void) {
       5, 63.0f, 420.0f, 81.0f, 430.0f, &height));
   CHECK(height > midpoint_datum + 0.3f);
   CHECK(fabsf(height - 2.23480224609375f) < 0.0001f);
+  const SimBackgroundVoxelObject bridge = {
+    .kind = kSimBackgroundVoxel_Bridge, .town = 5, .cell_x = 4, .cell_y = 26,
+    .bridge_axis = kSimBackgroundBridgeAxis_EastWest,
+    .bridge_bank_a_x = 3, .bridge_bank_a_y = 26,
+    .bridge_bank_b_x = 5, .bridge_bank_b_y = 26,
+  };
+  float approach, envelope;
+  CHECK(SimBackgroundBridge_TerrainHeights(&bridge, 5, &approach, &envelope));
+  CHECK(approach == midpoint_datum && envelope == height);
+  SimBackgroundVoxelObject north_south = bridge;
+  north_south.bridge_axis = kSimBackgroundBridgeAxis_NorthSouth;
+  north_south.cell_x = north_south.bridge_bank_a_x = north_south.bridge_bank_b_x = 4;
+  north_south.bridge_bank_a_y = 25;
+  north_south.bridge_bank_b_y = 27;
+  CHECK(SimTownTerrain_LevelPairUnits(5, 4, 25, .5f, 1, 4, 27, .5f, 0, &height));
+  CHECK(SimBackgroundBridge_TerrainHeights(&north_south, 5, &approach, &envelope));
+  CHECK(approach == height && envelope >= approach);
+  CHECK(!SimBackgroundBridge_TerrainHeights(NULL, 5, &approach, &envelope));
+  CHECK(!SimBackgroundBridge_TerrainHeights(&bridge, 0, &approach, &envelope));
 }
 
 static void TestHardEdgeClipping(void) {

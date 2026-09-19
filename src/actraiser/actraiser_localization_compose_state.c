@@ -144,44 +144,6 @@ static const char *KeySeparatorForSemanticId(const char *semantic_id) {
   return !strncmp(semantic_id, "name_entry.prompt_and_", 22) ? " " : NULL;
 }
 
-/* The name being typed is the only line of a keyboard page that changes as
- * the player types. Its graphemes carry the field underlines, one per native
- * tile, so it is the line holding them and has a cell per underline. False
- * when there is no underlined field, or when its underlines do not share one
- * line. */
-static bool NameFieldLine(const ActRaiserLocalizationComposeSnapshot *slot,
-                          size_t *line_offset, size_t *line_bytes,
-                          uint8_t *cells) {
-  size_t start = 0;
-  size_t end = 0;
-  uint8_t count = 0;
-  bool found = false;
-  for (uint8_t index = 0; index < slot->inline_object_count; ++index) {
-    const ArLocalizationInlineObjectSnapshot *object =
-        &slot->inline_objects[index];
-    if (object->kind != kArLocalizationInlineObject_NameFieldUnderline)
-      continue;
-    if (!object->end_utf8_byte || object->end_utf8_byte > slot->utf8_bytes)
-      return false;
-    ++count;
-    if (!found) {
-      /* An underline ends its grapheme, whose first byte is on the same line. */
-      start = object->end_utf8_byte - 1u;
-      while (start && slot->utf8[start - 1u] != '\n') --start;
-      end = object->end_utf8_byte;
-      while (end < slot->utf8_bytes && slot->utf8[end] != '\n') ++end;
-      found = true;
-    } else if (object->end_utf8_byte <= start || object->end_utf8_byte > end) {
-      return false;
-    }
-  }
-  if (!found || end == start) return false;
-  *line_offset = start;
-  *line_bytes = end - start;
-  *cells = count;
-  return true;
-}
-
 static ArLocalizationTextLayoutKind LayoutForSemanticId(
     const char *semantic_id) {
   if (MenuForSemanticId(semantic_id) != kActRaiserLocalizationMenu_None)
@@ -204,6 +166,7 @@ static bool ResolveSnapshot(
   if (!resolved || !resolve_text || !resolved->semantic_id[0]) return false;
   memset(&resolved->language, 0, sizeof(resolved->language));
   resolved->bidi.count = 0;
+  resolved->live_field = (ArLocalizationTextField){0};
   memset(resolved->structural_boundaries, 0, sizeof(resolved->structural_boundaries));
   if (!resolve_text(resolve_context, resolved->semantic_id,
                     resolved->utf8, sizeof(resolved->utf8),
@@ -211,10 +174,13 @@ static bool ResolveSnapshot(
                     &resolved->source_revision, resolved->inline_objects,
                     kArLocalizationFrameInlineObjectCapacity,
                     &resolved->inline_object_count, resolved->structural_boundaries,
-                    &resolved->language, &resolved->bidi, error, error_capacity) ||
+                    &resolved->language, &resolved->bidi, &resolved->live_field,
+                    error, error_capacity) ||
       !ArLocalizationTextLanguage_IsValid(&resolved->language) ||
       resolved->utf8_bytes >= sizeof(resolved->utf8) ||
       resolved->utf8[resolved->utf8_bytes] != 0 ||
+      !ArLocalizationTextField_IsValid(&resolved->live_field,
+                                        resolved->utf8, resolved->utf8_bytes) ||
       !ArTextBidiSpans_FitSource(&resolved->bidi, resolved->utf8, resolved->utf8_bytes) ||
       (!resolved->utf8_bytes &&
        (resolved->cluster_count || resolved->inline_object_count)) ||
@@ -363,6 +329,9 @@ bool ActRaiserLocalizationComposeState_RefreshLatest(
   if (slot->active && refreshed.source_revision == slot->source_revision &&
       refreshed.utf8_bytes == slot->utf8_bytes &&
       refreshed.inline_object_count == slot->inline_object_count &&
+      refreshed.live_field.utf8_offset == slot->live_field.utf8_offset &&
+      refreshed.live_field.utf8_bytes == slot->live_field.utf8_bytes &&
+      refreshed.live_field.cells == slot->live_field.cells &&
       !memcmp(refreshed.utf8, slot->utf8, refreshed.utf8_bytes + 1u) &&
       !memcmp(refreshed.structural_boundaries, slot->structural_boundaries,
               AR_TEXT_BOUNDARY_BYTES(refreshed.utf8_bytes)) &&
@@ -497,13 +466,11 @@ bool ActRaiserLocalizationComposeState_AppendFrame(
     /* The name keeps the native field's tiles while it is typed: letters sit
      * in fixed cells and never join, and typing rebuilds only the name rather
      * than the whole keyboard page. */
-    size_t field_offset = 0;
-    size_t field_bytes = 0;
-    uint8_t field_cells = 0;
-    if (separator &&
-        NameFieldLine(slot, &field_offset, &field_bytes, &field_cells))
-      (void)ArLocalizationFrame_SetLiveLine(frame, field_offset, field_bytes,
-                                            field_cells);
+    if (slot->live_field.utf8_bytes &&
+        !ArLocalizationFrame_SetLiveLine(frame, slot->live_field.utf8_offset,
+                                         slot->live_field.utf8_bytes,
+                                         slot->live_field.cells))
+      complete = false;
   }
   for (uint8_t i = first_snapshot; i < frame->snapshot_count; ++i)
     ActRaiserLocalizationStyle_Ordinary(&frame->snapshots[i], palette);

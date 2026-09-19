@@ -432,11 +432,19 @@ bool ArLocalizationFrame_SetKeySeparator(ArLocalizationFrame *frame,
 bool ArLocalizationFrame_SetKeyGrid(ArLocalizationFrame *frame,
                                     uint8_t columns, uint8_t trailing_lines,
                                     uint8_t cell_columns);
+/* A complete hard line, independent of any underline or other decoration.
+ * All zeroes means no field; zero cells means an ordinary flowing live line. */
+typedef struct ArLocalizationTextField {
+  size_t utf8_offset;
+  size_t utf8_bytes;
+  uint8_t cells;
+} ArLocalizationTextField;
+
+bool ArLocalizationTextField_IsValid(const ArLocalizationTextField *field,
+                                     const char *utf8, size_t utf8_bytes);
 /* Marks one complete, non-empty hard line of the most recently added surface
- * as live (see ArLocalizationTextSnapshot.live_line_utf8_offset), drawn as a
- * field of `cells` fixed cells when non-zero. The range must start at the
- * text start or after a line feed, end at the text end or before one, and
- * contain no line feed. Failure leaves the frame untouched. */
+ * as live, drawn as a field of `cells` fixed cells when non-zero.
+ * Failure leaves the frame untouched. */
 bool ArLocalizationFrame_SetLiveLine(ArLocalizationFrame *frame,
                                      size_t utf8_offset, size_t utf8_bytes,
                                      uint8_t cells);

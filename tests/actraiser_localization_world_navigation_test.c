@@ -23,7 +23,9 @@ static bool Resolve(
     ArLocalizationInlineObjectSnapshot *inline_objects,
     size_t inline_object_capacity, uint8_t *inline_object_count,
     uint8_t *structural_boundaries, ArLocalizationTextLanguage *language,
-    ArTextBidiSpans *bidi, char *error, size_t error_capacity) {
+    ArTextBidiSpans *bidi, ArLocalizationTextField *live_field,
+    char *error, size_t error_capacity) {
+  if (live_field) *live_field = (ArLocalizationTextField){0};
   (void)inline_objects;
   (void)inline_object_capacity;
   (void)structural_boundaries;

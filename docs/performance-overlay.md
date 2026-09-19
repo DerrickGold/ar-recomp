@@ -28,6 +28,12 @@ use `AR_PIPELINE_PERF=1`.
 - **Batches, vertices, uploads, and Scan MiB** describe submitted geometry,
   uploads, and requested change-detection comparisons. They are not measurements
   of total device bandwidth or memory traffic.
+  Texture calls include both ordinary texture updates and individual GPU atlas
+  regions. Texture bytes count their requested pixel payload, including full
+  uploads and failed attempts, once at the backend. They exclude staging-row
+  padding and hidden driver copies. Skipped uploads count unchanged mirrors in
+  both SIM and action modes; textures omitted because they have no consumer do
+  not count as mirror skips.
 - **Fallback / failed** count authentic-view fallbacks and rejected presents.
   **Opt / limit / reject** distinguish optimization opt-outs, draw-budget limits,
   and optional resource rejection; those counters alone do not mean the view

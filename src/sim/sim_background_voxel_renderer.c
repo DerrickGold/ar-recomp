@@ -554,24 +554,10 @@ static float BridgeApproachLiftPixels(
     const SimBackgroundVoxelObject *object,
     const SimBackgroundVoxelRenderParams *params) {
 #if AR_SIM3D_TERRAIN_ELEVATION
-  float height_units;
-  int resolved = 0;
-  if (object->bridge_axis == kSimBackgroundBridgeAxis_EastWest) {
-    resolved = SimTownTerrain_LevelPairUnits(
-        params->town,
-        object->bridge_bank_a_x, object->bridge_bank_a_y, 1.0f, 0.5f,
-        object->bridge_bank_b_x, object->bridge_bank_b_y, 0.0f, 0.5f,
-        &height_units);
-  } else if (object->bridge_axis ==
-             kSimBackgroundBridgeAxis_NorthSouth) {
-    resolved = SimTownTerrain_LevelPairUnits(
-        params->town,
-        object->bridge_bank_a_x, object->bridge_bank_a_y, 0.5f, 1.0f,
-        object->bridge_bank_b_x, object->bridge_bank_b_y, 0.5f, 0.0f,
-        &height_units);
-  }
-  if (!resolved) return 0.0f;
-  return SimBackgroundVoxelProject_TerrainUnitsToPixels(params, height_units);
+  float approach, envelope;
+  if (!SimBackgroundBridge_TerrainHeights(object, params->town, &approach, &envelope))
+    return 0.0f;
+  return SimBackgroundVoxelProject_TerrainUnitsToPixels(params, approach);
 #else
   (void)object;
   (void)params;
@@ -583,22 +569,10 @@ static float BridgeDepthLiftPixels(
     const SimBackgroundVoxelObject *object,
     const SimBackgroundVoxelRenderParams *params) {
 #if AR_SIM3D_TERRAIN_ELEVATION
-  /* Keep projection at the path-centre datum, but depth-test the rigid model
-   * against the highest terrain point touched by its footprint. Marahna's
-   * transverse grade makes those differ by about 2.35 pixels at the captured
-   * 40% landscape setting. Using the maximum for projection left the bridge
-   * visibly perched above the path; using the approach for depth let the far
-   * terrain corner erase its paving. Two datums give the bridge a buried bank
-   * joint without reopening the water/terrain punch-through. */
-  const SimBackgroundBridgeBounds bounds =
-      SimBackgroundBridge_ResolveBounds(object);
-  float height_units;
-  if (!SimTownTerrain_MaximumUnitsInRect(
-          params->town, bounds.origin_x, bounds.origin_y,
-          bounds.origin_x + bounds.width,
-          bounds.origin_y + bounds.depth, &height_units))
+  float approach, envelope;
+  if (!SimBackgroundBridge_TerrainHeights(object, params->town, &approach, &envelope))
     return 0.0f;
-  return SimBackgroundVoxelProject_TerrainUnitsToPixels(params, height_units);
+  return SimBackgroundVoxelProject_TerrainUnitsToPixels(params, envelope);
 #else
   (void)object;
   (void)params;

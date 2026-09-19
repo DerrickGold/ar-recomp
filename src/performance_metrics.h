@@ -34,12 +34,10 @@ typedef enum PerformanceCount {
   kPerformanceCount_GpuReuse, kPerformanceCount_GeometryPublish,
   kPerformanceCount_GeometryOptOut, kPerformanceCount_GeometryLimit,
   kPerformanceCount_GeometryRejected,
-  /* Upload traffic, counted at the render-device boundary so EVERY subsystem
-   * is included rather than only the ones that remembered to report. These are
-   * deterministic mechanism counters, not timings: they mean the same thing on
-   * every platform, which is what makes them usable as a regression gate when
-   * the host's own milliseconds are not comparable to the target's. */
-  kPerformanceCount_UploadCalls,      /* texture-update calls issued */
+  /* Backend texture updates, including direct GPU atlas uploads. Calls and
+   * payload bytes count requests issued, including failed attempts; bytes
+   * exclude row padding and hidden driver copies. Geometry is separate. */
+  kPerformanceCount_UploadCalls,      /* texture-update/copy calls issued */
   kPerformanceCount_UploadSkipped,    /* uploads avoided by change detection */
   kPerformanceCount_ScanBytes,        /* requested comparison bytes, both inputs;
                                       * includes edge scans, not measured DRAM reads */
@@ -94,6 +92,8 @@ bool PerformanceMetrics_Enabled(void);
 uint32_t PerformanceMetrics_Epoch(void);
 void PerformanceMetrics_Record(uint32_t epoch, PerformanceStage stage, uint64_t elapsed_ns);
 void PerformanceMetrics_Add(PerformanceCount counter, uint64_t value);
+/* Called once at the backend upload boundary, never by its caller. */
+void PerformanceMetrics_AddTextureUpload(uint64_t calls, uint64_t bytes);
 void PerformanceMetrics_SetContext(const PerformanceContext *context);
 void PerformanceMetrics_PresentCompleted(uint64_t now_ns);
 void PerformanceMetrics_Snapshot(PerformanceSnapshot *snapshot);

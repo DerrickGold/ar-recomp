@@ -104,7 +104,7 @@ void Sim3DPerformance_AddDraw(uint64_t vertices, uint64_t indices) {
 }
 
 void Sim3DPerformance_AddUpload(uint64_t bytes) {
-  PerformanceMetrics_Add(kPerformanceCount_UploadBytes, bytes);
+  /* Global traffic is counted by the backend. These are SIM-local totals. */
   /* Upload helpers are shared by flat/action presentations. Count them only
    * while the enhanced-SIM upload scope is active, otherwise an action-stage
    * frame rendered before entering a town pollutes the first SIM report. */

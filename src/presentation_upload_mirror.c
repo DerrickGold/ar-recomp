@@ -174,8 +174,10 @@ bool PresentationUploadMirror_UploadArgb8888(
   if (have_storage && mirror->valid &&
       !PresentationUploadMirror_FindDirtyRect(
           source, source_pitch, mirror->pixels, mirror_pitch,
-          width, height, &dirty))
+          width, height, &dirty)) {
+    PerformanceMetrics_Add(kPerformanceCount_UploadSkipped, 1);
     return true;
+  }
 
   ArRenderRectI destination = {
     destination_x + dirty.x,

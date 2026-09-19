@@ -41,6 +41,11 @@ static const char *const kNames[kPerformanceStage_Count] = {
 const char *PerformanceMetrics_StageName(PerformanceStage stage) {
   return stage >= 0 && stage < kPerformanceStage_Count ? kNames[stage] : "unknown";
 }
+
+void PerformanceMetrics_AddTextureUpload(uint64_t calls, uint64_t bytes) {
+  PerformanceMetrics_Add(kPerformanceCount_UploadCalls, calls);
+  PerformanceMetrics_Add(kPerformanceCount_UploadBytes, bytes);
+}
 const char *PerformanceMetrics_SceneName(PerformanceScene scene) {
   static const char *const names[kPerformanceScene_Count] = {
     "Native/menu", "Action 3D", "Town 3D", "World 3D", "Sky Palace", "Action 2D",

@@ -9,7 +9,7 @@
 #include "actraiser/actraiser_localization_grid.h"
 #include "localization/localization_frame.h"
 
-#define ACTRAISER_LOCALIZATION_COMPOSE_STATE_ABI_VERSION UINT32_C(10)
+#define ACTRAISER_LOCALIZATION_COMPOSE_STATE_ABI_VERSION UINT32_C(11)
 
 enum {
   kActRaiserLocalizationComposeSurfaceFirst = 2,
@@ -19,9 +19,9 @@ enum {
   kActRaiserLocalizationComposeSemanticIdCapacity = 256,
 };
 
-/* Title-screen surfaces, named because the runtime has to retire them when the
- * Mode 7 layer their lettering belongs to stops being presented flat. */
+/* Surfaces with a lifecycle managed explicitly by the runtime. */
 enum {
+  kActRaiserLocalizationNameEntrySurface = 5,
   kActRaiserLocalizationTitleTextSurface = 14,
   kActRaiserLocalizationTitleSelectorSurface = 15,
   kActRaiserLocalizationSoundTestSurface = 16,
@@ -37,6 +37,7 @@ typedef struct ActRaiserLocalizationComposeSnapshot {
   uint64_t source_revision;
   ArLocalizationTextLanguage language;
   ArTextBidiSpans bidi;
+  ArLocalizationTextField live_field;
   ArTextCellRegion region;
   uint16_t native_destination;
   uint8_t native_font_pixels;
@@ -71,8 +72,9 @@ typedef struct ActRaiserLocalizationComposeState {
  * snapshot. The boundary bitmap covers utf8_capacity bytes and distinguishes
  * authored grid delimiters from inserted values; non-grid consumers may omit
  * it. Language describes the effective message source (including fallback),
- * not the selected pack or font stack. Returning false leaves the
- * corresponding native cells unclaimed. */
+ * not the selected pack or font stack. Optional live_field describes the
+ * editable line directly; clear it for text without an editable field.
+ * Returning false leaves the corresponding native cells unclaimed. */
 typedef bool (*ActRaiserLocalizationComposeTextResolver)(
     void *context, const char *semantic_id,
     char *utf8, size_t utf8_capacity, size_t *utf8_bytes,
@@ -80,7 +82,7 @@ typedef bool (*ActRaiserLocalizationComposeTextResolver)(
     ArLocalizationInlineObjectSnapshot *inline_objects,
     size_t inline_object_capacity, uint8_t *inline_object_count,
     uint8_t *structural_boundaries, ArLocalizationTextLanguage *language,
-    ArTextBidiSpans *bidi,
+    ArTextBidiSpans *bidi, ArLocalizationTextField *live_field,
     char *error, size_t error_capacity);
 
 void ActRaiserLocalizationComposeState_Init(

@@ -34,11 +34,12 @@ bool ActRaiserLocalizationNameCompose_InsertPageIndicator(
     uint32_t page_index, uint32_t page_count,
     ArLocalizationInlineObjectSnapshot *objects, uint8_t object_count, ArTextBidiSpans *bidi);
 
-/* Attaches an underline object to each of the eight shaped name graphemes,
- * independently of keyboard geometry. */
-bool ActRaiserLocalizationNameCompose_InsertFieldUnderlines(
+/* Attaches an underline object to each of the eight shaped name graphemes and
+ * returns the field's layout independently of those decorations. Later gutter
+ * and page-indicator insertions occur after this field, so its range is stable. */
+bool ActRaiserLocalizationNameCompose_PrepareField(
     const char *utf8, size_t utf8_bytes,
     ArLocalizationInlineObjectSnapshot *objects, size_t capacity,
-    uint8_t *count);
+    uint8_t *count, ArLocalizationTextField *field);
 
 #endif /* ACTRAISER_LOCALIZATION_NAME_COMPOSE_H */

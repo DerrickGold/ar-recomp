@@ -1,3 +1,5 @@
+#include "gpu_texture_upload_layout.h"
+#include "performance_metrics.h"
 #include "sim/sim3d_depth_pass.h"
 #include "sim/sim3d_performance.h"
 
@@ -854,7 +856,16 @@ static bool CreatePipeline(void) {
   return true;
 }
 
+static bool TextureUploadsNeedAlignment(void) {
+  const char *driver = SDL_GetGPUDeviceDriver(g_depth_pass.device);
+  return driver && !SDL_strcmp(driver, "direct3d12");
+}
+
 static bool CreateWhiteTexture(SDL_Renderer *renderer) {
+  Uint32 upload_size = 0;
+  ArSdlTextureUploadLayout layout;
+  if (!ArSdlTextureUploadLayout_Append(1, 1, TextureUploadsNeedAlignment(),
+          &upload_size, &layout)) return false;
   SDL_GPUTextureCreateInfo texture_info;
   SDL_zero(texture_info);
   texture_info.type = SDL_GPU_TEXTURETYPE_2D;
@@ -869,7 +880,7 @@ static bool CreateWhiteTexture(SDL_Renderer *renderer) {
       g_depth_pass.device, &texture_info);
   SDL_GPUTransferBufferCreateInfo transfer_info = {
     .usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,
-    .size = kSim3DDepthRgbaBytesPerPixel,
+    .size = upload_size,
   };
   SDL_GPUTransferBuffer *transfer = texture ? SDL_CreateGPUTransferBuffer(
       g_depth_pass.device, &transfer_info) : NULL;
@@ -899,7 +910,7 @@ static bool CreateWhiteTexture(SDL_Renderer *renderer) {
   }
   SDL_GPUTextureTransferInfo source = {
     .transfer_buffer = transfer,
-    .pixels_per_row = 1,
+    .pixels_per_row = layout.row_pitch / kSim3DDepthRgbaBytesPerPixel,
     .rows_per_layer = 1,
   };
   SDL_GPUTextureRegion destination = {
@@ -909,6 +920,7 @@ static bool CreateWhiteTexture(SDL_Renderer *renderer) {
     .d = 1,
   };
   SDL_UploadToGPUTexture(copy, &source, &destination, false);
+  PerformanceMetrics_AddTextureUpload(1, kSim3DDepthRgbaBytesPerPixel);
   SDL_EndGPUCopyPass(copy);
   if (!SDL_SubmitGPUCommandBuffer(commands)) {
     SDL_ReleaseGPUTransferBuffer(g_depth_pass.device, transfer);
@@ -1103,57 +1115,57 @@ bool Sim3DDepthPass_UploadAtlasRegions(
       (size_t)height > SIZE_MAX / (size_t)pitch ||
       !EnsureInitialized(renderer))
     return false;
-  const Uint32 upload_size = (Uint32)(row_bytes * (size_t)height);
+  const bool align_for_d3d12 = TextureUploadsNeedAlignment();
+  Uint32 upload_size = 0;
+  ArSdlTextureUploadLayout layout;
   for (int region = 0; region < region_count; region++) {
     const ArRenderRectI *dirty = &regions[region];
     if (dirty->x < 0 || dirty->y < 0 || dirty->w <= 0 || dirty->h <= 0 ||
-        dirty->x > width - dirty->w || dirty->y > height - dirty->h)
+        dirty->x > width - dirty->w || dirty->y > height - dirty->h ||
+        !ArSdlTextureUploadLayout_Append(dirty->w, dirty->h, align_for_d3d12,
+            &upload_size, &layout))
       return false;
   }
 
-  const bool resources_match = atlas->texture &&
-      atlas->transfer &&
-      atlas->width == width &&
-      atlas->height == height &&
-      atlas->transfer_size >= upload_size;
-  if (!resources_match) {
-    SDL_GPUTextureCreateInfo texture_info;
-    SDL_zero(texture_info);
-    texture_info.type = SDL_GPU_TEXTURETYPE_2D;
-    texture_info.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
-    texture_info.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
-    texture_info.width = (Uint32)width;
-    texture_info.height = (Uint32)height;
-    texture_info.layer_count_or_depth = 1;
-    texture_info.num_levels = 1;
-    texture_info.sample_count = SDL_GPU_SAMPLECOUNT_1;
-    SDL_GPUTexture *texture = SDL_CreateGPUTexture(
-        g_depth_pass.device, &texture_info);
-    SDL_GPUTransferBufferCreateInfo transfer_info = {
-      .usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,
-      .size = upload_size,
+  const bool replace_texture = !atlas->texture ||
+      atlas->width != width || atlas->height != height;
+  const bool replace_transfer = !atlas->transfer || atlas->transfer_size < upload_size;
+  SDL_GPUTexture *texture = atlas->texture;
+  SDL_GPUTransferBuffer *transfer = atlas->transfer;
+  if (replace_texture) {
+    const SDL_GPUTextureCreateInfo info = {
+      .type = SDL_GPU_TEXTURETYPE_2D,
+      .format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM,
+      .usage = SDL_GPU_TEXTUREUSAGE_SAMPLER,
+      .width = (Uint32)width, .height = (Uint32)height,
+      .layer_count_or_depth = 1, .num_levels = 1,
+      .sample_count = SDL_GPU_SAMPLECOUNT_1,
     };
-    SDL_GPUTransferBuffer *transfer = texture ? SDL_CreateGPUTransferBuffer(
-        g_depth_pass.device, &transfer_info) : NULL;
-    if (!texture || !transfer) {
-      fprintf(stderr, "[sim3d-depth] material atlas upload resource creation "
-                      "failed: %s\n", SDL_GetError());
-      if (transfer)
-        SDL_ReleaseGPUTransferBuffer(g_depth_pass.device, transfer);
-      if (texture)
-        SDL_ReleaseGPUTexture(g_depth_pass.device, texture);
+    texture = SDL_CreateGPUTexture(g_depth_pass.device, &info);
+    if (!texture) return false;
+  }
+  if (replace_transfer) {
+    const SDL_GPUTransferBufferCreateInfo info = {
+      .usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD, .size = upload_size,
+    };
+    transfer = SDL_CreateGPUTransferBuffer(g_depth_pass.device, &info);
+    if (!transfer) {
+      if (replace_texture) SDL_ReleaseGPUTexture(g_depth_pass.device, texture);
       return false;
     }
-    if (atlas->transfer)
-      SDL_ReleaseGPUTransferBuffer(
-          g_depth_pass.device, atlas->transfer);
-    if (atlas->texture)
-      SDL_ReleaseGPUTexture(g_depth_pass.device, atlas->texture);
+  }
+  /* Fragmented updates can need more padded staging than a full image. Grow
+   * that buffer independently: replacing the texture would lose clean texels. */
+  if (replace_texture) {
+    if (atlas->texture) SDL_ReleaseGPUTexture(g_depth_pass.device, atlas->texture);
     atlas->texture = texture;
-    atlas->transfer = transfer;
-    atlas->transfer_size = upload_size;
     atlas->width = width;
     atlas->height = height;
+  }
+  if (replace_transfer) {
+    if (atlas->transfer) SDL_ReleaseGPUTransferBuffer(g_depth_pass.device, atlas->transfer);
+    atlas->transfer = transfer;
+    atlas->transfer_size = upload_size;
   }
 
   uint8_t *mapped = SDL_MapGPUTransferBuffer(
@@ -1163,22 +1175,14 @@ bool Sim3DDepthPass_UploadAtlasRegions(
             SDL_GetError());
     return false;
   }
-  /* Pack each rectangle contiguously. SDL GPU backends are free to cycle the
-   * transfer storage on map, so callers cannot depend on untouched full-atlas
-   * rows remaining addressable through a strided subwindow. Packing also
-   * keeps backend row-layout constraints behind this depth-pass seam. */
-  size_t packed_at = 0;
+  /* Repack every requested region into the current transfer generation.
+   * Cycled storage cannot preserve untouched rows from a previous upload.
+   * The preflight above validated every layout; replay it without allocation. */
+  Uint32 packed_at = 0;
   for (int region = 0; region < region_count; region++) {
     const ArRenderRectI *dirty = &regions[region];
-    const size_t region_row_bytes =
-        (size_t)dirty->w * kSim3DDepthRgbaBytesPerPixel;
-    const size_t region_bytes = region_row_bytes * (size_t)dirty->h;
-    if (packed_at > (size_t)upload_size ||
-        region_bytes > (size_t)upload_size - packed_at) {
-      SDL_UnmapGPUTransferBuffer(
-          g_depth_pass.device, atlas->transfer);
-      return false;
-    }
+    (void)ArSdlTextureUploadLayout_Append(dirty->w, dirty->h, align_for_d3d12,
+        &packed_at, &layout);
     const uint8_t *source = (const uint8_t *)argb_pixels +
         (size_t)dirty->y * (size_t)pitch +
         (size_t)dirty->x * sizeof(uint32_t);
@@ -1188,11 +1192,10 @@ bool Sim3DDepthPass_UploadAtlasRegions(
      * Validation above bounds row_bytes by the positive int source pitch. */
     if (!SDL_ConvertPixels(dirty->w, dirty->h, SDL_PIXELFORMAT_ARGB8888,
             source, pitch, SDL_PIXELFORMAT_RGBA32,
-            mapped + packed_at, (int)region_row_bytes)) {
+            mapped + layout.offset, (int)layout.row_pitch)) {
       SDL_UnmapGPUTransferBuffer(g_depth_pass.device, atlas->transfer);
       return false;
     }
-    packed_at += region_bytes;
   }
   SDL_UnmapGPUTransferBuffer(
       g_depth_pass.device, atlas->transfer);
@@ -1208,10 +1211,12 @@ bool Sim3DDepthPass_UploadAtlasRegions(
   packed_at = 0;
   for (int region = 0; region < region_count; region++) {
     const ArRenderRectI *dirty = &regions[region];
+    (void)ArSdlTextureUploadLayout_Append(dirty->w, dirty->h, align_for_d3d12,
+        &packed_at, &layout);
     SDL_GPUTextureTransferInfo source_info = {
       .transfer_buffer = atlas->transfer,
-      .offset = (Uint32)packed_at,
-      .pixels_per_row = (Uint32)dirty->w,
+      .offset = layout.offset,
+      .pixels_per_row = layout.row_pitch / kSim3DDepthRgbaBytesPerPixel,
       .rows_per_layer = (Uint32)dirty->h,
     };
     SDL_GPUTextureRegion destination = {
@@ -1225,8 +1230,8 @@ bool Sim3DDepthPass_UploadAtlasRegions(
     /* Mapping with `cycle=true` selected writable storage for this frame.
      * Every region in this transaction must reference that same generation. */
     SDL_UploadToGPUTexture(copy, &source_info, &destination, false);
-    packed_at += (size_t)dirty->w * (size_t)dirty->h *
-        kSim3DDepthRgbaBytesPerPixel;
+    PerformanceMetrics_AddTextureUpload(1,
+        (uint64_t)dirty->w * dirty->h * kSim3DDepthRgbaBytesPerPixel);
   }
   SDL_EndGPUCopyPass(copy);
   if (!SDL_SubmitGPUCommandBuffer(commands)) {

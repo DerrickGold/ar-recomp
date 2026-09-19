@@ -291,6 +291,14 @@ static bool LiveLineValid(const char *utf8, size_t utf8_bytes,
       !memchr(utf8 + offset, '\n', bytes);
 }
 
+bool ArLocalizationTextField_IsValid(const ArLocalizationTextField *field,
+                                     const char *utf8, size_t utf8_bytes) {
+  return field && utf8 &&
+      field->cells <= kArLocalizationFrameLiveLineMaximumCells &&
+      (field->utf8_bytes || !field->cells) &&
+      LiveLineValid(utf8, utf8_bytes, field->utf8_offset, field->utf8_bytes);
+}
+
 bool ArLocalizationFrame_IsValid(const ArLocalizationFrame *frame) {
   if (!FrameStorageValid(frame)) return false;
   if (!frame->snapshot_count) {

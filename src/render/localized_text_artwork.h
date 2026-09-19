@@ -11,7 +11,9 @@
 
 /* Positions one inline object beside its shaped cluster, uploading the frame's
  * artwork on first use. `snapshot` supplies the surface's key separator, which
- * sizes a selector to the gutter the game reserves.
+ * sizes a selector to the gutter the game reserves. `object` retains its
+ * original snapshot byte offset even when `cluster` belongs to a split line,
+ * so a selector can identify the artwork key at the same semantic anchor.
  *
  * `key_cell_extent` overrides that measurement with the room a key actually
  * has, in surface pixels, and is zero when the text flows. Text on a uniform
@@ -21,7 +23,7 @@
 bool ArLocalizedTextArtwork_PrepareInlineObject(
     ArRenderDevice *device, const ArLocalizationFrame *frame,
     const ArLocalizationTextSnapshot *snapshot,
-    ArLocalizationInlineObjectKind kind, const ArTextSurface *surface,
+    const ArLocalizationInlineObjectSnapshot *object, const ArTextSurface *surface,
     const char *utf8, size_t utf8_bytes,
     const ArTextRevealCluster *cluster, ArRenderRectI text_destination,
     int key_cell_extent, ArLocalizedPreparedInlineObject *prepared);

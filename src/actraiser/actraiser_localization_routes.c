@@ -114,6 +114,12 @@ ActRaiserLocalizationRoute_ResolveCompose(
         if (observation->map_group < kActRaiserActionMapGroup_First ||
             observation->map_group > kActRaiserActionMapGroup_Last) continue;
         break;
+      case kActRaiserLocalizationComposeScope_Gameplay:
+        if (!ActRaiserLocalizationRoute_InScope(
+                observation->map_group, observation->map_number) &&
+            (observation->map_group < kActRaiserActionMapGroup_First ||
+             observation->map_group > kActRaiserActionMapGroup_Last)) continue;
+        break;
       case kActRaiserLocalizationComposeScope_Simulation:
         if (!ActRaiserLocalizationRoute_InScope(
                 observation->map_group, observation->map_number)) continue;

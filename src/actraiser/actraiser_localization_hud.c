@@ -144,7 +144,7 @@ void ActRaiserLocalizationHud_Append(
       char error[256];
       label->valid = resolve(context, kFields[i].id, label->text, sizeof(label->text),
           &label->bytes, &label->clusters, &label->revision, NULL, 0, &objects,
-          NULL, &label->language, &label->bidi, error, sizeof(error)) && !objects &&
+          NULL, &label->language, &label->bidi, NULL, error, sizeof(error)) && !objects &&
           ArLocalizationTextLanguage_IsValid(&label->language) &&
           label->bytes < sizeof(label->text) && !label->text[label->bytes] &&
           ArTextBidiSpans_FitSource(&label->bidi, label->text, label->bytes) &&

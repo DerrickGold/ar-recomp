@@ -202,7 +202,7 @@ The presenter retains at most one prepared font candidate separately from its
 active surfaces. Only a frame carrying the approved font identity consumes that
 candidate, so a later semantic rejection cannot destroy the previous frame's
 resources. Repeated readiness checks and steady-state frames reuse font/cache
-resources. Frame ABI 27 carries opaque, host-registered font resource IDs, not
+resources. Frame ABI 28 carries opaque, host-registered font resource IDs, not
 filesystem paths; no platform font or texture handles enter the game-thread session.
 
 Pack storage crosses the separate `ActRaiserLocalizationPackHost` ABI 1. The
@@ -215,7 +215,7 @@ directory policy to the game adapter.
 
 Each snapshot also carries its effective source locale and paragraph direction,
 copied from `ArDialoguePageSnapshot` before the resolving session is destroyed.
-The fixed-composer resolver returns the same bounded value; compose state ABI 10,
+The fixed-composer resolver returns the same bounded value; compose state ABI 11,
 HUD labels and credits cache it with the text. A partial RTL pack may therefore
 publish native-English fallback and translated text together without sharing a
 paragraph base. Fonts remain the selected presentation stack. Native formatted
@@ -226,7 +226,7 @@ logical UTF-8: names/text use first-strong isolation, formatted numbers use LTR,
 and terms use their actual source's direction, including native fallback.
 Ranges encompass whole graphemes. The compiler bounds them to 256 per resolved
 message, rejecting an oversized begin/switch before replacing the active state.
-Frame ABI 27 owns a 256-range pool; fixed composers retain ranges with their
+Frame ABI 28 owns a 256-range pool; fixed composers retain ranges with their
 cached text. Normalization, retained-page scrolling, name-entry edits, credits
 padding and grid-cell slicing relocate these ranges along with the text.
 
@@ -328,7 +328,7 @@ contract does not acknowledge native input or skip interpreter controls.
 
 Action maps (groups 1–7) and the title scene (`$18/$19 = 00/00`) use the
 existing fixed composer, not the interactive dialogue scheduler. The fixed
-route census has 89 entries. Source observations retain the native control
+route census has 90 entries. Source observations retain the native control
 flow, and `$02:C1B7`/whole-map clears retire active and dormant replacements.
 
 | USA fixed source | Packed destination | Purpose |
@@ -337,10 +337,16 @@ flow, and `$02:C1B7`/whole-map clears retire active and dormant replacements.
 | `$00:A8CB/$A8D1` | `$0A0D` | Act 1 / Act 2 |
 | `$00:A8D8` | `$0C0D` | Clear |
 | `$00:A8DF/$A8E6` | `$090D/$090C` | Ready / Time up |
-| `$00:A8EF` | `$0B0D` | Pause; `$02:BF37` erases it on resume |
+| `$00:A8EF` | `$0B0D` | Shared action/SIM pause; `$02:BF37` erases it on resume |
 | `$02:A9A7` | `$1100` | Continue / New game |
 | `$02:A9D6` | `$120C` | Start, with its native selector |
 | `$02:AA60` | `$110C` | Professional option on the fifth source row |
+
+The pause route has gameplay scope and reuses `action.hud.pause` in SIM,
+including its enhanced font, centered layout, and selected pack translation.
+Existing language packs need no new entry. Other action cards remain scoped
+to action maps, and resume retires the translated pause owner through the
+native erase observation.
 
 Title `$02:A92F` installs HDMA mode/screen tables at `$7E:6000/$6800`.
 The logo band uses Mode 7 BG1; the lower options band uses Mode 1 BG3
@@ -390,7 +396,7 @@ presenter fits the text between the original-size ornaments and places them
 against its ink bounds; no font bracket substitute or glyph stretching is used.
 Missing artwork retains the entire native panel, not a partially replaced frame.
 
-Frame ABI 27 passes palette RGB endpoints, shadow shape, numeral/field styling
+Frame ABI 28 passes palette RGB endpoints, shadow shape, numeral/field styling
 and physical left/right/top gutters to the renderer-neutral presenter. Native
 labels/capitals use ink rows 1–7; all ten digits use rows 0–7. HUD labels therefore
 use a seven-pixel reference and one-pixel top inset, while counters use an
@@ -427,7 +433,7 @@ they are not shadowed a second time.
 World navigation is the first non-tilemap consumer of the same contract. The
 native OAM composition is classified as a variable zero-to-nine-glyph location
 prefix, a fixed 6x2 plaque, and the Palace's fixed 3x3 sprites. Capture preserves
-those as three independent immutable layers. Frame ABI 27 can publish a bounded
+those as three independent immutable layers. Frame ABI 28 can publish a bounded
 `ArLocalizationScreenTextRecord` in authentic 256x224 coordinates without
 pretending that OBJ owns BG3 cells. Enhanced presentation suppresses only the
 captured glyph prefix, retains the native plaque and Palace, resolves
@@ -549,7 +555,7 @@ resolved page. Literal `|` bytes and explicit authored newlines set bits;
 captured names/numbers, localized terms (including aliases), and icons cannot
 create them. Fixed-text normalization remaps that structure while collapsing
 whitespace; inserted value newlines become inline spaces in tables. Compose
-state ABI 10 retains the map and frame ABI 27 copies it into the pointer-free
+state ABI 11 retains the map and frame ABI 28 copies it into the pointer-free
 text pool (one bit per UTF-8 byte, 2 KiB maximum per frame). Grid parsing and
 column-plan cache keys consume that structure rather than reinterpreting all
 resolved punctuation as layout. Ordinary dialogue/keyboard pipes remain text.
@@ -564,6 +570,31 @@ selection mapping. The builder's grapheme data is generated from the same
 embedded Unicode properties as the game, without a runtime Python dependency.
 The 63-line/3,072-byte author budget leaves room for the runtime page indicator,
 Unicode name expansion and enlarged gutters in the 4,096-byte compose buffer.
+
+The name row is a live field: the presenter caches the prompt and keyboard
+with that row blanked and draws each typed grapheme in its own fixed cell.
+Typing a new grapheme rasterizes/uploads only that cell; reusing a cached
+grapheme, deleting, or moving the selector needs no text rasterization or
+upload. The source revision excludes the name and selector, but still changes
+with the authored keyboard page. Layouts that cannot be split safely (including
+right-to-left pages) retain the whole-page fallback. These are text-cache
+savings; the scene still draws normally each frame. The arrow centers its
+visible pixels on the selected key's cached ink, so other keys' descenders
+cannot shift it. Artwork keys are identified by their typed inline objects and
+use the row center shared by the action artwork.
+
+Composition publishes explicit field bounds and cell count; underline objects
+are decorations and do not enable or disable the live-field path. The initial
+Unicode key lookup retains a normalized page until the source selection,
+keyboard page, captured name, or entry generation changes. The final composition
+still resolves the newly edited name each time. `AR_TEST_NAME_ENTRY_BENCH=1`
+with the localization schedule test measures this native-compose/capture path.
+
+`ArLocalizedTextPresenter_GetLiveLineStats` reports attempts and outcomes since
+presenter reset. A whole-page fallback records its reason (unsupported layout,
+invalid field, capacity, spans, raster/upload failure, metrics, or placement)
+and logs the first occurrence of each reason, including the backend error when
+available. Expected fallbacks remain supported, and transient failures retry.
 
 ### Graphical credits page adapter
 

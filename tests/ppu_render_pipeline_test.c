@@ -1133,6 +1133,17 @@ static void TestSim3DFlatCompositionDemand(void) {
 }
 
 static void TestSim3DPlaneTextureUploadMask(void) {
+  const SimRenderFeatureMask projected =
+      kSimFeature_SeparatedComposite | kSimFeature_GroundProjection;
+  CHECK(Sim3D_ResolveGroundSource(0, true, true) == kSim3DGround_None);
+  CHECK(Sim3D_ResolveGroundSource(kSimFeature_SeparatedComposite, true, true) == kSim3DGround_None);
+  CHECK(Sim3D_ResolveGroundSource(projected, false, true) == kSim3DGround_None);
+  CHECK(Sim3D_ResolveGroundSource(projected, true, true) == kSim3DGround_Voxels);
+  const SimRenderFeatureMask underlay = projected | kSimFeature_WorldUnderlay;
+  CHECK(Sim3D_ResolveGroundSource(underlay, false, true) == kSim3DGround_Canvas);
+  CHECK(Sim3D_ResolveGroundSource(underlay, true, false) == kSim3DGround_Canvas);
+  CHECK(Sim3D_ResolveGroundSource(underlay, true, true) == kSim3DGround_Voxels);
+  CHECK(Sim3D_ResolveGroundSource(underlay | kSimFeature_GlobeUnderlay, true, true) == kSim3DGround_Voxels);
   const uint32_t all_planes = (1u << kSim3DPlane_Count) - 1u;
   CHECK(Sim3D_PlaneTextureUploadMask(0, all_planes) == 0);
   CHECK(Sim3D_PlaneTextureUploadMask(

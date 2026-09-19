@@ -209,6 +209,29 @@ int main(void) {
   compose.map_group = 0;
   compose.abi_version = 0;
   CHECK(!ActRaiserLocalizationRoute_ResolveCompose(&compose));
+
+  /* The native pause producer/eraser shares one string and destination across
+   * SIM and action. Keep the existing pack key, without admitting other action
+   * cards into SIM or claiming title-screen text. */
+  compose = Compose(0x00A8EF, 0x0B0D);
+  compose.caller_pc24 = 0x02BF1F;
+  for (unsigned group = 0; group <= kActRaiserActionMapGroup_Last; ++group) {
+    compose.map_group = group;
+    for (unsigned town = kActRaiserSimulationTown_First;
+         town <= kActRaiserSimulationTown_Last; ++town) {
+      compose.map_number = town;
+      compose_route = ActRaiserLocalizationRoute_ResolveCompose(&compose);
+      CHECK(compose_route && !strcmp(compose_route->semantic_id, "action.hud.pause"));
+    }
+  }
+  compose.map_group = 0;
+  compose.map_number = kActRaiserNonActionMap_Title;
+  CHECK(!ActRaiserLocalizationRoute_ResolveCompose(&compose));
+  compose.map_number = kActRaiserSimulationTown_First;
+  compose.destination = 0x090D;
+  CHECK(!ActRaiserLocalizationRoute_ResolveCompose(&compose));
+  compose.source_pc24 = 0x00A8DF; /* READY remains action-only. */
+  CHECK(!ActRaiserLocalizationRoute_ResolveCompose(&compose));
   puts("localization route checks passed");
   return failures ? 1 : 0;
 }

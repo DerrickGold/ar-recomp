@@ -19,6 +19,7 @@
 #include "action/action_effect_projection.h"
 #include "present.h"
 #include "present_sky_palace.h"
+#include "present_sim3d_canvas.h"
 #include "action/action_effect_render.h"
 #include "constants.h"
 #include "crt_post.h"
@@ -1175,8 +1176,13 @@ void PresentUpload(const FrameSlot *slot) {
           frame.w, frame.h, frame.w);
     }
   }
-  UploadSimTownCanvas();
   SimBackgroundVoxelRenderer_Upload(&g_render_device);
+  const Sim3DGroundSource ground_source = Sim3D_ResolveGroundSource(
+      slot->sim.effective_features, slot->sim.background_voxel_enabled,
+      SimBackgroundVoxelRenderer_Ready(slot->sim.background_voxel_serial));
+  PresentSim3DCanvas_Upload(&g_render_device,
+      slot->sim.view == kSimView_Enhanced && slot->sim.separated_valid &&
+      ground_source == kSim3DGround_Canvas);
   UploadWorldNavigationComposition(slot);
   Sim3DPerformance_End(performance);
 }
@@ -2050,9 +2056,8 @@ void PresentHostUi(const FrameSlot *slot, ArRenderRectI viewport,
  * indefinitely, so the damage does not self-heal; only changing town would
  * clear it.
  *
- * The symptom is already documented for this exact texture class in
- * UploadSimTownCanvas below ("it showed as magenta"): freshly reallocated
- * STREAMING storage is uninitialized. Never reproducible on macOS/Metal, which
+ * Freshly reallocated STREAMING storage is uninitialized and needs a complete
+ * upload before any partial updates. Never reproducible on macOS/Metal, which
  * does not emit _DEVICE_RESET at all — this is a Windows-D3D and
  * Vulkan-backed (Steam Deck) bug. */
 void PresentRendererResources_Reset(void) {

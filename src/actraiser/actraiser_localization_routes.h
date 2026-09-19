@@ -49,6 +49,7 @@ typedef enum ActRaiserLocalizationComposeScope {
   kActRaiserLocalizationComposeScope_Action,
   kActRaiserLocalizationComposeScope_Title,
   kActRaiserLocalizationComposeScope_SoundTest,
+  kActRaiserLocalizationComposeScope_Gameplay, /* Shared action/SIM pause. */
 } ActRaiserLocalizationComposeScope;
 
 /* Persistent fixed-composer surfaces use one stable surface ID per ownership

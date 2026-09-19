@@ -35,6 +35,8 @@ typedef struct Compositor {
   StoredTexture textures[kTextureCapacity];
   /* Textures ever created; slots are reused once destroyed. */
   uintptr_t created;
+  unsigned uploads;
+  uint64_t upload_bytes;
   float *canvas;
   int left, top, right, bottom;
   unsigned unsupported;
@@ -70,6 +72,8 @@ static bool Upload(void *context, ArRenderTexture texture,
   if (!texture.value || texture.value >= kTextureCapacity || rect || !pixels)
     return false;
   StoredTexture *stored = &compositor->textures[texture.value];
+  ++compositor->uploads;
+  compositor->upload_bytes += (uint64_t)stored->width * stored->height * 4u;
   for (int y = 0; y < stored->height; ++y)
     memcpy(stored->pixels + (size_t)y * (size_t)stored->width,
            (const uint8_t *)pixels + (size_t)y * (size_t)pitch,
@@ -190,6 +194,66 @@ static const ArRenderBackendOps kCompositorOps = {
 static ArHostFontResources s_font_store;
 static ArFontResourceId s_font;
 
+/* Count actual backend work, including a failed attempt that never uploads. */
+static unsigned s_rasters, s_page_rasters;
+static bool s_fail_next_cell;
+
+static bool CountRaster(void *context, const ArTextRasterRequest *request,
+                        ArTextBitmap *bitmap, ArTextRasterFailure *failure,
+                        char *error, size_t capacity) {
+  ++s_rasters;
+  s_page_rasters += memchr(request->utf8, '\n', request->utf8_bytes) != NULL;
+  if (s_fail_next_cell && request->utf8_bytes == 1 && request->utf8[0] == 'A') {
+    s_fail_next_cell = false;
+    *failure = kArTextRasterFailure_Retryable;
+    snprintf(error, capacity, "injected field raster failure");
+    return false;
+  }
+  return ArTextRasterizer_Rasterize(
+      ArTextBackendInstance_Get(context), request, bitmap, failure, error, capacity);
+}
+
+static void ReleaseBitmap(void *context, ArTextBitmap *bitmap) {
+  ArTextRasterizer_ReleaseBitmap(ArTextBackendInstance_Get(context), bitmap);
+}
+
+static bool HasGlyph(void *context, uint32_t scalar, bool *provided,
+                     char *error, size_t capacity) {
+  return ArTextRasterizer_HasGlyph(
+      ArTextBackendInstance_Get(context), scalar, provided, error, capacity);
+}
+
+static const ArTextRasterizerOps kCountRasterOps = {
+  .struct_size = sizeof(kCountRasterOps),
+  .abi_version = AR_TEXT_RASTERIZER_ABI_VERSION,
+  .rasterize = CountRaster, .release_bitmap = ReleaseBitmap, .has_glyph = HasGlyph,
+};
+
+static bool CreateBackend(void *context, ArTextBackendInstance *instance,
+                          const ArTextBackendConfig *config,
+                          char *error, size_t capacity) {
+  ArTextBackendInstance *real = calloc(1, sizeof(*real));
+  if (!real) return false;
+  if (!ArTextBackendInstance_Create(real, context, config, error, capacity)) {
+    free(real);
+    return false;
+  }
+  instance->implementation = real;
+  return ArTextRasterizer_Init(&instance->rasterizer, &kCountRasterOps, real,
+                               real->rasterizer.implementation_revision);
+}
+
+static void DestroyBackend(void *context, ArTextBackendInstance *instance) {
+  (void)context;
+  ArTextBackendInstance_Destroy(instance->implementation);
+  free(instance->implementation);
+}
+
+static const ArTextBackendOps kCountBackendOps = {
+  .struct_size = sizeof(kCountBackendOps), .abi_version = AR_TEXT_BACKEND_ABI_VERSION,
+  .create = CreateBackend, .destroy = DestroyBackend,
+};
+
 enum { kPageCapacity = 1024 };
 
 /* The page the runtime composes for the USA keyboard: prompt, the name padded
@@ -199,6 +263,7 @@ typedef struct KeyboardPage {
   char utf8[kPageCapacity];
   size_t bytes;
   size_t name_start, name_end;
+  size_t key_ends[65];
   ArLocalizationInlineObjectSnapshot objects[kArLocalizationFrameInlineObjectCapacity];
   uint8_t object_count;
 } KeyboardPage;
@@ -252,6 +317,7 @@ static void BuildPage(KeyboardPage *page, const char *name, unsigned selected) {
     for (unsigned column = 0; column < 13; ++column) {
       if (column) Append(page, "    ");
       Append(page, rows[row][column]);
+      page->key_ends[row * 13 + column] = page->bytes;
       if (row == 4 && column == 11)
         AddObject(page, kArLocalizationInlineObject_NameBackspace);
       if (row == 4 && column == 12)
@@ -585,6 +651,178 @@ static void CheckField(ArRenderDevice *device, Compositor *compositor,
   CHECK(prepared.text_count == 1);
 }
 
+/* Moving across upper/lowercase letters and digits must center the native
+ * arrow on the selected letter, even when its neighbours have descenders.
+ * All 65 positions reuse the same page and artwork textures. */
+static void CheckCursor(ArRenderDevice *device, Compositor *compositor,
+                        const ArEnhancedTextSettings *settings, int scale,
+                        bool alternate_artwork_placeholder) {
+  static KeyboardPage page;
+  static ArLocalizationFrame frame;
+  static ArLocalizedPreparedFrame prepared;
+  const HudPresentationChunk chunk = {
+    .inspector_kind = kInspectorPresentation_HudBg,
+    .screen_source = {0, 0, 256, 224}, .texture_source = {0, 0, 256, 224},
+    .output_destination = {7, 5, 256 * scale, 224 * scale},
+  };
+  unsigned rasters = 0, uploads = 0;
+  uintptr_t texture = 0;
+  for (unsigned selected = 0; selected < 65; ++selected) {
+    BuildPage(&page, "", selected);
+    if (alternate_artwork_placeholder) {
+      /* Artwork identity comes from the objects, not from U+FFFC bytes.
+       * An ellipsis has visible ink well below its neighbours' centers. */
+      for (unsigned key = 63; key < 65; ++key)
+        memcpy(page.utf8 + page.key_ends[key] - 3, "\xE2\x80\xA6", 3);
+    }
+    CHECK(BuildFrame(&frame, &page, settings, true, 8,
+                     kArTextDirection_LeftToRight));
+    ArLocalizedTextPresenter_Prepare(device, &frame, true, 0, 32, 32, 0, 0,
+                                     256, 224, &chunk, 1, &prepared);
+    CHECK(prepared.text_count == 1);
+    if (prepared.text_count != 1) continue;
+    const ArLocalizedPreparedText *text = &prepared.texts[0];
+    if (selected == 0) {
+      texture = text->surface.texture.value;
+      rasters = s_rasters;
+      uploads = compositor->uploads;
+    }
+    CHECK(text->surface.texture.value == texture);
+    CHECK(s_rasters == rasters && compositor->uploads == uploads);
+    const size_t selected_end = page.key_ends[selected] -
+        (page.name_end - page.name_start) + 3u; /* Blanked live line. */
+    const ArRenderRectI *ink = NULL;
+    for (size_t i = 0; i < text->surface.reveal_cluster_count; ++i)
+      if (text->surface.reveal_clusters[i].end_utf8_byte == selected_end)
+        ink = &text->surface.cluster_ink_bounds[i];
+    CHECK(ink);
+    const ArRenderRectI *arrow = NULL, *action_key = NULL;
+    for (uint8_t i = 0; i < prepared.inline_object_count; ++i) {
+      const ArLocalizedPreparedInlineObject *object = &prepared.inline_objects[i];
+      if (object->kind == kArLocalizationInlineObject_NameCursor)
+        arrow = &object->destination;
+      if ((selected == 63 && object->kind == kArLocalizationInlineObject_NameBackspace) ||
+          (selected == 64 && object->kind == kArLocalizationInlineObject_NameFinish))
+        action_key = &object->destination;
+    }
+    CHECK(arrow);
+    if (!arrow || !ink) continue;
+    /* The fixture's arrow ink occupies source rows [2, 6). */
+    const double center = arrow->y + arrow->h / 2.0;
+    if (selected < 63 && ink->h > 0) {
+      const double key_center = text->destination.y + ink->y + ink->h / 2.0;
+      if (fabs(center - key_center) > 0.75)
+        fprintf(stderr, "  key=%u arrow=%.1f key=%.1f\n", selected, center, key_center);
+      CHECK(fabs(center - key_center) <= 0.75);
+    } else if (action_key) {
+      CHECK(fabs(center - (action_key->y + action_key->h / 2.0)) <= 0.75);
+    }
+  }
+}
+
+static void CheckTypingWork(ArRenderDevice *device, Compositor *compositor) {
+  test_case = "typing work";
+  ArLocalizedTextPresenter_Reset(device);
+  ArEnhancedTextSettings settings;
+  ArEnhancedTextSettings_Defaults(&settings);
+  static KeyboardPage page;
+  static ArLocalizationFrame frame;
+  static ArLocalizedPreparedFrame prepared;
+  const HudPresentationChunk chunk = {
+    .inspector_kind = kInspectorPresentation_HudBg,
+    .screen_source = {0, 0, 256, 224}, .texture_source = {0, 0, 256, 224},
+    .output_destination = {0, 0, 1024, 896},
+  };
+  static const struct { const char *name; unsigned new_letters; } edits[] = {
+    {"", 0}, {"", 0}, {"A", 1}, {"A|B", 1}, {"A|B|A", 0},
+    {"A|B", 0}, {"", 0}, {"B", 0}, {"A|B|A|B", 0},
+    {"e\xCC\x81", 1}, {"A|e\xCC\x81", 0}, {"", 0},
+  };
+  uintptr_t page_texture = 0;
+  uint64_t page_bytes = 0, typed_bytes = 0;
+  unsigned typed_rasters = 0;
+  for (size_t i = 0; i < sizeof(edits) / sizeof(edits[0]); ++i) {
+    BuildPage(&page, edits[i].name, (unsigned)i);
+    CHECK(BuildFrame(&frame, &page, &settings, true, 8,
+                     kArTextDirection_LeftToRight));
+    const unsigned rasters = s_rasters, pages = s_page_rasters;
+    const unsigned uploads = compositor->uploads;
+    const uint64_t bytes = compositor->upload_bytes;
+    ArLocalizedTextPresenter_Prepare(device, &frame, true, 0, 32, 32, 0, 0,
+                                     256, 224, &chunk, 1, &prepared);
+    CHECK(prepared.text_count == 1u + CountGraphemes(edits[i].name));
+    if (i == 0) {
+      const ArTextSurface *surface = &prepared.texts[0].surface;
+      page_texture = surface->texture.value;
+      page_bytes = (uint64_t)surface->width * surface->height * 4u;
+    } else {
+      CHECK(prepared.texts[0].surface.texture.value == page_texture);
+      CHECK(s_page_rasters == pages);
+      CHECK(s_rasters - rasters == edits[i].new_letters);
+      CHECK(compositor->uploads - uploads == edits[i].new_letters);
+      typed_rasters += s_rasters - rasters;
+      typed_bytes += compositor->upload_bytes - bytes;
+      if (edits[i].new_letters)
+        CHECK(compositor->upload_bytes - bytes < page_bytes / 10u);
+    }
+  }
+  fprintf(stderr, "typing: %u new-letter rasters, %llu uploaded bytes; "
+                  "cached keyboard=%llu bytes\n", typed_rasters,
+          (unsigned long long)typed_bytes, (unsigned long long)page_bytes);
+  /* A different authored keyboard revision must invalidate the page. */
+  const unsigned pages = s_page_rasters;
+  ++frame.snapshots[0].source_revision;
+  ArLocalizedTextPresenter_Prepare(device, &frame, true, 0, 32, 32, 0, 0,
+                                   256, 224, &chunk, 1, &prepared);
+  CHECK(s_page_rasters == pages + 1);
+}
+
+static void CheckFallbackReasons(ArRenderDevice *device) {
+  test_case = "live field fallback diagnostics";
+  ArEnhancedTextSettings settings;
+  ArEnhancedTextSettings_Defaults(&settings);
+  static KeyboardPage page;
+  static ArLocalizationFrame frame;
+  static ArLocalizedPreparedFrame prepared;
+  const HudPresentationChunk chunk = {
+    .inspector_kind = kInspectorPresentation_HudBg,
+    .screen_source = {0, 0, 256, 224}, .texture_source = {0, 0, 256, 224},
+    .output_destination = {0, 0, 1024, 896},
+  };
+  const ArLocalizedLiveLineResult cases[] = {
+    kArLiveLine_Prepared, kArLiveLine_UnsupportedLayout,
+    kArLiveLine_InvalidField, kArLiveLine_SpanCrossesField, kArLiveLine_RasterFailed,
+  };
+  for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+    ArLocalizedTextPresenter_Reset(device);
+    CHECK(ArLocalizedTextPresenter_GetLiveLineStats().attempts == 0);
+    BuildPage(&page, "A", 0);
+    CHECK(BuildFrame(&frame, &page, &settings, true,
+        cases[i] == kArLiveLine_InvalidField ? 7 : 8,
+        cases[i] == kArLiveLine_UnsupportedLayout
+            ? kArTextDirection_RightToLeft : kArTextDirection_LeftToRight));
+    if (cases[i] == kArLiveLine_SpanCrossesField)
+      frame.bidi.spans[0].start = 0;
+    s_fail_next_cell = cases[i] == kArLiveLine_RasterFailed;
+    ArLocalizedTextPresenter_Prepare(device, &frame, true, 0, 32, 32, 0, 0,
+                                     256, 224, &chunk, 1, &prepared);
+    const ArLocalizedLiveLineStats stats = ArLocalizedTextPresenter_GetLiveLineStats();
+    CHECK(stats.attempts == 1 && stats.results[cases[i]] == 1);
+    CHECK(prepared.text_count == (cases[i] == kArLiveLine_Prepared ? 2 : 1));
+    CHECK(!s_fail_next_cell);
+    if (cases[i] == kArLiveLine_RasterFailed) {
+      /* A transient failure is visible, but it must not disable the fast path. */
+      ArLocalizedTextPresenter_Prepare(device, &frame, true, 0, 32, 32, 0, 0,
+                                       256, 224, &chunk, 1, &prepared);
+      const ArLocalizedLiveLineStats recovered = ArLocalizedTextPresenter_GetLiveLineStats();
+      CHECK(recovered.attempts == 2);
+      CHECK(recovered.results[kArLiveLine_Prepared] == 1);
+      CHECK(recovered.results[kArLiveLine_RasterFailed] == 1);
+      CHECK(prepared.text_count == 2);
+    }
+  }
+}
+
 int main(void) {
   s_font = ArHostFontResources_RegisterFile(&s_font_store, AR_TEST_FONT_PATH,
                                             NULL, 0);
@@ -603,7 +841,8 @@ int main(void) {
                              .maximum_texture_height = 4096}));
   ArTextBackend backend;
   ArSdlTextBackend_Init(&backend);
-  ArLocalizedTextPresenter_SetBackend(&backend);
+  const ArTextBackend counted_backend = {&kCountBackendOps, &backend};
+  ArLocalizedTextPresenter_SetBackend(&counted_backend);
 
   /* Descenders, capitals, digits (slanted), wide and narrow letters, accents
    * above the cap height and an empty field. */
@@ -654,6 +893,7 @@ int main(void) {
                    scale, sizes[size], treatment, block);
           test_case = label;
           CheckField(&device, &compositor, &settings, scale, &field_totals);
+          CheckCursor(&device, &compositor, &settings, scale, false);
         }
       }
     }
@@ -673,6 +913,10 @@ int main(void) {
   fprintf(stderr, "live-line comparisons=%u split=%u whole=%u sensitive=%u\n",
           totals.compared, totals.split, totals.whole, totals.sensitive);
   CHECK(totals.sensitive == 8);
+  CheckTypingWork(&device, &compositor);
+  test_case = "explicit action-key metadata";
+  CheckCursor(&device, &compositor, &settings, 4, true);
+  CheckFallbackReasons(&device);
   ArLocalizedTextPresenter_Reset(&device);
   ArLocalizedTextPresenter_SetFontResources(NULL);
   CHECK(ArHostFontResources_Destroy(&s_font_store));

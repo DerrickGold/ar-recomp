@@ -495,6 +495,28 @@ uint32_t *ArTextBitmap_BuildOwnership(const ArTextBitmap *b) {
   return owners;
 }
 
+/* UTF-8 spellings of the break whitespace and bidi formatting controls that
+ * shapers may omit from reveal clusters. NBSP, figure space and narrow NBSP
+ * remain glue. Match complete encodings without introducing a shaping/Unicode
+ * library dependency into the portable bitmap effects. */
+static size_t OmittedClusterPrefixBytes(const char *text, size_t bytes) {
+  if (!bytes) return 0;
+  const unsigned char *s = (const unsigned char *)text;
+  if (s[0] == ' ' || s[0] == '\t' || s[0] == '\n' || s[0] == '\r') return 1;
+  if (bytes >= 2 && ((s[0] == 0xc2 && s[1] == 0x85) ||
+                    (s[0] == 0xd8 && s[1] == 0x9c))) return 2; /* NEL, ALM */
+  if (bytes < 3) return 0;
+  if ((s[0] == 0xe1 && s[1] == 0x9a && s[2] == 0x80) || /* OGHAM space */
+      (s[0] == 0xe3 && s[1] == 0x80 && s[2] == 0x80)) return 3; /* ideographic */
+  if (s[0] != 0xe2) return 0;
+  if (s[1] == 0x80 && ((s[2] >= 0x80 && s[2] <= 0x86) ||
+      (s[2] >= 0x88 && s[2] <= 0x8a) || s[2] == 0x8e || s[2] == 0x8f ||
+      (s[2] >= 0xa8 && s[2] <= 0xae))) return 3; /* spaces, breaks, bidi */
+  if (s[1] == 0x81 && (s[2] == 0x9f ||
+      (s[2] >= 0xa6 && s[2] <= 0xa9))) return 3; /* math space, isolates */
+  return 0;
+}
+
 bool ArTextBitmap_SlantAsciiNumerals(ArTextBitmap *b,
                                     const char *utf8, size_t bytes) {
   if (!b || !utf8 || !b->pixel_owners || !b->reveal_clusters ||
@@ -510,9 +532,12 @@ bool ArTextBitmap_SlantAsciiNumerals(ArTextBitmap *b,
   for (size_t i = 0; i < b->reveal_cluster_count; ++i) {
     const size_t end = b->reveal_clusters[i].end_utf8_byte;
     bool number = start < end && end <= bytes;
-    /* A skipped hard-break substring is not part of the next ink cluster. */
-    while (start < end && start < bytes &&
-           (utf8[start] == '\n' || utf8[start] == '\r')) ++start;
+    /* A gap left by wrapping or bidi layout is not part of the next glyph. */
+    while (number && start < end) {
+      const size_t skipped = OmittedClusterPrefixBytes(utf8 + start, end - start);
+      if (!skipped) break;
+      start += skipped;
+    }
     number &= start < end;
     for (size_t j = start; number && j < end; ++j)
       number = utf8[j] >= '0' && utf8[j] <= '9';

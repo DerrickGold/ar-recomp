@@ -59,7 +59,6 @@ PresentationOutcome PresentWorldNavigation3D(const FrameSlot *slot);
  * must abort the selected scene, never switch to the native framebuffer. */
 PresentationOutcome PresentWorldNavigationBackdrop(
     const FrameSlot *slot, ArRenderRectI viewport);
-void UploadSimTownCanvas(void);
 void UploadWorldNavigationComposition(const FrameSlot *slot);
 
 /* The sim half of PresentRendererResources_Reset (which stays in present.c and

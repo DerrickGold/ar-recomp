@@ -6,8 +6,9 @@
 #include <string.h>
 
 /* Bitmap effects rewritten for speed must produce the bytes the original
- * produced. The numeral slant is kept below verbatim as it stood before it was
- * restricted to numeral rows (2026-09-17), and the rewrite is compared with it
+ * produced. The numeral slant below retains the full-page algorithm from before
+ * it was restricted to numeral rows (2026-09-17), with the wrap-space classifier
+ * correction applied to both versions. The rewrite is compared with it
  * on randomized pages, including failure cases and transparent pixels that
  * carry colour. */
 
@@ -40,9 +41,29 @@ static bool ReferenceSlantAsciiNumerals(ArTextBitmap *b,
   for (size_t i = 0; i < b->reveal_cluster_count; ++i) {
     const size_t end = b->reveal_clusters[i].end_utf8_byte;
     bool number = start < end && end <= bytes;
-    /* A skipped hard-break substring is not part of the next ink cluster. */
-    while (start < end && start < bytes &&
-           (utf8[start] == '\n' || utf8[start] == '\r')) ++start;
+    /* Omitted break whitespace does not belong to the next ink cluster. */
+    static const char *const omitted[] = {
+      " ", "\t", "\n", "\r", "\xc2\x85", "\xd8\x9c", "\xe1\x9a\x80",
+      "\xe2\x80\x80", "\xe2\x80\x81", "\xe2\x80\x82", "\xe2\x80\x83",
+      "\xe2\x80\x84", "\xe2\x80\x85", "\xe2\x80\x86", "\xe2\x80\x88",
+      "\xe2\x80\x89", "\xe2\x80\x8a", "\xe2\x80\x8e", "\xe2\x80\x8f",
+      "\xe2\x80\xa8", "\xe2\x80\xa9", "\xe2\x80\xaa", "\xe2\x80\xab",
+      "\xe2\x80\xac", "\xe2\x80\xad", "\xe2\x80\xae", "\xe2\x81\x9f",
+      "\xe2\x81\xa6", "\xe2\x81\xa7", "\xe2\x81\xa8", "\xe2\x81\xa9",
+      "\xe3\x80\x80",
+    };
+    while (number && start < end) {
+      size_t skipped = 0;
+      for (size_t j = 0; j < sizeof(omitted) / sizeof(omitted[0]); ++j) {
+        const size_t length = strlen(omitted[j]);
+        if (length <= end - start && !memcmp(utf8 + start, omitted[j], length)) {
+          skipped = length;
+          break;
+        }
+      }
+      if (!skipped) break;
+      start += skipped;
+    }
     number &= start < end;
     for (size_t j = start; number && j < end; ++j)
       number = utf8[j] >= '0' && utf8[j] <= '9';
@@ -112,8 +133,8 @@ static void BuildPage(Page *page, uint32_t *state, int width, int height,
   memset(page, 0, sizeof(*page));
   page->pixels = malloc((size_t)pitch * (size_t)height);
   page->owners = malloc((size_t)width * (size_t)height * sizeof(uint32_t));
-  /* Clusters are one to three bytes: digits, letters and hard breaks. */
-  static const char kAlphabet[] = "0123456789AB9\n";
+  /* Inferred ranges include digits, letters and omitted break whitespace. */
+  static const char kAlphabet[] = "0123456789AB9 \t\r\n";
   size_t at = 0;
   for (size_t i = 0; i < clusters; ++i) {
     const size_t length = 1 + Random(state) % 3;

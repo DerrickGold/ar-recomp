@@ -63,7 +63,7 @@ static bool ResolveLocation(
           state->utf8, sizeof(state->utf8), &state->utf8_bytes,
           &state->cluster_count, &state->source_revision,
           inline_objects, 1, &inline_object_count, NULL,
-          &state->language, &state->bidi, error, error_capacity) ||
+          &state->language, &state->bidi, NULL, error, error_capacity) ||
       inline_object_count ||
       !ArLocalizationTextLanguage_IsValid(&state->language) ||
       !ArTextBidiSpans_FitSource(

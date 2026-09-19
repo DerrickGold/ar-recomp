@@ -275,14 +275,33 @@ static ArRenderRectI RowInk(const ArTextSurface *surface, int line_index) {
   return ink;
 }
 
+static bool CursorSelectsArtwork(
+    const ArLocalizationFrame *frame, const ArLocalizationTextSnapshot *snapshot,
+    const ArLocalizationInlineObjectSnapshot *cursor) {
+  if (snapshot->inline_object_offset > frame->inline_object_count ||
+      snapshot->inline_object_count >
+          frame->inline_object_count - snapshot->inline_object_offset)
+    return false;
+  for (uint8_t i = 0; i < snapshot->inline_object_count; ++i) {
+    const ArLocalizationInlineObjectSnapshot *key =
+        &frame->inline_objects[snapshot->inline_object_offset + i];
+    if (key->end_utf8_byte == cursor->end_utf8_byte &&
+        (key->kind == kArLocalizationInlineObject_NameBackspace ||
+         key->kind == kArLocalizationInlineObject_NameFinish))
+      return true;
+  }
+  return false;
+}
+
 bool ArLocalizedTextArtwork_PrepareInlineObject(
     ArRenderDevice *device, const ArLocalizationFrame *frame,
     const ArLocalizationTextSnapshot *snapshot,
-    ArLocalizationInlineObjectKind kind, const ArTextSurface *surface,
+    const ArLocalizationInlineObjectSnapshot *object, const ArTextSurface *surface,
     const char *utf8, size_t utf8_bytes,
     const ArTextRevealCluster *cluster, ArRenderRectI text_destination,
     int key_cell_extent, ArLocalizedPreparedInlineObject *prepared) {
-  if (!surface || !cluster || !prepared) return false;
+  if (!object || !surface || !cluster || !prepared) return false;
+  const ArLocalizationInlineObjectKind kind = object->kind;
   if (kind == kArLocalizationInlineObject_NameFieldUnderline) {
     *prepared = (ArLocalizedPreparedInlineObject){.kind = kind};
     return ArLocalizedTextLayout_NameUnderline(
@@ -360,7 +379,22 @@ bool ArLocalizedTextArtwork_PrepareInlineObject(
        kind == kArLocalizationInlineObject_NameFinish ||
        kind == kArLocalizationInlineObject_SelectionPointer) &&
       surface->cluster_ink_bounds) {
-    ArRenderRectI ink = RowInk(surface, cluster->line_index);
+    ArRenderRectI ink = {0};
+    if (name_cursor && !CursorSelectsArtwork(frame, snapshot, object)) {
+      /* Center on the selected key's visible ink. A row union lets a
+       * neighbour's descender or accent pull the arrow away from that key,
+       * especially between the upper- and lowercase rows. These bounds are
+       * already cached, including the current pixelation and shading. */
+      for (size_t i = 0; i < surface->reveal_cluster_count; ++i) {
+        if (surface->reveal_clusters[i].end_utf8_byte == cluster->end_utf8_byte) {
+          ink = surface->cluster_ink_bounds[i];
+          break;
+        }
+      }
+    }
+    /* Blank/inline-art keys have no text ink: use the same row center as the
+     * backspace and finish artwork drawn in their place. */
+    if (ink.h <= 0) ink = RowInk(surface, cluster->line_index);
     if (ink.h > 0) {
       ink.y += text_destination.y;
       return ArLocalizedTextLayout_CenterInkVertically(

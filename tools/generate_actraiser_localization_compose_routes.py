@@ -107,7 +107,10 @@ def generate_c(manifest_path):
     for row in routes:
         flags = []
         kind = row['surface_kind']
-        scope = ('Action' if kind.startswith('action_') else
+        # The native pause routine is shared by action and SIM. Retain its
+        # historical action.hud.pause pack key in both scenes.
+        scope = ('Gameplay' if kind == 'action_pause' else
+                 'Action' if kind.startswith('action_') else
                  'Title' if kind.startswith('title_') else
                  'SoundTest' if kind == 'sound_test' else 'Simulation')
         if 'source_table_pc24' in row:

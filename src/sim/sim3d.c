@@ -111,6 +111,15 @@ uint32_t Sim3D_PlaneTextureUploadMask(
   return mask;
 }
 
+Sim3DGroundSource Sim3D_ResolveGroundSource(SimRenderFeatureMask features,
+    bool voxels_enabled, bool voxels_ready) {
+  const SimRenderFeatureMask projected =
+      kSimFeature_SeparatedComposite | kSimFeature_GroundProjection;
+  if ((features & projected) != projected) return kSim3DGround_None;
+  if (voxels_enabled && voxels_ready) return kSim3DGround_Voxels;
+  return features & kSimFeature_WorldUnderlay ? kSim3DGround_Canvas : kSim3DGround_None;
+}
+
 /* Shared with actraiser_rtl.c's widescreen margin-gap fill
  * rather than duplicated there: both want "the colour the authentic renderer
  * shows for an unrendered pixel", and two copies of the 5-bit expansion would

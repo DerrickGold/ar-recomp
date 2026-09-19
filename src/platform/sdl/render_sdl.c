@@ -1,4 +1,5 @@
 #include "render_sdl_internal.h"
+#include "performance_metrics.h"
 
 #include <limits.h>
 #include <stddef.h>
@@ -136,8 +137,22 @@ static bool UpdateTexture(void *context, ArRenderTexture texture,
                           destination->w, destination->h};
     rect = &converted;
   }
+  SDL_Texture *native = ArSdlRenderBackend_UnwrapTexture(texture);
+  if (PerformanceMetrics_Enabled()) {
+    /* Resolve full uploads and pixel size here, where the texture is known.
+     * Payload bytes exclude source padding and hidden driver staging. */
+    const SDL_PropertiesID properties = SDL_GetTextureProperties(native);
+    const int width = destination ? destination->w : (int)SDL_GetNumberProperty(
+        properties, SDL_PROP_TEXTURE_WIDTH_NUMBER, 0);
+    const int height = destination ? destination->h : (int)SDL_GetNumberProperty(
+        properties, SDL_PROP_TEXTURE_HEIGHT_NUMBER, 0);
+    const SDL_PixelFormat format = (SDL_PixelFormat)SDL_GetNumberProperty(
+        properties, SDL_PROP_TEXTURE_FORMAT_NUMBER, SDL_PIXELFORMAT_UNKNOWN);
+    PerformanceMetrics_AddTextureUpload(1, width > 0 && height > 0
+        ? (uint64_t)width * height * SDL_BYTESPERPIXEL(format) : 0);
+  }
   return SDL_UpdateTexture(
-      ArSdlRenderBackend_UnwrapTexture(texture), rect, pixels, pitch_bytes);
+      native, rect, pixels, pitch_bytes);
 }
 
 static bool EnsureOutputTarget(ArSdlRenderBackend *backend) {

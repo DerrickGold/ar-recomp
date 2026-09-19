@@ -26,6 +26,7 @@
 #include "diorama/diorama.h"
 #include "host/host_clock.h"
 #include "presentation_outcome.h"
+#include "presentation_upload_mirror.h"
 #include "render/render_device.h"
 #include "render/render_output.h"
 #include "render/localized_text_presenter.h"
@@ -247,6 +248,9 @@ static struct {
   ArRenderTexture palace;
   ArRenderTexture label;
   ArRenderTexture plaque;
+  PresentationUploadMirror palace_mirror;
+  PresentationUploadMirror label_mirror;
+  PresentationUploadMirror plaque_mirror;
   bool uploaded;
 } s_world_composition;
 
@@ -495,6 +499,14 @@ static ArRenderTexture EnsureWorldNavigationCompositionTexture(
   return *texture;
 }
 
+static bool UploadWorldNavigationLayer(PresentationUploadMirror *mirror,
+    ArRenderTexture texture, const SimWorldNavigationCompositionLayer *layer,
+    const uint32_t *pixels) {
+  return !layer->visible || PresentationUploadMirror_UploadArgb8888(
+      mirror, &g_render_device, texture, (const uint8_t *)pixels,
+      layer->width, layer->height, kSimWorldNavigationCompositionPitch, 0, 0, NULL);
+}
+
 void UploadWorldNavigationComposition(const FrameSlot *slot) {
   s_world_composition.uploaded = false;
   if (!slot || slot->sim.view != kSimView_WorldNavigation) return;
@@ -517,28 +529,12 @@ void UploadWorldNavigationComposition(const FrameSlot *slot) {
       !ArRenderTexture_IsValid(plaque) ||
       (composition->label.visible && !ArRenderTexture_IsValid(label)))
     return;
-  ArRenderRectI palace_rect = {
-    0, 0, composition->palace.width, composition->palace.height,
-  };
-  ArRenderRectI plaque_rect = {
-    0, 0, composition->plaque.width, composition->plaque.height,
-  };
-  ArRenderRectI label_rect = {
-    0, 0, composition->label.width, composition->label.height,
-  };
-  if (!ArRenderDevice_UpdateTexture(
-          &g_render_device, palace, &palace_rect,
-          g_sim_world_navigation_palace_pixels,
-          kSimWorldNavigationCompositionPitch) ||
-      !ArRenderDevice_UpdateTexture(
-          &g_render_device, plaque, &plaque_rect,
-          g_sim_world_navigation_plaque_pixels,
-          kSimWorldNavigationCompositionPitch) ||
-      (composition->label.visible &&
-       !ArRenderDevice_UpdateTexture(
-           &g_render_device, label, &label_rect,
-           g_sim_world_navigation_label_pixels,
-           kSimWorldNavigationCompositionPitch)))
+  if (!UploadWorldNavigationLayer(&s_world_composition.palace_mirror,
+          palace, &composition->palace, g_sim_world_navigation_palace_pixels) ||
+      !UploadWorldNavigationLayer(&s_world_composition.plaque_mirror,
+          plaque, &composition->plaque, g_sim_world_navigation_plaque_pixels) ||
+      !UploadWorldNavigationLayer(&s_world_composition.label_mirror,
+          label, &composition->label, g_sim_world_navigation_label_pixels))
     return;
   s_world_composition.uploaded = true;
 }
@@ -4827,16 +4823,16 @@ static PresentationOutcome DrawSimGlobeScene(const FrameSlot *slot, ArRenderRect
     }
     WorldNavigationModelSource *sources = s_world_models.gpu_sources;
     size_t count = 0, radial_count = 0;
-    /* Stable partition: neighbours and geometric bridges first, active SIM
-     * facades second. Each source is compiled by exactly one representation. */
-    for (unsigned group = 0; group < (sim_facades ? 2u : 1u); ++group) {
+    /* Active bridges use the town stream's separate visual/depth datums, but
+     * retain geometric height. Neighbours keep navigation's radial stream. */
+    for (unsigned group = 0; group < 2; ++group) {
       for (size_t i = 0; ok && i < candidates; ++i) {
         const SimWorldNavigationTownObject *object = i < towns->object_count
             ? &towns->objects[i] : &active_objects[i-towns->object_count];
         if (active_objects && i < towns->object_count && object->town == map.town) continue;
         if (object->town != map.town && !slot->sim.world_navigation_models) continue;
-        const bool facing = sim_facades && object->town == map.town &&
-            object->kind != kSimBackgroundVoxel_Bridge;
+        const bool facing = object->town == map.town &&
+            (sim_facades || object->kind == kSimBackgroundVoxel_Bridge);
         if (facing != (group == 1)) continue;
         if (object->kind >= kSimBackgroundVoxelKindCount) continue;
         const SimBackgroundBridgeBounds bounds = WorldNavigationObjectBounds(object);
@@ -4864,6 +4860,15 @@ static PresentationOutcome DrawSimGlobeScene(const FrameSlot *slot, ArRenderRect
           }
         } else s->anchor_height = map.landscape > 0
             ? WorldNavigationTerrainHeightAt(x*kSimWorldMapTilePixels,y*kSimWorldMapTilePixels,NULL) : 0;
+        s->depth_height = s->anchor_height;
+        if (object->town == map.town && object->kind == kSimBackgroundVoxel_Bridge) {
+          float approach, envelope;
+          if (!SimBackgroundBridge_TerrainHeights(object, map.town, &approach, &envelope) ||
+              !SimWorldNavigationTerrain_RegisterTownFloor(map.town, x-tx, y-ty,
+                  approach, &s->anchor_height) ||
+              !SimWorldNavigationTerrain_RegisterTownFloor(map.town, x-tx, y-ty,
+                  envelope, &s->depth_height)) { ok = false; break; }
+        }
       }
       if (!group) radial_count = count;
     }
@@ -4879,7 +4884,7 @@ static PresentationOutcome DrawSimGlobeScene(const FrameSlot *slot, ArRenderRect
     if (ok && count) ok = WorldNavigationModelMesh_Enabled();
     if (ok && radial_count)
       ok = WorldNavigationModelMesh_Draw(sources,radial_count,&style,&t.radial);
-    if (ok && sim_facades) {
+    if (ok) {
       /* Active facades are wholly inside the clear town. Do not invalidate
        * their resident sources when a neighbour-only focus setting changes. */
       style.focus=(Sim3DDepthSurfaceFocus){0};
@@ -5148,6 +5153,9 @@ void PresentWorldNav_ResetResources(void) {
   s_world_composition.plaque = ArRenderTexture_Invalid();
   s_world_composition.uploaded = false;
   s_world_weather.unavailable = false;
+  PresentationUploadMirror_Reset(&s_world_composition.palace_mirror);
+  PresentationUploadMirror_Reset(&s_world_composition.plaque_mirror);
+  PresentationUploadMirror_Reset(&s_world_composition.label_mirror);
   PresentWorldNavSky_Reset();
   s_world_weather.failure_reported = false;
 }

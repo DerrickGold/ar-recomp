@@ -36,7 +36,7 @@ static bool ResolvePage(ActRaiserLocalizationCredits *credits,
   uint8_t boundaries[AR_TEXT_BOUNDARY_BYTES(sizeof(source))] = {0};
   if (!resolve(context, id, source, sizeof(source), &bytes, &clusters,
                 &credits->revision, NULL, 0, &objects, boundaries,
-                &credits->language, &credits->bidi, NULL, 0) ||
+                &credits->language, &credits->bidi, NULL, NULL, 0) ||
       !ArLocalizationTextLanguage_IsValid(&credits->language) ||
       objects || bytes >= sizeof(source) || !credits->revision ||
       !ArTextBidiSpans_FitSource(&credits->bidi, source, bytes))

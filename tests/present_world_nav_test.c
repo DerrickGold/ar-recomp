@@ -27,6 +27,9 @@
 #include <string.h>
 
 typedef struct FakeBackend {
+  int ui_uploads;
+  bool fail_ui_upload;
+  ArRenderRectI last_ui_upload;
   int output_width;
   int output_height;
   int use_output_coordinates_count;
@@ -581,12 +584,12 @@ static void DestroyTexture(void *context, ArRenderTexture texture) {
 static bool UpdateTexture(void *context, ArRenderTexture texture,
                           const ArRenderRectI *destination,
                           const void *pixels, int pitch_bytes) {
-  (void)context;
+  FakeBackend *backend = context;
   (void)texture;
-  (void)destination;
-  (void)pixels;
-  (void)pitch_bytes;
-  return true;
+  assert(destination && pixels && pitch_bytes > 0);
+  backend->ui_uploads++;
+  backend->last_ui_upload = *destination;
+  return !backend->fail_ui_upload;
 }
 
 static bool SetRenderTarget(void *context, ArRenderTexture target) {
@@ -2610,7 +2613,63 @@ static void TestClippedBatch(void) {
   Sim3DDepthPass_Submit(&device,ArRenderTexture_Invalid());
 }
 
+static void TestCompositionUploadMirrors(void) {
+  FakeBackend backend = {0};
+  assert(ArRenderDevice_Init(&g_render_device, &kFakeOps, &backend,
+      (ArRenderCapabilities){0}));
+  PresentWorldNav_ResetResources();
+  FrameSlot slot = WorldNavigationSlot();
+  SimWorldNavigationComposition *composition = &slot.sim.world_navigation_scene.composition;
+  composition->empty_animation = false;
+  composition->palace = composition->plaque = composition->label =
+      (SimWorldNavigationCompositionLayer){.visible = true, .width = 4, .height = 4};
+  UploadWorldNavigationComposition(&slot);
+  assert(backend.ui_uploads == 3);
+  UploadWorldNavigationComposition(&slot);
+  assert(backend.ui_uploads == 3);
+
+  g_sim_world_navigation_plaque_pixels[1] ^= 0x00ffffff;
+  UploadWorldNavigationComposition(&slot);
+  assert(backend.ui_uploads == 4);
+  assert(backend.last_ui_upload.x == 1 && backend.last_ui_upload.y == 0 &&
+      backend.last_ui_upload.w == 1 && backend.last_ui_upload.h == 1);
+  composition->label.visible = false;
+  g_sim_world_navigation_label_pixels[2] ^= 0x00ffffff;
+  UploadWorldNavigationComposition(&slot);
+  assert(backend.ui_uploads == 4);
+  composition->label.visible = true;
+  UploadWorldNavigationComposition(&slot);
+  assert(backend.ui_uploads == 5 && backend.last_ui_upload.w == 1);
+
+  composition->empty_animation = true;
+  g_sim_world_navigation_palace_pixels[0] ^= 0x00ffffff;
+  UploadWorldNavigationComposition(&slot);
+  assert(backend.ui_uploads == 5);
+  composition->empty_animation = false;
+  backend.fail_ui_upload = true;
+  UploadWorldNavigationComposition(&slot);
+  assert(backend.ui_uploads == 6);
+  assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_CoreFailure);
+  backend.fail_ui_upload = false;
+  UploadWorldNavigationComposition(&slot);
+  assert(backend.ui_uploads == 7 && backend.last_ui_upload.w == 4 && backend.last_ui_upload.h == 4);
+  composition->label.width = 2;
+  UploadWorldNavigationComposition(&slot);
+  assert(backend.ui_uploads == 8 && backend.last_ui_upload.w == 2);
+  composition->label.width = 4;
+  UploadWorldNavigationComposition(&slot);
+  assert(backend.ui_uploads == 9 && backend.last_ui_upload.w == 4);
+  PresentWorldNav_ResetResources();
+  UploadWorldNavigationComposition(&slot); /* Fake backend reuses texture IDs. */
+  assert(backend.ui_uploads == 12);
+  PresentWorldNav_ResetResources();
+  g_sim_world_navigation_plaque_pixels[1] ^= 0x00ffffff;
+  g_sim_world_navigation_label_pixels[2] ^= 0x00ffffff;
+  g_sim_world_navigation_palace_pixels[0] ^= 0x00ffffff;
+}
+
 int main(void) {
+  TestCompositionUploadMirrors();
   Scene3DCamera camera = {-.575f,0,3,.4f};
   const Scene3DCamera original_camera = camera;
   PresentSimGlobe_ClampCamera(&camera);

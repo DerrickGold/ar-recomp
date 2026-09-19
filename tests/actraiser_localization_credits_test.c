@@ -16,8 +16,10 @@ static bool Resolve(void *context, const char *id, char *text, size_t capacity,
                      size_t *bytes, uint32_t *clusters, uint64_t *revision,
                      ArLocalizationInlineObjectSnapshot *objects, size_t object_capacity,
                      uint8_t *object_count, uint8_t *boundaries,
-                     ArLocalizationTextLanguage *language, ArTextBidiSpans *bidi,
+                     ArLocalizationTextLanguage *language,
+    ArTextBidiSpans *bidi, ArLocalizationTextField *live_field,
                      char *error, size_t error_capacity) {
+  if (live_field) *live_field = (ArLocalizationTextField){0};
   (void)context; (void)objects; (void)object_capacity; (void)error; (void)error_capacity;
   ++calls;
   snprintf(resolved_id,sizeof(resolved_id),"%s",id);

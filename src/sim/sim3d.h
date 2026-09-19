@@ -75,6 +75,16 @@ int Sim3D_ObjPlaneForPriority(int priority);
 uint32_t Sim3D_PlaneTextureUploadMask(
     SimRenderFeatureMask effective_features, uint32_t captured_plane_mask);
 
+typedef enum Sim3DGroundSource {
+  kSim3DGround_None,
+  kSim3DGround_Canvas,
+  kSim3DGround_Voxels,
+} Sim3DGroundSource;
+
+/* Shared by upload and drawing so unused ground textures stay on the CPU. */
+Sim3DGroundSource Sim3D_ResolveGroundSource(SimRenderFeatureMask features,
+    bool voxels_enabled, bool voxels_ready);
+
 /* Called before per-frame overlay policies. True means the preceding SIM
  * capture owned the PPU bindings and the frontend must restore its defaults. */
 bool Sim3D_BeginFrame(void);

@@ -11,6 +11,7 @@ typedef struct WorldNavigationModelSource {
   SimBackgroundVoxelDetail detail;
   uint16_t object_index; /* Identity within the immutable capture revision. */
   float source_x, source_y, centre_x, centre_y, anchor_height;
+  float depth_height; /* Bridge terrain envelope; visual anchor stays at the banks. */
 } WorldNavigationModelSource;
 
 typedef struct WorldNavigationModelSourceStyle {
@@ -45,7 +46,8 @@ void WorldNavigationModelMesh_Reset(void);
 
 /* Active continuous-town presentation. Sources must all belong to embedding's
  * town. Ground positions remain curved; only authored model height uses the
- * supplied SIM axes. Bridges retain the geometric radial path at the caller.
+ * supplied SIM axes. Bridges publish their complete curved geometry without
+ * camera-facing displacement, with a separate conservative depth envelope.
  * Static models and the three windmill poses are retained independently;
  * captured_poses instead updates only a separate small windmill stream using
  * the supplied individual phases, leaving static buildings resident. No new backend

@@ -138,10 +138,10 @@ bool ActRaiserLocalizationNameCompose_InsertPageIndicator(
       indicator, (size_t)written, objects, object_count, bidi);
 }
 
-bool ActRaiserLocalizationNameCompose_InsertFieldUnderlines(
+bool ActRaiserLocalizationNameCompose_PrepareField(
     const char *utf8, size_t utf8_bytes,
     ArLocalizationInlineObjectSnapshot *objects, size_t capacity,
-    uint8_t *object_count) {
+    uint8_t *object_count, ArLocalizationTextField *field) {
   if (!utf8 || !utf8_bytes || !objects || !object_count) return false;
   size_t starts[64];
   size_t ends[64];
@@ -174,5 +174,12 @@ bool ActRaiserLocalizationNameCompose_InsertFieldUnderlines(
     offset = next;
     ++graphemes;
   }
-  return graphemes == kActRaiserLocalizationNameLength;
+  if (graphemes != kActRaiserLocalizationNameLength) return false;
+  if (field) {
+    *field = (ArLocalizationTextField){
+        .utf8_offset = starts[name_line],
+        .utf8_bytes = ends[name_line] - starts[name_line],
+        .cells = graphemes};
+  }
+  return true;
 }

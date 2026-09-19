@@ -40,7 +40,7 @@
 #include "present_internal.h"
 #include "render/render_device.h"
 #include "render/render_output.h"
-#include "render/upload_rect_run.h"
+#include "present_sim3d_canvas.h"
 
 #ifndef AR_SIM3D_TERRAIN_ELEVATION
 #define AR_SIM3D_TERRAIN_ELEVATION 0
@@ -966,17 +966,6 @@ enum {
 };
 
 
-static ArRenderTexture s_sim_canvas_texture;
-static uint32_t s_sim_canvas_uploaded_serial;
-typedef enum SimCanvasUploadState {
-  kSimCanvasUpload_Uninitialized,
-  kSimCanvasUpload_Valid,
-  /* One bounded full-image retry after a failed initial or dirty upload. */
-  kSimCanvasUpload_RetryFull,
-  kSimCanvasUpload_Unavailable,
-} SimCanvasUploadState;
-static SimCanvasUploadState s_sim_canvas_upload_state;
-
 typedef enum SimGroundMeshCacheKind {
   kSimGroundMeshCache_UnderlayBlur,
   kSimGroundMeshCache_UnderlaySharp,
@@ -1063,112 +1052,6 @@ static void SimGroundMeshCacheSetKey(
   if (exclude) cache->exclude = *exclude;
   cache->valid = true;
 }
-
-static bool UploadSimCanvasRect(ArRenderRectI rect) {
-  if (!ArRenderDevice_UpdateTexture(
-          &g_render_device, s_sim_canvas_texture, &rect,
-          SimTownCanvas_Pixels() + (size_t)rect.y * kSimTownCanvasPixels +
-              (size_t)rect.x,
-          kSimTownCanvasPixels * (int)sizeof(uint32_t)))
-    return false;
-  Sim3DPerformance_AddUpload(
-      (uint64_t)rect.w * (uint64_t)rect.h * sizeof(uint32_t));
-  return true;
-}
-
-/* Uploaded at the frame-slot handoff, like every other game-thread pixel
- * buffer, and only over the region written since the last upload — a still
- * camera in a quiet town uploads nothing at all. */
-void UploadSimTownCanvas(void) {
-  const uint32_t serial = SimTownCanvas_Serial();
-  if (!serial ||
-      s_sim_canvas_upload_state == kSimCanvasUpload_Unavailable)
-    return;
-  if (!ArRenderTexture_IsValid(s_sim_canvas_texture)) {
-    const ArRenderTextureDesc desc = {
-      .width = kSimTownCanvasPixels,
-      .height = kSimTownCanvasPixels,
-      .format = kArRenderPixelFormat_Argb8888,
-      .usage = kArRenderTextureUsage_Streaming,
-      .filter = kArRenderFilter_Linear,
-      .blend = kArRenderBlendMode_Alpha,
-    };
-    if (!ArRenderDevice_CreateTexture(
-            &g_render_device, &desc, &s_sim_canvas_texture)) {
-      s_sim_canvas_upload_state = kSimCanvasUpload_Unavailable;
-      fprintf(stderr, "[sim3d-canvas] town canvas texture unavailable: %s\n",
-              ArRenderDevice_LastError(&g_render_device));
-      return;
-    }
-    /* A new streaming texture holds uninitialized memory, and from here on
-     * only dirty sub-rectangles are uploaded — so anything the camera never
-     * covers would keep whatever garbage the driver allocated (it showed as
-     * magenta). Publish the complete current canvas once, then consume the
-     * already-covered dirty regions so the first frame is not uploaded twice. */
-    if (ArRenderDevice_UpdateTexture(
-            &g_render_device, s_sim_canvas_texture, NULL,
-            SimTownCanvas_Pixels(),
-            kSimTownCanvasPixels * (int)sizeof(uint32_t))) {
-      Sim3DPerformance_AddUpload(
-          (uint64_t)kSimTownCanvasPixels * kSimTownCanvasPixels *
-          sizeof(uint32_t));
-      int x, y, w, h;
-      while (SimTownCanvas_TakeDirtyRect(&x, &y, &w, &h)) {}
-      s_sim_canvas_uploaded_serial = serial;
-      s_sim_canvas_upload_state = kSimCanvasUpload_Valid;
-    } else {
-      s_sim_canvas_uploaded_serial = 0;
-      s_sim_canvas_upload_state = kSimCanvasUpload_RetryFull;
-    }
-    return;
-  }
-  if (s_sim_canvas_upload_state == kSimCanvasUpload_RetryFull) {
-    if (!ArRenderDevice_UpdateTexture(
-            &g_render_device, s_sim_canvas_texture, NULL,
-            SimTownCanvas_Pixels(),
-            kSimTownCanvasPixels * (int)sizeof(uint32_t))) {
-      fprintf(stderr,
-              "[sim3d-canvas] full canvas retry failed; disabling the "
-              "optional town extension for this renderer: %s\n",
-              ArRenderDevice_LastError(&g_render_device));
-      ArRenderDevice_DestroyTexture(
-          &g_render_device, s_sim_canvas_texture);
-      s_sim_canvas_texture = ArRenderTexture_Invalid();
-      s_sim_canvas_uploaded_serial = 0;
-      s_sim_canvas_upload_state = kSimCanvasUpload_Unavailable;
-      return;
-    }
-    Sim3DPerformance_AddUpload(
-        (uint64_t)kSimTownCanvasPixels * kSimTownCanvasPixels *
-        sizeof(uint32_t));
-    int x, y, w, h;
-    while (SimTownCanvas_TakeDirtyRect(&x, &y, &w, &h)) {}
-    s_sim_canvas_uploaded_serial = serial;
-    s_sim_canvas_upload_state = kSimCanvasUpload_Valid;
-    return;
-  }
-  int x = 0, y = 0, w = 0, h = 0;
-  /* The canvas buffer is the complete current image, so coalesced rectangles
-   * may re-send clean pixels (upload_rect_run.h). */
-  UploadRectRun run = {0};
-  ArRenderRectI destination;
-  bool uploaded = true;
-  while (uploaded && SimTownCanvas_TakeDirtyRect(&x, &y, &w, &h)) {
-    if (UploadRectRun_Add(&run, (ArRenderRectI){x, y, w, h}, &destination))
-      uploaded = UploadSimCanvasRect(destination);
-  }
-  if (uploaded && UploadRectRun_Finish(&run, &destination))
-    uploaded = UploadSimCanvasRect(destination);
-  if (!uploaded) {
-    /* Some earlier dirty rectangles may already have landed. Suppress the
-     * mixed-generation texture until one complete upload succeeds. */
-    s_sim_canvas_uploaded_serial = 0;
-    s_sim_canvas_upload_state = kSimCanvasUpload_RetryFull;
-  }
-  if (s_sim_canvas_upload_state == kSimCanvasUpload_Valid)
-    s_sim_canvas_uploaded_serial = serial;
-}
-
 
 /* Draws one texture as an extension of the ground plane. `texture_x_at_zero`
  * is the captured-texture column that samples the texture's left edge, and
@@ -1625,11 +1508,7 @@ static void DrawSimTownCanvas(const FrameSlot *slot, ArRenderRectI source,
     canvas = SimBackgroundVoxelRenderer_GroundTexture(
         slot->sim.background_voxel_serial);
   } else {
-    if (!ArRenderTexture_IsValid(s_sim_canvas_texture) ||
-        s_sim_canvas_upload_state != kSimCanvasUpload_Valid ||
-        s_sim_canvas_uploaded_serial != slot->sim.town_canvas_serial)
-      return;
-    canvas = s_sim_canvas_texture;
+    canvas = PresentSim3DCanvas_Texture(slot->sim.town_canvas_serial);
   }
   if (!ArRenderTexture_IsValid(canvas)) return;
   float extent_x0 =
@@ -1755,8 +1634,10 @@ static PresentationOutcome RenderSimProfile(
   bool clouds = underlay && (features & kSimFeature_CloudShroud) != 0;
   bool cull_haze = underlay && (features & kSimFeature_CullHaze) != 0;
   bool atmospheric_backdrop = (features & kSimFeature_Backdrop) != 0;
-  bool background_voxels = ground && slot->sim.background_voxel_enabled &&
-      SimBackgroundVoxelRenderer_Ready(slot->sim.background_voxel_serial);
+  const Sim3DGroundSource ground_source = Sim3D_ResolveGroundSource(features,
+      slot->sim.background_voxel_enabled,
+      SimBackgroundVoxelRenderer_Ready(slot->sim.background_voxel_serial));
+  bool background_voxels = ground_source == kSim3DGround_Voxels;
   /* The lit region is ground-painted and can only express the height-zero
    * boundary, so its bottom edge is pulled in by the largest lift the
    * classifier hands out. Zero when nothing is being lifted at all -- with
@@ -1879,7 +1760,7 @@ static PresentationOutcome RenderSimProfile(
     cull_haze = false;
     fade_ground_planes = false;
   }
-  if (!globe_underlay && (underlay || background_voxels)) {
+  if (!globe_underlay && ground_source != kSim3DGround_None) {
     /* Keep the canvas as the opaque backing for transparent BG1 priority
      * pixels. Background voxels instead select the cleaned canvas and replace
      * both captured BG1 ranks, regardless of whether the separate world-map
@@ -2231,10 +2112,7 @@ void PresentSim3D_ResetResources(void) {
   atomic_store_explicit(
       &s_sim_rim_mask_supported, 1, memory_order_relaxed);
   PresentSim3DUnderlay_ResetResources(&g_render_device);
-  ArRenderDevice_DestroyTexture(&g_render_device, s_sim_canvas_texture);
-  s_sim_canvas_texture = ArRenderTexture_Invalid();
-  s_sim_canvas_uploaded_serial = 0;
-  s_sim_canvas_upload_state = kSimCanvasUpload_Uninitialized;
+  PresentSim3DCanvas_Reset(&g_render_device);
   memset(s_sim_ground_mesh_cache, 0, sizeof(s_sim_ground_mesh_cache));
   SimBackgroundVoxelRenderer_Reset(&g_render_device);
   PresentSim3DClouds_ResetResources();

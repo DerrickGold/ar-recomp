@@ -12,6 +12,7 @@
 #include "sim/sim3d_mesh_set.h"
 #include "sim3d_depth_reference.h"
 #include "present_world_nav_geometry.h"
+#include "performance_metrics.h"
 
 enum {
   kTestWidth = 32,
@@ -29,8 +30,8 @@ static uint64_t geometry_upload_bytes, draw_calls;
   }                                                                      \
 } while (0)
 
-/* sim3d_depth_pass.c reports production work to this dormant profiler hook.
- * The integration test deliberately links no global profiling state. */
+/* Retain the focused geometry counters without the SIM profiler. Global
+ * texture traffic is exercised through the production performance metrics. */
 void Sim3DPerformance_AddDraw(uint64_t vertices, uint64_t indices) {
   if (vertices && indices) ++draw_calls;
 }
@@ -1593,7 +1594,9 @@ static void TestAtlasRegionPacking(
     ArRenderDevice *render_device, SDL_Renderer *renderer) {
   /* Integer ARGB input can have padded rows, including a byte pitch not
    * divisible by four. Pack only the requested texels and retain everything
-   * outside them across transfer-buffer cycling and renderer reset. */
+   * outside them across transfer-buffer cycling and renderer reset. D3D12 padding
+   * exceeds the initial full-image allocation; repeated regions force that
+   * growth on tightly packed backends too. Neither may replace the texture. */
   enum { kWidth = 17, kHeight = 9, kPitch = kWidth * 4 + 3 };
   const ArRenderRectI full = {0, 0, kWidth, kHeight};
   const ArRenderRectI dirty[] = {{1, 1, 5, 3}, {9, 0, 1, 9}, {0, 8, 8, 1}};
@@ -1603,8 +1606,12 @@ static void TestAtlasRegionPacking(
   uint32_t reference[kWidth * kHeight];
   bool reference_ready = false;
   Sim3DDepthPass_Reset(render_device);
-  for (int mode = 0; mode < 3; mode++) {
+  for (int mode = 0; mode < 4; mode++) {
     if (mode == 2) Sim3DDepthPass_Reset(render_device);
+    CHECK(Sim3DDepthPass_Require(render_device));
+    PerformanceMetrics_Configure(false, false);
+    PerformanceMetrics_Configure(true, false);
+    PerformanceMetrics_PresentCompleted(0);
     memset(source, 0xa5, kPitch * kHeight);
     for (int y = 0; y < kHeight; y++)
       for (int x = 0; x < kWidth; x++) {
@@ -1629,7 +1636,13 @@ static void TestAtlasRegionPacking(
           const uint32_t pixel = AtlasTestPixel(x, y, 73);
           memcpy(source + y * kPitch + x * 4, &pixel, sizeof(pixel));
         }
-      if (mode == 1) {
+      if (mode == 3) {
+        ArRenderRectI repeated[18];
+        for (unsigned i = 0; i < 18; ++i) repeated[i] = dirty[i % 3];
+        CHECK(Sim3DDepthPass_UploadAtlasRegions(render_device,
+            kSim3DDepthPass_WorldMountain, (const uint32_t *)source,
+            kWidth, kHeight, kPitch, repeated, 18));
+      } else if (mode == 1) {
         CHECK(Sim3DDepthPass_UploadAtlasRegions(render_device,
             kSim3DDepthPass_WorldMountain, (const uint32_t *)source,
             kWidth, kHeight, kPitch, dirty, 3));
@@ -1640,6 +1653,14 @@ static void TestAtlasRegionPacking(
               kWidth, kHeight, kPitch, &dirty[i], 1));
       }
     }
+    PerformanceMetrics_PresentCompleted(1000000000);
+    PerformanceSnapshot traffic;
+    PerformanceMetrics_Snapshot(&traffic);
+    CHECK(traffic.ready && traffic.presents == 2);
+    CHECK(traffic.counts[kPerformanceCount_UploadCalls] * 2 == (mode == 3 ? 19 : mode ? 4 : 1));
+    CHECK(traffic.counts[kPerformanceCount_UploadBytes] * 2 ==
+        kWidth * kHeight * 4 + (mode ? (5 * 3 + 9 + 8) * 4 : 0) * (mode == 3 ? 6 : 1));
+    PerformanceMetrics_Configure(false, false);
     memset(source, 0, kPitch * kHeight);
     CHECK(Sim3DDepthPass_Begin(render_device, kWidth, kHeight, kArRenderFilter_Nearest));
     CHECK(AppendRect(kSim3DDepthPass_WorldMountain, 0, 0, kWidth, kHeight,

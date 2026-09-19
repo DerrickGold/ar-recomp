@@ -56,6 +56,18 @@ typedef struct DialogueWindow {
   char text[kArLocalizationFrameTextCapacity];
 } DialogueWindow;
 
+/* The first composition pass only locates the selected Unicode key. Keep its
+ * normalized page while the source, page and captured name are unchanged.
+ * The final pass still resolves live values after applying the native edit. */
+typedef struct NameEntryKeyMap {
+  bool valid;
+  uint32_t page_index;
+  uint32_t page_count;
+  char source_name[kActRaiserLocalizationMasterNameCapacity];
+  size_t text_bytes;
+  char text[kActRaiserLocalizationComposeTextCapacity];
+} NameEntryKeyMap;
+
 typedef struct LocalizationRuntime {
   ActRaiserLocalizationHud hud;
   ActRaiserLocalizationCredits credits;
@@ -76,6 +88,7 @@ typedef struct LocalizationRuntime {
   ActRaiserLocalizationWorldNavigation world_navigation;
   ActRaiserLocalizationNameEntryState name_entry;
   ActRaiserLocalizationNameEntryTracker name_tracker;
+  NameEntryKeyMap name_key_map;
   uint64_t name_entry_applied_native_revision;
   uint64_t name_entry_completed_observation_serial;
   uint64_t name_entry_completed_compose_serial;
@@ -349,6 +362,7 @@ static bool EnsureConfigured(void) {
   ActRaiserLocalizationWorldNavigation_Invalidate(
       &s_runtime.world_navigation);
   s_runtime.name_entry_applied_native_revision = 0;
+  s_runtime.name_key_map.valid = false;
   fprintf(stderr, "[localization] %s: %s\n",
           presentation ? "enhanced" : "native",
           presentation ? metadata->display_name : "untouched USA text/font");
@@ -528,6 +542,54 @@ static bool PageLanguage(const ArDialoguePageSnapshot *page,
   return true;
 }
 
+static bool PrepareNameEntryKeyMap(
+    ArDialogueContentSelection *selection, ArDialogueValueResolver *resolver,
+    const char *source_name, ArLanguagePackError *error) {
+  NameEntryKeyMap *keys = &s_runtime.name_key_map;
+  /* SelectPage applies an edge wrap, so call it exactly once per update. */
+  const bool page_selected = keys->valid;
+  if (page_selected && !ActRaiserLocalizationNameEntryTracker_SelectPage(
+          &s_runtime.name_tracker, &s_runtime.name_entry, keys->page_count))
+    return false;
+  if (keys->valid && keys->page_index == s_runtime.name_tracker.keyboard_page &&
+      !strcmp(keys->source_name, source_name))
+    return true;
+  keys->valid = false;
+
+  ArDialogueSession probe;
+  ArDialogueSession_Init(&probe);
+  ArDialoguePageSnapshot page;
+  bool resolved = ArDialogueSession_Begin(
+      &probe, selection, "name_entry.prompt_and_alphabet", resolver, error) &&
+      ArDialogueSession_GetPage(&probe, &page);
+  if (resolved && !page_selected) {
+    resolved = ActRaiserLocalizationNameEntryTracker_SelectPage(
+        &s_runtime.name_tracker, &s_runtime.name_entry, page.page_count);
+  }
+  if (resolved) {
+    resolved = ArDialogueSession_GetAuthoredPage(
+        &probe, s_runtime.name_tracker.keyboard_page, &page);
+  }
+  ArLocalizationInlineObjectSnapshot objects[kArLocalizationFrameInlineObjectCapacity];
+  uint8_t object_count = 0;
+  if (resolved) {
+    resolved = ActRaiserLocalizationText_Normalize(
+        page.utf8, page.utf8_bytes, page.inline_objects, page.inline_object_count,
+        false, keys->text, sizeof(keys->text), &keys->text_bytes, objects,
+        kArLocalizationFrameInlineObjectCapacity, &object_count, NULL) &&
+        ActRaiserLocalizationNameCompose_ClearUnderlineRow(
+            keys->text, &keys->text_bytes, objects, object_count, NULL);
+  }
+  if (resolved) {
+    keys->page_index = page.page_index;
+    keys->page_count = page.page_count;
+    keys->valid = strlen(source_name) < sizeof(keys->source_name);
+    if (keys->valid) strcpy(keys->source_name, source_name);
+  }
+  ArDialogueSession_Destroy(&probe);
+  return resolved && keys->valid;
+}
+
 static bool ResolveNameEntryText(
     ArDialogueContentSelection *selection,
     ActRaiserLocalizationValues *values,
@@ -536,59 +598,24 @@ static bool ResolveNameEntryText(
     ArLocalizationInlineObjectSnapshot *inline_objects,
     size_t inline_object_capacity, uint8_t *inline_object_count,
     uint64_t *page_source_revision, ArLocalizationTextLanguage *language,
-    ArTextBidiSpans *bidi,
+    ArTextBidiSpans *bidi, ArLocalizationTextField *live_field,
     ArLanguagePackError *error) {
   if (!selection || !values || !resolver || !utf8 || !utf8_bytes ||
       !inline_object_count || !page_source_revision || !language || !error ||
       !s_runtime.name_entry.revision)
     return false;
 
-  /* Resolve once to discover the authored page count and map this native
-   * transition into the canonical Unicode buffer. The final pass snapshots
-   * values again so a newly typed grapheme appears in the same frame. */
-  ArDialogueSession probe;
-  ArDialogueSession_Init(&probe);
-  bool resolved = ArDialogueSession_Begin(
-      &probe, selection, "name_entry.prompt_and_alphabet", resolver, error);
-  ArDialoguePageSnapshot page;
-  if (resolved) resolved = ArDialogueSession_GetPage(&probe, &page);
-  if (resolved) {
-    resolved = ActRaiserLocalizationNameEntryTracker_SelectPage(
-        &s_runtime.name_tracker, &s_runtime.name_entry, page.page_count) &&
-        ArDialogueSession_GetAuthoredPage(
-            &probe, s_runtime.name_tracker.keyboard_page, &page);
-  }
-  char normalized[kActRaiserLocalizationComposeTextCapacity];
-  size_t normalized_bytes = 0;
-  ArLocalizationInlineObjectSnapshot
-      normalized_objects[kArLocalizationFrameInlineObjectCapacity];
-  uint8_t normalized_object_count = 0;
-  if (resolved) {
-    resolved = ActRaiserLocalizationText_Normalize(
-        page.utf8, page.utf8_bytes,
-        page.inline_objects, page.inline_object_count, false,
-        normalized, sizeof(normalized), &normalized_bytes,
-        normalized_objects,
-        sizeof(normalized_objects) / sizeof(normalized_objects[0]),
-        &normalized_object_count, NULL);
-  }
-  if (resolved) {
-    resolved = ActRaiserLocalizationNameCompose_ClearUnderlineRow(
-        normalized, &normalized_bytes,
-        normalized_objects, normalized_object_count, NULL);
-  }
-  uint32_t selected_start = 0;
-  uint32_t selected_end = 0;
-  if (resolved) {
-    resolved = ActRaiserLocalizationNameEntry_SelectedKeyRange(
-        &s_runtime.name_entry, normalized, normalized_bytes,
-        &selected_start, &selected_end) &&
-        ActRaiserLocalizationNameEntryTracker_Synchronize(
-            &s_runtime.name_tracker, &s_runtime.name_entry,
-            normalized + selected_start, selected_end - selected_start);
-  }
-  ArDialogueSession_Destroy(&probe);
-  if (!resolved) return false;
+  if (!PrepareNameEntryKeyMap(selection, resolver, values->master_name, error))
+    return false;
+  const NameEntryKeyMap *keys = &s_runtime.name_key_map;
+  uint32_t selected_start = 0, selected_end = 0;
+  if (!ActRaiserLocalizationNameEntry_SelectedKeyRange(
+          &s_runtime.name_entry, keys->text, keys->text_bytes,
+          &selected_start, &selected_end) ||
+      !ActRaiserLocalizationNameEntryTracker_Synchronize(
+          &s_runtime.name_tracker, &s_runtime.name_entry,
+          keys->text + selected_start, selected_end - selected_start))
+    return false;
 
   char display_name[kActRaiserLocalizationUnicodeNameDisplayCapacity];
   if (!ActRaiserLocalizationNameEntryTracker_CopyDisplayName(
@@ -601,7 +628,8 @@ static bool ResolveNameEntryText(
   ArDialogueSession session;
   ArDialogueSession_Init(&session);
   uint16_t offsets[kArLocalizationFrameTextCapacity + 1];
-  resolved = ArDialogueSession_Begin(
+  ArDialoguePageSnapshot page;
+  bool resolved = ArDialogueSession_Begin(
       &session, selection, "name_entry.prompt_and_alphabet", resolver, error);
   if (resolved) {
     resolved = ArDialogueSession_GetAuthoredPage(
@@ -621,9 +649,9 @@ static bool ResolveNameEntryText(
         utf8, utf8_bytes, inline_objects, *inline_object_count, bidi);
   }
   if (resolved) {
-    resolved = ActRaiserLocalizationNameCompose_InsertFieldUnderlines(
+    resolved = ActRaiserLocalizationNameCompose_PrepareField(
         utf8, *utf8_bytes, inline_objects,
-        inline_object_capacity, inline_object_count);
+        inline_object_capacity, inline_object_count, live_field);
   }
   if (resolved) {
     resolved = ActRaiserLocalizationNameCompose_InsertPageIndicator(
@@ -662,7 +690,7 @@ static bool ResolveComposeText(
     ArLocalizationInlineObjectSnapshot *inline_objects,
     size_t inline_object_capacity, uint8_t *inline_object_count,
     uint8_t *structural_boundaries, ArLocalizationTextLanguage *language,
-    ArTextBidiSpans *bidi,
+    ArTextBidiSpans *bidi, ArLocalizationTextField *live_field,
     char *error_text, size_t error_capacity) {
   (void)context;
   if (!s_runtime.presentation) return false;
@@ -671,6 +699,7 @@ static bool ResolveComposeText(
     return false;
   *inline_object_count = 0;
   bidi->count = 0;
+  if (live_field) *live_field = (ArLocalizationTextField){0};
   uint16_t offsets[kArLocalizationFrameTextCapacity + 1];
   if (structural_boundaries)
     memset(structural_boundaries, 0, AR_TEXT_BOUNDARY_BYTES(utf8_capacity));
@@ -701,7 +730,7 @@ static bool ResolveComposeText(
         &selection, &values, &resolver,
         utf8, utf8_capacity, utf8_bytes,
         inline_objects, inline_object_capacity, inline_object_count,
-        &name_source_revision, language, bidi, &error);
+        &name_source_revision, language, bidi, live_field, &error);
     page.source_revision = name_source_revision;
   } else {
     resolved = ArDialogueSession_Begin(
@@ -752,7 +781,8 @@ static bool ResolveComposeText(
 
 static void RefreshNameEntry(void) {
   const ActRaiserLocalizationComposeSnapshot *snapshot =
-      ActRaiserLocalizationComposeState_FindObserved(&s_runtime.compose, 5);
+      ActRaiserLocalizationComposeState_FindObserved(
+          &s_runtime.compose, kActRaiserLocalizationNameEntrySurface);
   if (!snapshot || !s_runtime.name_entry.revision ||
       s_runtime.name_entry_applied_native_revision ==
           s_runtime.name_entry.revision)
@@ -765,7 +795,8 @@ static void RefreshNameEntry(void) {
   }
   char error[kArLanguagePackErrorCapacity] = {0};
   if (!ActRaiserLocalizationComposeState_RefreshLatest(
-          &s_runtime.compose, 5, ResolveComposeText, NULL,
+          &s_runtime.compose, kActRaiserLocalizationNameEntrySurface,
+          ResolveComposeText, NULL,
           error, sizeof(error))) {
     fprintf(stderr, "[localization] name entry refresh unavailable (%s); "
                     "native text retained\n",
@@ -780,7 +811,8 @@ CompleteNameEntry(const ActRaiserLocalizationTextObservation *observation) {
   const bool completed =
       observation->serial == s_runtime.name_entry_completed_observation_serial;
   const ActRaiserLocalizationComposeSnapshot *surface =
-      ActRaiserLocalizationComposeState_FindObserved(&s_runtime.compose, 5);
+      ActRaiserLocalizationComposeState_FindObserved(
+          &s_runtime.compose, kActRaiserLocalizationNameEntrySurface);
   if (observation->map_group != g_ram[kActRaiserWram_MapGroup] ||
       observation->map_number != g_ram[kActRaiserWram_CurrentMap] ||
       (surface &&
@@ -814,7 +846,8 @@ CompleteNameEntry(const ActRaiserLocalizationTextObservation *observation) {
   s_runtime.name_entry_completed_observation_serial = observation->serial;
   s_runtime.name_entry_completed_compose_serial =
       observation->entry_compose_serial;
-  (void)ActRaiserLocalizationComposeState_ReleaseSurface(&s_runtime.compose, 5);
+  (void)ActRaiserLocalizationComposeState_ReleaseSurface(
+      &s_runtime.compose, kActRaiserLocalizationNameEntrySurface);
   s_runtime.name_entry_applied_native_revision = 0;
 }
 
@@ -1226,7 +1259,8 @@ void ActRaiserLocalizationRuntime_CaptureFrame(
               &compose_observations[index]);
       /* A final keyboard redraw can still be queued when native acceptance
        * enters dialogue. Do not recreate a retired entry generation later. */
-      if (compose_route && compose_route->surface_id == 5 &&
+      if (compose_route &&
+          compose_route->surface_id == kActRaiserLocalizationNameEntrySurface &&
           compose_observations[index].serial <=
               s_runtime.name_entry_completed_compose_serial) {
         s_runtime.compose_observation_serial =
@@ -1237,11 +1271,14 @@ void ActRaiserLocalizationRuntime_CaptureFrame(
        * native cursor record. That is an update to the active generation, not
        * a new name-entry session: resetting here would discard the authored
        * keyboard page and any Unicode graphemes after every movement. The
-       * compose-state lifecycle removes surface 5 when the entry UI closes,
+       * compose-state lifecycle removes the surface when the entry UI closes,
        * so absence is the generation boundary we actually need. */
-      if (compose_route && compose_route->surface_id == 5 &&
-          !ActRaiserLocalizationComposeState_FindObserved(&s_runtime.compose, 5)) {
+      if (compose_route &&
+          compose_route->surface_id == kActRaiserLocalizationNameEntrySurface &&
+          !ActRaiserLocalizationComposeState_FindObserved(
+              &s_runtime.compose, kActRaiserLocalizationNameEntrySurface)) {
         ActRaiserLocalizationNameEntryTracker_Init(&s_runtime.name_tracker);
+        s_runtime.name_key_map.valid = false;
         s_runtime.name_entry_applied_native_revision = 0;
       }
       (void)ActRaiserLocalizationComposeState_Process(
@@ -1275,7 +1312,8 @@ void ActRaiserLocalizationRuntime_CaptureFrame(
    * Release before appending the frame so no stale keyboard can overlap even
    * the first native fallback frame of the following dialogue. */
   if (observation_valid &&
-      ActRaiserLocalizationComposeState_FindObserved(&s_runtime.compose, 5))
+      ActRaiserLocalizationComposeState_FindObserved(
+          &s_runtime.compose, kActRaiserLocalizationNameEntrySurface))
     CompleteNameEntry(&observation);
   if (s_runtime.refresh_pending) {
     for (uint32_t surface = kActRaiserLocalizationComposeSurfaceFirst;
@@ -1288,7 +1326,8 @@ void ActRaiserLocalizationRuntime_CaptureFrame(
     s_runtime.refresh_pending = false;
   }
   RefreshNameEntry();
-  if (ActRaiserLocalizationComposeState_Find(&s_runtime.compose, 5)) {
+  if (ActRaiserLocalizationComposeState_Find(
+          &s_runtime.compose, kActRaiserLocalizationNameEntrySurface)) {
     _Static_assert(kArLocalizationFrameNameCursorPixels ==
                        kActRaiserLocalizationNameCursorPixels,
                    "name cursor bitmap extent");
@@ -1328,7 +1367,8 @@ void ActRaiserLocalizationRuntime_CaptureFrame(
      * drawn. */
     const uint16_t name_finish[] = {0x007e};
     const uint16_t name_backspace[] = {0x007f};
-    if (ActRaiserLocalizationComposeState_Find(&s_runtime.compose, 5)) {
+    if (ActRaiserLocalizationComposeState_Find(
+          &s_runtime.compose, kActRaiserLocalizationNameEntrySurface)) {
       (void)ActRaiserLocalizationArt_Capture(
           &frame->artwork[kArLocalizationArtwork_NameFinish], bg3_tile_base_words,
           name_finish, 1, vram_words, vram_word_count, cgram_words, cgram_word_count);
