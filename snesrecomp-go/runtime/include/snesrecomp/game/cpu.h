@@ -95,6 +95,11 @@ static inline void cpu_return_scope_begin(CpuReturnScope *scope, CpuState *cpu,
         scope->previous->frame_bytes == 0u &&
         scope->previous->reset_activation_depth == g_recomp_stack_top)
         caller_stack_limit = scope->previous->caller_stack_limit;
+    /* A caller that already moved S above its own entry (for example a
+     * TXS stack reset) owns its actual pre-call stack, not the stale entry. */
+    if ((uint32)cpu->S + frame_bytes <= 0xffffu &&
+        (uint16)(cpu->S + frame_bytes) > caller_stack_limit)
+        caller_stack_limit = (uint16)(cpu->S + frame_bytes);
     scope->caller_stack_limit = caller_stack_limit;
     scope->frame_bytes = frame_bytes;
     scope->adjusted_return = 0u;
@@ -133,6 +138,9 @@ static inline int cpu_accept_indirect_return(CpuState *cpu,
 int cpu_accept_adjusted_return(CpuState *cpu, uint16 entry_stack,
                               uint16 return_stack, uint32 target,
                               uint8 frame_bytes);
+int cpu_accept_stacked_result_return(CpuState *cpu, uint16 entry_stack,
+                                     uint16 return_stack, uint32 target,
+                                     uint8 frame_bytes);
 
 /* Generated, single-basic-block return-word relocation contract. Capture
  * immediately after a native two-byte pull from this call's incoming frame.

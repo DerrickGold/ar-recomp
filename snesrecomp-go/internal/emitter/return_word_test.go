@@ -41,7 +41,7 @@ func TestReturnWordShuttleContracts(t *testing.T) {
 				t.Fatalf("contract=%t\n%s", tt.want, r.Source)
 			}
 			if tt.want {
-				if !strings.Contains(r.Source, "cpu_accept_adjusted_return") || !strings.Contains(r.Source, "cpu_resolve_ancestor_skip") {
+				if !strings.Contains(r.Source, "cpu_accept_adjusted_return") || !strings.Contains(r.Source, "cpu_accept_stacked_result_return") || !strings.Contains(r.Source, "cpu_resolve_ancestor_skip") {
 					t.Fatal("legacy guards lost")
 				}
 				if strings.Contains(tt.name, "guarded") && !strings.Contains(r.Source, "cpu_return_word_store_disjoint") {

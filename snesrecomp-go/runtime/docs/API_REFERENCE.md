@@ -220,13 +220,41 @@ the replay checkpoint assembled by the adapter.
 ### Integrate a recompiled frame loop
 
 Generated direct JSR/JSL calls now bracket their hardware return frame with a
-stack-local `CpuReturnScope`. An adjusted native RTS/RTL may resume that exact
+stack-local `CpuReturnScope`. A scope's caller stack bound is the caller's entry S, raised
+to the caller's actual stack at the call when the caller had already moved S
+above its entry (for example a `TXS` stack reset before a routine that clears
+RAM and returns through a saved pointer). An adjusted native RTS/RTL may resume that exact
 call when its actual PC/bank, frame kind, and entry stack match, and its final
 stack remains below the caller's own return frame. The caller then retains
 the native post-return S instead of applying its legacy stack-neutrality
 restore. Ordinary equal-stack returns keep their existing fast path. HLEs
 which return normally without a native adjusted return retain their existing
 stack contract; no return ownership is inferred from an HLE name.
+
+Pushed-target (paired) tail transfers normally keep the requesting
+activation's entry S and host pairing. When the requester's recorded entry S
+already lies below native S (it discarded its own entry frame, for example
+`PLA` followed by a jump into caller code), inner paired-tail drivers whose own
+entry S also lies below native S are dead for the same reason. If native S is
+exactly the entry of the nearest remaining owner on the same CPU, the transfer
+is handed back to that owner. The target inherits the owner's entry S and host
+pairing, and the suspended inner C frames and dead drivers unwind with
+`RECOMP_RETURN_TAILCALL`. While such a transfer is pending, dispatch loops
+propagate the request instead of consuming it, so only the adopted owner's
+driver resumes it. A foreign-CPU driver, an owner whose entry is not exactly
+native S, or any other stack position keeps the ordinary nested driver.
+Adoption is limited to native, non-wrapping bank-zero WRAM stacks.
+
+Generated RTS/RTL sites also call `cpu_accept_stacked_result_return` after the
+callee-clean check. A native return whose target is exactly the immediate
+call's own continuation, whose frame kind and entry S match, and whose
+post-return S is still below that call's entry frame (the callee stashed its
+return word, pushed results for the caller and re-pushed the word) is an
+ordinary return of that call rather than a pushed target. The paired host
+caller resumes and retains the actual native S, so it can pull those results.
+An unpaired activation, a different entry S or frame kind, an equal-stack or
+callee-clean return, an ancestor's continuation, emulation mode and non-WRAM
+or wrapping stacks keep their existing paths.
 
 A stronger, narrowly generated contract handles native **return-word
 relocation** even when the caller has already consumed its own entry frame.
@@ -277,6 +305,11 @@ These records are host bookkeeping, not additions to portable CPU/save state.
 Terminal shutdown clears abandoned records. Watchdog resets outside an active
 synchronous checkpoint invalidate records without resurrecting old owners;
 they must not be used as normal continuation transfers.
+An adopted paired tail carries an explicit outer-driver owner token. Only that
+driver consumes the request; inner dispatch loops propagate it. Fresh top-level
+execution and shutdown clear the token together with the driver, native-return
+scope and inherited tail context. Synchronous checkpoint/poll frame boundaries
+preserve this transient state. None of it is serialized as emulated CPU state.
 
 This first adjusted-return contract covers known direct calls and native
 bank-zero WRAM stacks without wrap. It does not yet replace the legacy

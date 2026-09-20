@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "paired_tail_internal.h"
 
 CpuState g_cpu;
 uint32 g_cpu_wait_pc24;
@@ -484,7 +485,9 @@ RecompReturn cpu_dispatch_pc_from(CpuState *cpu, uint32 pc24,
     for (;;) {
         RecompReturn result = dispatch_once(cpu, pc24, miss_restore_stack,
                                             source_pc24);
-        if (result != RECOMP_RETURN_TAILCALL) return result;
+        /* A pending adopted transfer belongs to an outer paired-tail driver. */
+        if (result != RECOMP_RETURN_TAILCALL || g_sr_paired_tail_owner != NULL)
+            return result;
         pc24 = g_tailcall_pc24;
         miss_restore_stack = g_tailcall_miss_s;
         source_pc24 = g_tailcall_src24;

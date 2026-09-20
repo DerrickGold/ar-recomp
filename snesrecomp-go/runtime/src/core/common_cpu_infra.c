@@ -56,6 +56,7 @@ static uint16 g_tailcall_entry_s;
 static uint8 g_tailcall_hrv;
 static bool g_tailcall_context_valid;
 PairedTailDriver *g_sr_paired_tail_driver;
+PairedTailDriver *g_sr_paired_tail_owner;
 
 uint64 g_watchdog_loop_headers;
 int g_watchdog_tripped;
@@ -698,6 +699,17 @@ void cpu_tailcall_request(uint32 pc24, uint16 miss_stack,
 CpuReturnScope *g_cpu_return_scope;
 CpuReturnScope *g_cpu_owned_unwind_scope;
 
+/* Invalidate the transient host continuation chain together. Called only
+ * when execution is abandoned, never at a synchronous checkpoint/poll yield. */
+static void clear_execution_context(void) {
+    g_recomp_stack_top = 0;
+    g_tailcall_context_valid = false;
+    g_sr_paired_tail_driver = NULL;
+    g_sr_paired_tail_owner = NULL;
+    g_cpu_return_scope = NULL;
+    g_cpu_owned_unwind_scope = NULL;
+}
+
 int cpu_begin_owned_unwind(CpuState *cpu, uint16 return_stack,
                            uint32 target, uint8 frame_bytes) {
     CpuReturnScope *scope = g_cpu_return_scope;
@@ -733,22 +745,48 @@ int cpu_finish_owned_unwind(CpuReturnScope *scope, CpuState *cpu) {
     return 1;
 }
 
+/* Shared identity contract for moved immediate-call frames. Stack direction
+ * and caller bounds remain explicit in the two acceptance rules below. */
+static CpuReturnScope *native_return_owner(CpuState *cpu, uint16 entry_stack,
+        uint16 return_stack, uint32 target, uint8 frame_bytes) {
+    CpuReturnScope *scope = g_cpu_return_scope;
+    if (cpu == NULL || scope == NULL || scope->cpu != cpu || cpu->emulation ||
+        scope->entry_stack != entry_stack || scope->frame_bytes != frame_bytes ||
+        (frame_bytes != 2u && frame_bytes != 3u) ||
+        scope->continuation != (target & 0xffffffu) ||
+        (uint32)return_stack + frame_bytes != cpu->S ||
+        (uint32)entry_stack + frame_bytes > 0x1fffu ||
+        cpu->S > 0x1fffu || scope->caller_stack_limit > 0x1fffu)
+        return NULL;
+    return scope;
+}
+
 int cpu_accept_adjusted_return(CpuState *cpu, uint16 entry_stack,
                               uint16 return_stack, uint32 target,
                               uint8 frame_bytes) {
-    CpuReturnScope *scope = g_cpu_return_scope;
+    CpuReturnScope *scope = native_return_owner(cpu, entry_stack, return_stack,
+                                               target, frame_bytes);
     /* Only moved native WRAM frames owned by this immediate call. Compare
      * the actual hardware target and frame kind, not stack height alone.
      * The final S cannot cross the suspended caller's own return frame.
      * Unknown/wrapping stacks, unpaired/HLE/ancestor returns stay on their
      * existing paths; there is no scan for a conveniently matching PC. */
-    if (scope == NULL || scope->cpu != cpu || cpu->emulation ||
-        scope->entry_stack != entry_stack || scope->frame_bytes != frame_bytes ||
-        (frame_bytes != 2u && frame_bytes != 3u) ||
-        scope->continuation != (target & 0xffffffu) ||
-        return_stack <= entry_stack ||
-        (uint32)return_stack + frame_bytes != cpu->S ||
-        cpu->S > scope->caller_stack_limit || scope->caller_stack_limit > 0x1fffu)
+    if (scope == NULL || return_stack <= entry_stack ||
+        cpu->S > scope->caller_stack_limit)
+        return 0;
+    scope->adjusted_return = 1u;
+    return 1;
+}
+
+int cpu_accept_stacked_result_return(CpuState *cpu, uint16 entry_stack,
+                                     uint16 return_stack, uint32 target,
+                                     uint8 frame_bytes) {
+    /* A callee saved its return frame, pushed results, then re-pushed the
+     * frame. Only its exact immediate continuation may resume with native S
+     * retained for the caller's pulls. Never search ancestors by PC. */
+    CpuReturnScope *scope = native_return_owner(cpu, entry_stack, return_stack,
+                                               target, frame_bytes);
+    if (scope == NULL || return_stack >= entry_stack)
         return 0;
     scope->adjusted_return = 1u;
     return 1;
@@ -881,13 +919,7 @@ void WatchdogFrameStart(void) {
     g_watchdog_poll_count = 0u;
     g_watchdog_enabled = true;
     g_watchdog_tripped = 0;
-    if (!s_execution_checkpoint_active) {
-        g_recomp_stack_top = 0;
-        g_tailcall_context_valid = false;
-        g_sr_paired_tail_driver = NULL;
-        g_cpu_return_scope = NULL;
-        g_cpu_owned_unwind_scope = NULL;
-    }
+    if (!s_execution_checkpoint_active) clear_execution_context();
 }
 
 void WatchdogFrameEnd(void) { g_watchdog_enabled = false; }
@@ -910,13 +942,7 @@ void WatchdogCheck(void) {
 #else
 void WatchdogFrameStart(void) {
     g_watchdog_tripped = 0;
-    if (!s_execution_checkpoint_active) {
-        g_recomp_stack_top = 0;
-        g_tailcall_context_valid = false;
-        g_sr_paired_tail_driver = NULL;
-        g_cpu_return_scope = NULL;
-        g_cpu_owned_unwind_scope = NULL;
-    }
+    if (!s_execution_checkpoint_active) clear_execution_context();
 }
 void WatchdogFrameEnd(void) {}
 void WatchdogCheck(void) { ++g_watchdog_loop_headers; }
@@ -993,8 +1019,7 @@ void SnesShutdown(void) {
     Snes *snes = g_snes;
     clear_published_runner();
     snes_free(snes);
-    g_cpu_return_scope = NULL; /* terminal shutdown may abandon reset's C scope */
-    g_cpu_owned_unwind_scope = NULL;
+    clear_execution_context(); /* terminal shutdown may abandon C activations */
 }
 
 Snes *SnesInit(const uint8 *data, int data_size) {

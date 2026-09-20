@@ -1,6 +1,7 @@
 #include "snesrecomp/game/bootstrap.h"
 #include "snesrecomp/game/generated_support.h"
 #include "snesrecomp/game/cpu.h"
+#include "paired_tail_internal.h"
 #include "runner_internal.h"
 #include "../src/snes/snes.h"
 #include "../src/snes/cart.h"
@@ -25,6 +26,7 @@ unsigned g_sr_block_index;
 uint32_t g_tailcall_pc24;
 uint16_t g_tailcall_miss_s;
 uint32_t g_tailcall_src24;
+PairedTailDriver *g_sr_paired_tail_owner;
 static uint16 last_register;
 static uint16 last_register_value;
 static unsigned handler_calls;
@@ -274,6 +276,17 @@ static void test_stack_and_dispatch(void) {
     check(cpu_dispatch_pc(&cpu, 0x028000u, 0x01f0u) ==
               RECOMP_RETURN_SKIP_1 && handler_calls == 4u,
           "flat tail dispatch");
+    PairedTailDriver *owner = (PairedTailDriver *)(void *)&cpu;
+    g_sr_paired_tail_owner = owner; /* opaque token; dispatch must not dereference it */
+    check(cpu_dispatch_pc(&cpu, 0x028000u, 0x01f0u) ==
+              RECOMP_RETURN_TAILCALL && handler_calls == 4u &&
+              g_sr_paired_tail_owner == owner && g_tailcall_pc24 == 0x018000u,
+          "an adopted outer tail propagates without dispatching its continuation early");
+    g_sr_paired_tail_owner = NULL; /* the owner consumes the token */
+    check(cpu_dispatch_pc_from(&cpu, g_tailcall_pc24, g_tailcall_miss_s,
+                               g_tailcall_src24) == RECOMP_RETURN_SKIP_1 &&
+              handler_calls == 5u,
+          "the adopted continuation dispatches exactly once after its owner resumes");
     g_sr_runner_event_mask = 0u;
 }
 

@@ -5,6 +5,7 @@
 #include "runner_internal.h"
 #include "runner_game_module_internal.h"
 #include "runner_state_internal.h"
+#include "paired_tail_internal.h"
 #include "snes/apu.h"
 #include "snes/cart.h"
 #include "snes/cpu.h"
@@ -908,7 +909,13 @@ static void execution_checkpoint(CpuState *cpu, uint32_t pc24) {
     cpu->A = 0x4321u;
     cpu->S -= 4u;
     cpu->m_flag = 0u;
+    PairedTailDriver *previous_owner = g_sr_paired_tail_owner;
+    PairedTailDriver *sentinel = (PairedTailDriver *)(void *)cpu;
+    g_sr_paired_tail_owner = sentinel;
     WatchdogFrameStart(); /* a host frame inside this still-active activation */
+    check(g_sr_paired_tail_owner == sentinel,
+          "synchronous checkpoints preserve pending continuation ownership");
+    g_sr_paired_tail_owner = previous_owner;
     RtlAudioExtensionConfigure(false); /* refresh hooks without losing guard */
     cpu_trace_block(cpu, 0x008000u);
     ++g_ram[0x10];
@@ -991,6 +998,8 @@ static void test_execution_checkpoint(void) {
 static unsigned tail_dispatch_depth, tail_max_depth, tail_steps, tail_child_calls;
 static uint16 tail_expected_entry;
 static uint8 tail_expected_hrv;
+static uint16 adopt_owner_entry, adopt_stale_entry;
+static unsigned adopt_continuations, adopt_nested, adopt_outer_continuations;
 RecompReturn cpu_dispatch_pc_from(CpuState *cpu, uint32 pc24,
         uint16 miss_stack, uint32 source_pc24) {
     (void)miss_stack; (void)source_pc24;
@@ -1027,6 +1036,79 @@ RecompReturn cpu_dispatch_pc_from(CpuState *cpu, uint32 pc24,
                 cpu->S = (uint16)(entry + 3u); /* original RTL, exactly once */
                 result = RECOMP_RETURN_NORMAL;
             }
+        } else if (pc24 == 0x009400u) {
+            check(entry == adopt_owner_entry && hrv == 1u, "owner body inherits its driver context");
+            RecompStackPush("owner-jsr-site");
+            cpu->S -= 2u; /* JSR pushes the child's return word */
+            uint16 child_entry = cpu->S;
+            RecompStackPush("child");
+            cpu->S += 2u; /* the child PLA discards that word, then jumps into caller code */
+            unsigned depth = tail_dispatch_depth;
+            result = cpu_dispatch_paired_tail_from(cpu, 0x009500u, child_entry, 1u, 0x009400u);
+            check(result == RECOMP_RETURN_TAILCALL && tail_dispatch_depth == depth &&
+                      g_tailcall_pc24 == 0x009500u && cpu->S == adopt_owner_entry,
+                  "a stale requester at the owner's native S transfers without nesting");
+            RecompStackPop();
+            RecompStackPop();
+            RecompStackPop();
+        } else if (pc24 == 0x009500u) {
+            check(entry == adopt_owner_entry && hrv == 1u,
+                  "the adopted transfer restores the owner's entry S and host pairing");
+            ++adopt_continuations;
+            RecompStackPop();
+            cpu->S = (uint16)(entry + 3u); /* the owner's single RTL */
+            result = RECOMP_RETURN_NORMAL;
+        } else if (pc24 == 0x009800u) {
+            check(entry == adopt_owner_entry && hrv == 1u, "outer owner body inherits its driver context");
+            RecompStackPush("owner-jsr-site");
+            cpu->S -= 2u; /* JSR frame for the callee */
+            uint16 callee_entry = cpu->S;
+            RecompStackPush("callee");
+            cpu->S -= 2u; /* PEA continuation-1, then an indirect JMP */
+            result = cpu_dispatch_paired_tail_from(cpu, 0x009900u, callee_entry, 1u, 0x009800u);
+            check(result == RECOMP_RETURN_TAILCALL && g_sr_paired_tail_owner != NULL &&
+                      g_tailcall_pc24 == 0x009b00u,
+                  "a transfer adopted through a dead inner driver propagates outward");
+            RecompStackPop();
+            RecompStackPop();
+            RecompStackPop();
+        } else if (pc24 == 0x009900u) {
+            check(entry == (uint16)(adopt_owner_entry - 2u), "the envelope target keeps the callee context");
+            RecompStackPop();
+            cpu->S += 2u; /* RTS pops the pushed continuation */
+            result = cpu_dispatch_paired_tail_from(cpu, 0x009a00u, entry, hrv, 0x009900u);
+        } else if (pc24 == 0x009a00u) {
+            check(entry == (uint16)(adopt_owner_entry - 2u), "the callee continuation runs under its own driver");
+            RecompStackPop();
+            cpu->S += 2u; /* PLA drops the callee's JSR frame; code jumps into its caller */
+            result = cpu_dispatch_paired_tail_from(cpu, 0x009b00u, entry, hrv, 0x009a00u);
+        } else if (pc24 == 0x009b00u) {
+            check(entry == adopt_owner_entry && hrv == 1u,
+                  "the adopted outer transfer restores the owner's entry S and host pairing");
+            ++adopt_outer_continuations;
+            RecompStackPop();
+            cpu->S = (uint16)(entry + 3u);
+            result = RECOMP_RETURN_NORMAL;
+        } else if (pc24 == 0x009700u) {
+            RecompStackPush("owner-jsr-site");
+            cpu->S -= 2u;
+            adopt_stale_entry = cpu->S;
+            RecompStackPush("child");
+            cpu->S += 1u; /* a partial pull leaves native S below the owner's entry */
+            check(cpu_dispatch_paired_tail_from(cpu, 0x009600u, adopt_stale_entry, 1u, 0x009700u) == RECOMP_RETURN_NORMAL &&
+                      adopt_nested == 1u,
+                  "a requester not exactly at the owner's entry keeps an ordinary nested driver");
+            cpu->S += 1u;
+            RecompStackPop();
+            RecompStackPop();
+            RecompStackPop();
+            cpu->S = (uint16)(entry + 3u);
+            result = RECOMP_RETURN_NORMAL;
+        } else if (pc24 == 0x009600u) {
+            check(entry == adopt_stale_entry, "the nested driver keeps the requester's own context");
+            ++adopt_nested;
+            RecompStackPop();
+            result = RECOMP_RETURN_NORMAL;
         } else {
             check(pc24 == 0x009100u && entry == (uint16)(tail_expected_entry - 3u),
                   "nested JSR uses distinct hardware frame");
@@ -1034,6 +1116,7 @@ RecompReturn cpu_dispatch_pc_from(CpuState *cpu, uint32 pc24,
             cpu->S += 2u;
             result = RECOMP_RETURN_NORMAL;
         }
+        if (result == RECOMP_RETURN_TAILCALL && g_sr_paired_tail_owner != NULL) break;
         if (result == RECOMP_RETURN_TAILCALL) pc24 = g_tailcall_pc24;
     } while (result == RECOMP_RETURN_TAILCALL);
     --tail_dispatch_depth;
@@ -1061,6 +1144,136 @@ static void test_paired_tail_driver(void) {
     check(cpu_take_tailcall_return_context(NULL, NULL) == 0,
           "missing body cannot poison a later unrelated entry");
     RecompStackPop();
+}
+
+static void test_paired_tail_adopts_owner_after_dropped_frame(void) {
+    CpuState cpu = {0};
+    WatchdogFrameStart();
+    RecompStackPush("jsl-caller");
+    cpu.S = 0x1f00u;
+    adopt_owner_entry = cpu.S;
+    check(cpu_dispatch_paired_tail_from(&cpu, 0x009400u, adopt_owner_entry, 1u, 0x008000u) == RECOMP_RETURN_NORMAL &&
+              adopt_continuations == 1u && cpu.S == (uint16)(adopt_owner_entry + 3u) &&
+              g_recomp_stack_top == 1 && tail_dispatch_depth == 0u,
+          "a dropped-frame transfer resumes the owner's flat driver exactly once");
+    check(cpu_take_tailcall_return_context(NULL, NULL) == 0,
+          "an adopted transfer leaves no pending context");
+    cpu.S = 0x1f00u;
+    adopt_owner_entry = cpu.S;
+    check(cpu_dispatch_paired_tail_from(&cpu, 0x009700u, adopt_owner_entry, 1u, 0x008000u) == RECOMP_RETURN_NORMAL &&
+              adopt_nested == 1u && g_recomp_stack_top == 1 && tail_dispatch_depth == 0u,
+          "partial pulls keep ordinary nested ownership");
+    cpu.S = 0x1f00u;
+    adopt_owner_entry = cpu.S;
+    check(cpu_dispatch_paired_tail_from(&cpu, 0x009800u, adopt_owner_entry, 1u, 0x008000u) == RECOMP_RETURN_NORMAL &&
+              adopt_outer_continuations == 1u && cpu.S == (uint16)(adopt_owner_entry + 3u) &&
+              g_recomp_stack_top == 1 && tail_dispatch_depth == 0u && g_sr_paired_tail_owner == NULL,
+          "a dropped frame behind an inner call envelope resumes the outer owner exactly once");
+    check(cpu_take_tailcall_return_context(NULL, NULL) == 0,
+          "the outer adoption leaves no pending context");
+    RecompStackPop();
+}
+
+static void test_stacked_result_return(void) {
+    CpuState cpu = {0}, other = {0};
+    CpuReturnScope outer, inner;
+    WatchdogFrameStart();
+    cpu.S = 0x1fe0;
+    cpu_return_scope_begin(&outer, &cpu, 0x008123u, 0x1fff, 2);
+    cpu.S = 0x1fd0; /* the callee's entry S after its JSR frame */
+    cpu_return_scope_begin(&inner, &cpu, 0x00a4dfu, 0x1fe0, 2);
+    cpu.S = 0x1fce; /* word stashed, one result word pushed, word re-pushed and popped */
+    check(cpu_accept_stacked_result_return(&cpu, 0x1fd0, 0x1fcc, 0x00a4dfu, 2) &&
+              inner.adjusted_return && !outer.adjusted_return,
+          "stacked callee results return to the immediate call and keep native S");
+    inner.adjusted_return = 0;
+    check(!cpu_accept_stacked_result_return(&cpu, 0x1fd0, 0x1fcc, 0x00a4e0u, 2) &&
+              !cpu_accept_stacked_result_return(&cpu, 0x1fd0, 0x1fcc, 0x01a4dfu, 2) &&
+              !cpu_accept_stacked_result_return(&cpu, 0x1fd0, 0x1fcb, 0x00a4dfu, 3) &&
+              !cpu_accept_stacked_result_return(&cpu, 0x1fd2, 0x1fcc, 0x00a4dfu, 2) &&
+              !cpu_accept_stacked_result_return(&other, 0x1fd0, 0x1fcc, 0x00a4dfu, 2) &&
+              !cpu_accept_stacked_result_return(&cpu, 0x1fd0, 0x1fcc, 0x008123u, 2),
+          "wrong PC, bank, frame kind, activation, CPU or ancestor continuation is not owned");
+    check(!cpu_accept_stacked_result_return(&cpu, 0x1fd0, 0x1fcd, 0x00a4dfu, 2),
+          "the popped frame must end exactly at native S");
+    cpu.S = 0x1fd2;
+    check(!cpu_accept_stacked_result_return(&cpu, 0x1fd0, 0x1fd0, 0x00a4dfu, 2),
+          "an equal-stack return stays on the host fast path");
+    cpu.S = 0x1fda;
+    check(!cpu_accept_stacked_result_return(&cpu, 0x1fd0, 0x1fd8, 0x00a4dfu, 2),
+          "a callee-clean return belongs to the adjusted-return contract");
+    cpu.S = 0x1fce; cpu.emulation = 1;
+    check(!cpu_accept_stacked_result_return(&cpu, 0x1fd0, 0x1fcc, 0x00a4dfu, 2),
+          "emulation stack wrapping is outside the native contract");
+    cpu.emulation = 0; inner.caller_stack_limit = 0x2000;
+    check(!cpu_accept_stacked_result_return(&cpu, 0x1fd0, 0x1fcc, 0x00a4dfu, 2),
+          "non-WRAM stack window rejected");
+    inner.caller_stack_limit = 0x1fe0;
+    inner.entry_stack = 0xffff;
+    check(!cpu_accept_stacked_result_return(&cpu, 0xffff, 0x1fcc, 0x00a4dfu, 2),
+          "an originally wrapping frame cannot become owned after moving S into WRAM");
+    inner.entry_stack = 0x1ffe;
+    check(!cpu_accept_stacked_result_return(&cpu, 0x1ffe, 0x1fcc, 0x00a4dfu, 2),
+          "the original call frame must lie entirely in WRAM too");
+    inner.entry_stack = 0x1fd0;
+    check(!inner.adjusted_return, "rejected returns never claim the scope");
+    cpu_return_scope_end(&inner);
+    cpu_return_scope_end(&outer);
+    check(!g_cpu_return_scope && !cpu_accept_stacked_result_return(&cpu, 0x1fd0, 0x1fcc, 0x00a4dfu, 2),
+          "an unpaired return cannot acquire an owner");
+}
+
+static void test_abandoned_continuation_cleanup(void) {
+    CpuState cpu = {0};
+    CpuReturnScope outer, inner;
+    /* An opaque sentinel is never dereferenced. It models a driver whose C
+     * activation was abandoned by a terminal/reset boundary. */
+    PairedTailDriver *sentinel = (PairedTailDriver *)(void *)&cpu;
+    for (unsigned shutdown = 0; shutdown < 2; ++shutdown) {
+        WatchdogFrameStart();
+        RecompStackPush("abandoned");
+        cpu.S = 0x1ff0;
+        cpu_return_scope_begin(&outer, &cpu, 0x008100, 0x1fff, 2u);
+        cpu_return_scope_begin(&inner, &cpu, 0x008200, 0x1fff, 2u);
+        g_cpu_owned_unwind_scope = &outer;
+        g_sr_paired_tail_driver = sentinel;
+        g_sr_paired_tail_owner = sentinel;
+        cpu_tailcall_inherit_return_context(cpu.S, 1u);
+        if (shutdown) SnesShutdown();
+        else WatchdogFrameStart();
+        check(g_recomp_stack_top == 0 && g_sr_paired_tail_driver == NULL &&
+                  g_sr_paired_tail_owner == NULL && g_cpu_return_scope == NULL &&
+                  g_cpu_owned_unwind_scope == NULL &&
+                  !cpu_take_tailcall_return_context(NULL, NULL),
+              "fresh execution and shutdown clear all abandoned continuation state");
+        cpu_return_scope_end(&inner);
+        cpu_return_scope_end(&outer);
+        check(g_cpu_return_scope == NULL, "late cleanup cannot resurrect abandoned owners");
+    }
+}
+
+static void test_call_scope_after_caller_stack_reset(void) {
+    CpuState cpu = {0};
+    CpuReturnScope call;
+    WatchdogFrameStart();
+    cpu.S = 0x1ff0;       /* the caller reset S above its stale entry 0x1fe0 */
+    cpu.S -= 3u;          /* JSL frame */
+    cpu_return_scope_begin(&call, &cpu, 0x0082ffu, 0x1fe0, 3u);
+    check(call.caller_stack_limit == 0x1ff0,
+          "a caller's actual pre-call stack bounds the call, not its stale entry");
+    cpu.S = 0x001fu;      /* callee moves S while it clears RAM */
+    cpu.S = 0x1ff0;       /* then restores exactly the caller's stack and JMLs back */
+    check(cpu_accept_indirect_return(&cpu, 0x1fed, 0x0082ffu),
+          "a stack-reset caller resumes at its own continuation");
+    cpu.S = 0x1ff3;
+    check(!cpu_accept_indirect_return(&cpu, 0x1fed, 0x0082ffu),
+          "a resume above the caller's pre-call stack is still rejected");
+    cpu_return_scope_end(&call);
+    cpu.S = 0x1fd0;
+    cpu_return_scope_begin(&call, &cpu, 0x008123u, 0x1fe0, 2u);
+    check(call.caller_stack_limit == 0x1fe0,
+          "an ordinary caller keeps its entry stack as the bound");
+    cpu_return_scope_end(&call);
 }
 
 static void test_return_ownership(void) {
@@ -1274,7 +1487,11 @@ int main(void) {
     test_execution_checkpoint();
     test_poll_wait();
     test_paired_tail_driver();
+    test_paired_tail_adopts_owner_after_dropped_frame();
+    test_stacked_result_return();
+    test_abandoned_continuation_cleanup();
     test_return_ownership();
+    test_call_scope_after_caller_stack_reset();
     WatchdogFrameStart();
     WatchdogCheck();
     WatchdogFrameEnd();
