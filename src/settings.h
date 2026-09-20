@@ -144,7 +144,7 @@ typedef enum {
  * still match its own InputClass/InputAction counts. */
 enum {
   kSettingsInputClasses = 2,
-  kSettingsInputActions = 26,
+  kSettingsInputActions = 27,
 };
 
 typedef enum {
@@ -500,6 +500,8 @@ typedef struct Settings {
    * masks.  D1 exposes the controls while the implemented-capability mask is
    * still zero, so every selection safely resolves to authentic output. */
   bool sim3d_mode;
+  int sim_menu_style;          /* Original / Modern; independent of renderer. */
+  int sim_menu_scale_percent;  /* 50-100% of the modern menu's full layout. */
   /* Extra host-renderable range around the authentic sim window. Raising it
    * also extends projectile lifetime and can increase world-record pressure,
    * so this is intentionally labelled gameplay-affecting. */

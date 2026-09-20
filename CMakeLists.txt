@@ -2516,6 +2516,24 @@ if(BUILD_TESTING)
     add_executable(actraiser_localization_text_test
         tests/actraiser_localization_text_test.c
         src/actraiser/actraiser_localization_text.c)
+    add_executable(sim_menu_model_test
+        tests/sim_menu_model_test.c src/sim/sim_menu_model.c)
+    target_include_directories(sim_menu_model_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    add_test(NAME sim_menu_model COMMAND sim_menu_model_test)
+    add_executable(sim_menu_help_test tests/sim_menu_help_test.c
+        src/sim/sim_menu_help.c src/localization/unicode_grapheme.c)
+    target_include_directories(sim_menu_help_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    add_test(NAME sim_menu_help COMMAND sim_menu_help_test)
+    add_executable(sim_menu_art_test tests/sim_menu_art_test.c src/sim/sim_menu_art.c)
+    target_include_directories(sim_menu_art_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    add_test(NAME sim_menu_art COMMAND sim_menu_art_test)
+    add_executable(actraiser_sim_menu_test tests/actraiser_sim_menu_test.c
+        src/actraiser/actraiser_sim_menu.c src/sim/sim_menu_model.c
+        src/sim/sim_menu_help.c src/localization/unicode_grapheme.c)
+    target_include_directories(actraiser_sim_menu_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    add_test(NAME actraiser_sim_menu COMMAND actraiser_sim_menu_test)
     target_include_directories(actraiser_localization_text_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
@@ -2524,6 +2542,8 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_localization_schedule_test
         tests/actraiser_localization_schedule_test.c
+        src/sim/sim_menu_model.c
+        src/sim/sim_menu_help.c
         src/save_system.c
         src/atomic_replace.c
         src/localization/text_presentation.c

@@ -6087,6 +6087,654 @@
     {
       "allowed_placeholders": [],
       "anchors": {
+        "de": [],
+        "eu-en": [],
+        "fr": [],
+        "jp": [],
+        "us": []
+      },
+      "canonical_profile": "us",
+      "id": "sim.help.action.01",
+      "optional": true,
+      "presentation": {
+        "layout": "flow",
+        "shape": "flow"
+      },
+      "us_runtime_usage": "live_optional"
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
+        "de": [],
+        "eu-en": [],
+        "fr": [],
+        "jp": [],
+        "us": []
+      },
+      "canonical_profile": "us",
+      "id": "sim.help.action.02",
+      "optional": true,
+      "presentation": {
+        "layout": "flow",
+        "shape": "flow"
+      },
+      "us_runtime_usage": "live_optional"
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
+        "de": [],
+        "eu-en": [],
+        "fr": [],
+        "jp": [],
+        "us": []
+      },
+      "canonical_profile": "us",
+      "id": "sim.help.action.03",
+      "optional": true,
+      "presentation": {
+        "layout": "flow",
+        "shape": "flow"
+      },
+      "us_runtime_usage": "live_optional"
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
+        "de": [],
+        "eu-en": [],
+        "fr": [],
+        "jp": [],
+        "us": []
+      },
+      "canonical_profile": "us",
+      "id": "sim.help.action.04",
+      "optional": true,
+      "presentation": {
+        "layout": "flow",
+        "shape": "flow"
+      },
+      "us_runtime_usage": "live_optional"
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
+        "de": [],
+        "eu-en": [],
+        "fr": [],
+        "jp": [],
+        "us": []
+      },
+      "canonical_profile": "us",
+      "id": "sim.help.action.10",
+      "optional": true,
+      "presentation": {
+        "layout": "flow",
+        "shape": "flow"
+      },
+      "us_runtime_usage": "live_optional"
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
+        "de": [],
+        "eu-en": [],
+        "fr": [],
+        "jp": [],
+        "us": []
+      },
+      "canonical_profile": "us",
+      "id": "sim.help.action.11",
+      "optional": true,
+      "presentation": {
+        "layout": "flow",
+        "shape": "flow"
+      },
+      "us_runtime_usage": "live_optional"
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
+        "de": [],
+        "eu-en": [],
+        "fr": [],
+        "jp": [],
+        "us": []
+      },
+      "canonical_profile": "us",
+      "id": "sim.help.action.12",
+      "optional": true,
+      "presentation": {
+        "layout": "flow",
+        "shape": "flow"
+      },
+      "us_runtime_usage": "live_optional"
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
+        "de": [],
+        "eu-en": [],
+        "fr": [],
+        "jp": [],
+        "us": []
+      },
+      "canonical_profile": "us",
+      "id": "sim.help.action.13",
+      "optional": true,
+      "presentation": {
+        "layout": "flow",
+        "shape": "flow"
+      },
+      "us_runtime_usage": "live_optional"
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
+        "de": [],
+        "eu-en": [],
+        "fr": [],
+        "jp": [],
+        "us": []
+      },
+      "canonical_profile": "us",
+      "id": "sim.help.action.14",
+      "optional": true,
+      "presentation": {
+        "layout": "flow",
+        "shape": "flow"
+      },
+      "us_runtime_usage": "live_optional"
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
+        "de": [],
+        "eu-en": [],
+        "fr": [],
+        "jp": [],
+        "us": []
+      },
+      "canonical_profile": "us",
+      "id": "sim.help.action.15",
+      "optional": true,
+      "presentation": {
+        "layout": "flow",
+        "shape": "flow"
+      },
+      "us_runtime_usage": "live_optional"
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
+        "de": [],
+        "eu-en": [],
+        "fr": [],
+        "jp": [],
+        "us": []
+      },
+      "canonical_profile": "us",
+      "id": "sim.help.category.0",
+      "optional": true,
+      "presentation": {
+        "layout": "flow",
+        "shape": "flow"
+      },
+      "us_runtime_usage": "live_optional"
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
+        "de": [],
+        "eu-en": [],
+        "fr": [],
+        "jp": [],
+        "us": []
+      },
+      "canonical_profile": "us",
+      "id": "sim.help.category.1",
+      "optional": true,
+      "presentation": {
+        "layout": "flow",
+        "shape": "flow"
+      },
+      "us_runtime_usage": "live_optional"
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
+        "de": [],
+        "eu-en": [],
+        "fr": [],
+        "jp": [],
+        "us": []
+      },
+      "canonical_profile": "us",
+      "id": "sim.help.category.2",
+      "optional": true,
+      "presentation": {
+        "layout": "flow",
+        "shape": "flow"
+      },
+      "us_runtime_usage": "live_optional"
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
+        "de": [],
+        "eu-en": [],
+        "fr": [],
+        "jp": [],
+        "us": []
+      },
+      "canonical_profile": "us",
+      "id": "sim.help.category.3",
+      "optional": true,
+      "presentation": {
+        "layout": "flow",
+        "shape": "flow"
+      },
+      "us_runtime_usage": "live_optional"
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
+        "de": [],
+        "eu-en": [],
+        "fr": [],
+        "jp": [],
+        "us": []
+      },
+      "canonical_profile": "us",
+      "id": "sim.help.category.4",
+      "optional": true,
+      "presentation": {
+        "layout": "flow",
+        "shape": "flow"
+      },
+      "us_runtime_usage": "live_optional"
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
+        "de": [],
+        "eu-en": [],
+        "fr": [],
+        "jp": [],
+        "us": []
+      },
+      "canonical_profile": "us",
+      "id": "sim.help.category.5",
+      "optional": true,
+      "presentation": {
+        "layout": "flow",
+        "shape": "flow"
+      },
+      "us_runtime_usage": "live_optional"
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
+        "de": [],
+        "eu-en": [],
+        "fr": [],
+        "jp": [],
+        "us": []
+      },
+      "canonical_profile": "us",
+      "id": "sim.help.item.01",
+      "optional": true,
+      "presentation": {
+        "layout": "flow",
+        "shape": "flow"
+      },
+      "us_runtime_usage": "live_optional"
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
+        "de": [],
+        "eu-en": [],
+        "fr": [],
+        "jp": [],
+        "us": []
+      },
+      "canonical_profile": "us",
+      "id": "sim.help.item.02",
+      "optional": true,
+      "presentation": {
+        "layout": "flow",
+        "shape": "flow"
+      },
+      "us_runtime_usage": "live_optional"
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
+        "de": [],
+        "eu-en": [],
+        "fr": [],
+        "jp": [],
+        "us": []
+      },
+      "canonical_profile": "us",
+      "id": "sim.help.item.03",
+      "optional": true,
+      "presentation": {
+        "layout": "flow",
+        "shape": "flow"
+      },
+      "us_runtime_usage": "live_optional"
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
+        "de": [],
+        "eu-en": [],
+        "fr": [],
+        "jp": [],
+        "us": []
+      },
+      "canonical_profile": "us",
+      "id": "sim.help.item.04",
+      "optional": true,
+      "presentation": {
+        "layout": "flow",
+        "shape": "flow"
+      },
+      "us_runtime_usage": "live_optional"
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
+        "de": [],
+        "eu-en": [],
+        "fr": [],
+        "jp": [],
+        "us": []
+      },
+      "canonical_profile": "us",
+      "id": "sim.help.item.05",
+      "optional": true,
+      "presentation": {
+        "layout": "flow",
+        "shape": "flow"
+      },
+      "us_runtime_usage": "live_optional"
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
+        "de": [],
+        "eu-en": [],
+        "fr": [],
+        "jp": [],
+        "us": []
+      },
+      "canonical_profile": "us",
+      "id": "sim.help.item.06",
+      "optional": true,
+      "presentation": {
+        "layout": "flow",
+        "shape": "flow"
+      },
+      "us_runtime_usage": "live_optional"
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
+        "de": [],
+        "eu-en": [],
+        "fr": [],
+        "jp": [],
+        "us": []
+      },
+      "canonical_profile": "us",
+      "id": "sim.help.item.07",
+      "optional": true,
+      "presentation": {
+        "layout": "flow",
+        "shape": "flow"
+      },
+      "us_runtime_usage": "live_optional"
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
+        "de": [],
+        "eu-en": [],
+        "fr": [],
+        "jp": [],
+        "us": []
+      },
+      "canonical_profile": "us",
+      "id": "sim.help.item.08",
+      "optional": true,
+      "presentation": {
+        "layout": "flow",
+        "shape": "flow"
+      },
+      "us_runtime_usage": "live_optional"
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
+        "de": [],
+        "eu-en": [],
+        "fr": [],
+        "jp": [],
+        "us": []
+      },
+      "canonical_profile": "us",
+      "id": "sim.help.item.09",
+      "optional": true,
+      "presentation": {
+        "layout": "flow",
+        "shape": "flow"
+      },
+      "us_runtime_usage": "live_optional"
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
+        "de": [],
+        "eu-en": [],
+        "fr": [],
+        "jp": [],
+        "us": []
+      },
+      "canonical_profile": "us",
+      "id": "sim.help.item.10",
+      "optional": true,
+      "presentation": {
+        "layout": "flow",
+        "shape": "flow"
+      },
+      "us_runtime_usage": "live_optional"
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
+        "de": [],
+        "eu-en": [],
+        "fr": [],
+        "jp": [],
+        "us": []
+      },
+      "canonical_profile": "us",
+      "id": "sim.help.item.11",
+      "optional": true,
+      "presentation": {
+        "layout": "flow",
+        "shape": "flow"
+      },
+      "us_runtime_usage": "live_optional"
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
+        "de": [],
+        "eu-en": [],
+        "fr": [],
+        "jp": [],
+        "us": []
+      },
+      "canonical_profile": "us",
+      "id": "sim.help.item.12",
+      "optional": true,
+      "presentation": {
+        "layout": "flow",
+        "shape": "flow"
+      },
+      "us_runtime_usage": "live_optional"
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
+        "de": [],
+        "eu-en": [],
+        "fr": [],
+        "jp": [],
+        "us": []
+      },
+      "canonical_profile": "us",
+      "id": "sim.help.item.13",
+      "optional": true,
+      "presentation": {
+        "layout": "flow",
+        "shape": "flow"
+      },
+      "us_runtime_usage": "live_optional"
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
+        "de": [],
+        "eu-en": [],
+        "fr": [],
+        "jp": [],
+        "us": []
+      },
+      "canonical_profile": "us",
+      "id": "sim.help.item.14",
+      "optional": true,
+      "presentation": {
+        "layout": "flow",
+        "shape": "flow"
+      },
+      "us_runtime_usage": "live_optional"
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
+        "de": [],
+        "eu-en": [],
+        "fr": [],
+        "jp": [],
+        "us": []
+      },
+      "canonical_profile": "us",
+      "id": "sim.help.item.15",
+      "optional": true,
+      "presentation": {
+        "layout": "flow",
+        "shape": "flow"
+      },
+      "us_runtime_usage": "live_optional"
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
+        "de": [],
+        "eu-en": [],
+        "fr": [],
+        "jp": [],
+        "us": []
+      },
+      "canonical_profile": "us",
+      "id": "sim.help.item.16",
+      "optional": true,
+      "presentation": {
+        "layout": "flow",
+        "shape": "flow"
+      },
+      "us_runtime_usage": "live_optional"
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
+        "de": [],
+        "eu-en": [],
+        "fr": [],
+        "jp": [],
+        "us": []
+      },
+      "canonical_profile": "us",
+      "id": "sim.help.item.17",
+      "optional": true,
+      "presentation": {
+        "layout": "flow",
+        "shape": "flow"
+      },
+      "us_runtime_usage": "live_optional"
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
+        "de": [],
+        "eu-en": [],
+        "fr": [],
+        "jp": [],
+        "us": []
+      },
+      "canonical_profile": "us",
+      "id": "sim.help.item.18",
+      "optional": true,
+      "presentation": {
+        "layout": "flow",
+        "shape": "flow"
+      },
+      "us_runtime_usage": "live_optional"
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
+        "de": [],
+        "eu-en": [],
+        "fr": [],
+        "jp": [],
+        "us": []
+      },
+      "canonical_profile": "us",
+      "id": "sim.help.item.19",
+      "optional": true,
+      "presentation": {
+        "layout": "flow",
+        "shape": "flow"
+      },
+      "us_runtime_usage": "live_optional"
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
+        "de": [],
+        "eu-en": [],
+        "fr": [],
+        "jp": [],
+        "us": []
+      },
+      "canonical_profile": "us",
+      "id": "sim.help.item.20",
+      "optional": true,
+      "presentation": {
+        "layout": "flow",
+        "shape": "flow"
+      },
+      "us_runtime_usage": "live_optional"
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
         "de": [
           "reset_text_cursor.00"
         ],

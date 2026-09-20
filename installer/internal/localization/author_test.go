@@ -110,7 +110,7 @@ func TestAuthorContractsAndAliasDependents(t *testing.T) {
 		}
 	}
 	refs, err := AuthorReferences("us")
-	if err != nil || len(refs) != 564 {
+	if err != nil || len(refs) != 600 {
 		t.Fatalf("refs: %d %v", len(refs), err)
 	}
 	for i := range refs {
@@ -183,7 +183,7 @@ func TestAuthorWorkspaceEditReopenTreeAndAtomicFailure(t *testing.T) {
 		present += entry.Present
 		done += entry.Done
 	}
-	if total != 564 || present != 3 || done != 1 {
+	if total != 600 || present != 3 || done != 1 {
 		t.Fatalf("tree counts %d %d %d", total, present, done)
 	}
 	children := w2.Children("action.hud")

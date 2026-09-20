@@ -38,7 +38,7 @@ typedef struct ArGeneratedRoute {
 
 #define ARRAY_COUNT(array) (sizeof(array) / sizeof((array)[0]))
 
-_Static_assert(ARRAY_COUNT(kGeneratedRoutes) == 564,
+_Static_assert(ARRAY_COUNT(kGeneratedRoutes) == 600,
                "v1 semantic route count changed");
 _Static_assert(ARRAY_COUNT(kGeneratedPlaceholders) == 62,
                "v1 placeholder count changed");

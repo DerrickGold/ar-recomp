@@ -6,6 +6,7 @@
 #include <SDL3/SDL.h>
 
 #include "actraiser_rtl.h"
+#include "actraiser/actraiser_sim_menu.h"
 #include "snesrecomp/game/bootstrap.h"
 #include "diorama/diorama.h"
 #include "forced_input.h"
@@ -46,6 +47,11 @@ uint32_t HostInput_SampleLiveInputs(void) {
   /* Re-read rather than trusting the last event: a gamepad's held bits are
    * owned by input_map.c and change without a keyboard event ever firing. */
   s_input_state = InputMap_State();
+  if (ActRaiserSimMenu_OwnsInput()) {
+    s_input_state &= ~(1u << kInputAction_X);
+    if (InputMap_GameActionHeld(kInputAction_SimDescribe))
+      s_input_state |= 1u << kInputAction_X;
+  }
   return ForcedInput_Apply(s_input_state, snes_frame_counter);
 }
 

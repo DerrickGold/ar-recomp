@@ -263,7 +263,8 @@ bool ArLocalizationFrame_AddScreenText(
       (layout != kArLocalizationTextLayout_SingleLineLabel &&
        layout != kArLocalizationTextLayout_CenteredLabel &&
        layout != kArLocalizationTextLayout_RightAlignedLabel &&
-       layout != kArLocalizationTextLayout_LeftAlignedLabel) ||
+       layout != kArLocalizationTextLayout_LeftAlignedLabel &&
+       layout != kArLocalizationTextLayout_DialogueWindow) ||
       frame->screen_text_count >= kArLocalizationFrameScreenTextCapacity ||
       frame->snapshot_count >= kArTextCellRecordCapacity ||
       utf8_bytes >= kArLocalizationFrameTextCapacity - frame->text_bytes ||

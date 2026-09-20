@@ -53,6 +53,8 @@ typedef enum {
   /* Session-only authentic/enhanced comparison. It has both keyboard and pad
    * rows because press duration selects its picture-in-picture hold mode. */
   kInputAction_RenderCompare,
+  /* Polled only by the modern SIM menu, encoded in its reserved X channel. */
+  kInputAction_SimDescribe,
   kInputAction_EdgeEnd,
 
   /* Analog camera actions. Unlike everything above these are POLLED, not
@@ -171,6 +173,7 @@ float InputMap_AnalogAction(InputAction action);
 /* Physical held state across both host-binding classes. Host comparison uses
  * this beside its press edge to distinguish click from hold. */
 bool InputMap_ActionHeld(InputAction action);
+bool InputMap_GameActionHeld(InputAction action);
 
 /* Stateful threshold used by both event edges and held-state polling. Kept
  * pure/public so the press/release hysteresis contract can be regression

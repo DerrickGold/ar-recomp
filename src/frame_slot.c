@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include "frame_slot.h"
+#include "actraiser/actraiser_sim_menu.h"
 #include "display_geometry.h"
 #include "host/host_clock.h"
 #include "present.h"
@@ -30,6 +31,7 @@
 #include "snesrecomp/game_runtime.h"
 #include "snesrecomp/game/runtime.h" /* g_ram */
 #include "frame_timing.h"
+#include "session_fatal.h"
 #include "hd_replacement_host.h"
 #include "snesrecomp/runner.h"
 
@@ -526,6 +528,16 @@ void FrameSlot_Capture(FrameSlot *dst, const SimFrameData *annotated_sim) {
   FramePpuView ppu_view;
   const bool have_ppu_view =
       FramePpuView_Capture(&ppu_view, &dst->ppu_surfaces);
+  ActRaiserSimMenu_CopyModel(&dst->sim_menu.model);
+  ActRaiserSimMenu_CopyHelp(&dst->sim_menu.help);
+  dst->sim_menu.scale_percent=(uint8_t)g_settings.sim_menu_scale_percent;
+  if (have_ppu_view && dst->sim_menu.model.phase != kSimMenu_Closed &&
+      dst->sim_menu.model.phase != kSimMenu_Native) {
+    if (dst->sim_menu.model.phase == kSimMenu_Confirm)
+      dst->sim_menu.model.yes = g_ram[0x0a] == 0;
+    if (!SimMenuArt_Capture(&dst->sim_menu, ppu_view.api, ppu_view.runner))
+      SessionFatal_Request("SIM menu artwork capture failed after its native preflight.");
+  }
 
   extern int snes_frame_counter;
   const int elapsed_ticks = CaptureElapsedTicks(snes_frame_counter);
@@ -779,6 +791,13 @@ void FrameSlot_Capture(FrameSlot *dst, const SimFrameData *annotated_sim) {
           ppu_view.live_state.backgrounds[2].tile_base_word,
           vram.data, vram.element_count, cgram.data, cgram.element_count,
           mode7_transformed);
+      if (dst->sim_menu.valid)
+        ActRaiserLocalizationRuntime_CaptureMenuLabels(
+            &dst->sim_menu.label_frame, &dst->localization, &dst->sim_menu.model,
+            cgram.data, cgram.element_count);
+      if (dst->sim_menu.help.active)
+        ActRaiserLocalizationRuntime_AppendMenuHelp(
+            &dst->localization,&dst->sim_menu.help,cgram.data,cgram.element_count);
       if (dst->sim.view == kSimView_WorldNavigation &&
           dst->sim.world_navigation_scene.composition.valid &&
           !dst->sim.world_navigation_scene.composition.empty_animation) {

@@ -49,6 +49,8 @@
 #include "funcs.h"
 #include "snesrecomp/game/trace.h"
 #include <stdio.h>
+#include "actraiser/actraiser_sim_menu.h"
+#include "sim/sim_menu_art.h"
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <errno.h>
@@ -87,6 +89,11 @@ enum {
 static ActRaiserRomSetupResult s_rom_setup_result;
 static SrRunnerHandle *s_runner;
 static const SnesRunnerApi *s_runner_api;
+
+bool ActRaiserSimMenu_ArtworkAvailable(void) {
+  static SimMenuFrame preflight;
+  return SimMenuArt_Capture(&preflight, s_runner_api, s_runner);
+}
 
 void ActRaiser_BindRunner(SrRunnerHandle *runner) {
   s_runner = runner;
@@ -158,6 +165,7 @@ static bool ActRaiser_ClearPpuObjMetadata(void) {
 
 bool ActRaiser_InitializeGame(
     const RtlGameInitializeContext *context) {
+  ActRaiserSimMenu_Reset();
   s_rom_setup_result = (ActRaiserRomSetupResult){0};
   if (!context ||
       context->struct_size < RTL_GAME_INITIALIZE_CONTEXT_V1_SIZE)
@@ -3753,9 +3761,15 @@ static void ActRaiser_PrepareTownCapture(void) {
       town && SimRenderAtlas_Build(
                   s_runner, ActRaiser_ReadWram16(kActRaiserWram_Bg1CameraX),
                   ActRaiser_ReadWram16(kActRaiserWram_Bg1CameraY));
+  /* The compact menu needs independent town layers even with 3D disabled.
+   * Menu sprites are not one OAM prefix: inventory icons and map brackets
+   * can follow the hourglass. Recompose the flat scene from the same captured
+   * planes/objects as enhanced mode, leaving the authentic scanout untouched. */
+  const bool flat_menu = town && ActRaiserSimMenu_OwnsPresentation() &&
+      !g_settings.sim3d_mode;
   Sim3DCaptureRequest request = {
       .town = town,
-      .master_enabled = g_settings.sim3d_mode,
+      .master_enabled = g_settings.sim3d_mode || flat_menu,
       /* The picker flag is in $7F WRAM; its 17-bit mirror address must not
        * pass through the 16-bit low-WRAM helper. */
       .picker_active = town && ActRaiser_SimMapPickerActiveForState(
@@ -3769,7 +3783,8 @@ static void ActRaiser_PrepareTownCapture(void) {
       /* The inspector panel is the only on-screen reader of the capture's
        * diagnostic hash; with it off, that pass is skipped. */
       .inspector_active = g_settings.scene_inspector,
-      .requested_features = Settings_Sim3DRequestedFeatures(),
+      .requested_features = flat_menu ? kSimFeature_SeparatedComposite
+          : Settings_Sim3DRequestedFeatures(),
       .diagnostic_layer_mask = g_settings.sim3d_diagnostic_layers,
       .width = kActRaiserAuthenticWidth + 2 * g_ws_extra,
       .height = kActRaiserAuthenticHeight,
@@ -3923,6 +3938,7 @@ static SrResult ActRaiser_DrawPpuFrameTransaction(
     const SrPpuFrameTransactionContext *context);
 
 void ActRaiserDrawPpuFrame(void) {
+  ActRaiserSimMenu_ObserveScene(ActRaiser_ReadWram16(kActRaiserWram_MapGroup));
   const PerformanceScope pipeline = PerformanceMetrics_Begin(kPerformance_Ppu);
   const uint8_t map_group = g_ram[kActRaiserWram_MapGroup];
   const uint8_t map_number = g_ram[kActRaiserWram_CurrentMap];

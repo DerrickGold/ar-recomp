@@ -123,7 +123,9 @@ void ArLocalizedTextPresenter_Prepare(
 
 /* Prepare one authentic-pixel screen-space claim. The owning scene projects
  * the record's source region into `bounds`; this layer handles only generic
- * shaping, fitting, direction and cached texture preparation. A successful
+ * shaping, fitting, direction and cached texture preparation. DialogueWindow
+ * uses the same wrapping, fixed font size, reveal and scrolling plan as a
+ * tilemap dialogue claim, including its continuation footer. A successful
  * intentional blank returns true with no prepared text, allowing the caller
  * to suppress native glyphs while retaining surrounding native artwork. */
 bool ArLocalizedTextPresenter_PrepareScreenText(

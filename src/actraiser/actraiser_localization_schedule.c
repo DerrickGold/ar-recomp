@@ -1,4 +1,5 @@
 #include "actraiser/actraiser_localization_schedule.h"
+#include "actraiser/actraiser_sim_menu.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -9,6 +10,7 @@
 static bool s_entering_native;
 static bool s_entering_reader;
 static bool s_entering_continuation;
+static bool s_skipping_menu_text;
 
 extern RecompReturn bank_01_8E29_M0X0(CpuState *cpu);
 extern RecompReturn bank_01_8E29_M0X1(CpuState *cpu);
@@ -89,6 +91,7 @@ static bool WaitFrame(void *context) {
 }
 
 static bool ConfirmPage(void *context) {
+  ActRaiserSimMenu_DescriptionWait();
   /* $9261 is exactly two $8C43 / BIT #$C0 loops: release, then press.
    * Keep its native per-frame work, but return between polls if the authored
    * page no longer exists. Never cancel a native gameplay/menu input loop. */
@@ -99,8 +102,10 @@ static bool ConfirmPage(void *context) {
       return false;
     if (!ActRaiserLocalizationRuntime_PageConfirmationPending())
       return true;
-    if (released && (buttons & 0xc0u))
+    if (released && (buttons & 0xc0u)) {
+      ActRaiserSimMenu_DescriptionWait();
       return true;
+    }
     if (!(buttons & 0xc0u))
       released = true;
   }
@@ -114,12 +119,14 @@ static ActRaiserLocalizationDialogueHost Host(CpuState *cpu) {
 bool ActRaiser_LocalizationScheduleGlyphDelay(CpuState *cpu) {
   return cpu && cpu->PB == 1 && cpu->m_flag == 1 &&
       cpu_read16(cpu, 0, (uint16_t)(cpu->S + 1u)) == 0x9026 &&
-      ActRaiserLocalizationRuntime_DialogueScheduled();
+      (s_skipping_menu_text || ActRaiserSimMenu_DescriptionAborted() ||
+       ActRaiserSimMenu_FastReveal() || ActRaiserLocalizationRuntime_DialogueScheduled());
 }
 
 RecompReturn ActRaiser_LocalizationGlyphDelay(CpuState *cpu) {
   const ActRaiserLocalizationDialogueHost host = Host(cpu);
-  ActRaiserLocalizationRuntime_RevealGlyph((uint8_t)cpu->A, &host);
+  if (!s_skipping_menu_text && !ActRaiserSimMenu_DescriptionAborted())
+    ActRaiserLocalizationRuntime_RevealGlyph((uint8_t)cpu->A, &host);
   /* $9278 CMP #0 / JSR $9284 / DEC A loop: A.low=0, C=Z=1,
    * N=0, high accumulator and all other registers preserved; consume RTS.
    * Each authored glyph uses $9284 itself, so neither menu animation nor
@@ -137,28 +144,54 @@ bool ActRaiser_LocalizationScheduleEntry(CpuState *cpu) {
     s_entering_native = false;
     return false;
   }
+  ActRaiserSimMenu_BeginDialogue(cpu);
   (void)ActRaiser_LocalizationObserveTextEntry(cpu);
   ActRaiserLocalizationTextObservation observation = {.struct_size =
                                                           sizeof(observation)};
-  if (cpu && ActRaiserLocalizationText_CopyObservation(&observation))
+  if (cpu && !ActRaiserSimMenu_SkipDialogue(cpu) &&
+      ActRaiserLocalizationText_CopyObservation(&observation))
     (void)ActRaiserLocalizationRuntime_BeginDialogue(&observation);
   /* The read-only return acknowledgement also matters in native mode. */
   return cpu != NULL;
+}
+
+bool ActRaiser_LocalizationScheduleMenuClear(CpuState *cpu) {
+  if (cpu) ActRaiserSimMenu_ClearDialogue();
+  return ActRaiser_LocalizationObserveMenuClear(cpu);
 }
 
 RecompReturn ActRaiser_LocalizationRunDialogue(CpuState *cpu) {
   static NativeRoutine const routines[] = {bank_01_8E29_M0X0, bank_01_8E29_M0X1,
                                            bank_01_8E29_M1X0,
                                            bank_01_8E29_M1X1};
+  s_skipping_menu_text = ActRaiserSimMenu_SkipDialogue(cpu);
+  if (s_skipping_menu_text) ActRaiserLocalizationRuntime_ReturnDialogue();
   s_entering_native = true;
   const RecompReturn result =
       routines[((cpu->m_flag & 1u) << 1) | (cpu->x_flag & 1u)](cpu);
   s_entering_native = false;
+  s_skipping_menu_text = false;
   if (result == RECOMP_RETURN_NORMAL) {
     ActRaiserLocalizationText_ObserveReturn();
     ActRaiserLocalizationRuntime_ReturnDialogue();
   }
   return result;
+}
+
+bool ActRaiser_LocalizationSkipMenuAcknowledgement(CpuState *cpu) {
+  ActRaiserSimMenu_DescriptionWait();
+  return cpu && (s_skipping_menu_text || ActRaiserSimMenu_DescriptionAborted()) &&
+      cpu->m_flag && !cpu->x_flag;
+}
+
+RecompReturn ActRaiser_LocalizationMenuAcknowledgement(CpuState *cpu) {
+  /* An explicit successful acknowledgement of an audited pure-text prompt.
+   * No pad state is changed; the next native confirmation owns a fresh edge. */
+  cpu->A = (cpu->A & 0xff00u) | 0x80u;
+  cpu->_flag_Z = 0; cpu->_flag_N = 1;
+  cpu->P = (cpu->P & ~0x82u) | 0x80u;
+  cpu->S += 2;
+  return RECOMP_RETURN_NORMAL;
 }
 
 bool ActRaiser_LocalizationScheduleByte(CpuState *cpu) {
@@ -208,14 +241,35 @@ bool ActRaiser_LocalizationScheduleContinuation(CpuState *cpu) {
   }
   (void)ActRaiser_LocalizationObserveContinuation(cpu);
   return cpu && cpu->m_flag == 1 &&
-         ActRaiserLocalizationRuntime_DialogueScheduled();
+      (s_skipping_menu_text || ActRaiserSimMenu_Describing() ||
+       ActRaiserLocalizationRuntime_DialogueScheduled());
 }
 
 RecompReturn ActRaiser_LocalizationContinueDialogue(CpuState *cpu) {
   const ActRaiserLocalizationDialogueHost host = Host(cpu);
-  (void)ActRaiserLocalizationRuntime_ContinueDialogue(
-      &host, cpu_read8(cpu, 0, 0x0200) != 0);
-  if (!ActRaiserLocalizationRuntime_DialogueScheduled()) {
+  if (ActRaiserSimMenu_Describing() &&
+      !ActRaiserLocalizationRuntime_DialogueScheduled()) {
+    /* Retail Help needs the same fresh acknowledgement as authored Help,
+     * including Back during the wait. Keep the native blinking arrow and
+     * frame service, but never let a cancelled read-only page block again. */
+    ActRaiserSimMenu_DescriptionWait();
+    bool released = false;
+    while (!ActRaiserSimMenu_DescriptionAborted()) {
+      cpu_write8(cpu, 0x7f, (uint16_t)(0xb000u + cpu->X),
+          cpu_read8(cpu, 0, 0x88) & 0x10 ? 0x5f : 0);
+      cpu_write8(cpu, 0, 0xf1, cpu_read8(cpu, 0, 0xf1) + 1);
+      uint8_t buttons = 0;
+      (void)CallPresentationRoutine(cpu, bank_01_8C43_M1X0, &buttons);
+      if (released && (buttons & 0xc0)) break;
+      if (!(buttons & 0xc0)) released = true;
+    }
+    ActRaiserSimMenu_DescriptionWait();
+  } else if (!s_skipping_menu_text && !ActRaiserSimMenu_DescriptionAborted()) {
+    (void)ActRaiserLocalizationRuntime_ContinueDialogue(
+        &host, cpu_read8(cpu, 0, 0x0200) != 0);
+  }
+  if (!s_skipping_menu_text && !ActRaiserSimMenu_Describing() &&
+      !ActRaiserLocalizationRuntime_DialogueScheduled()) {
     /* Unlike an added-only prompt, this is a real ROM $02 continuation.
      * Switching to retail must not pay its confirmation or scroll the native
      * page automatically. Resume the original routine on the same JSR frame. */

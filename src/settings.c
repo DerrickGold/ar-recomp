@@ -716,6 +716,7 @@ static const char *const kSaveItemLabels[] = {
  * greyed out rather than silently ignored (§D15). */
 bool Diorama_ModeIsOn(void) { return g_settings.diorama_mode; }
 bool Sim3D_ModeIsOn(void) { return g_settings.sim3d_mode; }
+static bool SimMenuModernSelected(void) { return g_settings.sim_menu_style == 1; }
 /* Screen ratio owns stretching. Keep the old bool as a load-only alias so
  * existing config.ini/settings.ini files still migrate cleanly, but never let
  * runtime code acquire a second source of truth. A legacy true enables the
@@ -1357,6 +1358,22 @@ const SettingDesc g_setting_descs[] = {
                "AR_SIM3D_PICKER_TOPDOWN=1 to restore the flat picker view).",
                kSettingCat_Simulation, 0, false, NULL,
                NULL),
+  { "sim_menu_style", "AR_SIM_MENU_STYLE", "SIM menu",
+    "Original uses the original town menu. Modern uses a compact crossbar. "
+    "Use Describe menu item to read descriptions; remap it under Controls. "
+    "Works with native and enhanced rendering.",
+    kSettingType_Enum, kApply_Passive, kSettingCat_Simulation,
+    &g_settings.sim_menu_style, 0, 0, 1, 1, false,
+    (const char *const[]){"Original", "Modern"}, 2,
+    NULL, NULL, NULL, NULL, .modern_env = true, .player_visible = true },
+  { "sim_menu_scale_percent", "AR_SIM_MENU_SCALE", "SIM menu scale (%)",
+    "Size of the modern dock, submenus, confirmations and Message Speed selector. "
+    "50% is compact; 100% uses the full layout. Descriptions, follow-up dialogue, "
+    "HUD and native PiP keep their own size.",
+    kSettingType_Int, kApply_Passive, kSettingCat_Simulation,
+    &g_settings.sim_menu_scale_percent, 50, 50, 100, 5, false, NULL, 0,
+    SimMenuModernSelected, NULL, NULL, NULL,
+    .modern_env = true, .player_visible = true },
   { "sim_view_range", "AR_SIM_VIEW_RANGE", "Extended actor range",
     "Gameplay-affecting. Keep simulation actors and projectiles alive and "
     "host-renderable this many original pixels beyond the authentic view. "
@@ -2346,6 +2363,7 @@ const SettingDesc g_setting_descs[] = {
                   "bind_pad_render_compare", "Compare rendering",
                   "Click to swap authentic and enhanced. Hold to toggle a "
                   "persistent authentic picture-in-picture."),
+  BINDING_SETTINGS(kInputAction_SimDescribe, "sim_describe", "Describe menu item"),
 
   /* This is an optional gameplay enhancement rather than a bug fix: the
    * original 128-record structure cap is authentic. Completed bridges move

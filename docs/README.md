@@ -27,6 +27,10 @@ marked uncertain should not be treated as verified offsets or behavior.
 - [Symbol map](research-symbol-map.md) — ROM addresses and their known purposes.
 - [Dialogue and menu text](dialogue-system.md) — text encoding, source identities,
   and replacement boundaries.
+- [Simulation command menu](sim-menu-reference.md) — actions, original icons,
+  offering inventories, and description/confirmation boundaries.
+- [Optional modern SIM menu](sim-menu-implementation.md) — setting, navigation,
+  native handoffs, localization, and validation.
 - [Reusable dialogue host](text-template-core.md) — templates, mixed typography,
   shared playback mechanics and the standalone sample.
 - [Save format](save-format.md) — SRAM layout, checksum, and editable fields.

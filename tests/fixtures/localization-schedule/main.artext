@@ -1,4 +1,54 @@
 # Original test wording; no retail text or assets.
+:: sim.miracle.sun.description
+@anchor reset_text_cursor.00
+Menu dialogue first page.
+@wait 2
+@page
+Menu dialogue final page.
+
+:: sim.miracle.sun.confirm
+@anchor reset_text_cursor.00
+Menu dialogue first page.
+@wait 2
+@page
+Menu dialogue final page.
+@anchor yield.01
+
+:: system.save.completed_continue_confirm
+@anchor reset_text_cursor.00
+Menu dialogue first page.
+@wait 2
+@page
+Menu dialogue final page.
+@anchor yield.01
+
+:: system.save.continue
+@anchor reset_text_cursor.00
+Menu dialogue first page.
+@wait 2
+@page
+Menu dialogue final page.
+
+:: sim.development.direction.cancel_confirm
+@anchor reset_text_cursor.00
+Menu dialogue first page.
+@wait 2
+@page
+Menu dialogue final page.
+
+:: sim.inventory.cancelled
+@anchor reset_text_cursor.00
+Menu dialogue first page.
+@wait 2
+@page
+Menu dialogue final page.
+
+:: sim.help.item.08
+Première aide. This synthetic explanation fills more than one native-sized window. Every word must remain available when the help page wraps and the continuation arrow appears below it.
+@wait 3
+@page
+Deuxième aide. Read-only help ends here.
+
 :: action.hud.pause
 En pause
 

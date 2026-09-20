@@ -58,6 +58,15 @@ origin and two-row line cells are game-owned; labels fit within ten native
 columns. It has no separate selector sprite. Closing the native modal releases
 the enhanced surface, including when its translation was unavailable.
 
+The optional modern SIM menu adds 36 read-only Help routes:
+`sim.help.category.0`–`.5`, `sim.help.action.01`–`.04` and `.10`–`.15`, and
+`sim.help.item.01`–`.20`. They accept authored pages, waits and text styles,
+with no gameplay anchors or dynamic values. Missing entries use built-in
+English Help; they do not affect complete-pack validity. See the
+[implementation reference](sim-menu-implementation.md#localization) for
+native-sized overflow and mirrored PiP presentation. Miracle descriptions
+continue to use their existing dialogue routes.
+
 Action labels use `action.hud.act_label`, `time_label`, `score_label`,
 `player_label` and `enemy_label` (each with the `action.hud.` prefix).
 They are optional additions to the original complete-pack contract. New source

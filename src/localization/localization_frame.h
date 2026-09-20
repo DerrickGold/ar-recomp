@@ -11,7 +11,7 @@
 #include "localization/text_cell_record.h"
 #include "localization/text_boundaries.h"
 
-#define AR_LOCALIZATION_FRAME_ABI_VERSION UINT32_C(31)
+#define AR_LOCALIZATION_FRAME_ABI_VERSION UINT32_C(32)
 
 enum {
   kArLocalizationFrameTextCapacity = 16 * 1024,
@@ -24,7 +24,7 @@ enum {
   /* Screen-space records are intentionally scarce. Unlike tile-cell claims,
    * they are for positively identified native UI whose placement is already
    * expressed in authentic 256x224 pixels. */
-  kArLocalizationFrameScreenTextCapacity = 4,
+  kArLocalizationFrameScreenTextCapacity = 16,
   kArLocalizationFrameNameCursorExtent = 8,
   kArLocalizationFrameNameCursorPixels = 8 * 8,
   kArLocalizationArtworkPixels = 16 * 8,
@@ -407,10 +407,11 @@ bool ArLocalizationFrame_AddTextWithObjects(
     uint8_t native_preserve_count,
     const ArLocalizationInlineObjectSnapshot *inline_objects,
     uint8_t inline_object_count);
-/* Publishes fixed text whose native owner is a screen-space OBJ/host surface,
+/* Publishes labels or dialogue whose native owner is a screen-space OBJ/host surface,
  * not a BG tilemap. Coordinates are authentic game pixels and are projected
  * by the owning presentation path. Native pixels remain the fallback until
- * the renderer successfully prepares this exact record. */
+ * the renderer successfully prepares this exact record. DialogueWindow uses
+ * revealed_utf8_bytes in the resulting snapshot for logical reveal. */
 bool ArLocalizationFrame_AddScreenText(
     ArLocalizationFrame *frame, uint32_t surface_id,
     uint16_t x, uint16_t y, uint16_t width, uint16_t height,

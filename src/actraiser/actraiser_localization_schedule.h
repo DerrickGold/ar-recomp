@@ -35,7 +35,10 @@ RecompReturn ActRaiser_LocalizationGlyphDelay(CpuState *cpu);
 /* Conditional HLE seams: interpreter/reader wrappers always execute the
  * original bodies. Enhanced glyph timing and continuation waits are adapted. */
 bool ActRaiser_LocalizationScheduleEntry(CpuState *cpu);
+bool ActRaiser_LocalizationScheduleMenuClear(CpuState *cpu);
 RecompReturn ActRaiser_LocalizationRunDialogue(CpuState *cpu);
+bool ActRaiser_LocalizationSkipMenuAcknowledgement(CpuState *cpu);
+RecompReturn ActRaiser_LocalizationMenuAcknowledgement(CpuState *cpu);
 bool ActRaiser_LocalizationScheduleByte(CpuState *cpu);
 RecompReturn ActRaiser_LocalizationReadTextByte(CpuState *cpu);
 bool ActRaiser_LocalizationScheduleContinuation(CpuState *cpu);

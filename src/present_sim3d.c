@@ -10,6 +10,7 @@
  * present.c internals to this file, never live game state. */
 
 #include "present_sim3d_internal.h"
+#include "present_sim_menu.h"
 #include "present_sim_globe.h"
 #include "present_sim_globe_project.h"
 #include "present_sim_globe_mountains.h"
@@ -114,6 +115,7 @@ typedef enum SimObjectOverheadFilter {
 typedef enum SimObjectSelectionFilter {
   kSimObjectSelection_Exclude,
   kSimObjectSelection_Only,
+  kSimObjectSelection_All,
 } SimObjectSelectionFilter;
 
 
@@ -278,6 +280,12 @@ static bool DrawSimObjectPriorityFiltered(
   for (int i = (int)slot->sim.object_count - 1; i >= 0; i--) {
     const SimRenderObject *object = &slot->sim.objects[i];
     bool fixed = object->tier != kSimRecordTier_World;
+    bool selection =
+        (object->traits & kSimObjectTrait_SelectionOverlay) != 0;
+    if (fixed && PresentSimMenu_Active(slot) &&
+        object->record_address >= 0x06a0 && object->record_address < 0x0928 &&
+        !(selection && slot->sim_menu.model.phase == kSimMenu_Handoff))
+      continue;
     if (!object->atlas_valid || object->priority != priority ||
         fixed != (tier_filter == kSimTierFilter_Fixed) ||
         SimObjectIsPromotedHud(slot, object))
@@ -296,8 +304,12 @@ static bool DrawSimObjectPriorityFiltered(
       continue;
     if (overhead_filter == kSimObjectOverhead_Only && !overhead)
       continue;
-    bool selection =
-        (object->traits & kSimObjectTrait_SelectionOverlay) != 0;
+    /* The original town-position brackets remain alive behind its large
+     * opaque menu. A compact replacement exposes them even though the map
+     * cannot be selected yet. Restore them when native targeting owns input. */
+    if (selection && PresentSimMenu_Active(slot) &&
+        slot->sim_menu.model.phase != kSimMenu_Handoff)
+      continue;
     if (selection_filter == kSimObjectSelection_Exclude && selection)
       continue;
     if (selection_filter == kSimObjectSelection_Only && !selection)
@@ -1610,6 +1622,44 @@ static void PublishSimCraterAnchor(const FrameSlot *slot, const SimBackgroundCra
       (int16_t)lroundf(height));
 }
 
+/* Rebuild a flat town without the replaced BG2/menu OBJ group. Drawing the
+ * independent world compositions also restores actors hidden behind native
+ * menu OAM; subtracting opaque pixels from the finished framebuffer cannot. */
+bool PresentSimMenuFlatTown(const FrameSlot *slot, ArRenderRectI source,
+                            ArRenderRectI viewport) {
+  const uint32_t color = slot->sim.separated_backdrop_argb;
+  const ArRenderRectF src = PortableRect(source), dst = PortableRect(viewport);
+  const SimObjectDrawScene scene = {
+    slot, source, viewport, NULL, NULL, false, false,
+  };
+  if (!ArRenderDevice_DrawSolidRect(&g_render_device, &dst,
+      (ArRenderColorF){((color >> 16) & 255) / 255.0f,
+        ((color >> 8) & 255) / 255.0f, (color & 255) / 255.0f, 1},
+      kArRenderBlendMode_Opaque)) return false;
+  for (int plane = 0; plane < kSim3DPlane_Count; ++plane) {
+    if (plane == kSim3DPlane_Bg2Low || plane == kSim3DPlane_Bg2High) continue;
+    int priority = -1;
+    for (int p = 0; p < 4; ++p)
+      if (plane == Sim3D_ObjPlaneForPriority(p)) priority = p;
+    if (priority >= 0) {
+      for (int tier = kSimTierFilter_World; tier <= kSimTierFilter_Fixed; ++tier) {
+        /* Flat presentation has no later projected-selector pass. Include
+         * selectors here; the menu ownership filter hides them while browsing
+         * and restores them when native targeting takes control. */
+        const SimObjectDrawFilters filters = {
+          tier, kSimObjectOverhead_All, kSimObjectSelection_All,
+          kSimObjectTerrain_Any, false, 0, 0,
+        };
+        if (!DrawSimObjectPriorityFiltered(&scene, priority, &filters, NULL))
+          return false;
+      }
+    } else if ((slot->sim.separated_plane_mask & (1u << plane)) &&
+        !ArRenderDevice_DrawTexture(&g_render_device,
+            g_sim3d_layer_textures[plane], &src, &dst)) return false;
+  }
+  return true;
+}
+
 static PresentationOutcome RenderSimProfile(
     const FrameSlot *slot, SimRenderFeatureMask features,
     ArRenderRectI source, ArRenderRectI viewport,
@@ -1644,6 +1694,9 @@ static PresentationOutcome RenderSimProfile(
    * VirtualHeight off the ground boundary is already exactly right. */
   int lift_inset = (slot->sim.cull_lift_inset && virtual_height)
       ? Sim3D_MaxDrawLift(slot->sim.height_scale_x100) : 0;
+  if (!ground && slot->sim.separated_valid && PresentSimMenu_Active(slot))
+    return PresentSimMenuFlatTown(slot, source, viewport)
+        ? outcome : kPresentationOutcome_CoreFailure;
   if (!separated) {
     const ArRenderRectF src = {
       (float)source.x, (float)source.y, (float)source.w, (float)source.h,
@@ -1710,6 +1763,8 @@ static PresentationOutcome RenderSimProfile(
       ? slot->sim.diagnostic_layer_mask
       : (1u << kSim3DPlane_Count) - 1;
   uint32_t captured_planes = slot->sim.separated_plane_mask;
+  if (PresentSimMenu_Active(slot))
+    captured_planes &= ~((1u << kSim3DPlane_Bg2Low) | (1u << kSim3DPlane_Bg2High));
   const PresentSimGlobeProjection *curved_projection = NULL;
   SimGlobeActorContext globe_actors = {
     .scene = {.slot=slot,.source=source,.viewport=viewport,.camera=&camera,.matrix=matrix,

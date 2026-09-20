@@ -6,6 +6,7 @@
 #include "constants.h"
 #include "crt_post.h"
 #include "present_internal.h"
+#include "present_sim_menu.h"
 #include "render_comparison.h"
 #include "session_fatal.h"
 #include "settings.h"
@@ -89,6 +90,7 @@ static ArRenderRectI DrawFrame(const FrameSlot *slot, float alpha,
           kFrameSlotAuthenticWidth, kFrameSlotAuthenticHeight, image);
       return image;
     }
+    PresentSimMenu_Draw(slot, image);
     image = EndCrtPost(
         kFrameSlotAuthenticWidth, kFrameSlotAuthenticHeight, image);
   } else {
@@ -99,6 +101,7 @@ static ArRenderRectI DrawFrame(const FrameSlot *slot, float alpha,
     (void)BeginCrtPost();
     if (SessionFatal_Requested()) return image;
     PresentCompositeScene(slot, alpha);
+    PresentSimMenu_Draw(slot, image);
     if (SessionFatal_Requested()) {
       (void)EndCrtPost(
           slot->visible_width, slot->snes_height, image);
@@ -130,11 +133,20 @@ static ArRenderRectI DrawFrame(const FrameSlot *slot, float alpha,
 
 ArRenderRectI PresentFrame(const FrameSlot *slot, float alpha,
                            double presentation_fps) {
-  /* Hardware blanking/fades deliberately hide both native and enhanced text;
-   * those are not missing-presentation failures. All visible fallback paths,
-   * including ones that never enter the HUD compositor, report otherwise. */
+  /* Navigation and neutral Help replace the preceding native dialogue just
+   * as a handoff hides an answered question. Native cleanup can retain its
+   * old ticket; only phases that actually present that dialogue must report
+   * to its scheduler. Hardware blanking/fades are also intentional. */
+  const bool menu_hides_dialogue = slot && slot->sim_menu.valid &&
+      (slot->sim_menu.model.phase == kSimMenu_Handoff ||
+       slot->sim_menu.model.phase == kSimMenu_Opening ||
+       slot->sim_menu.model.phase == kSimMenu_Browse ||
+       slot->sim_menu.model.phase == kSimMenu_Inventory ||
+       (slot->sim_menu.model.phase == kSimMenu_Describe &&
+        slot->sim_menu.help.active));
   const bool visible =
-      slot && !(slot->inidisp & 0x80) && (slot->inidisp & 0x0f);
+      slot && !(slot->inidisp & 0x80) && (slot->inidisp & 0x0f) &&
+      !menu_hides_dialogue;
   ArTextPresentation_BeginFrame(visible ? slot->localization.dialogue_ticket
                                         : 0);
   const ArRenderRectI image = DrawFrame(slot, alpha, presentation_fps);

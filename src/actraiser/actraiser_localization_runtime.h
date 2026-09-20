@@ -7,6 +7,9 @@
 #include "localization/localization_frame.h"
 #include "localization/language_pack.h"
 #include "localization/text_presentation.h"
+#include "sim/sim_menu_model.h"
+#include "sim/sim_menu_help.h"
+#include "localization/dialogue_session.h"
 
 #define ACTRAISER_LOCALIZATION_PACK_HOST_ABI_VERSION UINT32_C(2)
 
@@ -66,5 +69,16 @@ void ActRaiserLocalizationRuntime_AppendWorldNavigationLabel(
     bool native_label_visible,
     const uint16_t *cgram_words, size_t cgram_word_count);
 void ActRaiserLocalizationRuntime_Shutdown(void);
+void ActRaiserLocalizationRuntime_CaptureMenuLabels(
+    ArLocalizationFrame *labels, const ArLocalizationFrame *source,
+    const SimMenuModel *menu,
+    const uint16_t *cgram, size_t cgram_count);
+bool ActRaiserLocalizationRuntime_BeginMenuHelp(
+    ArDialogueSession *session, const char *id, const char *fallback);
+void ActRaiserLocalizationRuntime_AppendMenuHelp(
+    ArLocalizationFrame *frame, const SimMenuHelpPage *help,
+    const uint16_t *cgram, size_t cgram_count);
+bool ActRaiserLocalizationRuntime_PrepareMenuHelpStyle(
+    const ArDialoguePageSnapshot *source, const SimMenuHelpPage *help);
 
 #endif /* ACTRAISER_LOCALIZATION_RUNTIME_H */

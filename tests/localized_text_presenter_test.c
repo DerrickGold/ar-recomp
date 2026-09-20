@@ -476,6 +476,79 @@ static void ExerciseScreenText(ArRenderDevice *device) {
       device, &blank, 99, bounds, &prepared));
 }
 
+static void ExerciseScreenDialogue(ArRenderDevice *device) {
+  test_case = "screen dialogue: normal wrapping, stable font and logical reveal";
+  const char *pages[]={
+      "Choose a place in town to plant wheat. The selected terrain and the situation in town determine whether it can be planted. An",
+      "invalid place or cancellation leaves the offering in your inventory.",
+      "An authored first line.\nThe next line.\nThird line.\nFourth line.\nFifth line.\nSixth line.\nSeventh line."};
+  const ArRenderRectI bounds={120,80,528,168};
+  test_scale=3;
+  test_treatment=0;
+  for (int size=80;size<=140;size+=60) {
+    test_size=size;
+    int font_pixels=0;
+    for (unsigned page=0;page<3;++page) {
+      test_example=(int)page;
+      ArLocalizationFrame frame;
+      ArLocalizationFrame_Reset(&frame);
+      frame.settings.size_percent=size;
+      CHECK(ArLocalizationFrame_SetFont(&frame,"en-US","test",s_test_font,1,&frame.settings));
+      const size_t bytes=strlen(pages[page]);
+      CHECK(ArLocalizationFrame_AddScreenText(&frame,700,40,156,176,56,
+          pages[page],bytes,(uint32_t)bytes,(uint32_t)bytes,page+1,
+          kArTextDirection_LeftToRight,8,kArLocalizationTextLayout_DialogueWindow));
+      frame.snapshots[0].revealed_utf8_bytes=(uint32_t)bytes;
+      ArLocalizedPreparedFrame prepared;
+      CHECK(ArLocalizedTextPresenter_PrepareScreenText(device,&frame,700,bounds,&prepared));
+      CHECK(prepared.text_count==1);
+      if (!prepared.text_count) continue;
+      ArLocalizedPreparedText text=prepared.texts[0];
+      if (!page) font_pixels=text.surface.raster_font_pixels;
+      CHECK(text.surface.raster_font_pixels==font_pixels);
+      CHECK(text.viewport.h==144 && text.destination.x==bounds.x);
+      unsigned lines=0;
+      for (size_t i=0;i<text.surface.reveal_cluster_count;++i) {
+        const unsigned line=text.surface.reveal_clusters[i].line_index+1;
+        if (line>lines) lines=line;
+      }
+      if (!page) {
+        CHECK(text.surface.ink_bounds.w>bounds.w*3/4);
+        CHECK(lines>1 && lines<6);
+      }
+      if (page==2) {
+        CHECK(lines==7);
+        CHECK(text.surface.height>text.viewport.h);
+        CHECK(text.destination.y<bounds.y);
+      }
+      /* A screen dialogue uses exactly the ordinary cell dialogue plan. */
+      CHECK(ArLocalizationFrame_AddTextWithObjectsAndLayout(&frame,701,
+          (ArTextCellDestination){3,kArTextCellScreen_Composited,0},
+          (ArTextCellRegion){5,19,22,7},pages[page],bytes,(uint32_t)bytes,
+          (uint32_t)bytes,page+1,kArTextDirection_LeftToRight,8,
+          kArLocalizationTextLayout_DialogueWindow,NULL,0,NULL,0));
+      frame.snapshots[1].revealed_utf8_bytes=(uint32_t)bytes;
+      const HudPresentationChunk chunk={.inspector_kind=kInspectorPresentation_HudBg,
+          .screen_source={0,0,256,224},.texture_source={0,0,256,224},
+          .output_destination={0,0,768,672}};
+      ArLocalizedTextPresenter_Prepare(device,&frame,true,0,32,32,0,0,
+                                       256,224,&chunk,1,&prepared);
+      CHECK(prepared.text_count==1);
+      if (prepared.text_count) {
+        CHECK(prepared.texts[0].surface.key.primary==text.surface.key.primary);
+        CHECK(prepared.texts[0].surface.key.secondary==text.surface.key.secondary);
+      }
+      const unsigned uploads=((TextureSink *)device->context)->uploads;
+      frame.snapshots[0].revealed_utf8_bytes=1;
+      CHECK(ArLocalizedTextPresenter_PrepareScreenText(device,&frame,700,bounds,&prepared));
+      CHECK(((TextureSink *)device->context)->uploads==uploads);
+      CHECK(prepared.texts[0].surface.raster_font_pixels==font_pixels);
+      CHECK(prepared.texts[0].destination.y==bounds.y);
+      CHECK(prepared.texts[0].revealed_cluster_count<text.revealed_cluster_count);
+    }
+  }
+}
+
 static int ExerciseReport(ArRenderDevice *device, ArEnhancedTextSettings settings,
                            int scale, int example) {
   const bool score = example == 1;
@@ -1708,6 +1781,7 @@ int main(void) {
   ExerciseRtlDialogue(&device);
   ExerciseLabelBreaks(&device);
   ExerciseScreenText(&device);
+  ExerciseScreenDialogue(&device);
   const int sizes[] = {80, 110, 140};
   for (int scale = 2; scale <= 6; scale += 2) {
     for (size_t size = 0; size < 3; ++size) {

@@ -691,9 +691,9 @@ static void TestSemanticContracts(void) {
   CHECK(stats.validated_messages == 3);
   CHECK(stats.aliases == 1);
   CHECK(stats.required_messages == 495);
-  CHECK(ArLanguageContract_RouteCount() == 564);
+  CHECK(ArLanguageContract_RouteCount() == 600);
   CHECK(strcmp(ArLanguageContract_RouteId(0), "action.hud.act_1") == 0);
-  CHECK(ArLanguageContract_RouteId(564) == NULL);
+  CHECK(ArLanguageContract_RouteId(600) == NULL);
   CHECK(ArLanguageContract_RouteAvailable("action.hud.act_1",
                                           kArLanguageSourceProfile_Us));
   CHECK(!ArLanguageContract_RouteAvailable(

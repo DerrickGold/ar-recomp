@@ -1,6 +1,16 @@
 #include "render_comparison.h"
 
 #include <stdio.h>
+#include <stdlib.h>
+
+static void Environment(const char *key, const char *value) {
+#ifdef _WIN32
+  _putenv_s(key, value ? value : "");
+#else
+  if (value) setenv(key, value, 1);
+  else unsetenv(key);
+#endif
+}
 
 static int s_failures;
 #define CHECK(expr) do { \
@@ -12,6 +22,7 @@ static int s_failures;
 } while (0)
 
 int main(void) {
+  Environment("AR_TEST_RENDER_VIEW", NULL);
   RenderComparison_Reset();
   CHECK(RenderComparison_PresentView() == kRenderComparison_Enhanced);
   CHECK(!RenderComparison_IsTransitioning());
@@ -106,6 +117,24 @@ int main(void) {
   CHECK(RenderComparison_AuthenticWaitExpired());
   CHECK(RenderComparison_FreezesGameplay());
   CHECK(RenderComparison_RequiresAuthenticFrame());
+
+  Environment("AR_HEADLESS", "0");
+  Environment("AR_TEST_RENDER_VIEW", "pip");
+  RenderComparison_Reset();
+  CHECK(!RenderComparison_RequiresAuthenticFrame());
+  Environment("AR_HEADLESS", "1");
+  RenderComparison_Reset();
+  CHECK(RenderComparison_RequiresAuthenticFrame());
+  RenderComparison_Tick(0, false, false);
+  CHECK(RenderComparison_PresentView() == kRenderComparison_Enhanced);
+  RenderComparison_Tick(1, false, true);
+  CHECK(RenderComparison_PresentView() == kRenderComparison_SideBySide);
+  Environment("AR_TEST_RENDER_VIEW", "native");
+  RenderComparison_Reset();
+  RenderComparison_Tick(2, false, true);
+  CHECK(RenderComparison_PresentView() == kRenderComparison_Authentic);
+  Environment("AR_HEADLESS", NULL);
+  Environment("AR_TEST_RENDER_VIEW", NULL);
 
   if (s_failures) return 1;
   puts("render_comparison_test: PASS");

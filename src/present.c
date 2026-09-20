@@ -19,6 +19,7 @@
 #include "action/action_bg_tuner.h"
 #include "action/action_effect_projection.h"
 #include "present.h"
+#include "present_sim_menu.h"
 #include "present_sky_palace.h"
 #include "present_sim3d_canvas.h"
 #include "action/action_effect_render.h"
@@ -409,7 +410,8 @@ static HudProjectionInputs BuildProjectionInputsFromSlot(const FrameSlot *slot) 
   {
     const FrameSlotOverlayCapture *bg3 =
         &slot->overlay_captures[kFrameSlotOverlay_Bg3];
-    if (bg3->y1 > (int16_t)slot->hud_split_height && bg3->y1 <= 240)
+    if (!PresentSimMenu_Active(slot) &&
+        bg3->y1 > (int16_t)slot->hud_split_height && bg3->y1 <= 240)
       in.hud_body_y1 = (uint8_t)bg3->y1;
   }
 
@@ -1154,6 +1156,8 @@ void PresentUpload(const FrameSlot *slot) {
         Sim3D_PlaneTextureUploadMask(
             slot->sim.effective_features,
             slot->sim.separated_plane_mask);
+    if (PresentSimMenu_Active(slot))
+      plane_upload_mask |= slot->sim.separated_plane_mask;
     for (int plane = 0; plane < kSim3DPlane_Count; plane++) {
       const SrPpuSurfaceView *surface =
           BoundPpuSurface(Sim3DPpuSurface(slot, plane));
@@ -2099,6 +2103,7 @@ void PresentRendererResources_Reset(void) {
       &s_effect_geometry_supported, 1, memory_order_release);
   DioramaFrameGeneration_Reset();
   PresentSim3D_ResetResources();
+  PresentSimMenu_Reset();
 }
 
 void PresentCompositeScene(const FrameSlot *slot, float alpha) {
@@ -2556,8 +2561,21 @@ bool PresentAuthenticScene(const FrameSlot *slot, ArRenderRectI viewport) {
   const ArRenderRectF destination = {
     0.0f, 0.0f, (float)viewport.w, (float)viewport.h,
   };
-  if (!ArRenderDevice_DrawTexture(
-          &g_render_device, g_authentic_texture, &source, &destination)) {
+  bool drawn;
+  if (PresentSimMenu_Active(slot)) {
+    const ArRenderRectI local = {0, 0, viewport.w, viewport.h};
+    if (slot->sim.separated_valid)
+      drawn = PresentSimMenuFlatTown(slot,
+          (ArRenderRectI){slot->ws_extra, 0, 256, 224}, local);
+    else {
+      const ArRenderRectF clean_source = {slot->ws_extra, 0, 256, 224};
+      drawn = ArRenderDevice_DrawTexture(&g_render_device, g_texture,
+                                         &clean_source, &destination);
+    }
+    if (drawn) PresentHudOverlayComposited(slot, local);
+  } else drawn = ArRenderDevice_DrawTexture(
+      &g_render_device, g_authentic_texture, &source, &destination);
+  if (!drawn) {
     ArRenderOutputFrame_Abort(&output_frame);
     return false;
   }
@@ -2591,6 +2609,7 @@ bool PresentAuthenticPictureInPicture(const FrameSlot *slot,
   const int frame_size = kSettingsOverlayGlyphSize * frame_scale;
   int margin = priority_viewport.h * kPipMarginPercent / 100;
   if (margin < frame_size + 8) margin = frame_size + 8;
+  /* Menu phases do not move or resize the comparison inset. */
   const ArRenderRectF destination = {
     (float)(priority_viewport.x + priority_viewport.w - margin - width),
     (float)(priority_viewport.y + priority_viewport.h - margin - height),
@@ -2625,6 +2644,9 @@ bool PresentAuthenticPictureInPicture(const FrameSlot *slot,
   if (rendered)
     rendered = ArRenderDevice_DrawTexture(
         &g_render_device, g_authentic_texture, &source, &destination);
+  if (rendered)
+    PresentSimMenu_DrawNativeHelp(slot, (ArRenderRectI){
+        destination.x, destination.y, destination.w, destination.h});
   return rendered;
 }
 

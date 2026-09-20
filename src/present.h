@@ -12,6 +12,7 @@
 #include "action/action_bg_plan.h"
 #include "presentation_frame_generation.h"
 #include "render/hud_layout.h"
+#include "sim/sim_menu_art.h"
 #include "render/render_device.h"
 #include "localization/localization_frame.h"
 #include "snesrecomp/runner.h"
@@ -99,6 +100,7 @@ typedef struct InspectorPresentationSelection {
 } InspectorPresentationSelection;
 
 typedef struct FrameSlot {
+  SimMenuFrame sim_menu;
   /* Coherent, zero-copy views of the PPU output bindings that produced this
    * frame. The descriptors are copied; their host-owned pixels are not. They
    * remain valid through synchronous upload and retained re-presents between

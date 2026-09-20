@@ -216,6 +216,8 @@ static const struct {
                                 kInputBind_None, 0 },
   [kInputAction_RenderCompare] = { "Compare authentic rendering", 0,
                                    kInputBind_None, 0 },
+  [kInputAction_SimDescribe] = { "Describe menu item", SDL_SCANCODE_S,
+                                 kInputBind_PadButton, SDL_GAMEPAD_BUTTON_NORTH },
 
   /* Right stick orbits, triggers zoom — the layout any 3D game trains for.
    * The keyboard column is left unbound: the desktop path is the mouse
@@ -546,6 +548,10 @@ SettingChangeResult InputMap_ApplyBinding(const SettingDesc *desc,
   if (binding) {
     for (int i = 0; i < kSettingsInputActions; i++) {
       if (i == (int)action) continue;
+      /* X is unused by the retail town menu. Its action-stage binding and
+       * the scoped Describe binding may share a control independently. */
+      if ((action == kInputAction_SimDescribe && i == kInputAction_X) ||
+          (action == kInputAction_X && i == kInputAction_SimDescribe)) continue;
       if (g_settings.input_bind[klass][i] != binding) continue;
       for (int d = 0; d < g_setting_desc_count; d++) {
         const SettingDesc *other = &g_setting_descs[d];
@@ -828,6 +834,16 @@ bool InputMap_ActionHeld(InputAction action) {
    * the ordinary game-input arbiter must not cancel a keyboard hold merely
    * because a connected pad is active (or vice versa). */
   return keyboard || gamepad;
+}
+
+bool InputMap_GameActionHeld(InputAction action) {
+  if (action < 0 || action >= kInputAction_Count) return false;
+  const bool pad = g_settings.input_device != kInputDevice_Keyboard &&
+      s_pad_count && (g_settings.input_device == kInputDevice_Gamepad ||
+                      InputMap_GamepadIsActive());
+  return BindingIsHeld(g_settings.input_bind[
+      pad ? kInputClass_Gamepad : kInputClass_Keyboard][action],
+      pad && (s_host_axis_held & (1u << action)) != 0);
 }
 
 void InputMap_HandleEvent(const SDL_Event *event) {

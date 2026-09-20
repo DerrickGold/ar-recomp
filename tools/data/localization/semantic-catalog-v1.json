@@ -4,6 +4,42 @@
   "identity": "logical_consumer_route",
   "us_runtime_coverage": {
     "live_optional": [
+      "sim.help.action.01",
+      "sim.help.action.02",
+      "sim.help.action.03",
+      "sim.help.action.04",
+      "sim.help.action.10",
+      "sim.help.action.11",
+      "sim.help.action.12",
+      "sim.help.action.13",
+      "sim.help.action.14",
+      "sim.help.action.15",
+      "sim.help.category.0",
+      "sim.help.category.1",
+      "sim.help.category.2",
+      "sim.help.category.3",
+      "sim.help.category.4",
+      "sim.help.category.5",
+      "sim.help.item.01",
+      "sim.help.item.02",
+      "sim.help.item.03",
+      "sim.help.item.04",
+      "sim.help.item.05",
+      "sim.help.item.06",
+      "sim.help.item.07",
+      "sim.help.item.08",
+      "sim.help.item.09",
+      "sim.help.item.10",
+      "sim.help.item.11",
+      "sim.help.item.12",
+      "sim.help.item.13",
+      "sim.help.item.14",
+      "sim.help.item.15",
+      "sim.help.item.16",
+      "sim.help.item.17",
+      "sim.help.item.18",
+      "sim.help.item.19",
+      "sim.help.item.20",
       "action.hud.lives_value",
       "action.hud.time_value",
       "action.hud.score_value",
@@ -210,6 +246,978 @@
   ],
   "route_count": 531,
   "optional_routes": [
+    {
+      "allowed_placeholders": [],
+      "canonical_contract_profile": "us",
+      "contracts": {
+        "us": {
+          "required_anchors": []
+        },
+        "eu-en": {
+          "required_anchors": []
+        },
+        "de": {
+          "required_anchors": []
+        },
+        "fr": {
+          "required_anchors": []
+        },
+        "jp": {
+          "required_anchors": []
+        }
+      },
+      "id": "sim.help.action.01",
+      "optional": true,
+      "presentation": {
+        "layout": "flow",
+        "shape": "flow"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "canonical_contract_profile": "us",
+      "contracts": {
+        "us": {
+          "required_anchors": []
+        },
+        "eu-en": {
+          "required_anchors": []
+        },
+        "de": {
+          "required_anchors": []
+        },
+        "fr": {
+          "required_anchors": []
+        },
+        "jp": {
+          "required_anchors": []
+        }
+      },
+      "id": "sim.help.action.02",
+      "optional": true,
+      "presentation": {
+        "layout": "flow",
+        "shape": "flow"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "canonical_contract_profile": "us",
+      "contracts": {
+        "us": {
+          "required_anchors": []
+        },
+        "eu-en": {
+          "required_anchors": []
+        },
+        "de": {
+          "required_anchors": []
+        },
+        "fr": {
+          "required_anchors": []
+        },
+        "jp": {
+          "required_anchors": []
+        }
+      },
+      "id": "sim.help.action.03",
+      "optional": true,
+      "presentation": {
+        "layout": "flow",
+        "shape": "flow"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "canonical_contract_profile": "us",
+      "contracts": {
+        "us": {
+          "required_anchors": []
+        },
+        "eu-en": {
+          "required_anchors": []
+        },
+        "de": {
+          "required_anchors": []
+        },
+        "fr": {
+          "required_anchors": []
+        },
+        "jp": {
+          "required_anchors": []
+        }
+      },
+      "id": "sim.help.action.04",
+      "optional": true,
+      "presentation": {
+        "layout": "flow",
+        "shape": "flow"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "canonical_contract_profile": "us",
+      "contracts": {
+        "us": {
+          "required_anchors": []
+        },
+        "eu-en": {
+          "required_anchors": []
+        },
+        "de": {
+          "required_anchors": []
+        },
+        "fr": {
+          "required_anchors": []
+        },
+        "jp": {
+          "required_anchors": []
+        }
+      },
+      "id": "sim.help.action.10",
+      "optional": true,
+      "presentation": {
+        "layout": "flow",
+        "shape": "flow"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "canonical_contract_profile": "us",
+      "contracts": {
+        "us": {
+          "required_anchors": []
+        },
+        "eu-en": {
+          "required_anchors": []
+        },
+        "de": {
+          "required_anchors": []
+        },
+        "fr": {
+          "required_anchors": []
+        },
+        "jp": {
+          "required_anchors": []
+        }
+      },
+      "id": "sim.help.action.11",
+      "optional": true,
+      "presentation": {
+        "layout": "flow",
+        "shape": "flow"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "canonical_contract_profile": "us",
+      "contracts": {
+        "us": {
+          "required_anchors": []
+        },
+        "eu-en": {
+          "required_anchors": []
+        },
+        "de": {
+          "required_anchors": []
+        },
+        "fr": {
+          "required_anchors": []
+        },
+        "jp": {
+          "required_anchors": []
+        }
+      },
+      "id": "sim.help.action.12",
+      "optional": true,
+      "presentation": {
+        "layout": "flow",
+        "shape": "flow"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "canonical_contract_profile": "us",
+      "contracts": {
+        "us": {
+          "required_anchors": []
+        },
+        "eu-en": {
+          "required_anchors": []
+        },
+        "de": {
+          "required_anchors": []
+        },
+        "fr": {
+          "required_anchors": []
+        },
+        "jp": {
+          "required_anchors": []
+        }
+      },
+      "id": "sim.help.action.13",
+      "optional": true,
+      "presentation": {
+        "layout": "flow",
+        "shape": "flow"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "canonical_contract_profile": "us",
+      "contracts": {
+        "us": {
+          "required_anchors": []
+        },
+        "eu-en": {
+          "required_anchors": []
+        },
+        "de": {
+          "required_anchors": []
+        },
+        "fr": {
+          "required_anchors": []
+        },
+        "jp": {
+          "required_anchors": []
+        }
+      },
+      "id": "sim.help.action.14",
+      "optional": true,
+      "presentation": {
+        "layout": "flow",
+        "shape": "flow"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "canonical_contract_profile": "us",
+      "contracts": {
+        "us": {
+          "required_anchors": []
+        },
+        "eu-en": {
+          "required_anchors": []
+        },
+        "de": {
+          "required_anchors": []
+        },
+        "fr": {
+          "required_anchors": []
+        },
+        "jp": {
+          "required_anchors": []
+        }
+      },
+      "id": "sim.help.action.15",
+      "optional": true,
+      "presentation": {
+        "layout": "flow",
+        "shape": "flow"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "canonical_contract_profile": "us",
+      "contracts": {
+        "us": {
+          "required_anchors": []
+        },
+        "eu-en": {
+          "required_anchors": []
+        },
+        "de": {
+          "required_anchors": []
+        },
+        "fr": {
+          "required_anchors": []
+        },
+        "jp": {
+          "required_anchors": []
+        }
+      },
+      "id": "sim.help.category.0",
+      "optional": true,
+      "presentation": {
+        "layout": "flow",
+        "shape": "flow"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "canonical_contract_profile": "us",
+      "contracts": {
+        "us": {
+          "required_anchors": []
+        },
+        "eu-en": {
+          "required_anchors": []
+        },
+        "de": {
+          "required_anchors": []
+        },
+        "fr": {
+          "required_anchors": []
+        },
+        "jp": {
+          "required_anchors": []
+        }
+      },
+      "id": "sim.help.category.1",
+      "optional": true,
+      "presentation": {
+        "layout": "flow",
+        "shape": "flow"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "canonical_contract_profile": "us",
+      "contracts": {
+        "us": {
+          "required_anchors": []
+        },
+        "eu-en": {
+          "required_anchors": []
+        },
+        "de": {
+          "required_anchors": []
+        },
+        "fr": {
+          "required_anchors": []
+        },
+        "jp": {
+          "required_anchors": []
+        }
+      },
+      "id": "sim.help.category.2",
+      "optional": true,
+      "presentation": {
+        "layout": "flow",
+        "shape": "flow"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "canonical_contract_profile": "us",
+      "contracts": {
+        "us": {
+          "required_anchors": []
+        },
+        "eu-en": {
+          "required_anchors": []
+        },
+        "de": {
+          "required_anchors": []
+        },
+        "fr": {
+          "required_anchors": []
+        },
+        "jp": {
+          "required_anchors": []
+        }
+      },
+      "id": "sim.help.category.3",
+      "optional": true,
+      "presentation": {
+        "layout": "flow",
+        "shape": "flow"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "canonical_contract_profile": "us",
+      "contracts": {
+        "us": {
+          "required_anchors": []
+        },
+        "eu-en": {
+          "required_anchors": []
+        },
+        "de": {
+          "required_anchors": []
+        },
+        "fr": {
+          "required_anchors": []
+        },
+        "jp": {
+          "required_anchors": []
+        }
+      },
+      "id": "sim.help.category.4",
+      "optional": true,
+      "presentation": {
+        "layout": "flow",
+        "shape": "flow"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "canonical_contract_profile": "us",
+      "contracts": {
+        "us": {
+          "required_anchors": []
+        },
+        "eu-en": {
+          "required_anchors": []
+        },
+        "de": {
+          "required_anchors": []
+        },
+        "fr": {
+          "required_anchors": []
+        },
+        "jp": {
+          "required_anchors": []
+        }
+      },
+      "id": "sim.help.category.5",
+      "optional": true,
+      "presentation": {
+        "layout": "flow",
+        "shape": "flow"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "canonical_contract_profile": "us",
+      "contracts": {
+        "us": {
+          "required_anchors": []
+        },
+        "eu-en": {
+          "required_anchors": []
+        },
+        "de": {
+          "required_anchors": []
+        },
+        "fr": {
+          "required_anchors": []
+        },
+        "jp": {
+          "required_anchors": []
+        }
+      },
+      "id": "sim.help.item.01",
+      "optional": true,
+      "presentation": {
+        "layout": "flow",
+        "shape": "flow"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "canonical_contract_profile": "us",
+      "contracts": {
+        "us": {
+          "required_anchors": []
+        },
+        "eu-en": {
+          "required_anchors": []
+        },
+        "de": {
+          "required_anchors": []
+        },
+        "fr": {
+          "required_anchors": []
+        },
+        "jp": {
+          "required_anchors": []
+        }
+      },
+      "id": "sim.help.item.02",
+      "optional": true,
+      "presentation": {
+        "layout": "flow",
+        "shape": "flow"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "canonical_contract_profile": "us",
+      "contracts": {
+        "us": {
+          "required_anchors": []
+        },
+        "eu-en": {
+          "required_anchors": []
+        },
+        "de": {
+          "required_anchors": []
+        },
+        "fr": {
+          "required_anchors": []
+        },
+        "jp": {
+          "required_anchors": []
+        }
+      },
+      "id": "sim.help.item.03",
+      "optional": true,
+      "presentation": {
+        "layout": "flow",
+        "shape": "flow"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "canonical_contract_profile": "us",
+      "contracts": {
+        "us": {
+          "required_anchors": []
+        },
+        "eu-en": {
+          "required_anchors": []
+        },
+        "de": {
+          "required_anchors": []
+        },
+        "fr": {
+          "required_anchors": []
+        },
+        "jp": {
+          "required_anchors": []
+        }
+      },
+      "id": "sim.help.item.04",
+      "optional": true,
+      "presentation": {
+        "layout": "flow",
+        "shape": "flow"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "canonical_contract_profile": "us",
+      "contracts": {
+        "us": {
+          "required_anchors": []
+        },
+        "eu-en": {
+          "required_anchors": []
+        },
+        "de": {
+          "required_anchors": []
+        },
+        "fr": {
+          "required_anchors": []
+        },
+        "jp": {
+          "required_anchors": []
+        }
+      },
+      "id": "sim.help.item.05",
+      "optional": true,
+      "presentation": {
+        "layout": "flow",
+        "shape": "flow"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "canonical_contract_profile": "us",
+      "contracts": {
+        "us": {
+          "required_anchors": []
+        },
+        "eu-en": {
+          "required_anchors": []
+        },
+        "de": {
+          "required_anchors": []
+        },
+        "fr": {
+          "required_anchors": []
+        },
+        "jp": {
+          "required_anchors": []
+        }
+      },
+      "id": "sim.help.item.06",
+      "optional": true,
+      "presentation": {
+        "layout": "flow",
+        "shape": "flow"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "canonical_contract_profile": "us",
+      "contracts": {
+        "us": {
+          "required_anchors": []
+        },
+        "eu-en": {
+          "required_anchors": []
+        },
+        "de": {
+          "required_anchors": []
+        },
+        "fr": {
+          "required_anchors": []
+        },
+        "jp": {
+          "required_anchors": []
+        }
+      },
+      "id": "sim.help.item.07",
+      "optional": true,
+      "presentation": {
+        "layout": "flow",
+        "shape": "flow"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "canonical_contract_profile": "us",
+      "contracts": {
+        "us": {
+          "required_anchors": []
+        },
+        "eu-en": {
+          "required_anchors": []
+        },
+        "de": {
+          "required_anchors": []
+        },
+        "fr": {
+          "required_anchors": []
+        },
+        "jp": {
+          "required_anchors": []
+        }
+      },
+      "id": "sim.help.item.08",
+      "optional": true,
+      "presentation": {
+        "layout": "flow",
+        "shape": "flow"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "canonical_contract_profile": "us",
+      "contracts": {
+        "us": {
+          "required_anchors": []
+        },
+        "eu-en": {
+          "required_anchors": []
+        },
+        "de": {
+          "required_anchors": []
+        },
+        "fr": {
+          "required_anchors": []
+        },
+        "jp": {
+          "required_anchors": []
+        }
+      },
+      "id": "sim.help.item.09",
+      "optional": true,
+      "presentation": {
+        "layout": "flow",
+        "shape": "flow"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "canonical_contract_profile": "us",
+      "contracts": {
+        "us": {
+          "required_anchors": []
+        },
+        "eu-en": {
+          "required_anchors": []
+        },
+        "de": {
+          "required_anchors": []
+        },
+        "fr": {
+          "required_anchors": []
+        },
+        "jp": {
+          "required_anchors": []
+        }
+      },
+      "id": "sim.help.item.10",
+      "optional": true,
+      "presentation": {
+        "layout": "flow",
+        "shape": "flow"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "canonical_contract_profile": "us",
+      "contracts": {
+        "us": {
+          "required_anchors": []
+        },
+        "eu-en": {
+          "required_anchors": []
+        },
+        "de": {
+          "required_anchors": []
+        },
+        "fr": {
+          "required_anchors": []
+        },
+        "jp": {
+          "required_anchors": []
+        }
+      },
+      "id": "sim.help.item.11",
+      "optional": true,
+      "presentation": {
+        "layout": "flow",
+        "shape": "flow"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "canonical_contract_profile": "us",
+      "contracts": {
+        "us": {
+          "required_anchors": []
+        },
+        "eu-en": {
+          "required_anchors": []
+        },
+        "de": {
+          "required_anchors": []
+        },
+        "fr": {
+          "required_anchors": []
+        },
+        "jp": {
+          "required_anchors": []
+        }
+      },
+      "id": "sim.help.item.12",
+      "optional": true,
+      "presentation": {
+        "layout": "flow",
+        "shape": "flow"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "canonical_contract_profile": "us",
+      "contracts": {
+        "us": {
+          "required_anchors": []
+        },
+        "eu-en": {
+          "required_anchors": []
+        },
+        "de": {
+          "required_anchors": []
+        },
+        "fr": {
+          "required_anchors": []
+        },
+        "jp": {
+          "required_anchors": []
+        }
+      },
+      "id": "sim.help.item.13",
+      "optional": true,
+      "presentation": {
+        "layout": "flow",
+        "shape": "flow"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "canonical_contract_profile": "us",
+      "contracts": {
+        "us": {
+          "required_anchors": []
+        },
+        "eu-en": {
+          "required_anchors": []
+        },
+        "de": {
+          "required_anchors": []
+        },
+        "fr": {
+          "required_anchors": []
+        },
+        "jp": {
+          "required_anchors": []
+        }
+      },
+      "id": "sim.help.item.14",
+      "optional": true,
+      "presentation": {
+        "layout": "flow",
+        "shape": "flow"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "canonical_contract_profile": "us",
+      "contracts": {
+        "us": {
+          "required_anchors": []
+        },
+        "eu-en": {
+          "required_anchors": []
+        },
+        "de": {
+          "required_anchors": []
+        },
+        "fr": {
+          "required_anchors": []
+        },
+        "jp": {
+          "required_anchors": []
+        }
+      },
+      "id": "sim.help.item.15",
+      "optional": true,
+      "presentation": {
+        "layout": "flow",
+        "shape": "flow"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "canonical_contract_profile": "us",
+      "contracts": {
+        "us": {
+          "required_anchors": []
+        },
+        "eu-en": {
+          "required_anchors": []
+        },
+        "de": {
+          "required_anchors": []
+        },
+        "fr": {
+          "required_anchors": []
+        },
+        "jp": {
+          "required_anchors": []
+        }
+      },
+      "id": "sim.help.item.16",
+      "optional": true,
+      "presentation": {
+        "layout": "flow",
+        "shape": "flow"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "canonical_contract_profile": "us",
+      "contracts": {
+        "us": {
+          "required_anchors": []
+        },
+        "eu-en": {
+          "required_anchors": []
+        },
+        "de": {
+          "required_anchors": []
+        },
+        "fr": {
+          "required_anchors": []
+        },
+        "jp": {
+          "required_anchors": []
+        }
+      },
+      "id": "sim.help.item.17",
+      "optional": true,
+      "presentation": {
+        "layout": "flow",
+        "shape": "flow"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "canonical_contract_profile": "us",
+      "contracts": {
+        "us": {
+          "required_anchors": []
+        },
+        "eu-en": {
+          "required_anchors": []
+        },
+        "de": {
+          "required_anchors": []
+        },
+        "fr": {
+          "required_anchors": []
+        },
+        "jp": {
+          "required_anchors": []
+        }
+      },
+      "id": "sim.help.item.18",
+      "optional": true,
+      "presentation": {
+        "layout": "flow",
+        "shape": "flow"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "canonical_contract_profile": "us",
+      "contracts": {
+        "us": {
+          "required_anchors": []
+        },
+        "eu-en": {
+          "required_anchors": []
+        },
+        "de": {
+          "required_anchors": []
+        },
+        "fr": {
+          "required_anchors": []
+        },
+        "jp": {
+          "required_anchors": []
+        }
+      },
+      "id": "sim.help.item.19",
+      "optional": true,
+      "presentation": {
+        "layout": "flow",
+        "shape": "flow"
+      }
+    },
+    {
+      "allowed_placeholders": [],
+      "canonical_contract_profile": "us",
+      "contracts": {
+        "us": {
+          "required_anchors": []
+        },
+        "eu-en": {
+          "required_anchors": []
+        },
+        "de": {
+          "required_anchors": []
+        },
+        "fr": {
+          "required_anchors": []
+        },
+        "jp": {
+          "required_anchors": []
+        }
+      },
+      "id": "sim.help.item.20",
+      "optional": true,
+      "presentation": {
+        "layout": "flow",
+        "shape": "flow"
+      }
+    },
     {
       "allowed_placeholders": [
         "hud_value"

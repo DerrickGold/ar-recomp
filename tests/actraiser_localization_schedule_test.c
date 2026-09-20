@@ -15,6 +15,14 @@
 
 uint8 g_ram[kActRaiserWramSize];
 Settings g_settings;
+static bool s_menu_skip, s_menu_describing, s_menu_aborted;
+bool ActRaiserSimMenu_SkipDialogue(const CpuState *cpu) { (void)cpu; return s_menu_skip; }
+bool ActRaiserSimMenu_DescriptionAborted(void) { return s_menu_aborted; }
+bool ActRaiserSimMenu_Describing(void) { return s_menu_describing; }
+bool ActRaiserSimMenu_FastReveal(void) { return false; }
+void ActRaiserSimMenu_DescriptionWait(void) {}
+void ActRaiserSimMenu_BeginDialogue(const CpuState *cpu) { (void)cpu; }
+void ActRaiserSimMenu_ClearDialogue(void) {}
 static const char *s_installed_pack_path;
 const char *Settings_LocalizationPackPath(int content) {
   if (content == 2) return s_installed_pack_path;
@@ -105,6 +113,10 @@ static void WriteNativeFixture(bool oversized) {
       fputs("Pause fixture\n", file);
     else if (!strcmp(id, "credits.page_01"))
       fputs("- Credits fixture -\n@line\nA contributor\n", file);
+    else if (!strncmp(id, "sim.menu.", 9))
+      fputs("Menu label fixture\n", file);
+    else if (!strcmp(id, "system.choice.yes_no"))
+      fputs("Yes\n@line\nNo\n", file);
     else if (!speed)
       fputs("@empty\n", file);
     const uint32_t count =
@@ -150,6 +162,8 @@ static void CaptureWithTransform(bool mode7_transformed) {
                                             4, mode7_transformed);
   for (uint8_t i = 0; i < s_frame.snapshot_count; ++i) {
     const ArLocalizationTextSnapshot *s = &s_frame.snapshots[i];
+    if (s_frame.dialogue_ticket && s->surface_id==s_frame.dialogue_surface_id)
+      CHECK(s->layout==kArLocalizationTextLayout_DialogueWindow);
     CHECK(s->bidi_span_offset + s->bidi_span_count <= s_frame.bidi.count);
     CHECK(ArTextBidiSpans_Valid(s_frame.bidi.spans + s->bidi_span_offset,
         s->bidi_span_count, s_frame.text + s->utf8_offset, s->utf8_bytes, 0));
@@ -989,6 +1003,182 @@ static void TestLegacySelectionGate(ActRaiserLocalizationPackHost host) {
   CHECK(s_legacy_notices == 3 && s_legacy_native);
 }
 
+static void TestMenuLabelCapacity(void) {
+  static ArLocalizationFrame source, before, labels;
+  Capture();
+  source=s_frame;
+  CHECK(source.font_revision);
+  /* Reproduce a native frame with no remaining snapshots: modern inventory
+   * rows must not lose their chosen font, nor displace dialogue or HUD text. */
+  while (source.snapshot_count<kArTextCellRecordCapacity) {
+    if (!ArLocalizationFrame_AddScreenText(&source,900+source.snapshot_count,
+          0,0,8,8,"x",1,1,1,1,kArTextDirection_LeftToRight,8,
+          kArLocalizationTextLayout_SingleLineLabel)) {
+      CHECK(false); return;
+    }
+  }
+  before=source;
+  SimMenuModel menu={.phase=kSimMenu_Inventory,.category=3,.submenu=true,
+      .item_count=8,.items={19,18,13,11,10,9,8,7},.item_slot=7};
+  const uint16_t palette[]={0,0,0x7f33,0x7fff};
+  for (unsigned describe=0;describe<2;++describe) {
+    if (describe) {
+      menu.phase=kSimMenu_Describe; menu.return_phase=kSimMenu_Inventory;
+    }
+    ActRaiserLocalizationRuntime_CaptureMenuLabels(
+        &labels,&source,&menu,palette,4);
+    CHECK(labels.snapshot_count==15);
+    for (unsigned id=600;id<=615;++id) {
+      if (id==609) continue;
+      const ArLocalizationScreenTextRecord *record=
+          ArLocalizationFrame_FindScreenText(&labels,id);
+      CHECK(record && labels.snapshots[record->snapshot_slot].utf8_bytes);
+    }
+    CHECK(labels.font_revision==source.font_revision &&
+          labels.primary_font==source.primary_font &&
+          labels.fallback_font_count==source.fallback_font_count);
+    CHECK(!memcmp(&labels.settings,&source.settings,sizeof(labels.settings)));
+    CHECK(!memcmp(&source,&before,sizeof(source)));
+  }
+  menu.phase=kSimMenu_Confirm; menu.category=2; menu.row[2]=2;
+  ActRaiserLocalizationRuntime_CaptureMenuLabels(&labels,&source,&menu,palette,4);
+  CHECK(ArLocalizationFrame_FindScreenText(&labels,603)); /* Sun header */
+  CHECK(ArLocalizationFrame_FindScreenText(&labels,609)); /* Yes/No measurement */
+  CHECK(!ArLocalizationFrame_FindScreenText(&labels,608)); /* no stale inventory */
+  CHECK(!memcmp(&source,&before,sizeof(source)));
+}
+
+static void TestMenuHelp(void) {
+  for (unsigned item = 7; item <= 8; ++item) {
+    ArDialogueSession session;
+    ArDialogueSession_Init(&session);
+    const unsigned prior_frames = s_frames, prior_confirms = s_confirms;
+    CHECK(ActRaiserLocalizationRuntime_BeginMenuHelp(&session,
+        item == 7 ? "sim.help.item.07" : "sim.help.item.08", SimMenuHelp_Item(item)));
+    ArDialoguePageSnapshot page;
+    CHECK(ArDialogueSession_GetPage(&session, &page));
+    CHECK(page.page_count == (item == 7 ? 1 : 2));
+    unsigned windows = 0;
+    for (;;) {
+      size_t start = 0;
+      do {
+        SimMenuHelpPage help;
+        CHECK(SimMenuHelp_Build(&help, page.utf8, page.utf8_bytes, start,
+                               page.page_index + 1 < page.page_count));
+        CHECK(help.source_end > start);
+        CHECK(ActRaiserLocalizationRuntime_PrepareMenuHelpStyle(&page, &help));
+        help.authored_page=page.page_index;
+        help.revealed_glyphs=help.glyph_count;
+        snprintf(help.locale,sizeof(help.locale),"%s",page.locale);
+        help.direction=kArTextDirection_LeftToRight;
+        /* A zero-based first page must survive publication as screen text.
+         * The former zero revision / Flow layout silently discarded it. */
+        Capture();
+        const uint16_t palette[]={0,0,0x7f33,0x7fff};
+        ActRaiserLocalizationRuntime_AppendMenuHelp(&s_frame,&help,palette,4);
+        const ArLocalizationScreenTextRecord *record=
+            ArLocalizationFrame_FindScreenText(&s_frame,700);
+        CHECK(record != NULL);
+        if (record) {
+          const ArLocalizationTextSnapshot *snapshot=&s_frame.snapshots[record->snapshot_slot];
+          CHECK(snapshot->source_revision != 0);
+          CHECK(snapshot->layout == kArLocalizationTextLayout_DialogueWindow);
+          CHECK(snapshot->utf8_bytes == help.bytes);
+          CHECK(snapshot->revealed_cluster_count == snapshot->cluster_count);
+          CHECK(snapshot->revealed_utf8_bytes == snapshot->utf8_bytes);
+          CHECK(!memcmp(s_frame.text+snapshot->utf8_offset,help.text,help.bytes));
+        }
+        start = help.source_end; ++windows;
+      } while (start < page.utf8_bytes);
+      while (!session.state.awaiting_page_advance && !session.state.terminal) {
+        ArDialogueToken token; ArLanguagePackError error;
+        CHECK(ArDialogueSession_Next(&session, &token, &error));
+        CHECK(token.kind != kArDialogueToken_Control);
+        ArDialogueSession_TickWait(&session, session.state.wait_frames_remaining);
+      }
+      if (!ArDialogueSession_AdvancePage(&session)) break;
+      CHECK(ArDialogueSession_GetPage(&session, &page));
+    }
+    CHECK(windows > 1);
+    CHECK(s_frames == prior_frames && s_confirms == prior_confirms);
+    ArDialogueSession_Destroy(&session);
+  }
+}
+
+static void TestMenuDialogueKinds(void) {
+  /* Menu placement must not turn a scheduled question or acknowledgement into
+   * a fitted label. Every kind supports authored pages/waits before returning
+   * to its original selector or caller, including a miracle's read-only Help. */
+  static const struct {uint16_t source,caller; bool selector,describe;} cases[]={
+    {0xfedc,0x836c,false,true},  /* Sun description. */
+    {0xff57,0x8385,true,false},  /* Sun Yes/No question. */
+    {0xf9ba,0x8abe,true,false},  /* Progress Log continue question. */
+    {0xf9e6,0x8af1,false,false}, /* Progress Log acknowledgement. */
+    {0xfaee,0x8254,false,false}, /* Direct the People follow-up. */
+    {0xf98f,0x84f8,false,false}, /* Offering inventory cancellation. */
+  };
+  ActRaiserLocalizationRuntime_Shutdown();
+  g_settings.localization_presentation=1;
+  g_settings.localization_content=1;
+  for (unsigned i=0;i<sizeof(cases)/sizeof(cases[0]);++i) {
+    memset(g_ram,0,sizeof(g_ram));
+    g_ram[kActRaiserWram_CurrentMap]=1; /* Fillmore simulation, not title. */
+    ActRaiserLocalizationText_ResetObservation();
+    s_frames=s_confirms=s_polls=s_native_entries=s_resets=0;
+    s_menu_describing=cases[i].describe;
+    const uint8_t script[]={5,'a',cases[i].selector?1:0};
+    memcpy(s_rom+cases[i].source,script,sizeof(script));
+    CpuState cpu={.Y=cases[i].source,.S=0x1e0,.PB=1,.DB=1,
+                  .P=0x20,.m_flag=1,.ram=g_ram};
+    cpu_write16(&cpu,0,cpu.S+1,cases[i].caller-1);
+    CHECK(ActRaiser_LocalizationScheduleEntry(&cpu));
+    CHECK(ActRaiser_LocalizationRunDialogue(&cpu)==RECOMP_RETURN_NORMAL);
+    CHECK(cpu.S==0x1e2 && s_native_entries==1 && s_resets==1);
+    CHECK(s_confirms==1); /* The added page needs its own acknowledgement. */
+    Capture();
+    CHECK(s_frame.dialogue_ticket && s_frame.dialogue_surface_id);
+    bool found=false;
+    for (uint8_t n=0;n<s_frame.snapshot_count;++n) {
+      const ArLocalizationTextSnapshot *snapshot=&s_frame.snapshots[n];
+      if (snapshot->surface_id!=s_frame.dialogue_surface_id) continue;
+      found=true;
+      CHECK(snapshot->layout==kArLocalizationTextLayout_DialogueWindow);
+      CHECK(snapshot->revealed_utf8_bytes==snapshot->utf8_bytes);
+      CHECK(strstr(s_frame.text+snapshot->utf8_offset,"Menu dialogue final page."));
+    }
+    CHECK(found);
+  }
+  s_menu_describing=false;
+  ActRaiserLocalizationRuntime_Shutdown();
+}
+
+static void TestNativeMenuContinuation(void) {
+  g_settings.localization_presentation = 0;
+  s_frames = s_polls = s_confirms = s_native_entries = 0;
+  s_menu_skip = true;
+  const uint8_t text[] = {5, 'a', 2, 'b', 2, 'c', 1};
+  memcpy(s_rom + 0xfa7b, text, sizeof(text));
+  CpuState c = {.A = 0xab00, .Y = 0xfa7b, .X = 0x60a, .S = 0x1e0,
+               .PB = 1, .DB = 1, .P = 0x20, .m_flag = 1, .ram = g_ram};
+  cpu_write16(&c, 0, c.S + 1, 0x8afa);
+  CHECK(ActRaiser_LocalizationScheduleEntry(&c));
+  CHECK(ActRaiser_LocalizationRunDialogue(&c) == RECOMP_RETURN_NORMAL);
+  CHECK(c.S == 0x1e2 && s_native_entries == 1 && !s_polls && !s_confirms);
+  s_menu_skip = false;
+  s_menu_describing = true;
+  s_first_poll_held = true;
+  c.S = 0x1e0; c.X = 0x60a; c.Y = 0x9876; c.A = 0xab5f;
+  CHECK(ActRaiser_LocalizationScheduleContinuation(&c));
+  CHECK(ActRaiser_LocalizationContinueDialogue(&c) == RECOMP_RETURN_NORMAL);
+  CHECK(s_polls == 3 && s_confirms == 1); /* held, release, fresh press */
+  CHECK(c.S == 0x1e2 && c.X == 0x60a && c.Y == 0x9876 && c.A == 0xab00);
+  CHECK(c._flag_Z && !c._flag_N && !cpu_read8(&c, 0x7f, 0xb60a));
+  s_menu_aborted = true; c.S = 0x1e0;
+  CHECK(ActRaiser_LocalizationContinueDialogue(&c) == RECOMP_RETURN_NORMAL);
+  CHECK(s_polls == 3 && c.S == 0x1e2); /* cancellation never waits again */
+  s_menu_aborted = s_menu_describing = s_first_poll_held = false;
+}
+
 int main(void) {
   TestStructuredNormalization();
   WriteNativeFixture(false);
@@ -1043,6 +1233,8 @@ int main(void) {
   CHECK(s_confirms == 2 && s_frames == 12 && s_seen_pages == 7);
   CHECK(strstr(s_frame.text, "Dernière") && !strstr(s_frame.text, "Première"));
   CHECK(s_font_preflights == 2); /* No probing on glyph/reveal/frame ticks. */
+  TestMenuHelp();
+  TestMenuLabelCapacity();
   s_frame_hook = RejectFontSwitchOnce;
   Run(0xfa7b, 0x8afb, one_page, sizeof(one_page), 0);
   CHECK(!s_frame_hook && s_confirms == 2 && s_frames == 12 &&
@@ -1208,8 +1400,10 @@ int main(void) {
   TestUnicodeNameHandoff();
   TestCreditsWithoutDialogueObservation();
   TestPartialRtlSources();
+  TestMenuDialogueKinds();
   TestLegacySelectionGate(pack_host);
   ActRaiserLocalizationRuntime_Shutdown();
+  TestNativeMenuContinuation();
   ActRaiserLocalizationRuntime_SetPackHost(NULL);
   CHECK(s_pack_reads > 0 && s_pack_reads == s_pack_releases);
   CHECK(!s_live_fonts);

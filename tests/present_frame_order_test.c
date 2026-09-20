@@ -4,6 +4,7 @@
  * headless machine with no renderer or GPU. */
 #include "present.h"
 #include "present_internal.h"
+#include "present_sim_menu.h"
 #include "crt_post.h"
 #include "render_comparison.h"
 #include "session_fatal.h"
@@ -113,6 +114,11 @@ bool PresentAuthenticPictureInPicture(const FrameSlot *slot,
   return true;
 }
 
+void PresentSimMenu_Draw(const FrameSlot *slot, ArRenderRectI viewport) {
+  CHECK(slot == s_expected_slot);
+  CHECK(RectsEqual(viewport, kFallback));
+}
+
 bool PresentComparisonTransitionOverlay(uint8_t alpha, const char *label) {
   CHECK(s_stage++ == 4);
   CHECK(alpha == s_expected_transition_alpha);
@@ -201,6 +207,36 @@ int main(void) {
   s_dialogue_ready = true;
   RunCase(&slot);
   CHECK(!ArTextPresentation_Failed(11));
+  /* An answered question remains in native memory while the modern menu
+   * deliberately hides it for the handoff. Do not flag that stale ticket. */
+  slot.localization.dialogue_ticket = 12;
+  slot.sim_menu.valid = true;
+  slot.sim_menu.model.phase = kSimMenu_Handoff;
+  s_dialogue_ready = false;
+  RunCase(&slot);
+  CHECK(!ArTextPresentation_Failed(12));
+  slot.sim_menu.model.phase = kSimMenu_Inventory;
+  RunCase(&slot);
+  CHECK(!ArTextPresentation_Failed(12));
+  slot.sim_menu.model.phase = kSimMenu_Describe;
+  slot.sim_menu.help.active = true;
+  RunCase(&slot);
+  CHECK(!ArTextPresentation_Failed(12));
+  slot.sim_menu.help.active = false;
+  RunCase(&slot); /* Miracle descriptions still require native dialogue. */
+  CHECK(ArTextPresentation_Failed(12));
+  /* The exception belongs only to an active handoff, never ordinary text. */
+  slot.localization.dialogue_ticket = 13;
+  slot.sim_menu.model.phase = kSimMenu_Handoff;
+  slot.sim_menu.valid = false;
+  RunCase(&slot);
+  CHECK(ArTextPresentation_Failed(13));
+  slot.localization.dialogue_ticket = 14;
+  slot.sim_menu.valid = true;
+  slot.sim_menu.model.phase = kSimMenu_Dialogue;
+  RunCase(&slot);
+  CHECK(ArTextPresentation_Failed(14));
+  slot.sim_menu.valid = false;
   slot.localization.dialogue_ticket = 0;
 
   /* Authentic bypasses the enhanced compositor while retaining the player's

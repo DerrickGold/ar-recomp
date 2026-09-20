@@ -1,4 +1,6 @@
 #include "render_comparison.h"
+#include <stdlib.h>
+#include <string.h>
 
 typedef struct RenderComparisonState {
   RenderComparisonView base_view;
@@ -18,6 +20,7 @@ typedef struct RenderComparisonState {
 } RenderComparisonState;
 
 static RenderComparisonState s_compare;
+static RenderComparisonView s_headless_view;
 
 const char *RenderComparison_ViewName(RenderComparisonView view) {
   switch (view) {
@@ -35,6 +38,15 @@ void RenderComparison_Reset(void) {
     .transition_from = kRenderComparison_Enhanced,
     .transition_to = kRenderComparison_Enhanced,
   };
+  /* Deterministic screenshot replays cannot send a host comparison binding.
+   * This diagnostic is deliberately unavailable to ordinary game sessions. */
+  const char *headless = getenv("AR_HEADLESS");
+  const char *view = getenv("AR_TEST_RENDER_VIEW");
+  s_headless_view = kRenderComparison_Enhanced;
+  if (headless && !strcmp(headless, "1") && view) {
+    if (!strcmp(view, "native")) s_headless_view = kRenderComparison_Authentic;
+    else if (!strcmp(view, "pip")) s_headless_view = kRenderComparison_SideBySide;
+  }
 }
 
 static RenderComparisonView VisibleView(void) {
@@ -89,6 +101,13 @@ void RenderComparison_OnPress(uint64_t now_ms) {
 
 void RenderComparison_Tick(uint64_t now_ms, bool control_held,
                            bool authentic_frame_ready) {
+  if (s_headless_view != kRenderComparison_Enhanced && authentic_frame_ready) {
+    s_compare.settled_view = s_headless_view;
+    s_compare.base_view = s_headless_view == kRenderComparison_Authentic
+        ? s_headless_view : kRenderComparison_Enhanced;
+    s_compare.pip_latched = s_headless_view == kRenderComparison_SideBySide;
+    s_headless_view = kRenderComparison_Enhanced;
+  }
   s_compare.now_ms = now_ms;
   if (s_compare.transitioning &&
       now_ms - s_compare.transition_started_ms >=
@@ -167,6 +186,7 @@ bool RenderComparison_FreezesGameplay(void) {
 }
 
 bool RenderComparison_RequiresAuthenticFrame(void) {
+  if (s_headless_view != kRenderComparison_Enhanced) return true;
   if (s_compare.awaiting_authentic_frame || s_compare.transitioning)
     return true;
   return s_compare.settled_view != kRenderComparison_Enhanced ||

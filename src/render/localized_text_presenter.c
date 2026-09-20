@@ -1887,12 +1887,10 @@ static void FitCellReport(ArRenderDevice *device, const ArLocalizationFrame *fra
 
 /* Authored hard breaks are always preserved. Placement determines fitting,
  * automatic wrapping and viewport scrolling, never which markup is parsed. */
-static bool PlanFlowingText(const ArLocalizationFrame *frame, const ResolvedTextCell *cell,
+static bool PlanFlowingText(const ArLocalizationFrame *frame,
+                            const ArLocalizationTextSnapshot *snapshot,
+                            const char *utf8,size_t utf8_bytes,unsigned logical_height,
                             ArRenderRectI bounds, TextFlowPlan *plan) {
-  const ArTextCellRecord *record = cell->record;
-  const ArLocalizationTextSnapshot *snapshot = cell->snapshot;
-  const char *utf8 = cell->utf8;
-  const size_t utf8_bytes = cell->utf8_bytes;
   const bool framed_label = snapshot->layout == kArLocalizationTextLayout_FramedLabel;
   const bool centered_label =
       framed_label || snapshot->layout == kArLocalizationTextLayout_CenteredLabel;
@@ -1906,13 +1904,13 @@ static bool PlanFlowingText(const ArLocalizationFrame *frame, const ResolvedText
   if (scrolling) {
     /* The claim includes a footer cell for the continuation marker. Reserve
      * it even while typing so appearing/disappearing arrows never reflow text. */
-    int footer = bounds.h / record->region.rows;
+    int footer = bounds.h * 8 / logical_height;
     if (footer < 1) footer = 1;
     viewport.h -= footer;
     if (viewport.h <= 0) return false;
   }
-  const int base_pixels = (snapshot->native_font_pixels * bounds.h + (int)record->region.rows * 4) /
-                          ((int)record->region.rows * 8);
+  const int base_pixels = (snapshot->native_font_pixels * bounds.h + logical_height / 2) /
+                          logical_height;
   /* A one-tile label has a hard vertical limit, including accents and
    * low-resolution raster quantization. Permit extra fitting there. */
   int minimum_base_pixels = fitted_label ? base_pixels / 2 : base_pixels * 2 / 3;
@@ -2034,7 +2032,8 @@ static void PrepareCellText(ArRenderDevice *device, const ArLocalizationFrame *f
   }
 
   TextFlowPlan plan;
-  if (!PlanFlowingText(frame, cell, bounds, &plan)) return;
+  if (!PlanFlowingText(frame,snapshot,utf8,utf8_bytes,
+                       record->region.rows*8,bounds,&plan)) return;
   const bool scrolling = plan.scrolling, fitted_label = plan.fitted_label;
   const bool centered_label = plan.centered_label;
   const bool right_label = plan.right_label, left_label = plan.left_label;
@@ -2252,31 +2251,42 @@ bool ArLocalizedTextPresenter_PrepareScreenText(ArRenderDevice *device,
   if (base_pixels < 1) base_pixels = 1;
   int minimum_base_pixels = base_pixels / 2;
   if (minimum_base_pixels < 1) minimum_base_pixels = 1;
+  const bool dialogue = snapshot->layout == kArLocalizationTextLayout_DialogueWindow;
   const bool centered = snapshot->layout == kArLocalizationTextLayout_CenteredLabel;
   const bool physical_right = snapshot->layout == kArLocalizationTextLayout_RightAlignedLabel;
   const bool physical_left = snapshot->layout == kArLocalizationTextLayout_LeftAlignedLabel;
-  if (!centered && !physical_right && !physical_left &&
+  if (!dialogue && !centered && !physical_right && !physical_left &&
       snapshot->layout != kArLocalizationTextLayout_SingleLineLabel)
     return false;
 
-  ArTextRasterRequest request = TextRequestForSnapshot(frame, snapshot, utf8, utf8_bytes);
-  request.flags =
-      kArTextRasterFlag_PreserveHardBreaks | kArTextRasterFlag_CropHorizontalWhitespace |
-      kArTextRasterFlag_CropVerticalWhitespace | kArTextRasterFlag_IncludeRevealClusters |
-      (snapshot->slant_ascii_numerals ? kArTextRasterFlag_SlantAsciiNumerals : 0u);
-  request.alignment = centered         ? kArTextHorizontalAlignment_Center
-                      : physical_right ? kArTextHorizontalAlignment_Right
-                      : physical_left  ? kArTextHorizontalAlignment_Left
-                                       : kArTextHorizontalAlignment_Leading;
-  request.font_pixels = base_pixels;
-  request.minimum_font_pixels = minimum_base_pixels;
-  request.maximum_width = bounds.w;
-  request.maximum_height = bounds.h;
-  if (!ArEnhancedTextSettings_Apply(&frame->settings, base_pixels, minimum_base_pixels, &request))
-    return false;
-  const int minimum_for_row = bounds.h / 2 > 0 ? bounds.h / 2 : 1;
-  if (request.minimum_font_pixels > minimum_for_row) request.minimum_font_pixels = minimum_for_row;
-  if (snapshot->italic) request.flags |= kArTextRasterFlag_Italic;
+  ArTextRasterRequest request;
+  ArRenderRectI viewport={0};
+  if (dialogue) {
+    TextFlowPlan plan;
+    if (!PlanFlowingText(frame,snapshot,utf8,utf8_bytes,record->height,bounds,&plan))
+      return false;
+    request=plan.request;
+    viewport=plan.viewport;
+  } else {
+    request = TextRequestForSnapshot(frame, snapshot, utf8, utf8_bytes);
+    request.flags =
+        kArTextRasterFlag_PreserveHardBreaks | kArTextRasterFlag_CropHorizontalWhitespace |
+        kArTextRasterFlag_CropVerticalWhitespace | kArTextRasterFlag_IncludeRevealClusters |
+        (snapshot->slant_ascii_numerals ? kArTextRasterFlag_SlantAsciiNumerals : 0u);
+    request.alignment = centered         ? kArTextHorizontalAlignment_Center
+                        : physical_right ? kArTextHorizontalAlignment_Right
+                        : physical_left  ? kArTextHorizontalAlignment_Left
+                                         : kArTextHorizontalAlignment_Leading;
+    request.font_pixels = base_pixels;
+    request.minimum_font_pixels = minimum_base_pixels;
+    request.maximum_width = bounds.w;
+    request.maximum_height = bounds.h;
+    if (!ArEnhancedTextSettings_Apply(&frame->settings, base_pixels, minimum_base_pixels, &request))
+      return false;
+    const int minimum_for_row = bounds.h / 2 > 0 ? bounds.h / 2 : 1;
+    if (request.minimum_font_pixels > minimum_for_row) request.minimum_font_pixels = minimum_for_row;
+    if (snapshot->italic) request.flags |= kArTextRasterFlag_Italic;
+  }
 
   /* No other prepared frame is live on the mutually exclusive navigation
    * branch. Rotate retained cache references before acquiring this label. */
@@ -2298,10 +2308,15 @@ bool ArLocalizedTextPresenter_PrepareScreenText(ArRenderDevice *device,
   const int x = centered   ? bounds.x + (bounds.w - surface.width) / 2
                 : trailing ? bounds.x + bounds.w - surface.width
                            : bounds.x;
+  uint32_t revealed=snapshot->revealed_cluster_count;
+  const int scroll=dialogue?ArLocalizedTextLayout_ScrollOffset(
+      &surface,snapshot->revealed_utf8_bytes,viewport.h,&revealed):0;
   prepared->texts[0] = (ArLocalizedPreparedText){
       .surface = surface,
-      .destination = {x, bounds.y + (bounds.h - surface.height) / 2, surface.width, surface.height},
-      .revealed_cluster_count = snapshot->revealed_cluster_count,
+      .destination = {x, dialogue?bounds.y-scroll:bounds.y+(bounds.h-surface.height)/2,
+                      surface.width, surface.height},
+      .viewport = viewport,
+      .revealed_cluster_count = revealed,
       .cluster_count = snapshot->cluster_count,
       .cluster_shift_offset = -1,
   };

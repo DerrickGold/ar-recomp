@@ -53,6 +53,8 @@ bool SubmitEffectBatch(EffectBatch *batch, ArRenderBlendMode blend);
  * inherited binding because SDL exposes no getter for it. Apply an outer
  * shader after this stage instead. */
 PresentationOutcome PresentSim3D(const FrameSlot *slot);
+bool PresentSimMenuFlatTown(const FrameSlot *slot, ArRenderRectI source,
+                            ArRenderRectI viewport);
 PresentationOutcome PresentWorldNavigation3D(const FrameSlot *slot);
 /* Sky Palace only: draw the shared globe into a caller-owned local viewport.
  * Does not change output target/viewport or compose native UI. Core failures

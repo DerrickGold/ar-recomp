@@ -110,8 +110,9 @@ static void TestDefaultsAndMetadata(void) {
    * renderer and a legacy one that no longer exists. Localization adds six
    * source, presentation, and enhanced-font preferences, plus an independent
    * host interface language. Connected SIM adds one default-on underlay row.
-   * The Graphics API choice adds one restart-class Display row. */
-  CHECK(g_setting_desc_count == 293);
+   * The Graphics API choice adds one restart-class Display row. Modern SIM
+   * adds its presentation choice, player scale, and two independent Describe bindings. */
+  CHECK(g_setting_desc_count == 297);
   for (int i = 0; i < g_setting_desc_count; i++) {
     const SettingDesc *a = &g_setting_descs[i];
     CHECK(a->key && a->key[0] && a->label && a->tooltip);
@@ -1219,6 +1220,42 @@ static void TestInputBindings(void) {
   Settings_Init();
 
   const SettingDesc *key_b = Settings_Find("bind_key_b");
+  const SettingDesc *menu_style = Settings_Find("sim_menu_style");
+  const SettingDesc *sim_scale = Settings_Find("sim_menu_scale_percent");
+  CHECK(menu_style && menu_style->category == kSettingCat_Simulation);
+  CHECK(sim_scale && sim_scale->category == kSettingCat_Simulation);
+  CHECK(g_settings.sim_menu_scale_percent == 50);
+  CHECK(!Settings_IsDebugOnly(sim_scale) && Settings_IsMenuVisible(sim_scale));
+  CHECK(!Settings_IsAvailable(sim_scale));
+  CHECK(g_settings.sim_menu_style == 0);
+  g_settings.sim3d_mode = false;
+  CHECK(Settings_IsAvailable(menu_style));
+  CHECK(Settings_SetLong(menu_style, 1) == kSettingChange_Applied);
+  CHECK(g_settings.sim_menu_style == 1);
+  CHECK(Settings_IsAvailable(sim_scale)); /* Independent of the 3D renderer. */
+  CHECK(sim_scale->minval == 50 && sim_scale->maxval == 100 && sim_scale->step == 5);
+  CHECK(Settings_SetLong(sim_scale, 80) == kSettingChange_Applied);
+  CHECK(g_settings.sim_menu_scale_percent == 80);
+  CHECK(Settings_SetLong(sim_scale, 200) == kSettingChange_Applied);
+  CHECK(g_settings.sim_menu_scale_percent == 100);
+  CHECK(Settings_SetLong(sim_scale, 25) == kSettingChange_Applied);
+  CHECK(g_settings.sim_menu_scale_percent == 50);
+  CHECK(Settings_SetText(sim_scale, "75") == kSettingChange_Applied);
+  CHECK(g_settings.sim_menu_scale_percent == 75);
+  CHECK(Settings_Find("bind_key_sim_describe"));
+  CHECK(Settings_Find("bind_pad_sim_describe"));
+  CHECK(g_settings.input_bind[kInputClass_Keyboard][kInputAction_SimDescribe] ==
+        INPUT_BIND_MAKE(kInputBind_Key, SDL_SCANCODE_S, false));
+  CHECK(g_settings.input_bind[kInputClass_Gamepad][kInputAction_SimDescribe] ==
+        INPUT_BIND_MAKE(kInputBind_PadButton, SDL_GAMEPAD_BUTTON_NORTH, false));
+  const uint32 describe = g_settings.input_bind[kInputClass_Keyboard][kInputAction_SimDescribe];
+  CHECK(InputMap_ApplyBinding(Settings_Find("bind_key_sim_describe"), describe) ==
+        kSettingChange_Unchanged);
+  CHECK(g_settings.input_bind[kInputClass_Keyboard][kInputAction_X] == describe);
+  InputMap_HandleKey(SDL_SCANCODE_S, true, false);
+  CHECK(InputMap_GameActionHeld(kInputAction_SimDescribe));
+  InputMap_HandleKey(SDL_SCANCODE_S, false, false);
+  CHECK(!InputMap_GameActionHeld(kInputAction_SimDescribe));
   const SettingDesc *key_a = Settings_Find("bind_key_a");
   const SettingDesc *pad_b = Settings_Find("bind_pad_b");
   const SettingDesc *pad_menu = Settings_Find("bind_pad_menu");
@@ -1409,6 +1446,8 @@ static void TestInputBindings(void) {
   CHECK(memcmp(saved, g_settings.input_bind, sizeof(saved)) != 0);
   CHECK(Settings_Load(path));
   CHECK(memcmp(saved, g_settings.input_bind, sizeof(saved)) == 0);
+  CHECK(g_settings.sim_menu_style == 1);
+  CHECK(g_settings.sim_menu_scale_percent == 75);
   remove(path);
 }
 
