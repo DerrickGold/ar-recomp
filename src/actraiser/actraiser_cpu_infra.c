@@ -89,6 +89,7 @@ static SrResult ActRaiser_QueryExecutionState(
 static void ActRaiser_RunnerChanged(SrRunnerHandle *runner) {
   ActRaiser_BindRunner(runner);
   HdReplacements_BindRunner(runner);
+  AssetConditions_BindRunner(runner);
   SimWorldMapBuild_BindRunner(runner);
   ActRaiser_SpcUploadBindRunner(runner);
   ActRaiserActionBg_BindRunner(runner);

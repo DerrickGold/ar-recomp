@@ -5,7 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "snesrecomp/game/types.h"
-#include "hd_replacements.h" /* shared HdCondition gate grammar */
+#include "asset_condition.h"
 
 /* Manifest-driven music replacement ([music:<name>] sections of
  * game-assets/manifest.ini): stream an OGG Vorbis file in place of an SPC
@@ -37,21 +37,23 @@
 
 enum {
   kMusicMaxReplacements = 32,
+  kMusicNameCapacity = 48,
+  kMusicPathCapacity = 512,
   kMusicSongAny = -1,
 };
 
 typedef struct MusicReplacement {
-  char name[kHdMaxName];
+  char name[kMusicNameCapacity];
   uint32 src;            /* SPC image source address (BB:AAAA), the identity */
   int song;              /* driver song number, kMusicSongAny = any */
-  char file[kHdMaxPath]; /* resolved relative to the manifest */
+  char file[kMusicPathCapacity]; /* resolved relative to the manifest */
   bool loop;             /* default true */
   /* Loop points in sample frames at the FILE's rate. loop_end 0 = end of
    * file. Manifest keys override LOOPSTART/LOOPLENGTH(-END) Vorbis comment
    * tags, which override whole-file looping. */
   uint32 loop_start, loop_end;
   int gain_percent;      /* default 100 */
-  HdCondition conditions[kHdMaxConditions];
+  AssetCondition conditions[kAssetMaxConditions];
   int condition_count;
 
   /* Probe results (filled at load): the file exists and decodes. Entries

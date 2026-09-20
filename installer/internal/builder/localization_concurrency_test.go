@@ -53,7 +53,10 @@ func TestLocalizationSlowResponsesReleaseAllLocks(t *testing.T) {
 			locJSON(t, app, "edit", q, 200)
 			q = locIdentity(app)
 			q.ID, q.Body, q.Status = "action.hud.act_1", "Another adventure!\n@end\n", lk.TranslationDone
-			q.ConfirmRights = true
+			if endpoint == "backup" || endpoint == "publish" {
+				q = locIdentity(app)
+			}
+			q.ConfirmRights = endpoint == "publish"
 			request := localizationRequestFor(endpoint, q)
 			if endpoint == "state" {
 				request = httptest.NewRequest("GET", "/secret/localization/state", nil)
@@ -90,8 +93,8 @@ func TestLocalizationSlowResponsesReleaseAllLocks(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				actual, _ := archive.Pack().Workspace().Message(q.ID)
-				before, _ := expected.Pack().Workspace().Message(q.ID)
+				actual, _ := archive.Pack().Workspace().Message("action.hud.act_1")
+				before, _ := expected.Pack().Workspace().Message("action.hud.act_1")
 				if actual.Body != before.Body {
 					t.Fatal("archive changed during download")
 				}

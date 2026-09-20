@@ -1,3 +1,4 @@
+#include "actraiser/actraiser_room_profiles.h"
 #include "action_room_scene.h"
 
 #include <string.h>
@@ -369,7 +370,8 @@ bool ActionRoomScene_BuildCharacters(const ActionRoomScene *scene,
 
 bool ActionRoomScene_HasBg2PageCycle(const ActionRoomScene *scene) {
   return scene && scene->have_video_profile &&
-      scene->group == 0x04 && (scene->map == 0x02 || scene->map == 0x03) &&
+      ActRaiserRoom_ProfileFor(scene->group, scene->map) ==
+          kActRaiserRoomProfile_AitosWaterfall &&
       scene->bg[1].have_map && scene->bg[1].pages_wide == 2 &&
       scene->bg[1].pages_high == 2 && scene->video_profile[19] != 0;
 }

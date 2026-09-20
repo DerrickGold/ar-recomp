@@ -141,41 +141,62 @@ bool RuntimeSettings_BuildSaveEditRequest(SaveEditRequest *edits) {
 }
 
 bool RuntimeSettings_HandleAction(const SettingDesc *desc) {
-  if (!desc || !desc->key) return false;
+  if (!desc || desc->type != kSettingType_Action) return false;
 
-  if (!strcmp(desc->key, "toggle_pause")) {
+  switch (desc->action) {
+  case kSettingAction_TogglePause: {
     HostInput_TogglePause();
-  } else if (!strcmp(desc->key, "toggle_turbo")) {
+    break;
+  }
+  case kSettingAction_ToggleTurbo: {
     HostInput_ToggleTurbo();
-  } else if (!strcmp(desc->key, "save_state")) {
+    break;
+  }
+  case kSettingAction_SaveState: {
     return DebugState_Apply(kSaveLoad_Save, RuntimeSettings_QuickStateSlot());
-  } else if (!strcmp(desc->key, "load_state")) {
+  }
+  case kSettingAction_LoadState: {
     return DebugState_Apply(kSaveLoad_Load, RuntimeSettings_QuickStateSlot());
-  } else if (!strcmp(desc->key, "warp_now")) {
+  }
+  case kSettingAction_Warp: {
     extern void ActRaiser_Warp(unsigned region, unsigned map);
     const unsigned target = (unsigned)g_settings.warp_target;
     ActRaiser_Warp((target >> 8) & 0xff, target & 0xff);
-  } else if (!strcmp(desc->key, "take_snapshot")) {
+    break;
+  }
+  case kSettingAction_Snapshot: {
     HostDevTools_TakeFullSnapshot();
-  } else if (!strcmp(desc->key, "manual_open")) {
+    break;
+  }
+  case kSettingAction_Manual: {
     /* Returns false when there is no manual to show, which the overlay reports
      * as a failed action rather than opening onto an empty reader. */
     if (!ManualReader_Open()) return false;
-  } else if (!strcmp(desc->key, "rando_reroll")) {
+    break;
+  }
+  case kSettingAction_Reroll: {
     if (!Randomizer_IsAvailable()) return false;
     Randomizer_Reroll();
-  } else if (!strcmp(desc->key, "diorama_reset")) {
+    break;
+  }
+  case kSettingAction_DioramaReset: {
     Diorama_ResetCamera();
-  } else if (!strcmp(desc->key, "sim3d_reset_camera")) {
+    break;
+  }
+  case kSettingAction_SimCameraReset: {
     HostInput_ResetSim3DCamera();
-  } else if (!strcmp(desc->key, "dump_scene_assets")) {
+    break;
+  }
+  case kSettingAction_DumpSceneAssets: {
     if (!HostDevTools_DumpSceneAssets()) return false;
-  } else if (!strcmp(desc->key, "save_apply_session") ||
-             !strcmp(desc->key, "save_apply_persist")) {
+    break;
+  }
+  case kSettingAction_SaveApplySession:
+  case kSettingAction_SaveApplyPersist: {
     SaveEditRequest edits;
     RuntimeSettings_BuildSaveEditRequest(&edits);
     SaveError error = {{0}};
-    const bool persist = !strcmp(desc->key, "save_apply_persist");
+    const bool persist = desc->action == kSettingAction_SaveApplyPersist;
     if (!SaveSystem_ApplyEdits(
             &edits, g_settings.save_edit_armed, persist,
             g_settings.save_autobackup, &error)) {
@@ -185,7 +206,9 @@ bool RuntimeSettings_HandleAction(const SettingDesc *desc) {
     }
     fprintf(stderr, "[save-editor] staged save edits applied%s\n",
             persist ? " and saved" : " for this session");
-  } else if (!strcmp(desc->key, "save_import")) {
+    break;
+  }
+  case kSettingAction_SaveImport: {
     const char *path = getenv("AR_SAVE_IMPORT");
     if (!path || !path[0]) {
       FILE *probe = sr_fopen("saves/import.srm", "rb");
@@ -204,9 +227,11 @@ bool RuntimeSettings_HandleAction(const SettingDesc *desc) {
     }
     fprintf(stderr, "[save-editor] imported %s -> %s\n", path,
             SaveSystem_ActivePath());
-  } else if (!strcmp(desc->key, "save_export_srm") ||
-             !strcmp(desc->key, "save_export_ini")) {
-    const bool ini = !strcmp(desc->key, "save_export_ini");
+    break;
+  }
+  case kSettingAction_SaveExportSrm:
+  case kSettingAction_SaveExportIni: {
+    const bool ini = desc->action == kSettingAction_SaveExportIni;
     const char *path = ini ? "saves/export.ini" : "saves/export.srm";
     SaveError error = {{0}};
     if (!SaveSystem_Export(ini ? kSaveFileFormat_Ini
@@ -217,22 +242,26 @@ bool RuntimeSettings_HandleAction(const SettingDesc *desc) {
       return false;
     }
     fprintf(stderr, "[save-editor] export -> %s\n", path);
-  } else if (!strcmp(desc->key, "restart_game") ||
-             !strcmp(desc->key, "exit_desktop")) {
+    break;
+  }
+  case kSettingAction_Restart:
+  case kSettingAction_Exit: {
     char settings_path[kHostPathCapacity];
     UserDataFile(settings_path, sizeof(settings_path), "settings.ini");
     if (!Settings_Save(settings_path)) {
       fprintf(stderr, "[lifecycle] could not save settings.ini\n");
       return false;
     }
-    s_lifecycle_request = !strcmp(desc->key, "restart_game")
+    s_lifecycle_request = desc->action == kSettingAction_Restart
         ? kRuntimeLifecycle_Restart
         : kRuntimeLifecycle_Exit;
     SettingsOverlay_Close();
     fprintf(stderr, "[lifecycle] %s requested\n",
             s_lifecycle_request == kRuntimeLifecycle_Restart
                 ? "restart" : "exit");
-  } else {
+    break;
+  }
+  default:
     return false;
   }
   return true;

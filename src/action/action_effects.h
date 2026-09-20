@@ -322,12 +322,6 @@ void ActionEffects_CaptureFrame(ActionEffectObserver *observer,
                                 const uint8_t *wram, size_t wram_size,
                                 unsigned elapsed_ticks);
 
-/* Room-level presentation policy for Aitos Act 2's volcanic chambers. Heat
- * haze belongs to the whole room, so it must not blink when a camera window
- * temporarily contains no complete map-derived reservoir signature. */
-bool ActionEffects_IsAitosAct2LavaRoom(uint8_t map_group,
-                                      uint8_t map_number);
-
 /* Captures exact, measured scene identities used by the enhanced action pass:
  * Bloodpool/Marahna/Death-Heim-Viper BG1 torches, Aitos lava/water signatures,
  * measured enemy projectile families, the vertical trap, linked Marahna

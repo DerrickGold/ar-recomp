@@ -93,8 +93,8 @@ func TestLocalizationCoverageGatesPublicationAndInstallation(t *testing.T) {
 		return r, nil
 	}
 	q = locIdentity(app)
-	q.ConfirmRights = true
 	for _, endpoint := range []string{"install", "installation-check", "publish", "publication-check"} {
+		q.ConfirmRights = endpoint == "publish" || endpoint == "publication-check"
 		if body := locJSON(t, app, endpoint, q, 400).Body.String(); !strings.Contains(body, "U+65E5") {
 			t.Fatal(endpoint, body)
 		}
@@ -105,6 +105,7 @@ func TestLocalizationCoverageGatesPublicationAndInstallation(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(app.localizationRoot(), "packs", q.ProjectID)); !os.IsNotExist(err) {
 		t.Fatal("failed gate wrote installed files", err)
 	}
+	q = locIdentity(app)
 	var report lk.FontCoverageReport
 	if err := json.Unmarshal(locJSON(t, app, "font-coverage", q, 200).Body.Bytes(), &report); err != nil {
 		t.Fatal(err)
@@ -123,11 +124,11 @@ func TestLocalizationCoverageGatesPublicationAndInstallation(t *testing.T) {
 	q = locIdentity(app)
 	q.ConfirmRights = true
 	locJSON(t, app, "publication-check", q, 200)
-	locJSON(t, app, "installation-check", q, 400)
+	locJSON(t, app, "installation-check", locIdentity(app), 400)
 	q.IncludeWIP = true
 	locJSON(t, app, "publication-check", q, 400)
 	app.options.fontCoverageProbe = nil
-	if body := locJSON(t, app, "font-coverage", q, 400).Body.String(); !strings.Contains(body, "finish building") {
+	if body := locJSON(t, app, "font-coverage", locIdentity(app), 400).Body.String(); !strings.Contains(body, "finish building") {
 		t.Fatal(body)
 	}
 }

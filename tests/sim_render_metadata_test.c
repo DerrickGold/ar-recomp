@@ -30,6 +30,25 @@ static void Begin(uint16 record, bool world, uint16 composition,
       world ? 0x13 : 0x02, world ? 7 : 0, 0, cursor);
 }
 
+static void TestPresentationDecision(void) {
+  SimFrameData frame = {
+    .view = kSimView_Enhanced,
+    .view_reason = kSimViewReason_Enabled,
+    .master_enabled = true,
+    .separated_status = kSim3DCapture_AllocationFailure,
+  };
+  SimPresentationDecision decision = Sim3D_PresentationDecision(&frame);
+  CHECK(decision.view == kSimView_AuthenticFallback);
+  CHECK(!strcmp(decision.reason, "allocation_failure"));
+  frame.separated_valid = true;
+  decision = Sim3D_PresentationDecision(&frame);
+  CHECK(decision.view == kSimView_Enhanced);
+  CHECK(!strcmp(decision.reason, "enabled"));
+  frame.separated_valid = false;
+  frame.master_enabled = false;
+  CHECK(!strcmp(Sim3D_PresentationDecision(&frame).reason, "disabled"));
+}
+
 static void TestFeatureDependencies(void) {
   SimRenderFeatureMask all = kSimFeature_All;
   CHECK(Sim3D_ResolveFeatureMask(all, all, kSimView_Enhanced,
@@ -1776,6 +1795,7 @@ static void TestSkyPalaceFrameContract(void) {
   CHECK(frame.view == kSimView_None);
   SimRenderMetadata_CaptureSkyPalaceFrame(&frame, wram, true);
   CHECK(frame.view == kSimView_SkyPalace);
+  CHECK(!strcmp(Sim3D_PresentationDecision(&frame).reason, "enabled"));
   CHECK(frame.master_enabled && frame.world_navigation_scene.valid);
   CHECK(frame.world_navigation.matrix[0] == 0);
   CHECK(frame.world_navigation.focus_x == 512 && frame.world_navigation.focus_y == 512);
@@ -1785,6 +1805,7 @@ static void TestSkyPalaceFrameContract(void) {
   SimRenderMetadata_CaptureSkyPalaceFrame(&frame, wram, true);
   CHECK(frame.view == kSimView_AuthenticFallback);
   CHECK(!frame.world_navigation_scene.valid);
+  CHECK(!strcmp(Sim3D_PresentationDecision(&frame).reason, "invalid_palace_scene"));
   wram[kActRaiserWram_CurrentMap] = kActRaiserNonActionMap_WorldMap;
   frame.view = kSimView_WorldNavigation;
   SimRenderMetadata_CaptureSkyPalaceFrame(&frame, wram, true);
@@ -2005,6 +2026,7 @@ static void TestWorldNavigationFrameContract(void) {
       &frame, steady, false, true, kSimFeature_All, 0, kSimFeature_All);
   CHECK(frame.view == kSimView_AuthenticFallback);
   CHECK(frame.underlay_serial == 0);
+  CHECK(!strcmp(Sim3D_PresentationDecision(&frame).reason, "world_map_unavailable"));
   CHECK(frame.world_navigation_state_valid);
   CHECK(!frame.world_navigation_scene.valid);
 
@@ -2017,6 +2039,7 @@ static void TestWorldNavigationFrameContract(void) {
       &frame, steady, false, true, kSimFeature_All, 0, kSimFeature_All);
   CHECK(frame.view == kSimView_AuthenticFallback);
   CHECK(frame.master_enabled);
+  CHECK(!strcmp(Sim3D_PresentationDecision(&frame).reason, "invalid_world_transform"));
   CHECK(!frame.world_navigation_scene.valid);
 
   steady[kActRaiserWram_CurrentMap] = kActRaiserNonActionMap_Title;
@@ -3296,6 +3319,7 @@ static void TestEruptionScriptWalk(void) {
 
 int main(int argc, char **argv) {
   TestFeatureDependencies();
+  TestPresentationDecision();
   TestWorldNavigationAllTownObjects();
   TestWorldNavigationSanctuaryVariants();
   TestWorldNavigationCaptureCache();

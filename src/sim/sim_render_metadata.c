@@ -2215,6 +2215,8 @@ void SimRenderMetadata_CaptureSkyPalaceFrame(
       &dst->world_navigation_scene, dst->world_navigation.focus_x,
       dst->world_navigation.focus_y, dst->world_navigation.active_location,
       dst->underlay_serial) ? kSimView_SkyPalace : kSimView_AuthenticFallback;
+  dst->view_reason = dst->view == kSimView_SkyPalace
+      ? kSimViewReason_Enabled : kSimViewReason_InvalidPalaceScene;
 }
 
 void SimRenderMetadata_CaptureFrame(
@@ -2288,12 +2290,15 @@ void SimRenderMetadata_CaptureFrame(
     if (g_sim_metadata.record_active)
       dst->integrity_flags |= kSimMetadataIntegrity_CursorMismatch;
     dst->metadata_valid = g_sim_metadata.active && !dst->integrity_flags;
+    dst->view_reason = dst->master_enabled
+        ? kSimViewReason_Enabled : kSimViewReason_Disabled;
 #if AR_SIM3D_PICKER_TOPDOWN
     /* An active position picker owns the frame: the authentic flat view is
      * pixel- and input-identical to the original game by construction. */
-    if (dst->picker_flag)
+    if (dst->picker_flag) {
       dst->view = kSimView_AuthenticPicker;
-    else
+      dst->view_reason = kSimViewReason_Picker;
+    } else
 #endif
       /* Broken object metadata deliberately does NOT drop the view. The
        * ground, projection and camera have separate capture gates; only the
@@ -2301,8 +2306,11 @@ void SimRenderMetadata_CaptureFrame(
       dst->view = kSimView_Enhanced;
   } else if (!world_navigation || !world_navigation_enabled) {
     dst->view = kSimView_None;
+    dst->view_reason = world_navigation
+        ? kSimViewReason_Disabled : kSimViewReason_OutsideScene;
   } else if (!SimWorldMap_DevelopedAvailable()) {
     dst->view = kSimView_AuthenticFallback;
+    dst->view_reason = kSimViewReason_WorldMapUnavailable;
   } else if (!SimWorldNavigationScene_Build(
                  &dst->world_navigation_scene, &dst->world_navigation,
                  dst->underlay_serial)) {
@@ -2310,8 +2318,10 @@ void SimRenderMetadata_CaptureFrame(
      * Never expose a half-configured scene; keep the authentic renderer for
      * this frame and let a later valid matrix recover automatically. */
     dst->view = kSimView_AuthenticFallback;
+    dst->view_reason = kSimViewReason_InvalidWorldTransform;
   } else {
     dst->view = kSimView_WorldNavigation;
+    dst->view_reason = kSimViewReason_Enabled;
   }
 
   /* Leaving town retires every live emitter, but generation stays monotonic so
@@ -2367,6 +2377,29 @@ void SimRenderMetadata_CaptureFrame(
   if (!dst->effect_metadata_valid)
     dst->effective_features &= ~(kSimFeature_EffectLighting |
                                  kSimFeature_Particles);
+}
+
+SimPresentationDecision Sim3D_PresentationDecision(const SimFrameData *frame) {
+  if (!frame) return (SimPresentationDecision){kSimView_None, "no_frame"};
+  if (frame->view == kSimView_Enhanced && !frame->separated_valid) {
+    return (SimPresentationDecision){kSimView_AuthenticFallback,
+        frame->master_enabled ? Sim3D_CaptureStatusName(
+            (Sim3DCaptureStatus)frame->separated_status) : "disabled"};
+  }
+  const char *reason = "outside_scene";
+  switch (frame->view_reason) {
+    case kSimViewReason_OutsideScene: break;
+    case kSimViewReason_Enabled: reason = "enabled"; break;
+    case kSimViewReason_Disabled: reason = "disabled"; break;
+    case kSimViewReason_Picker: reason = "position_picker"; break;
+    case kSimViewReason_WorldMapUnavailable:
+      reason = "world_map_unavailable"; break;
+    case kSimViewReason_InvalidWorldTransform:
+      reason = "invalid_world_transform"; break;
+    case kSimViewReason_InvalidPalaceScene:
+      reason = "invalid_palace_scene"; break;
+  }
+  return (SimPresentationDecision){frame->view, reason};
 }
 
 const char *Sim3D_ViewName(SimViewKind view) {

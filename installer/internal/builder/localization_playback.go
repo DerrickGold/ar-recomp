@@ -91,7 +91,7 @@ func playbackSample(pack, fallback *lk.AuthorPack, id string, value lk.AuthorPla
 	return textpreview.ValueSample(value)
 }
 
-func (work *localizationWork) playback(ctx context.Context, q localizationRequest) (any, error) {
+func (work *localizationWork) playback(ctx context.Context, q localizationDraftRequest) (any, error) {
 	if err := work.checkLocalizationIdentity(q.ProjectID, q.Revision); err != nil {
 		return nil, err
 	}
@@ -157,7 +157,7 @@ func (work *localizationWork) playback(ctx context.Context, q localizationReques
 
 // Both previews validate the same detached edits. No project/store state is
 // published, and metadata is limited to the editable author fields.
-func previewLocalizationDraft(project *lk.AuthorProject, q localizationRequest) (*lk.AuthorProject, error) {
+func previewLocalizationDraft(project *lk.AuthorProject, q localizationDraftRequest) (*lk.AuthorProject, error) {
 	if project.Origin() == "native-source" {
 		return project, nil
 	}

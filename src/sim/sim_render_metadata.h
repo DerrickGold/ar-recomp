@@ -98,6 +98,23 @@ typedef enum SimViewKind {
   kSimView_SkyPalace,
 } SimViewKind;
 
+/* Record the decision where the needed evidence exists. A later presenter or
+ * inspector must not infer a missing world map from a failed camera transform. */
+typedef enum SimViewReason {
+  kSimViewReason_OutsideScene,
+  kSimViewReason_Enabled,
+  kSimViewReason_Disabled,
+  kSimViewReason_Picker,
+  kSimViewReason_WorldMapUnavailable,
+  kSimViewReason_InvalidWorldTransform,
+  kSimViewReason_InvalidPalaceScene,
+} SimViewReason;
+
+typedef struct SimPresentationDecision {
+  SimViewKind view;
+  const char *reason; /* static diagnostic label, including capture failures */
+} SimPresentationDecision;
+
 /* Per-frame D2 capture result. Kept in the frame-owned metadata contract so
  * diagnostics never need to query the live compositor. */
 typedef enum Sim3DCaptureStatus {
@@ -922,6 +939,7 @@ bool Sim3D_ObjectCastsShadow(const SimRenderObject *object);
 
 typedef struct SimFrameData {
   SimViewKind view;
+  SimViewReason view_reason;
   bool master_enabled;
   bool metadata_valid;
   /* What the stage toggles asked for, and what survived the dependency
@@ -1232,6 +1250,8 @@ void SimRenderMetadata_Reset(void);
 void SimRenderMetadata_ResetHeightSlew(void);
 
 const char *Sim3D_ViewName(SimViewKind view);
+/* The presenter and diagnostics use the same final capture gate. */
+SimPresentationDecision Sim3D_PresentationDecision(const SimFrameData *frame);
 const char *Sim3D_CaptureStatusName(Sim3DCaptureStatus status);
 
 #endif  /* SIM_RENDER_METADATA_H */

@@ -36,70 +36,6 @@ static bool ParseRect4(const char *value, int *x0, int *y0, int *x1, int *y1) {
   return *x1 > *x0 && *y1 > *y0;
 }
 
-/* One comparison: <operand> ==|!= <value>. Returns false on syntax error.
- * Shared with the music manifest parser (music_replacements.c). */
-bool HdManifest_ParseCondition(char *term, HdCondition *cond) {
-  memset(cond, 0, sizeof(*cond));
-  char *op = strstr(term, "==");
-  cond->negate = 0;
-  if (!op) { op = strstr(term, "!="); cond->negate = 1; }
-  if (!op) return false;
-  *op = 0;
-  char *lhs = Manifest_Trim(term);
-  char *rhs = Manifest_Trim(op + 2);
-  if (!lhs[0] || !rhs[0]) return false;
-
-  if (!strncmp(lhs, "wram[", 5)) {
-    char *close = strchr(lhs + 5, ']');
-    if (!close) return false;
-    *close = 0;
-    const char *addr = lhs + 5;
-    if (addr[0] == '$') addr++;
-    unsigned long parsed = strtoul(addr, NULL, 16);
-    if (parsed > 0xffff) return false; /* gate operands are low-page WRAM */
-    cond->kind = kHdCond_WramByte;
-    cond->address = (uint16)parsed;
-    cond->value = (uint16)strtoul(rhs, NULL, 0);
-    return true;
-  }
-  if (!strcmp(lhs, "mode")) {
-    cond->kind = kHdCond_BgMode;
-    cond->value = (uint16)strtoul(rhs, NULL, 0);
-    return true;
-  }
-  if (!strcmp(lhs, "m7")) {
-    if (strcmp(rhs, "identity")) return false;
-    cond->kind = kHdCond_M7Identity;
-    return true;
-  }
-  if (lhs[0] == 'm' && lhs[1] == '7' && lhs[2] >= 'a' && lhs[2] <= 'd' &&
-      !lhs[3]) {
-    cond->kind = kHdCond_M7Element;
-    cond->address = (uint16)(lhs[2] - 'a');
-    cond->value = (uint16)strtoul(rhs, NULL, 0);
-    return true;
-  }
-  return false;
-}
-
-bool HdManifest_ParseWhen(char *value, HdCondition *conditions, int max,
-                          int *count) {
-  char *cursor = value;
-  while (cursor && *cursor) {
-    char *comma = strchr(cursor, ',');
-    if (comma) *comma = 0;
-    char *term = Manifest_Trim(cursor);
-    if (term[0]) {
-      if (*count >= max) return false;
-      if (!HdManifest_ParseCondition(term, &conditions[*count]))
-        return false;
-      (*count)++;
-    }
-    cursor = comma ? comma + 1 : NULL;
-  }
-  return *count > 0;
-}
-
 static bool EntryComplete(const HdReplacement *entry, const char *path,
                           int line) {
   const char *missing = NULL;
@@ -193,7 +129,7 @@ int HdReplacements_Load(const char *path) {
       Manifest_ResolvePath(
           path, value, pending.image, sizeof(pending.image));
     } else if (!strcmp(key, "when")) {
-      ok = HdManifest_ParseWhen(value, pending.conditions, kHdMaxConditions,
+      ok = AssetConditions_ParseWhen(value, pending.conditions, kAssetMaxConditions,
                                 &pending.condition_count);
     } else if (!strcmp(key, "brightness")) {
       pending.brightness_mod = strtoul(value, NULL, 0) != 0;
@@ -222,16 +158,13 @@ int HdReplacements_Load(const char *path) {
 
 /* ---- per-frame policy -------------------------------------------------- */
 
-static bool QueryPpuState(const SnesRunnerApi **out_api,
-                          SrPpuStateSnapshot *out_state,
-                          bool require_capture_control) {
+static bool QueryCaptureState(const SnesRunnerApi **out_api,
+                              SrPpuStateSnapshot *out_state) {
   const SnesRunnerApi *api = sr_runner_get_api(SR_RUNNER_ABI_VERSION);
   const uint64_t required_caps = SR_RUNNER_CAP_PPU_STATE |
-      (require_capture_control ? SR_RUNNER_CAP_PPU_CAPTURE_CONTROL : 0u);
-  const uint32_t required_size = require_capture_control
-      ? SNES_RUNNER_API_PPU_CAPTURE_CONTROL_SIZE
-      : SNES_RUNNER_API_PPU_STATE_SIZE;
-  if (!s_runner || !api || api->struct_size < required_size ||
+      SR_RUNNER_CAP_PPU_CAPTURE_CONTROL;
+  if (!s_runner || !api ||
+      api->struct_size < SNES_RUNNER_API_PPU_CAPTURE_CONTROL_SIZE ||
       (api->capabilities & required_caps) != required_caps)
     return false;
   out_state->struct_size = sizeof(*out_state);
@@ -239,42 +172,6 @@ static bool QueryPpuState(const SnesRunnerApi **out_api,
     return false;
   if (out_api) *out_api = api;
   return true;
-}
-
-static bool ConditionPassesWithPpuState(
-    const HdCondition *cond, const SrPpuStateSnapshot *ppu_state) {
-  uint16 actual = 0;
-  if (!cond) return false;
-  /* PPU-dependent operands never pass without a coherent PPU snapshot;
-   * WRAM operands stay valid everywhere. */
-  if (!ppu_state && cond->kind != kHdCond_WramByte) return false;
-  switch (cond->kind) {
-    case kHdCond_WramByte: actual = g_ram[cond->address]; break;
-    case kHdCond_BgMode: actual = ppu_state->bg_mode; break;
-    case kHdCond_M7Element:
-      actual = (uint16)ppu_state->mode7_matrix[cond->address & 3];
-      break;
-    case kHdCond_M7Identity: {
-      bool identity = ppu_state->mode7_matrix[0] == 0x0100 &&
-                      ppu_state->mode7_matrix[1] == 0 &&
-                      ppu_state->mode7_matrix[2] == 0 &&
-                      ppu_state->mode7_matrix[3] == 0x0100;
-      return cond->negate ? !identity : identity;
-    }
-    default: return false;
-  }
-  bool equal = actual == cond->value;
-  return cond->negate ? !equal : equal;
-}
-
-bool HdManifest_ConditionPasses(const HdCondition *cond) {
-  SrPpuStateSnapshot ppu_state = {0};
-  if (!cond)
-    return false;
-  if (cond->kind == kHdCond_WramByte)
-    return ConditionPassesWithPpuState(cond, NULL);
-  return QueryPpuState(NULL, &ppu_state, false) &&
-         ConditionPassesWithPpuState(cond, &ppu_state);
 }
 
 static bool EntryHasLoadedArt(const HdReplacement *entry) {
@@ -296,7 +193,7 @@ void HdReplacements_EvaluateFrame(void) {
       has_any_art = true;
   }
   if (!g_settings.hd_replacements || !has_any_art ||
-      !QueryPpuState(&api, &ppu_state, true))
+      !QueryCaptureState(&api, &ppu_state))
     return;
 
   for (int i = 0; i < g_hd_replacement_count; i++) {
@@ -305,8 +202,8 @@ void HdReplacements_EvaluateFrame(void) {
       continue;
     bool pass = true;
     for (int c = 0; c < entry->condition_count && pass; c++)
-      pass = ConditionPassesWithPpuState(
-          &entry->conditions[c], &ppu_state);
+      pass = AssetCondition_Matches(
+          &entry->conditions[c], g_ram, &ppu_state);
     if (!pass)
       continue;
     /* One capture rect per source (and one Mode-7 override) per frame is a

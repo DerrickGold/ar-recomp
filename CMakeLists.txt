@@ -2397,6 +2397,7 @@ if(BUILD_TESTING)
     add_executable(actraiser_hd_manifest_test
         tests/hd_manifest_test.c
         src/manifest_utils.c
+        src/asset_condition.c
         src/hd_replacements.c
     )
     target_include_directories(actraiser_hd_manifest_test PRIVATE
@@ -2442,6 +2443,7 @@ if(BUILD_TESTING)
         tests/music_manifest_test.c
         src/manifest_utils.c
         src/music_replacements.c
+        src/asset_condition.c
         src/hd_replacements.c
         third_party/stb/stb_vorbis.c
     )

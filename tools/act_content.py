@@ -33,6 +33,7 @@ import collections
 import sys
 
 from ar_lib import load_rom
+from music_catalog import load_music_catalog
 
 REGION = {0: 'special/common', 1: 'Fillmore', 2: 'Bloodpool', 3: 'Kasandora',
           4: 'Aitos', 5: 'Marahna', 6: 'Northwall', 7: 'Death Heim'}
@@ -364,17 +365,9 @@ def cmd_assets(rom, verbose=False):
         print(f"  {REGION.get(m, '?')} map {s}: ${o:06X}")
 
 
-# The 17 pointer-table songs ($02:C7E5), under the ids the builder GUI and
-# game-assets/manifest.ini use for them. Songs reached only through inline
-# script pointers are not in that table and print as "(unlisted)".
-SONG_IDS = {
-    '1A:94B8': 'title-theme', '18:947F': 'song-00', '1C:A988': 'song-01',
-    '18:DDCC': 'song-02', '1A:E9E2': 'song-03', '1C:A5FB': 'song-04',
-    '1B:8554': 'song-05', '1B:9470': 'song-06', '1C:A7CC': 'song-08',
-    '0E:F69F': 'song-09', '1B:ABED': 'song-10', '1C:AFEB': 'song-11',
-    '19:FA4B': 'song-12', '17:C027': 'song-13', '18:D4FA': 'song-14',
-    '1C:9F3D': 'song-15', '1A:EF63': 'song-16',
-}
+# Shared with Workshop and the generated default manifest. Songs reached only
+# through inline script pointers remain "(unlisted)".
+SONG_IDS = {track["src"]: track["id"] for track in load_music_catalog()}
 
 
 # First $19 of act 2 per region; act 1 is every lower map. Same boundaries the

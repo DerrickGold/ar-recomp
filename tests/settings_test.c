@@ -116,6 +116,9 @@ static void TestDefaultsAndMetadata(void) {
     const SettingDesc *a = &g_setting_descs[i];
     CHECK(a->key && a->key[0] && a->label && a->tooltip);
     CHECK((a->type == kSettingType_Action) == (a->field == NULL));
+    CHECK((a->type == kSettingType_Action) ==
+          (a->action != kSettingAction_None));
+    CHECK(a->action >= kSettingAction_None && a->action < kSettingAction_Count);
     CHECK(a->game_change_kind >= kSettingGameChange_None &&
           a->game_change_kind < kSettingGameChange_Count);
     if (a->category == kSettingCat_Enhancements)
@@ -480,6 +483,9 @@ static void TestDefaultsAndMetadata(void) {
   /* Payload rows are paged; the backend/apply controls live only on Actions. */
   g_settings.save_editor_page = kSaveEditorPage_Progress;
   CHECK(Settings_IsMenuVisible(save_fillmore));
+  SettingDesc renamed_progress = *save_fillmore;
+  renamed_progress.key = "town_completion";
+  CHECK(Settings_IsMenuVisible(&renamed_progress));
   CHECK(!Settings_IsMenuVisible(Settings_Find("save_master_level")));
   CHECK(!Settings_IsMenuVisible(save_backend));
   g_settings.save_editor_page = kSaveEditorPage_Actions;

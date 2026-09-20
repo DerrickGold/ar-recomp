@@ -11,8 +11,14 @@ import (
 	lk "github.com/DerrickGold/ar-recomp/installer/internal/localization"
 )
 
-func (app *application) prepareLocalizationFontSave(w http.ResponseWriter, r *http.Request) (localizationRequest, func(), error) {
-	var q localizationRequest
+type localizationCoverageRequest struct {
+	ProjectID string   `json:"projectID"`
+	Revision  string   `json:"revision"`
+	Samples   []string `json:"samples"`
+}
+
+func (app *application) prepareLocalizationFontSave(w http.ResponseWriter, r *http.Request) (localizationDraftRequest, func(), error) {
+	var q localizationDraftRequest
 	r.Body = http.MaxBytesReader(w, r.Body, lk.MaxAuthorPackBytes+(20<<20))
 	err := r.ParseMultipartForm(2 << 20)
 	cleanup := func() {
@@ -26,7 +32,7 @@ func (app *application) prepareLocalizationFontSave(w http.ResponseWriter, r *ht
 	if len(r.MultipartForm.Value) != 1 || len(r.MultipartForm.Value["request"]) != 1 {
 		return q, cleanup, fmt.Errorf("font save requires one request field")
 	}
-	q, err = decodeLocalizationJSON(strings.NewReader(r.FormValue("request")))
+	q, err = decodeLocalizationJSON[localizationDraftRequest](strings.NewReader(r.FormValue("request")))
 	if err != nil {
 		return q, cleanup, err
 	}
@@ -83,4 +89,15 @@ func (work *localizationWork) requireFontCoverage(ctx context.Context, p *lk.Aut
 		return fmt.Errorf("font stack is missing %d character(s), starting with %s (%s). Open Fonts → Check coverage for message locations; add a suitable fallback font before installing or exporting", report.MissingCount, first.Codepoint, first.Character)
 	}
 	return nil
+}
+
+func (work *localizationWork) inspectLocalizationFonts(w *localizationReply, r *http.Request, _ string, q localizationCoverageRequest) error {
+	if err := work.checkLocalizationIdentity(q.ProjectID, q.Revision); err != nil {
+		return err
+	}
+	report, err := work.checkFontCoverage(r.Context(), work.current, q.Samples)
+	if err == nil {
+		w.json(200, report)
+	}
+	return err
 }

@@ -2,6 +2,7 @@
 #define HD_REPLACEMENTS_H
 
 #include <stdbool.h>
+#include "asset_condition.h"
 #include "render/render_types.h"
 #include "snesrecomp/runner.h"
 #include "snesrecomp/game/types.h"
@@ -40,23 +41,8 @@ typedef enum HdPlane {
   kHdPlane_Tiles = 2,
 } HdPlane;
 
-typedef enum HdConditionKind {
-  kHdCond_WramByte = 0,  /* g_ram[address] vs value */
-  kHdCond_BgMode = 1,    /* (bgmode & 7) vs value */
-  kHdCond_M7Element = 2, /* (uint16)m7matrix[address] vs value */
-  kHdCond_M7Identity = 3,
-} HdConditionKind;
-
-typedef struct HdCondition {
-  uint8 kind;
-  uint8 negate; /* 0: ==, 1: != */
-  uint16 address;
-  uint16 value;
-} HdCondition;
-
 enum {
   kHdMaxReplacements = 16,
-  kHdMaxConditions = 8,
   kHdMaxName = 48,
   kHdMaxPath = 512,
 };
@@ -73,7 +59,7 @@ typedef struct HdReplacement {
   bool canvas_wrap;
   char image[kHdMaxPath]; /* resolved relative to the manifest */
   bool brightness_mod; /* default true: follow INIDISP master brightness */
-  HdCondition conditions[kHdMaxConditions];
+  AssetCondition conditions[kAssetMaxConditions];
   int condition_count;
 
   /* Host-owned art. Screen-plane resources use an opaque renderer handle.
@@ -96,14 +82,6 @@ int HdReplacements_Load(const char *path);
 /* The game adapter publishes the active opaque runner for gate queries and
  * synchronous capture claims, and clears it before runner destruction. */
 void HdReplacements_BindRunner(SrRunnerHandle *runner);
-
-/* The gate mini-language is shared with the music manifest sections
- * (music_replacements.c): one comparison term / one full comma-separated
- * `when` value, and the matching evaluator. Both mutate the input string. */
-bool HdManifest_ParseCondition(char *term, HdCondition *cond);
-bool HdManifest_ParseWhen(char *value, HdCondition *conditions, int max,
-                          int *count);
-bool HdManifest_ConditionPasses(const HdCondition *cond);
 
 /* Per-frame game policy: evaluate every screen-plane entry's gate and request
  * overlay captures for the winners. Call from the frame hook after the other

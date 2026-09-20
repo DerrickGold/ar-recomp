@@ -49,11 +49,15 @@ void SimRenderMetadata_TraceFrame(uint32_t host_frame,
                                   const uint8_t *rgba, int width, int height,
                                   int pitch) {
   TraceInitFromEnvironment();
-  if (!g_sim_d1_trace || !frame || frame->view == kSimView_None) return;
+  if (!g_sim_d1_trace || !frame ||
+      (frame->view == kSimView_None &&
+       frame->view_reason == kSimViewReason_OutsideScene)) return;
+  const SimPresentationDecision decision = Sim3D_PresentationDecision(frame);
 
   fprintf(g_sim_d1_trace,
           "{\"host_frame\":%u,\"game_frame\":%u,\"town\":%u,"
           "\"view\":\"%s\",\"picker_flag\":%u,"
+          "\"presentation_view\":\"%s\",\"presentation_reason\":\"%s\","
           "\"miracle\":[%u,%u,%u,%u,%u],"
           "\"navigation_valid\":%s,\"world_focus\":[%u,%u],"
           "\"world_scroll\":[%u,%u],"
@@ -102,6 +106,7 @@ void SimRenderMetadata_TraceFrame(uint32_t host_frame,
           (unsigned)host_frame, (unsigned)frame->game_frame,
           (unsigned)frame->town,
           Sim3D_ViewName(frame->view), (unsigned)frame->picker_flag,
+          Sim3D_ViewName(decision.view), decision.reason,
           (unsigned)frame->miracle_kind,
           (unsigned)frame->miracle_user_active,
           (unsigned)frame->miracle_posted_active,

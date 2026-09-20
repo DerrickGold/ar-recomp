@@ -1,3 +1,4 @@
+#include "actraiser/actraiser_room_profiles.h"
 #include "snesrecomp/support/utf8_fs.h"
 
 #include "diorama.h"
@@ -2653,8 +2654,8 @@ static void PrepareDioramaWaterfall(const DioramaCapture *capture,
   attached->vertex_count = attached->index_count = 0;
 
   const bool aitos_waterfall_extension =
-      scene->map_group == kActRaiserMapGroup_Aitos && scene->map_number >= 2 &&
-      scene->map_number <= 3 &&
+      ActRaiserRoom_ProfileFor(scene->map_group, scene->map_number) ==
+          kActRaiserRoomProfile_AitosWaterfall &&
       scene->layer_section == kDioramaLayerSection_AitosWaterfall &&
       (layer->description->plane == SR_PPU_OVERLAY_BG2 ||
        layer->description->plane == kDioramaPlane_Bg2Hi ||

@@ -29,7 +29,8 @@ type assetTrack struct {
 	Name          string
 	Src           string
 	PreviewSource uint32
-	PreviewSong   byte
+	PreviewSong   byte   `json:"preview_song"`
+	DefaultFile   string `json:"file"`
 	Loop          *bool
 	// Regions are the action map groups ($18) whose maps DECLARE this song,
 	// read straight out of the ROM by `tools/act_content.py --songs`: the
@@ -102,51 +103,6 @@ func splitRegions(track assetTrack) []assetRegion {
 		}
 	}
 	return offered
-}
-
-func boolPointer(value bool) *bool { return &value }
-
-// The complete 17-entry song-image table. Slot 07 is the separately named
-// title-theme record; an entry whose musical identity is not established is
-// listed as "Track NN", after its song-table slot. That lets players
-// render/listen to every image and map it back to [music:song-NN] without the
-// UI inventing a title -- and without labelling a third of the list
-// "Unidentified", which described the project's knowledge rather than the
-// track and read as though something were missing.
-//
-// A name here must survive the ROM. `tools/act_content.py --songs` reads which
-// maps declare each song, and two former names claimed a PLACE the game
-// contradicts: song-02 ("Bloodpool") also carries Kasandora's act 1, and
-// song-09 ("Act 2 Theme") is act 1 in Marahna. Both are back to their slot
-// numbers rather than pointing a player at the wrong level. Names that describe
-// the MUSIC rather than a location -- "Advent", "Birth of the People",
-// "Sacrifices", "Level Up" -- make no claim the map table can refute, and
-// song-00 ("Fillmore") stays because the ROM confirms it exactly: Fillmore act
-// 1, nowhere else.
-//
-// song-16 was "Kasandora", which the map table refutes -- it is declared in all
-// six towns and the Temple, never in the Kasandora ACT region. It is
-// "Sacrifices", a town variant theme, which the same table corroborates: the
-// towns each declare four songs at slots $00-$03, and this one is slot $01
-// beside "Birth of the People" at slot $00.
-var assetTracks = []assetTrack{
-	{ID: "title-theme", Name: "Title Theme", Src: "1A:94B8", PreviewSource: 0x1a94b8, PreviewSong: 1},
-	{ID: "song-00", Name: "Fillmore", Src: "18:947F", PreviewSource: 0x18947f, PreviewSong: 1, Regions: []trackRegion{{0x01, actOne}}},
-	{ID: "song-01", Name: "Sky Palace", Src: "1C:A988", PreviewSource: 0x1ca988, PreviewSong: 1},
-	{ID: "song-02", Name: "Track 02", Src: "18:DDCC", PreviewSource: 0x18ddcc, PreviewSong: 1, Regions: []trackRegion{{0x02, actOne | actTwo}, {0x03, actOne}}},
-	{ID: "song-03", Name: "Track 03", Src: "1A:E9E2", PreviewSource: 0x1ae9e2, PreviewSong: 1, Regions: []trackRegion{{0x04, actOne}, {0x05, actOne}, {0x06, actOne}}},
-	{ID: "song-04", Name: "Track 04", Src: "1C:A5FB", PreviewSource: 0x1ca5fb, PreviewSong: 1},
-	{ID: "song-05", Name: "Track 05", Src: "1B:8554", PreviewSource: 0x1b8554, PreviewSong: 1, Regions: []trackRegion{{0x04, actOne | actTwo}, {0x05, actTwo}}},
-	{ID: "song-06", Name: "Track 06", Src: "1B:9470", PreviewSource: 0x1b9470, PreviewSong: 1, Regions: []trackRegion{{0x01, actTwo}, {0x02, actTwo}, {0x03, actTwo}, {0x04, actTwo}, {0x05, actTwo}, {0x06, actTwo}, {0x07, 0}}},
-	{ID: "song-08", Name: "Advent", Src: "1C:A7CC", PreviewSource: 0x1ca7cc, PreviewSong: 1, Loop: boolPointer(false)},
-	{ID: "song-09", Name: "Track 09", Src: "0E:F69F", PreviewSource: 0x0ef69f, PreviewSong: 1, Regions: []trackRegion{{0x01, actTwo}, {0x03, actTwo}, {0x05, actOne}}},
-	{ID: "song-10", Name: "Birth of the People", Src: "1B:ABED", PreviewSource: 0x1babed, PreviewSong: 1},
-	{ID: "song-11", Name: "Level Up", Src: "1C:AFEB", PreviewSource: 0x1cafeb, PreviewSong: 1},
-	{ID: "song-12", Name: "Track 12", Src: "19:FA4B", PreviewSource: 0x19fa4b, PreviewSong: 1, Regions: []trackRegion{{0x06, actOne}}},
-	{ID: "song-13", Name: "Track 13", Src: "17:C027", PreviewSource: 0x17c027, PreviewSong: 1, Regions: []trackRegion{{0x06, actTwo}}},
-	{ID: "song-14", Name: "Track 14", Src: "18:D4FA", PreviewSource: 0x18d4fa, PreviewSong: 1, Regions: []trackRegion{{0x07, 0}}},
-	{ID: "song-15", Name: "Track 15", Src: "1C:9F3D", PreviewSource: 0x1c9f3d, PreviewSong: 1},
-	{ID: "song-16", Name: "Sacrifices", Src: "1A:EF63", PreviewSource: 0x1aef63, PreviewSong: 1},
 }
 
 // assetRegion is one action region, keyed by the map-group byte the game keeps
@@ -834,11 +790,8 @@ func stageAudioUpload(root, target string,
 // path it originally had rather than a second invented convention.
 var templateAudioPaths = func() map[string]string {
 	paths := make(map[string]string, len(assetTracks))
-	template := string(assetManifestTemplate)
 	for _, track := range assetTracks {
-		if value, found := manifestSectionValue(template, "music:"+track.ID, "file"); found {
-			paths[track.ID] = value
-		}
+		paths[track.ID] = track.DefaultFile
 	}
 	return paths
 }()

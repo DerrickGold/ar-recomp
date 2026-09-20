@@ -1181,56 +1181,40 @@ static void RandoChanged(const SettingDesc *desc) {
     .category = kSettingCat_Enhancements, .field = &g_settings.id, \
     .defval = def, .minval = lo, .maxval = hi, .step = 1, \
     .parse = parser, .game_change_kind = kind }
-#define ACTION_SETTING(id, text, help) \
-  { id, NULL, text, help, kSettingType_Action, kApply_Action, \
-    kSettingCat_Extras, NULL, 0, 0, 0, 0, false, NULL, 0, NULL, NULL, \
-    NULL, NULL }
-/* Both reset actions live on their mode's Camera tab, beside the pose rows
- * they restore — hence the category here rather than the mode's Scene tab. */
-#define PRESENTATION_ACTION_SETTING(id, text, help) \
-  { id, NULL, text, help, kSettingType_Action, kApply_Action, \
-    kSettingCat_DioramaCamera, NULL, 0, 0, 0, 0, false, NULL, 0, \
-    Diorama_ModeIsOn, NULL, NULL, NULL }
-#define SIM_ACTION_SETTING(id, text, help) \
-  { id, NULL, text, help, kSettingType_Action, kApply_Action, \
-    kSettingCat_SimCamera, NULL, 0, 0, 0, 0, false, NULL, 0, \
-    Sim3D_ModeIsOn, NULL, NULL, NULL }
-#define INSPECTOR_ACTION_SETTING(id, text, help) \
-  { id, NULL, text, help, kSettingType_Action, kApply_Action, \
-    kSettingCat_Inspector, NULL, 0, 0, 0, 0, false, NULL, 0, NULL, NULL, \
-    NULL, NULL }
-#define MANUAL_ACTION_SETTING(id, text, help) \
-  { id, NULL, text, help, kSettingType_Action, kApply_Action, \
-    kSettingCat_Manual, NULL, 0, 0, 0, 0, false, NULL, 0, NULL, NULL, \
-    NULL, NULL }
-#define SAVE_ACTION_SETTING(id, text, help) \
-  { id, NULL, text, help, kSettingType_Action, kApply_Action, \
-    kSettingCat_Save, NULL, 0, 0, 0, 0, false, NULL, 0, NULL, NULL, \
-    NULL, NULL }
+#define ACTION_SETTING(id, action_id, category_id, available_fn, hidden, text, help) \
+  { .key = id, .label = text, .tooltip = help, \
+    .type = kSettingType_Action, .apply = kApply_Action, \
+    .category = category_id, .available = available_fn, \
+    .action = action_id, .menu_hidden = hidden }
 #define SAVE_PROGRESS_SETTING(index, id, env_name, text, help) \
   { id, env_name, text, help, kSettingType_Enum, kApply_Save, \
     kSettingCat_Save, &g_settings.save_region_progress[index], \
     kSaveProgressEdit_LeaveAsIs, kSaveProgressEdit_LeaveAsIs, \
     kSaveProgressEdit_Act2Cleared, 1, false, kSaveProgressEditLabels, \
-    kSaveProgressEdit_Count, NULL, NULL, ParseSaveProgressEdit, NULL }
+    kSaveProgressEdit_Count, NULL, NULL, ParseSaveProgressEdit, NULL, \
+    .save_page = kSaveEditorPage_Progress }
 #define SAVE_STAGE_DIRECT(field_name, id, text, help, maximum) \
   { id, NULL, text, help, kSettingType_Int, kApply_Save, \
     kSettingCat_Save, &g_settings.field_name, 0, 0, maximum, 1, false, \
-    NULL, 0, NULL, NULL, ParseStagedDirect, FormatStagedDirect }
+    NULL, 0, NULL, NULL, ParseStagedDirect, FormatStagedDirect, \
+    .save_page = kSaveEditorPage_Status }
 #define SAVE_STAGE_ZERO(field_name, id, text, help, maximum) \
   { id, NULL, text, help, kSettingType_Int, kApply_Save, \
     kSettingCat_Save, &g_settings.field_name, 0, 0, (maximum) + 1, 1, false, \
-    NULL, 0, NULL, NULL, ParseStagedZeroBased, FormatStagedZeroBased }
-#define SAVE_ENUM_FIELD(field_ptr, id, text, help, labels) \
+    NULL, 0, NULL, NULL, ParseStagedZeroBased, FormatStagedZeroBased, \
+    .save_page = kSaveEditorPage_Status }
+#define SAVE_ENUM_FIELD(page, field_ptr, id, text, help, labels) \
   { id, NULL, text, help, kSettingType_Enum, kApply_Save, \
     kSettingCat_Save, field_ptr, 0, 0, \
     (int)(sizeof(labels) / sizeof((labels)[0])) - 1, 1, false, labels, \
-    (int)(sizeof(labels) / sizeof((labels)[0])), NULL, NULL, NULL, NULL }
+    (int)(sizeof(labels) / sizeof((labels)[0])), NULL, NULL, NULL, NULL, \
+    .save_page = page }
 #define SAVE_SCORE_FIELD(region, act, id, text) \
   { id, NULL, text, "Stage the saved BCD score (0-99990 by 10).", \
     kSettingType_Int, kApply_Save, kSettingCat_Save, \
     &g_settings.save_scores[region][act], 0, 0, 10000, 1, false, \
-    NULL, 0, NULL, NULL, ParseStagedScore, FormatStagedScore }
+    NULL, 0, NULL, NULL, ParseStagedScore, FormatStagedScore, \
+    .save_page = kSaveEditorPage_Scores }
 
 const SettingDesc g_setting_descs[] = {
   { "interface_language", "AR_INTERFACE_LANGUAGE", "Interface language",
@@ -1948,7 +1932,8 @@ const SettingDesc g_setting_descs[] = {
     kSettingType_Int, kApply_Passive, kSettingCat_Simulation,
     &g_settings.sim3d_height_pop_pct, 0, 0, 50, 1, false, NULL, 0,
     Sim3DVirtualHeightEnabled, NULL, NULL, NULL, .modern_env = true },
-  SIM_ACTION_SETTING("sim3d_reset_camera", "Reset camera",
+  ACTION_SETTING("sim3d_reset_camera", kSettingAction_SimCameraReset,
+                 kSettingCat_SimCamera, Sim3D_ModeIsOn, false, "Reset camera",
                      "Return the camera mode in use to its default pitch, yaw, and distance."),
   BOOL_SETTING(diorama_mode, NULL, "Diorama 3D",
                "Render action-stage layers as tilted 3D planes (action stages only; needs the new renderer).",
@@ -2098,7 +2083,8 @@ const SettingDesc g_setting_descs[] = {
                "scalable, and screen-anchored like flat mode. Off: it is an "
                "unanchored tilted plane in the box, matching the pre-fix look.",
                kSettingCat_Presentation, 1, false, Diorama_ModeIsOn, NULL),
-  PRESENTATION_ACTION_SETTING("diorama_reset", "Reset defaults",
+  ACTION_SETTING("diorama_reset", kSettingAction_DioramaReset,
+                 kSettingCat_DioramaCamera, Diorama_ModeIsOn, false, "Reset defaults",
                               "Return all diorama controls to their defaults."),
   /* Load-only migration alias; Refresh rate is the sole live control. */
   BOOL_SETTING(uncapped_framerate, NULL, "Uncapped framerate",
@@ -2274,7 +2260,7 @@ const SettingDesc g_setting_descs[] = {
     kSettingType_Enum, kApply_Passive, kSettingCat_Input,
     &g_settings.input_bind_page, kInputClass_Keyboard, kInputClass_Keyboard,
     kInputClass_Gamepad, 1, false, kInputClassLabels, kInputClass_Count,
-    NULL, NULL, NULL, NULL },
+    NULL, NULL, NULL, NULL, .menu_hidden = true },
   BOOL_SETTING(input_stick_as_dpad, NULL, "Left stick as D-Pad",
                "Steer with the left analog stick in addition to the D-Pad. "
                "Recommended on Steam Deck.",
@@ -2401,7 +2387,7 @@ const SettingDesc g_setting_descs[] = {
     "Raw hexadecimal region/map target used by Warp now; see docs/manual.md for verified values.",
     kSettingType_Custom, kApply_Passive, kSettingCat_Extras,
     &g_settings.warp_target, 0x0101, 0, 0xffff, 1, false, NULL, 0,
-    NULL, NULL, ParseWarpTarget, FormatWarpTarget },
+    NULL, NULL, ParseWarpTarget, FormatWarpTarget, .menu_hidden = true },
   /* ---- Randomizer (src/randomizer.c). Descriptors only; every one of these
    * is read by the ROM-image transform, which re-runs whenever one changes. */
   BOOL_SETTING(rando_enable, "AR_RANDO", "Randomizer",
@@ -2419,7 +2405,8 @@ const SettingDesc g_setting_descs[] = {
   { "rando_reroll", NULL, "New seed",
     "Draw a fresh random seed and re-apply.",
     kSettingType_Action, kApply_Action, kSettingCat_RandoSeed,
-    NULL, 0, 0, 0, 0, false, NULL, 0, RandoAvailable, NULL, NULL, NULL },
+    NULL, 0, 0, 0, 0, false, NULL, 0, RandoAvailable, NULL, NULL, NULL,
+    .action = kSettingAction_Reroll },
 
   INT_SETTING(rando_enemy_hp, "AR_RANDO_ENEMY_HP", "Enemy health",
               "Percent of stock hit points for every enemy and boss. A handful "
@@ -2476,16 +2463,16 @@ const SettingDesc g_setting_descs[] = {
                "Click the game to pause and identify BG tiles, OAM sprites, "
                "VRAM addresses, palettes, hashes, and manifest gates.",
                kSettingCat_Inspector, 0, false, NULL, NULL),
-  INSPECTOR_ACTION_SETTING(
-      "dump_scene_assets", "Dump scene assets",
+  ACTION_SETTING("dump_scene_assets", kSettingAction_DumpSceneAssets,
+                 kSettingCat_Inspector, NULL, false, "Dump scene assets",
       "Export every resident BG tilemap, OBJ animation-tile atlas, all 128 "
       "OAM sprites, palettes, raw PPU memory, and a metadata index as PNG "
       "and data files in this run's diagnostic folder."),
   /* The in-game manual. Its own section rather than a row under System > Tools:
    * it is something a player reaches for, not a host command, and the reader it
    * opens is a full mode rather than a toggle. */
-  MANUAL_ACTION_SETTING(
-      "manual_open", "Read the manual",
+  ACTION_SETTING("manual_open", kSettingAction_Manual,
+                 kSettingCat_Manual, NULL, false, "Read the manual",
       "Open the scanned game manual. Arrows or the shoulder buttons turn "
       "pages, +/- zooms, Escape returns here."),
   BOOL_SETTING(manual_spreads, NULL, "Two-page spreads",
@@ -2493,23 +2480,31 @@ const SettingDesc g_setting_descs[] = {
                "Artwork drawn across the gutter stays whole; turn this off to "
                "read one page at a time, which suits a wide, short manual.",
                kSettingCat_Manual, true, false, NULL, NULL),
-  ACTION_SETTING("toggle_pause", "Pause / resume",
+  ACTION_SETTING("toggle_pause", kSettingAction_TogglePause,
+                 kSettingCat_Extras, NULL, false, "Pause / resume",
                  "Toggle game pause after the settings overlay closes."),
-  ACTION_SETTING("toggle_turbo", "Toggle turbo",
+  ACTION_SETTING("toggle_turbo", kSettingAction_ToggleTurbo,
+                 kSettingCat_Extras, NULL, false, "Toggle turbo",
                  "Toggle fast-forward using the configured turbo multiplier."),
-  ACTION_SETTING("save_state", "Save state",
+  ACTION_SETTING("save_state", kSettingAction_SaveState,
+                 kSettingCat_Extras, NULL, true, "Save state",
                  "Capture a debug hardware/RAM snapshot (F5). Inspection "
                  "only; this is not a resumable save state."),
-  ACTION_SETTING("load_state", "Load state",
+  ACTION_SETTING("load_state", kSettingAction_LoadState,
+                 kSettingCat_Extras, NULL, true, "Load state",
                  "Unsupported debug restore (F7). Requests are rejected "
                  "without changing game state; use battery saves instead."),
-  ACTION_SETTING("warp_now", "Warp now",
+  ACTION_SETTING("warp_now", kSettingAction_Warp,
+                 kSettingCat_Extras, NULL, true, "Warp now",
                  "Stage the configured raw warp target through the game's transition path."),
-  ACTION_SETTING("take_snapshot", "Take snapshot",
+  ACTION_SETTING("take_snapshot", kSettingAction_Snapshot,
+                 kSettingCat_Extras, NULL, false, "Take snapshot",
                  "Capture WRAM, VRAM, CGRAM, OAM, and the current game framebuffer."),
-  ACTION_SETTING("restart_game", "Restart game",
+  ACTION_SETTING("restart_game", kSettingAction_Restart,
+                 kSettingCat_Extras, NULL, false, "Restart game",
                  "Persist settings and battery SRAM, then restart the application."),
-  ACTION_SETTING("exit_desktop", "Exit to desktop",
+  ACTION_SETTING("exit_desktop", kSettingAction_Exit,
+                 kSettingCat_Extras, NULL, false, "Exit to desktop",
                  "Persist settings and battery SRAM, then close the application."),
   { "save_backend", "AR_SAVE_BACKEND", "Save storage format",
     "Choose the authoritative native-srm or lossless INI backend after restart.",
@@ -2527,7 +2522,7 @@ const SettingDesc g_setting_descs[] = {
     kSettingType_Enum, kApply_Passive, kSettingCat_Save,
     &g_settings.save_editor_page, kSaveEditorPage_Actions,
     kSaveEditorPage_Actions, kSaveEditorPage_Count - 1, 1, false,
-    kSaveEditorPageLabels, kSaveEditorPage_Count, NULL, NULL, NULL, NULL },
+    kSaveEditorPageLabels, kSaveEditorPage_Count, NULL, NULL, NULL, NULL, .menu_hidden = true },
   SAVE_PROGRESS_SETTING(0, "save_prog_fillmore", "AR_SAVE_PROG_FILLMORE",
                         "Fillmore State", "Stage Fillmore's Act/state flags."),
   SAVE_PROGRESS_SETTING(1, "save_prog_bloodpool", "AR_SAVE_PROG_BLOODPOOL",
@@ -2540,11 +2535,11 @@ const SettingDesc g_setting_descs[] = {
                         "Marahna State", "Stage Marahna's Act/state flags."),
   SAVE_PROGRESS_SETTING(5, "save_prog_northwall", "AR_SAVE_PROG_NORTHWALL",
                         "Northwall State", "Stage Northwall's Act/state flags."),
-  SAVE_ENUM_FIELD(&g_settings.save_death_heim_state,
+  SAVE_ENUM_FIELD(kSaveEditorPage_Progress, &g_settings.save_death_heim_state,
                   "save_death_heim_state", "Death Heim State",
                   "Stage Death Heim as locked, unlocked, or cleared.",
                   kSaveDeathHeimLabels),
-  SAVE_ENUM_FIELD(&g_settings.save_professional_mode,
+  SAVE_ENUM_FIELD(kSaveEditorPage_Progress, &g_settings.save_professional_mode,
                   "save_professional_mode", "Professional Mode",
                   "Stage the title-screen Professional mode unlock marker.",
                   kSaveProfessionalLabels),
@@ -2552,7 +2547,8 @@ const SettingDesc g_setting_descs[] = {
     "Stage the saved player name (1-8 printable characters).",
     kSettingType_Custom, kApply_Save, kSettingCat_Save,
     g_settings.save_player_name, 0, 0, 0, 0, false,
-    NULL, 0, NULL, NULL, ParseSavePlayerName, FormatSavePlayerName },
+    NULL, 0, NULL, NULL, ParseSavePlayerName, FormatSavePlayerName,
+    .save_page = kSaveEditorPage_Status },
   SAVE_STAGE_DIRECT(save_master_level, "save_master_level", "Master Level",
                     "Stage the persistent Master level (1-17).", 17),
   SAVE_STAGE_DIRECT(save_master_hp, "save_master_hp", "Master HP",
@@ -2571,48 +2567,48 @@ const SettingDesc g_setting_descs[] = {
                     "Angel Maximum HP", "Stage maximum Angel health (1-24).", 24),
   SAVE_STAGE_ZERO(save_message_speed, "save_message_speed", "Message Speed",
                   "Stage the saved native dialogue-speed value (0-9).", 9),
-  SAVE_ENUM_FIELD(&g_settings.save_equipped_magic,
+  SAVE_ENUM_FIELD(kSaveEditorPage_Magic, &g_settings.save_equipped_magic,
                   "save_equipped_magic", "Equipped Magic",
                   "Stage the equipped spell; that spell must exist in a magic slot.",
                   kSaveEquippedMagicLabels),
-  SAVE_ENUM_FIELD(&g_settings.save_magic_slots[0],
+  SAVE_ENUM_FIELD(kSaveEditorPage_Magic, &g_settings.save_magic_slots[0],
                   "save_magic_slot_1", "Magic Slot 1",
                   "Stage the spell stored in magic inventory slot 1.",
                   kSaveMagicSlotLabels),
-  SAVE_ENUM_FIELD(&g_settings.save_magic_slots[1],
+  SAVE_ENUM_FIELD(kSaveEditorPage_Magic, &g_settings.save_magic_slots[1],
                   "save_magic_slot_2", "Magic Slot 2",
                   "Stage the spell stored in magic inventory slot 2.",
                   kSaveMagicSlotLabels),
-  SAVE_ENUM_FIELD(&g_settings.save_magic_slots[2],
+  SAVE_ENUM_FIELD(kSaveEditorPage_Magic, &g_settings.save_magic_slots[2],
                   "save_magic_slot_3", "Magic Slot 3",
                   "Stage the spell stored in magic inventory slot 3.",
                   kSaveMagicSlotLabels),
-  SAVE_ENUM_FIELD(&g_settings.save_magic_slots[3],
+  SAVE_ENUM_FIELD(kSaveEditorPage_Magic, &g_settings.save_magic_slots[3],
                   "save_magic_slot_4", "Magic Slot 4",
                   "Stage the spell stored in magic inventory slot 4.",
                   kSaveMagicSlotLabels),
-  SAVE_ENUM_FIELD(&g_settings.save_item_slots[0],
+  SAVE_ENUM_FIELD(kSaveEditorPage_Items, &g_settings.save_item_slots[0],
                   "save_item_slot_1", "Item Slot 1",
                   "Stage the item stored in inventory slot 1.", kSaveItemLabels),
-  SAVE_ENUM_FIELD(&g_settings.save_item_slots[1],
+  SAVE_ENUM_FIELD(kSaveEditorPage_Items, &g_settings.save_item_slots[1],
                   "save_item_slot_2", "Item Slot 2",
                   "Stage the item stored in inventory slot 2.", kSaveItemLabels),
-  SAVE_ENUM_FIELD(&g_settings.save_item_slots[2],
+  SAVE_ENUM_FIELD(kSaveEditorPage_Items, &g_settings.save_item_slots[2],
                   "save_item_slot_3", "Item Slot 3",
                   "Stage the item stored in inventory slot 3.", kSaveItemLabels),
-  SAVE_ENUM_FIELD(&g_settings.save_item_slots[3],
+  SAVE_ENUM_FIELD(kSaveEditorPage_Items, &g_settings.save_item_slots[3],
                   "save_item_slot_4", "Item Slot 4",
                   "Stage the item stored in inventory slot 4.", kSaveItemLabels),
-  SAVE_ENUM_FIELD(&g_settings.save_item_slots[4],
+  SAVE_ENUM_FIELD(kSaveEditorPage_Items, &g_settings.save_item_slots[4],
                   "save_item_slot_5", "Item Slot 5",
                   "Stage the item stored in inventory slot 5.", kSaveItemLabels),
-  SAVE_ENUM_FIELD(&g_settings.save_item_slots[5],
+  SAVE_ENUM_FIELD(kSaveEditorPage_Items, &g_settings.save_item_slots[5],
                   "save_item_slot_6", "Item Slot 6",
                   "Stage the item stored in inventory slot 6.", kSaveItemLabels),
-  SAVE_ENUM_FIELD(&g_settings.save_item_slots[6],
+  SAVE_ENUM_FIELD(kSaveEditorPage_Items, &g_settings.save_item_slots[6],
                   "save_item_slot_7", "Item Slot 7",
                   "Stage the item stored in inventory slot 7.", kSaveItemLabels),
-  SAVE_ENUM_FIELD(&g_settings.save_item_slots[7],
+  SAVE_ENUM_FIELD(kSaveEditorPage_Items, &g_settings.save_item_slots[7],
                   "save_item_slot_8", "Item Slot 8",
                   "Stage the item stored in inventory slot 8.", kSaveItemLabels),
   SAVE_SCORE_FIELD(0, 0, "save_score_fillmore_1", "Fillmore Act 1"),
@@ -2627,15 +2623,20 @@ const SettingDesc g_setting_descs[] = {
   SAVE_SCORE_FIELD(4, 1, "save_score_marahna_2", "Marahna Act 2"),
   SAVE_SCORE_FIELD(5, 0, "save_score_northwall_1", "Northwall Act 1"),
   SAVE_SCORE_FIELD(5, 1, "save_score_northwall_2", "Northwall Act 2"),
-  SAVE_ACTION_SETTING("save_apply_session", "Apply for session",
+  ACTION_SETTING("save_apply_session", kSettingAction_SaveApplySession,
+                 kSettingCat_Save, NULL, false, "Apply for session",
                       "Apply only to live SRAM; use a natural return to title, not Restart."),
-  SAVE_ACTION_SETTING("save_apply_persist", "Apply and save",
+  ACTION_SETTING("save_apply_persist", kSettingAction_SaveApplyPersist,
+                 kSettingCat_Save, NULL, false, "Apply and save",
                       "Back up and save staged fields; then Restart Game and Continue."),
-  SAVE_ACTION_SETTING("save_import", "Import save",
+  ACTION_SETTING("save_import", kSettingAction_SaveImport,
+                 kSettingCat_Save, NULL, false, "Import save",
                       "Import saves/import.srm, then saves/import.ini, or AR_SAVE_IMPORT."),
-  SAVE_ACTION_SETTING("save_export_srm", "Export native SRAM",
+  ACTION_SETTING("save_export_srm", kSettingAction_SaveExportSrm,
+                 kSettingCat_Save, NULL, false, "Export native SRAM",
                       "Export the current exact image to saves/export.srm."),
-  SAVE_ACTION_SETTING("save_export_ini", "Export structured INI",
+  ACTION_SETTING("save_export_ini", kSettingAction_SaveExportIni,
+                 kSettingCat_Save, NULL, false, "Export structured INI",
                       "Export the current lossless image to saves/export.ini."),
   BOOL_SETTING(cheat_all_magic, "AR_ALL_MAGIC", "All magic",
                "Unlock all four spells; disabling cannot undo unlocks already written.",
@@ -2891,18 +2892,7 @@ bool Settings_IsMenuVisible(const SettingDesc *desc) {
    * Checked first so a debug row is hidden regardless of its category rules. */
   if (Settings_IsDebugOnly(desc) && !g_settings.show_debug_settings)
     return false;
-  if (desc->category == kSettingCat_Extras &&
-      (!strcmp(desc->key, "warp_target") ||
-       !strcmp(desc->key, "warp_now") ||
-       !strcmp(desc->key, "save_state") ||
-       !strcmp(desc->key, "load_state")))
-    return false;
-  /* input_bind_page and save_editor_page are still real, persisted settings,
-   * but the overlay now drives them from its tab bar rather than from a row
-   * the player scrolls to — so they no longer list themselves. */
-  if (!strcmp(desc->key, "input_bind_page") ||
-      !strcmp(desc->key, "save_editor_page"))
-    return false;
+  if (desc->menu_hidden) return false;
 
   /* The Gamepad row is pointless with nothing plugged in. */
   if (desc->category == kSettingCat_Input)
@@ -2919,35 +2909,7 @@ bool Settings_IsMenuVisible(const SettingDesc *desc) {
 
   if (desc->category != kSettingCat_Save) return true;
 
-  /* Save storage/safety controls and the apply/import/export commands now live
-   * on the dedicated Actions page instead of repeating on every payload page. */
-  if (desc->type == kSettingType_Action ||
-      !strcmp(desc->key, "save_backend") ||
-      !strcmp(desc->key, "save_edit_armed") ||
-      !strcmp(desc->key, "save_autobackup"))
-    return g_settings.save_editor_page == kSaveEditorPage_Actions;
-
-  switch (g_settings.save_editor_page) {
-    case kSaveEditorPage_Progress:
-      return !strncmp(desc->key, "save_prog_", 10) ||
-             !strcmp(desc->key, "save_death_heim_state") ||
-             !strcmp(desc->key, "save_professional_mode");
-    case kSaveEditorPage_Status:
-      return !strcmp(desc->key, "save_player_name") ||
-             !strncmp(desc->key, "save_master_", 12) ||
-             !strcmp(desc->key, "save_lives") ||
-             !strncmp(desc->key, "save_angel_", 11) ||
-             !strcmp(desc->key, "save_message_speed");
-    case kSaveEditorPage_Magic:
-      return !strcmp(desc->key, "save_equipped_magic") ||
-             !strncmp(desc->key, "save_magic_slot_", 16);
-    case kSaveEditorPage_Items:
-      return !strncmp(desc->key, "save_item_slot_", 15);
-    case kSaveEditorPage_Scores:
-      return !strncmp(desc->key, "save_score_", 11);
-    default:
-      return false;
-  }
+  return (int)desc->save_page == g_settings.save_editor_page;
 }
 
 bool Settings_GetLong(const SettingDesc *desc, long *value) {

@@ -3873,10 +3873,10 @@ static void DrawMenuRows(const MenuLayout *layout, const MenuChrome *c,
     if (!desc) continue;
     /* Commands are separated from the settings they act on. */
     if (category == kSettingCat_Save &&
-        !strcmp(desc->key, "save_apply_session"))
+        desc->action == kSettingAction_SaveApplySession)
       FillLogicalRect(layout, right_x + 12, y - 3, right_width - 24, 1,
                       structure_dim);
-    if (category == kSettingCat_Extras && !strcmp(desc->key, "restart_game"))
+    if (category == kSettingCat_Extras && desc->action == kSettingAction_Restart)
       FillLogicalRect(layout, right_x + 12, y - 3, right_width - 24, 1,
                       ARGB(160, 190, 96, 76));
     bool selected = s_submenu_open && row == s_row;

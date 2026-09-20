@@ -1,3 +1,4 @@
+#include "actraiser/actraiser_room_profiles.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -2082,15 +2083,15 @@ static void TestAitosAct2SideLavaReservoirIdentity(void) {
   ActionEffectObserver observer = {0};
   wram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_Aitos;
   wram[kActRaiserWram_CurrentMap] = 5;
-  CHECK(ActionEffects_IsAitosAct2LavaRoom(
-      kActRaiserMapGroup_Aitos, 4));
-  CHECK(ActionEffects_IsAitosAct2LavaRoom(
-      kActRaiserMapGroup_Aitos, 5));
-  CHECK(ActionEffects_IsAitosAct2LavaRoom(
-      kActRaiserMapGroup_Aitos, 6));
-  CHECK(!ActionEffects_IsAitosAct2LavaRoom(
-      kActRaiserMapGroup_Aitos, 3));
-  CHECK(!ActionEffects_IsAitosAct2LavaRoom(3, 5));
+  CHECK((ActRaiserRoom_ProfileFor(
+      kActRaiserMapGroup_Aitos, 4) == kActRaiserRoomProfile_AitosAct2Lava));
+  CHECK((ActRaiserRoom_ProfileFor(
+      kActRaiserMapGroup_Aitos, 5) == kActRaiserRoomProfile_AitosAct2Lava));
+  CHECK((ActRaiserRoom_ProfileFor(
+      kActRaiserMapGroup_Aitos, 6) == kActRaiserRoomProfile_AitosAct2Lava));
+  CHECK(!(ActRaiserRoom_ProfileFor(
+      kActRaiserMapGroup_Aitos, 3) == kActRaiserRoomProfile_AitosAct2Lava));
+  CHECK(!(ActRaiserRoom_ProfileFor(3, 5) == kActRaiserRoomProfile_AitosAct2Lava));
   Write16(wram, kActRaiserWram_GameFrame, 5009);
   Write16(wram, kActRaiserWram_Bg1Width, 512);
   Write16(wram, kActRaiserWram_Bg1Height, 256);

@@ -171,3 +171,23 @@ func (app *application) checkLocalizationIdentity(id, revision string) error {
 	}
 	return nil
 }
+
+func (work *localizationWork) checkLocalizationIdentity(id, revision string) error {
+	p := work.current
+	if p == nil || id != p.Pack().Manifest().Metadata().ID || revision != p.ProjectRevision() {
+		return fmt.Errorf("%w: project changed; reopen before continuing", lk.ErrProjectConflict)
+	}
+	return nil
+}
+
+// Extracting a comparison source is not opening a different author project.
+// Repeated extraction can reuse the identical read-only source, but cannot
+// silently overwrite a modified project with a colliding ID.
+
+func (work *localizationWork) saveLocalization(p *lk.AuthorProject, expected string) error {
+	if err := work.store.Save(p, expected); err != nil {
+		return err
+	}
+	work.current = p
+	return nil
+}

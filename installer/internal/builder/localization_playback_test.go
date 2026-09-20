@@ -68,7 +68,7 @@ func TestLocalizationPlaybackKeepsUnsavedTextAndFontsPrivate(t *testing.T) {
 		}
 		return textpreview.Movie{MessageID: id}, nil
 	}
-	q := localizationRequest{ProjectID: "playback.translation", Revision: before, ID: "dialogue.event.relay.aitos", Body: "Unsaved <span font=\"hud\">draft</span>.\n@end\n", Status: lk.TranslationWIP, SaveFonts: true, Fonts: lk.PackFonts{Primary: "builtin:actraiser-sans", Roles: []lk.PackFontRole{{Name: "hud", Primary: "builtin:actraiser-sans"}}}}
+	q := localizationDraftRequest{ProjectID: "playback.translation", Revision: before, ID: "dialogue.event.relay.aitos", Body: "Unsaved <span font=\"hud\">draft</span>.\n@end\n", Status: lk.TranslationWIP, SaveFonts: true, Fonts: lk.PackFonts{Primary: "builtin:actraiser-sans", Roles: []lk.PackFontRole{{Name: "hud", Primary: "builtin:actraiser-sans"}}}}
 	if _, err := work.playback(context.Background(), q); err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +97,7 @@ func TestLocalizationPlaybackPreservesOriginalFailureAndCancelsSibling(t *testin
 		<-started
 		return textpreview.Movie{}, errors.New("draft font could not load")
 	}
-	_, err := work.playback(context.Background(), localizationRequest{ProjectID: project.Pack().Manifest().Metadata().ID, Revision: project.ProjectRevision(), ID: "dialogue.event.relay.aitos", Body: "Draft.\n@end\n", Status: lk.TranslationWIP})
+	_, err := work.playback(context.Background(), localizationDraftRequest{ProjectID: project.Pack().Manifest().Metadata().ID, Revision: project.ProjectRevision(), ID: "dialogue.event.relay.aitos", Body: "Draft.\n@end\n", Status: lk.TranslationWIP})
 	if err == nil || !strings.Contains(err.Error(), "translation preview: draft font") {
 		t.Fatal(err)
 	}

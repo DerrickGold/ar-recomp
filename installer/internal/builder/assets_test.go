@@ -185,6 +185,11 @@ func TestAssetManifestTemplateCarriesEveryHook(t *testing.T) {
 		if !strings.Contains(template, section) {
 			t.Errorf("template has no %s", section)
 		}
+		for key, expected := range map[string]string{"src": track.Src, "file": track.DefaultFile} {
+			if actual, _ := manifestSectionValue(template, "music:"+track.ID, key); actual != expected {
+				t.Errorf("%s %s = %q, want catalog value %q; run tools/generate_music_catalog.py", section, key, actual, expected)
+			}
+		}
 	}
 	// Exactly the song-table slots: a split or a personal experiment leaking
 	// into the template is the thing this file exists to prevent.

@@ -1,3 +1,4 @@
+#include "actraiser/actraiser_room_profiles.h"
 #include "action_effects.h"
 
 #include <limits.h>
@@ -709,10 +710,6 @@ enum {
   kFlamingWheelBossMap = 0x07,
   kAitosBossSourceDescriptor = 0xD646,
   kAitosBossSwordBeamParentResume = 0xD793,
-  kAitosWaterfallFirstMap = 0x02,
-  kAitosWaterfallLastMap = 0x03,
-  kAitosAct2FirstLavaMap = 0x04,
-  kAitosAct2LastLavaMap = 0x06,
   /* Act 2 lake signature. $01 is the continuous bright side-view lip. The
    * row above interleaves transparent cells with animated splash/flame cells;
    * $77 is the map-$06 variant. $33/$34 and $2C/$32 are the two measured
@@ -818,25 +815,16 @@ static bool IsAitosStatueFireMap(const uint8_t *wram, size_t wram_size) {
 }
 
 static bool IsAitosWaterfallMap(const uint8_t *wram, size_t wram_size) {
-  if (!wram ||
-      Read8(wram, wram_size, kActRaiserWram_MapGroup) !=
-          kActRaiserMapGroup_Aitos)
-    return false;
-  const uint8_t map = Read8(wram, wram_size, kActRaiserWram_CurrentMap);
-  return map >= kAitosWaterfallFirstMap && map <= kAitosWaterfallLastMap;
-}
-
-bool ActionEffects_IsAitosAct2LavaRoom(uint8_t map_group,
-                                      uint8_t map_number) {
-  return map_group == kActRaiserMapGroup_Aitos &&
-      map_number >= kAitosAct2FirstLavaMap &&
-      map_number <= kAitosAct2LastLavaMap;
+  return wram && ActRaiserRoom_ProfileFor(
+      Read8(wram, wram_size, kActRaiserWram_MapGroup),
+      Read8(wram, wram_size, kActRaiserWram_CurrentMap)) ==
+          kActRaiserRoomProfile_AitosWaterfall;
 }
 
 static bool IsAitosAct2LavaMap(const uint8_t *wram, size_t wram_size) {
-  return wram && ActionEffects_IsAitosAct2LavaRoom(
+  return wram && (ActRaiserRoom_ProfileFor(
       Read8(wram, wram_size, kActRaiserWram_MapGroup),
-      Read8(wram, wram_size, kActRaiserWram_CurrentMap));
+      Read8(wram, wram_size, kActRaiserWram_CurrentMap)) == kActRaiserRoomProfile_AitosAct2Lava);
 }
 
 static bool ActionObjectVisible(const ActionObjectSnapshot *object) {

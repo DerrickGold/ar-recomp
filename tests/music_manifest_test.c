@@ -89,7 +89,7 @@ static void TestParseEntries(void) {
   CHECK(boss->loop_start == 44100 && boss->loop_end == 220500);
   CHECK(boss->gain_percent == 80);
   CHECK(boss->condition_count == 1);
-  CHECK(boss->conditions[0].kind == kHdCond_WramByte);
+  CHECK(boss->conditions[0].kind == kAssetCondition_WramByte);
   CHECK(boss->conditions[0].address == 0xA2);
   CHECK(boss->conditions[0].value == 3);
 }

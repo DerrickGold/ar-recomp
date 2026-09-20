@@ -1,3 +1,4 @@
+#include "actraiser/actraiser_room_profiles.h"
 /* Present-time rendering is isolated from live game state. This file must NOT
  * declare or extern g_ppu, g_settings, g_snes_width, g_ws_extra,
  * g_active_pixel_aspect, or call Settings_Visible*() — every present-time
@@ -1295,8 +1296,9 @@ static void FailActionHeatTargetState(const char *operation) {
 
 static bool FrameUsesActionHeat(const FrameSlot *slot) {
   if (!slot || !slot->action_effect_particles || slot->diorama_active ||
-      !ActionEffects_IsAitosAct2LavaRoom(
-          slot->diorama_map_group, slot->diorama_map_number) ||
+      ActRaiserRoom_ProfileFor(
+          slot->diorama_map_group, slot->diorama_map_number) !=
+              kActRaiserRoomProfile_AitosAct2Lava ||
       slot->action_scene_effects.decoration_overflow ||
       slot->action_scene_effects.decoration_count >
           kActionSceneDecorationMaxInstances)
@@ -2128,7 +2130,8 @@ void PresentCompositeScene(const FrameSlot *slot, float alpha) {
     return;
   }
 
-  if (slot->sim.view == kSimView_Enhanced && slot->sim.separated_valid) {
+  const SimPresentationDecision sim_view = Sim3D_PresentationDecision(&slot->sim);
+  if (sim_view.view == kSimView_Enhanced) {
     const PresentationOutcome sim = PresentSim3D(slot);
     if (!PresentationOutcome_IsUsable(sim)) {
       SessionFatal_Request(
@@ -2139,7 +2142,7 @@ void PresentCompositeScene(const FrameSlot *slot, float alpha) {
     }
     return;
   }
-  if (slot->sim.view == kSimView_WorldNavigation) {
+  if (sim_view.view == kSimView_WorldNavigation) {
     const PresentationOutcome navigation = PresentWorldNavigation3D(slot);
     if (PresentationOutcome_IsUsable(navigation)) return;
     SessionFatal_Request(

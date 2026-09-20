@@ -239,6 +239,30 @@ typedef enum SaveEditorPage {
   kSaveEditorPage_Count,
 } SaveEditorPage;
 
+/* Each action descriptor names its runtime operation; keys remain storage/UI IDs. */
+typedef enum SettingAction {
+  kSettingAction_None = 0,
+  kSettingAction_TogglePause,
+  kSettingAction_ToggleTurbo,
+  kSettingAction_SaveState,
+  kSettingAction_LoadState,
+  kSettingAction_Warp,
+  kSettingAction_Snapshot,
+  kSettingAction_Manual,
+  kSettingAction_Reroll,
+  kSettingAction_DioramaReset,
+  kSettingAction_SimCameraReset,
+  kSettingAction_DumpSceneAssets,
+  kSettingAction_SaveApplySession,
+  kSettingAction_SaveApplyPersist,
+  kSettingAction_SaveImport,
+  kSettingAction_SaveExportSrm,
+  kSettingAction_SaveExportIni,
+  kSettingAction_Restart,
+  kSettingAction_Exit,
+  kSettingAction_Count,
+} SettingAction;
+
 typedef struct SettingDesc SettingDesc;
 typedef bool (*SettingAvailableFn)(void);
 typedef void (*SettingChangedFn)(const SettingDesc *desc);
@@ -289,6 +313,11 @@ struct SettingDesc {
    * values remain. Stored and parsed values are not filtered, so a preference
    * synced from another machine survives. NULL offers every value. */
   bool (*value_available)(long value);
+  /* Placement and action behavior belong to the row, independently of its key.
+   * Save controls default to Actions; staged payload rows declare their page. */
+  SaveEditorPage save_page;
+  SettingAction action;
+  bool menu_hidden;
 };
 
 typedef enum {

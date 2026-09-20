@@ -567,7 +567,11 @@ bool SceneInspector_SelectFiltered(int screen_x, int screen_y,
          mode, view.state.brightness, view.state.main_screen,
          view.state.sub_screen, view.state.margin_left,
          view.state.margin_right);
-  if (s_sim_valid && s_sim.view != kSimView_None) {
+  if (s_sim_valid && (s_sim.view != kSimView_None ||
+      s_sim.view_reason != kSimViewReason_OutsideScene)) {
+    const SimPresentationDecision decision = Sim3D_PresentationDecision(&s_sim);
+    Append(&panel, "SIM PRESENT %s (%s)\n",
+           Sim3D_ViewName(decision.view), decision.reason);
     Append(&panel,
            "SIM3D %s META %s SERIAL %u REQ$%03X EFF$%03X\n",
            Sim3D_ViewName(s_sim.view),
@@ -642,7 +646,11 @@ bool SceneInspector_SelectFiltered(int screen_x, int screen_y,
          view.state.margin_left, view.state.margin_right,
          view.frame.margin_budget, g_ram[kActRaiserWram_MapGroup],
          g_ram[kActRaiserWram_CurrentMap], mode);
-  if (s_sim_valid && s_sim.view != kSimView_None) {
+  if (s_sim_valid && (s_sim.view != kSimView_None ||
+      s_sim.view_reason != kSimViewReason_OutsideScene)) {
+    const SimPresentationDecision decision = Sim3D_PresentationDecision(&s_sim);
+    Append(&report, "sim3d: presentation=%s reason=%s\n",
+           Sim3D_ViewName(decision.view), decision.reason);
     Append(&report,
            "sim3d: view=%s metadata_valid=%d integrity=$%X serial=%u "
            "requested=$%03X effective=$%03X sources=%u fragments=%u "

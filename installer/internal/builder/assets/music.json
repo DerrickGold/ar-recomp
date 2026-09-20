@@ -1,0 +1,224 @@
+[
+  {
+    "id": "title-theme",
+    "name": "Title Theme",
+    "src": "1A:94B8",
+    "preview_song": 1,
+    "file": "audio/title.ogg"
+  },
+  {
+    "id": "song-00",
+    "name": "Fillmore",
+    "src": "18:947F",
+    "preview_song": 1,
+    "file": "audio/fillmore.ogg",
+    "regions": [
+      {
+        "group": 1,
+        "acts": 1
+      }
+    ]
+  },
+  {
+    "id": "song-01",
+    "name": "Sky Palace",
+    "src": "1C:A988",
+    "preview_song": 1,
+    "file": "audio/sky-palace.ogg"
+  },
+  {
+    "id": "song-02",
+    "name": "Track 02",
+    "src": "18:DDCC",
+    "preview_song": 1,
+    "file": "audio/bp.ogg",
+    "regions": [
+      {
+        "group": 2,
+        "acts": 3
+      },
+      {
+        "group": 3,
+        "acts": 1
+      }
+    ]
+  },
+  {
+    "id": "song-03",
+    "name": "Track 03",
+    "src": "1A:E9E2",
+    "preview_song": 1,
+    "file": "audio/song-03.ogg",
+    "regions": [
+      {
+        "group": 4,
+        "acts": 1
+      },
+      {
+        "group": 5,
+        "acts": 1
+      },
+      {
+        "group": 6,
+        "acts": 1
+      }
+    ]
+  },
+  {
+    "id": "song-04",
+    "name": "Track 04",
+    "src": "1C:A5FB",
+    "preview_song": 1,
+    "file": "audio/song-04.ogg"
+  },
+  {
+    "id": "song-05",
+    "name": "Track 05",
+    "src": "1B:8554",
+    "preview_song": 1,
+    "file": "audio/song-05.ogg",
+    "regions": [
+      {
+        "group": 4,
+        "acts": 3
+      },
+      {
+        "group": 5,
+        "acts": 2
+      }
+    ]
+  },
+  {
+    "id": "song-06",
+    "name": "Track 06",
+    "src": "1B:9470",
+    "preview_song": 1,
+    "file": "audio/song-06.ogg",
+    "regions": [
+      {
+        "group": 1,
+        "acts": 2
+      },
+      {
+        "group": 2,
+        "acts": 2
+      },
+      {
+        "group": 3,
+        "acts": 2
+      },
+      {
+        "group": 4,
+        "acts": 2
+      },
+      {
+        "group": 5,
+        "acts": 2
+      },
+      {
+        "group": 6,
+        "acts": 2
+      },
+      {
+        "group": 7,
+        "acts": 0
+      }
+    ]
+  },
+  {
+    "id": "song-08",
+    "name": "Advent",
+    "src": "1C:A7CC",
+    "preview_song": 1,
+    "file": "audio/advent.ogg",
+    "loop": false
+  },
+  {
+    "id": "song-09",
+    "name": "Track 09",
+    "src": "0E:F69F",
+    "preview_song": 1,
+    "file": "audio/act2.ogg",
+    "regions": [
+      {
+        "group": 1,
+        "acts": 2
+      },
+      {
+        "group": 3,
+        "acts": 2
+      },
+      {
+        "group": 5,
+        "acts": 1
+      }
+    ]
+  },
+  {
+    "id": "song-10",
+    "name": "Birth of the People",
+    "src": "1B:ABED",
+    "preview_song": 1,
+    "file": "audio/birth-of-the-people.ogg"
+  },
+  {
+    "id": "song-11",
+    "name": "Level Up",
+    "src": "1C:AFEB",
+    "preview_song": 1,
+    "file": "audio/level-up.ogg"
+  },
+  {
+    "id": "song-12",
+    "name": "Track 12",
+    "src": "19:FA4B",
+    "preview_song": 1,
+    "file": "audio/song-12.ogg",
+    "regions": [
+      {
+        "group": 6,
+        "acts": 1
+      }
+    ]
+  },
+  {
+    "id": "song-13",
+    "name": "Track 13",
+    "src": "17:C027",
+    "preview_song": 1,
+    "file": "audio/song-13.ogg",
+    "regions": [
+      {
+        "group": 6,
+        "acts": 2
+      }
+    ]
+  },
+  {
+    "id": "song-14",
+    "name": "Track 14",
+    "src": "18:D4FA",
+    "preview_song": 1,
+    "file": "audio/song-14.ogg",
+    "regions": [
+      {
+        "group": 7,
+        "acts": 0
+      }
+    ]
+  },
+  {
+    "id": "song-15",
+    "name": "Track 15",
+    "src": "1C:9F3D",
+    "preview_song": 1,
+    "file": "audio/song-15.ogg"
+  },
+  {
+    "id": "song-16",
+    "name": "Sacrifices",
+    "src": "1A:EF63",
+    "preview_song": 1,
+    "file": "audio/song-16.ogg"
+  }
+]

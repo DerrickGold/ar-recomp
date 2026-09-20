@@ -233,7 +233,7 @@ int MusicReplacements_Load(const char *manifest_path) {
       pending.gain_percent = (int)strtol(value, NULL, 0);
       ok = pending.gain_percent >= 0 && pending.gain_percent <= 400;
     } else if (!strcmp(key, "when")) {
-      ok = HdManifest_ParseWhen(value, pending.conditions, kHdMaxConditions,
+      ok = AssetConditions_ParseWhen(value, pending.conditions, kAssetMaxConditions,
                                 &pending.condition_count);
     } else {
       fprintf(stderr, "[music-manifest] %s:%d: unknown key '%s' ignored\n",
@@ -282,7 +282,7 @@ static bool EntryPlaysSong(const MusicReplacement *entry, uint32 src, int song) 
 
 static bool EntryGatePasses(const MusicReplacement *entry) {
   for (int c = 0; c < entry->condition_count; c++)
-    if (!HdManifest_ConditionPasses(&entry->conditions[c])) return false;
+    if (!AssetCondition_Passes(&entry->conditions[c])) return false;
   return true;
 }
 

@@ -128,7 +128,6 @@ func TestLocalizationCatalogAndUninstallPreserveProject(t *testing.T) {
 	q.ID, q.Body, q.Status = "sim.menu.listen", "Excellent!\n@end\n", lk.TranslationDone
 	locJSON(t, app, "edit", q, 200)
 	q = locIdentity(app)
-	q.ConfirmRights = true
 	locJSON(t, app, "install", q, 200)
 	var rows []localizationCatalogEntry
 	if err := json.Unmarshal(locGET(t, app, "catalog", nil).Body.Bytes(), &rows); err != nil {

@@ -390,6 +390,7 @@ func TestLocalizationGUIAuthorSharingLifecycle(t *testing.T) {
 			t.Fatal("publication leaked private/reference text", f.Name)
 		}
 	}
+	q = locIdentity(app)
 	locJSON(t, app, "install", q, 200)
 	installed, err := lk.OpenAuthorPack(filepath.Join(app.localizationRoot(), "packs", m.ID))
 	if err != nil {

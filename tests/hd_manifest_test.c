@@ -121,6 +121,7 @@ static void ResetRuntime(void) {
   memset(&g_settings, 0, sizeof(g_settings));
   g_settings.hd_replacements = true;
   HdReplacements_BindRunner((SrRunnerHandle *)&g_runner_storage);
+  AssetConditions_BindRunner((SrRunnerHandle *)&g_runner_storage);
 }
 
 static void MakeTitleState(void) {
@@ -158,12 +159,12 @@ static void TestParseTitleEntry(void) {
         == 0);
   CHECK(e->brightness_mod);
   CHECK(e->condition_count == 4);
-  CHECK(e->conditions[0].kind == kHdCond_WramByte);
+  CHECK(e->conditions[0].kind == kAssetCondition_WramByte);
   CHECK(e->conditions[0].address == 0x18);
   CHECK(e->conditions[0].value == 0);
-  CHECK(e->conditions[2].kind == kHdCond_BgMode);
+  CHECK(e->conditions[2].kind == kAssetCondition_BgMode);
   CHECK(e->conditions[2].value == 7);
-  CHECK(e->conditions[3].kind == kHdCond_M7Identity);
+  CHECK(e->conditions[3].kind == kAssetCondition_M7Identity);
 }
 
 static void TestParseRejections(void) {
@@ -180,7 +181,7 @@ static void TestParseRejections(void) {
       "when = wram[0018]!=0x01, m7b==0x0000\n")) == 1);
   CHECK(!strcmp(g_hd_replacements[0].name, "ok"));
   CHECK(g_hd_replacements[0].conditions[0].negate == 1);
-  CHECK(g_hd_replacements[0].conditions[1].kind == kHdCond_M7Element);
+  CHECK(g_hd_replacements[0].conditions[1].kind == kAssetCondition_M7Element);
   CHECK(g_hd_replacements[0].conditions[1].address == 1);
 
   /* Bad condition syntax drops the entry. */
