@@ -18,12 +18,7 @@ enum {
 typedef struct ActRaiserLocalizationWorldNavigation {
   bool resolved;
   uint16_t attempted_location;
-  uint32_t cluster_count;
-  uint64_t source_revision;
-  size_t utf8_bytes;
-  ArLocalizationTextLanguage language;
-  ArTextBidiSpans bidi;
-  char utf8[kActRaiserLocalizationWorldNavigationTextCapacity];
+  ActRaiserResolvedText text;
 } ActRaiserLocalizationWorldNavigation;
 
 void ActRaiserLocalizationWorldNavigation_Init(
@@ -31,16 +26,20 @@ void ActRaiserLocalizationWorldNavigation_Init(
 void ActRaiserLocalizationWorldNavigation_Invalidate(
     ActRaiserLocalizationWorldNavigation *state);
 
+/* Shared screen-space geometry; styles and language are published by caller. */
+bool ActRaiserLocalizationWorldNavigation_AddText(
+    ArLocalizationFrame *frame, const ActRaiserResolvedText *text);
+
 /* Publishes the current destination name into the authentic screen-space
  * plaque interior. A hidden native label is not claimed. Resolution is cached
  * per location and invalidated by the runtime whenever the selected pack
  * changes. */
 bool ActRaiserLocalizationWorldNavigation_Append(
-    ActRaiserLocalizationWorldNavigation *state,
-    ArLocalizationFrame *frame, uint16_t active_location,
-    bool native_label_visible,
+    ActRaiserLocalizationWorldNavigation *state, ArLocalizationFrame *frame,
+    uint16_t active_location, bool native_label_visible,
     const uint16_t *cgram_words, size_t cgram_word_count,
     ActRaiserLocalizationComposeTextResolver resolve_text,
-    void *resolve_context, char *error, size_t error_capacity);
+    ActRaiserLocalizationFieldResolver resolve_label, void *resolve_context,
+    char *error, size_t error_capacity);
 
 #endif /* ACTRAISER_LOCALIZATION_WORLD_NAVIGATION_H */

@@ -1,5 +1,6 @@
-#include "localization/dialogue_session.h"
+#include "actraiser/actraiser_dialogue_adapter.h"
 #include "fixtures/keyboard_body.h"
+#include "localization/language_contract.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -53,30 +54,31 @@ static void ReleaseFile(void *context, ArLanguagePackBlob *blob) {
   memset(blob, 0, sizeof(*blob));
 }
 
-static bool LoadPack(ArLanguagePack *pack, const char *id, const char *locale,
-                     const char *script, ArLanguagePackError *error) {
+static bool LoadPackVersion(ArLanguagePack *pack, const char *id,
+                            const char *locale, const char *script, int version,
+                            ArLanguagePackError *error) {
   char manifest[1024];
-  const int manifest_size = snprintf(
-      manifest, sizeof(manifest),
-      "[pack]\n"
-      "format = actraiser-language-pack\n"
-      "version = 1\n"
-      "id = %s\n"
-      "locale = %s\n"
-      "name = Synthetic %s\n"
-      "autonym = Synthetic %s\n"
-      "author = Test Author\n"
-      "license = MIT\n"
-      "direction = %s\n"
-      "target = us-runtime\n"
-      "source_profile = us\n"
-      "fallback = native-us\n"
-      "coverage = partial\n"
-      "[fonts]\n"
-      "primary = builtin:actraiser-sans\n"
-      "[scripts]\n"
-      "source = text/main.artext\n",
-      id, locale, id, id, !strcmp(locale, "ar") ? "rtl" : "ltr");
+  const int manifest_size = snprintf(manifest, sizeof(manifest),
+                                     "[pack]\n"
+                                     "format = actraiser-language-pack\n"
+                                     "version = %d\n"
+                                     "id = %s\n"
+                                     "locale = %s\n"
+                                     "name = Synthetic %s\n"
+                                     "autonym = Synthetic %s\n"
+                                     "author = Test Author\n"
+                                     "license = MIT\n"
+                                     "direction = %s\n"
+                                     "target = us-runtime\n"
+                                     "source_profile = us\n"
+                                     "fallback = native-us\n"
+                                     "coverage = partial\n"
+                                     "[fonts]\n"
+                                     "primary = builtin:actraiser-sans\n"
+                                     "[scripts]\n"
+                                     "source = text/main.artext\n",
+                                     version, id, locale, id, id,
+                                     !strcmp(locale, "ar") ? "rtl" : "ltr");
   CHECK(manifest_size > 0 && (size_t)manifest_size < sizeof(manifest));
   const MemoryFile files[] = {
       {"pack.ini", (const uint8_t *)manifest, (size_t)manifest_size},
@@ -91,6 +93,11 @@ static bool LoadPack(ArLanguagePack *pack, const char *id, const char *locale,
       .release_file = ReleaseFile,
   };
   return ArLanguagePack_Load(pack, &io, "pack.ini", error);
+}
+
+static bool LoadPack(ArLanguagePack *pack, const char *id, const char *locale,
+                     const char *script, ArLanguagePackError *error) {
+  return LoadPackVersion(pack, id, locale, script, 1, error);
 }
 
 static ArDialogueContentSelection Selection(
@@ -550,6 +557,63 @@ static void TestNumberFormatting(void) {
   CHECK(LoadPack(&pack, "format.bad", "en-US",
       ":: status.report.master_report\n{master_name:03}\n@end\n", &error));
   CHECK(!ArLanguageContract_ValidatePack(&pack, NULL, &error));
+  ArLanguagePack_Destroy(&pack);
+}
+
+static void TestStyledValuesAndSourceOwnership(void) {
+  ArLanguagePack pack;
+  ArLanguagePack_Init(&pack);
+  ArLanguagePackError error;
+  CHECK(LoadPackVersion(
+      &pack, "styles.test", "en-US",
+      ":: status.report.master_report\n@layout master_status\n@font "
+      "body\n@scale 110%\n"
+      "Level <i>{master_level:03}</i> <span scale=\"80%\">small</span>\n@end\n",
+      2, &error));
+  ResolverState values = {0};
+  const ArDialogueValueResolver resolver = {
+      .struct_size = sizeof(resolver),
+      .abi_version = AR_DIALOGUE_VALUE_RESOLVER_ABI_VERSION,
+      .context = &values,
+      .resolve = ResolveValue,
+  };
+  const ArDialogueContentSelection selection =
+      Selection(kArDialoguePresentation_Enhanced, &pack, &pack);
+  ArDialogueSession session;
+  ArDialogueSession_Init(&session);
+  CHECK(ArDialogueSession_Begin(
+      &session, &selection, "status.report.master_report", &resolver, &error));
+  ArDialoguePageSnapshot page;
+  CHECK(ArDialogueSession_GetPage(&session, &page));
+  CHECK(!strcmp(page.utf8, "Level 002 small"));
+  CHECK(page.style_span_count == 2);
+  if (page.style_span_count == 2) {
+    CHECK(page.style_spans[0].start == 6 && page.style_spans[0].end == 9 &&
+          page.style_spans[0].style.italic == 2);
+    CHECK(page.style_spans[1].start == 10 && page.style_spans[1].end == 15 &&
+          page.style_spans[1].style.scale_percent == 80);
+  }
+  CHECK(page.default_style.scale_percent == 110 &&
+        !strcmp(page.default_style.font, "body"));
+  ArDialogueStableState saved;
+  CHECK(ArDialogueSession_ExportState(&session, &saved));
+  CHECK(ArDialogueSession_Restore(&session, &selection, &saved, &resolver,
+                                  &error));
+  ArLanguagePack_Destroy(&pack);
+  CHECK(ArDialogueSession_GetAuthoredPage(&session, 0, &page));
+  CHECK(!strcmp(page.source_path, "text/main.artext"));
+  CHECK(!strcmp(page.resolved_message_id, "status.report.master_report"));
+  CHECK(page.source_line == 1 && page.style_span_count == 2);
+  ArDialogueSession_Destroy(&session);
+
+  CHECK(LoadPackVersion(&pack, "styles.invalid", "en-US",
+                        ":: action.hud.act_1\ne<i>\xcc\x81</i>\n@end\n", 2,
+                        &error));
+  ArDialogueSession_Init(&session);
+  CHECK(!ArDialogueSession_Begin(&session, &selection, "action.hud.act_1", NULL,
+                                 &error));
+  CHECK(strstr(error.message, "style boundary splits") != NULL);
+  ArDialogueSession_Destroy(&session);
   ArLanguagePack_Destroy(&pack);
 }
 
@@ -1072,6 +1136,7 @@ int main(void) {
   TestEnhancedNativeControlProgress();
   TestCueCannotSplitGrapheme();
   TestNumberFormatting();
+  TestStyledValuesAndSourceOwnership();
   TestValueSpanBoundaries();
   TestValueSpanBudget();
   TestAuthoredBoundaries();

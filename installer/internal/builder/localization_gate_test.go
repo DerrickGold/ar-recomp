@@ -18,7 +18,7 @@ func completeLocalizationTestSource(t *testing.T) *lk.AuthorProject {
 	t.Helper()
 	m := localizationTestSource(t).Pack().Manifest().Metadata()
 	m.Coverage = "complete"
-	manifest, err := lk.NewPackManifest(m, lk.PackFonts{Primary: "builtin:actraiser-sans"}, []string{"text/source.artext"})
+	manifest, err := lk.NewPackManifestVersion(m, lk.PackFonts{Primary: "builtin:actraiser-sans"}, []string{"text/source.artext"}, 1)
 	if err != nil {
 		t.Fatal(err)
 	}

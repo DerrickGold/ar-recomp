@@ -49,6 +49,10 @@ typedef struct ArTextSurface {
   /* Disjoint effect-aware rectangles; typographic advances stay unchanged. */
   const ArTextRevealPiece *reveal_pieces;
   size_t reveal_piece_count;
+  const ArTextLineMetrics *lines;
+  size_t line_count;
+  const ArTextFontUse *font_uses;
+  size_t font_use_count;
 } ArTextSurface;
 
 typedef struct ArTextSurfaceCacheStats {

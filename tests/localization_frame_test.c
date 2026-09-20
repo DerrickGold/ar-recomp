@@ -32,9 +32,20 @@ int main(void) {
   CHECK(!ArLocalizationFrame_SetFallbackFonts(&frame, invalid_fallbacks, 2));
   CHECK(frame.fallback_font_count == 2 &&
         frame.fallback_fonts[1] == 3);
+  ArTextFontRole role = {
+      .name = "hud", .primary = 5, .fallbacks = {6}, .fallback_count = 1};
+  CHECK(ArLocalizationFrame_SetFontRoles(&frame, &role, 1));
+  role.primary = 7;
+  CHECK(frame.font_role_count == 1 && frame.font_roles[0].primary == 5);
+  CHECK(!ArLocalizationFrame_SetFontRoles(&frame, NULL, 1));
+  role.fallbacks[0] = 0;
+  CHECK(!ArLocalizationFrame_SetFontRoles(&frame, &role, 1));
+  CHECK(frame.font_roles[0].primary == 5);
+  CHECK(ArLocalizationFrame_IsValid(&frame));
   CHECK(ArLocalizationFrame_SetFont(
       &frame, "fr-FR", "test.font", UINT64_C(1), 7, &frame.settings));
   CHECK(!frame.fallback_font_count && !frame.fallback_fonts[0]);
+  CHECK(!frame.font_role_count && !frame.font_roles[0].primary);
   const ArLocalizationFrame font_before = frame;
   CHECK(!ArLocalizationFrame_SetFont(&frame, "fr", "test", 0, 7, &frame.settings));
   CHECK(!memcmp(&frame, &font_before, sizeof(frame)));

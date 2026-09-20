@@ -3,7 +3,6 @@ package localization
 import (
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 )
@@ -15,7 +14,7 @@ func TestNativeSourceOptionalHudUpgrade(t *testing.T) {
 	// its manifest names the source inside the version directory a previous
 	// install created.
 	const installedSource = "v-0000000000/text/source.artext"
-	manifest, err := NewPackManifest(metadata, PackFonts{Primary: "builtin:actraiser-sans"}, []string{installedSource})
+	manifest, err := NewPackManifestVersion(metadata, PackFonts{Primary: "builtin:actraiser-sans"}, []string{installedSource}, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,14 +50,14 @@ func TestNativeSourceOptionalHudUpgrade(t *testing.T) {
 	}
 	// Every transcribed label for this release except the one the pack already
 	// carries. Derived, so transcribing another label does not fail this.
-	expected := old.workspace.Stats().MessageCount + len(nativeHUDLabels("us")) - 1
+	expected := old.workspace.Stats().MessageCount + len(nativeHUDLabels("us")) + len(nativeHUDValues())
 	if pack.workspace.Stats().MessageCount != expected {
 		t.Fatal("optional labels missing")
 	}
 	for _, message := range messages {
 		before, _ := old.MessageOperations(message.ID)
 		after, _ := pack.MessageOperations(message.ID)
-		if !reflect.DeepEqual(before, after) {
+		if presentationDigest(before) != presentationDigest(after) {
 			t.Fatal("upgrade changed", message.ID)
 		}
 	}

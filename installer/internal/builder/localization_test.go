@@ -25,7 +25,7 @@ import (
 func localizationTestSource(t *testing.T) *lk.AuthorProject {
 	t.Helper()
 	m := lk.PackMetadata{ID: "native-us", Name: "Native US fixture", Locale: "en-US", Autonym: "English", Author: "Fixture author", License: "Local use only", Direction: "auto", Target: "us-runtime", SourceProfile: "us", Coverage: "partial", Fallback: "native-us"}
-	manifest, err := lk.NewPackManifest(m, lk.PackFonts{Primary: "builtin:actraiser-sans"}, []string{"text/source.artext"})
+	manifest, err := lk.NewPackManifestVersion(m, lk.PackFonts{Primary: "builtin:actraiser-sans"}, []string{"text/source.artext"}, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -265,6 +265,41 @@ func TestLocalizationCloneDoesNotInstall(t *testing.T) {
 	}
 }
 
+func TestLocalizationUpgradeCreatesReviewableCopy(t *testing.T) {
+	app := localizationTestApp(t)
+	locGET(t, app, "state", nil)
+	source := localizationTestSource(t)
+	metadata := source.Pack().Manifest().Metadata()
+	metadata.ID = "test.original-v1"
+	original, err := lk.NewTranslationProject(source.Pack(), metadata)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = app.saveLocalization(original, ""); err != nil {
+		t.Fatal(err)
+	}
+	q := locIdentity(app)
+	q.NewID = "test.upgraded-v2"
+	body := locJSON(t, app, "upgrade-v2", q, 200).Body.String()
+	if !strings.Contains(body, `"formatVersion":2`) || !strings.Contains(body, `"report":`) {
+		t.Fatal(body)
+	}
+	if app.localization.current.Pack().Manifest().Version() != 2 {
+		t.Fatal("did not adopt v2")
+	}
+	retained, err := app.localization.store.Open(metadata.ID)
+	if err != nil || retained.ProjectRevision() != original.ProjectRevision() {
+		t.Fatal("original project changed", err)
+	}
+	if _, err := os.Stat(filepath.Join(app.localizationRoot(), "packs")); !os.IsNotExist(err) {
+		t.Fatal("upgrade installed a pack", err)
+	}
+	locJSON(t, app, "upgrade-v2", q, 409)
+	if app.localization.current.Pack().Manifest().Metadata().ID != q.NewID {
+		t.Fatal("stale request changed current project")
+	}
+}
+
 func TestLocalizationGUIAuthorSharingLifecycle(t *testing.T) {
 	app := localizationTestApp(t)
 	installLocalizationCoverageSource(t, app)
@@ -473,17 +508,18 @@ func TestLocalizationGUIRetailExtraction(t *testing.T) {
 	// differ per release because the sim/Sky labels are listed only where they
 	// have been read: every Western release carries all three, and Japanese
 	// carries only the angel label -- its context label is a ten-cell shape
-	// this table has no room for.
+	// this table has no room for. Every release also includes the six v2
+	// HUD/map value templates.
 	for _, tc := range []struct {
 		file, profile string
 		messages      int
 		hud           [5]string
 	}{
-		{"ar.sfc", "us", 521, [5]string{"ACT", "ENEMY", "PLAYER", "SCORE", "TIME"}},
-		{"ar-eu.sfc", "eu-en", 522, [5]string{"ACT", "ENEMY", "PLAYER", "SCORE", "TIME"}},
-		{"ar-ger.sfc", "de", 522, [5]string{"ACT", "FEIND", "SPIELER", "PUNKTE", "ZEIT"}},
-		{"ar-fra.sfc", "fr", 520, [5]string{"ACT", "ENNEMI", "JOUEUR", "SCORE", "TEMPS"}},
-		{"ar-jp.sfc", "jp", 518, [5]string{"ACT", "ENEMY", "PLAYER", "SCORE", "TIME"}},
+		{"ar.sfc", "us", 527, [5]string{"ACT", "ENEMY", "PLAYER", "SCORE", "TIME"}},
+		{"ar-eu.sfc", "eu-en", 528, [5]string{"ACT", "ENEMY", "PLAYER", "SCORE", "TIME"}},
+		{"ar-ger.sfc", "de", 528, [5]string{"ACT", "FEIND", "SPIELER", "PUNKTE", "ZEIT"}},
+		{"ar-fra.sfc", "fr", 526, [5]string{"ACT", "ENNEMI", "JOUEUR", "SCORE", "TEMPS"}},
+		{"ar-jp.sfc", "jp", 524, [5]string{"ACT", "ENEMY", "PLAYER", "SCORE", "TIME"}},
 	} {
 		t.Run(tc.profile, func(t *testing.T) {
 			data, err := os.ReadFile(filepath.Join(root, tc.file))
@@ -651,4 +687,46 @@ func TestLocalizationStalledUploadDoesNotBlockStatus(t *testing.T) {
 	}
 	close(stall.released)
 	<-done
+}
+
+func TestInlineToolbarChoicesAndMarkupUsePackDefinitions(t *testing.T) {
+	app := editableWorkflowFixture(t)
+	q := locIdentity(app)
+	q.NewID = "test.toolbar-v2"
+	response := locJSON(t, app, "upgrade-v2", q, 200)
+	var payload struct {
+		State struct {
+			Project struct {
+				Treatments []lk.AuthorTreatment `json:"treatments"`
+			}
+		}
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	foundHUD := false
+	for _, style := range payload.State.Project.Treatments {
+		if style.Definition.Name == "hud" {
+			foundHUD = style.SourcePath != "" && style.SourceLine > 0
+		}
+	}
+	if !foundHUD {
+		t.Fatal("toolbar lacks the pack's named style and source location")
+	}
+	q = locIdentity(app)
+	q.ID, q.Status = "action.hud.act_1", lk.TranslationWIP
+	q.Body = "<i>A</i><span italic=\"false\">B</span><span font=\"hud\" style=\"hud\" color=\"#FF8040\" scale=\"80%\">C</span>\n@end\n"
+	result := locJSON(t, app, "preview", q, 200)
+	var operations []lk.AuthorOperation
+	if err := json.Unmarshal(result.Body.Bytes(), &operations); err != nil {
+		t.Fatal(err)
+	}
+	if len(operations) != 4 || operations[0].Style.Italic != 2 || operations[1].Style.Italic != 1 ||
+		operations[2].Style.Font != "hud" || operations[2].Style.Treatment != "hud" ||
+		operations[2].Style.Color != "#FF8040" || operations[2].Style.Scale != 80 {
+		t.Fatal("toolbar syntax differs from supported parser styles", operations)
+	}
+	if locIdentity(app).Revision != q.Revision {
+		t.Fatal("toolbar preview saved the draft")
+	}
 }

@@ -1,6 +1,7 @@
 #include "actraiser/actraiser_localization_routes.h"
 
 #include <stddef.h>
+#include <string.h>
 
 #include "actraiser_game.h"
 
@@ -25,7 +26,7 @@ enum {
 
 _Static_assert(sizeof(kDialogueRoutes) / sizeof(kDialogueRoutes[0]) == 365,
                "USA scoped dialogue route census changed");
-_Static_assert(sizeof(kComposeRoutes) / sizeof(kComposeRoutes[0]) == 90,
+_Static_assert(sizeof(kComposeRoutes) / sizeof(kComposeRoutes[0]) == 91,
                "USA scoped fixed-composer route census changed");
 
 bool ActRaiserLocalizationRoute_InScope(uint8_t map_group, uint8_t map_number) {
@@ -153,4 +154,28 @@ uint16_t ActRaiserLocalizationRoute_PageUnitCount(
   if (native_page_index >= route->native_page_count)
     native_page_index = route->native_page_count - 1u;
   return route->native_page_units[native_page_index];
+}
+
+bool ActRaiserLocalizationRoute_TextBounds(const char *id,
+                                           ArTextCellRegion *region,
+                                           uint8_t *font_pixels) {
+  if (!id || !region || !font_pixels)
+    return false;
+  for (size_t i = 0; i < sizeof(kDialogueRoutes) / sizeof(kDialogueRoutes[0]);
+       ++i) {
+    if (strcmp(kDialogueRoutes[i].semantic_id, id))
+      continue;
+    *region = kDialogueRoutes[i].region;
+    *font_pixels = kDialogueRoutes[i].native_font_pixels;
+    return true;
+  }
+  for (size_t i = 0; i < sizeof(kComposeRoutes) / sizeof(kComposeRoutes[0]);
+       ++i) {
+    if (strcmp(kComposeRoutes[i].semantic_id, id))
+      continue;
+    *region = kComposeRoutes[i].region;
+    *font_pixels = kComposeRoutes[i].native_font_pixels;
+    return true;
+  }
+  return false;
 }

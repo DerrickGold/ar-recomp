@@ -6,6 +6,9 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
+
+	"github.com/DerrickGold/ar-recomp/installer/internal/texttemplate"
 )
 
 // NativeSourceMetadata is shared by build and GUI callers. Locale describes
@@ -100,6 +103,11 @@ func InstallNativeUSSource(directory string, pack *AuthorPack) (*AuthorPack, err
 		for page := 0; page < endingPageCount; page++ {
 			id := creditPageID("us", page)
 			if ops, err := pack.MessageOperations(id); id != "" && err == nil {
+				// Supplemental content is interpreted once by the destination
+				// version. Do not feed v2 inline styles through the v1 emitter.
+				for i := range ops {
+					ops[i].Style = texttemplate.Style{}
+				}
 				credits = append(credits, AuthorMessage{ID: id, Operations: ops})
 			}
 		}
@@ -117,17 +125,32 @@ func InstallNativeUSSource(directory string, pack *AuthorPack) (*AuthorPack, err
 
 func supplementNativeUSSource(directory string, old *AuthorPack, supplemental ...AuthorMessage) (*AuthorPack, error) {
 	pack := old
-	for _, label := range append(nativeHUDLabels("us"), supplemental...) {
+	for _, label := range append(append(append(nativeHUDLabels("us"), nativeHUDValues()...), nativeWorldLabel()), supplemental...) {
 		if view, found := pack.workspace.Message(label.ID); found && view.Present {
 			continue
 		}
-		script, err := EmitAuthorScript([]AuthorMessage{label}, "supplement.artext")
+		if pack.manifest.Version() == 2 {
+			label = inferV1Appearance(label, "us")
+			var err error
+			pack, err = addNativeTreatmentDefinitions(pack, label)
+			if err != nil {
+				return nil, err
+			}
+		}
+		script, err := EmitAuthorScriptVersion([]AuthorMessage{label}, "supplement.artext", pack.manifest.Version())
 		if err != nil {
 			return nil, err
 		}
 		body, _ := script.Body(label.ID)
 		pack, err = pack.AddMessage(label.ID, pack.manifest.Sources()[0],
 			body, TranslationNotStarted)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if pack.manifest.Version() == 1 {
+		var err error
+		pack, _, err = upgradeAuthorPackV2(pack)
 		if err != nil {
 			return nil, err
 		}
@@ -145,4 +168,45 @@ func supplementNativeUSSource(directory string, old *AuthorPack, supplemental ..
 		return nil, err
 	}
 	return OpenNativeUSSource(directory)
+}
+
+func addNativeTreatmentDefinitions(pack *AuthorPack, message AuthorMessage) (*AuthorPack, error) {
+	if message.Appearance.Style.Font == "hud" {
+		fonts := pack.manifest.Fonts()
+		if !slices.ContainsFunc(fonts.Roles, func(role PackFontRole) bool { return role.Name == "hud" }) {
+			fonts.Roles = append(fonts.Roles, PackFontRole{Name: "hud", Primary: fonts.Primary, Fallback: slices.Clone(fonts.Fallback)})
+			var err error
+			pack, err = pack.WithFonts(fonts, nil)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+	needed := map[string]bool{message.Appearance.Style.Treatment: true}
+	for _, op := range message.Operations {
+		needed[op.Style.Treatment] = true
+	}
+	for _, treatment := range pack.Treatments() {
+		delete(needed, treatment.Definition.Name)
+	}
+	definitions := v1TreatmentDefinitions(needed)
+	if len(definitions) == 0 {
+		return pack, nil
+	}
+	source := pack.workspace.scripts[0]
+	prefix, err := EmitAuthorScriptVersion(nil, source.path, 2, definitions...)
+	if err != nil {
+		return nil, err
+	}
+	replacement, err := ParseAuthorScriptVersion(prefix.text+source.text, source.path, 2)
+	if err != nil {
+		return nil, err
+	}
+	scripts := append([]*AuthorScript{}, pack.workspace.scripts...)
+	scripts[0] = replacement
+	workspace, err := newAuthorWorkspace(pack.workspace.profile, pack.workspace.coverage, scripts, pack.workspace.progress.text)
+	if err != nil {
+		return nil, err
+	}
+	return pack.withWorkspace(workspace)
 }

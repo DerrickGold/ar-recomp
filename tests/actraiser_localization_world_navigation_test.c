@@ -13,22 +13,14 @@ typedef struct ResolverState {
   unsigned calls;
   bool blank;
   bool with_bidi;
+  unsigned label_calls;
+  bool reject_label;
   char semantic_id[64];
 } ResolverState;
 
-static bool Resolve(
-    void *context, const char *semantic_id,
-    char *utf8, size_t utf8_capacity, size_t *utf8_bytes,
-    uint32_t *cluster_count, uint64_t *source_revision,
-    ArLocalizationInlineObjectSnapshot *inline_objects,
-    size_t inline_object_capacity, uint8_t *inline_object_count,
-    uint8_t *structural_boundaries, ArLocalizationTextLanguage *language,
-    ArTextBidiSpans *bidi, ArLocalizationTextField *live_field,
-    char *error, size_t error_capacity) {
-  if (live_field) *live_field = (ArLocalizationTextField){0};
-  (void)inline_objects;
-  (void)inline_object_capacity;
-  (void)structural_boundaries;
+static bool Resolve(void *context, const char *semantic_id,
+                    ActRaiserResolvedText *text, char *error,
+                    size_t error_capacity) {
   (void)error;
   (void)error_capacity;
   ResolverState *state = context;
@@ -36,19 +28,40 @@ static bool Resolve(
   snprintf(state->semantic_id, sizeof(state->semantic_id), "%s", semantic_id);
   const char *value = state->blank ? "" : "مدينة";
   const size_t bytes = strlen(value);
-  if (bytes >= utf8_capacity) return false;
-  memcpy(utf8, value, bytes + 1u);
-  *utf8_bytes = bytes;
-  *cluster_count = state->blank ? 0 : 5;
-  *source_revision = 100 + state->calls;
-  *inline_object_count = 0;
-  *language = (ArLocalizationTextLanguage){
+  if (bytes >= sizeof(text->utf8))
+    return false;
+  memcpy(text->utf8, value, bytes + 1u);
+  text->utf8_bytes = bytes;
+  text->cluster_count = state->blank ? 0 : 5;
+  text->source_revision = 100 + state->calls;
+  text->language = (ArLocalizationTextLanguage){
       .locale = "ar", .direction = kArTextDirection_RightToLeft};
-  bidi->count = state->with_bidi ? 1 : 0;
-  if (bidi->count)
-    bidi->spans[0] = (ArTextBidiSpan){
-        .start = 0, .end = 2,
-        .direction = kArTextDirection_RightToLeft};
+  text->bidi.count = state->with_bidi ? 1 : 0;
+  if (text->bidi.count)
+    text->bidi.spans[0] = (ArTextBidiSpan){
+        .start = 0, .end = 2, .direction = kArTextDirection_RightToLeft};
+  return true;
+}
+
+/* The world template receives words as data; the menu's numeral styling does
+ * not leak into this separate consumer. */
+static bool ResolveWorldLabel(void *context, const char *id, const char *value,
+                              ActRaiserResolvedText *text, char *error,
+                              size_t capacity) {
+  ResolverState *state = context;
+  ++state->label_calls;
+  CHECK(!strcmp(id, "world_map.location_label"));
+  CHECK(!strcmp(value, "مدينة"));
+  if (state->reject_label)
+    return false;
+  CHECK(Resolve(context, id, text, error, capacity));
+  text->styles.authored = true;
+  text->styles.style_count = 1;
+  text->styles.styles[0].appearance =
+      (ArTextRunAppearance){.font_role = "body",
+                            .scale_basis = 10000,
+                            .band_rgb = 0xabcdef,
+                            .body_rgb = 0x123456};
   return true;
 }
 
@@ -77,8 +90,8 @@ int main(void) {
     PrepareFrame(&frame);
     char error[128] = {0};
     CHECK(ActRaiserLocalizationWorldNavigation_Append(
-        &state, &frame, location, true, cgram, 256,
-        Resolve, &resolver, error, sizeof(error)));
+        &state, &frame, location, true, cgram, 256, Resolve, NULL, &resolver,
+        error, sizeof(error)));
     CHECK(!strcmp(resolver.semantic_id, ids[location - 1]));
     CHECK(frame.screen_text_count == 1 && frame.snapshot_count == 1 &&
           frame.cells.count == 0 && ArLocalizationFrame_IsValid(&frame));
@@ -102,20 +115,18 @@ int main(void) {
   ArLocalizationFrame cached;
   PrepareFrame(&cached);
   CHECK(ActRaiserLocalizationWorldNavigation_Append(
-      &state, &cached, 7, true, cgram, 256,
-      Resolve, &resolver, NULL, 0));
+      &state, &cached, 7, true, cgram, 256, Resolve, NULL, &resolver, NULL, 0));
   CHECK(resolver.calls == calls);
 
   /* A hidden label and invalid locations never claim the native glyph range. */
   ArLocalizationFrame absent;
   PrepareFrame(&absent);
-  CHECK(!ActRaiserLocalizationWorldNavigation_Append(
-      &state, &absent, 7, false, cgram, 256,
-      Resolve, &resolver, NULL, 0));
+  CHECK(!ActRaiserLocalizationWorldNavigation_Append(&state, &absent, 7, false,
+                                                     cgram, 256, Resolve, NULL,
+                                                     &resolver, NULL, 0));
   CHECK(!absent.screen_text_count && resolver.calls == calls);
   CHECK(!ActRaiserLocalizationWorldNavigation_Append(
-      &state, &absent, 0, true, cgram, 256,
-      Resolve, &resolver, NULL, 0));
+      &state, &absent, 0, true, cgram, 256, Resolve, NULL, &resolver, NULL, 0));
 
   /* An authored empty value is a successful claim: presentation removes the
    * native glyphs but keeps the plaque. */
@@ -124,8 +135,7 @@ int main(void) {
   ArLocalizationFrame blank;
   PrepareFrame(&blank);
   CHECK(ActRaiserLocalizationWorldNavigation_Append(
-      &state, &blank, 1, true, cgram, 256,
-      Resolve, &resolver, NULL, 0));
+      &state, &blank, 1, true, cgram, 256, Resolve, NULL, &resolver, NULL, 0));
   CHECK(blank.screen_text_count == 1 && !blank.snapshots[0].utf8_bytes &&
         ArLocalizationFrame_IsValid(&blank));
 
@@ -160,14 +170,37 @@ int main(void) {
   ActRaiserLocalizationWorldNavigation_Invalidate(&state);
   char pressure_error[128] = {0};
   CHECK(!ActRaiserLocalizationWorldNavigation_Append(
-      &state, &pressure, 2, true, cgram, 256,
-      Resolve, &resolver, pressure_error, sizeof(pressure_error)));
+      &state, &pressure, 2, true, cgram, 256, Resolve, NULL, &resolver,
+      pressure_error, sizeof(pressure_error)));
   CHECK(strstr(pressure_error, "does not fit") != NULL);
   CHECK(pressure.snapshot_count == old_snapshots &&
         pressure.screen_text_count == old_screen_texts &&
         pressure.text_bytes == old_text_bytes &&
         pressure.bidi.count == kArTextMaximumBidiSpans &&
         ArLocalizationFrame_IsValid(&pressure));
+
+  resolver.with_bidi = false;
+  ActRaiserLocalizationWorldNavigation_Invalidate(&state);
+  PrepareFrame(&cached);
+  CHECK(ActRaiserLocalizationWorldNavigation_Append(
+      &state, &cached, 1, true, cgram, 256, Resolve, ResolveWorldLabel,
+      &resolver, NULL, 0));
+  CHECK(resolver.label_calls == 1 && cached.snapshot_count == 1);
+  CHECK(cached.snapshots[0].appearance.body_rgb == 0x123456);
+  CHECK(!cached.snapshots[0].appearance.slant_ascii_numerals);
+  CHECK(!cached.snapshots[0].appearance.italic);
+  PrepareFrame(&cached);
+  CHECK(ActRaiserLocalizationWorldNavigation_Append(
+      &state, &cached, 1, true, cgram, 256, Resolve, ResolveWorldLabel,
+      &resolver, NULL, 0));
+  CHECK(resolver.label_calls == 1);
+  resolver.reject_label = true;
+  ActRaiserLocalizationWorldNavigation_Invalidate(&state);
+  PrepareFrame(&cached);
+  CHECK(!ActRaiserLocalizationWorldNavigation_Append(
+      &state, &cached, 1, true, cgram, 256, Resolve, ResolveWorldLabel,
+      &resolver, NULL, 0));
+  CHECK(!cached.snapshot_count && !cached.screen_text_count);
 
   puts("world-navigation localization checks passed");
   return failures ? 1 : 0;

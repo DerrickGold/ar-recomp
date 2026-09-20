@@ -19,22 +19,23 @@ bool ArTextBackend_IsReady(const ArTextBackend *backend) {
       backend->ops->create && backend->ops->destroy;
 }
 
-static bool ValidConfig(const ArTextBackendConfig *config) {
+bool ArTextBackendConfig_IsValid(const ArTextBackendConfig *config) {
   if (!config ||
-      config->struct_size <
-          AR_MEMBER_END(ArTextBackendConfig, cached_size_capacity) ||
+      config->struct_size < AR_MEMBER_END(ArTextBackendConfig, role_count) ||
       config->abi_version != AR_TEXT_BACKEND_CONFIG_ABI_VERSION ||
       !config->font_stack_id || !config->font_stack_id[0] ||
       !config->primary_font || !ArFontResources_IsReady(&config->resources) ||
       config->fallback_font_count > kArTextBackendMaximumFallbackFonts ||
-      !config->font_revision || !config->cached_size_capacity)
+      !config->font_revision || !config->cached_size_capacity ||
+      config->role_count > kArTextBackendMaximumFontRoles ||
+      (config->role_count && !config->roles))
     return false;
   if (config->fallback_font_count && !config->fallback_fonts)
     return false;
   for (size_t index = 0; index < config->fallback_font_count; ++index)
     if (!config->fallback_fonts[index])
       return false;
-  return true;
+  return ArTextFontRoles_Valid(config->roles, config->role_count);
 }
 
 bool ArTextBackendInstance_Create(
@@ -42,7 +43,8 @@ bool ArTextBackendInstance_Create(
     const ArTextBackendConfig *config,
     char *error, size_t error_capacity) {
   if (error && error_capacity) error[0] = 0;
-  if (!instance || !ArTextBackend_IsReady(backend) || !ValidConfig(config)) {
+  if (!instance || !ArTextBackend_IsReady(backend) ||
+      !ArTextBackendConfig_IsValid(config)) {
     SetError(error, error_capacity, "invalid text backend configuration");
     return false;
   }

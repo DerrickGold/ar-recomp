@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -15,12 +16,26 @@ func TestLocalInstallationPreservesEveryStatusWithoutPublicationConsent(t *testi
 		t.Fatal(err)
 	}
 	before := p.ProjectRevision()
+	files := p.pack.Files()
 	prepared, report, err := p.Installation()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if report.Messages != p.Pack().Workspace().Stats().MessageCount || prepared.pack != p.pack {
-		t.Fatal("local installation filtered supplied messages", report)
+	if report.Upgrade == nil || report.Upgrade.FromVersion != 1 || report.Upgrade.ToVersion != 2 ||
+		report.Messages != p.Pack().Workspace().Stats().MessageCount+6 || prepared.pack.manifest.Version() != 2 ||
+		prepared.pack.manifest.Metadata() != p.pack.manifest.Metadata() {
+		t.Fatal("installation did not prepare v2 with the same identity", report)
+	}
+	for id := range p.pack.workspace.messageScript {
+		old, _ := p.pack.workspace.Message(id)
+		got, _ := prepared.pack.workspace.Message(id)
+		if !got.Present || got.Status != old.Status {
+			t.Fatal("preparation lost a supplied message or progress", id)
+		}
+	}
+	again, repeated, err := prepared.Installation()
+	if err != nil || repeated.Upgrade != nil || again.pack != prepared.pack || repeated.Messages != report.Messages {
+		t.Fatal("v2 installation converted again", repeated, err)
 	}
 	if err := prepared.WriteArchive(io.Discard, "publication"); err == nil {
 		t.Fatal("installation authorized publication")
@@ -37,10 +52,10 @@ func TestLocalInstallationPreservesEveryStatusWithoutPublicationConsent(t *testi
 		t.Fatal(err)
 	}
 	for id := range p.pack.workspace.messageScript {
-		old, _ := p.pack.workspace.Message(id)
-		got, _ := installed.workspace.Message(id)
-		if !got.Present || old.Body != got.Body {
-			t.Fatal("installed content changed", id, old.Status)
+		old, _ := resolvedAuthorOperations(p.pack.workspace, id)
+		got, err := resolvedAuthorOperations(installed.workspace, id)
+		if err != nil || presentationDigest(old) != presentationDigest(got) {
+			t.Fatal("installed wording or controls changed", id, err)
 		}
 	}
 	for _, path := range []string{"author-project.json", "translation-progress.tsv"} {
@@ -48,7 +63,7 @@ func TestLocalInstallationPreservesEveryStatusWithoutPublicationConsent(t *testi
 			t.Fatal("installed private editor metadata", path)
 		}
 	}
-	if p.ProjectRevision() != before {
+	if p.ProjectRevision() != before || p.pack.manifest.Version() != 1 || !reflect.DeepEqual(files, p.pack.Files()) {
 		t.Fatal("installation changed author project")
 	}
 	pub, reportPub, err := p.Publication(PublicationOptions{ConfirmRights: true})
@@ -63,7 +78,7 @@ func TestLocalInstallationPreservesEveryStatusWithoutPublicationConsent(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, r, err := imported.Installation(); err != nil || r.Messages != reportPub.Included {
+	if _, r, err := imported.Installation(); err != nil || r.Upgrade == nil || r.Messages != reportPub.Included+6 {
 		t.Fatal("shared archive was re-filtered", r, err)
 	}
 }

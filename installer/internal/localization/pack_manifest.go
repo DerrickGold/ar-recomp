@@ -32,8 +32,50 @@ type PackMetadata struct {
 }
 
 type PackFonts struct {
+	Primary  string         `json:"primary"`
+	Fallback []string       `json:"fallback"`
+	Roles    []PackFontRole `json:"roles,omitempty"`
+}
+
+// Body is the existing [fonts] stack. Other roles have independent ordered
+// fallbacks; sharing an asset never requires copying its payload.
+type PackFontRole struct {
+	Name     string   `json:"name"`
 	Primary  string   `json:"primary"`
 	Fallback []string `json:"fallback"`
+}
+
+func (f PackFonts) Stacks() []PackFontRole {
+	return append([]PackFontRole{{Name: "body", Primary: f.Primary, Fallback: f.Fallback}}, f.Roles...)
+}
+
+func (f PackFonts) References() []string {
+	var refs []string
+	for _, role := range f.Stacks() {
+		for _, ref := range append([]string{role.Primary}, role.Fallback...) {
+			if !slices.Contains(refs, ref) {
+				refs = append(refs, ref)
+			}
+		}
+	}
+	return refs
+}
+
+func (f *PackFonts) mapPaths(convert func(string) string) {
+	apply := func(primary *string, fallback []string) {
+		if !strings.HasPrefix(*primary, "builtin:") {
+			*primary = convert(*primary)
+		}
+		for i, path := range fallback {
+			if !strings.HasPrefix(path, "builtin:") {
+				fallback[i] = convert(path)
+			}
+		}
+	}
+	apply(&f.Primary, f.Fallback)
+	for i := range f.Roles {
+		apply(&f.Roles[i].Primary, f.Roles[i].Fallback)
+	}
 }
 
 type manifestValueSpan struct {
@@ -45,19 +87,27 @@ type manifestValueSpan struct {
 // It checks syntax and portable paths only; LoadAuthorPack verifies referenced
 // files and semantic contracts. Font availability/rendering is a later gate.
 type PackManifest struct {
-	text, path string
-	metadata   PackMetadata
-	fonts      PackFonts
-	sources    []string
-	packValues []manifestValueSpan
-	fontRows   []manifestValueSpan
-	packEnd    int
+	text, path    string
+	version       int
+	metadata      PackMetadata
+	fonts         PackFonts
+	sources       []string
+	packValues    []manifestValueSpan
+	fontRows      []manifestValueSpan
+	fontRoleSpans []manifestValueSpan
+	packEnd       int
 }
 
 func (m *PackManifest) Text() string           { return m.text }
+func (m *PackManifest) Version() int           { return m.version }
 func (m *PackManifest) Metadata() PackMetadata { return m.metadata }
 func (m *PackManifest) Fonts() PackFonts {
-	return PackFonts{m.fonts.Primary, append([]string{}, m.fonts.Fallback...)}
+	f := PackFonts{Primary: m.fonts.Primary, Fallback: append([]string{}, m.fonts.Fallback...)}
+	for _, role := range m.fonts.Roles {
+		role.Fallback = append([]string{}, role.Fallback...)
+		f.Roles = append(f.Roles, role)
+	}
+	return f
 }
 func (m *PackManifest) Sources() []string { return append([]string{}, m.sources...) }
 
@@ -206,7 +256,8 @@ func ParsePackManifest(text, path string) (*PackManifest, error) {
 		}
 		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
 			name := strings.Trim(line[1:len(line)-1], " \t")
-			if !slices.Contains([]string{"pack", "fonts", "scripts"}, name) {
+			isRole := strings.HasPrefix(name, "font.")
+			if !isRole && !slices.Contains([]string{"pack", "fonts", "scripts"}, name) {
 				return fail("unknown manifest section [%s]", name)
 			}
 			if sections[name] {
@@ -214,6 +265,14 @@ func ParsePackManifest(text, path string) (*PackManifest, error) {
 			}
 			if section == "pack" {
 				m.packEnd = start
+			}
+			if isRole {
+				role := strings.TrimPrefix(name, "font.")
+				if !authorIdentifier(role) || len(role) > 96 || role == "body" || len(m.fonts.Roles) >= 8 {
+					return fail("invalid or excessive font role %q", role)
+				}
+				m.fonts.Roles = append(m.fonts.Roles, PackFontRole{Name: role, Fallback: []string{}})
+				m.fontRoleSpans = append(m.fontRoleSpans, manifestValueSpan{name, start, next})
 			}
 			section, sections[name] = name, true
 			return nil
@@ -226,13 +285,14 @@ func ParsePackManifest(text, path string) (*PackManifest, error) {
 		if !found || key == "" || value == "" {
 			return fail("expected nonempty key = value")
 		}
-		repeated := section == "fonts" && key == "fallback" || section == "scripts" && key == "source"
+		fontSection := section == "fonts" || strings.HasPrefix(section, "font.")
+		repeated := fontSection && key == "fallback" || section == "scripts" && key == "source"
 		if seen[section+"/"+key] && !repeated {
 			return fail("duplicate key %q", key)
 		}
 		seen[section+"/"+key] = true
-		switch section {
-		case "pack":
+		switch {
+		case section == "pack":
 			if key != "format" && key != "version" && !slices.Contains(packMetadataKeys, key) {
 				return fail("unknown key %q in [pack]", key)
 			}
@@ -240,8 +300,15 @@ func ParsePackManifest(text, path string) (*PackManifest, error) {
 			equals := strings.IndexByte(physical, '=')
 			valueStart := equals + 1 + len(physical[equals+1:]) - len(strings.TrimLeft(physical[equals+1:], " \t"))
 			m.packValues = append(m.packValues, manifestValueSpan{key, start + valueStart, start + valueStart + len(value)})
-		case "fonts":
-			m.fontRows = append(m.fontRows, manifestValueSpan{key, start, next})
+		case fontSection:
+			primary, fallback := &m.fonts.Primary, &m.fonts.Fallback
+			if section == "fonts" {
+				m.fontRows = append(m.fontRows, manifestValueSpan{key, start, next})
+			} else {
+				role := &m.fonts.Roles[len(m.fonts.Roles)-1]
+				primary, fallback = &role.Primary, &role.Fallback
+				m.fontRoleSpans = append(m.fontRoleSpans, manifestValueSpan{section, start, next})
+			}
 			if key != "primary" && key != "fallback" {
 				return fail("unknown key %q in [fonts]", key)
 			}
@@ -249,17 +316,17 @@ func ParsePackManifest(text, path string) (*PackManifest, error) {
 				return fail("font reference must be builtin or a portable relative path")
 			}
 			if key == "primary" {
-				m.fonts.Primary = value
+				*primary = value
 			} else {
-				if len(m.fonts.Fallback) >= 8 {
+				if len(*fallback) >= 8 {
 					return fail("too many fallback fonts")
 				}
-				if slices.Contains(m.fonts.Fallback, value) {
+				if slices.Contains(*fallback, value) {
 					return fail("duplicate fallback font %q", value)
 				}
-				m.fonts.Fallback = append(m.fonts.Fallback, value)
+				*fallback = append(*fallback, value)
 			}
-		case "scripts":
+		case section == "scripts":
 			if key != "source" {
 				return fail("unknown key %q in [scripts]", key)
 			}
@@ -279,11 +346,20 @@ func ParsePackManifest(text, path string) (*PackManifest, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(sections) != 3 {
+	if !sections["pack"] || !sections["fonts"] || !sections["scripts"] {
 		return nil, authorError(path, 0, "missing required manifest section")
 	}
-	if values["format"] != "actraiser-language-pack" || values["version"] != "1" {
+	if values["format"] != "actraiser-language-pack" || (values["version"] != "1" && values["version"] != "2") {
 		return nil, authorError(path, 0, "unsupported language-pack format or version")
+	}
+	m.version = int(values["version"][0] - '0')
+	if m.version == 1 && len(m.fonts.Roles) != 0 {
+		return nil, authorError(path, 0, "font roles require version 2")
+	}
+	for _, role := range m.fonts.Roles {
+		if role.Primary == "" {
+			return nil, authorError(path, 0, "font role %s requires a primary font", role.Name)
+		}
 	}
 	m.metadata = PackMetadata{ID: values["id"], Locale: values["locale"], Name: values["name"], Autonym: values["autonym"], Author: values["author"], License: values["license"], Direction: values["direction"], Target: values["target"], SourceProfile: values["source_profile"], Fallback: values["fallback"], Coverage: values["coverage"], Description: values["description"]}
 	if err := validatePackMetadata(m.metadata); err != nil {
@@ -295,21 +371,30 @@ func ParsePackManifest(text, path string) (*PackManifest, error) {
 	return m, nil
 }
 
-// NewPackManifest emits a deterministic v1 manifest and uses the same parser
+// NewPackManifest emits a deterministic v2 manifest and uses the same parser
 // as the editor and reader. User values cannot inject keys, sections or paths.
 func NewPackManifest(metadata PackMetadata, fonts PackFonts, sources []string) (*PackManifest, error) {
+	return NewPackManifestVersion(metadata, fonts, sources, 2)
+}
+
+func NewPackManifestVersion(metadata PackMetadata, fonts PackFonts, sources []string, version int) (*PackManifest, error) {
+	if version != 1 && version != 2 {
+		return nil, fmt.Errorf("unsupported template version %d", version)
+	}
 	if err := validatePackMetadata(metadata); err != nil {
 		return nil, err
 	}
-	if !packFontReference(fonts.Primary) {
-		return nil, fmt.Errorf("invalid primary font")
-	}
-	if len(fonts.Fallback) > 8 || len(sources) == 0 || len(sources) > 64 {
+	if len(fonts.Roles) > 8 || len(sources) == 0 || len(sources) > 64 {
 		return nil, fmt.Errorf("too many fonts or invalid source count")
 	}
-	for _, font := range fonts.Fallback {
-		if !packFontReference(font) {
-			return nil, fmt.Errorf("invalid fallback font")
+	for _, role := range fonts.Stacks() {
+		if !authorIdentifier(role.Name) || len(role.Name) > 96 || len(role.Fallback) > 8 {
+			return nil, fmt.Errorf("invalid font role")
+		}
+		for _, font := range append([]string{role.Primary}, role.Fallback...) {
+			if !packFontReference(font) {
+				return nil, fmt.Errorf("invalid font reference")
+			}
 		}
 	}
 	for _, path := range sources {
@@ -318,7 +403,7 @@ func NewPackManifest(metadata PackMetadata, fonts PackFonts, sources []string) (
 		}
 	}
 	var text strings.Builder
-	text.WriteString("[pack]\nformat = actraiser-language-pack\nversion = 1\n")
+	fmt.Fprintf(&text, "[pack]\nformat = actraiser-language-pack\nversion = %d\n", version)
 	values := metadataValues(metadata)
 	for _, key := range packMetadataKeys {
 		if values[key] != "" {
@@ -329,6 +414,7 @@ func NewPackManifest(metadata PackMetadata, fonts PackFonts, sources []string) (
 	for _, font := range fonts.Fallback {
 		fmt.Fprintf(&text, "fallback = %s\n", font)
 	}
+	writeFontRoles(&text, fonts.Roles, "\n")
 	text.WriteString("\n[scripts]\n")
 	for _, path := range sources {
 		fmt.Fprintf(&text, "source = %s\n", path)

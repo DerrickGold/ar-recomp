@@ -47,9 +47,6 @@ bool ManualReader_Available(void);
  * here, valid until the next ManualReader_Load. */
 const char *ManualReader_Status(void);
 
-/* Number of pages, or 0. */
-int ManualReader_PageCount(void);
-
 bool ManualReader_IsOpen(void);
 /* Opens the reader, loading the manual first if needed. False -- and no state
  * change -- when there is no manual to show. */

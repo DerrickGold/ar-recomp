@@ -1,0 +1,316 @@
+[
+  {
+    "name": "plain",
+    "input": "A plain sentence.",
+    "runs": [
+      {
+        "text": "A plain sentence."
+      }
+    ]
+  },
+  {
+    "name": "number emphasis",
+    "input": "HP <i>{hp:02}</i>",
+    "runs": [
+      {
+        "text": "HP "
+      },
+      {
+        "value": "hp",
+        "minimum_digits": 2,
+        "style": {
+          "italic": 2
+        }
+      }
+    ]
+  },
+  {
+    "name": "all properties",
+    "input": "<span font=\"hud\" style=\"gold\" color=\"#aabbcc\" scale=\"80%\" italic=\"false\">key</span>",
+    "runs": [
+      {
+        "text": "key",
+        "style": {
+          "font": "hud",
+          "style": "gold",
+          "color": "#AABBCC",
+          "scale": 80,
+          "italic": 1
+        }
+      }
+    ]
+  },
+  {
+    "name": "nested scale replaces",
+    "input": "<span scale=\"80%\">a<span scale=\"120%\">b</span>c</span>d",
+    "runs": [
+      {
+        "text": "a",
+        "style": {
+          "scale": 80
+        }
+      },
+      {
+        "text": "b",
+        "style": {
+          "scale": 120
+        }
+      },
+      {
+        "text": "c",
+        "style": {
+          "scale": 80
+        }
+      },
+      {
+        "text": "d"
+      }
+    ]
+  },
+  {
+    "name": "upright exception",
+    "input": "<i>a<span italic=\"false\">b</span>c</i>",
+    "runs": [
+      {
+        "text": "a",
+        "style": {
+          "italic": 2
+        }
+      },
+      {
+        "text": "b",
+        "style": {
+          "italic": 1
+        }
+      },
+      {
+        "text": "c",
+        "style": {
+          "italic": 2
+        }
+      }
+    ]
+  },
+  {
+    "name": "literal escapes",
+    "input": "{{hp}} \\<tag> \\\\ path",
+    "runs": [
+      {
+        "text": "{hp} <tag> \\ path"
+      }
+    ]
+  },
+  {
+    "name": "rtl and combining",
+    "input": "<span font=\"body\">שלום é 日本語</span> {coins}",
+    "runs": [
+      {
+        "text": "שלום é 日本語",
+        "style": {
+          "font": "body"
+        }
+      },
+      {
+        "text": " "
+      },
+      {
+        "value": "coins"
+      }
+    ]
+  },
+  {
+    "name": "empty style is harmless",
+    "input": "a<i></i>b",
+    "runs": [
+      {
+        "text": "a"
+      },
+      {
+        "text": "b"
+      }
+    ]
+  },
+  {
+    "name": "black is explicit",
+    "input": "<span color=\"#000000\">black</span>",
+    "runs": [
+      {
+        "text": "black",
+        "style": {
+          "color": "#000000"
+        }
+      }
+    ]
+  },
+  {
+    "name": "attributes allow whitespace",
+    "input": "<span\tfont = \"body\" >x</span>",
+    "runs": [
+      {
+        "text": "x",
+        "style": {
+          "font": "body"
+        }
+      }
+    ]
+  },
+  {
+    "name": "scale lower limit",
+    "input": "<span scale=\"25%\">x</span>",
+    "runs": [
+      {
+        "text": "x",
+        "style": {
+          "scale": 25
+        }
+      }
+    ]
+  },
+  {
+    "name": "scale upper limit",
+    "input": "<span scale=\"400%\">x</span>",
+    "runs": [
+      {
+        "text": "x",
+        "style": {
+          "scale": 400
+        }
+      }
+    ]
+  },
+  {
+    "name": "empty",
+    "input": "",
+    "runs": []
+  },
+  {
+    "name": "unknown tag",
+    "input": "<script>x</script>",
+    "invalid": true
+  },
+  {
+    "name": "unclosed",
+    "input": "<i>x",
+    "invalid": true
+  },
+  {
+    "name": "crossed tags",
+    "input": "<i><span color=\"#FFFFFF\">x</i></span>",
+    "invalid": true
+  },
+  {
+    "name": "unmatched close",
+    "input": "x</i>",
+    "invalid": true
+  },
+  {
+    "name": "empty span",
+    "input": "<span>x</span>",
+    "invalid": true
+  },
+  {
+    "name": "duplicate",
+    "input": "<span font=\"a\" font=\"b\">x</span>",
+    "invalid": true
+  },
+  {
+    "name": "unknown attribute",
+    "input": "<span width=\"20\">x</span>",
+    "invalid": true
+  },
+  {
+    "name": "i has no attributes",
+    "input": "<i font=\"a\">x</i>",
+    "invalid": true
+  },
+  {
+    "name": "unquoted",
+    "input": "<span font=hud>x</span>",
+    "invalid": true
+  },
+  {
+    "name": "missing separator",
+    "input": "<span font=\"hud\"scale=\"80%\">x</span>",
+    "invalid": true
+  },
+  {
+    "name": "self closing",
+    "input": "<i/>",
+    "invalid": true
+  },
+  {
+    "name": "bad role",
+    "input": "<span font=\"../file\">x</span>",
+    "invalid": true
+  },
+  {
+    "name": "short color",
+    "input": "<span color=\"#fff\">x</span>",
+    "invalid": true
+  },
+  {
+    "name": "bad color",
+    "input": "<span color=\"#GG0000\">x</span>",
+    "invalid": true
+  },
+  {
+    "name": "bad boolean",
+    "input": "<span italic=\"yes\">x</span>",
+    "invalid": true
+  },
+  {
+    "name": "scale low",
+    "input": "<span scale=\"24%\">x</span>",
+    "invalid": true
+  },
+  {
+    "name": "scale high",
+    "input": "<span scale=\"401%\">x</span>",
+    "invalid": true
+  },
+  {
+    "name": "scale decimal",
+    "input": "<span scale=\"80.5%\">x</span>",
+    "invalid": true
+  },
+  {
+    "name": "unknown escape",
+    "input": "path\\folder",
+    "invalid": true
+  },
+  {
+    "name": "trailing escape",
+    "input": "x\\",
+    "invalid": true
+  },
+  {
+    "name": "unclosed value",
+    "input": "{hp",
+    "invalid": true
+  },
+  {
+    "name": "bad width",
+    "input": "{hp:20}",
+    "invalid": true
+  },
+  {
+    "name": "bad value",
+    "input": "{hp!}",
+    "invalid": true
+  },
+  {
+    "name": "unmatched brace",
+    "input": "x}",
+    "invalid": true
+  },
+  {
+    "name": "explicit boundary",
+    "input": "<i>one\ntwo</i>",
+    "invalid": true
+  },
+  {
+    "name": "style crosses a cell boundary",
+    "input": "<i>a | b</i>",
+    "invalid": true
+  }
+]

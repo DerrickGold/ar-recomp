@@ -23,80 +23,81 @@
 #endif
 
 #include "action/action_obj_apron.h"
-#include "snesrecomp/game/types.h"
-#include "actraiser_rtl.h"
-#include "snesrecomp/game/bootstrap.h"
-#include "snesrecomp/game/cpu.h"
-#include "snesrecomp/game/generated_support.h"
-#include "config.h"
-#include "crt_post.h"
-#include "render_preparation.h"
-#include "settings.h"
-#include "session_recovery.h"
-#include "localization/pack_discovery.h"
-#include "platform/sdl/font_coverage_cli.h"
-#include "settings_overlay.h"
-#include "sim/sim3d_depth_pass.h"
-#include "input_map.h"
-#include "dev/scene_inspector.h"
-#include "diorama/diorama.h"
-#include "diorama/diorama_frame_generation.h"
-#include "diorama/diorama_performance.h"
-#include "presentation_frame_generation.h"
-#include "forced_input.h"
-#include "save_system.h"
-#include "hd_replacement_host.h"
-#include "music_replacements.h"
-#include "audio_presentation_policy.h"
-#include "native_audio_extension.h"
-#include "native_audio_mixer.h"
-#include "render_comparison.h"
-#include "dev/sfx_census.h"
-#include "dev/native_audio_trace.h"
-#include "display_geometry.h"
-#include "run_dir.h"
-#include "snesrecomp/host/launcher.h"
-#include "snesrecomp/support/file.h"
 #include "actraiser/actraiser_action_bg.h"
 #include "actraiser/actraiser_localization_runtime.h"
 #include "actraiser_game.h"
-#include "snesrecomp/game/trace.h"
-#include "present.h"
-#include "frame_slot.h"
-#include "host/host_audio.h"
+#include "actraiser_rtl.h"
+#include "audio_presentation_policy.h"
+#include "config.h"
+#include "constants.h"
+#include "crt_post.h"
 #include "dev/host_dev_tools.h"
+#include "dev/native_audio_trace.h"
+#include "dev/oracle_trace.h"
+#include "dev/scene_inspector.h"
+#include "dev/sfx_census.h"
+#include "diorama/diorama.h"
+#include "diorama/diorama_frame_generation.h"
+#include "diorama/diorama_performance.h"
+#include "display_geometry.h"
+#include "forced_input.h"
+#include "frame_slot.h"
+#include "hd_replacement_host.h"
+#include "host/font_resources.h"
+#include "host/host_audio.h"
 #include "host/host_display.h"
 #include "host/host_display_pacing.h"
 #include "host/host_input.h"
 #include "host/parallel_work.h"
-#include "manual/manual_reader.h"
 #include "ini_upgrade_apply.h"
+#include "input_map.h"
 #include "input_replay.h"
-#include "dev/oracle_trace.h"
+#include "localization/language_pack.h"
+#include "localization/pack_discovery.h"
+#include "manual/manual_reader.h"
+#include "music_replacements.h"
+#include "native_audio_extension.h"
+#include "native_audio_mixer.h"
+#include "performance_metrics.h"
+#include "platform/sdl/font_coverage_cli.h"
+#include "platform/sdl/render_sdl.h"
+#include "platform/sdl/text_preview_cli.h"
+#include "platform/sdl/text_rasterizer_sdl.h"
 #include "portable_paths.h"
-#include "runtime_settings.h"
-#include "session_fatal.h"
+#include "present.h"
+#include "presentation_frame_generation.h"
+#include "render/localized_text_presenter.h"
+#include "render_comparison.h"
+#include "render_preparation.h"
+#include "run_dir.h"
 #include "runtime_diagnostics.h"
-#include "snesrecomp/runner.h"
+#include "runtime_settings.h"
+#include "save_system.h"
 #include "scheduled_settings.h"
-#include "user_data_dir.h"
+#include "session_fatal.h"
+#include "session_recovery.h"
+#include "settings.h"
+#include "settings_overlay.h"
+#include "sim/sim3d.h"
+#include "sim/sim3d_depth_pass.h"
+#include "sim/sim_background_voxels.h"
 #include "sim/sim_phase0_trace.h"
+#include "sim/sim_render_atlas.h"
 #include "sim/sim_render_metadata.h"
+#include "sim/sim_town_canvas.h"
+#include "sim/sim_town_ground_art.h"
+#include "sim/sim_world_map.h"
 #include "sim/sim_world_map_build.h"
 #include "sim/sim_world_navigation_capture.h"
-#include "sim/sim_render_atlas.h"
-#include "sim/sim_background_voxels.h"
-#include "sim/sim_town_canvas.h"
-#include "sim/sim_world_map.h"
-#include "sim/sim_town_ground_art.h"
-#include "sim/sim3d.h"
-#include "constants.h"
-#include "performance_metrics.h"
-#include "platform/sdl/render_sdl.h"
-#include "platform/sdl/text_rasterizer_sdl.h"
-#include "host/font_resources.h"
-#include "localization/language_pack.h"
-#include "render/localized_text_presenter.h"
+#include "snesrecomp/game/bootstrap.h"
+#include "snesrecomp/game/cpu.h"
+#include "snesrecomp/game/generated_support.h"
+#include "snesrecomp/game/trace.h"
+#include "snesrecomp/game/types.h"
+#include "snesrecomp/host/launcher.h"
+#include "snesrecomp/runner.h"
+#include "snesrecomp/support/file.h"
+#include "user_data_dir.h"
 
 static const char kWindowTitle[] = "ActRaiser (Recompiled)";
 enum {
@@ -520,8 +521,7 @@ static void DrawAndPresentFrame(HostDisplayPresentMode present_mode,
   SimWorldMap_BuildIfNeeded(
       g_settings.sim3d_world_navigation && g_settings.sim3d_sky_palace);
   PerformanceMetrics_End(pipeline);
-  /* #16: function-scope so the annotated sim outlives the block below and can
-   * be published to FrameSlot_Capture around the HostDisplay_SubmitFrame tail. */
+  /* This annotation is reused by frame submission after the host work below. */
   SimFrameData sim;
   pipeline = PerformanceMetrics_Begin(kPerformance_Metadata);
   {
@@ -714,14 +714,7 @@ static void DrawAndPresentFrame(HostDisplayPresentMode present_mode,
   }
 
   if (present_mode != kHostDisplayPresent_None) {
-    /* FrameSlot_Capture inside this call copies the sim annotated above
-     * instead of recomputing it (identical inputs, same thread, nothing
-     * mutates them in between). Cleared immediately after: the screenshot
-     * and paused/menu-redraw captures run outside this window and must
-     * self-annotate. */
-    FrameSlot_SetPendingAnnotatedSim(&sim);
-    (void)HostDisplay_SubmitFrame(present_mode, alpha);
-    FrameSlot_SetPendingAnnotatedSim(NULL);
+    (void)HostDisplay_SubmitFrame(present_mode, alpha, &sim);
   }
 }
 
@@ -888,6 +881,7 @@ typedef struct AppBoot {
   bool headless_video;  /* headless, but with a hidden-window renderer */
   bool video;           /* !headless || headless_video */
   bool ws_headless;     /* opt a headless run into the configured wide geometry */
+  bool localization_exit_requested;
   Snes *snes;
 } AppBoot;
 
@@ -1497,6 +1491,47 @@ static void DiscardPreparedLocalizedFont(void *context) {
   ArLocalizedTextPresenter_DiscardPreparedFont(context);
 }
 
+static void ExplainLegacyLanguagePack(void *context, const char *manifest,
+                                      const ArLanguagePackMetadata *metadata,
+                                      bool native) {
+  AppBoot *app = context;
+  const ArUiLocale locale = (ArUiLocale)g_settings.interface_language;
+  const char *instructions = ArUiCatalog_Text(
+      locale,
+      native ? "localization.upgrade.native" : "localization.upgrade.pack",
+      NULL);
+  char message[4096];
+  const ArUiTextArgument arguments[] = {{"name", metadata->display_name},
+                                        {"instructions", instructions},
+                                        {"path", manifest}};
+  if (!ArUiCatalog_Format(
+          message, sizeof(message),
+          ArUiCatalog_Text(locale, "localization.upgrade.message", NULL),
+          arguments, 3))
+    snprintf(message, sizeof(message), "%s\n%s\n%s", metadata->display_name,
+             instructions, manifest);
+  fprintf(stderr, "[localization] %s\n", message);
+  if (app->headless)
+    return;
+  const SDL_MessageBoxButtonData buttons[] = {
+      {SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT, 1,
+       ArUiCatalog_Text(locale, "localization.upgrade.continue", NULL)},
+      {SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, 0,
+       ArUiCatalog_Text(locale, "localization.upgrade.exit", NULL)}};
+  const SDL_MessageBoxData dialog = {
+      .flags = SDL_MESSAGEBOX_WARNING,
+      .window = g_window,
+      .title = ArUiCatalog_Text(locale, "localization.upgrade.title", NULL),
+      .message = message,
+      .numbuttons = 2,
+      .buttons = buttons};
+  int answer = -1;
+  if (!SDL_ShowMessageBox(&dialog, &answer))
+    fprintf(stderr, "[localization] cannot show upgrade window: %s\n",
+            SDL_GetError());
+  app->localization_exit_requested = answer != 1;
+}
+
 /* Overlay, world map, diorama manifest, the injected overlay hooks (layer editor,
  * manual), input, and music. Injection rather than direct calls is what keeps
  * settings_overlay.c testable with no renderer at all -- see settings_overlay.h. */
@@ -1516,6 +1551,9 @@ static void AppBoot_InstallSubsystems(AppBoot *app) {
       .abi_version = ACTRAISER_LOCALIZATION_PACK_HOST_ABI_VERSION,
       .io = pack_io,
       .native_manifest = native_manifest,
+      .require_v2 = true,
+      .context = app,
+      .legacy_pack = ExplainLegacyLanguagePack,
   };
   ActRaiserLocalizationRuntime_SetPackHost(&pack_host);
   const ArTextPresentationHost text_host = {
@@ -1796,433 +1834,344 @@ static void AppBoot_StartGame(AppBoot *app) {
     Die(InputReplay_LastError());
 }
 
-/* The SDL event pump. One long switch over event types -- flat and skimmable
- * the way a dispatch table is, since every arm is independent. Clears
- * *running on quit. */
-static void AppLoop_PumpEvents(AppBoot *app, bool *running) {
-  SDL_Event event;
-    while (SDL_PollEvent(&event)) {
-      switch (event.type) {
-        case SDL_EVENT_QUIT:
-          *running = false;
-          break;
-        /* Dragging the window to another monitor, or that monitor changing
-         * mode, can change the refresh rate the Vsync row reports — and the
-         * SAME monitor can re-mode under us (user flips 60->144Hz in OS
-         * settings, Windows dynamic refresh re-modes on power state), which
-         * arrives as a display-level event, not a window one. The R2 soft-
-         * cap and the menu's UI pacing both derive from this value. The same
-         * events change the window's PIXEL DENSITY (dragging between a Retina
-         * and a 1x monitor), which the pinned HUD/menu scale percentages are
-         * corrected by — so refresh both together. */
-        case SDL_EVENT_WINDOW_DISPLAY_CHANGED:
-          HostDisplay_WindowDisplayChanged();
-          HostInput_RequestPausedRedraw();
-          break;
-        case SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED:
-          HostDisplay_WindowDisplayScaleChanged();
-          HostInput_RequestPausedRedraw();
-          break;
-        case SDL_EVENT_DISPLAY_CURRENT_MODE_CHANGED:
-        case SDL_EVENT_DISPLAY_DESKTOP_MODE_CHANGED:
-        case SDL_EVENT_DISPLAY_ADDED:
-          HostDisplay_DisplayModeChanged(event.display.displayID);
-          HostInput_RequestPausedRedraw();
-          break;
-        case SDL_EVENT_DISPLAY_REMOVED:
-          HostDisplay_DisplayRemoved(event.display.displayID);
-          HostInput_RequestPausedRedraw();
-          break;
-        /* The window is the USER's: a drag-resize re-derives the picture inside
-         * it and nothing else. HostDisplay_RecomputeLogicalPresentation never
-         * calls SDL_SetWindowSize — calling the window-sizing path here
-         * snapped every manual resize straight back to window_scale and could
-         * oscillate on a fractional-scale compositor, where SDL notes the
-         * granted size "may not match the exact size requested". The render
-         * resolution and aspect settings are still fully respected: they
-         * letterbox inside whatever size the user chose.
-         *
-         * Rendering is synchronous, so re-deriving logical presentation here
-         * cannot race a composite. */
-        case SDL_EVENT_WINDOW_RESIZED:
-        case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
-          HostDisplay_RecomputeLogicalPresentation();
-          HostInput_RequestPausedRedraw();
-          break;
-        case SDL_EVENT_WINDOW_MINIMIZED:
-        case SDL_EVENT_WINDOW_HIDDEN:
-          g_window_hidden = true;
-          break;
-        case SDL_EVENT_WINDOW_RESTORED:
-        case SDL_EVENT_WINDOW_SHOWN:
-          g_window_hidden = false;
-          HostDisplay_ResetVsyncPacing();
-          HostInput_RequestPausedRedraw();
-          break;
-        case SDL_EVENT_WINDOW_EXPOSED:
-        case SDL_EVENT_WINDOW_FOCUS_GAINED:
-          HostDisplay_ResetVsyncPacing();
-          HostInput_RequestPausedRedraw();
-          break;
-        /* GPU device/target reset: STATIC textures lose their contents and
-         * must be recreated — both the HD replacements and the settings
-         * overlay's atlases (fonts/icons/dialog frame, uploaded once at
-         * Init). DEVICE_LOST is unrecoverable. */
-        case SDL_EVENT_RENDER_TARGETS_RESET:
-        case SDL_EVENT_RENDER_DEVICE_RESET:
-          HostDisplay_ResetVsyncPacing();
-          if (event.type == SDL_EVENT_RENDER_DEVICE_RESET) {
-            CrtPost_Shutdown(&g_render_device);
-            Diorama_ResetRendererResources(&g_render_device);
-            DestroyDioramaTextures();
-            CreateDioramaTextures();
-          }
-          /* Manual pages are STATIC textures too. Drop their cache before any
-           * stale pointer can be mistaken for a resident page; the next manual
-           * frame re-decodes from the retained PDF bytes under its normal budget. */
-          ManualReader_DestroyTextures();
-          HdReplacementHost_ReloadTextures();
-          if (!SettingsOverlay_ReloadTextures(app->rom_data, app->rom_size)) {
-            SessionFatal_RequestKind(kSessionFailure_GraphicsReset,
-                "overlay resources could not be restored after graphics reset: %s",
-                SDL_GetError());
-          }
-          /* The sim-3D caches are serial-gated on GAME state, so they would
-           * never notice the reset and would keep presenting discarded
-           * contents for the rest of the session (a settled town never bumps
-           * the underlay serial). Drop them so the next present re-bakes. */
-          PresentRendererResources_Reset();
-          {
-            RenderFeatureMask prepared_features = 0;
-            if (!RenderPreparation_Prepare(&g_render_device, &prepared_features) ||
-                !Settings_RenderCapabilitiesRetained(prepared_features))
-              SessionFatal_RequestKind(kSessionFailure_GraphicsReset,
-                  "graphics reset could not restore the prepared feature set; "
-                  "restart the game to recheck hardware support");
-          }
-          HostInput_RequestPausedRedraw();
-          /* R17/C2: the retained re-present slot copies opaque HD texture
-           * handles. The host reload just destroyed and recreated every one,
-           * so those copies are now stale even though their native pointer
-           * representation is hidden. Drop the slot; the next tick retains a
-           * fresh one. This also keeps retained-frame upload skipping from
-           * relying on resources invalidated by the reset. */
-          HostDisplay_InvalidatePresentHistory();
-          break;
-        case SDL_EVENT_RENDER_DEVICE_LOST:
-          SessionFatal_RequestKind(kSessionFailure_GraphicsLost,
-              "graphics device lost: %s",
-              SDL_GetError());
-          break;
-        case SDL_EVENT_KEY_DOWN:
-          /* An armed binding row consumes the raw key: it needs the scancode,
-           * and it must win over F5/F9/etc. so those stay bindable. */
-          if (SettingsOverlay_HandleCaptureEvent(&event)) break;
-          /* Steam Input can emit a keyboard mapping and a native gamepad
-           * event for one physical control. Auto mode gives the live gamepad
-           * event ownership, including host hotkeys, so the synthesized key
-           * cannot perform a second action. Key-up is still processed below
-           * to ensure a previously accepted key can never stick. */
-          if (HostInput_KeyboardIsSuppressed()) break;
-          if (SettingsOverlay_IsOpen()) {
-            /* Only the menu's active device drives navigation, so one
-             * physical press (+ its synthesized twin) moves the menu once. */
-            if (HostInput_MenuKeyboardIsActive()) {
-              bool was_open = true;
-              bool consumed = SettingsOverlay_HandleKey(
-                  event.key.key, true, event.key.repeat != 0);
-              if (was_open && !SettingsOverlay_IsOpen())
-                HostInput_ClearHeld();
-              if (consumed) break;
-            } else {
-              /* Menu owns the screen but keyboard isn't its device: swallow
-               * the key so it never reaches gameplay HandleInput. */
-              break;
-            }
-          }
-          /* The settings UI is host-owned and safe in every emulated state.
-           * Escape/F1 are not SNES inputs, so consume them before HandleInput
-           * and clear held joypad state before freezing game advancement. */
-          if (!event.key.repeat &&
-              (event.key.key == SDLK_ESCAPE ||
-               event.key.key == SDLK_F1)) {
-            HostInput_ClearHeld();
-            SettingsOverlay_Open();
-          } else if (event.key.key == SDLK_P) {
-            if (SceneInspector_HasSelection()) {
-              const bool inspector_owned_pause =
-                  HostInput_InspectorOwnsPause();
-              HostInput_CloseInspectorSelection();
-              if (!inspector_owned_pause) HostInput_TogglePause();
-            } else {
-              HostInput_TogglePause();
-            }
-          } else if (event.key.key == SDLK_T) {
-            HostInput_ToggleTurbo();
-          } else if (event.key.key == SDLK_F3) {
-            if (!event.key.repeat) {
-              const SettingDesc *inspector = Settings_Find("scene_inspector");
-              SettingChangeResult result = Settings_SetLong(
-                  inspector, !g_settings.scene_inspector);
-              char settings_path[kHostPathCapacity];
-              UserDataFile(settings_path, sizeof settings_path, "settings.ini");
-              if (result > kSettingChange_Unchanged &&
-                  !Settings_Save(settings_path))
-                fprintf(stderr,
-                        "[scene-inspector] could not save settings.ini\n");
-              fprintf(stderr, "[scene-inspector] %s (%s)\n",
-                      g_settings.scene_inspector
-                          ? "enabled — click the game to inspect"
-                          : "disabled",
-                      Settings_ChangeResultName(result));
-            }
-          } else if (event.key.key == SDLK_MINUS ||
-                     event.key.key == SDLK_KP_MINUS) {
-            if (!event.key.repeat)
-              HostDevTools_AdjustHudOutputScale(-25);
-          } else if (event.key.key == SDLK_EQUALS ||
-                     event.key.key == SDLK_PLUS ||
-                     event.key.key == SDLK_KP_PLUS) {
-            if (!event.key.repeat)
-              HostDevTools_AdjustHudOutputScale(25);
-          } else if (event.key.key == SDLK_F5) {
-            (void)RuntimeSettings_HandleAction(Settings_Find("save_state"));
-          } else if (event.key.key == SDLK_F7) {
-            (void)RuntimeSettings_HandleAction(Settings_Find("load_state"));
-          } else if (event.key.key == SDLK_F9) {
-            /* Cycle 4:3 -> widescreen RAW -> widescreen FULL, for capturing
-             * before/after comparison shots without a settings UI. Requires
-             * booting with ExtendedAspectRatio set: the wide framebuffer and
-             * window are sized once at boot, so an authentic-booted run has no
-             * margins to reveal and stays pinned to 4:3. Shift+F9 retains the
-             * long-standing diagnostic dump command. Ignore key-repeat so one
-             * physical press advances exactly one preset. */
-            if (event.key.repeat) {
-              /* no-op */
-            } else if (event.key.mod & SDL_KMOD_SHIFT) {
-              DumpDiagState("hotkey");
-            } else if (!g_ws_active) {
-              fprintf(stderr, "[display] F9 needs ExtendedAspectRatio "
+/* Drop resource caches before checking the rebuilt feature set. A retained
+ * frame carries old texture handles, so it must be discarded after reset. */
+static void AppLoop_HandleGraphicsReset(AppBoot *app, Uint32 event_type) {
+  HostDisplay_ResetVsyncPacing();
+  if (event_type == SDL_EVENT_RENDER_DEVICE_RESET) {
+    CrtPost_Shutdown(&g_render_device);
+    Diorama_ResetRendererResources(&g_render_device);
+    DestroyDioramaTextures();
+    CreateDioramaTextures();
+  }
+  ManualReader_DestroyTextures();
+  HdReplacementHost_ReloadTextures();
+  if (!SettingsOverlay_ReloadTextures(app->rom_data, app->rom_size)) {
+    SessionFatal_RequestKind(
+        kSessionFailure_GraphicsReset,
+        "overlay resources could not be restored after graphics reset: %s",
+        SDL_GetError());
+  }
+  PresentRendererResources_Reset();
+  {
+    RenderFeatureMask prepared_features = 0;
+    if (!RenderPreparation_Prepare(&g_render_device, &prepared_features) ||
+        !Settings_RenderCapabilitiesRetained(prepared_features))
+      SessionFatal_RequestKind(
+          kSessionFailure_GraphicsReset,
+          "graphics reset could not restore the prepared feature set; "
+          "restart the game to recheck hardware support");
+  }
+  HostInput_RequestPausedRedraw();
+  HostDisplay_InvalidatePresentHistory();
+}
+
+/* Capture wins over hotkeys; then the active menu device gets first use.
+ * Suppression applies only to key-down. Key-up remains in the event pump so
+ * previously accepted keys can always be released. */
+static void AppLoop_HandleKeyDown(const SDL_Event *event) {
+  if (SettingsOverlay_HandleCaptureEvent(event))
+    return;
+  if (HostInput_KeyboardIsSuppressed())
+    return;
+  if (SettingsOverlay_IsOpen()) {
+    if (HostInput_MenuKeyboardIsActive()) {
+      bool was_open = true;
+      bool consumed = SettingsOverlay_HandleKey(event->key.key, true,
+                                                event->key.repeat != 0);
+      if (was_open && !SettingsOverlay_IsOpen())
+        HostInput_ClearHeld();
+      if (consumed)
+        return;
+    } else {
+      return;
+    }
+  }
+  if (!event->key.repeat &&
+      (event->key.key == SDLK_ESCAPE || event->key.key == SDLK_F1)) {
+    HostInput_ClearHeld();
+    SettingsOverlay_Open();
+  } else if (event->key.key == SDLK_P) {
+    if (SceneInspector_HasSelection()) {
+      const bool inspector_owned_pause = HostInput_InspectorOwnsPause();
+      HostInput_CloseInspectorSelection();
+      if (!inspector_owned_pause)
+        HostInput_TogglePause();
+    } else {
+      HostInput_TogglePause();
+    }
+  } else if (event->key.key == SDLK_T) {
+    HostInput_ToggleTurbo();
+  } else if (event->key.key == SDLK_F3) {
+    if (!event->key.repeat) {
+      const SettingDesc *inspector = Settings_Find("scene_inspector");
+      SettingChangeResult result =
+          Settings_SetLong(inspector, !g_settings.scene_inspector);
+      char settings_path[kHostPathCapacity];
+      UserDataFile(settings_path, sizeof settings_path, "settings.ini");
+      if (result > kSettingChange_Unchanged && !Settings_Save(settings_path))
+        fprintf(stderr, "[scene-inspector] could not save settings.ini\n");
+      fprintf(stderr, "[scene-inspector] %s (%s)\n",
+              g_settings.scene_inspector ? "enabled — click the game to inspect"
+                                         : "disabled",
+              Settings_ChangeResultName(result));
+    }
+  } else if (event->key.key == SDLK_MINUS || event->key.key == SDLK_KP_MINUS) {
+    if (!event->key.repeat)
+      HostDevTools_AdjustHudOutputScale(-25);
+  } else if (event->key.key == SDLK_EQUALS || event->key.key == SDLK_PLUS ||
+             event->key.key == SDLK_KP_PLUS) {
+    if (!event->key.repeat)
+      HostDevTools_AdjustHudOutputScale(25);
+  } else if (event->key.key == SDLK_F5) {
+    (void)RuntimeSettings_HandleAction(Settings_Find("save_state"));
+  } else if (event->key.key == SDLK_F7) {
+    (void)RuntimeSettings_HandleAction(Settings_Find("load_state"));
+  } else if (event->key.key == SDLK_F9) {
+    if (event->key.repeat) {
+    } else if (event->key.mod & SDL_KMOD_SHIFT) {
+      DumpDiagState("hotkey");
+    } else if (!g_ws_active) {
+      fprintf(stderr, "[display] F9 needs ExtendedAspectRatio "
                       "(e.g. 16:9) in config.ini; staying 4:3\n");
-            } else {
-              /* A1 (followup doc): Settings_CycleDisplayMode now routes
-               * through Settings_SetLong, whose FinishChange fires
-               * OnRuntimeSettingChanged — that observer already re-derives
-               * the logical presentation and sets g_paused_redraw_pending for
-               * kSettingCat_Display. Doing it again here would re-mutate the
-               * renderer redundantly. */
-              int m = Settings_CycleDisplayMode();
-              fprintf(stderr, "[display] mode %d/%d -> %s\n", m + 1,
-                      kDisplayMode_PresetCount, Settings_DisplayModeName(m));
-            }
-          } else if (event.key.key == SDLK_F6) {
-            /* Level warp: stage the game's own sim->act transition to the raw
-             * registry target seeded by AR_WARP=<region_hex><map_hex>. The low byte is $19,
-             * not a uniform act number (e.g. Kasandora act 2 is 0303). Press
-             * from a transition-capable state; see docs/manual.md + docs/SEAMS.md. */
-            (void)RuntimeSettings_HandleAction(Settings_Find("warp_now"));
-          } else if (event.key.key == SDLK_F2 || event.key.key == SDLK_C) {
-            /* C is the one-hand alias for F2, deliberately NOT gated on
-             * `!event.key.repeat`: holding it fires on every key repeat, which
-             * is how you sweep a glitch that only shows for a frame or two
-             * without knowing its game-frame up front. Each press is still a
-             * full snapshot (~21 MB of .ppm alone), so a long hold writes GBs
-             * — for a REPLAY prefer the deterministic sweep, which captures
-             * exact frames and costs nothing to repeat:
-             *   AR_INPUT_REPLAY=<rec> AR_SHOT_EVERY=1 AR_SHOT_FROM=a AR_SHOT_TO=b
-             *   AR_INPUT_REPLAY=<rec> AR_VRAMDUMP_GF=g1,g2,...
-             * Use the key to find the moment, those to pin it. */
-            /* On-demand FULL snapshot — each press writes a unique set of files
-             * tagged with the game-frame: WRAM + VRAM + CGRAM + OAM (via
-             * ActRaiser_FullSnapshot) plus a .ppm screenshot. Lets several
-             * moments be grabbed while driving the game manually so the
-             * internals (esp. VRAM, where the bridge tiles live) can be watched
-             * change over time alongside the picture. */
-            /* If F9 and F2 were queued in the same paused host iteration,
-             * render the new preset before capturing it. */
-            HostDevTools_TakeFullSnapshot();
-          } else if (event.key.key == SDLK_D && !event.key.repeat) {
-            if (event.key.mod & SDL_KMOD_SHIFT) {
-              if (!ActRaiser_IsActionMapGroup(g_ram[kActRaiserWram_MapGroup])) {
-                fprintf(stderr, "[diorama] layer dump requires an action stage "
-                        "($18=%02x)\n", g_ram[kActRaiserWram_MapGroup]);
-              } else {
-                g_diorama_dump_pending = true;
-                fprintf(stderr, "[diorama] layer capture armed for next frame\n");
-              }
-            } else {
-              /* Route through the descriptor so the hotkey, the menu, and
-               * settings.ini stay one path — the change callback does the
-               * geometry rebind. */
-              const SettingDesc *mode = Settings_Find("diorama_mode");
-              if (mode && !Settings_IsAvailable(mode)) {
-                fprintf(stderr, "[diorama] requires the new renderer\n");
-              } else if (mode) {
-                Settings_SetLong(mode, !g_settings.diorama_mode);
-                fprintf(stderr, "[diorama] %s\n",
-                        g_settings.diorama_mode ? "ON" : "OFF");
-              }
-            }
-          } else if (g_settings.diorama_mode && !event.key.repeat &&
-                     event.key.key >= SDLK_1 && event.key.key <= SDLK_5) {
-            /* Layer visibility hotkeys, gated behind diorama so the digits
-             * stay free otherwise. Order matches the on-screen back-to-front
-             * stack: 1 backdrop, 2 BG2, 3 BG1, 4 sprites, 5 HUD. */
-            static const char *const kLayerKeys[] = {
-              "diorama_layer_backdrop", "diorama_layer_bg2",
-              "diorama_layer_bg1", "diorama_layer_obj", "diorama_layer_bg3",
-            };
-            int index = (int)(event.key.key - SDLK_1);
-            const SettingDesc *row = Settings_Find(kLayerKeys[index]);
-            long value = 0;
-            if (row && Settings_GetLong(row, &value)) {
-              Settings_SetLong(row, !value);
-              fprintf(stderr, "[diorama] %s %s\n", row->label,
-                      value ? "hidden" : "shown");
-              HostInput_RequestPausedRedraw();
-            }
-          } else {
-            HostInput_HandleKeyboard((int)event.key.scancode, true,
-                                     event.key.repeat != 0);
-          }
-          break;
-        case SDL_EVENT_TEXT_INPUT:
-          if (SettingsOverlay_IsOpen())
-            (void)SettingsOverlay_HandleText(event.text.text);
-          break;
-        case SDL_EVENT_MOUSE_BUTTON_DOWN:
-          /* The manual reader is modal and takes the mouse whole -- click to
-           * turn, drag to pan, wheel to zoom. Checked before every camera and
-           * inspector path below, all of which are gated on the overlay being
-           * CLOSED and so would otherwise silently ignore the reader. */
-          if (ManualReader_IsOpen()) {
-            (void)ManualReader_HandleMouse(&event);
-            break;
-          }
-          /* Diorama owns right-drag (orbit) and middle-click (reset) while it
-           * is on screen; §8.7 disables click-inspect in diorama for v1
-           * because the flat hit-testing does not follow the tilted planes. */
-          if (!SettingsOverlay_IsOpen() &&
-              !RenderComparison_FreezesGameplay() &&
-              Diorama_IsActiveThisFrame()) {
-            if (event.button.button == SDL_BUTTON_RIGHT)
-              Diorama_SetDragging(true);
-            else if (event.button.button == SDL_BUTTON_MIDDLE)
-              Diorama_ResetCamera();
-          } else if (!SettingsOverlay_IsOpen() &&
-                     !RenderComparison_FreezesGameplay() &&
-                     Sim3DCamera_ControlsAvailable(
-                         g_sim3d_textures_ready)) {
-            if (event.button.button == SDL_BUTTON_RIGHT)
-              Sim3DCamera_SetDragging(true);
-            else if (event.button.button == SDL_BUTTON_MIDDLE)
-              HostInput_ResetSim3DCamera();
-          } else if (!SettingsOverlay_IsOpen() && g_settings.scene_inspector) {
-            if (event.button.button == SDL_BUTTON_RIGHT) {
-              HostInput_CloseInspectorSelection();
-            } else if (event.button.button == SDL_BUTTON_LEFT) {
-              /* SDL3 mouse event coordinates are floats; the hit-testing works
-               * at SNES-pixel granularity, so truncating to int is exact. */
-              int event_x = (int)event.button.x;
-              int event_y = (int)event.button.y;
-              int output_x = 0, output_y = 0;
-              if (!HostDisplay_WindowPointToOutput(
-                      event_x, event_y, &output_x, &output_y) ||
-                  !SettingsOverlay_BeginDebugPanelDrag(
-                      output_x, output_y))
-                (void)HostDevTools_InspectWindowPoint(event_x, event_y);
-            }
-          }
-          break;
-        case SDL_EVENT_MOUSE_MOTION:
-          if (ManualReader_IsOpen()) {
-            (void)ManualReader_HandleMouse(&event);
-            break;
-          }
-          if (!RenderComparison_FreezesGameplay() &&
-              Diorama_IsDragging() && Diorama_IsActiveThisFrame()) {
-            Diorama_AdjustCamera(event.motion.xrel * Diorama_DragRadPerPx(),
-                                 event.motion.yrel * Diorama_DragRadPerPx(),
-                                 0.0f);
-          } else if (!RenderComparison_FreezesGameplay() &&
-                     Sim3DCamera_IsDragging() &&
-                     Sim3DCamera_ControlsAvailable(
-                         g_sim3d_textures_ready)) {
-            HostInput_AdjustSim3DCamera(
-                event.motion.xrel * Diorama_DragRadPerPx(),
-                event.motion.yrel * Diorama_DragRadPerPx(),
-                0.0f);
-          } else if (SettingsOverlay_IsDebugPanelDragging()) {
-            int output_x = 0, output_y = 0;
-            if (HostDisplay_WindowPointToOutput(
-                    (int)event.motion.x, (int)event.motion.y,
-                    &output_x, &output_y))
-              SettingsOverlay_DragDebugPanel(output_x, output_y);
-          }
-          break;
-        case SDL_EVENT_MOUSE_WHEEL:
-          if (ManualReader_IsOpen()) {
-            (void)ManualReader_HandleMouse(&event);
-            break;
-          }
-          /* Wheel up zooms in, i.e. decreases the camera distance. */
-          if (!SettingsOverlay_IsOpen() &&
-              !RenderComparison_FreezesGameplay() &&
-              Diorama_IsActiveThisFrame())
-            Diorama_AdjustCamera(0.0f, 0.0f,
-                                 -event.wheel.y * Diorama_ZoomStep());
-          else if (!SettingsOverlay_IsOpen() &&
-                   !RenderComparison_FreezesGameplay() &&
-                   Sim3DCamera_ControlsAvailable(
-                       g_sim3d_textures_ready))
-            HostInput_AdjustSim3DCamera(
-                0.0f, 0.0f, -event.wheel.y * Diorama_ZoomStep());
-          break;
-        case SDL_EVENT_MOUSE_BUTTON_UP:
-          if (ManualReader_IsOpen()) {
-            (void)ManualReader_HandleMouse(&event);
-            break;
-          }
-          if (event.button.button == SDL_BUTTON_RIGHT) {
-            Diorama_SetDragging(false);
-            Sim3DCamera_SetDragging(false);
-          }
-          if (event.button.button == SDL_BUTTON_LEFT)
-            SettingsOverlay_EndDebugPanelDrag();
-          break;
-        case SDL_EVENT_GAMEPAD_ADDED:
-        case SDL_EVENT_GAMEPAD_REMOVED:
-          InputMap_HandleEvent(&event);
-          break;
-        case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
-        case SDL_EVENT_GAMEPAD_BUTTON_UP:
-        case SDL_EVENT_GAMEPAD_AXIS_MOTION:
-          /* An armed binding row consumes the raw pad event regardless of the
-           * active menu device — mirrors the keyboard capture at the KEY_DOWN
-           * case above, so a gamepad-bind row can be captured even when the
-           * menu's active device is the keyboard (input_device=Keyboard). */
-          if (SettingsOverlay_IsOpen() &&
-              SettingsOverlay_HandleCaptureEvent(&event))
-            break;
-          /* While the menu owns the screen the pad drives menu NAVIGATION, not
-           * the game — but only when the pad is a menu-active device. */
-          if (SettingsOverlay_IsOpen()) {
-            if (HostInput_MenuGamepadIsActive())
-              (void)SettingsOverlay_HandleGamepadEvent(&event);
-            break;
-          }
-          InputMap_HandleEvent(&event);
-          break;
-        case SDL_EVENT_KEY_UP:
-          if (SettingsOverlay_IsOpen()) {
-            if (HostInput_MenuKeyboardIsActive())
-              (void)SettingsOverlay_HandleKey(event.key.key, false, false);
-          } else {
-            HostInput_HandleKeyboard((int)event.key.scancode, false, false);
-          }
-          break;
+    } else {
+      int m = Settings_CycleDisplayMode();
+      fprintf(stderr, "[display] mode %d/%d -> %s\n", m + 1,
+              kDisplayMode_PresetCount, Settings_DisplayModeName(m));
+    }
+  } else if (event->key.key == SDLK_F6) {
+    (void)RuntimeSettings_HandleAction(Settings_Find("warp_now"));
+  } else if (event->key.key == SDLK_F2 || event->key.key == SDLK_C) {
+    HostDevTools_TakeFullSnapshot();
+  } else if (event->key.key == SDLK_D && !event->key.repeat) {
+    if (event->key.mod & SDL_KMOD_SHIFT) {
+      if (!ActRaiser_IsActionMapGroup(g_ram[kActRaiserWram_MapGroup])) {
+        fprintf(stderr,
+                "[diorama] layer dump requires an action stage "
+                "($18=%02x)\n",
+                g_ram[kActRaiserWram_MapGroup]);
+      } else {
+        g_diorama_dump_pending = true;
+        fprintf(stderr, "[diorama] layer capture armed for next frame\n");
+      }
+    } else {
+      const SettingDesc *mode = Settings_Find("diorama_mode");
+      if (mode && !Settings_IsAvailable(mode)) {
+        fprintf(stderr, "[diorama] requires the new renderer\n");
+      } else if (mode) {
+        Settings_SetLong(mode, !g_settings.diorama_mode);
+        fprintf(stderr, "[diorama] %s\n",
+                g_settings.diorama_mode ? "ON" : "OFF");
       }
     }
+  } else if (g_settings.diorama_mode && !event->key.repeat &&
+             event->key.key >= SDLK_1 && event->key.key <= SDLK_5) {
+    static const char *const kLayerKeys[] = {
+        "diorama_layer_backdrop", "diorama_layer_bg2", "diorama_layer_bg1",
+        "diorama_layer_obj",      "diorama_layer_bg3",
+    };
+    int index = (int)(event->key.key - SDLK_1);
+    const SettingDesc *row = Settings_Find(kLayerKeys[index]);
+    long value = 0;
+    if (row && Settings_GetLong(row, &value)) {
+      Settings_SetLong(row, !value);
+      fprintf(stderr, "[diorama] %s %s\n", row->label,
+              value ? "hidden" : "shown");
+      HostInput_RequestPausedRedraw();
+    }
+  } else {
+    HostInput_HandleKeyboard((int)event->key.scancode, true,
+                             event->key.repeat != 0);
+  }
+}
+
+/* Manual-reader mouse input is modal. Otherwise camera controls precede
+ * flat scene inspection; mouse-up releases drags independently of eligibility.
+ */
+static void AppLoop_HandleMouse(const SDL_Event *event) {
+  switch (event->type) {
+  case SDL_EVENT_MOUSE_BUTTON_DOWN:
+    if (ManualReader_IsOpen()) {
+      (void)ManualReader_HandleMouse(event);
+      break;
+    }
+    if (!SettingsOverlay_IsOpen() && !RenderComparison_FreezesGameplay() &&
+        Diorama_IsActiveThisFrame()) {
+      if (event->button.button == SDL_BUTTON_RIGHT)
+        Diorama_SetDragging(true);
+      else if (event->button.button == SDL_BUTTON_MIDDLE)
+        Diorama_ResetCamera();
+    } else if (!SettingsOverlay_IsOpen() &&
+               !RenderComparison_FreezesGameplay() &&
+               Sim3DCamera_ControlsAvailable(g_sim3d_textures_ready)) {
+      if (event->button.button == SDL_BUTTON_RIGHT)
+        Sim3DCamera_SetDragging(true);
+      else if (event->button.button == SDL_BUTTON_MIDDLE)
+        HostInput_ResetSim3DCamera();
+    } else if (!SettingsOverlay_IsOpen() && g_settings.scene_inspector) {
+      if (event->button.button == SDL_BUTTON_RIGHT) {
+        HostInput_CloseInspectorSelection();
+      } else if (event->button.button == SDL_BUTTON_LEFT) {
+        int event_x = (int)event->button.x;
+        int event_y = (int)event->button.y;
+        int output_x = 0, output_y = 0;
+        if (!HostDisplay_WindowPointToOutput(event_x, event_y, &output_x,
+                                             &output_y) ||
+            !SettingsOverlay_BeginDebugPanelDrag(output_x, output_y))
+          (void)HostDevTools_InspectWindowPoint(event_x, event_y);
+      }
+    }
+    break;
+  case SDL_EVENT_MOUSE_MOTION:
+    if (ManualReader_IsOpen()) {
+      (void)ManualReader_HandleMouse(event);
+      break;
+    }
+    if (!RenderComparison_FreezesGameplay() && Diorama_IsDragging() &&
+        Diorama_IsActiveThisFrame()) {
+      Diorama_AdjustCamera(event->motion.xrel * Diorama_DragRadPerPx(),
+                           event->motion.yrel * Diorama_DragRadPerPx(), 0.0f);
+    } else if (!RenderComparison_FreezesGameplay() &&
+               Sim3DCamera_IsDragging() &&
+               Sim3DCamera_ControlsAvailable(g_sim3d_textures_ready)) {
+      HostInput_AdjustSim3DCamera(event->motion.xrel * Diorama_DragRadPerPx(),
+                                  event->motion.yrel * Diorama_DragRadPerPx(),
+                                  0.0f);
+    } else if (SettingsOverlay_IsDebugPanelDragging()) {
+      int output_x = 0, output_y = 0;
+      if (HostDisplay_WindowPointToOutput(
+              (int)event->motion.x, (int)event->motion.y, &output_x, &output_y))
+        SettingsOverlay_DragDebugPanel(output_x, output_y);
+    }
+    break;
+  case SDL_EVENT_MOUSE_WHEEL:
+    if (ManualReader_IsOpen()) {
+      (void)ManualReader_HandleMouse(event);
+      break;
+    }
+    if (!SettingsOverlay_IsOpen() && !RenderComparison_FreezesGameplay() &&
+        Diorama_IsActiveThisFrame())
+      Diorama_AdjustCamera(0.0f, 0.0f, -event->wheel.y * Diorama_ZoomStep());
+    else if (!SettingsOverlay_IsOpen() && !RenderComparison_FreezesGameplay() &&
+             Sim3DCamera_ControlsAvailable(g_sim3d_textures_ready))
+      HostInput_AdjustSim3DCamera(0.0f, 0.0f,
+                                  -event->wheel.y * Diorama_ZoomStep());
+    break;
+  case SDL_EVENT_MOUSE_BUTTON_UP:
+    if (ManualReader_IsOpen()) {
+      (void)ManualReader_HandleMouse(event);
+      break;
+    }
+    if (event->button.button == SDL_BUTTON_RIGHT) {
+      Diorama_SetDragging(false);
+      Sim3DCamera_SetDragging(false);
+    }
+    if (event->button.button == SDL_BUTTON_LEFT)
+      SettingsOverlay_EndDebugPanelDrag();
+    break;
+  }
+}
+
+/* Event routing stays flat; helpers own resource reset and modal input
+ * precedence. Device add/remove and key release always reach their owners. */
+static void AppLoop_PumpEvents(AppBoot *app, bool *running) {
+  SDL_Event event;
+  while (SDL_PollEvent(&event)) {
+    switch (event.type) {
+    case SDL_EVENT_QUIT:
+      *running = false;
+      break;
+
+    case SDL_EVENT_WINDOW_DISPLAY_CHANGED:
+      HostDisplay_WindowDisplayChanged();
+      HostInput_RequestPausedRedraw();
+      break;
+    case SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED:
+      HostDisplay_WindowDisplayScaleChanged();
+      HostInput_RequestPausedRedraw();
+      break;
+    case SDL_EVENT_DISPLAY_CURRENT_MODE_CHANGED:
+    case SDL_EVENT_DISPLAY_DESKTOP_MODE_CHANGED:
+    case SDL_EVENT_DISPLAY_ADDED:
+      HostDisplay_DisplayModeChanged(event.display.displayID);
+      HostInput_RequestPausedRedraw();
+      break;
+    case SDL_EVENT_DISPLAY_REMOVED:
+      HostDisplay_DisplayRemoved(event.display.displayID);
+      HostInput_RequestPausedRedraw();
+      break;
+
+    case SDL_EVENT_WINDOW_RESIZED:
+    case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
+      HostDisplay_RecomputeLogicalPresentation();
+      HostInput_RequestPausedRedraw();
+      break;
+    case SDL_EVENT_WINDOW_MINIMIZED:
+    case SDL_EVENT_WINDOW_HIDDEN:
+      g_window_hidden = true;
+      break;
+    case SDL_EVENT_WINDOW_RESTORED:
+    case SDL_EVENT_WINDOW_SHOWN:
+      g_window_hidden = false;
+      HostDisplay_ResetVsyncPacing();
+      HostInput_RequestPausedRedraw();
+      break;
+    case SDL_EVENT_WINDOW_EXPOSED:
+    case SDL_EVENT_WINDOW_FOCUS_GAINED:
+      HostDisplay_ResetVsyncPacing();
+      HostInput_RequestPausedRedraw();
+      break;
+
+    case SDL_EVENT_RENDER_TARGETS_RESET:
+    case SDL_EVENT_RENDER_DEVICE_RESET:
+      AppLoop_HandleGraphicsReset(app, event.type);
+      break;
+    case SDL_EVENT_RENDER_DEVICE_LOST:
+      SessionFatal_RequestKind(kSessionFailure_GraphicsLost,
+                               "graphics device lost: %s", SDL_GetError());
+      break;
+    case SDL_EVENT_KEY_DOWN:
+      AppLoop_HandleKeyDown(&event);
+      break;
+    case SDL_EVENT_TEXT_INPUT:
+      if (SettingsOverlay_IsOpen())
+        (void)SettingsOverlay_HandleText(event.text.text);
+      break;
+    case SDL_EVENT_MOUSE_BUTTON_DOWN:
+    case SDL_EVENT_MOUSE_MOTION:
+    case SDL_EVENT_MOUSE_WHEEL:
+    case SDL_EVENT_MOUSE_BUTTON_UP:
+      AppLoop_HandleMouse(&event);
+      break;
+    case SDL_EVENT_GAMEPAD_ADDED:
+    case SDL_EVENT_GAMEPAD_REMOVED:
+      InputMap_HandleEvent(&event);
+      break;
+    case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
+    case SDL_EVENT_GAMEPAD_BUTTON_UP:
+    case SDL_EVENT_GAMEPAD_AXIS_MOTION:
+
+      if (SettingsOverlay_IsOpen() &&
+          SettingsOverlay_HandleCaptureEvent(&event))
+        break;
+
+      if (SettingsOverlay_IsOpen()) {
+        if (HostInput_MenuGamepadIsActive())
+          (void)SettingsOverlay_HandleGamepadEvent(&event);
+        break;
+      }
+      InputMap_HandleEvent(&event);
+      break;
+    case SDL_EVENT_KEY_UP:
+      if (SettingsOverlay_IsOpen()) {
+        if (HostInput_MenuKeyboardIsActive())
+          (void)SettingsOverlay_HandleKey(event.key.key, false, false);
+      } else {
+        HostInput_HandleKeyboard((int)event.key.scancode, false, false);
+      }
+      break;
+    }
+  }
 }
 
 /* Keep automated runs bounded in either presentation path. This used to be
@@ -2270,7 +2219,8 @@ static void AppRunMainLoop(AppBoot *app) {
     AppLoop_PumpEvents(app, &running);
     PerformanceMetrics_End(events);
 
-    if (RuntimeSettings_LifecycleRequest() != kRuntimeLifecycle_None ||
+    if (app->localization_exit_requested ||
+        RuntimeSettings_LifecycleRequest() != kRuntimeLifecycle_None ||
         SessionFatal_Requested()) {
       running = false;
       continue;
@@ -2320,7 +2270,7 @@ static void AppRunMainLoop(AppBoot *app) {
                 ? kHostDisplayPresent_Menu
                 : kHostDisplayPresent_Paused;
         presented = HostDisplay_SubmitFrame(
-            present_mode, kPresentationFrameGenerationPhaseNone);
+            present_mode, kPresentationFrameGenerationPhaseNone, NULL);
       }
       /* Pacing comes from the present itself (vsync block or the selected
        * software throttle in HostDisplay_SubmitFrame), so menu input polling
@@ -2604,6 +2554,8 @@ static int AppShutdown(AppBoot *app, char **argv) {
 }
 
 int main(int argc, char **argv) {
+  if (argc > 1 && !strcmp(argv[1], "--text-preview-v1"))
+    return ArSdlTextPreview_Run(argc - 1, argv + 1);
   if (argc > 1 && !strcmp(argv[1], "--font-coverage-v1"))
     return ArSdlFontCoverage_Run(argc - 1, argv + 1);
   setvbuf(stdout, NULL, _IONBF, 0);
@@ -2619,6 +2571,8 @@ int main(int argc, char **argv) {
   if (rc >= 0) return rc;
   AppBoot_InstallSubsystems(&app);
   AppBoot_StartGame(&app);
-  AppRunMainLoop(&app);
+  ActRaiserLocalizationRuntime_ApplySettings();
+  if (!app.localization_exit_requested)
+    AppRunMainLoop(&app);
   return AppShutdown(&app, argv);
 }

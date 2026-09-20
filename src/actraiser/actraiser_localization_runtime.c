@@ -8,18 +8,21 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "actraiser/actraiser_dialogue_adapter.h"
+#include "actraiser/actraiser_dialogue_window.h"
 #include "actraiser/actraiser_localization_compose_state.h"
-#include "actraiser/actraiser_localization_name_entry.h"
+#include "actraiser/actraiser_localization_fixed_text.h"
 #include "actraiser/actraiser_localization_name_compose.h"
+#include "actraiser/actraiser_localization_name_entry.h"
 #include "actraiser/actraiser_localization_routes.h"
 #include "actraiser/actraiser_localization_schedule.h"
-#include "actraiser/actraiser_localization_text_normalize.h"
 #include "actraiser/actraiser_localization_text.h"
+#include "actraiser/actraiser_localization_text_normalize.h"
 #include "actraiser/actraiser_localization_values.h"
 #include "actraiser/actraiser_localization_world_navigation.h"
 #include "actraiser_game.h"
 #include "deterministic_hash.h"
-#include "localization/dialogue_session.h"
+#include "localization/language_contract.h"
 #include "localization/language_pack.h"
 #include "localization/unicode_grapheme.h"
 #include "save_system.h"
@@ -37,24 +40,6 @@ _Static_assert(kArEnhancedTextSampling_Crisp == 0 &&
                kArEnhancedTextPixelation_LowResolution == 1 &&
                kArEnhancedTextPixelation_Mosaic == 2,
                "update localization font settings mapping");
-
-typedef struct DialogueWindow {
-  ArTextBidiSpans bidi;
-  bool valid;
-  uint16_t native_first_page;
-  uint16_t native_clear_control_count;
-  uint32_t current_page;
-  uint64_t revision;
-  size_t bytes;
-  size_t current_page_offset;
-  size_t current_page_source_offset;
-  size_t current_page_source_bytes;
-  uint16_t reveal_offsets[kArLocalizationFrameTextCapacity + 1u];
-  uint8_t structural_boundaries[
-      AR_TEXT_BOUNDARY_BYTES(kArLocalizationFrameTextCapacity)];
-  uint32_t clusters;
-  char text[kArLocalizationFrameTextCapacity];
-} DialogueWindow;
 
 /* The first composition pass only locates the selected Unicode key. Keep its
  * normalized page while the source, page and captured name are unchanged.
@@ -78,11 +63,13 @@ typedef struct LocalizationRuntime {
   int selected_content;
   int content;
   int presentation;
+  bool compatibility_checked, legacy_blocked;
+  int compatibility_content, compatibility_presentation;
   ArLanguagePack selected_pack;
   ArLanguagePack native_pack;
   const ArLanguagePack *pack;
   ArDialogueSession session;
-  DialogueWindow dialogue_window;
+  ActRaiserDialogueWindow dialogue_window;
   ActRaiserLocalizationComposeState compose;
   ActRaiserLocalizationValues values;
   ActRaiserLocalizationWorldNavigation world_navigation;
@@ -109,12 +96,15 @@ typedef struct LocalizationRuntime {
   char native_manifest_path[kManifestPathCapacity];
   ArFontResourceId primary_font;
   ArFontResourceId fallback_fonts[kArTextPresentationMaximumFallbackFonts];
+  ArTextFontRole font_roles[kArTextFontMaximumRoles];
+  size_t font_role_count;
 } LocalizationRuntime;
 
 static LocalizationRuntime s_runtime;
 static ArTextPresentationHost s_presentation_host;
 static ArLanguagePackIo s_pack_io;
 static char s_native_manifest[kManifestPathCapacity];
+static ActRaiserLocalizationPackHost s_pack_host;
 /* Never reuse a ticket across game resets: retained old frames may outlive the
  * invocation they describe. This counter carries no emulated game state. */
 static uint64_t s_next_dialogue_ticket;
@@ -138,21 +128,21 @@ void ActRaiserLocalizationRuntime_SetPackHost(
     const ActRaiserLocalizationPackHost *host) {
   if (s_runtime.configured) return;
   s_pack_io = (ArLanguagePackIo){0};
+  s_pack_host = (ActRaiserLocalizationPackHost){0};
   s_native_manifest[0] = 0;
   if (!host) return;
-  if (host->struct_size <
-          offsetof(ActRaiserLocalizationPackHost, native_manifest) +
-              sizeof(host->native_manifest) ||
+  if (host->struct_size < offsetof(ActRaiserLocalizationPackHost, legacy_pack) +
+                              sizeof(host->legacy_pack) ||
       host->abi_version != ACTRAISER_LOCALIZATION_PACK_HOST_ABI_VERSION ||
-      host->io.struct_size <
-          offsetof(ArLanguagePackIo, release_file) +
-              sizeof(host->io.release_file) ||
+      host->io.struct_size < offsetof(ArLanguagePackIo, release_file) +
+                                 sizeof(host->io.release_file) ||
       host->io.abi_version != AR_LANGUAGE_PACK_IO_ABI_VERSION ||
       !host->io.read_file || !host->io.release_file ||
       !CopyPath(s_native_manifest, sizeof(s_native_manifest),
                 host->native_manifest))
     return;
   s_pack_io = host->io;
+  s_pack_host = *host;
 }
 
 static bool SynchronizeObservedDialogue(const ArLanguagePack *values_pack,
@@ -166,13 +156,47 @@ static bool CopyPath(char *destination, size_t capacity, const char *source) {
 }
 
 static void RetireFonts(ArFontResourceId primary,
-                         const ArFontResourceId *fallbacks) {
+                        const ArFontResourceId *fallbacks,
+                        const ArTextFontRole *roles, size_t role_count) {
   if (!s_presentation_host.retire_font) return;
   if (primary)
     s_presentation_host.retire_font(s_presentation_host.context, primary);
   for (size_t i = 0; i < kArTextPresentationMaximumFallbackFonts; ++i)
     if (fallbacks[i])
       s_presentation_host.retire_font(s_presentation_host.context, fallbacks[i]);
+  for (size_t i = 0; i < role_count; ++i) {
+    if (roles[i].primary)
+      s_presentation_host.retire_font(s_presentation_host.context,
+                                      roles[i].primary);
+    for (size_t j = 0; j < roles[i].fallback_count; ++j)
+      if (roles[i].fallbacks[j])
+        s_presentation_host.retire_font(s_presentation_host.context,
+                                        roles[i].fallbacks[j]);
+  }
+}
+
+static bool RegisterFontRoles(const ArLanguagePackMetadata *metadata,
+                              const char *manifest, ArTextFontRole *roles,
+                              ArLanguagePackError *error) {
+  for (size_t i = 0; i < metadata->font_role_count; ++i) {
+    const ArLanguageFontRole *source = &metadata->font_roles[i];
+    ArTextFontRole *role = &roles[i];
+    snprintf(role->name, sizeof(role->name), "%s", source->name);
+    role->fallback_count = source->fallback_font_count;
+    role->primary = s_presentation_host.register_font(
+        s_presentation_host.context, manifest, source->primary_font,
+        error->message, sizeof(error->message));
+    if (!role->primary)
+      return false;
+    for (size_t j = 0; j < role->fallback_count; ++j) {
+      role->fallbacks[j] = s_presentation_host.register_font(
+          s_presentation_host.context, manifest, source->fallback_fonts[j],
+          error->message, sizeof(error->message));
+      if (!role->fallbacks[j])
+        return false;
+    }
+  }
+  return true;
 }
 
 static void MakeSelection(int content, int presentation,
@@ -198,7 +222,8 @@ static bool LoadRuntimePack(ArLanguagePack *pack, const char *manifest,
   }
   if (!ArLanguagePack_Load(pack, &s_pack_io, manifest, error)) return false;
   const ArLanguagePackMetadata *metadata = ArLanguagePack_GetMetadata(pack);
-  if (!metadata || metadata->target != kArLanguagePackTarget_UsRuntime ||
+  if (!metadata || (s_pack_host.require_v2 && metadata->format_version != 2) ||
+      metadata->target != kArLanguagePackTarget_UsRuntime ||
       metadata->source_profile != kArLanguageSourceProfile_Us ||
       (native && metadata->coverage != kArLanguagePackCoverage_Complete) ||
       !ArLanguageContract_ValidatePack(pack, NULL, error)) {
@@ -210,6 +235,43 @@ static bool LoadRuntimePack(ArLanguagePack *pack, const char *manifest,
     return false;
   }
   return true;
+}
+
+static bool LegacySelection(int content, int presentation) {
+  if (!s_pack_host.require_v2)
+    return false;
+  if (s_runtime.compatibility_checked &&
+      s_runtime.compatibility_content == content &&
+      s_runtime.compatibility_presentation == presentation)
+    return s_runtime.legacy_blocked;
+  s_runtime.compatibility_checked = true;
+  s_runtime.compatibility_content = content;
+  s_runtime.compatibility_presentation = presentation;
+  s_runtime.legacy_blocked = false;
+  if (!presentation)
+    return false;
+  const char *paths[] = {content ? Settings_LocalizationPackPath(content)
+                                 : NULL,
+                         s_runtime.native_manifest_path};
+  for (unsigned i = 0; i < 2; ++i) {
+    if (!paths[i] || !paths[i][0])
+      continue;
+    ArLanguagePackMetadata metadata;
+    ArLanguagePackError error = {{0}};
+    if (!ArLanguagePack_ReadMetadata(&s_pack_io, paths[i], &metadata, NULL,
+                                     &error) ||
+        metadata.format_version != 1)
+      continue;
+    s_runtime.legacy_blocked = true;
+    fprintf(stderr,
+            "[localization] v1 pack '%s' requires a Builder upgrade; "
+            "using native ROM text for this session selection: %s\n",
+            metadata.package_id, paths[i]);
+    if (s_pack_host.legacy_pack)
+      s_pack_host.legacy_pack(s_pack_host.context, paths[i], &metadata, i == 1);
+    return true;
+  }
+  return false;
 }
 
 static bool EnsureConfigured(void) {
@@ -234,7 +296,10 @@ static bool EnsureConfigured(void) {
                    s_native_manifest);
   }
   const int content = g_settings.localization_content;
-  const int presentation = g_settings.localization_presentation;
+  const int presentation =
+      LegacySelection(content, g_settings.localization_presentation)
+          ? 0
+          : g_settings.localization_presentation;
   if (content == s_runtime.content && presentation == s_runtime.presentation)
     return s_runtime.enabled;
 
@@ -244,6 +309,8 @@ static bool EnsureConfigured(void) {
   bool candidate_ready = false;
   ArFontResourceId primary_font = 0;
   ArFontResourceId fallbacks[kArTextPresentationMaximumFallbackFonts] = {0};
+  ArTextFontRole roles[kArTextFontMaximumRoles] = {0};
+  size_t role_count = 0;
   const char *selected_manifest = s_runtime.manifest_path;
   if (presentation && !s_runtime.native_attempted) {
     s_runtime.native_attempted = true;
@@ -272,7 +339,8 @@ static bool EnsureConfigured(void) {
   }
   if (presentation) {
     if (metadata->fallback_font_count >
-        kArTextPresentationMaximumFallbackFonts) {
+            kArTextPresentationMaximumFallbackFonts ||
+        metadata->font_role_count > kArTextFontMaximumRoles) {
       snprintf(error.message, sizeof(error.message), "too many fallback fonts");
       goto reject;
     }
@@ -287,6 +355,9 @@ static bool EnsureConfigured(void) {
           error.message, sizeof(error.message));
       if (!fallbacks[i]) goto reject;
     }
+    role_count = metadata->font_role_count;
+    if (!RegisterFontRoles(metadata, manifest, roles, &error))
+      goto reject;
     const ArTextPresentationFont font = {
         .struct_size = sizeof(font),
         .abi_version = AR_TEXT_PRESENTATION_ABI_VERSION,
@@ -295,6 +366,8 @@ static bool EnsureConfigured(void) {
         .revision = pack->content_revision,
         .fallbacks = fallbacks,
         .fallback_count = metadata->fallback_font_count,
+        .roles = roles,
+        .role_count = role_count,
     };
     if (!s_presentation_host.prepare_font ||
         !s_presentation_host.prepare_font(s_presentation_host.context, &font,
@@ -351,9 +424,12 @@ static bool EnsureConfigured(void) {
   s_runtime.dialogue_ticket = 0;
   if (presentation) {
     s_runtime.pack = pack;
-    RetireFonts(s_runtime.primary_font, s_runtime.fallback_fonts);
+    RetireFonts(s_runtime.primary_font, s_runtime.fallback_fonts,
+                s_runtime.font_roles, s_runtime.font_role_count);
     s_runtime.primary_font = primary_font;
     memcpy(s_runtime.fallback_fonts, fallbacks, sizeof(fallbacks));
+    memcpy(s_runtime.font_roles, roles, sizeof(roles));
+    s_runtime.font_role_count = role_count;
     s_runtime.enabled = true;
   }
   s_runtime.refresh_pending = true;
@@ -371,8 +447,14 @@ static bool EnsureConfigured(void) {
 reject:
   if (s_presentation_host.discard_prepared_font)
     s_presentation_host.discard_prepared_font(s_presentation_host.context);
-  RetireFonts(primary_font, fallbacks);
+  RetireFonts(primary_font, fallbacks, roles, role_count);
   ArLanguagePack_Destroy(&candidate);
+  if (s_runtime.legacy_blocked) {
+    s_runtime.content = content;
+    s_runtime.presentation = 0;
+    ScheduleFailed(error.message);
+    return false;
+  }
   fprintf(stderr,
           "[localization] selection rejected (%s); prior selection retained\n",
           error.message);
@@ -410,98 +492,30 @@ static bool CaptureValues(void) {
   return CaptureValuesForPack(s_runtime.pack);
 }
 
-static uint32_t CountClusters(const char *utf8, size_t bytes) {
-  uint32_t count = 0;
-  size_t offset = 0;
-  while (offset < bytes) {
-    size_t next = 0;
-    if (!ArUnicodeGrapheme_Next(utf8, bytes, offset, NULL, &next) ||
-        next <= offset || count == UINT32_MAX)
-      return UINT32_MAX;
-    offset = next;
-    ++count;
-  }
-  return count;
-}
-
 static bool BuildDialogueWindow(
     const ArDialoguePageSnapshot *current,
     const ActRaiserLocalizationTextObservation *observation) {
-  DialogueWindow *window = &s_runtime.dialogue_window;
-  if (window->valid && window->revision == current->source_revision &&
+  ActRaiserDialogueWindow *window = &s_runtime.dialogue_window;
+  const bool unchanged =
+      window->valid && window->revision == current->source_revision &&
       window->native_first_page == observation->window_start_page &&
-      window->native_clear_control_count == observation->window_start_control_count &&
-      window->current_page == current->page_index)
-    return true;
-  window->valid = false;
-  uint32_t first_page = observation->window_start_page;
-  size_t first_offset = 0;
-  if (observation->window_start_control_count) {
-    if (!ArDialogueSession_GetControlPosition(
-          &s_runtime.session, observation->window_start_control_count - 1u,
-          &first_page, &first_offset) || first_page > current->page_index)
-      return false;
-  }
-  if (first_page > current->page_index) first_page = current->page_index;
-  window->bytes = 0;
-  memset(window->structural_boundaries, 0,
-         sizeof(window->structural_boundaries));
-  window->bidi.count = 0;
-  for (uint32_t index = first_page; index <= current->page_index; ++index) {
-    ArDialoguePageSnapshot page;
-    if (!ArDialogueSession_GetAuthoredPage(&s_runtime.session, index, &page))
-      return false;
-    const size_t source_offset = index == first_page ? first_offset : 0;
-    if (source_offset > page.utf8_bytes) return false;
-    if (index != first_page) {
-      if (window->bytes + 1u >= sizeof(window->text)) return false;
-      window->text[window->bytes++] = '\n';
-    }
-    const size_t offset = window->bytes;
-    size_t bytes = 0;
-    uint8_t object_count = 0;
-    if (!ActRaiserLocalizationText_Normalize(
-            page.utf8 + source_offset, page.utf8_bytes - source_offset,
-            NULL, 0, false,
-            window->text + offset, sizeof(window->text) - offset,
-            &bytes, NULL, 0, &object_count, window->reveal_offsets) ||
-        !ActRaiserLocalizationText_MapBidiSpans(page.bidi_spans, page.bidi_span_count,
-            source_offset, page.utf8_bytes - source_offset, window->reveal_offsets,
-            window->text + offset, bytes, offset, &window->bidi))
-      return false;
-    /* The source slice need not begin on a bitmap-byte boundary, so remap the
-     * relevant bits explicitly instead of copying packed bytes. */
-    for (size_t source_index = 0; source_index < page.utf8_bytes - source_offset;
-         ++source_index) {
-      if (!ArTextBoundary_Get(page.structural_boundaries,
-                              source_offset + source_index))
-        continue;
-      const size_t mapped = window->reveal_offsets[source_index];
-      if (mapped < bytes && window->text[offset + mapped] == ' ')
-        ArTextBoundary_Set(window->structural_boundaries, offset + mapped, true);
-    }
-    window->bytes += bytes;
-    if (index == current->page_index) {
-      window->current_page_offset = offset;
-      window->current_page_source_offset = source_offset;
-      window->current_page_source_bytes = page.utf8_bytes - source_offset;
-    }
-  }
-  window->clusters = CountClusters(window->text, window->bytes);
-  if (window->clusters == UINT32_MAX) return false;
-  window->native_first_page = observation->window_start_page;
-  window->native_clear_control_count = observation->window_start_control_count;
-  window->current_page = current->page_index;
-  window->revision = current->source_revision;
-  window->valid = true;
-  s_runtime.dialogue_ticket = s_runtime.scheduled_dialogue
-      ? ++s_next_dialogue_ticket : 0;
+      window->native_clear_control_count ==
+          observation->window_start_control_count &&
+      window->current_page == current->page_index;
+  if (!ActRaiserDialogueWindow_Build(window, &s_runtime.session, current,
+                                     observation->window_start_page,
+                                     observation->window_start_control_count))
+    return false;
+  if (!unchanged)
+    s_runtime.dialogue_ticket =
+        s_runtime.scheduled_dialogue ? ++s_next_dialogue_ticket : 0;
   return true;
 }
 
 static void ContentSelection(ArDialogueContentSelection *selection) {
   MakeSelection(s_runtime.content < 0 ? 0 : s_runtime.content,
-                s_runtime.presentation < 0 ? 0 : s_runtime.presentation, selection);
+                s_runtime.presentation < 0 ? 0 : s_runtime.presentation,
+                selection);
 }
 
 static void ValueResolver(const ActRaiserLocalizationValues *values,
@@ -570,38 +584,38 @@ static bool PrepareNameEntryKeyMap(
     resolved = ArDialogueSession_GetAuthoredPage(
         &probe, s_runtime.name_tracker.keyboard_page, &page);
   }
-  ArLocalizationInlineObjectSnapshot objects[kArLocalizationFrameInlineObjectCapacity];
-  uint8_t object_count = 0;
+  ActRaiserResolvedText normalized = {0};
   if (resolved) {
-    resolved = ActRaiserLocalizationText_Normalize(
-        page.utf8, page.utf8_bytes, page.inline_objects, page.inline_object_count,
-        false, keys->text, sizeof(keys->text), &keys->text_bytes, objects,
-        kArLocalizationFrameInlineObjectCapacity, &object_count, NULL) &&
-        ActRaiserLocalizationNameCompose_ClearUnderlineRow(
-            keys->text, &keys->text_bytes, objects, object_count, NULL);
+    resolved =
+        ActRaiserLocalizationText_Normalize(
+            page.utf8, page.utf8_bytes, page.inline_objects,
+            page.inline_object_count, false, normalized.utf8,
+            sizeof(normalized.utf8), &normalized.utf8_bytes,
+            normalized.inline_objects, kArLocalizationFrameInlineObjectCapacity,
+            &normalized.inline_object_count, NULL) &&
+        ActRaiserLocalizationNameCompose_ClearUnderlineRow(&normalized);
+    if (resolved) {
+      memcpy(keys->text, normalized.utf8, normalized.utf8_bytes + 1);
+      keys->text_bytes = normalized.utf8_bytes;
+    }
   }
   if (resolved) {
     keys->page_index = page.page_index;
     keys->page_count = page.page_count;
     keys->valid = strlen(source_name) < sizeof(keys->source_name);
-    if (keys->valid) strcpy(keys->source_name, source_name);
+    if (keys->valid)
+      strcpy(keys->source_name, source_name);
   }
   ArDialogueSession_Destroy(&probe);
   return resolved && keys->valid;
 }
 
-static bool ResolveNameEntryText(
-    ArDialogueContentSelection *selection,
-    ActRaiserLocalizationValues *values,
-    ArDialogueValueResolver *resolver,
-    char *utf8, size_t utf8_capacity, size_t *utf8_bytes,
-    ArLocalizationInlineObjectSnapshot *inline_objects,
-    size_t inline_object_capacity, uint8_t *inline_object_count,
-    uint64_t *page_source_revision, ArLocalizationTextLanguage *language,
-    ArTextBidiSpans *bidi, ArLocalizationTextField *live_field,
-    ArLanguagePackError *error) {
-  if (!selection || !values || !resolver || !utf8 || !utf8_bytes ||
-      !inline_object_count || !page_source_revision || !language || !error ||
+static bool ResolveNameEntryText(ArDialogueContentSelection *selection,
+                                 ActRaiserLocalizationValues *values,
+                                 ArDialogueValueResolver *resolver,
+                                 ActRaiserResolvedText *text,
+                                 ArLanguagePackError *error) {
+  if (!selection || !values || !resolver || !text || !error ||
       !s_runtime.name_entry.revision)
     return false;
 
@@ -610,8 +624,8 @@ static bool ResolveNameEntryText(
   const NameEntryKeyMap *keys = &s_runtime.name_key_map;
   uint32_t selected_start = 0, selected_end = 0;
   if (!ActRaiserLocalizationNameEntry_SelectedKeyRange(
-          &s_runtime.name_entry, keys->text, keys->text_bytes,
-          &selected_start, &selected_end) ||
+          &s_runtime.name_entry, keys->text, keys->text_bytes, &selected_start,
+          &selected_end) ||
       !ActRaiserLocalizationNameEntryTracker_Synchronize(
           &s_runtime.name_tracker, &s_runtime.name_entry,
           keys->text + selected_start, selected_end - selected_start))
@@ -627,7 +641,6 @@ static bool ResolveNameEntryText(
 
   ArDialogueSession session;
   ArDialogueSession_Init(&session);
-  uint16_t offsets[kArLocalizationFrameTextCapacity + 1];
   ArDialoguePageSnapshot page;
   bool resolved = ArDialogueSession_Begin(
       &session, selection, "name_entry.prompt_and_alphabet", resolver, error);
@@ -635,46 +648,23 @@ static bool ResolveNameEntryText(
     resolved = ArDialogueSession_GetAuthoredPage(
         &session, s_runtime.name_tracker.keyboard_page, &page);
   }
+  if (resolved)
+    resolved = ActRaiserLocalizationFixedText_FromPage(
+        &page, text, error->message, sizeof(error->message));
   if (resolved) {
-    resolved = ActRaiserLocalizationText_Normalize(
-        page.utf8, page.utf8_bytes,
-        page.inline_objects, page.inline_object_count, false,
-        utf8, utf8_capacity, utf8_bytes,
-        inline_objects, inline_object_capacity, inline_object_count, offsets) &&
-        ActRaiserLocalizationText_MapBidiSpans(page.bidi_spans, page.bidi_span_count,
-            0, page.utf8_bytes, offsets, utf8, *utf8_bytes, 0, bidi);
-  }
-  if (resolved) {
-    resolved = ActRaiserLocalizationNameCompose_ClearUnderlineRow(
-        utf8, utf8_bytes, inline_objects, *inline_object_count, bidi);
-  }
-  if (resolved) {
-    resolved = ActRaiserLocalizationNameCompose_PrepareField(
-        utf8, *utf8_bytes, inline_objects,
-        inline_object_capacity, inline_object_count, live_field);
-  }
-  if (resolved) {
-    resolved = ActRaiserLocalizationNameCompose_InsertPageIndicator(
-        utf8, utf8_capacity, utf8_bytes, page.page_index, page.page_count,
-        inline_objects, *inline_object_count, bidi);
-  }
-  if (resolved) {
-    resolved = ActRaiserLocalizationNameCompose_ExpandKeyGutters(
-        utf8, utf8_capacity, utf8_bytes,
-        inline_objects, *inline_object_count, bidi);
-  }
-  if (resolved) {
-    resolved = ActRaiserLocalizationNameEntry_SelectedKeyRange(
-        &s_runtime.name_entry, utf8, *utf8_bytes,
-        &selected_start, &selected_end) &&
+    resolved =
+        ActRaiserLocalizationNameEntry_SelectedKeyRange(
+            &s_runtime.name_entry, text->utf8, text->utf8_bytes,
+            &selected_start, &selected_end) &&
         ActRaiserLocalizationText_InsertInlineObject(
-            inline_objects, inline_object_capacity, inline_object_count,
+            text->inline_objects, kArLocalizationFrameInlineObjectCapacity,
+            &text->inline_object_count,
             (ArLocalizationInlineObjectSnapshot){
                 kArLocalizationInlineObject_NameCursor, selected_end});
   }
   if (resolved) {
-    *page_source_revision = page.source_revision;
-    resolved = PageLanguage(&page, language);
+    text->source_revision = page.source_revision;
+    resolved = PageLanguage(&page, &text->language);
   }
   ArDialogueSession_Destroy(&session);
   if (resolved)
@@ -683,93 +673,55 @@ static bool ResolveNameEntryText(
   return resolved;
 }
 
-static bool ResolveComposeText(
-    void *context, const char *semantic_id,
-    char *utf8, size_t utf8_capacity, size_t *utf8_bytes,
-    uint32_t *cluster_count, uint64_t *source_revision,
-    ArLocalizationInlineObjectSnapshot *inline_objects,
-    size_t inline_object_capacity, uint8_t *inline_object_count,
-    uint8_t *structural_boundaries, ArLocalizationTextLanguage *language,
-    ArTextBidiSpans *bidi, ArLocalizationTextField *live_field,
-    char *error_text, size_t error_capacity) {
-  (void)context;
-  if (!s_runtime.presentation) return false;
-  if (!semantic_id || !utf8 || !utf8_capacity || !utf8_bytes ||
-      !cluster_count || !source_revision || !inline_object_count || !language || !bidi)
+typedef struct CapturedTextField {
+  const char *hud_value;
+  const char *location_name;
+} CapturedTextField;
+
+static bool ResolveComposeText(void *context, const char *semantic_id,
+                               ActRaiserResolvedText *text, char *error_text,
+                               size_t error_capacity) {
+  if (!s_runtime.presentation)
     return false;
-  *inline_object_count = 0;
-  bidi->count = 0;
-  if (live_field) *live_field = (ArLocalizationTextField){0};
-  uint16_t offsets[kArLocalizationFrameTextCapacity + 1];
-  if (structural_boundaries)
-    memset(structural_boundaries, 0, AR_TEXT_BOUNDARY_BYTES(utf8_capacity));
+  if (!semantic_id || !text)
+    return false;
+  memset(text, 0, sizeof(*text));
   ArDialogueSession session;
   ArDialogueSession_Init(&session);
   ArDialogueContentSelection selection;
   ArDialogueValueResolver resolver;
   ActRaiserLocalizationValues values = s_runtime.values;
+  const CapturedTextField *field = context;
+  values.hud_value = field ? field->hud_value : NULL;
+  values.location_name = field ? field->location_name : NULL;
   const bool name_entry =
       !strcmp(semantic_id, "name_entry.prompt_and_alphabet");
-  const bool status_table =
-      !strcmp(semantic_id, "title.save_choice.labels") ||
-      !strncmp(semantic_id, "status.report.", 14) ||
-      !strcmp(semantic_id, "system.choice.yes_no") ||
-      !strcmp(semantic_id, "system.message_speed.scale_labels") ||
-      !strcmp(semantic_id, "sound_test.menu.labels") ||
-      !strncmp(semantic_id, "credits.", 8) ||
-      !strncmp(semantic_id, "sky.menu.", 9) ||
-      !strncmp(semantic_id, "sim.menu.", 9);
   ContentSelection(&selection);
   ValueResolver(&values, &resolver);
   ArLanguagePackError error = {{0}};
   ArDialoguePageSnapshot page;
   bool resolved = false;
   if (name_entry) {
-    uint64_t name_source_revision = 0;
-    resolved = ResolveNameEntryText(
-        &selection, &values, &resolver,
-        utf8, utf8_capacity, utf8_bytes,
-        inline_objects, inline_object_capacity, inline_object_count,
-        &name_source_revision, language, bidi, live_field, &error);
-    page.source_revision = name_source_revision;
+    resolved =
+        ResolveNameEntryText(&selection, &values, &resolver, text, &error);
+    page.source_revision = text->source_revision;
   } else {
-    resolved = ArDialogueSession_Begin(
-        &session, &selection, semantic_id, &resolver, &error);
-    if (resolved) resolved = ArDialogueSession_GetPage(&session, &page) &&
-        PageLanguage(&page, language);
-    if (resolved) {
-      resolved = ActRaiserLocalizationText_NormalizeStructured(
-          page.utf8, page.utf8_bytes,
-          page.inline_objects, page.inline_object_count,
-          status_table,
-          utf8, utf8_capacity, utf8_bytes,
-          inline_objects, inline_object_capacity, inline_object_count, offsets,
-          page.structural_boundaries, status_table ? structural_boundaries : NULL) &&
-          ActRaiserLocalizationText_MapBidiSpans(page.bidi_spans, page.bidi_span_count,
-              0, page.utf8_bytes, offsets, utf8, *utf8_bytes, 0, bidi);
-    }
+    resolved = ArDialogueSession_Begin(&session, &selection, semantic_id,
+                                       &resolver, &error);
+    if (resolved)
+      resolved = ArDialogueSession_GetPage(&session, &page) &&
+                 PageLanguage(&page, &text->language);
+    if (resolved)
+      resolved = ActRaiserLocalizationFixedText_FromPage(
+          &page, text, error.message, sizeof(error.message));
   }
   if (resolved) {
-    /* These two source records include the keyboard selector glyph. Its
-     * native BG3 cell is deliberately outside our claim and must not become
-     * a second font-rendered arrow. Other '>' characters remain authored text. */
-    if ((!strcmp(semantic_id, "title.start_prompt") ||
-         !strcmp(semantic_id, "title.selector.professional")) &&
-        *utf8_bytes && utf8[0] == '>') {
-      size_t first = 1;
-      while (first < *utf8_bytes && utf8[first] == ' ') ++first;
-      memmove(utf8, utf8 + first, *utf8_bytes - first);
-      ArTextBidiSpans_Edit(bidi, 0, (uint32_t)first, 0);
-      *utf8_bytes -= first;
-      utf8[*utf8_bytes] = 0;
-    }
-    *cluster_count = CountClusters(utf8, *utf8_bytes);
-    *source_revision = !strncmp(semantic_id, "status.report.", 14)
-        ? ActRaiserLocalizationValues_ReportRevision(&s_runtime.values)
+    text->source_revision =
+        !strncmp(semantic_id, "status.report.", 14)
+            ? ActRaiserLocalizationValues_ReportRevision(&s_runtime.values)
         : name_entry ? NameEntrySourceRevision(page.source_revision)
                      : page.source_revision;
-    resolved = *cluster_count != UINT32_MAX &&
-        *source_revision != 0;
+    resolved = text->cluster_count != UINT32_MAX && text->source_revision != 0;
   }
   if (!resolved && error_text && error_capacity) {
     snprintf(error_text, error_capacity, "%s",
@@ -777,6 +729,23 @@ static bool ResolveComposeText(
   }
   ArDialogueSession_Destroy(&session);
   return resolved;
+}
+
+static bool ResolveHudValue(void *context, const char *id,
+                            const char *native_value,
+                            ActRaiserResolvedText *text, char *error,
+                            size_t capacity) {
+  (void)context;
+  CapturedTextField field = {.hud_value = native_value};
+  return ResolveComposeText(&field, id, text, error, capacity);
+}
+
+static bool ResolveWorldLabel(void *context, const char *id, const char *name,
+                              ActRaiserResolvedText *text, char *error,
+                              size_t capacity) {
+  (void)context;
+  CapturedTextField field = {.location_name = name};
+  return ResolveComposeText(&field, id, text, error, capacity);
 }
 
 static void RefreshNameEntry(void) {
@@ -790,7 +759,8 @@ static void RefreshNameEntry(void) {
   if (!s_runtime.presentation) {
     if (ActRaiserLocalizationNameEntryTracker_SynchronizeNative(
             &s_runtime.name_tracker, &s_runtime.name_entry))
-      s_runtime.name_entry_applied_native_revision = s_runtime.name_entry.revision;
+      s_runtime.name_entry_applied_native_revision =
+          s_runtime.name_entry.revision;
     return;
   }
   char error[kArLanguagePackErrorCapacity] = {0};
@@ -860,7 +830,7 @@ static void RefreshReports(void) {
     const ActRaiserLocalizationComposeSnapshot *snapshot =
         ActRaiserLocalizationComposeState_Find(&s_runtime.compose, surface);
     if (!snapshot || strncmp(snapshot->semantic_id, "status.report.", 14) ||
-        snapshot->source_revision == revision)
+        snapshot->text.source_revision == revision)
       continue;
     char semantic_id[kActRaiserLocalizationComposeSemanticIdCapacity];
     snprintf(semantic_id, sizeof(semantic_id), "%s", snapshot->semantic_id);
@@ -1160,7 +1130,7 @@ void ActRaiserLocalizationRuntime_ScheduleByte(
       ScheduleFailed("native control acknowledgement is out of sequence");
       return;
     }
-    if (id && !strncmp(id, "reset_text_cursor.", 18)) {
+    if (ActRaiserDialogueWindow_ControlClears(id)) {
       s_runtime.scheduled_window_first_page =
           (uint16_t)session->state.authored_page_index;
       s_runtime.scheduled_window_clear_control = (uint16_t)(ordinal + 1u);
@@ -1234,6 +1204,9 @@ void ActRaiserLocalizationRuntime_CaptureFrame(
   if (!ArLocalizationFrame_SetFallbackFonts(frame, s_runtime.fallback_fonts,
                                             metadata->fallback_font_count))
     return;
+  if (!ArLocalizationFrame_SetFontRoles(frame, s_runtime.font_roles,
+                                        s_runtime.font_role_count))
+    return;
   const ArTextCellDestination destination = {
       .background = 3,
       .screen = kArTextCellScreen_Composited,
@@ -1298,6 +1271,8 @@ void ActRaiserLocalizationRuntime_CaptureFrame(
         &s_runtime.compose, kActRaiserLocalizationTitleTextSurface);
     (void)ActRaiserLocalizationComposeState_ReleaseSurface(
         &s_runtime.compose, kActRaiserLocalizationTitleSelectorSurface);
+    (void)ActRaiserLocalizationComposeState_ReleaseSurface(
+        &s_runtime.compose, kActRaiserLocalizationTitleCopyrightSurface);
   }
 
   ActRaiserLocalizationTextObservation observation = {
@@ -1398,9 +1373,14 @@ void ActRaiserLocalizationRuntime_CaptureFrame(
       }
     }
   }
+  ActRaiserTextPalette inks;
+  ActRaiserTextPalette_Capture(&inks, cgram_words, cgram_word_count);
+  ActRaiserLocalizationHud_CapturePalette(&inks, bg3_tilemap_base_words,
+                                          vram_words, vram_word_count,
+                                          cgram_words, cgram_word_count);
   if (s_runtime.presentation)
     (void)ActRaiserLocalizationComposeState_AppendFrame(
-        &s_runtime.compose, frame, destination, cgram_words);
+        &s_runtime.compose, frame, destination, &inks);
   /* The status bar exists in both shapes: the action bar on an act map, and
    * the simulation/Sky Palace bar on the non-action maps that have one. Each
    * field still proves its own template tiles before it replaces anything, so
@@ -1411,10 +1391,10 @@ void ActRaiserLocalizationRuntime_CaptureFrame(
        (map_group == kActRaiserMapGroup_NonAction &&
         map_number >= kActRaiserSimulationTown_First &&
         map_number <= kActRaiserNonActionMap_SkyPalace)))
-    ActRaiserLocalizationHud_Append(&s_runtime.hud, frame, destination,
-        bg3_tile_base_words,
-        vram_words, vram_word_count, cgram_words, cgram_word_count,
-        ResolveComposeText, NULL);
+    ActRaiserLocalizationHud_Append(
+        &s_runtime.hud, frame, destination, bg3_tile_base_words, vram_words,
+        vram_word_count, cgram_words, cgram_word_count, ResolveComposeText,
+        ResolveHudValue, NULL);
   if (s_runtime.presentation)
     ActRaiserLocalizationCredits_Append(&s_runtime.credits, frame, destination,
         map_group, map_number, bg3_tile_base_words,
@@ -1462,7 +1442,7 @@ void ActRaiserLocalizationRuntime_CaptureFrame(
     ScheduleFailed("dialogue window exceeds its presentation capacity");
     return;
   }
-  const DialogueWindow *window = &s_runtime.dialogue_window;
+  const ActRaiserDialogueWindow *window = &s_runtime.dialogue_window;
   if (window->bidi.count > kArTextMaximumBidiSpans - frame->bidi.count) {
     ScheduleFailed("dialogue value spans exceed frame capacity");
     return;
@@ -1470,14 +1450,8 @@ void ActRaiserLocalizationRuntime_CaptureFrame(
   /* Whitespace normalization changes byte/cluster counts. Map the actual
    * grapheme boundary through the cached normalization, not another ratio.
    * This is O(1) per frame and never reveals half a UTF-8 grapheme. */
-  size_t source_revealed =
-      page.revealed_utf8_bytes > window->current_page_source_offset
-      ? page.revealed_utf8_bytes - window->current_page_source_offset : 0;
-  if (source_revealed > window->current_page_source_bytes)
-    source_revealed = window->current_page_source_bytes;
-  size_t reveal_bytes =
-      window->current_page_offset + window->reveal_offsets[source_revealed];
-  if (reveal_bytes > window->bytes) reveal_bytes = window->bytes;
+  const size_t reveal_bytes =
+      ActRaiserDialogueWindow_RevealedBytes(window, page.revealed_utf8_bytes);
   static int reveal_trace = -1;
   static uint64_t trace_ticket;
   static size_t trace_bytes;
@@ -1496,13 +1470,15 @@ void ActRaiserLocalizationRuntime_CaptureFrame(
     trace_ticket = s_runtime.dialogue_ticket;
     trace_bytes = reveal_bytes;
   }
-  const bool added = ArLocalizationFrame_AddStructuredDialogueWindow(
-      frame, route->surface_id, destination, route->region,
-      window->text, window->bytes, (uint32_t)reveal_bytes, window->clusters,
-      page.source_revision, language.direction, route->native_font_pixels,
-      window->structural_boundaries) &&
+  const bool added =
+      ArLocalizationFrame_AddStructuredDialogueWindow(
+          frame, route->surface_id, destination, route->region, window->text,
+          window->bytes, (uint32_t)reveal_bytes, window->clusters,
+          page.source_revision, language.direction, route->native_font_pixels,
+          window->structural_boundaries) &&
       ArLocalizationFrame_SetTextLanguage(frame, &language) &&
-      ArLocalizationFrame_SetTextBidiSpans(frame, &window->bidi);
+      ArLocalizationFrame_SetTextBidiSpans(frame, &window->bidi) &&
+      ActRaiserTextStyle_Publish(&window->styles, 0, &inks, frame);
   if (!added) {
     ScheduleFailed("dialogue cannot fit in the current frame");
     return;
@@ -1534,7 +1510,8 @@ void ActRaiserLocalizationRuntime_AppendWorldNavigationLabel(
   if (!ActRaiserLocalizationWorldNavigation_Append(
           &s_runtime.world_navigation, frame, active_location,
           native_label_visible, cgram_words, cgram_word_count,
-          ResolveComposeText, NULL, error, sizeof(error)) && error[0])
+          ResolveComposeText, ResolveWorldLabel, NULL, error, sizeof(error)) &&
+      error[0])
     fprintf(stderr,
             "[localization] world-navigation label unavailable (%s); "
             "native text retained\n",
@@ -1542,7 +1519,8 @@ void ActRaiserLocalizationRuntime_AppendWorldNavigationLabel(
 }
 
 void ActRaiserLocalizationRuntime_Shutdown(void) {
-  RetireFonts(s_runtime.primary_font, s_runtime.fallback_fonts);
+  RetireFonts(s_runtime.primary_font, s_runtime.fallback_fonts,
+              s_runtime.font_roles, s_runtime.font_role_count);
   if (s_runtime.configured) {
     ArDialogueSession_Destroy(&s_runtime.session);
     ArLanguagePack_Destroy(&s_runtime.selected_pack);

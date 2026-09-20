@@ -67,7 +67,7 @@ func Launch(options LaunchOptions) error {
 	if err != nil {
 		return err
 	}
-	if len(options.GameArgs) > 0 && options.GameArgs[0] == "--font-coverage-v1" {
+	if len(options.GameArgs) > 0 && (options.GameArgs[0] == "--font-coverage-v1" || options.GameArgs[0] == "--text-preview-v1") {
 		// A language editor needs the installed game's exact font backend,
 		// including when it lives only inside an AppImage. This protocol is
 		// headless: preserve stdin/stdout and do not seed game data or log over

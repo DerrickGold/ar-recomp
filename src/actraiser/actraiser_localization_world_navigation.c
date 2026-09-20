@@ -42,36 +42,45 @@ void ActRaiserLocalizationWorldNavigation_Invalidate(
   ActRaiserLocalizationWorldNavigation_Init(state);
 }
 
-static bool ResolveLocation(
-    ActRaiserLocalizationWorldNavigation *state, uint16_t active_location,
-    ActRaiserLocalizationComposeTextResolver resolve_text,
-    void *resolve_context, char *error, size_t error_capacity) {
+static bool
+ResolveLocation(ActRaiserLocalizationWorldNavigation *state,
+                uint16_t active_location,
+                ActRaiserLocalizationComposeTextResolver resolve_text,
+                ActRaiserLocalizationFieldResolver resolve_label,
+                void *resolve_context, char *error, size_t error_capacity) {
   if (!state || !resolve_text || active_location < kFirstLocation ||
       active_location >= kFirstLocation + kLocationCount)
     return false;
   state->resolved = false;
   state->attempted_location = active_location;
-  state->utf8_bytes = 0;
-  state->cluster_count = 0;
-  state->source_revision = 0;
-  state->bidi.count = 0;
-  uint8_t inline_object_count = 0;
-  ArLocalizationInlineObjectSnapshot inline_objects[1];
-  if (!resolve_text(
-          resolve_context,
-          kLocationSemanticIds[active_location - kFirstLocation],
-          state->utf8, sizeof(state->utf8), &state->utf8_bytes,
-          &state->cluster_count, &state->source_revision,
-          inline_objects, 1, &inline_object_count, NULL,
-          &state->language, &state->bidi, NULL, error, error_capacity) ||
-      inline_object_count ||
-      !ArLocalizationTextLanguage_IsValid(&state->language) ||
-      !ArTextBidiSpans_FitSource(
-          &state->bidi, state->utf8, state->utf8_bytes)) {
+  memset(&state->text, 0, sizeof(state->text));
+  if (!resolve_text(resolve_context,
+                    kLocationSemanticIds[active_location - kFirstLocation],
+                    &state->text, error, error_capacity) ||
+      state->text.inline_object_count ||
+      state->text.utf8_bytes >=
+          kActRaiserLocalizationWorldNavigationTextCapacity ||
+      !ArLocalizationTextLanguage_IsValid(&state->text.language) ||
+      !ArTextBidiSpans_FitSource(&state->text.bidi, state->text.utf8,
+                                 state->text.utf8_bytes)) {
     if (error && error_capacity && !error[0])
       snprintf(error, error_capacity,
                "world-navigation location text is invalid");
     return false;
+  }
+  if (resolve_label) {
+    char name[kActRaiserLocalizationWorldNavigationTextCapacity];
+    memcpy(name, state->text.utf8, state->text.utf8_bytes + 1);
+    memset(&state->text, 0, sizeof(state->text));
+    if (!resolve_label(resolve_context, "world_map.location_label", name,
+                       &state->text, error, error_capacity) ||
+        state->text.inline_object_count ||
+        state->text.utf8_bytes >=
+            kActRaiserLocalizationWorldNavigationTextCapacity ||
+        !ArLocalizationTextLanguage_IsValid(&state->text.language) ||
+        !ArTextBidiSpans_FitSource(&state->text.bidi, state->text.utf8,
+                                   state->text.utf8_bytes))
+      return false;
   }
   state->resolved = true;
   return true;
@@ -101,25 +110,36 @@ static void RollbackScreenText(
   frame->text_bytes = text_bytes;
 }
 
+bool ActRaiserLocalizationWorldNavigation_AddText(
+    ArLocalizationFrame *frame, const ActRaiserResolvedText *text) {
+  return ArLocalizationFrame_AddScreenText(
+      frame, kActRaiserLocalizationWorldNavigationSurface,
+      kSimWorldNavigationLabelX, kSimWorldNavigationLabelY,
+      kSimWorldNavigationLabelWidth, kSimWorldNavigationLabelHeight, text->utf8,
+      text->utf8_bytes, text->cluster_count, text->cluster_count,
+      text->source_revision, text->language.direction, kNativeFontPixels,
+      kArLocalizationTextLayout_SingleLineLabel);
+}
+
 bool ActRaiserLocalizationWorldNavigation_Append(
-    ActRaiserLocalizationWorldNavigation *state,
-    ArLocalizationFrame *frame, uint16_t active_location,
-    bool native_label_visible,
+    ActRaiserLocalizationWorldNavigation *state, ArLocalizationFrame *frame,
+    uint16_t active_location, bool native_label_visible,
     const uint16_t *cgram_words, size_t cgram_word_count,
     ActRaiserLocalizationComposeTextResolver resolve_text,
-    void *resolve_context, char *error, size_t error_capacity) {
+    ActRaiserLocalizationFieldResolver resolve_label, void *resolve_context,
+    char *error, size_t error_capacity) {
   if (!state || !frame || !native_label_visible ||
       active_location < kFirstLocation ||
       active_location >= kFirstLocation + kLocationCount ||
       !cgram_words || cgram_word_count <= kObjBodyColor)
     return false;
   if (state->attempted_location != active_location &&
-      !ResolveLocation(state, active_location, resolve_text, resolve_context,
-                       error, error_capacity))
+      !ResolveLocation(state, active_location, resolve_text, resolve_label,
+                       resolve_context, error, error_capacity))
     return false;
   if (!state->resolved) return false;
   if (frame->bidi.count > kArTextMaximumBidiSpans ||
-      state->bidi.count > kArTextMaximumBidiSpans - frame->bidi.count) {
+      state->text.bidi.count > kArTextMaximumBidiSpans - frame->bidi.count) {
     if (error && error_capacity)
       snprintf(error, error_capacity,
                "world-navigation bidi metadata does not fit the frame");
@@ -129,17 +149,10 @@ bool ActRaiserLocalizationWorldNavigation_Append(
   const uint8_t screen_text_count = frame->screen_text_count;
   const uint16_t bidi_count = frame->bidi.count;
   const uint32_t text_bytes = frame->text_bytes;
-  if (!ArLocalizationFrame_AddScreenText(
-          frame, kActRaiserLocalizationWorldNavigationSurface,
-          kSimWorldNavigationLabelX, kSimWorldNavigationLabelY,
-          kSimWorldNavigationLabelWidth, kSimWorldNavigationLabelHeight,
-          state->utf8, state->utf8_bytes,
-          state->cluster_count, state->cluster_count,
-          state->source_revision, state->language.direction,
-          kNativeFontPixels, kArLocalizationTextLayout_SingleLineLabel))
+  if (!ActRaiserLocalizationWorldNavigation_AddText(frame, &state->text))
     return false;
-  if (!ArLocalizationFrame_SetTextLanguage(frame, &state->language) ||
-      !ArLocalizationFrame_SetTextBidiSpans(frame, &state->bidi)) {
+  if (!ArLocalizationFrame_SetTextLanguage(frame, &state->text.language) ||
+      !ArLocalizationFrame_SetTextBidiSpans(frame, &state->text.bidi)) {
     RollbackScreenText(frame, snapshot_count, screen_text_count,
                        bidi_count, text_bytes);
     return false;
@@ -156,5 +169,10 @@ bool ActRaiserLocalizationWorldNavigation_Append(
       ActRaiserLocalizationStyle_Rgb(cgram_words[kObjBandColor]);
   snapshot->body_rgb =
       ActRaiserLocalizationStyle_Rgb(cgram_words[kObjBodyColor]);
-  return true;
+  ActRaiserTextPalette inks;
+  ActRaiserTextPalette_Capture(&inks, cgram_words, cgram_word_count);
+  ActRaiserTextPalette_SetLocation(&inks, cgram_words[kObjShadowColor],
+                                   cgram_words[kObjBandColor],
+                                   cgram_words[kObjBodyColor]);
+  return ActRaiserTextStyle_Publish(&state->text.styles, 0, &inks, frame);
 }

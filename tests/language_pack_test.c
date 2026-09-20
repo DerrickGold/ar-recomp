@@ -294,6 +294,138 @@ static void ExpectFailure(const char *manifest, const uint8_t *script,
   ArLanguagePack_Destroy(&pack);
 }
 
+static void TestVersionedAppearance(void) {
+  char manifest[sizeof(kManifest) + 128];
+  snprintf(manifest, sizeof(manifest),
+           "%s\n[font.hud]\nprimary = builtin:actraiser-sans\n", kManifest);
+  char *version = strstr(manifest, "version = 1");
+  CHECK(version != NULL);
+  version[strlen("version = ")] = '2';
+  const char *script =
+      "@define-style hud band=native:hud.band body=#FFD36A "
+      "shadow=native:hud.shadow shape=keyline\n"
+      ":: sky.demo\n@layout flow\n@font body\n@scale 110%\n@style hud\n"
+      "@numerals upright\nHP <i>{hp:02}</i> <span font=\"hud\" "
+      "scale=\"80%\">gold\n# soft join\nsecond</span> plain\n@end\n";
+  TestFile files[] = {
+      {"pack.ini", (const uint8_t *)manifest, strlen(manifest)},
+      {"text/sky.artext", (const uint8_t *)script, strlen(script)},
+      {"fonts/Fallback.ttf", kFont, sizeof(kFont)},
+  };
+  TestVfs vfs = {files, 3, 0, 0};
+  ArLanguagePackIo io = MakeIo(&vfs);
+  ArLanguagePack pack;
+  ArLanguagePack_Init(&pack);
+  ArLanguagePackError error;
+  CHECK(ArLanguagePack_Load(&pack, &io, "pack.ini", &error));
+  if (error.message[0])
+    fprintf(stderr, "%s\n", error.message);
+  const ArLanguageMessage *message =
+      ArLanguagePack_FindMessage(&pack, "sky.demo");
+  CHECK(message != NULL);
+  if (message) {
+    CHECK(pack.metadata.format_version == 2);
+    CHECK(pack.metadata.font_role_count == 1);
+    CHECK(!strcmp(pack.metadata.font_roles[0].name, "hud"));
+    const ArLanguageNamedTreatment *treatment =
+        ArLanguagePack_FindTreatment(&pack, "hud");
+    CHECK(treatment && treatment->definition.body.rgb == 0xFFD36A &&
+          treatment->definition.keyline_shadow);
+    CHECK(treatment && treatment->definition.band.kind == kArTextInk_Binding &&
+          treatment->source_line == 1);
+    CHECK(!strcmp(ArLanguagePack_GetString(&pack, message->source_path),
+                  "text/sky.artext"));
+    CHECK(!strcmp(ArLanguagePack_GetString(&pack, message->layout), "flow"));
+    CHECK(message->numerals == 1);
+    const ArTextTemplateStyle *defaults =
+        ArLanguagePack_GetTextStyle(&pack, message->default_style);
+    CHECK(defaults && defaults->scale_percent == 110 &&
+          !strcmp(defaults->font, "body"));
+    const ArLanguageOperation *value =
+        FindOperation(&pack, message, kArLanguageOperation_Placeholder);
+    const ArTextTemplateStyle *style =
+        value ? ArLanguagePack_GetTextStyle(&pack, value->text_style) : NULL;
+    CHECK(style && style->italic == 2 && value->minimum_digits == 2);
+    bool saw_gold = false, saw_plain = false;
+    for (uint32_t i = 0; i < message->operation_count; ++i) {
+      const ArLanguageOperation *op =
+          ArLanguagePack_GetOperation(&pack, message, i);
+      if (op->kind != kArLanguageOperation_Text)
+        continue;
+      const char *text = ArLanguagePack_GetString(&pack, op->value.text);
+      if (!strcmp(text, "gold second")) {
+        style = ArLanguagePack_GetTextStyle(&pack, op->text_style);
+        saw_gold =
+            style && !strcmp(style->font, "hud") && style->scale_percent == 80;
+      }
+      if (!strcmp(text, " plain"))
+        saw_plain = op->text_style == 0;
+    }
+    CHECK(saw_gold && saw_plain);
+  }
+  ArLanguagePack_Destroy(&pack);
+  const char *invalid = ":: sky.demo\n<i>unclosed\n@end\n";
+  ExpectFailure(manifest, (const uint8_t *)invalid, strlen(invalid), true,
+                "unclosed style tag");
+  invalid = ":: sky.demo\n@font body\n@font hud\nx\n";
+  ExpectFailure(manifest, (const uint8_t *)invalid, strlen(invalid), true,
+                "presentation defaults");
+  invalid = ":: sky.demo\n<span font=\"missing\">x</span>\n";
+  ExpectFailure(manifest, (const uint8_t *)invalid, strlen(invalid), true,
+                "undeclared font role");
+  invalid = ":: sky.demo\n@style missing\nx\n";
+  ExpectFailure(manifest, (const uint8_t *)invalid, strlen(invalid), true,
+                "undefined style");
+  invalid =
+      "@define-style bad band=#001122 body=#001122 font=hud\n:: sky.demo\nx\n";
+  ExpectFailure(manifest, (const uint8_t *)invalid, strlen(invalid), true,
+                "unknown treatment property");
+  version[strlen("version = ")] = '1';
+  ExpectFailure(manifest, (const uint8_t *)kScript, strlen(kScript), true,
+                "font roles require version 2");
+}
+
+static void TestLayoutContracts(void) {
+  static const struct {
+    const char *script;
+    const char *error;
+  } cases[] = {
+      {":: action.hud.ready\n@layout centered_label\nReady\n@end\n"
+       ":: action.hud.pause\n@alias action.hud.ready\n",
+       NULL},
+      {":: action.hud.ready\n@layout mystery\nReady\n@end\n",
+       "requires layout 'centered_label'"},
+      {":: action.hud.ready\n@layout centered_label\nReady\n@end\n"
+       ":: title.start_prompt\n@alias action.hud.ready\n",
+       "title.start_prompt requires layout 'single_line_label'"},
+  };
+  for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+    const ArTextDocumentSource source = {
+        "layouts.artext",
+        cases[i].script,
+        strlen(cases[i].script),
+    };
+    const ArTextDocumentConfig config = {
+        .id = "layouts",
+        .locale = "en",
+        .format_version = 2,
+        .sources = &source,
+        .source_count = 1,
+    };
+    ArLanguagePack pack;
+    ArLanguagePackError error = {0};
+    ArLanguagePack_Init(&pack);
+    CHECK(ArLanguagePack_ParseDocument(&pack, &config, &error));
+    const bool valid = ArLanguageContract_ValidatePack(&pack, NULL, &error);
+    CHECK(valid == (cases[i].error == NULL));
+    if (cases[i].error) {
+      CHECK(strstr(error.message, cases[i].error) != NULL);
+      CHECK(strstr(error.message, "layouts.artext:1:") != NULL);
+    }
+    ArLanguagePack_Destroy(&pack);
+  }
+}
+
 static void TestRejectedInputs(void) {
   static const char invalid_utf8[] = ":: sky.demo\n\xC0\xAF\n";
   ExpectFailure(kManifest, (const uint8_t *)invalid_utf8,
@@ -559,9 +691,9 @@ static void TestSemanticContracts(void) {
   CHECK(stats.validated_messages == 3);
   CHECK(stats.aliases == 1);
   CHECK(stats.required_messages == 495);
-  CHECK(ArLanguageContract_RouteCount() == 558);
+  CHECK(ArLanguageContract_RouteCount() == 564);
   CHECK(strcmp(ArLanguageContract_RouteId(0), "action.hud.act_1") == 0);
-  CHECK(ArLanguageContract_RouteId(558) == NULL);
+  CHECK(ArLanguageContract_RouteId(564) == NULL);
   CHECK(ArLanguageContract_RouteAvailable("action.hud.act_1",
                                           kArLanguageSourceProfile_Us));
   CHECK(!ArLanguageContract_RouteAvailable(
@@ -749,6 +881,29 @@ static int ValidatePackFromFile(const char *manifest_path, int mode) {
   return EXIT_SUCCESS;
 }
 
+static void TestNativeInkContract(void) {
+  const char script[] = "@define-style bad band=native:hud.typo body=#FFFFFF\n"
+                        ":: action.hud.act_1\n@style bad\nACT I\n@end\n";
+  char manifest[sizeof(kManifest)];
+  strcpy(manifest, kManifest);
+  strstr(manifest, "version = 1")[strlen("version = ")] = '2';
+  TestFile files[] = {
+      {"pack.ini", (const uint8_t *)manifest, strlen(manifest)},
+      {"text/sky.artext", (const uint8_t *)script, sizeof(script) - 1},
+      {"fonts/Fallback.ttf", kFont, sizeof(kFont)},
+  };
+  TestVfs vfs = {files, 3, 0, 0};
+  ArLanguagePackIo io = MakeIo(&vfs);
+  ArLanguagePack pack;
+  ArLanguagePack_Init(&pack);
+  ArLanguagePackError error = {{0}};
+  CHECK(ArLanguagePack_Load(&pack, &io, "pack.ini", &error));
+  CHECK(!ArLanguageContract_ValidatePack(&pack, NULL, &error));
+  CHECK(strstr(error.message, "text/sky.artext:1") &&
+        strstr(error.message, "native:hud.typo"));
+  ArLanguagePack_Destroy(&pack);
+}
+
 int main(int argc, char **argv) {
   if (argc == 2)
     return ValidatePackFromFile(argv[1], 0);
@@ -765,6 +920,9 @@ int main(int argc, char **argv) {
   TestMemberPathResolution();
   TestMetadataFastPath();
   TestFullLoad();
+  TestVersionedAppearance();
+  TestLayoutContracts();
+  TestNativeInkContract();
   TestRejectedInputs();
   TestTransactionalReload();
   TestSemanticContracts();

@@ -110,7 +110,7 @@ func TestAuthorContractsAndAliasDependents(t *testing.T) {
 		}
 	}
 	refs, err := AuthorReferences("us")
-	if err != nil || len(refs) != 558 {
+	if err != nil || len(refs) != 564 {
 		t.Fatalf("refs: %d %v", len(refs), err)
 	}
 	for i := range refs {
@@ -183,7 +183,7 @@ func TestAuthorWorkspaceEditReopenTreeAndAtomicFailure(t *testing.T) {
 		present += entry.Present
 		done += entry.Done
 	}
-	if total != 558 || present != 3 || done != 1 {
+	if total != 564 || present != 3 || done != 1 {
 		t.Fatalf("tree counts %d %d %d", total, present, done)
 	}
 	children := w2.Children("action.hud")
@@ -507,12 +507,12 @@ func TestAuthorPresentationContracts(t *testing.T) {
 		id string
 		AuthorPresentation
 	}{
-		{"action.hud.act_1", AuthorPresentation{Shape: "fixed", MaximumPages: 1}},
-		{"action.hud.act_label", AuthorPresentation{Shape: "fixed", MaximumPages: 1, MaximumLines: 1}},
-		{"title.save_choice.labels", AuthorPresentation{Shape: "fixed", MaximumPages: 1, RequiredNonemptyLines: 2}},
-		{"name_entry.prompt_and_alphabet", AuthorPresentation{Shape: "keyboard", Keyboard: &AuthorKeyboardShape{Rows: 5, Columns: 13, MaximumLines: 63, MaximumPageBytes: 3072}}},
-		{"town.name.aitos", AuthorPresentation{Shape: "inline", MaximumPages: 1, MaximumLines: 1}},
-		{"dialogue.event.relay.aitos", AuthorPresentation{Shape: "flow"}},
+		{"action.hud.act_1", AuthorPresentation{Layout: "centered_label", Shape: "fixed", MaximumPages: 1}},
+		{"action.hud.act_label", AuthorPresentation{Layout: "framed_label", Shape: "fixed", MaximumPages: 1, MaximumLines: 1}},
+		{"title.save_choice.labels", AuthorPresentation{Layout: "single_line_label", Shape: "fixed", MaximumPages: 1, RequiredNonemptyLines: 2}},
+		{"name_entry.prompt_and_alphabet", AuthorPresentation{Layout: "keyboard", Shape: "keyboard", Keyboard: &AuthorKeyboardShape{Rows: 5, Columns: 13, MaximumLines: 63, MaximumPageBytes: 3072}}},
+		{"town.name.aitos", AuthorPresentation{Layout: "inline", Shape: "inline", MaximumPages: 1, MaximumLines: 1}},
+		{"dialogue.event.relay.aitos", AuthorPresentation{Layout: "flow", Shape: "flow"}},
 	} {
 		if !reflect.DeepEqual(shapes[expected.id], expected.AuthorPresentation) {
 			t.Fatalf("%s: %+v", expected.id, shapes[expected.id])

@@ -187,57 +187,6 @@ bool Diorama_ProjectCapturedBg2Point(const DioramaProjection *projection,
                                      ArRenderPointF *point,
                                      float *scale_x, float *scale_y);
 
-/* B4-kick (followup doc): boost's "zoom-punch" multiplies the RESOLVED
- * distance (1.0 = no change) rather than offsetting DioramaCameraPose's
- * distance field directly — cam_pose->distance is often the 0 "auto-fit"
- * sentinel (M5's dead-zone design, see Diorama_Composite's cam.distance
- * handling), and an additive world-unit offset on top of 0 would still
- * resolve to <=0 and re-trigger auto-fit, silently eating the punch. A
- * multiplier applied AFTER auto-fit/dead-zone resolution composes correctly
- * either way, which is also why this is its own parameter rather than a
- * 4th DioramaCameraPose field — that struct is reused verbatim for
- * FrameSlot's settings snapshots (main.c), which have no kick state at all.
- *
- * center_camera_vertically enables Dynamic Cam's projected focal-plane
- * framing after the final pose and distance are resolved. Free Cam leaves it
- * false to retain its authored framing and capture-margin pin.
- *
- * `viewport` is the aspect-fit game rectangle in physical output pixels. The
- * compositor renders in viewport-local coordinates and restores the full
- * renderer viewport before returning.
- *
- * bg2_valid_spans (Fix B/BH6): exact capture-row and texture-column regions of
- * BG2's rendered content. The skybox uses every row span for screen-space
- * crop/stretch; an attached BG2 continuation additionally uses their drawable
- * row bound as its sampling handoff. They are deliberately NOT used to narrow
- * ordinary layer UVs: those quads are world-registered against BG1, and doing
- * so would desync them. */
-/* authentic_y0: texture row where authentic screen y=0 begins inside the
- * vertically expanded capture.
- *
- * obj_apron: columns of RESOLVE apron the bound surfaces carry per side. The
- * displayed span is [obj_apron, obj_apron+snes_width) -- snes_width stays the
- * DISPLAY width, so the mesh, aspect_x and the camera fit are unaffected by
- * the apron and apron 0 reproduces the pre-apron geometry exactly. Only the UV
- * window and the supersample source rect move.
- *
- * effect_obj_priority_mask/effect_bg_plane_mask: authentic hardware planes
- * required by current captured effects. An effect is current projection
- * content even if its isolated band has no final winning pixels.
- *
- * bg2_content_revision changes whenever the raw captured BG2 texture changes.
- * bg2_content_dynamic is true when frame generation has replaced it with a
- * presentation-local result. Together they let the skybox prefilter reuse an
- * immutable image without retaining stale captured/interpolated pixels.
- *
- * The caller must enter without a custom GPU render state bound. This
- * compositor owns and unbinds every state it binds; the baseline shader
- * extension deliberately exposes no inherited native-state query. An outer
- * shader pass must bind after Diorama_Composite returns, around the resulting
- * scene.
- *
- * Complete and OptionalOmitted both mean the selected scene is usable;
- * CoreFailure means the caller must stop rather than present a partial view. */
 typedef struct DioramaSkyboxView {
   ArRenderTexture texture;
   uint64_t revision;
@@ -245,25 +194,56 @@ typedef struct DioramaSkyboxView {
   bool dynamic;
 } DioramaSkyboxView;
 
-PresentationOutcome Diorama_Composite(
-    ArRenderDevice *device, int snes_width, int snes_height,
-    int authentic_y0, int obj_apron,
-    int active_pixel_aspect, bool ignore_aspect_ratio,
-    int visible_width, ArRenderRectI viewport,
-    const ArRenderTexture textures[], const uint8_t *const pixels[],
-    const bool bg_transparent_fill_configured[2],
-    const uint32_t bg_transparent_fill_argb[2],
-    const DioramaCameraPose *cam_pose, float distance_scale,
-    bool center_camera_vertically,
-    uint32_t additive_plane_mask,
-    const DioramaCoverageMask coverage_masks[kDioramaPlane_Count],
-    uint64_t bg2_content_revision, bool bg2_content_dynamic,
-    uint8_t effect_obj_priority_mask, uint32_t effect_bg_plane_mask,
-    uint8_t map_group, uint8_t map_number, uint8_t layer_section,
-    const DioramaBgValidSpanPlan *bg2_valid_spans,
-    const DioramaSkyboxView *skybox_view,
-    DioramaPlaneEffectFn plane_effect, void *plane_effect_userdata,
-    DioramaProjection *out_projection);
+/* Borrowed for this draw. Width excludes the hidden apron; authentic_y0 is
+ * the first native row inside the vertically expanded capture. A non-NULL
+ * pixels entry certifies current content, not merely an allocated texture.
+ * Valid BG2 spans bound skybox sampling and waterfall attachment, never the
+ * ordinary world-registered layer UVs. */
+typedef struct DioramaCapture {
+  int width, height, authentic_y0, obj_apron;
+  const ArRenderTexture *textures;
+  const uint8_t *const *pixels;
+  const bool *bg_transparent_fill_configured;
+  const uint32_t *bg_transparent_fill_argb;
+  const DioramaCoverageMask *coverage_masks;
+  const DioramaBgValidSpanPlan *bg2_valid_spans;
+  const DioramaSkyboxView *skybox;
+  /* Revision identifies captured pixels; dynamic marks interpolated pixels
+   * that cannot reuse an immutable skybox prefilter result. */
+  uint64_t bg2_revision;
+  bool bg2_dynamic;
+} DioramaCapture;
+
+typedef struct DioramaView {
+  DioramaCameraPose camera;
+  /* Applied after auto-fit resolves camera.distance's zero sentinel. */
+  float distance_scale;
+  bool center_camera_vertically;
+  int pixel_aspect;
+  bool ignore_aspect_ratio;
+  int visible_width;
+  ArRenderRectI viewport;
+} DioramaView;
+
+typedef struct DioramaScene {
+  uint8_t map_group, map_number, layer_section;
+  uint32_t additive_plane_mask;
+  /* Current effects retain projection on an intentionally empty plane. */
+  uint8_t effect_obj_priority_mask;
+  uint32_t effect_bg_plane_mask;
+  DioramaPlaneEffectFn plane_effect;
+  void *plane_effect_userdata;
+} DioramaScene;
+
+/* Draws in viewport-local coordinates and restores full output on every exit.
+ * Enter without a custom GPU state bound; the compositor owns all effects it
+ * binds. Complete/OptionalOmitted produce a usable scene; CoreFailure means
+ * the caller must stop rather than publish a partial frame. */
+PresentationOutcome Diorama_Composite(ArRenderDevice *device,
+                                      const DioramaCapture *capture,
+                                      const DioramaView *view,
+                                      const DioramaScene *scene,
+                                      DioramaProjection *out_projection);
 
 /* Drops backend-owned targets/effects after a render-device reset so they are
  * lazily recreated against the current device. */

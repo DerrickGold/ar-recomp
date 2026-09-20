@@ -88,17 +88,17 @@ func TestAuthorPackManifestEditPreservesIdentityAndNotes(t *testing.T) {
 	if m.Sources()[0] != "text/sky.artext" {
 		t.Fatal("mutable source slice escaped")
 	}
-	fonts := PackFonts{"builtin:actraiser-sans", []string{"builtin:other", "fonts/École.ttf"}}
-	created, err := NewPackManifest(m.Metadata(), fonts, m.Sources())
+	fonts := PackFonts{Primary: "builtin:actraiser-sans", Fallback: []string{"builtin:other", "fonts/École.ttf"}}
+	created, err := NewPackManifestVersion(m.Metadata(), fonts, m.Sources(), 1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	created2, err := NewPackManifest(created.Metadata(), created.Fonts(), created.Sources())
+	created2, err := NewPackManifestVersion(created.Metadata(), created.Fonts(), created.Sources(), 1)
 	if err != nil || created2.Text() != created.Text() {
 		t.Fatal("nondeterministic manifest", err)
 	}
 	for _, bad := range []string{"../font.ttf", "x.ttf\nsource = evil.artext", "builtin:bad id", " font.ttf"} {
-		if _, err := NewPackManifest(m.Metadata(), PackFonts{Primary: bad}, m.Sources()); err == nil {
+		if _, err := NewPackManifestVersion(m.Metadata(), PackFonts{Primary: bad}, m.Sources(), 1); err == nil {
 			t.Fatalf("unsafe font emitted: %q", bad)
 		}
 	}
@@ -528,7 +528,7 @@ func FuzzAuthorManifest(f *testing.F) {
 		if err != nil || next.Text() != text {
 			t.Fatal("self edit not lossless", err)
 		}
-		canonical, err := NewPackManifest(m.Metadata(), m.Fonts(), m.Sources())
+		canonical, err := NewPackManifestVersion(m.Metadata(), m.Fonts(), m.Sources(), 1)
 		if err != nil {
 			t.Fatal("accepted manifest cannot be emitted", err)
 		}
@@ -536,4 +536,18 @@ func FuzzAuthorManifest(f *testing.F) {
 			t.Fatal("canonical metadata drift")
 		}
 	})
+}
+
+func TestNewPackManifestUsesCurrentTemplateFormat(t *testing.T) {
+	old, err := ParsePackManifest(authorPackManifest, "pack.ini")
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err := NewPackManifest(old.Metadata(), old.Fonts(), old.Sources())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current.Version() != 2 {
+		t.Fatalf("new author pack version = %d", current.Version())
+	}
 }

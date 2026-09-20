@@ -50,6 +50,12 @@ func (p *AuthorProject) WriteArchive(output io.Writer, kind string) error {
 	if kind == "publication" && !p.publicationReady {
 		return fmt.Errorf("prepare publication before exporting")
 	}
+	return p.writeArchive(output, kind)
+}
+
+// Also used to upgrade an already published archive for local installation.
+// That path preserves its kind without granting the project export permission.
+func (p *AuthorProject) writeArchive(output io.Writer, kind string) error {
 	files := p.projectFiles(kind == "backup")
 	header, _ := json.Marshal(archiveHeader{"actraiser-language-archive", 1, kind})
 	files["package.json"] = header

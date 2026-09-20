@@ -346,22 +346,22 @@ func AnalyzeAuthoredShadow(options ShadowAnalysisOptions) (ShadowReport, error) 
 	}
 	allRegions := collectShadowDataRegions(banks)
 	calleeExitMX := collectShadowExitMX(banks)
-	inferred, rawUnresolved, unresolved, issues, inferenceStats, decodeResults, err := inferShadowFacts(image, banks, allRegions, calleeExitMX, options.Jobs)
+	inference, err := inferShadowFacts(image, banks, allRegions, calleeExitMX, options.Jobs)
 	if err != nil {
 		return ShadowReport{}, err
 	}
-	comparisons, comparisonSummary := analysis.CompareDispatchFacts(authored, inferred)
+	comparisons, comparisonSummary := analysis.CompareDispatchFacts(authored, inference.facts)
 	tableSpans := collectShadowTableSpans(comparisons)
-	dispatchCodeIslands := collectShadowDispatchCodeIslands(image, comparisons, decodeResults, allRegions, tableSpans)
-	landingCandidates := collectShadowLandingCandidates(image, banks, decodeResults, allRegions, tableSpans, dispatchCodeIslands, calleeExitMX)
+	dispatchCodeIslands := collectShadowDispatchCodeIslands(image, comparisons, inference.decoded, allRegions, tableSpans)
+	landingCandidates := collectShadowLandingCandidates(image, banks, inference.decoded, allRegions, tableSpans, dispatchCodeIslands, calleeExitMX)
 	probableLandingCandidates, speculativeLandingCandidates, landingCandidateTableConflicts := countShadowLandingConfidence(landingCandidates)
 	entryRecovery, err := analyzeShadowEntryRecovery(image, banks, allRegions, calleeExitMX, options.Jobs)
 	if err != nil {
 		return ShadowReport{}, err
 	}
-	annotateShadowEntryPointerClusters(image, decodeResults, tableSpans, &entryRecovery)
-	entryAblation := analyzeShadowEntryAblation(image, banks, decodeResults)
-	tableFirstTargets, tableFirstRejections, tableFirstStats := collectShadowTableFirstTargets(image, banks, entryRecovery.Entries, landingCandidates, decodeResults, allRegions, tableSpans, calleeExitMX)
+	annotateShadowEntryPointerClusters(image, inference.decoded, tableSpans, &entryRecovery)
+	entryAblation := analyzeShadowEntryAblation(image, banks, inference.decoded)
+	tableFirstTargets, tableFirstRejections, tableFirstStats := collectShadowTableFirstTargets(image, banks, entryRecovery.Entries, landingCandidates, inference.decoded, allRegions, tableSpans, calleeExitMX)
 	probableTableFirstTargets, speculativeTableFirstTargets := countShadowTableFirstConfidence(tableFirstTargets)
 	confirmedTableSpans, candidateTableSpans := countShadowTableSpans(tableSpans)
 	hash := sha256.Sum256(image)
@@ -372,15 +372,15 @@ func AnalyzeAuthoredShadow(options ShadowAnalysisOptions) (ShadowReport, error) 
 		ROM:     ShadowROM{SHA256: hex.EncodeToString(hash[:]), Size: len(image), Mapper: romimage.Image(image).Mapper().String()},
 		Summary: ShadowSummary{
 			ComparisonSummary:              comparisonSummary,
-			InitialVariants:                inferenceStats.initialVariants,
-			FinalVariants:                  inferenceStats.finalVariants,
-			VariantPasses:                  inferenceStats.passes,
+			InitialVariants:                inference.stats.initialVariants,
+			FinalVariants:                  inference.stats.finalVariants,
+			VariantPasses:                  inference.stats.passes,
 			ConfirmedTableSpans:            confirmedTableSpans,
 			CandidateTableSpans:            candidateTableSpans,
-			RawUnresolvedEmissions:         rawUnresolved,
-			UniqueUnresolvedSites:          len(unresolved),
-			LikelyBlockingUnresolvedSites:  countLikelyBlockingUnresolved(unresolved),
-			DecodeIssues:                   len(issues),
+			RawUnresolvedEmissions:         inference.rawUnresolved,
+			UniqueUnresolvedSites:          len(inference.unresolved),
+			LikelyBlockingUnresolvedSites:  countLikelyBlockingUnresolved(inference.unresolved),
+			DecodeIssues:                   len(inference.issues),
 			DispatchCodeIslands:            len(dispatchCodeIslands),
 			LandingCandidates:              len(landingCandidates),
 			ProbableLandingCandidates:      probableLandingCandidates,
@@ -410,15 +410,15 @@ func AnalyzeAuthoredShadow(options ShadowAnalysisOptions) (ShadowReport, error) 
 		TableFirstRejections: tableFirstRejections,
 		EntryRecovery:        entryRecovery,
 		EntryAblation:        entryAblation,
-		Unresolved:           unresolved,
-		CommandStreams:       mergeShadowCommandStreams(decodeResults),
-		DeferredFields:       mergeShadowDeferredFields(decodeResults),
-		CommandStreamRoots:   resolveShadowCommandRoots(image, decodeResults),
-		DecodeIssues:         issues,
-		ReturnAudit:          collectShadowReturnAudit(decodeResults),
-		FrameLifetimes:       collectShadowFrameLifetimes(decodeResults),
-		ReturnProvenance:     collectShadowReturnProvenance(decodeResults),
-		ReturnCalls:          collectShadowReturnCalls(image, banks, decodeResults),
+		Unresolved:           inference.unresolved,
+		CommandStreams:       mergeShadowCommandStreams(inference.decoded),
+		DeferredFields:       mergeShadowDeferredFields(inference.decoded),
+		CommandStreamRoots:   resolveShadowCommandRoots(image, inference.decoded),
+		DecodeIssues:         inference.issues,
+		ReturnAudit:          collectShadowReturnAudit(inference.decoded),
+		FrameLifetimes:       collectShadowFrameLifetimes(inference.decoded),
+		ReturnProvenance:     collectShadowReturnProvenance(inference.decoded),
+		ReturnCalls:          collectShadowReturnCalls(image, banks, inference.decoded),
 		Limitations: []string{
 			"configured func entries, entry M/X states, and exit_mx_at routes seed the read-only call-target variant fixed point",
 			"an open table is a partial match until value/bounds provenance proves its complete target set",
@@ -443,8 +443,8 @@ func AnalyzeAuthoredShadow(options ShadowAnalysisOptions) (ShadowReport, error) 
 			"LoROM and HiROM decoding use cartridge-aware offsets; whole-bank speculative scans remain conservative and must not be treated as a complete code census",
 		},
 	}
-	report.ReturnAliases = collectShadowReturnAliases(image, banks, decodeResults, report.ReturnCalls)
-	report.DispatchSites = collectShadowDispatchInventory(image, banks, decodeResults, report)
+	report.ReturnAliases = collectShadowReturnAliases(image, banks, inference.decoded, report.ReturnCalls)
+	report.DispatchSites = collectShadowDispatchInventory(image, banks, inference.decoded, report)
 	report.DispatchSummary = summarizeShadowDispatchInventory(report.DispatchSites)
 	if strings.TrimSpace(options.DispatchAnalysisPath) != "" {
 		evidence, loadErr := LoadDispatchCensusFile(options.DispatchAnalysisPath)
@@ -464,7 +464,7 @@ func AnalyzeAuthoredShadow(options ShadowAnalysisOptions) (ShadowReport, error) 
 			return ShadowReport{}, applyErr
 		}
 	}
-	report.CommandWalks = walkShadowCommandStreamsWithCallbacks(image, report.CommandStreams, report.CommandStreamRoots, newShadowCallbackAnalyzer(image, banks, decodeResults, tableSpans))
+	report.CommandWalks = walkShadowCommandStreamsWithCallbacks(image, report.CommandStreams, report.CommandStreamRoots, newShadowCallbackAnalyzer(image, banks, inference.decoded, tableSpans))
 	return report, nil
 }
 
@@ -603,14 +603,28 @@ func authoredDispatchFacts(image romimage.Image, banks []shadowBank) ([]analysis
 	return facts, nil
 }
 
-func inferShadowFacts(image romimage.Image, banks []shadowBank, regions []decoder.DataRegion, calleeExitMX map[decoder.Variant]decoder.MX, jobs int) ([]analysis.DispatchFact, int, []ShadowUnresolvedSite, []ShadowDecodeIssue, shadowInferenceStats, []shadowDecodeResult, error) {
+// shadowInference keeps the facts and the evidence from the same decode run
+// together. Later report passes consume that evidence without decoding again.
+type shadowInference struct {
+	facts         []analysis.DispatchFact
+	rawUnresolved int
+	unresolved    []ShadowUnresolvedSite
+	issues        []ShadowDecodeIssue
+	stats         shadowInferenceStats
+	decoded       []shadowDecodeResult
+}
+
+func inferShadowFacts(image romimage.Image, banks []shadowBank, regions []decoder.DataRegion, calleeExitMX map[decoder.Variant]decoder.MX, jobs int) (shadowInference, error) {
 	results, stats, err := discoverShadowDecodeResults(image, banks, regions, calleeExitMX, jobs)
 	if err != nil {
-		return nil, 0, nil, nil, stats, nil, err
+		return shadowInference{stats: stats}, err
 	}
 	facts, rawUnresolved, unresolved, issues := summarizeShadowResults(image, results)
 	facts = inferShadowContinuationFacts(image, banks, regions, calleeExitMX, facts, collectShadowContinuationReaches(results))
-	return facts, rawUnresolved, unresolved, issues, stats, results, nil
+	return shadowInference{
+		facts: facts, rawUnresolved: rawUnresolved, unresolved: unresolved,
+		issues: issues, stats: stats, decoded: results,
+	}, nil
 }
 
 func discoverShadowDecodeResults(image romimage.Image, banks []shadowBank, regions []decoder.DataRegion, calleeExitMX map[decoder.Variant]decoder.MX, jobs int) ([]shadowDecodeResult, shadowInferenceStats, error) {

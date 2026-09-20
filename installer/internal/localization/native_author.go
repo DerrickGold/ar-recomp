@@ -15,13 +15,24 @@ import (
 // graphical extraction and the five-release coverage audit remain separate.
 // Regional sources must remain reference-only. No Python is invoked.
 func (d *Decoder) BuildNativeAuthorPack(metadata PackMetadata) (*AuthorPack, error) {
+	legacy, err := d.buildNativeAuthorPackV1(metadata)
+	if err != nil {
+		return nil, err
+	}
+	pack, _, err := upgradeAuthorPackV2(legacy)
+	return pack, err
+}
+
+// Extraction retains the historical word/control model; one builder-owned
+// conversion supplies explicit presentation for both new and imported sources.
+func (d *Decoder) buildNativeAuthorPackV1(metadata PackMetadata) (*AuthorPack, error) {
 	if d == nil {
 		return nil, fmt.Errorf("nil localization decoder")
 	}
 	if metadata.SourceProfile != d.profile.ID || metadata.Coverage != "complete" {
 		return nil, fmt.Errorf("native source metadata must use identified profile %s and complete coverage", d.profile.ID)
 	}
-	manifest, err := NewPackManifest(metadata, PackFonts{Primary: "builtin:actraiser-sans"}, []string{"text/source.artext"})
+	manifest, err := NewPackManifestVersion(metadata, PackFonts{Primary: "builtin:actraiser-sans"}, []string{"text/source.artext"}, 1)
 	if err != nil {
 		return nil, err
 	}
@@ -44,6 +55,8 @@ func (d *Decoder) BuildNativeAuthorPack(metadata PackMetadata) (*AuthorPack, err
 		return nil, fmt.Errorf("native routes are incomplete")
 	}
 	labels := append(nativeHUDLabels(d.profile.ID), nativeCreditsMessages(catalog.Credits)...)
+	labels = append(labels, nativeHUDValues()...)
+	labels = append(labels, nativeWorldLabel())
 	return nativeAuthorPack(manifest, catalog.SemanticRoutes.Routes, catalog.source.NativeDialogueLayout, labels...)
 }
 
@@ -377,4 +390,23 @@ func nativeHardBreaks(route *NativeSemanticRoute, layout IRObject) map[int]bool 
 		}
 	}
 	return hard
+}
+
+// hud_value is the final field emitted by the native BCD formatter. Keeping it
+// as data preserves zero/blank padding without reverse engineering that policy
+// in the renderer; the template owns its typography and surrounding wording.
+func nativeHUDValues() []AuthorMessage {
+	ids := []string{"action.hud.lives_value", "action.hud.time_value", "action.hud.score_value", "sim_sky.hud.population_value", "sim_sky.hud.sp_value"}
+	messages := make([]AuthorMessage, 0, len(ids))
+	for _, id := range ids {
+		messages = append(messages, AuthorMessage{ID: id, Operations: []AuthorOperation{{Op: "placeholder", Name: "hud_value"}, {Op: "end"}}})
+	}
+	return messages
+}
+
+// One wrapper supplies world-map typography; its data is the selected city's
+// localized name. Menus and the world map can keep independent numeral styles.
+func nativeWorldLabel() AuthorMessage {
+	return AuthorMessage{ID: "world_map.location_label", Operations: []AuthorOperation{
+		{Op: "placeholder", Name: "location_name"}, {Op: "end"}}}
 }

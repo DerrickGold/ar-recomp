@@ -76,4 +76,10 @@ ActRaiserLocalizationRoute_ResolveCompose(
 uint16_t ActRaiserLocalizationRoute_PageUnitCount(
     const ActRaiserLocalizationRoute *route, uint32_t native_page_index);
 
+/* Authoring playback uses the same native bounds as the live adapter. IDs
+ * with several call sites return their shared presentation geometry. */
+bool ActRaiserLocalizationRoute_TextBounds(const char *semantic_id,
+                                           ArTextCellRegion *region,
+                                           uint8_t *font_pixels);
+
 #endif /* ACTRAISER_LOCALIZATION_ROUTES_H */

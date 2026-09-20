@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/DerrickGold/ar-recomp/installer/internal/texttemplate"
 )
 
 const (
@@ -37,21 +39,31 @@ func authorError(path string, line int, format string, args ...any) error {
 
 // AuthorOperation is portable presentation data, never a ROM operation/address.
 type AuthorOperation struct {
-	Op            string `json:"op"`
-	Value         string `json:"value,omitempty"`
-	Name          string `json:"name,omitempty"`
-	ID            string `json:"id,omitempty"`
-	Arguments     string `json:"arguments,omitempty"`
-	Frames        int    `json:"frames,omitempty"`
-	MinimumDigits int    `json:"minimum_digits,omitempty"`
-	SourceLine    int    `json:"source_line"`
+	Op            string             `json:"op"`
+	Value         string             `json:"value,omitempty"`
+	Name          string             `json:"name,omitempty"`
+	ID            string             `json:"id,omitempty"`
+	Arguments     string             `json:"arguments,omitempty"`
+	Frames        int                `json:"frames,omitempty"`
+	MinimumDigits int                `json:"minimum_digits,omitempty"`
+	SourceLine    int                `json:"source_line"`
+	Style         texttemplate.Style `json:"style,omitzero"`
+}
+
+// AuthorTextAppearance keeps message defaults beside its wording. The semantic
+// presentation contract still decides which layout and values the game allows.
+type AuthorTextAppearance struct {
+	Layout   string             `json:"layout,omitempty"`
+	Numerals string             `json:"numerals,omitempty"`
+	Style    texttemplate.Style `json:"style"`
 }
 
 type AuthorMessage struct {
-	ID         string            `json:"id"`
-	Alias      string            `json:"alias,omitempty"`
-	SourceLine int               `json:"source_line"`
-	Operations []AuthorOperation `json:"operations"`
+	ID         string               `json:"id"`
+	Alias      string               `json:"alias,omitempty"`
+	SourceLine int                  `json:"source_line"`
+	Operations []AuthorOperation    `json:"operations"`
+	Appearance AuthorTextAppearance `json:"appearance,omitzero"`
 }
 
 type authorSpan struct{ bodyStart, end int }
@@ -66,6 +78,8 @@ type AuthorScript struct {
 	messages   []AuthorMessage
 	spans      []authorSpan
 	byID       map[string]int
+	version    int
+	treatments []AuthorTreatment
 }
 
 func (s *AuthorScript) Text() string { return s.text }
@@ -102,7 +116,7 @@ func (s *AuthorScript) ReplaceBody(id, body string) (*AuthorScript, error) {
 	if len(body) > MaxAuthorScriptBytes-(len(s.text)-(span.end-span.bodyStart)) {
 		return nil, authorError(s.path, 0, "script exceeds size limit")
 	}
-	next, err := ParseAuthorScript(s.text[:span.bodyStart]+body+s.text[span.end:], s.path)
+	next, err := ParseAuthorScriptVersion(s.text[:span.bodyStart]+body+s.text[span.end:], s.path, s.version)
 	if err != nil {
 		return nil, err
 	}
@@ -159,6 +173,9 @@ type authorParser struct {
 	current                 *AuthorMessage
 	ended, previousText     bool
 	textBytes, pages, waits int
+	defaults                map[string]bool
+	styledText              strings.Builder
+	styledSources           []styledSourceLine
 }
 
 func (p *authorParser) add(op AuthorOperation) error {
@@ -178,7 +195,7 @@ func (p *authorParser) text(value string, line int) error {
 	}
 	p.textBytes += len(value)
 	ops := p.current.Operations
-	if n := len(ops); n != 0 && ops[n-1].Op == "text" && ops[n-1].SourceLine == line {
+	if n := len(ops); n != 0 && ops[n-1].Op == "text" && ops[n-1].SourceLine == line && ops[n-1].Style == (texttemplate.Style{}) {
 		ops[n-1].Value += value
 		return nil
 	}
@@ -186,6 +203,9 @@ func (p *authorParser) text(value string, line int) error {
 }
 
 func (p *authorParser) inline(value string, line int) error {
+	if p.script.version == 2 {
+		return p.styledInline(value, line)
+	}
 	var literal strings.Builder
 	flush := func() error { err := p.text(literal.String(), line); literal.Reset(); return err }
 	for i := 0; i < len(value); {
@@ -291,6 +311,9 @@ func (p *authorParser) command(line string, number int) error {
 	if len(tokens) == 0 {
 		return nil
 	}
+	if p.script.version == 2 && isAppearanceCommand(tokens[0]) {
+		return p.appearance(tokens, number)
+	}
 	op := AuthorOperation{SourceLine: number}
 	switch tokens[0] {
 	case "@line", "@preferred-line", "@paragraph", "@page", "@empty", "@end":
@@ -310,7 +333,7 @@ func (p *authorParser) command(line string, number int) error {
 			return authorError(p.script.path, number, "%s requires one stable identifier", tokens[0])
 		}
 		if tokens[0] == "@alias" {
-			if len(p.current.Operations) != 0 {
+			if len(p.current.Operations) != 0 || len(p.defaults) != 0 {
 				return authorError(p.script.path, number, "@alias must be the only message content")
 			}
 			p.current.Alias, p.ended = tokens[1], true
@@ -345,6 +368,9 @@ func (p *authorParser) command(line string, number int) error {
 }
 
 func (p *authorParser) finish() error {
+	if err := p.flushStyledText(); err != nil {
+		return err
+	}
 	if p.current == nil {
 		return nil
 	}
@@ -376,6 +402,15 @@ func (p *authorParser) finish() error {
 }
 
 func ParseAuthorScript(text, path string) (*AuthorScript, error) {
+	return ParseAuthorScriptVersion(text, path, 1)
+}
+
+// ParseAuthorScriptVersion never guesses a format from markup. Legacy text
+// containing angle brackets stays literal until an explicit builder upgrade.
+func ParseAuthorScriptVersion(text, path string, version int) (*AuthorScript, error) {
+	if version != 1 && version != 2 {
+		return nil, authorError(path, 0, "unsupported template version %d", version)
+	}
 	if len(text) > MaxAuthorScriptBytes {
 		return nil, authorError(path, 0, "script exceeds size limit")
 	}
@@ -385,13 +420,16 @@ func ParseAuthorScript(text, path string) (*AuthorScript, error) {
 	if strings.IndexByte(text, 0) >= 0 {
 		return nil, authorError(path, 0, "script contains a NUL byte")
 	}
-	s := &AuthorScript{path: path, text: text, byID: make(map[string]int)}
+	s := &AuthorScript{path: path, text: text, byID: make(map[string]int), version: version}
 	p := authorParser{script: s}
 	err := authorLines(text, func(physical string, number, start, next int) error {
 		if number == 1 {
 			physical = strings.TrimPrefix(physical, "\ufeff")
 		}
 		stripped := strings.Trim(physical, " \t")
+		if strings.HasPrefix(stripped, "@define-style") && p.current == nil {
+			return p.defineTreatment(stripped, number)
+		}
 		if strings.HasPrefix(stripped, "::") {
 			if err := p.finish(); err != nil {
 				return err
@@ -414,6 +452,7 @@ func ParseAuthorScript(text, path string) (*AuthorScript, error) {
 			s.spans = append(s.spans, authorSpan{next, len(text)})
 			p.current = &s.messages[len(s.messages)-1]
 			p.ended, p.previousText, p.textBytes, p.pages, p.waits = false, false, 0, 1, 0
+			p.defaults = make(map[string]bool)
 			return nil
 		}
 		comment := strings.HasPrefix(stripped, "#") || strings.HasPrefix(stripped, ";")
@@ -424,6 +463,9 @@ func ParseAuthorScript(text, path string) (*AuthorScript, error) {
 			return authorError(path, number, "content appears outside a message body")
 		}
 		if stripped == "" {
+			if err := p.flushStyledText(); err != nil {
+				return err
+			}
 			p.previousText = false
 			if ops := p.current.Operations; len(ops) != 0 {
 				last := ops[len(ops)-1].Op
@@ -440,8 +482,14 @@ func ParseAuthorScript(text, path string) (*AuthorScript, error) {
 		if strings.HasPrefix(physical, "@@") || strings.HasPrefix(physical, "\\#") || strings.HasPrefix(physical, "\\;") {
 			physical = physical[1:]
 		} else if strings.HasPrefix(stripped, "@") {
+			if err := p.flushStyledText(); err != nil {
+				return err
+			}
 			p.previousText = false
 			return p.command(stripped, number)
+		}
+		if s.version == 2 {
+			return p.queueStyledText(physical, number)
 		}
 		if p.previousText {
 			if err := p.text(" ", number); err != nil {
@@ -460,7 +508,7 @@ func ParseAuthorScript(text, path string) (*AuthorScript, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(s.messages) == 0 {
+	if len(s.messages) == 0 && len(s.treatments) == 0 {
 		return nil, authorError(path, 0, "script contains no messages")
 	}
 	return s, nil

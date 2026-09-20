@@ -337,7 +337,7 @@ func TestNativeAuthorCompleteSourceRuntimeParity(t *testing.T) {
 			if profile == "us" {
 				metadata.Target = "us-runtime"
 			}
-			m, err = NewPackManifest(metadata, PackFonts{Primary: "builtin:actraiser-sans"}, []string{"text/source.artext"})
+			m, err = NewPackManifestVersion(metadata, PackFonts{Primary: "builtin:actraiser-sans"}, []string{"text/source.artext"}, 1)
 			if err != nil {
 				t.Fatal(err)
 			}

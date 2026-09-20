@@ -165,7 +165,7 @@ func TestInterfaceBootstrapAndBindings(t *testing.T) {
 	if strings.Index(w.Body.String(), `src="builder/i18n.js"`) > strings.Index(w.Body.String(), `src="localization/editor.js"`) {
 		t.Fatal("interface bootstrap must precede editor execution")
 	}
-	for _, name := range []string{"web/index.html", "web/app.js", "web/file-input.js", "web/scene.js", "web/i18n.js", "localization.js"} {
+	for _, name := range []string{"web/index.html", "web/app.js", "web/file-input.js", "web/scene.js", "web/i18n.js", "localization.js", "localization_playback.js", "localization_styling.js"} {
 		data, err := frontendFiles.ReadFile(name)
 		if name == "web/index.html" {
 			data = []byte(pageHTML)
@@ -174,12 +174,18 @@ func TestInterfaceBootstrapAndBindings(t *testing.T) {
 		if name == "localization.js" {
 			data, err = []byte(localizationJS), nil
 		}
+		if name == "localization_styling.js" {
+			data, err = []byte(localizationStylingJS), nil
+		}
+		if name == "localization_playback.js" {
+			data, err = []byte(localizationPlaybackJS), nil
+		}
 		if err != nil {
 			t.Fatal(err)
 		}
 		for _, match := range regexp.MustCompile(`"((?:builder|interface)\.[a-z0-9_.]+)"`).FindAllSubmatch(data, -1) {
 			switch string(match[1]) {
-			case "builder.phase.", "builder.assets.track.", "builder.assets.region.", "builder.navigation.":
+			case "builder.phase.", "builder.assets.track.", "builder.assets.region.", "builder.navigation.", "builder.playback.":
 				continue
 			} // Completed from the authoritative IDs above.
 			if len(bootstrap.Messages[string(match[1])]) != 4 {
@@ -233,9 +239,9 @@ func TestBrowserInterfaceBindings(t *testing.T) {
 	if err != nil {
 		t.Skip("optional JS checks need Node; never a builder dependency")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	if out, err := exec.CommandContext(ctx, node, "--test", "testdata/i18n.test.mjs", "testdata/localization_ui.test.mjs").CombinedOutput(); err != nil {
+	if out, err := exec.CommandContext(ctx, node, "--test", "testdata/i18n.test.mjs", "testdata/localization_ui.test.mjs", "testdata/localization_playback.test.mjs", "testdata/localization_styling.test.mjs").CombinedOutput(); err != nil {
 		t.Fatalf("interface JS: %v\n%s", err, out)
 	}
 }

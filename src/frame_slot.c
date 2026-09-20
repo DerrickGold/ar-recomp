@@ -53,7 +53,6 @@ static float g_diorama_vely_avg = 4.0f;
  * and is intentionally filtered only by the action-effect gameplay clock.
  * Reactive-camera statistics follow this emulator-frame delta, not capture
  * call count, so their EMA remains anchored to the fixed 60.0988Hz rate. */
-static int g_emulated_capture_ticks;
 static ActionEffectObserver s_action_effect_observer;
 static ActionEffectTickClock s_action_effect_tick_clock;
 
@@ -62,12 +61,13 @@ void FrameSlot_ResetActionEffects(void) {
   ActionEffectTickClock_Reset(&s_action_effect_tick_clock);
 }
 
-static float NormalizeReactiveVelocity(int16_t v, float *avg) {
+static float NormalizeReactiveVelocity(int16_t v, float *avg,
+                                       int elapsed_ticks) {
   static const float kFloor = 4.0f;
   static const float kEmaAlpha = 0.02f;      /* ~0.8s time constant, per-tick */
   static const float kNormMultiple = 3.0f;   /* "full lean" = 3x recent avg */
   float av = fabsf((float)v);
-  for (int t = 0; t < g_emulated_capture_ticks; t++)
+  for (int t = 0; t < elapsed_ticks; t++)
     *avg += (av - *avg) * kEmaAlpha;
   float ref = *avg * kNormMultiple;
   if (ref < kFloor) ref = kFloor;
@@ -295,7 +295,8 @@ Sim3DTuning BuildSim3DTuning(void) {
       .sprite_margin_bottom = sim_margin_bottom };
 }
 
-static void CaptureSimDynamicCamera(FrameSlot *dst, bool in_town) {
+static void CaptureSimDynamicCamera(FrameSlot *dst, bool in_town,
+                                    int elapsed_ticks) {
   Sim3DCameraPresentationState camera;
   Sim3DCamera_CapturePresentationState(&camera);
   dst->sim_camera_mode = camera.mode;
@@ -319,9 +320,10 @@ static void CaptureSimDynamicCamera(FrameSlot *dst, bool in_town) {
       kActRaiserWram_SimAngelRecord + kSimRecordVelocityX);
   int16_t vel_y = (int16_t)ActRaiser_ReadWram16(
       kActRaiserWram_SimAngelRecord + kSimRecordVelocityY);
-  dst->sim_dyncam_lean_yaw = NormalizeReactiveVelocity(vel_x, &g_sim_velx_avg);
+  dst->sim_dyncam_lean_yaw =
+      NormalizeReactiveVelocity(vel_x, &g_sim_velx_avg, elapsed_ticks);
   dst->sim_dyncam_lean_pitch =
-      NormalizeReactiveVelocity(vel_y, &g_sim_vely_avg);
+      NormalizeReactiveVelocity(vel_y, &g_sim_vely_avg, elapsed_ticks);
 
   /* Damage taken, on the frame it applies. Same reasoning as the action
    * stage's revision: an HP decrease is the instant damage lands, whereas an
@@ -336,58 +338,23 @@ static void CaptureSimDynamicCamera(FrameSlot *dst, bool in_town) {
   g_sim_prev_in_town = true;
 }
 
-/* DrawAndPresentFrame annotates the canonical SimFrameData once per frame and
- * publishes it around HostDisplay_SubmitFrame;
- * FrameSlot_Capture copies it instead of recomputing the identical
- * CaptureFrame+AnnotateFrame (same wram/settings/tuning inputs, same
- * thread, nothing mutates them in between). NULL for every other caller —
- * the AR_SHOT/F2 screenshot capture (DevTools_WriteFramebufferPpm) and the
- * paused/menu redraw submit — which fall back to computing their own. */
-static const SimFrameData *s_pending_annotated_sim;
-
-void FrameSlot_SetPendingAnnotatedSim(const SimFrameData *sim) {
-  s_pending_annotated_sim = sim;
+/* The first frame and a counter reset each contribute one tick. A host-paused
+ * redraw contributes zero; catch-up batches are bounded for presentation. */
+static int CaptureElapsedTicks(int current_tick) {
+  static int last_emulated_tick = -1;
+  int elapsed = 1;
+  if (last_emulated_tick >= 0) {
+    elapsed = current_tick - last_emulated_tick;
+    if (elapsed < 0)
+      elapsed = 1;
+    if (elapsed > kFrameTimingMaximumElapsedTicks)
+      elapsed = kFrameTimingMaximumElapsedTicks;
+  }
+  last_emulated_tick = current_tick;
+  return elapsed;
 }
 
-/* The sole FrameSlot writer.
- * Reads the coherent ABI PPU view, g_settings, g_snes_width/height,
- * g_scene_inspector_presentation, g_hd_replacements: legitimate here (this
- * runs on the game thread, immediately after RtlDrawPpuFrame() returns,
- * before the game thread touches any of this state again). present.c must
- * never do this; it only reads the FrameSlot this produces. */
-void FrameSlot_Capture(FrameSlot *dst) {
-  memset(dst, 0, sizeof(*dst));
-  /* The slot is already zeroed; stamping the header is all that is left. */
-  ArLocalizationFrame_InitCleared(&dst->localization);
-  FramePpuView ppu_view;
-  const bool have_ppu_view =
-      FramePpuView_Capture(&ppu_view, &dst->ppu_surfaces);
-
-  /* Emulated ticks since the previous capture—the advancement unit for the
-   * reactive-camera statistics below. Clamp stalls and discontinuities to the
-   * shared presentation-observer limit. Host-paused redraws produce zero;
-   * native in-game pause still produces emulated ticks. The first produced
-   * frame carries one tick because it has no prior presentation pair. */
-  { extern int snes_frame_counter;
-    static int last_emulated_tick = -1;
-    if (last_emulated_tick < 0) g_emulated_capture_ticks = 1;
-    else {
-      int elapsed = snes_frame_counter - last_emulated_tick;
-      if (elapsed < 0) elapsed = 1;           /* counter reset (reload) */
-      if (elapsed > kFrameTimingMaximumElapsedTicks)
-        elapsed = kFrameTimingMaximumElapsedTicks;
-      g_emulated_capture_ticks = elapsed;
-    }
-    last_emulated_tick = snes_frame_counter;
-  }
-  /* Publish the TRUE period of the image pair, not an assumed single tick:
-   * the main loop's drain
-   * runs up to kMaxCatchupFrames ticks in one iteration while the snapshot
-   * advances once per present. The delayed phase uses this to start exactly
-   * one tick behind curr. Same clamped value the reactive-camera statistics
-   * above use. */
-  dst->capture_ticks = (uint8_t)g_emulated_capture_ticks;
-
+static void CaptureActionEffects(FrameSlot *dst) {
   /* $00:8C98 publishes only completed gameplay/OAM passes and is skipped by
    * native pause/freeze. Capture through the shared adapter so production and
    * its regression consume the identical publisher/read/delta chain. */
@@ -418,6 +385,9 @@ void FrameSlot_Capture(FrameSlot *dst) {
       dst->diorama_layer_section);
   dst->action_effect_lighting = g_settings.action_effect_lighting;
   dst->action_effect_particles = g_settings.action_effect_particles;
+}
+
+static void ReportCapturedActionEffects(const FrameSlot *dst) {
   /* Capture-side twin of present.c's "[action-fx] first spell geometry
    * submitted". Together the two lines localise any future silence: neither
    * means no spell was ever identified in WRAM, capture-only means the
@@ -519,31 +489,58 @@ void FrameSlot_Capture(FrameSlot *dst) {
       }
     }
   }
+}
+
+/* Reuse the gameplay frame's annotation. Screenshots and paused redraws pass
+ * NULL and capture the current metadata without advancing the town canvas. */
+static void CaptureSimMetadata(SimFrameData *dst,
+                               const SimFrameData *annotated) {
+  if (annotated) {
+    *dst = *annotated;
+    return;
+  }
+  SimRenderMetadata_CaptureFrame(
+      dst, g_ram, g_settings.sim3d_mode, g_settings.sim3d_world_navigation,
+      Settings_Sim3DRequestedFeatures(), g_settings.sim3d_diagnostic_layers,
+      Sim3D_ImplementedFeatures());
+  SimRenderMetadata_CaptureSkyPalaceFrame(dst, g_ram,
+                                          g_settings.sim3d_world_navigation &&
+                                              g_settings.sim3d_sky_palace);
+  Sim3DTuning tuning = BuildSim3DTuning();
+  Sim3D_AnnotateFrame(dst, &tuning);
+  SimWorldNavigationCapture_Capture(dst, RtlGameRunner());
+  dst->town_canvas_serial = SimTownCanvas_Serial();
+  dst->background_voxel_serial = SimBackgroundVoxels_Serial();
+}
+
+/* The sole FrameSlot writer.
+ * Reads the coherent ABI PPU view, g_settings, g_snes_width/height,
+ * g_scene_inspector_presentation, g_hd_replacements: legitimate here (this
+ * runs on the game thread, immediately after RtlDrawPpuFrame() returns,
+ * before the game thread touches any of this state again). present.c must
+ * never do this; it only reads the FrameSlot this produces. */
+void FrameSlot_Capture(FrameSlot *dst, const SimFrameData *annotated_sim) {
+  memset(dst, 0, sizeof(*dst));
+  /* The slot is already zeroed; stamping the header is all that is left. */
+  ArLocalizationFrame_InitCleared(&dst->localization);
+  FramePpuView ppu_view;
+  const bool have_ppu_view =
+      FramePpuView_Capture(&ppu_view, &dst->ppu_surfaces);
+
+  extern int snes_frame_counter;
+  const int elapsed_ticks = CaptureElapsedTicks(snes_frame_counter);
+  /* A capture can follow multiple catch-up ticks. Presentation interpolation
+   * and camera smoothing both use this elapsed period; paused redraws use zero.
+   */
+  dst->capture_ticks = (uint8_t)elapsed_ticks;
+
+  CaptureActionEffects(dst);
+  ReportCapturedActionEffects(dst);
   dst->magic_cycle_armed = g_settings.cheat_magic_cycle;
   dst->magic_cycle_selected =
       g_settings.cheat_magic_cycle ? ActRaiser_SelectedMagic() : 0;
 
-  /* D2 publishes only the pitch-zero separated-composite capability, and
-   * only after its same-frame CPU oracle found zero differing pixels. */
-  if (s_pending_annotated_sim) {
-    dst->sim = *s_pending_annotated_sim;   /* already annotated this frame */
-  } else {
-    SimRenderMetadata_CaptureFrame(
-        &dst->sim, g_ram, g_settings.sim3d_mode,
-        g_settings.sim3d_world_navigation,
-        Settings_Sim3DRequestedFeatures(),
-        g_settings.sim3d_diagnostic_layers, Sim3D_ImplementedFeatures());
-    SimRenderMetadata_CaptureSkyPalaceFrame(&dst->sim, g_ram,
-        g_settings.sim3d_world_navigation && g_settings.sim3d_sky_palace);
-    Sim3DTuning tuning = BuildSim3DTuning();
-    Sim3D_AnnotateFrame(&dst->sim, &tuning);
-    SimWorldNavigationCapture_Capture(
-        &dst->sim, RtlGameRunner());
-    /* Accumulation itself happens once a frame at the always-run site below;
-     * this only publishes the current canvas state into the slot. */
-    dst->sim.town_canvas_serial = SimTownCanvas_Serial();
-    dst->sim.background_voxel_serial = SimBackgroundVoxels_Serial();
-  }
+  CaptureSimMetadata(&dst->sim, annotated_sim);
   Sim3D_CaptureOutputSurfaceViews(&dst->sim3d_output_surfaces);
 
   dst->snes_width = g_snes_width;
@@ -590,10 +587,8 @@ void FrameSlot_Capture(FrameSlot *dst) {
   dst->turbo_active = g_turbo != 0;
   dst->interp_setting_enabled = g_settings.gpu_interp_enabled;
   dst->diorama_hud_flat = g_settings.diorama_hud_flat;
-  /* B4-split (followup doc): both candidate camera poses and the transient
-   * orbit use the same small host-state snapshot as retained re-presentation.
-   * Keeping this conversion single-sourced prevents tick and between-tick
-   * frames from disagreeing about camera units or active mode. */
+  /* Tick and retained-frame presentation share the same camera units and mode.
+   */
   DioramaCameraPresentationState diorama_camera;
   Diorama_CaptureCameraPresentationState(&diorama_camera);
   dst->diorama_camera_mode = diorama_camera.mode;
@@ -602,31 +597,17 @@ void FrameSlot_Capture(FrameSlot *dst) {
   dst->diorama_manual_orbit_yaw = diorama_camera.orbit_yaw;
   dst->diorama_manual_orbit_pitch = diorama_camera.orbit_pitch;
   dst->diorama_reactive_strength = g_settings.diorama_reactive_strength;
-  /* B4-vellean (followup doc): same ReadWram16+cast pattern already used for
-   * PlayerVelocityX/Y elsewhere (actraiser_rtl.c ~346-349). */
   int16_t vel_x = (int16_t)ActRaiser_ReadWram16(kActRaiserWram_PlayerVelocityX);
   int16_t vel_y = (int16_t)ActRaiser_ReadWram16(kActRaiserWram_PlayerVelocityY);
   dst->diorama_dyncam_lean_yaw =
-      NormalizeReactiveVelocity(vel_x, &g_diorama_velx_avg);
+      NormalizeReactiveVelocity(vel_x, &g_diorama_velx_avg, elapsed_ticks);
   dst->diorama_dyncam_lean_pitch =
-      NormalizeReactiveVelocity(vel_y, &g_diorama_vely_avg);
+      NormalizeReactiveVelocity(vel_y, &g_diorama_vely_avg, elapsed_ticks);
 
-  /* B4-kick (followup doc): rising-edge event triggers. Hit was originally
-   * the invuln-bit test AR_NO_KNOCKBACK already relies on elsewhere in this
-   * file — REVISED (2026-07-21, live report + AR_FRAMELOG/AR_DYNCAM_LOG
-   * correlation): that flag consistently lagged the real hit by ~10 game
-   * frames (~167ms @ 60Hz) across 3 measured hits, apparently because the
-   * game doesn't set it until after the knockback/hit-stun begins, not at
-   * the instant damage applies. PlayerHp decreasing IS the instant damage
-   * applies, so that's the trigger now — fires exactly on the hit frame,
-   * no game-side lag to inherit. Landing has no documented WRAM flag, so
-   * it's inferred from velocity: falling with |vely| clearly above the
-   * recent-average scale, settling near zero in one tick — reuses
-   * g_diorama_vely_avg (just updated above) instead of a guessed magic
-   * threshold, same reasoning as B4-vellean's self-calibration. Boost is a
-   * 0-to-nonzero read of the raw byte, matching how
-   * PlayerInvulnerabilityTimer is read/pinned elsewhere (g_ram[...], not
-   * ReadWram16 — it's a single byte). */
+  /* HP decreases identify the damage frame; the native invulnerability flag
+   * arrives later. Landing is inferred from a fall settling near zero velocity,
+   * using the recent motion average. Boost is a rising edge of the native byte.
+   */
   uint8_t hp = g_ram[kActRaiserWram_PlayerHp];
   dst->diorama_dyncam_event_hit = hp < g_diorama_prev_hp;
   g_diorama_prev_hp = hp;
@@ -642,8 +623,10 @@ void FrameSlot_Capture(FrameSlot *dst) {
   g_diorama_prev_boost = boost;
 
   CaptureSimDynamicCamera(
-      dst, ActRaiser_IsSimulationTown(g_ram[kActRaiserWram_MapGroup],
-                                      g_ram[kActRaiserWram_CurrentMap]));
+      dst,
+      ActRaiser_IsSimulationTown(g_ram[kActRaiserWram_MapGroup],
+                                 g_ram[kActRaiserWram_CurrentMap]),
+      elapsed_ticks);
   /* Stable game-authored camera coordinates used by action effect projection.
    * Read before HDMA mutates the PPU scroll registers. */
   dst->bg1_camera_x = (int16_t)ActRaiser_ReadWram16(kActRaiserWram_Bg1CameraX);

@@ -42,6 +42,10 @@ func TestImportPreviewTargetsIncomingIDAndDoesNotMutate(t *testing.T) {
 		return data
 	}
 	first := preview()
+	upgrade, ok := first["upgrade"].(map[string]any)
+	if !ok || upgrade["fromVersion"] != float64(1) || upgrade["toVersion"] != float64(2) {
+		t.Fatal("import preview omitted automatic upgrade notice", first)
+	}
 	if first["existingProject"] != nil || app.localization.current != current {
 		t.Fatal("selecting directory changed current project")
 	}
@@ -69,15 +73,25 @@ func TestImportPreviewTargetsIncomingIDAndDoesNotMutate(t *testing.T) {
 	}
 	locJSON(t, app, "accept-import", localizationRequest{ImportToken: second["token"].(string)}, 409)
 	q := locIdentity(app)
+	originalRevision := app.localization.current.ProjectRevision()
 	// Local installation has no redistribution or WIP prerequisites.
-	locJSON(t, app, "installation-check", q, 200)
-	locJSON(t, app, "install", q, 200)
+	check := locJSON(t, app, "installation-check", q, 200)
+	if !strings.Contains(check.Body.String(), `"upgrade":{"fromVersion":1,"toVersion":2`) {
+		t.Fatal("installation review omitted upgrade", check.Body.String())
+	}
+	result := locJSON(t, app, "install", q, 200)
+	if !strings.Contains(result.Body.String(), `"upgrade":{"fromVersion":1,"toVersion":2`) {
+		t.Fatal("installation did not report upgrade", result.Body.String())
+	}
 	locJSON(t, app, "install", q, 409)
 	q.Replace = true
 	locJSON(t, app, "install", q, 200)
 	locJSON(t, app, "publish", q, 400)
-	if _, err := lk.OpenAuthorPack(filepath.Join(app.localizationRoot(), "packs", m.ID)); err != nil {
-		t.Fatal(err)
+	if installed, err := lk.OpenAuthorPack(filepath.Join(app.localizationRoot(), "packs", m.ID)); err != nil || installed.Manifest().Version() != 2 || installed.Manifest().Metadata().ID != m.ID {
+		t.Fatal("installed pack is not v2 with the original identity", err)
+	}
+	if saved, err := app.localization.store.Open(m.ID); err != nil || saved.Pack().Manifest().Version() != 1 || saved.ProjectRevision() != originalRevision {
+		t.Fatal("installation modified saved author project", err)
 	}
 }
 

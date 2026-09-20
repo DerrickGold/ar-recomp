@@ -421,7 +421,7 @@ func (app *application) ServeHTTP(response http.ResponseWriter, request *http.Re
 		// `object-src`, which stays 'none'.
 		response.Header().Set("Content-Security-Policy",
 			"default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; "+
-				"connect-src 'self'; img-src 'self'; media-src 'self' blob:; frame-src 'self'; "+
+				"connect-src 'self'; img-src 'self' data:; media-src 'self' blob:; frame-src 'self'; "+
 				"object-src 'none'; base-uri 'none'")
 		response.Header().Set("Cache-Control", "no-store")
 		response.Header().Set("Referrer-Policy", "no-referrer")

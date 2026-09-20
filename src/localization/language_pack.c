@@ -36,6 +36,7 @@ typedef enum ManifestSection {
   kManifestSection_None = 0,
   kManifestSection_Pack,
   kManifestSection_Fonts,
+  kManifestSection_FontRole,
   kManifestSection_Scripts,
 } ManifestSection;
 
@@ -60,6 +61,11 @@ typedef struct ManifestSeen {
   bool primary_font;
 } ManifestSeen;
 
+typedef struct StyledSourceLine {
+  size_t offset;
+  uint32_t line;
+} StyledSourceLine;
+
 typedef struct ScriptState {
   ArLanguagePack *pack;
   const char *path;
@@ -70,6 +76,13 @@ typedef struct ScriptState {
   uint32_t message_text_bytes;
   uint32_t message_pages;
   uint32_t message_wait_frames;
+  uint32_t text_style;
+  uint32_t appearance_keys;
+  ArLanguageString source_path;
+  char *styled_text;
+  size_t styled_bytes, styled_capacity;
+  StyledSourceLine *styled_sources;
+  size_t styled_source_count, styled_source_capacity;
 } ScriptState;
 
 static void SetError(ArLanguagePackError *error, const char *format, ...) {
@@ -348,6 +361,62 @@ static bool AddManifestPath(char paths[][kArLanguageFontPathCapacity],
   return true;
 }
 
+static bool FontReferenceValid(const char *reference) {
+  return strncmp(reference, "builtin:", 8) == 0
+             ? IsIdentifier(reference + 8)
+             : IsPortableRelativePath(reference);
+}
+
+static bool AddFontRole(ArLanguagePackMetadata *metadata, const char *name,
+                        const char *path, uint32_t line,
+                        ArLanguagePackError *error) {
+  if (!IsIdentifier(name) || strlen(name) >= kArTextTemplateRoleCapacity ||
+      strcmp(name, "body") == 0 ||
+      metadata->font_role_count >= kArLanguageMaximumFontRoles) {
+    SetError(error, "%s:%u: invalid or excessive font role '%s'", path, line,
+             name);
+    return false;
+  }
+  for (uint32_t i = 0; i < metadata->font_role_count; ++i) {
+    if (strcmp(metadata->font_roles[i].name, name) == 0) {
+      SetError(error, "%s:%u: duplicate font role '%s'", path, line, name);
+      return false;
+    }
+  }
+  ArLanguageFontRole *role = &metadata->font_roles[metadata->font_role_count++];
+  strcpy(role->name, name);
+  return true;
+}
+
+static bool HasFontRole(const ArLanguagePackMetadata *metadata,
+                        const char *name) {
+  if (!name[0] || strcmp(name, "body") == 0)
+    return true;
+  for (uint32_t i = 0; i < metadata->font_role_count; ++i)
+    if (strcmp(metadata->font_roles[i].name, name) == 0)
+      return true;
+  return false;
+}
+
+static bool ParseFontRoleKey(ArLanguageFontRole *role, const char *key,
+                             const char *value, const char *path, uint32_t line,
+                             ArLanguagePackError *error) {
+  if (strcmp(key, "primary") == 0) {
+    if (role->primary_font[0] || !FontReferenceValid(value)) {
+      SetError(error, "%s:%u: invalid or duplicate font primary", path, line);
+      return false;
+    }
+    return CopyField(role->primary_font, sizeof(role->primary_font), value,
+                     "primary font", path, line, error);
+  }
+  if (strcmp(key, "fallback") == 0)
+    return AddManifestPath(role->fallback_fonts, &role->fallback_font_count,
+                           kArLanguageMaximumFallbackFonts, value,
+                           "fallback font", path, line, error);
+  SetError(error, "%s:%u: unknown font role key '%s'", path, line, key);
+  return false;
+}
+
 static bool ParseManifest(char *text, const char *path,
                           ArLanguagePackMetadata *metadata,
                           ManifestSources *sources,
@@ -388,17 +457,22 @@ static bool ParseManifest(char *text, const char *path,
       } else if (strcmp(name, "scripts") == 0) {
         section = kManifestSection_Scripts;
         section_seen = &seen.scripts_section;
+      } else if (strncmp(name, "font.", 5) == 0) {
+        if (!AddFontRole(metadata, name + 5, path, line_number, error))
+          return false;
+        section = kManifestSection_FontRole;
       } else {
         SetError(error, "%s:%u: unknown manifest section [%s]", path,
                  line_number, name);
         return false;
       }
-      if (*section_seen) {
+      if (section_seen && *section_seen) {
         SetError(error, "%s:%u: duplicate manifest section [%s]", path,
                  line_number, name);
         return false;
       }
-      *section_seen = true;
+      if (section_seen)
+        *section_seen = true;
       physical = next;
       continue;
     }
@@ -442,11 +516,12 @@ static bool ParseManifest(char *text, const char *path,
         }
       } else if (strcmp(key, "version") == 0) {
         UNIQUE_KEY(version);
-        if (strcmp(value, "1") != 0) {
+        if (strcmp(value, "1") != 0 && strcmp(value, "2") != 0) {
           SetError(error, "%s:%u: unsupported language-pack version", path,
                    line_number);
           return false;
         }
+        metadata->format_version = (uint32_t)(value[0] - '0');
       } else if (strcmp(key, "id") == 0) {
         UNIQUE_KEY(package_id);
         if (!IsIdentifier(value)) {
@@ -534,6 +609,11 @@ static bool ParseManifest(char *text, const char *path,
                  line_number, key);
         return false;
       }
+    } else if (section == kManifestSection_FontRole) {
+      if (!ParseFontRoleKey(
+              &metadata->font_roles[metadata->font_role_count - 1], key, value,
+              path, line_number, error))
+        return false;
     } else if (section == kManifestSection_Fonts) {
       if (strcmp(key, "primary") == 0) {
         UNIQUE_KEY(primary_font);
@@ -585,6 +665,17 @@ static bool ParseManifest(char *text, const char *path,
   if (!seen.primary_font) {
     SetError(error, "%s: missing [fonts] primary", path);
     return false;
+  }
+  if (metadata->format_version < 2 && metadata->font_role_count) {
+    SetError(error, "%s: font roles require version 2", path);
+    return false;
+  }
+  for (uint32_t i = 0; i < metadata->font_role_count; ++i) {
+    if (!metadata->font_roles[i].primary_font[0]) {
+      SetError(error, "%s: font role '%s' requires a primary font", path,
+               metadata->font_roles[i].name);
+      return false;
+    }
   }
   if (sources->count == 0) {
     SetError(error, "%s: missing [scripts] source", path);
@@ -774,8 +865,8 @@ static bool AddText(ScriptState *state, const char *value, size_t length,
     ArLanguageOperation *last =
         &state->pack->operations[message->first_operation +
                                  message->operation_count - 1];
-    if (last->kind == kArLanguageOperation_Text &&
-        last->source_line == line &&
+    if (last->kind == kArLanguageOperation_Text && last->source_line == line &&
+        last->text_style == state->text_style &&
         (size_t)last->value.text.offset + last->value.text.length + 1 ==
             state->pack->strings_size) {
       if (!Reserve((void **)&state->pack->strings, 1,
@@ -794,6 +885,7 @@ static bool AddText(ScriptState *state, const char *value, size_t length,
   ArLanguageOperation operation = {0};
   operation.kind = kArLanguageOperation_Text;
   operation.source_line = line;
+  operation.text_style = state->text_style;
   if (!AddStringN(state->pack, value, length, &operation.value.text, error))
     return false;
   state->message_text_bytes += (uint32_t)length;
@@ -808,8 +900,8 @@ static bool AddSimpleOperation(ScriptState *state, ArLanguageOperationKind kind,
   return AddOperation(state, operation, error);
 }
 
-static bool AppendInline(ScriptState *state, const char *value, uint32_t line,
-                         ArLanguagePackError *error) {
+static bool AppendLegacyInline(ScriptState *state, const char *value,
+                               uint32_t line, ArLanguagePackError *error) {
   const char *literal = value;
   const char *cursor = value;
   while (*cursor) {
@@ -884,6 +976,188 @@ static bool AppendInline(ScriptState *state, const char *value, uint32_t line,
   return AddText(state, literal, (size_t)(cursor - literal), line, error);
 }
 
+const ArTextTemplateStyle *
+ArLanguagePack_GetTextStyle(const ArLanguagePack *pack, uint32_t index) {
+  return pack && index && index <= pack->text_style_count
+             ? &pack->text_styles[index - 1]
+             : NULL;
+}
+
+static bool InternTextStyle(ArLanguagePack *pack,
+                            const ArTextTemplateStyle *style, uint32_t *index,
+                            ArLanguagePackError *error) {
+  if (!HasFontRole(&pack->metadata, style->font)) {
+    SetError(error, "undeclared font role '%s'", style->font);
+    return false;
+  }
+  static const ArTextTemplateStyle inherited = {0};
+  if (ArTextTemplate_StyleEqual(style, &inherited)) {
+    *index = 0;
+    return true;
+  }
+  for (uint32_t i = 0; i < pack->text_style_count; ++i) {
+    if (ArTextTemplate_StyleEqual(style, &pack->text_styles[i])) {
+      *index = i + 1;
+      return true;
+    }
+  }
+  if (pack->text_style_count == 4096) {
+    SetError(error, "pack has too many distinct text styles");
+    return false;
+  }
+  if (!Reserve((void **)&pack->text_styles, sizeof(*pack->text_styles),
+               pack->text_style_count + 1, &pack->text_style_capacity, error))
+    return false;
+  pack->text_styles[pack->text_style_count++] = *style;
+  *index = pack->text_style_count;
+  return true;
+}
+
+typedef struct InlineDestination {
+  ScriptState *state;
+  uint32_t line;
+  ArLanguagePackError *error;
+} InlineDestination;
+
+static uint32_t StyledLineAt(const ScriptState *state, size_t offset,
+                             uint32_t fallback) {
+  size_t low = 0, high = state->styled_source_count;
+  while (low < high) {
+    const size_t middle = low + (high - low) / 2;
+    if (state->styled_sources[middle].offset <= offset)
+      low = middle + 1;
+    else
+      high = middle;
+  }
+  return low ? state->styled_sources[low - 1].line : fallback;
+}
+
+static bool AppendStyledRun(void *context, const ArTextTemplateRun *run) {
+  InlineDestination *destination = context;
+  ScriptState *state = destination->state;
+  const uint32_t line =
+      StyledLineAt(state, run->source_offset, destination->line);
+  ArLanguagePackError detail = {0};
+  if (!InternTextStyle(state->pack, &run->style, &state->text_style, &detail)) {
+    SetError(destination->error, "%s:%u: %s", state->path, line,
+             detail.message);
+    return false;
+  }
+  if (!run->is_value)
+    return AddText(state, run->text, run->bytes, line, destination->error);
+  ArLanguageOperation operation = {
+      .kind = kArLanguageOperation_Placeholder,
+      .source_line = line,
+      .minimum_digits = run->minimum_digits,
+      .text_style = state->text_style,
+  };
+  return AddStringN(state->pack, run->text, run->bytes,
+                    &operation.value.placeholder, destination->error) &&
+         AddOperation(state, operation, destination->error);
+}
+
+static bool AppendInline(ScriptState *state, const char *value, uint32_t line,
+                         ArLanguagePackError *error) {
+  if (state->pack->metadata.format_version < 2)
+    return AppendLegacyInline(state, value, line, error);
+  InlineDestination destination = {state, line, error};
+  ArTextTemplateError detail;
+  const bool valid = ArTextTemplate_ParseInline(
+      value, strlen(value), AppendStyledRun, &destination, &detail);
+  state->text_style = 0;
+  if (!valid && (!error || !error->message[0]))
+    SetError(error, "%s:%u: byte %zu: %s", state->path,
+             StyledLineAt(state, detail.offset, line), detail.offset + 1,
+             detail.message);
+  return valid;
+}
+
+static bool QueueStyledText(ScriptState *state, const char *text, uint32_t line,
+                            ArLanguagePackError *error) {
+  const size_t bytes = strlen(text),
+               separator = state->styled_source_count ? 1 : 0;
+  if (bytes + separator > kArTextTemplateMaximumBytes - state->styled_bytes) {
+    SetError(error, "%s:%u: inline text exceeds size limit", state->path, line);
+    return false;
+  }
+  if (!Reserve((void **)&state->styled_text, 1,
+               state->styled_bytes + separator + bytes + 1,
+               &state->styled_capacity, error) ||
+      !Reserve((void **)&state->styled_sources, sizeof(*state->styled_sources),
+               state->styled_source_count + 1, &state->styled_source_capacity,
+               error))
+    return false;
+  state->styled_sources[state->styled_source_count++] =
+      (StyledSourceLine){state->styled_bytes, line};
+  if (separator)
+    state->styled_text[state->styled_bytes++] = ' ';
+  memcpy(state->styled_text + state->styled_bytes, text, bytes + 1);
+  state->styled_bytes += bytes;
+  return true;
+}
+
+static bool FlushStyledText(ScriptState *state, ArLanguagePackError *error) {
+  if (!state->styled_source_count)
+    return true;
+  const bool valid = AppendInline(state, state->styled_text,
+                                  state->styled_sources[0].line, error);
+  state->styled_bytes = state->styled_source_count = 0;
+  return valid;
+}
+
+static unsigned AppearanceKey(const char *command) {
+  static const char *const names[] = {
+      "@layout", "@numerals", "@font", "@style", "@color", "@scale", "@italic"};
+  for (unsigned i = 0; i < sizeof(names) / sizeof(*names); ++i)
+    if (!strcmp(command, names[i]))
+      return 1u << i;
+  return 0;
+}
+
+static bool ParseAppearance(ScriptState *state, char **tokens, uint32_t count,
+                            uint32_t line, ArLanguagePackError *error) {
+  ArLanguageMessage *message = &state->pack->messages[state->message_index];
+  const unsigned key = AppearanceKey(tokens[0]);
+  if (count != 2 || message->operation_count ||
+      (state->appearance_keys & key)) {
+    SetError(error,
+             "%s:%u: presentation defaults require one value, appear once, and "
+             "precede content",
+             state->path, line);
+    return false;
+  }
+  state->appearance_keys |= key;
+  if (!strcmp(tokens[0], "@layout")) {
+    if (strlen(tokens[1]) >= kArTextTemplateRoleCapacity ||
+        !IsIdentifier(tokens[1])) {
+      SetError(error, "%s:%u: layout requires a stable identifier", state->path,
+               line);
+      return false;
+    }
+    return AddString(state->pack, tokens[1], &message->layout, error);
+  }
+  if (!strcmp(tokens[0], "@numerals")) {
+    if (strcmp(tokens[1], "upright") && strcmp(tokens[1], "slanted-ascii")) {
+      SetError(error, "%s:%u: numerals must be upright or slanted-ascii",
+               state->path, line);
+      return false;
+    }
+    message->numerals = !strcmp(tokens[1], "upright") ? 1 : 2;
+    return true;
+  }
+  ArTextTemplateStyle style = {0};
+  const ArTextTemplateStyle *prior =
+      ArLanguagePack_GetTextStyle(state->pack, message->default_style);
+  if (prior)
+    style = *prior;
+  ArTextTemplateError detail;
+  if (!ArTextTemplate_SetProperty(&style, tokens[0] + 1, tokens[1], &detail)) {
+    SetError(error, "%s:%u: %s", state->path, line, detail.message);
+    return false;
+  }
+  return InternTextStyle(state->pack, &style, &message->default_style, error);
+}
+
 static bool TokenizeCommand(char *line, char **tokens, uint32_t *token_count,
                             uint32_t maximum, const char *path,
                             uint32_t line_number, ArLanguagePackError *error) {
@@ -950,6 +1224,8 @@ static bool ParseCommand(ScriptState *state, char *line, uint32_t line_number,
   if (!count)
     return true;
   const char *command = tokens[0];
+  if (state->pack->metadata.format_version >= 2 && AppearanceKey(command))
+    return ParseAppearance(state, tokens, count, line_number, error);
   if (strcmp(command, "@line") == 0 ||
       strcmp(command, "@preferred-line") == 0 ||
       strcmp(command, "@paragraph") == 0 ||
@@ -1065,7 +1341,8 @@ static bool ParseCommand(ScriptState *state, char *line, uint32_t line_number,
                state->path, line_number);
       return false;
     }
-    if (message->operation_count || message->is_alias) {
+    if (message->operation_count || message->is_alias ||
+        state->appearance_keys) {
       SetError(error, "%s:%u: @alias must be the only message content",
                state->path, line_number);
       return false;
@@ -1180,12 +1457,115 @@ static bool BeginMessage(ScriptState *state, const char *semantic_id,
   state->message_text_bytes = 0;
   state->message_pages = 1;
   state->message_wait_frames = 0;
+  state->appearance_keys = 0;
+  message->source_path = state->source_path;
   return true;
 }
 
-static bool ParseScript(ArLanguagePack *pack, char *text, const char *path,
-                        ArLanguagePackError *error) {
-  ScriptState state = {.pack = pack, .path = path};
+const ArLanguageNamedTreatment *
+ArLanguagePack_FindTreatment(const ArLanguagePack *pack, const char *name) {
+  if (!pack || !name || !name[0])
+    return NULL;
+  for (uint32_t i = 0; i < pack->treatment_count; ++i)
+    if (!strcmp(pack->treatments[i].definition.name, name))
+      return &pack->treatments[i];
+  return NULL;
+}
+
+static bool ParseTreatment(ScriptState *state, char *line, uint32_t number,
+                           ArLanguagePackError *error) {
+  char *tokens[8];
+  uint32_t count;
+  if (!TokenizeCommand(line, tokens, &count, 8, state->path, number, error))
+    return false;
+  if (state->pack->metadata.format_version != 2 || count < 4 ||
+      strcmp(tokens[0], "@define-style") || !IsIdentifier(tokens[1]) ||
+      strlen(tokens[1]) >= kArTextTemplateRoleCapacity) {
+    SetError(error,
+             "%s:%u: v2 style definition requires a name, band and body inks",
+             state->path, number);
+    return false;
+  }
+  if (state->pack->treatment_count == 64 ||
+      ArLanguagePack_FindTreatment(state->pack, tokens[1])) {
+    SetError(error, "%s:%u: duplicate or excessive style definition '%s'",
+             state->path, number, tokens[1]);
+    return false;
+  }
+  ArLanguageNamedTreatment treatment = {.source_path = state->source_path,
+                                        .source_line = number};
+  strcpy(treatment.definition.name, tokens[1]);
+  unsigned seen = 0;
+  for (uint32_t i = 2; i < count; ++i) {
+    char *equals = strchr(tokens[i], '=');
+    if (!equals) {
+      SetError(error, "%s:%u: expected style property=value", state->path,
+               number);
+      return false;
+    }
+    *equals++ = 0;
+    const char *name = tokens[i];
+    unsigned key = !strcmp(name, "band")     ? 1
+                   : !strcmp(name, "body")   ? 2
+                   : !strcmp(name, "shadow") ? 4
+                   : !strcmp(name, "shape")  ? 8
+                                             : 0;
+    if (seen & key) {
+      SetError(error, "%s:%u: duplicate style property '%s'", state->path,
+               number, name);
+      return false;
+    }
+    ArTextTemplateError detail;
+    if (!ArTextTreatment_SetProperty(&treatment.definition, name, equals,
+                                     &detail)) {
+      SetError(error, "%s:%u: %s", state->path, number, detail.message);
+      return false;
+    }
+    seen |= key;
+  }
+  if ((seen & 3) != 3) {
+    SetError(error, "%s:%u: style definition requires band and body inks",
+             state->path, number);
+    return false;
+  }
+  ArLanguagePack *pack = state->pack;
+  if (!Reserve((void **)&pack->treatments, sizeof(*pack->treatments),
+               pack->treatment_count + 1, &pack->treatment_capacity, error))
+    return false;
+  pack->treatments[pack->treatment_count++] = treatment;
+  return true;
+}
+
+static bool ValidateTreatmentReferences(const ArLanguagePack *pack,
+                                        ArLanguagePackError *error) {
+  for (uint32_t i = 0; i < pack->message_count; ++i) {
+    const ArLanguageMessage *message = &pack->messages[i];
+    for (uint32_t j = 0; j <= message->operation_count; ++j) {
+      const ArLanguageOperation *op =
+          j < message->operation_count
+              ? &pack->operations[message->first_operation + j]
+              : NULL;
+      const ArTextTemplateStyle *style = ArLanguagePack_GetTextStyle(
+          pack, op ? op->text_style : message->default_style);
+      if (style && style->treatment[0] &&
+          !ArLanguagePack_FindTreatment(pack, style->treatment)) {
+        SetError(error, "%s:%u: undefined style '%s'",
+                 StringAt(pack, message->source_path),
+                 op ? op->source_line : message->source_line, style->treatment);
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+static bool ParseScriptBody(ScriptState *state, char *text,
+                            ArLanguagePackError *error) {
+  ArLanguagePack *pack = state->pack;
+  const char *path = state->path;
+  const uint32_t prior_treatments = pack->treatment_count;
+  if (!AddString(pack, path, &state->source_path, error))
+    return false;
   uint32_t line_number = 0;
   for (char *physical = text; physical;) {
     char *next = strpbrk(physical, "\r\n");
@@ -1204,15 +1584,22 @@ static bool ParseScript(ArLanguagePack *pack, char *text, const char *path,
       trim_end--;
     const char saved_trim_character = *trim_end;
     *trim_end = 0;
-    if (strncmp(stripped, "::", 2) == 0) {
-      char *semantic_id = TextParse_TrimLeft(stripped + 2);
-      TextParse_TrimRight(semantic_id);
-      if (!BeginMessage(&state, semantic_id, line_number, error))
+    if (!state->has_message && !strncmp(stripped, "@define-style", 13)) {
+      if (!ParseTreatment(state, stripped, line_number, error))
         return false;
       physical = next;
       continue;
     }
-    if (!state.has_message) {
+    if (strncmp(stripped, "::", 2) == 0) {
+      char *semantic_id = TextParse_TrimLeft(stripped + 2);
+      TextParse_TrimRight(semantic_id);
+      if (!FlushStyledText(state, error) ||
+          !BeginMessage(state, semantic_id, line_number, error))
+        return false;
+      physical = next;
+      continue;
+    }
+    if (!state->has_message) {
       if (!stripped[0] || stripped[0] == '#' || stripped[0] == ';') {
         physical = next;
         continue;
@@ -1221,7 +1608,7 @@ static bool ParseScript(ArLanguagePack *pack, char *text, const char *path,
                line_number);
       return false;
     }
-    if (state.ended) {
+    if (state->ended) {
       if (!stripped[0] || stripped[0] == '#' || stripped[0] == ';') {
         physical = next;
         continue;
@@ -1231,8 +1618,10 @@ static bool ParseScript(ArLanguagePack *pack, char *text, const char *path,
       return false;
     }
     if (!stripped[0]) {
-      state.previous_text_line = false;
-      ArLanguageMessage *message = &pack->messages[state.message_index];
+      if (!FlushStyledText(state, error))
+        return false;
+      state->previous_text_line = false;
+      ArLanguageMessage *message = &pack->messages[state->message_index];
       if (message->operation_count) {
         const ArLanguageOperationKind last =
             pack->operations[message->first_operation +
@@ -1242,7 +1631,7 @@ static bool ParseScript(ArLanguagePack *pack, char *text, const char *path,
             last != kArLanguageOperation_PreferredLineBreak &&
             last != kArLanguageOperation_ParagraphBreak &&
             last != kArLanguageOperation_PageBreak &&
-            !AddSimpleOperation(&state, kArLanguageOperation_ParagraphBreak,
+            !AddSimpleOperation(state, kArLanguageOperation_ParagraphBreak,
                                 line_number, error))
           return false;
       }
@@ -1260,25 +1649,41 @@ static bool ParseScript(ArLanguagePack *pack, char *text, const char *path,
     } else if (line[0] == '\\' && (line[1] == '#' || line[1] == ';')) {
       line++;
     } else if (stripped[0] == '@') {
-      if (!ParseCommand(&state, stripped, line_number, error))
+      if (!FlushStyledText(state, error) ||
+          !ParseCommand(state, stripped, line_number, error))
         return false;
-      state.previous_text_line = false;
+      state->previous_text_line = false;
       physical = next;
       continue;
     }
-    if (state.previous_text_line &&
-        !AddText(&state, " ", 1, line_number, error))
+    if (pack->metadata.format_version == 2) {
+      if (!QueueStyledText(state, line, line_number, error))
+        return false;
+      physical = next;
+      continue;
+    }
+    if (state->previous_text_line &&
+        !AddText(state, " ", 1, line_number, error))
       return false;
-    if (!AppendInline(&state, line, line_number, error))
+    if (!AppendInline(state, line, line_number, error))
       return false;
-    state.previous_text_line = true;
+    state->previous_text_line = true;
     physical = next;
   }
-  if (!state.has_message) {
+  if (!state->has_message && pack->treatment_count == prior_treatments) {
     SetError(error, "%s: script contains no messages", path);
     return false;
   }
-  return FinalizeMessage(&state, error);
+  return FlushStyledText(state, error) && FinalizeMessage(state, error);
+}
+
+static bool ParseScript(ArLanguagePack *pack, char *text, const char *path,
+                        ArLanguagePackError *error) {
+  ScriptState state = {.pack = pack, .path = path};
+  const bool valid = ParseScriptBody(&state, text, error);
+  free(state.styled_text);
+  free(state.styled_sources);
+  return valid;
 }
 
 static const ArLanguageMessage *FindMessageInternal(const ArLanguagePack *pack,
@@ -1440,6 +1845,8 @@ void ArLanguagePack_Destroy(ArLanguagePack *pack) {
     free(pack->message_lookup);
     free(pack->operations);
     free(pack->strings);
+    free(pack->text_styles);
+    free(pack->treatments);
   }
   memset(pack, 0, sizeof(*pack));
   pack->private_magic = kPackMagic;
@@ -1464,6 +1871,75 @@ bool ArLanguagePack_ReadMetadata(const ArLanguagePackIo *io,
   if (manifest_revision)
     *manifest_revision = revision;
   return true;
+}
+
+bool ArLanguagePack_ParseDocument(ArLanguagePack *pack,
+                                  const ArTextDocumentConfig *config,
+                                  ArLanguagePackError *error) {
+  ClearError(error);
+  if (!pack || !config || !config->id || !IsIdentifier(config->id) ||
+      strlen(config->id) >= kArLanguagePackageIdCapacity || !config->locale ||
+      strlen(config->locale) >= kArLanguageLocaleCapacity ||
+      !IsLocale(config->locale) || config->format_version != 2 ||
+      config->direction < kArLanguageDirection_Auto ||
+      config->direction > kArLanguageDirection_RightToLeft ||
+      !config->sources || !config->source_count ||
+      config->source_count > kMaximumSources ||
+      config->font_role_count > kArLanguageMaximumFontRoles ||
+      (config->font_role_count && !config->font_roles)) {
+    SetError(error, "invalid text document configuration");
+    return false;
+  }
+  ArLanguagePack candidate;
+  ArLanguagePack_Init(&candidate);
+  candidate.metadata.format_version = 2;
+  candidate.metadata.direction = config->direction;
+  strcpy(candidate.metadata.package_id, config->id);
+  strcpy(candidate.metadata.locale, config->locale);
+  candidate.content_revision =
+      HashPart(DETERMINISTIC_HASH_FNV1A64_OFFSET, "document", config->id,
+               (const uint8_t *)config->locale, strlen(config->locale));
+  candidate.content_revision =
+      HashSize(candidate.content_revision, config->direction);
+  for (size_t i = 0; i < config->font_role_count; ++i) {
+    if (!config->font_roles[i] ||
+        !AddFontRole(&candidate.metadata, config->font_roles[i], "<document>",
+                     0, error))
+      goto failed;
+  }
+  for (size_t i = 0; i < config->source_count; ++i) {
+    const ArTextDocumentSource *source = &config->sources[i];
+    if (!source->path || !source->path[0] || strlen(source->path) >= 1024 ||
+        !source->utf8 || !source->bytes ||
+        source->bytes > kScriptMaximumBytes) {
+      SetError(error, "invalid text document source");
+      goto failed;
+    }
+    ArLanguagePackBlob blob = {.data = (const uint8_t *)source->utf8,
+                               .size = source->bytes};
+    char *copy = CopyTextBlob(&blob, source->path, error);
+    if (!copy)
+      goto failed;
+    const bool valid = ParseScript(&candidate, copy, source->path, error);
+    free(copy);
+    if (!valid)
+      goto failed;
+    candidate.content_revision = HashPart(candidate.content_revision, "script",
+                                          source->path, blob.data, blob.size);
+  }
+  if (!candidate.message_count) {
+    SetError(error, "text document has no messages");
+    goto failed;
+  }
+  if (!ValidateAliases(&candidate, error) ||
+      !ValidateTreatmentReferences(&candidate, error))
+    goto failed;
+  ArLanguagePack_Destroy(pack);
+  *pack = candidate;
+  return true;
+failed:
+  ArLanguagePack_Destroy(&candidate);
+  return false;
 }
 
 bool ArLanguagePack_Load(ArLanguagePack *pack, const ArLanguagePackIo *io,
@@ -1503,13 +1979,26 @@ bool ArLanguagePack_Load(ArLanguagePack *pack, const ArLanguagePackIo *io,
     if (!valid)
       goto failed;
   }
-  const char *fonts[1 + kArLanguageMaximumFallbackFonts];
+  const char *fonts[(1 + kArLanguageMaximumFontRoles) *
+                    (1 + kArLanguageMaximumFallbackFonts)];
   uint32_t font_count = 0;
   fonts[font_count++] = temporary.metadata.primary_font;
   for (uint32_t i = 0; i < temporary.metadata.fallback_font_count; i++)
     fonts[font_count++] = temporary.metadata.fallback_fonts[i];
+  for (uint32_t i = 0; i < temporary.metadata.font_role_count; ++i) {
+    const ArLanguageFontRole *role = &temporary.metadata.font_roles[i];
+    fonts[font_count++] = role->primary_font;
+    for (uint32_t j = 0; j < role->fallback_font_count; ++j)
+      fonts[font_count++] = role->fallback_fonts[j];
+  }
   for (uint32_t i = 0; i < font_count; i++) {
     const char *font = fonts[i];
+    bool duplicate = false;
+    for (uint32_t j = 0; j < i; ++j)
+      if (strcmp(fonts[j], font) == 0)
+        duplicate = true;
+    if (duplicate)
+      continue;
     if (strncmp(font, "builtin:", 8) == 0) {
       temporary.content_revision =
           HashPart(temporary.content_revision, "builtin-font", font, NULL, 0);
@@ -1530,7 +2019,8 @@ bool ArLanguagePack_Load(ArLanguagePack *pack, const ArLanguagePackIo *io,
                                           font, blob.data, blob.size);
     io->release_file(io->context, &blob);
   }
-  if (!ValidateAliases(&temporary, error))
+  if (!ValidateAliases(&temporary, error) ||
+      !ValidateTreatmentReferences(&temporary, error))
     goto failed;
 
   if (pack->private_magic == kPackMagic)

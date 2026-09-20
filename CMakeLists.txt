@@ -89,6 +89,17 @@ add_library(actraiser_font_resources STATIC
     src/localization/font_resource.c src/host/font_resources.c)
 target_include_directories(actraiser_font_resources PUBLIC ${CMAKE_SOURCE_DIR}/src)
 
+# The template grammar is independent of the game, file system and renderer.
+add_library(ar_text_template STATIC src/localization/text_template.c)
+target_include_directories(ar_text_template PUBLIC ${CMAKE_SOURCE_DIR}/src)
+add_library(actraiser_text_style STATIC src/actraiser/actraiser_localization_text_style.c)
+target_include_directories(actraiser_text_style PUBLIC ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(actraiser_text_style PUBLIC ar_text_template)
+if(BUILD_TESTING)
+    add_executable(ar_text_template_probe tests/text_template_probe.c)
+    target_link_libraries(ar_text_template_probe PRIVATE ar_text_template)
+endif()
+
 # Enhanced Unicode text remains optional at the platform binding. The pack,
 # contract, session, and cache layers are portable C and still build when a
 # port supplies no SDL3_ttf rasterizer yet.
@@ -109,6 +120,8 @@ if(AR_ENHANCED_TEXT)
     find_package(SDL3_ttf 3.2.0 REQUIRED)
     add_library(actraiser_bidi_text STATIC
         src/platform/sdl/bidi_text_sdl.c
+        src/platform/sdl/styled_run_sdl.c
+        src/platform/sdl/styled_paint_sdl.c
         ${_AR_BIDI_SOURCES})
     target_include_directories(actraiser_bidi_text PRIVATE ${CMAKE_SOURCE_DIR}/src)
     target_link_libraries(actraiser_bidi_text PRIVATE SDL3::SDL3 SDL3_ttf::SDL3_ttf)
@@ -128,14 +141,70 @@ if(_AR_ENHANCED_TEXT)
     # Also available in ROM-free source checkouts and tests-only builds.
     add_executable(actraiser_font_coverage
         tools/font_coverage_probe.c
+        src/localization/text_backend.c
         src/platform/sdl/font_coverage_cli.c
         src/localization/text_rasterizer.c
         src/localization/unicode_grapheme.c
-        src/platform/sdl/text_rasterizer_sdl.c)
+        src/platform/sdl/text_rasterizer_sdl.c src/platform/sdl/text_fonts_sdl.c)
     target_include_directories(actraiser_font_coverage PRIVATE ${CMAKE_SOURCE_DIR}/src)
     target_compile_definitions(actraiser_font_coverage PRIVATE AR_HAS_SDL3_TTF=1)
     target_link_libraries(actraiser_font_coverage PRIVATE
         SDL3::SDL3 SDL3_ttf::SDL3_ttf actraiser_bidi_text actraiser_math actraiser_font_resources)
+
+    add_executable(actraiser_text_preview
+        tools/text_preview_probe.c
+        src/platform/sdl/text_preview_cli.c
+        src/platform/sdl/render_sdl.c
+        src/platform/sdl/text_rasterizer_sdl.c src/platform/sdl/text_fonts_sdl.c
+        src/localization/dialogue_session.c src/localization/language_pack.c
+        src/localization/text_template.c src/localization/language_contract.c
+        src/localization/language_row_shape.c src/localization/language_keyboard.c
+        src/localization/text_backend.c src/localization/text_rasterizer.c
+        src/localization/unicode_grapheme.c src/localization/localization_frame.c
+        src/localization/enhanced_text_settings.c src/localization/text_cell_record.c
+        src/actraiser/actraiser_localization_routes.c
+        src/actraiser/actraiser_localization_grid.c
+        src/actraiser/actraiser_localization_name_compose.c
+        src/actraiser/actraiser_localization_credits.c
+        src/actraiser/actraiser_localization_hud.c
+        src/actraiser/actraiser_localization_art.c
+        src/actraiser/actraiser_localization_world_navigation.c
+        src/actraiser/actraiser_localization_text_normalize.c
+        src/actraiser/actraiser_localization_text_style.c
+        src/actraiser/actraiser_dialogue_window.c
+        src/actraiser/actraiser_localization_fixed_text.c
+        src/render/render_device.c src/render/hud_layout.c
+        src/render/text_surface_cache.c src/render/text_cell_composite.c
+        src/render/localized_text_layout.c src/render/localized_text_presenter.c
+        src/render/localized_text_draw.c src/render/localized_text_artwork.c
+        src/performance_metrics.c)
+    target_include_directories(actraiser_text_preview PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    target_compile_definitions(actraiser_text_preview PRIVATE AR_HAS_SDL3_TTF=1)
+    target_link_libraries(actraiser_text_preview PRIVATE
+        SDL3::SDL3 SDL3_ttf::SDL3_ttf actraiser_bidi_text actraiser_math actraiser_font_resources)
+
+    # A second host proves the parser/session/renderer do not need game routes,
+    # a ROM, native language assets, or hardware state.
+    add_executable(ar_dialogue_sample
+        tools/dialogue_sample.c
+        src/localization/dialogue_session.c
+        src/localization/language_pack.c
+        src/localization/text_template.c
+        src/localization/text_backend.c
+        src/localization/text_rasterizer.c
+        src/localization/unicode_grapheme.c
+        src/platform/sdl/text_rasterizer_sdl.c
+        src/platform/sdl/text_fonts_sdl.c)
+    target_include_directories(ar_dialogue_sample PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    target_compile_definitions(ar_dialogue_sample PRIVATE AR_HAS_SDL3_TTF=1)
+    target_link_libraries(ar_dialogue_sample PRIVATE
+        SDL3::SDL3 SDL3_ttf::SDL3_ttf actraiser_bidi_text actraiser_math actraiser_font_resources)
+    if(BUILD_TESTING)
+        add_test(NAME ar_dialogue_sample_offscreen COMMAND ar_dialogue_sample --offscreen
+            "${CMAKE_CURRENT_BINARY_DIR}/dialogue-sample.png"
+            "${CMAKE_SOURCE_DIR}/game-assets/fonts/noto/NotoSans-SemiCondensedExtraBold.ttf"
+            "${CMAKE_SOURCE_DIR}/tests/fixtures/unicode-fonts/fonts/NotoSansJP-Bold.otf")
+    endif()
 endif()
 
 set(ACTRAISER_GEN_DIR "${CMAKE_SOURCE_DIR}/src/gen" CACHE PATH
@@ -433,6 +502,13 @@ endif() # NOT AR_TESTS_ONLY
 if(BUILD_TESTING)
     find_package(Python3 QUIET COMPONENTS Interpreter)
     if(Python3_Interpreter_FOUND)
+        add_test(NAME ar_text_template_contract
+            COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_SOURCE_DIR}/tests/text_template_contract_test.py
+                $<TARGET_FILE:ar_text_template_probe>
+                ${CMAKE_SOURCE_DIR}/tests/fixtures/text_template.json)
+    endif()
+    if(Python3_Interpreter_FOUND)
         add_test(NAME actraiser_pipeline_performance_tool
             COMMAND ${Python3_EXECUTABLE}
                 ${CMAKE_SOURCE_DIR}/tests/pipeline_performance_tool_test.py)
@@ -491,7 +567,7 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_font_resource COMMAND actraiser_font_resource_test)
 
     add_executable(actraiser_text_backend_no_ttf_test
-        tests/text_backend_no_ttf_test.c src/platform/sdl/text_rasterizer_sdl.c
+        tests/text_backend_no_ttf_test.c src/platform/sdl/text_rasterizer_sdl.c src/platform/sdl/text_fonts_sdl.c
         src/localization/text_backend.c src/localization/text_rasterizer.c)
     target_link_libraries(actraiser_text_backend_no_ttf_test PRIVATE actraiser_font_resources)
     target_compile_definitions(actraiser_text_backend_no_ttf_test PRIVATE AR_HAS_SDL3_TTF=0)
@@ -532,9 +608,10 @@ if(BUILD_TESTING)
     if(TARGET SDL3_ttf::SDL3_ttf)
         add_executable(actraiser_text_rasterizer_sdl_test
             tests/text_rasterizer_sdl_test.c
+            src/localization/text_backend.c
             src/localization/text_rasterizer.c
             src/localization/unicode_grapheme.c
-            src/platform/sdl/text_rasterizer_sdl.c)
+            src/platform/sdl/text_rasterizer_sdl.c src/platform/sdl/text_fonts_sdl.c)
         target_include_directories(actraiser_text_rasterizer_sdl_test PRIVATE
             ${CMAKE_SOURCE_DIR}/src)
         target_compile_definitions(actraiser_text_rasterizer_sdl_test PRIVATE
@@ -548,6 +625,24 @@ if(BUILD_TESTING)
             SDL3::SDL3 SDL3_ttf::SDL3_ttf actraiser_bidi_text actraiser_math actraiser_font_resources)
         add_test(NAME actraiser_text_rasterizer_sdl
             COMMAND actraiser_text_rasterizer_sdl_test)
+
+        add_executable(ar_styled_text_sdl_test
+            tests/styled_text_sdl_test.c
+            src/localization/text_backend.c
+            src/localization/text_rasterizer.c
+            src/localization/unicode_grapheme.c
+            src/platform/sdl/text_rasterizer_sdl.c
+            src/platform/sdl/text_fonts_sdl.c)
+        target_include_directories(ar_styled_text_sdl_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+        target_compile_definitions(ar_styled_text_sdl_test PRIVATE
+            AR_HAS_SDL3_TTF=1
+            "AR_TEST_HEBREW_FONT_PATH=\"${CMAKE_SOURCE_DIR}/game-assets/fonts/noto/NotoSansHebrew-Bold.ttf\""
+            "AR_TEST_FONT_PATH=\"${CMAKE_SOURCE_DIR}/game-assets/fonts/noto/NotoSans-SemiCondensedExtraBold.ttf\""
+            "AR_TEST_JAPANESE_FONT_PATH=\"${CMAKE_SOURCE_DIR}/tests/fixtures/unicode-fonts/fonts/NotoSansJP-Bold.otf\""
+            "AR_TEST_ARABIC_FONT_PATH=\"${CMAKE_SOURCE_DIR}/tests/fixtures/unicode-fonts/fonts/NotoSansArabic[wdth,wght].ttf\"")
+        target_link_libraries(ar_styled_text_sdl_test PRIVATE
+            SDL3::SDL3 SDL3_ttf::SDL3_ttf actraiser_bidi_text actraiser_math actraiser_font_resources)
+        add_test(NAME ar_styled_text_sdl COMMAND ar_styled_text_sdl_test)
 
         add_executable(actraiser_localized_text_presenter_test
             tests/localized_text_presenter_test.c
@@ -568,7 +663,7 @@ if(BUILD_TESTING)
             src/localization/text_cell_record.c
             src/render/text_cell_composite.c
             src/render/render_device.c
-            src/platform/sdl/text_rasterizer_sdl.c
+            src/platform/sdl/text_rasterizer_sdl.c src/platform/sdl/text_fonts_sdl.c
             # The renderer itself never links this: the test uses the game's
             # own menu geometry so its layout results stay comparable, and
             # separately checks a hand-built grid the game never publishes.
@@ -602,7 +697,7 @@ if(BUILD_TESTING)
             src/localization/text_cell_record.c
             src/render/text_cell_composite.c
             src/render/render_device.c
-            src/platform/sdl/text_rasterizer_sdl.c
+            src/platform/sdl/text_rasterizer_sdl.c src/platform/sdl/text_fonts_sdl.c
             src/performance_metrics.c)
         target_include_directories(actraiser_localized_text_live_line_test PRIVATE
             ${CMAKE_SOURCE_DIR}/src)
@@ -636,19 +731,19 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_language_pack_runtime_test
         tests/language_pack_test.c
-        src/localization/language_pack.c
+        src/localization/language_pack.c src/localization/text_template.c
         src/localization/language_keyboard.c
         src/localization/unicode_grapheme.c
         src/localization/language_contract.c
         src/localization/language_row_shape.c)
     add_executable(actraiser_language_pack_discovery_test
         tests/language_pack_discovery_test.c
-        src/localization/pack_discovery.c src/localization/language_pack.c)
+        src/localization/pack_discovery.c src/localization/language_pack.c src/localization/text_template.c)
     target_include_directories(actraiser_language_pack_discovery_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     add_test(NAME actraiser_language_pack_discovery COMMAND actraiser_language_pack_discovery_test)
     add_executable(actraiser_language_pack_desktop_test
         tests/language_pack_desktop_test.c src/localization/pack_discovery.c
-        src/localization/language_pack.c src/platform/sdl/pack_discovery_sdl.c)
+        src/localization/language_pack.c src/localization/text_template.c src/platform/sdl/pack_discovery_sdl.c)
     target_include_directories(actraiser_language_pack_desktop_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     target_link_libraries(actraiser_language_pack_desktop_test PRIVATE SDL3::SDL3)
     target_include_directories(actraiser_language_pack_runtime_test PRIVATE
@@ -659,7 +754,8 @@ if(BUILD_TESTING)
     add_executable(actraiser_dialogue_session_test
         tests/dialogue_session_test.c
         src/localization/dialogue_session.c
-        src/localization/language_pack.c
+        src/actraiser/actraiser_dialogue_adapter.c
+        src/localization/language_pack.c src/localization/text_template.c
         src/localization/language_keyboard.c
         src/localization/language_contract.c
         src/localization/language_row_shape.c
@@ -668,6 +764,18 @@ if(BUILD_TESTING)
         ${CMAKE_SOURCE_DIR}/src)
     add_test(NAME actraiser_dialogue_session
         COMMAND actraiser_dialogue_session_test)
+
+    add_executable(ar_dialogue_portability_test
+        tests/dialogue_portability_test.c
+        src/localization/dialogue_session.c
+        src/localization/language_pack.c src/localization/text_template.c
+        src/localization/unicode_grapheme.c)
+    target_include_directories(ar_dialogue_portability_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    add_test(NAME ar_dialogue_portability COMMAND ar_dialogue_portability_test)
+
+    add_executable(ar_text_appearance_test tests/text_appearance_test.c)
+    target_link_libraries(ar_text_appearance_test PRIVATE ar_text_template)
+    add_test(NAME ar_text_appearance COMMAND ar_text_appearance_test)
 
     add_executable(actraiser_text_cell_record_test
         tests/text_cell_record_test.c
@@ -693,10 +801,22 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_localization_frame
         COMMAND actraiser_localization_frame_test)
 
+    add_executable(actraiser_localization_text_style_test
+        tests/actraiser_localization_text_style_test.c
+        src/localization/language_pack.c
+        src/localization/dialogue_session.c
+        src/actraiser/actraiser_localization_name_compose.c
+        src/actraiser/actraiser_localization_text_normalize.c
+        src/localization/unicode_grapheme.c
+        ${AR_LOCALIZATION_FRAME_SOURCES})
+    target_link_libraries(actraiser_localization_text_style_test PRIVATE actraiser_text_style)
+    add_test(NAME actraiser_localization_text_style COMMAND actraiser_localization_text_style_test)
+
     add_executable(actraiser_localization_world_navigation_test
         tests/actraiser_localization_world_navigation_test.c
         src/actraiser/actraiser_localization_world_navigation.c
         ${AR_LOCALIZATION_FRAME_SOURCES})
+    target_link_libraries(actraiser_localization_world_navigation_test PRIVATE actraiser_text_style)
     target_include_directories(actraiser_localization_world_navigation_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_localization_world_navigation
@@ -715,11 +835,15 @@ if(BUILD_TESTING)
         tests/actraiser_localization_compose_state_test.c
         src/actraiser/actraiser_localization_compose_state.c
         src/actraiser/actraiser_localization_grid.c
+        src/localization/language_pack.c src/localization/text_template.c
+        src/localization/language_contract.c
+        src/localization/language_keyboard.c src/localization/unicode_grapheme.c
         src/localization/language_row_shape.c
         src/actraiser/actraiser_localization_hud.c
         src/actraiser/actraiser_localization_art.c
         src/actraiser/actraiser_localization_routes.c
         ${AR_LOCALIZATION_FRAME_SOURCES})
+    target_link_libraries(actraiser_localization_compose_state_test PRIVATE actraiser_text_style)
     target_include_directories(actraiser_localization_compose_state_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
@@ -729,7 +853,7 @@ if(BUILD_TESTING)
     add_executable(actraiser_localization_values_test
         tests/actraiser_localization_values_test.c
         src/actraiser/actraiser_localization_values.c
-        src/localization/language_pack.c
+        src/localization/language_pack.c src/localization/text_template.c
         src/localization/language_keyboard.c
         src/localization/unicode_grapheme.c
         src/localization/language_contract.c
@@ -744,7 +868,7 @@ if(BUILD_TESTING)
         tests/actraiser_localization_name_entry_test.c
         src/actraiser/actraiser_localization_name_entry.c
         src/localization/language_keyboard.c
-        src/localization/language_pack.c
+        src/localization/language_pack.c src/localization/text_template.c
         src/localization/unicode_grapheme.c)
     target_include_directories(actraiser_localization_name_entry_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src)
@@ -764,6 +888,7 @@ if(BUILD_TESTING)
         src/actraiser/actraiser_localization_credits.c
         src/localization/unicode_grapheme.c
         ${AR_LOCALIZATION_FRAME_SOURCES})
+    target_link_libraries(actraiser_localization_credits_test PRIVATE actraiser_text_style)
     target_include_directories(actraiser_localization_credits_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_localization_credits COMMAND actraiser_localization_credits_test)
@@ -785,6 +910,20 @@ if(BUILD_TESTING)
             WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/installer"
             ENVIRONMENT "GOCACHE=${CMAKE_BINARY_DIR}/go-cache;AR_AUTHOR_RUNTIME_PROBE=$<TARGET_FILE:actraiser_language_pack_runtime_test>;AR_NATIVE_GRAPHICS_PROBE=$<TARGET_FILE:actraiser_localization_art_test>;AR_CREDITS_RUNTIME_PROBE=$<TARGET_FILE:actraiser_localization_credits_test>"
             TIMEOUT 120)
+        if(TARGET actraiser_text_preview)
+            add_test(NAME actraiser_workshop_playback
+                COMMAND ${ACTRAISER_GO_EXECUTABLE} test ./internal/builder -run ^TestLocalizationPlayback -count=1)
+            set_tests_properties(actraiser_workshop_playback PROPERTIES
+                WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/installer"
+                ENVIRONMENT "GOCACHE=${CMAKE_BINARY_DIR}/go-cache;AR_AUTHOR_TEXT_PREVIEW=$<TARGET_FILE:actraiser_text_preview>"
+                TIMEOUT 120)
+            add_test(NAME actraiser_go_text_playback
+                COMMAND ${ACTRAISER_GO_EXECUTABLE} test ./internal/textpreview -count=1)
+            set_tests_properties(actraiser_go_text_playback PROPERTIES
+                WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/installer"
+                ENVIRONMENT "GOCACHE=${CMAKE_BINARY_DIR}/go-cache;AR_AUTHOR_TEXT_PREVIEW=$<TARGET_FILE:actraiser_text_preview>"
+                TIMEOUT 120)
+        endif()
         add_test(NAME actraiser_go_language_distribution
             COMMAND ${ACTRAISER_GO_EXECUTABLE} test ./internal/languagecli -count=1)
         set_tests_properties(actraiser_go_language_distribution PROPERTIES
@@ -1926,7 +2065,7 @@ if(BUILD_TESTING)
     )
     if(TARGET SDL3_ttf::SDL3_ttf)
         target_sources(actraiser_settings_overlay_test PRIVATE
-            src/platform/sdl/text_rasterizer_sdl.c)
+            src/platform/sdl/text_rasterizer_sdl.c src/platform/sdl/text_fonts_sdl.c)
         target_link_libraries(actraiser_settings_overlay_test PRIVATE SDL3_ttf::SDL3_ttf actraiser_bidi_text)
         target_compile_definitions(actraiser_settings_overlay_test PRIVATE
             AR_HAS_SDL3_TTF=1
@@ -2393,12 +2532,16 @@ if(BUILD_TESTING)
         src/actraiser/actraiser_localization_grid.c
         src/actraiser/actraiser_localization_name_compose.c
         src/actraiser/actraiser_localization_text_normalize.c
+        src/actraiser/actraiser_localization_text_style.c
+        src/actraiser/actraiser_dialogue_window.c
+        src/actraiser/actraiser_localization_fixed_text.c
         src/actraiser/actraiser_localization_hud.c
         src/actraiser/actraiser_localization_values.c
         src/actraiser/actraiser_localization_name_entry.c
         src/actraiser/actraiser_localization_art.c
         src/localization/dialogue_session.c
-        src/localization/language_pack.c
+        src/actraiser/actraiser_dialogue_adapter.c
+        src/localization/language_pack.c src/localization/text_template.c
         src/localization/language_keyboard.c
         src/localization/language_contract.c
         src/localization/language_row_shape.c

@@ -374,7 +374,7 @@ func stripInstalledVersion(files map[string][]byte, sources []string, fonts *Pac
 	}
 	prefix := ""
 	named := append([]string{}, sources...)
-	for _, path := range append([]string{fonts.Primary}, fonts.Fallback...) {
+	for _, path := range fonts.References() {
 		if !strings.HasPrefix(path, "builtin:") {
 			named = append(named, path)
 		}
@@ -396,14 +396,7 @@ func stripInstalledVersion(files map[string][]byte, sources []string, fonts *Pac
 	for i, source := range sources {
 		sources[i] = strings.TrimPrefix(source, prefix)
 	}
-	if !strings.HasPrefix(fonts.Primary, "builtin:") {
-		fonts.Primary = strings.TrimPrefix(fonts.Primary, prefix)
-	}
-	for i, path := range fonts.Fallback {
-		if !strings.HasPrefix(path, "builtin:") {
-			fonts.Fallback[i] = strings.TrimPrefix(path, prefix)
-		}
-	}
+	fonts.mapPaths(func(path string) string { return strings.TrimPrefix(path, prefix) })
 	for _, path := range named {
 		data := files[path]
 		delete(files, path)
@@ -469,7 +462,7 @@ func installAuthorProject(directory string, project *AuthorProject, replace bool
 	if stripInstalledVersion(files, sources, &fonts) != "" {
 		// The copy staged inside the version directory has to name its members
 		// the way they now sit beside it, or opening it below fails.
-		relative, err := NewPackManifest(pack.manifest.Metadata(), fonts, sources)
+		relative, err := NewPackManifestVersion(pack.manifest.Metadata(), fonts, sources, pack.manifest.Version())
 		if err != nil {
 			return "", err
 		}
@@ -491,18 +484,11 @@ func installAuthorProject(directory string, project *AuthorProject, replace bool
 		return "", err
 	}
 	prefix := filepath.Base(version) + "/"
-	if !strings.HasPrefix(fonts.Primary, "builtin:") {
-		fonts.Primary = prefix + fonts.Primary
-	}
-	for i, path := range fonts.Fallback {
-		if !strings.HasPrefix(path, "builtin:") {
-			fonts.Fallback[i] = prefix + path
-		}
-	}
+	fonts.mapPaths(func(path string) string { return prefix + path })
 	for i := range sources {
 		sources[i] = prefix + sources[i]
 	}
-	manifest, err := NewPackManifest(pack.manifest.Metadata(), fonts, sources)
+	manifest, err := NewPackManifestVersion(pack.manifest.Metadata(), fonts, sources, pack.manifest.Version())
 	if err != nil {
 		return "", err
 	}

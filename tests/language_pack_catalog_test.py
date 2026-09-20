@@ -28,7 +28,7 @@ def main():
     assert catalog['route_count'] == 531
     assert catalog['all_release_route_count'] == 472
     assert catalog['regional_or_release_variant_route_count'] == 59
-    assert catalog['placeholder_count'] == 60
+    assert catalog['placeholder_count'] == 62
     by_id = {route['id']: route for route in catalog['routes']}
     assert 'icon.status.population' in by_id[
         'status.report.cities_report']['allowed_placeholders']
@@ -75,7 +75,7 @@ def main():
                           for anchor in contract['required_anchors']]
             assert len(anchor_ids) == len(set(anchor_ids))
 
-    example = PACK.validate_pack(ROOT / 'examples/language-pack', catalog)
+    example = PACK.validate_pack(ROOT / 'tests/fixtures/language-pack-v1', catalog)
     assert example['valid']
     assert example['message_count'] == 2
     assert example['progress_rows'] == 2

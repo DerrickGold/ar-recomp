@@ -68,7 +68,7 @@ func TestReferenceAndEditorFreeValidation(t *testing.T) {
 	}
 	coverage := validation.TextCoverage
 	if coverage.Profile != "us" || !coverage.Runtime || coverage.Required.Total != 495 ||
-		coverage.LiveOptional.Total != 26 || len(coverage.Surfaces) != 6 || len(coverage.Dormant) != 2 {
+		coverage.LiveOptional.Total != 32 || len(coverage.Surfaces) != 6 || len(coverage.Dormant) != 2 {
 		t.Fatal("CLI omitted authoritative text coverage", out.String())
 	}
 	path := filepath.Join(t.TempDir(), "reference.json")
@@ -108,6 +108,39 @@ func TestCommandHelpAndOptionBoundaries(t *testing.T) {
 	}
 	if err := Run(context.Background(), []string{"install", "--confirm-rights"}, &out); err == nil || !strings.Contains(err.Error(), "not valid") {
 		t.Fatal("publishing rights must not become an installation option", err)
+	}
+}
+
+func TestUpgradeWritesNewProjectOnly(t *testing.T) {
+	example, err := filepath.Abs("../../../tests/fixtures/language-pack-v1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := os.ReadFile(filepath.Join(example, "pack.ini"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "upgraded.arproject")
+	args := []string{"upgrade", "--pack", example, "--new-id", "example.upgraded", "--out", path}
+	var out bytes.Buffer
+	if err := Run(context.Background(), args, &out); err != nil {
+		t.Fatal(err)
+	}
+	project, err := lk.OpenAuthorInput(path)
+	if err != nil || project.Pack().Manifest().Version() != 2 || project.Pack().Manifest().Metadata().ID != "example.upgraded" {
+		t.Fatal(project, err)
+	}
+	after, _ := os.ReadFile(filepath.Join(example, "pack.ini"))
+	if !bytes.Equal(manifest, after) {
+		t.Fatal("upgraded input in place")
+	}
+	before, _ := os.ReadFile(path)
+	if err := Run(context.Background(), args, &out); err == nil {
+		t.Fatal("overwrote upgrade output")
+	}
+	after, _ = os.ReadFile(path)
+	if !bytes.Equal(before, after) {
+		t.Fatal("failed upgrade changed existing output")
 	}
 }
 
@@ -194,5 +227,55 @@ func TestDesktopArchiveDiscoveryRelocation(t *testing.T) {
 	}
 	if out := run(); strings.Contains(out, "example.fr-ca\t") || !strings.Contains(out, "need the installed ActRaiser Builder helper") {
 		t.Fatal(out)
+	}
+}
+
+func TestInstallUpgradesV1CopyAndReportsIt(t *testing.T) {
+	project, err := lk.OpenAuthorInput("../../../tests/fixtures/language-pack-v1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	publication, _, err := project.Publication(lk.PublicationOptions{ConfirmRights: true, IncludeWIP: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var archive bytes.Buffer
+	if err := publication.WriteArchive(&archive, "publication"); err != nil {
+		t.Fatal(err)
+	}
+	source := filepath.Join(t.TempDir(), "original.arlang")
+	if err := os.WriteFile(source, archive.Bytes(), 0644); err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	var out bytes.Buffer
+	if err := Run(context.Background(), []string{"install", "--root", root, "--pack", source}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "Automatically upgraded the installed copy from v1 to v2") {
+		t.Fatal("missing CLI upgrade notice", out.String())
+	}
+	installedPath := filepath.Join(root, "game-assets", "languages", "packs", project.Pack().Manifest().Metadata().ID+".arlang")
+	installed, err := lk.OpenAuthorInput(installedPath)
+	if err != nil || installed.Pack().Manifest().Version() != 2 || installed.Pack().Manifest().Metadata() != project.Pack().Manifest().Metadata() {
+		t.Fatal("installed archive was not upgraded with its identity intact", err)
+	}
+	before, err := os.ReadFile(source)
+	if err != nil || !bytes.Equal(before, archive.Bytes()) {
+		t.Fatal("original archive changed", err)
+	}
+	// Reinstalling v2 copies its bytes as-is and does not report another upgrade.
+	out.Reset()
+	secondRoot := t.TempDir()
+	if err := Run(context.Background(), []string{"install", "--root", secondRoot, "--pack", installedPath}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "upgraded") {
+		t.Fatal("v2 was reported as upgraded", out.String())
+	}
+	first, _ := os.ReadFile(installedPath)
+	second, err := os.ReadFile(filepath.Join(secondRoot, "game-assets", "languages", "packs", filepath.Base(installedPath)))
+	if err != nil || !bytes.Equal(first, second) {
+		t.Fatal("v2 archive was rewritten", err)
 	}
 }

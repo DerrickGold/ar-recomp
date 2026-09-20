@@ -253,12 +253,6 @@ unsigned ActionRoomScene_TileHeight(const ActionRoomScene *scene,
       ? (unsigned)bg->pages_high * 32u : 0;
 }
 
-size_t ActionRoomScene_TileCount(const ActionRoomScene *scene,
-                                 uint8_t bg_layer) {
-  return (size_t)ActionRoomScene_TileWidth(scene, bg_layer) *
-      ActionRoomScene_TileHeight(scene, bg_layer);
-}
-
 uint16_t ActionRoomScene_BgAttributes(const ActionRoomScene *scene,
                                       uint8_t bg_layer) {
   if (!GetBg(scene, bg_layer)) return 0;
@@ -295,21 +289,6 @@ bool ActionRoomScene_LookupTile(const ActionRoomScene *scene,
       definition, kActionRoomSceneTileWordMask,
       ActionRoomScene_BgAttributes(scene, bg_layer));
   if (metatile) *metatile = id;
-  return true;
-}
-
-bool ActionRoomScene_ExpandBg(const ActionRoomScene *scene,
-                              uint8_t bg_layer,
-                              uint16_t *entries, size_t entry_count) {
-  const unsigned width = ActionRoomScene_TileWidth(scene, bg_layer);
-  const unsigned height = ActionRoomScene_TileHeight(scene, bg_layer);
-  const size_t needed = (size_t)width * height;
-  if (!entries || !needed || entry_count < needed) return false;
-  for (unsigned y = 0; y < height; y++)
-    for (unsigned x = 0; x < width; x++)
-      if (!ActionRoomScene_LookupTile(
-              scene, bg_layer, x, y, entries + (size_t)y * width + x, NULL))
-        return false;
   return true;
 }
 

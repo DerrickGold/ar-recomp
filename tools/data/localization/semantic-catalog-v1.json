@@ -4,17 +4,130 @@
   "identity": "logical_consumer_route",
   "us_runtime_coverage": {
     "live_optional": [
-      "action.hud.act_label", "action.hud.enemy_label", "action.hud.player_label",
-      "action.hud.score_label", "action.hud.time_label",
-      "sim_sky.hud.angel_label", "sim_sky.hud.context_label", "sim_sky.hud.sp_label",
-      "credits.best_player", "credits.game_over", "credits.the_end",
-      "credits.page_00", "credits.page_01", "credits.page_02", "credits.page_03",
-      "credits.page_04", "credits.page_05", "credits.page_06", "credits.page_07",
-      "credits.page_08", "credits.page_09", "credits.page_10", "credits.page_11",
-      "credits.page_12", "credits.page_13", "credits.page_14"
+      "action.hud.lives_value",
+      "action.hud.time_value",
+      "action.hud.score_value",
+      "sim_sky.hud.population_value",
+      "sim_sky.hud.sp_value",
+      "action.hud.act_label",
+      "action.hud.enemy_label",
+      "action.hud.player_label",
+      "action.hud.score_label",
+      "action.hud.time_label",
+      "sim_sky.hud.angel_label",
+      "sim_sky.hud.context_label",
+      "sim_sky.hud.sp_label",
+      "credits.best_player",
+      "credits.game_over",
+      "credits.the_end",
+      "credits.page_00",
+      "credits.page_01",
+      "credits.page_02",
+      "credits.page_03",
+      "credits.page_04",
+      "credits.page_05",
+      "credits.page_06",
+      "credits.page_07",
+      "credits.page_08",
+      "credits.page_09",
+      "credits.page_10",
+      "credits.page_11",
+      "credits.page_12",
+      "credits.page_13",
+      "credits.page_14",
+      "world_map.location_label"
     ],
-    "dormant": ["credits.special_mode", "sound_test.menu.labels"]
+    "dormant": [
+      "credits.special_mode",
+      "sound_test.menu.labels"
+    ]
   },
+  "native_inks": [
+    {
+      "name": "native:location.band",
+      "key": "LocationBand",
+      "source": "location",
+      "index": 2
+    },
+    {
+      "name": "native:location.body",
+      "key": "LocationBody",
+      "source": "location",
+      "index": 3
+    },
+    {
+      "name": "native:location.shadow",
+      "key": "LocationShadow",
+      "source": "location",
+      "index": 1
+    },
+    {
+      "name": "native:dialogue.band",
+      "key": "DialogueBand",
+      "source": "cgram",
+      "index": 2
+    },
+    {
+      "name": "native:dialogue.body",
+      "key": "DialogueBody",
+      "source": "cgram",
+      "index": 3
+    },
+    {
+      "name": "native:dialogue.shadow",
+      "key": "DialogueShadow",
+      "source": "cgram",
+      "index": 1
+    },
+    {
+      "name": "native:hud.band",
+      "key": "HudBand",
+      "source": "hud",
+      "index": 2
+    },
+    {
+      "name": "native:hud.body",
+      "key": "HudBody",
+      "source": "hud",
+      "index": 3
+    },
+    {
+      "name": "native:hud.shadow",
+      "key": "HudShadow",
+      "source": "hud",
+      "index": 1
+    },
+    {
+      "name": "native:credits.body",
+      "key": "CreditsBody",
+      "source": "cgram",
+      "index": 1
+    },
+    {
+      "name": "native:credits.accent",
+      "key": "CreditsAccent",
+      "source": "cgram",
+      "index": 5
+    },
+    {
+      "name": "native:world.band",
+      "key": "WorldBand",
+      "source": "cgram",
+      "index": 131
+    },
+    {
+      "name": "native:world.body",
+      "key": "WorldBody",
+      "source": "cgram",
+      "index": 132
+    },
+    {
+      "name": "native:world.shadow",
+      "key": "WorldShadow",
+      "source": "cgram",
+      "index": 129
+    }
+  ],
   "limits": {
     "authored_pages_per_message": 64,
     "message_utf8_bytes": 262144,
@@ -22,8 +135,9 @@
     "wait_frames_per_message": 3600,
     "wait_frames_per_operation": 600
   },
-  "placeholder_count": 60,
+  "placeholder_count": 62,
   "placeholders": {
+    "hud_value": "localized_text",
     "city_aitos_growth_state": "localized_term",
     "city_aitos_items": "number",
     "city_aitos_level": "number",
@@ -83,7 +197,8 @@
     "sound_music_id": "number",
     "total_population": "number",
     "total_score": "number",
-    "town_name": "localized_text"
+    "town_name": "localized_text",
+    "location_name": "localized_text"
   },
   "regional_or_release_variant_route_count": 59,
   "release_order": [
@@ -95,6 +210,161 @@
   ],
   "route_count": 531,
   "optional_routes": [
+    {
+      "allowed_placeholders": [
+        "hud_value"
+      ],
+      "canonical_contract_profile": "us",
+      "contracts": {
+        "us": {
+          "required_anchors": []
+        },
+        "eu-en": {
+          "required_anchors": []
+        },
+        "de": {
+          "required_anchors": []
+        },
+        "fr": {
+          "required_anchors": []
+        },
+        "jp": {
+          "required_anchors": []
+        }
+      },
+      "id": "action.hud.lives_value",
+      "optional": true,
+      "presentation": {
+        "layout": "single_line_label",
+        "maximum_lines": 1,
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
+    },
+    {
+      "allowed_placeholders": [
+        "hud_value"
+      ],
+      "canonical_contract_profile": "us",
+      "contracts": {
+        "us": {
+          "required_anchors": []
+        },
+        "eu-en": {
+          "required_anchors": []
+        },
+        "de": {
+          "required_anchors": []
+        },
+        "fr": {
+          "required_anchors": []
+        },
+        "jp": {
+          "required_anchors": []
+        }
+      },
+      "id": "action.hud.time_value",
+      "optional": true,
+      "presentation": {
+        "layout": "single_line_label",
+        "maximum_lines": 1,
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
+    },
+    {
+      "allowed_placeholders": [
+        "hud_value"
+      ],
+      "canonical_contract_profile": "us",
+      "contracts": {
+        "us": {
+          "required_anchors": []
+        },
+        "eu-en": {
+          "required_anchors": []
+        },
+        "de": {
+          "required_anchors": []
+        },
+        "fr": {
+          "required_anchors": []
+        },
+        "jp": {
+          "required_anchors": []
+        }
+      },
+      "id": "action.hud.score_value",
+      "optional": true,
+      "presentation": {
+        "layout": "right_aligned_label",
+        "maximum_lines": 1,
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
+    },
+    {
+      "allowed_placeholders": [
+        "hud_value"
+      ],
+      "canonical_contract_profile": "us",
+      "contracts": {
+        "us": {
+          "required_anchors": []
+        },
+        "eu-en": {
+          "required_anchors": []
+        },
+        "de": {
+          "required_anchors": []
+        },
+        "fr": {
+          "required_anchors": []
+        },
+        "jp": {
+          "required_anchors": []
+        }
+      },
+      "id": "sim_sky.hud.population_value",
+      "optional": true,
+      "presentation": {
+        "layout": "single_line_label",
+        "maximum_lines": 1,
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
+    },
+    {
+      "allowed_placeholders": [
+        "hud_value"
+      ],
+      "canonical_contract_profile": "us",
+      "contracts": {
+        "us": {
+          "required_anchors": []
+        },
+        "eu-en": {
+          "required_anchors": []
+        },
+        "de": {
+          "required_anchors": []
+        },
+        "fr": {
+          "required_anchors": []
+        },
+        "jp": {
+          "required_anchors": []
+        }
+      },
+      "id": "sim_sky.hud.sp_value",
+      "optional": true,
+      "presentation": {
+        "layout": "single_line_label",
+        "maximum_lines": 1,
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
+    },
     {
       "allowed_placeholders": [],
       "canonical_contract_profile": "us",
@@ -118,6 +388,7 @@
       "id": "action.hud.act_label",
       "optional": true,
       "presentation": {
+        "layout": "framed_label",
         "maximum_lines": 1,
         "maximum_pages": 1,
         "shape": "fixed"
@@ -146,6 +417,7 @@
       "id": "action.hud.enemy_label",
       "optional": true,
       "presentation": {
+        "layout": "right_aligned_label",
         "maximum_lines": 1,
         "maximum_pages": 1,
         "shape": "fixed"
@@ -174,6 +446,7 @@
       "id": "action.hud.player_label",
       "optional": true,
       "presentation": {
+        "layout": "right_aligned_label",
         "maximum_lines": 1,
         "maximum_pages": 1,
         "shape": "fixed"
@@ -202,6 +475,7 @@
       "id": "action.hud.score_label",
       "optional": true,
       "presentation": {
+        "layout": "left_aligned_label",
         "maximum_lines": 1,
         "maximum_pages": 1,
         "shape": "fixed"
@@ -230,6 +504,7 @@
       "id": "action.hud.time_label",
       "optional": true,
       "presentation": {
+        "layout": "right_aligned_label",
         "maximum_lines": 1,
         "maximum_pages": 1,
         "shape": "fixed"
@@ -258,6 +533,7 @@
       "id": "credits.best_player",
       "optional": true,
       "presentation": {
+        "layout": "credits",
         "maximum_lines": 6,
         "maximum_pages": 1,
         "shape": "fixed"
@@ -286,6 +562,7 @@
       "id": "credits.game_over",
       "optional": true,
       "presentation": {
+        "layout": "credits",
         "maximum_lines": 6,
         "maximum_pages": 1,
         "shape": "fixed"
@@ -314,6 +591,7 @@
       "id": "credits.page_00",
       "optional": true,
       "presentation": {
+        "layout": "credits",
         "maximum_lines": 6,
         "maximum_pages": 1,
         "shape": "fixed"
@@ -342,6 +620,7 @@
       "id": "credits.page_01",
       "optional": true,
       "presentation": {
+        "layout": "credits",
         "maximum_lines": 6,
         "maximum_pages": 1,
         "shape": "fixed"
@@ -370,6 +649,7 @@
       "id": "credits.page_02",
       "optional": true,
       "presentation": {
+        "layout": "credits",
         "maximum_lines": 6,
         "maximum_pages": 1,
         "shape": "fixed"
@@ -398,6 +678,7 @@
       "id": "credits.page_03",
       "optional": true,
       "presentation": {
+        "layout": "credits",
         "maximum_lines": 6,
         "maximum_pages": 1,
         "shape": "fixed"
@@ -426,6 +707,7 @@
       "id": "credits.page_04",
       "optional": true,
       "presentation": {
+        "layout": "credits",
         "maximum_lines": 6,
         "maximum_pages": 1,
         "shape": "fixed"
@@ -454,6 +736,7 @@
       "id": "credits.page_05",
       "optional": true,
       "presentation": {
+        "layout": "credits",
         "maximum_lines": 6,
         "maximum_pages": 1,
         "shape": "fixed"
@@ -482,6 +765,7 @@
       "id": "credits.page_06",
       "optional": true,
       "presentation": {
+        "layout": "credits",
         "maximum_lines": 6,
         "maximum_pages": 1,
         "shape": "fixed"
@@ -510,6 +794,7 @@
       "id": "credits.page_07",
       "optional": true,
       "presentation": {
+        "layout": "credits",
         "maximum_lines": 6,
         "maximum_pages": 1,
         "shape": "fixed"
@@ -538,6 +823,7 @@
       "id": "credits.page_08",
       "optional": true,
       "presentation": {
+        "layout": "credits",
         "maximum_lines": 6,
         "maximum_pages": 1,
         "shape": "fixed"
@@ -566,6 +852,7 @@
       "id": "credits.page_09",
       "optional": true,
       "presentation": {
+        "layout": "credits",
         "maximum_lines": 6,
         "maximum_pages": 1,
         "shape": "fixed"
@@ -594,6 +881,7 @@
       "id": "credits.page_10",
       "optional": true,
       "presentation": {
+        "layout": "credits",
         "maximum_lines": 6,
         "maximum_pages": 1,
         "shape": "fixed"
@@ -622,6 +910,7 @@
       "id": "credits.page_11",
       "optional": true,
       "presentation": {
+        "layout": "credits",
         "maximum_lines": 6,
         "maximum_pages": 1,
         "shape": "fixed"
@@ -650,6 +939,7 @@
       "id": "credits.page_12",
       "optional": true,
       "presentation": {
+        "layout": "credits",
         "maximum_lines": 6,
         "maximum_pages": 1,
         "shape": "fixed"
@@ -678,6 +968,7 @@
       "id": "credits.page_13",
       "optional": true,
       "presentation": {
+        "layout": "credits",
         "maximum_lines": 6,
         "maximum_pages": 1,
         "shape": "fixed"
@@ -706,6 +997,7 @@
       "id": "credits.page_14",
       "optional": true,
       "presentation": {
+        "layout": "credits",
         "maximum_lines": 6,
         "maximum_pages": 1,
         "shape": "fixed"
@@ -734,6 +1026,7 @@
       "id": "credits.special_mode",
       "optional": true,
       "presentation": {
+        "layout": "credits",
         "maximum_lines": 6,
         "maximum_pages": 1,
         "shape": "fixed"
@@ -762,6 +1055,7 @@
       "id": "credits.the_end",
       "optional": true,
       "presentation": {
+        "layout": "credits",
         "maximum_lines": 6,
         "maximum_pages": 1,
         "shape": "fixed"
@@ -790,6 +1084,7 @@
       "id": "sim_sky.hud.angel_label",
       "optional": true,
       "presentation": {
+        "layout": "right_aligned_label",
         "maximum_lines": 1,
         "maximum_pages": 1,
         "shape": "fixed"
@@ -818,6 +1113,7 @@
       "id": "sim_sky.hud.context_label",
       "optional": true,
       "presentation": {
+        "layout": "framed_label",
         "maximum_lines": 1,
         "maximum_pages": 1,
         "shape": "fixed"
@@ -846,6 +1142,38 @@
       "id": "sim_sky.hud.sp_label",
       "optional": true,
       "presentation": {
+        "layout": "centered_label",
+        "maximum_lines": 1,
+        "maximum_pages": 1,
+        "shape": "fixed"
+      }
+    },
+    {
+      "allowed_placeholders": [
+        "location_name"
+      ],
+      "canonical_contract_profile": "us",
+      "contracts": {
+        "us": {
+          "required_anchors": []
+        },
+        "eu-en": {
+          "required_anchors": []
+        },
+        "de": {
+          "required_anchors": []
+        },
+        "fr": {
+          "required_anchors": []
+        },
+        "jp": {
+          "required_anchors": []
+        }
+      },
+      "id": "world_map.location_label",
+      "optional": true,
+      "presentation": {
+        "layout": "single_line_label",
         "maximum_lines": 1,
         "maximum_pages": 1,
         "shape": "fixed"
@@ -898,6 +1226,7 @@
       },
       "id": "action.hud.act_1",
       "presentation": {
+        "layout": "centered_label",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -954,6 +1283,7 @@
       },
       "id": "action.hud.act_2",
       "presentation": {
+        "layout": "centered_label",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -1010,6 +1340,7 @@
       },
       "id": "action.hud.clear",
       "presentation": {
+        "layout": "centered_label",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -1066,6 +1397,7 @@
       },
       "id": "action.hud.pause",
       "presentation": {
+        "layout": "centered_label",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -1122,6 +1454,7 @@
       },
       "id": "action.hud.ready",
       "presentation": {
+        "layout": "centered_label",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -1178,6 +1511,7 @@
       },
       "id": "action.hud.time_up",
       "presentation": {
+        "layout": "centered_label",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -1234,6 +1568,7 @@
       },
       "id": "action.stage_name.aitos",
       "presentation": {
+        "layout": "centered_label",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -1290,6 +1625,7 @@
       },
       "id": "action.stage_name.bloodpool",
       "presentation": {
+        "layout": "centered_label",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -1346,6 +1682,7 @@
       },
       "id": "action.stage_name.death_heim",
       "presentation": {
+        "layout": "centered_label",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -1402,6 +1739,7 @@
       },
       "id": "action.stage_name.fillmore",
       "presentation": {
+        "layout": "centered_label",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -1458,6 +1796,7 @@
       },
       "id": "action.stage_name.kasandora",
       "presentation": {
+        "layout": "centered_label",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -1514,6 +1853,7 @@
       },
       "id": "action.stage_name.marahna",
       "presentation": {
+        "layout": "centered_label",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -1570,6 +1910,7 @@
       },
       "id": "action.stage_name.northwall",
       "presentation": {
+        "layout": "centered_label",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -1626,6 +1967,7 @@
       },
       "id": "city.aitos.name",
       "presentation": {
+        "layout": "single_line_label",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -1682,6 +2024,7 @@
       },
       "id": "city.bloodpool.name",
       "presentation": {
+        "layout": "single_line_label",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -1738,6 +2081,7 @@
       },
       "id": "city.death_heim.name",
       "presentation": {
+        "layout": "single_line_label",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -1794,6 +2138,7 @@
       },
       "id": "city.fillmore.name",
       "presentation": {
+        "layout": "single_line_label",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -1850,6 +2195,7 @@
       },
       "id": "city.kasandora.name",
       "presentation": {
+        "layout": "single_line_label",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -1906,6 +2252,7 @@
       },
       "id": "city.marahna.name",
       "presentation": {
+        "layout": "single_line_label",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -1962,6 +2309,7 @@
       },
       "id": "city.northwall.name",
       "presentation": {
+        "layout": "single_line_label",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -2357,6 +2705,7 @@
       },
       "id": "dialogue.ending.slot_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -2860,6 +3209,7 @@
       },
       "id": "dialogue.ending.slot_01",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -3313,6 +3663,7 @@
       },
       "id": "dialogue.ending.slot_02",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -3761,6 +4112,7 @@
       },
       "id": "dialogue.ending.slot_03",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -4144,6 +4496,7 @@
       },
       "id": "dialogue.ending.slot_04",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -4487,6 +4840,7 @@
       },
       "id": "dialogue.ending.slot_05",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -5040,6 +5394,7 @@
       },
       "id": "dialogue.ending.slot_06",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -5543,6 +5898,7 @@
       },
       "id": "dialogue.ending.slot_07",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -5597,6 +5953,7 @@
       },
       "id": "dialogue.event.relay.aitos",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -5652,6 +6009,7 @@
       },
       "id": "dialogue.event.relay.bloodpool",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -5707,6 +6065,7 @@
       },
       "id": "dialogue.event.relay.fillmore",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -5762,6 +6121,7 @@
       },
       "id": "dialogue.event.relay.kasandora",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -5817,6 +6177,7 @@
       },
       "id": "dialogue.event.relay.marahna",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -5872,6 +6233,7 @@
       },
       "id": "dialogue.event.relay.northwall",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -6367,6 +6729,7 @@
       },
       "id": "dialogue.event.wrapper_00.call_00.source_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -6966,6 +7329,7 @@
       },
       "id": "dialogue.event.wrapper_00.call_00.source_01",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -7506,6 +7870,7 @@
       },
       "id": "dialogue.event.wrapper_00.call_00.source_02",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -8031,6 +8396,7 @@
       },
       "id": "dialogue.event.wrapper_00.call_00.source_03",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -8481,6 +8847,7 @@
       },
       "id": "dialogue.event.wrapper_00.call_00.source_04",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -8941,6 +9308,7 @@
       },
       "id": "dialogue.event.wrapper_00.call_00.source_05",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -9502,6 +9870,7 @@
       },
       "id": "dialogue.event.wrapper_00.call_00.source_06",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -9582,6 +9951,7 @@
       },
       "id": "dialogue.event.wrapper_00.call_01.source_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -9637,6 +10007,7 @@
       },
       "id": "dialogue.event.wrapper_00.call_02.source_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -9735,6 +10106,7 @@
       },
       "id": "dialogue.event.wrapper_00.call_03.source_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -9815,6 +10187,7 @@
       },
       "id": "dialogue.event.wrapper_00.call_04.source_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -9907,6 +10280,7 @@
       },
       "id": "dialogue.event.wrapper_00.call_05.source_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -10005,6 +10379,7 @@
       },
       "id": "dialogue.event.wrapper_00.call_05.source_01",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -10103,6 +10478,7 @@
       },
       "id": "dialogue.event.wrapper_00.call_06.source_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -10195,6 +10571,7 @@
       },
       "id": "dialogue.event.wrapper_00.call_07.source_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -10289,6 +10666,7 @@
       },
       "id": "dialogue.event.wrapper_00.call_08.source_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -10387,6 +10765,7 @@
       },
       "id": "dialogue.event.wrapper_00.call_09.source_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -10485,6 +10864,7 @@
       },
       "id": "dialogue.event.wrapper_00.call_10.source_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -10583,6 +10963,7 @@
       },
       "id": "dialogue.event.wrapper_00.call_11.source_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -10675,6 +11056,7 @@
       },
       "id": "dialogue.event.wrapper_00.call_12.source_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -10755,6 +11137,7 @@
       },
       "id": "dialogue.event.wrapper_00.call_13.source_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -10853,6 +11236,7 @@
       },
       "id": "dialogue.event.wrapper_00.call_14.source_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -10945,6 +11329,7 @@
       },
       "id": "dialogue.event.wrapper_00.call_15.source_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -11037,6 +11422,7 @@
       },
       "id": "dialogue.event.wrapper_00.call_16.source_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -11117,6 +11503,7 @@
       },
       "id": "dialogue.event.wrapper_00.call_17.source_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -11231,6 +11618,7 @@
       },
       "id": "dialogue.event.wrapper_01.call_00.source_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -11343,6 +11731,7 @@
       },
       "id": "dialogue.event.wrapper_01.call_01.source_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -11461,6 +11850,7 @@
       },
       "id": "dialogue.event.wrapper_01.call_02.source_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -11565,6 +11955,7 @@
       },
       "id": "dialogue.event.wrapper_01.call_03.source_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -11620,6 +12011,7 @@
       },
       "id": "dialogue.event.wrapper_02.call_00.source_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -11704,6 +12096,7 @@
       },
       "id": "dialogue.event.wrapper_02.call_01.source_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -11783,6 +12176,7 @@
       },
       "id": "dialogue.event.wrapper_02.call_02.source_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -11864,6 +12258,7 @@
       },
       "id": "dialogue.event.wrapper_02.call_03.source_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -11955,6 +12350,7 @@
       },
       "id": "dialogue.event.wrapper_03.call_01.source_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -12035,6 +12431,7 @@
       },
       "id": "dialogue.event.wrapper_04.call_00.source_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -12127,6 +12524,7 @@
       },
       "id": "dialogue.event.wrapper_04.call_01.source_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -12219,6 +12617,7 @@
       },
       "id": "dialogue.event.wrapper_04.call_02.source_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -12306,6 +12705,7 @@
       },
       "id": "dialogue.event.wrapper_04.call_03.source_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -12394,6 +12794,7 @@
       },
       "id": "dialogue.event.wrapper_04.call_04.source_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -12486,6 +12887,7 @@
       },
       "id": "dialogue.event.wrapper_04.call_05.source_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -12570,6 +12972,7 @@
       },
       "id": "dialogue.event.wrapper_04.call_06.source_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -12650,6 +13053,7 @@
       },
       "id": "dialogue.event.wrapper_04.call_07.source_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -12740,6 +13144,7 @@
       },
       "id": "dialogue.event.wrapper_04.call_08.source_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -12838,6 +13243,7 @@
       },
       "id": "dialogue.event.wrapper_04.call_09.source_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -12936,6 +13342,7 @@
       },
       "id": "dialogue.event.wrapper_04.call_10.source_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -13034,6 +13441,7 @@
       },
       "id": "dialogue.event.wrapper_04.call_11.source_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -13132,6 +13540,7 @@
       },
       "id": "dialogue.event.wrapper_04.call_12.source_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -13212,6 +13621,7 @@
       },
       "id": "dialogue.event.wrapper_05.call_00.source_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -13307,6 +13717,7 @@
       },
       "id": "dialogue.event.wrapper_05.call_01.source_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -13399,6 +13810,7 @@
       },
       "id": "dialogue.event.wrapper_05.call_02.source_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -13881,6 +14293,7 @@
       },
       "id": "dialogue.event.wrapper_05.call_03.source_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -13974,6 +14387,7 @@
       },
       "id": "dialogue.event.wrapper_05.call_04.source_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -14067,6 +14481,7 @@
       },
       "id": "dialogue.event.wrapper_05.call_05.source_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -14691,6 +15106,7 @@
       },
       "id": "dialogue.event.wrapper_05.call_06.source_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -14783,6 +15199,7 @@
       },
       "id": "dialogue.event.wrapper_05.call_07.source_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -14875,6 +15292,7 @@
       },
       "id": "dialogue.event.wrapper_05.call_08.source_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -14955,6 +15373,7 @@
       },
       "id": "dialogue.event.wrapper_05.call_09.source_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -15035,6 +15454,7 @@
       },
       "id": "dialogue.event.wrapper_05.call_10.source_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -15127,6 +15547,7 @@
       },
       "id": "dialogue.event.wrapper_05.call_11.source_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -15207,6 +15628,7 @@
       },
       "id": "dialogue.event.wrapper_05.call_12.source_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -15299,6 +15721,7 @@
       },
       "id": "dialogue.event.wrapper_05.call_13.source_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -15391,6 +15814,7 @@
       },
       "id": "dialogue.event.wrapper_05.call_14.source_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -15483,6 +15907,7 @@
       },
       "id": "dialogue.event.wrapper_05.call_15.source_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -15575,6 +16000,7 @@
       },
       "id": "dialogue.event.wrapper_05.call_16.source_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -15667,6 +16093,7 @@
       },
       "id": "dialogue.event.wrapper_05.call_17.source_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -15751,6 +16178,7 @@
       },
       "id": "dialogue.event.wrapper_05.call_18.source_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -15831,6 +16259,7 @@
       },
       "id": "dialogue.event.wrapper_05.call_19.source_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -15923,6 +16352,7 @@
       },
       "id": "dialogue.event.wrapper_05.call_20.source_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -16003,6 +16433,7 @@
       },
       "id": "dialogue.event.wrapper_05.call_21.source_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -16083,6 +16514,7 @@
       },
       "id": "dialogue.event.wrapper_05.call_22.source_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -16163,6 +16595,7 @@
       },
       "id": "dialogue.event.wrapper_05.call_23.source_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -16243,6 +16676,7 @@
       },
       "id": "dialogue.event.wrapper_05.call_24.source_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -16323,6 +16757,7 @@
       },
       "id": "dialogue.event.wrapper_05.call_25.source_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -16403,6 +16838,7 @@
       },
       "id": "dialogue.event.wrapper_05.call_26.source_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -16483,6 +16919,7 @@
       },
       "id": "dialogue.event.wrapper_05.call_27.source_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -16575,6 +17012,7 @@
       },
       "id": "dialogue.event.wrapper_06.route_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -16655,6 +17093,7 @@
       },
       "id": "dialogue.event.wrapper_06.route_01",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -16747,6 +17186,7 @@
       },
       "id": "dialogue.event.wrapper_06.route_02",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -16839,6 +17279,7 @@
       },
       "id": "dialogue.event.wrapper_06.route_03",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -16931,6 +17372,7 @@
       },
       "id": "dialogue.event.wrapper_06.route_04",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -17023,6 +17465,7 @@
       },
       "id": "dialogue.event.wrapper_06.route_05",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -17115,6 +17558,7 @@
       },
       "id": "dialogue.event.wrapper_06.route_06",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -17195,6 +17639,7 @@
       },
       "id": "dialogue.offering.slot_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -17275,6 +17720,7 @@
       },
       "id": "dialogue.offering.slot_01",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -17355,6 +17801,7 @@
       },
       "id": "dialogue.offering.slot_02",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -17435,6 +17882,7 @@
       },
       "id": "dialogue.offering.slot_03",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -17515,6 +17963,7 @@
       },
       "id": "dialogue.offering.slot_04",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -17595,6 +18044,7 @@
       },
       "id": "dialogue.offering.slot_05",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -17675,6 +18125,7 @@
       },
       "id": "dialogue.offering.slot_06",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -17755,6 +18206,7 @@
       },
       "id": "dialogue.offering.slot_07",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -17835,6 +18287,7 @@
       },
       "id": "dialogue.offering.slot_08",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -17915,6 +18368,7 @@
       },
       "id": "dialogue.offering.slot_09",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -17995,6 +18449,7 @@
       },
       "id": "dialogue.offering.slot_10",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -18075,6 +18530,7 @@
       },
       "id": "dialogue.offering.slot_11",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -18155,6 +18611,7 @@
       },
       "id": "dialogue.offering.slot_12",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -18235,6 +18692,7 @@
       },
       "id": "dialogue.offering.slot_13",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -18315,6 +18773,7 @@
       },
       "id": "dialogue.offering.slot_14",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -18395,6 +18854,7 @@
       },
       "id": "dialogue.offering.slot_15",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -18475,6 +18935,7 @@
       },
       "id": "dialogue.offering.slot_16",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -18555,6 +19016,7 @@
       },
       "id": "dialogue.offering.slot_17",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -18635,6 +19097,7 @@
       },
       "id": "dialogue.offering.slot_18",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -18715,6 +19178,7 @@
       },
       "id": "dialogue.offering.slot_19",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -18742,6 +19206,7 @@
       },
       "id": "dialogue.offering.slot_20",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -18793,6 +19258,7 @@
       },
       "id": "enemy.name.slot_00",
       "presentation": {
+        "layout": "inline",
         "maximum_lines": 1,
         "maximum_pages": 1,
         "shape": "inline"
@@ -18850,6 +19316,7 @@
       },
       "id": "enemy.name.slot_01",
       "presentation": {
+        "layout": "inline",
         "maximum_lines": 1,
         "maximum_pages": 1,
         "shape": "inline"
@@ -18907,6 +19374,7 @@
       },
       "id": "enemy.name.slot_02",
       "presentation": {
+        "layout": "inline",
         "maximum_lines": 1,
         "maximum_pages": 1,
         "shape": "inline"
@@ -18964,6 +19432,7 @@
       },
       "id": "enemy.name.slot_03",
       "presentation": {
+        "layout": "inline",
         "maximum_lines": 1,
         "maximum_pages": 1,
         "shape": "inline"
@@ -19021,6 +19490,7 @@
       },
       "id": "growth_state.00",
       "presentation": {
+        "layout": "inline",
         "maximum_lines": 1,
         "maximum_pages": 1,
         "shape": "inline"
@@ -19078,6 +19548,7 @@
       },
       "id": "growth_state.01",
       "presentation": {
+        "layout": "inline",
         "maximum_lines": 1,
         "maximum_pages": 1,
         "shape": "inline"
@@ -19135,6 +19606,7 @@
       },
       "id": "growth_state.02",
       "presentation": {
+        "layout": "inline",
         "maximum_lines": 1,
         "maximum_pages": 1,
         "shape": "inline"
@@ -19192,6 +19664,7 @@
       },
       "id": "growth_state.03",
       "presentation": {
+        "layout": "inline",
         "maximum_lines": 1,
         "maximum_pages": 1,
         "shape": "inline"
@@ -19249,6 +19722,7 @@
       },
       "id": "growth_state.04",
       "presentation": {
+        "layout": "inline",
         "maximum_lines": 1,
         "maximum_pages": 1,
         "shape": "inline"
@@ -19306,6 +19780,7 @@
       },
       "id": "growth_state.05",
       "presentation": {
+        "layout": "inline",
         "maximum_lines": 1,
         "maximum_pages": 1,
         "shape": "inline"
@@ -19376,6 +19851,7 @@
       },
       "id": "name_entry.prompt_and_alphabet",
       "presentation": {
+        "layout": "keyboard",
         "shape": "keyboard"
       },
       "source_categories": {
@@ -19406,6 +19882,7 @@
       },
       "id": "name_entry.prompt_and_hiragana",
       "presentation": {
+        "layout": "keyboard",
         "shape": "keyboard"
       },
       "source_categories": {
@@ -19433,6 +19910,7 @@
       },
       "id": "name_entry.prompt_and_katakana",
       "presentation": {
+        "layout": "keyboard",
         "shape": "keyboard"
       },
       "source_categories": {
@@ -19488,6 +19966,7 @@
       },
       "id": "name_entry.selection_cursor",
       "presentation": {
+        "layout": "inline",
         "maximum_lines": 1,
         "maximum_pages": 1,
         "shape": "inline"
@@ -19545,6 +20024,7 @@
       },
       "id": "required_master_level.00",
       "presentation": {
+        "layout": "inline",
         "maximum_lines": 1,
         "maximum_pages": 1,
         "shape": "inline"
@@ -19602,6 +20082,7 @@
       },
       "id": "required_master_level.01",
       "presentation": {
+        "layout": "inline",
         "maximum_lines": 1,
         "maximum_pages": 1,
         "shape": "inline"
@@ -19659,6 +20140,7 @@
       },
       "id": "required_master_level.02",
       "presentation": {
+        "layout": "inline",
         "maximum_lines": 1,
         "maximum_pages": 1,
         "shape": "inline"
@@ -19716,6 +20198,7 @@
       },
       "id": "required_master_level.03",
       "presentation": {
+        "layout": "inline",
         "maximum_lines": 1,
         "maximum_pages": 1,
         "shape": "inline"
@@ -19773,6 +20256,7 @@
       },
       "id": "required_master_level.04",
       "presentation": {
+        "layout": "inline",
         "maximum_lines": 1,
         "maximum_pages": 1,
         "shape": "inline"
@@ -19830,6 +20314,7 @@
       },
       "id": "required_master_level.05",
       "presentation": {
+        "layout": "inline",
         "maximum_lines": 1,
         "maximum_pages": 1,
         "shape": "inline"
@@ -19900,6 +20385,7 @@
       },
       "id": "sim.development.direction.cancel_confirm",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -19991,6 +20477,7 @@
       },
       "id": "sim.development.direction.prompt",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -20071,6 +20558,7 @@
       },
       "id": "sim.inventory.cancelled",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -20183,6 +20671,7 @@
       },
       "id": "sim.inventory.choose_item",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -20275,6 +20764,7 @@
       },
       "id": "sim.inventory.empty",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -20355,6 +20845,7 @@
       },
       "id": "sim.inventory.full",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -20410,6 +20901,7 @@
       },
       "id": "sim.menu.building_direction",
       "presentation": {
+        "layout": "fixed_rows",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -20466,6 +20958,7 @@
       },
       "id": "sim.menu.choice.direct_people",
       "presentation": {
+        "layout": "fixed_rows",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -20522,6 +21015,7 @@
       },
       "id": "sim.menu.choice.miracles",
       "presentation": {
+        "layout": "fixed_rows",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -20578,6 +21072,7 @@
       },
       "id": "sim.menu.choice.movement",
       "presentation": {
+        "layout": "fixed_rows",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -20634,6 +21129,7 @@
       },
       "id": "sim.menu.choice.offerings",
       "presentation": {
+        "layout": "fixed_rows",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -20690,6 +21186,7 @@
       },
       "id": "sim.menu.choice.other",
       "presentation": {
+        "layout": "fixed_rows",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -20746,6 +21243,7 @@
       },
       "id": "sim.menu.choice.status",
       "presentation": {
+        "layout": "fixed_rows",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -20802,6 +21300,7 @@
       },
       "id": "sim.menu.earthquake",
       "presentation": {
+        "layout": "fixed_rows",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -20858,6 +21357,7 @@
       },
       "id": "sim.menu.lightning",
       "presentation": {
+        "layout": "fixed_rows",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -20914,6 +21414,7 @@
       },
       "id": "sim.menu.listen",
       "presentation": {
+        "layout": "fixed_rows",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -20970,6 +21471,7 @@
       },
       "id": "sim.menu.message_speed",
       "presentation": {
+        "layout": "fixed_rows",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -21026,6 +21528,7 @@
       },
       "id": "sim.menu.offering_action.give_oracle",
       "presentation": {
+        "layout": "fixed_rows",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -21082,6 +21585,7 @@
       },
       "id": "sim.menu.offering_action.listen",
       "presentation": {
+        "layout": "fixed_rows",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -21114,6 +21618,7 @@
       },
       "id": "sim.menu.offering_action.selected",
       "presentation": {
+        "layout": "fixed_rows",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -21166,6 +21671,7 @@
       },
       "id": "sim.menu.offering_action.take_offering",
       "presentation": {
+        "layout": "fixed_rows",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -21222,6 +21728,7 @@
       },
       "id": "sim.menu.possession.slot_00",
       "presentation": {
+        "layout": "fixed_rows",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -21278,6 +21785,7 @@
       },
       "id": "sim.menu.possession.slot_01",
       "presentation": {
+        "layout": "fixed_rows",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -21334,6 +21842,7 @@
       },
       "id": "sim.menu.possession.slot_02",
       "presentation": {
+        "layout": "fixed_rows",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -21390,6 +21899,7 @@
       },
       "id": "sim.menu.possession.slot_03",
       "presentation": {
+        "layout": "fixed_rows",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -21446,6 +21956,7 @@
       },
       "id": "sim.menu.possession.slot_04",
       "presentation": {
+        "layout": "fixed_rows",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -21502,6 +22013,7 @@
       },
       "id": "sim.menu.possession.slot_05",
       "presentation": {
+        "layout": "fixed_rows",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -21558,6 +22070,7 @@
       },
       "id": "sim.menu.possession.slot_06",
       "presentation": {
+        "layout": "fixed_rows",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -21614,6 +22127,7 @@
       },
       "id": "sim.menu.possession.slot_07",
       "presentation": {
+        "layout": "fixed_rows",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -21670,6 +22184,7 @@
       },
       "id": "sim.menu.possession.slot_08",
       "presentation": {
+        "layout": "fixed_rows",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -21726,6 +22241,7 @@
       },
       "id": "sim.menu.possession.slot_09",
       "presentation": {
+        "layout": "fixed_rows",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -21782,6 +22298,7 @@
       },
       "id": "sim.menu.possession.slot_10",
       "presentation": {
+        "layout": "fixed_rows",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -21838,6 +22355,7 @@
       },
       "id": "sim.menu.possession.slot_11",
       "presentation": {
+        "layout": "fixed_rows",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -21894,6 +22412,7 @@
       },
       "id": "sim.menu.possession.slot_12",
       "presentation": {
+        "layout": "fixed_rows",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -21950,6 +22469,7 @@
       },
       "id": "sim.menu.possession.slot_13",
       "presentation": {
+        "layout": "fixed_rows",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -22006,6 +22526,7 @@
       },
       "id": "sim.menu.possession.slot_14",
       "presentation": {
+        "layout": "fixed_rows",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -22062,6 +22583,7 @@
       },
       "id": "sim.menu.possession.slot_15",
       "presentation": {
+        "layout": "fixed_rows",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -22118,6 +22640,7 @@
       },
       "id": "sim.menu.possession.slot_16",
       "presentation": {
+        "layout": "fixed_rows",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -22174,6 +22697,7 @@
       },
       "id": "sim.menu.possession.slot_17",
       "presentation": {
+        "layout": "fixed_rows",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -22230,6 +22754,7 @@
       },
       "id": "sim.menu.possession.slot_18",
       "presentation": {
+        "layout": "fixed_rows",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -22286,6 +22811,7 @@
       },
       "id": "sim.menu.possession.slot_19",
       "presentation": {
+        "layout": "fixed_rows",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -22342,6 +22868,7 @@
       },
       "id": "sim.menu.progress_log",
       "presentation": {
+        "layout": "fixed_rows",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -22398,6 +22925,7 @@
       },
       "id": "sim.menu.rain",
       "presentation": {
+        "layout": "fixed_rows",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -22454,6 +22982,7 @@
       },
       "id": "sim.menu.return_to_palace",
       "presentation": {
+        "layout": "fixed_rows",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -22510,6 +23039,7 @@
       },
       "id": "sim.menu.sky_palace_movement",
       "presentation": {
+        "layout": "fixed_rows",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -22566,6 +23096,7 @@
       },
       "id": "sim.menu.status_cities",
       "presentation": {
+        "layout": "fixed_rows",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -22622,6 +23153,7 @@
       },
       "id": "sim.menu.status_master",
       "presentation": {
+        "layout": "fixed_rows",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -22678,6 +23210,7 @@
       },
       "id": "sim.menu.sun",
       "presentation": {
+        "layout": "fixed_rows",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -22734,6 +23267,7 @@
       },
       "id": "sim.menu.take_offering",
       "presentation": {
+        "layout": "fixed_rows",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -22790,6 +23324,7 @@
       },
       "id": "sim.menu.use_offering",
       "presentation": {
+        "layout": "fixed_rows",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -22846,6 +23381,7 @@
       },
       "id": "sim.menu.wind",
       "presentation": {
+        "layout": "fixed_rows",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -22902,6 +23438,7 @@
       },
       "id": "sim.miracle.earthquake.cancel",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -23002,6 +23539,7 @@
       },
       "id": "sim.miracle.earthquake.confirm",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -23082,6 +23620,7 @@
       },
       "id": "sim.miracle.earthquake.description",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -23141,6 +23680,7 @@
       },
       "id": "sim.miracle.earthquake.insufficient_sp",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -23241,6 +23781,7 @@
       },
       "id": "sim.miracle.lightning.confirm",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -23321,6 +23862,7 @@
       },
       "id": "sim.miracle.lightning.description",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -23380,6 +23922,7 @@
       },
       "id": "sim.miracle.lightning.insufficient_sp",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -23435,6 +23978,7 @@
       },
       "id": "sim.miracle.lightning.target_cancel",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -23490,6 +24034,7 @@
       },
       "id": "sim.miracle.lightning.target_prompt",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -23590,6 +24135,7 @@
       },
       "id": "sim.miracle.rain.confirm",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -23670,6 +24216,7 @@
       },
       "id": "sim.miracle.rain.description",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -23729,6 +24276,7 @@
       },
       "id": "sim.miracle.rain.insufficient_sp",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -23784,6 +24332,7 @@
       },
       "id": "sim.miracle.rain.target_cancel",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -23839,6 +24388,7 @@
       },
       "id": "sim.miracle.rain.target_prompt",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -23939,6 +24489,7 @@
       },
       "id": "sim.miracle.sun.confirm",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -24019,6 +24570,7 @@
       },
       "id": "sim.miracle.sun.description",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -24078,6 +24630,7 @@
       },
       "id": "sim.miracle.sun.insufficient_sp",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -24133,6 +24686,7 @@
       },
       "id": "sim.miracle.sun.target_cancel",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -24188,6 +24742,7 @@
       },
       "id": "sim.miracle.sun.target_prompt",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -24243,6 +24798,7 @@
       },
       "id": "sim.miracle.wind.cancel",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -24343,6 +24899,7 @@
       },
       "id": "sim.miracle.wind.confirm",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -24423,6 +24980,7 @@
       },
       "id": "sim.miracle.wind.description",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -24482,6 +25040,7 @@
       },
       "id": "sim.miracle.wind.insufficient_sp",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -24537,6 +25096,7 @@
       },
       "id": "sim.offerings.cancelled",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -24637,6 +25197,7 @@
       },
       "id": "sim.offerings.choose",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -24737,6 +25298,7 @@
       },
       "id": "sim.offerings.choose_more",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -24792,6 +25354,7 @@
       },
       "id": "sim.offerings.completed",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -24872,6 +25435,7 @@
       },
       "id": "sim.offerings.unavailable.inventory_full",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -24964,6 +25528,7 @@
       },
       "id": "sim.offerings.unavailable.no_residents",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -25044,6 +25609,7 @@
       },
       "id": "sim.offerings.unavailable.none",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -25124,6 +25690,7 @@
       },
       "id": "sim.town.gratitude",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -25204,6 +25771,7 @@
       },
       "id": "simulation.event.aitos.slot_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -25288,6 +25856,7 @@
       },
       "id": "simulation.event.aitos.slot_01",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -25368,6 +25937,7 @@
       },
       "id": "simulation.event.aitos.slot_02",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -25448,6 +26018,7 @@
       },
       "id": "simulation.event.aitos.slot_03",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -25528,6 +26099,7 @@
       },
       "id": "simulation.event.aitos.slot_04",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -25608,6 +26180,7 @@
       },
       "id": "simulation.event.aitos.slot_05",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -25688,6 +26261,7 @@
       },
       "id": "simulation.event.aitos.slot_06",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -25768,6 +26342,7 @@
       },
       "id": "simulation.event.aitos.slot_07",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -25848,6 +26423,7 @@
       },
       "id": "simulation.event.aitos.slot_08",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -25928,6 +26504,7 @@
       },
       "id": "simulation.event.aitos.slot_09",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -26008,6 +26585,7 @@
       },
       "id": "simulation.event.aitos.slot_10",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -26088,6 +26666,7 @@
       },
       "id": "simulation.event.aitos.slot_11",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -26168,6 +26747,7 @@
       },
       "id": "simulation.event.aitos.slot_12",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -26248,6 +26828,7 @@
       },
       "id": "simulation.event.aitos.slot_13",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -26328,6 +26909,7 @@
       },
       "id": "simulation.event.aitos.slot_14",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -26408,6 +26990,7 @@
       },
       "id": "simulation.event.aitos.slot_15",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -26488,6 +27071,7 @@
       },
       "id": "simulation.event.aitos.slot_16",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -26568,6 +27152,7 @@
       },
       "id": "simulation.event.aitos.slot_17",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -26648,6 +27233,7 @@
       },
       "id": "simulation.event.aitos.slot_18",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -26728,6 +27314,7 @@
       },
       "id": "simulation.event.aitos.slot_19",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -26808,6 +27395,7 @@
       },
       "id": "simulation.event.aitos.slot_20",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -26888,6 +27476,7 @@
       },
       "id": "simulation.event.aitos.slot_21",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -26968,6 +27557,7 @@
       },
       "id": "simulation.event.aitos.slot_22",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -27048,6 +27638,7 @@
       },
       "id": "simulation.event.aitos.slot_23",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -27128,6 +27719,7 @@
       },
       "id": "simulation.event.aitos.slot_24",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -27208,6 +27800,7 @@
       },
       "id": "simulation.event.aitos.slot_25",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -27288,6 +27881,7 @@
       },
       "id": "simulation.event.aitos.slot_26",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -27368,6 +27962,7 @@
       },
       "id": "simulation.event.aitos.slot_27",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -27448,6 +28043,7 @@
       },
       "id": "simulation.event.aitos.slot_28",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -27528,6 +28124,7 @@
       },
       "id": "simulation.event.aitos.slot_29",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -27608,6 +28205,7 @@
       },
       "id": "simulation.event.aitos.slot_30",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -27688,6 +28286,7 @@
       },
       "id": "simulation.event.aitos.slot_31",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -27768,6 +28367,7 @@
       },
       "id": "simulation.event.bloodpool.slot_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -27852,6 +28452,7 @@
       },
       "id": "simulation.event.bloodpool.slot_01",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -27932,6 +28533,7 @@
       },
       "id": "simulation.event.bloodpool.slot_02",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -28012,6 +28614,7 @@
       },
       "id": "simulation.event.bloodpool.slot_03",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -28092,6 +28695,7 @@
       },
       "id": "simulation.event.bloodpool.slot_04",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -28172,6 +28776,7 @@
       },
       "id": "simulation.event.bloodpool.slot_05",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -28252,6 +28857,7 @@
       },
       "id": "simulation.event.bloodpool.slot_06",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -28332,6 +28938,7 @@
       },
       "id": "simulation.event.bloodpool.slot_07",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -28412,6 +29019,7 @@
       },
       "id": "simulation.event.bloodpool.slot_08",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -28492,6 +29100,7 @@
       },
       "id": "simulation.event.bloodpool.slot_09",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -28572,6 +29181,7 @@
       },
       "id": "simulation.event.bloodpool.slot_10",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -28652,6 +29262,7 @@
       },
       "id": "simulation.event.bloodpool.slot_11",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -28732,6 +29343,7 @@
       },
       "id": "simulation.event.bloodpool.slot_12",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -28812,6 +29424,7 @@
       },
       "id": "simulation.event.bloodpool.slot_13",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -28892,6 +29505,7 @@
       },
       "id": "simulation.event.bloodpool.slot_14",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -28972,6 +29586,7 @@
       },
       "id": "simulation.event.bloodpool.slot_15",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -29052,6 +29667,7 @@
       },
       "id": "simulation.event.bloodpool.slot_16",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -29132,6 +29748,7 @@
       },
       "id": "simulation.event.bloodpool.slot_17",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -29212,6 +29829,7 @@
       },
       "id": "simulation.event.bloodpool.slot_18",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -29292,6 +29910,7 @@
       },
       "id": "simulation.event.bloodpool.slot_19",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -29372,6 +29991,7 @@
       },
       "id": "simulation.event.bloodpool.slot_20",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -29452,6 +30072,7 @@
       },
       "id": "simulation.event.bloodpool.slot_21",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -29532,6 +30153,7 @@
       },
       "id": "simulation.event.bloodpool.slot_22",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -29612,6 +30234,7 @@
       },
       "id": "simulation.event.bloodpool.slot_23",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -29692,6 +30315,7 @@
       },
       "id": "simulation.event.bloodpool.slot_24",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -29772,6 +30396,7 @@
       },
       "id": "simulation.event.bloodpool.slot_25",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -29852,6 +30477,7 @@
       },
       "id": "simulation.event.bloodpool.slot_26",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -29932,6 +30558,7 @@
       },
       "id": "simulation.event.bloodpool.slot_27",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -30012,6 +30639,7 @@
       },
       "id": "simulation.event.bloodpool.slot_28",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -30092,6 +30720,7 @@
       },
       "id": "simulation.event.bloodpool.slot_29",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -30172,6 +30801,7 @@
       },
       "id": "simulation.event.bloodpool.slot_30",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -30252,6 +30882,7 @@
       },
       "id": "simulation.event.bloodpool.slot_31",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -30332,6 +30963,7 @@
       },
       "id": "simulation.event.fillmore.slot_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -30416,6 +31048,7 @@
       },
       "id": "simulation.event.fillmore.slot_01",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -30496,6 +31129,7 @@
       },
       "id": "simulation.event.fillmore.slot_02",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -30576,6 +31210,7 @@
       },
       "id": "simulation.event.fillmore.slot_03",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -30656,6 +31291,7 @@
       },
       "id": "simulation.event.fillmore.slot_04",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -30736,6 +31372,7 @@
       },
       "id": "simulation.event.fillmore.slot_05",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -30816,6 +31453,7 @@
       },
       "id": "simulation.event.fillmore.slot_06",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -30896,6 +31534,7 @@
       },
       "id": "simulation.event.fillmore.slot_07",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -30976,6 +31615,7 @@
       },
       "id": "simulation.event.fillmore.slot_08",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -31056,6 +31696,7 @@
       },
       "id": "simulation.event.fillmore.slot_09",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -31136,6 +31777,7 @@
       },
       "id": "simulation.event.fillmore.slot_10",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -31216,6 +31858,7 @@
       },
       "id": "simulation.event.fillmore.slot_11",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -31296,6 +31939,7 @@
       },
       "id": "simulation.event.fillmore.slot_12",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -31376,6 +32020,7 @@
       },
       "id": "simulation.event.fillmore.slot_13",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -31456,6 +32101,7 @@
       },
       "id": "simulation.event.fillmore.slot_14",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -31536,6 +32182,7 @@
       },
       "id": "simulation.event.fillmore.slot_15",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -31616,6 +32263,7 @@
       },
       "id": "simulation.event.fillmore.slot_16",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -31696,6 +32344,7 @@
       },
       "id": "simulation.event.fillmore.slot_17",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -31776,6 +32425,7 @@
       },
       "id": "simulation.event.fillmore.slot_18",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -31856,6 +32506,7 @@
       },
       "id": "simulation.event.fillmore.slot_19",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -31936,6 +32587,7 @@
       },
       "id": "simulation.event.fillmore.slot_20",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -32016,6 +32668,7 @@
       },
       "id": "simulation.event.fillmore.slot_21",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -32096,6 +32749,7 @@
       },
       "id": "simulation.event.fillmore.slot_22",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -32176,6 +32830,7 @@
       },
       "id": "simulation.event.fillmore.slot_23",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -32256,6 +32911,7 @@
       },
       "id": "simulation.event.fillmore.slot_24",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -32336,6 +32992,7 @@
       },
       "id": "simulation.event.fillmore.slot_25",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -32416,6 +33073,7 @@
       },
       "id": "simulation.event.fillmore.slot_26",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -32496,6 +33154,7 @@
       },
       "id": "simulation.event.fillmore.slot_27",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -32576,6 +33235,7 @@
       },
       "id": "simulation.event.fillmore.slot_28",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -32656,6 +33316,7 @@
       },
       "id": "simulation.event.fillmore.slot_29",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -32736,6 +33397,7 @@
       },
       "id": "simulation.event.fillmore.slot_30",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -32816,6 +33478,7 @@
       },
       "id": "simulation.event.fillmore.slot_31",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -32896,6 +33559,7 @@
       },
       "id": "simulation.event.kasandora.slot_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -32980,6 +33644,7 @@
       },
       "id": "simulation.event.kasandora.slot_01",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -33060,6 +33725,7 @@
       },
       "id": "simulation.event.kasandora.slot_02",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -33140,6 +33806,7 @@
       },
       "id": "simulation.event.kasandora.slot_03",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -33220,6 +33887,7 @@
       },
       "id": "simulation.event.kasandora.slot_04",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -33300,6 +33968,7 @@
       },
       "id": "simulation.event.kasandora.slot_05",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -33355,6 +34024,7 @@
       },
       "id": "simulation.event.kasandora.slot_06",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -33435,6 +34105,7 @@
       },
       "id": "simulation.event.kasandora.slot_07",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -33515,6 +34186,7 @@
       },
       "id": "simulation.event.kasandora.slot_08",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -33595,6 +34267,7 @@
       },
       "id": "simulation.event.kasandora.slot_09",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -33675,6 +34348,7 @@
       },
       "id": "simulation.event.kasandora.slot_10",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -33755,6 +34429,7 @@
       },
       "id": "simulation.event.kasandora.slot_11",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -33835,6 +34510,7 @@
       },
       "id": "simulation.event.kasandora.slot_12",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -33915,6 +34591,7 @@
       },
       "id": "simulation.event.kasandora.slot_13",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -33995,6 +34672,7 @@
       },
       "id": "simulation.event.kasandora.slot_14",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -34075,6 +34753,7 @@
       },
       "id": "simulation.event.kasandora.slot_15",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -34155,6 +34834,7 @@
       },
       "id": "simulation.event.kasandora.slot_16",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -34235,6 +34915,7 @@
       },
       "id": "simulation.event.kasandora.slot_17",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -34315,6 +34996,7 @@
       },
       "id": "simulation.event.kasandora.slot_18",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -34395,6 +35077,7 @@
       },
       "id": "simulation.event.kasandora.slot_19",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -34475,6 +35158,7 @@
       },
       "id": "simulation.event.kasandora.slot_20",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -34555,6 +35239,7 @@
       },
       "id": "simulation.event.kasandora.slot_21",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -34635,6 +35320,7 @@
       },
       "id": "simulation.event.kasandora.slot_22",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -34715,6 +35401,7 @@
       },
       "id": "simulation.event.kasandora.slot_23",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -34795,6 +35482,7 @@
       },
       "id": "simulation.event.kasandora.slot_24",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -34879,6 +35567,7 @@
       },
       "id": "simulation.event.kasandora.slot_25",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -34963,6 +35652,7 @@
       },
       "id": "simulation.event.kasandora.slot_26",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -35043,6 +35733,7 @@
       },
       "id": "simulation.event.kasandora.slot_27",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -35123,6 +35814,7 @@
       },
       "id": "simulation.event.kasandora.slot_28",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -35203,6 +35895,7 @@
       },
       "id": "simulation.event.kasandora.slot_29",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -35283,6 +35976,7 @@
       },
       "id": "simulation.event.kasandora.slot_30",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -35363,6 +36057,7 @@
       },
       "id": "simulation.event.kasandora.slot_31",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -35460,6 +36155,7 @@
       },
       "id": "simulation.event.marahna.slot_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -35544,6 +36240,7 @@
       },
       "id": "simulation.event.marahna.slot_01",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -35624,6 +36321,7 @@
       },
       "id": "simulation.event.marahna.slot_02",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -35708,6 +36406,7 @@
       },
       "id": "simulation.event.marahna.slot_03",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -35788,6 +36487,7 @@
       },
       "id": "simulation.event.marahna.slot_04",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -35868,6 +36568,7 @@
       },
       "id": "simulation.event.marahna.slot_05",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -35948,6 +36649,7 @@
       },
       "id": "simulation.event.marahna.slot_06",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -36032,6 +36734,7 @@
       },
       "id": "simulation.event.marahna.slot_07",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -36112,6 +36815,7 @@
       },
       "id": "simulation.event.marahna.slot_08",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -36192,6 +36896,7 @@
       },
       "id": "simulation.event.marahna.slot_09",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -36272,6 +36977,7 @@
       },
       "id": "simulation.event.marahna.slot_10",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -36352,6 +37058,7 @@
       },
       "id": "simulation.event.marahna.slot_11",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -36432,6 +37139,7 @@
       },
       "id": "simulation.event.marahna.slot_12",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -36512,6 +37220,7 @@
       },
       "id": "simulation.event.marahna.slot_13",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -36592,6 +37301,7 @@
       },
       "id": "simulation.event.marahna.slot_14",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -36672,6 +37382,7 @@
       },
       "id": "simulation.event.marahna.slot_15",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -36752,6 +37463,7 @@
       },
       "id": "simulation.event.marahna.slot_16",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -36832,6 +37544,7 @@
       },
       "id": "simulation.event.marahna.slot_17",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -36912,6 +37625,7 @@
       },
       "id": "simulation.event.marahna.slot_18",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -36992,6 +37706,7 @@
       },
       "id": "simulation.event.marahna.slot_19",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -37072,6 +37787,7 @@
       },
       "id": "simulation.event.marahna.slot_20",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -37152,6 +37868,7 @@
       },
       "id": "simulation.event.marahna.slot_21",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -37232,6 +37949,7 @@
       },
       "id": "simulation.event.marahna.slot_22",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -37312,6 +38030,7 @@
       },
       "id": "simulation.event.marahna.slot_23",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -37392,6 +38111,7 @@
       },
       "id": "simulation.event.marahna.slot_24",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -37472,6 +38192,7 @@
       },
       "id": "simulation.event.marahna.slot_25",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -37552,6 +38273,7 @@
       },
       "id": "simulation.event.marahna.slot_26",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -37632,6 +38354,7 @@
       },
       "id": "simulation.event.marahna.slot_27",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -37712,6 +38435,7 @@
       },
       "id": "simulation.event.marahna.slot_28",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -37792,6 +38516,7 @@
       },
       "id": "simulation.event.marahna.slot_29",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -37872,6 +38597,7 @@
       },
       "id": "simulation.event.marahna.slot_30",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -37952,6 +38678,7 @@
       },
       "id": "simulation.event.marahna.slot_31",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -38032,6 +38759,7 @@
       },
       "id": "simulation.event.northwall.slot_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -38112,6 +38840,7 @@
       },
       "id": "simulation.event.northwall.slot_01",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -38192,6 +38921,7 @@
       },
       "id": "simulation.event.northwall.slot_02",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -38272,6 +39002,7 @@
       },
       "id": "simulation.event.northwall.slot_03",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -38352,6 +39083,7 @@
       },
       "id": "simulation.event.northwall.slot_04",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -38432,6 +39164,7 @@
       },
       "id": "simulation.event.northwall.slot_05",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -38512,6 +39245,7 @@
       },
       "id": "simulation.event.northwall.slot_06",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -38592,6 +39326,7 @@
       },
       "id": "simulation.event.northwall.slot_07",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -38672,6 +39407,7 @@
       },
       "id": "simulation.event.northwall.slot_08",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -38752,6 +39488,7 @@
       },
       "id": "simulation.event.northwall.slot_09",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -38832,6 +39569,7 @@
       },
       "id": "simulation.event.northwall.slot_10",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -38912,6 +39650,7 @@
       },
       "id": "simulation.event.northwall.slot_11",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -38992,6 +39731,7 @@
       },
       "id": "simulation.event.northwall.slot_12",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -39072,6 +39812,7 @@
       },
       "id": "simulation.event.northwall.slot_13",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -39152,6 +39893,7 @@
       },
       "id": "simulation.event.northwall.slot_14",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -39232,6 +39974,7 @@
       },
       "id": "simulation.event.northwall.slot_15",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -39312,6 +40055,7 @@
       },
       "id": "simulation.event.northwall.slot_16",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -39392,6 +40136,7 @@
       },
       "id": "simulation.event.northwall.slot_17",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -39472,6 +40217,7 @@
       },
       "id": "simulation.event.northwall.slot_18",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -39552,6 +40298,7 @@
       },
       "id": "simulation.event.northwall.slot_19",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -39632,6 +40379,7 @@
       },
       "id": "simulation.event.northwall.slot_20",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -39712,6 +40460,7 @@
       },
       "id": "simulation.event.northwall.slot_21",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -39792,6 +40541,7 @@
       },
       "id": "simulation.event.northwall.slot_22",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -39872,6 +40622,7 @@
       },
       "id": "simulation.event.northwall.slot_23",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -39952,6 +40703,7 @@
       },
       "id": "simulation.event.northwall.slot_24",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -40032,6 +40784,7 @@
       },
       "id": "simulation.event.northwall.slot_25",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -40112,6 +40865,7 @@
       },
       "id": "simulation.event.northwall.slot_26",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -40192,6 +40946,7 @@
       },
       "id": "simulation.event.northwall.slot_27",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -40272,6 +41027,7 @@
       },
       "id": "simulation.event.northwall.slot_28",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -40352,6 +41108,7 @@
       },
       "id": "simulation.event.northwall.slot_29",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -40432,6 +41189,7 @@
       },
       "id": "simulation.event.northwall.slot_30",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -40512,6 +41270,7 @@
       },
       "id": "simulation.event.northwall.slot_31",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -40592,6 +41351,7 @@
       },
       "id": "sky.action_mode.begin_blessing",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -40672,6 +41432,7 @@
       },
       "id": "sky.action_mode.cancel_confirm",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -40784,6 +41545,7 @@
       },
       "id": "sky.action_mode.confirm",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -40884,6 +41646,7 @@
       },
       "id": "sky.action_mode.outcome.final_battle",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -40996,6 +41759,7 @@
       },
       "id": "sky.action_mode.outcome.first_lair",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -41108,6 +41872,7 @@
       },
       "id": "sky.action_mode.outcome.repeat_lair",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -41200,6 +41965,7 @@
       },
       "id": "sky.action_mode.unavailable.already_cleared",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -41292,6 +42058,7 @@
       },
       "id": "sky.action_mode.unavailable.cannot_land",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -41390,6 +42157,7 @@
       },
       "id": "sky.action_mode.unavailable.master_level",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -41482,6 +42250,7 @@
       },
       "id": "sky.action_mode.unavailable.no_monsters",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -41574,6 +42343,7 @@
       },
       "id": "sky.action_mode.unavailable.no_residents",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -41654,6 +42424,7 @@
       },
       "id": "sky.magic.cancelled",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -41766,6 +42537,7 @@
       },
       "id": "sky.magic.choose",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -41858,6 +42630,7 @@
       },
       "id": "sky.magic.empty",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -41942,6 +42715,7 @@
       },
       "id": "sky.magic.selected.aura",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -42022,6 +42796,7 @@
       },
       "id": "sky.magic.selected.fire",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -42102,6 +42877,7 @@
       },
       "id": "sky.magic.selected.light",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -42182,6 +42958,7 @@
       },
       "id": "sky.magic.selected.stardust",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -42237,6 +43014,7 @@
       },
       "id": "sky.menu.choice.fight",
       "presentation": {
+        "layout": "fixed_rows",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -42293,6 +43071,7 @@
       },
       "id": "sky.menu.choice.movement",
       "presentation": {
+        "layout": "fixed_rows",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -42349,6 +43128,7 @@
       },
       "id": "sky.menu.choice.other",
       "presentation": {
+        "layout": "fixed_rows",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -42405,6 +43185,7 @@
       },
       "id": "sky.menu.choice.status",
       "presentation": {
+        "layout": "fixed_rows",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -42461,6 +43242,7 @@
       },
       "id": "sky.menu.fight_monsters",
       "presentation": {
+        "layout": "fixed_rows",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -42517,6 +43299,7 @@
       },
       "id": "sky.menu.magic.aura",
       "presentation": {
+        "layout": "fixed_rows",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -42573,6 +43356,7 @@
       },
       "id": "sky.menu.magic.fire",
       "presentation": {
+        "layout": "fixed_rows",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -42629,6 +43413,7 @@
       },
       "id": "sky.menu.magic.light",
       "presentation": {
+        "layout": "fixed_rows",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -42685,6 +43470,7 @@
       },
       "id": "sky.menu.magic.stardust",
       "presentation": {
+        "layout": "fixed_rows",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -42741,6 +43527,7 @@
       },
       "id": "sky.menu.message_speed",
       "presentation": {
+        "layout": "fixed_rows",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -42797,6 +43584,7 @@
       },
       "id": "sky.menu.movement",
       "presentation": {
+        "layout": "fixed_rows",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -42853,6 +43641,7 @@
       },
       "id": "sky.menu.observe_people",
       "presentation": {
+        "layout": "fixed_rows",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -42909,6 +43698,7 @@
       },
       "id": "sky.menu.progress_log",
       "presentation": {
+        "layout": "fixed_rows",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -42965,6 +43755,7 @@
       },
       "id": "sky.menu.select_magic",
       "presentation": {
+        "layout": "fixed_rows",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -43021,6 +43812,7 @@
       },
       "id": "sky.menu.status_cities",
       "presentation": {
+        "layout": "fixed_rows",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -43077,6 +43869,7 @@
       },
       "id": "sky.menu.status_master",
       "presentation": {
+        "layout": "fixed_rows",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -43151,6 +43944,7 @@
       },
       "id": "sound_test.menu.labels",
       "presentation": {
+        "layout": "sound_test",
         "maximum_lines": 5,
         "maximum_pages": 1,
         "shape": "fixed"
@@ -43375,6 +44169,7 @@
       },
       "id": "status.report.cities_report",
       "presentation": {
+        "layout": "cities_status",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -43489,6 +44284,7 @@
       },
       "id": "status.report.master_report",
       "presentation": {
+        "layout": "master_status",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -43608,6 +44404,7 @@
       },
       "id": "status.report.score_report",
       "presentation": {
+        "layout": "score_status",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -43663,6 +44460,7 @@
       },
       "id": "system.choice.yes_no",
       "presentation": {
+        "layout": "fixed_rows",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -43744,6 +44542,7 @@
       },
       "id": "system.message_speed.cancelled",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -43856,6 +44655,7 @@
       },
       "id": "system.message_speed.choose",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -43936,6 +44736,7 @@
       },
       "id": "system.message_speed.sample",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -44008,6 +44809,7 @@
       },
       "id": "system.message_speed.scale_labels",
       "presentation": {
+        "layout": "message_speed",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -44089,6 +44891,7 @@
       },
       "id": "system.save.cancelled",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -44189,6 +44992,7 @@
       },
       "id": "system.save.completed_continue_confirm",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -44301,6 +45105,7 @@
       },
       "id": "system.save.confirm",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -44393,6 +45198,7 @@
       },
       "id": "system.save.continue",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -44493,6 +45299,7 @@
       },
       "id": "system.save.rest_message",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -44548,6 +45355,7 @@
       },
       "id": "title.copyright",
       "presentation": {
+        "layout": "centered_block",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -44590,6 +45398,7 @@
       },
       "id": "title.difficulty.labels",
       "presentation": {
+        "layout": "single_line_label",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -44630,6 +45439,7 @@
       },
       "id": "title.mode_select.with_save",
       "presentation": {
+        "layout": "single_line_label",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -44670,6 +45480,7 @@
       },
       "id": "title.mode_select.without_save",
       "presentation": {
+        "layout": "single_line_label",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -44703,6 +45514,7 @@
       },
       "id": "title.save_choice.labels",
       "presentation": {
+        "layout": "single_line_label",
         "maximum_pages": 1,
         "required_nonempty_lines": 2,
         "shape": "fixed"
@@ -44743,6 +45555,7 @@
       },
       "id": "title.selector.beginner",
       "presentation": {
+        "layout": "single_line_label",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -44780,6 +45593,7 @@
       },
       "id": "title.selector.continue",
       "presentation": {
+        "layout": "single_line_label",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -44819,6 +45633,7 @@
       },
       "id": "title.selector.expert",
       "presentation": {
+        "layout": "single_line_label",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -44856,6 +45671,7 @@
       },
       "id": "title.selector.new_game",
       "presentation": {
+        "layout": "single_line_label",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -44895,6 +45711,7 @@
       },
       "id": "title.selector.normal",
       "presentation": {
+        "layout": "single_line_label",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -44921,6 +45738,7 @@
       },
       "id": "title.selector.professional",
       "presentation": {
+        "layout": "single_line_label",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -44949,6 +45767,7 @@
       },
       "id": "title.selector.special",
       "presentation": {
+        "layout": "single_line_label",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -44984,6 +45803,7 @@
       },
       "id": "title.start_prompt",
       "presentation": {
+        "layout": "single_line_label",
         "maximum_pages": 1,
         "shape": "fixed"
       },
@@ -45037,6 +45857,7 @@
       },
       "id": "town.name.aitos",
       "presentation": {
+        "layout": "inline",
         "maximum_lines": 1,
         "maximum_pages": 1,
         "shape": "inline"
@@ -45094,6 +45915,7 @@
       },
       "id": "town.name.bloodpool",
       "presentation": {
+        "layout": "inline",
         "maximum_lines": 1,
         "maximum_pages": 1,
         "shape": "inline"
@@ -45151,6 +45973,7 @@
       },
       "id": "town.name.fillmore",
       "presentation": {
+        "layout": "inline",
         "maximum_lines": 1,
         "maximum_pages": 1,
         "shape": "inline"
@@ -45208,6 +46031,7 @@
       },
       "id": "town.name.kasandora",
       "presentation": {
+        "layout": "inline",
         "maximum_lines": 1,
         "maximum_pages": 1,
         "shape": "inline"
@@ -45265,6 +46089,7 @@
       },
       "id": "town.name.marahna",
       "presentation": {
+        "layout": "inline",
         "maximum_lines": 1,
         "maximum_pages": 1,
         "shape": "inline"
@@ -45322,6 +46147,7 @@
       },
       "id": "town.name.northwall",
       "presentation": {
+        "layout": "inline",
         "maximum_lines": 1,
         "maximum_pages": 1,
         "shape": "inline"
@@ -45379,6 +46205,7 @@
       },
       "id": "town.name.table.sentinel",
       "presentation": {
+        "layout": "inline",
         "maximum_lines": 1,
         "maximum_pages": 1,
         "shape": "inline"
@@ -45417,6 +46244,7 @@
       },
       "id": "variant.de.dormant.angel_dialogue.resource_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -45449,6 +46277,7 @@
       },
       "id": "variant.de.dormant.angel_dialogue.resource_01",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -45481,6 +46310,7 @@
       },
       "id": "variant.de.dormant.angel_dialogue.resource_02",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -45504,6 +46334,7 @@
       },
       "id": "variant.de.dormant.town_dialogue.resource_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -45532,6 +46363,7 @@
       },
       "id": "variant.de.dormant.town_dialogue.resource_01",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -45564,6 +46396,7 @@
       },
       "id": "variant.eu-en.dormant.angel_dialogue.resource_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -45596,6 +46429,7 @@
       },
       "id": "variant.eu-en.dormant.angel_dialogue.resource_01",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -45628,6 +46462,7 @@
       },
       "id": "variant.eu-en.dormant.angel_dialogue.resource_02",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -45651,6 +46486,7 @@
       },
       "id": "variant.eu-en.dormant.town_dialogue.resource_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -45679,6 +46515,7 @@
       },
       "id": "variant.eu-en.dormant.town_dialogue.resource_01",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -45711,6 +46548,7 @@
       },
       "id": "variant.fr.dormant.angel_dialogue.resource_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -45743,6 +46581,7 @@
       },
       "id": "variant.fr.dormant.angel_dialogue.resource_01",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -45771,6 +46610,7 @@
       },
       "id": "variant.fr.dormant.town_dialogue.resource_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -45803,6 +46643,7 @@
       },
       "id": "variant.jp.dialogue.event.wrapper_00.extra_call_02",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -45835,6 +46676,7 @@
       },
       "id": "variant.jp.dormant.angel_dialogue_native.resource_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -45863,6 +46705,7 @@
       },
       "id": "variant.jp.dormant.post_offering_or_ending_native.resource_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -45895,6 +46738,7 @@
       },
       "id": "variant.jp.dormant.post_offering_or_ending_native.resource_01",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -45918,6 +46762,7 @@
       },
       "id": "variant.jp.dormant.town_dialogue_native.resource_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -45941,6 +46786,7 @@
       },
       "id": "variant.jp.dormant.town_dialogue_native.resource_01",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -45969,6 +46815,7 @@
       },
       "id": "variant.jp.dormant.town_dialogue_native.resource_02",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -46001,6 +46848,7 @@
       },
       "id": "variant.jp.dormant.town_dialogue_native.resource_03",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -46029,6 +46877,7 @@
       },
       "id": "variant.jp.sim.town.dry_fields",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -46061,6 +46910,7 @@
       },
       "id": "variant.jp.sim.town.low_productivity",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -46089,6 +46939,7 @@
       },
       "id": "variant.jp.sim.town.needs_development_direction",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -46121,6 +46972,7 @@
       },
       "id": "variant.jp.sim.town.no_buildable_space",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -46153,6 +47005,7 @@
       },
       "id": "variant.us.dormant.angel_dialogue.resource_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -46185,6 +47038,7 @@
       },
       "id": "variant.us.dormant.angel_dialogue.resource_01",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -46217,6 +47071,7 @@
       },
       "id": "variant.us.dormant.angel_dialogue.resource_02",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -46240,6 +47095,7 @@
       },
       "id": "variant.us.dormant.town_dialogue.resource_00",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -46268,6 +47124,7 @@
       },
       "id": "variant.us.dormant.town_dialogue.resource_01",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -46348,6 +47205,7 @@
       },
       "id": "variant.western.sim.command_menu.prompt",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {
@@ -46431,6 +47289,7 @@
       },
       "id": "variant.western.sim.command_menu.prompt_continuation",
       "presentation": {
+        "layout": "flow",
         "shape": "flow"
       },
       "source_categories": {

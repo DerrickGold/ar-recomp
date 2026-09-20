@@ -74,7 +74,7 @@ var authorNavigationCaptions = map[string]string{
 	"group.references":     "Additional regional & table references",
 	"context.start":        "Sky Palace introduction or returning to an existing save from the title screen.",
 	"context.names":        "World-navigation labels use live plaque colors; action title cards use fitted, centered enhanced text.",
-	"context.title":        "Title options and dormant sound-test labels support enhanced text. Logo and copyright artwork remain native.",
+	"context.title":        "Title options, copyright text and dormant sound-test labels support enhanced text. The title logo remains artwork.",
 	"context.ending":       "Ending dialogue and credits support enhanced text. Credits pages keep native timing; copyright artwork remains native.",
 	"context.final_battle": "Final-battle message delivered from the Sky Palace.",
 	"context.action":       "HUD labels, pause and stage messages support enhanced text; counters retain native formatting.",

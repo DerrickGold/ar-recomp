@@ -10,20 +10,20 @@ import (
 // after evaluating all five releases. Local ownership/graphics completeness
 // alone does not certify an author-format export. No runtime loads this IR.
 type NativeCatalog struct {
-	WholeGameCoverageComplete bool                     `json:"whole_game_coverage_complete"`
-	Inventory                 IRObject                 `json:"inventory"`
-	Messages                  []*NativeMessage         `json:"messages"`
-	PointerSets               []*NativePointerSet      `json:"pointer_sets"`
-	Menu                      *NativeMenuCatalog       `json:"menu_source_catalog"`
-	ReferenceSeeds            IRObject                 `json:"source_reference_seeds"`
-	ReferenceResolution       IRObject                 `json:"source_reference_resolution"`
-	SeedExpansion             IRObject                 `json:"source_seed_expansion"`
-	DynamicText               IRObject                 `json:"dynamic_text_census"`
-	Ownership                 IRObject                 `json:"language_source_ownership"`
-	SemanticRoutes            *NativeSemanticCatalog   `json:"semantic_route_catalog"`
-	Destinations              *NativeDestinationCensus `json:"destination_census,omitempty"`
-	Graphics                  IRObject                 `json:"graphical_text_census,omitempty"`
-	Credits                   []NativeCreditsPage      `json:"credits_text,omitempty"`
+	WholeGameCoverageComplete bool                          `json:"whole_game_coverage_complete"`
+	Inventory                 IRObject                      `json:"inventory"`
+	Messages                  []*NativeMessage              `json:"messages"`
+	PointerSets               []*NativePointerSet           `json:"pointer_sets"`
+	Menu                      *NativeMenuCatalog            `json:"menu_source_catalog"`
+	ReferenceSeeds            NativeSourceSeeds             `json:"source_reference_seeds"`
+	ReferenceResolution       NativeSourceResolutionSummary `json:"source_reference_resolution"`
+	SeedExpansion             IRObject                      `json:"source_seed_expansion"`
+	DynamicText               IRObject                      `json:"dynamic_text_census"`
+	Ownership                 IRObject                      `json:"language_source_ownership"`
+	SemanticRoutes            *NativeSemanticCatalog        `json:"semantic_route_catalog"`
+	Destinations              *NativeDestinationCensus      `json:"destination_census,omitempty"`
+	Graphics                  IRObject                      `json:"graphical_text_census,omitempty"`
+	Credits                   []NativeCreditsPage           `json:"credits_text,omitempty"`
 	releaseID                 string
 	source                    *NativeSourceCensus
 	locale, romSHA256         string

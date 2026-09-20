@@ -131,7 +131,9 @@ static void NavToSection(int target) {
  * both directions around the hole so section movement cannot land on it. */
 static void CheckManualSectionAvailability(void) {
   g_settings.show_debug_settings = false;
+  SettingsOverlay_Refresh();
   s_fake_manual_available = true;
+  SettingsOverlay_Refresh();
 
   int selected = -1;
   int total = -1;
@@ -140,6 +142,7 @@ static void CheckManualSectionAvailability(void) {
 
   NavToSection(kSection_Save);
   s_fake_manual_available = false;
+  SettingsOverlay_Refresh();
   CHECK(SettingsOverlay_GetNavigationState(&selected, NULL, NULL, &total));
   CHECK(selected == kSection_Save);
   CHECK(total == kPlayerSectionCountWithoutManual);
@@ -163,6 +166,7 @@ static void CheckManualSectionAvailability(void) {
   CHECK(SettingsOverlay_GetNavigationState(&selected, NULL, NULL, NULL));
   CHECK(selected == kSystemVisibleOrdinalWithoutManual);
   s_fake_manual_available = true;
+  SettingsOverlay_Refresh();
   CHECK(SettingsOverlay_GetNavigationState(&selected, NULL, NULL, &total));
   CHECK(selected == kSection_System);
   CHECK(total == kPlayerSectionCount);
@@ -172,6 +176,7 @@ static void CheckManualSectionAvailability(void) {
 
   /* Restore the fixture state expected by the exhaustive menu checks below. */
   g_settings.show_debug_settings = true;
+  SettingsOverlay_Refresh();
   NavToSection(kSection_Video);
 }
 
@@ -703,6 +708,7 @@ static void CheckLayerEditorSection(void) {
   /* THE GATE the feature was asked for: developer-only means the section is not
    * in the nav column at all for a player, not merely that its rows are. */
   g_settings.show_debug_settings = false;
+  SettingsOverlay_Refresh();
   int total = -1;
   CHECK(SettingsOverlay_GetNavigationState(NULL, NULL, NULL, &total));
   CHECK(total == kPlayerSectionCount);
@@ -737,6 +743,7 @@ static void CheckLayerEditorSection(void) {
   CHECK(!Settings_IsMenuVisible(Settings_Find("rando_lair_types")));
 
   g_settings.show_debug_settings = true;
+  SettingsOverlay_Refresh();
   /* Production initializes the randomizer before the overlay can open. Give
    * this isolated menu test the same stable capability before asserting that
    * its master row is available. */
@@ -1040,11 +1047,13 @@ static void CheckLayerEditorSection(void) {
   /* Turning debug settings off while standing IN the editor must move focus out
    * rather than leave the cursor on a hidden section. */
   g_settings.show_debug_settings = false;
+  SettingsOverlay_Refresh();
   int selected = -1;
   CHECK(SettingsOverlay_GetNavigationState(&selected, NULL, NULL, &total));
   CHECK(selected != kSection_Layers);
   CHECK(total == kPlayerSectionCount);
   g_settings.show_debug_settings = true;
+  SettingsOverlay_Refresh();
 
   CHECK(SettingsOverlay_HandleKey(SDLK_X, true, false));   /* leave submenu */
   /* Leave no hooks behind: later blocks drive other sections. */
@@ -1118,6 +1127,7 @@ int main(int argc, char **argv) {
    * so they are all present; a dedicated block below toggles it back off and
    * checks that they collapse. */
   g_settings.show_debug_settings = true;
+  SettingsOverlay_Refresh();
 
   int surface_width = 640;
   int surface_height = 480;
@@ -1775,6 +1785,16 @@ int main(int argc, char **argv) {
                         false));
   NavToTab(1);
   CHECK(g_settings.input_bind_page == kInputClass_Keyboard);
+  /* Read-only diagnostics must not re-synchronize a page selector behind the
+   * caller's back. The explicit refresh restores the active tab's page. */
+  g_settings.input_bind_page = kInputClass_Gamepad;
+  const Settings before_queries = g_settings;
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "bind_key_up"));
+  CHECK(SettingsOverlay_GetTabState(NULL, NULL));
+  CHECK(SettingsOverlay_GetNavigationState(NULL, NULL, NULL, NULL));
+  CHECK(memcmp(&before_queries, &g_settings, sizeof(g_settings)) == 0);
+  SettingsOverlay_Refresh();
+  CHECK(g_settings.input_bind_page == kInputClass_Keyboard);
   CHECK(SettingsOverlay_HandleKey(SDLK_X, true, false));
 
   /* The Save section's tabs are the Actions page plus five editor pages. The
@@ -1940,6 +1960,7 @@ int main(int argc, char **argv) {
   }
   /* Restore for the section-sweep contact sheet below. */
   g_settings.show_debug_settings = true;
+  SettingsOverlay_Refresh();
 
   /* Every section stays reachable and its nav row stays inside the scroll
    * window, whatever the panel can fit. With AR_OVERLAY_PREVIEW_DIR set this
@@ -2014,6 +2035,7 @@ int main(int argc, char **argv) {
    * System without Inspector, the dial rows gone). */
   if (renderer && preview_dir && preview_dir[0]) {
     g_settings.show_debug_settings = false;
+    SettingsOverlay_Refresh();
     for (int section = 0; section < kPlayerSectionCount; section++) {
       NavToSection(section);
       int tabs = 0;
@@ -2034,6 +2056,7 @@ int main(int argc, char **argv) {
       CHECK(SettingsOverlay_HandleKey(SDLK_X, true, false));
     }
     g_settings.show_debug_settings = true;
+    SettingsOverlay_Refresh();
   }
 
   CHECK(SettingsOverlay_HandleKey(SDLK_X, true, true));

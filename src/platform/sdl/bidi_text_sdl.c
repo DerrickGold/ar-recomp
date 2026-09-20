@@ -1,6 +1,8 @@
 #if defined(AR_HAS_SDL3_TTF) && AR_HAS_SDL3_TTF
 #include "platform/sdl/bidi_text_sdl.h"
+#include "localization/text_boundaries.h"
 #include "localization/unicode_grapheme.h"
+#include "platform/sdl/styled_run_sdl.h"
 
 #include <SheenBidi/SheenBidi.h>
 #include <limits.h>
@@ -13,9 +15,10 @@ enum { kMaximumLayoutBytes = 65536, kMaximumLayoutPixels = 16 * 1024 * 1024 };
 
 typedef struct ShapedRun {
   TTF_Text *text;
+  ArSdlStyledRun styled;
   size_t offset, length, logical_offset;
   int x, y, width, height, line;
-  bool rtl;
+  bool rtl, align_right;
 } ShapedRun;
 
 struct ArSdlBidiLayout {
@@ -23,6 +26,10 @@ struct ArSdlBidiLayout {
   ShapedRun *runs;
   size_t count, capacity, utf8_bytes;
   int width, height, line_count, line_advance;
+  int next_line_y;
+  bool styled;
+  ArTextLineMetrics *lines;
+  size_t line_capacity;
   ArTextDirection paragraph_direction;
   char *virtual_text;
   size_t *logical_offsets;
@@ -45,6 +52,9 @@ typedef struct LayoutSource {
   int *advances;
   const size_t *logical_offsets;
   size_t bytes;
+  ArSdlTextFonts *fonts;
+  int base_pixels;
+  ArTextRasterFailure *failure;
 } LayoutSource;
 
 bool ArSdlBidiText_NeedsLayout(const char *text, size_t length,
@@ -64,7 +74,11 @@ bool ArSdlBidiText_NeedsLayout(const char *text, size_t length,
 }
 
 static void TruncateRuns(ArSdlBidiLayout *layout, size_t count) {
-  while (layout->count > count) TTF_DestroyText(layout->runs[--layout->count].text);
+  while (layout->count > count) {
+    ShapedRun *run = &layout->runs[--layout->count];
+    TTF_DestroyText(run->text);
+    ArSdlStyledRun_Destroy(&run->styled);
+  }
 }
 
 void ArSdlBidiText_Destroy(ArSdlBidiLayout *layout) {
@@ -73,6 +87,7 @@ void ArSdlBidiText_Destroy(ArSdlBidiLayout *layout) {
   free(layout->runs);
   free(layout->virtual_text);
   free(layout->logical_offsets);
+  free(layout->lines);
   TTF_DestroySurfaceTextEngine(layout->engine);
   free(layout);
 }
@@ -88,6 +103,31 @@ static bool AddRun(ArSdlBidiLayout *layout, const LayoutSource *source,
     if (!runs) return SDL_SetError("out of memory for bidi runs");
     layout->runs = runs;
     layout->capacity = capacity;
+  }
+  if (source->fonts) {
+    ArSdlStyledRun styled = {0};
+    if (!ArSdlStyledRun_Create(&styled, source->fonts, source->text + start,
+                               end - start, source->logical_offsets + start,
+                               source->request, source->base_pixels,
+                               (level & 1) != 0, script, source->failure))
+      return false;
+    if (styled.width > INT_MAX - *x) {
+      ArSdlStyledRun_Destroy(&styled);
+      return SDL_SetError("styled text is too wide");
+    }
+    layout->runs[layout->count++] =
+        (ShapedRun){.styled = styled,
+                    .offset = start,
+                    .length = end - start,
+                    .logical_offset = source->logical_offsets[start],
+                    .x = *x,
+                    .y = y,
+                    .width = styled.width,
+                    .height = styled.ascent + styled.descent,
+                    .line = line,
+                    .rtl = (level & 1) != 0};
+    *x += styled.width;
+    return true;
   }
   TTF_Text *text = TTF_CreateText(layout->engine, source->font,
                                  source->text + start, end - start);
@@ -185,6 +225,13 @@ static bool RecordAdvances(const ArSdlBidiLayout *layout, LayoutSource *source,
                             size_t first) {
   for (size_t r = first; r < layout->count; ++r) {
     const ShapedRun *run = &layout->runs[r];
+    if (source->fonts) {
+      for (size_t i = 0; i < run->styled.cluster_count; ++i) {
+        const ArSdlStyledCluster *cluster = &run->styled.clusters[i];
+        source->advances[run->offset + cluster->end] = cluster->advance;
+      }
+      continue;
+    }
     if (!run->width) continue; /* Authored bidi controls can form an empty run. */
     size_t offset = 0;
     size_t previous_end = 0;
@@ -281,8 +328,9 @@ static size_t WrapEnd(const LayoutSource *source, size_t start, size_t end, int 
   return end;
 }
 
-static bool LayoutHardLine(ArSdlBidiLayout *layout, LayoutSource *source,
-                          SBParagraphRef paragraph, size_t start, size_t content_end) {
+static bool LayoutLineContent(ArSdlBidiLayout *layout, LayoutSource *source,
+                              SBParagraphRef paragraph, size_t start,
+                              size_t content_end) {
   const ArTextRasterRequest *request = source->request;
   const bool wrap = (request->flags & kArTextRasterFlag_WrapWords) != 0;
   size_t first = layout->count;
@@ -299,7 +347,8 @@ static bool LayoutHardLine(ArSdlBidiLayout *layout, LayoutSource *source,
     size_t ink_end = stop;
     if (wrap && stop < content_end)
       ink_end = TrimBreakableSpaces(source, cursor, ink_end);
-    const int y = layout->line_count * layout->line_advance;
+    const int y = layout->styled ? layout->next_line_y
+                                 : layout->line_count * layout->line_advance;
     first = layout->count;
     if (!ShapeLine(layout, source, paragraph, cursor, ink_end, y,
                    layout->line_count, &width)) return false;
@@ -319,23 +368,57 @@ static bool LayoutHardLine(ArSdlBidiLayout *layout, LayoutSource *source,
                      layout->line_count, &width)) return false;
     }
     const bool rtl = (SBParagraphGetBaseLevel(paragraph) & 1) != 0;
+    const bool align_right =
+        (request->alignment == kArTextHorizontalAlignment_Leading && rtl) ||
+        (request->alignment == kArTextHorizontalAlignment_Trailing && !rtl) ||
+        request->alignment == kArTextHorizontalAlignment_Right;
+    if (first < layout->count) layout->runs[first].align_right = align_right;
     int x = 0;
     if (wrap) {
       if (request->alignment == kArTextHorizontalAlignment_Center)
         x = (request->maximum_width - width) / 2;
-      else if ((request->alignment == kArTextHorizontalAlignment_Leading && rtl) ||
-               (request->alignment == kArTextHorizontalAlignment_Trailing && !rtl) ||
-               request->alignment == kArTextHorizontalAlignment_Right)
+      else if (align_right)
         x = request->maximum_width - width;
     }
     if (x < 0) x = 0;
     if (width > layout->width) layout->width = width;
     int height = TTF_GetFontHeight(source->font);
+    int ascent = TTF_GetFontAscent(source->font);
+    int descent = height - ascent;
+    if (layout->styled) {
+      for (size_t i = first; i < layout->count; ++i) {
+        if (layout->runs[i].styled.ascent > ascent)
+          ascent = layout->runs[i].styled.ascent;
+        if (layout->runs[i].styled.descent > descent)
+          descent = layout->runs[i].styled.descent;
+      }
+      height = ascent + descent;
+    }
     for (size_t i = first; i < layout->count; ++i) {
       layout->runs[i].x += x;
+      if (layout->styled)
+        layout->runs[i].y += ascent - layout->runs[i].styled.ascent;
       if (layout->runs[i].height > height) height = layout->runs[i].height;
     }
-    if ((int64_t)y + height > INT_MAX) return SDL_SetError("bidi text too tall");
+    const int advance =
+        height > layout->line_advance ? height : layout->line_advance;
+    if ((int64_t)y + advance > INT_MAX)
+      return SDL_SetError("bidi text too tall");
+    if (layout->styled) {
+      if ((size_t)layout->line_count == layout->line_capacity) {
+        const size_t capacity =
+            layout->line_capacity ? layout->line_capacity * 2 : 16;
+        ArTextLineMetrics *lines =
+            realloc(layout->lines, capacity * sizeof(*lines));
+        if (!lines)
+          return SDL_SetError("out of memory retaining line metrics");
+        layout->lines = lines;
+        layout->line_capacity = capacity;
+      }
+      layout->lines[layout->line_count] =
+          (ArTextLineMetrics){y, y + ascent, advance};
+    }
+    layout->next_line_y = y + advance;
     if (y + height > layout->height) layout->height = y + height;
     ++layout->line_count;
     cursor = stop;
@@ -346,6 +429,47 @@ static bool LayoutHardLine(ArSdlBidiLayout *layout, LayoutSource *source,
   } while (cursor < content_end);
   if (wrap && request->maximum_width > layout->width) layout->width = request->maximum_width;
   return true;
+}
+
+static bool LayoutHardLine(ArSdlBidiLayout *layout, LayoutSource *source,
+                           SBParagraphRef paragraph, size_t start, size_t end) {
+  const ArTextRasterRequest *request = source->request;
+  /* An authored blank row still needs a line strut, even when this dialogue
+   * also carries optional native wrapping hints. */
+  if (start == end || !source->fonts || !request->preferred_line_breaks)
+    return LayoutLineContent(layout, source, paragraph, start, end);
+  const size_t first = layout->count;
+  int measured = 0;
+  if (!ShapeLine(layout, source, paragraph, start, end, 0, 0, &measured) ||
+      !RecordAdvances(layout, source, first))
+    return false;
+  TruncateRuns(layout, first);
+  int64_t width = 0;
+  size_t segment = start;
+  for (size_t i = start; i < end; ++i) {
+    if (i > segment && source->advances[i] > 0)
+      width += source->advances[i];
+    const size_t original = source->logical_offsets[i];
+    if (source->text[i] != ' ' || width > request->maximum_width ||
+        !ArTextBoundary_Get(request->preferred_line_breaks,
+                            request->preferred_line_break_source_offset +
+                                original))
+      continue;
+    /* Recheck the complete prefix at its actual line edge: joining there can
+     * differ from the paragraph-wide measurement. A denied break stays soft. */
+    const size_t checkpoint = layout->count;
+    if (!ShapeLine(layout, source, paragraph, segment, i, 0, 0, &measured))
+      return false;
+    TruncateRuns(layout, checkpoint);
+    if (measured > request->maximum_width)
+      continue;
+    if (!LayoutLineContent(layout, source, paragraph, segment, i))
+      return false;
+    segment = i + 1;
+    width = 0;
+  }
+  return segment == end ||
+         LayoutLineContent(layout, source, paragraph, segment, end);
 }
 
 static bool LineSeparator(uint32_t scalar) {
@@ -447,9 +571,33 @@ static bool VirtualSource(ArSdlBidiLayout *layout, const char *text,
   return true;
 }
 
-ArSdlBidiLayout *ArSdlBidiText_Create(TTF_Font *font, const char *text,
-                                      const ArTextRasterRequest *request,
-                                      ArTextRasterFailure *failure) {
+/* Unwrapped text fits to its widest authored line. Only after measuring that
+ * width can shorter lines align within the block without adding empty width
+ * to the fitting request. Runs are contiguous by physical line. */
+static void AlignUnwrappedLines(ArSdlBidiLayout *layout,
+                                ArTextHorizontalAlignment alignment) {
+  for (size_t first = 0; first < layout->count;) {
+    size_t end = first;
+    int width = 0;
+    while (end < layout->count &&
+           layout->runs[end].line == layout->runs[first].line) {
+      const ShapedRun *run = &layout->runs[end++];
+      if (run->x + run->width > width) width = run->x + run->width;
+    }
+    const int shift = alignment == kArTextHorizontalAlignment_Center
+                          ? (layout->width - width) / 2
+                      : layout->runs[first].align_right
+                          ? layout->width - width : 0;
+    for (size_t i = first; i < end; ++i) layout->runs[i].x += shift;
+    first = end;
+  }
+}
+
+static ArSdlBidiLayout *CreateLayout(TTF_Font *font, ArSdlTextFonts *fonts,
+                                     const char *text,
+                                     const ArTextRasterRequest *request,
+                                     int base_pixels,
+                                     ArTextRasterFailure *failure) {
   *failure = kArTextRasterFailure_Retryable;
   if (!request->utf8_bytes || request->utf8_bytes > kMaximumLayoutBytes) {
     *failure = kArTextRasterFailure_Deterministic;
@@ -457,10 +605,16 @@ ArSdlBidiLayout *ArSdlBidiText_Create(TTF_Font *font, const char *text,
     return NULL;
   }
   ArSdlBidiLayout *layout = calloc(1, sizeof(*layout));
-  LayoutSource source = {.text = text, .request = request, .font = font};
+  LayoutSource source = {.text = text,
+                         .request = request,
+                         .font = font,
+                         .fonts = fonts,
+                         .base_pixels = base_pixels,
+                         .failure = failure};
   SBAlgorithmRef algorithm = NULL;
   SBScriptLocatorRef locator = NULL;
   if (!layout) goto fail;
+  layout->styled = fonts != NULL;
   layout->utf8_bytes = request->utf8_bytes;
   if (!VirtualSource(layout, text, request)) goto fail;
   source.text = layout->virtual_text;
@@ -500,6 +654,24 @@ ArSdlBidiLayout *ArSdlBidiText_Create(TTF_Font *font, const char *text,
     if (!ok) goto fail;
     offset += length;
   }
+  if (!(request->flags & kArTextRasterFlag_WrapWords))
+    AlignUnwrappedLines(layout, request->alignment);
+  /* SDL's ordinary single-line LTR path returns its natural width even when
+   * wrapping is enabled. Keep migrated labels identical; a multiline box or
+   * a bidi paragraph still needs the complete alignment area. */
+  if (fonts && layout->line_count == 1 && layout->count &&
+      !request->bidi_span_count &&
+      !ArSdlBidiText_NeedsLayout(text, request->utf8_bytes,
+                                 request->direction)) {
+    const int left = layout->runs[0].x;
+    layout->width = 0;
+    for (size_t i = 0; i < layout->count; ++i) {
+      ShapedRun *run = &layout->runs[i];
+      run->x -= left;
+      if (run->x + run->width > layout->width)
+        layout->width = run->x + run->width;
+    }
+  }
   SBScriptLocatorRelease(locator);
   SBAlgorithmRelease(algorithm);
   free(source.scripts);
@@ -515,6 +687,41 @@ fail:
   return NULL;
 }
 
+ArSdlBidiLayout *ArSdlBidiText_Create(TTF_Font *font, const char *text,
+                                      const ArTextRasterRequest *request,
+                                      ArTextRasterFailure *failure) {
+  return CreateLayout(font, NULL, text, request, 0, failure);
+}
+
+ArSdlBidiLayout *ArSdlBidiText_CreateStyled(ArSdlTextFonts *fonts,
+                                            TTF_Font *strut, const char *text,
+                                            const ArTextRasterRequest *request,
+                                            int base_pixels,
+                                            ArTextRasterFailure *failure) {
+  size_t cursor = 0;
+  const size_t first = request->appearance_source_offset;
+  for (size_t i = 0; i < request->appearance_span_count; ++i) {
+    const ArTextAppearanceSpan *span = &request->appearance_spans[i];
+    const size_t boundaries[] = {span->start, span->end};
+    for (size_t b = 0; b < 2; ++b) {
+      if (boundaries[b] <= first ||
+          boundaries[b] >= first + request->utf8_bytes)
+        continue;
+      const size_t at = boundaries[b] - first;
+      while (cursor < at)
+        if (!ArUnicodeGrapheme_Next(text, request->utf8_bytes, cursor, NULL,
+                                    &cursor))
+          return NULL;
+      if (cursor != at) {
+        *failure = kArTextRasterFailure_Deterministic;
+        SDL_SetError("style boundary at byte %zu divides a grapheme", at);
+        return NULL;
+      }
+    }
+  }
+  return CreateLayout(strut, fonts, text, request, base_pixels, failure);
+}
+
 void ArSdlBidiText_GetSize(const ArSdlBidiLayout *layout, int *width, int *height) {
   *width = layout->width;
   *height = layout->height;
@@ -522,6 +729,106 @@ void ArSdlBidiText_GetSize(const ArSdlBidiLayout *layout, int *width, int *heigh
 
 ArTextDirection ArSdlBidiText_GetDirection(const ArSdlBidiLayout *layout) {
   return layout->paragraph_direction;
+}
+
+ArTextLineMetrics *ArSdlBidiText_CopyLines(const ArSdlBidiLayout *layout,
+                                           size_t *count) {
+  *count = 0;
+  if (!layout->lines || !layout->line_count)
+    return NULL;
+  ArTextLineMetrics *copy = malloc((size_t)layout->line_count * sizeof(*copy));
+  if (!copy)
+    return NULL;
+  *count = (size_t)layout->line_count;
+  memcpy(copy, layout->lines, *count * sizeof(*copy));
+  return copy;
+}
+
+static int CompareFontUses(const void *a, const void *b) {
+  const ArTextFontUse *x = a, *y = b;
+  if (x->start != y->start)
+    return x->start < y->start ? -1 : 1;
+  if (x->end != y->end)
+    return x->end < y->end ? -1 : 1;
+  return (x->resource > y->resource) - (x->resource < y->resource);
+}
+
+bool ArSdlBidiText_CopyFontUses(const ArSdlBidiLayout *layout,
+                                ArTextFontUse **uses, size_t *count) {
+  *uses = NULL;
+  *count = 0;
+  size_t capacity = 0;
+  for (size_t r = 0; r < layout->count; ++r) {
+    const ShapedRun *run = &layout->runs[r];
+    for (size_t c = 0; c < run->styled.cluster_count; ++c) {
+      const ArSdlStyledCluster *cluster = &run->styled.clusters[c];
+      for (unsigned f = 0; f <= cluster->role->fallback_count; ++f) {
+        if (!(cluster->font_mask & (1u << f)))
+          continue;
+        if (*count == capacity) {
+          const size_t next = capacity ? capacity * 2 : 64;
+          if (next > 65536)
+            goto failed;
+          ArTextFontUse *expanded = realloc(*uses, next * sizeof(**uses));
+          if (!expanded)
+            goto failed;
+          *uses = expanded;
+          capacity = next;
+        }
+        (*uses)[(*count)++] = (ArTextFontUse){
+            .start = (uint32_t)(run->logical_offset + cluster->start),
+            .end = (uint32_t)(run->logical_offset + cluster->end),
+            .resource = cluster->role->ids[f],
+            .font_pixels = (uint16_t)cluster->pixels,
+            .missing = (cluster->missing_font_mask & (1u << f)) != 0};
+      }
+    }
+  }
+  if (*count)
+    qsort(*uses, *count, sizeof(**uses), CompareFontUses);
+  size_t kept = 0;
+  for (size_t i = 0; i < *count; ++i) {
+    const ArTextFontUse use = (*uses)[i];
+    if (kept && (*uses)[kept - 1].end == use.start &&
+        (*uses)[kept - 1].resource == use.resource &&
+        (*uses)[kept - 1].font_pixels == use.font_pixels &&
+        (*uses)[kept - 1].missing == use.missing) {
+      (*uses)[kept - 1].end = use.end;
+    } else
+      (*uses)[kept++] = use;
+  }
+  *count = kept;
+  return true;
+failed:
+  free(*uses);
+  *uses = NULL;
+  *count = 0;
+  return SDL_SetError("cannot retain bounded font selection metadata");
+}
+
+void ArSdlBidiText_DescribePaint(const ArSdlBidiLayout *layout,
+                                 const ArTextRevealCluster *clusters,
+                                 size_t count, ArSdlClusterPaint *paint) {
+  for (size_t r = 0; r < layout->count; ++r) {
+    const ShapedRun *run = &layout->runs[r];
+    for (size_t c = 0; c < run->styled.cluster_count; ++c) {
+      const ArSdlStyledCluster *cluster = &run->styled.clusters[c];
+      const size_t end = run->logical_offset + cluster->end;
+      size_t low = 0, high = count;
+      while (low < high) {
+        const size_t middle = low + (high - low) / 2;
+        if (clusters[middle].end_utf8_byte < end)
+          low = middle + 1;
+        else
+          high = middle;
+      }
+      if (low < count && clusters[low].end_utf8_byte == end)
+        paint[low] = (ArSdlClusterPaint){.appearance = cluster->appearance,
+                                         .source_start = run->logical_offset +
+                                                         cluster->start,
+                                         .pixels = cluster->pixels};
+    }
+  }
 }
 
 static int CompareClusters(const void *a, const void *b) {
@@ -552,6 +859,23 @@ SDL_Surface *ArSdlBidiText_Render(const ArSdlBidiLayout *layout,
   for (size_t i = 0; i < layout->count; ++i) {
     const ShapedRun *run = &layout->runs[i];
     if (!run->width) continue;
+    if (layout->styled) {
+      if (!ArSdlStyledRun_Draw(&run->styled, surface, run->x, run->y))
+        goto fail;
+      for (size_t c = 0; c < run->styled.cluster_count; ++c) {
+        const ArSdlStyledCluster *cluster = &run->styled.clusters[c];
+        if (cluster->rect.w <= 0 || cluster->rect.h <= 0)
+          continue;
+        result[(*cluster_count)++] = (ArTextRevealCluster){
+            .end_utf8_byte = run->logical_offset + cluster->end,
+            .line_index = run->line,
+            .x = run->x + cluster->rect.x,
+            .y = run->y + cluster->rect.y,
+            .width = cluster->rect.w,
+            .height = cluster->rect.h};
+      }
+      continue;
+    }
     if (!TTF_DrawSurfaceText(run->text, run->x, run->y, surface)) goto fail;
     size_t offset = 0;
     while (offset < run->length) {

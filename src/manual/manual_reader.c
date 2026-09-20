@@ -172,8 +172,6 @@ const char *ManualReader_Status(void) {
   return s_reader.status[0] ? s_reader.status : "Manual not loaded yet.";
 }
 
-int ManualReader_PageCount(void) { return s_reader.index.count; }
-
 /* ── Open / close ──────────────────────────────────────────────────────────── */
 
 static bool SpreadMode(void) { return g_settings.manual_spreads; }

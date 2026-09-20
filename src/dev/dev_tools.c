@@ -147,7 +147,7 @@ DevToolsCaptureResult DevTools_WriteFramebufferPpm(
   DevToolsRgb24Capture capture = {0};
   if (context->readback.capture_rgb24 &&
       ArRenderTexture_IsValid(context->hud_bg_texture)) {
-    FrameSlot_Capture(&frame_slot);
+    FrameSlot_Capture(&frame_slot, NULL);
     PresentUpload(&frame_slot);
     /* The same scene -> CRT resolve -> host-UI function used by the live
      * window keeps F2 captures visually identical, including an open menu. */

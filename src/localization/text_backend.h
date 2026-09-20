@@ -9,8 +9,12 @@
 #include "localization/font_resource.h"
 
 #define AR_TEXT_BACKEND_ABI_VERSION UINT32_C(1)
-#define AR_TEXT_BACKEND_CONFIG_ABI_VERSION UINT32_C(2)
-enum { kArTextBackendMaximumFallbackFonts = 16 };
+#define AR_TEXT_BACKEND_CONFIG_ABI_VERSION UINT32_C(3)
+enum {
+  kArTextBackendMaximumFallbackFonts = kArTextFontMaximumFallbacks,
+  kArTextBackendMaximumFontRoles = kArTextFontMaximumRoles,
+  kArTextBackendRoleCapacity = kArTextFontRoleCapacity,
+};
 
 /* Portable input for constructing one ordered font stack. The host resolves
  * resources; backends pin immutable bytes for their complete lifetime. */
@@ -24,7 +28,11 @@ typedef struct ArTextBackendConfig {
   size_t fallback_font_count;
   uint64_t font_revision;
   size_t cached_size_capacity;
+  const ArTextFontRole *roles;
+  size_t role_count;
 } ArTextBackendConfig;
+
+bool ArTextBackendConfig_IsValid(const ArTextBackendConfig *config);
 
 /* Opaque backend instance plus the renderer-neutral rasterizer it publishes.
  * Consumers zero-initialize it, then construct/destroy it only through the

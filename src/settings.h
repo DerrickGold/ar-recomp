@@ -669,6 +669,10 @@ typedef struct Settings {
   bool input_cam_invert_y;
 } Settings;
 
+/* Shared bound for boot-layer storage and menu snapshots. The descriptor
+ * definition statically verifies that every registered setting fits. */
+enum { kSettingsMaxDescriptors = 320 };
+
 extern Settings g_settings;
 extern const SettingDesc g_setting_descs[];
 extern const int g_setting_desc_count;
@@ -795,7 +799,6 @@ int Settings_AudioFrequencyHz(void);
 /* HD replacements are only actionable when at least one manifest image was
  * decoded and uploaded. The host publishes that resource state after load. */
 void Settings_SetHdReplacementsAvailable(bool available);
-bool Settings_HdReplacementsAvailable(void);
 
 /* Backing pixels per window point for the window's current display
  * (SDL_GetWindowPixelDensity), pushed from main.c. */

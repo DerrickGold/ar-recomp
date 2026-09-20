@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include "localization/font_resource.h"
 
-#define AR_TEXT_PRESENTATION_ABI_VERSION UINT32_C(2)
+#define AR_TEXT_PRESENTATION_ABI_VERSION UINT32_C(3)
 
 enum { kArTextPresentationMaximumFallbackFonts = 8 };
 
@@ -20,6 +20,8 @@ typedef struct ArTextPresentationFont {
   uint64_t revision;
   const ArFontResourceId *fallbacks;
   size_t fallback_count;
+  const ArTextFontRole *roles;
+  size_t role_count;
 } ArTextPresentationFont;
 
 /* Injected once on the game/presenter thread, before applying settings. A true

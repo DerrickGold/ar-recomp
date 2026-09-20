@@ -246,11 +246,16 @@ bool ActRaiserLocalizationValues_Resolve(
   bool resolved = false;
   if (expected_kind == kArLanguagePlaceholder_Icon) {
     resolved = !strncmp(name, "icon.", 5) && SetText(value, name);
+  } else if (!strcmp(name, "hud_value")) {
+    resolved = expected_kind == kArLanguagePlaceholder_LocalizedText &&
+               SetText(value, values->hud_value);
+  } else if (!strcmp(name, "location_name")) {
+    resolved = expected_kind == kArLanguagePlaceholder_LocalizedText &&
+               SetText(value, values->location_name);
   } else if (!strcmp(name, "master_name")) {
     resolved = expected_kind == kArLanguagePlaceholder_LocalizedText &&
         SetText(value, values->master_name);
-  } else if (!strcmp(name, "town_name") ||
-             !strcmp(name, "current_city_name")) {
+  } else if (!strcmp(name, "town_name") || !strcmp(name, "current_city_name")) {
     resolved = expected_kind == kArLanguagePlaceholder_LocalizedText &&
         ResolveTownText(values, CurrentTown(values), value);
   } else if (!strcmp(name, "enemy_name")) {

@@ -3,17 +3,25 @@
 
 #include "actraiser/actraiser_localization_compose_state.h"
 
-enum { kActRaiserCreditsPageCount = 20, kActRaiserCreditsTextCapacity = 4096 };
+enum {
+  kActRaiserCreditsPageCount = 20,
+  kActRaiserCreditsTextCapacity = 4096,
+  kActRaiserCreditsFontPixels = 13
+};
+extern const ArTextCellRegion kActRaiserCreditsRegion;
+
+/* Pure credits row placement and frame geometry, shared by live playback and
+ * authoring. Accent output supports legacy hosts; v2 templates own color. */
+bool ActRaiserLocalizationCredits_PrepareText(ActRaiserResolvedText *text,
+                                              uint32_t *accent_end);
+bool ActRaiserLocalizationCredits_AddText(ArLocalizationFrame *frame,
+                                          ArTextCellDestination destination,
+                                          const ActRaiserResolvedText *text);
 typedef struct ActRaiserLocalizationCredits {
   bool resolved, valid;
   uint8_t page;
-  uint32_t clusters, accent_end;
-  uint64_t revision;
-  ArLocalizationTextLanguage language;
-  ArTextBidiSpans bidi;
-  size_t bytes;
-  char text[kActRaiserCreditsTextCapacity];
-  uint8_t boundaries[AR_TEXT_BOUNDARY_BYTES(kActRaiserCreditsTextCapacity)];
+  uint32_t accent_end;
+  ActRaiserResolvedText text;
 } ActRaiserLocalizationCredits;
 
 /* US credits scene 08/01 only. Match the presented map to the resident maps

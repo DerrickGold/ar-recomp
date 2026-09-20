@@ -3332,6 +3332,592 @@ static void ActRaiser_PpuScanoutIrqCallback(
   }
 }
 
+static void ActRaiser_ReportVerticalCaptureRows(void) {
+  if (ActRaiser_DeveloperFlagEnabled(
+          kActRaiserDeveloperFlag_VerticalExtensionLog)) {
+    /* Where each destination's content actually LANDED, which is the check that
+     * catches the row-origin class of bug: the HUD surfaces are consumed in
+     * AUTHENTIC screen space and must not move when the vertical margin
+     * changes, while the diorama planes are consumed in CAPTURE space and must
+     * move by exactly the margin. Both on one line so a regression in either
+     * is one diff apart. */
+    extern uint8_t g_hud_bg_pixels[];
+    extern uint8_t *g_diorama_layer_pixels[];
+    int width = kActRaiserAuthenticWidth + 2 * g_ws_extra;
+    size_t pitch = (size_t)width * 4;
+    int hud0 = -1, hud1 = -1, plane0 = -1, plane1 = -1;
+    for (int y = 0; y < kHostDisplayFramebufferHeight; y++) {
+      const uint32_t *r =
+          (const uint32_t *)(g_hud_bg_pixels + (size_t)y * pitch);
+      for (int x = 0; x < width; x++)
+        if (r[x]) {
+          if (hud0 < 0)
+            hud0 = y;
+          hud1 = y;
+          break;
+        }
+    }
+    const uint8_t *bg2 = g_diorama_layer_pixels[SR_PPU_OVERLAY_BG2];
+    /* The plane's own pitch, not the HUD's: the diorama planes are bound
+     * apron-wide. A diagnostic that exists to catch origin bugs must not carry
+     * one, and the wrong stride would slide its reported rows a little further
+     * every row it walked. */
+    const size_t plane_pitch =
+        ActionApron_SurfacePitch(width, SR_PPU_OBJ_APRON);
+    if (bg2)
+      for (int y = 0; y < kHostDisplayFramebufferHeight; y++) {
+        const uint32_t *r = (const uint32_t *)(bg2 + (size_t)y * plane_pitch);
+        for (int x = 0; x < width + (int)SR_PPU_OBJ_APRON * 2; x++)
+          if (r[x]) {
+            if (plane0 < 0)
+              plane0 = y;
+            plane1 = y;
+            break;
+          }
+      }
+    fprintf(stderr,
+            "[vext-rows] gf=%u top=%d bottom=%d hudbg=[%d..%d] "
+            "bg2plane=[%d..%d] "
+            "objs_unlocked=%u\n",
+            ActRaiser_ReadWram16(kActRaiserWram_GameFrame), s_live_margin_top,
+            s_live_margin_bottom, hud0, hud1, plane0, plane1,
+            ActRaiser_TakeVextUnlockedObjects());
+  }
+}
+
+static void ActRaiser_ReportTitleScanout(const SnesRunnerApi *scanout_api,
+                                         SrRunnerHandle *scanout_runner,
+                                         bool scanout_ready,
+                                         uint8_t hdma_active_mask) {
+  /* AR_TITLELOG=1: per-frame title-screen PPU probe (map bytes, BG mode,
+   * HDMAEN, Mode-7 matrix, INIDISP) for deriving/validating the settled-logo
+   * gate above. Diagnostic only. */
+  if (ActRaiser_DeveloperFlagEnabled(kActRaiserDeveloperFlag_TitleLog)) {
+    static int last_gf = -1;
+    int gf = (int)ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
+    if (gf != last_gf) {
+      SrPpuStateSnapshot scanout_initial = {
+          .struct_size = sizeof(scanout_initial),
+      };
+      if (scanout_ready &&
+          scanout_api->query_ppu_state(scanout_runner, &scanout_initial) ==
+              SR_RESULT_OK) {
+        last_gf = gf;
+        fprintf(stderr,
+                "[titlelog] gf=%d $18=%02x $19=%02x bgmode=%02x "
+                "hdmaen=%02x m7=[%04x %04x %04x %04x] inidisp=%02x\n",
+                gf, g_ram[kActRaiserWram_MapGroup],
+                g_ram[kActRaiserWram_CurrentMap],
+                scanout_initial.bg_mode_control, hdma_active_mask,
+                (uint16)scanout_initial.mode7_matrix[0],
+                (uint16)scanout_initial.mode7_matrix[1],
+                (uint16)scanout_initial.mode7_matrix[2],
+                (uint16)scanout_initial.mode7_matrix[3],
+                scanout_initial.display_control);
+      }
+    }
+  }
+}
+
+static void ActRaiser_BindDioramaHudCapture(int width, size_t pitch,
+                                            int capture_height,
+                                            uint8_t capture_screens,
+                                            uint8_t full_add_sub_sources) {
+  extern uint8_t *g_diorama_layer_pixels[];
+  /* Rebind BG3 in both directions on every frame. Omitting it would retain
+   * the previous destination across flat/tilted HUD toggles. The flat HUD uses
+   * the narrow framebuffer pitch; tilted planes include the apron. */
+  if (g_settings.diorama_hud_flat) {
+    extern uint8_t g_hud_bg_pixels[];
+    /* The NARROW pitch, deliberately -- not the apron-wide `pitch` the
+     * diorama planes bind at. This surface is not a diorama plane: it feeds
+     * the anchored flat HUD overlay, which present.c uploads at
+     * snes_width*4 (PresentUpload's hud rect). Binding it apron-wide made
+     * the PPU write rows 2*kPpuObjApron columns apart while the upload read
+     * them snes_width apart, shearing the HUD across the top of the screen.
+     * The apron is resolve headroom for content that slides in past a
+     * tilted plane's edge; a screen-anchored HUD has no such edge. */
+    ActRaiser_BindPpuOutput(SR_PPU_OUTPUT_OVERLAY, SR_PPU_OVERLAY_BG3, 0u,
+                            g_hud_bg_pixels, (size_t)width * 4,
+                            kHostDisplayFramebufferHeight);
+    /* Capture extent is already final in
+     * ArBg3Composite_CaptureHeight. Keeping this block to a pure rebind
+     * makes ownership independent of renderer setup order and preserves
+     * the same policy through flat/tilted/flat toggle sequences. */
+  } else {
+    if (!g_diorama_layer_pixels[SR_PPU_OVERLAY_BG3])
+      g_diorama_layer_pixels[SR_PPU_OVERLAY_BG3] = calloc(
+          1, SR_PPU_SURFACE_MAX_WIDTH * 4 * kHostDisplayFramebufferHeight);
+    ActRaiser_BindPpuOutput(SR_PPU_OUTPUT_OVERLAY, SR_PPU_OVERLAY_BG3, 0u,
+                            g_diorama_layer_pixels[SR_PPU_OVERLAY_BG3], pitch,
+                            kHostDisplayFramebufferHeight);
+    if (capture_screens & (1 << SR_PPU_OVERLAY_BG3))
+      ActRaiser_SetPpuOverlayCapture(
+          SR_PPU_OVERLAY_BG3, -g_ws_extra, -g_ws_extra_top, width,
+          capture_height,
+          SR_PPU_OVERLAY_REMOVE_FROM_GAME |
+              ((full_add_sub_sources & (1 << SR_PPU_OVERLAY_BG3))
+                   ? SR_PPU_OVERLAY_MARK_FULL_ADD_SUBSCREEN
+                   : 0u));
+  }
+}
+
+static void ActRaiser_BindDioramaPriorityBands(size_t pitch) {
+  extern uint8_t *g_diorama_layer_pixels[];
+  /* Priority-band splits: scanout routes each captured pixel to the
+   * surface matching its hardware priority (Mode-1 tile priority bit for
+   * BGs, the 2-bit OAM priority for sprites), so the diorama can draw
+   * the true Mode-1 interleave — foreground tiles over sprites, low
+   * priority sprites behind the playfield. Bound after their primaries
+   * because a primary rebind drops the band family. */
+  static const struct {
+    uint32_t src;
+    int band;
+    int plane;
+  } kPrioBands[] = {
+      {SR_PPU_OVERLAY_BG1, 1, kDioramaPlane_Bg1Hi},
+      {SR_PPU_OVERLAY_BG2, 1, kDioramaPlane_Bg2Hi},
+      {SR_PPU_OVERLAY_BG1, 2, kDioramaPlane_Bg1Far},
+      {SR_PPU_OVERLAY_BG2, 2, kDioramaPlane_Bg2Far},
+      {SR_PPU_OVERLAY_OBJ, 1, kDioramaPlane_Obj1},
+      {SR_PPU_OVERLAY_OBJ, 2, kDioramaPlane_Obj2},
+      {SR_PPU_OVERLAY_OBJ, 3, kDioramaPlane_Obj3},
+  };
+  for (int i = 0; i < (int)(sizeof(kPrioBands) / sizeof(kPrioBands[0])); i++) {
+    if (kPrioBands[i].plane == kDioramaPlane_Bg1Far ||
+        kPrioBands[i].plane == kDioramaPlane_Bg2Far) {
+      const DioramaRoomOverride *virtual_room =
+          ActRaiser_CurrentVirtualLayerRoom();
+      const int virtual_bg =
+          kPrioBands[i].plane == kDioramaPlane_Bg1Far ? 0 : 1;
+      if (!virtual_room || !DioramaLayerOrder_VirtualLayerIsAuthored(
+                               &virtual_room->virtual_layers[virtual_bg]))
+        continue;
+    }
+    if (!g_diorama_layer_pixels[kPrioBands[i].plane])
+      g_diorama_layer_pixels[kPrioBands[i].plane] = calloc(
+          1, SR_PPU_SURFACE_MAX_WIDTH * 4 * kHostDisplayFramebufferHeight);
+    ActRaiser_BindPpuOutput(SR_PPU_OUTPUT_OVERLAY_PRIORITY, kPrioBands[i].src,
+                            (uint32_t)kPrioBands[i].band,
+                            g_diorama_layer_pixels[kPrioBands[i].plane], pitch,
+                            kHostDisplayFramebufferHeight);
+  }
+}
+
+static void ActRaiser_PrepareDioramaCapture(const SrPpuStateSnapshot *ppu) {
+  /* Diorama per-layer capture: when active (D toggle) or armed for a one-shot
+   * dump (Shift+D), override all existing capture policies with full-frame
+   * RemoveFromGame captures for BG1/2/3/OBJ. Bind dedicated diorama buffers
+   * so we don't collide with the HUD/HD overlay surfaces. The captures
+   * overwrite whatever the widescreen HUD split and HD replacements set
+   * above — mutual exclusion for this frame. */
+  extern bool Diorama_IsActiveThisFrame(void);
+  extern bool g_diorama_dump_pending;
+  extern bool g_diorama_frame_active;
+  extern uint8_t *g_diorama_layer_pixels[];
+  bool active = Diorama_IsActiveThisFrame();
+  bool want_capture =
+      active || (g_diorama_dump_pending &&
+                 ActRaiser_IsActionMapGroup(g_ram[kActRaiserWram_MapGroup]));
+  g_diorama_frame_active = active;
+  if (want_capture) {
+    int width = kActRaiserAuthenticWidth + 2 * g_ws_extra;
+    /* Apron-wide, matching the main framebuffer bind: the capture rect stays
+     * scanline-bounded (the scanline path cannot fill apron columns), but the
+     * wider pitch makes PpuWriteOverlayRenderLine's texture_extra centre the
+     * captured span, leaving the apron columns free for capture-time part
+     * rasterization to fill. */
+    size_t pitch = ActionApron_SurfacePitch(width, SR_PPU_OBJ_APRON);
+    /* Capture rectangles are expressed in AUTHENTIC screen space, so
+     * the vertical band starts at a negative y exactly as the side
+     * margins start at -g_ws_extra. The PPU maps that onto row 0 of the
+     * destination surface (PpuOutputRow), so a plane's texture row 0 is
+     * screen y = -g_ws_extra_top -- the transpose of column 0 meaning
+     * screen x = -g_ws_extra. */
+    int capture_height =
+        kActRaiserAuthenticHeight + g_ws_extra_top + g_ws_extra_bottom;
+    /* BG3 has a separate binding below: a flat HUD retains its anchored
+     * capture policy; a tilted HUD is captured as another scene plane. */
+    static const uint32_t kCaptureLayersCommon[] = {
+        SR_PPU_OVERLAY_BG1,
+        SR_PPU_OVERLAY_BG2,
+        SR_PPU_OVERLAY_OBJ,
+    };
+    /* Diorama owns visual sources, not just the SNES main screen. Marahna
+     * keeps BG1 and OBJ exclusively on TS ($11) and full-adds them to
+     * main-screen BG2 ($06); gating on TM alone produced an empty BG1 plane
+     * and no sprites even though the native composite was healthy. The PPU
+     * overlay exporter prefers TM and falls back to TS for a subscreen-only
+     * BG, so the union is the frontend's correct eligibility test. */
+    const uint8_t capture_screens =
+        (uint8_t)(ppu->main_screen | ppu->sub_screen);
+    const uint8_t full_add_sub_sources =
+        DioramaCaptureBlend_FullAddSubscreenSources(
+            ppu->color_math_control, ppu->color_math_designation,
+            ppu->main_screen, ppu->sub_screen);
+    uint8_t layer_group = 0, layer_map = 0;
+    uint8_t layer_section = kDioramaLayerSection_Room;
+    const bool layer_room_live =
+        Diorama_LiveRoom(&layer_group, &layer_map, &layer_section);
+    /* Captures represent half-add with alpha and disjoint full-add with
+     * subscreen-source ownership. Subtract and overlapping full-add fail
+     * closed. The hardware policy is tested in diorama_capture_blend.c. */
+    for (int i = 0; i < (int)(sizeof(kCaptureLayersCommon) /
+                              sizeof(kCaptureLayersCommon[0]));
+         i++) {
+      uint32_t src = kCaptureLayersCommon[i];
+      if (!g_diorama_layer_pixels[src])
+        g_diorama_layer_pixels[src] = calloc(
+            1, SR_PPU_SURFACE_MAX_WIDTH * 4 * kHostDisplayFramebufferHeight);
+      ActRaiser_BindPpuOutput(SR_PPU_OUTPUT_OVERLAY, src, 0u,
+                              g_diorama_layer_pixels[src], pitch,
+                              kHostDisplayFramebufferHeight);
+      if (capture_screens & (1 << src)) {
+        uint32_t flags = SR_PPU_OVERLAY_REMOVE_FROM_GAME;
+        if (full_add_sub_sources & (1 << src))
+          flags |= SR_PPU_OVERLAY_MARK_FULL_ADD_SUBSCREEN;
+        /* OBJ keeps its own per-palette-group flag; this one is BG-only. */
+        if (src != SR_PPU_OVERLAY_OBJ &&
+            DioramaCaptureBlend_LayerIsHalfAdded(
+                ppu->color_math_control, ppu->color_math_designation,
+                ppu->sub_screen, (uint8_t)(1 << src))) {
+          flags |= SR_PPU_OVERLAY_MARK_BG_HALF_ADD;
+          /* Once per source: this is a fidelity change to the captured image,
+           * so it should be visible in a log rather than inferred from
+           * pixels. Silent on every stage that does not use this math.
+           * AR_DIORAMA_BLEND_LOG=1 makes it per-frame instead, which is how
+           * to tell a stage that never qualifies from one that qualifies only
+           * on some frames (CGWSEL/CGADSUB are HDMA-writable per scanline, so
+           * the value at capture-setup time is not necessarily the value
+           * during scanout). */
+          static bool reported[SR_PPU_OVERLAY_SOURCE_COUNT];
+          static int verbose = -1;
+          if (verbose < 0)
+            verbose = getenv("AR_DIORAMA_BLEND_LOG") ? 1 : 0;
+          if (!reported[src] || verbose) {
+            reported[src] = true;
+            fprintf(stderr,
+                    "[diorama-blend] gf=%u BG%d half-added with subscreen "
+                    "(cgwsel=$%02x cgadsub=$%02x main=$%02x sub=$%02x) "
+                    "-> captured at 50%% alpha\n",
+                    ActRaiser_ReadWram16(kActRaiserWram_GameFrame), src + 1,
+                    ppu->color_math_control, ppu->color_math_designation,
+                    ppu->main_screen, ppu->sub_screen);
+          }
+        }
+        /* Bloodpool 0204 dims BG1 with full fixed-colour subtraction
+         * (cgwsel=$00 cgadsub=$81). Alpha cannot express subtraction, so ask
+         * the PPU capture to bake it into this isolated plane in native
+         * 5-bit colour space. */
+        if (src != SR_PPU_OVERLAY_OBJ &&
+            DioramaCaptureBlend_LayerUsesFixedColorSubtract(
+                ppu->color_math_control, ppu->color_math_designation,
+                ppu->fixed_color, (uint8_t)(1 << src))) {
+          flags |= SR_PPU_OVERLAY_APPLY_BG_FIXED_COLOR_SUBTRACT;
+        }
+        ActRaiser_SetPpuOverlayCapture(src, -g_ws_extra, -g_ws_extra_top, width,
+                                       capture_height, flags);
+        if (flags & SR_PPU_OVERLAY_MARK_FULL_ADD_SUBSCREEN) {
+          static bool reported_full_add;
+          static int verbose_full_add = -1;
+          if (verbose_full_add < 0)
+            verbose_full_add = getenv("AR_DIORAMA_BLEND_LOG") ? 1 : 0;
+          if (!reported_full_add || verbose_full_add) {
+            reported_full_add = true;
+            fprintf(stderr,
+                    "[diorama-blend] gf=%u full subscreen add "
+                    "(cgwsel=$%02x cgadsub=$%02x main=$%02x sub=$%02x) "
+                    "-> resolved TS sources=$%02x use additive planes\n",
+                    ActRaiser_ReadWram16(kActRaiserWram_GameFrame),
+                    ppu->color_math_control, ppu->color_math_designation,
+                    ppu->main_screen, ppu->sub_screen, full_add_sub_sources);
+          }
+        }
+      }
+      /* Backing is presentation policy even when this particular live BG is
+       * disabled: a named ROM skybox can source BG1/BG2 independently of the
+       * current room's screen-enable bits. Geometry and fill setup are
+       * deliberately order-independent within this per-frame policy. */
+      if (layer_room_live &&
+          (src == SR_PPU_OVERLAY_BG1 || src == SR_PPU_OVERLAY_BG2)) {
+        DioramaTransparentFill fill = kDioramaTransparentFill_None;
+        uint8_t fill_cgram = 0;
+        if (DioramaLayerOrder_ResolveTransparentFill(
+                Diorama_LayerOverrides(), layer_group, layer_map, layer_section,
+                src, &fill, &fill_cgram)) {
+          SrPpuTransparentFillMode mode = SR_PPU_TRANSPARENT_FILL_NONE;
+          if (fill == kDioramaTransparentFill_Black)
+            mode = SR_PPU_TRANSPARENT_FILL_BLACK;
+          else if (fill == kDioramaTransparentFill_Cgram)
+            mode = SR_PPU_TRANSPARENT_FILL_CGRAM;
+          /* Unknown/corrupt values fail transparent rather than silently
+           * becoming black and hiding a platform-specific capture fault.
+           * Setting None is still significant: it carries authored Off into
+           * the immutable frame snapshot used by ROM backdrop composition. */
+          ActRaiser_SetPpuOverlayFill(src, mode, fill_cgram);
+        }
+      }
+    }
+    ActRaiser_BindDioramaHudCapture(width, pitch, capture_height,
+                                    capture_screens, full_add_sub_sources);
+    if (capture_screens & (1 << SR_PPU_OVERLAY_OBJ))
+      ActRaiser_SetPpuOverlayOamRange(0, 128);
+    ActRaiser_BindDioramaPriorityBands(pitch);
+  }
+}
+
+static void ActRaiser_PrepareSceneMasks(uint8_t map_group, uint8_t map_number) {
+  /* Flat presentation has one already-composited framebuffer, so BG-local
+   * enhancements need the PPU's real priority winners as occlusion masks.
+   * Diorama owns isolated planes and inserts effects directly after BG1/BG2;
+   * a one-shot dump likewise owns these capture slots. HD replacements get
+   * first refusal above—never overwrite another source policy. */
+  extern bool g_diorama_frame_active;
+  extern bool g_diorama_dump_pending;
+  const bool action_effects_enabled =
+      g_settings.action_effect_lighting || g_settings.action_effect_particles;
+  if (action_effects_enabled && !g_diorama_frame_active &&
+      !g_diorama_dump_pending &&
+      ActionSceneEffects_RoomUsesBg1Decorations(g_ram, kActRaiserWramSize)) {
+    const SrPpuOverlayCaptureState *bg1 =
+        ActRaiser_PpuCapture(SR_PPU_OVERLAY_BG1);
+    if (bg1->x1 <= bg1->x0 || bg1->y1 <= bg1->y0) {
+      extern uint8_t g_action_bg1_mask_pixels[];
+      const int width = kActRaiserAuthenticWidth + 2 * g_ws_extra;
+      if (ActRaiser_BindPpuOutput(SR_PPU_OUTPUT_OVERLAY, SR_PPU_OVERLAY_BG1, 0u,
+                                  g_action_bg1_mask_pixels, (size_t)width * 4,
+                                  kHostDisplayFramebufferHeight)) {
+        ActRaiser_SetPpuOverlayCapture(
+            SR_PPU_OVERLAY_BG1, -g_ws_extra, 0, width,
+            kActRaiserAuthenticHeight,
+            SR_PPU_OVERLAY_MARK_OWNING_SCREEN_WINNER);
+      }
+    }
+  }
+  if (action_effects_enabled && !g_diorama_frame_active &&
+      !g_diorama_dump_pending && map_group == kActRaiserMapGroup_Aitos &&
+      map_number >= 2 && map_number <= 3) {
+    const SrPpuOverlayCaptureState *bg2 =
+        ActRaiser_PpuCapture(SR_PPU_OVERLAY_BG2);
+    if (bg2->x1 <= bg2->x0 || bg2->y1 <= bg2->y0) {
+      extern uint8_t g_action_bg2_mask_pixels[];
+      const int width = kActRaiserAuthenticWidth + 2 * g_ws_extra;
+      if (ActRaiser_BindPpuOutput(SR_PPU_OUTPUT_OVERLAY, SR_PPU_OVERLAY_BG2, 0u,
+                                  g_action_bg2_mask_pixels, (size_t)width * 4,
+                                  kHostDisplayFramebufferHeight)) {
+        ActRaiser_SetPpuOverlayCapture(SR_PPU_OVERLAY_BG2, -g_ws_extra, 0,
+                                       width, kActRaiserAuthenticHeight,
+                                       SR_PPU_OVERLAY_MARK_MAIN_SCREEN_WINNER);
+      }
+    }
+  }
+
+  /* Palace replaces only actual BG1 main-screen winners. The public mask
+   * leaves native scanout/HUD untouched and never takes an existing HD/dump
+   * claim. Binding/capture policy is owned here, before the normal scanout. */
+  if (g_settings.sim3d_world_navigation && g_settings.sim3d_sky_palace &&
+      !g_diorama_frame_active && !g_diorama_dump_pending &&
+      map_group == kActRaiserMapGroup_NonAction &&
+      map_number == kActRaiserNonActionMap_SkyPalace) {
+    const SrPpuOverlayCaptureState *bg1 =
+        ActRaiser_PpuCapture(SR_PPU_OVERLAY_BG1);
+    const int width = kActRaiserAuthenticWidth + 2 * g_ws_extra;
+    if (bg1 && (bg1->x1 <= bg1->x0 || bg1->y1 <= bg1->y0) &&
+        width <= kSimWorldNavigationPalaceMaxWidth &&
+        ActRaiser_BindPpuOutput(SR_PPU_OUTPUT_OVERLAY, SR_PPU_OVERLAY_BG1, 0u,
+                                (uint8_t *)g_sim_sky_palace_mask_pixels,
+                                (size_t)width * sizeof(uint32_t),
+                                kSimWorldNavigationPalaceMaxHeight)) {
+      ActRaiser_SetPpuOverlayCapture(SR_PPU_OVERLAY_BG1, -g_ws_extra, 0, width,
+                                     kActRaiserAuthenticHeight,
+                                     SR_PPU_OVERLAY_MARK_MAIN_SCREEN_WINNER);
+    }
+  }
+}
+
+static void ActRaiser_PrepareTownCapture(void) {
+  /* D2: claim observational full-frame Mode-1 captures only after every
+   * pre-existing HUD/HD/diorama policy has had a chance to declare a
+   * conflict. The original PPU framebuffer remains intact as same-frame A0. */
+  extern bool g_sim3d_textures_ready;
+  extern bool g_sim3d_billboard_renderer_ready;
+  extern bool g_diorama_frame_active;
+  uint8_t map_group = g_ram[kActRaiserWram_MapGroup];
+  uint8_t map_number = g_ram[kActRaiserWram_CurrentMap];
+  bool town = ActRaiser_IsSimulationTown(map_group, map_number);
+  /* Build D1b before choosing D2's physical planes. This is the same live
+   * OAM/VRAM/CGRAM state the scanline renderer is about to consume, but now
+   * an atlas or metadata failure can retain raw OBJ before scanout instead
+   * of being discovered after those fallback pixels were omitted. */
+  bool billboard_atlas_ready =
+      town && SimRenderAtlas_Build(
+                  s_runner, ActRaiser_ReadWram16(kActRaiserWram_Bg1CameraX),
+                  ActRaiser_ReadWram16(kActRaiserWram_Bg1CameraY));
+  Sim3DCaptureRequest request = {
+      .town = town,
+      .master_enabled = g_settings.sim3d_mode,
+      /* The picker flag is in $7F WRAM; its 17-bit mirror address must not
+       * pass through the 16-bit low-WRAM helper. */
+      .picker_active = town && ActRaiser_SimMapPickerActiveForState(
+                                   map_group, map_number,
+                                   ActRaiser_ReadWramMirror16(
+                                       kActRaiserWram_SimMapPickerFlag)),
+      .renderer_ready = g_sim3d_textures_ready,
+      .billboard_atlas_ready = billboard_atlas_ready,
+      .billboard_renderer_ready = g_sim3d_billboard_renderer_ready,
+      .diorama_active = g_diorama_frame_active,
+      /* The inspector panel is the only on-screen reader of the capture's
+       * diagnostic hash; with it off, that pass is skipped. */
+      .inspector_active = g_settings.scene_inspector,
+      .requested_features = Settings_Sim3DRequestedFeatures(),
+      .diagnostic_layer_mask = g_settings.sim3d_diagnostic_layers,
+      .width = kActRaiserAuthenticWidth + 2 * g_ws_extra,
+      .height = kActRaiserAuthenticHeight,
+  };
+  Sim3D_PrepareCapture(s_runner, &request);
+  ActRaiser_ReportSim3DCaptureContractFailure();
+}
+
+static SrPpuBackgroundViewRequest
+ActRaiser_PrepareSkyboxView(const SrPpuFrameTransactionContext *context,
+                            const SnesRunnerApi *scanout_api,
+                            bool scanout_ready, bool profile_diorama) {
+  /* A finite scrolling background needs its own fixed-size view at world
+   * edges. The normal BG capture remains registered to the gameplay camera.
+   * Named ROM, repeated, mirrored and row-banded skies retain their policies.
+   */
+  SrPpuBackgroundViewRequest skybox_view = {0};
+  const ActionBgLayerPlan *sky_layer = &s_pending_action_bg_plan.layer[1];
+  const DioramaRoomOverride *sky_room = ActRaiser_CurrentVirtualLayerRoom();
+  const DioramaPlaneOverride *backdrop_override =
+      sky_room ? &sky_room->planes[kDioramaPlane_Backdrop] : NULL;
+  const bool skybox_capable =
+      scanout_ready &&
+      scanout_api->struct_size >= SNES_RUNNER_API_PPU_BACKGROUND_VIEW_SIZE &&
+      (scanout_api->capabilities & SR_RUNNER_CAP_PPU_BACKGROUND_VIEW) != 0u &&
+      scanout_api->run_ppu_scanout_with_background_view;
+  if (skybox_capable && profile_diorama && g_settings.diorama_margin_fix &&
+      g_settings.diorama_skybox != kDioramaSky_Off && sky_layer->valid &&
+      sky_layer->source == kActionBgSource_WorldMap &&
+      !sky_layer->wrap_world_x && sky_layer->band_count == 0 &&
+      sky_layer->default_edge == kActionBgEdge_LiveWorld &&
+      (!backdrop_override || !backdrop_override->set_source ||
+       backdrop_override->source == kDioramaLayerSource_Captured) &&
+      (!sky_room || !DioramaLayerOrder_VirtualLayerHasClassification(
+                        &sky_room->virtual_layers[1]))) {
+    unsigned left = context->frame.margin_budget;
+    unsigned right = left;
+    if (sky_layer->horizontal_extent.mode == kActionBgExtent_Fixed) {
+      if (left > sky_layer->horizontal_extent.left)
+        left = sky_layer->horizontal_extent.left;
+      if (right > sky_layer->horizontal_extent.right)
+        right = sky_layer->horizontal_extent.right;
+    }
+    unsigned width = kActRaiserAuthenticWidth + left + right;
+    if (width > sky_layer->world_width)
+      width = sky_layer->world_width;
+    skybox_view = (SrPpuBackgroundViewRequest){
+        .struct_size = sizeof(skybox_view),
+        .layer = SR_PPU_OVERLAY_BG2,
+        .world_width = sky_layer->world_width,
+        .world_height = sky_layer->world_height,
+        .screen_x0 = -(int)left,
+        .screen_y0 = -(int)context->state.margin_top,
+        .width = width,
+        .height = SR_PPU_NATIVE_HEIGHT + context->state.margin_top +
+                  context->state.margin_bottom,
+        .pixels = s_diorama_skybox_pixels,
+        .pitch_bytes = width * sizeof(uint32_t),
+        .pixel_byte_size = sizeof(s_diorama_skybox_pixels),
+    };
+  }
+
+  return skybox_view;
+}
+
+static void ActRaiser_PublishScanout(SrResult scanout_status,
+                                     const SrPpuScanoutResult *result,
+                                     const SrPpuBackgroundViewRequest *skybox,
+                                     bool action) {
+  if (skybox->pixels && scanout_status == SR_RESULT_OK &&
+      (result->flags & SR_PPU_SCANOUT_BACKGROUND_VIEW_READY)) {
+    s_live_diorama_skybox = (SrPpuSurfaceView){
+        .flags = SR_PPU_SURFACE_BOUND | SR_PPU_SURFACE_HAS_CONTENT,
+        .pixel_format = SR_PPU_PIXEL_FORMAT_ARGB8888_U32,
+        .data = (const uint8_t *)skybox->pixels,
+        .byte_size = skybox->pitch_bytes * skybox->height,
+        .pitch_bytes = skybox->pitch_bytes,
+        .width_pixels = skybox->width,
+        .height_pixels = skybox->height,
+        .origin_x = 0,
+        .origin_y = -skybox->screen_y0,
+        .scale = 1,
+    };
+  }
+  if (scanout_status != SR_RESULT_OK) {
+    SessionFatal_Request(
+        "The runner could not execute the PPU scanout ABI service. "
+        "Restart after rebuilding the game and runner together.");
+  }
+  const uint32_t authentic_camera_flags =
+      SR_PPU_SCANOUT_AUTHENTIC_CAMERA_BG1 | SR_PPU_SCANOUT_AUTHENTIC_CAMERA_BG2;
+  const bool authentic_frame_valid =
+      scanout_status == SR_RESULT_OK &&
+      (result->flags & SR_PPU_SCANOUT_AUTHENTIC_SURFACE_READY) != 0u &&
+      (!action ||
+       (result->final_state.flags & SR_PPU_STATE_FORCED_BLANK) != 0u ||
+       result->final_state.bg_mode != 1u ||
+       (result->flags & authentic_camera_flags) == authentic_camera_flags);
+  ActRaiser_AuthenticCaptureFrameCompleted(authentic_frame_valid);
+}
+
+static void ActRaiser_FinishSceneCapture(void) {
+  extern uint8_t g_pixels[];
+  int width = kActRaiserAuthenticWidth + 2 * g_ws_extra;
+  /* g_pixels is bound apron-wide; the authentic frame starts kPpuObjApron
+   * columns in. Offset the base and pass the real pitch. */
+  Sim3D_FinishCapture(g_pixels + ActionApron_DisplayOffset(SR_PPU_OBJ_APRON),
+                      ActionApron_SurfacePitch(width, SR_PPU_OBJ_APRON),
+                      ActRaiser_ReadWram16(kActRaiserWram_GameFrame));
+  ActRaiser_ReportSim3DCaptureContractFailure();
+  /* After scanout (the diorama planes only hold this frame's sprites now) and
+   * before FrameSlot_Capture publishes them to the presentation path. */
+  ActRaiser_DioramaHudObjFinish(width);
+  ActRaiser_DioramaDeathHeimHubStatuesFinish(width);
+  /* After the HUD-icon promote, not before: that pass PUNCHES the promoted
+   * icon out of the OBJ planes, and the apron's claimed-set test reads those
+   * planes. Running first would let a hole it is about to punch look like
+   * free space. */
+  const ActionApronGeometry apron_geom = ActRaiser_ObjApronGeometry();
+  ActRaiser_DioramaApronFinish(&apron_geom);
+}
+
+static void ActRaiser_PublishFrameCapture(SrResult scanout_status,
+                                          const SrPpuScanoutResult *result) {
+  /* Latch the margin state the frame was ACTUALLY
+   * rendered with, here, rather than letting FrameSlot_Capture read live g_ppu.
+   * Between this function and the frame slot capture, main.c may call
+   * ActRaiser_RebindPpuOutputSurfaces(), whose public margin configuration
+   * zeroes both live margins — reading g_ppu later would silently describe a
+   * different frame than the pixels came from. The non-diorama rebind gate
+   * normally prevents this mismatch; latching at the producer boundary makes
+   * that safety independent of the gate. */
+  s_live_margin_top =
+      scanout_status == SR_RESULT_OK ? (int)result->final_state.margin_top : 0;
+  s_live_margin_bottom = scanout_status == SR_RESULT_OK
+                             ? (int)result->final_state.margin_bottom
+                             : 0;
+
+  ActRaiser_ReportVerticalCaptureRows();
+  s_live_margin_left =
+      scanout_status == SR_RESULT_OK ? (int)result->final_state.margin_left : 0;
+  s_live_margin_right = scanout_status == SR_RESULT_OK
+                            ? (int)result->final_state.margin_right
+                            : 0;
+  s_live_action_bg_plan = s_pending_action_bg_plan;
+  s_live_bg_capture_pad_to_budget = s_pending_bg_capture_pad_to_budget;
+}
+
 static SrResult ActRaiser_DrawPpuFrameTransaction(
     void *user_data, SrRunnerHandle *runner,
     const SrPpuFrameTransactionContext *context);
@@ -3397,8 +3983,7 @@ void ActRaiserDrawPpuFrame(void) {
     SessionFatal_Request(
         "The runner does not provide coherent PPU frame access. Restart "
         "after rebuilding the game and runner together.");
-    PerformanceMetrics_End(pipeline);
-    return;
+    goto finish;
   }
   const SrPpuFrameTransactionRequest request = {
     .struct_size = sizeof(request),
@@ -3410,6 +3995,10 @@ void ActRaiserDrawPpuFrame(void) {
         "The runner rejected ActRaiser's PPU frame transaction. Restart "
         "after rebuilding the game and runner together.");
   }
+finish:
+  /* This function owns the temporary VRAM patch, including rejection before
+   * the callback starts. No runner outcome may leave it for the next frame. */
+  ActRaiser_WidescreenSkyPalaceRestore(s_runner);
   PerformanceMetrics_End(pipeline);
 }
 
@@ -3442,400 +4031,9 @@ static SrResult ActRaiser_DrawPpuFrameTransaction(
   ActRaiser_ClearWidescreenMarginGaps(
       s_pending_action_bg_plan.bound_canvas_to_world, context);
 
-  /* Diorama per-layer capture: when active (D toggle) or armed for a one-shot
-   * dump (Shift+D), override all existing capture policies with full-frame
-   * RemoveFromGame captures for BG1/2/3/OBJ. Bind dedicated diorama buffers
-   * so we don't collide with the HUD/HD overlay surfaces. The captures
-   * overwrite whatever the widescreen HUD split and HD replacements set
-   * above — mutual exclusion for this frame. */
-  {
-    extern bool Diorama_IsActiveThisFrame(void);
-    extern bool g_diorama_dump_pending;
-    extern bool g_diorama_frame_active;
-    extern uint8_t *g_diorama_layer_pixels[];
-    bool active = Diorama_IsActiveThisFrame();
-    bool want_capture = active ||
-        (g_diorama_dump_pending &&
-         ActRaiser_IsActionMapGroup(g_ram[kActRaiserWram_MapGroup]));
-    g_diorama_frame_active = active;
-    if (want_capture) {
-      int width = kActRaiserAuthenticWidth + 2 * g_ws_extra;
-      /* Apron-wide, matching the main framebuffer bind: the capture rect stays
-       * scanline-bounded (the scanline path cannot fill apron columns), but the
-       * wider pitch makes PpuWriteOverlayRenderLine's texture_extra centre the
-       * captured span, leaving the apron columns free for capture-time part
-       * rasterization to fill. */
-      size_t pitch = ActionApron_SurfacePitch(width, SR_PPU_OBJ_APRON);
-      /* Capture rectangles are expressed in AUTHENTIC screen space, so
-       * the vertical band starts at a negative y exactly as the side
-       * margins start at -g_ws_extra. The PPU maps that onto row 0 of the
-       * destination surface (PpuOutputRow), so a plane's texture row 0 is
-       * screen y = -g_ws_extra_top -- the transpose of column 0 meaning
-       * screen x = -g_ws_extra. */
-      int capture_height =
-          kActRaiserAuthenticHeight + g_ws_extra_top + g_ws_extra_bottom;
-      /* A7/A5 (followup doc): BG3 (the status bar) is excluded from this
-       * diorama capture loop whenever diorama_hud_flat is on (default) —
-       * leaving the line-906 widescreen HUD split capture (PpuSetOverlayCapture
-       * ... SR_PPU_OVERLAY_BG3 ... RemoveFromGame, above) standing instead
-       * of being overridden by this block. That capture feeds
-       * g_hud_bg_pixels/g_hud_bg_texture exactly as in flat mode, which is
-       * what lets PresentCompositeScene's diorama branch call
-       * PresentHudOverlayComposited (present.c) and get the same widescreen
-       * HUD anchoring (ACT/TIME/SCORE spread, boss-health full width) flat
-       * mode already has. Before A7 BG3 was unconditionally rebound here, so
-       * the last bind won — the anchored capture never survived and the HUD
-       * only ever showed as an unanchored tilted plane.
-       *
-       * diorama_hud_flat=false (A5's A/B option) restores that pre-A7
-       * behavior on purpose: BG3 captured here as an ordinary diorama layer,
-       * rendered as the tilted plane (diorama.c's kDioramaLayers table), with
-       * no anchored overlay. This is a game-thread read of the setting — the
-       * present-side choice (whether to call PresentHudOverlayComposited)
-       * uses the FrameSlot-snapshotted copy per D6. */
-      static const uint32_t kCaptureLayersCommon[] = {
-        SR_PPU_OVERLAY_BG1, SR_PPU_OVERLAY_BG2, SR_PPU_OVERLAY_OBJ,
-      };
-      /* Diorama owns visual sources, not just the SNES main screen. Marahna
-       * keeps BG1 and OBJ exclusively on TS ($11) and full-adds them to
-       * main-screen BG2 ($06); gating on TM alone produced an empty BG1 plane
-       * and no sprites even though the native composite was healthy. The PPU
-       * overlay exporter prefers TM and falls back to TS for a subscreen-only
-       * BG, so the union is the frontend's correct eligibility test. */
-      const uint8_t capture_screens =
-          (uint8_t)(ppu->main_screen | ppu->sub_screen);
-      const uint8_t full_add_sub_sources =
-          DioramaCaptureBlend_FullAddSubscreenSources(
-              ppu->color_math_control, ppu->color_math_designation,
-              ppu->main_screen, ppu->sub_screen);
-      uint8_t layer_group = 0, layer_map = 0;
-      uint8_t layer_section = kDioramaLayerSection_Room;
-      const bool layer_room_live = Diorama_LiveRoom(
-          &layer_group, &layer_map, &layer_section);
-      /* F4 (2026-07-26 handback: "missing transparency on background layers in
-       * diorama mode"). SNES colour math is not reproduced by the capture, so a
-       * half-added BG used to arrive fully opaque and HIDE the planes behind it
-       * instead of tinting them. Annotate those planes so the compositor draws
-       * them at 50% instead — see kPpuOverlayFlag_MarkBgHalfAdd.
-       *
-       * Half-add is represented by alpha. A disjoint full-add scene is instead
-       * tagged as a subscreen addend: the PPU capture masks each source to the
-       * resolved TS winner, and the compositor uses additive blending. Measured
-       * respectively in Fillmore act 2 ($02/$43) and Marahna act 1 ($02/$03,
-       * TM=$06, TS=$11). Subtract and overlapping full-add ownership still fail
-       * closed rather than guessing.
-       *
-       * The policy itself lives in diorama_capture_blend.c so it can be tested
-       * without a ROM or a renderer. */
-      for (int i = 0; i < (int)(sizeof(kCaptureLayersCommon) /
-                                sizeof(kCaptureLayersCommon[0])); i++) {
-        uint32_t src = kCaptureLayersCommon[i];
-        if (!g_diorama_layer_pixels[src])
-          g_diorama_layer_pixels[src] = calloc(
-              1, SR_PPU_SURFACE_MAX_WIDTH * 4 *
-                     kHostDisplayFramebufferHeight);
-        ActRaiser_BindPpuOutput(
-            SR_PPU_OUTPUT_OVERLAY, src, 0u,
-            g_diorama_layer_pixels[src], pitch,
-            kHostDisplayFramebufferHeight);
-        if (capture_screens & (1 << src)) {
-          uint32_t flags = SR_PPU_OVERLAY_REMOVE_FROM_GAME;
-          if (full_add_sub_sources & (1 << src))
-            flags |= SR_PPU_OVERLAY_MARK_FULL_ADD_SUBSCREEN;
-          /* OBJ keeps its own per-palette-group flag; this one is BG-only. */
-          if (src != SR_PPU_OVERLAY_OBJ &&
-              DioramaCaptureBlend_LayerIsHalfAdded(
-                  ppu->color_math_control,
-                  ppu->color_math_designation,
-                  ppu->sub_screen, (uint8_t)(1 << src))) {
-            flags |= SR_PPU_OVERLAY_MARK_BG_HALF_ADD;
-            /* Once per source: this is a fidelity change to the captured image,
-             * so it should be visible in a log rather than inferred from
-             * pixels. Silent on every stage that does not use this math.
-             * AR_DIORAMA_BLEND_LOG=1 makes it per-frame instead, which is how
-             * to tell a stage that never qualifies from one that qualifies only
-             * on some frames (CGWSEL/CGADSUB are HDMA-writable per scanline, so
-             * the value at capture-setup time is not necessarily the value
-             * during scanout). */
-            static bool reported[SR_PPU_OVERLAY_SOURCE_COUNT];
-            static int verbose = -1;
-            if (verbose < 0) verbose = getenv("AR_DIORAMA_BLEND_LOG") ? 1 : 0;
-            if (!reported[src] || verbose) {
-              reported[src] = true;
-              fprintf(stderr,
-                      "[diorama-blend] gf=%u BG%d half-added with subscreen "
-                      "(cgwsel=$%02x cgadsub=$%02x main=$%02x sub=$%02x) "
-                      "-> captured at 50%% alpha\n",
-                      ActRaiser_ReadWram16(kActRaiserWram_GameFrame),
-                      src + 1, ppu->color_math_control,
-                      ppu->color_math_designation,
-                      ppu->main_screen, ppu->sub_screen);
-            }
-          }
-          /* Bloodpool 0204 dims BG1 with full fixed-colour subtraction
-           * (cgwsel=$00 cgadsub=$81). Alpha cannot express subtraction, so ask
-           * the PPU capture to bake it into this isolated plane in native
-           * 5-bit colour space. */
-          if (src != SR_PPU_OVERLAY_OBJ &&
-              DioramaCaptureBlend_LayerUsesFixedColorSubtract(
-                  ppu->color_math_control,
-                  ppu->color_math_designation,
-                  ppu->fixed_color, (uint8_t)(1 << src))) {
-            flags |= SR_PPU_OVERLAY_APPLY_BG_FIXED_COLOR_SUBTRACT;
-          }
-          ActRaiser_SetPpuOverlayCapture(
-              src, -g_ws_extra, -g_ws_extra_top,
-              width, capture_height, flags);
-          if (flags & SR_PPU_OVERLAY_MARK_FULL_ADD_SUBSCREEN) {
-            static bool reported_full_add;
-            static int verbose_full_add = -1;
-            if (verbose_full_add < 0)
-              verbose_full_add = getenv("AR_DIORAMA_BLEND_LOG") ? 1 : 0;
-            if (!reported_full_add || verbose_full_add) {
-              reported_full_add = true;
-              fprintf(stderr,
-                      "[diorama-blend] gf=%u full subscreen add "
-                      "(cgwsel=$%02x cgadsub=$%02x main=$%02x sub=$%02x) "
-                      "-> resolved TS sources=$%02x use additive planes\n",
-                      ActRaiser_ReadWram16(kActRaiserWram_GameFrame),
-                      ppu->color_math_control,
-                      ppu->color_math_designation,
-                      ppu->main_screen, ppu->sub_screen,
-                      full_add_sub_sources);
-            }
-          }
-        }
-        /* Backing is presentation policy even when this particular live BG is
-         * disabled: a named ROM skybox can source BG1/BG2 independently of the
-         * current room's screen-enable bits. Geometry and fill setup are
-         * deliberately order-independent within this per-frame policy. */
-        if (layer_room_live && (src == SR_PPU_OVERLAY_BG1 ||
-                                src == SR_PPU_OVERLAY_BG2)) {
-          DioramaTransparentFill fill = kDioramaTransparentFill_None;
-          uint8_t fill_cgram = 0;
-          if (DioramaLayerOrder_ResolveTransparentFill(
-                  Diorama_LayerOverrides(), layer_group, layer_map,
-                  layer_section, src, &fill, &fill_cgram)) {
-            SrPpuTransparentFillMode mode =
-                SR_PPU_TRANSPARENT_FILL_NONE;
-            if (fill == kDioramaTransparentFill_Black)
-              mode = SR_PPU_TRANSPARENT_FILL_BLACK;
-            else if (fill == kDioramaTransparentFill_Cgram)
-              mode = SR_PPU_TRANSPARENT_FILL_CGRAM;
-            /* Unknown/corrupt values fail transparent rather than silently
-             * becoming black and hiding a platform-specific capture fault.
-             * Setting None is still significant: it carries authored Off into
-             * the immutable frame snapshot used by ROM backdrop composition. */
-            ActRaiser_SetPpuOverlayFill(src, mode, fill_cgram);
-          }
-        }
-      }
-      /* BG3 needs its OWN branch, not just an on/off entry in the loop above:
-       * PpuBindOverlaySurface is the ONLY thing that changes a source's
-       * bound destination buffer, so a source simply left OUT of a frame's
-       * capture list keeps whatever buffer the LAST frame bound it to —
-       * there is no implicit "unbind." With diorama_hud_flat=true excluding
-       * BG3 from a shared loop (as A7 originally did), toggling
-       * flat->tilted->flat left BG3 permanently bound to the diorama layer
-       * buffer from the tilted frame: g_hud_bg_pixels silently stopped
-       * receiving fresh captures (frozen HUD) while the diorama buffer kept
-       * getting live writes and diorama.c kept drawing it — the HUD showing
-       * in two places at once (a live tilted ghost plus a frozen flat
-       * overlay). Explicitly rebinding BOTH ways, every frame, is
-       * self-healing regardless of toggle history. */
-      if (g_settings.diorama_hud_flat) {
-        extern uint8_t g_hud_bg_pixels[];
-        /* The NARROW pitch, deliberately -- not the apron-wide `pitch` the
-         * diorama planes bind at. This surface is not a diorama plane: it feeds
-         * the anchored flat HUD overlay, which present.c uploads at
-         * snes_width*4 (PresentUpload's hud rect). Binding it apron-wide made
-         * the PPU write rows 2*kPpuObjApron columns apart while the upload read
-         * them snes_width apart, shearing the HUD across the top of the screen.
-         * The apron is resolve headroom for content that slides in past a
-         * tilted plane's edge; a screen-anchored HUD has no such edge. */
-        ActRaiser_BindPpuOutput(
-            SR_PPU_OUTPUT_OVERLAY, SR_PPU_OVERLAY_BG3, 0u,
-            g_hud_bg_pixels, (size_t)width * 4,
-            kHostDisplayFramebufferHeight);
-        /* Capture extent is already final in
-         * ArBg3Composite_CaptureHeight. Keeping this block to a pure rebind
-         * makes ownership independent of renderer setup order and preserves
-         * the same policy through flat/tilted/flat toggle sequences. */
-      } else {
-        if (!g_diorama_layer_pixels[SR_PPU_OVERLAY_BG3])
-          g_diorama_layer_pixels[SR_PPU_OVERLAY_BG3] =
-              calloc(1, SR_PPU_SURFACE_MAX_WIDTH * 4 *
-                            kHostDisplayFramebufferHeight);
-        ActRaiser_BindPpuOutput(
-            SR_PPU_OUTPUT_OVERLAY, SR_PPU_OVERLAY_BG3, 0u,
-            g_diorama_layer_pixels[SR_PPU_OVERLAY_BG3], pitch,
-            kHostDisplayFramebufferHeight);
-        if (capture_screens & (1 << SR_PPU_OVERLAY_BG3))
-          ActRaiser_SetPpuOverlayCapture(
-              SR_PPU_OVERLAY_BG3, -g_ws_extra, -g_ws_extra_top,
-              width, capture_height,
-              SR_PPU_OVERLAY_REMOVE_FROM_GAME |
-                  ((full_add_sub_sources & (1 << SR_PPU_OVERLAY_BG3))
-                       ? SR_PPU_OVERLAY_MARK_FULL_ADD_SUBSCREEN : 0u));
-      }
-      if (capture_screens & (1 << SR_PPU_OVERLAY_OBJ))
-        ActRaiser_SetPpuOverlayOamRange(0, 128);
-      /* Priority-band splits: scanout routes each captured pixel to the
-       * surface matching its hardware priority (Mode-1 tile priority bit for
-       * BGs, the 2-bit OAM priority for sprites), so the diorama can draw
-       * the true Mode-1 interleave — foreground tiles over sprites, low
-       * priority sprites behind the playfield. Bound after their primaries
-       * because a primary rebind drops the band family. */
-      static const struct { uint32_t src; int band; int plane; }
-      kPrioBands[] = {
-        { SR_PPU_OVERLAY_BG1, 1, kDioramaPlane_Bg1Hi },
-        { SR_PPU_OVERLAY_BG2, 1, kDioramaPlane_Bg2Hi },
-        { SR_PPU_OVERLAY_BG1, 2, kDioramaPlane_Bg1Far },
-        { SR_PPU_OVERLAY_BG2, 2, kDioramaPlane_Bg2Far },
-        { SR_PPU_OVERLAY_OBJ, 1, kDioramaPlane_Obj1 },
-        { SR_PPU_OVERLAY_OBJ, 2, kDioramaPlane_Obj2 },
-        { SR_PPU_OVERLAY_OBJ, 3, kDioramaPlane_Obj3 },
-      };
-      for (int i = 0; i < (int)(sizeof(kPrioBands) / sizeof(kPrioBands[0])); i++) {
-        if (kPrioBands[i].plane == kDioramaPlane_Bg1Far ||
-            kPrioBands[i].plane == kDioramaPlane_Bg2Far) {
-          const DioramaRoomOverride *virtual_room =
-              ActRaiser_CurrentVirtualLayerRoom();
-          const int virtual_bg =
-              kPrioBands[i].plane == kDioramaPlane_Bg1Far ? 0 : 1;
-          if (!virtual_room ||
-              !DioramaLayerOrder_VirtualLayerIsAuthored(
-                  &virtual_room->virtual_layers[virtual_bg]))
-            continue;
-        }
-        if (!g_diorama_layer_pixels[kPrioBands[i].plane])
-          g_diorama_layer_pixels[kPrioBands[i].plane] =
-              calloc(1, SR_PPU_SURFACE_MAX_WIDTH * 4 *
-                            kHostDisplayFramebufferHeight);
-        ActRaiser_BindPpuOutput(
-            SR_PPU_OUTPUT_OVERLAY_PRIORITY, kPrioBands[i].src,
-            (uint32_t)kPrioBands[i].band,
-            g_diorama_layer_pixels[kPrioBands[i].plane], pitch,
-            kHostDisplayFramebufferHeight);
-      }
-    }
-  }
-
-  /* Flat presentation has one already-composited framebuffer, so BG-local
-   * enhancements need the PPU's real priority winners as occlusion masks.
-   * Diorama owns isolated planes and inserts effects directly after BG1/BG2;
-   * a one-shot dump likewise owns these capture slots. HD replacements get
-   * first refusal above—never overwrite another source policy. */
-  extern bool g_diorama_frame_active;
-  extern bool g_diorama_dump_pending;
-  const bool action_effects_enabled =
-      g_settings.action_effect_lighting || g_settings.action_effect_particles;
-  if (action_effects_enabled &&
-      !g_diorama_frame_active && !g_diorama_dump_pending &&
-      ActionSceneEffects_RoomUsesBg1Decorations(
-          g_ram, kActRaiserWramSize)) {
-    const SrPpuOverlayCaptureState *bg1 =
-        ActRaiser_PpuCapture(SR_PPU_OVERLAY_BG1);
-    if (bg1->x1 <= bg1->x0 || bg1->y1 <= bg1->y0) {
-      extern uint8_t g_action_bg1_mask_pixels[];
-      const int width = kActRaiserAuthenticWidth + 2 * g_ws_extra;
-      if (ActRaiser_BindPpuOutput(
-              SR_PPU_OUTPUT_OVERLAY, SR_PPU_OVERLAY_BG1, 0u,
-              g_action_bg1_mask_pixels, (size_t)width * 4,
-              kHostDisplayFramebufferHeight)) {
-        ActRaiser_SetPpuOverlayCapture(
-            SR_PPU_OVERLAY_BG1, -g_ws_extra, 0,
-            width, kActRaiserAuthenticHeight,
-            SR_PPU_OVERLAY_MARK_OWNING_SCREEN_WINNER);
-      }
-    }
-  }
-  if (action_effects_enabled &&
-      !g_diorama_frame_active && !g_diorama_dump_pending &&
-      map_group == kActRaiserMapGroup_Aitos &&
-      map_number >= 2 && map_number <= 3) {
-    const SrPpuOverlayCaptureState *bg2 =
-        ActRaiser_PpuCapture(SR_PPU_OVERLAY_BG2);
-    if (bg2->x1 <= bg2->x0 || bg2->y1 <= bg2->y0) {
-      extern uint8_t g_action_bg2_mask_pixels[];
-      const int width = kActRaiserAuthenticWidth + 2 * g_ws_extra;
-      if (ActRaiser_BindPpuOutput(
-              SR_PPU_OUTPUT_OVERLAY, SR_PPU_OVERLAY_BG2, 0u,
-              g_action_bg2_mask_pixels, (size_t)width * 4,
-              kHostDisplayFramebufferHeight)) {
-        ActRaiser_SetPpuOverlayCapture(
-            SR_PPU_OVERLAY_BG2, -g_ws_extra, 0,
-            width, kActRaiserAuthenticHeight,
-            SR_PPU_OVERLAY_MARK_MAIN_SCREEN_WINNER);
-      }
-    }
-  }
-
-  /* Palace replaces only actual BG1 main-screen winners. The public mask
-   * leaves native scanout/HUD untouched and never takes an existing HD/dump
-   * claim. Binding/capture policy is owned here, before the normal scanout. */
-  if (g_settings.sim3d_world_navigation && g_settings.sim3d_sky_palace &&
-      !g_diorama_frame_active && !g_diorama_dump_pending &&
-      map_group == kActRaiserMapGroup_NonAction &&
-      map_number == kActRaiserNonActionMap_SkyPalace) {
-    const SrPpuOverlayCaptureState *bg1 = ActRaiser_PpuCapture(SR_PPU_OVERLAY_BG1);
-    const int width = kActRaiserAuthenticWidth + 2 * g_ws_extra;
-    if (bg1 && (bg1->x1 <= bg1->x0 || bg1->y1 <= bg1->y0) &&
-        width <= kSimWorldNavigationPalaceMaxWidth &&
-        ActRaiser_BindPpuOutput(SR_PPU_OUTPUT_OVERLAY, SR_PPU_OVERLAY_BG1, 0u,
-            (uint8_t *)g_sim_sky_palace_mask_pixels, (size_t)width * sizeof(uint32_t),
-            kSimWorldNavigationPalaceMaxHeight)) {
-      ActRaiser_SetPpuOverlayCapture(SR_PPU_OVERLAY_BG1, -g_ws_extra, 0,
-          width, kActRaiserAuthenticHeight, SR_PPU_OVERLAY_MARK_MAIN_SCREEN_WINNER);
-    }
-  }
-
-  /* D2: claim observational full-frame Mode-1 captures only after every
-   * pre-existing HUD/HD/diorama policy has had a chance to declare a
-   * conflict. The original PPU framebuffer remains intact as same-frame A0. */
-  {
-    extern bool g_sim3d_textures_ready;
-    extern bool g_sim3d_billboard_renderer_ready;
-    extern bool g_diorama_frame_active;
-    uint8_t map_group = g_ram[kActRaiserWram_MapGroup];
-    uint8_t map_number = g_ram[kActRaiserWram_CurrentMap];
-    bool town = ActRaiser_IsSimulationTown(map_group, map_number);
-    /* Build D1b before choosing D2's physical planes. This is the same live
-     * OAM/VRAM/CGRAM state the scanline renderer is about to consume, but now
-     * an atlas or metadata failure can retain raw OBJ before scanout instead
-     * of being discovered after those fallback pixels were omitted. */
-    bool billboard_atlas_ready = town && SimRenderAtlas_Build(
-        s_runner,
-        ActRaiser_ReadWram16(kActRaiserWram_Bg1CameraX),
-        ActRaiser_ReadWram16(kActRaiserWram_Bg1CameraY));
-    Sim3DCaptureRequest request = {
-      .town = town,
-      .master_enabled = g_settings.sim3d_mode,
-      /* Mirror16, not ReadWram16: the picker flag lives at $7F:9215, so its
-       * constant is 0x19215 -- 17 bits. The low-WRAM helper takes a uint16 and
-       * silently truncated it to 0x9215, reading an unrelated byte pair in bank
-       * $7E, so the picker never activated. ActRaiser_ReadWramMirror16 exists
-       * precisely to make that impossible (actraiser_game.h) and every other
-       * reader of this address already used it -- this was the one call site that
-       * did not. -Wall reported it as "changes value from 102933 to 37397". */
-      .picker_active = town && ActRaiser_SimMapPickerActiveForState(
-          map_group, map_number,
-          ActRaiser_ReadWramMirror16(kActRaiserWram_SimMapPickerFlag)),
-      .renderer_ready = g_sim3d_textures_ready,
-      .billboard_atlas_ready = billboard_atlas_ready,
-      .billboard_renderer_ready = g_sim3d_billboard_renderer_ready,
-      .diorama_active = g_diorama_frame_active,
-      /* The inspector panel is the only on-screen reader of the capture's
-       * diagnostic hash; with it off, that pass is skipped. */
-      .inspector_active = g_settings.scene_inspector,
-      .requested_features = Settings_Sim3DRequestedFeatures(),
-      .diagnostic_layer_mask = g_settings.sim3d_diagnostic_layers,
-      .width = kActRaiserAuthenticWidth + 2 * g_ws_extra,
-      .height = kActRaiserAuthenticHeight,
-    };
-    Sim3D_PrepareCapture(s_runner, &request);
-    ActRaiser_ReportSim3DCaptureContractFailure();
-  }
+  ActRaiser_PrepareDioramaCapture(ppu);
+  ActRaiser_PrepareSceneMasks(map_group, map_number);
+  ActRaiser_PrepareTownCapture();
 
   /* AR_TILE_CENSUS=1: read-only HD tile-pack sizing survey (hd_tile_census.c). */
   HdTileCensus_Frame(s_runner);
@@ -3856,32 +4054,8 @@ static SrResult ActRaiser_DrawPpuFrameTransaction(
       scanout_api->query_generations(
           scanout_runner, &scanout_generations) == SR_RESULT_OK;
   const uint8_t hdma_active_mask = ActRaiser_QueryHdmaActiveMask();
-  /* AR_TITLELOG=1: per-frame title-screen PPU probe (map bytes, BG mode,
-   * HDMAEN, Mode-7 matrix, INIDISP) for deriving/validating the settled-logo
-   * gate above. Diagnostic only. */
-  if (ActRaiser_DeveloperFlagEnabled(kActRaiserDeveloperFlag_TitleLog)) {
-    static int last_gf = -1;
-    int gf = (int)ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
-    if (gf != last_gf) {
-      SrPpuStateSnapshot scanout_initial = {
-          .struct_size = sizeof(scanout_initial),
-      };
-      if (scanout_ready && scanout_api->query_ppu_state(
-              scanout_runner, &scanout_initial) == SR_RESULT_OK) {
-        last_gf = gf;
-        fprintf(stderr, "[titlelog] gf=%d $18=%02x $19=%02x bgmode=%02x "
-                "hdmaen=%02x m7=[%04x %04x %04x %04x] inidisp=%02x\n",
-                gf, g_ram[kActRaiserWram_MapGroup],
-                g_ram[kActRaiserWram_CurrentMap],
-                scanout_initial.bg_mode_control, hdma_active_mask,
-                (uint16)scanout_initial.mode7_matrix[0],
-                (uint16)scanout_initial.mode7_matrix[1],
-                (uint16)scanout_initial.mode7_matrix[2],
-                (uint16)scanout_initial.mode7_matrix[3],
-                scanout_initial.display_control);
-      }
-    }
-  }
+  ActRaiser_ReportTitleScanout(scanout_api, scanout_runner, scanout_ready,
+                               hdma_active_mask);
   /* The immutable action-room authority resolves the same persistent raster
    * state from ROM + camera + frame clock. Its default-off shadow is prepared
    * once here, then samples the live registers immediately before each visible
@@ -3911,51 +4085,8 @@ static SrResult ActRaiser_DrawPpuFrameTransaction(
    * writes the selected range to the HUD surface while each line is fetched. */
   ActRaiser_DioramaHudObjPrepare();
 
-  /* A finite scrolling background needs its own fixed-size view at world
-   * edges. The normal BG capture remains registered to the gameplay camera.
-   * Named ROM, repeated, mirrored and row-banded skies retain their policies. */
-  SrPpuBackgroundViewRequest skybox_view = {0};
-  const ActionBgLayerPlan *sky_layer = &s_pending_action_bg_plan.layer[1];
-  const DioramaRoomOverride *sky_room = ActRaiser_CurrentVirtualLayerRoom();
-  const DioramaPlaneOverride *backdrop_override = sky_room
-      ? &sky_room->planes[kDioramaPlane_Backdrop] : NULL;
-  const bool skybox_capable = scanout_ready &&
-      scanout_api->struct_size >= SNES_RUNNER_API_PPU_BACKGROUND_VIEW_SIZE &&
-      (scanout_api->capabilities & SR_RUNNER_CAP_PPU_BACKGROUND_VIEW) != 0u &&
-      scanout_api->run_ppu_scanout_with_background_view;
-  if (skybox_capable && profile_diorama && g_settings.diorama_margin_fix &&
-      g_settings.diorama_skybox != kDioramaSky_Off &&
-      sky_layer->valid && sky_layer->source == kActionBgSource_WorldMap &&
-      !sky_layer->wrap_world_x && sky_layer->band_count == 0 &&
-      sky_layer->default_edge == kActionBgEdge_LiveWorld &&
-      (!backdrop_override || !backdrop_override->set_source ||
-       backdrop_override->source == kDioramaLayerSource_Captured) &&
-      (!sky_room || !DioramaLayerOrder_VirtualLayerHasClassification(
-          &sky_room->virtual_layers[1]))) {
-    unsigned left = context->frame.margin_budget;
-    unsigned right = left;
-    if (sky_layer->horizontal_extent.mode == kActionBgExtent_Fixed) {
-      if (left > sky_layer->horizontal_extent.left)
-        left = sky_layer->horizontal_extent.left;
-      if (right > sky_layer->horizontal_extent.right)
-        right = sky_layer->horizontal_extent.right;
-    }
-    unsigned width = kActRaiserAuthenticWidth + left + right;
-    if (width > sky_layer->world_width) width = sky_layer->world_width;
-    skybox_view = (SrPpuBackgroundViewRequest){
-      .struct_size = sizeof(skybox_view), .layer = SR_PPU_OVERLAY_BG2,
-      .world_width = sky_layer->world_width,
-      .world_height = sky_layer->world_height,
-      .screen_x0 = -(int)left,
-      .screen_y0 = -(int)context->state.margin_top,
-      .width = width,
-      .height = SR_PPU_NATIVE_HEIGHT + context->state.margin_top +
-          context->state.margin_bottom,
-      .pixels = s_diorama_skybox_pixels,
-      .pitch_bytes = width * sizeof(uint32_t),
-      .pixel_byte_size = sizeof(s_diorama_skybox_pixels),
-    };
-  }
+  SrPpuBackgroundViewRequest skybox_view = ActRaiser_PrepareSkyboxView(
+      context, scanout_api, scanout_ready, profile_diorama);
 
   DioramaPerformance_End(producer_setup_performance);
   PerformanceMetrics_End(pipeline);
@@ -3972,37 +4103,8 @@ static SrResult ActRaiser_DrawPpuFrameTransaction(
         : scanout_api->run_ppu_scanout(
             scanout_runner, &scanout_request, &scanout_result);
   }
-  if (skybox_view.pixels && scanout_status == SR_RESULT_OK &&
-      (scanout_result.flags & SR_PPU_SCANOUT_BACKGROUND_VIEW_READY)) {
-    s_live_diorama_skybox = (SrPpuSurfaceView){
-      .flags = SR_PPU_SURFACE_BOUND | SR_PPU_SURFACE_HAS_CONTENT,
-      .pixel_format = SR_PPU_PIXEL_FORMAT_ARGB8888_U32,
-      .data = (const uint8_t *)skybox_view.pixels,
-      .byte_size = skybox_view.pitch_bytes * skybox_view.height,
-      .pitch_bytes = skybox_view.pitch_bytes,
-      .width_pixels = skybox_view.width, .height_pixels = skybox_view.height,
-      .origin_x = 0, .origin_y = -skybox_view.screen_y0, .scale = 1,
-    };
-  }
-  if (scanout_status != SR_RESULT_OK) {
-    SessionFatal_Request(
-        "The runner could not execute the PPU scanout ABI service. "
-        "Restart after rebuilding the game and runner together.");
-  }
-  const uint32_t authentic_camera_flags =
-      SR_PPU_SCANOUT_AUTHENTIC_CAMERA_BG1 |
-      SR_PPU_SCANOUT_AUTHENTIC_CAMERA_BG2;
-  const bool authentic_frame_valid =
-      scanout_status == SR_RESULT_OK &&
-      (scanout_result.flags &
-       SR_PPU_SCANOUT_AUTHENTIC_SURFACE_READY) != 0u &&
-      (!action ||
-       (scanout_result.final_state.flags &
-        SR_PPU_STATE_FORCED_BLANK) != 0u ||
-       scanout_result.final_state.bg_mode != 1u ||
-       (scanout_result.flags & authentic_camera_flags) ==
-           authentic_camera_flags);
-  ActRaiser_AuthenticCaptureFrameCompleted(authentic_frame_valid);
+  ActRaiser_PublishScanout(scanout_status, &scanout_result, &skybox_view,
+                           action);
   DioramaPerformance_End(scanout_performance);
   PerformanceMetrics_End(pipeline);
   pipeline = PerformanceMetrics_Begin(kPerformance_PpuFinish);
@@ -4010,93 +4112,12 @@ static SrResult ActRaiser_DrawPpuFrameTransaction(
   if (profile_diorama)
     producer_finish_performance =
         DioramaPerformance_Begin(kDioramaPerformance_ProducerFinish);
-  {
-    extern uint8_t g_pixels[];
-    int width = kActRaiserAuthenticWidth + 2 * g_ws_extra;
-    /* g_pixels is bound apron-wide; the authentic frame starts kPpuObjApron
-     * columns in. Offset the base and pass the real pitch. */
-    Sim3D_FinishCapture(
-        g_pixels + ActionApron_DisplayOffset(SR_PPU_OBJ_APRON),
-        ActionApron_SurfacePitch(width, SR_PPU_OBJ_APRON),
-        ActRaiser_ReadWram16(kActRaiserWram_GameFrame));
-    ActRaiser_ReportSim3DCaptureContractFailure();
-    /* After scanout (the diorama planes only hold this frame's sprites now) and
-     * before FrameSlot_Capture publishes them to the presentation path. */
-    ActRaiser_DioramaHudObjFinish(width);
-    ActRaiser_DioramaDeathHeimHubStatuesFinish(width);
-    /* After the HUD-icon promote, not before: that pass PUNCHES the promoted
-     * icon out of the OBJ planes, and the apron's claimed-set test reads those
-     * planes. Running first would let a hole it is about to punch look like
-     * free space. */
-    const ActionApronGeometry apron_geom = ActRaiser_ObjApronGeometry();
-    ActRaiser_DioramaApronFinish(&apron_geom);
-  }
-  /* Latch the margin state the frame was ACTUALLY
-   * rendered with, here, rather than letting FrameSlot_Capture read live g_ppu.
-   * Between this function and the frame slot capture, main.c may call
-   * ActRaiser_RebindPpuOutputSurfaces(), whose public margin configuration
-   * zeroes both live margins — reading g_ppu later would silently describe a
-   * different frame than the pixels came from. The non-diorama rebind gate
-   * normally prevents this mismatch; latching at the producer boundary makes
-   * that safety independent of the gate. */
-  s_live_margin_top = scanout_status == SR_RESULT_OK
-      ? (int)scanout_result.final_state.margin_top : 0;
-  s_live_margin_bottom = scanout_status == SR_RESULT_OK
-      ? (int)scanout_result.final_state.margin_bottom : 0;
+  ActRaiser_FinishSceneCapture();
+  ActRaiser_PublishFrameCapture(scanout_status, &scanout_result);
 
-  if (ActRaiser_DeveloperFlagEnabled(
-          kActRaiserDeveloperFlag_VerticalExtensionLog)) {
-    /* Where each destination's content actually LANDED, which is the check that
-     * catches the row-origin class of bug: the HUD surfaces are consumed in
-     * AUTHENTIC screen space and must not move when the vertical margin
-     * changes, while the diorama planes are consumed in CAPTURE space and must
-     * move by exactly the margin. Both on one line so a regression in either
-     * is one diff apart. */
-    extern uint8_t g_hud_bg_pixels[];
-    extern uint8_t *g_diorama_layer_pixels[];
-    int width = kActRaiserAuthenticWidth + 2 * g_ws_extra;
-    size_t pitch = (size_t)width * 4;
-    int hud0 = -1, hud1 = -1, plane0 = -1, plane1 = -1;
-    for (int y = 0; y < kHostDisplayFramebufferHeight; y++) {
-      const uint32_t *r = (const uint32_t *)(g_hud_bg_pixels + (size_t)y * pitch);
-      for (int x = 0; x < width; x++)
-        if (r[x]) { if (hud0 < 0) hud0 = y; hud1 = y; break; }
-    }
-    const uint8_t *bg2 = g_diorama_layer_pixels[SR_PPU_OVERLAY_BG2];
-    /* The plane's own pitch, not the HUD's: the diorama planes are bound
-     * apron-wide. A diagnostic that exists to catch origin bugs must not carry
-     * one, and the wrong stride would slide its reported rows a little further
-     * every row it walked. */
-    const size_t plane_pitch =
-        ActionApron_SurfacePitch(width, SR_PPU_OBJ_APRON);
-    if (bg2)
-      for (int y = 0; y < kHostDisplayFramebufferHeight; y++) {
-        const uint32_t *r = (const uint32_t *)(bg2 + (size_t)y * plane_pitch);
-        for (int x = 0; x < width + (int)SR_PPU_OBJ_APRON * 2; x++)
-          if (r[x]) { if (plane0 < 0) plane0 = y; plane1 = y; break; }
-      }
-    fprintf(stderr,
-            "[vext-rows] gf=%u top=%d bottom=%d hudbg=[%d..%d] "
-            "bg2plane=[%d..%d] "
-            "objs_unlocked=%u\n",
-            ActRaiser_ReadWram16(kActRaiserWram_GameFrame),
-            s_live_margin_top, s_live_margin_bottom,
-            hud0, hud1, plane0, plane1,
-            ActRaiser_TakeVextUnlockedObjects());
-  }
-  s_live_margin_left = scanout_status == SR_RESULT_OK
-      ? (int)scanout_result.final_state.margin_left : 0;
-  s_live_margin_right = scanout_status == SR_RESULT_OK
-      ? (int)scanout_result.final_state.margin_right : 0;
-  s_live_action_bg_plan = s_pending_action_bg_plan;
-  s_live_bg_capture_pad_to_budget =
-      s_pending_bg_capture_pad_to_budget;
-
-  /* Sky Palace BG2 is prepared at the top of this function and ALWAYS restored
-   * here at the end. ActRaiserDrawPpuFrame has no early returns, so a pending
-   * restore can never be stranded — keep it that way if you add control flow
-   * above. */
-  ActRaiser_WidescreenSkyPalaceRestore(s_runner);
+  /* Borrowed frame access ends here on every scanout outcome. The caller
+   * restores its temporary Sky Palace patch even if this callback is rejected.
+   */
   DioramaPerformance_End(producer_finish_performance);
   PerformanceMetrics_End(pipeline);
   s_ppu_frame_access = NULL;

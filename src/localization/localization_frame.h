@@ -11,10 +11,11 @@
 #include "localization/text_cell_record.h"
 #include "localization/text_boundaries.h"
 
-#define AR_LOCALIZATION_FRAME_ABI_VERSION UINT32_C(28)
+#define AR_LOCALIZATION_FRAME_ABI_VERSION UINT32_C(31)
 
 enum {
   kArLocalizationFrameTextCapacity = 16 * 1024,
+  kArLocalizationFrameAppearanceCapacity = 512,
   kArLocalizationFrameFontStackCapacity = 128,
   kArLocalizationFrameLocaleCapacity = 33,
   kArLocalizationFrameNativePreserveCapacity = 8,
@@ -99,10 +100,11 @@ typedef enum ArLocalizationTextLayoutKind {
   /* Fixed cells positioned by the accompanying grid description. */
   kArLocalizationTextLayout_Grid,
   kArLocalizationTextLayout_DialogueWindow,
-  /* One fitted line, anchored to the leading edge and vertically centered
-   * inside its claim. It must never wrap into neighboring native content. */
+  /* Fitted label, anchored to the leading edge and vertically centered.
+   * The legacy name means no automatic wrapping; explicit breaks survive.
+   * Text must fit inside its claim without covering neighboring content. */
   kArLocalizationTextLayout_SingleLineLabel,
-  /* Fitted one-line card, centered in a safe cell region (not word wrapped). */
+  /* Fitted card, centered in a safe cell region (no automatic wrapping). */
   kArLocalizationTextLayout_CenteredLabel,
   /* Physical right edge, independent of Unicode paragraph direction. */
   kArLocalizationTextLayout_RightAlignedLabel,
@@ -110,6 +112,8 @@ typedef enum ArLocalizationTextLayoutKind {
   kArLocalizationTextLayout_LeftAlignedLabel,
   /* Centered fitted label with native artwork bookends, not font brackets. */
   kArLocalizationTextLayout_FramedLabel,
+  /* Fitted multiline block: preserve authored breaks and center each line. */
+  kArLocalizationTextLayout_CenteredBlock,
 } ArLocalizationTextLayoutKind;
 
 /* One cell of a row. Columns are native cell units relative to the owning
@@ -212,6 +216,10 @@ typedef struct ArLocalizationTextSnapshot {
   uint8_t top_inset_pixels;
   ArLocalizationTextLanguage language;
   uint16_t bidi_span_offset, bidi_span_count;
+  bool has_appearance;
+  ArTextRunAppearance appearance;
+  ArTextSourceOrigin origin;
+  uint16_t appearance_span_offset, appearance_span_count;
   ArLocalizationTextLayoutKind layout;
   /* One-based index into the frame's grid table; zero for a non-grid layout. */
   uint8_t grid_index;
@@ -282,6 +290,8 @@ typedef struct ArLocalizationFrame {
   ArLocalizationTextSnapshot snapshots[kArTextCellRecordCapacity];
   uint8_t snapshot_count;
   ArTextBidiSpans bidi;
+  ArTextAppearanceSpan appearance_spans[kArLocalizationFrameAppearanceCapacity];
+  uint16_t appearance_span_count;
   /* Interned grid descriptions; snapshots reference them by index so a report
    * shared by several surfaces is published once. */
   ArLocalizationTextGrid grids[kArLocalizationFrameGridCapacity];
@@ -307,6 +317,8 @@ typedef struct ArLocalizationFrame {
   ArFontResourceId fallback_fonts[kArTextPresentationMaximumFallbackFonts];
   uint8_t fallback_font_count;
   uint64_t font_revision;
+  ArTextFontRole font_roles[kArTextFontMaximumRoles];
+  uint8_t font_role_count;
   ArEnhancedTextSettings settings;
   /* Zero for observational/fixed text; only scheduled dialogue needs execution
    * feedback when the presentation path falls back to native pixels. */
@@ -315,6 +327,14 @@ typedef struct ArLocalizationFrame {
 } ArLocalizationFrame;
 
 void ArLocalizationFrame_Reset(ArLocalizationFrame *frame);
+/* Decline a prepared surface without changing other snapshot identities. Pool
+ * storage remains owned until reset; its native pixels are no longer claimed.
+ */
+void ArLocalizationFrame_ReleaseText(ArLocalizationFrame *frame,
+                                     uint32_t surface_id);
+bool ArLocalizationFrame_SetFontRoles(ArLocalizationFrame *frame,
+                                      const ArTextFontRole *roles,
+                                      size_t count);
 /* Same, for storage the caller has already zeroed -- a freshly cleared frame
  * slot. Stamps the header without clearing tens of kilobytes a second time.
  * Passing anything else leaves stale content behind. */
@@ -356,6 +376,14 @@ bool ArLocalizationFrame_SetTextLanguage(
     ArLocalizationFrame *frame, const ArLocalizationTextLanguage *language);
 bool ArLocalizationFrame_SetTextBidiSpans(
     ArLocalizationFrame *frame, const ArTextBidiSpans *spans);
+/* Copy resolved appearance for the last snapshot, transactionally. Span offsets
+ * are relative to that snapshot's text; no session or palette pointer escapes.
+ */
+bool ArLocalizationFrame_SetTextOrigin(ArLocalizationFrame *frame,
+                                       const ArTextSourceOrigin *origin);
+bool ArLocalizationFrame_SetTextAppearance(
+    ArLocalizationFrame *frame, const ArTextRunAppearance *appearance,
+    const ArTextAppearanceSpan *spans, size_t count);
 bool ArLocalizationFrame_AddText(ArLocalizationFrame *frame,
                                  uint32_t surface_id,
                                  ArTextCellDestination destination,

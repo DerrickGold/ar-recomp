@@ -159,6 +159,12 @@
     ],
     "surface_id": 7
   },
+  "title_copyright": {
+    "destination": 5888,
+    "native_font_pixels": 7,
+    "region": [0, 23, 32, 5],
+    "surface_id": 17
+  },
   "title_options": {
     "destination": 4352,
     "native_font_pixels": 7,

@@ -376,11 +376,11 @@ typedef struct FrameSlot {
   InspectorPresentationSelection inspector_selection;
 } FrameSlot;
 
-/* Sole writer (D5). Populates every field above; call once per frame,
- * immediately after RtlDrawPpuFrame() returns, on the game thread. Lives in
- * main.c (it legitimately reads live g_ppu/g_settings — it IS the boundary,
- * not a present.c function). */
-void FrameSlot_Capture(FrameSlot *dst);
+/* Sole writer, implemented in frame_slot.c. Call on the game thread after
+ * RtlDrawPpuFrame. Pass that frame's annotated simulation data when available;
+ * NULL captures current metadata for a screenshot or paused redraw. The input
+ * is borrowed only for this call; the slot receives its own value copy. */
+void FrameSlot_Capture(FrameSlot *dst, const SimFrameData *annotated_sim);
 
 ArRenderRectI ComputePresentationViewport(
     ArRenderDevice *device, bool ignore_aspect_ratio,

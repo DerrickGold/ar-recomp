@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+
+	"github.com/DerrickGold/ar-recomp/installer/internal/texttemplate"
 )
 
 // Generated from the same ROM-free semantic registry as the C runtime.
@@ -19,6 +21,7 @@ var authorContractJSON []byte
 // paged name-entry alphabet; "inline" is a term substituted into another
 // message. A zero limit means the catalog does not constrain it.
 type AuthorPresentation struct {
+	Layout                string               `json:"layout"`
 	Shape                 string               `json:"shape"`
 	MaximumPages          int                  `json:"maximum_pages"`
 	MaximumLines          int                  `json:"maximum_lines"`
@@ -175,7 +178,16 @@ func (s *presentationScan) check(p AuthorPresentation) error {
 	return nil
 }
 
+// AuthorNativeInk names the native source a template treatment can bind.
+// HUD indices address a recognized descriptor palette; CGRAM indices are absolute.
+type AuthorNativeInk struct {
+	Name   string `json:"name"`
+	Source string `json:"source"`
+	Index  int    `json:"index"`
+}
+
 type authorContractRegistry struct {
+	nativeInks   []AuthorNativeInk
 	placeholders map[string]string
 	routes       map[string]authorRoute
 	ordered      []authorRoute
@@ -183,6 +195,7 @@ type authorContractRegistry struct {
 
 var authorContracts = func() authorContractRegistry {
 	var data struct {
+		NativeInks   []AuthorNativeInk `json:"native_inks"`
 		Placeholders map[string]string `json:"placeholders"`
 		Routes       []authorRoute     `json:"routes"`
 	}
@@ -193,7 +206,7 @@ var authorContracts = func() authorContractRegistry {
 	for _, route := range data.Routes {
 		routes[route.ID] = route
 	}
-	return authorContractRegistry{data.Placeholders, routes, data.Routes}
+	return authorContractRegistry{nativeInks: data.NativeInks, placeholders: data.Placeholders, routes: routes, ordered: data.Routes}
 }()
 
 func authorProfile(profile string) bool {
@@ -216,6 +229,9 @@ type AuthorReference struct {
 	// hide controls the runtime would ignore.
 	Presentation AuthorPresentation `json:"presentation"`
 }
+
+// AuthorNativeInks returns a detached copy of the shared game ink contract.
+func AuthorNativeInks() []AuthorNativeInk { return slices.Clone(authorContracts.nativeInks) }
 
 // AuthorReferences supplies the editor's tree and contextual pickers. Results
 // are detached copies; callers cannot modify the shared semantic registry.
@@ -268,7 +284,7 @@ func ValidateAuthorScripts(profile, coverage string, scripts ...*AuthorScript) (
 	var order []string
 	stats := AuthorValidationStats{}
 	for _, script := range scripts {
-		if script == nil || len(script.messages) == 0 {
+		if script == nil || (len(script.messages) == 0 && len(script.treatments) == 0) {
 			return zero, fmt.Errorf("pack contains an unparsed script")
 		}
 		for i := range script.messages {
@@ -288,6 +304,9 @@ func ValidateAuthorScripts(profile, coverage string, scripts ...*AuthorScript) (
 		}
 	}
 	stats.MessageCount = len(index)
+	if stats.MessageCount == 0 {
+		return zero, fmt.Errorf("pack has no messages")
+	}
 	if len(index) > MaxAuthorMessages {
 		return zero, fmt.Errorf("pack has too many messages")
 	}
@@ -343,11 +362,27 @@ func ValidateAuthorScripts(profile, coverage string, scripts ...*AuthorScript) (
 		}
 		anchorIndex, yielded := 0, false
 		body := resolved[id]
+		// Early v2 exports incorrectly tagged the three-line title footer as
+		// a single-line label. Keep those packs readable; the route owns layout.
+		layout := body.message.Appearance.Layout
+		legacyCopyright := id == "title.copyright" && layout == "single_line_label"
+		if layout != "" && layout != route.presentation(profile).Layout && !legacyCopyright {
+			return zero, authorError(body.path, body.message.SourceLine,
+				"%s requires layout %q, not %q", id, route.presentation(profile).Layout, layout)
+		}
+		inline := route.presentation(profile).Shape == "inline"
+		if inline && body.message.Appearance != (AuthorTextAppearance{}) {
+			return zero, authorError(body.path, body.message.SourceLine,
+				"%s: inline terms inherit appearance from their placeholder; style the containing template", id)
+		}
 		scan := presentationScan{pages: 1, line: 1}
 		for _, op := range body.message.Operations {
 			scan.operation(op)
 			fail := func(format string, args ...any) (AuthorValidationStats, error) {
 				return zero, authorError(body.path, op.SourceLine, id+": "+format, args...)
+			}
+			if inline && op.Style != (texttemplate.Style{}) {
+				return fail("inline terms inherit appearance from their placeholder; style the containing template")
 			}
 			if yielded && op.Op != "end" && op.Op != "empty" {
 				return fail("content after a menu yield is unreachable; place it before the yield anchor")

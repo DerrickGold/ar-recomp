@@ -97,6 +97,11 @@ bool SettingsOverlay_IsOpen(void);
 void SettingsOverlay_Open(void);
 void SettingsOverlay_Close(void);
 
+/* Refresh navigation/page selection and the visible registry rows after an
+ * external settings or availability change. Input, tick, open and render call
+ * this automatically. Diagnostic queries only read the resulting selection. */
+void SettingsOverlay_Refresh(void);
+
 /* Read-only layout diagnostics used by preview/regression tests. Ordinals
  * count populated primary-navigation rows, including Restart and Exit. */
 /* Key of the currently selected row, or "" when the overlay is closed. Lets a

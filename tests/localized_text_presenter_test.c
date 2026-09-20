@@ -287,7 +287,7 @@ static void Exercise(ArRenderDevice *device, ArEnhancedTextSettings settings,
 static void ExerciseSingleLine(ArRenderDevice *device,
                                ArEnhancedTextSettings settings, int scale) {
   test_case = "single line label";
-  const char *labels[] = {"ESTUARY", "Région de l'Été", "Upper\nValley"};
+  const char *labels[] = {"ESTUARY", "Région de l'Été", "Upper Valley"};
   for (size_t label = 0; label < sizeof(labels) / sizeof(labels[0]); ++label) {
     for (int rtl = 0; rtl <= 1; ++rtl) {
       ArLocalizationFrame frame;
@@ -325,6 +325,95 @@ static void ExerciseSingleLine(ArRenderDevice *device,
       CHECK(((TextureSink *)device->context)->uploads == uploads);
     }
   }
+}
+
+static void ExerciseLabelBreaks(ArRenderDevice *device) {
+  test_case = "authored breaks survive label placement";
+  const ArLocalizationTextLayoutKind layouts[] = {
+      kArLocalizationTextLayout_SingleLineLabel,
+      kArLocalizationTextLayout_CenteredLabel,
+      kArLocalizationTextLayout_RightAlignedLabel,
+      kArLocalizationTextLayout_LeftAlignedLabel,
+      kArLocalizationTextLayout_FramedLabel,
+      kArLocalizationTextLayout_CenteredBlock};
+  const char text[] = "HHHHH\n\nH";
+  const HudPresentationChunk chunk = {
+      .inspector_kind = kInspectorPresentation_HudBg,
+      .screen_source = {0, 0, 256, 224}, .texture_source = {0, 0, 256, 224},
+      .output_destination = {0, 0, 768, 672}};
+  for (size_t i = 0; i < sizeof(layouts) / sizeof(layouts[0]); ++i)
+  for (unsigned styled = 0; styled < 2; ++styled)
+  for (unsigned screen = 0; screen < 2; ++screen) {
+    if (screen && (layouts[i] == kArLocalizationTextLayout_FramedLabel ||
+                   layouts[i] == kArLocalizationTextLayout_CenteredBlock))
+      continue;
+    test_example = (int)i;
+    ArLocalizationFrame frame;
+    ArLocalizationFrame_Reset(&frame);
+    CHECK(ArLocalizationFrame_SetFont(&frame, "en", "test", s_test_font, 1,
+                                      &frame.settings));
+    if (screen)
+      CHECK(ArLocalizationFrame_AddScreenText(&frame, 4, 24, 48, 208, 48,
+          text, sizeof(text) - 1, 8, 8, 1, kArTextDirection_LeftToRight, 7,
+          layouts[i]));
+    else
+      CHECK(ArLocalizationFrame_AddTextWithObjectsAndLayout(&frame, 4,
+          (ArTextCellDestination){3, kArTextCellScreen_Composited, 0},
+          (ArTextCellRegion){3, 6, 26, 6}, text, sizeof(text) - 1, 8, 8, 1,
+          kArTextDirection_LeftToRight, 7, layouts[i], NULL, 0, NULL, 0));
+    if (styled) {
+      const ArTextRunAppearance base = {.font_role = "body",
+          .scale_basis = 10000, .band_rgb = 0xffffff, .body_rgb = 0xffffff};
+      const ArTextAppearanceSpan span = {.start = 7, .end = 8,
+          .appearance = {.font_role = "body", .scale_basis = 8000,
+                        .band_rgb = 0xff8800, .body_rgb = 0xff8800,
+                        .italic = true}};
+      CHECK(ArLocalizationFrame_SetTextAppearance(&frame, &base, &span, 1));
+    }
+    SetArt(&frame.artwork[kArLocalizationArtwork_LabelFrameLeft], 8);
+    SetArt(&frame.artwork[kArLocalizationArtwork_LabelFrameRight], 7);
+    ArLocalizedPreparedFrame prepared;
+    if (screen)
+      CHECK(ArLocalizedTextPresenter_PrepareScreenText(device, &frame, 4,
+          (ArRenderRectI){72, 144, 624, 144}, &prepared));
+    else
+      ArLocalizedTextPresenter_Prepare(device, &frame, true, 0, 32, 32, 0, 0,
+                                      256, 224, &chunk, 1, &prepared);
+    CHECK(prepared.text_count == 1);
+    if (prepared.text_count != 1) continue;
+    const ArTextSurface *surface = &prepared.texts[0].surface;
+    if (styled) CHECK(surface->line_count == 3);
+    CHECK(surface->reveal_cluster_count > 0);
+    if (!surface->reveal_cluster_count) continue;
+    const ArTextRevealCluster *first = &surface->reveal_clusters[0];
+    const ArTextRevealCluster *last =
+        &surface->reveal_clusters[surface->reveal_cluster_count - 1];
+    CHECK(first->line_index == 0 && last->line_index == 2);
+    CHECK(last->end_utf8_byte == sizeof(text) - 1 && last->y > first->y);
+    if (layouts[i] != kArLocalizationTextLayout_SingleLineLabel &&
+        layouts[i] != kArLocalizationTextLayout_LeftAlignedLabel)
+      CHECK(last->x > first->x);
+  }
+  /* A tiny field must fail fitting instead of flattening forty authored rows
+   * into a line that could fit horizontally. Keep its native pixels intact. */
+  ArLocalizationFrame frame;
+  ArLocalizationFrame_Reset(&frame);
+  CHECK(ArLocalizationFrame_SetFont(&frame, "en", "test", s_test_font, 1,
+                                    &frame.settings));
+  char crowded[80];
+  for (size_t i = 0; i < sizeof(crowded) - 1; ++i)
+    crowded[i] = i % 2 ? '\n' : 'H';
+  crowded[sizeof(crowded) - 1] = 0;
+  CHECK(ArLocalizationFrame_AddTextWithObjectsAndLayout(&frame, 4,
+      (ArTextCellDestination){3, kArTextCellScreen_Composited, 0},
+      (ArTextCellRegion){3, 6, 26, 1}, crowded, sizeof(crowded) - 1, 79, 79, 1,
+      kArTextDirection_LeftToRight, 7, kArLocalizationTextLayout_SingleLineLabel,
+      NULL, 0, NULL, 0));
+  ArLocalizedPreparedFrame prepared;
+  ArLocalizedTextPresenter_Prepare(device, &frame, true, 0, 32, 32, 0, 0,
+                                  256, 224, &chunk, 1, &prepared);
+  CHECK(!prepared.text_count && !prepared.mask_count);
+  ArLocalizedTextPresenter_Reset(device);
 }
 
 static void ExerciseScreenText(ArRenderDevice *device) {
@@ -619,6 +708,44 @@ static void ExercisePreflight(ArRenderDevice *device,
   ArLocalizedTextPresenter_Prepare(device, &frame, true, 0, 32, 32, 0, 0, 256,
                                    224, &chunk, 1, &prepared);
   CHECK(!prepared.text_count && !prepared.mask_count && sink->live == 0);
+}
+
+static void ExerciseFontRolePreflight(ArRenderDevice *device) {
+  test_case = "font role preflight";
+  TextureSink *sink = device->context;
+  char error[kArTextRasterErrorCapacity];
+  ArTextFontRole role = {.name = "hud", .primary = s_test_font};
+  ArTextPresentationFont font = {.struct_size = sizeof(font),
+                                 .abi_version =
+                                     AR_TEXT_PRESENTATION_ABI_VERSION,
+                                 .stack_id = "roles",
+                                 .primary = s_test_font,
+                                 .revision = 1,
+                                 .roles = &role,
+                                 .role_count = 1};
+  CHECK(ArLocalizedTextPresenter_PrepareFont(device, &font, error,
+                                             sizeof(error)));
+  CHECK(sink->live ==
+        2); /* Both named stacks actually rasterized and uploaded. */
+  const unsigned warm = sink->uploads;
+  CHECK(ArLocalizedTextPresenter_PrepareFont(device, &font, error,
+                                             sizeof(error)));
+  CHECK(sink->uploads == warm);
+  const ArFontResourceId bad = ArHostFontResources_RegisterFile(
+      &s_font_store, __FILE__, error, sizeof(error));
+  CHECK(bad);
+  role.primary = bad;
+  CHECK(!ArLocalizedTextPresenter_PrepareFont(device, &font, error,
+                                              sizeof(error)));
+  CHECK(sink->live ==
+        2); /* The rejected role cannot replace the ready selection. */
+  role.primary = s_test_font;
+  const unsigned rejected = sink->uploads;
+  CHECK(ArLocalizedTextPresenter_PrepareFont(device, &font, error,
+                                             sizeof(error)));
+  CHECK(sink->uploads == rejected);
+  ArLocalizedTextPresenter_DiscardPreparedFont(device);
+  CHECK(sink->live == 0);
 }
 
 static void ExerciseDialogueFailure(ArRenderDevice *device) {
@@ -1479,6 +1606,77 @@ static void ExerciseRtlDialogue(ArRenderDevice *device) {
   }
 }
 
+static void ExerciseTemplateAppearance(ArRenderDevice *device) {
+  test_case = "template appearances through frame publication";
+  ArLocalizationFrame frame;
+  ArLocalizationFrame_Reset(&frame);
+  CHECK(ArLocalizationFrame_SetFont(&frame, "en", "styled", s_test_font, 1,
+                                    &frame.settings));
+  const ArTextFontRole role = {.name = "hud", .primary = s_test_font};
+  CHECK(ArLocalizationFrame_SetFontRoles(&frame, &role, 1));
+  const char text[] = "Small 12\nLarge 34";
+  CHECK(ArLocalizationFrame_AddDialogueWindow(
+      &frame, 1, (ArTextCellDestination){3, kArTextCellScreen_Composited, 0},
+      (ArTextCellRegion){2, 4, 28, 12}, text, strlen(text), 0, 17, 1,
+      kArTextDirection_LeftToRight, 12));
+  const ArTextRunAppearance plain = {.font_role = "body",
+                                     .scale_basis = 10000,
+                                     .band_rgb = 0xffffff,
+                                     .body_rgb = 0xffffff};
+  ArTextAppearanceSpan span = {.start = 9,
+                               .end = 17,
+                               .appearance = {.font_role = "hud",
+                                              .scale_basis = 18000,
+                                              .band_rgb = 0xff8800,
+                                              .body_rgb = 0xffcc00,
+                                              .italic = true}};
+  CHECK(ArLocalizationFrame_SetTextAppearance(&frame, &plain, &span, 1));
+  const HudPresentationChunk chunk = {.inspector_kind =
+                                          kInspectorPresentation_HudBg,
+                                      .screen_source = {0, 0, 256, 224},
+                                      .texture_source = {0, 0, 256, 224},
+                                      .output_destination = {0, 0, 768, 672}};
+  ArLocalizedPreparedFrame prepared;
+  ArLocalizedTextPresenter_Prepare(device, &frame, true, 0, 32, 32, 0, 0, 256,
+                                   224, &chunk, 1, &prepared);
+  CHECK(prepared.text_count == 1 && prepared.mask_count == 1);
+  if (prepared.text_count == 1) {
+    const ArTextSurface *surface = &prepared.texts[0].surface;
+    CHECK(surface->line_count == 2);
+    CHECK(surface->font_use_count > 0);
+    bool larger_font = false;
+    for (size_t i = 0; i < surface->font_use_count; ++i) {
+      CHECK(surface->font_uses[i].resource == s_test_font &&
+            !surface->font_uses[i].missing);
+      larger_font |=
+          surface->font_uses[i].start >= 9 &&
+          surface->font_uses[i].font_pixels > surface->raster_font_pixels;
+    }
+    CHECK(larger_font);
+    if (surface->line_count == 2)
+      CHECK(surface->lines[1].height > surface->lines[0].height);
+    const uintptr_t texture = surface->texture.value;
+    const unsigned uploads = ((TextureSink *)device->context)->uploads;
+    frame.snapshots[0].revealed_utf8_bytes = sizeof(text) - 1;
+    ArLocalizedTextPresenter_Prepare(device, &frame, true, 0, 32, 32, 0, 0, 256,
+                                     224, &chunk, 1, &prepared);
+    CHECK(prepared.text_count == 1 &&
+          prepared.texts[0].surface.texture.value == texture);
+    CHECK(((TextureSink *)device->context)->uploads == uploads);
+    frame.appearance_spans[0].appearance.band_rgb = 0x00ff00;
+    ArLocalizedTextPresenter_Prepare(device, &frame, true, 0, 32, 32, 0, 0, 256,
+                                     224, &chunk, 1, &prepared);
+    CHECK(prepared.text_count == 1 &&
+          ((TextureSink *)device->context)->uploads > uploads);
+  }
+  /* An undeclared role cannot render through a body-font substitution. */
+  strcpy(frame.appearance_spans[0].appearance.font_role, "missing");
+  ArLocalizedTextPresenter_Prepare(device, &frame, true, 0, 32, 32, 0, 0, 256,
+                                   224, &chunk, 1, &prepared);
+  CHECK(!prepared.text_count && !prepared.mask_count);
+  ArLocalizedTextPresenter_Reset(device);
+}
+
 int main(void) {
   s_test_font = ArHostFontResources_RegisterFile(&s_font_store, AR_TEST_FONT_PATH, NULL, 0);
   CHECK(s_test_font);
@@ -1492,7 +1690,9 @@ int main(void) {
   ArTextBackend backend;
   ArSdlTextBackend_Init(&backend);
   ArLocalizedTextPresenter_SetBackend(&backend);
+  ExerciseTemplateAppearance(&device);
   ExerciseSourceLanguage(&device);
+  ExerciseFontRolePreflight(&device);
   ExercisePreflight(&device, &backend);
   ExerciseDialogueFailure(&device);
   ExerciseEmpty(&device, &backend);
@@ -1506,6 +1706,7 @@ int main(void) {
   ExerciseMaximumSharedColumns(&device);
   ExerciseCenteredPage(&device);
   ExerciseRtlDialogue(&device);
+  ExerciseLabelBreaks(&device);
   ExerciseScreenText(&device);
   const int sizes[] = {80, 110, 140};
   for (int scale = 2; scale <= 6; scale += 2) {

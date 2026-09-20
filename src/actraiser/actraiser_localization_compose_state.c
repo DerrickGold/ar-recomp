@@ -5,6 +5,7 @@
 
 #include "actraiser/actraiser_localization_name_entry.h"
 #include "actraiser/actraiser_localization_style.h"
+#include "localization/language_contract.h"
 
 static bool IsValid(const ActRaiserLocalizationComposeState *state) {
   return state && state->struct_size >= sizeof(*state) &&
@@ -148,14 +149,15 @@ static ArLocalizationTextLayoutKind LayoutForSemanticId(
     const char *semantic_id) {
   if (MenuForSemanticId(semantic_id) != kActRaiserLocalizationMenu_None)
     return kArLocalizationTextLayout_Grid;
-  if (!strncmp(semantic_id, "action.", 7))
-    return kArLocalizationTextLayout_CenteredLabel;
-  if (!strncmp(semantic_id, "title.", 6))
-    return kArLocalizationTextLayout_SingleLineLabel;
-  const size_t length = strlen(semantic_id);
-  if (!strncmp(semantic_id, "city.", 5) && length > 10 &&
-      !strcmp(semantic_id + length - 5, ".name"))
-    return kArLocalizationTextLayout_SingleLineLabel;
+  ArLanguagePresentationContract presentation;
+  if (ArLanguageContract_Presentation(semantic_id, &presentation)) {
+    if (!strcmp(presentation.layout, "centered_label"))
+      return kArLocalizationTextLayout_CenteredLabel;
+    if (!strcmp(presentation.layout, "single_line_label"))
+      return kArLocalizationTextLayout_SingleLineLabel;
+    if (!strcmp(presentation.layout, "centered_block"))
+      return kArLocalizationTextLayout_CenteredBlock;
+  }
   return kArLocalizationTextLayout_Flow;
 }
 
@@ -164,29 +166,22 @@ static bool ResolveSnapshot(
     ActRaiserLocalizationComposeTextResolver resolve_text,
     void *resolve_context, char *error, size_t error_capacity) {
   if (!resolved || !resolve_text || !resolved->semantic_id[0]) return false;
-  memset(&resolved->language, 0, sizeof(resolved->language));
-  resolved->bidi.count = 0;
-  resolved->live_field = (ArLocalizationTextField){0};
-  memset(resolved->structural_boundaries, 0, sizeof(resolved->structural_boundaries));
-  if (!resolve_text(resolve_context, resolved->semantic_id,
-                    resolved->utf8, sizeof(resolved->utf8),
-                    &resolved->utf8_bytes, &resolved->cluster_count,
-                    &resolved->source_revision, resolved->inline_objects,
-                    kArLocalizationFrameInlineObjectCapacity,
-                    &resolved->inline_object_count, resolved->structural_boundaries,
-                    &resolved->language, &resolved->bidi, &resolved->live_field,
+  memset(&resolved->text, 0, sizeof(resolved->text));
+  if (!resolve_text(resolve_context, resolved->semantic_id, &resolved->text,
                     error, error_capacity) ||
-      !ArLocalizationTextLanguage_IsValid(&resolved->language) ||
-      resolved->utf8_bytes >= sizeof(resolved->utf8) ||
-      resolved->utf8[resolved->utf8_bytes] != 0 ||
-      !ArLocalizationTextField_IsValid(&resolved->live_field,
-                                        resolved->utf8, resolved->utf8_bytes) ||
-      !ArTextBidiSpans_FitSource(&resolved->bidi, resolved->utf8, resolved->utf8_bytes) ||
-      (!resolved->utf8_bytes &&
-       (resolved->cluster_count || resolved->inline_object_count)) ||
-      (resolved->utf8_bytes && !resolved->cluster_count) ||
-      !resolved->source_revision ||
-      resolved->inline_object_count >
+      !ArLocalizationTextLanguage_IsValid(&resolved->text.language) ||
+      resolved->text.utf8_bytes >= sizeof(resolved->text.utf8) ||
+      resolved->text.utf8[resolved->text.utf8_bytes] != 0 ||
+      !ArLocalizationTextField_IsValid(&resolved->text.live_field,
+                                       resolved->text.utf8,
+                                       resolved->text.utf8_bytes) ||
+      !ArTextBidiSpans_FitSource(&resolved->text.bidi, resolved->text.utf8,
+                                 resolved->text.utf8_bytes) ||
+      (!resolved->text.utf8_bytes &&
+       (resolved->text.cluster_count || resolved->text.inline_object_count)) ||
+      (resolved->text.utf8_bytes && !resolved->text.cluster_count) ||
+      !resolved->text.source_revision ||
+      resolved->text.inline_object_count >
           kArLocalizationFrameInlineObjectCapacity) {
     if (error && error_capacity && !error[0])
       snprintf(error, error_capacity,
@@ -285,17 +280,12 @@ bool ActRaiserLocalizationComposeState_Refresh(
   ActRaiserLocalizationComposeSnapshot *slot = Slot(state, surface_id);
   if (!slot || !slot->observed || !expected_source_revision || !resolve_text)
     return false;
-  if (slot->active && slot->source_revision == expected_source_revision)
+  if (slot->active && slot->text.source_revision == expected_source_revision)
     return true;
   ActRaiserLocalizationComposeSnapshot refreshed = *slot;
-  refreshed.utf8[0] = 0;
-  refreshed.utf8_bytes = 0;
-  refreshed.cluster_count = 0;
-  refreshed.source_revision = 0;
-  refreshed.inline_object_count = 0;
-  if (!ResolveSnapshot(&refreshed, resolve_text, resolve_context,
-                       error, error_capacity) ||
-      refreshed.source_revision != expected_source_revision) {
+  if (!ResolveSnapshot(&refreshed, resolve_text, resolve_context, error,
+                       error_capacity) ||
+      refreshed.text.source_revision != expected_source_revision) {
     slot->active = false;
     if (error && error_capacity && !error[0])
       snprintf(error, error_capacity,
@@ -316,38 +306,21 @@ bool ActRaiserLocalizationComposeState_RefreshLatest(
   ActRaiserLocalizationComposeSnapshot *slot = Slot(state, surface_id);
   if (!slot || !slot->observed || !resolve_text) return false;
   ActRaiserLocalizationComposeSnapshot refreshed = *slot;
-  refreshed.utf8[0] = 0;
-  refreshed.utf8_bytes = 0;
-  refreshed.cluster_count = 0;
-  refreshed.source_revision = 0;
-  refreshed.inline_object_count = 0;
   if (!ResolveSnapshot(&refreshed, resolve_text, resolve_context,
                        error, error_capacity)) {
     slot->active = false;
     return false;
   }
-  if (slot->active && refreshed.source_revision == slot->source_revision &&
-      refreshed.utf8_bytes == slot->utf8_bytes &&
-      refreshed.inline_object_count == slot->inline_object_count &&
-      refreshed.live_field.utf8_offset == slot->live_field.utf8_offset &&
-      refreshed.live_field.utf8_bytes == slot->live_field.utf8_bytes &&
-      refreshed.live_field.cells == slot->live_field.cells &&
-      !memcmp(refreshed.utf8, slot->utf8, refreshed.utf8_bytes + 1u) &&
-      !memcmp(refreshed.structural_boundaries, slot->structural_boundaries,
-              AR_TEXT_BOUNDARY_BYTES(refreshed.utf8_bytes)) &&
-      !memcmp(refreshed.inline_objects, slot->inline_objects,
-              (size_t)refreshed.inline_object_count *
-                  sizeof(refreshed.inline_objects[0])))
-    return true;
+  /* Resolution may change annotations without changing the visible bytes.
+   * The presenter owns content caching; publish the complete result here. */
   refreshed.active = true;
   *slot = refreshed;
   return true;
 }
 
 bool ActRaiserLocalizationComposeState_AppendFrame(
-    const ActRaiserLocalizationComposeState *state,
-    ArLocalizationFrame *frame, ArTextCellDestination destination,
-    const uint16_t palette[4]) {
+    const ActRaiserLocalizationComposeState *state, ArLocalizationFrame *frame,
+    ArTextCellDestination destination, const ActRaiserTextPalette *palette) {
   if (!IsValid(state) || !frame || !palette) return false;
   const uint8_t first_snapshot = frame->snapshot_count;
   bool complete = true;
@@ -356,9 +329,10 @@ bool ActRaiserLocalizationComposeState_AppendFrame(
     const ActRaiserLocalizationComposeSnapshot *slot =
         &state->surfaces[index];
     if (!slot->active) continue;
-    if (!ArLocalizationTextLanguage_IsValid(&slot->language) ||
-        !ArTextBidiSpans_FitSource(&slot->bidi, slot->utf8, slot->utf8_bytes) ||
-        slot->bidi.count > kArTextMaximumBidiSpans - frame->bidi.count) {
+    if (!ArLocalizationTextLanguage_IsValid(&slot->text.language) ||
+        !ArTextBidiSpans_FitSource(&slot->text.bidi, slot->text.utf8,
+                                   slot->text.utf8_bytes) ||
+        slot->text.bidi.count > kArTextMaximumBidiSpans - frame->bidi.count) {
       complete = false;
       continue;
     }
@@ -368,34 +342,40 @@ bool ActRaiserLocalizationComposeState_AppendFrame(
        * lettering cannot leak through. Extra authored rows cannot escape. */
       size_t start = 0;
       for (unsigned choice = 0; choice < 2; ++choice) {
-        size_t first = slot->utf8_bytes, end = first;
-        while (start < slot->utf8_bytes) {
+        size_t first = slot->text.utf8_bytes, end = first;
+        while (start < slot->text.utf8_bytes) {
           end = start;
-          while (end < slot->utf8_bytes && slot->utf8[end] != '\n') ++end;
+          while (end < slot->text.utf8_bytes && slot->text.utf8[end] != '\n')
+            ++end;
           first = start;
-          while (first < end && slot->utf8[first] == ' ') ++first;
-          start = end < slot->utf8_bytes ? end + 1 : end;
+          while (first < end && slot->text.utf8[first] == ' ')
+            ++first;
+          start = end < slot->text.utf8_bytes ? end + 1 : end;
           if (first < end) break;
         }
         ArTextCellRegion region = slot->region;
         region.row += choice * 2;
         region.rows = 1;
-        const uint32_t clusters = first < end ? slot->cluster_count : 0;
+        const uint32_t clusters = first < end ? slot->text.cluster_count : 0;
         ArTextBidiSpans bidi = {0};
-        for (uint16_t i = 0; i < slot->bidi.count; ++i) {
-          ArTextBidiSpan s = slot->bidi.spans[i];
+        for (uint16_t i = 0; i < slot->text.bidi.count; ++i) {
+          ArTextBidiSpan s = slot->text.bidi.spans[i];
           if (s.end <= first || s.start >= end) continue;
           s.start = s.start > first ? s.start - (uint32_t)first : 0;
           s.end = (s.end < end ? s.end : (uint32_t)end) - (uint32_t)first;
           bidi.spans[bidi.count++] = s;
         }
-        complete &= ArLocalizationFrame_AddTextWithObjectsAndLayout(
-            frame, 140 + choice, destination, region,
-            slot->utf8 + first, end - first, clusters, clusters,
-            slot->source_revision, slot->language.direction, slot->native_font_pixels,
-            kArLocalizationTextLayout_SingleLineLabel, NULL, 0, NULL, 0) &&
-            ArLocalizationFrame_SetTextLanguage(frame, &slot->language) &&
-            ArLocalizationFrame_SetTextBidiSpans(frame, &bidi);
+        complete &=
+            ArLocalizationFrame_AddTextWithObjectsAndLayout(
+                frame, 140 + choice, destination, region,
+                slot->text.utf8 + first, end - first, clusters, clusters,
+                slot->text.source_revision, slot->text.language.direction,
+                slot->native_font_pixels,
+                kArLocalizationTextLayout_SingleLineLabel, NULL, 0, NULL, 0) &&
+            ArLocalizationFrame_SetTextLanguage(frame, &slot->text.language) &&
+            ArLocalizationFrame_SetTextBidiSpans(frame, &bidi) &&
+            ActRaiserTextStyle_Publish(&slot->text.styles, (uint32_t)first,
+                                       palette, frame);
       }
       continue;
     }
@@ -422,26 +402,28 @@ bool ActRaiserLocalizationComposeState_AppendFrame(
       }
       if (!ArLocalizationFrame_AddTextWithGrid(
               frame, slot->surface_id, destination, slot->region,
-              slot->utf8, slot->utf8_bytes,
-              slot->cluster_count, slot->cluster_count,
-              slot->source_revision, slot->language.direction, slot->native_font_pixels,
-              &slot->grid, slot->structural_boundaries,
+              slot->text.utf8, slot->text.utf8_bytes, slot->text.cluster_count,
+              slot->text.cluster_count, slot->text.source_revision,
+              slot->text.language.direction, slot->native_font_pixels,
+              &slot->grid, slot->text.structural_boundaries,
               preserve_count ? preserves : NULL, preserve_count,
-              slot->inline_objects, slot->inline_object_count) ||
-          !ArLocalizationFrame_SetTextLanguage(frame, &slot->language) ||
-          !ArLocalizationFrame_SetTextBidiSpans(frame, &slot->bidi))
+              slot->text.inline_objects, slot->text.inline_object_count) ||
+          !ArLocalizationFrame_SetTextLanguage(frame, &slot->text.language) ||
+          !ArLocalizationFrame_SetTextBidiSpans(frame, &slot->text.bidi) ||
+          !ActRaiserTextStyle_Publish(&slot->text.styles, 0, palette, frame))
         complete = false;
       continue;
     }
     if (!ArLocalizationFrame_AddTextWithObjectsAndLayout(
-            frame, slot->surface_id, destination, slot->region,
-            slot->utf8, slot->utf8_bytes,
-            slot->cluster_count, slot->cluster_count,
-            slot->source_revision, slot->language.direction, slot->native_font_pixels,
-            slot->layout, NULL, 0,
-            slot->inline_objects, slot->inline_object_count) ||
-        !ArLocalizationFrame_SetTextLanguage(frame, &slot->language) ||
-        !ArLocalizationFrame_SetTextBidiSpans(frame, &slot->bidi)) {
+            frame, slot->surface_id, destination, slot->region, slot->text.utf8,
+            slot->text.utf8_bytes, slot->text.cluster_count,
+            slot->text.cluster_count, slot->text.source_revision,
+            slot->text.language.direction, slot->native_font_pixels,
+            slot->layout, NULL, 0, slot->text.inline_objects,
+            slot->text.inline_object_count) ||
+        !ArLocalizationFrame_SetTextLanguage(frame, &slot->text.language) ||
+        !ArLocalizationFrame_SetTextBidiSpans(frame, &slot->text.bidi) ||
+        !ActRaiserTextStyle_Publish(&slot->text.styles, 0, palette, frame)) {
       complete = false;
       continue;
     }
@@ -466,14 +448,15 @@ bool ActRaiserLocalizationComposeState_AppendFrame(
     /* The name keeps the native field's tiles while it is typed: letters sit
      * in fixed cells and never join, and typing rebuilds only the name rather
      * than the whole keyboard page. */
-    if (slot->live_field.utf8_bytes &&
-        !ArLocalizationFrame_SetLiveLine(frame, slot->live_field.utf8_offset,
-                                         slot->live_field.utf8_bytes,
-                                         slot->live_field.cells))
+    if (slot->text.live_field.utf8_bytes &&
+        !ArLocalizationFrame_SetLiveLine(
+            frame, slot->text.live_field.utf8_offset,
+            slot->text.live_field.utf8_bytes, slot->text.live_field.cells))
       complete = false;
   }
   for (uint8_t i = first_snapshot; i < frame->snapshot_count; ++i)
-    ActRaiserLocalizationStyle_Ordinary(&frame->snapshots[i], palette);
+    ActRaiserLocalizationStyle_Ordinary(&frame->snapshots[i],
+                                        palette->dialogue);
   return complete;
 }
 

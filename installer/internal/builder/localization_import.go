@@ -39,8 +39,10 @@ func (work *localizationWork) previewLocalizationImport(w *localizationReply, p 
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	if _, _, err := p.Installation(); err != nil {
+	if _, report, err := p.Installation(); err != nil {
 		result["installError"] = err.Error()
+	} else if report.Upgrade != nil {
+		result["upgrade"] = report.Upgrade
 	}
 	work.pendingImport = &localizationImport{token: token, project: p}
 	w.json(200, result)

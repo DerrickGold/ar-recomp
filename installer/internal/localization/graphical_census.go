@@ -217,6 +217,6 @@ func (d *Decoder) graphicalCensus(census *NativeDestinationCensus, entries []ass
 		"claim":          "All language-bearing graphical surfaces are owned by a stable replacement class; only structured text is author-editable.",
 		"resource_count": len(resources), "font_resource_count": 1, "tile_strip_or_tilemap_region_count": 8, "full_surface_count": 2, "path_audits": audits, "resources": resources,
 		"boundaries": []string{"Non-language regional art and gameplay graphics belong to the future regional-graphics registry, not language extraction.",
-			"Title logo and copyright pages remain artwork; credits lettering has a separate editable Unicode composition decoder.",
+			"The title logo and ending copyright pages remain artwork; the title copyright footer is fixed-composer text, and credits lettering has a separate editable Unicode composition decoder.",
 			"Credits use the final 08/01 asset entry's distinct alphabet, palette and twenty page maps; not the dialogue alphabet."}}, nil
 }

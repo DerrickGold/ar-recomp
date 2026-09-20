@@ -1,12 +1,24 @@
-# Independently authored syntax example; contains no retail script.
+# Independently authored v2 templates; contains no retail script.
+@define-style prose band=native:dialogue.band body=native:dialogue.body shadow=native:dialogue.shadow
+@define-style warm band=#FFB347 body=#FFE6A1 shadow=#24180D
 
 :: sky.menu.fight_monsters
+@layout fixed_rows
+@style prose
+@font body
+@scale 100%
+@numerals slanted-ascii
 Affronter les monstres
 @end
 
 :: sky.action_mode.confirm
+@layout flow
+@style prose
+@font body
+@scale 100%
+@numerals slanted-ascii
 @anchor reset_text_cursor.00
-{master_name}, commençons-nous ?
+<span font="hud" style="warm">{master_name}</span>, commençons-nous ?
 @page
 Cette page supplémentaire montre que le texte peut être prolongé.
 @anchor yield.01

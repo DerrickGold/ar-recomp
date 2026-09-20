@@ -63,7 +63,9 @@ uint64_t HostDisplay_CatchupCapNs(uint64_t emulation_frame_interval_ns,
                                   int maximum_catchup_frames);
 
 void HostDisplay_InvalidatePresentHistory(void);
-bool HostDisplay_SubmitFrame(HostDisplayPresentMode mode, float alpha);
+struct SimFrameData;
+bool HostDisplay_SubmitFrame(HostDisplayPresentMode mode, float alpha,
+                             const struct SimFrameData *annotated_sim);
 /* Recompose the retained frame between emulation ticks at the selected host
  * cadence. Visual interpolation is optional: with it disabled, the exact
  * retained tick is presented while host-owned camera/effect time can advance. */

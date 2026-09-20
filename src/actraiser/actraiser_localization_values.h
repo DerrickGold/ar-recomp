@@ -8,7 +8,7 @@
 #include "localization/dialogue_session.h"
 #include "localization/language_pack.h"
 
-#define ACTRAISER_LOCALIZATION_VALUES_ABI_VERSION UINT32_C(2)
+#define ACTRAISER_LOCALIZATION_VALUES_ABI_VERSION UINT32_C(4)
 
 enum {
   kActRaiserLocalizationMasterNameCapacity =
@@ -22,6 +22,10 @@ typedef struct ActRaiserLocalizationValues {
   uint32_t abi_version;
   const uint8_t *wram;
   size_t wram_bytes;
+  /* Optional, copied by session Begin. Final native HUD field including
+   * padding. */
+  const char *hud_value;
+  const char *location_name;
   const ArLanguagePack *pack;
   const ArLanguagePack *fallback_pack;
   char master_name[kActRaiserLocalizationMasterNameCapacity];

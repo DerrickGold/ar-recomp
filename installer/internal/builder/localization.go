@@ -17,6 +17,7 @@ import (
 	"time"
 
 	lk "github.com/DerrickGold/ar-recomp/installer/internal/localization"
+	"github.com/DerrickGold/ar-recomp/installer/internal/textpreview"
 )
 
 // The GUI is an adapter over localization, not another script parser or ROM
@@ -31,6 +32,12 @@ var localizationCSS string
 //go:embed localization.js
 var localizationJS string
 
+//go:embed localization_styling.js
+var localizationStylingJS string
+
+//go:embed localization_playback.js
+var localizationPlaybackJS string
+
 type localizationSession struct {
 	mu     sync.Mutex
 	editMu sync.Mutex
@@ -44,30 +51,32 @@ type localizationExport struct {
 }
 
 type localizationRequest struct {
-	ProjectID        string               `json:"projectID"`
-	Revision         string               `json:"revision"`
-	ID               string               `json:"id"`
-	Body             string               `json:"body"`
-	Status           lk.TranslationStatus `json:"status"`
-	Metadata         lk.PackMetadata      `json:"metadata"`
-	Notes            string               `json:"notes"`
-	NoticeName       string               `json:"noticeName"`
-	NoticeText       string               `json:"noticeText"`
-	Directory        string               `json:"directory"`
-	NewID            string               `json:"newID"`
-	Replace          bool                 `json:"replace"`
-	Expected         string               `json:"expected"`
-	ConfirmRights    bool                 `json:"confirmRights"`
-	IncludeWIP       bool                 `json:"includeWIP"`
-	PrepareDownload  bool                 `json:"prepareDownload"`
-	SaveMessage      bool                 `json:"saveMessage"`
-	SaveDetails      bool                 `json:"saveDetails"`
-	SaveNotice       bool                 `json:"saveNotice"`
-	ConfirmUninstall bool                 `json:"confirmUninstall"`
-	SaveFonts        bool                 `json:"saveFonts"`
-	Fonts            lk.PackFonts         `json:"fonts"`
-	FontPaths        []string             `json:"fontPaths"`
-	Samples          []string             `json:"samples"`
+	Scenario         *textpreview.Scenario `json:"scenario"`
+	SourceScenario   *textpreview.Scenario `json:"sourceScenario"`
+	ProjectID        string                `json:"projectID"`
+	Revision         string                `json:"revision"`
+	ID               string                `json:"id"`
+	Body             string                `json:"body"`
+	Status           lk.TranslationStatus  `json:"status"`
+	Metadata         lk.PackMetadata       `json:"metadata"`
+	Notes            string                `json:"notes"`
+	NoticeName       string                `json:"noticeName"`
+	NoticeText       string                `json:"noticeText"`
+	Directory        string                `json:"directory"`
+	NewID            string                `json:"newID"`
+	Replace          bool                  `json:"replace"`
+	Expected         string                `json:"expected"`
+	ConfirmRights    bool                  `json:"confirmRights"`
+	IncludeWIP       bool                  `json:"includeWIP"`
+	PrepareDownload  bool                  `json:"prepareDownload"`
+	SaveMessage      bool                  `json:"saveMessage"`
+	SaveDetails      bool                  `json:"saveDetails"`
+	SaveNotice       bool                  `json:"saveNotice"`
+	ConfirmUninstall bool                  `json:"confirmUninstall"`
+	SaveFonts        bool                  `json:"saveFonts"`
+	Fonts            lk.PackFonts          `json:"fonts"`
+	FontPaths        []string              `json:"fontPaths"`
+	Samples          []string              `json:"samples"`
 	fontUploads      map[string][]byte
 	PreviewImport    bool   `json:"previewImport"`
 	ImportToken      string `json:"importToken"`
@@ -85,9 +94,13 @@ func (app *application) serveLocalization(w http.ResponseWriter, r *http.Request
 		app.chooseLocalizationDirectory(w, r)
 		return
 	}
-	if r.Method == http.MethodGet && (endpoint == "editor.js" || endpoint == "editor.css") {
-		if endpoint == "editor.js" {
+	if r.Method == http.MethodGet && (endpoint == "editor.js" || endpoint == "editor.css" || endpoint == "playback.js") {
+		if endpoint == "playback.js" {
 			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+			io.WriteString(w, localizationPlaybackJS)
+		} else if endpoint == "editor.js" {
+			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+			io.WriteString(w, localizationStylingJS)
 			io.WriteString(w, localizationJS)
 		} else {
 			w.Header().Set("Content-Type", "text/css; charset=utf-8")
@@ -118,7 +131,7 @@ func (app *application) serveLocalization(w http.ResponseWriter, r *http.Request
 			if upload != nil && upload.cleanup != nil {
 				defer upload.cleanup()
 			}
-		} else if endpoint == "save" && strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data") {
+		} else if (endpoint == "save" || endpoint == "playback" || endpoint == "preview") && strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data") {
 			var cleanup func()
 			q, cleanup, err = app.prepareLocalizationFontSave(w, r)
 			if cleanup != nil {
@@ -137,7 +150,7 @@ func (app *application) serveLocalization(w http.ResponseWriter, r *http.Request
 	// writer mutex orders mutations without holding the state lock over I/O.
 	reply := &localizationReply{}
 	err = func() error {
-		if r.Method == http.MethodPost && endpoint != "font-coverage" {
+		if r.Method == http.MethodPost && endpoint != "font-coverage" && endpoint != "playback" && endpoint != "preview" {
 			s.editMu.Lock()
 			defer s.editMu.Unlock()
 		}
@@ -151,6 +164,13 @@ func (app *application) serveLocalization(w http.ResponseWriter, r *http.Request
 		if r.Method == http.MethodGet {
 			return work.readLocalization(reply, r, endpoint)
 		}
+		if endpoint == "playback" {
+			result, err := work.playback(r.Context(), q)
+			if err == nil {
+				reply.json(200, result)
+			}
+			return err
+		}
 		if endpoint == "font-coverage" {
 			if err := work.checkLocalizationIdentity(q.ProjectID, q.Revision); err != nil {
 				return err
@@ -160,6 +180,9 @@ func (app *application) serveLocalization(w http.ResponseWriter, r *http.Request
 				reply.json(200, report)
 			}
 			return err
+		}
+		if endpoint == "preview" {
+			return work.mutateLocalization(reply, r, endpoint, q)
 		}
 		if upload != nil {
 			err = work.commitLocalizationUpload(reply, r, upload)
@@ -231,7 +254,7 @@ func (work *localizationWork) localizationState() map[string]any {
 	state := map[string]any{"project": nil, "root": work.root}
 	if s.current != nil {
 		p := s.current
-		state["project"] = map[string]any{"metadata": p.Pack().Manifest().Metadata(), "revision": p.ProjectRevision(), "origin": p.Origin(), "notes": p.Notes(), "notices": p.Notices(), "fonts": p.Pack().Manifest().Fonts(), "totals": p.Pack().Workspace().Children("")}
+		state["project"] = map[string]any{"formatVersion": p.Pack().Manifest().Version(), "metadata": p.Pack().Manifest().Metadata(), "revision": p.ProjectRevision(), "origin": p.Origin(), "notes": p.Notes(), "notices": p.Notices(), "fonts": p.Pack().Manifest().Fonts(), "treatments": p.Pack().Treatments(), "totals": p.Pack().Workspace().Children("")}
 	}
 	if s.reference != nil {
 		state["reference"] = s.reference.Pack().Manifest().Metadata()
@@ -581,6 +604,16 @@ func (work *localizationWork) mutateLocalization(w *localizationReply, r *http.R
 	var next *lk.AuthorProject
 	var err error
 	switch endpoint {
+	case "upgrade-v2":
+		next, report, err := p.UpgradeV2(q.NewID)
+		if err != nil {
+			return err
+		}
+		if err = work.saveLocalization(next, ""); err != nil {
+			return err
+		}
+		w.json(200, map[string]any{"state": work.localizationState(), "report": report})
+		return nil
 	case "save":
 		if p.Origin() == "native-source" {
 			return fmt.Errorf("native sources are read-only; create a translation first")
@@ -602,11 +635,15 @@ func (work *localizationWork) mutateLocalization(w *localizationReply, r *http.R
 		if err == nil && q.SaveNotice {
 			next, err = next.WithNotice(q.NoticeName, q.NoticeText)
 		}
-		if err == nil && q.SaveMessage {
-			next, err = next.EditMessage(q.ID, q.Body, q.Status)
-		}
-		if err == nil && q.SaveFonts {
-			next, err = next.WithFonts(q.Fonts, q.fontUploads)
+		if err == nil {
+			switch {
+			case q.SaveMessage && q.SaveFonts:
+				next, err = next.EditMessageAndFonts(q.ID, q.Body, q.Status, q.Fonts, q.fontUploads)
+			case q.SaveMessage:
+				next, err = next.EditMessage(q.ID, q.Body, q.Status)
+			case q.SaveFonts:
+				next, err = next.WithFonts(q.Fonts, q.fontUploads)
+			}
 		}
 	case "clone":
 		if p.Origin() == "native-source" {
@@ -655,12 +692,11 @@ func (work *localizationWork) mutateLocalization(w *localizationReply, r *http.R
 	case "edit":
 		next, err = p.EditMessage(q.ID, q.Body, q.Status)
 	case "preview":
-		if p.Origin() != "native-source" {
-			p, err = p.EditMessage(q.ID, q.Body, q.Status)
-			if err != nil {
-				return err
-			}
+		p, err = previewLocalizationDraft(p, q)
+		if err != nil {
+			return err
 		}
+
 		ops, err := p.Pack().MessageOperations(q.ID)
 		if err != nil {
 			return err
@@ -668,11 +704,11 @@ func (work *localizationWork) mutateLocalization(w *localizationReply, r *http.R
 		w.json(200, ops)
 		return nil
 	case "materialize":
-		ops, err := p.Pack().MessageOperations(q.ID)
+		message, err := p.Pack().ResolvedMessage(q.ID)
 		if err != nil {
 			return err
 		}
-		script, err := lk.EmitAuthorScript([]lk.AuthorMessage{{ID: q.ID, Operations: ops}}, "preview.artext")
+		script, err := lk.EmitAuthorScriptVersion([]lk.AuthorMessage{message}, "preview.artext", p.Pack().Manifest().Version(), p.Pack().Treatments()...)
 		if err != nil {
 			return err
 		}

@@ -6,14 +6,17 @@ import (
 	"strings"
 )
 
-func resolveReferences(census *NativeSourceCensus, messages, menu []*NativeMessage) (IRObject, error) {
+// Resolution never changes the supplied discovery evidence. Callers publish the
+// returned references only after any required seed expansion has succeeded.
+func resolveReferences(seeds []NativeSourceReference, messages, menu []*NativeMessage) (sourceReferenceResolution, error) {
 	records := append(append([]*NativeMessage{}, messages...), menu...)
+	resolved := make([]NativeSourceReference, 0, len(seeds))
 	unique := map[string]bool{}
-	for _, reference := range irRows(census.SourceReferenceSeeds, "references") {
-		address := irString(reference, "source_pc24")
+	for _, reference := range seeds {
+		address := reference.SourcePC24
 		offset, err := parsedOffset(address)
 		if err != nil {
-			return nil, err
+			return sourceReferenceResolution{}, err
 		}
 		var closest *NativeMessage
 		exactCount := 0
@@ -28,17 +31,18 @@ func resolveReferences(census *NativeSourceCensus, messages, menu []*NativeMessa
 			}
 		}
 		if exactCount > 1 {
-			return nil, fmt.Errorf("%s: duplicate exact source records", address)
+			return sourceReferenceResolution{}, fmt.Errorf("%s: duplicate exact source records", address)
 		}
+		reference.NativeSourceResolution = &NativeSourceResolution{}
 		if closest != nil {
-			reference["resolved_record_id"], reference["source_offset_within_record"] = closest.ID, offset-closest.start
+			id, within := closest.ID, offset-closest.start
+			reference.ResolvedRecordID = &id
+			reference.SourceOffsetWithinRecord = &within
 			unique[address] = true
-		} else {
-			reference["resolved_record_id"] = nil
-			if _, exists := unique[address]; !exists {
-				unique[address] = false
-			}
+		} else if _, exists := unique[address]; !exists {
+			unique[address] = false
 		}
+		resolved = append(resolved, reference)
 	}
 	unmapped := []string{}
 	for source, mapped := range unique {
@@ -47,20 +51,27 @@ func resolveReferences(census *NativeSourceCensus, messages, menu []*NativeMessa
 		}
 	}
 	slices.Sort(unmapped)
-	return IRObject{"unique_source_count": len(unique), "mapped_unique_source_count": len(unique) - len(unmapped),
-		"unmapped_unique_source_count": len(unmapped), "all_current_seeds_mapped": len(unmapped) == 0, "unmapped_source_pc24s": unmapped}, nil
+	return sourceReferenceResolution{
+		References: resolved,
+		Summary: NativeSourceResolutionSummary{
+			UniqueSourceCount: len(unique), MappedUniqueSourceCount: len(unique) - len(unmapped),
+			UnmappedUniqueSourceCount: len(unmapped), AllCurrentSeedsMapped: len(unmapped) == 0,
+			UnmappedSourcePC24s: unmapped,
+		},
+	}, nil
 }
-func (b *catalogBuilder) expandSeeds(census *NativeSourceCensus, menu *NativeMenuCatalog) (IRObject, IRObject, error) {
-	resolution, err := resolveReferences(census, b.messages, menu.Segments)
+
+func (b *catalogBuilder) expandSeeds(census *NativeSourceCensus, menu *NativeMenuCatalog) (NativeSourceResolutionSummary, IRObject, error) {
+	resolution, err := resolveReferences(census.SourceReferenceSeeds.References, b.messages, menu.Segments)
 	if err != nil {
-		return nil, nil, err
+		return NativeSourceResolutionSummary{}, nil, err
 	}
 	added := []string{}
 	kinds := map[string][]string{}
-	for _, reference := range irRows(census.SourceReferenceSeeds, "references") {
-		if reference["resolved_record_id"] == nil {
-			address := irString(reference, "source_pc24")
-			kinds[address] = append(kinds[address], irString(reference, "reference_kind"))
+	for _, reference := range resolution.References {
+		if reference.ResolvedRecordID == nil {
+			address := reference.SourcePC24
+			kinds[address] = append(kinds[address], reference.ReferenceKind)
 		}
 	}
 	sources := []string{}
@@ -71,27 +82,31 @@ func (b *catalogBuilder) expandSeeds(census *NativeSourceCensus, menu *NativeMen
 	for _, source := range sources {
 		for _, kind := range kinds[source] {
 			if !strings.HasPrefix(kind, "interpreter_") && !strings.HasPrefix(kind, "dialogue_wrapper_") {
-				return nil, nil, fmt.Errorf("%s: non-dialogue source %s is absent from bounded catalogues", b.p.ID, source)
+				return NativeSourceResolutionSummary{}, nil, fmt.Errorf("%s: non-dialogue source %s is absent from bounded catalogues", b.p.ID, source)
 			}
 		}
 		offset, err := parsedOffset(source)
 		if err != nil {
-			return nil, nil, err
+			return NativeSourceResolutionSummary{}, nil, err
 		}
 		message, err := b.add(offset, -1, "dialogue_consumer_seed",
 			fmt.Sprintf("dialogue.consumer_seed.%02x.%04x", offset/0x8000, 0x8000+offset%0x8000), "consumer_reference_seed")
 		if err != nil {
-			return nil, nil, err
+			return NativeSourceResolutionSummary{}, nil, err
 		}
 		if !message.Terminated {
-			return nil, nil, fmt.Errorf("consumer source %s has no invocation terminator", source)
+			return NativeSourceResolutionSummary{}, nil, fmt.Errorf("consumer source %s has no invocation terminator", source)
 		}
 		added = append(added, message.ID)
 	}
 	if len(sources) > 0 {
-		resolution, err = resolveReferences(census, b.messages, menu.Segments)
+		resolution, err = resolveReferences(census.SourceReferenceSeeds.References, b.messages, menu.Segments)
+		if err != nil {
+			return NativeSourceResolutionSummary{}, nil, err
+		}
 	}
-	return resolution, IRObject{"added_record_count": len(added), "added_record_ids": added}, err
+	census.SourceReferenceSeeds.References = resolution.References
+	return resolution.Summary, IRObject{"added_record_count": len(added), "added_record_ids": added}, nil
 }
 
 func (b *catalogBuilder) dynamicCensus(records []*NativeMessage) IRObject {

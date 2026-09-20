@@ -1,0 +1,13 @@
+# Independently authored syntax example; contains no retail script.
+
+:: sky.menu.fight_monsters
+Affronter les monstres
+@end
+
+:: sky.action_mode.confirm
+@anchor reset_text_cursor.00
+{master_name}, commençons-nous ?
+@page
+Cette page supplémentaire montre que le texte peut être prolongé.
+@anchor yield.01
+@end

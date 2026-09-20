@@ -8,7 +8,7 @@
 #include "localization/language_pack.h"
 #include "localization/text_presentation.h"
 
-#define ACTRAISER_LOCALIZATION_PACK_HOST_ABI_VERSION UINT32_C(1)
+#define ACTRAISER_LOCALIZATION_PACK_HOST_ABI_VERSION UINT32_C(2)
 
 /* Host-owned pack storage policy. The runtime copies this binding and the
  * native manifest locator; the I/O context remains borrowed through Shutdown.
@@ -18,6 +18,13 @@ typedef struct ActRaiserLocalizationPackHost {
   uint32_t abi_version;
   ArLanguagePackIo io;
   const char *native_manifest;
+  bool require_v2;
+  void *context;
+  /* Called synchronously on the game/host thread before loading any v1 script.
+   * The host explains upgrading and may request exit. Continuing selects ROM
+   * text for this attempted selection without changing saved preferences. */
+  void (*legacy_pack)(void *context, const char *manifest,
+                      const ArLanguagePackMetadata *metadata, bool native);
 } ActRaiserLocalizationPackHost;
 
 /* Game-thread adapter. Persisted localization settings select native/enhanced

@@ -18,6 +18,8 @@ DEFAULT_GO_OUTPUT = (ROOT / 'installer' / 'internal' / 'localization' /
 DEFAULT_SHAPES = ROOT / 'tools/data/localization/presentation-shapes-v1.json'
 DEFAULT_SHAPE_OUTPUT = ROOT / 'src/localization/language_row_shape_data.inc'
 DEFAULT_KEYBOARD_OUTPUT = ROOT / 'src/localization/language_keyboard_shape.h'
+DEFAULT_INK_OUTPUT = ROOT / 'src/localization/language_ink_bindings.h'
+DEFAULT_GAME_INK_OUTPUT = ROOT / 'src/actraiser/actraiser_text_ink_bindings.h'
 DEFAULT_UNICODE_OUTPUT = ROOT / 'installer/internal/localization/unicode_grapheme_data.go'
 UNICODE_SOURCE = ROOT / 'src/localization/unicode_grapheme_data.inc'
 ROW_SHAPES = {
@@ -86,6 +88,9 @@ def generate(catalog_path):
         raise ValueError('classify every optional US route as live or dormant')
 
     for route in routes:
+        layout = route.get('presentation', {}).get('layout', '')
+        if not re.fullmatch(r'[a-z][a-z0-9_]*', layout):
+            raise ValueError(f'{route["id"]}: missing or invalid layout name')
         shape = route.get('presentation', {}).get('shape')
         if shape not in PRESENTATION_SHAPES:
             raise ValueError(
@@ -121,7 +126,8 @@ def generate(catalog_path):
             PRESENTATION_SHAPES[presentation['shape']],
             presentation.get('maximum_pages', 0),
             presentation.get('maximum_lines', 0),
-            presentation.get('required_nonempty_lines', 0)))
+            presentation.get('required_nonempty_lines', 0),
+            presentation['layout']))
 
     if max((len(placeholders), len(contracts), len(anchor_names),
             len(route_placeholder_indices))) > 0xffff:
@@ -160,7 +166,7 @@ def generate(catalog_path):
     for (route_id, placeholder_first, placeholder_count, contract_first,
          contract_count, profile_mask, canonical_profile, optional, shape,
          maximum_pages, maximum_lines,
-         required_nonempty_lines) in generated_routes:
+         required_nonempty_lines, layout) in generated_routes:
         lines.append(
             f'  {{{c_string(route_id)}, UINT16_C({placeholder_first}), '
             f'UINT16_C({placeholder_count}), UINT16_C({contract_first}), '
@@ -168,7 +174,7 @@ def generate(catalog_path):
             f'UINT8_C({profile_mask}), '
             f'{canonical_profile}, {optional}, {shape}, '
             f'UINT8_C({maximum_pages}), '
-            f'UINT8_C({required_nonempty_lines})}},')
+            f'UINT8_C({required_nonempty_lines}), {c_string(layout)}}},')
     lines.extend(['};', ''])
     return '\n'.join(lines)
 
@@ -249,6 +255,7 @@ def generate_go(catalog_path, shapes_path=DEFAULT_SHAPES):
             if route['id'] == keyboard['id'] else {}), **({'table': {
             'kind': shape, 'rules': tables[shape]}} if shape else {})}
     return json.dumps({
+        'native_inks': catalog['native_inks'],
         'placeholders': catalog['placeholders'],
         'routes': [{
             'id': route['id'],
@@ -312,6 +319,53 @@ def generate_go_unicode():
     return '\n'.join(lines + ['}', ''])
 
 
+def generate_game_ink_bindings(catalog_path):
+    entries = json.loads(catalog_path.read_text())['native_inks']
+    if len(entries) > 15:
+        raise ValueError('native ink availability mask supports at most 15 bindings')
+    names, keys = set(), set()
+    for ink in entries:
+        if (ink['name'] in names or ink['key'] in keys or
+                not re.fullmatch(r'native:[a-z]+\.[a-z]+', ink['name']) or
+                not re.fullmatch(r'[A-Z][A-Za-z]+', ink['key']) or
+                ink['source'] not in ('cgram', 'hud', 'location') or
+                not isinstance(ink['index'], int) or
+                not 0 <= ink['index'] <= (255 if ink['source'] == 'cgram' else 3)):
+            raise ValueError('invalid native ink binding')
+        names.add(ink['name'])
+        keys.add(ink['key'])
+    lines = ['/* Generated native ink contract; edit semantic-catalog-v1.json. */',
+             '#ifndef ACTRAISER_TEXT_INK_BINDINGS_H', '#define ACTRAISER_TEXT_INK_BINDINGS_H',
+             '#include <stdbool.h>', '#include <stdint.h>', '#include <string.h>', '',
+             'typedef enum ActRaiserTextInkBinding {', '  kActRaiserTextInk_Literal = 0,']
+    lines += [f'  kActRaiserTextInk_{ink["key"]},' for ink in entries]
+    lines += ['  kActRaiserTextInk_Count,', '} ActRaiserTextInkBinding;', '',
+              'typedef struct ArLanguageInkBindingContract {',
+              '  const char *binding;', '  uint8_t index;', '  bool hud, location;',
+              '} ArLanguageInkBindingContract;', '',
+              'static const ArLanguageInkBindingContract kArLanguageInkBindings[] = {',
+              '  {"", 0, false, false},']
+    lines += [f'  {{{c_string(ink["name"][7:])}, {ink["index"]}, {"true" if ink["source"] == "hud" else "false"}, {"true" if ink["source"] == "location" else "false"}}},'
+              for ink in entries]
+    lines += ['};', '#endif', '']
+    return '\n'.join(lines)
+
+
+def generate_ink_bindings(catalog_path):
+    # Portable contract validation needs names only. Native palette indices
+    # and context-dependent bindings belong to the game adapter's header.
+    entries = json.loads(catalog_path.read_text())['native_inks']
+    lines = ['/* Generated ink names; edit semantic-catalog-v1.json. */',
+             '#ifndef AR_LANGUAGE_INK_BINDINGS_H', '#define AR_LANGUAGE_INK_BINDINGS_H',
+             '#include <stdbool.h>', '#include <string.h>',
+             'static inline bool ArLanguageInkBinding_IsKnown(const char *name) {',
+             '  static const char *const names[] = {']
+    lines += [f'    {c_string(ink["name"][7:])},' for ink in entries]
+    lines += ['  };', '  for (unsigned i = 0; i < sizeof(names)/sizeof(names[0]); ++i)',
+              '    if (!strcmp(name, names[i])) return true;', '  return false;', '}', '#endif', '']
+    return '\n'.join(lines)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--catalog', type=Path, default=DEFAULT_CATALOG)
@@ -320,6 +374,8 @@ def main():
     parser.add_argument('--shapes', type=Path, default=DEFAULT_SHAPES)
     parser.add_argument('--shape-out', type=Path, default=DEFAULT_SHAPE_OUTPUT)
     parser.add_argument('--keyboard-out', type=Path, default=DEFAULT_KEYBOARD_OUTPUT)
+    parser.add_argument('--ink-out', type=Path, default=DEFAULT_INK_OUTPUT)
+    parser.add_argument('--game-ink-out', type=Path, default=DEFAULT_GAME_INK_OUTPUT)
     parser.add_argument('--unicode-out', type=Path, default=DEFAULT_UNICODE_OUTPUT)
     parser.add_argument('--check', action='store_true')
     args = parser.parse_args()
@@ -327,7 +383,9 @@ def main():
                args.go_out: generate_go(args.catalog, args.shapes),
                args.shape_out: generate_row_shapes(args.catalog, args.shapes),
                args.keyboard_out: generate_keyboard(args.catalog, args.shapes),
-               args.unicode_out: generate_go_unicode()}
+               args.unicode_out: generate_go_unicode(),
+               args.ink_out: generate_ink_bindings(args.catalog),
+               args.game_ink_out: generate_game_ink_bindings(args.catalog)}
     if args.check:
         for path, output in outputs.items():
             if not path.is_file() or path.read_text(encoding='utf-8') != output:

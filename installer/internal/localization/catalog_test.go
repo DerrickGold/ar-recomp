@@ -30,7 +30,7 @@ func emptyCatalogCensus() *NativeSourceCensus {
 		composer[key] = []IRObject{}
 	}
 	return &NativeSourceCensus{
-		SourceReferenceSeeds: IRObject{"references": []IRObject{}},
+		SourceReferenceSeeds: NativeSourceSeeds{References: []NativeSourceReference{}},
 		FixedComposerSources: composer,
 		NestedHandlerSources: IRObject{"matrices": []IRObject{}},
 		DialogueForwarding:   IRObject{"wrappers": []IRObject{}},
@@ -127,28 +127,39 @@ func TestCatalogReferenceContainmentAndExpansion(t *testing.T) {
 	rom := []byte{'A', 'B', 'C', 'D', 0}
 	b := newCatalogBuilder(catalogTestDecoder(t, rom), catalogProfile{ID: "test"})
 	census := emptyCatalogCensus()
-	refs := []IRObject{{"source_pc24": "$00:8000", "reference_kind": "interpreter_immediate_y"},
-		{"source_pc24": "$00:8002", "reference_kind": "dialogue_wrapper_immediate_y"},
-		{"source_pc24": "$00:8002", "reference_kind": "interpreter_immediate_y"}}
-	census.SourceReferenceSeeds["references"] = refs
-	resolution, expansion, err := b.expandSeeds(census, &NativeMenuCatalog{})
-	if err != nil || resolution["all_current_seeds_mapped"] != true || expansion["added_record_count"] != 2 || len(b.messages) != 2 {
-		t.Fatal("overlapping original seeds were discarded", resolution, expansion, err)
+	seeds := []NativeSourceReference{
+		{SourcePC24: "$00:8000", ReferenceKind: "interpreter_immediate_y"},
+		{SourcePC24: "$00:8002", ReferenceKind: "dialogue_wrapper_immediate_y"},
+		{SourcePC24: "$00:8002", ReferenceKind: "interpreter_immediate_y"},
 	}
-	if refs[1]["resolved_record_id"] != b.messages[1].ID || refs[1]["source_offset_within_record"] != 0 || refs[2]["resolved_record_id"] != b.messages[1].ID {
+	census.SourceReferenceSeeds.References = seeds
+	summary, expansion, err := b.expandSeeds(census, &NativeMenuCatalog{})
+	if err != nil || !summary.AllCurrentSeedsMapped || expansion["added_record_count"] != 2 || len(b.messages) != 2 {
+		t.Fatal("overlapping original seeds were discarded", summary, expansion, err)
+	}
+	refs := census.SourceReferenceSeeds.References
+	if *refs[1].ResolvedRecordID != b.messages[1].ID || *refs[1].SourceOffsetWithinRecord != 0 || *refs[2].ResolvedRecordID != b.messages[1].ID {
 		t.Fatal("exact/alias seed identity lost", refs)
 	}
-	refs = append(refs, IRObject{"source_pc24": "$00:8003"}, IRObject{"source_pc24": "$00:8005"})
-	census.SourceReferenceSeeds["references"] = refs
-	resolution, err = resolveReferences(census, b.messages, nil)
-	if err != nil || refs[3]["resolved_record_id"] != b.messages[1].ID || refs[3]["source_offset_within_record"] != 1 || refs[4]["resolved_record_id"] != nil || resolution["unmapped_unique_source_count"] != 1 {
-		t.Fatal("closest interval or exclusive end incorrect", resolution, err)
+	for _, seed := range seeds {
+		if seed.NativeSourceResolution != nil {
+			t.Fatal("discovery evidence was mutated during resolution")
+		}
 	}
-	if _, err := resolveReferences(census, b.messages, []*NativeMessage{b.messages[0]}); err == nil {
-		t.Fatal("ambiguous exact source accepted")
+	seeds = append(seeds, NativeSourceReference{SourcePC24: "$00:8003"}, NativeSourceReference{SourcePC24: "$00:8005"})
+	resolution, err := resolveReferences(seeds, b.messages, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	refs = resolution.References
+	if *refs[3].ResolvedRecordID != b.messages[1].ID || *refs[3].SourceOffsetWithinRecord != 1 || refs[4].ResolvedRecordID != nil || resolution.Summary.UnmappedUniqueSourceCount != 1 {
+		t.Fatal("closest interval or exclusive end incorrect", resolution)
+	}
+	if result, err := resolveReferences(seeds, b.messages, []*NativeMessage{b.messages[0]}); err == nil || len(result.References) != 0 {
+		t.Fatal("ambiguous exact source accepted or partial results returned")
 	}
 	for _, kind := range []string{"fixed_composer_direct_test", "unknown"} {
-		census.SourceReferenceSeeds["references"] = []IRObject{{"source_pc24": "$00:8000", "reference_kind": kind}}
+		census.SourceReferenceSeeds.References = []NativeSourceReference{{SourcePC24: "$00:8000", ReferenceKind: kind}}
 		fresh := newCatalogBuilder(b.d, b.p)
 		if _, _, err := fresh.expandSeeds(census, &NativeMenuCatalog{}); err == nil || len(fresh.messages) != 0 {
 			t.Fatal("non-dialogue seed decoded using interactive grammar")
@@ -231,11 +242,11 @@ func TestCatalogOwnershipAndDynamicDiagnostics(t *testing.T) {
 	b.messages[3].Classification = "typed_numeric_only"
 	b.messages[4].Operations = []Operation{{"op": "end"}}
 	census := emptyCatalogCensus()
-	resolution, err := resolveReferences(census, b.messages, nil)
+	resolution, err := resolveReferences(census.SourceReferenceSeeds.References, b.messages, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	ownership, err := b.localOwnership(census, &NativeMenuCatalog{}, resolution)
+	ownership, err := b.localOwnership(census, &NativeMenuCatalog{}, resolution.Summary)
 	want := []string{"dormant_or_release_variant_text", "bounded_consumer_catalog_text", "unclassified", "verified_non_language_numeric_descriptor", "verified_non_language_empty_record"}
 	if err != nil || ownership["complete"] != false || ownership["unclassified_record_count"] != 1 || ownership["owned_rom_byte_count"] != 5 {
 		t.Fatal("incomplete ownership hidden", ownership, err)
@@ -255,10 +266,12 @@ func TestCatalogRoutesAndContinuationHashes(t *testing.T) {
 		t.Fatal(err)
 	}
 	census := emptyCatalogCensus()
-	census.SourceReferenceSeeds["references"] = []IRObject{{"source_pc24": "$00:8001", "reference_kind": "interpreter_immediate_y", "via_call_site": "$00:8100"}}
-	if _, err := resolveReferences(census, b.messages, nil); err != nil {
+	census.SourceReferenceSeeds.References = []NativeSourceReference{{SourcePC24: "$00:8001", ReferenceKind: "interpreter_immediate_y", ViaCallSite: "$00:8100"}}
+	resolution, err := resolveReferences(census.SourceReferenceSeeds.References, b.messages, nil)
+	if err != nil {
 		t.Fatal(err)
 	}
+	census.SourceReferenceSeeds.References = resolution.References
 	routes, err := b.semanticRoutes(census, &NativeMenuCatalog{})
 	if err != nil || !routes.Complete || routes.RouteCount != 1 || routes.Routes[0].Operations[0]["value"] != "BC" || routes.Routes[0].SourceOffset != 1 {
 		t.Fatal("continuation reused whole-record operations", routes, err)

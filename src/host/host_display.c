@@ -647,7 +647,8 @@ static void PerformanceContextForFrame(const FrameSlot *slot, HostDisplayPresent
     PerformanceMetrics_Add(kPerformanceCount_Fallbacks, 1);
 }
 
-bool HostDisplay_SubmitFrame(HostDisplayPresentMode mode, float alpha) {
+bool HostDisplay_SubmitFrame(HostDisplayPresentMode mode, float alpha,
+                             const SimFrameData *annotated_sim) {
   if (mode == kHostDisplayPresent_None ||
       !ArRenderDevice_IsReady(&g_render_device) ||
       !ArRenderTexture_IsValid(g_texture))
@@ -659,7 +660,7 @@ bool HostDisplay_SubmitFrame(HostDisplayPresentMode mode, float alpha) {
                          mode == kHostDisplayPresent_HeadlessVideo;
   FrameSlot slot;
   PerformanceScope pipeline = PerformanceMetrics_Begin(kPerformance_Capture);
-  FrameSlot_Capture(&slot);
+  FrameSlot_Capture(&slot, annotated_sim);
   PerformanceMetrics_End(pipeline);
   PerformanceContextForFrame(&slot, mode);
   const uint64_t render_start_ms =

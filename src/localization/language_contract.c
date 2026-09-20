@@ -1,6 +1,7 @@
 #include "localization/language_contract.h"
-#include "localization/language_row_shape.h"
+#include "localization/language_ink_bindings.h"
 #include "localization/language_keyboard.h"
+#include "localization/language_row_shape.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -30,15 +31,16 @@ typedef struct ArGeneratedRoute {
   ArLanguagePresentationShape shape;
   uint8_t maximum_pages;
   uint8_t required_nonempty_lines;
+  const char *layout;
 } ArGeneratedRoute;
 
 #include "localization/language_contract_data.inc"
 
 #define ARRAY_COUNT(array) (sizeof(array) / sizeof((array)[0]))
 
-_Static_assert(ARRAY_COUNT(kGeneratedRoutes) == 558,
+_Static_assert(ARRAY_COUNT(kGeneratedRoutes) == 564,
                "v1 semantic route count changed");
-_Static_assert(ARRAY_COUNT(kGeneratedPlaceholders) == 60,
+_Static_assert(ARRAY_COUNT(kGeneratedPlaceholders) == 62,
                "v1 placeholder count changed");
 
 static void SetError(ArLanguagePackError *error, const char *format, ...) {
@@ -273,14 +275,43 @@ static bool ValidateBody(const ArLanguagePack *pack,
                          const ArLanguageMessage *body,
                          const char *diagnostic_id,
                          ArLanguagePackError *error) {
+  const char *layout =
+      body->layout.length ? ArLanguagePack_GetString(pack, body->layout) : NULL;
+  /* Early v2 exporters mislabeled this multiline footer. Accept the old
+   * declaration while the route's corrected presentation owns rendering. */
+  const bool legacy_copyright =
+      layout && !strcmp(route->id, "title.copyright") &&
+      !strcmp(layout, "single_line_label");
+  if (layout && strcmp(layout, route->layout) && !legacy_copyright) {
+    SetError(error, "%s:%u: %s requires layout '%s', not '%s'",
+             ArLanguagePack_GetString(pack, body->source_path),
+             body->source_line, diagnostic_id, route->layout, layout);
+    return false;
+  }
   uint32_t anchor_index = 0;
   bool yielded = false;
   PresentationScan scan = {1, 1, 0, 0, false};
+  if (route->shape == kArLanguagePresentation_Inline &&
+      (body->default_style || body->layout.length || body->numerals)) {
+    SetError(error,
+             "%s: inline terms inherit appearance from their placeholder; "
+             "style the containing template",
+             diagnostic_id);
+    return false;
+  }
   for (uint32_t i = 0; i < body->operation_count; i++) {
     const ArLanguageOperation *operation =
         ArLanguagePack_GetOperation(pack, body, i);
     if (!operation) {
       SetError(error, "%s: invalid operation range", diagnostic_id);
+      return false;
+    }
+    if (route->shape == kArLanguagePresentation_Inline &&
+        operation->text_style) {
+      SetError(error,
+               "%s: inline terms inherit appearance from their placeholder; "
+               "style the containing template",
+               diagnostic_id);
       return false;
     }
     if (operation->kind == kArLanguageOperation_Text) {
@@ -365,6 +396,25 @@ static bool ValidateBody(const ArLanguagePack *pack,
       ArLanguageKeyboard_ValidateMessage(pack, body, diagnostic_id, error);
 }
 
+static bool ValidateInkBindings(const ArLanguagePack *pack,
+                                ArLanguagePackError *error) {
+  for (uint32_t i = 0; i < pack->treatment_count; ++i) {
+    const ArLanguageNamedTreatment *style = &pack->treatments[i];
+    const ArTextInk *inks[] = {&style->definition.band, &style->definition.body,
+                               &style->definition.shadow};
+    for (unsigned j = 0; j < 3; ++j) {
+      if (inks[j]->kind != kArTextInk_Binding ||
+          ArLanguageInkBinding_IsKnown(inks[j]->binding))
+        continue;
+      SetError(error, "%s:%u: style '%s' has unknown native ink 'native:%s'",
+               ArLanguagePack_GetString(pack, style->source_path),
+               style->source_line, style->definition.name, inks[j]->binding);
+      return false;
+    }
+  }
+  return true;
+}
+
 bool ArLanguageContract_ValidatePack(const ArLanguagePack *pack,
                                      ArLanguageContractStats *stats,
                                      ArLanguagePackError *error) {
@@ -381,6 +431,9 @@ bool ArLanguageContract_ValidatePack(const ArLanguagePack *pack,
     SetError(error, "language pack has an invalid source profile");
     return false;
   }
+
+  if (!ValidateInkBindings(pack, error))
+    return false;
 
   for (uint32_t i = 0; i < ArLanguagePack_MessageCount(pack); i++) {
     const ArLanguageMessage *message = ArLanguagePack_GetMessage(pack, i);
@@ -523,6 +576,7 @@ bool ArLanguageContract_Presentation(const char *semantic_id,
       .maximum_pages = route->maximum_pages,
       .maximum_lines = route->maximum_lines,
       .required_nonempty_lines = route->required_nonempty_lines,
+      .layout = route->layout,
   };
   return true;
 }

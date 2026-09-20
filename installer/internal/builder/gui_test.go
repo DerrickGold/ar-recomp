@@ -144,6 +144,9 @@ func TestBuilderPageEscapesTitleAndSetsLocalSecurityHeaders(t *testing.T) {
 			t.Errorf("missing %s header", header)
 		}
 	}
+	if policy := response.Header().Get("Content-Security-Policy"); !strings.Contains(policy, "img-src 'self' data:") {
+		t.Errorf("image policy does not admit native preview PNG sheets: %s", policy)
+	}
 	if policy := response.Header().Get("Content-Security-Policy"); !strings.Contains(policy, "media-src 'self' blob:") {
 		t.Errorf("audio policy does not admit local WAV/blob playback: %s", policy)
 	}

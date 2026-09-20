@@ -5,8 +5,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "localization/text_template.h"
+
 #define AR_LANGUAGE_PACK_IO_ABI_VERSION UINT32_C(1)
-#define AR_LANGUAGE_PACK_FORMAT_VERSION UINT32_C(1)
+#define AR_LANGUAGE_PACK_FORMAT_VERSION UINT32_C(2)
 
 enum {
   kArLanguagePackageIdCapacity = 97,
@@ -16,6 +18,7 @@ enum {
   kArLanguageLicenseCapacity = 129,
   kArLanguageFontPathCapacity = 512,
   kArLanguageMaximumFallbackFonts = 8,
+  kArLanguageMaximumFontRoles = 8,
   kArLanguagePackErrorCapacity = 512,
 };
 
@@ -68,6 +71,9 @@ typedef struct ArLanguageOperation {
   /* Optional decimal formatting on a number placeholder: {value:03}.
    * A minimum width never truncates a larger number. Zero means unpadded. */
   uint8_t minimum_digits;
+  /* One-based index into the pack's interned inline overrides; zero inherits
+   * the message defaults. Structural/control operations never carry a style. */
+  uint32_t text_style;
   union {
     ArLanguageString text;
     ArLanguageString placeholder;
@@ -86,13 +92,26 @@ typedef struct ArLanguageMessage {
   uint32_t first_operation;
   uint32_t operation_count;
   uint32_t source_line;
+  ArLanguageString source_path;
+  ArLanguageString layout;
+  uint32_t default_style;
+  uint8_t numerals; /* 0=default, 1=upright, 2=slanted ASCII */
   /* Its own position in the owning pack, so ownership of a caller-supplied
    * message is a constant-time equality check rather than a scan. */
   uint32_t index;
   bool is_alias;
 } ArLanguageMessage;
 
+typedef struct ArLanguageFontRole {
+  char name[kArTextTemplateRoleCapacity];
+  char primary_font[kArLanguageFontPathCapacity];
+  char fallback_fonts[kArLanguageMaximumFallbackFonts]
+                     [kArLanguageFontPathCapacity];
+  uint32_t fallback_font_count;
+} ArLanguageFontRole;
+
 typedef struct ArLanguagePackMetadata {
+  uint32_t format_version;
   char package_id[kArLanguagePackageIdCapacity];
   char locale[kArLanguageLocaleCapacity];
   char display_name[kArLanguageNameCapacity];
@@ -108,11 +127,19 @@ typedef struct ArLanguagePackMetadata {
   char fallback_fonts[kArLanguageMaximumFallbackFonts]
                      [kArLanguageFontPathCapacity];
   uint32_t fallback_font_count;
+  ArLanguageFontRole font_roles[kArLanguageMaximumFontRoles];
+  uint32_t font_role_count;
 } ArLanguagePackMetadata;
 
 typedef struct ArLanguagePackError {
   char message[kArLanguagePackErrorCapacity];
 } ArLanguagePackError;
+
+typedef struct ArLanguageNamedTreatment {
+  ArTextTreatment definition;
+  ArLanguageString source_path;
+  uint32_t source_line;
+} ArLanguageNamedTreatment;
 
 /* VFS blobs remain adapter-owned until release_file. The core copies all
  * retained data, so no filesystem/archive pointer escapes a load call. */
@@ -152,11 +179,46 @@ typedef struct ArLanguagePack {
   size_t strings_capacity;
   size_t message_capacity;
   size_t operation_capacity;
+  ArTextTemplateStyle *text_styles;
+  uint32_t text_style_count;
+  size_t text_style_capacity;
+  ArLanguageNamedTreatment *treatments;
+  uint32_t treatment_count;
+  size_t treatment_capacity;
   uint32_t private_magic;
 } ArLanguagePack;
 
+const ArTextTemplateStyle *
+ArLanguagePack_GetTextStyle(const ArLanguagePack *pack, uint32_t index);
+const ArLanguageNamedTreatment *
+ArLanguagePack_FindTreatment(const ArLanguagePack *pack, const char *name);
+
 void ArLanguagePack_Init(ArLanguagePack *pack);
 void ArLanguagePack_Destroy(ArLanguagePack *pack);
+
+typedef struct ArTextDocumentSource {
+  const char *path;
+  const char *utf8;
+  size_t bytes;
+} ArTextDocumentSource;
+
+/* In-memory entry point for a host without the game package envelope.
+ * Role names refer to fonts supplied by that host's text backend. No asset
+ * lookup, native source, filesystem access or game catalog is involved. */
+typedef struct ArTextDocumentConfig {
+  const char *id;
+  const char *locale;
+  ArLanguageDirection direction;
+  uint32_t format_version;
+  const ArTextDocumentSource *sources;
+  size_t source_count;
+  const char *const *font_roles;
+  size_t font_role_count;
+} ArTextDocumentConfig;
+
+bool ArLanguagePack_ParseDocument(ArLanguagePack *pack,
+                                  const ArTextDocumentConfig *config,
+                                  ArLanguagePackError *error);
 
 /* Transactional: failure leaves an already loaded pack unchanged. This layer
  * validates the container, UTF-8 grammar, resource limits, and alias graph.

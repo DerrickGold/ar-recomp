@@ -2,7 +2,7 @@
  * tools/generate_actraiser_localization_compose_routes.py.
  * Do not edit by hand. Contains address-only USA adapter metadata;
  * it contains no retail wording, decoded operations, or raw bytes.
- * Manifest SHA-256: ea02af21fa764f81f18b93421957e9ca26a21a1dbefadf1c71e48cea399d7e3c
+ * Manifest SHA-256: bebf72505606c84c4d4b4458877bfca387d3a262bdd55d275739b0e70c372253
  */
 static const ActRaiserLocalizationComposeRoute kComposeRoutes[] = {
   {
@@ -1004,6 +1004,17 @@ static const ActRaiserLocalizationComposeRoute kComposeRoutes[] = {
     .scope = kActRaiserLocalizationComposeScope_Title,
     .destination = UINT16_C(0x120C),
     .region = {14, 18, 17, 1},
+    .source_selector = UINT16_C(0),
+    .native_font_pixels = UINT8_C(7),
+    .match_flags = 0,
+  },
+  {
+    .source_pc24 = UINT32_C(0x02A9DE),
+    .semantic_id = "title.copyright",
+    .surface_id = UINT32_C(17),
+    .scope = kActRaiserLocalizationComposeScope_Title,
+    .destination = UINT16_C(0x1700),
+    .region = {0, 23, 32, 5},
     .source_selector = UINT16_C(0),
     .native_font_pixels = UINT8_C(7),
     .match_flags = 0,

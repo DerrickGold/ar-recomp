@@ -7,8 +7,11 @@ the US contract for every message, including anchors and allowed placeholders.
 
 ActRaiser language packs are UTF-8 directories designed for ordinary text
 editors and the builder's Languages workspace. A pack contains no ROM
-addresses, dictionary tokens, or font-tile numbers. Version 1 deliberately
-starts fresh; the unreleased prototype format is not supported.
+addresses, dictionary tokens, or font-tile numbers. New packs use **version 2**:
+wording, interpolation, layout and typography are explicit templates. The builder
+can upgrade a v1 pack into a separate v2 project. The game detects a selected v1
+pack and offers upgrade instructions or native text for that session; it never
+infers old styling or converts community files at runtime.
 
 The game applies packs to simulation-mode and Sky Palace menus/dialogue/HUD, action
 HUD labels and counters, action stage cards and pause/stage messages, and the
@@ -34,7 +37,7 @@ are staff pages; `credits.the_end`, `credits.best_player` and `credits.game_over
 are the final cards. Each accepts up to six explicit lines (`@line`) on one
 page; `@page` is not supported because native code owns the page sequence and
 timing. Lines are centered and fitted independently on a fixed vertical pitch;
-the heading's first grapheme retains the native gold accent. `@empty` clears
+the generated template explicitly marks the native heading's accented prefix. `@empty` clears
 the entire text page. Missing entries fall back to Native US, and a rendering
 failure retains the whole native page, never a partially erased staff list.
 Changing language while a credit page is visible retains its native timing.
@@ -59,14 +62,17 @@ Action labels use `action.hud.act_label`, `time_label`, `score_label`,
 `player_label` and `enemy_label` (each with the `action.hud.` prefix).
 They are optional additions to the original complete-pack contract. New source
 extractions include them; an older community pack falls back to Native US for
-missing labels. Lives, timer and score remain game-owned numbers, not editable
-script literals. Enhanced counters retain their slanted appearance and labels
-use the game's palette rather than the dialogue palette.
+missing labels. Lives, timer and score have corresponding `action.hud.lives_value`,
+`action.hud.time_value` and `action.hud.score_value` templates. Their `{hud_value}`
+is the final native formatted field, including zero/blank padding. It is data,
+never markup; the template controls its font, italics, color and scale.
 
 Simulation/Sky Palace HUD labels use `sim_sky.hud.context_label`,
 `sim_sky.hud.angel_label`, and `sim_sky.hud.sp_label`. These are also optional
 additions with Native US fallback in older community packs. Population and
-current/maximum SP remain game-owned values. Western reference extractions
+current/maximum SP are supplied to `sim_sky.hud.population_value` and
+`sim_sky.hud.sp_value` through `{hud_value}`. Generated templates preserve their
+native treatment. Western reference extractions
 include all three labels; the Japanese reference currently includes only the
 angel label. Its different CRT/AREA context layout is not interchangeable with
 the US field. A translation targeting the US game can author all three US
@@ -80,6 +86,20 @@ extra authored pages are not an extension of a fixed menu and are rejected —
 see "What each route displays".
 Translating a regional reference's different mode/difficulty menu does not
 automatically replace the US title choices—edit the US semantic routes.
+
+`title.copyright` is a centered multiline block in the title footer.
+`@line` keeps each authored line separate in both the game and Workshop playback;
+font, color, size and italic spans work within each line. New v2 templates use
+`@layout centered_block`. Earlier v2 exports with `@layout single_line_label`
+remain compatible and use the corrected multiline presentation automatically.
+The title logo and the ending's copyright artwork remain graphical assets.
+
+Explicit `@line` breaks and the blank row from `@paragraph` also survive in
+fitted labels. Layout names describe alignment, automatic wrapping and the
+available game region; even `single_line_label` means no automatic wrapping,
+not permission to flatten authored breaks. Inline styling applies within those
+lines. If the result cannot fit, Workshop reports a fitting error and the game
+keeps the native surface. Fixed menu row counts and page limits still apply.
 
 ## Author backups and sharing archives
 
@@ -133,10 +153,9 @@ fallback. This does not make a game pack's missing glyphs available: declare
 the dependencies needed by its actual game text in the pack's Fonts tab.
 
 The Go builder prepares the local Native US source first in both its CMake-backed
-and hermetic build flows, preserving existing source messages. Older native
-baselines gain missing graphical HUD labels and, when a ROM is available,
-credit text through an atomic update;
-previous source files and translation progress remain intact. Community packs
+and hermetic build flows. Generated native baselines upgrade atomically to v2,
+retaining wording, control order and translation progress, and gain missing
+HUD/value templates and credits. Previous version directories remain intact. Community packs
 are never automatically rewritten. Its runtime path
 is `game-assets/languages/native-us/pack.ini`. The workshop's Languages section
 and Home shortcuts require this complete, valid source: start a build with your
@@ -274,12 +293,14 @@ a distribution—not the executable directory. Resumable projects live under
 are local-only, not bundled. The optional development `Configured pack` source
 still accepts `AR_LOCALIZATION_PACK`; it does not replace installed discovery.
 
-The editor's script preview shows logical pages and controls, not exact in-game
-wrapping, font size, mosaic, scroll timing or keyboard geometry. It does not
-certify shaping or final layout. The separate Fonts tab checks scalar coverage
-through the game backend; test appearance in game before publishing. Directory
-imports and archives retain declared fonts; new translations use the bundled
-font. A missing or incompatible selected pack retains the prior working source.
+**Validate & preview** renders source and unsaved translation through the game
+text engine, including wrapping, mixed fonts, mosaic and reveal timing. The
+expandable **Script operations** view explains logical pages and control order;
+it does not measure text. The separate Fonts tab checks scalar coverage through
+the game backend. Check actual gameplay for scene artwork and control effects
+before publishing. Imports and archives retain declared fonts; new translations
+use the bundled font. A missing or incompatible selected pack retains the prior
+working source.
 
 Install/publication review also reports text coverage by dialogue, menus,
 keyboard, shared terms, HUD and credits. Expand a group for missing IDs and
@@ -305,8 +326,9 @@ at a time so ASCII directives such as `@anchor` remain readable alongside RTL
 prose. The logical preview uses the translation's `direction` setting and keeps
 control IDs/value placeholders isolated left-to-right. These are display rules:
 the editor does not insert hidden bidi characters or reverse saved text. Browser
-caret behavior and the game's mixed-script appearance still need RTL-specific
-qualification; the logical preview is not proof of in-game bidi correctness.
+caret behavior is separate from runtime shaping. Use the native playback panes
+to inspect mixed-script appearance; the logical operation list does not certify
+in-game bidi layout.
 
 Authorship is stored in `author` and `license`. Preserve original contributor
 credits when adapting a pack, add your contributions, and use public
@@ -457,7 +479,7 @@ Do not distribute scripts, fonts, or graphics extracted from a retail ROM.
 ```ini
 [pack]
 format = actraiser-language-pack
-version = 1
+version = 2
 id = example.fr-ca
 locale = fr-CA
 name = Canadian French
@@ -471,6 +493,10 @@ fallback = native-us
 coverage = partial
 
 [fonts]
+primary = builtin:actraiser-sans
+fallback = fonts/OptionalFallback.ttf
+
+[font.hud]
 primary = builtin:actraiser-sans
 fallback = fonts/OptionalFallback.ttf
 
@@ -499,7 +525,7 @@ source = text/simulation.artext
   `source_profile = us`. A local extract from another official ROM uses
   `target = reference-only`; it cannot accidentally replace the U.S. execution
   baseline.
-- `fallback` is fixed to `native-us` in version 1. Missing or rejected messages
+- `fallback` is fixed to `native-us`. Missing or rejected messages
   therefore fall back to the locally extracted U.S. enhanced source and then
   to untouched native ROM rendering.
   Enhanced fallback uses the effective message source's locale and direction,
@@ -592,7 +618,7 @@ The supported commands are:
 | `@page` | Authored page break. Pages may be added, removed, or reordered. |
 | `@wait N` | Optional presentation delay of 1–600 frames. |
 | `@anchor ID` | Machine-owned native control position; do not edit it. |
-| `@event ID ...` | Allow-listed semantic event. Version 1 initially has no author events enabled. |
+| `@event ID ...` | Allow-listed semantic event. No arbitrary author events are enabled. |
 | `@empty` | Intentionally show no text. Required anchors remain beside it. |
 | `@alias ID` | Reuse another included message with a compatible contract. |
 | `@end` | Explicit end; it is added implicitly if omitted. |
@@ -606,6 +632,122 @@ Unicode line/paragraph-separator characters remain text; use `@line`, `@page`
 or a blank physical line for explicit authoring boundaries. Quoting a command
 argument does not relax its identifier rules; do not escape punctuation inside
 quoted anchor IDs.
+
+## V2 templates and appearance
+
+Keep text and its styling together:
+
+```text
+@define-style dialogue band=native:dialogue.band body=native:dialogue.body shadow=native:dialogue.shadow
+@define-style warm band=#FFB347 body=#FFE6A1 shadow=#24180D shape=diagonal
+
+:: sky.action_mode.confirm
+@layout flow
+@font body
+@style dialogue
+@scale 100%
+@numerals slanted-ascii
+@anchor reset_text_cursor.00
+<span font="hud" style="warm" scale="110%">{master_name}</span>, commençons-nous ?
+@line
+<span scale="80%">Cette ligne est plus petite.</span>
+@anchor yield.01
+@end
+```
+
+`@layout` names the route's game-owned geometry; choose the name in the route
+reference. It does not let a translation resize the native window. `@font`,
+`@style`, `@scale` and `@numerals` set message defaults before its content.
+`@numerals` accepts `upright` or `slanted-ascii`. `<i>…</i>` and
+`<span italic="false">…</span>` set or remove italics explicitly. `<span>` accepts `font`, `style`, `color` and
+`scale`, for example `<span color="#FFD050"><i>{master_level:02}</i></span>` on a
+route that permits `master_level`. This is a small strict grammar, not HTML or
+CSS: unknown tags/attributes, unbalanced tags and unsupported properties fail
+validation. It never runs scripts, loads URLs or interprets inserted values.
+
+A flat `@define-style` declares `band`, `body`, `shadow` and optional
+`shape=diagonal|keyline`. Inks are `#RRGGBB` or one of the generated `native:`
+bindings; `shadow=none` disables the shadow. A literal `color` overrides band and
+body while retaining the treatment's shadow. There is no cascading stylesheet,
+selector matching or treatment inheritance to trace. Definition names are
+pack-wide and unique. Keep definitions at the top of the relevant `.artext`
+file; message bodies refer to them by name.
+
+`body` is `[fonts]` in `pack.ini`. Up to eight additional `[font.NAME]` sections
+have their own primary and fallback stacks. A HUD word can appear in dialogue
+simply by naming its role; it does not move to the HUD. A missing glyph falls
+back within that role's stack. Native fallback messages use the selected
+pack's matching role, or its body stack if it has no such role. Unknown roles
+in the selected pack's own templates are authoring errors.
+
+An authored scale is 25–400%. Inline scale is relative to message scale; nested
+inline scales replace their enclosing inline scale rather than multiplying
+again. Player text size and output scaling are applied by the game before the
+final font size is rounded. Fitting reduces all sizes together, retaining their
+relative proportions. Mixed fonts share a baseline, and each line accommodates
+its tallest run; a larger word can change both wrapping and the number of
+visible lines. Complete pages are shaped before reveal, so later characters
+do not move already displayed words.
+
+Close inline tags before `@line`, `@page`, controls or table `|` separators.
+Physical source lines can continue an open tag. Escape literal `<` as `\<`,
+backslash as `\\`, and braces as `{{` and `}}`. A value containing `<i>` remains
+literal text. Inline terms supply wording and inherit their placeholder's
+appearance; their own definitions cannot contain styling. An alias inherits
+its target's entire presentation.
+
+The game supports 64 distinct appearances and 512 style spans per composed
+message, and 32 font/size/italic variants per message. Workshop validates these
+limits before saving or publishing. Retained dialogue can include earlier
+pages, so span limits apply across the message. Style boundaries cannot split
+a Unicode grapheme; font/size/italic boundaries must also respect the shaped
+cluster. Color changes retain shaping. Review whole-word styling for joined
+scripts and ligatures in playback.
+
+HUD inks use the recognized HUD palette. A dialogue that uses a HUD treatment
+needs that palette to be available in its scene; use literal inks for colors
+that must work everywhere. `world_map.location_label` is a separate wrapper
+around `{location_name}` (the selected `city.*.name` wording). Its explicit
+upright-numeral style is independent of menu label styles.
+
+## Workshop playback and tracing
+
+After building the game, open a message and choose **Validate & preview**. The source
+reference and unsaved translation render side by side using the same native
+parser, layout, fonts, rasterizer and presentation code as the game. Unsaved
+font stacks/uploads, locale and direction are part of the translation preview. Nothing is saved,
+installed or published by playback.
+
+Each side supports play/pause, restart, one-tick stepping and confirm. Link
+controls for comparison or run the clocks independently. Reveal stops at waits
+and controls; confirm acknowledges a control or advances a completed page.
+Authored waits retain their frame durations. Inspection-only seeking and page
+selection can jump through the recording without claiming to send game input.
+Inspection speed changes playback speed; visual zoom magnifies the image without
+changing wrapping. Player text size recomputes the actual layout. This previews text presentation, not the gameplay effects of a
+control. Nonzero character delay retains previous page rows; instant text
+clears them, matching the game. Cursor-reset controls clear retained text.
+
+Edit source and translation sample values independently to test long names,
+large numbers and different scripts. Values default to the selected language's
+available terms. Display controls select player size, sampling and pixel effects;
+scene ink overrides let you reproduce a particular palette. These are explicit
+samples, not captured current game state. Outlined reservations stand in for
+icons/ornaments that the running game captures from its native scene. Keyboard
+action keys use the presenter's drawn fallback. Native layout and text metrics
+are still used; inspect actual gameplay for final artwork and scene effects.
+
+**Template, fonts and events** shows the requested ID, alias-resolved ID,
+actual pack and script path/line, layout, message appearance, named style
+definitions and their locations, selected font files, fitted pixel sizes and
+missing-glyph diagnostics. **Locate template** returns to the current draft
+without discarding unsaved text. Search the visible wording in the Workshop, select
+its message, then follow this trace back to the template. Inspect the
+placeholder in that body to see where a number receives italics or a word gets
+a different role. For a runtime value's producer, see
+`src/actraiser/actraiser_localization_values.c`; the semantic catalog lists its
+allowed routes and type. [Following a text template](text-template-core.md)
+documents the full code path and the independent portable host.
 
 ## Locked anchors and safe extension
 
@@ -833,7 +975,7 @@ translation state.
 
 ## Limits
 
-Version 1 rejects rather than truncates content above these limits:
+The parser rejects rather than truncates content above these limits:
 
 - 64 script files and 8 fallback fonts per pack;
 - 16 MiB per script and 64 MiB per pack-relative font;

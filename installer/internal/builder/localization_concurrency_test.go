@@ -190,7 +190,7 @@ func localizationFontHeavyFixture(tb testing.TB) *application {
 	tb.Helper()
 	app := newApplication(context.Background(), Options{ProjectRoot: filepath.Join(tb.TempDir(), "utils")}, "secret")
 	meta := lk.PackMetadata{ID: "native-us", Name: "Synthetic source", Locale: "en-US", Autonym: "English", Author: "Fixture", License: "MIT", Direction: "auto", Target: "us-runtime", SourceProfile: "us", Coverage: "partial", Fallback: "native-us"}
-	manifest, err := lk.NewPackManifest(meta, lk.PackFonts{Primary: "fonts/Fixture.ttf"}, []string{"text/source.artext"})
+	manifest, err := lk.NewPackManifestVersion(meta, lk.PackFonts{Primary: "fonts/Fixture.ttf"}, []string{"text/source.artext"}, 1)
 	if err != nil {
 		tb.Fatal(err)
 	}

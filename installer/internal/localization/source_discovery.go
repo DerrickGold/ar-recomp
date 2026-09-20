@@ -7,14 +7,14 @@ import "fmt"
 // ownership, source expansion, semantic routing and graphics are separate gates.
 type NativeSourceCensus struct {
 	destinations              *NativeDestinationCensus
-	WholeGameCoverageComplete bool       `json:"whole_game_coverage_complete"`
-	Consumers                 []IRObject `json:"consumers"`
-	DialogueForwarding        IRObject   `json:"dialogue_forwarding"`
-	NestedHandlerSources      IRObject   `json:"nested_handler_sources"`
-	FixedComposerSources      IRObject   `json:"fixed_composer_sources"`
-	SourceReferenceSeeds      IRObject   `json:"source_reference_seeds"`
-	NativeDictionaryConsumers IRObject   `json:"native_dictionary_consumers"`
-	NativeDialogueLayout      IRObject   `json:"native_dialogue_layout"`
+	WholeGameCoverageComplete bool              `json:"whole_game_coverage_complete"`
+	Consumers                 []IRObject        `json:"consumers"`
+	DialogueForwarding        IRObject          `json:"dialogue_forwarding"`
+	NestedHandlerSources      IRObject          `json:"nested_handler_sources"`
+	FixedComposerSources      IRObject          `json:"fixed_composer_sources"`
+	SourceReferenceSeeds      NativeSourceSeeds `json:"source_reference_seeds"`
+	NativeDictionaryConsumers IRObject          `json:"native_dictionary_consumers"`
+	NativeDialogueLayout      IRObject          `json:"native_dialogue_layout"`
 }
 
 // DiscoverNativeSources independently follows ROM call/pointer/control-flow
@@ -34,7 +34,7 @@ func (d *Decoder) DiscoverNativeSources() (*NativeSourceCensus, error) {
 type sourceDiscovery struct {
 	d             *Decoder
 	p             sourceProfile
-	references    []IRObject
+	references    []NativeSourceReference
 	matrices      []IRObject
 	matrixTargets []int
 }
@@ -63,7 +63,7 @@ func (d *Decoder) discoverNativeSources(profile sourceProfile) (*NativeSourceCen
 	if err != nil {
 		return nil, err
 	}
-	s := sourceDiscovery{d: d, p: profile, references: []IRObject{}, matrices: []IRObject{}}
+	s := sourceDiscovery{d: d, p: profile, references: []NativeSourceReference{}, matrices: []IRObject{}}
 	interactive, err := s.interactiveSources()
 	if err != nil {
 		return nil, fmt.Errorf("%s interactive sources: %w", profile.ID, err)
@@ -78,7 +78,7 @@ func (d *Decoder) discoverNativeSources(profile sourceProfile) (*NativeSourceCen
 	}
 	unique := map[string]bool{}
 	for _, reference := range s.references {
-		unique[reference["source_pc24"].(string)] = true
+		unique[reference.SourcePC24] = true
 	}
 	return &NativeSourceCensus{
 		Consumers:          []IRObject{interactive, composer},
@@ -86,8 +86,8 @@ func (d *Decoder) discoverNativeSources(profile sourceProfile) (*NativeSourceCen
 		NestedHandlerSources: IRObject{"status": "pointer_matrix_censused", "matrices": s.matrices,
 			"pointer_slot_count": len(s.matrixTargets), "unique_target_count": len(distinctInts(s.matrixTargets))},
 		FixedComposerSources: fixed,
-		SourceReferenceSeeds: IRObject{"status": "known_call_paths_censused", "reference_count": len(s.references),
-			"unique_source_count": len(unique), "references": s.references},
+		SourceReferenceSeeds: NativeSourceSeeds{Status: "known_call_paths_censused", ReferenceCount: len(s.references),
+			UniqueSourceCount: len(unique), References: s.references},
 		NativeDictionaryConsumers: dictionary, NativeDialogueLayout: layout,
 	}, nil
 }
@@ -102,7 +102,16 @@ func (s *sourceDiscovery) reference(address int, kind string, via int, edge stri
 	if edge != "via_call_site" && edge != "via_source_table" && edge != "via_consumer_entry" {
 		return fmt.Errorf("source reference needs exactly one known provenance edge")
 	}
-	s.references = append(s.references, IRObject{"source_pc24": pcString(address), "reference_kind": kind, edge: pcString(via)})
+	reference := NativeSourceReference{SourcePC24: pcString(address), ReferenceKind: kind}
+	switch edge {
+	case "via_call_site":
+		reference.ViaCallSite = pcString(via)
+	case "via_source_table":
+		reference.ViaSourceTable = pcString(via)
+	case "via_consumer_entry":
+		reference.ViaConsumerEntry = pcString(via)
+	}
+	s.references = append(s.references, reference)
 	return nil
 }
 func (s *sourceDiscovery) yReference(bank, local int, kind string, call int) error {

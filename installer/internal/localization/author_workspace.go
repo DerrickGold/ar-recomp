@@ -86,6 +86,10 @@ type AuthorWorkspace struct {
 // NewAuthorWorkspace opens already-read script/progress files. It never scans
 // directories, invokes a decoder, opens a font, or writes anything to disk.
 func NewAuthorWorkspace(profile, coverage string, sources map[string]string, progress string) (*AuthorWorkspace, error) {
+	return NewAuthorWorkspaceVersion(profile, coverage, sources, progress, 1)
+}
+
+func NewAuthorWorkspaceVersion(profile, coverage string, sources map[string]string, progress string, version int) (*AuthorWorkspace, error) {
 	if len(sources) == 0 || len(sources) > 64 {
 		return nil, fmt.Errorf("workspace requires 1-64 script sources")
 	}
@@ -96,7 +100,7 @@ func NewAuthorWorkspace(profile, coverage string, sources map[string]string, pro
 	slices.Sort(paths)
 	scripts := make([]*AuthorScript, 0, len(paths))
 	for _, path := range paths {
-		script, err := ParseAuthorScript(sources[path], path)
+		script, err := ParseAuthorScriptVersion(sources[path], path, version)
 		if err != nil {
 			return nil, err
 		}
@@ -126,6 +130,12 @@ func newAuthorWorkspace(profile, coverage string, scripts []*AuthorScript, progr
 	}
 	w := &AuthorWorkspace{profile: profile, coverage: coverage, scripts: scripts, messageScript: ids,
 		progress: parsedProgress, references: make(map[string]AuthorReference, len(refs)), stats: stats}
+	if err := validateAuthorPresentationBudgets(w); err != nil {
+		return nil, err
+	}
+	if err := validateAuthorTreatments(w); err != nil {
+		return nil, err
+	}
 	for _, ref := range refs {
 		w.references[ref.ID] = ref
 	}
@@ -217,7 +227,7 @@ func (w *AuthorWorkspace) AddMessage(id, path, body string, status TranslationSt
 		if len(addition) > MaxAuthorScriptBytes-len(script.text) {
 			return nil, fmt.Errorf("script exceeds size limit")
 		}
-		next, err := ParseAuthorScript(script.text+addition, path)
+		next, err := ParseAuthorScriptVersion(script.text+addition, path, script.version)
 		if err != nil {
 			return nil, err
 		}

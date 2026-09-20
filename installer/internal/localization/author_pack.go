@@ -45,6 +45,12 @@ func (p *AuthorPack) MessageOperations(id string) ([]AuthorOperation, error) {
 	return resolvedAuthorOperations(p.workspace, id)
 }
 
+// ResolvedMessage includes the alias target's presentation defaults as well as
+// its content, so materialization/export cannot silently lose styling.
+func (p *AuthorPack) ResolvedMessage(id string) (AuthorMessage, error) {
+	return resolvedAuthorMessage(p.workspace, id)
+}
+
 // Files produces owned bytes for the next save/export adapter. It preserves
 // manifest/script/progress comments exactly and includes referenced local fonts
 // only. A caller must not mistake this working snapshot for publication output:
@@ -84,7 +90,7 @@ func (p *AuthorPack) RuntimeRevision() uint64 {
 		for _, script := range p.workspace.scripts {
 			hashPackPart(h, "script", script.path, []byte(script.text))
 		}
-		for _, font := range append([]string{p.manifest.fonts.Primary}, p.manifest.fonts.Fallback...) {
+		for _, font := range p.manifest.fonts.References() {
 			if strings.HasPrefix(font, "builtin:") {
 				hashPackPart(h, "builtin-font", font, nil)
 			} else {
@@ -113,6 +119,9 @@ func (p *AuthorPack) AddMessage(id, path, body string, status TranslationStatus)
 }
 
 func (p *AuthorPack) withWorkspace(w *AuthorWorkspace) (*AuthorPack, error) {
+	if err := validateAuthorFontRoles(p.manifest, w); err != nil {
+		return nil, err
+	}
 	next := &AuthorPack{manifest: p.manifest, workspace: w, fonts: p.fonts, progressPresent: p.progressPresent}
 	if next.byteSize() > MaxAuthorPackBytes {
 		return nil, fmt.Errorf("pack exceeds aggregate size limit")
@@ -181,14 +190,14 @@ func loadAuthorPack(fsys fs.FS, maximum int) (*AuthorPack, error) {
 	if err := validateAuthorPackPaths(m); err != nil {
 		return nil, err
 	}
-	fontReferences := append([]string{m.fonts.Primary}, m.fonts.Fallback...)
+	fontReferences := m.fonts.References()
 	scripts := make([]*AuthorScript, 0, len(m.sources))
 	for _, path := range m.sources {
 		raw, err := read(path, MaxAuthorScriptBytes)
 		if err != nil {
 			return nil, err
 		}
-		script, err := ParseAuthorScript(string(raw), path)
+		script, err := ParseAuthorScriptVersion(string(raw), path, m.Version())
 		if err != nil {
 			return nil, err
 		}
@@ -202,6 +211,9 @@ func loadAuthorPack(fsys fs.FS, maximum int) (*AuthorPack, error) {
 	}
 	w, err := newAuthorWorkspace(m.metadata.SourceProfile, m.metadata.Coverage, scripts, progress)
 	if err != nil {
+		return nil, err
+	}
+	if err := validateAuthorFontRoles(m, w); err != nil {
 		return nil, err
 	}
 	fonts := make(map[string][]byte)
@@ -251,7 +263,7 @@ func validateAuthorPackPaths(m *PackManifest) error {
 			return err
 		}
 	}
-	for _, path := range append([]string{m.fonts.Primary}, m.fonts.Fallback...) {
+	for _, path := range m.fonts.References() {
 		if !strings.HasPrefix(path, "builtin:") {
 			if err := addRole(path, "font"); err != nil {
 				return err

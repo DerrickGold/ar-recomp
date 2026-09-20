@@ -88,16 +88,24 @@ bool ArLocalizedTextLayout_NameUnderline(
   if (!surface || !cluster || !underline || cluster->width <= 0 ||
       surface->line_advance <= 0 || cluster->line_index < 0)
     return false;
-  int thickness = surface->line_advance / 16;
+  int row_bottom = cluster->line_index * surface->line_advance +
+                   surface->ascent - surface->descent;
+  int row_height = surface->line_advance;
+  if (surface->line_count) {
+    if ((size_t)cluster->line_index >= surface->line_count)
+      return false;
+    const ArTextLineMetrics *row = &surface->lines[cluster->line_index];
+    row_height = row->height;
+    row_bottom = row->top + row_height;
+  }
+  int thickness = row_height / 16;
   if (thickness < 1) thickness = 1;
   int inset = cluster->width / 10;
   /* A blank logical row after the name reserves space below the descenders.
    * Its baseline is identical for I, W, g, combining accents and empty slots. */
-  *underline = (ArRenderRectI){
-      text_destination.x + cluster->x + inset,
-      text_destination.y + cluster->line_index * surface->line_advance +
-          surface->ascent - surface->descent + thickness,
-      cluster->width - 2 * inset, 2 * thickness};
+  *underline = (ArRenderRectI){text_destination.x + cluster->x + inset,
+                               text_destination.y + row_bottom + thickness,
+                               cluster->width - 2 * inset, 2 * thickness};
   return true;
 }
 
@@ -117,6 +125,15 @@ int ArLocalizedTextLayout_ScrollOffset(
       bottom = cluster->y + cluster->height;
   }
   if (bottom <= viewport_height) return 0;
+  if (surface->line_count) {
+    const int minimum = bottom - viewport_height;
+    for (size_t i = 0; i < surface->line_count; ++i) {
+      const ArTextLineMetrics *row = &surface->lines[i];
+      if (row->top >= minimum && row->top < bottom)
+        return row->top;
+    }
+    return minimum;
+  }
   const int advance = surface->line_advance;
   return ((bottom - viewport_height + advance - 1) / advance) * advance;
 }

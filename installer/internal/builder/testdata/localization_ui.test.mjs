@@ -48,9 +48,12 @@ class Element extends Node {
   closest(selector){let n=this;while(n&&!n.matches(selector))n=n.parent;return n;}
   contains(node){return node===this||this.children.some(child=>child.contains(node));}
   scrollIntoView(){}
+  showModal(){this.open=true;}
+  close(){if(this.open){this.open=false;void this.fire("close");}}
   checkValidity(){return true;}
   reportValidity(){return true;}
   reset(){for(const el of Object.values(this.elements))if(typeof el!=="function")el.value="";}
+  setSelectionRange(start,end){this.selectionStart=start;this.selectionEnd=end;}
   setRangeText(text,start,end){this.value=this.value.slice(0,start)+text+this.value.slice(end);this.selectionStart=this.selectionEnd=start+text.length;}
 }
 function parseMarkup(html,doc){
@@ -99,6 +102,7 @@ function setupEditor(){
     return reply(endpoint,data,Object.fromEntries(new URL(url).searchParams));
   }});
   s.ui.apply(root);
+  runInNewContext(readFileSync(new URL("../localization_styling.js",import.meta.url),"utf8"),s.context);
   runInNewContext(readFileSync(new URL("../localization.js",import.meta.url),"utf8"),s.context);
   return {...s,root,requests,confirmations,node:id=>s.doc.getElementById("loc-"+id),respond(fn){reply=async(...args)=>({ok:true,json:async()=>fn(...args)});},response(fn){reply=fn;}};
 }
@@ -196,6 +200,87 @@ test("dropped conflicts require explicit choices; installed packs remain togglea
     assert.equal(enabled,checked);assert.equal(s.node("library").querySelector("input").checked,checked);
   }
   assert.ok(!s.requests.some(r=>r.endpoint==="uninstall"));
+});
+
+async function openInstalledLibrary(s,rows=[packageInfo]){
+  s.respond(endpoint=>{
+    if(endpoint==="state")return snapshot;
+    if(endpoint==="projects")return [];
+    if(endpoint==="catalog")return rows;
+    throw Error("unexpected endpoint "+endpoint);
+  });
+  // The desktop webview can silently reject native JavaScript dialogs.
+  s.context.window.confirm=()=>{throw Error("native confirmation is unavailable");};
+  await s.context.window.localizationActivate();
+}
+
+test("uninstall opens a localized in-page review; cancel and dismissal send no request",async()=>{
+  const s=setupEditor();await openInstalledLibrary(s);
+  for(const dismiss of [()=>s.node("uninstall-cancel").fire("click"),()=>s.node("uninstall-dialog").close()]){
+    const before=s.requests.length;
+    await s.node("library").querySelector(".loc-uninstall").fire("click");
+    assert.equal(s.node("uninstall-dialog").open,true);
+    assert.equal(s.doc.activeElement,s.node("uninstall-cancel"));
+    for(const locale of ["fr","de","ja","en"]){
+      s.picker.value=locale;await s.picker.fire("change");
+      assert.equal(s.node("uninstall-question").textContent,s.ui.text("builder.language.uninstall_confirm",{
+        name:packageInfo.installedName,id:packageInfo.id,folder:packageInfo.key
+      }));
+      assert.equal(s.node("uninstall-question").children.length,0,"pack names must remain literal text");
+      assert.equal(s.node("uninstall-confirm").textContent,s.ui.text("builder.language.uninstall_now"));
+    }
+    await dismiss();
+    assert.equal(s.node("uninstall-dialog").open,false);
+    await s.node("uninstall-confirm").fire("click");
+    assert.equal(s.requests.length,before);
+  }
+});
+
+test("confirmed uninstall targets the reviewed installation and refreshes the library",async()=>{
+  const s=setupEditor(),other={...packageInfo,key:"Disabled pack.arlang",enabled:false,installedRevision:"other-revision"};
+  await openInstalledLibrary(s,[packageInfo,other]);
+  await s.node("library").querySelectorAll(".loc-uninstall")[1].fire("click");
+  let release;const pending=new Promise(resolve=>{release=resolve;});
+  s.response(async(endpoint,data)=>{
+    if(endpoint==="uninstall"){
+      assert.deepEqual(data,{id:other.id,directory:other.key,expected:other.installedRevision,confirmUninstall:true});
+      await pending;return {ok:true,json:async()=>({backup:"/packs/.uninstalled/recovery.arlang"})};
+    }
+    assert.equal(endpoint,"catalog");return {ok:true,json:async()=>[packageInfo]};
+  });
+  const uninstall=s.node("uninstall-confirm").fire("click");
+  assert.equal(s.node("uninstall-dialog").open,false);
+  assert.equal(s.node("uninstall-confirm").disabled,true);
+  await s.node("uninstall-confirm").fire("click");
+  await s.node("library").querySelector(".loc-uninstall").fire("click");
+  assert.equal(s.node("uninstall-dialog").open,false);
+  release();await uninstall;
+  assert.equal(s.requests.filter(r=>r.endpoint==="uninstall").length,1);
+  assert.equal(s.node("library").children.length,1);
+  assert.equal(s.node("library").children[0].dataset.packageKey,packageInfo.key);
+  assert.equal(s.node("feedback").textContent,s.ui.text("builder.language.uninstalled",{backup:"/packs/.uninstalled/recovery.arlang"}));
+  assert.equal(s.doc.activeElement,s.node("library-search"));
+});
+
+test("failed uninstall preserves the installed card and allows a new review",async()=>{
+  const s=setupEditor();await openInstalledLibrary(s);
+  await s.node("library").querySelector(".loc-uninstall").fire("click");
+  s.response(async endpoint=>{
+    assert.equal(endpoint,"uninstall");
+    return {ok:false,status:409,json:async()=>({errorCode:"builder.language.request_conflict",error:"Pack changed"})};
+  });
+  await s.node("uninstall-confirm").fire("click");
+  assert.equal(s.node("uninstall-dialog").open,false);
+  assert.equal(s.node("library").children.length,1);
+  assert.equal(s.node("feedback").dataset.error,"true");
+  assert.equal(s.node("feedback").textContent,s.ui.text("builder.language.request_conflict",{detail:"Pack changed"}));
+  const button=s.node("library").querySelector(".loc-uninstall");
+  assert.equal(button.disabled,false);await button.fire("click");
+  assert.equal(s.node("uninstall-dialog").open,true);
+  await s.doc.fire("workshop:closed");
+  assert.equal(s.node("uninstall-dialog").open,false);
+  await s.node("uninstall-confirm").fire("click");
+  assert.equal(s.requests.filter(r=>r.endpoint==="uninstall").length,1);
 });
 
 test("invalid or multiple drops show localized guidance without requests or draft loss",async()=>{
@@ -394,14 +479,14 @@ test("dynamic accessibility bindings cannot change action targets or form values
 
 const messageID="sky.action_mode.confirm";
 const nativeBody="@anchor reset_text_cursor.00\nInvented source.\n@anchor yield.01\n@end\n";
-function projectSnapshot(){return {...snapshot,project:{origin:"translation",revision:"original-revision",
+function projectSnapshot(formatVersion=2){return {...snapshot,project:{formatVersion,origin:"translation",revision:"original-revision",
   metadata:{id:packageInfo.id,name:packageInfo.name,locale:"en-CA",autonym:"English (Canada)",author:"Élodie & Team",license:"CC-BY-4.0",direction:"auto"},
   notes:"Private <note> {name}",notices:{"notices/CREDITS.txt":"Original contributor"},fonts:{primary:"builtin:actraiser-sans",fallback:[]},
   totals:[{total:1,done:0,wip:1}]}};}
 function editorMessage(){return {message:{present:true,path:"text/translation.artext",body:nativeBody,status:"wip",reference:{anchors:["reset_text_cursor.00","yield.01"],placeholders:[],native_in_profile:true}},reference:{body:nativeBody},referenceMetadata:{id:"native-us",name:"Native US",locale:"en-US"}};}
-async function openEditorMessage(s,view=editorMessage(),select=true){
+async function openEditorMessage(s,view=editorMessage(),select=true,project=projectSnapshot()){
   s.respond(endpoint=>{
-    if(endpoint==="open")return projectSnapshot();
+    if(endpoint==="open")return project;
     if(endpoint==="projects"||endpoint==="catalog")return [];
     if(endpoint==="tree")return [{id:messageID,label:"Invented message",is_message:true,done:0,wip:1}];
     if(endpoint==="installation")return {installed:false};
@@ -788,4 +873,175 @@ test("a completed in-flight editor request cannot re-enable a closed workshop",a
     await s.context.window.localizationActivate();
     assert.equal(s.requests.length,requests);
   }
+});
+
+test("font roles save together and removing one preserves the body stack",async()=>{
+ const s=setupEditor();await openEditorMessage(s);
+ s.node("font-role-name").value="hud";await s.node("font-role-add").fire("click");
+ assert.equal(s.node("font-role").value,"hud");
+ let saved;
+ s.response(async(endpoint,data)=>{assert.equal(endpoint,"save");saved=data;return {ok:false,status:409,json:async()=>({error:"fixture conflict"})};});
+ await s.node("save-progress").fire("click");
+ assert.equal(saved.saveFonts,true);assert.equal(saved.fonts.primary,"builtin:actraiser-sans");
+ assert.equal(saved.fonts.roles[0].name,"hud");
+ s.node("font-role-name").value="constructor";await s.node("font-role-add").fire("click");
+ assert.equal(s.node("font-role").value,"constructor");
+ await s.node("font-role-remove").fire("click");
+ assert.equal(s.node("font-role").value,"body");
+ await s.node("save-progress").fire("click");
+ assert.equal(saved.fonts.roles.length,1);assert.equal(saved.fonts.roles[0].name,"hud");
+});
+
+test("v1 upgrade adopts a separate v2 project and hides the upgrade action",async()=>{
+ const s=setupEditor();
+ const old=projectSnapshot();old.project.formatVersion=1;
+ const upgraded=projectSnapshot();upgraded.project.formatVersion=2;upgraded.project.metadata.id="upgraded.copy";
+ let received;
+ s.respond((endpoint,data)=>{
+   if(endpoint==="open") return old;
+   if(endpoint==="upgrade-v2") {received=data;return {state:upgraded,report:{messages:2,aliasesMaterialized:1}};}
+   if(["projects","catalog","tree"].includes(endpoint)) return [];
+   if(endpoint==="installation") return {installed:false};
+   throw Error("unexpected endpoint "+endpoint);
+ });
+ await s.context.window.localizationOpenProject(packageInfo.id);
+ assert.equal(s.node("upgrade-v2").hidden,false);
+ s.node("upgrade-v2").elements.newID.value="upgraded.copy";
+ await s.node("upgrade-v2").fire("submit",{preventDefault(){},currentTarget:s.node("upgrade-v2")});
+ assert.equal(received.projectID,packageInfo.id);assert.equal(received.newID,"upgraded.copy");
+ assert.equal(s.node("upgrade-v2").hidden,true);
+ assert.ok(s.node("feedback").textContent.includes("2 messages"));
+});
+
+
+test("v1 import shows an upgrade notice before installation, not when only editing",async()=>{
+  for(const version of [1,2]){
+    const upgrade=version===1?{fromVersion:1,toVersion:2}:undefined;
+    const s=setupEditor();importResponder(s,{...sharedPreview,upgrade});
+    await s.doc.fire("drop",dragEvent(s));
+    assert.equal(s.node("import-preview").hidden,false);
+    assert.equal(s.node("import-upgrade").hidden,version!==1);
+    assert.ok(!s.requests.some(r=>["accept-import","install"].includes(r.endpoint)));
+    for(const locale of ["fr","de","ja","en"]){
+      s.picker.value=locale;await s.picker.fire("change");
+      assert.equal(s.node("import-upgrade").textContent,s.ui.text("builder.language.install_upgrade"));
+      assert.equal(s.node("import-upgrade").hidden,version!==1);
+    }
+    s.respond(endpoint=>{
+      if(endpoint==="accept-import")return projectSnapshot(version);
+      if(endpoint==="projects"||endpoint==="tree"||endpoint==="catalog")return [];
+      if(endpoint==="installation")return {installed:false};
+      if(endpoint==="install")return {enabled:true,path:"/game/languages/packs/edition",report:{messages:8,upgrade}};
+      throw Error(endpoint);
+    });
+    await s.node("accept-import").fire("click");
+    assert.equal(s.node("installed").hidden,false);
+    assert.equal(s.node("installed-upgrade").hidden,version!==1);
+
+    const editing=setupEditor();importResponder(editing,{...sharedPreview,upgrade});
+    await editing.context.window.localizationActivate();
+    await editing.root.querySelector('[data-loc-flow="edit"]').fire("click");
+    const input=editing.node("import-backup").elements.file;input.files=[{name:"work.arproject",size:100}];
+    await input.fire("change");
+    assert.equal(editing.node("import-preview").hidden,false);
+    assert.equal(editing.node("import-upgrade").hidden,true);
+  }
+});
+
+test("saved v1 installation review explains upgrade and completion confirms it",async()=>{
+  for(const version of [1,2]){
+    const upgrade=version===1?{fromVersion:1,toVersion:2}:undefined;
+    const s=setupEditor();await openEditorMessage(s,editorMessage(),false,projectSnapshot(version));
+    await s.node("review-publish").fire("click");
+    assert.equal(s.node("install-upgrade").hidden,true);
+    s.respond(endpoint=>{
+      if(endpoint==="installation")return {installed:false};
+      if(endpoint==="installation-check")return {messages:8,fallback:5,upgrade};
+      if(endpoint==="install")return {enabled:true,path:"/game/languages/packs/edition",report:{messages:8,upgrade}};
+      throw Error(endpoint);
+    });
+    await s.node("review-install").fire("click");
+    assert.equal(s.node("sharing").hidden,false);
+    assert.equal(s.node("install-upgrade").hidden,version!==1);
+    assert.equal(s.node("upgrade-v2").hidden,true);
+    assert.ok(!s.requests.some(r=>r.endpoint==="install"));
+    for(const locale of ["fr","de","ja","en"]){
+      s.picker.value=locale;await s.picker.fire("change");
+      assert.equal(s.node("install-upgrade").textContent,s.ui.text("builder.language.install_upgrade"));
+    }
+    await s.node("install").fire("click");
+    assert.equal(s.node("installed").hidden,false);
+    assert.equal(s.node("installed-upgrade").hidden,version!==1);
+    s.picker.value="ja";await s.picker.fire("change");
+    assert.equal(s.node("installed-upgrade").textContent,s.ui.text("builder.language.installed_upgrade"));
+  }
+});
+
+test("inline style toolbar wraps selections, inserts at the caret, and preserves locale state",async()=>{
+ const s=setupEditor(),project=projectSnapshot();
+ project.project.fonts.roles=[{name:"hud",primary:"builtin:actraiser-sans",fallback:[]}];
+ project.project.treatments=[{definition:{name:"retail"}},{definition:{name:"hud"}}];
+ await openEditorMessage(s,editorMessage(),true,project);
+ const input=s.node("body");
+ s.node("style-font").value="hud";s.node("style-treatment").value="hud";
+ s.node("style-color").value="#ff8040";s.node("style-scale").value="80";
+ const cases=[['italic','<i>','</i>'],['upright','<span italic="false">','</span>'],
+  ['font','<span font="hud">','</span>'],['style','<span style="hud">','</span>'],
+  ['color','<span color="#FF8040">','</span>'],['scale','<span scale="80%">','</span>']];
+ const before=s.requests.length;
+ for(const [kind,open,close] of cases){
+  input.value="Hello {master_name}!";input.setSelectionRange(6,19);
+  s.doc.activeElement=s.node("style-font");
+  await s.root.querySelector(`[data-loc-style="${kind}"]`).fire("click");
+  assert.equal(input.value,"Hello "+open+"{master_name}"+close+"!");
+  assert.equal(input.value.slice(input.selectionStart,input.selectionEnd),"{master_name}");
+  assert.equal(s.doc.activeElement,input);assert.equal(s.context.window.localizationHasEdits(),true);
+  input.value="Hello";input.setSelectionRange(2,2);
+  await s.root.querySelector(`[data-loc-style="${kind}"]`).fire("click");
+  assert.equal(input.value,"He"+open+close+"llo");assert.equal(input.selectionStart,2+open.length);
+ }
+ assert.equal(s.requests.length,before);
+ const text=input.value,start=input.selectionStart;
+ for(const locale of ["fr","de","ja","en"]){
+  s.picker.value=locale;await s.picker.fire("change");
+  assert.equal(input.value,text);assert.equal(input.selectionStart,start);
+  assert.equal(s.node("style-font").value,"hud");assert.equal(s.node("style-treatment").value,"hud");
+  assert.equal(s.node("style-scale").value,"80");assert.equal(s.node("style-color").value,"#ff8040");
+  assert.equal(s.root.querySelector('[data-loc-style="upright"]').textContent,s.ui.text("builder.styling.upright"));
+ }
+});
+
+test("inline styling respects format, source, alias and inherited-term restrictions",async()=>{
+ for(const kind of ["v1","source","alias","term"]){
+  const s=setupEditor(),project=projectSnapshot(kind==="v1"?1:2),view=editorMessage();
+  if(kind==="source")project.project.origin="native-source";
+  if(kind==="alias")view.message.body="@alias city.fillmore.name\n";
+  if(kind==="term")view.message.reference.presentation={shape:"inline"};
+  await openEditorMessage(s,view,true,project);
+  const before=s.node("body").value,button=s.root.querySelector('[data-loc-style="italic"]');
+  assert.equal(button.disabled,true,kind);await button.fire("click");assert.equal(s.node("body").value,before);
+  assert.equal(s.node("style-color").disabled,true,kind);
+  assert.ok(s.node("style-status").textContent);
+ }
+});
+
+test("invalid styling leaves drafts untouched; unsaved font roles are available",async()=>{
+ const s=setupEditor();await openEditorMessage(s);
+ const button=kind=>s.root.querySelector(`[data-loc-style="${kind}"]`),input=s.node("body");
+ assert.equal(button("style").disabled,true);assert.equal(button("font").disabled,false);
+ input.value="Dude {master_name}";input.setSelectionRange(6,8);
+ await button("italic").fire("click");assert.equal(input.value,"Dude {master_name}");
+ assert.equal(s.node("style-status").textContent,s.ui.text("builder.styling.selection"));
+ input.setSelectionRange(0,4);
+ for(const value of ["24","401","99.5",""]){
+  s.node("style-scale").value=value;await button("scale").fire("click");
+  assert.equal(input.value,"Dude {master_name}");assert.equal(s.node("style-status").textContent,s.ui.text("builder.styling.invalid_size"));
+ }
+ s.node("font-role-name").value="quiet";await s.node("font-role-add").fire("click");
+ assert.ok(s.node("style-font").options.some(o=>o.value==="quiet"));
+ s.node("style-font").value="quiet";await button("font").fire("click");
+ assert.equal(input.value,'<span font="quiet">Dude</span> {master_name}');
+ await s.node("font-role-remove").fire("click");
+ assert.equal(s.node("style-font").value,"body");
+ assert.ok(!s.node("style-font").options.some(o=>o.value==="quiet"));
 });

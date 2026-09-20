@@ -12,12 +12,14 @@
 #include "deterministic_hash.h"
 
 enum {
-  kSurfaceCacheCapacity = 128, kFontSizeCacheCapacity = 8,
+  kSurfaceCacheCapacity = 128,
+  kFontSizeCacheCapacity = 32,
   /* Entry count alone is not a memory budget: one tall scrolling page at
    * HiDPI outweighs a hundred menu labels. This caps what the cache may own
    * in texture bytes; the prepared frame's own surfaces are never evicted. */
   kSurfaceCacheByteBudget = 96 << 20,
-  kReportPlanCapacity = 8, kReportMeasureExtent = 4096,
+  kReportPlanCapacity = 8,
+  kReportMeasureExtent = 4096,
 };
 
 _Static_assert(kSurfaceCacheCapacity >= kArLocalizedPreparedTextCapacity,
@@ -41,6 +43,8 @@ typedef struct PendingFont {
   ArFontResourceId primary;
   ArFontResourceId fallbacks[kArTextPresentationMaximumFallbackFonts];
   size_t fallback_count;
+  ArTextFontRole roles[kArTextFontMaximumRoles];
+  size_t role_count;
   uint64_t revision, backend_revision;
 } PendingFont;
 
@@ -55,6 +59,8 @@ typedef struct LocalizedTextPresenterState {
   ArFontResourceId active_primary;
   ArFontResourceId active_fallbacks[kArTextPresentationMaximumFallbackFonts];
   size_t active_fallback_count;
+  ArTextFontRole active_roles[kArTextFontMaximumRoles];
+  size_t active_role_count;
   PendingFont pending;
   uint64_t active_revision;
   uint64_t reported_errors[32];
@@ -65,6 +71,8 @@ typedef struct LocalizedTextPresenterState {
    * PrepareLiveLinePage). */
   char live_line_page[kArLocalizationFrameTextCapacity];
   ArTextBidiSpans live_line_spans;
+  ArTextAppearanceSpan
+      live_line_appearances[kArLocalizationFrameAppearanceCapacity + 2];
   ArLocalizedLiveLineStats live_line_stats;
 } LocalizedTextPresenterState;
 
@@ -75,7 +83,8 @@ ArLocalizedLiveLineStats ArLocalizedTextPresenter_GetLiveLineStats(void) {
 }
 
 static void RecordLiveLineResult(ArLocalizedLiveLineResult result,
-                                  uint32_t surface_id, const char *error) {
+                                 uint32_t surface_id, const char *error,
+                                 bool native_fallback) {
   static const char *const reasons[kArLiveLine_ResultCount] = {
     [kArLiveLine_Prepared] = "prepared",
     [kArLiveLine_UnsupportedLayout] = "unsupported layout",
@@ -93,9 +102,13 @@ static void RecordLiveLineResult(ArLocalizedLiveLineResult result,
   ++stats->attempts;
   const bool first = stats->results[result]++ == 0;
   if (result != kArLiveLine_Prepared && first) {
-    fprintf(stderr, "[localized-text] surface=%u live-line fallback: %s%s%s; "
-                    "rendering whole page\n", surface_id, reasons[result],
-            error && error[0] ? ": " : "", error ? error : "");
+    fprintf(stderr,
+            "[localized-text] surface=%u live-line fallback: %s%s%s; "
+            "%s\n",
+            surface_id, reasons[result], error && error[0] ? ": " : "",
+            error ? error : "",
+            native_fallback ? "retaining native cells"
+                            : "rendering whole page");
   }
 }
 
@@ -144,6 +157,8 @@ static void DestroyResources(ArRenderDevice *device) {
   s_presenter.active_revision = 0;
   s_presenter.active_fallback_count = 0;
   memset(s_presenter.active_fallbacks, 0, sizeof(s_presenter.active_fallbacks));
+  s_presenter.active_role_count = 0;
+  memset(s_presenter.active_roles, 0, sizeof(s_presenter.active_roles));
   memset(s_presenter.reported_errors, 0, sizeof(s_presenter.reported_errors));
   s_presenter.next_reported_error = 0;
   memset(s_presenter.reports, 0, sizeof(s_presenter.reports));
@@ -157,10 +172,17 @@ static void ReportRequestFailure(const ArLocalizationTextSnapshot *snapshot,
       ArTextBackendInstance_Get(&s_presenter.instance), request);
   char diagnostic[kArTextRasterErrorCapacity];
   snprintf(diagnostic, sizeof(diagnostic),
-           "surface=%u layout=%u request=%016llx/%016llx: %.128s",
+           "surface=%u layout=%u request=%016llx/%016llx: %.96s",
            snapshot->surface_id, (unsigned)snapshot->layout,
-           (unsigned long long)key.primary,
-           (unsigned long long)key.secondary, detail);
+           (unsigned long long)key.primary, (unsigned long long)key.secondary,
+           detail);
+  if (snapshot->origin.source_path[0]) {
+    char source[kArTextRasterErrorCapacity];
+    snprintf(source, sizeof(source), "%.100s:%u :: %.96s",
+             snapshot->origin.source_path, snapshot->origin.source_line,
+             snapshot->origin.resolved_id);
+    ReportOnce("text template source", source);
+  }
   ReportOnce("text surface acquisition failed", diagnostic);
 }
 
@@ -192,7 +214,9 @@ static bool ActiveFontMatches(ArRenderDevice *device,
   for (size_t i = 0; i < font->fallback_count; ++i)
     if (font->fallbacks[i] != s_presenter.active_fallbacks[i])
       return false;
-  return true;
+  return ArTextFontRoles_Equal(s_presenter.active_roles,
+                               s_presenter.active_role_count, font->roles,
+                               font->role_count);
 }
 
 bool ArLocalizedTextPresenter_PrepareFont(ArRenderDevice *device,
@@ -206,14 +230,15 @@ bool ArLocalizedTextPresenter_PrepareFont(ArRenderDevice *device,
     return FontError(error, error_capacity,
                      "enhanced text backend is unavailable");
   if (!font ||
-      font->struct_size < offsetof(ArTextPresentationFont, fallback_count) +
-                              sizeof(font->fallback_count) ||
+      font->struct_size < offsetof(ArTextPresentationFont, role_count) +
+                              sizeof(font->role_count) ||
       font->abi_version != AR_TEXT_PRESENTATION_ABI_VERSION ||
       !font->revision || !font->stack_id || !font->stack_id[0] ||
       !font->primary ||
       strlen(font->stack_id) >= sizeof(s_presenter.active_stack) ||
       font->fallback_count > kArTextPresentationMaximumFallbackFonts ||
-      (font->fallback_count && !font->fallbacks))
+      (font->fallback_count && !font->fallbacks) ||
+      !ArTextFontRoles_Valid(font->roles, font->role_count))
     return FontError(error, error_capacity, "invalid enhanced font selection");
   for (size_t i = 0; i < font->fallback_count; ++i) {
     if (!font->fallbacks[i])
@@ -231,6 +256,9 @@ bool ArLocalizedTextPresenter_PrepareFont(ArRenderDevice *device,
       pending->primary == font->primary;
   for (size_t i = 0; same_pending && i < font->fallback_count; ++i)
     same_pending = pending->fallbacks[i] == font->fallbacks[i];
+  same_pending =
+      same_pending && ArTextFontRoles_Equal(pending->roles, pending->role_count,
+                                            font->roles, font->role_count);
   if (same_pending)
     return true;
   const ArTextBackendConfig config = {
@@ -243,6 +271,8 @@ bool ArLocalizedTextPresenter_PrepareFont(ArRenderDevice *device,
       .cached_size_capacity = kFontSizeCacheCapacity,
       .fallback_fonts = font->fallbacks,
       .fallback_font_count = font->fallback_count,
+      .roles = font->roles,
+      .role_count = font->role_count,
   };
   ArTextBackendInstance instance = {0};
   if (!ArTextBackendInstance_Create(&instance, &s_presenter.backend, &config,
@@ -258,7 +288,7 @@ bool ArLocalizedTextPresenter_PrepareFont(ArRenderDevice *device,
    * Exercise shaping, raster allocation, texture creation and upload before
    * advertising readiness to the game. Keep the warmed font/cache on success.
    */
-  const ArTextRasterRequest probe = {
+  ArTextRasterRequest probe = {
       .struct_size = sizeof(probe),
       .abi_version = AR_TEXT_RASTER_REQUEST_ABI_VERSION,
       .utf8 = "Ag",
@@ -283,6 +313,20 @@ bool ArLocalizedTextPresenter_PrepareFont(ArRenderDevice *device,
     ArTextBackendInstance_Destroy(&instance);
     return false;
   }
+  ArTextRunAppearance appearance = {
+      .scale_basis = 10000, .band_rgb = 0xffffff, .body_rgb = 0xffffff};
+  probe.appearance = &appearance;
+  for (size_t i = 0; i < font->role_count; ++i) {
+    snprintf(appearance.font_role, sizeof(appearance.font_role), "%s",
+             font->roles[i].name);
+    if (!ArTextSurfaceCache_Acquire(&cache, device,
+                                    ArTextBackendInstance_Get(&instance),
+                                    &probe, &surface, error, error_capacity)) {
+      ArTextSurfaceCache_Destroy(&cache, device);
+      ArTextBackendInstance_Destroy(&instance);
+      return false;
+    }
+  }
   /* A source can still fail semantic validation after this readiness check.
    * Keep the active font and all borrowed surfaces intact until a frame with
    * the approved identity arrives. At most one candidate is retained. */
@@ -296,6 +340,10 @@ bool ArLocalizedTextPresenter_PrepareFont(ArRenderDevice *device,
   pending->fallback_count = font->fallback_count;
   for (size_t i = 0; i < font->fallback_count; ++i)
     pending->fallbacks[i] = font->fallbacks[i];
+  pending->role_count = font->role_count;
+  if (font->role_count)
+    memcpy(pending->roles, font->roles,
+           font->role_count * sizeof(*font->roles));
   return true;
 }
 
@@ -311,6 +359,8 @@ static bool ActivateFont(ArRenderDevice *device,
       .revision = frame->font_revision,
       .fallbacks = frame->fallback_fonts,
       .fallback_count = frame->fallback_font_count,
+      .roles = frame->font_roles,
+      .role_count = frame->font_role_count,
   };
   char error[kArTextRasterErrorCapacity] = {0};
   if (ArLocalizedTextPresenter_PrepareFont(device, &font, error,
@@ -326,6 +376,8 @@ static bool ActivateFont(ArRenderDevice *device,
       memcpy(s_presenter.active_fallbacks, pending->fallbacks,
              sizeof(pending->fallbacks));
       s_presenter.active_fallback_count = pending->fallback_count;
+      s_presenter.active_role_count = pending->role_count;
+      memcpy(s_presenter.active_roles, pending->roles, sizeof(pending->roles));
       s_presenter.active_revision = pending->revision;
       s_presenter.active_backend_revision = pending->backend_revision;
       memset(pending, 0,
@@ -596,30 +648,49 @@ static bool TableRequest(const ArLocalizationFrame *frame,
   const bool italic = snapshot->italic || (rule && field->field_index < rule->cell_count &&
       rule->cells[field->field_index].italic);
   *request = (ArTextRasterRequest){
-      .struct_size = sizeof(*request), .abi_version = AR_TEXT_RASTER_REQUEST_ABI_VERSION,
-      .utf8 = utf8 + field->utf8_offset, .utf8_bytes = field->utf8_bytes,
+      .struct_size = sizeof(*request),
+      .abi_version = AR_TEXT_RASTER_REQUEST_ABI_VERSION,
+      .utf8 = utf8 + field->utf8_offset,
+      .utf8_bytes = field->utf8_bytes,
       .font_stack_id = frame->font_stack_id,
       .font_stack_id_bytes = strlen(frame->font_stack_id),
-      .source_revision = snapshot->source_revision, .font_revision = frame->font_revision,
+      .source_revision = snapshot->source_revision,
+      .font_revision = frame->font_revision,
       .style_id = snapshot->style_id,
-      .band_rgb = snapshot->band_rgb, .body_rgb = snapshot->body_rgb,
+      .appearance = snapshot->has_appearance ? &snapshot->appearance : NULL,
+      .appearance_spans =
+          snapshot->has_appearance
+              ? frame->appearance_spans + snapshot->appearance_span_offset
+              : NULL,
+      .appearance_span_count = snapshot->appearance_span_count,
+      .band_rgb = snapshot->band_rgb,
+      .body_rgb = snapshot->body_rgb,
       .shadow_rgb = snapshot->shadow_rgb,
       .shadow_enabled = snapshot->shadow_enabled,
       .shadow_shape = snapshot->shadow_shape,
-      .flags = kArTextRasterFlag_IncludeRevealClusters |
-          (snapshot->slant_ascii_numerals ? kArTextRasterFlag_SlantAsciiNumerals : 0u) |
+      .flags =
+          kArTextRasterFlag_IncludeRevealClusters |
+          (snapshot->slant_ascii_numerals ? kArTextRasterFlag_SlantAsciiNumerals
+                                          : 0u) |
           (italic ? kArTextRasterFlag_Italic : 0u) |
           (crop_vertical ? kArTextRasterFlag_CropVerticalWhitespace : 0u) |
-          (FieldHasObject(frame, snapshot, field) ? 0u : kArTextRasterFlag_CropHorizontalWhitespace),
+          (FieldHasObject(frame, snapshot, field)
+               ? 0u
+               : kArTextRasterFlag_CropHorizontalWhitespace),
       .direction = snapshot->language.direction,
       .bidi_spans = frame->bidi.spans + snapshot->bidi_span_offset,
       .bidi_span_count = snapshot->bidi_span_count,
       .bidi_source_offset = (uint32_t)field->utf8_offset,
+      .appearance_source_offset =
+          snapshot->has_appearance ? (uint32_t)field->utf8_offset : 0,
       .alignment = kArTextHorizontalAlignment_Leading,
-      .font_pixels = base_pixels, .minimum_font_pixels = minimum_base_pixels,
-      .maximum_width = width, .maximum_height = height,
+      .font_pixels = base_pixels,
+      .minimum_font_pixels = minimum_base_pixels,
+      .maximum_width = width,
+      .maximum_height = height,
       .filter = kArRenderFilter_Nearest,
-      .language_bcp47 = snapshot->language.locale, .language_bcp47_bytes = strlen(snapshot->language.locale),
+      .language_bcp47 = snapshot->language.locale,
+      .language_bcp47_bytes = strlen(snapshot->language.locale),
   };
   if (snapshot->accent_end_utf8_byte > field->utf8_offset &&
       snapshot->accent_end_utf8_byte <= field->utf8_offset + field->utf8_bytes) {
@@ -1160,8 +1231,7 @@ static int NearestMultiple(int value, int quantum) {
  * shadow's breadth apart, and rounded up to whole grid steps so every cell
  * starts on the page's pixel grid. */
 static int FieldCellPitch(const ArLocalizationTextSnapshot *snapshot,
-                          const ArTextSurface *page, int quantum) {
-  const int em = page->raster_font_pixels * page->raster_scale;
+                          const ArTextSurface *page, int quantum, int em) {
   int widest = 0;
   if (snapshot->key_trailing_lines && page->cluster_ink_bounds) {
     int last_line = -1;
@@ -1195,29 +1265,111 @@ typedef struct LiveLineLayout {
 static bool SurfaceMatchesPage(const ArTextSurface *surface,
                                const ArTextSurface *page) {
   return surface->raster_font_pixels == page->raster_font_pixels &&
-      surface->raster_scale == page->raster_scale &&
-      surface->mosaic_block == page->mosaic_block &&
-      surface->line_advance == page->line_advance &&
-      surface->descent == page->descent &&
-      surface->paragraph_direction != kArTextDirection_RightToLeft;
+         surface->raster_scale == page->raster_scale &&
+         surface->mosaic_block == page->mosaic_block &&
+         (page->line_count || (surface->line_advance == page->line_advance &&
+                               surface->descent == page->descent)) &&
+         surface->paragraph_direction != kArTextDirection_RightToLeft;
+}
+
+/* The editable value has one font/size, even when its individual cells have
+ * different inks. Keep that geometry on the placeholder used by the cached
+ * keyboard page; relocate only the static ranges around it. */
+static bool BlankLiveLineAppearance(const ArTextRasterRequest *request,
+                                    size_t start, size_t end,
+                                    size_t blank_bytes,
+                                    ArTextRasterRequest *page) {
+  if (!request->appearance)
+    return true;
+  const ArTextRunAppearance *field = request->appearance;
+  for (size_t i = 0; i < request->appearance_span_count; ++i) {
+    const ArTextAppearanceSpan *span = &request->appearance_spans[i];
+    if (span->start <= start && span->end > start)
+      field = &span->appearance;
+  }
+  size_t cursor = start;
+  while (cursor < end) {
+    const ArTextRunAppearance *at = request->appearance;
+    size_t next = end;
+    for (size_t i = 0; i < request->appearance_span_count; ++i) {
+      const ArTextAppearanceSpan *span = &request->appearance_spans[i];
+      if (span->end <= cursor)
+        continue;
+      if (span->start > cursor) {
+        if (span->start < next)
+          next = span->start;
+        break;
+      }
+      at = &span->appearance;
+      if (span->end < next)
+        next = span->end;
+      break;
+    }
+    if (at->scale_basis != field->scale_basis || at->italic != field->italic ||
+        strcmp(at->font_role, field->font_role))
+      return false;
+    cursor = next;
+  }
+  ArTextAppearanceSpan *spans = s_presenter.live_line_appearances;
+  size_t count = 0;
+  for (size_t i = 0; i < request->appearance_span_count; ++i) {
+    ArTextAppearanceSpan span = request->appearance_spans[i];
+    if (span.start >= start)
+      break;
+    if (span.end > start)
+      span.end = (uint32_t)start;
+    spans[count++] = span;
+  }
+  spans[count++] = (ArTextAppearanceSpan){
+      (uint32_t)start, (uint32_t)(start + blank_bytes), *field};
+  for (size_t i = 0; i < request->appearance_span_count; ++i) {
+    ArTextAppearanceSpan span = request->appearance_spans[i];
+    if (span.end <= end)
+      continue;
+    span.start = (uint32_t)((span.start < end ? end : span.start) - end +
+                            start + blank_bytes);
+    span.end = (uint32_t)(span.end - end + start + blank_bytes);
+    spans[count++] = span;
+  }
+  page->appearance_spans = spans;
+  page->appearance_span_count = count;
+  return true;
 }
 
 /* An entry field (see ArLocalizationTextSnapshot.live_line_cells): every
  * grapheme is rasterized alone -- so nothing joins or kerns -- and centred in
  * its own cell. Each surface is keyed by its grapheme alone, so a letter
  * typed anywhere in the field before costs no rasterization when it returns. */
-static ArLocalizedLiveLineResult PrepareFieldCells(
-    ArRenderDevice *device, const ArLocalizationTextSnapshot *snapshot,
-    const char *line, size_t line_bytes, size_t line_start,
-    const ArTextRasterRequest *request, const ArTextSurface *page,
-    ArRenderRectI page_destination, int line_top, LiveLineLayout *layout,
-    char *error, size_t error_capacity) {
+static ArLocalizedLiveLineResult
+PrepareFieldCells(ArRenderDevice *device,
+                  const ArLocalizationTextSnapshot *snapshot, const char *line,
+                  size_t line_bytes, size_t line_start,
+                  const ArTextRasterRequest *request, const ArTextSurface *page,
+                  ArRenderRectI page_destination, int line_index, int line_top,
+                  LiveLineLayout *layout, char *error, size_t error_capacity) {
   enum { kCellSpanCapacity = 8 };
   const int quantum =
       page->mosaic_block > 1 ? page->mosaic_block : page->raster_scale;
-  layout->pitch = FieldCellPitch(snapshot, page, quantum);
+  int em = page->raster_font_pixels * page->raster_scale;
+  if (request->appearance) {
+    const ArTextRunAppearance *field = request->appearance;
+    for (size_t i = 0; i < request->appearance_span_count; ++i) {
+      const ArTextAppearanceSpan *span = &request->appearance_spans[i];
+      if (span->start <= line_start && span->end > line_start)
+        field = &span->appearance;
+    }
+    em = (int)(((int64_t)page->raster_font_pixels * field->scale_basis + 5000) /
+               10000) *
+         page->raster_scale;
+    em += (em + 4) / 8; /* Reserve the field font's shadow/italic overhang. */
+  }
+  layout->pitch = FieldCellPitch(snapshot, page, quantum, em);
   layout->field_x = page_destination.x + page->origin_x;
   const int line_y = page_destination.y + page->origin_y + line_top;
+  if (request->appearance &&
+      page->origin_x + snapshot->live_line_cells * layout->pitch >
+          request->maximum_width)
+    return kArLiveLine_IncompatibleMetrics;
   size_t offset = 0;
   uint8_t cell = 0;
   while (offset < line_bytes) {
@@ -1246,6 +1398,18 @@ static ArLocalizedLiveLineResult PrepareFieldCells(
       cell_request.utf8_bytes = next - offset;
       cell_request.bidi_spans = span_count ? spans : NULL;
       cell_request.bidi_span_count = span_count;
+      if (request->appearance) {
+        for (size_t i = 0; i < request->appearance_span_count; ++i) {
+          const ArTextAppearanceSpan *span = &request->appearance_spans[i];
+          if (span->start <= first && span->end > first)
+            cell_request.appearance = &span->appearance;
+        }
+        /* A value grapheme inherits one appearance. Localize it so typing the
+         * same letter in another cell reuses the same cache entry. */
+        cell_request.appearance_spans = NULL;
+        cell_request.appearance_span_count = 0;
+        cell_request.appearance_source_offset = 0;
+      }
       /* One grapheme never wraps, and a wrapping layout is as wide as its
        * box: without wrapping the surface is the letter's own size. Cropping
        * would move its origin by the letter's blank edge. */
@@ -1265,8 +1429,11 @@ static ArLocalizedLiveLineResult PrepareFieldCells(
               ArTextBackendInstance_Get(&s_presenter.instance), &cell_request,
               &surface, error, error_capacity))
         return kArLiveLine_RasterFailed;
-      if (!SurfaceMatchesPage(&surface, page))
+      if (!SurfaceMatchesPage(&surface, page)) {
+        snprintf(error, error_capacity,
+                 "cell font or pixel grid differs from page");
         return kArLiveLine_IncompatibleMetrics;
+      }
       if (!surface.reveal_cluster_count) return kArLiveLine_InvalidField;
       /* Centre the letterform itself, not its shading or advance. */
       int left = surface.reveal_clusters[0].x;
@@ -1282,13 +1449,38 @@ static ArLocalizedLiveLineResult PrepareFieldCells(
       /* A glyph taller than the font's ascent pushes its own text's line
        * down; lift it back so every cell shares one baseline. */
       const int drop = surface.reveal_clusters[0].y - surface.origin_y;
+      int cell_y = line_y - surface.origin_y - NearestMultiple(drop, quantum);
+      if (request->appearance) {
+        if ((size_t)line_index >= page->line_count || surface.line_count != 1 ||
+            surface.ink_bounds.w > layout->pitch) {
+          snprintf(error, error_capacity,
+                   "cell ink width %d exceeds pitch %d, or invalid row metrics",
+                   surface.ink_bounds.w, layout->pitch);
+          return kArLiveLine_IncompatibleMetrics;
+        }
+        const int baseline = page->lines[line_index].baseline;
+        cell_y = page_destination.y +
+                 NearestMultiple(baseline - surface.lines[0].baseline, quantum);
+        const int ink_top = cell_y - page_destination.y + surface.ink_bounds.y;
+        const int ink_bottom = ink_top + surface.ink_bounds.h;
+        /* The following blank row reserves underline/shadow room. A font
+         * whose ink exceeds it must retain native text, never overlap keys. */
+        const ArTextLineMetrics *row = &page->lines[line_index];
+        if (ink_top < row->top - quantum ||
+            ink_bottom > row->top + row->height + page->line_advance) {
+          snprintf(error, error_capacity,
+                   "cell ink [%d,%d] exceeds reserved row [%d,%d]", ink_top,
+                   ink_bottom, row->top,
+                   row->top + row->height + page->line_advance);
+          return kArLiveLine_IncompatibleMetrics;
+        }
+      }
       layout->texts[layout->text_count++] = (ArLocalizedPreparedText){
           .surface = surface,
-          .destination = {
-              page_destination.x +
-                  NearestMultiple(centred - page_destination.x, quantum),
-              line_y - surface.origin_y - NearestMultiple(drop, quantum),
-              surface.width, surface.height},
+          .destination = {page_destination.x +
+                              NearestMultiple(centred - page_destination.x,
+                                              quantum),
+                          cell_y, surface.width, surface.height},
           .revealed_cluster_count = (uint32_t)surface.reveal_cluster_count,
           .cluster_count = (uint32_t)surface.reveal_cluster_count,
           .cluster_shift_offset = -1,
@@ -1316,6 +1508,10 @@ static ArLocalizedLiveLineResult PrepareLiveLineAlone(
   line_request.utf8_bytes = line_bytes;
   /* The page's own spans, viewed from the line's first byte. */
   line_request.bidi_source_offset = (uint32_t)line_start;
+  line_request.appearance_source_offset =
+      request->appearance
+          ? request->appearance_source_offset + (uint32_t)line_start
+          : 0;
   /* Cropping would drop a blank line, which has no ink to keep. Wrapping stays
    * on, so a line too long for the page still breaks and is refused below. */
   line_request.flags &= ~kArTextRasterFlag_CropHorizontalWhitespace;
@@ -1383,19 +1579,22 @@ static ArLocalizedLiveLineResult PrepareLiveLinePage(
   if (!line_bytes || line_end > utf8_bytes)
     return kArLiveLine_InvalidField;
   if (line_end == utf8_bytes || request->bidi_source_offset ||
+      request->appearance_source_offset || (request->appearance && !cells) ||
       snapshot->language.direction == kArTextDirection_RightToLeft ||
       request->alignment != kArTextHorizontalAlignment_Leading ||
       snapshot->revealed_cluster_count < snapshot->cluster_count ||
       request->accent_end_utf8_byte)
     return kArLiveLine_UnsupportedLayout;
-  if (utf8_bytes - line_bytes + blank_bytes > sizeof(s_presenter.live_line_page) ||
+  if (utf8_bytes - line_bytes + blank_bytes >
+          sizeof(s_presenter.live_line_page) ||
       cells > kArLocalizationFrameLiveLineMaximumCells ||
       request->bidi_span_count > kArTextMaximumBidiSpans ||
+      request->appearance_span_count > kArLocalizationFrameAppearanceCapacity ||
       snapshot->inline_object_offset > frame->inline_object_count ||
       snapshot->inline_object_count >
           frame->inline_object_count - snapshot->inline_object_offset ||
-      snapshot->inline_object_count >
-          kArLocalizationFrameInlineObjectCapacity - prepared->inline_object_count ||
+      snapshot->inline_object_count > kArLocalizationFrameInlineObjectCapacity -
+                                          prepared->inline_object_count ||
       prepared->text_count + 1u + (cells ? cells : 1u) >
           kArLocalizedPreparedTextCapacity)
     return kArLiveLine_CapacityExceeded;
@@ -1432,6 +1631,12 @@ static ArLocalizedLiveLineResult PrepareLiveLinePage(
   page_request.utf8_bytes = page_bytes;
   page_request.bidi_spans = spans->count ? spans->spans : NULL;
   page_request.bidi_span_count = spans->count;
+  if (!BlankLiveLineAppearance(request, line_start, line_end, blank_bytes,
+                               &page_request)) {
+    snprintf(error, error_capacity,
+             "an editable name must use one font and scale across its cells");
+    return kArLiveLine_IncompatibleMetrics;
+  }
   ArTextSurface page_surface;
   if (!ArTextSurfaceCache_Acquire(
           &s_presenter.cache, device,
@@ -1442,20 +1647,27 @@ static ArLocalizedLiveLineResult PrepareLiveLinePage(
   if (page_surface.paragraph_direction == kArTextDirection_RightToLeft)
     return kArLiveLine_UnsupportedLayout;
   const int line_index = LineIndexAt(&page_surface, page, line_start);
-  const int line_top = line_index * page_surface.line_advance;
+  if (request->appearance && (size_t)line_index >= page_surface.line_count)
+    return kArLiveLine_IncompatibleMetrics;
+  const int line_top =
+      page_surface.line_count
+          ? page_surface.lines[line_index].top - page_surface.origin_y
+          : line_index * page_surface.line_advance;
   const ArRenderRectI page_destination = {
       bounds.x + (bounds.w - page_surface.width) / 2, bounds.y,
       page_surface.width, page_surface.height,
   };
   LiveLineLayout layout;
   layout.text_count = 0;
-  const ArLocalizedLiveLineResult line_result = cells
-      ? PrepareFieldCells(device, snapshot, utf8 + line_start, line_bytes,
-                          line_start, request, &page_surface, page_destination,
-                          line_top, &layout, error, error_capacity)
-      : PrepareLiveLineAlone(device, utf8 + line_start, line_bytes, line_start,
-                             request, &page_surface, page_destination, line_top,
-                             &layout, error, error_capacity);
+  const ArLocalizedLiveLineResult line_result =
+      cells ? PrepareFieldCells(device, snapshot, utf8 + line_start, line_bytes,
+                                line_start, request, &page_surface,
+                                page_destination, line_index, line_top, &layout,
+                                error, error_capacity)
+            : PrepareLiveLineAlone(device, utf8 + line_start, line_bytes,
+                                   line_start, request, &page_surface,
+                                   page_destination, line_top, &layout, error,
+                                   error_capacity);
   if (line_result != kArLiveLine_Prepared) return line_result;
 
   const size_t first_shift = prepared->cluster_shift_count;
@@ -1687,9 +1899,11 @@ void ArLocalizedTextPresenter_Prepare(
 
       const bool centered_label = framed_label ||
           snapshot->layout == kArLocalizationTextLayout_CenteredLabel;
+      const bool centered_block =
+          snapshot->layout == kArLocalizationTextLayout_CenteredBlock;
       const bool right_label = snapshot->layout == kArLocalizationTextLayout_RightAlignedLabel;
       const bool left_label = snapshot->layout == kArLocalizationTextLayout_LeftAlignedLabel;
-      const bool single_line = centered_label || right_label || left_label ||
+      const bool fitted_label = centered_label || right_label || left_label ||
           snapshot->layout == kArLocalizationTextLayout_SingleLineLabel;
       if (snapshot->layout == kArLocalizationTextLayout_Grid) {
         if (!PrepareTable(device, frame, snapshot, record, utf8, utf8_bytes, bounds,
@@ -1715,7 +1929,7 @@ void ArLocalizedTextPresenter_Prepare(
           ((int)record->region.rows * 8);
       /* A one-tile label has a hard vertical limit, including accents and
        * low-resolution raster quantization. Permit extra fitting there. */
-      int minimum_base_pixels = single_line ? base_pixels / 2 : base_pixels * 2 / 3;
+      int minimum_base_pixels = fitted_label ? base_pixels / 2 : base_pixels * 2 / 3;
       if (minimum_base_pixels < 1) minimum_base_pixels = 1;
       ArTextRasterRequest request = {
           .struct_size = sizeof(request),
@@ -1727,6 +1941,12 @@ void ArLocalizedTextPresenter_Prepare(
           .source_revision = snapshot->source_revision,
           .font_revision = frame->font_revision,
           .style_id = snapshot->style_id,
+          .appearance = snapshot->has_appearance ? &snapshot->appearance : NULL,
+          .appearance_spans =
+              snapshot->has_appearance
+                  ? frame->appearance_spans + snapshot->appearance_span_offset
+                  : NULL,
+          .appearance_span_count = snapshot->appearance_span_count,
           .band_rgb = snapshot->band_rgb,
           .body_rgb = snapshot->body_rgb,
           .accent_end_utf8_byte = snapshot->accent_end_utf8_byte,
@@ -1734,8 +1954,11 @@ void ArLocalizedTextPresenter_Prepare(
           .shadow_rgb = snapshot->shadow_rgb,
           .shadow_enabled = snapshot->shadow_enabled,
           .shadow_shape = snapshot->shadow_shape,
-          .flags = kArTextRasterFlag_WrapWords | kArTextRasterFlag_PreserveHardBreaks |
-                   (snapshot->slant_ascii_numerals ? kArTextRasterFlag_SlantAsciiNumerals : 0u) |
+          .flags = kArTextRasterFlag_WrapWords |
+                   kArTextRasterFlag_PreserveHardBreaks |
+                   (snapshot->slant_ascii_numerals
+                        ? kArTextRasterFlag_SlantAsciiNumerals
+                        : 0u) |
                    kArTextRasterFlag_CropHorizontalWhitespace |
                    kArTextRasterFlag_IncludeRevealClusters,
           .direction = snapshot->language.direction,
@@ -1747,9 +1970,10 @@ void ArLocalizedTextPresenter_Prepare(
               scrolling ? kArLocalizationFrameTextCapacity : 0,
           .preferred_line_break_source_offset =
               scrolling ? snapshot->utf8_offset : 0,
-          .alignment = right_label ? kArTextHorizontalAlignment_Right
-              : left_label ? kArTextHorizontalAlignment_Left
-                           : kArTextHorizontalAlignment_Leading,
+          .alignment = centered_block || centered_label ? kArTextHorizontalAlignment_Center
+                       : right_label  ? kArTextHorizontalAlignment_Right
+                       : left_label ? kArTextHorizontalAlignment_Left
+                                    : kArTextHorizontalAlignment_Leading,
           .font_pixels = base_pixels,
           .minimum_font_pixels = minimum_base_pixels,
           .maximum_width = bounds.w,
@@ -1761,8 +1985,10 @@ void ArLocalizedTextPresenter_Prepare(
       if (!ArEnhancedTextSettings_Apply(&frame->settings, base_pixels, minimum_base_pixels,
                                         &request))
         continue;
-      if (single_line) {
-        request.flags &= ~(kArTextRasterFlag_WrapWords | kArTextRasterFlag_PreserveHardBreaks);
+      if (fitted_label) {
+        /* Labels fit without automatic wrapping. Explicit template breaks
+         * still belong to the text, regardless of its placement policy. */
+        request.flags &= ~kArTextRasterFlag_WrapWords;
         request.flags |= kArTextRasterFlag_CropVerticalWhitespace;
         /* HUD scale and font scale are independent. Enlarging the preferred
          * font must not enlarge its fitting floor past a tiny physical row.
@@ -1778,19 +2004,24 @@ void ArLocalizedTextPresenter_Prepare(
         request.minimum_font_pixels = request.font_pixels;
         request.flags &= ~kArTextRasterFlag_CropHorizontalWhitespace;
       }
-      if (!scrolling && !single_line && snapshot->live_line_utf8_bytes) {
+      if (!scrolling && !fitted_label && snapshot->live_line_utf8_bytes) {
         char split_error[kArTextRasterErrorCapacity] = {0};
         const ArLocalizedLiveLineResult result = PrepareLiveLinePage(
             device, frame, snapshot, record, utf8, utf8_bytes, &request, bounds,
             record->surface_id, bg3_map_width_tiles, bg3_map_height_tiles,
             bg3_hscroll, bg3_vscroll, visible_width, visible_height,
             chunks, chunk_count, prepared, split_error, sizeof(split_error));
-        RecordLiveLineResult(result, record->surface_id, split_error);
+        RecordLiveLineResult(result, record->surface_id, split_error,
+                             request.appearance && snapshot->live_line_cells);
         if (result == kArLiveLine_Prepared) {
           memcpy(&prepared->masks[prepared->mask_count], masks, mask_count * sizeof(masks[0]));
           prepared->mask_count += mask_count;
           continue;
         }
+        /* A fixed-cell field cannot safely turn into a flowing styled line.
+         * Keep its native cells visible when authored geometry cannot fit. */
+        if (request.appearance && snapshot->live_line_cells)
+          continue;
       }
       ArTextSurface surface;
       char error[kArTextRasterErrorCapacity] = {0};
@@ -1811,10 +2042,10 @@ void ArLocalizedTextPresenter_Prepare(
                     : 0;
       const ArRenderRectI destination = {
           bounds.x +
-              (scrolling || (single_line && !centered_label)
+              (scrolling || (fitted_label && !centered_label)
                    ? (trailing ? bounds.w - surface.width : 0)
                    : (bounds.w - surface.width) / 2),
-          bounds.y - scroll_y + (single_line ? (bounds.h - surface.height) / 2 : 0),
+          bounds.y - scroll_y + (fitted_label ? (bounds.h - surface.height) / 2 : 0),
           surface.width,
           surface.height,
       };
@@ -1970,6 +2201,12 @@ bool ArLocalizedTextPresenter_PrepareScreenText(
       .source_revision = snapshot->source_revision,
       .font_revision = frame->font_revision,
       .style_id = snapshot->style_id,
+      .appearance = snapshot->has_appearance ? &snapshot->appearance : NULL,
+      .appearance_spans =
+          snapshot->has_appearance
+              ? frame->appearance_spans + snapshot->appearance_span_offset
+              : NULL,
+      .appearance_span_count = snapshot->appearance_span_count,
       .band_rgb = snapshot->band_rgb,
       .body_rgb = snapshot->body_rgb,
       .accent_end_utf8_byte = snapshot->accent_end_utf8_byte,
@@ -1977,18 +2214,20 @@ bool ArLocalizedTextPresenter_PrepareScreenText(
       .shadow_rgb = snapshot->shadow_rgb,
       .shadow_enabled = snapshot->shadow_enabled,
       .shadow_shape = snapshot->shadow_shape,
-      .flags = kArTextRasterFlag_CropHorizontalWhitespace |
-               kArTextRasterFlag_CropVerticalWhitespace |
-               kArTextRasterFlag_IncludeRevealClusters |
-               (snapshot->slant_ascii_numerals
-                    ? kArTextRasterFlag_SlantAsciiNumerals
-                    : 0u),
+      .flags =
+          kArTextRasterFlag_PreserveHardBreaks |
+          kArTextRasterFlag_CropHorizontalWhitespace |
+          kArTextRasterFlag_CropVerticalWhitespace |
+          kArTextRasterFlag_IncludeRevealClusters |
+          (snapshot->slant_ascii_numerals ? kArTextRasterFlag_SlantAsciiNumerals
+                                          : 0u),
       .direction = snapshot->language.direction,
       .bidi_spans = frame->bidi.spans + snapshot->bidi_span_offset,
       .bidi_span_count = snapshot->bidi_span_count,
-      .alignment = physical_right ? kArTextHorizontalAlignment_Right
-          : physical_left ? kArTextHorizontalAlignment_Left
-                          : kArTextHorizontalAlignment_Leading,
+      .alignment = centered ? kArTextHorizontalAlignment_Center
+                   : physical_right  ? kArTextHorizontalAlignment_Right
+                   : physical_left ? kArTextHorizontalAlignment_Left
+                                   : kArTextHorizontalAlignment_Leading,
       .font_pixels = base_pixels,
       .minimum_font_pixels = minimum_base_pixels,
       .maximum_width = bounds.w,

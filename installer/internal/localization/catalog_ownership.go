@@ -37,11 +37,11 @@ func intervalStats(intervals []sourceInterval) (int, int, error) {
 	}
 	return len(merged), total, err
 }
-func (b *catalogBuilder) localOwnership(census *NativeSourceCensus, menu *NativeMenuCatalog, resolution IRObject) (IRObject, error) {
+func (b *catalogBuilder) localOwnership(census *NativeSourceCensus, menu *NativeMenuCatalog, resolution NativeSourceResolutionSummary) (IRObject, error) {
 	live := map[string]bool{}
-	for _, reference := range irRows(census.SourceReferenceSeeds, "references") {
-		if id := irString(reference, "resolved_record_id"); id != "" {
-			live[id] = true
+	for _, reference := range census.SourceReferenceSeeds.References {
+		if reference.NativeSourceResolution != nil && reference.ResolvedRecordID != nil {
+			live[*reference.ResolvedRecordID] = true
 		}
 	}
 	bounded := []string{"action_stage_name", "action_hud_label", "title_and_mode_menu", "sound_test_menu", "town_name", "enemy_name", "dynamic_lookup_text", "offering_text", "offering_text_native", "ending_text"}
@@ -155,7 +155,7 @@ func (b *catalogBuilder) localOwnership(census *NativeSourceCensus, menu *Native
 	}
 	slices.Sort(unclassified)
 	consumerComplete := census.destinations != nil && census.destinations.ConsumerComplete
-	complete := consumerComplete && resolution["all_current_seeds_mapped"] == true && len(unclassified) == 0
+	complete := consumerComplete && resolution.AllCurrentSeedsMapped && len(unclassified) == 0
 	status := "incomplete_source_ownership"
 	if complete {
 		status = "complete_consumer_rooted_source_ownership"
@@ -163,10 +163,10 @@ func (b *catalogBuilder) localOwnership(census *NativeSourceCensus, menu *Native
 	return IRObject{"status": status, "complete": complete,
 		"method": "exhaustive_text_destination_consumers_then_source_closure", "raw_printable_scan_rejected": true,
 		"raw_printable_scan_reason": "Dictionary tokens and direct tile codes make arbitrary ROM data decode as plausible text; byte-likeness cannot establish language ownership.",
-		"proof_obligations": IRObject{"whole_game_consumer_discovery_complete": consumerComplete, "all_consumer_source_references_mapped": resolution["all_current_seeds_mapped"],
+		"proof_obligations": IRObject{"whole_game_consumer_discovery_complete": consumerComplete, "all_consumer_source_references_mapped": resolution.AllCurrentSeedsMapped,
 			"all_bounded_source_records_classified": len(unclassified) == 0, "graphical_language_resources_deferred_to_separate_census": true},
 		"record_count": len(records), "record_counts_by_ownership": counts, "unclassified_record_count": len(unclassified), "unclassified_record_ids": unclassified,
-		"consumer_reference_count": len(irRows(census.SourceReferenceSeeds, "references")), "unique_consumer_source_count": resolution["unique_source_count"], "mapped_unique_consumer_source_count": resolution["mapped_unique_source_count"],
+		"consumer_reference_count": len(census.SourceReferenceSeeds.References), "unique_consumer_source_count": resolution.UniqueSourceCount, "mapped_unique_consumer_source_count": resolution.MappedUniqueSourceCount,
 		"text_source_interval_count": textCount, "text_source_byte_count": textBytes, "metadata_interval_count": metadataCount, "metadata_byte_count": metadataBytes,
 		"owned_rom_byte_count": ownedBytes, "outside_consumer_source_ownership_byte_count": len(b.d.rom) - ownedBytes,
 		"outside_ownership_classification": "not_reachable_as_language_source_by_any_censused_live_text_path; graphical assets are classified by graphical_text_census",

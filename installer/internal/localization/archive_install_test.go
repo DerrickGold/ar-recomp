@@ -69,7 +69,7 @@ func TestArchiveDistributionLifecycleAndCache(t *testing.T) {
 	}
 	manifest := filepath.Join(root, archiveCacheDirectory, filepath.FromSlash(fields[2]), "pack.ini")
 	pack, err := OpenAuthorPack(filepath.Dir(manifest))
-	if err != nil || pack.Manifest().Metadata().ID != row.Metadata.ID {
+	if err != nil || pack.Manifest().Metadata().ID != row.Metadata.ID || pack.Manifest().Version() != 1 {
 		t.Fatal(err)
 	}
 	if probe := os.Getenv("AR_AUTHOR_RUNTIME_PROBE"); probe != "" {
@@ -115,11 +115,19 @@ func TestArchiveDistributionLifecycleAndCache(t *testing.T) {
 		t.Fatal(err)
 	}
 	updated := putDistribution(t, t.TempDir(), "new.arlang", distributionFixture(t, "Updated English"))
-	if _, err := InstallLanguageArchive(root, updated, false); err == nil {
+	if _, _, err := InstallLanguageArchive(root, updated, false); err == nil {
 		t.Fatal("replaced without consent")
 	}
-	if installed, err := InstallLanguageArchive(root, updated, true); err != nil || installed != newPath {
+	if installed, report, err := InstallLanguageArchive(root, updated, true); err != nil || installed != newPath || report.Upgrade == nil {
 		t.Fatal(installed, err)
+	}
+	upgraded, err := OpenAuthorInput(newPath)
+	if err != nil || upgraded.Pack().Manifest().Version() != 2 || upgraded.Pack().Manifest().Metadata().ID != row.Metadata.ID {
+		t.Fatal("archive install did not upgrade with the same ID", err)
+	}
+	original, err := OpenAuthorInput(updated)
+	if err != nil || original.Pack().Manifest().Version() != 1 {
+		t.Fatal("archive install changed the source", err)
 	}
 	rows, err = ListInstalledPacks(root)
 	if err != nil || len(rows) != 1 || rows[0].Enabled {
@@ -221,7 +229,7 @@ func TestOrdinaryZipDirectoriesAndPublicationOnly(t *testing.T) {
 	if index := prepareDistribution(t, root); index != ArchiveCatalogHeader {
 		t.Fatal(index)
 	}
-	if _, err := InstallLanguageArchive(t.TempDir(), filepath.Join(root, "not-a-publication.arlang"), false); err == nil {
+	if _, _, err := InstallLanguageArchive(t.TempDir(), filepath.Join(root, "not-a-publication.arlang"), false); err == nil {
 		t.Fatal("installed private backup")
 	}
 }

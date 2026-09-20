@@ -44,6 +44,7 @@ type FontCoverageLocation struct {
 }
 
 type FontCoverageGap struct {
+	FontRole  string                 `json:"fontRole,omitempty"`
 	Codepoint string                 `json:"codepoint"`
 	Character string                 `json:"character"`
 	Locations []FontCoverageLocation `json:"locations"`
@@ -78,33 +79,11 @@ func (p *AuthorPack) CheckFontCoverageWithFallback(ctx context.Context, probe Fo
 	if probe == nil {
 		return report, fmt.Errorf("font coverage requires the game's font backend")
 	}
-	locations := make(map[rune][]FontCoverageLocation)
-	dynamic := make(map[string]bool)
-	collect := func(text string, location FontCoverageLocation) error {
-		if !utf8.ValidString(text) || strings.ContainsRune(text, 0) {
-			return fmt.Errorf("font samples must contain valid non-NUL Unicode")
-		}
-		for _, scalar := range text {
-			found, exists := locations[scalar]
-			if !exists && len(locations) >= MaxFontCoverageScalars {
-				return fmt.Errorf("font coverage exceeds %d distinct characters; check a smaller pack", MaxFontCoverageScalars)
-			}
-			if len(found) < maxCoverageLocations && !slices.Contains(found, location) {
-				locations[scalar] = append(found, location)
-			}
-		}
-		return ctx.Err()
-	}
+	coverage := fontCoverageInput{locations: make(map[string]map[rune][]FontCoverageLocation), dynamic: make(map[string]bool)}
 	for _, script := range p.workspace.scripts {
 		for _, message := range script.messages {
-			for _, op := range message.Operations {
-				if op.Op == "text" {
-					if err := collect(op.Value, FontCoverageLocation{script.path, message.ID, op.SourceLine}); err != nil {
-						return report, err
-					}
-				} else if op.Op == "placeholder" && !strings.HasPrefix(op.Name, "icon.") {
-					dynamic[op.Name] = true
-				}
+			if err := coverage.message(ctx, message, script.path, nil); err != nil {
+				return report, err
 			}
 		}
 	}
@@ -114,18 +93,12 @@ func (p *AuthorPack) CheckFontCoverageWithFallback(ctx context.Context, probe Fo
 				if _, replaced := p.workspace.messageScript[message.ID]; replaced {
 					continue
 				}
-				ops, err := resolvedAuthorOperations(fallback.workspace, message.ID)
+				resolved, err := resolvedAuthorMessage(fallback.workspace, message.ID)
 				if err != nil {
 					return report, err
 				}
-				for _, op := range ops {
-					if op.Op == "text" {
-						if err := collect(op.Value, FontCoverageLocation{"<native fallback>", message.ID, op.SourceLine}); err != nil {
-							return report, err
-						}
-					} else if op.Op == "placeholder" && !strings.HasPrefix(op.Name, "icon.") {
-						dynamic[op.Name] = true
-					}
+				if err := coverage.message(ctx, resolved, "<native fallback>", p.manifest.fonts.Stacks()); err != nil {
+					return report, err
 				}
 			}
 		}
@@ -137,21 +110,96 @@ func (p *AuthorPack) CheckFontCoverageWithFallback(ctx context.Context, probe Fo
 		if len(sample) > 16384 {
 			return report, fmt.Errorf("font sample exceeds 16 KiB")
 		}
-		if err := collect(sample, FontCoverageLocation{Source: fmt.Sprintf("<sample:%d>", i+1), Line: 1}); err != nil {
-			return report, err
+		for _, role := range p.manifest.fonts.Stacks() {
+			if err := coverage.collect(ctx, role.Name, sample, FontCoverageLocation{Source: fmt.Sprintf("<sample:%d>", i+1), Line: 1}); err != nil {
+				return report, err
+			}
 		}
 	}
+	for name := range coverage.dynamic {
+		report.DynamicValues = append(report.DynamicValues, name)
+	}
+	slices.Sort(report.DynamicValues)
+	for _, role := range p.manifest.fonts.Stacks() {
+		if err := p.checkFontRole(ctx, probe, role, coverage.locations[role.Name], &report); err != nil {
+			return report, err
+		}
+		delete(coverage.locations, role.Name)
+	}
+	for role := range coverage.locations {
+		return report, fmt.Errorf("undeclared font role %q", role)
+	}
+	report.PackageID = p.manifest.metadata.ID
+	report.ContentRevision = fmt.Sprintf("%016x", p.RuntimeRevision())
+	if fallback != nil {
+		report.FallbackRevision = fmt.Sprintf("%016x", fallback.RuntimeRevision())
+	}
+	report.Complete = report.MissingCount == 0
+	return report, nil
+}
+
+// Coverage belongs to a role, never to the union of every font in the pack.
+// Otherwise a glyph in the HUD stack could conceal a missing body glyph.
+type fontCoverageInput struct {
+	locations   map[string]map[rune][]FontCoverageLocation
+	dynamic     map[string]bool
+	scalarCount int
+}
+
+func (c *fontCoverageInput) collect(ctx context.Context, role, text string, location FontCoverageLocation) error {
+	if !utf8.ValidString(text) || strings.ContainsRune(text, 0) {
+		return fmt.Errorf("font samples must contain valid non-NUL Unicode")
+	}
+	if role == "" {
+		role = "body"
+	}
+	if c.locations[role] == nil {
+		c.locations[role] = make(map[rune][]FontCoverageLocation)
+	}
+	locations := c.locations[role]
+	for _, scalar := range text {
+		found, exists := locations[scalar]
+		if !exists {
+			if c.scalarCount >= MaxFontCoverageScalars {
+				return fmt.Errorf("font coverage exceeds %d role/character pairs; check a smaller pack", MaxFontCoverageScalars)
+			}
+			c.scalarCount++
+		}
+		if len(found) < maxCoverageLocations && !slices.Contains(found, location) {
+			locations[scalar] = append(found, location)
+		}
+	}
+	return ctx.Err()
+}
+
+func (c *fontCoverageInput) message(ctx context.Context, message AuthorMessage, path string, available []PackFontRole) error {
+	for _, op := range message.Operations {
+		if op.Op == "text" {
+			role := message.Appearance.Style.Font
+			if op.Style.Font != "" {
+				role = op.Style.Font
+			}
+			if available != nil && role != "" && role != "body" && !slices.ContainsFunc(available, func(font PackFontRole) bool { return font.Name == role }) {
+				role = "body"
+			}
+			if err := c.collect(ctx, role, op.Value, FontCoverageLocation{path, message.ID, op.SourceLine}); err != nil {
+				return err
+			}
+		} else if op.Op == "placeholder" && !strings.HasPrefix(op.Name, "icon.") {
+			c.dynamic[op.Name] = true
+		}
+	}
+	return nil
+}
+
+func (p *AuthorPack) checkFontRole(ctx context.Context, probe FontCoverageProbe, role PackFontRole, locations map[rune][]FontCoverageLocation, report *FontCoverageReport) error {
 	scalars := make([]rune, 0, len(locations))
 	for scalar := range locations {
 		scalars = append(scalars, scalar)
 	}
 	slices.Sort(scalars)
-	for value := range dynamic {
-		report.DynamicValues = append(report.DynamicValues, value)
-	}
-	slices.Sort(report.DynamicValues)
 	var fonts []FontCoverageSource
-	for _, ref := range append([]string{p.manifest.fonts.Primary}, p.manifest.fonts.Fallback...) {
+	for _, ref := range append([]string{role.Primary}, role.Fallback...) {
 		source := FontCoverageSource{Reference: ref}
 		if !strings.HasPrefix(ref, "builtin:") {
 			data := p.fonts[ref]
@@ -161,26 +209,24 @@ func (p *AuthorPack) CheckFontCoverageWithFallback(ctx context.Context, probe Fo
 		fonts = append(fonts, source)
 	}
 	if err := ctx.Err(); err != nil {
-		return report, err
+		return err
 	}
 	result, err := probe(ctx, fonts, scalars)
 	if err != nil {
-		return report, err
+		return err
 	}
 	if len(result.Provided) != len(scalars) || len(result.Fonts) != len(fonts) {
-		return report, fmt.Errorf("incomplete font-backend response")
+		return fmt.Errorf("incomplete font-backend response")
 	}
 	for i, font := range result.Fonts {
 		if font.Reference != fonts[i].Reference || len(font.SHA256) != 64 || strings.Trim(font.SHA256, "0123456789abcdef") != "" {
-			return report, fmt.Errorf("invalid font-backend identity")
+			return fmt.Errorf("invalid font-backend identity")
+		}
+		if !slices.Contains(report.Fonts, font) {
+			report.Fonts = append(report.Fonts, font)
 		}
 	}
-	report.Fonts, report.Scalars = result.Fonts, len(scalars)
-	report.PackageID = p.manifest.metadata.ID
-	report.ContentRevision = fmt.Sprintf("%016x", p.RuntimeRevision())
-	if fallback != nil {
-		report.FallbackRevision = fmt.Sprintf("%016x", fallback.RuntimeRevision())
-	}
+	report.Scalars += len(scalars)
 	for i, covered := range result.Provided {
 		if covered {
 			continue
@@ -188,10 +234,8 @@ func (p *AuthorPack) CheckFontCoverageWithFallback(ctx context.Context, probe Fo
 		report.MissingCount++
 		if len(report.Missing) < maxCoverageMissing {
 			scalar := scalars[i]
-			report.Missing = append(report.Missing, FontCoverageGap{
-				fmt.Sprintf("U+%04X", scalar), string(scalar), locations[scalar]})
+			report.Missing = append(report.Missing, FontCoverageGap{FontRole: role.Name, Codepoint: fmt.Sprintf("U+%04X", scalar), Character: string(scalar), Locations: locations[scalar]})
 		}
 	}
-	report.Complete = report.MissingCount == 0
-	return report, nil
+	return nil
 }

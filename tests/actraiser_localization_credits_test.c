@@ -12,24 +12,29 @@ static const char *body = "- Équipe -\nUn nom\n別の名前";
 static bool reject;
 static char resolved_id[64];
 
-static bool Resolve(void *context, const char *id, char *text, size_t capacity,
-                     size_t *bytes, uint32_t *clusters, uint64_t *revision,
-                     ArLocalizationInlineObjectSnapshot *objects, size_t object_capacity,
-                     uint8_t *object_count, uint8_t *boundaries,
-                     ArLocalizationTextLanguage *language,
-    ArTextBidiSpans *bidi, ArLocalizationTextField *live_field,
-                     char *error, size_t error_capacity) {
-  if (live_field) *live_field = (ArLocalizationTextField){0};
-  (void)context; (void)objects; (void)object_capacity; (void)error; (void)error_capacity;
+static bool Resolve(void *context, const char *id,
+                    ActRaiserResolvedText *result, char *error,
+                    size_t error_capacity) {
+  (void)context;
+  (void)error;
+  (void)error_capacity;
   ++calls;
   snprintf(resolved_id,sizeof(resolved_id),"%s",id);
-  if (reject || strlen(body) >= capacity) return false;
-  strcpy(text,body); *bytes = strlen(body); *clusters = 1; *revision = 23; *object_count = 0;
-  *language = (ArLocalizationTextLanguage){.locale = "fr",
-      .direction = kArTextDirection_LeftToRight};
-  bidi->count = 0;
-  memset(boundaries,0,AR_TEXT_BOUNDARY_BYTES(capacity));
-  for (size_t i = 0; i < *bytes; ++i) ArTextBoundary_Set(boundaries,i,text[i]=='\n');
+  if (reject || strlen(body) >= sizeof(result->utf8))
+    return false;
+  strcpy(result->utf8, body);
+  result->utf8_bytes = strlen(body);
+  result->cluster_count = 1;
+  result->source_revision = 23;
+  result->inline_object_count = 0;
+  result->language = (ArLocalizationTextLanguage){
+      .locale = "fr", .direction = kArTextDirection_LeftToRight};
+  result->bidi.count = 0;
+  memset(result->structural_boundaries, 0,
+         AR_TEXT_BOUNDARY_BYTES(sizeof(result->utf8)));
+  for (size_t i = 0; i < result->utf8_bytes; ++i)
+    ArTextBoundary_Set(result->structural_boundaries, i,
+                       result->utf8[i] == '\n');
   return true;
 }
 

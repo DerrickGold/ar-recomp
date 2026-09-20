@@ -145,6 +145,20 @@ int main(void) {
   CHECK(!ArTextBackendInstance_Create(&instance, &backend, &bad, error, sizeof(error)));
   CHECK(fake.creates == 3 && ArTextBackendInstance_Get(&instance));
 
+  ArTextFontRole roles[] = {{.name = "hud", .primary = 2},
+                            {.name = "title", .primary = 3}};
+  bad = config;
+  bad.roles = roles;
+  bad.role_count = 2;
+  CHECK(ArTextBackendConfig_IsValid(&bad));
+  strcpy(roles[1].name, "hud");
+  CHECK(!ArTextBackendConfig_IsValid(&bad));
+  strcpy(roles[1].name, "body");
+  CHECK(!ArTextBackendConfig_IsValid(&bad));
+  strcpy(roles[1].name, "title");
+  roles[1].fallback_count = 1;
+  CHECK(!ArTextBackendConfig_IsValid(&bad));
+
   ArTextBackendInstance_Destroy(&instance);
   CHECK(fake.destroys == 3);
   CHECK(ArTextBackendInstance_Get(&instance) == NULL);

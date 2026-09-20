@@ -1,9 +1,9 @@
 #ifndef AR_LOCALIZATION_DIALOGUE_SESSION_H
 #define AR_LOCALIZATION_DIALOGUE_SESSION_H
 
-#include "localization/language_contract.h"
-#include "localization/text_boundaries.h"
+#include "localization/language_pack.h"
 #include "localization/text_bidi.h"
+#include "localization/text_boundaries.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -56,16 +56,28 @@ typedef struct ArDialogueValueResolver {
   ArDialogueFormatNumber format_number;
 } ArDialogueValueResolver;
 
-typedef struct ArDialogueContentSelection {
-  size_t struct_size;
-  uint32_t abi_version;
+/* Callers resolve package/fallback policy and validate their game's routes
+ * before entering the core. Inputs are borrowed only during begin/switch/
+ * restore; the session owns its compiled text, values and contract afterward.
+ */
+typedef struct ArDialogueSource {
+  const ArLanguagePack *effective_pack;
+  const ArLanguagePack *term_fallback_pack;
+  const ArLanguageMessage *message;
+  ArDialogueResolvedSource resolved_source;
   ArDialoguePresentation presentation;
-  /* NULL selected_pack means native USA wording. Community packs must use
-   * enhanced presentation. Both packs must already have passed the v1 loader;
-   * this boundary re-runs semantic validation before activation. */
-  const ArLanguagePack *selected_pack;
-  const ArLanguagePack *native_us_enhanced_pack;
-} ArDialogueContentSelection;
+} ArDialogueSource;
+
+typedef struct ArDialogueValueSpec {
+  char name[kArDialogueValueNameCapacity];
+  ArLanguagePlaceholderKind kind;
+} ArDialogueValueSpec;
+
+typedef struct ArDialogueContract {
+  ArDialogueValueSpec values[kArDialogueMaximumValues];
+  uint32_t value_count;
+  uint32_t control_count;
+} ArDialogueContract;
 
 /* A portable host serializer must encode these named fields; do not persist a
  * raw struct image because size_t/bool layout and padding are platform ABI
@@ -98,7 +110,14 @@ typedef struct ArDialogueInlineObject {
   const char *id;
 } ArDialogueInlineObject;
 
+typedef struct ArDialogueTreatmentDefinition {
+  ArTextTreatment definition;
+  char source_path[1024];
+  uint32_t source_line;
+} ArDialogueTreatmentDefinition;
+
 typedef struct ArDialoguePageSnapshot {
+  uint32_t format_version;
   const char *utf8;
   /* Borrowed alongside utf8. Only authored literals/breaks can set these
    * bits; resolving a name, number, term or icon never creates structure. */
@@ -117,6 +136,18 @@ typedef struct ArDialoguePageSnapshot {
   ArLanguageDirection direction;
   const ArTextBidiSpan *bidi_spans;
   size_t bidi_span_count;
+  const ArTextTemplateSpan *style_spans;
+  size_t style_span_count;
+  ArTextTemplateStyle default_style;
+  const char *layout;
+  uint8_t numerals;
+  /* Borrowed from the session, not from reloadable pack storage. */
+  const char *source_path;
+  const char *resolved_message_id;
+  const char *message_id;
+  uint32_t source_line;
+  const ArDialogueTreatmentDefinition *treatments;
+  size_t treatment_count;
 } ArDialoguePageSnapshot;
 
 /* Progress observed while the untouched ROM presenter owns the text box.
@@ -162,6 +193,7 @@ typedef struct ArDialogueToken {
 typedef struct ArDialogueSession {
   ArDialogueStableState state;
   void *private_program;
+  ArDialogueContract private_contract;
   uint32_t private_cue_index;
   size_t private_revealed_utf8_bytes;
   ArDialogueValueResolver private_resolver;
@@ -173,29 +205,20 @@ typedef struct ArDialogueSession {
 void ArDialogueSession_Init(ArDialogueSession *session);
 void ArDialogueSession_Destroy(ArDialogueSession *session);
 
-bool ArDialogueSession_Begin(ArDialogueSession *session,
-                             const ArDialogueContentSelection *selection,
-                             const char *semantic_id,
-                             const ArDialogueValueResolver *resolver,
-                             ArLanguagePackError *error);
-
-/* Transactional live switch. Existing stable state and active wait/input are
- * retained; derived pages are rebuilt and reveal/page progress is clamped. */
-bool ArDialogueSession_Switch(ArDialogueSession *session,
-                              const ArDialogueContentSelection *selection,
-                              ArLanguagePackError *error);
-
-/* Production adapters may impose a smaller presentation budget than the
- * portable compiler. Count resolved UTF-8 plus one separator per authored
- * page (including captured dynamic values). Zero keeps the portable limits.
- * Both operations reject over-budget candidates before mutating the session. */
-bool ArDialogueSession_BeginBounded(
-    ArDialogueSession *session, const ArDialogueContentSelection *selection,
-    const char *semantic_id, const ArDialogueValueResolver *resolver,
-    size_t maximum_text_bytes, ArLanguagePackError *error);
-bool ArDialogueSession_SwitchBounded(
-    ArDialogueSession *session, const ArDialogueContentSelection *selection,
-    size_t maximum_text_bytes, ArLanguagePackError *error);
+/* Explicit portable entry points. A host supplies the validated source and
+ * typed value/control contract instead of a global semantic catalog. Budgets
+ * count resolved UTF-8 plus one separator per page; zero uses core limits. */
+bool ArDialogueSession_BeginSource(ArDialogueSession *session,
+                                   const ArDialogueSource *source,
+                                   const ArDialogueContract *contract,
+                                   const char *message_id,
+                                   const ArDialogueValueResolver *resolver,
+                                   size_t maximum_text_bytes,
+                                   ArLanguagePackError *error);
+bool ArDialogueSession_SwitchSource(ArDialogueSession *session,
+                                    const ArDialogueSource *source,
+                                    size_t maximum_text_bytes,
+                                    ArLanguagePackError *error);
 
 bool ArDialogueSession_Next(ArDialogueSession *session,
                             ArDialogueToken *token,
@@ -242,10 +265,11 @@ bool ArDialogueSession_SynchronizeNativeProgress(
 
 bool ArDialogueSession_ExportState(const ArDialogueSession *session,
                                    ArDialogueStableState *state);
-bool ArDialogueSession_Restore(ArDialogueSession *session,
-                               const ArDialogueContentSelection *selection,
-                               const ArDialogueStableState *state,
-                               const ArDialogueValueResolver *resolver,
-                               ArLanguagePackError *error);
+bool ArDialogueSession_RestoreSource(ArDialogueSession *session,
+                                     const ArDialogueSource *source,
+                                     const ArDialogueContract *contract,
+                                     const ArDialogueStableState *state,
+                                     const ArDialogueValueResolver *resolver,
+                                     ArLanguagePackError *error);
 
 #endif /* AR_LOCALIZATION_DIALOGUE_SESSION_H */

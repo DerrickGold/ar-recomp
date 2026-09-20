@@ -154,23 +154,18 @@ unsigned ActionRoomScene_TileWidth(const ActionRoomScene *scene,
                                    uint8_t bg_layer);
 unsigned ActionRoomScene_TileHeight(const ActionRoomScene *scene,
                                     uint8_t bg_layer);
-size_t ActionRoomScene_TileCount(const ActionRoomScene *scene,
-                                 uint8_t bg_layer);
 
 /* Profile common priority is merged with the permanent action character-bank
  * attribute. The returned value is already in the 16-bit tile-word domain. */
 uint16_t ActionRoomScene_BgAttributes(const ActionRoomScene *scene,
                                       uint8_t bg_layer);
 
-/* Exact finite-world tile lookup/expansion. Coordinates are 8x8 tile cells.
+/* Exact finite-world tile lookup. Coordinates are 8x8 tile cells.
  * The optional metatile result names the containing 16x16 map cell. */
 bool ActionRoomScene_LookupTile(const ActionRoomScene *scene,
                                 uint8_t bg_layer,
                                 unsigned tile_x, unsigned tile_y,
                                 uint16_t *entry, uint8_t *metatile);
-bool ActionRoomScene_ExpandBg(const ActionRoomScene *scene,
-                              uint8_t bg_layer,
-                              uint16_t *entries, size_t entry_count);
 
 /* Character animation is reconstructed from the room's own 4 KiB snapshot
  * window. explicit_phase >= 0 is editor-controlled; -1 derives a deterministic

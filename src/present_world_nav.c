@@ -5043,15 +5043,17 @@ PresentationOutcome PresentWorldNavigation3D(const FrameSlot *slot) {
   return outcome;
 }
 
-/* The world-map half of the presentation-resource reset. PresentSim3D_ResetResources
- * keeps the town half and calls this; see the comment on
- * PresentRendererResources_Reset in present.c for why any of it exists. */
-void PresentWorldNav_ResetResources(void) {
-  PresentSimGlobeMountains_Reset();
-  PresentSimGlobeTerrain_Reset();
-  PresentSimGlobeWater_Reset();
-  Sim3DMeshSet_Destroy(&s_sim_globe.surface);
-  memset(&s_sim_globe, 0, sizeof(s_sim_globe));
+/* Each reset owns the same fields as its preparation path. Readiness gates
+ * invalidate retained CPU keys without erasing monotonic revision counters.
+ * Presentation has already drained; stop the shared workers before releasing
+ * their borrowed arrays, and detach terrain before destroying mountain data. */
+static void ResetWorldNavigationWorkers(void) {
+  HostParallelWork_Destroy(s_world_workers);
+  s_world_workers = NULL;
+  s_world_workers_attempted = false;
+}
+
+static void ResetWorldNavigationModels(void) {
   WorldNavigationModelMesh_Reset();
   free(s_world_models.gpu_sources);
   s_world_models.gpu_sources = NULL;
@@ -5059,47 +5061,14 @@ void PresentWorldNav_ResetResources(void) {
   s_world_models.gpu_sources_unavailable = false;
   s_world_models.gpu_current_ready = false;
   s_world_models.gpu_current_rejected = false;
-  Sim3DDepthPass_DestroyMesh(s_world_surfaces.mesh);
-  memset(&s_world_surfaces, 0, sizeof(s_world_surfaces));
-  Sim3DMeshSet_Destroy(&s_world_gpu_grid.meshes);
-  memset(&s_world_gpu_grid, 0, sizeof(s_world_gpu_grid));
-  free(s_world_shells.atmosphere_draw.vertices);
-  free(s_world_shells.atmosphere_draw.indices);
-  s_world_shells.atmosphere_draw = (WorldNavigationAtmosphereDrawCache){0};
-  s_world_shells.ocean.ready = s_world_shells.cloud.ready = s_world_shells.atmosphere.ready = false;
-  Sim3DDepthPass_DestroyMesh(s_world_weather.receiver_mesh);
-  Sim3DDepthPass_DestroyMesh(s_world_weather.spherical_mesh);
-  Sim3DDepthPass_DestroyMesh(s_world_weather.body_mesh);
-  free(s_world_weather.body_vertices); s_world_weather.body_vertices = NULL;
-  s_world_weather.body_mesh = NULL; s_world_weather.body_unavailable = false;
-  s_world_weather.body_radius = s_world_weather.body_distance = 0;
-  free(s_world_weather.spherical_quads);
-  s_world_weather.spherical_mesh = NULL; s_world_weather.spherical_quads = NULL;
-  s_world_weather.spherical_capacity = 0;
-  s_world_weather.spherical_ready = s_world_weather.spherical_unavailable = false;
-  s_world_weather.receiver_mesh = NULL;
-  free(s_world_weather.receiver_positions); free(s_world_weather.receiver_uv);
-  s_world_weather.receiver_positions = NULL; s_world_weather.receiver_uv = NULL;
-  s_world_weather.receiver_mesh_capacity = 0;
-  s_world_weather.receiver_mesh_ready = s_world_weather.receiver_mesh_unavailable = false;
-  HostParallelWork_Destroy(s_world_workers);
-  free(s_world_art.animation);
-  s_world_art.animation = NULL;
-  s_world_art.animation_unavailable = false;
   free(s_world_model_batch);
   s_world_model_batch = NULL;
   s_world_model_batch_unavailable = false;
-  s_world_workers = NULL;
-  s_world_workers_attempted = false;
-  s_world_terrain.samples_ready = false;
-  free(s_world_weather.receivers);
-  s_world_weather.receivers = NULL;
-  s_world_weather.receiver_count = s_world_weather.receiver_capacity = 0;
-  s_world_weather.receivers_ready = s_world_weather.receivers_unavailable = false;
   free(s_world_models.projected);
   Sim3DDepthPass_DestroyMesh(s_world_models.solid_mesh);
   s_world_models.solid_mesh = NULL;
-  s_world_models.solid_mesh_published = s_world_models.solid_mesh_unavailable = false;
+  s_world_models.solid_mesh_published = s_world_models.solid_mesh_unavailable =
+      false;
   s_world_models.solid_mesh_attempted = false;
   s_world_models.solid_mesh_opt_out = false;
   s_world_models.projected = NULL;
@@ -5112,12 +5081,59 @@ void PresentWorldNav_ResetResources(void) {
   s_world_models.object_count = 0;
   s_world_models.detail = s_world_models.style = -1;
   s_world_models.maximum_rise = 0.0f;
-  DestroyWorldNavigationMountainProjection();
-  SimWorldNavigationMountains_Destroy(&s_world_mountains.scene);
+}
+
+static void ResetWorldNavigationWeather(void) {
+  Sim3DDepthPass_DestroyMesh(s_world_weather.receiver_mesh);
+  Sim3DDepthPass_DestroyMesh(s_world_weather.spherical_mesh);
+  Sim3DDepthPass_DestroyMesh(s_world_weather.body_mesh);
+  free(s_world_weather.body_vertices);
+  s_world_weather.body_vertices = NULL;
+  s_world_weather.body_mesh = NULL;
+  s_world_weather.body_unavailable = false;
+  s_world_weather.body_radius = s_world_weather.body_distance = 0;
+  free(s_world_weather.spherical_quads);
+  s_world_weather.spherical_mesh = NULL;
+  s_world_weather.spherical_quads = NULL;
+  s_world_weather.spherical_capacity = 0;
+  s_world_weather.spherical_ready = s_world_weather.spherical_unavailable =
+      false;
+  s_world_weather.receiver_mesh = NULL;
+  free(s_world_weather.receiver_positions);
+  free(s_world_weather.receiver_uv);
+  s_world_weather.receiver_positions = NULL;
+  s_world_weather.receiver_uv = NULL;
+  s_world_weather.receiver_mesh_capacity = 0;
+  s_world_weather.receiver_mesh_ready =
+      s_world_weather.receiver_mesh_unavailable = false;
+  free(s_world_weather.receivers);
+  s_world_weather.receivers = NULL;
+  s_world_weather.receiver_count = s_world_weather.receiver_capacity = 0;
+  s_world_weather.receivers_ready = s_world_weather.receivers_unavailable =
+      false;
+  s_world_weather.ready = false;
+  s_world_weather.unavailable = false;
+  PresentWorldNavSky_Reset();
+  s_world_weather.failure_reported = false;
+}
+
+static void ResetWorldNavigationTerrain(void) {
+  s_world_terrain.samples_ready = false;
   SimWorldNavigationCliffs_Destroy(&s_world_terrain.cliffs);
   free(s_world_terrain.cliff_projection);
   s_world_terrain.cliff_projection = NULL;
   s_world_terrain.cliffs_ready = false;
+  SimWorldNavigationTerrain_SetMountainReplacement(NULL);
+  SimWorldNavigationTerrain_SetMountainTransition(NULL);
+  SimWorldNavigationTerrain_SetMountainJoin(NULL, NULL, 0);
+  SimWorldNavigationTerrain_SetMountainContinuationLimit(NULL, NULL, 0);
+  s_world_terrain.projection_ready = false;
+  s_world_terrain.ready = false;
+}
+
+static void ResetWorldNavigationMountains(void) {
+  DestroyWorldNavigationMountainProjection();
+  SimWorldNavigationMountains_Destroy(&s_world_mountains.scene);
   SimWorldNavigationMountainTransition_Destroy(&s_world_mountains.transition);
   s_world_mountains.transition_ready = false;
   s_world_mountains.transition_serial = 0;
@@ -5126,12 +5142,12 @@ void PresentWorldNav_ResetResources(void) {
   s_world_mountains.active = false;
   s_world_mountains.lava_upload = (SimWorldNavigationMountainAtlasUpdate){0};
   s_world_mountains.developed = false;
-  SimWorldNavigationTerrain_SetMountainReplacement(NULL);
-  SimWorldNavigationTerrain_SetMountainTransition(NULL);
-  SimWorldNavigationTerrain_SetMountainJoin(NULL, NULL, 0);
-  SimWorldNavigationTerrain_SetMountainContinuationLimit(NULL, NULL, 0);
-  s_world_terrain.projection_ready = false;
-  s_world_terrain.ready = false;
+}
+
+static void ResetWorldNavigationArt(void) {
+  free(s_world_art.animation);
+  s_world_art.animation = NULL;
+  s_world_art.animation_unavailable = false;
   InvalidateWorldNavigationArtPublication();
   s_world_art.blur_serial = 0;
   s_world_art.geography = 0;
@@ -5141,21 +5157,47 @@ void PresentWorldNav_ResetResources(void) {
   s_world_art.pixels = NULL;
   free(s_world_art.baseline);
   s_world_art.baseline = NULL;
-  s_world_weather.ready = false;
-  ArRenderDevice_DestroyTexture(
-      &g_render_device, s_world_composition.palace);
+}
+
+static void ResetWorldNavigationComposition(void) {
+  ArRenderDevice_DestroyTexture(&g_render_device, s_world_composition.palace);
   s_world_composition.palace = ArRenderTexture_Invalid();
-  ArRenderDevice_DestroyTexture(
-      &g_render_device, s_world_composition.label);
+  ArRenderDevice_DestroyTexture(&g_render_device, s_world_composition.label);
   s_world_composition.label = ArRenderTexture_Invalid();
-  ArRenderDevice_DestroyTexture(
-      &g_render_device, s_world_composition.plaque);
+  ArRenderDevice_DestroyTexture(&g_render_device, s_world_composition.plaque);
   s_world_composition.plaque = ArRenderTexture_Invalid();
   s_world_composition.uploaded = false;
-  s_world_weather.unavailable = false;
   PresentationUploadMirror_Reset(&s_world_composition.palace_mirror);
   PresentationUploadMirror_Reset(&s_world_composition.plaque_mirror);
   PresentationUploadMirror_Reset(&s_world_composition.label_mirror);
-  PresentWorldNavSky_Reset();
-  s_world_weather.failure_reported = false;
+}
+
+static void ResetWorldNavigationGlobeSurfaces(void) {
+  PresentSimGlobeMountains_Reset();
+  PresentSimGlobeTerrain_Reset();
+  PresentSimGlobeWater_Reset();
+  Sim3DMeshSet_Destroy(&s_sim_globe.surface);
+  memset(&s_sim_globe, 0, sizeof(s_sim_globe));
+  Sim3DDepthPass_DestroyMesh(s_world_surfaces.mesh);
+  memset(&s_world_surfaces, 0, sizeof(s_world_surfaces));
+  Sim3DMeshSet_Destroy(&s_world_gpu_grid.meshes);
+  memset(&s_world_gpu_grid, 0, sizeof(s_world_gpu_grid));
+  free(s_world_shells.atmosphere_draw.vertices);
+  free(s_world_shells.atmosphere_draw.indices);
+  s_world_shells.atmosphere_draw = (WorldNavigationAtmosphereDrawCache){0};
+  s_world_shells.ocean.ready = s_world_shells.cloud.ready =
+      s_world_shells.atmosphere.ready = false;
+}
+
+/* The world-map half of PresentSim3D_ResetResources. All resource releases
+ * stay private to this view; no cache survives a renderer replacement. */
+void PresentWorldNav_ResetResources(void) {
+  ResetWorldNavigationWorkers();
+  ResetWorldNavigationGlobeSurfaces();
+  ResetWorldNavigationModels();
+  ResetWorldNavigationWeather();
+  ResetWorldNavigationTerrain();
+  ResetWorldNavigationMountains();
+  ResetWorldNavigationArt();
+  ResetWorldNavigationComposition();
 }

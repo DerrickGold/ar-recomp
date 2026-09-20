@@ -24,14 +24,14 @@ class FontCoverageTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stderr.count(' has no glyph for U+'), 128)
         self.assertEqual(result.stderr.count('warnings for font stack'), 2)
-        self.assertEqual(result.stderr.count('no glyph for U+F0000;'), 2)
-        self.assertEqual(result.stderr.count('no glyph for U+F003F;'), 2)
-        self.assertNotIn('no glyph for U+F0040;', result.stderr)
+        self.assertEqual(result.stderr.count('no glyph for U+F0000 ('), 2)
+        self.assertEqual(result.stderr.count('no glyph for U+F003F ('), 2)
+        self.assertNotIn('no glyph for U+F0040 (', result.stderr)
         # A runtime warning must not send a player to development tooling.
         self.assertNotIn('check_language_fonts', result.stderr)
         # Nor to a font-management panel that the shipping editor lacks.
         self.assertNotIn('under Fonts', result.stderr)
-        self.assertIn("[fonts] in the source pack's pack.ini", result.stderr)
+        self.assertIn("affected role's fallback list", result.stderr)
 
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(prefix='ar-font-coverage-')

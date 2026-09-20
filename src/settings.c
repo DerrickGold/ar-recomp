@@ -32,15 +32,7 @@ Settings g_settings;
 static SettingsChangeObserver s_change_observer;
 static SettingsActionObserver s_action_observer;
 
-/* Descriptor-backed settings grew past the original round-number reserve when
- * the five SIM D1 A/B controls landed.  This is fixed boot storage, not a
- * serialized limit; leave useful headroom for the remaining SIM stages. */
-/* Sized with headroom rather than to the current table: this backs
- * s_config_layer, and Settings_InitWithFile aborts the moment the table
- * outgrows it, so a cap that tracks the count exactly turns every new setting
- * into a crash on boot. */
 enum {
-  kSettingsMaxDescriptors = 320,
   kSettingsLayerValueSize = 512,
   kSettingsIniLineCapacity = 1024,
 };
@@ -3783,10 +3775,6 @@ bool Settings_IgnoreAspectRatio(void) {
 
 void Settings_SetHdReplacementsAvailable(bool available) {
   s_hd_replacements_available = available;
-}
-
-bool Settings_HdReplacementsAvailable(void) {
-  return s_hd_replacements_available;
 }
 
 /* Backing pixels per window point (SDL_GetWindowPixelDensity), pushed from

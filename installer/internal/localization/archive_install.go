@@ -100,7 +100,7 @@ func setArchiveEnabled(root, key, id, expected string, enabled bool) error {
 		if err != nil {
 			return err
 		}
-		if _, _, err = p.Installation(); err != nil {
+		if err = p.checkInstallable(); err != nil {
 			return err
 		}
 		rows, err := ListInstalledPacks(root)
@@ -159,59 +159,71 @@ func uninstallArchive(root, key, id, expected string) (string, error) {
 	return backup, nil
 }
 
-// InstallLanguageArchive copies a complete publication, never extracts over a
-// working directory or grants publishing rights. The game checks fonts on use.
-func InstallLanguageArchive(root, source string, replace bool) (string, error) {
+// InstallLanguageArchive installs a complete publication, upgrading a v1 copy
+// to v2 without changing the source or granting publishing rights.
+// The game checks fonts on use.
+func InstallLanguageArchive(root, source string, replace bool) (string, InstallationReport, error) {
+	var report InstallationReport
 	f, err := openRegularAuthorFile(source)
 	if err != nil {
-		return "", err
+		return "", report, err
 	}
 	defer f.Close()
 	info, err := f.Stat()
 	if err != nil {
-		return "", err
+		return "", report, err
 	}
 	index, err := inspectAuthorArchive(f, info.Size())
 	if err != nil {
-		return "", err
+		return "", report, err
 	}
 	if err = requirePublication(index); err != nil {
-		return "", err
+		return "", report, err
 	}
 	data, err := io.ReadAll(io.LimitReader(f, MaxAuthorArchiveBytes+1))
 	if err != nil {
-		return "", err
+		return "", report, err
 	}
 	if int64(len(data)) != info.Size() {
-		return "", fmt.Errorf("archive changed while reading")
+		return "", report, fmt.Errorf("archive changed while reading")
 	}
 	index, err = inspectAuthorArchive(bytes.NewReader(data), int64(len(data)))
 	if err != nil {
-		return "", err
+		return "", report, err
 	}
 	if err = requirePublication(index); err != nil {
-		return "", err
+		return "", report, err
 	}
 	p, err := ReadAuthorArchive(bytes.NewReader(data), int64(len(data)))
 	if err != nil {
-		return "", err
+		return "", report, err
 	}
-	if _, _, err = p.Installation(); err != nil {
-		return "", err
+	prepared, report, err := p.Installation()
+	if err != nil {
+		return "", report, err
+	}
+	if report.Upgrade != nil {
+		var upgraded bytes.Buffer
+		// requirePublication already verified this is a distributed publication.
+		// Do not run Publication again: it would filter supplied messages.
+		if err := prepared.writeArchive(&upgraded, "publication"); err != nil {
+			return "", report, err
+		}
+		data = upgraded.Bytes()
 	}
 	if err = makeAuthorDirectory(root); err != nil {
-		return "", err
+		return "", report, err
 	}
 	unlock, err := authorLock(root)
 	if err != nil {
-		return "", err
+		return "", report, err
 	}
 	defer unlock()
 	id := p.Pack().Manifest().Metadata().ID
 	key := id + ".arlang"
 	rows, err := ListInstalledPacks(root)
 	if err != nil {
-		return "", err
+		return "", report, err
 	}
 	active := 0
 	found := false
@@ -221,26 +233,26 @@ func InstallLanguageArchive(root, source string, replace bool) (string, error) {
 		}
 		if strings.EqualFold(other.Metadata.ID, id) {
 			if found || !replace || !other.Archive {
-				return "", fmt.Errorf("package ID %s is already installed; remove conflicting copies or explicitly replace its archive", id)
+				return "", report, fmt.Errorf("package ID %s is already installed; remove conflicting copies or explicitly replace its archive", id)
 			}
 			key, found = other.Key, true
 		}
 	}
 	if enabled, err := archiveEnabled(root, id); err != nil {
-		return "", err
+		return "", report, err
 	} else if enabled && !found && active >= MaximumEnabledPacks {
-		return "", fmt.Errorf("only %d enabled packages are supported", MaximumEnabledPacks)
+		return "", report, fmt.Errorf("only %d enabled packages are supported", MaximumEnabledPacks)
 	}
 	path := filepath.Join(root, key)
 	if !found {
 		if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
-			return "", fmt.Errorf("installation target already exists or cannot be inspected")
+			return "", report, fmt.Errorf("installation target already exists or cannot be inspected")
 		}
 	}
 	if err = atomicAuthorFile(path, func(w io.Writer) error { _, err := w.Write(data); return err }); err != nil {
-		return "", err
+		return "", report, err
 	}
-	return path, nil
+	return path, report, nil
 }
 
 func cacheVersionValid(token string) bool {
@@ -343,7 +355,7 @@ func prepareArchive(root, key string) (string, string, error) {
 	if err != nil {
 		return "", "", err
 	}
-	if _, _, err = p.Installation(); err != nil {
+	if err = p.checkInstallable(); err != nil {
 		return "", "", err
 	}
 	version, err := os.MkdirTemp(object, "v-")

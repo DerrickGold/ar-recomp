@@ -97,6 +97,8 @@ static void WriteNativeFixture(bool oversized) {
     const bool speed = !strcmp(id, "system.message_speed.choose");
     if (!strcmp(id, "title.save_choice.labels"))
       fputs("Continue fixture\n@line\nNew fixture\n", file);
+    else if (!strcmp(id, "title.copyright"))
+      fputs("Footer first\n@line\nFooter second\n@line\nFooter third\n", file);
     else if (!strcmp(id, "city.fillmore.name"))
       fputs("Town fixture\n", file);
     else if (!strcmp(id, "action.hud.pause"))
@@ -538,6 +540,18 @@ static void TestTitleTransformHandoff(void) {
   CHECK(FrameHasText("Continue fixture"));
   CHECK(FrameHasText("New fixture"));
   CHECK(s_frame.cells.count == 2); /* Separate fixed cells for the two choices. */
+  CpuState copyright = title;
+  copyright.Y = 0xa9de;
+  copyright.A = 0x1700;
+  CHECK(!ActRaiser_LocalizationObserveTextCompose(&copyright));
+  Capture();
+  CHECK(FrameHasText("Footer first\nFooter second\nFooter third"));
+  const ArTextCellRecord *footer = ArTextCellRecordSet_Find(
+      &s_frame.cells, kActRaiserLocalizationTitleCopyrightSurface);
+  CHECK(footer && footer->region.row == 23 && footer->region.rows == 5);
+  CHECK(footer && s_frame.snapshots[footer->snapshot_slot].layout ==
+                      kArLocalizationTextLayout_CenteredBlock);
+  CHECK(FrameHasText("Continue fixture") && FrameHasText("New fixture"));
   CpuState professional = title;
   professional.Y = 0xaa60;
   professional.A = 0x110c;
@@ -553,6 +567,7 @@ static void TestTitleTransformHandoff(void) {
   /* A native redraw queued on the same frame as the spin must also retire,
    * rather than recreating a replacement after the transform check. */
   CHECK(!ActRaiser_LocalizationObserveTextCompose(&title));
+  CHECK(!ActRaiser_LocalizationObserveTextCompose(&copyright));
   CaptureWithTransform(true);
   CHECK(s_frame.cells.count == 0 && s_frame.snapshot_count == 0);
 
@@ -926,6 +941,54 @@ static void TestPartialRtlSources(void) {
   s_installed_pack_path = NULL;
 }
 
+static unsigned s_legacy_notices;
+static bool s_legacy_native;
+static void LegacyNotice(void *context, const char *manifest,
+                         const ArLanguagePackMetadata *metadata, bool native) {
+  CHECK(context == &s_legacy_notices && manifest &&
+        metadata->format_version == 1);
+  ++s_legacy_notices;
+  s_legacy_native = native;
+}
+
+static void TestLegacySelectionGate(ActRaiserLocalizationPackHost host) {
+  ActRaiserLocalizationRuntime_Shutdown();
+  ActRaiserLocalizationText_ResetObservation();
+  host.require_v2 = true;
+  host.context = &s_legacy_notices;
+  host.legacy_pack = LegacyNotice;
+  ActRaiserLocalizationRuntime_SetPackHost(&host);
+  const unsigned reads = s_pack_reads, fonts = s_font_preflights;
+  g_settings.localization_content = 1;
+  g_settings.localization_presentation = 0;
+  ActRaiserLocalizationRuntime_ApplySettings();
+  CHECK(s_pack_reads == reads && !s_legacy_notices);
+  g_settings.localization_presentation = 1;
+  ActRaiserLocalizationRuntime_ApplySettings();
+  CHECK(s_legacy_notices == 1 && !s_legacy_native);
+  CHECK(s_pack_reads == reads + 1); /* Manifest only, no v1 script or font. */
+  CHECK(g_settings.localization_content == 1 &&
+        g_settings.localization_presentation == 1);
+  for (unsigned i = 0; i < 3; ++i) {
+    Capture();
+    CHECK(!s_frame.snapshot_count &&
+          !ActRaiserLocalizationRuntime_DialogueScheduled());
+  }
+  CHECK(s_pack_reads == reads + 1 && s_legacy_notices == 1 &&
+        s_font_preflights == fonts);
+  g_settings.localization_content = 0;
+  ActRaiserLocalizationRuntime_ApplySettings();
+  CHECK(s_legacy_notices == 2 && s_legacy_native);
+  CHECK(g_settings.localization_content == 0 &&
+        g_settings.localization_presentation == 1);
+  /* Choosing Native and then attempting enhanced again is a new attempt. */
+  g_settings.localization_presentation = 0;
+  ActRaiserLocalizationRuntime_ApplySettings();
+  g_settings.localization_presentation = 1;
+  ActRaiserLocalizationRuntime_ApplySettings();
+  CHECK(s_legacy_notices == 3 && s_legacy_native);
+}
+
 int main(void) {
   TestStructuredNormalization();
   WriteNativeFixture(false);
@@ -1145,6 +1208,7 @@ int main(void) {
   TestUnicodeNameHandoff();
   TestCreditsWithoutDialogueObservation();
   TestPartialRtlSources();
+  TestLegacySelectionGate(pack_host);
   ActRaiserLocalizationRuntime_Shutdown();
   ActRaiserLocalizationRuntime_SetPackHost(NULL);
   CHECK(s_pack_reads > 0 && s_pack_reads == s_pack_releases);

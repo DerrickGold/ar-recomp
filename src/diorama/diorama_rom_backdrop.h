@@ -53,10 +53,4 @@ bool DioramaRomBackdrop_LoadActionBgSparse(
     uint32_t *out_argb, size_t out_pixel_count,
     uint32_t *out_default_fill_argb);
 
-/* Compatibility wrapper for the named source that originally established
- * this seam. Equivalent to LoadActionBg($04,$01,BG2). */
-bool DioramaRomBackdrop_LoadAitosSky(const uint8_t *rom, size_t rom_size,
-                                    uint32_t *out_argb,
-                                    size_t out_pixel_count);
-
 #endif  /* DIORAMA_ROM_BACKDROP_H */

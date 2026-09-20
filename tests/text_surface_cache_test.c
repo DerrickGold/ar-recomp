@@ -301,6 +301,39 @@ static void TestAbiValidation(void) {
 
   ArTextRasterRequest request = Request("Texte");
   CHECK(ArTextRasterRequest_IsValid(&request));
+  ArTextRunAppearance appearance = {.font_role = "body",
+                                    .scale_basis = 10000,
+                                    .band_rgb = 0xffffff,
+                                    .body_rgb = 0xffffff};
+  const ArTextCacheKey unstyled =
+      ArTextSurfaceCache_MakeKey(&rasterizer, &request);
+  request.appearance = &appearance;
+  CHECK(ArTextRasterRequest_IsValid(&request));
+  const ArTextCacheKey styled =
+      ArTextSurfaceCache_MakeKey(&rasterizer, &request);
+  CHECK(!ArTextCacheKey_Equals(unstyled, styled));
+  ArTextAppearanceSpan painted = {
+      .start = 1, .end = 4, .appearance = appearance};
+  painted.appearance.body_rgb = 0xffcc00;
+  request.appearance_spans = &painted;
+  request.appearance_span_count = 1;
+  CHECK(ArTextRasterRequest_IsValid(&request));
+  const ArTextCacheKey painted_key =
+      ArTextSurfaceCache_MakeKey(&rasterizer, &request);
+  CHECK(!ArTextCacheKey_Equals(styled, painted_key));
+  painted.appearance.scale_basis = 8000;
+  CHECK(!ArTextCacheKey_Equals(
+      painted_key, ArTextSurfaceCache_MakeKey(&rasterizer, &request)));
+  painted.appearance.scale_basis = 0;
+  CHECK(!ArTextRasterRequest_IsValid(&request));
+  painted.appearance = appearance;
+  request.appearance = NULL;
+  CHECK(!ArTextRasterRequest_IsValid(&request));
+  request = Request("Élise");
+  request.appearance = &appearance;
+  request.appearance_spans = &painted;
+  request.appearance_span_count = 1;
+  CHECK(!ArTextRasterRequest_IsValid(&request)); /* interior UTF-8 byte */
   uint8_t preferred[AR_TEXT_BOUNDARY_BYTES(16)] = {0};
   request = Request("A B");
   const ArTextCacheKey ordinary =

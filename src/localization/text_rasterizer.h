@@ -5,12 +5,14 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "render/render_types.h"
+#include "localization/font_resource.h"
 #include "localization/text_bidi.h"
+#include "localization/text_template.h"
+#include "render/render_types.h"
 
 #define AR_TEXT_RASTERIZER_ABI_VERSION UINT32_C(2)
-#define AR_TEXT_RASTER_REQUEST_ABI_VERSION UINT32_C(13)
-#define AR_TEXT_BITMAP_ABI_VERSION UINT32_C(5)
+#define AR_TEXT_RASTER_REQUEST_ABI_VERSION UINT32_C(14)
+#define AR_TEXT_BITMAP_ABI_VERSION UINT32_C(7)
 
 enum { kArTextRasterErrorCapacity = 256 };
 
@@ -135,6 +137,14 @@ typedef struct ArTextRasterRequest {
   bool align_pixelation_grid;
   int pixelation_grid_x;
   int pixelation_grid_y;
+  /* Optional template-resolved appearance. Null keeps the legacy whole-text
+   * fields above. Spans are sorted, nonoverlapping, and use the owning source's
+   * UTF-8 offsets, just like bidi spans; gaps inherit this default appearance.
+   */
+  const ArTextRunAppearance *appearance;
+  const ArTextAppearanceSpan *appearance_spans;
+  size_t appearance_span_count;
+  uint32_t appearance_source_offset;
 } ArTextRasterRequest;
 
 typedef struct ArTextRevealCluster {
@@ -146,6 +156,23 @@ typedef struct ArTextRevealCluster {
   int width;
   int height;
 } ArTextRevealCluster;
+
+typedef struct ArTextLineMetrics {
+  /* Relative to the bitmap origin; top can be negative after ink cropping.
+   * Height includes the minimum strut and leading reserved for this line. */
+  int top, baseline, height;
+} ArTextLineMetrics;
+
+/* Actual font used for a shaped logical range, after fallback and fitting.
+ * Overlapping ranges can use different fonts for a combining cluster. IDs
+ * identify registered bytes; no backend font handles escape. font_pixels is
+ * before any host low-resolution enlargement. */
+typedef struct ArTextFontUse {
+  uint32_t start, end;
+  ArFontResourceId resource;
+  uint16_t font_pixels;
+  bool missing;
+} ArTextFontUse;
 
 /* Backend-owned CPU bitmap. It remains valid until release_bitmap(). Pixel
  * format names use the portable render-device vocabulary, so upload code does
@@ -180,6 +207,10 @@ typedef struct ArTextBitmap {
    * of the laid-out text, so the layout origin is (-crop_left, -crop_top). */
   int crop_left;
   int crop_top;
+  const ArTextLineMetrics *lines;
+  size_t line_count;
+  const ArTextFontUse *font_uses;
+  size_t font_use_count;
 } ArTextBitmap;
 
 /* Why a rasterization failed, so a caller can tell "this request can never
@@ -291,5 +322,9 @@ bool ArTextBitmap_ApplyClusterAccent(void *pixels, int width, int height,
                                      const ArTextRevealCluster *clusters,
                                      size_t cluster_count, uint32_t utf8_end,
                                      uint32_t rgb);
+
+/* Shared band interpolation for uniform and mixed-appearance raster paths. */
+uint32_t ArTextStyle_BandColor(uint32_t band_rgb, uint32_t body_rgb, int row,
+                               int last_row);
 
 #endif /* AR_LOCALIZATION_TEXT_RASTERIZER_H */

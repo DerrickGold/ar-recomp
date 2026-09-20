@@ -33,7 +33,7 @@ func (app *application) prepareLocalizationFontSave(w http.ResponseWriter, r *ht
 	if err = app.checkLocalizationIdentity(q.ProjectID, q.Revision); err != nil {
 		return q, cleanup, err
 	}
-	if !q.SaveFonts || len(q.FontPaths) > 9 || len(r.MultipartForm.File) != len(q.FontPaths) {
+	if !q.SaveFonts || len(q.FontPaths) > 81 || len(r.MultipartForm.File) != len(q.FontPaths) {
 		return q, cleanup, fmt.Errorf("invalid font upload count")
 	}
 	q.fontUploads = make(map[string][]byte)

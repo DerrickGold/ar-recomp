@@ -48,9 +48,12 @@ typedef struct DialoguePage {
   uint32_t cluster_count;
   ArTextBidiSpan *bidi_spans;
   uint32_t bidi_span_count, bidi_span_capacity;
+  ArTextTemplateSpan *style_spans;
+  uint32_t style_span_count, style_span_capacity;
 } DialoguePage;
 
 typedef struct DialogueProgram {
+  uint32_t format_version;
   DialoguePage *pages;
   uint32_t page_count;
   uint32_t page_capacity;
@@ -61,14 +64,15 @@ typedef struct DialogueProgram {
   char package_id[kArLanguagePackageIdCapacity];
   char locale[kArLanguageLocaleCapacity];
   ArLanguageDirection direction;
+  ArTextTemplateStyle default_style;
+  char layout[kArTextTemplateRoleCapacity];
+  uint8_t numerals;
+  char source_path[1024];
+  char resolved_message_id[kArDialogueMessageIdCapacity];
+  uint32_t source_line;
+  ArDialogueTreatmentDefinition *treatments;
+  size_t treatment_count;
 } DialogueProgram;
-
-typedef struct ProgramSource {
-  const ArLanguagePack *effective_pack;
-  const ArLanguagePack *term_fallback_pack;
-  const ArLanguageMessage *message;
-  ArDialogueResolvedSource resolved_source;
-} ProgramSource;
 
 static void SetError(ArLanguagePackError *error, const char *format, ...) {
   if (!error)
@@ -132,12 +136,14 @@ static void DestroyPage(DialoguePage *page) {
   free(page->cues);
   free(page->objects);
   free(page->bidi_spans);
+  free(page->style_spans);
   memset(page, 0, sizeof(*page));
 }
 
 static void DestroyProgram(DialogueProgram *program) {
   if (!program)
     return;
+  free(program->treatments);
   for (uint32_t i = 0; i < program->page_count; i++)
     DestroyPage(&program->pages[i]);
   free(program->pages);
@@ -331,10 +337,20 @@ static bool AppendPlainMessage(const ArLanguagePack *pack,
   const ArLanguageMessage *body = ResolveAlias(pack, message);
   if (!body)
     return false;
+  if (body->default_style || body->layout.length || body->numerals) {
+    SetError(error,
+             "localized terms inherit appearance from their placeholder");
+    return false;
+  }
   size_t used = 0;
   for (uint32_t i = 0; i < body->operation_count; i++) {
     const ArLanguageOperation *operation =
         ArLanguagePack_GetOperation(pack, body, i);
+    if (!operation || operation->text_style) {
+      SetError(error,
+               "localized terms inherit appearance from their placeholder");
+      return false;
+    }
     const char *value = NULL;
     if (operation->kind == kArLanguageOperation_Text)
       value = ArLanguagePack_GetString(pack, operation->value.text);
@@ -366,7 +382,7 @@ static bool AppendPlainMessage(const ArLanguagePack *pack,
   return true;
 }
 
-static bool ResolveLocalizedTerm(const ProgramSource *source, const char *id,
+static bool ResolveLocalizedTerm(const ArDialogueSource *source, const char *id,
                                  char *output, size_t capacity,
                                  ArTextDirection *direction,
                                  ArLanguagePackError *error) {
@@ -396,12 +412,11 @@ static bool ResolveLocalizedTerm(const ProgramSource *source, const char *id,
   return false;
 }
 
-static bool AppendValue(const ProgramSource *source,
+static bool AppendValue(const ArDialogueSource *source,
                         const ArDialogueStableState *state,
                         const ArDialogueValueResolver *resolver,
                         DialoguePage *page, const char *name,
-                        unsigned minimum_digits,
-                        ArLanguagePackError *error) {
+                        unsigned minimum_digits, ArLanguagePackError *error) {
   const ArDialogueValue *value = FindValue(state, name);
   if (!value) {
     SetError(error, "dialogue value '%s' was not snapshotted", name);
@@ -479,6 +494,7 @@ static size_t ByteOffsetForClusters(const DialoguePage *page,
 static bool FinalizePage(DialoguePage *page, ArLanguagePackError *error) {
   size_t offset = 0;
   uint32_t clusters = 0, cue = 0, span = 0;
+  uint32_t style_index = 0;
   for (;;) {
     while (cue < page->cue_count && page->cues[cue].utf8_offset <= offset) {
       if (page->cues[cue].utf8_offset != offset) {
@@ -502,6 +518,18 @@ static bool FinalizePage(DialoguePage *page, ArLanguagePackError *error) {
       if (value->end <= next) { value->end = (uint32_t)next; ++span; }
       else break;
     }
+    while (style_index < page->style_span_count &&
+           page->style_spans[style_index].start < next) {
+      const ArTextTemplateSpan *style = &page->style_spans[style_index];
+      if (style->start > offset || (style->end > offset && style->end < next)) {
+        SetError(error, "text style boundary splits a Unicode grapheme");
+        return false;
+      }
+      if (style->end <= next)
+        ++style_index;
+      else
+        break;
+    }
     offset = next;
     ++clusters;
   }
@@ -522,7 +550,35 @@ static bool FinalizePage(DialoguePage *page, ArLanguagePackError *error) {
   return true;
 }
 
-static bool BuildProgram(const ProgramSource *source,
+static bool AppendTextStyle(DialoguePage *page, size_t start,
+                            const ArTextTemplateStyle *style,
+                            ArLanguagePackError *error) {
+  if (!style || start == page->utf8_bytes)
+    return true;
+  if (page->style_span_count) {
+    ArTextTemplateSpan *previous =
+        &page->style_spans[page->style_span_count - 1];
+    if (previous->end == start &&
+        ArTextTemplate_StyleEqual(&previous->style, style)) {
+      previous->end = (uint32_t)page->utf8_bytes;
+      return true;
+    }
+  }
+  if (page->style_span_count == kArTextTemplateMaximumRuns) {
+    SetError(error, "dialogue page has too many style spans");
+    return false;
+  }
+  if (!Reserve((void **)&page->style_spans, sizeof(*page->style_spans),
+               page->style_span_count + 1, &page->style_span_capacity, error))
+    return false;
+  page->style_spans[page->style_span_count++] =
+      (ArTextTemplateSpan){.start = (uint32_t)start,
+                           .end = (uint32_t)page->utf8_bytes,
+                           .style = *style};
+  return true;
+}
+
+static bool BuildProgram(const ArDialogueSource *source,
                          const ArDialogueStableState *state,
                          const ArDialogueValueResolver *resolver,
                          DialogueProgram **out_program,
@@ -537,6 +593,28 @@ static bool BuildProgram(const ProgramSource *source,
       ArLanguagePack_GetMetadata(source->effective_pack);
   program->source_revision = source->effective_pack->content_revision;
   program->direction = metadata->direction;
+  program->format_version = metadata->format_version;
+  program->treatment_count = source->effective_pack->treatment_count;
+  if (program->treatment_count) {
+    program->treatments =
+        calloc(program->treatment_count, sizeof(*program->treatments));
+    if (!program->treatments) {
+      SetError(error, "out of memory retaining dialogue styles");
+      goto failed;
+    }
+    for (size_t i = 0; i < program->treatment_count; ++i) {
+      const ArLanguageNamedTreatment *source_style =
+          &source->effective_pack->treatments[i];
+      ArDialogueTreatmentDefinition *style = &program->treatments[i];
+      style->definition = source_style->definition;
+      style->source_line = source_style->source_line;
+      if (!CopyBounded(style->source_path, sizeof(style->source_path),
+                       ArLanguagePack_GetString(source->effective_pack,
+                                                source_style->source_path),
+                       "style path", error))
+        goto failed;
+    }
+  }
   if (!CopyBounded(program->package_id, sizeof(program->package_id),
                    metadata->package_id, "package id", error) ||
       !CopyBounded(program->locale, sizeof(program->locale), metadata->locale,
@@ -552,6 +630,27 @@ static bool BuildProgram(const ProgramSource *source,
     SetError(error, "%s: could not resolve message alias", state->message_id);
     goto failed;
   }
+  const ArTextTemplateStyle *defaults =
+      ArLanguagePack_GetTextStyle(source->effective_pack, body->default_style);
+  if (defaults)
+    program->default_style = *defaults;
+  program->numerals = body->numerals;
+  program->source_line = body->source_line;
+  if (!CopyBounded(
+          program->layout, sizeof(program->layout),
+          body->layout.length
+              ? ArLanguagePack_GetString(source->effective_pack, body->layout)
+              : "",
+          "layout", error) ||
+      !CopyBounded(
+          program->source_path, sizeof(program->source_path),
+          ArLanguagePack_GetString(source->effective_pack, body->source_path),
+          "template path", error) ||
+      !CopyBounded(program->resolved_message_id,
+                   sizeof(program->resolved_message_id),
+                   ArLanguagePack_GetString(source->effective_pack, body->id),
+                   "message id", error))
+    goto failed;
   for (uint32_t i = 0; i < body->operation_count; i++) {
     const ArLanguageOperation *operation =
         ArLanguagePack_GetOperation(source->effective_pack, body, i);
@@ -559,6 +658,7 @@ static bool BuildProgram(const ProgramSource *source,
       SetError(error, "%s: invalid message operation", state->message_id);
       goto failed;
     }
+    const size_t text_start = page->utf8_bytes;
     switch (operation->kind) {
     case kArLanguageOperation_Text: {
       const char *text = ArLanguagePack_GetString(source->effective_pack,
@@ -639,6 +739,13 @@ static bool BuildProgram(const ProgramSource *source,
                state->message_id);
       goto failed;
     }
+    if ((operation->kind == kArLanguageOperation_Text ||
+         operation->kind == kArLanguageOperation_Placeholder) &&
+        !AppendTextStyle(page, text_start,
+                         ArLanguagePack_GetTextStyle(source->effective_pack,
+                                                     operation->text_style),
+                         error))
+      goto failed;
   }
   for (uint32_t i = 0; i < program->page_count; i++) {
     if (!FinalizePage(&program->pages[i], error)) goto failed;
@@ -651,96 +758,60 @@ failed:
   return false;
 }
 
-static bool ValidatePackMetadataForRuntime(const ArLanguagePack *pack,
-                                           bool required,
-                                           ArLanguagePackError *error) {
-  if (!pack)
-    return !required;
-  const ArLanguagePackMetadata *metadata = ArLanguagePack_GetMetadata(pack);
-  if (!metadata || metadata->target != kArLanguagePackTarget_UsRuntime ||
-      metadata->source_profile != kArLanguageSourceProfile_Us) {
-    if (required)
-      SetError(error, "runtime language pack must target the U.S. contract");
+static bool ValidateContract(const ArDialogueContract *contract,
+                             ArLanguagePackError *error) {
+  if (!contract || contract->value_count > kArDialogueMaximumValues ||
+      contract->control_count > kMaximumDialogueCues) {
+    SetError(error, "invalid dialogue contract limits");
     return false;
   }
-  return true;
-}
-
-static bool ValidateMessageForRuntime(const ArLanguagePack *pack,
-                                      const char *semantic_id, bool required,
-                                      ArLanguagePackError *error) {
-  if (!ValidatePackMetadataForRuntime(pack, required, error))
-    return false;
-  ArLanguagePackError detail;
-  if (!ArLanguageContract_ValidateMessage(pack, semantic_id, &detail)) {
-    if (required)
-      SetError(error, "%s", detail.message);
-    return false;
-  }
-  return true;
-}
-
-static bool SelectProgramSource(const ArDialogueContentSelection *selection,
-                                const char *semantic_id,
-                                ProgramSource *source,
-                                ArLanguagePackError *error) {
-  memset(source, 0, sizeof(*source));
-  if (!selection ||
-      selection->struct_size <
-          AR_MEMBER_END(ArDialogueContentSelection,
-                        native_us_enhanced_pack) ||
-      selection->abi_version != AR_DIALOGUE_SESSION_ABI_VERSION ||
-      selection->presentation < kArDialoguePresentation_NativeRetail ||
-      selection->presentation > kArDialoguePresentation_Enhanced) {
-    SetError(error, "invalid dialogue content selection");
-    return false;
-  }
-  if (selection->selected_pack &&
-      selection->presentation != kArDialoguePresentation_Enhanced) {
-    SetError(error, "community language packs require enhanced presentation");
-    return false;
-  }
-  if (selection->selected_pack) {
-    source->message =
-        ArLanguagePack_FindMessage(selection->selected_pack, semantic_id);
-    if (source->message) {
-      if (!ValidateMessageForRuntime(selection->selected_pack, semantic_id,
-                                     true, error))
-        return false;
-      source->effective_pack = selection->selected_pack;
-      source->term_fallback_pack =
-          ValidatePackMetadataForRuntime(selection->native_us_enhanced_pack,
-                                         false, NULL)
-              ? selection->native_us_enhanced_pack
-              : NULL;
-      source->resolved_source = kArDialogueResolvedSource_SelectedPack;
-      return true;
+  for (uint32_t i = 0; i < contract->value_count; ++i) {
+    const ArDialogueValueSpec *value = &contract->values[i];
+    if (!value->name[0] ||
+        !FixedStringTerminated(value->name, sizeof(value->name)) ||
+        value->kind <= kArLanguagePlaceholder_Unknown ||
+        value->kind > kArLanguagePlaceholder_Icon) {
+      SetError(error, "invalid dialogue value contract");
+      return false;
     }
-  }
-  if ((!selection->selected_pack &&
-       selection->presentation == kArDialoguePresentation_Enhanced) ||
-      selection->selected_pack) {
-    if (ValidateMessageForRuntime(selection->native_us_enhanced_pack,
-                                  semantic_id, false, NULL)) {
-      source->message = ArLanguagePack_FindMessage(
-          selection->native_us_enhanced_pack, semantic_id);
-      if (source->message) {
-        source->effective_pack = selection->native_us_enhanced_pack;
-        source->term_fallback_pack = selection->native_us_enhanced_pack;
-        source->resolved_source = kArDialogueResolvedSource_NativeEnhanced;
-        return true;
+    for (uint32_t j = 0; j < i; ++j) {
+      if (!strcmp(value->name, contract->values[j].name)) {
+        SetError(error, "duplicate dialogue value contract '%s'", value->name);
+        return false;
       }
     }
   }
-  source->resolved_source = kArDialogueResolvedSource_NativeRom;
+  return true;
+}
+
+static bool ValidateSource(const ArDialogueSource *source,
+                           const char *message_id, ArLanguagePackError *error) {
+  if (!source || !message_id || !message_id[0] ||
+      source->presentation < kArDialoguePresentation_NativeRetail ||
+      source->presentation > kArDialoguePresentation_Enhanced ||
+      source->resolved_source < kArDialogueResolvedSource_NativeRom ||
+      source->resolved_source > kArDialogueResolvedSource_SelectedPack) {
+    SetError(error, "invalid resolved dialogue source");
+    return false;
+  }
+  if (source->resolved_source == kArDialogueResolvedSource_NativeRom)
+    return true;
+  if (!ArLanguagePack_GetMetadata(source->effective_pack) || !source->message ||
+      ArLanguagePack_FindMessage(source->effective_pack, message_id) !=
+          source->message ||
+      (source->term_fallback_pack &&
+       !ArLanguagePack_GetMetadata(source->term_fallback_pack))) {
+    SetError(error, "dialogue source does not own the requested message");
+    return false;
+  }
   return true;
 }
 
 static bool SnapshotValues(ArDialogueStableState *state,
+                           const ArDialogueContract *contract,
                            const ArDialogueValueResolver *resolver,
                            ArLanguagePackError *error) {
-  const uint32_t count =
-      ArLanguageContract_AllowedPlaceholderCount(state->message_id);
+  const uint32_t count = contract->value_count;
   if (count > kArDialogueMaximumValues) {
     SetError(error, "%s requires too many dynamic values", state->message_id);
     return false;
@@ -752,11 +823,9 @@ static bool SnapshotValues(ArDialogueStableState *state,
   }
   state->value_count = count;
   for (uint32_t i = 0; i < count; i++) {
-    const char *name =
-        ArLanguageContract_AllowedPlaceholder(state->message_id, i);
+    const char *name = contract->values[i].name;
     ArDialogueValue value = {0};
-    const ArLanguagePlaceholderKind kind =
-        ArLanguageContract_PlaceholderKind(name);
+    const ArLanguagePlaceholderKind kind = contract->values[i].kind;
     if (!resolver->resolve(resolver->context, name, kind, &value,
                            error ? error->message : NULL,
                            error ? sizeof(error->message) : 0)) {
@@ -791,9 +860,9 @@ static bool SnapshotValues(ArDialogueStableState *state,
 }
 
 static bool ValidateStableValues(const ArDialogueStableState *state,
+                                 const ArDialogueContract *contract,
                                  ArLanguagePackError *error) {
-  const uint32_t expected =
-      ArLanguageContract_AllowedPlaceholderCount(state->message_id);
+  const uint32_t expected = contract->value_count;
   if (state->value_count != expected ||
       state->value_count > kArDialogueMaximumValues) {
     SetError(error, "%s: saved dynamic-value set is incompatible",
@@ -818,11 +887,9 @@ static bool ValidateStableValues(const ArDialogueStableState *state,
     }
   }
   for (uint32_t i = 0; i < expected; i++) {
-    const char *name =
-        ArLanguageContract_AllowedPlaceholder(state->message_id, i);
+    const char *name = contract->values[i].name;
     const ArDialogueValue *value = FindValue(state, name);
-    const ArLanguagePlaceholderKind kind =
-        ArLanguageContract_PlaceholderKind(name);
+    const ArLanguagePlaceholderKind kind = contract->values[i].kind;
     if (!value || value->kind != kind ||
         (kind != kArLanguagePlaceholder_Number &&
          (!value->text[0] || !ValidUtf8(value->text)))) {
@@ -983,23 +1050,27 @@ static void MapProgramProgress(ArDialogueSession *session,
   session->private_cue_index = cue_index;
 }
 
-static bool ActivateSelection(ArDialogueSession *session,
-                              const ArDialogueContentSelection *selection,
-                              const ArDialogueStableState *stable,
-                              size_t maximum_text_bytes,
-                              ArLanguagePackError *error) {
-  ProgramSource source;
-  if (!SelectProgramSource(selection, stable->message_id, &source, error))
+static bool ActivateSource(ArDialogueSession *session,
+                           const ArDialogueSource *source,
+                           const ArDialogueStableState *stable,
+                           size_t maximum_text_bytes,
+                           ArLanguagePackError *error) {
+  if (!ValidateSource(source, stable->message_id, error))
     return false;
   DialogueProgram *program = NULL;
-  if (source.resolved_source != kArDialogueResolvedSource_NativeRom &&
-      !BuildProgram(&source, stable,
+  if (source->resolved_source != kArDialogueResolvedSource_NativeRom &&
+      !BuildProgram(source, stable,
                     session->private_has_resolver ? &session->private_resolver
                                                   : NULL,
                     &program, error))
     return false;
 
   if (program) {
+    if (program->control_count != session->private_contract.control_count) {
+      SetError(error, "dialogue controls do not match the supplied contract");
+      DestroyProgram(program);
+      return false;
+    }
     size_t remaining = maximum_text_bytes;
     size_t remaining_spans = kArTextMaximumBidiSpans;
     for (uint32_t i = 0; i < program->page_count; ++i) {
@@ -1033,7 +1104,7 @@ static bool ActivateSelection(ArDialogueSession *session,
   session->private_cue_index = 0;
   session->private_revealed_utf8_bytes = 0;
   if (program) {
-    session->state.presentation = selection->presentation;
+    session->state.presentation = source->presentation;
     session->state.resolved_source = program->resolved_source;
     session->state.source_revision = program->source_revision;
     snprintf(session->state.package_id, sizeof(session->state.package_id),
@@ -1050,7 +1121,7 @@ static bool ActivateSelection(ArDialogueSession *session,
       session->private_revealed_utf8_bytes = last->utf8_bytes;
     }
   } else {
-    InstallNativeSource(session, selection->presentation);
+    InstallNativeSource(session, source->presentation);
   }
   DestroyProgram(old_program);
   return true;
@@ -1072,27 +1143,18 @@ void ArDialogueSession_Destroy(ArDialogueSession *session) {
   ArDialogueSession_Init(session);
 }
 
-bool ArDialogueSession_Begin(ArDialogueSession *session,
-                             const ArDialogueContentSelection *selection,
-                             const char *semantic_id,
-                             const ArDialogueValueResolver *resolver,
-                             ArLanguagePackError *error) {
-  return ArDialogueSession_BeginBounded(session, selection, semantic_id,
-                                        resolver, 0, error);
-}
-
-bool ArDialogueSession_BeginBounded(ArDialogueSession *session,
-                                    const ArDialogueContentSelection *selection,
-                                    const char *semantic_id,
-                                    const ArDialogueValueResolver *resolver,
-                                    size_t maximum_text_bytes,
-                                    ArLanguagePackError *error) {
+bool ArDialogueSession_BeginSource(ArDialogueSession *session,
+                                   const ArDialogueSource *source,
+                                   const ArDialogueContract *contract,
+                                   const char *semantic_id,
+                                   const ArDialogueValueResolver *resolver,
+                                   size_t maximum_text_bytes,
+                                   ArLanguagePackError *error) {
   if (error)
     error->message[0] = 0;
   if (!IsInitialized(session) || !semantic_id ||
-      !ArLanguageContract_RouteAvailable(semantic_id,
-                                         kArLanguageSourceProfile_Us)) {
-    SetError(error, "unknown or unavailable U.S. dialogue route");
+      !ValidateContract(contract, error)) {
+    SetError(error, "invalid dialogue input or contract");
     return false;
   }
   if (resolver && !ValidateResolver(resolver, false, error))
@@ -1103,17 +1165,17 @@ bool ArDialogueSession_BeginBounded(ArDialogueSession *session,
   };
   if (!CopyBounded(stable.message_id, sizeof(stable.message_id), semantic_id,
                    "semantic message id", error) ||
-      !SnapshotValues(&stable, resolver, error))
+      !SnapshotValues(&stable, contract, resolver, error))
     return false;
 
   ArDialogueSession scratch;
   ArDialogueSession_Init(&scratch);
+  scratch.private_contract = *contract;
   if (resolver) {
     scratch.private_resolver = *resolver;
     scratch.private_has_resolver = true;
   }
-  if (!ActivateSelection(&scratch, selection, &stable, maximum_text_bytes,
-                         error)) {
+  if (!ActivateSource(&scratch, source, &stable, maximum_text_bytes, error)) {
     ArDialogueSession_Destroy(&scratch);
     return false;
   }
@@ -1122,23 +1184,18 @@ bool ArDialogueSession_BeginBounded(ArDialogueSession *session,
   return true;
 }
 
-bool ArDialogueSession_Switch(ArDialogueSession *session,
-                              const ArDialogueContentSelection *selection,
-                              ArLanguagePackError *error) {
-  return ArDialogueSession_SwitchBounded(session, selection, 0, error);
-}
-
-bool ArDialogueSession_SwitchBounded(
-    ArDialogueSession *session, const ArDialogueContentSelection *selection,
-    size_t maximum_text_bytes, ArLanguagePackError *error) {
+bool ArDialogueSession_SwitchSource(ArDialogueSession *session,
+                                    const ArDialogueSource *source,
+                                    size_t maximum_text_bytes,
+                                    ArLanguagePackError *error) {
   if (error)
     error->message[0] = 0;
   if (!IsInitialized(session) || !session->state.message_id[0]) {
     SetError(error, "cannot switch an inactive dialogue session");
     return false;
   }
-  return ActivateSelection(session, selection, &session->state,
-                           maximum_text_bytes, error);
+  return ActivateSource(session, source, &session->state, maximum_text_bytes,
+                        error);
 }
 
 bool ArDialogueSession_Next(ArDialogueSession *session,
@@ -1310,11 +1367,23 @@ bool ArDialogueSession_GetPage(const ArDialogueSession *session,
       .inline_objects = source->objects,
       .inline_object_count = source->object_count,
       .source_revision = program->source_revision,
+      .format_version = program->format_version,
       .package_id = program->package_id,
       .locale = program->locale,
       .direction = program->direction,
       .bidi_spans = source->bidi_spans,
       .bidi_span_count = source->bidi_span_count,
+      .style_spans = source->style_spans,
+      .style_span_count = source->style_span_count,
+      .default_style = program->default_style,
+      .layout = program->layout,
+      .numerals = program->numerals,
+      .source_path = program->source_path,
+      .resolved_message_id = program->resolved_message_id,
+      .message_id = session->state.message_id,
+      .source_line = program->source_line,
+      .treatments = program->treatments,
+      .treatment_count = program->treatment_count,
   };
   return true;
 }
@@ -1340,11 +1409,23 @@ bool ArDialogueSession_GetAuthoredPage(const ArDialogueSession *session,
       .inline_objects = source->objects,
       .inline_object_count = source->object_count,
       .source_revision = program->source_revision,
+      .format_version = program->format_version,
       .package_id = program->package_id,
       .locale = program->locale,
       .direction = program->direction,
       .bidi_spans = source->bidi_spans,
       .bidi_span_count = source->bidi_span_count,
+      .style_spans = source->style_spans,
+      .style_span_count = source->style_span_count,
+      .default_style = program->default_style,
+      .layout = program->layout,
+      .numerals = program->numerals,
+      .source_path = program->source_path,
+      .resolved_message_id = program->resolved_message_id,
+      .message_id = session->state.message_id,
+      .source_line = program->source_line,
+      .treatments = program->treatments,
+      .treatment_count = program->treatment_count,
   };
   return true;
 }
@@ -1356,8 +1437,7 @@ bool ArDialogueSession_ObserveNativeProgress(
     error->message[0] = 0;
   const uint32_t anchor_count =
       IsInitialized(session) && session->state.message_id[0]
-          ? ArLanguageContract_RequiredAnchorCount(
-                session->state.message_id, kArLanguageSourceProfile_Us)
+          ? session->private_contract.control_count
           : 0;
   if (!IsInitialized(session) || !progress ||
       progress->struct_size <
@@ -1482,11 +1562,12 @@ bool ArDialogueSession_ExportState(const ArDialogueSession *session,
   return true;
 }
 
-bool ArDialogueSession_Restore(ArDialogueSession *session,
-                               const ArDialogueContentSelection *selection,
-                               const ArDialogueStableState *state,
-                               const ArDialogueValueResolver *resolver,
-                               ArLanguagePackError *error) {
+bool ArDialogueSession_RestoreSource(ArDialogueSession *session,
+                                     const ArDialogueSource *source,
+                                     const ArDialogueContract *contract,
+                                     const ArDialogueStableState *state,
+                                     const ArDialogueValueResolver *resolver,
+                                     ArLanguagePackError *error) {
   if (error)
     error->message[0] = 0;
   if (!IsInitialized(session) || !state ||
@@ -1494,8 +1575,7 @@ bool ArDialogueSession_Restore(ArDialogueSession *session,
       state->abi_version != AR_DIALOGUE_SESSION_ABI_VERSION ||
       !FixedStringTerminated(state->message_id, sizeof(state->message_id)) ||
       !FixedStringTerminated(state->package_id, sizeof(state->package_id)) ||
-      !ArLanguageContract_RouteAvailable(state->message_id,
-                                         kArLanguageSourceProfile_Us) ||
+      !ValidateContract(contract, error) ||
       state->presentation < kArDialoguePresentation_NativeRetail ||
       state->presentation > kArDialoguePresentation_Enhanced ||
       state->resolved_source < kArDialogueResolvedSource_NativeRom ||
@@ -1504,9 +1584,7 @@ bool ArDialogueSession_Restore(ArDialogueSession *session,
       state->revealed_cluster_count > state->page_cluster_count ||
       state->completed_wait_count > kMaximumDialogueCues ||
       state->wait_frames_total > 3600 ||
-      state->completed_control_count >
-          ArLanguageContract_RequiredAnchorCount(
-              state->message_id, kArLanguageSourceProfile_Us) ||
+      state->completed_control_count > contract->control_count ||
       state->wait_frames_remaining > state->wait_frames_total ||
       (state->terminal &&
        (state->control_pending || state->awaiting_input ||
@@ -1515,10 +1593,8 @@ bool ArDialogueSession_Restore(ArDialogueSession *session,
        (state->awaiting_input || state->awaiting_page_advance ||
         state->wait_frames_remaining)) ||
       (state->control_pending &&
-       state->completed_control_count >=
-           ArLanguageContract_RequiredAnchorCount(
-               state->message_id, kArLanguageSourceProfile_Us)) ||
-      !ValidateStableValues(state, error)) {
+       state->completed_control_count >= contract->control_count) ||
+      !ValidateStableValues(state, contract, error)) {
     if (error && !error->message[0])
       SetError(error, "saved dialogue state is invalid");
     return false;
@@ -1527,11 +1603,12 @@ bool ArDialogueSession_Restore(ArDialogueSession *session,
     return false;
   ArDialogueSession scratch;
   ArDialogueSession_Init(&scratch);
+  scratch.private_contract = *contract;
   if (resolver) {
     scratch.private_resolver = *resolver;
     scratch.private_has_resolver = true;
   }
-  if (!ActivateSelection(&scratch, selection, state, 0, error)) {
+  if (!ActivateSource(&scratch, source, state, 0, error)) {
     ArDialogueSession_Destroy(&scratch);
     return false;
   }

@@ -130,7 +130,7 @@ func TestSourceBoundsAndAtomicFailure(t *testing.T) {
 	if y, err := d.directY(0x8000); err != nil || y != nil {
 		t.Fatal("before-first-instruction underflow")
 	}
-	s := sourceDiscovery{d: d, references: []IRObject{}}
+	s := sourceDiscovery{d: d, references: []NativeSourceReference{}}
 	if err := s.reference(0x8020, "test", 0x8000, "wrong"); err == nil || len(s.references) != 0 {
 		t.Fatal("invalid provenance published")
 	}

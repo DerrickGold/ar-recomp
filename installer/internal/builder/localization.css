@@ -210,6 +210,19 @@
 }
 #panel-localization .loc-package-card .loc-row>button { min-height:36px }
 #panel-localization .loc-uninstall { color:var(--bad); background:transparent }
+#loc-uninstall-dialog {
+  width:min(36rem,calc(100vw - 2rem));
+  max-height:90vh;
+  overflow:auto;
+  overflow-wrap:anywhere;
+  border:1px solid var(--line);
+  border-radius:12px;
+  padding:24px;
+  background:var(--panel);
+  color:var(--ink);
+  box-shadow:0 24px 80px #0009
+}
+#loc-uninstall-dialog::backdrop { background:#0009 }
 #loc-flow-title {
   margin:0;
   font-size:16px
@@ -350,7 +363,20 @@
   font-size:14px;
   color:#cbd5e2
 }
-.loc-comparison #loc-body {
+.loc-comparison .loc-inline-styles { min-width:0; margin:16px 0; padding:10px 12px; border:1px solid var(--loc-line); border-radius:6px }
+.loc-inline-styles legend { padding:0 6px; color:var(--muted); font-size:12px }
+.loc-style-controls { display:flex; flex-wrap:wrap; align-items:end; gap:8px }
+.loc-style-choice { display:flex; align-items:end; gap:4px; min-width:0 }
+#panel-localization .loc-style-choice label { margin:0; min-width:0 }
+#panel-localization .loc-style-choice select { width:130px; max-width:100% }
+#panel-localization .loc-style-choice input[type=number] { width:78px }
+#panel-localization .loc-style-choice input[type=color] { width:46px; height:36px; padding:3px }
+#panel-localization .loc-style-controls button { font-size:12px; padding:8px }
+.loc-style-controls [data-loc-style=italic] { font-style:italic }
+.loc-inline-styles .loc-help { margin:10px 0 0 }
+#loc-style-status:empty { display:none }
+#loc-style-status[data-error=true] { color:#ffd0c9 }
+#loc-body {
   min-height:424px;
   font-weight:400
 }
@@ -502,6 +528,19 @@
 .loc-toolbar button {
   font-size:12px!important
 }
+.loc-inline-styles { min-width:0; margin:16px 0; padding:10px 12px; border:1px solid var(--loc-line); border-radius:6px }
+.loc-inline-styles legend { padding:0 6px; color:var(--muted); font-size:12px }
+.loc-style-controls { display:flex; flex-wrap:wrap; align-items:end; gap:8px }
+.loc-style-choice { display:flex; align-items:end; gap:4px; min-width:0 }
+#panel-localization .loc-style-choice label { margin:0; min-width:0 }
+#panel-localization .loc-style-choice select { width:130px; max-width:100% }
+#panel-localization .loc-style-choice input[type=number] { width:78px }
+#panel-localization .loc-style-choice input[type=color] { width:46px; height:36px; padding:3px }
+#panel-localization .loc-style-controls button { font-size:12px; padding:8px }
+.loc-style-controls [data-loc-style=italic] { font-style:italic }
+.loc-inline-styles .loc-help { margin:10px 0 0 }
+#loc-style-status:empty { display:none }
+#loc-style-status[data-error=true] { color:#ffd0c9 }
 #loc-body {
   font-family:ui-monospace,SFMono-Regular,Consolas,monospace!important;
   font-size:14px!important;
@@ -601,3 +640,13 @@
     max-width:100%
   }
 }
+
+.loc-playback-panels canvas { display:block; width:100%; height:auto; background:#121828; image-rendering:auto; }
+.loc-playback-panels section { min-width:0; }
+.loc-playback-panels input[type=range] { width:100%; }
+#loc-playback fieldset { min-width:0; border:1px solid #526078; border-radius:6px; }
+#loc-playback fieldset label { display:block; }
+#loc-playback details p { overflow-wrap:anywhere; white-space:pre-wrap; }
+
+.loc-playback-viewport { overflow:auto; }
+#loc-playback pre { white-space:pre-wrap; overflow-wrap:anywhere; }

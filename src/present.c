@@ -2358,24 +2358,47 @@ void PresentCompositeScene(const FrameSlot *slot, float alpha) {
     (void)BeginActionHeat(slot, output_viewport);
     const ArRenderRectI viewport = ActionHeatSceneViewport(output_viewport);
     ActionDioramaPlaneEffectContext plane_effect = {slot, viewport};
+    const DioramaCapture capture = {
+        .width = slot->snes_width,
+        .height =
+            slot->snes_height + slot->ws_extra_top + slot->ws_extra_bottom,
+        .authentic_y0 = slot->ws_extra_top,
+        .obj_apron = slot->obj_apron,
+        .textures = scene_textures,
+        .pixels = pixels,
+        .bg_transparent_fill_configured =
+            slot->diorama_bg_transparent_fill_configured,
+        .bg_transparent_fill_argb = slot->diorama_bg_transparent_fill_argb,
+        .coverage_masks =
+            slot->interp_setting_enabled ? NULL : s_diorama_coverage_masks,
+        .bg2_valid_spans = &bg2_valid_spans,
+        .skybox = &skybox_view,
+        .bg2_revision = s_diorama_bg2_content_revision,
+        .bg2_dynamic =
+            (generated_plane_mask & (UINT32_C(1) << SR_PPU_OVERLAY_BG2)) != 0,
+    };
+    const DioramaView view = {
+        .camera = final_cam,
+        .distance_scale = distance_scale,
+        .center_camera_vertically = dynamic,
+        .pixel_aspect = slot->pixel_aspect,
+        .ignore_aspect_ratio = slot->ignore_aspect_ratio,
+        .visible_width = slot->visible_width,
+        .viewport = viewport,
+    };
+    const DioramaScene scene = {
+        .map_group = slot->diorama_map_group,
+        .map_number = slot->diorama_map_number,
+        .layer_section = slot->diorama_layer_section,
+        .additive_plane_mask =
+            slot->diorama_plane_additive_mask & s_diorama_uploaded_plane_mask,
+        .effect_obj_priority_mask = effect_obj_priority_mask,
+        .effect_bg_plane_mask = effect_bg_plane_mask,
+        .plane_effect = DrawActionDioramaPlaneEffect,
+        .plane_effect_userdata = &plane_effect,
+    };
     const PresentationOutcome diorama = Diorama_Composite(
-        &g_render_device, slot->snes_width,
-        slot->snes_height + slot->ws_extra_top + slot->ws_extra_bottom,
-        slot->ws_extra_top, slot->obj_apron,
-        slot->pixel_aspect, slot->ignore_aspect_ratio,
-        slot->visible_width, viewport, scene_textures, pixels,
-        slot->diorama_bg_transparent_fill_configured,
-        slot->diorama_bg_transparent_fill_argb,
-        &final_cam, distance_scale, dynamic,
-        slot->diorama_plane_additive_mask & s_diorama_uploaded_plane_mask,
-        slot->interp_setting_enabled ? NULL : s_diorama_coverage_masks,
-        s_diorama_bg2_content_revision,
-        (generated_plane_mask &
-         (UINT32_C(1) << SR_PPU_OVERLAY_BG2)) != 0,
-        effect_obj_priority_mask, effect_bg_plane_mask,
-        slot->diorama_map_group, slot->diorama_map_number,
-        slot->diorama_layer_section, &bg2_valid_spans, &skybox_view,
-        DrawActionDioramaPlaneEffect, &plane_effect, &action_projection);
+        &g_render_device, &capture, &view, &scene, &action_projection);
     if (!PresentationOutcome_IsUsable(diorama)) {
       CancelActionHeat();
       DioramaPerformance_End(presentation_performance);

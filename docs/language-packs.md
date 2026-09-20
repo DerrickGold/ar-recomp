@@ -13,6 +13,8 @@ The recommended Workshop flow is the same on macOS, Linux and Windows:
 2. Open **Languages → Add a language pack** and choose the `.arlang` file, or
    drop it into the Workshop. Add one package at a time; **do not unzip it**.
 3. Review its language, credits and any conflicts, then choose **Import & install**.
+   For v1 packs, a notice explains that the installed copy will automatically
+   upgrade to v2. Your original archive and saved project stay unchanged.
    Replacing a saved project or installed pack requires explicit confirmation.
 4. Use the installed-pack checklist in **Languages** to toggle packs on or off
    without deleting them.
@@ -53,6 +55,51 @@ Keep the helper when moving or slimming a folder installation. The Workshop's
 build-tool cleanup already retains it. A source CMake build
 with Go available builds the helper beside the game executable. Other ports
 can provide their own archive adapter; unpacked folders need no helper.
+
+## Apply inline styling in Workshop
+
+The message editor's **Inline styling** toolbar supports **Italic**, **Upright**,
+font roles, named styles, colors, and sizes from 25% to 400%. Select text or a
+complete placeholder, then apply a style. With no selection, the toolbar inserts
+an empty tag pair and places the cursor inside it. Normal Undo reverses the edit.
+Font choices include unsaved roles from the Fonts tab; named styles come from
+the pack's `@define-style` declarations.
+
+Selections across lines or table cells style each text portion separately,
+leaving commands and separators intact. Existing tags stay in place; the new
+style is applied inside them. Native references are read-only, aliases must
+first be expanded, and inline terms inherit their caller's style. A v1 project
+needs **Create v2 copy** before using these controls. Use **Validate & preview**
+to review mixed-font wrapping and size changes before saving.
+
+## Upgrade a v1 pack
+
+Installing a v1 pack through the Builder automatically upgrades the installed
+copy to v2, keeping its package ID. **Import & install** and **Review before
+installing** explain this before installation; the completion screen confirms
+the upgrade. The command-line `language install` also upgrades the installed
+copy and reports it. Original archives and saved projects stay unchanged.
+
+To edit or publish the converted templates, open the existing project in
+Languages and choose **Create v2 copy** with a new package ID. The builder
+writes inferred historical layout, font, numeral and color rules into readable
+templates. It preserves wording, control anchors,
+progress and notes. Review the new copy in side-by-side playback, then install
+it. Disable the old installed pack when switching to its replacement.
+
+For an unpacked v1 pack, the same conversion is available from the helper:
+
+```sh
+"$BUILDER_CLI" language upgrade --pack /path/to/v1-pack \
+  --new-id my.translation-v2 --out my.translation-v2.arproject
+```
+
+See [command-line setup](#command-line-setup) for `BUILDER_CLI`. Conversion
+creates a new output; it does not overwrite the input or an existing output.
+Generated Native US packs are upgraded by rebuilding with the current Builder.
+If a v1 pack is selected when launching directly, the game shows upgrade
+instructions. **Continue with native text** uses original text for that session
+and preserves your saved language selection. The game does not convert packs.
 
 ## Where files belong
 
@@ -142,7 +189,7 @@ same files under `Contents/Resources/payload/utils/`. Do not assume a generated
 game app includes the authoring examples.
 
 Create a separate directory, copy the example layout, and choose your own stable
-ID, locale, name, authorship and license. Use `target = us-runtime`,
+ID, locale, name, authorship and license. Use `version = 2`, `target = us-runtime`,
 `source_profile = us`, `fallback = native-us`, and usually `coverage = partial`.
 Omit untranslated messages so the game uses its local US fallback. If you use an
 alias, its target must also be included in the same pack. Regional extracts are
@@ -157,6 +204,11 @@ A useful instruction to give an AI is:
 > for intentional breaks; physical newlines alone are wrappable. Added dialogue
 > pages must precede a terminal `yield.*` anchor. Omit untranslated messages.
 > Preserve contributor credits. Do not include private notes or source templates.
+
+Use Workshop **Preview** to compare the source with an unsaved translation,
+including inline fonts, color, relative size, wrapping and reveal timing. Test
+long dynamic values and inspect the template/font trace before installing.
+See the [v2 syntax and playback guide](language-pack-format.md#v2-templates-and-appearance).
 
 AI output still needs validation and in-game review. Format validation does not
 prove translation quality, correct shaping, readable layout or redistribution

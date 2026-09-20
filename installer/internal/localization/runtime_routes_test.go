@@ -48,6 +48,14 @@ func TestUSRuntimeRoutesROM(t *testing.T) {
 			requireJSONEqual(t, "US runtime "+name+" routes", actual, expected)
 		})
 	}
+	for _, offset := range []int{0x1271c, 0x1271f, 0x1273c, 0x1273f} {
+		changed := *d
+		changed.rom = slices.Clone(d.rom)
+		changed.rom[offset] ^= 1
+		if err := changed.verifyUSTitleCopyrightComposer(); err == nil {
+			t.Fatalf("title copyright producer mutation accepted at %x", offset)
+		}
+	}
 }
 
 func TestRuntimeDialogueRoutesRequireUS(t *testing.T) {

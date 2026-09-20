@@ -214,19 +214,26 @@ func (b *catalogBuilder) semanticRoutes(census *NativeSourceCensus, menu *Native
 	}
 	wrapperSix, relay := 0, 0
 	unknown := []int{}
-	for index, reference := range irRows(census.SourceReferenceSeeds, "references") {
-		kind, recordID := irString(reference, "reference_kind"), irString(reference, "resolved_record_id")
+	for index, reference := range census.SourceReferenceSeeds.References {
+		if reference.NativeSourceResolution == nil || reference.ResolvedRecordID == nil {
+			unknown = append(unknown, index)
+			continue
+		}
+		kind, recordID := reference.ReferenceKind, *reference.ResolvedRecordID
+		if reference.SourceOffsetWithinRecord == nil {
+			return nil, fmt.Errorf("resolved source %s has no offset", reference.SourcePC24)
+		}
 		if recordID == "" {
 			unknown = append(unknown, index)
 			continue
 		}
-		offset, _ := reference["source_offset_within_record"].(int)
-		provenance := irString(reference, "via_call_site")
+		offset := *reference.SourceOffsetWithinRecord
+		provenance := reference.ViaCallSite
 		if provenance == "" {
-			provenance = irString(reference, "via_source_table")
+			provenance = reference.ViaSourceTable
 		}
 		if provenance == "" {
-			provenance = irString(reference, "via_consumer_entry")
+			provenance = reference.ViaConsumerEntry
 		}
 		id := ""
 		regional := false
@@ -243,7 +250,7 @@ func (b *catalogBuilder) semanticRoutes(census *NativeSourceCensus, menu *Native
 				id = offerings[occurrence]
 			}
 		case strings.HasPrefix(kind, "interpreter_"):
-			call, err := parsePC(irString(reference, "via_call_site"))
+			call, err := parsePC(reference.ViaCallSite)
 			if err != nil {
 				return nil, err
 			}
@@ -259,7 +266,7 @@ func (b *catalogBuilder) semanticRoutes(census *NativeSourceCensus, menu *Native
 			}
 			relay++
 		case strings.HasPrefix(kind, "dialogue_wrapper_"):
-			position, ok := wrapperCalls[irString(reference, "via_call_site")]
+			position, ok := wrapperCalls[reference.ViaCallSite]
 			if ok {
 				wi, ci := position[0], position[1]
 				alternative := alternatives[position]

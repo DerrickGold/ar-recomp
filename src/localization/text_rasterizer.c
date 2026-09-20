@@ -1,4 +1,5 @@
 #include "localization/text_rasterizer.h"
+#include "localization/text_appearance.h"
 
 #include <stddef.h>
 #include <stdio.h>
@@ -89,6 +90,17 @@ static bool ValidLanguage(const char *language, size_t size) {
   return true;
 }
 
+static bool ValidAppearanceSpans(const ArTextRasterRequest *request) {
+  if (!request->appearance)
+    return !request->appearance_spans && !request->appearance_span_count &&
+           !request->appearance_source_offset;
+  return ArTextAppearance_IsValid(request->appearance) &&
+         ArTextAppearanceSpans_IsValid(request->appearance_spans,
+                                       request->appearance_span_count,
+                                       request->utf8, request->utf8_bytes,
+                                       request->appearance_source_offset);
+}
+
 bool ArTextRasterRequest_IsValid(const ArTextRasterRequest *request) {
   const ArTextRasterFlags known_flags =
       kArTextRasterFlag_WrapWords |
@@ -99,58 +111,59 @@ bool ArTextRasterRequest_IsValid(const ArTextRasterRequest *request) {
       kArTextRasterFlag_SlantAsciiNumerals |
       kArTextRasterFlag_IncludeRevealClusters;
   return request &&
-      request->struct_size >= AR_MEMBER_END(
-          ArTextRasterRequest, pixelation_grid_y) &&
-      request->abi_version == AR_TEXT_RASTER_REQUEST_ABI_VERSION &&
-      request->raster_font_pixels >= 0 && request->raster_font_pixels <= 4096 &&
-      (request->align_pixelation_grid ||
-       (!request->pixelation_grid_x && !request->pixelation_grid_y)) &&
-      ValidUtf8Buffer(request->utf8, request->utf8_bytes) &&
-      ArTextBidiSpans_Valid(request->bidi_spans, request->bidi_span_count,
-          request->utf8, request->utf8_bytes, request->bidi_source_offset) &&
-      request->accent_end_utf8_byte <= request->utf8_bytes &&
-      (!request->accent_end_utf8_byte ||
-       request->accent_end_utf8_byte == request->utf8_bytes ||
-       ((uint8_t)request->utf8[request->accent_end_utf8_byte] & 0xc0u) != 0x80u) &&
-      request->font_stack_id && request->font_stack_id_bytes > 0 &&
-      !memchr(request->font_stack_id, 0, request->font_stack_id_bytes) &&
-      request->font_revision != 0 &&
-      request->shadow_shape >= kArTextShadow_Diagonal &&
-      request->shadow_shape <= kArTextShadow_Keyline &&
-      request->font_pixels > 0 && request->font_pixels <= 4096 &&
-      request->minimum_font_pixels > 0 &&
-      request->minimum_font_pixels <= request->font_pixels &&
-      request->maximum_width > 0 &&
-      request->maximum_height > 0 &&
-      request->direction >= kArTextDirection_Auto &&
-      request->direction <= kArTextDirection_RightToLeft &&
-      request->alignment >= kArTextHorizontalAlignment_Leading &&
-      request->alignment <= kArTextHorizontalAlignment_Right &&
-      ((!request->preferred_line_breaks &&
-        request->preferred_line_break_capacity == 0 &&
-        request->preferred_line_break_source_offset == 0) ||
-       (request->preferred_line_breaks &&
-        request->preferred_line_break_source_offset <=
-            request->preferred_line_break_capacity &&
-        request->utf8_bytes <= request->preferred_line_break_capacity -
-            request->preferred_line_break_source_offset &&
-        (request->flags & (kArTextRasterFlag_WrapWords |
-                           kArTextRasterFlag_PreserveHardBreaks)) ==
-            (kArTextRasterFlag_WrapWords |
-             kArTextRasterFlag_PreserveHardBreaks))) &&
-      (request->flags & ~known_flags) == 0 &&
-      (request->filter == kArRenderFilter_Nearest ||
-       request->filter == kArRenderFilter_Linear) &&
-      request->pixelation >= kArTextPixelation_None &&
-      request->pixelation <= kArTextPixelation_Mosaic &&
-      ((request->pixelation == kArTextPixelation_None &&
-        (request->pixelation_size == 0 ||
-         request->pixelation_size == 1)) ||
-       (request->pixelation != kArTextPixelation_None &&
-        request->pixelation_size >= 2 &&
-        request->pixelation_size <= 8)) &&
-      ValidLanguage(request->language_bcp47,
-                    request->language_bcp47_bytes);
+         request->struct_size >=
+             AR_MEMBER_END(ArTextRasterRequest, appearance_source_offset) &&
+         request->abi_version == AR_TEXT_RASTER_REQUEST_ABI_VERSION &&
+         request->raster_font_pixels >= 0 &&
+         request->raster_font_pixels <= 4096 &&
+         (request->align_pixelation_grid ||
+          (!request->pixelation_grid_x && !request->pixelation_grid_y)) &&
+         ValidUtf8Buffer(request->utf8, request->utf8_bytes) &&
+         ValidAppearanceSpans(request) &&
+         ArTextBidiSpans_Valid(request->bidi_spans, request->bidi_span_count,
+                               request->utf8, request->utf8_bytes,
+                               request->bidi_source_offset) &&
+         request->accent_end_utf8_byte <= request->utf8_bytes &&
+         (!request->accent_end_utf8_byte ||
+          request->accent_end_utf8_byte == request->utf8_bytes ||
+          ((uint8_t)request->utf8[request->accent_end_utf8_byte] & 0xc0u) !=
+              0x80u) &&
+         request->font_stack_id && request->font_stack_id_bytes > 0 &&
+         !memchr(request->font_stack_id, 0, request->font_stack_id_bytes) &&
+         request->font_revision != 0 &&
+         request->shadow_shape >= kArTextShadow_Diagonal &&
+         request->shadow_shape <= kArTextShadow_Keyline &&
+         request->font_pixels > 0 && request->font_pixels <= 4096 &&
+         request->minimum_font_pixels > 0 &&
+         request->minimum_font_pixels <= request->font_pixels &&
+         request->maximum_width > 0 && request->maximum_height > 0 &&
+         request->direction >= kArTextDirection_Auto &&
+         request->direction <= kArTextDirection_RightToLeft &&
+         request->alignment >= kArTextHorizontalAlignment_Leading &&
+         request->alignment <= kArTextHorizontalAlignment_Right &&
+         ((!request->preferred_line_breaks &&
+           request->preferred_line_break_capacity == 0 &&
+           request->preferred_line_break_source_offset == 0) ||
+          (request->preferred_line_breaks &&
+           request->preferred_line_break_source_offset <=
+               request->preferred_line_break_capacity &&
+           request->utf8_bytes <=
+               request->preferred_line_break_capacity -
+                   request->preferred_line_break_source_offset &&
+           (request->flags & (kArTextRasterFlag_WrapWords |
+                              kArTextRasterFlag_PreserveHardBreaks)) ==
+               (kArTextRasterFlag_WrapWords |
+                kArTextRasterFlag_PreserveHardBreaks))) &&
+         (request->flags & ~known_flags) == 0 &&
+         (request->filter == kArRenderFilter_Nearest ||
+          request->filter == kArRenderFilter_Linear) &&
+         request->pixelation >= kArTextPixelation_None &&
+         request->pixelation <= kArTextPixelation_Mosaic &&
+         ((request->pixelation == kArTextPixelation_None &&
+           (request->pixelation_size == 0 || request->pixelation_size == 1)) ||
+          (request->pixelation != kArTextPixelation_None &&
+           request->pixelation_size >= 2 && request->pixelation_size <= 8)) &&
+         ValidLanguage(request->language_bcp47, request->language_bcp47_bytes);
 }
 
 static void SetError(char *error, size_t capacity, const char *message) {
@@ -212,30 +225,57 @@ bool ArTextRasterizer_HasGlyph(const ArTextRasterizer *rasterizer,
 static bool BitmapValid(const ArTextBitmap *bitmap,
                         const ArTextRasterRequest *request) {
   if (!bitmap ||
-      bitmap->struct_size < AR_MEMBER_END(ArTextBitmap, crop_top) ||
+      bitmap->struct_size < AR_MEMBER_END(ArTextBitmap, font_use_count) ||
       bitmap->abi_version != AR_TEXT_BITMAP_ABI_VERSION ||
       bitmap->font_pixels < 0 || bitmap->font_pixels > 4096 ||
       bitmap->crop_left < 0 || bitmap->crop_top < 0 ||
       bitmap->paragraph_direction < kArTextDirection_Auto ||
       bitmap->paragraph_direction > kArTextDirection_RightToLeft ||
       !bitmap->pixels || bitmap->width <= 0 || bitmap->height <= 0 ||
-      bitmap->reveal_cluster_count > 65536 ||
+      bitmap->reveal_cluster_count > 65536 || bitmap->line_count > 65536 ||
+      (bitmap->line_count && !bitmap->lines) ||
+      bitmap->font_use_count > 65536 ||
+      (bitmap->font_use_count && !bitmap->font_uses) ||
       (bitmap->reveal_cluster_count && !bitmap->reveal_clusters) ||
       bitmap->width > request->maximum_width ||
       bitmap->height > request->maximum_height ||
       ((request->flags & kArTextRasterFlag_IncludeRevealClusters) &&
        (!bitmap->reveal_clusters || !bitmap->reveal_cluster_count)))
     return false;
+  uint32_t previous_font_start = 0;
+  for (size_t i = 0; i < bitmap->font_use_count; ++i) {
+    const ArTextFontUse *use = &bitmap->font_uses[i];
+    if (!use->resource || !use->font_pixels || use->font_pixels > 4096 ||
+        use->start < previous_font_start || use->start >= use->end ||
+        use->end > request->utf8_bytes ||
+        (use->start && ((uint8_t)request->utf8[use->start] & 0xC0) == 0x80) ||
+        (use->end < request->utf8_bytes &&
+         ((uint8_t)request->utf8[use->end] & 0xC0) == 0x80))
+      return false;
+    previous_font_start = use->start;
+  }
+  int64_t previous_bottom = -(int64_t)bitmap->crop_top;
+  for (size_t i = 0; i < bitmap->line_count; ++i) {
+    const ArTextLineMetrics *line = &bitmap->lines[i];
+    if (line->height <= 0 || line->top < previous_bottom ||
+        line->baseline < line->top ||
+        (int64_t)line->baseline > (int64_t)line->top + line->height ||
+        (int64_t)line->top + line->height > INT32_MAX / 8 ||
+        line->top < -INT32_MAX / 8)
+      return false;
+    previous_bottom = (int64_t)line->top + line->height;
+  }
   for (size_t index = 0; index < bitmap->reveal_cluster_count; ++index) {
     const ArTextRevealCluster *cluster = &bitmap->reveal_clusters[index];
     const size_t previous_end = index
         ? bitmap->reveal_clusters[index - 1u].end_utf8_byte : 0u;
-    if (!cluster->end_utf8_byte ||
-        cluster->end_utf8_byte <= previous_end ||
+    if (!cluster->end_utf8_byte || cluster->end_utf8_byte <= previous_end ||
         cluster->end_utf8_byte > request->utf8_bytes ||
         (cluster->end_utf8_byte < request->utf8_bytes &&
          ((uint8_t)request->utf8[cluster->end_utf8_byte] & 0xc0u) == 0x80u) ||
         cluster->line_index < 0 || cluster->x < 0 || cluster->y < 0 ||
+        (bitmap->line_count &&
+         (size_t)cluster->line_index >= bitmap->line_count) ||
         cluster->width <= 0 || cluster->height <= 0 ||
         cluster->x > bitmap->width - cluster->width ||
         cluster->y > bitmap->height - cluster->height)
@@ -381,6 +421,19 @@ static float RetailBlueWeight(float position) {
   if (position < 0.36f) return (0.36f - position) / 0.14f;
   if (position > 0.64f) return (position - 0.64f) / 0.14f;
   return 0.0f;
+}
+
+uint32_t ArTextStyle_BandColor(uint32_t band, uint32_t body, int row,
+                               int last_row) {
+  const float position = last_row > 0 ? (float)row / (float)last_row : 0;
+  const float weight = RetailBlueWeight(position);
+  uint32_t rgb = 0;
+  for (unsigned shift = 0; shift <= 16; shift += 8) {
+    const float a = (float)((body >> shift) & 255);
+    const float b = (float)((band >> shift) & 255);
+    rgb |= (uint32_t)floorf(a + weight * (b - a) + 0.5f) << shift;
+  }
+  return rgb;
 }
 
 static bool ApplyShadow(void *pixels, int width, int height,
@@ -677,16 +730,11 @@ bool ArTextBitmap_ApplyStyleBands(void *pixels, int width, int height,
       }
     }
     if (last < first) continue;
-    const float denominator = last > first ? (float)(last - first) : 1.0f;
     for (int y = first; y <= last; ++y) {
-      const float blue = RetailBlueWeight((float)(y - first) / denominator);
-      uint8_t rgb[3];
-      for (unsigned c = 0; c < 3; ++c) {
-        const unsigned shift = 16 - c * 8;
-        const float band = (float)((band_rgb >> shift) & 255);
-        const float body = (float)((body_rgb >> shift) & 255);
-        rgb[c] = (uint8_t)floorf(body + blue * (band - body) + 0.5f);
-      }
+      const uint32_t color =
+          ArTextStyle_BandColor(band_rgb, body_rgb, y - first, last - first);
+      const uint8_t rgb[] = {(uint8_t)(color >> 16), (uint8_t)(color >> 8),
+                             (uint8_t)color};
       uint8_t *row =
           (uint8_t *)pixels + (size_t)y * (size_t)pitch_bytes;
       for (int x = left; x < right; ++x) {

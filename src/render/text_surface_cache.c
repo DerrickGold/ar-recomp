@@ -21,12 +21,39 @@ static uint64_t HashU64(uint64_t hash, uint64_t value) {
   return hash;
 }
 
+static uint64_t HashAppearance(uint64_t hash,
+                               const ArTextRunAppearance *appearance) {
+  hash = HashU64(hash, strlen(appearance->font_role));
+  hash = DeterministicHash_Fnv1a64(hash, appearance->font_role,
+                                   strlen(appearance->font_role));
+  hash = HashU32(hash, appearance->scale_basis);
+  hash = HashU32(hash, appearance->band_rgb);
+  hash = HashU32(hash, appearance->body_rgb);
+  hash = HashU32(hash, appearance->shadow_rgb);
+  hash = HashU32(hash, appearance->shadow_enabled);
+  hash = HashU32(hash, appearance->keyline_shadow);
+  hash = HashU32(hash, appearance->italic);
+  return HashU32(hash, appearance->slant_ascii_numerals);
+}
+
 static uint64_t HashRequest(uint64_t hash,
                             const ArTextRasterizer *rasterizer,
                             const ArTextRasterRequest *request) {
   hash = HashU64(hash, rasterizer->implementation_revision);
   hash = HashU64(hash, request->source_revision);
   hash = HashU64(hash, request->font_revision);
+  hash = HashU32(hash, request->appearance != NULL);
+  if (request->appearance) {
+    hash = HashAppearance(hash, request->appearance);
+    hash = HashU32(hash, request->appearance_source_offset);
+    hash = HashU64(hash, request->appearance_span_count);
+    for (size_t i = 0; i < request->appearance_span_count; ++i) {
+      const ArTextAppearanceSpan *span = &request->appearance_spans[i];
+      hash = HashU32(hash, span->start);
+      hash = HashU32(hash, span->end);
+      hash = HashAppearance(hash, &span->appearance);
+    }
+  }
   hash = HashU32(hash, request->style_id);
   hash = HashU32(hash, request->band_rgb);
   hash = HashU32(hash, request->body_rgb);
@@ -118,6 +145,8 @@ static void ReleaseSurfaceResources(ArTextSurface *surface,
   free((void *)surface->reveal_clusters);
   free((void *)surface->cluster_ink_bounds);
   free((void *)surface->reveal_pieces);
+  free((void *)surface->lines);
+  free((void *)surface->font_uses);
   memset(surface, 0, sizeof(*surface));
 }
 
@@ -798,31 +827,76 @@ bool ArTextSurfaceCache_Acquire(
     SetError(error, error_capacity, "cannot build bounded text effect reveal geometry");
     return false;
   }
+  ArTextLineMetrics *lines = NULL;
+  if (bitmap.line_count) {
+    lines = malloc(bitmap.line_count * sizeof(*lines));
+    if (!lines) {
+      free(treated_pixels);
+      free(reveal_clusters);
+      free(cluster_ink_bounds);
+      free(reveal_pieces);
+      ReleaseGridAligned(&aligned);
+      ArTextRasterizer_ReleaseBitmap(rasterizer, &bitmap);
+      ++cache->stats.failures;
+      SetError(error, error_capacity, "out of memory caching line metrics");
+      return false;
+    }
+    for (size_t i = 0; i < bitmap.line_count; ++i) {
+      lines[i] = bitmap.lines[i];
+      lines[i].top = (lines[i].top + aligned.pad_top) * metric_scale;
+      lines[i].baseline = (lines[i].baseline + aligned.pad_top) * metric_scale;
+      lines[i].height *= metric_scale;
+    }
+    effect_metadata_bytes += bitmap.line_count * sizeof(*lines);
+  }
+  ArTextFontUse *font_uses = NULL;
+  if (bitmap.font_use_count) {
+    font_uses = malloc(bitmap.font_use_count * sizeof(*font_uses));
+    if (!font_uses) {
+      free(treated_pixels);
+      free(reveal_clusters);
+      free(cluster_ink_bounds);
+      free(reveal_pieces);
+      free(lines);
+      ReleaseGridAligned(&aligned);
+      ArTextRasterizer_ReleaseBitmap(rasterizer, &bitmap);
+      ++cache->stats.failures;
+      SetError(error, error_capacity, "out of memory caching font selections");
+      return false;
+    }
+    memcpy(font_uses, bitmap.font_uses,
+           bitmap.font_use_count * sizeof(*font_uses));
+    effect_metadata_bytes += bitmap.font_use_count * sizeof(*font_uses);
+  }
   ++cache->stats.upload_calls;
   const bool created = ArRenderDevice_CreateTexture(
       device, &descriptor, &texture);
   const bool uploaded = created && ArRenderDevice_UpdateTexture(
       device, texture, NULL, upload_pixels, upload_pitch);
   const ArTextSurface replacement = {
-    .texture = texture,
-    .key = key,
-    .width = upload_width,
-    .height = upload_height,
-    .ascent = (bitmap.ascent + aligned.pad_top) * metric_scale,
-    .descent = bitmap.descent * metric_scale,
-    .line_advance = bitmap.line_advance * metric_scale,
-    .paragraph_direction = bitmap.paragraph_direction,
-    .raster_font_pixels = bitmap.font_pixels,
-    .raster_scale = metric_scale,
-    .mosaic_block = mosaic_block,
-    .origin_x = (aligned.pad_left - bitmap.crop_left) * metric_scale,
-    .origin_y = (aligned.pad_top - bitmap.crop_top) * metric_scale,
-    .ink_bounds = ink_bounds,
-    .reveal_clusters = reveal_clusters,
-    .cluster_ink_bounds = cluster_ink_bounds,
-    .reveal_cluster_count = source->reveal_cluster_count,
-    .reveal_pieces = reveal_pieces,
-    .reveal_piece_count = reveal_piece_count,
+      .texture = texture,
+      .key = key,
+      .width = upload_width,
+      .height = upload_height,
+      .ascent = (bitmap.ascent + aligned.pad_top) * metric_scale,
+      .descent = bitmap.descent * metric_scale,
+      .line_advance = bitmap.line_advance * metric_scale,
+      .paragraph_direction = bitmap.paragraph_direction,
+      .raster_font_pixels = bitmap.font_pixels,
+      .raster_scale = metric_scale,
+      .mosaic_block = mosaic_block,
+      .origin_x = (aligned.pad_left - bitmap.crop_left) * metric_scale,
+      .origin_y = (aligned.pad_top - bitmap.crop_top) * metric_scale,
+      .ink_bounds = ink_bounds,
+      .reveal_clusters = reveal_clusters,
+      .cluster_ink_bounds = cluster_ink_bounds,
+      .reveal_cluster_count = source->reveal_cluster_count,
+      .reveal_pieces = reveal_pieces,
+      .reveal_piece_count = reveal_piece_count,
+      .lines = lines,
+      .line_count = bitmap.line_count,
+      .font_uses = font_uses,
+      .font_use_count = bitmap.font_use_count,
   };
   free(treated_pixels);
   ReleaseGridAligned(&aligned);
@@ -832,6 +906,8 @@ bool ArTextSurfaceCache_Acquire(
     free(reveal_clusters);
     free(cluster_ink_bounds);
     free(reveal_pieces);
+    free(lines);
+    free(font_uses);
     ++cache->stats.failures;
     SetError(error, error_capacity,
              ArRenderDevice_LastError(device));

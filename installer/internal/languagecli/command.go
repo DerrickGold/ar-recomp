@@ -23,11 +23,11 @@ func (s *samples) Set(v string) error { *s = append(*s, v); return nil }
 
 func Run(ctx context.Context, args []string, output io.Writer) error {
 	if len(args) > 0 && (args[0] == "help" || args[0] == "--help" || args[0] == "-h") {
-		_, err := fmt.Fprintln(output, "Usage: actraiser-builder language <command> [options]\n\n  validate   Check a directory/archive; --game adds font coverage\n  package    Publish reviewed translations as a .arlang\n  reference  Export the ROM-free US authoring contract as JSON\n  install    Copy a publication into this game's language library\n  enable     Enable an installed file/folder\n  disable    Disable without modifying archive contents\n  uninstall  Remove from discovery with a recovery copy\n\nUse <command> --help for options. No command opens the editor.")
+		_, err := fmt.Fprintln(output, "Usage: actraiser-builder language <command> [options]\n\n  validate   Check a directory/archive; --game adds font coverage\n  upgrade    Create a v2 project copy with explicit template styling\n  package    Publish reviewed translations as a .arlang\n  reference  Export the ROM-free US authoring contract as JSON\n  install    Copy a publication into this game's language library\n  enable     Enable an installed file/folder\n  disable    Disable without modifying archive contents\n  uninstall  Remove from discovery with a recovery copy\n\nUse <command> --help for options. No command opens the editor.")
 		return err
 	}
 	if len(args) == 0 {
-		return fmt.Errorf("usage: actraiser-builder language validate|package|reference|install|enable|disable|uninstall [options]")
+		return fmt.Errorf("usage: actraiser-builder language validate|upgrade|package|reference|install|enable|disable|uninstall [options]")
 	}
 	allowed := map[string][]string{
 		"validate":  {"pack", "out", "root", "game", "sample"},
@@ -35,6 +35,7 @@ func Run(ctx context.Context, args []string, output io.Writer) error {
 		"reference": {"out"}, "install": {"pack", "root", "replace"},
 		"enable": {"installed", "root"}, "disable": {"installed", "root"}, "uninstall": {"installed", "root"},
 		"prepare": {"root", "packs-root"},
+		"upgrade": {"pack", "out", "new-id"},
 	}
 	if _, ok := allowed[args[0]]; !ok {
 		return fmt.Errorf("unknown language command %q", args[0])
@@ -51,6 +52,7 @@ func Run(ctx context.Context, args []string, output io.Writer) error {
 	packsRoot := f.String("packs-root", "", "internal startup adapter: explicit installation root")
 	game := f.String("game", "", "trusted game executable for font coverage; never selected by a pack")
 	out := f.String("out", "", "new output file; never overwritten")
+	newID := f.String("new-id", "", "new package ID for a v2 project copy")
 	rights := f.Bool("confirm-rights", false, "confirm that you may redistribute the publication's content")
 	wip := f.Bool("include-wip", false, "include WIP as well as Done messages in publication")
 	all := f.Bool("all-messages", false, "explicitly mark every supplied message reviewed before publication")
@@ -94,11 +96,12 @@ func Run(ctx context.Context, args []string, output io.Writer) error {
 			return err
 		}
 		data := struct {
-			Format  string               `json:"format"`
-			Version int                  `json:"version"`
-			Profile string               `json:"source_profile"`
-			Routes  []lk.AuthorReference `json:"routes"`
-		}{"actraiser-language-authoring-reference", 1, "us", refs}
+			Format     string               `json:"format"`
+			Version    int                  `json:"version"`
+			Profile    string               `json:"source_profile"`
+			Routes     []lk.AuthorReference `json:"routes"`
+			NativeInks []lk.AuthorNativeInk `json:"native_inks"`
+		}{"actraiser-language-authoring-reference", 1, "us", refs, lk.AuthorNativeInks()}
 		return writeOutput(*out, output, func(w io.Writer) error { e := json.NewEncoder(w); e.SetIndent("", "  "); return e.Encode(data) })
 	}
 	if args[0] == "prepare" {
@@ -131,16 +134,21 @@ func Run(ctx context.Context, args []string, output io.Writer) error {
 		_, err = fmt.Fprintln(output, "Package availability saved. Restart the game.")
 		return err
 	}
-	if args[0] != "validate" && args[0] != "package" && args[0] != "install" {
+	if args[0] != "validate" && args[0] != "package" && args[0] != "install" && args[0] != "upgrade" {
 		return fmt.Errorf("unknown language command %q", args[0])
 	}
 	if *packPath == "" {
 		return fmt.Errorf("--pack is required")
 	}
 	if args[0] == "install" {
-		path, err := lk.InstallLanguageArchive(filepath.Join(absRoot, "game-assets", "languages", "packs"), *packPath, *replace)
+		path, report, err := lk.InstallLanguageArchive(filepath.Join(absRoot, "game-assets", "languages", "packs"), *packPath, *replace)
 		if err != nil {
 			return err
+		}
+		if report.Upgrade != nil {
+			if _, err := fmt.Fprintln(output, "Automatically upgraded the installed copy from v1 to v2. The original archive is unchanged."); err != nil {
+				return err
+			}
 		}
 		_, err = fmt.Fprintf(output, "Installed %s. Restart the game and select its package name.\n", path)
 		return err
@@ -148,6 +156,19 @@ func Run(ctx context.Context, args []string, output io.Writer) error {
 	p, err := lk.OpenAuthorInput(*packPath)
 	if err != nil {
 		return err
+	}
+	if args[0] == "upgrade" {
+		if *out == "" || filepath.Ext(*out) != ".arproject" {
+			return fmt.Errorf("upgrade requires --out pointing to a new .arproject file")
+		}
+		next, report, err := p.UpgradeV2(*newID)
+		if err != nil {
+			return err
+		}
+		if err := writeOutput(*out, output, func(w io.Writer) error { return next.WriteArchive(w, "backup") }); err != nil {
+			return err
+		}
+		return json.NewEncoder(output).Encode(report)
 	}
 	var publication lk.PublicationReport
 	if args[0] == "package" {

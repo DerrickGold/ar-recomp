@@ -6,9 +6,10 @@
 #include <SDL3/SDL.h>
 #include <SDL3_ttf/SDL_ttf.h>
 
-#include "platform/sdl/text_rasterizer_sdl.h"
 #include "host/font_resources.h"
 #include "localization/text_boundaries.h"
+#include "platform/sdl/text_fonts_sdl.h"
+#include "platform/sdl/text_rasterizer_sdl.h"
 
 #ifndef AR_TEST_FONT_PATH
 #error AR_TEST_FONT_PATH must identify the bundled test font
@@ -1187,6 +1188,47 @@ static void TestStyleShadowTraversalMatchesSnapshot(void) {
   }
 }
 
+static void TestFontRoleCacheOwnership(void) {
+  char error[256];
+  const ArTextFontRole hud = {.name = "hud", .primary = s_test_font};
+  ArTextBackendConfig config = {
+      .struct_size = sizeof(config),
+      .abi_version = AR_TEXT_BACKEND_CONFIG_ABI_VERSION,
+      .font_stack_id = "roles",
+      .resources = ArHostFontResources_Provider(&s_font_store),
+      .primary_font = s_test_font,
+      .font_revision = 1,
+      .cached_size_capacity = 2,
+      .roles = &hud,
+      .role_count = 1,
+  };
+  ArSdlTextFonts fonts = {0};
+  CHECK(TTF_Init());
+  CHECK(ArSdlTextFonts_Init(&fonts, &config, error, sizeof(error)));
+  ArSdlTextFonts_BeginLayout(&fonts);
+  ArSdlFontSet *body = ArSdlTextFonts_Acquire(&fonts, "body", 24, false, NULL,
+                                              error, sizeof(error));
+  ArSdlFontSet *italic = ArSdlTextFonts_Acquire(&fonts, "hud", 24, true, NULL,
+                                                error, sizeof(error));
+  CHECK(body && italic && body->primary != italic->primary);
+  if (body && italic) {
+    CHECK(TTF_GetFontStyle(body->primary) == TTF_STYLE_NORMAL);
+    CHECK(TTF_GetFontStyle(italic->primary) == TTF_STYLE_ITALIC);
+    CHECK(!ArSdlTextFonts_Acquire(&fonts, "hud", 30, false, NULL, error,
+                                  sizeof(error)));
+    CHECK(strstr(error, "too many distinct font variants"));
+    CHECK(TTF_GetFontSize(body->primary) == 24.0f);
+    CHECK(TTF_GetFontSize(italic->primary) == 24.0f);
+    ArSdlTextFonts_BeginLayout(&fonts);
+    CHECK(ArSdlTextFonts_Acquire(&fonts, "hud", 30, false, NULL, error,
+                                 sizeof(error)));
+    CHECK(!ArSdlTextFonts_Acquire(&fonts, "unknown", 24, false, NULL, error,
+                                  sizeof(error)));
+  }
+  ArSdlTextFonts_Destroy(&fonts);
+  TTF_Quit();
+}
+
 int main(int argc, char **argv) {
   s_test_font = ArHostFontResources_RegisterFile(&s_font_store, AR_TEST_FONT_PATH, NULL, 0);
   CHECK(s_test_font);
@@ -1196,6 +1238,7 @@ int main(int argc, char **argv) {
   if (argc == 2 && !strcmp(argv[1], "--missing-glyph-warnings"))
     TestMissingGlyphWarnings();
   else {
+    TestFontRoleCacheOwnership();
     TestRasterization();
     TestFontSnapshotLifetime();
   }

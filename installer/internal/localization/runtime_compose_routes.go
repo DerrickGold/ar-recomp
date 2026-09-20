@@ -44,6 +44,8 @@ func nativeComposeKind(id string) string {
 		return "title_options"
 	case "title.start_prompt":
 		return "title_start"
+	case "title.copyright":
+		return "title_copyright"
 	case "title.selector.professional":
 		return "title_professional"
 	case "sound_test.menu.labels":
@@ -79,6 +81,9 @@ func (d *Decoder) USRuntimeComposeRoutes() (IRObject, error) {
 		return nil, fmt.Errorf("runtime routes require the exact US ROM")
 	}
 	if err := d.verifyUSSoundTestComposer(); err != nil {
+		return nil, err
+	}
+	if err := d.verifyUSTitleCopyrightComposer(); err != nil {
 		return nil, err
 	}
 	catalog, err := d.BuildNativeCatalog()
@@ -179,6 +184,17 @@ func (d *Decoder) USRuntimeComposeRoutes() (IRObject, error) {
 		return nil, fmt.Errorf("empty runtime composer routes")
 	}
 	return IRObject{"format": "actraiser-us-runtime-compose-routes", "version": 1, "source_profile": "us", "rom_sha256": d.profile.SHA256, "route_count": len(result), "routes": result}, nil
+}
+
+func (d *Decoder) verifyUSTitleCopyrightComposer() error {
+	// Both save/no-save title branches draw the same three-row footer at
+	// column 0, row 23, independently of the option/selector surfaces.
+	for _, pc := range []int{0x02a71b, 0x02a73b} {
+		if err := d.expectPC(pc, []byte{0xa9, 0x00, 0x17, 0xa0, 0xde, 0xa9, 0x22, 0x60, 0xbf, 0x02}, "title copyright composition"); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // The modal redraws both counters at one fixed origin and closes with a blank

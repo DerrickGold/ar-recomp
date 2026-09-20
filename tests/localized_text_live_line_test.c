@@ -720,6 +720,97 @@ static void CheckCursor(ArRenderDevice *device, Compositor *compositor,
   }
 }
 
+static void CheckStyledField(ArRenderDevice *device, Compositor *compositor) {
+  test_case = "styled fixed-cell field";
+  ArEnhancedTextSettings settings;
+  ArEnhancedTextSettings_Defaults(&settings);
+  static KeyboardPage page;
+  static ArLocalizationFrame frame;
+  static ArLocalizedPreparedFrame prepared;
+  const HudPresentationChunk chunk = {.inspector_kind =
+                                          kInspectorPresentation_HudBg,
+                                      .screen_source = {0, 0, 256, 224},
+                                      .texture_source = {0, 0, 256, 224},
+                                      .output_destination = {7, 5, 1024, 896}};
+  const ArTextRunAppearance body = {.font_role = "body",
+                                    .scale_basis = 10000,
+                                    .band_rgb = 0x9cceff,
+                                    .body_rgb = 0xffffff,
+                                    .shadow_enabled = true};
+  uintptr_t page_texture = 0;
+  ArRenderRectI page_destination = {0};
+  unsigned uploads = 0;
+  const char *names[] = {"A|W", "W|A", "A|W"};
+  for (unsigned i = 0; i < 3; ++i) {
+    BuildPage(&page, names[i], 4);
+    CHECK(BuildFrame(&frame, &page, &settings, true, 8,
+                     kArTextDirection_LeftToRight));
+    ArTextAppearanceSpan spans[2] = {{.start = (uint32_t)page.name_start,
+                                      .end = (uint32_t)page.name_end,
+                                      .appearance = body},
+                                     {.start = (uint32_t)page.key_ends[0] - 1,
+                                      .end = (uint32_t)page.bytes,
+                                      .appearance = body}};
+    spans[0].appearance.scale_basis = 12000;
+    spans[0].appearance.italic = true;
+    spans[0].appearance.band_rgb = 0xff8800;
+    spans[0].appearance.body_rgb = 0xffdd44;
+    spans[1].appearance.scale_basis = 8000;
+    CHECK(ArLocalizationFrame_SetTextAppearance(&frame, &body, spans, 2));
+    ArLocalizedTextPresenter_Prepare(device, &frame, true, 0, 32, 32, 0, 0, 256,
+                                     224, &chunk, 1, &prepared);
+    CHECK(prepared.text_count == 3);
+    CHECK(prepared.mask_count > 0);
+    if (prepared.text_count != 3)
+      continue;
+    const ArTextSurface *background = &prepared.texts[0].surface;
+    CHECK(background->line_count > 5);
+    if (!i) {
+      page_texture = background->texture.value;
+      page_destination = prepared.texts[0].destination;
+      uploads = compositor->uploads;
+    }
+    CHECK(background->texture.value == page_texture);
+    CHECK(!memcmp(&page_destination, &prepared.texts[0].destination,
+                  sizeof(page_destination)));
+    CHECK(compositor->uploads == uploads);
+    const ArLocalizedPreparedText *a = &prepared.texts[1],
+                                  *b = &prepared.texts[2];
+    CHECK(a->surface.line_count == 1 && b->surface.line_count == 1);
+    CHECK(a->destination.y + a->surface.lines[0].baseline ==
+          b->destination.y + b->surface.lines[0].baseline);
+    CHECK(a->surface.font_use_count > 0 && b->surface.font_use_count > 0);
+    unsigned underlines = 0;
+    int previous_x = 0, pitch = 0;
+    for (unsigned j = 0; j < prepared.inline_object_count; ++j) {
+      const ArLocalizedPreparedInlineObject *object =
+          &prepared.inline_objects[j];
+      if (object->kind != kArLocalizationInlineObject_NameFieldUnderline)
+        continue;
+      if (underlines == 1)
+        pitch = object->destination.x - previous_x;
+      if (underlines > 1)
+        CHECK(object->destination.x - previous_x == pitch);
+      previous_x = object->destination.x;
+      ++underlines;
+    }
+    CHECK(underlines == 8 && pitch > 0);
+  }
+  /* A font change inside an editable value cannot change the fixed field's
+   * geometry as the player types. Diagnose and retain its native cells. */
+  BuildPage(&page, "A|W", 4);
+  CHECK(BuildFrame(&frame, &page, &settings, true, 8,
+                   kArTextDirection_LeftToRight));
+  ArTextAppearanceSpan partial = {.start = (uint32_t)page.name_start,
+                                  .end = (uint32_t)page.name_start + 1,
+                                  .appearance = body};
+  partial.appearance.scale_basis = 20000;
+  CHECK(ArLocalizationFrame_SetTextAppearance(&frame, &body, &partial, 1));
+  ArLocalizedTextPresenter_Prepare(device, &frame, true, 0, 32, 32, 0, 0, 256,
+                                   224, &chunk, 1, &prepared);
+  CHECK(prepared.text_count == 0 && prepared.mask_count == 0);
+}
+
 static void CheckTypingWork(ArRenderDevice *device, Compositor *compositor) {
   test_case = "typing work";
   ArLocalizedTextPresenter_Reset(device);
@@ -914,6 +1005,7 @@ int main(void) {
           totals.compared, totals.split, totals.whole, totals.sensitive);
   CHECK(totals.sensitive == 8);
   CheckTypingWork(&device, &compositor);
+  CheckStyledField(&device, &compositor);
   test_case = "explicit action-key metadata";
   CheckCursor(&device, &compositor, &settings, 4, true);
   CheckFallbackReasons(&device);

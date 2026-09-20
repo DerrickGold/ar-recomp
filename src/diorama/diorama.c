@@ -2262,60 +2262,23 @@ static PresentationOutcome DioramaCompositeCoreFailure(
   return kPresentationOutcome_CoreFailure;
 }
 
-PresentationOutcome Diorama_Composite(
-    ArRenderDevice *device, int snes_width, int snes_height,
-    int authentic_y0, int obj_apron,
-    int active_pixel_aspect, bool ignore_aspect_ratio,
-    int visible_width, ArRenderRectI output_viewport,
-    const ArRenderTexture texture_handles[], const uint8_t *const pixels[],
-    const bool bg_transparent_fill_configured[2],
-    const uint32_t bg_transparent_fill_argb[2],
-    const DioramaCameraPose *cam_pose, float distance_scale,
-    bool center_camera_vertically,
-    uint32_t additive_plane_mask,
-    const DioramaCoverageMask coverage_masks[kDioramaPlane_Count],
-    uint64_t bg2_content_revision, bool bg2_content_dynamic,
-    uint8_t effect_obj_priority_mask, uint32_t effect_bg_plane_mask,
-    uint8_t map_group, uint8_t map_number, uint8_t layer_section,
-    const DioramaBgValidSpanPlan *bg2_valid_spans,
-    const DioramaSkyboxView *skybox_view,
-    DioramaPlaneEffectFn plane_effect, void *plane_effect_userdata,
-    DioramaProjection *out_projection) {
-  const ArRenderRectI viewport = output_viewport;
-  ArRenderTexture textures[kDioramaPlane_Count];
-  for (int plane = 0; plane < kDioramaPlane_Count; plane++)
-    textures[plane] = texture_handles
-        ? texture_handles[plane] : ArRenderTexture_Invalid();
-  if (out_projection) memset(out_projection, 0, sizeof(*out_projection));
-  if (!ArRenderDevice_IsReady(device) || !cam_pose || authentic_y0 < 0 ||
-      authentic_y0 + kActRaiserAuthenticHeight > snes_height)
-    return kPresentationOutcome_CoreFailure;
+typedef struct DioramaViewGeometry {
+  float matrix[16];
+  DioramaCamera camera;
+  float aspect_x, height_scale;
+  float u0, v0, u1, v1;
+  int width, height;
+} DioramaViewGeometry;
 
-  const ArRenderColorF black = {0.0f, 0.0f, 0.0f, 1.0f};
-  const ArRenderColorF navy = {
-    20.0f / 255.0f, 20.0f / 255.0f, 30.0f / 255.0f, 1.0f,
-  };
-  ArRenderOutputFrame output_frame;
-  if (!ArRenderOutputFrame_Begin(
-          device, viewport, black, navy, &output_frame))
-    return kPresentationOutcome_CoreFailure;
+typedef struct DioramaFocalAperture {
+  ArRenderVertex2D vertices[DIORAMA_VERTS_PER_LAYER];
+  float z;
+  bool valid;
+} DioramaFocalAperture;
 
-  PresentationOutcome outcome = kPresentationOutcome_Complete;
-
-  /* The 3D compositor works in coordinates local to the game viewport. This
-   * keeps the same projection math at any window size while the backend
-   * offsets and clips the result into the aspect-fit rectangle. The scoped
-   * output frame owns margin/scene clears and full-output restoration. */
-  const int out_w = viewport.w;
-  const int out_h = viewport.h;
-  DioramaPerformance_SetViewport(out_w, out_h);
-
-  /* Resolve this room's authored overrides before the far-background pass.
-   * The Backdrop record carries the skybox source as room-scoped metadata, so
-   * waiting until the in-box layer loop would leave the skybox stuck on live
-   * BG2 even though the editor and decoder had selected a ROM source. */
-  DioramaResolvedLayer resolved[kDioramaLayerCount];
-  int resolved_count;
+static int
+ResolveDioramaLayers(const DioramaScene *scene,
+                     DioramaResolvedLayer resolved[kDioramaLayerCount]) {
   {
     DioramaResolvedLayer defaults[kDioramaLayerCount];
     for (int i = 0; i < kDioramaLayerCount; i++) {
@@ -2331,20 +2294,20 @@ PresentationOutcome Diorama_Composite(
       defaults[i].stack_direction = kDioramaStack_Forward;
       defaults[i].stack_solid = false;
     }
-    resolved_count = DioramaLayerOrder_ResolveSection(
-        &g_layer_overrides, map_group, map_number, layer_section,
-        defaults, kDioramaLayerCount, resolved, kDioramaLayerCount);
+    return DioramaLayerOrder_ResolveSection(
+        &g_layer_overrides, scene->map_group, scene->map_number,
+        scene->layer_section, defaults, kDioramaLayerCount, resolved,
+        kDioramaLayerCount);
   }
+}
 
-  /* B5 (followup doc): drawn before the per-layer loop below — painter's
-   * algorithm, skybox is the farthest thing in the scene. Captured mode uses
-   * the same pixels[]-populated guard as the layer loop so stale BG2 cannot
-   * draw; an authored ROM source is immutable and does not need that guard.
-   *
-   * Live report (2026-07-21): Skybox-only wants noticeably LESS blur than
-   * Plane+skybox — it's the entire visible background there (no sharper
-   * in-box copy to contrast against), so the same heavy blur just reads as
-   * "broken," not atmospheric. */
+/* The skybox draws first. Missing ROM art falls back to current captured
+ * BG2; failed renderer restoration is a core failure, never a fallback. */
+static PresentationOutcome DrawResolvedDioramaSkybox(
+    ArRenderDevice *device, const DioramaCapture *capture,
+    const DioramaViewGeometry *geometry, const ArRenderTexture *textures,
+    const DioramaResolvedLayer *resolved, int resolved_count) {
+  PresentationOutcome outcome = kPresentationOutcome_Complete;
   static const float kSkyboxBlurRadiusOnly = 1.0f;
   static const float kSkyboxBlurRadiusBoth = 3.0f;
   if (g_settings.diorama_skybox != kDioramaSky_Off) {
@@ -2352,22 +2315,23 @@ PresentationOutcome Diorama_Composite(
     bool both = g_settings.diorama_skybox == kDioramaSky_Both;
     ArRenderTexture skybox_texture = textures[SR_PPU_OVERLAY_BG2];
     bool rom_skybox = false;
-    uint64_t skybox_revision = bg2_content_revision;
-    bool skybox_dynamic = bg2_content_dynamic;
-    int skybox_apron = obj_apron;
-    int skybox_width = snes_width;
+    uint64_t skybox_revision = capture->bg2_revision;
+    bool skybox_dynamic = capture->bg2_dynamic;
+    int skybox_apron = capture->obj_apron;
+    int skybox_width = capture->width;
     DioramaBgValidSpanPlan skybox_spans;
-    const DioramaBgValidSpanPlan *skybox_valid_spans = bg2_valid_spans;
+    const DioramaBgValidSpanPlan *skybox_valid_spans = capture->bg2_valid_spans;
     const int skybox_source =
         DioramaLayerOrder_SkyboxSource(resolved, resolved_count);
-    if (skybox_source == kDioramaLayerSource_Captured && skybox_view &&
-        ArRenderTexture_IsValid(skybox_view->texture) && bg2_valid_spans) {
-      skybox_texture = skybox_view->texture;
-      skybox_revision = skybox_view->revision;
-      skybox_dynamic = skybox_view->dynamic;
+    if (skybox_source == kDioramaLayerSource_Captured && capture->skybox &&
+        ArRenderTexture_IsValid(capture->skybox->texture) &&
+        capture->bg2_valid_spans) {
+      skybox_texture = capture->skybox->texture;
+      skybox_revision = capture->skybox->revision;
+      skybox_dynamic = capture->skybox->dynamic;
       skybox_apron = 0;
-      skybox_width = skybox_view->width;
-      skybox_spans = *bg2_valid_spans;
+      skybox_width = capture->skybox->width;
+      skybox_spans = *capture->bg2_valid_spans;
       for (unsigned i = 0; i < skybox_spans.count; ++i) {
         if (skybox_spans.spans[i].x1 <= skybox_spans.spans[i].x0) continue;
         skybox_spans.spans[i].x0 = 0;
@@ -2379,91 +2343,80 @@ PresentationOutcome Diorama_Composite(
       uint8_t source_group = 0, source_map = 0, source_bg = 0;
       bool transparent_fill_configured = false;
       uint32_t transparent_fill_argb = 0;
-      if (bg_transparent_fill_configured && bg_transparent_fill_argb &&
-          DioramaLayerOrder_DecodeActionBgSource(
-              skybox_source, &source_group, &source_map, &source_bg) &&
+      if (capture->bg_transparent_fill_configured &&
+          capture->bg_transparent_fill_argb &&
+          DioramaLayerOrder_DecodeActionBgSource(skybox_source, &source_group,
+                                                 &source_map, &source_bg) &&
           (source_bg == 1 || source_bg == 2)) {
         transparent_fill_configured =
-            bg_transparent_fill_configured[source_bg - 1];
+            capture->bg_transparent_fill_configured[source_bg - 1];
         transparent_fill_argb =
-            bg_transparent_fill_argb[source_bg - 1];
+            capture->bg_transparent_fill_argb[source_bg - 1];
       }
       bool skybox_state_restore_failed = false;
-      const ArRenderTexture named_handle =
-          DioramaRomSkyboxResource_Resolve(
-              device, skybox_source, transparent_fill_configured,
-              transparent_fill_argb, &skybox_state_restore_failed);
-      /* A missing/invalid ROM backdrop can safely fall back to captured BG2.
-       * A failed renderer-state restore cannot: continuing could submit the
-       * rest of the frame to the cache target or through stale clip/viewport
-       * state, producing backend-specific corruption. */
+      const ArRenderTexture named_handle = DioramaRomSkyboxResource_Resolve(
+          device, skybox_source, transparent_fill_configured,
+          transparent_fill_argb, &skybox_state_restore_failed);
+
       if (skybox_state_restore_failed) {
-        return DioramaCompositeCoreFailure(&output_frame);
+        return kPresentationOutcome_CoreFailure;
       }
       if (ArRenderTexture_IsValid(named_handle)) {
         skybox_texture = named_handle;
         rom_skybox = true;
         skybox_dynamic = false;
-        skybox_revision =
-            ((uint64_t)(uint32_t)skybox_source << 33) ^
-            ((uint64_t)transparent_fill_configured << 32) ^
-            (uint64_t)transparent_fill_argb;
+        skybox_revision = ((uint64_t)(uint32_t)skybox_source << 33) ^
+                          ((uint64_t)transparent_fill_configured << 32) ^
+                          (uint64_t)transparent_fill_argb;
       }
     }
-    /* Named ROM art is immutable and supplies its own current pixels. A decode
-     * or upload failure falls back to captured BG2, retaining the established
-     * current-frame guard so a stale live texture cannot leak into a scene. */
-    if (rom_skybox || pixels[SR_PPU_OVERLAY_BG2] ||
-        (skybox_view && ArRenderTexture_IsValid(skybox_view->texture))) {
+
+    if (rom_skybox || capture->pixels[SR_PPU_OVERLAY_BG2] ||
+        (capture->skybox &&
+         ArRenderTexture_IsValid(capture->skybox->texture))) {
       const PresentationOutcome skybox = DrawDioramaSkybox(
-          device, skybox_texture,
-          skybox_apron, skybox_width, snes_height, out_w, out_h, both,
-          both ? kSkyboxBlurRadiusBoth : kSkyboxBlurRadiusOnly,
-          rom_skybox, skybox_revision, skybox_dynamic, skybox_valid_spans);
+          device, skybox_texture, skybox_apron, skybox_width, capture->height,
+          geometry->width, geometry->height, both,
+          both ? kSkyboxBlurRadiusBoth : kSkyboxBlurRadiusOnly, rom_skybox,
+          skybox_revision, skybox_dynamic, skybox_valid_spans);
       outcome = PresentationOutcome_Combine(outcome, skybox);
       if (!PresentationOutcome_IsUsable(skybox)) {
-        return DioramaCompositeCoreFailure(&output_frame);
+        return kPresentationOutcome_CoreFailure;
       }
     }
   }
+  return outcome;
+}
 
-  float tex_h = (float)snes_height;
-  /* The UV window is the DISPLAYED span [obj_apron, obj_apron+snes_width), not
-   * the whole surface: the apron carries resolve headroom, never extra world to
-   * show. Sampling from column 0 dragged both empty apron bands into every
-   * plane and widened the picture by 2*apron. */
-  float uv_u0 = (float)obj_apron / (float)SR_PPU_SURFACE_MAX_WIDTH;
-  float uv_u1 =
-      (float)(obj_apron + snes_width) / (float)SR_PPU_SURFACE_MAX_WIDTH;
-  /* V now divides by the TEXTURE height the way U always divided by the
-   * texture width. The old form (`1 - slack/tex_h`) silently assumed the
-   * texture was exactly as tall as its content, which stopped being true once
-   * the planes use the ABI maximum height to hold the vertical margin. */
-  float uv_v0 = 0.0f;
-  float uv_v1 = tex_h / (float)SR_PPU_SURFACE_MAX_HEIGHT;
-  /* World height is normalized against the AUTHENTIC 224 lines, not against
-   * the captured height -- this is the whole point of the vertical extend.
-   * Dividing by tex_h would make the taller capture span the same 1.0 world
-   * unit, so the auto-fit below would frame the bigger plane to the same
-   * screen height and the only visible effect would be that everything got
-   * ~14% SMALLER. Normalizing against 224 instead keeps the authentic band
-   * exactly where it was and lets the extra scanlines project past the top
-   * edge, into screen space the tilt was previously wasting.
-   *
-   */
-  float height_scale = tex_h / (float)kActRaiserAuthenticHeight;
+/* UVs describe the displayed capture inside the allocation. World size
+ * remains normalized to 224 native rows so margins extend the scene rather
+ * than shrinking the playfield. Resolve auto-fit before applying zoom. */
+static void PrepareDioramaView(const DioramaCapture *capture,
+                               const DioramaView *view,
+                               const DioramaResolvedLayer *resolved,
+                               int resolved_count,
+                               DioramaViewGeometry *geometry) {
+  float tex_h = (float)capture->height;
+
+  geometry->u0 = (float)capture->obj_apron / (float)SR_PPU_SURFACE_MAX_WIDTH;
+  geometry->u1 = (float)(capture->obj_apron + capture->width) /
+                 (float)SR_PPU_SURFACE_MAX_WIDTH;
+
+  geometry->v0 = 0.0f;
+  geometry->v1 = tex_h / (float)SR_PPU_SURFACE_MAX_HEIGHT;
+
+  geometry->height_scale = tex_h / (float)kActRaiserAuthenticHeight;
 
   float par = 1.0f;
-  if (active_pixel_aspect == kPixelAspect_Crt43 && !ignore_aspect_ratio)
+  if (view->pixel_aspect == kPixelAspect_Crt43 && !view->ignore_aspect_ratio)
     par = 7.0f / 6.0f;
-  /* Width is normalized against the same authentic-height reference used by
-   * every layer and projection consumer. */
-  float aspect_x = (float)snes_width /
-      (float)kActRaiserAuthenticHeight * par;
-  float vis_half_w =
-      0.5f * (float)visible_width / (float)kActRaiserAuthenticHeight * par;
 
-  float screen_aspect = (float)out_w / (float)out_h;
+  geometry->aspect_x =
+      (float)capture->width / (float)kActRaiserAuthenticHeight * par;
+  float vis_half_w = 0.5f * (float)view->visible_width /
+                     (float)kActRaiserAuthenticHeight * par;
+
+  float screen_aspect = (float)geometry->width / (float)geometry->height;
   float tan_half = tanf(kDioramaFovY * 0.5f);
   float fit_h = 0.5f / tan_half;
   float fit_w = vis_half_w / (tan_half * screen_aspect);
@@ -2471,36 +2424,22 @@ PresentationOutcome Diorama_Composite(
   g_diorama_auto_distance =
       fmaxf(fit_h, fit_w) * 1.02f + (kDioramaZ_Hud - 0.5f);
 
-  /* B4-split (followup doc): the camera comes from the caller's snapshot
-   * (Free Cam: the authored/persisted pose via FrameSlot; Dynamic Cam:
-   * present.c's own render camera) instead of reading the game-thread-owned
-   * g_diorama_cam directly — see the DioramaCameraPose comment (diorama.h)
-   * for why. fov_y stays the fixed camera constant; it was never authored
-   * per-mode. */
-  DioramaCamera cam = { cam_pose->tilt_x, cam_pose->tilt_y,
-                        cam_pose->distance, kDioramaFovY };
-  if (cam.distance <= 0.0f) cam.distance = g_diorama_auto_distance;
-  /* M5 (followup doc): the descriptor range (0..2000, settings.c) must stay
-   * contiguous to cover both the 0 auto-fit sentinel and the real
-   * kDioramaDistMin..kDioramaDistMax range, so 1..199 (0.01x..1.99x) is a
-   * reachable "dead zone" the range alone can't exclude — a single
-   * right-arrow off the default 0 lands at distance=1, inside the near
-   * plane (kNear=0.1), clipping the whole scene. Enforce the floor here,
-   * at consume time. */
-  else if (cam.distance < kDioramaDistMin) cam.distance = kDioramaDistMin;
-  /* B4-kick: boost's zoom-punch, applied AFTER the auto-fit/dead-zone
-   * resolution above so it composes correctly with the 0 sentinel (see the
-   * distance_scale parameter comment, diorama.h). 1.0 = no change. */
-  cam.distance *= distance_scale;
-  if (cam.distance < kDioramaDistMin) cam.distance = kDioramaDistMin;
+  geometry->camera = (DioramaCamera){view->camera.tilt_x, view->camera.tilt_y,
+                                     view->camera.distance, kDioramaFovY};
+  if (geometry->camera.distance <= 0.0f)
+    geometry->camera.distance = g_diorama_auto_distance;
 
-  float mvp[16];
-  BuildViewProjection(&cam, out_w, out_h, mvp);
+  else if (geometry->camera.distance < kDioramaDistMin)
+    geometry->camera.distance = kDioramaDistMin;
 
-  if (center_camera_vertically) {
-    /* BG1 defines the scene aperture. Resolve its geometry even on an empty
-     * capture frame so transient pixels/visibility cannot move the camera.
-     * Layer-order Z is authored around 0.5; meshes use z - 0.5. */
+  geometry->camera.distance *= view->distance_scale;
+  if (geometry->camera.distance < kDioramaDistMin)
+    geometry->camera.distance = kDioramaDistMin;
+
+  BuildViewProjection(&geometry->camera, geometry->width, geometry->height,
+                      geometry->matrix);
+
+  if (view->center_camera_vertically) {
     float focal_z = DioramaBg1ReferenceZ() - 0.5f;
     float focal_rake = 0.0f, focal_bow = 0.0f;
     for (int i = 0; i < resolved_count; i++) {
@@ -2511,118 +2450,101 @@ PresentationOutcome Diorama_Composite(
       break;
     }
     Diorama_CenterCameraVertically(
-        mvp, aspect_x, height_scale, focal_z, focal_rake, focal_bow,
-        (float)authentic_y0 / tex_h,
-        (float)(authentic_y0 + kActRaiserAuthenticHeight) / tex_h);
+        geometry->matrix, geometry->aspect_x, geometry->height_scale, focal_z,
+        focal_rake, focal_bow, (float)capture->authentic_y0 / tex_h,
+        (float)(capture->authentic_y0 + kActRaiserAuthenticHeight) / tex_h);
   } else {
-    /* Free Cam retains its authored framing and margin pin. Meshes are
-     * symmetric around wy=0, while the capture can have different numbers of
-     * rows above/below the authentic 224. Translate world Y by their half
-     * difference, limited by the existing centering/crop policy. */
-    float bottom_rows = tex_h - (float)authentic_y0 -
-        (float)kActRaiserAuthenticHeight;
-    float pin = 0.5f * ((float)authentic_y0 - bottom_rows) /
-        (float)kActRaiserAuthenticHeight;
-    float d = DioramaVerticalShift(mvp, height_scale, pin, out_w, out_h);
+    float bottom_rows =
+        tex_h - (float)capture->authentic_y0 - (float)kActRaiserAuthenticHeight;
+    float pin = 0.5f * ((float)capture->authentic_y0 - bottom_rows) /
+                (float)kActRaiserAuthenticHeight;
+    float d = DioramaVerticalShift(geometry->matrix, geometry->height_scale,
+                                   pin, geometry->width, geometry->height);
     if (d != 0.0f)
       for (int r = 0; r < 4; r++)
-        mvp[12 + r] += d * mvp[4 + r];
+        geometry->matrix[12 + r] += d * geometry->matrix[4 + r];
   }
+}
 
+static void PublishDioramaView(const DioramaCapture *capture,
+                               const DioramaView *view,
+                               const DioramaViewGeometry *geometry,
+                               DioramaProjection *out_projection) {
   if (out_projection) {
-    memcpy(out_projection->matrix, mvp, sizeof(mvp));
-    out_projection->aspect_x = aspect_x;
-    out_projection->height_scale = height_scale;
-    /* The public point-projection contract takes coordinates relative to the
-     * displayed capture. Layer textures carry a hidden resolve apron before
-     * that capture, so publish its origin once instead of making every
-     * presentation overlay know the surface layout. */
-    out_projection->texture_x_origin = obj_apron;
+    memcpy(out_projection->matrix, geometry->matrix, sizeof(geometry->matrix));
+    out_projection->aspect_x = geometry->aspect_x;
+    out_projection->height_scale = geometry->height_scale;
+
+    out_projection->texture_x_origin = capture->obj_apron;
     out_projection->texture_width = SR_PPU_SURFACE_MAX_WIDTH;
-    /* The ALLOCATED height, matching texture_width's allocated width, because
-     * Diorama_ProjectCapturedPoint divides a texture row by this to get V and
-     * the uv_v window above is now expressed in the same allocated space. */
+
     out_projection->texture_height = SR_PPU_SURFACE_MAX_HEIGHT;
-    out_projection->output_x = viewport.x;
-    out_projection->output_y = viewport.y;
-    out_projection->output_width = out_w;
-    out_projection->output_height = out_h;
+    out_projection->output_x = view->viewport.x;
+    out_projection->output_y = view->viewport.y;
+    out_projection->output_width = geometry->width;
+    out_projection->output_height = geometry->height;
   }
+}
 
-  /* B6 (followup doc): drawn before the per-layer loop below — painter's
-   * algorithm, the box surrounds the stack. */
-  if (g_settings.diorama_shoebox) {
-    DioramaPerformance_SetPlane(-1);
-    const PresentationOutcome shoebox = DrawDioramaShoebox(
-        device, mvp, aspect_x, height_scale, cam.tilt_y, out_w, out_h);
-    outcome = PresentationOutcome_Combine(outcome, shoebox);
-    if (!PresentationOutcome_IsUsable(shoebox)) {
-      return DioramaCompositeCoreFailure(&output_frame);
-    }
-  }
-
-  float shade_mix =
-      (float)g_settings.diorama_depth_shade / (float)kPercentScale;
-
-  ArRenderVertex2D verts[DIORAMA_VERTS_PER_LAYER];
-  int32_t indices[DIORAMA_INDICES_PER_LAYER];
-  int nv, ni;
-
-  /* The focal BG1 plane owns the in-box scene aperture. A BG plane can be
-   * authored slightly in front of it to adjust parallax/priority alignment,
-   * but its rectangular mesh must not protrude through BG1's transparent
-   * pixels at the outer boundary. Build the aperture once from BG1's resolved
-   * shape; forward planes below retain their centre projection and converge to
-   * this grid only through the two outer vertex rings. */
-  ArRenderVertex2D focal_aperture_verts[DIORAMA_VERTS_PER_LAYER];
+/* Forward BG planes converge to BG1 only at their outer rings. Empty
+ * captures cannot move the camera; only drawable BG1 defines an aperture. */
+static void PrepareDioramaAperture(const DioramaCapture *capture,
+                                   const DioramaViewGeometry *geometry,
+                                   const ArRenderTexture *textures,
+                                   const DioramaResolvedLayer *resolved,
+                                   int resolved_count,
+                                   DioramaFocalAperture *aperture) {
   int32_t focal_aperture_indices[DIORAMA_INDICES_PER_LAYER];
   int focal_aperture_nv = 0, focal_aperture_ni = 0;
-  float focal_aperture_z = kDofFocalZ;
-  bool focal_aperture_valid = false;
+  aperture->z = kDofFocalZ;
+  aperture->valid = false;
   for (int i = 0; i < resolved_count; i++) {
-    if (resolved[i].plane != SR_PPU_OVERLAY_BG1 ||
-        resolved[i].alpha == 0)
+    if (resolved[i].plane != SR_PPU_OVERLAY_BG1 || resolved[i].alpha == 0)
       continue;
     const DioramaLayerDesc *aperture_layer =
         DioramaDescForPlane(SR_PPU_OVERLAY_BG1);
-    if (!DioramaLayerIsDrawable(aperture_layer, textures, pixels))
+    if (!DioramaLayerIsDrawable(aperture_layer, textures, capture->pixels))
       break;
-    focal_aperture_z = resolved[i].z;
-    BuildLayerMesh(
-        mvp, focal_aperture_z - 0.5f,
-        resolved[i].rake, resolved[i].bow,
-        uv_u0, uv_v0, uv_u1, uv_v1,
-        aspect_x, height_scale, out_w, out_h,
-        (ArRenderColorF){1.0f, 1.0f, 1.0f, 1.0f},
-        focal_aperture_verts, focal_aperture_indices,
-        &focal_aperture_nv, &focal_aperture_ni);
-    focal_aperture_valid =
-        focal_aperture_nv == DIORAMA_VERTS_PER_LAYER &&
-        focal_aperture_ni == DIORAMA_INDICES_PER_LAYER;
+    aperture->z = resolved[i].z;
+    BuildLayerMesh(geometry->matrix, aperture->z - 0.5f, resolved[i].rake,
+                   resolved[i].bow, geometry->u0, geometry->v0, geometry->u1,
+                   geometry->v1, geometry->aspect_x, geometry->height_scale,
+                   geometry->width, geometry->height,
+                   (ArRenderColorF){1.0f, 1.0f, 1.0f, 1.0f}, aperture->vertices,
+                   focal_aperture_indices, &focal_aperture_nv,
+                   &focal_aperture_ni);
+    aperture->valid = focal_aperture_nv == DIORAMA_VERTS_PER_LAYER &&
+                      focal_aperture_ni == DIORAMA_INDICES_PER_LAYER;
     break;
   }
+}
 
-  /* Publish the exact authored shape/window of the effect-addressable BG
-   * planes and each OBJ priority plane. A current attached effect can retain
-   * its transform when the isolated source band has no winning pixels. */
+/* An attached effect may retain a transform on an intentionally empty
+ * source band. Publish the exact authored geometry used by layer drawing. */
+static void PublishDioramaPlanes(const DioramaCapture *capture,
+                                 const DioramaScene *scene,
+                                 const DioramaViewGeometry *geometry,
+                                 const ArRenderTexture *textures,
+                                 const DioramaResolvedLayer *resolved,
+                                 int resolved_count,
+                                 DioramaProjection *out_projection) {
   if (out_projection) {
     for (int i = 0; i < resolved_count; i++) {
       if (resolved[i].alpha == 0) continue;
-      const DioramaLayerDesc *layer =
-          DioramaDescForPlane(resolved[i].plane);
-      if (!DioramaLayerIsProjectable(
-              layer, textures, pixels, effect_obj_priority_mask,
-              effect_bg_plane_mask))
+      const DioramaLayerDesc *layer = DioramaDescForPlane(resolved[i].plane);
+      if (!DioramaLayerIsProjectable(layer, textures, capture->pixels,
+                                     scene->effect_obj_priority_mask,
+                                     scene->effect_bg_plane_mask))
         continue;
       DioramaPlaneProjection plane = {
-        .valid = true,
-        .u0 = uv_u0,
-        .v0 = uv_v0,
-        .u1 = uv_u1,
-        .v1 = uv_v1,
-        .z_world = resolved[i].z - 0.5f,
-        .rake = resolved[i].rake,
-        .bow = resolved[i].bow,
+          .valid = true,
+          .u0 = geometry->u0,
+          .v0 = geometry->v0,
+          .u1 = geometry->u1,
+          .v1 = geometry->v1,
+          .z_world = resolved[i].z - 0.5f,
+          .rake = resolved[i].rake,
+          .bow = resolved[i].bow,
       };
       if (resolved[i].plane == SR_PPU_OVERLAY_BG1) {
         out_projection->bg1_plane = plane;
@@ -2639,551 +2561,435 @@ PresentationOutcome Diorama_Composite(
     }
     out_projection->valid = true;
   }
+}
 
-  /* Ordinary scenes retain the single historical painter pass byte-for-byte.
-   * A disjoint full-add scene needs three passes: main world, resolved TS
-   * addends, then BG3. The PPU capture has already made every additive plane
-   * sparse at non-winning pixels, so drawing all addends after the main world
-   * reproduces main+sub without letting a low-priority addend be overwritten by
-   * a later main plane. BG3 remains last because a non-math HUD winner must
-   * occlude (rather than receive) the subscreen contribution. */
-  int draw_order[kDioramaLayerCount];
+/* Normal layers retain authored painter order. Full-add scenes draw main
+ * world, then sparse subscreen addends, then the non-math HUD. */
+static int ResolveDioramaDrawOrder(const DioramaScene *scene,
+                                   const DioramaResolvedLayer *resolved,
+                                   int resolved_count,
+                                   int draw_order[kDioramaLayerCount]) {
   int draw_count = 0;
-  const int blend_pass_count = additive_plane_mask ? 3 : 1;
+  const int blend_pass_count = scene->additive_plane_mask ? 3 : 1;
   for (int blend_pass = 0; blend_pass < blend_pass_count; blend_pass++) {
     for (int i = 0; i < resolved_count; i++) {
       const int plane = resolved[i].plane;
       const bool additive =
-          (additive_plane_mask & (1u << (unsigned)plane)) != 0;
+          (scene->additive_plane_mask & (1u << (unsigned)plane)) != 0;
       int plane_pass = 0;
-      if (additive_plane_mask)
-        plane_pass = additive ? 1
-            : plane == SR_PPU_OVERLAY_BG3 ? 2 : 0;
+      if (scene->additive_plane_mask)
+        plane_pass = additive ? 1 : plane == SR_PPU_OVERLAY_BG3 ? 2 : 0;
       if (plane_pass == blend_pass)
         draw_order[draw_count++] = i;
     }
   }
-  for (int draw_index = 0; draw_index < draw_count; draw_index++) {
-    const int i = draw_order[draw_index];
-    if (resolved[i].alpha == 0) continue;
-    const DioramaLayerDesc *layer = DioramaDescForPlane(resolved[i].plane);
-    if (!layer) continue;
-    DioramaPerformance_SetPlane(layer->plane);
-    const bool is_additive =
-        (additive_plane_mask & (1u << (unsigned)layer->plane)) != 0;
-    const float layer_z = resolved[i].z;
-    const float layer_rake = resolved[i].rake;
-    const float layer_bow = resolved[i].bow;
-    const float layer_thickness = resolved[i].thickness;
-    const float layer_stack = resolved[i].stack;
-    const int layer_stack_copies = resolved[i].stack_copies;
-    const int layer_stack_dir = resolved[i].stack_direction;
-    const bool layer_stack_solid = resolved[i].stack_solid;
-    /* A5 (followup doc): with diorama_hud_flat on, BG3 is deliberately not
-     * captured as a diorama layer (actraiser_rtl.c) and the anchored flat
-     * HUD draws separately (present.c). Skip this entry outright rather
-     * than relying on its pixel buffer staying unpopulated — once the
-     * buffer has been written at least once (tilted mode was used this
-     * session), the pointer stays non-NULL and its last frame's content
-     * would otherwise keep drawing as a stale ghost plane. */
-    /* B5 (followup doc): "Skybox only" promotes BG2 OUT of the box entirely
-     * (drawn above as the enveloping skybox instead) — both priority bands
-     * share the same underlying capture/visibility toggle, so both are
-     * excluded together. "Plane + skybox" and "Off" leave this loop
-     * untouched: BG2 still draws in-box exactly as before. */
-    /* B5 follow-up (live report, 2026-07-21): the pre-existing backdrop
-     * plane (kDioramaPlane_Backdrop, the full flat-scene residual) sits
-     * opaque at z=-0.50, in front of the skybox — at low tilt its projected
-     * quad fills nearly the whole frustum, leaving only a thin sliver for
-     * the skybox to show through at all. In Skybox-only, BG2 is meant to
-     * REPLACE that role entirely (it's now the ENTIRE background, not a
-     * margin-filler), so skip backdrop too. Plane+skybox keeps it — there
-     * BG2's in-box copy is the main visual and backdrop still backstops any
-     * gaps the way it always has. */
-    bool is_backdrop = (layer->plane == kDioramaPlane_Backdrop);
-    const ArRenderTexture texture = textures[layer->plane];
-    if (!DioramaLayerIsDrawable(layer, textures, pixels)) {
-      /* An isolated BG band can legitimately have no winning pixels at a
-       * particular scroll position while an environmental effect remains
-       * anchored to that plane. Preserve its painter-order callback and
-       * transform without drawing a stale/empty texture. */
-      if (DioramaLayerIsProjectable(
-              layer, textures, pixels, effect_obj_priority_mask,
-              effect_bg_plane_mask)) {
-        const PresentationOutcome effect = DioramaSubmitPlaneEffect(
-            &output_frame, plane_effect, plane_effect_userdata,
-            layer->plane, out_projection);
-        outcome = PresentationOutcome_Combine(outcome, effect);
-        if (!PresentationOutcome_IsUsable(effect)) {
-          return DioramaCompositeCoreFailure(&output_frame);
-        }
+  return draw_count;
+}
+
+typedef struct DioramaLayerDraw {
+  const DioramaResolvedLayer *authored;
+  const DioramaLayerDesc *description;
+  ArRenderTexture texture;
+  ArRenderColorF shade;
+  ArRenderBlendMode blend;
+} DioramaLayerDraw;
+
+typedef struct DioramaLayerMesh {
+  ArRenderVertex2D vertices[DIORAMA_VERTS_PER_LAYER];
+  int32_t indices[DIORAMA_INDICES_PER_LAYER];
+  int vertex_count, index_count;
+  bool constrained;
+} DioramaLayerMesh;
+
+typedef struct DioramaAttachedMesh {
+  /* Enough room to append the host plane and its optional edge fringe. */
+  ArRenderVertex2D vertices[DIORAMA_ATTACHED_AA_VERTS];
+  int32_t indices[DIORAMA_ATTACHED_AA_INDICES];
+  int vertex_count, index_count;
+  float lower_content_v_max;
+} DioramaAttachedMesh;
+
+static void PrepareDioramaLayerMesh(const DioramaCapture *capture,
+                                    const DioramaViewGeometry *geometry,
+                                    const DioramaFocalAperture *aperture,
+                                    const DioramaLayerDraw *layer,
+                                    DioramaLayerMesh *mesh) {
+  const float z_world = layer->authored->z - 0.5f;
+  BuildLayerMesh(geometry->matrix, z_world, layer->authored->rake,
+                 layer->authored->bow, geometry->u0, geometry->v0, geometry->u1,
+                 geometry->v1, geometry->aspect_x, geometry->height_scale,
+                 geometry->width, geometry->height, layer->shade,
+                 mesh->vertices, mesh->indices, &mesh->vertex_count,
+                 &mesh->index_count);
+  mesh->constrained = false;
+  if (aperture->valid && layer->description->plane != SR_PPU_OVERLAY_BG1 &&
+      LayerUsesFocalAperture(layer->description->plane) &&
+      layer->authored->z > aperture->z + 0.0001f) {
+    mesh->constrained =
+        DioramaAperture_ConstrainGrid(mesh->vertices, aperture->vertices,
+                                      DIORAMA_SUBDIV_X, DIORAMA_SUBDIV_Y, 2.0f);
+  }
+  if (capture->coverage_masks &&
+      DioramaSparseCoverageEnabledForPlane(layer->description->plane)) {
+    const DioramaCoverageMask coverage =
+        capture->coverage_masks[layer->description->plane];
+    if (coverage && coverage != DioramaCoverage_FullMask())
+      mesh->index_count = DioramaCoverage_FilterGridIndices(
+          mesh->indices, mesh->index_count, coverage);
+  }
+}
+
+/* Fold at the authentic bottom; keep the continuation coplanar through
+ * the last drawable texel plus tolerance. This makes the attachment stable
+ * when authored capture extents change. Only low BG2 publishes the fold for
+ * atmosphere projection; the higher bands use the same geometry. */
+static void PrepareDioramaWaterfall(const DioramaCapture *capture,
+                                    const DioramaScene *scene,
+                                    const DioramaViewGeometry *geometry,
+                                    const DioramaLayerDraw *layer,
+                                    DioramaAttachedMesh *attached,
+                                    DioramaProjection *out_projection) {
+  const float z_world = layer->authored->z - 0.5f;
+  attached->vertex_count = attached->index_count = 0;
+
+  const bool aitos_waterfall_extension =
+      scene->map_group == kActRaiserMapGroup_Aitos && scene->map_number >= 2 &&
+      scene->map_number <= 3 &&
+      scene->layer_section == kDioramaLayerSection_AitosWaterfall &&
+      (layer->description->plane == SR_PPU_OVERLAY_BG2 ||
+       layer->description->plane == kDioramaPlane_Bg2Hi ||
+       layer->description->plane == kDioramaPlane_Bg2Far);
+  attached->lower_content_v_max = 0.0f;
+
+  float log_fold_t = -1.0f, log_overlap_t = -1.0f;
+  int log_drawable_y1 = -1;
+  if (aitos_waterfall_extension) {
+    DioramaVerticalRepeatPlan repeat;
+    const float layer_v_span = geometry->v1 - geometry->v0;
+    if (DioramaVerticalRepeatPlan_Build(
+            capture->authentic_y0, kActRaiserAuthenticHeight, capture->height,
+            SR_PPU_SURFACE_MAX_HEIGHT, &repeat) &&
+        layer_v_span > 0.0f) {
+      const float layer_v_shift = geometry->v0 - geometry->v0;
+      int drawable_y1 = 0;
+      if (!DioramaBgValidSpanPlan_DrawableRowBounds(capture->bg2_valid_spans,
+                                                    NULL, &drawable_y1) ||
+          drawable_y1 <= 0 || drawable_y1 > capture->height) {
+        drawable_y1 = capture->height;
       }
-      continue;
-    }
 
-    ArRenderColorF shade = {
-      1.0f + (layer->shade.r - 1.0f) * shade_mix,
-      1.0f + (layer->shade.g - 1.0f) * shade_mix,
-      1.0f + (layer->shade.b - 1.0f) * shade_mix,
-      /* Authored alpha multiplies the layer's built-in shade alpha, so an
-       * un-authored plane (255) preserves the built-in value exactly. */
-      layer->shade.a * ((float)resolved[i].alpha / 255.0f),
-    };
+      attached->lower_content_v_max =
+          (float)drawable_y1 / (float)SR_PPU_SURFACE_MAX_HEIGHT + layer_v_shift;
+      log_drawable_y1 = drawable_y1;
+      const float fold_v =
+          (float)repeat.fold_y / (float)SR_PPU_SURFACE_MAX_HEIGHT +
+          layer_v_shift;
+      const float source_v0 =
+          (float)repeat.source_y0 / (float)SR_PPU_SURFACE_MAX_HEIGHT +
+          layer_v_shift;
+      const float source_v1 =
+          (float)repeat.source_y1 / (float)SR_PPU_SURFACE_MAX_HEIGHT +
+          layer_v_shift;
+      const float fold_t = (fold_v - geometry->v0) / layer_v_span;
+      const float extension_height =
+          (float)repeat.repeat_height / (float)kActRaiserAuthenticHeight;
+      if (fold_t >= 0.0f && fold_t <= 1.0f && source_v0 >= 0.0f &&
+          source_v1 <= 1.0f) {
+        const float extension_y = (0.5f - fold_t) * geometry->height_scale;
+        const float extension_z = DioramaTiltedRowDepth(
+            z_world, layer->authored->rake, layer->authored->bow, fold_t);
 
-    float z_world = layer_z - 0.5f;
-    const float layer_u0 = uv_u0;
-    const float layer_u1 = uv_u1;
-    const float layer_v0 = uv_v0;
-    const float layer_v1 = uv_v1;
+        float overlap_t = (float)(drawable_y1 - repeat.fold_y +
+                                  kAitosWaterfallSeamTolerancePixels) /
+                          (float)repeat.repeat_height;
+        if (overlap_t < 0.0f)
+          overlap_t = 0.0f;
+        if (overlap_t > 1.0f)
+          overlap_t = 1.0f;
+        float handoff_t =
+            fold_t + overlap_t * extension_height / geometry->height_scale;
+        if (handoff_t > 1.0f)
+          handoff_t = 1.0f;
+        const float handoff_z = DioramaTiltedRowDepth(
+            z_world, layer->authored->rake, layer->authored->bow, handoff_t);
+        log_fold_t = fold_t;
+        log_overlap_t = overlap_t;
+        BuildFoldedOverflowMesh(
+            geometry->matrix, extension_y, extension_z, handoff_z,
+            extension_height, overlap_t, kShoeboxZFront,
+            kAitosWaterfallFrontDrop, geometry->u0, source_v0, geometry->u1,
+            source_v1, geometry->aspect_x, geometry->width, geometry->height,
+            layer->shade, attached->vertices, attached->indices,
+            &attached->vertex_count, &attached->index_count);
 
-    BuildLayerMesh(mvp,
-                   z_world, layer_rake, layer_bow, layer_u0, layer_v0,
-                   layer_u1, layer_v1,
-                   aspect_x, height_scale, out_w, out_h, shade,
-                   verts, indices, &nv, &ni);
-    bool constrained_to_focal_aperture = false;
-    if (focal_aperture_valid &&
-        layer->plane != SR_PPU_OVERLAY_BG1 &&
-        LayerUsesFocalAperture(layer->plane) &&
-        layer_z > focal_aperture_z + 0.0001f) {
-      constrained_to_focal_aperture = DioramaAperture_ConstrainGrid(
-          verts, focal_aperture_verts,
-          DIORAMA_SUBDIV_X, DIORAMA_SUBDIV_Y, 2.0f);
-    }
-    if (coverage_masks &&
-        DioramaSparseCoverageEnabledForPlane(layer->plane)) {
-      const DioramaCoverageMask coverage = coverage_masks[layer->plane];
-      if (coverage && coverage != DioramaCoverage_FullMask())
-        ni = DioramaCoverage_FilterGridIndices(indices, ni, coverage);
-    }
-
-    /* Sized for the extension plus the host: when the extension is present,
-     * both are appended into this one ordered geometry submission below.
-     * Extension primitives remain first so the authentic BG2 owns the hidden
-     * coplanar overlap without relying on a second draw call. */
-    ArRenderVertex2D extension_verts[DIORAMA_ATTACHED_AA_VERTS];
-    int32_t extension_indices[DIORAMA_ATTACHED_AA_INDICES];
-    int extension_nv = 0, extension_ni = 0;
-
-    /* The validated `$04/$02-$03:waterfall` token is published only when the
-     * exact three-row splash-platform signature is camera-local. Extend both
-     * BG2 priority bands, and no other layer/section, by repeating the
-     * authentic 224-row waterfall interval.
-     *
-     * The authentic interval is the only source guaranteed to stay populated
-     * under every BG Extents edit. The previous PoC derived both its source and
-     * fold from `bg2_valid_spans`; changing a top/bottom extent could therefore
-     * move the fold outside the captured 256-row cycle and make the overflow
-     * disappear. Folding at the authentic bottom is invariant; the opaque
-     * continuation is tucked beneath the host before curling over its edge. */
-    const bool aitos_waterfall_extension =
-        map_group == kActRaiserMapGroup_Aitos &&
-        map_number >= 2 && map_number <= 3 &&
-        layer_section == kDioramaLayerSection_AitosWaterfall &&
-        (layer->plane == SR_PPU_OVERLAY_BG2 ||
-         layer->plane == kDioramaPlane_Bg2Hi ||
-         layer->plane == kDioramaPlane_Bg2Far);
-    float attached_lower_content_v_max = 0.0f;
-    /* AR_AITOS_WATERFALL_LOG=1 draw-side counterpart. Seeded to sentinels so a
-     * frame that took an early-out inside the block is distinguishable from one
-     * that never entered it at all. */
-    float log_fold_t = -1.0f, log_overlap_t = -1.0f;
-    int log_drawable_y1 = -1;
-    if (aitos_waterfall_extension) {
-      DioramaVerticalRepeatPlan repeat;
-      const float layer_v_span = layer_v1 - layer_v0;
-      if (DioramaVerticalRepeatPlan_Build(
-              authentic_y0, kActRaiserAuthenticHeight,
-              snes_height, SR_PPU_SURFACE_MAX_HEIGHT, &repeat) &&
-          layer_v_span > 0.0f) {
-        /* Apply the same bounded sub-tick V shift as the host layer. The shift
-         * cancels out of fold_t (geometry stays fixed) but keeps the repeated
-         * pixels flowing with the captured waterfall rather than drifting by
-         * one emulated tick. */
-        const float layer_v_shift = layer_v0 - uv_v0;
-        int drawable_y1 = 0;
-        if (!DioramaBgValidSpanPlan_DrawableRowBounds(
-                bg2_valid_spans, NULL, &drawable_y1) ||
-            drawable_y1 <= 0 || drawable_y1 > snes_height) {
-          drawable_y1 = snes_height;
-        }
-        /* The capture can deliberately end in transparent policy rows. The
-         * attachment belongs at the final drawable texel, not at the texture
-         * rectangle's geometric end; otherwise vertical interpolation samples
-         * across that hidden ownership boundary and exposes a colored line. */
-        attached_lower_content_v_max =
-            (float)drawable_y1 / (float)SR_PPU_SURFACE_MAX_HEIGHT +
-            layer_v_shift;
-        log_drawable_y1 = drawable_y1;
-        const float fold_v =
-            (float)repeat.fold_y / (float)SR_PPU_SURFACE_MAX_HEIGHT +
-            layer_v_shift;
-        const float source_v0 =
-            (float)repeat.source_y0 / (float)SR_PPU_SURFACE_MAX_HEIGHT +
-            layer_v_shift;
-        const float source_v1 =
-            (float)repeat.source_y1 / (float)SR_PPU_SURFACE_MAX_HEIGHT +
-            layer_v_shift;
-        const float fold_t = (fold_v - layer_v0) / layer_v_span;
-        const float extension_height =
-            (float)repeat.repeat_height / (float)kActRaiserAuthenticHeight;
-        if (fold_t >= 0.0f && fold_t <= 1.0f && source_v0 >= 0.0f &&
-            source_v1 <= 1.0f) {
-          const float extension_y = (0.5f - fold_t) * height_scale;
-          const float extension_z = DioramaTiltedRowDepth(
-              z_world, layer_rake, layer_bow, fold_t);
-          /* Remain coplanar through the host's last DRAWABLE row, then add the
-           * tolerance underlap before bending. The dedicated row in
-           * BuildFoldedOverflowMesh prevents the first curved triangle from
-           * intruding into this interval under camera pitch.
-           *
-           * Measured in texture rows against `drawable_y1` — the same row the
-           * shader hands ownership over at (attached_lower_content_v_max) —
-           * rather than as `(1 - fold_t)` of the host mesh. Those are not the
-           * same edge: the source crop and mesh geometry can otherwise put the
-           * host handoff on different texture rows. Row units are
-           * exact for both meshes: each spans 1/224 world units per texture row,
-           * so no height_scale factor belongs in this expression at all. */
-          float overlap_t =
-              (float)(drawable_y1 - repeat.fold_y +
-                      kAitosWaterfallSeamTolerancePixels) /
-              (float)repeat.repeat_height;
-          if (overlap_t < 0.0f) overlap_t = 0.0f;
-          if (overlap_t > 1.0f) overlap_t = 1.0f;
-          float handoff_t = fold_t +
-              overlap_t * extension_height / height_scale;
-          if (handoff_t > 1.0f) handoff_t = 1.0f;
-          const float handoff_z = DioramaTiltedRowDepth(
-              z_world, layer_rake, layer_bow, handoff_t);
-          log_fold_t = fold_t;
-          log_overlap_t = overlap_t;
-          BuildFoldedOverflowMesh(
-              mvp, extension_y, extension_z, handoff_z,
-              extension_height, overlap_t,
-              kShoeboxZFront, kAitosWaterfallFrontDrop,
-              layer_u0, source_v0, layer_u1, source_v1,
-              aspect_x, out_w, out_h, shade,
-              extension_verts, extension_indices,
-              &extension_nv, &extension_ni);
-
-          /* Only the low BG2 plane owns the public waterfall projection. The
-           * high-priority band uses identical geometry but must not overwrite
-           * the atmosphere's established low-plane host. */
-          if (extension_nv > 0 && out_projection &&
-              layer->plane == SR_PPU_OVERLAY_BG2 &&
-              out_projection->bg2_plane.valid) {
-            DioramaPlaneProjection *plane = &out_projection->bg2_plane;
-            plane->overflow_valid = true;
-            plane->overflow_fold_t = fold_t;
-            plane->overflow_height = extension_height;
-            plane->overflow_overlap_t = overlap_t;
-            plane->overflow_handoff_z = handoff_z;
-            plane->overflow_front_z = kShoeboxZFront;
-            plane->overflow_front_drop = kAitosWaterfallFrontDrop;
-          }
+        if (attached->vertex_count > 0 && out_projection &&
+            layer->description->plane == SR_PPU_OVERLAY_BG2 &&
+            out_projection->bg2_plane.valid) {
+          DioramaPlaneProjection *plane = &out_projection->bg2_plane;
+          plane->overflow_valid = true;
+          plane->overflow_fold_t = fold_t;
+          plane->overflow_height = extension_height;
+          plane->overflow_overlap_t = overlap_t;
+          plane->overflow_handoff_z = handoff_z;
+          plane->overflow_front_z = kShoeboxZFront;
+          plane->overflow_front_drop = kAitosWaterfallFrontDrop;
         }
       }
     }
-    if (layer->plane == SR_PPU_OVERLAY_BG2)
-      DioramaAitosWaterfallLog(map_group, map_number, layer_section,
-                               aitos_waterfall_extension, extension_nv,
-                               authentic_y0, snes_height, log_drawable_y1,
-                               log_fold_t, log_overlap_t);
+  }
+  if (layer->description->plane == SR_PPU_OVERLAY_BG2)
+    DioramaAitosWaterfallLog(scene->map_group, scene->map_number,
+                             scene->layer_section, aitos_waterfall_extension,
+                             attached->vertex_count, capture->authentic_y0,
+                             capture->height, log_drawable_y1, log_fold_t,
+                             log_overlap_t);
+}
 
-    /* STACK: fill the depth gap with PARALLEL copies of the layer, drawn behind
-     * the plane itself (back to front, so the painter's algorithm layers them
-     * correctly without a depth test).
-     *
-     * This is the alternative to a rake for the same void, and the reason it
-     * exists is that a rake tilts the plane: its rows end up at different
-     * depths, so the perspective divide gives one layer two different parallax
-     * rates and it shears as the camera moves, over-exaggerating that layer's
-     * parallax. Every copy here stays exactly parallel at ONE depth, so each has
-     * a single parallax rate and the layer keeps the flat poster-like motion the
-     * whole diorama is built on.
-     *
-     * `dir` chooses which side of the plane gets filled: forward (toward the
-     * camera, the default and what Fillmore act 2 needs, since its water sits
-     * BEHIND the rock path), backward, or both. Copies are drawn in descending
-     * index, which is far-to-near for forward and near-to-far for backward -- for
-     * a backward stack that is still correct, because those copies are all behind
-     * the plane and the plane is drawn last over them either way. Only `both`
-     * genuinely interleaves, and its far half is drawn before its near half.
-     *
-     * Copy 0 coincides with the plane's own depth for a forward or backward
-     * stack, and is skipped -- the plane's own draw below IS that copy, so drawing
-     * it twice would double-darken the front face. A `both` stack has no copy at
-     * the plane unless the count is odd, so nothing is skipped wrongly; the index-0
-     * copy there is the far edge, which must be drawn.
-     *
-     * Same deliberate exclusions as the skirt: no shadow pass, no DOF/rim shader
-     * (they key off a single depth and would be recomputed per copy for no
-     * visual gain), and not the backdrop plane. */
-    if (layer_stack > 0.0f && layer_stack_copies > 1 && !is_backdrop) {
-      int stack_batch_nv = 0, stack_batch_ni = 0;
-      DioramaStackGroupBounds copy_bounds[kDioramaVoxelMax];
-      int copy_bound_count = 0;
-      for (int c = layer_stack_copies - 1; c >= 0; c--) {
-        /* Skip whichever copy coincides with the plane's own depth -- index 0 for
-         * a one-sided fill, the middle one for an odd-count centred fill. The
-         * rule lives in the pure module so it cannot drift from the geometry. */
-        if (DioramaStackCopyIsRedundant(c, layer_stack_copies, layer_stack_dir))
-          continue;
-        float copy_z = z_world, copy_shade = 1.0f, copy_alpha = 1.0f;
-        DioramaStackCopyShaped(c, layer_stack_copies, z_world, layer_stack,
-                               layer_stack_dir, layer_stack_solid, &copy_z,
-                               &copy_shade, &copy_alpha);
-        ArRenderColorF copy_color = shade;
-        copy_color.r *= copy_shade;
-        copy_color.g *= copy_shade;
-        copy_color.b *= copy_shade;
-        copy_color.a *= copy_alpha;
-        /* Rake is passed through so a room authoring both keeps every copy on
-         * the same tilt rather than mixing tilted and flat slices. */
-        ArRenderVertex2D *copy_vertices =
-            &s_diorama_stack_vertices[stack_batch_nv];
-        int32_t *copy_indices =
-            &s_diorama_stack_indices[stack_batch_ni];
-        int copy_nv = 0, copy_ni = 0;
-        BuildLayerMesh(mvp, copy_z, layer_rake, layer_bow, layer_u0, layer_v0,
-                       layer_u1, layer_v1, aspect_x, height_scale,
-                       out_w, out_h, copy_color,
-                       copy_vertices, copy_indices, &copy_nv, &copy_ni);
-        if (focal_aperture_valid &&
-            LayerUsesFocalAperture(layer->plane) &&
-            copy_z + 0.5f > focal_aperture_z + 0.0001f) {
-          (void)DioramaAperture_ConstrainGrid(
-              copy_vertices, focal_aperture_verts,
-              DIORAMA_SUBDIV_X, DIORAMA_SUBDIV_Y, 2.0f);
-        }
-        if (coverage_masks &&
-            DioramaSparseCoverageEnabledForPlane(layer->plane)) {
-          const DioramaCoverageMask coverage = coverage_masks[layer->plane];
-          if (coverage && coverage != DioramaCoverage_FullMask())
-            copy_ni = DioramaCoverage_FilterGridIndices(
-                copy_indices, copy_ni, coverage);
-        }
-        if (copy_nv <= 0 || copy_ni <= 0) continue;
-        if (copy_bound_count < kDioramaVoxelMax &&
-            DioramaStackGroupBounds_FromGeometry(
-                copy_vertices, copy_nv, copy_indices, copy_ni,
-                &copy_bounds[copy_bound_count]))
-          copy_bound_count++;
-        for (int index = 0; index < copy_ni; index++)
-          copy_indices[index] += stack_batch_nv;
-        stack_batch_nv += copy_nv;
-        stack_batch_ni += copy_ni;
+/* Depth copies and the underside draw before the host face. They retain
+ * the source texture, omit shadows/DOF, and never apply to the backdrop.
+ * Stack groups preserve authored back-to-front order and sparse coverage. */
+static PresentationOutcome
+DrawDioramaLayerDepth(ArRenderDevice *device, const DioramaCapture *capture,
+                      const DioramaViewGeometry *geometry,
+                      const DioramaFocalAperture *aperture,
+                      const DioramaLayerDraw *layer) {
+  const float z_world = layer->authored->z - 0.5f;
+  PresentationOutcome outcome = kPresentationOutcome_Complete;
+  if (layer->authored->stack > 0.0f && layer->authored->stack_copies > 1 &&
+      !(layer->description->plane == kDioramaPlane_Backdrop)) {
+    int stack_batch_nv = 0, stack_batch_ni = 0;
+    DioramaStackGroupBounds copy_bounds[kDioramaVoxelMax];
+    int copy_bound_count = 0;
+    for (int c = layer->authored->stack_copies - 1; c >= 0; c--) {
+      if (DioramaStackCopyIsRedundant(c, layer->authored->stack_copies,
+                                      layer->authored->stack_direction))
+        continue;
+      float copy_z = z_world, copy_shade = 1.0f, copy_alpha = 1.0f;
+      DioramaStackCopyShaped(
+          c, layer->authored->stack_copies, z_world, layer->authored->stack,
+          layer->authored->stack_direction, layer->authored->stack_solid,
+          &copy_z, &copy_shade, &copy_alpha);
+      ArRenderColorF copy_color = layer->shade;
+      copy_color.r *= copy_shade;
+      copy_color.g *= copy_shade;
+      copy_color.b *= copy_shade;
+      copy_color.a *= copy_alpha;
+
+      ArRenderVertex2D *copy_vertices =
+          &s_diorama_stack_vertices[stack_batch_nv];
+      int32_t *copy_indices = &s_diorama_stack_indices[stack_batch_ni];
+      int copy_nv = 0, copy_ni = 0;
+      BuildLayerMesh(geometry->matrix, copy_z, layer->authored->rake,
+                     layer->authored->bow, geometry->u0, geometry->v0,
+                     geometry->u1, geometry->v1, geometry->aspect_x,
+                     geometry->height_scale, geometry->width, geometry->height,
+                     copy_color, copy_vertices, copy_indices, &copy_nv,
+                     &copy_ni);
+      if (aperture->valid &&
+          LayerUsesFocalAperture(layer->description->plane) &&
+          copy_z + 0.5f > aperture->z + 0.0001f) {
+        (void)DioramaAperture_ConstrainGrid(copy_vertices, aperture->vertices,
+                                            DIORAMA_SUBDIV_X, DIORAMA_SUBDIV_Y,
+                                            2.0f);
       }
-      if (stack_batch_nv > 0 && stack_batch_ni > 0) {
-        const DioramaStackGroupPlan stack_plan =
-            DioramaStackGroupPlan_Build(
-                out_w, out_h, snes_width, snes_height,
-                copy_bounds, copy_bound_count);
-        const PresentationOutcome stack_outcome = RenderDioramaStackBatch(
-            device, texture,
-            s_diorama_stack_vertices, stack_batch_nv,
-            s_diorama_stack_indices, stack_batch_ni,
-            is_additive ? kArRenderBlendMode_Add
-                        : kArRenderBlendMode_Alpha,
-            &stack_plan, out_w, out_h);
-        outcome = PresentationOutcome_Combine(outcome, stack_outcome);
-        if (!PresentationOutcome_IsUsable(stack_outcome))
-          return DioramaCompositeCoreFailure(&output_frame);
+      if (capture->coverage_masks &&
+          DioramaSparseCoverageEnabledForPlane(layer->description->plane)) {
+        const DioramaCoverageMask coverage =
+            capture->coverage_masks[layer->description->plane];
+        if (coverage && coverage != DioramaCoverage_FullMask())
+          copy_ni = DioramaCoverage_FilterGridIndices(copy_indices, copy_ni,
+                                                      coverage);
       }
+      if (copy_nv <= 0 || copy_ni <= 0)
+        continue;
+      if (copy_bound_count < kDioramaVoxelMax &&
+          DioramaStackGroupBounds_FromGeometry(copy_vertices, copy_nv,
+                                               copy_indices, copy_ni,
+                                               &copy_bounds[copy_bound_count]))
+        copy_bound_count++;
+      for (int index = 0; index < copy_ni; index++)
+        copy_indices[index] += stack_batch_nv;
+      stack_batch_nv += copy_nv;
+      stack_batch_ni += copy_ni;
+    }
+    if (stack_batch_nv > 0 && stack_batch_ni > 0) {
+      const DioramaStackGroupPlan stack_plan = DioramaStackGroupPlan_Build(
+          geometry->width, geometry->height, capture->width, capture->height,
+          copy_bounds, copy_bound_count);
+      const PresentationOutcome stack_outcome = RenderDioramaStackBatch(
+          device, layer->texture, s_diorama_stack_vertices, stack_batch_nv,
+          s_diorama_stack_indices, stack_batch_ni, layer->blend, &stack_plan,
+          geometry->width, geometry->height);
+      outcome = PresentationOutcome_Combine(outcome, stack_outcome);
+      if (!PresentationOutcome_IsUsable(stack_outcome))
+        return kPresentationOutcome_CoreFailure;
+    }
+  }
+
+  if (layer->authored->thickness > 0.0f &&
+      !(layer->description->plane == kDioramaPlane_Backdrop)) {
+    int skirt_nv = 0, skirt_ni = 0;
+    ArRenderVertex2D skirt_verts[DIORAMA_VERTS_PER_LAYER];
+    int32_t skirt_indices[DIORAMA_INDICES_PER_LAYER];
+    BuildLayerSkirtMesh(
+        geometry->matrix, z_world, layer->authored->rake + layer->authored->bow,
+        layer->authored->thickness, geometry->u0, geometry->u1, geometry->v1,
+        geometry->aspect_x, geometry->height_scale, geometry->width,
+        geometry->height, layer->shade, skirt_verts, skirt_indices, &skirt_nv,
+        &skirt_ni);
+    if (skirt_nv > 0) {
+      RecordOptionalDioramaDraw(
+          &outcome,
+          RenderDioramaGeometry(device, layer->texture, skirt_verts, skirt_nv,
+                                skirt_indices, skirt_ni, layer->blend));
+    }
+  }
+
+  return outcome;
+}
+
+/* Resolve compact sources before shadows, then bind the main effect for
+ * exactly one submission. The attached waterfall precedes its host face in
+ * that batch; the host owns their overlap. Every successful bind is unbound
+ * before returning, including failures. */
+static PresentationOutcome DrawDioramaLayerFace(
+    ArRenderDevice *device, const DioramaCapture *capture,
+    const DioramaViewGeometry *geometry, const DioramaLayerDraw *layer,
+    const DioramaLayerMesh *mesh, DioramaAttachedMesh *attached) {
+  PresentationOutcome outcome = kPresentationOutcome_Complete;
+  bool rim_light = layer->description->is_figure && RimLightEnabled(device);
+  bool want_dof = !rim_light &&
+                  layer->description->plane != SR_PPU_OVERLAY_BG3 &&
+                  DofBlurEnabled(device);
+  float dof_radius = want_dof ? DofRadiusForLayer(layer->authored->z) : 0.0f;
+  if (dof_radius < 0.05f)
+    dof_radius = 0.0f;
+  bool want_edge = !rim_light && !mesh->constrained &&
+                   LayerGetsEdgeAA(layer->description->plane) &&
+                   EdgeAAEnabled();
+  bool use_dof_shader = !rim_light && dof_radius > 0.0f;
+  bool use_shader = rim_light || use_dof_shader;
+
+  ArRenderTexture draw_texture = layer->texture;
+  int compact_scale = 0;
+  if (use_dof_shader) {
+    PresentationOutcome dof_source_outcome = kPresentationOutcome_Complete;
+    DioramaPerformanceScope dof_source_performance =
+        DioramaPerformance_Begin(kDioramaPerformance_DofSource);
+    const ArRenderTexture compact = BuildDioramaDofSource(
+        device, layer->texture, capture->obj_apron, capture->width,
+        capture->height, &dof_source_outcome);
+    DioramaPerformance_End(dof_source_performance);
+    outcome = PresentationOutcome_Combine(outcome, dof_source_outcome);
+    if (!PresentationOutcome_IsUsable(dof_source_outcome))
+      return kPresentationOutcome_CoreFailure;
+    if (ArRenderTexture_IsValid(compact)) {
+      draw_texture = compact;
+      compact_scale = 1;
+    } else {
+      dof_radius = 0.0f;
+      use_dof_shader = false;
+      use_shader = rim_light;
+    }
+  }
+  if (!use_shader) {
+    PresentationOutcome supersample_outcome = kPresentationOutcome_Complete;
+    DioramaPerformanceScope supersample_performance =
+        DioramaPerformance_Begin(kDioramaPerformance_Supersample);
+    const ArRenderTexture ss = BuildDioramaSupersample(
+        device, layer->texture, capture->obj_apron, capture->width,
+        capture->height, &supersample_outcome);
+    DioramaPerformance_End(supersample_performance);
+    outcome = PresentationOutcome_Combine(outcome, supersample_outcome);
+    if (!PresentationOutcome_IsUsable(supersample_outcome)) {
+      return kPresentationOutcome_CoreFailure;
+    }
+    if (ArRenderTexture_IsValid(ss)) {
+      draw_texture = ss;
+      compact_scale = kDioramaSupersample;
+    }
+  }
+
+  ArRenderVertex2D compact_verts[DIORAMA_VERTS_PER_LAYER];
+  const ArRenderVertex2D *draw_verts = mesh->vertices;
+  float draw_u0 = geometry->u0;
+  float draw_u1 = geometry->u1;
+  float draw_v0 = geometry->v0;
+  float draw_v1 = geometry->v1;
+  float draw_lower_content_v_max = attached->lower_content_v_max;
+  float draw_texel_width = 1.0f / (float)SR_PPU_SURFACE_MAX_WIDTH;
+  float draw_texel_height = 1.0f / (float)SR_PPU_SURFACE_MAX_HEIGHT;
+  if (compact_scale > 0) {
+    memcpy(compact_verts, mesh->vertices,
+           (size_t)mesh->vertex_count * sizeof(compact_verts[0]));
+    RemapMeshToCompactTexture(compact_verts, mesh->vertex_count,
+                              capture->obj_apron, capture->width,
+                              capture->height);
+    if (attached->vertex_count > 0) {
+      RemapMeshToCompactTexture(attached->vertices, attached->vertex_count,
+                                capture->obj_apron, capture->width,
+                                capture->height);
+    }
+    draw_verts = compact_verts;
+    draw_u0 = 0.0f;
+    draw_u1 = 1.0f;
+    draw_v0 = 0.0f;
+    draw_v1 = 1.0f;
+    if (draw_lower_content_v_max > 0.0f) {
+      draw_lower_content_v_max *=
+          (float)SR_PPU_SURFACE_MAX_HEIGHT / (float)capture->height;
+    }
+    draw_texel_width = 1.0f / (float)(capture->width * compact_scale);
+    draw_texel_height = 1.0f / (float)(capture->height * compact_scale);
+  }
+
+  if (!(layer->description->plane == kDioramaPlane_Backdrop) &&
+      layer->description->casts_shadow) {
+    float off = (float)geometry->height * 0.004f;
+    ArRenderVertex2D shadow[DIORAMA_VERTS_PER_LAYER];
+    memcpy(shadow, draw_verts, (size_t)mesh->vertex_count * sizeof(shadow[0]));
+    for (int v = 0; v < mesh->vertex_count; v++) {
+      shadow[v].position.x += off;
+      shadow[v].position.y += off;
+      shadow[v].color = (ArRenderColorF){0.0f, 0.0f, 0.0f, 0.35f};
     }
 
-    /* THICKNESS: the extruded near face, drawn BEFORE the plane itself.
-     *
-     * Order matters and is not arbitrary. Baseline geometry has no depth test
-     * (see the shoebox comment), so this is painter's algorithm: drawing the
-     * skirt first lets the plane's own bottom edge land on top of it, which
-     * keeps the fold crisp. Drawn the other way the skirt's top row would
-     * overwrite the plane's last scanline and the seam would shimmer as the
-     * camera moves.
-     *
-     * Deliberately plain: no shadow pass (a skirt is the underside of a layer
-     * that already cast one, so a second offset copy would double-darken), no
-     * DOF/rim shader (both are keyed to a single plane depth and the skirt spans
-     * a depth RANGE, so the radius would be wrong along it), and never the
-     * supersample path (that is for flat parallel art). Those are the honest
-     * limits of extruding a 2D capture, not oversights.
-     *
-     * `is_backdrop` layers are excluded: the backdrop is the infinite behind-
-     * everything fill drawn with BLENDMODE_NONE, so giving it a near face would
-     * paint an opaque band across the scene. */
-    if (layer_thickness > 0.0f && !is_backdrop) {
-      int skirt_nv = 0, skirt_ni = 0;
-      ArRenderVertex2D skirt_verts[DIORAMA_VERTS_PER_LAYER];
-      int32_t skirt_indices[DIORAMA_INDICES_PER_LAYER];
-      BuildLayerSkirtMesh(mvp, z_world, layer_rake + layer_bow, layer_thickness,
-                          layer_u0, layer_u1, layer_v1,
-                          aspect_x, height_scale, out_w, out_h, shade,
-                          skirt_verts, skirt_indices, &skirt_nv, &skirt_ni);
-      if (skirt_nv > 0) {
-        RecordOptionalDioramaDraw(
-            &outcome,
-            RenderDioramaGeometry(
-                device, texture, skirt_verts, skirt_nv,
-                skirt_indices, skirt_ni,
-                is_additive ? kArRenderBlendMode_Add
-                            : kArRenderBlendMode_Alpha));
-      }
-    }
-
-    /* Shader selection and source preparation are resolved before shadows and
-     * the main draw. Edge coverage is geometry and never selects a shader. */
-    bool rim_light = layer->is_figure && RimLightEnabled(device);
-    bool want_dof = !rim_light &&
-        layer->plane != SR_PPU_OVERLAY_BG3 &&
-        DofBlurEnabled(device);
-    float dof_radius = want_dof ? DofRadiusForLayer(layer_z) : 0.0f;
-    if (dof_radius < 0.05f) dof_radius = 0.0f;
-    bool want_edge = !rim_light && !constrained_to_focal_aperture &&
-        LayerGetsEdgeAA(layer->plane) &&
-        EdgeAAEnabled();
-    bool use_dof_shader = !rim_light && dof_radius > 0.0f;
-    bool use_shader = rim_light || use_dof_shader;
-
-    const ArRenderBlendMode layer_blend = is_backdrop
-        ? kArRenderBlendMode_Opaque
-        : is_additive ? kArRenderBlendMode_Add : kArRenderBlendMode_Alpha;
-
-    ArRenderTexture draw_texture = texture;
-    int compact_scale = 0;
-    if (use_dof_shader) {
-      PresentationOutcome dof_source_outcome =
-          kPresentationOutcome_Complete;
-      DioramaPerformanceScope dof_source_performance =
-          DioramaPerformance_Begin(kDioramaPerformance_DofSource);
-      const ArRenderTexture compact = BuildDioramaDofSource(
-          device, texture, obj_apron, snes_width, snes_height,
-          &dof_source_outcome);
-      DioramaPerformance_End(dof_source_performance);
-      outcome = PresentationOutcome_Combine(outcome, dof_source_outcome);
-      if (!PresentationOutcome_IsUsable(dof_source_outcome))
-        return DioramaCompositeCoreFailure(&output_frame);
-      if (ArRenderTexture_IsValid(compact)) {
-        draw_texture = compact;
-        compact_scale = 1;
-      } else {
-        /* A correct crisp boundary is preferable to a blur that samples the
-         * persistent allocation's transparent tail. */
-        dof_radius = 0.0f;
-        use_dof_shader = false;
-        use_shader = rim_light;
-      }
-    }
-    if (!use_shader) {
-      PresentationOutcome supersample_outcome =
-          kPresentationOutcome_Complete;
-      DioramaPerformanceScope supersample_performance =
-          DioramaPerformance_Begin(kDioramaPerformance_Supersample);
-      const ArRenderTexture ss = BuildDioramaSupersample(
-          device, texture_handles[layer->plane], obj_apron,
-          snes_width, snes_height,
-          &supersample_outcome);
-      DioramaPerformance_End(supersample_performance);
-      outcome = PresentationOutcome_Combine(outcome, supersample_outcome);
-      if (!PresentationOutcome_IsUsable(supersample_outcome)) {
-        return DioramaCompositeCoreFailure(&output_frame);
-      }
-      if (ArRenderTexture_IsValid(ss)) {
-        draw_texture = ss;
-        compact_scale = kDioramaSupersample;
-      }
-    }
-
-    /* Both compact targets contain only the active capture, unlike the source
-     * allocation. Remap the host and attached geometry into that 0..1 window.
-     * Stack/skirt draws above intentionally keep the original texture. */
-    ArRenderVertex2D compact_verts[DIORAMA_VERTS_PER_LAYER];
-    ArRenderVertex2D *draw_verts = verts;
-    float draw_u0 = layer_u0;
-    float draw_u1 = layer_u1;
-    float draw_v0 = layer_v0;
-    float draw_v1 = layer_v1;
-    float draw_lower_content_v_max = attached_lower_content_v_max;
-    float draw_texel_width =
-        1.0f / (float)SR_PPU_SURFACE_MAX_WIDTH;
-    float draw_texel_height =
-        1.0f / (float)SR_PPU_SURFACE_MAX_HEIGHT;
-    if (compact_scale > 0) {
-      memcpy(compact_verts, verts, (size_t)nv * sizeof(compact_verts[0]));
-      RemapMeshToCompactTexture(
-          compact_verts, nv, obj_apron, snes_width, snes_height);
-      if (extension_nv > 0) {
-        RemapMeshToCompactTexture(
-            extension_verts, extension_nv,
-            obj_apron, snes_width, snes_height);
-      }
-      draw_verts = compact_verts;
-      draw_u0 = 0.0f;
-      draw_u1 = 1.0f;
-      draw_v0 = 0.0f;
-      draw_v1 = 1.0f;
-      if (draw_lower_content_v_max > 0.0f) {
-        draw_lower_content_v_max *=
-            (float)SR_PPU_SURFACE_MAX_HEIGHT / (float)snes_height;
-      }
-      draw_texel_width =
-          1.0f / (float)(snes_width * compact_scale);
-      draw_texel_height =
-          1.0f / (float)(snes_height * compact_scale);
-    }
-
-    if (!is_backdrop && layer->casts_shadow) {
-      float off = (float)out_h * 0.004f;
-      ArRenderVertex2D shadow[DIORAMA_VERTS_PER_LAYER];
-      memcpy(shadow, draw_verts, (size_t)nv * sizeof(shadow[0]));
-      for (int v = 0; v < nv; v++) {
-        shadow[v].position.x += off;
-        shadow[v].position.y += off;
-        shadow[v].color = (ArRenderColorF){ 0.0f, 0.0f, 0.0f, 0.35f };
-      }
-      /* M8/AR_GPU_FX_SHADOW: soften the hard silhouette shadow with a GPU
-       * blur. Independently toggleable — bind only for this one draw call,
-       * clear immediately after, so nothing else in the frame is affected
-       * (falls back silently to the existing hard-edged shadow above if
-       * unavailable/disabled/failed to compile). */
-      const bool shadow_blur_requested = ShadowBlurEnabled(device);
-      bool shadow_blur_bound = false;
-      if (shadow_blur_requested) {
-        const DioramaBlurEffectParams params = {
+    const bool shadow_blur_requested = ShadowBlurEnabled(device);
+    bool shadow_blur_bound = false;
+    if (shadow_blur_requested) {
+      const DioramaBlurEffectParams params = {
           .texel_width = draw_texel_width,
           .texel_height = draw_texel_height,
           .radius = 3.0f,
-        };
-        shadow_blur_bound = DioramaEffectBackend_BindBlur(device, &params);
-        if (!shadow_blur_bound) {
-          outcome = PresentationOutcome_Combine(
-              outcome, kPresentationOutcome_OptionalOmitted);
-          if (!DioramaEffectBackend_Unbind(device)) {
-            return DioramaCompositeCoreFailure(&output_frame);
-          }
+      };
+      shadow_blur_bound = DioramaEffectBackend_BindBlur(device, &params);
+      if (!shadow_blur_bound) {
+        outcome = PresentationOutcome_Combine(
+            outcome, kPresentationOutcome_OptionalOmitted);
+        if (!DioramaEffectBackend_Unbind(device)) {
+          return kPresentationOutcome_CoreFailure;
         }
       }
-      RecordOptionalDioramaDraw(
-          &outcome,
-          RenderDioramaGeometry(
-              device, draw_texture, shadow, nv, indices, ni, layer_blend));
-      if (shadow_blur_bound && !DioramaEffectBackend_Unbind(device)) {
-        return DioramaCompositeCoreFailure(&output_frame);
-      }
     }
+    RecordOptionalDioramaDraw(
+        &outcome,
+        RenderDioramaGeometry(device, draw_texture, shadow, mesh->vertex_count,
+                              mesh->indices, mesh->index_count, layer->blend));
+    if (shadow_blur_bound && !DioramaEffectBackend_Unbind(device)) {
+      return kPresentationOutcome_CoreFailure;
+    }
+  }
 
-    /* Rim and nonzero DOF remain custom effects. Edge coverage is appended to
-     * the same geometry batch below and never attenuates the host mesh. */
-    bool layer_shader_bound = false;
-    if (rim_light) {
-      const DioramaRimLightEffectParams params = {
+  bool layer_shader_bound = false;
+  if (rim_light) {
+    const DioramaRimLightEffectParams params = {
         .texel_width = 1.0f / (float)SR_PPU_SURFACE_MAX_WIDTH,
         .texel_height = 1.0f / (float)SR_PPU_SURFACE_MAX_HEIGHT,
         .strength = 0.33f,
-      };
-      layer_shader_bound =
-          DioramaEffectBackend_BindRimLight(device, &params);
-    } else if (use_dof_shader) {
-      const DioramaDofEdgeEffectParams params = {
+    };
+    layer_shader_bound = DioramaEffectBackend_BindRimLight(device, &params);
+  } else if (use_dof_shader) {
+    const DioramaDofEdgeEffectParams params = {
         .texel_width = draw_texel_width,
         .texel_height = draw_texel_height,
         .blur_radius = dof_radius,
@@ -3191,98 +2997,211 @@ PresentationOutcome Diorama_Composite(
         .u_max = draw_u1,
         .v_min = draw_v0,
         .v_max = draw_v1,
-        /* The old inward opacity fade is intentionally disabled. */
+
         .edge_feather = 0.0f,
         .lower_content_v_max = draw_lower_content_v_max,
-      };
-      layer_shader_bound =
-          DioramaEffectBackend_BindDofEdge(device, &params);
+    };
+    layer_shader_bound = DioramaEffectBackend_BindDofEdge(device, &params);
+  }
+  if ((rim_light || use_dof_shader) && !layer_shader_bound) {
+    outcome = PresentationOutcome_Combine(outcome,
+                                          kPresentationOutcome_OptionalOmitted);
+    if (!DioramaEffectBackend_Unbind(device)) {
+      return kPresentationOutcome_CoreFailure;
     }
-    if ((rim_light || use_dof_shader) && !layer_shader_bound) {
-      outcome = PresentationOutcome_Combine(
-          outcome, kPresentationOutcome_OptionalOmitted);
-      if (!DioramaEffectBackend_Unbind(device)) {
-        return DioramaCompositeCoreFailure(&output_frame);
-      }
-    }
-    /* Submit the attached waterfall and BG2 as one ordered geometry batch.
-     * Auxiliary water remains first and coplanar for two hidden native tile
-     * rows; the following host primitives cover it in the same draw. This
-     * removes an otherwise unnecessary submission boundary from the seam
-     * without pretending the folded 3D mesh can be baked into a 2D texture.
-     * The optional coverage fringe is appended last but shares this one draw. */
-    bool main_submitted = false;
-    if (extension_nv > 0) {
-      const int host_vertex_base = extension_nv;
-      memcpy(&extension_verts[extension_nv], draw_verts,
-             (size_t)nv * sizeof(extension_verts[0]));
-      for (int index = 0; index < ni; index++)
-        extension_indices[extension_ni + index] =
-            host_vertex_base + indices[index];
-      extension_nv += nv;
-      extension_ni += ni;
-      if (want_edge) {
-        DioramaEdgeAaMask edge_mask = kDioramaEdgeAa_All;
-        if (draw_lower_content_v_max > 0.0f)
-          edge_mask &= ~kDioramaEdgeAa_Bottom;
-        if (!AppendDioramaEdgeFringe(
-                draw_verts, 1.0f, edge_mask,
-                draw_u0, draw_u1, draw_v0, draw_v1,
-                draw_texel_width, draw_texel_height,
-                extension_verts, DIORAMA_ATTACHED_AA_VERTS, &extension_nv,
-                extension_indices, DIORAMA_ATTACHED_AA_INDICES,
-                &extension_ni)) {
-          outcome = PresentationOutcome_Combine(
-              outcome, kPresentationOutcome_OptionalOmitted);
-        }
-      }
-      main_submitted = RenderDioramaGeometry(
-          device, draw_texture, extension_verts,
-          extension_nv, extension_indices, extension_ni, layer_blend);
-    } else if (want_edge) {
-      ArRenderVertex2D aa_vertices[DIORAMA_AA_VERTS];
-      int32_t aa_indices[DIORAMA_AA_INDICES];
-      int aa_vertex_count = nv;
-      int aa_index_count = ni;
-      memcpy(aa_vertices, draw_verts,
-             (size_t)nv * sizeof(aa_vertices[0]));
-      memcpy(aa_indices, indices,
-             (size_t)ni * sizeof(aa_indices[0]));
+  }
+
+  bool main_submitted = false;
+  if (attached->vertex_count > 0) {
+    const int host_vertex_base = attached->vertex_count;
+    memcpy(&attached->vertices[attached->vertex_count], draw_verts,
+           (size_t)mesh->vertex_count * sizeof(attached->vertices[0]));
+    for (int index = 0; index < mesh->index_count; index++)
+      attached->indices[attached->index_count + index] =
+          host_vertex_base + mesh->indices[index];
+    attached->vertex_count += mesh->vertex_count;
+    attached->index_count += mesh->index_count;
+    if (want_edge) {
+      DioramaEdgeAaMask edge_mask = kDioramaEdgeAa_All;
+      if (draw_lower_content_v_max > 0.0f)
+        edge_mask &= ~kDioramaEdgeAa_Bottom;
       if (!AppendDioramaEdgeFringe(
-              draw_verts, 1.0f, kDioramaEdgeAa_All,
-              draw_u0, draw_u1, draw_v0, draw_v1,
-              draw_texel_width, draw_texel_height,
-              aa_vertices, DIORAMA_AA_VERTS, &aa_vertex_count,
-              aa_indices, DIORAMA_AA_INDICES, &aa_index_count)) {
+              draw_verts, 1.0f, edge_mask, draw_u0, draw_u1, draw_v0, draw_v1,
+              draw_texel_width, draw_texel_height, attached->vertices,
+              DIORAMA_ATTACHED_AA_VERTS, &attached->vertex_count,
+              attached->indices, DIORAMA_ATTACHED_AA_INDICES,
+              &attached->index_count)) {
         outcome = PresentationOutcome_Combine(
             outcome, kPresentationOutcome_OptionalOmitted);
       }
-      main_submitted = RenderDioramaGeometry(
-          device, draw_texture, aa_vertices, aa_vertex_count,
-          aa_indices, aa_index_count, layer_blend);
-    } else {
-      main_submitted = RenderDioramaGeometry(
-          device, draw_texture, draw_verts, nv, indices, ni, layer_blend);
     }
-    if (layer_shader_bound && !DioramaEffectBackend_Unbind(device)) {
-      return DioramaCompositeCoreFailure(&output_frame);
+    main_submitted = RenderDioramaGeometry(
+        device, draw_texture, attached->vertices, attached->vertex_count,
+        attached->indices, attached->index_count, layer->blend);
+  } else if (want_edge) {
+    ArRenderVertex2D aa_vertices[DIORAMA_AA_VERTS];
+    int32_t aa_indices[DIORAMA_AA_INDICES];
+    int aa_vertex_count = mesh->vertex_count;
+    int aa_index_count = mesh->index_count;
+    memcpy(aa_vertices, draw_verts,
+           (size_t)mesh->vertex_count * sizeof(aa_vertices[0]));
+    memcpy(aa_indices, mesh->indices,
+           (size_t)mesh->index_count * sizeof(aa_indices[0]));
+    if (!AppendDioramaEdgeFringe(draw_verts, 1.0f, kDioramaEdgeAa_All, draw_u0,
+                                 draw_u1, draw_v0, draw_v1, draw_texel_width,
+                                 draw_texel_height, aa_vertices,
+                                 DIORAMA_AA_VERTS, &aa_vertex_count, aa_indices,
+                                 DIORAMA_AA_INDICES, &aa_index_count)) {
+      outcome = PresentationOutcome_Combine(
+          outcome, kPresentationOutcome_OptionalOmitted);
     }
-    if (!main_submitted) {
-      return DioramaCompositeCoreFailure(&output_frame);
-    }
-    const PresentationOutcome effect = DioramaSubmitPlaneEffect(
-        &output_frame, plane_effect, plane_effect_userdata,
-        layer->plane, out_projection);
-    outcome = PresentationOutcome_Combine(outcome, effect);
-    if (!PresentationOutcome_IsUsable(effect)) {
-      return DioramaCompositeCoreFailure(&output_frame);
-    }
+    main_submitted = RenderDioramaGeometry(device, draw_texture, aa_vertices,
+                                           aa_vertex_count, aa_indices,
+                                           aa_index_count, layer->blend);
+  } else {
+    main_submitted = RenderDioramaGeometry(device, draw_texture, draw_verts,
+                                           mesh->vertex_count, mesh->indices,
+                                           mesh->index_count, layer->blend);
+  }
+  if (layer_shader_bound && !DioramaEffectBackend_Unbind(device)) {
+    return kPresentationOutcome_CoreFailure;
+  }
+  if (!main_submitted) {
+    return kPresentationOutcome_CoreFailure;
+  }
+  return outcome;
+}
+
+static PresentationOutcome DrawResolvedDioramaLayer(
+    ArRenderDevice *device, const DioramaCapture *capture,
+    const DioramaScene *scene, const DioramaViewGeometry *geometry,
+    const DioramaFocalAperture *aperture, const ArRenderTexture *textures,
+    const DioramaResolvedLayer *resolved, ArRenderOutputFrame *output_frame,
+    DioramaProjection *out_projection) {
+  if (!resolved->alpha)
+    return kPresentationOutcome_Complete;
+  const DioramaLayerDesc *description = DioramaDescForPlane(resolved->plane);
+  if (!description)
+    return kPresentationOutcome_Complete;
+  DioramaPerformance_SetPlane(description->plane);
+  if (!DioramaLayerIsDrawable(description, textures, capture->pixels)) {
+    if (!DioramaLayerIsProjectable(description, textures, capture->pixels,
+                                   scene->effect_obj_priority_mask,
+                                   scene->effect_bg_plane_mask))
+      return kPresentationOutcome_Complete;
+    return DioramaSubmitPlaneEffect(output_frame, scene->plane_effect,
+                                    scene->plane_effect_userdata,
+                                    description->plane, out_projection);
+  }
+
+  const float shade_mix =
+      (float)g_settings.diorama_depth_shade / (float)kPercentScale;
+  const bool additive =
+      (scene->additive_plane_mask & (1u << (unsigned)description->plane)) != 0;
+  const DioramaLayerDraw layer = {
+      .authored = resolved,
+      .description = description,
+      .texture = textures[description->plane],
+      .shade =
+          {
+              1.0f + (description->shade.r - 1.0f) * shade_mix,
+              1.0f + (description->shade.g - 1.0f) * shade_mix,
+              1.0f + (description->shade.b - 1.0f) * shade_mix,
+              description->shade.a * ((float)resolved->alpha / 255.0f),
+          },
+      .blend = description->plane == kDioramaPlane_Backdrop
+                   ? kArRenderBlendMode_Opaque
+               : additive ? kArRenderBlendMode_Add
+                          : kArRenderBlendMode_Alpha,
+  };
+  DioramaLayerMesh mesh;
+  PrepareDioramaLayerMesh(capture, geometry, aperture, &layer, &mesh);
+  DioramaAttachedMesh attached;
+  PrepareDioramaWaterfall(capture, scene, geometry, &layer, &attached,
+                          out_projection);
+  PresentationOutcome outcome =
+      DrawDioramaLayerDepth(device, capture, geometry, aperture, &layer);
+  if (!PresentationOutcome_IsUsable(outcome))
+    return outcome;
+  const PresentationOutcome face =
+      DrawDioramaLayerFace(device, capture, geometry, &layer, &mesh, &attached);
+  outcome = PresentationOutcome_Combine(outcome, face);
+  if (!PresentationOutcome_IsUsable(face))
+    return outcome;
+  const PresentationOutcome effect = DioramaSubmitPlaneEffect(
+      output_frame, scene->plane_effect, scene->plane_effect_userdata,
+      description->plane, out_projection);
+  return PresentationOutcome_Combine(outcome, effect);
+}
+
+PresentationOutcome Diorama_Composite(ArRenderDevice *device,
+                                      const DioramaCapture *capture,
+                                      const DioramaView *view,
+                                      const DioramaScene *scene,
+                                      DioramaProjection *out_projection) {
+  if (out_projection)
+    memset(out_projection, 0, sizeof(*out_projection));
+  if (!ArRenderDevice_IsReady(device) || !capture || !view || !scene ||
+      !capture->pixels || capture->authentic_y0 < 0 ||
+      capture->authentic_y0 + kActRaiserAuthenticHeight > capture->height)
+    return kPresentationOutcome_CoreFailure;
+  ArRenderTexture textures[kDioramaPlane_Count];
+  for (int plane = 0; plane < kDioramaPlane_Count; ++plane)
+    textures[plane] = capture->textures ? capture->textures[plane]
+                                        : ArRenderTexture_Invalid();
+  const ArRenderColorF black = {0.0f, 0.0f, 0.0f, 1.0f};
+  const ArRenderColorF navy = {20.0f / 255.0f, 20.0f / 255.0f, 30.0f / 255.0f,
+                               1.0f};
+  ArRenderOutputFrame output_frame;
+  if (!ArRenderOutputFrame_Begin(device, view->viewport, black, navy,
+                                 &output_frame))
+    return kPresentationOutcome_CoreFailure;
+
+  DioramaViewGeometry geometry = {.width = view->viewport.w,
+                                  .height = view->viewport.h};
+  DioramaPerformance_SetViewport(geometry.width, geometry.height);
+  DioramaResolvedLayer resolved[kDioramaLayerCount];
+  const int resolved_count = ResolveDioramaLayers(scene, resolved);
+  PresentationOutcome outcome = DrawResolvedDioramaSkybox(
+      device, capture, &geometry, textures, resolved, resolved_count);
+  if (!PresentationOutcome_IsUsable(outcome))
+    goto failed;
+
+  PrepareDioramaView(capture, view, resolved, resolved_count, &geometry);
+  PublishDioramaView(capture, view, &geometry, out_projection);
+  if (g_settings.diorama_shoebox) {
+    DioramaPerformance_SetPlane(-1);
+    const PresentationOutcome shoebox = DrawDioramaShoebox(
+        device, geometry.matrix, geometry.aspect_x, geometry.height_scale,
+        geometry.camera.tilt_y, geometry.width, geometry.height);
+    outcome = PresentationOutcome_Combine(outcome, shoebox);
+    if (!PresentationOutcome_IsUsable(shoebox))
+      goto failed;
+  }
+
+  DioramaFocalAperture aperture;
+  PrepareDioramaAperture(capture, &geometry, textures, resolved, resolved_count,
+                         &aperture);
+  PublishDioramaPlanes(capture, scene, &geometry, textures, resolved,
+                       resolved_count, out_projection);
+  int draw_order[kDioramaLayerCount];
+  const int draw_count =
+      ResolveDioramaDrawOrder(scene, resolved, resolved_count, draw_order);
+  for (int draw = 0; draw < draw_count; ++draw) {
+    const PresentationOutcome layer = DrawResolvedDioramaLayer(
+        device, capture, scene, &geometry, &aperture, textures,
+        &resolved[draw_order[draw]], &output_frame, out_projection);
+    outcome = PresentationOutcome_Combine(outcome, layer);
+    if (!PresentationOutcome_IsUsable(layer))
+      goto failed;
   }
 
   if (!ArRenderOutputFrame_Finish(&output_frame))
     return kPresentationOutcome_CoreFailure;
-
   return outcome;
+
+failed:
+  return DioramaCompositeCoreFailure(&output_frame);
 }
 
 void Diorama_ResetRendererResources(ArRenderDevice *device) {

@@ -6,14 +6,6 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-typedef enum ArLanguagePlaceholderKind {
-  kArLanguagePlaceholder_Unknown = 0,
-  kArLanguagePlaceholder_LocalizedText,
-  kArLanguagePlaceholder_LocalizedTerm,
-  kArLanguagePlaceholder_Number,
-  kArLanguagePlaceholder_Icon,
-} ArLanguagePlaceholderKind;
-
 /* How the game presents a route. This is the authoring-time half of what the
  * runtime actually does with a message, so a pack cannot pass validation with
  * content the game will never display.
@@ -36,6 +28,7 @@ typedef struct ArLanguagePresentationContract {
   uint8_t maximum_pages;
   uint16_t maximum_lines;
   uint8_t required_nonempty_lines;
+  const char *layout; /* Generated native layout; aliases must be compatible. */
 } ArLanguagePresentationContract;
 
 typedef struct ArLanguageContractStats {

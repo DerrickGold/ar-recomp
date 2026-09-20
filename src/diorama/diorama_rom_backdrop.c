@@ -146,10 +146,3 @@ bool DioramaRomBackdrop_LoadActionBgSparse(
       rom, rom_size, map_group, map_number, bg_layer, 0, true,
       out_default_fill_argb, out_argb, out_pixel_count);
 }
-
-bool DioramaRomBackdrop_LoadAitosSky(const uint8_t *rom, size_t rom_size,
-                                     uint32_t *out_argb,
-                                     size_t out_pixel_count) {
-  return DioramaRomBackdrop_LoadActionBg(
-      rom, rom_size, 0x04, 0x01, 2, out_argb, out_pixel_count);
-}

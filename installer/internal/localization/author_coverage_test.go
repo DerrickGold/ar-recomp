@@ -33,14 +33,14 @@ func TestContractCompleteStillReportsMissingLiveHudAndCredits(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := p.Coverage()
-	if !r.ContractComplete || r.Required.Total != 495 || r.Required.Provided != 495 || len(r.Required.Missing) != 0 || r.LiveOptional.Total != 26 || r.LiveOptional.Provided != 0 || len(r.LiveOptional.Missing) != 26 {
+	if !r.ContractComplete || r.Required.Total != 495 || r.Required.Provided != 495 || len(r.Required.Missing) != 0 || r.LiveOptional.Total != 32 || r.LiveOptional.Provided != 0 || len(r.LiveOptional.Missing) != 32 {
 		t.Fatalf("wrong required/live distinction: %+v", r)
 	}
 	if !slices.Contains(r.Dormant, "credits.special_mode") || !slices.Contains(r.Dormant, "sound_test.menu.labels") {
 		t.Fatal(r.Dormant)
 	}
 	for _, s := range r.Surfaces {
-		if s.Surface == "hud" && len(s.Missing) != 8 {
+		if s.Surface == "hud" && len(s.Missing) != 13 {
 			t.Fatal(s)
 		}
 		if s.Surface == "credits" && len(s.Missing) != 19 {

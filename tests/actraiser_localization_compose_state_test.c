@@ -8,7 +8,8 @@
 #include "actraiser_game.h"
 
 static int failures;
-static const uint16_t kTextPalette[4] = {0, 0, 0x7f33, 0x7fff};
+static const ActRaiserTextPalette kTextPalette = {
+    .dialogue = {0, 0, 0x7f33, 0x7fff}};
 
 #define CHECK(expression) do {                                             \
   if (!(expression)) {                                                     \
@@ -18,22 +19,13 @@ static const uint16_t kTextPalette[4] = {0, 0, 0x7f33, 0x7fff};
   }                                                                        \
 } while (0)
 
-static bool ResolveSemanticId(
-    void *context, const char *semantic_id,
-    char *utf8, size_t utf8_capacity, size_t *utf8_bytes,
-    uint32_t *cluster_count, uint64_t *source_revision,
-    ArLocalizationInlineObjectSnapshot *inline_objects,
-    size_t inline_object_capacity, uint8_t *inline_object_count,
-    uint8_t *structural_boundaries, ArLocalizationTextLanguage *language,
-    ArTextBidiSpans *bidi, ArLocalizationTextField *live_field,
-    char *error, size_t error_capacity) {
-  if (live_field) *live_field = (ArLocalizationTextField){0};
-  (void)inline_objects;
-  (void)inline_object_capacity;
-  *inline_object_count = 0;
-  bidi->count = 0;
-  *language = (ArLocalizationTextLanguage){.locale = "en-US",
-      .direction = kArTextDirection_LeftToRight};
+static bool ResolveSemanticId(void *context, const char *semantic_id,
+                              ActRaiserResolvedText *result, char *error,
+                              size_t error_capacity) {
+  result->inline_object_count = 0;
+  result->bidi.count = 0;
+  result->language = (ArLocalizationTextLanguage){
+      .locale = "en-US", .direction = kArTextDirection_LeftToRight};
   const char *rejected = (const char *)context;
   if (rejected && !strcmp(rejected, semantic_id)) {
     if (error && error_capacity)
@@ -41,17 +33,19 @@ static bool ResolveSemanticId(
     return false;
   }
   const size_t length = strlen(semantic_id);
-  if (length >= utf8_capacity) return false;
-  memcpy(utf8, semantic_id, length + 1u);
-  if (structural_boundaries) {
-    memset(structural_boundaries, 0, AR_TEXT_BOUNDARY_BYTES(utf8_capacity));
+  if (length >= sizeof(result->utf8))
+    return false;
+  memcpy(result->utf8, semantic_id, length + 1u);
+  {
+    memset(result->structural_boundaries, 0,
+           AR_TEXT_BOUNDARY_BYTES(sizeof(result->utf8)));
     for (size_t i = 0; i < length; ++i)
-      if (utf8[i] == '|' || utf8[i] == '\n')
-        ArTextBoundary_Set(structural_boundaries, i, true);
+      if (result->utf8[i] == '|' || result->utf8[i] == '\n')
+        ArTextBoundary_Set(result->structural_boundaries, i, true);
   }
-  *utf8_bytes = length;
-  *cluster_count = (uint32_t)length;
-  *source_revision = 1;
+  result->utf8_bytes = length;
+  result->cluster_count = (uint32_t)length;
+  result->source_revision = 1;
   return true;
 }
 
@@ -60,63 +54,47 @@ typedef struct RevisionResolver {
   const char *suffix;
 } RevisionResolver;
 
-static bool ResolveRevision(
-    void *context, const char *semantic_id,
-    char *utf8, size_t utf8_capacity, size_t *utf8_bytes,
-    uint32_t *cluster_count, uint64_t *source_revision,
-    ArLocalizationInlineObjectSnapshot *inline_objects,
-    size_t inline_object_capacity, uint8_t *inline_object_count,
-    uint8_t *structural_boundaries, ArLocalizationTextLanguage *language,
-    ArTextBidiSpans *bidi, ArLocalizationTextField *live_field,
-    char *error, size_t error_capacity) {
-  if (live_field) *live_field = (ArLocalizationTextField){0};
-  (void)inline_objects;
-  (void)structural_boundaries;
-  (void)inline_object_capacity;
-  *inline_object_count = 0;
-  bidi->count = 0;
-  *language = (ArLocalizationTextLanguage){.locale = "en-US",
-      .direction = kArTextDirection_LeftToRight};
+static bool ResolveRevision(void *context, const char *semantic_id,
+                            ActRaiserResolvedText *result, char *error,
+                            size_t error_capacity) {
+  result->inline_object_count = 0;
+  result->bidi.count = 0;
+  result->language = (ArLocalizationTextLanguage){
+      .locale = "en-US", .direction = kArTextDirection_LeftToRight};
   (void)error;
   (void)error_capacity;
   const RevisionResolver *resolver = (const RevisionResolver *)context;
-  const int written = snprintf(utf8, utf8_capacity, "%s:%s", semantic_id,
-                               resolver->suffix);
-  if (written <= 0 || (size_t)written >= utf8_capacity) return false;
-  *utf8_bytes = (size_t)written;
-  *cluster_count = (uint32_t)written;
-  *source_revision = resolver->revision;
+  const int written = snprintf(result->utf8, sizeof(result->utf8), "%s:%s",
+                               semantic_id, resolver->suffix);
+  if (written <= 0 || (size_t)written >= sizeof(result->utf8))
+    return false;
+  result->utf8_bytes = (size_t)written;
+  result->cluster_count = (uint32_t)written;
+  result->source_revision = resolver->revision;
   return true;
 }
 
-static bool ResolveInlineObject(
-    void *context, const char *semantic_id,
-    char *utf8, size_t utf8_capacity, size_t *utf8_bytes,
-    uint32_t *cluster_count, uint64_t *source_revision,
-    ArLocalizationInlineObjectSnapshot *inline_objects,
-    size_t inline_object_capacity, uint8_t *inline_object_count,
-    uint8_t *structural_boundaries, ArLocalizationTextLanguage *language,
-    ArTextBidiSpans *bidi, ArLocalizationTextField *live_field,
-    char *error, size_t error_capacity) {
-  if (live_field) *live_field = (ArLocalizationTextField){0};
-  if (live_field && context)
-    *live_field = *(const ArLocalizationTextField *)context;
-  (void)structural_boundaries;
+static bool ResolveInlineObject(void *context, const char *semantic_id,
+                                ActRaiserResolvedText *result, char *error,
+                                size_t error_capacity) {
+  if (context)
+    result->live_field = *(const ArLocalizationTextField *)context;
   (void)semantic_id;
   (void)error;
   (void)error_capacity;
-  bidi->count = 0;
-  *language = (ArLocalizationTextLanguage){.locale = "en-US",
-      .direction = kArTextDirection_LeftToRight};
+  result->bidi.count = 0;
+  result->language = (ArLocalizationTextLanguage){
+      .locale = "en-US", .direction = kArTextDirection_LeftToRight};
   static const char text[] = "A\xE2\x80\x87" "B";
-  if (sizeof(text) > utf8_capacity || !inline_object_capacity) return false;
-  memcpy(utf8, text, sizeof(text));
-  *utf8_bytes = sizeof(text) - 1u;
-  *cluster_count = 3;
-  *source_revision = 9;
-  inline_objects[0] = (ArLocalizationInlineObjectSnapshot){
+  if (sizeof(text) > sizeof(result->utf8))
+    return false;
+  memcpy(result->utf8, text, sizeof(text));
+  result->utf8_bytes = sizeof(text) - 1u;
+  result->cluster_count = 3;
+  result->source_revision = 9;
+  result->inline_objects[0] = (ArLocalizationInlineObjectSnapshot){
       kArLocalizationInlineObject_StatusLife, 4};
-  *inline_object_count = 1;
+  result->inline_object_count = 1;
   return true;
 }
 
@@ -133,25 +111,14 @@ static ActRaiserLocalizationComposeObservation Compose(
   };
 }
 
-static bool ResolveEmpty(
-    void *context, const char *semantic_id,
-    char *utf8, size_t utf8_capacity, size_t *utf8_bytes,
-    uint32_t *cluster_count, uint64_t *source_revision,
-    ArLocalizationInlineObjectSnapshot *inline_objects,
-    size_t inline_object_capacity, uint8_t *inline_object_count,
-    uint8_t *structural_boundaries, ArLocalizationTextLanguage *language,
-    ArTextBidiSpans *bidi, ArLocalizationTextField *live_field,
-    char *error, size_t error_capacity) {
-  if (live_field) *live_field = (ArLocalizationTextField){0};
-  if (!ResolveSemanticId(NULL, semantic_id, utf8, utf8_capacity, utf8_bytes,
-                         cluster_count, source_revision, inline_objects,
-                         inline_object_capacity, inline_object_count, structural_boundaries,
-                         language, bidi, live_field,
-                         error, error_capacity))
+static bool ResolveEmpty(void *context, const char *semantic_id,
+                         ActRaiserResolvedText *text, char *error,
+                         size_t error_capacity) {
+  if (!ResolveSemanticId(NULL, semantic_id, text, error, error_capacity))
     return false;
-  utf8[0] = 0;
-  *utf8_bytes = 0;
-  *cluster_count = context ? 1 : 0; /* Malformed-empty fixture. */
+  text->utf8[0] = 0;
+  text->utf8_bytes = 0;
+  text->cluster_count = context ? 1 : 0; /* Malformed-empty fixture. */
   return true;
 }
 
@@ -165,19 +132,20 @@ static void TestEmptyMenuLifecycle(void) {
       &state, &event, ResolveEmpty, NULL, error, sizeof(error)));
   const ActRaiserLocalizationComposeSnapshot *slot =
       ActRaiserLocalizationComposeState_Find(&state, 8);
-  CHECK(slot && slot->utf8_bytes == 0 && slot->cluster_count == 0);
+  CHECK(slot && slot->text.utf8_bytes == 0 && slot->text.cluster_count == 0);
   ArLocalizationFrame frame;
   ArLocalizationFrame_Reset(&frame);
   CHECK(ArLocalizationFrame_SetFont(
       &frame, "en", "test", UINT64_C(1), 1, &frame.settings));
   CHECK(ActRaiserLocalizationComposeState_AppendFrame(
-      &state, &frame, (ArTextCellDestination){3, kArTextCellScreen_Composited, 0},
-      kTextPalette));
+      &state, &frame,
+      (ArTextCellDestination){3, kArTextCellScreen_Composited, 0},
+      &kTextPalette));
   CHECK(frame.snapshot_count == 1 && frame.snapshots[0].utf8_bytes == 0);
   /* Empty, visible, and failed replacements share the same lifetime. */
   CHECK(ActRaiserLocalizationComposeState_RefreshLatest(
       &state, 8, ResolveSemanticId, NULL, error, sizeof(error)));
-  CHECK(ActRaiserLocalizationComposeState_Find(&state, 8)->utf8_bytes > 0);
+  CHECK(ActRaiserLocalizationComposeState_Find(&state, 8)->text.utf8_bytes > 0);
   CHECK(!ActRaiserLocalizationComposeState_RefreshLatest(
       &state, 8, ResolveEmpty, &state, error, sizeof(error)));
   CHECK(!ActRaiserLocalizationComposeState_Find(&state, 8));
@@ -260,7 +228,7 @@ static void TestPartialMenuErases(void) {
       CHECK(ActRaiserLocalizationComposeState_AppendFrame(
           &state, &frame,
           (ArTextCellDestination){3, kArTextCellScreen_Composited, 0x5800},
-          kTextPalette));
+          &kTextPalette));
       CHECK(frame.snapshot_count == 0);
       /* Erase followed by redraw in the same game frame creates a fresh owner. */
       event = Compose(13, menus[i].source, menus[i].destination);
@@ -303,19 +271,11 @@ static void TestPartialMenuErases(void) {
       &state, &event, NULL, NULL, error, sizeof(error)));
 }
 
-static bool ResolveLiteral(
-    void *context, const char *id, char *utf8, size_t capacity, size_t *bytes,
-    uint32_t *clusters, uint64_t *revision,
-    ArLocalizationInlineObjectSnapshot *objects, size_t object_capacity,
-    uint8_t *object_count, uint8_t *structural_boundaries, ArLocalizationTextLanguage *language,
-    ArTextBidiSpans *bidi, ArLocalizationTextField *live_field,
-    char *error, size_t error_capacity) {
-  if (live_field) *live_field = (ArLocalizationTextField){0};
-  (void)id;
-  return ResolveSemanticId(NULL, context, utf8, capacity, bytes, clusters,
-      revision, objects, object_capacity, object_count, structural_boundaries,
-                         language, bidi, live_field,
-      error, error_capacity);
+static bool ResolveLiteral(void *context, const char *semantic_id,
+                           ActRaiserResolvedText *text, char *error,
+                           size_t error_capacity) {
+  (void)semantic_id;
+  return ResolveSemanticId(NULL, context, text, error, error_capacity);
 }
 
 static void TestActionAndTitle(void) {
@@ -354,8 +314,10 @@ static void TestActionAndTitle(void) {
     ArLocalizationFrame frame;
     ArLocalizationFrame_Reset(&frame);
     CHECK(ArLocalizationFrame_SetFont(&frame, "en", "test", UINT64_C(1), 1, &frame.settings));
-    CHECK(ActRaiserLocalizationComposeState_AppendFrame(&state, &frame,
-        (ArTextCellDestination){3, kArTextCellScreen_Composited, 0x5800}, kTextPalette));
+    CHECK(ActRaiserLocalizationComposeState_AppendFrame(
+        &state, &frame,
+        (ArTextCellDestination){3, kArTextCellScreen_Composited, 0x5800},
+        &kTextPalette));
     CHECK(frame.snapshot_count == 2);
     CHECK(frame.cells.records[0].region.row == 17 && frame.cells.records[1].region.row == 19);
     CHECK(frame.cells.records[0].region.column == 14 && frame.cells.records[0].region.rows == 1);
@@ -397,7 +359,7 @@ static void TestSimulationPause(void) {
     CHECK(ArLocalizationFrame_SetFont(&frame, "fr", "test", 1, 1, &frame.settings));
     const ArTextCellDestination destination = {3, kArTextCellScreen_Composited, 0x5800};
     CHECK(ActRaiserLocalizationComposeState_AppendFrame(
-        &state, &frame, destination, kTextPalette));
+        &state, &frame, destination, &kTextPalette));
     CHECK(frame.snapshot_count == 1 && frame.cells.count == 1);
     CHECK(!strcmp(frame.text + frame.snapshots[0].utf8_offset, "En pause"));
     CHECK(frame.snapshots[0].shadow_enabled);
@@ -406,7 +368,8 @@ static void TestSimulationPause(void) {
     /* Language changes while paused refresh the active label. */
     CHECK(ActRaiserLocalizationComposeState_RefreshLatest(
         &state, 13, ResolveLiteral, "Pausiert", error, sizeof(error)));
-    CHECK(!strcmp(ActRaiserLocalizationComposeState_Find(&state, 13)->utf8, "Pausiert"));
+    CHECK(!strcmp(ActRaiserLocalizationComposeState_Find(&state, 13)->text.utf8,
+                  "Pausiert"));
     /* Resume's $02:C1B7 erase covers the original five letters and their
      * upper row, releasing the entire translated owner. */
     event.serial++;
@@ -419,6 +382,25 @@ static void TestSimulationPause(void) {
     CHECK(!ActRaiserLocalizationComposeState_RefreshLatest(
         &state, 13, ResolveLiteral, "En pause", error, sizeof(error)));
   }
+}
+
+static unsigned hud_value_calls;
+static bool ResolveHudValue(void *context, const char *id, const char *value,
+                            ActRaiserResolvedText *text, char *error,
+                            size_t capacity) {
+  ++hud_value_calls;
+  CHECK(strstr(id, "_value") != NULL);
+  if (!strcmp(id, "action.hud.score_value"))
+    CHECK(!strcmp(value, "56789"));
+  CHECK(ResolveSemanticId(context, value, text, error, capacity));
+  text->styles.authored = true;
+  text->styles.style_count = 1;
+  text->styles.styles[0].appearance =
+      (ArTextRunAppearance){.font_role = "body",
+                            .scale_basis = 12000,
+                            .band_rgb = 0xabcdef,
+                            .body_rgb = 0xfedcba};
+  return true;
 }
 
 static void TestActionHud(void) {
@@ -450,8 +432,8 @@ static void TestActionHud(void) {
   const ArTextCellDestination destination = {3, kArTextCellScreen_Composited, base};
   ArLocalizationFrame_Reset(&frame);
   CHECK(ArLocalizationFrame_SetFont(&frame, "ar", "test", UINT64_C(1), 1, &frame.settings));
-  ActRaiserLocalizationHud_Append(&hud, &frame, destination,
-      0, vram, 0x8000, cgram, 256, ResolveSemanticId, NULL);
+  ActRaiserLocalizationHud_Append(&hud, &frame, destination, 0, vram, 0x8000,
+                                  cgram, 256, ResolveSemanticId, NULL, NULL);
   CHECK(frame.snapshot_count == 8 && hud.resolved);
   for (uint8_t i = 0; i < frame.snapshot_count; ++i) {
     CHECK(!strcmp(frame.snapshots[i].language.locale, "en-US"));
@@ -487,19 +469,43 @@ static void TestActionHud(void) {
   CHECK(frame.snapshots[2].layout == kArLocalizationTextLayout_LeftAlignedLabel);
   CHECK(!frame.snapshots[2].left_inset_pixels && !frame.snapshots[2].right_inset_pixels);
   CHECK(frame.cells.records[3].region.columns == 6); /* Bars, heart and magic stay native. */
+  /* Production supplies a value resolver: templates own the typography and
+   * the input is the exact native formatter output, including its padding. */
+  for (int capture = 0; capture < 2; ++capture) {
+    ArLocalizationFrame_Reset(&frame);
+    CHECK(ArLocalizationFrame_SetFont(&frame, "en", "test", 1, 1,
+                                      &frame.settings));
+    ActRaiserLocalizationHud_Append(&hud, &frame, destination, 0, vram, 0x8000,
+                                    cgram, 256, ResolveSemanticId,
+                                    ResolveHudValue, NULL);
+    CHECK(hud_value_calls == 3 && frame.snapshot_count == 8);
+    CHECK(frame.snapshots[5].appearance.scale_basis == 12000);
+    CHECK(frame.snapshots[5].appearance.body_rgb == 0xfedcba);
+    CHECK(!frame.snapshots[5].appearance.italic);
+  }
+  vram[base + 32 + 8] = 0x2439;
+  ArLocalizationFrame_Reset(&frame);
+  CHECK(
+      ArLocalizationFrame_SetFont(&frame, "en", "test", 1, 1, &frame.settings));
+  ActRaiserLocalizationHud_Append(&hud, &frame, destination, 0, vram, 0x8000,
+                                  cgram, 256, ResolveSemanticId,
+                                  ResolveHudValue, NULL);
+  CHECK(hud_value_calls == 4);
+  CHECK(!strncmp(frame.text + frame.snapshots[5].utf8_offset, "91", 2));
   vram[base + 32 + 15] = 0x2499; /* Bad number retains native pixels. */
   cgram[6] = 0x7c00;
   ArLocalizationFrame_Reset(&frame);
   CHECK(ArLocalizationFrame_SetFont(&frame, "en", "test", UINT64_C(1), 1, &frame.settings));
-  ActRaiserLocalizationHud_Append(&hud, &frame, destination,
-      0, vram, 0x8000, cgram, 256, ResolveSemanticId, "action.hud.time_label");
+  ActRaiserLocalizationHud_Append(&hud, &frame, destination, 0, vram, 0x8000,
+                                  cgram, 256, ResolveSemanticId, NULL,
+                                  "action.hud.time_label");
   CHECK(frame.snapshot_count == 7); /* Resolver was not called again. */
   CHECK(frame.snapshots[1].band_rgb == 0x0000ff);
   memset(vram, 0, sizeof(vram));
   ArLocalizationFrame_Reset(&frame);
   CHECK(ArLocalizationFrame_SetFont(&frame, "en", "test", UINT64_C(1), 1, &frame.settings));
-  ActRaiserLocalizationHud_Append(&hud, &frame, destination,
-      0, vram, 0x8000, cgram, 256, ResolveSemanticId, NULL);
+  ActRaiserLocalizationHud_Append(&hud, &frame, destination, 0, vram, 0x8000,
+                                  cgram, 256, ResolveSemanticId, NULL, NULL);
   CHECK(!frame.snapshot_count); /* Clear/fade transition cannot leave stale HUD. */
 }
 
@@ -523,9 +529,10 @@ static void TestSoundTestLifecycle(void) {
   ArLocalizationFrame_Reset(&frame);
   CHECK(ArLocalizationFrame_SetFont(&frame, "fr", "test", UINT64_C(1), 1,
                                   &frame.settings));
-  CHECK(ActRaiserLocalizationComposeState_AppendFrame(&state, &frame,
+  CHECK(ActRaiserLocalizationComposeState_AppendFrame(
+      &state, &frame,
       (ArTextCellDestination){3, kArTextCellScreen_Composited, 0},
-      kTextPalette));
+      &kTextPalette));
   CHECK(frame.snapshot_count == 1 && frame.cells.records[0].region.row == 8);
   /* Numeric changes are native redraws. The cached immutable copy must not
    * continue displaying the previous counter. */
@@ -535,7 +542,8 @@ static void TestSoundTestLifecycle(void) {
       &state, &event, ResolveRevision, &resolver, error, sizeof(error)));
   snapshot = ActRaiserLocalizationComposeState_Find(&state, surface);
   /* A live value changes without a pack content-revision change. */
-  CHECK(snapshot && snapshot->source_revision == 1 && strstr(snapshot->utf8, "22"));
+  CHECK(snapshot && snapshot->text.source_revision == 1 &&
+        strstr(snapshot->text.utf8, "22"));
   for (unsigned native_only = 0; native_only < 2; ++native_only) {
     event.source_pc24 = 0x029871;
     event.caller_pc24 = 0x0297F0;
@@ -577,19 +585,22 @@ static void TestAppearance(void) {
     slot->region = (ArTextCellRegion){2, 4, 20, 6};
     slot->layout = kArLocalizationTextLayout_SingleLineLabel;
     slot->native_font_pixels = 8;
-    slot->source_revision = 1;
-    slot->language = (ArLocalizationTextLanguage){.locale = "en-US",
-        .direction = kArTextDirection_LeftToRight};
+    slot->text.source_revision = 1;
+    slot->text.language = (ArLocalizationTextLanguage){
+        .locale = "en-US", .direction = kArTextDirection_LeftToRight};
     snprintf(slot->semantic_id, sizeof(slot->semantic_id), "%s", ids[i]);
-    snprintf(slot->utf8, sizeof(slot->utf8), "Test 1");
-    slot->utf8_bytes = slot->cluster_count = 6;
+    snprintf(slot->text.utf8, sizeof(slot->text.utf8), "Test 1");
+    slot->text.utf8_bytes = slot->text.cluster_count = 6;
     for (unsigned p = 0; p < 2; ++p) {
       ArLocalizationFrame frame;
       ArLocalizationFrame_Reset(&frame);
       CHECK(ArLocalizationFrame_SetFont(&frame, "en", "test", 1, 1, &frame.settings));
-      CHECK(ActRaiserLocalizationComposeState_AppendFrame(&state, &frame,
+      CHECK(ActRaiserLocalizationComposeState_AppendFrame(
+          &state, &frame,
           (ArTextCellDestination){3, kArTextCellScreen_Composited, 0},
-          palettes[p]));
+          &(ActRaiserTextPalette){.dialogue = {palettes[p][0], palettes[p][1],
+                                               palettes[p][2],
+                                               palettes[p][3]}}));
       CHECK(frame.snapshot_count > 0);
       for (uint8_t s = 0; s < frame.snapshot_count; ++s) {
         const ArLocalizationTextSnapshot *text = &frame.snapshots[s];
@@ -628,36 +639,39 @@ static void TestNameEntryLiveLine(void) {
     slot->region = (ArTextCellRegion){3, 7, 27, 16};
     slot->layout = kArLocalizationTextLayout_Flow;
     slot->native_font_pixels = 8;
-    slot->source_revision = 1;
-    slot->language = (ArLocalizationTextLanguage){.locale = "en-US",
-        .direction = kArTextDirection_LeftToRight};
+    slot->text.source_revision = 1;
+    slot->text.language = (ArLocalizationTextLanguage){
+        .locale = "en-US", .direction = kArTextDirection_LeftToRight};
     snprintf(slot->semantic_id, sizeof(slot->semantic_id), "%s",
              variant == 3 ? "sky.menu.magic.fire"
                           : "name_entry.prompt_and_alphabet");
-    memcpy(slot->utf8, page, sizeof(page));
-    slot->utf8_bytes = sizeof(page) - 1u;
-    slot->cluster_count = (uint32_t)slot->utf8_bytes;
+    memcpy(slot->text.utf8, page, sizeof(page));
+    slot->text.utf8_bytes = sizeof(page) - 1u;
+    slot->text.cluster_count = (uint32_t)slot->text.utf8_bytes;
     if (variant != 3)
-      slot->live_field = (ArLocalizationTextField){name_start, 8, 4};
+      slot->text.live_field = (ArLocalizationTextField){name_start, 8, 4};
     uint8_t count = 0;
     if (variant != 1) {
       for (size_t i = 0; i < sizeof(name_ends) / sizeof(name_ends[0]); ++i)
-        slot->inline_objects[count++] = (ArLocalizationInlineObjectSnapshot){
-            kArLocalizationInlineObject_NameFieldUnderline, name_ends[i]};
+        slot->text.inline_objects[count++] =
+            (ArLocalizationInlineObjectSnapshot){
+                kArLocalizationInlineObject_NameFieldUnderline, name_ends[i]};
     }
     /* A selector on a key is not part of the field. */
-    slot->inline_objects[count++] = (ArLocalizationInlineObjectSnapshot){
-        kArLocalizationInlineObject_NameCursor, (uint32_t)slot->utf8_bytes};
+    slot->text.inline_objects[count++] = (ArLocalizationInlineObjectSnapshot){
+        kArLocalizationInlineObject_NameCursor,
+        (uint32_t)slot->text.utf8_bytes};
     if (variant == 2)
-      slot->inline_objects[count - 1u].kind =
+      slot->text.inline_objects[count - 1u].kind =
           kArLocalizationInlineObject_NameFieldUnderline;
-    slot->inline_object_count = count;
+    slot->text.inline_object_count = count;
     static ArLocalizationFrame frame;
     ArLocalizationFrame_Reset(&frame);
     CHECK(ArLocalizationFrame_SetFont(&frame, "en", "test", 1, 1, &frame.settings));
-    const uint16_t palette[4] = {0, 0, 0x7f33, 0x7fff};
-    CHECK(ActRaiserLocalizationComposeState_AppendFrame(&state, &frame,
-        (ArTextCellDestination){3, kArTextCellScreen_Composited, 0}, palette));
+    const ActRaiserTextPalette palette = {.dialogue = {0, 0, 0x7f33, 0x7fff}};
+    CHECK(ActRaiserLocalizationComposeState_AppendFrame(
+        &state, &frame,
+        (ArTextCellDestination){3, kArTextCellScreen_Composited, 0}, &palette));
     CHECK(frame.snapshot_count == 1);
     CHECK(ArLocalizationFrame_IsValid(&frame));
     const ArLocalizationTextSnapshot *text = &frame.snapshots[0];
@@ -688,13 +702,13 @@ static void TestFieldMetadataRefresh(void) {
       &state, &event, ResolveInlineObject, &field, error, sizeof(error)));
   const ActRaiserLocalizationComposeSnapshot *snapshot =
       ActRaiserLocalizationComposeState_Find(&state, route->surface_id);
-  CHECK(snapshot && snapshot->live_field.cells == 3);
+  CHECK(snapshot && snapshot->text.live_field.cells == 3);
   /* Metadata changes must publish even when text and source revision match. */
   field.cells = 0;
   CHECK(ActRaiserLocalizationComposeState_RefreshLatest(
       &state, route->surface_id, ResolveInlineObject, &field, error, sizeof(error)));
   snapshot = ActRaiserLocalizationComposeState_Find(&state, route->surface_id);
-  CHECK(snapshot && snapshot->live_field.cells == 0);
+  CHECK(snapshot && snapshot->text.live_field.cells == 0);
   /* An invalid range releases enhanced ownership before publishing a frame. */
   field.utf8_offset = 1;
   field.utf8_bytes = 4;
@@ -726,8 +740,7 @@ int main(void) {
       &state, &event, ResolveSemanticId, NULL, error, sizeof(error)));
   const ActRaiserLocalizationComposeSnapshot *snapshot =
       ActRaiserLocalizationComposeState_Find(&state, 2);
-  CHECK(snapshot && !strcmp(snapshot->utf8,
-                            "sky.menu.choice.movement"));
+  CHECK(snapshot && !strcmp(snapshot->text.utf8, "sky.menu.choice.movement"));
   CHECK(ActRaiserLocalizationComposeState_ActiveCount(&state) == 1);
   CHECK(ActRaiserLocalizationComposeState_ReleaseSurface(&state, 2));
   CHECK(!ActRaiserLocalizationComposeState_Find(&state, 2));
@@ -744,8 +757,8 @@ int main(void) {
   CHECK(ActRaiserLocalizationComposeState_Process(
       &state, &event, ResolveSemanticId, NULL, error, sizeof(error)));
   snapshot = ActRaiserLocalizationComposeState_Find(&state, 3);
-  CHECK(snapshot && !strcmp(snapshot->utf8,
-                            "sim.menu.possession.slot_12"));
+  CHECK(snapshot &&
+        !strcmp(snapshot->text.utf8, "sim.menu.possession.slot_12"));
   CHECK(ActRaiserLocalizationComposeState_ActiveCount(&state) == 2);
 
   /* An unrouted native generation still clears the previous enhanced owner. */
@@ -771,9 +784,9 @@ int main(void) {
   CHECK(ActRaiserLocalizationComposeState_Refresh(
       &state, 7, 2, ResolveRevision, &revision, error, sizeof(error)));
   snapshot = ActRaiserLocalizationComposeState_Find(&state, 7);
-  CHECK(snapshot && snapshot->source_revision == 2);
-  CHECK(snapshot && !strcmp(snapshot->utf8,
-                            "status.report.cities_report:updated"));
+  CHECK(snapshot && snapshot->text.source_revision == 2);
+  CHECK(snapshot &&
+        !strcmp(snapshot->text.utf8, "status.report.cities_report:updated"));
   const uint64_t generation = snapshot ? snapshot->generation_serial : 0;
   CHECK(ActRaiserLocalizationComposeState_Refresh(
       &state, 7, 2, ResolveRevision, &revision, error, sizeof(error)));
@@ -785,9 +798,9 @@ int main(void) {
   CHECK(ActRaiserLocalizationComposeState_RefreshLatest(
       &state, 7, ResolveRevision, &revision, error, sizeof(error)));
   snapshot = ActRaiserLocalizationComposeState_Find(&state, 7);
-  CHECK(snapshot && snapshot->source_revision == 3);
-  CHECK(snapshot && !strcmp(snapshot->utf8,
-                            "status.report.cities_report:latest"));
+  CHECK(snapshot && snapshot->text.source_revision == 3);
+  CHECK(snapshot &&
+        !strcmp(snapshot->text.utf8, "status.report.cities_report:latest"));
 
   event = Compose(14, 0x01F5BC, 0x0603);
   CHECK(ActRaiserLocalizationComposeState_Process(
@@ -803,7 +816,7 @@ int main(void) {
   CHECK(ActRaiserLocalizationComposeState_AppendFrame(
       &state, &report_frame,
       (ArTextCellDestination){3, kArTextCellScreen_Composited, 0x5800},
-      kTextPalette));
+      &kTextPalette));
   CHECK(report_frame.snapshot_count == 1);
   CHECK(report_frame.snapshots[0].native_preserve_count == 1);
   CHECK(report_frame.snapshots[0].native_preserves[0].row == 11);
@@ -822,9 +835,9 @@ int main(void) {
   CHECK(ActRaiserLocalizationComposeState_Process(
       &state, &event, ResolveInlineObject, NULL, error, sizeof(error)));
   snapshot = ActRaiserLocalizationComposeState_Find(&state, 6);
-  CHECK(snapshot && snapshot->inline_object_count == 1);
-  CHECK(snapshot && snapshot->inline_objects[0].kind ==
-        kArLocalizationInlineObject_StatusLife);
+  CHECK(snapshot && snapshot->text.inline_object_count == 1);
+  CHECK(snapshot && snapshot->text.inline_objects[0].kind ==
+                        kArLocalizationInlineObject_StatusLife);
   ArLocalizationFrame frame;
   ArLocalizationFrame_Reset(&frame);
   CHECK(ArLocalizationFrame_SetFont(
@@ -833,7 +846,7 @@ int main(void) {
   CHECK(ActRaiserLocalizationComposeState_AppendFrame(
       &state, &frame,
       (ArTextCellDestination){3, kArTextCellScreen_Composited, 0x5800},
-      kTextPalette));
+      &kTextPalette));
   CHECK(frame.inline_object_count == 1);
   CHECK(frame.snapshots[0].inline_object_count == 1);
 

@@ -1246,17 +1246,6 @@ static int VisibleSectionCount(void) {
 }
 
 static const MenuSection *ActiveSection(void) {
-  if (s_section < 0) s_section = 0;
-  if (s_section >= kSectionCount) s_section = kSectionCount - 1;
-  /* Never leave the cursor parked on a section that has just collapsed: turning
-   * debug settings off while standing in the layer editor must move focus out,
-   * not render a hidden section. Same rule ActiveTabIndex applies to tabs. */
-  if (SectionHidden(s_section)) {
-    for (int i = 1; i <= kSectionCount; i++) {
-      int candidate = (s_section + i) % kSectionCount;
-      if (!SectionHidden(candidate)) { s_section = candidate; break; }
-    }
-  }
   return &kSections[s_section];
 }
 
@@ -1283,13 +1272,28 @@ static int VisibleTabCount(int section) {
   return count < 1 ? 1 : count;
 }
 
-static int ActiveTabIndex(void) {
+/* Normalize only at explicit refresh/transition points. Queries below read
+ * the selected section and tab without changing navigation or settings. */
+static bool NormalizeNavigation(void) {
+  const int previous_section = s_section;
+  if (s_section < 0)
+    s_section = 0;
+  if (s_section >= kSectionCount)
+    s_section = kSectionCount - 1;
+  if (SectionHidden(s_section)) {
+    for (int i = 1; i <= kSectionCount; i++) {
+      int candidate = (s_section + i) % kSectionCount;
+      if (!SectionHidden(candidate)) {
+        s_section = candidate;
+        break;
+      }
+    }
+  }
   const MenuSection *section = ActiveSection();
-  int tab = s_tab[s_section];
+  const int previous_tab = s_tab[s_section];
+  int tab = previous_tab;
   if (tab < 0) tab = 0;
   if (tab >= section->tab_count) tab = section->tab_count - 1;
-  /* Never leave the cursor parked on a collapsed tab: if debug settings were
-   * turned off while it was there, slide to the next visible tab. */
   if (RawTabHidden(s_section, tab)) {
     for (int i = 1; i <= section->tab_count; i++) {
       int candidate = (tab + i) % section->tab_count;
@@ -1300,8 +1304,10 @@ static int ActiveTabIndex(void) {
     }
   }
   s_tab[s_section] = tab;
-  return tab;
+  return s_section != previous_section || tab != previous_tab;
 }
+
+static int ActiveTabIndex(void) { return s_tab[s_section]; }
 
 /* Position of the active tab among the visible ones — the index the tab bar
  * and the test navigation count in, since hidden tabs are not shown. */
@@ -1317,18 +1323,10 @@ static const MenuTab *ActiveTab(void) {
   return &ActiveSection()->tabs[ActiveTabIndex()];
 }
 
-/* A paging tab owns a real setting (save_editor_page / input_bind_page) that
- * Settings_IsMenuVisible filters rows against. Push the tab's value into it
- * before anything enumerates rows, so the row list and the highlighted tab
- * can never disagree.
- *
- * Deliberately a direct store rather than Settings_SetLong: row enumeration
- * happens inside SettingsOverlay_Render, and the normal mutation API invokes
- * the full host change observer. These fields are plain in-range enum selectors
- * with no callback or restart semantics, so changing them directly keeps the
- * tab and its row traversal in one operation. A later normal settings save
- * includes the selector; tab movement itself does not invoke callbacks or
- * write the settings file. */
+/* A page transition owns these in-range enum selectors. They have no change
+ * callbacks or restart semantics; synchronizing them here does not save the
+ * settings file. Refresh calls this before building the visible row snapshot.
+ */
 static void SyncActiveTabPage(void) {
   const MenuTab *tab = ActiveTab();
   if (!tab->page_key) return;
@@ -1366,73 +1364,61 @@ typedef struct SettingMenuRow {
   SettingGameChangeKind heading;
 } SettingMenuRow;
 
-static bool ActiveTabUsesGameChangeGroups(void) {
-  return ActiveTab()->category == kSettingCat_Enhancements;
-}
+enum {
+  kSettingMenuGroupCount =
+      sizeof(kGameChangeGroupOrder) / sizeof(kGameChangeGroupOrder[0]),
+  kSettingMenuRowCapacity = kSettingsMaxDescriptors + kSettingMenuGroupCount,
+};
+static SettingMenuRow s_registry_rows[kSettingMenuRowCapacity];
+static int s_registry_row_count;
 
-static int GameChangeSettingCount(SettingGameChangeKind kind) {
-  int count = 0;
-  for (int i = 0; i < g_setting_desc_count; i++) {
-    const SettingDesc *desc = &g_setting_descs[i];
-    if (RowBelongsToActiveTab(desc) && desc->game_change_kind == kind) count++;
-  }
-  return count;
-}
-
-static int RegistryMenuRowCount(void) {
-  int count = 0;
-  if (!ActiveTabUsesGameChangeGroups()) {
-    for (int i = 0; i < g_setting_desc_count; i++)
-      if (RowBelongsToActiveTab(&g_setting_descs[i])) count++;
-    return count;
-  }
-
-  for (size_t group = 0;
-       group < sizeof(kGameChangeGroupOrder) / sizeof(kGameChangeGroupOrder[0]);
-       group++) {
-    int settings = GameChangeSettingCount(kGameChangeGroupOrder[group]);
-    if (settings) count += 1 + settings;  /* heading + settings */
-  }
-  /* Keep a malformed future descriptor reachable instead of silently dropping
-   * it. The settings contract test rejects this state, but the release menu
-   * remains fail-open if a downstream build omits the classification. */
-  count += GameChangeSettingCount(kSettingGameChange_None);
-  return count;
-}
-
-static SettingMenuRow RegistryMenuRowAt(int index) {
-  SettingMenuRow none = {0};
-  if (index < 0) return none;
-  if (!ActiveTabUsesGameChangeGroups()) {
+/* Build once per refresh, in display order. Count, selection and drawing all
+ * consume this same list. Each descriptor appears at most once, plus at most
+ * one heading per group, so the registry's compile-time bound also covers it.
+ */
+static void RebuildRegistryMenuRows(void) {
+  s_registry_row_count = 0;
+  if (ActiveSectionIsCustom())
+    return;
+  if (ActiveTab()->category != kSettingCat_Enhancements) {
     for (int i = 0; i < g_setting_desc_count; i++) {
       const SettingDesc *desc = &g_setting_descs[i];
-      if (!RowBelongsToActiveTab(desc)) continue;
-      if (index-- == 0) return (SettingMenuRow){ .desc = desc };
+      if (RowBelongsToActiveTab(desc))
+        s_registry_rows[s_registry_row_count++] =
+            (SettingMenuRow){.desc = desc};
     }
-    return none;
+    return;
   }
-
-  for (size_t group = 0;
-       group < sizeof(kGameChangeGroupOrder) / sizeof(kGameChangeGroupOrder[0]);
-       group++) {
+  for (int group = 0; group < kSettingMenuGroupCount; group++) {
     const SettingGameChangeKind kind = kGameChangeGroupOrder[group];
-    if (!GameChangeSettingCount(kind)) continue;
-    if (index-- == 0) return (SettingMenuRow){ .heading = kind };
+    bool heading_added = false;
     for (int i = 0; i < g_setting_desc_count; i++) {
       const SettingDesc *desc = &g_setting_descs[i];
       if (!RowBelongsToActiveTab(desc) || desc->game_change_kind != kind)
         continue;
-      if (index-- == 0) return (SettingMenuRow){ .desc = desc };
+      if (!heading_added) {
+        s_registry_rows[s_registry_row_count++] =
+            (SettingMenuRow){.heading = kind};
+        heading_added = true;
+      }
+      s_registry_rows[s_registry_row_count++] = (SettingMenuRow){.desc = desc};
     }
   }
+  /* Keep unclassified descriptors reachable in downstream builds. The
+   * settings contract test rejects this state in the shipped registry. */
   for (int i = 0; i < g_setting_desc_count; i++) {
     const SettingDesc *desc = &g_setting_descs[i];
-    if (!RowBelongsToActiveTab(desc) ||
-        desc->game_change_kind != kSettingGameChange_None)
-      continue;
-    if (index-- == 0) return (SettingMenuRow){ .desc = desc };
+    if (RowBelongsToActiveTab(desc) &&
+        desc->game_change_kind == kSettingGameChange_None)
+      s_registry_rows[s_registry_row_count++] = (SettingMenuRow){.desc = desc};
   }
-  return none;
+}
+
+static int RegistryMenuRowCount(void) { return s_registry_row_count; }
+
+static SettingMenuRow RegistryMenuRowAt(int index) {
+  return index >= 0 && index < s_registry_row_count ? s_registry_rows[index]
+                                                    : (SettingMenuRow){0};
 }
 
 /* Row-name suffix for SettingsOverlay_SelectedKey, so a test can navigate to
@@ -1564,7 +1550,6 @@ static int TabSettingRowCount(void) {
     LayerMenuRow rows[kLayerMenuRowMax];
     return LayerMenuRows(rows, kLayerMenuRowMax);
   }
-  SyncActiveTabPage();
   return RegistryMenuRowCount();
 }
 
@@ -1617,7 +1602,6 @@ static const SettingDesc *SelectedDesc(void) {
    * descriptor 3. Keep this guard even though callers also branch earlier; a
    * missed branch must not let a custom row edit an unrelated setting. */
   if (ActiveSectionIsCustom()) return NULL;
-  SyncActiveTabPage();
   return RegistryMenuRowAt(s_row).desc;
 }
 
@@ -1658,6 +1642,7 @@ static void PersistChange(SettingChangeResult result) {
 }
 
 static void SaveAcceptedChange(SettingChangeResult result) {
+  SettingsOverlay_Refresh();
   if (result <= kSettingChange_Unchanged) {
     SetStatus(result == kSettingChange_Rejected ? Ui("overlay.status.not_editable") : Ui("overlay.status.unchanged"));
     return;
@@ -2169,9 +2154,9 @@ static void ResetSelectedValue(void) {
 static void MoveSection(int direction) {
   EndValueHold();
   ClearSectionResetArm();
-  /* Step over hidden sections rather than landing on one. The loop is bounded by
-   * the section count and ActiveSection() guarantees at least one is visible, so
-   * it always terminates on a real section. */
+  /* Step over hidden sections rather than landing on one. The loop is bounded
+   * by the section count and the menu always has at least one visible section,
+   * so it always terminates on a real section. */
   int step = direction < 0 ? -1 : 1;
   for (int i = 0; i < kSectionCount; i++) {
     s_section = (s_section + step + kSectionCount) % kSectionCount;
@@ -2181,7 +2166,7 @@ static void MoveSection(int direction) {
   s_top_row = 0;
   s_tab_scroll = 0;
   s_layer_plane = -1;
-  SyncActiveTabPage();
+  SettingsOverlay_Refresh();
   EnsureSelectedNavVisible();
 }
 
@@ -2223,6 +2208,27 @@ static void SkipUnselectableRow(void) {
    * row is drawn as a notice rather than as a control. */
 }
 
+void SettingsOverlay_Refresh(void) {
+  if (!s_open)
+    return;
+  if (NormalizeNavigation()) {
+    EndValueHold();
+    StopEditing();
+    ClearSectionResetArm();
+    s_capture_desc = NULL;
+    s_row = 0;
+    s_top_row = 0;
+    s_tab_scroll = 0;
+    s_layer_plane = -1;
+  }
+  SyncActiveTabPage();
+  RebuildRegistryMenuRows();
+  EnsureSelectedNavVisible();
+  EnsureSelectedRowVisible();
+  SkipUnselectableRow();
+  EnsureSelectedRowVisible();
+}
+
 static void MoveRow(int direction) {
   int count = TabRowCount();
   if (count <= 0) return;
@@ -2260,7 +2266,7 @@ static void MoveTab(int direction) {
   s_layer_plane = -1;
   StopEditing();
   s_capture_desc = NULL;
-  SyncActiveTabPage();
+  SettingsOverlay_Refresh();
   SkipUnselectableRow();
   EnsureSelectedRowVisible();
 }
@@ -2270,7 +2276,7 @@ static void EnterSection(void) {
   s_submenu_open = true;
   s_row = 0;
   s_top_row = 0;
-  SyncActiveTabPage();
+  SettingsOverlay_Refresh();
   SkipUnselectableRow();
   EnsureSelectedRowVisible();
 }
@@ -2366,7 +2372,7 @@ void SettingsOverlay_Open(void) {
   s_capture_desc = NULL;
   s_submenu_open = false;
   s_open = true;
-  SyncActiveTabPage();
+  SettingsOverlay_Refresh();
   s_status[0] = 0;
   fprintf(stderr, "[settings-menu] opened\n");
 }
@@ -2414,12 +2420,6 @@ bool SettingsOverlay_GetNavigationState(int *selected_ordinal,
                                         int *visible_rows,
                                         int *total_rows) {
   if (!s_open) return false;
-  /* ActiveSection() is what slides the cursor off a section that has just
-   * collapsed, so it must run before the position is read -- otherwise a caller
-   * that turns debug settings off and immediately queries would be told the
-   * cursor is still on a section the nav column no longer draws. */
-  (void)ActiveSection();
-  EnsureSelectedNavVisible();
   /* Positions among the VISIBLE sections, matching what the column draws and
    * what top_ordinal counts in.
    *
@@ -2470,7 +2470,9 @@ static void TickHold(uint64_t now_ms) {
 }
 
 void SettingsOverlay_Tick(void) {
+  SettingsOverlay_Refresh();
   TickHold(HostClock_Milliseconds());
+  SettingsOverlay_Refresh();
 }
 
 long SettingsOverlay_HoldStepForTest(const struct SettingDesc *desc,
@@ -2479,7 +2481,9 @@ long SettingsOverlay_HoldStepForTest(const struct SettingDesc *desc,
 }
 
 void SettingsOverlay_TickAtForTest(uint64_t now_ms) {
+  SettingsOverlay_Refresh();
   TickHold(now_ms);
+  SettingsOverlay_Refresh();
 }
 
 /* Logical menu commands. Both the keyboard path and the gamepad path funnel
@@ -2623,6 +2627,7 @@ bool SettingsOverlay_IsCapturing(void) {
 }
 
 bool SettingsOverlay_HandleCaptureEvent(const SDL_Event *event) {
+  SettingsOverlay_Refresh();
   if (!SettingsOverlay_IsCapturing() || !event) return false;
 
   /* Escape always aborts, whatever device the row belongs to — otherwise a
@@ -2661,6 +2666,7 @@ bool SettingsOverlay_HandleCaptureEvent(const SDL_Event *event) {
 
 bool SettingsOverlay_HandleGamepadEvent(const SDL_Event *event) {
   if (!s_open || !event) return false;
+  SettingsOverlay_Refresh();
   /* Before capture, so a pad press while reading pages the manual instead of
    * being interpreted as menu navigation underneath it. */
   if (ManualIsOpen() && s_manual_hooks.handle_pad &&
@@ -2753,6 +2759,7 @@ static bool MenuNavForBoundKey(SDL_Keycode key, MenuNav *out) {
 
 bool SettingsOverlay_HandleKey(SDL_Keycode key, bool pressed, bool repeat) {
   if (!s_open) return false;
+  SettingsOverlay_Refresh();
   /* The reader is modal while it is up, so it gets first refusal on every key.
    * It declines exactly the ones that must never be captured -- F1, which closes
    * the menu outright -- so there is always a key that exits, whatever state the
@@ -4186,7 +4193,6 @@ static void DrawMenu(const MenuLayout *layout) {
                   chrome.bottom_height);
 
   const MenuSection *section = ActiveSection();
-  SyncActiveTabPage();
 
   /* The host clock is monotonic and 64-bit, so a direct comparison is exact
    * over any realistic session. */
@@ -4292,6 +4298,7 @@ static void DrawLayerPalettePicker(const MenuLayout *layout) {
 
 
 void SettingsOverlay_Render(ArRenderRectI game_viewport) {
+  SettingsOverlay_Refresh();
   if (!s_open || !s_render_device ||
       !ArRenderTexture_IsValid(s_font_textures[kText_Normal])) return;
   int output_width = 0;

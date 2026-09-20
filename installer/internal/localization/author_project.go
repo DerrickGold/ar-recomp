@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"unicode/utf8"
+
+	"github.com/DerrickGold/ar-recomp/installer/internal/texttemplate"
 )
 
 // AuthorProject contains private author metadata separately from the runtime
@@ -148,26 +150,40 @@ func (p *AuthorProject) EditMessage(id, body string, status TranslationStatus) (
 }
 
 func resolvedAuthorOperations(w *AuthorWorkspace, id string) ([]AuthorOperation, error) {
+	message, err := resolvedAuthorMessage(w, id)
+	return message.Operations, err
+}
+
+func resolvedAuthorMessage(w *AuthorWorkspace, id string) (AuthorMessage, error) {
+	requested := id
 	seen := map[string]bool{}
 	for {
 		if seen[id] {
-			return nil, fmt.Errorf("cyclic alias %s", id)
+			return AuthorMessage{}, fmt.Errorf("cyclic alias %s", id)
 		}
 		seen[id] = true
 		i, ok := w.messageScript[id]
 		if !ok {
-			return nil, fmt.Errorf("missing alias target %s", id)
+			return AuthorMessage{}, fmt.Errorf("missing alias target %s", id)
 		}
 		s := w.scripts[i]
 		m := s.messages[s.byID[id]]
 		if m.Alias == "" {
-			return authorPresentation(m.Operations), nil
+			m.ID = requested
+			m.Operations = authorPresentation(m.Operations)
+			return m, nil
 		}
 		id = m.Alias
 	}
 }
 func presentationDigest(ops []AuthorOperation) string {
-	data, _ := json.Marshal(authorPresentation(ops))
+	// This is the unchanged-source publication gate, not a render cache key.
+	// Styling alone must not turn original source prose into a translation.
+	wording := append([]AuthorOperation{}, ops...)
+	for i := range wording {
+		wording[i].Style = texttemplate.Style{}
+	}
+	data, _ := json.Marshal(authorPresentation(wording))
 	return fmt.Sprintf("%x", sha256.Sum256(data))
 }
 
@@ -187,35 +203,54 @@ type InstallationReport struct {
 	Coverage AuthorCoverageReport `json:"coverage"`
 	Messages int                  `json:"messages"`
 	Fallback int                  `json:"fallback"`
+	Upgrade  *AuthorUpgradeReport `json:"upgrade,omitempty"`
 }
 
 // Installation is local use, not a publication. Preserve every supplied
-// message (including WIP/unreviewed text), font and notice. The installer omits
-// author metadata/progress; export still requires its separate publication gate.
+// message (including WIP/unreviewed text), font and notice, upgrading v1 styling
+// in a detached v2 snapshot with the same ID. The source project is unchanged.
+// Export still requires its separate publication gate.
 func (p *AuthorProject) Installation() (*AuthorProject, InstallationReport, error) {
 	var report InstallationReport
-	if p.info.Origin == "native-source" || strings.EqualFold(p.pack.manifest.metadata.ID, "native-us") {
-		return nil, report, fmt.Errorf("native sources are references; create a translation to install a separate language pack")
+	if err := p.checkInstallable(); err != nil {
+		return nil, report, err
 	}
-	if p.pack.manifest.metadata.SourceProfile != "us" || p.pack.manifest.metadata.Target != "us-runtime" {
-		return nil, report, fmt.Errorf("reference-only regional sources cannot be installed as game translations")
-	}
-	for _, font := range append([]string{p.pack.manifest.fonts.Primary}, p.pack.manifest.fonts.Fallback...) {
-		if strings.HasPrefix(font, "builtin:") && font != "builtin:actraiser-sans" {
-			return nil, report, fmt.Errorf("unsupported built-in font dependency: %s", font)
+	next := p.clone()
+	if p.pack.manifest.Version() == 1 {
+		pack, upgrade, err := upgradeAuthorPackV2(p.pack)
+		if err != nil {
+			return nil, report, err
 		}
+		next.pack = pack
+		report.Upgrade = &upgrade
 	}
-	report.Messages = len(p.pack.workspace.messageScript)
-	report.Coverage = p.Coverage()
+	report.Messages = len(next.pack.workspace.messageScript)
+	report.Coverage = next.Coverage()
 	refs, _ := AuthorReferences("us")
 	for _, ref := range refs {
-		if _, present := p.pack.workspace.messageScript[ref.ID]; ref.NativeInProfile && !present {
+		if _, present := next.pack.workspace.messageScript[ref.ID]; ref.NativeInProfile && !present {
 			report.Fallback++
 		}
 	}
-	next := p.clone()
 	next.installationReady = true
 	return next, report, nil
+}
+
+// Runtime archive discovery only validates. It must retain v1 so the game can
+// show upgrade instructions; conversion belongs to an explicit Builder install.
+func (p *AuthorProject) checkInstallable() error {
+	if p.info.Origin == "native-source" || strings.EqualFold(p.pack.manifest.metadata.ID, "native-us") {
+		return fmt.Errorf("native sources are references; create a translation to install a separate language pack")
+	}
+	if p.pack.manifest.metadata.SourceProfile != "us" || p.pack.manifest.metadata.Target != "us-runtime" {
+		return fmt.Errorf("reference-only regional sources cannot be installed as game translations")
+	}
+	for _, font := range p.pack.manifest.fonts.References() {
+		if strings.HasPrefix(font, "builtin:") && font != "builtin:actraiser-sans" {
+			return fmt.Errorf("unsupported built-in font dependency: %s", font)
+		}
+	}
+	return nil
 }
 
 // Publication strips comments/private metadata, resolves aliases independently
@@ -241,7 +276,7 @@ func (p *AuthorProject) Publication(options PublicationOptions) (*AuthorProject,
 	if len(p.pack.fonts) > 0 && len(p.notices) == 0 {
 		return fail("include redistribution/license notices for local fonts")
 	}
-	for _, font := range append([]string{p.pack.manifest.fonts.Primary}, p.pack.manifest.fonts.Fallback...) {
+	for _, font := range p.pack.manifest.fonts.References() {
 		if strings.HasPrefix(font, "builtin:") && font != "builtin:actraiser-sans" {
 			return fail("unsupported built-in font dependency: " + font)
 		}
@@ -257,15 +292,15 @@ func (p *AuthorProject) Publication(options PublicationOptions) (*AuthorProject,
 		if view.Status == TranslationNotStarted || view.Status == TranslationWIP && !options.IncludeWIP {
 			continue
 		}
-		ops, err := resolvedAuthorOperations(p.pack.workspace, id)
+		message, err := resolvedAuthorMessage(p.pack.workspace, id)
 		if err != nil {
 			return nil, report, err
 		}
-		if p.info.Baseline[id] != "" && p.info.Baseline[id] == presentationDigest(ops) {
+		if p.info.Baseline[id] != "" && p.info.Baseline[id] == presentationDigest(message.Operations) {
 			report.UnchangedSource++
 			continue
 		}
-		messages = append(messages, AuthorMessage{ID: id, Operations: ops})
+		messages = append(messages, message)
 		report.Included++
 		if view.Status == TranslationWIP {
 			report.WIP++
@@ -285,7 +320,7 @@ func (p *AuthorProject) Publication(options PublicationOptions) (*AuthorProject,
 	if len(messages) == 0 {
 		return fail("no reviewed translations to publish; save an edited message as WIP or Done")
 	}
-	script, err := EmitAuthorScript(messages, "text/translation.artext")
+	script, err := EmitAuthorScriptVersion(messages, "text/translation.artext", p.pack.manifest.Version(), p.pack.Treatments()...)
 	if err != nil {
 		return nil, report, err
 	}
@@ -295,7 +330,7 @@ func (p *AuthorProject) Publication(options PublicationOptions) (*AuthorProject,
 	if _, err := ValidateAuthorScripts("us", "complete", script); err == nil {
 		metadata.Coverage = "complete"
 	}
-	manifest, err := NewPackManifest(metadata, p.pack.manifest.Fonts(), []string{script.path})
+	manifest, err := NewPackManifestVersion(metadata, p.pack.manifest.Fonts(), []string{script.path}, p.pack.manifest.Version())
 	if err != nil {
 		return nil, report, err
 	}

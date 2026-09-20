@@ -40,6 +40,17 @@ static ActRaiserLocalizationComposeObservation Compose(uint32_t source,
 }
 
 int main(void) {
+  ActRaiserLocalizationComposeObservation copyright = Compose(0x02A9DE, 0x1700);
+  CHECK(!ActRaiserLocalizationRoute_ResolveCompose(&copyright));
+  copyright.map_number = kActRaiserNonActionMap_Title;
+  const ActRaiserLocalizationComposeRoute *footer =
+      ActRaiserLocalizationRoute_ResolveCompose(&copyright);
+  CHECK(footer && !strcmp(footer->semantic_id, "title.copyright"));
+  CHECK(footer && footer->region.row == 23 && footer->region.rows == 5 &&
+        footer->region.column == 0 && footer->region.columns == 32);
+  copyright.destination = 0x120C;
+  CHECK(!ActRaiserLocalizationRoute_ResolveCompose(&copyright));
+
   /* Modal ownership is independent of numeric surface IDs, and requires the
    * real producer continuation. The action title shares this destination. */
   ActRaiserLocalizationComposeObservation sound = Compose(0x029871, 0x080B);

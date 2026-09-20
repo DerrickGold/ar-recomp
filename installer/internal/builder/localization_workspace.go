@@ -39,6 +39,7 @@ type localizationWork struct {
 	localizationStateData
 	root      string
 	fontProbe lk.FontCoverageProbe
+	preview   localizationPlayback
 }
 
 func (app *application) localizationSource() *localizationSourceCache {
@@ -82,7 +83,7 @@ func (app *application) localizationSnapshot() (*localizationWork, error) {
 		}
 	}
 	s.mu.Lock()
-	work := &localizationWork{localizationStateData: s.localizationStateData, root: app.localizationRoot(), fontProbe: app.probeLocalizationFonts}
+	work := &localizationWork{localizationStateData: s.localizationStateData, root: app.localizationRoot(), fontProbe: app.probeLocalizationFonts, preview: app.playbackLocalization}
 	s.mu.Unlock()
 	return work, nil
 }
