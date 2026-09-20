@@ -498,6 +498,36 @@ async function openEditorMessage(s,view=editorMessage(),select=true,project=proj
   if(select)await s.node("tree").querySelector("button").fire("click");
 }
 
+test("save adopts progress and reports whether the installed copy was updated",async()=>{
+  for(const [update,key] of [
+    [{installed:false,updated:false,enabled:false},"saved_feedback"],
+    [{installed:true,updated:true,enabled:true},"saved_installed"],
+    [{installed:true,updated:true,enabled:false},"saved_disabled"],
+    [{installed:true,updated:false,enabled:true,error:"Font check <failed>"},"saved_update_failed"]
+  ]){
+    const s=setupEditor();await openEditorMessage(s);
+    const body=nativeBody.replace("Invented source.","My saved translation.");
+    s.node("body").value=body;await s.node("body").fire("input");
+    const next=projectSnapshot();next.project.revision="saved-revision";next.installationUpdate=update;
+    const view=editorMessage();view.message.body=body;
+    s.respond((endpoint,data)=>{
+      if(endpoint==="save"){assert.equal(data.body,body);return next;}
+      if(endpoint==="projects"||endpoint==="catalog")return [];
+      if(endpoint==="tree")return [{id:messageID,label:"Invented message",is_message:true,done:0,wip:1}];
+      if(endpoint==="message")return view;
+      throw Error("unexpected endpoint "+endpoint);
+    });
+    await s.node("save-progress").fire("click");
+    assert.equal(s.context.window.localizationHasEdits(),false);
+    assert.equal(s.node("body").value,body);
+    assert.equal(s.node("save-progress").disabled,true);
+    for(const locale of ["en","fr","de","ja"]){
+      s.picker.value=locale;await s.picker.fire("change");
+      assert.equal(s.node("feedback").textContent,s.ui.text("builder.language."+key,update.error?{detail:update.error}:{}));
+    }
+  }
+});
+
 test("editor language switches retain a real message, metadata, notice and font draft",async()=>{
   const s=setupEditor();await openEditorMessage(s);
   const body="@anchor reset_text_cursor.00\nSir {player_name}, most excellent!\n@anchor yield.01\n@end\n";

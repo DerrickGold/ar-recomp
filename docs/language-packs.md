@@ -15,7 +15,7 @@ The recommended Workshop flow is the same on macOS, Linux and Windows:
 3. Review its language, credits and any conflicts, then choose **Import & install**.
    For v1 packs, a notice explains that the installed copy will automatically
    upgrade to v2. Your original archive and saved project stay unchanged.
-   Replacing a saved project or installed pack requires explicit confirmation.
+   Importing over a saved project or installed pack requires explicit confirmation.
 4. Use the installed-pack checklist in **Languages** to toggle packs on or off
    without deleting them.
 5. Restart the game and select the enabled package in the system overlay's
@@ -161,10 +161,15 @@ Editable projects and the Native US source are untouched. With the game closed,
 you may remove `.arlang-cache/` to reclaim space; needed snapshots regenerate.
 Do not remove `.arlang-state/` unless you intend to reset archive availability.
 
-Workshop draft installations stay unpacked because they may include unfinished
-or unchanged source text. To replace an archive with a workshop draft, uninstall
-the archive first. To distribute an update, export a reviewed `.arlang` and
-replace the archive instead. Installing someone else's publication does not
+Workshop's first installation creates an unpacked snapshot. After that,
+**Save progress** (including Cmd+S / Ctrl+S) automatically updates the installed
+copy with the same package ID, whether it is a folder or an archive. Disabled
+packs stay disabled; uninstalled packs are not reinstalled. All supplied draft
+messages are retained. Restart the game to load the new copy. A failed update
+leaves your Workshop progress saved and shows an explanation.
+
+To distribute an update, use **Export for sharing** to create a reviewed `.arlang`.
+Installing someone else's publication does not
 ask you to claim redistribution rights or filter its WIP content again.
 
 ## Author with a text editor or AI

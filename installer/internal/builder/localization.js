@@ -791,7 +791,7 @@
     }
     await projects();
     await tree();
-    const installed = await json("installation", identity());
+    const installed = next.installationUpdate || await json("installation", identity());
     installedExists = !!installed.installed;
     label("install-state",
       installed.installed ? "builder.language.existing_install" : "builder.language.not_installed");
@@ -1467,7 +1467,14 @@
         throw error;
       }
       await adopt(next, true);
-      feedbackKey("builder.language.saved_feedback");
+      const update = next.installationUpdate;
+      if (update?.error)
+        feedbackKey("builder.language.saved_update_failed", {detail: update.error}, true);
+      else if (update?.updated)
+        feedbackKey(update.enabled ? "builder.language.saved_installed" :
+                                     "builder.language.saved_disabled");
+      else
+        feedbackKey("builder.language.saved_feedback");
     });
   }
   for (const id of ["save", "save-progress"])

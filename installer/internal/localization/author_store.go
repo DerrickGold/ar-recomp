@@ -425,6 +425,13 @@ func installAuthorProject(directory string, project *AuthorProject, replace bool
 		return "", err
 	}
 	defer unlock()
+	return writeInstalledProject(root, project, replace, expectedRevision)
+}
+
+// The caller holds the directory's author lock through validation and manifest
+// publication, including any checks against a previously inspected install.
+func writeInstalledProject(root string, project *AuthorProject, replace bool, expectedRevision uint64) (string, error) {
+	pack := project.pack
 	manifestPath := filepath.Join(root, "pack.ini")
 	if name, _, err := installedManifest(root); err == nil {
 		// Updating a disabled pack preserves the user's availability choice.

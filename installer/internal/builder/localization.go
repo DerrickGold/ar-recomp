@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -665,11 +664,15 @@ func (work *localizationWork) mutateLocalization(w *localizationReply, r *http.R
 		return nil
 	case "installation":
 		path := filepath.Join(work.root, "packs", p.Pack().Manifest().Metadata().ID, "pack.ini")
-		installed, statErr := lk.InspectInstalledPack(filepath.Join(work.root, "packs"), p.Pack().Manifest().Metadata().ID)
-		if statErr != nil && !os.IsNotExist(statErr) {
+		installed, statErr := lk.FindInstalledPack(filepath.Join(work.root, "packs"), p.Pack().Manifest().Metadata().ID)
+		if statErr != nil {
 			return statErr
 		}
-		w.json(200, map[string]any{"installed": statErr == nil, "enabled": installed.Enabled, "path": path})
+		enabled := installed != nil && installed.Enabled
+		if installed != nil && installed.Archive {
+			path = filepath.Join(work.root, "packs", installed.Key)
+		}
+		w.json(200, map[string]any{"installed": installed != nil, "enabled": enabled, "path": path})
 		return nil
 	case "install", "installation-check":
 		prepared, report, err := p.Installation()
@@ -765,7 +768,11 @@ func (work *localizationWork) mutateLocalization(w *localizationReply, r *http.R
 	if err = work.saveLocalization(next, p.ProjectRevision()); err != nil {
 		return err
 	}
-	w.json(200, work.localizationState())
+	state := work.localizationState()
+	if endpoint == "save" {
+		state["installationUpdate"] = work.refreshSavedLocalization(r.Context(), next)
+	}
+	w.json(200, state)
 	return nil
 }
 

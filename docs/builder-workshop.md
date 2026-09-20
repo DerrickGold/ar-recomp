@@ -130,7 +130,7 @@ test is still installed and still readable in the workshop.
 To convert a text PDF, export or rasterise it to one baseline JPEG per page at a
 single page size, then recombine those images into a PDF.
 
-## Language projects are not installed packs
+## Save and test language projects
 
 Use **Languages → Add a language pack** to choose an `.arlang` file, or drop it
 into the Workshop from any section. Add one pack at a time; no unzipping is
@@ -139,17 +139,21 @@ needed. **Install a language pack** also opens this package-first flow, with
 (`.arproject`) and compatible legacy ZIPs have a secondary import option;
 **Advanced: unpacked language folder** retains **Choose folder…** and manual
 paths for authors. Selecting or dropping a package opens a preview only.
-Only **Import & install** writes the workshop copy and installs it. Matching
-package IDs require explicit replacement; a distinct ID lets you keep both.
+Choose **Import & install** to save the workshop copy and install it. Matching
+package IDs require explicit replacement during import; a distinct ID lets you keep both.
 
 Opening a saved project gives you an editable workshop copy. The editor's
 sticky toolbar has **Languages** and **Save progress**, with a visible
 saved/unsaved indicator. **Save progress** (or Cmd+S / Ctrl+S) saves pending
 message text, Not started / WIP / Done status, package details, notes, public
 notices and font dependencies together. Validation failure leaves all of those edits unsaved so you
-can correct them. This does not change the game.
+can correct them. If this package ID is already installed, saving also refreshes
+that game copy, preserving whether it is enabled or disabled. Restart the game
+to load the updated text. If the refresh fails, the editor keeps your saved
+progress and explains why the installed copy could not be updated.
 **Messages**, **Details & credits**, and **Fonts** are separate tabs; drafts survive switching.
-Use **Pack actions → Install in game**, then **Install for this game**. Local
+For the first installation, use **Pack actions → Install in game**, then
+**Install for this game**. Subsequent saves update it automatically. Local
 installation keeps every supplied message, including unfinished translations.
 It does not ask you to confirm redistribution rights or filter someone else's
 work. Those choices belong to **Export for sharing**, where publishers choose
