@@ -67,8 +67,8 @@
   }
   const playback = window.workshopPlayback?.create($("playback"), () => ({
     ...identity(), id: draft.selected, body: $("body").value,
-    status: $("message-status").value, saveFonts: draft.fontsDirty,
-    fonts: draftFonts(), fontUploads: draftFontUploads(),
+    status: $("message-status").value, saveFonts: fonts.dirty,
+    fonts: fonts.fonts(), fontUploads: fonts.uploads(),
     saveDetails: draft.detailsDirty, metadata: previewMetadata()
   }), message => feedback(message, true), () => {
     $("body").focus();
@@ -96,14 +96,13 @@
   // The server snapshot is replaced atomically after a successful request.
   let state = {project: null};
   let busy = false, loaded = false, closed = false;
-  let offset = 0, searchSnapshot = null, catalog = [], installedExists = false;
+  let offset = 0, searchSnapshot = null, installedExists = false;
   const flow = {
     kind: "home",
     phase: "choose",
     reviewPurpose: "install",
     installPath: "",
     editorTab: "messages",
-    importPreview: null,
   };
   const draft = {
     selected: "",
@@ -111,13 +110,31 @@
     messageDirty: false,
     detailsDirty: false,
     noticeDirty: false,
-    fontsDirty: false,
-    fontStack: [],
-    fontStacks: {},
-    fontRole: "body",
-    fontUploads: new Map(),
     saveFailure: "",
   };
+  const fonts = window.workshopLanguageFonts.create({
+    $, ui, phrase, option, keyedOption, feedbackKey,
+    onChange() {
+      playback?.invalidate();
+      draft.saveFailure = "";
+      saveIndicator();
+    },
+    onRender() {
+      populateStyleChoices();
+      readonly();
+    },
+  });
+  const library = window.workshopLanguageLibrary.create({
+    $, ui, label, contentLanguage, run, json, feedbackKey, openProject,
+    isBusy: () => busy, isClosed: () => closed,
+  });
+  const imports = window.workshopLanguageImport.create({
+    $, label, raw, feedback, feedbackKey, failure, json, run, submit, discard,
+    kind: () => flow.kind, isBusy: () => busy, isClosed: () => closed,
+    onPreviewChanged: workflowView,
+    beginInstall: beginImportInstallation,
+    onAccepted: adoptImportedProject,
+  });
   const expanded = new Set();
   const flowTitles = {
     install: "builder.language.flow_install",
@@ -167,7 +184,7 @@
       flow.kind !== "extract" && !(flow.kind === "create" && !state.sourceAvailable);
     $("create").hidden = flow.kind !== "create" || !state.sourceAvailable;
     $("import-source").hidden = !importing;
-    $("import-preview").hidden = !importing || !flow.importPreview;
+    $("import-preview").hidden = !importing || !imports.preview;
     $("clone").hidden = home || flow.phase !== "clone";
     $("workspace").hidden =
       home || !state.project || !["edit", "review", "installed"].includes(flow.phase);
@@ -197,7 +214,7 @@
     $("install-upgrade").hidden = flow.reviewPurpose !== "install" || state.project?.formatVersion !== 1;
     $("replace-install").closest("label").hidden =
       flow.reviewPurpose !== "install" || !installedExists;
-    syncImportPreview();
+    imports.render();
     saveIndicator();
   }
   function projectDestination() {
@@ -255,11 +272,10 @@
     draft.messageDirty = false;
     draft.detailsDirty = false;
     draft.noticeDirty = false;
-    draft.fontsDirty = false;
-    draft.fontUploads.clear();
+    fonts.clearDirty();
   }
   function hasEdits() {
-    return draft.messageDirty || draft.detailsDirty || draft.noticeDirty || draft.fontsDirty;
+    return draft.messageDirty || draft.detailsDirty || draft.noticeDirty || fonts.dirty;
   }
   function saveIndicator() {
     const native = state.project?.origin === "native-source";
@@ -340,9 +356,9 @@
       $(id).disabled = native;
     for (const el of $("font-stack").querySelectorAll("input,select,button"))
       el.disabled = native || busy || el.dataset.unavailable === "true";
-    $("font-add").disabled = native || busy || draft.fontStack.length >= 9;
+    $("font-add").disabled = native || busy || fonts.stackLength >= 9;
     saveIndicator();
-    syncImportPreview();
+    imports.render();
     updateInlineStyleAvailability();
   }
   async function run(action) {
@@ -397,147 +413,13 @@
     updateContentLanguage();
     label("fonts", "builder.editor.font_summary",
       {fonts: [p.fonts.primary, ...(p.fonts.fallback || [])].join(" → ")});
-    draft.fontRole = "body";
-    draft.fontStacks = Object.assign(Object.create(null), {body: [p.fonts.primary, ...(p.fonts.fallback || [])]});
-    for (const role of p.fonts.roles || []) draft.fontStacks[role.name] = [role.primary, ...(role.fallback || [])];
-    draft.fontStack = draft.fontStacks.body;
-    draft.fontUploads = new Map();
-    draft.fontsDirty = false;
-    $("font-report").replaceChildren();
-    renderFonts();
+    fonts.load(p.fonts);
     $("notices").replaceChildren(keyedOption("", "builder.editor.new_notice"));
     for (const name of Object.keys(p.notices).sort())
       $("notices").append(option(name, name));
     $("notice").reset();
     draft.detailsDirty = draft.noticeDirty = false;
   }
-  $("font-role").addEventListener("change", () => {
-    draft.fontRole = $("font-role").value;
-    draft.fontStack = draft.fontStacks[draft.fontRole];
-    renderFonts();
-  });
-  $("font-role-add").addEventListener("click", () => {
-    const name = $("font-role-name").value.trim();
-    if (!/^[a-z][a-z0-9_.-]*$/.test(name) || draft.fontStacks[name] || Object.keys(draft.fontStacks).length >= 9) {
-      feedback(ui.text("builder.playback.role_invalid"), true); return;
-    }
-    draft.fontStacks[name] = [...draft.fontStacks.body];
-    draft.fontRole = name; draft.fontStack = draft.fontStacks[name];
-    $("font-role-name").value = ""; fontChanged();
-  });
-  $("font-role-remove").addEventListener("click", () => {
-    if (draft.fontRole === "body") return;
-    delete draft.fontStacks[draft.fontRole];
-    draft.fontRole = "body"; draft.fontStack = draft.fontStacks.body; fontChanged();
-  });
-  function fontChanged() {
-    playback?.invalidate();
-    draft.fontsDirty = true;
-    draft.saveFailure = "";
-    for (const name of draft.fontUploads.keys())
-      if (!Object.values(draft.fontStacks).some(stack => stack.includes(name)))
-        draft.fontUploads.delete(name);
-    $("font-report").replaceChildren();
-    renderFonts();
-    saveIndicator();
-  }
-  function renderFonts() {
-    populateStyleChoices();
-    $("font-role").replaceChildren(...Object.keys(draft.fontStacks).map(name => option(name, name)));
-    $("font-role").value = draft.fontRole;
-    $("font-role-remove").disabled = draft.fontRole === "body";
-    const known = [...new Set([
-      "builtin:actraiser-sans", state.project?.fonts.primary,
-      ...(state.project?.fonts.fallback || []), ...draft.fontUploads.keys(), ...Object.values(draft.fontStacks).flat()
-    ].filter(Boolean))];
-    $("font-list").replaceChildren(...draft.fontStack.map((reference, index) => {
-      const row = document.createElement("li");
-      row.className = "loc-font-row";
-      const label = document.createElement("label");
-      label.append(phrase(
-        index ? "builder.editor.fallback_number" : "builder.editor.primary_font", {number: index}));
-      const select = document.createElement("select");
-      select.required = true;
-      select.append(keyedOption("", "builder.editor.choose_font"));
-      for (const name of known)
-        select.append(name === "builtin:actraiser-sans" ?
-            keyedOption(name, "builder.editor.bundled_font") :
-            option(name, name));
-      select.value = reference;
-      select.addEventListener("change", () => {
-        draft.fontStack[index] = select.value;
-        fontChanged();
-      });
-      label.append(select);
-      row.append(label);
-      if (draft.fontUploads.has(reference))
-        label.append(phrase("builder.editor.pending_font", {}, "small"));
-      const fileLabel = document.createElement("label");
-      fileLabel.append(phrase("builder.editor.choose_font_file"));
-      const file = document.createElement("input");
-      file.type = "file";
-      file.accept = ".ttf,.otf";
-      file.addEventListener("change", () => {
-        const chosen = file.files[0];
-        if (!chosen)
-          return;
-        if (!chosen.size || chosen.size > 64 * 1024 * 1024) {
-          feedbackKey("builder.editor.font_size_error", {}, true);
-          file.value = "";
-          return;
-        }
-        const path = "fonts/" + chosen.name;
-        draft.fontUploads.set(path, chosen);
-        draft.fontStack[index] = path;
-        fontChanged();
-      });
-      fileLabel.append(file);
-      row.append(fileLabel);
-      window.workshopFileInputs?.enhance(file);
-      const actions = document.createElement("div");
-      actions.className = "loc-row";
-      for (const [key, aria, emptyAria, offset] of [[
-             "builder.editor.move_up", "builder.editor.move_up_font", "builder.editor.move_up_slot",
-             -1
-           ],
-             [
-               "builder.editor.move_down", "builder.editor.move_down_font",
-               "builder.editor.move_down_slot", 1
-             ],
-             [
-               "builder.editor.remove", "builder.editor.remove_font", "builder.editor.remove_slot",
-               0
-             ]]) {
-        const button = phrase(key, {}, "button");
-        button.type = "button";
-        ui.attribute(
-          button, "aria-label", reference ? aria : emptyAria, {font: reference, number: index + 1});
-        button.dataset.unavailable =
-          String(offset ? index + offset < 0 || index + offset >= draft.fontStack.length :
-                          draft.fontStack.length === 1);
-        button.disabled = button.dataset.unavailable === "true";
-        button.addEventListener("click", () => {
-          if (offset)
-            [draft.fontStack[index], draft.fontStack[index + offset]] =
-              [draft.fontStack[index + offset], draft.fontStack[index]];
-          else
-            draft.fontStack.splice(index, 1);
-          fontChanged();
-        });
-        actions.append(button);
-      }
-      row.append(actions);
-      return row;
-    }));
-    readonly();
-  }
-  $("font-add").addEventListener("click", () => {
-    if (draft.fontStack.length < 9) {
-      draft.fontStack.push("");
-      fontChanged();
-      $("font-list").lastElementChild.querySelector("select").focus();
-    }
-  });
   $("font-check").addEventListener("click", async () => {
     if (hasEdits())
       await saveProgress();
@@ -546,24 +428,7 @@
     return run(async () => {
       const sample = $("font-sample").value;
       const result = await json("font-coverage", {...identity(), samples: sample ? [sample] : []});
-      const summary = phrase(
-        result.complete ? "builder.editor.coverage_complete" : "builder.editor.coverage_missing",
-        {count: result.complete ? result.scalars : result.missingCount}, "p");
-      const list = document.createElement("ul");
-      for (const gap of result.missing) {
-        const item = document.createElement("li");
-        item.textContent = gap.codepoint + " “" + gap.character + "” — " +
-          gap.locations
-            .map(loc =>
-                   loc.messageID ? loc.messageID + " · " + loc.source + ":" + loc.line : loc.source)
-            .join("; ");
-        list.append(item);
-      }
-      const values = phrase(result.dynamicValues.length ? "builder.editor.unresolved_values" :
-                                                          "builder.editor.no_unresolved_values",
-        {values: result.dynamicValues.join(", ")}, "p");
-      values.className = "loc-help";
-      $("font-report").replaceChildren(summary, list, values);
+      fonts.showCoverage(result);
     });
   });
   async function projects() {
@@ -592,165 +457,8 @@
       state.reference.id :
       "";
     if (flow.kind === "home")
-      await loadCatalog();
+      await library.refresh();
   }
-  async function loadCatalog(focusKey) {
-    catalog = await json("catalog");
-    renderCatalog(focusKey);
-  }
-  let uninstallPack = null;
-  function reviewUninstall(pack) {
-    if (busy || closed)
-      return;
-    uninstallPack = pack;
-    label("uninstall-question", "builder.language.uninstall_confirm",
-      {name: pack.installedName, id: pack.id, folder: pack.key});
-    // Embedded webviews do not consistently implement window.confirm().
-    $("uninstall-dialog").showModal();
-    $("uninstall-cancel").focus();
-  }
-  $("uninstall-cancel").addEventListener("click", () => $("uninstall-dialog").close());
-  $("uninstall-dialog").addEventListener("close", () => { uninstallPack = null; });
-  $("uninstall-confirm").addEventListener("click", async () => {
-    if (!uninstallPack || busy || closed)
-      return;
-    const pack = uninstallPack;
-    uninstallPack = null;
-    $("uninstall-dialog").close();
-    let removed = false;
-    await run(async () => {
-      const result = await json("uninstall", {
-        id: pack.id, directory: pack.key, expected: pack.installedRevision, confirmUninstall: true
-      });
-      await loadCatalog();
-      removed = true;
-      feedbackKey("builder.language.uninstalled", {backup: result.backup});
-    });
-    if (removed && !closed)
-      $("library-search").focus({preventScroll: true});
-  });
-  function renderCatalog(focusKey) {
-    const query = $("library-search").value.trim().toLocaleLowerCase(),
-          filter = $("library-filter").value;
-    const rows = catalog.filter(
-      p => [p.name, p.installedName, p.locale, p.id].join(" ").toLocaleLowerCase().includes(
-             query) &&
-        (filter === "all" || filter === "installed" && p.installed ||
-          filter === "workshop" && !p.installed));
-    $("library-empty").hidden = rows.length > 0;
-    label("library-summary", "builder.language.library_counts", {
-      enabled: catalog.filter(p => p.installed && p.enabled).length,
-      disabled: catalog.filter(p => p.installed && !p.enabled).length,
-      projects: catalog.filter(p => p.project).length
-    });
-    label("library-empty",
-      filter === "installed" && !catalog.some(p => p.installed) ? "builder.language.library_empty" :
-                                                                  "builder.language.no_packages");
-    $("library").replaceChildren(...rows.map(p => {
-      const card = document.createElement("article");
-      card.className = "loc-package-card";
-      card.dataset.packageId = p.id;
-      card.dataset.packageKey = p.key || "";
-      const title = document.createElement("h3");
-      title.textContent = p.name;
-      contentLanguage(title, {locale: p.locale});
-      const badge = document.createElement("span");
-      badge.className = "loc-package-badge";
-      badge.dataset.error = String(!!p.error);
-      if (p.error || !p.installed)
-        ui.set(badge,
-          p.error      ? "builder.language.needs_attention" :
-            p.readOnly ? "builder.language.read_only" :
-                         "builder.language.workshop_only");
-      const info = document.createElement("p");
-      info.className = "loc-help";
-      info.textContent = (p.locale ? p.locale + " · " : "") + p.id;
-      if (p.installed && p.installedName !== p.name) {
-        const name = document.createElement("span");
-        ui.set(name, "builder.language.installed_as", {name: p.installedName});
-        info.append(name);
-      }
-      if (p.installed && p.key !== p.id) {
-        const folder = document.createElement("span");
-        ui.set(folder, "builder.language.folder", {folder: p.key});
-        info.append(folder);
-      }
-      if (p.error || !p.installed)
-        card.append(badge);
-      card.append(title, info);
-      if (p.installed) {
-        const label = document.createElement("label");
-        label.className = "loc-package-enable";
-        const checkbox = document.createElement("input");
-        checkbox.type = "checkbox";
-        checkbox.checked = p.enabled;
-        checkbox.disabled = !p.installedRevision || (!p.enabled && !!p.error);
-        ui.attribute(
-          checkbox, "aria-label", "builder.language.enable_pack", {name: p.installedName});
-        const caption = document.createElement("span");
-        ui.set(
-          caption, p.enabled ? "builder.language.enabled_game" : "builder.language.disabled_game");
-        label.append(checkbox, caption);
-        card.prepend(label);
-        checkbox.addEventListener("change", () => {
-          if (busy) {
-            checkbox.checked = p.enabled;
-            return;
-          }
-          const enabled = checkbox.checked;
-          run(async () => {
-            try {
-              await json("set-enabled",
-                {id: p.id, directory: p.key, expected: p.installedRevision, enabled});
-              feedbackKey("builder.language.availability_saved");
-            } finally {
-              await loadCatalog(p.key);
-            }
-          });
-        });
-      }
-      const actions = document.createElement("div");
-      actions.className = "loc-row";
-      const action = (key, handler) => {
-        const b = document.createElement("button");
-        b.type = "button";
-        ui.set(b, key);
-        b.addEventListener("click", handler);
-        actions.append(b);
-        return b;
-      };
-      if (p.project) {
-        action(p.readOnly ? "builder.language.view_reference" : "builder.language.edit_project",
-          () => openProject(p.id));
-        if (!p.readOnly)
-          action(p.installed ? "builder.language.review_update" : "builder.language.review_install",
-            () => openProject(p.id, true));
-      }
-      if (p.installed && p.installedRevision)
-        action("builder.language.uninstall", () => reviewUninstall(p))
-          .className = "loc-uninstall";
-      if (p.error) {
-        const error = document.createElement("p");
-        error.className = "loc-help";
-        error.textContent = p.error;
-        card.append(error);
-      } else if (!p.project) {
-        const note = document.createElement("p");
-        note.className = "loc-help";
-        ui.set(note, "builder.language.no_project");
-        card.append(note);
-      }
-      card.append(actions);
-      return card;
-    }));
-    if (typeof focusKey === "string")
-      [...$("library").children]
-        .find(row => row.dataset.packageKey === focusKey)
-        ?.querySelector("input[type=\"checkbox\"]")
-        ?.focus({preventScroll: true});
-  }
-  $("library-search").addEventListener("input", renderCatalog);
-  $("library-filter").addEventListener("change", renderCatalog);
   async function adopt(next, preserveMessage = false) {
     playback?.invalidate();
     state = next;
@@ -1009,7 +717,7 @@
   function populateStyleChoices() {
     const font = $("style-font"), treatment = $("style-treatment");
     const previousFont = font.value, previousStyle = treatment.value;
-    const roles = Object.keys(draft.fontStacks);
+    const roles = fonts.roles;
     font.replaceChildren(...roles.map(name => option(name, name)));
     font.value = roles.includes(previousFont) ? previousFont : "body";
     const styles = (state.project?.treatments || []).map(style => style.definition.name);
@@ -1044,7 +752,7 @@
     let value;
     if (kind === "font") {
       value = $("style-font").value;
-      if (!Object.hasOwn(draft.fontStacks, value)) throw failure("builder.styling.choose_font");
+      if (!fonts.roles.includes(value)) throw failure("builder.styling.choose_font");
     } else if (kind === "style") {
       value = $("style-treatment").value;
       if (!(state.project?.treatments || []).some(style => style.definition.name === value))
@@ -1143,6 +851,35 @@
     }
     feedbackKey("builder.language.extracted_feedback");
   }
+  async function beginImportInstallation() {
+    if (window.workshopOpenLanguages && !window.workshopOpenLanguages())
+      return false;
+    if (!loaded)
+      await adopt(await json("state"));
+    clearDraftEdits();
+    flow.kind = "install";
+    flow.phase = "choose";
+    flow.installPath = "import";
+    flow.editorTab = "messages";
+    $("download").hidden = true;
+    return true;
+  }
+  async function adoptImportedProject(next, replaceInstall) {
+    await adopt(next);
+
+    imports.reset();
+    projectDestination();
+    if (flow.kind === "install") {
+      try {
+        await installCurrent(replaceInstall);
+      } catch (error) {
+        await prepareReview("install");
+        throw failure(
+          "builder.language.import_partial", {detail: error.uiArgs?.detail || error.message});
+      }
+    } else
+      feedbackKey("builder.language.imported_edit");
+  }
   async function createProject(data) {
     if (!discard())
       return;
@@ -1179,211 +916,6 @@
       expanded: upgraded.report.aliasesMaterialized,
     });
   });
-  function syncImportPreview() {
-    $("import-upgrade").hidden = flow.kind !== "install" || !flow.importPreview?.upgrade;
-    if (!flow.importPreview) {
-      $("accept-import").disabled = true;
-      return;
-    }
-    const copying = !!$("import-new-id").value.trim(), installing = flow.kind === "install";
-    $("project-conflict").hidden = !flow.importPreview.existingProject;
-    $("replace-project").closest("label").hidden = copying;
-    $("import-install-conflict").hidden = !installing || !flow.importPreview.installed || copying;
-    label("accept-import",
-      installing              ? "builder.language.import_install" :
-        flow.kind === "clone" ? "builder.language.import_clone" :
-                                "builder.language.import_edit");
-    $("accept-import").disabled = busy || installing && !!flow.importPreview.installError ||
-      !!flow.importPreview.existingProject && !copying && !$("replace-project").checked ||
-      installing && !!flow.importPreview.installed && !copying &&
-        !$("import-replace-installed").checked;
-  }
-  async function previewImport(endpoint, data) {
-    flow.importPreview = null;
-    workflowView();
-    feedbackKey("builder.language.loading_pack");
-    flow.importPreview = await json(endpoint, data);
-    $("replace-project").checked = $("import-replace-installed").checked = false;
-    $("import-new-id").value = "";
-    const p = flow.importPreview, m = p.metadata;
-    $("import-name").textContent = m.name;
-    label("import-summary", "builder.language.import_summary",
-      {locale: m.locale, id: m.id, count: p.messages, author: m.author, license: m.license});
-    if (p.existingProject)
-      label("project-conflict-note", "builder.language.project_conflict",
-        {id: m.id, name: p.existingProject.name});
-    else
-      raw("project-conflict-note", "");
-    label("import-warning",
-      p.installError ? "builder.language.import_not_installable" : "builder.language.import_kept",
-      {detail: p.installError});
-    workflowView();
-    feedback("");
-    $("import-preview").scrollIntoView({block: "nearest"});
-    $("import-name").focus({preventScroll: true});
-  }
-  async function loadDirectory(directory) {
-    if (!directory.trim() || !discard())
-      return;
-    await previewImport("directory", {directory, previewImport: true});
-  }
-  $("pick-directory").addEventListener("click", () => run(async () => {
-    if (!discard())
-      return;
-    const result = await json("choose-directory", {});
-    if (result.cancelled)
-      return;
-    $("directory").elements.directory.value = result.directory;
-    await loadDirectory(result.directory);
-  }));
-  submit("directory", data => loadDirectory(data.get("directory")));
-  $("directory").elements.directory.addEventListener("change", event => {
-    const path = event.target.value;
-    run(() => loadDirectory(path));
-  });
-  let dragDepth = 0;
-  function clearDrop() {
-    dragDepth = 0;
-    $("drop-overlay").hidden = true;
-  }
-  function dropNotice(key) {
-    label("drop-message", key);
-    $("drop-overlay").dataset.notice = "true";
-    $("dismiss-drop").hidden = false;
-    $("drop-overlay").hidden = false;
-  }
-  $("dismiss-drop").addEventListener("click", clearDrop);
-  function importFiles(files, install = false, backup = false) {
-    if (closed || !files.length)
-      return Promise.resolve();
-    if (busy) {
-      dropNotice("builder.language.drop_busy");
-      return Promise.resolve();
-    }
-    // One detached server preview per session; never silently install only the
-    // first item of a multi-file drop or overwrite a preview still loading.
-    if (files.length !== 1) {
-      dropNotice("builder.language.one_archive");
-      return Promise.resolve();
-    }
-    const file = files[0], extension = file.name.split(".").pop().toLowerCase();
-    if (!(backup ? ["arproject", "zip"] : ["arlang"]).includes(extension)) {
-      dropNotice(backup ? "builder.language.backup_types" : "builder.language.package_types");
-      return Promise.resolve();
-    }
-    if (!file.size || file.size > 257 * 1024 * 1024) {
-      dropNotice("builder.language.archive_size");
-      return Promise.resolve();
-    }
-    return run(async () => {
-      if (!discard())
-        return;
-      if (install) {
-        if (window.workshopOpenLanguages && !window.workshopOpenLanguages()) {
-          dropNotice("builder.language.build_required");
-          return;
-        }
-        if (!loaded)
-          await adopt(await json("state"));
-        clearDraftEdits();
-        flow.kind = "install";
-        flow.phase = "choose";
-        flow.installPath = "import";
-        flow.editorTab = "messages";
-        $("download").hidden = true;
-      }
-      clearDrop();
-      const data = new FormData();
-      data.set("file", file);
-      data.set("intent", "preview");
-      await previewImport("import", data);
-    });
-  }
-  for (const id of ["quick-import", "import", "import-backup"]) {
-    const form = $(id), input = form.elements.file;
-    form.addEventListener("submit", event => event.preventDefault());
-    input.addEventListener("change",
-      () =>
-        importFiles([...input.files], id === "quick-import", id === "import-backup").finally(() => {
-          // A failed/cancelled selection must be selectable again without first
-          // choosing a different file. The preview already owns its uploaded bytes.
-          input.value = "";
-          window.workshopFileInputs?.refresh(input);
-        }));
-  }
-  const fileDrag = event => [...(event.dataTransfer?.types || [])].includes("Files") ||
-    event.dataTransfer?.files?.length > 0;
-  const fileTarget = event => event.target?.closest?.("input[type=\"file\"],.file-control");
-  document.addEventListener("dragenter", event => {
-    if (!fileDrag(event) || fileTarget(event))
-      return;
-    event.preventDefault();
-    ++dragDepth;
-    if (closed || busy)
-      return;
-    label("drop-message", "builder.language.drop_prompt");
-    $("drop-overlay").dataset.notice = "false";
-    $("dismiss-drop").hidden = true;
-    $("drop-overlay").hidden = false;
-  });
-  document.addEventListener("dragover", event => {
-    if (!fileDrag(event))
-      return;
-    if (fileTarget(event)) {
-      clearDrop();
-      return;
-    }
-    event.preventDefault();
-    event.dataTransfer.dropEffect = closed || busy ? "none" : "copy";
-  });
-  document.addEventListener("dragleave", event => {
-    if (!fileDrag(event))
-      return;
-    if (--dragDepth <= 0)
-      clearDrop();
-  });
-  document.addEventListener("dragend", clearDrop);
-  document.addEventListener("drop", event => {
-    clearDrop();
-    if (!fileDrag(event) || fileTarget(event))
-      return;  // ROM/font controls keep native drop behavior.
-    event.preventDefault();
-    return importFiles([...(event.dataTransfer.files || [])], true);
-  });
-  document.addEventListener("keydown", event => {
-    if (event.key === "Escape")
-      clearDrop();
-  });
-  for (const id of ["replace-project", "import-new-id", "import-replace-installed"])
-    $(id).addEventListener("input", syncImportPreview);
-  $("accept-import").addEventListener("click", () => run(async () => {
-    if (!flow.importPreview)
-      return;
-    const incoming = flow.importPreview, newID = $("import-new-id").value.trim();
-    const replaceInstall = !newID && $("import-replace-installed").checked;
-    if (incoming.existingProject && !newID && !$("replace-project").checked)
-      throw failure("builder.language.choose_conflict");
-    if (flow.kind === "install" && incoming.installed && !newID && !replaceInstall)
-      throw failure("builder.language.confirm_replace");
-    await adopt(await json("accept-import", {
-      importToken: incoming.token,
-      newID,
-      replace: !newID && $("replace-project").checked,
-      expected: incoming.existingProject?.revision || ""
-    }));
-    flow.importPreview = null;
-    projectDestination();
-    if (flow.kind === "install") {
-      try {
-        await installCurrent(replaceInstall);
-      } catch (error) {
-        await prepareReview("install");
-        throw failure(
-          "builder.language.import_partial", {detail: error.uiArgs?.detail || error.message});
-      }
-    } else
-      feedbackKey("builder.language.imported_edit");
-  }));
   $("metadata").addEventListener("input", () => {
     draft.detailsDirty = true;
     draft.saveFailure = "";
@@ -1408,31 +940,11 @@
   });
   $("body").addEventListener("input", markDirty);
   $("message-status").addEventListener("change", markDirty);
-  function draftFonts() {
-    const fonts = {primary: draft.fontStacks.body[0], fallback: draft.fontStacks.body.slice(1)};
-    const roles = Object.entries(draft.fontStacks).filter(([name]) => name !== "body")
-      .map(([name, stack]) => ({name, primary: stack[0], fallback: stack.slice(1)}));
-    if (roles.length) fonts.roles = roles;
-    return fonts;
-  }
-  function draftFontUploads() {
-    return [...draft.fontUploads].filter(([name]) =>
-      Object.values(draft.fontStacks).some(stack => stack.includes(name)));
-  }
-  function fontPayload(q) {
-    const uploads = draftFontUploads();
-    if (!q.saveFonts || !uploads.length) return q;
-    q.fontPaths = uploads.map(([name]) => name);
-    const payload = new FormData();
-    payload.set("request", JSON.stringify(q));
-    uploads.forEach(([,file], i) => payload.set("font" + i, file));
-    return payload;
-  }
   function saveProgress() {
     if (busy || !hasEdits() || state.project?.origin === "native-source")
       return;
     for (const [id, changed] of [["metadata", draft.detailsDirty], ["notice", draft.noticeDirty],
-           ["font-stack", draft.fontsDirty]]) {
+           ["font-stack", fonts.dirty]]) {
       if (changed && !$(id).checkValidity()) {
         flow.editorTab = id === "font-stack" ? "fonts" : "details";
         workflowView();
@@ -1455,9 +967,9 @@
       notes,
       ...Object.fromEntries(new FormData($("notice")))
     };
-    q.saveFonts = draft.fontsDirty;
-    q.fonts = draftFonts();
-    const payload = fontPayload(q);
+    q.saveFonts = fonts.dirty;
+    q.fonts = fonts.fonts();
+    const payload = fonts.payload(q);
     return run(async () => {
       let next;
       try {
@@ -1510,9 +1022,9 @@
     }
   });
   $("preview").addEventListener("click", () => run(async () => {
-    const ops = await json("preview", fontPayload({
+    const ops = await json("preview", fonts.payload({
       ...identity(), id: draft.selected, body: $("body").value,
-      status: $("message-status").value, saveFonts: draft.fontsDirty, fonts: draftFonts(),
+      status: $("message-status").value, saveFonts: fonts.dirty, fonts: fonts.fonts(),
       saveDetails: draft.detailsDirty, metadata: previewMetadata()
     }));
     const container = $("preview-content");
@@ -1660,7 +1172,7 @@
     flow.kind = kind;
     flow.phase = "choose";
     flow.installPath = kind === "install" ? "import" : "";
-    flow.importPreview = null;
+    imports.reset();
     flow.editorTab = "messages";
     $("archive-options").open = kind === "edit";
     $("download").hidden = true;
@@ -1670,7 +1182,7 @@
   }
   async function chooseInstallPath(path) {
     flow.installPath = path;
-    flow.importPreview = null;
+    imports.reset();
     feedback("");
     workflowView();
     await projects();
@@ -1683,7 +1195,7 @@
     $("download").hidden = true;
     feedback("");
     workflowView();
-    await loadCatalog();
+    await library.refresh();
     window.scrollTo(0, 0);
     $("title").focus({preventScroll: true});
   }
@@ -1760,7 +1272,7 @@
       await refreshReference(next);
       workflowView();
       if (flow.kind === "home")
-        await loadCatalog();
+        await library.refresh();
     }
   });
   // The shell passes only a project ID. It never reads archives or edits pack
@@ -1784,10 +1296,9 @@
   window.localizationOpenProject = openProject;
   window.localizationHasEdits = hasEdits;
   document.addEventListener("workshop:closed", () => {
-    clearDrop();
+    imports.clearDrop();
     closed = true;
-    uninstallPack = null;
-    $("uninstall-dialog").close();
+    library.close();
     playback?.invalidate();
     clearDraftEdits();
     for (const control of panel.querySelectorAll("button,input,textarea,select"))

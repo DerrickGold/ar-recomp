@@ -103,7 +103,8 @@ function setupEditor(){
   }});
   s.ui.apply(root);
   runInNewContext(readFileSync(new URL("../localization_styling.js",import.meta.url),"utf8"),s.context);
-  runInNewContext(readFileSync(new URL("../localization.js",import.meta.url),"utf8"),s.context);
+  for (const name of ["localization_font_editor.js", "localization_library.js", "localization_import_editor.js", "localization.js"])
+    runInNewContext(readFileSync(new URL("../" + name,import.meta.url),"utf8"),s.context);
   return {...s,root,requests,confirmations,node:id=>s.doc.getElementById("loc-"+id),respond(fn){reply=async(...args)=>({ok:true,json:async()=>fn(...args)});},response(fn){reply=fn;}};
 }
 const packageInfo={key:"edition-folder",id:"community.same-locale",name:"Français {name} <b>1234</b>",locale:"en-CA",project:true,installed:true,enabled:true,installedName:"Installed <i>edition</i>",installedRevision:"keep-revision"};

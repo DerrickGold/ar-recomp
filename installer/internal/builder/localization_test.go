@@ -481,7 +481,8 @@ func TestLocalizationGUIRejectsMalformedAndUnscopedRequests(t *testing.T) {
 			t.Fatal("wrong embedded asset type")
 		}
 	}
-	if strings.Contains(localizationJS, "innerHTML") || strings.Contains(localizationJS, "eval(") {
+	script := locGET(t, app, "editor.js", nil).Body.String()
+	if strings.Contains(script, "innerHTML") || strings.Contains(script, "eval(") {
 		t.Fatal("untrusted pack content can become markup/code")
 	}
 	page := renderPage(t)

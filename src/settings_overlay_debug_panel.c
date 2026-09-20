@@ -1,5 +1,6 @@
 #include "settings_overlay.h"
 #include "settings_overlay_internal.h"
+#include "settings_overlay_artwork.h"
 #include "constants.h"
 #include "render/render_output.h"
 
@@ -68,7 +69,7 @@ void SettingsOverlayDebugPanel_Reset(void) {
 
 void SettingsOverlay_RenderDebugPanel(const char *title, const char *text,
                                       ArRenderPointI avoid_point) {
-  if (!s_render_device || !ArRenderTexture_IsValid(s_debug_font_texture) ||
+  if (!s_render_device || !ArRenderTexture_IsValid(SettingsOverlayArtwork_Get()->debug_font) ||
       !text || !text[0])
     return;
   int output_width = 0, output_height = 0;

@@ -3,10 +3,10 @@
  * here; model compilation/cache policy stays in the portable SIM modules.
  * All drawing crosses the renderer/depth-pass interfaces, never a backend.
  *
- * The D6 no-live-globals invariant holds here as everywhere in the present
- * family: no g_ppu, no g_settings, no Settings_Visible*(). State arrives via
+ * Captured state is the input contract for the present family: no g_ppu, no g_settings, no Settings_Visible*(). State arrives via
  * the `const FrameSlot *`. */
 #include "present_world_nav_geometry.h"
+#include "present_world_nav_composition.h"
 #include "present_world_nav_sky.h"
 #include "present_world_nav_model_mesh.h"
 #include "present_sim_globe_focus.h"
@@ -245,16 +245,6 @@ typedef struct WorldNavigationReceiverKey {
 } WorldNavigationReceiverKey;
 
 static struct {
-  ArRenderTexture palace;
-  ArRenderTexture label;
-  ArRenderTexture plaque;
-  PresentationUploadMirror palace_mirror;
-  PresentationUploadMirror label_mirror;
-  PresentationUploadMirror plaque_mirror;
-  bool uploaded;
-} s_world_composition;
-
-static struct {
   uint32_t serial;
   uint64_t image_revision;
   uint32_t geography;
@@ -479,66 +469,6 @@ static void DestroyWorldNavigationMountainProjection(void) {
   s_world_mountains.projection_unavailable = false;
 }
 
-static ArRenderTexture EnsureWorldNavigationCompositionTexture(
-    ArRenderTexture *texture) {
-  if (ArRenderTexture_IsValid(*texture)) return *texture;
-  const ArRenderTextureDesc desc = {
-    .width = kSimWorldNavigationCompositionWidth,
-    .height = kSimWorldNavigationCompositionHeight,
-    .format = kArRenderPixelFormat_Argb8888,
-    .usage = kArRenderTextureUsage_Streaming,
-    .filter = kArRenderFilter_Nearest,
-    .blend = kArRenderBlendMode_Alpha,
-  };
-  if (!ArRenderDevice_CreateTexture(&g_render_device, &desc, texture)) {
-    fprintf(stderr,
-            "[world-navigation] composition texture unavailable: %s\n",
-            ArRenderDevice_LastError(&g_render_device));
-    return ArRenderTexture_Invalid();
-  }
-  return *texture;
-}
-
-static bool UploadWorldNavigationLayer(PresentationUploadMirror *mirror,
-    ArRenderTexture texture, const SimWorldNavigationCompositionLayer *layer,
-    const uint32_t *pixels) {
-  return !layer->visible || PresentationUploadMirror_UploadArgb8888(
-      mirror, &g_render_device, texture, (const uint8_t *)pixels,
-      layer->width, layer->height, kSimWorldNavigationCompositionPitch, 0, 0, NULL);
-}
-
-void UploadWorldNavigationComposition(const FrameSlot *slot) {
-  s_world_composition.uploaded = false;
-  if (!slot || slot->sim.view != kSimView_WorldNavigation) return;
-  const SimWorldNavigationComposition *composition =
-      &slot->sim.world_navigation_scene.composition;
-  if (!composition->valid) return;
-  if (composition->empty_animation) {
-    s_world_composition.uploaded = true;
-    return;
-  }
-
-  ArRenderTexture palace = EnsureWorldNavigationCompositionTexture(
-      &s_world_composition.palace);
-  ArRenderTexture plaque = EnsureWorldNavigationCompositionTexture(
-      &s_world_composition.plaque);
-  ArRenderTexture label = composition->label.visible
-      ? EnsureWorldNavigationCompositionTexture(&s_world_composition.label)
-      : ArRenderTexture_Invalid();
-  if (!ArRenderTexture_IsValid(palace) ||
-      !ArRenderTexture_IsValid(plaque) ||
-      (composition->label.visible && !ArRenderTexture_IsValid(label)))
-    return;
-  if (!UploadWorldNavigationLayer(&s_world_composition.palace_mirror,
-          palace, &composition->palace, g_sim_world_navigation_palace_pixels) ||
-      !UploadWorldNavigationLayer(&s_world_composition.plaque_mirror,
-          plaque, &composition->plaque, g_sim_world_navigation_plaque_pixels) ||
-      !UploadWorldNavigationLayer(&s_world_composition.label_mirror,
-          label, &composition->label, g_sim_world_navigation_label_pixels))
-    return;
-  s_world_composition.uploaded = true;
-}
-
 static bool EnsureWorldNavigationCloudTexture(void) {
   enum { kPaddedPixels = kSimWorldNavigationCloudWidth * 2 };
   const int height = kSimWorldNavigationCloudHeight * kSimCloudLayerCount;
@@ -720,6 +650,20 @@ static void EnsureWorldNavigationMountains(const FrameSlot *slot, float radius_t
     RebuildWorldNavigationMountainTransition(ground, radius_tiles);
   }
 }
+
+static void ResetWorldNavigationMountains(void) {
+  DestroyWorldNavigationMountainProjection();
+  SimWorldNavigationMountains_Destroy(&s_world_mountains.scene);
+  SimWorldNavigationMountainTransition_Destroy(&s_world_mountains.transition);
+  s_world_mountains.transition_ready = false;
+  s_world_mountains.transition_serial = 0;
+  s_world_mountains.relief_pct = 0;
+  s_world_mountains.ready = false;
+  s_world_mountains.active = false;
+  s_world_mountains.lava_upload = (SimWorldNavigationMountainAtlasUpdate){0};
+  s_world_mountains.developed = false;
+}
+
 
 static bool WorldNavigationAnimationBlockChanged(
     const SimWorldNavigationArtChanges *changes, int x, int y, int step) {
@@ -981,21 +925,21 @@ static bool EnsureWorldNavigationBlur(const FrameSlot *slot) {
  * Navigation uses the same developed texture cache as the town underlay, but
  * none of the underlay geometry. Its captured Mode-7 matrix supplies focus,
  * zoom and in-plane rotation before the shared town perspective is applied. */
-static ArRenderPointF WorldNavigationAuthenticToOutput(
-    const FrameSlot *slot, ArRenderRectI viewport,
-    float authentic_x, float authentic_y) {
-  const float authentic_x0 =
-      ((float)slot->snes_width -
-       (float)kSimWorldNavigationCompositionWidth) * 0.5f;
-  const float captured_x = authentic_x0 + authentic_x;
-  return (ArRenderPointF){
-    (float)viewport.x +
-        (captured_x - (float)slot->visible_x0) *
-            (float)viewport.w / (float)slot->visible_width,
-    (float)viewport.y + authentic_y *
-        (float)viewport.h / (float)slot->snes_height,
-  };
+static void ResetWorldNavigationArt(void) {
+  free(s_world_art.animation);
+  s_world_art.animation = NULL;
+  s_world_art.animation_unavailable = false;
+  InvalidateWorldNavigationArtPublication();
+  s_world_art.blur_serial = 0;
+  s_world_art.geography = 0;
+  s_world_art.unavailable = false;
+  s_world_art.atlas_cache_unavailable = false;
+  free(s_world_art.pixels);
+  s_world_art.pixels = NULL;
+  free(s_world_art.baseline);
+  s_world_art.baseline = NULL;
 }
+
 
 static int WorldNavigationTerrainVertexIndex(int tile_x, int tile_y) {
   return tile_y * kWorldNavigationTerrainAxis + tile_x;
@@ -1099,6 +1043,21 @@ static void PrepareWorldNavigationTerrain(void) {
 
 /* Read-only after owner preparation; source-building workers share the frozen
  * height/cap arrays only until their bounded fork/join completes. */
+static void ResetWorldNavigationTerrain(void) {
+  s_world_terrain.samples_ready = false;
+  SimWorldNavigationCliffs_Destroy(&s_world_terrain.cliffs);
+  free(s_world_terrain.cliff_projection);
+  s_world_terrain.cliff_projection = NULL;
+  s_world_terrain.cliffs_ready = false;
+  SimWorldNavigationTerrain_SetMountainReplacement(NULL);
+  SimWorldNavigationTerrain_SetMountainTransition(NULL);
+  SimWorldNavigationTerrain_SetMountainJoin(NULL, NULL, 0);
+  SimWorldNavigationTerrain_SetMountainContinuationLimit(NULL, NULL, 0);
+  s_world_terrain.projection_ready = false;
+  s_world_terrain.ready = false;
+}
+
+
 static float WorldNavigationTerrainHeightAtPrepared(float source_x, float source_y,
                                                 float *authored_weight, bool floor_only) {
   float tile_x = source_x / (float)kSimWorldMapTilePixels;
@@ -1170,7 +1129,7 @@ static bool WorldNavigationFlatOutputPoint(
           &slot->sim.world_navigation_scene, source_x, source_y,
           &authentic_x, &authentic_y))
     return false;
-  *out = WorldNavigationAuthenticToOutput(
+  *out = WorldNavigationComposition_ProjectPoint(
       slot, viewport, authentic_x, authentic_y);
   return true;
 }
@@ -3436,6 +3395,37 @@ static bool DrawWorldNavigationTowns(
   return valid;
 }
 
+static void ResetWorldNavigationModels(void) {
+  WorldNavigationModelMesh_Reset();
+  free(s_world_models.gpu_sources);
+  s_world_models.gpu_sources = NULL;
+  s_world_models.gpu_source_capacity = 0;
+  s_world_models.gpu_sources_unavailable = false;
+  s_world_models.gpu_current_ready = false;
+  s_world_models.gpu_current_rejected = false;
+  free(s_world_model_batch);
+  s_world_model_batch = NULL;
+  s_world_model_batch_unavailable = false;
+  free(s_world_models.projected);
+  Sim3DDepthPass_DestroyMesh(s_world_models.solid_mesh);
+  s_world_models.solid_mesh = NULL;
+  s_world_models.solid_mesh_published = s_world_models.solid_mesh_unavailable =
+      false;
+  s_world_models.solid_mesh_attempted = false;
+  s_world_models.solid_mesh_opt_out = false;
+  s_world_models.projected = NULL;
+  s_world_models.projected_count = s_world_models.projected_capacity = 0;
+  s_world_models.projected_valid = s_world_models.capturing = false;
+  s_world_models.capture_static = false;
+  s_world_models.animated_count = 0;
+  s_world_models.projection_key_ready = false;
+  s_world_models.projection_unavailable = false;
+  s_world_models.object_count = 0;
+  s_world_models.detail = s_world_models.style = -1;
+  s_world_models.maximum_rise = 0.0f;
+}
+
+
 static bool DrawWorldNavigationLightTreatment(
     const FrameSlot *slot, ArRenderRectI viewport) {
   if (!slot->sim.world_navigation_lighting) return true;
@@ -4261,36 +4251,40 @@ static PresentationOutcome DrawWorldNavigationWeather(
   return kPresentationOutcome_Complete;
 }
 
-static bool DrawWorldNavigationCompositionLayer(
-    const FrameSlot *slot, ArRenderRectI viewport,
-    const SimWorldNavigationCompositionLayer *layer,
-    ArRenderTexture texture, ArRenderPointF offset, float scale) {
-  if (!layer || !layer->visible) return true;
-  if (!ArRenderTexture_IsValid(texture) ||
-      !layer->width || !layer->height)
-    return false;
-  const ArRenderPointF top_left = WorldNavigationAuthenticToOutput(
-      slot, viewport, layer->screen_x, layer->screen_y);
-  const ArRenderPointF bottom_right = WorldNavigationAuthenticToOutput(
-      slot, viewport, layer->screen_x + layer->width,
-      layer->screen_y + layer->height);
-  ArRenderRectF source = {0.0f, 0.0f, layer->width, layer->height};
-  ArRenderRectF destination = {
-    top_left.x + offset.x, top_left.y + offset.y,
-    bottom_right.x - top_left.x,
-    bottom_right.y - top_left.y,
-  };
-  if (scale != 1.0f) {
-    /* Scale about the native travel focus, including the authored offset of
-     * the cloud/platform, not about a potentially asymmetric raster crop. */
-    destination.x = viewport.w * .5f + (top_left.x - viewport.w * .5f) * scale + offset.x;
-    destination.y = viewport.h * .5f + (top_left.y - viewport.h * .5f) * scale + offset.y;
-    destination.w *= scale;
-    destination.h *= scale;
-  }
-  return ArRenderDevice_DrawTexture(
-      &g_render_device, texture, &source, &destination);
+static void ResetWorldNavigationWeather(void) {
+  Sim3DDepthPass_DestroyMesh(s_world_weather.receiver_mesh);
+  Sim3DDepthPass_DestroyMesh(s_world_weather.spherical_mesh);
+  Sim3DDepthPass_DestroyMesh(s_world_weather.body_mesh);
+  free(s_world_weather.body_vertices);
+  s_world_weather.body_vertices = NULL;
+  s_world_weather.body_mesh = NULL;
+  s_world_weather.body_unavailable = false;
+  s_world_weather.body_radius = s_world_weather.body_distance = 0;
+  free(s_world_weather.spherical_quads);
+  s_world_weather.spherical_mesh = NULL;
+  s_world_weather.spherical_quads = NULL;
+  s_world_weather.spherical_capacity = 0;
+  s_world_weather.spherical_ready = s_world_weather.spherical_unavailable =
+      false;
+  s_world_weather.receiver_mesh = NULL;
+  free(s_world_weather.receiver_positions);
+  free(s_world_weather.receiver_uv);
+  s_world_weather.receiver_positions = NULL;
+  s_world_weather.receiver_uv = NULL;
+  s_world_weather.receiver_mesh_capacity = 0;
+  s_world_weather.receiver_mesh_ready =
+      s_world_weather.receiver_mesh_unavailable = false;
+  free(s_world_weather.receivers);
+  s_world_weather.receivers = NULL;
+  s_world_weather.receiver_count = s_world_weather.receiver_capacity = 0;
+  s_world_weather.receivers_ready = s_world_weather.receivers_unavailable =
+      false;
+  s_world_weather.ready = false;
+  s_world_weather.unavailable = false;
+  PresentWorldNavSky_Reset();
+  s_world_weather.failure_reported = false;
 }
+
 
 static bool DrawWorldNavigationPalace(
     const FrameSlot *slot, ArRenderRectI viewport,
@@ -4321,9 +4315,9 @@ static bool DrawWorldNavigationPalace(
   const float distance = hypotf(hypotf(projection->camera_world[0],
       projection->camera_world[1]), projection->camera_world[2]);
   const float scale = fminf(1.0f, fmaxf(.35f, .75f * 3.0f / distance));
-  return DrawWorldNavigationCompositionLayer(slot, viewport,
+  return WorldNavigationComposition_DrawLayer(slot, viewport,
       &slot->sim.world_navigation_scene.composition.palace,
-      s_world_composition.palace, offset, scale);
+      WorldNavigationComposition_Get()->palace, offset, scale);
 }
 
 static bool DrawWorldNavigationMasterFade(
@@ -4672,22 +4666,20 @@ static float SimGlobeMountainGround(float x, float y) {
       x*kSimWorldMapTilePixels,y*kSimWorldMapTilePixels,NULL,true);
 }
 
-static PresentationOutcome DrawSimGlobeScene(const FrameSlot *slot, ArRenderRectI source,
-    ArRenderRectI viewport, const Scene3DCamera *camera, const float matrix[16],
-    float radius_scale, bool sim_facades, bool detailed_town,
-    const PresentSimGlobeContent *content,
-    PresentSimGlobeView *out_view) {
-  if (!slot || !camera || !matrix || source.w <= 0 || source.h <= 0 ||
-      viewport.w <= 0 || viewport.h <= 0 || !isfinite(radius_scale) ||
-      radius_scale < 1 || radius_scale > 4 ||
+static bool PrepareSimGlobeView(const FrameSlot *slot, ArRenderRectI source, ArRenderRectI viewport,
+                                const Scene3DCamera *camera, const float matrix[16],
+                                float radius_scale, bool sim_facades,
+                                WorldNavigationProjection *out_projection,
+                                PresentSimGlobeView *out_view) {
+  if (!slot || !camera || !matrix || source.w <= 0 || source.h <= 0 || viewport.w <= 0 ||
+      viewport.h <= 0 || !isfinite(radius_scale) || radius_scale < 1 || radius_scale > 4 ||
       (unsigned)slot->sim.background_voxel_detail >= kSimBackgroundVoxelDetail_Count ||
-      (sim_facades && (
-       (unsigned)slot->sim.background_voxel_facing >= kSimBackgroundVoxelFacing_Count ||
-       (unsigned)slot->sim.background_voxel_shading >= kSimBackgroundVoxelShading_Count)))
-    return kPresentationOutcome_CoreFailure;
-  const float chart_radius = WorldNavigationChartRadius(slot)*radius_scale;
-  if (!EnsureWorldNavigationResourcesAtRadius(slot,chart_radius))
-    return kPresentationOutcome_CoreFailure;
+      (sim_facades &&
+       ((unsigned)slot->sim.background_voxel_facing >= kSimBackgroundVoxelFacing_Count ||
+        (unsigned)slot->sim.background_voxel_shading >= kSimBackgroundVoxelShading_Count)))
+    return false;
+  const float chart_radius = WorldNavigationChartRadius(slot) * radius_scale;
+  if (!EnsureWorldNavigationResourcesAtRadius(slot, chart_radius)) return false;
   /* SIM owns its active landscape and model shading. Navigation toggles may
    * reduce the neighbouring overview, but cannot flatten or unlight the town
    * the player is editing. Do not copy/mutate a large captured FrameSlot to
@@ -4702,12 +4694,13 @@ static PresentationOutcome DrawSimGlobeScene(const FrameSlot *slot, ArRenderRect
   const float ox = slot->sim.underlay_origin_tile_x, oy = slot->sim.underlay_origin_tile_y;
   float reference = 0;
   if (relief && !SimWorldNavigationTerrain_RegisterTownFloor(
-          slot->sim.town,16,16,SimTownTerrain_HeightUnitsAt(slot->sim.town,256,256),&reference))
-    return kPresentationOutcome_CoreFailure;
+                    slot->sim.town, 16, 16, SimTownTerrain_HeightUnitsAt(slot->sim.town, 256, 256),
+                    &reference))
+    return false;
   SimGlobeMapping map;
-  if (!SimGlobeMapping_Build(slot->sim.town, ox, oy, chart_radius,reference,
-          relief ? slot->sim.landscape_height_pct/100.0f : 0, &map))
-    return kPresentationOutcome_CoreFailure;
+  if (!SimGlobeMapping_Build(slot->sim.town, ox, oy, chart_radius, reference,
+                             relief ? slot->sim.landscape_height_pct / 100.0f : 0, &map))
+    return false;
   /* Globe relief is independently optional. Its shoreline still meets the
    * active town's actual elevation, including builds with flat SIM terrain. */
 #if AR_SIM3D_TERRAIN_ELEVATION
@@ -4718,198 +4711,298 @@ static PresentationOutcome DrawSimGlobeScene(const FrameSlot *slot, ArRenderRect
   /* Keep the centre's audited SIM elevation at the same camera-space datum.
    * Curvature is the variable, not a hidden vertical reframe of the town. */
   if (map.landscape > 0)
-    map.reference_height -= SimTownTerrain_HeightUnitsAt(map.town,256,256) *
-        map.town_landscape * map.metric / map.landscape;
-  WorldNavigationProjection projection = {.chart_radius_tiles = map.chart_radius,
-      .globe_radius_world = map.radius,.height_world_per_unit = map.landscape > 0 ? 1 : 0,.clip_frustum = true,
-      .tile_world = 1/map.metric,
-      .globe_frame = {.right = {1,0,0},.up = {0,1,0},.outward = {0,0,1}}};
-  const float aspect = (float)viewport.w/viewport.h;
-  const float scale[3] = {16*aspect/source.w,16.0f/source.h,16.0f/source.h};
+    map.reference_height -= SimTownTerrain_HeightUnitsAt(map.town, 256, 256) * map.town_landscape *
+                            map.metric / map.landscape;
+  WorldNavigationProjection projection = {
+      .chart_radius_tiles = map.chart_radius,
+      .globe_radius_world = map.radius,
+      .height_world_per_unit = map.landscape > 0 ? 1 : 0,
+      .clip_frustum = true,
+      .tile_world = 1 / map.metric,
+      .globe_frame = {.right = {1, 0, 0}, .up = {0, 1, 0}, .outward = {0, 0, 1}}};
+  const float aspect = (float)viewport.w / viewport.h;
+  const float scale[3] = {16 * aspect / source.w, 16.0f / source.h, 16.0f / source.h};
   const float offset[3] = {
-      ((slot->sim.underlay_screen_x0-slot->sim.camera_x+256.0f-source.x)/source.w-.5f)*aspect,
-      .5f-(256.0f-slot->sim.camera_y-source.y)/source.h,0};
+      ((slot->sim.underlay_screen_x0 - slot->sim.camera_x + 256.0f - source.x) / source.w - .5f) *
+          aspect,
+      .5f - (256.0f - slot->sim.camera_y - source.y) / source.h, 0};
   for (int row = 0; row < 4; ++row) {
-    for (int col = 0; col < 3; ++col) projection.matrix[col*4+row] = matrix[col*4+row]*scale[col];
-    projection.matrix[12+row] = matrix[12+row];
-    for (int col = 0; col < 3; ++col) projection.matrix[12+row] += matrix[col*4+row]*offset[col];
+    for (int col = 0; col < 3; ++col)
+      projection.matrix[col * 4 + row] = matrix[col * 4 + row] * scale[col];
+    projection.matrix[12 + row] = matrix[12 + row];
+    for (int col = 0; col < 3; ++col)
+      projection.matrix[12 + row] += matrix[col * 4 + row] * offset[col];
   }
   for (int i = 0; i < 3; ++i)
-    projection.camera_world[i] = (-camera->distance*matrix[i*4+3]-offset[i])/scale[i];
+    projection.camera_world[i] = (-camera->distance * matrix[i * 4 + 3] - offset[i]) / scale[i];
   PresentSimGlobeView view = {.map = map};
-  memcpy(view.matrix,projection.matrix,sizeof(view.matrix));
-  memcpy(view.camera,projection.camera_world,sizeof(view.camera));
-  if (out_view) *out_view = view;
-  if (detailed_town) {
-    SimBackgroundVoxelRenderParams params = SimVoxelRenderParams(slot,source,viewport,matrix);
-    SimBackgroundVoxelProject_Prepare(&params);
-    if (!PresentSimGlobeMountains_Prepare(&params,&map,SimGlobeMountainGround,
-            SimWorldMap_GeographySerial())) {
-      fprintf(stderr,"[sim-globe-town] native mountain preparation rejected\n");
-      goto failed;
-    }
-    if (!PresentSimGlobeTerrain_Prepare(&map,SimWorldMap_GeographySerial())) {
-      fprintf(stderr,"[sim-globe-town] native terrain preparation rejected\n");
-      goto failed;
-    }
-  }
-  PresentSimGlobeGroundShadow town_shadow = {0};
-  if (content && content->prepare &&
-      !content->prepare(content->userdata,&view,&town_shadow)) {
-    fprintf(stderr,"[sim-globe-town] dynamic content preparation rejected\n");
-    goto failed;
-  }
-  if (!Sim3DDepthPass_Begin(&g_render_device,viewport.w,viewport.h,kArRenderFilter_Linear)) goto failed;
-  if (!SimGlobeBuildSurface(slot,&projection,&map,detailed_town)) goto failed;
-  bool ok = s_world_art.displayed_version < 0 || Sim3DDepthPass_SelectAtlasVersion(
-      s_world_art.atlas_cache,(unsigned)s_world_art.displayed_version);
-  Sim3DDepthSurfaceTransform t = {.radial = {.sphere_radius = map.radius,.height_scale = 1},
-      .ambient = .76f,
-      .diffuse = .24f};
-  t.focus=PresentSimGlobeFocus_Resolve(&map,
-      (slot->sim.effective_features & kSimFeature_CullHaze)!=0,
-      slot->sim.cull_dim_pct,slot->sim.underlay_haze_pct,slot->sim.cull_haze_lead_px);
-  memcpy(t.radial.matrix,projection.matrix,sizeof(t.radial.matrix));
+  memcpy(view.matrix, projection.matrix, sizeof(view.matrix));
+  memcpy(view.camera, projection.camera_world, sizeof(view.camera));
+  *out_projection = projection;
+  *out_view = view;
+  return true;
+}
+
+static Sim3DDepthSurfaceTransform SimGlobeSurfaceTransform(const FrameSlot *slot,
+                                                           const PresentSimGlobeView *view) {
+  const SimGlobeMapping map = view->map;
+  Sim3DDepthSurfaceTransform t = {
+      .radial = {.sphere_radius = map.radius, .height_scale = 1}, .ambient = .76f, .diffuse = .24f};
+  t.focus = PresentSimGlobeFocus_Resolve(
+      &map, (slot->sim.effective_features & kSimFeature_CullHaze) != 0, slot->sim.cull_dim_pct,
+      slot->sim.underlay_haze_pct, slot->sim.cull_haze_lead_px);
+  memcpy(t.radial.matrix, view->matrix, sizeof(t.radial.matrix));
   for (int i = 0; i < 3; ++i) t.radial.basis[i][i] = 1;
-  const float azimuth = slot->sim.light_azimuth_deg*kPi/180, elevation = slot->sim.light_elevation_deg*kPi/180;
-  t.light[0] = -cosf(azimuth)*cosf(elevation); t.light[1] = -sinf(azimuth)*cosf(elevation); t.light[2] = sinf(elevation);
+  const float azimuth = slot->sim.light_azimuth_deg * kPi / 180,
+              elevation = slot->sim.light_elevation_deg * kPi / 180;
+  t.light[0] = -cosf(azimuth) * cosf(elevation);
+  t.light[1] = -sinf(azimuth) * cosf(elevation);
+  t.light[2] = sinf(elevation);
+  return t;
+}
+
+static bool AppendSimGlobeSurfaces(const FrameSlot *slot, ArRenderRectI source,
+                                   ArRenderRectI viewport,
+                                   const WorldNavigationProjection *projection,
+                                   const SimGlobeMapping *mapping, bool detailed_town,
+                                   const PresentSimGlobeContent *content,
+                                   const PresentSimGlobeGroundShadow *shadow,
+                                   Sim3DDepthSurfaceTransform t) {
+  const SimGlobeMapping map = *mapping;
+  const PresentSimGlobeGroundShadow town_shadow = *shadow;
+  bool ok = s_world_art.displayed_version < 0 ||
+            Sim3DDepthPass_SelectAtlasVersion(s_world_art.atlas_cache,
+                                              (unsigned)s_world_art.displayed_version);
   Sim3DDepthSurfaceBatch batches[3] = {
-    {.layer = kSim3DDepthPass_Ground,.range = {0,kWorldNavigationOceanQuads}},
-    {.layer = kSim3DDepthPass_Ground,.range = {kWorldNavigationOceanQuads,s_sim_globe.mountain_first-kWorldNavigationOceanQuads},.transform = t},
-    {.layer = kSim3DDepthPass_WorldMountain,.range = {s_sim_globe.mountain_first,s_sim_globe.quads-s_sim_globe.mountain_first},.transform = t}};
-  batches[2].transform.ambient = .90f; batches[2].transform.diffuse = 0;
-  WorldNavigationProjection ocean = projection;
-  ocean.reference_height_units = map.reference_height*map.landscape/map.metric;
-  ok = ok && WorldNavigationOceanTransform(&ocean,&batches[0].transform);
-  batches[0].transform.focus=t.focus;
-  ok = ok && Sim3DMeshSet_AppendSurface(&s_sim_globe.surface,batches,3);
-  if (!ok) fprintf(stderr,"[sim-globe-underlay] surface batch rejected\n");
+      {.layer = kSim3DDepthPass_Ground, .range = {0, kWorldNavigationOceanQuads}},
+      {.layer = kSim3DDepthPass_Ground,
+       .range = {kWorldNavigationOceanQuads,
+                 s_sim_globe.mountain_first - kWorldNavigationOceanQuads},
+       .transform = t},
+      {.layer = kSim3DDepthPass_WorldMountain,
+       .range = {s_sim_globe.mountain_first, s_sim_globe.quads - s_sim_globe.mountain_first},
+       .transform = t}};
+  batches[2].transform.ambient = .90f;
+  batches[2].transform.diffuse = 0;
+  WorldNavigationProjection ocean = *projection;
+  ocean.reference_height_units = map.reference_height * map.landscape / map.metric;
+  ok = ok && WorldNavigationOceanTransform(&ocean, &batches[0].transform);
+  batches[0].transform.focus = t.focus;
+  ok = ok && Sim3DMeshSet_AppendSurface(&s_sim_globe.surface, batches, 3);
+  if (!ok) fprintf(stderr, "[sim-globe-underlay] surface batch rejected\n");
   if (ok && detailed_town) {
     /* Geographic focus marks the selected town; this separate ground cue
      * follows its smaller live sprite window. Both are draw-time materials,
      * never reasons to rebuild resident terrain/model sources on a pan. */
     const Sim3DDepthSurfaceFocus visibility =
-        PresentSimGlobeFocus_ResolveVisibility(&map,&slot->sim,source);
-    ok = PresentSimGlobeTerrain_Append(projection.matrix,map.radius,
-            SimBackgroundVoxelRenderer_GroundTexture(slot->sim.background_voxel_serial),
-            town_shadow.texture,town_shadow.opacity,&visibility) &&
-        PresentSimGlobeMountains_Append(projection.matrix,map.radius) &&
-        PresentSimGlobeWater_Append(projection.matrix,map.radius,
-            SimBackgroundVoxelRenderer_GroundTexture(slot->sim.background_voxel_serial),&visibility);
+        PresentSimGlobeFocus_ResolveVisibility(&map, &slot->sim, source);
+    ok = PresentSimGlobeTerrain_Append(
+             projection->matrix, map.radius,
+             SimBackgroundVoxelRenderer_GroundTexture(slot->sim.background_voxel_serial),
+             town_shadow.texture, town_shadow.opacity, &visibility) &&
+         PresentSimGlobeMountains_Append(projection->matrix, map.radius) &&
+         PresentSimGlobeWater_Append(
+             projection->matrix, map.radius,
+             SimBackgroundVoxelRenderer_GroundTexture(slot->sim.background_voxel_serial),
+             &visibility);
     if (ok && content)
-      ok=PresentSimGlobeMountains_AppendEffects(projection.matrix,viewport,
-          slot->sim.game_frame,slot->sim.background_voxel_detail,slot->sim.background_voxel_style,
-          SimGlobeMountainGround);
-    if (!ok) fprintf(stderr,"[sim-globe-town] native surface/shadow append rejected\n");
+      ok = PresentSimGlobeMountains_AppendEffects(
+          projection->matrix, viewport, slot->sim.game_frame, slot->sim.background_voxel_detail,
+          slot->sim.background_voxel_style, SimGlobeMountainGround);
+    if (!ok) fprintf(stderr, "[sim-globe-town] native surface/shadow append rejected\n");
   }
-  if (ok) {
-    const SimWorldNavigationTowns *towns = &slot->sim.world_navigation_towns;
-    /* The detailed town consumes the already published active SIM
-     * identities, not navigation's approximation of currently resident art.
-     * Borrowed only during this call; retained sources own their values. */
-    const SimBackgroundVoxelObject *active_objects = NULL;
-    size_t active_count = 0;
-    if (detailed_town) {
-      const SimBackgroundVoxelScene *active = SimBackgroundVoxels_Scene();
-      if (active->overflow || active->town != map.town || active->object_count > kSimBackgroundMaxObjects) ok = false;
-      else { active_objects = active->objects; active_count = active->object_count; }
+  return ok;
+}
+
+static bool AppendSimGlobeModels(const FrameSlot *slot, ArRenderRectI source,
+                                 ArRenderRectI viewport, const float matrix[16],
+                                 const PresentSimGlobeView *view, bool sim_facades,
+                                 bool detailed_town, Sim3DDepthSurfaceTransform t) {
+  const SimGlobeMapping map = view->map;
+  bool ok = true;
+  const SimWorldNavigationTowns *towns = &slot->sim.world_navigation_towns;
+  /* The detailed town consumes the already published active SIM
+   * identities, not navigation's approximation of currently resident art.
+   * Borrowed only during this call; retained sources own their values. */
+  const SimBackgroundVoxelObject *active_objects = NULL;
+  size_t active_count = 0;
+  if (detailed_town) {
+    const SimBackgroundVoxelScene *active = SimBackgroundVoxels_Scene();
+    if (active->overflow || active->town != map.town ||
+        active->object_count > kSimBackgroundMaxObjects)
+      ok = false;
+    else {
+      active_objects = active->objects;
+      active_count = active->object_count;
     }
-    if (towns->overflow || towns->object_count > kSimWorldNavigationTownObjectCapacity) ok = false;
-    const size_t candidates = towns->object_count + active_count;
-    if (ok && candidates > s_world_models.gpu_source_capacity) {
-      void *buffer = realloc(s_world_models.gpu_sources,candidates*sizeof(WorldNavigationModelSource));
-      if (!buffer) ok = false;
-      else { s_world_models.gpu_sources = buffer; s_world_models.gpu_source_capacity = candidates; }
+  }
+  if (towns->overflow || towns->object_count > kSimWorldNavigationTownObjectCapacity) ok = false;
+  const size_t candidates = towns->object_count + active_count;
+  if (ok && candidates > s_world_models.gpu_source_capacity) {
+    void *buffer =
+        realloc(s_world_models.gpu_sources, candidates * sizeof(WorldNavigationModelSource));
+    if (!buffer)
+      ok = false;
+    else {
+      s_world_models.gpu_sources = buffer;
+      s_world_models.gpu_source_capacity = candidates;
     }
-    WorldNavigationModelSource *sources = s_world_models.gpu_sources;
-    size_t count = 0, radial_count = 0;
-    /* Active bridges use the town stream's separate visual/depth datums, but
-     * retain geometric height. Neighbours keep navigation's radial stream. */
-    for (unsigned group = 0; group < 2; ++group) {
-      for (size_t i = 0; ok && i < candidates; ++i) {
-        const SimWorldNavigationTownObject *object = i < towns->object_count
-            ? &towns->objects[i] : &active_objects[i-towns->object_count];
-        if (active_objects && i < towns->object_count && object->town == map.town) continue;
-        if (object->town != map.town && !slot->sim.world_navigation_models) continue;
-        const bool facing = object->town == map.town &&
-            (sim_facades || object->kind == kSimBackgroundVoxel_Bridge);
-        if (facing != (group == 1)) continue;
-        if (object->kind >= kSimBackgroundVoxelKindCount) continue;
-        const SimBackgroundBridgeBounds bounds = WorldNavigationObjectBounds(object);
-        int tx, ty;
-        if (!SimWorldMap_OriginForTown(object->town,&tx,&ty)) { ok = false; break; }
-        const float x = tx+(bounds.origin_x+bounds.width*.5f)/16;
-        const float y = ty+(bounds.origin_y+bounds.depth*.5f)/16;
-        if (!SimGlobeNearby(&map,x,y)) continue;
-        if (count >= kSimWorldNavigationTownObjectCapacity) { ok = false; break; }
-        WorldNavigationModelSource *s = &sources[count++];
-        memset(s,0,sizeof(*s)); s->object = *object;
-        if (object->kind == kSimBackgroundVoxel_Windmill && !(active_objects && facing))
-          s->object.animation_phase = 0;
-        s->detail = object->town == slot->sim.town
-            ? (SimBackgroundVoxelDetail)slot->sim.background_voxel_detail
-            : kSimBackgroundVoxelDetail_Low;
-        s->object_index = active_objects ? count-1 : i;
-        s->source_x = tx*kSimWorldMapTilePixels+bounds.origin_x*.5f;
-        s->source_y = ty*kSimWorldMapTilePixels+bounds.origin_y*.5f;
-        s->centre_x = bounds.width*.5f; s->centre_y = bounds.depth*.5f;
-        if (detailed_town && object->town == map.town) {
-          if (!SimWorldNavigationTerrain_RegisterTownFloor(map.town,x-tx,y-ty,
-                SimTownTerrain_HeightUnitsAt(map.town,(x-tx)*16,(y-ty)*16),&s->anchor_height)) {
-            ok = false; break;
-          }
-        } else s->anchor_height = map.landscape > 0
-            ? WorldNavigationTerrainHeightAt(x*kSimWorldMapTilePixels,y*kSimWorldMapTilePixels,NULL) : 0;
-        s->depth_height = s->anchor_height;
-        if (object->town == map.town && object->kind == kSimBackgroundVoxel_Bridge) {
-          float approach, envelope;
-          if (!SimBackgroundBridge_TerrainHeights(object, map.town, &approach, &envelope) ||
-              !SimWorldNavigationTerrain_RegisterTownFloor(map.town, x-tx, y-ty,
-                  approach, &s->anchor_height) ||
-              !SimWorldNavigationTerrain_RegisterTownFloor(map.town, x-tx, y-ty,
-                  envelope, &s->depth_height)) { ok = false; break; }
+  }
+  WorldNavigationModelSource *sources = s_world_models.gpu_sources;
+  size_t count = 0, radial_count = 0;
+  /* Active bridges use the town stream's separate visual/depth datums, but
+   * retain geometric height. Neighbours keep navigation's radial stream. */
+  for (unsigned group = 0; group < 2; ++group) {
+    for (size_t i = 0; ok && i < candidates; ++i) {
+      const SimWorldNavigationTownObject *object =
+          i < towns->object_count ? &towns->objects[i] : &active_objects[i - towns->object_count];
+      if (active_objects && i < towns->object_count && object->town == map.town) continue;
+      if (object->town != map.town && !slot->sim.world_navigation_models) continue;
+      const bool facing =
+          object->town == map.town && (sim_facades || object->kind == kSimBackgroundVoxel_Bridge);
+      if (facing != (group == 1)) continue;
+      if (object->kind >= kSimBackgroundVoxelKindCount) continue;
+      const SimBackgroundBridgeBounds bounds = WorldNavigationObjectBounds(object);
+      int tx, ty;
+      if (!SimWorldMap_OriginForTown(object->town, &tx, &ty)) {
+        ok = false;
+        break;
+      }
+      const float x = tx + (bounds.origin_x + bounds.width * .5f) / 16;
+      const float y = ty + (bounds.origin_y + bounds.depth * .5f) / 16;
+      if (!SimGlobeNearby(&map, x, y)) continue;
+      if (count >= kSimWorldNavigationTownObjectCapacity) {
+        ok = false;
+        break;
+      }
+      WorldNavigationModelSource *s = &sources[count++];
+      memset(s, 0, sizeof(*s));
+      s->object = *object;
+      if (object->kind == kSimBackgroundVoxel_Windmill && !(active_objects && facing))
+        s->object.animation_phase = 0;
+      s->detail = object->town == slot->sim.town
+                      ? (SimBackgroundVoxelDetail)slot->sim.background_voxel_detail
+                      : kSimBackgroundVoxelDetail_Low;
+      s->object_index = active_objects ? count - 1 : i;
+      s->source_x = tx * kSimWorldMapTilePixels + bounds.origin_x * .5f;
+      s->source_y = ty * kSimWorldMapTilePixels + bounds.origin_y * .5f;
+      s->centre_x = bounds.width * .5f;
+      s->centre_y = bounds.depth * .5f;
+      if (detailed_town && object->town == map.town) {
+        if (!SimWorldNavigationTerrain_RegisterTownFloor(
+                map.town, x - tx, y - ty,
+                SimTownTerrain_HeightUnitsAt(map.town, (x - tx) * 16, (y - ty) * 16),
+                &s->anchor_height)) {
+          ok = false;
+          break;
+        }
+      } else
+        s->anchor_height = map.landscape > 0
+                               ? WorldNavigationTerrainHeightAt(x * kSimWorldMapTilePixels,
+                                                                y * kSimWorldMapTilePixels, NULL)
+                               : 0;
+      s->depth_height = s->anchor_height;
+      if (object->town == map.town && object->kind == kSimBackgroundVoxel_Bridge) {
+        float approach, envelope;
+        if (!SimBackgroundBridge_TerrainHeights(object, map.town, &approach, &envelope) ||
+            !SimWorldNavigationTerrain_RegisterTownFloor(map.town, x - tx, y - ty, approach,
+                                                         &s->anchor_height) ||
+            !SimWorldNavigationTerrain_RegisterTownFloor(map.town, x - tx, y - ty, envelope,
+                                                         &s->depth_height)) {
+          ok = false;
+          break;
         }
       }
-      if (!group) radial_count = count;
     }
-    WorldNavigationModelSourceStyle style;
-    memset(&style,0,sizeof(style));
-    style.embedding = map; style.surface_revision = SimWorldMap_GeographySerial();
-    style.chart_radius_tiles = map.chart_radius; style.tile_world = 1/map.metric;
-    style.height_percent = slot->sim.height_scale_x100;
-    style.light_azimuth = slot->sim.light_azimuth_deg; style.light_elevation = slot->sim.light_elevation_deg;
-    style.style = slot->sim.background_voxel_style; style.lighting = true;
-    style.focus=t.focus;
-    t.radial.variant = (unsigned)((slot->sim.game_frame / 12) % 3) + 1;
-    if (ok && count) ok = WorldNavigationModelMesh_Enabled();
-    if (ok && radial_count)
-      ok = WorldNavigationModelMesh_Draw(sources,radial_count,&style,&t.radial);
-    if (ok) {
-      /* Active facades are wholly inside the clear town. Do not invalidate
-       * their resident sources when a neighbour-only focus setting changes. */
-      style.focus=(Sim3DDepthSurfaceFocus){0};
-      style.captured_poses = active_objects != NULL;
-      const SimBackgroundVoxelRenderParams params = {
-        .source = source, .viewport = viewport, .matrix = matrix,
-        .facing = slot->sim.background_voxel_facing,
-      };
-      SimBackgroundProjectionAxis axes[kSimBackgroundVoxelKindCount];
-      SimBackgroundVoxelProject_ResolveAxes(&params,axes);
-      ok = WorldNavigationModelMesh_DrawFacingTown(
-          sources ? sources+radial_count : NULL,count-radial_count,&style,
-          slot->sim.background_voxel_shading,axes,projection.matrix,(unsigned)t.radial.variant-1);
-    }
-    if (!ok) fprintf(stderr,"[sim-globe-underlay] models rejected count=%zu\n",count);
+    if (!group) radial_count = count;
   }
-  if (ok && content) ok = content->append && content->append(content->userdata,&view);
-  ArRenderTexture composite = Sim3DDepthPass_Submit(&g_render_device,ArRenderTexture_Invalid());
-  if (!ArRenderTexture_IsValid(composite)) fprintf(stderr,"[sim-globe-underlay] composite rejected\n");
+  WorldNavigationModelSourceStyle style;
+  memset(&style, 0, sizeof(style));
+  style.embedding = map;
+  style.surface_revision = SimWorldMap_GeographySerial();
+  style.chart_radius_tiles = map.chart_radius;
+  style.tile_world = 1 / map.metric;
+  style.height_percent = slot->sim.height_scale_x100;
+  style.light_azimuth = slot->sim.light_azimuth_deg;
+  style.light_elevation = slot->sim.light_elevation_deg;
+  style.style = slot->sim.background_voxel_style;
+  style.lighting = true;
+  style.focus = t.focus;
+  t.radial.variant = (unsigned)((slot->sim.game_frame / 12) % 3) + 1;
+  if (ok && count) ok = WorldNavigationModelMesh_Enabled();
+  if (ok && radial_count)
+    ok = WorldNavigationModelMesh_Draw(sources, radial_count, &style, &t.radial);
+  if (ok) {
+    /* Active facades are wholly inside the clear town. Do not invalidate
+     * their resident sources when a neighbour-only focus setting changes. */
+    style.focus = (Sim3DDepthSurfaceFocus){0};
+    style.captured_poses = active_objects != NULL;
+    const SimBackgroundVoxelRenderParams params = {
+        .source = source,
+        .viewport = viewport,
+        .matrix = matrix,
+        .facing = slot->sim.background_voxel_facing,
+    };
+    SimBackgroundProjectionAxis axes[kSimBackgroundVoxelKindCount];
+    SimBackgroundVoxelProject_ResolveAxes(&params, axes);
+    ok = WorldNavigationModelMesh_DrawFacingTown(
+        sources ? sources + radial_count : NULL, count - radial_count, &style,
+        slot->sim.background_voxel_shading, axes, view->matrix, (unsigned)t.radial.variant - 1);
+  }
+  if (!ok) fprintf(stderr, "[sim-globe-underlay] models rejected count=%zu\n", count);
+  return ok;
+}
+
+static PresentationOutcome DrawSimGlobeScene(const FrameSlot *slot, ArRenderRectI source,
+                                             ArRenderRectI viewport, const Scene3DCamera *camera,
+                                             const float matrix[16], float radius_scale,
+                                             bool sim_facades, bool detailed_town,
+                                             const PresentSimGlobeContent *content,
+                                             PresentSimGlobeView *out_view) {
+  WorldNavigationProjection projection;
+  PresentSimGlobeView view;
+  if (!PrepareSimGlobeView(slot, source, viewport, camera, matrix, radius_scale, sim_facades,
+                           &projection, &view))
+    return kPresentationOutcome_CoreFailure;
+  const SimGlobeMapping map = view.map;
+  if (out_view) *out_view = view;
+  if (detailed_town) {
+    SimBackgroundVoxelRenderParams params = SimVoxelRenderParams(slot, source, viewport, matrix);
+    SimBackgroundVoxelProject_Prepare(&params);
+    if (!PresentSimGlobeMountains_Prepare(&params, &map, SimGlobeMountainGround,
+                                          SimWorldMap_GeographySerial())) {
+      fprintf(stderr, "[sim-globe-town] native mountain preparation rejected\n");
+      goto failed;
+    }
+    if (!PresentSimGlobeTerrain_Prepare(&map, SimWorldMap_GeographySerial())) {
+      fprintf(stderr, "[sim-globe-town] native terrain preparation rejected\n");
+      goto failed;
+    }
+  }
+  PresentSimGlobeGroundShadow town_shadow = {0};
+  if (content && content->prepare && !content->prepare(content->userdata, &view, &town_shadow)) {
+    fprintf(stderr, "[sim-globe-town] dynamic content preparation rejected\n");
+    goto failed;
+  }
+  if (!Sim3DDepthPass_Begin(&g_render_device, viewport.w, viewport.h, kArRenderFilter_Linear))
+    goto failed;
+  if (!SimGlobeBuildSurface(slot, &projection, &map, detailed_town)) goto failed;
+  const Sim3DDepthSurfaceTransform transform = SimGlobeSurfaceTransform(slot, &view);
+  bool ok = AppendSimGlobeSurfaces(slot, source, viewport, &projection, &map, detailed_town,
+                                   content, &town_shadow, transform);
+  if (ok)
+    ok = AppendSimGlobeModels(slot, source, viewport, matrix, &view, sim_facades, detailed_town,
+                              transform);
+  if (ok && content) ok = content->append && content->append(content->userdata, &view);
+  ArRenderTexture composite = Sim3DDepthPass_Submit(&g_render_device, ArRenderTexture_Invalid());
+  if (!ArRenderTexture_IsValid(composite))
+    fprintf(stderr, "[sim-globe-underlay] composite rejected\n");
   if (!ok || !ArRenderTexture_IsValid(composite)) goto failed;
-  return DrawSimGlobeImage(viewport,composite);
+  return DrawSimGlobeImage(viewport, composite);
 failed:
   if (Sim3DDepthPass_IsCollecting())
-    (void)Sim3DDepthPass_Submit(&g_render_device,ArRenderTexture_Invalid());
-  fprintf(stderr,"[sim-globe-underlay] selected connected world could not be rendered\n");
+    (void)Sim3DDepthPass_Submit(&g_render_device, ArRenderTexture_Invalid());
+  fprintf(stderr, "[sim-globe-underlay] selected connected world could not be rendered\n");
   return kPresentationOutcome_CoreFailure;
 }
 
@@ -4962,14 +5055,14 @@ PresentationOutcome PresentWorldNavigation3D(const FrameSlot *slot) {
       &slot->sim.world_navigation_scene;
   const SimWorldNavigationComposition *composition = &scene->composition;
   if (!scene->valid || !composition->valid ||
-      !s_world_composition.uploaded)
+      !WorldNavigationComposition_Get()->uploaded)
     return kPresentationOutcome_CoreFailure;
   if (!EnsureWorldNavigationResources(slot)) return kPresentationOutcome_CoreFailure;
   if (!composition->empty_animation &&
-      (!ArRenderTexture_IsValid(s_world_composition.palace) ||
-       !ArRenderTexture_IsValid(s_world_composition.plaque) ||
+      (!ArRenderTexture_IsValid(WorldNavigationComposition_Get()->palace) ||
+       !ArRenderTexture_IsValid(WorldNavigationComposition_Get()->plaque) ||
        (composition->label.visible &&
-        !ArRenderTexture_IsValid(s_world_composition.label))))
+        !ArRenderTexture_IsValid(WorldNavigationComposition_Get()->label))))
     return kPresentationOutcome_CoreFailure;
 
   const int aspect_width = slot->visible_width *
@@ -4997,9 +5090,9 @@ PresentationOutcome PresentWorldNavigation3D(const FrameSlot *slot) {
             kSimWorldNavigationCompositionWidth &&
         (unsigned)record->y + record->height <=
             kSimWorldNavigationCompositionHeight) {
-      const ArRenderPointF top_left = WorldNavigationAuthenticToOutput(
+      const ArRenderPointF top_left = WorldNavigationComposition_ProjectPoint(
           slot, viewport, record->x, record->y);
-      const ArRenderPointF bottom_right = WorldNavigationAuthenticToOutput(
+      const ArRenderPointF bottom_right = WorldNavigationComposition_ProjectPoint(
           slot, viewport, record->x + record->width,
           record->y + record->height);
       const int left = (int)lroundf(top_left.x);
@@ -5023,13 +5116,13 @@ PresentationOutcome PresentWorldNavigation3D(const FrameSlot *slot) {
   }
   if (!composition->empty_animation &&
       (!DrawWorldNavigationPalace(slot, viewport, &projection) ||
-       !DrawWorldNavigationCompositionLayer(
+       !WorldNavigationComposition_DrawLayer(
            slot, viewport, &composition->plaque,
-           s_world_composition.plaque, (ArRenderPointF){0}, 1.0f) ||
+           WorldNavigationComposition_Get()->plaque, (ArRenderPointF){0}, 1.0f) ||
        (!localized_label_ready && composition->label.visible &&
-        !DrawWorldNavigationCompositionLayer(
+        !WorldNavigationComposition_DrawLayer(
             slot, viewport, &composition->label,
-            s_world_composition.label, (ArRenderPointF){0}, 1.0f)) ||
+            WorldNavigationComposition_Get()->label, (ArRenderPointF){0}, 1.0f)) ||
        (localized_label_ready &&
         !ArLocalizedTextPresenter_DrawWithBrightness(
             &g_render_device, &localized_label,
@@ -5053,124 +5146,10 @@ static void ResetWorldNavigationWorkers(void) {
   s_world_workers_attempted = false;
 }
 
-static void ResetWorldNavigationModels(void) {
-  WorldNavigationModelMesh_Reset();
-  free(s_world_models.gpu_sources);
-  s_world_models.gpu_sources = NULL;
-  s_world_models.gpu_source_capacity = 0;
-  s_world_models.gpu_sources_unavailable = false;
-  s_world_models.gpu_current_ready = false;
-  s_world_models.gpu_current_rejected = false;
-  free(s_world_model_batch);
-  s_world_model_batch = NULL;
-  s_world_model_batch_unavailable = false;
-  free(s_world_models.projected);
-  Sim3DDepthPass_DestroyMesh(s_world_models.solid_mesh);
-  s_world_models.solid_mesh = NULL;
-  s_world_models.solid_mesh_published = s_world_models.solid_mesh_unavailable =
-      false;
-  s_world_models.solid_mesh_attempted = false;
-  s_world_models.solid_mesh_opt_out = false;
-  s_world_models.projected = NULL;
-  s_world_models.projected_count = s_world_models.projected_capacity = 0;
-  s_world_models.projected_valid = s_world_models.capturing = false;
-  s_world_models.capture_static = false;
-  s_world_models.animated_count = 0;
-  s_world_models.projection_key_ready = false;
-  s_world_models.projection_unavailable = false;
-  s_world_models.object_count = 0;
-  s_world_models.detail = s_world_models.style = -1;
-  s_world_models.maximum_rise = 0.0f;
-}
 
-static void ResetWorldNavigationWeather(void) {
-  Sim3DDepthPass_DestroyMesh(s_world_weather.receiver_mesh);
-  Sim3DDepthPass_DestroyMesh(s_world_weather.spherical_mesh);
-  Sim3DDepthPass_DestroyMesh(s_world_weather.body_mesh);
-  free(s_world_weather.body_vertices);
-  s_world_weather.body_vertices = NULL;
-  s_world_weather.body_mesh = NULL;
-  s_world_weather.body_unavailable = false;
-  s_world_weather.body_radius = s_world_weather.body_distance = 0;
-  free(s_world_weather.spherical_quads);
-  s_world_weather.spherical_mesh = NULL;
-  s_world_weather.spherical_quads = NULL;
-  s_world_weather.spherical_capacity = 0;
-  s_world_weather.spherical_ready = s_world_weather.spherical_unavailable =
-      false;
-  s_world_weather.receiver_mesh = NULL;
-  free(s_world_weather.receiver_positions);
-  free(s_world_weather.receiver_uv);
-  s_world_weather.receiver_positions = NULL;
-  s_world_weather.receiver_uv = NULL;
-  s_world_weather.receiver_mesh_capacity = 0;
-  s_world_weather.receiver_mesh_ready =
-      s_world_weather.receiver_mesh_unavailable = false;
-  free(s_world_weather.receivers);
-  s_world_weather.receivers = NULL;
-  s_world_weather.receiver_count = s_world_weather.receiver_capacity = 0;
-  s_world_weather.receivers_ready = s_world_weather.receivers_unavailable =
-      false;
-  s_world_weather.ready = false;
-  s_world_weather.unavailable = false;
-  PresentWorldNavSky_Reset();
-  s_world_weather.failure_reported = false;
-}
 
-static void ResetWorldNavigationTerrain(void) {
-  s_world_terrain.samples_ready = false;
-  SimWorldNavigationCliffs_Destroy(&s_world_terrain.cliffs);
-  free(s_world_terrain.cliff_projection);
-  s_world_terrain.cliff_projection = NULL;
-  s_world_terrain.cliffs_ready = false;
-  SimWorldNavigationTerrain_SetMountainReplacement(NULL);
-  SimWorldNavigationTerrain_SetMountainTransition(NULL);
-  SimWorldNavigationTerrain_SetMountainJoin(NULL, NULL, 0);
-  SimWorldNavigationTerrain_SetMountainContinuationLimit(NULL, NULL, 0);
-  s_world_terrain.projection_ready = false;
-  s_world_terrain.ready = false;
-}
 
-static void ResetWorldNavigationMountains(void) {
-  DestroyWorldNavigationMountainProjection();
-  SimWorldNavigationMountains_Destroy(&s_world_mountains.scene);
-  SimWorldNavigationMountainTransition_Destroy(&s_world_mountains.transition);
-  s_world_mountains.transition_ready = false;
-  s_world_mountains.transition_serial = 0;
-  s_world_mountains.relief_pct = 0;
-  s_world_mountains.ready = false;
-  s_world_mountains.active = false;
-  s_world_mountains.lava_upload = (SimWorldNavigationMountainAtlasUpdate){0};
-  s_world_mountains.developed = false;
-}
 
-static void ResetWorldNavigationArt(void) {
-  free(s_world_art.animation);
-  s_world_art.animation = NULL;
-  s_world_art.animation_unavailable = false;
-  InvalidateWorldNavigationArtPublication();
-  s_world_art.blur_serial = 0;
-  s_world_art.geography = 0;
-  s_world_art.unavailable = false;
-  s_world_art.atlas_cache_unavailable = false;
-  free(s_world_art.pixels);
-  s_world_art.pixels = NULL;
-  free(s_world_art.baseline);
-  s_world_art.baseline = NULL;
-}
-
-static void ResetWorldNavigationComposition(void) {
-  ArRenderDevice_DestroyTexture(&g_render_device, s_world_composition.palace);
-  s_world_composition.palace = ArRenderTexture_Invalid();
-  ArRenderDevice_DestroyTexture(&g_render_device, s_world_composition.label);
-  s_world_composition.label = ArRenderTexture_Invalid();
-  ArRenderDevice_DestroyTexture(&g_render_device, s_world_composition.plaque);
-  s_world_composition.plaque = ArRenderTexture_Invalid();
-  s_world_composition.uploaded = false;
-  PresentationUploadMirror_Reset(&s_world_composition.palace_mirror);
-  PresentationUploadMirror_Reset(&s_world_composition.plaque_mirror);
-  PresentationUploadMirror_Reset(&s_world_composition.label_mirror);
-}
 
 static void ResetWorldNavigationGlobeSurfaces(void) {
   PresentSimGlobeMountains_Reset();
@@ -5199,5 +5178,5 @@ void PresentWorldNav_ResetResources(void) {
   ResetWorldNavigationTerrain();
   ResetWorldNavigationMountains();
   ResetWorldNavigationArt();
-  ResetWorldNavigationComposition();
+  WorldNavigationComposition_Reset();
 }

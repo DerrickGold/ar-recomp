@@ -1126,6 +1126,7 @@ if(BUILD_TESTING)
         src/sim/sim3d_performance.c
         src/present_sim3d_environment.c
         src/present_world_nav.c
+        src/present_world_nav_composition.c
         src/present_sim_globe_mapping.c
         src/present_world_nav_geometry.c
         src/present_world_nav_model_mesh.c
@@ -2028,6 +2029,8 @@ if(BUILD_TESTING)
         src/atomic_replace.c
         src/randomizer.c
         src/settings_overlay.c
+        src/settings_overlay_artwork.c
+        src/settings_overlay_palette.c
         src/localization/interface_text.c
         src/render/ui_text_renderer.c
         src/render/text_surface_cache.c

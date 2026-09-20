@@ -27,6 +27,15 @@ var localizationCSS string
 //go:embed localization.js
 var localizationJS string
 
+//go:embed localization_font_editor.js
+var localizationFontEditorJS string
+
+//go:embed localization_import_editor.js
+var localizationImportEditorJS string
+
+//go:embed localization_library.js
+var localizationLibraryJS string
+
 //go:embed localization_styling.js
 var localizationStylingJS string
 
@@ -63,6 +72,9 @@ func (app *application) serveLocalization(w http.ResponseWriter, r *http.Request
 		} else if endpoint == "editor.js" {
 			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 			io.WriteString(w, localizationStylingJS)
+			io.WriteString(w, localizationFontEditorJS)
+			io.WriteString(w, localizationLibraryJS)
+			io.WriteString(w, localizationImportEditorJS)
 			io.WriteString(w, localizationJS)
 		} else {
 			w.Header().Set("Content-Type", "text/css; charset=utf-8")

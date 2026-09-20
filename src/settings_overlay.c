@@ -3,6 +3,8 @@
 #include "localization/unicode_grapheme.h"
 #include "localization/interface_text.h"
 #include "settings_overlay_internal.h"
+#include "settings_overlay_artwork.h"
+#include "settings_overlay_palette.h"
 #include "settings_overlay_localization.h"
 #include "settings_overlay_layers_localization.h"
 
@@ -11,32 +13,17 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "byte_order.h"
 #include "constants.h"
 #include "diorama/diorama_layer_editor.h"
 #include "action/action_bg_tuner.h"
 #include "host/host_clock.h"
 #include "input_map.h"
-#include "quintet_lzss.h"
 #include "render/render_output.h"
 #include "render/ui_text_renderer.h"
 #include "settings.h"
-#include "snes_bgr555.h"
 #include "user_data_dir.h"
 
 enum {
-  kFontTileBytes = 0x1000,
-  kFontAssetOffset = 0xBECFB,
-  kFontAtlasWidth = 128,
-  kFontAtlasHeight = 128,
-  kDebugFontAtlasWidth = 96,
-  kDebugFontAtlasHeight = 128,
-  /* kDebugGlyphWidth/kDebugGlyphHeight/kDebugLineHeight and kGlyphSize live in
-   * settings_overlay_internal.h — shared with the debug panel. */
-  kDialogCharAssetOffset = 0x6C000,
-  kDialogPaletteAssetOffset = 0xE3F73,
-  kDialogAtlasWidth = 24,
-  kDialogAtlasHeight = 24,
   kRowHeight = 13,
   kMinimumLayoutWidth = 464,
   kMinimumLayoutHeight = 208,
@@ -72,12 +59,12 @@ static const uint32_t kHighlight = ARGB(255, 22, 57, 83);
  *    yellow-bordered selected item slot,
  *  - the warm gold is the game's own highlight text color (CGRAM pal0 #6),
  *    used for the blinking cursor and the restart marker. */
-static const uint32_t kSteelBlue = ARGB(255, 164, 196, 219);
+const uint32_t kSteelBlue = ARGB(255, 164, 196, 219);
 static const uint32_t kSteelDim = ARGB(255, 74, 104, 130);
-static const uint32_t kSelectYellow = ARGB(255, 255, 230, 0);
-static const uint32_t kGameGold = ARGB(255, 255, 180, 65);
+const uint32_t kSelectYellow = ARGB(255, 255, 230, 0);
+const uint32_t kGameGold = ARGB(255, 255, 180, 65);
 static const uint32_t kQualityOfLifeBlue = ARGB(255, 156, 205, 255);
-static const uint32_t kMutedText = ARGB(255, 120, 140, 158);
+const uint32_t kMutedText = ARGB(255, 120, 140, 158);
 static ArUiTextRenderer s_ui_text;
 
 static ArUiLocale InterfaceLocale(void) {
@@ -113,144 +100,6 @@ static const uint32_t kDebugTextColors[kDebugTextStyle_Count] = {
   ARGB(255, 119, 139, 154), /* controls and explanatory notes */
 };
 
-typedef enum TextStyle {
-  kText_Normal,
-  kText_Dim,
-  kText_Warning,
-  kText_Value,
-  kTextStyle_Count,
-} TextStyle;
-
-/* Pixel zero is transparent. The remaining entries are the original
- * dialog-font outline, blue shadow, and face colors, plus host-side dim and
- * warning remaps of those same three pixel classes. Every non-transparent
- * color here is a color from the game's own menu CGRAM. */
-static const uint32_t kTextPalettes[kTextStyle_Count][4] = {
-  /* Normal: the game's white face over its blue shadow (CGRAM pal0 #3/#2). */
-  { ARGB(0, 0, 0, 0), ARGB(255, 0, 0, 0),
-    ARGB(255, 156, 205, 255), ARGB(255, 255, 255, 255) },
-  /* Dim: recessed steel for unavailable/passive text. */
-  { ARGB(0, 0, 0, 0), ARGB(255, 0, 0, 0),
-    ARGB(255, 45, 63, 78), ARGB(255, 91, 111, 126) },
-  /* Warning/cursor: the game's warm gold highlight (CGRAM pal0 #6). */
-  { ARGB(0, 0, 0, 0), ARGB(255, 38, 21, 3),
-    ARGB(255, 164, 98, 20), ARGB(255, 255, 180, 65) },
-  /* Value: the game's light menu blue (CGRAM pal0 #2) so a row's value reads
-   * distinct from its warm-white label without the neon cyan drift. */
-  { ARGB(0, 0, 0, 0), ARGB(255, 0, 0, 0),
-    ARGB(255, 49, 82, 164), ARGB(255, 156, 205, 255) },
-};
-
-/* Compact 5x8 fallback and supplemental punctuation, five pixels wide in the
- * low bits of each row, sharing a baseline on row 6 so caps and lowercase sit
- * on the same line and row 7 is free for descenders. The ROM font is the
- * normal path for menu chrome, but these host-authored masks keep the menu
- * usable if the supplied ROM does not match the verified asset layout — and
- * they are also the SOURCE of the small proportional-height font the
- * description panel and tab bar draw with, which is why the lowercase set is
- * authored for real rather than aliased onto the capitals. */
-static const uint8_t kFallbackFont[128][8] = {
-  [' '] = {0, 0, 0, 0, 0, 0, 0},
-  ['!'] = {4, 4, 4, 4, 4, 0, 4},
-  ['"'] = {10, 10, 10, 0, 0, 0, 0},
-  ['#'] = {10, 31, 10, 10, 31, 10, 0},
-  ['$'] = {4, 15, 20, 14, 5, 30, 4},
-  ['%'] = {24, 25, 2, 4, 8, 19, 3},
-  ['('] = {2, 4, 8, 8, 8, 4, 2},
-  [')'] = {8, 4, 2, 2, 2, 4, 8},
-  ['*'] = {0, 21, 14, 31, 14, 21, 0},
-  ['+'] = {0, 4, 4, 31, 4, 4, 0},
-  [','] = {0, 0, 0, 0, 4, 4, 8},
-  ['-'] = {0, 0, 0, 31, 0, 0, 0},
-  ['.'] = {0, 0, 0, 0, 0, 4, 4},
-  ['/'] = {1, 2, 2, 4, 8, 8, 16},
-  ['0'] = {14, 17, 19, 21, 25, 17, 14},
-  ['1'] = {4, 12, 4, 4, 4, 4, 14},
-  ['2'] = {14, 17, 1, 2, 4, 8, 31},
-  ['3'] = {30, 1, 1, 14, 1, 1, 30},
-  ['4'] = {2, 6, 10, 18, 31, 2, 2},
-  ['5'] = {31, 16, 16, 30, 1, 1, 30},
-  ['6'] = {14, 16, 16, 30, 17, 17, 14},
-  ['7'] = {31, 1, 2, 4, 8, 8, 8},
-  ['8'] = {14, 17, 17, 14, 17, 17, 14},
-  ['9'] = {14, 17, 17, 15, 1, 1, 14},
-  [':'] = {0, 4, 4, 0, 4, 4, 0},
-  [';'] = {0, 4, 4, 0, 4, 4, 8},
-  ['<'] = {2, 4, 8, 16, 8, 4, 2},
-  ['='] = {0, 0, 31, 0, 31, 0, 0},
-  ['>'] = {8, 4, 2, 1, 2, 4, 8},
-  ['?'] = {14, 17, 1, 2, 4, 0, 4},
-  ['['] = {14, 8, 8, 8, 8, 8, 14},
-  [']'] = {14, 2, 2, 2, 2, 2, 14},
-  ['_'] = {0, 0, 0, 0, 0, 0, 31},
-  ['A'] = {14, 17, 17, 31, 17, 17, 17},
-  ['B'] = {30, 17, 17, 30, 17, 17, 30},
-  ['C'] = {15, 16, 16, 16, 16, 16, 15},
-  ['D'] = {30, 17, 17, 17, 17, 17, 30},
-  ['E'] = {31, 16, 16, 30, 16, 16, 31},
-  ['F'] = {31, 16, 16, 30, 16, 16, 16},
-  ['G'] = {15, 16, 16, 23, 17, 17, 15},
-  ['H'] = {17, 17, 17, 31, 17, 17, 17},
-  ['I'] = {31, 4, 4, 4, 4, 4, 31},
-  ['J'] = {7, 2, 2, 2, 2, 18, 12},
-  ['K'] = {17, 18, 20, 24, 20, 18, 17},
-  ['L'] = {16, 16, 16, 16, 16, 16, 31},
-  ['M'] = {17, 27, 21, 21, 17, 17, 17},
-  ['N'] = {17, 25, 21, 19, 17, 17, 17},
-  ['O'] = {14, 17, 17, 17, 17, 17, 14},
-  ['P'] = {30, 17, 17, 30, 16, 16, 16},
-  ['Q'] = {14, 17, 17, 17, 21, 18, 13},
-  ['R'] = {30, 17, 17, 30, 20, 18, 17},
-  ['S'] = {15, 16, 16, 14, 1, 1, 30},
-  ['T'] = {31, 4, 4, 4, 4, 4, 4},
-  ['U'] = {17, 17, 17, 17, 17, 17, 14},
-  ['V'] = {17, 17, 17, 17, 17, 10, 4},
-  ['W'] = {17, 17, 17, 21, 21, 21, 10},
-  ['X'] = {17, 17, 10, 4, 10, 17, 17},
-  ['Y'] = {17, 17, 10, 4, 4, 4, 4},
-  ['Z'] = {31, 1, 2, 4, 8, 16, 31},
-  /* Lowercase: x-height on rows 2-6, ascenders from row 0, descenders on
-   * row 7. Only the small font renders these; the 8x8 menu font still folds
-   * lowercase onto the capitals (see BuildFallbackFont) to match the ROM
-   * dialog font's single-case letterforms. */
-  ['a'] = {0, 0, 14, 1, 15, 17, 15, 0},
-  ['b'] = {16, 16, 30, 17, 17, 17, 30, 0},
-  ['c'] = {0, 0, 14, 16, 16, 16, 14, 0},
-  ['d'] = {1, 1, 15, 17, 17, 17, 15, 0},
-  ['e'] = {0, 0, 14, 17, 31, 16, 14, 0},
-  ['f'] = {6, 8, 28, 8, 8, 8, 8, 0},
-  ['g'] = {0, 0, 15, 17, 17, 15, 1, 14},
-  ['h'] = {16, 16, 30, 17, 17, 17, 17, 0},
-  ['i'] = {4, 0, 12, 4, 4, 4, 14, 0},
-  ['j'] = {2, 0, 6, 2, 2, 2, 18, 12},
-  ['k'] = {16, 16, 18, 20, 24, 20, 18, 0},
-  ['l'] = {12, 4, 4, 4, 4, 4, 14, 0},
-  ['m'] = {0, 0, 26, 21, 21, 21, 21, 0},
-  ['n'] = {0, 0, 30, 17, 17, 17, 17, 0},
-  ['o'] = {0, 0, 14, 17, 17, 17, 14, 0},
-  ['p'] = {0, 0, 30, 17, 17, 30, 16, 16},
-  ['q'] = {0, 0, 15, 17, 17, 15, 1, 1},
-  ['r'] = {0, 0, 22, 25, 16, 16, 16, 0},
-  ['s'] = {0, 0, 15, 16, 14, 1, 30, 0},
-  ['t'] = {8, 8, 28, 8, 8, 8, 6, 0},
-  ['u'] = {0, 0, 17, 17, 17, 19, 13, 0},
-  ['v'] = {0, 0, 17, 17, 17, 10, 4, 0},
-  ['w'] = {0, 0, 17, 17, 21, 21, 10, 0},
-  ['x'] = {0, 0, 17, 10, 4, 10, 17, 0},
-  ['y'] = {0, 0, 17, 17, 17, 15, 1, 14},
-  ['z'] = {0, 0, 31, 2, 4, 8, 31, 0},
-  ['\''] = {4, 4, 0, 0, 0, 0, 0, 0},
-  ['&'] = {12, 18, 20, 8, 21, 18, 13, 0},
-  ['@'] = {14, 17, 23, 21, 23, 16, 15, 0},
-  ['{'] = {6, 8, 8, 16, 8, 8, 6, 0},
-  ['}'] = {12, 2, 2, 1, 2, 2, 12, 0},
-  ['|'] = {4, 4, 4, 4, 4, 4, 4, 0},
-  ['\\'] = {16, 8, 8, 4, 2, 2, 1, 0},
-  ['^'] = {4, 10, 17, 0, 0, 0, 0, 0},
-  ['~'] = {0, 0, 9, 21, 18, 0, 0, 0},
-  ['`'] = {8, 4, 0, 0, 0, 0, 0, 0},
-};
-
 /* ── Sections and tabs (M1(b), followup doc) ─────────────────────────────
  * The nav column used to list one row per SettingCategory, which meant 13
  * rows of near-synonyms (Display / Diorama / Simulation / Graphics /
@@ -279,6 +128,7 @@ typedef struct MenuTab {
 typedef struct MenuSection {
   const char *label;
   const char *blurb;      /* shown in the description panel from the nav column */
+  SettingsOverlayIcon icon;
   const MenuTab *tabs;
   int tab_count;
   /* Rows built by this file rather than enumerated from the settings registry.
@@ -377,22 +227,22 @@ _Static_assert((int)(sizeof(kTabsLayers) / sizeof(kTabsLayers[0])) ==
 #undef TAB
 #undef PAGE_TAB
 
-#define SECTION(name_, blurb_, tabs_) \
-  { .label = (name_), .blurb = (blurb_), .tabs = (tabs_), \
+#define SECTION(icon_, name_, blurb_, tabs_) \
+  { .icon = kOverlayIcon_##icon_, .label = (name_), .blurb = (blurb_), .tabs = (tabs_), \
     .tab_count = (int)(sizeof(tabs_) / sizeof((tabs_)[0])) }
-#define MANUAL_SECTION(name_, blurb_, tabs_) \
-  { .label = (name_), .blurb = (blurb_), .tabs = (tabs_), \
+#define MANUAL_SECTION(icon_, name_, blurb_, tabs_) \
+  { .icon = kOverlayIcon_##icon_, .label = (name_), .blurb = (blurb_), .tabs = (tabs_), \
     .tab_count = (int)(sizeof(tabs_) / sizeof((tabs_)[0])), \
     .requires_manual = true }
 /* Developer-only, but with ordinary registry-backed rows. Distinct from
  * CUSTOM_DEBUG_SECTION, which also owns its own row model. */
-#define DEBUG_SECTION(name_, blurb_, tabs_) \
-  { .label = (name_), .blurb = (blurb_), .tabs = (tabs_), \
+#define DEBUG_SECTION(icon_, name_, blurb_, tabs_) \
+  { .icon = kOverlayIcon_##icon_, .label = (name_), .blurb = (blurb_), .tabs = (tabs_), \
     .tab_count = (int)(sizeof(tabs_) / sizeof((tabs_)[0])), \
     .debug_only = true }
 /* A section whose rows this file builds, and which is developer-only. */
-#define CUSTOM_DEBUG_SECTION(name_, blurb_, tabs_) \
-  { .label = (name_), .blurb = (blurb_), .tabs = (tabs_), \
+#define CUSTOM_DEBUG_SECTION(icon_, name_, blurb_, tabs_) \
+  { .icon = kOverlayIcon_##icon_, .label = (name_), .blurb = (blurb_), .tabs = (tabs_), \
     .tab_count = (int)(sizeof(tabs_) / sizeof((tabs_)[0])), \
     .custom_rows = true, .debug_only = true }
 
@@ -403,46 +253,46 @@ _Static_assert((int)(sizeof(kTabsLayers) / sizeof(kTabsLayers[0])) ==
  * unselected, the colored game slot palette when current); all chrome is the
  * shared steel-blue/yellow game scheme. */
 static const MenuSection kSections[] = {
-  SECTION("overlay.section.video", "overlay.section.video.help",
+  SECTION(Video, "overlay.section.video", "overlay.section.video.help",
           kTabsVideo),
   /* Both 3D sections are named for the MODE they apply to, not the technique
      they apply. "Diorama" is the technique; a player looking for the action
      stages' visuals has no reason to guess that word, and it left the pair
      reading as unrelated features when they are the same idea per mode. Named
      this way the blurbs carry the technique instead. */
-  SECTION("overlay.section.action", "overlay.section.action.help",
+  SECTION(Action, "overlay.section.action", "overlay.section.action.help",
           kTabsDiorama),
-  SECTION("overlay.section.town", "overlay.section.town.help",
+  SECTION(Town, "overlay.section.town", "overlay.section.town.help",
           kTabsTown),
-  SECTION("overlay.section.audio", "overlay.section.audio.help",
+  SECTION(Audio, "overlay.section.audio", "overlay.section.audio.help",
           kTabsAudio),
-  SECTION("overlay.section.controls", "overlay.section.controls.help",
+  SECTION(Controls, "overlay.section.controls", "overlay.section.controls.help",
           kTabsControls),
-  SECTION("overlay.section.cheats", "overlay.section.cheats.help",
+  SECTION(Cheats, "overlay.section.cheats", "overlay.section.cheats.help",
           kTabsCheats),
-  SECTION("overlay.section.save", "overlay.section.save.help",
+  SECTION(Save, "overlay.section.save", "overlay.section.save.help",
           kTabsSave),
   /* Before System: the manual is something a PLAYER reaches for, while System
    * holds host commands, restart and exit. Inserting here renumbers everything
    * below it, and tests/settings_overlay_test.c indexes sections positionally,
    * so its enum moves with this. */
-  MANUAL_SECTION("overlay.section.manual", "overlay.section.manual.help", kTabsManual),
-  SECTION("overlay.section.system", "overlay.section.system.help",
+  MANUAL_SECTION(Manual, "overlay.section.manual", "overlay.section.manual.help", kTabsManual),
+  SECTION(System, "overlay.section.system", "overlay.section.system.help",
           kTabsSystem),
-  SECTION("overlay.section.localization", "overlay.section.localization.help",
+  SECTION(Localization, "overlay.section.localization", "overlay.section.localization.help",
           kTabsLocalization),
   /* Developer-only until a randomized run has actually been played end to end.
    * Every table it rewrites is verified against the ROM, but no seed has been
    * played through, so it must not read as a finished player feature. Placed
    * with the other hidden section so revealing it cannot renumber any
    * player-visible section. */
-  DEBUG_SECTION("overlay.section.randomizer", "overlay.section.randomizer.help",
+  DEBUG_SECTION(Randomizer, "overlay.section.randomizer", "overlay.section.randomizer.help",
           kTabsRandomizer),
   /* Last deliberately: it is the developer-only section, and keeping it at the
    * end means every player section's nav position is the same whether debug
    * settings are on or off. tests/settings_overlay_test.c indexes sections
    * positionally, so an insertion anywhere above here would renumber them. */
-  CUSTOM_DEBUG_SECTION("overlay.section.layers", "overlay.section.layers.help",
+  CUSTOM_DEBUG_SECTION(Layers, "overlay.section.layers", "overlay.section.layers.help",
           kTabsLayers),
 };
 
@@ -459,23 +309,8 @@ static const char kSectionResetKey[] = "reset_section_defaults";
 
 /* MenuLayout is defined in settings_overlay_internal.h (shared with the panel). */
 
-/* Glyph-cache dimensions. Both are 256 for BYTE-INDEXING reasons and are not
- * related to each other or to any pixel dimension:
- *   TileIds   a tilemap entry names its tile with one byte.
- *   CharCodes the dictionary maps one source byte to one tile id.
- * The glyphs themselves are 8x8, which is why the coordinate guards below
- * compare against 8 rather than either of these. */
-enum { kOverlayTileIds = 256, kOverlayCharCodes = 256 };
-
 ArRenderDevice *s_render_device;  /* extern: debug panel shares the device */
 static SDL_Window *s_window;      /* SDL input service only; never renders */
-static ArRenderTexture s_font_textures[kTextStyle_Count];
-ArRenderTexture s_debug_font_texture;  /* extern: shared with debug panel */
-static ArRenderTexture s_dialog_frame_texture;
-static uint8_t s_font_tiles[kFontTileBytes];
-/* One flag per VRAM tile id the glyph cache can occupy; 256 because the id is
- * a byte in the tilemap entry. */
-static bool s_glyph_defined[kOverlayTileIds];
 static bool s_open;
 static bool s_submenu_open;
 static int s_section;
@@ -551,19 +386,6 @@ static SettingsOverlayLayerPaletteFn s_layer_palette_provider;
  * the cursor so the expansion does not collapse while the player steps DOWN
  * through its own parameter rows. */
 static int s_layer_plane = -1;
-static bool s_layer_palette_open;
-static uint8_t s_layer_palette_cursor;
-static uint16_t s_layer_palette[kSettingsOverlayLayerPaletteEntries];
-static DioramaEditorRow s_layer_palette_row;
-static ArRenderTexture s_layer_palette_texture;
-
-enum {
-  kLayerPaletteCell = 9,
-  kLayerPaletteGridPixels = 16 * kLayerPaletteCell,
-};
-
-static bool RebuildLayerPaletteTexture(void);
-
 static void ClearSectionResetArm(void) {
   s_reset_armed_section = -1;
   s_reset_armed_until = 0;
@@ -604,15 +426,14 @@ void SettingsOverlay_SetLayerPaletteProvider(
     SettingsOverlayLayerPaletteFn provider) {
   s_layer_palette_provider = provider;
   if (!provider) {
-    s_layer_palette_open = false;
-    ArRenderDevice_DestroyTexture(s_render_device, s_layer_palette_texture);
-    s_layer_palette_texture = ArRenderTexture_Invalid();
+    SettingsOverlayPalette_Close();
+    SettingsOverlayPalette_ReleaseTexture();
   }
 }
 
 /* Layout math stays integer (it also feeds the public panel-rect API), so
  * convert only at the portable draw call. */
-static ArRenderRectF ToRenderRect(ArRenderRectI r) {
+ArRenderRectF ToRenderRect(ArRenderRectI r) {
   return (ArRenderRectF){ (float)r.x, (float)r.y,
                           (float)r.w, (float)r.h };
 }
@@ -632,344 +453,6 @@ static SDL_Window *OverlayWindow(void) {
   return s_window;
 }
 
-static bool DecodeFontAsset(const uint8_t *rom_data, size_t rom_size) {
-  if (!rom_data || rom_size < (size_t)kFontAssetOffset + 2)
-    return false;
-  const uint8_t *asset = rom_data + kFontAssetOffset;
-  size_t output_size = (size_t)asset[0] | ((size_t)asset[1] << 8);
-  if (output_size != kFontTileBytes)
-    return false;
-
-  QuintetLzssState state;
-  if (!QuintetLzss_DecompressAsset(
-          asset, rom_size - (size_t)kFontAssetOffset,
-          s_font_tiles, output_size, &state))
-    return false;
-
-  fprintf(stderr,
-          "[settings-menu] decoded ActRaiser font: $%04X bytes from ROM "
-          "offset $%06X (%zu compressed bytes consumed)\n",
-          kFontTileBytes, kFontAssetOffset,
-          (state.bits_consumed + 7) / 8);
-  return true;
-}
-
-static void SetTilePixel(unsigned tile, int x, int y, unsigned value) {
-  if (tile >= kOverlayTileIds || x < 0 || x >= 8 || y < 0 || y >= 8)
-    return;
-  size_t offset = (size_t)tile * 16 + (size_t)y * 2;
-  uint8_t mask = (uint8_t)(1u << (7 - x));
-  if (value & 1) s_font_tiles[offset] |= mask;
-  else s_font_tiles[offset] &= (uint8_t)~mask;
-  if (value & 2) s_font_tiles[offset + 1] |= mask;
-  else s_font_tiles[offset + 1] &= (uint8_t)~mask;
-}
-
-static bool FallbackGlyphDefined(unsigned ch) {
-  if (ch == ' ') return true;
-  if (ch >= 128) return false;
-  for (int row = 0; row < 8; row++)
-    if (kFallbackFont[ch][row]) return true;
-  return false;
-}
-
-static void WriteFallbackGlyph(unsigned tile, unsigned source_ch) {
-  if (tile >= kOverlayTileIds || source_ch >= 128)
-    return;
-  memset(s_font_tiles + tile * 16, 0, 16);
-  for (int row = 0; row < 7; row++) {
-    uint8_t bits = kFallbackFont[source_ch][row];
-    for (int col = 0; col < 5; col++) {
-      if (!(bits & (1u << (4 - col)))) continue;
-      SetTilePixel(tile, col + 2, row + 1, 2);
-    }
-  }
-  for (int row = 0; row < 8; row++) {
-    uint8_t bits = kFallbackFont[source_ch][row];
-    for (int col = 0; col < 5; col++) {
-      if (bits & (1u << (4 - col)))
-        SetTilePixel(tile, col + 1, row, 3);
-    }
-  }
-}
-
-/* ── Section nav icons ──────────────────────────────────────────────────
- * Real ActRaiser menu icons, lifted from a Sky Palace status-screen VRAM
- * snapshot (`snesbuild chr-render snapshot` + `chr-render icons`). Each is a
- * 16x16 4bpp index map — the game stores these as framed item/magic/status
- * glyphs — rendered through the game's OWN menu CGRAM palettes: the grey slot
- * palette (pal 14) for an unselected section, and the colored "selected slot"
- * palette (pal 13, red/gold frame) for the current one, exactly as the game
- * lights up the item you are pointing at. Index 14 is the black outline. */
-enum {
-  kIconSize = 16,
-  kIconAtlasWidth = kIconSize * kSectionCount,
-  /* Two stacked rows: grey (inactive) at y=0, colored (selected) below. */
-  kIconAtlasHeight = kIconSize * 2,
-};
-
-/* The two 16-color menu palettes straight from the snapshot CGRAM (BGR555 →
- * RGB). kIconGreyPalette is pal 14 (unselected slots), kIconSelectPalette is
- * pal 13 (the highlighted slot: green/blue glyphs, red/gold frame). Index 0 is
- * transparent so the panel shows through the rounded corners. */
-static const uint32_t kIconGreyPalette[16] = {
-  0, ARGB(255, 90, 90, 90), ARGB(255, 115, 115, 115), ARGB(255, 164, 164, 164),
-  ARGB(255, 189, 189, 189), ARGB(255, 222, 222, 222), ARGB(255, 246, 246, 246),
-  ARGB(255, 197, 197, 197), ARGB(255, 238, 238, 238), ARGB(255, 205, 205, 205),
-  ARGB(255, 156, 156, 156), ARGB(255, 131, 131, 131), ARGB(255, 82, 82, 82),
-  ARGB(255, 255, 255, 255), ARGB(255, 0, 0, 0), ARGB(255, 41, 41, 41),
-};
-static const uint32_t kIconSelectPalette[16] = {
-  0, ARGB(255, 49, 82, 164), ARGB(255, 82, 197, 0), ARGB(255, 180, 230, 0),
-  ARGB(255, 115, 180, 230), ARGB(255, 197, 222, 230), ARGB(255, 230, 246, 255),
-  ARGB(255, 255, 230, 0), ARGB(255, 255, 213, 172), ARGB(255, 213, 172, 131),
-  ARGB(255, 230, 164, 0), ARGB(255, 255, 0, 0), ARGB(255, 164, 123, 82),
-  ARGB(255, 255, 255, 255), ARGB(255, 0, 0, 0), ARGB(255, 0, 82, 0),
-};
-
-typedef uint8_t IconIndexMap[kIconSize][kIconSize];
-
-/* Deliberately UNSIZED: with an explicit [kSectionCount] a short initializer
- * list is legal C and silently zero-fills the tail, which is exactly how the
- * Manual section shipped with no icon, pushed every icon after it onto the
- * wrong section, and left Layers drawing a blank. Sizing from the list and
- * asserting the count turns that into a build failure. */
-static const IconIndexMap kSectionIconMaps[] = {
-  { /* Display <- game icon #11 */
-    {14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14},
-    {14,11,11,11,11,11,11,11,11,11,11,11,11,11,11,14},
-    {14,11,14,14,14,14,14,14,14,14,14,14,14,14,11,14},
-    {14,11,14, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,14,11,14},
-    {14,11,14, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,14,14,14},
-    {14,11,14, 2, 2, 2, 2, 2, 2, 2, 2, 2, 5, 6, 6,14},
-    {14,14,14, 2, 2, 2, 2, 2, 2, 2, 5, 6, 6, 6, 6,14},
-    {14, 6, 5, 3, 3, 3, 3, 3, 3, 5, 6, 6, 6, 6, 6,14},
-    {14, 6, 6, 6, 5, 5, 4, 4, 4, 3, 4, 4, 5, 5, 5,14},
-    {14, 6, 6, 6, 6, 5, 4, 5, 5, 5, 3, 3, 4, 4, 4,14},
-    {14, 5, 5, 5, 4, 3, 3, 5, 5, 5, 5, 5, 2, 2, 3,14},
-    {14, 4, 3, 3, 2, 2, 5, 5, 5, 5, 5, 5, 5,14,14,14},
-    {14, 2, 2, 2, 5, 5, 5, 5, 5, 5, 5, 5, 5,14,11,14},
-    {14,14,14,14,14,14,14,14,14,14,14,14,14,14,11,14},
-    {14,11,11,11,11,11,11,11,11,11,11,11,11,11,11,14},
-    {14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14},
-  },
-  { /* Action 3D <- game icon #12 */
-    {14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14},
-    {14, 7, 7, 7, 7, 7, 7, 7, 7,14, 7, 7,14, 7, 7,14},
-    {14, 7,14,14,14,14,14,14,14,14, 7,10,14,14, 7,14},
-    {14, 7,14,15,15,15,15,15,15, 7,10,15,15,14, 7,14},
-    {14, 7,14,15,15,15,15,15, 7, 7,12,15,15,14, 7,14},
-    {14, 7,14,15, 7, 7, 7,10,10,10,10,10,10,14, 7,14},
-    {14, 7,14,15,15,15,15, 6, 3, 5,15,15,15,14, 7,14},
-    {14, 7,14,15,15,15, 5, 3, 5,15,15,15,15,14, 7,14},
-    {14, 7,14,15,15,15, 6, 3, 5,15,15,15,15,14, 7,14},
-    {14, 7,14,15,15, 6, 3, 5,15,15,15,15,15,14, 7,14},
-    {14, 7,14,15, 6, 6, 3, 5,15,15,15,15,15,14, 7,14},
-    {14, 7,14,13, 6, 3, 5,15,15,15,15,15,15,14, 7,14},
-    {14, 7,14,13, 6, 4, 5,15,15,15,15,15,15,14, 7,14},
-    {14, 7,14,13, 6, 6, 6,14,14,14,14,14,14,14, 7,14},
-    {14, 7,14,13,13,13,14, 7, 7, 7, 7, 7, 7, 7, 7,14},
-    {14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14},
-  },
-  { /* Simulation <- game icon #10 */
-    {14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14},
-    {14,11,11,11,11,14, 6,13,13, 6,14,11,11,11,11,14},
-    {14,11,14,14,14,14,13,14,14,13,14,14,14,14,11,14},
-    {14,11,14,15,15, 7, 6,13,13, 6, 7,15,15,14,11,14},
-    {14,11,14,15, 7,10,10, 7,10, 7, 7, 7,15,14,11,14},
-    {14,11,14,15, 7, 9, 8, 8, 8, 8,10, 7,15,14,11,14},
-    {14,14,14,15, 7, 8, 1, 8, 1, 8, 8, 7,15,14,14,14},
-    {14, 6,13, 6,10, 9, 1, 9, 1, 9, 9,10, 6,13, 6,14},
-    {14, 6,13, 6, 9, 8, 8,12, 8, 8, 9, 9, 6,13, 6,14},
-    {14,14, 6, 5,12, 9, 8, 8, 8, 9, 9,12, 5, 6,14,14},
-    {14,11,14, 9, 8,12,12,12,12,12,12, 8, 9,14,11,14},
-    {14,11,14, 8,15, 9, 8, 8, 8, 8, 8,12, 8,14,11,14},
-    {14,11,14,15,15, 9, 8, 8, 8, 8, 8,12,15,14,11,14},
-    {14,11,14,14,14,12, 8, 9, 9, 8, 9,12,14,14,11,14},
-    {14,11,11,11,11,14, 9, 8,14, 8, 9,14,11,11,11,14},
-    {14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14},
-  },
-  { /* Audio <- game icon #53 */
-    {14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14},
-    {14,11,14, 9, 9,14,11,11,11,11,14,14, 9, 9,14,14},
-    {14,11,14,10, 9,14,14,14,14,14,14,14, 9,10,14,14},
-    {14,11,14,15, 9,15,15,15,15,15,15,15, 9,14,11,14},
-    {14,11,14,15, 9,12,10,10,10,10,10,12, 9,14,11,14},
-    {14,11,14,10, 9,15, 5,15, 5,15, 5,15, 9,10,14,14},
-    {14,11,14, 9, 9,15,13,15,13,15,13,15, 9, 9,14,14},
-    {14,11,14, 9,10,15,13,15,13,15,13,15,10, 9,14,14},
-    {14,11,14, 9,10,15,13,15,13,15,13,15,10, 9,14,14},
-    {14,11,14, 9,10,15,13,15,13,15,13,15,10, 9,14,14},
-    {14,11,14, 9, 9,15,13,15,13,15,13,15, 9, 9,14,14},
-    {14,11,14,10, 9, 9, 5,15, 5,15, 5, 9, 9,10,14,14},
-    {14,11,14,15,10, 9, 9, 9, 9, 9, 9, 9,10,14,11,14},
-    {14,11,14,14,14,10, 9,10,10,10, 9,10,14,14,11,14},
-    {14,11,11,14,10, 9,10,10, 9,10,10, 9,10,14,11,14},
-    {14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14},
-  },
-  { /* Input <- game icon #18 */
-    {14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14},
-    {14, 7, 7, 7, 7, 7, 7,14, 1,14, 7, 7, 7, 7, 7,14},
-    {14, 7,14,14,14,14,14, 1,14,14,14,14,14,14, 7,14},
-    {14, 7,14,15,15,15,15, 1,15,15,15,15,15,14, 7,14},
-    {14, 7,14,15,15,15,15, 3,15,15,15,15,15,14, 7,14},
-    {14,14, 3, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 3,14,14},
-    {14, 3, 5, 5, 5, 5, 5, 5, 5, 5, 3, 3, 3, 5, 3,14},
-    {14, 5, 5, 5,14, 5, 5, 5, 5, 3,11, 5, 3, 3, 5,14},
-    {14, 5, 5,14,14,14, 5, 5, 5, 3, 3, 3,11, 3, 5,14},
-    {14, 5, 5, 5,14, 5, 5, 5, 5, 3,11, 5, 3, 3, 5,14},
-    {14, 3, 5, 5, 5, 5, 5, 5, 5, 5, 3, 3,11, 5, 3,14},
-    {14,14, 3, 5, 5, 5, 3,15,15, 3, 5, 5, 5, 3,14,14},
-    {14, 7,14,15,15,15,15,15,15,15,15,15,15,14, 7,14},
-    {14, 7,14,14,14,14,14,14,14,14,14,14,14,14, 7,14},
-    {14, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,14},
-    {14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14},
-  },
-  { /* Cheats <- game icon #14 */
-    {14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14},
-    {14,11,11,11,11,11,14,14,14,14,11,11,14,14,13,14},
-    {14,11,14,14,14,14, 5,13,13, 5,14,14, 5,13,14,14},
-    {14,11,14,15, 5,13, 7, 7, 7, 7,13,13,13, 5,14,14},
-    {14,11,14, 5,13, 7,15,15,15,15, 7,13,13,14,11,14},
-    {14,11,14,13, 7,15, 4, 6, 6, 4,15, 7,13,14,11,14},
-    {14,14, 5, 7,15, 4, 6,13,13, 6, 4,15, 7, 5,14,14},
-    {14,14,13, 7,15, 6,13,13,13,13, 6,15, 7,13,14,14},
-    {14,14,13, 7,15, 6,13,13,13,13, 6,15, 7,13,14,14},
-    {14,14, 5, 7,15, 4, 6,13,13, 6, 4,15, 7, 5,14,14},
-    {14,11,14,13, 7,15, 4, 6, 6, 4,15, 7,13,14,11,14},
-    {14,11,14,13,13, 7,15,15,15,15, 7,13, 5,14,11,14},
-    {14,14, 5,13,13,13, 7, 7, 7, 7,13, 5,15,14,11,14},
-    {14,14,13, 5,14,14, 5,13,13, 5,14,14,14,14,11,14},
-    {14,13,14,14,11,11,14,14,14,14,11,11,11,11,11,14},
-    {14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14},
-  },
-  { /* Save <- game icon #16 */
-    {14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14},
-    {14,11,14, 7,13,13, 7,14,14,14,14,14,11,11,11,14},
-    {14,11,14,14,10, 7,13, 7, 5, 6, 6, 4,14,14,11,14},
-    {14,11,14,15,15,10, 7, 7, 6,13,13,13, 6, 4,14,14},
-    {14,11,14,15, 1, 4,10, 7, 7, 6, 6,13,13, 6,14,14},
-    {14,11,14,15, 4, 5,12,10, 7, 7,10,13,10,13,14,14},
-    {14,11,14,15, 4,12, 4, 5, 4, 6, 8, 8, 9,13,14,14},
-    {14,11,14,15, 4, 5, 5, 4, 8, 6, 8, 1, 8,14,11,14},
-    {14,11,14,15, 4, 5, 4, 8, 8, 5, 8, 8, 8,14,11,14},
-    {14,11,14,15, 4, 5, 5, 9, 8, 8, 8, 8, 8,14,11,14},
-    {14,11,14, 4, 4, 4, 5,12, 9, 8, 8, 8,15,14,11,14},
-    {14,14, 4, 4, 5, 5, 6,12,12, 9, 8, 9,15,14,11,14},
-    {14,14,12,10, 7, 7, 7, 5, 6,12,15,15,15,14,11,14},
-    {14,12,10, 7, 7, 8,13, 7, 5, 6,13,14,14,14,11,14},
-    {14,12,10, 7, 7, 7, 7, 7, 7, 5, 6,13,14,11,11,14},
-    {14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14},
-  },
-  { /* Manual -- an open book. Drawn rather than lifted from the ROM: no game
-     * icon reads as "documentation", and this section had NO icon at all until
-     * 2026-08-03, which silently shifted every icon after it by one and left
-     * the last section (Layers) on the zero-filled tail of this array. */
-    {14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14},
-    {14,11,11,11,11,11,11,11,11,11,11,11,11,11,11,14},
-    {14,11,14,14,14,14,14,14,14,14,14,14,14,14,11,14},
-    {14,11,14, 6, 6, 6, 6,14,14, 6, 6, 6, 6,14,11,14},
-    {14,11,14,13,13,13,13,14,14,13,13,13,13,14,11,14},
-    {14,11,14,13,13,13,13,14,14,13,13,13,13,14,11,14},
-    {14,11,14,13, 4, 4, 4,14,14, 4, 4, 4,13,14,11,14},
-    {14,11,14,13,13,13,13,14,14,13,13,13,13,14,11,14},
-    {14,11,14,13, 4, 4, 4,14,14, 4, 4, 4,13,14,11,14},
-    {14,11,14,13,13,13,13,14,14,13,13,13,13,14,11,14},
-    {14,11,14,13, 4, 4, 4,14,14, 4, 4, 4,13,14,11,14},
-    {14,11,14,13,13,13,13,14,14,13,13,13,13,14,11,14},
-    {14,11,14,12,12,12,12,12,12,12,12,12,12,14,11,14},
-    {14,11,14,14,14,14,14,14,14,14,14,14,14,14,11,14},
-    {14,11,11,11,11,11,11,11,11,11,11,11,11,11,11,14},
-    {14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14},
-  },
-  { /* Extras <- game icon #54 */
-    {14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14},
-    {14,11,11,11,14,14,14,14,11,11,11,11,11,11,11,14},
-    {14,11,14,14, 4, 4, 3, 3,14,14,14,14,14,14,11,14},
-    {14,11,14,15, 6, 6, 6, 5, 3, 4,15,15,15,14,11,14},
-    {14,11,14,15, 6, 5, 5, 5, 6, 5, 3, 4,15,14,11,14},
-    {14,11,14,15, 4,14,14,14, 4,14,14, 6,15,14,11,14},
-    {14,11,14,15, 5, 4, 5, 5, 5, 5, 4, 6,15,14,11,14},
-    {14,11,14,15, 4,14,14, 4,14,14,14, 5,15,14,11,14},
-    {14,11,14,15, 4, 5, 5, 5, 5, 5, 5, 4,15,14,11,14},
-    {14,11,14,15, 5,14,14,14,14, 3,14, 5,15,14,11,14},
-    {14,11,14,15, 4, 5, 4, 5, 5, 5, 5, 5,15,14,11,14},
-    {14,11,14,15, 4, 5,14,14, 4, 5, 4, 5,15,14,11,14},
-    {14,11,14,15, 4, 5, 4, 5, 5, 5, 5, 4,15,14,11,14},
-    {14,11,14,14, 4, 4, 4, 5, 5, 5, 5, 3,14,14,11,14},
-    {14,11,11,11,14,14,14,14,14,14,14,14,11,11,11,14},
-    {14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14},
-  },
-  { /* Localization: an independently drawn speech bubble. */
-    {14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14},
-    {14,11,11,11,11,11,11,11,11,11,11,11,11,11,11,14},
-    {14,11,15,15,15,15,15,15,15,15,15,15,15,15,11,14},
-    {14,11,15,15,15,15,15,15,15,15,15,15,15,15,11,14},
-    {14,11,15, 3, 3, 3, 3, 3, 3, 3, 3,15,15,15,11,14},
-    {14,11,15,15,15,15,15,15,15,15,15,15,15,15,11,14},
-    {14,11,15, 3, 3, 3, 3, 3, 3, 3, 3,15,15,15,11,14},
-    {14,11,15,15,15,15,15,15,15,15,15,15,15,15,11,14},
-    {14,11,15, 3, 3, 3, 3, 3,15,15,15,15,15,15,11,14},
-    {14,11,15,15,15,15,15,15,15,15,15,15,15,15,11,14},
-    {14,11,15,15,15,15,15,15,15,15,15,15,15,15,11,14},
-    {14,11,11,11,11,11,11,15,15,11,11,11,11,11,11,14},
-    {14,14,14,14,14,14,11,15,11,14,14,14,14,14,14,14},
-    {14,14,14,14,14,11,15,11,14,14,14,14,14,14,14,14},
-    {14,14,14,14,11,11,11,14,14,14,14,14,14,14,14,14},
-    {14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14},
-  },
-  { /* Randomizer <- sim composition $01:D128, the red/blue double arrow the
-     * game uses for its own swap/exchange menu glyph. Lifted from the sim
-     * object catalog (docs/research/sim-object-catalog/spawn_compositions_01.png,
-     * row 4 col 1) rather than the Sky Palace sheet the icons above came from,
-     * so its colours were quantised onto kIconSelectPalette: dark green, yellow,
-     * red and pale blue land within 2 units, the vivid blue and orange are the
-     * nearest available. */
-    {14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14},
-    {14, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,14},
-    {14, 7,14,14,14,14,14,14,14,14,14,14,14,14, 7,14},
-    {14, 7,14,15,15,15,15,15,15,15,15,15,15,14, 7,14},
-    {14, 7,14,15,11,15,15,15,15,15,15, 1,15,14, 7,14},
-    {14, 7,14,11,11,15,15,15,15,15,15, 1, 1,14, 7,14},
-    {14,14,11,11,11,11,11,11, 1, 1, 1, 1, 1, 1,14,14},
-    {14,11,11,11,11,11,11,11, 1, 1, 1, 1, 1, 1, 1,14},
-    {14, 5,11,11,11,11,11,11, 1, 1, 1, 1, 1, 1,10,14},
-    {14,14, 5,11,11, 5, 5, 5,10,10,10, 1, 1,10,14,14},
-    {14, 7,14, 5,11,15,15,15,15,15,15, 1,10,14, 7,14},
-    {14, 7,14,15, 5,15,15,15,15,15,15,10,15,14, 7,14},
-    {14, 7,14,15,15,15,15,15,15,15,15,15,15,14, 7,14},
-    {14, 7,14,14,14,14,14,14,14,14,14,14,14,14, 7,14},
-    {14, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,14},
-    {14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14},
-  },
-  { /* Layers -- three stacked planes receding in depth, which is what the
-     * section authors. Drawn here rather than lifted from the ROM because no
-     * game icon depicts layered planes; it follows the same framed convention
-     * (index 14 transparent, 11 frame, 15 field) as the borrowed ones. */
-    {14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14},
-    {14,11,11,11,11,11,11,11,11,11,11,11,11,11,11,14},
-    {14,11,14,14,14,14,14,14,14,14,14,14,14,14,11,14},
-    {14,11,14,14, 3, 3, 3, 3, 3, 3, 3, 3,14,14,11,14},
-    {14,11,14, 3, 5, 5, 5, 5, 5, 5, 5, 5, 3,14,11,14},
-    {14,11,14,14, 4, 4, 4, 4, 4, 4, 4, 4,14,14,11,14},
-    {14,11,14,15,14,14,14,14,14,14,14,14,15,14,11,14},
-    {14,11,14,14, 6, 6, 6, 6, 6, 6, 6, 6,14,14,11,14},
-    {14,11,14, 6,13,13,13,13,13,13,13,13, 6,14,11,14},
-    {14,11,14,14,12,12,12,12,12,12,12,12,14,14,11,14},
-    {14,11,14,15,14,14,14,14,14,14,14,14,15,14,11,14},
-    {14,11,14,14, 9, 9, 9, 9, 9, 9, 9, 9,14,14,11,14},
-    {14,11,14, 9,10,10,10,10,10,10,10,10, 9,14,11,14},
-    {14,11,14,14, 8, 8, 8, 8, 8, 8, 8, 8,14,14,11,14},
-    {14,11,11,11,11,11,11,11,11,11,11,11,11,11,11,14},
-    {14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14},
-  },
-};
-_Static_assert((int)(sizeof(kSectionIconMaps) / sizeof(kSectionIconMaps[0]))
-                   == kSectionCount,
-               "one nav icon per menu section");
-
-static ArRenderTexture s_icon_texture;
-
 static uint32_t ScaleColor(uint32_t color, int percent) {
   unsigned r = ((color >> 16) & 0xff) * (unsigned)percent /
       kPercentScale;
@@ -980,246 +463,9 @@ static uint32_t ScaleColor(uint32_t color, int percent) {
   return ARGB(255, r, g, b);
 }
 
-static ArRenderTexture CreateStaticAtlas(int width, int height,
-                                         const uint32_t *pixels) {
-  ArRenderTexture texture = ArRenderTexture_Invalid();
-  const ArRenderTextureDesc desc = {
-    .width = width,
-    .height = height,
-    .format = kArRenderPixelFormat_Argb8888,
-    .usage = kArRenderTextureUsage_Static,
-    .filter = kArRenderFilter_Nearest,
-    .blend = kArRenderBlendMode_Alpha,
-  };
-  if (!ArRenderDevice_CreateTexture(s_render_device, &desc, &texture) ||
-      !ArRenderDevice_UpdateTexture(
-          s_render_device, texture, NULL, pixels,
-          width * (int)sizeof(*pixels))) {
-    ArRenderDevice_DestroyTexture(s_render_device, texture);
-    return ArRenderTexture_Invalid();
-  }
-  return texture;
-}
-
-static ArRenderTexture CreateIconAtlas(void) {
-  uint32_t *pixels = (uint32_t *)calloc(
-      (size_t)kIconAtlasWidth * kIconAtlasHeight, sizeof(uint32_t));
-  if (!pixels) return ArRenderTexture_Invalid();
-
-  /* Row 0 = grey (unselected), row 1 = colored (selected), each icon straight
-   * through the game palette so the colors are the game's own. */
-  for (int row = 0; row < 2; row++) {
-    const uint32_t *palette = row == 0 ? kIconGreyPalette : kIconSelectPalette;
-    for (int section = 0; section < kSectionCount; section++) {
-      for (int y = 0; y < kIconSize; y++) {
-        for (int x = 0; x < kIconSize; x++) {
-          uint8_t index = kSectionIconMaps[section][y][x];
-          uint32_t color = palette[index];
-          if ((color >> 24) == 0) continue;   /* transparent index */
-          pixels[(row * kIconSize + y) * kIconAtlasWidth +
-                 section * kIconSize + x] = color;
-        }
-      }
-    }
-  }
-
-  const ArRenderTexture texture = CreateStaticAtlas(
-      kIconAtlasWidth, kIconAtlasHeight, pixels);
-  free(pixels);
-  return texture;
-}
-
-
-static void BuildFallbackFont(void) {
-  memset(s_font_tiles, 0, sizeof(s_font_tiles));
-  memset(s_glyph_defined, 0, sizeof(s_glyph_defined));
-  for (unsigned ch = 0; ch < 128; ch++) {
-    unsigned source_ch = ch;
-    if (ch >= 'a' && ch <= 'z') source_ch = ch - 'a' + 'A';
-    if (!FallbackGlyphDefined(source_ch)) continue;
-    WriteFallbackGlyph(ch, source_ch);
-    s_glyph_defined[ch] = true;
-  }
-  s_glyph_defined[' '] = true;
-  fprintf(stderr,
-          "[settings-menu] ROM font unavailable; using host fallback font\n");
-}
-
-static void PrepareRomFont(void) {
-  memset(s_glyph_defined, 0, sizeof(s_glyph_defined));
-  for (unsigned ch = 0x20; ch < 0x80; ch++)
-    s_glyph_defined[ch] = true;
-  s_glyph_defined['@'] = false;
-
-  /* These nominal ASCII slots contain game-specific symbols rather than text.
-   * Supply host-authored punctuation while retaining every real alphabetic,
-   * numeric, and selector tile from the ROM. */
-  WriteFallbackGlyph(':', ':');
-  WriteFallbackGlyph('%', '%');
-  WriteFallbackGlyph('$', '$');
-  WriteFallbackGlyph('*', '*');
-}
-
-static unsigned FontPixel(unsigned tile, int x, int y) {
-  size_t offset = (size_t)tile * 16 + (size_t)y * 2;
-  uint8_t mask = (uint8_t)(1u << (7 - x));
-  unsigned plane0 = (s_font_tiles[offset] & mask) != 0;
-  unsigned plane1 = (s_font_tiles[offset + 1] & mask) != 0;
-  return plane0 | (plane1 << 1);
-}
-
-static ArRenderTexture CreateFontAtlas(TextStyle style) {
-  uint32_t *pixels = (uint32_t *)calloc(
-      (size_t)kFontAtlasWidth * kFontAtlasHeight, sizeof(uint32_t));
-  if (!pixels) return ArRenderTexture_Invalid();
-
-  for (unsigned tile = 0; tile < kOverlayTileIds; tile++) {
-    int tile_x = (int)(tile & 15) * kGlyphSize;
-    int tile_y = (int)(tile >> 4) * kGlyphSize;
-    for (int y = 0; y < kGlyphSize; y++) {
-      for (int x = 0; x < kGlyphSize; x++) {
-        unsigned pixel = FontPixel(tile, x, y);
-        pixels[(tile_y + y) * kFontAtlasWidth + tile_x + x] =
-            kTextPalettes[style][pixel];
-      }
-    }
-  }
-
-  const ArRenderTexture texture = CreateStaticAtlas(
-      kFontAtlasWidth, kFontAtlasHeight, pixels);
-  free(pixels);
-  return texture;
-}
-
-static ArRenderTexture CreateDebugFontAtlas(void) {
-  uint32_t *pixels = (uint32_t *)calloc(
-      (size_t)kDebugFontAtlasWidth * kDebugFontAtlasHeight,
-      sizeof(uint32_t));
-  if (!pixels) return ArRenderTexture_Invalid();
-
-  for (unsigned ch = 0; ch < kOverlayCharCodes; ch++) {
-    unsigned source_ch = ch;
-    /* Lowercase is authored for real now; fold onto the capital only for the
-     * handful of codepoints that still have no lowercase mask. */
-    if (source_ch >= 128 || !FallbackGlyphDefined(source_ch)) {
-      if (source_ch >= 'a' && source_ch <= 'z')
-        source_ch = source_ch - 'a' + 'A';
-      else
-        source_ch = '?';
-    }
-    if (source_ch >= 128 || !FallbackGlyphDefined(source_ch))
-      source_ch = '?';
-    int cell_x = (int)(ch & 15) * kDebugGlyphWidth;
-    int cell_y = (int)(ch >> 4) * kDebugGlyphHeight;
-    for (int row = 0; row < 8; row++) {
-      uint8_t bits = kFallbackFont[source_ch][row];
-      for (int col = 0; col < 5; col++) {
-        if (bits & (1u << (4 - col)))
-          pixels[(cell_y + row) * kDebugFontAtlasWidth + cell_x + col] =
-              ARGB(255, 255, 255, 255);
-      }
-    }
-  }
-
-  const ArRenderTexture texture = CreateStaticAtlas(
-      kDebugFontAtlasWidth, kDebugFontAtlasHeight, pixels);
-  free(pixels);
-  return texture;
-}
-
-static void DestroyFontTextures(void) {
-  for (int i = 0; i < kTextStyle_Count; i++) {
-    ArRenderDevice_DestroyTexture(s_render_device, s_font_textures[i]);
-    s_font_textures[i] = ArRenderTexture_Invalid();
-  }
-  ArRenderDevice_DestroyTexture(s_render_device, s_debug_font_texture);
-  s_debug_font_texture = ArRenderTexture_Invalid();
-}
-
 static int CursorBlinkOffset(void) {
   return (int)((HostClock_Milliseconds() /
                 kCursorBlinkHalfPeriodMs) & 1u);
-}
-
-static uint32_t DialogColor(const uint8_t *palette, unsigned index) {
-  if (index == 0) return ARGB(0, 0, 0, 0);
-  uint16_t color = ByteOrder_ReadLe16(palette + index * 2);
-  unsigned red = (color & 0x1f) * 255 / 31;
-  unsigned green = ((color >> 5) & 0x1f) * 255 / 31;
-  unsigned blue = ((color >> 10) & 0x1f) * 255 / 31;
-  return ARGB(255, red, green, blue);
-}
-
-static unsigned DialogTilePixel(const uint8_t *tile, int x, int y) {
-  unsigned mask = 1u << (7 - x);
-  unsigned plane0 = (tile[y * 2] & mask) != 0;
-  unsigned plane1 = (tile[y * 2 + 1] & mask) != 0;
-  unsigned plane2 = (tile[16 + y * 2] & mask) != 0;
-  unsigned plane3 = (tile[16 + y * 2 + 1] & mask) != 0;
-  return plane0 | (plane1 << 1) | (plane2 << 2) | (plane3 << 3);
-}
-
-static void DecodeDialogAtlasTile(uint32_t *pixels, int atlas_column,
-                                  int atlas_row, const uint8_t *characters,
-                                  const uint8_t *palette,
-                                  unsigned tile_index, bool vertical_flip) {
-  const uint8_t *tile = characters + tile_index * 32;
-  int destination_x = atlas_column * kGlyphSize;
-  int destination_y = atlas_row * kGlyphSize;
-  for (int y = 0; y < kGlyphSize; y++) {
-    int source_y = vertical_flip ? kGlyphSize - 1 - y : y;
-    for (int x = 0; x < kGlyphSize; x++) {
-      unsigned pixel = DialogTilePixel(tile, x, source_y);
-      pixels[(destination_y + y) * kDialogAtlasWidth +
-             destination_x + x] = DialogColor(palette, pixel);
-    }
-  }
-}
-
-/* Sky Palace's 16x16 metatiles mix the lower dialog corners with tile $18,
- * which is palace scenery. Decode the six actual 8x8 frame characters instead:
- *
- *   $CE  vflip($EE)  $CF
- *   $DE      $FF      $DF
- *   vflip($CE) $EE   vflip($CF)
- *
- * $FF is the opaque black center. Palette index zero remains transparent so
- * the beveled corner cutouts and gutters show the paused game underneath. */
-static ArRenderTexture CreateDialogFrameTexture(const uint8_t *rom_data,
-                                                size_t rom_size) {
-  size_t character_end =
-      (size_t)kDialogCharAssetOffset + (size_t)(0xff + 1) * 32;
-  size_t palette_end = (size_t)kDialogPaletteAssetOffset + 32;
-  if (!rom_data || rom_size < character_end || rom_size < palette_end) {
-    fprintf(stderr,
-            "[settings-menu] native dialog frame unavailable; "
-            "using host frame fallback\n");
-    return ArRenderTexture_Invalid();
-  }
-
-  const uint8_t *characters = rom_data + kDialogCharAssetOffset;
-  const uint8_t *palette = rom_data + kDialogPaletteAssetOffset;
-  uint32_t pixels[kDialogAtlasWidth * kDialogAtlasHeight];
-  memset(pixels, 0, sizeof(pixels));
-  DecodeDialogAtlasTile(pixels, 0, 0, characters, palette, 0xce, false);
-  DecodeDialogAtlasTile(pixels, 1, 0, characters, palette, 0xee, true);
-  DecodeDialogAtlasTile(pixels, 2, 0, characters, palette, 0xcf, false);
-  DecodeDialogAtlasTile(pixels, 0, 1, characters, palette, 0xde, false);
-  DecodeDialogAtlasTile(pixels, 1, 1, characters, palette, 0xff, false);
-  DecodeDialogAtlasTile(pixels, 2, 1, characters, palette, 0xdf, false);
-  DecodeDialogAtlasTile(pixels, 0, 2, characters, palette, 0xce, true);
-  DecodeDialogAtlasTile(pixels, 1, 2, characters, palette, 0xee, false);
-  DecodeDialogAtlasTile(pixels, 2, 2, characters, palette, 0xcf, true);
-
-  const ArRenderTexture texture = CreateStaticAtlas(
-      kDialogAtlasWidth, kDialogAtlasHeight, pixels);
-  if (ArRenderTexture_IsValid(texture)) {
-    fprintf(stderr,
-            "[settings-menu] decoded native dialog frame: "
-            "chars ROM $%06X, palette ROM $%06X\n",
-            kDialogCharAssetOffset, kDialogPaletteAssetOffset);
-  }
-  return texture;
 }
 
 /* ── Section / tab / row addressing ─────────────────────────────────────
@@ -1887,25 +1133,38 @@ static void LayerSaveEdit(void) {
     SetStatus(Ui("overlay.status.save_failed"));
 }
 
+static void CommitLayerPalette(const DioramaEditorRow *row, bool reset, uint8_t index) {
+  DioramaPlaneOverride *plane = LayerPlaneForRow(row, !reset);
+  if (reset) {
+    if (plane) {
+      DioramaLayerEditor_ClearParam(plane, kDioramaEditorParam_TransparentFill);
+      LayerPruneEmptySection(row);
+      LayerSaveEdit();
+      SetStatus(Ui("overlay.status.fill_cleared"));
+    } else {
+      SetStatus(Ui("overlay.status.inherited"));
+    }
+    return;
+  }
+  if (!plane) {
+    SetStatus(Ui("overlay.status.no_room"));
+    return;
+  }
+  plane->set_transparent_fill = true;
+  plane->transparent_fill_kind = kDioramaTransparentFill_Cgram;
+  plane->transparent_fill_cgram = index;
+  LayerSaveEdit();
+  SetStatus(Ui("overlay.status.fill_applied"));
+}
+
 static bool LayerOpenPalette(const DioramaEditorRow *row) {
-  if (!row || row->param != kDioramaEditorParam_TransparentFill ||
-      !s_layer_palette_provider ||
-      !s_layer_palette_provider(s_layer_palette)) {
+  uint16_t palette[kSettingsOverlayLayerPaletteEntries];
+  if (!row || row->param != kDioramaEditorParam_TransparentFill || !s_layer_palette_provider ||
+      !s_layer_palette_provider(palette)) {
     SetStatus(Ui("overlay.status.palette_unavailable"));
     return false;
   }
-  s_layer_palette_row = *row;
-  s_layer_palette_cursor =
-      row->effective_transparent_fill_set &&
-      row->effective_transparent_fill_kind == kDioramaTransparentFill_Cgram
-          ? row->effective_transparent_fill_cgram : 0;
-  /* Snapshot CGRAM once when the modal opens. The game is suspended while the
-   * menu owns input, so rebuilding this immutable atlas on cursor movement (or
-   * issuing 256 rectangle draws every frame) would only duplicate work. */
-  ArRenderDevice_DestroyTexture(s_render_device, s_layer_palette_texture);
-  s_layer_palette_texture = ArRenderTexture_Invalid();
-  if (s_render_device) (void)RebuildLayerPaletteTexture();
-  s_layer_palette_open = true;
+  SettingsOverlayPalette_Open(row, palette, CommitLayerPalette);
   return true;
 }
 
@@ -2281,32 +1540,6 @@ static void EnterSection(void) {
   EnsureSelectedRowVisible();
 }
 
-/* (Re)create every overlay texture from the already-decoded font tiles and
- * the ROM dialog assets. Shared by Init and the device-reset reload. */
-static bool CreateOverlayTextures(const uint8_t *rom_data, size_t rom_size) {
-  for (int i = 0; i < kTextStyle_Count; i++) {
-    s_font_textures[i] = CreateFontAtlas((TextStyle)i);
-    if (!ArRenderTexture_IsValid(s_font_textures[i])) {
-      DestroyFontTextures();
-      return false;
-    }
-  }
-  s_debug_font_texture = CreateDebugFontAtlas();
-  if (!ArRenderTexture_IsValid(s_debug_font_texture)) {
-    DestroyFontTextures();
-    return false;
-  }
-  /* Host-authored section icons, independent of which text font loaded. */
-  s_icon_texture = CreateIconAtlas();
-  if (!ArRenderTexture_IsValid(s_icon_texture)) {
-    DestroyFontTextures();
-    return false;
-  }
-  s_dialog_frame_texture =
-      CreateDialogFrameTexture(rom_data, rom_size);
-  return true;
-}
-
 bool SettingsOverlay_Init(ArRenderDevice *render_device, SDL_Window *window,
                           const uint8_t *rom_data, size_t rom_size) {
   s_render_device = ArRenderDevice_IsReady(render_device)
@@ -2314,38 +1547,21 @@ bool SettingsOverlay_Init(ArRenderDevice *render_device, SDL_Window *window,
   s_window = window;
   if (!s_render_device) return true;
 
-  bool rom_font = DecodeFontAsset(rom_data, rom_size);
-  if (rom_font) PrepareRomFont();
-  else BuildFallbackFont();
-
-  return CreateOverlayTextures(rom_data, rom_size);
+  return SettingsOverlayArtwork_Init(s_render_device, rom_data, rom_size);
 }
 
 bool SettingsOverlay_ReloadTextures(const uint8_t *rom_data, size_t rom_size) {
   if (!s_render_device) return true;
   ArUiTextRenderer_ClearTextures(&s_ui_text);
-  DestroyFontTextures();
-  ArRenderDevice_DestroyTexture(s_render_device, s_icon_texture);
-  s_icon_texture = ArRenderTexture_Invalid();
-  ArRenderDevice_DestroyTexture(s_render_device, s_dialog_frame_texture);
-  s_dialog_frame_texture = ArRenderTexture_Invalid();
-  ArRenderDevice_DestroyTexture(s_render_device, s_layer_palette_texture);
-  s_layer_palette_texture = ArRenderTexture_Invalid();
-  /* The decoded font tiles (s_font_tiles/s_glyph_defined) are CPU-side and
-   * survive the reset; only the GPU-side atlases need rebuilding. */
-  return CreateOverlayTextures(rom_data, rom_size);
+  SettingsOverlayPalette_ReleaseTexture();
+  return SettingsOverlayArtwork_Reload(rom_data, rom_size);
 }
 
 void SettingsOverlay_Destroy(void) {
   StopEditing();
   ArUiTextRenderer_Destroy(&s_ui_text);
-  DestroyFontTextures();
-  ArRenderDevice_DestroyTexture(s_render_device, s_icon_texture);
-  s_icon_texture = ArRenderTexture_Invalid();
-  ArRenderDevice_DestroyTexture(s_render_device, s_dialog_frame_texture);
-  s_dialog_frame_texture = ArRenderTexture_Invalid();
-  ArRenderDevice_DestroyTexture(s_render_device, s_layer_palette_texture);
-  s_layer_palette_texture = ArRenderTexture_Invalid();
+  SettingsOverlayArtwork_Destroy();
+  SettingsOverlayPalette_ReleaseTexture();
   s_render_device = NULL;
   s_window = NULL;
   s_open = false;
@@ -2388,7 +1604,7 @@ void SettingsOverlay_Close(void) {
   ClearSectionResetArm();
   s_capture_desc = NULL;
   s_submenu_open = false;
-  s_layer_palette_open = false;
+  SettingsOverlayPalette_Close();
   s_open = false;
   fprintf(stderr, "[settings-menu] closed\n");
 }
@@ -2489,86 +1705,8 @@ void SettingsOverlay_TickAtForTest(uint64_t now_ms) {
 /* Logical menu commands. Both the keyboard path and the gamepad path funnel
  * through these so the two never drift apart, and so a rebound pad drives the
  * menu with the player's own buttons. */
-typedef enum {
-  kMenuNav_Up,
-  kMenuNav_Down,
-  kMenuNav_Left,
-  kMenuNav_Right,
-  kMenuNav_Confirm,
-  kMenuNav_Back,     /* leave the submenu, or close from the nav column */
-  kMenuNav_Reset,    /* restore the selected row's default */
-  kMenuNav_TabPrev,  /* previous tab of the current section */
-  kMenuNav_TabNext,
-  kMenuNav_Close,
-} MenuNav;
-
-static bool ApplyLayerPaletteNav(MenuNav nav, bool repeat) {
-  if (!s_layer_palette_open) return false;
-  switch (nav) {
-    case kMenuNav_Up:
-      s_layer_palette_cursor = (uint8_t)(s_layer_palette_cursor - 16);
-      break;
-    case kMenuNav_Down:
-      s_layer_palette_cursor = (uint8_t)(s_layer_palette_cursor + 16);
-      break;
-    case kMenuNav_Left:
-      s_layer_palette_cursor = (uint8_t)(
-          (s_layer_palette_cursor & 0xf0) |
-          ((s_layer_palette_cursor - 1) & 0x0f));
-      break;
-    case kMenuNav_Right:
-      s_layer_palette_cursor = (uint8_t)(
-          (s_layer_palette_cursor & 0xf0) |
-          ((s_layer_palette_cursor + 1) & 0x0f));
-      break;
-    case kMenuNav_Confirm: {
-      if (repeat) break;
-      DioramaPlaneOverride *plane = LayerPlaneForRow(
-          &s_layer_palette_row, true);
-      if (!plane) {
-        SetStatus(Ui("overlay.status.no_room"));
-        s_layer_palette_open = false;
-        break;
-      }
-      plane->set_transparent_fill = true;
-      plane->transparent_fill_kind = kDioramaTransparentFill_Cgram;
-      plane->transparent_fill_cgram = s_layer_palette_cursor;
-      LayerSaveEdit();
-      SetStatus(Ui("overlay.status.fill_applied"));
-      s_layer_palette_open = false;
-      break;
-    }
-    case kMenuNav_Reset: {
-      if (repeat) break;
-      DioramaPlaneOverride *plane = LayerPlaneForRow(
-          &s_layer_palette_row, false);
-      if (plane) {
-        DioramaLayerEditor_ClearParam(
-            plane, kDioramaEditorParam_TransparentFill);
-        LayerPruneEmptySection(&s_layer_palette_row);
-        LayerSaveEdit();
-        SetStatus(Ui("overlay.status.fill_cleared"));
-      } else {
-        SetStatus(Ui("overlay.status.inherited"));
-      }
-      s_layer_palette_open = false;
-      break;
-    }
-    case kMenuNav_Back:
-      if (!repeat) s_layer_palette_open = false;
-      break;
-    case kMenuNav_Close:
-      if (!repeat) SettingsOverlay_Close();
-      break;
-    case kMenuNav_TabPrev:
-    case kMenuNav_TabNext:
-      break;
-  }
-  return true;
-}
-
 static void ApplyMenuNav(MenuNav nav, bool repeat) {
-  if (ApplyLayerPaletteNav(nav, repeat)) return;
+  if (SettingsOverlayPalette_ApplyNav(nav, repeat)) return;
   if (!s_submenu_open) {
     switch (nav) {
       case kMenuNav_Up:      MoveSection(-1); break;
@@ -2916,13 +2054,13 @@ static bool DrawDialogTileChecked(const MenuLayout *layout, int atlas_column,
       ToRenderRect(LogicalRect(layout, x, y, kGlyphSize, kGlyphSize));
   const ArRenderRectF source_f = ToRenderRect(source);
   return ArRenderDevice_DrawTexture(
-      s_render_device, s_dialog_frame_texture, &source_f, &destination);
+      s_render_device, SettingsOverlayArtwork_Get()->dialog_frame, &source_f, &destination);
 }
 
 static bool DrawDialogPanelChecked(const MenuLayout *layout,
                                    int x, int y, int width, int height) {
   if (width < 16 || height < 16) return false;
-  if (!ArRenderTexture_IsValid(s_dialog_frame_texture)) {
+  if (!ArRenderTexture_IsValid(SettingsOverlayArtwork_Get()->dialog_frame)) {
     const ArRenderRectI outer = LogicalRect(layout, x, y, width, height);
     const ArRenderRectI middle = LogicalRect(
         layout, x + 2, y + 2, width - 4, height - 4);
@@ -2993,9 +2131,9 @@ bool SettingsOverlay_DrawGameFrame(ArRenderRectI rect, int scale) {
 static void DrawGlyph(const MenuLayout *layout, int x, int y,
                       unsigned char ch, TextStyle style) {
   if (ch == ' ') return;
-  if (!s_glyph_defined[ch]) ch = '?';
-  if (!s_glyph_defined[ch]) return;
-  const ArRenderTexture texture = s_font_textures[style];
+  if (!SettingsOverlayArtwork_Get()->glyph_defined[ch]) ch = '?';
+  if (!SettingsOverlayArtwork_Get()->glyph_defined[ch]) return;
+  const ArRenderTexture texture = SettingsOverlayArtwork_Get()->fonts[style];
   if (!ArRenderTexture_IsValid(texture)) return;
   const ArRenderRectF source = {
     (float)((ch & 15) * kGlyphSize),
@@ -3167,7 +2305,7 @@ void SettingsOverlay_DrawGameText(int x, int y, int scale, uint8_t alpha,
           kGlyphSize, kArUiTextAlignment_Left, kText_Normal,
           ARGB(alpha, 255, 255, 255))) return;
   }
-  const ArRenderTexture texture = s_font_textures[kText_Normal];
+  const ArRenderTexture texture = SettingsOverlayArtwork_Get()->fonts[kText_Normal];
   if (!s_render_device || !ArRenderTexture_IsValid(texture)) return;
 
   static int32_t indices[
@@ -3208,8 +2346,8 @@ void SettingsOverlay_DrawGameText(int x, int y, int scale, uint8_t alpha,
     offset = next;
     ++cell;
     if (ch == ' ') continue;
-    if (!s_glyph_defined[ch]) ch = '?';
-    if (!s_glyph_defined[ch]) continue;
+    if (!SettingsOverlayArtwork_Get()->glyph_defined[ch]) ch = '?';
+    if (!SettingsOverlayArtwork_Get()->glyph_defined[ch]) continue;
 
     if (glyph_count == kGameTextGlyphBatchCapacity) {
       (void)ArRenderDevice_DrawGeometryWithState(
@@ -3267,7 +2405,7 @@ static void DrawTextRight(const MenuLayout *layout, int right, int y,
  * comfortably at couch distance. */
 static void DrawSmallGlyph(const MenuLayout *layout, int x, int y,
                            unsigned char ch, uint32_t color) {
-  if (ch == ' ' || !ArRenderTexture_IsValid(s_debug_font_texture)) return;
+  if (ch == ' ' || !ArRenderTexture_IsValid(SettingsOverlayArtwork_Get()->debug_font)) return;
   const ArRenderRectF source = {
     (float)((ch & 15) * kDebugGlyphWidth),
     (float)((ch >> 4) * kDebugGlyphHeight),
@@ -3277,14 +2415,14 @@ static void DrawSmallGlyph(const MenuLayout *layout, int x, int y,
   const ArRenderRectF destination = ToRenderRect(LogicalRect(
       layout, x, y, kDebugGlyphWidth, kDebugGlyphHeight));
   (void)ArRenderDevice_DrawTextureTinted(
-      s_render_device, s_debug_font_texture, &source, &destination,
+      s_render_device, SettingsOverlayArtwork_Get()->debug_font, &source, &destination,
       RenderColor(color));
 }
 
-static void DrawSmallTextN(const MenuLayout *layout, int x, int y,
+void DrawSmallTextN(const MenuLayout *layout, int x, int y,
                            const char *text, int max_chars, uint32_t color) {
   if (!text || max_chars <= 0 ||
-      !ArRenderTexture_IsValid(s_debug_font_texture)) return;
+      !ArRenderTexture_IsValid(SettingsOverlayArtwork_Get()->debug_font)) return;
   if (DrawUnicodeText(layout, x, y, text, max_chars, kDebugGlyphWidth,
                         kArUiTextAlignment_Left, -1, color)) return;
   const size_t bytes = strlen(text);
@@ -3298,7 +2436,7 @@ static void DrawSmallTextN(const MenuLayout *layout, int x, int y,
   }
 }
 
-static void DrawSmallText(const MenuLayout *layout, int x, int y,
+void DrawSmallText(const MenuLayout *layout, int x, int y,
                           const char *text, uint32_t color) {
   DrawSmallTextN(layout, x, y, text, 512, color);
 }
@@ -3313,16 +2451,16 @@ static int SmallTextWidth(const char *text) {
  * fades an unselected, un-focused nav row so it reads as recessive. */
 static void DrawSectionIcon(const MenuLayout *layout, int x, int y, int size,
                             int section, bool selected, int alpha) {
-  if (!ArRenderTexture_IsValid(s_icon_texture) ||
+  if (!ArRenderTexture_IsValid(SettingsOverlayArtwork_Get()->icons) ||
       section < 0 || section >= kSectionCount) return;
   const ArRenderRectF source = {
-    (float)(section * kIconSize), selected ? (float)kIconSize : 0.0f,
+    (float)(kSections[section].icon * kIconSize), selected ? (float)kIconSize : 0.0f,
     (float)kIconSize, (float)kIconSize,
   };
   const ArRenderRectF destination = ToRenderRect(
       LogicalRect(layout, x, y, size, size));
   (void)ArRenderDevice_DrawTextureTinted(
-      s_render_device, s_icon_texture, &source, &destination,
+      s_render_device, SettingsOverlayArtwork_Get()->icons, &source, &destination,
       (ArRenderColorF){1.0f, 1.0f, 1.0f, (float)alpha / 255.0f});
 }
 
@@ -3345,8 +2483,8 @@ static void DrawScrollBar(const MenuLayout *layout, int x, int y, int height,
 
 static void DrawDebugGlyph(const MenuLayout *layout, int x, int y,
                            unsigned char ch, DebugTextStyle style) {
-  if (ch == ' ' || !ArRenderTexture_IsValid(s_debug_font_texture)) return;
-  if (ch >= 128 || !FallbackGlyphDefined(ch)) {
+  if (ch == ' ' || !ArRenderTexture_IsValid(SettingsOverlayArtwork_Get()->debug_font)) return;
+  if (ch >= 128 || !SettingsOverlayArtwork_HasDebugGlyph(ch)) {
     if (ch >= 'a' && ch <= 'z') ch = (unsigned char)(ch - 'a' + 'A');
     else ch = '?';
   }
@@ -3359,7 +2497,7 @@ static void DrawDebugGlyph(const MenuLayout *layout, int x, int y,
   const ArRenderRectF destination = ToRenderRect(LogicalRect(
       layout, x, y, kDebugGlyphWidth, kDebugGlyphHeight));
   (void)ArRenderDevice_DrawTextureTinted(
-      s_render_device, s_debug_font_texture, &source, &destination,
+      s_render_device, SettingsOverlayArtwork_Get()->debug_font, &source, &destination,
       RenderColor(kDebugTextColors[style]));
 }
 
@@ -4207,100 +3345,10 @@ static void DrawMenu(const MenuLayout *layout) {
   DrawMenuFooter(layout, &chrome, section, custom_rows);
 }
 
-static uint32_t LayerPaletteColor(uint16_t bgr555) {
-  return ARGB(255,
-              ExpandColor5(bgr555, 15),
-              ExpandColor5(bgr555 >> 5, 15),
-              ExpandColor5(bgr555 >> 10, 15));
-}
-
-static bool RebuildLayerPaletteTexture(void) {
-  if (!s_render_device) return false;
-  uint32_t *pixels = calloc(
-      (size_t)kLayerPaletteGridPixels * kLayerPaletteGridPixels,
-      sizeof(*pixels));
-  if (!pixels) return false;
-  for (int index = 0; index < kSettingsOverlayLayerPaletteEntries; index++) {
-    const int x0 = (index & 15) * kLayerPaletteCell;
-    const int y0 = (index >> 4) * kLayerPaletteCell;
-    const uint32_t color = LayerPaletteColor(s_layer_palette[index]);
-    for (int y = 0; y < kLayerPaletteCell - 1; y++)
-      for (int x = 0; x < kLayerPaletteCell - 1; x++)
-        pixels[(size_t)(y0 + y) * kLayerPaletteGridPixels + x0 + x] = color;
-  }
-
-  const ArRenderTexture texture = CreateStaticAtlas(
-      kLayerPaletteGridPixels, kLayerPaletteGridPixels, pixels);
-  const bool ready = ArRenderTexture_IsValid(texture);
-  free(pixels);
-  if (!ready) {
-    return false;
-  }
-  s_layer_palette_texture = texture;
-  return true;
-}
-
-static void DrawLayerPalettePicker(const MenuLayout *layout) {
-  if (!s_layer_palette_open) return;
-  enum {
-    kPickerWidth = 172,
-    kPickerHeight = 190,
-    kPickerGridX = 14,
-    kPickerGridY = 25,
-  };
-  const int x = (layout->logical_width - kPickerWidth) / 2;
-  const int y = (layout->logical_height - kPickerHeight) / 2;
-  DrawDialogPanel(layout, x, y, kPickerWidth, kPickerHeight);
-  DrawSmallTextN(layout, x + 14, y + 11, Ui("overlay.palette.title"),
-                 (kPickerWidth - 28) / kDebugGlyphWidth, kSteelBlue);
-
-  if (!ArRenderTexture_IsValid(s_layer_palette_texture))
-    (void)RebuildLayerPaletteTexture();
-  if (ArRenderTexture_IsValid(s_layer_palette_texture)) {
-    const ArRenderRectF destination = ToRenderRect(LogicalRect(
-        layout, x + kPickerGridX, y + kPickerGridY,
-        kLayerPaletteGridPixels, kLayerPaletteGridPixels));
-    (void)ArRenderDevice_DrawTexture(
-        s_render_device, s_layer_palette_texture, NULL, &destination);
-  } else {
-    /* Texture creation failure should not make the editor unusable. This slow
-     * fallback is exceptional; the normal path submits the entire grid once. */
-    for (int index = 0; index < kSettingsOverlayLayerPaletteEntries; index++) {
-      FillLogicalRect(
-          layout,
-          x + kPickerGridX + (index & 15) * kLayerPaletteCell,
-          y + kPickerGridY + (index >> 4) * kLayerPaletteCell,
-          kLayerPaletteCell - 1, kLayerPaletteCell - 1,
-          LayerPaletteColor(s_layer_palette[index]));
-    }
-  }
-
-  const int selected_x =
-      x + kPickerGridX + (s_layer_palette_cursor & 15) * kLayerPaletteCell;
-  const int selected_y =
-      y + kPickerGridY + (s_layer_palette_cursor >> 4) * kLayerPaletteCell;
-  FillLogicalRect(layout, selected_x, selected_y,
-                  kLayerPaletteCell, 1, kSelectYellow);
-  FillLogicalRect(layout, selected_x, selected_y + kLayerPaletteCell - 1,
-                  kLayerPaletteCell, 1, kSelectYellow);
-  FillLogicalRect(layout, selected_x, selected_y,
-                  1, kLayerPaletteCell, kSelectYellow);
-  FillLogicalRect(layout, selected_x + kLayerPaletteCell - 1, selected_y,
-                  1, kLayerPaletteCell, kSelectYellow);
-
-  char selected[32];
-  snprintf(selected, sizeof(selected), "CGRAM $%02X",
-           (unsigned)s_layer_palette_cursor);
-  DrawSmallText(layout, x + 14, y + 173, selected, kGameGold);
-  DrawSmallTextN(layout, x + 76, y + 173, Ui("overlay.palette.hint"),
-                 (kPickerWidth - 90) / kDebugGlyphWidth, kMutedText);
-}
-
-
 void SettingsOverlay_Render(ArRenderRectI game_viewport) {
   SettingsOverlay_Refresh();
   if (!s_open || !s_render_device ||
-      !ArRenderTexture_IsValid(s_font_textures[kText_Normal])) return;
+      !ArRenderTexture_IsValid(SettingsOverlayArtwork_Get()->fonts[kText_Normal])) return;
   int output_width = 0;
   int output_height = 0;
   if (!ArRenderOutput_UseFull(
@@ -4330,5 +3378,5 @@ void SettingsOverlay_Render(ArRenderRectI game_viewport) {
 
   MenuLayout layout = BuildLayout(output_width, output_height);
   DrawMenu(&layout);
-  DrawLayerPalettePicker(&layout);
+  SettingsOverlayPalette_Draw(&layout);
 }

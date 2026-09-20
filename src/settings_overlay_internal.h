@@ -1,19 +1,16 @@
 #ifndef SETTINGS_OVERLAY_INTERNAL_H
 #define SETTINGS_OVERLAY_INTERNAL_H
 
-/* Internal contract between settings_overlay.c (the menu core) and
- * settings_overlay_debug_panel.c (the draggable F-key diagnostic panel). NOT a
- * public API — settings_overlay.h is the public one. The panel is a distinct
- * feature that shares the overlay's renderer, ROM/debug fonts, layout math and
- * low-level draw primitives, so those few internals are declared here rather
- * than duplicated. Everything here stays owned by settings_overlay.c. */
+/* Private UI vocabulary shared by the menu, diagnostic panel and palette
+ * picker. settings_overlay.h is the public API. The menu owns navigation and
+ * draw primitives; settings_overlay_artwork.c owns fonts and atlas lifetimes. */
 
 #include <stdint.h>
 #include <SDL3/SDL.h>
 
 #include "render/render_device.h"
 
-/* ARGB pixel packing, shared by both translation units' colour constants. */
+/* ARGB pixel packing for overlay artwork and UI colors. */
 #define ARGB(a, r, g, b) \
   ((uint32_t)(a) << 24 | (uint32_t)(r) << 16 | \
    (uint32_t)(g) << 8 | (uint32_t)(b))
@@ -37,6 +34,19 @@ typedef enum DebugTextStyle {
   kDebugTextStyle_Count,
 } DebugTextStyle;
 
+typedef enum {
+  kMenuNav_Up,
+  kMenuNav_Down,
+  kMenuNav_Left,
+  kMenuNav_Right,
+  kMenuNav_Confirm,
+  kMenuNav_Back,     /* leave the submenu, or close from the nav column */
+  kMenuNav_Reset,    /* restore the selected row's default */
+  kMenuNav_TabPrev,  /* previous tab of the current section */
+  kMenuNav_TabNext,
+  kMenuNav_Close,
+} MenuNav;
+
 /* Resolved per-frame geometry for one overlay draw pass. */
 typedef struct MenuLayout {
   int output_width;
@@ -52,7 +62,6 @@ typedef struct MenuLayout {
  * SettingsOverlay_Init). The panel reads these; it does not create or free
  * them. */
 extern ArRenderDevice *s_render_device;
-extern ArRenderTexture s_debug_font_texture;
 
 /* Layout + draw primitives defined in settings_overlay.c, reused by the panel
  * so both surfaces scale and render text identically. */
@@ -69,6 +78,14 @@ void DrawDebugTextN(const MenuLayout *layout, int x, int y,
                     const char *text, int length, DebugTextStyle style);
 void DrawDebugHighlightedLine(const MenuLayout *layout,
                               int x, int y, const char *text, int length);
+
+/* Shared menu/modal drawing vocabulary. */
+extern const uint32_t kSteelBlue, kSelectYellow, kGameGold, kMutedText;
+ArRenderRectF ToRenderRect(ArRenderRectI rect);
+void DrawSmallTextN(const MenuLayout *layout, int x, int y,
+                    const char *text, int length, uint32_t color);
+void DrawSmallText(const MenuLayout *layout, int x, int y,
+                   const char *text, uint32_t color);
 
 /* Defined in settings_overlay_debug_panel.c. Clears all panel state; called by
  * SettingsOverlay_Destroy so teardown owns no panel internals directly. */
