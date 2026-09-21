@@ -226,6 +226,13 @@ int InputMap_FormatBinding(char *buffer, int buffer_size, uint32 binding);
 /* Pretty form for the settings menu — a key reads as "Key Return", without
  * the numeric storage spelling. */
 int InputMap_DescribeBinding(char *buffer, int buffer_size, uint32 binding);
+/* Compact in-game hint. Face-button names follow the physical controller;
+ * unbound controls yield an empty string. These names are not persisted. */
+int InputMap_FormatBindingHint(char *buffer, int buffer_size, uint32 binding,
+                              SDL_GamepadType gamepad_type);
+/* Retains the last active input device after release, respecting forced mode
+ * and the disconnected-gamepad keyboard fallback. Call during frame capture. */
+int InputMap_GameActionHint(char *buffer, int buffer_size, InputAction action);
 /* Borrowed display name without device prefix; NULL for an unknown control.
  * Hosts may localize a controller's typed kind/code, but key names originate
  * from the platform and are display-only, never the persisted identity. */

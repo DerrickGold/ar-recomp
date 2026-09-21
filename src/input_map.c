@@ -25,6 +25,7 @@ typedef struct {
 
 static GamepadSlot s_pads[kMaxGamepads];
 static int s_pad_count;
+static InputClass s_hint_class = kInputClass_Keyboard;
 
 /* Held state, tracked per source so the device-mode row can gate them
  * independently without either source clobbering the other's bits. */
@@ -155,6 +156,7 @@ void InputMap_Init(void) {
 void InputMap_Shutdown(void) {
   for (int i = 0; i < s_pad_count; i++) SDL_CloseGamepad(s_pads[i].pad);
   s_pad_count = 0;
+  s_hint_class = kInputClass_Keyboard;
   memset(s_pads, 0, sizeof(s_pads));
   InputMap_Clear();
 }
@@ -398,6 +400,56 @@ int InputMap_DescribeBinding(char *buffer, int buffer_size, uint32 binding) {
     return snprintf(buffer, buffer_size, "Key #%d", code);
   }
   return InputMap_FormatBinding(buffer, buffer_size, binding);
+}
+
+int InputMap_FormatBindingHint(char *buffer, int buffer_size, uint32 binding,
+                              SDL_GamepadType gamepad_type) {
+  if (!buffer || buffer_size <= 0) return 0;
+  buffer[0] = 0;
+  if (!binding) return 0;
+  const int kind = INPUT_BIND_KIND(binding), code = INPUT_BIND_CODE(binding);
+  if (kind == kInputBind_PadButton && code < SDL_GAMEPAD_BUTTON_COUNT) {
+    static const char *const faces[] = {
+      "", "A", "B", "X", "Y", "Cross", "Circle", "Square", "Triangle"};
+    SDL_GamepadButtonLabel label = SDL_GetGamepadButtonLabelForType(
+        gamepad_type, (SDL_GamepadButton)code);
+    if (label > SDL_GAMEPAD_BUTTON_LABEL_UNKNOWN &&
+        label <= SDL_GAMEPAD_BUTTON_LABEL_TRIANGLE)
+      return snprintf(buffer, buffer_size, "%s", faces[label]);
+    /* Unknown devices still use SDL's standard physical face positions. */
+    if (code <= SDL_GAMEPAD_BUTTON_NORTH) {
+      static const char *const standard[] = {"A", "B", "X", "Y"};
+      return snprintf(buffer, buffer_size, "%s", standard[code]);
+    }
+  }
+  if (kind == kInputBind_PadAxis) {
+    static const char *const axes[][2] = {
+      {"LS Right", "LS Left"}, {"LS Down", "LS Up"},
+      {"RS Right", "RS Left"}, {"RS Down", "RS Up"},
+      {"LT", "LT"}, {"RT", "RT"}};
+    if (code < SDL_GAMEPAD_AXIS_COUNT)
+      return snprintf(buffer, buffer_size, "%s", axes[code][INPUT_BIND_NEG(binding)]);
+  }
+  const char *name = InputMap_BindingName(binding);
+  if (name && name[0]) return snprintf(buffer, buffer_size, "%s", name);
+  return InputMap_DescribeBinding(buffer, buffer_size, binding);
+}
+
+int InputMap_GameActionHint(char *buffer, int buffer_size, InputAction action) {
+  if (!buffer || buffer_size <= 0) return 0;
+  buffer[0] = 0;
+  if (action < 0 || action >= kInputAction_Count) return 0;
+  if (!s_pad_count || g_settings.input_device == kInputDevice_Keyboard)
+    s_hint_class = kInputClass_Keyboard;
+  else if (g_settings.input_device == kInputDevice_Gamepad ||
+           InputMap_GamepadIsActive())
+    s_hint_class = kInputClass_Gamepad;
+  else if (s_key_bits || s_host_key_held)
+    s_hint_class = kInputClass_Keyboard;
+  GamepadSlot *pad = SelectedGamepad();
+  return InputMap_FormatBindingHint(buffer, buffer_size,
+      g_settings.input_bind[s_hint_class][action],
+      pad ? SDL_GetGamepadType(pad->pad) : SDL_GAMEPAD_TYPE_STANDARD);
 }
 
 static bool EqualsIgnoreCase(const char *a, const char *b) {

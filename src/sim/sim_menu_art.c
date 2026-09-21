@@ -95,7 +95,9 @@ bool SimMenuArt_Capture(SimMenuFrame *f, const SnesRunnerApi *api,
     if (i<6) { family=categories[i]; label=Word(r,0xf36a+i*2); }
     else if (i<21) { family=actions[i-6]; label=Word(r,0xf34c+(i-6)*2); }
     else if (i<41) { label=Word(r,0xf08e + (i-21)*2); family=r[label++]; }
-    else family=i==41?35:36;
+    /* Observe the People's small angel: family $0B, selected $01:D134.
+     * Resolve its genuine grey variant through the same ROM table. */
+    else family=i==kSimMenuArtDescribeAngel?0x0b:i==41?35:36;
     if (label) Label(r,label,f->labels[i]);
     for (unsigned variant=0;variant<2;++variant) {
       const unsigned table=Word(r,0xa227+family*2);

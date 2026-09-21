@@ -478,6 +478,22 @@ static void DescriptionTitle(const FrameSlot *slot, ArRenderRectI view,
   }
 }
 
+static bool MenuLabelRightToLeft(const FrameSlot *slot, ArRenderRectI view,
+                                 unsigned surface) {
+  const ArLocalizationFrame *labels=&slot->sim_menu.label_frame;
+  const ArLocalizationScreenTextRecord *record=
+      ArLocalizationFrame_FindScreenText(labels,surface);
+  if (!record) return false;
+  const ArTextDirection direction=labels->snapshots[record->snapshot_slot].language.direction;
+  if (direction!=kArTextDirection_Auto)
+    return direction==kArTextDirection_RightToLeft;
+  const ArRenderRectF r=Rect(view,0,0,132,18);
+  ArLocalizedPreparedFrame prepared={0};
+  return ArLocalizedTextPresenter_PrepareScreenText(&g_render_device,labels,surface,
+      (ArRenderRectI){r.x,r.y,r.w,r.h},&prepared) && prepared.text_count==1 &&
+      prepared.texts[0].surface.paragraph_direction==kArTextDirection_RightToLeft;
+}
+
 static void Browse(const FrameSlot *slot,ArRenderRectI view,
                    const SimMenuModel *m) {
   const SimMenuFrame *f=&slot->sim_menu;
@@ -497,9 +513,21 @@ static void Browse(const FrameSlot *slot,ArRenderRectI view,
   const bool miracle=m->phase!=kSimMenu_Inventory && m->category==2;
   /* Reserve a full label column before the separate SP column, so long
    * miracle names do not need a smaller font than their neighbouring rows. */
-  const float panel_width=miracle?198:166;
+  const float content_width=miracle?198:166;
+  /* Keep the name/SP columns intact. A separate trailing column associates
+   * the ROM angel and physical binding with only the selected entry. Retain
+   * that space behind Describe so opening Help cannot move the submenu. */
+  const unsigned selected_row=m->phase==kSimMenu_Inventory?m->item_slot:m->row[m->category];
+  const bool rtl=MenuLabelRightToLeft(slot,view,601+selected_row);
+  const float binding_width=fminf(56,strlen(f->describe_binding)*7);
+  const float hint_width=f->describe_binding[0]?24+binding_width:0;
+  const float panel_width=content_width+hint_width;
   float x=dock_x+8+pitch*(m->category+0.5f)-16;
   x=fminf(x,dock_x+dock_width-8-panel_width);
+  /* A long remapped binding may make the panel wider than the dock itself. */
+  const float viewport_left=(256-view.w*224.0f/view.h)*0.5f;
+  x=fmaxf(x,viewport_left+4);
+  const float content_x=x+(rtl?hint_width:0);
   const unsigned row_height=count?fminf(20,floorf(128.0f/count)):20;
   Frame(view,x,84,panel_width,8+count*row_height);
   for(unsigned row=0;row<count;++row) {
@@ -512,11 +540,19 @@ static void Browse(const FrameSlot *slot,ArRenderRectI view,
            kSimMenuActions[action].row==row) id=6+action;
       selected=row==m->row[m->category];
     }
-    Icon(view,id,selected,x+6,88+row*row_height);
-    Label(slot,view,601+row,f->labels[id],x+27,92+row*row_height,132);
+    Icon(view,id,selected,content_x+6,88+row*row_height);
+    Label(slot,view,601+row,f->labels[id],content_x+27,92+row*row_height,132);
     if(miracle) {
       char cost[8]; snprintf(cost,sizeof(cost),"%u",kSimMenuActions[id-6].sp_cost);
-      LabelGlyphs(view,cost,x+panel_width-32,92+row*row_height,25);
+      LabelGlyphs(view,cost,content_x+content_width-32,92+row*row_height,25);
+    }
+    if (selected && hint_width &&
+        (f->model.phase==kSimMenu_Browse || f->model.phase==kSimMenu_Inventory)) {
+      const float hint_x=rtl?x+6:x+content_width+2;
+      Texture(s_icons,(ArRenderRectF){0,kSimMenuArtDescribeAngel*16,16,16},
+          Rect(view,hint_x+(rtl?binding_width+4:0),90+row*row_height,12,12));
+      LabelGlyphs(view,f->describe_binding,hint_x+(rtl?0:16),
+                   92+row*row_height,binding_width);
     }
   }
 }

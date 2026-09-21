@@ -6,7 +6,7 @@
 #include "localization/localization_frame.h"
 #include "snesrecomp/runner.h"
 
-enum { kSimMenuArtCount = 43, kSimMenuArtWidth = 32,
+enum { kSimMenuArtDescribeAngel = 43, kSimMenuArtCount = 44, kSimMenuArtWidth = 32,
        kSimMenuArtHeight = kSimMenuArtCount * 16 };
 typedef struct SimMenuFrame {
   SimMenuModel model;
@@ -17,6 +17,8 @@ typedef struct SimMenuFrame {
   ArLocalizationFrame label_frame;
   bool valid;
   uint8_t scale_percent;
+  /* Captured with input state; presentation never polls a live controller. */
+  char describe_binding[64];
   uint32_t art_revision;
   /* Complete ROM prompt footprint, available before its first glyph reveals.
    * Enhanced prose is measured by the dialogue renderer instead. */

@@ -1215,6 +1215,91 @@ static void TestNoWideBudget(void) {
 /* Input bindings: defaults reproduce the pre-rebinding hard-coded keyboard
  * layout, every row survives the ini text round trip, and claiming a control
  * that another row already owns steals it rather than double-binding. */
+static void TestInputBindingHints(void) {
+  Settings_Init();
+  char hint[64];
+  const uint32 north=INPUT_BIND_MAKE(kInputBind_PadButton,SDL_GAMEPAD_BUTTON_NORTH,false);
+  InputMap_FormatBindingHint(hint,sizeof(hint),north,SDL_GAMEPAD_TYPE_XBOXONE);
+  CHECK(!strcmp(hint,"Y"));
+  InputMap_FormatBindingHint(hint,sizeof(hint),north,SDL_GAMEPAD_TYPE_PS5);
+  CHECK(!strcmp(hint,"Triangle"));
+  InputMap_FormatBindingHint(hint,sizeof(hint),north,SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO);
+  CHECK(!strcmp(hint,"X"));
+  InputMap_FormatBindingHint(hint,sizeof(hint),
+      INPUT_BIND_MAKE(kInputBind_PadButton,SDL_GAMEPAD_BUTTON_WEST,false),SDL_GAMEPAD_TYPE_PS4);
+  CHECK(!strcmp(hint,"Square"));
+  InputMap_FormatBindingHint(hint,sizeof(hint),0,SDL_GAMEPAD_TYPE_STANDARD);
+  CHECK(!hint[0]);
+  InputMap_FormatBindingHint(hint,sizeof(hint),
+      INPUT_BIND_MAKE(kInputBind_PadAxis,SDL_GAMEPAD_AXIS_RIGHTX,true),SDL_GAMEPAD_TYPE_STANDARD);
+  CHECK(!strcmp(hint,"RS Left"));
+  /* Forced gamepad mode retains the same disconnected-pad keyboard safety
+   * valve as gameplay; the hint follows a remap and disappears when unbound. */
+  g_settings.input_device=kInputDevice_Gamepad;
+  InputMap_GameActionHint(hint,sizeof(hint),kInputAction_SimDescribe);
+  CHECK(!strcmp(hint,"S"));
+  g_settings.input_bind[kInputClass_Keyboard][kInputAction_SimDescribe]=
+      INPUT_BIND_MAKE(kInputBind_Key,SDL_SCANCODE_F1,false);
+  InputMap_GameActionHint(hint,sizeof(hint),kInputAction_SimDescribe);
+  CHECK(!strcmp(hint,"F1"));
+  g_settings.input_bind[kInputClass_Keyboard][kInputAction_SimDescribe]=0;
+  InputMap_GameActionHint(hint,sizeof(hint),kInputAction_SimDescribe);
+  CHECK(!hint[0]);
+}
+
+static void TestInputHintDeviceRetention(void) {
+  Settings_Init();
+  InputMap_Clear();
+  const bool initialized=SDL_InitSubSystem(SDL_INIT_GAMEPAD);
+  CHECK(initialized);
+  if (!initialized) return;
+  SDL_VirtualJoystickDesc desc;
+  SDL_INIT_INTERFACE(&desc);
+  desc.type=SDL_JOYSTICK_TYPE_GAMEPAD;
+  desc.nbuttons=SDL_GAMEPAD_BUTTON_COUNT;
+  desc.button_mask=(1u<<SDL_GAMEPAD_BUTTON_COUNT)-1;
+  desc.name="Describe hint test";
+  const SDL_JoystickID id=SDL_AttachVirtualJoystick(&desc);
+  CHECK(id!=0);
+  if (!id) { SDL_QuitSubSystem(SDL_INIT_GAMEPAD); return; }
+  SDL_Event event={0};
+  event.type=SDL_EVENT_GAMEPAD_ADDED; event.gdevice.which=id;
+  InputMap_HandleEvent(&event);
+  CHECK(InputMap_GamepadCount()==1);
+  char hint[64];
+  event.type=SDL_EVENT_GAMEPAD_BUTTON_DOWN;
+  event.gbutton.which=id; event.gbutton.button=SDL_GAMEPAD_BUTTON_NORTH;
+  InputMap_HandleEvent(&event);
+  InputMap_GameActionHint(hint,sizeof(hint),kInputAction_SimDescribe);
+  CHECK(!strcmp(hint,"Y"));
+  event.type=SDL_EVENT_GAMEPAD_BUTTON_UP;
+  InputMap_HandleEvent(&event);
+  InputMap_GameActionHint(hint,sizeof(hint),kInputAction_SimDescribe);
+  CHECK(!strcmp(hint,"Y")); /* Release must not flash the keyboard hint. */
+  InputMap_HandleKey(SDL_SCANCODE_UP,true,false);
+  InputMap_GameActionHint(hint,sizeof(hint),kInputAction_SimDescribe);
+  CHECK(!strcmp(hint,"S"));
+  InputMap_HandleKey(SDL_SCANCODE_UP,false,false);
+  InputMap_GameActionHint(hint,sizeof(hint),kInputAction_SimDescribe);
+  CHECK(!strcmp(hint,"S"));
+  g_settings.input_device=kInputDevice_Gamepad;
+  g_settings.input_bind[kInputClass_Gamepad][kInputAction_SimDescribe]=
+      INPUT_BIND_MAKE(kInputBind_PadButton,SDL_GAMEPAD_BUTTON_WEST,false);
+  InputMap_GameActionHint(hint,sizeof(hint),kInputAction_SimDescribe);
+  CHECK(!strcmp(hint,"X"));
+  g_settings.input_device=kInputDevice_Keyboard;
+  InputMap_GameActionHint(hint,sizeof(hint),kInputAction_SimDescribe);
+  CHECK(!strcmp(hint,"S"));
+  g_settings.input_device=kInputDevice_Gamepad;
+  event.type=SDL_EVENT_GAMEPAD_REMOVED; event.gdevice.which=id;
+  InputMap_HandleEvent(&event);
+  InputMap_GameActionHint(hint,sizeof(hint),kInputAction_SimDescribe);
+  CHECK(!strcmp(hint,"S"));
+  InputMap_Shutdown();
+  SDL_DetachVirtualJoystick(id);
+  SDL_QuitSubSystem(SDL_INIT_GAMEPAD);
+}
+
 static void TestInputBindings(void) {
   ClearSettingsEnv();
   Settings_Init();
@@ -2012,6 +2097,8 @@ int main(int argc,char **argv) {
   TestCheatsCanBeStagedOutsideTheirRuntimeMode();
   TestNoWideBudget();
   TestInputBindings();
+  TestInputBindingHints();
+  TestInputHintDeviceRetention();
   TestHardwareCapabilities();
   TestGpuBackendChoice();
   ClearSettingsEnv();

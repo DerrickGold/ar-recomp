@@ -13,6 +13,7 @@
 #include "present.h"
 #include "snesrecomp/game/types.h"
 #include "settings.h"
+#include "input_map.h"
 #include "diorama/diorama_planes.h"
 #include "diorama/diorama.h"
 #include "diorama/diorama_layer_order.h"
@@ -533,6 +534,8 @@ void FrameSlot_Capture(FrameSlot *dst, const SimFrameData *annotated_sim) {
   dst->sim_menu.scale_percent=(uint8_t)g_settings.sim_menu_scale_percent;
   if (have_ppu_view && dst->sim_menu.model.phase != kSimMenu_Closed &&
       dst->sim_menu.model.phase != kSimMenu_Native) {
+    InputMap_GameActionHint(dst->sim_menu.describe_binding,
+        sizeof(dst->sim_menu.describe_binding), kInputAction_SimDescribe);
     if (dst->sim_menu.model.phase == kSimMenu_Confirm)
       dst->sim_menu.model.yes = g_ram[0x0a] == 0;
     if (!SimMenuArt_Capture(&dst->sim_menu, ppu_view.api, ppu_view.runner))

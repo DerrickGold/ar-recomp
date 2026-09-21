@@ -54,6 +54,14 @@ remain in force across page/menu transitions.
   column to keep longer names at the same size as shorter entries. Single-line
   label bounds also leave room for shadows and descenders without shrinking
   individual rows; their centers and row spacing remain fixed.
+  The selected submenu/inventory row includes a small ROM-sourced angel
+  (Observe the People, family `$0B`, selected composition `$01:D134`) beside
+  the current Describe binding. A trailing hint column preserves name/SP
+  widths and mirrors to the left for RTL labels. The angel keeps its native
+  proportions at 12x12 logical pixels. The hint hides during Help and other
+  modal phases, and when Describe is unbound; Help retains the column's space
+  so the menu behind it does not move. Keyboard remaps and controller face
+  labels follow the active device, retaining that device's hint after release.
   The dock spreads out on wider displays, and selection uses the
   original color/grey variants. Submenus keep their native frames, attach just
   below the dock, and fit all eight inventory slots. All enhanced menu labels
@@ -362,3 +370,11 @@ handling of unknown controls/sources. Model tests cover directional repeat,
 opposing/diagonal inputs, held action suppression and stable dialogue session
 identity. The model, Help, artwork, adapter, localization scheduler and text
 presenter tests all pass after this polish pass.
+
+The angel Describe hint adds five isolated replays (`angel-hint-*`) with
+77 original-resolution captures: ROM/enhanced text at 50%, a remapped F1
+binding at 100%, RTL placement, and an unbound action. All retain SP and
+inventory. Pixel comparisons show that opening Help changes only the hint
+pixels and closing it restores the same submenu. Settings tests cover physical
+Xbox/PlayStation/Nintendo face labels and a virtual controller's press/release,
+keyboard switch, forced input modes, remapping, and disconnect fallback.
