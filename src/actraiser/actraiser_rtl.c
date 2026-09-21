@@ -14,6 +14,8 @@
 #include "actraiser_hle_fatal.h"
 #include "actraiser/actraiser_event_bugfixes.h"
 #include "actraiser/actraiser_credits.h"
+#include "actraiser/actraiser_hud.h"
+#include "actraiser/actraiser_bg3_upload.h"
 #include "actraiser/actraiser_localization_routes.h"
 #include "action/action_bg_tuner.h"
 #include "action/action_effects.h"
@@ -167,7 +169,7 @@ static bool ActRaiser_ClearPpuObjMetadata(void) {
 bool ActRaiser_InitializeGame(
     const RtlGameInitializeContext *context) {
   ActRaiserSimMenu_Reset();
-  ActRaiserCredits_Reset();
+  ActRaiserBg3Upload_Reset();
   s_rom_setup_result = (ActRaiserRomSetupResult){0};
   if (!context ||
       context->struct_size < RTL_GAME_INITIALIZE_CONTEXT_V1_SIZE)
@@ -4671,7 +4673,7 @@ static bool CreateGameCoroutine(void) {
  * the guard-page mapping and the fiber are not leaked, and so a leak checker
  * run against a clean exit stays quiet. Safe to call without a coroutine. */
 void ActRaiser_DestroyGameCoroutine(void) {
-  ActRaiserCredits_Reset();
+  ActRaiserBg3Upload_Reset();
   ActRaiserHleFatal_RegisterHostEscape(NULL);
   g_game_coroutine_executing = false;
 #ifdef _WIN32
@@ -4706,6 +4708,8 @@ static bool ActRaiser_ControlGameTiming(
 }
 
 void RunOneFrameOfGame(void) {
+  ActRaiserHud_ObserveScene(g_ram[kActRaiserWram_MapGroup],
+                            g_ram[kActRaiserWram_CurrentMap]);
   ActRaiserCredits_ObserveScene(g_ram[kActRaiserWram_MapGroup],
                                g_ram[kActRaiserWram_CurrentMap]);
   NativeAudioExtension_ObserveGameState(g_ram, kSnesWramSize);

@@ -111,6 +111,7 @@ bool ActRaiser_LocalizationObserveTextCompose(CpuState *cpu);
 bool ActRaiser_LocalizationObserveTextErase(CpuState *cpu);
 bool ActRaiser_LocalizationObserveMenuClear(CpuState *cpu);
 bool ActRaiser_LocalizationObserveGeneralClear(CpuState *cpu);
+bool ActRaiser_LocalizationObserveHudTemplate(CpuState *cpu);
 bool ActRaiser_LocalizationObserveContinuation(CpuState *cpu);
 bool ActRaiser_LocalizationObserveDialogueWrapper0(CpuState *cpu);
 bool ActRaiser_LocalizationObserveDialogueWrapper1(CpuState *cpu);

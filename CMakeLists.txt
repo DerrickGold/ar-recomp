@@ -885,10 +885,21 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_credits_test
         tests/actraiser_credits_test.c
-        src/actraiser/actraiser_credits.c)
+        src/actraiser/actraiser_credits.c
+        src/actraiser/actraiser_bg3_upload.c
+        src/actraiser/actraiser_hud.c)
     target_include_directories(actraiser_credits_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_credits COMMAND actraiser_credits_test)
+
+    add_executable(actraiser_hud_test
+        tests/actraiser_hud_test.c
+        src/actraiser/actraiser_hud.c
+        src/actraiser/actraiser_bg3_upload.c
+        src/actraiser/actraiser_credits.c)
+    target_include_directories(actraiser_hud_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    add_test(NAME actraiser_hud COMMAND actraiser_hud_test)
 
     add_executable(actraiser_localization_credits_test
         tests/actraiser_localization_credits_test.c
@@ -2522,7 +2533,8 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_localization_text_test
         tests/actraiser_localization_text_test.c
-        src/actraiser/actraiser_localization_text.c)
+        src/actraiser/actraiser_localization_text.c
+        src/actraiser/actraiser_hud.c)
     add_executable(sim_menu_model_test
         tests/sim_menu_model_test.c src/sim/sim_menu_model.c)
     target_include_directories(sim_menu_model_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
@@ -2555,6 +2567,7 @@ if(BUILD_TESTING)
         src/atomic_replace.c
         src/localization/text_presentation.c
         src/actraiser/actraiser_localization_schedule.c
+        src/actraiser/actraiser_hud.c
         src/actraiser/actraiser_localization_runtime.c
         src/actraiser/actraiser_localization_world_navigation.c
         src/actraiser/actraiser_localization_credits.c

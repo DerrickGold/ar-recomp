@@ -39,7 +39,7 @@ typedef struct ActRaiserTextStylePlan {
 } ActRaiserTextStylePlan;
 
 /* Dialogue/credits/OBJ bindings name exact CGRAM entries. HUD is populated by
- * its adapter only after matching the native template's tile descriptors. */
+ * its adapter only for an observed, uploaded owner with intact field tiles. */
 void ActRaiserTextPalette_Capture(ActRaiserTextPalette *palette,
                                   const uint16_t *cgram, size_t count);
 void ActRaiserTextPalette_SetHud(ActRaiserTextPalette *palette,

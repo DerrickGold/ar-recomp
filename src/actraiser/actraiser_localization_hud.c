@@ -50,10 +50,10 @@ static const HudField kFields[kActRaiserLocalizationHudLabels] = {
    kArLocalizationTextLayout_RightAlignedLabel, 5, 4},
   {"action.hud.enemy_label", {0, 3, 6, 1}, 0, 3, 6, {15,16,17,18,19,20},
    kArLocalizationTextLayout_RightAlignedLabel, 5, 4},
-  /* The simulation and Sky Palace status bar reuses the action bar's shape:
+  /* Town, Sky Palace and temple share the simulation status bar:
    * the same bookended context label over the same six-cell name/bar row, so
    * these mirror their action counterparts cell for cell. One context label
-   * covers both scenes -- town and palace draw the identical tiles. SP is a
+   * covers all three scenes, which draw the identical tiles. SP is a
    * plain two-cell ASCII label rather than the packed artwork the others use,
    * and leads its value the way SCORE leads the score. */
   {"sim_sky.hud.context_label", {0, 1, 6, 1}, 0, 1, 6, {34,91,92,93,94,39},
@@ -77,8 +77,8 @@ static const struct {
      kArLocalizationTextLayout_SingleLineLabel},
     {"action.hud.score_value", 26, 1, 5, kHudFieldScoreLabel, 0,
      kArLocalizationTextLayout_RightAlignedLabel},
-    /* Simulation and Sky Palace: population above SP, both written by the same
-     * native formatter as "current/maximum". SP is one cell narrower and the
+    /* Population is selected-town/total; SP is current/maximum. Both come
+     * from the native formatter. SP is one cell narrower and the
      * formatter indents it with a leading blank, which the rasterizer crops
      * away -- so the indent is stated as an inset instead. Anchoring to the
      * trailing edge would not do: these glyphs are narrower than the native
@@ -120,6 +120,14 @@ static uint16_t Word(const uint16_t *vram, uint16_t base, unsigned row, unsigned
   return vram[(base + row * 32 + col) & 0x7fff];
 }
 
+static bool OwnsField(ActRaiserHudOwner owner, unsigned field) {
+  if (field >= kHudFieldSimContextLabel)
+    return owner.kind == kActRaiserHud_Simulation;
+  return owner.kind == kActRaiserHud_Action &&
+      (field != kHudFieldEnemyLabel || owner.enemy);
+}
+
+/* Integrity guard for an already-owned field, never a way to select an owner. */
 static bool Matches(const HudField *field, const uint16_t *vram, uint16_t base) {
   for (unsigned i = 0; i < field->source_count; ++i)
     if ((Word(vram, base, field->source_row, field->source_column + i) & 0x3ff) != field->tiles[i])
@@ -127,16 +135,14 @@ static bool Matches(const HudField *field, const uint16_t *vram, uint16_t base) 
   return true;
 }
 
-/* Native strip coordinates: left ornament x=5..12, right x=37..43.
- * Each spans two tiles; cropping excludes every original letter pixel but
- * retains the unequal top/bottom strokes, shadow ink and transparent row. */
 void ActRaiserLocalizationHud_CapturePalette(
-    ActRaiserTextPalette *palette, uint16_t map_base, const uint16_t *vram,
+    ActRaiserTextPalette *palette, ActRaiserHudOwner owner,
+    uint16_t map_base, const uint16_t *vram,
     size_t vram_count, const uint16_t *cgram, size_t cgram_count) {
   if (!palette || !vram || vram_count < 0x8000 || !cgram || cgram_count < 32)
     return;
   for (size_t i = 0; i < kActRaiserLocalizationHudLabels; ++i) {
-    if (!Matches(&kFields[i], vram, map_base))
+    if (!OwnsField(owner, i) || !Matches(&kFields[i], vram, map_base))
       continue;
     const uint16_t word =
         Word(vram, map_base, kFields[i].source_row, kFields[i].source_column);
@@ -145,6 +151,9 @@ void ActRaiserLocalizationHud_CapturePalette(
   }
 }
 
+/* Native strip coordinates: left ornament x=5..12, right x=37..43.
+ * Each spans two tiles; cropping excludes every original letter pixel but
+ * retains the unequal top/bottom strokes, shadow ink and transparent row. */
 static bool CaptureFrameEnd(ArLocalizationArtwork *art, unsigned column,
                             unsigned width, uint16_t map_base, uint16_t tile_base,
                             const uint16_t *vram, size_t vram_count,
@@ -201,12 +210,13 @@ Append(ArLocalizationFrame *frame, uint32_t id,
 }
 
 void ActRaiserLocalizationHud_Append(
-    ActRaiserLocalizationHud *hud, ArLocalizationFrame *frame,
+    ActRaiserLocalizationHud *hud, ActRaiserHudOwner owner,
+    ArLocalizationFrame *frame,
     ArTextCellDestination destination, uint16_t tile_base_words,
     const uint16_t *vram, size_t vram_count, const uint16_t *cgram,
     size_t cgram_count, ActRaiserLocalizationComposeTextResolver resolve,
     ActRaiserLocalizationFieldResolver resolve_value, void *context) {
-  if (!hud || !frame || !vram || vram_count < 0x8000 ||
+  if (owner.kind == kActRaiserHud_None || !hud || !frame || !vram || vram_count < 0x8000 ||
       !cgram || cgram_count < 32 || !resolve) return;
   ActRaiserTextPalette inks;
   ActRaiserTextPalette_Capture(&inks, cgram, cgram_count);
@@ -232,7 +242,7 @@ void ActRaiserLocalizationHud_Append(
   for (unsigned i = 0; i < kActRaiserLocalizationHudLabels; ++i) {
     const HudField *field = &kFields[i];
     const ActRaiserLocalizationHudLabel *label = &hud->labels[i];
-    if (label->valid && Matches(field, vram, base)) {
+    if (OwnsField(owner, i) && label->valid && Matches(field, vram, base)) {
       if (field->layout == kArLocalizationTextLayout_FramedLabel &&
           (!CaptureFrameEnd(&frame->artwork[kArLocalizationArtwork_LabelFrameLeft],
                             0, 8, base, tile_base_words, vram, vram_count, cgram, cgram_count) ||
@@ -248,7 +258,8 @@ void ActRaiserLocalizationHud_Append(
     }
   }
   for (unsigned i = 0; i < sizeof(kNumbers) / sizeof(kNumbers[0]); ++i) {
-    if (!Matches(&kFields[kNumbers[i].owner], vram, base))
+    if (!OwnsField(owner, kNumbers[i].owner) ||
+        !Matches(&kFields[kNumbers[i].owner], vram, base))
       continue;
     char digits[9] = {0};
     bool valid = true;

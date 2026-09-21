@@ -9,16 +9,12 @@ static int s_selected = kActRaiserCreditsNoPage;
 static int s_staged = kActRaiserCreditsNoPage;
 static int s_presented = kActRaiserCreditsNoPage;
 static bool s_awaiting_copy;
-static bool s_entering_upload;
-
-extern RecompReturn bank_02_AEEB_M1X0(CpuState *cpu);
 
 int ActRaiserCredits_PresentedPage(void) { return s_presented; }
 
 void ActRaiserCredits_Reset(void) {
   s_selected = s_staged = s_presented = kActRaiserCreditsNoPage;
   s_awaiting_copy = false;
-  s_entering_upload = false;
 }
 
 void ActRaiserCredits_ObserveScene(uint8_t map_group, uint8_t map_number) {
@@ -61,28 +57,7 @@ void ActRaiserCredits_ObserveWait(CpuState *cpu) {
   s_awaiting_copy = false;
 }
 
-bool ActRaiser_CreditsUploadEntry(CpuState *cpu) {
-  if (s_entering_upload) {
-    s_entering_upload = false;
-    return false;
-  }
-  /* AEEB uses DB-relative PPU ports and direct-page $F1. Only wrap the
-   * audited native-width, bank-$00 I/O call used by the credits NMI. */
-  return InCredits(cpu) && cpu->PB == 2 && cpu->DB == 0 && cpu->D == 0 &&
-      cpu->m_flag && !cpu->x_flag && !cpu->emulation;
-}
-
-RecompReturn ActRaiser_CreditsUpload(CpuState *cpu) {
-  const bool lower_rows = cpu_read8(cpu, 0, 0xf1) != 0;
-  /* Delegate exactly once with the original JSR frame. AEEB does not yield;
-   * its DMA writes are synchronous. Preserve all native return semantics. */
-  s_entering_upload = true;
-  const RecompReturn result = bank_02_AEEB_M1X0(cpu);
-  s_entering_upload = false;
-  if (result != RECOMP_RETURN_NORMAL)
-    ActRaiserCredits_Reset();
-  else if (lower_rows)
-    s_presented = s_staged;
+void ActRaiserCredits_ObserveUpload(bool lower_rows) {
   /* The unconditional top-four-row upload alone never commits a new page. */
-  return result;
+  if (lower_rows) s_presented = s_staged;
 }

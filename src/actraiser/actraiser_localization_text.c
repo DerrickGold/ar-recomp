@@ -1,5 +1,6 @@
 #include "actraiser/actraiser_localization_text.h"
 #include "actraiser/actraiser_credits.h"
+#include "actraiser/actraiser_hud.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -344,8 +345,17 @@ bool ActRaiser_LocalizationObserveMenuClear(CpuState *cpu) {
 
 bool ActRaiser_LocalizationObserveGeneralClear(CpuState *cpu) {
   /* $02:ABC4/$BA41 clear $7F:B000..B6FF (28 complete rows). */
-  if (cpu) ActRaiserCredits_ObserveClear();
+  if (cpu) {
+    ActRaiserCredits_ObserveClear();
+    ActRaiserHud_ObserveClear();
+  }
   return ObserveSurfaceClear(cpu, 0, 0, 32, 28);
+}
+
+bool ActRaiser_LocalizationObserveHudTemplate(CpuState *cpu) {
+  (void)ActRaiser_LocalizationObserveGeneralClear(cpu);
+  ActRaiserHud_ObserveTemplate(cpu);
+  return false; /* BA41 completes the template without yielding to NMI. */
 }
 
 bool ActRaiser_LocalizationObserveTextCompose(CpuState *cpu) {

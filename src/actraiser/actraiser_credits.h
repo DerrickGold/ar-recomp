@@ -11,12 +11,11 @@ int ActRaiserCredits_PresentedPage(void);
 void ActRaiserCredits_Reset(void);
 void ActRaiserCredits_ObserveScene(uint8_t map_group, uint8_t map_number);
 void ActRaiserCredits_ObserveClear(void);
+void ActRaiserCredits_ObserveUpload(bool lower_rows);
 
 /* Native seams: AB30 entry, A85E before its JSR frame is popped, and AEEB.
  * Selection/wait observers never change native CPU, memory, or timing. */
 bool ActRaiser_CreditsObserveSelection(CpuState *cpu);
 void ActRaiserCredits_ObserveWait(CpuState *cpu);
-bool ActRaiser_CreditsUploadEntry(CpuState *cpu);
-RecompReturn ActRaiser_CreditsUpload(CpuState *cpu);
 
 #endif

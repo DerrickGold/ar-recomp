@@ -379,10 +379,31 @@ Japanese font source `$14:F2A6` has byte-identical English lettering at
 ACT and numeral tiles are at their ordinary indices. French/German packed
 lettering is transcribed separately after ROM identity/census validation.
 
-The runtime checks these exact destination cells before claiming labels.
+`actraiser_hud.c` owns the native HUD lifecycle. The scene loader's `$02:BA41`
+selects the action or simulation template; `$00:A4C3` adds ENEMY and `$00:88F7`
+clears its row. These yield-free producers stage ownership. The shared
+`actraiser_bg3_upload.c` wrapper delegates the original `$02:AEEB` with its
+original stack, then publishes ownership after DMA returns. HUD publication
+uses the unconditional top-four-row transfer, even when `$F1` is zero. Credits
+still require the separate lower-row transfer. Clearing the ENEMY activity
+flag `$EE` alone does not remove the displayed label.
+
+The simulation HUD covers all six towns, Sky Palace **and the temple**, using
+the same `sim_sky.hud.*` messages and styles. Ordinary menu clears and pauses
+retain it. Current scenes, not pending destinations, control eligibility so
+outgoing fades retain their HUD. Title, world map and credits exclude HUD
+claims even if matching old tiles remain in VRAM. Game reset/shutdown discards
+ownership; language/font switches do not. Explicit HUD ink bindings are only
+available from a visible, intact owned field. An unavailable binding retains
+the affected text's native rendering, following the existing style policy.
+
+The adapter checks these exact destination cells as overwrite guards **after**
+native events establish ownership; a matching tile pattern cannot activate it.
 Lives (row 1 columns 8–9), time (15–17) and score (26–30) use the native
 writer's final `$30-$39` digit/blank cells, retaining BCD formatting and zero
 padding. Labels/health bars are not inferred by scanning arbitrary glyphs.
+SIM population retains selected-town/total formatting, and SP retains
+current/maximum formatting, from the same native formatter.
 The selected tile's CGRAM palette supplies 2bpp ink index 1 (opaque shadow),
 2 (edge band) and 3 (body), with per-character banding; ACT uses a solid body colour. Numerals
 request italic shaping, labels stay upright. Heart, multiplier, health bars,

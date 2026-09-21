@@ -1380,24 +1380,18 @@ void ActRaiserLocalizationRuntime_CaptureFrame(
   }
   ActRaiserTextPalette inks;
   ActRaiserTextPalette_Capture(&inks, cgram_words, cgram_word_count);
-  ActRaiserLocalizationHud_CapturePalette(&inks, bg3_tilemap_base_words,
+  const ActRaiserHudOwner hud_owner = ActRaiserHud_Presented(map_group, map_number);
+  ActRaiserLocalizationHud_CapturePalette(&inks, hud_owner, bg3_tilemap_base_words,
                                           vram_words, vram_word_count,
                                           cgram_words, cgram_word_count);
   if (s_runtime.presentation)
     (void)ActRaiserLocalizationComposeState_AppendFrame(
         &s_runtime.compose, frame, destination, &inks);
-  /* The status bar exists in both shapes: the action bar on an act map, and
-   * the simulation/Sky Palace bar on the non-action maps that have one. Each
-   * field still proves its own template tiles before it replaces anything, so
-   * offering both here cannot put one bar's label on the other's bar. */
-  if (s_runtime.presentation &&
-      ((map_group >= kActRaiserActionMapGroup_First &&
-        map_group <= kActRaiserActionMapGroup_Last) ||
-       (map_group == kActRaiserMapGroup_NonAction &&
-        map_number >= kActRaiserSimulationTown_First &&
-        map_number <= kActRaiserNonActionMap_SkyPalace)))
+  /* Native producers/upload own identity; the adapter only validates and
+   * presents their fields, including the SIM bar inside the temple. */
+  if (s_runtime.presentation)
     ActRaiserLocalizationHud_Append(
-        &s_runtime.hud, frame, destination, bg3_tile_base_words, vram_words,
+        &s_runtime.hud, hud_owner, frame, destination, bg3_tile_base_words, vram_words,
         vram_word_count, cgram_words, cgram_word_count, ResolveComposeText,
         ResolveHudValue, NULL);
   if (s_runtime.presentation)

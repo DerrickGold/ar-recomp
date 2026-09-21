@@ -428,11 +428,33 @@ static void TestActionHud(void) {
   vram[0x26 * 8 + 2] = 0x0808; /* x=36, not right ornament */
   vram[0x27 * 8 + 2] = 0x0808; /* x=44, not right ornament */
   ActRaiserLocalizationHud hud = {0};
+  const ActRaiserHudOwner owner = {kActRaiserHud_Action, true};
   ArLocalizationFrame frame;
   const ArTextCellDestination destination = {3, kArTextCellScreen_Composited, base};
+  const ActRaiserHudOwner unowned[] = {{0}, {kActRaiserHud_Simulation, false}};
+  for (unsigned i = 0; i < 2; ++i) {
+    ArLocalizationFrame_Reset(&frame);
+    CHECK(ArLocalizationFrame_SetFont(&frame, "en", "test", 1, 1, &frame.settings));
+    ActRaiserLocalizationHud_Append(&hud, unowned[i], &frame, destination, 0,
+                                    vram, 0x8000, cgram, 256,
+                                    ResolveSemanticId, NULL, NULL);
+    CHECK(!frame.snapshot_count); /* Matching action tiles are not an owner. */
+    ActRaiserTextPalette inks;
+    ActRaiserTextPalette_Capture(&inks, cgram, 256);
+    const uint16_t available = inks.available;
+    ActRaiserLocalizationHud_CapturePalette(&inks, unowned[i], base,
+                                            vram, 0x8000, cgram, 256);
+    CHECK(inks.available == available);
+  }
+  ArLocalizationFrame_Reset(&frame);
+  CHECK(ArLocalizationFrame_SetFont(&frame, "en", "test", 1, 1, &frame.settings));
+  ActRaiserLocalizationHud_Append(&hud, (ActRaiserHudOwner){kActRaiserHud_Action},
+                                  &frame, destination, 0, vram, 0x8000,
+                                  cgram, 256, ResolveSemanticId, NULL, NULL);
+  CHECK(frame.snapshot_count == 7); /* ENEMY needs its own uploaded producer. */
   ArLocalizationFrame_Reset(&frame);
   CHECK(ArLocalizationFrame_SetFont(&frame, "ar", "test", UINT64_C(1), 1, &frame.settings));
-  ActRaiserLocalizationHud_Append(&hud, &frame, destination, 0, vram, 0x8000,
+  ActRaiserLocalizationHud_Append(&hud, owner, &frame, destination, 0, vram, 0x8000,
                                   cgram, 256, ResolveSemanticId, NULL, NULL);
   CHECK(frame.snapshot_count == 8 && hud.resolved);
   for (uint8_t i = 0; i < frame.snapshot_count; ++i) {
@@ -475,7 +497,7 @@ static void TestActionHud(void) {
     ArLocalizationFrame_Reset(&frame);
     CHECK(ArLocalizationFrame_SetFont(&frame, "en", "test", 1, 1,
                                       &frame.settings));
-    ActRaiserLocalizationHud_Append(&hud, &frame, destination, 0, vram, 0x8000,
+    ActRaiserLocalizationHud_Append(&hud, owner, &frame, destination, 0, vram, 0x8000,
                                     cgram, 256, ResolveSemanticId,
                                     ResolveHudValue, NULL);
     CHECK(hud_value_calls == 3 && frame.snapshot_count == 8);
@@ -487,7 +509,7 @@ static void TestActionHud(void) {
   ArLocalizationFrame_Reset(&frame);
   CHECK(
       ArLocalizationFrame_SetFont(&frame, "en", "test", 1, 1, &frame.settings));
-  ActRaiserLocalizationHud_Append(&hud, &frame, destination, 0, vram, 0x8000,
+  ActRaiserLocalizationHud_Append(&hud, owner, &frame, destination, 0, vram, 0x8000,
                                   cgram, 256, ResolveSemanticId,
                                   ResolveHudValue, NULL);
   CHECK(hud_value_calls == 4);
@@ -496,7 +518,7 @@ static void TestActionHud(void) {
   cgram[6] = 0x7c00;
   ArLocalizationFrame_Reset(&frame);
   CHECK(ArLocalizationFrame_SetFont(&frame, "en", "test", UINT64_C(1), 1, &frame.settings));
-  ActRaiserLocalizationHud_Append(&hud, &frame, destination, 0, vram, 0x8000,
+  ActRaiserLocalizationHud_Append(&hud, owner, &frame, destination, 0, vram, 0x8000,
                                   cgram, 256, ResolveSemanticId, NULL,
                                   "action.hud.time_label");
   CHECK(frame.snapshot_count == 7); /* Resolver was not called again. */
@@ -504,7 +526,7 @@ static void TestActionHud(void) {
   memset(vram, 0, sizeof(vram));
   ArLocalizationFrame_Reset(&frame);
   CHECK(ArLocalizationFrame_SetFont(&frame, "en", "test", UINT64_C(1), 1, &frame.settings));
-  ActRaiserLocalizationHud_Append(&hud, &frame, destination, 0, vram, 0x8000,
+  ActRaiserLocalizationHud_Append(&hud, owner, &frame, destination, 0, vram, 0x8000,
                                   cgram, 256, ResolveSemanticId, NULL, NULL);
   CHECK(!frame.snapshot_count); /* Clear/fade transition cannot leave stale HUD. */
 }

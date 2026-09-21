@@ -6,6 +6,7 @@
 #include <time.h>
 
 #include "actraiser/actraiser_localization_runtime.h"
+#include "actraiser/actraiser_hud.h"
 #include "actraiser/actraiser_localization_compose_state.h"
 #include "actraiser/actraiser_localization_text_normalize.h"
 #include "actraiser_game.h"
@@ -910,6 +911,108 @@ static void TestCreditsWithoutDialogueObservation(void) {
   s_credits_page=-1;
 }
 
+static void TestHudSceneParity(void) {
+  /* A real V2 partial translation, including native HUD inks, an alternate
+   * font role, scaling and italic values. Every SIM scene shares these IDs. */
+  FILE *file = fopen(AR_TEST_NATIVE_FIXTURE_DIR "/hud.ini", "wb");
+  CHECK(file);
+  if (!file) return;
+  fputs("[pack]\nformat = actraiser-language-pack\nversion = 2\n"
+        "id = test.hud-parity\nlocale = fr-CA\nname = HUD fixture\n"
+        "autonym = HUD fixture\nauthor = Test suite\nlicense = MIT\n"
+        "direction = ltr\ntarget = us-runtime\nsource_profile = us\n"
+        "fallback = native-us\ncoverage = partial\n"
+        "[fonts]\nprimary = builtin:actraiser-sans\n"
+        "[font.hud]\nprimary = builtin:actraiser-sans\n"
+        "[scripts]\nsource = hud.artext\n", file);
+  CHECK(fclose(file) == 0);
+  file = fopen(AR_TEST_NATIVE_FIXTURE_DIR "/hud.artext", "wb");
+  CHECK(file);
+  if (!file) return;
+  fputs("@define-style hud band=native:hud.band body=native:hud.body "
+        "shadow=native:hud.shadow\n"
+        ":: sim_sky.hud.context_label\n@style hud\n@font hud\nRégion\n"
+        ":: sim_sky.hud.angel_label\n@style hud\nAnge\n"
+        ":: sim_sky.hud.sp_label\n@style hud\nPS\n"
+        ":: sim_sky.hud.population_value\n@style hud\n@scale 120%\n"
+        "<i>{hud_value}</i>\n"
+        ":: sim_sky.hud.sp_value\n@style hud\n<i>{hud_value}</i>\n", file);
+  CHECK(fclose(file) == 0);
+  ActRaiserLocalizationRuntime_Shutdown();
+  ActRaiserLocalizationText_ResetObservation();
+  ActRaiserHud_Reset();
+  memset(g_ram, 0, sizeof(g_ram));
+  s_installed_pack_path = AR_TEST_NATIVE_FIXTURE_DIR "/hud.ini";
+  g_settings.localization_content = 2;
+  g_settings.localization_presentation = 1;
+  static uint16_t vram[0x8000], cgram[32];
+  memset(vram, 0, sizeof(vram));
+  cgram[5] = 1; cgram[6] = 0x001f; cgram[7] = 0x03e0;
+  const uint16_t context[] = {34, 91, 92, 93, 94, 39};
+  for (unsigned i = 0; i < 6; ++i) {
+    vram[0x5800 + 32 + i] = 0x2400 | context[i];
+    vram[0x5800 + 64 + i] = 0x2400 | (21 + i);
+    vram[0x5800 + 96 + i] = 0x2400 | (15 + i); /* Stale ENEMY is unowned. */
+  }
+  vram[0x5800 + 64 + 21] = 0x2453;
+  vram[0x5800 + 64 + 22] = 0x2450;
+  for (unsigned i = 0; i < 8; ++i) {
+    vram[0x5800 + 32 + 23 + i] = 0x2400 | "123/0456"[i];
+    vram[0x5800 + 64 + 23 + i] = 0x2400 | " 012/099"[i];
+  }
+  g_ram[0x19] = 8;
+  ActRaiserLocalizationRuntime_CaptureFrame(
+      &s_frame, 0x5800, 0, vram, 0x8000, cgram, 32, false);
+  CHECK(!s_frame.snapshot_count); /* Tiles do not establish ownership. */
+  for (unsigned map = 1; map <= 8; ++map) {
+    g_ram[0x19] = map;
+    CpuState cpu = {.PB = 2, .m_flag = 1, .S = 0x1e0};
+    CHECK(!ActRaiser_LocalizationObserveHudTemplate(&cpu));
+    ActRaiserHud_ObserveUpload();
+    ActRaiserLocalizationRuntime_CaptureFrame(
+        &s_frame, 0x5800, 0, vram, 0x8000, cgram, 32, false);
+    CHECK(s_frame.snapshot_count == 5);
+    CHECK(FrameHasText("Région") && FrameHasText("Ange") && FrameHasText("PS"));
+    CHECK(FrameHasText("123/0456") && FrameHasText("012/099"));
+    CHECK(!strcmp(s_frame.snapshots[0].appearance.font_role, "hud"));
+    CHECK(s_frame.snapshots[3].appearance.scale_basis == 12000);
+    CHECK(s_frame.appearance_span_count == 2);
+    for (unsigned i = 0; i < s_frame.appearance_span_count; ++i)
+      CHECK(s_frame.appearance_spans[i].appearance.italic);
+    for (unsigned i = 0; i < s_frame.snapshot_count; ++i) {
+      CHECK(s_frame.snapshots[i].has_appearance);
+      CHECK(s_frame.snapshots[i].appearance.body_rgb == 0x00ff00);
+      CHECK(s_frame.snapshots[i].appearance.band_rgb == 0xff0000);
+      CHECK(!strcmp(s_frame.snapshots[i].language.locale, "fr-CA"));
+    }
+  }
+  /* Temple remains owned through menu clears and native/enhanced toggles. */
+  CpuState clear = {.PB = 1, .S = 0x1e0};
+  CHECK(!ActRaiser_LocalizationObserveMenuClear(&clear));
+  for (unsigned enabled = 0; enabled <= 1; ++enabled) {
+    g_settings.localization_presentation = enabled;
+    ActRaiserLocalizationRuntime_CaptureFrame(
+        &s_frame, 0x5800, 0, vram, 0x8000, cgram, 32, false);
+    CHECK(s_frame.snapshot_count == (enabled ? 5 : 0));
+    CHECK(ActRaiserHud_Presented(0, 8).kind == kActRaiserHud_Simulation);
+  }
+  vram[0x5800 + 64 + 21] = 0; /* Unexpected overwrite loses only SP claims. */
+  ActRaiserLocalizationRuntime_CaptureFrame(
+      &s_frame, 0x5800, 0, vram, 0x8000, cgram, 32, false);
+  CHECK(s_frame.snapshot_count == 3 && FrameHasText("123/0456"));
+  vram[0x5800 + 64 + 21] = 0x2453;
+  for (unsigned map = 9; map <= 10; ++map) {
+    g_ram[0x19] = map == 9 ? 9 : 0; /* World and title keep no stale claims. */
+    ActRaiserLocalizationRuntime_CaptureFrame(
+        &s_frame, 0x5800, 0, vram, 0x8000, cgram, 32, false);
+    CHECK(!s_frame.snapshot_count);
+  }
+  ActRaiserHud_Reset();
+  ActRaiserLocalizationRuntime_Shutdown();
+  ActRaiserLocalizationText_ResetObservation();
+  s_installed_pack_path = NULL;
+}
+
 static void TestPartialRtlSources(void) {
   const char *path = AR_TEST_NATIVE_FIXTURE_DIR "/partial.ini";
   FILE *file = fopen(path, "wb");
@@ -1414,6 +1517,7 @@ int main(void) {
   TestSimulationPause();
   TestUnicodeNameHandoff();
   TestCreditsWithoutDialogueObservation();
+  TestHudSceneParity();
   TestPartialRtlSources();
   TestMenuDialogueKinds();
   TestLegacySelectionGate(pack_host);
