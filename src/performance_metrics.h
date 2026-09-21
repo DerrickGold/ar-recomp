@@ -21,7 +21,10 @@ typedef enum PerformanceStage {
   kPerformance_WorkOwner, kPerformance_WorkHelpers, kPerformance_WorkJoin,
   kPerformance_SimFirst,
   kPerformance_ActionFirst = kPerformance_SimFirst + kPerformance_SimCount,
-  kPerformanceStage_Count = kPerformance_ActionFirst + kPerformance_ActionCount,
+  kPerformance_SettingsWrite = kPerformance_ActionFirst + kPerformance_ActionCount,
+  kPerformance_SaveWrite, kPerformance_MusicStart,
+  kPerformance_TerrainPrepare, kPerformance_TerrainSamples, kPerformance_GlobeBuild,
+  kPerformanceStage_Count,
 } PerformanceStage;
 
 typedef enum PerformanceCount {
@@ -91,6 +94,11 @@ void PerformanceMetrics_Configure(bool enabled, bool log_reports);
 bool PerformanceMetrics_Enabled(void);
 uint32_t PerformanceMetrics_Epoch(void);
 void PerformanceMetrics_Record(uint32_t epoch, PerformanceStage stage, uint64_t elapsed_ns);
+/* Merge owner-collected worker completions without treating their sum as one
+ * long call. Worker time may overlap the frame or be included in an owner's
+ * synchronous wait; it is not additional serial frame cost. */
+void PerformanceMetrics_RecordBatch(uint32_t epoch, PerformanceStage stage,
+    uint64_t elapsed_ns, uint64_t maximum_ns, uint64_t calls);
 void PerformanceMetrics_Add(PerformanceCount counter, uint64_t value);
 /* Called once at the backend upload boundary, never by its caller. */
 void PerformanceMetrics_AddTextureUpload(uint64_t calls, uint64_t bytes);

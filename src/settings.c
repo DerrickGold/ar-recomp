@@ -3569,12 +3569,17 @@ static void Settings_SyncContainingDirectory(const char *path) {
  * here rather than queried from input_replay.c so settings.c keeps no dependency
  * on the replay module -- several test targets compile settings.c without it. */
 static bool s_persistence_enabled = true;
+static SettingsSaveHost s_save_host;
+
+void Settings_SetSaveHost(const SettingsSaveHost *host) {
+  s_save_host = host ? *host : (SettingsSaveHost){0};
+}
 
 void Settings_SetPersistenceEnabled(bool enabled) {
   s_persistence_enabled = enabled;
 }
 
-bool Settings_Save(const char *path) {
+static bool SaveSettings(const char *path, bool deferred) {
   if (!path || !path[0]) return false;
   /* A replay is a DIAGNOSTIC run and must not mutate the player's configuration
    * — the same reason InputReplay_ShouldProtectSaveData already refuses to
@@ -3599,6 +3604,51 @@ bool Settings_Save(const char *path) {
     }
     return true;  /* not an error: the caller's intent is satisfied */
   }
+  /* Snapshot on the registry owner. Workers never follow descriptor pointers
+   * into g_settings or read live hardware-suppressed preferences. */
+  const size_t capacity = (size_t)g_setting_desc_count * kSettingsIniLineCapacity + 256;
+  char *text = malloc(capacity);
+  if (!text) return false;
+  int written = snprintf(text, capacity,
+      "# ActRaiser Recompiled user settings\n"
+      "# Generated from the live descriptor registry; config.ini remains developer-owned.\n\n");
+  size_t used = written > 0 ? (size_t)written : capacity;
+  char value[512];
+  for (int i = 0; used < capacity && i < g_setting_desc_count; i++) {
+    const SettingDesc *desc = &g_setting_descs[i];
+    if (desc->type == kSettingType_Action || Settings_IsLoadOnly(desc)) continue;
+    if (desc->field == &g_settings.display_mode &&
+        g_settings.display_mode == kDisplayMode_Custom) continue;
+    const struct HardwareSetting *hardware = HardwareSettingFor(desc);
+    if (hardware && hardware->suppressed)
+      snprintf(value, sizeof(value), "%s", hardware->requested ? "On" : "Off");
+    else if (desc->serialize) desc->serialize(value, sizeof(value), desc->field);
+    else Settings_FormatValue(desc, value, sizeof(value));
+    written = snprintf(text + used, capacity - used, "%s = %s\n", desc->key, value);
+    if (written < 0 || (size_t)written >= capacity - used) used = capacity;
+    else used += (size_t)written;
+  }
+  bool success = false;
+  if (used < capacity) {
+    if (s_save_host.submit && s_save_host.drain) {
+      /* One persistence owner for both modes. A synchronous save publishes
+       * the latest snapshot and waits for its durable result; it must not
+       * bypass the host and leave older failure bookkeeping behind. */
+      success = s_save_host.submit(s_save_host.context, path, text, used);
+      if (success && !deferred) success = s_save_host.drain(s_save_host.context);
+    } else {
+      success = Settings_WriteSnapshot(path, text, used);
+    }
+  }
+  free(text);
+  return success;
+}
+
+bool Settings_Save(const char *path) { return SaveSettings(path, false); }
+bool Settings_SaveDeferred(const char *path) { return SaveSettings(path, true); }
+
+bool Settings_WriteSnapshot(const char *path, const char *text, size_t size) {
+  if (!path || !path[0] || !text || !size) return false;
   size_t path_length = strlen(path);
   char *temporary = (char *)malloc(path_length + 5);
   if (!temporary) return false;
@@ -3613,27 +3663,7 @@ bool Settings_Save(const char *path) {
     return false;
   }
 
-  bool success = fprintf(file,
-      "# ActRaiser Recompiled user settings\n"
-      "# Generated from the live descriptor registry; config.ini remains developer-owned.\n\n") >= 0;
-  char value[512];
-  for (int i = 0; success && i < g_setting_desc_count; i++) {
-    const SettingDesc *desc = &g_setting_descs[i];
-    if (desc->type == kSettingType_Action ||
-        Settings_IsLoadOnly(desc))
-      continue;
-    /* CUSTOM is derived from the individual widescreen rows. Omitting the
-     * preset lets those rows reconstruct it without a contradictory action. */
-    if (desc->field == &g_settings.display_mode &&
-        g_settings.display_mode == kDisplayMode_Custom)
-      continue;
-    const struct HardwareSetting *hardware = HardwareSettingFor(desc);
-    if (hardware && hardware->suppressed)
-      snprintf(value, sizeof(value), "%s", hardware->requested ? "On" : "Off");
-    else if (desc->serialize) desc->serialize(value, sizeof(value), desc->field);
-    else Settings_FormatValue(desc, value, sizeof(value));
-    success = fprintf(file, "%s = %s\n", desc->key, value) >= 0;
-  }
+  bool success = fwrite(text, 1, size, file) == size;
   if (fflush(file) != 0 || ferror(file)) success = false;
   if (success && !Settings_FlushFileData(file)) success = false;
   if (fclose(file) != 0) success = false;

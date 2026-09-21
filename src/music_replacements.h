@@ -70,6 +70,11 @@ extern int g_music_replacement_count;
  * (existence, rate, length, loop tags). Returns entries loaded; 0 with no
  * output if the manifest does not exist. */
 int MusicReplacements_Load(const char *manifest_path);
+/* Load/Shutdown are lifecycle operations with the audio producer stopped.
+ * Encoded-file snapshots live until shutdown; duplicate paths share storage.
+ * A bounded cache removes filesystem access from normal streaming, not DSP
+ * work or the existing audio synchronization contract. */
+void MusicReplacements_Shutdown(void);
 
 /* Reset replacement playback state. The game module registers the three
  * callbacks below with its immutable RtlGameAudioApi table. */

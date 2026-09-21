@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <limits.h>
 
 #include "music_replacements.h"
 #include "constants.h"
@@ -11,6 +12,7 @@
 #include "manifest_utils.h"
 #include "native_audio_mixer.h"
 #include "settings.h"
+#include "performance_metrics.h"
 
 #define STB_VORBIS_HEADER_ONLY
 #include "stb_vorbis.c"
@@ -42,6 +44,44 @@ extern int RtlGetAudioOutputRate(void);
 
 MusicReplacement g_music_replacements[kMusicMaxReplacements];
 int g_music_replacement_count;
+
+/* Immutable compressed assets, prepared before HostAudio starts. Preserve the
+ * existing file-backed decoder only when the bounded cache cannot admit an
+ * asset. Do not preload decoded PCM or grow storage on the audio thread. */
+enum { kMusicEncodedCacheBytes = 128 * 1024 * 1024 };
+static struct {
+  unsigned char *data;
+  int size;
+  bool owned;
+} s_encoded[kMusicMaxReplacements];
+static size_t s_encoded_bytes;
+
+static void CacheEncodedFile(int index) {
+  const char *path = g_music_replacements[index].file;
+  for (int i = 0; i < index; ++i) {
+    if (s_encoded[i].data && !strcmp(path, g_music_replacements[i].file)) {
+      s_encoded[index] = s_encoded[i];
+      s_encoded[index].owned = false;
+      return;
+    }
+  }
+  FILE *file = sr_fopen(path, "rb");
+  if (!file) return;
+  long size = -1;
+  if (!fseek(file, 0, SEEK_END)) size = ftell(file);
+  if (size <= 0 || size > INT_MAX ||
+      (size_t)size > kMusicEncodedCacheBytes - s_encoded_bytes ||
+      fseek(file, 0, SEEK_SET)) { fclose(file); return; }
+  unsigned char *data = malloc((size_t)size);
+  const bool read = data && fread(data, 1, (size_t)size, file) == (size_t)size &&
+      fgetc(file) == EOF && !ferror(file);
+  fclose(file);
+  if (!read) { free(data); return; }
+  s_encoded[index].data = data;
+  s_encoded[index].size = (int)size;
+  s_encoded[index].owned = true;
+  s_encoded_bytes += (size_t)size;
+}
 
 static bool s_musiclog;
 static bool s_session_bypassed;
@@ -166,6 +206,7 @@ static void ProbeEntryFile(MusicReplacement *entry) {
 }
 
 int MusicReplacements_Load(const char *manifest_path) {
+  MusicReplacements_Shutdown();
   g_music_replacement_count = 0;
   memset(g_music_replacements, 0, sizeof(g_music_replacements));
   s_musiclog = getenv("AR_MUSICLOG") != NULL;
@@ -255,6 +296,7 @@ int MusicReplacements_Load(const char *manifest_path) {
     MusicReplacement *entry = &g_music_replacements[i];
     ProbeEntryFile(entry);
     if (entry->has_audio) {
+      CacheEncodedFile(i);
       with_audio++;
       fprintf(stderr, "[music-manifest] [music:%s] %s (%d Hz, %u frames, "
               "loop %u..%u)\n", entry->name, entry->file, entry->file_rate,
@@ -262,8 +304,10 @@ int MusicReplacements_Load(const char *manifest_path) {
               entry->loop_end ? entry->loop_end : entry->file_frames);
     }
   }
-  fprintf(stderr, "[music-manifest] %d entries, %d with audio\n",
-          g_music_replacement_count, with_audio);
+  int cached = 0;
+  for (int i = 0; i < g_music_replacement_count; ++i) cached += s_encoded[i].data != NULL;
+  fprintf(stderr, "[music-manifest] %d entries, %d with audio; %d memory-backed (%zu bytes), %d file-backed\n",
+          g_music_replacement_count, with_audio, cached, s_encoded_bytes, with_audio - cached);
   return g_music_replacement_count;
 }
 
@@ -353,13 +397,27 @@ static void ApplyVoiceMutePolicyLocked(void) {
   NativeAudioMixer_SetMusicReplacementActive(muted);
 }
 
+void MusicReplacements_Shutdown(void) {
+  EndSession("shutdown/reload");
+  for (int i = 0; i < kMusicMaxReplacements; ++i)
+    if (s_encoded[i].owned) free(s_encoded[i].data);
+  memset(s_encoded, 0, sizeof(s_encoded));
+  s_encoded_bytes = 0;
+  s_loaded_src = 0;
+  s_current_song = -1;
+}
+
 static void StartSession(const MusicReplacement *entry, int song) {
+  const PerformanceScope performance = PerformanceMetrics_Begin(kPerformance_MusicStart);
   RtlApuLock();
   if (s.v) stb_vorbis_close(s.v);
   int error = 0;
-  stb_vorbis *v = stb_vorbis_open_filename(entry->file, &error, NULL);
+  const size_t index = (size_t)(entry - g_music_replacements);
+  stb_vorbis *v = s_encoded[index].data
+      ? stb_vorbis_open_memory(s_encoded[index].data, s_encoded[index].size, &error, NULL)
+      : stb_vorbis_open_filename(entry->file, &error, NULL);
   if (!v) {
-    /* File vanished since the probe: fall back to authentic playback. */
+    /* Decoder allocation failed, or an uncached file changed since probing. */
     fprintf(stderr, "[music] [music:%s] open failed at play time (%d) — "
             "authentic\n", entry->name, error);
     if (s.session) {
@@ -367,6 +425,7 @@ static void StartSession(const MusicReplacement *entry, int song) {
     }
     memset(&s, 0, sizeof(s));
     RtlApuUnlock();
+    PerformanceMetrics_End(performance);
     return;
   }
   s.session = entry;
@@ -387,6 +446,7 @@ static void StartSession(const MusicReplacement *entry, int song) {
           (unsigned)(entry->src >> 16), (unsigned)(entry->src & 0xffff),
           (unsigned)song, entry->name, entry->file);
   RtlApuUnlock();
+  PerformanceMetrics_End(performance);
 }
 
 /* ---- engine hooks -------------------------------------------------------- */

@@ -741,6 +741,25 @@ void Settings_SetPersistenceEnabled(bool enabled);
 
 bool Settings_Save(const char *path);
 
+/* Optional host-owned background persistence. Submit copies immutable bytes
+ * before returning; true means accepted, not durable yet. Both callbacks must
+ * be supplied. Synchronous saves submit through the same host, then drain to
+ * wait for the durable result. Deferred saves return after submission. The
+ * registry and host control calls remain main-thread-owned. Drain the previous
+ * host before replacing/uninstalling it. A false drain result still means all
+ * work joined, but its latest write failed; a new submission can retry safely. */
+typedef struct SettingsSaveHost {
+  void *context;
+  bool (*submit)(void *context, const char *path, const char *text, size_t size);
+  bool (*drain)(void *context);
+} SettingsSaveHost;
+void Settings_SetSaveHost(const SettingsSaveHost *host);
+bool Settings_SaveDeferred(const char *path);
+/* File-only operation: never reads the live registry. The host serializes
+ * writers to a given path. Only the host invokes this while it is installed;
+ * Settings_Save uses it directly when no host is installed. */
+bool Settings_WriteSnapshot(const char *path, const char *text, size_t size);
+
 /* Descriptor/mutation API used by the host overlay and settings.ini loader.
  * All runtime writes go through these functions so range normalization,
  * profile invalidation, callbacks, and sticky/restart results stay uniform. */

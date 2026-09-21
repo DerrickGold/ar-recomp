@@ -25,6 +25,7 @@
 #include "snesrecomp/game/types.h"
 #include "diorama/diorama.h"
 #include "host/host_clock.h"
+#include "performance_metrics.h"
 #include "presentation_outcome.h"
 #include "presentation_upload_mirror.h"
 #include "render/render_device.h"
@@ -1007,38 +1008,54 @@ static void EnsureWorldNavigationCliffs(const FrameSlot *slot, float radius_tile
   s_world_mountains.projection_ready = false;
 }
 
-static void PrepareWorldNavigationTerrain(void) {
-  const uint32_t world_serial = SimWorldMap_GeographySerial();
-  if (s_world_terrain.ready &&
-      s_world_terrain.serial == world_serial)
-    return;
-  s_world_terrain.samples_ready = false;
-  const uint32_t *world_pixels = SimWorldMap_BakedPixels();
-  if (world_pixels)
-    (void)SimWorldNavigationTerrain_RebuildWorldPrior(
-        world_pixels, kSimWorldMapPixels, world_serial);
-  s_world_terrain.maximum_height = 0.0f;
-  for (int y = 0; y <= kWorldNavigationTerrainCells; y++) {
+typedef struct WorldNavigationTerrainWork {
+  float *height, *floor, *authored, *maximum;
+} WorldNavigationTerrainWork;
+
+static void BuildWorldNavigationTerrainRows(void *context, size_t first, size_t end) {
+  WorldNavigationTerrainWork *work = context;
+  for (int y = (int)first; y < (int)end; y++) {
+    work->maximum[y] = 0;
     for (int x = 0; x <= kWorldNavigationTerrainCells; x++) {
       SimWorldNavigationTerrainHeights sample;
       (void)SimWorldNavigationTerrain_SampleHeights((float)x, (float)y, &sample);
       const int at = WorldNavigationTerrainVertexIndex(x, y);
 #if AR_SIM3D_TERRAIN_ELEVATION
-      s_world_terrain.height[at] = sample.height_units;
-      s_world_terrain.floor[at] = sample.floor_height_units;
-      s_world_terrain.authored[at] = sample.authored_weight;
+      work->height[at] = sample.height_units;
+      work->floor[at] = sample.floor_height_units;
+      work->authored[at] = sample.authored_weight;
 #else
-      s_world_terrain.height[at] = 0.0f;
-      s_world_terrain.floor[at] = 0.0f;
-      s_world_terrain.authored[at] = 0.0f;
+      work->height[at] = 0.0f;
+      work->floor[at] = 0.0f;
+      work->authored[at] = 0.0f;
 #endif
-      s_world_terrain.maximum_height = fmaxf(
-          s_world_terrain.maximum_height,
-          s_world_terrain.height[at]);
+      work->maximum[y] = fmaxf(work->maximum[y], work->height[at]);
     }
   }
+}
+
+static void PrepareWorldNavigationTerrain(void) {
+  const uint32_t world_serial = SimWorldMap_GeographySerial();
+  if (s_world_terrain.ready && s_world_terrain.serial == world_serial) return;
+  const PerformanceScope performance = PerformanceMetrics_Begin(kPerformance_TerrainPrepare);
+  s_world_terrain.samples_ready = false;
+  /* Prior publication is owner-only. All following samples read immutable
+   * world/town inputs, and each job writes disjoint rows. */
+  const uint32_t *world_pixels = SimWorldMap_BakedPixels();
+  if (world_pixels)
+    (void)SimWorldNavigationTerrain_RebuildWorldPrior(
+        world_pixels, kSimWorldMapPixels, world_serial);
+  float maximum[kWorldNavigationTerrainAxis];
+  WorldNavigationTerrainWork work = {s_world_terrain.height, s_world_terrain.floor,
+      s_world_terrain.authored, maximum};
+  HostParallelWork_Run(WorldNavigationWorkers(), kWorldNavigationTerrainAxis, 16,
+      BuildWorldNavigationTerrainRows, &work);
+  s_world_terrain.maximum_height = 0;
+  for (int y = 0; y < kWorldNavigationTerrainAxis; ++y)
+    s_world_terrain.maximum_height = fmaxf(s_world_terrain.maximum_height, maximum[y]);
   s_world_terrain.ready = true;
   s_world_terrain.serial = world_serial;
+  PerformanceMetrics_End(performance);
 }
 
 /* Read-only after owner preparation; source-building workers share the frozen
@@ -1458,25 +1475,26 @@ static float WorldNavigationSurfaceShade(
   return WorldNavigationShadeFromPoints(light, centre, east, south);
 }
 
-static bool PrepareWorldNavigationGroundSamples(const WorldNavigationProjection *projection) {
+typedef struct WorldNavigationSampleWork {
   WorldNavigationGroundSampleKey key;
-  memset(&key, 0, sizeof(key));
-  key.chart_radius_tiles = projection->chart_radius_tiles;
-  key.geography_serial = SimWorldMap_GeographySerial();
-  key.cliff_serial = s_world_terrain.cliff_serial;
-  key.heights = projection->height_world_per_unit > 0;
-  if (s_world_terrain.samples_ready && !memcmp(&key, &s_world_terrain.sample_key, sizeof(key))) return true;
-  s_world_terrain.samples_ready = false;
-  for (int y = 0; y <= kWorldNavigationTerrainCells; ++y)
+  WorldNavigationGroundSample *samples;
+  bool valid[kWorldNavigationTerrainAxis];
+} WorldNavigationSampleWork;
+
+static void BuildWorldNavigationSampleRows(void *context, size_t first, size_t end) {
+  WorldNavigationSampleWork *work = context;
+  const WorldNavigationGroundSampleKey key = work->key;
+  for (int y = (int)first; y < (int)end; ++y) {
+    work->valid[y] = true;
     for (int x = 0; x <= kWorldNavigationTerrainCells; ++x) {
-      WorldNavigationGroundSample *sample = &s_world_terrain.samples[WorldNavigationTerrainVertexIndex(x,y)];
+      WorldNavigationGroundSample *sample = &work->samples[WorldNavigationTerrainVertexIndex(x,y)];
       for (int p = 0; p < 3; ++p) {
         const float source_x = (x + (p == 1 ? .5f : 0)) * kSimWorldMapTilePixels;
         const float source_y = (y + (p == 2 ? .5f : 0)) * kSimWorldMapTilePixels;
         if (!SimWorldNavigationGlobe_SampleAtRadius(key.chart_radius_tiles,
                 source_x / kSimWorldMapTilePixels, source_y / kSimWorldMapTilePixels,
-                sample->normal[p], NULL)) return false;
-        sample->height[p] = key.heights ? WorldNavigationTerrainHeightAt(source_x, source_y, NULL) : 0;
+                sample->normal[p], NULL)) work->valid[y] = false;
+        sample->height[p] = key.heights ? WorldNavigationTerrainHeightAtPrepared(source_x, source_y, NULL, false) : 0;
       }
       const float edge_tiles = fminf(fminf((float)x, (float)y),
           fminf((float)(kWorldNavigationTerrainCells - x), (float)(kWorldNavigationTerrainCells - y)));
@@ -1489,7 +1507,30 @@ static bool PrepareWorldNavigationGroundSamples(const WorldNavigationProjection 
               cy < kWorldNavigationTerrainCells && !SimWorldMap_CellIsOpenWater(cx, cy)) sample->edge_alpha = 1;
         }
     }
-  s_world_terrain.sample_key = key;
+  }
+}
+
+static bool PrepareWorldNavigationGroundSamples(const WorldNavigationProjection *projection) {
+  /* Resolve all mutable caches on the owner before publishing read-only
+   * terrain and water semantics to the bounded row jobs. */
+  if (projection->height_world_per_unit > 0) PrepareWorldNavigationTerrain();
+  WorldNavigationSampleWork work;
+  /* Preserve canonical padding: this key is compared byte-for-byte. */
+  memset(&work.key, 0, sizeof(work.key));
+  work.samples = s_world_terrain.samples;
+  work.key.chart_radius_tiles = projection->chart_radius_tiles;
+  work.key.geography_serial = SimWorldMap_GeographySerial();
+  work.key.cliff_serial = s_world_terrain.cliff_serial;
+  work.key.heights = projection->height_world_per_unit > 0;
+  if (s_world_terrain.samples_ready && !memcmp(&work.key, &s_world_terrain.sample_key, sizeof(work.key))) return true;
+  s_world_terrain.samples_ready = false;
+  const PerformanceScope performance = PerformanceMetrics_Begin(kPerformance_TerrainSamples);
+  HostParallelWork_Run(WorldNavigationWorkers(), kWorldNavigationTerrainAxis, 16,
+      BuildWorldNavigationSampleRows, &work);
+  PerformanceMetrics_End(performance);
+  for (int y = 0; y < kWorldNavigationTerrainAxis; ++y)
+    if (!work.valid[y]) return false;
+  s_world_terrain.sample_key = work.key;
   s_world_terrain.samples_ready = true;
   return true;
 }
@@ -4511,6 +4552,24 @@ static bool SimGlobeKeepFace(const SimGlobeMapping *map,
   return !mountain || SimGlobeNearby(map,cx,cy);
 }
 
+typedef struct SimGlobeGridSourceWork {
+  WorldNavigationGridSourceWork source;
+  const SimGlobeMapping *map;
+  bool valid[kWorldNavigationTerrainAxis];
+} SimGlobeGridSourceWork;
+
+static void BuildSimGlobeGridRows(void *context, size_t first, size_t end) {
+  SimGlobeGridSourceWork *work = context;
+  BuildWorldNavigationGridSourceRange(&work->source,
+      first*kWorldNavigationTerrainAxis,end*kWorldNavigationTerrainAxis);
+  for (int y = (int)first; y < (int)end; ++y) {
+    work->valid[y] = true;
+    for (int x = 0; x < kWorldNavigationTerrainAxis; ++x)
+      work->valid[y] &= SimGlobeEmbedVertex(work->map,x,y,0,
+          &work->source.vertices[WorldNavigationTerrainVertexIndex(x,y)]);
+  }
+}
+
 static bool SimGlobeBuildSurface(const FrameSlot *slot,
     const WorldNavigationProjection *projection, const SimGlobeMapping *map,
     bool detailed_town) {
@@ -4552,12 +4611,12 @@ static bool SimGlobeBuildSurface(const FrameSlot *slot,
    * native/mountain texture packing. No color rebuild when focus changes. */
   for (size_t i=0;i<kWorldNavigationOceanQuads*4;++i) mask[i]=(ArRenderPointF){-2,-2};
   const float ratio = map->landscape/map->chart_radius;
-  WorldNavigationGridSourceWork work = {s_world_terrain.samples, points, ratio};
-  HostParallelWork_Run(WorldNavigationWorkers(), kWorldNavigationTerrainVertexCount, 2048,
-      BuildWorldNavigationGridSourceRange, &work);
-  for (int y = 0; ok && y < kWorldNavigationTerrainAxis; ++y)
-    for (int x = 0; ok && x < kWorldNavigationTerrainAxis; ++x)
-      ok = SimGlobeEmbedVertex(map,x,y,0,&points[WorldNavigationTerrainVertexIndex(x,y)]);
+  SimGlobeGridSourceWork work = {.source={s_world_terrain.samples,points,ratio},.map=map};
+  const PerformanceScope bake = PerformanceMetrics_Begin(kPerformance_GlobeBuild);
+  HostParallelWork_Run(WorldNavigationWorkers(), kWorldNavigationTerrainAxis, 16,
+      BuildSimGlobeGridRows, &work);
+  PerformanceMetrics_End(bake);
+  for (int y = 0; y < kWorldNavigationTerrainAxis; ++y) ok &= work.valid[y];
   size_t count = kWorldNavigationOceanQuads;
   for (int y = 0; ok && y < kWorldNavigationTerrainCells; ++y)
     for (int x = 0; x < kWorldNavigationTerrainCells; ++x) {

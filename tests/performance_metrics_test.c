@@ -279,9 +279,28 @@ static void TestOverlayLayout(void) {
         }
 }
 
+static void TestBackgroundBatch(void) {
+  Fresh();
+  const uint32_t stale = PerformanceMetrics_Epoch();
+  Fresh();
+  const uint32_t epoch = PerformanceMetrics_Epoch();
+  PerformanceMetrics_RecordBatch(stale, kPerformance_SettingsWrite, 99000000, 99000000, 1);
+  PerformanceMetrics_RecordBatch(epoch, kPerformance_SettingsWrite, 99000000, 99000000, 0);
+  PerformanceMetrics_RecordBatch(epoch, kPerformance_SettingsWrite, 9000000, 6000000, 2);
+  PerformanceMetrics_RecordBatch(epoch, kPerformance_SettingsWrite, 2000000, 2000000, 1);
+  PerformanceMetrics_PresentCompleted(0);
+  PerformanceMetrics_PresentCompleted(1000000000);
+  PerformanceSnapshot snapshot;
+  PerformanceMetrics_Snapshot(&snapshot);
+  CHECK(snapshot.ready && snapshot.stages[kPerformance_SettingsWrite].calls == 3);
+  NEAR(snapshot.stages[kPerformance_SettingsWrite].mean_ms, 5.5);
+  NEAR(snapshot.stages[kPerformance_SettingsWrite].maximum_ms, 6.0);
+}
+
 int main(void) {
   TestToggleAndWindow();
   TestParallelAndCapacity();
+  TestBackgroundBatch();
   TestOverlayLayout();
   TestOverlayResources();
   PerformanceMetrics_Configure(false, false);

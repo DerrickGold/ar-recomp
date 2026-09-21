@@ -36,6 +36,8 @@ static const char *const kNames[kPerformanceStage_Count] = {
   "action total", "action upload", "action analysis", "action setup", "action scanout",
   "action finish", "action host-post", "action synthesis", "action mesh", "action supersample",
   "action DOF", "action submit", "action callback",
+  "settings write*", "battery save", "music start",
+  "terrain rebuild", "terrain samples", "globe grid bake",
 };
 
 const char *PerformanceMetrics_StageName(PerformanceStage stage) {
@@ -71,12 +73,17 @@ void PerformanceMetrics_Configure(bool enabled, bool log_reports) {
 }
 
 void PerformanceMetrics_Record(uint32_t epoch, PerformanceStage stage, uint64_t elapsed_ns) {
+  PerformanceMetrics_RecordBatch(epoch, stage, elapsed_ns, elapsed_ns, 1);
+}
+void PerformanceMetrics_RecordBatch(uint32_t epoch, PerformanceStage stage,
+    uint64_t elapsed_ns, uint64_t maximum_ns, uint64_t calls) {
   if (!epoch || epoch != PerformanceMetrics_Epoch() || stage < 0 || stage >= kPerformanceStage_Count) return;
+  if (!calls) return;
   atomic_fetch_add_explicit(&s_pending[stage].elapsed, elapsed_ns, memory_order_relaxed);
-  atomic_fetch_add_explicit(&s_pending[stage].calls, 1, memory_order_relaxed);
+  atomic_fetch_add_explicit(&s_pending[stage].calls, calls, memory_order_relaxed);
   uint_fast64_t maximum = atomic_load_explicit(&s_pending[stage].maximum, memory_order_relaxed);
-  while (maximum < elapsed_ns && !atomic_compare_exchange_weak_explicit(
-      &s_pending[stage].maximum, &maximum, elapsed_ns, memory_order_relaxed, memory_order_relaxed)) {}
+  while (maximum < maximum_ns && !atomic_compare_exchange_weak_explicit(
+      &s_pending[stage].maximum, &maximum, maximum_ns, memory_order_relaxed, memory_order_relaxed)) {}
 }
 void PerformanceMetrics_Add(PerformanceCount counter, uint64_t value) {
   if (PerformanceMetrics_Enabled() && counter >= 0 && counter < kPerformanceCount_Count)

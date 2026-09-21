@@ -2011,6 +2011,7 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_settings_test
         tests/settings_test.c
+        src/platform/sdl/settings_persistence_sdl.c
         src/config.c
         src/settings.c
         src/display_geometry.c
@@ -2033,6 +2034,13 @@ if(BUILD_TESTING)
     target_compile_definitions(actraiser_settings_test PRIVATE
         AR_SIM3D_TERRAIN_ELEVATION=${AR_SIM3D_TERRAIN_ELEVATION_VALUE})
     add_test(NAME actraiser_settings COMMAND actraiser_settings_test)
+
+    add_executable(actraiser_settings_persistence_test
+        tests/settings_persistence_test.c src/platform/sdl/settings_persistence_sdl.c)
+    target_include_directories(actraiser_settings_persistence_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    target_link_libraries(actraiser_settings_persistence_test PRIVATE SDL3::SDL3)
+    add_test(NAME actraiser_settings_persistence COMMAND actraiser_settings_persistence_test)
 
     add_executable(actraiser_settings_overlay_test
         tests/settings_overlay_test.c
@@ -2462,6 +2470,7 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_music_manifest_test
         tests/music_manifest_test.c
+        src/performance_metrics.c
         src/manifest_utils.c
         src/music_replacements.c
         src/asset_condition.c
@@ -2474,7 +2483,8 @@ if(BUILD_TESTING)
         ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
     )
     target_link_libraries(actraiser_music_manifest_test PRIVATE actraiser_math)
-    add_test(NAME actraiser_music_manifest COMMAND actraiser_music_manifest_test)
+    add_test(NAME actraiser_music_manifest COMMAND actraiser_music_manifest_test
+        ${CMAKE_SOURCE_DIR}/tests/fixtures/audio/stream-probe.ogg)
 
     add_executable(actraiser_save_system_test
         tests/save_system_test.c

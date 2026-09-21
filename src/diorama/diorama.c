@@ -744,11 +744,14 @@ void Diorama_ResetCamera(void) {
 void Diorama_FlushSettingsIfDirty(void) {
   if (g_diorama_settings_dirty && !s_diorama_dragging &&
       HostClock_Milliseconds() - g_diorama_settings_dirty_at > 500) {
-    g_diorama_settings_dirty = false;
     char settings_path[kHostPathCapacity];
     UserDataFile(settings_path, sizeof settings_path, "settings.ini");
-    if (!Settings_Save(settings_path))
+    if (Settings_SaveDeferred(settings_path))
+      g_diorama_settings_dirty = false;
+    else {
+      g_diorama_settings_dirty_at = HostClock_Milliseconds();
       fprintf(stderr, "[diorama] failed to persist camera settings\n");
+    }
   }
 }
 

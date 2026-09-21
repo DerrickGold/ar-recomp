@@ -88,7 +88,8 @@ bool ArLocalizedTextPresenter_DrawWithBrightness(
  * frozen. Profiling time does not advance with those artificial jumps. */
 static uint64_t weather_time_ms;
 uint64_t HostClock_Milliseconds(void) { return weather_time_ms; }
-uint64_t HostClock_Nanoseconds(void) { return 0; }
+/* Profiling uses real wall time; visual weather still uses the frozen clock. */
+uint64_t HostClock_Nanoseconds(void) { return SDL_GetTicksNS(); }
 
 static const char *output_directory;
 static bool weather_sequence_requested;
@@ -1498,6 +1499,75 @@ static SDL_Surface *RenderSimGlobe(SDL_Renderer *renderer, const FrameSlot *slot
   return RenderSimGlobeScene(renderer,slot,camera,source,3);
 }
 
+static void TestColdTerrainWorkers(SDL_Renderer *renderer) {
+  const char *incoming = SDL_getenv("AR_RENDER_WORKERS");
+  char *saved = incoming ? SDL_strdup(incoming) : NULL;
+  CHECK(!incoming || saved);
+  const char *incoming_grid = SDL_getenv("AR_SIM3D_WORLD_GPU_GRID");
+  char *saved_grid = incoming_grid ? SDL_strdup(incoming_grid) : NULL;
+  CHECK(!incoming_grid || saved_grid);
+  CHECK(!SDL_setenv_unsafe("AR_SIM3D_WORLD_GPU_GRID","1",1));
+  FrameSlot *probe = malloc(sizeof(*probe)); CHECK(probe);
+  /* One warm-up per worker count, then two ABBA blocks. Report only narrow
+   * CPU cold-build scopes, not readback time or a synthetic game FPS. */
+  const unsigned helpers[] = {0,3,0,3,3,0,0,3,3,0};
+  const Scene3DCamera camera = {-.575f,0,2,.4f};
+  const ArRenderRectI source = {0,0,360,224};
+  for (unsigned sim = 0; sim < 2; ++sim) {
+    SDL_Surface *reference = NULL;
+    for (unsigned pass = 0; pass < sizeof(helpers)/sizeof(helpers[0]); ++pass) {
+      CHECK(!SDL_setenv_unsafe("AR_RENDER_WORKERS",helpers[pass] ? "3" : "0",1));
+      PresentWorldNav_ResetResources();
+      InitSlot(probe);
+      if (sim) {
+        probe->sim.view = kSimView_Enhanced;
+        probe->sim.town = 4;
+        int ox, oy; CHECK(SimWorldMap_OriginForTown(4,&ox,&oy));
+        probe->sim.underlay_origin_tile_x = ox; probe->sim.underlay_origin_tile_y = oy;
+      }
+      BuildScene(probe); UploadWorldNavigationComposition(probe);
+      PerformanceMetrics_Configure(true,false);
+      SDL_Surface *actual = sim ? RenderSimGlobe(renderer,probe,&camera,source)
+          : Render(renderer,probe,NULL);
+      PerformanceMetrics_PresentCompleted(1);
+      PerformanceMetrics_PresentCompleted(UINT64_C(1000000001));
+      PerformanceSnapshot measured; PerformanceMetrics_Snapshot(&measured);
+      CHECK(measured.ready);
+      if (!reference) reference = actual;
+      else { CHECK(Differences(reference,actual) == 0); SDL_DestroySurface(actual); }
+      CHECK(measured.stages[kPerformance_TerrainPrepare].calls == 1);
+      CHECK(measured.stages[kPerformance_TerrainSamples].calls == 1);
+      if (sim) CHECK(measured.stages[kPerformance_GlobeBuild].calls == 1);
+      if (pass >= 2) printf("cold-build scene=%s helpers=%u terrain-ms=%.4f samples-ms=%.4f grid-ms=%.4f\n",
+          sim ? "SIM" : "world",helpers[pass],
+          measured.stages[kPerformance_TerrainPrepare].maximum_ms,
+          measured.stages[kPerformance_TerrainSamples].maximum_ms,
+          measured.stages[kPerformance_GlobeBuild].maximum_ms);
+      PerformanceMetrics_Configure(false,false);
+      PerformanceMetrics_Configure(true,false);
+      SDL_Surface *warm = sim ? RenderSimGlobe(renderer,probe,&camera,source)
+          : Render(renderer,probe,NULL);
+      CHECK(Differences(reference,warm) == 0); SDL_DestroySurface(warm);
+      PerformanceMetrics_PresentCompleted(1);
+      PerformanceMetrics_PresentCompleted(UINT64_C(1000000001));
+      PerformanceMetrics_Snapshot(&measured);
+      CHECK(measured.ready && measured.stages[kPerformance_TerrainPrepare].calls == 0);
+      CHECK(measured.stages[kPerformance_TerrainSamples].calls == 0);
+      CHECK(measured.stages[kPerformance_GlobeBuild].calls == 0);
+      PerformanceMetrics_Configure(false,false);
+    }
+    SDL_DestroySurface(reference);
+  }
+  free(probe);
+  if (saved) CHECK(!SDL_setenv_unsafe("AR_RENDER_WORKERS",saved,1));
+  else CHECK(!SDL_unsetenv_unsafe("AR_RENDER_WORKERS"));
+  SDL_free(saved);
+  if (saved_grid) CHECK(!SDL_setenv_unsafe("AR_SIM3D_WORLD_GPU_GRID",saved_grid,1));
+  else CHECK(!SDL_unsetenv_unsafe("AR_SIM3D_WORLD_GPU_GRID"));
+  SDL_free(saved_grid);
+  PresentWorldNav_ResetResources();
+}
+
 static void TestNavigationZoomEntry(SDL_Renderer *renderer) {
   FrameSlot *navigation = malloc(sizeof(*navigation));
   FrameSlot *town = malloc(sizeof(*town));
@@ -2158,6 +2228,7 @@ static void TestSynthetic(SDL_Renderer *renderer) {
   TestTallModelViewport(renderer, slot);
   TestGpuGridRevisions(renderer, slot);
   TestWorldAtlasVersions(renderer, slot);
+  TestColdTerrainWorkers(renderer);
   TestNavigationZoomEntry(renderer);
   TestContinuousTownScene(renderer);
   TestFacingTownScene(renderer);

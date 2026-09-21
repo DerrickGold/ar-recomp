@@ -1,8 +1,8 @@
 /* Unit tests for the music replacement manifest parser, variant selection,
  * and loop-region slicing. Links music_replacements.c + hd_replacements.c
  * (shared gate grammar) against stub engine state — no SDL or audio device.
- * Decode/streaming against a real .ogg is covered by the end-to-end headless
- * run (see docs/SEAMS.md "Audio"), not here. */
+ * Uses a synthetic .ogg for cache/decoder lifetime and PCM equivalence; real
+ * game integration is covered by headless runs (docs/SEAMS.md "Audio"). */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -10,6 +10,8 @@
 #include "music_replacements.h"
 #include "hd_replacements.h"
 #include "settings.h"
+#define STB_VORBIS_HEADER_ONLY
+#include "stb_vorbis.c"
 
 static int g_failures;
 #define CHECK(cond) do { \
@@ -33,6 +35,7 @@ const SnesRunnerApi *sr_runner_get_api(uint32_t requested_abi_version) {
 void RtlApuLock(void) {}
 void RtlApuUnlock(void) {}
 int RtlGetAudioOutputRate(void) { return 44100; }
+uint64_t HostClock_Nanoseconds(void) { return 0; }
 static bool s_music_replacement_active;
 void NativeAudioMixer_SetMusicReplacementActive(bool active) {
   s_music_replacement_active = active;
@@ -479,7 +482,86 @@ static void TestRedundantRestartGuard(void) {
   CHECK(!MusicPlay_IsRedundantRestart(NULL, NULL, false));
 }
 
-int main(void) {
+static void TestCachedPlayback(const char *fixture) {
+  int error = 0;
+  stb_vorbis *reference = stb_vorbis_open_filename(fixture, &error, NULL);
+  CHECK(reference);
+  if (!reference) return;
+  int16_t expected[2048] = {0};
+  CHECK(stb_vorbis_get_samples_short_interleaved(reference, 2, expected, 2048) == 1024);
+  stb_vorbis_close(reference);
+
+  char cached_path[600], manifest[2048];
+  snprintf(cached_path, sizeof(cached_path), "%s.ogg", WriteManifest(""));
+  FILE *input = fopen(fixture, "rb"), *copy = fopen(cached_path, "wb");
+  CHECK(input && copy);
+  if (!input || !copy) {
+    if (input) fclose(input);
+    if (copy) fclose(copy);
+    return;
+  }
+  unsigned char bytes[1024];
+  size_t count;
+  while ((count = fread(bytes, 1, sizeof(bytes), input)))
+    CHECK(fwrite(bytes, 1, count, copy) == count);
+  CHECK(!ferror(input));
+  CHECK(fclose(input) == 0);
+  CHECK(fclose(copy) == 0);
+  snprintf(manifest, sizeof(manifest),
+      "[music:one-shot]\nsrc = 01:8000\nsong = 1\nloop = 0\nfile = %s\n"
+      "[music:loop]\nsrc = 01:8000\nsong = 2\nloop = 1\nfile = %s\n",
+      cached_path, cached_path);
+  CHECK(MusicReplacements_Load(WriteManifest(manifest)) == 2);
+  CHECK(g_music_replacements[0].has_audio && g_music_replacements[1].has_audio);
+  /* Both entries share one immutable compressed asset. Remove the original
+   * before starting, proving open/seek/decode need no runtime file access. */
+  CHECK(remove(cached_path) == 0);
+  MusicReplacements_InstallHooks();
+  g_settings.music_replacements = true;
+  MusicReplacements_OnSpcUpload(0x018000);
+  MusicReplacements_OnApuPortWrite(0, 1);
+  CHECK(s_music_replacement_active);
+  bool complete = true;
+  const uint64_t token = MusicReplacements_GetOneShotSnapshot(&complete);
+  CHECK(token && !complete);
+  int16_t actual[2048] = {0};
+  MusicReplacements_MixOutput(actual, 512);
+  CHECK(memcmp(actual, expected, 1024 * sizeof(int16_t)) == 0);
+  MusicReplacements_OnApuPortWrite(0, 0xF2);
+  MusicReplacements_MixOutput(actual + 1024, 512);
+  for (int i = 1024; i < 2048; ++i) CHECK(actual[i] == 0);
+  MusicReplacements_OnApuPortWrite(0, 1);
+  MusicReplacements_MixOutput(actual + 1024, 512);
+  CHECK(memcmp(actual, expected, sizeof(actual)) == 0);
+  int16_t tail[8192] = {0};
+  MusicReplacements_MixOutput(tail, 4096);
+  CHECK(MusicReplacements_GetOneShotSnapshot(&complete) == token && complete);
+  CHECK(s_music_replacement_active); /* Ended replacement keeps SPC music muted. */
+  MusicReplacements_OnApuPortWrite(0, 1);
+  CHECK(MusicReplacements_GetOneShotSnapshot(&complete) != token && !complete);
+  memset(actual, 0, sizeof(actual));
+  MusicReplacements_MixOutput(actual, 1024);
+  CHECK(memcmp(actual, expected, sizeof(actual)) == 0);
+  MusicReplacements_OnApuPortWrite(0, 2);
+  for (int pass = 0; pass < 3; ++pass) {
+    memset(tail, 0, sizeof(tail));
+    MusicReplacements_MixOutput(tail, 4096);
+    bool audible = false;
+    for (size_t i = 0; i < sizeof(tail) / sizeof(tail[0]); ++i) audible |= tail[i] != 0;
+    CHECK(audible && s_music_replacement_active);
+  }
+  CHECK(MusicReplacements_GetOneShotSnapshot(&complete) == 0);
+  /* Reload closes the old decoder before freeing the shared backing bytes. */
+  CHECK(MusicReplacements_Load(WriteManifest(manifest)) == 2);
+  CHECK(!s_music_replacement_active && !g_music_replacements[0].has_audio);
+  MusicReplacements_OnSpcUpload(0x018000);
+  MusicReplacements_OnApuPortWrite(0, 1);
+  CHECK(!s_music_replacement_active);
+  MusicReplacements_Shutdown();
+  MusicReplacements_Shutdown();
+}
+
+int main(int argc, char **argv) {
   TestMusicResamplerMath();
   TestParseEntries();
   TestParseRejections();
@@ -489,6 +571,8 @@ int main(void) {
   TestLoopSlicing();
   TestRedundantRestartGuard();
   TestTriggerStateMachine();
+  CHECK(argc == 2);
+  if (argc == 2) TestCachedPlayback(argv[1]);
   if (g_failures) {
     fprintf(stderr, "music manifest tests: %d failure(s)\n", g_failures);
     return 1;

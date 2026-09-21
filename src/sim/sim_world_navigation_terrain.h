@@ -50,7 +50,9 @@ typedef struct SimWorldNavigationTerrainHeights {
 
 /* Samples a finite point in [0,128] on each axis. Out-of-range coordinates
  * are clamped so atmosphere meshes can safely extend a shadow by a few tiles.
- * False is reserved for a null output or non-finite input. */
+ * False is reserved for a null output or non-finite input. Queries do not
+ * prepare or mutate state: parallel readers are safe while the owner keeps
+ * the world map/prior and all mountain constraints frozen until they join. */
 bool SimWorldNavigationTerrain_Sample(
     float tile_x, float tile_y,
     SimWorldNavigationTerrainSample *out_sample);

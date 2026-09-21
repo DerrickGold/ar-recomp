@@ -305,9 +305,12 @@ void Sim3DCamera_FlushSettingsIfDirty(void) {
           kSim3DCameraSettingsSaveDelayMs)
     return;
 
-  s_settings_dirty = false;
   char settings_path[kHostPathCapacity];
   UserDataFile(settings_path, sizeof(settings_path), "settings.ini");
-  if (!Settings_Save(settings_path))
+  if (Settings_SaveDeferred(settings_path))
+    s_settings_dirty = false;
+  else {
+    s_settings_dirty_at_ms = HostClock_Milliseconds();
     fprintf(stderr, "[sim3d] failed to persist camera settings\n");
+  }
 }

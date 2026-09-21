@@ -4,6 +4,7 @@
 #include "input_map.h"
 #include "render_capabilities.h"
 #include "settings.h"
+#include "platform/sdl/settings_persistence_sdl.h"
 #include "sim/sim3d_camera_limits.h"
 #include "sim/sim_town_terrain.h"
 #include "user_data_dir.h"
@@ -658,6 +659,135 @@ static bool FileContains(const char *path, const char *needle) {
   buffer[size] = 0;
   fclose(file);
   return strstr(buffer, needle) != NULL;
+}
+
+typedef struct DeferredSettingsProbe {
+  char *text;
+  size_t size;
+  const char *path;
+  unsigned submissions, drains;
+  bool fail_write, reject_submit;
+} DeferredSettingsProbe;
+
+static bool CaptureDeferredSettings(void *context, const char *path,
+                                    const char *text, size_t size) {
+  DeferredSettingsProbe *probe = context;
+  CHECK(!strcmp(path, probe->path));
+  if (probe->reject_submit) return false;
+  free(probe->text);
+  probe->text = malloc(size + 1);
+  CHECK(probe->text);
+  memcpy(probe->text, text, size);
+  probe->text[size] = 0;
+  probe->size = size;
+  ++probe->submissions;
+  return true;
+}
+
+static bool DrainDeferredSettings(void *context) {
+  DeferredSettingsProbe *probe = context;
+  ++probe->drains;
+  const bool ok = !probe->text ||
+      (!probe->fail_write && Settings_WriteSnapshot(probe->path, probe->text, probe->size));
+  free(probe->text);
+  probe->text = NULL;
+  return ok;
+}
+
+static void TestDeferredSettingsSnapshot(void) {
+  const char *path = "actraiser-settings-deferred-test.ini";
+  ClearSettingsEnv();
+  Settings_SetPersistenceEnabled(true);
+  Settings_Init();
+  DeferredSettingsProbe probe = {.path = path};
+  const SettingsSaveHost host = {&probe, CaptureDeferredSettings, DrainDeferredSettings};
+  Settings_SetSaveHost(&host);
+  g_settings.audio_master_volume = 20;
+  CHECK(Settings_SaveDeferred(path));
+  CHECK(probe.submissions == 1 && probe.drains == 0);
+  g_settings.audio_master_volume = 80;
+  CHECK(DrainDeferredSettings(&probe));
+  CHECK(FileContains(path, "audio_master_volume = 20%\n"));
+  CHECK(Settings_SaveDeferred(path));
+  g_settings.audio_master_volume = 65;
+  CHECK(Settings_Save(path)); /* queued 80 is superseded by the synchronous 65 */
+  CHECK(probe.submissions == 3);
+  CHECK(probe.drains == 2 && !probe.text);
+  CHECK(FileContains(path, "audio_master_volume = 65%\n"));
+  probe.fail_write = true;
+  CHECK(Settings_SaveDeferred(path));
+  CHECK(!host.drain(host.context));
+  probe.fail_write = false;
+  g_settings.audio_master_volume = 45;
+  CHECK(Settings_Save(path)); /* A failed older snapshot must not block retry. */
+  CHECK(FileContains(path, "audio_master_volume = 45%\n"));
+  CHECK(probe.submissions == 5);
+  probe.reject_submit = true;
+  CHECK(!Settings_Save(path));
+  CHECK(!Settings_SaveDeferred(path));
+  Settings_SetPersistenceEnabled(false);
+  CHECK(Settings_SaveDeferred(path));
+  CHECK(probe.submissions == 5);
+  Settings_SetSaveHost(NULL);
+  Settings_SetPersistenceEnabled(true);
+  remove(path);
+}
+
+static void TestSettingsWriterRecovery(void) {
+  const char *path = "actraiser-settings-recovery-test.ini";
+  const char *blocked = "actraiser-settings-recovery-test.ini.tmp";
+  ClearSettingsEnv();
+  Settings_Init();
+  Settings_SetPersistenceEnabled(true);
+  CHECK(SDL_Init(0));
+  SDL_PathInfo info;
+  /* Never remove an existing fixture or unrelated file. An empty directory
+   * at the atomic temporary path deterministically fails opening the file,
+   * including on Windows and when the test runs with elevated privileges. */
+  const bool exists = SDL_GetPathInfo(blocked, &info);
+  CHECK(!exists);
+  if (exists) { SDL_Quit(); return; }
+  const bool created = SDL_CreateDirectory(blocked);
+  CHECK(created);
+  if (!created) { SDL_Quit(); return; }
+  SettingsPersistence *writer = SettingsPersistence_Create();
+  CHECK(writer);
+  if (!writer) { SDL_RemovePath(blocked); SDL_Quit(); return; }
+  const SettingsSaveHost host = SettingsPersistence_Host(writer);
+  Settings_SetSaveHost(&host);
+  g_settings.audio_master_volume = 20;
+  CHECK(Settings_SaveDeferred(path));
+  CHECK(!host.drain(host.context));
+  CHECK(SDL_RemovePath(blocked));
+  g_settings.audio_master_volume = 65;
+  CHECK(Settings_Save(path));
+  CHECK(FileContains(path, "audio_master_volume = 65%\n"));
+  const SettingsPersistenceReport report = SettingsPersistence_TakeReport(writer);
+  CHECK(report.writes == 2 && !report.failed);
+  /* Match the app shutdown decision. A recovered failure must not cause a
+   * second save that persists a later, deliberately unsaved live value. */
+  g_settings.audio_master_volume = 90;
+  const bool drained = SettingsPersistence_Destroy(writer);
+  Settings_SetSaveHost(NULL);
+  CHECK(drained);
+  if (!drained) CHECK(Settings_Save(path));
+  CHECK(FileContains(path, "audio_master_volume = 65%\n"));
+  remove(path);
+  /* The converse matters too: a failed synchronous write must remain visible
+   * at shutdown, and rejection of a different destination cannot erase it. */
+  writer = SettingsPersistence_Create();
+  CHECK(writer);
+  if (writer) {
+    const SettingsSaveHost retry_host = SettingsPersistence_Host(writer);
+    Settings_SetSaveHost(&retry_host);
+    CHECK(SDL_CreateDirectory(blocked));
+    CHECK(!Settings_Save(path));
+    CHECK(!Settings_Save("actraiser-settings-other-test.ini"));
+    CHECK(!SettingsPersistence_Destroy(writer));
+    Settings_SetSaveHost(NULL);
+    CHECK(SDL_RemovePath(blocked));
+  }
+  SDL_Quit();
 }
 
 static void TestLandscapeHeightDefaultAndPersistence(void) {
@@ -2090,6 +2220,8 @@ int main(int argc,char **argv) {
   TestSim3DEnvironmentLabels();
   TestLandscapeHeightDefaultAndPersistence();
   TestFogDefaultsAndPersistence();
+  TestDeferredSettingsSnapshot();
+  TestSettingsWriterRecovery();
   TestConfigSettingsEnvironmentPrecedence();
   TestLegacySeedEncodings();
   TestMutationApi();

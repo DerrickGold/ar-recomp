@@ -61,6 +61,7 @@
 #include "performance_metrics.h"
 #include "platform/sdl/font_coverage_cli.h"
 #include "platform/sdl/render_sdl.h"
+#include "platform/sdl/settings_persistence_sdl.h"
 #include "platform/sdl/text_preview_cli.h"
 #include "platform/sdl/text_rasterizer_sdl.h"
 #include "portable_paths.h"
@@ -723,6 +724,8 @@ static void DrawAndPresentFrame(HostDisplayPresentMode present_mode,
  * host presentation can outpace emulation (dramatically in Unlimited), and
  * multiplying SRAM scans or host/APU policy checks by presentation throughput
  * both wastes work and contaminates the rendering measurement. */
+static SettingsPersistence *s_settings_writer;
+
 static void RunPostTickHousekeeping(void) {
   const PerformanceScope performance = PerformanceMetrics_Begin(kPerformance_Housekeeping);
   extern uint8 g_ram[];
@@ -805,6 +808,11 @@ static void RunPostTickHousekeeping(void) {
 
   Diorama_FlushSettingsIfDirty();
   Sim3DCamera_FlushSettingsIfDirty();
+  const SettingsPersistenceReport written = SettingsPersistence_TakeReport(s_settings_writer);
+  PerformanceMetrics_RecordBatch(PerformanceMetrics_Epoch(), kPerformance_SettingsWrite,
+      written.elapsed_ns, written.maximum_ns, written.writes);
+  if (written.failed)
+    fprintf(stderr, "[settings] latest settings write failed; it will be retried by the next save or on exit\n");
 
   /* Auto-persist battery SRAM the moment the game writes a save, so progress
    * survives a freeze/force-quit (the clean-exit save-system write never runs
@@ -816,7 +824,10 @@ static void RunPostTickHousekeeping(void) {
     static bool write_error_reported;
     static uint64_t first_write_failure_ms;
     SaveError error = {{0}};
-    if (!SaveSystem_AutoPersistIfChanged(&error)) {
+    const PerformanceScope save_scope = PerformanceMetrics_Begin(kPerformance_SaveWrite);
+    const bool saved = SaveSystem_AutoPersistIfChanged(&error);
+    PerformanceMetrics_End(save_scope);
+    if (!saved) {
       if (!write_error_reported)
         fprintf(stderr, "[saves] auto-persist failed: %s\n", error.message);
       write_error_reported = true;
@@ -1808,6 +1819,13 @@ static void AppBoot_StartGame(AppBoot *app) {
    * refuses to persist SRAM. Set from the same predicate so the two protections
    * cannot drift apart. */
   Settings_SetPersistenceEnabled(!InputReplay_ShouldProtectSaveData());
+  if (!InputReplay_ShouldProtectSaveData()) {
+    s_settings_writer = SettingsPersistence_Create();
+    const SettingsSaveHost host = SettingsPersistence_Host(s_settings_writer);
+    Settings_SetSaveHost(&host);
+    if (!s_settings_writer)
+      fprintf(stderr, "[settings] background writer unavailable; using durable synchronous saves\n");
+  }
   ScheduledSettings_Init();
 
   if (!HostAudio_Init(Settings_AudioFrequencyHz(), g_settings.audio_samples,
@@ -2428,14 +2446,19 @@ static int AppShutdown(AppBoot *app, char **argv) {
   bool settings_flush_failed = false;
   bool save_flush_failed = false;
 
-  /* A fatal request can arrive before the normal delayed camera-settings
-   * flush. Persist the complete live registry once; comparison state is not a
-   * setting and therefore remains session-only. Diagnostic replays keep their
-   * existing no-write contract inside Settings_Save. */
-  if (fatal_session) {
+  /* Drain accepted settings snapshots before any fatal/failure-recovery save.
+   * A normal exit must not newly persist unrelated session-only overrides. */
+  const bool settings_save_ok = SettingsPersistence_Destroy(s_settings_writer);
+  s_settings_writer = NULL;
+  Settings_SetSaveHost(NULL);
+  if (!settings_save_ok)
+    fprintf(stderr, "[settings] retrying failed settings save during shutdown\n");
+  if ((fatal_session || !settings_save_ok) && !InputReplay_ShouldProtectSaveData()) {
     char settings_path[kHostPathCapacity];
     UserDataFile(settings_path, sizeof(settings_path), "settings.ini");
     settings_flush_failed = !Settings_Save(settings_path);
+    if (settings_flush_failed)
+      fprintf(stderr, "[settings] shutdown write failed; recent preferences may not have been saved\n");
   }
 
   /* Rendering is synchronous, so nothing can be mid-render during the reverse-
@@ -2469,6 +2492,7 @@ static int AppShutdown(AppBoot *app, char **argv) {
   /* Stop the sole audio producer before reading observer-owned capture state
    * or removing subscriptions. The run directory remains live for reports. */
   HostAudio_Shutdown();
+  MusicReplacements_Shutdown();
   SfxCensus_Report();
   NativeAudioTrace_Report();
 

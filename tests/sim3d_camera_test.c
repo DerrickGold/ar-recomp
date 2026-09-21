@@ -17,7 +17,7 @@ SimRenderFeatureMask Sim3D_ImplementedFeatures(void) { return kSimFeature_All; }
 SimRenderFeatureMask Settings_Sim3DRequestedFeatures(void) { return requested_features; }
 const SettingDesc *Settings_Find(const char *key) { (void)key; settings_writes++; return NULL; }
 SettingChangeResult Settings_Reset(const SettingDesc *desc) { (void)desc; settings_writes++; return kSettingChange_Applied; }
-bool Settings_Save(const char *path) { (void)path; settings_writes++; return true; }
+bool Settings_SaveDeferred(const char *path) { (void)path; settings_writes++; return true; }
 char *UserDataFile(char *buf, size_t size, const char *leaf) { (void)size; (void)leaf; return buf; }
 
 static void TestTownZoomFromVisiblePose(void) {
