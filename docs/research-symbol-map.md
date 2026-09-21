@@ -29,7 +29,7 @@ assume that one observed use establishes a global variable.
 | `$02:A85E` | `WaitForVblank_Bank02` | Verified | Bank-02 frame-yield variant. |
 | `$00:8519` | `SetDataBankFromA` | Verified | Standard `PHA; PLB` helper; changes DB from A's low byte. |
 | `$00:80E5` | `MainLoop_RunSimulationFrame` | Mapped | Sim-mode dispatch entry reached when map group `$18` is zero. |
-| `$01:8000` | `SimulationBuilding_UpdateAll` | Mapped | Region-gated per-frame building/icon update path with several indirect tables. |
+| `$01:8000` | `Simulation_Interact` | Mapped | SIM interaction entry: scene 7 routes to the Palace, 8 to the temple; town input, `$7F:9750` and `$0347` gates precede `$8170`. Earlier building/icon-updater interpretation is superseded by the command-owner trace. |
 | `$00:8465` | `HardwareSetup_Unknown8465` | Observed | Writes a hardware-register-style `$A1` value during the sim-dispatch tail; confirmed valid native-width code, but semantic target remains unknown. |
 | `$00:8241` | `MainLoopUnknown8241` | Observed | Called twice around the `$8418` vblank wait; role remains unknown. |
 | `$00:8059` | `MainLoop_Top` | Verified | Main-loop re-entry point; also the ending presenter's exit target — one of the ROM's only two RTL-long-jump destinations. |
@@ -248,6 +248,30 @@ ROM by shape; run it after any bank00.cfg handler work.
 | `$03:8700-$03:8711` | `TownState_Dispatch` | Mapped | Per-town state dispatcher keyed by `$7CC9[town]`. |
 | `$03:E1D2-$03:E1EB` | `TownEventHandler_Dispatch` | Mapped | Per-town, 32-entry event-handler dispatcher with shared continuation `$E1EC`. |
 
+### Town command navigation and offerings
+
+USA addresses; descriptive candidates, not generated-code renames. The
+[SIM menu reference](sim-menu-reference.md) contains the complete action/item
+tables and caller-specific control flow. A saved JSR return on the stack is
+one byte before the continuation PC used by localization routes.
+
+| Address | Candidate symbol | Status | Contract / observation |
+| --- | --- | --- | --- |
+| `$01:8170` | `TownMenu_Run` | Mapped | Resets angel input/pose, caches town state in `$7F:9217`, and checks contextual lair inspection before opening the command menu. C=1 from an action redraws the retained selection; C=0 leaves the menu. |
+| `$03:BB11` | `Lair_InspectAtAngel` | Mapped | Inspects a lair at the angel's position and can consume the town interaction before the menu opens; not temple detection. |
+| `$01:81AC` | `TownMenu_OpeningReleasePoll` | Mapped | JSR site to `$8C43`; saved return `$81AE`, continuation `$81AF`. Its first frame service can already present menu artwork, before navigation begins. |
+| `$01:8B7D` | `Menu_SelectCommand` | Mapped | X = list-node pointer, Y = label descriptor; `$0338/$033A` track list and selection. C=0/A=action on Use, C=1 on cancel. Town caller saves `$81BE` with Y=`$F34A`; shared Palace callers are separate owners. |
+| `$01:81D7` | `TownMenu_DispatchAction` | Mapped | A = action ID 1–15; town owner saves return `$81C3`. Native JSR/RTS dispatch, normally M=1/X=0/DB=1; invoking an effect leaf directly bypasses command gates and cleanup. |
+| `$01:8C49` / `$01:B52F` | `Menu_DrawSelectionLabel` / `Menu_UpdateIconSelection` | Mapped | Resolve the selected category/action label through `$02:BF60`, then set selected/grey/hidden variants on the menu's fixed records. |
+| `$01:8CF0` / `$01:8CE6` | `Inventory_SelectHeldItem` / `Inventory_SelectFromBase` | Mapped | Eight-slot selector; C=0/A=slot selects, C=1 cancels. Use Offering saves return `$84EF`, X=`$0898`, Y=`$F08C`; the caller reads the current `$02A2+slot` item before `$9C6E` dispatch. |
+| `$01:8CB6` | `Menu_Close` | Mapped | Clears text, hides the 21 root records and restores screen configuration; includes frame service. |
+| `$01:9270` | `Menu_WaitFaceRelease` | Mapped | Waits until `$A1 & $C0` is clear; not interchangeable with a fixed frame delay. |
+| `$01:899B` / `$01:8A3F` | `Status_ShowMaster` / `Status_ShowCities` | Mapped | Standalone structured reports with their own composition and acknowledgement; Master can advance to scores. |
+| `$01:8A9A` / `$01:8AF5` | `ProgressLog_Run` / `MessageSpeed_Run` | Mapped | Save/continue questions versus a native 0–9 selector writing `$0200`. Text still uses `$8E29`; speed input polls save returns `$8B2A/$8B31`. |
+| `$01:91D3` / `$01:91E7` | `Inventory_ResolveTownBase` / `Inventory_CountItems` | Mapped | Base `$024C+9*($0341-1)`; count eight usable entries, not nine. |
+| `$01:921B` / `$01:9239` | `Inventory_RemoveFirstMatchingItem` / `Inventory_Compact` | Mapped | Removal matches the first item ID; later compaction preserves the remaining order. A UI must not independently remove the clicked slot. |
+| `$01:9C6E` / `$01:9C85` | `Item_RunHandler` / `Item_UnwindTargetedHandler` | Mapped | `$9C6E` saves P before shared `$9C6F` dispatch. Ordinary handlers return through `$9C83`; targeted handlers can unwind through `$9C85`. Preserve native dialogue/effect/consumption order. |
+
 ### Dialogue and fixed-menu text
 
 All addresses here are USA. Detailed contracts and regional cautions are in
@@ -270,7 +294,7 @@ All addresses here are USA. Detailed contracts and regional cautions are in
 | `$02:C206` | `Hud_UpdateStatus` | Mapped | Non-action branch clears the 12-tile health row at `$7F:B08C` and supplies `$0286/$0287` to the bar writer |
 | `$02:C375` | `Bg3_FillWords` | Verified | Fill Y words with A at `$7F:B000+X`, preserving X |
 | `$02:C386` | `Hud_DrawHealthBar` | Mapped | Current/max HP in DP `$00/$02`; full tile per two units plus half-tile remainder |
-| `$01:8D92` / `$01:8CA7` | `Choice_RunYesNo` / `Choice_EraseLabels` | Verified | Shared choice close joins at `$8DED`, reaches partial eraser via `$8CB0` |
+| `$01:8D92` / `$01:8CA7` | `Choice_RunYesNo` / `Choice_EraseLabels` | Verified | Initially selects Yes; C=1 means Yes, C=0 means No/cancel, the opposite success polarity to command/inventory selection. Shared choice close joins at `$8DED`, reaches partial eraser via `$8CB0`. |
 | `$01:8CCE` | `Menu_ClearTextRows` | Verified | Clears BG3 bytes `$B100-$B7FF`, retaining status strip |
 | `$02:ABC4/$02:BA41` | `Bg3_ClearGeneralRows` | Verified | Clears BG3 bytes `$B000-$B6FF` |
 
@@ -313,8 +337,14 @@ the eventual symbol format.
 
 | Address / range | Candidate symbol | Status | Meaning |
 |---|---|---|---|
-| `$01:A227` | `TownProcess_SpawnListTable` | Mapped | Maps list ID to five process-script variants. |
-| `$01:D128+` | `TownActor_PlacementRecords` | Mapped | Six-byte placement records: actor type and world position. |
+| `$01:A227` | `TownProcess_SpawnListTable` | Mapped | Maps family/list ID to a variant-pointer array; variant counts depend on family (menu icons use color/grey 0/1), not a universal five-entry layout. |
+| `$01:D128+` | `TownUi_Compositions` | Mapped | Count plus five-byte OBJ parts, beginning with Movement's `$D128`; not six-byte actor placement records. Root-menu initialization records instead begin at `$01:AB32`. |
+| `$01:AB20` / `$01:AB32` | `SimFixed_SceneInitPointers` / `TownMenu_FixedInitRecords` | Mapped | Scene pointers and six-byte X/Y/family initialization records; the six towns share `$AB32` and its first 21 menu entries. |
+| `$01:F32E-$F349` | `TownMenu_SelectionList` | Mapped | Packed category/action bytes with `$FF` separators and a double terminator. |
+| `$01:F34A/$F34C/$F36A` | `TownMenu_LabelDestination` / `ActionLabels` / `CategoryLabels` | Mapped | Packed destination, 15 action pointers and six category pointers; fixed-text grammar. |
+| `$01:F08C/$F08E` | `HeldInventory_BaseDescriptor` / `ItemLabels` | Mapped | WRAM base `$02A2` and 20 pointer records beginning with icon-family byte; aliased text does not imply aliased behavior. |
+| `$01:A2C1` / `$01:D134/$D3E6` | `ObservePeople_IconVariants` / `ObservePeople_IconColor/Grey` | Mapped | Family `$0B`; selected/grey scripts `$A3A1/$A48D`. Small angel reused by the Describe hint, not the Listen portrait. |
+| `$01:D1E2/$D494` / `$01:D1F7/$D4A9` | `Choice_YesCompositions` / `Choice_NoCompositions` | Mapped | Color/grey pairs for family `$23/$24`; resolve through variant tables `$A321/$A325`. |
 | `$01:E099` | `TownActor_BehaviorScriptTable` | Verified | Actor-type-indexed behavior-script pointers. |
 | `$01:E7D9` | `TownActor_SpriteFrameTable` | Verified | Actor-type-indexed sprite-frame/composition pointers. |
 | `$03:F5ED-$03:F620` | `Town_HandlerLists` | Verified | Six-town outer table plus packed handler lists consumed by `$F5BE`. |

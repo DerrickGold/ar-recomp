@@ -1,15 +1,22 @@
 # Simulation command menu: source reference
 
-This maps the original town command menu, its icons, and the dialogue/action
-boundaries needed by an alternative interface. Findings were checked against
-the USA ROM and source tree at `2407b6d` on 2026-09-19. This is a research
-reference, not an implemented menu replacement. Unless specified otherwise,
-program/data addresses below are in bank `$01` and WRAM is in bank `$7E`.
+This reference maps the original town command menu, its icons, dialogue, and
+action boundaries for modding and data extraction. Findings were checked
+against the USA ROM and source tree at `2407b6d` on 2026-09-19. Unless specified
+otherwise, program/data addresses below are in bank `$01` and WRAM is in bank
+`$7E`. For the optional modern interface, see the
+[player manual](manual.md#modern-sim-menu).
 
 The six-town menu has **six categories and 15 actions**. The offering selector
 has **20 item identities**, with eight usable inventory slots. The Sky Palace
 and temple use related code but are separate menu contexts. Keeping those
 contexts explicit is necessary when changing a shared menu or text routine.
+
+Shared references carry the reusable findings: [ROM tables](rom-map.md#town-command-menu-tables-usa),
+[WRAM/record ownership](ram-map.md#town-command-state),
+[routine names and return contracts](research-symbol-map.md#town-command-navigation-and-offerings),
+and [dialogue/selector boundaries](dialogue-system.md#town-command-dialogue-and-selectors).
+This document supplies the complete per-command and per-item inventory.
 
 ## Reproduce the catalogue
 
@@ -62,9 +69,7 @@ entry with its actual M/X widths.
 In the town owner, C=1 from an action redraws the retained command selection;
 C=0 returns to SIM/transition processing. Successful miracle use, rejection at
 Yes/No, and cancelling a target generally exit the menu; insufficient SP or
-the initial town-state gate return to the command menu. A modern interface
-that remains open after casting would therefore change lifecycle behavior,
-not just coordinates.
+the initial town-state gate return to the command menu.
 
 `$03:BB11` is **lair inspection**, not temple detection. It checks the angel's
 position against a lair and displays the corresponding enemy/count message.
@@ -80,9 +85,8 @@ is the action ID. `$FF` separates groups; a second `$FF` terminates the list.
 
 Native Up/Down changes category rows; Left/Right moves between that category
 and its commands. Confirming a category node displays the generic command
-selection instructions at `$F699`, not an action description. An XMB-style
-interface can transpose these axes, but must retain semantic action IDs rather
-than treating screen position as an action ID.
+selection instructions at `$F699`, not an action description. An action's
+encoded ID is distinct from its position on screen.
 
 ## Complete town action inventory
 
@@ -112,18 +116,12 @@ Use the typed live-value resolver in
 [`actraiser_localization_values.c`](../src/actraiser/actraiser_localization_values.c)
 and existing `status.report.*` contracts instead of parsing their displayed
 numbers. Master/score/cities are standalone native screens, with their own
-composition, acknowledgement and cleanup; command coverage does not require
-replacing them. The design retains those original report screens and the
-cathedral's offering menu. Save/continue and Message Speed retain native
-execution but use the replacement window for their questions and selectors.
-Follow-up text without a selector reuses the original bottom dialogue box,
-without a menu icon or title. The held Use Offering selector is an inventory-presentation
-replacement with integrated Describe support.
+composition, acknowledgement and cleanup. The cathedral owns its separate
+offering-transfer menu; Use Offering owns the held-item selector.
 
 The status/save/speed wrappers `$8530/$853B/$854A/$8559` each close through
 `$8CB6`, wait for release through `$9270`, and return C=0. Their native return
-path closes the town menu. The requested miracle confirmation No/Back return
-to browsing is a separate behavior change, not a global native-modal rule.
+path closes the town menu.
 
 ## Miracle description, confirmation and execution seams
 
@@ -191,10 +189,10 @@ button could otherwise select the wrong branch. Inventory prompts and native
 Yes/No loops also require release barriers to prevent a single press from
 selecting an item or accepting Yes twice.
 
-### State to capture at the game boundary
+### Native menu state
 
-These addresses are consumer-scoped. They are evidence for a semantic snapshot,
-not a recommendation that the presenter read WRAM directly.
+These addresses are consumer-scoped; shared scratch values only have these
+meanings while the corresponding menu or action owns them.
 
 | State | Address |
 | --- | --- |
@@ -270,6 +268,13 @@ identifying UI because ordinary world sprites also use priority zero.
 | Other category | `$13` | `$D164` | `$D416` |
 | Progress Log | `$14` | `$D16A` | `$D41C` |
 | Message Speed | `$15` | `$D170` | `$D422` |
+| Observe the People angel (Describe hint) | `$0B` | `$D134` | `$D3E6` |
+| Yes | `$23` | `$D1E2` | `$D494` |
+| No | `$24` | `$D1F7` | `$D4A9` |
+
+The last three rows are supplementary artwork, not additional root commands.
+The angel uses variant table `$A2C1` and scripts `$A3A1/$A48D`; it is distinct
+from the Listen portrait and the world angel. Yes/No use `$A321/$A325`.
 
 Both variants use the same pixel tiles with different palettes (typically
 4/5 selected, 6/7 unselected). Some 16×16 icons comprise four 8×8 parts;
@@ -281,8 +286,8 @@ art. [`ActRaiserLocalizationArt_Capture`](../src/actraiser/actraiser_localizatio
 only handles small 2bpp BG3 objects; it is not a 4bpp menu-icon decoder.
 
 The live atlas contains submitted/visible objects; it is not a complete static
-menu asset library. A modern interface showing previously hidden entries
-must explicitly resolve their compositions and resident graphics. Cache by
+menu asset library. Rendering previously hidden entries requires resolving
+their compositions and resident graphics. Cache by
 ROM/scene, tile/palette generation and replacement-asset identity, not merely
 item ID. Honor actual OBJ bases, palette, transparency and replacement art.
 `tools/sim_object_catalog.py render --snapshot <prefix> --out-dir <directory>`
@@ -353,14 +358,10 @@ not a blanket description-skipping candidate.
 
 ### Use Offering handoff contract
 
-The replacement owns **which held item is selected and its read-only Describe
-view**. Once Use is accepted, hand execution/input to the selected item's
-complete native handler **before its first dialogue or effect**. Keep modern
-presentation around every native dialogue page; hide the menu when a native
-world selector takes over. A native function call alone must not expose the
-old root menu panels. A generic
-`targeted` boolean is insufficient: dialogue, consumption and effects occur
-in different orders, and success depends on native town/event/terrain checks.
+**Using a held offering does not enter the cathedral view.** The selected
+item's native handler owns all dialogue and effects. Dialogue, consumption,
+world selectors and effects occur in different orders; success depends on
+native town/event/terrain checks.
 
 The native selection boundary is `$84ED` (`JSR $8CF0`): C=0 and A=slot resumes
 at `$84F0/$84FA`, widens the slot into X, reads the live item ID from
@@ -389,46 +390,27 @@ These source-verified examples distinguish the important paths:
 The ordinary no-op and acquisition-only cases remain as recorded in the item
 table above; do not invent a picker, effect or success message for them.
 
-#### Dialogue policy and completion
+#### Dialogue and completion
 
-- **Describe** reads separately reviewed help content, plays every authored
-  and overflow page, and restores the same inventory selection. It must never
-  enter `$9C6E`, an acquisition script, a native effect, or a consumption path.
-- **Use** retains native outcome/event dialogue and its exact place relative
-  to writes. Do not treat every item message as the item's optional description
-  or move all consumption/effects after a generic dialogue callback.
-- A pure instruction may be skipped only through a context-specific, proven
-  continuation adapter. The shared position instruction `$04:8930` is a
-  candidate for Bread/Wheat/Skull; its return contexts are `$01:9CFE`,
-  `$01:9D75` and `$01:9EEF`. It passes through `$93A8/$8E29` with catalogue
-  caller `$01:93B2` in the
-  [runtime dialogue routes](../tools/data/localization/us-runtime-dialogue-routes-v1.json).
-  Do not skip `$93A8` globally: it also carries the effect-
-  adjacent dialogue above. Keep the instruction until its skip adapter is
-  qualified; this research does not implement one.
-- Use the existing native/localization page scheduler, reveal timing and
-  release/press barriers. Music's two-page success message must finish through
-  that path before the following event write. A held Use press must not leak
-  from the inventory into acknowledgement or target acceptance.
-- Native `$921B` removes the **first matching item ID** from the eight held
-  slots; `$9239` compacts them later. The replacement must not pre-remove the
-  clicked slot or perform an extra decrement, including with duplicate items.
-- Normal return at `$8506–851D` compacts, removes inventory objects, clears
-  `$29`, closes the menu and waits for release before returning C=0. Targeted
-  handlers also have special unwinds through `$9C85`. Preserve both paths.
-  Native item-picker cancellation is not the requested miracle-confirmation
-  Back-to-selection exception; do not silently reopen the held inventory.
+Outcome/event dialogue occurs at the points shown above, sometimes before and
+sometimes after consumption or state changes. It is not interchangeable with
+an item's descriptive or acquisition text.
 
-This handoff is documented from ROM control flow. Isolated-save recordings
-now cover Wheat/Skull cancellation, Herb, Bridge, Music, Strength, Bomb,
-wrong-town Herb and an inert Tablet; see the implementation and review gallery
-for the exact limits. Full acceptance must also cover Bread and valid/invalid
-Wheat/Bread/Skull targets;
-dialogue-before-write (Herb), writes on both sides (Bridge), multi-page
-dialogue after consumption (Music), effect-before-dialogue (Strength), direct
-effect (Bomb 18), wrong-town/no-op paths and duplicate IDs. Check state at
-dialogue boundaries as well as final state, and require exactly one native
-dispatch/consumption per accepted Use. Describe must leave all of them unchanged.
+The shared position instruction `$04:8930` serves Bread/Wheat/Skull; its return
+contexts are `$01:9CFE`, `$01:9D75` and `$01:9EEF`. It passes through
+`$93A8/$8E29` with catalogue caller `$01:93B2` in the
+[runtime dialogue routes](../tools/data/localization/us-runtime-dialogue-routes-v1.json).
+`$93A8` also carries effect-adjacent dialogue. Music's two-page success message
+must complete before its following event write. Native release/press barriers
+separate inventory selection, acknowledgement and target acceptance.
+
+Native `$921B` removes the **first matching item ID** from the eight held
+slots; `$9239` compacts them later. This matters when duplicate items occupy
+several slots: the selected slot is not necessarily the slot removed.
+
+Normal return at `$8506–851D` compacts, removes inventory objects, clears `$29`,
+closes the menu and waits for release before returning C=0. Targeted handlers
+also have special unwinds through `$9C85`; these are distinct cleanup paths.
 
 ## Adjacent menus and text ownership
 
@@ -446,80 +428,30 @@ category pointers `$F290`, also through `$8B7D`. Its dispatcher `$8646` has:
 | 7 | Progress Log | `$8806` |
 | 8 | Message Speed | `$880B` |
 
-These use `sky.menu.*` identities. A town-only setting must scope shared hooks
-to the town owner, rather than silently reinterpreting Palace action ID 5 as
-Lightning. The ending, world-navigation and temple contexts also need explicit
-handback even if their UI remains native initially.
+These use `sky.menu.*` identities. The same action ID has different meanings
+in different owners: Palace action ID 5 is Status of Master, while town action
+ID 5 is Lightning. The ending, world-navigation and temple contexts also use
+shared routines with their own callers and return contracts.
 
-Native UI has three graphical owners: BG3 text, BG2 box/frame furniture, and
-fixed-tier OBJ icons/selectors. In Town 3D,
-[`SimPlaneIsMenu`](../src/present_sim3d.c) defers BG3 low/high and BG2 high,
-alongside fixed-tier OBJ, until after atmosphere/world effects. The HUD is
-composited separately. Hiding BG3 alone leaves the old panels and icons;
-hiding all fixed sprites can remove the hourglass, selectors or unrelated UI.
-Claim exact surfaces and record roles for the active replacement state.
+Native UI has three graphical owners: BG3 text, BG2 box/frame tiles, and
+fixed-tier OBJ icons/selectors. Hiding BG3 alone leaves panels and icons;
+hiding all fixed sprites can also remove the HUD hourglass or target cursors.
+Existing text routes identify heading region `(18,5,10,2)` and item-label
+region `(18,10,10,2)` in native tile cells.
 
-Existing text routes claim heading region `(18,5,10,2)` and item-label region
-`(18,10,10,2)` in native tile cells. These are observation/fixed-layout facts,
-not suitable XMB coordinates. Do not change their native footprints merely to
-move host text. The modern layout needs its own viewport-space rectangles and
-text lifetimes. Preserve top HUD/status information and native target cursors.
-
-The production text path already provides semantic source selection, language
-fallback, typed values, shaping, raster caches and loss-of-presentation handling:
-
-- [`actraiser_localization_runtime.c`](../src/actraiser/actraiser_localization_runtime.c)
-  and [`actraiser_localization_schedule.c`](../src/actraiser/actraiser_localization_schedule.c):
-  game-side observation, dialogue lifetimes and native scheduling.
-- [`actraiser_dialogue_adapter.h`](../src/actraiser/actraiser_dialogue_adapter.h)
-  and [`dialogue_session.h`](../src/localization/dialogue_session.h): semantic
-  sessions that can inform a separate read-only Help presentation.
-- [`localization_frame.h`](../src/localization/localization_frame.h),
-  [`frame_slot.c`](../src/frame_slot.c), [`present.h`](../src/present.h): owned,
-  immutable frame transfer; presentation must not read live emulation scratch.
-- [`input_map.h`](../src/input_map.h), [`host_input.c`](../src/host/host_input.c),
-  [`input_replay.c`](../src/input_replay.c), [`main.c`](../src/main.c): bindings,
-  held-input ownership and canonical per-emulation-tick replay.
-- [`settings.h`](../src/settings.h), [`settings.c`](../src/settings.c),
-  [`settings_overlay.c`](../src/settings_overlay.c): persisted setting fields,
-  descriptors, dependencies and controls UI.
-- [`recomp/bank01.cfg`](../recomp/bank01.cfg): existing interpreter wrappers.
-  Compose with their predicates/adapters; do not install competing replacements
-  or hand-edit generated bank C files.
-
-Physical controls should be described as Use, Back and Describe with glyphs
-from current bindings. **Native SIM and the host settings overlay differ.**
+**Native SIM and the host settings overlay use different Back controls.**
 The native menu reads `$A1`: `$80` confirms and `$40` cancels. `$02:AC51–AC56`
 copies `$4218 & $F4` to `$A0/A1`; the runner's `SwapInputBits` maps input
 bit 0 (SNES B, default Z) to `$8000` and bit 1 (SNES Y, default A) to `$4000`.
 The host settings overlay instead uses SNES A/default X for Back, matching
 the mapper's generic `A cancel` label. Do not infer native SIM controls from
-those host labels. A new Describe input must be
-captured before the native menu discards unhandled buttons and must not leak
-into gameplay, the target picker or a subsequent confirmation.
+those host labels.
 
-## Evidence limits and implementation qualification
+## Scope and evidence limits
 
-The catalogue and source flow were checked statically against the local USA
-ROM. An isolated 1,450-frame headless replay also completed and supplied town
-VRAM/CGRAM for visual inspection of all 41 category/command/item icon entries
-in both variants. This establishes asset identity, not every menu's live
-behavior. These checks do not establish that a new
-menu hook, hidden-art suppression, Help session, or alternate layout works.
-Other retail ROMs have separate extraction profiles, while the running game
-uses the USA route contract. Do not apply these offsets to another release.
-
-Existing `saves/sim-actions.rec`, its pinned SRAM/settings under
-`tests/fixtures/sim3d/`, and `tools/sim3d_demo.py` provide a starting regression
-corpus. They cover all miracle kinds and shared position helpers, not every
-menu branch or offering ID. In particular a count of `$9754` calls is not
-proof that Wind/Earthquake require player targeting: the item and repeated-use
-paths share that helper. New tests must identify the invoking action.
-
-Before shipping a replacement, qualify every root action, item identity,
-Yes/No/Back path, empty/full inventory, insufficient SP, invalid target and
-event-specific failure; switching settings/languages during menus; load/reset
-with a menu open; input replay, turbo, rebinding and controller disconnect;
-native 2D, widescreen and Town 3D; resize, long translations, RTL text and
-renderer failure. Compare gameplay state at equivalent action boundaries,
-since deliberately removing acknowledgements changes frame counts.
+The catalogue verifies asset identities and control-flow boundaries in the
+USA ROM. It is not an exhaustive account of every town/event outcome.
+In particular, a call to `$9754` does not by itself identify miracle targeting:
+item and repeated-use paths share that helper. Interpret it with its caller.
+Other retail ROMs have separate extraction profiles; do not apply these
+USA addresses to another release.

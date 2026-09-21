@@ -291,6 +291,15 @@ Two-byte entries per town.
 - Counts: $7E:023A-$7E:0245 (two-byte entries)
 - Inventories: $7E:024C-$7E:0281 (nine bytes per town)
 
+The town selector uses **eight usable slots**, starting at
+`$024C + 9*($0341-1)`; the ninth byte is terminator/storage, not another item.
+Held offerings likewise use `$02A2-$02A9` with the extra byte at `$02AA`.
+IDs 12/13 (Ancient Tablet) and 16/17/18 (Bomb) share labels/art but have
+different Use handlers. Preserve both item ID and slot. Native `$01:921B`
+removes the first matching item ID, and `$01:9239` compacts the inventory;
+with duplicates, the removed slot can differ from the selected slot. See the
+[offering handoff contract](sim-menu-reference.md#use-offering-handoff-contract).
+
 ## Angel & Master Data ($7E:0280+)
 
 ### Angel
@@ -350,6 +359,7 @@ See [dialogue-system.md](dialogue-system.md) for the control and clear paths.
 | DP `$10/$12` (sound-test modal only) | Music/effect selection counters; the routine changes their low bytes in ranges 1–22 and 1–38. Native numeric formatting and the localization value adapter read the words. These are reused scratch, not global current-song/SFX state. |
 | `$7E:0200` | Dialogue pacing/retained-row mode: `$901C` delays non-space glyphs by this many `$9284` frames; zero selects clear at `$02` continuation, nonzero selects row advancement/scroll. Enhanced sessions apply this interval per authored Unicode grapheme through caller-scoped `$9278` (return `$9026`), not per compressed source token. Authored pages retain the same zero/nonzero window policy. |
 | `$7E:0201` | Text presentation-state byte initialized to `$FF` on interpreter entry; not a standalone host page counter |
+| `$7E:0202` | Native dialogue cursor; reset and row advancement belong to the text interpreter, independently of the host's page/reveal snapshot |
 | `$7E:0288-$028F` | Eight live native player-name slots read by interactive `$06`; can precede SRAM `$1439` until the next save. `$0290` is terminator/padding. Never UTF-8 storage. |
 | `$7E:034B/$034C/$034D` | Name-entry selected column / row / entered length |
 | `$7F:B000-$B7FF` | 32×32 BG3 tilemap staging; byte offset = `row*64 + column*2` |
@@ -366,6 +376,39 @@ its footprint is neither of the whole-clear ranges. The NMI upload range can
 be smaller than the allocated/cleared map; do not infer ownership from upload
 length alone. Unicode names and authored dialogue state require separate host
 state and explicit save/load handling, not writes into these native slots.
+
+### Town command state
+
+These USA addresses describe the native owner shared by the original and
+modern presentations. The host's navigation phase, remembered category rows,
+Describe session, scale and binding hint have no additional WRAM allocation.
+See the [command flow](sim-menu-reference.md#entry-selection-and-dispatch)
+and [dialogue boundaries](dialogue-system.md#town-command-dialogue-and-selectors).
+
+| Address | Meaning while this menu/action owns it |
+| --- | --- |
+| `$7E:0338` / `$7E:033A` | Menu-list base / retained list-node pointer, both words; town base is ROM `$01:F32E`. These are pointers, not category or action IDs. |
+| `$7E:033C` / `$7E:033D` | Animation-family / variant scratch bytes consumed by `$01:AC36`; variant 0 is selected and 1 is ordinary for menu icons. The same scratch serves other animation owners. |
+| `$7E:033F` | Zero-based cached menu location; distinct from active location `$0341` and temple action `$033E`. |
+| `$7E:00A0-$00A1` / `$7E:00F4-$00F5` | Held-input word / enable mask. Native menu polls the high byte `$A1`: `$80` confirms, `$40` cancels. Both must be released before a fresh activation. |
+| `$7F:9217` | Town-state cache captured at menu entry from `$7F:6B18[$7F:7BFB]`; a zero value rejects miracle use before the SP gate. It is not a separately established miracle-unlock flag. |
+| `$7F:9208` / `$7F:920A` | Item position-picker coordinates; do not conflate with the confirmed miracle cell fields `$90E1/$90E5`. |
+| `$7F:9215` | Full-word target-picker activity, also used by non-miracle commands; [picker details](#story-event-and-scenery-spawner-state-7f9202-7f9228). |
+
+Fixed-screen UI records have stride `$12`: timing at `+$00`, script cursor
+at `+$02`, loop/script base at `+$06`, composition at `+$08`, X/Y anchor at
+`+$0A/+$0C`, family at `+$0E`, and flags at `+$10` (`$8000` hides a record).
+
+| Record base(s) | Menu role |
+| --- | --- |
+| `$7E:06A0-$0808` | First 21 records: six categories and 15 commands, in native list order |
+| `$7E:081A/$082C` | Yes/No selectors |
+| `$7E:083E` | HUD hourglass; independent of menu ownership |
+| `$7E:0850` | Start of magic-icon records |
+| `$7E:0898` | Start of inventory-icon records; these lie after the hourglass |
+
+Record addresses are stable ownership clues; emitted OAM slot numbers and
+screen coordinates are not. Native camera/screen offsets still apply to anchors.
 
 ## Temple & Gameplay State
 

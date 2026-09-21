@@ -684,6 +684,60 @@ already discarded by the author parser; it does not change native erase logic.
 Some native routes also rely on an implicit source end, which the author parser
 materializes as the same terminal operation as explicit `@end`.
 
+## Town command dialogue and selectors
+
+The modern SIM menu uses the existing dialogue scheduler for every prose body:
+miracle and offering descriptions, Yes/No questions, Message Speed instructions
+and samples, Progress Log acknowledgements, errors and action follow-ups.
+Titles, item names, SP costs, choice labels and selector digits remain fixed
+labels. Master/city reports retain their separate structured native layouts.
+The [SIM menu reference](sim-menu-reference.md) maps each action and offering's
+execution order; [RAM state](ram-map.md#town-command-state) is consumer-scoped.
+
+A prompt belongs to a selector only when its action, source and caller match.
+The five miracle questions are listed in the
+[miracle seam table](sim-menu-reference.md#miracle-description-confirmation-and-execution-seams).
+The other selector-associated streams are:
+
+| Owner | `$01` source | Saved JSR return | Continuation PC |
+| --- | --- | --- | --- |
+| Progress Log save question | `$F99B` | `$8A9F` | `$8AA0` |
+| Progress Log continue question | `$F9BA` | `$8ABD` | `$8ABE` |
+| Message Speed question | `$FA7B` | `$8AFA` | `$8AFB` |
+
+The saved return is the last JSR operand byte; localization's `caller_pc24`
+identifies the following instruction. `$01` yields with the question still
+visible. Yes/No input belongs to `$8D92`; Message Speed's separate number/arrow
+selector is identified by `$8C43` polls with saved returns `$8B2A/$8B31`.
+The latter commits `$0200` through native `$8AF5`, not a host-only slider.
+
+Use fast-drains only audited optional descriptions/targeting instructions
+through the actual interpreter; it does not skip a whole dialogue routine or
+all calls through `$93A8`. Building Direction's instruction returns to `$824A`,
+where the original code tests A bit `$40`, so a skipped instruction must supply
+an explicit proceed result. Miracle Describe enters only the pure description
+source through a checked synthetic RTS boundary, never the action's gates or
+effect body. Other Describe entries use zero-gameplay-control `ArDialogueSession`
+Help routes; [authoring rules](language-pack-format.md#script-basics)
+are the same page/style rules as ordinary text. A Help acknowledgement cannot
+become a native Yes or item dispatch. Fresh release/press barriers separate them.
+
+Native scrolling can remove early lines from BG3 while the same logical page
+is still active. Repositioned dialogue must retain the **complete current
+page**, its reveal position, continuation and authored breaks, rather than
+copy only the currently visible tile rows. This is the Progress Log case where
+the salutation and first line otherwise disappear. Enhanced wrapping uses the
+dialogue layout at the selected font size; ROM soft wraps do not become hard
+breaks or trigger per-label shrinking. The main view and PiP share page progress.
+
+Native execution handoff does not end text presentation. Use Offering retains
+its native instruction/outcome/effect order, and Building Direction's terminal
+follow-up remains ordinary bottom dialogue. `$8CCE` clears command text; a
+scene change retires the owner. The original root panels need independent
+suppression throughout those flows because text, frame tiles and fixed OBJ
+records are separately owned. The renderer receives an immutable menu/dialogue
+snapshot and acknowledges the relocated text's presentation to the scheduler.
+
 ## Replacement boundaries
 
 Native game controls and input remain authoritative. Semantic routes and typed

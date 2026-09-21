@@ -7,6 +7,8 @@ start with the [project README](https://github.com/DerrickGold/ar-recomp#quick-s
 ## Playing and customizing
 
 - [Manual](manual.md) — controls, settings, saves, and troubleshooting.
+- [Modern SIM menu](manual.md#modern-sim-menu) — enable the compact town menu,
+  adjust its scale, and use the angel's Describe hint.
 - [Builder and Workshop](builder-workshop.md) — building the game and replacing
   artwork, music, and text.
 - [Desktop packages and user data](desktop-packaging.md) — portable installs,
@@ -29,8 +31,6 @@ marked uncertain should not be treated as verified offsets or behavior.
   and replacement boundaries.
 - [Simulation command menu](sim-menu-reference.md) — actions, original icons,
   offering inventories, and description/confirmation boundaries.
-- [Optional modern SIM menu](sim-menu-implementation.md) — setting, navigation,
-  native handoffs, localization, and validation.
 - [Reusable dialogue host](text-template-core.md) — templates, mixed typography,
   shared playback mechanics and the standalone sample.
 - [Save format](save-format.md) — SRAM layout, checksum, and editable fields.

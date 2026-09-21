@@ -129,6 +129,30 @@ each one, and *First connected* follows hotplug. If SDL does not recognise a
 pad, drop a `gamecontrollerdb.txt` next to the executable (or in `assets/`)
 and it is loaded at startup.
 
+### Modern SIM menu
+
+Set **Town 3D → SIM menu → Modern** for the compact town command menu.
+**Original** is the default. The modern menu works with native or enhanced
+rendering, including when Town 3D itself is disabled.
+
+Left/right selects a category; Down or Use opens its submenu. Up from the
+first entry returns to the crossbar, and Back returns one level. Each category
+remembers its selected entry. No or Back at a miracle confirmation returns
+to that miracle in the submenu.
+
+Use proceeds to the command's decision or action. **Describe menu item** reads
+its explanation without using the miracle or offering. Describe defaults to
+keyboard **S** or the top face button: **SNES X / Xbox Y / PlayStation Triangle**.
+Remap it under **Controls**. The selected submenu or inventory row shows a
+small angel beside the current binding. The hint hides while reading Help and
+when Describe is unbound. Use advances the explanation; Back returns to the
+same selection. Navigation supports keyboard and controller.
+
+**Town 3D → SIM menu scale (%)** adjusts the dock, submenus, confirmations and
+Message Speed selector from **50–100%** in 5% steps; the default is 50%.
+Descriptions, follow-up dialogue and the HUD keep their own sizing. Native PiP
+keeps its established size and position and may overlap the menu.
+
 ### Camera control
 
 In diorama mode, 3D towns and 3D world navigation, the right stick orbits, the triggers zoom,

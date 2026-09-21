@@ -309,6 +309,35 @@ seam: moving an animal is a byte edit, not a code change.
 | `$01:CF2B-$01:CFA8` | `0x0CF2B` | Kind → variant table: 9 row pointers followed by 9 × 12 variant bytes. Indexed **by byte** with the raw `kind`, so the row is `kind/2`. kind 0 people, 2 horse, 4 dog, **6 sheep**, 8 boat, 10 flame, 12 `$DD3F` family |
 | `$01:A91C-$01:A96D` | `0x0A91C` | Spawn-list 6 variant array (41 entries, reached via `$01:A227[6]`); variants `$0C`/`$0D` horse, `$0E`/`$0F` dog, `$10`/`$11` sheep, `$12`-`$15` boat. Compositions follow at `$01:A96E+` |
 
+### Town command menu tables (USA)
+
+The menu has six categories, 15 commands and 20 offering identities.
+Bank `$01` interleaves executable code, fixed labels, interactive dialogue and
+sprite data; decode each through its actual consumer. File offsets below are
+headerless LoROM offsets. The [SIM menu reference](sim-menu-reference.md)
+contains the action, item and dialogue-source inventories; the
+[symbol map](research-symbol-map.md#town-command-navigation-and-offerings)
+records the callable boundaries.
+
+| SNES address | File offset/range | Meaning |
+| --- | --- | --- |
+| `$01:F32E-$F349` | `0x0F32E-0x0F349` | Town navigation bytes: high nibble = category 0–5, low nibble = action 1–15 or zero for a category node; `$FF` separates groups and a second `$FF` ends the list. |
+| `$01:F34A` | `0x0F34A` | Packed fixed-label destination `$0512` (column 18, row 5), followed by the action pointers. |
+| `$01:F34C-$F369` | `0x0F34C-0x0F369` | Fifteen action-label pointers, indexed in native action-ID order. |
+| `$01:F36A-$F375` | `0x0F36A-0x0F375` | Six category-label pointers. |
+| `$01:F08C` / `$F08E-$F0B5` | `0x0F08C` / `0x0F08E-0x0F0B5` | Held-inventory base word `$02A2`, then 20 item-label pointers. Each pointed record begins with its icon family byte, followed by fixed text. Duplicate label pointers do not merge item identities. |
+| `$01:9C94-$9CBB` | `0x09C94-0x09CBB` | Twenty item Use/reward handler-minus-one words for the stacked RTS dispatcher `$9C6E/$9C6F`; not callable label/description records. |
+| `$01:AB20` → `$01:AB32` | `0x0AB20` → `0x0AB32` | Scene initialization pointers; all six towns use `$AB32`. Six-byte records hold X, Y and family; `$FFFD` jumps, `$FFFE` skips a record, `$FFFF` ends. The first 21 records initialize the root menu. |
+| `$01:A227` | `0x0A227` | Family-to-variant-table pointers. Menu variant 0 selects color artwork and variant 1 selects grey artwork; scripts resolve composition pointers. |
+| `$01:A2C1` → `$A3A1/$A48D` | `0x0A2C1` → `0x0A3A1/0x0A48D` | Family `$0B`, Observe the People angel: selected/grey scripts resolve `$D134/$D3E6`. Used for the modern Describe hint. |
+| `$01:A321/$A325` | `0x0A321/0x0A325` | Yes/No family `$23/$24` variant tables. Selected compositions `$D1E2/$D1F7`; grey compositions `$D494/$D4A9`. |
+| `$04:C6AE-$C6D5` | `0x246AE-0x246D5` | Twenty offering-receipt dialogue pointers, indexed by `(item_id-1)*2`; receipt text follows inventory transfer and is not a read-only item description. IDs 5/6 use immediate-grant dialogue instead. |
+
+Composition records contain a part count then five-byte OBJ parts. Tile indices,
+palette, size and flips resolve against the scene's resident VRAM/CGRAM; a
+composition address alone is not a standalone bitmap. The native menu's grey
+variant denotes selection state, not whether a command is available.
+
 ### Town OBJ composition landmarks (bank $01, classified 2026-07-22)
 
 Composition addresses consumed by `$01:ADAD`/`$AE6F` via world record `+08`.
@@ -320,6 +349,7 @@ to mistake for their neighbours.
 |---|---|---|
 | `$A627-$A792` | Angel directional/pose frames | **Not** an angel signal on their own — borrowed by miracle effect records |
 | `$A589-$A5BC` | Four directional angel animation programs | Four 4-tick poses per direction; `$A627/$A67B/$A6CF/$A705` are the respective first compositions. Preserve part origins rather than tight-cropping each pose |
+| `$D134/$D3E6` | Observe the People small angel, color/grey | Family `$0B`, variant table `$A2C1`. This is the ROM icon reused for Describe, distinct from the Listen portrait `$D1D6/$D488` and world-angel pose family. |
 | `$A7C5`, `$EC40/$EC6E` | Navigation palace animation and compositions | Two 96-tick, 48×48 frames. Map `$00/$09` asset entry at file `$0282EF` selects raw OBJ chars at file `$02CE7F` → VRAM word `$4000`; palette at file `$0E4093` → CGRAM `$80`. Parts use OBJ palette 1 |
 | `$D233-$D302` | Position/direction cursor family | class-`$11` town position controller |
 | `$D967/$D972/$D97D/$D988` | Angel arrow vertical/horizontal A/B | record `$0B0A` |

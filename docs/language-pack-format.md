@@ -62,10 +62,16 @@ The optional modern SIM menu adds 36 read-only Help routes:
 `sim.help.category.0`–`.5`, `sim.help.action.01`–`.04` and `.10`–`.15`, and
 `sim.help.item.01`–`.20`. They accept authored pages, waits and text styles,
 with no gameplay anchors or dynamic values. Missing entries use built-in
-English Help; they do not affect complete-pack validity. See the
-[implementation reference](sim-menu-implementation.md#localization) for
-native-sized overflow and mirrored PiP presentation. Miracle descriptions
-continue to use their existing dialogue routes.
+English Help; they do not affect complete-pack validity. Miracle descriptions
+continue to use their existing dialogue routes. See the
+[modern SIM menu controls](manual.md#modern-sim-menu) for enabling Describe.
+
+Help preserves authored page breaks, hard line breaks, styles and direction.
+Long pages also paginate to fit the native dialogue footprint; the main view
+and native PiP share page progress. Enhanced text wraps at the selected font
+size without importing the ROM font's soft line breaks. Icon/name decorations
+sit outside the dialogue body and mirror for RTL text. Follow-up and
+confirmation text continues to use the command's existing dialogue routes.
 
 Action labels use `action.hud.act_label`, `time_label`, `score_label`,
 `player_label` and `enemy_label` (each with the `action.hud.` prefix).
