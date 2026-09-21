@@ -14,6 +14,7 @@ const languageTab=document.querySelector("#tab-localization");
 let localizationReady=false, localizationChecked=false;
 const assetTab=document.querySelector("#tab-assets"), assetForm=document.querySelector("#assets-form");
 const titleToggle=document.querySelector("#title-toggle"), titleChange=document.querySelector("#title-change");
+const titleVariant=document.querySelector("#title-variant"), titlePreview=document.querySelector("#title-preview");
 const assetState=document.querySelector("#asset-state");
 const saveAssetsTop=document.querySelector("#save-assets-top"), discardAssets=document.querySelector("#discard-assets");
 const assetBar=document.querySelector("#asset-bar"), assetBarNote=document.querySelector("#asset-bar-note");
@@ -384,6 +385,8 @@ function refreshAssetDirtyState(){
 function discardAssetChanges(){
   titleChange.value="0";
   titleToggle.checked=assetBaseline.title;
+  titleVariant.value=assetBaseline.titleVariant;
+  refreshTitlePreview();
   assetRows.forEach(row=>{
     clearRowSelection(row);
     row.querySelector(".asset-remove").value="0";
@@ -414,7 +417,7 @@ function clearRowSelection(row){
   audio.removeAttribute("src");
 }
 
-let assetBaseline={title:false};
+let assetBaseline={title:false,titleVariant:"en"};
 /* The configuration the page is currently showing. Kept because a split
  * checkbox has to rebuild that slot's rows without asking the server again --
  * the record it would create is already described in this payload. */
@@ -422,8 +425,10 @@ let lastAssetConfig={tracks:[]};
 
 function paintAssetConfiguration(config){
   titleToggle.checked=!!(config.title&&config.title.enabled);
+  titleVariant.value=config.title?.variant==="ja"?"ja":"en";
+  refreshTitlePreview();
   titleChange.value="0";
-  assetBaseline={title:titleToggle.checked};
+  assetBaseline={title:titleToggle.checked,titleVariant:titleVariant.value};
   lastAssetConfig=config;
   (config.tracks||[]).forEach(track=>{
     const row=document.querySelector('.asset-row[data-track="'+track.id+'"]');
@@ -558,13 +563,23 @@ async function startAudioPreviews(force){
 generatePreviews.addEventListener("click",()=>startAudioPreviews(false));
 regeneratePreviews.addEventListener("click",()=>startAudioPreviews(true));
 
-titleToggle.addEventListener("change",()=>{
+function refreshTitlePreview(){
+  titlePreview.src=titleVariant.value==="ja"?"title-logo-ja.png":"title-logo.png";
+}
+
+function titleSelectionChanged(){
   /* Compared against the loaded value rather than latched: toggling twice
    * leaves the manifest as it was, and saving that would rewrite a
-   * hand-authored title mapping for no reason. */
-  titleChange.value=(titleToggle.checked===assetBaseline.title)?"0":"1";
+   * hand-authored title mapping for no reason. Browsing styles while off is
+   * preview-only; the choice is installed when the player enables it. */
+  refreshTitlePreview();
+  const changed=titleToggle.checked!==assetBaseline.title ||
+    (titleToggle.checked&&titleVariant.value!==assetBaseline.titleVariant);
+  titleChange.value=changed?"1":"0";
   refreshAssetDirtyState();
-});
+}
+titleToggle.addEventListener("change",titleSelectionChanged);
+titleVariant.addEventListener("change",titleSelectionChanged);
 
 function wireAssetRow(row){
   const input=row.querySelector("input[type=file]"), remove=row.querySelector(".asset-remove");

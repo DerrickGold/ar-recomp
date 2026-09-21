@@ -35,6 +35,23 @@ var boxArtWebP []byte
 //go:embed assets/title-logo.png
 var titleLogoPNG []byte
 
+// Japanese companion artwork, fitted to the same settled/swirl bounds.
+// Original ROM captures used as references remain local-only.
+//
+//go:embed assets/title-logo-ja.png
+var titleLogoJapanesePNG []byte
+
+func bundledTitleArtwork(variant string) ([]byte, bool) {
+	switch variant {
+	case "", "en": // Older clients omitted the variant and selected English.
+		return titleLogoPNG, true
+	case "ja":
+		return titleLogoJapanesePNG, true
+	default:
+		return nil, false
+	}
+}
+
 // The asset-replacement manifest TEMPLATE: every known hook, active but inert
 // until its file exists, plus the reference documentation for the format.
 //

@@ -83,6 +83,7 @@ func TestAssetEndpointsServeCorrectTypes(t *testing.T) {
 	}{
 		{"boxart.webp", "image/webp", 4096},
 		{"title-logo.png", "image/png", 100_000},
+		{"title-logo-ja.png", "image/png", 100_000},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.endpoint, func(t *testing.T) {
@@ -142,6 +143,7 @@ func TestPageReferencesAssetsAndPermitsTheManualFrame(t *testing.T) {
 	body := response.Body.String()
 	for _, reference := range []string{
 		`src="boxart.webp"`, `src="title-logo.png"`, `href="manual.pdf"`,
+		`id="title-variant"`, `value="ja"`, `id="title-preview"`,
 		`id="manual-form"`, `accept=".pdf,application/pdf"`,
 	} {
 		if !strings.Contains(body, reference) {

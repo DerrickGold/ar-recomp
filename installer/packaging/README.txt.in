@@ -155,6 +155,13 @@ The builder copies those files into "utils/game-assets" and updates
 "manifest.ini" for you. Advanced packs can still add their own files and
 records there directly. Anything you don't add simply stays original.
 
+In Title artwork, choose the English "Recompiled" or Japanese
+"アクトレイザー" HD style, check "Use the included HD title", and save.
+The preview follows your choice. Both the settled logo and its Mode-7 intro
+animation use the selected art.
+This does not change the game's text language.
+Uncheck the option and save to restore the ROM title.
+
 After supplying the ROM on the Build tab, you can also press "Extract
 original-audio previews" on Assets. The bundled pure-Go audio renderer creates
 local 30-second WAVs so each original track can be played beside the selected

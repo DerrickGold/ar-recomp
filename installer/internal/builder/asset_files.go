@@ -20,8 +20,8 @@ type stagedAsset struct {
 
 const maxTrackBytes = 256 << 20
 
-func bundledTitleRelativePath() string {
-	digest := sha256.Sum256(titleLogoPNG)
+func bundledTitleRelativePath(artwork []byte) string {
+	digest := sha256.Sum256(artwork)
 	return filepath.ToSlash(filepath.Join("hd", "builder",
 		"title-logo-"+hex.EncodeToString(digest[:8])+".png"))
 }

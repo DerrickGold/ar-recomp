@@ -982,6 +982,9 @@ pre {
   font-size:13px;
   color:var(--muted)
 }
+.asset-title-copy select {
+  margin-bottom:16px
+}
 .asset-toggle {
   display:flex;
   align-items:center;

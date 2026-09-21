@@ -142,12 +142,17 @@
       <div class="asset-categories" aria-label="Asset categories" data-i18n-aria="builder.assets.categories"><button type="button" data-asset-category="music" aria-pressed="true"><span data-i18n="builder.assets.music">Music</span> <span class="count">17</span></button><button type="button" data-asset-category="title" aria-pressed="false" data-i18n="builder.assets.title_art">Title artwork</button></div>
 
       <div class="asset-title-card" id="asset-title-view" hidden>
-        <img src="title-logo.png" width="2087" height="754" loading="lazy"
+        <img id="title-preview" src="title-logo.png" width="2212" height="760" loading="lazy"
              alt="Preview of the included high-resolution ActRaiser title treatment" data-i18n-alt="builder.assets.title_preview">
         <div class="asset-title-copy">
           <h2 data-i18n="builder.assets.hd_title">High-resolution title</h2>
           <p data-i18n="builder.assets.hd_title_help">The included art replaces both the settled title logo and its Mode-7 intro swirl.
           Turn it off at any time to return to the ROM artwork.</p>
+          <label for="title-variant" data-i18n="builder.assets.title_variant">Artwork style</label>
+          <select id="title-variant" name="title-variant">
+            <option value="en" data-i18n="builder.assets.title_english">English — Recompiled</option>
+            <option value="ja" data-i18n="builder.assets.title_japanese">Japanese — アクトレイザー</option>
+          </select>
           <div class="asset-toggle">
             <input id="title-toggle" name="title" type="checkbox">
             <label for="title-toggle" data-i18n="builder.assets.use_hd_title">Use the included HD title</label>

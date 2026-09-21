@@ -58,6 +58,7 @@ game-assets/manifest.ini
 !examples/example.fr-ca.arlang
 !assets/*.png
 !installer/internal/builder/assets/title-logo.png
+!installer/internal/builder/assets/title-logo-ja.png
 
 # Build output. Root paths are anchored and module-owned paths are explicit;
 # a broad `build*/` glob would also match installer/internal/builder/, which is

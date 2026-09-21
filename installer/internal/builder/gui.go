@@ -441,6 +441,8 @@ func (app *application) ServeHTTP(response http.ResponseWriter, request *http.Re
 		serveBoxArt(response, request)
 	case endpoint == "title-logo.png" && request.Method == http.MethodGet:
 		serveTitleLogo(response, request)
+	case endpoint == "title-logo-ja.png" && request.Method == http.MethodGet:
+		serveEmbeddedAsset(response, request, "title-logo-ja.png", "image/png", titleLogoJapanesePNG)
 	case endpoint == "manual.pdf" && request.Method == http.MethodGet:
 		app.serveManual(response, request)
 	case endpoint == "manual" && request.Method == http.MethodGet:

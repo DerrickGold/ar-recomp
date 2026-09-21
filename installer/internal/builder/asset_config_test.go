@@ -168,7 +168,7 @@ image = hd/custom.png
 	}
 
 	logoRelative, ok := manifestSectionValue(updated, "replace:title-logo", "image")
-	if !ok || logoRelative != bundledTitleRelativePath() {
+	if !ok || logoRelative != bundledTitleRelativePath(titleLogoPNG) {
 		t.Fatalf("saved title path = %q", logoRelative)
 	}
 	swirlRelative, _ := manifestSectionValue(updated, "replace:title-swirl", "image")
@@ -213,7 +213,7 @@ func TestAssetSaveCanDisableAndRestoreBundledTitle(t *testing.T) {
 		t.Fatalf("enable status = %d: %s", enabled.Code, enabled.Body.String())
 	}
 	titlePath := filepath.Join(root, "game-assets",
-		filepath.FromSlash(bundledTitleRelativePath()))
+		filepath.FromSlash(bundledTitleRelativePath(titleLogoPNG)))
 	if !regularFileExists(titlePath) {
 		t.Fatal("enabling the title did not materialize its image")
 	}
@@ -238,7 +238,7 @@ func TestAssetSaveCanDisableAndRestoreBundledTitle(t *testing.T) {
 		t.Fatal(err)
 	}
 	if value, _ := manifestSectionValue(string(manifestBytes),
-		"replace:title-logo", "image"); value != bundledTitleRelativePath() {
+		"replace:title-logo", "image"); value != bundledTitleRelativePath(titleLogoPNG) {
 		t.Errorf("disabled hook no longer points at the recoverable bundled path: %q", value)
 	}
 

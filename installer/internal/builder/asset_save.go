@@ -10,6 +10,8 @@ import (
 
 const maxAssetRequestBytes = 1 << 30
 
+var errUnknownTitleArtwork = errors.New("select an available title artwork variant")
+
 func (app *application) saveAssets(response http.ResponseWriter, request *http.Request) {
 	app.assetMu.Lock()
 	defer app.assetMu.Unlock()
@@ -35,7 +37,11 @@ func (app *application) saveAssets(response http.ResponseWriter, request *http.R
 	plan := assetSavePlan{root: app.options.ProjectRoot, manifest: manifest, manifestPath: manifestPath}
 	defer plan.discardStaged()
 	if err := plan.prepareTitle(request); err != nil {
-		writeJSONError(response, http.StatusInternalServerError, err.Error())
+		status := http.StatusInternalServerError
+		if errors.Is(err, errUnknownTitleArtwork) {
+			status = http.StatusBadRequest
+		}
+		writeJSONError(response, status, err.Error())
 		return
 	}
 	if err := plan.prepareTracks(request); err != nil {
@@ -84,10 +90,11 @@ func (app *application) saveAssets(response http.ResponseWriter, request *http.R
 // and file edits are tracked separately so an audio-only save preserves the
 // player's manifest bytes. Preparation never replaces an installed file.
 type assetSavePlan struct {
-	root, manifestPath, manifest  string
-	changed, touched, removeTitle bool
-	staged                        []stagedAsset
-	reverted                      []string
+	root, manifestPath, manifest string
+	changed, touched             bool
+	removeTitle                  string // Only a selected, builder-owned content-addressed path.
+	staged                       []stagedAsset
+	reverted                     []string
 }
 
 func (plan *assetSavePlan) discardStaged() {
@@ -100,18 +107,23 @@ func (plan *assetSavePlan) discardStaged() {
 
 func (plan *assetSavePlan) prepareTitle(request *http.Request) error {
 	if request.FormValue("title-change") == "1" {
-		relative := bundledTitleRelativePath()
+		artwork, ok := bundledTitleArtwork(request.FormValue("title-variant"))
+		if !ok {
+			return errUnknownTitleArtwork
+		}
+		relative := bundledTitleRelativePath(artwork)
 		logo, swirl := titleManifestValues(relative)
 		plan.manifest = upsertManifestSection(plan.manifest, "replace:title-logo", logo)
 		plan.manifest = upsertManifestSection(plan.manifest, "replace:title-swirl", swirl)
 		if request.FormValue("title") == "on" {
-			asset, stageErr := stageBytes(plan.root, relative, titleLogoPNG)
+			asset, stageErr := stageBytes(plan.root, relative, artwork)
 			if stageErr != nil {
 				return fmt.Errorf("prepare bundled title art: %w", stageErr)
 			}
 			plan.staged = append(plan.staged, asset)
+		} else {
+			plan.removeTitle = relative
 		}
-		plan.removeTitle = request.FormValue("title") != "on"
 		plan.changed = true
 		plan.touched = true
 	}
@@ -306,9 +318,9 @@ func (plan *assetSavePlan) install() error {
 	// Turning the included title off means the manifest keeps a valid hook but
 	// its builder-owned image is absent. The embedded bytes make this deletion
 	// recoverable: checking the toggle and saving restores the exact file.
-	if plan.removeTitle {
+	if plan.removeTitle != "" {
 		managedTitle := filepath.Join(plan.root, "game-assets",
-			filepath.FromSlash(bundledTitleRelativePath()))
+			filepath.FromSlash(plan.removeTitle))
 		if err := os.Remove(managedTitle); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return fmt.Errorf("disable bundled title art: %w", err)
 		}

@@ -26,6 +26,7 @@ type assetSplitStatus struct {
 type assetTitleStatus struct {
 	Enabled bool   `json:"enabled"`
 	File    string `json:"file,omitempty"`
+	Variant string `json:"variant"`
 }
 
 type assetTrackStatus struct {
@@ -151,6 +152,10 @@ func loadAssetConfiguration(root string) (assetConfiguration, error) {
 	logo, logoFound := manifestSectionValue(manifest, "replace:title-logo", "image")
 	swirl, swirlFound := manifestSectionValue(manifest, "replace:title-swirl", "image")
 	configuration.Title.File = logo
+	configuration.Title.Variant = "en"
+	if logo == swirl && logo == bundledTitleRelativePath(titleLogoJapanesePNG) {
+		configuration.Title.Variant = "ja"
+	}
 	configuration.Title.Enabled = logoFound && swirlFound &&
 		regularFileExists(resolveManifestFile(manifestPath, logo)) &&
 		regularFileExists(resolveManifestFile(manifestPath, swirl))

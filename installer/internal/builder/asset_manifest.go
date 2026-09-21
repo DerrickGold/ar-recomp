@@ -330,6 +330,10 @@ func slotAudioTarget(root, manifest, manifestPath string,
 }
 
 func titleManifestValues(relative string) ([]manifestValue, []manifestValue) {
+	// Both 237x95 regions consume the same display-authored 2212x760 canvas:
+	// 8x resolution with the default 7:6 CRT pixel aspect. Language artwork is
+	// centered/padded, never stretched to fill this canvas. Keep the regions
+	// identical in size so the Mode-7 swirl lands on the settled overlay.
 	logo := []manifestValue{
 		{Key: "plane", Value: "screen"},
 		{Key: "layer", Value: "bg1"},
