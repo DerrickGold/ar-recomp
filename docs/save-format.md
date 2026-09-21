@@ -26,8 +26,9 @@ bytes rather than resetting them.
 
 The `ACT` marker lies outside the checksum. Static code at `$02:AA9C`
 writes it after the ending. The editor exposes it as Professional Mode
-Locked/Unlocked, but the exact post-ending unlock behavior still needs an
-in-game round trip to verify. Both codecs preserve these bytes.
+Locked/Unlocked. Controlled native US/JP boots with this marker now verify the
+third title selection and Professional/Special initialization; earning the
+marker through the full ending remains a separate test. Both codecs preserve it.
 
 ## 2. Checksum
 
@@ -112,8 +113,9 @@ derived USA address used here.
 | `$13` | Compass | `$14` | Strength of Angel |
 
 The Professional marker has an independent static proof: ending presenter
-`$02:AA9C` stamps `ACT`. Death Heim, inventory, score, and unlock semantics
-still need the manual §6.3 game round trip even though their addresses,
+`$02:AA9C` stamps `ACT`. Marker consumption is verified as described above;
+Death Heim, inventory, score and earning the unlock still need the manual §6.3
+game round trip even though their addresses,
 encodings, range validation, checksum repair, and transactional writes are now
 covered by `actraiser_save_system` tests.
 
@@ -181,6 +183,58 @@ checksummed 8 KiB image, including the sidecar. A save-system regression test
 covers both halves of this boundary. The census, marks, and scene-finish
 render hooks read the area directly (`src/actraiser/actraiser_bugfixes.c`); the ROM
 itself never does.
+
+### 3.5 Lairs, growth and SIM actor cache
+
+Native US/JP Save/Continue and reset/Continue fixtures verify these fields.
+The SRAM offsets in this table coincide; **the entire saves are not thereby
+interchangeable**. Runtime addresses below are the low word in WRAM bank `$7F`.
+
+| SRAM | Size | Meaning | US / JP WRAM |
+|---|---:|---|---|
+| `$14B3` / `$14E3` | `$30` each | 24 lair X / Y words | `$9568/$9598` / `$955C/$958C` |
+| `$1513` | `$30` | Lair imagery/state flags, including sealed `$8000` | `$95C8` / `$95BC` |
+| `$1543` | `$30` | Lair monster types | `$95F8` / `$95EC` |
+| `$1573` / `$15A3` | `$30` each | Lair reload delays / active countdowns | `$9628/$9658` / `$961C/$964C` |
+| `$15D3` | `$30` | Lair actor-record addresses | `$9688` / `$967C` |
+| `$1603` | `$30` | Remaining monster stocks, not seal flags | `$96B8` / `$96AC` |
+| `$1633-$1D52` | `$720` | Six towns × eight cached SIM actor records of `$26` bytes | `$97DA` / `$97CE` |
+| `$1D53` | `$0C` | Six pending town-growth words | `$9EFA` / `$9EEE` |
+
+Save entries are US `$03:A656`, JP `$03:A42E`; load entries US `$03:A83A`,
+JP `$03:A60A`. The actor-cache table is US `$03:8111`, JP `$03:810E`, with
+one `$0130`-byte slice per town. US `$03:8168` / JP `$03:8165` copies the live
+eight records at `$0B30-$0C5F` to the current town's cache before Progress Log
+saves. US `$03:813F` / JP `$03:813C` restores them on town entry. The native
+restore loop uses overlapping word transfers with byte increments, including
+one trailing byte past the nominal slice; preserve this CPU detail when
+modeling the exact routine footprint.
+
+Booted fixtures verify the cache payload byte-for-byte and a pending class16
+soul surviving a cold load: stock stays zero and the soul credits one growth
+on its later return. This actor cache must not be confused with the unsaved
+ambient scene index in §3.3.2. Companion metadata for future regional rules
+must distinguish restored actors from new spawns.
+
+Native town-switch fixtures also preserve the pending soul while visiting
+another town, award once on return, and then reuse its live slot for a Dragon.
+The cached slice is a snapshot: it keeps the old soul until the next cache
+operation updates it. A second departure/re-entry preserves the new Dragon
+without repeating the soul reward. Reset/Continue after an unsaved reward
+restores the earlier saved soul and growth0, allowing its valid reward again.
+Companion state must roll back with SRAM, not apply a session-global reward
+deduplication set across restored timelines.
+
+Saving is not one instantaneous SRAM write. In controlled native traces,
+several payload-writing frames precede the final checksum stores at US
+`$03:A82E/$A833`, JP `$03:A5FE/$A603`. Future companion persistence must follow
+completed-save ownership; a changed-byte observation alone is not proof that
+the payload and checksum already describe one complete save.
+Reference-core video frames are not host coroutine yields: the native save
+body has no frame wait, and the host checksum HLE is yield-free. Normal host
+auto-persistence runs after the coroutine returns; partial host-save exposure
+is not demonstrated by the native multi-frame trace. Abnormal-exit behavior
+still needs a host-specific test before adding a companion commit contract.
 
 ---
 

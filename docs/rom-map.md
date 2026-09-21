@@ -64,8 +64,27 @@ eraser `$02:C1B7`; they do not enter the interactive dialogue grammar.
   keeping SFX authentic.
 
 ### Game Data Tables
-- **0x1B40E-0x1B431**: Experience level requirements (population-based)
-- **0x1B432-0x1B455**: Experience level max SP values
+- **US `$03:8111-$811C`, JP `$03:810E-$8119`**: six little-endian WRAM
+  pointers to town actor-cache slices (US `$97DA + town*$130`, JP `$97CE + town*$130`).
+  Each slice saves eight live SIM records; the `$720`-byte aggregate persists
+  at SRAM `$1633-$1D52`. [Native cache/save ownership](save-format.md#35-lairs-growth-and-sim-actor-cache).
+- **US `$01:B061-$B06C`, JP `$01:B031-$B03C`**: SIM enemy combat tables,
+  four bytes each for SP reward, contact damage, and accumulated arrow-damage
+  threshold, in Blue Dragon/Bat/Red Demon/Skull Head order. Threshold is one
+  less than ordinary-arrow hits to kill. This is distinct from action spawn
+  records and from SIM AI state tables; [regional values and consumers](regional-differences-technical.md#sim-enemy-state-differences).
+- **US `$01:E099`, JP `$01:E023`**: SIM behavior-program pointer table.
+  Skull programs `$16,$1F-$26,$2E-$33` have byte-identical contents at relocated
+  pointers, including visual IDs, durations and signed X/Y steps. Set/advance
+  consumers are US `$01:D072/$D08F`, JP `$01:CFFC/$D019`. Program equality is
+  not sprite-pixel identity or whole-world AI equivalence; see the
+  [native Skull contract](regional-differences-technical.md#skull-head-target-and-earthquake-state-contract).
+- **US 0x1B40E-0x1B431 / JP 0x1B1DF-0x1B202**: 18 population-based level
+  thresholds, final9999 sentinel. Consumed by US `$03:B3BA` / JP `$03:B18B`;
+  the award wrapper handles level17 and publishes zero as its next threshold.
+  [Native award and switching contracts](regional-differences-technical.md#population-switching-established-boundaries).
+- **US 0x1B432-0x1B455 / JP 0x1B203-0x1B226**: 18 identical maximum-SP
+  entries, indexed by the pre-award level. Not a current-SP refill table.
 - **0x1B825-0x1B8FC** (`$03:B825`): **Monster-lair seed table** — 24 records × 9 bytes
   (4 lairs per town × 6 towns), installed by `$03:B7C6`:
   `[cellX, cellY, imageId, monsterType, count, respawnDelay(word), worldRecordAddr(word)]`.
@@ -132,12 +151,18 @@ HP at `+8` and death score at `+9`. `tools/act_content.py --tables` decodes all 
 | `$00:E0BA-$E18D` | `0x060BA-0x0618D` | Marahna reaper and orb lifecycle. The parent rooted at `$E0BA` allocates a child, installs update handler `$E13A`, and selects loaded-animation states `$17/$3A-$3D` for horizontal, aimed, and vertical paths. Run `20260811-232640` proves this is a non-fire negative family. |
 | `$00:E2F3-$E37E` | `0x062F3-0x0637E` | Marahna moving-platform roots and wait/resume tails. Run `20260811-221433` corrects the prior flame-projectile classification: live `$E2F3/$E304/$E315/$E326/$E351/$E368` actors use `$34/$4BE5` but are platform machinery and must not receive fire effects. `$4BE5` itself is decompressed WRAM animation data. |
 | `$00:E483-$E600` | `0x06483-0x06600` | Marahna boss and electrical attack family measured in runs `20260811-221433` and `20260811-225534`. The boss and launched child retain source `$E483`; parent waits resume at `$E4E5/$E4F4`, the diagonal descent resumes at `$E578`, and `$E57E` is the live post-impact ground-charge resume—not a retired tail. While it travels, the boss parent repeats through `$E4D7`. Exact `$7E:5000` charge/orb/diagonal/ground artwork and backlink identity are documented in `ram-map.md`. |
+| `$00:F16D-$F399`; `$00:F76C-$F777` | `0x0716D-0x07399`; `0x0776C-0x07777` | Northwall Act-2 Ice Dragon boss/child family and Death Heim rematch wrapper. JP family `$00:F1EC-$F418`, wrapper `$00:F7EB-$F7F6`. Source records precede entries by12 bytes and are data, not instructions. Regional timing delta is in the rematch sequence asset below, not a general boss-code speed multiplier. |
+| US `$18:B137/$C32C`; JP `$18:891E/$A3FC` | US `0xC3137/0xC432C`; JP `0xC091E/0xC23FC` | Northwall original/rematch compressed animation/composition blobs, loaded to `$7E:5000`. Original blobs match byte-for-byte; rematch states `$11/$12` each omit two six-tick stationary rows in JP, verified as118→106 active frames. All26 visual composition records match across regions. States `$19/$1A` double horizontal ice-ball velocity in both rematches independently of region. [Native timing evidence](regional-differences-technical.md#northwall-act-2-boss-original-versus-death-heim). |
+| `$00:879D-$884F`; `$00:88D6-$88F6` | `0x0079D-0x0084F`; `0x008D6-0x008F6` | Action pickup dispatch and heal queue. JP `$00:878C-$883E` / `$00:88C5-$88E5`. Half/full apple formulas and four-phase queued refill match; differences at particular locations are item placements, not different healing potency. |
+| `$00:A940-$A9B2`; `$00:A9BF` | `0x02940-0x029B2`; `0x029BF` | Fillmore Act-1 tree head and inactive US peer entry. JP `$00:A8FF-$A97D` and `$00:A98A-$A9D9` drive an adjacent peer and two seeds before the same two orb shots; JP seed/plant family `$00:A9F4-$AA6D`. State10's stored duration is not its JP wait: native code uses separate `$0080` delay. [Paired native evidence](regional-differences-technical.md#fillmore-act-1-tree-seed-controller-and-pre-shot-wait). |
 | `$00:CF9E-$D024` | `0x04F9E-0x05024` | Aitos lava-fireball spawn and cyclic lifecycle measured in run `20260811-151353`. Live slots retain source `$CF9E` and resume `$CFCD`; handlers `$CFE3` and `$CFFE` own the rising and return phases, while shared delay handler `$8661` owns reset/wait state `$23`. Exact WRAM artwork and velocities are documented in `ram-map.md`; `$4D21/$4D2D` are decompressed WRAM composition pointers, not ROM symbols. |
 | `$00:CEEC-$CF5B` | `0x04EEC-0x04F5B` | Aitos lava-mouth / launched-molten-rock family separated in run `20260812-000613`. Active launch children retain source `$CEEC`, resume `$CF16`, handler/state `$8661/$27`, and exact motion/artwork documented in `ram-map.md`; stationary mouths resume at `$CF1C` and are deliberately excluded from the molten-rock accent. `$4D21/$4D2D` remain decompressed WRAM composition pointers. |
 | `$00:BD2A-$BD35` | `0x03D2A-0x03D35` | Bloodpool vertical-lightning spawn record. Its computed primary handler is record+`$0C` = `$00:BD36`; live objects retain `$BD2A` in slot `+$32`. |
 | `$00:BD36-$BD75` | `0x03D36-0x03D75` | Bloodpool vertical-lightning lifecycle: offscreen gate, packed animation/repeat commands `$0010/$1104/$1406`, SFX `$10`, and transition through the shared animation/retirement helpers. The saved nested resume value is `$BD69` (execution resumes at `$BD6A`). |
 | `$00:BD76-$BD81`, `$00:BD84-$BD8F` | `0x03D76-0x03D81`, `0x03D84-0x03D8F` | Two direction/attribute variants of the Bloodpool enemy-fireball spawn record. Live fireballs retain the selected record address in slot `+$32`; `$BD84` is intentionally embedded behind the branch at handler `$BD82`. |
-| `$00:BDF0-$BDFE` | `0x03DF0-0x03DFE` | Enemy-fireball flight tail: advance/loop animation through `$00:8631` until object flag `$0400` says it left the currently selected activation window, then release through `$00:85B7`. Drawing and activation are independently selected by the `$8C98` host seam. |
+| `$00:BD90-$BDB0` / JP `$00:BE24-$BE4D` | US `0x03D90-0x03DB0` / JP `0x03E24-0x03E4D` | Bloodpool Act-2 firing-statue volley, types `$26/$1E`, sources US `$BD76/$BD84`, JP `$BE0A/$BE18`. US plays idle60/fire16/spawn/idle60; JP adds fire16/spawn at `$BE3C-$BE44`. Native restart yields full cycles137/153. Root flag `$0400` gates entry, not the intervening second shot. Both facings and normal/Special verified; [family contract](regional-differences-technical.md#bloodpool-act-2-statues-single-versus-double-volley). |
+| `$00:BDB1-$BDCA` / JP `$00:BE4E-$BE67` | US `0x03DB1-0x03DCA` / JP `0x03E4E-0x03E67` | Statue projectile allocation after parent; copies facing/source/attack, child backlink, offsets X−16/+16 and Y−8, entry `$BDCB/$BE68`. Exhaustion returns scratch `$1AA2` and creates no live child; caller still progresses the volley. Startup state `$21` lasts4 frames; flight `$23` sets velocity±3 before next-frame movement. |
+| `$00:BDF0-$BDFE` | `0x03DF0-0x03DFE` | Enemy-fireball flight tail: advance/loop animation through `$00:8631`, checking `$0400` at the two-row/eight-frame sequence boundary (not every frame); when outside the selected activation window, release through `$00:85B7`. Drawing and activation are independently selected by the `$8C98` host seam. JP counterpart `$BE8D-$BE9B` has the same retirement contract. |
 | `$00:BDFF-$BE0A` | `0x03DFF-0x03E0A` | Bloodpool boss spawn record retained as `$BDFF` in the boss and its linked lightning children (`+$32`); computed primary boss handler is `$BE0B`. |
 | `$00:BFDF-$BFF8` | `0x03FDF-0x03FF8` | Boss lightning-attack child allocation: allocates an action slot, assigns handler `$BFF9`, links/copies the boss through `$8709`, and offsets the child anchor vertically. |
 | `$00:BFF9-$C06E` | `0x03FF9-0x0406E` | Linked boss-lightning sequence. `$BFF9` selects one of six strike states through the table at `$C056` (`$07,$04,$06,$03,$05,$02` = diagonal/vertical × short/medium/long), runs each strike/blank cycle through delay handler `$8661`, then creates the state-9 floor child handled at `$C062`. Strike saved resumes observed live are `$C02B/$C04B/$C051`; floor resume is `$C06A`. |

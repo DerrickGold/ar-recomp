@@ -7,6 +7,8 @@ start with the [project README](https://github.com/DerrickGold/ar-recomp#quick-s
 ## Playing and customizing
 
 - [Manual](manual.md) — controls, settings, saves, and troubleshooting.
+- [Regional differences](regional-differences.md) — a plain-English comparison
+  of the releases, their mechanics, and what is still being investigated.
 - [Modern SIM menu](manual.md#modern-sim-menu) — enable the compact town menu,
   adjust its scale, and use the angel's Describe hint.
 - [Builder and Workshop](builder-workshop.md) — building the game and replacing
@@ -26,6 +28,9 @@ The game-data references describe the US ROM unless stated otherwise. Entries
 marked uncertain should not be treated as verified offsets or behavior.
 
 - [RAM map](ram-map.md) and [ROM map](rom-map.md) — known state and data regions.
+- [Regional differences: technical evidence](regional-differences-technical.md)
+  — ROM tables, code boundaries, measurements, and limits of the evidence
+  behind the reader-facing article.
 - [Symbol map](research-symbol-map.md) — ROM addresses and their known purposes.
 - [Dialogue and menu text](dialogue-system.md) — text encoding, source identities,
   and replacement boundaries.
