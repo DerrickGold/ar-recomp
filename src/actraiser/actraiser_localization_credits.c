@@ -5,16 +5,18 @@
 #include "localization/unicode_grapheme.h"
 #include "snes_bgr555.h"
 
-static bool PageMatches(unsigned page, uint16_t map_base,
-                         const uint8_t *wram, const uint16_t *vram) {
+static bool SelectedPageIntact(unsigned page, uint16_t map_base,
+                               const uint8_t *wram, const uint16_t *vram) {
   const uint8_t *source = wram + 0x4000 + page * 0x800;
   bool ink = false;
-  for (unsigned i = 0; i < 1024; ++i) {
+  /* AEEB uploads 27 rows, although AB30 copies 32 rows to staging. Rows
+   * 27..31 are outside our text region and must not decide page ownership. */
+  for (unsigned i = 0; i < 27 * 32; ++i) {
     const uint16_t word = source[i * 2] | (uint16_t)source[i * 2 + 1] << 8;
     if ((word & ~0x4ffu) || vram[(map_base + i) & 0x7fff] != word)
       return false;
-    if ((i < 32 || i >= 27 * 32) && word != 0x10) return false;
-    ink |= i < 28 * 32 && (word & 0xff) != 0x10 && (word & 0xff) != 0x42;
+    if (i < 32 && word != 0x10) return false;
+    ink |= (word & 0xff) != 0x10 && (word & 0xff) != 0x42;
   }
   return ink;
 }
@@ -133,7 +135,7 @@ bool ActRaiserLocalizationCredits_AddText(ArLocalizationFrame *frame,
 
 void ActRaiserLocalizationCredits_Append(
     ActRaiserLocalizationCredits *credits, ArLocalizationFrame *frame,
-    ArTextCellDestination destination,
+    ArTextCellDestination destination, int presented_page,
     uint8_t map_group, uint8_t map_number, uint16_t tile_base_words,
     const uint8_t *wram, size_t wram_bytes,
     const uint16_t *vram, size_t vram_words,
@@ -147,16 +149,10 @@ void ActRaiserLocalizationCredits_Append(
     credits->resolved = credits->valid = false;
     return;
   }
-  int page = -1;
-  if (credits->resolved && credits->page < kActRaiserCreditsPageCount &&
-      PageMatches(credits->page, destination.tilemap_base_words, wram, vram))
-    page = credits->page;
-  else for (unsigned i = 0; i < kActRaiserCreditsPageCount; ++i) {
-    if (!PageMatches(i, destination.tilemap_base_words, wram, vram)) continue;
-    if (page >= 0) { page = -1; break; } // Ambiguous/corrupt page inventory.
-    page = (int)i;
-  }
-  if (page < 0 || page == 15 || page == 16) {
+  const int page = presented_page;
+  if (page < 0 || page >= kActRaiserCreditsPageCount || page == 15 ||
+      page == 16 || !SelectedPageIntact(
+          (unsigned)page, destination.tilemap_base_words, wram, vram)) {
     credits->resolved = credits->valid = false;
     return;
   }
@@ -177,7 +173,7 @@ void ActRaiserLocalizationCredits_Append(
       (uint32_t)ExpandColor5(body,15)<<16 | (uint32_t)ExpandColor5(body>>5,15)<<8 |
       ExpandColor5(body>>10,15);
   bool accented = false;
-  for (unsigned i = 0; i < 28 * 32; ++i)
+  for (unsigned i = 0; i < 27 * 32; ++i)
     accented |= (vram[(destination.tilemap_base_words+i)&0x7fff] & 0x400) != 0;
   if (accented && !credits->text.styles.authored) {
     snapshot->accent_end_utf8_byte = credits->accent_end;

@@ -9,6 +9,7 @@ static uint8_t s_wram[0x20000];
 static uint8_t s_bank01[0x10000];
 static int s_failures;
 static unsigned s_bank01_reads;
+void ActRaiserCredits_ObserveClear(void) {}
 
 #define CHECK(expression) do {                                             \
   if (!(expression)) {                                                     \

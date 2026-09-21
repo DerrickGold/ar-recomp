@@ -10,6 +10,7 @@ static ArLocalizationFrame frame;
 static ActRaiserLocalizationCredits state;
 static const char *body = "- Équipe -\nUn nom\n別の名前";
 static bool reject;
+static int presented_page = kActRaiserCreditsNoPage;
 static char resolved_id[64];
 
 static bool Resolve(void *context, const char *id,
@@ -39,6 +40,7 @@ static bool Resolve(void *context, const char *id,
 }
 
 static void Show(unsigned page) {
+  presented_page = (int)page;
   for (unsigned i=0; i<1024; ++i) {
     const uint8_t *source=ram+0x4000+page*0x800+i*2;
     vram[0x3800+i]=source[0]|(uint16_t)source[1]<<8;
@@ -49,7 +51,7 @@ static void Capture(unsigned group, unsigned number, unsigned font) {
   CHECK(ArLocalizationFrame_SetFont(&frame,"ar","test",1,1,&frame.settings));
   ActRaiserLocalizationCredits_Append(&state,&frame,
       (ArTextCellDestination){3,kArTextCellScreen_Composited,0x3800},
-      group,number,font,ram,sizeof(ram),vram,0x8000,
+      presented_page,group,number,font,ram,sizeof(ram),vram,0x8000,
       palette,16,Resolve,NULL);
 }
 
@@ -67,6 +69,10 @@ int main(int argc, char **argv) {
       ram[0x4000+page*0x800+i*2+1]=word>>8;
     }
   } else return 2;
+  Show(1); presented_page=kActRaiserCreditsNoPage;
+  Capture(8,1,0x5000); CHECK(!frame.snapshot_count); // Never infer from tiles.
+  presented_page=20;
+  Capture(8,1,0x5000); CHECK(!frame.snapshot_count);
   for (unsigned page=0;page<20;++page) {
     Show(page); Capture(8,1,0x5000);
     CHECK(frame.snapshot_count==(page==15 || page==16 ? 0 : 1));
@@ -96,6 +102,19 @@ int main(int argc, char **argv) {
   Capture(8,1,0x1000); CHECK(!frame.snapshot_count);
   Capture(8,1,0x5000); CHECK(frame.snapshot_count==1);
   vram[0x3800]^=1; Capture(8,1,0x5000); CHECK(!frame.snapshot_count);
+  Show(1); vram[0x3800+27*32]^=0x400;
+  Capture(8,1,0x5000); CHECK(frame.snapshot_count==1); // Outside DMA/text extent.
+  // Identical resident maps still have distinct, explicitly selected messages.
+  uint8_t saved_page[0x800];
+  memcpy(saved_page,ram+0x4000+2*0x800,sizeof(saved_page));
+  memcpy(ram+0x4000+2*0x800,ram+0x4000+0x800,sizeof(saved_page));
+  Show(2); Capture(8,1,0x5000);
+  CHECK(frame.snapshot_count==1 && !strcmp(resolved_id,"credits.page_02"));
+  Show(1); Capture(8,1,0x5000);
+  CHECK(frame.snapshot_count==1 && !strcmp(resolved_id,"credits.page_01"));
+  memcpy(ram+0x4000+2*0x800,saved_page,sizeof(saved_page));
+  Show(2); presented_page=1;
+  Capture(8,1,0x5000); CHECK(!frame.snapshot_count); // Mismatch never selects page 2.
   Show(1); reject=true; state.resolved=false;
   Capture(8,1,0x5000); CHECK(!frame.snapshot_count);
   const int failed=calls;
@@ -104,7 +123,7 @@ int main(int argc, char **argv) {
   Capture(8,1,0x5000); CHECK(frame.snapshot_count==1 && !frame.snapshots[0].utf8_bytes);
   state.resolved=false; body="one\ntwo\nthree\nfour\nfive\nsix\nseven";
   Capture(8,1,0x5000); CHECK(!frame.snapshot_count);
-  // Debug restore or clear cannot keep a cached claim on a blank inventory.
+  // An unknown clear cannot keep a cached claim over blank native content.
   for (unsigned i=0x4000;i<0xe000;i+=2) { ram[i]=0x10;ram[i+1]=0; }
   Show(1); Capture(8,1,0x5000); CHECK(!frame.snapshot_count);
   return failures ? 1 : 0;

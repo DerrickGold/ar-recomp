@@ -2,9 +2,9 @@
 #define ACTRAISER_LOCALIZATION_CREDITS_H
 
 #include "actraiser/actraiser_localization_compose_state.h"
+#include "actraiser/actraiser_credits.h"
 
 enum {
-  kActRaiserCreditsPageCount = 20,
   kActRaiserCreditsTextCapacity = 4096,
   kActRaiserCreditsFontPixels = 13
 };
@@ -24,14 +24,14 @@ typedef struct ActRaiserLocalizationCredits {
   ActRaiserResolvedText text;
 } ActRaiserLocalizationCredits;
 
-/* US credits scene 08/01 only. Match the presented map to the resident maps
- * produced by that scene's asset loader; never infer a page from a timer.
- * Native code owns fades, hold/input, sequence and tile uploads. A restore,
- * clear or scene change needs no serialized enhanced state. Pack changes
- * invalidate `resolved`. Failed text keeps the entire native page. */
+/* US credits scene 08/01 only. `presented_page` comes from the native upload
+ * observer; tiles only validate that page's surface, never select its identity.
+ * Native code owns fades, hold/input, sequence and tile uploads. Missing
+ * ownership or failed text keeps the native page. Pack changes invalidate
+ * `resolved` without discarding the native producer's page history. */
 void ActRaiserLocalizationCredits_Append(
     ActRaiserLocalizationCredits *credits, ArLocalizationFrame *frame,
-    ArTextCellDestination destination,
+    ArTextCellDestination destination, int presented_page,
     uint8_t map_group, uint8_t map_number, uint16_t tile_base_words,
     const uint8_t *wram, size_t wram_bytes,
     const uint16_t *vram, size_t vram_words,

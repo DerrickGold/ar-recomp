@@ -1402,7 +1402,7 @@ void ActRaiserLocalizationRuntime_CaptureFrame(
         ResolveHudValue, NULL);
   if (s_runtime.presentation)
     ActRaiserLocalizationCredits_Append(&s_runtime.credits, frame, destination,
-        map_group, map_number, bg3_tile_base_words,
+        ActRaiserCredits_PresentedPage(), map_group, map_number, bg3_tile_base_words,
         g_ram, kActRaiserWramSize, vram_words, vram_word_count,
         cgram_words, cgram_word_count, ResolveComposeText, NULL);
   if (!observation_valid) return;

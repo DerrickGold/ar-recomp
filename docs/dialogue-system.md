@@ -602,11 +602,20 @@ Credits are a distinct 16-pixel alphabet, not `$901C` dialogue. In scene 08/01,
 the asset loader produces twenty `$0800`-byte maps at `$7E:4000-$DFFF` and
 uploads the credits font to VRAM word `$5000`. `$02:AB30` copies one map to
 `$7F:B000`; native code retains all fade steps, holds, input and completion-save
-writes. `ActRaiserLocalizationCredits_Append` matches the captured VRAM map to
-those resident maps in that exact scene/font context. It observes no timer and
-writes no RAM. Clears, mismatches and scene changes remove the claim; selection
-changes invalidate only the resolved text cache. It can activate without any
-preceding dialogue observation, including during a debug recovery.
+writes. `actraiser_credits.c` observes the page argument at `$AB30`, completion
+of its copy at the first `$AB65` VBlank wait, and the completed `$AEEB` BG3 upload.
+Selection alone keeps the old translation during its outgoing fade. The new
+page becomes presentable after the lower-row DMA, never from the unconditional
+top-four-row upload alone. An uploaded clear, scene exit, or execution reset
+retires that ownership. Observation runs in native and enhanced text modes, so
+changing presentation or language mid-page retains the native page identity.
+
+`ActRaiserLocalizationCredits_Append` resolves only that explicit page. It checks
+the selected map's 27 uploaded rows against VRAM to reject unexpected overwrites;
+it never searches other maps or infers an identity from tiles, pixels, or timers.
+Identical maps can therefore have different translations. Missing producer
+history keeps native text. Future resumable snapshots would need to restore or
+invalidate this history; current debug snapshots do not support execution restore.
 
 The Go extractor decodes complete upper/lower tile compositions, including
 narrow I/J, packed lettering, French accents and macrons. Unsupported or clipped
@@ -618,7 +627,8 @@ is reference-only. Regional contributor lists are preserved, not rewritten into
 US staffing or gameplay variants.
 
 At presentation, one atomic grid owns all lettering cells: columns 0–31, rows
-1–26. Rows 0 and 27–31 must be native blanks. This avoids clipping the SNES
+1–26. Row 0 must be native blank; rows 27–31 are outside the upload and claim.
+This avoids clipping the SNES
 first scanline and stretching the grid's vertical pitch. One to six authored
 lines are centered on a four-cell pitch; all native lettering is masked even
 when the replacement has fewer lines. A failed row keeps the entire native

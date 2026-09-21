@@ -883,6 +883,13 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_localization_art
         COMMAND actraiser_localization_art_test)
 
+    add_executable(actraiser_credits_test
+        tests/actraiser_credits_test.c
+        src/actraiser/actraiser_credits.c)
+    target_include_directories(actraiser_credits_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    add_test(NAME actraiser_credits COMMAND actraiser_credits_test)
+
     add_executable(actraiser_localization_credits_test
         tests/actraiser_localization_credits_test.c
         src/actraiser/actraiser_localization_credits.c

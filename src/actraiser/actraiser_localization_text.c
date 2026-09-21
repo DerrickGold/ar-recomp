@@ -1,4 +1,5 @@
 #include "actraiser/actraiser_localization_text.h"
+#include "actraiser/actraiser_credits.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -343,6 +344,7 @@ bool ActRaiser_LocalizationObserveMenuClear(CpuState *cpu) {
 
 bool ActRaiser_LocalizationObserveGeneralClear(CpuState *cpu) {
   /* $02:ABC4/$BA41 clear $7F:B000..B6FF (28 complete rows). */
+  if (cpu) ActRaiserCredits_ObserveClear();
   return ObserveSurfaceClear(cpu, 0, 0, 32, 28);
 }
 

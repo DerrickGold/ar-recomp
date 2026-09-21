@@ -15,6 +15,10 @@
 
 uint8 g_ram[kActRaiserWramSize];
 Settings g_settings;
+/* Supply committed identity; native producer/upload timing has its own suite. */
+static int s_credits_page = -1;
+int ActRaiserCredits_PresentedPage(void) { return s_credits_page; }
+void ActRaiserCredits_ObserveClear(void) {}
 static bool s_menu_skip, s_menu_describing, s_menu_aborted;
 bool ActRaiserSimMenu_SkipDialogue(const CpuState *cpu) { (void)cpu; return s_menu_skip; }
 bool ActRaiserSimMenu_DescriptionAborted(void) { return s_menu_aborted; }
@@ -887,12 +891,23 @@ static void TestCreditsWithoutDialogueObservation(void) {
     if (page==1) vram[0x3800+i]=word;
   }
   uint8_t before[kActRaiserWramSize];memcpy(before,g_ram,sizeof(before));
+  s_credits_page=-1;
+  ActRaiserLocalizationRuntime_CaptureFrame(&s_frame,0x3800,0x5000,vram,0x8000,cgram,16,false);
+  CHECK(!s_frame.snapshot_count); // Matching tiles alone cannot identify credits.
+  s_credits_page=1;
   ActRaiserLocalizationRuntime_CaptureFrame(&s_frame,0x3800,0x5000,vram,0x8000,cgram,16,false);
   CHECK(s_frame.snapshot_count==1 && strstr(s_frame.text,"Credits fixture"));
   CHECK(!memcmp(before,g_ram,sizeof(before)));
+  g_settings.localization_presentation=0;
+  ActRaiserLocalizationRuntime_CaptureFrame(&s_frame,0x3800,0x5000,vram,0x8000,cgram,16,false);
+  CHECK(!s_frame.snapshot_count);
+  g_settings.localization_presentation=1;
+  ActRaiserLocalizationRuntime_CaptureFrame(&s_frame,0x3800,0x5000,vram,0x8000,cgram,16,false);
+  CHECK(s_frame.snapshot_count==1 && strstr(s_frame.text,"Credits fixture"));
   g_ram[kActRaiserWram_MapGroup]=0;
   ActRaiserLocalizationRuntime_CaptureFrame(&s_frame,0x3800,0x5000,vram,0x8000,cgram,16,false);
   CHECK(!s_frame.snapshot_count);
+  s_credits_page=-1;
 }
 
 static void TestPartialRtlSources(void) {
