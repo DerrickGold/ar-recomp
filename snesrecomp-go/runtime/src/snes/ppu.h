@@ -346,6 +346,7 @@ struct Ppu {
     uint8_t m7OverlayMaybeDirty;
     uint8_t *m7OverlayBuffer;
     uint32_t m7OverlayPitch;
+    uint32_t m7OverlayHeight;
     uint8_t m7OverlayScale;
     PpuMode7Override m7Override;
     /* Host-output binding epoch. Derived state: not serialized. */
@@ -521,7 +522,7 @@ bool PpuSetOverlayOamRange(Ppu *, uint8_t, uint8_t);
 bool PpuSetOverlayRelocatedOamRange(Ppu *, uint8_t, uint8_t);
 bool PpuSetObjRangeCapture(Ppu *, uint8_t, uint8_t, int, int, int, int,
                            uint8_t *, size_t);
-bool PpuBindMode7OverlaySurface(Ppu *, uint8_t *, size_t, uint8_t);
+bool PpuBindMode7OverlaySurface(Ppu *, uint8_t *, size_t, uint8_t, uint32_t);
 bool PpuSetMode7Override(Ppu *, const uint32_t *, int, int, int, int,
                          int, int, uint8_t);
 void PpuSetExtraSpace(Ppu *, uint8_t);

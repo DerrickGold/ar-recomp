@@ -1033,6 +1033,25 @@ typedef struct SrPpuScanoutResult {
     ((uint32_t)(offsetof(SrPpuScanoutResult, presentation) +              \
                 sizeof(((SrPpuScanoutResult *)0)->presentation)))
 
+/** Frame-scoped BG1 canvas replacement, in 0xAARRGGBB straight-alpha pixels.
+ *
+ * Bind SR_PPU_OUTPUT_MODE7 before claiming. The caller retains immutable
+ * source pixels through scanout. Bounds are half-open in the 1024x1024 canvas;
+ * wrap=0 replaces only the primary instance, wrap=1 also replaces repetitions.
+ * Scanout uses each line's live Mode-7 matrix/scroll/flips, including HDMA,
+ * with nearest sampling at the output binding's 1x..4x scale. Mosaic, BG1
+ * screen/window visibility, OBJ/EXTBG priority and colour-window policy apply.
+ * HD colour math keeps 8-bit precision and follows INIDISP brightness/blanking.
+ *
+ * Native main/authentic output remains unchanged. The Mode-7 surface contains
+ * opaque, fully composited replacement pixels (texture alpha reveals the
+ * underlying scene without native BG1), including cleanup of coarse native
+ * edge pixels. Other texels are transparent. Composite it over main output
+ * once, without applying another brightness or colour-math pass. Its actual
+ * pitch, origin and bounded height come from query_ppu_surfaces. It must not
+ * alias the borrowed source image. reset_ppu_frame_state releases the claim;
+ * persistent surface bindings remain valid and old rows are cleared on scanout.
+ */
 typedef struct SrPpuMode7OverrideRequest {
     uint32_t struct_size;
     uint32_t flags;

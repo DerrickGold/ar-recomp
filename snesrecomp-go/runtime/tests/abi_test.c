@@ -53,6 +53,9 @@ static uint32_t s_authentic_surface[384u * 253u];
 static uint32_t s_overlay_surface[384u * 232u];
 static uint32_t s_overlay_band_surface[384u * 232u];
 static uint32_t s_mode7_surface[768u * 506u];
+static const uint32_t s_mode7_art[4] = {
+    0xffff0000u, 0xff00ff00u, 0xff0000ffu, 0x00000000u,
+};
 static uint16_t s_virtual_span_entries[4];
 static uint8_t s_virtual_context;
 static uint8_t s_apu_snapshot_ram[SR_APU_RAM_BYTE_COUNT];
@@ -2689,6 +2692,24 @@ int main(void) {
     failed |= check(api->query_ppu_surfaces(runner, &small_ppu_surfaces) ==
                         SR_RESULT_INVALID_ARGUMENT,
                     "undersized PPU surface snapshot accepted");
+    /* A short binding is legal: neither rendering nor the readable view may
+     * silently expand it to the full scanout height. */
+    output_binding.height_pixels = 1u;
+    output_binding.pixel_byte_size = output_binding.pitch_bytes;
+    failed |= check(api->bind_ppu_output_surface(
+                        runner, &output_binding) == SR_RESULT_OK &&
+                        api->query_ppu_surfaces(runner, &ppu_surfaces) ==
+                            SR_RESULT_OK &&
+                        ppu_surfaces.mode7.height_pixels == 1u &&
+                        ppu_surfaces.mode7.byte_size == output_binding.pitch_bytes,
+                    "Mode-7 surface exceeded declared binding capacity");
+    output_binding.height_pixels = 506u;
+    output_binding.pixel_byte_size = sizeof(s_mode7_surface);
+    failed |= check(api->bind_ppu_output_surface(
+                        runner, &output_binding) == SR_RESULT_OK &&
+                        api->query_ppu_surfaces(runner, &ppu_surfaces) ==
+                            SR_RESULT_OK,
+                    "Mode-7 full-height rebind failed");
     ppu_frame_reset_request.lifetime_generation =
         ppu_surfaces.lifetime_generation;
     small_ppu_frame_reset_request.lifetime_generation =
@@ -3096,7 +3117,7 @@ int main(void) {
 
     mode7_override_request = (SrPpuMode7OverrideRequest) {
         .struct_size = sizeof(mode7_override_request),
-        .pixels = s_mode7_surface,
+        .pixels = s_mode7_art,
         .pixel_byte_size = 4u * sizeof(uint32_t),
         .width_pixels = 2u,
         .height_pixels = 2u,
@@ -3108,7 +3129,7 @@ int main(void) {
     };
     failed |= check(api->claim_ppu_mode7_override(
                         runner, &mode7_override_request) == SR_RESULT_OK &&
-                        snes->ppu->m7Override.rgba == s_mode7_surface &&
+                        snes->ppu->m7Override.rgba == s_mode7_art &&
                         snes->ppu->m7Override.width == 2 &&
                         snes->ppu->m7Override.height == 2 &&
                         snes->ppu->m7Override.canvasX0 == 10 &&

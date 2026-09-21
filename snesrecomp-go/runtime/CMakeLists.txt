@@ -437,6 +437,13 @@ if(BUILD_TESTING)
     add_test(NAME snesrecomp_runtime_ppu
         COMMAND snesrecomp_runtime_ppu_test)
 
+    add_executable(snesrecomp_runtime_mode7_override_test
+        tests/mode7_override_test.c tests/runner_event_stub.c)
+    target_link_libraries(snesrecomp_runtime_mode7_override_test PRIVATE
+        snesrecomp_runtime)
+    add_test(NAME snesrecomp_runtime_mode7_override
+        COMMAND snesrecomp_runtime_mode7_override_test)
+
     set(_SNESRECOMP_PRIVATE_CONTRACT_TESTS
         snesrecomp_runtime_saveload_test
         snesrecomp_runtime_contract_test
@@ -461,7 +468,8 @@ if(BUILD_TESTING)
         snesrecomp_runtime_cpu_state_test
         snesrecomp_runtime_support_test
         snesrecomp_runtime_sha256_test
-        snesrecomp_runtime_ppu_test)
+        snesrecomp_runtime_ppu_test
+        snesrecomp_runtime_mode7_override_test)
     foreach(_target IN LISTS _SNESRECOMP_PRIVATE_CONTRACT_TESTS)
         target_include_directories(${_target} PRIVATE
             ${SNESRECOMP_RUNTIME_PRIVATE_INCLUDE_DIRS})

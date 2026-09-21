@@ -191,7 +191,7 @@ void ppu_reset(Ppu *ppu) {
     uint32_t overlay_height[kPpuOverlaySource_Count];
     uint8_t *bands[kPpuOverlaySource_Count][3];
     uint8_t *m7;
-    uint32_t m7_pitch;
+    uint32_t m7_pitch, m7_height;
     uint8_t m7_scale;
     uint64_t surface_binding_generation;
     if (ppu == NULL) return;
@@ -208,6 +208,7 @@ void ppu_reset(Ppu *ppu) {
     memcpy(bands, ppu->overlayRenderBands, sizeof(bands));
     m7 = ppu->m7OverlayBuffer;
     m7_pitch = ppu->m7OverlayPitch;
+    m7_height = ppu->m7OverlayHeight;
     m7_scale = ppu->m7OverlayScale;
     surface_binding_generation = ppu->surfaceBindingGeneration;
     memset(ppu, 0, sizeof(*ppu));
@@ -224,6 +225,7 @@ void ppu_reset(Ppu *ppu) {
     memcpy(ppu->overlayRenderBands, bands, sizeof(bands));
     ppu->m7OverlayBuffer = m7;
     ppu->m7OverlayPitch = m7_pitch;
+    ppu->m7OverlayHeight = m7_height;
     ppu->m7OverlayScale = m7_scale;
     ppu->surfaceBindingGeneration = surface_binding_generation;
     note_surface_binding(ppu);
@@ -602,12 +604,14 @@ bool PpuSetObjRangeCapture(Ppu *ppu, uint8_t first, uint8_t count,
 }
 
 bool PpuBindMode7OverlaySurface(Ppu *ppu, uint8_t *pixels, size_t pitch,
-                                uint8_t scale) {
+                                uint8_t scale, uint32_t height) {
     if (ppu == NULL || (pixels != NULL && (scale < 1u || scale > 4u ||
+        height == 0u || height > (uint32_t)kPpuBufHeight * scale ||
         pitch % 4u != 0u || pitch / 4u < (size_t)kPpuXPixels * scale ||
         pitch / 4u > (size_t)kPpuSurfaceWidth * scale))) return false;
     ppu->m7OverlayBuffer = pixels;
     ppu->m7OverlayPitch = pixels != NULL ? (uint32_t)pitch : 0u;
+    ppu->m7OverlayHeight = pixels != NULL ? height : 0u;
     ppu->m7OverlayScale = pixels != NULL ? scale : 0u;
     ppu->m7OverlayMaybeDirty = pixels != NULL;
     if (pixels == NULL) memset(&ppu->m7Override, 0, sizeof(ppu->m7Override));
@@ -619,7 +623,8 @@ bool PpuSetMode7Override(Ppu *ppu, const uint32_t *rgba, int width, int height,
         int x0, int y0, int x1, int y1, uint8_t wrap) {
     if (ppu == NULL || ppu->m7OverlayBuffer == NULL || rgba == NULL ||
         width <= 0 || height <= 0 || x0 < 0 || y0 < 0 || x1 <= x0 || y1 <= y0 ||
-        x1 > kPpuMode7CanvasExtent || y1 > kPpuMode7CanvasExtent) return false;
+        x1 > kPpuMode7CanvasExtent || y1 > kPpuMode7CanvasExtent || wrap > 1u)
+        return false;
     ppu->m7Override.rgba = rgba;
     ppu->m7Override.width = width; ppu->m7Override.height = height;
     ppu->m7Override.canvasX0 = x0; ppu->m7Override.canvasY0 = y0;
@@ -2178,6 +2183,164 @@ static uint16_t final_color(Ppu *ppu, int x, const SrPpuPixel *main,
     return color;
 }
 
+/* The canvas override is presentation-only: leave both native buffers intact
+ * and export a fully composited, opaque subpixel wherever the replacement
+ * rectangle covers the screen. Outside it, alpha zero reveals native output.
+ * This avoids erasing a whole SNES pixel at a fractional transformed edge or
+ * leaking the old lettering through transparent replacement texels. */
+static bool mode7_override_texel(const PpuMode7Override *art,
+        uint32_t x, uint32_t y, uint32_t *color) {
+    if (art->wrap) {
+        x &= UINT32_C(0x3ffff);
+        y &= UINT32_C(0x3ffff);
+    }
+    uint32_t left = (uint32_t)art->canvasX0 * 256u;
+    uint32_t top = (uint32_t)art->canvasY0 * 256u;
+    uint32_t width = (uint32_t)(art->canvasX1 - art->canvasX0) * 256u;
+    uint32_t height = (uint32_t)(art->canvasY1 - art->canvasY0) * 256u;
+    /* Unsigned subtraction also rejects negative/unwrapped coordinates. */
+    x -= left;
+    y -= top;
+    if (x >= width || y >= height) return false;
+    size_t tx = (size_t)((uint64_t)x * (unsigned)art->width / width);
+    size_t ty = (size_t)((uint64_t)y * (unsigned)art->height / height);
+    *color = art->rgba[ty * (size_t)art->width + tx];
+    return true;
+}
+
+static unsigned mode7_native_component(uint16_t color, unsigned channel) {
+    unsigned value = (color >> ((2u - channel) * 5u)) & 31u;
+    return (value << 3) | (value >> 2);
+}
+
+/* Retain the artwork's 8-bit components, but apply the same screen/window,
+ * add/subtract/half and brightness policy as native composition. */
+static uint32_t mode7_override_rgb(Ppu *ppu, int x, uint32_t art,
+        SrPpuPixel main, SrPpuPixel sub, bool main_hd, bool sub_hd) {
+    if (!main_hd && !sub_hd)
+        return color_rgb(ppu, final_color(ppu, x, &main, &sub));
+    if (main_hd) { main.layer = 0u; main.palette = 0u; }
+    if (sub_hd) sub.layer = 0u;
+    bool inside = window_inside(ppu, 5, x);
+    unsigned clip = PPU_clipMode(ppu), prevent = PPU_preventMathMode(ppu);
+    bool clipped = clip == 3u || (clip == 2u && inside) || (clip == 1u && !inside);
+    bool prevented = prevent == 3u || (prevent == 2u && inside) ||
+                     (prevent == 1u && !inside);
+    bool math = !prevented && main.layer <= 5u &&
+        (PPU_mathEnabled(ppu) & (1u << main.layer)) != 0u &&
+        !(main.layer == 4u && main.palette < 4u);
+    bool use_sub = PPU_addSubscreen(ppu) && sub.layer != 5u;
+    if (!main_hd && !(math && use_sub && sub_hd))
+        return color_rgb(ppu, final_color(ppu, x, &main, &sub));
+    uint32_t rgb = 0u;
+    for (unsigned channel = 0; channel < 3; ++channel) {
+        unsigned shift = channel * 8u;
+        int value = clipped ? 0 : main_hd ? (int)((art >> shift) & 255u)
+            : (int)mode7_native_component(main.color, channel);
+        if (math) {
+            int other = use_sub && sub_hd ? (int)((art >> shift) & 255u)
+                : (int)mode7_native_component(
+                    use_sub ? sub.color : ppu->fixedColor, channel);
+            value += PPU_subtractColor(ppu) ? -other : other;
+            if (PPU_halfColor(ppu) && (use_sub || !PPU_addSubscreen(ppu)))
+                value /= 2;
+        }
+        value = clamp_int(value, 0, 255) * PPU_brightness(ppu) / 15;
+        rgb |= (uint32_t)value << shift;
+    }
+    return rgb;
+}
+
+static void render_mode7_override_line(Ppu *ppu, int screen_y) {
+    unsigned scale = ppu->m7OverlayScale;
+    int row = output_row(ppu, screen_y);
+    if (ppu->m7OverlayBuffer == NULL || scale == 0u || row < 0 ||
+        (!ppu->m7Override.rgba && !ppu->m7OverlayMaybeDirty)) return;
+    unsigned start = (unsigned)row * scale;
+    if (start >= ppu->m7OverlayHeight) return;
+    unsigned rows = ppu->m7OverlayHeight - start;
+    if (rows > scale) rows = scale;
+    uint8_t *surface = ppu->m7OverlayBuffer + (size_t)start * ppu->m7OverlayPitch;
+    memset(surface, 0, (size_t)rows * ppu->m7OverlayPitch);
+    if (screen_y == kPpuYPixels - 1 + ppu->extraBottomCur)
+        ppu->m7OverlayMaybeDirty = ppu->m7Override.rgba != NULL;
+    if (PPU_forcedBlank(ppu) || PPU_mode(ppu) != 7 || !ppu->m7Override.rgba)
+        return;
+    int width = (int)(ppu->m7OverlayPitch / sizeof(uint32_t));
+    int span = (kPpuXPixels + 2 * ppu->extraLeftRight) * (int)scale;
+    int origin = (width > span ? (width - span) / 2 : 0) +
+        ppu->extraLeftRight * (int)scale;
+    int rank = layer_rank(ppu, 0, 0);
+    int ystep_x = PPU_m7yFlip(ppu) ? -ppu->m7matrix[1] : ppu->m7matrix[1];
+    int ystep_y = PPU_m7yFlip(ppu) ? -ppu->m7matrix[3] : ppu->m7matrix[3];
+    for (int x = -ppu->extraLeftCur; x < kPpuXPixels + ppu->extraRightCur; ++x) {
+        int column = origin + x * (int)scale;
+        if (column < 0 || column + (int)scale > width) continue;
+        bool on_main = source_visible_on_screen(ppu, 0, false, x);
+        bool on_sub = source_visible_on_screen(ppu, 0, true, x);
+        PpuOverlayCapture *cap = &ppu->overlayCaptures[0];
+        if ((!on_main && !on_sub) ||
+            (capture_surface_bound(ppu, 0) && capture_active(cap, x, screen_y) &&
+             (cap->flags & kPpuOverlayFlag_RemoveFromGame))) continue;
+        int source_x, sample_y;
+        bool mosaic;
+        if (!PpuResolveBackgroundCoordinate(ppu, 0u, x, screen_y,
+                &source_x, &sample_y, NULL, &mosaic)) continue;
+        uint32_t px, py;
+        mode7_sample_coordinates(ppu, source_x, sample_y, &px, &py);
+        uint32_t ignored;
+        bool native_covered = mode7_override_texel(&ppu->m7Override, px, py, &ignored);
+        int xstep_x = ppu->mode7SampleCache.step_x;
+        int xstep_y = ppu->mode7SampleCache.step_y;
+        bool resolved = false, main_hd = false, sub_hd = false;
+        SrPpuPixel main = {0}, sub = {0};
+        uint32_t under = 0u;
+        for (unsigned sy = 0; sy < rows; ++sy) {
+            uint32_t *dest = (uint32_t *)(surface + (size_t)sy * ppu->m7OverlayPitch);
+            for (unsigned sx = 0; sx < scale; ++sx) {
+                // Pixel centres within the hardware fetch cell, including flips.
+                int fx = (int)(2u * sx + 1u) - (PPU_m7xFlip(ppu) ? (int)(2u * scale) : 0);
+                int fy = (int)(2u * sy + 1u) - (PPU_m7yFlip(ppu) ? (int)(2u * scale) : 0);
+                uint32_t tx = px, ty = py, art;
+                if (!mosaic) {
+                    tx += (uint32_t)((xstep_x * fx + ystep_x * fy) / (int)(2u * scale));
+                    ty += (uint32_t)((xstep_y * fx + ystep_y * fy) / (int)(2u * scale));
+                }
+                bool covered = mode7_override_texel(&ppu->m7Override, tx, ty, &art);
+                if (!covered && !native_covered) continue;
+                if (!resolved) {
+                    main = resolve_screen(ppu, x, screen_y, false,
+                        false, 0, true, 0, false, NULL);
+                    sub = resolve_screen(ppu, x, screen_y, true,
+                        false, 0, true, 0, false, NULL);
+                    main_hd = on_main && rank > main.rank;
+                    sub_hd = on_sub && rank > sub.rank;
+                    under = color_rgb(ppu, final_color(ppu, x, &main, &sub));
+                    resolved = true;
+                }
+                /* Remove the coarse native pixel's footprint too: otherwise
+                 * its old lettering fringes outside the finer affine edge. */
+                if (!covered) {
+                    dest[column + (int)sx] = 0xff000000u | under;
+                    continue;
+                }
+                uint32_t rgb = mode7_override_rgb(ppu, x, art, main, sub, main_hd, sub_hd);
+                unsigned alpha = art >> 24;
+                if (alpha != 255u) {
+                    uint32_t mixed = 0u;
+                    for (unsigned shift = 0; shift <= 16; shift += 8) {
+                        unsigned component = (((rgb >> shift) & 255u) * alpha +
+                            ((under >> shift) & 255u) * (255u - alpha) + 127u) / 255u;
+                        mixed |= component << shift;
+                    }
+                    rgb = mixed;
+                }
+                dest[column + (int)sx] = 0xff000000u | rgb;
+            }
+        }
+    }
+}
+
 /* Native scanlines have no reason to build a separate pixel record for every
  * BG layer.  A packed resolved pixel keeps the CGRAM index, priority rank, and
  * winning source in one word while sources are decoded directly into the
@@ -2375,10 +2538,7 @@ static bool native_fast_eligible(const Ppu *ppu, int screen_y,
             return false;
     }
     if (!capture) return true;
-    /* The scaled host override writes subpixels into a separate surface while
-     * deciding removal from the base affine sample.  Keep that uncommon case
-     * on its dedicated path; ordinary Mode 7 can use packed capture. */
-    if (mode == 7 && ppu->m7Override.rgba != NULL) return false;
+    /* HD Mode-7 overrides composite separately after native scanout. */
     for (int source = 0; source < kPpuOverlaySource_Count; ++source) {
         const PpuOverlayCapture *capture_policy =
             &ppu->overlayCaptures[source];
@@ -4697,6 +4857,7 @@ static void render_line(Ppu *ppu, int line) {
         }
     }
     if (!authentic_done) render_authentic(ppu, screen_y);
+    render_mode7_override_line(ppu, screen_y);
 }
 
 bool PpuRenderBackgroundViewLine(Ppu *ppu,

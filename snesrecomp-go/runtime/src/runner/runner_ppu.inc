@@ -393,7 +393,9 @@ static SrResult query_ppu_surfaces(
         if (apron < 0) apron = 0;
         ppu_surface_view_init(
             &out_surfaces->mode7, ppu->m7OverlayBuffer,
-            ppu->m7OverlayPitch, rendered_height * scale,
+            ppu->m7OverlayPitch,
+            ppu->m7OverlayHeight < rendered_height * scale
+                ? ppu->m7OverlayHeight : rendered_height * scale,
             apron + ppu->extraLeftRight * (int32_t)scale,
             PpuVerticalOrigin(ppu) * (int32_t)scale, scale,
             ppu->m7Override.rgba != NULL);
@@ -1283,7 +1285,7 @@ static SrResult bind_ppu_output_surface(
             if (capacity_result != SR_RESULT_OK) return capacity_result;
             return PpuBindMode7OverlaySurface(
                        ppu, request->pixels, (size_t)request->pitch_bytes,
-                       (uint8_t)request->scale)
+                       (uint8_t)request->scale, request->height_pixels)
                 ? SR_RESULT_OK : SR_RESULT_INVALID_ARGUMENT;
         case SR_PPU_OUTPUT_CLEAR_OVERLAY_SOURCES:
             if (request->flags != 0u || request->source != 0u ||
@@ -1564,7 +1566,9 @@ static SrResult claim_ppu_mode7_override(
         return SR_RESULT_INVALID_ARGUMENT;
     pixel_count = (uint64_t)request->width_pixels * request->height_pixels;
     if (pixel_count > UINT64_MAX / sizeof(uint32_t) ||
-        request->pixel_byte_size < pixel_count * sizeof(uint32_t))
+        pixel_count > SIZE_MAX / sizeof(uint32_t) ||
+        request->pixel_byte_size < pixel_count * sizeof(uint32_t) ||
+        pixel_count * sizeof(uint32_t) > UINTPTR_MAX - (uintptr_t)request->pixels)
         return SR_RESULT_INVALID_ARGUMENT;
     ppu = ppu_output_control_target(snes);
     if (ppu == NULL) return SR_RESULT_UNAVAILABLE;

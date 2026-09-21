@@ -157,8 +157,8 @@ Perform enhancement work on the emulation thread at the draw safe point:
 5. Publish camera-relative object metadata with `update_ppu_obj_metadata` and,
    when comparison rendering needs it, authentic per-row camera values with
    `update_ppu_authentic_camera`.
-6. Claim separated BG/OBJ or Mode-7 captures. Bind persistent host-owned output
-   buffers with `bind_ppu_output_surface`.
+6. Bind persistent host-owned output buffers with `bind_ppu_output_surface`,
+   then claim separated BG/OBJ captures or a Mode-7 override.
 7. Run composition inside `visit_ppu_frame_transaction`. Its snapshots,
    VRAM/CGRAM/OAM borrows, and writable surfaces are coherent and valid only
    for the callback. Use bounded services such as OBJ resolve/raster and
@@ -189,6 +189,32 @@ Every request must check the required capability bit, API extent, return value,
 and generation. A borrowed pointer is not a cache. Persistent game-side source
 maps and provider `user_data` remain game-owned and must outlive the frame in
 which they are published.
+
+### HD Mode-7 canvas replacements
+
+Use `claim_ppu_mode7_override` for artwork attached to the affine BG1 canvas,
+not a screen-space rectangle. The game identifies a half-open rectangle in the
+1024x1024 canvas and supplies straight-alpha `0xAARRGGBB` pixels. Keep them
+immutable and alive through scanout. Bind `SR_PPU_OUTPUT_MODE7` first, with a
+1x..4x output scale and enough pitch/height for the configured margins; both
+the buffer and its capacity remain host-owned. Reclaim the image each frame
+after `reset_ppu_frame_state`. Set `wrap` only when repeated canvas instances
+should also use the replacement.
+
+Runner-owned scanout samples the replacement using each scanline's live
+matrix, scroll and flips, so HDMA animation is preserved. Windows, mosaic,
+OBJ/EXTBG priority, color math, brightness and blanking still apply. The
+native main and authentic surfaces remain unchanged. Query the Mode-7
+surface's actual pitch, origin, scale and height with `query_ppu_surfaces`;
+do not assume the allocation and visible extents are identical.
+
+The exported surface contains **fully composited opaque pixels** inside the
+replacement footprint, including cleanup of the native image's coarse edges.
+Source transparency reveals the scene beneath BG1, not the old BG1 artwork.
+Other output pixels are transparent. Composite this surface over the main
+image once; do not apply brightness or color math a second time. A later
+scanout clears stale rows after the claim is removed. A capture that removes
+BG1 from the main scene takes precedence over this replacement.
 
 `query_ppu_state` samples the live registers at the instant of the call. A
 between-frame query commonly observes the VBlank configuration (including
@@ -319,7 +345,7 @@ as one custom-renderer callback:
 | Background data beyond resident VRAM | Virtual tilemap providers | Game map decoding, camera identity, and unloaded-world policy |
 | Independently composited BG/HUD/OBJ planes | Overlay captures and caller-owned surfaces | Plane grouping, depth, projection, and presentation layout |
 | Sprites outside the native viewport | OBJ metadata plus resolve/raster services | Stable entity identity and unwrapped world position |
-| A replacement affine scene | Mode-7 override | Replacement pixels and game-specific transform semantics |
+| A replacement affine scene | Mode-7 BG1 canvas override | Replacement pixels, canvas bounds, and game-specific activation gates |
 | Native fallback and comparison | Authentic surface and optional presentation digest | Acceptance ranges and intentional differences |
 | One coherent preparation point | PPU frame transaction | Any durable copy or host-renderer resource built from the callback borrows |
 
