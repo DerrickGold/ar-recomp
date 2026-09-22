@@ -2,6 +2,7 @@
 
 SNES WRAM: 128KB at banks $7E-$7F.
 Direct page and stack in first 8KB ($7E:0000-$7E:1FFF), mirrored at $00-$3F:0000-$1FFF.
+Unless a release is explicitly named, addresses below describe the US ROM.
 
 ## Core Game State ($7E:0000+)
 
@@ -19,7 +20,7 @@ Direct page and stack in first 8KB ($7E:0000-$7E:1FFF), mirrored at $00-$3F:0000
 | $7E:001C | 1 | Lives remaining | BCD, cap `$99`. Award = `$00:8850`; act entry loads it from persistent `$02AB` (`$02:84D7`) |
 | $7E:001D | 1 | Current HP | Set to `$1E` at stage entry (`$00:83CF`); damaged by `$00:8A21` (`$1D -= toucher.$2A`) and by terrain boxes (`$00:8C75`) |
 | $7E:001E | 1 | Maximum HP | 8 at new game (`$02:BE5F`); **level-up `$03:B3DF` INCs it, hard cap `$18` (24)**; professional mode starts at 24 (`$02:AB20`). SRAM `$70:1246` |
-| $7E:001F | 2 | Score | BCD format; `$00:873C` adds and saturates at `$9999` |
+| $7E:001F | 2 | Score | BCD **stored in tens of displayed points**; `$00:873C` adds and saturates at `$9999` (99,990 displayed). US `$02:C2E8` / JP `$04:9223` formats four digits at `$7F:B074`; template zero at `$7F:B07C` supplies the fifth digit. Item6 adds raw `$0100` = 1,000 displayed; item7 raw `$0050` = 500. Score-to-town formulas consume stored units. |
 | $7E:0021 | 1 | Magic points | Act working copy; loaded from persistent `$0295` at `$02:84E0`. Scroll pickup INCs only this (`$00:887E`), cap `$FF` |
 | $7E:00E3 | 1 | Heal queue | US `$00:88D6`, JP `$00:88C5`: drain one queued point when `$88 & 3 == 0`, increment HP only below max; otherwise clear residual queue. Both releases' item4 sets `floor(maxHP/4)`, item5 sets `maxHP-currentHP`; **replace**, not accumulate, pending recovery. Native normal/Special pickup/queue fixtures verify equality; differing apple placements are separate. |
 | $7E:00E4 | 1 | Sword power-up | `$80` = item id `$03` collected; `$00:9DC8` then gives the player ATK 2 instead of 1. Never ticks down — cleared on act change |
@@ -28,7 +29,36 @@ Direct page and stack in first 8KB ($7E:0000-$7E:1FFF), mirrored at $00-$3F:0000
 | $7E:08BC | 1 | Player **Crest** walking-cycle phase | TAS terminology; interacts with Boost to determine normal/pre-jump movement cadence. Player object `$08A0 + $1C`. |
 | $7E:08C4 | 1 | Player **Boost** walking-speed countdown | Can produce temporary 3 px/frame movement; player object `$08A0 + $24`. Extended `AR_FRAMELOG=1` records both fields with input and position delta. |
 
+### European state offsets
+
+European research uses different state offsets; do not decode PAL snapshots
+with the preceding US stats layout. Verified in EU English, German and French:
+
+| PAL WRAM field | Size | Meaning |
+| --- | ---: | --- |
+| `$0205` | 2 | Difficulty1/2/3 = Beginner/Normal/Expert; selective placement, initial HP and contact-damage policy. Native Story save stores it at SRAM `$70:13B6`; cold Continue restores it before rebuilding the timer reload |
+| `$0336/$0338` | 2 each | Title choice0/1/2 = Story/Continue/Action; save-valid flag. Neither is difficulty |
+| `$034B` | 2 | Action-only progression counter, initialized1 on a fresh Action run; Game Over Start clears it while returning to title, rather than directly restarting Fillmore |
+| `$034D` | 1 | Timer reload71/59/47 selected by difficulty |
+| `$00E6/$00E7/$00E9` | 1/2/1 | Timer divider / BCD time remaining / hold gate |
+| `$008B` | 2 | Active player-slot pointer; fresh Action fixtures resolve to `$08E0`, not US `$08A0` |
+| `$0023/$0025` | 2 each | PAL camera X/Y; using US `$22/$24` overlaps the PAL magic-stock word at `$21` |
+| `$0081/$0083` | 2 each | PAL cached camera-subject X/Y |
+| `$0089` | 2 | PAL native frame tick; use for boss phase intervals, not US `$88` |
+| `$0021` / `$1C00+` | 2 / byte entries | PAL Action spell-stack depth / ordered spell IDs, latest first when consumed. Push increments low byte; post-cast pop decrements word. Story uses the low byte as generic scroll count. Not a cross-mode interchangeable field |
+| `$02AE` | 2 | PAL selected/active spell; Action accepts the current stack top here before casting |
+| `$08A0` | `$40` | PAL HUD magic-icon actor, not the player. `+38` holds next spell or0; handler `$9254` updates VRAM after pickup/cast |
+| `$00E4/$00E5` | 1 each | PAL heal queue / sword-power byte, shifted from US `$E3/$E4` |
+| `$021A` / `$021E–0229` | 2 / 6 words | PAL total population / six per-town populations; native census/level fixtures, not published maximum-town caps |
+| `$0284/$0286` | 2 each | PAL current/maximum SP |
+| `$0288/$0289` | 1 each | PAL current/maximum angel HP |
+| `$0293` | 2 | PAL earned Master level; native leaf awards upward only |
+
+The [European contracts](regional-differences-technical.md#european-difficulty-and-placement-contracts)
+separate these fields from PAL display timing and from authored hazard damage.
+
 ### Camera / Scroll
+
 | Address | Size | Description |
 |---------|------|-------------|
 | $7E:0022 | 2 | BG1/camera X. Action writer/HLE seam `$02:B091`: native clamp `[0,$2E-$100]`; corrected action-wide clamp `[left,$2E-$100-right]` when the complete requested view fits, otherwise native. Town writer `$01:B4C6`: native `[0,$0100]`, corrected-wide `[extra,$0100-extra]` (16:9: `[$002B,$00D5]`, directly validated 2026-07-14). All six scroll regs upload from `$22-$2D` via `$02:ADC3` (10-bit). |
@@ -49,6 +79,33 @@ Direct page and stack in first 8KB ($7E:0000-$7E:1FFF), mirrored at $00-$3F:0000
 | $7E:008A | 2 | WRAM offset of the action object selected as the camera subject. `$02:B030` reads subject X from `[$8A]+$02`; object spawn/control paths update the selector when camera-follow ownership changes. Arrival handler `$97A6` does not install the player `$08A0` here until the approach reaches its target, so an entry-time host policy must not assume `$8A` already names the player on the first object scan. |
 | $7E:008E | 1 | parallax disable bits (bit0 BG2H, bit1 BG2V = script-driven) |
 | $7E:0093 | 1 | strip-request flags: $80 BG1col $40 BG1row $20 BG2col $10 BG2row (set by $02:B091 on 16px crossings, TRB-consumed by dispatcher $02:B127) |
+
+### Action damage boxes and terrain lookup
+
+These are room-owned gameplay data, separate from the sprite hitboxes and
+render-layer maps. Native US/JP expansion and contact rules match; regional
+differences are in the authored streams. See the
+[terrain/damage contract](regional-differences-technical.md#terrain-and-damage-box-contracts)
+for tested boundaries, overlaps and changed rooms.
+
+| Address | Size | Description |
+| --- | --- | --- |
+| `$7E:1AE2` | 2 | Expanded damage-box count, US `$00:93A9` / JP `$00:93D1` |
+| `$7E:1AE4` onward | 10 per box | Five words: left `16*x0-4`, width `16*(x1-x0)+24`, top `16*y0-16`, height `16*(y1-y0)+48`, zero-extended damage/flag byte. Coordinates wrap to16 bits; not unpadded tile bounds |
+| US `$7E:00ED` / JP `$7E:00F0` | 1 | Nonzero skips the damage-box pass. Player pointer `$8A`, player flags `+$30 & $2058` also gate entry. Contact is hot-point-based; top extent `+$0C <25` subtracts16 from effective height. Overlapping boxes all execute in stream order |
+| `$7E:05A0` | 256 | Metatile quadrant attributes, indexed through chunked `$7E:8000` map by US `$00:91C3` / JP `$00:91CF`; tile width/height `$84/$86`, chunk columns byte `$2F`, input tile X/Y `$14/$16`. X out of bounds returns `$0F`, Y out of bounds zero |
+
+Ordinary box damage subtracts HP with zero saturation and sets player hit
+flag `$0008`; it does not use Special-mode enemy stat promotion. Damage-byte
+bit `$80` instead sets player flag `$8000` without subtracting HP. US
+`$00:8EDE` / JP `$00:8EEA`, within the animation decoder, consumes it only
+when X equals player pointer `$8A`: clear the flag and halve the newly
+decoded signed X velocity at `+$06`, rounding toward negative infinity.
+The animation terminator and non-player actors leave it untouched. Without
+the flag, US `$F2` / JP `$F5` equal to 1 adds actor `+$3E` instead; slowdown
+takes precedence. [Native tests](regional-differences-technical.md#shared-player-slowing-zones)
+cover all eleven authored boxes. Do not assign this meaning to every
+unrelated actor's use of bit `$8000`.
 
 ### OAM shadow + sprite-build working vars
 
@@ -112,12 +169,92 @@ apron channel) must read it here and resolve through
 | slot `+1E` | 2 | Nested-dispatch resume value. Yield helpers store the JSR return address, so the next executed instruction is `value+1`: live fireball `$BDD9` resumes at `$BDDA`; live lightning `$BD69` resumes at `$BD6A`; Marahna's large orb/split and snake children retain `$E061/$A65D`, while its boss diagonal/ground children retain `$E578/$E57E`; the post-impact boss parent repeats through `$E4D7`. Aitos lava fireballs retain `$CFCD`; launched `$CEEC` molten rocks retain `$CF16`, distinct from stationary `$CF1C` mouths. Flaming Wheel's cyan shots use shared `$A65D`; Minotaur axes retain `$B008`, Ice Dragon balls retain `$F2CA`, and Tanzara's exact admitted families retain `$FBEA/$FBF5/$FC13/$FC21/$FCA1/$FCAF/$FCB5/$FCD6/$FCED/$FCFB/$FD22/$FD44/$FD77/$FD9E`. |
 | slot `+20/+22/+24` | 2 each | Current composition pointer, visual ID, and animation wait counter |
 | slot `+28`/`+29` | 1+1 (see note) | Attribute/transform. Masking the 16-bit read at `+28` with `$C000` selects the horizontal/vertical flip, which works because the bits live in the **byte at `+29`**; `+28`'s own byte measured `$00` on every spell actor observed, and `$00:95F0` writes `+28` byte-wise. Treat as two bytes rather than one word until a case is found that needs the low half. `+19` carries the same base attribute value as `+29`. |
-| slot `+2A/+2C/+2E` | 2 each | Attack, HP, and BCD death-score value copied from spawn-record bytes `+7/+8/+9` by `$00:95F0`. |
+| slot `+2A/+2C/+2E` | 2 each | Attack, HP, and BCD death-score value copied from spawn-record bytes `+7/+8/+9` by `$00:95F0`. Death-score units are tens of displayed points: Aitos skull `$20` means 200 points, not20. |
 | slot `+30` | 2 | Object flags. Bit `$0001` marks an attacker (including the player sword beam); bit `$0400` means outside the **currently selected activation window**, not necessarily outside the draw window or native viewport. With extended activation enabled it covers fitted camera `$22` plus live horizontal margins; during `$08B2=$97A6/$97C9/$97E4` it uses the reconstructed native 256px horizontal camera and authentic vertical `$24`. Object drawing is decided independently and may remain visible in the margins while `$0400` is set. The scene-effect observer keeps lifecycle identity but does not submit the object while the bit is set. |
 | slot `+32` | 2 | Source/spawn-record pointer retained by ordinary action actors. Bloodpool trap lightning uses `$BD2A`, boss-lightning children use `$BDFF`, and the two fireball directions use `$BD76` and `$BD84`. Marahna orb/split fireballs retain `$E047`, snake enemies/projectiles retain `$DE96`, and the excluded reaper/orb family retains `$E0BA`; `$E2F3/$E304/$E315/$E326/$E351/$E368` are moving-platform roots. Its linked-lightning source endpoint/child retain `$E18E`, the partner retains `$E254`, and the boss electrical family retains `$E483`. Aitos lava fireballs retain `$CF9E` throughout their cyclic rise/wait/return phases; launched molten rocks and their stationary mouths retain the distinct `$CEEC` source. The original/Death Heim boss-family pairs are Minotaur `$AF5D/$F6CA`, Wizard `$BDFF/$F6E2`, Flaming Wheel `$D838/$F712`, Viper `$E483/$F72A`, and Ice Dragon `$F161/$F760`; Tanzara uses `$F80F`. Player sword-beam captures observed `$979A` and `$9810`; validate equality with the linked player's current source instead of hardcoding either. This is a useful slot-reuse discriminator, not a globally unique actor ID. |
-| slot `+38` | 2 | Polymorphic spell-local counter. Controller `$0860+38` is selected spell ID; cohort spells reuse `+38` for repeat counts |
+| slot `+38` | 2 | Role-specific counter/flag. Controller `$0860+38` is selected spell ID; cohort spells reuse `+38` for repeat counts. Original/rematch Pharaoh root uses it as a pending-sphere flag: successful allocation increments it, the child clears it through `+$3A` after formation, and the root checks between waiting sequences. It is not a shared boss timer. |
 | slot `+3A` | 2 | Spawner backlink. The cast controller and player sword-beam child point to player `$08A0`; Bloodpool boss-lightning strike child `$08E0` points to boss `$12E0`, while its floor child `$0920` points to `$08E0`. Marahna split fireballs point to their retired `$E047` orb, snake fireballs point to their validated `$DE96` parent, linked-lightning children point to the first `$E18E` endpoint while the `$E254` partner occupies the next slot, and both `$E483` boss bolt stages point to boss `$12E0`. Death Heim's room owner is `$001C`; the Viper parent and the visible Flaming Wheel body retain it in their rematches. Minotaur axes and Ice Dragon balls instead point to a live parent with the same original/rematch source. The original Flaming Wheel body is root-owned (`0`); helper/child records have action-object backlinks and are rejected. Combined with `+32`, this validates linked families and remains stable while other control-flow fields change. |
 | `$7E:00F4/$00F8/$00F9` | 2 each | Input-enable mask, cast-active gate, and cast-transition state used by `$9DE1-$9F10` |
+
+Regional Pharaoh fixtures distinguish original source US `$C1A2` / JP `$C239`
+in raw room `$0603` from rematch `$F6FA/$F779` in `$0407`.
+The HP-owning root, health helper, sphere, converted wall head and
+arrows retain that source. The sphere/head backlink identifies the root;
+arrows instead link to the head. Reinitializing a sphere from an ordinary
+wall-head record changes its fields but **does not replace `+$32`**. Native
+slot reuse after US head retirement requires generation-aware identity.
+An arrow can outlive its head, so a live parent is not required throughout
+its flight. The root's backlink is0 originally and `$001C` in the rematch;
+`+$38` clears after child formation, not after head or arrow retirement.
+See the [Pharaoh rematch family contract](regional-differences-technical.md#pharaoh-death-heim-rematch).
+
+Regional Aitos fixtures add platform-skull source US `$D382` / JP `$D404`:
+`+$30 & $0800` deflects a confirmed sword contact before HP subtraction,
+distinct from the early `$0020` victim filter. Both skulls start with `+$2C=0`;
+US death score `+$2E=$20` awards20 BCD points, JP stores0. Proximity is measured
+from the live hot point; spawn Y subtracts the composition bottom extent12.
+
+Volcano-fireball source US `$CF9E` / JP `$D01E` uses `+$38=48` as an
+eight-frame-row counter during its4px/update rise. `+$3C/$3D` supply the
+subframe/reload pair, initialized as word `$0200`; these are not another
+48-frame timer. Reinitialization uses authored X/Y at `+$34/+$36`.
+All six phase-aligned rise/return/reset paths match in both regions and modes.
+See [Aitos collision and timing](regional-differences-technical.md#aitos-act-1-platform-skulls-and-volcano-fireballs).
+
+The Aitos bamboo trap is a separate source US `$CF2E` / JP `$CFB3`, type
+`$06` in raw room `$0104`. Its initial `+$1A=38` and bottom extent32 put
+the first shared trap's hot point at `(400,528)`. The entry requires
+`+$30 & $0400` clear and `abs(cachedPlayerX - trapX) < 32`; it does not
+check Y. States37/38 partition the same219-update movement differently:
+27/192 US,43/176 JP. State numbers alone must not select a regional speed.
+See [trap placement and phase contract](regional-differences-technical.md#aitos-bamboo-spike-traps).
+
+Antlion source US `$C66F` / JP `$C6FE` in raw room `$0203` uses cached
+player X `$7E:0080` for its encounter threshold2432US/2304JP. Its
+post-volley distance decision uses absolute X<64 for the next phase;
+equality64 repeats firing. US state12 consumes36 animation updates before
+the decision. JP instead decides immediately and, on the far branch,
+stores native-delay `+$24=60`, yielding61 updates. That delay and the
+animation row timer reuse a field but have different continuations; do not
+convert an in-flight wait just because a regional option changes. Source,
+handler and saved resume together distinguish them. See the
+[Antlion decision contract](regional-differences-technical.md#antlion-trigger-and-post-volley-decision).
+
+First-act boss roots retain sources US/JP `$AD45/$ADD9` (Centaur),
+`$B786/$B81A` (Bloodpool), `$D646/$D6C8` (Aitos dragon) and
+`$E7C6/$E845` (Northwall). Together with Antlion they have HP24,
+attack1 normal/2 Special, and boss flag `$4000`. Source alone also matches
+their children: validate role/backlink before treating a slot as the root.
+Phase comparisons use active-update counter `$88`; repeated video frames
+with an unchanged counter are not additional animation updates. The
+[paired first-act observations](regional-differences-technical.md#first-act-boss-program-comparison)
+find no regional attack-program or animation-data change for these four.
+
+Regional Minotaur fixtures distinguish original source US `$AF5D` / JP `$AFF1`
+from rematch `$F6CA/$F749`. The root's `+$38` latches player X before ascent;
+it is not a countdown. Root `+$3A` is0 originally and `$001C` in the rematch;
+the axe instead links to the live root, inherits its source/attack, and has
+HP/score0. Encounter identity is required for animation metadata.
+See [Minotaur phases and family contract](regional-differences-technical.md#minotaur-timing-and-room-inheritance).
+
+The Wizard's `+$2C` health check selects the second form below 12 HP; its
+US-only 31-update post-spread wait is separate from animation `+$24` and
+does not imply that all first-form sequences are slower. Viper's regional
+lightning choice consumes one RNG result: low two bits zero in US, low bit
+zero in JP. Neither is a global Special-mode multiplier.
+
+Final-boss source US `$F80F` / JP `$F88E` spans both forms and their parts.
+Second-form projectile `$FD25/$FDA2` overwrites `+$2A` with 3/4 attack even
+in Special; it does not overwrite HP. First-form states 5/10 leave victim
+filter `$20` clear; state 10's final row adds 28 US frames of vulnerability.
+State 48 belongs to the upper body, not a projectile; its JP first row adds
+one moving frame. See [final-boss contracts](regional-differences-technical.md#tanzra-forms-timer-and-projectile-strength).
+
+| Action clock field (both regions) | Size | Native meaning |
+| --- | ---: | --- |
+| `$7E:00E5` | 1 | Timer divider; decremented only with `$E8=0`, reloads to 59 on underflow. |
+| `$7E:00E6/$00E7` | 2 | Packed-BCD stage countdown, saturates at zero; not binary seconds. |
+| `$7E:00E8` | 1-byte timer read | Nonzero stops timer service. Generic boss-death handling increments the word at `$E8`; US final second-form entry clears it, JP preserves it. Preserve each caller's access width. A policy toggle must not refill or retrospectively restart the clock. |
 
 Action-scene identities measured in runs `20260810-124203`, `20260810-163044`,
 `20260810-174202`, the six-cycle correction run `20260810-180202`, and sword-beam run
@@ -167,7 +304,7 @@ See [tree timing/ownership](regional-differences-technical.md#fillmore-act-1-tre
 | Aitos molten rock (`$18/$19=$04/$01`) | `+32=$CEEC`, `+1E=$CF16`, `+12=$8661`, state `$27`, animation `$7E:4000`, artwork `$2B/$4D2D`, extents `8/8/8/8`; X velocity is `-2` unflipped or `+2` H-flipped and measured Y is `-1..+1`. Stationary mouths use resume `$CF1C` and are excluded. |
 | Boss lightning (`$18/$19=$02/$08`) | Base identity `+32=$BDFF`, `+12=$8661`, `+16/+18=$5000/$7E`, no V-flip, and `+3A` resolving to an active `$BDFF/$7E:5000` parent. Strikes: states/visuals/compositions `$02/$00/$5346`, `$03/$01/$5401`, `$04/$02/$5492` are vertical long/medium/short; `$05/$03/$54F2`, `$06/$04/$55C2`, `$07/$05/$5661` are diagonal long/medium/short. Normal left/top/right/bottom extents are `6/83/11/117`, `6/83/11/69`, `1/83/11/21`, `48/83/8/117`, `36/83/8/69`, `30/83/8/21`; H-flip swaps left/right. `$20/$5D2B` is the blank half-cycle and is not decorated. Observed strike resumes `$C02B/$C04B/$C051` are control flow, not shape identity. Floor impact is state/resume `$09/$C06A`, pairs `$08/$570A`, `$09/$5716`, or `$0A/$5729`. |
 | Death Heim Wizard lightning (`$18/$19=$07/$03`) | Same exact `$7E:5000` child states, artwork, extents, handler, resumes, and parent-validation contract as Bloodpool, with the owning source changed consistently from `$BDFF` to `$F6E2`. The room gate accepts both the original and rematch pair; mixed-room or mixed-source tuples fail closed. |
-| Minotaur axe (`$01/$04` or `$07/$02`) | Original/rematch source `$AF5D/$F6CA`, handler/resume `$8661/$B008`, animation `$7E:5000`, state `$03`, and backlink to a live same-source parent. Visuals `$00-$07` map exactly to compositions `$50FB/$5138/$5159/$5196/$51B7/$51F4/$5215/$5252`; the small terminal frame is `$10/$59B0` with 4px extents. |
+| Minotaur axe (`$01/$04` or `$07/$02`) | Original/rematch source `$AF5D/$F6CA`, handler/resume `$8661/$B008`, animation `$7E:5000`, state `$03`, backlink to a live same-source parent. Original visuals `$00-$07` use `$50FD/$513A/$515B/$5198/$51B9/$51F6/$5217/$5254`, alternating with tiny visual/composition `$11/$5A9E`. Rematch uses `$50FB/$5138/$5159/$5196/$51B7/$51F4/$5215/$5252`, alternating with `$10/$59B0`. Tiny frames have4px extents and occur every other update, not only at sequence end. Original speed alternates3/1, rematch4/2 pixels/update; source-specific metadata is required. |
 | Flaming Wheel (`$04/$07` or `$07/$05`) | Visible body uses source `$D838` with root backlink `0`, or `$F712` with Death Heim room-owner backlink `$001C`; both require active boss flag `$4000`, animation `$7E:5000`, and nonzero composition. Handler and priority are intentionally excluded from identity because the same body moves among handlers and the room supplies its OBJ band through `$008F`. Same-source helpers carry action-object backlinks and fail closed. Full-ring compositions `$5276/$5398/$54BA/$55DC` place twelve authored fireballs at local centres `x/y=-24,-8,8,24` with the four interior corners omitted. |
 | Flaming Wheel cyan shot (`$04/$07` or `$07/$05`) | Same room/source pair and a backlink to its active same-source root, handler/resume `$8661/$A65D`, animation `$7E:5000`, index 1, flags `$0020`, and 8px extents. States `$08-$0C` use local counter equal to state, velocities `(-1,+1)/(0,+1)/(+1,+1)/(-1,0)/(+1,0)`, and exact visuals/compositions `$00/$51B5`, `$01/$51C1`, `$02/$51CD`, or `$03/$51D9`. All five simultaneous children are independent effect records. Their raw part priority is zero, so presentation inherits bits 12-13 of live `$008F`; original Aitos measured priority 2, while Death Heim remains free to select a different band. |
 | Death Heim Viper lightning (`$18/$19=$07/$06`) | Same charge/orb/bolt/ground tuples as Marahna `$05/$08`, with source `$F72A` replacing `$E483` consistently on parent and children. The rematch parent retains backlink `$001C`; diagonal and floor children retain their normal parent link. |
@@ -208,7 +345,7 @@ See [tree timing/ownership](regional-differences-technical.md#fillmore-act-1-tre
 |---------|------|-------------|
 | $7E:0076/$0079 (+banks $78/$7B) | 2+1 ea | NMI record-drain pointers — reset EVERY NMI by $02:ACC8 to $3900/$3A02 then $3B04/$3C06 (game-side reads see the resting values; not a game variable) |
 | $7E:3900/$3A02/$3B04/$3C06 | $102 ea | the four one-record upload buffers (BG1 col/row, BG2 col/row): +0 header = VRAM base word (0=empty, zeroed after drain), data = 4x64B chunks at +2/+$42/+$82/+$C2. Column records use VMAIN=$81 and target `base,+1,+$800,+$801` (32 words, stride `$20`); row records use VMAIN=$80 and target `base,+$20,+$400,+$420` (32 contiguous words). |
-| $7E:00C4-$00CA | — | fade gate/config + BG2SC page-flip anim counters ($C5 arm, $C7 page) |
+| $7E:00C4-$00CA | — | Fade gate/config and background page-flip counters: `$C5/$C6` are page masks, `$C7/$C8` current offsets, `$C9/$CA` packed reload/countdown bytes. `$02:BC27` services both pairs. Aitos Act 1 rooms 2/3 use mask `$0C`, counter `$40`: offsets 4/8/12/0 held five calls each. Same checked settings/cycle in all five ROMs; PAL addresses are one higher. [Native profile checks](regional-differences-technical.md#aitos-background-animation-and-video-profiles). |
 | $7E:00CB/$00CD/$00CE/$00CF | 2+1+1+1 | CGRAM upload descriptor: src addr/bank, CGADD, row count ($02:AE75) |
 | $7E:00D0-$00D6 | 7 | VRAM DMA descriptor slot 0: src16/bank/VMADD/size (size=0 idle; $02:AF30) |
 | $7E:00D7-$00DD | 7 | VRAM DMA descriptor slot 1 = tile-anim upload. Action/town `$02:BC56` uses `[$D9]:$D7 = $7F:B800+n*$E1`; world navigation's `$02:AF86` instead fixes bank `$0A`, with `$D7 = $B000/$B040/$B080/$B0C0` for the four water frames. `$D7` remains after `$DC` is drained, so the host-owned map can synchronize phase without reading VRAM. |
@@ -233,6 +370,9 @@ See [tree timing/ownership](regional-differences-technical.md#fillmore-act-1-tre
 | $7E:0314 | 2 | Scripted world-navigation in-plane rotation; remains active during the action-entry zoom-and-spin |
 | $7E:0316 | 2 | Current world-navigation zoom state |
 | $7E:0318 | 2 | Target world-navigation zoom state |
+| $7E:031A | 2 | **US-only Death Heim emergence latch.** Final-act departure writes `$FFFF`; `$02:8134/$8550/$AFCB` consume it for camera setup, reveal and tile upload. The reveal clears it before returning to the Palace. This is transient presentation state, not the persistent unlock/announcement bits at `$7F:9101`. JP `$031A` instead serves a return/respawn marker; do not alias them. |
+| $7E:031C-$032B | 16 | **US-only emergence sprite mask.** Eight words initialize to `$00FF`; `$02:863E` clears one low-byte bit per step according to `$02:902F`. `$02:AFCB` uploads the bytes to VRAM word `$47F0` for repeated OBJ tile `$7F`. Not world-map rows or Mode-7 transform data. JP's song selector at `$0322` overlaps this range. |
+| $7E:06D6 | `$12` | During US emergence, fixed-screen record with composition `$01:EDF8`: 64 repeated tile-`$7F` parts in an 8×8 grid. `$02:8601` moves `+0A/+0C` inversely to camera jitter to keep the mask aligned. This slot is not a persistent Death Heim identity in other scenes. |
 
 ## Action-room bootstrap background staging (mapped 2026-08-22)
 
@@ -302,7 +442,7 @@ in-game “settings mode” byte or PPU page is introduced.
 | $7E:0218 | 2 | Total population; `$03:8E10` sums the six population words, not support (JP `$0217`, helper `$03:8CFD`) |
 | $7E:021A | 2 | Most recently refreshed/selected town's population, not a town ID (JP `$0219`) |
 | ... | 2 each | Individual town populations (Fillmore→Northwall) |
-| $7E:021C+2N | 2 each | ↑ the individual populations are recomputed by the structure census `$03:C07E`: sum of per-house people by civ level, +2, − `$7F:9F57+2N` — population is derived from standing house records. JP `$021B+2N`, adjustment `$7F:9F4B+2N`; no support clamp |
+| $7E:021C+2N | 2 each | ↑ the individual populations are recomputed by the structure census `$03:C07E`: sum of per-house people by civ level, +2, − `$7F:9F57+2N` — population is derived from standing house records. JP `$021B+2N`, adjustment `$7F:9F4B+2N`; PAL `$021E+2N` with the US adjustment address. No support clamp |
 
 ### Growth Rates ($7E:0228-$7E:022D)
 One byte per town. Values:
@@ -325,9 +465,15 @@ The town selector uses **eight usable slots**, starting at
 Held offerings likewise use `$02A2-$02A9` with the extra byte at `$02AA`.
 IDs 12/13 (Ancient Tablet) and 16/17/18 (Bomb) share labels/art but have
 different Use handlers. Preserve both item ID and slot. Native `$01:921B`
-removes the first matching item ID, and `$01:9239` compacts the inventory;
+removes the first matching item ID, and `$01:9239` sorts the eight item IDs
+in descending order, moving zeros to the end without touching the ninth byte;
 with duplicates, the removed slot can differ from the selected slot. See the
 [offering handoff contract](sim-menu-reference.md#use-offering-handoff-contract).
+
+JP uses town base `$024B`, town selector `$032F` and held base `$02A1`.
+Bloodpool's replenishment checks prerequisite event 5 (`$7F:910B & $04`) and
+requires all eight town slots to be empty; held items do not block it. See
+[the regional timing contract](regional-differences-technical.md#crop-offering-replenishment).
 
 ## Angel & Master Data ($7E:0280+)
 
@@ -349,7 +495,7 @@ with duplicates, the removed slot can differ from the selected slot. See the
 | $7E:0297 | 2 | Population needed for next level |
 | $7E:0299 | 9 | Magic inventory |
 | $7E:02A2 | 9 | Offerings inventory |
-| $7E:02AB | 1 | Number of lives (max-HP-style grant handler `$01:9CBD` INCs it) |
+| $7E:02AB | 1 | Persistent, zero-based starting lives. Source of Life `$01:9CBD` increments this byte; ordinary action entry loads it into `$1C`. Not an HP increase or level-up award. |
 | $7E:02AC | 1 | Selected/equipped magic ID (`0` none, `1..4` Fire/Stardust/Aura/Light); save-backed at SRAM `$145D`, while the high bit of `$0299-$029C` marks the inventory slot containing that selection. **`$02AC = 0` does not suppress the HUD icon's sprites:** the game still emits OAM slots 0-3 with the complete icon signature (tiles `$D4-$D7`, x `$94/$9C`, y `$0B/$13`, attr `$3C`), but `$02:BC9E` leaves the VRAM `$2D40` window zeroed, so the icon renders as nothing. Measured 2026-08-05. Any check keyed on the OAM signature therefore "succeeds" on a blank icon — validate against VRAM `$2D40` (or `$02AC`) if you need to know it is actually *visible* |
 
 **SRAM correspondence (USA ROM, 2026-07-16).** The persistent status block is
@@ -375,6 +521,9 @@ see [save-format.md](save-format.md) §3.
 ### Platformer Score Records ($7E:02B3+)
 12 packed-BCD words / 24 bytes (6 towns × 2 acts × 2 bytes), ending at
 `$7E:02CA`. Display appends a decimal zero; these are not binary integers.
+The US Master-status score page sums these in decimal mode at `$01:89FD`.
+DP `$00/$02` temporarily hold the low four/carry digits; formatting reuses
+that scratch. Japan's Master report has no corresponding second page.
 
 ## Dialogue and menu scratch (USA)
 
@@ -446,7 +595,7 @@ screen coordinates are not. Native camera/screen offsets still apply to anchors.
 | $7E:033E | 1 | Temple action (0x00=Give Oracle, 0x01=Listen, 0x02=Take Offering) |
 | $7E:0334 | 1 | **Selected/requested song id** (earlier "Death Heim/ending state" reading was a misread of music state). The `[$A2]`-script song handler `$02:B64B` executes a declaration only when this byte matches its selector; a separate loaded-source comparison against DP `$AB/$AD` skips redundant uploads. Written by ~10 play sites (`$00:828F/A370/F650/FF04`, `$01:8602/8754/8856`, `$02:8345/BD2A`, `$03:8262`); zeroed by the transition stop at `$00:83F2`. `$00:A370` selects 4 after all six act counts reach two. `$00:FEFC` selects 1 at final-boss teleport-out; `$00:F650` selects 3 after the returning `0701` sky fade-in — too late for the black-frame BG page swap (`$00:F5F0-$F619`, BG1SC/BG2SC `$64/$74`). JP equivalent field is `$0322`. |
 | $7E:0341 | 1 | Active world-location ID, 1-7. `$01:B6CA` first clears it, then writes the entry whose 256x256 source-pixel region from ROM table `$01:B73C` contains the `$0300/$0302` focus; zero therefore means outside every town border. The location label and 3D navigation clear-region mask consume the same value; zero keeps the full world hazed. Also read by `$00:A375` as the pending post-Death-Heim destination |
-| $7E:0347 | 1 | Death Heim boss-rush progress: `$00:FEEC` writes `$19 - 1` after each boss (hub stager `$F3D4` warps to `$0347+2` next); 0x07 = final boss beaten |
+| $7E:0347 | 1 | Death Heim boss-rush/ending progress: `$00:FEEC` writes `$19 - 1` after each boss (hub stager `$F3D4` warps to `$0347+2` next); `$07` = final boss beaten. Epilogue completion `$01:8859` increments it to `$08`; world-scene handler `$02:84EC` then selects silent music ID 21 and runs the departure into credits. |
 
 ## Debug / System
 
@@ -470,6 +619,11 @@ screen coordinates are not. Native camera/screen offsets still apply to anchors.
 ### Act Completion ($7F:6B18-$7F:6B23)
 Two bytes per town tracking act completion counts. `$00:A343` (Death Heim exit
 stager) requires all six words == 2 for the all-bosses-done path.
+The town BG character-bank filter also reads this count: below 2 loads raw
+file `0x60000`, at 2 or more loads `0x64000`. Both are 16 KiB uploads to the
+same VRAM destination. This selector is not the house-development tier.
+The rule matches all five ROMs; JP's early-bank skull-lair star is absent
+from the later bank. [Source and tests](regional-differences-technical.md#town-title-and-death-heim-artwork).
 
 ### Building Direction UI
 | Address | Description |
@@ -480,7 +634,8 @@ stager) requires all six words == 2 for the all-bosses-done path.
 ### Structure records & town capacity
 | Address | Description |
 |---------|-------------|
-| $7F:3800-$7F:53FF | Per-cell flag maps, `$400` per town (32×32 cells; bit0 set at road/build commit `$03:9623`, bit1 at `$03:8E48`, transient pathfinder visited bit2 set at `$03:9A50` and tested by the `$03:96EF` HLE) |
+| $7F:3800-$7F:53FF | Per-cell flag maps, `$400` per town (32×32 cells; bit0 set at road/build commit `$03:9623`, bit1 at `$03:8E48`, transient pathfinder visited bit2 set at `$03:9A50` and tested by the `$03:96EF` HLE). Construction predicate `$03:96BE` requires bit2 **set**, plus tile `$08` or `$D0-$DA`; a visually empty cell is not necessarily available. |
+| $7F:6BCF+2N / $7F:6BDB+2N | X/Y plot coordinates consumed as the flood-fill seed by US/PAL `$03:9156` / JP `$03:8F3B`. Each is multiplied by four to obtain cell coordinates. The wrapper clears/rebuilds the town's visited bits; treating every eligible terrain cell as visited bypasses real construction constraints. |
 | $7F:6B26+2N | Per-town **support capacity** (census `$03:C07E`: US32/48/72, JP16/24/32; bridges32US/16JP). Admission checks old population ≤ support+2; not a resident cap |
 | $7F:6BE7-$7F:77E6 | Per-town **structure-record arrays**, `$200` each (base = `word[$03:DC74+town*2]`): 128 × 4-byte records `{cell X, cell Y, flags/type, action/progress}`. Flags byte: bit7 active, **bit6 not-yet-contributing / per-class visual variant — NOT a construction flag** (the allocator never sets it; on a class-3 windmill it is the "no wind" story state), bits 4-5 subtype (house civ level / wheat `$10` / bridge orientation), low nibble type class (0 house, 1 bridge, 2 field, 3/4 factory tier). Allocator `$03:9D9F`; the 128-slot exhaustion is the game's 128-structure cap |
 | $7F:77E7-$7F:7BE6 | Per-record visual step-machine slots, 128 × 8 bytes (armed by the construction `$03:A4B8` / rebuild `$03:A4A8` HLE pair through one shared resolver/armer, then walked by the `$89F7`/`$8A7E` 8-frame stepper). Completed sidecar bridges bypass this pool: the `$89F0` HLE resolves and replays their single native rebuild draw through the same model. Slot layout, from interpreter `$03:A4F7` (decoded 2026-08-17): `+0` countdown, decremented once per tick, entry executes when it hits 0; `+1` loop repeat counter; `+2` program cursor (bank-`$03` address of the NEXT entry); `+4` loop restart address, set by the program's `$FF` opcode; `+6` address of the CURRENT entry's draw-list pointer word, which `$03:A591` dereferences to redraw. The armer initialises `+0`/`+1`/`+2`/`+4` only, so `+6` is stale until the first tick |
@@ -521,14 +676,17 @@ AR_WRAM_TRACE=structrec.jsonl AR_TRACE_LO=0x16BE7 AR_TRACE_HI=0x16DE6 \
 (that range is town 0 / Fillmore's 128 records; shift by the town's `$03:DC74` base for others.)
 | $7F:7BF9 / $7F:7BFB | Current town id / town id ×2 (index into `$03:DC74`) |
 | $7F:7C05 / $7F:7C07 | Shared census/scan scratch (house-population sum before +2/adjustment, support sum; reused for allocator slot index and other scans) |
-| $7F:7C11/13/15/17 | Record-scan rectangle X0/Y0/X1/Y1 (cell coords) |
+| $7F:7C11/13/15/17 | Record-scan rectangle X0/Y0/X1/Y1 (cell coords); shared scratch. Miracle story dispatch `$03:F921` instead uses `$7C11/$7C13` for aim square X/Y, or `$7C11=$FFFF` to bypass location for Earthquake/Wind |
 | $7F:7C1D | Record-scan remaining counter |
+| $7F:7C33/$7C35/$7C37 | Plot-operation controls: stamp roads / attempt buildings / remaining allocation budget. Complete offscreen caller `$03:90DE` sets budget to 0 or 1 from the growth resource `$9560` (JP `$9554`) and debits that resource only if consumed. Shared addresses in all five ROMs; not a population cap. |
+| $7F:7C3D | Construction-attempt marker used by growth-status calculation, not a completed-building count. Available house candidates set it in all five ROMs. JP also sets it for an available food footprint, including with budget0; Western versions do not. [Producer/store distinction](regional-differences-technical.md#regional-growth-status-producer). |
+| $7F:7C41/$7C43/$7C49 | Construction plot X/Y (0–7) and template index (0–11). The iterator expands each plot to 4×4 cells and stages sixteen availability words at `$7C51-$7C70`. |
 | $7F:7C9D/$7C9F/$7CA1 | Pending allocation request: cell X, cell Y, type byte |
 | $7F:90E1/$90E5 | Miracle aimed map cell X/Y (`$96EA/$96EC >> 4`); `$90E3/$90E7` = square-aligned copies |
 | $7F:90E9 | User-miracle operation active; set by `$01:97E5`, cleared after effect-wrapper cleanup, later than `$90F3` completion. Skull attempts retry while this is set. Subsequent result dialogue can hold the pending timer even after it clears. Posted enemy/script effects use `$90F5` instead |
 | $7F:90EB | Active miracle kind: 0 silent clear, 1 Lightning, 2 Rain, 3 Sunlight, 4 Earthquake, 5 Wind |
 | $7F:90F1/$90F3/$90F5 | Lightning/Rain visual actor finished; overall effect complete; posted/scripted-driver marker. `$90F5` suppresses the player's direct lair depletion but not destroyed-house feedback; it can remain set after completion, so it is not an active-effect boolean |
-| $7F:90F7 | Structure-visual refresh flag set by `$03:B274` |
+| $7F:90F7 | Miracle result/change marker: cleared at user-miracle entry, set by structure operation `$03:B274` and some story-trigger handlers, tested after cleanup by `$01:9832` to select the wrapper's return carry. Not solely a visual-refresh flag, nor set by every story flag change: Marahna Lightning's `$03:FBD1` sets global bit12 without writing this marker |
 | $7F:9218/$921C/$923E | Wind remaining ticks (120); Earthquake remaining ticks (180); Sunlight phase (0-140) |
 | $7F:9250-$7F:954F | Per-town built-square lists, `$80` each: 64 × 2-byte **square**-coord pairs (x,y ≤ 7), `$FFFF` = empty (append/dedup `$03:8EC1`; staged pair `$9550/$9552`; cursors `$9554+`; persisted at SRAM `0x0300+town*0x80`) |
 | $7F:96E8/$96EA/$96EC | Miracle/effect post: kind, pixel X, pixel Y, consumed by master-loop `$03:820F`; Skull Head requests Earthquake kind4. Kind is cleared before the ordinary actor pass (US `$03:8204`, JP `$03:820F`), read afterward, and remains set throughout posted-effect servicing. JP fields `$96DC/$96DE/$96E0`. At the post threshold, existing kind/sealing `$7BEB` cancels the attack; otherwise user-active `$90E9` or picker `$9215` delays retry. Two-Skull native fixtures produce one effect, not a queued second attack. |
@@ -553,8 +711,13 @@ through SRAM by `$03:A850`. Corrected 2026-08-02 — the arrays are **not** 16 l
 ### Flags
 | Address | Description |
 |---------|-------------|
-| $7F:9101 | World-state flags. `$02:865C` tests bit 0 before preserving an 8x8 block at world-tilemap offset `$0660`; when clear, that block is zeroed before town development is stamped. `$01:B6CA` also uses bit 0 to decide whether its location scan includes the seventh (Death Heim) rectangle. Bit 1 remains Death Heim-related but is not consumed by the host world-map composer. |
+| $7F:9101 | World-state flags. Bit 0 unlocks Death Heim: `$02:865C` preserves its 8x8 block at world-tilemap offset `$0660`, otherwise clearing that block; `$01:B6CA` admits the seventh location rectangle only when set. Bit 1 means the Palace announcement has begun and suppresses its replay. US sets bit 0 at final-act departure, then bit 1 before dialogue; JP sets both before its Palace dialogue after checking all six act counts. Preserve unrelated bits. Neither bit is a transient reveal-progress counter. [Regional sequence](regional-differences-technical.md#death-heim-transition-and-music). |
 | $7F:910B | Bloodpool's story-event **prereq** bitmap, byte 0 (= `$9107 + 1*4`). The PAR-derived "bridge technology (bit 0x20)" label is event id 2 of that town — see the event-bitmap table below |
+| $7F:916E / $7F:9173 | Fillmore / Marahna fishing-event counters, shared addresses across all five ROMs. Completion targets are 255 Western / 128 JP for Fillmore, 128 everywhere for Marahna. Counts are callback updates, not elapsed frames; fired event 10 prevents normal repeat rewards. [Discovery and switch contract](regional-differences-technical.md#source-discoveries-and-compass-fishing). |
+| $7F:918D | Teddy-return marker, shared address in all five ROMs. Successful Bread use writes 1 after consuming held item 7. Bloodpool's event 6 callback reads it to supply the Magic Skull, complete event 6, release the development hold and request event 7. Not itself event 7's prerequisite/fired bit. |
+| $7F:9192 + town | Six crop-knowledge bytes, shared addresses across the five ROMs. Bloodpool event 5 writes `$9193=1`; its road-connection event 4 can write Fillmore's `$9192=1` and upgrade all Fillmore fields. Ordinary-field item-8 use writes the receiving town's byte after converting one field; already-upgraded use consumes the item without this write. Replenishment checks prerequisite 5 and inventory emptiness instead, not a timer here. [Crop-sharing contracts](regional-differences-technical.md#bridges-and-cross-town-crop-sharing). |
+| $7F:91A5 | Bloodpool Music/state byte. Accepted item 11 writes 1 after its response; event 8 tests nonzero to finish disputes, clear `$7CF1` and mark fired 8. The ambient music selector also reads this byte; do not treat it as the event-8 bitmap or a standalone save flag. Kasandora's Music grant writes its neighboring `$91A6=1`. |
+| $7F:91D4 + town | Compass-delivery bytes. Successful Use in Fillmore or Marahna writes 1 after consumption/response; the respective periodic handler latches prerequisite 10. Other towns are rejected by the Use handler. Not the fishing progress counter or the completed-event bit. |
 
 ### Story-event bitmaps ($7F:9107-$7F:914E)
 
@@ -566,7 +729,7 @@ resolver `$F497` (scratch `$7F:914F`).
 | Address | Description |
 |---------|-------------|
 | $7F:9107 + town*4 | **prereq/enabled** — the event may be selected. Persisted at SRAM `0x120E` |
-| $7F:911F + town*4 | **fired** — already run; never selected again. Persisted at SRAM `0x1226` |
+| $7F:911F + town*4 | **fired** — excluded by normal event selection once set. Not a universal guard for forced dispatch or miracle handlers. Persisted at SRAM `0x1226` |
 | $7F:9137 + town*4 | **dispatched this session** (set by `$03:E02B`/`$E0B0`); not persisted |
 | $7F:914F | scratch byte holding the resolved bit mask (`$03:F497`) |
 
@@ -574,6 +737,47 @@ These were labelled "open lairs"/"spawned lairs" until 2026-08-17. Monster-lair 
 separate `$7F:9568+` block above; these bits are consumed by the `$03:DFFB` event selector and
 by every town-event handler in `$03:E6xx-$F3xx` (32 ids/town matches the 32-entry handler
 tables at `$03:E66E`, not 4 lairs/town).
+
+Population and road producers also latch these prerequisite bits. US/PAL
+`$03:E122` / JP `$03:DC27` reads population at the active town's indexed
+word and requires **strictly greater than** the authored threshold.
+US/PAL `$03:E15D` / JP `$03:DC62` tests specific road-square words.
+Neither clears a previously reached prerequisite when the condition stops
+holding. Individual event callbacks can clear it: Bloodpool event 8 clears
+prerequisite 8 if the act count is not 2, and Western versions also clear
+prerequisite 9. Japan retains 9. The regular pipeline re-enables population
+conditions before selecting again, so that difference alone does not bypass
+event 8's priority. See [population tables](regional-differences-technical.md#population-and-road-story-prerequisites)
+and [late Bloodpool progression](regional-differences-technical.md#bloodpool-disputes-music-and-compass).
+
+Periodic maintenance latches prerequisites; it does not recompute these
+arrays from scratch. For example, Aitos prerequisite 6 (`$9113 & $02`) and
+fired 5 (`$912B & $04`) are set by `$03:F7D1` when global flag 8 is set and
+**Fillmore** population is at least 20. The population word is US `$7E:021C`,
+JP `$7E:021B`, PAL `$7E:021E`, not the active town's indexed word. This
+dependency matches all five ROMs. See
+[periodic maintenance](regional-differences-technical.md#periodic-town-event-maintenance)
+for the other tested gates and their limits.
+
+Bloodpool's bridge request can return from the temple with prerequisite 2
+and dispatched 2 set but fired 2 still clear. Its callback `$03:E9ED` tests
+the separate technology byte `$7F:919F`; when zero, it selects ambient scene
+7 without marking the event fired. This path matches all five ROMs. Do not
+derive a universal event-completion rule from a temple transition alone.
+
+Bridge delivery through US/PAL `$01:9E28` / JP `$01:9E04` sets `$919F=1`
+**before** the acceptance dialogue finishes and item 10 is consumed. The
+later town callback marks fired 2. All five ROMs preserve this ordering;
+`$919F` alone does not establish that the offering transaction has settled.
+See [bridge delivery](regional-differences-technical.md#bridge-offering-delivery)
+for native cancellation/rejection tests and regional held-inventory addresses.
+
+Bloodpool's Teddy callback independently sets development hold word
+`$7F:7CF1` (town 1 in `$7CEF+2N`) while the return marker is clear, then
+clears it when Teddy returns. Global bits 10 and 25 at `$7F:90FF` guard the
+Bread grant and actor spawn separately; the event 6 fired bit remains clear
+until the return path. That path sets fired 6, clears dispatched 6 and requests
+event 7 through `$7F:920E=$87`. See [the source and fixture boundaries](regional-differences-technical.md#bloodpool-crop-and-teddy-event-joins).
 
 ### Story-event and scenery-spawner state ($7F:9202-$7F:9228)
 

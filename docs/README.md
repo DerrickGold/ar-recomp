@@ -9,6 +9,9 @@ start with the [project README](https://github.com/DerrickGold/ar-recomp#quick-s
 - [Manual](manual.md) — controls, settings, saves, and troubleshooting.
 - [Regional differences](regional-differences.md) — a plain-English comparison
   of the releases, their mechanics, and what is still being investigated.
+- [Unused content and oddities](unused-content.md) — debug facilities,
+  developer-text reports, unexplained artwork and skipped code; separate
+  from features removed or changed between regions.
 - [Modern SIM menu](manual.md#modern-sim-menu) — enable the compact town menu,
   adjust its scale, and use the angel's Describe hint.
 - [Builder and Workshop](builder-workshop.md) — building the game and replacing

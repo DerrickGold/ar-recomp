@@ -296,8 +296,10 @@ can render source compositions from local `AR_VRAMDUMP_GF` captures.
 ## Offerings, stored items and temple flow
 
 `$91D3` computes town inventory base `$024C + 9 * ($0341 - 1)`. `$91E7` counts
-eight usable entries; `$9239` compacts them. Held items likewise have eight
-usable slots `$02A2–02A9`, followed by the extra terminator/storage byte.
+eight usable entries; `$9239` sorts their item IDs descending, with zeros last.
+It does not preserve the relative positions of surviving items or touch the
+ninth byte. Held items likewise have eight usable slots `$02A2–02A9`, followed
+by the extra terminator/storage byte.
 The nine-byte allocation is not nine selectable items. Town counts and other
 persistent fields are described in [ram-map.md](ram-map.md#offerings-7e023a-7e0281).
 
@@ -356,6 +358,22 @@ deduplication loses behavior. The item catalogue records all 20 individually.
 Success/failure text inside these handlers is observable gameplay feedback,
 not a blanket description-skipping candidate.
 
+The table above is US-specific. Japan retains distinct names and icon
+families for ID 12, Dragon's Egg (`りゅうのたまご`, `$40`), and IDs 16/17,
+a dog (`りっぱなイヌ`, `$44`) and fertilizer (`ひりょう`, `$45`). Their Use
+handlers are still empty, as in the Western versions. See the
+[Dragon's Egg](sim-object-catalog.md#dragons-egg-item-remnant) and
+[dog/fertilizer](sim-object-catalog.md#dog-and-fertilizer-item-remnants)
+references for addresses, regional artwork coverage and acquisition-search
+limits.
+
+Japan also treats Sources of Life/Magic (IDs 5/6) differently during Take
+Offering: it adds them to held inventory for later Use. US and all PAL
+releases apply them immediately when collected. Source of Life increases
+persistent starting lives, not HP. The shared Use-style removal step is
+unsafe for automatic collection when an older same-ID item is still held;
+see the [five-ROM transaction and live-switch contract](regional-differences-technical.md#sources-of-life-and-magic-collection-versus-use).
+
 ### Use Offering handoff contract
 
 **Using a held offering does not enter the cathedral view.** The selected
@@ -405,12 +423,18 @@ must complete before its following event write. Native release/press barriers
 separate inventory selection, acknowledgement and target acceptance.
 
 Native `$921B` removes the **first matching item ID** from the eight held
-slots; `$9239` compacts them later. This matters when duplicate items occupy
+slots; `$9239` sorts them later. This matters when duplicate items occupy
 several slots: the selected slot is not necessarily the slot removed.
 
-Normal return at `$8506–851D` compacts, removes inventory objects, clears `$29`,
-closes the menu and waits for release before returning C=0. Targeted handlers
+Normal return at `$8506–851D` sorts the inventory, removes inventory objects,
+clears `$29`, closes the menu and waits for release before returning C=0. Targeted handlers
 also have special unwinds through `$9C85`; these are distinct cleanup paths.
+
+The regional return policy is caller-owned. For actions 12–15, US wrappers
+`$8530/$853B/$854A/$8559` close the town menu and return C=0; JP counterparts
+`$84FA/$84FF/$8504/$8509` return C=1 to the retained menu. Native traces verify
+both report exits and cancellation of Progress Log/Message Speed. This does
+not generalize to every action or to the Palace's separate callers.
 
 ## Adjacent menus and text ownership
 
@@ -432,6 +456,15 @@ These use `sky.menu.*` identities. The same action ID has different meanings
 in different owners: Palace action ID 5 is Status of Master, while town action
 ID 5 is Lightning. The ending, world-navigation and temple contexts also use
 shared routines with their own callers and return contracts.
+
+The US Master report `$899B` waits for a fresh B/Y press: B opens the score
+page and Y returns directly. Either button closes scores. JP `$8978` has no
+score page and closes on either button. Report cleanup clears `$27/$29` and
+retains the root selection. See the [regional report contract](regional-differences-technical.md#master-status-and-score-page).
+
+Message Speed offers 0–9 in US and 0–7 in JP; the shared `$0200` byte is not a
+portable cross-language pacing scale. Its [regional selector and return contract](regional-differences-technical.md#town-menu-return-behavior-and-message-speed-choices)
+is distinct from localized labels and font rendering.
 
 Native UI has three graphical owners: BG3 text, BG2 box/frame tiles, and
 fixed-tier OBJ icons/selectors. Hiding BG3 alone leaves panels and icons;
