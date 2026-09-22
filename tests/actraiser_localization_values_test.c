@@ -1,4 +1,5 @@
 #include "actraiser/actraiser_localization_values.h"
+#include "actraiser/actraiser_miracle_translation.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -92,6 +93,12 @@ int main(void) {
       "@end\n"
       ":: enemy.name.slot_02\n"
       "Démon\n"
+      "@end\n"
+      ":: sim.miracle.earthquake.insufficient_sp\n"
+      "Cost {miracle_earthquake_sp} SP\n"
+      "@end\n"
+      ":: sim.miracle.lightning.insufficient_sp\n"
+      "Cost 10 SP\n"
       "@end\n";
   TestVfs vfs = {
       .manifest = (const uint8_t *)manifest,
@@ -133,6 +140,35 @@ int main(void) {
   CHECK(ActRaiserLocalizationValues_Capture(
       &values, wram, sizeof(wram), &pack, NULL, "Maître"));
   ArDialogueValue value;
+  CHECK(Resolve(&values,"miracle_earthquake_sp",kArLanguagePlaceholder_Number,&value));
+  CHECK(value.number==160);
+  ArRegionalCostPolicy jp;
+  CHECK(ArRegionalCosts_Init(&jp,kArRegionalCost_Japan));
+  CHECK(ArRegionalCosts_Resolve(&jp,&values.prices));
+  static const char *const miracle_names[]={"miracle_lightning_sp","miracle_rain_sp",
+      "miracle_sunlight_sp","miracle_wind_sp","miracle_earthquake_sp"};
+  static const unsigned jp_prices[]={12,16,18,24,60};
+  for (unsigned i=0;i<5;++i) {
+    CHECK(Resolve(&values,miracle_names[i],kArLanguagePlaceholder_Number,&value));
+    CHECK(value.number==jp_prices[i]);
+  }
+  ArDialogueContentSelection selected={.presentation=kArDialoguePresentation_Enhanced,
+      .selected_pack=&pack,.native_us_enhanced_pack=&pack};
+  ActRaiserMiracle_ConstrainText(&selected,"sim.miracle.earthquake.insufficient_sp",&values.prices);
+  CHECK(selected.selected_pack==&pack && selected.presentation==kArDialoguePresentation_Enhanced);
+  selected.selected_pack=NULL;
+  ActRaiserMiracle_ConstrainText(&selected,"sim.miracle.earthquake.insufficient_sp",&values.prices);
+  CHECK(selected.native_us_enhanced_pack==&pack && selected.presentation==kArDialoguePresentation_Enhanced);
+  selected.selected_pack=&pack;
+  ActRaiserMiracle_ConstrainText(&selected,"sim.miracle.lightning.insufficient_sp",&values.prices);
+  CHECK(!selected.selected_pack && !selected.native_us_enhanced_pack &&
+      selected.presentation==kArDialoguePresentation_NativeRetail);
+  selected=(ArDialogueContentSelection){.presentation=kArDialoguePresentation_Enhanced,.selected_pack=&pack};
+  ArRegionalCostPolicy us;
+  ArRegionalCostSnapshot us_prices;
+  ArRegionalCosts_Init(&us,kArRegionalCost_US); ArRegionalCosts_Resolve(&us,&us_prices);
+  ActRaiserMiracle_ConstrainText(&selected,"sim.miracle.lightning.insufficient_sp",&us_prices);
+  CHECK(selected.selected_pack==&pack && selected.presentation==kArDialoguePresentation_Enhanced);
   Write16(0x0010, 22);
   Write16(0x0012, 38);
   CHECK(Resolve(&values, "sound_music_id", kArLanguagePlaceholder_Number, &value));

@@ -389,6 +389,14 @@ RecompReturn cpu_dispatch_pc_from(CpuState *cpu, uint32 pc24,
  * JSR/JSL calls must keep their own driver/return boundary. */
 RecompReturn cpu_dispatch_paired_tail_from(CpuState *cpu, uint32 pc24,
         uint16 entry_stack, uint8 hrv, uint32 source_pc24);
+/** Queue a branch-only HLE continuation from inside its generated wrapper.
+ * Inherits that activation's original entry stack/return ownership, which can
+ * differ from current S after a pushed-target dispatch. Does not pop a frame
+ * or run a nested driver. On success the HLE must immediately return
+ * RECOMP_RETURN_TAILCALL so its wrapper can retire. Returns zero, unchanged,
+ * outside an active generated wrapper. Not for JSR/JSL calls or raw HLE bodies
+ * lacking a generated prologue. */
+int cpu_hle_tailcall_request(uint32 pc24, uint32 source_pc24);
 void cpu_poll_wait(CpuState *cpu, uint32 resume_pc24,
                    uint32 read_address24, uint32 read_width_bytes);
 int cpu_dispatch_has_entry(CpuState *cpu, uint32 pc24);

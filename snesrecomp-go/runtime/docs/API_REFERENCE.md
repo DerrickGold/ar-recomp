@@ -18,7 +18,15 @@ an SDK contract.
 | Generated C | `snesrecomp/game/*.h` | 65816 register, dispatch, tracing, and generated-support ABI |
 | Host conveniences | `snesrecomp/host/launcher.h` | Portable ROM loading and launch-path helpers; presentation and diagnostics use the runner ABI or application-owned code |
 | Runner replay artifacts | `snesrecomp/runner/replay.h` | Stateful canonical host-frame input streams over caller-owned transport |
-| Stateless utilities | `snesrecomp/support/*.h` | File loading, CRC32, packing, and other transport-independent helpers |
+| Stateless utilities | `snesrecomp/support/*.h` | File loading, CRC32, SHA-256, packing, and other transport-independent helpers |
+
+`snesrecomp/support/digest.h` exposes `sr_support_sha256(data, length, out)`
+for host artifact identities. The output is 32 bytes. Null data is valid only
+with zero length; invalid arguments return false without changing the output.
+It allocates no memory and exposes no private hashing context or runner state.
+Game-owned policy schemas and any combination with a runner semantic digest
+remain the caller's responsibility; this helper does not extend
+`SnesRunnerApi` or alter its semantic-state contract.
 
 Use the linked-game helpers only inside the executable linked to this runtime.
 External tools and optional enhancement layers should use `SnesRunnerApi` so
@@ -230,6 +238,16 @@ the native post-return S instead of applying its legacy stack-neutrality
 restore. Ordinary equal-stack returns keep their existing fast path. HLEs
 which return normally without a native adjusted return retain their existing
 stack contract; no return ownership is inferred from an HLE name.
+
+An HLE replacing a branch-only block inside a generated wrapper can queue
+its continuation with `cpu_hle_tailcall_request(target_pc24, source_pc24)` and,
+on success, immediately return `RECOMP_RETURN_TAILCALL`. The helper preserves
+the wrapper's inherited entry stack and return ownership without popping it
+or starting a nested dispatcher. Current `CpuState.S` is not a substitute for
+that context: a pushed-target dispatch may have placed native data below the
+original frame before reaching the HLE. The helper returns zero unchanged
+without an active wrapper. It is not a JSR/JSL call API and must not be called
+from a raw HLE lacking the generated prologue.
 
 Pushed-target (paired) tail transfers normally keep the requesting
 activation's entry S and host pairing. When the requester's recorded entry S

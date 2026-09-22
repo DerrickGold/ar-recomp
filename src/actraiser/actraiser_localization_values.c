@@ -222,6 +222,9 @@ bool ActRaiserLocalizationValues_Capture(
       .pack = pack,
       .fallback_pack = fallback_pack,
   };
+  ArRegionalCostPolicy baseline;
+  ArRegionalCosts_Init(&baseline, kArRegionalCost_US);
+  ArRegionalCosts_Resolve(&baseline, &captured.prices);
   snprintf(captured.master_name, sizeof(captured.master_name), "%s",
            master_name);
   *values = captured;
@@ -273,6 +276,16 @@ bool ActRaiserLocalizationValues_Resolve(
   } else if (!strcmp(name, "master_sp")) {
     resolved = expected_kind == kArLanguagePlaceholder_Number &&
         SetNumber(value, Read16(values, kWramMasterSp));
+  } else if (!strncmp(name, "miracle_", 8)) {
+    for (unsigned i = kArRegionalCost_Lightning; i < kArRegionalCostRule_Count; ++i) {
+      const char *key = ArRegionalCosts_Descriptor((ArRegionalCostRule)i)->key;
+      const size_t length = strlen(key);
+      if (!strncmp(name, key, length) && !strcmp(name + length, "_sp")) {
+        resolved = expected_kind == kArLanguagePlaceholder_Number &&
+            SetNumber(value, values->prices.price[i]);
+        break;
+      }
+    }
   } else if (!strcmp(name, "master_magic_points")) {
     resolved = expected_kind == kArLanguagePlaceholder_Number &&
         SetNumber(value, Read16(values,

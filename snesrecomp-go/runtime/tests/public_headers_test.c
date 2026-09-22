@@ -13,6 +13,7 @@
 #include "snesrecomp/game_runtime.h"
 #include "snesrecomp/host/launcher.h"
 #include "snesrecomp/runner.h"
+#include "snesrecomp/support/digest.h"
 #include "snesrecomp/runner/determinism.h"
 #include "snesrecomp/runner/ppu_diagnostics.h"
 #include "snesrecomp/spc_upload.h"

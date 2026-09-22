@@ -278,7 +278,7 @@ func nativeAuthorOperations(route *NativeSemanticRoute, layout IRObject) ([]Auth
 	if len(ops) > 0 && strings.HasPrefix(route.ID, "status.report.") && ops[len(ops)-1].Op != "end" && ops[len(ops)-1].Op != "line" {
 		return nil, fmt.Errorf("unterminated native report row")
 	}
-	return stripNativePadding(nativeAuthorTable(ops, route.ID)), nil
+	return nativeMiraclePrice(stripNativePadding(nativeAuthorTable(ops, route.ID)), route.ID)
 }
 
 // Blank native cell runs clear the retail tilemap; they are not a paragraph or

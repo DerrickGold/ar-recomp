@@ -2,6 +2,7 @@ package localization
 
 import (
 	"context"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -66,6 +67,17 @@ func TestFontRoleDependenciesAndEdits(t *testing.T) {
 	if !reflect.DeepEqual(reopened.pack.manifest.Fonts(), next.manifest.Fonts()) {
 		t.Fatal("save/open changed font roles")
 	}
+}
+
+func TestFontRoleRuntimeProbe(t *testing.T) {
+	probe := os.Getenv("AR_AUTHOR_RUNTIME_PROBE")
+	if probe == "" {
+		t.Skip("C runtime probe not configured")
+	}
+	pack := fontRolePack(t)
+	root := t.TempDir()
+	writeAuthorTestFiles(t, root, pack.Files())
+	assertAuthorPackRuntime(t, probe, root, pack)
 }
 
 func TestFontCoverageUsesEachRolesOwnFallbacks(t *testing.T) {

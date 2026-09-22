@@ -1,6 +1,8 @@
 #include "actraiser/actraiser_sim_menu.h"
 #include "actraiser/actraiser_localization_runtime.h"
 #include "settings.h"
+#include "actraiser/actraiser_regional_runtime.h"
+#include "actraiser/actraiser_miracle.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -13,6 +15,16 @@ static const uint16_t sources[] = {0xfc9c, 0xfd25, 0xfedc, 0xfdc8, 0xfe3a};
 static const uint16_t callers[] = {0x8295, 0x8300, 0x836b, 0x8436, 0x83d6};
 static const uint16_t questions[] = {0xfd15, 0xfdb9, 0xff57, 0xfe2a, 0xfec7};
 static const uint16_t question_callers[] = {0x82ae, 0x8319, 0x8384, 0x844f, 0x83ef};
+
+bool ActRaiserRegional_MiracleEntry(const CpuState *cpu) { (void)cpu; return false; }
+RecompReturn ActRaiserRegional_RunMiracle(CpuState *cpu) { (void)cpu; assert(false); return RECOMP_RETURN_NORMAL; }
+bool ActRaiserRegional_CopyPrices(ArRegionalCostSnapshot *prices) {
+  *prices=(ArRegionalCostSnapshot){{1,1,1,1,10,20,30,80,160}}; return true;
+}
+bool ActRaiserMiracle_Rule(unsigned action, ArRegionalCostRule *rule) {
+  if (action<5 || action>9 || !rule) return false;
+  *rule=(ArRegionalCostRule)(action-5+kArRegionalCost_Lightning); return true;
+}
 
 static SimMenuPhase Phase(void) {
   SimMenuModel m; ActRaiserSimMenu_CopyModel(&m); return m.phase;

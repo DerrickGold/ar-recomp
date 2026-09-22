@@ -540,6 +540,107 @@ static ArRenderTexture CreateIconAtlas(void) {
   return texture;
 }
 
+/* Independently drawn miniature flags/emblem, using the menu's red, blue,
+ * white and gold. Fixed pixels + nearest sampling, not platform emoji. These
+ * are a separate atlas: adding provenance badges cannot reorder nav icons. */
+static const char kRegionBadgeMasks[kOverlayRegionBadge_Count][kRegionBadgeHeight][kRegionBadgeWidth + 1] = {
+  [kOverlayRegionBadge_US] = {
+    " GGGGGGGGGGGGGGGGGGGGGG ",
+    "Gbbbbbbbbbbrrrrrrrrrrrrg",
+    "GbwbbbwbbbwWWWWWWWWWWWWg",
+    "Gbbbwbbbwbbrrrrrrrrrrrrg",
+    "GbwbbbwbbbwWWWWWWWWWWWWg",
+    "Gbbbwbbbwbbrrrrrrrrrrrrg",
+    "GbwbbbwbbbwWWWWWWWWWWWWg",
+    "Gbbbbbbbbbbrrrrrrrrrrrrg",
+    "GWWWWWWWWWWWWWWWWWWWWWWg",
+    "Grrrrrrrrrrrrrrrrrrrrrrg",
+    "GWWWWWWWWWWWWWWWWWWWWWWg",
+    "Grrrrrrrrrrrrrrrrrrrrrrg",
+    "GWWWWWWWWWWWWWWWWWWWWWWg",
+    "Grrrrrrrrrrrrrrrrrrrrrrg",
+    " gggggggggggggggggggggg ",
+    "  ssssssssssssssssssssss",
+  },
+  [kOverlayRegionBadge_Japan] = {
+    " GGGGGGGGGGGGGGGGGGGGGG ",
+    "GWWWWWWWWWWWWWWWWWWWWWWg",
+    "GWWWWWWWWWWWWWWWWWWWWWWg",
+    "GWWWWWWWWWWrrWWWWWWWWWWg",
+    "GWWWWWWWWrrrrrrWWWWWWWWg",
+    "GWWWWWWWrrrrrrrrWWWWWWWg",
+    "GWWWWWWWrrrrrrrrWWWWWWWg",
+    "GWWWWWWWrrrrrrrrWWWWWWWg",
+    "GWWWWWWWrrrrrrrrWWWWWWWg",
+    "GWWWWWWWrrrrrrrrWWWWWWWg",
+    "GWWWWWWWWrrrrrrWWWWWWWWg",
+    "GWWWWWWWWWWrrWWWWWWWWWWg",
+    "GWWWWWWWWWWWWWWWWWWWWWWg",
+    "Gwwwwwwwwwwwwwwwwwwwwwwg",
+    " gggggggggggggggggggggg ",
+    "  ssssssssssssssssssssss",
+  },
+  [kOverlayRegionBadge_Europe] = {
+    " GGGGGGGGGGGGGGGGGGGGGG ",
+    "Gbbbbbbbbbbbbbbbbbbbbbbg",
+    "GbbbbbbbbbbGbbbbbbbbbbbg",
+    "GbbbbbbbbGbbbGbbbbbbbbbg",
+    "GbbbbbbGbbbbbbbGbbbbbbbg",
+    "Gbbbbbbbbbbbbbbbbbbbbbbg",
+    "GbbbbbGbbbbbbbbbGbbbbbbg",
+    "Gbbbbbbbbbbbbbbbbbbbbbbg",
+    "GbbbbbbGbbbbbbbGbbbbbbbg",
+    "GbbbbbbbbGbbbGbbbbbbbbbg",
+    "GbbbbbbbbbbGbbbbbbbbbbbg",
+    "Gbbbbbbbbbbbbbbbbbbbbbbg",
+    "Gbbbbbbbbbbbbbbbbbbbbbbg",
+    "Gbbbbbbbbbbbbbbbbbbbbbbg",
+    " gggggggggggggggggggggg ",
+    "  ssssssssssssssssssssss",
+  },
+  [kOverlayRegionBadge_Mixed] = {
+    " GGGGGGGGGGGGGGGGGGGGGG ",
+    "Gssssssssssssssssssssssg",
+    "Gssssssssssssssssssssssg",
+    "Gsssrrrrrrsswwwwwwsssssg",
+    "GsssrrrrrrssWWWWWWsssssg",
+    "GsssrrrrrrssWWWWWWsssssg",
+    "GsssrrrrrrssWWWWWWsssssg",
+    "Gssssssssssssssssssssssg",
+    "GsssbbbbbbssGGGGGGsssssg",
+    "GsssbbbbbbssGGGGGGsssssg",
+    "GsssbbbbbbssGGGGGGsssssg",
+    "Gsssbbbbbbssggggggsssssg",
+    "Gssssssssssssssssssssssg",
+    "Gssssssssssssssssssssssg",
+    " gggggggggggggggggggggg ",
+    "  ssssssssssssssssssssss",
+  },
+};
+
+static ArRenderTexture CreateRegionBadgeAtlas(void) {
+  enum { width = kRegionBadgeWidth * kOverlayRegionBadge_Count };
+  uint32_t pixels[width * kRegionBadgeHeight];
+  for (int badge = 0; badge < kOverlayRegionBadge_Count; ++badge) {
+    for (int y = 0; y < kRegionBadgeHeight; ++y) {
+      for (int x = 0; x < kRegionBadgeWidth; ++x) {
+        uint32_t color = 0;
+        switch (kRegionBadgeMasks[badge][y][x]) {
+          case 'G': color = kIconSelectPalette[7]; break;
+          case 'g': color = kIconSelectPalette[10]; break;
+          case 'b': color = kIconSelectPalette[1]; break;
+          case 'r': color = kIconSelectPalette[11]; break;
+          case 'W': color = kIconSelectPalette[13]; break;
+          case 'w': color = kIconSelectPalette[5]; break;
+          case 's': color = ARGB(255, 0, 0, 0); break;
+        }
+        pixels[y * width + badge * kRegionBadgeWidth + x] = color;
+      }
+    }
+  }
+  return SettingsOverlayArtwork_CreateAtlas(s_device, width, kRegionBadgeHeight, pixels);
+}
+
 static void BuildFallbackFont(void) {
   memset(s_font_tiles, 0, sizeof(s_font_tiles));
   memset(s_artwork.glyph_defined, 0, sizeof(s_artwork.glyph_defined));
@@ -739,6 +840,13 @@ static bool CreateOverlayTextures(const uint8_t *rom_data, size_t rom_size) {
     DestroyFontTextures();
     return false;
   }
+  s_artwork.region_badges = CreateRegionBadgeAtlas();
+  if (!ArRenderTexture_IsValid(s_artwork.region_badges)) {
+    ArRenderDevice_DestroyTexture(s_device, s_artwork.icons);
+    s_artwork.icons = ArRenderTexture_Invalid();
+    DestroyFontTextures();
+    return false;
+  }
   s_artwork.dialog_frame = CreateDialogFrameTexture(rom_data, rom_size);
   return true;
 }
@@ -758,6 +866,8 @@ void SettingsOverlayArtwork_Destroy(void) {
   DestroyFontTextures();
   ArRenderDevice_DestroyTexture(s_device, s_artwork.icons);
   s_artwork.icons = ArRenderTexture_Invalid();
+  ArRenderDevice_DestroyTexture(s_device, s_artwork.region_badges);
+  s_artwork.region_badges = ArRenderTexture_Invalid();
   ArRenderDevice_DestroyTexture(s_device, s_artwork.dialog_frame);
   s_artwork.dialog_frame = ArRenderTexture_Invalid();
   s_device = NULL;

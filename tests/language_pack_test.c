@@ -764,6 +764,17 @@ static void PrintJsonString(const char *value) {
   putchar('"');
 }
 
+static void DumpStyle(const ArTextTemplateStyle *s) {
+  putchar('{');
+  if (s) {
+    printf("\"font\":"); PrintJsonString(s->font);
+    printf(",\"style\":"); PrintJsonString(s->treatment);
+    printf(",\"scale\":%u,\"italic\":%u", s->scale_percent, s->italic);
+    if (s->has_color) printf(",\"color\":\"#%06X\"", s->color_rgb);
+  }
+  putchar('}');
+}
+
 /* Development-only probe of the production loader and contract validator.
  * No second parser or game executable/ROM is involved. */
 static void DumpPack(const ArLanguagePack *pack) {
@@ -777,6 +788,15 @@ static void DumpPack(const ArLanguagePack *pack) {
     printf("{\"id\":");
     PrintJsonString(ArLanguagePack_GetString(pack, message->id));
     printf(",\"source_line\":%u", message->source_line);
+    if (message->default_style || message->layout.length || message->numerals) {
+      printf(",\"appearance\":{\"layout\":");
+      PrintJsonString(ArLanguagePack_GetString(pack, message->layout));
+      printf(",\"numerals\":");
+      PrintJsonString(message->numerals == 1 ? "upright" : message->numerals == 2 ? "slanted-ascii" : "");
+      printf(",\"style\":");
+      DumpStyle(ArLanguagePack_GetTextStyle(pack, message->default_style));
+      putchar('}');
+    }
     if (message->is_alias) {
       printf(",\"alias\":");
       PrintJsonString(ArLanguagePack_GetString(pack, message->alias));
@@ -788,6 +808,10 @@ static void DumpPack(const ArLanguagePack *pack) {
       printf("{\"op\":");
       PrintJsonString(kinds[op->kind]);
       printf(",\"source_line\":%u", op->source_line);
+      if (op->text_style) {
+        printf(",\"style\":");
+        DumpStyle(ArLanguagePack_GetTextStyle(pack, op->text_style));
+      }
       if (op->kind == kArLanguageOperation_Text) {
         printf(",\"value\":");
         PrintJsonString(ArLanguagePack_GetString(pack, op->value.text));
@@ -834,7 +858,23 @@ static void DumpMetadata(const ArLanguagePackMetadata *m) {
     if (i) printf(",");
     PrintJsonString(m->fallback_fonts[i]);
   }
-  printf("]}");
+  printf("]");
+  if (m->font_role_count) {
+    printf(",\"roles\":[");
+    for (uint32_t i = 0; i < m->font_role_count; ++i) {
+      const ArLanguageFontRole *role = &m->font_roles[i];
+      if (i) putchar(',');
+      putchar('{'); FIELD("name", role->name); printf(",");
+      FIELD("primary", role->primary_font); printf(",\"fallback\":[");
+      for (uint32_t j = 0; j < role->fallback_font_count; ++j) {
+        if (j) putchar(',');
+        PrintJsonString(role->fallback_fonts[j]);
+      }
+      printf("]}");
+    }
+    putchar(']');
+  }
+  putchar('}');
 #undef FIELD
 }
 

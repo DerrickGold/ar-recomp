@@ -15,6 +15,7 @@
 #include "snesrecomp/game/runtime.h"
 #include "snesrecomp/runner.h"
 #include "snesrecomp/runner/replay.h"
+#include "snesrecomp/support/digest.h"
 
 enum {
   kLegacyReplayRecordByteCount = 8,
@@ -61,6 +62,8 @@ static bool s_save_data_protected;
 static bool s_game_frame_logging_enabled;
 static bool s_action_entry_reported;
 static bool s_session_started;
+static InputReplayPolicyDigest s_policy_digest;
+static void *s_policy_context;
 
 static bool s_tick_pending;
 static uint64_t s_pending_ordinal;
@@ -86,6 +89,11 @@ const char *InputReplay_LastError(void) {
 
 bool InputReplay_Failed(void) {
   return s_failed;
+}
+
+bool InputReplay_PolicyChangesAllowed(void) {
+  return s_session_started && !s_failed && !s_save_data_protected &&
+      !s_record_file && !s_writer_open && s_replay_source == kReplaySource_None;
 }
 
 static unsigned ReadGameFrame(void) {
@@ -282,6 +290,8 @@ static uint64_t ParseCheckpointInterval(void) {
 }
 
 void InputReplay_Init(void) {
+  s_policy_digest = NULL;
+  s_policy_context = NULL;
   s_last_error[0] = '\0';
   s_failed = false;
   const char *replay_path = getenv("AR_INPUT_REPLAY");
@@ -301,6 +311,13 @@ void InputReplay_Init(void) {
   }
   s_game_frame_logging_enabled = getenv("AR_GFLOG") != NULL;
   s_checkpoint_interval = ParseCheckpointInterval();
+}
+
+bool InputReplay_SetPolicyDigest(InputReplayPolicyDigest digest, void *context) {
+  if (s_session_started) return false;
+  s_policy_digest = digest;
+  s_policy_context = context;
+  return true;
 }
 
 static bool QueryInputState(SrRunnerHandle *runner,
@@ -339,7 +356,21 @@ static bool QuerySemanticDigest(SrRunnerHandle *runner,
   *digest = (SrSemanticDigestResult){
     .struct_size = SR_SEMANTIC_DIGEST_RESULT_V2_SIZE,
   };
-  return api->query_semantic_digest(runner, &request, digest) == SR_RESULT_OK;
+  if (api->query_semantic_digest(runner, &request, digest) != SR_RESULT_OK) return false;
+  if (!s_policy_digest) return true;
+  uint8_t policy[32];
+  bool baseline = false;
+  if (!s_policy_digest(s_policy_context, policy, &baseline)) return false;
+  if (baseline) return true;
+  /* Container schemas belong to digest producers. Domain separation and the
+   * original runner schema prevent a host policy from masquerading as CPU
+   * state or accidentally matching a later runner digest schema. */
+  uint8_t payload[80] = "ARHOST-POLICY";
+  ByteOrder_WriteLe32(payload + 12, digest->schema_version);
+  memcpy(payload + 16, digest->sha256, 32);
+  memcpy(payload + 48, policy, 32);
+  digest->schema_version = UINT32_C(0x41520001);
+  return sr_support_sha256(payload, sizeof(payload), digest->sha256);
 }
 
 bool InputReplay_BeginSession(SrRunnerHandle *runner, const char *game_id) {
@@ -362,6 +393,23 @@ bool InputReplay_BeginSession(SrRunnerHandle *runner, const char *game_id) {
   const bool canonical_session =
       s_replay_source == kReplaySource_CanonicalHostTick ||
       s_record_file != NULL;
+  if (canonical_session && s_policy_digest && !has_initial_digest) {
+    SetError("game policy and runner identity are required for canonical replay");
+    return false;
+  }
+  if (s_policy_digest && s_replay_source != kReplaySource_None) {
+    uint8_t policy[32];
+    bool baseline = false;
+    if (!s_policy_digest(s_policy_context, policy, &baseline)) {
+      SetError("game policy identity is unavailable");
+      return false;
+    }
+    if (!baseline && (s_replay_source == kReplaySource_LegacyGameFrame ||
+        !(s_canonical_header.flags & SR_INPUT_REPLAY_INITIAL_STATE_DIGEST_VALID))) {
+      SetError("non-native policies require a replay with initial-state identity");
+      return false;
+    }
+  }
   if (canonical_session && !has_input_state) {
     SetError("runner input-state service is required for canonical replay");
     return false;

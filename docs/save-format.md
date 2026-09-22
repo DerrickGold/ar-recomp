@@ -32,6 +32,12 @@ marker through the full ending remains a separate test. Both codecs preserve it.
 
 ## 2. Checksum
 
+The host defers automatic persistence while the native story-save routine
+copies its payload and writes the checksum. Only a normal completion with a
+valid checksum releases that transaction. An interrupted transaction preserves
+the existing disk save, including at shutdown. Session-only editor changes
+do not change the host's last-durable image.
+
 Recompute the checksum after changing the SRAM payload:
 
 ```text
@@ -286,6 +292,47 @@ native saves update the companion's checksum association, even with enhanced
 rendering disabled. Each file is replaced atomically, but the two files are
 not one filesystem transaction: a companion write failure is retried, and an
 interruption between writes can lose the enhanced spelling, not corrupt SRAM.
+
+### Regional campaign checkpoints
+
+The regional pricing foundation uses a second companion, `.archeckpoint`,
+appended to the active path (`save.srm.archeckpoint` or `save.ini.archeckpoint`).
+It leaves the native image unchanged. Keep it with the save when moving between
+Recomp installations; an emulator still needs only the `.srm`.
+
+The companion binds its payload to all 8,192 native bytes, including the
+completion marker outside the cartridge checksum. It retains the candidate and
+one prior checkpoint. The host writes it before replacing the native file, so
+an interrupted save can select the metadata matching whichever image reached
+disk. A damaged, newer-format, or unmatched companion is preserved and reported
+as an error, not silently applied to another campaign. Older rollbacks beyond
+the retained pair need their corresponding companion backup.
+
+Accepted New Game creates a fresh campaign identity in memory; it does not
+overwrite the old saved campaign. The native story-save completion captures
+that campaign's settings for the subsequent host write. Continue restores the
+matching checkpoint. Legacy saves without metadata start with US pricing in
+memory; this does not claim that historical lair counts have been reconstructed.
+Automatic completion-marker writes and persistent editor changes retain the
+durable campaign's settings, even while a different unsaved game is running.
+Import reads a matching regional companion beside the source save when present.
+Export still writes the selected game-image format only; carry the matching
+regional companion separately. This differs from the Unicode-name import
+behavior described above.
+
+This storage currently covers the [regional pricing options](regional-settings.md)
+only, not full gameplay presets, reserve tracking, or population redevelopment.
+Overlay changes remain in memory until the next completed Progress Log save;
+they are not written to the global `settings.ini`.
+
+Canonical input recordings bind the requested and effective pricing rules to
+their initial-state identity and any recorded checkpoints. Equal-valued US and
+European pricing remains compatible with baseline recordings. Non-native rules
+require a recording with an initial identity; unidentified legacy recordings
+are rejected rather than played under different rules. Campaign IDs themselves
+are not part of this gameplay identity.
+Pricing edits are disabled during recording/replay, including live takeover,
+because these overlay actions are not yet events in the input stream.
 
 ### 4.1 Lossless INI schema (version 1)
 

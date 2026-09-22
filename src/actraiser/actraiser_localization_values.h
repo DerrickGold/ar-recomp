@@ -7,8 +7,9 @@
 
 #include "localization/dialogue_session.h"
 #include "localization/language_pack.h"
+#include "regional/regional_costs.h"
 
-#define ACTRAISER_LOCALIZATION_VALUES_ABI_VERSION UINT32_C(4)
+#define ACTRAISER_LOCALIZATION_VALUES_ABI_VERSION UINT32_C(5)
 
 enum {
   kActRaiserLocalizationMasterNameCapacity =
@@ -28,6 +29,7 @@ typedef struct ActRaiserLocalizationValues {
   const char *location_name;
   const ArLanguagePack *pack;
   const ArLanguagePack *fallback_pack;
+  ArRegionalCostSnapshot prices; /* captured quote, never a live policy pointer */
   char master_name[kActRaiserLocalizationMasterNameCapacity];
 } ActRaiserLocalizationValues;
 

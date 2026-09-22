@@ -852,7 +852,9 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_localization_values_test
         tests/actraiser_localization_values_test.c
+        src/actraiser/actraiser_miracle_translation.c
         src/actraiser/actraiser_localization_values.c
+        src/regional/regional_costs.c
         src/localization/language_pack.c src/localization/text_template.c
         src/localization/language_keyboard.c
         src/localization/unicode_grapheme.c
@@ -1056,6 +1058,7 @@ if(BUILD_TESTING)
         tests/input_replay_test.c
         src/input_replay.c
         ${SNESRECOMP_RUNNER_ROOT}/src/runner/replay.c
+        ${SNESRECOMP_RUNNER_ROOT}/src/support/sha256.c
     )
     target_include_directories(actraiser_input_replay_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
@@ -2035,6 +2038,16 @@ if(BUILD_TESTING)
         AR_SIM3D_TERRAIN_ELEVATION=${AR_SIM3D_TERRAIN_ELEVATION_VALUE})
     add_test(NAME actraiser_settings COMMAND actraiser_settings_test)
 
+    add_executable(actraiser_regional_policy_test
+        tests/regional_policy_test.c
+        src/regional/regional_costs.c
+        src/regional/regional_stock.c
+        src/settings_overlay_regions.c
+        src/localization/ui_catalog.c)
+    target_include_directories(actraiser_regional_policy_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src)
+    add_test(NAME actraiser_regional_policy COMMAND actraiser_regional_policy_test)
+
     add_executable(actraiser_settings_persistence_test
         tests/settings_persistence_test.c src/platform/sdl/settings_persistence_sdl.c)
     target_include_directories(actraiser_settings_persistence_test PRIVATE
@@ -2044,6 +2057,8 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_settings_overlay_test
         tests/settings_overlay_test.c
+        src/settings_overlay_regions.c
+        src/regional/regional_costs.c
         src/performance_metrics.c src/performance_overlay.c
         src/settings_overlay_localization.c
         src/settings_overlay_layers_localization.c
@@ -2501,6 +2516,89 @@ if(BUILD_TESTING)
     )
     add_test(NAME actraiser_save_system COMMAND actraiser_save_system_test)
 
+    add_executable(actraiser_save_transaction_test
+        tests/actraiser_save_transaction_test.c
+        src/actraiser/actraiser_save_transaction.c
+        src/actraiser/actraiser_hle_fatal.c
+        src/save_system.c
+        src/atomic_replace.c
+        src/localization/unicode_grapheme.c)
+    target_include_directories(actraiser_save_transaction_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    add_test(NAME actraiser_save_transaction COMMAND actraiser_save_transaction_test)
+
+    add_executable(actraiser_regional_session_test
+        tests/regional_session_test.c
+        src/regional/regional_session.c
+        src/regional/regional_costs.c
+        src/save_checkpoint.c
+        src/save_system.c
+        src/atomic_replace.c
+        src/localization/unicode_grapheme.c)
+    target_include_directories(actraiser_regional_session_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    add_test(NAME actraiser_regional_session COMMAND actraiser_regional_session_test)
+
+    add_executable(actraiser_regional_campaign_test
+        tests/regional_campaign_test.c
+        src/regional/regional_campaign.c
+        src/regional/regional_session.c
+        src/regional/regional_costs.c
+        src/host/campaign_identity.c
+        src/save_checkpoint.c
+        src/save_system.c
+        src/atomic_replace.c
+        src/localization/unicode_grapheme.c)
+    target_include_directories(actraiser_regional_campaign_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    add_test(NAME actraiser_regional_campaign COMMAND actraiser_regional_campaign_test)
+
+    add_executable(actraiser_regional_fingerprint_test
+        tests/regional_fingerprint_test.c
+        src/regional/regional_fingerprint.c
+        src/regional/regional_costs.c
+        ${SNESRECOMP_RUNNER_ROOT}/src/support/sha256.c)
+    target_include_directories(actraiser_regional_fingerprint_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    add_test(NAME actraiser_regional_fingerprint COMMAND actraiser_regional_fingerprint_test)
+
+    add_executable(actraiser_regional_runtime_test
+        tests/actraiser_regional_runtime_test.c
+        src/actraiser/actraiser_regional_runtime.c
+        src/actraiser/actraiser_scroll_cast.c
+        src/actraiser/actraiser_cpu_hle_internal.c
+        src/actraiser/actraiser_hle_fatal.c
+        src/regional/regional_costs.c src/regional/regional_campaign.c
+        src/regional/regional_session.c src/regional/regional_fingerprint.c
+        src/save_checkpoint.c src/save_system.c src/atomic_replace.c
+        src/localization/unicode_grapheme.c
+        ${SNESRECOMP_RUNNER_ROOT}/src/support/sha256.c)
+    target_include_directories(actraiser_regional_runtime_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    add_test(NAME actraiser_regional_runtime COMMAND actraiser_regional_runtime_test)
+
+    add_executable(actraiser_scroll_cast_test tests/actraiser_scroll_cast_test.c
+        src/actraiser/actraiser_scroll_cast.c src/actraiser/actraiser_cpu_hle_internal.c
+        src/actraiser/actraiser_hle_fatal.c src/regional/regional_costs.c)
+    target_include_directories(actraiser_scroll_cast_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    add_test(NAME actraiser_scroll_cast COMMAND actraiser_scroll_cast_test)
+
+    add_executable(actraiser_miracle_test
+        tests/actraiser_miracle_test.c
+        src/actraiser/actraiser_miracle.c
+        src/actraiser/actraiser_cpu_hle_internal.c
+        src/actraiser/actraiser_hle_fatal.c
+        src/regional/regional_costs.c)
+    target_include_directories(actraiser_miracle_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    add_test(NAME actraiser_miracle COMMAND actraiser_miracle_test)
+
+    add_executable(actraiser_miracle_text_test tests/actraiser_miracle_text_test.c
+        src/actraiser/actraiser_miracle_text.c src/regional/regional_costs.c)
+    target_include_directories(actraiser_miracle_text_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    add_test(NAME actraiser_miracle_text COMMAND actraiser_miracle_text_test)
+
     add_executable(actraiser_debug_state_test
         tests/debug_state_test.c
         src/dev/debug_state.c
@@ -2577,6 +2675,9 @@ if(BUILD_TESTING)
         src/atomic_replace.c
         src/localization/text_presentation.c
         src/actraiser/actraiser_localization_schedule.c
+        src/actraiser/actraiser_miracle_text.c
+        src/regional/regional_costs.c
+        src/actraiser/actraiser_miracle_translation.c
         src/actraiser/actraiser_hud.c
         src/actraiser/actraiser_localization_runtime.c
         src/actraiser/actraiser_localization_world_navigation.c

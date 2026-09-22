@@ -7,6 +7,8 @@ start with the [project README](https://github.com/DerrickGold/ar-recomp#quick-s
 ## Playing and customizing
 
 - [Manual](manual.md) — controls, settings, saves, and troubleshooting.
+- [Regional settings](regional-settings.md) — per-campaign spell and miracle
+  pricing, activation boundaries, and saving your choices.
 - [Regional differences](regional-differences.md) — a plain-English comparison
   of the releases, their mechanics, and what is still being investigated.
 - [Unused content and oddities](unused-content.md) — debug facilities,

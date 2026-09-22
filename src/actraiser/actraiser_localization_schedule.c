@@ -1,5 +1,7 @@
 #include "actraiser/actraiser_localization_schedule.h"
 #include "actraiser/actraiser_sim_menu.h"
+#include "actraiser/actraiser_miracle_text.h"
+#include "actraiser/actraiser_regional_runtime.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -11,6 +13,7 @@ static bool s_entering_native;
 static bool s_entering_reader;
 static bool s_entering_continuation;
 static bool s_skipping_menu_text;
+static bool s_native_glyph_delay;
 
 extern RecompReturn bank_01_8E29_M0X0(CpuState *cpu);
 extern RecompReturn bank_01_8E29_M0X1(CpuState *cpu);
@@ -18,6 +21,7 @@ extern RecompReturn bank_01_8E29_M1X0(CpuState *cpu);
 extern RecompReturn bank_01_8E29_M1X1(CpuState *cpu);
 extern RecompReturn bank_01_8FC5_M1X0(CpuState *cpu);
 extern RecompReturn bank_01_9284_M1X0(CpuState *cpu);
+extern RecompReturn bank_01_9278_M1X0(CpuState *cpu);
 extern RecompReturn bank_01_8C43_M1X0(CpuState *cpu);
 extern RecompReturn bank_01_9099_M1X0(CpuState *cpu);
 extern RecompReturn bank_01_9099_M1X1(CpuState *cpu);
@@ -116,14 +120,30 @@ static ActRaiserLocalizationDialogueHost Host(CpuState *cpu) {
   return (ActRaiserLocalizationDialogueHost){cpu, WaitFrame, ConfirmPage};
 }
 
+static bool EnhancedGlyphDelay(void) {
+  return s_skipping_menu_text || ActRaiserSimMenu_DescriptionAborted() ||
+      ActRaiserSimMenu_FastReveal() || ActRaiserLocalizationRuntime_DialogueScheduled();
+}
+
 bool ActRaiser_LocalizationScheduleGlyphDelay(CpuState *cpu) {
+  if (s_native_glyph_delay) return false;
   return cpu && cpu->PB == 1 && cpu->m_flag == 1 &&
       cpu_read16(cpu, 0, (uint16_t)(cpu->S + 1u)) == 0x9026 &&
-      (s_skipping_menu_text || ActRaiserSimMenu_DescriptionAborted() ||
-       ActRaiserSimMenu_FastReveal() || ActRaiserLocalizationRuntime_DialogueScheduled());
+      (EnhancedGlyphDelay() ||
+       (cpu->DB == 1 && cpu->Y >= 0xfcd6 && cpu->Y <= 0xff15));
 }
 
 RecompReturn ActRaiser_LocalizationGlyphDelay(CpuState *cpu) {
+  /* The predicate is read-only. Native text takes its original delay body
+   * after adapting the verified price digit; enhanced text keeps its own clock. */
+  ArRegionalCostSnapshot prices;
+  if (ActRaiserRegional_CopyPrices(&prices)) ActRaiserMiracle_UpdateNativeDigit(cpu, &prices);
+  if (!EnhancedGlyphDelay()) {
+    s_native_glyph_delay = true;
+    const RecompReturn result = bank_01_9278_M1X0(cpu);
+    s_native_glyph_delay = false;
+    return result;
+  }
   const ActRaiserLocalizationDialogueHost host = Host(cpu);
   if (!s_skipping_menu_text && !ActRaiserSimMenu_DescriptionAborted())
     ActRaiserLocalizationRuntime_RevealGlyph((uint8_t)cpu->A, &host);

@@ -6,6 +6,8 @@
 
 #include <stdio.h>
 #include "actraiser/actraiser_sim_menu.h"
+#include "actraiser/actraiser_regional_runtime.h"
+#include "actraiser/actraiser_miracle_translation.h"
 #include "localization/unicode_grapheme.h"
 #include "actraiser/actraiser_localization_style.h"
 #include <stdlib.h>
@@ -391,6 +393,8 @@ static bool EnsureConfigured(void) {
   if (!was_scheduled && !SynchronizeObservedDialogue(
                             s_runtime.pack ? s_runtime.pack : pack, &error))
     goto reject;
+  ActRaiserMiracle_ConstrainText(&selection,s_runtime.session.state.message_id,
+                                &s_runtime.values.prices);
   if (s_runtime.session.state.message_id[0] &&
       !ArDialogueSession_SwitchBounded(&s_runtime.session, &selection,
                                        kArLocalizationFrameTextCapacity, &error))
@@ -487,6 +491,7 @@ static bool CaptureValuesForPack(const ArLanguagePack *pack) {
       &s_runtime.values, g_ram, kActRaiserWramSize,
       pack, s_runtime.native_pack.content_revision
           ? &s_runtime.native_pack : NULL, master_name);
+  if (captured && !ActRaiserRegional_CopyPrices(&s_runtime.values.prices)) return false;
   memset(&s_runtime.name_entry, 0, sizeof(s_runtime.name_entry));
   (void)ActRaiserLocalizationNameEntry_Capture(
       &s_runtime.name_entry, g_ram, kActRaiserWramSize);
@@ -901,6 +906,7 @@ static bool SynchronizeObservedDialogue(const ArLanguagePack *values_pack,
       return false;
     }
     ValueResolver(&s_runtime.values, &resolver);
+    ActRaiserMiracle_ConstrainText(&selection,route->semantic_id,&s_runtime.values.prices);
     if (!ArDialogueSession_BeginBounded(&s_runtime.session, &selection,
                                         route->semantic_id, &resolver,
                                         kArLocalizationFrameTextCapacity, error))
@@ -988,6 +994,7 @@ bool ActRaiserLocalizationRuntime_BeginDialogue(
   ContentSelection(&selection);
   ValueResolver(&s_runtime.values, &resolver);
   ArLanguagePackError error = {{0}};
+  ActRaiserMiracle_ConstrainText(&selection,route->semantic_id,&s_runtime.values.prices);
   if (!ArDialogueSession_BeginBounded(&s_runtime.session, &selection,
                                       route->semantic_id, &resolver,
                                       kArLocalizationFrameTextCapacity, &error)) {

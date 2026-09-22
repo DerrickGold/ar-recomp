@@ -67,8 +67,24 @@ func TestReferenceAndEditorFreeValidation(t *testing.T) {
 		t.Fatal(err)
 	}
 	coverage := validation.TextCoverage
-	if coverage.Profile != "us" || !coverage.Runtime || coverage.Required.Total != 495 ||
-		coverage.LiveOptional.Total != 32 || len(coverage.Surfaces) != 6 || len(coverage.Dormant) != 2 {
+	refs, err := lk.AuthorReferences("us")
+	if err != nil {
+		t.Fatal(err)
+	}
+	required, optional := 0, 0
+	for _, ref := range refs {
+		if !ref.NativeInProfile {
+			continue
+		}
+		if ref.RequiredForComplete {
+			required++
+		}
+		if ref.USRuntimeUsage == "live_optional" {
+			optional++
+		}
+	}
+	if coverage.Profile != "us" || !coverage.Runtime || coverage.Required.Total != required ||
+		coverage.LiveOptional.Total != optional || len(coverage.Surfaces) != 6 || len(coverage.Dormant) != 2 {
 		t.Fatal("CLI omitted authoritative text coverage", out.String())
 	}
 	path := filepath.Join(t.TempDir(), "reference.json")

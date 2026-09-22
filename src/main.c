@@ -74,6 +74,8 @@
 #include "runtime_diagnostics.h"
 #include "runtime_settings.h"
 #include "save_system.h"
+#include "host/campaign_identity.h"
+#include "actraiser/actraiser_regional_runtime.h"
 #include "scheduled_settings.h"
 #include "session_fatal.h"
 #include "session_recovery.h"
@@ -1635,6 +1637,11 @@ static void AppBoot_InstallSubsystems(AppBoot *app) {
   Diorama_LoadLayerManifest();
   SettingsOverlay_SetInspectorInfoProvider(
       HostDevTools_FormatInspectorInfo);
+  static const SettingsOverlayRegionalHooks kRegionalHooks = {
+    .copy = ActRaiserRegional_CopyPricingView,
+    .request = ActRaiserRegional_RequestPricing,
+  };
+  SettingsOverlay_SetRegionalHooks(&kRegionalHooks);
   /* The layer editor (Settings > Layers, developer-only) edits the override
    * table loaded above and writes the manifest back. Injected rather than called
    * directly from the overlay so that file stays testable without diorama.c --
@@ -1815,6 +1822,10 @@ static void AppBoot_StartGame(AppBoot *app) {
   OracleTrace_Init(RtlGameRunner());
   ForcedInput_Init();
   InputReplay_Init();
+  if (!ActRaiserRegional_Initialize(HostCampaignIdentity_Create, NULL))
+    Die("Regional campaign storage could not be initialized; saves preserved.");
+  if (!InputReplay_SetPolicyDigest(ActRaiserRegional_ReplayDigest, NULL))
+    Die("Regional replay identity could not be initialized.");
   /* A replay must not mutate the player's configuration, for the same reason it
    * refuses to persist SRAM. Set from the same predicate so the two protections
    * cannot drift apart. */
@@ -1828,14 +1839,6 @@ static void AppBoot_StartGame(AppBoot *app) {
   }
   ScheduledSettings_Init();
 
-  if (!HostAudio_Init(Settings_AudioFrequencyHz(), g_settings.audio_samples,
-                      g_settings.audio_master_volume,
-                      g_settings.audio_enabled)) {
-    Die("The selected audio output could not be opened. Check the system "
-        "output device, then restart the game. You can also change the "
-        "audio buffer or sample-rate setting before launching again.");
-  }
-
   /* Do not silently run a debug replay from power-on when its requested start
    * state cannot be restored. Runner snapshots omit the recompiled CPU and
    * suspended game continuation; even a native-font restore is unsafe. */
@@ -1845,11 +1848,19 @@ static void AppBoot_StartGame(AppBoot *app) {
           "recompiled game execution. No snapshot was loaded. Unset "
           "AR_LOADSTATE and use a battery save with an input recording.");
     } }
-  /* Canonical replay identity is defined by the state that will execute its
-   * first recorded runner tick. Unsupported boot restores fail before a
-   * misleading replay identity can be validated or written. */
+  /* Bind cold-boot state before starting asynchronous audio production, whose
+   * demand callback can advance APU state even before the first game tick.
+   * Unsupported restores fail before any replay header is written. */
   if (!InputReplay_BeginSession(RtlGameRunner(), RtlGameIdentifier()))
     Die(InputReplay_LastError());
+
+  if (!HostAudio_Init(Settings_AudioFrequencyHz(), g_settings.audio_samples,
+                      g_settings.audio_master_volume,
+                      g_settings.audio_enabled)) {
+    Die("The selected audio output could not be opened. Check the system "
+        "output device, then restart the game. You can also change the "
+        "audio buffer or sample-rate setting before launching again.");
+  }
 }
 
 /* Drop resource caches before checking the rebuilt feature set. A retained

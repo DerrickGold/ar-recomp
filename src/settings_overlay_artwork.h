@@ -30,8 +30,20 @@ typedef enum SettingsOverlayIcon {
 } SettingsOverlayIcon;
 enum { kIconSize = 16 };
 
+/* Region markers describe rule/media provenance, never the player's language.
+ * Keep text labels beside them. Europe is one regional emblem; it must not
+ * imply a French/German gameplay profile. Mixed is deliberately not a flag. */
+typedef enum SettingsOverlayRegionBadge {
+  kOverlayRegionBadge_US,
+  kOverlayRegionBadge_Japan,
+  kOverlayRegionBadge_Europe,
+  kOverlayRegionBadge_Mixed,
+  kOverlayRegionBadge_Count,
+} SettingsOverlayRegionBadge;
+enum { kRegionBadgeWidth = 24, kRegionBadgeHeight = 16 };
+
 typedef struct SettingsOverlayArtwork {
-  ArRenderTexture fonts[kTextStyle_Count], debug_font, icons, dialog_frame;
+  ArRenderTexture fonts[kTextStyle_Count], debug_font, icons, dialog_frame, region_badges;
   bool glyph_defined[256];
 } SettingsOverlayArtwork;
 

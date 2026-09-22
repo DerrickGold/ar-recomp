@@ -6,6 +6,8 @@
 #include "settings.h"
 #include "actraiser/actraiser_localization_schedule.h"
 #include "actraiser/actraiser_localization_runtime.h"
+#include "actraiser/actraiser_regional_runtime.h"
+#include "actraiser/actraiser_miracle.h"
 
 typedef RecompReturn (*Routine)(CpuState *);
 #define NATIVE_VARIANTS(pc) \
@@ -114,7 +116,16 @@ bool ActRaiserSimMenu_OwnsPresentation(void) {
 }
 
 void ActRaiserSimMenu_CopyModel(SimMenuModel *model) {
-  if (model) *model=s_menu;
+  if (model) {
+    *model=s_menu;
+    ArRegionalCostSnapshot prices;
+    if (ActRaiserRegional_CopyPrices(&prices)) {
+      for (unsigned action=5; action<=9; ++action) {
+        ArRegionalCostRule rule;
+        if (ActRaiserMiracle_Rule(action,&rule)) model->miracle_sp[action-5]=prices.price[rule];
+      }
+    }
+  }
 }
 
 void ActRaiserSimMenu_CopyHelp(SimMenuHelpPage *page) { if(page) *page=s_help; }
@@ -337,16 +348,22 @@ RecompReturn ActRaiser_SimMenuBrowse(CpuState *c) {
 
 bool ActRaiser_SimMenuActionEntry(CpuState *c) {
   if (s_action_guard) { s_action_guard=false; return false; }
-  return c && s_owner && cpu_read16(c,0,c->S+1) == 0x81c3;
+  return c && (s_owner || ActRaiserRegional_MiracleEntry(c)) &&
+      cpu_read16(c,0,c->S+1) == 0x81c3;
 }
 
 RecompReturn ActRaiser_SimMenuAction(CpuState *c) {
   s_action=(uint8_t)c->A;
   if (s_action == 12 || s_action == 13) s_menu.phase=kSimMenu_Native;
   s_confirmation_cancelled=false;
-  s_action_guard=true;
-  const RecompReturn result=kNative81D7[Mode(c)](c);
-  if (!s_owner) return result; /* A native scene change may have retired us. */
+  RecompReturn result;
+  if (ActRaiserRegional_MiracleEntry(c)) result=ActRaiserRegional_RunMiracle(c);
+  else {
+    s_action_guard=true;
+    result=kNative81D7[Mode(c)](c);
+    s_action_guard=false;
+  }
+  if (!s_owner) { s_action=0; return result; } /* Native scene changes can retire us. */
   if (result == RECOMP_RETURN_NORMAL && s_confirmation_cancelled) {
     /* Native cancellation already performed its cleanup and release wait.
      * Ask the original owner to reopen at the same native node. */

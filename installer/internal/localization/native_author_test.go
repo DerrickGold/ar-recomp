@@ -312,6 +312,11 @@ func TestNativeAuthorCompleteSourceRuntimeParity(t *testing.T) {
 				// Invented text only; no retail wording in the primary Go/C gate.
 				// Fields the game reserves a single row for get a single row.
 				ops = append(ops, Operation{"op": "text", "value": "Most excellent, élève! 日本語"})
+				if strings.HasPrefix(ref.ID, "sim.miracle.") && strings.HasSuffix(ref.ID, ".insufficient_sp") {
+					prices := map[string]string{"lightning": "10", "rain": "20", "sun": "30", "wind": "80", "earthquake": "160"}
+					key := strings.TrimSuffix(strings.TrimPrefix(ref.ID, "sim.miracle."), ".insufficient_sp")
+					ops = []Operation{{"op": "text", "value": "Most excellent! This takes " + prices[key] + " SP."}}
+				}
 				if ref.Presentation.MaximumLines != 1 {
 					ops = append(ops, Operation{"op": "line_break"}, Operation{"op": "text", "value": "Party on!"})
 				}

@@ -39,6 +39,9 @@ game-assets/manifest.ini
 *.smc
 *.srm
 *.srm.bak
+# Save checkpoint companions embed private native SRAM images.
+*.archeckpoint
+*.archeckpoint.tmp
 *.png
 *.ppm
 *.wav

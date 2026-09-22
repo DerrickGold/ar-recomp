@@ -1,4 +1,5 @@
 #include "sha256.h"
+#include "snesrecomp/support/digest.h"
 
 #include <string.h>
 
@@ -165,4 +166,10 @@ void sha256_compute(const uint8_t *data, size_t length, uint8_t digest[32]) {
     sha256_init(&context);
     sha256_update(&context, data, length);
     sha256_final(&context, digest);
+}
+
+bool sr_support_sha256(const void *data, size_t length, uint8_t out[32]) {
+    if (!out || (!data && length)) return false;
+    sha256_compute(data, length, out);
+    return true;
 }

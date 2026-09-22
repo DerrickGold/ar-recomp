@@ -9,6 +9,11 @@
 #include "render/render_device.h"
 #include "localization/text_backend.h"
 #include "settings_overlay_render.h"
+#include "settings_overlay_regions.h"
+
+/* Game-owned campaign settings, injected as copied views and guarded edits.
+ * Never persisted through the global settings.ini registry. */
+void SettingsOverlay_SetRegionalHooks(const SettingsOverlayRegionalHooks *hooks);
 
 /* Host-owned settings overlay. It consumes SDL input before the SNES joypad
  * path and renders through the portable device after the emulated framebuffer

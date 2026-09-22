@@ -696,6 +696,16 @@ void cpu_tailcall_request(uint32 pc24, uint16 miss_stack,
     g_tailcall_src24 = source_pc24 & 0xffffffu;
 }
 
+int cpu_hle_tailcall_request(uint32 pc24, uint32 source_pc24) {
+    if (g_recomp_stack_top <= 0 || g_recomp_stack_top > kRecompStackCapacity)
+        return 0;
+    const unsigned owner = (unsigned)(g_recomp_stack_top - 1);
+    const uint16 entry_stack = g_cpu_entry_s[owner];
+    cpu_tailcall_inherit_return_context(entry_stack, g_cpu_entry_hrv[owner]);
+    cpu_tailcall_request(pc24, entry_stack, source_pc24);
+    return 1;
+}
+
 CpuReturnScope *g_cpu_return_scope;
 CpuReturnScope *g_cpu_owned_unwind_scope;
 

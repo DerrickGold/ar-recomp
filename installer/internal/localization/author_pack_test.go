@@ -363,8 +363,22 @@ func assertAuthorPackRuntime(t *testing.T, probe, root string, p *AuthorPack) {
 	for _, script := range p.workspace.scripts {
 		messages = append(messages, script.Messages()...)
 	}
-	if actual.Metadata != metadata || !reflect.DeepEqual(actual.Fonts, p.Manifest().Fonts()) || actual.Revision != fmt.Sprintf("%016x", p.RuntimeRevision()) || !reflect.DeepEqual(messages, actual.Messages) {
-		t.Fatal("whole pack Go/C drift", actual.Revision, fmt.Sprintf("%016x", p.RuntimeRevision()))
+	if actual.Metadata != metadata {
+		t.Fatalf("Go/C metadata drift: Go=%+v C=%+v", metadata, actual.Metadata)
+	}
+	if !reflect.DeepEqual(actual.Fonts, p.Manifest().Fonts()) {
+		t.Fatalf("Go/C font drift: Go=%+v C=%+v", p.Manifest().Fonts(), actual.Fonts)
+	}
+	if actual.Revision != fmt.Sprintf("%016x", p.RuntimeRevision()) {
+		t.Fatalf("Go/C revision drift: Go=%016x C=%s", p.RuntimeRevision(), actual.Revision)
+	}
+	if len(messages) != len(actual.Messages) {
+		t.Fatalf("Go/C message count drift: Go=%d C=%d", len(messages), len(actual.Messages))
+	}
+	for i, message := range messages {
+		if !reflect.DeepEqual(message, actual.Messages[i]) {
+			t.Fatalf("Go/C message drift at %d: Go=%+v C=%+v", i, message, actual.Messages[i])
+		}
 	}
 }
 

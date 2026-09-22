@@ -86,6 +86,11 @@ bool Save_LoadFile(SaveFileFormat format, const char *path,
                    uint8_t out[kActRaiserSramSize], SaveError *error);
 bool Save_WriteFile(SaveFileFormat format, const char *path,
                     const uint8_t sram[kActRaiserSramSize], SaveError *error);
+/* Save companions share the native writer's flush/atomic-replace semantics.
+ * This writes only the supplied auxiliary path, never live SRAM. The owning
+ * codec validates its version/size and coordinates its checkpoint first. */
+bool Save_WriteCompanionFile(const char *path, const void *data, size_t size,
+                             SaveError *error);
 
 /* Runtime owner for the one canonical g_sram image. The active backend is
  * snapshotted at boot; changing the corresponding setting takes effect after
@@ -101,6 +106,37 @@ bool SaveSystem_MigrateLegacyNative(const char *legacy_path,
 bool SaveSystem_LoadActive(SaveError *error);
 bool SaveSystem_WriteActive(SaveError *error);
 bool SaveSystem_AutoPersistIfChanged(SaveError *error);
+/* Native story saves are multi-write transactions. The game adapter brackets
+ * the complete writer, including checksum stores; frame/shutdown polls must
+ * not persist intermediate images. An aborted writer stays blocked until a
+ * successful reload/reattach, rather than flushing partial SRAM on shutdown. */
+bool SaveSystem_BeginNativeWrite(SaveError *error);
+bool SaveSystem_EndNativeWrite(bool completed, SaveError *error);
+/* Last loaded/successfully persisted canonical image, independent of the
+ * session-only auto-persist shadow. False leaves out unchanged (empty slot). */
+bool SaveSystem_CopyDurableImage(uint8_t out[kActRaiserSramSize]);
+typedef enum SaveCommitKind {
+  kSaveCommit_Automatic,
+  kSaveCommit_Story,
+  kSaveCommit_Editor,
+  kSaveCommit_Import,
+} SaveCommitKind;
+
+/* Optional game feature coordinator. commit replaces (not supplements) the
+ * native write and must persist both image and companions before success.
+ * expected is the last durable image, not the session shadow; NULL = no file.
+ * prepare_story snapshots feature state at native completion without I/O.
+ * No CPU, overlay or regional-policy types cross this boundary. */
+typedef struct SaveCommitHost {
+  void *context;
+  bool (*prepare_story)(void *context, SaveError *error);
+  bool (*commit)(void *context, SaveFileFormat format, const char *path,
+                 const uint8_t *expected, const uint8_t *image,
+                 SaveCommitKind kind, const char *import_path, SaveError *error);
+  void (*reloaded)(void *context);
+} SaveCommitHost;
+/* Attach clears the host. Install after initial load. Caller owns context. */
+bool SaveSystem_SetCommitHost(const SaveCommitHost *host);
 void SaveSystem_ResyncShadow(void);
 /* Mark a live-SRAM subrange as session-only without concealing unrelated
  * game writes. A later native save still persists the complete live image. */

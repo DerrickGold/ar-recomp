@@ -16,6 +16,13 @@ typedef struct InputReplayFrameResult {
  * canonical runner replay container. */
 void InputReplay_Init(void);
 
+/* Optional game-owned semantic extension. The callback returns a deterministic
+ * policy digest, excluding random storage IDs and presentation-only settings.
+ * baseline=true preserves historical native replay identity byte-for-byte.
+ * Install after Init and before BeginSession. Never performs I/O on a tick. */
+typedef bool (*InputReplayPolicyDigest)(void *context, uint8_t out[32], bool *baseline);
+bool InputReplay_SetPolicyDigest(InputReplayPolicyDigest digest, void *context);
+
 /* Bind the loaded/recording artifact to the initialized runner state before
  * its first tick. This validates a canonical replay's game and
  * initial-state identity and writes the header for a new recording. */
@@ -40,6 +47,11 @@ const char *InputReplay_LastError(void);
 /* Replay runs must never persist SRAM, even if the configured file failed to
  * open: the environment setting itself marks the session as diagnostic. */
 bool InputReplay_ShouldProtectSaveData(void);
+
+/* Host policy edits are not input-stream events. Refuse them during recording
+ * or diagnostic replay (including a live handoff), and after initialization
+ * failures. Initial policy loading before BeginSession is a separate owner. */
+bool InputReplay_PolicyChangesAllowed(void);
 
 void InputReplay_Shutdown(void);
 

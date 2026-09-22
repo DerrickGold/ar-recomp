@@ -807,6 +807,16 @@ type rather than asking authors to memorize it.
 Values are snapshotted when a semantic message begins. A language switch does
 not mix counters or names captured at different moments.
 
+The five `sim.miracle.*.insufficient_sp` messages also support live prices:
+`{miracle_lightning_sp}`, `{miracle_rain_sp}`, `{miracle_sunlight_sp}`,
+`{miracle_wind_sp}`, and `{miracle_earthquake_sp}` respectively. Use the matching
+placeholder instead of writing a fixed SP amount. New ROM extractions insert
+these automatically, including Japanese references. The value comes from the
+gameplay transaction, not the translation's locale. With non-US prices, an
+older message lacking its price placeholder falls back to compatible native
+enhanced text, or to the original font with corrected digits if that enhanced
+fallback is also old. Other messages and the selected language stay unchanged.
+
 Number placeholders may request a minimum digit count: `{master_level:02}`
 or `{city_northwall_population:03}`. These display `02` and `002` for a value
 of 2. Formats `01` through `09` are supported; larger values are never

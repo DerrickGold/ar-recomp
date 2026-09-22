@@ -13,6 +13,14 @@
 #include "localization/language_contract.h"
 #include "save_system.h"
 #include "settings.h"
+#include "actraiser/actraiser_regional_runtime.h"
+
+static ArRegionalCostSource s_price_source = kArRegionalCost_US;
+bool ActRaiserRegional_CopyPrices(ArRegionalCostSnapshot *prices) {
+  ArRegionalCostPolicy baseline;
+  return ArRegionalCosts_Init(&baseline,s_price_source) &&
+      ArRegionalCosts_Resolve(&baseline,prices);
+}
 
 uint8 g_ram[kActRaiserWramSize];
 Settings g_settings;
@@ -190,6 +198,16 @@ static void CaptureWithTransform(bool mode7_transformed) {
 }
 
 static void Capture(void) { CaptureWithTransform(false); }
+
+RecompReturn bank_01_9278_M1X0(CpuState *cpu) {
+  CHECK(!ActRaiser_LocalizationScheduleGlyphDelay(cpu));
+  cpu->A &= 0xff00u;
+  cpu->_flag_C = cpu->_flag_Z = 1;
+  cpu->_flag_N = 0;
+  cpu->P = (cpu->P & ~0x83u) | 3u;
+  cpu->S += 2;
+  return RECOMP_RETURN_NORMAL;
+}
 
 RecompReturn bank_01_9284_M1X0(CpuState *cpu) {
   CHECK(cpu->m_flag == 1 && cpu->x_flag == 0 && cpu->host_return_valid == 1);
@@ -1297,7 +1315,24 @@ static void TestNativeMenuContinuation(void) {
   s_menu_aborted = s_menu_describing = s_first_poll_held = false;
 }
 
+static void TestNativePriceDelay(void) {
+  CpuState cpu = {.PB=1, .DB=1, .S=0x1e0, .m_flag=1, .X=2, .Y=0xfcd7, .A=3};
+  cpu_write16(&cpu, 0, cpu.S+1, 0x9026);
+  s_rom[0xfcd6]='0';
+  cpu_write8(&cpu, 0x7f, 0xb000, '0');
+  s_price_source=kArRegionalCost_Japan;
+  const CpuState before=cpu;
+  CHECK(ActRaiser_LocalizationScheduleGlyphDelay(&cpu));
+  CHECK(!memcmp(&cpu,&before,sizeof(cpu)));
+  CHECK(cpu_read8(&cpu,0x7f,0xb000)=='0'); /* predicate doesn't write */
+  CHECK(ActRaiser_LocalizationGlyphDelay(&cpu)==RECOMP_RETURN_NORMAL);
+  CHECK(cpu_read8(&cpu,0x7f,0xb000)=='2');
+  CHECK(cpu.S==0x1e2 && cpu.A==0 && cpu._flag_C && cpu._flag_Z);
+  s_price_source=kArRegionalCost_US;
+}
+
 int main(void) {
+  TestNativePriceDelay();
   TestStructuredNormalization();
   WriteNativeFixture(false);
   ArLanguagePackFileIo_Init(&s_file_pack_io);

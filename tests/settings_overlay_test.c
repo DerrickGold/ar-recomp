@@ -9,6 +9,7 @@
 #include "settings.h"
 #include "randomizer.h"
 #include "settings_overlay.h"
+#include "settings_overlay_artwork.h"
 #include "settings_overlay_localization.h"
 #include "settings_overlay_layers_localization.h"
 #include "performance_overlay.h"
@@ -200,6 +201,87 @@ static void RowToKey(const char *key) {
     CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
   }
   CHECK(!"row not reachable");
+}
+
+static ActRaiserRegionalPricingView s_fake_region;
+static bool s_fake_region_active;
+static unsigned s_region_edits;
+static bool FakeRegionalView(ActRaiserRegionalPricingView *out) {
+  if (!s_fake_region_active) return false;
+  *out = s_fake_region;
+  return true;
+}
+static ActRaiserRegionalEditResult FakeRegionalEdit(const ActRaiserRegionalPricingView *view,
+    ArRegionalCostGroup group, ArRegionalCostSource source) {
+  ++s_region_edits;
+  CHECK(view->revision == s_fake_region.revision);
+  CHECK(!memcmp(view->campaign, s_fake_region.campaign, sizeof(view->campaign)));
+  CHECK(s_fake_region.editable);
+  CHECK(ArRegionalCosts_SetGroup(&s_fake_region.requested, group, source));
+  ++s_fake_region.revision;
+  return kActRaiserRegionalEdit_Applied;
+}
+
+static void CheckRegionalControls(SDL_Renderer *renderer, SDL_Surface *surface) {
+  SettingsOverlay_Close();
+  SettingsOverlay_Open();
+  const Settings before = g_settings;
+  SettingsOverlayRegionalHooks hooks = {FakeRegionalView, FakeRegionalEdit};
+  SettingsOverlay_SetRegionalHooks(&hooks);
+  NavToSection(kSection_Localization);
+  NavToTab(3);
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "regional_no_campaign"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
+  CHECK(s_region_edits == 0);
+  s_fake_region_active = true;
+  s_fake_region = (ActRaiserRegionalPricingView){.revision = 7, .editable = true, .campaign = {42}};
+  CHECK(ArRegionalCosts_Init(&s_fake_region.requested, kArRegionalCost_US));
+  s_fake_region.effective = s_fake_region.requested;
+  SettingsOverlay_Refresh();
+  RowToKey("regional_scroll_prices");
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
+  CHECK(s_region_edits == 1);
+  CHECK(s_fake_region.requested.source[kArRegionalCost_Light] == kArRegionalCost_Japan);
+  CHECK(s_fake_region.effective.source[kArRegionalCost_Light] == kArRegionalCost_US);
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "regional_miracle_prices"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_LEFT, true, false));
+  CHECK(s_region_edits == 2);
+  CHECK(s_fake_region.requested.source[kArRegionalCost_Rain] == kArRegionalCost_Europe);
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "regional_scroll_prices")); /* no global reset row */
+  s_fake_region.editable = false;
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  CHECK(s_region_edits == 2);
+  CHECK(!memcmp(&before, &g_settings, sizeof(before)));
+  s_fake_region.editable = true;
+  SettingsOverlay_Close(); /* clear transient status for the preview */
+  SettingsOverlay_Open();
+  NavToSection(kSection_Localization);
+  NavToTab(3);
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  if (renderer && surface) {
+    for (int locale = 0; locale < kArUiLocale_Count; ++locale) {
+      g_settings.interface_language = locale;
+      SDL_SetRenderDrawColor(renderer, 32, 24, 16, 255);
+      CHECK(SDL_RenderClear(renderer));
+      SettingsOverlay_Render((ArRenderRectI){0, 0, surface->w, surface->h});
+      CHECK(SDL_RenderPresent(renderer));
+      const char *preview = getenv("AR_OVERLAY_REGIONAL_TEST_BMP");
+      if (preview && preview[0]) {
+        char path[1024];
+        const int length = snprintf(path, sizeof(path), "%s-%s.bmp", preview,
+                                     ArUiCatalog_LocaleTag((ArUiLocale)locale));
+        CHECK(length > 0 && length < (int)sizeof(path));
+        if (length > 0 && length < (int)sizeof(path)) CHECK(SDL_SaveBMP(surface, path));
+      }
+    }
+    g_settings.interface_language = before.interface_language;
+  }
+  SettingsOverlay_SetRegionalHooks(NULL);
+  SettingsOverlay_Close();
 }
 
 static bool s_dump_catalog;
@@ -530,7 +612,7 @@ static void CheckInterfaceCatalogs(SDL_Renderer *renderer, SDL_Surface *surface)
                       "overlay.group.quality_of_life", NULL)));
     /* Traversal, help, and reset prompts use the actual shaped overlay. The
      * same loop also runs in no-TTF builds, which must remain English/readable. */
-    for (int tab = 0; tab < 3; ++tab) {
+    for (int tab = 0; tab < 4; ++tab) {
       NavToTab(tab);
       if (renderer && surface) {
         SDL_SetRenderDrawColor(renderer, 32, 24, 16, 255);
@@ -1099,6 +1181,50 @@ static void CheckPerformanceOverlay(ArRenderDevice *device, SDL_Renderer *render
   PerformanceOverlay_Reset(device);
 }
 
+static uint64_t CheckRegionBadges(ArRenderDevice *device, SDL_Renderer *renderer,
+                                SDL_Surface *surface, bool capture) {
+  if (!surface || surface->w < 448 || surface->h < 88) {
+    CHECK(surface && surface->w >= 448 && surface->h >= 88);
+    return 0;
+  }
+  const SettingsOverlayArtwork *art = SettingsOverlayArtwork_Get();
+  CHECK(ArRenderTexture_IsValid(art->region_badges));
+  CHECK(ArRenderDevice_UseOutputCoordinates(device));
+  CHECK(ArRenderDevice_Clear(device, (ArRenderColorF){0.04f, 0.06f, 0.10f, 1}));
+  static const char *labels[] = {"US", "JAPAN", "EUROPE", "CUSTOM"};
+  for (int badge = 0; badge < kOverlayRegionBadge_Count; ++badge) {
+    const ArRenderRectF source = {
+      (float)(badge * kRegionBadgeWidth), 0, kRegionBadgeWidth, kRegionBadgeHeight};
+    const ArRenderRectF destination = {(float)(8 + badge * 112), 8, 96, 64};
+    CHECK(ArRenderDevice_DrawTexture(device, art->region_badges, &source, &destination));
+    for (unsigned i = 0; labels[badge][i]; ++i) {
+      unsigned ch = (unsigned char)labels[badge][i];
+      ArRenderRectF glyph = {(float)((ch % 16) * 8), (float)((ch / 16) * 8), 8, 8};
+      ArRenderRectF cell = {(float)(8 + badge * 112 + i * 8), 80, 8, 8};
+      CHECK(ArRenderDevice_DrawTexture(device, art->fonts[kText_Normal], &glyph, &cell));
+    }
+  }
+  CHECK(SDL_RenderPresent(renderer));
+  /* Include every pixel in the magnified badges; compare before/after device
+   * reset below. Check characteristic colors as well, not just nonempty art. */
+  uint64_t hash = UINT64_C(14695981039346656037);
+  for (int y = 8; y < 72; ++y) {
+    const uint32_t *row = (const uint32_t *)((const uint8_t *)surface->pixels + y * surface->pitch);
+    for (int x = 8; x < 440; ++x) { hash ^= row[x]; hash *= UINT64_C(1099511628211); }
+  }
+  const uint32_t *flag_row = (const uint32_t *)((const uint8_t *)surface->pixels +
+                                              (8 + 7 * 4) * surface->pitch);
+  CHECK(flag_row[8 + 20 * 4] == 0xffff0000u);          /* US red stripe */
+  CHECK(flag_row[8 + 112 + 11 * 4] == 0xffff0000u);    /* Japanese disc */
+  CHECK(flag_row[8 + 112 + 3 * 4] == 0xffffffffu);     /* Japanese field */
+  CHECK(flag_row[8 + 224 + 2 * 4] == 0xff3152a4u);     /* European field */
+  if (capture) {
+    const char *preview = getenv("AR_OVERLAY_REGION_BADGES_BMP");
+    if (preview && *preview) CHECK(SDL_SaveBMP(surface, preview));
+  }
+  return hash;
+}
+
 int main(int argc, char **argv) {
   if (argc == 2 && !strcmp(argv[1], "--dump-layer-help")) {
     s_dump_catalog = true;
@@ -1150,11 +1276,13 @@ int main(int argc, char **argv) {
   size_t rom_size = 0;
   uint8_t *rom_data = ReadOptionalRom(&rom_size);
   CHECK(SettingsOverlay_Init(&render_device, NULL, rom_data, rom_size));
+  const uint64_t region_badges = CheckRegionBadges(&render_device, renderer, surface, false);
   SettingsOverlay_SetManualHooks(&kFakeManualHooks);
   /* Device-reset recovery: rebuild every atlas in place. All rendering below
    * runs against the REBUILT textures, so a broken reload shows up in the
    * preview captures too. */
   CHECK(SettingsOverlay_ReloadTextures(rom_data, rom_size));
+  CHECK(CheckRegionBadges(&render_device, renderer, surface, true) == region_badges);
   SettingsOverlay_SetInspectorInfoProvider(InspectorInfo);
   free(rom_data);
   CheckPerformanceOverlay(&render_device, renderer, surface);
@@ -2072,6 +2200,7 @@ int main(int argc, char **argv) {
   SettingsOverlay_Open();
   CheckLayerEditorSection();
   SettingsOverlay_Close();
+  CheckRegionalControls(renderer, surface);
 
   /* Debug panels avoid the inspected point and can be moved without a click
    * falling through to the tool beneath them. */

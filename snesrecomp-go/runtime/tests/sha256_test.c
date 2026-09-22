@@ -1,4 +1,5 @@
 #include "sha256.h"
+#include "snesrecomp/support/digest.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -10,6 +11,9 @@ static int check_vector(const char *message, const uint8_t *data, size_t length,
     uint8_t digest[32];
     char actual_hex[65];
     sha256_compute(data, length, digest);
+    uint8_t public_digest[32];
+    if (!sr_support_sha256(data, length, public_digest) ||
+        memcmp(public_digest, digest, sizeof(digest))) return 1;
     for (size_t index = 0; index < sizeof(digest); ++index) {
         actual_hex[index * 2u] = digits[digest[index] >> 4u];
         actual_hex[index * 2u + 1u] = digits[digest[index] & 0x0Fu];
@@ -58,5 +62,9 @@ int main(void) {
         "two-block padding", two_blocks, sizeof(two_blocks) - 1u,
         "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1");
     failed |= check_incremental();
+    uint8_t unchanged[32] = {0x5a};
+    failed |= sr_support_sha256(NULL, 1, unchanged);
+    failed |= unchanged[0] != 0x5a;
+    failed |= sr_support_sha256(abc, sizeof(abc), NULL);
     return failed;
 }

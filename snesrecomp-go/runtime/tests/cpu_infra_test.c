@@ -801,6 +801,22 @@ static void test_stack_and_tailcalls(void) {
     cpu_tailcall_request(0xff123456u, 0x01c0u, 0xaa654321u);
     check(g_tailcall_pc24 == 0x123456u && g_tailcall_miss_s == 0x01c0u &&
           g_tailcall_src24 == 0x654321u, "tailcall request masking");
+    /* A branch-only HLE can be entered below a pushed target. Reusing live S
+     * instead of the wrapper's inherited context loses the outer host return. */
+    for (unsigned paired = 0; paired < 2; ++paired) {
+        g_cpu_entry_s[0] = 0x01fdu;
+        g_cpu_entry_hrv[0] = (uint8)paired;
+        check(cpu_hle_tailcall_request(0xff009e0eu, 0xaa009de1u), "HLE tail queued");
+        check(g_tailcall_pc24 == 0x009e0eu && g_tailcall_miss_s == 0x01fdu &&
+              g_tailcall_src24 == 0x009de1u, "HLE tail inherits original stack");
+        check(g_recomp_stack_top == 1, "HLE wrapper retains its own pop");
+        check(cpu_take_tailcall_return_context(&entry_stack, &hrv) &&
+              entry_stack == 0x01fdu && hrv == paired, "HLE paired/unpaired context");
+    }
+    RecompStackPop();
+    check(!cpu_hle_tailcall_request(0x1234u, 0x5678u), "HLE tail requires wrapper");
+    check(!cpu_take_tailcall_return_context(NULL, NULL) &&
+          g_tailcall_pc24 == 0x009e0eu, "rejected HLE tail leaves state alone");
 }
 
 static void test_ancestor_skip(void) {

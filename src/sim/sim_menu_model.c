@@ -6,21 +6,21 @@ const uint16_t kSimMenuCategoryPointers[6] = {
     0xf32e, 0xf332, 0xf336, 0xf33d, 0xf341, 0xf345};
 const uint8_t kSimMenuCategoryActionCounts[6] = {2, 2, 5, 2, 2, 2};
 const SimMenuAction kSimMenuActions[15] = {
-    {"sim.menu.return_to_palace", 0, 0, 0, 0xf32f},
-    {"sim.menu.sky_palace_movement", 0, 1, 0, 0xf330},
-    {"sim.menu.building_direction", 1, 0, 0, 0xf333},
-    {"sim.menu.listen", 1, 1, 0, 0xf334},
-    {"sim.menu.lightning", 2, 0, 10, 0xf337},
-    {"sim.menu.rain", 2, 1, 20, 0xf338},
-    {"sim.menu.sun", 2, 2, 30, 0xf339},
-    {"sim.menu.wind", 2, 3, 80, 0xf33a},
-    {"sim.menu.earthquake", 2, 4, 160, 0xf33b},
-    {"sim.menu.take_offering", 3, 0, 0, 0xf33e},
-    {"sim.menu.use_offering", 3, 1, 0, 0xf33f},
-    {"sim.menu.status_master", 4, 0, 0, 0xf342},
-    {"sim.menu.status_cities", 4, 1, 0, 0xf343},
-    {"sim.menu.progress_log", 5, 0, 0, 0xf346},
-    {"sim.menu.message_speed", 5, 1, 0, 0xf347},
+    {"sim.menu.return_to_palace", 0, 0, 0xf32f},
+    {"sim.menu.sky_palace_movement", 0, 1, 0xf330},
+    {"sim.menu.building_direction", 1, 0, 0xf333},
+    {"sim.menu.listen", 1, 1, 0xf334},
+    {"sim.menu.lightning", 2, 0, 0xf337},
+    {"sim.menu.rain", 2, 1, 0xf338},
+    {"sim.menu.sun", 2, 2, 0xf339},
+    {"sim.menu.wind", 2, 3, 0xf33a},
+    {"sim.menu.earthquake", 2, 4, 0xf33b},
+    {"sim.menu.take_offering", 3, 0, 0xf33e},
+    {"sim.menu.use_offering", 3, 1, 0xf33f},
+    {"sim.menu.status_master", 4, 0, 0xf342},
+    {"sim.menu.status_cities", 4, 1, 0xf343},
+    {"sim.menu.progress_log", 5, 0, 0xf346},
+    {"sim.menu.message_speed", 5, 1, 0xf347},
 };
 
 void SimMenuModel_ReleaseBarrier(SimMenuModel *m) {

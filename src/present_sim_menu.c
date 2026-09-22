@@ -543,7 +543,7 @@ static void Browse(const FrameSlot *slot,ArRenderRectI view,
     Icon(view,id,selected,content_x+6,88+row*row_height);
     Label(slot,view,601+row,f->labels[id],content_x+27,92+row*row_height,132);
     if(miracle) {
-      char cost[8]; snprintf(cost,sizeof(cost),"%u",kSimMenuActions[id-6].sp_cost);
+      char cost[8]; snprintf(cost,sizeof(cost),"%u",m->miracle_sp[id-10]);
       LabelGlyphs(view,cost,content_x+content_width-32,92+row*row_height,25);
     }
     if (selected && hint_width &&
@@ -645,7 +645,7 @@ void PresentSimMenu_Draw(const FrameSlot *slot, ArRenderRectI view) {
           text_width-22-(miracle?44:0));
     if (miracle) {
       char label[16];
-      snprintf(label,sizeof(label),"%u SP",kSimMenuActions[action-1].sp_cost);
+      snprintf(label,sizeof(label),"%u SP",m->miracle_sp[action-5]);
       LabelGlyphs(view,label,x+8+text_width-36,text_y+4,36);
     }
     /* Reprepare at the fitted position after header text has used the shared

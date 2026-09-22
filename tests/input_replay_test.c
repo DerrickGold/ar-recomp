@@ -158,6 +158,7 @@ static void TestDefaultStop(const char *path) {
   InputReplay_Init();
   CHECK(InputReplay_BeginSession(NULL, "actraiser"));
   CHECK(InputReplay_ShouldProtectSaveData());
+  CHECK(!InputReplay_PolicyChangesAllowed());
 
   InputReplayFrameResult result = ResolveAt(0x5555, 0xAA);
   CHECK(result.inputs == 0);
@@ -309,6 +310,7 @@ static void TestCanonicalIdentityAndCheckpoint(void) {
   CHECK(setenv("AR_REPLAY_CHECKPOINT_INTERVAL", "1", 1) == 0);
   InputReplay_Init();
   CHECK(InputReplay_BeginSession(FakeRunner(), "actraiser"));
+  CHECK(!InputReplay_PolicyChangesAllowed());
   InputReplayFrameResult result = InputReplay_Resolve(0x111111u);
   CHECK(result.inputs == 0x111111u);
   CHECK(InputReplay_CompleteTick(FakeRunner()));
@@ -378,6 +380,81 @@ static SrResult WriteExact(void *context, const uint8_t *bytes, uint32_t count) 
       ? SR_RESULT_OK : SR_RESULT_INVALID_ARGUMENT;
 }
 
+static bool Policy(void *context, uint8_t out[32], bool *baseline) {
+  const int value = *(const int *)context;
+  if (value < 0) return false;
+  memset(out, value, 32);
+  *baseline = value == 0;
+  return true;
+}
+
+static void TestPolicyIdentity(const char *legacy_path) {
+  ClearEnvironment();
+  char path[] = "/tmp/actraiser-policy-replay-XXXXXX";
+  int fd = mkstemp(path);
+  CHECK(fd >= 0);
+  if (fd < 0) return;
+  close(fd);
+  for (int recorded = 0; recorded <= 1; ++recorded) {
+    ConfigureFakeApi();
+    s_fake_frame_counter = 0; s_fake_digest_byte = 0x71;
+    int policy = recorded;
+    CHECK(setenv("AR_INPUT_RECORD", path, 1) == 0);
+    CHECK(setenv("AR_REPLAY_CHECKPOINT_INTERVAL", "1", 1) == 0);
+    InputReplay_Init();
+    CHECK(InputReplay_SetPolicyDigest(Policy, &policy));
+    CHECK(InputReplay_BeginSession(FakeRunner(), "actraiser"));
+    CHECK(!InputReplay_SetPolicyDigest(NULL, NULL));
+    (void)InputReplay_Resolve(1);
+    CHECK(InputReplay_CompleteTick(FakeRunner()));
+    InputReplay_Shutdown();
+    ClearEnvironment();
+    ConfigureFakeApi();
+    CHECK(setenv("AR_INPUT_REPLAY", path, 1) == 0);
+    InputReplay_Init();
+    CHECK(InputReplay_SetPolicyDigest(Policy, &policy));
+    CHECK(InputReplay_BeginSession(FakeRunner(), "actraiser"));
+    (void)InputReplay_Resolve(0);
+    CHECK(InputReplay_CompleteTick(FakeRunner()));
+    InputReplay_Shutdown();
+    /* Same runner bytes, different rules: reject the starting identity. */
+    policy = recorded + 1;
+    InputReplay_Init();
+    CHECK(InputReplay_SetPolicyDigest(Policy, &policy));
+    CHECK(!InputReplay_BeginSession(FakeRunner(), "actraiser"));
+    CHECK(strstr(InputReplay_LastError(), "initial semantic state") != NULL);
+    InputReplay_Shutdown();
+    /* A change after a matching start is visible in semantic checkpoints. */
+    policy = recorded;
+    InputReplay_Init();
+    CHECK(InputReplay_SetPolicyDigest(Policy, &policy));
+    CHECK(InputReplay_BeginSession(FakeRunner(), "actraiser"));
+    policy = recorded + 2;
+    (void)InputReplay_Resolve(0);
+    CHECK(!InputReplay_CompleteTick(FakeRunner()));
+    CHECK(strstr(InputReplay_LastError(), "semantic checkpoint mismatch") != NULL);
+    InputReplay_Shutdown();
+    ClearEnvironment();
+  }
+  int policy = 1;
+  CHECK(setenv("AR_INPUT_REPLAY", legacy_path, 1) == 0);
+  InputReplay_Init();
+  CHECK(InputReplay_SetPolicyDigest(Policy, &policy));
+  CHECK(!InputReplay_BeginSession(FakeRunner(), "actraiser"));
+  CHECK(strstr(InputReplay_LastError(), "non-native policies") != NULL);
+  InputReplay_Shutdown();
+  ClearEnvironment();
+  ConfigureFakeApi();
+  CHECK(setenv("AR_INPUT_RECORD", path, 1) == 0);
+  policy = -1;
+  InputReplay_Init();
+  CHECK(InputReplay_SetPolicyDigest(Policy, &policy));
+  CHECK(!InputReplay_BeginSession(FakeRunner(), "actraiser"));
+  InputReplay_Shutdown();
+  ClearEnvironment();
+  unlink(path);
+}
+
 // ROM-free canonical fixture generation/counting for the real game-process
 // regression. Keep replay encoding in the runner's public API, never in Go.
 static int ProcessFixture(int argc, char **argv) {
@@ -423,6 +500,26 @@ static int ProcessFixture(int argc, char **argv) {
   return 2;
 }
 
+static void TestPolicyEditPermission(void) {
+  ClearEnvironment();
+  InputReplay_Init();
+  CHECK(!InputReplay_PolicyChangesAllowed());
+  CHECK(InputReplay_BeginSession(NULL,"actraiser"));
+  CHECK(InputReplay_PolicyChangesAllowed());
+  InputReplay_Shutdown();
+  CHECK(!InputReplay_PolicyChangesAllowed());
+  CHECK(setenv("AR_INPUT_REPLAY","/nonexistent-regional-replay.rec",1)==0);
+  InputReplay_Init();
+  CHECK(!InputReplay_PolicyChangesAllowed());
+  InputReplay_Shutdown();
+  ClearEnvironment();
+  CHECK(setenv("AR_INPUT_RECORD","/nonexistent-regional-output/record.rec",1)==0);
+  InputReplay_Init();
+  CHECK(!InputReplay_PolicyChangesAllowed());
+  InputReplay_Shutdown();
+  ClearEnvironment();
+}
+
 int main(int argc, char **argv) {
   if (argc > 1) return ProcessFixture(argc, argv);
   char *path = MakeReplay();
@@ -432,6 +529,8 @@ int main(int argc, char **argv) {
   TestNoStopHoldsLastInput(path);
   TestLiveHandoffAndCombinedRecording(path);
   TestCanonicalIdentityAndCheckpoint();
+  TestPolicyIdentity(path);
+  TestPolicyEditPermission();
 
   CHECK(unlink(path) == 0);
   free(path);

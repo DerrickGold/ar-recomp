@@ -32,7 +32,7 @@ typedef enum SimMenuEvent {
 
 typedef struct SimMenuAction {
   const char *semantic_id;
-  uint8_t category, row, sp_cost;
+  uint8_t category, row;
   uint16_t selection_pointer;
 } SimMenuAction;
 
@@ -43,6 +43,7 @@ typedef struct SimMenuModel {
   SimMenuPhase phase, return_phase;
   uint8_t category, row[kSimMenuCategoryCount];
   uint8_t items[kSimMenuInventoryCapacity], item_count, item_slot;
+  uint16_t miracle_sp[5]; /* published quote; Lightning/Rain/Sun/Wind/Quake */
   bool submenu, yes;
   /* Dialogue that introduces a pending Yes/No or number selector keeps the
    * modern modal presentation while the native interpreter reveals it. */

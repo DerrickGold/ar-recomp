@@ -531,11 +531,88 @@ static void TestLocalizedNameExtension(SaveBackend backend) {
   remove("actraiser-name-extension-test.srm.arname.tmp");
 }
 
+static void TestNativeWriteBoundary(SaveBackend backend) {
+  const char *native = "actraiser-save-boundary-test.srm";
+  const char *ini = "actraiser-save-boundary-test.ini";
+  const char *path = backend == kSaveBackend_Ini ? ini : native;
+  SaveFileFormat format = backend == kSaveBackend_Ini
+      ? kSaveFileFormat_Ini : kSaveFileFormat_NativeSrm;
+  uint8_t live[kActRaiserSramSize], original[kActRaiserSramSize], disk[kActRaiserSramSize];
+  MakeFixture(live);
+  memcpy(original, live, sizeof(live));
+  remove(native); remove(ini);
+  SaveError error = {{0}};
+  CHECK(SaveSystem_Attach(live, sizeof(live), backend, native, ini, &error));
+  memset(disk, 0xa5, sizeof(disk));
+  CHECK(!SaveSystem_CopyDurableImage(disk));
+  CHECK(disk[0] == 0xa5);
+  CHECK(SaveSystem_WriteActive(&error));
+  CHECK(SaveSystem_CopyDurableImage(disk));
+  CHECK(!memcmp(original, disk, sizeof(disk)));
+
+  /* Session-only shadow changes must never alter the durable identity. */
+  live[100] ^= 1;
+  Save_RecomputeChecksum(live);
+  SaveSystem_ResyncShadow();
+  CHECK(SaveSystem_CopyDurableImage(disk));
+  CHECK(!memcmp(original, disk, sizeof(disk)));
+
+  CHECK(SaveSystem_BeginNativeWrite(&error));
+  CHECK(!SaveSystem_BeginNativeWrite(&error));
+  for (int i = 0; i < 8; ++i) {
+    live[200 + i] ^= 1;
+    CHECK(SaveSystem_AutoPersistIfChanged(&error));
+    CHECK(Save_LoadFile(format, path, disk, &error));
+    CHECK(!memcmp(original, disk, sizeof(disk)));
+  }
+  CHECK(!SaveSystem_WriteActive(&error));
+  CHECK(!SaveSystem_LoadActive(&error));
+  CHECK(!SaveSystem_Import(path, false, &error));
+  CHECK(!SaveSystem_Export(format, path, &error));
+  SaveEditRequest edits;
+  SaveEditRequest_Clear(&edits);
+  edits.master_level = 5;
+  CHECK(!SaveSystem_ApplyEdits(&edits, true, true, false, &error));
+  Save_RecomputeChecksum(live);
+  CHECK(SaveSystem_EndNativeWrite(true, &error));
+  CHECK(!SaveSystem_EndNativeWrite(true, &error));
+  CHECK(SaveSystem_AutoPersistIfChanged(&error));
+  CHECK(SaveSystem_CopyDurableImage(disk));
+  CHECK(!memcmp(live, disk, sizeof(disk)));
+  memcpy(original, disk, sizeof(disk));
+
+  /* An interrupted/invalid writer must not be flushed on shutdown, even if
+   * somebody recomputes a checksum afterward. Reload is explicit recovery. */
+  for (int abort = 0; abort < 2; ++abort) {
+    CHECK(SaveSystem_BeginNativeWrite(&error));
+    live[200] ^= 1;
+    CHECK(!SaveSystem_EndNativeWrite(!abort, &error));
+    Save_RecomputeChecksum(live);
+    CHECK(!SaveSystem_AutoPersistIfChanged(&error));
+    CHECK(!SaveSystem_WriteActive(&error));
+    CHECK(!SaveSystem_BeginNativeWrite(&error));
+    CHECK(Save_LoadFile(format, path, disk, &error));
+    CHECK(!memcmp(original, disk, sizeof(disk)));
+    CHECK(SaveSystem_LoadActive(&error));
+    CHECK(!memcmp(original, live, sizeof(live)));
+  }
+  CHECK(SaveSystem_ApplyEdits(&edits, true, true, false, &error));
+  CHECK(SaveSystem_CopyDurableImage(disk));
+  CHECK(!memcmp(live, disk, sizeof(disk)));
+  CHECK(Save_WriteFile(format, path, original, &error));
+  CHECK(SaveSystem_Import(path, false, &error));
+  CHECK(SaveSystem_CopyDurableImage(disk));
+  CHECK(!memcmp(original, disk, sizeof(disk)));
+  remove(native); remove(ini);
+}
+
 int main(void) {
   TestChecksumAndFields();
   TestNativeAndIniCodecs();
   TestLegacyMigration();
   TestRuntimeTransactions();
+  TestNativeWriteBoundary(kSaveBackend_NativeSrm);
+  TestNativeWriteBoundary(kSaveBackend_Ini);
   TestLocalizedNameExtension(kSaveBackend_NativeSrm);
   TestLocalizedNameExtension(kSaveBackend_Ini);
   if (s_failures) {

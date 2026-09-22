@@ -82,6 +82,12 @@ typedef struct SaveRuntime {
   char ini_path[kSaveRuntimePathBytes];
   uint8_t shadow[kActRaiserSramSize];
   bool shadow_valid;
+  uint8_t durable[kActRaiserSramSize];
+  bool durable_valid;
+  bool native_write_active;
+  bool native_write_aborted;
+  bool story_pending;
+  SaveCommitHost commit_host;
   bool backup_taken;
   bool localized_name_valid;
   bool localized_name_dirty;
@@ -577,6 +583,27 @@ static const char *ActivePath(void) {
       ? s_runtime.ini_path : s_runtime.native_path;
 }
 
+typedef struct CompanionWriteContext {
+  const void *data;
+  size_t size;
+} CompanionWriteContext;
+
+static bool WriteCompanionBody(FILE *file, const void *context, SaveError *error) {
+  const CompanionWriteContext *bytes = context;
+  if (fwrite(bytes->data, 1, bytes->size, file) != bytes->size)
+    return Fail(error, "error writing save companion");
+  return true;
+}
+
+bool Save_WriteCompanionFile(const char *path, const void *data, size_t size,
+                             SaveError *error) {
+  ClearError(error);
+  if (!path || !path[0] || !data || !size)
+    return Fail(error, "invalid save companion write request");
+  const CompanionWriteContext context = {data, size};
+  return WriteAtomic(path, WriteCompanionBody, &context, error);
+}
+
 static SaveFileFormat ActiveFormat(void) {
   return s_runtime.backend == kSaveBackend_Ini
       ? kSaveFileFormat_Ini : kSaveFileFormat_NativeSrm;
@@ -770,13 +797,48 @@ void SaveSystem_ResyncShadowRange(size_t offset, size_t size) {
   memcpy(s_runtime.shadow + offset, s_runtime.live + offset, size);
 }
 
+bool SaveSystem_SetCommitHost(const SaveCommitHost *host) {
+  if (!s_runtime.live || s_runtime.native_write_active ||
+      s_runtime.native_write_aborted || s_runtime.story_pending ||
+      (host && (!host->commit || !host->prepare_story || !host->reloaded)))
+    return false;
+  s_runtime.commit_host = host ? *host : (SaveCommitHost){0};
+  return true;
+}
+
+static bool CommitImage(const uint8_t *image, SaveCommitKind kind,
+                         const char *import_path, SaveError *error) {
+  const SaveCommitHost *host = &s_runtime.commit_host;
+  bool ok = host->commit
+      ? host->commit(host->context, ActiveFormat(), ActivePath(),
+                     s_runtime.durable_valid ? s_runtime.durable : NULL,
+                     image, kind, import_path, error)
+      : Save_WriteFile(ActiveFormat(), ActivePath(), image, error);
+  if (!ok) return false;
+  memcpy(s_runtime.durable, image, kActRaiserSramSize);
+  s_runtime.durable_valid = true;
+  return true;
+}
+
+static void NotifyReload(void) {
+  s_runtime.story_pending = false;
+  if (s_runtime.commit_host.reloaded)
+    s_runtime.commit_host.reloaded(s_runtime.commit_host.context);
+}
+
 bool SaveSystem_LoadActive(SaveError *error) {
   ClearError(error);
   if (!s_runtime.live) return Fail(error, "save system is not attached");
+  if (s_runtime.native_write_active)
+    return Fail(error, "cannot reload during a native save transaction");
   const char *path = ActivePath();
   FILE *probe = sr_fopen(path, "rb");
   if (!probe) {
     if (errno == ENOENT) {
+      s_runtime.durable_valid = false;
+      s_runtime.native_write_active = false;
+      s_runtime.native_write_aborted = false;
+      NotifyReload();
       s_runtime.localized_name_valid = false;
       s_runtime.localized_name_dirty = false;
       SaveSystem_ResyncShadow();
@@ -789,6 +851,11 @@ bool SaveSystem_LoadActive(SaveError *error) {
   }
   fclose(probe);
   if (!Save_LoadFile(ActiveFormat(), path, s_runtime.live, error)) return false;
+  memcpy(s_runtime.durable, s_runtime.live, kActRaiserSramSize);
+  s_runtime.durable_valid = true;
+  s_runtime.native_write_active = false;
+  s_runtime.native_write_aborted = false;
+  NotifyReload();
   SaveSystem_ResyncShadow();
   LoadLocalizedNameExtension();
   fprintf(stderr, "[saves] loaded %s backend from %s\n",
@@ -799,8 +866,12 @@ bool SaveSystem_LoadActive(SaveError *error) {
 bool SaveSystem_WriteActive(SaveError *error) {
   ClearError(error);
   if (!s_runtime.live) return Fail(error, "save system is not attached");
-  if (!Save_WriteFile(ActiveFormat(), ActivePath(), s_runtime.live, error))
+  if (s_runtime.native_write_active || s_runtime.native_write_aborted)
+    return Fail(error, "native save transaction is incomplete; existing save preserved");
+  if (!CommitImage(s_runtime.live, s_runtime.story_pending
+                     ? kSaveCommit_Story : kSaveCommit_Automatic, NULL, error))
     return false;
+  s_runtime.story_pending = false;
   SaveSystem_ResyncShadow();
   return WriteLocalizedNameExtension(error);
 }
@@ -808,15 +879,51 @@ bool SaveSystem_WriteActive(SaveError *error) {
 bool SaveSystem_AutoPersistIfChanged(SaveError *error) {
   ClearError(error);
   if (!s_runtime.live) return Fail(error, "save system is not attached");
+  if (s_runtime.native_write_aborted)
+    return Fail(error, "native save transaction was interrupted; existing save preserved");
+  if (s_runtime.native_write_active) return true;
   if (!s_runtime.shadow_valid) {
     SaveSystem_ResyncShadow();
     return true;
   }
-  if (!memcmp(s_runtime.shadow, s_runtime.live, kActRaiserSramSize))
+  if (!s_runtime.story_pending && !memcmp(s_runtime.shadow, s_runtime.live, kActRaiserSramSize))
     return !s_runtime.localized_name_dirty ||
         WriteLocalizedNameExtension(error);
   if (!SaveSystem_WriteActive(error)) return false;
   fprintf(stderr, "[saves] battery SRAM changed -> wrote %s\n", ActivePath());
+  return true;
+}
+
+bool SaveSystem_BeginNativeWrite(SaveError *error) {
+  ClearError(error);
+  if (!s_runtime.live) return Fail(error, "save system is not attached");
+  if (s_runtime.native_write_active || s_runtime.native_write_aborted)
+    return Fail(error, "cannot enter an unfinished native save transaction");
+  s_runtime.native_write_active = true;
+  return true;
+}
+
+bool SaveSystem_EndNativeWrite(bool completed, SaveError *error) {
+  ClearError(error);
+  if (!s_runtime.native_write_active)
+    return Fail(error, "no native save transaction is active");
+  s_runtime.native_write_active = false;
+  s_runtime.native_write_aborted = !completed || !Save_ChecksumValid(s_runtime.live);
+  if (s_runtime.native_write_aborted)
+    return Fail(error, "native save transaction did not complete a valid image");
+  if (s_runtime.commit_host.prepare_story &&
+      !s_runtime.commit_host.prepare_story(s_runtime.commit_host.context, error)) {
+    s_runtime.native_write_aborted = true;
+    return false;
+  }
+  s_runtime.story_pending = true;
+  fprintf(stderr, "[saves] native story transaction completed\n");
+  return true;
+}
+
+bool SaveSystem_CopyDurableImage(uint8_t out[kActRaiserSramSize]) {
+  if (!out || !s_runtime.durable_valid) return false;
+  memcpy(out, s_runtime.durable, kActRaiserSramSize);
   return true;
 }
 
@@ -938,6 +1045,8 @@ bool SaveSystem_ApplyEdits(const SaveEditRequest *edits,
   ClearError(error);
   if (!s_runtime.live || !edits)
     return Fail(error, "save system is not attached");
+  if (s_runtime.native_write_active || s_runtime.native_write_aborted || s_runtime.story_pending)
+    return Fail(error, "cannot edit an incomplete native save transaction");
   if (!armed) return Fail(error, "save editing is not armed");
   if (!Save_ChecksumValid(s_runtime.live))
     return Fail(error, "current SRAM has no valid save checksum");
@@ -1068,7 +1177,7 @@ bool SaveSystem_ApplyEdits(const SaveEditRequest *edits,
   Save_RecomputeChecksum(scratch);
   if (persist) {
     if (!BackupActiveOnce(auto_backup, error)) return false;
-    if (!Save_WriteFile(ActiveFormat(), ActivePath(), scratch, error))
+    if (!CommitImage(scratch, kSaveCommit_Editor, NULL, error))
       return false;
   }
   memcpy(s_runtime.live, scratch, sizeof(scratch));
@@ -1103,10 +1212,12 @@ bool SaveSystem_Import(const char *path, bool auto_backup, SaveError *error) {
   ClearError(error);
   if (!s_runtime.live || !path || !path[0])
     return Fail(error, "invalid save import request");
+  if (s_runtime.native_write_active || s_runtime.native_write_aborted || s_runtime.story_pending)
+    return Fail(error, "cannot import during an incomplete native save transaction");
   uint8_t scratch[kActRaiserSramSize];
   if (!Save_LoadFile(FormatFromPath(path), path, scratch, error)) return false;
   if (!BackupActiveOnce(auto_backup, error)) return false;
-  if (!Save_WriteFile(ActiveFormat(), ActivePath(), scratch, error)) return false;
+  if (!CommitImage(scratch, kSaveCommit_Import, path, error)) return false;
   memcpy(s_runtime.live, scratch, sizeof(scratch));
   SaveSystem_ResyncShadow();
   /* Import is a save replacement, not a gameplay update. Never carry pending
@@ -1119,6 +1230,8 @@ bool SaveSystem_Export(SaveFileFormat format, const char *path,
                        SaveError *error) {
   ClearError(error);
   if (!s_runtime.live) return Fail(error, "save system is not attached");
+  if (s_runtime.native_write_active || s_runtime.native_write_aborted)
+    return Fail(error, "cannot export an incomplete native save transaction");
   if (!Save_ChecksumValid(s_runtime.live))
     return Fail(error, "current SRAM has no valid save checksum");
   return Save_WriteFile(format, path, s_runtime.live, error);

@@ -171,7 +171,7 @@
     "wait_frames_per_message": 3600,
     "wait_frames_per_operation": 600
   },
-  "placeholder_count": 62,
+  "placeholder_count": 67,
   "placeholders": {
     "hud_value": "localized_text",
     "city_aitos_growth_state": "localized_term",
@@ -214,6 +214,11 @@
     "master_magic_points": "number",
     "master_name": "localized_text",
     "master_sp": "number",
+    "miracle_earthquake_sp": "number",
+    "miracle_lightning_sp": "number",
+    "miracle_rain_sp": "number",
+    "miracle_sunlight_sp": "number",
+    "miracle_wind_sp": "number",
     "next_level_population": "number",
     "required_master_level": "number",
     "score_aitos_act_1": "number",
@@ -24641,7 +24646,8 @@
     },
     {
       "allowed_placeholders": [
-        "master_name"
+        "master_name",
+        "miracle_earthquake_sp"
       ],
       "availability": "all_supported_releases",
       "available_releases": [
@@ -24883,7 +24889,8 @@
     },
     {
       "allowed_placeholders": [
-        "master_name"
+        "master_name",
+        "miracle_lightning_sp"
       ],
       "availability": "all_supported_releases",
       "available_releases": [
@@ -25237,7 +25244,8 @@
     },
     {
       "allowed_placeholders": [
-        "master_name"
+        "master_name",
+        "miracle_rain_sp"
       ],
       "availability": "all_supported_releases",
       "available_releases": [
@@ -25591,7 +25599,8 @@
     },
     {
       "allowed_placeholders": [
-        "master_name"
+        "master_name",
+        "miracle_sunlight_sp"
       ],
       "availability": "all_supported_releases",
       "available_releases": [
@@ -26001,7 +26010,8 @@
     },
     {
       "allowed_placeholders": [
-        "master_name"
+        "master_name",
+        "miracle_wind_sp"
       ],
       "availability": "all_supported_releases",
       "available_releases": [
