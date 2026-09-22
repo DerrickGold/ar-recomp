@@ -1001,11 +1001,27 @@ The four Source of Life discoveries are shared across the releases:
 | Kasandora | Reveal the pyramid with Rain, then use Earthquake before the story event asking you to enter the pyramid. |
 | Northwall | Use Lightning on your temple. The priest admits keeping a jewel and offers it to you. |
 
-Fillmore's fishing event has a regional timer difference: it completes after
-128 event updates in Japan, versus 255 in the Western releases. These are
-callback counts, not seconds; the simulation's scheduling also affects the
-wait. Marahna accepts the Compass too, but its fishing reward is a Source
-of Magic and uses 128 updates in every release.
+Marahna accepts the Compass too, but its fishermen offer a Source of Magic
+instead. Successful use consumes the Compass and teaches only the receiving
+town; cancelling or trying it in another town leaves the item intact. The
+fishing reward becomes an offering to collect, not an immediate bonus.
+
+Japan's fishermen take longer despite Fillmore's lower completion threshold:
+
+| Fishing rule | Japan | US | European releases |
+| --- | --- | --- | --- |
+| Fillmore progress updates required | 128 | 255 | 255 |
+| Marahna progress updates required | 128 | 128 | 128 |
+| Usual interval between updates while the town runs | 40 frames | 8 frames | 8 frames |
+
+Dialogue pauses and construction-cycle work also affect the wait, so these
+are not fixed completion times. Europe's eight-frame interval takes longer
+in real time at 50 Hz than the US interval at 60 Hz.
+
+Visiting the Sky Palace before fishing finishes restarts the expedition
+when you return to town. The town keeps its Compass knowledge, so you do
+not need another Compass. This rule is shared: Fillmore's restart was
+tested in all five releases, and Marahna uses the same initialization rule.
 
 Evidence: [discovery gates and fishing rewards](regional-differences-technical.md#source-discoveries-and-compass-fishing).
 

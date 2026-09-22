@@ -829,29 +829,77 @@ that write or consumption. The already-verified periodic handlers
 | Fillmore event 10 | `$03:E865–E8B6` | `$03:E359–E3AA` | `$7F:916E`: 255 Western, 128 JP | Item 5; request `$8B` (message 11) |
 | Marahna event 10 | `$03:F247–F298` | `$03:ED23–ED74` | `$7F:9173`: 128 everywhere | Item 6; request `$89` (message 9) |
 
-On first entry, global bit 25/26 prevents repeating initialization, the
-counter is zeroed and the fishing scene is initialized. Each callback
-increments the byte before testing equality. Completion sets fired 10,
+Each callback tests a scene-local initialization bit (global index 25/26).
+When clear, it sets the bit, zeroes the counter and initializes the fishing
+scene. Each callback increments the byte before testing equality. Completion sets fired 10,
 clears dispatched 10 and grants the offering. Marahna slots 9 and 10 alias
 the same callback; that alone does not make two independent discoveries.
 The source-message catalogue and event-pointer tables establish these joins
 without interpreting a message number as a second reward.
+The dispatched-bit clear is an internal transition: outer event handling
+can set it again before the next frame sample. Fired 10 is the completion guard.
 
 One hundred native fixtures cover both counters at 0/1/126/127/128/253/254/255,
 plus repeated original-selector calls through completion and the following
 update. They preserve other towns' inventories and flags, and award once
 through normal selector eligibility. Cinematic initialization is marked
-already complete in these isolated fixtures. They do not establish the
-wall-clock fishing wait, play the entire fishing journey or exercise the
-Compass's modal response; the latter is source-inspected here.
+already complete in these isolated fixtures. Those fixtures establish the
+counter boundaries, not the modal or scheduling behavior below.
+
+A separate 20-transaction live batch exercises original Compass Use,
+initialization and completion in both towns, plus cancellation and Bloodpool
+rejection, across all five ROMs. Each starts from a controlled same-town
+fixture with a seeded Compass, unrelated events completed and enemies
+retired; no ROM patches, substituted callees or coordinate warps are used.
+Successful Use consumes the item before writing only the receiving town's
+delivery byte. Each fishing event then awards one town offering; discovery
+itself changes neither persistent lives nor scrolls. Cancellation and
+rejection preserve the Compass. Bloodpool's ordinary crop refill can still
+populate its empty town inventory; that is not a Compass reward.
+
+| Live counter interval | US | JP | EU / DE / FR |
+| --- | --- | --- | --- |
+| Ordinary progress | 8 frames | 40 frames | 8 frames |
+| Observed construction-clock crossing | 20 frames | 52 frames | 18 frames |
+
+The development masters, US/PAL `$03:8193–8238` and JP `$03:8190–8243`,
+service events at phase 1 of eight. Japan advances that phase only once per
+five master calls. The longer observed gaps coincide with construction-clock
+wraps; the first interval additionally includes the arrival dialogue. These
+are controlled live traces, not universal waits under every menu or story
+state. PAL's ordinary interval is 20% longer in real time at nominal 50 Hz
+than the US interval at 60 Hz; the observed extra 10/12-frame boundary work
+takes approximately 0.2 seconds in either timing system. All 342 retained
+files from this batch match an independent repeat byte-for-byte.
+
+Palace entry at US/PAL `$01:80D5–8111`, JP `$01:80CE–810A`, writes
+`$01` to `$7F:9102` (store at `$01:8107` / JP `$01:8100`). This clears
+the fishing-init masks `$40/$20`, but not the counters, Compass bytes or
+per-town fired flags. Returning to an unfinished fishing event therefore
+zeroes its old counter and starts again; the first frame-visible count is 1.
+These initialization bits are not permanent discovery flags.
+
+Five additional button-only transactions leave Fillmore mid-fishing, wait
+1,800 frames in the Palace, return through Observe the People and complete
+the reward. In every ROM the Palace wait leaves the counter unchanged,
+return starts a new 1-to-target sequence, and the town keeps its Compass
+marker without another held item. These excursions make no RAM edits and
+leave SRAM unchanged. They start from the controlled Compass batch, not a
+natural campaign. Twenty-five exact Go windows cover both town callbacks,
+the scene route, Palace initialization and development master in all five
+ROMs. Marahna's restart is source-established; the live same-town excursion
+covers Fillmore only. Both batches have independent byte-identical repeats.
 
 Live-switch design: keep the two town counters and one-time fired state,
 not a shared global fishing timer. If changing Fillmore's threshold during
 an unfinished expedition, reconcile progress at a serviced event boundary
 and complete once if the new threshold has already been reached. Do not
 leave a counter above a new equality target to wrap around, restart the
-expedition, or clear its completed flag. This threshold and the offering's
-automatic/manual activation policy are independent settings and require no
+expedition solely because a setting changed, or clear its completed flag.
+Keep the native Palace-triggered restart distinct from a settings change;
+preserving unfinished fishing across Palace visits would be a separate QoL
+policy. This threshold and the offering's automatic/manual activation policy
+are independent settings and require no
 Japanese artwork donor.
 
 The other item-6 callbacks are Fillmore 7/13, Bloodpool 1, Kasandora 3/7,

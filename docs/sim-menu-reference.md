@@ -348,7 +348,7 @@ several targeted handlers unwind to `$9C85` rather than returning normally.
 | 15 | Sheep's Fleece | `$43` | `$9F97` | Town-specific event use. |
 | 16 / 17 | Bomb! | `$46` | `$9FC2 / $9FC3` | No-op Use handlers. |
 | 18 | Bomb! | `$46` | `$9FC4` | Consumes item and changes the four monster slots. |
-| 19 | Compass | `$47` | `$9FF0` | Town-specific navigation/event use. |
+| 19 | Compass | `$47` | `$9FF0` | Fillmore/Marahna: consume, acknowledge, then write the receiving town's knowledge byte. Other towns reject without consumption. Fishing later produces a separate offering to collect. |
 | 20 | Strength of Angel | `$48` | `$A02F` | Consumes item and modifies angel combat state. |
 
 IDs 12/13 share a name/icon but have different handlers and receipt dialogue.
