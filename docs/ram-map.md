@@ -470,7 +470,13 @@ in descending order, moving zeros to the end without touching the ninth byte;
 with duplicates, the removed slot can differ from the selected slot. See the
 [offering handoff contract](sim-menu-reference.md#use-offering-handoff-contract).
 
-JP uses town base `$024B`, town selector `$032F` and held base `$02A1`.
+JP uses town base `$024B`, town selector `$032F` and held base `$02A1`;
+PAL uses `$024E`, `$0343` and `$02A4`, respectively.
+Insertion returns failure when all eight slots are occupied. A discovery's
+fired/global flag does not prove its item was stored: the five checked
+fishing/miracle Source owners set that guard before attempting insertion
+and do not retry after a slot is freed. Keep inventory and story completion
+separate; see [capacity and reward ownership](regional-differences-technical.md#full-inventories-and-one-time-discoveries).
 Bloodpool's replenishment checks prerequisite event 5 (`$7F:910B & $04`) and
 requires all eight town slots to be empty; held items do not block it. See
 [the regional timing contract](regional-differences-technical.md#crop-offering-replenishment).
@@ -712,9 +718,11 @@ through SRAM by `$03:A850`. Corrected 2026-08-02 — the arrays are **not** 16 l
 | Address | Description |
 |---------|-------------|
 | $7F:9101 | World-state flags. Bit 0 unlocks Death Heim: `$02:865C` preserves its 8x8 block at world-tilemap offset `$0660`, otherwise clearing that block; `$01:B6CA` admits the seventh location rectangle only when set. Bit 1 means the Palace announcement has begun and suppresses its replay. US sets bit 0 at final-act departure, then bit 1 before dialogue; JP sets both before its Palace dialogue after checking all six act counts. Preserve unrelated bits. Neither bit is a transient reveal-progress counter. [Regional sequence](regional-differences-technical.md#death-heim-transition-and-music). |
-| $7F:9102 | Scene-local flags within the global bit array. Masks `$40/$20` (global indices 25/26) guard Fillmore/Marahna fishing initialization. Palace initialization writes `$01` to the whole byte in every ROM, clearing both guards without clearing Compass knowledge or fired events. Do not model these guards as permanent discoveries. |
+| $7F:9102 | Scene-local flags within the global bit array. Mask `$40` (index 25) guards both Fillmore fishing and Northwall lake-scene creation; `$20` (index 26) guards Marahna fishing and is tested by Aitos's dying-man callback, which writes the wrong flag family (see below). Palace initialization writes `$01` to the whole byte in every ROM, clearing both masks without clearing counters, Compass knowledge or fired events. The fishing callbacks differ: Fillmore/Marahna reset their counter on initialization, Northwall does not. Do not model these guards as permanent discoveries. |
 | $7F:910B | Bloodpool's story-event **prereq** bitmap, byte 0 (= `$9107 + 1*4`). The PAR-derived "bridge technology (bit 0x20)" label is event id 2 of that town — see the event-bitmap table below |
-| $7F:916E / $7F:9173 | Fillmore / Marahna fishing-event counters, shared addresses across all five ROMs. Completion targets are 255 Western / 128 JP for Fillmore, 128 everywhere for Marahna. Counts are callback updates, ordinarily 8 live frames apart in the West / 40 in JP. Palace entry leaves the byte intact, but the cleared initialization guard makes the unfinished event restart on return. Fired event 10 prevents normal repeat rewards. [Discovery and switch contract](regional-differences-technical.md#source-discoveries-and-compass-fishing). |
+| $7F:916E | Fillmore fishing counter, same address in all five ROMs. Target 255 Western / 128 JP. Counts are callback updates, ordinarily 8 live frames apart in the West / 40 in JP. Palace entry leaves it intact, but cleared initialization makes unfinished fishing restart on return. Fillmore fired 10 prevents normal repeat rewards. [Discovery and switch contract](regional-differences-technical.md#source-discoveries-and-compass-fishing). |
+| $7F:9171 | Aitos dying-man timer byte in all five ROMs. Callback 2 increments without resetting during scene setup; equality with 128 marks fired 2 and requests message 11. Distinct from the actor's `+$22` pose wait of 120 updates. The global-26/fired-26 mismatch repeats scene initialization and interrupts that animation, but full timeout and early-Rain/message-12 paths complete in the checked live scenes. [Original-selector and live evidence](regional-differences-technical.md#aitos-dying-man-scene-flag-mismatch). |
+| $7F:9173 | Shared Marahna fishing / Northwall lake-search counter in all five ROMs. Marahna resets on initialization and finishes at 128; Northwall retains the value and finishes at 255. Completed Marahna value 128 survives the tested Palace/native Northwall-load path, leaving 127 updates to its Magical Light reward. Guards remain separate: Marahna fired 10 / Northwall fired 3. [Native alias, lifecycle and limits](regional-differences-technical.md#northwalls-lake-search-shares-marahnas-counter). |
 | $7F:918D | Teddy-return marker, shared address in all five ROMs. Successful Bread use writes 1 after consuming held item 7. Bloodpool's event 6 callback reads it to supply the Magic Skull, complete event 6, release the development hold and request event 7. Not itself event 7's prerequisite/fired bit. |
 | $7F:9192 + town | Six crop-knowledge bytes, shared addresses across the five ROMs. Bloodpool event 5 writes `$9193=1`; its road-connection event 4 can write Fillmore's `$9192=1` and upgrade all Fillmore fields. Ordinary-field item-8 use writes the receiving town's byte after converting one field; already-upgraded use consumes the item without this write. Replenishment checks prerequisite 5 and inventory emptiness instead, not a timer here. [Crop-sharing contracts](regional-differences-technical.md#bridges-and-cross-town-crop-sharing). |
 | $7F:91A5 | Bloodpool Music/state byte. Accepted item 11 writes 1 after its response; event 8 tests nonzero to finish disputes, clear `$7CF1` and mark fired 8. The ambient music selector also reads this byte; do not treat it as the event-8 bitmap or a standalone save flag. Kasandora's Music grant writes its neighboring `$91A6=1`. |
@@ -733,6 +741,20 @@ resolver `$F497` (scratch `$7F:914F`).
 | $7F:911F + town*4 | **fired** — excluded by normal event selection once set. Not a universal guard for forced dispatch or miracle handlers. Persisted at SRAM `0x1226` |
 | $7F:9137 + town*4 | **dispatched this session** (set by `$03:E02B`/`$E0B0`); not persisted |
 | $7F:914F | scratch byte holding the resolved bit mask (`$03:F497`) |
+
+Fillmore's retained Magic Skull event uses mask `$02` in `$9108/$9120/$9138`
+for enabled/fired/dispatched event 14. Its callback enables event 15 through
+`$9108 & $01`; event 15 sets `$9120 & $01` and requests `$920E=$8F`.
+These addresses agree across all five ROMs. No normal producer for Fillmore's
+enabled-14 bit has been identified; setting it in a fixture is not a gameplay
+acquisition route. See [the retained event and controls](regional-differences-technical.md#fillmores-additional-magic-skull-event).
+
+Aitos callback 2 tests scene-global bit 26 (`$9102 & $20`) but writes
+town fired bit 26 (`$912E & $20`) through its inherited fired-table pointer.
+Its actual completion flag is fired 2 (`$912B & $20`). These are three
+distinct states despite the shared mask value. The first write does not
+enable the magic-discovery message assigned to slot 26. See the
+[five-ROM flag mismatch](regional-differences-technical.md#aitos-dying-man-scene-flag-mismatch).
 
 These were labelled "open lairs"/"spawned lairs" until 2026-08-17. Monster-lair state is the
 separate `$7F:9568+` block above; these bits are consumed by the `$03:DFFB` event selector and

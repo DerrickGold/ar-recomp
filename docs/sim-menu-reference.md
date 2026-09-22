@@ -310,6 +310,12 @@ Listen (1), and Take Offering (2); Give Oracle is not a sixteenth root command.
 Its event-entry semantics need separate evidence before exposing it as a new
 independent action. Scene 8 also has a distinct ending branch at `$8849`.
 
+The root command's held-capacity check precedes this scene change and item
+selection. Eight held items block Take Offering even for Western Sources
+of Life/Magic that would activate without occupying a slot. The offering
+stays in town and no bonus is applied. This gate is shared across all five
+ROMs; see the [native capacity controls](regional-differences-technical.md#full-inventories-and-one-time-discoveries).
+
 `$8898` contains a Marahna-specific no-residents check. `$88B5` checks whether
 there is an offering. `$88C3` displays the prompt and the town's eight-slot
 selector. After selection, `$890F–894E`:

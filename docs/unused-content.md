@@ -24,6 +24,8 @@ has been traced to an earlier build or confirmed as a removed feature.
 | Development inscription | All five | Japanese asset label retained in the Palace/temple graphics, but omitted from their authored backgrounds |
 | Dog and fertilizer | Artwork in all five; named in Japan | Item entries with pictures but no Use effects or identified acquisition route |
 | Dragon's Egg | Named in Japan; slot retained in all five | Separate item entry, relabelled Ancient Tablet in the West, with no Use effect |
+| Fillmore's extra Magic Skull event | All five | Working reward callback and translated dialogue, but no identified normal trigger |
+| Unexplained offering announcements | All five | Fillmore jewel and Aitos magic messages with no identified normal trigger |
 | Extra log animation | US and all European releases | A gentle bob with no identified gameplay use |
 | Four cave pictures | All five | Sprite definitions with no identified owner |
 | Questionable Bloodpool animations | Japan; blank Western counterparts | Invalid picture references with no established normal caller |
@@ -34,6 +36,8 @@ has been traced to an earlier build or confirmed as a removed feature.
 | Lair-spawn delay helper | All five | Shortens spawn waits, but has no identified gameplay caller |
 | Empty lair helper | All five | Two lair-processing paths still call a routine that does nothing |
 | Northwall scroll condition | All five | An internal rejection branch that its own constant condition never selects |
+| Shared fishing progress | All five | Northwall's lake search inherits the counter used by Marahna's fishing expedition |
+| Aitos scene flag mismatch | All five | Repeated scene setup interrupts the dying man's pose animation; both story outcomes still work in the tested sequences |
 
 ## Debugging facilities
 
@@ -164,7 +168,50 @@ explain what the item was intended to do.
 
 Evidence: [item identity, icon data and empty Use routine](sim-object-catalog.md#dragons-egg-item-remnant).
 
+### Fillmore's extra Magic Skull event
+
+Bloodpool supplies the familiar Magic Skull after Teddy returns. All five
+releases also retain a separate event assigned to Fillmore: the followers
+report finding a skull-shaped statue and offer it to the Master. The message
+is translated in the Japanese, German and French versions as well.
+
+The reward code works when its eligibility flag is enabled in a controlled
+test. It places one Magic Skull among Fillmore's offerings and schedules a
+follow-up that displays the discovery message. Later event passes do not
+grant another Skull.
+
+No normal trigger has been identified. Fillmore's population and road event
+tables do not select it, nor do the town's periodic checks enable it. The
+retained code and dialogue suggest a possible leftover event, but do not
+establish that it was ever available in an earlier version or exclude an
+unidentified activation path. It is not a second kind of Skull item.
+
+Evidence: [callback ownership, eligibility tests and search limits](regional-differences-technical.md#fillmores-additional-magic-skull-event).
+
+### Other offering announcements
+
+Fillmore has a message about finding a strange jewel, and Aitos has one
+announcing the discovery of the Master's magic. Both survive in translation
+across all five releases, but no normal trigger has been identified in the
+checked event tables and message-setting paths.
+
+Unlike Fillmore's extra Skull event, these messages have no reward code in
+their assigned callbacks. The Aitos message also has no matching spell grant
+in the examined offering routines. They may be leftovers, but the text alone
+does not establish a removed quest, the jewel's identity or a missing spell.
+
+Evidence: [message ownership and limits](regional-differences-technical.md#dialogue-only-slots-and-indirect-message-owners).
+
 ## Unexplained artwork and animations
+
+The three action-stage candidates below were also checked during bounded
+original-game traces in all five releases. The tests followed the game's
+actual picture selections, including animation offsets, and verified which
+graphics were loaded. None selected the questioned resources. These were
+not complete stage playthroughs, so their absence does not prove that no
+gameplay path uses them.
+
+Evidence: [instruction-level selection checks](regional-differences-technical.md#instruction-level-resource-selection-checks).
 
 ### Bloodpool's extra log animation
 
@@ -229,6 +276,51 @@ Evidence: [ordinary simulation visual identities](sim-object-catalog.md#ordinary
 
 ## Skipped paths and code oddities
 
+### Aitos's dying-man scene flag
+
+The Aitos event about a wounded man asking for rain contains a flag mismatch
+in all five releases. It checks whether its scene has been prepared, but
+records that preparation in a different, persistent event flag. Its own
+initialization flag therefore stays unset.
+
+The man has a small, two-pose animation. Recreating the scene keeps returning
+him to its starting pose while the simulation runs. In a controlled comparison,
+marking the already-created scene as initialized lets the alternate pose
+appear. The change is subtle, involving only a few pixels of his sprite.
+
+The story itself still works in the checked sequences. Waiting reaches the
+message about his death without rain; sending rain earlier fulfills his last
+wish and produces the separate response thanking the Master. Both paths
+finish and remove the actor in all five releases, with or without the
+comparison flag change.
+
+The evidence supports an original animation bug, not a skipped event or a
+blocked rain request. These tests use controlled town and lair state, rather
+than full campaign playthroughs, and do not cover every possible casting
+time. The issue is separate from the Aitos mountain-event dialogue bug.
+
+Evidence: [flag addresses, actor program and live comparisons](regional-differences-technical.md#aitos-dying-man-scene-flag-mismatch).
+
+### Two towns sharing fishing progress
+
+Marahna's deep-sea expedition and Northwall's lake search use the same
+progress counter. Marahna resets it when starting an expedition and finishes
+at 128. Northwall keeps the value already there and finishes at 255.
+
+In controlled tests, completing Marahna's expedition left the counter at
+128. That value survived a visit to the Sky Palace and loading Northwall,
+where the lake search needed only 127 more updates to find its magic. A
+comparison starting from zero needed 255 updates for the same reward.
+The behavior matches in all five releases.
+
+These are event updates, not seconds: dialogue and regional simulation
+timing affect the actual wait. The tests used an explicitly enabled Northwall
+event, rather than playing a complete campaign between the two discoveries.
+They establish the shared progress and its effect, but not why the developers
+used one counter for both towns.
+
+Evidence: [counter ownership, original-scene tests and limits](regional-differences-technical.md#northwalls-lake-search-shares-marahnas-counter).
+
 ### A Northwall condition that always passes
 
 The event awarding a scroll near Northwall's great tree contains a rejection
@@ -253,8 +345,11 @@ The oddity is a separate reference to it in the Western Sky Palace scene
 data. No normal route has been found that activates this particular entry.
 The ending loads the silence directly, without using the Palace reference.
 
-Its use during the ending is established; the extra Palace entry remains
-unexplained. No earlier audible song has been recovered from this resource.
+The closest known lead is a scene-selection value set when Death Heim
+appears. A trace confirms that the game clears this value before loading
+the Palace, which receives its normal music selection instead.
+
+No earlier audible song has been recovered from this resource.
 
 Evidence: [silent upload and scene-selection checks](regional-differences-technical.md#extra-palace-music-resource-silent-upload).
 

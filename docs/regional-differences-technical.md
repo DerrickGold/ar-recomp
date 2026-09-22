@@ -8,8 +8,8 @@ remains separate in the project's private development notes.
 
 This is a reverse-engineering reference, **not a list of implemented settings**.
 The comparisons below were checked against the exact headerless retail ROMs
-on 2026-09-20–21. Table/code comparisons were supplemented with 83,024 isolated
-native-routine fixtures, 711 booted SIM/action/save traces, and 442 complete controlled
+on 2026-09-20–22. Table/code comparisons were supplemented with 84,499 isolated
+native-routine fixtures, 836 booted SIM/action/save traces, and 442 complete controlled
 earthquake-matrix transactions in the Snes9x reference core. Booted traces also
 include effects; do not count those casts again as separate matrix cases. These establish the
 listed behaviors, not complete playthrough equivalence or safe live switching
@@ -17,6 +17,8 @@ between profiles. Booted fixtures use unmodified ROMs and separate scratch
 states; their RAM setup is not a claim of unassisted playthrough coverage.
 Ten additional Ice Dragon positive controls use explicitly modified in-memory
 waveform data; they are separate from those unmodified-ROM trace counts.
+Twenty-five debug/menu controls are also counted separately because their
+entry adapters or activation patches modify the in-memory ROM.
 
 | Release | Size | SHA-256 |
 | --- | ---: | --- |
@@ -469,8 +471,9 @@ reachability, maximum town populations or an implemented live-switch feature.
 
 The existing `ActRaiser_TownCensus` HLE is the integration owner. Extend its
 support coefficients, including completed extension bridges (32 US /16 JP),
-rather than introducing a second town model. Preserve standing structures,
-the adjustment word US `$7F:9F57+2N` / JP `$7F:9F4B+2N`, and earned levels.
+rather than introducing a second town model. The census itself preserves
+standing structures, the adjustment word US `$7F:9F57+2N` / JP
+`$7F:9F4B+2N`, and earned levels.
 Towns with no act completion skip census output stores; retain that gate.
 The decoded US references to the adjustment are census plus save/restore;
 they do not establish its full initialization/indirect-write lifecycle or a
@@ -500,6 +503,22 @@ the no-award/max-level wrapper paths were executed. Policy activation should
 refresh derived displays without invoking award side effects from a settings
 callback, then let the normal wrapper process eligible awards. Repeatedly
 toggling must not refill SP, replay awards or lower already-earned levels.
+
+**Planned host transition, approved September 22:** changes to effective
+population-support rules will require confirmed redevelopment of affected
+developed towns. A custom redevelopment earthquake will clear eligible
+housing/support structures while retaining roads, bridges, story progress,
+sealed lairs and earned levels. This supersedes the earlier non-destructive
+support-switch proposal; it does not change what the original censuses do.
+The ordinary player/Skull earthquake must retain its native behavior.
+Reconstruction is planned to use normal town construction, with explicit
+rebuilding resources so sealed or exhausted lairs cannot strand the town.
+Checkpoint recovery, structure/cache cleanup, growth-budget reconciliation,
+pending-event safety and supported policy combinations still require host
+implementation and validation. Do not charge ordinary miracle SP or trigger
+ordinary lair/house-loss rewards merely for conversion. This is not an
+original regional mechanic or an implemented feature. Neither a fixed cap
+nor a proof of every published population maximum is required for it.
 
 The US full-development scan `$03:C037–C071` is also not a maximum-population
 formula: it returns carry set only after all128 records are active and every
@@ -778,7 +797,8 @@ already applied and no held item. Japan returns with the held item and
 unchanged counters; ordinary menu navigation to Use Offering then applies
 the bonus once and removes the item after acknowledgement. Every transaction
 returns to town with SRAM unchanged. These are collection/Use tests, not
-natural discovery-event playthroughs or full-inventory/overflow coverage.
+natural discovery-event playthroughs. Capacity is tested separately
+[below](#full-inventories-and-one-time-discoveries); counter overflow is not.
 
 **Live-switch integration hazard.** Eight further controlled Western cases
 start with a same-ID item already held, modeling a carry-over from Japanese
@@ -875,8 +895,8 @@ files from this batch match an independent repeat byte-for-byte.
 Palace entry at US/PAL `$01:80D5–8111`, JP `$01:80CE–810A`, writes
 `$01` to `$7F:9102` (store at `$01:8107` / JP `$01:8100`). This clears
 the fishing-init masks `$40/$20`, but not the counters, Compass bytes or
-per-town fired flags. Returning to an unfinished fishing event therefore
-zeroes its old counter and starts again; the first frame-visible count is 1.
+per-town fired flags. Returning to unfinished Fillmore or Marahna fishing
+therefore zeroes its old counter and starts again; the first frame-visible count is 1.
 These initialization bits are not permanent discovery flags.
 
 Five additional button-only transactions leave Fillmore mid-fishing, wait
@@ -890,8 +910,10 @@ the scene route, Palace initialization and development master in all five
 ROMs. Marahna's restart is source-established; the live same-town excursion
 covers Fillmore only. Both batches have independent byte-identical repeats.
 
-Live-switch design: keep the two town counters and one-time fired state,
-not a shared global fishing timer. If changing Fillmore's threshold during
+Live-switch design: keep Fillmore's counter and the shared Marahna/Northwall
+counter, alongside each event's own fired state. The additional owner and
+its different initialization rule are detailed [below](#northwalls-lake-search-shares-marahnas-counter).
+If changing Fillmore's threshold during
 an unfinished expedition, reconcile progress at a serviced event boundary
 and complete once if the new threshold has already been reached. Do not
 leave a counter above a new equality target to wrap around, restart the
@@ -906,6 +928,270 @@ The other item-6 callbacks are Fillmore 7/13, Bloodpool 1, Kasandora 3/7,
 Aitos 5 and Northwall 5. All eight grant sites have rooted callback joins
 and hash-checked Go-extracted messages in all five ROMs; this census does
 not replace full natural-event playthroughs.
+
+#### Northwall's lake search shares Marahna's counter
+
+Northwall event 3, US/PAL `$03:F3AB–F3F0` / JP `$03:EE87–EECC`
+(end-exclusive), reads and increments `$7F:9173`, the same byte used by
+Marahna's fishing callback. It tests equality with 255 in every release.
+On completion it marks Northwall fired 3, clears dispatched 3, requests
+`$920E=$9D` (message 29) and grants item 4, Magical Light.
+
+| Counter owner | Initialization | Target | Completion guard |
+| --- | --- | ---: | --- |
+| Fillmore fishing | Reset `$916E` when global initialization bit 25 is clear | 255 West / 128 JP | Fillmore fired 10 |
+| Marahna fishing | Reset `$9173` when global initialization bit 26 is clear | 128 | Marahna fired 10 |
+| Northwall lake search | Keep `$9173`; global initialization bit 25 only guards scene creation | 255 | Northwall fired 3 |
+
+Northwall's initialization sets global bit 25 and creates the scene from
+US/PAL `$03:E5E2` / JP `$03:E0E1`; it does **not** zero the counter.
+This distinguishes it from both Compass-led fishing callbacks. Palace
+initialization clears the scene bits, but leaving the counter intact alone
+does not imply that all three events restart or all three resume.
+
+A fresh five-ROM direct-long-access census finds two reads and three stores
+to `$7F:9173`, all within the Marahna and Northwall callbacks. The three
+stores are Marahna's reset, Marahna's increment and Northwall's increment.
+This is a bounded literal-access census, not a proof against indexed access,
+bulk initialization or save restoration.
+
+One hundred forty-five isolated original-selector controls cover Northwall's
+counter boundaries, first-time scene creation, eligibility and fired guards,
+full completion from 0/128/255, and Marahna reset controls. Northwall keeps
+its initial value even when creating its scene; Marahna restarts at zero
+when its own initialization bit is clear. From 255, an unfinished Northwall
+event wraps and needs 256 updates to return to its equality target. Its fired
+guard still prevents a second reward after completion.
+
+Ten original-ROM scene transactions compare these cases in all five releases:
+
+| Input to Northwall | Search updates to reward | Result |
+| --- | ---: | --- |
+| Preserve completed Marahna counter, 128 | 127 | One Magical Light; Northwall fired 3 set |
+| Explicit zero-counter comparison | 255 | Same reward and completion state |
+
+Each starts from the accepted completed Marahna fishing fixture, leaves for
+the Palace through its menu, closes that menu and requests Northwall through
+the original scene loader. The test explicitly supplies the destination,
+act/eligibility state and neutralized enemies; only the comparison branch
+changes the shared counter. Northwall's original loader places the angel;
+no actor coordinates or ROM code are patched. The retained value survives
+Palace entry, Northwall loading and its first-visit introduction. Original
+announcement, temple dialogue and reward processing then complete normally.
+Marahna's existing offering remains intact and SRAM is unchanged.
+
+These establish the state transfer through the tested lifecycle, not a
+continuous natural campaign, save/reload behavior or the reverse live
+Northwall-to-Marahna journey. The 60 exact Go windows, 145 isolated controls
+and ten scene transactions have a byte-identical independent repeat.
+
+Message ownership matters here too: Northwall's slot-29 callback is only
+`CLC; RTS`, yet the message is used by event 3 through pending `$9D`.
+An empty callback is therefore not evidence that its dialogue is unused.
+The regional slot-3/29 and Marahna slot-9/10 text spans were checked against
+the Go catalogue and ROM hashes; their distinct roles must not be merged.
+
+Integration: preserve this shared byte for native compatibility. Replacing
+it with independent Marahna and Northwall timers would change the wait and
+requires an explicit behavioral decision, not a routine data-model cleanup.
+Keep completion flags town-specific so an unrelated reset cannot regrant
+completed rewards. No regional toggle or QoL fix is implemented by this research.
+
+#### Full inventories and one-time discoveries
+
+Held inventory and each town's offerings have separate eight-slot limits.
+The ninth allocated byte is not a spare slot. The following behavior is
+shared by all five ROMs, rather than another regional policy difference.
+
+| Boundary | US / PAL | JP | Full-inventory behavior |
+| --- | --- | --- | --- |
+| Take Offering entry | `$01:8491–84B2` | `$01:8458–8479` | Count held slots; eight blocks temple entry before item selection |
+| Town grant wrapper | `$01:A076–A087` | `$01:A045–A056` | Resolve active town, call first-free insertion, return its carry |
+| First-free insertion | `$01:9204–921B` | `$01:9144–915B` | Eight occupied slots return C=1 without changing inventory |
+
+Ranges are end-exclusive. Twenty original-menu transactions test Sources
+5/6 with seven or eight held items in every release. At eight, the game
+shows its full-possession response, does not enter the temple and leaves
+both inventories and all Source bonuses unchanged. At seven, Japan stores
+the Source in the last free held slot; Western releases apply it immediately
+without filling that slot. Bloodpool's ordinary crop refill runs after the
+successful collection returns to town, independently of the Source reward.
+
+The discovery side does not have this protective gate. The named callbacks
+commit their one-time guard before asking the town inventory to accept the
+reward, then ignore insertion failure:
+
+| Discovery | Guard committed before grant | Reward |
+| --- | --- | --- |
+| Fillmore fishing | Town 0 fired event 10 | Source of Life (5) |
+| Marahna fishing | Town 4 fired event 10 | Source of Magic (6) |
+| Bloodpool lake Rain | Global flag 11 | Source of Life (5) |
+| Kasandora pyramid Earthquake | Global flag 13 | Source of Life (5) |
+| Northwall temple Lightning | Global flag 14 | Source of Life (5) |
+
+One hundred isolated calls cover seven/eight occupied town slots for these
+five owners across all releases, followed by a retry after freeing an
+existing slot. Fishing goes through the original event selector. The first
+miracle calls stop immediately after the native grant, before modal text;
+their retries execute the original guard and return normally. Seven items
+allow insertion; eight retain all existing items but store no reward. The
+ninth byte and other towns' inventories remain unchanged. Clearing a slot
+after either outcome does not replay a completed discovery.
+
+Ten further live fishing transactions cover both towns in all five ROMs.
+They restore the accepted in-progress Compass states and change only town
+inventory bytes. With eight items present, the original scene reaches its
+completion counter and fired flag but supplies no Source. After explicitly
+freeing a slot, 1,800 more input-free frames do not recover the offering.
+All thirty live transactions leave SRAM unchanged. Forty-five exact Go
+windows and an independent repeat support the batch.
+
+These are controlled capacity states, not a demonstrated route to eight
+uncollected offerings in each town. The conditional reward loss is established;
+its ordinary-play reachability and save/reload recovery remain unverified.
+The [grant-owner census](#offering-grant-owners-and-capacity-limits) below
+narrows the source accounting without supplying that campaign proof. Do not
+label it a new JP-only bug or infer that every grant caller ignores carry.
+
+Integration: inventory insertion must report success separately from story
+completion. Keep the native held-capacity gate under both activation policies
+unless an explicit QoL option changes it. Likewise, deferring a rejected
+one-time reward would change shared native behavior, not select JP rules.
+Any such policy needs explicit pending-reward ownership and exactly-once
+delivery; clearing fired/global flags to retry would also replay story effects.
+
+#### Offering grant owners and capacity limits
+
+All five ROMs contain the same **28 direct calls** to the town-insertion
+wrapper: 20 calls within 19 distinct story callbacks, seven within periodic
+or miracle handlers, and one indexed lair-reward call. Fresh Go disassembly
+joins every byte-pattern candidate to its event-table or separately identified
+handler entry. This closes ownership of that bounded census, not indirect
+calls or arbitrary writes to inventory.
+
+The 24-word lair table at US/PAL `$03:B734` / JP `$03:B4BD` supplies one Bomb
+(18) and one Strength of Angel (20) per town. Each town's other two entries
+are `$8000`, selecting technology upgrades rather than inventory items.
+
+| Town | Story, periodic and miracle reward opportunities | Lair items | Total listed opportunities |
+| --- | --- | --- | ---: |
+| Fillmore | Two Sources of Magic, Source of Life, Bridge, Magical Fire; additional Magic Skull with no identified trigger | Bomb, Strength of Angel | 7, plus the unexplained Skull event |
+| Bloodpool | Source of Magic, crop, Bread, Magic Skull, Compass, Magical Stardust, Source of Life | Bomb, Strength of Angel | 9 |
+| Kasandora | Two Sources of Magic, Music, Ancient Tablet, Source of Life | Bomb, Strength of Angel | 7 |
+| Aitos | Source of Magic, Fleece | Bomb, Strength of Angel | 4 |
+| Marahna | Herb, Magical Aura, Source of Magic | Bomb, Strength of Angel | 5 |
+| Northwall | Magical Light, Source of Magic, Source of Life | Bomb, Strength of Angel | 5 |
+
+These totals count recorded reward opportunities, **not maximum simultaneous
+inventory** or proven complete routes. Marahna slots 9/10 alias one fishing
+callback and are counted once. Bloodpool's later crop refill is a separate
+call site, but requires an empty town inventory; it cannot stack extra crops
+beside pending rewards. Its Bread must also be collected and consumed before
+Teddy's return supplies the Skull. Thus the nine listed Bloodpool rewards
+cannot simply be treated as nine items left waiting together. These owners
+provide no demonstrated ordinary overflow route for the Source discoveries;
+the controlled capacity result remains a compatibility edge case rather than
+a confirmed player-facing loss.
+
+Callback grant identities, excluding the indexed lair call, are:
+
+| Town | Event slots → item IDs | Other owners → item IDs |
+| --- | --- | --- |
+| Fillmore | 7→6, 10→5, 13→6, 14→14 | Bridge→10; southeast-rock Lightning→1 |
+| Bloodpool | 1→6, 5→8, 6→7 then 14, 9→19 | Lake clearing→2; crop refill→8; lake Rain→5 |
+| Kasandora | 3→6, 4→11, 7→6, 9→13 | Pyramid Earthquake→5 |
+| Aitos | 5→6, 8→15 | — |
+| Marahna | 2→9, 6→3, 9/10→6 | — |
+| Northwall | 3→4, 5→6 | Temple Lightning→5 |
+
+#### Fillmore's additional Magic Skull event
+
+The Fillmore callback table retains a separate item-14 grant, distinct from
+Bloodpool's Teddy-return branch. Addresses below are end-exclusive; event
+numbers and item IDs are decimal.
+
+| Owner | US / PAL | JP | Effect |
+| --- | --- | --- | --- |
+| Fillmore event 14 | `$03:E8EF–E913` | `$03:E3E3–E407` | Attempt item-14 insertion; set fired/dispatched 14; enable event 15 |
+| Fillmore event 15 | `$03:E913–E927` | `$03:E407–E41B` | Set fired 15; request pending message `$8F` |
+| Original event selector | `$03:E19C–E1F2` | `$03:DCA1–DCF7` | Require enabled and not fired; dispatch through the active town's table |
+
+Both Fillmore slots resolve to the same message within each release:
+US/European English bank04 `$9DA3`, Japanese bank02 `$BA61`, German bank04
+`$9DA4`, French bank04 `$9E0B`. The Go-extracted text describes finding and
+offering a skull-shaped statue; the source spans were rehashed against each
+ROM. This is retained translated content, not text inferred from item names.
+
+One hundred twenty isolated original-selector controls cover all five ROMs,
+enabled/not-enabled, fired/not-fired, empty/full inventory and one/two/three
+passes. Only enabled, unfinished event 14 attempts the grant. The first pass
+completes 14 and enables 15; the second completes 15 and requests `$8F`.
+Further passes add no item. At full capacity, insertion fails but both events
+still finish: this callback does not defer the reward. The ninth inventory
+byte and other towns' inventories and event flags remain unchanged.
+
+The activation search has a narrower conclusion. None of Fillmore's six
+population rows or its road row selects event 14/15. Its three pointer-rooted
+periodic handlers (`$F621/$F671/$F68A`, JP minus `$0524`) do not enable 14.
+Across each complete ROM, neither adjacent literal setter idiom—load event
+14 then the prerequisite pointer, or the reverse order—occurs. These checks
+do not exclude nonadjacent, computed or direct bitmap writers. Event 15's
+producer is identified, but event 14's ordinary enabling source is not.
+Forced eligibility proves the retained code works, not that normal play can
+reach it or that a pre-release build used it.
+
+The owner/Skull batch retains 215 exact Go windows and the 120 isolated
+controls above, with an independent byte-identical repeat. It adds no live
+campaign trace. Do not merge Fillmore's unexplained event into Teddy's semantic
+dialogue route or expose it as a regional toggle merely because it exists.
+
+#### Dialogue-only slots and indirect message owners
+
+A five-ROM follow-up distinguishes retained messages from their callback
+slots. All addresses below are message starts, not executable entry points.
+US and European English use the same starts in this table.
+
+| Assigned slots | US / EU English | Japan | German | French | Finding |
+| --- | --- | --- | --- | --- | --- |
+| Fillmore 6 | `$04:99EE` | `$02:B764` | `$04:99FE` | `$04:9AD2` | Strange-jewel offering announcement; bare RTS callback; no identified ordinary producer |
+| Kasandora 6 | `$04:AE0C` | `$02:C8F1` | `$04:AE73` | `$04:AE33` | End-only blank entry, not recovered dialogue |
+| Kasandora 25/26 | `$04:B180` | `$02:CC10` | `$04:B1F5` | `$04:B195` | Prosperity/thanks message, used indirectly through slot 26 |
+| Aitos 25–29 | `$04:B881` | `$02:D225` | `$04:B960` | `$04:B8F8` | Magic-discovery announcement; common CLC/RTS callback; no identified ordinary producer |
+
+Kasandora event 0 owns the prosperity selection: US/PAL
+`$03:EC02–EC7D`, JP `$03:E6EE–E769` (end-exclusive). With event 0 enabled
+and unfinished, act count not equal to 2 and prerequisite 8 clear, it writes
+pending `$9A`, then unwinds the callback dispatcher with carry set. The
+Listen selector consequently returns message 26. If prerequisite 8 is set,
+the callback takes its other scene path; act count 2 instead finishes event
+0 and enables event 1. Eighty original-selector controls check these gates
+across the five ROMs. The slot-25 alias is not evidence of another unused
+message: it shares exactly the text already selected as 26.
+
+For Fillmore 6 and Aitos 25–29, the population and road tables do not select
+the slots. Whole-ROM searches for the two adjacent prerequisite-setter
+idioms and immediate forced-message stores find no matching town owner.
+Every resulting literal hit is decoded from a callback, periodic-list or
+miracle-table root: the same event numbers in other towns are not references
+to these messages. The indexed lair-reward path supplies messages 30/31
+for its positive item rewards, not these candidates. The existing direct
+grant census has no Aitos spell-1–4 grant.
+
+These are bounded producer checks, not a proof against every computed,
+nonadjacent or direct bitmap write or an independent text-pointer caller.
+The blank Kasandora slot is not a cut story. The remaining offering texts
+are unexplained, not confirmed pre-release features or regional options.
+
+Two hundred twenty-five native controls cover all nine candidate slots:
+the real message selector accepts explicit eligibility or a forced pending
+ID, rejects disabled/completed ordinary entries, and the empty callbacks
+do not grant rewards or mark themselves complete. These controls establish
+selection behavior under supplied state, not ordinary gameplay reachability.
+The Go catalogue source spans were rehashed against every ROM.
+
+Together with the Aitos flag investigation below, this batch retains 440
+isolated controls and 140 exact Go windows with a byte-identical independent
+repeat. No new live campaign trace is included.
 
 #### Northwall scroll callback's constant condition
 
@@ -1673,6 +1959,112 @@ A future regional-policy switch must preserve this in-flight transaction:
 the technology flag can already be set while the item is still held. Do not
 restart delivery or infer complete settlement from that flag alone. No
 runtime policy switch is implemented or tested by these native fixtures.
+
+### Aitos dying-man scene flag mismatch
+
+Aitos callback 2 is US/PAL `$03:EEE1–EF2E`, JP `$03:E9C5–EA12`
+(end-exclusive). The normal dispatcher supplies Y = the fired-bitmap pointer
+table (`$DCAE`, JP `$D7B3`). Its opening sequence tests global flag 26
+through `$F4DF` / JP `$EFBB`, but on the clear branch calls the **town**
+setter `$F479` / JP `$EF55`, not the global setter `$F4EA` / JP `$EFC6`.
+The test preserves Y, and the callback does not replace it before that call.
+
+| Operation | Actual state affected in all five ROMs |
+| --- | --- |
+| Initialization test | Global bit 26: `$7F:9102 & $20` |
+| Setter at `$03:EEEC` / JP `$03:E9D0` | Aitos fired bit 26: `$7F:912E & $20` |
+| Scene setup | Record `$03:E664` / JP `$03:E163`: kind 0, base 4/5, scene `$31`; retires the eight-slot `$0F0C` pool and creates the scene |
+| Timer update | Increment byte `$7F:9171`; compare with `$80` |
+| Timeout branch | Set Aitos fired 2 (`$7F:912B & $20`), request `$920E=$8B` (message 11), then enter the summons/dialogue path |
+
+Because the first setter leaves global 26 clear, eligible callback updates
+repeat scene creation. This is a persistent **fired** write, not prerequisite
+26, and does not activate Aitos's magic-discovery text. The original selector
+continues event 2 because fired 2 remains clear until timeout or another
+event path finishes it. The callback does not reset its timer during scene
+creation.
+
+The normal periodic eligibility helper is `$03:F822–F857` / JP
+`$03:F2FE–F333`. It latches prerequisite 2 when exactly two of Aitos's four
+lair words have their high bit set; it leaves an existing prerequisite set.
+Twenty-five native controls cover initial counts zero through four across
+all five releases. This is an identified trigger, unlike the unexplained
+offering announcements above, but is not a continuous campaign reproduction.
+
+One hundred original-selector controls exercise timer wrap/noncompletion,
+clear/set scene flag, repeated updates and enabled/fired guards. With the
+scene flag clear, the output sets fired 26, leaves global 26 clear and
+replaces the seeded pool flags with one active scene actor plus seven retired
+slots. With the scene flag set, it leaves those pool flags untouched while
+still advancing the timer. Disabled or completed event 2 does neither.
+
+Ten additional timeout controls start the counter at 127 and execute the
+unchanged callback through its fired-2/pending-11 writes. An explicit RTL
+stop ends each test immediately **before** the modal-kernel JSL at
+`$03:EF18` / JP `$03:E9FC`; Y is supplied exactly as the dispatcher leaves
+it. These are completion fragments, not full dialogue playback. A first
+attempt to run that modal boundary in the isolated harness did not return
+and is excluded from the evidence counts; it was a harness limitation,
+not a game crash.
+
+#### Live scene, animation and rain response
+
+A subsequent twenty-transaction batch runs the full scene in all five
+unmodified ROMs. Each region has a native wait/no-rain path, a native Rain
+path, and the same two paths with global 26 latched **after** the first
+original spawn. That one-byte comparison prevents repeated setup without
+replacing the actor, its program or any ROM instructions; it is not a shipped
+fix or an assertion of intended behavior.
+
+The fixtures load Aitos through the original town loader, block unrelated
+events and supply act/resource state and exactly two sealed lairs. They
+begin with prerequisite 2 clear: the native periodic check enables it.
+The loader places the angel at `(288,352)`, already inside the correct Rain
+square. No actor coordinates or miracle-target RAM are written. The original
+summons, temple introduction, command menu, target confirmation, effects and
+completion dialogue run normally. These are controlled transactions, not
+unassisted two-lair campaign playthroughs.
+
+| Path, in every region | Counter at completion | Pending message | Result |
+| --- | ---: | --- | --- |
+| Wait without Rain | 128 | `$8B` → 11 | No-rain death response; fired 2 set; actor retired |
+| Select Rain after counter 16, confirm through native picker | 16 | `$8C` → 12 | Last-wish response; fired 2 set; actor retired; miracle result 1 |
+
+Latching global 26 changes neither outcome nor frame count within each paired
+run. Rain costs 16 SP in Japan and 20 in the West, targets cells `(16,20)`
+and leaves the event counter stopped at 16 in these sequences. The pending
+latch clears after either dialogue, the scene pool is retired, and SRAM is
+unchanged. Near-timeout casting, save/reload and intervening travel are not
+covered by this batch.
+
+The visible difference is in the actor's retained program:
+
+| Resource | US / PAL | Japan | Meaning |
+| --- | --- | --- | --- |
+| Authored actor program | `$0A:DB0C` | `$04:AB93` | `0D 09 78 00 0C 09 78 00 0B F5 FF` |
+| Pose compositions | `$01:E85C` / `$01:E892` | `$01:E7E6` / `$01:E81C` | Single-part pictures using tiles `$A0` / `$A1` |
+| Class-1 dispatcher | `$01:CD0C` | `$01:CC96` | Original town-person state table |
+| Timed-wait state | `$01:CEEB` | `$01:CE75` | Decrement actor `+$22`, then resume commands at zero |
+
+Table-rooted command decoding shows two pose selections, each followed by
+a wait of 120 actor updates, then a relative loop back to the start. This
+actor-local wait is not the event's `$9171` timeout counter. During the
+checked native simulation waiting interval, repeated creation keeps the actor
+on the first composition. The latched comparison reaches both compositions.
+Selected paired stills differ only within the sprite's six-by-four-pixel
+bounding area; per-frame video hashes reveal changes missed by screenshots
+taken exactly at event-counter updates. This establishes a small visual
+animation suppression, rather than merely a difference in hidden counters.
+
+All twenty transactions and fifty additional Go windows have a byte-identical
+independent repeat. The comparison traces are counted once alongside the
+native branches, not as twenty ordinary-playthrough confirmations. This
+closes the earlier full-timeout and early-Rain playback gaps, while leaving
+the stated boundary cases untested.
+
+The shared flag mismatch is consistent with a wrong-helper call. Preserve
+native behavior unless an optional fix is separately approved; no repair was
+implemented. It is unrelated to the Aitos mountain-event stale-message issue.
 
 ### Skull Head target and earthquake state contract
 
@@ -4527,7 +4919,9 @@ Reachability of this particular declaration remains parked, not declared
 impossible. Reopen with a route or trace that carries selector 4 into the
 Palace loader, or with a rooted computed/indexed writer. The resource's
 identity and direct ending use are established; it should no longer be
-listed as unused audio.
+listed as unused audio. The [instruction-level follow-up](#instruction-level-resource-selection-checks)
+below confirms the selector's clearing on the controlled US emergence route
+and checks five-ROM Palace excursions for indirect writes.
 
 ### Action resources without a proven gameplay owner
 
@@ -4614,6 +5008,73 @@ ordinary Bloodpool 26/27 or the four cave pictures. No beta build or removed
 feature history has been established. The reader-facing
 [unused-content catalogue](unused-content.md) keeps these qualifications
 with the findings.
+
+### Instruction-level resource selection checks
+
+Twenty-two controlled scene traces follow actual music-selector writes and
+animation selections in the original ROMs. Each has an uninstrumented
+comparison; final serialized state, WRAM, SRAM and the all-frame video hash
+match exactly. An independent repeat reproduces all 246 output files
+(75,889,578 bytes). These are 22 additional booted scenarios, not 44 because
+of the observer controls, and not additional isolated-routine cases.
+
+| Scenario | Releases | Setup and observation |
+| --- | --- | --- |
+| Fillmore → Palace → world map → Palace → Fillmore | All five | Button-only excursion from an existing controlled Fillmore state; 1,764 frames each |
+| Bloodpool Act 1, first room | All five | Original room loader; health supplied, then neutral/right/attack/jump inputs; 1,996–3,000 frames including loading |
+| Fillmore Act 2, first cave room | All five | Sequential native loading through rooms 1 and 2; same input rule; 3,600 frames each |
+| Bloodpool Act 2, first room | All five | Sequential native loading through rooms 1–3; same input rule; 3,786–4,200 frames |
+| Death Heim completion and emergence | US and JP | Previously accepted staged final-boss completion; 3,600 frames each |
+
+No new player, camera or actor coordinate writes are used. The action traces
+are bounded traversal attempts, sometimes ending in death or stalling, not
+completed stages. The emergence setup supplies boss-completion and campaign
+state; it is not a natural full-campaign witness.
+
+The observer temporarily wraps instruction dispatch in the pinned Snes9x
+core, without modifying ROM bytes. Go disassembly identifies these exact
+observation points:
+
+| Point | US | JP | European English | German | French |
+| --- | --- | --- | --- | --- | --- |
+| Scene music selector read | `$02:B64B` | `$04:8653` | `$02:BC43` | `$02:BC4C` | `$02:BC35` |
+| Loader selector clear | `$00:83F2` | `$00:83EC` | `$00:830A` | `$00:830A` | `$00:830A` |
+| Decoded composition-pointer store | `$00:8EA5` | `$00:8EB1` | `$00:89DD` | `$00:89DD` | `$00:89DD` |
+
+Store, read-modify-write and block-move instructions are also observed for
+actual changes to the selector word, including executed indirect/indexed
+writes. For animation events, the entire resident ordinary `$7E:4000`
+bundle must match its pinned decompressed source before attributing a
+selection to one of the three suspect resources. State numbers alone are
+not used to infer ownership. The batch retains 73,438 instruction events
+and 15 single-instruction Go windows.
+
+#### Palace result
+
+In the US emergence trace, `$00:A370` writes selector 4 at frame 1,199 while
+requesting scene 9. At frame 1,243, `$00:83F2` clears it during that scene's
+load. The Palace music declaration reads selector 0 at frames 1,795 and
+1,806. Thus the known literal-4 write does not reach the Palace declaration
+on this route. All five button-only Palace excursions likewise read 0;
+none exposes another selector-4 producer.
+
+#### Animation result
+
+None of the matched-bundle decoder events selects the extra log state 23,
+the ordinary Bloodpool Act 2 states 26/27, or cave pictures `$28–2B`.
+The trace does observe the suspected indirect-picture mechanism in use:
+Bloodpool Act 1 actors have `+$3C` values `$0200/$0201` while states 4/11
+resolve pictures 7/8. The decoder's eight-bit mask makes this an ordinary
+two-picture alternation, not an index hundreds of pictures beyond the table.
+It occurs in all five releases and supplies no owner for the questioned
+resources. Log **state** 23 must also not be confused with ordinary
+**picture** 23, which is observed under a different state.
+
+These traces narrow the remaining usage questions; they do not prove global
+unreachability. Direct custom composition paths, unvisited actor states,
+and writes outside the observed CPU mechanisms remain outside the check.
+No graphics-removal decision, new game bug or additional regional behavior
+is inferred from the absent selections.
 
 ### Aitos room exits and the unassigned lava claim
 
@@ -4854,6 +5315,12 @@ intent. No overall percentage of PAL changes has been classified as
 compensation. A host implementation should distinguish source gameplay
 parameters from source clock/pacing policy: blindly using PAL update counts
 with a US-rate clock can reproduce neither release's real-time behavior.
+
+**Planned host policy, approved September 22:** regional options will retain
+the existing nominal 60 Hz simulation, including European profiles. Selected
+regional update counts will not receive automatic 50/60 rescaling. This is
+European rules at normal host pacing, not native PAL wall-clock reproduction;
+the original-ROM measurements above remain unchanged.
 
 ### Regional action raster tables
 

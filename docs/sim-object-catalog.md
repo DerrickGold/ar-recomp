@@ -40,7 +40,7 @@ proven. It does not mean that the record or its state table is missing.
 | Class | Handler | States | Current semantic identification |
 |---:|---:|---:|---|
 | `$00` | `$CD0C` | 8 | Town actor/person family; observed on construction people |
-| `$01` | `$CD0C` | 8 | Shares the town-actor state machine |
+| `$01` | `$CD0C` | 8 | Authored town-person scripts; observed on Aitos's injured man; shares the town-actor state machine |
 | `$02` | `$CABD` | 6 | Spawn-list-driven special actor/controller |
 | `$03` | `$CC38` | 4 | Spawn-list-driven special actor/controller |
 | `$04` | `$CCDA` | 2 | Spawn-list-driven special actor/controller |
@@ -70,6 +70,21 @@ Classes `$12-$15` each have a real 16-entry state table. Their state handlers
 change the behavior identity passed to `$D072`, so a render implementation can
 key altitude/attachment policy on `(record class, semantic state)` without
 inventing a general-purpose Z coordinate.
+
+### Aitos's injured-man actor
+
+The dying-man scene uses class `$01` at the first slot of the `$0F0C` pool
+in the checked original-ROM sequences. Its authored program is
+`$0A:DB0C` (JP `$04:AB93`): two pose selections separated by waits of 120
+actor updates, looping back to the start. The pictures are single-part
+compositions `$01:E85C/$E892` (JP `$E7E6/$E81C`), using tiles `$A0/$A1`.
+
+The actor's `+$22` wait is separate from the event timer `$7F:9171`.
+A mismatch between scene and event flags repeatedly recreates the actor
+while event 2 is running, interrupting the pose cycle. Both the full timeout
+and early-Rain completion paths still work in the five-ROM controlled tests.
+See [the flag ownership, program and live comparisons](regional-differences-technical.md#aitos-dying-man-scene-flag-mismatch)
+before treating a recreated slot as a new story event or changing its behavior.
 
 ## Ordinary world visual identities
 

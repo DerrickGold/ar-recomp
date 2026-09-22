@@ -17,6 +17,7 @@ follow.
 ## Contents
 
 - [At a glance](#at-a-glance)
+- [Which differences affect play?](#which-differences-affect-play)
 - [Releases, modes and timing](#releases-modes-and-timing)
 - [Action rules](#action-mode)
   - [Magic](#casting-magic)
@@ -30,6 +31,7 @@ follow.
   - [Development and recovery](#town-development-and-recovery)
   - [Miracles and rebuilding](#miracle-costs)
   - [Population and levels](#housing-and-population-support)
+  - [Documented population maxima](#documented-population-maxima)
   - [Population-triggered story events](#population-prerequisites-for-story-events)
   - [Lairs and score rewards](#monster-lairs-and-sealing)
   - [Monsters](#simulation-enemy-combat-and-behavior)
@@ -59,6 +61,36 @@ follow.
 These are the checked rules, not a single ranking of regional difficulty.
 Europe also has its own enemy stats, hazards, boss behavior and selectable
 difficulty. Its rules are not simply the US game running at a lower frame rate.
+
+## Which differences affect play?
+
+The differences fall into several categories. Their impact is not measured
+by how much ROM data changed or how noticeable a new picture is.
+
+| Kind of difference | Examples | Effect on the game |
+| --- | --- | --- |
+| Rules and challenge | Stage geometry, enemy placements, damage, hitboxes, attack choices, magic costs, item effects and lives | Changes what the player can do, encounter or survive |
+| Development and progression | Town schedules, support, population prerequisites, recovery, lair reserves and score rewards | Changes resource availability, waiting and access to later events or levels |
+| Interaction and information | Magic controls, menu returns, score-page access and city-report classification | Changes how the game is operated or explained; some also affect when simulation resumes |
+| Presentation only | Text, music, clothing, symbols and validated visual-only pose changes | Changes what the player sees or hears while leaving the checked rules intact; readability and appearance can still matter |
+| Internal or unestablished | Relocated data, unowned animation entries and state differences without a demonstrated gameplay consequence | Does not by itself establish a player-facing feature or difficulty difference |
+
+Some changes cross these boundaries. Kasandora's bird-headed swordsmen have
+both a redraw and altered sword collision extents. Marahna's arrows differ
+in appearance and speed. Other animation edits change attack timing or the
+collision footprint of a pose. Those gameplay effects are distinct from the
+artwork, even when the original ROM stores them together.
+
+Likewise, Death Heim's reveal is visual, but the Japanese route also changes
+when the island is unlocked and announced. Town-menu behavior can keep the
+simulation paused after a report closes. Neither should be treated as a
+purely cosmetic preference.
+
+Language, presentation and rules are therefore separate aspects of a regional
+release. The Japanese names do not require Japanese combat or town rules,
+and the European translations do not imply identical graphics or native
+timing. Shared behaviors and unsupported reports are identified in their
+respective sections rather than counted as additional regional features.
 
 ## Releases, modes and timing
 
@@ -821,11 +853,38 @@ of the 142 candidate house sites. Bridges and subsequent development matter;
 these starting-map counts are not limits on a finished town.
 
 This makes population a layout and development problem rather than a fixed
-regional cap. A preliminary Fillmore calculation can reproduce the reported
-914 US and 634 Japanese residents with different house, factory and bridge
-combinations. Those combinations still need reachable layouts and legal
-construction sequences. House upgrades, events and population adjustments
-also remain relevant; published maxima are not yet independently verified.
+regional cap. Our preliminary Fillmore calculations reproduce the guide
+totals below under stated assumptions, but do not yet establish legal
+construction sequences or exclude larger alternatives.
+
+### Documented population maxima
+
+Published guides report these attainable maxima for the original game,
+not *ActRaiser Renaissance*. The Western figures come from
+[The Admiral's Maximum Population Guide](https://gamefaqs.gamespot.com/snes/563502-actraiser/faqs/47431);
+the Japanese figures are listed by both
+[GCGX](https://gcgx.games/actraiser/tips.html) and
+[nJOY](https://i-njoy.net/ar1_14.html).
+
+| Town | Western guide | Japanese guides |
+| --- | ---: | ---: |
+| Fillmore | 914 | 634 |
+| Bloodpool | 874 | 554 |
+| Kasandora / Cassandra | 874 | 754 |
+| Aitos | 802 | 522 |
+| Marahna | 538 | 354 |
+| Northwall | 650 | 538 |
+| **Total** | **4,652** | **3,356** |
+
+These are guide-reported results, not hard-coded caps or independently
+verified maxima from this project's ROM tests. Separate confirmation for
+each European release remains outstanding.
+
+The Western guide supplies construction advice and allows Fillmore's 914
+with either one or two bridges. It also distinguishes normal play from
+cursor-inaccessible building sites. [The Admiral's guide](https://gamefaqs.gamespot.com/snes/563502-actraiser/faqs/47431)
+provides practical layouts to test; proving every maximum independently
+is a separate research task, not a prerequisite for reporting these figures.
 
 ### Population milestones and the Master's level
 
@@ -1018,12 +1077,32 @@ Dialogue pauses and construction-cycle work also affect the wait, so these
 are not fixed completion times. Europe's eight-frame interval takes longer
 in real time at 50 Hz than the US interval at 60 Hz.
 
-Visiting the Sky Palace before fishing finishes restarts the expedition
-when you return to town. The town keeps its Compass knowledge, so you do
+Visiting the Sky Palace before a Compass-led fishing expedition finishes
+restarts it when you return to town. The town keeps its Compass knowledge, so you do
 not need another Compass. This rule is shared: Fillmore's restart was
 tested in all five releases, and Marahna uses the same initialization rule.
 
 Evidence: [discovery gates and fishing rewards](regional-differences-technical.md#source-discoveries-and-compass-fishing).
+
+Northwall's separate lake search uses the same progress counter as Marahna,
+but does not reset it when starting. In all five releases, controlled tests
+carried Marahna's completed value of 128 into Northwall, reducing its search
+from 255 updates to 127 without changing the reward. See
+[the shared-counter oddity](unused-content.md#two-towns-sharing-fishing-progress)
+for the behavior and test limits.
+
+**Inventory limits.** All five releases require a free held-item slot before
+opening Take Offering. This includes Western Sources that activate immediately
+and would not occupy that slot. With eight held items, collection is refused;
+the town keeps its offering and no bonus is applied.
+
+A full town inventory behaves differently. In tests with all eight offering
+slots occupied, fishing and the three miracle-based Sources of Life marked
+their discovery complete without storing the new reward. Making room later
+did not recover it. This behavior matches across the releases; whether normal
+town progression can fill all eight slots at these moments remains unverified.
+
+Evidence: [capacity gates and one-time discoveries](regional-differences-technical.md#full-inventories-and-one-time-discoveries).
 
 The Magic Skull seals its designated Bloodpool lair through a different path
 from guiding the people. It works at the tested population of two, credits
@@ -1033,6 +1112,9 @@ rules agree in US and Japan.
 
 The US item sequence adds a 90-frame wait after the effect before consuming
 the skull. Japan proceeds without that wait.
+
+All five ROMs also retain a [separate Fillmore Skull event](unused-content.md#fillmores-extra-magic-skull-event)
+with translated dialogue, but no normal way of activating it has been identified.
 
 The crop offering uses the same checked replenishment rule in all five
 releases. Once Bloodpool's story prerequisite is met, the game supplies
@@ -1324,16 +1406,23 @@ Evidence: [town, title and Death Heim artwork](regional-differences-technical.md
 
 ## What remains unverified
 
-These questions remain open; they should not be treated as confirmed
-regional differences:
+The guide-reported population figures above are documented externally.
+Their independent verification and the following questions remain open:
 
 | Topic | Still to establish |
 | --- | --- |
-| Maximum town populations | Reachable completed layouts and upper bounds accounting for upgrades, bridges and event changes |
+| Independent verification of population maxima | Reproduce the published layouts in the pinned ROMs; upper bounds accounting for upgrades, bridges and event changes remain a separate proof task |
 | Complete event chains | Natural prerequisite progression and event order across complete campaigns, beyond the individually tested successful paths |
 | Other action behavior | Untested enemy and boss branches; a precise scene/object for the reported Aitos lava slowdown |
 | Remaining action artwork | Bosses and other shared graphics; native owners for the extra Bloodpool log animation, questionable Japanese Bloodpool references and four unreferenced Fillmore cave pictures. See the [resource-usage checks](regional-differences-technical.md#action-resources-without-a-proven-gameplay-owner) |
 | Extra Palace silence declaration | A route carrying scene selector 4 into the Palace loader. The ending already uses the same silent resource directly as music ID 21, independently of this declaration |
+
+Follow-up traces checked the questionable action graphics with their actual
+loaded resources and confirmed that the known Death Heim scene selector is
+cleared before the Palace loads. They found no new gameplay use for these
+entries. The [technical account](regional-differences-technical.md#instruction-level-resource-selection-checks)
+records the tested routes and their limits; neither question is treated as
+an established regional gameplay difference.
 
 The [unused content and oddities](unused-content.md) article covers debug
 facilities, developer text and possible leftovers separately. It
@@ -1342,7 +1431,7 @@ remaining candidates has confirmed beta or cut-content provenance.
 
 ## About the research
 
-Last revised: September 21, 2026. Established findings come from comparing
+Last revised: September 22, 2026. Established findings come from comparing
 the retail US, Japanese and European ROM data and code, supplemented by controlled
 tests running the original routines and game scenes. Some tests deliberately
 set up a particular situation; they are not substitutes for complete playthroughs.
