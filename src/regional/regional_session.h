@@ -34,6 +34,21 @@ bool ArRegionalSession_RequestVolley(ArRegionalSession *session, uint32_t revisi
 bool ArRegionalSession_BeginVolley(ArRegionalSession *session, bool *double_shot);
 bool ArRegionalSession_RequestBosses(ArRegionalSession *session,uint32_t revision,const ArRegionalBossPolicy *policy);
 bool ArRegionalSession_BeginBosses(ArRegionalSession *session,ArRegionalBossSnapshot *snapshot);
+bool ArRegionalSession_RequestDifficulty(ArRegionalSession *session, uint32_t revision,
+    const ArRegionalDifficultyPolicy *policy);
+/* Room/retry boundary: never modify a live enemy, hit or countdown. */
+bool ArRegionalSession_BeginDifficulty(ArRegionalSession *session, ArRegionalDifficultySnapshot *snapshot);
+bool ArRegionalSession_RequestScoreLives(ArRegionalSession *session,uint32_t revision,ArRegionalSource source);
+/* Room/retry boundary, before any score additions. No retroactive awards. */
+bool ArRegionalSession_BeginScoreLives(ArRegionalSession *session,bool *enabled);
+bool ArRegionalSession_RequestActionStart(ArRegionalSession *session,uint32_t revision,const ArRegionalActionStartPolicy *policy);
+/* Confirmed Action Mode new run only, never a room/retry or settings edit. */
+bool ArRegionalSession_BeginActionStart(ArRegionalSession *session,ArRegionalActionStartSnapshot *snapshot);
+bool ArRegionalSession_RequestInventory(ArRegionalSession *session,uint32_t revision,ArRegionalSource source);
+bool ArRegionalSession_RequestModeEntry(ArRegionalSession *session,uint32_t revision,const ArRegionalModePolicy *policy);
+bool ArRegionalSession_BeginModeEntry(ArRegionalSession *session,uint8_t *snapshot);
+/* New Action run only; never reinterprets a live collection. */
+bool ArRegionalSession_BeginInventory(ArRegionalSession *session,bool *enabled);
 bool ArRegionalSession_RequestCollision(ArRegionalSession *session,uint32_t revision,const ArRegionalCollisionPolicy *policy);
 bool ArRegionalSession_BeginCollision(ArRegionalSession *session,ArRegionalCollisionSnapshot *snapshot);
 bool ArRegionalSession_RequestPlatformSkull(ArRegionalSession *session,uint32_t revision,const ArRegionalPlatformSkullPolicy *policy);

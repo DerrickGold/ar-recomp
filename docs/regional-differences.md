@@ -99,6 +99,10 @@ Mode immediately, without a completed-game save. Both offer Beginner, Normal
 and Expert, with Normal selected initially. Story saves retain the chosen
 difficulty; Continue restores it and its timer rate without asking again.
 
+After Game Over, the US and Japanese action-only modes start another run.
+The European games instead return to the title, where the player can choose
+a mode and difficulty again. The new difficulty selection starts at Normal.
+
 | Release | Approximate native refresh rate |
 | --- | ---: |
 | US | 60 frames/s |

@@ -21,7 +21,10 @@ static int16_t SignedExtent(uint8_t value) {
   return value<128?value:(int16_t)((int)value-256);
 }
 enum { kExpandedProgramMarker=0x100 };
-typedef struct ProgramRow { uint16_t row,native_row,visual_offset; bool end; } ProgramRow;
+typedef struct ProgramRow {
+  uint16_t row,native_row,visual_offset,duration;
+  bool end,replace_duration;
+} ProgramRow;
 static bool HeadProgram(CpuState *cpu,ProgramRow *out) {
   const unsigned x=cpu->X;
   const uint16_t stored_row=cpu_read16(cpu,0,x+0x1c);
@@ -74,8 +77,42 @@ static bool PlantProgram(CpuState *cpu,ProgramRow *out) {
       .visual_offset=(uint16_t)(row==0?0xffff:0),.end=visual==255};
   return true;
 }
+static bool TendrilShape(CpuState *cpu) {
+  if(!ActorShape(cpu) || cpu_read16(cpu,0,0x18)!=0x0305 ||
+      cpu_read16(cpu,0,cpu->X+0x32)!=0xd974 || cpu_read16(cpu,0,cpu->X+0x16)!=0x5000 ||
+      cpu_read8(cpu,0,cpu->X+0x18)!=0x7e || !cpu_read16(cpu,0,cpu->X+0x3a) ||
+      cpu_read16(cpu,0,cpu->X+0x3c) || cpu_read16(cpu,0,cpu->S+1)==0x969d)return false;
+  const unsigned sequence=cpu_read16(cpu,0x7e,0x5022),end=cpu_read16(cpu,0x7e,0x5000);
+  if(sequence<0x32 || sequence+17>end || end>0x1000)return false;
+  static const uint8_t expected[]={27,3,255,255,27,7,255,0,27,3,255,1,27,7,255,0,255};
+  for(unsigned i=0;i<sizeof(expected);++i)if(cpu_read8(cpu,0x7e,0x5000+sequence+i)!=expected[i])return false;
+  return true;
+}
+bool ActRaiser_PlantTendrilEntry(CpuState *cpu) {
+  return ActRaiserRegional_DifficultySnapshot().single_tendril_bob && TendrilShape(cpu) && !cpu->m_flag;
+}
+RecompReturn ActRaiser_PlantTendril(CpuState *cpu) {
+  if(!ActRaiser_PlantTendrilEntry(cpu))ActRaiserHleFatal("Unsupported Beginner tendril sequence");
+  /* One 48-update software program, rather than two 24-update repeats. The
+   * real DAE0 JSR owns its repeat count and native coroutine return word. */
+  cpu->A=0x1001;ActRaiserCpuHle_SetNegativeZero16(cpu,cpu->A);
+  if(!cpu_hle_tailcall_request(0x00dae0,0x00dadd))ActRaiserHleFatal("Tendril sequence has no native owner");
+  return RECOMP_RETURN_TAILCALL;
+}
+static bool TendrilProgram(CpuState *cpu,ProgramRow *out) {
+  const uint16_t stored=cpu_read16(cpu,0,cpu->X+0x1c);
+  const bool active=stored>=kExpandedProgramMarker && stored<=kExpandedProgramMarker+6;
+  if((!active && !ActRaiserRegional_DifficultySnapshot().single_tendril_bob) ||
+      cpu_read16(cpu,0,cpu->X+0x1a)!=16 || !TendrilShape(cpu))return false;
+  const unsigned row=active?stored-kExpandedProgramMarker:stored;
+  static const uint8_t native_rows[]={0,1,1,2,3,3,4},delays[]={3,3,15,3,3,15,0};
+  if(row>=sizeof(native_rows))return false;
+  if(out)*out=(ProgramRow){.row=(uint16_t)row,.native_row=native_rows[row],
+      .duration=delays[row],.replace_duration=row<6,.end=row==6};
+  return true;
+}
 static bool AnimationProgram(CpuState *cpu,ProgramRow *out) {
-  return ActorShape(cpu) && (HeadProgram(cpu,out) || PlantProgram(cpu,out));
+  return ActorShape(cpu) && (HeadProgram(cpu,out) || PlantProgram(cpu,out) || TendrilProgram(cpu,out));
 }
 static bool Initializing(CpuState *cpu) {
   /* Real 969B JSR return word. During this call +32 may still be a previous
@@ -333,6 +370,7 @@ RecompReturn ActRaiser_ActionMotion(CpuState *cpu) {
      * without a host cache. The native terminator/state initializer clears
      * it. No other routine in this source family consumes the row index. */
     if(!program.end)cpu_write16(cpu,0,object+0x1c,kExpandedProgramMarker+program.row);
+    if(program.replace_duration)cpu_write16(cpu,0,object+0x24,program.duration);
     return result;
   }
   if(row.skip_rows)return result; /* Native reader acquired the selected row. */

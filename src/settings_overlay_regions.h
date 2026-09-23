@@ -13,10 +13,14 @@ typedef struct SettingsOverlayRegionalHooks {
   ActRaiserRegionalEditResult (*request)(const ActRaiserRegionalRulesView *view,
                                        ActRaiserRegionalSettingGroup group,
                                        ArRegionalSource source);
+  ActRaiserRegionalEditResult (*difficulty)(const ActRaiserRegionalRulesView *view,
+                                           ArRegionalDifficulty level);
 } SettingsOverlayRegionalHooks;
 
 const char *SettingsOverlayRegions_RowKey(ActRaiserRegionalSettingGroup group);
 const char *SettingsOverlayRegions_RowLabel(ArUiLocale locale, ActRaiserRegionalSettingGroup group);
+const char *SettingsOverlayRegions_ValueLabel(ArUiLocale locale, const ActRaiserRegionalRulesView *view,
+    ActRaiserRegionalSettingGroup group, bool effective);
 const char *SettingsOverlayRegions_EditStatus(ArUiLocale locale, ActRaiserRegionalEditResult result);
 bool SettingsOverlayRegions_NextSource(const ActRaiserRegionalRulesView *view,
                                       ActRaiserRegionalSettingGroup group, int direction,

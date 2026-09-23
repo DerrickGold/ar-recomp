@@ -4783,6 +4783,55 @@ An independent repeat reproduces all436 files byte-for-byte. These are
 attack-phase/difficulty results, not complete victories, Story playthroughs,
 magic interactions or proof that every European boss matches another region.
 
+### Difficulty integration in the US host
+
+The game-owned difficulty policy has five independent source leaves: spawn
+HP, contact damage, countdown reload, dragon attack availability and plant
+tendril motion. The selected level is a separate host enum, not a regional
+source or a write to European `$0205`. Requested/effective choices persist
+in companion codec51; the native SRAM image retains its original layout.
+All five effects are captured atomically at complete room/retry initialization.
+No settings callback rewrites active HP, children, hit transactions or time.
+
+- `$00:966F` runs after base-stat and fresh-flag projections at `$966C`.
+  Descriptor Y and copied animation identity guard initialization before
+  source `+32` is installed. A selected PAL HP rule reproduces the `$8231`
+  exemption and Beginner2→1/Expert1→2 transformations, then rejoins `$968F`.
+  This bypasses US Professional promotion, including its attack promotion;
+  US/JP selections leave the original `$0201`/`$0349` path intact.
+- `$00:8A24` changes only an accepted enemy-contact SBC. Expert adds1 to the
+  attack in eight bits, then subtracts with the native carry/sign/overflow
+  semantics. `$8A27` retains the store and original sign-based zero clamp.
+  Damage-box contact `$8C12`, magic and native hit eligibility are untouched.
+- `$02:BC8A` supplies reload71/59/47 only after the US divider has expired.
+  US `$E5` is the divider, `$E6` the BCD time and `$E8` the hold gate. It does
+  not substitute PAL offsets or rescale the host's60Hz simulation.
+- `$00:D766` returns through native RTS `$D76B` on Beginner before allocating
+  the Aitos dragon's producer. Existing producers/children are not removed.
+- `$00:DADD` requests one repeat of retained state16 through real JSR `$DAE0`.
+  The reader maps logical rows0–6 to native rows0/1/1/2/3/3/4, with delays
+  3/3/15/3/3/15 and the native terminator. Pose27, mirrored velocities and
+  collision remain native:48updates, one four-pixel bob, zero net Y travel.
+  `+1C` marker100 owns in-progress logical rows across missing host caches;
+  native state initialization/end clears it. No shared resource is patched.
+
+The renderer-independent adapter tests cover all256×256 contact operands,
+HP flag masks, pending/effective state, migration, timer guards and expanded
+rows in both widths/facings. Five-ROM checks verify promotion masks, reload
+tables, difficulty branches and the complete retained tendril pose/program.
+Controlled Continue/Palace/Fight runs then loaded the plant and dragon rooms
+through native pending-room transitions. All six Normal/Beginner/Expert runs
+exited normally. Beginner countdown reload71 produced72-update intervals;
+Expert reload47 produced48. Expert enemy contacts reduced20→18 and18→16
+health for base attack1. Plant Beginner used the six expanded rows once per
+48-update cycle; Normal/Expert retained two native bobs in the same period.
+The dragon's Beginner gate skipped four producers, while Normal/Expert
+allocated native projectile pairs. Existing actors and random state were not
+edited. Plant background checks reported no mismatch; the controlled dragon
+warp reported the same background mismatch in all three runs, so it is not
+evidence of visual correctness. Complete fights and visual acceptance remain
+separate from these numerical, ABI and controlled-lifecycle checks.
+
 ### European items and spell inventory
 
 All three PAL ROMs share the following checked bank-00 addresses. Pickup
@@ -4842,13 +4891,121 @@ the post-PLP icon entry must be decoded at M0, and the push helper at M1.
 An independent repeat reproduces all73 files byte-for-byte, including the
 three complete casting traces.
 
-Implementation: mode inventory owns an ordered spell collection, current
-cast, debit stage and HUD selection—not just a regional scroll-price scalar.
-Keep pickup semantics and artwork selection distinct. Switch inventory models
-at a new-run/act boundary until an explicit migration policy exists; never
-reinterpret a live stack or toggle its debit convention during a cast.
+The integrated score-life rule wraps US `$00:873C–874D` only after a room/
+retry boundary captures its source. The original helper owns BCD score
+addition, saturation and its RTS/PHP/PLP contract in both accumulator widths.
+The adapter compares the old and resulting score, checks US Action-mode
+progression `$0349`, and performs one uncapped decimal life increment. COP8D
+uses the existing runtime interrupt boundary, preserving audio extension and
+trace handling. PAL's final old-score accumulator return is also reproduced;
+an escaped native return receives no postprocessing. The rule does not
+change item pickups, lives display, retry debits or starting allowances.
+Codec52 and replay identity retain requested/effective choices independently.
+Tests cover36,000 width/mode/score/life transactions, all256 life bytes,
+unsupported entry shapes, escaped returns and all five original helpers.
+Three booted US/Japan/Europe controls each executed56 additional transactions
+through the generated US helper after normal Continue/Palace/Fight. These
+checked actual RTS balance, flags, score saturation, single/multiple band
+crossings, the99→00 life edge and COP8D. Staged score, lives, mode, registers
+and stack were restored immediately; these are bounded integration checks,
+not naturally earned20,000-point playthroughs. All three exited normally with
+zero action-background mismatches.
+
+The US-host implementation captures the inventory model only on a confirmed
+Action new run, after the bounded native initializer returns normally. Its
+256-byte collection, count, displayed icon and in-flight spell are host-owned;
+PAL `$1C00` is not presumed free in US memory. Native US stock byte `$21`
+mirrors the count, without touching adjacent camera state `$22`. The host
+collection is volatile Action-run state, not a change to cartridge SRAM.
+Replay includes live ordered entries and transaction state, excluding dead
+storage. Debug-state restore remains rejected before mutation.
+
+Changed pickup effects enter at `$00:879D` and rejoin the original PLP/RTS
+epilogue `$884E`. Shared sword/heal/score paths remain native. The regional
+cast gate selects the last spell without quoting or spending generic scrolls;
+the selected model remains fixed even if settings change during the effect.
+Actual native cleanup `$9EFC` consumes it after graphics restoration. Accepted
+room/retry initialization cancels only the pending cast and preserves stock.
+Health/max health each increment below24, independently of each other.
+
+Pickup source selection `$96E3` reuses US `$06:A400/A480/A500/A580`, which
+match the four spell pickups in all PAL ROMs byte-for-byte. The full-apple
+fallback distinguishes health growth from the incorrect native life graphic;
+it is not claimed to match the European health-growth art. The HUD uses the
+retained US spell graphics too, not the smaller PAL `$06:AC00` icons.
+Dirty-only `$02:AC20` publishes128 bytes through native PPU ports, leaving
+adjacent pickup tiles intact, then executes original JSR `$AF30` with caller
+word `$AC22`. Ordinary unchanged frames have no additional upload.
+
+Explicit generated boundaries prevent pickup-source, post-cast and NMI hooks
+from being inlined away. Codec54 defaults older companions to US inventory.
+Unit tests cover all256 push depths, delayed debit/interruption, independent
+HP caps, CPU/stack/return contracts, rejected entry shapes, exact icon upload
+length, migration, replay aliases and the five-ROM instructions/assets.
+Controlled live checks complete all four effects, retain stock across an
+interruption and retry, and compare nine HUD uploads against source tiles.
+A separate staged boss-death/act-clear route retains three spells, increased
+maximum HP and lives, clears sword power, then resets the populated collection
+on Game Over restart. Its direct room warp is not evidence of natural encounter
+or background-rendering parity. Full encounters and donor-media acceptance
+remain separate checks.
 
 ### European Story save and Continue
+
+The host's `$02:A622` title owner now exposes a separate new-game settings
+draft while the native title coroutine is open. Accepted New Game/Action
+publishes that draft; Continue instead loads the save-bound companion.
+Abnormal title returns discard the draft without changing the active campaign.
+Difficulty and inventory choices can therefore precede the first room/run
+initializer rather than requiring a Game Over restart. This does not yet
+couple difficulty selection to the translated title artwork: the overlay
+provides the host difficulty selector.
+
+New-game history starts with exact seed/reload projections, but observers and
+regional projections remain gated until native baseline initialization has
+been verified. Title population selection needs no destructive redevelopment:
+there is no developed town in the draft. Existing-campaign conversion retains
+its separate confirmation/recovery path. Draft and active edit tokens are
+distinct, including after acceptance; neither path writes SRAM from settings.
+
+Regional mode entry uses two independent leaves: completion-gated access and
+Game Over destination. `$02:A70D` captures the original checksum result, then
+chooses the native title branch. European access routes a no-save title into
+the existing selector, with Start composed at `$A748/$A751` instead of a
+misleading Continue label. `$A7E9→A813` cycles only eligible choices; the
+completion marker remains untouched. Late enabling at the already-visible
+Start prompt routes `$A72D` back to `$A72F`, while a populated menu can gain
+the additional choice on its next navigation input.
+
+The European Game Over prefix at `$AAF9` waits through the real `$AAEF` call
+boundary, clears the retained US text map with bounded RTS leaf `$ABC4`, and
+resets the corresponding US progression/sword fields and fourteen bytes at
+`$7F:6B18`. `$AAFD` retains its native PHA and `$AB00` changes the target
+operand from `$8058` to `$8023`. The `$AB03` adapter models the original
+PHX/RTL stack effects, then explicitly retires all discarded host callers
+through the runner's reset-root transfer contract. Ordinary dispatch here
+would leave an extra compiled title/mainline activation on every Game Over.
+The reset driver resumes at the new PC without resetting CPU or memory. This enters
+the original US title setup at `$00:8024`, not a whole-CPU reset. PAL source
+blocks are EU `$AB5F`, German `$AB68`, French `$AB51`; the tilemap clear
+matches US byte-for-byte. US/Japanese restart branches remain native.
+
+Four controlled host runs cover initial and late configuration with both
+empty and valid, non-completion-unlocked saves. Each reaches its first
+European-inventory Action run and returns through Game Over to a new title
+draft, with Normal difficulty and retained rule choices. No save/marker is
+written. A separate US Continue/Action/Game Over control retains its native
+restart and allowances. These are selection/lifecycle checks with staged
+death, not natural complete campaigns or final visual acceptance.
+
+The generic transfer contract has a 200-cycle generated-code regression:
+constant activation depth, no resumption of discarded callers, and a final
+ordinary nested return. Invalid/foreign scopes, live hardware frames and
+repeated consumption are rejected. This API is separate from ordinary
+branch-only HLE tails and does not infer terminal transfers from stack height.
+Three consecutive controlled in-game Action runs also return with one title
+root each time and unchanged native stack balance. The private test exits
+normally after13,000 ticks with zero action-background comparison mismatches.
 
 Nine complete button-only transactions cover EU English/German/French and
 all three difficulties. Each resumes its same-ROM fresh Story predecessor,
@@ -4923,6 +5080,30 @@ story timing, level-award wrappers and developed-town maxima still require
 their own coverage; do not generalize these results into “Europe equals US.”
 
 ### European Action retry and new-run inventory
+
+The US-host starting-allowance adapter wraps the complete `$02:AB05–AB2F`
+initializer with its original JSL/RTL frame. Requested spare-life and health
+sources activate at that boundary, not at ordinary retry or room loading.
+After a normal native return it writes only `$1C/$1D/$1E`, returning the
+selected byte health in A with matching N/Z. Native score, stock, equipped
+spell, sword power, progression and destination resets remain authoritative.
+Escaped returns receive no postprocessing. Japan's equivalent initializer is
+`$02:A84B`; PAL entries are EU `$AB9E`, German `$ABA7`, French `$AB90`.
+PAL initializes health earlier and uses different progression/sword fields;
+only verified allowance values are projected, not its RAM layout or ordering.
+
+Codec53 preserves independent requested/effective choices; old companions
+default to US. Tests cover all nine source pairs, both accumulator high-byte
+cases, every valid entry flag combination, rejected shapes, escaped returns
+and all five original initializers. First-run profile selection and European
+Game Over/title routing remain separate mode-entry work.
+
+Three US-host controls entered Game Over through the native death flag with
+zero lives after Continue/Palace/Fight. Start invoked the generated initializer
+with a balanced original return frame; the next Fillmore room had4/24,
+2/24 and4/8 spares/health. Score, stock, equipped spell and sword power were
+cleared. All three exited normally with no background mismatch. These test
+restart routing, not a naturally lethal hit or selection from the first title.
 
 Twenty-seven booted fixtures cover three routes × three difficulties × three
 PAL ROMs. Each begins at native playable Fillmore with explicitly seeded
@@ -5107,6 +5288,12 @@ writes `$1CFF` and wraps to zero, rather than clamping. Sentinels immediately
 outside the 256-byte storage remain intact. The icon still shows the newly
 collected spell. This establishes a boundary behavior, not that an ordinary
 run can accumulate 256 spells.
+
+The host retains this byte-count wrap. One defensive exception is a wrap
+during an in-flight effect: completion clears the pending cast and leaves an
+empty collection. It does not reproduce the PAL word-debit underflow into
+unrelated WRAM, invent a spell, or terminate the game. A dedicated test covers
+255 collected spells, a cast, a 256th pickup and completion.
 
 Cast owner `$00:9925–9AB9` selects the top Action spell before the effect,
 but debits it afterward. It sets player flag `$0010` and `$FA`, spawns the

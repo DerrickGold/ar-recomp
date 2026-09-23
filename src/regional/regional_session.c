@@ -54,7 +54,15 @@ enum { kHeaderBytes = 36, kPayloadCapacity = kSaveCheckpointPayloadMax,
        kV47RecordCount = kV46RecordCount + 1,
        kV48RecordCount = kV47RecordCount + 3,
        kV49RecordCount = kV48RecordCount + 4,
-       kRecordCount = kV49RecordCount + 1 };
+       kV50RecordCount = kV49RecordCount + 1,
+       kV51RecordCount = kV50RecordCount + kArRegionalDifficultyRule_Count,
+       kV52RecordCount = kV51RecordCount + 1,
+       kV53RecordCount = kV52RecordCount + kArRegionalActionStart_Count,
+       kV54RecordCount = kV53RecordCount + 1,
+       kRecordCount = kV54RecordCount + kArRegionalMode_Count };
+_Static_assert(kArRegionalMode_Count==2,"preserve mode-entry record ordinals");
+_Static_assert(kArRegionalActionStart_Count==2,"preserve action-start record ordinals");
+_Static_assert(kArRegionalDifficultyRule_Count==5,"preserve difficulty record ordinals");
 _Static_assert(kArRegionalFire_Count==4,"preserve fire-enemy record ordinals");
 _Static_assert(kArRegionalCastHold_Count==3,"preserve cast-hold record ordinals");
 _Static_assert(kArRegionalActorStat_BaseCount==63 && kArRegionalActorStat_Count==66,"preserve historical stat record ordinals");
@@ -103,7 +111,21 @@ static bool Valid(const ArRegionalSession *session) {
       !ArRegionalLairAccounting_Projection(&effective,&active_projection)) return false;
   uint8_t unused_collision;
   ArRegionalActorStatsSnapshot unused_stats;
-  return has_id && ArRegionalFire_Resolve(&session->requested.fire_enemy,&unused_collision) &&
+  ArRegionalDifficultySnapshot unused_difficulty;
+  bool unused_lives;
+  uint8_t unused_mode;
+  ArRegionalActionStartSnapshot unused_start;
+  return has_id && ArRegionalMode_Resolve(&session->requested.mode_entry,&unused_mode) &&
+      ArRegionalMode_Resolve(&session->effective.mode_entry,&unused_mode) &&
+      ArRegionalActionStart_Resolve(&session->requested.action_start,&unused_start) &&
+      ArRegionalInventory_Resolve(session->requested.spell_inventory,&unused_lives) &&
+      ArRegionalInventory_Resolve(session->effective.spell_inventory,&unused_lives) &&
+      ArRegionalActionStart_Resolve(&session->effective.action_start,&unused_start) &&
+      ArRegionalScoreLives_Resolve(session->requested.score_lives,&unused_lives) &&
+      ArRegionalScoreLives_Resolve(session->effective.score_lives,&unused_lives) &&
+      ArRegionalDifficulty_Resolve(&session->requested.difficulty,&unused_difficulty) &&
+      ArRegionalDifficulty_Resolve(&session->effective.difficulty,&unused_difficulty) &&
+      ArRegionalFire_Resolve(&session->requested.fire_enemy,&unused_collision) &&
       ArRegionalFire_Resolve(&session->effective.fire_enemy,&unused_collision) &&
       ArRegionalCastHold_Resolve(&session->requested.cast_hold,&unused_collision) &&
       ArRegionalCastHold_Resolve(&session->effective.cast_hold,&unused_collision) &&
@@ -544,6 +566,93 @@ bool ArRegionalSession_BeginCollision(ArRegionalSession *session,ArRegionalColli
   if(changed)++session->revision;
   *snapshot=next;return true;
 }
+bool ArRegionalSession_RequestModeEntry(ArRegionalSession *session,uint32_t revision,const ArRegionalModePolicy *policy) {
+  uint8_t unused;
+  if(!Valid(session) || revision!=session->revision || !ArRegionalMode_Resolve(policy,&unused))return false;
+  if(!memcmp(policy,&session->requested.mode_entry,sizeof(*policy)))return true;
+  if(session->revision==UINT32_MAX)return false;
+  session->requested.mode_entry=*policy;++session->revision;return true;
+}
+bool ArRegionalSession_BeginModeEntry(ArRegionalSession *session,uint8_t *snapshot) {
+  if(!snapshot || !Valid(session))return false;
+  const bool changed=memcmp(&session->requested.mode_entry,&session->effective.mode_entry,sizeof(session->requested.mode_entry))!=0;
+  if(changed && session->revision==UINT32_MAX)return false;
+  uint8_t next;if(!ArRegionalMode_Resolve(&session->requested.mode_entry,&next))return false;
+  session->effective.mode_entry=session->requested.mode_entry;
+  if(changed)++session->revision;
+  *snapshot=next;return true;
+}
+bool ArRegionalSession_RequestInventory(ArRegionalSession *session,uint32_t revision,ArRegionalSource source) {
+  bool unused;
+  if(!Valid(session) || revision!=session->revision || !ArRegionalInventory_Resolve(source,&unused))return false;
+  if(session->requested.spell_inventory==source)return true;
+  if(session->revision==UINT32_MAX)return false;
+  session->requested.spell_inventory=source;++session->revision;return true;
+}
+bool ArRegionalSession_BeginInventory(ArRegionalSession *session,bool *enabled) {
+  if(!enabled || !Valid(session))return false;
+  const bool changed=session->requested.spell_inventory!=session->effective.spell_inventory;
+  if(changed && session->revision==UINT32_MAX)return false;
+  bool next;if(!ArRegionalInventory_Resolve(session->requested.spell_inventory,&next))return false;
+  session->effective.spell_inventory=session->requested.spell_inventory;
+  if(changed)++session->revision;
+  *enabled=next;return true;
+}
+bool ArRegionalSession_RequestActionStart(ArRegionalSession *session,uint32_t revision,const ArRegionalActionStartPolicy *policy) {
+  ArRegionalActionStartSnapshot unused;
+  if(!Valid(session) || revision!=session->revision || !ArRegionalActionStart_Resolve(policy,&unused))return false;
+  if(!memcmp(policy,&session->requested.action_start,sizeof(*policy)))return true;
+  if(session->revision==UINT32_MAX)return false;
+  session->requested.action_start=*policy;++session->revision;return true;
+}
+bool ArRegionalSession_BeginActionStart(ArRegionalSession *session,ArRegionalActionStartSnapshot *snapshot) {
+  if(!snapshot || !Valid(session))return false;
+  const bool changed=memcmp(&session->requested.action_start,&session->effective.action_start,sizeof(session->requested.action_start))!=0;
+  if(changed && session->revision==UINT32_MAX)return false;
+  ArRegionalActionStartSnapshot next;
+  if(!ArRegionalActionStart_Resolve(&session->requested.action_start,&next))return false;
+  session->effective.action_start=session->requested.action_start;
+  if(changed)++session->revision;
+  *snapshot=next;return true;
+}
+bool ArRegionalSession_RequestScoreLives(ArRegionalSession *session,uint32_t revision,ArRegionalSource source) {
+  bool unused;
+  if(!Valid(session) || revision!=session->revision || !ArRegionalScoreLives_Resolve(source,&unused))return false;
+  if(session->requested.score_lives==source)return true;
+  if(session->revision==UINT32_MAX)return false;
+  session->requested.score_lives=source;++session->revision;return true;
+}
+bool ArRegionalSession_BeginScoreLives(ArRegionalSession *session,bool *enabled) {
+  if(!enabled || !Valid(session))return false;
+  const bool changed=session->requested.score_lives!=session->effective.score_lives;
+  if(changed && session->revision==UINT32_MAX)return false;
+  bool next;if(!ArRegionalScoreLives_Resolve(session->requested.score_lives,&next))return false;
+  session->effective.score_lives=session->requested.score_lives;
+  if(changed)++session->revision;
+  *enabled=next;return true;
+}
+bool ArRegionalSession_RequestDifficulty(ArRegionalSession *session, uint32_t revision,
+    const ArRegionalDifficultyPolicy *policy) {
+  ArRegionalDifficultySnapshot unused;
+  if (!Valid(session) || revision!=session->revision || !ArRegionalDifficulty_Resolve(policy,&unused)) return false;
+  if (!memcmp(policy,&session->requested.difficulty,sizeof(*policy))) return true;
+  if (session->revision==UINT32_MAX) return false;
+  session->requested.difficulty=*policy;
+  ++session->revision;
+  return true;
+}
+bool ArRegionalSession_BeginDifficulty(ArRegionalSession *session, ArRegionalDifficultySnapshot *snapshot) {
+  if (!snapshot || !Valid(session)) return false;
+  const bool changed=memcmp(&session->requested.difficulty,&session->effective.difficulty,
+      sizeof(session->requested.difficulty))!=0;
+  if (changed && session->revision==UINT32_MAX) return false;
+  ArRegionalDifficultySnapshot next;
+  if (!ArRegionalDifficulty_Resolve(&session->requested.difficulty,&next)) return false;
+  session->effective.difficulty=session->requested.difficulty;
+  if (changed) ++session->revision;
+  *snapshot=next;
+  return true;
+}
 bool ArRegionalSession_RequestBosses(ArRegionalSession *session,uint32_t revision,const ArRegionalBossPolicy *policy) {
   uint64_t unused;
   if(!Valid(session) || revision!=session->revision || !ArRegionalBoss_Resolve(policy,&unused))return false;
@@ -892,6 +1001,26 @@ bool ArRegionalSession_BeginSimActor(ArRegionalSession *session,unsigned town,un
 /* The wire shape is shared, not the units: stable keys select the descriptor
  * for resource counts, initial BCD times, booleans or town service counts. */
 static const char *Record(unsigned i, const uint16_t **values) {
+  if(i>=kV54RecordCount) {
+    const ArRegionalModeDescriptor *desc=ArRegionalMode_Descriptor(i-kV54RecordCount);
+    *values=desc->value;return desc->key;
+  }
+  if(i==kV53RecordCount) {
+    const ArRegionalInventoryDescriptor *desc=ArRegionalInventory_Descriptor();
+    *values=desc->enabled;return desc->key;
+  }
+  if(i>=kV52RecordCount) {
+    const ArRegionalActionStartDescriptor *desc=ArRegionalActionStart_Descriptor(i-kV52RecordCount);
+    *values=desc->value;return desc->key;
+  }
+  if(i==kV51RecordCount) {
+    const ArRegionalScoreLivesDescriptor *desc=ArRegionalScoreLives_Descriptor();
+    *values=desc->enabled;return desc->key;
+  }
+  if(i>=kV50RecordCount) {
+    const ArRegionalDifficultyDescriptor *desc=ArRegionalDifficulty_Descriptor(i-kV50RecordCount);
+    *values=desc->value;return desc->key;
+  }
   if(i==kV49RecordCount) {
     const ArRegionalActionMotionDescriptor *desc=ArRegionalActionMotion_Descriptor(kArRegionalActionMotion_TreeSeeds);
     *values=desc->value;return desc->key;
@@ -1089,6 +1218,11 @@ static const char *Record(unsigned i, const uint16_t **values) {
 }
 
 static ArRegionalSource RecordSource(const ArRegionalSession *session, unsigned i, bool requested) {
+  if(i>=kV54RecordCount)return requested?session->requested.mode_entry.source[i-kV54RecordCount]:session->effective.mode_entry.source[i-kV54RecordCount];
+  if(i==kV53RecordCount)return requested?session->requested.spell_inventory:session->effective.spell_inventory;
+  if(i>=kV52RecordCount)return requested?session->requested.action_start.source[i-kV52RecordCount]:session->effective.action_start.source[i-kV52RecordCount];
+  if(i==kV51RecordCount)return requested?session->requested.score_lives:session->effective.score_lives;
+  if(i>=kV50RecordCount)return requested?session->requested.difficulty.source[i-kV50RecordCount]:session->effective.difficulty.source[i-kV50RecordCount];
   if(i==kV49RecordCount)return requested?session->requested.action_motion.source[kArRegionalActionMotion_TreeSeeds]:session->effective.action_motion.source[kArRegionalActionMotion_TreeSeeds];
   if(i>=kV48RecordCount)return requested?session->requested.bosses.source[22+i-kV48RecordCount]:session->effective.bosses.source[22+i-kV48RecordCount];
   if(i>=kV47RecordCount)return requested?session->requested.bosses.source[19+i-kV47RecordCount]:session->effective.bosses.source[19+i-kV47RecordCount];
@@ -1188,7 +1322,7 @@ static bool Encode(const ArRegionalSession *session, uint8_t *out, size_t *size)
   if (!Valid(session)) return false;
   memset(out, 0, kHeaderBytes);
   memcpy(out, kMagic, sizeof(kMagic));
-  ByteOrder_WriteLe16(out + 8, 50);
+  ByteOrder_WriteLe16(out + 8, 55);
   ByteOrder_WriteLe16(out + 10, kRecordCount);
   ByteOrder_WriteLe32(out + 12, session->slot);
   memcpy(out + 16, session->campaign, 16);
@@ -1218,7 +1352,13 @@ static bool Encode(const ArRegionalSession *session, uint8_t *out, size_t *size)
   offset+=kArRegionalSimActorsEncodedBytes;
   if(kPayloadCapacity-offset<9)return false;
   memcpy(out+offset,"ARARRIV1",8);out[offset+8]=session->arrival_locked;
-  *size=offset+9;
+  offset+=9;
+  if(kPayloadCapacity-offset<10)return false;
+  memcpy(out+offset,"ARDIFF01",8);
+  /* Stable choice bytes; neither foreign RAM values nor region keys. */
+  out[offset+8]=(uint8_t)session->requested.difficulty.level;
+  out[offset+9]=(uint8_t)session->effective.difficulty.level;
+  *size=offset+10;
   return true;
 }
 
@@ -1233,7 +1373,7 @@ static SaveCheckpointStatus Decode(const uint8_t *bytes, size_t size, ArRegional
   const bool pricing_only = !memcmp(bytes, kPriceMagic, sizeof(kPriceMagic));
   if (!pricing_only && memcmp(bytes, kMagic, sizeof(kMagic))) return kSaveCheckpoint_Invalid;
   const unsigned version = ByteOrder_ReadLe16(bytes + 8);
-  if (version < 1 || version > (pricing_only ? 1u : 50u)) return kSaveCheckpoint_Unsupported;
+  if (version < 1 || version > (pricing_only ? 1u : 55u)) return kSaveCheckpoint_Unsupported;
   const unsigned count = pricing_only ? kArRegionalCostRule_Count :
       version == 1 ? kV1RecordCount : version == 2 ? kV2RecordCount :
       version == 3 ? kV3RecordCount : version == 4 ? kV4RecordCount :
@@ -1258,7 +1398,10 @@ static SaveCheckpointStatus Decode(const uint8_t *bytes, size_t size, ArRegional
       version == 42 ? kV42RecordCount : version == 43 ? kV43RecordCount :
       version == 44 ? kV44RecordCount : version == 45 ? kV45RecordCount :
       version == 46 ? kV46RecordCount : version == 47 ? kV47RecordCount :
-      version == 48 ? kV48RecordCount : version == 49 ? kV49RecordCount : kRecordCount;
+      version == 48 ? kV48RecordCount : version == 49 ? kV49RecordCount :
+      version == 50 ? kV50RecordCount : version == 51 ? kV51RecordCount :
+      version == 52 ? kV52RecordCount : version == 53 ? kV53RecordCount :
+      version == 54 ? kV54RecordCount : kRecordCount;
   if (ByteOrder_ReadLe16(bytes + 10) != count) return kSaveCheckpoint_Unsupported;
   ArRegionalSession next = {.slot = ByteOrder_ReadLe32(bytes + 12), .revision = ByteOrder_ReadLe32(bytes + 32)};
   memcpy(next.campaign, bytes + 16, sizeof(next.campaign));
@@ -1286,7 +1429,20 @@ static SaveCheckpointStatus Decode(const uint8_t *bytes, size_t size, ArRegional
       return kSaveCheckpoint_Unsupported;
     if (values[requested] != ByteOrder_ReadLe16(bytes + offset + 4) ||
         values[effective] != ByteOrder_ReadLe16(bytes + offset + 6)) return kSaveCheckpoint_Unsupported;
-    if(rule==kV49RecordCount) {
+    if(rule>=kV54RecordCount) {
+      next.requested.mode_entry.source[rule-kV54RecordCount]=requested;
+      next.effective.mode_entry.source[rule-kV54RecordCount]=effective;
+    } else if(rule==kV53RecordCount) {
+      next.requested.spell_inventory=requested;next.effective.spell_inventory=effective;
+    } else if(rule>=kV52RecordCount) {
+      next.requested.action_start.source[rule-kV52RecordCount]=requested;
+      next.effective.action_start.source[rule-kV52RecordCount]=effective;
+    } else if(rule==kV51RecordCount) {
+      next.requested.score_lives=requested;next.effective.score_lives=effective;
+    } else if(rule>=kV50RecordCount) {
+      next.requested.difficulty.source[rule-kV50RecordCount]=requested;
+      next.effective.difficulty.source[rule-kV50RecordCount]=effective;
+    } else if(rule==kV49RecordCount) {
       next.requested.action_motion.source[kArRegionalActionMotion_TreeSeeds]=requested;
       next.effective.action_motion.source[kArRegionalActionMotion_TreeSeeds]=effective;
     } else if(rule>=kV48RecordCount) {
@@ -1431,8 +1587,16 @@ static SaveCheckpointStatus Decode(const uint8_t *bytes, size_t size, ArRegional
         offset+=actors_size;
         if(version>=28) {
           if(size-offset>=8 && !memcmp(bytes+offset,"ARARRIV",7) && bytes[offset+7]!='1')return kSaveCheckpoint_Unsupported;
-          if(size-offset!=9 || memcmp(bytes+offset,"ARARRIV1",8) || bytes[offset+8]>1)return kSaveCheckpoint_Invalid;
+          if(size-offset!=(version>=51?19u:9u) || memcmp(bytes+offset,"ARARRIV1",8) || bytes[offset+8]>1)return kSaveCheckpoint_Invalid;
           next.arrival_locked=bytes[offset+8]!=0;
+          if(version>=51) {
+            offset+=9;
+            if(memcmp(bytes+offset,"ARDIFF01",8))return kSaveCheckpoint_Unsupported;
+            if(bytes[offset+8]>=kArRegionalDifficulty_Count || bytes[offset+9]>=kArRegionalDifficulty_Count)
+              return kSaveCheckpoint_Invalid;
+            next.requested.difficulty.level=(ArRegionalDifficulty)bytes[offset+8];
+            next.effective.difficulty.level=(ArRegionalDifficulty)bytes[offset+9];
+          }
         }
       }
     }

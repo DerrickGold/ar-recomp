@@ -771,9 +771,47 @@ int cpu_begin_owned_unwind(CpuState *cpu, uint16 return_stack,
 
 int cpu_finish_owned_unwind(CpuReturnScope *scope, CpuState *cpu) {
     if (scope == NULL || scope != g_cpu_owned_unwind_scope ||
-        scope != g_cpu_return_scope || scope->cpu != cpu) return 0;
+        scope != g_cpu_return_scope || scope->cpu != cpu || !scope->frame_bytes) return 0;
     scope->adjusted_return = 1u;
     g_cpu_owned_unwind_scope = NULL;
+    return 1;
+}
+
+int cpu_begin_reset_tail(CpuState *cpu, uint32 target, uint32 source) {
+    if (!cpu || cpu->emulation || cpu->S > 0x1fffu ||
+        g_cpu_owned_unwind_scope || g_recomp_stack_top <= 0 ||
+        target > 0xffffffu || source > 0xffffffu) return 0;
+    CpuReturnScope *scope = g_cpu_return_scope;
+    uint16 previous = 0;
+    for (; scope; scope = scope->previous) {
+        if (scope->cpu != cpu) return 0;
+        if (!scope->frame_bytes) break;
+        if ((scope->frame_bytes != 2 && scope->frame_bytes != 3) ||
+            scope->entry_stack < previous ||
+            (uint32)scope->entry_stack + scope->frame_bytes > cpu->S) return 0;
+        previous = scope->entry_stack;
+    }
+    if (!scope || scope->previous || scope->reset_activation_depth <= 0 ||
+        scope->reset_activation_depth > g_recomp_stack_top) return 0;
+    /* No continuation can legally return through the discarded native stack.
+     * Retire host frames using the existing owned-unwind propagation path. */
+    (void)cpu_take_tailcall_return_context(NULL, NULL);
+    cpu_tailcall_request(target, cpu->S, source);
+    scope->adjusted_return = 1;
+    g_cpu_owned_unwind_scope = scope;
+    cpu->PB = (uint8)(target >> 16);
+    return 1;
+}
+
+int cpu_finish_reset_tail(CpuReturnScope *scope, CpuState *cpu) {
+    if (!scope || scope != g_cpu_owned_unwind_scope || scope != g_cpu_return_scope ||
+        scope->cpu != cpu || scope->frame_bytes || !scope->adjusted_return ||
+        scope->previous || g_recomp_stack_top || cpu->S != g_tailcall_miss_s) return 0;
+    g_cpu_owned_unwind_scope = NULL;
+    scope->adjusted_return = 0;
+    scope->reset_activation_depth = 1;
+    cpu_tailcall_inherit_return_context(cpu->S, 0);
+    cpu->host_return_valid = 0;
     return 1;
 }
 

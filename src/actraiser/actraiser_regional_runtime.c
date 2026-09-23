@@ -64,6 +64,12 @@ extern RecompReturn bank_03_EB35_M1X0(CpuState *cpu);
 static bool s_story_compass_delegate;
 static uint16_t s_skull_frames;
 static ArRegionalCampaign s_campaign;
+/* Title choices are an unsaved new-game draft, never an alias of the loaded
+ * campaign. Continue discards the draft and restores its own bound rules. */
+static ArRegionalSession s_title_draft;
+static bool s_title_open;
+static ArRegionalRules s_return_rules;
+static bool s_return_rules_valid;
 static struct {
   bool pending,delegate;
   uint8_t campaign[16];
@@ -97,6 +103,8 @@ typedef struct ActionRuleCache {
   ArRegionalEmitterSnapshot emitters;
   bool statue_volley;
   ArRegionalBossSnapshot bosses;
+  ArRegionalDifficultySnapshot difficulty;
+  bool score_lives;
   ArRegionalCollisionSnapshot collision;
   ArRegionalPlatformSkullSnapshot platform_skull;
   ArRegionalActorStatsSnapshot actor_stats;
@@ -115,10 +123,16 @@ static bool s_report_active, s_report_delegate, s_report_score_page;
 static bool s_report_command_active;
 static bool s_speed_active, s_speed_delegate, s_speed_scale_delegate;
 static uint16_t s_speed_maximum;
+static ArRegionalSpellInventory s_inventory;
+static bool s_inventory_icon_pending;
 static uint32_t s_prices_revision;
 static ArRegionalCostSnapshot s_prices, s_miracle_prices;
 
 bool ActRaiserRegional_Initialize(ArRegionalCampaignIdentity identity, void *context) {
+  s_title_open=false;
+  s_title_draft=(ArRegionalSession){0};
+  s_return_rules_valid=false;
+  ArRegionalSpellInventory_Reset(&s_inventory,false);s_inventory_icon_pending=false;
   if (!identity) return false;
   s_delegate = false;
   memset(&s_population,0,sizeof(s_population));
@@ -151,6 +165,9 @@ bool ActRaiserRegional_Initialize(ArRegionalCampaignIdentity identity, void *con
   s_speed_maximum = 9;
   s_trace = getenv("AR_REGIONAL_TRACE") != NULL;
   ArRegionalCampaign_Init(&s_campaign, 0, identity, context);
+  /* Initialization may follow a previous campaign in the same process. Reset
+   * every family before overlaying an available durable companion. */
+  s_boot_requested = (ArRegionalRules){0};
   ArRegionalCosts_Init(&s_boot_requested.costs, kArRegionalSource_US);
   ArRegionalTimers_Init(&s_boot_requested.timers, kArRegionalSource_US);
   s_boot_requested.retry_score = kArRegionalSource_US;
@@ -206,9 +223,38 @@ bool ActRaiserRegional_CopySupport(ArRegionalSupportSnapshot *snapshot) {
 }
 
 ArRegionalActionMotionSnapshot ActRaiserRegional_ActionMotionSnapshot(void) { return s_action.motion; }
+bool ActRaiserRegional_ScoreLivesEnabled(void) {return s_action.score_lives;}
+bool ActRaiserRegional_BeginActionStart(ArRegionalActionStartSnapshot *snapshot) {
+  const ArRegionalActionStartPolicy native={{0}};
+  return s_campaign.active_valid?ArRegionalSession_BeginActionStart(&s_campaign.active,snapshot):
+      ArRegionalActionStart_Resolve(&native,snapshot);
+}
+bool ActRaiserRegional_StartInventory(void) {
+  bool enabled=false;
+  if(s_campaign.active_valid && !ArRegionalSession_BeginInventory(&s_campaign.active,&enabled))return false;
+  ArRegionalSpellInventory_Reset(&s_inventory,enabled);s_inventory_icon_pending=enabled;
+  return true;
+}
+ActRaiserInventoryView ActRaiserRegional_InventoryView(void) {
+  return (ActRaiserInventoryView){s_inventory.count,s_inventory.icon,s_inventory.casting,
+      s_inventory.enabled,s_inventory_icon_pending};
+}
+bool ActRaiserRegional_PushSpell(unsigned spell) {
+  if(!ArRegionalSpellInventory_Push(&s_inventory,spell))return false;
+  s_inventory_icon_pending=true;return true;
+}
+bool ActRaiserRegional_BeginSpell(uint8_t *spell) {
+  return ArRegionalSpellInventory_BeginCast(&s_inventory,spell);
+}
+bool ActRaiserRegional_FinishSpell(void) {
+  if(!ArRegionalSpellInventory_FinishCast(&s_inventory))return false;
+  s_inventory_icon_pending=true;return true;
+}
+void ActRaiserRegional_InventoryIconUploaded(void) {s_inventory_icon_pending=false;}
 ArRegionalEmitterSnapshot ActRaiserRegional_EmitterSnapshot(void) { return s_action.emitters; }
 bool ActRaiserRegional_DoubleStatueVolley(void) { return s_action.statue_volley; }
 ArRegionalBossSnapshot ActRaiserRegional_BossSnapshot(void) { return s_action.bosses; }
+ArRegionalDifficultySnapshot ActRaiserRegional_DifficultySnapshot(void) { return s_action.difficulty; }
 ArRegionalCollisionSnapshot ActRaiserRegional_CollisionSnapshot(void) { return s_action.collision; }
 ArRegionalPlatformSkullSnapshot ActRaiserRegional_PlatformSkullSnapshot(void) { return s_action.platform_skull; }
 ArRegionalCastHoldSnapshot ActRaiserRegional_CastHoldSnapshot(void) { return s_action.cast_hold; }
@@ -298,173 +344,232 @@ bool ActRaiserRegional_CopyPrices(ArRegionalCostSnapshot *prices) {
   return true;
 }
 
+static ArRegionalSession *EditableSession(void) {
+  return s_title_open?&s_title_draft:s_campaign.active_valid?&s_campaign.active:NULL;
+}
+
+bool ActRaiserRegional_ModeEntry(bool activate,uint8_t *snapshot) {
+  if(!snapshot)return false;
+  ArRegionalSession *session=EditableSession();
+  if(!session) {*snapshot=0;return true;}
+  return activate?ArRegionalSession_BeginModeEntry(session,snapshot):
+      ArRegionalMode_Resolve(&session->requested.mode_entry,snapshot);
+}
+
+bool ActRaiserRegional_ReturnToTitle(void) {
+  if(s_title_open || !s_campaign.active_valid)return false;
+  s_return_rules=s_campaign.active.requested;s_return_rules_valid=true;
+  s_return_rules.difficulty.level=kArRegionalDifficulty_Normal;
+  ArRegionalSpellInventory_Reset(&s_inventory,false);s_inventory_icon_pending=false;
+  s_action=(ActionRuleCache){0};
+  return true;
+}
+
 bool ActRaiserRegional_CopyRulesView(ActRaiserRegionalRulesView *out) {
-  if (!out || !s_campaign.active_valid) return false;
-  *out = (ActRaiserRegionalRulesView){.revision = s_campaign.active.revision,
-      .requested = s_campaign.active.requested, .effective = s_campaign.active.effective,
+  ArRegionalSession *session=EditableSession();
+  if (!out || !session) return false;
+  *out = (ActRaiserRegionalRulesView){.revision = session->revision,
+      .requested = session->requested, .effective = session->effective,
+      .new_game = s_title_open,
       .editable = InputReplay_PolicyChangesAllowed(), .miracle_in_progress = s_miracle_active};
-  out->lair_history_ready = s_campaign.active.lairs.initialized_towns == 0x3f &&
-      !s_campaign.active.lairs.diverged_towns;
-  out->lair_reload_ready = s_campaign.active.reloads.initialized_towns==0x3f &&
-      !s_campaign.active.reloads.diverged_towns;
-  memcpy(out->campaign, s_campaign.active.campaign, sizeof(out->campaign));
-  out->population_pending=s_population.pending && s_population.revision==out->revision &&
+  out->lair_history_ready = session->lairs.initialized_towns == 0x3f &&
+      !session->lairs.diverged_towns;
+  out->lair_reload_ready = session->reloads.initialized_towns==0x3f &&
+      !session->reloads.diverged_towns;
+  memcpy(out->campaign, session->campaign, sizeof(out->campaign));
+  out->population_pending=!s_title_open && s_population.pending && s_population.revision==out->revision &&
       !memcmp(s_population.campaign,out->campaign,16);
   out->pending_population=s_population.source;
-  out->arrival_locked=s_campaign.active.arrival_locked;
+  out->arrival_locked=session->arrival_locked;
   return true;
 }
 
 ActRaiserRegionalEditResult ActRaiserRegional_RequestRules(
     const ActRaiserRegionalRulesView *view, ActRaiserRegionalSettingGroup group,
     ArRegionalSource source) {
-  if (!view || !s_campaign.active_valid || (unsigned)group >= kActRaiserRegionalSetting_Count ||
+  ArRegionalSession *session=EditableSession();
+  if (!view || !session || (unsigned)group >= kActRaiserRegionalSetting_Count ||
       (unsigned)source >= kArRegionalSource_Count) return kActRaiserRegionalEdit_Invalid;
   if (!InputReplay_PolicyChangesAllowed()) return kActRaiserRegionalEdit_Locked;
-  if (view->revision != s_campaign.active.revision ||
-      memcmp(view->campaign, s_campaign.active.campaign, sizeof(view->campaign)))
+  if (view->new_game != s_title_open || view->revision != session->revision ||
+      memcmp(view->campaign, session->campaign, sizeof(view->campaign)))
     return kActRaiserRegionalEdit_Stale;
   bool ok;
   switch (group) {
+    case kActRaiserRegionalSetting_ModeEntry: {
+      ArRegionalModePolicy policy;ArRegionalMode_Init(&policy,source);
+      ok=ArRegionalSession_RequestModeEntry(session,view->revision,&policy);break;
+    }
+    case kActRaiserRegionalSetting_Inventory:
+      ok=ArRegionalSession_RequestInventory(session,view->revision,source);break;
+    case kActRaiserRegionalSetting_ActionStart: {
+      ArRegionalActionStartPolicy policy;ArRegionalActionStart_Init(&policy,source);
+      ok=ArRegionalSession_RequestActionStart(session,view->revision,&policy);break;
+    }
+    case kActRaiserRegionalSetting_ScoreLives:
+      ok=ArRegionalSession_RequestScoreLives(session,view->revision,source);break;
+    case kActRaiserRegionalSetting_DifficultyRules: {
+      ArRegionalDifficultyPolicy policy;
+      ArRegionalDifficulty_Init(&policy,source,session->requested.difficulty.level);
+      ok=ArRegionalSession_RequestDifficulty(session,view->revision,&policy);break;
+    }
     case kActRaiserRegionalSetting_FireEnemy: {
       ArRegionalFirePolicy policy;ArRegionalFire_Init(&policy,source);
-      ok=ArRegionalSession_RequestFire(&s_campaign.active,view->revision,&policy);break;
+      ok=ArRegionalSession_RequestFire(session,view->revision,&policy);break;
     }
     case kActRaiserRegionalSetting_CastHold: {
       ArRegionalCastHoldPolicy policy;ArRegionalCastHold_Init(&policy,source);
-      ok=ArRegionalSession_RequestCastHold(&s_campaign.active,view->revision,&policy);break;
+      ok=ArRegionalSession_RequestCastHold(session,view->revision,&policy);break;
     }
     case kActRaiserRegionalSetting_Bosses: {
       ArRegionalBossPolicy policy;ArRegionalBoss_Init(&policy,source);
-      ok=ArRegionalSession_RequestBosses(&s_campaign.active,view->revision,&policy);break;
+      ok=ArRegionalSession_RequestBosses(session,view->revision,&policy);break;
     }
     case kActRaiserRegionalSetting_Collision: {
       ArRegionalCollisionPolicy policy;ArRegionalCollision_Init(&policy,source);
-      ok=ArRegionalSession_RequestCollision(&s_campaign.active,view->revision,&policy);break;
+      ok=ArRegionalSession_RequestCollision(session,view->revision,&policy);break;
     }
     case kActRaiserRegionalSetting_PlatformSkull: {
       ArRegionalPlatformSkullPolicy policy;ArRegionalPlatformSkull_Init(&policy,source);
-      ok=ArRegionalSession_RequestPlatformSkull(&s_campaign.active,view->revision,&policy);break;
+      ok=ArRegionalSession_RequestPlatformSkull(session,view->revision,&policy);break;
     }
     case kActRaiserRegionalSetting_ActorStats: {
       ArRegionalActorStatsPolicy policy;ArRegionalActorStats_Init(&policy,source);
-      ok=ArRegionalSession_RequestActorStats(&s_campaign.active,view->revision,&policy);break;
+      ok=ArRegionalSession_RequestActorStats(session,view->revision,&policy);break;
     }
     case kActRaiserRegionalSetting_StatueVolley:
-      ok=ArRegionalSession_RequestVolley(&s_campaign.active,view->revision,source);break;
+      ok=ArRegionalSession_RequestVolley(session,view->revision,source);break;
     case kActRaiserRegionalSetting_Emitters: {
       ArRegionalEmitterPolicy policy;ArRegionalEmitter_Init(&policy,source);
-      ok=ArRegionalSession_RequestEmitters(&s_campaign.active,view->revision,&policy);break;
+      ok=ArRegionalSession_RequestEmitters(session,view->revision,&policy);break;
     }
     case kActRaiserRegionalSetting_ActionMotion: {
       ArRegionalActionMotionPolicy policy;ArRegionalActionMotion_Init(&policy,source);
-      ok=ArRegionalSession_RequestActionMotion(&s_campaign.active,view->revision,&policy);break;
+      ok=ArRegionalSession_RequestActionMotion(session,view->revision,&policy);break;
     }
     case kActRaiserRegionalSetting_Arrival:
-      ok=ArRegionalSession_RequestArrival(&s_campaign.active,view->revision,source);break;
+      ok=ArRegionalSession_RequestArrival(session,view->revision,source);break;
     case kActRaiserRegionalSetting_Population: {
-      ArRegionalSession candidate=s_campaign.active;
+      ArRegionalSession candidate=*session;
       if(!ArRegionalSession_SetPopulationProfile(&candidate,view->revision,source))return kActRaiserRegionalEdit_Invalid;
+      if(s_title_open) {
+        *session=candidate;
+        return candidate.revision==view->revision?kActRaiserRegionalEdit_Unchanged:kActRaiserRegionalEdit_Applied;
+      }
       if(candidate.revision==view->revision) {s_population.pending=false;return kActRaiserRegionalEdit_Unchanged;}
       s_population.pending=true;s_population.source=source;s_population.revision=view->revision;
       memcpy(s_population.campaign,view->campaign,16);
       return kActRaiserRegionalEdit_Deferred;
     }
     case kActRaiserRegionalSetting_Construction:
-      ok=ArRegionalSession_RequestConstruction(&s_campaign.active,view->revision,source);break;
+      ok=ArRegionalSession_RequestConstruction(session,view->revision,source);break;
     case kActRaiserRegionalSetting_SimAi: {
       ArRegionalSimAiPolicy policy;
       if (!ArRegionalSimAi_Init(&policy,source)) return kActRaiserRegionalEdit_Invalid;
-      ok=ArRegionalSession_RequestSimAi(&s_campaign.active,view->revision,&policy);break;
+      ok=ArRegionalSession_RequestSimAi(session,view->revision,&policy);break;
     }
     case kActRaiserRegionalSetting_SimCombat: {
       ArRegionalSimCombatPolicy policy;
       if (!ArRegionalSimCombat_Init(&policy,source)) return kActRaiserRegionalEdit_Invalid;
-      ok=ArRegionalSession_RequestSimCombat(&s_campaign.active,view->revision,&policy);break;
+      ok=ArRegionalSession_RequestSimCombat(session,view->revision,&policy);break;
     }
     case kActRaiserRegionalSetting_LevelGoals:
       if(source!=kArRegionalSource_Japan) {
-        ArRegionalRules candidate=s_campaign.active.requested;candidate.level_goals=source;
+        ArRegionalRules candidate=session->requested;candidate.level_goals=source;
         if(!ArRegionalRules_PopulationCompatible(&candidate))return kActRaiserRegionalEdit_Incompatible;
       }
-      ok=ArRegionalSession_RequestLevelGoals(&s_campaign.active,view->revision,source);break;
+      ok=ArRegionalSession_RequestLevelGoals(session,view->revision,source);break;
     case kActRaiserRegionalSetting_TownStatus: {
       ArRegionalTownStatusPolicy policy;
-      ok=ArRegionalTownStatus_Init(&policy,source) && ArRegionalSession_RequestTownStatus(&s_campaign.active,view->revision,&policy);
+      ok=ArRegionalTownStatus_Init(&policy,source) && ArRegionalSession_RequestTownStatus(session,view->revision,&policy);
       break;
     }
     case kActRaiserRegionalSetting_LairReloads:
-      if (s_campaign.active.reloads.initialized_towns!=0x3f || s_campaign.active.reloads.diverged_towns)
+      if (session->reloads.initialized_towns!=0x3f || session->reloads.diverged_towns)
         return kActRaiserRegionalEdit_HistoryUnavailable;
-      ok=ArRegionalSession_RequestLairReloads(&s_campaign.active,view->revision,source); break;
+      ok=ArRegionalSession_RequestLairReloads(session,view->revision,source); break;
     case kActRaiserRegionalSetting_Story: {
       ArRegionalStoryPolicy policy;
-      ArRegionalRules candidate=s_campaign.active.requested;
+      ArRegionalRules candidate=session->requested;
       ArRegionalStory_Init(&candidate.story,source);
       if(!ArRegionalRules_PopulationCompatible(&candidate))return kActRaiserRegionalEdit_Incompatible;
-      ok=ArRegionalStory_Init(&policy,source) && ArRegionalSession_RequestStory(&s_campaign.active,view->revision,&policy);
+      ok=ArRegionalStory_Init(&policy,source) && ArRegionalSession_RequestStory(session,view->revision,&policy);
       break;
     }
     case kActRaiserRegionalSetting_SkullWait:
-      ok=ArRegionalSession_RequestSkullWait(&s_campaign.active,view->revision,source); break;
+      ok=ArRegionalSession_RequestSkullWait(session,view->revision,source); break;
     case kActRaiserRegionalSetting_Sources: {
       ArRegionalSourcesPolicy policy;
       ok=ArRegionalSources_Init(&policy,source) &&
-          ArRegionalSession_RequestSources(&s_campaign.active,view->revision,&policy);
+          ArRegionalSession_RequestSources(session,view->revision,&policy);
       break;
     }
     case kActRaiserRegionalSetting_LivesDisplay:
-      ok = ArRegionalSession_RequestLivesDisplay(&s_campaign.active, view->revision, source); break;
+      ok = ArRegionalSession_RequestLivesDisplay(session, view->revision, source); break;
     case kActRaiserRegionalSetting_ScoreFeedback: {
-      if (s_campaign.active.lairs.initialized_towns != 0x3f || s_campaign.active.lairs.diverged_towns)
+      if (session->lairs.initialized_towns != 0x3f || session->lairs.diverged_towns)
         return kActRaiserRegionalEdit_HistoryUnavailable;
       ArRegionalScorePolicy policy;
       ok = ArRegionalScore_Init(&policy, source) &&
-          ArRegionalSession_RequestScoreFeedback(&s_campaign.active, view->revision, &policy);
+          ArRegionalSession_RequestScoreFeedback(session, view->revision, &policy);
       break;
     }
     case kActRaiserRegionalSetting_HouseCredit:
-      if (s_campaign.active.lairs.initialized_towns != 0x3f || s_campaign.active.lairs.diverged_towns)
+      if (session->lairs.initialized_towns != 0x3f || session->lairs.diverged_towns)
         return kActRaiserRegionalEdit_HistoryUnavailable;
-      ok = ArRegionalSession_RequestHouseCredit(&s_campaign.active, view->revision, source); break;
+      ok = ArRegionalSession_RequestHouseCredit(session, view->revision, source); break;
     case kActRaiserRegionalSetting_LairReserves:
-      if (s_campaign.active.lairs.initialized_towns != 0x3f || s_campaign.active.lairs.diverged_towns)
+      if (session->lairs.initialized_towns != 0x3f || session->lairs.diverged_towns)
         return kActRaiserRegionalEdit_HistoryUnavailable;
-      ok = ArRegionalSession_RequestLairSeeds(&s_campaign.active, view->revision, source); break;
+      ok = ArRegionalSession_RequestLairSeeds(session, view->revision, source); break;
     case kActRaiserRegionalSetting_RoomTimes:
-      ok = ArRegionalSession_RequestTimers(&s_campaign.active, view->revision, source); break;
+      ok = ArRegionalSession_RequestTimers(session, view->revision, source); break;
     case kActRaiserRegionalSetting_RetryScore:
-      ok = ArRegionalSession_RequestRetryScore(&s_campaign.active, view->revision, source); break;
+      ok = ArRegionalSession_RequestRetryScore(session, view->revision, source); break;
     case kActRaiserRegionalSetting_TownWait:
-      ok = ArRegionalSession_RequestTownWait(&s_campaign.active, view->revision, source); break;
+      ok = ArRegionalSession_RequestTownWait(session, view->revision, source); break;
     case kActRaiserRegionalSetting_Fishing:
-      ok = ArRegionalSession_RequestFishing(&s_campaign.active, view->revision, source); break;
+      ok = ArRegionalSession_RequestFishing(session, view->revision, source); break;
     case kActRaiserRegionalSetting_Development:
-      ok = ArRegionalSession_RequestDevelopment(&s_campaign.active,view->revision,source);break;
+      ok = ArRegionalSession_RequestDevelopment(session,view->revision,source);break;
     case kActRaiserRegionalSetting_Recovery:
-      ok = ArRegionalSession_RequestRecovery(&s_campaign.active, view->revision, source); break;
+      ok = ArRegionalSession_RequestRecovery(session, view->revision, source); break;
     case kActRaiserRegionalSetting_Quake:
-      ok = ArRegionalSession_RequestQuake(&s_campaign.active, view->revision, source); break;
+      ok = ArRegionalSession_RequestQuake(session, view->revision, source); break;
     case kActRaiserRegionalSetting_ScorePage:
-      ok = ArRegionalSession_RequestScorePage(&s_campaign.active, view->revision, source); break;
+      ok = ArRegionalSession_RequestScorePage(session, view->revision, source); break;
     case kActRaiserRegionalSetting_MenuReturn:
-      ok = ArRegionalSession_RequestMenuReturn(&s_campaign.active, view->revision, source); break;
+      ok = ArRegionalSession_RequestMenuReturn(session, view->revision, source); break;
     case kActRaiserRegionalSetting_SpeedRange:
-      ok = ArRegionalSession_RequestSpeedRange(&s_campaign.active, view->revision, source); break;
+      ok = ArRegionalSession_RequestSpeedRange(session, view->revision, source); break;
     case kActRaiserRegionalSetting_MagicGesture:
-      ok = ArRegionalSession_RequestMagicGesture(&s_campaign.active, view->revision, source); break;
+      ok = ArRegionalSession_RequestMagicGesture(session, view->revision, source); break;
     case kActRaiserRegionalSetting_Scrolls:
-      ok = ArRegionalSession_RequestCosts(&s_campaign.active, view->revision,
+      ok = ArRegionalSession_RequestCosts(session, view->revision,
                                          kArRegionalCostGroup_Scrolls, source); break;
     case kActRaiserRegionalSetting_Miracles:
-      ok = ArRegionalSession_RequestCosts(&s_campaign.active, view->revision,
+      ok = ArRegionalSession_RequestCosts(session, view->revision,
                                          kArRegionalCostGroup_Miracles, source); break;
     default: return kActRaiserRegionalEdit_Invalid;
   }
   if (!ok)
     return kActRaiserRegionalEdit_Invalid;
-  return view->revision == s_campaign.active.revision
+  return view->revision == session->revision
       ? kActRaiserRegionalEdit_Unchanged : kActRaiserRegionalEdit_Applied;
+}
+
+ActRaiserRegionalEditResult ActRaiserRegional_RequestDifficulty(
+    const ActRaiserRegionalRulesView *view, ArRegionalDifficulty level) {
+  ArRegionalSession *session=EditableSession();
+  if(!view || !session || (unsigned)level>=kArRegionalDifficulty_Count)
+    return kActRaiserRegionalEdit_Invalid;
+  if(!InputReplay_PolicyChangesAllowed())return kActRaiserRegionalEdit_Locked;
+  if(view->new_game!=s_title_open || view->revision!=session->revision || memcmp(view->campaign,session->campaign,16))
+    return kActRaiserRegionalEdit_Stale;
+  ArRegionalDifficultyPolicy policy=session->requested.difficulty;
+  policy.level=level;
+  if(!ArRegionalSession_RequestDifficulty(session,view->revision,&policy))return kActRaiserRegionalEdit_Invalid;
+  return view->revision==session->revision?kActRaiserRegionalEdit_Unchanged:kActRaiserRegionalEdit_Applied;
 }
 
 bool ActRaiserRegional_BeginActionRoom(uint8_t profile, uint16_t native_bcd, uint16_t *out_bcd) {
@@ -480,12 +585,16 @@ bool ActRaiserRegional_BeginActionRoom(uint8_t profile, uint16_t native_bcd, uin
       !ArRegionalSession_BeginEmitters(&candidate,&next.emitters) ||
       !ArRegionalSession_BeginVolley(&candidate,&next.statue_volley) ||
       !ArRegionalSession_BeginBosses(&candidate,&next.bosses) ||
+      !ArRegionalSession_BeginDifficulty(&candidate,&next.difficulty) ||
+      !ArRegionalSession_BeginScoreLives(&candidate,&next.score_lives) ||
       !ArRegionalSession_BeginCollision(&candidate,&next.collision) ||
       !ArRegionalSession_BeginPlatformSkull(&candidate,&next.platform_skull) ||
       !ArRegionalSession_BeginActorStats(&candidate,&next.actor_stats) ||
       !ArRegionalSession_BeginCastHold(&candidate,&next.cast_hold) ||
       !ArRegionalSession_BeginFire(&candidate,&next.fire_enemy)) return false;
   s_campaign.active=candidate;s_action=next;
+  ArRegionalSpellInventory_Interrupt(&s_inventory);
+  s_inventory_icon_pending=s_inventory.enabled;
   /* Only an accepted retry/new-room initialization abandons an interrupted
    * clear sequence; an invalid request must not erase its one-shot marker. */
   s_completion_state = kScoreIdle;
@@ -546,8 +655,9 @@ bool ActRaiserRegional_ReplayDigest(void *unused, uint8_t out[32], bool *baselin
     completion[50]=(uint8_t)(s_completion_scene>>8);
     if (!sr_support_sha256(completion,sizeof(completion),digest)) return false;
   }
+  if(!ArRegionalSpellInventory_Fingerprint(digest,&s_inventory,digest))return false;
   memcpy(out,digest,sizeof(digest));
-  *baseline = rules_native && lairs_native && reloads_native && actors_native;
+  *baseline = rules_native && lairs_native && reloads_native && actors_native && !s_inventory.enabled;
   return true;
 }
 
@@ -712,9 +822,10 @@ RecompReturn ActRaiser_RegionalRetry(CpuState *cpu) {
 }
 
 RecompReturn ActRaiser_RegionalScrollCast(CpuState *cpu) {
-  ArRegionalCostSnapshot quote;
+  ArRegionalCostSnapshot quote={0};
   if (!ActRaiser_RegionalScrollEntry(cpu) ||
-      !ArRegionalSession_BeginCosts(&s_campaign.active, kArRegionalCostGroup_Scrolls, &quote))
+      (!(s_inventory.enabled && cpu_read8(cpu,0,0x349)) &&
+       !ArRegionalSession_BeginCosts(&s_campaign.active, kArRegionalCostGroup_Scrolls, &quote)))
     ActRaiserHleFatal("Cannot capture regional scroll transaction");
   const unsigned before = cpu_read8(cpu, 0, 0x21);
   const uint16_t continuation = ActRaiserScrollCast_Gate(cpu, &quote);
@@ -1076,7 +1187,7 @@ static void ReportReloadDivergence(unsigned previous) {
   if (changed) fprintf(stderr,"[regional] unaccounted lair delay write; retained delays quarantined for towns=%02x\n",changed);
 }
 void ActRaiserRegional_CheckLairHistory(CpuState *cpu) {
-  if (!s_campaign.active_valid) return;
+  if (!s_campaign.active_valid || s_lair_seed_pending) return;
   const unsigned before=s_campaign.active.lairs.diverged_towns;
   const ArRegionalLairAccounting active = ArRegionalRules_LairAccounting(&s_campaign.active.effective);
   ActRaiserLairHistory_Check(&s_campaign.active.lairs,cpu,&active);
@@ -1086,7 +1197,7 @@ void ActRaiserRegional_CheckLairHistory(CpuState *cpu) {
   ReportReloadDivergence(reload_before);
 }
 static void ActivateLairReloads(CpuState *cpu) {
-  if (!s_campaign.active_valid || s_reload_active || s_lair_active || s_quake_active || s_miracle_active ||
+  if (!s_campaign.active_valid || s_lair_seed_pending || s_reload_active || s_lair_active || s_quake_active || s_miracle_active ||
       s_campaign.active.requested.lair_reloads==s_campaign.active.effective.lair_reloads ||
       s_campaign.active.reloads.initialized_towns!=0x3f || s_campaign.active.reloads.diverged_towns ||
       !ActRaiserLairHistory_Entry(cpu)) return;
@@ -1105,7 +1216,7 @@ static void ActivateLairReloads(CpuState *cpu) {
 }
 bool ActRaiser_RegionalLairReductionEntry(CpuState *cpu) {
   if (s_reload_delegate) { s_reload_delegate=false; return false; }
-  return s_campaign.active_valid && !s_reload_active && s_campaign.active.reloads.initialized_towns &&
+  return s_campaign.active_valid && !s_lair_seed_pending && !s_reload_active && s_campaign.active.reloads.initialized_towns &&
       ActRaiserLairReloads_Entry(cpu);
 }
 RecompReturn ActRaiser_RegionalLairReduction(CpuState *cpu) {
@@ -1125,7 +1236,7 @@ RecompReturn ActRaiser_RegionalLairReduction(CpuState *cpu) {
   return result;
 }
 static void ActivateLairAccounting(CpuState *cpu) {
-  if (s_completion_state != kScoreIdle || s_lair_active || s_quake_active || s_miracle_active || !s_campaign.active_valid ||
+  if (s_completion_state != kScoreIdle || s_lair_seed_pending || s_lair_active || s_quake_active || s_miracle_active || !s_campaign.active_valid ||
       ArRegionalRules_SameAccounting(&s_campaign.active.requested,&s_campaign.active.effective) ||
       s_campaign.active.lairs.initialized_towns != 0x3f || s_campaign.active.lairs.diverged_towns ||
       !ActRaiserLairHistory_ProjectionEntry(cpu)) return;
@@ -1147,7 +1258,7 @@ static void ActivateLairAccounting(CpuState *cpu) {
 }
 bool ActRaiser_RegionalLairEntry(CpuState *cpu) {
   if (s_lair_delegate) { s_lair_delegate=false; return false; }
-  return s_campaign.active_valid && s_campaign.active.lairs.initialized_towns &&
+  return s_campaign.active_valid && !s_lair_seed_pending && s_campaign.active.lairs.initialized_towns &&
       ActRaiserLairHistory_Entry(cpu);
 }
 bool ActRaiser_RegionalLairSeedEntry(CpuState *cpu) {
@@ -1157,6 +1268,9 @@ bool ActRaiser_RegionalLairSeedEntry(CpuState *cpu) {
 static void TryInitializeLairs(CpuState *cpu) {
   if (!s_lair_seed_pending) return;
   ArRegionalSession next=s_campaign.active;
+  /* Draft histories are exact initial values but cannot be observed/projected
+   * until the native new-game initializer has established its baseline. */
+  next.lairs=(ArRegionalLairHistory){0};next.reloads=(ArRegionalLairReloads){0};
   if (ActRaiserLairHistory_Initialize(&next.lairs,cpu) && ActRaiserLairReloads_Initialize(&next.reloads,cpu)) {
     s_campaign.active=next;
     s_lair_seed_pending=false;
@@ -1384,6 +1498,27 @@ bool ActRaiser_RegionalTitleEntry(CpuState *cpu) {
 }
 
 RecompReturn ActRaiser_RegionalTitle(CpuState *cpu) {
+  ArRegionalCampaign draft;
+  ArRegionalCampaign_Init(&draft,s_campaign.slot,s_campaign.identity,s_campaign.identity_context);
+  ArRegionalCostPolicy defaults;ArRegionalCosts_Init(&defaults,kArRegionalSource_US);
+  SaveError error={{0}};
+  if(!ArRegionalCampaign_NewGame(&draft,&defaults,&error))
+    ActRaiserHleFatal("Cannot prepare new-game rules; saves preserved: %s",error.message);
+  for(unsigned town=0;town<6;++town)
+    if(!ArRegionalLairHistory_InitTown(&draft.active.lairs,town))
+      ActRaiserHleFatal("Cannot prepare exact new-game lair history");
+  if(!ArRegionalLairReloads_Init(&draft.active.reloads))
+    ActRaiserHleFatal("Cannot prepare exact new-game lair reloads");
+  if(s_return_rules_valid) {
+    draft.active.requested=s_return_rules;
+    /* Empty new towns need no destructive conversion. Keep coupled starting
+     * support/goals coherent; stock projections still await native seeding. */
+    draft.active.effective.support=s_return_rules.support;
+    draft.active.effective.level_goals=s_return_rules.level_goals;
+    draft.active.effective.story=s_return_rules.story;
+    s_return_rules_valid=false;
+  }
+  s_title_draft=draft.active;s_title_open=true;
   /* The native title routine owns selection, checksum validation, restoration
    * and fades. Its normal return is accepted entry, including the no-save
    * path (which bypasses Continue's selection loop). No resources have run yet.
@@ -1391,8 +1526,8 @@ RecompReturn ActRaiser_RegionalTitle(CpuState *cpu) {
   s_delegate = true;
   RecompReturn result = bank_02_A622_M1X0(cpu);
   s_delegate = false;
+  s_title_open=false;
   if (result != RECOMP_RETURN_NORMAL) return result;
-  SaveError error = {{0}};
   bool ok;
   const unsigned selection = cpu_read8(cpu, 0, 0x0336);
   if (selection == 1) {
@@ -1404,15 +1539,16 @@ RecompReturn ActRaiser_RegionalTitle(CpuState *cpu) {
     if (ok && s_campaign.active.lairs.initialized_towns==0x3f && !s_campaign.active.reloads.initialized_towns)
       ok=ActRaiserLairReloads_AdoptSaved(&s_campaign.active.reloads,image);
   } else if (selection == 0 || selection == 2) {
-    ArRegionalCostPolicy defaults;
-    ArRegionalCosts_Init(&defaults, kArRegionalSource_US);
-    ok = ArRegionalCampaign_NewGame(&s_campaign, &defaults, &error);
+    s_campaign.active=s_title_draft;
+    s_campaign.active_valid=true;
+    ok=true;
   } else {
     ActRaiserHleFatal("Unknown accepted title selection: %u", selection);
   }
   if (!ok) ActRaiserHleFatal("Cannot enter regional campaign; saves preserved: %s",
                             error.message[0] ? error.message : "no durable save image");
   s_lair_seed_pending=selection!=1;
+  ArRegionalSpellInventory_Reset(&s_inventory,false);s_inventory_icon_pending=false;
   s_action=(ActionRuleCache){0};
   s_completion_state=kScoreIdle;
   s_completion_scene=0;

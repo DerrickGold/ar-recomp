@@ -221,6 +221,11 @@ static void CheckMenuAdapter(void) {
       CHECK(ArRegionalActorStats_Init(&view.requested.actor_stats,(ArRegionalSource)source));
       CHECK(ArRegionalCastHold_Init(&view.requested.cast_hold,(ArRegionalSource)source));
       CHECK(ArRegionalFire_Init(&view.requested.fire_enemy,(ArRegionalSource)source));
+      CHECK(ArRegionalDifficulty_Init(&view.requested.difficulty,(ArRegionalSource)source,kArRegionalDifficulty_Normal));
+      view.requested.score_lives=(ArRegionalSource)source;
+      view.requested.spell_inventory=(ArRegionalSource)source;
+      CHECK(ArRegionalActionStart_Init(&view.requested.action_start,(ArRegionalSource)source));
+      CHECK(ArRegionalMode_Init(&view.requested.mode_entry,(ArRegionalSource)source));
       view.requested.menu_return = (ArRegionalSource)source;
       view.requested.speed_range = (ArRegionalSource)source;
       view.requested.magic_gesture = (ArRegionalSource)source;
@@ -231,10 +236,14 @@ static void CheckMenuAdapter(void) {
       CHECK(ArRegionalScore_Init(&view.requested.score_feedback,(ArRegionalSource)source));
       view.lair_history_ready = true;
       ArRegionalSource next;
-      CHECK(SettingsOverlayRegions_NextSource(&view, (ActRaiserRegionalSettingGroup)group, 1, &next));
-      CHECK(next == (ArRegionalSource)((source + 1) % 3));
-      CHECK(SettingsOverlayRegions_NextSource(&view, (ActRaiserRegionalSettingGroup)group, -1, &next));
-      CHECK(next == (ArRegionalSource)((source + 2) % 3));
+      if(group==kActRaiserRegionalSetting_DifficultyLevel) {
+        CHECK(!SettingsOverlayRegions_NextSource(&view,(ActRaiserRegionalSettingGroup)group,1,&next));
+      } else {
+        CHECK(SettingsOverlayRegions_NextSource(&view, (ActRaiserRegionalSettingGroup)group, 1, &next));
+        CHECK(next == (ArRegionalSource)((source + 1) % 3));
+        CHECK(SettingsOverlayRegions_NextSource(&view, (ActRaiserRegionalSettingGroup)group, -1, &next));
+        CHECK(next == (ArRegionalSource)((source + 2) % 3));
+      }
       for (int locale = 0; locale < kArUiLocale_Count; ++locale) {
         char text[2048];
         CHECK(SettingsOverlayRegions_ViewDescription((ArUiLocale)locale, &view,

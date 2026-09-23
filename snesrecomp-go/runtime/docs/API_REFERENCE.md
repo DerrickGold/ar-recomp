@@ -318,7 +318,9 @@ WatchdogFrameStart();
 CpuReturnScope reset_owner;
 cpu_reset_scope_begin(&reset_owner, &cpu);
 RecompReturn result = compiled_reset(&cpu);
-if (result == RECOMP_RETURN_TAILCALL)
+while (result == RECOMP_RETURN_TAILCALL ||
+       (result == RECOMP_RETURN_OWNED_UNWIND &&
+        cpu_finish_reset_tail(&reset_owner, &cpu)))
     result = cpu_dispatch_pc_from(&cpu, g_tailcall_pc24,
                                   g_tailcall_miss_s, g_tailcall_src24);
 cpu_return_scope_end(&reset_owner);
@@ -332,6 +334,15 @@ limited to that root activation, including same-activation tail bodies;
 nested interrupt routines retain their own hardware-frame boundary. Ordinary
 calls, reset scopes, and paired tails run on the owning execution thread.
 These records are host bookkeeping, not additions to portable CPU/save state.
+An audited game HLE that implements a nonreturning native stack-reset jump may
+use `cpu_begin_reset_tail(cpu, target, source)` after completing its native CPU
+effects. It requires native WRAM S above every discarded hardware frame and an
+explicit, same-CPU reset owner; failures leave ownership unchanged. Immediately
+return `RECOMP_RETURN_OWNED_UNWIND` on success. Ordinary generated callers retire
+without restoring S/PB; the reset driver alone consumes the request, once no
+compiled activations remain. This prevents recursively nesting title/mainline
+drivers. It neither resets the machine nor authorizes guessing a return target.
+Ordinary HLE branches must continue using `cpu_hle_tailcall_request` instead.
 Terminal shutdown clears abandoned records. Watchdog resets outside an active
 synchronous checkpoint invalidate records without resurrecting old owners;
 they must not be used as normal continuation transfers.

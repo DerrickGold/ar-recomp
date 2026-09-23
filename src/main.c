@@ -1683,6 +1683,7 @@ static void AppBoot_InstallSubsystems(AppBoot *app) {
   static const SettingsOverlayRegionalHooks kRegionalHooks = {
     .copy = ActRaiserRegional_CopyRulesView,
     .request = ActRaiserRegional_RequestRules,
+    .difficulty = ActRaiserRegional_RequestDifficulty,
   };
   SettingsOverlay_SetRegionalHooks(&kRegionalHooks);
   /* The layer editor (Settings > Layers, developer-only) edits the override

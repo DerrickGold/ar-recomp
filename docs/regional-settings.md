@@ -1,7 +1,9 @@
 # Regional settings
 
-Open **Settings → Localization → Regional rules** after starting or continuing
-a game. You can choose spell-scroll costs, miracle SP costs, initial room
+Open **Settings → Localization → Regional rules** at the title screen or during
+a game. Title-screen choices apply to a new game; **Continue** restores the
+saved campaign's rules instead. The draft does not change your existing save.
+You can choose spell-scroll costs, miracle SP costs, initial room
 time limits, checkpoint-retry score handling, development pacing, construction
 waits, Fillmore's fishing target, town recovery, earthquake destruction and
 the Master report's score page, town-menu return behavior, message-speed
@@ -9,7 +11,8 @@ choices, magic controls, monster reserves, house-loss and act-score feedback,
 the action HUD's life-count convention, Source activation, the Magic Skull
 wait, story prerequisites, lair respawn delays, town growth reports and level
 population goals independently. Population support changes use the confirmed
-conversion described below rather than an immediate toggle.
+conversion described below rather than an immediate toggle. A title-screen
+draft has no developed towns, so it needs no conversion or recovery copy.
 The flag and name beside each choice identify its source rules, not the
 language of your game.
 
@@ -29,6 +32,34 @@ This option uses the existing artwork and music and needs no Japanese ROM;
 regional artwork and independent music choices are separate.
 
 ## Action and resource rules
+
+### Difficulty rules
+
+**Difficulty rules** selects the US/Japanese or European transformations;
+**European difficulty** chooses Beginner, Normal or Expert. These are saved
+with your campaign and take effect at the next room entry or retry. Selecting
+a level has no effect on rules that still use US/Japanese behavior.
+
+| Rule | US / Japan | European Beginner | European Normal | European Expert |
+| --- | --- | --- | --- | --- |
+| Eligible enemy HP | In action-only mode, 1 becomes 2 | 2 becomes 1 | Unchanged | 1 becomes 2 |
+| Eligible base attack | In action-only mode, 1 becomes 2 | Unchanged | Unchanged | Unchanged |
+| Accepted enemy-contact damage | Unchanged | Unchanged | Unchanged | +1 |
+| Active updates per countdown unit | 60 | 72 | 60 | 48 |
+| Aitos dragon projectile attack | Present | Omitted | Present | Present |
+| Plant boss's lower tendril bobs per 48 updates | Two | One | Two | Two |
+
+Enemy-type exemptions still apply. These transformations follow the selected
+base HP/attack rules; they are not a multiplier for every boss. Contact damage
+does not change terrain hazards. The clock keeps its current countdown and
+pause gates, and all choices run at 60 Hz. Existing enemies, projectiles and
+attacks are never reset by editing a setting. No donor ROM is needed.
+
+The five internal difficulty rules are independently selectable. Enemy
+placement, terrain, initial room time and the action-only campaign's entry
+and inventory rules are separate features, not implied by this setting.
+
+### Enemy behavior
 
 **Enemy movement & recovery** selects the behaviors below. The fourteen
 rules remain separate internally.
@@ -100,6 +131,66 @@ counts of possible inputs, not a guaranteed firing rate. A full enemy pool
 drops the child. Curve shape, close-player sequence and both thresholds remain
 independent internally. Choices apply next room/retry, with no new random
 draws, artwork requirement or changes to Pharaoh's blue spheres.
+
+**Score-earned lives** controls the European Action Mode reward. US/Japanese
+rules do not grant lives for score. European rules grant one life when an
+addition crosses a 20,000-point band; a single large addition still grants
+only one. This follows the original overflow behavior: 99 stored spare lives
+wrap to 00. Story mode is unaffected. Changes apply in the next action room
+or retry and never grant rewards for earlier points or reset current lives.
+This rule does not enable Action Mode, change starting attempts, or select
+European items or difficulty.
+
+**Action Mode starting stats** selects the allowance for a new Action run:
+
+| Rules | Total attempts | Starting and maximum health |
+| --- | ---: | ---: |
+| US | 5 | 24 |
+| Japan | 3 | 24 |
+| Europe | 5 | 8 |
+
+Attempts and health are independent internally. A request never overwrites
+the current run's lives or health, and ordinary retries and room changes do
+not activate it. The native new-run initializer still clears score, scrolls,
+equipped magic and sword power. Story mode is unaffected.
+
+This applies to the first Action run and native Game Over restart. Configure
+the first run through the title-screen overlay before accepting its mode.
+Mode availability and Game Over routing are controlled separately by
+**Action Mode entry**; starting allowances alone do not unlock that mode.
+
+**Action Mode entry** uses the original completion unlock under US/Japanese
+rules. European rules make Action available without completing Story and
+return to the title after Game Over. Enable access in the title overlay, then
+press Start or change the highlighted choice. Continue is only offered when
+the native save checksum is valid; no completion marker is written.
+
+The European return retains your requested regional rules for the next run
+but resets difficulty to Normal. Choose another difficulty in the overlay
+before starting. A US/Japanese Game Over starts another Action run directly.
+The return policy is captured when you press Start on Game Over. Neither
+route changes the battery save; Continue always restores its own rules.
+Mode labels remain owned by the selected language, not the rules preset.
+
+**Action Mode items & spells** selects a new run's inventory model. US and
+Japanese rules use shared scrolls and the equipped spell. European rules
+collect individual spells and cast the most recently collected one first;
+the spell is removed only after its effect and graphics restoration finish.
+An earlier room transition retains it. Changing the requested rules cannot
+convert the current collection or change an in-flight cast's payment.
+
+Under the European model, the extra-life pickup instead adds one current HP
+and one maximum HP, each capped at24. Four pickup kinds grant the four spells;
+sword power, full healing and the1,000-point reward retain their shared effects.
+Inventory survives retries and room changes. Starting HP remains a separate
+setting. The native 256-pickup count wrap to zero is preserved. If that wrap
+happens during a cast, completion leaves the collection empty instead of
+reproducing the cartridge's out-of-range inventory read.
+
+The spell pickups and HUD use graphics already present in the US ROM. The
+health-growth pickup temporarily uses the full-apple graphic; exact European
+health-growth artwork and smaller European HUD icons remain media work.
+First-run profile selection is available through the title-screen overlay.
 
 **Enemy collision shapes** selects Kasandora Act 2's pose bounds and Marahna's
 trap-arrow hitboxes. Japanese sword poses reach 36 pixels toward the blade

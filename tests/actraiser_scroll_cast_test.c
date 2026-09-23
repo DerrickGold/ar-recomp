@@ -1,11 +1,18 @@
 #include "actraiser/actraiser_scroll_cast.h"
 #include "actraiser/actraiser_cpu_hle_internal.h"
+#include "actraiser/actraiser_regional_runtime.h"
 
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
 
 static uint8_t ram[65536], code[65536];
+static ActRaiserInventoryView inventory;
+ActRaiserInventoryView ActRaiserRegional_InventoryView(void) {return inventory;}
+bool ActRaiserRegional_BeginSpell(uint8_t *spell) {
+  assert(inventory.enabled && inventory.count && !inventory.casting);
+  *spell=inventory.icon;inventory.casting=*spell;return true;
+}
 uint8 cpu_read8(CpuState *cpu, uint8 bank, uint16 address) {
   (void)cpu; assert(bank == 0); return ram[address];
 }

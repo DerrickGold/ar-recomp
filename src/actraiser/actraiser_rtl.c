@@ -1153,7 +1153,13 @@ static void game_coroutine(void) {
   cpu_state_init(&g_cpu, g_ram);
   g_cpu_brk_hook = ActRaiser_BrkHook;
   g_cpu_cop_hook = ActRaiser_CopHook;
-  ResetHandler_M1X1(&g_cpu);
+  CpuReturnScope reset_owner;
+  cpu_reset_scope_begin(&reset_owner, &g_cpu);
+  RecompReturn result = ResetHandler_M1X1(&g_cpu);
+  while (result == RECOMP_RETURN_TAILCALL ||
+         (result == RECOMP_RETURN_OWNED_UNWIND && cpu_finish_reset_tail(&reset_owner, &g_cpu)))
+    result = cpu_dispatch_pc_from(&g_cpu, g_tailcall_pc24, g_tailcall_miss_s, g_tailcall_src24);
+  cpu_return_scope_end(&reset_owner);
   for (;;)
     ActRaiser_YieldToHost();
 }

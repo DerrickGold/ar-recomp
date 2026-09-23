@@ -36,11 +36,17 @@
 #include "regional_actor_stats.h"
 #include "regional_cast_hold.h"
 #include "regional_fire_enemy.h"
+#include "regional_difficulty.h"
+#include "regional_score_lives.h"
+#include "regional_action_start.h"
+#include "regional_spell_inventory.h"
+#include "regional_mode_entry.h"
 
 /* Game-owned value snapshot. No campaign identity, persistence, native memory
  * or UI ownership. Each family keeps its own units and activation boundary;
  * this aggregate is not a request to activate all families together. */
 typedef struct ArRegionalRules {
+  ArRegionalModePolicy mode_entry;
   ArRegionalCostPolicy costs;
   ArRegionalTimerPolicy timers;
   ArRegionalSource retry_score;
@@ -77,6 +83,10 @@ typedef struct ArRegionalRules {
   ArRegionalActorStatsPolicy actor_stats;
   ArRegionalCastHoldPolicy cast_hold;
   ArRegionalFirePolicy fire_enemy;
+  ArRegionalDifficultyPolicy difficulty;
+  ArRegionalSource score_lives;
+  ArRegionalActionStartPolicy action_start;
+  ArRegionalSource spell_inventory;
 } ArRegionalRules;
 
 /* Conservative supported mix: any reduced support coefficient requires the

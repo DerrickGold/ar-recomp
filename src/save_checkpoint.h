@@ -3,7 +3,9 @@
 
 #include "save_system.h"
 
-enum { kSaveCheckpointPayloadMax = 8192 };
+/* Host metadata has a separate bound from the unchanged 8 KiB cartridge SRAM.
+ * Journals allocate on save/load only; this adds no per-frame allocation. */
+enum { kSaveCheckpointPayloadMax = 32768 };
 
 typedef enum SaveCheckpointStatus {
   kSaveCheckpoint_Ready,

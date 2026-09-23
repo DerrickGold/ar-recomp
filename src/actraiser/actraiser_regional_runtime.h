@@ -28,10 +28,32 @@ ArRegionalActionMotionSnapshot ActRaiserRegional_ActionMotionSnapshot(void);
 ArRegionalEmitterSnapshot ActRaiserRegional_EmitterSnapshot(void);
 bool ActRaiserRegional_DoubleStatueVolley(void);
 ArRegionalBossSnapshot ActRaiserRegional_BossSnapshot(void);
+ArRegionalDifficultySnapshot ActRaiserRegional_DifficultySnapshot(void);
 ArRegionalCollisionSnapshot ActRaiserRegional_CollisionSnapshot(void);
 ArRegionalPlatformSkullSnapshot ActRaiserRegional_PlatformSkullSnapshot(void);
 ArRegionalCastHoldSnapshot ActRaiserRegional_CastHoldSnapshot(void);
 ArRegionalFireSnapshot ActRaiserRegional_FireSnapshot(void);
+bool ActRaiserRegional_ScoreLivesEnabled(void);
+/* Native Action Mode initializer is the sole consumer. Before a session is
+ * available, resolve US defaults without creating a save or campaign. */
+bool ActRaiserRegional_BeginActionStart(ArRegionalActionStartSnapshot *snapshot);
+/* Title-menu construction and Game Over acceptance are the only activation
+ * boundaries. Read-only calls resolve requested choices without validating
+ * an entire campaign or exposing it to the CPU adapter. */
+bool ActRaiserRegional_ModeEntry(bool activate,uint8_t *snapshot);
+bool ActRaiserRegional_ReturnToTitle(void);
+typedef struct ActRaiserInventoryView {
+  uint8_t count,icon,casting;
+  bool enabled,icon_pending;
+} ActRaiserInventoryView;
+/* Run-scoped host inventory. No foreign WRAM, mutable collection pointer or
+ * persistence ownership crosses this interface. O(1) gameplay operations. */
+bool ActRaiserRegional_StartInventory(void);
+ActRaiserInventoryView ActRaiserRegional_InventoryView(void);
+bool ActRaiserRegional_PushSpell(unsigned spell);
+bool ActRaiserRegional_BeginSpell(uint8_t *spell);
+bool ActRaiserRegional_FinishSpell(void);
+void ActRaiserRegional_InventoryIconUploaded(void);
 bool ActRaiserRegional_ActorStatsEnabled(void);
 bool ActRaiserRegional_ActorStats(uint16_t actor,uint16_t native_hp,uint16_t native_attack,uint16_t *hp,uint16_t *attack);
 /* Cached child value by semantic rule ID; UINT16_MAX before room activation

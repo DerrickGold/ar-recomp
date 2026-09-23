@@ -37,6 +37,18 @@ bool ArRegionalRules_Fingerprint(const ArRegionalRules *requested,
       !ArRegionalTimers_Valid(&requested->timers) ||
       !ArRegionalTimers_Valid(&effective->timers)) return false;
   bool retry_requested, retry_effective;
+  uint8_t mode_requested,mode_effective;
+  if(!ArRegionalMode_Resolve(&requested->mode_entry,&mode_requested) ||
+      !ArRegionalMode_Resolve(&effective->mode_entry,&mode_effective))return false;
+  bool inventory_requested,inventory_effective;
+  if(!ArRegionalInventory_Resolve(requested->spell_inventory,&inventory_requested) ||
+      !ArRegionalInventory_Resolve(effective->spell_inventory,&inventory_effective))return false;
+  ArRegionalActionStartSnapshot start_requested,start_effective;
+  if(!ArRegionalActionStart_Resolve(&requested->action_start,&start_requested) ||
+      !ArRegionalActionStart_Resolve(&effective->action_start,&start_effective))return false;
+  bool score_lives_requested,score_lives_effective;
+  if(!ArRegionalScoreLives_Resolve(requested->score_lives,&score_lives_requested) ||
+      !ArRegionalScoreLives_Resolve(effective->score_lives,&score_lives_effective))return false;
   bool arrival_requested,arrival_effective;
   uint16_t motion_requested,motion_effective;
   bool volley_requested,volley_effective;
@@ -46,6 +58,9 @@ bool ArRegionalRules_Fingerprint(const ArRegionalRules *requested,
   ArRegionalActorStatsSnapshot stats_requested,stats_effective;
   uint8_t hold_requested,hold_effective;
   uint8_t fire_requested,fire_effective;
+  ArRegionalDifficultySnapshot difficulty_requested,difficulty_effective;
+  if(!ArRegionalDifficulty_Resolve(&requested->difficulty,&difficulty_requested) ||
+      !ArRegionalDifficulty_Resolve(&effective->difficulty,&difficulty_effective))return false;
   if(!ArRegionalFire_Resolve(&requested->fire_enemy,&fire_requested) ||
       !ArRegionalFire_Resolve(&effective->fire_enemy,&fire_effective))return false;
   if(!ArRegionalCastHold_Resolve(&requested->cast_hold,&hold_requested) ||
@@ -460,7 +475,50 @@ bool ArRegionalRules_Fingerprint(const ArRegionalRules *requested,
     if(!sr_support_sha256(bytes,sizeof(bytes),out))return false;
     *baseline=false;
   }
+  const uint8_t difficulty_pending=ArRegionalDifficulty_Identity(&difficulty_requested);
+  const uint8_t difficulty_active=ArRegionalDifficulty_Identity(&difficulty_effective);
+  if(difficulty_pending || difficulty_active) {
+    uint8_t bytes[50]="ARDIFF-R1";memcpy(bytes+16,out,32);
+    bytes[48]=difficulty_pending;bytes[49]=difficulty_active;
+    if(!sr_support_sha256(bytes,sizeof(bytes),out))return false;
+    *baseline=false;
+  }
+  if(score_lives_requested || score_lives_effective) {
+    uint8_t bytes[50]="ARSCORELIVES-R1";memcpy(bytes+16,out,32);
+    bytes[48]=score_lives_requested;bytes[49]=score_lives_effective;
+    if(!sr_support_sha256(bytes,sizeof(bytes),out))return false;
+    *baseline=false;
+  }
+  if(start_requested.spares!=4 || start_requested.health!=24 || start_effective.spares!=4 || start_effective.health!=24) {
+    uint8_t bytes[52]="ARACTIONSTART-R1";memcpy(bytes+16,out,32);
+    bytes[48]=start_requested.spares;bytes[49]=start_requested.health;
+    bytes[50]=start_effective.spares;bytes[51]=start_effective.health;
+    if(!sr_support_sha256(bytes,sizeof(bytes),out))return false;
+    *baseline=false;
+  }
+  if(inventory_requested || inventory_effective) {
+    uint8_t bytes[50]="ARINVENTORY-R1";memcpy(bytes+16,out,32);
+    bytes[48]=inventory_requested;bytes[49]=inventory_effective;
+    if(!sr_support_sha256(bytes,sizeof(bytes),out))return false;
+    *baseline=false;
+  }
+  if(mode_requested || mode_effective) {
+    uint8_t bytes[50]="ARMODEENTRY-R1";memcpy(bytes+16,out,32);
+    bytes[48]=mode_requested;bytes[49]=mode_effective;
+    if(!sr_support_sha256(bytes,sizeof(bytes),out))return false;
+    *baseline=false;
+  }
   return true;
+}
+
+bool ArRegionalSpellInventory_Fingerprint(const uint8_t previous[32],
+    const ArRegionalSpellInventory *inventory,uint8_t out[32]) {
+  if(!previous || !out || !ArRegionalSpellInventory_Valid(inventory))return false;
+  if(!inventory->enabled) {memmove(out,previous,32);return true;}
+  uint8_t bytes[51+256]="ARSPELLSTACK-R1";memcpy(bytes+16,previous,32);
+  bytes[48]=inventory->count;bytes[49]=inventory->icon;bytes[50]=inventory->casting;
+  memcpy(bytes+51,inventory->spells,inventory->count);
+  return sr_support_sha256(bytes,51+inventory->count,out);
 }
 
 bool ArRegionalArrivalLock_Fingerprint(const uint8_t previous[32],ArRegionalSource requested,

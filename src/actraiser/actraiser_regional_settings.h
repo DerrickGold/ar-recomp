@@ -42,6 +42,12 @@ typedef enum ActRaiserRegionalSettingGroup {
   kActRaiserRegionalSetting_ActorStats,
   kActRaiserRegionalSetting_CastHold,
   kActRaiserRegionalSetting_FireEnemy,
+  kActRaiserRegionalSetting_DifficultyRules,
+  kActRaiserRegionalSetting_DifficultyLevel,
+  kActRaiserRegionalSetting_ScoreLives,
+  kActRaiserRegionalSetting_ActionStart,
+  kActRaiserRegionalSetting_Inventory,
+  kActRaiserRegionalSetting_ModeEntry,
   kActRaiserRegionalSetting_Count,
 } ActRaiserRegionalSettingGroup;
 
@@ -53,6 +59,7 @@ typedef struct ActRaiserRegionalRulesView {
   uint32_t revision;
   ArRegionalRules requested, effective;
   bool editable;
+  bool new_game; /* title draft, discarded by Continue */
   bool miracle_in_progress;
   bool lair_history_ready;
   bool lair_reload_ready;
@@ -72,7 +79,8 @@ typedef enum ActRaiserRegionalEditResult {
   kActRaiserRegionalEdit_Incompatible,
 } ActRaiserRegionalEditResult;
 
-/* False until an accepted New Game/Continue, without modifying output. */
+/* Title edits target an unsaved new-game draft. Continue loads its own rules;
+ * outside title/gameplay this returns false without modifying output. */
 bool ActRaiserRegional_CopyRulesView(ActRaiserRegionalRulesView *out);
 /* The view's campaign/revision identifies the requested edit; its editable
  * and policy fields are display data, not authority. Validate again on apply.
@@ -82,5 +90,7 @@ bool ActRaiserRegional_CopyRulesView(ActRaiserRegionalRulesView *out);
 ActRaiserRegionalEditResult ActRaiserRegional_RequestRules(
     const ActRaiserRegionalRulesView *view, ActRaiserRegionalSettingGroup group,
     ArRegionalSource source);
+ActRaiserRegionalEditResult ActRaiserRegional_RequestDifficulty(
+    const ActRaiserRegionalRulesView *view, ArRegionalDifficulty level);
 
 #endif

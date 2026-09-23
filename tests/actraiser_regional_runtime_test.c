@@ -285,8 +285,34 @@ void cpu_write8(CpuState *cpu, uint8 bank, uint16 address, uint8 value) {
 void cpu_write16(CpuState *cpu, uint8 bank, uint16 address, uint16 value) {
   cpu_write8(cpu,bank,address,value); cpu_write8(cpu,bank,address+1,value>>8);
 }
+static unsigned title_edits;
+static ActRaiserRegionalRulesView title_view;
 RecompReturn bank_02_A622_M1X0(CpuState *cpu) {
   assert(!ActRaiser_RegionalTitleEntry(cpu)); /* delegates exactly once */
+  assert(ActRaiserRegional_CopyRulesView(&title_view) && title_view.new_game);
+  if(title_edits==3) {
+    assert(title_view.requested.spell_inventory==2 && title_view.requested.mode_entry.source[0]==2);
+    assert(title_view.requested.difficulty.level==kArRegionalDifficulty_Normal);
+    assert(title_view.lair_history_ready && title_view.lair_reload_ready && !title_view.population_pending);
+    ++title_calls;return title_return;
+  }
+  assert(title_view.requested.spell_inventory==0 && title_view.lair_history_ready && title_view.lair_reload_ready);
+  if(title_edits) {
+    const ActRaiserRegionalSettingGroup groups[]={kActRaiserRegionalSetting_ActionStart,
+      kActRaiserRegionalSetting_Inventory,kActRaiserRegionalSetting_DifficultyRules,
+      kActRaiserRegionalSetting_Population,kActRaiserRegionalSetting_LairReserves,
+      kActRaiserRegionalSetting_LairReloads};
+    for(unsigned i=0;i<sizeof(groups)/sizeof(groups[0]);++i) {
+      assert(ActRaiserRegional_CopyRulesView(&title_view));
+      const ArRegionalSource source=i<3?kArRegionalSource_Europe:kArRegionalSource_Japan;
+      assert(ActRaiserRegional_RequestRules(&title_view,groups[i],source)==
+          (title_edits==2?kActRaiserRegionalEdit_Locked:kActRaiserRegionalEdit_Applied));
+    }
+    assert(ActRaiserRegional_CopyRulesView(&title_view) && !title_view.population_pending);
+    assert(ActRaiserRegional_RequestDifficulty(&title_view,kArRegionalDifficulty_Expert)==
+        (title_edits==2?kActRaiserRegionalEdit_Locked:kActRaiserRegionalEdit_Applied));
+    assert(ActRaiserRegional_CopyRulesView(&title_view));
+  }
   ++title_calls;
   return title_return;
 }
@@ -1215,6 +1241,31 @@ int main(void) {
   assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_ActionMotion,1)==kActRaiserRegionalEdit_Applied);
   assert(!ActRaiserRegional_ActionMotionSnapshot());
   uint16_t motion_time;
+  ArRegionalActionStartSnapshot start_snapshot;
+  assert(ActRaiserRegional_CopyRulesView(&view));
+  assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_ActionStart,1)==kActRaiserRegionalEdit_Applied);
+  assert(ActRaiserRegional_BeginActionRoom(3,0x300,&motion_time));
+  assert(ActRaiserRegional_CopyRulesView(&view) && !view.effective.action_start.source[0]);
+  assert(ActRaiserRegional_BeginActionStart(&start_snapshot) && start_snapshot.spares==2 && start_snapshot.health==24);
+  assert(ActRaiserRegional_CopyRulesView(&view));
+  assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_ActionStart,2)==kActRaiserRegionalEdit_Applied);
+  assert(ActRaiserRegional_BeginActionRoom(3,0x300,&motion_time));
+  assert(ActRaiserRegional_CopyRulesView(&view) && view.effective.action_start.source[0]==1);
+  assert(ActRaiserRegional_BeginActionStart(&start_snapshot) && start_snapshot.spares==4 && start_snapshot.health==8);
+  assert(ActRaiserRegional_CopyRulesView(&view));
+  assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_Inventory,2)==kActRaiserRegionalEdit_Applied);
+  assert(!ActRaiserRegional_InventoryView().enabled);
+  assert(ActRaiserRegional_BeginActionRoom(3,0x300,&motion_time) && !ActRaiserRegional_InventoryView().enabled);
+  assert(ActRaiserRegional_StartInventory() && ActRaiserRegional_InventoryView().enabled);
+  assert(ActRaiserRegional_PushSpell(1) && ActRaiserRegional_PushSpell(4));
+  uint8_t selected_spell;assert(ActRaiserRegional_BeginSpell(&selected_spell) && selected_spell==4);
+  assert(ActRaiserRegional_CopyRulesView(&view));
+  assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_Inventory,0)==kActRaiserRegionalEdit_Applied);
+  assert(ActRaiserRegional_InventoryView().casting==4 && ActRaiserRegional_InventoryView().count==2);
+  assert(ActRaiserRegional_BeginActionRoom(3,0x300,&motion_time));
+  assert(ActRaiserRegional_InventoryView().count==2 && !ActRaiserRegional_InventoryView().casting);
+  assert(ActRaiserRegional_StartInventory() && !ActRaiserRegional_InventoryView().enabled && !ActRaiserRegional_InventoryView().count);
+  assert(ActRaiserRegional_CopyRulesView(&view));
   assert(ActRaiserRegional_BeginActionRoom(3,0x300,&motion_time) && ActRaiserRegional_ActionMotionSnapshot()==0x3fff);
   assert(ActRaiserRegional_CopyRulesView(&view) && view.effective.action_motion.source[0]==1);
   assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_ActionMotion,0)==kActRaiserRegionalEdit_Applied);
@@ -1342,6 +1393,34 @@ int main(void) {
   assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_FireEnemy,2)==kActRaiserRegionalEdit_Applied);
   assert(ActRaiserRegional_FireSnapshot()==15);
   assert(ActRaiserRegional_BeginActionRoom(3,0x300,&motion_time) && !ActRaiserRegional_FireSnapshot());
+  assert(!ActRaiserRegional_ScoreLivesEnabled());
+  assert(ActRaiserRegional_CopyRulesView(&view));
+  assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_ScoreLives,2)==kActRaiserRegionalEdit_Applied);
+  assert(!ActRaiserRegional_ScoreLivesEnabled());
+  assert(ActRaiserRegional_BeginActionRoom(3,0x300,&motion_time) && ActRaiserRegional_ScoreLivesEnabled());
+  assert(ActRaiserRegional_CopyRulesView(&view));
+  assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_ScoreLives,1)==kActRaiserRegionalEdit_Applied);
+  assert(ActRaiserRegional_ScoreLivesEnabled());
+  assert(ActRaiserRegional_BeginActionRoom(3,0x300,&motion_time) && !ActRaiserRegional_ScoreLivesEnabled());
+  assert(!ActRaiserRegional_DifficultySnapshot().spawn_hp);
+  assert(ActRaiserRegional_CopyRulesView(&view));
+  assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_DifficultyRules,2)==kActRaiserRegionalEdit_Applied);
+  assert(ActRaiserRegional_RequestDifficulty(&view,kArRegionalDifficulty_Beginner)==kActRaiserRegionalEdit_Stale);
+  assert(ActRaiserRegional_CopyRulesView(&view));
+  assert(ActRaiserRegional_RequestDifficulty(&view,kArRegionalDifficulty_Beginner)==kActRaiserRegionalEdit_Applied);
+  assert(!ActRaiserRegional_DifficultySnapshot().spawn_hp);
+  assert(ActRaiserRegional_BeginActionRoom(3,0x300,&motion_time));
+  assert(ActRaiserRegional_DifficultySnapshot().spawn_hp==2 &&
+      ActRaiserRegional_DifficultySnapshot().skip_dragon_attack && ActRaiserRegional_DifficultySnapshot().timer_reload==71);
+  assert(ActRaiserRegional_CopyRulesView(&view));
+  assert(ActRaiserRegional_RequestDifficulty(&view,kArRegionalDifficulty_Expert)==kActRaiserRegionalEdit_Applied);
+  assert(ActRaiserRegional_DifficultySnapshot().spawn_hp==2);
+  assert(ActRaiserRegional_BeginActionRoom(3,0x300,&motion_time));
+  assert(ActRaiserRegional_DifficultySnapshot().spawn_hp==3 && ActRaiserRegional_DifficultySnapshot().contact_extra==1 &&
+      !ActRaiserRegional_DifficultySnapshot().skip_dragon_attack && ActRaiserRegional_DifficultySnapshot().timer_reload==47);
+  assert(ActRaiserRegional_CopyRulesView(&view));
+  assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_DifficultyRules,0)==kActRaiserRegionalEdit_Applied);
+  assert(ActRaiserRegional_BeginActionRoom(3,0x300,&motion_time) && !ActRaiserRegional_DifficultySnapshot().spawn_hp);
   ActRaiserRegional_SetPopulationPrompt(PopulationPrompt,NULL);
   assert(ActRaiserRegional_CopyRulesView(&view));
   assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_Population,1)==kActRaiserRegionalEdit_Deferred);
@@ -1379,6 +1458,9 @@ int main(void) {
   assert(Save_WriteFile(kSaveFileFormat_NativeSrm,path,image,&error));
   assert(SaveSystem_LoadActive(&error));
   assert(ActRaiserRegional_Initialize(Identity,NULL));
+  assert(ActRaiserRegional_BeginActionStart(&start_snapshot) && start_snapshot.spares==4 && start_snapshot.health==24);
+  uint8_t boot_digest[32];bool boot_baseline=false;
+  assert(ActRaiserRegional_ReplayDigest(NULL,boot_digest,&boot_baseline) && boot_baseline);
   ActRaiserRegional_SetContinuePrompt(ContinuePrompt,&prompt_calls);
   cpu=(CpuState){.PB=2,.DB=2,.m_flag=1,.S=0x1ee0}; ram[0x336]=1;
   edits_allowed=false; assert(!ActRaiser_RegionalContinueEntry(&cpu));
@@ -1401,6 +1483,60 @@ int main(void) {
   restore_result=RECOMP_RETURN_PARKED_WAIT;
   assert(ActRaiser_RegionalContinue(&cpu)==RECOMP_RETURN_PARKED_WAIT);
   assert(cpu.PB==3 && prompt_calls==2);
+  /* A title draft cannot replace Continue, mutate SRAM, reuse an old campaign
+   * edit token, or activate accounting against pre-initialization WRAM. */
+  title_edits=1;title_return=RECOMP_RETURN_NORMAL;
+  cpu=(CpuState){.PB=2,.DB=2,.m_flag=1,.S=0x1ee0};ram[0x336]=1;
+  assert(ActRaiser_RegionalTitle(&cpu)==RECOMP_RETURN_NORMAL);
+  assert(ActRaiserRegional_CopyRulesView(&view) && !view.new_game && !view.requested.spell_inventory);
+  assert(ActRaiserRegional_RequestRules(&title_view,kActRaiserRegionalSetting_Inventory,0)==kActRaiserRegionalEdit_Stale);
+  memset(town_ram,0,sizeof(town_ram));ram[0x336]=2;
+  assert(ActRaiser_RegionalTitle(&cpu)==RECOMP_RETURN_NORMAL);
+  assert(ActRaiserRegional_CopyRulesView(&view) && !view.new_game && view.requested.spell_inventory==2);
+  assert(ActRaiserRegional_BeginActionStart(&start_snapshot) && start_snapshot.health==8 && start_snapshot.spares==4);
+  assert(ActRaiserRegional_StartInventory() && ActRaiserRegional_InventoryView().enabled);
+  assert(ActRaiserRegional_BeginActionRoom(3,0x300,&timer));
+  assert(ActRaiserRegional_DifficultySnapshot().spawn_hp==3);
+  cpu.PB=3;cpu.DB=3;
+  assert(!ActRaiser_RegionalLairEntry(&cpu) && !ActRaiser_RegionalLairReductionEntry(&cpu));
+  ActRaiserRegional_CheckLairHistory(&cpu);
+  assert(ActRaiserRegional_CopyRulesView(&view) && view.lair_history_ready && view.lair_reload_ready);
+  assert(ActRaiser_RegionalLairSeedEntry(&cpu));
+  lair_result=RECOMP_RETURN_NORMAL;
+  assert(ActRaiser_RegionalLairSeed(&cpu)==RECOMP_RETURN_NORMAL);
+  assert(ActRaiser_RegionalLairEntry(&cpu) && !ActRaiser_RegionalLairSeedEntry(&cpu));
+  assert(ActRaiserRegional_RequestRules(&title_view,kActRaiserRegionalSetting_Inventory,0)==kActRaiserRegionalEdit_Stale);
+  uint8_t unchanged_image[kActRaiserSramSize];
+  assert(Save_LoadFile(kSaveFileFormat_NativeSrm,path,unchanged_image,&error) && !memcmp(image,unchanged_image,sizeof(image)));
+  assert(ArRegionalSession_Load(&loaded,0,path,image,&error)==kSaveCheckpoint_Ready && !loaded.requested.spell_inventory);
+  assert(ActRaiserRegional_CopyRulesView(&view));
+  assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_ModeEntry,2)==kActRaiserRegionalEdit_Applied);
+  uint8_t mode_rules;
+  assert(ActRaiserRegional_ModeEntry(false,&mode_rules) && mode_rules==3);
+  assert(ActRaiserRegional_ModeEntry(true,&mode_rules) && mode_rules==3);
+  assert(ActRaiserRegional_ReturnToTitle() && !ActRaiserRegional_InventoryView().enabled);
+  title_edits=3;cpu.PB=2;
+  assert(ActRaiser_RegionalTitle(&cpu)==RECOMP_RETURN_NORMAL);
+  assert(ActRaiserRegional_CopyRulesView(&view) && view.requested.spell_inventory==2 && !view.requested.difficulty.level);
+  assert(ActRaiserRegional_BeginActionStart(&start_snapshot) && start_snapshot.health==8);
+  assert(ActRaiserRegional_StartInventory() && ActRaiserRegional_InventoryView().enabled);
+  title_edits=1;
+  /* Returning abnormally from title never publishes its draft. A later title
+   * starts from US defaults, and record/replay locks still apply there. */
+  assert(ActRaiserRegional_CopyRulesView(&view));
+  title_return=RECOMP_RETURN_PARKED_WAIT;cpu.PB=2;
+  assert(ActRaiser_RegionalTitle(&cpu)==RECOMP_RETURN_PARKED_WAIT);
+  ActRaiserRegionalRulesView after_title;
+  assert(ActRaiserRegional_CopyRulesView(&after_title) && after_title.revision==view.revision);
+  assert(!memcmp(after_title.campaign,view.campaign,16) && !after_title.new_game);
+  assert(!memcmp(&after_title.requested,&view.requested,sizeof(view.requested)) &&
+      !memcmp(&after_title.effective,&view.effective,sizeof(view.effective)));
+  assert(after_title.lair_history_ready==view.lair_history_ready && after_title.lair_reload_ready==view.lair_reload_ready);
+  title_edits=2;edits_allowed=false;title_return=RECOMP_RETURN_NORMAL;ram[0x336]=0;
+  assert(ActRaiser_RegionalTitle(&cpu)==RECOMP_RETURN_NORMAL);
+  assert(ActRaiserRegional_CopyRulesView(&view) && !view.requested.spell_inventory);
+  assert(ActRaiserRegional_BeginActionStart(&start_snapshot) && start_snapshot.health==24);
+  edits_allowed=true;title_edits=0;
   remove(path); remove(companion);
   return 0;
 }

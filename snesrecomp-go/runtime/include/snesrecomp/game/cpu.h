@@ -120,6 +120,16 @@ int cpu_begin_owned_unwind(CpuState *cpu, uint16 return_stack,
                            uint32 target, uint8 frame_bytes);
 int cpu_finish_owned_unwind(CpuReturnScope *scope, CpuState *cpu);
 
+/* Explicit game-owned, nonreturning transfer after native code has discarded
+ * ALL hardware call frames (for example a stack reset followed by RTL to the
+ * title). Requires a bracketed reset root on this CPU and native WRAM S above
+ * every live hardware frame. This is not an ordinary branch/return, nor a CPU
+ * reset. On success immediately propagate RECOMP_RETURN_OWNED_UNWIND. Only the
+ * host's reset driver may consume it after all compiled activations retire;
+ * then dispatch g_tailcall_* without restoring registers or emulated memory. */
+int cpu_begin_reset_tail(CpuState *cpu, uint32 target, uint32 source);
+int cpu_finish_reset_tail(CpuReturnScope *scope, CpuState *cpu);
+
 /* A native callee may remove its hardware frame and jump to its saved return
  * PC instead of executing RTS/RTL. Only the immediate active call, its exact
  * continuation and its exact post-pop S can resume the existing C activation.

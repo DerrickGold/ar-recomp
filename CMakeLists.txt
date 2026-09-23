@@ -2169,6 +2169,7 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_regional_lair_projection COMMAND actraiser_regional_lair_projection_test)
 
     add_executable(actraiser_regional_policy_test
+        src/regional/regional_difficulty.c src/regional/regional_score_lives.c src/regional/regional_action_start.c src/regional/regional_spell_inventory.c src/regional/regional_mode_entry.c
         tests/regional_policy_test.c
         src/regional/regional_timers.c
         src/regional/regional_retry.c
@@ -2202,6 +2203,7 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_settings_persistence COMMAND actraiser_settings_persistence_test)
 
     add_executable(actraiser_settings_overlay_test
+        src/regional/regional_difficulty.c src/regional/regional_score_lives.c src/regional/regional_action_start.c src/regional/regional_spell_inventory.c src/regional/regional_mode_entry.c
         tests/settings_overlay_test.c
         src/regional/regional_timers.c
         src/regional/regional_retry.c
@@ -2698,6 +2700,7 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_story_snapshot COMMAND actraiser_story_snapshot_test)
 
     add_executable(actraiser_regional_session_test
+        src/regional/regional_difficulty.c src/regional/regional_score_lives.c src/regional/regional_action_start.c src/regional/regional_spell_inventory.c src/regional/regional_mode_entry.c
         tests/regional_session_test.c
         src/regional/regional_timers.c
         src/regional/regional_retry.c
@@ -2730,6 +2733,7 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_regional_timers COMMAND actraiser_regional_timers_test)
 
     add_executable(actraiser_regional_campaign_test
+        src/regional/regional_difficulty.c src/regional/regional_score_lives.c src/regional/regional_action_start.c src/regional/regional_spell_inventory.c src/regional/regional_mode_entry.c
         tests/regional_campaign_test.c
         src/regional/regional_timers.c
         src/regional/regional_retry.c
@@ -2799,6 +2803,43 @@ if(BUILD_TESTING)
     target_include_directories(actraiser_platform_skull_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     add_test(NAME actraiser_platform_skull COMMAND actraiser_platform_skull_test)
 
+    add_executable(actraiser_difficulty_test tests/actraiser_difficulty_test.c
+        src/quintet_lzss.c
+        src/actraiser/actraiser_difficulty.c src/regional/regional_difficulty.c
+        src/actraiser/actraiser_cpu_hle_internal.c src/actraiser/actraiser_hle_fatal.c)
+    target_include_directories(actraiser_difficulty_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    add_test(NAME actraiser_difficulty COMMAND actraiser_difficulty_test)
+
+    add_executable(actraiser_score_lives_test tests/actraiser_score_lives_test.c
+        src/actraiser/actraiser_score_lives.c src/regional/regional_score_lives.c
+        src/actraiser/actraiser_hle_fatal.c src/cpu_65816_math.c)
+    target_include_directories(actraiser_score_lives_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    add_test(NAME actraiser_score_lives COMMAND actraiser_score_lives_test)
+
+    add_executable(actraiser_action_start_test tests/actraiser_action_start_test.c
+        src/actraiser/actraiser_action_start.c src/regional/regional_action_start.c
+        src/actraiser/actraiser_cpu_hle_internal.c src/actraiser/actraiser_hle_fatal.c)
+    target_include_directories(actraiser_action_start_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    add_test(NAME actraiser_action_start COMMAND actraiser_action_start_test)
+
+    add_executable(actraiser_mode_entry_test tests/actraiser_mode_entry_test.c
+        src/actraiser/actraiser_mode_entry.c src/regional/regional_mode_entry.c
+        src/actraiser/actraiser_cpu_hle_internal.c src/actraiser/actraiser_hle_fatal.c)
+    target_include_directories(actraiser_mode_entry_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    add_test(NAME actraiser_mode_entry COMMAND actraiser_mode_entry_test)
+
+    add_executable(regional_spell_inventory_test tests/regional_spell_inventory_test.c
+        src/regional/regional_spell_inventory.c)
+    target_include_directories(regional_spell_inventory_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    add_test(NAME regional_spell_inventory COMMAND regional_spell_inventory_test)
+
+    add_executable(actraiser_action_inventory_test tests/actraiser_action_inventory_test.c
+        src/actraiser/actraiser_action_inventory.c src/actraiser/actraiser_scroll_cast.c
+        src/regional/regional_spell_inventory.c src/actraiser/actraiser_cpu_hle_internal.c
+        src/actraiser/actraiser_hle_fatal.c)
+    target_include_directories(actraiser_action_inventory_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    add_test(NAME actraiser_action_inventory COMMAND actraiser_action_inventory_test)
+
     add_executable(actraiser_boss_rules_test tests/actraiser_boss_rules_test.c
         src/actraiser/actraiser_boss_rules.c src/actraiser/actraiser_cpu_hle_internal.c
         src/actraiser/actraiser_hle_fatal.c src/regional/regional_boss_rules.c src/quintet_lzss.c)
@@ -2824,6 +2865,7 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_action_motion COMMAND actraiser_action_motion_test)
 
     add_executable(actraiser_regional_fingerprint_test
+        src/regional/regional_difficulty.c src/regional/regional_score_lives.c src/regional/regional_action_start.c src/regional/regional_spell_inventory.c src/regional/regional_mode_entry.c
         tests/regional_fingerprint_test.c
         src/regional/regional_fingerprint.c
         src/regional/regional_timers.c
@@ -2849,6 +2891,7 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_regional_fingerprint COMMAND actraiser_regional_fingerprint_test)
 
     add_executable(actraiser_regional_runtime_test
+        src/regional/regional_difficulty.c src/regional/regional_score_lives.c src/regional/regional_action_start.c src/regional/regional_spell_inventory.c src/regional/regional_mode_entry.c
         tests/actraiser_regional_runtime_test.c
         src/regional/regional_timers.c
         src/regional/regional_retry.c

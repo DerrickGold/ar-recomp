@@ -505,7 +505,7 @@ Version 25 adds six independently sourced behavior records (86 named records
 total): `sim_dragon_search_interval`, `sim_dragon_extra_actor_pass`,
 `sim_target_wide_coordinates`, `sim_target_full_pool`,
 `sim_bat_fallback_threshold`, and `sim_bat_abduction_wait`. Its payload is
-4163 bytes; the bounded companion limit is now 8192 bytes. The native SRAM
+4163 bytes; the bounded companion limit is now 32768 bytes. The native SRAM
 image remains exactly 8192 bytes and contains no host metadata.
 
 Version 26 appends `construction_price_japanese` (87 named records, 4199-byte
@@ -653,6 +653,65 @@ captures all three; live flags and positions remain native actor state.
 The optional `ARCASTHOLD-R1` digest domain appends the requested/effective
 three-bit masks after prior domains. All-US/Japanese aliases preserve the
 previous replay identity.
+
+Version 55 appends `action_mode_unlocked` and `action_game_over_title` (226
+records, 8203 bytes). Each stores independent requested/effective sources and
+values 0/0/1. Versions 1–54 default to US mode entry. Title choice construction
+and Game Over acceptance activate the policy; no SRAM unlock byte is changed.
+`ARMODEENTRY-R1` extends the rules digest with requested/effective two-bit
+masks. US/Japanese aliases preserve previous identities. New-game title
+drafts and Game Over's pending title handoff are volatile, not save slots.
+
+Version 54 appends `action_spell_inventory` (224 total), requested/effective
+source pairs with values0/0/1. Versions1–53 default to generic US inventory.
+Only confirmed Action new-run initialization activates it. No cartridge SRAM
+or PAL `$1C00` storage is repurposed: the collection belongs to the host Action
+run, which has no native battery-save operation. Continue/New Game reset that
+volatile owner; room/retry initialization only cancels an interrupted cast.
+Unsupported debug-state restoration remains rejected before mutation.
+
+`ARINVENTORY-R1` appends two rule booleans to the rules digest. Replay then
+includes enabled run state under `ARSPELLSTACK-R1`: count, displayed icon,
+selected in-flight spell, and the live collection bytes in order. Dead entries
+after a pop/wrap are excluded. Disabled inventory preserves prior hashes.
+The version 54 codec is 8143 bytes. Host payloads have a separate 32768-byte
+bound, leaving room for remaining policies without changing the 8192-byte
+cartridge image. Journals retain at most two records and allocate only during
+save/load. Maximum-size two-record recovery, oversized-write rejection and
+non-mutating short-buffer reads have explicit tests.
+
+Version 53 appends `action_start_spares` and `action_start_health` (223 total).
+Their requested/effective source pairs resolve to4/2/4 stored spare lives and
+24/24/8 health for US/Japan/Europe. Versions1–52 default both to US. Only the
+accepted Action new-run initializer activates them; ordinary rooms and
+retries leave requests pending. The optional `ARACTIONSTART-R1` digest follows
+the score-life domain and contains requested spares/health, then effective
+spares/health. Numerical aliases preserve baseline identity. No new trailer
+or native SRAM field is added.
+
+Version 52 appends `action_score_lives` (221 total), with independent
+requested/effective sources and values0/0/1 for US/Japan/Europe. Versions1–51
+default it to US. Room/retry activation owns the cached rule; current lives
+and score remain native state. No reward journal or SRAM field is added.
+The optional `ARSCORELIVES-R1` replay domain appends two resolved booleans
+after the difficulty domain; US/Japan aliases retain prior hashes. The
+existing difficulty trailer is unchanged.
+
+Version 51 appends five records (220 total): `action_difficulty_hp`,
+`action_difficulty_contact`, `action_difficulty_clock`,
+`action_difficulty_dragon` and `action_difficulty_tendril`. Each stores a
+requested/effective source and value0/0/1 for US/Japan/Europe. A ten-byte
+`ARDIFF01` trailer follows the arrival block: eight magic bytes followed by
+requested and effective difficulty choice bytes, explicitly0=Normal,
+1=Beginner,2=Expert. These are host choices, not PAL RAM or region ordinals.
+Older versions default all five rules to US and the level to Normal.
+
+Room/retry activation captures the five numerical effects together. The
+optional `ARDIFF-R1` replay domain records two semantic bytes: HP mode in
+bits0–1 (native, PAL Normal, Beginner, Expert), Expert contact addition in
+bit2, clock mode in bits3–4 (60,72,48 updates), omitted dragon producer in
+bit5, and single tendril bob in bit6. Inactive level choices and US/Japan
+aliases preserve older hashes. Native SRAM is unchanged.
 
 Version 50 appends `action_tree_seed_family` (215 total), value0 for US and1
 for Japan/Europe. Versions1–49 default it to US. Requested/effective sources

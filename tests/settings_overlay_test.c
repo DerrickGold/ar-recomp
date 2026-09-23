@@ -278,6 +278,16 @@ static ActRaiserRegionalEditResult FakeRegionalEdit(const ActRaiserRegionalRules
     ArRegionalCastHold_Init(&s_fake_region.requested.cast_hold,source);
   else if(group==kActRaiserRegionalSetting_FireEnemy)
     ArRegionalFire_Init(&s_fake_region.requested.fire_enemy,source);
+  else if(group==kActRaiserRegionalSetting_ScoreLives)
+    s_fake_region.requested.score_lives=source;
+  else if(group==kActRaiserRegionalSetting_ModeEntry)
+    ArRegionalMode_Init(&s_fake_region.requested.mode_entry,source);
+  else if(group==kActRaiserRegionalSetting_ActionStart)
+    ArRegionalActionStart_Init(&s_fake_region.requested.action_start,source);
+  else if(group==kActRaiserRegionalSetting_Inventory)
+    s_fake_region.requested.spell_inventory=source;
+  else if(group==kActRaiserRegionalSetting_DifficultyRules)
+    ArRegionalDifficulty_Init(&s_fake_region.requested.difficulty,source,s_fake_region.requested.difficulty.level);
   else if (group == kActRaiserRegionalSetting_MenuReturn)
     s_fake_region.requested.menu_return = source;
   else if (group == kActRaiserRegionalSetting_SpeedRange)
@@ -298,11 +308,17 @@ static ActRaiserRegionalEditResult FakeRegionalEdit(const ActRaiserRegionalRules
   return kActRaiserRegionalEdit_Applied;
 }
 
+static ActRaiserRegionalEditResult FakeDifficultyEdit(const ActRaiserRegionalRulesView *view,ArRegionalDifficulty level) {
+  CHECK(view->revision==s_fake_region.revision);
+  CHECK((unsigned)level<kArRegionalDifficulty_Count);
+  ++s_region_edits;++s_fake_region.revision;s_fake_region.requested.difficulty.level=level;
+  return kActRaiserRegionalEdit_Applied;
+}
 static void CheckRegionalControls(SDL_Renderer *renderer, SDL_Surface *surface) {
   SettingsOverlay_Close();
   SettingsOverlay_Open();
   const Settings before = g_settings;
-  SettingsOverlayRegionalHooks hooks = {FakeRegionalView, FakeRegionalEdit};
+  SettingsOverlayRegionalHooks hooks = {FakeRegionalView, FakeRegionalEdit, FakeDifficultyEdit};
   SettingsOverlay_SetRegionalHooks(&hooks);
   NavToSection(kSection_Localization);
   NavToTab(3);
@@ -773,11 +789,91 @@ static void CheckRegionalControls(SDL_Renderer *renderer, SDL_Surface *surface) 
     CHECK(used==length && !strchr(help,'{'));
   }
   CHECK(SettingsOverlay_HandleKey(SDLK_DOWN,true,false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "regional_difficulty_rules"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_LEFT,true,false));
+  CHECK(s_region_edits==38 && s_fake_region.requested.difficulty.source[0]==2);
+  for(unsigned locale=0;locale<kArUiLocale_Count;++locale)for(unsigned source=0;source<3;++source) {
+    ActRaiserRegionalRulesView preview=s_fake_region;ArRegionalDifficulty_Init(&preview.requested.difficulty,source,0);
+    for(unsigned group=kActRaiserRegionalSetting_DifficultyRules;group<=kActRaiserRegionalSetting_DifficultyLevel;++group) {
+      char help[2048];CHECK(SettingsOverlayRegions_ViewDescription(locale,&preview,group,help,sizeof(help)));
+      size_t used=0,length=strlen(help);
+      for(unsigned line=0;line<4 && used<length;++line) {
+        ArInterfaceTextLine slice;CHECK(ArInterfaceText_WrapLine(help+used,length-used,98,kArInterfaceTextMaximumBytes,&slice));
+        CHECK(slice.consumed);used+=slice.consumed;
+      }
+      CHECK(used==length && !strchr(help,'{'));
+    }
+  }
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN,true,false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "regional_difficulty_level"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT,true,false));
+  CHECK(s_region_edits==39 && s_fake_region.requested.difficulty.level==kArRegionalDifficulty_Beginner);
+  CHECK(!s_fake_region.effective.difficulty.level);
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT,true,false));
+  CHECK(s_region_edits==40 && s_fake_region.requested.difficulty.level==kArRegionalDifficulty_Expert);
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN,true,false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(),"regional_score_lives"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_LEFT,true,false));
+  CHECK(s_region_edits==41 && s_fake_region.requested.score_lives==2 && !s_fake_region.effective.score_lives);
+  for(unsigned locale=0;locale<kArUiLocale_Count;++locale)for(unsigned source=0;source<3;++source) {
+    ActRaiserRegionalRulesView preview=s_fake_region;preview.requested.score_lives=source;
+    char help[2048];
+    CHECK(SettingsOverlayRegions_ViewDescription(locale,&preview,kActRaiserRegionalSetting_ScoreLives,help,sizeof(help)));
+    size_t used=0,length=strlen(help);
+    for(unsigned line=0;line<4 && used<length;++line) {
+      ArInterfaceTextLine slice;CHECK(ArInterfaceText_WrapLine(help+used,length-used,98,kArInterfaceTextMaximumBytes,&slice));
+      CHECK(slice.consumed);used+=slice.consumed;
+    }
+    CHECK(used==length && !strchr(help,'{'));
+  }
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN,true,false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(),"regional_action_start"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT,true,false));
+  CHECK(s_region_edits==42 && s_fake_region.requested.action_start.source[0]==1 && !s_fake_region.effective.action_start.source[0]);
+  for(unsigned locale=0;locale<kArUiLocale_Count;++locale)for(unsigned source=0;source<3;++source) {
+    ActRaiserRegionalRulesView preview=s_fake_region;ArRegionalActionStart_Init(&preview.requested.action_start,source);
+    char help[2048];CHECK(SettingsOverlayRegions_ViewDescription(locale,&preview,kActRaiserRegionalSetting_ActionStart,help,sizeof(help)));
+    size_t used=0,length=strlen(help);
+    for(unsigned line=0;line<4 && used<length;++line) {
+      ArInterfaceTextLine slice;CHECK(ArInterfaceText_WrapLine(help+used,length-used,98,kArInterfaceTextMaximumBytes,&slice));
+      CHECK(slice.consumed);used+=slice.consumed;
+    }
+    CHECK(used==length && !strchr(help,'{'));
+  }
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN,true,false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(),"regional_inventory"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_LEFT,true,false));
+  CHECK(s_region_edits==43 && s_fake_region.requested.spell_inventory==2 && !s_fake_region.effective.spell_inventory);
+  for(unsigned locale=0;locale<kArUiLocale_Count;++locale)for(unsigned source=0;source<3;++source) {
+    ActRaiserRegionalRulesView preview=s_fake_region;preview.requested.spell_inventory=source;
+    char help[2048];CHECK(SettingsOverlayRegions_ViewDescription(locale,&preview,kActRaiserRegionalSetting_Inventory,help,sizeof(help)));
+    size_t used=0,length=strlen(help);
+    for(unsigned line=0;line<4 && used<length;++line) {
+      ArInterfaceTextLine slice;CHECK(ArInterfaceText_WrapLine(help+used,length-used,98,kArInterfaceTextMaximumBytes,&slice));
+      CHECK(slice.consumed);used+=slice.consumed;
+    }
+    CHECK(used==length && !strchr(help,'{'));
+  }
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN,true,false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(),"regional_mode_entry"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_LEFT,true,false));
+  CHECK(s_region_edits==44 && s_fake_region.requested.mode_entry.source[0]==2 && !s_fake_region.effective.mode_entry.source[0]);
+  for(unsigned locale=0;locale<kArUiLocale_Count;++locale)for(unsigned source=0;source<3;++source) {
+    ActRaiserRegionalRulesView preview=s_fake_region;ArRegionalMode_Init(&preview.requested.mode_entry,source);
+    char help[2048];CHECK(SettingsOverlayRegions_ViewDescription(locale,&preview,kActRaiserRegionalSetting_ModeEntry,help,sizeof(help)));
+    size_t used=0,length=strlen(help);
+    for(unsigned line=0;line<4 && used<length;++line) {
+      ArInterfaceTextLine slice;CHECK(ArInterfaceText_WrapLine(help+used,length-used,98,kArInterfaceTextMaximumBytes,&slice));
+      CHECK(slice.consumed);used+=slice.consumed;
+    }
+    CHECK(used==length && !strchr(help,'{'));
+  }
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN,true,false));
   CHECK(!strcmp(SettingsOverlay_SelectedKey(), "regional_scroll_prices")); /* no global reset row */
   s_fake_region.editable = false;
   CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
   CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
-  CHECK(s_region_edits == 37);
+  CHECK(s_region_edits == 44);
   CHECK(!memcmp(&before, &g_settings, sizeof(before)));
   s_fake_region.editable = true;
   SettingsOverlay_Close(); /* clear transient status for the preview */

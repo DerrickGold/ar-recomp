@@ -4,6 +4,7 @@
 #include "regional/regional_boss_rules.h"
 #include "regional/regional_collision.h"
 #include "regional/regional_fire_enemy.h"
+#include "regional/regional_difficulty.h"
 #include "quintet_lzss.h"
 #include "byte_order.h"
 #include <assert.h>
@@ -16,6 +17,8 @@ static uint8_t emitters;
 static uint64_t bosses;
 static uint8_t collision;
 static uint8_t fire;
+static ArRegionalDifficultySnapshot difficulty;
+ArRegionalDifficultySnapshot ActRaiserRegional_DifficultySnapshot(void){return difficulty;}
 uint8_t ActRaiserRegional_FireSnapshot(void){return fire;}
 static bool decode_extents;
 static unsigned calls;
@@ -768,6 +771,52 @@ static void CheckPlantWindups(void) {
   }
   bosses=0;printf("Plant wind-ups: %u mixed-policy/row/facing/width cases and signature guards passed\n",cases);
 }
+static CpuState Tendril(unsigned row,unsigned flip,unsigned width) {
+  CpuState cpu=Setup(0,16,row,flip,width);Write(0x18,0x0305);Write(0x912,0xd974);
+  Write(cpu.X+0x16,0x5000);Write(cpu.X+0x3a,0x920);Write(0x5000,0x600);Write(0x5022,0x100);
+  memcpy(memory+0x5100,(uint8_t[]){27,3,255,255,27,7,255,0,27,3,255,1,27,7,255,0,255},17);
+  return cpu;
+}
+static void CheckTendril(void) {
+  snapshot=0;bosses=0;emitters=collision=fire=0;decode_extents=false;
+  for(unsigned enabled=0;enabled<2;++enabled)for(unsigned tagged=0;tagged<2;++tagged)
+  for(unsigned row=0;row<8;++row)for(unsigned flip=0;flip<4;++flip)for(unsigned width=0;width<2;++width) {
+    difficulty.single_tendril_bob=enabled;
+    CpuState cpu=Tendril(row+(tagged?0x100:0),flip<<14,width),expected=cpu;
+    uint8_t before[sizeof(memory)],wanted[sizeof(memory)];memcpy(before,memory,sizeof(memory));
+    const bool change=(enabled || tagged) && row<=6;
+    assert(ActRaiser_ActionMotionEntry(&cpu)==change);
+    if(change) {
+      const unsigned indices[]={0,1,1,2,3,3,4},delay[]={3,3,15,3,3,15};
+      Write(cpu.X+0x1c,indices[row]);Native(&expected);
+      if(row<6){Write(cpu.X+0x1c,0x100+row);Write(cpu.X+0x24,delay[row]);}
+      memcpy(wanted,memory,sizeof(memory));memcpy(memory,before,sizeof(memory));
+      assert(ActRaiser_ActionMotion(&cpu)==RECOMP_RETURN_NORMAL);
+      assert(!memcmp(&cpu,&expected,sizeof(cpu)) && !memcmp(memory,wanted,sizeof(memory)));
+    }
+  }
+  difficulty.single_tendril_bob=true;
+  for(unsigned bad=0;bad<24;++bad) {
+    CpuState cpu=Tendril(0,0,0);
+    if(bad<17)memory[0x5100+bad]^=1;
+    else switch(bad) {
+      case 17:Write(cpu.X+0x3a,0);break;case 18:Write(cpu.X+0x3c,1);break;
+      case 19:Write(cpu.S+1,0x969d);break;case 20:Write(0x5022,0xffff);break;
+      case 21:Write(0x5000,0x110);break;case 22:cpu.PB=1;break;case 23:Write(0x18,0x0405);break;
+    }
+    assert(!ActRaiser_ActionMotionEntry(&cpu) && !ActRaiser_PlantTendrilEntry(&cpu));
+  }
+  CpuState cpu=Tendril(0,0,0);uint8_t before[sizeof(memory)];memcpy(before,memory,sizeof(memory));
+  assert(ActRaiser_PlantTendrilEntry(&cpu) && ActRaiser_PlantTendril(&cpu)==RECOMP_RETURN_TAILCALL);
+  assert(cpu.A==0x1001 && tail_target==0xdae0 && tail_origin==0xdadd && !memcmp(before,memory,sizeof(memory)));
+  for(unsigned token=1;token<=RECOMP_RETURN_OWNED_UNWIND;++token) {
+    cpu=Tendril(0x100,0,0);const CpuState expected=cpu;memcpy(before,memory,sizeof(memory));
+    native_result=(RecompReturn)token;
+    assert(ActRaiser_ActionMotion(&cpu)==token && !memcmp(before,memory,sizeof(memory)) && !memcmp(&cpu,&expected,sizeof(cpu)));
+  }
+  difficulty=(ArRegionalDifficultySnapshot){0};native_result=RECOMP_RETURN_NORMAL;
+  puts("Beginner tendril: expanded48-update program, cacheless completion, signature guards and native repeat ownership passed");
+}
 int main(int argc,char **argv) {
   assert(argc==1 || argc==6);
   CheckHeadProgram();
@@ -776,7 +825,7 @@ int main(int argc,char **argv) {
   CheckDragonRows();
   CheckViperRows();
   CheckPharaohRows();
-  CheckPlantProgram();CheckPlantWindups();
+  CheckPlantProgram();CheckPlantWindups();CheckTendril();
   CheckIceRows();
   CheckTanzraRows();
   CheckBossRows();

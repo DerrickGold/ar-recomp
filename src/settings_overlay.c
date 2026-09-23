@@ -618,6 +618,7 @@ static bool ActiveTabIsRegional(void) { return ActiveTab()->regional_rules; }
 static const char *RegionalNotice(void) {
   return Ui(!s_regional_valid ? "overlay.region.enter_campaign" :
       !s_regional_view.editable ? "overlay.region.replay_locked" :
+      s_regional_view.new_game ? "overlay.region.new_game_draft" :
       s_regional_view.population_pending ? "overlay.region.population_pending" : "overlay.region.saved_with_story");
 }
 
@@ -1270,6 +1271,14 @@ static bool RegionalChangeSelected(int direction, bool reset) {
     return true;
   }
   const ActRaiserRegionalSettingGroup group = (ActRaiserRegionalSettingGroup)s_row;
+  if(group==kActRaiserRegionalSetting_DifficultyLevel) {
+    if(!s_regional_hooks.difficulty)return true;
+    const unsigned current=s_regional_view.requested.difficulty.level;
+    const ArRegionalDifficulty next=reset?kArRegionalDifficulty_Normal:
+        (ArRegionalDifficulty)((current+(direction<0?2u:1u))%kArRegionalDifficulty_Count);
+    SetStatus(SettingsOverlayRegions_EditStatus(InterfaceLocale(),s_regional_hooks.difficulty(&s_regional_view,next)));
+    SettingsOverlay_Refresh();return true;
+  }
   ArRegionalSource source = kArRegionalSource_US;
   if ((unsigned)group >= kActRaiserRegionalSetting_Count ||
       (!reset && !SettingsOverlayRegions_NextSource(&s_regional_view, group, direction, &source)))
@@ -3069,14 +3078,14 @@ static void DrawMenuRows(const MenuLayout *layout, const MenuChrome *c,
         DrawGlyph(layout, selector_x + CursorBlinkOffset(), y, '>', kText_Warning);
       }
       const TextStyle style = s_submenu_open && s_regional_view.editable ? kText_Normal : kText_Dim;
-      const char *value = SettingsOverlayRegions_BadgeLabel(InterfaceLocale(), badge);
+      const char *value = SettingsOverlayRegions_ValueLabel(InterfaceLocale(),&s_regional_view,group,false);
       const int shown = CappedTextLength(value, value_chars);
       const int badge_x = value_right - shown * kGlyphSize - 16;
       DrawTextN(layout, label_x, y, SettingsOverlayRegions_RowLabel(InterfaceLocale(), group),
                 (badge_x - label_x - 4) / kGlyphSize, style);
       DrawTextRight(layout, value_right, y, value, value_chars, style == kText_Normal ? kText_Value : style);
       const ArRenderTexture texture = SettingsOverlayArtwork_Get()->region_badges;
-      if (ArRenderTexture_IsValid(texture)) {
+      if (group!=kActRaiserRegionalSetting_DifficultyLevel && ArRenderTexture_IsValid(texture)) {
         const ArRenderRectF source = {(float)(badge * kRegionBadgeWidth), 0,
                                       kRegionBadgeWidth, kRegionBadgeHeight};
         const ArRenderRectF destination = ToRenderRect(LogicalRect(layout, badge_x, y, 12, 8));
@@ -3317,9 +3326,9 @@ static void DrawMenuFooter(const MenuLayout *layout, const MenuChrome *c,
     char help[2048];
     char current[256] = "";
     SettingsOverlayRegionBadge effective;
-    if (s_regional_valid &&
+    if (s_regional_valid && !s_regional_view.new_game &&
         SettingsOverlayRegions_ViewBadge(&s_regional_view, group, true, &effective)) {
-      const ArUiTextArgument args[] = {{"region", SettingsOverlayRegions_BadgeLabel(InterfaceLocale(), effective)}};
+      const ArUiTextArgument args[] = {{"region", SettingsOverlayRegions_ValueLabel(InterfaceLocale(),&s_regional_view,group,true)}};
       ArUiCatalog_Format(current, sizeof(current), Ui("overlay.region.active"), args, 1);
     }
     const int current_x = panel_right - 12 - SmallTextWidth(current);

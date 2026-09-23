@@ -1,6 +1,8 @@
 #ifndef ACTRAISER_ACTION_MOTION_H
 #define ACTRAISER_ACTION_MOTION_H
 #include "snesrecomp/game/cpu.h"
+bool ActRaiser_PlantTendrilEntry(CpuState *cpu);
+RecompReturn ActRaiser_PlantTendril(CpuState *cpu);
 /* Shared native animation-row acquisition seam. Independent policies change
  * fresh actor outputs or select an existing pose through the native reader;
  * never shared asset bytes, elapsed phases or native CPU/return ownership. */

@@ -24,6 +24,78 @@ int main(void) {
   CHECK(ArRegionalCosts_Fingerprint(&eu, &us, current, &baseline) && baseline);
   CHECK(!memcmp(native, current, 32));
   ArRegionalRules r = {.costs = us}, e = {.costs = eu};
+  uint8_t mode_hashes[16][32];bool mode_seen[16]={0};
+  for(unsigned combination=0;combination<81;++combination) {
+    ArRegionalRules req={0},eff={0};unsigned digits=combination,index=0;
+    for(unsigned i=0;i<4;++i) {
+      const unsigned source=digits%3;digits/=3;
+      if(i<2)req.mode_entry.source[i]=source;else eff.mode_entry.source[i-2]=source;
+      if(source==2)index|=1u<<i;
+    }
+    CHECK(ArRegionalRules_Fingerprint(&req,&eff,current,&baseline) && baseline==!index);
+    if(mode_seen[index])CHECK(!memcmp(mode_hashes[index],current,32));
+    else {memcpy(mode_hashes[index],current,32);mode_seen[index]=true;}
+  }
+  for(unsigned i=0;i<16;++i)for(unsigned j=0;j<i;++j)CHECK(memcmp(mode_hashes[i],mode_hashes[j],32));
+  uint8_t inventory_hashes[4][32];bool inventory_seen[4]={0};
+  for(unsigned request=0;request<3;++request)for(unsigned active=0;active<3;++active) {
+    ArRegionalRules req={.spell_inventory=request},eff={.spell_inventory=active};
+    const unsigned index=(request==2)|((active==2)<<1);
+    CHECK(ArRegionalRules_Fingerprint(&req,&eff,current,&baseline) && baseline==!index);
+    if(inventory_seen[index])CHECK(!memcmp(inventory_hashes[index],current,32));
+    else {memcpy(inventory_hashes[index],current,32);inventory_seen[index]=true;}
+  }
+  for(unsigned i=0;i<4;++i)for(unsigned j=0;j<i;++j)CHECK(memcmp(inventory_hashes[i],inventory_hashes[j],32));
+  ArRegionalSpellInventory collection={0};
+  CHECK(ArRegionalSpellInventory_Fingerprint(native,&collection,current) && !memcmp(native,current,32));
+  ArRegionalSpellInventory_Reset(&collection,true);
+  CHECK(ArRegionalSpellInventory_Fingerprint(native,&collection,current) && memcmp(native,current,32));
+  collection.spells[255]=4;
+  CHECK(ArRegionalSpellInventory_Fingerprint(native,&collection,pending) && !memcmp(current,pending,32));
+  CHECK(ArRegionalSpellInventory_Push(&collection,2));
+  CHECK(ArRegionalSpellInventory_Fingerprint(native,&collection,current) && memcmp(current,pending,32));
+  uint8_t selected_spell;
+  CHECK(ArRegionalSpellInventory_BeginCast(&collection,&selected_spell));
+  CHECK(ArRegionalSpellInventory_Fingerprint(native,&collection,pending) && memcmp(current,pending,32));
+  ArRegionalSpellInventory_Interrupt(&collection);
+  CHECK(ArRegionalSpellInventory_Fingerprint(native,&collection,pending) && !memcmp(current,pending,32));
+  collection.spells[0]=5;
+  CHECK(!ArRegionalSpellInventory_Fingerprint(native,&collection,pending));
+  uint8_t start_hashes[16][32];bool start_seen[16]={0};
+  for(unsigned combination=0;combination<81;++combination) {
+    ArRegionalRules req={0},eff={0};unsigned digits=combination,index=0;
+    for(unsigned i=0;i<4;++i) {
+      const unsigned source=digits%3;digits/=3;
+      if(i<2)req.action_start.source[i]=source;else eff.action_start.source[i-2]=source;
+      if((i%2==0 && source==1) || (i%2 && source==2))index|=1u<<i;
+    }
+    CHECK(ArRegionalRules_Fingerprint(&req,&eff,current,&baseline) && baseline==!index);
+    if(start_seen[index])CHECK(!memcmp(start_hashes[index],current,32));
+    else {memcpy(start_hashes[index],current,32);start_seen[index]=true;}
+  }
+  for(unsigned i=0;i<16;++i)for(unsigned j=0;j<i;++j)CHECK(memcmp(start_hashes[i],start_hashes[j],32));
+  uint8_t life_hashes[4][32];bool life_seen[4]={0};
+  for(unsigned req_source=0;req_source<3;++req_source)for(unsigned eff_source=0;eff_source<3;++eff_source) {
+    ArRegionalRules req={.score_lives=req_source},eff={.score_lives=eff_source};
+    const unsigned index=(req_source==2)|((eff_source==2)<<1);
+    CHECK(ArRegionalRules_Fingerprint(&req,&eff,current,&baseline) && baseline==!index);
+    if(life_seen[index])CHECK(!memcmp(life_hashes[index],current,32));
+    else {memcpy(life_hashes[index],current,32);life_seen[index]=true;}
+  }
+  for(unsigned i=0;i<4;++i)for(unsigned j=0;j<i;++j)CHECK(memcmp(life_hashes[i],life_hashes[j],32));
+  uint8_t difficulty_hashes[256][32];bool difficulty_seen[256]={0};
+  for(unsigned n=0;n<243;++n)for(unsigned level=0;level<3;++level)for(unsigned active=0;active<2;++active) {
+    ArRegionalRules req={0},eff={0};unsigned digits=n;
+    ArRegionalDifficultyPolicy *p=active?&eff.difficulty:&req.difficulty;p->level=level;
+    for(unsigned i=0;i<5;++i){p->source[i]=digits%3;digits/=3;}
+    ArRegionalDifficultySnapshot values;CHECK(ArRegionalDifficulty_Resolve(p,&values));
+    const unsigned id=ArRegionalDifficulty_Identity(&values),index=id+(id?128*active:0);
+    CHECK(ArRegionalRules_Fingerprint(&req,&eff,current,&baseline) && baseline==!id);
+    if(difficulty_seen[index])CHECK(!memcmp(difficulty_hashes[index],current,32));
+    else {memcpy(difficulty_hashes[index],current,32);difficulty_seen[index]=true;}
+  }
+  for(unsigned i=0;i<256;++i)if(difficulty_seen[i])for(unsigned j=0;j<i;++j)if(difficulty_seen[j])
+    CHECK(memcmp(difficulty_hashes[i],difficulty_hashes[j],32));
   uint8_t hold_hashes[64][32];bool hold_seen[64]={0};
   uint8_t fire_hashes[256][32];bool fire_seen[256]={0};
   for(unsigned n=0;n<6561;++n) {

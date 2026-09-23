@@ -27,5 +27,7 @@ bool ArRegionalArrivalLock_Fingerprint(const uint8_t previous[32],ArRegionalSour
  * to US. Include their identity separately, just like retained lair history. */
 bool ArRegionalSimActors_Fingerprint(const uint8_t previous[32],const ArRegionalSimActors *actors,
                                     uint8_t out[32],bool *baseline);
+bool ArRegionalSpellInventory_Fingerprint(const uint8_t previous[32],
+    const ArRegionalSpellInventory *inventory,uint8_t out[32]);
 
 #endif

@@ -23,6 +23,12 @@ bool SettingsOverlayRegions_PopulationConfirmation(ArUiLocale locale,
 
 const char *SettingsOverlayRegions_RowKey(ActRaiserRegionalSettingGroup group) {
   switch (group) {
+    case kActRaiserRegionalSetting_ModeEntry:return "regional_mode_entry";
+    case kActRaiserRegionalSetting_Inventory:return "regional_inventory";
+    case kActRaiserRegionalSetting_ActionStart:return "regional_action_start";
+    case kActRaiserRegionalSetting_ScoreLives: return "regional_score_lives";
+    case kActRaiserRegionalSetting_DifficultyRules: return "regional_difficulty_rules";
+    case kActRaiserRegionalSetting_DifficultyLevel: return "regional_difficulty_level";
     case kActRaiserRegionalSetting_Scrolls: return "regional_scroll_prices";
     case kActRaiserRegionalSetting_Miracles: return "regional_miracle_prices";
     case kActRaiserRegionalSetting_RoomTimes: return "regional_room_times";
@@ -66,6 +72,18 @@ const char *SettingsOverlayRegions_RowKey(ActRaiserRegionalSettingGroup group) {
 
 const char *SettingsOverlayRegions_RowLabel(ArUiLocale locale, ActRaiserRegionalSettingGroup group) {
   switch (group) {
+    case kActRaiserRegionalSetting_ModeEntry:
+      return ArUiCatalog_Text(locale,"overlay.region.mode_label",NULL);
+    case kActRaiserRegionalSetting_Inventory:
+      return ArUiCatalog_Text(locale,"overlay.region.inventory_label",NULL);
+    case kActRaiserRegionalSetting_ActionStart:
+      return ArUiCatalog_Text(locale,"overlay.region.action_start_label",NULL);
+    case kActRaiserRegionalSetting_ScoreLives:
+      return ArUiCatalog_Text(locale,"overlay.region.score_lives_label",NULL);
+    case kActRaiserRegionalSetting_DifficultyRules:
+      return ArUiCatalog_Text(locale,"overlay.region.difficulty_rules_label",NULL);
+    case kActRaiserRegionalSetting_DifficultyLevel:
+      return ArUiCatalog_Text(locale,"overlay.region.difficulty_level_label",NULL);
     case kActRaiserRegionalSetting_Scrolls:
       return ArUiCatalog_Text(locale, "overlay.region.scroll_label", "Spell scroll costs");
     case kActRaiserRegionalSetting_Miracles:
@@ -175,6 +193,37 @@ static SettingsOverlayRegionBadge SourceBadge(ArRegionalSource source) {
 bool SettingsOverlayRegions_ViewBadge(const ActRaiserRegionalRulesView *view,
     ActRaiserRegionalSettingGroup group, bool effective, SettingsOverlayRegionBadge *badge) {
   if (!view || !badge || (unsigned)group >= kActRaiserRegionalSetting_Count) return false;
+  if(group==kActRaiserRegionalSetting_ModeEntry) {
+    const ArRegionalModePolicy *policy=effective?&view->effective.mode_entry:&view->requested.mode_entry;
+    uint8_t snapshot;ArRegionalSource source;
+    if(!ArRegionalMode_Resolve(policy,&snapshot))return false;
+    *badge=ArRegionalMode_GroupSource(policy,&source)?SourceBadge(source):kOverlayRegionBadge_Mixed;
+    return true;
+  }
+  if(group==kActRaiserRegionalSetting_Inventory) {
+    const ArRegionalSource source=effective?view->effective.spell_inventory:view->requested.spell_inventory;
+    bool enabled;if(!ArRegionalInventory_Resolve(source,&enabled))return false;
+    *badge=SourceBadge(source);return true;
+  }
+  if(group==kActRaiserRegionalSetting_ActionStart) {
+    const ArRegionalActionStartPolicy *policy=effective?&view->effective.action_start:&view->requested.action_start;
+    ArRegionalActionStartSnapshot snapshot;ArRegionalSource source;
+    if(!ArRegionalActionStart_Resolve(policy,&snapshot))return false;
+    *badge=ArRegionalActionStart_GroupSource(policy,&source)?SourceBadge(source):kOverlayRegionBadge_Mixed;
+    return true;
+  }
+  if(group==kActRaiserRegionalSetting_ScoreLives) {
+    const ArRegionalSource source=effective?view->effective.score_lives:view->requested.score_lives;
+    bool enabled;if(!ArRegionalScoreLives_Resolve(source,&enabled))return false;
+    *badge=SourceBadge(source);return true;
+  }
+  if(group==kActRaiserRegionalSetting_DifficultyRules || group==kActRaiserRegionalSetting_DifficultyLevel) {
+    const ArRegionalDifficultyPolicy *policy=effective?&view->effective.difficulty:&view->requested.difficulty;
+    ArRegionalSource source;ArRegionalDifficultySnapshot snapshot;
+    if(!ArRegionalDifficulty_Resolve(policy,&snapshot))return false;
+    *badge=ArRegionalDifficulty_GroupSource(policy,&source)?SourceBadge(source):kOverlayRegionBadge_Mixed;
+    return true;
+  }
   if(group==kActRaiserRegionalSetting_FireEnemy) {
     const ArRegionalFirePolicy *policy=effective?&view->effective.fire_enemy:&view->requested.fire_enemy;
     uint8_t snapshot;ArRegionalSource source;
@@ -412,11 +461,23 @@ bool SettingsOverlayRegions_ViewBadge(const ActRaiserRegionalRulesView *view,
   return true;
 }
 
+const char *SettingsOverlayRegions_ValueLabel(ArUiLocale locale,const ActRaiserRegionalRulesView *view,
+    ActRaiserRegionalSettingGroup group,bool effective) {
+  SettingsOverlayRegionBadge badge;
+  if(!SettingsOverlayRegions_ViewBadge(view,group,effective,&badge))return "";
+  if(group==kActRaiserRegionalSetting_DifficultyLevel) {
+    const ArRegionalDifficulty level=effective?view->effective.difficulty.level:view->requested.difficulty.level;
+    const char *keys[]={"overlay.region.difficulty_normal","overlay.region.difficulty_beginner","overlay.region.difficulty_expert"};
+    return (unsigned)level<kArRegionalDifficulty_Count?ArUiCatalog_Text(locale,keys[level],NULL):"";
+  }
+  return SettingsOverlayRegions_BadgeLabel(locale,badge);
+}
+
 bool SettingsOverlayRegions_NextSource(const ActRaiserRegionalRulesView *view,
                                       ActRaiserRegionalSettingGroup group, int direction,
                                       ArRegionalSource *source) {
   SettingsOverlayRegionBadge badge;
-  if (!source || !SettingsOverlayRegions_ViewBadge(view, group, false, &badge)) return false;
+  if (!source || group==kActRaiserRegionalSetting_DifficultyLevel || !SettingsOverlayRegions_ViewBadge(view, group, false, &badge)) return false;
   ArRegionalSource current;
   switch (badge) {
     case kOverlayRegionBadge_US: current = kArRegionalSource_US; break;
@@ -494,6 +555,37 @@ bool SettingsOverlayRegions_ViewDescription(ArUiLocale locale,
     char *output, size_t capacity) {
   SettingsOverlayRegionBadge badge;
   if (!SettingsOverlayRegions_ViewBadge(view, group, false, &badge)) return false;
+  if(group==kActRaiserRegionalSetting_ModeEntry) {
+    uint8_t snapshot;if(!ArRegionalMode_Resolve(&view->requested.mode_entry,&snapshot))return false;
+    const ArUiTextArgument args[]={
+      {"access",ArUiCatalog_Text(locale,snapshot&1?"overlay.region.mode_open":"overlay.region.mode_locked",NULL)},
+      {"restart",ArUiCatalog_Text(locale,snapshot&2?"overlay.region.mode_title":"overlay.region.mode_retry",NULL)}};
+    return ArUiCatalog_Format(output,capacity,ArUiCatalog_Text(locale,"overlay.region.mode_help",NULL),args,2);
+  }
+  if(group==kActRaiserRegionalSetting_Inventory) {
+    const char *key=badge==kOverlayRegionBadge_Europe?"overlay.region.inventory_europe":"overlay.region.inventory_native";
+    const int length=snprintf(output,capacity,"%s",ArUiCatalog_Text(locale,key,NULL));
+    return length>=0 && (size_t)length<capacity;
+  }
+  if(group==kActRaiserRegionalSetting_ActionStart) {
+    ArRegionalActionStartSnapshot snapshot;
+    if(!ArRegionalActionStart_Resolve(&view->requested.action_start,&snapshot))return false;
+    char lives[8],health[8];snprintf(lives,sizeof(lives),"%u",snapshot.spares+1);snprintf(health,sizeof(health),"%u",snapshot.health);
+    const ArUiTextArgument args[]={{"lives",lives},{"health",health}};
+    return ArUiCatalog_Format(output,capacity,ArUiCatalog_Text(locale,"overlay.region.action_start_help",NULL),args,2);
+  }
+  if(group==kActRaiserRegionalSetting_ScoreLives) {
+    const char *key=badge==kOverlayRegionBadge_Europe?"overlay.region.score_lives_europe":"overlay.region.score_lives_native";
+    const int length=snprintf(output,capacity,"%s",ArUiCatalog_Text(locale,key,NULL));
+    return length>=0 && (size_t)length<capacity;
+  }
+  if(group==kActRaiserRegionalSetting_DifficultyRules || group==kActRaiserRegionalSetting_DifficultyLevel) {
+    const char *key=group==kActRaiserRegionalSetting_DifficultyLevel?"overlay.region.difficulty_level":
+      badge==kOverlayRegionBadge_Europe?"overlay.region.difficulty_europe":
+      badge==kOverlayRegionBadge_Mixed?"overlay.region.difficulty_mixed":"overlay.region.difficulty_native";
+    const int length=snprintf(output,capacity,"%s",ArUiCatalog_Text(locale,key,NULL));
+    return length>=0 && (size_t)length<capacity;
+  }
   if(group==kActRaiserRegionalSetting_FireEnemy) {
     uint8_t snapshot;
     if(!ArRegionalFire_Resolve(&view->requested.fire_enemy,&snapshot))return false;

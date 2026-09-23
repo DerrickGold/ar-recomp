@@ -30,6 +30,12 @@ static void Image(uint8_t *image, unsigned marker) {
 
 static bool EqualSession(const ArRegionalSession *a, const ArRegionalSession *b) {
   return a->slot == b->slot && a->revision == b->revision &&
+      !memcmp(&a->requested.action_start,&b->requested.action_start,sizeof(a->requested.action_start)) &&
+      !memcmp(&a->effective.action_start,&b->effective.action_start,sizeof(a->effective.action_start)) &&
+      a->requested.score_lives==b->requested.score_lives && a->effective.score_lives==b->effective.score_lives &&
+      a->requested.spell_inventory==b->requested.spell_inventory && a->effective.spell_inventory==b->effective.spell_inventory &&
+      !memcmp(&a->requested.difficulty,&b->requested.difficulty,sizeof(a->requested.difficulty)) &&
+      !memcmp(&a->effective.difficulty,&b->effective.difficulty,sizeof(a->effective.difficulty)) &&
       a->requested.statue_volley==b->requested.statue_volley && a->effective.statue_volley==b->effective.statue_volley &&
       !memcmp(&a->requested.bosses,&b->requested.bosses,sizeof(a->requested.bosses)) &&
       !memcmp(&a->effective.bosses,&b->effective.bosses,sizeof(a->effective.bosses)) &&
@@ -875,6 +881,35 @@ static SaveCheckpointStatus AcceptOpaque(const uint8_t *bytes, size_t size, void
   return bytes && size ? kSaveCheckpoint_Ready : kSaveCheckpoint_Invalid;
 }
 
+static void CheckPayloadBoundary(void) {
+  const char *path="actraiser-checkpoint-boundary-test.srm";
+  const char *companion="actraiser-checkpoint-boundary-test.srm.archeckpoint";
+  remove(path);remove(companion);
+  uint8_t a[kActRaiserSramSize],b[kActRaiserSramSize];
+  uint8_t payload[kSaveCheckpointPayloadMax+1],out[kSaveCheckpointPayloadMax];
+  Image(a,1);Image(b,2);
+  for(size_t i=0;i<sizeof(payload);++i)payload[i]=(uint8_t)(i*37u);
+  SaveError error={{0}};size_t size=123;
+  CHECK(SaveCheckpoint_Commit(kSaveFileFormat_NativeSrm,path,NULL,a,payload,
+      kSaveCheckpointPayloadMax,AcceptOpaque,NULL,&error));
+  CHECK(SaveCheckpoint_Commit(kSaveFileFormat_NativeSrm,path,a,b,payload,
+      kSaveCheckpointPayloadMax,AcceptOpaque,NULL,&error));
+  /* Both maximum-size retained records fit; an oversized candidate cannot
+   * change the native image or the recoverable journal. */
+  CHECK(!SaveCheckpoint_Commit(kSaveFileFormat_NativeSrm,path,b,a,payload,
+      sizeof(payload),AcceptOpaque,NULL,&error));
+  CheckDisk(kSaveFileFormat_NativeSrm,path,b);
+  for(unsigned i=0;i<2;++i) {
+    CHECK(SaveCheckpoint_Read(path,i?a:b,out,sizeof(out),&size,&error)==kSaveCheckpoint_Ready);
+    CHECK(size==kSaveCheckpointPayloadMax && !memcmp(payload,out,size));
+  }
+  memset(out,0xa5,sizeof(out));size=123;
+  CHECK(SaveCheckpoint_Read(path,b,out,sizeof(out)-1,&size,&error)==kSaveCheckpoint_Invalid);
+  CHECK(size==123);
+  for(size_t i=0;i<sizeof(out);++i)CHECK(out[i]==0xa5);
+  remove(path);remove(companion);
+}
+
 static void CheckSessionState(void) {
   const uint8_t id[16] = {1}, zero[16] = {0};
   ArRegionalCostPolicy defaults;
@@ -1223,7 +1258,7 @@ static void CheckFeatureCodec(void) {
     CHECK(!ArRegionalSession_Save(&session, kSaveFileFormat_NativeSrm, path, image, image, &error));
   }
   /* Reordering valid named fields is supported; they are not enum ordinals. */
-  enum { records = kArRegionalCostRule_Count + kArRegionalTimerRule_Count + 15 + kArRegionalDevelopmentRule_Count + kArRegionalRecovery_Count + kArRegionalQuake_Count + kArRegionalLairCount + kArRegionalScore_Count + kArRegionalSourceItem_Count + kArRegionalStory_Count + kArRegionalTownStatus_Count + kArRegionalSimCombat_Count + kArRegionalSimAi_Count + kArRegionalSupport_Count + kArRegionalActionMotion_Count + kArRegionalEmitter_Count + kArRegionalBoss_Count + kArRegionalCollision_Count + kArRegionalPlatformSkull_Count + kArRegionalActorStat_Count + kArRegionalCastHold_Count + kArRegionalFire_Count };
+  enum { records = kArRegionalCostRule_Count + kArRegionalTimerRule_Count + 17 + kArRegionalDevelopmentRule_Count + kArRegionalRecovery_Count + kArRegionalQuake_Count + kArRegionalLairCount + kArRegionalScore_Count + kArRegionalSourceItem_Count + kArRegionalStory_Count + kArRegionalTownStatus_Count + kArRegionalSimCombat_Count + kArRegionalSimAi_Count + kArRegionalSupport_Count + kArRegionalActionMotion_Count + kArRegionalEmitter_Count + kArRegionalBoss_Count + kArRegionalCollision_Count + kArRegionalPlatformSkull_Count + kArRegionalActorStat_Count + kArRegionalCastHold_Count + kArRegionalFire_Count + kArRegionalDifficultyRule_Count + kArRegionalActionStart_Count + kArRegionalMode_Count };
   CHECK(ByteOrder_ReadLe16(original + 10) == records);
   if(ByteOrder_ReadLe16(original+10)!=records)return; /* Do not cascade into invalid fixture offsets. */
   size_t offsets[records], offset = 36;
@@ -1232,7 +1267,7 @@ static void CheckFeatureCodec(void) {
     offset += original[offset] + 9u;
   }
   const size_t rules_end=offset;
-  CHECK(offset + kArRegionalLairHistoryEncodedBytes + kArRegionalLairReloadEncodedBytes + kArRegionalSimActorsEncodedBytes + 9 == size);
+  CHECK(offset + kArRegionalLairHistoryEncodedBytes + kArRegionalLairReloadEncodedBytes + kArRegionalSimActorsEncodedBytes + 19 == size);
   memcpy(mutated, original, 36); offset = 36;
   for (unsigned i = records; i-- > 0;) {
     size_t length = original[offsets[i]] + 9u;
@@ -1521,97 +1556,97 @@ static void CheckFeatureCodec(void) {
   CHECK(!loaded.arrival_locked && !loaded.requested.arrival && !loaded.effective.arrival);
   const size_t v28_bytes=offsets[93];
   memcpy(mutated,original,v28_bytes);ByteOrder_WriteLe16(mutated+8,28);ByteOrder_WriteLe16(mutated+10,93);
-  memcpy(mutated+v28_bytes,original+rules_end,size-rules_end);
+  memcpy(mutated+v28_bytes,original+rules_end,size-rules_end-10);
   CHECK(SaveCheckpoint_Commit(kSaveFileFormat_NativeSrm,path,image,image,
-      mutated,v28_bytes+size-rules_end,AcceptOpaque,NULL,&error));
+      mutated,v28_bytes+size-rules_end-10,AcceptOpaque,NULL,&error));
   CHECK(ArRegionalSession_Load(&loaded,2,path,image,&error)==kSaveCheckpoint_Ready);
   for(unsigned i=0;i<kArRegionalActionMotion_Count;++i)CHECK(loaded.requested.action_motion.source[i]==0 && loaded.effective.action_motion.source[i]==0);
   const size_t v29_bytes=offsets[100];
   memcpy(mutated,original,v29_bytes);ByteOrder_WriteLe16(mutated+8,29);ByteOrder_WriteLe16(mutated+10,100);
-  memcpy(mutated+v29_bytes,original+rules_end,size-rules_end);
+  memcpy(mutated+v29_bytes,original+rules_end,size-rules_end-10);
   CHECK(SaveCheckpoint_Commit(kSaveFileFormat_NativeSrm,path,image,image,
-      mutated,v29_bytes+size-rules_end,AcceptOpaque,NULL,&error));
+      mutated,v29_bytes+size-rules_end-10,AcceptOpaque,NULL,&error));
   CHECK(ArRegionalSession_Load(&loaded,2,path,image,&error)==kSaveCheckpoint_Ready);
   for(unsigned i=0;i<7;++i)CHECK(loaded.requested.action_motion.source[i]==session.requested.action_motion.source[i] &&
       loaded.effective.action_motion.source[i]==session.effective.action_motion.source[i]);
   for(unsigned i=7;i<kArRegionalActionMotion_Count;++i)CHECK(!loaded.requested.action_motion.source[i] && !loaded.effective.action_motion.source[i]);
   const size_t v30_bytes=offsets[102];
   memcpy(mutated,original,v30_bytes);ByteOrder_WriteLe16(mutated+8,30);ByteOrder_WriteLe16(mutated+10,102);
-  memcpy(mutated+v30_bytes,original+rules_end,size-rules_end);
+  memcpy(mutated+v30_bytes,original+rules_end,size-rules_end-10);
   CHECK(SaveCheckpoint_Commit(kSaveFileFormat_NativeSrm,path,image,image,
-      mutated,v30_bytes+size-rules_end,AcceptOpaque,NULL,&error));
+      mutated,v30_bytes+size-rules_end-10,AcceptOpaque,NULL,&error));
   CHECK(ArRegionalSession_Load(&loaded,2,path,image,&error)==kSaveCheckpoint_Ready);
   for(unsigned i=0;i<9;++i)CHECK(loaded.requested.action_motion.source[i]==session.requested.action_motion.source[i] &&
       loaded.effective.action_motion.source[i]==session.effective.action_motion.source[i]);
   CHECK(!loaded.requested.action_motion.source[9] && !loaded.effective.action_motion.source[9]);
   const size_t v31_bytes=offsets[103];
   memcpy(mutated,original,v31_bytes);ByteOrder_WriteLe16(mutated+8,31);ByteOrder_WriteLe16(mutated+10,103);
-  memcpy(mutated+v31_bytes,original+rules_end,size-rules_end);
+  memcpy(mutated+v31_bytes,original+rules_end,size-rules_end-10);
   CHECK(SaveCheckpoint_Commit(kSaveFileFormat_NativeSrm,path,image,image,
-      mutated,v31_bytes+size-rules_end,AcceptOpaque,NULL,&error));
+      mutated,v31_bytes+size-rules_end-10,AcceptOpaque,NULL,&error));
   CHECK(ArRegionalSession_Load(&loaded,2,path,image,&error)==kSaveCheckpoint_Ready);
   for(unsigned i=0;i<10;++i)CHECK(loaded.requested.action_motion.source[i]==session.requested.action_motion.source[i] &&
       loaded.effective.action_motion.source[i]==session.effective.action_motion.source[i]);
   for(unsigned i=10;i<12;++i)CHECK(!loaded.requested.action_motion.source[i] && !loaded.effective.action_motion.source[i]);
   const size_t v32_bytes=offsets[105];
   memcpy(mutated,original,v32_bytes);ByteOrder_WriteLe16(mutated+8,32);ByteOrder_WriteLe16(mutated+10,105);
-  memcpy(mutated+v32_bytes,original+rules_end,size-rules_end);
+  memcpy(mutated+v32_bytes,original+rules_end,size-rules_end-10);
   CHECK(SaveCheckpoint_Commit(kSaveFileFormat_NativeSrm,path,image,image,
-      mutated,v32_bytes+size-rules_end,AcceptOpaque,NULL,&error));
+      mutated,v32_bytes+size-rules_end-10,AcceptOpaque,NULL,&error));
   CHECK(ArRegionalSession_Load(&loaded,2,path,image,&error)==kSaveCheckpoint_Ready);
   CHECK(!memcmp(&loaded.requested.action_motion,&session.requested.action_motion,sizeof(session.requested.action_motion)));
   for(unsigned i=0;i<kArRegionalEmitter_Count;++i)CHECK(!loaded.requested.emitters.source[i] && !loaded.effective.emitters.source[i]);
   const size_t v33_bytes=offsets[107];
   memcpy(mutated,original,v33_bytes);ByteOrder_WriteLe16(mutated+8,33);ByteOrder_WriteLe16(mutated+10,107);
-  memcpy(mutated+v33_bytes,original+rules_end,size-rules_end);
+  memcpy(mutated+v33_bytes,original+rules_end,size-rules_end-10);
   CHECK(SaveCheckpoint_Commit(kSaveFileFormat_NativeSrm,path,image,image,
-      mutated,v33_bytes+size-rules_end,AcceptOpaque,NULL,&error));
+      mutated,v33_bytes+size-rules_end-10,AcceptOpaque,NULL,&error));
   CHECK(ArRegionalSession_Load(&loaded,2,path,image,&error)==kSaveCheckpoint_Ready);
   CHECK(!loaded.requested.statue_volley && !loaded.effective.statue_volley);
   CHECK(!memcmp(&loaded.requested.emitters,&session.requested.emitters,sizeof(session.requested.emitters)));
   const size_t v34_bytes=offsets[108];
   memcpy(mutated,original,v34_bytes);ByteOrder_WriteLe16(mutated+8,34);ByteOrder_WriteLe16(mutated+10,108);
-  memcpy(mutated+v34_bytes,original+rules_end,size-rules_end);
+  memcpy(mutated+v34_bytes,original+rules_end,size-rules_end-10);
   CHECK(SaveCheckpoint_Commit(kSaveFileFormat_NativeSrm,path,image,image,
-      mutated,v34_bytes+size-rules_end,AcceptOpaque,NULL,&error));
+      mutated,v34_bytes+size-rules_end-10,AcceptOpaque,NULL,&error));
   CHECK(ArRegionalSession_Load(&loaded,2,path,image,&error)==kSaveCheckpoint_Ready);
   CHECK(loaded.requested.statue_volley==session.requested.statue_volley && loaded.effective.statue_volley==session.effective.statue_volley);
   for(unsigned i=0;i<kArRegionalBoss_Count;++i)CHECK(!loaded.requested.bosses.source[i] && !loaded.effective.bosses.source[i]);
   const size_t v35_bytes=offsets[114];
   memcpy(mutated,original,v35_bytes);ByteOrder_WriteLe16(mutated+8,35);ByteOrder_WriteLe16(mutated+10,114);
-  memcpy(mutated+v35_bytes,original+rules_end,size-rules_end);
+  memcpy(mutated+v35_bytes,original+rules_end,size-rules_end-10);
   CHECK(SaveCheckpoint_Commit(kSaveFileFormat_NativeSrm,path,image,image,
-      mutated,v35_bytes+size-rules_end,AcceptOpaque,NULL,&error));
+      mutated,v35_bytes+size-rules_end-10,AcceptOpaque,NULL,&error));
   CHECK(ArRegionalSession_Load(&loaded,2,path,image,&error)==kSaveCheckpoint_Ready);
   for(unsigned i=0;i<6;++i)CHECK(loaded.requested.bosses.source[i]==session.requested.bosses.source[i] &&
       loaded.effective.bosses.source[i]==session.effective.bosses.source[i]);
   CHECK(!loaded.requested.bosses.source[6] && !loaded.effective.bosses.source[6]);
   const size_t v36_bytes=offsets[115];
   memcpy(mutated,original,v36_bytes);ByteOrder_WriteLe16(mutated+8,36);ByteOrder_WriteLe16(mutated+10,115);
-  memcpy(mutated+v36_bytes,original+rules_end,size-rules_end);
+  memcpy(mutated+v36_bytes,original+rules_end,size-rules_end-10);
   CHECK(SaveCheckpoint_Commit(kSaveFileFormat_NativeSrm,path,image,image,
-      mutated,v36_bytes+size-rules_end,AcceptOpaque,NULL,&error));
+      mutated,v36_bytes+size-rules_end-10,AcceptOpaque,NULL,&error));
   CHECK(ArRegionalSession_Load(&loaded,2,path,image,&error)==kSaveCheckpoint_Ready);
   for(unsigned i=0;i<kArRegionalCollision_Count;++i)CHECK(!loaded.requested.collision.source[i] && !loaded.effective.collision.source[i]);
   const size_t v37_bytes=offsets[117];
   memcpy(mutated,original,v37_bytes);ByteOrder_WriteLe16(mutated+8,37);ByteOrder_WriteLe16(mutated+10,117);
-  memcpy(mutated+v37_bytes,original+rules_end,size-rules_end);
+  memcpy(mutated+v37_bytes,original+rules_end,size-rules_end-10);
   CHECK(SaveCheckpoint_Commit(kSaveFileFormat_NativeSrm,path,image,image,
-      mutated,v37_bytes+size-rules_end,AcceptOpaque,NULL,&error));
+      mutated,v37_bytes+size-rules_end-10,AcceptOpaque,NULL,&error));
   CHECK(ArRegionalSession_Load(&loaded,2,path,image,&error)==kSaveCheckpoint_Ready);
   for(unsigned i=0;i<kArRegionalPlatformSkull_Count;++i)CHECK(!loaded.requested.platform_skull.source[i] && !loaded.effective.platform_skull.source[i]);
   const size_t v38_bytes=offsets[121];
   memcpy(mutated,original,v38_bytes);ByteOrder_WriteLe16(mutated+8,38);ByteOrder_WriteLe16(mutated+10,121);
-  memcpy(mutated+v38_bytes,original+rules_end,size-rules_end);
+  memcpy(mutated+v38_bytes,original+rules_end,size-rules_end-10);
   CHECK(SaveCheckpoint_Commit(kSaveFileFormat_NativeSrm,path,image,image,
-      mutated,v38_bytes+size-rules_end,AcceptOpaque,NULL,&error));
+      mutated,v38_bytes+size-rules_end-10,AcceptOpaque,NULL,&error));
   CHECK(ArRegionalSession_Load(&loaded,2,path,image,&error)==kSaveCheckpoint_Ready);
   for(unsigned i=0;i<kArRegionalActorStat_Count;++i)CHECK(!loaded.requested.actor_stats.source[i] && !loaded.effective.actor_stats.source[i]);
   const size_t v39_bytes=offsets[184];
   memcpy(mutated,original,v39_bytes);ByteOrder_WriteLe16(mutated+8,39);ByteOrder_WriteLe16(mutated+10,184);
-  memcpy(mutated+v39_bytes,original+rules_end,size-rules_end);
+  memcpy(mutated+v39_bytes,original+rules_end,size-rules_end-10);
   CHECK(SaveCheckpoint_Commit(kSaveFileFormat_NativeSrm,path,image,image,
-      mutated,v39_bytes+size-rules_end,AcceptOpaque,NULL,&error));
+      mutated,v39_bytes+size-rules_end-10,AcceptOpaque,NULL,&error));
   CHECK(ArRegionalSession_Load(&loaded,2,path,image,&error)==kSaveCheckpoint_Ready);
   for(unsigned i=0;i<kArRegionalActorStat_BaseCount;++i)CHECK(loaded.requested.actor_stats.source[i]==session.requested.actor_stats.source[i] &&
       loaded.effective.actor_stats.source[i]==session.effective.actor_stats.source[i]);
@@ -1619,79 +1654,157 @@ static void CheckFeatureCodec(void) {
     CHECK(!loaded.requested.actor_stats.source[i] && !loaded.effective.actor_stats.source[i]);
   const size_t v40_bytes=offsets[187];
   memcpy(mutated,original,v40_bytes);ByteOrder_WriteLe16(mutated+8,40);ByteOrder_WriteLe16(mutated+10,187);
-  memcpy(mutated+v40_bytes,original+rules_end,size-rules_end);
+  memcpy(mutated+v40_bytes,original+rules_end,size-rules_end-10);
   CHECK(SaveCheckpoint_Commit(kSaveFileFormat_NativeSrm,path,image,image,
-      mutated,v40_bytes+size-rules_end,AcceptOpaque,NULL,&error));
+      mutated,v40_bytes+size-rules_end-10,AcceptOpaque,NULL,&error));
   CHECK(ArRegionalSession_Load(&loaded,2,path,image,&error)==kSaveCheckpoint_Ready);
   for(unsigned i=0;i<7;++i)CHECK(loaded.requested.bosses.source[i]==session.requested.bosses.source[i] &&
       loaded.effective.bosses.source[i]==session.effective.bosses.source[i]);
   for(unsigned i=7;i<kArRegionalBoss_Count;++i)CHECK(!loaded.requested.bosses.source[i] && !loaded.effective.bosses.source[i]);
   const size_t v41_bytes=offsets[191];
   memcpy(mutated,original,v41_bytes);ByteOrder_WriteLe16(mutated+8,41);ByteOrder_WriteLe16(mutated+10,191);
-  memcpy(mutated+v41_bytes,original+rules_end,size-rules_end);
+  memcpy(mutated+v41_bytes,original+rules_end,size-rules_end-10);
   CHECK(SaveCheckpoint_Commit(kSaveFileFormat_NativeSrm,path,image,image,
-      mutated,v41_bytes+size-rules_end,AcceptOpaque,NULL,&error));
+      mutated,v41_bytes+size-rules_end-10,AcceptOpaque,NULL,&error));
   CHECK(ArRegionalSession_Load(&loaded,2,path,image,&error)==kSaveCheckpoint_Ready);
   for(unsigned i=0;i<3;++i)CHECK(!loaded.requested.cast_hold.source[i] && !loaded.effective.cast_hold.source[i]);
   const size_t v42_bytes=offsets[194];
   memcpy(mutated,original,v42_bytes);ByteOrder_WriteLe16(mutated+8,42);ByteOrder_WriteLe16(mutated+10,194);
-  memcpy(mutated+v42_bytes,original+rules_end,size-rules_end);
+  memcpy(mutated+v42_bytes,original+rules_end,size-rules_end-10);
   CHECK(SaveCheckpoint_Commit(kSaveFileFormat_NativeSrm,path,image,image,
-      mutated,v42_bytes+size-rules_end,AcceptOpaque,NULL,&error));
+      mutated,v42_bytes+size-rules_end-10,AcceptOpaque,NULL,&error));
   CHECK(ArRegionalSession_Load(&loaded,2,path,image,&error)==kSaveCheckpoint_Ready);
   for(unsigned i=11;i<kArRegionalBoss_Count;++i)CHECK(!loaded.requested.bosses.source[i] && !loaded.effective.bosses.source[i]);
   const size_t v43_bytes=offsets[196];
   memcpy(mutated,original,v43_bytes);ByteOrder_WriteLe16(mutated+8,43);ByteOrder_WriteLe16(mutated+10,196);
-  memcpy(mutated+v43_bytes,original+rules_end,size-rules_end);
+  memcpy(mutated+v43_bytes,original+rules_end,size-rules_end-10);
   CHECK(SaveCheckpoint_Commit(kSaveFileFormat_NativeSrm,path,image,image,
-      mutated,v43_bytes+size-rules_end,AcceptOpaque,NULL,&error));
+      mutated,v43_bytes+size-rules_end-10,AcceptOpaque,NULL,&error));
   CHECK(ArRegionalSession_Load(&loaded,2,path,image,&error)==kSaveCheckpoint_Ready);
   for(unsigned i=13;i<kArRegionalBoss_Count;++i)CHECK(!loaded.requested.bosses.source[i] && !loaded.effective.bosses.source[i]);
   const size_t v44_bytes=offsets[200];
   memcpy(mutated,original,v44_bytes);ByteOrder_WriteLe16(mutated+8,44);ByteOrder_WriteLe16(mutated+10,200);
-  memcpy(mutated+v44_bytes,original+rules_end,size-rules_end);
+  memcpy(mutated+v44_bytes,original+rules_end,size-rules_end-10);
   CHECK(SaveCheckpoint_Commit(kSaveFileFormat_NativeSrm,path,image,image,
-      mutated,v44_bytes+size-rules_end,AcceptOpaque,NULL,&error));
+      mutated,v44_bytes+size-rules_end-10,AcceptOpaque,NULL,&error));
   CHECK(ArRegionalSession_Load(&loaded,2,path,image,&error)==kSaveCheckpoint_Ready);
   for(unsigned i=13;i<kArRegionalBoss_Count;++i)CHECK(!loaded.requested.bosses.source[i] && !loaded.effective.bosses.source[i]);
   for(unsigned i=0;i<4;++i)CHECK(!loaded.requested.fire_enemy.source[i] && !loaded.effective.fire_enemy.source[i]);
   const size_t v45_bytes=offsets[202];
   memcpy(mutated,original,v45_bytes);ByteOrder_WriteLe16(mutated+8,45);ByteOrder_WriteLe16(mutated+10,202);
-  memcpy(mutated+v45_bytes,original+rules_end,size-rules_end);
+  memcpy(mutated+v45_bytes,original+rules_end,size-rules_end-10);
   CHECK(SaveCheckpoint_Commit(kSaveFileFormat_NativeSrm,path,image,image,
-      mutated,v45_bytes+size-rules_end,AcceptOpaque,NULL,&error));
+      mutated,v45_bytes+size-rules_end-10,AcceptOpaque,NULL,&error));
   CHECK(ArRegionalSession_Load(&loaded,2,path,image,&error)==kSaveCheckpoint_Ready);
   for(unsigned i=15;i<kArRegionalBoss_Count;++i)CHECK(!loaded.requested.bosses.source[i] && !loaded.effective.bosses.source[i]);
   const size_t v46_bytes=offsets[206];
   memcpy(mutated,original,v46_bytes);ByteOrder_WriteLe16(mutated+8,46);ByteOrder_WriteLe16(mutated+10,206);
-  memcpy(mutated+v46_bytes,original+rules_end,size-rules_end);
+  memcpy(mutated+v46_bytes,original+rules_end,size-rules_end-10);
   CHECK(SaveCheckpoint_Commit(kSaveFileFormat_NativeSrm,path,image,image,
-      mutated,v46_bytes+size-rules_end,AcceptOpaque,NULL,&error));
+      mutated,v46_bytes+size-rules_end-10,AcceptOpaque,NULL,&error));
   CHECK(ArRegionalSession_Load(&loaded,2,path,image,&error)==kSaveCheckpoint_Ready);
   CHECK(!loaded.requested.action_motion.source[kArRegionalActionMotion_HeadWithdrawal] &&
       !loaded.effective.action_motion.source[kArRegionalActionMotion_HeadWithdrawal]);
   const size_t v47_bytes=offsets[207];
   memcpy(mutated,original,v47_bytes);ByteOrder_WriteLe16(mutated+8,47);ByteOrder_WriteLe16(mutated+10,207);
-  memcpy(mutated+v47_bytes,original+rules_end,size-rules_end);
+  memcpy(mutated+v47_bytes,original+rules_end,size-rules_end-10);
   CHECK(SaveCheckpoint_Commit(kSaveFileFormat_NativeSrm,path,image,image,
-      mutated,v47_bytes+size-rules_end,AcceptOpaque,NULL,&error));
+      mutated,v47_bytes+size-rules_end-10,AcceptOpaque,NULL,&error));
   CHECK(ArRegionalSession_Load(&loaded,2,path,image,&error)==kSaveCheckpoint_Ready);
   for(unsigned i=19;i<kArRegionalBoss_Count;++i)CHECK(!loaded.requested.bosses.source[i] && !loaded.effective.bosses.source[i]);
   const size_t v48_bytes=offsets[210];
   memcpy(mutated,original,v48_bytes);ByteOrder_WriteLe16(mutated+8,48);ByteOrder_WriteLe16(mutated+10,210);
-  memcpy(mutated+v48_bytes,original+rules_end,size-rules_end);
+  memcpy(mutated+v48_bytes,original+rules_end,size-rules_end-10);
   CHECK(SaveCheckpoint_Commit(kSaveFileFormat_NativeSrm,path,image,image,
-      mutated,v48_bytes+size-rules_end,AcceptOpaque,NULL,&error));
+      mutated,v48_bytes+size-rules_end-10,AcceptOpaque,NULL,&error));
   CHECK(ArRegionalSession_Load(&loaded,2,path,image,&error)==kSaveCheckpoint_Ready);
   for(unsigned i=22;i<kArRegionalBoss_Count;++i)CHECK(!loaded.requested.bosses.source[i] && !loaded.effective.bosses.source[i]);
   const size_t v49_bytes=offsets[214];
   memcpy(mutated,original,v49_bytes);ByteOrder_WriteLe16(mutated+8,49);ByteOrder_WriteLe16(mutated+10,214);
-  memcpy(mutated+v49_bytes,original+rules_end,size-rules_end);
+  memcpy(mutated+v49_bytes,original+rules_end,size-rules_end-10);
   CHECK(SaveCheckpoint_Commit(kSaveFileFormat_NativeSrm,path,image,image,
-      mutated,v49_bytes+size-rules_end,AcceptOpaque,NULL,&error));
+      mutated,v49_bytes+size-rules_end-10,AcceptOpaque,NULL,&error));
   CHECK(ArRegionalSession_Load(&loaded,2,path,image,&error)==kSaveCheckpoint_Ready);
   CHECK(!loaded.requested.action_motion.source[kArRegionalActionMotion_TreeSeeds] &&
       !loaded.effective.action_motion.source[kArRegionalActionMotion_TreeSeeds]);
+  const size_t v50_bytes=offsets[215];
+  memcpy(mutated,original,v50_bytes);ByteOrder_WriteLe16(mutated+8,50);ByteOrder_WriteLe16(mutated+10,215);
+  memcpy(mutated+v50_bytes,original+rules_end,size-rules_end-10);
+  CHECK(SaveCheckpoint_Commit(kSaveFileFormat_NativeSrm,path,image,image,
+      mutated,v50_bytes+size-rules_end-10,AcceptOpaque,NULL,&error));
+  CHECK(ArRegionalSession_Load(&loaded,2,path,image,&error)==kSaveCheckpoint_Ready);
+  CHECK(!loaded.requested.difficulty.level && !loaded.effective.difficulty.level);
+  for(unsigned i=0;i<kArRegionalDifficultyRule_Count;++i)
+    CHECK(!loaded.requested.difficulty.source[i] && !loaded.effective.difficulty.source[i]);
+  const size_t v51_bytes=offsets[220];
+  memcpy(mutated,original,v51_bytes);ByteOrder_WriteLe16(mutated+8,51);ByteOrder_WriteLe16(mutated+10,220);
+  memcpy(mutated+v51_bytes,original+rules_end,size-rules_end);
+  CHECK(SaveCheckpoint_Commit(kSaveFileFormat_NativeSrm,path,image,image,
+      mutated,v51_bytes+size-rules_end,AcceptOpaque,NULL,&error));
+  CHECK(ArRegionalSession_Load(&loaded,2,path,image,&error)==kSaveCheckpoint_Ready);
+  CHECK(!loaded.requested.score_lives && !loaded.effective.score_lives);
+  const size_t v52_bytes=offsets[221];
+  memcpy(mutated,original,v52_bytes);ByteOrder_WriteLe16(mutated+8,52);ByteOrder_WriteLe16(mutated+10,221);
+  memcpy(mutated+v52_bytes,original+rules_end,size-rules_end);
+  CHECK(SaveCheckpoint_Commit(kSaveFileFormat_NativeSrm,path,image,image,
+      mutated,v52_bytes+size-rules_end,AcceptOpaque,NULL,&error));
+  CHECK(ArRegionalSession_Load(&loaded,2,path,image,&error)==kSaveCheckpoint_Ready);
+  CHECK(!loaded.requested.action_start.source[0] && !loaded.effective.action_start.source[1]);
+  const size_t v53_bytes=offsets[223];
+  memcpy(mutated,original,v53_bytes);ByteOrder_WriteLe16(mutated+8,53);ByteOrder_WriteLe16(mutated+10,223);
+  memcpy(mutated+v53_bytes,original+rules_end,size-rules_end);
+  CHECK(SaveCheckpoint_Commit(kSaveFileFormat_NativeSrm,path,image,image,
+      mutated,v53_bytes+size-rules_end,AcceptOpaque,NULL,&error));
+  CHECK(ArRegionalSession_Load(&loaded,2,path,image,&error)==kSaveCheckpoint_Ready);
+  CHECK(!loaded.requested.spell_inventory && !loaded.effective.spell_inventory);
+  const size_t v54_bytes=offsets[224];
+  memcpy(mutated,original,v54_bytes);ByteOrder_WriteLe16(mutated+8,54);ByteOrder_WriteLe16(mutated+10,224);
+  memcpy(mutated+v54_bytes,original+rules_end,size-rules_end);
+  CHECK(SaveCheckpoint_Commit(kSaveFileFormat_NativeSrm,path,image,image,
+      mutated,v54_bytes+size-rules_end,AcceptOpaque,NULL,&error));
+  CHECK(ArRegionalSession_Load(&loaded,2,path,image,&error)==kSaveCheckpoint_Ready);
+  CHECK(!loaded.requested.mode_entry.source[0] && !loaded.effective.mode_entry.source[1]);
+  ArRegionalModePolicy mode_policy={{2,1}};uint8_t mode_snapshot;
+  CHECK(!ArRegionalSession_RequestModeEntry(&session,session.revision-1,&mode_policy));
+  CHECK(ArRegionalSession_RequestModeEntry(&session,session.revision,&mode_policy));
+  CHECK(ArRegionalSession_BeginModeEntry(&session,&mode_snapshot) && mode_snapshot==1);
+  mode_policy.source[1]=2;
+  CHECK(ArRegionalSession_RequestModeEntry(&session,session.revision,&mode_policy));
+  bool inventory;
+  CHECK(!ArRegionalSession_RequestInventory(&session,session.revision-1,2));
+  CHECK(!ArRegionalSession_RequestInventory(&session,session.revision,3));
+  CHECK(ArRegionalSession_RequestInventory(&session,session.revision,2));
+  CHECK(!session.effective.spell_inventory);
+  CHECK(ArRegionalSession_BeginInventory(&session,&inventory) && inventory);
+  CHECK(ArRegionalSession_RequestInventory(&session,session.revision,0));
+  CHECK(session.effective.spell_inventory==2);
+  ArRegionalActionStartPolicy start_policy={{1,2}};ArRegionalActionStartSnapshot start_snapshot;
+  CHECK(!ArRegionalSession_RequestActionStart(&session,session.revision-1,&start_policy));
+  CHECK(ArRegionalSession_RequestActionStart(&session,session.revision,&start_policy));
+  CHECK(!session.effective.action_start.source[0]);
+  CHECK(ArRegionalSession_BeginActionStart(&session,&start_snapshot) && start_snapshot.spares==2 && start_snapshot.health==8);
+  start_policy.source[0]=0;CHECK(ArRegionalSession_RequestActionStart(&session,session.revision,&start_policy));
+  CHECK(session.effective.action_start.source[0]==1);
+  bool score_lives;
+  CHECK(!ArRegionalSession_RequestScoreLives(&session,session.revision-1,2));
+  CHECK(!ArRegionalSession_RequestScoreLives(&session,session.revision,3));
+  CHECK(ArRegionalSession_RequestScoreLives(&session,session.revision,2));
+  CHECK(!session.effective.score_lives);
+  CHECK(ArRegionalSession_BeginScoreLives(&session,&score_lives) && score_lives);
+  CHECK(ArRegionalSession_RequestScoreLives(&session,session.revision,0));
+  CHECK(session.effective.score_lives==2);
+  ArRegionalDifficultyPolicy difficulty_policy={{2,1,2,0,2},kArRegionalDifficulty_Beginner};
+  ArRegionalDifficultySnapshot difficulty_snapshot;
+  const ArRegionalSession before_difficulty=session;
+  CHECK(!ArRegionalSession_RequestDifficulty(&session,session.revision-1,&difficulty_policy));
+  CHECK(EqualSession(&before_difficulty,&session));
+  CHECK(ArRegionalSession_RequestDifficulty(&session,session.revision,&difficulty_policy));
+  CHECK(!session.effective.difficulty.level);
+  CHECK(ArRegionalSession_BeginDifficulty(&session,&difficulty_snapshot) && difficulty_snapshot.spawn_hp==2 &&
+      difficulty_snapshot.timer_reload==71 && difficulty_snapshot.single_tendril_bob && !difficulty_snapshot.skip_dragon_attack);
+  difficulty_policy.level=kArRegionalDifficulty_Expert;
+  CHECK(ArRegionalSession_RequestDifficulty(&session,session.revision,&difficulty_policy));
+  CHECK(session.effective.difficulty.level==kArRegionalDifficulty_Beginner);
   ArRegionalFirePolicy fire_policy={{1,0,2,1}};uint8_t fire_snapshot;
   CHECK(ArRegionalSession_RequestFire(&session,session.revision,&fire_policy));
   CHECK(ArRegionalSession_BeginFire(&session,&fire_snapshot) && fire_snapshot==9);
@@ -1754,6 +1867,7 @@ static void CheckFeatureCodec(void) {
 }
 
 int main(void) {
+  CheckPayloadBoundary();
   CheckFire();
   CheckCastHold();
   CheckBosses();

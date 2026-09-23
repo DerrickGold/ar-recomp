@@ -1585,7 +1585,48 @@ static void test_owned_ancestor_unwind(void) {
     check(!g_cpu_return_scope && !g_cpu_owned_unwind_scope,"reset cannot retain an abandoned token");
 }
 
+static void test_reset_tail(void) {
+    CpuState cpu={0}, other={0};
+    CpuReturnScope root, outer, inner;
+    WatchdogFrameStart();cpu.S=0x1ff;
+    check(!cpu_begin_reset_tail(&cpu,0x018123,0x028000),"no unframed transfer outside reset execution");
+    cpu_reset_scope_begin(&root,&cpu);RecompStackPush("reset");
+    cpu.S=0x1fc;cpu_return_scope_begin(&outer,&cpu,0x008012,0x1ff,3);
+    RecompStackPush("outer");cpu.S=0x1fa;cpu_return_scope_begin(&inner,&cpu,0x018456,0x1fc,2);
+    RecompStackPush("inner");
+    check(!cpu_begin_reset_tail(&cpu,0x018123,0x028000),"cannot discard live hardware return frames");
+    cpu.S=0x1ff;cpu.emulation=1;
+    check(!cpu_begin_reset_tail(&cpu,0x018123,0x028000),"no emulation-mode root transfer");cpu.emulation=0;
+    outer.cpu=&other;
+    check(!cpu_begin_reset_tail(&cpu,0x018123,0x028000),"foreign owner blocks reset transfer");outer.cpu=&cpu;
+    outer.entry_stack=0x1f9;
+    check(!cpu_begin_reset_tail(&cpu,0x018123,0x028000),"nonmonotone frame chain blocks reset transfer");outer.entry_stack=0x1fc;
+    root.frame_bytes=2;
+    check(!cpu_begin_reset_tail(&cpu,0x018123,0x028000),"ordinary caller is not a reset root");root.frame_bytes=0;
+    check(!cpu_begin_reset_tail(&cpu,0x1000000,0x028000),"reject non-native target");
+    check(cpu_begin_reset_tail(&cpu,0x018123,0x028000) && cpu.PB==1 && cpu.S==0x1ff &&
+          g_cpu_owned_unwind_scope==&root,"explicit terminal transfer targets reset owner");
+    check(!cpu_begin_reset_tail(&cpu,0x018123,0x028000),"cannot replace pending transfer");
+    check(!cpu_finish_reset_tail(&root,&cpu) && !cpu_finish_owned_unwind(&inner,&cpu),"cannot consume before retiring calls");
+    RecompStackPop();cpu_return_scope_end(&inner);RecompStackPop();cpu_return_scope_end(&outer);
+    check(!cpu_finish_reset_tail(&root,&cpu) && !cpu_finish_owned_unwind(&root,&cpu),"root activation must retire too");
+    RecompStackPop();
+    check(cpu_finish_reset_tail(&root,&cpu) && !g_cpu_owned_unwind_scope &&
+          g_tailcall_pc24==0x018123 && g_tailcall_miss_s==0x1ff && g_tailcall_src24==0x028000,
+          "host consumes once, retaining destination and CPU");
+    check(!cpu_finish_reset_tail(&root,&cpu),"root transfer consumed once");
+    uint16 entry;uint8 hrv;
+    check(cpu_take_tailcall_return_context(&entry,&hrv) && entry==0x1ff && !hrv,"new mainline is unpaired");
+    cpu_return_scope_end(&root);
+    WatchdogFrameStart();cpu_reset_scope_begin(&root,&cpu);RecompStackPush("reset");
+    check(cpu_begin_reset_tail(&cpu,0x018123,0x028000),"second root transfer request");
+    WatchdogFrameStart();cpu_return_scope_end(&root);
+    check(!g_cpu_return_scope && !g_cpu_owned_unwind_scope && !cpu_finish_reset_tail(&root,&cpu),
+          "terminal invalidation cannot revive root transfer");
+}
+
 int main(void) {
+    test_reset_tail();
     test_owned_ancestor_unwind();
     test_return_word_relocation();
     test_registration_and_initialization();
