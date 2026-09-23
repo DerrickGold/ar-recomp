@@ -399,6 +399,16 @@ RecompReturn cpu_dispatch_paired_tail_from(CpuState *cpu, uint32 pc24,
  * outside an active generated wrapper. Not for JSR/JSL calls or raw HLE bodies
  * lacking a generated prologue. */
 int cpu_hle_tailcall_request(uint32 pc24, uint32 source_pc24);
+/* Synchronous, balanced RTS leaf call from a game-owned HLE controller.
+ * Creates a paired two-byte call frame and return scope; the continuation is
+ * an ownership/diagnostic label, not a synthesized instruction or resume PC.
+ * The audited leaf must not yield, retain its return word, change banks, or
+ * escape to another activation. Native mode / low WRAM stack only. Invalid
+ * arguments fail before mutation. A callee contract failure returns zero
+ * without repairing CPU/stack state: the caller MUST abandon execution, never
+ * retry or continue the controller. Does not consume the HLE's caller frame. */
+int cpu_invoke_rts_leaf(CpuState *cpu, RecompReturn (*leaf)(CpuState *),
+                        uint32 continuation_pc24);
 /* Generated-wrapper epilogue only, after its activation pop. Drives an owned
  * paired HLE branch with the standard flat-tail driver; escaped child returns
  * and unpaired transfers propagate. Game HLEs return tokens, never call this. */

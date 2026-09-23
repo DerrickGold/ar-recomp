@@ -17,6 +17,8 @@ typedef enum ArRegionalActionMotionRule {
   kArRegionalActionMotion_ArrowSpeed,
   kArRegionalActionMotion_WallHeadShortHold,
   kArRegionalActionMotion_WallHeadLongHold,
+  kArRegionalActionMotion_HeadWithdrawal,
+  kArRegionalActionMotion_TreeSeeds,
   kArRegionalActionMotion_Count
 } ArRegionalActionMotionRule;
 typedef enum ArRegionalActionMotionFamily {
@@ -30,7 +32,7 @@ typedef enum ArRegionalActionMotionFamily {
   kArRegionalActionMotionFamily_Count
 } ArRegionalActionMotionFamily;
 typedef struct ArRegionalActionMotionPolicy { ArRegionalSource source[kArRegionalActionMotion_Count]; } ArRegionalActionMotionPolicy;
-/* Numerical room snapshot: one bit per independently selectable JP rule.
+/* Numerical room snapshot: one bit per independently selectable alternate rule.
  * No native pointers, actor memory, artwork or host lifecycle in this layer. */
 typedef uint16_t ArRegionalActionMotionSnapshot;
 typedef struct ArRegionalActionMotionDescriptor {
@@ -50,4 +52,8 @@ bool ArRegionalActionMotion_GroupSource(const ArRegionalActionMotionPolicy *poli
 bool ArRegionalActionMotion_Row(ArRegionalActionMotionSnapshot snapshot,
     ArRegionalActionMotionFamily family,unsigned state,unsigned row,
     uint16_t *duration,int16_t *dx);
+/* Logical withdrawal rows map to existing native rows and compositions.
+ * The inserted pose needs no donor graphics. Includes the terminator row. */
+bool ArRegionalActionMotion_HeadRow(ArRegionalActionMotionSnapshot snapshot,
+    unsigned logical_row,unsigned *native_row,uint8_t *visual);
 #endif

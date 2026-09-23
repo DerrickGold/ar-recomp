@@ -40,6 +40,10 @@ bool ArRegionalSession_RequestPlatformSkull(ArRegionalSession *session,uint32_t 
 bool ArRegionalSession_BeginPlatformSkull(ArRegionalSession *session,ArRegionalPlatformSkullSnapshot *snapshot);
 bool ArRegionalSession_RequestActorStats(ArRegionalSession *session,uint32_t revision,const ArRegionalActorStatsPolicy *policy);
 bool ArRegionalSession_BeginActorStats(ArRegionalSession *session,ArRegionalActorStatsSnapshot *snapshot);
+bool ArRegionalSession_RequestCastHold(ArRegionalSession *session,uint32_t revision,const ArRegionalCastHoldPolicy *policy);
+bool ArRegionalSession_RequestFire(ArRegionalSession *session,uint32_t revision,const ArRegionalFirePolicy *policy);
+bool ArRegionalSession_BeginFire(ArRegionalSession *session,ArRegionalFireSnapshot *snapshot);
+bool ArRegionalSession_BeginCastHold(ArRegionalSession *session,ArRegionalCastHoldSnapshot *snapshot);
 /* Once per campaign, at the eligible final departure/Palace gate. Continuing
  * an already-unlocked native event retains the saved effective policy rather
  * than adopting a new request midway through its reveal/announcement. A later

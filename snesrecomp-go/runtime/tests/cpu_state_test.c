@@ -11,6 +11,8 @@
 #include <string.h>
 
 uint8 g_ram[kSnesWramSize];
+CpuReturnScope *g_cpu_return_scope, *g_cpu_owned_unwind_scope;
+int g_recomp_stack_top;
 static uint8 rom[0x100000];
 static uint8 save_ram[0x8000];
 uint8 *g_sram = save_ram;
@@ -523,7 +525,44 @@ static void test_recovered_handler_continuation(void) {
     g_rtl_game_execution = NULL;
 }
 
+static unsigned leaf_calls;
+static RecompReturn balanced_leaf(CpuState *cpu) {
+    ++leaf_calls;
+    check(cpu->host_return_valid && g_cpu_return_scope &&
+          g_cpu_return_scope->cpu==cpu && g_cpu_return_scope->entry_stack==cpu->S &&
+          g_cpu_return_scope->continuation==0x008000 &&
+          cpu_read16(cpu,0,cpu->S+1)==0x7fff,"leaf owns paired RTS frame");
+    cpu->S+=2;cpu->A=0x1234;return RECOMP_RETURN_NORMAL;
+}
+static RecompReturn escaping_leaf(CpuState *cpu) {
+    cpu->A=0xabcd;return RECOMP_RETURN_SKIP_1;
+}
+static void test_hle_leaf_call(void) {
+    CpuState cpu;cpu_state_init(&cpu,g_ram);cpu.emulation=0;cpu.PB=0;cpu.S=0x1e0;
+    CpuReturnScope outer;cpu_return_scope_begin(&outer,&cpu,0x008888,0x1e2,2);
+    for(unsigned paired=0;paired<2;++paired) {
+        cpu.host_return_valid=(uint8)paired;
+        for(unsigned i=0;i<10000;++i)
+            check(cpu_invoke_rts_leaf(&cpu,balanced_leaf,0x008000) &&
+                  cpu.S==0x1e0 && cpu.A==0x1234 && cpu.host_return_valid==paired &&
+                  g_cpu_return_scope==&outer,"bounded calls retain outer stack/owner");
+    }
+    check(leaf_calls==20000,"leaf invoked once per call");
+    check(!cpu_invoke_rts_leaf(NULL,balanced_leaf,0x008000) &&
+          !cpu_invoke_rts_leaf(&cpu,NULL,0x008000) &&
+          !cpu_invoke_rts_leaf(&cpu,balanced_leaf,0x018000) &&
+          !cpu_invoke_rts_leaf(&cpu,balanced_leaf,0x1008000),"reject invalid leaf arguments");
+    cpu.emulation=1;check(!cpu_invoke_rts_leaf(&cpu,balanced_leaf,0x008000),"reject emulation leaf stack");cpu.emulation=0;
+    cpu.S=1;check(!cpu_invoke_rts_leaf(&cpu,balanced_leaf,0x008000),"reject wrapping leaf stack");
+    cpu.S=0x2000;check(!cpu_invoke_rts_leaf(&cpu,balanced_leaf,0x008000),"reject non-WRAM leaf stack");
+    cpu.S=0x1e0;
+    check(!cpu_invoke_rts_leaf(&cpu,escaping_leaf,0x008000) && cpu.S==0x1de &&
+          cpu.A==0xabcd && g_cpu_return_scope==&outer,"failed contract is not repaired into success");
+    cpu_return_scope_end(&outer);
+}
+
 int main(void) {
+    test_hle_leaf_call();
     test_registers();
     test_memory();
     test_hirom_memory_routing();

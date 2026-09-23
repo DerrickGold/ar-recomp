@@ -219,6 +219,8 @@ static void CheckMenuAdapter(void) {
       CHECK(ArRegionalCollision_Init(&view.requested.collision,(ArRegionalSource)source));
       CHECK(ArRegionalPlatformSkull_Init(&view.requested.platform_skull,(ArRegionalSource)source));
       CHECK(ArRegionalActorStats_Init(&view.requested.actor_stats,(ArRegionalSource)source));
+      CHECK(ArRegionalCastHold_Init(&view.requested.cast_hold,(ArRegionalSource)source));
+      CHECK(ArRegionalFire_Init(&view.requested.fire_enemy,(ArRegionalSource)source));
       view.requested.menu_return = (ArRegionalSource)source;
       view.requested.speed_range = (ArRegionalSource)source;
       view.requested.magic_gesture = (ArRegionalSource)source;

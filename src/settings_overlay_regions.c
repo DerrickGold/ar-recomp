@@ -58,6 +58,8 @@ const char *SettingsOverlayRegions_RowKey(ActRaiserRegionalSettingGroup group) {
     case kActRaiserRegionalSetting_Collision: return "regional_collision";
     case kActRaiserRegionalSetting_PlatformSkull: return "regional_platform_skull";
     case kActRaiserRegionalSetting_ActorStats: return "regional_actor_stats";
+    case kActRaiserRegionalSetting_CastHold: return "regional_cast_hold";
+    case kActRaiserRegionalSetting_FireEnemy: return "regional_fire_enemy";
     default: return "";
   }
 }
@@ -134,6 +136,10 @@ const char *SettingsOverlayRegions_RowLabel(ArUiLocale locale, ActRaiserRegional
       return ArUiCatalog_Text(locale,"overlay.region.platform_skull_label","Aitos platform skulls");
     case kActRaiserRegionalSetting_ActorStats:
       return ArUiCatalog_Text(locale,"overlay.region.actor_stats_label","Enemy stats");
+    case kActRaiserRegionalSetting_CastHold:
+      return ArUiCatalog_Text(locale,"overlay.region.cast_hold_label","Platforms during magic");
+    case kActRaiserRegionalSetting_FireEnemy:
+      return ArUiCatalog_Text(locale,"overlay.region.fire_label","Kasandora fire enemies");
     default: return "";
   }
 }
@@ -169,6 +175,20 @@ static SettingsOverlayRegionBadge SourceBadge(ArRegionalSource source) {
 bool SettingsOverlayRegions_ViewBadge(const ActRaiserRegionalRulesView *view,
     ActRaiserRegionalSettingGroup group, bool effective, SettingsOverlayRegionBadge *badge) {
   if (!view || !badge || (unsigned)group >= kActRaiserRegionalSetting_Count) return false;
+  if(group==kActRaiserRegionalSetting_FireEnemy) {
+    const ArRegionalFirePolicy *policy=effective?&view->effective.fire_enemy:&view->requested.fire_enemy;
+    uint8_t snapshot;ArRegionalSource source;
+    if(!ArRegionalFire_Resolve(policy,&snapshot))return false;
+    *badge=ArRegionalFire_GroupSource(policy,&source)?SourceBadge(source):kOverlayRegionBadge_Mixed;
+    return true;
+  }
+  if(group==kActRaiserRegionalSetting_CastHold) {
+    const ArRegionalCastHoldPolicy *policy=effective?&view->effective.cast_hold:&view->requested.cast_hold;
+    uint8_t snapshot;ArRegionalSource source;
+    if(!ArRegionalCastHold_Resolve(policy,&snapshot))return false;
+    *badge=ArRegionalCastHold_GroupSource(policy,&source)?SourceBadge(source):kOverlayRegionBadge_Mixed;
+    return true;
+  }
   if(group==kActRaiserRegionalSetting_ActorStats) {
     const ArRegionalActorStatsPolicy *policy=effective?&view->effective.actor_stats:&view->requested.actor_stats;
     ArRegionalActorStatsSnapshot snapshot;ArRegionalSource source;
@@ -474,6 +494,28 @@ bool SettingsOverlayRegions_ViewDescription(ArUiLocale locale,
     char *output, size_t capacity) {
   SettingsOverlayRegionBadge badge;
   if (!SettingsOverlayRegions_ViewBadge(view, group, false, &badge)) return false;
+  if(group==kActRaiserRegionalSetting_FireEnemy) {
+    uint8_t snapshot;
+    if(!ArRegionalFire_Resolve(&view->requested.fire_enemy,&snapshot))return false;
+    const unsigned child=ArRegionalFire_Value(snapshot,kArRegionalFire_ChildThreshold);
+    const unsigned bounce=ArRegionalFire_Value(snapshot,kArRegionalFire_BounceThreshold);
+    char none[8],straight[8],bouncing[8];
+    snprintf(none,sizeof(none),"%u",child);snprintf(straight,sizeof(straight),"%u",bounce-child);
+    snprintf(bouncing,sizeof(bouncing),"%u",256-bounce);
+    const ArUiTextArgument args[]={{"region",SettingsOverlayRegions_BadgeLabel(locale,badge)},
+      {"curve",snapshot&1?"4":"3"},{"none",none},{"straight",straight},{"bounce",bouncing},
+      {"path",ArUiCatalog_Text(locale,snapshot&2?"overlay.region.fire_jp":"overlay.region.fire_us",NULL)}};
+    return ArUiCatalog_Format(output,capacity,ArUiCatalog_Text(locale,"overlay.region.fire",NULL),args,6);
+  }
+  if(group==kActRaiserRegionalSetting_CastHold) {
+    uint8_t snapshot;
+    if(!ArRegionalCastHold_Resolve(&view->requested.cast_hold,&snapshot))return false;
+    ArUiTextArgument args[]={{"region",SettingsOverlayRegions_BadgeLabel(locale,badge)},
+      {"left",NULL},{"upper",NULL},{"right",NULL}};
+    for(unsigned i=0;i<3;++i)args[i+1].value=ArUiCatalog_Text(locale,
+        snapshot&(1u<<i)?"overlay.region.cast_hold_pause":"overlay.region.cast_hold_follow",NULL);
+    return ArUiCatalog_Format(output,capacity,ArUiCatalog_Text(locale,"overlay.region.cast_hold",NULL),args,4);
+  }
   if(group==kActRaiserRegionalSetting_ActorStats) {
     ArRegionalActorStatsSnapshot snapshot;
     if(!ArRegionalActorStats_Resolve(&view->requested.actor_stats,&snapshot))return false;
@@ -503,19 +545,44 @@ bool SettingsOverlayRegions_ViewDescription(ArUiLocale locale,
     return ArUiCatalog_Format(output,capacity,ArUiCatalog_Text(locale,"overlay.region.collision",NULL),args,3);
   }
   if(group==kActRaiserRegionalSetting_Bosses) {
-    static const char *names[]={"idle","throw_end","throw","jump","offset","wizard","ice","closing","clock","turn","minion"};
-    _Static_assert(sizeof(names)/sizeof(names[0])==kArRegionalBoss_Count,"name every boss rule");
-    char values[kArRegionalBoss_Count][8];ArUiTextArgument args[kArRegionalBoss_Count+1];
-    args[0]=(ArUiTextArgument){"region",SettingsOverlayRegions_BadgeLabel(locale,badge)};
+    enum { kCommonRules=kArRegionalBoss_DragonProjectileDelay };
+    static const char *names[]={"idle","throw_end","throw","jump","offset","wizard","ice","closing","clock","turn","minion","trigger","strategy"};
+    _Static_assert(sizeof(names)/sizeof(names[0])==kCommonRules,"name the common boss rules");
+    char values[kArRegionalBoss_Count][8],common[1024],dragon[24],viper[192],pharaoh[192],plant[192];ArUiTextArgument args[kCommonRules];
     for(unsigned i=0;i<kArRegionalBoss_Count;++i) {
       const ArRegionalBossDescriptor *desc=ArRegionalBoss_Descriptor(i);
       snprintf(values[i],sizeof(values[i]),"%u",desc->value[view->requested.bosses.source[i]]+desc->phase_extra_updates);
-      args[i+1]=(ArUiTextArgument){names[i],values[i]};
+      if(i<kCommonRules)args[i]=(ArUiTextArgument){names[i],values[i]};
     }
-    args[kArRegionalBoss_TanzraClock+1].value=ArUiCatalog_Text(locale,
+    snprintf(values[kArRegionalBoss_ViperChoice],sizeof(values[0]),"%u",
+        view->requested.bosses.source[kArRegionalBoss_ViperChoice]==kArRegionalSource_US?64:128);
+    snprintf(dragon,sizeof(dragon),"%s×%s",values[kArRegionalBoss_DragonProjectileFlight],values[kArRegionalBoss_DragonProjectileDelay]);
+    const ArUiTextArgument viper_args[]={
+      {"choices",values[kArRegionalBoss_ViperChoice]},{"original",values[kArRegionalBoss_ViperLightning]},
+      {"rematch",values[kArRegionalBoss_ViperRematchLightning]},{"floor",values[kArRegionalBoss_ViperFloor]}};
+    if(!ArUiCatalog_Format(viper,sizeof(viper),ArUiCatalog_Text(locale,"overlay.region.viper",NULL),viper_args,4))return false;
+    args[kArRegionalBoss_TanzraClock].value=ArUiCatalog_Text(locale,
         view->requested.bosses.source[kArRegionalBoss_TanzraClock]==kArRegionalSource_Japan?
         "overlay.region.clock_stopped":"overlay.region.clock_running",NULL);
-    return ArUiCatalog_Format(output,capacity,ArUiCatalog_Text(locale,"overlay.region.bosses",NULL),args,kArRegionalBoss_Count+1);
+    args[kArRegionalBoss_AntlionStrategy].value=ArUiCatalog_Text(locale,
+        view->requested.bosses.source[kArRegionalBoss_AntlionStrategy]==kArRegionalSource_Japan?
+        "overlay.region.antlion_jp":"overlay.region.antlion_us",NULL);
+    const ArUiTextArgument pharaoh_args[]={
+      {"landing",values[kArRegionalBoss_PharaohLanding]},{"rematch",values[kArRegionalBoss_PharaohRematchLanding]},
+      {"heads",ArUiCatalog_Text(locale,view->requested.bosses.source[kArRegionalBoss_PharaohHeads]==kArRegionalSource_Japan?
+          "overlay.region.heads_repeat":"overlay.region.heads_retire",NULL)}};
+    const ArUiTextArgument plant_args[]={
+      {"cycle",ArUiCatalog_Text(locale,view->requested.bosses.source[kArRegionalBoss_PlantCycle]==kArRegionalSource_US?
+          "overlay.region.plant_open":"overlay.region.plant_retracts",NULL)},
+      {"head",values[kArRegionalBoss_PlantOpen]},{"high",values[kArRegionalBoss_PlantHighWindup]},
+      {"low",values[kArRegionalBoss_PlantLowWindup]}};
+    if(!ArUiCatalog_Format(common,sizeof(common),ArUiCatalog_Text(locale,"overlay.region.bosses_common",NULL),args,kCommonRules) ||
+        !ArUiCatalog_Format(pharaoh,sizeof(pharaoh),ArUiCatalog_Text(locale,"overlay.region.pharaoh",NULL),pharaoh_args,3) ||
+        !ArUiCatalog_Format(plant,sizeof(plant),ArUiCatalog_Text(locale,"overlay.region.plant",NULL),plant_args,4))return false;
+    const ArUiTextArgument summary[]={
+      {"region",SettingsOverlayRegions_BadgeLabel(locale,badge)},
+      {"common",common},{"dragon",dragon},{"viper",viper},{"pharaoh",pharaoh},{"plant",plant}};
+    return ArUiCatalog_Format(output,capacity,ArUiCatalog_Text(locale,"overlay.region.bosses",NULL),summary,6);
   }
   if(group==kActRaiserRegionalSetting_StatueVolley) {
     bool double_shot;
@@ -532,7 +599,7 @@ bool SettingsOverlayRegions_ViewDescription(ArUiLocale locale,
     return ArUiCatalog_Format(output,capacity,ArUiCatalog_Text(locale,"overlay.region.emitters",NULL),args,4);
   }
   if(group==kActRaiserRegionalSetting_ActionMotion) {
-    static const char *names[]={"bird","leaper","cave","straight","high","low_cast","high_cast","sword","high_sword","arrow","short_head","long_head"};
+    static const char *names[]={"bird","leaper","cave","straight","high","low_cast","high_cast","sword","high_sword","arrow","short_head","long_head","withdrawal","tree"};
     _Static_assert(sizeof(names)/sizeof(names[0])==kArRegionalActionMotion_Count,"name every motion value");
     char numbers[kArRegionalActionMotion_Count][8];ArUiTextArgument args[kArRegionalActionMotion_Count+1];
     args[0]=(ArUiTextArgument){"region",SettingsOverlayRegions_BadgeLabel(locale,badge)};
@@ -541,6 +608,9 @@ bool SettingsOverlayRegions_ViewDescription(ArUiLocale locale,
       snprintf(numbers[i],sizeof(numbers[i]),"%u",desc->value[view->requested.action_motion.source[i]]+desc->phase_extra_updates);
       args[i+1]=(ArUiTextArgument){names[i],numbers[i]};
     }
+    args[kArRegionalActionMotion_TreeSeeds+1].value=ArUiCatalog_Text(locale,
+        view->requested.action_motion.source[kArRegionalActionMotion_TreeSeeds]==kArRegionalSource_US?
+        "overlay.region.tree_off":"overlay.region.tree_on",NULL);
     return ArUiCatalog_Format(output,capacity,ArUiCatalog_Text(locale,"overlay.region.action_motion",NULL),args,kArRegionalActionMotion_Count+1);
   }
   if(group==kActRaiserRegionalSetting_Arrival) {

@@ -2,11 +2,15 @@
 #include "actraiser/actraiser_cpu_hle_internal.h"
 #include "regional/regional_actor_stats.h"
 #include "regional/regional_platform_skull.h"
+#include "regional/regional_cast_hold.h"
+#include "actraiser/actraiser_cast_hold.h"
 #include "byte_order.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
 static uint8_t memory[65536],skull;
+static uint8_t cast_hold;
+uint8_t ActRaiserRegional_CastHoldSnapshot(void){return cast_hold;}
 static ArRegionalActorStatsSnapshot snapshot;
 static unsigned target,origin;
 bool ActRaiserRegional_ActorStatsEnabled(void){return snapshot.changed;}
@@ -214,6 +218,56 @@ static void CheckChildren(void) {
   assert(!ActRaiser_TanzraMinionHpEntry(NULL) && !ActRaiser_TanzraMinionRewardEntry(NULL) && !ActRaiser_TanzraProjectileAttackEntry(NULL));
   printf("child stats: %u mixed/inherited-value cases and 40 invalid-owner/CPU cases passed\n",cases);
 }
+static CpuState Prop(unsigned rule,unsigned slot,unsigned flags,unsigned stale) {
+  static const uint16_t records[]={0xac02,0xac32,0xac5e};
+  memset(memory,0,0x8000);const unsigned x=0x6a0+slot*0x40;
+  memory[0x18]=1;Write(x+0x16,0x4000);memory[x+0x18]=0x7e;
+  Write(x+0x1a,38+rule);Write(x+0x30,0x32);Write(x+0x32,stale);
+  CpuState cpu={.A=0xa5a5,.X=x,.Y=records[rule],.S=0x1ef0,.P=(uint8_t)flags};
+  cpu_p_to_mirrors(&cpu);return cpu;
+}
+static void CheckCastHold(void) {
+  snapshot=(ArRegionalActorStatsSnapshot){0};skull=0;unsigned cases=0;
+  const unsigned flags[]={0,CPU_P_C|CPU_P_V,CPU_P_Z,CPU_P_N};
+  const unsigned slots[]={0,31,79},stale[]={0,0xac02,0xf80f,0xffff};
+  for(unsigned n=0;n<27;++n) {
+    ArRegionalCastHoldPolicy policy;unsigned digits=n;
+    for(unsigned i=0;i<3;++i){policy.source[i]=digits%3;digits/=3;}
+    assert(ArRegionalCastHold_Resolve(&policy,&cast_hold));
+    for(unsigned rule=0;rule<3;++rule)for(unsigned s=0;s<3;++s)
+      for(unsigned f=0;f<4;++f)for(unsigned old=0;old<4;++old) {
+        CpuState cpu=Prop(rule,slots[s],flags[f],stale[old]),expected=cpu;
+        uint8_t wanted[65536];memcpy(wanted,memory,sizeof(wanted));
+        const bool changed=policy.source[rule]==2;
+        assert(ActRaiser_ActorStatsEntry(&cpu)==changed);
+        if(changed) {
+          ByteOrder_WriteLe16(wanted+cpu.X+0x30,0x8032);
+          expected.A=0x8032;ActRaiserCpuHle_SetNegativeZero16(&expected,expected.A);
+          assert(ActRaiser_ActorStats(&cpu)==RECOMP_RETURN_TAILCALL && target==0x966f && origin==0x966c);
+        }
+        assert(!memcmp(wanted,memory,sizeof(wanted)) && !memcmp(&cpu,&expected,sizeof(cpu)));++cases;
+      }
+  }
+  for(unsigned bad=0;bad<22;++bad) {
+    CpuState cpu=Prop(0,0,0,0xffff);cast_hold=7;
+    switch(bad) {
+      case 0:cpu.PB=1;break;case 1:cpu.DB=1;break;case 2:cpu.D=1;break;
+      case 3:cpu.m_flag=1;break;case 4:cpu.x_flag=1;break;case 5:cpu.emulation=1;break;
+      case 6:cpu._flag_D=1;break;case 7:cpu.P|=CPU_P_D;break;
+      case 8:cpu.X++;break;case 9:cpu.X=0x660;break;case 10:cpu.X=0x1aa0;break;
+      case 11:cpu.Y++;break;case 12:memory[0x18]=2;break;
+      case 13:Write(cpu.X+0x16,0x5000);break;case 14:memory[cpu.X+0x18]=0x7f;break;
+      case 15:Write(cpu.X+0x1a,39);break;case 16:Write(cpu.X+0x30,0x8032);break;
+      case 17:Write(cpu.X+0x2a,1);break;case 18:Write(cpu.X+0x2c,1);break;
+      case 19:Write(cpu.X+0x2e,1);break;case 20:cast_hold=0;break;case 21:cast_hold=8;break;
+    }
+    const CpuState before=cpu;uint8_t wanted[65536];memcpy(wanted,memory,sizeof(wanted));
+    assert(!ActRaiser_CastHoldSpawnEntry(&cpu) && !ActRaiser_ActorStatsEntry(&cpu));
+    assert(!memcmp(wanted,memory,sizeof(wanted)) && !memcmp(&cpu,&before,sizeof(cpu)));
+  }
+  assert(!ActRaiser_CastHoldSpawnEntry(NULL));cast_hold=0;
+  printf("linked-prop cast hold: %u mixed-policy/reused-slot cases and 22 guards passed\n",cases);
+}
 static void CheckRoms(char **paths) {
   static uint8_t rom[5][1048576];unsigned cases=0;
   for(unsigned region=0;region<5;++region) {
@@ -222,6 +276,13 @@ static void CheckRoms(char **paths) {
     uint8_t minion_prefix[]={0x9e,0,0,0x9e,0x30,0,0xa9,2,0,0x9d,0x2c,0,0x9d,0x2e,0};
     uint8_t projectile_prefix[]={0x9e,0,0,0xa9,0x20,0,0x9d,0x30,0,0xa9,3,0,0x9d,0x2a,0,0xa9,6,0};
     const unsigned source=region>=2?2:region;
+    const unsigned prop[5][3]={{0xac02,0xac32,0xac5e},{0xac96,0xacc6,0xacf2},
+      {0xa8ac,0xa8dc,0xa908},{0xa8ae,0xa8de,0xa90a},{0xa8b1,0xa8e1,0xa90d}};
+    for(unsigned i=0;i<3;++i) {
+      const uint8_t *p=rom[region]+prop[region][i]-0x8000;
+      assert(ByteOrder_ReadLe16(p)==0x4000 && p[2]==0x7e && p[6]==38+i);
+      assert(ByteOrder_ReadLe16(p+4)==(source==2?0x8032:0x32) && !p[7] && !p[8] && !p[9]);
+    }
     minion_prefix[7]=(uint8_t)ArRegionalActorStats_Descriptor(kArRegionalActorStat_TanzraMinionHp)->value[source];
     assert(minion_prefix[7]==ArRegionalActorStats_Descriptor(kArRegionalActorStat_TanzraMinionReward)->value[source]);
     projectile_prefix[10]=(uint8_t)ArRegionalActorStats_Descriptor(kArRegionalActorStat_TanzraProjectileAttack)->value[source];
@@ -242,5 +303,5 @@ static void CheckRoms(char **paths) {
   printf("five-ROM stat bytes: 63 base fields and 3 child overrides x5 releases; %u actual-record adapter combinations passed\n",cases);
 }
 int main(int argc,char **argv) {
-  assert(argc==1 || argc==6);CheckSynthetic();CheckChildren();if(argc==6)CheckRoms(argv+1);return 0;
+  assert(argc==1 || argc==6);CheckSynthetic();CheckChildren();CheckCastHold();if(argc==6)CheckRoms(argv+1);return 0;
 }

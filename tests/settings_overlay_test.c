@@ -274,6 +274,10 @@ static ActRaiserRegionalEditResult FakeRegionalEdit(const ActRaiserRegionalRules
     ArRegionalPlatformSkull_Init(&s_fake_region.requested.platform_skull,source);
   else if(group==kActRaiserRegionalSetting_ActorStats)
     ArRegionalActorStats_Init(&s_fake_region.requested.actor_stats,source);
+  else if(group==kActRaiserRegionalSetting_CastHold)
+    ArRegionalCastHold_Init(&s_fake_region.requested.cast_hold,source);
+  else if(group==kActRaiserRegionalSetting_FireEnemy)
+    ArRegionalFire_Init(&s_fake_region.requested.fire_enemy,source);
   else if (group == kActRaiserRegionalSetting_MenuReturn)
     s_fake_region.requested.menu_return = source;
   else if (group == kActRaiserRegionalSetting_SpeedRange)
@@ -741,11 +745,39 @@ static void CheckRegionalControls(SDL_Renderer *renderer, SDL_Surface *surface) 
     CHECK(used==length && !strchr(help,'{'));
   }
   CHECK(SettingsOverlay_HandleKey(SDLK_DOWN,true,false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(),"regional_cast_hold"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT,true,false));
+  CHECK(s_region_edits==36 && s_fake_region.requested.cast_hold.source[0]==1);
+  for(unsigned locale=0;locale<kArUiLocale_Count;++locale)for(unsigned source=0;source<3;++source) {
+    ActRaiserRegionalRulesView preview=s_fake_region;ArRegionalCastHold_Init(&preview.requested.cast_hold,source);
+    char help[2048];CHECK(SettingsOverlayRegions_ViewDescription((ArUiLocale)locale,&preview,kActRaiserRegionalSetting_CastHold,help,sizeof(help)));
+    size_t used=0,length=strlen(help);
+    for(unsigned line=0;line<4 && used<length;++line) {
+      ArInterfaceTextLine slice;CHECK(ArInterfaceText_WrapLine(help+used,length-used,98,kArInterfaceTextMaximumBytes,&slice));
+      CHECK(slice.consumed);used+=slice.consumed;
+    }
+    CHECK(used==length && !strchr(help,'{'));
+  }
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN,true,false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(),"regional_fire_enemy"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT,true,false));
+  CHECK(s_region_edits==37 && s_fake_region.requested.fire_enemy.source[0]==1);
+  for(unsigned locale=0;locale<kArUiLocale_Count;++locale)for(unsigned source=0;source<3;++source) {
+    ActRaiserRegionalRulesView preview=s_fake_region;ArRegionalFire_Init(&preview.requested.fire_enemy,source);
+    char help[2048];CHECK(SettingsOverlayRegions_ViewDescription((ArUiLocale)locale,&preview,kActRaiserRegionalSetting_FireEnemy,help,sizeof(help)));
+    size_t used=0,length=strlen(help);
+    for(unsigned line=0;line<4 && used<length;++line) {
+      ArInterfaceTextLine slice;CHECK(ArInterfaceText_WrapLine(help+used,length-used,98,kArInterfaceTextMaximumBytes,&slice));
+      CHECK(slice.consumed);used+=slice.consumed;
+    }
+    CHECK(used==length && !strchr(help,'{'));
+  }
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN,true,false));
   CHECK(!strcmp(SettingsOverlay_SelectedKey(), "regional_scroll_prices")); /* no global reset row */
   s_fake_region.editable = false;
   CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
   CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
-  CHECK(s_region_edits == 35);
+  CHECK(s_region_edits == 37);
   CHECK(!memcmp(&before, &g_settings, sizeof(before)));
   s_fake_region.editable = true;
   SettingsOverlay_Close(); /* clear transient status for the preview */

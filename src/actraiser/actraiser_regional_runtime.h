@@ -30,6 +30,8 @@ bool ActRaiserRegional_DoubleStatueVolley(void);
 ArRegionalBossSnapshot ActRaiserRegional_BossSnapshot(void);
 ArRegionalCollisionSnapshot ActRaiserRegional_CollisionSnapshot(void);
 ArRegionalPlatformSkullSnapshot ActRaiserRegional_PlatformSkullSnapshot(void);
+ArRegionalCastHoldSnapshot ActRaiserRegional_CastHoldSnapshot(void);
+ArRegionalFireSnapshot ActRaiserRegional_FireSnapshot(void);
 bool ActRaiserRegional_ActorStatsEnabled(void);
 bool ActRaiserRegional_ActorStats(uint16_t actor,uint16_t native_hp,uint16_t native_attack,uint16_t *hp,uint16_t *attack);
 /* Cached child value by semantic rule ID; UINT16_MAX before room activation

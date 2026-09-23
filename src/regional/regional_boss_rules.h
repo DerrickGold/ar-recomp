@@ -15,6 +15,21 @@ typedef enum ArRegionalBossRule {
   kArRegionalBoss_TanzraClock,
   kArRegionalBoss_TanzraUpperTurn,
   kArRegionalBoss_TanzraMinionTurn,
+  kArRegionalBoss_AntlionTrigger,
+  kArRegionalBoss_AntlionStrategy,
+  kArRegionalBoss_DragonProjectileDelay,
+  kArRegionalBoss_DragonProjectileFlight,
+  kArRegionalBoss_ViperChoice,
+  kArRegionalBoss_ViperLightning,
+  kArRegionalBoss_ViperRematchLightning,
+  kArRegionalBoss_ViperFloor,
+  kArRegionalBoss_PharaohLanding,
+  kArRegionalBoss_PharaohRematchLanding,
+  kArRegionalBoss_PharaohHeads,
+  kArRegionalBoss_PlantCycle,
+  kArRegionalBoss_PlantOpen,
+  kArRegionalBoss_PlantHighWindup,
+  kArRegionalBoss_PlantLowWindup,
   kArRegionalBoss_Count
 } ArRegionalBossRule;
 typedef struct ArRegionalBossPolicy { ArRegionalSource source[kArRegionalBoss_Count]; } ArRegionalBossPolicy;
@@ -43,4 +58,15 @@ bool ArRegionalBoss_IceSkip(ArRegionalBossSnapshot snapshot,unsigned state,unsig
 bool ArRegionalBoss_TanzraRow(ArRegionalBossSnapshot snapshot,unsigned state,unsigned row,
     uint16_t *duration,int16_t dx,int16_t dy);
 bool ArRegionalBoss_TanzraMinionSkip(ArRegionalBossSnapshot snapshot,unsigned state,unsigned row,unsigned *next);
+bool ArRegionalBoss_DragonRow(ArRegionalBossSnapshot snapshot,unsigned state,unsigned row,
+    uint8_t visual,uint16_t *duration,int16_t dx,int16_t dy);
+bool ArRegionalBoss_ViperRow(ArRegionalBossSnapshot snapshot,bool rematch,unsigned state,unsigned row,
+    uint8_t visual,uint16_t *duration,int16_t dx,int16_t *dy);
+bool ArRegionalBoss_PharaohSkip(ArRegionalBossSnapshot snapshot,bool rematch,
+    unsigned state,unsigned row,unsigned *next);
+typedef struct ArRegionalPlantPhase { uint8_t state,repetitions; } ArRegionalPlantPhase;
+bool ArRegionalBoss_PlantPhase(ArRegionalBossSnapshot snapshot,unsigned previous,ArRegionalPlantPhase *next);
+bool ArRegionalBoss_PlantOpenRow(ArRegionalBossSnapshot snapshot,unsigned row,unsigned *native_row,uint8_t *visual);
+bool ArRegionalBoss_PlantWindup(ArRegionalBossSnapshot snapshot,unsigned state,unsigned row,
+    uint8_t visual,uint16_t *duration,int16_t dx,int16_t dy);
 #endif

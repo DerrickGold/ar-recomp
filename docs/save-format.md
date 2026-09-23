@@ -645,6 +645,75 @@ sequences. Versions1–40 default these to US. Their canonical source pairs
 occupy bits14–21 of the existing `ARBOSS-R1` snapshot; previous ordinals,
 record layouts and baseline replay identities remain unchanged.
 
+Version 42 appends `fillmore_left_prop_cast_hold`,
+`fillmore_upper_prop_cast_hold` and `fillmore_right_prop_cast_hold` (194
+records). Each stores requested/effective sources and resolved values0/0/1
+for US/Japan/Europe. Versions1–41 initialize these to US. Room/retry activation
+captures all three; live flags and positions remain native actor state.
+The optional `ARCASTHOLD-R1` digest domain appends the requested/effective
+three-bit masks after prior domains. All-US/Japanese aliases preserve the
+previous replay identity.
+
+Version 50 appends `action_tree_seed_family` (215 total), value0 for US and1
+for Japan/Europe. Versions1–49 default it to US. Requested/effective sources
+use ordinary-motion snapshot bit13 in the existing `ARACTIONMOVE-R1` domain;
+JP/European aliases share a numerical identity, and an unset bit preserves
+older replay hashes. The tree's live peer/seed/visual phase tags reside in
+native actor `+$3E`, not the campaign companion. Existing tagged children
+finish after debug-cache loss; native death/slot replacement retains ownership.
+
+Version 49 appends four plant records (214 total): `plant_retracting_cycle`
+(0/1/1), `plant_open_sequence` (8/8/16 updates), and
+`plant_high_shot_windup` / `plant_low_shot_windup` (stored delay7/7/23,
+complete preparation9/9/25). Versions1–48 default them to US. Requested/effective
+sources occupy boss snapshot pairs44–51; native aliases preserve older replay
+identity. Native repeat state and the tagged expanded row cursor own progress.
+A cacheless debug restore clears a completed protected phase before resuming
+the US loop, so protection cannot remain stuck on.
+
+Version 48 appends `pharaoh_landing` (40/24/40 updates),
+`pharaoh_rematch_landing` (56/24/56) and `pharaoh_repeating_heads` (0/1/0),
+for210 records. Versions1–47 initialize these to US. Requested/effective
+sources occupy boss snapshot pairs38–43 in the existing `ARBOSS-R1` domain;
+native aliases leave previous replay identity unchanged. An active head's
+animation state and native yield frame own its current idle, not a host timer.
+
+Version 47 appends `action_head_withdrawal` (16/20/16 updates), for207 records.
+Earlier saves default it to US. Its requested/effective sources resolve to
+ordinary-motion bit12, preserving earlier digest identities when unset. The
+active expanded animation cursor is native actor state, not campaign metadata;
+it is marked until the native sequence terminates or changes state.
+
+Version 46 appends four Viper records (206 total): `viper_lightning_choice_program`
+(0/1/2 for US AND3, JP LSR, European AND1), `viper_lightning_delay`
+(21/21/17), `viper_rematch_lightning_delay` (10/10/8) and
+`viper_floor_descent` (22/22/15 active updates). Requested/effective sources
+occupy boss snapshot pairs30–37. Versions1–45 default them to US; earlier
+replay identity is unchanged when these additions resolve to US. Policies
+are captured at room/retry, independently of artwork and difficulty.
+
+Version 45 appends `aitos_dragon_projectile_delay` (0/0/15 stored delay) and
+`aitos_dragon_projectile_flight` (1/1/5 sequences before the first offscreen
+check), for202 records. Versions1–44 default both to US. Their canonical
+source pairs occupy boss snapshot bits26–29; zero-valued US/JP aliases leave
+earlier replay identities unchanged. Requests take effect next room/retry.
+The in-flight repeat count belongs to the native actor, not the campaign save.
+
+Version 44 appends `kasandora_fire_curve`, `kasandora_fire_close_strategy`,
+`kasandora_fire_child_threshold` and `kasandora_fire_bounce_threshold`, for
+200 records. US/JP/Europe values are0/1/0,0/1/0,160/128/160 and242/210/242.
+Versions1–43 default these to US. Requested and effective choices are stored
+separately; active rooms retain their captured policy until the next room/retry.
+The conditional `ARFIRE-R1` replay domain follows the existing cast-hold domain
+and contains the prior digest plus requested/effective four-bit numerical
+snapshots. US/European aliases preserve preceding baseline replay identities.
+
+Version 43 appends `antlion_encounter_x` (2432/2304/2432) and
+`antlion_post_volley_strategy` (0/1/0), for196 records. The strategy selects
+the complete decision ordering, not a global animation multiplier. Versions
+1–42 default both to US. Their canonical source pairs occupy boss snapshot
+bits22–25; earlier pairs and baseline replay identities remain unchanged.
+
 `ARSIMAC2` replaces the actor block with 124 bytes: the same 12-byte header,
 then 24 cached and four live records, each holding a combat word followed by
 an AI word. AI bits 0–5 select Japanese behavior in the record order above;

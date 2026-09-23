@@ -22,6 +22,7 @@ set(SNESRECOMP_RUNNER_SOURCES
     ${SNESRECOMP_RUNNER_ROOT}/src/support/launcher.c
     ${SNESRECOMP_RUNNER_ROOT}/src/support/keybinds.c
     ${SNESRECOMP_RUNNER_ROOT}/src/core/cpu_state.c
+    ${SNESRECOMP_RUNNER_ROOT}/src/core/native_leaf.c
     ${SNESRECOMP_RUNNER_ROOT}/src/core/common_cpu_infra.c
     ${SNESRECOMP_RUNNER_ROOT}/src/core/paired_tail.c
     ${SNESRECOMP_RUNNER_ROOT}/src/core/diagnostic.c

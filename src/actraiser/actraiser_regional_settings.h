@@ -40,6 +40,8 @@ typedef enum ActRaiserRegionalSettingGroup {
   kActRaiserRegionalSetting_Collision,
   kActRaiserRegionalSetting_PlatformSkull,
   kActRaiserRegionalSetting_ActorStats,
+  kActRaiserRegionalSetting_CastHold,
+  kActRaiserRegionalSetting_FireEnemy,
   kActRaiserRegionalSetting_Count,
 } ActRaiserRegionalSettingGroup;
 

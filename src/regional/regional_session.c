@@ -45,13 +45,24 @@ enum { kHeaderBytes = 36, kPayloadCapacity = kSaveCheckpointPayloadMax,
        kV38RecordCount = kV37RecordCount + 4,
        kV39RecordCount = kV38RecordCount + 63,
        kV40RecordCount = kV38RecordCount + 66,
-       kRecordCount = kV40RecordCount + kArRegionalBoss_Count-7 };
+       kV41RecordCount = kV40RecordCount + 4,
+       kV42RecordCount = kV41RecordCount + 3,
+       kV43RecordCount = kV42RecordCount + 2,
+       kV44RecordCount = kV43RecordCount + kArRegionalFire_Count,
+       kV45RecordCount = kV44RecordCount + 2,
+       kV46RecordCount = kV45RecordCount + 4,
+       kV47RecordCount = kV46RecordCount + 1,
+       kV48RecordCount = kV47RecordCount + 3,
+       kV49RecordCount = kV48RecordCount + 4,
+       kRecordCount = kV49RecordCount + 1 };
+_Static_assert(kArRegionalFire_Count==4,"preserve fire-enemy record ordinals");
+_Static_assert(kArRegionalCastHold_Count==3,"preserve cast-hold record ordinals");
 _Static_assert(kArRegionalActorStat_BaseCount==63 && kArRegionalActorStat_Count==66,"preserve historical stat record ordinals");
 _Static_assert(kArRegionalPlatformSkull_Count==4,"preserve historical skull record ordinals");
 _Static_assert(kArRegionalCollision_Count==2,"preserve historical collision record ordinals");
-_Static_assert(kArRegionalBoss_Count==11,"preserve historical boss record ordinals");
+_Static_assert(kArRegionalBoss_Count==26,"preserve historical boss record ordinals");
 _Static_assert(kArRegionalEmitter_Count==2,"preserve historical emitter record ordinals");
-_Static_assert(kArRegionalActionMotion_Count==12,"preserve historical motion record ordinals");
+_Static_assert(kArRegionalActionMotion_Count==14,"preserve historical motion record ordinals");
 _Static_assert(kArRegionalCostRule_Count == 9 && kArRegionalTimerRule_Count == 6,
                "extend the legacy record mapping explicitly when adding family leaves");
 _Static_assert(kArRegionalDevelopmentRule_Count == 3,"version5 has three development leaves");
@@ -92,7 +103,11 @@ static bool Valid(const ArRegionalSession *session) {
       !ArRegionalLairAccounting_Projection(&effective,&active_projection)) return false;
   uint8_t unused_collision;
   ArRegionalActorStatsSnapshot unused_stats;
-  return has_id && ArRegionalActorStats_Resolve(&session->requested.actor_stats,&unused_stats) &&
+  return has_id && ArRegionalFire_Resolve(&session->requested.fire_enemy,&unused_collision) &&
+      ArRegionalFire_Resolve(&session->effective.fire_enemy,&unused_collision) &&
+      ArRegionalCastHold_Resolve(&session->requested.cast_hold,&unused_collision) &&
+      ArRegionalCastHold_Resolve(&session->effective.cast_hold,&unused_collision) &&
+      ArRegionalActorStats_Resolve(&session->requested.actor_stats,&unused_stats) &&
       ArRegionalActorStats_Resolve(&session->effective.actor_stats,&unused_stats) &&
       ArRegionalPlatformSkull_Resolve(&session->requested.platform_skull,&unused_collision) &&
       ArRegionalPlatformSkull_Resolve(&session->effective.platform_skull,&unused_collision) &&
@@ -448,6 +463,38 @@ bool ArRegionalSession_RequestVolley(ArRegionalSession *session, uint32_t revisi
   session->requested.statue_volley = source;
   ++session->revision;
   return true;
+}
+bool ArRegionalSession_RequestFire(ArRegionalSession *session,uint32_t revision,const ArRegionalFirePolicy *policy) {
+  uint8_t unused;
+  if(!Valid(session) || revision!=session->revision || !ArRegionalFire_Resolve(policy,&unused))return false;
+  if(!memcmp(policy,&session->requested.fire_enemy,sizeof(*policy)))return true;
+  if(session->revision==UINT32_MAX)return false;
+  session->requested.fire_enemy=*policy;++session->revision;return true;
+}
+bool ArRegionalSession_BeginFire(ArRegionalSession *session,ArRegionalFireSnapshot *snapshot) {
+  if(!snapshot || !Valid(session))return false;
+  const bool changed=memcmp(&session->requested.fire_enemy,&session->effective.fire_enemy,sizeof(session->requested.fire_enemy))!=0;
+  if(changed && session->revision==UINT32_MAX)return false;
+  uint8_t next;if(!ArRegionalFire_Resolve(&session->requested.fire_enemy,&next))return false;
+  session->effective.fire_enemy=session->requested.fire_enemy;
+  if(changed)++session->revision;
+  *snapshot=next;return true;
+}
+bool ArRegionalSession_RequestCastHold(ArRegionalSession *session,uint32_t revision,const ArRegionalCastHoldPolicy *policy) {
+  uint8_t unused;
+  if(!Valid(session) || revision!=session->revision || !ArRegionalCastHold_Resolve(policy,&unused))return false;
+  if(!memcmp(policy,&session->requested.cast_hold,sizeof(*policy)))return true;
+  if(session->revision==UINT32_MAX)return false;
+  session->requested.cast_hold=*policy;++session->revision;return true;
+}
+bool ArRegionalSession_BeginCastHold(ArRegionalSession *session,ArRegionalCastHoldSnapshot *snapshot) {
+  if(!snapshot || !Valid(session))return false;
+  const bool changed=memcmp(&session->requested.cast_hold,&session->effective.cast_hold,sizeof(session->requested.cast_hold))!=0;
+  if(changed && session->revision==UINT32_MAX)return false;
+  uint8_t next;if(!ArRegionalCastHold_Resolve(&session->requested.cast_hold,&next))return false;
+  session->effective.cast_hold=session->requested.cast_hold;
+  if(changed)++session->revision;
+  *snapshot=next;return true;
 }
 bool ArRegionalSession_RequestActorStats(ArRegionalSession *session,uint32_t revision,const ArRegionalActorStatsPolicy *policy) {
   ArRegionalActorStatsSnapshot unused;
@@ -845,6 +892,42 @@ bool ArRegionalSession_BeginSimActor(ArRegionalSession *session,unsigned town,un
 /* The wire shape is shared, not the units: stable keys select the descriptor
  * for resource counts, initial BCD times, booleans or town service counts. */
 static const char *Record(unsigned i, const uint16_t **values) {
+  if(i==kV49RecordCount) {
+    const ArRegionalActionMotionDescriptor *desc=ArRegionalActionMotion_Descriptor(kArRegionalActionMotion_TreeSeeds);
+    *values=desc->value;return desc->key;
+  }
+  if(i>=kV48RecordCount) {
+    const ArRegionalBossDescriptor *desc=ArRegionalBoss_Descriptor(22+i-kV48RecordCount);
+    *values=desc->value;return desc->key;
+  }
+  if(i>=kV47RecordCount) {
+    const ArRegionalBossDescriptor *desc=ArRegionalBoss_Descriptor(19+i-kV47RecordCount);
+    *values=desc->value;return desc->key;
+  }
+  if(i==kV46RecordCount) {
+    const ArRegionalActionMotionDescriptor *desc=ArRegionalActionMotion_Descriptor(kArRegionalActionMotion_HeadWithdrawal);
+    *values=desc->value;return desc->key;
+  }
+  if(i>=kV45RecordCount) {
+    const ArRegionalBossDescriptor *desc=ArRegionalBoss_Descriptor(15+i-kV45RecordCount);
+    *values=desc->value;return desc->key;
+  }
+  if(i>=kV44RecordCount) {
+    const ArRegionalBossDescriptor *desc=ArRegionalBoss_Descriptor(13+i-kV44RecordCount);
+    *values=desc->value;return desc->key;
+  }
+  if(i>=kV43RecordCount) {
+    const ArRegionalFireDescriptor *desc=ArRegionalFire_Descriptor(i-kV43RecordCount);
+    *values=desc->value;return desc->key;
+  }
+  if(i>=kV42RecordCount) {
+    const ArRegionalBossDescriptor *desc=ArRegionalBoss_Descriptor(11+i-kV42RecordCount);
+    *values=desc->value;return desc->key;
+  }
+  if(i>=kV41RecordCount) {
+    const ArRegionalCastHoldDescriptor *desc=ArRegionalCastHold_Descriptor(i-kV41RecordCount);
+    *values=desc->enabled;return desc->key;
+  }
   if(i>=kV40RecordCount) {
     const ArRegionalBossDescriptor *desc=ArRegionalBoss_Descriptor(7+i-kV40RecordCount);
     *values=desc->value;return desc->key;
@@ -1006,6 +1089,15 @@ static const char *Record(unsigned i, const uint16_t **values) {
 }
 
 static ArRegionalSource RecordSource(const ArRegionalSession *session, unsigned i, bool requested) {
+  if(i==kV49RecordCount)return requested?session->requested.action_motion.source[kArRegionalActionMotion_TreeSeeds]:session->effective.action_motion.source[kArRegionalActionMotion_TreeSeeds];
+  if(i>=kV48RecordCount)return requested?session->requested.bosses.source[22+i-kV48RecordCount]:session->effective.bosses.source[22+i-kV48RecordCount];
+  if(i>=kV47RecordCount)return requested?session->requested.bosses.source[19+i-kV47RecordCount]:session->effective.bosses.source[19+i-kV47RecordCount];
+  if(i==kV46RecordCount)return requested?session->requested.action_motion.source[kArRegionalActionMotion_HeadWithdrawal]:session->effective.action_motion.source[kArRegionalActionMotion_HeadWithdrawal];
+  if(i>=kV45RecordCount)return requested?session->requested.bosses.source[15+i-kV45RecordCount]:session->effective.bosses.source[15+i-kV45RecordCount];
+  if(i>=kV44RecordCount)return requested?session->requested.bosses.source[13+i-kV44RecordCount]:session->effective.bosses.source[13+i-kV44RecordCount];
+  if(i>=kV43RecordCount)return requested?session->requested.fire_enemy.source[i-kV43RecordCount]:session->effective.fire_enemy.source[i-kV43RecordCount];
+  if(i>=kV42RecordCount)return requested?session->requested.bosses.source[11+i-kV42RecordCount]:session->effective.bosses.source[11+i-kV42RecordCount];
+  if(i>=kV41RecordCount)return requested?session->requested.cast_hold.source[i-kV41RecordCount]:session->effective.cast_hold.source[i-kV41RecordCount];
   if(i>=kV40RecordCount)return requested?session->requested.bosses.source[7+i-kV40RecordCount]:session->effective.bosses.source[7+i-kV40RecordCount];
   if(i>=kV38RecordCount)return requested?session->requested.actor_stats.source[i-kV38RecordCount]:session->effective.actor_stats.source[i-kV38RecordCount];
   if(i>=kV37RecordCount)return requested?session->requested.platform_skull.source[i-kV37RecordCount]:session->effective.platform_skull.source[i-kV37RecordCount];
@@ -1096,7 +1188,7 @@ static bool Encode(const ArRegionalSession *session, uint8_t *out, size_t *size)
   if (!Valid(session)) return false;
   memset(out, 0, kHeaderBytes);
   memcpy(out, kMagic, sizeof(kMagic));
-  ByteOrder_WriteLe16(out + 8, 41);
+  ByteOrder_WriteLe16(out + 8, 50);
   ByteOrder_WriteLe16(out + 10, kRecordCount);
   ByteOrder_WriteLe32(out + 12, session->slot);
   memcpy(out + 16, session->campaign, 16);
@@ -1141,7 +1233,7 @@ static SaveCheckpointStatus Decode(const uint8_t *bytes, size_t size, ArRegional
   const bool pricing_only = !memcmp(bytes, kPriceMagic, sizeof(kPriceMagic));
   if (!pricing_only && memcmp(bytes, kMagic, sizeof(kMagic))) return kSaveCheckpoint_Invalid;
   const unsigned version = ByteOrder_ReadLe16(bytes + 8);
-  if (version < 1 || version > (pricing_only ? 1u : 41u)) return kSaveCheckpoint_Unsupported;
+  if (version < 1 || version > (pricing_only ? 1u : 50u)) return kSaveCheckpoint_Unsupported;
   const unsigned count = pricing_only ? kArRegionalCostRule_Count :
       version == 1 ? kV1RecordCount : version == 2 ? kV2RecordCount :
       version == 3 ? kV3RecordCount : version == 4 ? kV4RecordCount :
@@ -1162,7 +1254,11 @@ static SaveCheckpointStatus Decode(const uint8_t *bytes, size_t size, ArRegional
       version == 34 ? kV34RecordCount : version == 35 ? kV35RecordCount :
       version == 36 ? kV36RecordCount : version == 37 ? kV37RecordCount :
       version == 38 ? kV38RecordCount : version == 39 ? kV39RecordCount :
-      version == 40 ? kV40RecordCount : kRecordCount;
+      version == 40 ? kV40RecordCount : version == 41 ? kV41RecordCount :
+      version == 42 ? kV42RecordCount : version == 43 ? kV43RecordCount :
+      version == 44 ? kV44RecordCount : version == 45 ? kV45RecordCount :
+      version == 46 ? kV46RecordCount : version == 47 ? kV47RecordCount :
+      version == 48 ? kV48RecordCount : version == 49 ? kV49RecordCount : kRecordCount;
   if (ByteOrder_ReadLe16(bytes + 10) != count) return kSaveCheckpoint_Unsupported;
   ArRegionalSession next = {.slot = ByteOrder_ReadLe32(bytes + 12), .revision = ByteOrder_ReadLe32(bytes + 32)};
   memcpy(next.campaign, bytes + 16, sizeof(next.campaign));
@@ -1190,7 +1286,34 @@ static SaveCheckpointStatus Decode(const uint8_t *bytes, size_t size, ArRegional
       return kSaveCheckpoint_Unsupported;
     if (values[requested] != ByteOrder_ReadLe16(bytes + offset + 4) ||
         values[effective] != ByteOrder_ReadLe16(bytes + offset + 6)) return kSaveCheckpoint_Unsupported;
-    if(rule>=kV40RecordCount) {
+    if(rule==kV49RecordCount) {
+      next.requested.action_motion.source[kArRegionalActionMotion_TreeSeeds]=requested;
+      next.effective.action_motion.source[kArRegionalActionMotion_TreeSeeds]=effective;
+    } else if(rule>=kV48RecordCount) {
+      next.requested.bosses.source[22+rule-kV48RecordCount]=requested;
+      next.effective.bosses.source[22+rule-kV48RecordCount]=effective;
+    } else if(rule>=kV47RecordCount) {
+      next.requested.bosses.source[19+rule-kV47RecordCount]=requested;
+      next.effective.bosses.source[19+rule-kV47RecordCount]=effective;
+    } else if(rule==kV46RecordCount) {
+      next.requested.action_motion.source[kArRegionalActionMotion_HeadWithdrawal]=requested;
+      next.effective.action_motion.source[kArRegionalActionMotion_HeadWithdrawal]=effective;
+    } else if(rule>=kV45RecordCount) {
+      next.requested.bosses.source[15+rule-kV45RecordCount]=requested;
+      next.effective.bosses.source[15+rule-kV45RecordCount]=effective;
+    } else if(rule>=kV44RecordCount) {
+      next.requested.bosses.source[13+rule-kV44RecordCount]=requested;
+      next.effective.bosses.source[13+rule-kV44RecordCount]=effective;
+    } else if(rule>=kV43RecordCount) {
+      next.requested.fire_enemy.source[rule-kV43RecordCount]=requested;
+      next.effective.fire_enemy.source[rule-kV43RecordCount]=effective;
+    } else if(rule>=kV42RecordCount) {
+      next.requested.bosses.source[11+rule-kV42RecordCount]=requested;
+      next.effective.bosses.source[11+rule-kV42RecordCount]=effective;
+    } else if(rule>=kV41RecordCount) {
+      next.requested.cast_hold.source[rule-kV41RecordCount]=requested;
+      next.effective.cast_hold.source[rule-kV41RecordCount]=effective;
+    } else if(rule>=kV40RecordCount) {
       next.requested.bosses.source[7+rule-kV40RecordCount]=requested;
       next.effective.bosses.source[7+rule-kV40RecordCount]=effective;
     } else if(rule>=kV38RecordCount) {

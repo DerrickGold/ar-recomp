@@ -3021,6 +3021,35 @@ Full victories, all child attack/death paths, magic interactions, mixed-media
 presentation and actual host policy switching still need implementation or
 encounter-level validation. It does not close other bosses or Death Heim.
 
+The host phase adapter now selects the retained states through the real
+`$00:D9DE JSR $8669`. Native repeat counts and the `$D9E0` yield word own
+progress; the source/room/root/state guards exclude linked spawners and health
+helpers. On each completed phase, `$D9DB` selects1, then2 repeated5 times,
+then3, then20; it sets protection `$0020` only before20 and clears it on leaving
+20. The original actor collision routine remains responsible for rejecting
+damage. Native death/state changes abandon the loop through their existing
+handlers. A missing host cache after a debug restore still clears completed
+protection before returning to the US state2 loop.
+
+The open-head timeline and high/low projectile wind-ups are independent
+room-pinned leaves. The existing animation-reader adapter maps the four-row
+European head sequence onto retained US compositions, using a tagged logical
+cursor in `+$1C` and a temporary actor-local visual offset during decoding.
+Native state/end handling clears it; no shared animation table is rewritten.
+Exact program/pose signatures guard the mapping. Projectile preparation changes
+only the first row's delay in body states4/6. CPU flags, motion, collision
+decoding, allocation and waits remain native. This integrates the phase and
+timing mechanics, not Japanese body geometry/placement or Beginner's tendril.
+
+Matched host runs reached the encounter through its preceding room loads and
+verified the resident animation bundle before holding the player at two heights.
+JP completed25 full154-update cycles and Europe20 full194-update cycles; US
+remained open. Protection was present only in closed state20. Seven high and
+six low preparations per profile retained first-row delays7/7/23. All three
+14,500-tick runs exited normally without background-data mismatches or changes
+to the user's save. These controlled checks do not establish full-combat or
+visual acceptance, and they deliberately retain US geometry.
+
 ### Northwall Act-2 boss: original versus Death Heim
 
 Northwall room8, raw map key `$0806`, places type `$08`, source US `$00:F161`
@@ -3181,14 +3210,38 @@ and collision combinations still need validation. Animation blobs are at file
 US `0xCD695` / JP `0xCBE43`, loaded to `$7E:4000`; the JP seed/plant program is
 `$00:A9F4–AA6D`, and head entries are US `$00:A940` / JP `$00:A8FF`.
 
+Europe retains this controller too. The English PAL head requests its adjacent
+peer at `$00:A553` and waits128 through `$8612`; peer entry is `$A5A0`.
+German adds2 and French5 to these sites. Their state10 row still stores63,
+but the separate wait overwrites that delay, so all three PAL releases use
+the129-update hold. Five-ROM tests match the complete retained programs and13
+composition records used by the restored seed family. The PAL animation blobs
+are at file `0xCD696` English / `0xCCE78` German and French.
+
 Implementation boundary: one named tree attack-family policy, US default,
 captured on room/family creation and shared by the head, peer and descendants.
 Represent the peer relationship explicitly, preserve native allocation failure,
 terrain, collision and yield behavior, and defer live changes until the next
 room/family initialization. Neither live HP nor a pending attack should reset.
-Full tree defeat and bridge extension, all seed/contact edge cases, exact art
-compatibility and the actual mixed-policy implementation remain validation
-gates; the existence and timing ownership of the extra phase are now settled.
+The host integration now captures `action_tree_seed_family` with the room's
+motion policy (US0, JP/Europe1). `$A975` applies state10, requests only a verified
+adjacent peer, then lets native `+$24` expire before resuming the original
+`$A97B` orb code. The restored peer, seeds and visual children share the retained
+`$A9BF` handler. Slot-local `+$3E` tags distinguish their phases; existing
+children finish after a debug-cache reset. The native dispatcher still owns
+movement, active-frame waits, death and slot reuse. Bounded RTS calls reuse
+the original allocation, animation, terrain and facing helpers. No donor code,
+host countdown, foreign-PC dispatch or shared animation mutation is needed.
+
+Zero/one/two seed-slot tests retain successful allocations without retrying
+failures; visual allocation failures are also ignored like the original.
+Controlled US/JP/European host runs verify64 versus129 preparation updates,
+two seeds at X1760/1824,Y416 after28 updates, and subsequent landing, walking,
+withering and retirement. Each12,500-tick run self-exits. The player/camera
+position fixture yields the same background-check warning in all three, so
+these are lifecycle checks, not visual acceptance or natural traversal.
+Full tree defeat/bridge extension, magic and broader contact coverage remain
+separate encounter-level validation gates.
 
 ### Bloodpool Act-2 statues: single versus double volley
 
@@ -3498,6 +3551,38 @@ rematch speeds/timing attached to encounter identity. US assets contain the
 sequences required for these mechanics without a JP donor ROM. Full defeat,
 magic, room-exit cleanup and mixed-policy host execution remain validation
 gates; attack-loop/rematch discovery is closed.
+
+The host implements three room/retry-pinned choices: original landing,
+rematch landing and repeated head firing. The animation reader recognizes
+the ten-row bounce plus encounter-specific final hold, then lets the native
+reader consume the real terminator when that hold is omitted. It changes no
+shared resource bytes or root allocation/pending-flag logic.
+
+At `$00:C2CB`, repeated heads select retained idle state3 instead of withdrawal
+state27 and tail to the original `$C2CE` JSR. Its native return word `$C2D0`
+and state3 identify completion at `$C2D1`, which returns to firing at `$C2A1`.
+That in-flight idle can finish even if a debug restore loses the policy cache.
+The ordinary withdrawal/retirement path remains native. Exact source, room,
+animation base and CPU shape checks exclude ordinary heads, spheres and arrows;
+no currently live parent is required. Upstream generated boundaries end at
+the native sequence/allocation continuations so inlining cannot bypass either
+adapter. Neither path creates an emulated return frame or host timer.
+
+Five-ROM checks compare338 rows and their complete pose records, plus the
+head-loop opcodes. Host tests cover mixed landing/lifetime choices, both
+encounters, CPU flags/widths, facings, invalid ownership, dropped-shot context,
+missing caches and unexpected animation-reader returns. These bounded tests
+do not establish full-victory, magic or manual presentation parity.
+
+Four controlled host runs now verify the complete US/JP attack loops in both
+encounters. Native room loads supply the checked1863-byte US animation bundle;
+only the player's position, hold and invulnerability are prepared. The original
+landing measures40/24 updates over27/30 completed cycles, and the rematch56/24
+over29/37. Japanese heads repeat at136-update intervals in both rooms; Western
+heads retire after their30/15-update withdrawal while fired arrows continue.
+All four runs exit normally, with no background preflight mismatches and no
+changes to the player's SRAM. They are controlled encounters, not natural
+traversals, full victories or a manual visual comparison.
 
 ### Aitos Act 1: platform skulls and volcano fireballs
 
@@ -3945,6 +4030,32 @@ US by default. Freeze the threshold before the room's intro and the attack
 strategy for the encounter. A toggle must not restart the intro, replay a
 volley, or reinterpret an existing native/animation wait. Full combat,
 mixed-policy integration and family-wide contention remain validation gates.
+
+Implementation uses the US artwork and original six-shot allocation. Prefix
+`$C67D→C680` changes only the threshold CMP. `$C718→C71E` skips state12 for
+the Japanese strategy, leaving `$85BE` to calculate distance. At `$C721`, a
+near result resumes `$C726`; a far result follows the native `$86FA` wait
+contract: zero motion, delay60 at slot+24, and `$C6E3` at slot+12. Returning
+through Antlion's native RTS leaf `$C682` preserves the real dispatch owner;
+there is no fabricated stack return, host timer, or recheck after the wait.
+This equivalent continuation goes directly to the firing preparation instead
+of storing Japan's relocated branch instruction. The room snapshot keeps
+threshold and strategy independent, including when settings change mid-wait.
+Five-ROM instruction signatures and1,944 mixed-source/slot/CPU cases cover
+the two prefixes and decision outputs;32 invalid-owner cases reject children,
+wrong rooms, widths and shifted slots.
+
+Controlled recompilation runs then exercise the full native dispatcher for
+12,500 ticks. After Continue and an ordinary Palace/Fight entry, a debug room
+request loads Kasandora2; a held, invulnerable player supplies a fixed distant
+target. The US control produces60 volleys at exactly48-update intervals;
+the Japanese rule produces39 at exactly73. Both exit normally with positive
+HP, unchanged lives and byte-identical private SRAM. A first implementation
+returned from the HLE without consuming the native dispatch return; this live
+test caught that error and the final path uses `$C682` as described above.
+The forced room transition also produces background-preflight mismatches in
+both controls; these runs validate encounter timing, not stage traversal,
+terrain/render parity, a complete victory or the near-player phase sequence.
 
 ### Aitos bamboo spike traps
 
@@ -5040,6 +5151,19 @@ three changed flags. It does not test every rider or the complete linked
 platform group during a naturally initiated cast. The 63 fixtures here plus
 the 15 inventory fixtures above form one 78-case isolated batch.
 
+The recompilation exposes three room-scoped flag choices at US spawn prefix
+`$00:966C→966F`. US descriptors `$AC02/$AC32/$AC5E` carry the same states
+38/39/40 and base `$7E:4000`; only their fresh `$0032` flags become `$8032`.
+The US dispatcher already has the corresponding hold at `$8943–894A`, using
+`$F9` rather than PAL `$FA`. No imported dispatcher or per-frame policy is
+needed. Twelve US suffix fixtures confirm the new flag survives original
+promotion/animation initialization, and twelve dispatcher fixtures confirm
+hold/resume against the original `$AC11/$AC41/$AC6D` continuations. This is
+isolated native execution, not a complete natural rider/cast playthrough.
+Adapter tests cover3,888 source/slot/flag cases,22 malformed contexts and all
+five ROM descriptors. The native initializer's Y, not stale slot field+32,
+owns the choice. Existing actors retain their flags until room reload.
+
 ### Fillmore Act 2 music residency
 
 Five booted scene loads request Fillmore room 2 through the native pending
@@ -5915,6 +6039,26 @@ delays `7,3,3`; JP inserts visual `$27`, delay 3, after `$28`. Native playback
 therefore differs by four frames. This belongs to the ordinary room-6 head
 enemy, not the Act 1 plant boss or Viper.
 
+All four compositions37–40—including the inserted39, its four sprite parts,
+and bottom extent21—are retained byte-identically in the US bundle. The host
+withdrawal policy therefore needs no Japanese artwork. The room-pinned reader
+adapter maps the expanded logical sequence onto existing native rows/poses;
+native motion, mirrored extents and end-of-sequence handling still execute.
+It borrows only the current actor's row and visual-offset words during the
+non-yielding decode, never shared asset bytes. A tagged logical cursor in
+`+$1C` lets an in-flight sequence finish after a debug restore without depending
+on a host-only counter; native state initialization and the terminator clear
+it. Sources, room, complete US sequence and retained pose header are checked
+before applying this mapping. It is not a general-purpose donor-table editor.
+
+Paired held-player host runs follow the native Marahna room-loading chain and
+verify the resident ordinary animation bundle before measuring the sequence.
+They observe the three US poses over16 updates and four JP poses over20,
+then an untagged cursor in the next native state. Both exit normally. Earlier
+direct-warp fixtures retained the previous area's animation data and were
+discarded. These checks establish the animation lifecycle, not natural
+traversal, full contact/combat parity or manual visual acceptance.
+
 ### Kasandora fire-enemy motion and spawn decisions
 
 Type `03/06` is the ordinary floating fire enemy, not the Act 2 blue sphere.
@@ -5957,10 +6101,21 @@ allocators and child-handler assignments execute unchanged. Horizontal/
 bouncing children use US `$C447/$C429`, JP `$C4D6/$C4B8`, PAL
 EU `$C10E/$C0F0` with the same language offsets. All results reproduce.
 
-Movement, hover and child-selection rules should be explicit gameplay
-policies, separate from the flame's appearance. Active parent/child families
-need a coherent policy until they retire; importing an animation bundle
-alone would neither reproduce the complete JP behavior nor preserve US rules.
+The runtime implements four room-pinned policies: movement curves,
+close-player strategy and the two child-choice thresholds. The guarded
+`$8E2F` reader adapter projects only verified US rows13/14 into Japanese
+velocities, preserving native visual/duration outputs and facing mirrors.
+`$C3DD` handles the already-computed mirrored near-player decision;
+`$C3EA→C3F6` skips the Western hover and second curve. Threshold prefixes
+`$C405→C408` and `$C40A→C40D` replace only CMP flags after the original RNG
+call. Native allocators, child handlers, stack/yield ownership and pool-full
+failure paths remain unchanged. Explicit `$C3DA/$C3DD/$C3F9` boundaries
+prevent incoming branches from inlining past those hooks.
+
+Curves and strategy can be mixed without importing artwork or replacing
+shared animation buffers. Active rooms retain their captured policy through
+all parent/child generations; edits apply on the next room/retry. Shared
+initialization calls are excluded until descriptor ownership is established.
 
 ### European Wizard and Viper branch contracts
 
@@ -5984,9 +6139,18 @@ equal. The separate row and running-encounter checks below find PAL changes.
 
 ### European Viper lightning and floor attacks
 
-The original encounter uses `$5000` data from file `0xC8000` in US/PAL;
-the Death Heim rematch uses US `0xCA81A`, PAL `0xCA81E`. All three PAL
-languages have the same changed programs. US and JP programs agree here.
+The original encounter uses `$5000` data from file `0xC8000` in US/European
+English, `0xC7332` in German/French, and `0xC5F6D` in JP. The Death Heim
+rematch uses US `0xCA81A`, European English `0xCA81E`, German/French `0xCA000`
+and JP `0xC8800`. All three PAL languages have the same changed programs.
+US and JP animation programs agree here.
+
+The main attack-choice prefix is a separate difference: US `$E4DB` uses
+`AND #3/BNE`, JP `$E55C` uses `LSR/BCS`, and European English `$E1DA`
+uses `AND #1/BNE` (German +2, French +5). Thus JP and PAL select lightning
+for the same 128 of 256 byte inputs, versus 64 in US. Their accumulator and
+carry results differ, so the integration retains separate choice programs.
+All follow the existing native RNG call without drawing a second value.
 
 States 4–6 select the three lightning directions. Their first movement
 segment is shortened in PAL:
@@ -6018,6 +6182,24 @@ regional delays; all five-ROM decoder outputs verify state 6 as well. No
 per-frame enemy-state edits are made, and SRAM is unchanged. Independent
 repeats have identical parsed JSON and trace data; ordering of some report
 object keys varies because the private harness iterates a set.
+
+The room-policy integration projects only the changed reader outputs at
+`$00:8E2F`: root sources `$E483/$F72A`, rooms `$0805/$0607`, state4–6 row0;
+floor sources `$E5CF/$E606`, original room only, state9/8 rows6–9. Exact US
+row signatures and `$7E:5000` ownership guard the adapter. The original reader
+still owns visuals, collision headers, register effects and coroutine state;
+shared animation buffers are not rewritten. The choice prefix `$E4DB` resumes
+native `$E4E0` or `$E4F7`. Explicit `$E4D2/$E4D8` boundaries prevent incoming
+controller paths from bypassing the hook. Numerical options need no donor art.
+
+Six controlled host encounters verify the integrated US/JP/European profiles
+in both original and rematch rooms. They preserve native enemies and RNG,
+hold a positioned invulnerable player, and exit normally without modifying
+the player's save. Observed state4 lightning segments are22/22/18 updates
+and11/11/9 in the rematch. Both original floor parts match their four-row
+22-versus15-update descent. Other lightning directions retain five-ROM reader
+and adapter coverage; these controls are not full victories or visual parity
+tests, and direct debug room requests are not natural traversal evidence.
 
 A separate static inventory now compares all 19 distinct boss-slot program
 sets across five ROMs, including row counts, visuals, durations, velocities
@@ -6140,6 +6322,24 @@ The projectile-producing attack still obeys the previously documented
 Beginner gate. Its animation delay, mandatory flight interval and actual
 offscreen test are distinct mechanics; the delay alone is insufficient
 to reproduce the European behavior.
+
+The host's two room-pinned leaves now implement the delay and mandatory
+flight interval separately. The native `$8E2F` adapter validates both complete
+US one-row programs before changing their delay from0 to15. At `$A655`, the
+regional prefix places four remaining repetitions in the high byte of the
+projectile's local state selector `+$38`; its low byte stays1 or2. `$A65E`
+decrements that count and tails to the real `$A65B JSR $8657`, feeding only
+the original state index. Once the count reaches zero, the native flag test,
+repeat branch and retirement code resume unchanged. This field is owned by
+this projectile controller; its `$8657` helper does not use `+$38`.
+
+Guards require room `$0304`, inherited descriptor `$D646`, animation
+`$7E:5000`, matching child state and the real `$A65D` yield-return word.
+There is no host timer or synthetic return frame. An initialized count is
+honored even without the host room cache after a debug restore, preventing a
+packed value from reaching the original animation-index load. The counter is
+discarded on native death/slot reuse; no live projectile is restarted by an
+overlay request. Beginner's producer gate remains a separate difficulty rule.
 
 #### Marahna head and projectile preparation
 

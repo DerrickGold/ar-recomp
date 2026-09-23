@@ -24,6 +24,35 @@ int main(void) {
   CHECK(ArRegionalCosts_Fingerprint(&eu, &us, current, &baseline) && baseline);
   CHECK(!memcmp(native, current, 32));
   ArRegionalRules r = {.costs = us}, e = {.costs = eu};
+  uint8_t hold_hashes[64][32];bool hold_seen[64]={0};
+  uint8_t fire_hashes[256][32];bool fire_seen[256]={0};
+  for(unsigned n=0;n<6561;++n) {
+    ArRegionalRules req={0},eff={0};unsigned digits=n,index=0;
+    for(unsigned i=0;i<8;++i) {
+      const unsigned source=digits%3;digits/=3;
+      if(i<4)req.fire_enemy.source[i]=source;else eff.fire_enemy.source[i-4]=source;
+      if(source==1)index|=1u<<i;
+    }
+    CHECK(ArRegionalRules_Fingerprint(&req,&eff,current,&baseline) && baseline==!index);
+    if(!index)CHECK(!memcmp(native,current,32));
+    if(fire_seen[index])CHECK(!memcmp(fire_hashes[index],current,32));
+    else {memcpy(fire_hashes[index],current,32);fire_seen[index]=true;}
+  }
+  qsort(fire_hashes,256,32,CompareDigest);
+  for(unsigned i=1;i<256;++i)CHECK(memcmp(fire_hashes[i-1],fire_hashes[i],32));
+  for(unsigned n=0;n<729;++n) {
+    ArRegionalRules req={0},eff={0};unsigned digits=n,index=0;
+    for(unsigned i=0;i<6;++i) {
+      const unsigned source=digits%3;digits/=3;
+      if(i<3)req.cast_hold.source[i]=source;else eff.cast_hold.source[i-3]=source;
+      if(source==2)index|=1u<<i;
+    }
+    CHECK(ArRegionalRules_Fingerprint(&req,&eff,current,&baseline) && baseline==!index);
+    if(!index)CHECK(!memcmp(native,current,32));
+    if(hold_seen[index])CHECK(!memcmp(hold_hashes[index],current,32));
+    else {memcpy(hold_hashes[index],current,32);hold_seen[index]=true;}
+  }
+  for(unsigned i=0;i<64;++i)for(unsigned j=0;j<i;++j)CHECK(memcmp(hold_hashes[i],hold_hashes[j],32));
   /* Freeze the v39 digest byte layout independently of the current leaf count.
    * Native child defaults (including aliases) must not add another domain. */
   for(unsigned region=1;region<3;++region) {
@@ -113,6 +142,87 @@ int main(void) {
     for(unsigned i=0;i<mask;++i)CHECK(memcmp(ice_digests[i],current,32));
   }
   uint8_t volley_digests[4][32];bool volley_seen[4]={false};
+  uint8_t antlion_digests[16][32];bool antlion_seen[16]={false};
+  uint8_t dragon_digests[16][32];bool dragon_seen[16]={false};
+  uint8_t viper_digests[576][32];bool viper_seen[576]={false};
+  for(unsigned n=0;n<6561;++n) {
+    ArRegionalRules request={0},active={0};unsigned digits=n,index=0;
+    for(unsigned i=15;i<19;++i) {
+      request.bosses.source[i]=digits%3;digits/=3;active.bosses.source[i]=digits%3;digits/=3;
+      if(i==15)index=request.bosses.source[i]*3+active.bosses.source[i];
+      else index=index*4+(request.bosses.source[i]==2?2u:0u)+(active.bosses.source[i]==2?1u:0u);
+    }
+    CHECK(ArRegionalRules_Fingerprint(&request,&active,current,&baseline) && baseline==!index);
+    if(viper_seen[index])CHECK(!memcmp(viper_digests[index],current,32));
+    else {viper_seen[index]=true;memcpy(viper_digests[index],current,32);}
+  }
+  CHECK(!memcmp(native,viper_digests[0],32));
+  for(unsigned i=0;i<576;++i)CHECK(viper_seen[i]);
+  qsort(viper_digests,576,32,CompareDigest);
+  for(unsigned i=1;i<576;++i)CHECK(memcmp(viper_digests[i-1],viper_digests[i],32));
+  uint8_t pharaoh_digests[64][32];bool pharaoh_seen[64]={false};
+  for(unsigned n=0;n<729;++n) {
+    ArRegionalRules request={0},active={0};unsigned digits=n,index=0;
+    for(unsigned i=19;i<22;++i) {
+      request.bosses.source[i]=digits%3;digits/=3;active.bosses.source[i]=digits%3;digits/=3;
+      index|=(request.bosses.source[i]==1?1u:0u)<<(2*(i-19));
+      index|=(active.bosses.source[i]==1?1u:0u)<<(2*(i-19)+1);
+    }
+    CHECK(ArRegionalRules_Fingerprint(&request,&active,current,&baseline) && baseline==!index);
+    if(pharaoh_seen[index])CHECK(!memcmp(pharaoh_digests[index],current,32));
+    else {pharaoh_seen[index]=true;memcpy(pharaoh_digests[index],current,32);}
+    if(index)CHECK(!bsearch(current,viper_digests,576,32,CompareDigest) && !bsearch(current,boss_digests,4096,32,CompareDigest));
+  }
+  CHECK(!memcmp(native,pharaoh_digests[0],32));
+  for(unsigned i=0;i<64;++i)CHECK(pharaoh_seen[i]);
+  qsort(pharaoh_digests,64,32,CompareDigest);
+  for(unsigned i=1;i<64;++i)CHECK(memcmp(pharaoh_digests[i-1],pharaoh_digests[i],32));
+  uint8_t plant_digests[256][32];bool plant_seen[256]={false};
+  for(unsigned n=0;n<6561;++n) {
+    ArRegionalRules request={0},active={0};unsigned digits=n,index=0;
+    for(unsigned i=22;i<26;++i) {
+      request.bosses.source[i]=digits%3;digits/=3;active.bosses.source[i]=digits%3;digits/=3;
+      const bool req=i==22?request.bosses.source[i]!=0:request.bosses.source[i]==2;
+      const bool eff=i==22?active.bosses.source[i]!=0:active.bosses.source[i]==2;
+      index|=(unsigned)req<<(2*(i-22));index|=(unsigned)eff<<(2*(i-22)+1);
+    }
+    CHECK(ArRegionalRules_Fingerprint(&request,&active,current,&baseline) && baseline==!index);
+    if(plant_seen[index])CHECK(!memcmp(plant_digests[index],current,32));
+    else {plant_seen[index]=true;memcpy(plant_digests[index],current,32);}
+    if(index)CHECK(!bsearch(current,pharaoh_digests,64,32,CompareDigest));
+  }
+  CHECK(!memcmp(native,plant_digests[0],32));
+  for(unsigned i=0;i<256;++i)CHECK(plant_seen[i]);
+  qsort(plant_digests,256,32,CompareDigest);
+  for(unsigned i=1;i<256;++i)CHECK(memcmp(plant_digests[i-1],plant_digests[i],32));
+  for(unsigned n=0;n<81;++n) {
+    ArRegionalRules request={0},active={0};unsigned digits=n,index=0;
+    for(unsigned i=13;i<15;++i) {
+      request.bosses.source[i]=digits%3;digits/=3;active.bosses.source[i]=digits%3;digits/=3;
+      index|=(request.bosses.source[i]==2?1u:0u)<<(2*(i-13));
+      index|=(active.bosses.source[i]==2?1u:0u)<<(2*(i-13)+1);
+    }
+    CHECK(ArRegionalRules_Fingerprint(&request,&active,current,&baseline) && baseline==!index);
+    if(dragon_seen[index])CHECK(!memcmp(dragon_digests[index],current,32));
+    else {dragon_seen[index]=true;memcpy(dragon_digests[index],current,32);}
+  }
+  CHECK(!memcmp(native,dragon_digests[0],32));
+  qsort(dragon_digests,16,32,CompareDigest);
+  for(unsigned i=1;i<16;++i)CHECK(memcmp(dragon_digests[i-1],dragon_digests[i],32));
+  for(unsigned n=0;n<81;++n) {
+    ArRegionalRules request={0},active={0};unsigned digits=n,index=0;
+    for(unsigned i=11;i<13;++i) {
+      request.bosses.source[i]=digits%3;digits/=3;active.bosses.source[i]=digits%3;digits/=3;
+      index|=(request.bosses.source[i]==1?1u:0u)<<(2*(i-11));
+      index|=(active.bosses.source[i]==1?1u:0u)<<(2*(i-11)+1);
+    }
+    CHECK(ArRegionalRules_Fingerprint(&request,&active,current,&baseline) && baseline==!index);
+    if(antlion_seen[index])CHECK(!memcmp(antlion_digests[index],current,32));
+    else {antlion_seen[index]=true;memcpy(antlion_digests[index],current,32);}
+  }
+  CHECK(!memcmp(native,antlion_digests[0],32));
+  qsort(antlion_digests,16,32,CompareDigest);
+  for(unsigned i=1;i<16;++i)CHECK(memcmp(antlion_digests[i-1],antlion_digests[i],32));
   uint8_t tanzra_digests[256][32];bool tanzra_seen[256]={false};
   for(unsigned n=0;n<6561;++n) {
     ArRegionalRules request={0},active={0};unsigned digits=n,index=0;
@@ -173,6 +283,30 @@ int main(void) {
     for(unsigned j=0;j<n;++j)CHECK(memcmp(sword_digests[j],current,32));
   }
   ArRegionalRules invalid_motion={0};invalid_motion.action_motion.source[3]=kArRegionalSource_Count;
+  uint8_t head_digests[4][32];bool head_seen[4]={false};
+  for(unsigned requested=0;requested<3;++requested)for(unsigned effective=0;effective<3;++effective) {
+    ArRegionalRules req={0},eff={0};req.action_motion.source[12]=requested;eff.action_motion.source[12]=effective;
+    const unsigned index=(requested==1?2:0)+(effective==1?1:0);
+    CHECK(ArRegionalRules_Fingerprint(&req,&eff,current,&baseline) && baseline==!index);
+    if(head_seen[index])CHECK(!memcmp(current,head_digests[index],32));
+    else {head_seen[index]=true;memcpy(head_digests[index],current,32);}
+    if(index)CHECK(!bsearch(current,motion_digests,16384,32,CompareDigest));
+  }
+  for(unsigned i=0;i<4;++i)for(unsigned j=0;j<i;++j)CHECK(memcmp(head_digests[i],head_digests[j],32));
+  memcpy(current,native,32);baseline=true;
+  uint8_t tree_digests[4][32]={{0}};bool tree_seen[4]={0};
+  for(unsigned requested=0;requested<3;++requested)for(unsigned effective=0;effective<3;++effective) {
+    ArRegionalRules req={0},eff={0};
+    req.action_motion.source[kArRegionalActionMotion_TreeSeeds]=requested;
+    eff.action_motion.source[kArRegionalActionMotion_TreeSeeds]=effective;
+    const unsigned index=(requested!=0)*2+(effective!=0);
+    CHECK(ArRegionalRules_Fingerprint(&req,&eff,current,&baseline) && baseline==!index);
+    if(tree_seen[index])CHECK(!memcmp(current,tree_digests[index],32));
+    else {memcpy(tree_digests[index],current,32);tree_seen[index]=true;}
+    if(index)CHECK(!bsearch(current,motion_digests,16384,32,CompareDigest));
+  }
+  qsort(tree_digests,4,32,CompareDigest);
+  for(unsigned i=1;i<4;++i)CHECK(memcmp(tree_digests[i-1],tree_digests[i],32));
   memcpy(current,native,32);baseline=true;
   CHECK(!ArRegionalRules_Fingerprint(&invalid_motion,&e,current,&baseline) && baseline && !memcmp(current,native,32));
   uint8_t support_digests[1024][32];

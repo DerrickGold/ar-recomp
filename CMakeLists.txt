@@ -2181,7 +2181,7 @@ if(BUILD_TESTING)
         src/regional/regional_score_page.c
         src/regional/regional_lives_display.c
         src/regional/regional_skull_wait.c
-        src/regional/regional_story_prerequisites.c src/regional/regional_town_status.c src/regional/regional_level_goals.c src/regional/regional_sim_combat.c src/regional/regional_sim_ai.c src/regional/regional_sim_actors.c src/regional/regional_construction.c src/regional/regional_support.c src/regional/regional_arrival.c src/regional/regional_action_motion.c src/regional/regional_emitters.c src/regional/regional_volley.c src/regional/regional_boss_rules.c src/regional/regional_collision.c src/regional/regional_platform_skull.c src/regional/regional_actor_stats.c
+        src/regional/regional_story_prerequisites.c src/regional/regional_town_status.c src/regional/regional_level_goals.c src/regional/regional_sim_combat.c src/regional/regional_sim_ai.c src/regional/regional_sim_actors.c src/regional/regional_construction.c src/regional/regional_support.c src/regional/regional_arrival.c src/regional/regional_action_motion.c src/regional/regional_emitters.c src/regional/regional_volley.c src/regional/regional_boss_rules.c src/regional/regional_collision.c src/regional/regional_platform_skull.c src/regional/regional_actor_stats.c src/regional/regional_cast_hold.c src/regional/regional_fire_enemy.c
         src/regional/regional_sources.c
         src/regional/regional_menu_return.c
         src/regional/regional_speed_range.c
@@ -2214,7 +2214,7 @@ if(BUILD_TESTING)
         src/regional/regional_score_page.c
         src/regional/regional_lives_display.c
         src/regional/regional_skull_wait.c
-        src/regional/regional_story_prerequisites.c src/regional/regional_town_status.c src/regional/regional_level_goals.c src/regional/regional_sim_combat.c src/regional/regional_sim_ai.c src/regional/regional_sim_actors.c src/regional/regional_construction.c src/regional/regional_support.c src/regional/regional_arrival.c src/regional/regional_action_motion.c src/regional/regional_emitters.c src/regional/regional_volley.c src/regional/regional_boss_rules.c src/regional/regional_collision.c src/regional/regional_platform_skull.c src/regional/regional_actor_stats.c
+        src/regional/regional_story_prerequisites.c src/regional/regional_town_status.c src/regional/regional_level_goals.c src/regional/regional_sim_combat.c src/regional/regional_sim_ai.c src/regional/regional_sim_actors.c src/regional/regional_construction.c src/regional/regional_support.c src/regional/regional_arrival.c src/regional/regional_action_motion.c src/regional/regional_emitters.c src/regional/regional_volley.c src/regional/regional_boss_rules.c src/regional/regional_collision.c src/regional/regional_platform_skull.c src/regional/regional_actor_stats.c src/regional/regional_cast_hold.c src/regional/regional_fire_enemy.c
         src/regional/regional_sources.c
         src/regional/regional_menu_return.c
         src/regional/regional_speed_range.c
@@ -2710,7 +2710,7 @@ if(BUILD_TESTING)
         src/regional/regional_score_page.c
         src/regional/regional_lives_display.c
         src/regional/regional_skull_wait.c
-        src/regional/regional_story_prerequisites.c src/regional/regional_town_status.c src/regional/regional_level_goals.c src/regional/regional_sim_combat.c src/regional/regional_sim_ai.c src/regional/regional_sim_actors.c src/regional/regional_construction.c src/regional/regional_support.c src/regional/regional_arrival.c src/regional/regional_action_motion.c src/regional/regional_emitters.c src/regional/regional_volley.c src/regional/regional_boss_rules.c src/regional/regional_collision.c src/regional/regional_platform_skull.c src/regional/regional_actor_stats.c
+        src/regional/regional_story_prerequisites.c src/regional/regional_town_status.c src/regional/regional_level_goals.c src/regional/regional_sim_combat.c src/regional/regional_sim_ai.c src/regional/regional_sim_actors.c src/regional/regional_construction.c src/regional/regional_support.c src/regional/regional_arrival.c src/regional/regional_action_motion.c src/regional/regional_emitters.c src/regional/regional_volley.c src/regional/regional_boss_rules.c src/regional/regional_collision.c src/regional/regional_platform_skull.c src/regional/regional_actor_stats.c src/regional/regional_cast_hold.c src/regional/regional_fire_enemy.c
         src/regional/regional_sources.c
         src/regional/regional_menu_return.c
         src/regional/regional_speed_range.c
@@ -2742,7 +2742,7 @@ if(BUILD_TESTING)
         src/regional/regional_score_page.c
         src/regional/regional_lives_display.c
         src/regional/regional_skull_wait.c
-        src/regional/regional_story_prerequisites.c src/regional/regional_town_status.c src/regional/regional_level_goals.c src/regional/regional_sim_combat.c src/regional/regional_sim_ai.c src/regional/regional_sim_actors.c src/regional/regional_construction.c src/regional/regional_support.c src/regional/regional_arrival.c src/regional/regional_action_motion.c src/regional/regional_emitters.c src/regional/regional_volley.c src/regional/regional_boss_rules.c src/regional/regional_collision.c src/regional/regional_platform_skull.c src/regional/regional_actor_stats.c
+        src/regional/regional_story_prerequisites.c src/regional/regional_town_status.c src/regional/regional_level_goals.c src/regional/regional_sim_combat.c src/regional/regional_sim_ai.c src/regional/regional_sim_actors.c src/regional/regional_construction.c src/regional/regional_support.c src/regional/regional_arrival.c src/regional/regional_action_motion.c src/regional/regional_emitters.c src/regional/regional_volley.c src/regional/regional_boss_rules.c src/regional/regional_collision.c src/regional/regional_platform_skull.c src/regional/regional_actor_stats.c src/regional/regional_cast_hold.c src/regional/regional_fire_enemy.c
         src/regional/regional_sources.c
         src/regional/regional_menu_return.c
         src/regional/regional_speed_range.c
@@ -2787,9 +2787,9 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_statue_volley COMMAND actraiser_statue_volley_test)
 
     add_executable(actraiser_actor_stats_test tests/actraiser_actor_stats_test.c
-        src/actraiser/actraiser_actor_stats.c src/actraiser/actraiser_platform_skull.c
+        src/actraiser/actraiser_actor_stats.c src/actraiser/actraiser_platform_skull.c src/actraiser/actraiser_cast_hold.c
         src/actraiser/actraiser_cpu_hle_internal.c src/actraiser/actraiser_hle_fatal.c
-        src/regional/regional_actor_stats.c src/regional/regional_platform_skull.c)
+        src/regional/regional_actor_stats.c src/regional/regional_cast_hold.c src/regional/regional_platform_skull.c)
     target_include_directories(actraiser_actor_stats_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     add_test(NAME actraiser_actor_stats COMMAND actraiser_actor_stats_test)
 
@@ -2805,9 +2805,21 @@ if(BUILD_TESTING)
     target_include_directories(actraiser_boss_rules_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     add_test(NAME actraiser_boss_rules COMMAND actraiser_boss_rules_test)
 
+    add_executable(actraiser_fire_enemy_test tests/actraiser_fire_enemy_test.c
+        src/actraiser/actraiser_fire_enemy.c src/actraiser/actraiser_cpu_hle_internal.c
+        src/actraiser/actraiser_hle_fatal.c src/regional/regional_fire_enemy.c src/quintet_lzss.c)
+    target_include_directories(actraiser_fire_enemy_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    add_test(NAME actraiser_fire_enemy COMMAND actraiser_fire_enemy_test)
+
+    add_executable(actraiser_tree_attack_test tests/actraiser_tree_attack_test.c
+        src/actraiser/actraiser_tree_attack.c src/actraiser/actraiser_hle_fatal.c
+        src/quintet_lzss.c ${SNESRECOMP_RUNNER_ROOT}/src/core/native_leaf.c)
+    target_include_directories(actraiser_tree_attack_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    add_test(NAME actraiser_tree_attack COMMAND actraiser_tree_attack_test)
+
     add_executable(actraiser_action_motion_test tests/actraiser_action_motion_test.c
         src/actraiser/actraiser_action_motion.c src/actraiser/actraiser_hle_fatal.c src/actraiser/actraiser_cpu_hle_internal.c
-        src/regional/regional_action_motion.c src/regional/regional_emitters.c src/regional/regional_boss_rules.c src/regional/regional_collision.c src/quintet_lzss.c)
+        src/regional/regional_action_motion.c src/regional/regional_emitters.c src/regional/regional_boss_rules.c src/regional/regional_collision.c src/regional/regional_fire_enemy.c src/quintet_lzss.c)
     target_include_directories(actraiser_action_motion_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     add_test(NAME actraiser_action_motion COMMAND actraiser_action_motion_test)
 
@@ -2825,7 +2837,7 @@ if(BUILD_TESTING)
         src/regional/regional_score_page.c
         src/regional/regional_lives_display.c
         src/regional/regional_skull_wait.c
-        src/regional/regional_story_prerequisites.c src/regional/regional_town_status.c src/regional/regional_level_goals.c src/regional/regional_sim_combat.c src/regional/regional_sim_ai.c src/regional/regional_sim_actors.c src/regional/regional_construction.c src/regional/regional_support.c src/regional/regional_arrival.c src/regional/regional_action_motion.c src/regional/regional_emitters.c src/regional/regional_volley.c src/regional/regional_boss_rules.c src/regional/regional_collision.c src/regional/regional_platform_skull.c src/regional/regional_actor_stats.c
+        src/regional/regional_story_prerequisites.c src/regional/regional_town_status.c src/regional/regional_level_goals.c src/regional/regional_sim_combat.c src/regional/regional_sim_ai.c src/regional/regional_sim_actors.c src/regional/regional_construction.c src/regional/regional_support.c src/regional/regional_arrival.c src/regional/regional_action_motion.c src/regional/regional_emitters.c src/regional/regional_volley.c src/regional/regional_boss_rules.c src/regional/regional_collision.c src/regional/regional_platform_skull.c src/regional/regional_actor_stats.c src/regional/regional_cast_hold.c src/regional/regional_fire_enemy.c
         src/regional/regional_sources.c
         src/regional/regional_menu_return.c
         src/regional/regional_speed_range.c
@@ -2849,7 +2861,7 @@ if(BUILD_TESTING)
         src/regional/regional_score_page.c
         src/regional/regional_lives_display.c
         src/regional/regional_skull_wait.c
-        src/regional/regional_story_prerequisites.c src/regional/regional_town_status.c src/regional/regional_level_goals.c src/regional/regional_sim_combat.c src/regional/regional_sim_ai.c src/regional/regional_sim_actors.c src/regional/regional_construction.c src/regional/regional_support.c src/regional/regional_arrival.c src/regional/regional_action_motion.c src/regional/regional_emitters.c src/regional/regional_volley.c src/regional/regional_boss_rules.c src/regional/regional_collision.c src/regional/regional_platform_skull.c src/regional/regional_actor_stats.c
+        src/regional/regional_story_prerequisites.c src/regional/regional_town_status.c src/regional/regional_level_goals.c src/regional/regional_sim_combat.c src/regional/regional_sim_ai.c src/regional/regional_sim_actors.c src/regional/regional_construction.c src/regional/regional_support.c src/regional/regional_arrival.c src/regional/regional_action_motion.c src/regional/regional_emitters.c src/regional/regional_volley.c src/regional/regional_boss_rules.c src/regional/regional_collision.c src/regional/regional_platform_skull.c src/regional/regional_actor_stats.c src/regional/regional_cast_hold.c src/regional/regional_fire_enemy.c
         src/regional/regional_sources.c
         src/regional/regional_menu_return.c
         src/regional/regional_speed_range.c

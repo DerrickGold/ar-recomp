@@ -3,6 +3,7 @@
 #include "regional/regional_emitters.h"
 #include "regional/regional_boss_rules.h"
 #include "regional/regional_collision.h"
+#include "regional/regional_fire_enemy.h"
 #include "quintet_lzss.h"
 #include "byte_order.h"
 #include <assert.h>
@@ -14,6 +15,8 @@ static uint16_t snapshot;
 static uint8_t emitters;
 static uint64_t bosses;
 static uint8_t collision;
+static uint8_t fire;
+uint8_t ActRaiserRegional_FireSnapshot(void){return fire;}
 static bool decode_extents;
 static unsigned calls;
 static unsigned tail_target,tail_origin;
@@ -31,10 +34,14 @@ static uint16_t Read(unsigned at){return ByteOrder_ReadLe16(memory+at);}
 static void Write(unsigned at,uint16_t value){ByteOrder_WriteLe16(memory+at,value);}
 static int16_t Signed(uint8_t value){return value<128?value:(int16_t)((int)value-256);}
 /* Native-reader stand-in. It deliberately owns all CPU/return side effects;
- * the regional adapter must preserve them and change only two output words. */
+ * the regional adapter must preserve them and change only its declared outputs. */
 static RecompReturn Native(CpuState *cpu) {
   if(native_result!=RECOMP_RETURN_NORMAL)return native_result;
   const unsigned x=cpu->X,base=Read(x+0x16),at=base+Read(base+2+Read(x+0x1a)*2)+Read(x+0x1c)*4;
+  if(memory[at]==255) {
+    Write(x+0x1c,0);cpu->_flag_C=1;cpu->P|=CPU_P_C;
+    cpu->A=255;cpu->Y=0xbeef;cpu->S+=2;return native_result;
+  }
   Write(x+0x24,memory[at+1]);
   Write(x+6,(uint16_t)(Signed(memory[at+2])*((Read(x+0x28)&0x4000)?-1:1)));
   Write(x+8,(uint16_t)(Signed(memory[at+3])*((Read(x+0x28)&0x8000)?-1:1)));
@@ -47,6 +54,7 @@ static RecompReturn Native(CpuState *cpu) {
     Write(x+0x0c,(uint16_t)Signed(memory[comp+2+!!(flip&0x8000)]));
     Write(x+0x10,(uint16_t)Signed(memory[comp+2+!(flip&0x8000)]));
   }
+  cpu->_flag_C=0;cpu->P&=~CPU_P_C;
   cpu->A=0x1234;cpu->Y=0xbeef;cpu->S+=2;return native_result;
 }
 RecompReturn bank_00_8E2F_M0X0(CpuState *cpu){assert(!cpu->m_flag && !ActRaiser_ActionMotionEntry(cpu));++calls;return Native(cpu);}
@@ -61,7 +69,8 @@ static CpuState Setup(unsigned family,unsigned state,unsigned row,unsigned flip,
   cpu_p_to_mirrors(&cpu);calls=0;native_result=RECOMP_RETURN_NORMAL;return cpu;
 }
 static void CheckRow(unsigned family,unsigned state,unsigned row,unsigned delay,int dx) {
-  for(unsigned mask=0;mask<(1u<<kArRegionalActionMotion_Count);++mask)for(unsigned flip=0;flip<4;++flip)for(unsigned width=0;width<2;++width) {
+  /* These seven families predate the independent expanded head program. */
+  for(unsigned mask=0;mask<(1u<<kArRegionalActionMotion_HeadWithdrawal);++mask)for(unsigned flip=0;flip<4;++flip)for(unsigned width=0;width<2;++width) {
     CpuState cpu=Setup(family,state,row,flip<<14,width),reference=cpu;snapshot=mask;
     Write(0x4000,0x600);Write(0x4002+state*2,0x100);
     const unsigned at=0x4100+row*4;memory[at]=31;memory[at+1]=delay;memory[at+2]=(uint8_t)dx;memory[at+3]=0xfd;
@@ -99,6 +108,22 @@ static void CheckRoms(char **paths) {
       const unsigned off=offsets[region][area],size=ByteOrder_ReadLe16(rom+off);
       assert(size<=4096 && QuintetLzss_DecompressAsset(rom+off,sizeof(rom)-off,blobs[region][area],size,NULL));
     }
+  }
+  for(unsigned region=0;region<5;++region) {
+    const uint8_t *us=blobs[0][4],*other=blobs[region][4];
+    const unsigned a=ByteOrder_ReadLe16(us+72),b=ByteOrder_ReadLe16(other+72);
+    unsigned total=0;
+    for(unsigned row=0;;++row) {
+      unsigned native_row=row;uint8_t visual=us[a+4*row];
+      (void)ArRegionalActionMotion_HeadRow(region==1?(1u<<kArRegionalActionMotion_HeadWithdrawal):0,row,&native_row,&visual);
+      assert(visual==other[b+4*row]);
+      if(visual==255)break;
+      assert(!memcmp(us+a+4*native_row+1,other+b+4*row+1,3));
+      const unsigned uc=ByteOrder_ReadLe16(us+ByteOrder_ReadLe16(us)+2*visual);
+      const unsigned oc=ByteOrder_ReadLe16(other+ByteOrder_ReadLe16(other)+2*visual);
+      assert(!memcmp(us+uc,other+oc,5+7*us[uc+4]));total+=us[a+4*native_row+1]+1;
+    }
+    assert(total==(region==1?20:16));
   }
   static const unsigned states[7][4]={{21,0,0,0},{30,31,32,33},{31,0,0,0},{39,41,0,0},{16,19,0,0},{29,30,0,0},{41,0,0,0}};
   const uint8_t *emitter_us=blobs[0][1];
@@ -440,9 +465,318 @@ static void CheckCollisionRoms(char **paths) {
   }
   printf("five-ROM collision headers: %u compositions verified\n",cases);
 }
+static void CheckFireRows(void) {
+  static const int8_t native[2][8][2]={
+    {{-2,-1},{-2,-2},{-2,-3},{-2,-3},{-2,-3},{-1,-2},{-1,-1},{-1,0}},
+    {{1,0},{1,1},{1,2},{2,3},{2,3},{2,3},{2,2},{2,1}}};
+  unsigned cases=0;
+  for(unsigned mask=0;mask<16;++mask)for(unsigned state=13;state<=14;++state)
+  for(unsigned row=0;row<8;++row)for(unsigned flip=0;flip<4;++flip)for(unsigned width=0;width<2;++width) {
+    CpuState cpu=Setup(0,state,row,flip<<14,width),expected=cpu;
+    memory[0x18]=3;Write(0x912,0xc3a5);fire=mask;snapshot=0;bosses=0;
+    Write(0x4000,0x600);Write(0x4002+state*2,0x100);
+    const unsigned at=0x4100+4*row;
+    memory[at]=32+row/4;memory[at+1]=1;
+    memory[at+2]=(uint8_t)native[state-13][row][0];memory[at+3]=(uint8_t)native[state-13][row][1];
+    int16_t dx=native[state-13][row][0],dy=native[state-13][row][1];
+    const bool changed=ArRegionalFire_CurveRow(mask,state,row,memory[at],1,&dx,&dy);
+    assert(ActRaiser_ActionMotionEntry(&cpu)==changed);
+    uint8_t before[sizeof(memory)],wanted[sizeof(memory)];memcpy(before,memory,sizeof(memory));
+    Native(&expected);
+    if(changed){Write(cpu.X+6,(uint16_t)(dx*(flip&1?-1:1)));Write(cpu.X+8,(uint16_t)(dy*(flip&2?-1:1)));}
+    memcpy(wanted,memory,sizeof(memory));memcpy(memory,before,sizeof(memory));
+    assert((changed?ActRaiser_ActionMotion(&cpu):Native(&cpu))==RECOMP_RETURN_NORMAL);
+    assert(!memcmp(&cpu,&expected,sizeof(cpu)) && !memcmp(wanted,memory,sizeof(memory)));
+    if(changed)for(unsigned byte=0;byte<4;++byte) {
+      memcpy(memory,before,sizeof(memory));memory[at+byte]^=1;
+      assert(!ActRaiser_ActionMotionEntry(&cpu));
+    }
+    ++cases;
+  }
+  fire=0;
+  printf("fire animation adapter: %u mixed-policy/row/facing/width cases and native-row guards passed\n",cases);
+}
+static void CheckDragonRows(void) {
+  for(unsigned source=0;source<3;++source)for(unsigned state=1;state<=2;++state)
+  for(unsigned flip=0;flip<4;++flip)for(unsigned width=0;width<2;++width) {
+    ArRegionalBossPolicy policy;assert(ArRegionalBoss_Init(&policy,source) && ArRegionalBoss_Resolve(&policy,&bosses));
+    CpuState cpu=Setup(0,state,0,flip<<14,width),expected=cpu;Write(0x18,0x0304);Write(0x912,0xd646);Write(0x8f6,0x5000);
+    Write(0x5000,0x600);Write(0x5002+2*state,0x100);
+    const uint8_t row[]={(uint8_t)(34-state),0,253,(uint8_t)(state==1?1:255),255};memcpy(memory+0x5100,row,5);
+    uint8_t saved[sizeof(memory)],wanted[sizeof(memory)];memcpy(saved,memory,sizeof(memory));
+    const bool changed=source==2;assert(ActRaiser_ActionMotionEntry(&cpu)==changed);
+    Native(&expected);if(changed)Write(0x904,15);memcpy(wanted,memory,sizeof(memory));memcpy(memory,saved,sizeof(memory));
+    assert((changed?ActRaiser_ActionMotion(&cpu):Native(&cpu))==RECOMP_RETURN_NORMAL);
+    assert(!memcmp(&cpu,&expected,sizeof(cpu)) && !memcmp(wanted,memory,sizeof(memory)));
+    if(changed)for(unsigned byte=0;byte<5;++byte) {
+      memcpy(memory,saved,sizeof(memory));memory[0x5100+byte]^=1;assert(!ActRaiser_ActionMotionEntry(&cpu));
+    }
+  }
+  bosses=0;
+}
+static void CheckViperRows(void) {
+  unsigned cases=0;
+  for(unsigned mix=0;mix<81;++mix)for(unsigned which=0;which<14;++which)
+  for(unsigned flip=0;flip<4;++flip)for(unsigned width=0;width<2;++width) {
+    ArRegionalBossPolicy policy={{0}};unsigned digits=mix;
+    for(unsigned i=kArRegionalBoss_ViperChoice;i<kArRegionalBoss_Count;++i){policy.source[i]=digits%3;digits/=3;}
+    assert(ArRegionalBoss_Resolve(&policy,&bosses));
+    const bool floor=which>=6,rematch=which>=3 && which<6;
+    const unsigned state=floor?8+(which-6)/4:4+which%3,row=floor?6+(which-6)%4:0;
+    const unsigned source=floor?(state==8?0xe606:0xe5cf):rematch?0xf72a:0xe483;
+    CpuState cpu=Setup(0,state,row,flip<<14,width),expected=cpu;
+    Write(0x18,rematch?0x0607:0x0805);Write(0x912,source);Write(0x8f6,0x5000);
+    Write(0x5000,0x600);Write(0x5002+2*state,0x100);
+    static const uint8_t delays[]={1,1,1,15},speeds[]={1,2,4,6},visuals[]={17,25,26};
+    const unsigned at=0x5100+4*row;
+    uint16_t duration=floor?delays[row-6]:rematch?10:21;
+    int16_t dy=floor?speeds[row-6]:rematch?8:4,dx=floor?0:((int)state-6)*dy/2;
+    memory[at]=floor?(state==8?27:16):visuals[state-4];memory[at+1]=duration;
+    memory[at+2]=(uint8_t)dx;memory[at+3]=(uint8_t)dy;
+    const bool changed=ArRegionalBoss_ViperRow(bosses,rematch,state,row,memory[at],&duration,dx,&dy);
+    assert(ActRaiser_ActionMotionEntry(&cpu)==changed);
+    uint8_t saved[sizeof(memory)],wanted[sizeof(memory)];memcpy(saved,memory,sizeof(memory));
+    Native(&expected);
+    if(changed){Write(cpu.X+0x24,duration);Write(cpu.X+8,(uint16_t)(dy*(flip&2?-1:1)));}
+    memcpy(wanted,memory,sizeof(memory));memcpy(memory,saved,sizeof(memory));
+    assert((changed?ActRaiser_ActionMotion(&cpu):Native(&cpu))==RECOMP_RETURN_NORMAL);
+    assert(!memcmp(&cpu,&expected,sizeof(cpu)) && !memcmp(wanted,memory,sizeof(memory)));
+    if(changed)for(unsigned bad=0;bad<13;++bad) {
+      memcpy(memory,saved,sizeof(memory));CpuState invalid=cpu;
+      if(bad<4)memory[at+bad]^=1;
+      else switch(bad) {
+        case 4:Write(0x18,0x0105);break;
+        case 5:Write(0x912,source+1);break;
+        case 6:Write(0x8f6,0x4000);break;
+        case 7:memory[0x8f8]=0x7f;break;
+        case 8:Write(0x8fc,row+1);break;
+        case 9:Write(0x5002+2*state,0xfffe);break;
+        case 10:Write(0x5000,0x1001);break;
+        case 11:Write(invalid.S+1,0x969d);break;
+        case 12:Write(0x912,floor?0xe483:0xe5cf);break;
+      }
+      assert(!ActRaiser_ActionMotionEntry(&invalid));
+    }
+    ++cases;
+  }
+  bosses=0;
+  printf("Viper animation adapter: %u mixed-policy/row/facing/width cases and owner/signature guards passed\n",cases);
+}
+static CpuState PharaohReader(unsigned encounter,unsigned row,unsigned width) {
+  CpuState cpu=Setup(0,11,row,0,width);Write(0x18,encounter?0x0407:0x0603);
+  Write(0x912,encounter?0xf6fa:0xc1a2);Write(0x8f6,0x5000);
+  Write(0x5000,0x600);Write(0x5018,0x100);
+  const uint8_t bounce[]={15,3,0,253,15,1,0,254,15,0,0,255,15,1,0,0,
+    15,0,0,1,15,1,0,2,15,3,0,3,15,2,0,255,15,1,0,0,15,2,0,1,15,15,0,0,255};
+  memcpy(memory+0x5100,bounce,sizeof(bounce));memory[0x5129]=encounter?31:15;return cpu;
+}
+static void CheckPharaohRows(void) {
+  unsigned cases=0;
+  for(unsigned mix=0;mix<27;++mix)for(unsigned encounter=0;encounter<2;++encounter)
+  for(unsigned row=0;row<=11;++row)for(unsigned width=0;width<2;++width)for(unsigned flip=0;flip<4;++flip) {
+    ArRegionalBossPolicy policy={{0}};unsigned digits=mix;
+    for(unsigned i=19;i<22;++i){policy.source[i]=digits%3;digits/=3;}
+    assert(ArRegionalBoss_Resolve(&policy,&bosses));
+    CpuState cpu=PharaohReader(encounter,row,width),expected=cpu;Write(cpu.X+0x28,flip<<14);
+    const bool changed=row==10 && policy.source[encounter?kArRegionalBoss_PharaohRematchLanding:kArRegionalBoss_PharaohLanding]==1;
+    assert(ActRaiser_ActionMotionEntry(&cpu)==changed);
+    uint8_t before[sizeof(memory)],wanted[sizeof(memory)];memcpy(before,memory,sizeof(memory));
+    if(changed)Write(cpu.X+0x1c,11);
+    Native(&expected);memcpy(wanted,memory,sizeof(memory));memcpy(memory,before,sizeof(memory));
+    assert((changed?ActRaiser_ActionMotion(&cpu):Native(&cpu))==RECOMP_RETURN_NORMAL);
+    assert(!memcmp(&cpu,&expected,sizeof(cpu)) && !memcmp(memory,wanted,sizeof(memory)));++cases;
+  }
+  bosses=UINT64_C(1)<<(2*kArRegionalBoss_PharaohLanding);
+  for(unsigned bad=0;bad<58;++bad) {
+    CpuState cpu=PharaohReader(0,10,0);
+    if(bad<45)memory[0x5100+bad]^=1;
+    else switch(bad) {
+      case 45:Write(0x18,0x0503);break;case 46:Write(0x912,0xc8c9);break;
+      case 47:Write(0x8f6,0x4000);break;case 48:memory[0x8f8]=0x7f;break;
+      case 49:Write(0x8fa,25);break;case 50:Write(0x5018,0xfffe);break;
+      case 51:Write(0x5018,0);break;case 52:Write(0x5000,0x1001);break;
+      case 53:Write(0x5000,0x12c);break;case 54:Write(cpu.S+1,0x969d);break;
+      case 55:cpu.DB=1;break;case 56:cpu.D=1;break;case 57:cpu.X++;break;
+    }
+    assert(!ActRaiser_ActionMotionEntry(&cpu));
+  }
+  for(unsigned escape=1;escape<=RECOMP_RETURN_OWNED_UNWIND;++escape) {
+    CpuState cpu=PharaohReader(0,10,0),expected=cpu;
+    native_result=(RecompReturn)escape;
+    uint8_t before[sizeof(memory)];memcpy(before,memory,sizeof(memory));
+    assert(ActRaiser_ActionMotionEntry(&cpu) && ActRaiser_ActionMotion(&cpu)==native_result);
+    assert(!memcmp(memory,before,sizeof(memory)) && !memcmp(&cpu,&expected,sizeof(cpu)));
+  }
+  bosses=0;native_result=RECOMP_RETURN_NORMAL;
+  printf("Pharaoh landing: %u mixed-policy/row/facing/width cases, 58 invalid contexts and escape restoration passed\n",cases);
+}
+static CpuState HeadReader(unsigned row,unsigned flags) {
+  CpuState cpu=Setup(0,35,row,0,0);Write(0x18,0x0605);Write(0x912,0xe3a1);
+  Write(0xa5,0x4000);Write(0x4048,0x100);Write(0x4000,0x600);
+  const uint8_t sequence[]={40,7,0,0,38,3,0,0,37,3,0,0,255,41,1,254,0};
+  memcpy(memory+0x4100,sequence,sizeof(sequence));
+  const uint8_t bottoms[]={16,19,21,24};
+  for(unsigned i=0;i<4;++i) {
+    Write(0x4600+2*(37+i),0x800+40*i);
+    memcpy(memory+0x4800+40*i,(uint8_t[]){8,8,16,bottoms[i],4},5);
+  }
+  cpu.P=flags;cpu_p_to_mirrors(&cpu);Write(cpu.S+1,0x8633);return cpu;
+}
+static void CheckHeadProgram(void) {
+  for(unsigned mask=0;mask<(1u<<kArRegionalActionMotion_Count);++mask)for(unsigned row=0;row<6;++row) {
+    unsigned mapped=99;uint8_t visual=99;
+    const bool accepted=(mask&(1u<<kArRegionalActionMotion_HeadWithdrawal)) && row<=4;
+    assert(ArRegionalActionMotion_HeadRow(mask,row,&mapped,&visual)==accepted);
+    if(!accepted)assert(mapped==99 && visual==99);
+  }
+  unsigned mapped=99;uint8_t visual=99;
+  assert(!ArRegionalActionMotion_HeadRow(UINT16_MAX,0,&mapped,&visual) && mapped==99 && visual==99);
+  assert(!ArRegionalActionMotion_HeadRow(0x1000,0,NULL,&visual));
+  assert(!ArRegionalActionMotion_HeadRow(0x1000,0,&mapped,NULL));
+  const unsigned peers[]={0,1,0xaaa,0xfff};unsigned cases=0;
+  for(unsigned region=0;region<3;++region)for(unsigned peer=0;peer<4;++peer)
+  for(unsigned row=0;row<6;++row)for(unsigned flags=0;flags<16;++flags)
+  for(unsigned tagged=0;tagged<2;++tagged)for(unsigned width=0;width<2;++width) {
+    snapshot=peers[peer]|(region==1?(1u<<kArRegionalActionMotion_HeadWithdrawal):0);
+    CpuState cpu=HeadReader(row+(tagged?0x100:0),(flags&1)|(flags&2)|((flags&4)<<4)|((flags&8)<<4)|(width?CPU_P_M:0)),expected=cpu;
+    Write(cpu.X+0x28,(flags&3)<<14);decode_extents=true;
+    uint8_t saved[sizeof(memory)],wanted[sizeof(memory)];memcpy(saved,memory,sizeof(memory));
+    const bool changed=(region==1 || tagged) && row<=4;
+    assert(ActRaiser_ActionMotionEntry(&cpu)==changed);
+    if(changed) {
+      static const unsigned native[]={0,1,1,2,3};
+      Write(cpu.X+0x1c,native[row]);Write(cpu.X+0x3c,row==1?1:0);Native(&expected);
+      Write(cpu.X+0x3c,0);if(row<4)Write(cpu.X+0x1c,0x100+row);
+      memcpy(wanted,memory,sizeof(memory));memcpy(memory,saved,sizeof(memory));
+      assert(ActRaiser_ActionMotion(&cpu)==RECOMP_RETURN_NORMAL);
+      assert(!memcmp(wanted,memory,sizeof(memory)) && !memcmp(&cpu,&expected,sizeof(cpu)));
+    } else {
+      assert(!memcmp(saved,memory,sizeof(memory)) && !memcmp(&cpu,&expected,sizeof(cpu)));
+    }
+    ++cases;
+  }
+  snapshot=UINT16_MAX;CpuState invalid_policy=HeadReader(1,0);
+  assert(!ActRaiser_ActionMotionEntry(&invalid_policy));
+  snapshot=1u<<kArRegionalActionMotion_HeadWithdrawal;
+  for(unsigned bad=0;bad<33;++bad) {
+    CpuState cpu=HeadReader(1,0);
+    if(bad<13)memory[0x4100+bad]^=1;
+    else switch(bad) {
+      case 13:cpu.PB=1;break;case 14:cpu.DB=1;break;case 15:cpu.D=1;break;
+      case 16:cpu.X=0x1aa0;break;case 17:cpu.x_flag=1;break;case 18:cpu.emulation=1;break;
+      case 19:cpu.P|=CPU_P_D;break;case 20:cpu._flag_D=1;break;case 21:cpu.X++;break;
+      case 22:Write(0x8a,cpu.X);break;case 23:Write(0x18,0x0505);break;case 24:Write(0x912,0xe3a2);break;
+      case 25:Write(0x8fa,34);break;case 26:Write(0x8f6,0x5000);break;case 27:memory[0x8f8]=0x7f;break;
+      case 28:Write(cpu.X+0x3c,1);break;case 29:Write(cpu.S+1,0x969d);break;
+      case 30:memory[0x4800+80+3]++;break;
+      case 31:Write(0x4600+78,0xfffe);break;case 32:Write(0x4000,0x1001);break;
+    }
+    assert(!ActRaiser_ActionMotionEntry(&cpu));
+  }
+  for(unsigned token=1;token<=RECOMP_RETURN_OWNED_UNWIND;++token) {
+    CpuState cpu=HeadReader(0x101,0),expected=cpu;uint8_t saved[sizeof(memory)];memcpy(saved,memory,sizeof(memory));
+    native_result=token;assert(ActRaiser_ActionMotionEntry(&cpu));
+    assert(ActRaiser_ActionMotion(&cpu)==token && !memcmp(&cpu,&expected,sizeof(cpu)) && !memcmp(saved,memory,sizeof(memory)));
+  }
+  snapshot=0;decode_extents=false;
+  printf("head withdrawal: %u policy/row/flag/width/cache cases, 33 invalid contexts and escape restoration passed\n",cases);
+}
+static CpuState PlantReader(unsigned row,unsigned flags) {
+  CpuState cpu=Setup(0,2,row,0,0);Write(0x18,0x0305);Write(0x912,0xd974);Write(cpu.X+0x16,0x5000);
+  Write(0x5000,0x600);Write(0x5006,0x100);
+  memcpy(memory+0x5100,(uint8_t[]){3,3,0,0,4,3,0,0,255},9);
+  for(unsigned i=0;i<3;++i) {
+    Write(0x5604+2*i,0x800+32*i);
+    memcpy(memory+0x5800+32*i,(uint8_t[]){i?16:8,8,16,16,2},5);
+  }
+  cpu.P=flags;cpu_p_to_mirrors(&cpu);return cpu;
+}
+static void CheckPlantProgram(void) {
+  unsigned cases=0;
+  for(unsigned mix=0;mix<81;++mix)for(unsigned row=0;row<6;++row)
+  for(unsigned flags=0;flags<16;++flags)for(unsigned tagged=0;tagged<2;++tagged)for(unsigned width=0;width<2;++width) {
+    ArRegionalBossPolicy policy={{0}};unsigned digits=mix;
+    for(unsigned i=22;i<26;++i){policy.source[i]=digits%3;digits/=3;}
+    assert(ArRegionalBoss_Resolve(&policy,&bosses));
+    CpuState cpu=PlantReader(row+(tagged?0x100:0),(flags&3)|((flags&12)<<4)|(width?CPU_P_M:0)),expected=cpu;
+    Write(cpu.X+0x28,(flags&3)<<14);decode_extents=true;
+    uint8_t saved[sizeof(memory)],wanted[sizeof(memory)];memcpy(saved,memory,sizeof(memory));
+    const bool changed=(policy.source[23]==2 || tagged) && row<=4;
+    assert(ActRaiser_ActionMotionEntry(&cpu)==changed);
+    if(changed) {
+      const unsigned native[]={0,0,1,0,2};
+      Write(cpu.X+0x1c,native[row]);Write(cpu.X+0x3c,row==0?0xffff:0);Native(&expected);
+      Write(cpu.X+0x3c,0);if(row<4)Write(cpu.X+0x1c,0x100+row);
+      memcpy(wanted,memory,sizeof(memory));memcpy(memory,saved,sizeof(memory));
+      assert(ActRaiser_ActionMotion(&cpu)==RECOMP_RETURN_NORMAL);
+      assert(!memcmp(memory,wanted,sizeof(memory)) && !memcmp(&cpu,&expected,sizeof(cpu)));
+    } else assert(!memcmp(memory,saved,sizeof(memory)) && !memcmp(&cpu,&expected,sizeof(cpu)));
+    ++cases;
+  }
+  bosses=UINT64_C(2)<<(2*kArRegionalBoss_PlantOpen);
+  for(unsigned bad=0;bad<25;++bad) {
+    CpuState cpu=PlantReader(0,0);
+    if(bad<9)memory[0x5100+bad]^=1;
+    else switch(bad) {
+      case 9:Write(0x18,0x0405);break;case 10:Write(0x912,0xe3a1);break;
+      case 11:Write(cpu.X+0x16,0x4000);break;case 12:memory[cpu.X+0x18]=0x7f;break;
+      case 13:Write(cpu.X+0x3a,0x920);break;case 14:Write(cpu.X+0x3c,1);break;
+      case 15:Write(cpu.S+1,0x969d);break;case 16:Write(0x5006,0xffff);break;
+      case 17:Write(0x5000,0x108);break;case 18:Write(0x5000,0x1001);break;
+      case 19:memory[0x5800]++;break;case 20:memory[0x5803]++;break;
+      case 21:memory[0x5804]++;break;case 22:Write(0x5604,0xffff);break;
+      case 23:cpu.PB=1;break;case 24:cpu.X++;break;
+    }
+    assert(!ActRaiser_ActionMotionEntry(&cpu));
+  }
+  for(unsigned token=1;token<=RECOMP_RETURN_OWNED_UNWIND;++token) {
+    CpuState cpu=PlantReader(0x100,0),expected=cpu;uint8_t before[sizeof(memory)];memcpy(before,memory,sizeof(memory));
+    native_result=(RecompReturn)token;assert(ActRaiser_ActionMotionEntry(&cpu));
+    assert(ActRaiser_ActionMotion(&cpu)==token && !memcmp(memory,before,sizeof(memory)) && !memcmp(&cpu,&expected,sizeof(cpu)));
+  }
+  bosses=0;decode_extents=false;native_result=RECOMP_RETURN_NORMAL;
+  printf("Plant open program: %u mixed-policy/row/facing/width/cache cases, 25 invalid contexts and escape restoration passed\n",cases);
+}
+static void CheckPlantWindups(void) {
+  unsigned cases=0;
+  for(unsigned mix=0;mix<81;++mix)for(unsigned state=4;state<=6;state+=2)
+  for(unsigned row=0;row<2;++row)for(unsigned width=0;width<2;++width)for(unsigned flip=0;flip<4;++flip) {
+    ArRegionalBossPolicy policy={{0}};unsigned digits=mix;
+    for(unsigned i=22;i<26;++i){policy.source[i]=digits%3;digits/=3;}
+    assert(ArRegionalBoss_Resolve(&policy,&bosses));
+    CpuState cpu=Setup(0,state,row,flip<<14,width),expected=cpu;
+    Write(0x18,0x0305);Write(cpu.X+0x32,0xd974);Write(cpu.X+0x16,0x5000);Write(cpu.X+0x3a,0x920);
+    Write(0x5000,0x600);Write(0x5002+2*state,0x100);
+    const uint8_t program[]={state==4?5:6,7,0,0,state==4?7:8,0,0,0,255};memcpy(memory+0x5100,program,sizeof(program));
+    const bool changed=!row && policy.source[state==4?kArRegionalBoss_PlantLowWindup:kArRegionalBoss_PlantHighWindup]==2;
+    assert(ActRaiser_ActionMotionEntry(&cpu)==changed);
+    uint8_t before[sizeof(memory)],wanted[sizeof(memory)];memcpy(before,memory,sizeof(memory));
+    Native(&expected);if(changed)Write(cpu.X+0x24,23);
+    memcpy(wanted,memory,sizeof(memory));memcpy(memory,before,sizeof(memory));
+    assert((changed?ActRaiser_ActionMotion(&cpu):Native(&cpu))==RECOMP_RETURN_NORMAL);
+    assert(!memcmp(memory,wanted,sizeof(memory)) && !memcmp(&cpu,&expected,sizeof(cpu)));
+    if(changed)for(unsigned bad=0;bad<13;++bad) {
+      memcpy(memory,before,sizeof(memory));CpuState invalid=cpu;
+      if(bad<9)memory[0x5100+bad]^=1;
+      else switch(bad) {
+        case 9:Write(cpu.X+0x3a,0);break;case 10:Write(0x5000,0x108);break;
+        case 11:Write(cpu.S+1,0x969d);break;case 12:Write(0x18,0x0805);break;
+      }
+      assert(!ActRaiser_ActionMotionEntry(&invalid));
+    }
+    ++cases;
+  }
+  bosses=0;printf("Plant wind-ups: %u mixed-policy/row/facing/width cases and signature guards passed\n",cases);
+}
 int main(int argc,char **argv) {
   assert(argc==1 || argc==6);
+  CheckHeadProgram();
   CheckCollision();
+  CheckFireRows();
+  CheckDragonRows();
+  CheckViperRows();
+  CheckPharaohRows();
+  CheckPlantProgram();CheckPlantWindups();
   CheckIceRows();
   CheckTanzraRows();
   CheckBossRows();
@@ -481,5 +815,5 @@ int main(int argc,char **argv) {
     assert(!ActRaiser_ActionMotionEntry(&cpu));
   }
   if(argc==6){CheckRoms(argv+1);CheckCollisionRoms(argv+1);}
-  printf("action motion: 57 owner/rows x%u mixes x4 facings x2 widths, escape and shape checks passed\n",1u<<kArRegionalActionMotion_Count);return 0;
+  printf("action motion: 57 owner/rows x%u mixes x4 facings x2 widths, escape and shape checks passed\n",1u<<kArRegionalActionMotion_HeadWithdrawal);return 0;
 }

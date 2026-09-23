@@ -249,6 +249,18 @@ original frame before reaching the HLE. The helper returns zero unchanged
 without an active wrapper. It is not a JSR/JSL call API and must not be called
 from a raw HLE lacking the generated prologue.
 
+`cpu_invoke_rts_leaf(cpu, leaf, continuation_pc24)` serves a different case:
+a game-owned HLE controller calling an audited synchronous native helper.
+It provides a paired two-byte RTS frame and a scoped owner without borrowing
+another routine's JSR site. The continuation labels ownership; it is not a
+generated resume body. The leaf must balance its stack, retain its program
+bank, and must not yield, stash its return word, or escape. Invalid arguments
+fail before mutation. A failed callee contract returns zero without repairing
+CPU state, and the host must abandon that execution. This restricted API is
+not a replacement for generated coroutine calls, JSL, or branch continuations.
+The implementation is a separate archive member, so device-only consumers do
+not acquire call-owner dependencies through the ordinary CPU memory API.
+
 Pushed-target (paired) tail transfers normally keep the requesting
 activation's entry S and host pairing. When the requester's recorded entry S
 already lies below native S (it discarded its own entry frame, for example

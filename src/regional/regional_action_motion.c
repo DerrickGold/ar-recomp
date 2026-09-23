@@ -13,6 +13,8 @@ static const ArRegionalActionMotionDescriptor kRules[kArRegionalActionMotion_Cou
   {"action_trap_arrow_speed",{2,3,2},0},
   {"action_wall_head_short_hold",{31,0,31},0},
   {"action_wall_head_long_hold",{31,0,31},0},
+  {"action_head_withdrawal",{16,20,16},0},
+  {"action_tree_seed_family",{0,1,1},0},
 };
 enum { kMask=(1u<<kArRegionalActionMotion_Count)-1 };
 _Static_assert(kArRegionalActionMotion_Count<=16,"extend the motion snapshot for new leaves");
@@ -29,7 +31,7 @@ bool ArRegionalActionMotion_Resolve(const ArRegionalActionMotionPolicy *policy,A
   uint16_t next=0;
   for(unsigned i=0;i<kArRegionalActionMotion_Count;++i) {
     if((unsigned)policy->source[i]>=kArRegionalSource_Count)return false;
-    if(policy->source[i]==kArRegionalSource_Japan)next|=(uint16_t)(1u<<i);
+    if(kRules[i].value[policy->source[i]]!=kRules[i].value[0])next|=(uint16_t)(1u<<i);
   }
   *snapshot=next;return true;
 }
@@ -89,4 +91,10 @@ bool ArRegionalActionMotion_Row(uint16_t snapshot,ArRegionalActionMotionFamily f
     *duration=value;
   }
   return true;
+}
+bool ArRegionalActionMotion_HeadRow(uint16_t snapshot,unsigned logical_row,unsigned *native_row,uint8_t *visual) {
+  if(!native_row || !visual || (snapshot&~kMask) ||
+      !(snapshot&(1u<<kArRegionalActionMotion_HeadWithdrawal)) || logical_row>4)return false;
+  static const uint8_t rows[]={0,1,1,2,3},visuals[]={40,39,38,37,255};
+  *native_row=rows[logical_row];*visual=visuals[logical_row];return true;
 }

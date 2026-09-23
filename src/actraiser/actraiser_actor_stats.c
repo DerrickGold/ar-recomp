@@ -1,6 +1,7 @@
 #include "actraiser_actor_stats.h"
 #include "actraiser_regional_runtime.h"
 #include "actraiser_platform_skull.h"
+#include "actraiser_cast_hold.h"
 #include "actraiser_cpu_hle_internal.h"
 #include "actraiser_hle_fatal.h"
 #include "actraiser_game.h"
@@ -83,13 +84,14 @@ static bool Plan(CpuState *cpu,uint16_t *hp,uint16_t *attack) {
       cpu_read16(cpu,0,x+0x2a),hp,attack);
 }
 bool ActRaiser_ActorStatsEntry(CpuState *cpu) {
-  uint16_t hp,attack;return Plan(cpu,&hp,&attack) || ActRaiser_PlatformSkullSpawnEntry(cpu);
+  uint16_t hp,attack;return Plan(cpu,&hp,&attack) || ActRaiser_PlatformSkullSpawnEntry(cpu) || ActRaiser_CastHoldSpawnEntry(cpu);
 }
 RecompReturn ActRaiser_ActorStats(CpuState *cpu) {
-  uint16_t hp,attack;const bool stats=Plan(cpu,&hp,&attack),skull=ActRaiser_PlatformSkullSpawnEntry(cpu);
-  if(!stats && !skull)ActRaiserHleFatal("Unsupported regional base-stat initializer");
+  uint16_t hp,attack;const bool stats=Plan(cpu,&hp,&attack),skull=ActRaiser_PlatformSkullSpawnEntry(cpu),hold=ActRaiser_CastHoldSpawnEntry(cpu);
+  if(!stats && !skull && !hold)ActRaiserHleFatal("Unsupported regional actor initializer");
   if(stats){cpu_write16(cpu,0,cpu->X+0x2c,hp);cpu_write16(cpu,0,cpu->X+0x2a,attack);}
   if(skull)return ActRaiser_PlatformSkullSpawn(cpu);
+  if(hold)return ActRaiser_CastHoldSpawn(cpu);
   cpu->A=cpu_read16(cpu,0,cpu->X+0x30);ActRaiserCpuHle_SetNegativeZero16(cpu,cpu->A);
   if(!cpu_hle_tailcall_request(0x00966f,0x00966c))ActRaiserHleFatal("Actor stats have no native continuation");
   return RECOMP_RETURN_TAILCALL;

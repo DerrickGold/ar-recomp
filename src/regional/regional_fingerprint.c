@@ -44,6 +44,12 @@ bool ArRegionalRules_Fingerprint(const ArRegionalRules *requested,
   uint8_t collision_requested,collision_effective;
   uint8_t platform_skull_requested,platform_skull_effective;
   ArRegionalActorStatsSnapshot stats_requested,stats_effective;
+  uint8_t hold_requested,hold_effective;
+  uint8_t fire_requested,fire_effective;
+  if(!ArRegionalFire_Resolve(&requested->fire_enemy,&fire_requested) ||
+      !ArRegionalFire_Resolve(&effective->fire_enemy,&fire_effective))return false;
+  if(!ArRegionalCastHold_Resolve(&requested->cast_hold,&hold_requested) ||
+      !ArRegionalCastHold_Resolve(&effective->cast_hold,&hold_effective))return false;
   if(!ArRegionalActorStats_Resolve(&requested->actor_stats,&stats_requested) ||
       !ArRegionalActorStats_Resolve(&effective->actor_stats,&stats_effective))return false;
   if(!ArRegionalPlatformSkull_Resolve(&requested->platform_skull,&platform_skull_requested) ||
@@ -439,6 +445,18 @@ bool ArRegionalRules_Fingerprint(const ArRegionalRules *requested,
     uint8_t bytes[54]="ARCHILDSTAT-R1";memcpy(bytes+16,out,32);
     memcpy(bytes+48,stats_requested.value+kArRegionalActorStat_BaseCount,3);
     memcpy(bytes+51,stats_effective.value+kArRegionalActorStat_BaseCount,3);
+    if(!sr_support_sha256(bytes,sizeof(bytes),out))return false;
+    *baseline=false;
+  }
+  if(hold_requested || hold_effective) {
+    uint8_t bytes[50]="ARCASTHOLD-R1";memcpy(bytes+16,out,32);
+    bytes[48]=hold_requested;bytes[49]=hold_effective;
+    if(!sr_support_sha256(bytes,sizeof(bytes),out))return false;
+    *baseline=false;
+  }
+  if(fire_requested || fire_effective) {
+    uint8_t bytes[50]="ARFIRE-R1";memcpy(bytes+16,out,32);
+    bytes[48]=fire_requested;bytes[49]=fire_effective;
     if(!sr_support_sha256(bytes,sizeof(bytes),out))return false;
     *baseline=false;
   }

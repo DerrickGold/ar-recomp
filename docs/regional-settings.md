@@ -30,8 +30,8 @@ regional artwork and independent music choices are separate.
 
 ## Action and resource rules
 
-**Enemy movement & recovery** selects the behaviors below. The twelve
-numerical rules remain separate internally.
+**Enemy movement & recovery** selects the behaviors below. The fourteen
+rules remain separate internally.
 
 | Behavior | US / Europe | Japan |
 | --- | ---: | ---: |
@@ -43,6 +43,7 @@ numerical rules remain separate internally.
 | Bloodpool skeletal swordsman's straight / high attack | 62 / 63 updates | 46 / 55 updates |
 | Marahna trap-arrow speed | 2 px/update | 3 px/update |
 | Kasandora ordinary wall-head extra pause, both variants | 31 updates | None |
+| Marahna retracting-head withdrawal | 16 updates | 20 updates |
 
 The next room entry or retry captures the choice, including for enemies that
 appear later in that room. Changing settings never restarts an attack or
@@ -52,6 +53,18 @@ separate; no Japanese ROM is needed. Trap arrows retain the Western flashing
 and collision box when changing this speed option. All counts run at 60 Hz.
 The wall-head pause does not affect Pharaoh's sphere-created heads. Existing
 pauses finish before a newly selected regional rule takes effect next room.
+
+Marahna's ordinary retracting head restores an extra withdrawal pose under
+Japanese rules, using retained US graphics and its original collision bounds.
+This is separate from the plant boss and Viper; no donor artwork is required.
+
+Fillmore's tree also uses this group. Japanese and European rules restore its
+seed phase: two falling seeds sprout into walking plants before withering.
+The tree waits129 updates before firing its usual orbs, compared with64 under
+US rules. Existing US graphics contain the required poses, so no donor ROM is
+needed. A full enemy pool can prevent one or both seeds from appearing; the
+tree proceeds normally and does not retry a failed spawn. A setting change
+waits until the next room or retry, without interrupting existing plants.
 
 **Cave fireball emitters** controls Fillmore Act 2's firing interval and launch
 points. Both are independently selectable internally and apply on the next
@@ -74,6 +87,19 @@ first by 16 active updates. The complete cycle is 137 updates for one shot or
 This applies at the next room entry/retry; changing the request never restarts
 a volley or removes a pending shot. Placement, damage and appearance remain
 separate. No donor ROM is required, and European counts use normal 60 Hz.
+
+**Kasandora fire enemies** selects the ordinary floating flames' movement and
+child attacks. US/European rules rise, hover for 64 updates, then fall before
+turning; Japanese rules choose a rise or fall according to facing, then turn
+without hovering. Each rise/fall lasts 16 updates, with Japanese vertical
+speeds reaching 4 pixels per update instead of 3.
+
+The native random-byte decision has 160 no-child, 82 straight-flame and
+14 bouncing-flame inputs in US/Europe, versus 128/82/46 in Japan. These are
+counts of possible inputs, not a guaranteed firing rate. A full enemy pool
+drops the child. Curve shape, close-player sequence and both thresholds remain
+independent internally. Choices apply next room/retry, with no new random
+draws, artwork requirement or changes to Pharaoh's blue spheres.
 
 **Enemy collision shapes** selects Kasandora Act 2's pose bounds and Marahna's
 trap-arrow hitboxes. Japanese sword poses reach 36 pixels toward the blade
@@ -104,6 +130,13 @@ assigned at the child's activation, not reapplied to a damaged enemy. Terrain
 damage and Aitos skull rewards remain separate. European base values give Aitos's platform
 skulls 2 HP and attack2, independently of their deflection/proximity setting.
 
+**Platforms during magic** controls three linked platform pieces in Fillmore.
+US/Japanese rules keep them following their parent during a spell; European
+rules hold their positions until casting ends. Their left, upper and right
+pieces remain independently selectable internally. The choice applies next
+room/retry, never midway through a cast. This changes no artwork, rider
+collision or parent movement, and requires no donor ROM.
+
 **Boss attack patterns** selects these independent internal rules:
 
 | Behavior | US | Japan | Europe |
@@ -118,9 +151,28 @@ skulls 2 HP and attack2, independently of their deflection/proximity setting.
 | Tanzra's first-form closing | 64 updates | 36 updates | 64 updates |
 | Tanzra's second-form countdown | Resumes remaining time | Stays stopped | Resumes remaining time |
 | Tanzra's upper-body turn | 37 updates | 38 updates | 37 updates |
+| Antlion's horizontal introduction threshold | X2432 | X2304 | X2432 |
+| Antlion's post-volley decision | Wait36, then check distance | Check immediately; if far, wait61 | Wait36, then check distance |
+| Aitos dragon projectile movement sequence | 1 update | 1 update | 16 updates |
+| Sequences before its first offscreen check | 1 | 1 | 5 |
 | Tanzra minion's turn | 16 updates | 16 updates | 8 updates |
+| Viper lightning inputs at each random decision | 64 of 256 | 128 of 256 | 128 of 256 |
+| Viper's first lightning movement | 22 updates | 22 updates | 18 updates |
+| Death Heim Viper's first lightning movement | 11 updates | 11 updates | 9 updates |
+| Original Viper floor parts' second descent | 22 updates | 22 updates | 15 updates |
+| Pharaoh's landing/bounce | 40 updates | 24 updates | 40 updates |
+| Death Heim Pharaoh's landing/bounce | 56 updates | 24 updates | 56 updates |
+| Pharaoh's sphere-created wall heads | One shot, withdraw | Repeat every136 updates | One shot, withdraw |
+| Marahna plant's head cycle | Always exposed | Opens, closes, then protected | Opens, closes, then protected |
+| Plant's open-head animation, one repetition | 8 updates | 8 updates | 16 updates, four poses |
+| Plant's high / low projectile preparation | 9 /9 updates | 9 /9 updates | 25 /25 updates |
 
 The axe offset and Wizard pause also apply to their Death Heim rematches.
+Viper's choice test, original/rematch lightning travel and floor descent are
+independent. The choice counts describe random inputs, not bolts per minute.
+The floor segment covers 110 pixels in every region; European lightning
+travels less far at unchanged velocity. Existing attacks finish with their
+room's captured settings. All counts run at 60 Hz, with no donor ROM required.
 The Minotaur's rematch timings and the original Northwall Ice Dragon remain
 unchanged. The shorter Ice Dragon wind-up removes two stationary holds from
 both its head and body, preserving their synchronization and final positions;
@@ -129,10 +181,29 @@ update of horizontal movement, so it also shifts the unmirrored path four
 pixels left. Europe's minion skips two poses and their interim collision
 shapes; it is not an accelerated playback of all four. The clock option
 never refills the stage timer. These choices take effect next room/retry
-without restarting a fight or changing HP, damage, movement speed, placement
+without restarting a fight or changing HP, damage, placement
 or artwork. Selecting a shorter sequence does change when its poses and their
 collision boxes appear. European counts run at normal 60 Hz. No donor ROM is
-required.
+required. Aitos's dragon projectiles therefore move for at least 80 updates
+under the combined European rules before they can be removed for leaving the
+screen, versus 1 under US/Japanese rules. Afterward, the native offscreen check
+runs after each sequence. The two choices can be mixed internally; neither
+changes velocity, collision shape, artwork or the separate Beginner attack gate.
+
+Pharaoh's original landing, rematch landing and head lifetime are independent.
+Japanese landing rules remove only the extra stationary hold after the bounce.
+Japanese wall heads wait after firing and repeat; US/European heads withdraw
+over30 updates in Kasandora or15 in Death Heim, then disappear. A full enemy
+pool can drop an arrow without stopping the head's normal sequence. Existing
+arrows keep flying after their head disappears. These choices use retained US
+animation data and apply next room/retry without clearing live heads or arrows.
+
+The retracting plant cycle opens for12 updates, repeats the selected open-head
+animation five times, closes for12, then stays protected for90. The European
+head sequence restores a narrower intermediate pose rather than stretching
+the two US poses. High and low projectile wind-ups are separate internally.
+These changes use retained US animations; selecting them does not change the
+body artwork, initial placement or the difficulty-specific tendril pattern.
 
 | Cost | US / Europe | Japan |
 | --- | ---: | ---: |

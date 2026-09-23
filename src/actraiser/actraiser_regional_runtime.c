@@ -100,6 +100,8 @@ typedef struct ActionRuleCache {
   ArRegionalCollisionSnapshot collision;
   ArRegionalPlatformSkullSnapshot platform_skull;
   ArRegionalActorStatsSnapshot actor_stats;
+  ArRegionalCastHoldSnapshot cast_hold;
+  ArRegionalFireSnapshot fire_enemy;
 } ActionRuleCache;
 /* Published only after every room-boundary activation succeeds. One aggregate
  * also guarantees title/recovery resets cannot leave an older family cached. */
@@ -209,6 +211,8 @@ bool ActRaiserRegional_DoubleStatueVolley(void) { return s_action.statue_volley;
 ArRegionalBossSnapshot ActRaiserRegional_BossSnapshot(void) { return s_action.bosses; }
 ArRegionalCollisionSnapshot ActRaiserRegional_CollisionSnapshot(void) { return s_action.collision; }
 ArRegionalPlatformSkullSnapshot ActRaiserRegional_PlatformSkullSnapshot(void) { return s_action.platform_skull; }
+ArRegionalCastHoldSnapshot ActRaiserRegional_CastHoldSnapshot(void) { return s_action.cast_hold; }
+ArRegionalFireSnapshot ActRaiserRegional_FireSnapshot(void) { return s_action.fire_enemy; }
 bool ActRaiserRegional_ActorStatsEnabled(void) { return s_action.actor_stats.changed; }
 bool ActRaiserRegional_ActorStats(uint16_t actor,uint16_t native_hp,uint16_t native_attack,uint16_t *hp,uint16_t *attack) {
   return ArRegionalActorStats_Apply(&s_action.actor_stats,actor,native_hp,native_attack,hp,attack);
@@ -322,6 +326,14 @@ ActRaiserRegionalEditResult ActRaiserRegional_RequestRules(
     return kActRaiserRegionalEdit_Stale;
   bool ok;
   switch (group) {
+    case kActRaiserRegionalSetting_FireEnemy: {
+      ArRegionalFirePolicy policy;ArRegionalFire_Init(&policy,source);
+      ok=ArRegionalSession_RequestFire(&s_campaign.active,view->revision,&policy);break;
+    }
+    case kActRaiserRegionalSetting_CastHold: {
+      ArRegionalCastHoldPolicy policy;ArRegionalCastHold_Init(&policy,source);
+      ok=ArRegionalSession_RequestCastHold(&s_campaign.active,view->revision,&policy);break;
+    }
     case kActRaiserRegionalSetting_Bosses: {
       ArRegionalBossPolicy policy;ArRegionalBoss_Init(&policy,source);
       ok=ArRegionalSession_RequestBosses(&s_campaign.active,view->revision,&policy);break;
@@ -470,7 +482,9 @@ bool ActRaiserRegional_BeginActionRoom(uint8_t profile, uint16_t native_bcd, uin
       !ArRegionalSession_BeginBosses(&candidate,&next.bosses) ||
       !ArRegionalSession_BeginCollision(&candidate,&next.collision) ||
       !ArRegionalSession_BeginPlatformSkull(&candidate,&next.platform_skull) ||
-      !ArRegionalSession_BeginActorStats(&candidate,&next.actor_stats)) return false;
+      !ArRegionalSession_BeginActorStats(&candidate,&next.actor_stats) ||
+      !ArRegionalSession_BeginCastHold(&candidate,&next.cast_hold) ||
+      !ArRegionalSession_BeginFire(&candidate,&next.fire_enemy)) return false;
   s_campaign.active=candidate;s_action=next;
   /* Only an accepted retry/new-room initialization abandons an interrupted
    * clear sequence; an invalid request must not erase its one-shot marker. */

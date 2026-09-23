@@ -39,6 +39,10 @@ static bool EqualSession(const ArRegionalSession *a, const ArRegionalSession *b)
       !memcmp(&a->effective.platform_skull,&b->effective.platform_skull,sizeof(a->effective.platform_skull)) &&
       !memcmp(&a->requested.actor_stats,&b->requested.actor_stats,sizeof(a->requested.actor_stats)) &&
       !memcmp(&a->effective.actor_stats,&b->effective.actor_stats,sizeof(a->effective.actor_stats)) &&
+      !memcmp(&a->requested.cast_hold,&b->requested.cast_hold,sizeof(a->requested.cast_hold)) &&
+      !memcmp(&a->effective.cast_hold,&b->effective.cast_hold,sizeof(a->effective.cast_hold)) &&
+      !memcmp(&a->requested.fire_enemy,&b->requested.fire_enemy,sizeof(a->requested.fire_enemy)) &&
+      !memcmp(&a->effective.fire_enemy,&b->effective.fire_enemy,sizeof(a->effective.fire_enemy)) &&
       a->arrival_locked==b->arrival_locked && a->requested.arrival==b->requested.arrival && a->effective.arrival==b->effective.arrival &&
       !memcmp(&a->requested.action_motion,&b->requested.action_motion,sizeof(a->requested.action_motion)) &&
       !memcmp(&a->effective.action_motion,&b->effective.action_motion,sizeof(a->effective.action_motion)) &&
@@ -89,6 +93,52 @@ static bool EqualSession(const ArRegionalSession *a, const ArRegionalSession *b)
       !memcmp(a->lairs.stock,b->lairs.stock,sizeof(a->lairs.stock));
 }
 
+static void CheckFire(void) {
+  const uint8_t id[16]={1};const ArRegionalCostPolicy defaults={{0}};
+  ArRegionalSession session;CHECK(ArRegionalSession_NewGame(&session,0,id,&defaults));
+  for(unsigned n=0;n<81;++n) {
+    ArRegionalFirePolicy policy;unsigned digits=n;
+    for(unsigned i=0;i<4;++i){policy.source[i]=digits%3;digits/=3;}
+    uint8_t snapshot=255,expected;CHECK(ArRegionalFire_Resolve(&policy,&expected));
+    const ArRegionalSession before=session;
+    CHECK(!ArRegionalSession_RequestFire(&session,session.revision-1,&policy) && EqualSession(&before,&session));
+    CHECK(ArRegionalSession_RequestFire(&session,session.revision,&policy));
+    CHECK(!memcmp(&before.effective.fire_enemy,&session.effective.fire_enemy,sizeof(policy)));
+    CHECK(ArRegionalSession_BeginFire(&session,&snapshot) && snapshot==expected);
+    const uint32_t revision=session.revision;
+    CHECK(ArRegionalSession_BeginFire(&session,&snapshot) && session.revision==revision);
+  }
+  ArRegionalFirePolicy policy={{1,0,2,1}};
+  CHECK(ArRegionalSession_RequestFire(&session,session.revision,&policy));
+  session.revision=UINT32_MAX;const ArRegionalSession before=session;uint8_t snapshot=99;
+  CHECK(!ArRegionalSession_BeginFire(&session,&snapshot) && snapshot==99 && EqualSession(&before,&session));
+  policy.source[0]=3;
+  CHECK(!ArRegionalSession_RequestFire(&session,session.revision,&policy) && EqualSession(&before,&session));
+  CHECK(!ArRegionalFire_Resolve(&policy,&snapshot) && snapshot==99);
+}
+static void CheckCastHold(void) {
+  const uint8_t id[16]={1};const ArRegionalCostPolicy defaults={{0}};
+  ArRegionalSession session;CHECK(ArRegionalSession_NewGame(&session,0,id,&defaults));
+  for(unsigned n=0;n<27;++n) {
+    ArRegionalCastHoldPolicy policy;unsigned digits=n;
+    for(unsigned i=0;i<3;++i){policy.source[i]=digits%3;digits/=3;}
+    uint8_t snapshot=255,expected;CHECK(ArRegionalCastHold_Resolve(&policy,&expected));
+    const ArRegionalSession before=session;
+    CHECK(!ArRegionalSession_RequestCastHold(&session,session.revision-1,&policy) && EqualSession(&before,&session));
+    CHECK(ArRegionalSession_RequestCastHold(&session,session.revision,&policy));
+    CHECK(!memcmp(&before.effective.cast_hold,&session.effective.cast_hold,sizeof(policy)));
+    CHECK(ArRegionalSession_BeginCastHold(&session,&snapshot) && snapshot==expected);
+    const uint32_t revision=session.revision;
+    CHECK(ArRegionalSession_BeginCastHold(&session,&snapshot) && session.revision==revision);
+  }
+  ArRegionalCastHoldPolicy policy={{0,2,1}};
+  CHECK(ArRegionalSession_RequestCastHold(&session,session.revision,&policy));
+  session.revision=UINT32_MAX;const ArRegionalSession before=session;uint8_t snapshot=99;
+  CHECK(!ArRegionalSession_BeginCastHold(&session,&snapshot) && snapshot==99 && EqualSession(&before,&session));
+  policy.source[0]=3;
+  CHECK(!ArRegionalSession_RequestCastHold(&session,session.revision,&policy) && EqualSession(&before,&session));
+  CHECK(!ArRegionalCastHold_Resolve(&policy,&snapshot) && snapshot==99);
+}
 static void CheckActorStats(void) {
   const uint8_t id[16]={1};const ArRegionalCostPolicy defaults={{0}};
   ArRegionalSession session;CHECK(ArRegionalSession_NewGame(&session,0,id,&defaults));
@@ -178,9 +228,10 @@ static void CheckVolley(void) {
 static void CheckBosses(void) {
   const uint8_t id[16]={1};const ArRegionalCostPolicy defaults={{0}};
   ArRegionalSession session;CHECK(ArRegionalSession_NewGame(&session,0,id,&defaults));
-  for(unsigned n=0;n<2187+81;++n) {
-    ArRegionalBossPolicy policy={{0}};unsigned digits=n<2187?n:n-2187;
-    for(unsigned i=n<2187?0:7;i<(n<2187?7:kArRegionalBoss_Count);++i){policy.source[i]=digits%3;digits/=3;}
+  const unsigned bounds[]={0,7,11,13,15,19,22,kArRegionalBoss_Count},combinations[]={2187,81,9,9,81,27,81};
+  for(unsigned group=0;group<7;++group)for(unsigned n=0;n<combinations[group];++n) {
+    ArRegionalBossPolicy policy={{0}};unsigned digits=n;
+    for(unsigned i=bounds[group];i<bounds[group+1];++i){policy.source[i]=digits%3;digits/=3;}
     uint64_t expected=UINT64_MAX,snapshot=UINT64_MAX;
     CHECK(ArRegionalBoss_Resolve(&policy,&expected));
     const ArRegionalSession before=session;
@@ -225,11 +276,20 @@ static void CheckArrival(void) {
 static void CheckActionMotion(void) {
   const uint8_t id[16]={1};const ArRegionalCostPolicy defaults={{0}};
   ArRegionalSession session;CHECK(ArRegionalSession_NewGame(&session,0,id,&defaults));
+  /* Exhaust each independently stored group, retaining nonzero peers across
+   * groups. Avoid multiplying this session/codec test by every new leaf. */
+  const unsigned boundaries[]={0,7,kArRegionalActionMotion_Count};
+  for(unsigned group=0;group<2;++group) {
   unsigned combinations=1;
-  for(unsigned i=0;i<kArRegionalActionMotion_Count;++i)combinations*=3;
+  for(unsigned i=boundaries[group];i<boundaries[group+1];++i)combinations*=3;
   for(unsigned combination=0;combination<combinations;++combination) {
     ArRegionalActionMotionPolicy policy;unsigned digits=combination;uint16_t expected=0,snapshot=0xffff;
-    for(unsigned i=0;i<kArRegionalActionMotion_Count;++i){policy.source[i]=digits%3;if(digits%3==1)expected|=1u<<i;digits/=3;}
+    for(unsigned i=0;i<kArRegionalActionMotion_Count;++i) {
+      policy.source[i]=(i+group)%3;
+      if(i>=boundaries[group] && i<boundaries[group+1]){policy.source[i]=digits%3;digits/=3;}
+      const ArRegionalActionMotionDescriptor *desc=ArRegionalActionMotion_Descriptor((ArRegionalActionMotionRule)i);
+      if(desc->value[policy.source[i]]!=desc->value[0])expected|=1u<<i;
+    }
     const ArRegionalSession before=session;
     CHECK(!ArRegionalSession_RequestActionMotion(&session,session.revision-1,&policy) && EqualSession(&before,&session));
     CHECK(ArRegionalSession_RequestActionMotion(&session,session.revision,&policy));
@@ -237,6 +297,7 @@ static void CheckActionMotion(void) {
     CHECK(ArRegionalSession_BeginActionMotion(&session,&snapshot) && snapshot==expected);
     const uint32_t revision=session.revision;
     CHECK(ArRegionalSession_BeginActionMotion(&session,&snapshot) && revision==session.revision);
+  }
   }
   ArRegionalActionMotionPolicy policy;CHECK(ArRegionalActionMotion_Init(&policy,1));
   CHECK(ArRegionalSession_RequestActionMotion(&session,session.revision,&policy));
@@ -1162,7 +1223,7 @@ static void CheckFeatureCodec(void) {
     CHECK(!ArRegionalSession_Save(&session, kSaveFileFormat_NativeSrm, path, image, image, &error));
   }
   /* Reordering valid named fields is supported; they are not enum ordinals. */
-  enum { records = kArRegionalCostRule_Count + kArRegionalTimerRule_Count + 15 + kArRegionalDevelopmentRule_Count + kArRegionalRecovery_Count + kArRegionalQuake_Count + kArRegionalLairCount + kArRegionalScore_Count + kArRegionalSourceItem_Count + kArRegionalStory_Count + kArRegionalTownStatus_Count + kArRegionalSimCombat_Count + kArRegionalSimAi_Count + kArRegionalSupport_Count + kArRegionalActionMotion_Count + kArRegionalEmitter_Count + kArRegionalBoss_Count + kArRegionalCollision_Count + kArRegionalPlatformSkull_Count + kArRegionalActorStat_Count };
+  enum { records = kArRegionalCostRule_Count + kArRegionalTimerRule_Count + 15 + kArRegionalDevelopmentRule_Count + kArRegionalRecovery_Count + kArRegionalQuake_Count + kArRegionalLairCount + kArRegionalScore_Count + kArRegionalSourceItem_Count + kArRegionalStory_Count + kArRegionalTownStatus_Count + kArRegionalSimCombat_Count + kArRegionalSimAi_Count + kArRegionalSupport_Count + kArRegionalActionMotion_Count + kArRegionalEmitter_Count + kArRegionalBoss_Count + kArRegionalCollision_Count + kArRegionalPlatformSkull_Count + kArRegionalActorStat_Count + kArRegionalCastHold_Count + kArRegionalFire_Count };
   CHECK(ByteOrder_ReadLe16(original + 10) == records);
   if(ByteOrder_ReadLe16(original+10)!=records)return; /* Do not cascade into invalid fixture offsets. */
   size_t offsets[records], offset = 36;
@@ -1565,6 +1626,80 @@ static void CheckFeatureCodec(void) {
   for(unsigned i=0;i<7;++i)CHECK(loaded.requested.bosses.source[i]==session.requested.bosses.source[i] &&
       loaded.effective.bosses.source[i]==session.effective.bosses.source[i]);
   for(unsigned i=7;i<kArRegionalBoss_Count;++i)CHECK(!loaded.requested.bosses.source[i] && !loaded.effective.bosses.source[i]);
+  const size_t v41_bytes=offsets[191];
+  memcpy(mutated,original,v41_bytes);ByteOrder_WriteLe16(mutated+8,41);ByteOrder_WriteLe16(mutated+10,191);
+  memcpy(mutated+v41_bytes,original+rules_end,size-rules_end);
+  CHECK(SaveCheckpoint_Commit(kSaveFileFormat_NativeSrm,path,image,image,
+      mutated,v41_bytes+size-rules_end,AcceptOpaque,NULL,&error));
+  CHECK(ArRegionalSession_Load(&loaded,2,path,image,&error)==kSaveCheckpoint_Ready);
+  for(unsigned i=0;i<3;++i)CHECK(!loaded.requested.cast_hold.source[i] && !loaded.effective.cast_hold.source[i]);
+  const size_t v42_bytes=offsets[194];
+  memcpy(mutated,original,v42_bytes);ByteOrder_WriteLe16(mutated+8,42);ByteOrder_WriteLe16(mutated+10,194);
+  memcpy(mutated+v42_bytes,original+rules_end,size-rules_end);
+  CHECK(SaveCheckpoint_Commit(kSaveFileFormat_NativeSrm,path,image,image,
+      mutated,v42_bytes+size-rules_end,AcceptOpaque,NULL,&error));
+  CHECK(ArRegionalSession_Load(&loaded,2,path,image,&error)==kSaveCheckpoint_Ready);
+  for(unsigned i=11;i<kArRegionalBoss_Count;++i)CHECK(!loaded.requested.bosses.source[i] && !loaded.effective.bosses.source[i]);
+  const size_t v43_bytes=offsets[196];
+  memcpy(mutated,original,v43_bytes);ByteOrder_WriteLe16(mutated+8,43);ByteOrder_WriteLe16(mutated+10,196);
+  memcpy(mutated+v43_bytes,original+rules_end,size-rules_end);
+  CHECK(SaveCheckpoint_Commit(kSaveFileFormat_NativeSrm,path,image,image,
+      mutated,v43_bytes+size-rules_end,AcceptOpaque,NULL,&error));
+  CHECK(ArRegionalSession_Load(&loaded,2,path,image,&error)==kSaveCheckpoint_Ready);
+  for(unsigned i=13;i<kArRegionalBoss_Count;++i)CHECK(!loaded.requested.bosses.source[i] && !loaded.effective.bosses.source[i]);
+  const size_t v44_bytes=offsets[200];
+  memcpy(mutated,original,v44_bytes);ByteOrder_WriteLe16(mutated+8,44);ByteOrder_WriteLe16(mutated+10,200);
+  memcpy(mutated+v44_bytes,original+rules_end,size-rules_end);
+  CHECK(SaveCheckpoint_Commit(kSaveFileFormat_NativeSrm,path,image,image,
+      mutated,v44_bytes+size-rules_end,AcceptOpaque,NULL,&error));
+  CHECK(ArRegionalSession_Load(&loaded,2,path,image,&error)==kSaveCheckpoint_Ready);
+  for(unsigned i=13;i<kArRegionalBoss_Count;++i)CHECK(!loaded.requested.bosses.source[i] && !loaded.effective.bosses.source[i]);
+  for(unsigned i=0;i<4;++i)CHECK(!loaded.requested.fire_enemy.source[i] && !loaded.effective.fire_enemy.source[i]);
+  const size_t v45_bytes=offsets[202];
+  memcpy(mutated,original,v45_bytes);ByteOrder_WriteLe16(mutated+8,45);ByteOrder_WriteLe16(mutated+10,202);
+  memcpy(mutated+v45_bytes,original+rules_end,size-rules_end);
+  CHECK(SaveCheckpoint_Commit(kSaveFileFormat_NativeSrm,path,image,image,
+      mutated,v45_bytes+size-rules_end,AcceptOpaque,NULL,&error));
+  CHECK(ArRegionalSession_Load(&loaded,2,path,image,&error)==kSaveCheckpoint_Ready);
+  for(unsigned i=15;i<kArRegionalBoss_Count;++i)CHECK(!loaded.requested.bosses.source[i] && !loaded.effective.bosses.source[i]);
+  const size_t v46_bytes=offsets[206];
+  memcpy(mutated,original,v46_bytes);ByteOrder_WriteLe16(mutated+8,46);ByteOrder_WriteLe16(mutated+10,206);
+  memcpy(mutated+v46_bytes,original+rules_end,size-rules_end);
+  CHECK(SaveCheckpoint_Commit(kSaveFileFormat_NativeSrm,path,image,image,
+      mutated,v46_bytes+size-rules_end,AcceptOpaque,NULL,&error));
+  CHECK(ArRegionalSession_Load(&loaded,2,path,image,&error)==kSaveCheckpoint_Ready);
+  CHECK(!loaded.requested.action_motion.source[kArRegionalActionMotion_HeadWithdrawal] &&
+      !loaded.effective.action_motion.source[kArRegionalActionMotion_HeadWithdrawal]);
+  const size_t v47_bytes=offsets[207];
+  memcpy(mutated,original,v47_bytes);ByteOrder_WriteLe16(mutated+8,47);ByteOrder_WriteLe16(mutated+10,207);
+  memcpy(mutated+v47_bytes,original+rules_end,size-rules_end);
+  CHECK(SaveCheckpoint_Commit(kSaveFileFormat_NativeSrm,path,image,image,
+      mutated,v47_bytes+size-rules_end,AcceptOpaque,NULL,&error));
+  CHECK(ArRegionalSession_Load(&loaded,2,path,image,&error)==kSaveCheckpoint_Ready);
+  for(unsigned i=19;i<kArRegionalBoss_Count;++i)CHECK(!loaded.requested.bosses.source[i] && !loaded.effective.bosses.source[i]);
+  const size_t v48_bytes=offsets[210];
+  memcpy(mutated,original,v48_bytes);ByteOrder_WriteLe16(mutated+8,48);ByteOrder_WriteLe16(mutated+10,210);
+  memcpy(mutated+v48_bytes,original+rules_end,size-rules_end);
+  CHECK(SaveCheckpoint_Commit(kSaveFileFormat_NativeSrm,path,image,image,
+      mutated,v48_bytes+size-rules_end,AcceptOpaque,NULL,&error));
+  CHECK(ArRegionalSession_Load(&loaded,2,path,image,&error)==kSaveCheckpoint_Ready);
+  for(unsigned i=22;i<kArRegionalBoss_Count;++i)CHECK(!loaded.requested.bosses.source[i] && !loaded.effective.bosses.source[i]);
+  const size_t v49_bytes=offsets[214];
+  memcpy(mutated,original,v49_bytes);ByteOrder_WriteLe16(mutated+8,49);ByteOrder_WriteLe16(mutated+10,214);
+  memcpy(mutated+v49_bytes,original+rules_end,size-rules_end);
+  CHECK(SaveCheckpoint_Commit(kSaveFileFormat_NativeSrm,path,image,image,
+      mutated,v49_bytes+size-rules_end,AcceptOpaque,NULL,&error));
+  CHECK(ArRegionalSession_Load(&loaded,2,path,image,&error)==kSaveCheckpoint_Ready);
+  CHECK(!loaded.requested.action_motion.source[kArRegionalActionMotion_TreeSeeds] &&
+      !loaded.effective.action_motion.source[kArRegionalActionMotion_TreeSeeds]);
+  ArRegionalFirePolicy fire_policy={{1,0,2,1}};uint8_t fire_snapshot;
+  CHECK(ArRegionalSession_RequestFire(&session,session.revision,&fire_policy));
+  CHECK(ArRegionalSession_BeginFire(&session,&fire_snapshot) && fire_snapshot==9);
+  fire_policy.source[1]=1;CHECK(ArRegionalSession_RequestFire(&session,session.revision,&fire_policy));
+  ArRegionalCastHoldPolicy hold_policy={{2,0,1}};uint8_t hold_snapshot;
+  CHECK(ArRegionalSession_RequestCastHold(&session,session.revision,&hold_policy));
+  CHECK(ArRegionalSession_BeginCastHold(&session,&hold_snapshot) && hold_snapshot==1);
+  hold_policy.source[1]=2;CHECK(ArRegionalSession_RequestCastHold(&session,session.revision,&hold_policy));
   ArRegionalActorStatsPolicy stat_policy;ArRegionalActorStatsSnapshot stat_snapshot;
   for(unsigned i=0;i<kArRegionalActorStat_Count;++i)stat_policy.source[i]=i%3;
   CHECK(ArRegionalSession_RequestActorStats(&session,session.revision,&stat_policy));
@@ -1579,10 +1714,15 @@ static void CheckFeatureCodec(void) {
   CHECK(ArRegionalSession_RequestCollision(&session,session.revision,&collision_policy));
   CHECK(ArRegionalSession_BeginCollision(&session,&collision_snapshot) && collision_snapshot==1);
   collision_policy.source[1]=1;CHECK(ArRegionalSession_RequestCollision(&session,session.revision,&collision_policy));
-  ArRegionalBossPolicy boss_policy={{1,2,0,2,1,2,0,1,1,0,2}};uint64_t boss_snapshot;
+  ArRegionalBossPolicy boss_policy={{1,2,0,2,1,2,0,1,1,0,2,1,0,2,0,1,2,0,2,1,2,1,1,2,0,2}};uint64_t boss_snapshot;
   CHECK(ArRegionalSession_RequestBosses(&session,session.revision,&boss_policy));
   CHECK(ArRegionalSession_BeginBosses(&session,&boss_snapshot));
   boss_policy.source[5]=1;boss_policy.source[6]=1;boss_policy.source[7]=0;boss_policy.source[9]=1;
+  boss_policy.source[11]=0;boss_policy.source[12]=1;
+  boss_policy.source[13]=0;boss_policy.source[14]=2;
+  boss_policy.source[15]=0;boss_policy.source[16]=0;boss_policy.source[17]=2;boss_policy.source[18]=1;
+  boss_policy.source[19]=0;boss_policy.source[20]=1;boss_policy.source[21]=2;
+  boss_policy.source[22]=0;boss_policy.source[23]=0;boss_policy.source[24]=2;boss_policy.source[25]=0;
   CHECK(ArRegionalSession_RequestBosses(&session,session.revision,&boss_policy));
   bool double_shot;
   CHECK(ArRegionalSession_RequestVolley(&session,session.revision,2));
@@ -1592,10 +1732,10 @@ static void CheckFeatureCodec(void) {
   CHECK(ArRegionalSession_RequestEmitters(&session,session.revision,&emitter_policy));
   CHECK(ArRegionalSession_BeginEmitters(&session,&emitter_snapshot) && emitter_snapshot==2);
   emitter_policy.source[1]=2;CHECK(ArRegionalSession_RequestEmitters(&session,session.revision,&emitter_policy));
-  ArRegionalActionMotionPolicy motion={{1,0,2,1,0,1,2,1,2,1,2,1}};uint16_t motion_snapshot;
+  ArRegionalActionMotionPolicy motion={{1,0,2,1,0,1,2,1,2,1,2,1,1}};uint16_t motion_snapshot;
   CHECK(ArRegionalSession_RequestActionMotion(&session,session.revision,&motion));
-  CHECK(ArRegionalSession_BeginActionMotion(&session,&motion_snapshot) && motion_snapshot==0xaa9);
-  motion.source[3]=0;motion.source[8]=1;CHECK(ArRegionalSession_RequestActionMotion(&session,session.revision,&motion));
+  CHECK(ArRegionalSession_BeginActionMotion(&session,&motion_snapshot) && motion_snapshot==0x1aa9);
+  motion.source[3]=0;motion.source[8]=1;motion.source[12]=2;CHECK(ArRegionalSession_RequestActionMotion(&session,session.revision,&motion));
   CHECK(ArRegionalSession_RequestStory(&session,session.revision,&story));
   CHECK(ArRegionalSession_BeginStory(&session,&story_snapshot));
   story.source[2]=1;CHECK(ArRegionalSession_RequestStory(&session,session.revision,&story));
@@ -1614,6 +1754,8 @@ static void CheckFeatureCodec(void) {
 }
 
 int main(void) {
+  CheckFire();
+  CheckCastHold();
   CheckBosses();
   CheckCollision();
   CheckPlatformSkull();

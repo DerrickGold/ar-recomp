@@ -7,7 +7,7 @@
 extern RecompReturn bank_00_8E2F_M0X0(CpuState *cpu);
 extern RecompReturn bank_00_8E2F_M1X0(CpuState *cpu);
 static bool s_delegate;
-typedef struct MotionRow { uint16_t duration,dx,next_row; bool skip_rows; } MotionRow;
+typedef struct MotionRow { uint16_t duration,dx,dy,next_row; bool skip_rows,replace_dy; } MotionRow;
 
 static bool ActorShape(const CpuState *cpu) {
   if(!cpu || cpu->PB || cpu->DB || cpu->D || cpu->x_flag ||
@@ -19,6 +19,63 @@ static bool ActorShape(const CpuState *cpu) {
 }
 static int16_t SignedExtent(uint8_t value) {
   return value<128?value:(int16_t)((int)value-256);
+}
+enum { kExpandedProgramMarker=0x100 };
+typedef struct ProgramRow { uint16_t row,native_row,visual_offset; bool end; } ProgramRow;
+static bool HeadProgram(CpuState *cpu,ProgramRow *out) {
+  const unsigned x=cpu->X;
+  const uint16_t stored_row=cpu_read16(cpu,0,x+0x1c);
+  const uint16_t snapshot=ActRaiserRegional_ActionMotionSnapshot();
+  const bool active=stored_row>=kExpandedProgramMarker && stored_row<=kExpandedProgramMarker+4;
+  if(!active && !(snapshot&(1u<<kArRegionalActionMotion_HeadWithdrawal)))return false;
+  if(x==cpu_read16(cpu,0,0x8a) || cpu_read16(cpu,0,0x18)!=0x0605 ||
+      cpu_read16(cpu,0,x+0x32)!=0xe3a1 || cpu_read16(cpu,0,x+0x1a)!=35 ||
+      cpu_read16(cpu,0,x+0x16)!=0x4000 || cpu_read8(cpu,0,x+0x18)!=0x7e ||
+      cpu_read16(cpu,0,x+0x3c) || cpu_read16(cpu,0,cpu->S+1)==0x969d)return false;
+  const unsigned sequence=cpu_read16(cpu,0x7e,0x4048),row=active?stored_row-kExpandedProgramMarker:stored_row;
+  const unsigned end=cpu_read16(cpu,0x7e,0x4000);
+  unsigned native_row;uint8_t pose;
+  if(!ArRegionalActionMotion_HeadRow(active?(1u<<kArRegionalActionMotion_HeadWithdrawal):snapshot,row,&native_row,&pose) ||
+      sequence<0x4a || sequence+13>end || end>0x1000)return false;
+  static const uint8_t expected[]={40,7,0,0,38,3,0,0,37,3,0,0,255};
+  for(unsigned i=0;i<sizeof(expected);++i)if(cpu_read8(cpu,0x7e,0x4000+sequence+i)!=expected[i])return false;
+  /* Pose39 is retained in US data. Require its measured four-piece header;
+   * incompatible future donor bundles must provide their own mapping. */
+  const unsigned composition=cpu_read16(cpu,0x7e,0x4000+end+2*39);
+  if(composition<end+80 || composition+33>0x1000 ||
+      cpu_read16(cpu,0x7e,0x4000+composition)!=0x0808 ||
+      cpu_read16(cpu,0x7e,0x4002+composition)!=0x1510 ||
+      cpu_read8(cpu,0x7e,0x4004+composition)!=4)return false;
+  if(out)*out=(ProgramRow){.row=(uint16_t)row,.native_row=(uint16_t)native_row,
+      .visual_offset=(uint16_t)(row==1?1:0),.end=pose==255};
+  return true;
+}
+static bool PlantProgram(CpuState *cpu,ProgramRow *out) {
+  const unsigned x=cpu->X;
+  const uint16_t stored_row=cpu_read16(cpu,0,x+0x1c);
+  const bool active=stored_row>=kExpandedProgramMarker && stored_row<=kExpandedProgramMarker+4;
+  const uint64_t policy=active?UINT64_C(2)<<(2*kArRegionalBoss_PlantOpen):ActRaiserRegional_BossSnapshot();
+  if(ArRegionalBoss_Value(policy,kArRegionalBoss_PlantOpen)!=16 || cpu_read16(cpu,0,0x18)!=0x0305 ||
+      cpu_read16(cpu,0,x+0x32)!=0xd974 || cpu_read16(cpu,0,x+0x1a)!=2 ||
+      cpu_read16(cpu,0,x+0x16)!=0x5000 || cpu_read8(cpu,0,x+0x18)!=0x7e ||
+      cpu_read16(cpu,0,x+0x3a) || cpu_read16(cpu,0,x+0x3c) || cpu_read16(cpu,0,cpu->S+1)==0x969d)return false;
+  const unsigned row=active?stored_row-kExpandedProgramMarker:stored_row;
+  unsigned native_row;uint8_t visual;
+  if(!ArRegionalBoss_PlantOpenRow(policy,row,&native_row,&visual))return false;
+  const unsigned sequence=cpu_read16(cpu,0x7e,0x5006),end=cpu_read16(cpu,0x7e,0x5000);
+  if(sequence<8 || sequence+9>end || end>0x1000)return false;
+  static const uint8_t expected[]={3,3,0,0,4,3,0,0,255};
+  for(unsigned i=0;i<sizeof(expected);++i)if(cpu_read8(cpu,0x7e,0x5000+sequence+i)!=expected[i])return false;
+  const unsigned composition=cpu_read16(cpu,0x7e,0x5000+end+4);
+  if(composition<end+6 || composition+19>0x1000 ||
+      cpu_read16(cpu,0x7e,0x5000+composition)!=0x0808 ||
+      cpu_read16(cpu,0x7e,0x5002+composition)!=0x1010 || cpu_read8(cpu,0x7e,0x5004+composition)!=2)return false;
+  if(out)*out=(ProgramRow){.row=(uint16_t)row,.native_row=(uint16_t)native_row,
+      .visual_offset=(uint16_t)(row==0?0xffff:0),.end=visual==255};
+  return true;
+}
+static bool AnimationProgram(CpuState *cpu,ProgramRow *out) {
+  return ActorShape(cpu) && (HeadProgram(cpu,out) || PlantProgram(cpu,out));
 }
 static bool Initializing(CpuState *cpu) {
   /* Real 969B JSR return word. During this call +32 may still be a previous
@@ -83,10 +140,89 @@ static bool Plan(CpuState *cpu,MotionRow *out) {
   const uint16_t snapshot=ActRaiserRegional_ActionMotionSnapshot();
   const uint8_t emitters=ActRaiserRegional_EmitterSnapshot();
   const uint64_t bosses=ActRaiserRegional_BossSnapshot();
-  if((!snapshot && (emitters&3)!=2 && !bosses) || !ActorShape(cpu) || Initializing(cpu))return false;
+  const uint8_t fire=ActRaiserRegional_FireSnapshot();
+  if((!snapshot && (emitters&3)!=2 && !bosses && !(fire&1)) || !ActorShape(cpu) || Initializing(cpu))return false;
   const unsigned x=cpu->X;
   const unsigned area=cpu_read8(cpu,0,kActRaiserWram_MapGroup);
   const uint16_t source=cpu_read16(cpu,0,x+0x32);
+  const unsigned room=cpu_read8(cpu,0,kActRaiserWram_MapGroup+1);
+  if(area==5 && room==3 && source==0xd974 && cpu_read16(cpu,0,x+0x16)==0x5000 &&
+      cpu_read8(cpu,0,x+0x18)==0x7e && cpu_read16(cpu,0,x+0x3a)) {
+    const unsigned state=cpu_read16(cpu,0,x+0x1a),index=cpu_read16(cpu,0,x+0x1c);
+    if((state!=4 && state!=6) || index)return false;
+    const unsigned sequence=cpu_read16(cpu,0x7e,0x5002+2*state),end=cpu_read16(cpu,0x7e,0x5000);
+    if(sequence<2+2*(state+1) || sequence+9>end || end>0x1000)return false;
+    const uint8_t expected[]={state==6?6:5,7,0,0,state==6?8:7,0,0,0,255};
+    for(unsigned i=0;i<sizeof(expected);++i)if(cpu_read8(cpu,0x7e,0x5000+sequence+i)!=expected[i])return false;
+    uint16_t duration=7;if(!ArRegionalBoss_PlantWindup(bosses,state,index,expected[0],&duration,0,0))return false;
+    if(out)*out=(MotionRow){.duration=duration};
+    return true;
+  }
+  const bool pharaoh=(area==3 && room==6 && source==0xc1a2) || (area==7 && room==4 && source==0xf6fa);
+  if(pharaoh && cpu_read16(cpu,0,x+0x16)==0x5000 && cpu_read8(cpu,0,x+0x18)==0x7e) {
+    const unsigned state=cpu_read16(cpu,0,x+0x1a),row=cpu_read16(cpu,0,x+0x1c);
+    unsigned next;if(!ArRegionalBoss_PharaohSkip(bosses,area==7,state,row,&next))return false;
+    const unsigned sequence=cpu_read16(cpu,0x7e,0x5018),end=cpu_read16(cpu,0x7e,0x5000);
+    if(sequence<26 || sequence+45>end || end>0x1000)return false;
+    /* Both encounters share the ten-row bounce. Only their final stationary
+     * row differs. Let the native reader consume its real FF terminator. */
+    static const uint8_t bounce[]={15,3,0,253,15,1,0,254,15,0,0,255,15,1,0,0,
+      15,0,0,1,15,1,0,2,15,3,0,3,15,2,0,255,15,1,0,0,15,2,0,1};
+    for(unsigned i=0;i<sizeof(bounce);++i)if(cpu_read8(cpu,0x7e,0x5000+sequence+i)!=bounce[i])return false;
+    if(cpu_read8(cpu,0x7e,0x5028+sequence)!=15 ||
+        cpu_read8(cpu,0x7e,0x5029+sequence)!=(area==7?31:15) ||
+        cpu_read16(cpu,0x7e,0x502a+sequence) || cpu_read8(cpu,0x7e,0x502c+sequence)!=255)return false;
+    if(out)*out=(MotionRow){.next_row=(uint16_t)next,.skip_rows=true};
+    return true;
+  }
+  const bool viper=(area==5 && room==8 && source==0xe483) || (area==7 && room==6 && source==0xf72a);
+  const bool floor=area==5 && room==8 && (source==0xe5cf || source==0xe606);
+  if((viper || floor) && cpu_read16(cpu,0,x+0x16)==0x5000 && cpu_read8(cpu,0,x+0x18)==0x7e) {
+    const unsigned state=cpu_read16(cpu,0,x+0x1a),row=cpu_read16(cpu,0,x+0x1c);
+    if(viper?!(state>=4 && state<=6 && !row):!(state==(source==0xe5cf?9u:8u) && row>=6 && row<=9))return false;
+    const unsigned sequence=cpu_read16(cpu,0x7e,0x5002+2*state),offset=sequence+4*row,end=cpu_read16(cpu,0x7e,0x5000);
+    if(sequence<2+2*(state+1) || offset+4>end || end>0x1000)return false;
+    const uint8_t visual=cpu_read8(cpu,0x7e,0x5000+offset);
+    uint16_t duration=cpu_read8(cpu,0x7e,0x5001+offset);
+    int16_t dx=SignedExtent(cpu_read8(cpu,0x7e,0x5002+offset)),dy=SignedExtent(cpu_read8(cpu,0x7e,0x5003+offset));
+    if(!ArRegionalBoss_ViperRow(bosses,area==7,state,row,visual,&duration,dx,&dy))return false;
+    const unsigned flip=cpu_read16(cpu,0,x+0x28);
+    if(flip&0x4000)dx=-dx;
+    if(flip&0x8000)dy=-dy;
+    if(out)*out=(MotionRow){.duration=duration,.dx=(uint16_t)dx,.dy=(uint16_t)dy,.replace_dy=true};
+    return true;
+  }
+  if(area==4 && cpu_read8(cpu,0,kActRaiserWram_MapGroup+1)==3 && source==0xd646 &&
+      cpu_read16(cpu,0,x+0x16)==0x5000 && cpu_read8(cpu,0,x+0x18)==0x7e) {
+    const unsigned state=cpu_read16(cpu,0,x+0x1a),row=cpu_read16(cpu,0,x+0x1c);
+    if((state!=1 && state!=2) || row)return false;
+    const unsigned sequence=cpu_read16(cpu,0x7e,0x5002+2*state),end=cpu_read16(cpu,0x7e,0x5000);
+    if(sequence<2+2*(state+1) || sequence+5>end || end>0x1000 ||
+        cpu_read8(cpu,0x7e,0x5004+sequence)!=255)return false;
+    const uint8_t visual=cpu_read8(cpu,0x7e,0x5000+sequence);
+    uint16_t duration=cpu_read8(cpu,0x7e,0x5001+sequence);
+    int16_t dx=SignedExtent(cpu_read8(cpu,0x7e,0x5002+sequence));
+    const int16_t dy=SignedExtent(cpu_read8(cpu,0x7e,0x5003+sequence));
+    if(!ArRegionalBoss_DragonRow(bosses,state,row,visual,&duration,dx,dy))return false;
+    if(cpu_read16(cpu,0,x+0x28)&0x4000)dx=-dx;
+    if(out)*out=(MotionRow){.duration=duration,.dx=(uint16_t)dx};
+    return true;
+  }
+  if(area==3 && source==0xc3a5 && cpu_read16(cpu,0,x+0x16)==0x4000 && cpu_read8(cpu,0,x+0x18)==0x7e) {
+    const unsigned state=cpu_read16(cpu,0,x+0x1a),row=cpu_read16(cpu,0,x+0x1c);
+    if((state!=13 && state!=14) || row>=8)return false;
+    const unsigned sequence=cpu_read16(cpu,0x7e,0x4002+2*state),offset=sequence+4*row;
+    const unsigned end=cpu_read16(cpu,0x7e,0x4000);
+    if(sequence<2+2*(state+1) || offset+4>end || end>0x1000)return false;
+    const uint8_t visual=cpu_read8(cpu,0x7e,0x4000+offset),duration=cpu_read8(cpu,0x7e,0x4001+offset);
+    int16_t dx=SignedExtent(cpu_read8(cpu,0x7e,0x4002+offset)),dy=SignedExtent(cpu_read8(cpu,0x7e,0x4003+offset));
+    if(!ArRegionalFire_CurveRow(fire,state,row,visual,duration,&dx,&dy))return false;
+    const unsigned flip=cpu_read16(cpu,0,x+0x28);
+    if(flip&0x4000)dx=-dx;
+    if(flip&0x8000)dy=-dy;
+    if(out)*out=(MotionRow){.duration=duration,.dx=(uint16_t)dx,.dy=(uint16_t)dy,.replace_dy=true};
+    return true;
+  }
   if(area==7 && cpu_read8(cpu,0,kActRaiserWram_MapGroup+1)==8 && source==0xf80f &&
       cpu_read16(cpu,0,x+0x16)==0x5000 && cpu_read8(cpu,0,x+0x18)==0x7e) {
     const unsigned state=cpu_read16(cpu,0,x+0x1a),row=cpu_read16(cpu,0,x+0x1c);
@@ -164,22 +300,39 @@ static bool Plan(CpuState *cpu,MotionRow *out) {
 }
 bool ActRaiser_ActionMotionEntry(CpuState *cpu) {
   if(s_delegate){s_delegate=false;return false;}
-  return Plan(cpu,NULL) || CollisionPlan(cpu,false,NULL);
+  return Plan(cpu,NULL) || CollisionPlan(cpu,false,NULL) || AnimationProgram(cpu,NULL);
 }
 RecompReturn ActRaiser_ActionMotion(CpuState *cpu) {
   MotionRow row={0};ArRegionalCollisionExtents extents;
   const bool motion=Plan(cpu,&row),collision=CollisionPlan(cpu,false,&extents);
-  if(!motion && !collision)ActRaiserHleFatal("Unsupported regional animation-row entry");
+  ProgramRow program={0};const bool expanded=AnimationProgram(cpu,&program);
+  if(!motion && !collision && !expanded)ActRaiserHleFatal("Unsupported regional animation-row entry");
   const uint16_t object=cpu->X;
-  const uint16_t old_row=row.skip_rows?cpu_read16(cpu,0,object+0x1c):0;
+  const uint16_t old_row=(row.skip_rows || expanded)?cpu_read16(cpu,0,object+0x1c):0;
   if(row.skip_rows)cpu_write16(cpu,0,object+0x1c,row.next_row);
+  if(expanded) {
+    /* Borrow only this actor's row and visual-offset fields during the
+     * non-yielding reader. All velocities, extents, poses and flags remain
+     * native outputs. No shared animation or composition bytes are changed. */
+    cpu_write16(cpu,0,object+0x1c,program.native_row);
+    cpu_write16(cpu,0,object+0x3c,program.visual_offset);
+  }
   s_delegate=true;
   const RecompReturn result=cpu->m_flag?bank_00_8E2F_M1X0(cpu):bank_00_8E2F_M0X0(cpu);
   s_delegate=false;
+  if(expanded)cpu_write16(cpu,0,object+0x3c,0);
   if(result!=RECOMP_RETURN_NORMAL) {
     /* Audited reader never yields; preserve an unexpected escape token and
      * do not leave our speculative cursor edit behind. */
-    if(row.skip_rows)cpu_write16(cpu,0,object+0x1c,old_row);
+    if(row.skip_rows || expanded)cpu_write16(cpu,0,object+0x1c,old_row);
+    return result;
+  }
+  if(expanded) {
+    /* 8637 increments this logical cursor after return. A marker in its
+     * unused high byte keeps an active sequence valid across debug restores
+     * without a host cache. The native terminator/state initializer clears
+     * it. No other routine in this source family consumes the row index. */
+    if(!program.end)cpu_write16(cpu,0,object+0x1c,kExpandedProgramMarker+program.row);
     return result;
   }
   if(row.skip_rows)return result; /* Native reader acquired the selected row. */
@@ -189,6 +342,7 @@ RecompReturn ActRaiser_ActionMotion(CpuState *cpu) {
   if(motion) {
     cpu_write16(cpu,0,object+0x24,row.duration);
     cpu_write16(cpu,0,object+0x06,row.dx);
+    if(row.replace_dy)cpu_write16(cpu,0,object+0x08,row.dy);
   }
   if(collision) {
     /* Contact and victim tests consume these four words. Attack-part geometry

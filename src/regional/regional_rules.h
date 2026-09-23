@@ -34,6 +34,8 @@
 #include "regional_collision.h"
 #include "regional_platform_skull.h"
 #include "regional_actor_stats.h"
+#include "regional_cast_hold.h"
+#include "regional_fire_enemy.h"
 
 /* Game-owned value snapshot. No campaign identity, persistence, native memory
  * or UI ownership. Each family keeps its own units and activation boundary;
@@ -73,6 +75,8 @@ typedef struct ArRegionalRules {
   ArRegionalCollisionPolicy collision;
   ArRegionalPlatformSkullPolicy platform_skull;
   ArRegionalActorStatsPolicy actor_stats;
+  ArRegionalCastHoldPolicy cast_hold;
+  ArRegionalFirePolicy fire_enemy;
 } ArRegionalRules;
 
 /* Conservative supported mix: any reduced support coefficient requires the

@@ -327,13 +327,14 @@ enemy also moves farther horizontally through most of its jump: three pixels
 per update instead of two. Its measured launch, descent and landing phases
 take the same time; the change is horizontal movement, not a shorter animation.
 
-**Act 1: tree attacks.** In Japan, the orb-spitting tree also releases two
+**Act 1: tree attacks.** In Japan and Europe, the orb-spitting tree also releases two
 seeds. They fall to the ground and become moving plant
 enemies before the tree fires its two familiar orbs. The US version leaves
 out this seed-and-plant phase.
 
-The measured pre-shot hold lasts 129 frames in Japan and 64 in the US. The
-seed phase and longer hold occur in both normal and Special mode.
+The pre-shot hold lasts 129 active updates in Japan and Europe, versus64 in
+the US. In Japan, the seed phase and longer hold occur in both normal and
+Special mode.
 
 **Act 2: cave-enemy recovery.** Two projectile-firing enemy types recover
 sooner in Japan. One waits 40 frames after firing instead of 60. The other
@@ -454,9 +455,9 @@ with 99 in Japan. A second variant deeper in the pyramid has longer firing
 and idle animations: its intervals are 168 frames in the US and 137 in Japan.
 All fourteen placements match between US and Japan.
 
-**Pharaoh fight.** The US boss adds 16 stationary frames to its landing
-sequence before releasing a sphere. In US and Japan, that sphere travels
-to a wall and turns into a head. The US head fires one arrow, withdraws,
+**Pharaoh fight.** The US and European bosses add 16 stationary frames to the
+landing sequence before releasing a sphere. In every region, that sphere travels
+to a wall and turns into a head. The Western head fires one arrow, withdraws,
 and disappears 30 frames after firing. The Japanese head stays in place
 and fires again every 136 frames, allowing heads to accumulate during the
 fight. These differences occur in both normal and Special mode.
@@ -608,7 +609,7 @@ nine in US and Japan. This is separate from the head's vulnerability cycle.
 
 **Act 2: Viper lightning choice.** At each random attack decision, the US
 boss selects lightning when the random value is divisible by four. Japan
-selects it for every even value: half the possible values rather than a
+and Europe select it for every even value: half the possible values rather than a
 quarter. This applies in both the original fight and Death Heim, including
 Special mode. It does not mean exactly twice as many bolts per minute;
 the other attacks and the player's position also affect the time between
@@ -705,14 +706,14 @@ The Minotaur's shared rematch changes and regional axe placement are described
 under [Fillmore](#fillmore); the Ice Dragon's regional wind-up change is under
 [Northwall](#northwall).
 
-**Pharaoh rematch.** In US and Japan, the spheres and arrows move twice as
+**Pharaoh rematch.** In every region, the spheres and arrows move twice as
 fast as in Kasandora, and the wall heads emerge in half the time. The regional
-firing patterns remain: US heads shoot once and withdraw, while Japanese heads
-stay and fire every 136 frames. The US withdrawal is also halved, from 30 to
+firing patterns remain: Western heads shoot once and withdraw, while Japanese heads
+stay and fire every 136 frames. The Western withdrawal is also halved, from 30 to
 15 frames; an arrow already fired continues after its head disappears.
 
 The boss's grounded pause changes differently. Its landing-and-bounce sequence
-lasts 56 frames in the US rematch, up from 40 in Kasandora. Japan keeps the
+lasts 56 frames in the Western rematch, up from 40 in Kasandora. Japan keeps the
 24-frame sequence in both encounters. These timings and firing patterns apply
 in normal and Special mode.
 
