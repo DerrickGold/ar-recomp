@@ -4,7 +4,12 @@
 #include <stdio.h>
 #include <string.h>
 
-static int failures, calls;
+static int failures, calls, history_checks;
+void ActRaiserRegional_CheckLairHistory(CpuState *cpu) {
+  ++history_checks;
+  /* Audit sees the original writer's completed registers, before capture. */
+  if (cpu->A!=0x5721 || cpu->DB!=0x42 || cpu->S!=0x1e03) ++failures;
+}
 static uint8_t image[kActRaiserSramSize], old[kActRaiserSramSize];
 static RecompReturn outcome;
 static const char *path = "actraiser-save-seam-test.srm";
@@ -52,8 +57,10 @@ int main(void) {
       cpu.x_flag = 0;
       outcome = aborted ? RECOMP_RETURN_PARKED_WAIT : RECOMP_RETURN_NORMAL;
       int before = calls;
+      int checked_before = history_checks;
       CHECK(ActRaiser_SaveStory(&cpu) == outcome);
       CHECK(calls == before + 1);
+      CHECK(history_checks == checked_before + !aborted);
       CHECK(cpu.A == 0x5721 && cpu.DB == 0x42 && cpu.S == 0x1e03);
       CHECK(SaveSystem_AutoPersistIfChanged(&error) == !aborted);
       uint8_t disk[kActRaiserSramSize];

@@ -898,6 +898,23 @@ typedef struct AppBoot {
   Snes *snes;
 } AppBoot;
 
+static bool RegionalContinuePrompt(void *context, ActRaiserRegionalContinueNotice notice) {
+  const AppBoot *app = context;
+  if (!app || app->headless) return false; /* Never silently acknowledge or wait on an invisible menu. */
+  const char *body = notice == kActRaiserRegionalContinue_Estimate ? "overlay.region.legacy_estimate" :
+      notice == kActRaiserRegionalContinue_LoadFailed ? "overlay.region.continue_failed" :
+      "overlay.region.adoption_failed";
+  const char *accept = notice == kActRaiserRegionalContinue_Estimate ?
+      "overlay.region.acknowledge" : "overlay.decision.retry";
+  if (!SettingsOverlay_BeginDecision("overlay.region.continue_title", body, accept)) return false;
+  SettingsOverlayDecisionResult result;
+  do {
+    ActRaiser_YieldToHost();
+    result = SettingsOverlay_TakeDecisionResult();
+  } while (result == kOverlayDecision_Pending);
+  return result == kOverlayDecision_Accepted;
+}
+
 /* Argument parsing, the portable-bundle chdir, the per-run artifact dir, the
  * shipped-defaults ini upgrade, the config layer, and the ROM read.
  * Returns a process exit code on failure, or -1 to continue booting. */
@@ -1824,6 +1841,7 @@ static void AppBoot_StartGame(AppBoot *app) {
   InputReplay_Init();
   if (!ActRaiserRegional_Initialize(HostCampaignIdentity_Create, NULL))
     Die("Regional campaign storage could not be initialized; saves preserved.");
+  ActRaiserRegional_SetContinuePrompt(RegionalContinuePrompt, app);
   if (!InputReplay_SetPolicyDigest(ActRaiserRegional_ReplayDigest, NULL))
     Die("Regional replay identity could not be initialized.");
   /* A replay must not mutate the player's configuration, for the same reason it

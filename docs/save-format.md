@@ -320,8 +320,8 @@ Export still writes the selected game-image format only; carry the matching
 regional companion separately. This differs from the Unicode-name import
 behavior described above.
 
-This storage currently covers [the implemented regional gameplay and report options](regional-settings.md)
-only, not full gameplay presets, reserve tracking, or population redevelopment.
+This storage covers [the implemented regional gameplay and report options](regional-settings.md)
+and retained lair histories, not full gameplay presets or population redevelopment.
 Overlay changes remain in memory until the next completed Progress Log save;
 they are not written to the global `settings.ini`. Older pricing-only companions
 load with US room limits and retain all their prices. They are upgraded only
@@ -357,6 +357,163 @@ Companions predating magic-gesture support retain US dedicated-button casting.
 The requested and effective gestures are distinct until a released input
 sample activates the change; neither state changes physical input bindings.
 
+New campaigns initialize exact lair histories from the native seed transaction.
+The companion retains bounded alternative counters for the same observed
+kills, miracles, destroyed houses and action-score settlements. It does not
+contain extra monsters, sealed flags or rewards. Only the selected counters
+are projected into the game's existing stock fields and subsequently saved
+in native SRAM; inactive alternatives remain in the companion. Older companions have no history; loading
+one does not silently claim that its earlier events were reconstructed. Normal
+Continue pauses before native restoration to explain the approximation. Accepting
+estimates only missing towns and atomically saves their companion metadata against
+the unchanged durable image; Cancel returns to the title. A failed write offers
+retry/cancel and does not activate the estimate. Existing exact or approximate
+histories are retained. The acknowledgement does not repeat after a successful
+write. Recording/replay never supplies implicit consent: legacy histories remain
+unavailable in those protected sessions. A detected unaccounted counter write retains the affected
+history but marks it diverged, rather than overwriting the game's counter.
+
+ARREGION version 13 adds 24 named, resolved seed records to the previous 32
+rule records. The whole seed table has one source, but each record binds its
+actual numerical value; an inconsistent source or value is rejected. Earlier
+companions default to US seeds and retain any existing history. Pending reserve
+choices activate only after all 24 native counters match the current retained
+projection, at a safe town update or before action-score settlement. A failed check leaves the effective choice
+and native counters unchanged. The requested choice stays pending for recovery.
+Version 14 adds `house_credit_tiered`, bringing the total to 57 named records.
+Older companions retain tier-based US house feedback. Seed and house policies
+activate together only when their complete retained stock projection can be
+published safely. The native town-growth balance remains authoritative; no
+alternative growth balance is retroactively applied.
+
+Version 15 adds three independent resolved score records: `score_jp_conversion`,
+`score_stock_subtract` and `score_stock_nonsecond`, for 60 named records total.
+Older companions default these to US behavior while retaining their stock
+histories. Seed, house and score accounting policies publish together only
+after validating the complete stock projection. Score conversion/routing is
+captured for the native transaction; neither a policy edit nor migration
+replays a growth award. The companion still uses the same 32 retained stock
+projections and does not store an alternative growth balance.
+
+Version 16 adds `score_at_clear_card` (61 named records total). Earlier
+companions keep departure-time settlement. Timing is captured at the accepted
+clear-card boundary and does not reproject previous events. The 32 stock
+histories use the same actual settled score, with their respective conversion,
+operation and route rules. A clear's captured policies remain effective until
+departure; settings changes during the tally stay pending. No native battery
+save occurs midway through this sequence. Canonical replay checkpoints bind
+the live completion phase and scene when non-native rules are involved.
+
+Version 17 adds `lives_zero_based` (62 named records total). Versions 1–16
+default to US display, without modifying native SRAM's zero-based life stock.
+The requested source activates at the next action HUD redraw. It changes
+neither the attempt allowance nor the Master report. Replay identity includes
+pending/effective display behavior; US and Europe preserve previous digests.
+
+Version 18 adds `source_life_on_take` and `source_magic_on_take` (64 named
+records total). Both default to automatic collection for older companions.
+The leaves are independent; collection captures the requested policy before
+choosing effect or held insertion. Existing carried items are never converted
+by a rule edit or migration. The native collection return chain identifies
+an automatic effect, so no host-only modal state needs saving. Non-native
+pending/effective Source policies extend replay identity; US/Europe aliases
+preserve previous baseline digests.
+
+Version 19 adds `skull_post_effect_frames` (65 named records total), with
+90 frames for US/Europe and zero for Japan. Older companions default to US.
+Use Offering captures this choice until the original item handler returns;
+pending changes do not interrupt targeting or change an active wait. Native
+seals, growth and item consumption remain in SRAM; the companion stores only
+the requested/effective choice. Non-native timing extends replay identity
+without changing earlier US/European digests.
+
+Version 20 adds three independently sourced story-prerequisite records
+(68 total): `story_fillmore_hint_threshold`,
+`story_kasandora_tablet_threshold`, and `story_failed_act2_clear_compass`.
+Older companions default to US. Activation occurs at the next relevant
+native check; loading or changing a policy never edits event flags. Native
+prerequisite/fired bitmaps remain in SRAM. Requested/effective numeric rules
+extend replay identity only when behavior differs from US/Europe.
+
+Version 24 adds five independently sourced SIM combat records (80 named
+records total): `sim_dragon_threshold`, `sim_demon_threshold`,
+`sim_dragon_contact`, `sim_demon_contact`, and `sim_skull_contact`.
+Unchanged Bat values and Skull durability remain constants. Its feature payload
+was 3905 bytes; the current version is described below.
+
+After `ARLHIST1` and `ARLDELY1`, a 68-byte `ARSIMAC1` block preserves per-generation
+rules: an 8-byte magic, active-town tag (0 unavailable, otherwise town + 1),
+three zero reserved bytes, 24 cached and four active little-endian 16-bit
+snapshots. Bits 0–4 select Japanese Dragon durability, Demon durability,
+Dragon contact, Demon contact and Skull contact respectively; other bits are
+rejected. An unavailable active town requires four zero active snapshots.
+Native actor data is not duplicated or modified. Separate live/cached rule
+snapshots follow the native `$03:813F/$03:8168` copy boundaries. A verified
+`$03:B9EE` birth updates only its active slot, not its older cached image.
+Older companions default policies and existing generations to US.
+`ARSIMCOMBAT-R1` fingerprints requested/effective behavior;
+`ARSIMACTOR-R1` includes retained non-US live/cached generations even after
+both policy selections return to US. All-US actor snapshots preserve older
+replay digests regardless of the active-town tag.
+
+Version 25 adds six independently sourced behavior records (86 named records
+total): `sim_dragon_search_interval`, `sim_dragon_extra_actor_pass`,
+`sim_target_wide_coordinates`, `sim_target_full_pool`,
+`sim_bat_fallback_threshold`, and `sim_bat_abduction_wait`. Its payload is
+4163 bytes; the bounded companion limit is now 8192 bytes. The native SRAM
+image remains exactly 8192 bytes and contains no host metadata.
+
+`ARSIMAC2` replaces the actor block with 124 bytes: the same 12-byte header,
+then 24 cached and four live records, each holding a combat word followed by
+an AI word. AI bits 0–5 select Japanese behavior in the record order above;
+all remaining bits are rejected. Both words are captured together at birth.
+Version 24 companions decode `ARSIMAC1` with zero AI words; older formats
+default all actor metadata to US. The writer never silently drops AI state
+into a version-1 block.
+
+`ARSIMAI-R1` extends the policy fingerprint only for non-US numeric behavior.
+Actor histories with no AI bits retain the original `ARSIMACTOR-R1` hash and
+version-1 encoding; histories containing AI bits use `ARSIMACTOR-R2` and the
+version-2 encoding. Thus combat-only and all-US recordings keep their identities,
+while a surviving Japanese-rule actor still affects replay identity after the
+requested setting returns to US.
+
+Version 23 adds `level_goals_japanese` (75 named records total). Requested and
+effective sources select the US/European or Japanese population table. Existing
+companions default to US. Earned levels, HP/SP and the derived next-level target
+remain in native SRAM; no alternate progression counters are stored. The award
+owner pins a table through the complete native award sequence. A Master-report
+refresh can activate it without running an award. `ARLEVELGOALS-R1` extends
+replay identity only for non-US requested/effective behavior.
+
+Version 22 adds five town-status records (74 named records total):
+`town_report_flag_classifier`, `town_status_fixed_low_growth`,
+`town_status_extra_plot`, `town_status_food_attempt`, and
+`town_status_discard_computed_flags`. Each retains independent requested and
+effective sources; US/Europe resolve to 0 and Japan to 1. Older companions
+default these choices to US. They add no alternate town snapshots: structures,
+status flags and population remain native. Activation is pinned through a
+complete construction calculation or six-town report. `ARTOWNSTATUS-R1`
+extends replay identity only for non-native requested/effective behavior.
+
+Version 21 adds `lair_reload_japanese` (69 named records total) and a separate
+108-byte `ARLDELY1` block after `ARLHIST1`: eight-byte magic, initialized,
+approximate and diverged town masks, one reserved zero byte, then two sets of
+24 little-endian reload words (US/Europe, Japan). The running countdowns remain
+solely in native SRAM. Versions 1–20 default this choice to US and have no
+retained delay block; their stock histories are unchanged.
+
+New campaigns verify the native seed installation before initializing exact
+delay histories. After legacy-history acknowledgement, older saves adopt the
+actual US reloads and estimate the alternate values using the fewest native
+quarter-plus-one reductions consistent with each town. A US delay of 1 cannot
+reveal invisible past reductions, so adopted histories remain approximate.
+Unexplained values are retained and quarantine the affected town. Interactive
+Continue upgrades an already-acknowledged companion without changing SRAM or
+asking again; replay performs only the corresponding in-memory migration.
+Active Japanese or pending Japanese choices bind the retained delay block into
+replay identity. US/European choices preserve prior baseline digests.
+
 Canonical input recordings bind the requested and effective gameplay rules to
 their initial-state identity and any recorded checkpoints. Equal-valued US and
 European prices and initial room limits remain compatible with baseline
@@ -365,6 +522,10 @@ identities. Non-native rules
 require a recording with an initial identity; unidentified legacy recordings
 are rejected rather than played under different rules. Campaign IDs themselves
 are not part of this gameplay identity.
+Japanese requested or effective reserve, house or score-accounting policies also bind every retained counter and
+its initialization, approximation and divergence flags to the recording.
+When all accounting policies are US/European, inactive histories cannot affect
+execution and preserve the baseline recording identity.
 Rule edits are disabled during recording/replay, including live takeover,
 because these overlay actions are not yet events in the input stream.
 

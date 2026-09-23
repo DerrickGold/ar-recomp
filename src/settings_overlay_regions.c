@@ -17,6 +17,18 @@ const char *SettingsOverlayRegions_RowKey(ActRaiserRegionalSettingGroup group) {
     case kActRaiserRegionalSetting_MenuReturn: return "regional_menu_return";
     case kActRaiserRegionalSetting_SpeedRange: return "regional_speed_range";
     case kActRaiserRegionalSetting_MagicGesture: return "regional_magic_gesture";
+    case kActRaiserRegionalSetting_LairReserves: return "regional_lair_reserves";
+    case kActRaiserRegionalSetting_HouseCredit: return "regional_house_credit";
+    case kActRaiserRegionalSetting_ScoreFeedback: return "regional_score_feedback";
+    case kActRaiserRegionalSetting_LivesDisplay: return "regional_lives_display";
+    case kActRaiserRegionalSetting_Sources: return "regional_sources";
+    case kActRaiserRegionalSetting_SkullWait: return "regional_skull_wait";
+    case kActRaiserRegionalSetting_Story: return "regional_story";
+    case kActRaiserRegionalSetting_LairReloads: return "regional_lair_reloads";
+    case kActRaiserRegionalSetting_TownStatus: return "regional_town_status";
+    case kActRaiserRegionalSetting_LevelGoals: return "regional_level_goals";
+    case kActRaiserRegionalSetting_SimCombat: return "regional_sim_combat";
+    case kActRaiserRegionalSetting_SimAi: return "regional_sim_ai";
     default: return "";
   }
 }
@@ -49,6 +61,30 @@ const char *SettingsOverlayRegions_RowLabel(ArUiLocale locale, ActRaiserRegional
       return ArUiCatalog_Text(locale, "overlay.region.speed_range_label", "Message-speed range");
     case kActRaiserRegionalSetting_MagicGesture:
       return ArUiCatalog_Text(locale, "overlay.region.magic_gesture_label", "Magic controls");
+    case kActRaiserRegionalSetting_LairReserves:
+      return ArUiCatalog_Text(locale, "overlay.region.lair_label", "Monster reserves");
+    case kActRaiserRegionalSetting_HouseCredit:
+      return ArUiCatalog_Text(locale, "overlay.region.house_label", "House-loss feedback");
+    case kActRaiserRegionalSetting_ScoreFeedback:
+      return ArUiCatalog_Text(locale, "overlay.region.score_feedback_label", "Act-score feedback");
+    case kActRaiserRegionalSetting_LivesDisplay:
+      return ArUiCatalog_Text(locale, "overlay.region.lives_label", "Action HUD lives");
+    case kActRaiserRegionalSetting_Sources:
+      return ArUiCatalog_Text(locale, "overlay.region.sources_label", "Source activation");
+    case kActRaiserRegionalSetting_SkullWait:
+      return ArUiCatalog_Text(locale, "overlay.region.skull_label", "Magic Skull wait");
+    case kActRaiserRegionalSetting_Story:
+      return ArUiCatalog_Text(locale, "overlay.region.story_label", "Story prerequisites");
+    case kActRaiserRegionalSetting_LairReloads:
+      return ArUiCatalog_Text(locale,"overlay.region.reload_label","Lair respawn delays");
+    case kActRaiserRegionalSetting_TownStatus:
+      return ArUiCatalog_Text(locale,"overlay.region.town_status_label","Town growth reports");
+    case kActRaiserRegionalSetting_LevelGoals:
+      return ArUiCatalog_Text(locale,"overlay.region.level_label","Level population goals");
+    case kActRaiserRegionalSetting_SimCombat:
+      return ArUiCatalog_Text(locale,"overlay.region.sim_combat_label","Town monster combat");
+    case kActRaiserRegionalSetting_SimAi:
+      return ArUiCatalog_Text(locale,"overlay.region.sim_ai_label","Town monster behavior");
     default: return "";
   }
 }
@@ -62,6 +98,8 @@ const char *SettingsOverlayRegions_EditStatus(ArUiLocale locale, ActRaiserRegion
       return ArUiCatalog_Text(locale, "overlay.region.replay_locked", NULL);
     case kActRaiserRegionalEdit_Stale:
       return ArUiCatalog_Text(locale, "overlay.region.stale", NULL);
+    case kActRaiserRegionalEdit_HistoryUnavailable:
+      return ArUiCatalog_Text(locale, "overlay.region.lair_unavailable", NULL);
     default: return ArUiCatalog_Text(locale, "overlay.status.unavailable", NULL);
   }
 }
@@ -78,6 +116,81 @@ static SettingsOverlayRegionBadge SourceBadge(ArRegionalSource source) {
 bool SettingsOverlayRegions_ViewBadge(const ActRaiserRegionalRulesView *view,
     ActRaiserRegionalSettingGroup group, bool effective, SettingsOverlayRegionBadge *badge) {
   if (!view || !badge || (unsigned)group >= kActRaiserRegionalSetting_Count) return false;
+  if (group==kActRaiserRegionalSetting_SimAi) {
+    const ArRegionalSimAiPolicy *policy=effective?&view->effective.sim_ai:&view->requested.sim_ai;
+    uint16_t snapshot;ArRegionalSource source;
+    if (!ArRegionalSimAi_Resolve(policy,&snapshot)) return false;
+    *badge=ArRegionalSimAi_GroupSource(policy,&source)?SourceBadge(source):kOverlayRegionBadge_Mixed;return true;
+  }
+  if (group==kActRaiserRegionalSetting_SimCombat) {
+    const ArRegionalSimCombatPolicy *policy=effective?&view->effective.sim_combat:&view->requested.sim_combat;
+    uint16_t snapshot;ArRegionalSource source;
+    if (!ArRegionalSimCombat_Resolve(policy,&snapshot)) return false;
+    *badge=ArRegionalSimCombat_GroupSource(policy,&source)?SourceBadge(source):kOverlayRegionBadge_Mixed;return true;
+  }
+  if (group==kActRaiserRegionalSetting_LevelGoals) {
+    const ArRegionalSource source=effective?view->effective.level_goals:view->requested.level_goals;
+    bool unused;
+    if (!ArRegionalLevelGoals_Resolve(source,&unused)) return false;
+    *badge=SourceBadge(source);return true;
+  }
+  if (group==kActRaiserRegionalSetting_TownStatus) {
+    const ArRegionalTownStatusPolicy *policy=effective?&view->effective.town_status:&view->requested.town_status;
+    ArRegionalTownStatusSnapshot snapshot; ArRegionalSource source;
+    if (!ArRegionalTownStatus_Resolve(policy,&snapshot)) return false;
+    *badge=ArRegionalTownStatus_GroupSource(policy,&source)?SourceBadge(source):kOverlayRegionBadge_Mixed;
+    return true;
+  }
+  if (group==kActRaiserRegionalSetting_LairReloads) {
+    const ArRegionalSource source=effective?view->effective.lair_reloads:view->requested.lair_reloads;
+    if ((unsigned)source>=kArRegionalSource_Count) return false;
+    *badge=SourceBadge(source); return true;
+  }
+  if (group == kActRaiserRegionalSetting_Story) {
+    const ArRegionalStoryPolicy *policy=effective?&view->effective.story:&view->requested.story;
+    ArRegionalStorySnapshot snapshot; ArRegionalSource source;
+    if (!ArRegionalStory_Resolve(policy,&snapshot)) return false;
+    *badge=ArRegionalStory_GroupSource(policy,&source)?SourceBadge(source):kOverlayRegionBadge_Mixed;
+    return true;
+  }
+  if (group == kActRaiserRegionalSetting_SkullWait) {
+    const ArRegionalSource source=effective?view->effective.skull_wait:view->requested.skull_wait;
+    uint16_t unused;
+    if (!ArRegionalSkullWait_Resolve(source,&unused)) return false;
+    *badge=SourceBadge(source); return true;
+  }
+  if (group == kActRaiserRegionalSetting_Sources) {
+    const ArRegionalSourcesPolicy *policy=effective?&view->effective.sources:&view->requested.sources;
+    ArRegionalSourcesSnapshot snapshot; ArRegionalSource source;
+    if (!ArRegionalSources_Resolve(policy,&snapshot)) return false;
+    *badge=ArRegionalSources_GroupSource(policy,&source)?SourceBadge(source):kOverlayRegionBadge_Mixed;
+    return true;
+  }
+  if (group == kActRaiserRegionalSetting_LivesDisplay) {
+    const ArRegionalSource source = effective ? view->effective.lives_display : view->requested.lives_display;
+    bool unused;
+    if (!ArRegionalLivesDisplay_Resolve(source, &unused)) return false;
+    *badge = SourceBadge(source); return true;
+  }
+  if (group == kActRaiserRegionalSetting_ScoreFeedback) {
+    const ArRegionalScorePolicy *policy=effective?&view->effective.score_feedback:&view->requested.score_feedback;
+    ArRegionalScoreSnapshot snapshot; ArRegionalSource source;
+    if (!ArRegionalScore_Resolve(policy,&snapshot)) return false;
+    *badge=ArRegionalScore_GroupSource(policy,&source)?SourceBadge(source):kOverlayRegionBadge_Mixed;
+    return true;
+  }
+  if (group == kActRaiserRegionalSetting_HouseCredit) {
+    const ArRegionalSource source = effective ? view->effective.house_credit : view->requested.house_credit;
+    if ((unsigned)source >= kArRegionalSource_Count) return false;
+    *badge = SourceBadge(source);
+    return true;
+  }
+  if (group == kActRaiserRegionalSetting_LairReserves) {
+    const ArRegionalSource source = effective ? view->effective.lair_seeds : view->requested.lair_seeds;
+    if ((unsigned)source >= kArRegionalSource_Count) return false;
+    *badge = SourceBadge(source);
+    return true;
+  }
   if (group == kActRaiserRegionalSetting_MagicGesture) {
     const ArRegionalSource source = effective ? view->effective.magic_gesture : view->requested.magic_gesture;
     bool unused;
@@ -242,6 +355,113 @@ bool SettingsOverlayRegions_ViewDescription(ArUiLocale locale,
     char *output, size_t capacity) {
   SettingsOverlayRegionBadge badge;
   if (!SettingsOverlayRegions_ViewBadge(view, group, false, &badge)) return false;
+  if (group==kActRaiserRegionalSetting_SimAi) {
+    const char *key=badge==kOverlayRegionBadge_Mixed?"overlay.region.sim_ai_mixed":
+        badge==kOverlayRegionBadge_Japan?"overlay.region.sim_ai_jp":"overlay.region.sim_ai_us";
+    const ArUiTextArgument args[]={{"region",SettingsOverlayRegions_BadgeLabel(locale,badge)}};
+    const char *message=ArUiCatalog_Text(locale,key,NULL);
+    return message[0] && ArUiCatalog_Format(output,capacity,message,args,1);
+  }
+  if (group==kActRaiserRegionalSetting_SimCombat) {
+    const char *key=badge==kOverlayRegionBadge_Mixed?"overlay.region.sim_combat_mixed":
+        badge==kOverlayRegionBadge_Japan?"overlay.region.sim_combat_jp":"overlay.region.sim_combat_us";
+    const ArUiTextArgument args[]={{"region",SettingsOverlayRegions_BadgeLabel(locale,badge)}};
+    const char *message=ArUiCatalog_Text(locale,key,NULL);
+    return message[0] && ArUiCatalog_Format(output,capacity,message,args,1);
+  }
+  if (group==kActRaiserRegionalSetting_LevelGoals) {
+    const ArUiTextArgument args[]={{"region",SettingsOverlayRegions_BadgeLabel(locale,badge)}};
+    const char *message=ArUiCatalog_Text(locale,badge==kOverlayRegionBadge_Japan?
+        "overlay.region.level_jp":"overlay.region.level_us",NULL);
+    return message[0] && ArUiCatalog_Format(output,capacity,message,args,1);
+  }
+  if (group==kActRaiserRegionalSetting_TownStatus) {
+    const char *key=badge==kOverlayRegionBadge_Mixed?"overlay.region.town_status_mixed":
+        badge==kOverlayRegionBadge_Japan?"overlay.region.town_status_jp":"overlay.region.town_status_us";
+    const ArUiTextArgument args[]={{"region",SettingsOverlayRegions_BadgeLabel(locale,badge)}};
+    const char *message=ArUiCatalog_Text(locale,key,NULL);
+    return message[0] && ArUiCatalog_Format(output,capacity,message,args,1);
+  }
+  if (group==kActRaiserRegionalSetting_LairReloads) {
+    const ArUiTextArgument args[]={{"region",SettingsOverlayRegions_BadgeLabel(locale,badge)}};
+    const char *message=ArUiCatalog_Text(locale,!view->lair_reload_ready?"overlay.region.lair_unavailable":
+        view->requested.lair_reloads==kArRegionalSource_Japan?"overlay.region.reload_jp":"overlay.region.reload_us",NULL);
+    return message[0] && ArUiCatalog_Format(output,capacity,message,args,1);
+  }
+  if (group == kActRaiserRegionalSetting_ScoreFeedback) {
+    ArRegionalScoreSnapshot snapshot;
+    if (!ArRegionalScore_Resolve(&view->requested.score_feedback,&snapshot)) return false;
+    const ArUiTextArgument args[] = {
+      {"region", SettingsOverlayRegions_BadgeLabel(locale,badge)},
+      {"conversion", ArUiCatalog_Text(locale,snapshot.japanese[kArRegionalScore_Conversion] ?
+          "overlay.region.score_conversion_jp" : "overlay.region.score_conversion_us",NULL)},
+      {"operation", ArUiCatalog_Text(locale,snapshot.japanese[kArRegionalScore_Operation] ?
+          "overlay.region.score_operation_jp" : "overlay.region.score_operation_us",NULL)},
+      {"route", ArUiCatalog_Text(locale,snapshot.japanese[kArRegionalScore_Route] ?
+          "overlay.region.score_route_jp" : "overlay.region.score_route_us",NULL)},
+      {"phase", ArUiCatalog_Text(locale,snapshot.japanese[kArRegionalScore_Phase] ?
+          "overlay.region.score_phase_jp" : "overlay.region.score_phase_us",NULL)},
+    };
+    const char *message=ArUiCatalog_Text(locale,view->lair_history_ready ?
+        "overlay.region.score_feedback_help" : "overlay.region.lair_unavailable",NULL);
+    return message[0] && ArUiCatalog_Format(output,capacity,message,args,5);
+  }
+  if (group == kActRaiserRegionalSetting_LivesDisplay) {
+    const ArUiTextArgument args[] = {{"region", SettingsOverlayRegions_BadgeLabel(locale, badge)}};
+    const char *message = ArUiCatalog_Text(locale, view->requested.lives_display == kArRegionalSource_Japan ?
+        "overlay.region.lives_jp" : "overlay.region.lives_us", NULL);
+    return message[0] && ArUiCatalog_Format(output, capacity, message, args, 1);
+  }
+  if (group == kActRaiserRegionalSetting_SkullWait) {
+    uint16_t frames;
+    if (!ArRegionalSkullWait_Resolve(view->requested.skull_wait,&frames)) return false;
+    char value[4]; snprintf(value,sizeof(value),"%u",frames);
+    const ArUiTextArgument args[]={{"region",SettingsOverlayRegions_BadgeLabel(locale,badge)},{"frames",value}};
+    const char *message=ArUiCatalog_Text(locale,"overlay.region.skull_help",NULL);
+    return message[0] && ArUiCatalog_Format(output,capacity,message,args,2);
+  }
+  if (group == kActRaiserRegionalSetting_Story) {
+    ArRegionalStorySnapshot snapshot;
+    if (!ArRegionalStory_Resolve(&view->requested.story,&snapshot)) return false;
+    char hint[8],tablet[8];
+    snprintf(hint,sizeof(hint),"%u",snapshot.value[kArRegionalStory_FillmoreHint]);
+    snprintf(tablet,sizeof(tablet),"%u",snapshot.value[kArRegionalStory_KasandoraTablet]);
+    const ArUiTextArgument args[]={
+      {"region",SettingsOverlayRegions_BadgeLabel(locale,badge)}, {"hint",hint}, {"tablet",tablet},
+      {"compass",ArUiCatalog_Text(locale,snapshot.value[kArRegionalStory_ClearCompassPrerequisite] ?
+          "overlay.region.story_clear":"overlay.region.story_keep",NULL)},
+    };
+    const char *message=ArUiCatalog_Text(locale,"overlay.region.story_help",NULL);
+    return message[0] && ArUiCatalog_Format(output,capacity,message,args,4);
+  }
+  if (group == kActRaiserRegionalSetting_Sources) {
+    ArRegionalSourcesSnapshot snapshot;
+    if (!ArRegionalSources_Resolve(&view->requested.sources,&snapshot)) return false;
+    const ArUiTextArgument args[] = {
+      {"region",SettingsOverlayRegions_BadgeLabel(locale,badge)},
+      {"life",ArUiCatalog_Text(locale,snapshot.automatic[kArRegionalSourceItem_Life] ?
+          "overlay.region.sources_auto":"overlay.region.sources_manual",NULL)},
+      {"magic",ArUiCatalog_Text(locale,snapshot.automatic[kArRegionalSourceItem_Magic] ?
+          "overlay.region.sources_auto":"overlay.region.sources_manual",NULL)},
+    };
+    const char *message=ArUiCatalog_Text(locale,"overlay.region.sources_help",NULL);
+    return message[0] && ArUiCatalog_Format(output,capacity,message,args,3);
+  }
+  if (group == kActRaiserRegionalSetting_HouseCredit) {
+    const char *key = !view->lair_history_ready ? "overlay.region.lair_unavailable" :
+        view->requested.house_credit == kArRegionalSource_Japan ? "overlay.region.house_jp" : "overlay.region.house_us";
+    const ArUiTextArgument args[] = {{"region", SettingsOverlayRegions_BadgeLabel(locale, badge)}};
+    const char *message = ArUiCatalog_Text(locale, key, NULL);
+    return message[0] && ArUiCatalog_Format(output, capacity, message, args, 1);
+  }
+  if (group == kActRaiserRegionalSetting_LairReserves) {
+    const char *key = !view->lair_history_ready ? "overlay.region.lair_unavailable" :
+        view->requested.lair_seeds == kArRegionalSource_Japan ?
+        "overlay.region.lair_jp" : "overlay.region.lair_us";
+    const ArUiTextArgument args[] = {{"region", SettingsOverlayRegions_BadgeLabel(locale, badge)}};
+    const char *message = ArUiCatalog_Text(locale, key, NULL);
+    return message[0] && ArUiCatalog_Format(output, capacity, message, args, 1);
+  }
   if (group == kActRaiserRegionalSetting_MagicGesture) {
     bool up_attack;
     if (!ArRegionalMagicGesture_Resolve(view->requested.magic_gesture, &up_attack)) return false;

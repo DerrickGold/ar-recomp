@@ -334,6 +334,11 @@ static int s_visible_rows = 9;
 static int s_auto_menu_scale_percent = kPercentScale;
 static int s_match_game_scale_percent = kPercentScale;
 static char s_status[256];
+static struct {
+  SettingsOverlayDecisionResult result;
+  bool accept_selected;
+  char title[96], body[96], accept[96];
+} s_decision;
 static uint64_t s_status_until;
 static bool s_editing;
 static char s_edit_buffer[512];
@@ -1607,6 +1612,7 @@ void SettingsOverlay_Destroy(void) {
   s_render_device = NULL;
   s_window = NULL;
   s_open = false;
+  memset(&s_decision, 0, sizeof(s_decision));
   s_submenu_open = false;
   SettingsOverlayDebugPanel_Reset();
   s_inspector_info_provider = NULL;
@@ -1625,6 +1631,7 @@ bool SettingsOverlay_IsOpen(void) {
 }
 
 void SettingsOverlay_Open(void) {
+  if (s_decision.result == kOverlayDecision_Pending) return;
   StopEditing();
   EndValueHold();
   ClearSectionResetArm();
@@ -1638,6 +1645,8 @@ void SettingsOverlay_Open(void) {
 
 void SettingsOverlay_Close(void) {
   if (!s_open) return;
+  if (s_decision.result == kOverlayDecision_Pending)
+    s_decision.result = kOverlayDecision_Cancelled;
   /* The reader is nested inside this overlay, so closing the overlay closes it
    * too -- otherwise it would still believe it is open, and the next time the
    * menu came up the player would land in the manual instead of the menu. */
@@ -1650,6 +1659,28 @@ void SettingsOverlay_Close(void) {
   SettingsOverlayPalette_Close();
   s_open = false;
   fprintf(stderr, "[settings-menu] closed\n");
+}
+
+bool SettingsOverlay_BeginDecision(const char *title, const char *body, const char *accept) {
+  if (s_open || s_decision.result != kOverlayDecision_None || !s_render_device ||
+      !ArRenderTexture_IsValid(SettingsOverlayArtwork_Get()->fonts[kText_Normal]) ||
+      !title || !body || !accept || !*title || !*body || !*accept ||
+      strlen(title) >= sizeof(s_decision.title) || strlen(body) >= sizeof(s_decision.body) ||
+      strlen(accept) >= sizeof(s_decision.accept)) return false;
+  SettingsOverlay_Open();
+  strcpy(s_decision.title, title);
+  strcpy(s_decision.body, body);
+  strcpy(s_decision.accept, accept);
+  s_decision.accept_selected = false;
+  s_decision.result = kOverlayDecision_Pending;
+  return true;
+}
+
+SettingsOverlayDecisionResult SettingsOverlay_TakeDecisionResult(void) {
+  const SettingsOverlayDecisionResult result = s_decision.result;
+  if (result == kOverlayDecision_Accepted || result == kOverlayDecision_Cancelled)
+    s_decision.result = kOverlayDecision_None;
+  return result;
 }
 
 const char *SettingsOverlay_SelectedKey(void) {
@@ -1751,6 +1782,16 @@ void SettingsOverlay_TickAtForTest(uint64_t now_ms) {
  * through these so the two never drift apart, and so a rebound pad drives the
  * menu with the player's own buttons. */
 static void ApplyMenuNav(MenuNav nav, bool repeat) {
+  if (s_decision.result == kOverlayDecision_Pending) {
+    if (repeat) return;
+    if (nav == kMenuNav_Up || nav == kMenuNav_Down || nav == kMenuNav_Left || nav == kMenuNav_Right)
+      s_decision.accept_selected = !s_decision.accept_selected;
+    else if (nav == kMenuNav_Confirm) {
+      s_decision.result = s_decision.accept_selected ? kOverlayDecision_Accepted : kOverlayDecision_Cancelled;
+      SettingsOverlay_Close();
+    } else if (nav == kMenuNav_Back || nav == kMenuNav_Close) SettingsOverlay_Close();
+    return;
+  }
   if (SettingsOverlayPalette_ApplyNav(nav, repeat)) return;
   if (!s_submenu_open) {
     switch (nav) {
@@ -2653,6 +2694,28 @@ static int DrawWrappedSmallText(const MenuLayout *layout, int x, int y,
   return line;
 }
 
+static void DrawDecision(const MenuLayout *layout) {
+  const int width = (layout->logical_width < 496 ? layout->logical_width - 32 : 464) / 8 * 8;
+  const int height = (layout->logical_height < 288 ? layout->logical_height - 32 : 256) / 8 * 8;
+  const int x = (layout->logical_width - width) / 2;
+  const int y = (layout->logical_height - height) / 2;
+  FillLogicalRect(layout, 0, 0, layout->logical_width, layout->logical_height, ARGB(180, 0, 0, 0));
+  DrawDialogPanel(layout, x, y, width, height);
+  DrawWrappedSmallText(layout, x + 16, y + 12, Ui(s_decision.title),
+                       (width - 32) / kDebugGlyphWidth, 2, kGameGold);
+  DrawWrappedSmallText(layout, x + 16, y + 36, Ui(s_decision.body),
+                       (width - 32) / kDebugGlyphWidth,
+                       (height - 100) / kSmallLineHeight, kSteelBlue);
+  const int choices_y = y + height - 48;
+  for (unsigned n = 0; n < 2; ++n) {
+    const bool selected = s_decision.accept_selected == (n == 0);
+    if (selected) FillLogicalRect(layout, x + 8, choices_y + n * 16 - 2, width - 16, 14, kPanel);
+    DrawSmallText(layout, x + 16, choices_y + n * 16, selected ? ">" : " ", kSelectYellow);
+    DrawSmallText(layout, x + 30, choices_y + n * 16,
+                   Ui(n ? "overlay.decision.cancel" : s_decision.accept), selected ? kSelectYellow : kSteelBlue);
+  }
+}
+
 static void DrawInspectorInfo(const MenuLayout *layout, int x, int y,
                               int max_chars, int max_lines) {
   if (!s_inspector_info_provider || max_chars <= 0 || max_lines <= 0) return;
@@ -3489,6 +3552,10 @@ void SettingsOverlay_Render(ArRenderRectI game_viewport) {
     s_match_game_scale_percent = kMatchGameMaximumScalePercent;
 
   MenuLayout layout = BuildLayout(output_width, output_height);
+  if (s_decision.result == kOverlayDecision_Pending) {
+    DrawDecision(&layout);
+    return;
+  }
   DrawMenu(&layout);
   SettingsOverlayPalette_Draw(&layout);
 }

@@ -824,6 +824,21 @@ kind 0 people, 2 horse, 4 dog, 6 sheep, 8 boat, 10 flame.
 
 ### Saved SIM actor cache ($7F:97DA-$7F:9EF9)
 
+Regional combat/AI metadata keeps four live policy snapshots and 24 cached
+snapshots in the save companion, not in these native records. Native copies
+at `$03:813F/$03:8168` synchronize the corresponding policy copies; `$03:B9EE`
+pins only a verified new generation. The combat scan uses the first four slots
+(`$0B30/$0B56/$0B7C/$0BA2`); the other four cached actors stay native. Accumulated
+arrow damage remains the native byte at actor `+$24`, and never changes merely
+because a regional option is edited. [Integration contract](regional-differences-technical.md#sim-combat-integration).
+
+For these monsters, `+$0E` is the species byte; `+$0F` is behavior state,
+including a Bat's carrying flag. Treating the pair as a 16-bit species ID
+incorrectly loses ownership after that flag changes. `+$14` is state-local:
+Japanese Dragon search uses an eight-update counter, while Bat state 4 uses
+its abduction wait there. The strike helper can change X to its effect slot;
+the parent Dragon remains in the native `PHX` word at `S+1` at `$01:BB5C`.
+
 Six town slices of `$0130` bytes; eight `$26`-byte records each. JP base is
 `$7F:97CE` (end `$9EED`). US ROM `$03:8111` / JP `$03:810E` selects the slice.
 US `$03:8168` caches live `$0B30-$0C5F`; `$03:813F` restores on entry (JP
@@ -859,6 +874,9 @@ Regional read/write cautions:
 - US `$7F:91DA+2N` also participates in status reporting; JP's report uses the
   corresponding array but a different classification path. A growth label is
   not a population cap.
+- US `$7F:91E6+2N` is the previous-status snapshot copied by `$03:8612` after
+  construction. `$03:8620` compares it with `$91DA+2N` to detect newly raised
+  warning bits. Regional status rules leave this native copy/comparison intact.
 - US `$7E:0B04/$0B05` are byte HP/SP recovery queues; JP `$7E:0B04` is a
   **word** recovery phase. Never project one ROM's structure onto the other.
 - `$7F:91FE` is the long development clock; `$9200` is its subcycle. JP's

@@ -210,6 +210,23 @@ JP $03:B1DF: 0,80,200,400,550,650,750,1050,1400,1600,1800,1900,2000,2200,2400,26
 The 18-entry maximum-SP tables (US `$03:B432`, JP `$03:B203`) are identical.
 Level checks at US `$03:B3BA` / JP `$03:B18B` award upward, not downward.
 
+#### Level-goal integration
+
+The US-rooted regional adapter replaces only the three population-table reads:
+`$03:B3C7 → B3CB` performs the selected comparison, `$B3CD → B3D1` loads the
+unmet goal, and `$B407 → B40B` loads the following goal after an award. Generated
+entry boundaries keep all three reads behind their guards; HP/SP changes,
+level increments and the original PHP/PLP/return behavior remain native.
+
+`ActRaiserLevelGoalsRuntime` captures one table for the complete `$03:E414`
+award wrapper, including its repeated `$B3BA` calls, yields and dialogue.
+Standalone `$B3BA` entries also capture, while nested calls reuse the wrapper's
+snapshot. Settings changes cannot replace the table midway through an award.
+The existing Master-report owner refreshes only `$7E:0297` when Japanese goals
+are active or being replaced with US goals; it never calls the award wrapper.
+The maximum-level display stays zero, distinct from the table's 9999 sentinel.
+Population support and redevelopment have separate activation contracts.
+
 ### Monster lairs
 
 US `$03:B825` / JP `$03:B5AE`: 24 nine-byte seeds, four per town. Position,
@@ -291,6 +308,40 @@ versus JP `-25`. Scores and destroyed houses must be
 part of any dual-profile progress journal; `initial stock - kills` is not enough.
 An exhausted but unsealed lair can gain stock again. Do not clamp to its seed.
 
+The storage arithmetic has distinct edge contracts. House feedback uses word
+`INC`, and US score feedback uses word `ADC`: both wrap at65536. JP score
+subtraction uses carry to clamp a borrow to zero. The miracle debit instead
+uses `SBC #10; BPL` and clears a negative **result**, so it is not equivalent
+to unsigned saturation for high-bit stock words. Ordinary seeds are far below
+that boundary, but an edited or overflowed counter must not silently acquire
+different semantics in a host accountant. The house callback derives
+`4 + ((subtype & $30) >> 3)`, including10 for subtype `$30`; this differs from
+the census's four-person fallback for that subtype and does not establish a
+normally reachable ten-person house tier.
+
+For selectable house feedback, Recomp changes only the US `$03:B4B8` unit
+prefix (`AND #$00FF; TAY`) to a fixed four under the Japanese policy, then
+rejoins `$03:B4BC`. The shared native distributor still handles round-robin
+stock increments, word overflow, all-sealed growth and register/stack cleanup.
+US/European selections use the original prefix. The effective policy cannot
+change inside a house callback, miracle or earthquake. Existing growth is not
+reprojected when the retained stock history switches. The wrapper preserves
+the US caller's flag contract rather than importing JP's pre-`PHP` `LDY` flags.
+
+Selectable score arithmetic retains the US `$03:D095` transaction and replaces
+three bounded prefixes: `$D0B3` chooses the destination, `$D0D4` converts the
+score, and `$B525-$B548` performs JP stock subtraction. Explicit CFG boundaries
+retain the native prologues and cleanup. Conversion returns through the original
+`$D10A` RTS, rather than manually popping a host-invented frame. All10,000 valid
+four-digit scores match the unmodified JP converter, including A, Y, flags and
+scratch words `$7F:7C05/$7C07`. The converters leave carry clear for the shared
+growth helper. Conversion, stock operation and destination have independent
+internal policy keys; their UI bundle captures them for one settlement.
+The separate clear-card-versus-departure timing member captures one completion
+transaction, as described below. Phase is prospective; all retained stock
+projections consume the same actual settled score rather than fabricating a
+second tally when the player later switches rules.
+
 The qualifying miracle path (US `$03:BA42`, JP `$03:B7CB`) skips flags `$C000`,
 the `$90F5` busy gate and zero stock. Its depletion branch subtracts ten, but
 **the growth credit is not always ten**: `$03:B54E` / JP `$03:B2DA` uses `ADC`
@@ -311,6 +362,55 @@ A delay mutator at US `$03:B6BF` / JP `$03:B448` sets each current-town reload
 to `(delay >> 2) + 1`. Its ordinary gameplay caller has not been established;
 do not expose it as a confirmed regional rule or overwrite potential event
 modifications by reapplying seed delays every frame.
+
+Recomp's **Lair respawn delays** setting stages a whole-table replacement at
+the `$03:8193` town-master boundary. It verifies all 24 old `$7F:9628` words
+before writing any replacement and never writes `$7F:9658` countdowns, flags,
+actors or stock. `$03:B97F` remains native, including the `$1000` bypass and
+the `$B9C0/$B9C3` reload on expiry. US/Europe share numerical values; there is
+no PAL clock conversion. The owner does no table scan when no edit is pending.
+
+The `$03:B6BF` observer delegates the original M0/M1 body, then commits both
+retained projections only when native return and table values match. It does
+not add a caller for the unconfirmed path. New games initialize exact history
+after `$03:B7C6`; old saves retain their actual US values and estimate the fewest
+town-wide reductions consistent with those values. Fixed-point ambiguity
+(`1 -> 1`) is explicitly approximate. Unknown patterns or later unobserved
+writes quarantine history, rather than repairing native state. See
+[save format](save-format.md) for the independent `ARLDELY1` block.
+
+Recomp observes whole native transactions at `$03:BADD` (matched monster
+defeat), `$03:BA42` (miracle), `$03:B4A6` (one house) and `$03:D095`
+(action-score settlement). The first two capture eligible candidates before
+the active stock's zero early-out. Defeat matches the first actor-record
+address; it does not add a seal guard absent from the native leaf. Miracle
+capture retains the `$C000` flags, effect kind and posted-effect busy gate.
+House capture retains subtype and the four seal bits. Score capture uses the
+completed region at `$0341`, not the previously selected town.
+
+Each original body retains its native call frame, registers, flags and reward
+side effects. After its return the observer computes a candidate history,
+checks its active projection against native stocks, and commits only if they
+match. An escape or mismatch retains the old history marked diverged; it never
+repairs WRAM to fit the model. New-game initialization uses `$03:B7C6` or its
+already-installed result, checking all24 seeds before starting exact tracking.
+Completed saves perform another projection check before feature capture.
+Live accounting switching runs before the `$03:8193` development controller
+or the `$03:D095` score transaction,
+outside active stock, miracle and earthquake transactions. It validates all24
+native stocks against the effective projection before writing any counter,
+then changes only `$7F:96B8-$96E7` and publishes the staged effective policy.
+Registers, flags, actors, reloads, countdowns, sealing and rewards are untouched.
+Unknown or quarantined history blocks switching; mismatches quarantine the
+affected history without repairing WRAM. An unchanged policy takes a constant-time
+early exit, with no per-frame history copy, stock scan or disk access.
+For older saves, the normal Continue acknowledgement at `$02:A79F` reads the
+24 durable stock words from SRAM `$1603-$1632`, not from transient WRAM. It
+estimates only missing towns and persists the feature checkpoint before the
+original `$03:A83A` restoration. Known histories must match their US projection;
+divergent records are preserved for recovery. Cancel resumes the existing title
+frame at `$02:A75B` after release of the native `$4219 & $D0` accept mask.
+Record/replay follows its original route without fabricating acknowledgement.
 
 ### Census, construction and status are separate contracts
 
@@ -344,6 +444,34 @@ Text localization alone cannot reproduce this difference. Derived reports,
 construction policy and underlying status-flag producers need one consistent
 regional model. Geography, allocation, events and the bias still prevent a
 claim that all twelve US/JP final population maxima have been proved.
+
+### Town-status integration
+
+The US-rooted runtime keeps five independent policy leaves: report classifier,
+low-growth test, expected plot count, food-attempt marker and persistent flag
+merge. The overlay groups these as **Town growth reports**. US and Europe use
+the same numeric rules. Support coefficients and level goals are separate.
+
+`ActRaiserTownStatusRuntime` captures a resolved snapshot around native
+`$03:82DB` (complete construction calculation), `$03:BF8C` (six-town report),
+or standalone `$03:91AE/$91BC` plot operations. Nested calls reuse that snapshot;
+ordinary returns, coroutine yields and nonlocal return tokens retain native
+ownership. Prefix replacements use the US RAM layout and native continuations:
+
+| Prefix → continuation | Selected Japanese operation |
+| --- | --- |
+| `$8566 → $856B` | Load fixed threshold 4, retaining the US scratch store and comparison |
+| `$85A3 → $85A7` | Compare against the Japanese plot count, preserving A and native CMP flags |
+| `$85C3 → $85C6` | Omit scratch OR after the native `old & $50` |
+| `$9271 → $9274` | Mark the eligible food attempt, then perform the displaced native load |
+| `$BF9E → $C022` | Resolve the JP report code from US population, gate and stored flags |
+| `$BFA2 → $BFA7` | Use threshold 4 when combined with the US report classifier |
+
+The `$BF9A` loop root explicitly ends at `$BF9E`; otherwise generated code can
+inline the US classifier on towns after the first. No menu callback rewrites
+flags. A report before the next construction update intentionally sees stored
+flags from the earlier policy. New Japanese status calculations keep only the
+old `$10/$40` bits, even though temporary flags were computed.
 
 ### Regional growth-status producer
 
@@ -595,6 +723,25 @@ optional JP-ROM control interprets the original prefix, rather than using
 the generated host code as its oracle.
 
 ### Lives convention
+
+The integrated I02 option replaces only the two glyph writes in US
+`$02:C280..C2A3`, resuming the common HUD at `$02:C2A4`. Entry is native
+M0X0, PB2, D0, decimal clear, X `$0050`; the preceding `$C375` restores X.
+JP writes the raw `$1C` nibbles as ASCII to `$7F:B050/$B052`, leaving their
+attribute bytes untouched. Exit is M1 with A's high byte preserved, low byte
+`$30+($1C&15)`, and N/Z/C/V clear. US/Europe delegates the original BCD
+increment, including its debug-value behavior. Unsupported entry shapes stay
+native. `$C206` ends at the seam so its generated body cannot bypass the hook.
+No life debit or death dispatcher changes are needed for this display option.
+Enhanced HUD text consumes the same final glyphs and invalidates only the
+changed numeric cache entry.
+
+The native oracle checks all 256 stock bytes in both ROMs; the host-prefix
+test covers all input flag combinations with decimal clear and both high-byte
+patterns. Two ordinary 1,800-tick Continue-to-Fillmore controls retain stored
+`$1C=2` and differ only in the last lives glyph (`03` versus `02`) in the
+HUD tile buffer. Their frame-1400 captures differ only within that glyph.
+These are display controls, not new death/retry coverage.
 
 US HUD `$02:C280–C2A3` draws stored lives **plus one** in BCD; JP
 `$04:91C5–91DE` draws the stored byte unchanged. Death dispatch is at US
@@ -856,6 +1003,13 @@ controlled Bloodpool fixtures, not a complete lake/story playthrough. Do not
 give every seal the guidance reward bundle; keep a policy snapshot through
 item consumption, not merely through the initial seal write.
 
+The regional runtime captures S20 at `$01:9EE7`. Its Japanese wait choice
+redirects only `$01:9F80` (M0/X0, PB=DB=1, D=0) to `$01:9F87`, bypassing
+`LDA #$005A; JSL $03:B20C`. The destination's native `SEP`, item-ID load,
+`JSR $921B`, `PLX` and `$9C85` cleanup remain intact. The donor counterpart
+reaches consumption directly at `$01:9F56`. The setting does not replace the
+target picker, seal wrapper, reward or inventory code.
+
 Twelve further booted arrow-contact fixtures cover stock 0/1/200, sealed or
 unsealed, in both ROMs. The original Blue Dragon dies, stock saturates at zero,
 and seal flags do not change. There is also a **separate delayed growth award**:
@@ -908,17 +1062,39 @@ is a reproduced compatibility hazard for mixed policies, not an ordinary
 Western acquisition bug. Simply calling the old Use handler during an
 automatic collection would lose the carry-over item.
 
-Implementation: keep US automatic collection as the default and represent
-Japanese manual activation as an acquisition policy, independent of language
-or artwork. Apply a policy change at a completed collection/Use transaction,
-not between its effect and consumption. Preserve previously held Sources
-and allow explicit Use under either policy. Automatic collection must grant
-the new offering's effect without consuming an older held item; split the
-effect from held-item consumption at the host boundary. Do not award, consume,
-refund or convert existing inventory merely because the setting changed.
-This rule needs no Japanese graphics donor. Eighteen transactions and twenty
-exact Go windows support this contract; the independent repeat reproduces
-the retained evidence, with no ROM or player-save writes.
+The integrated S18 policy retains US automatic collection as the default and
+offers separate internal Life/Magic leaves under one overlay group. The
+accepted collection prefix `$01:8916` captures the policy after the native
+town slot is cleared and the item ID pushed. US resumes at `$8922`, Japan
+at `$892D`; the original effect or held-insertion flow owns the remaining
+transaction. Other item IDs keep the native branch. Policy edits do not
+convert existing inventory or alter an acknowledgement already in progress.
+
+Only the two Source consumption calls, `$01:9CCE/$9CF0`, can be bypassed.
+At those sites, automatic collection has dispatcher return `$9C82` at S+1
+and collection return `$8924` at S+4, with the saved P between them. If an
+older same-ID Source is held, the adapter resumes at `$9CD1/$9CF3` without
+removing it. Without that exact native chain and item match, the original
+removal executes, including explicit Use under either policy. The native
+effect, dialogue, sound request, P restore and town return remain intact.
+There is no host modal flag, inventory snapshot/restore, or guessed refund.
+
+Entries require M1X0, PB/DB1, D0, decimal clear. The collector reproduces the
+native CMP flags: automatic C1/Z1/N0, manual C1 and Z only for item5, preserving
+A and V. The bank coroutine root ends before `$88C3`; that owner ends at
+`$8916`. The two effect owners end at their respective consumption calls,
+preventing generated inlining from bypassing the guarded seams. No Japanese
+graphics donor is required. The eighteen original-ROM transactions and twenty
+Go windows above remain the independent reference, not host-game test claims.
+
+Thirteen compiled-game controls follow normal Continue, Palace, Fillmore and
+temple menus with a seeded offering in a scratch save. They cover automatic
+Life/Magic with an older matching Source, manual collection, independent
+Life/Magic choices, eight-held rejection, seven-held insertion, and explicit
+Use after collection under both rules. Every control returns to town with
+native SRAM unchanged. Automatic collection grants once while retaining the
+older item; explicit Use subsequently grants once and removes that item.
+These controlled offerings do not establish natural discovery reachability.
 
 #### Source discoveries and Compass fishing
 
@@ -1485,6 +1661,33 @@ enters the native knockback state. Consumers are arrow collision US `$01:AFC8`
 combat policy per actor generation; changing a threshold underneath an
 already-damaged actor is not equivalent to changing only spawn stock.
 
+#### SIM combat integration
+
+The host implements five independent combat leaves; it does not add switches
+for unchanged values. Each verified native birth captures combat and AI snapshots
+together through the shared `regional_sim_actors` owner.
+The narrow prefixes `$01:B018→B01C` and `$01:B0CC→B0D0` replace the threshold
+load and contact subtraction, preserving accumulator high bytes, native flags,
+the strict death comparison and subsequent native effects. Arrow accumulation,
+SP awards, knockback, lair stock changes and soul rewards retain their owners.
+All five cartridge tables were compared; the four Western releases agree.
+
+The collision scan `$01:B147` checks four `$26`-byte records starting at `$0B30`.
+All 24 lair seed records map their town's four lairs to those same four slots.
+The birth hook at `$03:B9EE` validates town, slot, species and the inactive flag
+before displacing `LDA #0`; the uninterrupted native field clearing follows.
+The spawner's `$B993` back edge is an explicit decode boundary, so later births
+cannot bypass the hook through an inlined native loop.
+
+Actor policy has separate active and six-town cached copies. Successful native
+cache load/save bodies `$03:813F/$03:8168` synchronize the matching policy copy;
+restoration is not treated as a new spawn. This preserves an older cached soul
+even after its live slot becomes a new monster, until native caching actually
+replaces it. The companion binds both snapshots to the native completed-save
+image; old companions assign US rules to their existing actors. Collision
+lookups are constant-time and never inspect other towns or activate a request.
+See the [companion layout](save-format.md) and [player setting](regional-settings.md).
+
 The four SIM species' 64 state entries were paired separately from scheduling:
 
 - Blue Dragon state 1: US target search every eligible update, JP only after
@@ -1499,6 +1702,39 @@ The four SIM species' 64 state entries were paired separately from scheduling:
 - Shared target selection US `$01:BCB0–BD89` biases random candidates using
   town offsets `$7F:6B9F/$6BAB` and a smaller local range. JP
   `$01:BC5F–BD13` samples the wider 32-cell grid without those offsets.
+
+#### SIM AI integration
+
+Six independent numeric leaves select the search interval, extra actor pass,
+candidate range, lookup pool, Bat fallback threshold and Bat wait. Like combat,
+they activate only on a verified birth and survive native actor cache copies.
+An overlay edit cannot change a live monster's search or attack halfway through.
+
+| US seam → continuation | Japanese-rule prefix | Native work retained |
+| --- | --- | --- |
+| `$01:BA67 → BA6A` | Reset Dragon search counter after animation setup | Original `$D072` call and its return contract |
+| `$01:BA6A → BA6D` or `$BA79` | Increment counter; search every eighth eligible update | Fallback attack still runs on skipped searches |
+| `$01:BB5C → BB60` | Omit only the extra world-actor pass | Strike effect, destruction, sound and state advance |
+| `$01:BCBC → BD45` | Generate the wider-grid candidate | Sealing gate before the prefix; exactly two calls to native `$03:AF65` |
+| `$01:BD46 → BD4A` | Call existing full-pool `$03:BDE1` instead of sliced `$BDEF` | Found/class/flag checks, stack restoration and target assignment |
+| `$01:BEE3 → BEE5` | Compare the random byte with 250 | Native fallback branch and animation |
+| `$01:BF72 → BF75` | Load the wait value 60 | Store, immediate decrement and subsequent Bat states |
+
+The candidate prefix changes coordinate generation only. A generic `$FF` target
+still follows the native acceptance rule; failed lookup does not erase an old
+target. The pool and coordinate rules are separate leaves, so mixed selections
+do not accidentally select both at once. All random draws and structure scans
+remain native; the adapter neither invents a host RNG nor adds a per-frame scan.
+
+`$01:BB5C` resolves ownership from the parent Dragon's stacked X. The preceding
+strike-effect allocator may already have changed live X; using that effect or
+a global “current monster” would fail during nested actor passes. Species checks
+read `actor+$0E` as a byte, leaving Bat carrying state at `+$0F` independent.
+Native helper escapes propagate without running a continuation; US-valued
+leaves take their original code. The candidate prefix has ROM-decoded parity
+tests over all 32×32 draws, both alignments, three target classes and four input
+flag combinations. Separate tests cover helper call frames, continuations,
+per-generation ownership, saved histories and old combat-only replay digests.
 
 Address-normalized state comparisons are not whole-world equivalence proofs:
 shared callees, animation, RNG order and US `BRK` versus JP `COP` audio dispatch
@@ -1772,6 +2008,12 @@ remaining 28 rows agree. These are prerequisites, not census limits, level
 requirements, or proof of the first naturally attainable population at which
 each scene appears. Normal selection and event callbacks have further state.
 
+The regional runtime replaces only the threshold load at `$03:E13E` for
+US record pointers `$F543` (Fillmore5) and `$F56C` (Kasandora9). It verifies
+the town and original record identity before loading the selected value.
+Native `$E142` keeps the strict comparison, `$F479` sets the prerequisite,
+and the original list walk/selector handles all other records and fired flags.
+
 The following road-location producer, US/PAL `$03:E15D–E19B` / JP
 `$03:DC62–DCA0`, reads six lists at `$03:F59D` / `$03:F079`. Their
 `{square_x, square_y, event_id}` records also end with `$FF`. All five ROMs
@@ -1919,6 +2161,12 @@ fixtures distinguish this selector dependency from a nonexistent direct gate
 inside the Compass callback. They are controlled states, not attainable-route
 proofs. Live regional policy must preserve actual prerequisite/fired state
 instead of reconstructing it from a guide's recommended order.
+
+S22's runtime seam is `$03:EB35`, after native prerequisite-8 clearing.
+Japan skips the three instructions that clear prerequisite9 and resumes at
+`$EB3D`; US/Europe delegates that original body. The original `REP`, two
+`PLX`, `PLA`, `SEC` and `RTS` retain rejection/stack ownership. Policy activation
+does not set a prerequisite, alter fired flags or call the Compass reward.
 
 Western Music use also brackets its audio routine with helpers
 `$01:93BE–93DB` that write `$4200=$01`, then `$A1` after acknowledging
@@ -2413,6 +2661,23 @@ score tally (stored score `$1799`). Neither changes lair stock in these
 fixtures. This is not an equal-final-score formula
 comparison; the [score settlement contract](#lair-stock-is-not-monotonic)
 describes the independent conversion rules.
+
+Recomp inserts the selected early settlement at US `$00:A754`, the equivalent
+of JP `$00:A713`, after the native completion count and clear-card text have
+been published. It then calls the original `$00:85B7` display-object finalizer
+and returns through `$00:A757`. Departure at `$00:A30D` either retains its
+original `$03:D095` call or skips it when this clear already settled, then
+rejoins `$00:A311`. Policies are pinned from clear through departure; stock
+projection changes wait until that transaction closes. Retry/new-room and
+accepted title entry discard an interrupted completion marker. Debug snapshot
+restoration remains rejected by the existing execution-lifecycle guard.
+
+The departure tail is shared by several coroutine resumes. CFG ends at A30D
+are required for A1CE, A1FC, A20D, A22F, A264, A285, A2B5 and A2C6;
+splitting only A2B5 leaves other generated bodies bypassing the hook. The
+clear-card body similarly ends at A754. The adapter uses public native-call
+and paired-tail contracts, preserving native return ownership rather than
+editing a return word or manually popping the clear/departure frame.
 
 US `$00:A343–A381`, reached after the action completion animation, checks all
 six completed-act counts. When all are two it sets `$7F:9101` bit 0, stages

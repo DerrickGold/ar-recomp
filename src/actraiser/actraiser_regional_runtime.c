@@ -12,24 +12,73 @@
 #include "actraiser/actraiser_report_command.h"
 #include "actraiser/actraiser_speed_selector.h"
 #include "actraiser/actraiser_magic_gesture.h"
+#include "actraiser/actraiser_lair_history.h"
+#include "actraiser/actraiser_lair_reloads.h"
+#include "actraiser/actraiser_town_status_runtime.h"
+#include "actraiser/actraiser_level_goals_runtime.h"
+#include "actraiser/actraiser_score_feedback.h"
+#include "actraiser/actraiser_lives_display.h"
+#include "actraiser/actraiser_sources.h"
+#include "actraiser/actraiser_story_prerequisites.h"
+#include "actraiser/actraiser_native_call.h"
 #include "actraiser/actraiser_localization_runtime.h"
 #include "actraiser/actraiser_regional_settings.h"
 #include "input_replay.h"
 #include "regional/regional_fingerprint.h"
+#include "regional/regional_lair_fingerprint.h"
+#include "snesrecomp/support/digest.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 extern RecompReturn bank_02_A622_M1X0(CpuState *cpu);
+extern RecompReturn bank_03_A83A_M1X0(CpuState *cpu);
+extern RecompReturn ActRaiser_WaitForVblank(CpuState *cpu);
 extern RecompReturn bank_01_97E5_M1X0(CpuState *cpu);
 extern RecompReturn bank_01_9840_M0X0(CpuState *cpu);
 extern RecompReturn bank_01_899B_M1X0(CpuState *cpu);
 extern RecompReturn bank_01_8AF5_M1X0(CpuState *cpu);
 extern RecompReturn bank_01_8C98_M1X0(CpuState *cpu);
+extern RecompReturn bank_03_B7C6_M0X0(CpuState *cpu);
+extern RecompReturn bank_03_B7C6_M1X0(CpuState *cpu);
+extern RecompReturn bank_03_B6BF_M0X0(CpuState *cpu);
+extern RecompReturn bank_03_B6BF_M1X0(CpuState *cpu);
+extern RecompReturn bank_03_B4A6_M0X0(CpuState *cpu);
+extern RecompReturn bank_03_B4A6_M1X0(CpuState *cpu);
+extern RecompReturn bank_03_BA42_M0X0(CpuState *cpu);
+extern RecompReturn bank_03_BA42_M1X0(CpuState *cpu);
+extern RecompReturn bank_03_BADD_M0X0(CpuState *cpu);
+extern RecompReturn bank_03_BADD_M1X0(CpuState *cpu);
+extern RecompReturn bank_03_D095_M0X0(CpuState *cpu);
+extern RecompReturn bank_03_D095_M1X0(CpuState *cpu);
+extern RecompReturn bank_00_85B7_M0X0(CpuState *cpu);
+extern RecompReturn bank_02_C280_M0X0(CpuState *cpu);
+static bool s_lives_delegate;
+extern RecompReturn bank_01_9EE7_M1X0(CpuState *cpu);
+static bool s_skull_active, s_skull_delegate;
+extern RecompReturn bank_03_EB35_M1X0(CpuState *cpu);
+static bool s_story_compass_delegate;
+static uint16_t s_skull_frames;
 static ArRegionalCampaign s_campaign;
 static bool s_delegate;
+static ActRaiserRegionalContinuePrompt s_continue_prompt;
+static void *s_continue_context;
+static bool s_lair_delegate, s_lair_seed_pending, s_lair_active;
+static bool s_reload_delegate, s_reload_active;
+static bool s_score_active;
+static ArRegionalScoreSnapshot s_score;
+/* One native clear-card -> departure transaction. This is not a second
+ * reward journal: every retained projection sees the one actual score. */
+enum { kScoreIdle, kScoreAwaitDeparture, kScoreSettledAtCard };
+static unsigned s_completion_state;
+static uint16_t s_completion_scene;
+static void ActivateLairAccounting(CpuState *cpu);
+static void ActivateLairReloads(CpuState *cpu);
 static ArRegionalRules s_boot_requested, s_boot_effective;
+static ArRegionalLairHistory s_boot_lairs;
+static ArRegionalLairReloads s_boot_reloads;
+static ArRegionalSimActors s_boot_sim_actors;
 static bool s_boot_valid;
 static bool s_miracle_active, s_prices_valid;
 static bool s_trace;
@@ -46,6 +95,23 @@ static ArRegionalCostSnapshot s_prices, s_miracle_prices;
 bool ActRaiserRegional_Initialize(ArRegionalCampaignIdentity identity, void *context) {
   if (!identity) return false;
   s_delegate = false;
+  s_lives_delegate = false;
+  s_skull_active=s_skull_delegate=false;
+  s_story_compass_delegate=false;
+  s_skull_frames=90;
+  s_continue_prompt = NULL;
+  s_continue_context = NULL;
+  s_lair_delegate = s_lair_seed_pending = s_lair_active = false;
+  s_reload_delegate = s_reload_active = false;
+  ActRaiserTownStatusRuntime_Reset();
+  ActRaiserLevelGoalsRuntime_Reset();
+  s_score_active = false;
+  s_score = (ArRegionalScoreSnapshot){0};
+  s_completion_state = kScoreIdle;
+  s_completion_scene = 0;
+  s_boot_lairs = (ArRegionalLairHistory){0};
+  s_boot_reloads = (ArRegionalLairReloads){0};
+  s_boot_sim_actors = (ArRegionalSimActors){0};
   s_miracle_active = s_prices_valid = false;
   s_quake_active = s_quake_delegate = false;
   s_report_active = s_report_delegate = false;
@@ -63,9 +129,21 @@ bool ActRaiserRegional_Initialize(ArRegionalCampaignIdentity identity, void *con
   ArRegionalRecovery_Init(&s_boot_requested.recovery, kArRegionalSource_US);
   ArRegionalQuake_Init(&s_boot_requested.quake, kArRegionalSource_US);
   s_boot_requested.score_page = kArRegionalSource_US;
+  s_boot_requested.lives_display = kArRegionalSource_US;
+  s_boot_requested.skull_wait = kArRegionalSource_US;
+  ArRegionalStory_Init(&s_boot_requested.story,kArRegionalSource_US);
+  ArRegionalSources_Init(&s_boot_requested.sources,kArRegionalSource_US);
   s_boot_requested.menu_return = kArRegionalSource_US;
   s_boot_requested.speed_range = kArRegionalSource_US;
   s_boot_requested.magic_gesture = kArRegionalSource_US;
+  s_boot_requested.lair_seeds = kArRegionalSource_US;
+  s_boot_requested.lair_reloads = kArRegionalSource_US;
+  ArRegionalTownStatus_Init(&s_boot_requested.town_status,kArRegionalSource_US);
+  s_boot_requested.level_goals=kArRegionalSource_US;
+  ArRegionalSimCombat_Init(&s_boot_requested.sim_combat,kArRegionalSource_US);
+  ArRegionalSimAi_Init(&s_boot_requested.sim_ai,kArRegionalSource_US);
+  s_boot_requested.house_credit = kArRegionalSource_US;
+  ArRegionalScore_Init(&s_boot_requested.score_feedback, kArRegionalSource_US);
   s_boot_effective = s_boot_requested;
   s_boot_valid = true;
   uint8_t image[kActRaiserSramSize];
@@ -78,6 +156,9 @@ bool ActRaiserRegional_Initialize(ArRegionalCampaignIdentity identity, void *con
     if (status == kSaveCheckpoint_Ready) {
       s_boot_requested = loaded.requested;
       s_boot_effective = loaded.effective;
+      s_boot_lairs = loaded.lairs;
+      s_boot_reloads = loaded.reloads;
+      s_boot_sim_actors = loaded.sim_actors;
     }
   }
   SaveCommitHost host = ArRegionalCampaign_SaveHost(&s_campaign);
@@ -106,6 +187,10 @@ bool ActRaiserRegional_CopyRulesView(ActRaiserRegionalRulesView *out) {
   *out = (ActRaiserRegionalRulesView){.revision = s_campaign.active.revision,
       .requested = s_campaign.active.requested, .effective = s_campaign.active.effective,
       .editable = InputReplay_PolicyChangesAllowed(), .miracle_in_progress = s_miracle_active};
+  out->lair_history_ready = s_campaign.active.lairs.initialized_towns == 0x3f &&
+      !s_campaign.active.lairs.diverged_towns;
+  out->lair_reload_ready = s_campaign.active.reloads.initialized_towns==0x3f &&
+      !s_campaign.active.reloads.diverged_towns;
   memcpy(out->campaign, s_campaign.active.campaign, sizeof(out->campaign));
   return true;
 }
@@ -121,6 +206,58 @@ ActRaiserRegionalEditResult ActRaiserRegional_RequestRules(
     return kActRaiserRegionalEdit_Stale;
   bool ok;
   switch (group) {
+    case kActRaiserRegionalSetting_SimAi: {
+      ArRegionalSimAiPolicy policy;
+      if (!ArRegionalSimAi_Init(&policy,source)) return kActRaiserRegionalEdit_Invalid;
+      ok=ArRegionalSession_RequestSimAi(&s_campaign.active,view->revision,&policy);break;
+    }
+    case kActRaiserRegionalSetting_SimCombat: {
+      ArRegionalSimCombatPolicy policy;
+      if (!ArRegionalSimCombat_Init(&policy,source)) return kActRaiserRegionalEdit_Invalid;
+      ok=ArRegionalSession_RequestSimCombat(&s_campaign.active,view->revision,&policy);break;
+    }
+    case kActRaiserRegionalSetting_LevelGoals:
+      ok=ArRegionalSession_RequestLevelGoals(&s_campaign.active,view->revision,source);break;
+    case kActRaiserRegionalSetting_TownStatus: {
+      ArRegionalTownStatusPolicy policy;
+      ok=ArRegionalTownStatus_Init(&policy,source) && ArRegionalSession_RequestTownStatus(&s_campaign.active,view->revision,&policy);
+      break;
+    }
+    case kActRaiserRegionalSetting_LairReloads:
+      if (s_campaign.active.reloads.initialized_towns!=0x3f || s_campaign.active.reloads.diverged_towns)
+        return kActRaiserRegionalEdit_HistoryUnavailable;
+      ok=ArRegionalSession_RequestLairReloads(&s_campaign.active,view->revision,source); break;
+    case kActRaiserRegionalSetting_Story: {
+      ArRegionalStoryPolicy policy;
+      ok=ArRegionalStory_Init(&policy,source) && ArRegionalSession_RequestStory(&s_campaign.active,view->revision,&policy);
+      break;
+    }
+    case kActRaiserRegionalSetting_SkullWait:
+      ok=ArRegionalSession_RequestSkullWait(&s_campaign.active,view->revision,source); break;
+    case kActRaiserRegionalSetting_Sources: {
+      ArRegionalSourcesPolicy policy;
+      ok=ArRegionalSources_Init(&policy,source) &&
+          ArRegionalSession_RequestSources(&s_campaign.active,view->revision,&policy);
+      break;
+    }
+    case kActRaiserRegionalSetting_LivesDisplay:
+      ok = ArRegionalSession_RequestLivesDisplay(&s_campaign.active, view->revision, source); break;
+    case kActRaiserRegionalSetting_ScoreFeedback: {
+      if (s_campaign.active.lairs.initialized_towns != 0x3f || s_campaign.active.lairs.diverged_towns)
+        return kActRaiserRegionalEdit_HistoryUnavailable;
+      ArRegionalScorePolicy policy;
+      ok = ArRegionalScore_Init(&policy, source) &&
+          ArRegionalSession_RequestScoreFeedback(&s_campaign.active, view->revision, &policy);
+      break;
+    }
+    case kActRaiserRegionalSetting_HouseCredit:
+      if (s_campaign.active.lairs.initialized_towns != 0x3f || s_campaign.active.lairs.diverged_towns)
+        return kActRaiserRegionalEdit_HistoryUnavailable;
+      ok = ArRegionalSession_RequestHouseCredit(&s_campaign.active, view->revision, source); break;
+    case kActRaiserRegionalSetting_LairReserves:
+      if (s_campaign.active.lairs.initialized_towns != 0x3f || s_campaign.active.lairs.diverged_towns)
+        return kActRaiserRegionalEdit_HistoryUnavailable;
+      ok = ArRegionalSession_RequestLairSeeds(&s_campaign.active, view->revision, source); break;
     case kActRaiserRegionalSetting_RoomTimes:
       ok = ArRegionalSession_RequestTimers(&s_campaign.active, view->revision, source); break;
     case kActRaiserRegionalSetting_RetryScore:
@@ -164,6 +301,10 @@ bool ActRaiserRegional_BeginRoomTime(uint8_t profile, uint16_t native_bcd, uint1
   ArRegionalTimerPolicy snapshot;
   if (!ArRegionalTimers_Resolve(&s_campaign.active.requested.timers, profile, native_bcd, &resolved) ||
       !ArRegionalSession_BeginTimers(&s_campaign.active, &snapshot)) return false;
+  /* Only an accepted retry/new-room initialization abandons an interrupted
+   * clear sequence; an invalid request must not erase its one-shot marker. */
+  s_completion_state = kScoreIdle;
+  s_completion_scene = 0;
   *out_bcd = resolved;
   if (s_trace) fprintf(stderr, "[regional] room profile=%02x time=%04x->%04x\n",
                        profile, native_bcd, resolved);
@@ -197,11 +338,30 @@ RecompReturn ActRaiserRegional_RunMiracle(CpuState *cpu) {
 
 bool ActRaiserRegional_ReplayDigest(void *unused, uint8_t out[32], bool *baseline) {
   (void)unused;
-  if (s_campaign.active_valid)
-    return ArRegionalRules_Fingerprint(&s_campaign.active.requested,
-        &s_campaign.active.effective, out, baseline);
-  return s_boot_valid && ArRegionalRules_Fingerprint(&s_boot_requested,
-      &s_boot_effective, out, baseline);
+  if (!out || !baseline || (!s_campaign.active_valid && !s_boot_valid)) return false;
+  const ArRegionalRules *requested = s_campaign.active_valid ? &s_campaign.active.requested : &s_boot_requested;
+  const ArRegionalRules *effective = s_campaign.active_valid ? &s_campaign.active.effective : &s_boot_effective;
+  const ArRegionalLairHistory *history = s_campaign.active_valid ? &s_campaign.active.lairs : &s_boot_lairs;
+  const ArRegionalLairAccounting pending = ArRegionalRules_LairAccounting(requested), active = ArRegionalRules_LairAccounting(effective);
+  const ArRegionalLairReloads *reloads=s_campaign.active_valid?&s_campaign.active.reloads:&s_boot_reloads;
+  const ArRegionalSimActors *actors=s_campaign.active_valid?&s_campaign.active.sim_actors:&s_boot_sim_actors;
+  uint8_t digest[32]; bool rules_native, lairs_native, reloads_native, actors_native;
+  if (!ArRegionalRules_Fingerprint(requested,effective,digest,&rules_native) ||
+      !ArRegionalLairHistory_Fingerprint(digest,history,&pending,&active,digest,&lairs_native) ||
+      !ArRegionalLairReloads_Fingerprint(digest,reloads,requested->lair_reloads,effective->lair_reloads,
+                                        digest,&reloads_native) ||
+      !ArRegionalSimActors_Fingerprint(digest,actors,digest,&actors_native)) return false;
+  if (s_campaign.active_valid && s_completion_state!=kScoreIdle && (!rules_native || !lairs_native)) {
+    uint8_t completion[51]="ARSCORECLEAR-R1";
+    memcpy(completion+16,digest,32);
+    completion[48]=(uint8_t)s_completion_state;
+    completion[49]=(uint8_t)s_completion_scene;
+    completion[50]=(uint8_t)(s_completion_scene>>8);
+    if (!sr_support_sha256(completion,sizeof(completion),digest)) return false;
+  }
+  memcpy(out,digest,sizeof(digest));
+  *baseline = rules_native && lairs_native && reloads_native && actors_native;
+  return true;
 }
 
 bool ActRaiserRegional_ReportCommandEntry(const CpuState *cpu) {
@@ -296,6 +456,8 @@ bool ActRaiser_RegionalEffectEntry(CpuState *cpu) {
 }
 RecompReturn ActRaiser_RegionalDevelopment(CpuState *cpu) {
   if(!ActRaiser_RegionalDevelopmentEntry(cpu))ActRaiserHleFatal("Invalid regional development entry");
+  ActivateLairAccounting(cpu);
+  ActivateLairReloads(cpu);
   ArRegionalDevelopmentSnapshot snapshot;
   const bool new_cycle=cpu_read16(cpu,0,0x0347)!=7 &&
       !cpu_read16(cpu,0x7f,0x91fe) && !cpu_read16(cpu,0x7f,0x9200);
@@ -430,6 +592,170 @@ QUAKE_SELECTOR(Class4, kArRegionalQuake_Class4)
 QUAKE_SELECTOR(Class5, kArRegionalQuake_Class5)
 #undef QUAKE_SELECTOR
 
+bool ActRaiserRegional_SimActorsReady(void) { return s_campaign.active_valid; }
+void ActRaiserRegional_SimActorCache(bool load,unsigned town) {
+  if (!s_campaign.active_valid) return;
+  const bool ok=load?ArRegionalSimActors_LoadTown(&s_campaign.active.sim_actors,town):
+      ArRegionalSimActors_SaveTown(&s_campaign.active.sim_actors,town);
+  if (s_trace) fprintf(stderr,"[regional] SIM cache %s town=%u captured=%u\n",load?"load":"save",town,ok);
+}
+void ActRaiserRegional_SimActorBirth(unsigned town,unsigned slot) {
+  if (!s_campaign.active_valid) return;
+  const bool ok=ArRegionalSession_BeginSimActor(&s_campaign.active,town,slot);
+  if (s_trace) fprintf(stderr,"[regional] SIM birth town=%u slot=%u captured=%u combat=%u ai=%u\n",town,slot,ok,
+      ok?s_campaign.active.sim_actors.active[slot].combat:0,ok?s_campaign.active.sim_actors.active[slot].ai:0);
+}
+bool ActRaiserRegional_SimActorSnapshot(unsigned town,unsigned slot,uint16_t *snapshot) {
+  ArRegionalSimActorRules rules;
+  if (!snapshot || !s_campaign.active_valid || !ArRegionalSimActors_Read(&s_campaign.active.sim_actors,town,slot,&rules)) return false;
+  *snapshot=rules.combat;return true;
+}
+bool ActRaiserRegional_SimActorAiSnapshot(unsigned town,unsigned slot,uint16_t *snapshot) {
+  ArRegionalSimActorRules rules;
+  if (!snapshot || !s_campaign.active_valid || !ArRegionalSimActors_Read(&s_campaign.active.sim_actors,town,slot,&rules)) return false;
+  *snapshot=rules.ai;return true;
+}
+bool ActRaiserRegional_LevelGoalsSnapshot(bool activate,bool *japanese) {
+  if (!s_campaign.active_valid || !japanese) return false;
+  return activate?ArRegionalSession_BeginLevelGoals(&s_campaign.active,japanese):
+      ArRegionalLevelGoals_Resolve(s_campaign.active.effective.level_goals,japanese);
+}
+
+bool ActRaiserRegional_TownStatusSnapshot(bool activate, ArRegionalTownStatusSnapshot *out) {
+  if (!s_campaign.active_valid || !out) return false;
+  return activate ? ArRegionalSession_BeginTownStatus(&s_campaign.active,out) :
+      ArRegionalTownStatus_Resolve(&s_campaign.active.effective.town_status,out);
+}
+
+bool ActRaiser_RegionalStoryThresholdEntry(CpuState *cpu) {
+  ArRegionalStoryRule rule;
+  return s_campaign.active_valid && ActRaiserStory_ThresholdEntry(cpu,&rule);
+}
+RecompReturn ActRaiser_RegionalStoryThreshold(CpuState *cpu) {
+  ArRegionalStoryRule rule;
+  ArRegionalStorySnapshot snapshot;
+  if (!s_campaign.active_valid || !ActRaiserStory_ThresholdEntry(cpu,&rule) ||
+      !ArRegionalSession_BeginStory(&s_campaign.active,&snapshot) ||
+      !ActRaiserStory_LoadThreshold(cpu,snapshot.value[rule]) ||
+      !cpu_hle_tailcall_request(0x03e142,0x03e13e))
+    ActRaiserHleFatal("Cannot resume native story prerequisite comparison");
+  if (s_trace) fprintf(stderr,"[regional] story rule=%u threshold=%u population=%u gf=%u\n",
+      (unsigned)rule,snapshot.value[rule],cpu_read16(cpu,0x7f,0x9202),cpu_read16(cpu,0,0x88));
+  return RECOMP_RETURN_TAILCALL;
+}
+bool ActRaiser_RegionalStoryCompassEntry(CpuState *cpu) {
+  if (s_story_compass_delegate) { s_story_compass_delegate=false; return false; }
+  return s_campaign.active_valid && ActRaiserStory_CompassEntry(cpu);
+}
+RecompReturn ActRaiser_RegionalStoryCompass(CpuState *cpu) {
+  ArRegionalStorySnapshot snapshot;
+  if (!ActRaiser_RegionalStoryCompassEntry(cpu) ||
+      !ArRegionalSession_BeginStory(&s_campaign.active,&snapshot))
+    ActRaiserHleFatal("Cannot capture Bloodpool event prerequisite policy");
+  if (s_trace) fprintf(stderr,"[regional] failed Bloodpool Act2 clear-compass=%u\n",
+      snapshot.value[kArRegionalStory_ClearCompassPrerequisite]);
+  if (snapshot.value[kArRegionalStory_ClearCompassPrerequisite]) {
+    s_story_compass_delegate=true;
+    const RecompReturn result=bank_03_EB35_M1X0(cpu);
+    s_story_compass_delegate=false;
+    return result;
+  }
+  if (!cpu_hle_tailcall_request(0x03eb3d,0x03eb35))
+    ActRaiserHleFatal("Cannot resume native Bloodpool event rejection");
+  return RECOMP_RETURN_TAILCALL;
+}
+
+static bool SkullShape(const CpuState *cpu, bool accumulator8) {
+  return cpu && cpu->PB==1 && cpu->DB==1 && !cpu->D && !cpu->emulation &&
+      cpu->m_flag==accumulator8 && !cpu->x_flag && !cpu->_flag_D && !(cpu->P & CPU_P_D);
+}
+bool ActRaiser_RegionalSkullUseEntry(CpuState *cpu) {
+  if (s_skull_delegate) { s_skull_delegate=false; return false; }
+  return !s_skull_active && s_campaign.active_valid && SkullShape(cpu,true);
+}
+RecompReturn ActRaiser_RegionalSkullUse(CpuState *cpu) {
+  if (!ActRaiser_RegionalSkullUseEntry(cpu) ||
+      !ArRegionalSession_BeginSkullWait(&s_campaign.active,&s_skull_frames))
+    ActRaiserHleFatal("Cannot capture Magic Skull transaction");
+  s_skull_active=s_skull_delegate=true;
+  if (s_trace) fprintf(stderr,"[regional] Magic Skull post-effect wait=%u begin\n",s_skull_frames);
+  RecompReturn result=bank_01_9EE7_M1X0(cpu);
+  s_skull_active=s_skull_delegate=false;
+  if (s_trace) fprintf(stderr,"[regional] Magic Skull return=%u\n",(unsigned)result);
+  return result;
+}
+bool ActRaiser_RegionalSkullSkipWaitEntry(CpuState *cpu) {
+  return s_skull_active && !s_skull_frames && SkullShape(cpu,false);
+}
+RecompReturn ActRaiser_RegionalSkullSkipWait(CpuState *cpu) {
+  if (!ActRaiser_RegionalSkullSkipWaitEntry(cpu) || !cpu_hle_tailcall_request(0x019f87,0x019f80))
+    ActRaiserHleFatal("Cannot resume native Magic Skull consumption");
+  return RECOMP_RETURN_TAILCALL;
+}
+
+bool ActRaiser_RegionalSourceCollectionEntry(CpuState *cpu) {
+  return s_campaign.active_valid && ActRaiserSources_CollectionEntry(cpu);
+}
+RecompReturn ActRaiser_RegionalSourceCollection(CpuState *cpu) {
+  ArRegionalSourcesSnapshot snapshot;
+  if (!ActRaiser_RegionalSourceCollectionEntry(cpu) ||
+      !ArRegionalSession_BeginSources(&s_campaign.active,&snapshot))
+    ActRaiserHleFatal("Cannot capture Source collection policy");
+  const uint8_t item=(uint8_t)cpu->A;
+  const bool automatic=snapshot.automatic[item==5?kArRegionalSourceItem_Life:kArRegionalSourceItem_Magic];
+  const uint32_t target=ActRaiserSources_CollectionRoute(cpu,automatic);
+  if (s_trace) fprintf(stderr,"[regional] Source item=%u collection=%s\n",item,automatic?"automatic":"held");
+  if (!cpu_hle_tailcall_request(target,0x018916))
+    ActRaiserHleFatal("Source collection has no native return owner");
+  return RECOMP_RETURN_TAILCALL;
+}
+bool ActRaiser_RegionalSourceLifeKeepEntry(CpuState *cpu) {
+  return s_campaign.active_valid && ActRaiserSources_KeepCarried(cpu,5);
+}
+bool ActRaiser_RegionalSourceMagicKeepEntry(CpuState *cpu) {
+  return s_campaign.active_valid && ActRaiserSources_KeepCarried(cpu,6);
+}
+static RecompReturn KeepSource(CpuState *cpu, uint8_t item) {
+  if (!s_campaign.active_valid || !ActRaiserSources_KeepCarried(cpu,item))
+    ActRaiserHleFatal("Source preservation outside automatic collection");
+  /* The collected Source's native bonus and acknowledgement have completed.
+   * Skip only removal of an older held Source. Sound, P restore, item pop and
+   * native return-to-town continue normally. Explicit Use is never guarded. */
+  if (s_trace) fprintf(stderr,"[regional] Source item=%u kept older held item\n",item);
+  if (!cpu_hle_tailcall_request(item==5?0x019cd1:0x019cf3,item==5?0x019cce:0x019cf0))
+    ActRaiserHleFatal("Source preservation has no native return owner");
+  return RECOMP_RETURN_TAILCALL;
+}
+RecompReturn ActRaiser_RegionalSourceLifeKeep(CpuState *cpu) { return KeepSource(cpu,5); }
+RecompReturn ActRaiser_RegionalSourceMagicKeep(CpuState *cpu) { return KeepSource(cpu,6); }
+
+bool ActRaiser_RegionalLivesDisplayEntry(CpuState *cpu) {
+  if (s_lives_delegate) { s_lives_delegate = false; return false; }
+  return s_campaign.active_valid && ActRaiserLivesDisplay_Entry(cpu) &&
+      (s_campaign.active.requested.lives_display != s_campaign.active.effective.lives_display ||
+       s_campaign.active.effective.lives_display == kArRegionalSource_Japan);
+}
+RecompReturn ActRaiser_RegionalLivesDisplay(CpuState *cpu) {
+  if (!ActRaiser_RegionalLivesDisplayEntry(cpu)) ActRaiserHleFatal("Unsupported regional lives HUD entry");
+  bool zero_based = s_campaign.active.effective.lives_display == kArRegionalSource_Japan;
+  /* The stable per-frame path does not scan/validate the campaign history. */
+  if (s_campaign.active.requested.lives_display != s_campaign.active.effective.lives_display) {
+    if (!ArRegionalSession_BeginLivesDisplay(&s_campaign.active, &zero_based))
+      ActRaiserHleFatal("Cannot activate regional lives HUD convention");
+    if (s_trace) fprintf(stderr, "[regional] lives HUD zero-based=%u\n", zero_based);
+  }
+  if (!zero_based) {
+    s_lives_delegate = true;
+    RecompReturn result = bank_02_C280_M0X0(cpu);
+    s_lives_delegate = false;
+    return result;
+  }
+  ActRaiserLivesDisplay_DrawZeroBased(cpu);
+  if (!cpu_hle_tailcall_request(0x02c2a4, 0x02c280))
+    ActRaiserHleFatal("Lives HUD continuation has no native return owner");
+  return RECOMP_RETURN_TAILCALL;
+}
+
 static bool ReportShape(const CpuState *cpu) {
   return cpu && cpu->PB == 1 && cpu->DB == 1 && !cpu->D && !cpu->emulation &&
       cpu->m_flag && !cpu->x_flag;
@@ -443,6 +769,7 @@ RecompReturn ActRaiser_RegionalMasterReport(CpuState *cpu) {
       !ArRegionalSession_BeginScorePage(&s_campaign.active, &s_report_score_page))
     ActRaiserHleFatal("Cannot capture regional Master report");
   s_report_active = s_report_delegate = true;
+  ActRaiserLevelGoalsRuntime_RefreshReport(cpu);
   if (s_trace) fprintf(stderr, "[regional] Master report score-page=%u begin\n", s_report_score_page);
   /* The native body still composes the report and owns inventory objects,
    * button release/press waits and cleanup. Only its optional branch changes. */
@@ -542,6 +869,313 @@ RecompReturn ActRaiser_RegionalSpeedScale(CpuState *cpu) {
   return result;
 }
 
+static void ReportLairDivergence(unsigned previous) {
+  const unsigned changed=s_campaign.active.lairs.diverged_towns & ~previous;
+  if (changed) fprintf(stderr,"[regional] unaccounted lair stock write; retained histories quarantined for towns=%02x\n",changed);
+}
+static void ReportReloadDivergence(unsigned previous) {
+  const unsigned changed=s_campaign.active.reloads.diverged_towns & ~previous;
+  if (changed) fprintf(stderr,"[regional] unaccounted lair delay write; retained delays quarantined for towns=%02x\n",changed);
+}
+void ActRaiserRegional_CheckLairHistory(CpuState *cpu) {
+  if (!s_campaign.active_valid) return;
+  const unsigned before=s_campaign.active.lairs.diverged_towns;
+  const ArRegionalLairAccounting active = ArRegionalRules_LairAccounting(&s_campaign.active.effective);
+  ActRaiserLairHistory_Check(&s_campaign.active.lairs,cpu,&active);
+  ReportLairDivergence(before);
+  const unsigned reload_before=s_campaign.active.reloads.diverged_towns;
+  ActRaiserLairReloads_Check(&s_campaign.active.reloads,cpu,s_campaign.active.effective.lair_reloads);
+  ReportReloadDivergence(reload_before);
+}
+static void ActivateLairReloads(CpuState *cpu) {
+  if (!s_campaign.active_valid || s_reload_active || s_lair_active || s_quake_active || s_miracle_active ||
+      s_campaign.active.requested.lair_reloads==s_campaign.active.effective.lair_reloads ||
+      s_campaign.active.reloads.initialized_towns!=0x3f || s_campaign.active.reloads.diverged_towns ||
+      !ActRaiserLairHistory_Entry(cpu)) return;
+  ArRegionalSession next=s_campaign.active;
+  if (!ArRegionalSession_BeginLairReloads(&next)) return;
+  if (!ActRaiserLairReloads_Project(&next.reloads,cpu,s_campaign.active.effective.lair_reloads,
+                                   next.effective.lair_reloads)) {
+    const unsigned previous=s_campaign.active.reloads.diverged_towns;
+    s_campaign.active.reloads=next.reloads;
+    ReportReloadDivergence(previous);
+    return;
+  }
+  s_campaign.active=next;
+  if (s_trace) fprintf(stderr,"[regional] lair reload source=%u activated; running countdowns preserved\n",
+                       (unsigned)next.effective.lair_reloads);
+}
+bool ActRaiser_RegionalLairReductionEntry(CpuState *cpu) {
+  if (s_reload_delegate) { s_reload_delegate=false; return false; }
+  return s_campaign.active_valid && !s_reload_active && s_campaign.active.reloads.initialized_towns &&
+      ActRaiserLairReloads_Entry(cpu);
+}
+RecompReturn ActRaiser_RegionalLairReduction(CpuState *cpu) {
+  const unsigned previous=s_campaign.active.reloads.diverged_towns;
+  ArRegionalLairReloads candidate;
+  unsigned town;
+  const ArRegionalSource source=s_campaign.active.effective.lair_reloads;
+  const bool captured=ActRaiserLairReloads_BeginReduction(&s_campaign.active.reloads,cpu,source,&candidate,&town);
+  s_reload_active=s_reload_delegate=true;
+  const RecompReturn result=cpu->m_flag?bank_03_B6BF_M1X0(cpu):bank_03_B6BF_M0X0(cpu);
+  s_reload_active=s_reload_delegate=false;
+  if (captured) {
+    const bool matched=ActRaiserLairReloads_EndReduction(&s_campaign.active.reloads,cpu,source,&candidate,town,result);
+    if (s_trace) fprintf(stderr,"[regional] native delay reduction town=%u matched=%u\n",town,matched);
+  }
+  ReportReloadDivergence(previous);
+  return result;
+}
+static void ActivateLairAccounting(CpuState *cpu) {
+  if (s_completion_state != kScoreIdle || s_lair_active || s_quake_active || s_miracle_active || !s_campaign.active_valid ||
+      ArRegionalRules_SameAccounting(&s_campaign.active.requested,&s_campaign.active.effective) ||
+      s_campaign.active.lairs.initialized_towns != 0x3f || s_campaign.active.lairs.diverged_towns ||
+      !ActRaiserLairHistory_ProjectionEntry(cpu)) return;
+  ArRegionalSession next = s_campaign.active;
+  ArRegionalLairAccounting target;
+  if (!ArRegionalSession_BeginLairAccounting(&next,&target)) return;
+  const ArRegionalLairAccounting current = ArRegionalRules_LairAccounting(&s_campaign.active.effective);
+  const unsigned previous = s_campaign.active.lairs.diverged_towns;
+  const ArRegionalLairProjectionResult result = ActRaiserLairHistory_Project(&next.lairs,cpu,&current,&target);
+  if (result == kArRegionalLairProjection_Ready) {
+    s_campaign.active = next;
+    if (s_trace) fprintf(stderr,"[regional] retained lair projection activated: seeds=%u house=%u score=%u/%u/%u\n",
+        (unsigned)target.seeds, (unsigned)target.house_credit, (unsigned)target.score_conversion,
+        (unsigned)target.score_operation, (unsigned)target.score_route);
+  } else {
+    s_campaign.active.lairs = next.lairs; /* Preserve mismatch evidence, not the staged policy. */
+    ReportLairDivergence(previous);
+  }
+}
+bool ActRaiser_RegionalLairEntry(CpuState *cpu) {
+  if (s_lair_delegate) { s_lair_delegate=false; return false; }
+  return s_campaign.active_valid && s_campaign.active.lairs.initialized_towns &&
+      ActRaiserLairHistory_Entry(cpu);
+}
+bool ActRaiser_RegionalLairSeedEntry(CpuState *cpu) {
+  if (s_lair_delegate) { s_lair_delegate=false; return false; }
+  return s_campaign.active_valid && s_lair_seed_pending && ActRaiserLairHistory_Entry(cpu);
+}
+static void TryInitializeLairs(CpuState *cpu) {
+  if (!s_lair_seed_pending) return;
+  ArRegionalSession next=s_campaign.active;
+  if (ActRaiserLairHistory_Initialize(&next.lairs,cpu) && ActRaiserLairReloads_Initialize(&next.reloads,cpu)) {
+    s_campaign.active=next;
+    s_lair_seed_pending=false;
+    if (s_trace) fprintf(stderr,"[regional] exact lair histories initialized for new campaign\n");
+  }
+}
+RecompReturn ActRaiser_RegionalLairSeed(CpuState *cpu) {
+  s_lair_delegate=true;
+  const RecompReturn result=cpu->m_flag ? bank_03_B7C6_M1X0(cpu) : bank_03_B7C6_M0X0(cpu);
+  s_lair_delegate=false;
+  if (result==RECOMP_RETURN_NORMAL) TryInitializeLairs(cpu);
+  return result;
+}
+static RecompReturn ObserveLairs(CpuState *cpu, ActRaiserLairEvent event,
+                                 ActRaiserNativeLeaf m0, ActRaiserNativeLeaf m1) {
+  const unsigned previous=s_campaign.active.lairs.diverged_towns;
+  ActRaiserLairCapture capture;
+  const ArRegionalLairAccounting active = ArRegionalRules_LairAccounting(&s_campaign.active.effective);
+  const bool observed=ActRaiserLairHistory_Begin(&s_campaign.active.lairs,cpu,event,
+                                               &active,&capture);
+  const bool was_active = s_lair_active;
+  const bool was_score = s_score_active;
+  const ArRegionalScoreSnapshot previous_score = s_score;
+  if (event==kActRaiserLairEvent_Score) {
+    if (!ArRegionalScore_Resolve(&s_campaign.active.effective.score_feedback,&s_score))
+      ActRaiserHleFatal("Invalid regional score-feedback snapshot");
+    s_score_active=true;
+  }
+  s_lair_active=true;
+  s_lair_delegate=true;
+  const RecompReturn result=cpu->m_flag ? m1(cpu) : m0(cpu);
+  s_lair_delegate=false;
+  s_lair_active=was_active;
+  s_score_active=was_score;
+  s_score=previous_score;
+  if (observed) {
+    const bool matched=ActRaiserLairHistory_End(&s_campaign.active.lairs,cpu,&capture,result);
+    if (s_trace) fprintf(stderr,"[regional] lair event=%u town=%u candidates=%x matched=%u\n",
+        (unsigned)event,capture.town,capture.candidates,matched);
+  }
+  ReportLairDivergence(previous);
+  return result;
+}
+RecompReturn ActRaiser_RegionalLairKill(CpuState *cpu) {
+  return ObserveLairs(cpu,kActRaiserLairEvent_Kill,bank_03_BADD_M0X0,bank_03_BADD_M1X0);
+}
+RecompReturn ActRaiser_RegionalLairMiracle(CpuState *cpu) {
+  return ObserveLairs(cpu,kActRaiserLairEvent_Miracle,bank_03_BA42_M0X0,bank_03_BA42_M1X0);
+}
+RecompReturn ActRaiser_RegionalLairHouse(CpuState *cpu) {
+  return ObserveLairs(cpu,kActRaiserLairEvent_House,bank_03_B4A6_M0X0,bank_03_B4A6_M1X0);
+}
+bool ActRaiser_RegionalHouseUnitsEntry(CpuState *cpu) {
+  return ActRaiserLairHistory_Entry(cpu) && !cpu->m_flag && s_campaign.active_valid &&
+      s_campaign.active.effective.house_credit == kArRegionalSource_Japan;
+}
+RecompReturn ActRaiser_RegionalHouseUnits(CpuState *cpu) {
+  if (!ActRaiser_RegionalHouseUnitsEntry(cpu) || !ActRaiserLairHouse_Units(cpu, false))
+    ActRaiserHleFatal("Unsupported regional house-credit prefix");
+  if (!cpu_hle_tailcall_request(0x03b4bc, 0x03b4b8))
+    ActRaiserHleFatal("Regional house-credit prefix has no native return owner");
+  return RECOMP_RETURN_TAILCALL;
+}
+RecompReturn ActRaiser_RegionalLairScore(CpuState *cpu) {
+  /* The completed-act settlement precedes the next development tick. Activate
+   * here too, before capture, so an action-mode request covers this score. */
+  ActivateLairAccounting(cpu);
+  return ObserveLairs(cpu,kActRaiserLairEvent_Score,bank_03_D095_M0X0,bank_03_D095_M1X0);
+}
+static bool ScoreEntry(CpuState *cpu, ArRegionalScoreRule rule) {
+  return s_score_active && s_score.japanese[rule] && ActRaiserScoreFeedback_Entry(cpu);
+}
+bool ActRaiser_RegionalScoreRouteEntry(CpuState *cpu) { return ScoreEntry(cpu,kArRegionalScore_Route); }
+bool ActRaiser_RegionalScoreConversionEntry(CpuState *cpu) { return ScoreEntry(cpu,kArRegionalScore_Conversion); }
+bool ActRaiser_RegionalScoreSubtractEntry(CpuState *cpu) { return ScoreEntry(cpu,kArRegionalScore_Operation); }
+static RecompReturn ScoreTransfer(bool valid, uint32_t target, uint32_t origin) {
+  if (!valid || !cpu_hle_tailcall_request(target,origin))
+    ActRaiserHleFatal("Regional score-feedback prefix violated its native contract");
+  return RECOMP_RETURN_TAILCALL;
+}
+RecompReturn ActRaiser_RegionalScoreRoute(CpuState *cpu) {
+  uint32_t target=0;
+  const bool valid=ActRaiserScoreFeedback_Route(cpu,true,&target);
+  return ScoreTransfer(valid,target,0x03d0b3);
+}
+RecompReturn ActRaiser_RegionalScoreConversion(CpuState *cpu) {
+  return ScoreTransfer(ActRaiserScoreFeedback_ConvertJP(cpu),0x03d10a,0x03d0d4);
+}
+RecompReturn ActRaiser_RegionalScoreSubtract(CpuState *cpu) {
+  return ScoreTransfer(ActRaiserScoreFeedback_Subtract(cpu),0x03b549,0x03b525);
+}
+
+static bool ScoreSceneEntry(const CpuState *cpu) {
+  return s_campaign.active_valid && cpu && cpu->PB==0 && cpu->DB==0 &&
+      !cpu->D && !cpu->emulation && !cpu->m_flag && !cpu->x_flag &&
+      !cpu->_flag_D && !(cpu->P & CPU_P_D);
+}
+bool ActRaiser_RegionalScoreCardEntry(CpuState *cpu) {
+  return ScoreSceneEntry(cpu);
+}
+RecompReturn ActRaiser_RegionalScoreCard(CpuState *cpu) {
+  if (!ScoreSceneEntry(cpu)) ActRaiserHleFatal("Unsupported regional score-card entry");
+  const uint16_t scene=cpu_read16(cpu,0,0x0018);
+  if (s_completion_state==kScoreIdle || s_completion_scene!=scene) {
+    s_completion_state=kScoreIdle;
+    ActivateLairAccounting(cpu);
+    ArRegionalScoreSnapshot policy;
+    if (!ArRegionalSession_BeginScoreCompletion(&s_campaign.active,&policy))
+      ActRaiserHleFatal("Cannot capture regional score-completion policy");
+    s_completion_scene=scene;
+    s_completion_state=policy.japanese[kArRegionalScore_Phase] ? kScoreSettledAtCard : kScoreAwaitDeparture;
+    if (s_trace) fprintf(stderr,"[regional] clear-card score phase=%s scene=%04x score=%04x\n",
+        s_completion_state==kScoreSettledAtCard?"card":"departure",scene,cpu_read16(cpu,0,0x001f));
+    if (s_completion_state==kScoreSettledAtCard) {
+      /* Insert the JP settlement at the US equivalent of JP00:A713, after
+       * count/text publication and before the display object is finalized.
+       * A754 is the audited resume boundary (preceding JSL ends at A753). */
+      const RecompReturn result=ActRaiserNativeCall(cpu,bank_03_D095_M0X0,3,0xa753,true);
+      if (result!=RECOMP_RETURN_NORMAL) return result;
+    }
+  }
+  const RecompReturn result=ActRaiserNativeCall(cpu,bank_00_85B7_M0X0,0,0xa756,false);
+  if (result!=RECOMP_RETURN_NORMAL) return result;
+  return ScoreTransfer(true,0x00a757,0x00a754);
+}
+bool ActRaiser_RegionalScoreDepartureEntry(CpuState *cpu) {
+  return ScoreSceneEntry(cpu);
+}
+RecompReturn ActRaiser_RegionalScoreDeparture(CpuState *cpu) {
+  if (!ScoreSceneEntry(cpu)) ActRaiserHleFatal("Unsupported regional score-departure entry");
+  const bool settled=s_completion_state==kScoreSettledAtCard &&
+      s_completion_scene==cpu_read16(cpu,0,0x0018);
+  if (!settled) {
+    const RecompReturn result=ActRaiserNativeCall(cpu,bank_03_D095_M0X0,3,0xa310,true);
+    if (result!=RECOMP_RETURN_NORMAL) return result;
+  }
+  if (s_trace) fprintf(stderr,"[regional] departure score settlement=%s score=%04x\n",
+      settled?"already completed at card":"completed now",cpu_read16(cpu,0,0x001f));
+  s_completion_state=kScoreIdle;
+  s_completion_scene=0;
+  return ScoreTransfer(true,0x00a311,0x00a30d);
+}
+
+void ActRaiserRegional_SetContinuePrompt(ActRaiserRegionalContinuePrompt prompt, void *context) {
+  s_continue_prompt = prompt;
+  s_continue_context = context;
+}
+
+bool ActRaiser_RegionalContinueEntry(CpuState *cpu) {
+  /* Record/replay sessions retain their recorded pre-feature path. Missing
+   * history stays unavailable: no synthetic consent or companion mutation. */
+  return s_continue_prompt && InputReplay_PolicyChangesAllowed() && cpu &&
+      cpu->PB == 2 && cpu->DB == 2 && cpu->m_flag && !cpu->x_flag &&
+      !cpu->D && !cpu->emulation && cpu_read8(cpu, 0, 0x0336) == 1;
+}
+
+static bool PrepareContinue(void) {
+  bool acknowledged = false;
+  for (;;) {
+    uint8_t image[kActRaiserSramSize];
+    SaveError error = {{0}};
+    if (!SaveSystem_CopyDurableImage(image) ||
+        !ArRegionalCampaign_Continue(&s_campaign, SaveSystem_ActivePath(), image, &error)) {
+      s_campaign.active_valid = false;
+      fprintf(stderr, "[regional] Continue preserved saves: %s\n", error.message);
+      if (!s_continue_prompt(s_continue_context, kActRaiserRegionalContinue_LoadFailed)) return false;
+      continue;
+    }
+    if (s_campaign.active.lairs.initialized_towns == 0x3f) {
+      if (s_campaign.active.reloads.initialized_towns) return true;
+      /* Stock-history acknowledgement also covers old, unknowable delay
+       * history. Upgrade the bound companion once; never modify SRAM. */
+      const SaveFileFormat format=SaveSystem_ActiveBackend()==kSaveBackend_Ini?kSaveFileFormat_Ini:kSaveFileFormat_NativeSrm;
+      if (ActRaiserLairReloads_AdoptSaved(&s_campaign.active.reloads,image) &&
+          ArRegionalSession_Save(&s_campaign.active,format,SaveSystem_ActivePath(),image,image,&error)) return true;
+      s_campaign.active_valid=false;
+      if (!s_continue_prompt(s_continue_context,kActRaiserRegionalContinue_SaveFailed)) return false;
+      continue;
+    }
+    if (!acknowledged && !s_continue_prompt(s_continue_context, kActRaiserRegionalContinue_Estimate)) {
+      s_campaign.active_valid = false;
+      return false;
+    }
+    acknowledged = true;
+    uint16_t stocks[kArRegionalLairCount];
+    const SaveFileFormat format = SaveSystem_ActiveBackend() == kSaveBackend_Ini ?
+        kSaveFileFormat_Ini : kSaveFileFormat_NativeSrm;
+    if (ActRaiserLairHistory_ReadSavedStocks(image, stocks) &&
+        ArRegionalCampaign_AcknowledgeLairHistory(&s_campaign, format,
+            SaveSystem_ActivePath(), image, stocks, &error)) continue;
+    s_campaign.active_valid = false;
+    fprintf(stderr, "[regional] Continue history was not saved: %s\n", error.message);
+    if (!s_continue_prompt(s_continue_context, kActRaiserRegionalContinue_SaveFailed)) return false;
+  }
+}
+
+RecompReturn ActRaiser_RegionalContinue(CpuState *cpu) {
+  if (PrepareContinue()) {
+    if (s_trace) fprintf(stderr, "[regional] Continue history ready before native restoration\n");
+    const RecompReturn result = ActRaiserNativeCall(cpu, bank_03_A83A_M1X0, 3, 0xa7a2, true);
+    if (result != RECOMP_RETURN_NORMAL) return result;
+    if (!cpu_hle_tailcall_request(0x02a7a3, 0x02a79f))
+      ActRaiserHleFatal("Continue acceptance has no native title owner");
+    return RECOMP_RETURN_TAILCALL;
+  }
+  if (s_trace) fprintf(stderr, "[regional] Continue cancelled before native restoration\n");
+  /* The title frame remains live. Wait for the accepting button to be released
+   * so a held B/Start cannot immediately reopen a cancelled prompt. */
+  do {
+    const RecompReturn result = ActRaiserNativeCall(cpu, ActRaiser_WaitForVblank, 2, 0xa75d, false);
+    if (result != RECOMP_RETURN_NORMAL) return result;
+  } while (cpu_read8(cpu, 0, 0x4219) & 0xd0);
+  if (!cpu_hle_tailcall_request(0x02a75b, 0x02a79f))
+    ActRaiserHleFatal("Continue cancellation has no native title owner");
+  return RECOMP_RETURN_TAILCALL;
+}
+
 bool ActRaiser_RegionalTitleEntry(CpuState *cpu) {
   if (s_delegate) {
     s_delegate = false;
@@ -567,6 +1201,10 @@ RecompReturn ActRaiser_RegionalTitle(CpuState *cpu) {
     uint8_t image[kActRaiserSramSize];
     ok = SaveSystem_CopyDurableImage(image) &&
         ArRegionalCampaign_Continue(&s_campaign, SaveSystem_ActivePath(), image, &error);
+    /* Record/replay deliberately skips consent and disk writes. Only an
+     * already acknowledged older companion can acquire an in-memory estimate. */
+    if (ok && s_campaign.active.lairs.initialized_towns==0x3f && !s_campaign.active.reloads.initialized_towns)
+      ok=ActRaiserLairReloads_AdoptSaved(&s_campaign.active.reloads,image);
   } else if (selection == 0 || selection == 2) {
     ArRegionalCostPolicy defaults;
     ArRegionalCosts_Init(&defaults, kArRegionalSource_US);
@@ -576,6 +1214,11 @@ RecompReturn ActRaiser_RegionalTitle(CpuState *cpu) {
   }
   if (!ok) ActRaiserHleFatal("Cannot enter regional campaign; saves preserved: %s",
                             error.message[0] ? error.message : "no durable save image");
+  s_lair_seed_pending=selection!=1;
+  s_completion_state=kScoreIdle;
+  s_completion_scene=0;
+  if (s_lair_seed_pending) TryInitializeLairs(cpu);
+  else ActRaiserRegional_CheckLairHistory(cpu);
   s_prices_valid = false; /* a different campaign can have the same revision */
   fprintf(stderr, "[regional] %s campaign rules session ready\n",
           selection == 1 ? "continued" : "new");

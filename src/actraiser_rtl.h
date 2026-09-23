@@ -78,6 +78,9 @@ void ActRaiser_OnApuPortPace(uint8 port, uint8 value);
 /* Release the game coroutine's stack (guard-page mapping) / fiber at shutdown.
  * Safe to call when none was created. */
 void ActRaiser_DestroyGameCoroutine(void);
+/* Suspend only from the executing game coroutine. Host UI decisions use this
+ * without issuing a native VBlank/input/timer update while their menu is open. */
+void ActRaiser_YieldToHost(void);
 int ActRaiser_ReadRdnmi(const RtlRdnmiReadContext *context);
 bool ActRaiser_RecoverDispatchMiss(uint32 source_pc24, uint32 target_pc24);
 void ActRaiser_SpcUploaderCompleteTick(void);

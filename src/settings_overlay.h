@@ -102,6 +102,20 @@ bool SettingsOverlay_IsOpen(void);
 void SettingsOverlay_Open(void);
 void SettingsOverlay_Close(void);
 
+/* One host-owned decision at a time. Keys are copied from the interface
+ * catalogue; no game state or callback is retained. Cancel is selected first.
+ * The open overlay pauses gameplay through the existing host contract. */
+typedef enum SettingsOverlayDecisionResult {
+  kOverlayDecision_None,
+  kOverlayDecision_Pending,
+  kOverlayDecision_Accepted,
+  kOverlayDecision_Cancelled,
+} SettingsOverlayDecisionResult;
+bool SettingsOverlay_BeginDecision(const char *title_key, const char *body_key,
+                                   const char *accept_key);
+/* Consumes terminal results only. Closing the overlay means cancellation. */
+SettingsOverlayDecisionResult SettingsOverlay_TakeDecisionResult(void);
+
 /* Refresh navigation/page selection and the visible registry rows after an
  * external settings or availability change. Input, tick, open and render call
  * this automatically. Diagnostic queries only read the resulting selection. */

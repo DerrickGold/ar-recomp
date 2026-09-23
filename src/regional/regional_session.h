@@ -2,15 +2,20 @@
 #define AR_REGIONAL_SESSION_H
 
 #include "regional_rules.h"
+#include "regional_lair_history.h"
+#include "regional_sim_actors.h"
 #include "save_checkpoint.h"
 
 /* Campaign identity is host-supplied (never inferred from name/locale/ROM).
  * Slot 0 is today's sole slot. This codec covers the integrated rule families;
- * it does not set a legacy-history acknowledgement or claim lair tracking. */
+ * legacy histories remain empty until the explicit adoption workflow. */
 typedef struct ArRegionalSession {
   uint8_t campaign[16];
   uint32_t slot, revision;
   ArRegionalRules requested, effective;
+  ArRegionalLairHistory lairs;
+  ArRegionalLairReloads reloads;
+  ArRegionalSimActors sim_actors;
 } ArRegionalSession;
 
 /* Caller-owned state; no singleton, filesystem access or old-save mutation. */
@@ -62,6 +67,20 @@ bool ArRegionalSession_RequestScorePage(ArRegionalSession *session, uint32_t rev
                                        ArRegionalSource source);
 /* Shared Palace/SIM Master report opening, never when a button is pressed. */
 bool ArRegionalSession_BeginScorePage(ArRegionalSession *session, bool *enabled);
+bool ArRegionalSession_RequestLivesDisplay(ArRegionalSession *session, uint32_t revision,
+                                         ArRegionalSource source);
+/* Next action HUD redraw; never changes the stored number of attempts. */
+bool ArRegionalSession_BeginLivesDisplay(ArRegionalSession *session, bool *zero_based);
+bool ArRegionalSession_RequestSources(ArRegionalSession *session, uint32_t revision,
+                                     const ArRegionalSourcesPolicy *policy);
+/* Accepted Source collection only, not menu opening or explicit Use. */
+bool ArRegionalSession_BeginSources(ArRegionalSession *session, ArRegionalSourcesSnapshot *snapshot);
+bool ArRegionalSession_RequestSkullWait(ArRegionalSession *session, uint32_t revision, ArRegionalSource source);
+bool ArRegionalSession_RequestStory(ArRegionalSession *session, uint32_t revision, const ArRegionalStoryPolicy *policy);
+/* Next applicable native prerequisite check. No event-state mutation here. */
+bool ArRegionalSession_BeginStory(ArRegionalSession *session, ArRegionalStorySnapshot *snapshot);
+/* Capture before the complete Magic Skull use, including its picker/cancel. */
+bool ArRegionalSession_BeginSkullWait(ArRegionalSession *session, uint16_t *frames);
 bool ArRegionalSession_RequestMenuReturn(ArRegionalSession *session, uint32_t revision,
                                         ArRegionalSource source);
 /* Accepted SIM report/log/speed command, independent of the report itself. */
@@ -76,6 +95,39 @@ bool ArRegionalSession_RequestMagicGesture(ArRegionalSession *session, uint32_t 
  * a released sample can activate the request without creating a button edge. */
 bool ArRegionalSession_BeginMagicGesture(ArRegionalSession *session,
                                         bool controls_released, bool *up_attack);
+bool ArRegionalSession_RequestLairSeeds(ArRegionalSession *session, uint32_t revision,
+                                      ArRegionalSource source);
+bool ArRegionalSession_RequestLairReloads(ArRegionalSession *session, uint32_t revision,
+                                         ArRegionalSource source);
+/* Stage on a copy; publish only after the adapter validates/replaces the
+ * complete native reload table. Never touches running countdowns. */
+bool ArRegionalSession_BeginLairReloads(ArRegionalSession *session);
+bool ArRegionalSession_RequestTownStatus(ArRegionalSession *session, uint32_t revision,
+                                        const ArRegionalTownStatusPolicy *policy);
+/* Capture a whole construction/report transaction. No flag mutation here. */
+bool ArRegionalSession_BeginTownStatus(ArRegionalSession *session, ArRegionalTownStatusSnapshot *snapshot);
+bool ArRegionalSession_RequestLevelGoals(ArRegionalSession *session,uint32_t revision,ArRegionalSource source);
+bool ArRegionalSession_BeginLevelGoals(ArRegionalSession *session,bool *japanese);
+bool ArRegionalSession_RequestSimCombat(ArRegionalSession *session,uint32_t revision,
+                                      const ArRegionalSimCombatPolicy *policy);
+/* Verified native birth only. Existing/cached actors retain their snapshots. */
+bool ArRegionalSession_BeginSimActor(ArRegionalSession *session,unsigned town,unsigned slot);
+bool ArRegionalSession_RequestSimAi(ArRegionalSession *session,uint32_t revision,const ArRegionalSimAiPolicy *policy);
+bool ArRegionalSession_RequestHouseCredit(ArRegionalSession *session, uint32_t revision,
+                                        ArRegionalSource source);
+/* Internal leaves stay independently selectable; the ordinary overlay passes
+ * a uniform policy for its grouped Act-score feedback control. */
+bool ArRegionalSession_RequestScoreFeedback(ArRegionalSession *session, uint32_t revision,
+                                          const ArRegionalScorePolicy *policy);
+/* Called at the accepted clear-card boundary, after any safe stock-policy
+ * activation. Captures phase without changing counters or awarding anything. */
+bool ArRegionalSession_BeginScoreCompletion(ArRegionalSession *session,
+                                           ArRegionalScoreSnapshot *snapshot);
+/* Stage on a copied session at a safe town tick. Publish that session only if
+ * the game adapter successfully projects all native stocks; never activate a
+ * policy just because the UI requested it. Requires complete healthy history. */
+bool ArRegionalSession_BeginLairAccounting(ArRegionalSession *session,
+                                         ArRegionalLairAccounting *snapshot);
 
 /* Only Ready permits Continue. Missing requires a separate legacy adoption
  * decision; other statuses require recovery. Failure leaves session unchanged

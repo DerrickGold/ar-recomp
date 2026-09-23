@@ -12,6 +12,7 @@
 #include "settings_overlay_artwork.h"
 #include "settings_overlay_localization.h"
 #include "settings_overlay_layers_localization.h"
+#include "localization/interface_text.h"
 #include "performance_overlay.h"
 #include "platform/sdl/render_sdl_internal.h"
 #include "sim/sim_town_terrain.h"
@@ -233,12 +234,36 @@ static ActRaiserRegionalEditResult FakeRegionalEdit(const ActRaiserRegionalRules
     CHECK(ArRegionalQuake_Init(&s_fake_region.requested.quake, source));
   else if (group == kActRaiserRegionalSetting_ScorePage)
     s_fake_region.requested.score_page = source;
+  else if (group == kActRaiserRegionalSetting_LivesDisplay)
+    s_fake_region.requested.lives_display = source;
+  else if (group == kActRaiserRegionalSetting_Sources)
+    CHECK(ArRegionalSources_Init(&s_fake_region.requested.sources,source));
+  else if (group == kActRaiserRegionalSetting_SkullWait)
+    s_fake_region.requested.skull_wait=source;
+  else if (group == kActRaiserRegionalSetting_Story)
+    CHECK(ArRegionalStory_Init(&s_fake_region.requested.story,source));
+  else if (group == kActRaiserRegionalSetting_LairReloads)
+    s_fake_region.requested.lair_reloads=source;
+  else if (group == kActRaiserRegionalSetting_TownStatus)
+    ArRegionalTownStatus_Init(&s_fake_region.requested.town_status,source);
+  else if (group == kActRaiserRegionalSetting_LevelGoals)
+    s_fake_region.requested.level_goals=source;
+  else if (group == kActRaiserRegionalSetting_SimCombat)
+    ArRegionalSimCombat_Init(&s_fake_region.requested.sim_combat,source);
+  else if (group == kActRaiserRegionalSetting_SimAi)
+    ArRegionalSimAi_Init(&s_fake_region.requested.sim_ai,source);
   else if (group == kActRaiserRegionalSetting_MenuReturn)
     s_fake_region.requested.menu_return = source;
   else if (group == kActRaiserRegionalSetting_SpeedRange)
     s_fake_region.requested.speed_range = source;
   else if (group == kActRaiserRegionalSetting_MagicGesture)
     s_fake_region.requested.magic_gesture = source;
+  else if (group == kActRaiserRegionalSetting_LairReserves)
+    s_fake_region.requested.lair_seeds = source;
+  else if (group == kActRaiserRegionalSetting_HouseCredit)
+    s_fake_region.requested.house_credit = source;
+  else if (group == kActRaiserRegionalSetting_ScoreFeedback)
+    CHECK(ArRegionalScore_Init(&s_fake_region.requested.score_feedback,source));
   else
     CHECK(ArRegionalCosts_SetGroup(&s_fake_region.requested.costs,
         group == kActRaiserRegionalSetting_Scrolls ? kArRegionalCostGroup_Scrolls : kArRegionalCostGroup_Miracles,
@@ -260,7 +285,7 @@ static void CheckRegionalControls(SDL_Renderer *renderer, SDL_Surface *surface) 
   CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
   CHECK(s_region_edits == 0);
   s_fake_region_active = true;
-  s_fake_region = (ActRaiserRegionalRulesView){.revision = 7, .editable = true, .campaign = {42}};
+  s_fake_region = (ActRaiserRegionalRulesView){.revision = 7, .editable = true, .lair_history_ready = true, .campaign = {42}};
   CHECK(ArRegionalCosts_Init(&s_fake_region.requested.costs, kArRegionalSource_US));
   s_fake_region.effective.costs = s_fake_region.requested.costs;
   SettingsOverlay_Refresh();
@@ -341,11 +366,210 @@ static void CheckRegionalControls(SDL_Renderer *renderer, SDL_Surface *surface) 
   CHECK(s_fake_region.requested.magic_gesture == kArRegionalSource_Japan);
   CHECK(s_fake_region.effective.magic_gesture == kArRegionalSource_US);
   CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "regional_lair_reserves"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
+  CHECK(s_region_edits == 14);
+  CHECK(s_fake_region.requested.lair_seeds == kArRegionalSource_Japan);
+  CHECK(s_fake_region.effective.lair_seeds == kArRegionalSource_US);
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "regional_house_credit"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
+  CHECK(s_region_edits == 15);
+  CHECK(s_fake_region.requested.house_credit == kArRegionalSource_Japan);
+  CHECK(s_fake_region.effective.house_credit == kArRegionalSource_US);
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "regional_score_feedback"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
+  CHECK(s_region_edits == 16);
+  for(unsigned i=0;i<kArRegionalScore_Count;++i) {
+    CHECK(s_fake_region.requested.score_feedback.source[i] == kArRegionalSource_Japan);
+    CHECK(s_fake_region.effective.score_feedback.source[i] == kArRegionalSource_US);
+  }
+  /* Four rows at the default 640-wide description panel. Do not silently
+   * clip the new timing/one-reward caveats, including internal mixed bundles. */
+  for(unsigned combination=0;combination<81;++combination)for(unsigned locale=0;locale<kArUiLocale_Count;++locale) {
+    ActRaiserRegionalRulesView preview=s_fake_region;
+    unsigned digits=combination;
+    for(unsigned i=0;i<kArRegionalScore_Count;++i) {
+      preview.requested.score_feedback.source[i]=(ArRegionalSource)(digits%3);digits/=3;
+    }
+    char help[2048];
+    CHECK(SettingsOverlayRegions_ViewDescription((ArUiLocale)locale,&preview,
+        kActRaiserRegionalSetting_ScoreFeedback,help,sizeof(help)));
+    size_t at=0,length=strlen(help);
+    for(unsigned row=0;row<4 && at<length;++row) {
+      ArInterfaceTextLine line;
+      CHECK(ArInterfaceText_WrapLine(help+at,length-at,98,kArInterfaceTextMaximumBytes,&line));
+      if(!line.consumed)break;
+      at+=line.consumed;
+    }
+    if(at!=length)fprintf(stderr,"score help overflow: bundle=%u locale=%u remaining=%s\n",combination,locale,help+at);
+    CHECK(at==length);
+  }
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "regional_lives_display"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
+  CHECK(s_region_edits == 17);
+  CHECK(s_fake_region.requested.lives_display == kArRegionalSource_Japan);
+  CHECK(s_fake_region.effective.lives_display == kArRegionalSource_US);
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "regional_sources"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
+  CHECK(s_region_edits == 18);
+  for(unsigned combination=0;combination<9;++combination)for(unsigned locale=0;locale<kArUiLocale_Count;++locale) {
+    ActRaiserRegionalRulesView preview=s_fake_region;
+    preview.requested.sources.source[0]=(ArRegionalSource)(combination%3);
+    preview.requested.sources.source[1]=(ArRegionalSource)(combination/3);
+    char help[2048];
+    CHECK(SettingsOverlayRegions_ViewDescription((ArUiLocale)locale,&preview,
+        kActRaiserRegionalSetting_Sources,help,sizeof(help)));
+    size_t at=0,length=strlen(help);
+    for(unsigned row=0;row<4 && at<length;++row) {
+      ArInterfaceTextLine line;
+      CHECK(ArInterfaceText_WrapLine(help+at,length-at,98,kArInterfaceTextMaximumBytes,&line));
+      if(!line.consumed)break;
+      at+=line.consumed;
+    }
+    CHECK(at==length);
+  }
+  for(unsigned i=0;i<kArRegionalSourceItem_Count;++i) {
+    CHECK(s_fake_region.requested.sources.source[i]==kArRegionalSource_Japan);
+    CHECK(s_fake_region.effective.sources.source[i]==kArRegionalSource_US);
+  }
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "regional_skull_wait"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
+  CHECK(s_region_edits == 19);
+  CHECK(s_fake_region.requested.skull_wait == kArRegionalSource_Japan);
+  CHECK(s_fake_region.effective.skull_wait == kArRegionalSource_US);
+  for(unsigned source=0;source<3;++source)for(unsigned locale=0;locale<kArUiLocale_Count;++locale) {
+    ActRaiserRegionalRulesView preview=s_fake_region;
+    preview.requested.skull_wait=(ArRegionalSource)source;
+    char help[2048];
+    CHECK(SettingsOverlayRegions_ViewDescription((ArUiLocale)locale,&preview,
+        kActRaiserRegionalSetting_SkullWait,help,sizeof(help)));
+    size_t at=0,length=strlen(help);
+    for(unsigned row=0;row<4 && at<length;++row) {
+      ArInterfaceTextLine line;
+      CHECK(ArInterfaceText_WrapLine(help+at,length-at,98,kArInterfaceTextMaximumBytes,&line));
+      if(!line.consumed)break;
+      at+=line.consumed;
+    }
+    CHECK(at==length);
+  }
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "regional_story"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
+  CHECK(s_region_edits == 20);
+  for(unsigned i=0;i<3;++i)CHECK(s_fake_region.requested.story.source[i]==kArRegionalSource_Japan &&
+      s_fake_region.effective.story.source[i]==kArRegionalSource_US);
+  for(unsigned n=0;n<27;++n)for(unsigned locale=0;locale<kArUiLocale_Count;++locale) {
+    ActRaiserRegionalRulesView preview=s_fake_region;unsigned digits=n;
+    for(unsigned i=0;i<3;++i){preview.requested.story.source[i]=(ArRegionalSource)(digits%3);digits/=3;}
+    char help[2048];
+    CHECK(SettingsOverlayRegions_ViewDescription((ArUiLocale)locale,&preview,
+        kActRaiserRegionalSetting_Story,help,sizeof(help)));
+    size_t at=0,length=strlen(help);
+    for(unsigned row=0;row<4 && at<length;++row) {
+      ArInterfaceTextLine line;
+      CHECK(ArInterfaceText_WrapLine(help+at,length-at,98,kArInterfaceTextMaximumBytes,&line));
+      if(!line.consumed)break;
+      at+=line.consumed;
+    }
+    CHECK(at==length);
+  }
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "regional_lair_reloads"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT,true,false));
+  CHECK(s_region_edits==21 && s_fake_region.requested.lair_reloads==kArRegionalSource_Japan);
+  for(unsigned source=0;source<3;++source)for(unsigned locale=0;locale<kArUiLocale_Count;++locale) {
+    ActRaiserRegionalRulesView preview=s_fake_region;
+    preview.requested.lair_reloads=(ArRegionalSource)source;preview.lair_reload_ready=true;
+    char help[2048];
+    CHECK(SettingsOverlayRegions_ViewDescription((ArUiLocale)locale,&preview,
+        kActRaiserRegionalSetting_LairReloads,help,sizeof(help)));
+    size_t at=0,length=strlen(help);
+    for(unsigned row=0;row<4 && at<length;++row) {
+      ArInterfaceTextLine line;
+      CHECK(ArInterfaceText_WrapLine(help+at,length-at,98,kArInterfaceTextMaximumBytes,&line));
+      if(!line.consumed)break;
+      at+=line.consumed;
+    }
+    CHECK(at==length);
+  }
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN,true,false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "regional_town_status"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT,true,false));
+  CHECK(s_region_edits==22 && s_fake_region.requested.town_status.source[0]==kArRegionalSource_Japan);
+  for(unsigned source=0;source<3;++source)for(unsigned locale=0;locale<kArUiLocale_Count;++locale) {
+    ActRaiserRegionalRulesView preview=s_fake_region;
+    ArRegionalTownStatus_Init(&preview.requested.town_status,(ArRegionalSource)source);
+    char help[2048];
+    CHECK(SettingsOverlayRegions_ViewDescription((ArUiLocale)locale,&preview,kActRaiserRegionalSetting_TownStatus,help,sizeof(help)));
+    size_t at=0,length=strlen(help);
+    for(unsigned row=0;row<4 && at<length;++row) {
+      ArInterfaceTextLine line;
+      CHECK(ArInterfaceText_WrapLine(help+at,length-at,98,kArInterfaceTextMaximumBytes,&line));
+      if(!line.consumed)break;
+      at+=line.consumed;
+    }
+    CHECK(at==length);
+  }
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN,true,false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "regional_level_goals"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT,true,false));
+  CHECK(s_region_edits==23 && s_fake_region.requested.level_goals==kArRegionalSource_Japan);
+  for(unsigned source=0;source<3;++source)for(unsigned locale=0;locale<kArUiLocale_Count;++locale) {
+    ActRaiserRegionalRulesView preview=s_fake_region;preview.requested.level_goals=(ArRegionalSource)source;
+    char help[2048];
+    CHECK(SettingsOverlayRegions_ViewDescription((ArUiLocale)locale,&preview,kActRaiserRegionalSetting_LevelGoals,help,sizeof(help)));
+    size_t at=0,length=strlen(help);
+    for(unsigned row=0;row<4 && at<length;++row) {
+      ArInterfaceTextLine line;
+      CHECK(ArInterfaceText_WrapLine(help+at,length-at,98,kArInterfaceTextMaximumBytes,&line));
+      if(!line.consumed)break;
+      at+=line.consumed;
+    }
+    CHECK(at==length);
+  }
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN,true,false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "regional_sim_combat"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT,true,false));
+  CHECK(s_region_edits==24 && s_fake_region.requested.sim_combat.source[0]==kArRegionalSource_Japan);
+  for(unsigned source=0;source<3;++source)for(unsigned locale=0;locale<kArUiLocale_Count;++locale) {
+    ActRaiserRegionalRulesView preview=s_fake_region;
+    ArRegionalSimCombat_Init(&preview.requested.sim_combat,(ArRegionalSource)source);
+    char help[2048];CHECK(SettingsOverlayRegions_ViewDescription((ArUiLocale)locale,&preview,kActRaiserRegionalSetting_SimCombat,help,sizeof(help)));
+    size_t at=0,length=strlen(help);
+    for(unsigned row=0;row<4 && at<length;++row) {
+      ArInterfaceTextLine line;CHECK(ArInterfaceText_WrapLine(help+at,length-at,98,kArInterfaceTextMaximumBytes,&line));
+      if(!line.consumed)break;
+      at+=line.consumed;
+    }
+    CHECK(at==length);
+  }
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN,true,false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "regional_sim_ai"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT,true,false));
+  CHECK(s_region_edits==25 && s_fake_region.requested.sim_ai.source[0]==kArRegionalSource_Japan);
+  for(unsigned source=0;source<3;++source)for(unsigned locale=0;locale<kArUiLocale_Count;++locale) {
+    ActRaiserRegionalRulesView preview=s_fake_region;
+    ArRegionalSimAi_Init(&preview.requested.sim_ai,(ArRegionalSource)source);
+    char help[2048];CHECK(SettingsOverlayRegions_ViewDescription((ArUiLocale)locale,&preview,kActRaiserRegionalSetting_SimAi,help,sizeof(help)));
+    size_t at=0,length=strlen(help);
+    for(unsigned row=0;row<4 && at<length;++row) {
+      ArInterfaceTextLine line;CHECK(ArInterfaceText_WrapLine(help+at,length-at,98,kArInterfaceTextMaximumBytes,&line));
+      if(!line.consumed)break;
+      at+=line.consumed;
+    }
+    CHECK(at==length);
+  }
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN,true,false));
   CHECK(!strcmp(SettingsOverlay_SelectedKey(), "regional_scroll_prices")); /* no global reset row */
   s_fake_region.editable = false;
   CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
   CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
-  CHECK(s_region_edits == 13);
+  CHECK(s_region_edits == 25);
   CHECK(!memcmp(&before, &g_settings, sizeof(before)));
   s_fake_region.editable = true;
   SettingsOverlay_Close(); /* clear transient status for the preview */
@@ -364,6 +588,9 @@ static void CheckRegionalControls(SDL_Renderer *renderer, SDL_Surface *surface) 
   if (getenv("AR_OVERLAY_REGIONAL_RETURN_PREVIEW")) RowToKey("regional_menu_return");
   if (getenv("AR_OVERLAY_REGIONAL_SPEED_PREVIEW")) RowToKey("regional_speed_range");
   if (getenv("AR_OVERLAY_REGIONAL_GESTURE_PREVIEW")) RowToKey("regional_magic_gesture");
+  if (getenv("AR_OVERLAY_REGIONAL_LAIR_PREVIEW")) RowToKey("regional_lair_reserves");
+  const char *preview_row = getenv("AR_OVERLAY_REGIONAL_ROW_PREVIEW");
+  if (preview_row && preview_row[0]) RowToKey(preview_row);
   if (renderer && surface) {
     for (int locale = 0; locale < kArUiLocale_Count; ++locale) {
       g_settings.interface_language = locale;
@@ -667,6 +894,47 @@ static void CheckDynamicInterfaceValues(void) {
   HostDisplayStatus_SetNominalRefreshHz(hz);
   HostDisplayStatus_SetVsyncActive(vsync);
   g_settings = before;
+}
+
+static void CheckDecisions(SDL_Renderer *renderer, SDL_Surface *surface) {
+  SettingsOverlay_Close();
+  CHECK(SettingsOverlay_TakeDecisionResult()==kOverlayDecision_None);
+  const int language=g_settings.interface_language;
+  for (int locale=0; locale<kArUiLocale_Count; ++locale) {
+    g_settings.interface_language=locale;
+    CHECK(SettingsOverlay_BeginDecision("overlay.region.continue_title",
+        "overlay.region.legacy_estimate","overlay.region.acknowledge"));
+    CHECK(SettingsOverlay_IsOpen());
+    CHECK(!SettingsOverlay_BeginDecision("a","b","c"));
+    CHECK(SettingsOverlay_TakeDecisionResult()==kOverlayDecision_Pending);
+    CHECK(SettingsOverlay_HandleKey(SDLK_RETURN,true,true)); /* Held key never consents. */
+    CHECK(SettingsOverlay_IsOpen());
+    SettingsOverlay_Render((ArRenderRectI){0,0,surface->w,surface->h});
+    SDL_RenderPresent(renderer);
+    const char *directory=getenv("AR_OVERLAY_DECISION_PREVIEW_DIR");
+    if(directory && *directory) {
+      char path[1024];
+      snprintf(path,sizeof(path),"%s/continue-%s.bmp",directory,ArUiCatalog_LocaleTag((ArUiLocale)locale));
+      CHECK(SDL_SaveBMP(surface,path));
+    }
+    CHECK(SettingsOverlay_HandleKey(SDLK_RETURN,true,false)); /* Default is Cancel. */
+    CHECK(!SettingsOverlay_IsOpen());
+    CHECK(SettingsOverlay_TakeDecisionResult()==kOverlayDecision_Cancelled);
+    CHECK(SettingsOverlay_TakeDecisionResult()==kOverlayDecision_None);
+    CHECK(SettingsOverlay_BeginDecision("overlay.region.continue_title",
+        "overlay.region.legacy_estimate","overlay.region.acknowledge"));
+    CHECK(SettingsOverlay_HandleKey(SDLK_UP,true,false));
+    CHECK(SettingsOverlay_HandleKey(SDLK_RETURN,true,false));
+    CHECK(SettingsOverlay_TakeDecisionResult()==kOverlayDecision_Accepted);
+    CHECK(!SettingsOverlay_IsOpen());
+    CHECK(SettingsOverlay_BeginDecision("overlay.region.continue_title",
+        "overlay.region.adoption_failed","overlay.decision.retry"));
+    CHECK(SettingsOverlay_HandleKey(SDLK_ESCAPE,true,false));
+    CHECK(SettingsOverlay_TakeDecisionResult()==kOverlayDecision_Cancelled);
+  }
+  CHECK(!SettingsOverlay_BeginDecision(NULL,"b","c"));
+  g_settings.interface_language=language;
+  SettingsOverlay_Open();
 }
 
 static void CheckInterfaceCatalogs(SDL_Renderer *renderer, SDL_Surface *surface) {
@@ -1560,6 +1828,7 @@ int main(int argc, char **argv) {
   CHECK(SettingsOverlay_IsOpen());
   CheckManualSectionAvailability();
   CheckInterfaceCatalogs(renderer, surface);
+  CheckDecisions(renderer, surface);
   if (renderer) {
     /* Fullscreen 4:3 leaves SDL's game presentation pillarboxed on a wide
      * output. The overlay is terminal host UI: it discards that coordinate

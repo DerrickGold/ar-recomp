@@ -1,4 +1,5 @@
 #include "regional/regional_fingerprint.h"
+#include "snesrecomp/support/digest.h"
 #include <stdio.h>
 #include <string.h>
 static int failures;
@@ -21,9 +22,161 @@ int main(void) {
   CHECK(ArRegionalCosts_Fingerprint(&eu, &us, current, &baseline) && baseline);
   CHECK(!memcmp(native, current, 32));
   ArRegionalRules r = {.costs = us}, e = {.costs = eu};
+  uint8_t ai_digests[4096][32];
+  for(unsigned index=0;index<4096;++index) {
+    ArRegionalRules request={0},active={0};
+    for(unsigned i=0;i<6;++i) {
+      request.sim_ai.source[i]=(index>>(2*i))&1;
+      active.sim_ai.source[i]=(index>>(2*i+1))&1;
+    }
+    CHECK(ArRegionalRules_Fingerprint(&request,&active,ai_digests[index],&baseline) && baseline==!index);
+    for(unsigned i=0;i<6;++i) {
+      if(!request.sim_ai.source[i])request.sim_ai.source[i]=kArRegionalSource_Europe;
+      if(!active.sim_ai.source[i])active.sim_ai.source[i]=kArRegionalSource_Europe;
+    }
+    CHECK(ArRegionalRules_Fingerprint(&request,&active,current,&baseline) && !memcmp(current,ai_digests[index],32));
+    for(unsigned j=0;j<index;++j)CHECK(memcmp(ai_digests[j],current,32));
+  }
+  uint8_t combat_digests[1024][32];bool combat_seen[1024]={false};
+  for(unsigned n=0;n<59049;++n) {
+    ArRegionalRules request={0},active={0};unsigned digits=n,index=0;
+    for(unsigned i=0;i<5;++i) {
+      request.sim_combat.source[i]=(ArRegionalSource)(digits%3);digits/=3;
+      active.sim_combat.source[i]=(ArRegionalSource)(digits%3);digits/=3;
+      if(request.sim_combat.source[i]==1) index|=1u<<(2*i);
+      if(active.sim_combat.source[i]==1) index|=1u<<(2*i+1);
+    }
+    CHECK(ArRegionalRules_Fingerprint(&request,&active,current,&baseline));
+    CHECK(baseline==!index && (memcmp(current,native,32)==0)==!index);
+    if(combat_seen[index]) CHECK(!memcmp(combat_digests[index],current,32));
+    else { memcpy(combat_digests[index],current,32);combat_seen[index]=true; }
+  }
+  for(unsigned i=0;i<1024;++i) for(unsigned j=0;j<i;++j) CHECK(memcmp(combat_digests[i],combat_digests[j],32));
+  ArRegionalSimActors actors={0};
+  CHECK(ArRegionalSimActors_Fingerprint(native,&actors,current,&baseline) && baseline && !memcmp(native,current,32));
+  /* A v24 combat-only recording retains its byte-for-byte hash domain. */
+  uint8_t old_bytes[116]="ARSIMACTOR-R1",old_hash[32];
+  memcpy(old_bytes+16,native,32);memcpy(old_bytes+48,"ARSIMAC1",8);old_bytes[60]=7;
+  actors.cached[0].combat=7;
+  CHECK(sr_support_sha256(old_bytes,sizeof(old_bytes),old_hash));
+  CHECK(ArRegionalSimActors_Fingerprint(native,&actors,current,&baseline) && !baseline && !memcmp(old_hash,current,32));
+  actors.cached[0].combat=0;
+  for(unsigned town=0;town<6;++town)for(unsigned slot=0;slot<4;++slot)for(unsigned bit=0;bit<6;++bit) {
+    actors=(ArRegionalSimActors){0};actors.cached[town*4+slot].ai=1u<<bit;
+    CHECK(ArRegionalSimActors_Fingerprint(native,&actors,current,&baseline) && !baseline && memcmp(native,current,32));
+    CHECK(ArRegionalSimActors_LoadTown(&actors,town));
+    CHECK(ArRegionalSimActors_Fingerprint(native,&actors,pending,&baseline) && !baseline && memcmp(current,pending,32));
+    actors.cached[town*4+slot].ai=0;
+    CHECK(ArRegionalSimActors_Fingerprint(native,&actors,effective,&baseline) && !baseline && memcmp(effective,pending,32));
+    actors.active[slot].ai=0;
+    CHECK(ArRegionalSimActors_Fingerprint(native,&actors,current,&baseline) && baseline && !memcmp(native,current,32));
+  }
+  actors=(ArRegionalSimActors){0};
+  CHECK(ArRegionalSimActors_LoadTown(&actors,0));
+  CHECK(ArRegionalSimActors_Fingerprint(native,&actors,current,&baseline) && baseline && !memcmp(native,current,32));
+  for(unsigned town=0;town<6;++town)for(unsigned slot=0;slot<4;++slot)for(unsigned bit=0;bit<5;++bit) {
+    actors=(ArRegionalSimActors){0};actors.cached[town*4+slot].combat=(uint16_t)(1u<<bit);
+    CHECK(ArRegionalSimActors_Fingerprint(native,&actors,current,&baseline) && !baseline && memcmp(native,current,32));
+    CHECK(ArRegionalSimActors_LoadTown(&actors,town));
+    CHECK(ArRegionalSimActors_Fingerprint(native,&actors,pending,&baseline) && !baseline && memcmp(pending,current,32));
+    actors.cached[town*4+slot].combat=0;
+    CHECK(ArRegionalSimActors_Fingerprint(native,&actors,effective,&baseline) && !baseline && memcmp(pending,effective,32));
+    actors.active[slot].combat=0;
+    CHECK(ArRegionalSimActors_Fingerprint(native,&actors,current,&baseline) && baseline && !memcmp(native,current,32));
+  }
+  actors.active[0].combat=0x80;memset(current,0xa5,sizeof(current));
+  CHECK(!ArRegionalSimActors_Fingerprint(native,&actors,current,&baseline) && current[0]==0xa5);
+  uint8_t level_digests[4][32];bool level_seen[4]={false};
+  for(unsigned p=0;p<3;++p)for(unsigned a=0;a<3;++a) {
+    ArRegionalRules request={.level_goals=(ArRegionalSource)p},active={.level_goals=(ArRegionalSource)a};
+    unsigned index=(p==1?1:0)|(a==1?2:0);
+    CHECK(ArRegionalRules_Fingerprint(&request,&active,current,&baseline));
+    CHECK(baseline==!index && (memcmp(current,native,32)==0)==!index);
+    if(level_seen[index]) CHECK(!memcmp(level_digests[index],current,32));
+    else { memcpy(level_digests[index],current,32);level_seen[index]=true; }
+  }
+  for(unsigned i=0;i<4;++i)for(unsigned j=0;j<i;++j) CHECK(memcmp(level_digests[i],level_digests[j],32));
+  ArRegionalRules invalid_level={.level_goals=3};memset(current,0xa5,sizeof(current));
+  CHECK(!ArRegionalRules_Fingerprint(&invalid_level,&e,current,&baseline) && current[0]==0xa5);
+  uint8_t status_digests[1024][32]; bool status_seen[1024]={false};
+  for(unsigned n=0;n<59049;++n) {
+    ArRegionalRules request={0},active={0};unsigned digits=n,index=0;
+    for(unsigned i=0;i<5;++i) {
+      request.town_status.source[i]=(ArRegionalSource)(digits%3);digits/=3;
+      active.town_status.source[i]=(ArRegionalSource)(digits%3);digits/=3;
+      if(request.town_status.source[i]==1) index|=1u<<(2*i);
+      if(active.town_status.source[i]==1) index|=1u<<(2*i+1);
+    }
+    CHECK(ArRegionalRules_Fingerprint(&request,&active,current,&baseline));
+    CHECK(baseline==!index && (memcmp(current,native,32)==0)==!index);
+    if(status_seen[index]) CHECK(!memcmp(status_digests[index],current,32));
+    else { memcpy(status_digests[index],current,32);status_seen[index]=true; }
+  }
+  for(unsigned i=0;i<1024;++i) for(unsigned j=0;j<i;++j) CHECK(memcmp(status_digests[i],status_digests[j],32));
+  ArRegionalRules invalid_status={.town_status={{0,0,3,0,0}}};memset(current,0xa5,sizeof(current));
+  CHECK(!ArRegionalRules_Fingerprint(&invalid_status,&e,current,&baseline) && current[0]==0xa5);
+  uint8_t story_digests[64][32];bool story_seen[64]={false};
+  for(unsigned n=0;n<729;++n) {
+    ArRegionalRules request={0},active={0};unsigned digits=n,index=0;
+    for(unsigned i=0;i<3;++i) {
+      request.story.source[i]=(ArRegionalSource)(digits%3);digits/=3;
+      active.story.source[i]=(ArRegionalSource)(digits%3);digits/=3;
+      if(request.story.source[i]==1)index|=1u<<(2*i);
+      if(active.story.source[i]==1)index|=1u<<(2*i+1);
+    }
+    CHECK(ArRegionalRules_Fingerprint(&request,&active,current,&baseline));
+    CHECK(baseline==!index && (memcmp(current,native,32)==0)==!index);
+    if(story_seen[index])CHECK(!memcmp(story_digests[index],current,32));
+    else {memcpy(story_digests[index],current,32);story_seen[index]=true;}
+  }
+  for(unsigned i=0;i<64;++i)for(unsigned j=i+1;j<64;++j)CHECK(memcmp(story_digests[i],story_digests[j],32));
+  ArRegionalRules invalid_story={.story={{0,3,0}}};memset(current,0xa5,sizeof(current));
+  CHECK(!ArRegionalRules_Fingerprint(&invalid_story,&e,current,&baseline) && current[0]==0xa5);
+  uint8_t skull_digests[4][32]; bool seen_skull[4]={false};
+  for(unsigned p=0;p<3;++p)for(unsigned a=0;a<3;++a) {
+    ArRegionalRules requested={.skull_wait=(ArRegionalSource)p}, active={.skull_wait=(ArRegionalSource)a};
+    const unsigned index=(p==1?1:0)|(a==1?2:0);
+    CHECK(ArRegionalRules_Fingerprint(&requested,&active,current,&baseline));
+    CHECK(baseline==!index && (memcmp(current,native,32)==0)==!index);
+    if(seen_skull[index])CHECK(!memcmp(skull_digests[index],current,32));
+    else {memcpy(skull_digests[index],current,32);seen_skull[index]=true;}
+  }
+  for(unsigned i=0;i<4;++i)for(unsigned j=i+1;j<4;++j)CHECK(memcmp(skull_digests[i],skull_digests[j],32));
+  ArRegionalRules invalid_skull={.skull_wait=kArRegionalSource_Count};
+  memset(current,0xa5,sizeof(current));
+  CHECK(!ArRegionalRules_Fingerprint(&invalid_skull,&e,current,&baseline) && current[0]==0xa5);
+  uint8_t source_digests[16][32]; bool seen_sources[16]={false};
+  for(unsigned n=0;n<81;++n) {
+    ArRegionalRules request={0}, active={0}; unsigned digits=n,index=0;
+    for(unsigned i=0;i<2;++i) {
+      request.sources.source[i]=(ArRegionalSource)(digits%3); digits/=3;
+      active.sources.source[i]=(ArRegionalSource)(digits%3); digits/=3;
+      if(request.sources.source[i]==kArRegionalSource_Japan)index|=1u<<(2*i);
+      if(active.sources.source[i]==kArRegionalSource_Japan)index|=1u<<(2*i+1);
+    }
+    CHECK(ArRegionalRules_Fingerprint(&request,&active,current,&baseline));
+    CHECK(baseline==!index && (memcmp(current,native,32)==0)==!index);
+    if(seen_sources[index])CHECK(!memcmp(source_digests[index],current,32));
+    else { memcpy(source_digests[index],current,32);seen_sources[index]=true; }
+  }
+  for(unsigned i=0;i<16;++i)for(unsigned j=i+1;j<16;++j)
+    CHECK(memcmp(source_digests[i],source_digests[j],32));
   CHECK(ArRegionalRules_Fingerprint(&r, &e, current, &baseline) && baseline);
   CHECK(!memcmp(native, current, 32));
   r.retry_score = kArRegionalSource_Japan;
+  for (unsigned p=0;p<3;++p) for (unsigned a=0;a<3;++a) {
+    ArRegionalRules request = {.lives_display=(ArRegionalSource)p};
+    ArRegionalRules active = {.lives_display=(ArRegionalSource)a};
+    CHECK(ArRegionalRules_Fingerprint(&request,&active,current,&baseline));
+    CHECK(baseline==(p!=kArRegionalSource_Japan && a!=kArRegionalSource_Japan));
+    CHECK((memcmp(native,current,32)==0)==baseline);
+  }
+  ArRegionalRules life_request={.lives_display=kArRegionalSource_Japan}, life_active={0};
+  CHECK(ArRegionalRules_Fingerprint(&life_request,&life_active,pending,&baseline));
+  CHECK(ArRegionalRules_Fingerprint(&life_active,&life_request,effective,&baseline));
+  CHECK(memcmp(pending,effective,32));
+  life_request.lives_display=kArRegionalSource_Count; memset(current,0xa5,sizeof(current));
+  CHECK(!ArRegionalRules_Fingerprint(&life_request,&life_active,current,&baseline) && current[0]==0xa5);
   CHECK(ArRegionalRules_Fingerprint(&r, &e, pending, &baseline) && !baseline);
   CHECK(memcmp(native, pending, 32));
   r.retry_score = kArRegionalSource_Europe; e.retry_score = kArRegionalSource_Japan;
@@ -131,6 +284,49 @@ int main(void) {
   memset(current, 0xa5, sizeof(current)); baseline = true;
   CHECK(!ArRegionalRules_Fingerprint(&r, &e, current, &baseline) && current[0] == 0xa5 && baseline);
   r.score_page = e.score_page = kArRegionalSource_US;
+  for(unsigned p=0;p<kArRegionalSource_Count;++p) for(unsigned a=0;a<kArRegionalSource_Count;++a) {
+    r.lair_seeds=(ArRegionalSource)p; e.lair_seeds=(ArRegionalSource)a;
+    CHECK(ArRegionalRules_Fingerprint(&r,&e,current,&baseline));
+    CHECK(baseline==(p!=kArRegionalSource_Japan && a!=kArRegionalSource_Japan));
+    CHECK((!memcmp(native,current,32))==baseline);
+  }
+  r.lair_seeds=kArRegionalSource_Count;
+  memset(current,0xa5,sizeof(current)); baseline=true;
+  CHECK(!ArRegionalRules_Fingerprint(&r,&e,current,&baseline) && current[0]==0xa5 && baseline);
+  r.lair_seeds=e.lair_seeds=kArRegionalSource_US;
+  for(unsigned p=0;p<kArRegionalSource_Count;++p) for(unsigned a=0;a<kArRegionalSource_Count;++a) {
+    r.house_credit=(ArRegionalSource)p; e.house_credit=(ArRegionalSource)a;
+    CHECK(ArRegionalRules_Fingerprint(&r,&e,current,&baseline));
+    CHECK(baseline==(p!=kArRegionalSource_Japan && a!=kArRegionalSource_Japan));
+    CHECK((!memcmp(native,current,32))==baseline);
+  }
+  r.house_credit=kArRegionalSource_Count;
+  memset(current,0xa5,sizeof(current)); baseline=true;
+  CHECK(!ArRegionalRules_Fingerprint(&r,&e,current,&baseline) && current[0]==0xa5 && baseline);
+  r.house_credit=e.house_credit=kArRegionalSource_US;
+  uint8_t score_digests[256][32]; bool seen_score[256]={false};
+  for(unsigned p=0;p<81;++p)for(unsigned a=0;a<81;++a) {
+    unsigned pd=p,ad=a,bits=0;
+    for(unsigned i=0;i<kArRegionalScore_Count;++i) {
+      r.score_feedback.source[i]=(ArRegionalSource)(pd%3);pd/=3;
+      e.score_feedback.source[i]=(ArRegionalSource)(ad%3);ad/=3;
+      if(r.score_feedback.source[i]==kArRegionalSource_Japan)bits|=1u<<i;
+      if(e.score_feedback.source[i]==kArRegionalSource_Japan)bits|=16u<<i;
+    }
+    CHECK(ArRegionalRules_Fingerprint(&r,&e,current,&baseline) && baseline==!bits);
+    CHECK((!memcmp(native,current,32))==baseline);
+    if(seen_score[bits]) CHECK(!memcmp(score_digests[bits],current,32));
+    else { memcpy(score_digests[bits],current,32);seen_score[bits]=true; }
+  }
+  for(unsigned i=0;i<256;++i) {
+    CHECK(seen_score[i]);
+    for(unsigned j=0;j<i;++j)CHECK(memcmp(score_digests[i],score_digests[j],32));
+  }
+  r.score_feedback.source[2]=kArRegionalSource_Count;
+  memset(current,0xa5,sizeof(current));baseline=true;
+  CHECK(!ArRegionalRules_Fingerprint(&r,&e,current,&baseline) && current[0]==0xa5 && baseline);
+  ArRegionalScore_Init(&r.score_feedback,kArRegionalSource_US);
+  ArRegionalScore_Init(&e.score_feedback,kArRegionalSource_US);
   for (unsigned p = 0; p < kArRegionalSource_Count; ++p)
     for (unsigned a = 0; a < kArRegionalSource_Count; ++a) {
       r.menu_return = (ArRegionalSource)p; e.menu_return = (ArRegionalSource)a;

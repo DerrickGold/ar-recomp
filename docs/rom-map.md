@@ -10,6 +10,12 @@ Action/title text consumers are mapped in the
 `$02:A9A7/$A9D6/$AA60` title choices. These use `$02:BF60` and its inverse
 eraser `$02:C1B7`; they do not enter the interactive dialogue grammar.
 
+Title campaign entry is separate from its labels: `$02:A622` owns the complete
+selection loop. Continue calls `$03:A83A` at `$02:A79F`, then follows `$A7A3`
+through the fade. The guarded regional acknowledgement precedes that restore;
+cancellation returns to `$02:A75B` without replacing the native title frame.
+New Game and Professional bypass the Continue restore.
+
 ## Interrupt Vectors
 
 | Vector | Address | Purpose |
@@ -262,6 +268,21 @@ earlier-build history is claimed.
   `[cellX, cellY, imageId, monsterType, count, respawnDelay(word), worldRecordAddr(word)]`.
   X/Y are 16px town-map cells 0..31. Dump with `tools/act_content.py --lairs`; field
   semantics in [RAM map: Monster Lair Data](ram-map.md#monster-lair-data-7f9500).
+  Regional respawn selection uses retained US/JP reload projections rather
+  than changing these ROM records. Safe projection writes `$7F:9628` only;
+  native `$03:B9C0` copies it to the countdown only when the old countdown
+  expires. The `$03:B6BF` quarter-plus-one modifier is observed if called;
+  its ordinary gameplay caller remains unconfirmed.
+- **US/PAL `$01:B061/B065/B069`, JP `$01:B031/B035/B039`**: four-byte SIM
+  SP-reward, contact-damage and accumulated-damage threshold tables, ordered
+  Dragon/Bat/Demon/Skull. The regional combat adapter replaces only the two
+  differing consumers at US `$B018/$B0CC`, using the collided generation's
+  snapshot. SP tables agree in all five ROMs. [Values and integration](regional-differences-technical.md#sim-enemy-state-differences).
+- **US `$01:BA67/BA6A/BB5C/BCBC/BD46/BEE3/BF72`**: narrow regional
+  AI seams for the Dragon search reset/gate, nested strike pass, shared target
+  candidate/pool lookup and Bat fallback/wait. Native `$03:AF65` remains the
+  RNG; `$03:BDE1` is the existing full-128-record lookup selected by the Japanese
+  pool rule. [Ownership and continuations](regional-differences-technical.md#sim-ai-integration).
 - **US `$03:BC8A`, JP `$03:BA13`**: 17 lair/landmark picture-list pointers,
   consumed by `$03:BC42/$03:B9CB`. Entries contain a byte count and
   `{cell_dx, cell_dy, structure_metatile}` triples. Skull lair IDs 6/9/10
@@ -897,6 +918,43 @@ Decompression state in RAM:
 - Output destination: $7E:00B5-$7E:00B6
 
 ## Notes
+
+Level requirements use US `$03:B40E` (18 words including zero and the 9999
+sentinel); the common maximum-SP table starts at `$03:B432`. Regional prefixes
+at `$B3C7/$B3CD/$B407` select thresholds within the native `$B3BA` leaf, pinned
+through `$03:E414`'s complete award sequence. Master-report refresh changes
+only the derived `$7E:0297` field. See [level-goal integration](regional-differences-technical.md#level-goal-integration).
+
+Town-status integration captures US `$03:82DB` construction calculations,
+shared plot roots `$03:91AE/$91BC`, and the six-town report at `$03:BF8C`.
+Guarded prefixes at `$8566`, `$85A3`, `$85C3`, `$9271`, `$BF9E` and `$BFA2`
+retain the native stores, loop and cleanup. The `$BF9A` back edge has its own
+entry boundary so every town uses the selected classifier.
+See [the status integration contract](regional-differences-technical.md#town-status-integration).
+
+The population-event list records at US `$03:F543/$03:F56C` (file
+`0x01F543/0x01F56C`) are the Fillmore rock-hint and Kasandora Tablet
+thresholds. The runtime resolves these at `$03:E13E` without changing ROM
+data or the other28 records. Bloodpool's failed-Act2 event9 clear occupies
+`$03:EB35..EB3C`; Japan omits it. See
+[story prerequisites](regional-differences-technical.md#population-and-road-story-prerequisites).
+
+Magic Skull's US Use owner is `$01:9EE7` (file `0x009EE7`), with the
+90-frame post-effect wait at `$01:9F80..9F86` and native consumption starting
+`$01:9F87`. JP enters at `$01:9EBD` and proceeds to consumption at `$01:9F56`
+without that wait. See [the sealing contract](regional-differences-technical.md#guidance-sealing-and-delayed-soul-rewards).
+
+Source collection's US branch is `$01:8916..8927` (file
+`0x008916..0x008927`). The Life/Magic effects remain native at
+`$01:9CBD/$9CD6`; only their held-item removal calls at `$9CCE/$9CF0` can
+be skipped for a proven automatic collection carrying an older Source.
+See [collection versus Use](regional-differences-technical.md#sources-of-life-and-magic-collection-versus-use).
+
+The action HUD lives writer is US `$02:C280..C2A3` (file
+`0x014280..0x0142A3`) versus JP `$04:91C5..91DE` (file
+`0x0211C5..0x0211DE`). The regional adapter changes the two digit bytes,
+not life stock or graphics sources; see the
+[native contract](regional-differences-technical.md#lives-convention).
 
 - Map metadata format is similar to other Quintet games
 - Most platformer-side numeric values use BCD encoding

@@ -1,6 +1,7 @@
 #include "actraiser/actraiser_save_transaction.h"
 
 #include "actraiser/actraiser_hle_fatal.h"
+#include "actraiser/actraiser_regional_runtime.h"
 #include "save_system.h"
 
 extern RecompReturn bank_03_A656_M0X0(CpuState *cpu);
@@ -27,6 +28,7 @@ RecompReturn ActRaiser_SaveStory(CpuState *cpu) {
   RecompReturn result = cpu->m_flag
       ? bank_03_A656_M1X0(cpu) : bank_03_A656_M0X0(cpu);
   s_delegate = false;
+  if (result == RECOMP_RETURN_NORMAL) ActRaiserRegional_CheckLairHistory(cpu);
   const bool ended = SaveSystem_EndNativeWrite(result == RECOMP_RETURN_NORMAL, &error);
   if (result == RECOMP_RETURN_NORMAL && !ended)
     ActRaiserHleFatal("Cannot finish story save: %s", error.message);

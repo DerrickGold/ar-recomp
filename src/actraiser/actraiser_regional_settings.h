@@ -18,6 +18,18 @@ typedef enum ActRaiserRegionalSettingGroup {
   kActRaiserRegionalSetting_MenuReturn,
   kActRaiserRegionalSetting_SpeedRange,
   kActRaiserRegionalSetting_MagicGesture,
+  kActRaiserRegionalSetting_LairReserves,
+  kActRaiserRegionalSetting_HouseCredit,
+  kActRaiserRegionalSetting_ScoreFeedback,
+  kActRaiserRegionalSetting_LivesDisplay,
+  kActRaiserRegionalSetting_Sources,
+  kActRaiserRegionalSetting_SkullWait,
+  kActRaiserRegionalSetting_Story,
+  kActRaiserRegionalSetting_LairReloads,
+  kActRaiserRegionalSetting_TownStatus,
+  kActRaiserRegionalSetting_LevelGoals,
+  kActRaiserRegionalSetting_SimCombat,
+  kActRaiserRegionalSetting_SimAi,
   kActRaiserRegionalSetting_Count,
 } ActRaiserRegionalSettingGroup;
 
@@ -30,6 +42,8 @@ typedef struct ActRaiserRegionalRulesView {
   ArRegionalRules requested, effective;
   bool editable;
   bool miracle_in_progress;
+  bool lair_history_ready;
+  bool lair_reload_ready;
 } ActRaiserRegionalRulesView;
 
 typedef enum ActRaiserRegionalEditResult {
@@ -38,6 +52,7 @@ typedef enum ActRaiserRegionalEditResult {
   kActRaiserRegionalEdit_Stale,
   kActRaiserRegionalEdit_Unchanged,
   kActRaiserRegionalEdit_Applied,
+  kActRaiserRegionalEdit_HistoryUnavailable,
 } ActRaiserRegionalEditResult;
 
 /* False until an accepted New Game/Continue, without modifying output. */

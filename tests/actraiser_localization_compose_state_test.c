@@ -517,6 +517,20 @@ static void TestActionHud(void) {
                                   ResolveHudValue, NULL);
   CHECK(hud_value_calls == 4);
   CHECK(!strncmp(frame.text + frame.snapshots[5].utf8_offset, "91", 2));
+  /* Regional I02 edits the native glyphs, not a renderer-side life counter.
+   * Both directions invalidate just the changed numeric field; a repeated
+   * frame remains cached and never adds one to the JP display. */
+  const char *life_labels[] = {"03", "02", "03"};
+  for (unsigned i=0;i<3;++i) for (unsigned repeat=0;repeat<2;++repeat) {
+    vram[base+32+8]=0x2400 | (uint8_t)life_labels[i][0];
+    vram[base+32+9]=0x2400 | (uint8_t)life_labels[i][1];
+    ArLocalizationFrame_Reset(&frame);
+    CHECK(ArLocalizationFrame_SetFont(&frame,"en","test",1,1,&frame.settings));
+    ActRaiserLocalizationHud_Append(&hud,owner,&frame,destination,0,vram,0x8000,
+                                  cgram,256,ResolveSemanticId,ResolveHudValue,NULL);
+    CHECK(hud_value_calls==5+i);
+    CHECK(!strncmp(frame.text+frame.snapshots[5].utf8_offset,life_labels[i],2));
+  }
   vram[base + 32 + 15] = 0x2499; /* Bad number retains native pixels. */
   cgram[6] = 0x7c00;
   ArLocalizationFrame_Reset(&frame);

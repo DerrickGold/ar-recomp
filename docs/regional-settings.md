@@ -5,7 +5,10 @@ a game. You can choose spell-scroll costs, miracle SP costs, initial room
 time limits, checkpoint-retry score handling, development pacing, construction
 waits, Fillmore's fishing target, town recovery, earthquake destruction and
 the Master report's score page, town-menu return behavior, message-speed
-choices and magic controls independently.
+choices, magic controls, monster reserves, house-loss and act-score feedback,
+the action HUD's life-count convention, Source activation, the Magic Skull
+wait, story prerequisites, lair respawn delays, town growth reports and level
+population goals independently.
 The flag and name beside each choice identify its source rules, not the
 language of your game.
 
@@ -50,6 +53,24 @@ checkpoint-retry marker, not when you change the setting. It does not alter
 life allowances, act-clear rewards, returning to the Palace after the last
 life, or starting another act/run; those paths keep their own native behavior.
 
+**Action HUD lives** changes how the same remaining attempts are labeled.
+US/Europe displays 3 for three attempts and 1 for the last; Japan displays
+2 and 0 respectively. It takes effect on the next HUD redraw with either
+native or enhanced text. Starting lives, retries, extra-life rewards and the
+Palace's Master report are unchanged.
+
+**Source activation** chooses when Source of Life and Source of Magic take
+effect. US/Europe applies the bonus when you collect the offering; Japan
+stores it for **Use Offering**. Source of Life adds one to the persistent
+life allowance, not maximum HP. Source of Magic adds a scroll to the persistent
+allowance and the working scroll count. The native bonus amounts are unchanged.
+
+The choice applies to newly collected Sources. Previously carried Sources
+remain available under either rule, and automatic collection does not consume
+one of those older items. Changing the setting grants nothing by itself.
+The native eight-slot inventory limit still applies: a full inventory blocks
+Take Offering, including automatic Sources.
+
 **Magic controls** uses A or X for the US/European standing cast, or Up + Y
 for Japan's ground-attack cast. In the Japanese scheme A and X no longer cast;
 Y alone still swings the sword. Airborne and crouching attacks retain their
@@ -57,6 +78,75 @@ native behavior. These are game buttons: your physical controller and keyboard
 bindings stay unchanged. A change waits until Up, Y, A and X are released, so
 holding a button while switching does not accidentally cast. Scroll prices,
 spell inventory and the ordinary casting restrictions are separate.
+
+**Level population goals** selects the population needed for each Master level.
+Both tables begin at 80, 200 and 400. The fourth goal is 700 in US/Europe or
+550 in Japan; the final goal is 4,600 or 3,000 respectively. Earned levels are
+never removed. Houses, population support, rewards per level and the level-17
+maximum remain unchanged.
+
+The next native level-check sequence uses the selected table throughout its
+awards and dialogue. Opening the Master report refreshes its next-level target
+without awarding levels or healing. Changing the option itself grants nothing;
+lower goals can make you eligible for additional awards at the next normal
+check. At maximum level the report continues to show a next goal of zero.
+
+**Town growth reports** chooses how the Cities report classifies development.
+US/Europe checks growth, buildings and population; Japan reads stored status
+flags. The Japanese construction-status rules use a fixed low-growth threshold
+of 4, expect one extra plot per town, count available food plots as construction
+attempts, and discard newly computed warning flags. These are reporting rules,
+not population caps or changes to how many residents a house holds.
+
+The choice applies to the next complete report or construction calculation.
+Selecting it does not rewrite existing flags or structures. A report opened
+before a new construction calculation may therefore still reflect flags
+produced under the previous rules. The translated labels follow the resulting
+status code; this option does not change the selected language.
+
+**Town monster combat** selects the durability and contact damage of newly
+spawned town monsters. With ordinary arrows, US/Europe takes 3 hits for a Blue
+Dragon and 4 for a Red Demon; Japan takes 2 and 3. Bats still take 1 and Skull
+Heads 8. Contact damage for Dragon/Bat/Demon/Skull is 3/1/6/8 in US/Europe and
+2/1/3/4 in Japan. SP rewards, movement, targeting and respawn timing are separate.
+
+Existing monsters keep their original combat rules, including after leaving a
+town or saving and continuing. Changing back to US does not alter a surviving
+Japanese-rule monster. Older saves start their existing monsters with US rules;
+only a verified new spawn adopts the selected setting. These rules require no
+Japanese ROM or graphics extraction.
+
+**Town monster behavior** controls how newly spawned monsters look for targets
+and how Dragons and Bats carry out certain attacks:
+
+| Behavior | US / Europe | Japan |
+| --- | --- | --- |
+| Blue Dragon target search | Every eligible update | Every eighth eligible update |
+| Extra actor update when a Dragon strikes | Yes, including other active actors | No |
+| Candidate target cells | Local range, offset within the town | Whole 32-cell map |
+| Structure records checked for a candidate | A rotating slice of 16 | All 128 |
+| Bat fallback to the angel after no house target | Random result 253–254 | Random result 250–254 |
+| Bat abduction wait | 1 eligible update | 60 eligible updates |
+
+The fallback draws from the native 0–254 random range; it does not bypass the
+normal targeting checks. Update counts are not seconds, and all choices use
+the game's normal 60 Hz clock. Existing monsters keep their behavior when
+settings change, including across town visits and save/continue. Combat damage
+and respawn delays remain separate options. No Japanese ROM is required.
+
+**Lair respawn delays** changes how long an eligible, empty lair waits before
+its next monster appears. US/Europe normally reloads a delay of one town update;
+one Aitos lair uses 141, and two Northwall lairs use 100. Japan's lair-specific
+delays range from 37 to 275 updates. These are eligible town-service calls,
+not seconds: sealed lairs, exhausted reserves, existing monsters and native
+pause rules still control whether a countdown advances.
+
+Switching changes the reload table at the next safe town update, leaving every
+countdown already running untouched. Prior native delay reductions are retained
+for both choices; switching back restores that choice's retained values. This
+does not change monster reserves or introduce new events. Old-save histories
+are estimates because the save cannot reveal every past reduction; unexplained
+values are preserved and prevent this setting from being switched.
 
 **Construction wait** sets the pause between town construction phases: one
 town update for US/Europe, or 150 for Japan. These are calls to the town's wait
@@ -135,6 +225,83 @@ It cannot repeat a completed reward. Native Palace visits still restart an
 unfinished expedition. Marahna fishing, Northwall's lake search and automatic
 versus manual collection of Sources are unchanged.
 
+**Monster reserves** selects the starting stock behind each town's four lairs.
+These are the combined starting totals, before kills, miracles, house losses
+and action-score settlements change them:
+
+| Town | US / Europe | Japan |
+| --- | ---: | ---: |
+| Fillmore | 500 | 600 |
+| Bloodpool | 330 | 400 |
+| Kasandora | 450 | 900 |
+| Aitos | 320 | 600 |
+| Marahna | 210 | 600 |
+| Northwall | 180 | 500 |
+
+The game keeps each alternative count up to date using the events you actually
+play through. Switching resumes those retained counts, rather than refilling
+lairs or trying to simulate a second playthrough. The change waits for a safe
+town update or score settlement after any active miracle or earthquake. A sealed lair stays sealed;
+an exhausted but unsealed lair can produce monsters again if its newly selected
+count is positive. Existing monsters, spawn clocks, rewards and sealing progress
+are not reset. House-loss and score-conversion rules remain separate from this
+choice. Missing or inconsistent history prevents a switch instead of guessing
+again or overwriting your progress.
+
+**House-loss feedback** changes the amount contributed by each destroyed house.
+US/Europe uses 4, 6 or 8 units according to the house's tier; Japan always uses
+four. The game distributes these units among unsealed lairs, replenishing their
+monster reserves. If all four lairs are sealed, it adds them to the town's
+growth balance instead. This does not choose which houses are destroyed or
+change how many residents a house supports.
+
+Like monster reserves, this choice activates at a safe town update or score settlement using
+retained stock history. An earthquake already running keeps its rule throughout.
+Growth already awarded stays awarded: switching does not undo it or grant the
+other region's past rewards. Save with the Progress Log to keep the choice.
+
+**Act-score feedback** selects how a completed act contributes to its town.
+The formulas below use the stored score: divide the displayed points by ten.
+
+| Rule | US / Europe | Japan |
+| --- | --- | --- |
+| Converted units | Twice the score divided by 10, rounded down | Subtract 650 (minimum zero), divide by 32 and round down, then multiply by 10 |
+| Stock adjustment | Add a quarter of the units to each lair | Subtract a quarter from each lair, stopping at zero |
+| Destination | One completed act: stocks; two: growth; other counts: neither | Two completed acts: growth; all other counts: stocks |
+| Settlement | At departure, after the final tally | At the clear card, before the final tally |
+
+Stock shares round down. Sealed flags are unchanged. The growth route adds the
+converted units once through the native town-growth routine. Changing the option
+selects retained stock history at a safe town update or before the next clear;
+it never repeats an earlier growth reward. A clear captures its rules and keeps
+them through departure, even if you change a setting during the tally. Japan's
+earlier award is not repeated at departure. Settlement timing changes future
+clears only: every retained stock history uses the score from the one settlement
+you actually played, not a second hypothetical tally.
+
+**Magic Skull wait** keeps the US/European 90-frame pause after sealing, or
+uses Japan's immediate consumption. The choice is captured when you begin
+Use Offering and stays fixed through the picker and completion. This does not
+change which lair accepts the Skull, its growth reward, or cancellation: an
+invalid or cancelled use retains the item.
+
+**Story prerequisites** changes two population checks:
+
+| Event | US / Europe | Japan |
+| --- | ---: | ---: |
+| Fillmore's southeastern rock/magic hint | More than 110 people | More than 88 |
+| Kasandora's Ancient Tablet discovery | More than 700 people | More than 400 |
+
+The next native event check uses the chosen thresholds. Previously enabled
+population prerequisites remain enabled; completed events are not replayed,
+and changing the setting does not grant an item. Other story conditions and
+event priority still apply.
+
+The same bundle includes Bloodpool's failed-Act-2 check: US/Europe clears the
+Compass prerequisite alongside the disputes prerequisite; Japan clears only
+the disputes prerequisite. The normal event loop still gives disputes priority.
+This is not an option to obtain the Compass early.
+
 These choices belong to the current campaign. **Save with the Progress Log to
 keep them.** Closing the overlay is not a save. New Game starts with US rules;
 Continue restores the choices saved with that campaign. Keep the matching
@@ -143,12 +310,21 @@ installation. The `.srm` itself remains compatible with SNES emulators. See
 [save companions](save-format.md#regional-campaign-checkpoints) for backup and
 recovery details.
 
+On the first normal Continue of an older save, the game asks to estimate its
+missing regional monster-lair history. The estimate preserves current US counts
+and approximates the other-region counts; earlier kills and house losses cannot
+be reconstructed exactly. Accepting records the estimate once in the companion,
+without changing your towns, sealed lairs or native SNES save. Cancel returns to
+the title. New games track from the beginning and do not need this estimate.
+If the estimate cannot be saved, you can retry or cancel; the game does not
+silently discard an existing history.
+
 Regional changes are locked during recording and replay, including after
 taking over from a replay. Start a normal session to edit them.
 
 These are **individual options, not complete regional presets**. They do not
-change spell inventory, population,
-enemy behavior, artwork or language. In particular, choosing European costs
+change spell inventory, population support, action-enemy behavior or stats,
+artwork or language. In particular, choosing European costs
 does not enable the European Action-mode spell stack. No donor ROM is needed
 for these rules. The [regional comparison](regional-differences.md)
 describes the wider set of differences separately.

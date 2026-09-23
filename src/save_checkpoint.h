@@ -3,7 +3,7 @@
 
 #include "save_system.h"
 
-enum { kSaveCheckpointPayloadMax = 4096 };
+enum { kSaveCheckpointPayloadMax = 8192 };
 
 typedef enum SaveCheckpointStatus {
   kSaveCheckpoint_Ready,

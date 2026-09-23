@@ -6,11 +6,69 @@
 
 /* After SaveSystem Attach/Load, before the first CPU dispatch. */
 bool ActRaiserRegional_Initialize(ArRegionalCampaignIdentity identity, void *context);
+typedef enum ActRaiserRegionalContinueNotice {
+  kActRaiserRegionalContinue_Estimate,
+  kActRaiserRegionalContinue_LoadFailed,
+  kActRaiserRegionalContinue_SaveFailed,
+} ActRaiserRegionalContinueNotice;
+/* Host presents a localized, cancellable decision while suspending the game
+ * coroutine. No renderer, SDL types or save paths cross this boundary. True
+ * means acknowledge/retry; false means return to the unchanged title menu. */
+typedef bool (*ActRaiserRegionalContinuePrompt)(void *context, ActRaiserRegionalContinueNotice notice);
+void ActRaiserRegional_SetContinuePrompt(ActRaiserRegionalContinuePrompt prompt, void *context);
+bool ActRaiser_RegionalContinueEntry(CpuState *cpu);
+RecompReturn ActRaiser_RegionalContinue(CpuState *cpu);
 bool ActRaiserRegional_ReplayDigest(void *unused, uint8_t out[32], bool *baseline);
+/* SIM generation ownership. Cache notifications follow completed native
+ * copies; collision lookup is O(1) and never activates pending settings. */
+bool ActRaiserRegional_SimActorsReady(void);
+void ActRaiserRegional_SimActorCache(bool load,unsigned town);
+void ActRaiserRegional_SimActorBirth(unsigned town,unsigned slot);
+bool ActRaiserRegional_SimActorSnapshot(unsigned town,unsigned slot,uint16_t *snapshot);
+bool ActRaiserRegional_SimActorAiSnapshot(unsigned town,unsigned slot,uint16_t *snapshot);
+/* Before completed native save capture, not every frame. Never repairs WRAM. */
+void ActRaiserRegional_CheckLairHistory(CpuState *cpu);
+bool ActRaiser_RegionalLairEntry(CpuState *cpu);
+bool ActRaiser_RegionalLairSeedEntry(CpuState *cpu);
+RecompReturn ActRaiser_RegionalLairSeed(CpuState *cpu);
+RecompReturn ActRaiser_RegionalLairKill(CpuState *cpu);
+RecompReturn ActRaiser_RegionalLairMiracle(CpuState *cpu);
+RecompReturn ActRaiser_RegionalLairHouse(CpuState *cpu);
+bool ActRaiser_RegionalHouseUnitsEntry(CpuState *cpu);
+RecompReturn ActRaiser_RegionalHouseUnits(CpuState *cpu);
+RecompReturn ActRaiser_RegionalLairScore(CpuState *cpu);
+bool ActRaiser_RegionalScoreRouteEntry(CpuState *cpu);
+bool ActRaiser_RegionalScoreConversionEntry(CpuState *cpu);
+bool ActRaiser_RegionalScoreSubtractEntry(CpuState *cpu);
+bool ActRaiser_RegionalScoreCardEntry(CpuState *cpu);
+RecompReturn ActRaiser_RegionalScoreCard(CpuState *cpu);
+bool ActRaiser_RegionalScoreDepartureEntry(CpuState *cpu);
+RecompReturn ActRaiser_RegionalScoreDeparture(CpuState *cpu);
+RecompReturn ActRaiser_RegionalScoreRoute(CpuState *cpu);
+RecompReturn ActRaiser_RegionalScoreConversion(CpuState *cpu);
+RecompReturn ActRaiser_RegionalScoreSubtract(CpuState *cpu);
 /* Game thread, after completed NMI input sampling. Observes raw held buttons;
  * does not alter CPU, physical bindings, native input masks or the pad latch. */
 void ActRaiserRegional_ObserveInputRelease(CpuState *cpu);
 bool ActRaiser_RegionalMagicGestureEntry(CpuState *cpu);
+bool ActRaiser_RegionalLivesDisplayEntry(CpuState *cpu);
+RecompReturn ActRaiser_RegionalLivesDisplay(CpuState *cpu);
+bool ActRaiser_RegionalSourceCollectionEntry(CpuState *cpu);
+RecompReturn ActRaiser_RegionalSourceCollection(CpuState *cpu);
+bool ActRaiser_RegionalSourceLifeKeepEntry(CpuState *cpu);
+bool ActRaiser_RegionalSourceMagicKeepEntry(CpuState *cpu);
+RecompReturn ActRaiser_RegionalSourceLifeKeep(CpuState *cpu);
+RecompReturn ActRaiser_RegionalSourceMagicKeep(CpuState *cpu);
+bool ActRaiser_RegionalSkullUseEntry(CpuState *cpu);
+RecompReturn ActRaiser_RegionalSkullUse(CpuState *cpu);
+bool ActRaiser_RegionalSkullSkipWaitEntry(CpuState *cpu);
+RecompReturn ActRaiser_RegionalSkullSkipWait(CpuState *cpu);
+bool ActRaiser_RegionalStoryThresholdEntry(CpuState *cpu);
+RecompReturn ActRaiser_RegionalStoryThreshold(CpuState *cpu);
+bool ActRaiser_RegionalStoryCompassEntry(CpuState *cpu);
+bool ActRaiser_RegionalLairReductionEntry(CpuState *cpu);
+RecompReturn ActRaiser_RegionalLairReduction(CpuState *cpu);
+RecompReturn ActRaiser_RegionalStoryCompass(CpuState *cpu);
 RecompReturn ActRaiser_RegionalMagicDedicated(CpuState *cpu);
 RecompReturn ActRaiser_RegionalMagicAttack(CpuState *cpu);
 /* Game-thread snapshot. While a miracle is open, its complete captured prices

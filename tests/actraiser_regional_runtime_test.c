@@ -4,13 +4,20 @@
 #include "actraiser/actraiser_development.h"
 #include "actraiser/actraiser_quake.h"
 #include "actraiser/actraiser_report_command.h"
+#include "actraiser/actraiser_town_status_runtime.h"
+#include "actraiser/actraiser_level_goals_runtime.h"
 
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
 
+/* The transaction module has its own native-call harness. */
+void ActRaiserTownStatusRuntime_Reset(void) {}
+void ActRaiserLevelGoalsRuntime_Reset(void) {}
+void ActRaiserLevelGoalsRuntime_RefreshReport(CpuState *cpu) { (void)cpu; }
 static uint8_t ram[65536];
 static uint8_t town_ram[65536];
+static uint8_t story_rom[65536];
 CpuReturnScope *g_cpu_return_scope, *g_cpu_owned_unwind_scope;
 int g_recomp_stack_top;
 int cpu_finish_owned_unwind(CpuReturnScope *scope, CpuState *cpu) {
@@ -29,6 +36,33 @@ RecompReturn bank_03_CA93_M1X0(CpuState *cpu) { cpu->S+=2; return RECOMP_RETURN_
 static ArRegionalCostSnapshot expected;
 static RecompReturn title_return, miracle_return;
 static unsigned title_calls, miracle_calls;
+static unsigned restore_calls, release_calls, prompt_calls;
+static unsigned lives_native_calls;
+static RecompReturn lives_return;
+RecompReturn bank_02_C280_M0X0(CpuState *cpu) {
+  assert(!ActRaiser_RegionalLivesDisplayEntry(cpu)); /* one-shot native delegation */
+  ++lives_native_calls;
+  return lives_return;
+}
+static bool prompt_accept;
+static RecompReturn restore_result;
+RecompReturn bank_03_A83A_M1X0(CpuState *cpu) {
+  assert(cpu->PB==3 && cpu_read16(cpu,0,cpu->S+1)==0xa7a2);
+  ++restore_calls; cpu->S+=3;
+  return restore_result;
+}
+RecompReturn ActRaiser_WaitForVblank(CpuState *cpu) {
+  assert(cpu->PB==2 && cpu_read16(cpu,0,cpu->S+1)==0xa75d);
+  ++release_calls;
+  if(release_calls==3)ram[0x4219]=0;
+  cpu->S+=2;
+  return RECOMP_RETURN_NORMAL;
+}
+static bool ContinuePrompt(void *context, ActRaiserRegionalContinueNotice notice) {
+  assert(context==&prompt_calls && notice==kActRaiserRegionalContinue_Estimate);
+  ++prompt_calls;
+  return prompt_accept;
+}
 static bool edits_allowed = true, edit_during_miracle;
 static ArRegionalDevelopmentSnapshot last_development;
 static bool last_world_actors;
@@ -59,6 +93,35 @@ void ActRaiserRecovery_Reconcile(CpuState *cpu, unsigned changed) {
   (void)cpu; retired_recovery = changed;
 }
 static uint32_t tail_pc, tail_source;
+static bool skull_skip, skull_edit;
+static unsigned skull_calls;
+static RecompReturn skull_return;
+static RecompReturn story_return;
+static unsigned story_native_calls;
+RecompReturn bank_03_EB35_M1X0(CpuState *cpu) {
+  assert(!ActRaiser_RegionalStoryCompassEntry(cpu));
+  ++story_native_calls;return story_return;
+}
+RecompReturn bank_01_9EE7_M1X0(CpuState *cpu) {
+  ++skull_calls;
+  assert(!ActRaiser_RegionalSkullUseEntry(cpu)); /* one-shot delegation */
+  assert(!ActRaiser_RegionalSkullUseEntry(cpu)); /* no nested capture */
+  assert(!ActRaiser_RegionalSkullSkipWaitEntry(cpu)); /* wait prefix is M0 */
+  cpu->m_flag=0; cpu->P &= ~CPU_P_M;
+  if(skull_edit) {
+    ActRaiserRegionalRulesView view;
+    assert(ActRaiserRegional_CopyRulesView(&view));
+    assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_SkullWait,
+        skull_skip?kArRegionalSource_US:kArRegionalSource_Japan)==kActRaiserRegionalEdit_Applied);
+  }
+  assert(ActRaiser_RegionalSkullSkipWaitEntry(cpu)==skull_skip);
+  if(skull_skip) {
+    const CpuState before=*cpu;
+    assert(ActRaiser_RegionalSkullSkipWait(cpu)==RECOMP_RETURN_TAILCALL);
+    assert(tail_pc==0x019f87 && tail_source==0x019f80 && !memcmp(&before,cpu,sizeof(before)));
+  }
+  return skull_return;
+}
 static unsigned captured_speed_maximum;
 static bool edit_during_speed;
 static RecompReturn speed_return;
@@ -183,6 +246,7 @@ int cpu_hle_tailcall_request(uint32_t pc, uint32_t source) {
 }
 
 uint8 cpu_read8(CpuState *cpu, uint8 bank, uint16 address) {
+  if(bank==3)return story_rom[address];
   (void)cpu; assert(bank == 0 || bank == 0x7f); return bank ? town_ram[address] : ram[address];
 }
 uint16 cpu_read16(CpuState *cpu, uint8 bank, uint16 address) {
@@ -199,6 +263,152 @@ RecompReturn bank_02_A622_M1X0(CpuState *cpu) {
   assert(!ActRaiser_RegionalTitleEntry(cpu)); /* delegates exactly once */
   ++title_calls;
   return title_return;
+}
+/* Native bodies remain delegated. This fixture models only their stock side
+ * effects and return-frame ownership; the separate adapter tests cover gates. */
+static unsigned lair_calls;
+static RecompReturn lair_result;
+static bool change_seeds_in_lair;
+static bool change_house_in_lair;
+static bool change_score_in_lair;
+static unsigned clear_yields;
+static RecompReturn clear_yield_result;
+RecompReturn bank_00_85B7_M0X0(CpuState *cpu) {
+  assert(cpu->PB==0 && cpu_read16(cpu,0,cpu->S+1)==0xa756);
+  ++clear_yields;
+  cpu->A=0x4000; cpu->_flag_N=cpu->_flag_Z=0; cpu->P&=~(CPU_P_N|CPU_P_Z);
+  cpu_write16(cpu,cpu->DB,cpu->X,0x4000); cpu->S+=2;
+  return clear_yield_result;
+}
+static RecompReturn NativeLair(CpuState *cpu,unsigned event,bool width) {
+  assert(cpu->m_flag==width);
+  if(event!=3) assert(!(event==4 ? ActRaiser_RegionalLairSeedEntry(cpu) : ActRaiser_RegionalLairEntry(cpu)));
+  ++lair_calls;
+  if(event==4)for(unsigned i=0;i<24;++i) {
+    uint16_t seed; assert(ArRegionalLair_Seed(0,i,&seed)); cpu_write16(cpu,0x7f,0x96b8+2*i,seed);
+    assert(ArRegionalLair_Reload(0,i,&seed)); cpu_write16(cpu,0x7f,0x9628+2*i,seed);
+  }
+  if(event==0) {
+    const unsigned base=cpu_read16(cpu,0x7f,0x7bfb)*4;
+    for(unsigned n=0;n<4;++n)if(cpu_read16(cpu,0x7f,0x9688+base+n*2)==cpu->X) {
+      const unsigned value=cpu_read16(cpu,0x7f,0x96b8+base+n*2);
+      if(value)cpu_write16(cpu,0x7f,0x96b8+base+n*2,value-1);
+      break;
+    }
+  }
+  if(event==2) {
+    const unsigned base=cpu_read16(cpu,0x7f,0x7bfb)*4;
+    const unsigned subtype=cpu_read8(cpu,cpu->DB,cpu->X+2);
+    CpuState prefix=*cpu;
+    prefix.m_flag=0; prefix.A=4+((subtype&0x30)>>3);
+    if(ActRaiser_RegionalHouseUnitsEntry(&prefix)) {
+      assert(ActRaiser_RegionalHouseUnits(&prefix)==RECOMP_RETURN_TAILCALL);
+      assert(tail_pc==0x03b4bc && tail_source==0x03b4b8 && prefix.A==4 && prefix.Y==4);
+    }
+    unsigned mask=0;
+    for(unsigned n=0;n<4;++n)if(cpu_read16(cpu,0x7f,0x95c8+base+2*n)&0x8000)mask|=1u<<n;
+    if(mask==15) {
+      const unsigned at=0x9efa+base/4;
+      cpu_write16(cpu,0x7f,at,(uint16_t)(cpu_read16(cpu,0x7f,at)+prefix.A));
+    } else for(unsigned n=0,left=prefix.A;left;n=(n+1)%4)if(!(mask&(1u<<n))) {
+      const unsigned at=0x96b8+base+2*n;
+      cpu_write16(cpu,0x7f,at,(uint16_t)(cpu_read16(cpu,0x7f,at)+1)); --left;
+    }
+  }
+  if(event==3) {
+    const unsigned region=ram[0x341]-1;
+    cpu_write16(cpu,0x7f,0x7bf9,region); cpu_write16(cpu,0x7f,0x7bfb,region*2);
+    const unsigned completed=cpu_read16(cpu,0x7f,0x6b18+region*2);
+    uint32_t target=completed==2?0x03d0c7:completed==1?0x03d0be:0x03d0ce;
+    CpuState prefix=*cpu; prefix.m_flag=0; prefix.DB=0x7f; prefix.X=(uint16_t)(region*2);
+    if(ActRaiser_RegionalScoreRouteEntry(&prefix)) {
+      assert(ActRaiser_RegionalScoreRoute(&prefix)==RECOMP_RETURN_TAILCALL);
+      assert(tail_source==0x03d0b3); target=tail_pc;
+    }
+    if(target!=0x03d0ce) {
+      const unsigned bcd=cpu_read16(cpu,0,0x1f);
+      const unsigned score=(bcd&15)+((bcd>>4)&15)*10+((bcd>>8)&15)*100+(bcd>>12)*1000;
+      prefix.A=(uint16_t)(score/10*2);
+      if(ActRaiser_RegionalScoreConversionEntry(&prefix)) {
+        assert(ActRaiser_RegionalScoreConversion(&prefix)==RECOMP_RETURN_TAILCALL);
+        assert(tail_pc==0x03d10a && tail_source==0x03d0d4);
+      }
+      if(target==0x03d0c7) {
+        const unsigned at=0x9efa+region*2;
+        cpu_write16(cpu,0x7f,at,(uint16_t)(cpu_read16(cpu,0x7f,at)+prefix.A));
+      } else {
+        const unsigned delta=prefix.A>>2; prefix.X=(uint16_t)(region*8);
+        if(ActRaiser_RegionalScoreSubtractEntry(&prefix)) {
+          cpu_write16(&prefix,0,(uint16_t)(prefix.S+1),delta);
+          assert(ActRaiser_RegionalScoreSubtract(&prefix)==RECOMP_RETURN_TAILCALL);
+          assert(tail_pc==0x03b549 && tail_source==0x03b525);
+        } else for(unsigned n=0;n<4;++n) {
+          const unsigned at=0x96b8+prefix.X+2*n;
+          cpu_write16(cpu,0x7f,at,(uint16_t)(cpu_read16(cpu,0x7f,at)+delta));
+        }
+      }
+    }
+  }
+  if(change_score_in_lair) {
+    change_score_in_lair=false; ActRaiserRegionalRulesView view;
+    assert(ActRaiserRegional_CopyRulesView(&view));
+    assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_ScoreFeedback,
+        kArRegionalSource_US)==kActRaiserRegionalEdit_Applied);
+    assert(ActRaiser_RegionalDevelopment(cpu)==RECOMP_RETURN_NORMAL);
+    assert(ActRaiserRegional_CopyRulesView(&view));
+    for(unsigned i=0;i<kArRegionalScore_Phase;++i)assert(view.effective.score_feedback.source[i]==kArRegionalSource_Japan);
+  }
+  if(change_house_in_lair) {
+    change_house_in_lair=false;
+    ActRaiserRegionalRulesView view;
+    assert(ActRaiserRegional_CopyRulesView(&view));
+    assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_HouseCredit,
+        kArRegionalSource_US)==kActRaiserRegionalEdit_Applied);
+    assert(ActRaiser_RegionalDevelopment(cpu)==RECOMP_RETURN_NORMAL);
+    assert(ActRaiserRegional_CopyRulesView(&view) && view.effective.house_credit==kArRegionalSource_Japan);
+  }
+  if(change_seeds_in_lair) {
+    change_seeds_in_lair=false;
+    ActRaiserRegionalRulesView view;
+    assert(ActRaiserRegional_CopyRulesView(&view) && view.lair_history_ready);
+    assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_LairReserves,
+        kArRegionalSource_Japan)==kActRaiserRegionalEdit_Applied);
+    assert(ActRaiser_RegionalDevelopment(cpu)==RECOMP_RETURN_NORMAL);
+    assert(ActRaiserRegional_CopyRulesView(&view) && view.effective.lair_seeds==kArRegionalSource_US);
+    assert(cpu_read16(cpu,0x7f,0x96b8)==199); /* No switch inside the capture. */
+  }
+  cpu->S+=event==4 ? 2:3;
+  if(event!=3) cpu->A=0x5678;
+  return lair_result;
+}
+#define LAIR_STUB(pc,event) \
+  RecompReturn bank_03_##pc##_M0X0(CpuState *cpu) { return NativeLair(cpu,event,false); } \
+  RecompReturn bank_03_##pc##_M1X0(CpuState *cpu) { return NativeLair(cpu,event,true); }
+LAIR_STUB(B7C6,4)
+LAIR_STUB(BADD,0)
+LAIR_STUB(BA42,1)
+LAIR_STUB(B4A6,2)
+#undef LAIR_STUB
+static RecompReturn reload_return;
+static RecompReturn ReduceLairDelays(CpuState *cpu) {
+  assert(!ActRaiser_RegionalLairReductionEntry(cpu));
+  assert(!ActRaiser_RegionalLairReductionEntry(cpu));
+  const unsigned base=cpu_read16(cpu,0x7f,0x7bfb)*4;
+  for(unsigned n=0;n<4;++n) {
+    const unsigned at=0x9628+base+2*n;
+    cpu_write16(cpu,0x7f,at,(cpu_read16(cpu,0x7f,at)>>2)+1);
+  }
+  return reload_return;
+}
+RecompReturn bank_03_B6BF_M0X0(CpuState *cpu) { return ReduceLairDelays(cpu); }
+RecompReturn bank_03_B6BF_M1X0(CpuState *cpu) { return ReduceLairDelays(cpu); }
+RecompReturn bank_03_D095_M0X0(CpuState *cpu) {
+  if(ActRaiser_RegionalLairEntry(cpu))return ActRaiser_RegionalLairScore(cpu);
+  return NativeLair(cpu,3,false);
+}
+RecompReturn bank_03_D095_M1X0(CpuState *cpu) {
+  if(ActRaiser_RegionalLairEntry(cpu))return ActRaiser_RegionalLairScore(cpu);
+  return NativeLair(cpu,3,true);
 }
 bool ActRaiserMiracle_Entry(const CpuState *cpu, unsigned action) {
   return cpu && action >= 5 && action <= 9 && cpu->PB == 1 && cpu->DB == 1 &&
@@ -286,6 +496,51 @@ int main(void) {
     assert(ActRaiser_RegionalTitleEntry(&cpu));
     assert(ActRaiser_RegionalTitle(&cpu) == RECOMP_RETURN_NORMAL);
     CheckPrices((ArRegionalSource)source);
+    ArRegionalTownStatusSnapshot status;
+    assert(ActRaiserRegional_CopyRulesView(&view));
+    assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_TownStatus,
+        kArRegionalSource_Japan)==kActRaiserRegionalEdit_Applied);
+    assert(ActRaiserRegional_TownStatusSnapshot(false,&status) && !status.japanese[0]);
+    assert(ActRaiserRegional_TownStatusSnapshot(true,&status));
+    for(unsigned i=0;i<kArRegionalTownStatus_Count;++i) assert(status.japanese[i]);
+    assert(ActRaiserRegional_CopyRulesView(&view));
+    assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_TownStatus,
+        kArRegionalSource_US)==kActRaiserRegionalEdit_Applied);
+    assert(ActRaiserRegional_TownStatusSnapshot(true,&status) && !status.japanese[0]);
+    bool level_jp;
+    assert(ActRaiserRegional_CopyRulesView(&view));
+    assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_LevelGoals,1)==kActRaiserRegionalEdit_Applied);
+    assert(ActRaiserRegional_LevelGoalsSnapshot(false,&level_jp) && !level_jp);
+    assert(ActRaiserRegional_LevelGoalsSnapshot(true,&level_jp) && level_jp);
+    assert(ActRaiserRegional_CopyRulesView(&view));
+    assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_LevelGoals,0)==kActRaiserRegionalEdit_Applied);
+    assert(ActRaiserRegional_LevelGoalsSnapshot(true,&level_jp) && !level_jp);
+    uint16_t combat=0xdead;
+    assert(ActRaiserRegional_CopyRulesView(&view));
+    assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_SimCombat,1)==kActRaiserRegionalEdit_Applied);
+    assert(ActRaiserRegional_CopyRulesView(&view));
+    assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_SimAi,1)==kActRaiserRegionalEdit_Applied);
+    uint16_t ai=0xdead;
+    assert(!ActRaiserRegional_SimActorAiSnapshot(0,0,&ai) && ai==0xdead);
+    assert(!ActRaiserRegional_SimActorSnapshot(0,0,&combat) && combat==0xdead);
+    ActRaiserRegional_SimActorCache(true,0);ActRaiserRegional_SimActorBirth(0,0);
+    assert(ActRaiserRegional_SimActorSnapshot(0,0,&combat) && combat==31);
+    assert(ActRaiserRegional_SimActorAiSnapshot(0,0,&ai) && ai==63);
+    ActRaiserRegional_SimActorCache(false,0);
+    assert(ActRaiserRegional_CopyRulesView(&view));
+    assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_SimCombat,0)==kActRaiserRegionalEdit_Applied);
+    assert(ActRaiserRegional_CopyRulesView(&view));
+    assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_SimAi,0)==kActRaiserRegionalEdit_Applied);
+    ActRaiserRegional_SimActorBirth(0,1);
+    assert(ActRaiserRegional_SimActorAiSnapshot(0,1,&ai) && !ai);
+    assert(ActRaiserRegional_SimActorAiSnapshot(0,0,&ai) && ai==63);
+    assert(ActRaiserRegional_SimActorSnapshot(0,0,&combat) && combat==31);
+    ActRaiserRegional_SimActorCache(true,1);ActRaiserRegional_SimActorCache(true,0);
+    assert(ActRaiserRegional_SimActorAiSnapshot(0,0,&ai) && ai==63);
+    assert(ActRaiserRegional_SimActorSnapshot(0,0,&combat) && combat==31);
+    ActRaiserRegional_SimActorBirth(0,0);ActRaiserRegional_SimActorCache(false,0);
+    assert(ActRaiserRegional_SimActorSnapshot(0,0,&combat) && !combat);
+    assert(ActRaiserRegional_SimActorAiSnapshot(0,0,&ai) && !ai);
     CpuState casting={.S=0x1f0,.X=0xc00,.host_return_valid=1};
     ram[0x2ac]=4; ram[0x21]=5;
     assert(ActRaiser_RegionalScrollEntry(&casting));
@@ -516,6 +771,103 @@ int main(void) {
     assert(!ActRaiser_RegionalSkipScoreEntry(&report_cpu));
     assert(ActRaiser_RegionalMasterReportEntry(&report_cpu));
   }
+  CpuState source_cpu={.PB=1,.DB=1,.A=5,.X=0x24c,.Y=0x24c,.S=0x1f0,.m_flag=1,.P=CPU_P_M};
+  for(unsigned source=0;source<3;++source)for(unsigned item=5;item<=6;++item) {
+    assert(ActRaiserRegional_CopyRulesView(&view));
+    assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_Sources,(ArRegionalSource)source)>=kActRaiserRegionalEdit_Unchanged);
+    source_cpu.A=item;
+    assert(ActRaiser_RegionalSourceCollectionEntry(&source_cpu));
+    assert(ActRaiser_RegionalSourceCollection(&source_cpu)==RECOMP_RETURN_TAILCALL);
+    assert(tail_source==0x018916 && tail_pc==(source==1?0x01892d:0x018922));
+    assert(ActRaiserRegional_CopyRulesView(&view) && view.effective.sources.source[item-5]==(ArRegionalSource)source);
+    memset(ram+0x2a2,0,8);ram[0x2a2]=item;
+    cpu_write16(&source_cpu,0,source_cpu.S+1,0x9c82);
+    cpu_write16(&source_cpu,0,source_cpu.S+4,0x8924);
+    const bool keep=item==5?ActRaiser_RegionalSourceLifeKeepEntry(&source_cpu):ActRaiser_RegionalSourceMagicKeepEntry(&source_cpu);
+    assert(keep); /* current policy is irrelevant to an already-started auto effect */
+    assert((item==5?ActRaiser_RegionalSourceLifeKeep(&source_cpu):ActRaiser_RegionalSourceMagicKeep(&source_cpu))==RECOMP_RETURN_TAILCALL);
+    assert(tail_pc==(item==5?0x019cd1:0x019cf3) && ram[0x2a2]==item);
+    cpu_write16(&source_cpu,0,source_cpu.S+4,0x88ae);
+    assert(!ActRaiser_RegionalSourceLifeKeepEntry(&source_cpu) && !ActRaiser_RegionalSourceMagicKeepEntry(&source_cpu));
+  }
+  source_cpu.A=7;assert(!ActRaiser_RegionalSourceCollectionEntry(&source_cpu));
+  story_rom[0xf543]=110;story_rom[0xf545]=5;
+  story_rom[0xf56c]=700&255;story_rom[0xf56d]=700>>8;story_rom[0xf56e]=9;
+  for(unsigned source=0;source<3;++source) {
+    assert(ActRaiserRegional_CopyRulesView(&view));
+    assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_Story,(ArRegionalSource)source)>=kActRaiserRegionalEdit_Unchanged);
+    CpuState story_cpu={.PB=3,.DB=0x7f,.X=0xf543,.S=0x1ef0};
+    cpu_write16(&story_cpu,0x7f,0x7bfb,0);
+    assert(ActRaiser_RegionalStoryThresholdEntry(&story_cpu));
+    assert(ActRaiser_RegionalStoryThreshold(&story_cpu)==RECOMP_RETURN_TAILCALL);
+    assert(story_cpu.A==(source==1?88:110) && tail_pc==0x03e142 && tail_source==0x03e13e);
+    story_cpu.X=0xf56c;cpu_write16(&story_cpu,0x7f,0x7bfb,4);
+    assert(ActRaiser_RegionalStoryThreshold(&story_cpu)==RECOMP_RETURN_TAILCALL);
+    assert(story_cpu.A==(source==1?400:700) && story_cpu.S==0x1ef0);
+    for(unsigned token=RECOMP_RETURN_NORMAL;token<=RECOMP_RETURN_OWNED_UNWIND;++token) {
+      story_cpu.m_flag=1;story_cpu.P|=CPU_P_M;
+      story_return=(RecompReturn)token;
+      const unsigned calls=story_native_calls;const CpuState before=story_cpu;
+      assert(ActRaiser_RegionalStoryCompassEntry(&story_cpu));
+      assert(ActRaiser_RegionalStoryCompass(&story_cpu)==(source==1?RECOMP_RETURN_TAILCALL:story_return));
+      assert(!memcmp(&before,&story_cpu,sizeof(before)));
+      assert(story_native_calls==calls+(source==1?0:1));
+      if(source==1)assert(tail_pc==0x03eb3d && tail_source==0x03eb35);
+    }
+    assert(ActRaiserRegional_CopyRulesView(&view));
+    for(unsigned rule=0;rule<kArRegionalStory_Count;++rule)assert(view.effective.story.source[rule]==(ArRegionalSource)source);
+  }
+  for(unsigned source=0;source<3;++source)for(unsigned edit=0;edit<2;++edit)
+    for(unsigned token=RECOMP_RETURN_NORMAL;token<=RECOMP_RETURN_OWNED_UNWIND;++token) {
+      assert(ActRaiserRegional_CopyRulesView(&view));
+      assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_SkullWait,
+          (ArRegionalSource)source)>=kActRaiserRegionalEdit_Unchanged);
+      CpuState skull_cpu={.PB=1,.DB=1,.A=14,.S=0x1ee0,.m_flag=1,.P=CPU_P_M};
+      skull_return=(RecompReturn)token;skull_skip=source==1;skull_edit=edit;
+      assert(ActRaiser_RegionalSkullUseEntry(&skull_cpu));
+      const unsigned calls=skull_calls;
+      assert(ActRaiser_RegionalSkullUse(&skull_cpu)==skull_return && skull_calls==calls+1);
+      assert(!ActRaiser_RegionalSkullSkipWaitEntry(&skull_cpu) && skull_cpu.S==0x1ee0);
+      skull_cpu.m_flag=1;skull_cpu.P|=CPU_P_M;
+      assert(ActRaiser_RegionalSkullUseEntry(&skull_cpu));
+      assert(ActRaiserRegional_CopyRulesView(&view) && view.effective.skull_wait==(ArRegionalSource)source);
+      assert(view.requested.skull_wait==(edit?(source==1?kArRegionalSource_US:kArRegionalSource_Japan):(ArRegionalSource)source));
+      skull_cpu.DB=0x7f;assert(!ActRaiser_RegionalSkullUseEntry(&skull_cpu));
+    }
+  CpuState lives_cpu={.PB=2,.X=0x50,.A=0xabcd,.S=0x1ef};
+  ram[0x1c]=2; town_ram[0xb051]=0x20; town_ram[0xb053]=0x20;
+  for (unsigned source=0; source<3; ++source) {
+    assert(ActRaiserRegional_CopyRulesView(&view));
+    assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_LivesDisplay,(ArRegionalSource)source)>=kActRaiserRegionalEdit_Unchanged);
+    lives_cpu.m_flag=0; lives_cpu.P=0; cpu_p_to_mirrors(&lives_cpu);
+    if (source==0) assert(!ActRaiser_RegionalLivesDisplayEntry(&lives_cpu));
+    else {
+      assert(ActRaiser_RegionalLivesDisplayEntry(&lives_cpu));
+      assert(ActRaiser_RegionalLivesDisplay(&lives_cpu)==(source==1?RECOMP_RETURN_TAILCALL:lives_return));
+      assert(ActRaiserRegional_CopyRulesView(&view) && view.effective.lives_display==(ArRegionalSource)source);
+      if (source==1) {
+        assert(tail_pc==0x02c2a4 && tail_source==0x02c280);
+        assert(town_ram[0xb050]=='0' && town_ram[0xb052]=='2');
+        assert(town_ram[0xb051]==0x20 && town_ram[0xb053]==0x20);
+        assert(lives_cpu.A==0xab32 && lives_cpu.S==0x1ef && ram[0x1c]==2);
+        const uint32_t revision=view.revision;
+        lives_cpu.P=0; cpu_p_to_mirrors(&lives_cpu);
+        assert(ActRaiser_RegionalLivesDisplay(&lives_cpu)==RECOMP_RETURN_TAILCALL);
+        assert(ActRaiserRegional_CopyRulesView(&view) && view.revision==revision);
+      } else assert(lives_native_calls==1 && !ActRaiser_RegionalLivesDisplayEntry(&lives_cpu));
+    }
+  }
+  for (unsigned token=0;token<=RECOMP_RETURN_OWNED_UNWIND;++token) {
+    assert(ActRaiserRegional_CopyRulesView(&view));
+    assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_LivesDisplay,kArRegionalSource_Japan)==kActRaiserRegionalEdit_Applied);
+    lives_cpu.P=0; cpu_p_to_mirrors(&lives_cpu);
+    assert(ActRaiser_RegionalLivesDisplay(&lives_cpu)==RECOMP_RETURN_TAILCALL);
+    assert(ActRaiserRegional_CopyRulesView(&view));
+    assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_LivesDisplay,kArRegionalSource_US)==kActRaiserRegionalEdit_Applied);
+    lives_cpu.P=0; cpu_p_to_mirrors(&lives_cpu); lives_return=(RecompReturn)token;
+    assert(ActRaiser_RegionalLivesDisplay(&lives_cpu)==lives_return);
+    assert(!ActRaiser_RegionalLivesDisplayEntry(&lives_cpu));
+  }
   report_cpu.PB = 3; assert(!ActRaiser_RegionalMasterReportEntry(&report_cpu)); report_cpu.PB = 1;
   report_cpu.DB = 0x7f; assert(!ActRaiser_RegionalMasterReportEntry(&report_cpu)); report_cpu.DB = 1;
   report_cpu.m_flag = 0; assert(!ActRaiser_RegionalMasterReportEntry(&report_cpu));
@@ -593,6 +945,247 @@ int main(void) {
   assert(ActRaiser_RegionalTitle(&cpu) == RECOMP_RETURN_NORMAL);
   CheckPrices(kArRegionalSource_US); /* New Game doesn't adopt saved JP */
   assert(title_calls == 5 && miracle_calls == 32);
+  for(unsigned width=0;width<2;++width) {
+    memset(town_ram+0x96b8,0,48);
+    cpu=(CpuState){.PB=2,.m_flag=1}; ram[0x336]=0;
+    assert(ActRaiser_RegionalTitle(&cpu)==RECOMP_RETURN_NORMAL);
+    cpu=(CpuState){.PB=3,.DB=0x7f,.m_flag=width,.S=0x1e00};
+    assert(ActRaiser_RegionalLairSeedEntry(&cpu));
+    lair_result=RECOMP_RETURN_NORMAL;
+    unsigned count=lair_calls;
+    assert(ActRaiser_RegionalLairSeed(&cpu)==RECOMP_RETURN_NORMAL);
+    assert(lair_calls==count+1 && cpu.A==0x5678 && cpu.S==0x1e02);
+    assert(!ActRaiser_RegionalLairSeedEntry(&cpu) && ActRaiser_RegionalLairEntry(&cpu));
+    cpu.X=0xb30; cpu_write16(&cpu,0x7f,0x9688,cpu.X); cpu_write16(&cpu,0x7f,0x7bfb,0);
+    count=lair_calls;
+    change_seeds_in_lair=true;
+    assert(ActRaiser_RegionalLairKill(&cpu)==RECOMP_RETURN_NORMAL);
+    assert(lair_calls==count+1 && cpu.S==0x1e05 && cpu_read16(&cpu,0x7f,0x96b8)==199);
+    assert(ActRaiserRegional_ReplayDigest(NULL,pending_digest,&baseline) && !baseline);
+    assert(ActRaiser_RegionalDevelopment(&cpu)==RECOMP_RETURN_NORMAL);
+    assert(cpu_read16(&cpu,0x7f,0x96b8)==249);
+    assert(ActRaiserRegional_CopyRulesView(&view) && view.effective.lair_seeds==kArRegionalSource_Japan);
+    assert(ActRaiserRegional_ReplayDigest(NULL,active_digest,&baseline) && !baseline);
+    assert(memcmp(pending_digest,active_digest,32));
+    assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_LairReserves,
+        kArRegionalSource_US)==kActRaiserRegionalEdit_Applied);
+    assert(ActRaiser_RegionalDevelopment(&cpu)==RECOMP_RETURN_NORMAL);
+    assert(cpu_read16(&cpu,0x7f,0x96b8)==199 && cpu.S==0x1e05);
+    assert(ActRaiserRegional_ReplayDigest(NULL,active_digest,&baseline) && baseline);
+    ActRaiserRegional_CheckLairHistory(&cpu);
+    SaveError error={{0}};
+    assert(SaveSystem_BeginNativeWrite(&error) && SaveSystem_EndNativeWrite(true,&error));
+    assert(SaveSystem_AutoPersistIfChanged(&error));
+    uint8_t durable[kActRaiserSramSize]; assert(SaveSystem_CopyDurableImage(durable));
+    ArRegionalSession loaded;
+    assert(ArRegionalSession_Load(&loaded,0,path,durable,&error)==kSaveCheckpoint_Ready);
+    assert(loaded.lairs.initialized_towns==63 && !loaded.lairs.diverged_towns);
+    assert(loaded.lairs.stock[0][0]==199 && loaded.lairs.stock[1][0]==249);
+    /* Preserve escape exactly; retain pre-event history as diverged. */
+    lair_result=RECOMP_RETURN_PARKED_WAIT;
+    assert(ActRaiser_RegionalLairKill(&cpu)==RECOMP_RETURN_PARKED_WAIT);
+    assert(SaveSystem_BeginNativeWrite(&error) && SaveSystem_EndNativeWrite(true,&error));
+    assert(SaveSystem_AutoPersistIfChanged(&error));
+    assert(ArRegionalSession_Load(&loaded,0,path,durable,&error)==kSaveCheckpoint_Ready);
+    assert(loaded.lairs.diverged_towns==1 && loaded.lairs.stock[0][0]==199);
+    assert(ActRaiserRegional_CopyRulesView(&view) && !view.lair_history_ready);
+    assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_LairReserves,
+        kArRegionalSource_Japan)==kActRaiserRegionalEdit_HistoryUnavailable);
+  }
+  /* Shared real events, independent seed/house choices. Switching projects
+   * only stock history; already awarded all-sealed growth is never replayed. */
+  for(unsigned width=0;width<2;++width)for(unsigned mask=0;mask<16;++mask)
+  for(unsigned tier=0;tier<4;++tier) {
+    memset(town_ram,0,sizeof(town_ram));
+    cpu=(CpuState){.PB=2,.m_flag=1}; ram[0x336]=0;
+    assert(ActRaiser_RegionalTitle(&cpu)==RECOMP_RETURN_NORMAL);
+    cpu=(CpuState){.PB=3,.DB=0x7f,.m_flag=width,.S=0x1e00};
+    lair_result=RECOMP_RETURN_NORMAL;
+    assert(ActRaiser_RegionalLairSeed(&cpu)==RECOMP_RETURN_NORMAL);
+    cpu.X=0x6be7; town_ram[cpu.X+2]=(uint8_t)(tier<<4);
+    for(unsigned n=0;n<4;++n)cpu_write16(&cpu,0x7f,0x95c8+2*n,mask&(1u<<n)?0x8000:0);
+    assert(ActRaiser_RegionalLairHouse(&cpu)==RECOMP_RETURN_NORMAL);
+    assert(ActRaiserRegional_CopyRulesView(&view) && view.lair_history_ready);
+    assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_HouseCredit,
+        kArRegionalSource_Japan)==kActRaiserRegionalEdit_Applied);
+    assert(ActRaiserRegional_CopyRulesView(&view));
+    assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_LairReserves,
+        kArRegionalSource_Japan)==kActRaiserRegionalEdit_Applied);
+    assert(ActRaiser_RegionalDevelopment(&cpu)==RECOMP_RETURN_NORMAL);
+    unsigned sum=0;
+    for(unsigned n=0;n<4;++n)sum+=cpu_read16(&cpu,0x7f,0x96b8+2*n);
+    assert(sum==600u+(mask==15?0u:4u));
+    assert(cpu_read16(&cpu,0x7f,0x9efa)==(mask==15?4+tier*2:0));
+    change_house_in_lair=true;
+    assert(ActRaiser_RegionalLairHouse(&cpu)==RECOMP_RETURN_NORMAL);
+    assert(ActRaiserRegional_CopyRulesView(&view) && view.lair_history_ready);
+    assert(view.effective.house_credit==kArRegionalSource_Japan && view.requested.house_credit==kArRegionalSource_US);
+    assert(ActRaiser_RegionalDevelopment(&cpu)==RECOMP_RETURN_NORMAL);
+    sum=0;
+    for(unsigned n=0;n<4;++n) {
+      sum+=cpu_read16(&cpu,0x7f,0x96b8+2*n);
+      assert(cpu_read16(&cpu,0x7f,0x95c8+2*n)==(mask&(1u<<n)?0x8000:0));
+    }
+    assert(sum==600u+(mask==15?0u:2*(4+tier*2)));
+    assert(cpu_read16(&cpu,0x7f,0x9efa)==(mask==15?8+tier*2:0));
+    assert(ActRaiserRegional_CopyRulesView(&view) && view.lair_history_ready);
+  }
+  /* Score capture belongs to the completed town, not the previous selection.
+   * A request made during action mode activates before this settlement; a
+   * nested edit stays pending until the native transaction has returned. */
+  const unsigned scores[]={0,650,682,9999};
+  for(unsigned source=0;source<3;++source)for(unsigned completed=0;completed<4;++completed)
+  for(unsigned sample=0;sample<4;++sample)for(unsigned width=0;width<2;++width) {
+    memset(town_ram,0,sizeof(town_ram));
+    cpu=(CpuState){.PB=2,.m_flag=1}; ram[0x336]=0;
+    assert(ActRaiser_RegionalTitle(&cpu)==RECOMP_RETURN_NORMAL);
+    cpu=(CpuState){.PB=3,.DB=0x7f,.m_flag=width,.S=0x1e00}; lair_result=RECOMP_RETURN_NORMAL;
+    assert(ActRaiser_RegionalLairSeed(&cpu)==RECOMP_RETURN_NORMAL);
+    ram[0x341]=2; cpu_write16(&cpu,0x7f,0x6b1a,completed); /* Bloodpool, while selected town is Fillmore. */
+    cpu_write16(&cpu,0x7f,0x9efc,10);
+    const unsigned score=scores[sample];
+    const uint16_t bcd=(uint16_t)((score%10)|((score/10%10)<<4)|((score/100%10)<<8)|((score/1000)<<12));
+    cpu_write16(&cpu,0,0x1f,bcd);
+    assert(ActRaiserRegional_CopyRulesView(&view));
+    const ActRaiserRegionalEditResult edit=ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_ScoreFeedback,(ArRegionalSource)source);
+    assert(edit==(source?kActRaiserRegionalEdit_Applied:kActRaiserRegionalEdit_Unchanged));
+    change_score_in_lair=source==1;
+    assert(ActRaiser_RegionalLairScore(&cpu)==RECOMP_RETURN_NORMAL);
+    assert(!ActRaiser_RegionalScoreConversionEntry(&cpu)); /* transaction snapshot retired */
+    assert(ActRaiserRegional_CopyRulesView(&view) && view.lair_history_ready);
+    const unsigned converted=source==1?(score<650?0:(score-650)/32*10):score/10*2;
+    assert(cpu_read16(&cpu,0x7f,0x9efc)==10+(completed==2?converted:0));
+    for(unsigned n=0;n<4;++n) {
+      uint16_t seed; assert(ArRegionalLair_Seed(kArRegionalSource_US,4+n,&seed));
+      unsigned expected=seed;
+      if(completed!=2 && (source==1 || completed==1)) {
+        const unsigned delta=converted/4;
+        expected=source==1?(seed>=delta?seed-delta:0):(uint16_t)(seed+delta);
+      }
+      assert(cpu_read16(&cpu,0x7f,0x96c0+n*2)==expected);
+    }
+    const unsigned earned=cpu_read16(&cpu,0x7f,0x9efc);
+    assert(ActRaiser_RegionalDevelopment(&cpu)==RECOMP_RETURN_NORMAL);
+    assert(cpu_read16(&cpu,0x7f,0x9efc)==earned); /* no retroactive growth */
+    assert(ActRaiserRegional_CopyRulesView(&view) && view.lair_history_ready);
+    if(source==1)for(unsigned n=0;n<4;++n) {
+      uint16_t seed; assert(ArRegionalLair_Seed(kArRegionalSource_US,4+n,&seed));
+      assert(cpu_read16(&cpu,0x7f,0x96c0+n*2)==seed+(completed==1?(score/10*2)/4:0));
+    }
+  }
+  /* The same native clear/departure calls see different scores. Changing
+   * the policy during the tally must not move or duplicate this settlement. */
+  for(unsigned source=0;source<3;++source)for(unsigned completed=1;completed<=2;++completed)
+  for(unsigned region=1;region<=6;++region) {
+    memset(town_ram,0,sizeof(town_ram));
+    cpu=(CpuState){.PB=2,.m_flag=1}; ram[0x336]=0;
+    assert(ActRaiser_RegionalTitle(&cpu)==RECOMP_RETURN_NORMAL);
+    cpu=(CpuState){.PB=3,.DB=0x7f,.S=0x1e00}; lair_result=RECOMP_RETURN_NORMAL;
+    assert(ActRaiser_RegionalLairSeed(&cpu)==RECOMP_RETURN_NORMAL);
+    ram[0x341]=(uint8_t)region; ram[0x18]=(uint8_t)region; ram[0x19]=(uint8_t)completed;
+    cpu_write16(&cpu,0x7f,0x6b18+(region-1)*2,completed);
+    cpu_write16(&cpu,0,0x1f,0x1314);
+    assert(ActRaiserRegional_CopyRulesView(&view));
+    assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_ScoreFeedback,
+        (ArRegionalSource)source)==(source?kActRaiserRegionalEdit_Applied:kActRaiserRegionalEdit_Unchanged));
+    const unsigned start_calls=lair_calls;
+    clear_yield_result=RECOMP_RETURN_NORMAL;
+    cpu=(CpuState){.PB=0,.DB=0,.S=0x1f00,.A=0x0c0d,.Y=0xa8d8,.X=0xe20};
+    assert(ActRaiser_RegionalScoreCardEntry(&cpu));
+    assert(ActRaiser_RegionalScoreCard(&cpu)==RECOMP_RETURN_TAILCALL);
+    assert(tail_pc==0x00a757 && tail_source==0x00a754 && cpu.S==0x1f00 && cpu.PB==0);
+    assert(lair_calls==start_calls+(source==1));
+    assert(ActRaiserRegional_CopyRulesView(&view) && view.lair_history_ready);
+    for(unsigned i=0;i<kArRegionalScore_Count;++i)assert(view.effective.score_feedback.source[i]==(ArRegionalSource)source);
+    uint8_t captured[32], repeated[32]; bool baseline;
+    assert(ActRaiserRegional_ReplayDigest(NULL,captured,&baseline));
+    /* Reentry at the same clear boundary does not credit a second event. */
+    assert(ActRaiser_RegionalScoreCard(&cpu)==RECOMP_RETURN_TAILCALL);
+    assert(lair_calls==start_calls+(source==1));
+    assert(ActRaiserRegional_ReplayDigest(NULL,repeated,&baseline) && !memcmp(captured,repeated,32));
+    assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_ScoreFeedback,
+        source==1?kArRegionalSource_US:kArRegionalSource_Japan)==kActRaiserRegionalEdit_Applied);
+    CpuState town_cpu={.PB=3,.S=0x1f00};
+    assert(ActRaiser_RegionalDevelopment(&town_cpu)==RECOMP_RETURN_NORMAL);
+    assert(ActRaiserRegional_CopyRulesView(&view));
+    for(unsigned i=0;i<kArRegionalScore_Count;++i)assert(view.effective.score_feedback.source[i]==(ArRegionalSource)source);
+    cpu_write16(&cpu,0,0x1f,0x1799);
+    assert(ActRaiser_RegionalScoreDeparture(&cpu)==RECOMP_RETURN_TAILCALL);
+    assert(tail_pc==0x00a311 && tail_source==0x00a30d && cpu.S==0x1f00 && cpu.PB==0);
+    assert(lair_calls==start_calls+1 && cpu.A==0x4000 && cpu.Y==0xa8d8);
+    assert(cpu_read16(&cpu,0,0xe20)==0x4000);
+    const unsigned converted=source==1?200:358;
+    assert(cpu_read16(&cpu,0x7f,0x9efa+(region-1)*2)==(completed==2?converted:0));
+    for(unsigned n=0;n<4;++n) {
+      uint16_t seed; assert(ArRegionalLair_Seed(kArRegionalSource_US,(region-1)*4+n,&seed));
+      const unsigned expected=completed==2?seed:source==1?(seed>=50?seed-50:0):seed+89;
+      assert(cpu_read16(&cpu,0x7f,0x96b8+(region-1)*8+n*2)==expected);
+    }
+    assert(ActRaiserRegional_CopyRulesView(&view) && view.lair_history_ready);
+    const unsigned growth=cpu_read16(&cpu,0x7f,0x9efa+(region-1)*2);
+    assert(ActRaiser_RegionalDevelopment(&town_cpu)==RECOMP_RETURN_NORMAL);
+    assert(cpu_read16(&cpu,0x7f,0x9efa+(region-1)*2)==growth);
+    assert(ActRaiserRegional_CopyRulesView(&view) && view.lair_history_ready);
+    /* Phase itself waits for the next accepted clear, even once stocks switch. */
+    assert(view.effective.score_feedback.source[kArRegionalScore_Phase]==(ArRegionalSource)source);
+  }
+  remove(path); remove(companion);
+  for(unsigned source=0;source<3;++source)for(unsigned width=0;width<2;++width)
+  for(unsigned token=0;token<=RECOMP_RETURN_OWNED_UNWIND;++token) {
+    memset(town_ram,0,sizeof(town_ram));
+    cpu=(CpuState){.PB=2,.m_flag=1};ram[0x336]=0;
+    assert(ActRaiser_RegionalTitle(&cpu)==RECOMP_RETURN_NORMAL);
+    cpu=(CpuState){.PB=3,.DB=0x7f,.S=0x1e00};lair_result=RECOMP_RETURN_NORMAL;
+    assert(ActRaiser_RegionalLairSeed(&cpu)==RECOMP_RETURN_NORMAL);
+    assert(ActRaiserRegional_CopyRulesView(&view) && view.lair_reload_ready);
+    assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_LairReloads,(ArRegionalSource)source)>=kActRaiserRegionalEdit_Unchanged);
+    for(unsigned i=0;i<24;++i) cpu_write16(&cpu,0x7f,0x9658+2*i,0x1234+i);
+    cpu.DB=1;assert(ActRaiser_RegionalDevelopment(&cpu)==RECOMP_RETURN_NORMAL);cpu.DB=0x7f;
+    assert(ActRaiserRegional_CopyRulesView(&view) && view.effective.lair_reloads==(ArRegionalSource)source);
+    for(unsigned i=0;i<24;++i) {
+      uint16_t expected;assert(ArRegionalLair_Reload((ArRegionalSource)source,i,&expected));
+      assert(cpu_read16(&cpu,0x7f,0x9628+2*i)==expected);
+      assert(cpu_read16(&cpu,0x7f,0x9658+2*i)==0x1234+i);
+    }
+    cpu_write16(&cpu,0x7f,0x7bfb,6);cpu.m_flag=width;reload_return=(RecompReturn)token;
+    assert(ActRaiser_RegionalLairReductionEntry(&cpu));const CpuState previous=cpu;
+    assert(ActRaiser_RegionalLairReduction(&cpu)==reload_return && !memcmp(&cpu,&previous,sizeof(cpu)));
+    assert(ActRaiserRegional_CopyRulesView(&view) && view.lair_reload_ready==(token==RECOMP_RETURN_NORMAL));
+    if(token==RECOMP_RETURN_NORMAL) {
+      assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_LairReloads,source==1?0:1)==kActRaiserRegionalEdit_Applied);
+      assert(ActRaiser_RegionalDevelopment(&cpu)==RECOMP_RETURN_NORMAL);
+      uint16_t expected;assert(ArRegionalLair_Reload(source==1?0:1,13,&expected));
+      assert(cpu_read16(&cpu,0x7f,0x9642)==(expected>>2)+1);
+    }
+  }
+  /* Accepted Continue owns its original title frame, including cancellation
+   * and a held native accept button. Replays cannot create an acknowledgement. */
+  memset(image,0,sizeof(image)); Save_RecomputeChecksum(image);
+  assert(Save_WriteFile(kSaveFileFormat_NativeSrm,path,image,&error));
+  assert(SaveSystem_LoadActive(&error));
+  assert(ActRaiserRegional_Initialize(Identity,NULL));
+  ActRaiserRegional_SetContinuePrompt(ContinuePrompt,&prompt_calls);
+  cpu=(CpuState){.PB=2,.DB=2,.m_flag=1,.S=0x1ee0}; ram[0x336]=1;
+  edits_allowed=false; assert(!ActRaiser_RegionalContinueEntry(&cpu));
+  edits_allowed=true; assert(ActRaiser_RegionalContinueEntry(&cpu));
+  ram[0x4219]=0x80; prompt_accept=false;
+  assert(ActRaiser_RegionalContinue(&cpu)==RECOMP_RETURN_TAILCALL);
+  assert(prompt_calls==1 && release_calls==3 && !restore_calls);
+  assert(cpu.S==0x1ee0 && cpu.PB==2 && tail_pc==0x02a75b && tail_source==0x02a79f);
+  assert(!ActRaiserRegional_CopyRulesView(&view));
+  ArRegionalSession loaded;
+  assert(ArRegionalSession_Load(&loaded,0,path,image,&error)==kSaveCheckpoint_Missing);
+  prompt_accept=true;
+  assert(ActRaiser_RegionalContinue(&cpu)==RECOMP_RETURN_TAILCALL);
+  assert(prompt_calls==2 && restore_calls==1 && tail_pc==0x02a7a3);
+  assert(cpu.S==0x1ee0 && cpu.PB==2);
+  assert(ArRegionalSession_Load(&loaded,0,path,image,&error)==kSaveCheckpoint_Ready);
+  assert(loaded.lairs.initialized_towns==63 && loaded.lairs.approximate_towns==63);
+  assert(ActRaiser_RegionalContinue(&cpu)==RECOMP_RETURN_TAILCALL);
+  assert(prompt_calls==2 && restore_calls==2); /* No repeated warning. */
+  restore_result=RECOMP_RETURN_PARKED_WAIT;
+  assert(ActRaiser_RegionalContinue(&cpu)==RECOMP_RETURN_PARKED_WAIT);
+  assert(cpu.PB==3 && prompt_calls==2);
   remove(path); remove(companion);
   return 0;
 }

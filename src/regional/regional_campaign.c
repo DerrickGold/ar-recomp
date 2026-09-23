@@ -58,6 +58,41 @@ bool ArRegionalCampaign_Continue(ArRegionalCampaign *campaign,
   return true;
 }
 
+bool ArRegionalCampaign_AcknowledgeLairHistory(ArRegionalCampaign *campaign,
+    SaveFileFormat format, const char *path, const uint8_t *image,
+    const uint16_t remaining[kArRegionalLairCount], SaveError *error) {
+  if (error) error->message[0] = 0;
+  if (!campaign) return Fail(error, "no campaign owner for history acknowledgement");
+  campaign->active_valid = false;
+  if (!path || !image || !remaining || !Save_ChecksumValid(image) || campaign->pending_valid)
+    return Fail(error, "no unchanged durable save for history acknowledgement");
+  ArRegionalSession next;
+  if (!LoadOrAdopt(campaign, path, image, &next, error)) return false;
+  const ArRegionalLairAccounting native = {0};
+  if (next.lairs.diverged_towns)
+    return Fail(error, "retained lair history needs recovery; it has not been replaced");
+  const bool changed = next.lairs.initialized_towns != 0x3f;
+  for (unsigned town = 0; town < kArRegionalLairTowns; ++town) {
+    if (!(next.lairs.initialized_towns & (1u << town))) {
+      if (!ArRegionalLairHistory_AdoptTown(&next.lairs, town, kArRegionalSource_US,
+                                          remaining + town * kArRegionalLairsPerTown))
+        return Fail(error, "cannot initialize the missing lair history");
+    } else {
+      for (unsigned n = 0; n < kArRegionalLairsPerTown; ++n) {
+        const unsigned lair = town * kArRegionalLairsPerTown + n;
+        uint16_t retained;
+        if (!ArRegionalLairHistory_Read(&next.lairs, &native, lair, &retained) ||
+            retained != remaining[lair])
+          return Fail(error, "retained lair history does not match this save; preserved");
+      }
+    }
+  }
+  if (changed && !ArRegionalSession_Save(&next, format, path, image, image, error)) return false;
+  campaign->active = next;
+  campaign->active_valid = true;
+  return true;
+}
+
 static bool Prepare(void *context, SaveError *error) {
   ArRegionalCampaign *campaign = context;
   if (!campaign || !campaign->active_valid)

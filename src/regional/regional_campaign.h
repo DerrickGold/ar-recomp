@@ -25,6 +25,16 @@ bool ArRegionalCampaign_NewGame(ArRegionalCampaign *campaign,
  * historical lair accounting. Corrupt/unknown/mismatched metadata blocks entry. */
 bool ArRegionalCampaign_Continue(ArRegionalCampaign *campaign,
     const char *path, const uint8_t image[kActRaiserSramSize], SaveError *error);
+/* Explicit acknowledgement only, before gameplay resumes. Reload the bound
+ * durable session, estimate only missing towns from the supplied native US
+ * stocks, then atomically persist metadata against the unchanged native image.
+ * Known or divergent histories are never replaced. A failed write leaves no
+ * active campaign; retry must call this function again. Native SRAM layout
+ * belongs to the game adapter, not this coordinator. */
+bool ArRegionalCampaign_AcknowledgeLairHistory(ArRegionalCampaign *campaign,
+    SaveFileFormat format, const char *path,
+    const uint8_t image[kActRaiserSramSize],
+    const uint16_t remaining[kArRegionalLairCount], SaveError *error);
 SaveCommitHost ArRegionalCampaign_SaveHost(ArRegionalCampaign *campaign);
 
 #endif

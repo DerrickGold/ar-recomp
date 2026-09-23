@@ -32,6 +32,8 @@ bool ArRegionalRules_Fingerprint(const ArRegionalRules *requested,
     const ArRegionalRules *effective,
     uint8_t out[32], bool *baseline) {
   if (!requested || !effective || !out || !baseline ||
+      (unsigned)requested->lair_reloads>=kArRegionalSource_Count ||
+      (unsigned)effective->lair_reloads>=kArRegionalSource_Count ||
       !ArRegionalTimers_Valid(&requested->timers) ||
       !ArRegionalTimers_Valid(&effective->timers)) return false;
   bool retry_requested, retry_effective;
@@ -53,6 +55,30 @@ bool ArRegionalRules_Fingerprint(const ArRegionalRules *requested,
   if (!ArRegionalQuake_Resolve(&requested->quake, &quake_requested) ||
       !ArRegionalQuake_Resolve(&effective->quake, &quake_effective)) return false;
   bool score_requested, score_effective;
+  ArRegionalStorySnapshot story_requested,story_effective;
+  ArRegionalTownStatusSnapshot status_requested,status_effective;
+  bool level_requested,level_effective;
+  uint16_t combat_requested,combat_effective;
+  uint16_t ai_requested,ai_effective;
+  if (!ArRegionalSimAi_Resolve(&requested->sim_ai,&ai_requested) ||
+      !ArRegionalSimAi_Resolve(&effective->sim_ai,&ai_effective)) return false;
+  if (!ArRegionalSimCombat_Resolve(&requested->sim_combat,&combat_requested) ||
+      !ArRegionalSimCombat_Resolve(&effective->sim_combat,&combat_effective)) return false;
+  if (!ArRegionalLevelGoals_Resolve(requested->level_goals,&level_requested) ||
+      !ArRegionalLevelGoals_Resolve(effective->level_goals,&level_effective)) return false;
+  if (!ArRegionalTownStatus_Resolve(&requested->town_status,&status_requested) ||
+      !ArRegionalTownStatus_Resolve(&effective->town_status,&status_effective)) return false;
+  if (!ArRegionalStory_Resolve(&requested->story,&story_requested) ||
+      !ArRegionalStory_Resolve(&effective->story,&story_effective)) return false;
+  uint16_t skull_requested, skull_effective;
+  if (!ArRegionalSkullWait_Resolve(requested->skull_wait,&skull_requested) ||
+      !ArRegionalSkullWait_Resolve(effective->skull_wait,&skull_effective)) return false;
+  ArRegionalSourcesSnapshot sources_requested, sources_effective;
+  if (!ArRegionalSources_Resolve(&requested->sources,&sources_requested) ||
+      !ArRegionalSources_Resolve(&effective->sources,&sources_effective)) return false;
+  bool lives_requested, lives_effective;
+  if (!ArRegionalLivesDisplay_Resolve(requested->lives_display, &lives_requested) ||
+      !ArRegionalLivesDisplay_Resolve(effective->lives_display, &lives_effective)) return false;
   if (!ArRegionalScorePage_Resolve(requested->score_page, &score_requested) ||
       !ArRegionalScorePage_Resolve(effective->score_page, &score_effective)) return false;
   bool menu_requested, menu_effective;
@@ -65,6 +91,17 @@ bool ArRegionalRules_Fingerprint(const ArRegionalRules *requested,
   bool gesture_requested, gesture_effective;
   if (!ArRegionalMagicGesture_Resolve(requested->magic_gesture, &gesture_requested) ||
       !ArRegionalMagicGesture_Resolve(effective->magic_gesture, &gesture_effective)) return false;
+  if ((unsigned)requested->lair_seeds >= kArRegionalSource_Count ||
+      (unsigned)effective->lair_seeds >= kArRegionalSource_Count) return false;
+  const bool seeds_requested=requested->lair_seeds==kArRegionalSource_Japan;
+  const bool seeds_effective=effective->lair_seeds==kArRegionalSource_Japan;
+  if ((unsigned)requested->house_credit >= kArRegionalSource_Count ||
+      (unsigned)effective->house_credit >= kArRegionalSource_Count) return false;
+  const bool house_requested=requested->house_credit==kArRegionalSource_Japan;
+  const bool house_effective=effective->house_credit==kArRegionalSource_Japan;
+  ArRegionalScoreSnapshot score_pending, score_active;
+  if (!ArRegionalScore_Resolve(&requested->score_feedback,&score_pending) ||
+      !ArRegionalScore_Resolve(&effective->score_feedback,&score_active)) return false;
   bool costs_native;
   if (!ArRegionalCosts_Fingerprint(&requested->costs, &effective->costs, digest, &costs_native))
     return false;
@@ -182,7 +219,134 @@ bool ArRegionalRules_Fingerprint(const ArRegionalRules *requested,
     gesture_bytes[50]=gesture_requested; gesture_bytes[51]=gesture_effective;
     if (!sr_support_sha256(gesture_bytes,sizeof(gesture_bytes),digest)) return false;
   }
+  if (seeds_requested || seeds_effective) {
+    uint8_t seed_bytes[50] = "ARLAIRSEEDS-R1";
+    memcpy(seed_bytes+16,digest,sizeof(digest));
+    seed_bytes[48]=seeds_requested; seed_bytes[49]=seeds_effective;
+    if (!sr_support_sha256(seed_bytes,sizeof(seed_bytes),digest)) return false;
+  }
+  if (house_requested || house_effective) {
+    uint8_t house_bytes[50] = "ARHOUSECREDIT-R1";
+    memcpy(house_bytes+16,digest,sizeof(digest));
+    house_bytes[48]=house_requested; house_bytes[49]=house_effective;
+    if (!sr_support_sha256(house_bytes,sizeof(house_bytes),digest)) return false;
+  }
+  uint8_t score_bytes[192]="ARSCORESTOCK-R1";
+  memcpy(score_bytes+16,digest,sizeof(digest)); used=16+sizeof(digest);
+  bool score_feedback_native=true;
+  /* Keep the v15 arithmetic identity unchanged when phase remains US. */
+  for (unsigned i=0; i<kArRegionalScore_Phase; ++i) {
+    const ArRegionalScoreDescriptor *rule=ArRegionalScore_Descriptor((ArRegionalScoreRule)i);
+    const size_t length=strlen(rule->key);
+    if (length>255 || length+5>sizeof(score_bytes)-used) return false;
+    score_bytes[used++]=(uint8_t)length;
+    memcpy(score_bytes+used,rule->key,length); used+=length;
+    ByteOrder_WriteLe16(score_bytes+used,score_pending.japanese[i]);
+    ByteOrder_WriteLe16(score_bytes+used+2,score_active.japanese[i]); used+=4;
+    score_feedback_native &= !score_pending.japanese[i] && !score_active.japanese[i];
+  }
+  if (!score_feedback_native && !sr_support_sha256(score_bytes,used,digest)) return false;
+  const bool phase_pending=score_pending.japanese[kArRegionalScore_Phase];
+  const bool phase_active=score_active.japanese[kArRegionalScore_Phase];
+  if (phase_pending || phase_active) {
+    uint8_t phase_bytes[50]="ARSCOREPHASE-R1";
+    memcpy(phase_bytes+16,digest,sizeof(digest));
+    phase_bytes[48]=phase_pending; phase_bytes[49]=phase_active;
+    if (!sr_support_sha256(phase_bytes,sizeof(phase_bytes),digest)) return false;
+    score_feedback_native=false;
+  }
+  if (lives_requested || lives_effective) {
+    uint8_t lives_bytes[50]="ARLIFEDISPLAY-R1";
+    memcpy(lives_bytes+16,digest,sizeof(digest));
+    lives_bytes[48]=lives_requested; lives_bytes[49]=lives_effective;
+    if (!sr_support_sha256(lives_bytes,sizeof(lives_bytes),digest)) return false;
+  }
+  bool sources_native=true;
+  _Static_assert(kArRegionalSourceItem_Count==2,"ARSOURCES-R1 has two independent collection leaves");
+  uint8_t source_bytes[52]="ARSOURCES-R1";
+  memcpy(source_bytes+16,digest,sizeof(digest));
+  for(unsigned i=0;i<kArRegionalSourceItem_Count;++i) {
+    source_bytes[48+2*i]=sources_requested.automatic[i];
+    source_bytes[49+2*i]=sources_effective.automatic[i];
+    sources_native &= sources_requested.automatic[i] && sources_effective.automatic[i];
+  }
+  if (!sources_native && !sr_support_sha256(source_bytes,sizeof(source_bytes),digest)) return false;
+  const bool skull_native=skull_requested==90 && skull_effective==90;
+  if (!skull_native) {
+    uint8_t skull_bytes[52]="ARSKULLWAIT-R1";
+    memcpy(skull_bytes+16,digest,sizeof(digest));
+    ByteOrder_WriteLe16(skull_bytes+48,skull_requested);
+    ByteOrder_WriteLe16(skull_bytes+50,skull_effective);
+    if (!sr_support_sha256(skull_bytes,sizeof(skull_bytes),digest)) return false;
+  }
+  bool story_native=true;
+  _Static_assert(kArRegionalStory_Count==3,"ARSTORY-R1 has three prerequisite leaves");
+  uint8_t story_bytes[60]="ARSTORY-R1";
+  memcpy(story_bytes+16,digest,sizeof(digest));
+  for (unsigned i=0;i<kArRegionalStory_Count;++i) {
+    const unsigned native=ArRegionalStory_Descriptor((ArRegionalStoryRule)i)->value[kArRegionalSource_US];
+    story_native &= story_requested.value[i]==native && story_effective.value[i]==native;
+    ByteOrder_WriteLe16(story_bytes+48+4*i,story_requested.value[i]);
+    ByteOrder_WriteLe16(story_bytes+50+4*i,story_effective.value[i]);
+  }
+  if (!story_native && !sr_support_sha256(story_bytes,sizeof(story_bytes),digest)) return false;
+  const bool reload_native=requested->lair_reloads!=kArRegionalSource_Japan &&
+      effective->lair_reloads!=kArRegionalSource_Japan;
+  if (!reload_native) {
+    uint8_t reload_bytes[50]="ARRELOADPOL-R1";
+    memcpy(reload_bytes+16,digest,32);
+    reload_bytes[48]=requested->lair_reloads==kArRegionalSource_Japan;
+    reload_bytes[49]=effective->lair_reloads==kArRegionalSource_Japan;
+    if (!sr_support_sha256(reload_bytes,sizeof(reload_bytes),digest)) return false;
+  }
+  bool status_native=true;
+  _Static_assert(kArRegionalTownStatus_Count==5,"ARTOWNSTATUS-R1 has five reporting leaves");
+  uint8_t status_bytes[58]="ARTOWNSTATUS-R1";
+  memcpy(status_bytes+16,digest,sizeof(digest));
+  for (unsigned i=0;i<kArRegionalTownStatus_Count;++i) {
+    status_bytes[48+2*i]=(uint8_t)status_requested.japanese[i];
+    status_bytes[49+2*i]=(uint8_t)status_effective.japanese[i];
+    status_native &= !status_requested.japanese[i] && !status_effective.japanese[i];
+  }
+  if (!status_native && !sr_support_sha256(status_bytes,sizeof(status_bytes),digest)) return false;
+  if (level_requested || level_effective) {
+    uint8_t level_bytes[50]="ARLEVELGOALS-R1";
+    memcpy(level_bytes+16,digest,sizeof(digest));
+    level_bytes[48]=level_requested;level_bytes[49]=level_effective;
+    if (!sr_support_sha256(level_bytes,sizeof(level_bytes),digest)) return false;
+  }
+  if (combat_requested || combat_effective) {
+    uint8_t combat_bytes[52]="ARSIMCOMBAT-R1";
+    memcpy(combat_bytes+16,digest,sizeof(digest));
+    ByteOrder_WriteLe16(combat_bytes+48,combat_requested);ByteOrder_WriteLe16(combat_bytes+50,combat_effective);
+    if (!sr_support_sha256(combat_bytes,sizeof(combat_bytes),digest)) return false;
+  }
+  if (ai_requested || ai_effective) {
+    uint8_t ai_bytes[52]="ARSIMAI-R1";
+    memcpy(ai_bytes+16,digest,sizeof(digest));
+    ByteOrder_WriteLe16(ai_bytes+48,ai_requested);ByteOrder_WriteLe16(ai_bytes+50,ai_effective);
+    if (!sr_support_sha256(ai_bytes,sizeof(ai_bytes),digest)) return false;
+  }
   memcpy(out,digest,sizeof(digest));
-  *baseline = costs_native && timers_native && !retry_requested && !retry_effective && wait_native && fish_native && development_native && recovery_native && quake_native && score_requested && score_effective && !menu_requested && !menu_effective && speed_native && !gesture_requested && !gesture_effective;
+  *baseline = costs_native && timers_native && !retry_requested && !retry_effective && wait_native && fish_native && development_native && recovery_native && quake_native && score_requested && score_effective && !menu_requested && !menu_effective && speed_native && !gesture_requested && !gesture_effective && !seeds_requested && !seeds_effective && !house_requested && !house_effective && score_feedback_native;
+  *baseline &= !lives_requested && !lives_effective && sources_native && skull_native && story_native && reload_native && status_native;
+  *baseline &= !level_requested && !level_effective && !combat_requested && !combat_effective;
+  *baseline &= !ai_requested && !ai_effective;
   return true;
+}
+
+bool ArRegionalSimActors_Fingerprint(const uint8_t previous[32],const ArRegionalSimActors *actors,
+                                    uint8_t out[32],bool *baseline) {
+  if (!previous || !out || !baseline || !ArRegionalSimActors_Valid(actors)) return false;
+  bool native=true,ai_native=true;
+  for (unsigned i=0;i<24;++i) { native &= !actors->cached[i].combat;ai_native &= !actors->cached[i].ai; }
+  for (unsigned i=0;i<4;++i) { native &= !actors->active[i].combat;ai_native &= !actors->active[i].ai; }
+  native &= ai_native;
+  if (native) { memmove(out,previous,32);*baseline=true;return true; }
+  uint8_t bytes[48+kArRegionalSimActorsEncodedBytes]="ARSIMACTOR-R1";
+  if (!ai_native) memcpy(bytes,"ARSIMACTOR-R2",13);
+  memcpy(bytes+16,previous,32);
+  const size_t encoded=ai_native?kArRegionalSimActorsV1EncodedBytes:kArRegionalSimActorsEncodedBytes;
+  if (!ArRegionalSimActors_EncodeVersion(actors,bytes+48,encoded,ai_native?1:2) || !sr_support_sha256(bytes,48+encoded,out)) return false;
+  *baseline=false;return true;
 }

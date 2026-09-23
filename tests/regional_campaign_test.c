@@ -123,6 +123,68 @@ static void Run(SaveBackend backend) {
   Remove(native); Remove(ini); Remove(donor);
 }
 
+static void Acknowledge(SaveFileFormat format) {
+  const char *path = "regional-adoption-test.srm";
+  Remove(path);
+  uint8_t image[kActRaiserSramSize] = {0}, disk[kActRaiserSramSize], sequence = 0;
+  uint16_t stocks[kArRegionalLairCount];
+  for (unsigned i = 0; i < kArRegionalLairCount; ++i) stocks[i] = i * 2900;
+  Save_RecomputeChecksum(image);
+  SaveError error = {{0}};
+  ArRegionalCampaign campaign;
+  ArRegionalCampaign_Init(&campaign, 0, Identity, &sequence);
+  CHECK(Save_WriteFile(format, path, image, &error));
+  CHECK(ArRegionalCampaign_Continue(&campaign, path, image, &error));
+  CHECK(campaign.active.lairs.initialized_towns == 0);
+  ArRegionalSession loaded;
+  CHECK(ArRegionalSession_Load(&loaded, 0, path, image, &error) == kSaveCheckpoint_Missing);
+  /* A failed metadata replacement is neither consent persisted nor permission
+   * to continue. It never rewrites the native save, and retry can succeed. */
+  CHECK(MAKE_DIR("regional-adoption-test.srm.archeckpoint.tmp") == 0);
+  CHECK(!ArRegionalCampaign_AcknowledgeLairHistory(&campaign, format, path, image, stocks, &error));
+  CHECK(!campaign.active_valid);
+  CHECK(ArRegionalSession_Load(&loaded, 0, path, image, &error) == kSaveCheckpoint_Missing);
+  CHECK(REMOVE_DIR("regional-adoption-test.srm.archeckpoint.tmp") == 0);
+  CHECK(ArRegionalCampaign_AcknowledgeLairHistory(&campaign, format, path, image, stocks, &error));
+  CHECK(campaign.active_valid && campaign.active.lairs.approximate_towns == 0x3f);
+  CHECK(campaign.active.lairs.initialized_towns == 0x3f);
+  CHECK(!memcmp(campaign.active.lairs.stock[0], stocks, sizeof(stocks)));
+  CHECK(Save_LoadFile(format, path, disk, &error) && !memcmp(disk, image, sizeof(image)));
+  CHECK(ArRegionalSession_Load(&loaded, 0, path, image, &error) == kSaveCheckpoint_Ready);
+  CHECK(!memcmp(&loaded.lairs, &campaign.active.lairs, sizeof(loaded.lairs)));
+  /* Cold Continue already has the estimate; a second acknowledgement is
+   * idempotent, and exact/approximate distinctions are retained. */
+  CHECK(ArRegionalCampaign_Continue(&campaign, path, image, &error));
+  CHECK(ArRegionalCampaign_AcknowledgeLairHistory(&campaign, format, path, image, stocks, &error));
+  CHECK(!memcmp(&loaded.lairs, &campaign.active.lairs, sizeof(loaded.lairs)));
+  stocks[0] ^= 1;
+  CHECK(!ArRegionalCampaign_AcknowledgeLairHistory(&campaign, format, path, image, stocks, &error));
+  CHECK(!campaign.active_valid);
+  stocks[0] ^= 1;
+  CHECK(ArRegionalLairHistory_MarkDiverged(&loaded.lairs, 0));
+  CHECK(ArRegionalSession_Save(&loaded, format, path, image, image, &error));
+  CHECK(!ArRegionalCampaign_AcknowledgeLairHistory(&campaign, format, path, image, stocks, &error));
+  CHECK(ArRegionalSession_Load(&loaded, 0, path, image, &error) == kSaveCheckpoint_Ready);
+  CHECK(loaded.lairs.diverged_towns == 1);
+  Remove(path);
+  /* Partial histories retain their exact towns; only absent towns are adopted. */
+  CHECK(Save_WriteFile(format, path, image, &error));
+  CHECK(ArRegionalCampaign_Continue(&campaign, path, image, &error));
+  CHECK(ArRegionalLairHistory_InitTown(&campaign.active.lairs, 0));
+  for (unsigned i = 0; i < 4; ++i) stocks[i] = campaign.active.lairs.stock[0][i];
+  CHECK(ArRegionalSession_Save(&campaign.active, format, path, image, image, &error));
+  CHECK(ArRegionalCampaign_AcknowledgeLairHistory(&campaign, format, path, image, stocks, &error));
+  CHECK(campaign.active.lairs.initialized_towns == 0x3f && campaign.active.lairs.approximate_towns == 0x3e);
+  Remove(path);
+  /* External save replacement while the prompt is open cannot be overwritten. */
+  CHECK(Save_WriteFile(format, path, image, &error));
+  image[10] = 1; Save_RecomputeChecksum(image);
+  CHECK(!ArRegionalCampaign_AcknowledgeLairHistory(&campaign, format, path, image, stocks, &error));
+  CHECK(!campaign.active_valid);
+  CHECK(Save_LoadFile(format, path, disk, &error) && disk[10] == 0);
+  Remove(path);
+}
+
 int main(void) {
   uint8_t a[16], b[16];
   CHECK(HostCampaignIdentity_Create(NULL, a));
@@ -131,5 +193,6 @@ int main(void) {
   CHECK((a[6] & 0xf0) == 0x40 && (a[8] & 0xc0) == 0x80);
   CHECK(!HostCampaignIdentity_Create(NULL, NULL));
   Run(kSaveBackend_NativeSrm); Run(kSaveBackend_Ini);
+  Acknowledge(kSaveFileFormat_NativeSrm); Acknowledge(kSaveFileFormat_Ini);
   return failures ? 1 : 0;
 }
