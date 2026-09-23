@@ -538,6 +538,113 @@ lock survives saves before the Japanese announcement; New Game resets it.
 lock into non-native replay identity. Numerically Western choices retain
 existing replay identities. Native story flags and SRAM layout are unchanged.
 
+Version 29 adds seven action-motion records (100 named records, 4616-byte
+payload): `action_bird_speed`, `action_leaper_speed`,
+`action_cave_recovery_delay`, `action_cave_straight_delay`,
+`action_cave_high_delay`, `action_caster_low_delay`, and
+`action_caster_high_delay`. Values are velocity magnitudes or stored row
+delays, not total phase lengths. Versions 1–28 default them to US. Requested
+and effective choices remain separate until a complete action-room
+initialization; the cached room snapshot then remains fixed through later
+spawns and animation phases. `ARACTIONMOVE-R1` includes the two numerical
+snapshots in replay identity. US/European aliases preserve prior digests.
+There is no action-actor data or new field in native SRAM.
+
+Version 30 appends `action_sword_straight_delay` and `action_sword_high_delay`
+(102 named records, 4684-byte payload). These are the Bloodpool swordsman's
+stored recovery delays, not full attack lengths. Versions 1–29 default the
+two new rules to US while retaining earlier requested/effective motion
+choices. The snapshot uses bits7/8 without changing the replay domain or the
+meaning of bits0–6, so older recordings retain their identities and behavior.
+
+Version 31 adds `action_trap_arrow_speed` (103 named records, 4716-byte payload),
+using motion snapshot bit9. Older companions default this independent velocity
+to US without changing retained motion preferences. The selected speed does
+not imply Japanese projectile visuals, flashing cadence or collision extents.
+
+Version 32 adds `action_wall_head_short_hold` and `action_wall_head_long_hold`
+(105 named records, 4787-byte payload). Values31/0/31 are extra active-update
+pauses for the two ordinary Kasandora head variants. Snapshot bits10/11 select
+their Japanese no-pause paths independently. Older formats preserve their
+existing choices and initialize these leaves to US. The rules apply at the
+next complete room initialization, never to an already-running native delay.
+
+Version 33 adds `cave_emitter_interval` and `cave_emitter_pal_offset`
+(107 records, 4849-byte payload). Values are 360/180/255 active updates and
+0/0/1 for the PAL coordinate adjustment. They remain independent requested/
+effective choices until the next complete room initialization. Older versions
+default both to US. `AREMITTER-R1` binds their numeric pending/active snapshots
+into replay identity only when non-native; US and equal-valued position aliases
+keep previous identities. Native SRAM remains unchanged.
+
+Version 34 adds `bloodpool_statue_shots` (108 records, 4880-byte payload),
+with values1/2/2 for US/Japan/Europe. Requested/effective sources are separate
+until the next complete room/retry initialization. Older versions default
+this leaf to US. `ARVOLLEY-R1` binds only non-US requested/effective shot
+counts into replay identity; equal Japanese/European behavior shares an
+identity. The root's in-flight repeat counter lives in native action WRAM,
+not the campaign companion; SRAM saves contain no active action actors.
+
+Version 35 adds six independently keyed Minotaur/Wizard rules (114 records,
+5073-byte payload): `minotaur_idle_delay`, `minotaur_throw_end_delay`,
+`minotaur_throw_windup_delay`, `minotaur_jump_windup_delay`,
+`minotaur_axe_offset` and `wizard_post_spread_pause`. Older companions default
+all six to US while retaining their earlier requested/effective rules.
+The cached room snapshot uses two bits per leaf, selecting the first regional
+source with the resolved numeric value. `ARBOSS-R1` appends requested/effective
+64-bit little-endian snapshots to replay identity only for non-US behavior;
+equal-value aliases retain the same identity. Existing enemies, elapsed holds,
+HP and projectiles are not changed by a settings request.
+
+Version 36 adds `ice_dragon_rematch_windup` (115 records, 5107-byte payload),
+with values118/106/118. It occupies boss snapshot bits12–13 without changing
+the preceding six rules or `ARBOSS-R1` domain. Version35 and earlier companions
+default this leaf to US. The head and body use one coherent rule captured at
+the complete room/retry boundary. Their live animation cursors remain ordinary
+action WRAM, not additional SRAM or companion actor state.
+
+Version 37 adds `kasandora_pose_extents` and `marahna_arrow_extents`
+(117 records, 5168-byte payload). Each stores a US/JP/Europe source and its
+resolved Japanese-header selector (0/1/0). Older records retain their order;
+versions1–36 default the new leaves to US. `ARCOLLISION-R1` appends the two
+requested/effective bitmasks only when either is nonzero. US/European aliases
+therefore preserve earlier replay identities. Extents are acquired through
+ordinary actor WRAM at row boundaries; neither native SRAM nor shared assets
+are altered, and settings changes activate only at complete room/retry entry.
+
+Version 38 adds `aitos_skull_deflection`, `aitos_skull_death_reward`,
+`aitos_skull_range_x` and `aitos_skull_range_y` (121 records, 5288-byte payload).
+Their US/JP/Europe values are respectively0/1/0, BCD`$20/$00/$20`,32/24/32
+and64/24/64. `ARPLATSKULL-R1` appends requested/effective four-bit snapshots
+only for non-US behavior; numerical US/PAL aliases share replay identity.
+Versions1–37 initialize all four to US. Policies freeze at room/retry entry;
+live armor, score and native animation state remain ordinary actor WRAM.
+
+Version 39 adds 63 `actor_AATT_hp` / `actor_AATT_attack` records (184 total,
+6842-byte payload). `AA/TT` identify the stable area/type, not a ROM address.
+Only fields whose authored values differ are stored, in the order of
+`regional_actor_stats_data.inc`. Versions1–38 default all to US. Each retains
+its requested/effective source and resolved numerical value. `ARACTORSTAT-R1`
+extends replay identity with the two ordered 63-byte value arrays only when
+either differs from US; equal-value source aliases preserve identity. A
+room/retry captures all fields together. Live object HP is still native WRAM.
+
+Version 40 appends `tanzra_minion_hp`, `tanzra_minion_reward` and
+`tanzra_projectile_attack` (187 records). US/JP/Europe values are2/2/1,
+BCD`$02/$02/$01` (20/20/10 points) and3/4/5. Versions1–39 default these to US
+without changing existing base-stat choices. The first63 values keep the
+version39 `ARACTORSTAT-R1` layout. `ARCHILDSTAT-R1` adds requested/effective
+three-byte arrays only when a child value differs from US. These settings
+join the room/retry snapshot; already spawned child actors remain untouched.
+
+Version 41 appends four boss records after the version40 stat block (191
+records): `tanzra_closing_delay`31/3/31, `tanzra_second_form_clock`1/0/1,
+`tanzra_upper_turn_delay`10/11/10 and `tanzra_minion_turn`16/16/8. The first
+and third are stored row delays, producing64/36/64 and37/38/37-update whole
+sequences. Versions1–40 default these to US. Their canonical source pairs
+occupy bits14–21 of the existing `ARBOSS-R1` snapshot; previous ordinals,
+record layouts and baseline replay identities remain unchanged.
+
 `ARSIMAC2` replaces the actor block with 124 bytes: the same 12-byte header,
 then 24 cached and four live records, each holding a combat word followed by
 an AI word. AI bits 0–5 select Japanese behavior in the record order above;

@@ -23,6 +23,18 @@ RecompReturn ActRaiser_RegionalPopulation(CpuState *cpu);
 /* Read effective coefficients only; no activation in a census. US before a
  * campaign is accepted. Fixed small snapshot, not full session validation. */
 bool ActRaiserRegional_CopySupport(ArRegionalSupportSnapshot *snapshot);
+/* Cached numerical room policy, O(1), no per-animation session validation. */
+ArRegionalActionMotionSnapshot ActRaiserRegional_ActionMotionSnapshot(void);
+ArRegionalEmitterSnapshot ActRaiserRegional_EmitterSnapshot(void);
+bool ActRaiserRegional_DoubleStatueVolley(void);
+ArRegionalBossSnapshot ActRaiserRegional_BossSnapshot(void);
+ArRegionalCollisionSnapshot ActRaiserRegional_CollisionSnapshot(void);
+ArRegionalPlatformSkullSnapshot ActRaiserRegional_PlatformSkullSnapshot(void);
+bool ActRaiserRegional_ActorStatsEnabled(void);
+bool ActRaiserRegional_ActorStats(uint16_t actor,uint16_t native_hp,uint16_t native_attack,uint16_t *hp,uint16_t *attack);
+/* Cached child value by semantic rule ID; UINT16_MAX before room activation
+ * or for a non-child rule. No session or native memory exposed to callers. */
+uint16_t ActRaiserRegional_ActorChildStat(unsigned rule);
 typedef enum ActRaiserRegionalContinueNotice {
   kActRaiserRegionalContinue_Estimate,
   kActRaiserRegionalContinue_LoadFailed,
@@ -92,8 +104,9 @@ RecompReturn ActRaiser_RegionalMagicAttack(CpuState *cpu);
  * win over pending edits. Outside it, menus quote the next transaction. */
 bool ActRaiserRegional_CopyPrices(ArRegionalCostSnapshot *prices);
 /* Called at native action-profile initialization, never from a frame update
- * or settings edit. Validates the profile before activating pending limits. */
-bool ActRaiserRegional_BeginRoomTime(uint8_t profile, uint16_t native_bcd, uint16_t *out_bcd);
+ * or settings edit. Validates the profile and atomically captures pending
+ * limits and motion for the entire room, including later actor spawns. */
+bool ActRaiserRegional_BeginActionRoom(uint8_t profile, uint16_t native_bcd, uint16_t *out_bcd);
 bool ActRaiserRegional_MiracleEntry(const CpuState *cpu);
 RecompReturn ActRaiserRegional_RunMiracle(CpuState *cpu);
 bool ActRaiserRegional_ReportCommandEntry(const CpuState *cpu);

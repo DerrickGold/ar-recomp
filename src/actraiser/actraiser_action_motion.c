@@ -1,0 +1,255 @@
+#include "actraiser_action_motion.h"
+#include "actraiser_regional_runtime.h"
+#include "actraiser_hle_fatal.h"
+#include "actraiser_game.h"
+#include "actraiser_cpu_hle_internal.h"
+
+extern RecompReturn bank_00_8E2F_M0X0(CpuState *cpu);
+extern RecompReturn bank_00_8E2F_M1X0(CpuState *cpu);
+static bool s_delegate;
+typedef struct MotionRow { uint16_t duration,dx,next_row; bool skip_rows; } MotionRow;
+
+static bool ActorShape(const CpuState *cpu) {
+  if(!cpu || cpu->PB || cpu->DB || cpu->D || cpu->x_flag ||
+      cpu->emulation || cpu->_flag_D || (cpu->P&CPU_P_D))return false;
+  const unsigned x=cpu->X;
+  return x>=kActRaiserWram_ActionObjectTable &&
+      x<kActRaiserWram_ActionObjectTable+kActRaiserActionObjectCount*kActRaiserActionObjectStride &&
+      !((x-kActRaiserWram_ActionObjectTable)%kActRaiserActionObjectStride);
+}
+static int16_t SignedExtent(uint8_t value) {
+  return value<128?value:(int16_t)((int)value-256);
+}
+static bool Initializing(CpuState *cpu) {
+  /* Real 969B JSR return word. During this call +32 may still be a previous
+   * occupant; the dedicated 969E boundary uses the selected descriptor Y.
+   * Initial motion is subsequently cleared by the common initializer. */
+  return cpu_read16(cpu,0,(uint16_t)(cpu->S+1))==0x969d;
+}
+static bool CollisionPlan(CpuState *cpu,bool birth,ArRegionalCollisionExtents *out) {
+  const uint8_t collision=ActRaiserRegional_CollisionSnapshot();
+  if(!collision || !ActorShape(cpu) || (!birth && Initializing(cpu)))return false;
+  const unsigned x=cpu->X,area=cpu_read8(cpu,0,kActRaiserWram_MapGroup);
+  if(x==cpu_read16(cpu,0,0x8a) || cpu_read16(cpu,0,x+0x16)!=0x4000 ||
+      cpu_read8(cpu,0,x+0x18)!=0x7e)return false;
+  const unsigned source=birth?cpu->Y:cpu_read16(cpu,0,x+0x32),state=cpu_read16(cpu,0,x+0x1a);
+  unsigned family;
+  if(area==3 && (source==0xc961 || source==0xc9be || (source==0xc863 && state==10)))
+    family=kArRegionalCollision_Kasandora;
+  else if(area==5 && (source==0xdfe5 || source==0xdff3) && state==41)
+    family=kArRegionalCollision_Arrow;
+  else return false;
+  if(!(collision&(1u<<family)) || state>41)return false;
+  const unsigned table=cpu_read16(cpu,0x7e,0x4000),row=cpu_read16(cpu,0,x+0x1c);
+  const unsigned sequence=cpu_read16(cpu,0x7e,0x4002+2*state),at=sequence+4*row;
+  if(sequence<2+2*(state+1) || at+4>table || table>0x1000)return false;
+  const unsigned raw=cpu_read8(cpu,0x7e,0x4000+at);
+  if(raw==255)return false;
+  const unsigned visual=(raw+cpu_read16(cpu,0,x+0x3c))&255;
+  if(table+2*visual+2>0x1000)return false;
+  const unsigned comp=cpu_read16(cpu,0x7e,0x4000+table+2*visual);
+  if(comp<table+2*visual+2 || comp+4>0x1000)return false;
+  const ArRegionalCollisionExtents native={
+    SignedExtent(cpu_read8(cpu,0x7e,0x4000+comp)),SignedExtent(cpu_read8(cpu,0x7e,0x4001+comp)),
+    SignedExtent(cpu_read8(cpu,0x7e,0x4002+comp)),SignedExtent(cpu_read8(cpu,0x7e,0x4003+comp))};
+  ArRegionalCollisionExtents next;
+  if(!ArRegionalCollision_Pose(collision,family,visual,&native,&next))return false;
+  const unsigned flip=cpu_read16(cpu,0,x+0x28);
+  if(flip&kActRaiserObjectFlip_Horizontal){const int16_t t=next.left;next.left=next.right;next.right=t;}
+  if(flip&0x8000){const int16_t t=next.top;next.top=next.bottom;next.bottom=t;}
+  if(out)*out=next;
+  return true;
+}
+static void ApplyExtents(CpuState *cpu,unsigned object,const ArRegionalCollisionExtents *extents) {
+  cpu_write16(cpu,0,object+0x0a,(uint16_t)extents->left);
+  cpu_write16(cpu,0,object+0x0e,(uint16_t)extents->right);
+  cpu_write16(cpu,0,object+0x0c,(uint16_t)extents->top);
+  cpu_write16(cpu,0,object+0x10,(uint16_t)extents->bottom);
+}
+bool ActRaiser_ActionCollisionBirthEntry(CpuState *cpu) {
+  return cpu && !cpu->m_flag && CollisionPlan(cpu,true,NULL);
+}
+RecompReturn ActRaiser_ActionCollisionBirth(CpuState *cpu) {
+  ArRegionalCollisionExtents extents;
+  if(!cpu || cpu->m_flag || !CollisionPlan(cpu,true,&extents))ActRaiserHleFatal("Unsupported regional first-pose collision");
+  /* Common initializer's 8E2F has just restored descriptor Y. +32 is not
+   * assigned until 95B9, and may still identify a previous slot occupant. */
+  ApplyExtents(cpu,cpu->X,&extents);
+  cpu_write16(cpu,0,cpu->X+6,0); /* Original STZ at 969E, no flag changes. */
+  if(!cpu_hle_tailcall_request(0x0096a1,0x00969e))ActRaiserHleFatal("First pose has no initializer continuation");
+  return RECOMP_RETURN_TAILCALL;
+}
+static bool Plan(CpuState *cpu,MotionRow *out) {
+  const uint16_t snapshot=ActRaiserRegional_ActionMotionSnapshot();
+  const uint8_t emitters=ActRaiserRegional_EmitterSnapshot();
+  const uint64_t bosses=ActRaiserRegional_BossSnapshot();
+  if((!snapshot && (emitters&3)!=2 && !bosses) || !ActorShape(cpu) || Initializing(cpu))return false;
+  const unsigned x=cpu->X;
+  const unsigned area=cpu_read8(cpu,0,kActRaiserWram_MapGroup);
+  const uint16_t source=cpu_read16(cpu,0,x+0x32);
+  if(area==7 && cpu_read8(cpu,0,kActRaiserWram_MapGroup+1)==8 && source==0xf80f &&
+      cpu_read16(cpu,0,x+0x16)==0x5000 && cpu_read8(cpu,0,x+0x18)==0x7e) {
+    const unsigned state=cpu_read16(cpu,0,x+0x1a),row=cpu_read16(cpu,0,x+0x1c);
+    if(!((state==10 && row==7) || (state==48 && !row) || (state==22 && !row)))return false;
+    const unsigned sequence=cpu_read16(cpu,0x7e,0x5002+2*state),offset=sequence+4*row;
+    const unsigned end=cpu_read16(cpu,0x7e,0x5000);
+    const unsigned length=state==22?16:4;
+    if(sequence<2+2*(state+1) || offset+length>end || end>0x1000)return false;
+    static const uint8_t closing[]={11,31,0,0},upper[]={2,10,252,0};
+    static const uint8_t minion[]={31,3,0,0,33,3,0,0,35,3,0,0,37,3,0,0};
+    const uint8_t *expected=state==10?closing:state==48?upper:minion;
+    for(unsigned i=0;i<length;++i)if(cpu_read8(cpu,0x7e,0x5000+offset+i)!=expected[i])return false;
+    if(state==22) {
+      unsigned next;if(!ArRegionalBoss_TanzraMinionSkip(bosses,state,row,&next))return false;
+      if(out)*out=(MotionRow){.next_row=(uint16_t)next,.skip_rows=true};
+    } else {
+      uint16_t duration=expected[1];int16_t dx=state==48?-4:0;
+      if(!ArRegionalBoss_TanzraRow(bosses,state,row,&duration,dx,0) || duration==expected[1])return false;
+      if(cpu_read16(cpu,0,x+0x28)&kActRaiserObjectFlip_Horizontal)dx=-dx;
+      if(out)*out=(MotionRow){.duration=duration,.dx=(uint16_t)dx};
+    }
+    return true;
+  }
+  if(area==7 && source==0xf760 && cpu_read16(cpu,0,x+0x16)==0x5000 && cpu_read8(cpu,0,x+0x18)==0x7e) {
+    const unsigned state=cpu_read16(cpu,0,x+0x1a),row=cpu_read16(cpu,0,x+0x1c);
+    unsigned next;
+    if(!ArRegionalBoss_IceSkip(bosses,state,row,&next))return false;
+    const unsigned sequence=cpu_read16(cpu,0x7e,0x5002+2*state),offset=sequence+4*row;
+    const unsigned end=cpu_read16(cpu,0x7e,0x5000);
+    if(sequence<2+2*(state+1) || offset+12>end || end>0x1000)return false;
+    /* Body removes rows5/6; head removes rows6/7. Their remaining stationary
+     * poses differ. Match the actual three-row windows before moving a cursor,
+     * so an incompatible donor sequence is never silently reinterpreted. */
+    static const uint8_t body[]={5,5,0,0,9,5,0,0,13,5,0,0};
+    static const uint8_t head[]={8,5,0,0,11,5,0,0,4,5,0,255};
+    const uint8_t *expected=state==17?body:head;
+    for(unsigned i=0;i<12;++i)if(cpu_read8(cpu,0x7e,0x5000+offset+i)!=expected[i])return false;
+    if(out)*out=(MotionRow){.next_row=(uint16_t)next,.skip_rows=true};
+    return true;
+  }
+  const bool emitter=area==1 && source==0xb3bf;
+  const bool minotaur=area==1 && source==0xaf5d; /* Original, NOT the rematch. */
+  ArRegionalActionMotionFamily family;
+  if(area==1 && source==0xaa9a)family=kArRegionalActionMotion_Bird;
+  else if(area==1 && source==0xac8e)family=kArRegionalActionMotion_Leaper;
+  else if(area==1 && source==0xb041)family=kArRegionalActionMotion_Cave;
+  else if(area==1 && source==0xb0b4)family=kArRegionalActionMotion_CaveAttacker;
+  else if(area==5 && source==0xdcdb)family=kArRegionalActionMotion_Caster;
+  else if(area==2 && source==0xbba8)family=kArRegionalActionMotion_Swordsman;
+  else if(area==5 && (source==0xdfe5 || source==0xdff3))family=kArRegionalActionMotion_Arrow;
+  else if(emitter || minotaur)family=kArRegionalActionMotionFamily_Count;
+  else return false;
+  const unsigned base=minotaur?0x5000:0x4000;
+  if(cpu_read16(cpu,0,x+0x16)!=base || cpu_read8(cpu,0,x+0x18)!=0x7e)return false;
+  const unsigned state=cpu_read16(cpu,0,x+0x1a),row=cpu_read16(cpu,0,x+0x1c);
+  if(state>41 || row>10)return false;
+  const unsigned offset=cpu_read16(cpu,0x7e,base+2+state*2)+4*row;
+  const unsigned end=cpu_read16(cpu,0x7e,base);
+  if(offset<2+2*(state+1) || offset+4>end || end>0x1000)return false;
+  if(cpu_read8(cpu,0x7e,base+offset)==0xff)return false;
+  uint16_t duration=cpu_read8(cpu,0x7e,base+1+offset);
+  const uint8_t raw_dx=cpu_read8(cpu,0x7e,base+2+offset);
+  int16_t dx=raw_dx<128?raw_dx:(int16_t)((int)raw_dx-256);
+  const uint16_t native_duration=duration;const int16_t native_dx=dx;
+  const uint8_t raw_dy=cpu_read8(cpu,0x7e,base+3+offset);
+  if(emitter && (cpu_read8(cpu,0x7e,base+offset)!=37 || raw_dy))return false;
+  const bool planned=minotaur?ArRegionalBoss_MinoRow(bosses,state,row,&duration,dx,raw_dy):
+      emitter?ArRegionalEmitter_Row(emitters,state,row,&duration,dx):
+      ArRegionalActionMotion_Row(snapshot,family,state,row,&duration,&dx);
+  if(!planned ||
+      (duration==native_duration && dx==native_dx))return false;
+  if(cpu_read16(cpu,0,x+0x28)&kActRaiserObjectFlip_Horizontal)dx=-dx;
+  if(out)*out=(MotionRow){.duration=duration,.dx=(uint16_t)dx};
+  return true;
+}
+bool ActRaiser_ActionMotionEntry(CpuState *cpu) {
+  if(s_delegate){s_delegate=false;return false;}
+  return Plan(cpu,NULL) || CollisionPlan(cpu,false,NULL);
+}
+RecompReturn ActRaiser_ActionMotion(CpuState *cpu) {
+  MotionRow row={0};ArRegionalCollisionExtents extents;
+  const bool motion=Plan(cpu,&row),collision=CollisionPlan(cpu,false,&extents);
+  if(!motion && !collision)ActRaiserHleFatal("Unsupported regional animation-row entry");
+  const uint16_t object=cpu->X;
+  const uint16_t old_row=row.skip_rows?cpu_read16(cpu,0,object+0x1c):0;
+  if(row.skip_rows)cpu_write16(cpu,0,object+0x1c,row.next_row);
+  s_delegate=true;
+  const RecompReturn result=cpu->m_flag?bank_00_8E2F_M1X0(cpu):bank_00_8E2F_M0X0(cpu);
+  s_delegate=false;
+  if(result!=RECOMP_RETURN_NORMAL) {
+    /* Audited reader never yields; preserve an unexpected escape token and
+     * do not leave our speculative cursor edit behind. */
+    if(row.skip_rows)cpu_write16(cpu,0,object+0x1c,old_row);
+    return result;
+  }
+  if(row.skip_rows)return result; /* Native reader acquired the selected row. */
+  /* 8E2F has no yield in the audited body. Native code has acquired one row,
+   * mirrored motion, resolved composition/extents and consumed its RTS frame.
+   * Update only the two numerical outputs; no fabricated CPU or stack state. */
+  if(motion) {
+    cpu_write16(cpu,0,object+0x24,row.duration);
+    cpu_write16(cpu,0,object+0x06,row.dx);
+  }
+  if(collision) {
+    /* Contact and victim tests consume these four words. Attack-part geometry
+     * belongs to the attacker, not the victim's sprite composition. These
+     * owners are enemies/projectiles, never the player or weapon objects. */
+    ApplyExtents(cpu,object,&extents);
+  }
+  return result;
+}
+
+bool ActRaiser_WallHeadPauseEntry(CpuState *cpu) {
+  const uint16_t snapshot=ActRaiserRegional_ActionMotionSnapshot();
+  const unsigned short_bit=1u<<kArRegionalActionMotion_WallHeadShortHold;
+  const unsigned long_bit=1u<<kArRegionalActionMotion_WallHeadLongHold;
+  if(!(snapshot&(short_bit|long_bit)) || !ActorShape(cpu) || cpu->m_flag ||
+      cpu_read8(cpu,0,kActRaiserWram_MapGroup)!=3 ||
+      cpu_read8(cpu,0,cpu->X+0x18)!=0x7e || (cpu_read16(cpu,0,cpu->X+0x30)&0x400))return false;
+  const uint16_t source=cpu_read16(cpu,0,cpu->X+0x32),base=cpu_read16(cpu,0,cpu->X+0x16);
+  return (base==0x4000 && (source==0xc8e5 || source==0xc8f3) && (snapshot&short_bit)) ||
+      (base==0x5000 && (source==0xc8c9 || source==0xc8d7) && (snapshot&long_bit));
+}
+
+RecompReturn ActRaiser_WallHeadPause(CpuState *cpu) {
+  /* C908 is reached only after the native activation gate. JP has no LDA30 /
+   * delay call here. Preserve all CPU, object and return state and let C90E
+   * own LDA2, animation, allocation, recovery and the eventual RTS/yields. */
+  if(!ActRaiser_WallHeadPauseEntry(cpu) || !cpu_hle_tailcall_request(0x00c90e,0x00c908))
+    ActRaiserHleFatal("Cannot skip ordinary wall-head pause at its native boundary");
+  return RECOMP_RETURN_TAILCALL;
+}
+
+static bool EmitterShape(CpuState *cpu) {
+  return ActorShape(cpu) && !cpu->m_flag && cpu_read8(cpu,0,kActRaiserWram_MapGroup)==1 &&
+      cpu_read16(cpu,0,cpu->X+0x32)==0xb3bf && cpu_read16(cpu,0,cpu->X+0x16)==0x4000 &&
+      cpu_read8(cpu,0,cpu->X+0x18)==0x7e;
+}
+bool ActRaiser_EmitterPositionEntry(CpuState *cpu) {
+  return (ActRaiserRegional_EmitterSnapshot()&4) && EmitterShape(cpu);
+}
+RecompReturn ActRaiser_EmitterPosition(CpuState *cpu) {
+  if(!ActRaiser_EmitterPositionEntry(cpu))ActRaiserHleFatal("Unsupported emitter position entry");
+  const uint16_t before=cpu_read16(cpu,0,cpu->X+2);
+  const bool right=before>=0x380;
+  cpu->A=(uint16_t)(right?before-22:before+6);
+  /* PAL SEC/SBC22 on the right, CLC/ADC6 on the left. The branch range
+   * excludes left overflow/carry and right borrow; retain exact SBC overflow. */
+  cpu->_flag_C=right;cpu->_flag_V=right && ((before^22)&(before^cpu->A)&0x8000)!=0;
+  cpu->P=(uint8_t)((cpu->P&~(CPU_P_C|CPU_P_V))|(cpu->_flag_C?CPU_P_C:0)|(cpu->_flag_V?CPU_P_V:0));
+  ActRaiserCpuHle_SetNegativeZero16(cpu,cpu->A);cpu_write16(cpu,0,cpu->X+2,cpu->A);
+  if(!cpu_hle_tailcall_request(0x00b3d5,0x00b3cb))ActRaiserHleFatal("Emitter position has no native return owner");
+  return RECOMP_RETURN_TAILCALL;
+}
+bool ActRaiser_EmitterCadenceEntry(CpuState *cpu) {
+  return (ActRaiserRegional_EmitterSnapshot()&3) && EmitterShape(cpu);
+}
+RecompReturn ActRaiser_EmitterCadence(CpuState *cpu) {
+  if(!ActRaiser_EmitterCadenceEntry(cpu))ActRaiserHleFatal("Unsupported emitter cadence entry");
+  /* One cycle for JP/PAL instead of US's two. The native repeated-animation
+   * helper still owns every yield and spawn continuation. PAL rows share a
+   * single stationary pose and resolve to 127+128 updates through the reader. */
+  cpu->A=0x2401;ActRaiserCpuHle_SetNegativeZero16(cpu,cpu->A);
+  if(!cpu_hle_tailcall_request(0x00b3e7,0x00b3e4))ActRaiserHleFatal("Emitter cadence has no native return owner");
+  return RECOMP_RETURN_TAILCALL;
+}

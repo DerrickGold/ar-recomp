@@ -100,8 +100,8 @@ RecompReturn ActRaiser_RunActionVideoConfig(CpuState *cpu) {
   if (result != RECOMP_RETURN_NORMAL) return result;
   const uint16_t native_bcd = ActionRoomHle_ReadDirectPage16(cpu, 0xE6);
   uint16_t resolved;
-  if (!ActRaiserRegional_BeginRoomTime(profile, native_bcd, &resolved))
-    ActRaiserHleFatal("Cannot resolve regional room limit for profile %02x", profile);
+  if (!ActRaiserRegional_BeginActionRoom(profile, native_bcd, &resolved))
+    ActRaiserHleFatal("Cannot initialize regional action rules for profile %02x", profile);
   if (resolved != native_bcd)
     ActionRoomHle_WriteDirectPage16(cpu, 0xE6, resolved);
   return result;

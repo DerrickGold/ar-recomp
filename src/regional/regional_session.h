@@ -23,6 +23,23 @@ typedef struct ArRegionalSession {
 bool ArRegionalSession_NewGame(ArRegionalSession *session, uint32_t slot,
     const uint8_t campaign[16], const ArRegionalCostPolicy *defaults);
 bool ArRegionalSession_RequestArrival(ArRegionalSession *session,uint32_t revision,ArRegionalSource source);
+bool ArRegionalSession_RequestActionMotion(ArRegionalSession *session,uint32_t revision,
+    const ArRegionalActionMotionPolicy *policy);
+/* Complete room initialization only: later settings never alter an existing
+ * actor's current or future phases until the next room/retry. */
+bool ArRegionalSession_BeginActionMotion(ArRegionalSession *session,ArRegionalActionMotionSnapshot *snapshot);
+bool ArRegionalSession_RequestEmitters(ArRegionalSession *session,uint32_t revision,const ArRegionalEmitterPolicy *policy);
+bool ArRegionalSession_BeginEmitters(ArRegionalSession *session,ArRegionalEmitterSnapshot *snapshot);
+bool ArRegionalSession_RequestVolley(ArRegionalSession *session, uint32_t revision, ArRegionalSource source);
+bool ArRegionalSession_BeginVolley(ArRegionalSession *session, bool *double_shot);
+bool ArRegionalSession_RequestBosses(ArRegionalSession *session,uint32_t revision,const ArRegionalBossPolicy *policy);
+bool ArRegionalSession_BeginBosses(ArRegionalSession *session,ArRegionalBossSnapshot *snapshot);
+bool ArRegionalSession_RequestCollision(ArRegionalSession *session,uint32_t revision,const ArRegionalCollisionPolicy *policy);
+bool ArRegionalSession_BeginCollision(ArRegionalSession *session,ArRegionalCollisionSnapshot *snapshot);
+bool ArRegionalSession_RequestPlatformSkull(ArRegionalSession *session,uint32_t revision,const ArRegionalPlatformSkullPolicy *policy);
+bool ArRegionalSession_BeginPlatformSkull(ArRegionalSession *session,ArRegionalPlatformSkullSnapshot *snapshot);
+bool ArRegionalSession_RequestActorStats(ArRegionalSession *session,uint32_t revision,const ArRegionalActorStatsPolicy *policy);
+bool ArRegionalSession_BeginActorStats(ArRegionalSession *session,ArRegionalActorStatsSnapshot *snapshot);
 /* Once per campaign, at the eligible final departure/Palace gate. Continuing
  * an already-unlocked native event retains the saved effective policy rather
  * than adopting a new request midway through its reveal/announcement. A later

@@ -395,10 +395,10 @@ The Act 2 theme change is covered under [Music](#music).
 ### Bloodpool
 
 **Act 2: statue volleys.** US statues fire one fireball per volley. Japanese
-statues fire two, 16 frames apart. The second shot has its
+and European statues fire two, 16 active frames apart. The second shot has its
 own firing animation.
 
-The extra shot makes the complete Japanese cycle longer: 153 frames between
+The extra shot makes the complete cycle longer: 153 active frames between
 the first shots of successive volleys, compared with 137 in the US. Both
 facing directions behave this way in normal and Special mode. All ten statue
 placements match between US and Japan.
@@ -409,9 +409,9 @@ instead of 62; the high attack takes 55 instead of 63. The differences are
 in the final held pose, not the speed of every sword movement. The European
 versions use the US timings.
 
-**Wizard boss.** During its first form, the US Wizard pauses after firing its
-three-projectile spread. This adds 31 active frames before it decides whether
-to disappear or begin its lightning attack. The Japanese version has no such
+**Wizard boss.** In the US and European versions, the Wizard's first form
+pauses after firing its three-projectile spread. This adds 31 active frames
+before it decides whether to disappear or begin its lightning attack. Japan has no such
 pause. The difference remains in Death Heim and in Special mode; it is not a
 general slowdown of all the Wizard's animations. US and Japan switch to the
 second form when the boss next checks its health and finds fewer than 12 HP.
@@ -644,6 +644,9 @@ difference here.
 US and European arrows move 2. The Western arrows use a shorter drawing
 and alternate with a bright flash, while the Japanese arrows keep one
 appearance. Native tests verified both firing directions.
+The Japanese collision box is also wider: it extends 16 pixels to either
+side of the arrow's position, compared with 8 in the Western releases. Its
+vertical reach is unchanged, so this is more than a difference in appearance.
 
 **Act 2: retracting heads.** After firing, the retracting head enemy takes
 20 active frames to withdraw in Japan and 16 in the Western releases.
@@ -669,13 +672,13 @@ horizontally. On impact, its effect expands
 to a wider collision footprint but disappears sooner—20 updates instead of
 42. These changes are larger than ordinary PAL timing compensation.
 
-**Act 2: Ice Dragon wind-up.** The examined wind-up lasts 118 frames in the
-original US and Japanese Northwall fights. In Death Heim, the US rematch
-still takes 118 frames, but the Japanese rematch takes 106. Japan removes
-a short pause from the sequence,
-bringing the next attack forward by 12 frames.
+**Act 2: Ice Dragon wind-up.** The examined wind-up lasts 118 active frames
+in the original Northwall fight in every release. In Death Heim, the US and
+European rematches still take 118 frames, but Japan takes 106. Japan removes
+two stationary holds from both the head and body, bringing the next attack
+forward by 12 frames without changing their final positions.
 
-In US and Japan, the rematch doubles the horizontal speed of its ice balls.
+In every release, the rematch doubles the horizontal speed of its ice balls.
 These timing results hold in normal and Special mode.
 
 Tests of the Ice Dragon's wavy background found no visible effect from the
@@ -727,11 +730,13 @@ giving US players 28 more frames before it disappears.
 
 After the first form is defeated, the US game resumes the stage countdown
 from the time remaining; Japan leaves it stopped. A projectile emitted by
-the second form also has attack strength 3 in US and 4 in Japan, even in
-Special mode. An upper-body turn lasts 37 frames in US and 38 in Japan.
+the second form has attack strength 3 in US, 4 in Japan and 5 in Europe.
+These values replace inherited strength, including any mode adjustments.
+An upper-body turn lasts 37 frames in US and 38 in Japan.
 
 **European final-boss minion.** One of Tanzra's second-form minions has 1 HP
-in Europe instead of 2 in the US. Its turn uses two poses rather than four,
+in Europe instead of 2 in the US and Japan, and awards 10 points instead of 20.
+Its turn uses two poses rather than four,
 taking eight updates instead of 16 before choosing its next direction. These are minion changes,
 not a reduction to the final boss's own health.
 

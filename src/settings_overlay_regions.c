@@ -51,6 +51,13 @@ const char *SettingsOverlayRegions_RowKey(ActRaiserRegionalSettingGroup group) {
     case kActRaiserRegionalSetting_Construction: return "regional_construction";
     case kActRaiserRegionalSetting_Population: return "regional_population";
     case kActRaiserRegionalSetting_Arrival: return "regional_arrival";
+    case kActRaiserRegionalSetting_ActionMotion: return "regional_action_motion";
+    case kActRaiserRegionalSetting_Emitters: return "regional_emitters";
+    case kActRaiserRegionalSetting_StatueVolley: return "regional_statue_volley";
+    case kActRaiserRegionalSetting_Bosses: return "regional_boss_rules";
+    case kActRaiserRegionalSetting_Collision: return "regional_collision";
+    case kActRaiserRegionalSetting_PlatformSkull: return "regional_platform_skull";
+    case kActRaiserRegionalSetting_ActorStats: return "regional_actor_stats";
     default: return "";
   }
 }
@@ -113,6 +120,20 @@ const char *SettingsOverlayRegions_RowLabel(ArUiLocale locale, ActRaiserRegional
       return ArUiCatalog_Text(locale,"overlay.region.population_label","Population rules");
     case kActRaiserRegionalSetting_Arrival:
       return ArUiCatalog_Text(locale,"overlay.region.arrival_label","Death Heim arrival");
+    case kActRaiserRegionalSetting_ActionMotion:
+      return ArUiCatalog_Text(locale,"overlay.region.action_motion_label","Enemy movement & recovery");
+    case kActRaiserRegionalSetting_Emitters:
+      return ArUiCatalog_Text(locale,"overlay.region.emitters_label","Cave fireball emitters");
+    case kActRaiserRegionalSetting_StatueVolley:
+      return ArUiCatalog_Text(locale,"overlay.region.statue_volley_label","Bloodpool statue volleys");
+    case kActRaiserRegionalSetting_Bosses:
+      return ArUiCatalog_Text(locale,"overlay.region.bosses_label","Boss attack patterns");
+    case kActRaiserRegionalSetting_Collision:
+      return ArUiCatalog_Text(locale,"overlay.region.collision_label","Enemy collision shapes");
+    case kActRaiserRegionalSetting_PlatformSkull:
+      return ArUiCatalog_Text(locale,"overlay.region.platform_skull_label","Aitos platform skulls");
+    case kActRaiserRegionalSetting_ActorStats:
+      return ArUiCatalog_Text(locale,"overlay.region.actor_stats_label","Enemy stats");
     default: return "";
   }
 }
@@ -148,6 +169,53 @@ static SettingsOverlayRegionBadge SourceBadge(ArRegionalSource source) {
 bool SettingsOverlayRegions_ViewBadge(const ActRaiserRegionalRulesView *view,
     ActRaiserRegionalSettingGroup group, bool effective, SettingsOverlayRegionBadge *badge) {
   if (!view || !badge || (unsigned)group >= kActRaiserRegionalSetting_Count) return false;
+  if(group==kActRaiserRegionalSetting_ActorStats) {
+    const ArRegionalActorStatsPolicy *policy=effective?&view->effective.actor_stats:&view->requested.actor_stats;
+    ArRegionalActorStatsSnapshot snapshot;ArRegionalSource source;
+    if(!ArRegionalActorStats_Resolve(policy,&snapshot))return false;
+    *badge=ArRegionalActorStats_GroupSource(policy,&source)?SourceBadge(source):kOverlayRegionBadge_Mixed;
+    return true;
+  }
+  if(group==kActRaiserRegionalSetting_PlatformSkull) {
+    const ArRegionalPlatformSkullPolicy *policy=effective?&view->effective.platform_skull:&view->requested.platform_skull;
+    uint8_t snapshot;ArRegionalSource source;
+    if(!ArRegionalPlatformSkull_Resolve(policy,&snapshot))return false;
+    *badge=ArRegionalPlatformSkull_GroupSource(policy,&source)?SourceBadge(source):kOverlayRegionBadge_Mixed;
+    return true;
+  }
+  if(group==kActRaiserRegionalSetting_Collision) {
+    const ArRegionalCollisionPolicy *policy=effective?&view->effective.collision:&view->requested.collision;
+    uint8_t snapshot;ArRegionalSource source;
+    if(!ArRegionalCollision_Resolve(policy,&snapshot))return false;
+    *badge=ArRegionalCollision_GroupSource(policy,&source)?SourceBadge(source):kOverlayRegionBadge_Mixed;
+    return true;
+  }
+  if(group==kActRaiserRegionalSetting_Bosses) {
+    const ArRegionalBossPolicy *policy=effective?&view->effective.bosses:&view->requested.bosses;
+    uint64_t snapshot;ArRegionalSource source;
+    if(!ArRegionalBoss_Resolve(policy,&snapshot))return false;
+    *badge=ArRegionalBoss_GroupSource(policy,&source)?SourceBadge(source):kOverlayRegionBadge_Mixed;
+    return true;
+  }
+  if(group==kActRaiserRegionalSetting_StatueVolley) {
+    const ArRegionalSource source=effective?view->effective.statue_volley:view->requested.statue_volley;
+    bool unused;if(!ArRegionalVolley_Resolve(source,&unused))return false;
+    *badge=SourceBadge(source);return true;
+  }
+  if(group==kActRaiserRegionalSetting_Emitters) {
+    const ArRegionalEmitterPolicy *policy=effective?&view->effective.emitters:&view->requested.emitters;
+    uint8_t snapshot;ArRegionalSource source;
+    if(!ArRegionalEmitter_Resolve(policy,&snapshot))return false;
+    *badge=ArRegionalEmitter_GroupSource(policy,&source)?SourceBadge(source):kOverlayRegionBadge_Mixed;
+    return true;
+  }
+  if(group==kActRaiserRegionalSetting_ActionMotion) {
+    const ArRegionalActionMotionPolicy *policy=effective?&view->effective.action_motion:&view->requested.action_motion;
+    uint16_t snapshot;ArRegionalSource source;
+    if(!ArRegionalActionMotion_Resolve(policy,&snapshot))return false;
+    *badge=ArRegionalActionMotion_GroupSource(policy,&source)?SourceBadge(source):kOverlayRegionBadge_Mixed;
+    return true;
+  }
   if(group==kActRaiserRegionalSetting_Population) {
     if(!effective && view->population_pending) {*badge=SourceBadge(view->pending_population);return true;}
     const ArRegionalSupportPolicy *policy=effective?&view->effective.support:&view->requested.support;
@@ -406,6 +474,75 @@ bool SettingsOverlayRegions_ViewDescription(ArUiLocale locale,
     char *output, size_t capacity) {
   SettingsOverlayRegionBadge badge;
   if (!SettingsOverlayRegions_ViewBadge(view, group, false, &badge)) return false;
+  if(group==kActRaiserRegionalSetting_ActorStats) {
+    ArRegionalActorStatsSnapshot snapshot;
+    if(!ArRegionalActorStats_Resolve(&view->requested.actor_stats,&snapshot))return false;
+    char hp[8],reward[8],attack[8];
+    snprintf(hp,sizeof(hp),"%u",snapshot.value[kArRegionalActorStat_TanzraMinionHp]);
+    snprintf(reward,sizeof(reward),"%u",10u*snapshot.value[kArRegionalActorStat_TanzraMinionReward]);
+    snprintf(attack,sizeof(attack),"%u",snapshot.value[kArRegionalActorStat_TanzraProjectileAttack]);
+    const ArUiTextArgument args[]={{"region",SettingsOverlayRegions_BadgeLabel(locale,badge)},
+      {"hp",hp},{"reward",reward},{"attack",attack}};
+    return ArUiCatalog_Format(output,capacity,ArUiCatalog_Text(locale,"overlay.region.actor_stats",NULL),args,4);
+  }
+  if(group==kActRaiserRegionalSetting_PlatformSkull) {
+    uint8_t snapshot;
+    if(!ArRegionalPlatformSkull_Resolve(&view->requested.platform_skull,&snapshot))return false;
+    const ArUiTextArgument args[]={
+      {"region",SettingsOverlayRegions_BadgeLabel(locale,badge)},
+      {"reward",snapshot&2?"0":"200"},{"x",snapshot&4?"24":"32"},{"y",snapshot&8?"24":"64"}};
+    return ArUiCatalog_Format(output,capacity,ArUiCatalog_Text(locale,snapshot&1?
+        "overlay.region.platform_skull_armored":"overlay.region.platform_skull_open",NULL),args,4);
+  }
+  if(group==kActRaiserRegionalSetting_Collision) {
+    uint8_t snapshot;
+    if(!ArRegionalCollision_Resolve(&view->requested.collision,&snapshot))return false;
+    const ArUiTextArgument args[]={
+      {"region",SettingsOverlayRegions_BadgeLabel(locale,badge)},
+      {"sword",snapshot&1?"36":"28"},{"arrow",snapshot&2?"16":"8"}};
+    return ArUiCatalog_Format(output,capacity,ArUiCatalog_Text(locale,"overlay.region.collision",NULL),args,3);
+  }
+  if(group==kActRaiserRegionalSetting_Bosses) {
+    static const char *names[]={"idle","throw_end","throw","jump","offset","wizard","ice","closing","clock","turn","minion"};
+    _Static_assert(sizeof(names)/sizeof(names[0])==kArRegionalBoss_Count,"name every boss rule");
+    char values[kArRegionalBoss_Count][8];ArUiTextArgument args[kArRegionalBoss_Count+1];
+    args[0]=(ArUiTextArgument){"region",SettingsOverlayRegions_BadgeLabel(locale,badge)};
+    for(unsigned i=0;i<kArRegionalBoss_Count;++i) {
+      const ArRegionalBossDescriptor *desc=ArRegionalBoss_Descriptor(i);
+      snprintf(values[i],sizeof(values[i]),"%u",desc->value[view->requested.bosses.source[i]]+desc->phase_extra_updates);
+      args[i+1]=(ArUiTextArgument){names[i],values[i]};
+    }
+    args[kArRegionalBoss_TanzraClock+1].value=ArUiCatalog_Text(locale,
+        view->requested.bosses.source[kArRegionalBoss_TanzraClock]==kArRegionalSource_Japan?
+        "overlay.region.clock_stopped":"overlay.region.clock_running",NULL);
+    return ArUiCatalog_Format(output,capacity,ArUiCatalog_Text(locale,"overlay.region.bosses",NULL),args,kArRegionalBoss_Count+1);
+  }
+  if(group==kActRaiserRegionalSetting_StatueVolley) {
+    bool double_shot;
+    if(!ArRegionalVolley_Resolve(view->requested.statue_volley,&double_shot))return false;
+    const ArUiTextArgument args[]={{"region",SettingsOverlayRegions_BadgeLabel(locale,badge)},
+      {"shots",double_shot?"2":"1"},{"cycle",double_shot?"153":"137"}};
+    return ArUiCatalog_Format(output,capacity,ArUiCatalog_Text(locale,"overlay.region.statue_volley",NULL),args,3);
+  }
+  if(group==kActRaiserRegionalSetting_Emitters) {
+    char interval[8];snprintf(interval,sizeof(interval),"%u",ArRegionalEmitter_Descriptor(0)->value[view->requested.emitters.source[0]]);
+    const bool pal=ArRegionalEmitter_Descriptor(1)->value[view->requested.emitters.source[1]]!=0;
+    const ArUiTextArgument args[]={{"region",SettingsOverlayRegions_BadgeLabel(locale,badge)},
+      {"interval",interval},{"left",pal?"+6":"-8"},{"right",pal?"-22":"-8"}};
+    return ArUiCatalog_Format(output,capacity,ArUiCatalog_Text(locale,"overlay.region.emitters",NULL),args,4);
+  }
+  if(group==kActRaiserRegionalSetting_ActionMotion) {
+    static const char *names[]={"bird","leaper","cave","straight","high","low_cast","high_cast","sword","high_sword","arrow","short_head","long_head"};
+    _Static_assert(sizeof(names)/sizeof(names[0])==kArRegionalActionMotion_Count,"name every motion value");
+    char numbers[kArRegionalActionMotion_Count][8];ArUiTextArgument args[kArRegionalActionMotion_Count+1];
+    args[0]=(ArUiTextArgument){"region",SettingsOverlayRegions_BadgeLabel(locale,badge)};
+    for(unsigned i=0;i<kArRegionalActionMotion_Count;++i) {
+      const ArRegionalActionMotionDescriptor *desc=ArRegionalActionMotion_Descriptor((ArRegionalActionMotionRule)i);
+      snprintf(numbers[i],sizeof(numbers[i]),"%u",desc->value[view->requested.action_motion.source[i]]+desc->phase_extra_updates);
+      args[i+1]=(ArUiTextArgument){names[i],numbers[i]};
+    }
+    return ArUiCatalog_Format(output,capacity,ArUiCatalog_Text(locale,"overlay.region.action_motion",NULL),args,kArRegionalActionMotion_Count+1);
+  }
   if(group==kActRaiserRegionalSetting_Arrival) {
     SettingsOverlayRegionBadge active;
     if(!SettingsOverlayRegions_ViewBadge(view,group,true,&active))return false;

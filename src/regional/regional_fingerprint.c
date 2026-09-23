@@ -38,6 +38,27 @@ bool ArRegionalRules_Fingerprint(const ArRegionalRules *requested,
       !ArRegionalTimers_Valid(&effective->timers)) return false;
   bool retry_requested, retry_effective;
   bool arrival_requested,arrival_effective;
+  uint16_t motion_requested,motion_effective;
+  bool volley_requested,volley_effective;
+  uint64_t boss_requested,boss_effective;
+  uint8_t collision_requested,collision_effective;
+  uint8_t platform_skull_requested,platform_skull_effective;
+  ArRegionalActorStatsSnapshot stats_requested,stats_effective;
+  if(!ArRegionalActorStats_Resolve(&requested->actor_stats,&stats_requested) ||
+      !ArRegionalActorStats_Resolve(&effective->actor_stats,&stats_effective))return false;
+  if(!ArRegionalPlatformSkull_Resolve(&requested->platform_skull,&platform_skull_requested) ||
+      !ArRegionalPlatformSkull_Resolve(&effective->platform_skull,&platform_skull_effective))return false;
+  if(!ArRegionalCollision_Resolve(&requested->collision,&collision_requested) ||
+      !ArRegionalCollision_Resolve(&effective->collision,&collision_effective))return false;
+  if(!ArRegionalBoss_Resolve(&requested->bosses,&boss_requested) ||
+      !ArRegionalBoss_Resolve(&effective->bosses,&boss_effective))return false;
+  if(!ArRegionalVolley_Resolve(requested->statue_volley,&volley_requested) ||
+      !ArRegionalVolley_Resolve(effective->statue_volley,&volley_effective))return false;
+  uint8_t emitter_requested,emitter_effective;
+  if(!ArRegionalEmitter_Resolve(&requested->emitters,&emitter_requested) ||
+      !ArRegionalEmitter_Resolve(&effective->emitters,&emitter_effective))return false;
+  if(!ArRegionalActionMotion_Resolve(&requested->action_motion,&motion_requested) ||
+      !ArRegionalActionMotion_Resolve(&effective->action_motion,&motion_effective))return false;
   if(!ArRegionalArrival_Resolve(requested->arrival,&arrival_requested) ||
       !ArRegionalArrival_Resolve(effective->arrival,&arrival_effective))return false;
   if (!ArRegionalRetry_Resolve(requested->retry_score, &retry_requested) ||
@@ -363,6 +384,62 @@ bool ArRegionalRules_Fingerprint(const ArRegionalRules *requested,
     uint8_t arrival_bytes[50]="ARARRIVAL-R1";
     memcpy(arrival_bytes+16,digest,32);arrival_bytes[48]=arrival_requested;arrival_bytes[49]=arrival_effective;
     if(!sr_support_sha256(arrival_bytes,sizeof(arrival_bytes),out))return false;
+    *baseline=false;
+  }
+  if(motion_requested || motion_effective) {
+    uint8_t bytes[52]="ARACTIONMOVE-R1";memcpy(bytes+16,out,32);
+    ByteOrder_WriteLe16(bytes+48,motion_requested);ByteOrder_WriteLe16(bytes+50,motion_effective);
+    if(!sr_support_sha256(bytes,sizeof(bytes),out))return false;
+    *baseline=false;
+  }
+  if(emitter_requested || emitter_effective) {
+    uint8_t bytes[50]="AREMITTER-R1";memcpy(bytes+16,out,32);
+    bytes[48]=emitter_requested;bytes[49]=emitter_effective;
+    if(!sr_support_sha256(bytes,sizeof(bytes),out))return false;
+    *baseline=false;
+  }
+  if(volley_requested || volley_effective) {
+    uint8_t bytes[50]="ARVOLLEY-R1";memcpy(bytes+16,out,32);
+    bytes[48]=volley_requested;bytes[49]=volley_effective;
+    if(!sr_support_sha256(bytes,sizeof(bytes),out))return false;
+    *baseline=false;
+  }
+  if(boss_requested || boss_effective) {
+    uint8_t bytes[64]="ARBOSS-R1";memcpy(bytes+16,out,32);
+    for(unsigned i=0;i<8;++i) {bytes[48+i]=(uint8_t)(boss_requested>>(8*i));bytes[56+i]=(uint8_t)(boss_effective>>(8*i));}
+    if(!sr_support_sha256(bytes,sizeof(bytes),out))return false;
+    *baseline=false;
+  }
+  if(collision_requested || collision_effective) {
+    uint8_t bytes[50]="ARCOLLISION-R1";memcpy(bytes+16,out,32);
+    bytes[48]=collision_requested;bytes[49]=collision_effective;
+    if(!sr_support_sha256(bytes,sizeof(bytes),out))return false;
+    *baseline=false;
+  }
+  if(platform_skull_requested || platform_skull_effective) {
+    uint8_t bytes[50]="ARPLATSKULL-R1";memcpy(bytes+16,out,32);
+    bytes[48]=platform_skull_requested;bytes[49]=platform_skull_effective;
+    if(!sr_support_sha256(bytes,sizeof(bytes),out))return false;
+    *baseline=false;
+  }
+  if(stats_requested.changed || stats_effective.changed) {
+    _Static_assert(kArRegionalActorStat_BaseCount==63,"preserve actor-stat replay domain");
+    uint8_t bytes[48+2*kArRegionalActorStat_BaseCount]="ARACTORSTAT-R1";memcpy(bytes+16,out,32);
+    memcpy(bytes+48,stats_requested.value,kArRegionalActorStat_BaseCount);
+    memcpy(bytes+48+kArRegionalActorStat_BaseCount,stats_effective.value,kArRegionalActorStat_BaseCount);
+    if(!sr_support_sha256(bytes,sizeof(bytes),out))return false;
+    *baseline=false;
+  }
+  bool child_changed=false;
+  for(unsigned i=kArRegionalActorStat_BaseCount;i<kArRegionalActorStat_Count;++i)
+    child_changed|=stats_requested.value[i]!=ArRegionalActorStats_Descriptor(i)->value[0] ||
+        stats_effective.value[i]!=ArRegionalActorStats_Descriptor(i)->value[0];
+  if(child_changed) {
+    _Static_assert(kArRegionalActorStat_Count-kArRegionalActorStat_BaseCount==3,"preserve child-stat replay domain");
+    uint8_t bytes[54]="ARCHILDSTAT-R1";memcpy(bytes+16,out,32);
+    memcpy(bytes+48,stats_requested.value+kArRegionalActorStat_BaseCount,3);
+    memcpy(bytes+51,stats_effective.value+kArRegionalActorStat_BaseCount,3);
+    if(!sr_support_sha256(bytes,sizeof(bytes),out))return false;
     *baseline=false;
   }
   return true;

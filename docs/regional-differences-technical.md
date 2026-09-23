@@ -2920,6 +2920,16 @@ captures cover the family and helpers. An independent run reproduces all
 the four earlier original-only traces; neither their seed setup nor repeated
 runs count as extra gameplay coverage.
 
+Runtime integration keeps four original-encounter animation durations separate:
+idle row0 of state0, throw row4 of state2, initial row0 of states1 and4. Only
+source `$AF5D`, map1, bank`$7E`/base`$5000` is eligible; rematch `$F6CA` and
+inherited-source axes are excluded. The common `$8E2F` reader owns the row,
+pose, collision, facing and vertical motion; the adapter changes only a newly
+acquired delay. An independent `$AFDB→AFDE` LDA prefix selects the axe offset
+in both encounters before the original `$8709` facing helper. Allocation,
+including its exhausted-pool scratch result, remains native. Five-ROM checks
+cover470 rows across both assets, their velocities/extents and axe immediates.
+
 Keep original-fight idle and follow-through durations, and the shared-across-
 encounters regional axe offset, as separate semantic policy fields. Select
 by encounter identity, freeze the policy for root and descendants, and defer
@@ -3045,6 +3055,10 @@ traversals, full victories or measurements during menu/clock freezes.
   has stored duration5, consuming6 native frames. The final Y is unchanged
   (64→326); the root then starts state `$09` and spawns its first projectile
   12 frames earlier relative to that wind-up's start.
+  More precisely, body state17 omits zero-based US rows5/6 and retains row7
+  (visual13); head state18 retains row5 (visual4) and omits rows6/7. Their
+  remaining stationary poses are not the same ordinal. European variants
+  retain the US118-update sequences.
 - The original Northwall animation/composition blobs are byte-identical.
   For the rematch, all 26 visual composition records—including extent headers
   and sprite parts—match across regions. Only states `$11/$12` differ in the
@@ -3074,6 +3088,16 @@ replace the original fight's animation blob. Defer mid-fight setting changes
 until the next encounter; do not reset HP, root/child generations, RNG or
 projectiles to apply them. Full defeat/cleanup, magic/contact coverage and
 actual mixed-policy runtime validation remain separate gates.
+
+The integrated `$8E2F` adapter selects those two row skips only for source
+`$F760`, map7, bank`$7E`/base`$5000`, and the matching state/index/three-row
+signature. It advances the native cursor before delegating the complete row
+reader, which still owns pose/extents, facing, movement, flags and return state.
+An unexpected escaped token restores only that speculative cursor edit and is
+propagated unchanged. The original `$F161` owner and projectile states25/26
+remain native. One room-captured rule controls both sequences; no live setting
+change can shorten only one part of a wind-up. Five-ROM comparisons cover the
+full head/body and projectile timelines, not merely their final durations.
 
 ### Apples: equal recovery rules, different placements
 
@@ -3184,6 +3208,13 @@ reviewed animation sequences match between ROMs: state `$0E` waits 60 active
 frames, `$0F` has four 4-frame firing rows, child `$21` has two 2-frame startup
 rows, and child `$23` has two 4-frame flight rows with horizontal speed 3.
 
+The European, German and French programs also contain this extra wind-up and
+spawn, at roots `$00:BA48/$BA4A/$BA4D`, with sequence helper `$856F` and spawn
+helpers `$BA72/$BA74/$BA77`. Their relevant animation data is byte-identical
+to US at file `0x5782E`. Their double-volley cycle is153 active updates, with
+16 updates between shots, just as in JP. This is a regional gameplay choice,
+not a PAL clock conversion; the US single volley must not stand in for Europe.
+
 Eight controlled 320-frame traces cover both ROMs, both facings and
 normal/Special. Native room loads create the real authored statues; fixtures
 set player position and HP but do not fabricate an enemy or its attack state.
@@ -3243,6 +3274,20 @@ retirement timing. Host mixed-policy tests, parent defeat during a pending
 shot, full contact/magic interactions and exact artwork remain validation
 gates; the shot-count and timing discovery is closed.
 
+Implemented adapter: `$BD9F→BDA2` initializes the root's local counter `+$38`
+to1 and executes the native first wind-up. `$BDA8→BDA2` consumes that counter
+once and adds the second wind-up; the next `$BDA8` delegates the post-shot idle.
+The root's ordinary `$8657` sequence helper does not use the local counter
+(`$8669`, which does, is not called here). Native actor destruction/reuse owns
+its lifetime; no parallel host slot table is needed. The inherited-source
+projectiles are excluded by states `$21/$23`. The original allocator, scratch
+exhaustion behavior, facing, child backlinks and native return/yield frames
+remain delegated. Offscreen state is deliberately not rechecked mid-volley.
+Policy is captured at complete room/retry initialization with the other action
+rules. Five-ROM root-call traces and adapter boundary tests cover allocation
+failure, activation changes and termination between shots; this is not a claim
+of a new full combat/contact or manual visual pass.
+
 ### Kasandora Act-2: wall heads, Pharaoh and blue spheres
 
 These are three distinct families. Ordinary wall heads use types `$0E/$0F`
@@ -3260,6 +3305,21 @@ The `$4000` sequences themselves match: state2 lasts8 frames, state3 lasts90,
 and the restart takes one frame. All14 authored wall-head placements match,
 including a duplicated placement in room4; this is a count of records, not
 unique coordinates.
+
+The host implements two independent ordinary-head pause rules, one for each
+animation-base variant. A complete room initialization captures them with the
+other motion/timing choices. The `$00:C908` adapter only bypasses the new
+pause for the selected Japanese variant and tail-transfers to `$C90E`, where
+native LDA2 starts the ordinary animation/allocation/recovery sequence. Existing
+wait continuations never re-enter this prefix. Source/base checks exclude the
+Pharaoh family, other scenes, unknown actors and incompatible CPU modes.
+Registers, RAM and the native return owner stay intact at the transfer.
+
+Five-ROM opcode checks confirm the activation prefix and Western LDA30/delay
+versus JP's immediate state2. Controller cases cover all four sources, four
+short/long mixes and 32 flag combinations, with malformed-owner exclusions.
+Generated boundaries split `$C8FF→C908→C90E`; the native offscreen gate remains
+before the override and the complete US pause body is retained as fallback.
 
 Sources are US `$C8E5/$C8F3/$C8C9/$C8D7`, JP
 `$C976/$C984/$C95A/$C968`, respectively. They contain HP3/attack1; Special
@@ -3525,6 +3585,24 @@ full sword-playthrough or magic-reachability tests.
 
 The owning animation/composition blobs are file US `0xC4C17` / JP `0xC1B1C`.
 States `$21–$24/$2F/$30` and the seven reviewed compositions42/43/47–51 match.
+
+The B10 host policy integrates four independent room-scoped leaves: armor,
+BCD death reward, exclusive horizontal range and exclusive vertical range.
+At `$966C→966F` the initializer projects only fresh flags/reward, then executes
+the native professional promotion, animation and bottom anchoring. First birth
+uses descriptor Y: source field`+$32` is not installed until `$95B9`, after
+the common initializer returns. Reused-slot source bytes are not identity.
+At `$D39A→D39D` and `$D3A2→D3A5`, exact CMP24 prefixes retain the original
+distance helpers, offscreen gate, waits, sound, explosion and retirement.
+No hit resolver, score award routine, pool or per-frame scheduler is replaced.
+
+Five-ROM checks confirm PAL uses the US armor/reward/proximity values, but
+its base record has HP2/attack2 rather than US/JP's HP0/attack1. Those use
+the independent A06 stat policy, not an implicit effect of B10. The new tests
+cover all 16-bit CMP inputs and mixed armor/reward/range choices; the earlier
+native collision fixtures establish deflection/reward semantics. This is not
+a new full host playthrough of the platform ride or a full magic-interaction
+test. Live setting changes remain deferred until room/retry entry.
 This proves metadata compatibility, not identical CHR pixels or palettes.
 
 Keep **skull sword protection**, **kill-score value** and **proximity bounds**
@@ -3587,6 +3665,13 @@ not additional regional attack variations.
 Use a first-form post-spread-delay policy, frozen with the encounter. Keep
 the common rematch changes and HP threshold unchanged. Do not add a blanket
 Wizard animation-speed setting or reset a pending native delay when toggling.
+
+The European roots at `$BACC/$BACE/$BAD1` retain the US31-update pause, at
+`$BB39/$BB3B/$BB3E`. Their corresponding delay helper is `$8612`.
+The integrated room-stable prefix skips `$BE78→BE7E` only for the selected
+Japanese pause rule and verified `$BDFF`/map2 or `$F6E2`/map7 owner, base`$5000`,
+state`$0B`. It edits no registers, actor fields or return frames. The native
+HP/position decisions and form transition remain in the shared suffix.
 
 ### Flaming Wheel original fight and rematch
 
@@ -3709,8 +3794,9 @@ one movement-row difference are verified:
   while `$E8` is nonzero. With the gate clear, `$E5` divides updates by 60 and
   `$E6/$E7` count down in BCD, saturating at zero.
 - **Second-form projectile:** activation `$FD25/$FDA2` explicitly sets
-  `+$2A` attack to 3 US / 4 JP before state 6, then state `$22` flight. This
-  overrides inherited attack, so the values remain 3/4 in Special mode.
+  `+$2A` attack to 3 US / 4 JP before state 6, then state `$22` flight. PAL
+  activation is EU`$FA1E`, DE`$FA20`, FR`$FA23` and explicitly assigns5.
+  These assignments override inherited attack, including mode promotions.
   It is not HP or a general increase to all final-boss attacks.
 - **Upper-body turn:** state 48 lasts 37 US / 38 JP frames. JP extends the
   first horizontal row at −4 px/update by one frame, before the shared
@@ -3745,6 +3831,27 @@ Do not restart/refill the clock or modify already-launched attacks on a toggle.
 US assets plus normalized timing/movement parameters support these mechanics
 without requiring JP graphics. Complete victories, magic, pool contention
 across whole families and host mixed-policy behavior remain validation gates.
+
+The host now integrates closing duration, phase-two clock behavior and upper
+turn as independent room-cached policies. The native animation reader owns
+poses, mirrored movement and return state; the adapter changes only the
+audited row delays (state10/row7 and state48/row0). `$00:F8FC→F8FE` skips the
+8-bit `STZ $E8` for Japan, retaining the current divider, remaining time and
+surrounding collision/cast-gate clears. Its guard requires the defeated first
+form's native secondary handler, not simply any actor inheriting `$F80F`.
+Five-ROM program tests verify row bytes, total durations, collision headers
+and displacement; clock tests cover all256 low gate values and preserve
+adjacent memory/CPU state.
+
+Three host integration runs now load Death Heim through native pending-room
+requests after an ordinary Continue/Palace/Fight entry. A held player remains
+at the authored final-room entrance; one controlled native first-form defeat
+dispatch reaches phase two. Production guards accept the Japanese clock skip
+and Japanese/European projectile values. End WRAM retains the stopped Japanese
+clock, running US/European clocks, and minion HP/reward2/2 versus European1/1.
+All runs exit normally with positive HP and unchanged native SRAM. These are
+controlled transitions, not evidence of a naturally completed campaign or
+victory; the explicit room requests and defeat preparation are part of setup.
 
 The accepted four-family batch comprises 40 booted fixtures, 1,928 isolated
 native cases (852 logic/boundary cases and 1,076 animation-row decodes), and
@@ -4187,6 +4294,21 @@ the player and waits through state 36 before allocating a shot:
 | Repeated successful firing interval | 360 active frames | 180 active frames |
 | First observed shot after controlled positioning | Frame 362 | Frame 182 |
 
+The host implements cadence and launch offset as independent, room-stable
+policies. `$B3CB→B3D5` substitutes only the PAL coordinate arithmetic, with
+matching NZCV flags. `$B3E4→B3E7` selects one repetition for JP/PAL; generated
+code still owns the repeat-helper call frame, activation, allocation and child
+continuations. The US two-repetition path remains the native default.
+
+PAL state36 is one stationary255-update row. Both US rows have the identical
+visual37, zero movement and the same collision/composition record. The host
+therefore uses one127+128-update cycle of those US rows, adjusting only their
+fresh delays through `$8E2F`. This reproduces the255-update hold without a donor
+asset or a virtual animation stream. It does not claim identical internal row
+indices to PAL. Five-ROM tests verify the totals and stationary composition;
+all65536 X inputs verify the position prefix's arithmetic and flags. Existing
+room snapshots and live projectiles are never rewritten by a settings edit.
+
 Owned states 10/11/36 and their composition records match. Apart from the
 repeat argument/helper choice, all reviewed program differences are
 relocations. The first-shot timestamps include this fixture's initial
@@ -4337,6 +4459,38 @@ Implementation: expose named family movement/wind-up/recovery values, captured
 on room or actor-generation initialization. Do not swap whole animation blobs
 merely to change artwork: those blobs also carry gameplay data. Preserve live
 phase progress and descendants; a setting change must not restart an attack.
+
+The host implements these seven speed/delay leaves, plus the two Bloodpool
+swordsman delays described below, with a complete-room
+snapshot. The accepted `$02:B4E8` profile boundary atomically captures room
+time and motion; a failed validation publishes neither. This also covers
+later spawns without maintaining a parallel lifetime table for action actors.
+Changing a setting during a room leaves its existing snapshot unchanged.
+
+At `$00:8E2F`, the adapter checks the native source identity, map group,
+animation bank/base and exact row. It delegates the original reader, then
+changes only actor `+$06` and `+$24` on a normal return. It never patches
+shared animation bytes, graphics, collision extents, vertical movement or
+CPU/stack state. Unknown shapes and the native-US snapshot stay native;
+escape tokens propagate without postprocessing. No donor media is needed.
+
+All 53 reviewed rows are compared with the five actual ROMs: 265 numerical,
+vertical-motion, visual-ordinal and collision-extent checks. For this subset
+all three PAL releases use the US values. Controller tests exercise those
+53 rows across 512 mixed snapshots, four facing combinations and both M
+widths, plus malformed ownership and return-token cases. The reader itself
+is delegated in production; the unit stand-in is not an independent native
+CPU proof. Existing original-CPU row evidence above supplies that reference.
+The unchanged US row shape is intentional: future artwork integration must
+preserve the independently selected motion metadata.
+
+Controlled host saves additionally enter Fillmore Act 1 through the Palace's
+ordinary Fight/confirmation flow. The JP motion capture observes a native
+bird row acquire DX4; the US control bypasses the adapter. Both 11,500-tick
+captures preserve positive HP and lives. Cold replays in the production
+binary accept their initial identities, exit at the recording end, and match
+their respective final WRAM/SRAM byte-for-byte. This is live bird/room-lifecycle
+evidence, not a live test of every cave or caster branch.
 
 ### Unused world-map placement root
 
@@ -4759,6 +4913,31 @@ stopping before animation loading. Thus the PAL HP mask/rule is checked
 against every joined record, not only synthetic HP examples. This does not
 execute every record's controller, contact path or later animation phase.
 
+The host now integrates the 63 changed base fields (21 HP,42 attack) across
+54 US-owned initializers. Stable area/type keys and numerical tables live in
+the portable policy; native source-address mapping stays in the game adapter.
+The `$966C→966F` prefix uses descriptor Y, not a reused slot's `+$32`, and
+applies selected values before the existing native promotion. Every changed
+field is independently selectable. The shared room-policy cache is published
+only after all room-boundary activations succeed; no lookup runs per animation
+frame. Baseline settings bypass the projection without searching the table.
+
+The skull armor/reward prefix composes at the same boundary; it does not
+overwrite selected skull HP/attack. Native record signature/animation-identity
+checks reject incompatible inputs. Five-ROM stat bytes and 1,944 combinations
+of real records, HP/attack sources and skull rules verify the adapter; another
+1,944 synthetic cases test untouched fields and reused-slot identities.
+The table integration does not change difficulty or terrain rectangles.
+Explicit child assignments are handled by separate initializer prefixes:
+Tanzra minion HP`$FC96→FC99` and reward`$FC99→FC9C` replace their own store
+values independently, preserving A=2 and all flags. Projectile`$FD2E→FD31`
+replaces the attack LDA and its N/Z result; the native STA follows. The final
+room, inherited source/animation identity, active handler and fresh flags
+guard each prefix. No parent-state polling, allocator replacement or live-HP
+rewrite is involved. All five ROM instruction signatures,2,592 mixed-source/
+inherited-value cases and40 invalid-owner/CPU cases check this adapter.
+Full encounters remain a distinct validation gate.
+
 ### Native narrative comparisons
 
 The Go Builder's `localization-extract --format catalog` supplies all five
@@ -5172,6 +5351,22 @@ stream: a future appearance-only toggle must preserve the selected gameplay
 velocities rather than blindly replacing that entire stream. Existing live
 projectiles should retain their chosen policy through cleanup.
 
+The host speed option uses the complete-room snapshot for both trap sources
+`$DFE5/$DFF3` and their copied-source children. State41's two Western rows keep
+their visual and stored delay1; only horizontal magnitude2 becomes3. Actual
+JP data has one row with delay0, so importing its entire sequence would also
+silently change flashing. US/PAL and JP velocities are checked against all
+five ROMs while explicitly retaining the selected Western timeline.
+
+This comparison also identified an independent collision difference: both
+Western arrow compositions have left/right/top/bottom extents `8,8,8,0`,
+whereas JP's single `$2C` composition is `16,16,8,0`. These are decoder input
+bytes before facing mirroring. They belong to the A04 collision policy, not
+the B12 speed or P01 artwork selector. The B12 speed adapter retains native US
+extents unless the independent room-scoped collision policy selects Japanese
+bounds. Both US flashing poses map to those same Japanese bounds; this does
+not import Japanese art.
+
 ### Kasandora swordsman collision extents
 
 The ordinary Kasandora Act 2 bundle has five changed composition collision
@@ -5207,6 +5402,30 @@ contact or a complete fight. The additional `$08` header is verified through
 the native decoder without assigning it an unsupported enemy name. An
 appearance-only option should not import donor collision headers unless
 the corresponding gameplay variation is also selected.
+
+The host's collision policy now projects these headers at the shared `$8E2F`
+row-acquisition boundary. It identifies the two swordsman sources above and
+the type`03/0D` source`$C863` state10/visual8 path. The latter is retained in
+the resource/controller but its ordinary entry unconditionally branches past
+the state10 selection; supporting that header does not establish natural use.
+Fresh extents are mirrored with `+$28` into `+$0A/$0E/$0C/$10`; the native
+reader still owns pose, duration, motion, registers and return state. Header
+signatures and bounded sequence/composition offsets reject incompatible assets.
+No shared animation or composition bytes are rewritten.
+
+The first pose has a separate `$969E→96A1` initializer continuation using the
+descriptor restored in Y. The reader recognizes its real `$969D` return word
+and leaves this call to that birth hook; it cannot mistake a stale `+$32` for
+the new enemy's identity. Extents are installed before the original bottom
+anchoring. All changed headers here retain their native bottom extent, so this
+does not move the authored spawn position. Later rows use the installed source.
+
+Native contact `$8970–8A3B` consumes these four extent words. Sword/magic
+resolution `$8A3C–8B66` also reads victim extents, then checks **attacker**
+composition parts through `$8B67`. The policy does not replace that narrow
+test, damage subtraction, deflection, rewards or death. It is independent
+from the Marahna arrow-speed rule and from graphics. Room/retry capture keeps
+current enemies stable after a settings edit; old companions default to US.
 
 ### European SIM helper and behavior-resource follow-up
 
@@ -5683,6 +5902,13 @@ German +2 and French +5. The nine-entry straight attack's last delay is
 versus 23. Both choices were reached natively with different player heights.
 These are complete state durations, not whole fight or jump-cycle periods.
 
+The host's room-stable motion adapter implements the two swordsman delays
+independently. Only state29 row8 and state30 row4 of source `$BBA8` in map
+group2 are eligible. The original reader still selects the pose and collision
+header. Current attacks and later spawns keep their room snapshot until the
+next full room load/retry; no Japanese artwork is required. All fourteen rows
+of both attacks are included in the five-ROM and controller comparisons above.
+
 Marahna head records start at US `$00:E3A1`, JP `$00:E422`, EU `$00:E0A0`,
 German +2 and French +5. State `$23` is US/PAL visuals `$28,$26,$25` with
 delays `7,3,3`; JP inserts visual `$27`, delay 3, after `$28`. Native playback
@@ -5974,6 +6200,16 @@ the sequence, the controller faces the player and selects movement state
 23/24/25 according to vertical distance. Removing the first two poses
 therefore changes both the interim collision footprint and when the next
 direction is chosen, not just the displayed animation.
+
+The host's independently selectable turn policy now advances the US state22
+cursor from row0 to row2 before the native reader. All four original row
+signatures must match before applying it. The reader then acquires the actual
+remaining pose and collision header; no donor graphics or fabricated pose
+metadata are needed. The phase-two stats have their own initializer policies,
+so choosing the short turn alone does not reduce minion HP or score reward.
+Mixed timing policies, both accumulator widths/facings, malformed owners and
+unexpected reader-return tokens are covered by1,944 adapter cases. Native
+full-fight, damage and pool-contention validation remains separate.
 
 **Evidence scope.** 634 isolated animation-row inputs and 580 auxiliary
 fixtures cover all five ROMs, both facings, native actor-loop delays,

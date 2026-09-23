@@ -33,6 +33,13 @@ typedef enum ActRaiserRegionalSettingGroup {
   kActRaiserRegionalSetting_Construction,
   kActRaiserRegionalSetting_Population,
   kActRaiserRegionalSetting_Arrival,
+  kActRaiserRegionalSetting_ActionMotion,
+  kActRaiserRegionalSetting_Emitters,
+  kActRaiserRegionalSetting_StatueVolley,
+  kActRaiserRegionalSetting_Bosses,
+  kActRaiserRegionalSetting_Collision,
+  kActRaiserRegionalSetting_PlatformSkull,
+  kActRaiserRegionalSetting_ActorStats,
   kActRaiserRegionalSetting_Count,
 } ActRaiserRegionalSettingGroup;
 

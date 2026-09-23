@@ -27,6 +27,13 @@
 #include "regional_construction.h"
 #include "regional_support.h"
 #include "regional_arrival.h"
+#include "regional_action_motion.h"
+#include "regional_emitters.h"
+#include "regional_volley.h"
+#include "regional_boss_rules.h"
+#include "regional_collision.h"
+#include "regional_platform_skull.h"
+#include "regional_actor_stats.h"
 
 /* Game-owned value snapshot. No campaign identity, persistence, native memory
  * or UI ownership. Each family keeps its own units and activation boundary;
@@ -59,6 +66,13 @@ typedef struct ArRegionalRules {
   ArRegionalSource construction;
   ArRegionalSupportPolicy support;
   ArRegionalSource arrival;
+  ArRegionalActionMotionPolicy action_motion;
+  ArRegionalEmitterPolicy emitters;
+  ArRegionalSource statue_volley;
+  ArRegionalBossPolicy bosses;
+  ArRegionalCollisionPolicy collision;
+  ArRegionalPlatformSkullPolicy platform_skull;
+  ArRegionalActorStatsPolicy actor_stats;
 } ArRegionalRules;
 
 /* Conservative supported mix: any reduced support coefficient requires the

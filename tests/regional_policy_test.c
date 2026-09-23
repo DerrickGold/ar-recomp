@@ -209,9 +209,16 @@ static void CheckMenuAdapter(void) {
       view.requested.level_goals=(ArRegionalSource)source;
       view.requested.construction=(ArRegionalSource)source;
       view.requested.arrival=(ArRegionalSource)source;
+      view.requested.statue_volley=(ArRegionalSource)source;
       CHECK(ArRegionalSupport_Init(&view.requested.support,(ArRegionalSource)source));
       CHECK(ArRegionalSimCombat_Init(&view.requested.sim_combat,(ArRegionalSource)source));
       CHECK(ArRegionalSimAi_Init(&view.requested.sim_ai,(ArRegionalSource)source));
+      CHECK(ArRegionalActionMotion_Init(&view.requested.action_motion,(ArRegionalSource)source));
+      CHECK(ArRegionalEmitter_Init(&view.requested.emitters,(ArRegionalSource)source));
+      CHECK(ArRegionalBoss_Init(&view.requested.bosses,(ArRegionalSource)source));
+      CHECK(ArRegionalCollision_Init(&view.requested.collision,(ArRegionalSource)source));
+      CHECK(ArRegionalPlatformSkull_Init(&view.requested.platform_skull,(ArRegionalSource)source));
+      CHECK(ArRegionalActorStats_Init(&view.requested.actor_stats,(ArRegionalSource)source));
       view.requested.menu_return = (ArRegionalSource)source;
       view.requested.speed_range = (ArRegionalSource)source;
       view.requested.magic_gesture = (ArRegionalSource)source;
@@ -223,9 +230,9 @@ static void CheckMenuAdapter(void) {
       view.lair_history_ready = true;
       ArRegionalSource next;
       CHECK(SettingsOverlayRegions_NextSource(&view, (ActRaiserRegionalSettingGroup)group, 1, &next));
-      CHECK(next == (source + 1) % 3);
+      CHECK(next == (ArRegionalSource)((source + 1) % 3));
       CHECK(SettingsOverlayRegions_NextSource(&view, (ActRaiserRegionalSettingGroup)group, -1, &next));
-      CHECK(next == (source + 2) % 3);
+      CHECK(next == (ArRegionalSource)((source + 2) % 3));
       for (int locale = 0; locale < kArUiLocale_Count; ++locale) {
         char text[2048];
         CHECK(SettingsOverlayRegions_ViewDescription((ArUiLocale)locale, &view,

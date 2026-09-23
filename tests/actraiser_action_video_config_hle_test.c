@@ -33,7 +33,7 @@ static bool replace_time;
     }                                                                      \
   } while (0)
 
-bool ActRaiserRegional_BeginRoomTime(uint8_t profile, uint16_t native_bcd, uint16_t *out) {
+bool ActRaiserRegional_BeginActionRoom(uint8_t profile, uint16_t native_bcd, uint16_t *out) {
   ++timer_calls;
   CHECK(profile == kProfile);
   CHECK(native_bcd == 0x1234);

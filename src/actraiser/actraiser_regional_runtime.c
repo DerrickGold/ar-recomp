@@ -92,6 +92,18 @@ static ArRegionalLairHistory s_boot_lairs;
 static ArRegionalLairReloads s_boot_reloads;
 static ArRegionalSimActors s_boot_sim_actors;
 static bool s_boot_valid,s_boot_arrival_locked;
+typedef struct ActionRuleCache {
+  ArRegionalActionMotionSnapshot motion;
+  ArRegionalEmitterSnapshot emitters;
+  bool statue_volley;
+  ArRegionalBossSnapshot bosses;
+  ArRegionalCollisionSnapshot collision;
+  ArRegionalPlatformSkullSnapshot platform_skull;
+  ArRegionalActorStatsSnapshot actor_stats;
+} ActionRuleCache;
+/* Published only after every room-boundary activation succeeds. One aggregate
+ * also guarantees title/recovery resets cannot leave an older family cached. */
+static ActionRuleCache s_action;
 static bool s_miracle_active, s_prices_valid;
 static bool s_trace;
 static bool s_quake_active, s_quake_delegate;
@@ -128,6 +140,7 @@ bool ActRaiserRegional_Initialize(ArRegionalCampaignIdentity identity, void *con
   s_boot_reloads = (ArRegionalLairReloads){0};
   s_boot_sim_actors = (ArRegionalSimActors){0};
   s_boot_arrival_locked=false;
+  s_action=(ActionRuleCache){0};
   s_miracle_active = s_prices_valid = false;
   s_quake_active = s_quake_delegate = false;
   s_report_active = s_report_delegate = false;
@@ -188,6 +201,22 @@ bool ActRaiserRegional_Initialize(ArRegionalCampaignIdentity identity, void *con
 bool ActRaiserRegional_CopySupport(ArRegionalSupportSnapshot *snapshot) {
   const ArRegionalSupportPolicy native={{0}};
   return ArRegionalSupport_Resolve(s_campaign.active_valid?&s_campaign.active.effective.support:&native,snapshot);
+}
+
+ArRegionalActionMotionSnapshot ActRaiserRegional_ActionMotionSnapshot(void) { return s_action.motion; }
+ArRegionalEmitterSnapshot ActRaiserRegional_EmitterSnapshot(void) { return s_action.emitters; }
+bool ActRaiserRegional_DoubleStatueVolley(void) { return s_action.statue_volley; }
+ArRegionalBossSnapshot ActRaiserRegional_BossSnapshot(void) { return s_action.bosses; }
+ArRegionalCollisionSnapshot ActRaiserRegional_CollisionSnapshot(void) { return s_action.collision; }
+ArRegionalPlatformSkullSnapshot ActRaiserRegional_PlatformSkullSnapshot(void) { return s_action.platform_skull; }
+bool ActRaiserRegional_ActorStatsEnabled(void) { return s_action.actor_stats.changed; }
+bool ActRaiserRegional_ActorStats(uint16_t actor,uint16_t native_hp,uint16_t native_attack,uint16_t *hp,uint16_t *attack) {
+  return ArRegionalActorStats_Apply(&s_action.actor_stats,actor,native_hp,native_attack,hp,attack);
+}
+uint16_t ActRaiserRegional_ActorChildStat(unsigned rule) {
+  if(rule<kArRegionalActorStat_BaseCount || rule>=kArRegionalActorStat_Count)return UINT16_MAX;
+  const uint8_t value=s_action.actor_stats.value[rule];
+  return value?value:UINT16_MAX;
 }
 
 bool ActRaiserRegional_ArrivalSnapshot(bool latch,bool continuing,bool *japanese) {
@@ -293,6 +322,32 @@ ActRaiserRegionalEditResult ActRaiserRegional_RequestRules(
     return kActRaiserRegionalEdit_Stale;
   bool ok;
   switch (group) {
+    case kActRaiserRegionalSetting_Bosses: {
+      ArRegionalBossPolicy policy;ArRegionalBoss_Init(&policy,source);
+      ok=ArRegionalSession_RequestBosses(&s_campaign.active,view->revision,&policy);break;
+    }
+    case kActRaiserRegionalSetting_Collision: {
+      ArRegionalCollisionPolicy policy;ArRegionalCollision_Init(&policy,source);
+      ok=ArRegionalSession_RequestCollision(&s_campaign.active,view->revision,&policy);break;
+    }
+    case kActRaiserRegionalSetting_PlatformSkull: {
+      ArRegionalPlatformSkullPolicy policy;ArRegionalPlatformSkull_Init(&policy,source);
+      ok=ArRegionalSession_RequestPlatformSkull(&s_campaign.active,view->revision,&policy);break;
+    }
+    case kActRaiserRegionalSetting_ActorStats: {
+      ArRegionalActorStatsPolicy policy;ArRegionalActorStats_Init(&policy,source);
+      ok=ArRegionalSession_RequestActorStats(&s_campaign.active,view->revision,&policy);break;
+    }
+    case kActRaiserRegionalSetting_StatueVolley:
+      ok=ArRegionalSession_RequestVolley(&s_campaign.active,view->revision,source);break;
+    case kActRaiserRegionalSetting_Emitters: {
+      ArRegionalEmitterPolicy policy;ArRegionalEmitter_Init(&policy,source);
+      ok=ArRegionalSession_RequestEmitters(&s_campaign.active,view->revision,&policy);break;
+    }
+    case kActRaiserRegionalSetting_ActionMotion: {
+      ArRegionalActionMotionPolicy policy;ArRegionalActionMotion_Init(&policy,source);
+      ok=ArRegionalSession_RequestActionMotion(&s_campaign.active,view->revision,&policy);break;
+    }
     case kActRaiserRegionalSetting_Arrival:
       ok=ArRegionalSession_RequestArrival(&s_campaign.active,view->revision,source);break;
     case kActRaiserRegionalSetting_Population: {
@@ -400,13 +455,23 @@ ActRaiserRegionalEditResult ActRaiserRegional_RequestRules(
       ? kActRaiserRegionalEdit_Unchanged : kActRaiserRegionalEdit_Applied;
 }
 
-bool ActRaiserRegional_BeginRoomTime(uint8_t profile, uint16_t native_bcd, uint16_t *out_bcd) {
+bool ActRaiserRegional_BeginActionRoom(uint8_t profile, uint16_t native_bcd, uint16_t *out_bcd) {
   if (!out_bcd) return false;
-  if (!s_campaign.active_valid) { *out_bcd = native_bcd; return true; }
+  if (!s_campaign.active_valid) { s_action=(ActionRuleCache){0};*out_bcd = native_bcd; return true; }
   uint16_t resolved;
   ArRegionalTimerPolicy snapshot;
+  ActionRuleCache next={0};
+  ArRegionalSession candidate=s_campaign.active;
   if (!ArRegionalTimers_Resolve(&s_campaign.active.requested.timers, profile, native_bcd, &resolved) ||
-      !ArRegionalSession_BeginTimers(&s_campaign.active, &snapshot)) return false;
+      !ArRegionalSession_BeginTimers(&candidate, &snapshot) ||
+      !ArRegionalSession_BeginActionMotion(&candidate,&next.motion) ||
+      !ArRegionalSession_BeginEmitters(&candidate,&next.emitters) ||
+      !ArRegionalSession_BeginVolley(&candidate,&next.statue_volley) ||
+      !ArRegionalSession_BeginBosses(&candidate,&next.bosses) ||
+      !ArRegionalSession_BeginCollision(&candidate,&next.collision) ||
+      !ArRegionalSession_BeginPlatformSkull(&candidate,&next.platform_skull) ||
+      !ArRegionalSession_BeginActorStats(&candidate,&next.actor_stats)) return false;
+  s_campaign.active=candidate;s_action=next;
   /* Only an accepted retry/new-room initialization abandons an interrupted
    * clear sequence; an invalid request must not erase its one-shot marker. */
   s_completion_state = kScoreIdle;
@@ -1334,6 +1399,7 @@ RecompReturn ActRaiser_RegionalTitle(CpuState *cpu) {
   if (!ok) ActRaiserHleFatal("Cannot enter regional campaign; saves preserved: %s",
                             error.message[0] ? error.message : "no durable save image");
   s_lair_seed_pending=selection!=1;
+  s_action=(ActionRuleCache){0};
   s_completion_state=kScoreIdle;
   s_completion_scene=0;
   if (s_lair_seed_pending) TryInitializeLairs(cpu);
