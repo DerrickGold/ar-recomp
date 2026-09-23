@@ -1638,8 +1638,8 @@ static void AppBoot_InstallSubsystems(AppBoot *app) {
   SettingsOverlay_SetInspectorInfoProvider(
       HostDevTools_FormatInspectorInfo);
   static const SettingsOverlayRegionalHooks kRegionalHooks = {
-    .copy = ActRaiserRegional_CopyPricingView,
-    .request = ActRaiserRegional_RequestPricing,
+    .copy = ActRaiserRegional_CopyRulesView,
+    .request = ActRaiserRegional_RequestRules,
   };
   SettingsOverlay_SetRegionalHooks(&kRegionalHooks);
   /* The layer editor (Settings > Layers, developer-only) edits the override

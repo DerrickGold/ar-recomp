@@ -48,13 +48,15 @@ static void Run(SaveBackend backend) {
   SaveCommitHost host = ArRegionalCampaign_SaveHost(&campaign);
   CHECK(SaveSystem_SetCommitHost(&host));
   CHECK(ArRegionalCampaign_Continue(&campaign, path, durable, &error));
-  CHECK(campaign.active.requested.source[0] == kArRegionalCost_US);
+  CHECK(campaign.active.requested.costs.source[0] == kArRegionalSource_US);
   ArRegionalSession loaded;
   CHECK(ArRegionalSession_Load(&loaded, 0, path, durable, &error) == kSaveCheckpoint_Missing);
   ArRegionalCostPolicy jp, eu;
-  ArRegionalCosts_Init(&jp, kArRegionalCost_Japan);
-  ArRegionalCosts_Init(&eu, kArRegionalCost_Europe);
+  ArRegionalCosts_Init(&jp, kArRegionalSource_Japan);
+  ArRegionalCosts_Init(&eu, kArRegionalSource_Europe);
   CHECK(ArRegionalCampaign_NewGame(&campaign, &jp, &error));
+  CHECK(ArRegionalSession_RequestTimers(&campaign.active, campaign.active.revision, kArRegionalSource_Japan));
+  CHECK(ArRegionalSession_RequestRetryScore(&campaign.active, campaign.active.revision, kArRegionalSource_Japan));
   ArRegionalSession saving = campaign.active;
   CHECK(ArRegionalSession_Load(&loaded, 0, path, durable, &error) == kSaveCheckpoint_Missing);
   CHECK(SaveSystem_BeginNativeWrite(&error));
@@ -64,6 +66,7 @@ static void Run(SaveBackend backend) {
   CHECK(SaveSystem_EndNativeWrite(true, &error));
   CHECK(campaign.pending_valid);
   CHECK(ArRegionalCampaign_NewGame(&campaign, &eu, &error));
+  CHECK(campaign.active.requested.timers.source[0] == kArRegionalSource_US);
   CHECK(Save_LoadFile(format, path, disk, &error));
   CHECK(!memcmp(disk, durable, sizeof(disk)));
   char blocked[256];
@@ -77,7 +80,7 @@ static void Run(SaveBackend backend) {
   CHECK(!campaign.pending_valid);
   CHECK(ArRegionalSession_Load(&loaded, 0, path, image, &error) == kSaveCheckpoint_Ready);
   CHECK(!memcmp(&loaded, &saving, sizeof(saving)));
-  CHECK(campaign.active.requested.source[0] == kArRegionalCost_Europe);
+  CHECK(campaign.active.requested.costs.source[0] == kArRegionalSource_Europe);
   /* A marker outside the checksum belongs to the durable JP game, not the
    * unsaved EU one. No direct Save_WriteFile bypass of companion rotation. */
   image[0x1ff0] ^= 1;
@@ -88,7 +91,9 @@ static void Run(SaveBackend backend) {
   SaveEditRequest_Clear(&edits); edits.master_level = 5;
   CHECK(SaveSystem_ApplyEdits(&edits, true, true, false, &error));
   CHECK(ArRegionalSession_Load(&loaded, 0, path, image, &error) == kSaveCheckpoint_Ready);
-  CHECK(loaded.requested.source[0] == kArRegionalCost_Japan);
+  CHECK(loaded.requested.costs.source[0] == kArRegionalSource_Japan);
+  CHECK(loaded.requested.timers.source[0] == kArRegionalSource_Japan);
+  CHECK(loaded.requested.retry_score == kArRegionalSource_Japan);
 
   /* Foreign import gets its own identity/provenance, never the running game's. */
   memset(disk, 0, sizeof(disk)); Save_RecomputeChecksum(disk);
@@ -100,12 +105,13 @@ static void Run(SaveBackend backend) {
   CHECK(!campaign.active_valid && !campaign.pending_valid);
   CHECK(SaveSystem_CopyDurableImage(durable));
   CHECK(ArRegionalCampaign_Continue(&campaign, path, durable, &error));
-  CHECK(campaign.active.requested.source[0] == kArRegionalCost_Europe);
+  CHECK(campaign.active.requested.costs.source[0] == kArRegionalSource_Europe);
 
   /* Same-image story saves still commit pending metadata; SRAM memcmp alone
    * must not swallow a region-only change. */
   CHECK(ArRegionalSession_RequestCosts(&campaign.active, campaign.active.revision,
-                                      kArRegionalCostGroup_Miracles, kArRegionalCost_Japan));
+                                      kArRegionalCostGroup_Miracles, kArRegionalSource_Japan));
+  CHECK(ArRegionalSession_RequestTimers(&campaign.active, campaign.active.revision, kArRegionalSource_Japan));
   CHECK(SaveSystem_BeginNativeWrite(&error));
   CHECK(SaveSystem_EndNativeWrite(true, &error));
   CHECK(SaveSystem_AutoPersistIfChanged(&error));

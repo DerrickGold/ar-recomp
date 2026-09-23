@@ -6,21 +6,27 @@
 #include "settings_overlay_artwork.h"
 #include "actraiser/actraiser_regional_settings.h"
 
-/* Pricing-subset UI adapter, never full regional gameplay presets. No CPU,
+/* Integrated-rule UI adapter, never full regional gameplay presets. No CPU,
  * save I/O or mutable campaign ownership. */
 typedef struct SettingsOverlayRegionalHooks {
-  bool (*copy)(ActRaiserRegionalPricingView *out);
-  ActRaiserRegionalEditResult (*request)(const ActRaiserRegionalPricingView *view,
-                                       ArRegionalCostGroup group,
-                                       ArRegionalCostSource source);
+  bool (*copy)(ActRaiserRegionalRulesView *out);
+  ActRaiserRegionalEditResult (*request)(const ActRaiserRegionalRulesView *view,
+                                       ActRaiserRegionalSettingGroup group,
+                                       ArRegionalSource source);
 } SettingsOverlayRegionalHooks;
 
-const char *SettingsOverlayRegions_RowKey(ArRegionalCostGroup group);
-const char *SettingsOverlayRegions_RowLabel(ArUiLocale locale, ArRegionalCostGroup group);
+const char *SettingsOverlayRegions_RowKey(ActRaiserRegionalSettingGroup group);
+const char *SettingsOverlayRegions_RowLabel(ArUiLocale locale, ActRaiserRegionalSettingGroup group);
 const char *SettingsOverlayRegions_EditStatus(ArUiLocale locale, ActRaiserRegionalEditResult result);
-bool SettingsOverlayRegions_NextSource(const ArRegionalCostPolicy *policy,
-                                      ArRegionalCostGroup group, int direction,
-                                      ArRegionalCostSource *source);
+bool SettingsOverlayRegions_NextSource(const ActRaiserRegionalRulesView *view,
+                                      ActRaiserRegionalSettingGroup group, int direction,
+                                      ArRegionalSource *source);
+bool SettingsOverlayRegions_ViewBadge(const ActRaiserRegionalRulesView *view,
+                                      ActRaiserRegionalSettingGroup group, bool effective,
+                                      SettingsOverlayRegionBadge *badge);
+bool SettingsOverlayRegions_ViewDescription(ArUiLocale locale,
+    const ActRaiserRegionalRulesView *view, ActRaiserRegionalSettingGroup group,
+    char *output, size_t capacity);
 bool SettingsOverlayRegions_CostBadge(const ArRegionalCostPolicy *policy,
                                      ArRegionalCostGroup group,
                                      SettingsOverlayRegionBadge *badge);

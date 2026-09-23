@@ -55,6 +55,7 @@ uint32 g_tailcall_src24;
 static uint16 g_tailcall_entry_s;
 static uint8 g_tailcall_hrv;
 static bool g_tailcall_context_valid;
+static int g_hle_tail_request_depth;
 PairedTailDriver *g_sr_paired_tail_driver;
 PairedTailDriver *g_sr_paired_tail_owner;
 
@@ -591,6 +592,16 @@ uint8 *IndirPtrDB(uint8 direct_page_address, uint16 offset) {
     return RomPtr(address & 0xffffffu);
 }
 
+void cpu_yield_execution(void (*yield_to_host)(void *), void *context) {
+    if (yield_to_host == NULL) return;
+    const bool previous = s_execution_checkpoint_active;
+    const char *interrupted_name = g_last_recomp_func;
+    s_execution_checkpoint_active = true;
+    yield_to_host(context);
+    s_execution_checkpoint_active = previous;
+    g_last_recomp_func = interrupted_name;
+}
+
 void cpu_poll_wait(CpuState *cpu, uint32 resume_pc24,
                    uint32 read_address24, uint32 read_width_bytes) {
     uint32 bank, address;
@@ -686,11 +697,13 @@ int cpu_take_tailcall_return_context(uint16 *entry_stack, uint8 *hrv) {
     if (entry_stack != NULL) *entry_stack = g_tailcall_entry_s;
     if (hrv != NULL) *hrv = g_tailcall_hrv;
     g_tailcall_context_valid = false;
+    g_hle_tail_request_depth = 0;
     return 1;
 }
 
 void cpu_tailcall_request(uint32 pc24, uint16 miss_stack,
                           uint32 source_pc24) {
+    g_hle_tail_request_depth = 0;
     g_tailcall_pc24 = pc24 & 0xffffffu;
     g_tailcall_miss_s = miss_stack;
     g_tailcall_src24 = source_pc24 & 0xffffffu;
@@ -703,6 +716,14 @@ int cpu_hle_tailcall_request(uint32 pc24, uint32 source_pc24) {
     const uint16 entry_stack = g_cpu_entry_s[owner];
     cpu_tailcall_inherit_return_context(entry_stack, g_cpu_entry_hrv[owner]);
     cpu_tailcall_request(pc24, entry_stack, source_pc24);
+    g_hle_tail_request_depth = g_recomp_stack_top;
+    return 1;
+}
+
+int sr_take_hle_tail_request(int activation_depth) {
+    if (!g_tailcall_context_valid || !g_hle_tail_request_depth ||
+        g_hle_tail_request_depth != activation_depth) return 0;
+    g_hle_tail_request_depth = 0;
     return 1;
 }
 
@@ -714,6 +735,7 @@ CpuReturnScope *g_cpu_owned_unwind_scope;
 static void clear_execution_context(void) {
     g_recomp_stack_top = 0;
     g_tailcall_context_valid = false;
+    g_hle_tail_request_depth = 0;
     g_sr_paired_tail_driver = NULL;
     g_sr_paired_tail_owner = NULL;
     g_cpu_return_scope = NULL;

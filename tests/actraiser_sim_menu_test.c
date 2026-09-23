@@ -17,6 +17,8 @@ static const uint16_t questions[] = {0xfd15, 0xfdb9, 0xff57, 0xfe2a, 0xfec7};
 static const uint16_t question_callers[] = {0x82ae, 0x8319, 0x8384, 0x844f, 0x83ef};
 
 bool ActRaiserRegional_MiracleEntry(const CpuState *cpu) { (void)cpu; return false; }
+bool ActRaiserRegional_ReportCommandEntry(const CpuState *cpu) { (void)cpu; return false; }
+RecompReturn ActRaiserRegional_RunReportCommand(CpuState *cpu) { (void)cpu; assert(false); return RECOMP_RETURN_NORMAL; }
 RecompReturn ActRaiserRegional_RunMiracle(CpuState *cpu) { (void)cpu; assert(false); return RECOMP_RETURN_NORMAL; }
 bool ActRaiserRegional_CopyPrices(ArRegionalCostSnapshot *prices) {
   *prices=(ArRegionalCostSnapshot){{1,1,1,1,10,20,30,80,160}}; return true;

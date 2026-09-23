@@ -20,8 +20,8 @@ static const ArRegionalCostDescriptor kCosts[kArRegionalCostRule_Count] = {
 
 _Static_assert(kArRegionalCostRule_Count <= 16, "cost preview mask capacity");
 
-static bool ValidSource(ArRegionalCostSource source) {
-  return (unsigned)source < kArRegionalCostSource_Count;
+static bool ValidSource(ArRegionalSource source) {
+  return (unsigned)source < kArRegionalSource_Count;
 }
 
 static bool ValidPolicy(const ArRegionalCostPolicy *policy) {
@@ -35,14 +35,14 @@ const ArRegionalCostDescriptor *ArRegionalCosts_Descriptor(ArRegionalCostRule ru
   return (unsigned)rule < kArRegionalCostRule_Count ? &kCosts[rule] : NULL;
 }
 
-bool ArRegionalCosts_Init(ArRegionalCostPolicy *policy, ArRegionalCostSource source) {
+bool ArRegionalCosts_Init(ArRegionalCostPolicy *policy, ArRegionalSource source) {
   if (!policy || !ValidSource(source)) return false;
   for (unsigned i = 0; i < kArRegionalCostRule_Count; ++i) policy->source[i] = source;
   return true;
 }
 
 bool ArRegionalCosts_SetRule(ArRegionalCostPolicy *policy, ArRegionalCostRule rule,
-                             ArRegionalCostSource source) {
+                             ArRegionalSource source) {
   if (!ValidPolicy(policy) || !ArRegionalCosts_Descriptor(rule) || !ValidSource(source))
     return false;
   policy->source[rule] = source;
@@ -50,7 +50,7 @@ bool ArRegionalCosts_SetRule(ArRegionalCostPolicy *policy, ArRegionalCostRule ru
 }
 
 bool ArRegionalCosts_SetGroup(ArRegionalCostPolicy *policy, ArRegionalCostGroup group,
-                              ArRegionalCostSource source) {
+                              ArRegionalSource source) {
   if (!ValidPolicy(policy) || (unsigned)group >= kArRegionalCostGroup_Count ||
       !ValidSource(source)) return false;
   for (unsigned i = 0; i < kArRegionalCostRule_Count; ++i)
@@ -82,28 +82,28 @@ bool ArRegionalCosts_Preview(const ArRegionalCostPolicy *current,
 
 bool ArRegionalCosts_GroupSource(const ArRegionalCostPolicy *policy,
                                  ArRegionalCostGroup group,
-                                 ArRegionalCostSource *source) {
+                                 ArRegionalSource *source) {
   if (!ValidPolicy(policy) || !source || (unsigned)group >= kArRegionalCostGroup_Count)
     return false;
-  ArRegionalCostSource found = kArRegionalCostSource_Count;
+  ArRegionalSource found = kArRegionalSource_Count;
   bool uniform = true;
   for (unsigned i = 0; i < kArRegionalCostRule_Count; ++i) {
     if (kCosts[i].group != group) continue;
-    if (found != kArRegionalCostSource_Count && found != policy->source[i]) uniform = false;
+    if (found != kArRegionalSource_Count && found != policy->source[i]) uniform = false;
     found = policy->source[i];
   }
   if (uniform) {
     *source = found;
     return true;
   }
-  for (unsigned candidate = 0; candidate < kArRegionalCostSource_Count; ++candidate) {
+  for (unsigned candidate = 0; candidate < kArRegionalSource_Count; ++candidate) {
     bool matches = true;
     for (unsigned i = 0; i < kArRegionalCostRule_Count; ++i) {
       if (kCosts[i].group == group &&
           kCosts[i].price[policy->source[i]] != kCosts[i].price[candidate]) matches = false;
     }
     if (matches) {
-      *source = (ArRegionalCostSource)candidate;
+      *source = (ArRegionalSource)candidate;
       return true;
     }
   }

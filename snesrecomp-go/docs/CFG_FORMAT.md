@@ -127,6 +127,20 @@ the live `CpuState`; otherwise the decoded native body executes. The predicate
 must not mutate CPU or emulated state. Use this for deliberately bounded HLE
 domains that still need an exact native fallback.
 
+This attaches to a function entry; it does not intercept an arbitrary decoded
+instruction inside another function. Add and verify explicit `func` boundaries
+when replacing a prefix or shared continuation. Inspect incoming branches and
+fall-throughs in the generated code.
+
+A branch-only HLE may call `cpu_hle_tailcall_request` with full 24-bit target
+and source addresses, then immediately return `RECOMP_RETURN_TAILCALL`.
+The generated wrapper retains its original hardware-stack/return context and
+owns its activation pop. For a paired caller, the wrapper drives its own branch
+through the native return before the caller resumes; an unpaired branch is
+left to the outer dispatch loop. A nonlocal return from a nested child is not
+the wrapper's own branch and must retain its escape semantics. Game hooks must
+not pop generated frames, repair the stack or call wrapper epilogue helpers.
+
 ### `hle_dispatch PC C_FUNCTION`
 
 Routes a dispatch site to a project-provided C function.

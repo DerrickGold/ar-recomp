@@ -32,6 +32,7 @@ func TestConditionalHLEKeepsNativeFallback(t *testing.T) {
 	for _, fragment := range []string{
 		"if (HostConditionalEnabled(cpu))",
 		"RecompReturn _r = HostConditional(cpu);",
+		"RecompStackPop();\n    return cpu_finish_hle_return(cpu, _r, _entry_s, _hrv);",
 		"L_8000_M1X1:",
 		"uint8 _v1 = 0x5;",
 	} {

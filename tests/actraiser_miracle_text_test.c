@@ -29,7 +29,7 @@ int main(void) {
         ram[0x1b150]=fields[i].us[n]; ram[0x1b151]=0x38;
         CpuState before=c;
         ActRaiserMiracle_UpdateNativeDigit(&c,&prices);
-        assert(ram[0x1b150]==(region==kArRegionalCost_Japan?fields[i].jp[n]:fields[i].us[n]));
+        assert(ram[0x1b150]==(region==kArRegionalSource_Japan?fields[i].jp[n]:fields[i].us[n]));
         assert(ram[0x1b151]==0x38 && !memcmp(&c,&before,sizeof(c)));
         for (unsigned bad=0;bad<8;++bad) {
           c=before; ram[0x1b150]=fields[i].us[n];

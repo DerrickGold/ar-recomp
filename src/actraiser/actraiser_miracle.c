@@ -2,8 +2,8 @@
 
 #include "actraiser/actraiser_cpu_hle_internal.h"
 #include "actraiser/actraiser_hle_fatal.h"
+#include "actraiser/actraiser_native_call.h"
 
-typedef RecompReturn (*NativeLeaf)(CpuState *);
 #define LEAF(bank, pc) extern RecompReturn bank_##bank##_##pc##_M1X0(CpuState *)
 LEAF(01, 8E29); LEAF(01, 8D92); LEAF(01, 8CB6); LEAF(01, 9754);
 LEAF(03, CA5E); LEAF(01, 97E5); LEAF(01, 93B4); LEAF(01, B1FE);
@@ -53,32 +53,15 @@ static void LoadY(CpuState *cpu, uint16_t value) {
 /* Only these audited native leaves are called. Keep their real JSR/JSL
  * frames and return ownership; do not restore architectural state or discard
  * nonlocal control flow. No synthesized resource values or ROM mutation. */
-static RecompReturn Call(CpuState *cpu, NativeLeaf leaf, uint8_t bank,
+static RecompReturn Call(CpuState *cpu, ActRaiserNativeLeaf leaf, uint8_t bank,
                          uint16_t caller, bool long_call) {
-  const uint16_t stack = cpu->S;
-  const uint8_t pb = cpu->PB;
-  if (long_call) cpu_write8(cpu, 0, cpu->S--, pb);
-  ActRaiserCpuHle_PushWord(cpu, caller);
-  cpu->host_return_valid = 1;
-  CpuReturnScope scope;
-  cpu_return_scope_begin(&scope, cpu, ((uint32_t)pb << 16) | (uint16_t)(caller + 1),
-                         stack, long_call ? 3 : 2);
-  cpu->PB = bank;
-  RecompReturn result = leaf(cpu);
-  if (result == RECOMP_RETURN_OWNED_UNWIND && cpu_finish_owned_unwind(&scope, cpu))
-    result = RECOMP_RETURN_NORMAL;
-  /* Generated RTL leaves PB restoration to its paired JSL caller. Match the
-   * generated call contract for normal/SKIP/tail returns, but never overwrite
-   * the native continuation owned by a parked or escaping owned return. */
-  if (long_call && result != RECOMP_RETURN_PARKED_WAIT &&
-      result != RECOMP_RETURN_OWNED_UNWIND) cpu->PB = pb;
-  cpu_return_scope_end(&scope);
+  RecompReturn result = ActRaiserNativeCall(cpu, leaf, bank, caller, long_call);
   if (result != RECOMP_RETURN_NORMAL) {
     /* Match the native direct caller's one-level SKIP propagation. A SKIP_1
      * leaves this activation with NORMAL; it must not resume its next step. */
     return result;
   }
-  if (cpu->S != stack || cpu->PB != pb || !cpu->m_flag || cpu->x_flag ||
+  if (!cpu->m_flag || cpu->x_flag ||
       cpu->DB != 1 || cpu->D || cpu->emulation)
     ActRaiserHleFatal("Miracle leaf at $%02X:%04X returned outside its contract", bank, caller);
   return RECOMP_RETURN_NORMAL;

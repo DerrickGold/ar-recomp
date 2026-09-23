@@ -834,6 +834,7 @@ if(BUILD_TESTING)
     add_executable(actraiser_localization_compose_state_test
         tests/actraiser_localization_compose_state_test.c
         src/actraiser/actraiser_localization_compose_state.c
+        src/actraiser/actraiser_localization_speed_text.c
         src/actraiser/actraiser_localization_grid.c
         src/localization/language_pack.c src/localization/text_template.c
         src/localization/language_contract.c
@@ -1835,6 +1836,7 @@ if(BUILD_TESTING)
         tests/actraiser_action_video_config_hle_test.c
         src/actraiser/actraiser_cpu_hle_internal.c
         src/actraiser/actraiser_action_video_config.c
+        src/actraiser/actraiser_hle_fatal.c
     )
     target_include_directories(actraiser_action_video_config_hle_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
@@ -2040,6 +2042,17 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_regional_policy_test
         tests/regional_policy_test.c
+        src/regional/regional_timers.c
+        src/regional/regional_retry.c
+        src/regional/regional_town_wait.c
+        src/regional/regional_fishing.c
+        src/regional/regional_development.c
+        src/regional/regional_recovery.c
+        src/regional/regional_quake.c
+        src/regional/regional_score_page.c
+        src/regional/regional_menu_return.c
+        src/regional/regional_speed_range.c
+        src/regional/regional_magic_gesture.c
         src/regional/regional_costs.c
         src/regional/regional_stock.c
         src/settings_overlay_regions.c
@@ -2057,6 +2070,17 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_settings_overlay_test
         tests/settings_overlay_test.c
+        src/regional/regional_timers.c
+        src/regional/regional_retry.c
+        src/regional/regional_town_wait.c
+        src/regional/regional_fishing.c
+        src/regional/regional_development.c
+        src/regional/regional_recovery.c
+        src/regional/regional_quake.c
+        src/regional/regional_score_page.c
+        src/regional/regional_menu_return.c
+        src/regional/regional_speed_range.c
+        src/regional/regional_magic_gesture.c
         src/settings_overlay_regions.c
         src/regional/regional_costs.c
         src/performance_metrics.c src/performance_overlay.c
@@ -2529,6 +2553,17 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_regional_session_test
         tests/regional_session_test.c
+        src/regional/regional_timers.c
+        src/regional/regional_retry.c
+        src/regional/regional_town_wait.c
+        src/regional/regional_fishing.c
+        src/regional/regional_development.c
+        src/regional/regional_recovery.c
+        src/regional/regional_quake.c
+        src/regional/regional_score_page.c
+        src/regional/regional_menu_return.c
+        src/regional/regional_speed_range.c
+        src/regional/regional_magic_gesture.c
         src/regional/regional_session.c
         src/regional/regional_costs.c
         src/save_checkpoint.c
@@ -2538,8 +2573,23 @@ if(BUILD_TESTING)
     target_include_directories(actraiser_regional_session_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     add_test(NAME actraiser_regional_session COMMAND actraiser_regional_session_test)
 
+    add_executable(actraiser_regional_timers_test tests/regional_timers_test.c src/regional/regional_timers.c)
+    target_include_directories(actraiser_regional_timers_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    add_test(NAME actraiser_regional_timers COMMAND actraiser_regional_timers_test)
+
     add_executable(actraiser_regional_campaign_test
         tests/regional_campaign_test.c
+        src/regional/regional_timers.c
+        src/regional/regional_retry.c
+        src/regional/regional_town_wait.c
+        src/regional/regional_fishing.c
+        src/regional/regional_development.c
+        src/regional/regional_recovery.c
+        src/regional/regional_quake.c
+        src/regional/regional_score_page.c
+        src/regional/regional_menu_return.c
+        src/regional/regional_speed_range.c
+        src/regional/regional_magic_gesture.c
         src/regional/regional_campaign.c
         src/regional/regional_session.c
         src/regional/regional_costs.c
@@ -2555,6 +2605,17 @@ if(BUILD_TESTING)
     add_executable(actraiser_regional_fingerprint_test
         tests/regional_fingerprint_test.c
         src/regional/regional_fingerprint.c
+        src/regional/regional_timers.c
+        src/regional/regional_retry.c
+        src/regional/regional_town_wait.c
+        src/regional/regional_fishing.c
+        src/regional/regional_development.c
+        src/regional/regional_recovery.c
+        src/regional/regional_quake.c
+        src/regional/regional_score_page.c
+        src/regional/regional_menu_return.c
+        src/regional/regional_speed_range.c
+        src/regional/regional_magic_gesture.c
         src/regional/regional_costs.c
         ${SNESRECOMP_RUNNER_ROOT}/src/support/sha256.c)
     target_include_directories(actraiser_regional_fingerprint_test PRIVATE
@@ -2563,8 +2624,26 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_regional_runtime_test
         tests/actraiser_regional_runtime_test.c
+        src/regional/regional_timers.c
+        src/regional/regional_retry.c
+        src/regional/regional_town_wait.c
+        src/regional/regional_fishing.c
+        src/regional/regional_development.c
+        src/regional/regional_recovery.c
+        src/regional/regional_quake.c
+        src/regional/regional_score_page.c
+        src/regional/regional_menu_return.c
+        src/regional/regional_speed_range.c
+        src/regional/regional_magic_gesture.c
         src/actraiser/actraiser_regional_runtime.c
+        src/actraiser/actraiser_speed_selector.c
+        src/actraiser/actraiser_magic_gesture.c
+        src/actraiser/actraiser_quake.c
         src/actraiser/actraiser_scroll_cast.c
+        src/actraiser/actraiser_retry.c
+        src/actraiser/actraiser_town_wait.c
+        src/actraiser/actraiser_fishing.c
+        src/actraiser/actraiser_native_call.c
         src/actraiser/actraiser_cpu_hle_internal.c
         src/actraiser/actraiser_hle_fatal.c
         src/regional/regional_costs.c src/regional/regional_campaign.c
@@ -2583,9 +2662,76 @@ if(BUILD_TESTING)
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_scroll_cast COMMAND actraiser_scroll_cast_test)
 
+    add_executable(actraiser_retry_test tests/actraiser_retry_test.c
+        src/actraiser/actraiser_retry.c src/actraiser/actraiser_cpu_hle_internal.c
+        src/actraiser/actraiser_hle_fatal.c src/regional/regional_retry.c)
+    target_include_directories(actraiser_retry_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    add_test(NAME actraiser_retry COMMAND actraiser_retry_test)
+
+    add_executable(actraiser_town_wait_test tests/actraiser_town_wait_test.c
+        src/actraiser/actraiser_town_wait.c src/actraiser/actraiser_cpu_hle_internal.c
+        src/actraiser/actraiser_hle_fatal.c)
+    target_include_directories(actraiser_town_wait_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    add_test(NAME actraiser_town_wait COMMAND actraiser_town_wait_test)
+
+    add_executable(actraiser_fishing_test tests/actraiser_fishing_test.c
+        src/actraiser/actraiser_fishing.c src/actraiser/actraiser_native_call.c
+        src/actraiser/actraiser_cpu_hle_internal.c src/actraiser/actraiser_hle_fatal.c)
+    target_include_directories(actraiser_fishing_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    add_test(NAME actraiser_fishing COMMAND actraiser_fishing_test)
+
+    add_executable(actraiser_development_test tests/actraiser_development_test.c
+        src/actraiser/actraiser_development.c src/actraiser/actraiser_native_call.c
+        src/actraiser/actraiser_cpu_hle_internal.c src/actraiser/actraiser_hle_fatal.c
+        src/regional/regional_development.c)
+    target_include_directories(actraiser_development_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    add_test(NAME actraiser_development COMMAND actraiser_development_test)
+
+    add_executable(actraiser_recovery_test tests/actraiser_recovery_test.c
+        src/actraiser/actraiser_recovery.c src/actraiser/actraiser_native_call.c
+        src/actraiser/actraiser_cpu_hle_internal.c src/actraiser/actraiser_hle_fatal.c
+        src/regional/regional_recovery.c)
+    target_include_directories(actraiser_recovery_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    add_test(NAME actraiser_recovery COMMAND actraiser_recovery_test)
+
+    add_executable(actraiser_quake_test tests/actraiser_quake_test.c
+        src/actraiser/actraiser_quake.c src/actraiser/actraiser_native_call.c
+        src/actraiser/actraiser_cpu_hle_internal.c src/actraiser/actraiser_hle_fatal.c
+        src/regional/regional_quake.c)
+    target_include_directories(actraiser_quake_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    add_test(NAME actraiser_quake COMMAND actraiser_quake_test)
+
+    add_executable(actraiser_report_command_test tests/actraiser_report_command_test.c
+        src/actraiser/actraiser_report_command.c src/actraiser/actraiser_native_call.c
+        src/actraiser/actraiser_cpu_hle_internal.c src/actraiser/actraiser_hle_fatal.c)
+    target_include_directories(actraiser_report_command_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    add_test(NAME actraiser_report_command COMMAND actraiser_report_command_test)
+
+    add_executable(actraiser_magic_gesture_test tests/actraiser_magic_gesture_test.c
+        src/actraiser/actraiser_magic_gesture.c
+        src/actraiser/actraiser_cpu_hle_internal.c src/actraiser/actraiser_hle_fatal.c)
+    target_include_directories(actraiser_magic_gesture_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    add_test(NAME actraiser_magic_gesture COMMAND actraiser_magic_gesture_test)
+
+    add_executable(actraiser_speed_selector_test tests/actraiser_speed_selector_test.c
+        src/actraiser/actraiser_speed_selector.c
+        src/actraiser/actraiser_cpu_hle_internal.c src/actraiser/actraiser_hle_fatal.c)
+    target_include_directories(actraiser_speed_selector_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    add_test(NAME actraiser_speed_selector COMMAND actraiser_speed_selector_test)
+
     add_executable(actraiser_miracle_test
         tests/actraiser_miracle_test.c
         src/actraiser/actraiser_miracle.c
+        src/actraiser/actraiser_native_call.c
         src/actraiser/actraiser_cpu_hle_internal.c
         src/actraiser/actraiser_hle_fatal.c
         src/regional/regional_costs.c)
@@ -2685,6 +2831,7 @@ if(BUILD_TESTING)
         src/actraiser/actraiser_localization_text.c
         src/actraiser/actraiser_localization_routes.c
         src/actraiser/actraiser_localization_compose_state.c
+        src/actraiser/actraiser_localization_speed_text.c
         src/actraiser/actraiser_localization_grid.c
         src/actraiser/actraiser_localization_name_compose.c
         src/actraiser/actraiser_localization_text_normalize.c

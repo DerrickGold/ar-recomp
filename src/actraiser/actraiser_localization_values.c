@@ -223,7 +223,7 @@ bool ActRaiserLocalizationValues_Capture(
       .fallback_pack = fallback_pack,
   };
   ArRegionalCostPolicy baseline;
-  ArRegionalCosts_Init(&baseline, kArRegionalCost_US);
+  ArRegionalCosts_Init(&baseline, kArRegionalSource_US);
   ArRegionalCosts_Resolve(&baseline, &captured.prices);
   snprintf(captured.master_name, sizeof(captured.master_name), "%s",
            master_name);

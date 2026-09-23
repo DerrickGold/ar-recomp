@@ -6,6 +6,7 @@
 #include "actraiser/actraiser_localization_name_entry.h"
 #include "actraiser/actraiser_localization_style.h"
 #include "localization/language_contract.h"
+#include "actraiser/actraiser_localization_speed_text.h"
 
 static bool IsValid(const ActRaiserLocalizationComposeState *state) {
   return state && state->struct_size >= sizeof(*state) &&
@@ -35,6 +36,14 @@ void ActRaiserLocalizationComposeState_Init(
   memset(state, 0, sizeof(*state));
   state->struct_size = sizeof(*state);
   state->abi_version = ACTRAISER_LOCALIZATION_COMPOSE_STATE_ABI_VERSION;
+  state->message_speed_maximum = 9;
+}
+
+bool ActRaiserLocalizationComposeState_SetMessageSpeedMaximum(
+    ActRaiserLocalizationComposeState *state, unsigned maximum) {
+  if (!IsValid(state) || (maximum != 7 && maximum != 9)) return false;
+  state->message_speed_maximum = (uint8_t)maximum;
+  return true;
 }
 
 void ActRaiserLocalizationComposeState_Clear(
@@ -189,6 +198,13 @@ static bool ResolveSnapshot(
                resolved->semantic_id);
     return false;
   }
+  if ((resolved->menu == kActRaiserLocalizationMenu_MessageSpeed ||
+       resolved->menu == kActRaiserLocalizationMenu_MessageSpeedJP) &&
+      !ActRaiserLocalizationSpeedText_Project(&resolved->text,
+          resolved->menu == kActRaiserLocalizationMenu_MessageSpeedJP ? 7 : 9)) {
+    if (error && error_capacity) snprintf(error, error_capacity, "incompatible message-speed numeric row");
+    return false;
+  }
   return true;
 }
 
@@ -250,6 +266,8 @@ bool ActRaiserLocalizationComposeState_Process(
       .layout = LayoutForSemanticId(route->semantic_id),
       .menu = MenuForSemanticId(route->semantic_id),
   };
+  if (resolved.menu == kActRaiserLocalizationMenu_MessageSpeed && state->message_speed_maximum == 7)
+    resolved.menu = kActRaiserLocalizationMenu_MessageSpeedJP;
   if (resolved.menu != kActRaiserLocalizationMenu_None &&
       !ActRaiserLocalizationGrid_Build(resolved.menu, resolved.region,
                                        &resolved.grid))

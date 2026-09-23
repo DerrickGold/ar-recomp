@@ -1016,6 +1016,18 @@ static uint16 tail_expected_entry;
 static uint8 tail_expected_hrv;
 static uint16 adopt_owner_entry, adopt_stale_entry;
 static unsigned adopt_continuations, adopt_nested, adopt_outer_continuations;
+static unsigned hle_steps, hle_child_returns, hle_parent_resumes;
+static unsigned native_yields;
+static void native_frame_yield(void *context) {
+    const int depth = g_recomp_stack_top;
+    PairedTailDriver *driver = g_sr_paired_tail_driver;
+    CpuReturnScope *scope = g_cpu_return_scope;
+    WatchdogFrameStart();
+    check(g_recomp_stack_top == depth && g_sr_paired_tail_driver == driver &&
+          g_cpu_return_scope == scope, "native host ticks retain suspended return ownership");
+    if (context != NULL) cpu_yield_execution(native_frame_yield, NULL);
+    ++native_yields;
+}
 RecompReturn cpu_dispatch_pc_from(CpuState *cpu, uint32 pc24,
         uint16 miss_stack, uint32 source_pc24) {
     (void)miss_stack; (void)source_pc24;
@@ -1031,7 +1043,38 @@ RecompReturn cpu_dispatch_pc_from(CpuState *cpu, uint32 pc24,
               "paired registry entry inherits return context");
         cpu->host_return_valid = hrv;
         RecompStackPush("split-body");
-        if (pc24 == 0x009000u) {
+        if (pc24 == 0x009c00u) {
+            /* A conditional HLE's branch must complete a nested paired call
+             * before the surrounding controller resumes its next instruction. */
+            if (hle_steps == 0) {
+                const uint16 before = cpu->S;
+                cpu->S -= 2u;
+                const uint16 child_entry = cpu->S;
+                RecompStackPush("nested-hle-wrapper");
+                g_cpu_entry_s[g_recomp_stack_top - 1] = child_entry;
+                g_cpu_entry_hrv[g_recomp_stack_top - 1] = 1;
+                check(cpu_hle_tailcall_request(0x009d00u, 0x009c10u), "nested HLE branch queued");
+                RecompStackPop();
+                check(cpu_finish_hle_return(cpu, RECOMP_RETURN_TAILCALL, child_entry, 1) == RECOMP_RETURN_NORMAL &&
+                      cpu->S == before && hle_child_returns == 1u,
+                      "nested HLE continuation returns to the exact paired host caller");
+                ++hle_parent_resumes;
+            }
+            if (++hle_steps < 10000u) {
+                g_cpu_entry_s[g_recomp_stack_top - 1] = entry;
+                g_cpu_entry_hrv[g_recomp_stack_top - 1] = hrv;
+                check(cpu_hle_tailcall_request(0x009c00u, pc24), "HLE chain branch queued");
+                RecompStackPop();
+                result = cpu_finish_hle_return(cpu, RECOMP_RETURN_TAILCALL, entry, hrv);
+            } else {
+                RecompStackPop(); cpu->S = (uint16)(entry + 3u);
+                result = RECOMP_RETURN_NORMAL;
+            }
+        } else if (pc24 == 0x009d00u) {
+            ++hle_child_returns;
+            RecompStackPop(); cpu->S = (uint16)(entry + 2u);
+        } else if (pc24 == 0x009000u) {
+            cpu_yield_execution(native_frame_yield, cpu);
             check(entry == tail_expected_entry && hrv == tail_expected_hrv,
                   "split bodies keep original entry S and host pairing");
             check(cpu->m_flag == (tail_steps & 1u), "live width retained across split tail");
@@ -1152,13 +1195,61 @@ static void test_paired_tail_driver(void) {
           "split-tail chain returns normally to the active caller");
     check(tail_steps == 10001u && tail_child_calls == 1u && tail_max_depth == 2u &&
               tail_dispatch_depth == 0u && g_recomp_stack_top == 1 &&
-              cpu.S == (uint16)(tail_expected_entry + 3u),
+              cpu.S == (uint16)(tail_expected_entry + 3u) && native_yields == 20002u,
           "long tail chains are flat; only genuine nested calls add a driver");
     check(cpu_take_tailcall_return_context(NULL, NULL) == 0,
           "completed tail leaves no pending context");
     (void)cpu_dispatch_paired_tail_from(&cpu, 0x00deadu, 0x1234u, 1u, 0x008000u);
     check(cpu_take_tailcall_return_context(NULL, NULL) == 0,
           "missing body cannot poison a later unrelated entry");
+    RecompStackPop();
+    cpu_yield_execution(NULL, NULL);
+    RecompStackPush("abandoned-after-yield");
+    WatchdogFrameStart();
+    check(g_recomp_stack_top == 0, "yield guard restores ordinary fresh-frame cleanup");
+}
+
+static void test_hle_tail_return(void) {
+    CpuState cpu = {0};
+    cpu.S = 0x1fe0u;
+    RecompStackPush("hle-host-caller");
+    RecompStackPush("hle-wrapper");
+    g_cpu_entry_s[g_recomp_stack_top - 1] = cpu.S;
+    g_cpu_entry_hrv[g_recomp_stack_top - 1] = 1;
+    check(cpu_hle_tailcall_request(0x009c00u, 0x008000u), "paired HLE root branch queued");
+    RecompStackPop();
+    tail_max_depth = 0;
+    check(cpu_finish_hle_return(&cpu, RECOMP_RETURN_TAILCALL, cpu.S, 1) == RECOMP_RETURN_NORMAL,
+          "paired HLE root completes before returning to its host caller");
+    check(hle_steps == 10000u && hle_child_returns == 1u && hle_parent_resumes == 1u &&
+          tail_max_depth == 2u && g_recomp_stack_top == 1 && cpu.S == 0x1fe3u,
+          "HLE branches are flat, genuine nested calls isolated, native return popped once");
+    check(!cpu_take_tailcall_return_context(NULL, NULL), "HLE paired completion clears context");
+    RecompStackPush("unpaired-hle");
+    g_cpu_entry_s[g_recomp_stack_top - 1] = cpu.S;
+    g_cpu_entry_hrv[g_recomp_stack_top - 1] = 0;
+    check(cpu_hle_tailcall_request(0x009c00u, 0x008000u), "unpaired HLE branch queued");
+    RecompStackPop();
+    check(cpu_finish_hle_return(&cpu, RECOMP_RETURN_TAILCALL, cpu.S, 0) == RECOMP_RETURN_TAILCALL &&
+          hle_steps == 10000u, "unpaired HLE branch stays with outer dispatcher");
+    check(cpu_take_tailcall_return_context(NULL, NULL), "unpaired HLE context survives");
+    cpu_tailcall_inherit_return_context(0x1fc0u, 1);
+    cpu_tailcall_request(0x009d00u, 0x1fc0u, 0x008123u);
+    check(cpu_finish_hle_return(&cpu, RECOMP_RETURN_TAILCALL, cpu.S, 1) == RECOMP_RETURN_TAILCALL &&
+          hle_child_returns == 1u, "escaped native child's tail is not an owned HLE branch");
+    check(cpu_take_tailcall_return_context(NULL, NULL), "escaped child keeps its context");
+    RecompStackPush("owned-hle");
+    g_cpu_entry_s[g_recomp_stack_top - 1] = cpu.S;
+    g_cpu_entry_hrv[g_recomp_stack_top - 1] = 1;
+    check(cpu_hle_tailcall_request(0x009d00u, 0x008000u), "owned HLE branch queued");
+    check(cpu_finish_hle_return(&cpu, RECOMP_RETURN_TAILCALL, cpu.S, 1) == RECOMP_RETURN_TAILCALL &&
+          hle_child_returns == 1u, "a different activation cannot consume an owned HLE branch");
+    RecompStackPop();
+    check(cpu_finish_hle_return(&cpu, RECOMP_RETURN_OWNED_UNWIND, cpu.S, 1) == RECOMP_RETURN_OWNED_UNWIND &&
+          !cpu_take_tailcall_return_context(NULL, NULL), "aborted HLE request does not poison a later call");
+    for (unsigned result = RECOMP_RETURN_NORMAL; result <= RECOMP_RETURN_OWNED_UNWIND; ++result)
+        check(cpu_finish_hle_return(&cpu, (RecompReturn)result, cpu.S, 1) == (RecompReturn)result,
+              "non-owned HLE returns propagate unchanged");
     RecompStackPop();
 }
 
@@ -1254,7 +1345,9 @@ static void test_abandoned_continuation_cleanup(void) {
         g_cpu_owned_unwind_scope = &outer;
         g_sr_paired_tail_driver = sentinel;
         g_sr_paired_tail_owner = sentinel;
-        cpu_tailcall_inherit_return_context(cpu.S, 1u);
+        g_cpu_entry_s[g_recomp_stack_top - 1] = cpu.S;
+        g_cpu_entry_hrv[g_recomp_stack_top - 1] = 1;
+        check(cpu_hle_tailcall_request(0x009d00u, 0x008000u), "abandoned HLE branch queued");
         if (shutdown) SnesShutdown();
         else WatchdogFrameStart();
         check(g_recomp_stack_top == 0 && g_sr_paired_tail_driver == NULL &&
@@ -1503,6 +1596,7 @@ int main(void) {
     test_execution_checkpoint();
     test_poll_wait();
     test_paired_tail_driver();
+    test_hle_tail_return();
     test_paired_tail_adopts_owner_after_dropped_frame();
     test_stacked_result_return();
     test_abandoned_continuation_cleanup();

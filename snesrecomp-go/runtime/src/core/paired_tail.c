@@ -11,6 +11,19 @@ struct PairedTailDriver {
     int activation_depth;
 };
 
+RecompReturn cpu_finish_hle_return(CpuState *cpu, RecompReturn result,
+        uint16 entry_stack, uint8 hrv) {
+    if (!sr_take_hle_tail_request(g_recomp_stack_top + 1)) return result;
+    if (result != RECOMP_RETURN_TAILCALL) {
+        /* Invalid HLE implementations must not poison a later unrelated call. */
+        (void)cpu_take_tailcall_return_context(NULL, NULL);
+        return result;
+    }
+    if (!hrv) return result;
+    return cpu_dispatch_paired_tail_from(cpu, g_tailcall_pc24,
+                                         entry_stack, hrv, g_tailcall_src24);
+}
+
 /* Keep dispatch-dependent code in its own archive member. Device-only SDK
  * consumers must not acquire a generated dispatch-table link dependency. */
 RecompReturn cpu_dispatch_paired_tail_from(CpuState *cpu, uint32 pc24,

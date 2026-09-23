@@ -155,7 +155,7 @@ int main(int argc, char **argv) {
         assert(c.S==0x1ef2 && c.PB==1 && c.DB==1 && c.m_flag && !c.x_flag);
         assert(c._flag_C==(!enabled || sp<price));
         assert(!g_cpu_return_scope);
-        if (have_rom && region!=kArRegionalCost_Japan) {
+        if (have_rom && region!=kArRegionalSource_Japan) {
           Trace expected[32]; memcpy(expected,trace,sizeof(trace)); unsigned expected_calls=calls;
           uint8_t expected_ram[sizeof(ram)]; memcpy(expected_ram,ram,sizeof(ram));
           CpuState native=Setup(action,sp,enabled); Native(&native,action);

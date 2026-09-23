@@ -16,6 +16,7 @@ typedef enum ActRaiserLocalizationMenu {
   kActRaiserLocalizationMenu_StatusMaster = kArLanguageRowShape_Master,
   kActRaiserLocalizationMenu_FixedRows = kArLanguageRowShape_FixedRows,
   kActRaiserLocalizationMenu_MessageSpeed = kArLanguageRowShape_MessageSpeed,
+  kActRaiserLocalizationMenu_MessageSpeedJP = kArLanguageRowShape_MessageSpeedJP,
   kActRaiserLocalizationMenu_SoundTest = kArLanguageRowShape_SoundTest,
 } ActRaiserLocalizationMenu;
 

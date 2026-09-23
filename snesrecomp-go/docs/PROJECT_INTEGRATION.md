@@ -226,6 +226,13 @@ does not supply a complete application. A game project owns:
    recovered ordering of body slices, interrupt handlers, and scanout. A host
    tick is not a universal hardware phase; record the evidence for the chosen
    cyclic boundary in the project.
+   Stack-preserving coroutines must switch to the host through
+   `cpu_yield_execution(callback, context)`, including native VBlank waits
+   outside optional block checkpoints. This retains compiled return scopes
+   and flat-tail ownership across the next host tick. The callback returns to
+   the same activation; it does not authorize reset, state replacement, or
+   abandonment followed by resumption. Games using ordinary frame returns
+   need no wrapper. Terminal shutdown still clears abandoned contexts.
 6. **HLE hooks and required symbols.** Every C symbol named by `hle_func`,
    `hle_func_if`, or `hle_dispatch` in a cfg must be implemented by the game
    project with the generated `CpuState *` ABI. `snesrecomp/game/required_symbols.h`

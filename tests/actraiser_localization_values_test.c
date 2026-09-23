@@ -143,7 +143,7 @@ int main(void) {
   CHECK(Resolve(&values,"miracle_earthquake_sp",kArLanguagePlaceholder_Number,&value));
   CHECK(value.number==160);
   ArRegionalCostPolicy jp;
-  CHECK(ArRegionalCosts_Init(&jp,kArRegionalCost_Japan));
+  CHECK(ArRegionalCosts_Init(&jp,kArRegionalSource_Japan));
   CHECK(ArRegionalCosts_Resolve(&jp,&values.prices));
   static const char *const miracle_names[]={"miracle_lightning_sp","miracle_rain_sp",
       "miracle_sunlight_sp","miracle_wind_sp","miracle_earthquake_sp"};
@@ -166,7 +166,7 @@ int main(void) {
   selected=(ArDialogueContentSelection){.presentation=kArDialoguePresentation_Enhanced,.selected_pack=&pack};
   ArRegionalCostPolicy us;
   ArRegionalCostSnapshot us_prices;
-  ArRegionalCosts_Init(&us,kArRegionalCost_US); ArRegionalCosts_Resolve(&us,&us_prices);
+  ArRegionalCosts_Init(&us,kArRegionalSource_US); ArRegionalCosts_Resolve(&us,&us_prices);
   ActRaiserMiracle_ConstrainText(&selected,"sim.miracle.lightning.insufficient_sp",&us_prices);
   CHECK(selected.selected_pack==&pack && selected.presentation==kArDialoguePresentation_Enhanced);
   Write16(0x0010, 22);

@@ -393,10 +393,26 @@ RecompReturn cpu_dispatch_paired_tail_from(CpuState *cpu, uint32 pc24,
  * Inherits that activation's original entry stack/return ownership, which can
  * differ from current S after a pushed-target dispatch. Does not pop a frame
  * or run a nested driver. On success the HLE must immediately return
- * RECOMP_RETURN_TAILCALL so its wrapper can retire. Returns zero, unchanged,
+ * RECOMP_RETURN_TAILCALL so its wrapper can retire. A paired wrapper drives
+ * that branch to its native return before resuming its host caller; an
+ * unpaired wrapper leaves it to the outer dispatch loop. Returns zero, unchanged,
  * outside an active generated wrapper. Not for JSR/JSL calls or raw HLE bodies
  * lacking a generated prologue. */
 int cpu_hle_tailcall_request(uint32 pc24, uint32 source_pc24);
+/* Generated-wrapper epilogue only, after its activation pop. Drives an owned
+ * paired HLE branch with the standard flat-tail driver; escaped child returns
+ * and unpaired transfers propagate. Game HLEs return tokens, never call this. */
+RecompReturn cpu_finish_hle_return(CpuState *cpu, RecompReturn result,
+                                 uint16 entry_stack, uint8 hrv);
+/* Suspend an intact compiled activation on this execution thread while the
+ * host schedules another tick. The callback must resume at this exact call;
+ * no frame-pacing longjmp, machine replacement, or reset-and-resume. Nested
+ * checkpoint/poll yields are supported. Native registers/RAM are not copied
+ * or restored. Terminal abandonment must use the normal shutdown/reset path.
+ * Protects return scopes and flat-tail ownership across WatchdogFrameStart;
+ * games without stack-preserving schedulers need not call this helper. */
+void cpu_yield_execution(void (*yield_to_host)(void *), void *context);
+
 void cpu_poll_wait(CpuState *cpu, uint32 resume_pc24,
                    uint32 read_address24, uint32 read_width_bytes);
 int cpu_dispatch_has_entry(CpuState *cpu, uint32 pc24);

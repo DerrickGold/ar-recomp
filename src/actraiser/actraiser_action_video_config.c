@@ -6,6 +6,11 @@
 
 #include "actraiser_action_room_hle_internal.h"
 #include "actraiser_game.h"
+#include "actraiser/actraiser_regional_runtime.h"
+#include "actraiser/actraiser_hle_fatal.h"
+
+extern RecompReturn bank_02_B4E8_M1X0(CpuState *cpu);
+static bool s_native_delegate;
 
 enum {
   kDpScript = 0xA2,
@@ -48,14 +53,18 @@ static bool IsAuditedActionProfile(uint8_t profile) {
   return profile >= 0x03 && profile <= 0x2E && profile != 0x08;
 }
 
-bool ActRaiser_ActionVideoConfigHleEnabled(CpuState *cpu) {
-  if (!cpu || !ActionVideoConfigEnabled() || cpu->emulation ||
+bool ActRaiser_ActionVideoConfigEntry(CpuState *cpu) {
+  if (!cpu || s_native_delegate || cpu->emulation ||
       !cpu->m_flag || cpu->x_flag || cpu->D != 0 || cpu->DB != 0)
     return false;
   if (!ActRaiser_IsActionMapGroup(cpu_read8(
           cpu, kSnesLowWramBank, kActRaiserWram_MapGroup)))
     return false;
   return IsAuditedActionProfile(PeekOperand(cpu));
+}
+
+bool ActRaiser_ActionVideoConfigHleEnabled(CpuState *cpu) {
+  return ActionVideoConfigEnabled() && ActRaiser_ActionVideoConfigEntry(cpu);
 }
 
 static void PushWordResidue(CpuState *cpu, uint16_t stack,
@@ -72,6 +81,30 @@ static void WritePpu(CpuState *cpu, uint16_t address, uint8_t value) {
 static uint8_t ReadProfile(CpuState *cpu, uint16_t offset, unsigned byte) {
   return cpu_read8(cpu, kVideoProfileBank,
                    (uint16_t)(kVideoProfileAddress + offset + byte));
+}
+
+RecompReturn ActRaiser_RunActionVideoConfig(CpuState *cpu) {
+  if (!ActRaiser_ActionVideoConfigEntry(cpu))
+    ActRaiserHleFatal("Unsupported action-profile entry");
+  const uint8_t profile = PeekOperand(cpu);
+  RecompReturn result;
+  if (ActionVideoConfigEnabled()) {
+    result = ActRaiser_ApplyActionVideoConfig(cpu);
+  } else {
+    /* The generated function consumes the original JSR frame. The read-only
+     * guard declines the nested dispatch; no synthetic frame is pushed. */
+    s_native_delegate = true;
+    result = bank_02_B4E8_M1X0(cpu);
+    s_native_delegate = false;
+  }
+  if (result != RECOMP_RETURN_NORMAL) return result;
+  const uint16_t native_bcd = ActionRoomHle_ReadDirectPage16(cpu, 0xE6);
+  uint16_t resolved;
+  if (!ActRaiserRegional_BeginRoomTime(profile, native_bcd, &resolved))
+    ActRaiserHleFatal("Cannot resolve regional room limit for profile %02x", profile);
+  if (resolved != native_bcd)
+    ActionRoomHle_WriteDirectPage16(cpu, 0xE6, resolved);
+  return result;
 }
 
 static void ReportDiagnostics(void) {

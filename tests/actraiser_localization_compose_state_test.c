@@ -1,6 +1,7 @@
 #include "actraiser/actraiser_localization_compose_state.h"
 #include "actraiser/actraiser_localization_hud.h"
 #include "actraiser/actraiser_localization_style.h"
+#include "actraiser/actraiser_localization_speed_text.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -32,10 +33,12 @@ static bool ResolveSemanticId(void *context, const char *semantic_id,
       snprintf(error, error_capacity, "fixture rejected %s", semantic_id);
     return false;
   }
-  const size_t length = strlen(semantic_id);
+  const char *source = !strcmp(semantic_id, "system.message_speed.scale_labels")
+      ? "0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9\n\nFast | <> | Slow" : semantic_id;
+  const size_t length = strlen(source);
   if (length >= sizeof(result->utf8))
     return false;
-  memcpy(result->utf8, semantic_id, length + 1u);
+  memcpy(result->utf8, source, length + 1u);
   {
     memset(result->structural_boundaries, 0,
            AR_TEXT_BOUNDARY_BYTES(sizeof(result->utf8)));
@@ -740,7 +743,58 @@ static void TestFieldMetadataRefresh(void) {
   CHECK(ActRaiserLocalizationComposeState_FindObserved(&state, route->surface_id));
 }
 
+static void TestRegionalSpeedRange(void) {
+  ActRaiserLocalizationComposeState state;
+  ActRaiserLocalizationComposeState_Init(&state);
+  ActRaiserLocalizationComposeState_SetScene(&state, 0, kActRaiserNonActionMap_SkyPalace);
+  char error[256];
+  ActRaiserLocalizationComposeObservation event = Compose(1, 0x01fa9a, 0x0c12);
+  for (unsigned maximum=7; maximum<=9; maximum+=2) {
+    CHECK(ActRaiserLocalizationComposeState_SetMessageSpeedMaximum(&state, maximum));
+    CHECK(ActRaiserLocalizationComposeState_Process(&state, &event, ResolveSemanticId, NULL, error, sizeof(error)));
+    const ActRaiserLocalizationComposeSnapshot *snapshot = ActRaiserLocalizationComposeState_Find(&state, 9);
+    CHECK(snapshot); if (!snapshot) continue;
+    CHECK(snapshot->region.columns==10 && snapshot->region.column==18);
+    const ArLocalizationTextRowRule *row=ArLocalizationGrid_FindRow(&snapshot->grid,0,maximum+1);
+    CHECK(row && row->cell_count==maximum+1);
+    if (row) for (unsigned i=0;i<=maximum;++i) {
+      CHECK(row->cells[i].start==i+(maximum==7) && row->cells[i].end==i+1+(maximum==7));
+      CHECK(row->cells[i].italic && !row->cells[i].follows_direction);
+    }
+    CHECK((strstr(snapshot->text.utf8," | 8 | 9")!=NULL)==(maximum==9));
+    CHECK(strstr(snapshot->text.utf8,"Fast | <> | Slow"));
+    /* Pending settings cannot reshape an existing modal, even on pack refresh. */
+    CHECK(ActRaiserLocalizationComposeState_SetMessageSpeedMaximum(&state,maximum==7?9:7));
+    CHECK(ActRaiserLocalizationComposeState_RefreshLatest(&state,9,ResolveSemanticId,NULL,error,sizeof(error)));
+    snapshot=ActRaiserLocalizationComposeState_Find(&state,9);
+    CHECK(snapshot && ArLocalizationGrid_FindRow(&snapshot->grid,0,maximum+1));
+  }
+  ActRaiserResolvedText text={0};
+  CHECK(ResolveSemanticId(NULL,"system.message_speed.scale_labels",&text,error,sizeof(error)));
+  const size_t label=(size_t)(strstr(text.utf8,"Fast")-text.utf8);
+  text.language.direction=kArTextDirection_RightToLeft;
+  text.bidi.count=1; text.bidi.spans[0]=(ArTextBidiSpan){.start=(uint32_t)label,.end=(uint32_t)text.utf8_bytes};
+  text.styles.span_count=1;
+  text.styles.spans[0].start=(uint32_t)label; text.styles.spans[0].end=(uint32_t)text.utf8_bytes;
+  text.inline_object_count=1; text.inline_objects[0].end_utf8_byte=(uint32_t)label+9;
+  CHECK(ActRaiserLocalizationSpeedText_Project(&text,7));
+  const size_t short_label=(size_t)(strstr(text.utf8,"Fast")-text.utf8);
+  CHECK(short_label<label && text.bidi.spans[0].start==short_label && text.styles.spans[0].start==short_label);
+  CHECK(text.inline_objects[0].end_utf8_byte==short_label+9 && text.language.direction==kArTextDirection_RightToLeft);
+  CHECK(ActRaiserLocalizationSpeedText_Project(&text,9));
+  const size_t expanded_label=(size_t)(strstr(text.utf8,"Fast")-text.utf8);
+  CHECK(text.bidi.spans[0].start==expanded_label && text.styles.spans[0].start==expanded_label);
+  CHECK(text.inline_objects[0].end_utf8_byte==expanded_label+9 && strstr(text.utf8," | 8 | 9"));
+  for (size_t i=0;i<text.utf8_bytes;++i)
+    CHECK(ArTextBoundary_Get(text.structural_boundaries,i)==(text.utf8[i]=='|' || text.utf8[i]=='\n'));
+  CHECK(!ActRaiserLocalizationSpeedText_Project(&text,8));
+  memset(text.structural_boundaries,0,sizeof(text.structural_boundaries));
+  CHECK(!ActRaiserLocalizationSpeedText_Project(&text,7));
+  CHECK(!ActRaiserLocalizationComposeState_SetMessageSpeedMaximum(&state,8));
+}
+
 int main(void) {
+  TestRegionalSpeedRange();
   TestFieldMetadataRefresh();
   TestNameEntryLiveLine();
   TestAppearance();

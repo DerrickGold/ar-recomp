@@ -45,7 +45,7 @@ Development is active, and bugs remain.
 | 🟡 | **Simulation mode:** Event coverage is confirmed in Fillmore, Bloodpool, Kasandora, Aitos, and Marahna; Northwall remains to be validated. |
 | 🟡 | **Diorama mode:** Every action route except Northwall has been play-tested, with further room-by-room refinement planned. |
 | 🟡 | **Platforms:** macOS arm64 and Steam Deck are confirmed. macOS x86_64, generic Linux, and Windows still need representative launch testing. |
-| 🟡 | **Localization and regional support:** Enhanced fonts, language packs, and Workshop authoring are available. [Regional pricing options](docs/regional-settings.md) are selectable per campaign; other regional mechanics and artwork are not yet selectable. |
+| 🟡 | **Localization and regional support:** Enhanced fonts, language packs, and Workshop authoring are available. [Regional options](docs/regional-settings.md) include prices, room limits, retry score, town pacing, recovery, earthquake selection and report/menu behavior; other regional mechanics and artwork are not yet selectable. |
 
 ---
 

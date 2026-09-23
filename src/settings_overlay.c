@@ -123,7 +123,7 @@ typedef struct MenuTab {
   const char *label;
   const char *page_key;   /* NULL, or the setting this tab selects */
   long page_value;
-  bool regional_prices;  /* copied per-campaign model, not settings.ini fields */
+  bool regional_rules;  /* copied per-campaign model, not settings.ini fields */
 } MenuTab;
 
 typedef struct MenuSection {
@@ -206,7 +206,7 @@ static const MenuTab kTabsLocalization[] = {
   TAB(Localization, "overlay.tab.game_text"),
   TAB(LocalizationFont, "overlay.tab.font"),
   TAB(Interface, "overlay.tab.interface"),
-  {.category = kSettingCat_Localization, .label = "overlay.region.tab", .regional_prices = true},
+  {.category = kSettingCat_Localization, .label = "overlay.region.tab", .regional_rules = true},
 };
 
 /* Most Layers tabs are LEVELS ($18), not setting categories. Their position is
@@ -600,7 +600,7 @@ static bool ActiveSectionIsCustom(void) {
 }
 
 static SettingsOverlayRegionalHooks s_regional_hooks;
-static ActRaiserRegionalPricingView s_regional_view;
+static ActRaiserRegionalRulesView s_regional_view;
 static bool s_regional_valid;
 
 void SettingsOverlay_SetRegionalHooks(const SettingsOverlayRegionalHooks *hooks) {
@@ -608,7 +608,7 @@ void SettingsOverlay_SetRegionalHooks(const SettingsOverlayRegionalHooks *hooks)
   s_regional_valid = false;
 }
 
-static bool ActiveTabIsRegional(void) { return ActiveTab()->regional_prices; }
+static bool ActiveTabIsRegional(void) { return ActiveTab()->regional_rules; }
 
 static const char *RegionalNotice(void) {
   return Ui(!s_regional_valid ? "overlay.region.enter_campaign" :
@@ -810,7 +810,7 @@ static const LayerMenuRow *SelectedLayerRow(LayerMenuRow *rows,
 }
 
 static int TabSettingRowCount(void) {
-  if (ActiveTabIsRegional()) return s_regional_valid ? kArRegionalCostGroup_Count : 1;
+  if (ActiveTabIsRegional()) return s_regional_valid ? kActRaiserRegionalSetting_Count : 1;
   if (ActiveSectionIsCustom()) {
     LayerMenuRow rows[kLayerMenuRowMax];
     return LayerMenuRows(rows, kLayerMenuRowMax);
@@ -1263,10 +1263,10 @@ static bool RegionalChangeSelected(int direction, bool reset) {
     SetStatus(RegionalNotice());
     return true;
   }
-  const ArRegionalCostGroup group = (ArRegionalCostGroup)s_row;
-  ArRegionalCostSource source = kArRegionalCost_US;
-  if ((unsigned)group >= kArRegionalCostGroup_Count ||
-      (!reset && !SettingsOverlayRegions_NextSource(&s_regional_view.requested, group, direction, &source)))
+  const ActRaiserRegionalSettingGroup group = (ActRaiserRegionalSettingGroup)s_row;
+  ArRegionalSource source = kArRegionalSource_US;
+  if ((unsigned)group >= kActRaiserRegionalSetting_Count ||
+      (!reset && !SettingsOverlayRegions_NextSource(&s_regional_view, group, direction, &source)))
     return true;
   const ActRaiserRegionalEditResult result = s_regional_hooks.request(&s_regional_view, group, source);
   SetStatus(SettingsOverlayRegions_EditStatus(InterfaceLocale(), result));
@@ -1655,7 +1655,7 @@ void SettingsOverlay_Close(void) {
 const char *SettingsOverlay_SelectedKey(void) {
   if (!s_open) return "";
   if (ActiveTabIsRegional()) return s_regional_valid
-      ? SettingsOverlayRegions_RowKey((ArRegionalCostGroup)s_row) : "regional_no_campaign";
+      ? SettingsOverlayRegions_RowKey((ActRaiserRegionalSettingGroup)s_row) : "regional_no_campaign";
   /* The layer editor's rows have no descriptor key, so they report a synthesized
    * one: the plane token for a plane row ("bg2hi"), the token plus the parameter
    * for a nested row ("bg2hi.copies"), and a fixed name for the room reset. The
@@ -2956,7 +2956,8 @@ static void DrawMenuRows(const MenuLayout *layout, const MenuChrome *c,
    * the rest of that reservation. */
   const int value_chars = 18;
 
-  s_visible_rows = (top_y + top_height - 6 - first_row_y) / kRowHeight;
+  const int regional_notice_height = ActiveTabIsRegional() ? 6 + 2 * kSmallLineHeight : 0;
+  s_visible_rows = (top_y + top_height - 6 - first_row_y - regional_notice_height) / kRowHeight;
   if (s_visible_rows < 1) s_visible_rows = 1;
   EnsureSelectedRowVisible();
 
@@ -2979,9 +2980,9 @@ static void DrawMenuRows(const MenuLayout *layout, const MenuChrome *c,
                        (value_right - label_x) / kDebugGlyphWidth, kMutedText);
         continue;
       }
-      const ArRegionalCostGroup group = (ArRegionalCostGroup)row;
+      const ActRaiserRegionalSettingGroup group = (ActRaiserRegionalSettingGroup)row;
       SettingsOverlayRegionBadge badge;
-      if (!SettingsOverlayRegions_CostBadge(&s_regional_view.requested, group, &badge)) continue;
+      if (!SettingsOverlayRegions_ViewBadge(&s_regional_view, group, false, &badge)) continue;
       const bool selected = s_submenu_open && row == s_row;
       if (selected) {
         FillLogicalRect(layout, right_x + 9, y - 2, right_width - 18, 11, kHighlight);
@@ -3231,14 +3232,14 @@ static void DrawMenuFooter(const MenuLayout *layout, const MenuChrome *c,
     DrawWrappedSmallText(layout, description_x, header_y + 14,
                          s_status, description_chars, 4, ARGB(255, 208, 220, 232));
   } else if (ActiveTabIsRegional()) {
-    const ArRegionalCostGroup group = (ArRegionalCostGroup)s_row;
+    const ActRaiserRegionalSettingGroup group = (ActRaiserRegionalSettingGroup)s_row;
     const char *label = s_regional_valid
         ? SettingsOverlayRegions_RowLabel(InterfaceLocale(), group) : Ui("overlay.region.tab");
     char help[2048];
     char current[256] = "";
     SettingsOverlayRegionBadge effective;
     if (s_regional_valid &&
-        SettingsOverlayRegions_CostBadge(&s_regional_view.effective, group, &effective)) {
+        SettingsOverlayRegions_ViewBadge(&s_regional_view, group, true, &effective)) {
       const ArUiTextArgument args[] = {{"region", SettingsOverlayRegions_BadgeLabel(InterfaceLocale(), effective)}};
       ArUiCatalog_Format(current, sizeof(current), Ui("overlay.region.active"), args, 1);
     }
@@ -3247,8 +3248,8 @@ static void DrawMenuFooter(const MenuLayout *layout, const MenuChrome *c,
         (current_x - description_x - 8) / kDebugGlyphWidth, structure);
     DrawSmallText(layout, current_x, header_y, current, kMutedText);
     FillLogicalRect(layout, description_x, header_y + 10, bottom_width - 24, 1, structure_dim);
-    if (!s_regional_valid || !SettingsOverlayRegions_CostDescription(InterfaceLocale(),
-        &s_regional_view.requested, group, help, sizeof(help)))
+    if (!s_regional_valid || !SettingsOverlayRegions_ViewDescription(InterfaceLocale(),
+        &s_regional_view, group, help, sizeof(help)))
       snprintf(help, sizeof(help), "%s", RegionalNotice());
     DrawWrappedSmallText(layout, description_x, header_y + 14, help, description_chars, 4,
         ARGB(255, 208, 220, 232));

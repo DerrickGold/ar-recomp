@@ -601,6 +601,7 @@ records the callable boundaries.
 | `$01:9D6F-$9E02`, `$01:9E82-$9EB6` / JP `$01:9D4B-$9DDE`, `$01:9E5E-$9E8C` | `0x09D6F`, `0x09E82` / `0x09D4B`, `0x09E5E` | Crop item-8 and Music item-11 Use wrappers. Crop upgrades one field, unlike automatic cross-town teaching. Music accepts Bloodpool and writes `$91A5` after consumption/response. Western Music wrapper brackets upload with `$01:93BE/$93CB` interrupt-mask helpers; JP omits them. [Item and event contracts](regional-differences-technical.md#bloodpool-disputes-music-and-compass). |
 | `$01:8530-$8563` | `0x08530-0x08563` | Four town status/log/speed wrappers; US closes the menu/C=0, JP `$01:84FA-$850D` returns C=1 to selection. |
 | `$01:8AF5-$8B7C` | `0x08AF5-0x08B7C` | Message-speed selector, range0–9. JP `$01:8A8C-$8B13` offers0–7; selector origin differs by one column. |
+| `$00:9843-$984D`, `$00:9A6E-$9A72` | `0x01843-0x0184D`, `0x01A6E-0x01A72` | Standing A/X cast gate and ground-attack prefix. The regional gesture adapter can omit the former and insert JP's Up test in the latter without remapping input or replacing the common cast/payment body. [Contracts](regional-differences-technical.md#magic-gesture-integration). |
 
 Composition records contain a part count then five-byte OBJ parts. Tile indices,
 palette, size and flips resolve against the scene's resident VRAM/CGRAM; a

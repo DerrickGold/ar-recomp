@@ -50,6 +50,9 @@ void ActRaiserLocalizationRuntime_SetPackHost(
 /* Resolve source changes synchronously before the overlay saves preferences.
  * Failed activation restores the previous content/presentation settings. */
 void ActRaiserLocalizationRuntime_ApplySettings(void);
+/* Captured game-side selector geometry, independent of the pack's locale.
+ * Does not initialize fonts or load packs in untouched native mode. */
+void ActRaiserLocalizationRuntime_SetMessageSpeedMaximum(unsigned maximum);
 /* `mode7_transformed` says the Mode 7 layer is being presented rotated or
  * scaled rather than flat. The title screen's lettering lives inside that
  * layer, so a flat screen-space replacement only stands in for it while the

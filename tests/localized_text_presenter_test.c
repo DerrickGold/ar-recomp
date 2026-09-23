@@ -10,6 +10,7 @@
 #include "actraiser/actraiser_localization_grid.h"
 #include "actraiser/actraiser_localization_world_navigation.h"
 #include "render/localized_text_presenter.h"
+#include "render/text_cell_composite.h"
 
 static int failures, test_size, test_scale, test_treatment, test_example;
 static ArHostFontResources s_font_store;
@@ -282,6 +283,55 @@ static void Exercise(ArRenderDevice *device, ArEnhancedTextSettings settings,
   ArLocalizedTextPresenter_Prepare(device, &frame, true, 0, 32, 32, 0, 0,
                                   256, 224, &chunk, 1, &prepared);
   CHECK(((TextureSink *)device->context)->uploads == uploads);
+}
+
+static void ExerciseRelocatedSpeedScale(ArRenderDevice *device) {
+  test_case = "regional speed scale in scrolled modern modal";
+  for (unsigned maximum=7; maximum<=9; maximum+=2) {
+    const char *text=maximum==7 ? "0|1|2|3|4|5|6|7\n\nFast|\u2007|Slow"
+                              : "0|1|2|3|4|5|6|7|8|9\n\nFast|\u2007|Slow";
+    const ArLocalizationInlineObjectSnapshot object={
+      kArLocalizationInlineObject_SpeedDirection,
+      (uint32_t)(strstr(text,"\u2007")-text+3)};
+    for (int rtl=0; rtl<2; ++rtl) for (int scale=1; scale<=6; scale+=5) {
+      ArLocalizationFrame frame;
+      ArLocalizationFrame_Reset(&frame);
+      CHECK(ArLocalizationFrame_SetFont(&frame,"en-US","test",s_test_font,1,&frame.settings));
+      SetArt(&frame.artwork[kArLocalizationArtwork_SpeedDirection],16);
+      ArLocalizationTextGrid grid;
+      CHECK(ActRaiserLocalizationGrid_Build(maximum==7
+          ? kActRaiserLocalizationMenu_MessageSpeedJP : kActRaiserLocalizationMenu_MessageSpeed,
+          (ArTextCellRegion){18,12,10,4},&grid));
+      CHECK(ArLocalizationFrame_AddTextWithGrid(&frame,9,
+          (ArTextCellDestination){3,kArTextCellScreen_Composited,0},
+          (ArTextCellRegion){18,12,10,4},text,strlen(text),100,100,1,
+          rtl ? kArTextDirection_RightToLeft : kArTextDirection_LeftToRight,
+          7,&grid,NULL,NULL,0,&object,1));
+      const unsigned scrolls[]={0,1020,1023};
+      for (unsigned s=0; s<sizeof(scrolls)/sizeof(scrolls[0]); ++s) {
+        ArRenderRectI projected[kArTextCellMaximumProjectedRegions];
+        CHECK(ArTextCellComposite_ProjectRegion((ArTextCellRegion){17,11,12,5},
+            32,32,0,scrolls[s],256,224,projected)==1);
+        const HudPresentationChunk chunk={.inspector_kind=kInspectorPresentation_HudBg,
+            .screen_source=projected[0],.texture_source=projected[0],
+            .output_destination={80*scale,92*scale,96*scale,40*scale}};
+        ArLocalizedPreparedFrame prepared;
+        ArLocalizedTextPresenter_Prepare(device,&frame,true,0,32,32,0,scrolls[s],
+            256,224,&chunk,1,&prepared);
+        CHECK(prepared.mask_count>0 && prepared.text_count==maximum+4);
+        CHECK(prepared.inline_object_count==1);
+        for (unsigned digit=0; digit<=maximum && digit<prepared.text_count; ++digit) {
+          const ArRenderRectI ink=Ink(&prepared.texts[digit]);
+          const int x=(88+8*(digit+(maximum==7)))*scale;
+          CHECK(ink.x>=x && ink.x+ink.w<=x+8*scale);
+        }
+        const unsigned uploads=((TextureSink *)device->context)->uploads;
+        ArLocalizedTextPresenter_Prepare(device,&frame,true,0,32,32,0,scrolls[s],
+            256,224,&chunk,1,&prepared);
+        CHECK(((TextureSink *)device->context)->uploads==uploads);
+      }
+    }
+  }
 }
 
 static void ExerciseSingleLine(ArRenderDevice *device,
@@ -1810,6 +1860,7 @@ int main(void) {
       }
     }
   }
+  ExerciseRelocatedSpeedScale(&device);
   ArEnhancedTextSettings pressure_settings;
   ArEnhancedTextSettings_Defaults(&pressure_settings);
   test_size = 140; test_scale = 4; test_treatment = 2; test_example = 9;

@@ -21,6 +21,9 @@ static uint8_t script_bank[kBankBytes];
 static uint8_t bank02[kBankBytes];
 static uint8_t ppu[0x40];
 static int failures;
+static unsigned native_calls, timer_calls;
+static RecompReturn native_result;
+static bool replace_time;
 
 #define CHECK(condition)                                                   \
   do {                                                                     \
@@ -29,6 +32,23 @@ static int failures;
       failures++;                                                          \
     }                                                                      \
   } while (0)
+
+bool ActRaiserRegional_BeginRoomTime(uint8_t profile, uint16_t native_bcd, uint16_t *out) {
+  ++timer_calls;
+  CHECK(profile == kProfile);
+  CHECK(native_bcd == 0x1234);
+  *out = replace_time ? 0x200 : native_bcd;
+  return true;
+}
+
+RecompReturn bank_02_B4E8_M1X0(CpuState *cpu) {
+  ++native_calls;
+  CHECK(!ActRaiser_ActionVideoConfigEntry(cpu)); /* delegation guard */
+  /* This test checks wrapper ownership; existing ROM parity probes validate
+   * the original routine's PPU/CPU contract independently. */
+  if (native_result == RECOMP_RETURN_NORMAL) ActRaiser_ApplyActionVideoConfig(cpu);
+  return native_result;
+}
 
 uint8 cpu_read8(CpuState *cpu, uint8 bank, uint16 address) {
   (void)cpu;
@@ -226,6 +246,39 @@ static void TestGuardedFallbacks(void) {
   wram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_Fillmore;
   CHECK(setenv("AR_ACTION_ROOM_VIDEO_HLE", "0", 1) == 0);
   CHECK(!ActRaiser_ActionVideoConfigHleEnabled(&cpu));
+  CHECK(ActRaiser_ActionVideoConfigEntry(&cpu));
+  CHECK(unsetenv("AR_ACTION_ROOM_VIDEO_HLE") == 0);
+}
+
+static void TestRegionalWrapper(void) {
+  for (unsigned native = 0; native < 2; ++native) {
+    if (native) CHECK(setenv("AR_ACTION_ROOM_VIDEO_HLE", "0", 1) == 0);
+    for (unsigned changed = 0; changed < 2; ++changed) {
+      ResetFixture();
+      CpuState expected = MakeCpu();
+      ActRaiser_ApplyActionVideoConfig(&expected);
+      uint8_t expected_ram[sizeof(wram)], saved_ppu[sizeof(ppu)];
+      memcpy(expected_ram, wram, sizeof(wram));
+      memcpy(saved_ppu, ppu, sizeof(ppu));
+      ResetFixture();
+      CpuState actual = MakeCpu();
+      replace_time = changed;
+      unsigned before = timer_calls, calls_before = native_calls;
+      CHECK(ActRaiser_RunActionVideoConfig(&actual) == RECOMP_RETURN_NORMAL);
+      CHECK(timer_calls == before + 1 && native_calls == calls_before + native);
+      CHECK(!memcmp(&actual, &expected, sizeof(actual)));
+      CHECK(!memcmp(ppu, saved_ppu, sizeof(ppu)));
+      if (changed) { expected_ram[0xE6] = 0; expected_ram[0xE7] = 2; }
+      CHECK(!memcmp(wram, expected_ram, sizeof(wram)));
+    }
+  }
+  ResetFixture();
+  CpuState cpu = MakeCpu(), before = cpu;
+  native_result = RECOMP_RETURN_TAILCALL;
+  const unsigned calls = timer_calls;
+  CHECK(ActRaiser_RunActionVideoConfig(&cpu) == native_result);
+  CHECK(timer_calls == calls && !memcmp(&cpu, &before, sizeof(cpu)));
+  CHECK(ActRaiser_ActionVideoConfigEntry(&cpu)); /* guard restored on escape */
   CHECK(unsetenv("AR_ACTION_ROOM_VIDEO_HLE") == 0);
 }
 
@@ -233,6 +286,7 @@ int main(void) {
   TestVideoProfile();
   TestPriorityClearAndC1Retention();
   TestGuardedFallbacks();
+  TestRegionalWrapper();
   if (failures) {
     printf("actraiser action video-config HLE: %d failure(s)\n", failures);
     return 1;

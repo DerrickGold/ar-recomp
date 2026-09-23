@@ -59,7 +59,7 @@ int main(int argc, char **argv) {
   unsigned cases=0;
   const unsigned stocks[]={0,1,2,3,4,5,127,128,255};
   const unsigned flags[]={0,8,0x2000,0x2008,0x8000,0x4000};
-  for (unsigned source=0;source<kArRegionalCostSource_Count;++source) {
+  for (unsigned source=0;source<kArRegionalSource_Count;++source) {
     ArRegionalCostPolicy policy;
     ArRegionalCostSnapshot quote;
     assert(ArRegionalCosts_Init(&policy,source) && ArRegionalCosts_Resolve(&policy,&quote));
@@ -86,7 +86,7 @@ int main(int argc, char **argv) {
               before[0x21]=ram[0x21]; assert(!memcmp(before,ram,sizeof(ram)));
               assert(cpu.S==original.S && cpu.X==original.X && cpu.Y==original.Y &&
                      !cpu.m_flag && cpu._flag_C==original._flag_C && cpu._flag_V==original._flag_V);
-              if (native && source!=kArRegionalCost_Japan) {
+              if (native && source!=kArRegionalSource_Japan) {
                 uint8_t after[sizeof(ram)]; memcpy(after,ram,sizeof(ram));
                 ram[0x21]=stocks[s];
                 assert(Native(&original)==target);

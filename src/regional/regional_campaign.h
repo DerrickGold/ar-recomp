@@ -21,7 +21,7 @@ void ArRegionalCampaign_Init(ArRegionalCampaign *campaign, uint32_t slot,
 bool ArRegionalCampaign_NewGame(ArRegionalCampaign *campaign,
     const ArRegionalCostPolicy *defaults, SaveError *error);
 /* image is the last durable native image, not a session-edited shadow.
- * Legacy pricing adopts US in memory only; it does NOT acknowledge/initialize
+ * Legacy saves adopt US rules in memory only; this does NOT acknowledge/initialize
  * historical lair accounting. Corrupt/unknown/mismatched metadata blocks entry. */
 bool ArRegionalCampaign_Continue(ArRegionalCampaign *campaign,
     const char *path, const uint8_t image[kActRaiserSramSize], SaveError *error);

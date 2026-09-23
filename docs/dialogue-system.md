@@ -741,6 +741,18 @@ identifies the following instruction. `$01` yields with the question still
 visible. Yes/No input belongs to `$8D92`; Message Speed's separate number/arrow
 selector is identified by `$8C43` polls with saved returns `$8B2A/$8B31`.
 The latter commits `$0200` through native `$8AF5`, not a host-only slider.
+Regional speed choices are captured at that modal's opening: US/Europe 0–9,
+Japan 0–7. The composer keeps its ten-cell claim while centering the eight JP
+ticks, so removed choices cannot leak through from native tiles. Authored
+labels/artwork and text direction remain independent of the range. A pack's
+numeric row is projected to the captured range with byte-indexed annotations
+and hard boundaries moved together; a failed projection falls back to native
+cells. Refreshing a pack never changes an open modal's range. See
+[regional selector contracts](regional-differences-technical.md#town-menu-return-behavior-and-message-speed-choices).
+The modern modal projects its full native cell region (including the selector
+row) through the captured BG3 scroll before cropping. A fixed screen-pixel
+crop can omit the claim's blank bottom rows and force native fallback even
+when all visible glyphs appear to fit.
 
 Use fast-drains only audited optional descriptions/targeting instructions
 through the actual interpreter; it does not skip a whole dialogue routine or

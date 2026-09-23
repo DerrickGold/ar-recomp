@@ -3,17 +3,11 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include "regional_source.h"
 
 /* Game-owned, renderer/platform/ROM-independent policy. This is the pricing
  * subset, NOT a complete regional preset. No locale, donor availability,
  * clock rate, inventory conversion or persistence is inferred here. */
-typedef enum ArRegionalCostSource {
-  kArRegionalCost_US,
-  kArRegionalCost_Japan,
-  kArRegionalCost_Europe,
-  kArRegionalCostSource_Count,
-} ArRegionalCostSource;
-
 typedef enum ArRegionalCostGroup {
   kArRegionalCostGroup_Scrolls,
   kArRegionalCostGroup_Miracles,
@@ -38,11 +32,11 @@ typedef enum ArRegionalCostRule {
 typedef struct ArRegionalCostDescriptor {
   const char *key;
   ArRegionalCostGroup group;
-  uint16_t price[kArRegionalCostSource_Count];
+  uint16_t price[kArRegionalSource_Count];
 } ArRegionalCostDescriptor;
 
 typedef struct ArRegionalCostPolicy {
-  ArRegionalCostSource source[kArRegionalCostRule_Count];
+  ArRegionalSource source[kArRegionalCostRule_Count];
 } ArRegionalCostPolicy;
 
 /* Resolve once on load/change. A transaction captures its price before the
@@ -62,11 +56,11 @@ typedef struct ArRegionalCostPreview {
 const ArRegionalCostDescriptor *ArRegionalCosts_Descriptor(ArRegionalCostRule rule);
 /* All fallible operations leave outputs unchanged on invalid inputs. Policies
  * are caller-owned: separate saves/sessions must never share mutable state. */
-bool ArRegionalCosts_Init(ArRegionalCostPolicy *policy, ArRegionalCostSource source);
+bool ArRegionalCosts_Init(ArRegionalCostPolicy *policy, ArRegionalSource source);
 bool ArRegionalCosts_SetRule(ArRegionalCostPolicy *policy, ArRegionalCostRule rule,
-                             ArRegionalCostSource source);
+                             ArRegionalSource source);
 bool ArRegionalCosts_SetGroup(ArRegionalCostPolicy *policy, ArRegionalCostGroup group,
-                              ArRegionalCostSource source);
+                              ArRegionalSource source);
 bool ArRegionalCosts_Resolve(const ArRegionalCostPolicy *policy,
                              ArRegionalCostSnapshot *snapshot);
 /* Preview only. It cannot activate a rule or mutate the current transaction.
@@ -80,6 +74,6 @@ bool ArRegionalCosts_Preview(const ArRegionalCostPolicy *current,
  * remains in policy; numerically identical selections aren't called Custom. */
 bool ArRegionalCosts_GroupSource(const ArRegionalCostPolicy *policy,
                                  ArRegionalCostGroup group,
-                                 ArRegionalCostSource *source);
+                                 ArRegionalSource *source);
 
 #endif

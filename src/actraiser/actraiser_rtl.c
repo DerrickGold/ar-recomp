@@ -15,6 +15,7 @@
 #include "actraiser/actraiser_event_bugfixes.h"
 #include "actraiser/actraiser_credits.h"
 #include "actraiser/actraiser_hud.h"
+#include "actraiser/actraiser_regional_runtime.h"
 #include "actraiser/actraiser_bg3_upload.h"
 #include "actraiser/actraiser_localization_routes.h"
 #include "action/action_bg_tuner.h"
@@ -547,7 +548,8 @@ static size_t g_game_stack_map_len;
 static bool g_game_started;
 static bool g_game_coroutine_executing;
 
-void ActRaiser_YieldToHost(void) {
+static void SuspendGameCoroutine(void *unused) {
+  (void)unused;
 #ifdef _WIN32
   SwitchToFiber(g_host_fiber);
 #else
@@ -559,6 +561,13 @@ void ActRaiser_YieldToHost(void) {
     abort();
   }
 #endif
+}
+
+void ActRaiser_YieldToHost(void) {
+  /* The next host tick resumes this stack, not a new generated activation.
+   * Preserve the runner's scopes even for native VBlank yields outside an
+   * optional block checkpoint/poll callback. */
+  cpu_yield_execution(SuspendGameCoroutine, NULL);
 }
 
 /* HLE failures cannot return through a partly executed emulated routine. The
@@ -4841,6 +4850,7 @@ void RunOneFrameOfGame(void) {
     NmiHandler_M1X1(&g_cpu);
     g_sr_in_interrupt = 0;
     ActRaiser_RestoreRegs(&g_cpu, &snap);
+    ActRaiserRegional_ObserveInputRelease(&g_cpu);
     if (observe_interrupt) {
       ActRaiser_EmitInterrupt(
           SR_INTERRUPT_NMI, SR_EVENT_INTERRUPT_EXIT, interrupt_pc,

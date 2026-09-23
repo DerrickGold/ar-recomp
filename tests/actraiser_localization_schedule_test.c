@@ -15,7 +15,7 @@
 #include "settings.h"
 #include "actraiser/actraiser_regional_runtime.h"
 
-static ArRegionalCostSource s_price_source = kArRegionalCost_US;
+static ArRegionalSource s_price_source = kArRegionalSource_US;
 bool ActRaiserRegional_CopyPrices(ArRegionalCostSnapshot *prices) {
   ArRegionalCostPolicy baseline;
   return ArRegionalCosts_Init(&baseline,s_price_source) &&
@@ -1320,7 +1320,7 @@ static void TestNativePriceDelay(void) {
   cpu_write16(&cpu, 0, cpu.S+1, 0x9026);
   s_rom[0xfcd6]='0';
   cpu_write8(&cpu, 0x7f, 0xb000, '0');
-  s_price_source=kArRegionalCost_Japan;
+  s_price_source=kArRegionalSource_Japan;
   const CpuState before=cpu;
   CHECK(ActRaiser_LocalizationScheduleGlyphDelay(&cpu));
   CHECK(!memcmp(&cpu,&before,sizeof(cpu)));
@@ -1328,7 +1328,7 @@ static void TestNativePriceDelay(void) {
   CHECK(ActRaiser_LocalizationGlyphDelay(&cpu)==RECOMP_RETURN_NORMAL);
   CHECK(cpu_read8(&cpu,0x7f,0xb000)=='2');
   CHECK(cpu.S==0x1e2 && cpu.A==0 && cpu._flag_C && cpu._flag_Z);
-  s_price_source=kArRegionalCost_US;
+  s_price_source=kArRegionalSource_US;
 }
 
 int main(void) {

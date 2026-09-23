@@ -295,7 +295,7 @@ interruption between writes can lose the enhanced spelling, not corrupt SRAM.
 
 ### Regional campaign checkpoints
 
-The regional pricing foundation uses a second companion, `.archeckpoint`,
+Regional rules use a second companion, `.archeckpoint`,
 appended to the active path (`save.srm.archeckpoint` or `save.ini.archeckpoint`).
 It leaves the native image unchanged. Keep it with the save when moving between
 Recomp installations; an emulator still needs only the `.srm`.
@@ -311,7 +311,7 @@ the retained pair need their corresponding companion backup.
 Accepted New Game creates a fresh campaign identity in memory; it does not
 overwrite the old saved campaign. The native story-save completion captures
 that campaign's settings for the subsequent host write. Continue restores the
-matching checkpoint. Legacy saves without metadata start with US pricing in
+matching checkpoint. Legacy saves without metadata start with US rules in
 memory; this does not claim that historical lair counts have been reconstructed.
 Automatic completion-marker writes and persistent editor changes retain the
 durable campaign's settings, even while a different unsaved game is running.
@@ -320,18 +320,52 @@ Export still writes the selected game-image format only; carry the matching
 regional companion separately. This differs from the Unicode-name import
 behavior described above.
 
-This storage currently covers the [regional pricing options](regional-settings.md)
+This storage currently covers [the implemented regional gameplay and report options](regional-settings.md)
 only, not full gameplay presets, reserve tracking, or population redevelopment.
 Overlay changes remain in memory until the next completed Progress Log save;
-they are not written to the global `settings.ini`.
+they are not written to the global `settings.ini`. Older pricing-only companions
+load with US room limits and retain all their prices. They are upgraded only
+with the next completed save, not merely by loading them.
+Pricing-only and initial-time companions also default to keeping score on
+checkpoint retries. Existing choices are never interpreted as a complete
+regional preset. Companions predating construction-wait support default to
+US waits. Native Continue still restores its own town state; the regional
+reload applies on the next wait expiry, not as a save-load reset.
+Companions predating fishing-target support default to the US target without
+inferring a Japanese target from other Japanese choices.
+Companions predating development-clock support default its three independent
+leaves to US pacing. Native Continue owns restoration of the town clocks;
+loading the companion does not reset them to force a pending choice through.
+Companions predating recovery support default to US recovery. The bounded angel
+clock and the HP/SP queues live in their existing native RAM fields, not a
+second host-side timer. Their initialization follows the native scene/load
+lifecycle; the companion stores the requested/effective rules, not an extra
+claim that transient clocks survive a battery save.
+Companions predating earthquake selection default all five structure selectors
+to US rules. Pending choices activate together at the next complete earthquake;
+loading or changing them does not itself destroy any buildings.
+Older companions keep the US Master score page available. Hiding that page
+does not remove or reset the native saved act scores.
+Companions predating town-menu return support default to US closing behavior.
+The command captures the effective choice at acceptance; saving inside that
+command stores the captured rule, without a second save or SRAM layout change.
+Companions predating message-speed range support default to US 0–9 choices.
+The companion records only requested/effective range policy. The confirmed
+speed remains the native `$13B1` save byte, restored to `$0200`; selecting a
+smaller range does not rewrite it. Cancel preserves an existing 8/9 value.
+Companions predating magic-gesture support retain US dedicated-button casting.
+The requested and effective gestures are distinct until a released input
+sample activates the change; neither state changes physical input bindings.
 
-Canonical input recordings bind the requested and effective pricing rules to
+Canonical input recordings bind the requested and effective gameplay rules to
 their initial-state identity and any recorded checkpoints. Equal-valued US and
-European pricing remains compatible with baseline recordings. Non-native rules
+European prices and initial room limits remain compatible with baseline
+recordings. Baseline room limits also preserve older pricing-only replay
+identities. Non-native rules
 require a recording with an initial identity; unidentified legacy recordings
 are rejected rather than played under different rules. Campaign IDs themselves
 are not part of this gameplay identity.
-Pricing edits are disabled during recording/replay, including live takeover,
+Rule edits are disabled during recording/replay, including live takeover,
 because these overlay actions are not yet events in the input stream.
 
 ### 4.1 Lossless INI schema (version 1)

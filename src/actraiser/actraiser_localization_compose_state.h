@@ -9,7 +9,7 @@
 #include "actraiser/actraiser_localization_resolved_text.h"
 #include "actraiser/actraiser_localization_routes.h"
 
-#define ACTRAISER_LOCALIZATION_COMPOSE_STATE_ABI_VERSION UINT32_C(13)
+#define ACTRAISER_LOCALIZATION_COMPOSE_STATE_ABI_VERSION UINT32_C(14)
 
 enum {
   kActRaiserLocalizationComposeSurfaceFirst = 2,
@@ -54,12 +54,16 @@ typedef struct ActRaiserLocalizationComposeState {
   uint8_t map_group;
   uint8_t map_number;
   bool scene_valid;
+  uint8_t message_speed_maximum;
   ActRaiserLocalizationComposeSnapshot
       surfaces[kActRaiserLocalizationComposeSurfaceCapacity];
 } ActRaiserLocalizationComposeState;
 
 void ActRaiserLocalizationComposeState_Init(
     ActRaiserLocalizationComposeState *state);
+/* Applies to the next scale generation only, not an already open selector. */
+bool ActRaiserLocalizationComposeState_SetMessageSpeedMaximum(
+    ActRaiserLocalizationComposeState *state, unsigned maximum);
 void ActRaiserLocalizationComposeState_Clear(
     ActRaiserLocalizationComposeState *state);
 void ActRaiserLocalizationComposeState_SetScene(

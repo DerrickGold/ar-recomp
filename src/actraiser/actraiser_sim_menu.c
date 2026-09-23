@@ -348,7 +348,7 @@ RecompReturn ActRaiser_SimMenuBrowse(CpuState *c) {
 
 bool ActRaiser_SimMenuActionEntry(CpuState *c) {
   if (s_action_guard) { s_action_guard=false; return false; }
-  return c && (s_owner || ActRaiserRegional_MiracleEntry(c)) &&
+  return c && (s_owner || ActRaiserRegional_MiracleEntry(c) || ActRaiserRegional_ReportCommandEntry(c)) &&
       cpu_read16(c,0,c->S+1) == 0x81c3;
 }
 
@@ -358,6 +358,7 @@ RecompReturn ActRaiser_SimMenuAction(CpuState *c) {
   s_confirmation_cancelled=false;
   RecompReturn result;
   if (ActRaiserRegional_MiracleEntry(c)) result=ActRaiserRegional_RunMiracle(c);
+  else if (ActRaiserRegional_ReportCommandEntry(c)) result=ActRaiserRegional_RunReportCommand(c);
   else {
     s_action_guard=true;
     result=kNative81D7[Mode(c)](c);

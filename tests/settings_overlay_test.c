@@ -203,21 +203,46 @@ static void RowToKey(const char *key) {
   CHECK(!"row not reachable");
 }
 
-static ActRaiserRegionalPricingView s_fake_region;
+static ActRaiserRegionalRulesView s_fake_region;
 static bool s_fake_region_active;
 static unsigned s_region_edits;
-static bool FakeRegionalView(ActRaiserRegionalPricingView *out) {
+static bool FakeRegionalView(ActRaiserRegionalRulesView *out) {
   if (!s_fake_region_active) return false;
   *out = s_fake_region;
   return true;
 }
-static ActRaiserRegionalEditResult FakeRegionalEdit(const ActRaiserRegionalPricingView *view,
-    ArRegionalCostGroup group, ArRegionalCostSource source) {
+static ActRaiserRegionalEditResult FakeRegionalEdit(const ActRaiserRegionalRulesView *view,
+    ActRaiserRegionalSettingGroup group, ArRegionalSource source) {
   ++s_region_edits;
   CHECK(view->revision == s_fake_region.revision);
   CHECK(!memcmp(view->campaign, s_fake_region.campaign, sizeof(view->campaign)));
   CHECK(s_fake_region.editable);
-  CHECK(ArRegionalCosts_SetGroup(&s_fake_region.requested, group, source));
+  if (group == kActRaiserRegionalSetting_RoomTimes)
+    CHECK(ArRegionalTimers_Init(&s_fake_region.requested.timers, source));
+  else if (group == kActRaiserRegionalSetting_RetryScore)
+    s_fake_region.requested.retry_score = source;
+  else if (group == kActRaiserRegionalSetting_TownWait)
+    s_fake_region.requested.town_wait = source;
+  else if (group == kActRaiserRegionalSetting_Fishing)
+    s_fake_region.requested.fishing = source;
+  else if(group==kActRaiserRegionalSetting_Development)
+    CHECK(ArRegionalDevelopment_Init(&s_fake_region.requested.development,source));
+  else if (group == kActRaiserRegionalSetting_Recovery)
+    CHECK(ArRegionalRecovery_Init(&s_fake_region.requested.recovery, source));
+  else if (group == kActRaiserRegionalSetting_Quake)
+    CHECK(ArRegionalQuake_Init(&s_fake_region.requested.quake, source));
+  else if (group == kActRaiserRegionalSetting_ScorePage)
+    s_fake_region.requested.score_page = source;
+  else if (group == kActRaiserRegionalSetting_MenuReturn)
+    s_fake_region.requested.menu_return = source;
+  else if (group == kActRaiserRegionalSetting_SpeedRange)
+    s_fake_region.requested.speed_range = source;
+  else if (group == kActRaiserRegionalSetting_MagicGesture)
+    s_fake_region.requested.magic_gesture = source;
+  else
+    CHECK(ArRegionalCosts_SetGroup(&s_fake_region.requested.costs,
+        group == kActRaiserRegionalSetting_Scrolls ? kArRegionalCostGroup_Scrolls : kArRegionalCostGroup_Miracles,
+        source));
   ++s_fake_region.revision;
   return kActRaiserRegionalEdit_Applied;
 }
@@ -235,26 +260,92 @@ static void CheckRegionalControls(SDL_Renderer *renderer, SDL_Surface *surface) 
   CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
   CHECK(s_region_edits == 0);
   s_fake_region_active = true;
-  s_fake_region = (ActRaiserRegionalPricingView){.revision = 7, .editable = true, .campaign = {42}};
-  CHECK(ArRegionalCosts_Init(&s_fake_region.requested, kArRegionalCost_US));
-  s_fake_region.effective = s_fake_region.requested;
+  s_fake_region = (ActRaiserRegionalRulesView){.revision = 7, .editable = true, .campaign = {42}};
+  CHECK(ArRegionalCosts_Init(&s_fake_region.requested.costs, kArRegionalSource_US));
+  s_fake_region.effective.costs = s_fake_region.requested.costs;
   SettingsOverlay_Refresh();
   RowToKey("regional_scroll_prices");
   CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
   CHECK(s_region_edits == 1);
-  CHECK(s_fake_region.requested.source[kArRegionalCost_Light] == kArRegionalCost_Japan);
-  CHECK(s_fake_region.effective.source[kArRegionalCost_Light] == kArRegionalCost_US);
+  CHECK(s_fake_region.requested.costs.source[kArRegionalCost_Light] == kArRegionalSource_Japan);
+  CHECK(s_fake_region.effective.costs.source[kArRegionalCost_Light] == kArRegionalSource_US);
   CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
   CHECK(!strcmp(SettingsOverlay_SelectedKey(), "regional_miracle_prices"));
   CHECK(SettingsOverlay_HandleKey(SDLK_LEFT, true, false));
   CHECK(s_region_edits == 2);
-  CHECK(s_fake_region.requested.source[kArRegionalCost_Rain] == kArRegionalCost_Europe);
+  CHECK(s_fake_region.requested.costs.source[kArRegionalCost_Rain] == kArRegionalSource_Europe);
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "regional_room_times"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
+  CHECK(s_region_edits == 3);
+  CHECK(s_fake_region.requested.timers.source[0] == kArRegionalSource_Japan);
+  CHECK(s_fake_region.effective.timers.source[0] == kArRegionalSource_US);
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "regional_retry_score"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
+  CHECK(s_region_edits == 4);
+  CHECK(s_fake_region.requested.retry_score == kArRegionalSource_Japan);
+  CHECK(s_fake_region.effective.retry_score == kArRegionalSource_US);
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "regional_town_wait"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
+  CHECK(s_region_edits == 5);
+  CHECK(s_fake_region.requested.town_wait == kArRegionalSource_Japan);
+  CHECK(s_fake_region.effective.town_wait == kArRegionalSource_US);
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "regional_fishing"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
+  CHECK(s_region_edits == 6);
+  CHECK(s_fake_region.requested.fishing == kArRegionalSource_Japan);
+  CHECK(s_fake_region.effective.fishing == kArRegionalSource_US);
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(),"regional_development"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT,true,false));
+  CHECK(s_region_edits==7);
+  CHECK(s_fake_region.requested.development.source[0]==kArRegionalSource_Japan);
+  CHECK(s_fake_region.effective.development.source[0]==kArRegionalSource_US);
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN,true,false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "regional_recovery"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
+  CHECK(s_region_edits == 8);
+  CHECK(s_fake_region.requested.recovery.source[0] == kArRegionalSource_Japan);
+  CHECK(s_fake_region.effective.recovery.source[0] == kArRegionalSource_US);
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "regional_quake"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
+  CHECK(s_region_edits == 9);
+  CHECK(s_fake_region.requested.quake.source[0] == kArRegionalSource_Japan);
+  CHECK(s_fake_region.effective.quake.source[0] == kArRegionalSource_US);
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "regional_score_page"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
+  CHECK(s_region_edits == 10);
+  CHECK(s_fake_region.requested.score_page == kArRegionalSource_Japan);
+  CHECK(s_fake_region.effective.score_page == kArRegionalSource_US);
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "regional_menu_return"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
+  CHECK(s_region_edits == 11);
+  CHECK(s_fake_region.requested.menu_return == kArRegionalSource_Japan);
+  CHECK(s_fake_region.effective.menu_return == kArRegionalSource_US);
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "regional_speed_range"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
+  CHECK(s_region_edits == 12);
+  CHECK(s_fake_region.requested.speed_range == kArRegionalSource_Japan);
+  CHECK(s_fake_region.effective.speed_range == kArRegionalSource_US);
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "regional_magic_gesture"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
+  CHECK(s_region_edits == 13);
+  CHECK(s_fake_region.requested.magic_gesture == kArRegionalSource_Japan);
+  CHECK(s_fake_region.effective.magic_gesture == kArRegionalSource_US);
   CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
   CHECK(!strcmp(SettingsOverlay_SelectedKey(), "regional_scroll_prices")); /* no global reset row */
   s_fake_region.editable = false;
   CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
   CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
-  CHECK(s_region_edits == 2);
+  CHECK(s_region_edits == 13);
   CHECK(!memcmp(&before, &g_settings, sizeof(before)));
   s_fake_region.editable = true;
   SettingsOverlay_Close(); /* clear transient status for the preview */
@@ -262,6 +353,17 @@ static void CheckRegionalControls(SDL_Renderer *renderer, SDL_Surface *surface) 
   NavToSection(kSection_Localization);
   NavToTab(3);
   CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  if (getenv("AR_OVERLAY_REGIONAL_TIME_PREVIEW")) RowToKey("regional_room_times");
+  if (getenv("AR_OVERLAY_REGIONAL_RETRY_PREVIEW")) RowToKey("regional_retry_score");
+  if (getenv("AR_OVERLAY_REGIONAL_WAIT_PREVIEW")) RowToKey("regional_town_wait");
+  if (getenv("AR_OVERLAY_REGIONAL_FISHING_PREVIEW")) RowToKey("regional_fishing");
+  if(getenv("AR_OVERLAY_REGIONAL_DEVELOPMENT_PREVIEW"))RowToKey("regional_development");
+  if (getenv("AR_OVERLAY_REGIONAL_RECOVERY_PREVIEW")) RowToKey("regional_recovery");
+  if (getenv("AR_OVERLAY_REGIONAL_QUAKE_PREVIEW")) RowToKey("regional_quake");
+  if (getenv("AR_OVERLAY_REGIONAL_SCORE_PREVIEW")) RowToKey("regional_score_page");
+  if (getenv("AR_OVERLAY_REGIONAL_RETURN_PREVIEW")) RowToKey("regional_menu_return");
+  if (getenv("AR_OVERLAY_REGIONAL_SPEED_PREVIEW")) RowToKey("regional_speed_range");
+  if (getenv("AR_OVERLAY_REGIONAL_GESTURE_PREVIEW")) RowToKey("regional_magic_gesture");
   if (renderer && surface) {
     for (int locale = 0; locale < kArUiLocale_Count; ++locale) {
       g_settings.interface_language = locale;

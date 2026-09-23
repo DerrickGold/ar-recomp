@@ -88,10 +88,11 @@ static bool MenuColumns(ActRaiserLocalizationMenu menu, unsigned line,
     *next_column = 10;
     return true;
   }
-  if (menu == kActRaiserLocalizationMenu_MessageSpeed) {
-    if (line == 0 && field_count == 10) {
-      *column = field_index;
-      *next_column = field_index + 1;
+  if (menu == kActRaiserLocalizationMenu_MessageSpeed || menu == kActRaiserLocalizationMenu_MessageSpeedJP) {
+    const bool short_range = menu == kActRaiserLocalizationMenu_MessageSpeedJP;
+    if (line == 0 && field_count == (short_range ? 8u : 10u)) {
+      *column = field_index + short_range;
+      *next_column = *column + 1;
     } else if (line == 2 && field_count == 3) {
       static const unsigned starts[] = {0, 4, 6, 10};
       *column = starts[field_index];
@@ -125,8 +126,9 @@ static bool MenuValueCell(ActRaiserLocalizationMenu menu, unsigned line,
  * ticks and the labels anchored on either side of its arrow. */
 static bool MenuPhysicalCell(ActRaiserLocalizationMenu menu, unsigned line,
                              unsigned field_count) {
-  return menu == kActRaiserLocalizationMenu_MessageSpeed &&
-      ((line == 0 && field_count == 10) || (line == 2 && field_count == 3));
+  return (menu == kActRaiserLocalizationMenu_MessageSpeed || menu == kActRaiserLocalizationMenu_MessageSpeedJP) &&
+      ((line == 0 && field_count == (menu == kActRaiserLocalizationMenu_MessageSpeedJP ? 8u : 10u)) ||
+       (line == 2 && field_count == 3));
 }
 
 static unsigned MenuSharedColumns(ActRaiserLocalizationMenu menu) {
@@ -172,7 +174,7 @@ static bool BuildRow(ActRaiserLocalizationMenu menu, ArTextCellRegion region,
     if (next_column <= column) return false;
     ArLocalizationTextCellRule *cell = &rule->cells[index];
     cell->italic = MenuValueCell(menu, line, index, field_count) ||
-        (menu == kActRaiserLocalizationMenu_MessageSpeed && line == 0 && field_count == 10);
+        (physical && line == 0);
     cell->start = (uint8_t)column;
     cell->end = (uint8_t)next_column;
     if (physical) {

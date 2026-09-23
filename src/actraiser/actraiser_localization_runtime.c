@@ -281,6 +281,13 @@ static bool LegacySelection(int content, int presentation) {
   return false;
 }
 
+static unsigned s_message_speed_maximum = 9;
+void ActRaiserLocalizationRuntime_SetMessageSpeedMaximum(unsigned maximum) {
+  if (maximum != 7 && maximum != 9) return;
+  s_message_speed_maximum = maximum;
+  (void)ActRaiserLocalizationComposeState_SetMessageSpeedMaximum(&s_runtime.compose, maximum);
+}
+
 static bool EnsureConfigured(void) {
   /* Untouched native mode does not load scripts or initialize the font stack.
    * Once enhanced mode was used, retain semantic observations while hidden so
@@ -293,6 +300,7 @@ static bool EnsureConfigured(void) {
     ArLanguagePack_Init(&s_runtime.native_pack);
     ArDialogueSession_Init(&s_runtime.session);
     ActRaiserLocalizationComposeState_Init(&s_runtime.compose);
+    (void)ActRaiserLocalizationComposeState_SetMessageSpeedMaximum(&s_runtime.compose, s_message_speed_maximum);
     ActRaiserLocalizationNameEntryTracker_Init(&s_runtime.name_tracker);
     ActRaiserLocalizationWorldNavigation_Init(&s_runtime.world_navigation);
     s_runtime.content = -1;
@@ -1266,9 +1274,11 @@ void ActRaiserLocalizationRuntime_CaptureFrame(
         s_runtime.name_key_map.valid = false;
         s_runtime.name_entry_applied_native_revision = 0;
       }
-      (void)ActRaiserLocalizationComposeState_Process(
+      const bool composed = ActRaiserLocalizationComposeState_Process(
           &s_runtime.compose, &compose_observations[index],
           ResolveComposeText, NULL, error, sizeof(error));
+      if (s_runtime.presentation && !composed && error[0])
+        fprintf(stderr, "[localization] fixed text unavailable (%s); native text retained\n", error);
       s_runtime.compose_observation_serial =
           compose_observations[index].serial;
     }

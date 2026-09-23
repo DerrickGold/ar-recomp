@@ -574,7 +574,15 @@ void PresentSimMenu_Draw(const FrameSlot *slot, ArRenderRectI view) {
        * the ordinary bottom dialogue footprint throughout the operation. */
       view=MenuViewport(view,m->phase,f->scale_percent);
       Frame(view,72,88,112,48);
-      NativeLabels(slot,view,(ArRenderRectI){136,88,96,40},80,92);
+      /* Include the arrow row and the complete text claim after BG3 scroll.
+       * The retail -4px scroll places its bottom at y=132, outside the old
+       * fixed y=88..128 crop; that silently rejected all enhanced labels. */
+      ArRenderRectI source[kArTextCellMaximumProjectedRegions];
+      if (slot->bg3_state_valid && ArTextCellComposite_ProjectRegion(
+          (ArTextCellRegion){17,11,12,5}, slot->bg3_tilemap_width_tiles,
+          slot->bg3_tilemap_height_tiles, slot->bg3_hscroll, slot->bg3_vscroll,
+          256,224,source)==1)
+        NativeLabels(slot,view,source[0],80,92);
     }
     return;
   }

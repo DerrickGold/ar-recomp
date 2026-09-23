@@ -41,7 +41,7 @@ static bool LoadOrAdopt(ArRegionalCampaign *campaign, const char *path,
   if (status == kSaveCheckpoint_Ready) return true;
   if (status != kSaveCheckpoint_Missing) return false;
   ArRegionalCostPolicy baseline;
-  ArRegionalCosts_Init(&baseline, kArRegionalCost_US);
+  ArRegionalCosts_Init(&baseline, kArRegionalSource_US);
   return Create(campaign, &baseline, next, error);
 }
 
@@ -85,7 +85,7 @@ static bool Commit(void *context, SaveFileFormat format, const char *path,
       if (!LoadOrAdopt(campaign, path, expected, &session, error)) return false;
     } else {
       ArRegionalCostPolicy baseline;
-      ArRegionalCosts_Init(&baseline, kArRegionalCost_US);
+      ArRegionalCosts_Init(&baseline, kArRegionalSource_US);
       if (!Create(campaign, &baseline, &session, error)) return false;
     }
   }

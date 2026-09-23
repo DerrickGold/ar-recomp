@@ -28,7 +28,7 @@ void ActRaiserMiracle_ConstrainText(ArDialogueContentSelection *selection,
   };
   for (unsigned i=0;i<sizeof(fields)/sizeof(fields[0]);++i) {
     if (strcmp(id,fields[i].id)) continue;
-    if (prices->price[fields[i].rule]==ArRegionalCosts_Descriptor(fields[i].rule)->price[kArRegionalCost_US]) return;
+    if (prices->price[fields[i].rule]==ArRegionalCosts_Descriptor(fields[i].rule)->price[kArRegionalSource_US]) return;
     if (HasPrice(selection->selected_pack,id,fields[i].token)) return;
     selection->selected_pack=NULL;
     if (HasPrice(selection->native_us_enhanced_pack,id,fields[i].token)) return;

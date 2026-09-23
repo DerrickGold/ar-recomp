@@ -75,10 +75,13 @@ Equal base maps do not establish equal development, events, or town capacity.
 
 ### Action timer profiles
 
-The profile tables start at US `$02:893E` / JP `$02:87E7`; timer word at `+25`.
+The profile tables start at US/EU/DE/FR `$02:893E` / JP `$02:87E7`;
+timer word at `+25`. All 43 used action records have matching bytes `+0..+24`
+across all five ROMs. The six JP limits below are the only initial-time changes;
+the three European releases match the US throughout this used-profile set.
 Timers are BCD, not binary. Map keys below use `region/room`, not act numbers.
 
-| Profile | Consumers | US | JP |
+| Profile | Consumers | US / EU / DE / FR | JP |
 | --- | --- | ---: | ---: |
 | `$03` | Fillmore room 1 | 300 | 200 |
 | `$05` | Fillmore room 3 | 200 | 100 |
@@ -86,6 +89,12 @@ Timers are BCD, not binary. Map keys below use `region/room`, not act numbers.
 | `$24` | Marahna room 8; Death Heim room 6 | 300 | 200 |
 | `$25` | Northwall room 1 | 200 | 100 |
 | `$26` | Northwall room 2 | 200 | 100 |
+
+Recomp resolves this choice at the normal return of the audited action-only
+`$02:B4E8` profile initializer, replacing only `$E6/$E7`. The native or HLE
+profile body still owns PPU writes, CPU flags and stack return. Disabling the
+video HLE retains the selected gameplay limit. No frame-time patch, live-clock
+rescaling or setting-change refill is involved.
 
 ### Changed used object records
 
@@ -145,6 +154,14 @@ US Professional mode equals JP Special mode in other respects.
 World-actor passes are **outside** JP's development divider (US `$03:8207` /
 JP `$03:8212`). Pauses, effects, and menu ownership can gate entry. Raw service
 counts must not be presented as universal real-time delays.
+
+The Recomp construction-wait option replaces only the leaf at `$03:872A–873B`.
+It decrements `$7F:7CE1[town]`, reloads it on expiry, and advances
+`$7F:7CC9[town]` once. The pending rule activates at that expiry, preserving an
+existing wait and leaving the native reload table `$7F:7CD5[town]`, other towns,
+master divider and cycle untouched. All five ROMs have the same leaf opcodes
+(JP `$03:86DA–86EB`); initialization loads1 in US/EU/DE/FR and150 in JP.
+
 The earthquake RNG helper reduces modulo its argument (`$FF` here); do not
 silently replace it with an unrelated host coin flip.
 
@@ -552,6 +569,31 @@ the effective policy and consistent canonical state at a completed simulation
 transaction boundary. Exact host activation hooks and replay tests remain
 implementation work.
 
+### Magic gesture integration
+
+US standing input `$00:9832` checks the attack bit first, then the dedicated
+A/X gate at `$9843–984D`. JP `$00:985C` has no dedicated gate. Its ground
+attack prefix `$9A6D–9A7C` removes held Y from the native release mask and tests
+Up before choosing the sword or common cast body. The corresponding US
+prefix begins at `$9A6E`; walking attacks also enter there. Airborne and
+crouching attack entries are separate and are not replaced by this rule.
+
+Recomp's Japanese gesture bypasses `$9843–984D` to `$984E` and replaces only
+the ground prefix, continuing at US `$9A73` for a sword swing or `$9DE1` for
+the existing cast gate. JP's mask word `$F9` maps to US `$F6`; the tested
+input remains the word at `$A1`. The adapter preserves the prefix's register,
+flag and mask effects, native return ownership and ordinary spell payment.
+It does not remap controller buttons or make every Up + Y combination a cast.
+
+A campaign request activates after completed NMI sampling when raw latched
+Up/Y/A/X are all released. The debounced input word is not a release test:
+it can be zero while Y remains physically held. The observer changes only
+campaign metadata, not input latches, native masks, CPU registers or bindings.
+The US/European paths remain generated native code. Unit tests cover every
+16-bit release sample and 4,194,304 ground-prefix input/flag/mask cases; the
+optional JP-ROM control interprets the original prefix, rather than using
+the generated host code as its oracle.
+
 ### Lives convention
 
 US HUD `$02:C280–C2A3` draws stored lives **plus one** in BCD; JP
@@ -574,6 +616,13 @@ Start then restarts Fillmore with stored lives 4/2 and score zero in both ROMs.
 Thus “JP clears score on every death” is too broad: the owner is the action
 respawn transaction. These tests enter the native death dispatcher by setting
 its player flag; they do not replay lethal damage or every checkpoint.
+
+Recomp's selectable score rule intercepts only the US `$00:981C–9825` prefix.
+It retains `REP #$20`, the marker word load, marker consumption and resulting
+A/N/Z; Japan adds the word clear at `$1F/$20`. Continuations `$9826` (retry)
+and `$982F` (no marker) keep allocation and subsequent player logic native.
+The captured rule is activated only for a nonzero marker. It does not insert
+a score write into the death dispatcher, life debit or Palace loader.
 
 Native Fight/Yes after normal Palace return reloads the persistent life allowance
 (two in both fixtures), clears score, and reaches playable Fillmore. This is
@@ -668,6 +717,20 @@ Developed-town geography, live sealing/target-picker contention, other effect
 combinations and complete selector RNG ordering remain separate tests. Do not
 substitute synthetic coordinates for a geographically valid developed town.
 
+The Recomp selector integration captures five independently stored choices at
+the complete native player effect `$01:97E5` (kind4 only) or posted effect
+`$01:9840` (pending kind4). It does not intercept bridges or the already-random
+class6. US/Europe falls through to the original selectors. JP uses the native
+`$03:AF65` RNG and rejoins the original preserve/destroy continuations, including
+the house-only `$03:B4A6` feedback call. House-credit quantities remain a separate
+regional rule. Settings edits cannot change a captured effect partway through.
+
+Selector tests cover20,480 JP-prefix/native-US-continuation cases against the
+JP ROM and5,120 US/PAL subtype cases across the four other ROMs, plus all243
+mixed policies. Native helper contracts are modeled in these bounded tests;
+they do not independently prove the RNG algorithm or the house-credit math.
+The generated call paths and complete effects require separate live checks.
+
 ### Scheduler and SIM enemies
 
 Booted, natively initialized Fillmore traces now cross complete long cycles in
@@ -692,11 +755,48 @@ visual service `$03:9C15` every fifth pass even while `$7F:91FE/$9200` are held;
 US calls its structure visual service `$03:9E40` each pass. Do not restore the
 pre-effect JP divider as though every paused development clock were frozen.
 
+The Recomp development policy implements those three counts as independent
+leaves, exposed as one pacing choice. Its bounded master coordinator preserves
+scene-mode 7's early exit, the pending callback before the divider, and the
+actor/recovery pass outside it. Both effect coordinators use the effective
+policy and retain their existing actor/no-actor distinction. Their common
+native callees still own events, actors, census, rendering and audio; choosing
+JP pacing does not substitute JP media helpers. A pending choice activates
+only in an eligible master call with both `$7F:91FE` and `$7F:9200` zero. It
+does not reset those counters or `$7F:7CED`.
+
+Implementation tests compare 26,880 master-coordinator cases (including all
+five ROMs, with explicit address/callee normalization) and 896 effect cases
+(including the US ROM). These compare CPU state, RAM, call order and native
+frames, not the bodies of regional callees. All 27 source combinations also
+test full cycles and independent actor counts; an interleaved effect/master
+case verifies shared divider ownership. Native nonlocal returns are tested at
+each called leaf. These are implementation tests, separate from the research
+fixture totals below.
+
 JP angel recovery is one HP per 60 eligible calls, capped at the current max;
 state low nibble 4 freezes the recovery phase. A controlled US cast with two
 HP and three SP already queued starts at HP 3 / SP 200, pays 160, and finishes
 at HP 5 / SP 43 with both queues drained, while the development clock never
 advances. No new long-cycle queue is generated during that effect.
+
+Recomp keeps SP and angel recovery independently keyed under one town-recovery
+menu choice. The cycle queue prefix and normal-angel drain retain the native
+division/saturation callees. The JP eligible-call clock runs from both movement
+decoder continuations, not just the US normal-state drain. Its native word at
+`$0B04` overlaps the US SP queue byte at `$0B05`: the mixed-rule integration
+therefore uses only byte `$0B04` for the bounded 0–59 phase. It never treats
+pending SP as the high byte of that clock. On a numerical rule change, only
+the changed queue/phase is retired at the next recovery service; current HP/SP
+is retained. Equal US/European choices do not retire it. Initialization still
+belongs to the native scene/load lifecycle, without a second persistent clock.
+
+The recovery integration has 78,928 reference/ROM cases: US/PAL queue prefixes,
+US drain and JP eligible-call leaf, with normalized PAL/JP stat addresses.
+Native helper bodies remain observed contracts in these tests. Another 15,360
+cases vary every valid JP phase against every possible adjacent SP queue byte.
+Mixed rules, changed-leaf retirement, incoming widths and native escape tokens
+have separate tests. These counts are not part of the earlier research totals.
 
 The helpers US `$03:AF54/$AF47` (JP `$03:AD1C/$AD0F`) around the posted effect
 write interrupt-control `$4200` (`$A1` / `$01`). They must not be modeled as a
@@ -923,6 +1023,14 @@ preserving unfinished fishing across Palace visits would be a separate QoL
 policy. This threshold and the offering's automatic/manual activation policy
 are independent settings and require no
 Japanese artwork donor.
+
+The Recomp adapter replaces only Fillmore's `$03:E865–E88B` prefix. It keeps
+the native initialization-bit helpers and fishing-scene call, then transfers
+to `$E88C` (continue waiting) or `$E895` (completion). Native eligibility/fired
+guards and reward insertion remain in charge. A numerical target change
+reconciles progress already at or above the new target; unchanged targets keep
+the original increment-before-equality behavior, including byte wrap in unusual
+debug states. No setting write changes the counter or grants an item directly.
 
 The other item-6 callbacks are Fillmore 7/13, Bloodpool 1, Kasandora 3/7,
 Aitos 5 and Northwall 5. All eight grant sites have rooted callback joins
@@ -2213,8 +2321,11 @@ not establish all city-report, campaign, or European behavior.
 Expose score-page availability as a presentation policy, independent of
 recording/settling scores, language selection and gameplay rewards. Capture
 it when the report opens; a mid-report setting change takes effect on the
-next opening, without cancelling a page or replaying a transaction. No runtime
-regional option is implemented by this research.
+next opening, without cancelling a page or replaying a transaction. The
+Recomp option now wraps US `$01:899B`, delegates its native body, and, for the
+captured JP policy, routes `$01:89EE` directly to native cleanup `$01:8A2F`.
+The original `$01:9261` release/press wait still runs. Score recording and
+settlement are untouched; the surrounding menu's lifetime remains independent.
 
 ### Town-menu return behavior and message-speed choices
 
@@ -2257,6 +2368,34 @@ again. When integrating a narrower speed range, explicitly handle an existing
 value 8/9 without changing stored pacing merely because settings were toggled;
 the user should be able to cancel with their previous value intact. Native
 and modern menu owners need the same effective policy, not renderer hooks.
+
+The Recomp return option now captures the policy at the accepted `$01:81D7`
+command boundary for actions12–15. A small game-owned adapter retains the US
+report, city-census/cache preparation, save and message-speed callees with
+their exact JSR/JSL return addresses. US/Europe also retains `$8CB6` close and
+`$9270` release; JP omits only those two calls and returns carry set. This is
+the JP menu-return rule on US report/save behavior, not a replacement of the
+whole command with JP code. The native and modern menu owners consume the
+same carry result. Escaped native returns terminate the command without
+performing its remaining calls.
+
+The message-speed adapter captures the offered range at `$01:8AF5`, separately
+from command-menu return behavior. The original prompt, polling calls, movement
+sound, sample/cancel text and cleanup remain native. Bounded prefixes at
+`$8B18` and `$8B59` change cursor geometry and the upper limit. If an existing
+speed is 8/9, only temporary `$0A` is clamped for the JP selector; `$0200` changes
+only along the original confirmation branch. A captured range cannot change
+under an open selector.
+
+US scale `$01:FA9A` begins at `$0C12`; JP `$01:F9A5` begins at `$0C13`.
+The JP eight-cell row is centered inside the US ten-cell claim. Native
+composition first completes synchronously; the adapter changes only the ten
+digit bytes at `$7F:B324 + 2*i`, preserving attributes and the normal upload
+flag. Enhanced composition projects the authored numeric row to the same
+captured grid, retaining translated labels, artwork offsets, styles, hard
+boundaries and bidi spans. A JP eight-field source can also be used with US
+choices; absent 8/9 fields get numeric fallbacks. Neither renderer nor language
+locale decides the gameplay range.
 
 ### Death Heim transition and music
 

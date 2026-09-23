@@ -643,7 +643,7 @@ func emitFunctionEntry(name string, entryPC uint32, entryM, entryX uint8, option
 			fmt.Sprintf("  if (%s(cpu)) {", options.HLEFunctionIf.Predicate),
 			fmt.Sprintf("    RecompReturn _r = %s(cpu);", options.HLEFunctionIf.Function),
 			"    RecompStackPop();",
-			"    return _r;",
+			"    return cpu_finish_hle_return(cpu, _r, _entry_s, _hrv);",
 			"  }",
 		)
 	}

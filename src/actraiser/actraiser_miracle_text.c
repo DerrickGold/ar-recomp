@@ -19,7 +19,7 @@ void ActRaiserMiracle_UpdateNativeDigit(CpuState *cpu,
     const unsigned index = source - fields[i].cursor;
     if (index >= fields[i].width) continue;
     const unsigned price = prices->price[fields[i].rule];
-    const unsigned native = ArRegionalCosts_Descriptor(fields[i].rule)->price[kArRegionalCost_US];
+    const unsigned native = ArRegionalCosts_Descriptor(fields[i].rule)->price[kArRegionalSource_US];
     if (price == native || !price || price >= (fields[i].width == 2 ? 100u : 1000u)) return;
     unsigned divisor = 1;
     for (unsigned j = index + 1; j < fields[i].width; ++j) divisor *= 10;

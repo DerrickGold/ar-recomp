@@ -10,5 +10,9 @@
  * CPU modes, and unaudited profile operands retain the decoded ROM body. */
 bool ActRaiser_ActionVideoConfigHleEnabled(CpuState *cpu);
 RecompReturn ActRaiser_ApplyActionVideoConfig(CpuState *cpu);
+/* Regional wrapper owns only initial time. Disabling the video HLE delegates
+ * the PPU/register work to native code, without disabling gameplay rules. */
+bool ActRaiser_ActionVideoConfigEntry(CpuState *cpu);
+RecompReturn ActRaiser_RunActionVideoConfig(CpuState *cpu);
 
 #endif /* ACTRAISER_ACTION_VIDEO_CONFIG_H */
