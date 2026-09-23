@@ -30,6 +30,7 @@ static void Image(uint8_t *image, unsigned marker) {
 
 static bool EqualSession(const ArRegionalSession *a, const ArRegionalSession *b) {
   return a->slot == b->slot && a->revision == b->revision &&
+      a->arrival_locked==b->arrival_locked && a->requested.arrival==b->requested.arrival && a->effective.arrival==b->effective.arrival &&
       !memcmp(a->campaign, b->campaign, sizeof(a->campaign)) &&
       !memcmp(&a->sim_actors,&b->sim_actors,sizeof(a->sim_actors)) &&
       !memcmp(&a->requested.sim_combat,&b->requested.sim_combat,sizeof(a->requested.sim_combat)) &&
@@ -37,6 +38,9 @@ static bool EqualSession(const ArRegionalSession *a, const ArRegionalSession *b)
       !memcmp(&a->requested.sim_ai,&b->requested.sim_ai,sizeof(a->requested.sim_ai)) &&
       !memcmp(&a->effective.sim_ai,&b->effective.sim_ai,sizeof(a->effective.sim_ai)) &&
       a->requested.level_goals==b->requested.level_goals && a->effective.level_goals==b->effective.level_goals &&
+      a->requested.construction==b->requested.construction && a->effective.construction==b->effective.construction &&
+      !memcmp(&a->requested.support,&b->requested.support,sizeof(a->requested.support)) &&
+      !memcmp(&a->effective.support,&b->effective.support,sizeof(a->effective.support)) &&
       !memcmp(&a->requested.town_status,&b->requested.town_status,sizeof(a->requested.town_status)) &&
       !memcmp(&a->effective.town_status,&b->effective.town_status,sizeof(a->effective.town_status)) &&
       a->requested.lair_reloads==b->requested.lair_reloads && a->effective.lair_reloads==b->effective.lair_reloads &&
@@ -70,6 +74,109 @@ static bool EqualSession(const ArRegionalSession *a, const ArRegionalSession *b)
       a->lairs.approximate_towns == b->lairs.approximate_towns &&
       a->lairs.diverged_towns == b->lairs.diverged_towns &&
       !memcmp(a->lairs.stock,b->lairs.stock,sizeof(a->lairs.stock));
+}
+
+static void CheckArrival(void) {
+  const uint8_t id[16]={1};const ArRegionalCostPolicy defaults={{0}};
+  for(unsigned source=0;source<3;++source)for(unsigned continuing=0;continuing<2;++continuing) {
+    ArRegionalSession session;CHECK(ArRegionalSession_NewGame(&session,0,id,&defaults));
+    CHECK(ArRegionalSession_RequestArrival(&session,session.revision,(ArRegionalSource)source));
+    CHECK(!session.arrival_locked && session.effective.arrival==0);
+    bool japanese;
+    CHECK(ArRegionalSession_BeginArrival(&session,continuing,&japanese));
+    CHECK(session.arrival_locked && japanese==(source==1 && !continuing));
+    const uint32_t revision=session.revision;
+    CHECK(ArRegionalSession_BeginArrival(&session,false,&japanese) && revision==session.revision);
+    CHECK(ArRegionalSession_RequestArrival(&session,session.revision,source==1?0:1));
+    CHECK(ArRegionalSession_BeginArrival(&session,false,&japanese));
+    CHECK(japanese==(source==1 && !continuing));
+    const ArRegionalSession before=session;
+    CHECK(!ArRegionalSession_RequestArrival(&session,session.revision-1,2) && EqualSession(&session,&before));
+    CHECK(!ArRegionalSession_RequestArrival(&session,session.revision,3) && EqualSession(&session,&before));
+  }
+  ArRegionalSession session;CHECK(ArRegionalSession_NewGame(&session,0,id,&defaults));
+  session.revision=UINT32_MAX;const ArRegionalSession before=session;bool japanese=true;
+  CHECK(!ArRegionalSession_BeginArrival(&session,false,&japanese) && japanese && EqualSession(&before,&session));
+}
+
+static void CheckPopulation(void) {
+  ArRegionalRules rules={0};
+  for(unsigned combination=0;combination<243;++combination) {
+    unsigned digits=combination;bool reduced=false;
+    for(unsigned i=0;i<5;++i) { rules.support.source[i]=digits%3;reduced|=digits%3==1;digits/=3; }
+    for(unsigned level=0;level<3;++level)for(unsigned hint=0;hint<3;++hint)for(unsigned tablet=0;tablet<3;++tablet) {
+      rules.level_goals=level;rules.story.source[0]=hint;rules.story.source[1]=tablet;
+      CHECK(ArRegionalRules_PopulationCompatible(&rules)==(!reduced || (level==1 && hint==1 && tablet==1)));
+    }
+  }
+  const uint8_t id[16]={99};uint8_t image[kActRaiserSramSize];Image(image,99);SaveError error;
+  const char *path="regional-population.srm";
+  remove(path);remove("regional-population.srm.archeckpoint");
+  ArRegionalSession session,loaded;ArRegionalCostPolicy defaults={{0}};
+  CHECK(ArRegionalSession_NewGame(&session,0,id,&defaults));
+  session.requested.story.source[2]=session.effective.story.source[2]=1;
+  for(unsigned n=0;n<6;++n) {
+    const ArRegionalSource source=(n+1)%3;
+    ArRegionalSession before=session;uint32_t revision=session.revision;
+    CHECK(!ArRegionalSession_SetPopulationProfile(&session,revision-1,source) && EqualSession(&session,&before));
+    CHECK(ArRegionalSession_SetPopulationProfile(&session,revision,source));
+    CHECK(session.revision==revision+1 && session.requested.level_goals==source && session.effective.level_goals==source);
+    CHECK(session.requested.story.source[0]==source && session.effective.story.source[1]==source);
+    CHECK(session.requested.story.source[2]==1 && session.effective.story.source[2]==1);
+    for(unsigned i=0;i<5;++i) CHECK(session.requested.support.source[i]==source && session.effective.support.source[i]==source);
+    before=session;
+    CHECK(ArRegionalSession_SetPopulationProfile(&session,session.revision,source) && EqualSession(&session,&before));
+    CHECK(ArRegionalSession_Save(&session,kSaveFileFormat_NativeSrm,path,n?image:NULL,image,&error));
+    CHECK(ArRegionalSession_Load(&loaded,0,path,image,&error)==kSaveCheckpoint_Ready && EqualSession(&loaded,&session));
+    if(source==1) {
+      CHECK(!ArRegionalSession_RequestLevelGoals(&session,session.revision,0) && EqualSession(&session,&before));
+      ArRegionalStoryPolicy story=session.requested.story;story.source[0]=0;
+      CHECK(!ArRegionalSession_RequestStory(&session,session.revision,&story) && EqualSession(&session,&before));
+      story=session.requested.story;story.source[1]=2;
+      CHECK(!ArRegionalSession_RequestStory(&session,session.revision,&story) && EqualSession(&session,&before));
+      story=session.requested.story;story.source[2]=0;
+      CHECK(ArRegionalSession_RequestStory(&session,session.revision,&story));
+      story.source[2]=1;CHECK(ArRegionalSession_RequestStory(&session,session.revision,&story));
+    }
+  }
+  session.revision=UINT32_MAX;ArRegionalSession before=session;
+  CHECK(!ArRegionalSession_SetPopulationProfile(&session,session.revision,1) && EqualSession(&session,&before));
+  CHECK(!ArRegionalSession_SetPopulationProfile(&session,session.revision,kArRegionalSource_Count));
+  session.revision=1;session.requested.support.source[0]=1;
+  CHECK(!ArRegionalSession_Save(&session,kSaveFileFormat_NativeSrm,path,image,image,&error));
+  remove(path);remove("regional-population.srm.archeckpoint");
+}
+
+static void CheckConstruction(void) {
+  const uint8_t id[16]={98};uint8_t image[kActRaiserSramSize];Image(image,98);SaveError error;
+  const char *path="regional-construction.srm";
+  remove(path);remove("regional-construction.srm.archeckpoint");
+  ArRegionalSession session,loaded;ArRegionalCostPolicy defaults={{0}};
+  CHECK(ArRegionalSession_NewGame(&session,0,id,&defaults));
+  for(unsigned n=0;n<6;++n) {
+    const ArRegionalSource source=(ArRegionalSource)((n+1)%3);
+    const ArRegionalSource old=session.effective.construction;
+    CHECK(ArRegionalSession_RequestConstruction(&session,session.revision,source));
+    const uint32_t revision=session.revision;
+    CHECK(ArRegionalSession_RequestConstruction(&session,revision,source) && session.revision==revision);
+    CHECK(!ArRegionalSession_RequestConstruction(&session,revision-1,source));
+    CHECK(session.effective.construction==old);
+    CHECK(ArRegionalSession_Save(&session,kSaveFileFormat_NativeSrm,path,n?image:NULL,image,&error));
+    CHECK(ArRegionalSession_Load(&loaded,0,path,image,&error)==kSaveCheckpoint_Ready && EqualSession(&loaded,&session));
+    bool jp=false;CHECK(ArRegionalSession_BeginConstruction(&session,&jp) && jp==(source==1));
+    CHECK(session.revision==revision+1 && session.effective.construction==source);
+    CHECK(ArRegionalSession_BeginConstruction(&session,&jp) && session.revision==revision+1);
+    CHECK(ArRegionalSession_Save(&session,kSaveFileFormat_NativeSrm,path,image,image,&error));
+    CHECK(ArRegionalSession_Load(&loaded,0,path,image,&error)==kSaveCheckpoint_Ready && EqualSession(&loaded,&session));
+  }
+  ArRegionalSession before=session;bool jp=true;
+  CHECK(!ArRegionalSession_RequestConstruction(&session,session.revision,3) && EqualSession(&before,&session));
+  CHECK(!ArRegionalSession_BeginConstruction(&session,NULL) && EqualSession(&before,&session));
+  session.revision=UINT32_MAX;
+  CHECK(!ArRegionalSession_RequestConstruction(&session,session.revision,1));
+  session.requested.construction=1;before=session;
+  CHECK(!ArRegionalSession_BeginConstruction(&session,&jp) && jp && EqualSession(&before,&session));
+  remove(path);remove("regional-construction.srm.archeckpoint");
 }
 
 static void CheckSimCombat(void) {
@@ -883,7 +990,7 @@ static void CheckFeatureCodec(void) {
     CHECK(!ArRegionalSession_Save(&session, kSaveFileFormat_NativeSrm, path, image, image, &error));
   }
   /* Reordering valid named fields is supported; they are not enum ordinals. */
-  enum { records = kArRegionalCostRule_Count + kArRegionalTimerRule_Count + 12 + kArRegionalDevelopmentRule_Count + kArRegionalRecovery_Count + kArRegionalQuake_Count + kArRegionalLairCount + kArRegionalScore_Count + kArRegionalSourceItem_Count + kArRegionalStory_Count + kArRegionalTownStatus_Count + kArRegionalSimCombat_Count + kArRegionalSimAi_Count };
+  enum { records = kArRegionalCostRule_Count + kArRegionalTimerRule_Count + 14 + kArRegionalDevelopmentRule_Count + kArRegionalRecovery_Count + kArRegionalQuake_Count + kArRegionalLairCount + kArRegionalScore_Count + kArRegionalSourceItem_Count + kArRegionalStory_Count + kArRegionalTownStatus_Count + kArRegionalSimCombat_Count + kArRegionalSimAi_Count + kArRegionalSupport_Count };
   CHECK(ByteOrder_ReadLe16(original + 10) == records);
   size_t offsets[records], offset = 36;
   for (unsigned i = 0; i < records; ++i) {
@@ -891,7 +998,7 @@ static void CheckFeatureCodec(void) {
     offset += original[offset] + 9u;
   }
   const size_t rules_end=offset;
-  CHECK(offset + kArRegionalLairHistoryEncodedBytes + kArRegionalLairReloadEncodedBytes + kArRegionalSimActorsEncodedBytes == size);
+  CHECK(offset + kArRegionalLairHistoryEncodedBytes + kArRegionalLairReloadEncodedBytes + kArRegionalSimActorsEncodedBytes + 9 == size);
   memcpy(mutated, original, 36); offset = 36;
   for (unsigned i = records; i-- > 0;) {
     size_t length = original[offsets[i]] + 9u;
@@ -1155,11 +1262,37 @@ static void CheckFeatureCodec(void) {
   CHECK(loaded.sim_actors.cached[0].combat==31 && loaded.sim_actors.active[0].combat==7 && !loaded.sim_actors.active[0].ai);
   CHECK(ArRegionalSimAi_Resolve(&loaded.requested.sim_ai,&combat) && !combat);
   CHECK(!memcmp(&loaded.lairs,&session.lairs,sizeof(session.lairs)) && !memcmp(&loaded.reloads,&session.reloads,sizeof(session.reloads)));
+  const size_t v25_bytes=offsets[86];
+  memcpy(mutated,original,v25_bytes);ByteOrder_WriteLe16(mutated+8,25);ByteOrder_WriteLe16(mutated+10,86);
+  memcpy(mutated+v25_bytes,original+rules_end,old_history_size+kArRegionalSimActorsEncodedBytes);
+  CHECK(SaveCheckpoint_Commit(kSaveFileFormat_NativeSrm,path,image,image,
+      mutated,v25_bytes+old_history_size+kArRegionalSimActorsEncodedBytes,AcceptOpaque,NULL,&error));
+  CHECK(ArRegionalSession_Load(&loaded,2,path,image,&error)==kSaveCheckpoint_Ready);
+  CHECK(loaded.requested.construction==0 && loaded.effective.construction==0);
+  const size_t v26_bytes=offsets[87];
+  memcpy(mutated,original,v26_bytes);ByteOrder_WriteLe16(mutated+8,26);ByteOrder_WriteLe16(mutated+10,87);
+  memcpy(mutated+v26_bytes,original+rules_end,old_history_size+kArRegionalSimActorsEncodedBytes);
+  CHECK(SaveCheckpoint_Commit(kSaveFileFormat_NativeSrm,path,image,image,
+      mutated,v26_bytes+old_history_size+kArRegionalSimActorsEncodedBytes,AcceptOpaque,NULL,&error));
+  CHECK(ArRegionalSession_Load(&loaded,2,path,image,&error)==kSaveCheckpoint_Ready);
+  for(unsigned i=0;i<5;++i) CHECK(loaded.requested.support.source[i]==0 && loaded.effective.support.source[i]==0);
+  CHECK(!memcmp(&loaded.lairs,&session.lairs,sizeof(session.lairs)) && !memcmp(&loaded.reloads,&session.reloads,sizeof(session.reloads)));
+  CHECK(!memcmp(&loaded.sim_actors,&session.sim_actors,sizeof(session.sim_actors)));
+  const size_t v27_bytes=offsets[92];
+  memcpy(mutated,original,v27_bytes);ByteOrder_WriteLe16(mutated+8,27);ByteOrder_WriteLe16(mutated+10,92);
+  memcpy(mutated+v27_bytes,original+rules_end,old_history_size+kArRegionalSimActorsEncodedBytes);
+  CHECK(SaveCheckpoint_Commit(kSaveFileFormat_NativeSrm,path,image,image,
+      mutated,v27_bytes+old_history_size+kArRegionalSimActorsEncodedBytes,AcceptOpaque,NULL,&error));
+  CHECK(ArRegionalSession_Load(&loaded,2,path,image,&error)==kSaveCheckpoint_Ready);
+  CHECK(!loaded.arrival_locked && !loaded.requested.arrival && !loaded.effective.arrival);
   CHECK(ArRegionalSession_RequestStory(&session,session.revision,&story));
   CHECK(ArRegionalSession_BeginStory(&session,&story_snapshot));
   story.source[2]=1;CHECK(ArRegionalSession_RequestStory(&session,session.revision,&story));
   ArRegionalSourcesSnapshot sources_snapshot;
   CHECK(ArRegionalSession_RequestSources(&session,session.revision,&sources));
+  CHECK(ArRegionalSession_RequestArrival(&session,session.revision,kArRegionalSource_Japan));
+  bool japanese;CHECK(ArRegionalSession_BeginArrival(&session,false,&japanese) && japanese);
+  CHECK(ArRegionalSession_RequestArrival(&session,session.revision,kArRegionalSource_US));
   CHECK(ArRegionalSession_BeginSources(&session,&sources_snapshot));
   sources.source[1]=kArRegionalSource_Japan;
   CHECK(ArRegionalSession_RequestSources(&session,session.revision,&sources));
@@ -1170,6 +1303,9 @@ static void CheckFeatureCodec(void) {
 }
 
 int main(void) {
+  CheckArrival();
+  CheckPopulation();
+  CheckConstruction();
   CheckSimCombat();
   CheckLevelGoals();
   CheckTownStatus();

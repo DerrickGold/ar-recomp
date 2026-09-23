@@ -186,9 +186,11 @@ session-only: exiting without a native save cannot leak newly migrated bridge
 records to disk. The ROM's normal `$03:A656` save transaction later changes
 the native town block; auto-persistence then commits the complete, already
 checksummed 8 KiB image, including the sidecar. A save-system regression test
-covers both halves of this boundary. The census, marks, and scene-finish
-render hooks read the area directly (`src/actraiser/actraiser_bugfixes.c`); the ROM
-itself never does.
+covers both halves of this boundary. The bridge owner in
+`src/actraiser/actraiser_bugfixes.c` supplies marks, scene-finish rendering and
+the census's read-only validated/deduplicated bridge count. The census lives
+in `actraiser_town_census.c`; it does not interpret extension storage. The ROM
+itself never reads the area.
 
 ### 3.5 Lairs, growth and SIM actor cache
 
@@ -320,9 +322,52 @@ Export still writes the selected game-image format only; carry the matching
 regional companion separately. This differs from the Unicode-name import
 behavior described above.
 
+The complete recovery-copy API is separate from ordinary Export. It reserves a
+new directory and writes `save.srm`, its matching regional companion (if present)
+and its Unicode-name companion (if present). It never replaces an existing
+directory. The native file is written last, so a failed copy cannot look complete
+while missing a required companion. Partial directories are retained on failure.
+It accepts only a completed, persisted save whose disk image still matches;
+the caller must first persist a coherent story image, including cached actors.
+Regional metadata comes from that saved campaign, even if a different unsaved
+New Game is running. Population conversion creates this copy after confirming
+the current game state in the Sky Palace. Restoration is manual, as described
+below; ordinary save Export is not a substitute for the complete copy.
+
+`ActRaiserStorySnapshot_Capture` provides a read-only projection of the US
+writer at `$03:A656`. It copies current WRAM into a separate SRAM-sized buffer,
+retains bytes the native writer does not own (including extension bridges),
+and recomputes the native checksum. It does not refresh the active town's actor
+cache or establish a safe save boundary. Ordinary saves still execute the
+original writer. Randomized original-CPU comparisons cover all 8,192 bytes,
+both native accumulator entry widths and both carry states.
+
+`SaveSystem_CommitStorySnapshot` persists such a completed game-owned projection
+with the current campaign's metadata, then replaces live SRAM and its shadow.
+It rejects pending/aborted native saves. Failed commits leave live SRAM and
+the durable image unchanged; the checkpoint journal can retain a retry
+candidate without selecting it on reload. The result distinguishes an
+uncommitted image from a committed image whose Unicode-name companion needs
+retrying. A caller must never roll back committed gameplay or repeat a
+destructive conversion because that companion write failed. Neither API
+alone makes redevelopment safe. The game-owned conversion runs at the Palace
+selector boundary `$01:85A2`, after native active-town cache retirement. It
+revalidates the confirmed campaign/revision and town footprint, saves a complete
+pre-change image, and reserves `<active-save>.redevelopment-<random-id>/` before
+mutating structures. Rule changes and the post-conversion image commit together;
+a failed candidate commit restores the exact changed WRAM ranges and old rules.
+
+To restore a complete recovery copy manually, close the game and retain a copy
+of the current save and companions first. For the native backend, replace the
+active `.srm` and its companions together, using the active save's basename.
+Remove an old companion if the recovery has none; do not pair old metadata with
+the restored image. Recovery copies always use native `.srm`, including copies
+made from the INI backend: select the native backend before using this manual
+procedure. Ordinary Import does not restore the Unicode-name companion.
+
 This storage covers [the implemented regional gameplay and report options](regional-settings.md)
-and retained lair histories, not full gameplay presets or population redevelopment.
-Overlay changes remain in memory until the next completed Progress Log save;
+and retained lair histories, not full gameplay presets.
+Ordinary overlay changes remain in memory until the next completed Progress Log save;
 they are not written to the global `settings.ini`. Older pricing-only companions
 load with US room limits and retain all their prices. They are upgraded only
 with the next completed save, not merely by loading them.
@@ -462,6 +507,36 @@ total): `sim_dragon_search_interval`, `sim_dragon_extra_actor_pass`,
 `sim_bat_fallback_threshold`, and `sim_bat_abduction_wait`. Its payload is
 4163 bytes; the bounded companion limit is now 8192 bytes. The native SRAM
 image remains exactly 8192 bytes and contains no host metadata.
+
+Version 26 appends `construction_price_japanese` (87 named records, 4199-byte
+payload). Resolved values are0/1/0 for US/JP/Europe. Requested and effective
+prices remain separate until the next complete construction batch. Versions
+1–25 default this rule to US and retain all existing histories and actor state.
+`ARBUILDPRICE-R1` binds non-native requested/effective prices into replay
+identity; US/European aliases preserve older digests.
+
+Version 27 adds five support records (92 named records, 4357-byte payload):
+`support_regular_fields`, `support_upgraded_fields`, `support_factory_class3`,
+`support_factory_class4`, and `support_other_structures`. Older companions
+default these to US. Unlike ordinary pending preferences, requested and
+effective support must match: there is no persistent demolition request.
+`ARSUPPORT-R1` includes resolved support amounts in replay identity; numerically
+identical US/European choices preserve previous digests. Reduced support is
+accepted only with Japanese level and population-event goals. The conversion
+updates that compatible set together while preserving earned progress and
+the independent Compass prerequisite rule. Conversion saves immediately,
+including its recovery copy, rather than waiting for a later Progress Log.
+
+Version 28 adds `final_island_japanese` (93 named records, 4396-byte payload)
+and a nine-byte event block after `ARSIMAC2`: ASCII `ARARRIV1`, followed by a
+0/1 route-lock byte. Older companions default to unlocked US behavior. An
+already-unlocked native event keeps its effective route instead of adopting
+a pending preference halfway through the reveal. Otherwise the eligible final
+departure or Japanese Palace check captures the requested route once. The
+lock survives saves before the Japanese announcement; New Game resets it.
+`ARARRIVAL-R1` binds the requested/effective route and `ARARRLOCK-R1` binds its
+lock into non-native replay identity. Numerically Western choices retain
+existing replay identities. Native story flags and SRAM layout are unchanged.
 
 `ARSIMAC2` replaces the actor block with 124 bytes: the same 12-byte header,
 then 24 cached and four live records, each holding a combat word followed by

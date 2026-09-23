@@ -2,6 +2,25 @@
 
 #include <stdio.h>
 
+bool SettingsOverlayRegions_PopulationConfirmation(ArUiLocale locale,
+    ArRegionalSource source,const uint16_t removed[6],char *output,size_t capacity) {
+  if((unsigned)source>=kArRegionalSource_Count || !removed)return false;
+  char towns[512]={0};size_t used=0;
+  for(unsigned town=0;town<6;++town)if(removed[town]) {
+    char key[32];snprintf(key,sizeof(key),"overlay.region.town.%u",town);
+    const int count=snprintf(towns+used,sizeof(towns)-used,"%s%s %u",used?", ":"",
+        ArUiCatalog_Text(locale,key,NULL),removed[town]);
+    if(count<0 || (size_t)count>=sizeof(towns)-used)return false;
+    used+=(size_t)count;
+  }
+  const SettingsOverlayRegionBadge badge=source==kArRegionalSource_Japan?kOverlayRegionBadge_Japan:
+      source==kArRegionalSource_Europe?kOverlayRegionBadge_Europe:kOverlayRegionBadge_US;
+  const ArUiTextArgument args[]={{"region",SettingsOverlayRegions_BadgeLabel(locale,badge)},
+      {"towns",used?towns:ArUiCatalog_Text(locale,"overlay.region.population_none",NULL)}};
+  return ArUiCatalog_Format(output,capacity,
+      ArUiCatalog_Text(locale,"overlay.region.population_confirm",NULL),args,2);
+}
+
 const char *SettingsOverlayRegions_RowKey(ActRaiserRegionalSettingGroup group) {
   switch (group) {
     case kActRaiserRegionalSetting_Scrolls: return "regional_scroll_prices";
@@ -29,6 +48,9 @@ const char *SettingsOverlayRegions_RowKey(ActRaiserRegionalSettingGroup group) {
     case kActRaiserRegionalSetting_LevelGoals: return "regional_level_goals";
     case kActRaiserRegionalSetting_SimCombat: return "regional_sim_combat";
     case kActRaiserRegionalSetting_SimAi: return "regional_sim_ai";
+    case kActRaiserRegionalSetting_Construction: return "regional_construction";
+    case kActRaiserRegionalSetting_Population: return "regional_population";
+    case kActRaiserRegionalSetting_Arrival: return "regional_arrival";
     default: return "";
   }
 }
@@ -85,6 +107,12 @@ const char *SettingsOverlayRegions_RowLabel(ArUiLocale locale, ActRaiserRegional
       return ArUiCatalog_Text(locale,"overlay.region.sim_combat_label","Town monster combat");
     case kActRaiserRegionalSetting_SimAi:
       return ArUiCatalog_Text(locale,"overlay.region.sim_ai_label","Town monster behavior");
+    case kActRaiserRegionalSetting_Construction:
+      return ArUiCatalog_Text(locale,"overlay.region.construction_label","Construction growth cost");
+    case kActRaiserRegionalSetting_Population:
+      return ArUiCatalog_Text(locale,"overlay.region.population_label","Population rules");
+    case kActRaiserRegionalSetting_Arrival:
+      return ArUiCatalog_Text(locale,"overlay.region.arrival_label","Death Heim arrival");
     default: return "";
   }
 }
@@ -100,6 +128,10 @@ const char *SettingsOverlayRegions_EditStatus(ArUiLocale locale, ActRaiserRegion
       return ArUiCatalog_Text(locale, "overlay.region.stale", NULL);
     case kActRaiserRegionalEdit_HistoryUnavailable:
       return ArUiCatalog_Text(locale, "overlay.region.lair_unavailable", NULL);
+    case kActRaiserRegionalEdit_Deferred:
+      return ArUiCatalog_Text(locale,"overlay.region.population_pending",NULL);
+    case kActRaiserRegionalEdit_Incompatible:
+      return ArUiCatalog_Text(locale,"overlay.region.population_incompatible",NULL);
     default: return ArUiCatalog_Text(locale, "overlay.status.unavailable", NULL);
   }
 }
@@ -116,6 +148,25 @@ static SettingsOverlayRegionBadge SourceBadge(ArRegionalSource source) {
 bool SettingsOverlayRegions_ViewBadge(const ActRaiserRegionalRulesView *view,
     ActRaiserRegionalSettingGroup group, bool effective, SettingsOverlayRegionBadge *badge) {
   if (!view || !badge || (unsigned)group >= kActRaiserRegionalSetting_Count) return false;
+  if(group==kActRaiserRegionalSetting_Population) {
+    if(!effective && view->population_pending) {*badge=SourceBadge(view->pending_population);return true;}
+    const ArRegionalSupportPolicy *policy=effective?&view->effective.support:&view->requested.support;
+    ArRegionalSupportSnapshot snapshot;ArRegionalSource source;
+    if(!ArRegionalSupport_Resolve(policy,&snapshot))return false;
+    *badge=ArRegionalSupport_GroupSource(policy,&source)?SourceBadge(source):kOverlayRegionBadge_Mixed;
+    return true;
+  }
+  if(group==kActRaiserRegionalSetting_Arrival) {
+    const ArRegionalSource source=effective?view->effective.arrival:view->requested.arrival;
+    bool unused;if(!ArRegionalArrival_Resolve(source,&unused))return false;
+    *badge=SourceBadge(source);return true;
+  }
+  if (group==kActRaiserRegionalSetting_Construction) {
+    const ArRegionalSource source=effective?view->effective.construction:view->requested.construction;
+    bool unused;
+    if (!ArRegionalConstruction_Resolve(source,&unused)) return false;
+    *badge=SourceBadge(source);return true;
+  }
   if (group==kActRaiserRegionalSetting_SimAi) {
     const ArRegionalSimAiPolicy *policy=effective?&view->effective.sim_ai:&view->requested.sim_ai;
     uint16_t snapshot;ArRegionalSource source;
@@ -355,6 +406,27 @@ bool SettingsOverlayRegions_ViewDescription(ArUiLocale locale,
     char *output, size_t capacity) {
   SettingsOverlayRegionBadge badge;
   if (!SettingsOverlayRegions_ViewBadge(view, group, false, &badge)) return false;
+  if(group==kActRaiserRegionalSetting_Arrival) {
+    SettingsOverlayRegionBadge active;
+    if(!SettingsOverlayRegions_ViewBadge(view,group,true,&active))return false;
+    const ArUiTextArgument args[]={{"region",SettingsOverlayRegions_BadgeLabel(locale,badge)},
+        {"active",SettingsOverlayRegions_BadgeLabel(locale,active)}};
+    const char *key=view->arrival_locked?"overlay.region.arrival_decided":
+        badge==kOverlayRegionBadge_Japan?"overlay.region.arrival_jp":"overlay.region.arrival_us";
+    return ArUiCatalog_Format(output,capacity,ArUiCatalog_Text(locale,key,NULL),args,2);
+  }
+  if (group==kActRaiserRegionalSetting_Population) {
+    const ArUiTextArgument args[]={{"region",SettingsOverlayRegions_BadgeLabel(locale,badge)}};
+    const char *message=ArUiCatalog_Text(locale,badge==kOverlayRegionBadge_Japan?
+        "overlay.region.population_jp":"overlay.region.population_us",NULL);
+    return message[0] && ArUiCatalog_Format(output,capacity,message,args,1);
+  }
+  if (group==kActRaiserRegionalSetting_Construction) {
+    const ArUiTextArgument args[]={{"region",SettingsOverlayRegions_BadgeLabel(locale,badge)}};
+    const char *message=ArUiCatalog_Text(locale,badge==kOverlayRegionBadge_Japan?
+        "overlay.region.construction_jp":"overlay.region.construction_us",NULL);
+    return message[0] && ArUiCatalog_Format(output,capacity,message,args,1);
+  }
   if (group==kActRaiserRegionalSetting_SimAi) {
     const char *key=badge==kOverlayRegionBadge_Mixed?"overlay.region.sim_ai_mixed":
         badge==kOverlayRegionBadge_Japan?"overlay.region.sim_ai_jp":"overlay.region.sim_ai_us";

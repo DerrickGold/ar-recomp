@@ -218,6 +218,10 @@ static ActRaiserRegionalEditResult FakeRegionalEdit(const ActRaiserRegionalRules
   CHECK(view->revision == s_fake_region.revision);
   CHECK(!memcmp(view->campaign, s_fake_region.campaign, sizeof(view->campaign)));
   CHECK(s_fake_region.editable);
+  if(group==kActRaiserRegionalSetting_Population) {
+    s_fake_region.population_pending=true;s_fake_region.pending_population=source;
+    return kActRaiserRegionalEdit_Deferred;
+  }
   if (group == kActRaiserRegionalSetting_RoomTimes)
     CHECK(ArRegionalTimers_Init(&s_fake_region.requested.timers, source));
   else if (group == kActRaiserRegionalSetting_RetryScore)
@@ -252,6 +256,10 @@ static ActRaiserRegionalEditResult FakeRegionalEdit(const ActRaiserRegionalRules
     ArRegionalSimCombat_Init(&s_fake_region.requested.sim_combat,source);
   else if (group == kActRaiserRegionalSetting_SimAi)
     ArRegionalSimAi_Init(&s_fake_region.requested.sim_ai,source);
+  else if (group == kActRaiserRegionalSetting_Construction)
+    s_fake_region.requested.construction=source;
+  else if(group==kActRaiserRegionalSetting_Arrival)
+    s_fake_region.requested.arrival=source;
   else if (group == kActRaiserRegionalSetting_MenuReturn)
     s_fake_region.requested.menu_return = source;
   else if (group == kActRaiserRegionalSetting_SpeedRange)
@@ -565,11 +573,67 @@ static void CheckRegionalControls(SDL_Renderer *renderer, SDL_Surface *surface) 
     CHECK(at==length);
   }
   CHECK(SettingsOverlay_HandleKey(SDLK_DOWN,true,false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "regional_construction"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT,true,false));
+  CHECK(s_region_edits==26 && s_fake_region.requested.construction==kArRegionalSource_Japan);
+  for(unsigned source=0;source<3;++source)for(unsigned locale=0;locale<kArUiLocale_Count;++locale) {
+    ActRaiserRegionalRulesView preview=s_fake_region;
+    preview.requested.construction=(ArRegionalSource)source;
+    char help[2048];CHECK(SettingsOverlayRegions_ViewDescription((ArUiLocale)locale,&preview,kActRaiserRegionalSetting_Construction,help,sizeof(help)));
+    size_t at=0,length=strlen(help);
+    for(unsigned row=0;row<4 && at<length;++row) {
+      ArInterfaceTextLine line;CHECK(ArInterfaceText_WrapLine(help+at,length-at,98,kArInterfaceTextMaximumBytes,&line));
+      if(!line.consumed)break;
+      at+=line.consumed;
+    }
+    CHECK(at==length);
+  }
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN,true,false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "regional_population"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT,true,false));
+  CHECK(s_region_edits==27 && s_fake_region.population_pending && s_fake_region.pending_population==kArRegionalSource_Japan);
+  CHECK(s_fake_region.effective.support.source[0]==kArRegionalSource_US);
+  for(unsigned source=0;source<3;++source)for(unsigned locale=0;locale<kArUiLocale_Count;++locale) {
+    ActRaiserRegionalRulesView preview=s_fake_region;
+    preview.population_pending=true;preview.pending_population=(ArRegionalSource)source;
+    char help[2048];CHECK(SettingsOverlayRegions_ViewDescription((ArUiLocale)locale,&preview,kActRaiserRegionalSetting_Population,help,sizeof(help)));
+    CHECK(help[0] && !strchr(help,'{'));
+    const uint16_t counts[6]={128,128,128,128,128,128};
+    CHECK(SettingsOverlayRegions_PopulationConfirmation((ArUiLocale)locale,(ArRegionalSource)source,counts,help,sizeof(help)));
+    CHECK(strstr(help,"128") && !strchr(help,'{'));
+    /* Smallest supported 464x208 logical overlay: 66 cells x8 lines. */
+    size_t used=0,length=strlen(help);
+    for(unsigned line=0;line<8 && used<length;++line) {
+      ArInterfaceTextLine slice;
+      CHECK(ArInterfaceText_WrapLine(help+used,length-used,66,kArInterfaceTextMaximumBytes,&slice));
+      CHECK(slice.consumed);used+=slice.consumed;
+    }
+    CHECK(used==length);
+    const uint16_t empty[6]={0};
+    CHECK(SettingsOverlayRegions_PopulationConfirmation((ArUiLocale)locale,(ArRegionalSource)source,empty,help,sizeof(help)));
+    CHECK(help[0] && !strchr(help,'{'));
+    CHECK(!SettingsOverlayRegions_PopulationConfirmation((ArUiLocale)locale,(ArRegionalSource)source,counts,help,2));
+  }
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN,true,false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(),"regional_arrival"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT,true,false));
+  CHECK(s_region_edits==28 && s_fake_region.requested.arrival==kArRegionalSource_Japan);
+  for(unsigned locale=0;locale<kArUiLocale_Count;++locale)for(unsigned locked=0;locked<2;++locked)for(unsigned source=0;source<3;++source) {
+    ActRaiserRegionalRulesView preview=s_fake_region;preview.arrival_locked=locked;preview.requested.arrival=source;
+    char help[2048];CHECK(SettingsOverlayRegions_ViewDescription((ArUiLocale)locale,&preview,kActRaiserRegionalSetting_Arrival,help,sizeof(help)));
+    size_t used=0,length=strlen(help);
+    for(unsigned line=0;line<4 && used<length;++line) {
+      ArInterfaceTextLine slice;CHECK(ArInterfaceText_WrapLine(help+used,length-used,98,kArInterfaceTextMaximumBytes,&slice));
+      CHECK(slice.consumed);used+=slice.consumed;
+    }
+    CHECK(used==length && !strchr(help,'{'));
+  }
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN,true,false));
   CHECK(!strcmp(SettingsOverlay_SelectedKey(), "regional_scroll_prices")); /* no global reset row */
   s_fake_region.editable = false;
   CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
   CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
-  CHECK(s_region_edits == 25);
+  CHECK(s_region_edits == 28);
   CHECK(!memcmp(&before, &g_settings, sizeof(before)));
   s_fake_region.editable = true;
   SettingsOverlay_Close(); /* clear transient status for the preview */
@@ -920,6 +984,17 @@ static void CheckDecisions(SDL_Renderer *renderer, SDL_Surface *surface) {
     CHECK(SettingsOverlay_HandleKey(SDLK_RETURN,true,false)); /* Default is Cancel. */
     CHECK(!SettingsOverlay_IsOpen());
     CHECK(SettingsOverlay_TakeDecisionResult()==kOverlayDecision_Cancelled);
+    char body[2048];const uint16_t removed[6]={128,128,128,128,128,128};
+    CHECK(SettingsOverlayRegions_PopulationConfirmation((ArUiLocale)locale,kArRegionalSource_Japan,removed,body,sizeof(body)));
+    CHECK(SettingsOverlay_BeginDecisionText("overlay.region.population_label",body,"overlay.region.population_accept"));
+    memset(body,'X',strlen(body)); /* Overlay owns its copy, not the caller's buffer. */
+    SettingsOverlay_Render((ArRenderRectI){0,0,surface->w,surface->h});SDL_RenderPresent(renderer);
+    if(directory && *directory) {
+      char path[1024];snprintf(path,sizeof(path),"%s/population-%s.bmp",directory,ArUiCatalog_LocaleTag((ArUiLocale)locale));
+      CHECK(SDL_SaveBMP(surface,path));
+    }
+    CHECK(SettingsOverlay_HandleKey(SDLK_RETURN,true,false));
+    CHECK(SettingsOverlay_TakeDecisionResult()==kOverlayDecision_Cancelled);
     CHECK(SettingsOverlay_TakeDecisionResult()==kOverlayDecision_None);
     CHECK(SettingsOverlay_BeginDecision("overlay.region.continue_title",
         "overlay.region.legacy_estimate","overlay.region.acknowledge"));
@@ -931,6 +1006,14 @@ static void CheckDecisions(SDL_Renderer *renderer, SDL_Surface *surface) {
         "overlay.region.adoption_failed","overlay.decision.retry"));
     CHECK(SettingsOverlay_HandleKey(SDLK_ESCAPE,true,false));
     CHECK(SettingsOverlay_TakeDecisionResult()==kOverlayDecision_Cancelled);
+    CHECK(SettingsOverlay_BeginNotice("overlay.region.population_label",
+        "overlay.region.population_complete","overlay.region.acknowledge"));
+    CHECK(SettingsOverlay_HandleKey(SDLK_DOWN,true,false));
+    CHECK(SettingsOverlay_HandleKey(SDLK_RETURN,true,true));
+    CHECK(SettingsOverlay_TakeDecisionResult()==kOverlayDecision_Pending);
+    SettingsOverlay_Render((ArRenderRectI){0,0,surface->w,surface->h});SDL_RenderPresent(renderer);
+    CHECK(SettingsOverlay_HandleKey(SDLK_RETURN,true,false));
+    CHECK(SettingsOverlay_TakeDecisionResult()==kOverlayDecision_Accepted);
   }
   CHECK(!SettingsOverlay_BeginDecision(NULL,"b","c"));
   g_settings.interface_language=language;

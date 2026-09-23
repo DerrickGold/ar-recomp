@@ -6,14 +6,40 @@
 #include "actraiser/actraiser_report_command.h"
 #include "actraiser/actraiser_town_status_runtime.h"
 #include "actraiser/actraiser_level_goals_runtime.h"
+#include "actraiser/actraiser_construction_runtime.h"
+#include "actraiser/actraiser_population_conversion.h"
+#include "actraiser/actraiser_arrival_runtime.h"
 
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
 
 /* The transaction module has its own native-call harness. */
+static unsigned population_native_calls,population_commit_calls;
+static bool population_accept;
+RecompReturn bank_01_85A2_M1X0(CpuState *cpu) {
+  assert(!ActRaiser_RegionalPopulationEntry(cpu));++population_native_calls;return RECOMP_RETURN_TAILCALL;
+}
+ActRaiserPopulationResult ActRaiserPopulation_Preview(CpuState *cpu,const ArRegionalCampaign *campaign,
+    ArRegionalSource source,ActRaiserPopulationPreview *out) {
+  (void)cpu;(void)campaign;*out=(ActRaiserPopulationPreview){.source=source};
+  out->town.removed[0]=4;return kActRaiserPopulation_Ready;
+}
+ActRaiserPopulationResult ActRaiserPopulation_Commit(CpuState *cpu,ArRegionalCampaign *campaign,
+    const ActRaiserPopulationPreview *preview,const char *directory,SaveError *error) {
+  (void)cpu;(void)error;assert(directory && strstr(directory,".redevelopment-"));++population_commit_calls;
+  assert(ArRegionalSession_SetPopulationProfile(&campaign->active,campaign->active.revision,preview->source));
+  return kActRaiserPopulation_Committed;
+}
+static bool PopulationPrompt(void *context,ActRaiserRegionalPopulationNotice notice,
+    ArRegionalSource source,const uint16_t removed[6]) {
+  (void)context;(void)source;assert(notice==kActRaiserRegionalPopulation_Failed || removed[0]==4);
+  return population_accept;
+}
 void ActRaiserTownStatusRuntime_Reset(void) {}
+void ActRaiserConstructionRuntime_Reset(void) {}
 void ActRaiserLevelGoalsRuntime_Reset(void) {}
+void ActRaiserArrivalRuntime_Reset(void) {}
 void ActRaiserLevelGoalsRuntime_RefreshReport(CpuState *cpu) { (void)cpu; }
 static uint8_t ram[65536];
 static uint8_t town_ram[65536];
@@ -508,6 +534,14 @@ int main(void) {
         kArRegionalSource_US)==kActRaiserRegionalEdit_Applied);
     assert(ActRaiserRegional_TownStatusSnapshot(true,&status) && !status.japanese[0]);
     bool level_jp;
+    bool construction_jp;
+    assert(ActRaiserRegional_CopyRulesView(&view));
+    assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_Construction,1)==kActRaiserRegionalEdit_Applied);
+    assert(ActRaiserRegional_ConstructionSnapshot(false,&construction_jp) && !construction_jp);
+    assert(ActRaiserRegional_ConstructionSnapshot(true,&construction_jp) && construction_jp);
+    assert(ActRaiserRegional_CopyRulesView(&view));
+    assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_Construction,0)==kActRaiserRegionalEdit_Applied);
+    assert(ActRaiserRegional_ConstructionSnapshot(true,&construction_jp) && !construction_jp);
     assert(ActRaiserRegional_CopyRulesView(&view));
     assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_LevelGoals,1)==kActRaiserRegionalEdit_Applied);
     assert(ActRaiserRegional_LevelGoalsSnapshot(false,&level_jp) && !level_jp);
@@ -1158,6 +1192,55 @@ int main(void) {
       assert(cpu_read16(&cpu,0x7f,0x9642)==(expected>>2)+1);
     }
   }
+  cpu=(CpuState){.PB=2,.m_flag=1};ram[0x336]=0;
+  assert(ActRaiser_RegionalTitle(&cpu)==RECOMP_RETURN_NORMAL);
+  assert(ActRaiserRegional_CopyRulesView(&view) && !view.arrival_locked);
+  assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_Arrival,1)==kActRaiserRegionalEdit_Applied);
+  bool arrival_jp;
+  assert(ActRaiserRegional_ArrivalSnapshot(false,false,&arrival_jp) && arrival_jp);
+  assert(ActRaiserRegional_CopyRulesView(&view) && !view.arrival_locked && view.effective.arrival==0);
+  uint8_t before_arrival[32],after_arrival[32];bool native_arrival;
+  assert(ActRaiserRegional_ReplayDigest(NULL,before_arrival,&native_arrival) && !native_arrival);
+  assert(ActRaiserRegional_ArrivalSnapshot(true,false,&arrival_jp) && arrival_jp);
+  assert(ActRaiserRegional_CopyRulesView(&view) && view.arrival_locked && view.effective.arrival==1);
+  assert(ActRaiserRegional_ReplayDigest(NULL,after_arrival,&native_arrival) && memcmp(before_arrival,after_arrival,32));
+  assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_Arrival,0)==kActRaiserRegionalEdit_Applied);
+  assert(ActRaiserRegional_ArrivalSnapshot(true,false,&arrival_jp) && arrival_jp);
+  /* Conversion is only queued by settings; cancellation, stale previews and
+   * replay locks never change support. The selector's native token survives. */
+  cpu=(CpuState){.PB=2,.m_flag=1};ram[0x336]=0;
+  assert(ActRaiser_RegionalTitle(&cpu)==RECOMP_RETURN_NORMAL);
+  ActRaiserRegional_SetPopulationPrompt(PopulationPrompt,NULL);
+  assert(ActRaiserRegional_CopyRulesView(&view));
+  assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_Population,1)==kActRaiserRegionalEdit_Deferred);
+  assert(ActRaiserRegional_CopyRulesView(&view) && view.population_pending && view.pending_population==1);
+  ArRegionalSupportSnapshot support;
+  assert(ActRaiserRegional_CopySupport(&support) && support.amount[0]==32);
+  cpu=(CpuState){.PB=1,.DB=1,.m_flag=1,.S=0x1ee0};
+  assert(ActRaiser_RegionalPopulationEntry(&cpu));
+  population_accept=false;
+  assert(ActRaiser_RegionalPopulation(&cpu)==RECOMP_RETURN_TAILCALL);
+  assert(population_native_calls==1 && !population_commit_calls && !ActRaiser_RegionalPopulationEntry(&cpu));
+  assert(ActRaiserRegional_CopyRulesView(&view) && !view.population_pending);
+  assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_Population,1)==kActRaiserRegionalEdit_Deferred);
+  assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_Population,0)==kActRaiserRegionalEdit_Unchanged);
+  assert(!ActRaiser_RegionalPopulationEntry(&cpu));
+  assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_Population,1)==kActRaiserRegionalEdit_Deferred);
+  edits_allowed=false;assert(!ActRaiser_RegionalPopulationEntry(&cpu));
+  assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_Population,2)==kActRaiserRegionalEdit_Locked);
+  edits_allowed=true;population_accept=true;
+  assert(ActRaiser_RegionalPopulation(&cpu)==RECOMP_RETURN_TAILCALL);
+  assert(population_native_calls==2 && population_commit_calls==1);
+  assert(ActRaiserRegional_CopySupport(&support) && support.amount[0]==16);
+  assert(ActRaiserRegional_CopyRulesView(&view) && !view.population_pending);
+  assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_LevelGoals,0)==kActRaiserRegionalEdit_Incompatible);
+  assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_Story,0)==kActRaiserRegionalEdit_Incompatible);
+  assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_Population,0)==kActRaiserRegionalEdit_Deferred);
+  assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_Construction,1)==kActRaiserRegionalEdit_Applied);
+  assert(ActRaiserRegional_CopyRulesView(&view) && !view.population_pending);
+  assert(ActRaiser_RegionalPopulation(&cpu)==RECOMP_RETURN_TAILCALL);
+  assert(population_native_calls==3 && population_commit_calls==1);
+  assert(ActRaiserRegional_CopySupport(&support) && support.amount[0]==16);
   /* Accepted Continue owns its original title frame, including cancellation
    * and a held native accept button. Replays cannot create an acknowledgement. */
   memset(image,0,sizeof(image)); Save_RecomputeChecksum(image);

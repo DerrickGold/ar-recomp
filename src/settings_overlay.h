@@ -113,6 +113,13 @@ typedef enum SettingsOverlayDecisionResult {
 } SettingsOverlayDecisionResult;
 bool SettingsOverlay_BeginDecision(const char *title_key, const char *body_key,
                                    const char *accept_key);
+/* Already localized/formatted body, copied immediately. Title/accept remain
+ * catalog keys. No game pointers, callbacks or formatting arguments retained. */
+bool SettingsOverlay_BeginDecisionText(const char *title_key,const char *body,
+                                       const char *accept_key);
+/* One dismiss action; never offers to cancel an already completed operation. */
+bool SettingsOverlay_BeginNotice(const char *title_key,const char *body_key,
+                                 const char *dismiss_key);
 /* Consumes terminal results only. Closing the overlay means cancellation. */
 SettingsOverlayDecisionResult SettingsOverlay_TakeDecisionResult(void);
 

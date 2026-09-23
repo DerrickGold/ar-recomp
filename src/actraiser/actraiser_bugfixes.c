@@ -1,10 +1,11 @@
 /* Optional bridge-limit enhancement. Completed bridges migrate from each
  * town's 128-record array into checksummed SRAM without losing support,
- * marks, rendering, or crossing state. The four HLE entry points below must
- * remain coordinated. ROM mapping and persistence details live in
- * docs/SEAMS.md and docs/save-format.md. */
+ * marks, rendering, or crossing state. Allocation, scene hooks and the census
+ * bridge accessor must remain coordinated. ROM mapping and persistence details
+ * live in docs/ram-map.md and docs/save-format.md. */
 
 #include "actraiser_cell_map.h"
+#include "actraiser_bridge_extension.h"
 #include "actraiser_town_metatile.h"
 #include "actraiser_town_structure_steps.h"
 #include "snesrecomp/game/cpu.h"
@@ -62,10 +63,6 @@ enum {
   kSram_ChecksumRange  = 0x1FEC,   /* c1/c2 cover [0, this) */
   kSram_ChecksumAddr   = 0x1FEC,
 
-  kVar_TownActWords    = 0x6B18,   /* census activity gate, word per town */
-  kVar_SupportCapacity = 0x6B26,   /* census output: support, word per town */
-  kVar_HousePopBias    = 0x9F57,   /* census output subtraction, per town */
-  kWram_PopulationBase = 0x021C,   /* long $00:021C,X population output */
   kVar_RoadMap         = 0x6800,   /* $7F: 6 towns x $80 road-map bytes */
   kVar_TownMapActive   = 0x919E,   /* per-town byte gating bridge marks */
 };
@@ -342,9 +339,9 @@ static int ext_migrate_bridges(CpuState *cpu, uint8 db, unsigned town,
   return migrated;
 }
 
-static int ext_bridge_count(CpuState *cpu, uint8 db, unsigned town,
-                            uint16 base) {
-  if (!ext_area_valid(cpu)) return 0;
+unsigned ActRaiserBridgeExtension_Count(CpuState *cpu, uint8 db, unsigned town) {
+  if (!cpu || town >= kExt_TownCount || !ext_area_valid(cpu)) return 0;
+  const uint16 base = struct_list_base(cpu,(uint16)(town*2));
   int n = 0;
   for (int i = 0; i < kExt_PerTown; i++) {
     uint8 rec[4];
@@ -476,79 +473,6 @@ RecompReturn ActRaiser_AllocStructureRecord(CpuState *cpu) {
   return RECOMP_RETURN_NORMAL;
 }
 
-/* Faithful HLE of $03:C07E — the town population/support census. Iterates
- * the record table and stores: population (per-house people by civ subtype:
- * $20 -> 8, $10 -> 6, else 4; +2; minus $9F57,X) into long $00:021C+town*2,
- * and support capacity (completed class 2 = 32/48 by wheat bit, class 3 = 72
- * unless building, class 4 = 72, all other classes = 32) into $6B26+town*2.
- * Towns with no act completions ($6B18,X == 0) skip the store entirely.
- *
- * v2 extension: +32 support per extension bridge, counted regardless of the
- * toggle so disabling fix_bridge_limit never collapses a town's support. */
-RecompReturn ActRaiser_TownCensus(CpuState *cpu) {
-  const uint8 db = cpu->DB;
-  const uint8 saved_p = cpu->P;      /* PHP */
-  const uint16 saved_x = cpu->X;     /* PHX */
-  uint16 native_y = cpu->Y;          /* Y is not saved by the ROM */
-
-  uint16 population = 0, support = 0;
-  cpu_write16(cpu, db, kVar_AllocSlot, 0);       /* STZ $7C05 */
-  cpu_write16(cpu, db, 0x7C07, 0);               /* STZ $7C07 */
-  cpu_write16(cpu, db, kVar_AllocRemaining, kStructRecordCount);
-
-  const uint16 town_index = cpu_read16(cpu, db, kVar_TownIndexWord);
-  const uint16 active =
-      cpu_read16(cpu, db, (uint16)(kVar_TownActWords + town_index));
-  uint16 exit_a;
-  if (active != 0) {
-    const uint16 base = struct_list_base(cpu, town_index);
-    for (int i = 0; i < kStructRecordCount; i++) {
-      const uint16 rec = (uint16)(base + i * kStructRecordSize);
-      const uint8 f2 = cpu_read8(cpu, db, (uint16)(rec + 2));
-      if (!(f2 & kStructFlag_Active)) continue;
-      const uint8 cls = f2 & kStructType_ClassMask;
-      if (cls == 0) {
-        const uint8 sub = f2 & 0x30;
-        population = (uint16)(population +
-                              (sub == 0x20 ? 8 : sub == 0x10 ? 6 : 4));
-      } else {
-        uint16 add = 0x20;
-        if (cls == 2)
-          add = (f2 & kStructFlag_Building) ? 0
-                : (f2 & kStructFlag_Subtype) ? 0x30 : 0x20;
-        else if (cls == 3)
-          add = (f2 & kStructFlag_Building) ? 0 : 0x48;
-        else if (cls == 4)
-          add = 0x48;
-        native_y = add;
-        support = (uint16)(support + add);
-      }
-    }
-    support = (uint16)(support +
-                       0x20 * (uint16)ext_bridge_count(
-                                  cpu, db, (unsigned)(town_index >> 1), base));
-    cpu_write16(cpu, db, kVar_AllocSlot, population);
-    cpu_write16(cpu, db, 0x7C07, support);
-    cpu_write16(cpu, db, kVar_AllocRemaining, 0);  /* loop counter spent */
-    const uint16 bias =
-        cpu_read16(cpu, db, (uint16)(kVar_HousePopBias + town_index));
-    cpu_write16(cpu, 0x00, (uint16)(kWram_PopulationBase + town_index),
-                (uint16)(population + 2 - bias));
-    cpu_write16(cpu, db, (uint16)(kVar_SupportCapacity + town_index),
-                support);
-    exit_a = support;                /* last LDA $7C07 before the store */
-  } else {
-    exit_a = active;                 /* fell through the $6B18 gate */
-  }
-
-  cpu->A = exit_a;
-  cpu->X = saved_x;                  /* PLX */
-  cpu->Y = native_y;
-  cpu->P = saved_p;                  /* PLP restores every flag */
-  cpu_p_to_mirrors(cpu);
-  cpu->S = (uint16)(cpu->S + 2);     /* replaced RTS */
-  return RECOMP_RETURN_NORMAL;
-}
 
 /* Faithful HLE of $03:9CFB — the construction-scene MARKS pass. Rewrites
  * the current town's per-cell structure marks in the $7F:2000 map from the

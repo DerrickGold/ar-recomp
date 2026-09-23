@@ -37,6 +37,9 @@ bool ArRegionalRules_Fingerprint(const ArRegionalRules *requested,
       !ArRegionalTimers_Valid(&requested->timers) ||
       !ArRegionalTimers_Valid(&effective->timers)) return false;
   bool retry_requested, retry_effective;
+  bool arrival_requested,arrival_effective;
+  if(!ArRegionalArrival_Resolve(requested->arrival,&arrival_requested) ||
+      !ArRegionalArrival_Resolve(effective->arrival,&arrival_effective))return false;
   if (!ArRegionalRetry_Resolve(requested->retry_score, &retry_requested) ||
       !ArRegionalRetry_Resolve(effective->retry_score, &retry_effective)) return false;
   uint16_t wait_requested, wait_effective;
@@ -58,6 +61,12 @@ bool ArRegionalRules_Fingerprint(const ArRegionalRules *requested,
   ArRegionalStorySnapshot story_requested,story_effective;
   ArRegionalTownStatusSnapshot status_requested,status_effective;
   bool level_requested,level_effective;
+  bool construction_requested,construction_effective;
+  ArRegionalSupportSnapshot support_requested,support_effective;
+  if (!ArRegionalSupport_Resolve(&requested->support,&support_requested) ||
+      !ArRegionalSupport_Resolve(&effective->support,&support_effective)) return false;
+  if (!ArRegionalConstruction_Resolve(requested->construction,&construction_requested) ||
+      !ArRegionalConstruction_Resolve(effective->construction,&construction_effective)) return false;
   uint16_t combat_requested,combat_effective;
   uint16_t ai_requested,ai_effective;
   if (!ArRegionalSimAi_Resolve(&requested->sim_ai,&ai_requested) ||
@@ -327,12 +336,45 @@ bool ArRegionalRules_Fingerprint(const ArRegionalRules *requested,
     ByteOrder_WriteLe16(ai_bytes+48,ai_requested);ByteOrder_WriteLe16(ai_bytes+50,ai_effective);
     if (!sr_support_sha256(ai_bytes,sizeof(ai_bytes),digest)) return false;
   }
+  if (construction_requested || construction_effective) {
+    uint8_t construction_bytes[50]="ARBUILDPRICE-R1";
+    memcpy(construction_bytes+16,digest,sizeof(digest));
+    construction_bytes[48]=construction_requested;construction_bytes[49]=construction_effective;
+    if (!sr_support_sha256(construction_bytes,sizeof(construction_bytes),digest)) return false;
+  }
+  uint8_t support_bytes[48+4*kArRegionalSupport_Count]="ARSUPPORT-R1";
+  memcpy(support_bytes+16,digest,sizeof(digest));
+  bool support_native=true;
+  for (unsigned i=0;i<kArRegionalSupport_Count;++i) {
+    ByteOrder_WriteLe16(support_bytes+48+i*4,support_requested.amount[i]);
+    ByteOrder_WriteLe16(support_bytes+50+i*4,support_effective.amount[i]);
+    const unsigned native=ArRegionalSupport_Descriptor((ArRegionalSupportRule)i)->amount[kArRegionalSource_US];
+    support_native &= support_requested.amount[i]==native && support_effective.amount[i]==native;
+  }
+  if (!support_native && !sr_support_sha256(support_bytes,sizeof(support_bytes),digest)) return false;
   memcpy(out,digest,sizeof(digest));
   *baseline = costs_native && timers_native && !retry_requested && !retry_effective && wait_native && fish_native && development_native && recovery_native && quake_native && score_requested && score_effective && !menu_requested && !menu_effective && speed_native && !gesture_requested && !gesture_effective && !seeds_requested && !seeds_effective && !house_requested && !house_effective && score_feedback_native;
   *baseline &= !lives_requested && !lives_effective && sources_native && skull_native && story_native && reload_native && status_native;
   *baseline &= !level_requested && !level_effective && !combat_requested && !combat_effective;
   *baseline &= !ai_requested && !ai_effective;
+  *baseline &= !construction_requested && !construction_effective;
+  *baseline &= support_native;
+  if(arrival_requested || arrival_effective) {
+    uint8_t arrival_bytes[50]="ARARRIVAL-R1";
+    memcpy(arrival_bytes+16,digest,32);arrival_bytes[48]=arrival_requested;arrival_bytes[49]=arrival_effective;
+    if(!sr_support_sha256(arrival_bytes,sizeof(arrival_bytes),out))return false;
+    *baseline=false;
+  }
   return true;
+}
+
+bool ArRegionalArrivalLock_Fingerprint(const uint8_t previous[32],ArRegionalSource requested,
+    ArRegionalSource effective,bool locked,uint8_t out[32]) {
+  bool req,eff;
+  if(!previous || !out || !ArRegionalArrival_Resolve(requested,&req) || !ArRegionalArrival_Resolve(effective,&eff))return false;
+  if(!req && !eff){memmove(out,previous,32);return true;}
+  uint8_t bytes[49]="ARARRLOCK-R1";memcpy(bytes+16,previous,32);bytes[48]=locked;
+  return sr_support_sha256(bytes,sizeof(bytes),out);
 }
 
 bool ArRegionalSimActors_Fingerprint(const uint8_t previous[32],const ArRegionalSimActors *actors,

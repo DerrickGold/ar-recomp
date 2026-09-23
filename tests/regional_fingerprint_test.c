@@ -22,6 +22,32 @@ int main(void) {
   CHECK(ArRegionalCosts_Fingerprint(&eu, &us, current, &baseline) && baseline);
   CHECK(!memcmp(native, current, 32));
   ArRegionalRules r = {.costs = us}, e = {.costs = eu};
+  uint8_t support_digests[1024][32];
+  for(unsigned index=0;index<1024;++index) {
+    ArRegionalRules request={0},active={0};
+    for(unsigned i=0;i<5;++i) {
+      request.support.source[i]=(index>>(2*i))&1;
+      active.support.source[i]=(index>>(2*i+1))&1;
+    }
+    CHECK(ArRegionalRules_Fingerprint(&request,&active,support_digests[index],&baseline) && baseline==!index);
+    CHECK((memcmp(support_digests[index],native,32)==0)==!index);
+    for(unsigned i=0;i<5;++i) {
+      if(!request.support.source[i])request.support.source[i]=2;
+      if(!active.support.source[i])active.support.source[i]=2;
+    }
+    CHECK(ArRegionalRules_Fingerprint(&request,&active,current,&baseline) && !memcmp(current,support_digests[index],32));
+    for(unsigned j=0;j<index;++j)CHECK(memcmp(support_digests[j],current,32));
+  }
+  uint8_t construction_digests[4][32];bool construction_seen[4]={false};
+  for(unsigned p=0;p<3;++p)for(unsigned a=0;a<3;++a) {
+    ArRegionalRules request={.construction=p},active={.construction=a};
+    unsigned index=(p==1)|((a==1)<<1);
+    CHECK(ArRegionalRules_Fingerprint(&request,&active,current,&baseline) && baseline==!index);
+    CHECK((memcmp(current,native,32)==0)==!index);
+    if(construction_seen[index])CHECK(!memcmp(current,construction_digests[index],32));
+    else { memcpy(construction_digests[index],current,32);construction_seen[index]=true; }
+  }
+  for(unsigned i=0;i<4;++i)for(unsigned j=0;j<i;++j)CHECK(memcmp(construction_digests[i],construction_digests[j],32));
   uint8_t ai_digests[4096][32];
   for(unsigned index=0;index<4096;++index) {
     ArRegionalRules request={0},active={0};
@@ -408,5 +434,17 @@ int main(void) {
   jp.source[0] = kArRegionalSource_Count;
   CHECK(!ArRegionalCosts_Fingerprint(&jp, &us, current, &baseline));
   CHECK(current[0] == 0xa5 && baseline);
+  for(unsigned req=0;req<3;++req)for(unsigned eff=0;eff<3;++eff) {
+    ArRegionalRules a={0},b={0};a.arrival=req;b.arrival=eff;
+    uint8_t first[32],second[32],policy[32];
+    CHECK(ArRegionalRules_Fingerprint(&a,&b,policy,&baseline) && baseline==(req!=1 && eff!=1));
+    CHECK(ArRegionalArrivalLock_Fingerprint(policy,req,eff,false,first));
+    CHECK(ArRegionalArrivalLock_Fingerprint(policy,req,eff,true,second));
+    CHECK((memcmp(first,second,32)!=0)==(req==1 || eff==1));
+    if(baseline)CHECK(!memcmp(policy,native,32) && !memcmp(first,native,32));
+  }
+  r=(ArRegionalRules){.arrival=3};e=(ArRegionalRules){0};
+  memset(current,0xa5,32);baseline=true;
+  CHECK(!ArRegionalRules_Fingerprint(&r,&e,current,&baseline) && current[0]==0xa5 && baseline);
   return failures ? 1 : 0;
 }

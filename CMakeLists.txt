@@ -2109,6 +2109,15 @@ if(BUILD_TESTING)
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_town_status COMMAND actraiser_town_status_test)
 
+    add_executable(actraiser_construction_test tests/actraiser_construction_test.c
+        src/actraiser/actraiser_construction_runtime.c src/regional/regional_construction.c
+        src/actraiser/actraiser_town_status.c src/actraiser/actraiser_town_status_runtime.c
+        src/regional/regional_town_status.c src/actraiser/actraiser_cpu_hle_internal.c
+        src/actraiser/actraiser_hle_fatal.c)
+    target_include_directories(actraiser_construction_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    add_test(NAME actraiser_construction COMMAND actraiser_construction_test)
+
     add_executable(actraiser_sim_combat_test tests/actraiser_sim_combat_test.c
         src/actraiser/actraiser_sim_combat.c src/actraiser/actraiser_sim_combat_runtime.c src/actraiser/actraiser_sim_actor.c
         src/regional/regional_sim_combat.c src/regional/regional_sim_ai.c src/regional/regional_sim_actors.c src/actraiser/actraiser_cpu_hle_internal.c
@@ -2125,6 +2134,22 @@ if(BUILD_TESTING)
     target_include_directories(actraiser_sim_ai_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_sim_ai COMMAND actraiser_sim_ai_test)
+
+    add_executable(actraiser_town_census_test tests/actraiser_town_census_test.c
+        src/actraiser/actraiser_town_census.c src/regional/regional_support.c
+        src/actraiser/actraiser_bugfixes.c src/actraiser/actraiser_cell_map.c
+        src/actraiser/actraiser_town_metatile.c src/actraiser/actraiser_town_structure_steps.c
+        src/actraiser/actraiser_cpu_hle_internal.c src/actraiser/actraiser_hle_fatal.c src/cpu_65816_math.c)
+    target_include_directories(actraiser_town_census_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    add_test(NAME actraiser_town_census COMMAND actraiser_town_census_test)
+
+    add_executable(actraiser_town_redevelopment_test tests/actraiser_town_redevelopment_test.c
+        src/actraiser/actraiser_town_redevelopment.c src/actraiser/actraiser_cell_map.c src/regional/regional_construction.c
+        src/actraiser/actraiser_cpu_hle_internal.c src/actraiser/actraiser_hle_fatal.c src/cpu_65816_math.c)
+    target_include_directories(actraiser_town_redevelopment_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    add_test(NAME actraiser_town_redevelopment COMMAND actraiser_town_redevelopment_test)
 
     add_executable(actraiser_level_goals_test tests/actraiser_level_goals_test.c
         src/actraiser/actraiser_level_goals.c src/actraiser/actraiser_level_goals_runtime.c
@@ -2156,7 +2181,7 @@ if(BUILD_TESTING)
         src/regional/regional_score_page.c
         src/regional/regional_lives_display.c
         src/regional/regional_skull_wait.c
-        src/regional/regional_story_prerequisites.c src/regional/regional_town_status.c src/regional/regional_level_goals.c src/regional/regional_sim_combat.c src/regional/regional_sim_ai.c src/regional/regional_sim_actors.c
+        src/regional/regional_story_prerequisites.c src/regional/regional_town_status.c src/regional/regional_level_goals.c src/regional/regional_sim_combat.c src/regional/regional_sim_ai.c src/regional/regional_sim_actors.c src/regional/regional_construction.c src/regional/regional_support.c src/regional/regional_arrival.c
         src/regional/regional_sources.c
         src/regional/regional_menu_return.c
         src/regional/regional_speed_range.c
@@ -2189,7 +2214,7 @@ if(BUILD_TESTING)
         src/regional/regional_score_page.c
         src/regional/regional_lives_display.c
         src/regional/regional_skull_wait.c
-        src/regional/regional_story_prerequisites.c src/regional/regional_town_status.c src/regional/regional_level_goals.c src/regional/regional_sim_combat.c src/regional/regional_sim_ai.c src/regional/regional_sim_actors.c
+        src/regional/regional_story_prerequisites.c src/regional/regional_town_status.c src/regional/regional_level_goals.c src/regional/regional_sim_combat.c src/regional/regional_sim_ai.c src/regional/regional_sim_actors.c src/regional/regional_construction.c src/regional/regional_support.c src/regional/regional_arrival.c
         src/regional/regional_sources.c
         src/regional/regional_menu_return.c
         src/regional/regional_speed_range.c
@@ -2664,6 +2689,14 @@ if(BUILD_TESTING)
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_save_transaction COMMAND actraiser_save_transaction_test)
 
+    add_executable(actraiser_story_snapshot_test
+        tests/actraiser_story_snapshot_test.c
+        src/actraiser/actraiser_story_snapshot.c
+        src/save_system.c src/atomic_replace.c src/localization/unicode_grapheme.c)
+    target_include_directories(actraiser_story_snapshot_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    add_test(NAME actraiser_story_snapshot COMMAND actraiser_story_snapshot_test)
+
     add_executable(actraiser_regional_session_test
         tests/regional_session_test.c
         src/regional/regional_timers.c
@@ -2677,7 +2710,7 @@ if(BUILD_TESTING)
         src/regional/regional_score_page.c
         src/regional/regional_lives_display.c
         src/regional/regional_skull_wait.c
-        src/regional/regional_story_prerequisites.c src/regional/regional_town_status.c src/regional/regional_level_goals.c src/regional/regional_sim_combat.c src/regional/regional_sim_ai.c src/regional/regional_sim_actors.c
+        src/regional/regional_story_prerequisites.c src/regional/regional_town_status.c src/regional/regional_level_goals.c src/regional/regional_sim_combat.c src/regional/regional_sim_ai.c src/regional/regional_sim_actors.c src/regional/regional_construction.c src/regional/regional_support.c src/regional/regional_arrival.c
         src/regional/regional_sources.c
         src/regional/regional_menu_return.c
         src/regional/regional_speed_range.c
@@ -2709,7 +2742,7 @@ if(BUILD_TESTING)
         src/regional/regional_score_page.c
         src/regional/regional_lives_display.c
         src/regional/regional_skull_wait.c
-        src/regional/regional_story_prerequisites.c src/regional/regional_town_status.c src/regional/regional_level_goals.c src/regional/regional_sim_combat.c src/regional/regional_sim_ai.c src/regional/regional_sim_actors.c
+        src/regional/regional_story_prerequisites.c src/regional/regional_town_status.c src/regional/regional_level_goals.c src/regional/regional_sim_combat.c src/regional/regional_sim_ai.c src/regional/regional_sim_actors.c src/regional/regional_construction.c src/regional/regional_support.c src/regional/regional_arrival.c
         src/regional/regional_sources.c
         src/regional/regional_menu_return.c
         src/regional/regional_speed_range.c
@@ -2727,6 +2760,26 @@ if(BUILD_TESTING)
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_regional_campaign COMMAND actraiser_regional_campaign_test)
 
+    # Exercise the conversion against the same complete campaign/save stack.
+    get_target_property(AR_POPULATION_TEST_SOURCES actraiser_regional_campaign_test SOURCES)
+    list(REMOVE_ITEM AR_POPULATION_TEST_SOURCES tests/regional_campaign_test.c)
+    add_executable(actraiser_population_conversion_test
+        tests/actraiser_population_conversion_test.c ${AR_POPULATION_TEST_SOURCES}
+        src/actraiser/actraiser_population_conversion.c
+        src/actraiser/actraiser_story_snapshot.c src/actraiser/actraiser_town_redevelopment.c
+        src/actraiser/actraiser_town_census.c src/actraiser/actraiser_level_goals.c
+        src/actraiser/actraiser_cell_map.c src/actraiser/actraiser_cpu_hle_internal.c
+        src/actraiser/actraiser_hle_fatal.c src/cpu_65816_math.c)
+    target_include_directories(actraiser_population_conversion_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    add_test(NAME actraiser_population_conversion COMMAND actraiser_population_conversion_test)
+
+    add_executable(actraiser_arrival_runtime_test tests/actraiser_arrival_runtime_test.c
+        src/actraiser/actraiser_arrival_runtime.c src/actraiser/actraiser_cpu_hle_internal.c
+        src/actraiser/actraiser_hle_fatal.c)
+    target_include_directories(actraiser_arrival_runtime_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    add_test(NAME actraiser_arrival_runtime COMMAND actraiser_arrival_runtime_test)
+
     add_executable(actraiser_regional_fingerprint_test
         tests/regional_fingerprint_test.c
         src/regional/regional_fingerprint.c
@@ -2741,7 +2794,7 @@ if(BUILD_TESTING)
         src/regional/regional_score_page.c
         src/regional/regional_lives_display.c
         src/regional/regional_skull_wait.c
-        src/regional/regional_story_prerequisites.c src/regional/regional_town_status.c src/regional/regional_level_goals.c src/regional/regional_sim_combat.c src/regional/regional_sim_ai.c src/regional/regional_sim_actors.c
+        src/regional/regional_story_prerequisites.c src/regional/regional_town_status.c src/regional/regional_level_goals.c src/regional/regional_sim_combat.c src/regional/regional_sim_ai.c src/regional/regional_sim_actors.c src/regional/regional_construction.c src/regional/regional_support.c src/regional/regional_arrival.c
         src/regional/regional_sources.c
         src/regional/regional_menu_return.c
         src/regional/regional_speed_range.c
@@ -2765,7 +2818,7 @@ if(BUILD_TESTING)
         src/regional/regional_score_page.c
         src/regional/regional_lives_display.c
         src/regional/regional_skull_wait.c
-        src/regional/regional_story_prerequisites.c src/regional/regional_town_status.c src/regional/regional_level_goals.c src/regional/regional_sim_combat.c src/regional/regional_sim_ai.c src/regional/regional_sim_actors.c
+        src/regional/regional_story_prerequisites.c src/regional/regional_town_status.c src/regional/regional_level_goals.c src/regional/regional_sim_combat.c src/regional/regional_sim_ai.c src/regional/regional_sim_actors.c src/regional/regional_construction.c src/regional/regional_support.c src/regional/regional_arrival.c
         src/regional/regional_sources.c
         src/regional/regional_menu_return.c
         src/regional/regional_speed_range.c

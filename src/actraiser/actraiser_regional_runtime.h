@@ -6,6 +6,23 @@
 
 /* After SaveSystem Attach/Load, before the first CPU dispatch. */
 bool ActRaiserRegional_Initialize(ArRegionalCampaignIdentity identity, void *context);
+typedef enum ActRaiserRegionalPopulationNotice {
+  kActRaiserRegionalPopulation_Confirm,
+  kActRaiserRegionalPopulation_Failed,
+  kActRaiserRegionalPopulation_Complete,
+  kActRaiserRegionalPopulation_NamePending,
+} ActRaiserRegionalPopulationNotice;
+/* Value-only host decision. Counts identify buildings to remove in each of
+ * six towns. The host does not receive a CPU, session or transaction pointer.
+ * Only Confirm consumes the boolean response; other notices acknowledge. */
+typedef bool (*ActRaiserRegionalPopulationPrompt)(void *context,
+    ActRaiserRegionalPopulationNotice notice,ArRegionalSource source,const uint16_t removed[6]);
+void ActRaiserRegional_SetPopulationPrompt(ActRaiserRegionalPopulationPrompt prompt,void *context);
+bool ActRaiser_RegionalPopulationEntry(CpuState *cpu);
+RecompReturn ActRaiser_RegionalPopulation(CpuState *cpu);
+/* Read effective coefficients only; no activation in a census. US before a
+ * campaign is accepted. Fixed small snapshot, not full session validation. */
+bool ActRaiserRegional_CopySupport(ArRegionalSupportSnapshot *snapshot);
 typedef enum ActRaiserRegionalContinueNotice {
   kActRaiserRegionalContinue_Estimate,
   kActRaiserRegionalContinue_LoadFailed,

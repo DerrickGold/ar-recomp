@@ -27,6 +27,8 @@ bool SettingsOverlayRegions_ViewBadge(const ActRaiserRegionalRulesView *view,
 bool SettingsOverlayRegions_ViewDescription(ArUiLocale locale,
     const ActRaiserRegionalRulesView *view, ActRaiserRegionalSettingGroup group,
     char *output, size_t capacity);
+bool SettingsOverlayRegions_PopulationConfirmation(ArUiLocale locale,
+    ArRegionalSource source, const uint16_t removed[6], char *output, size_t capacity);
 bool SettingsOverlayRegions_CostBadge(const ArRegionalCostPolicy *policy,
                                      ArRegionalCostGroup group,
                                      SettingsOverlayRegionBadge *badge);

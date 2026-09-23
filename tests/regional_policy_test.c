@@ -207,6 +207,9 @@ static void CheckMenuAdapter(void) {
       CHECK(ArRegionalStory_Init(&view.requested.story,(ArRegionalSource)source));
       CHECK(ArRegionalTownStatus_Init(&view.requested.town_status,(ArRegionalSource)source));
       view.requested.level_goals=(ArRegionalSource)source;
+      view.requested.construction=(ArRegionalSource)source;
+      view.requested.arrival=(ArRegionalSource)source;
+      CHECK(ArRegionalSupport_Init(&view.requested.support,(ArRegionalSource)source));
       CHECK(ArRegionalSimCombat_Init(&view.requested.sim_combat,(ArRegionalSource)source));
       CHECK(ArRegionalSimAi_Init(&view.requested.sim_ai,(ArRegionalSource)source));
       view.requested.menu_return = (ArRegionalSource)source;

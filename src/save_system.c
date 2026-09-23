@@ -876,6 +876,24 @@ bool SaveSystem_WriteActive(SaveError *error) {
   return WriteLocalizedNameExtension(error);
 }
 
+SaveStorySnapshotResult SaveSystem_CommitStorySnapshot(const uint8_t *image, SaveError *error) {
+  ClearError(error);
+  if (!s_runtime.live || !image || image == s_runtime.live || !Save_ChecksumValid(image)) {
+    Fail(error, "no separate, valid story snapshot to commit");
+    return kSaveStorySnapshot_NotCommitted;
+  }
+  if (s_runtime.native_write_active || s_runtime.native_write_aborted || s_runtime.story_pending) {
+    Fail(error, "complete the pending native save before a story snapshot");
+    return kSaveStorySnapshot_NotCommitted;
+  }
+  if (!CommitImage(image, kSaveCommit_StorySnapshot, NULL, error))
+    return kSaveStorySnapshot_NotCommitted;
+  memcpy(s_runtime.live, image, kActRaiserSramSize);
+  SaveSystem_ResyncShadow();
+  return WriteLocalizedNameExtension(error)
+      ? kSaveStorySnapshot_Committed : kSaveStorySnapshot_NamePending;
+}
+
 bool SaveSystem_AutoPersistIfChanged(SaveError *error) {
   ClearError(error);
   if (!s_runtime.live) return Fail(error, "save system is not attached");
@@ -1235,4 +1253,49 @@ bool SaveSystem_Export(SaveFileFormat format, const char *path,
   if (!Save_ChecksumValid(s_runtime.live))
     return Fail(error, "current SRAM has no valid save checksum");
   return Save_WriteFile(format, path, s_runtime.live, error);
+}
+
+bool SaveSystem_CreateRecoveryCopy(const char *directory, SaveError *error) {
+  ClearError(error);
+  if (!s_runtime.live || !s_runtime.durable_valid)
+    return Fail(error, "no durable save for a recovery copy");
+  if (s_runtime.native_write_active || s_runtime.native_write_aborted ||
+      s_runtime.story_pending || s_runtime.localized_name_dirty ||
+      memcmp(s_runtime.live, s_runtime.durable, kActRaiserSramSize))
+    return Fail(error, "complete and persist the current story save before recovery copy");
+  const SaveCommitHost *host = &s_runtime.commit_host;
+  if (host->commit && !host->copy_recovery)
+    return Fail(error, "save feature owner cannot preserve recovery companions");
+  char path[kSaveRuntimePathBytes], name_path[kLocalizedNamePathBytes];
+  if (!directory || !directory[0]) return Fail(error, "recovery directory is empty");
+  const int written = snprintf(path, sizeof(path), "%s/save.srm", directory);
+  if (written <= 0 || (size_t)written >= sizeof(path))
+    return Fail(error, "recovery path exceeds runtime limit");
+  snprintf(name_path, sizeof(name_path), "%s.arname", path);
+  uint8_t disk[kActRaiserSramSize];
+  if (!Save_LoadFile(ActiveFormat(), ActivePath(), disk, error)) return false;
+  if (memcmp(disk, s_runtime.durable, sizeof(disk)))
+    return Fail(error, "save changed since load; reload before recovery copy");
+  char native_name[kActRaiserPlayerNameStorageBytes];
+  if (s_runtime.localized_name_valid &&
+      (!CopyNativePlayerName(native_name, sizeof(native_name)) ||
+       strcmp(native_name, s_runtime.localized_compatibility)))
+    return Fail(error, "localized name belongs to an unsaved campaign");
+
+  /* mkdir is the exclusive reservation, including against existing symlinks.
+   * Do not remove partial artifacts or overwrite a prior recovery on failure. */
+  if (sr_mkdir(directory) != 0)
+    return Fail(error, "cannot reserve recovery directory %s: %s", directory, strerror(errno));
+  SyncContainingDirectory(directory);
+  if (s_runtime.localized_name_valid) {
+    const LocalizedNameWriteContext name = {
+        .save_checksum = Save_ComputeChecksum(disk),
+        .compatibility_name = s_runtime.localized_compatibility,
+        .utf8_name = s_runtime.localized_name,
+    };
+    if (!WriteAtomic(name_path, WriteLocalizedNameBody, &name, error)) return false;
+  }
+  return host->commit
+      ? host->copy_recovery(host->context, ActivePath(), path, disk, error)
+      : Save_WriteFile(kSaveFileFormat_NativeSrm, path, disk, error);
 }

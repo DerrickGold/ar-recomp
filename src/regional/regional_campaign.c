@@ -111,6 +111,10 @@ static bool Commit(void *context, SaveFileFormat format, const char *path,
   if (kind == kSaveCommit_Story) {
     if (!campaign->pending_valid) return Fail(error, "story checkpoint was not prepared");
     session = campaign->pending;
+  } else if (kind == kSaveCommit_StorySnapshot) {
+    if (!campaign->active_valid || campaign->pending_valid)
+      return Fail(error, "story snapshot has no quiescent regional campaign");
+    session = campaign->active;
   } else if (kind == kSaveCommit_Import) {
     if (!import_path || !LoadOrAdopt(campaign, import_path, image, &session, error)) return false;
   } else {
@@ -134,8 +138,24 @@ static void Reloaded(void *context) {
   campaign->active_valid = campaign->pending_valid = false;
 }
 
+static bool CopyRecovery(void *context, const char *source_path,
+    const char *destination_path, const uint8_t *image, SaveError *error) {
+  const ArRegionalCampaign *campaign = context;
+  if (!campaign) return Fail(error, "missing regional recovery owner");
+  ArRegionalSession saved;
+  const SaveCheckpointStatus status =
+      ArRegionalSession_Load(&saved, campaign->slot, source_path, image, error);
+  /* Preserve a genuinely legacy save as legacy. Never manufacture a new
+   * campaign identity or copy settings from an unsaved active campaign. */
+  if (status == kSaveCheckpoint_Missing)
+    return Save_WriteFile(kSaveFileFormat_NativeSrm, destination_path, image, error);
+  if (status != kSaveCheckpoint_Ready) return false;
+  return ArRegionalSession_Save(&saved, kSaveFileFormat_NativeSrm,
+                                destination_path, NULL, image, error);
+}
+
 SaveCommitHost ArRegionalCampaign_SaveHost(ArRegionalCampaign *campaign) {
   if (!campaign) return (SaveCommitHost){0};
   return (SaveCommitHost){.context = campaign, .prepare_story = Prepare,
-      .commit = Commit, .reloaded = Reloaded};
+      .commit = Commit, .reloaded = Reloaded, .copy_recovery = CopyRecovery};
 }

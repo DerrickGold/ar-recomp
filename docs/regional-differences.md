@@ -755,6 +755,24 @@ In a controlled starting-town comparison, a construction cycle took 732
 active frames in the US game and 2,412 in Japan—about 3.3 times as long in that
 situation. Developed towns and event interruptions can change that ratio.
 
+Construction also uses an internal growth reserve to decide how many buildings
+can start. The price is 4 units in Japan. In the US and Europe, it rises with
+civilization level:
+
+| Civilization level | US / Europe | Japan |
+| --- | --- | --- |
+| 1 | 4 | 4 |
+| 2 | 6 | 4 |
+| 3 | 8 | 4 |
+
+Both versions budget at most six starts per construction batch. A lower cost
+does not make a Japanese cycle run sooner, and buildings still need suitable
+land, sufficient support and a free structure record.
+In the town being shown, houses spend those units; support buildings return
+their cost when they finish. Off-screen building uses the same starting budget
+but does not deduct the reserve. These are separate from construction speed.
+[Construction-budget evidence](regional-differences-technical.md#population-switching-established-boundaries)
+
 Recovery follows these schedules; fractional amounts are rounded down:
 
 | Recovery | US | Japan | Europe |

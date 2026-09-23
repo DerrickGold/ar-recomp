@@ -24,6 +24,9 @@
 #include "regional_level_goals.h"
 #include "regional_sim_combat.h"
 #include "regional_sim_ai.h"
+#include "regional_construction.h"
+#include "regional_support.h"
+#include "regional_arrival.h"
 
 /* Game-owned value snapshot. No campaign identity, persistence, native memory
  * or UI ownership. Each family keeps its own units and activation boundary;
@@ -53,7 +56,30 @@ typedef struct ArRegionalRules {
   ArRegionalSource level_goals;
   ArRegionalSimCombatPolicy sim_combat;
   ArRegionalSimAiPolicy sim_ai;
+  ArRegionalSource construction;
+  ArRegionalSupportPolicy support;
+  ArRegionalSource arrival;
 } ArRegionalRules;
+
+/* Conservative supported mix: any reduced support coefficient requires the
+ * Japanese level and population-event targets. Western support may use either
+ * set of goals. This is a compatibility rule, not a claim about fixed caps.
+ * The unrelated failed-Act2 Compass leaf remains independently selectable. */
+static inline bool ArRegionalRules_PopulationCompatible(const ArRegionalRules *rules) {
+  if (!rules) return false;
+  ArRegionalSupportSnapshot support;
+  ArRegionalStorySnapshot story;
+  bool japanese;
+  if (!ArRegionalSupport_Resolve(&rules->support,&support) ||
+      !ArRegionalStory_Resolve(&rules->story,&story) ||
+      !ArRegionalLevelGoals_Resolve(rules->level_goals,&japanese)) return false;
+  bool reduced=false;
+  for (unsigned i=0;i<kArRegionalSupport_Count;++i)
+    reduced |= support.amount[i] < ArRegionalSupport_Descriptor((ArRegionalSupportRule)i)->amount[kArRegionalSource_US];
+  return !reduced || (japanese &&
+      story.value[kArRegionalStory_FillmoreHint]==ArRegionalStory_Descriptor(kArRegionalStory_FillmoreHint)->value[kArRegionalSource_Japan] &&
+      story.value[kArRegionalStory_KasandoraTablet]==ArRegionalStory_Descriptor(kArRegionalStory_KasandoraTablet)->value[kArRegionalSource_Japan]);
+}
 
 /* One mapping for activation, observation and replay identity. The retained
  * projection bits remain feature-codec details, never rule-field ordinals. */

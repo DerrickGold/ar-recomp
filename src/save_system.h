@@ -120,12 +120,33 @@ typedef enum SaveCommitKind {
   kSaveCommit_Story,
   kSaveCommit_Editor,
   kSaveCommit_Import,
+  kSaveCommit_StorySnapshot,
 } SaveCommitKind;
+
+typedef enum SaveStorySnapshotResult {
+  kSaveStorySnapshot_NotCommitted,
+  kSaveStorySnapshot_Committed,
+  kSaveStorySnapshot_NamePending,
+} SaveStorySnapshotResult;
+/* Persist a complete, game-owned projection captured at a quiescent story
+ * boundary. Unlike an editor/automatic write, this binds the CURRENT campaign
+ * metadata. No native writer or previously completed save may be pending.
+ * On NotCommitted, live SRAM/durable image/shadow remain unchanged. The host
+ * journal may retain a retry candidate, always bound to its exact image.
+ * On either committed result, image replaces live SRAM/shadow only AFTER disk
+ * commit. NamePending means ONLY the Unicode companion needs retry; callers
+ * must NOT roll back committed gameplay or repeat a destructive transaction.
+ * No frame service or callbacks that advance gameplay may run during this call.
+ * The image must not alias live SRAM. CPU/cache coherency belongs to the game. */
+SaveStorySnapshotResult SaveSystem_CommitStorySnapshot(
+    const uint8_t image[kActRaiserSramSize], SaveError *error);
 
 /* Optional game feature coordinator. commit replaces (not supplements) the
  * native write and must persist both image and companions before success.
  * expected is the last durable image, not the session shadow; NULL = no file.
  * prepare_story snapshots feature state at native completion without I/O.
+ * StorySnapshot commits capture current feature state synchronously (without
+ * prepare_story/pending); other kinds retain their existing ownership.
  * No CPU, overlay or regional-policy types cross this boundary. */
 typedef struct SaveCommitHost {
   void *context;
@@ -134,6 +155,15 @@ typedef struct SaveCommitHost {
                  const uint8_t *expected, const uint8_t *image,
                  SaveCommitKind kind, const char *import_path, SaveError *error);
   void (*reloaded)(void *context);
+  /* Optional complete recovery-copy support. Read metadata bound to image at
+   * source_path, never the currently running (possibly unsaved) campaign.
+   * destination_path is an empty native-SRM slot in a newly reserved directory.
+   * Write companions first and the native image last; do not change live state,
+   * pending state or source files. Absence blocks recovery rather than silently
+   * exporting a save without its feature metadata. */
+  bool (*copy_recovery)(void *context, const char *source_path,
+                        const char *destination_path, const uint8_t *image,
+                        SaveError *error);
 } SaveCommitHost;
 /* Attach clears the host. Install after initial load. Caller owns context. */
 bool SaveSystem_SetCommitHost(const SaveCommitHost *host);
@@ -172,5 +202,16 @@ bool SaveSystem_ApplyRegionEdits(const int edits[kActRaiserSaveRegionCount],
 bool SaveSystem_Import(const char *path, bool auto_backup, SaveError *error);
 bool SaveSystem_Export(SaveFileFormat format, const char *path,
                        SaveError *error);
+/* Permanent recovery copy of an already completed/persisted native save.
+ * The game must first persist current WRAM (including active actor caches)
+ * as a coherent story image; this API does not save unsaved gameplay.
+ * Reject pending/dirty/session-only images and externally changed disk files.
+ * Exclusively create directory; never reuse/overwrite an existing directory.
+ * Writes save.srm plus installed feature/name companions, native image last.
+ * Failure may leave a partial directory; retain it and choose a new name on
+ * retry. No live state, active files or auto-persist shadow are modified.
+ * A completed copy is restored by replacing the active save and companions
+ * together while the game is closed. Native SRAM remains emulator compatible. */
+bool SaveSystem_CreateRecoveryCopy(const char *directory, SaveError *error);
 
 #endif  /* SAVE_SYSTEM_H */

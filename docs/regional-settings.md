@@ -8,9 +8,27 @@ the Master report's score page, town-menu return behavior, message-speed
 choices, magic controls, monster reserves, house-loss and act-score feedback,
 the action HUD's life-count convention, Source activation, the Magic Skull
 wait, story prerequisites, lair respawn delays, town growth reports and level
-population goals independently.
+population goals independently. Population support changes use the confirmed
+conversion described below rather than an immediate toggle.
 The flag and name beside each choice identify its source rules, not the
 language of your game.
+
+## Death Heim arrival
+
+**Death Heim arrival** selects the route after all six towns' second acts
+are complete. US/Europe shows the island emerging from the sea and takes you
+to the Sky Palace for its announcement. Japan returns you to the current
+town; your next Palace visit announces the island without the emergence
+animation. The island remains available afterward in either case.
+
+Choose before the final departure. Once that sequence begins, its route is
+fixed for this campaign, including if you save in town before the Japanese
+announcement. Later changes cannot replay the reveal, hide the island or
+repeat its rewards. The description identifies the route already decided.
+This option uses the existing artwork and music and needs no Japanese ROM;
+regional artwork and independent music choices are separate.
+
+## Action and resource rules
 
 | Cost | US / Europe | Japan |
 | --- | ---: | ---: |
@@ -90,6 +108,51 @@ awards and dialogue. Opening the Master report refreshes its next-level target
 without awarding levels or healing. Changing the option itself grants nothing;
 lower goals can make you eligible for additional awards at the next normal
 check. At maximum level the report continues to show a next goal of zero.
+
+## Population rules and rebuilding
+
+**Population & town conversion** selects these support capacities together
+with the region's level and story population goals:
+
+| Structure | US / Europe | Japan |
+| --- | ---: | ---: |
+| Ordinary field | 32 | 16 |
+| Improved field | 48 | 24 |
+| Aitos/Marahna factory | 72 | 32 |
+| Other supporting structures, including bridges | 32 | 16 |
+
+House occupancy is unchanged. Lower support means towns need more production
+buildings and have less room for houses. To avoid leaving an existing town
+stuck with an unsuitable layout, a capacity change requires redevelopment:
+
+1. Choose the region, return to the Sky Palace, and finish a menu action.
+2. Review the number of houses, fields and factories to remove from each town.
+   Cancel leaves the layout and rules unchanged.
+3. **Save & apply** saves current progress, creates a recovery folder beside
+   your save, removes those buildings, and saves the new rules and town state.
+
+Roads, bridges, landmarks, civilization levels, story progress, sealed lairs,
+offerings and earned Master levels remain. There is no SP charge or ordinary
+earthquake reward. Towns rebuild through normal construction, with a bounded
+growth top-up when needed; this is not instant rebuilding. No Japanese ROM is
+needed. The next town visit redraws its surviving structures.
+
+Switching back requires another redevelopment; it does **not** restore the
+old layout. To restore that layout, use the complete pre-change recovery copy
+as described in [Save formats](save-format.md). A US/Europe switch keeps the
+same support capacities, so it does not remove buildings. Japanese support
+requires Japanese population goals; those goals cannot be switched separately
+to the higher Western requirements while Japanese support remains selected.
+Unrelated Compass prerequisites stay unchanged by this conversion.
+
+Pending conversions are not saved or resumed after a restart. Changing another
+regional rule invalidates an earlier request; select the population choice
+again to review it. Inconsistent town records or unsafe pending work prevent
+conversion. A save failure before conversion leaves the layout and rules
+unchanged; a failure saving the enhanced player name after a successful
+conversion does not repeat or undo the conversion.
+
+## Other town rules
 
 **Town growth reports** chooses how the Cities report classifies development.
 US/Europe checks growth, buildings and population; Japan reads stored status
@@ -302,6 +365,8 @@ Compass prerequisite alongside the disputes prerequisite; Japan clears only
 the disputes prerequisite. The normal event loop still gives disputes priority.
 This is not an option to obtain the Compass early.
 
+## Saving your choices
+
 These choices belong to the current campaign. **Save with the Progress Log to
 keep them.** Closing the overlay is not a save. New Game starts with US rules;
 Continue restores the choices saved with that campaign. Keep the matching
@@ -309,6 +374,8 @@ Continue restores the choices saved with that campaign. Keep the matching
 installation. The `.srm` itself remains compatible with SNES emulators. See
 [save companions](save-format.md#regional-campaign-checkpoints) for backup and
 recovery details.
+The confirmed population conversion is an exception: it saves immediately and
+also keeps a complete pre-change recovery copy.
 
 On the first normal Continue of an older save, the game asks to estimate its
 missing regional monster-lair history. The estimate preserves current US counts
@@ -323,7 +390,7 @@ Regional changes are locked during recording and replay, including after
 taking over from a replay. Start a normal session to edit them.
 
 These are **individual options, not complete regional presets**. They do not
-change spell inventory, population support, action-enemy behavior or stats,
+change spell inventory, action-enemy behavior or stats,
 artwork or language. In particular, choosing European costs
 does not enable the European Action-mode spell stack. No donor ROM is needed
 for these rules. The [regional comparison](regional-differences.md)

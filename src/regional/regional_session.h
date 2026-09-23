@@ -16,11 +16,26 @@ typedef struct ArRegionalSession {
   ArRegionalLairHistory lairs;
   ArRegionalLairReloads reloads;
   ArRegionalSimActors sim_actors;
+  bool arrival_locked;
 } ArRegionalSession;
 
 /* Caller-owned state; no singleton, filesystem access or old-save mutation. */
 bool ArRegionalSession_NewGame(ArRegionalSession *session, uint32_t slot,
     const uint8_t campaign[16], const ArRegionalCostPolicy *defaults);
+bool ArRegionalSession_RequestArrival(ArRegionalSession *session,uint32_t revision,ArRegionalSource source);
+/* Once per campaign, at the eligible final departure/Palace gate. Continuing
+ * an already-unlocked native event retains the saved effective policy rather
+ * than adopting a new request midway through its reveal/announcement. A later
+ * request never changes a locked event or clears the native story flags. */
+bool ArRegionalSession_BeginArrival(ArRegionalSession *session,bool continuing,bool *japanese);
+/* Conversion-owner ONLY: prepare a candidate session for an already confirmed,
+ * recoverable town reset. Sets support, level goals and the two population
+ * prerequisites together; preserves the independent Compass prerequisite.
+ * No queued destructive intent is persisted. Caller commits this candidate
+ * with the converted town image before publishing it as the active session.
+ * A raw settings callback must not use this as a support activation shortcut. */
+bool ArRegionalSession_SetPopulationProfile(ArRegionalSession *candidate,
+    uint32_t revision, ArRegionalSource source);
 /* A preview must carry revision; stale confirmations fail without mutation. */
 bool ArRegionalSession_RequestCosts(ArRegionalSession *session, uint32_t revision,
     ArRegionalCostGroup group, ArRegionalSource source);
@@ -113,6 +128,10 @@ bool ArRegionalSession_RequestSimCombat(ArRegionalSession *session,uint32_t revi
 /* Verified native birth only. Existing/cached actors retain their snapshots. */
 bool ArRegionalSession_BeginSimActor(ArRegionalSession *session,unsigned town,unsigned slot);
 bool ArRegionalSession_RequestSimAi(ArRegionalSession *session,uint32_t revision,const ArRegionalSimAiPolicy *policy);
+bool ArRegionalSession_RequestConstruction(ArRegionalSession *session, uint32_t revision, ArRegionalSource source);
+/* Capture budget, animated payment and support-building return together.
+ * Off-screen batches capture at their own outer native entry. */
+bool ArRegionalSession_BeginConstruction(ArRegionalSession *session, bool *japanese);
 bool ArRegionalSession_RequestHouseCredit(ArRegionalSession *session, uint32_t revision,
                                         ArRegionalSource source);
 /* Internal leaves stay independently selectable; the ordinary overlay passes

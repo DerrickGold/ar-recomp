@@ -915,6 +915,32 @@ static bool RegionalContinuePrompt(void *context, ActRaiserRegionalContinueNotic
   return result == kOverlayDecision_Accepted;
 }
 
+static bool RegionalPopulationPrompt(void *context,ActRaiserRegionalPopulationNotice notice,
+    ArRegionalSource source,const uint16_t removed[6]) {
+  const AppBoot *app=context;
+  if(!app || app->headless)return false;
+  bool opened;
+  if(notice==kActRaiserRegionalPopulation_Confirm) {
+    char body[2048];
+    if(!SettingsOverlayRegions_PopulationConfirmation((ArUiLocale)g_settings.interface_language,
+        source,removed,body,sizeof(body)))return false;
+    opened=SettingsOverlay_BeginDecisionText("overlay.region.population_label",body,
+        "overlay.region.population_accept");
+  } else {
+    const char *key=notice==kActRaiserRegionalPopulation_Complete?"overlay.region.population_complete":
+        notice==kActRaiserRegionalPopulation_NamePending?"overlay.region.population_name_pending":
+        "overlay.region.population_failed";
+    opened=SettingsOverlay_BeginNotice("overlay.region.population_label",key,"overlay.region.acknowledge");
+  }
+  if(!opened)return false;
+  SettingsOverlayDecisionResult result;
+  do {
+    ActRaiser_YieldToHost();
+    result=SettingsOverlay_TakeDecisionResult();
+  } while(result==kOverlayDecision_Pending);
+  return result==kOverlayDecision_Accepted;
+}
+
 /* Argument parsing, the portable-bundle chdir, the per-run artifact dir, the
  * shipped-defaults ini upgrade, the config layer, and the ROM read.
  * Returns a process exit code on failure, or -1 to continue booting. */
@@ -1842,6 +1868,7 @@ static void AppBoot_StartGame(AppBoot *app) {
   if (!ActRaiserRegional_Initialize(HostCampaignIdentity_Create, NULL))
     Die("Regional campaign storage could not be initialized; saves preserved.");
   ActRaiserRegional_SetContinuePrompt(RegionalContinuePrompt, app);
+  ActRaiserRegional_SetPopulationPrompt(RegionalPopulationPrompt, app);
   if (!InputReplay_SetPolicyDigest(ActRaiserRegional_ReplayDigest, NULL))
     Die("Regional replay identity could not be initialized.");
   /* A replay must not mutate the player's configuration, for the same reason it

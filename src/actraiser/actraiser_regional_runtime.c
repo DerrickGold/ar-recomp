@@ -15,6 +15,9 @@
 #include "actraiser/actraiser_lair_history.h"
 #include "actraiser/actraiser_lair_reloads.h"
 #include "actraiser/actraiser_town_status_runtime.h"
+#include "actraiser/actraiser_construction_runtime.h"
+#include "actraiser/actraiser_population_conversion.h"
+#include "actraiser/actraiser_arrival_runtime.h"
 #include "actraiser/actraiser_level_goals_runtime.h"
 #include "actraiser/actraiser_score_feedback.h"
 #include "actraiser/actraiser_lives_display.h"
@@ -61,6 +64,15 @@ extern RecompReturn bank_03_EB35_M1X0(CpuState *cpu);
 static bool s_story_compass_delegate;
 static uint16_t s_skull_frames;
 static ArRegionalCampaign s_campaign;
+static struct {
+  bool pending,delegate;
+  uint8_t campaign[16];
+  uint32_t revision;
+  ArRegionalSource source;
+  ActRaiserRegionalPopulationPrompt prompt;
+  void *context;
+} s_population;
+extern RecompReturn bank_01_85A2_M1X0(CpuState *cpu);
 static bool s_delegate;
 static ActRaiserRegionalContinuePrompt s_continue_prompt;
 static void *s_continue_context;
@@ -79,7 +91,7 @@ static ArRegionalRules s_boot_requested, s_boot_effective;
 static ArRegionalLairHistory s_boot_lairs;
 static ArRegionalLairReloads s_boot_reloads;
 static ArRegionalSimActors s_boot_sim_actors;
-static bool s_boot_valid;
+static bool s_boot_valid,s_boot_arrival_locked;
 static bool s_miracle_active, s_prices_valid;
 static bool s_trace;
 static bool s_quake_active, s_quake_delegate;
@@ -95,6 +107,7 @@ static ArRegionalCostSnapshot s_prices, s_miracle_prices;
 bool ActRaiserRegional_Initialize(ArRegionalCampaignIdentity identity, void *context) {
   if (!identity) return false;
   s_delegate = false;
+  memset(&s_population,0,sizeof(s_population));
   s_lives_delegate = false;
   s_skull_active=s_skull_delegate=false;
   s_story_compass_delegate=false;
@@ -104,7 +117,9 @@ bool ActRaiserRegional_Initialize(ArRegionalCampaignIdentity identity, void *con
   s_lair_delegate = s_lair_seed_pending = s_lair_active = false;
   s_reload_delegate = s_reload_active = false;
   ActRaiserTownStatusRuntime_Reset();
+  ActRaiserConstructionRuntime_Reset();
   ActRaiserLevelGoalsRuntime_Reset();
+  ActRaiserArrivalRuntime_Reset();
   s_score_active = false;
   s_score = (ArRegionalScoreSnapshot){0};
   s_completion_state = kScoreIdle;
@@ -112,6 +127,7 @@ bool ActRaiserRegional_Initialize(ArRegionalCampaignIdentity identity, void *con
   s_boot_lairs = (ArRegionalLairHistory){0};
   s_boot_reloads = (ArRegionalLairReloads){0};
   s_boot_sim_actors = (ArRegionalSimActors){0};
+  s_boot_arrival_locked=false;
   s_miracle_active = s_prices_valid = false;
   s_quake_active = s_quake_delegate = false;
   s_report_active = s_report_delegate = false;
@@ -142,6 +158,9 @@ bool ActRaiserRegional_Initialize(ArRegionalCampaignIdentity identity, void *con
   s_boot_requested.level_goals=kArRegionalSource_US;
   ArRegionalSimCombat_Init(&s_boot_requested.sim_combat,kArRegionalSource_US);
   ArRegionalSimAi_Init(&s_boot_requested.sim_ai,kArRegionalSource_US);
+  ArRegionalSupport_Init(&s_boot_requested.support,kArRegionalSource_US);
+  s_boot_requested.construction=kArRegionalSource_US;
+  s_boot_requested.arrival=kArRegionalSource_US;
   s_boot_requested.house_credit = kArRegionalSource_US;
   ArRegionalScore_Init(&s_boot_requested.score_feedback, kArRegionalSource_US);
   s_boot_effective = s_boot_requested;
@@ -159,10 +178,74 @@ bool ActRaiserRegional_Initialize(ArRegionalCampaignIdentity identity, void *con
       s_boot_lairs = loaded.lairs;
       s_boot_reloads = loaded.reloads;
       s_boot_sim_actors = loaded.sim_actors;
+      s_boot_arrival_locked=loaded.arrival_locked;
     }
   }
   SaveCommitHost host = ArRegionalCampaign_SaveHost(&s_campaign);
   return SaveSystem_SetCommitHost(&host);
+}
+
+bool ActRaiserRegional_CopySupport(ArRegionalSupportSnapshot *snapshot) {
+  const ArRegionalSupportPolicy native={{0}};
+  return ArRegionalSupport_Resolve(s_campaign.active_valid?&s_campaign.active.effective.support:&native,snapshot);
+}
+
+bool ActRaiserRegional_ArrivalSnapshot(bool latch,bool continuing,bool *japanese) {
+  if(!s_campaign.active_valid || !japanese)return false;
+  if(latch)return ArRegionalSession_BeginArrival(&s_campaign.active,continuing,japanese);
+  return ArRegionalArrival_Resolve(s_campaign.active.arrival_locked?s_campaign.active.effective.arrival:
+      s_campaign.active.requested.arrival,japanese);
+}
+
+void ActRaiserRegional_SetPopulationPrompt(ActRaiserRegionalPopulationPrompt prompt,void *context) {
+  s_population.prompt=prompt;s_population.context=context;
+}
+
+bool ActRaiser_RegionalPopulationEntry(CpuState *cpu) {
+  if(s_population.delegate){s_population.delegate=false;return false;}
+  return s_population.pending && s_campaign.active_valid && InputReplay_PolicyChangesAllowed() &&
+      cpu && cpu->PB==1 && cpu->DB==1 && cpu->m_flag && !cpu->x_flag && !cpu->D && !cpu->emulation;
+}
+
+static bool PopulationRecoveryPath(char *path,size_t capacity) {
+  uint8_t id[16];
+  if(!s_campaign.identity || !s_campaign.identity(s_campaign.identity_context,id))return false;
+  const int prefix=snprintf(path,capacity,"%s.redevelopment-",SaveSystem_ActivePath());
+  if(prefix<=0 || (size_t)prefix+33>capacity)return false;
+  for(unsigned i=0;i<16;++i)snprintf(path+prefix+2*i,3,"%02x",id[i]);
+  return true;
+}
+
+RecompReturn ActRaiser_RegionalPopulation(CpuState *cpu) {
+  const ArRegionalSource source=s_population.source;
+  const bool current=s_population.pending && s_population.revision==s_campaign.active.revision &&
+      !memcmp(s_population.campaign,s_campaign.active.campaign,16) && InputReplay_PolicyChangesAllowed();
+  s_population.pending=false; /* A failed/cancelled request is never replayed. */
+  ActRaiserPopulationPreview preview;
+  ActRaiserPopulationResult result=current?ActRaiserPopulation_Preview(cpu,&s_campaign,source,&preview):kActRaiserPopulation_Stale;
+  if(result==kActRaiserPopulation_Ready && s_population.prompt) {
+    if(s_population.prompt(s_population.context,kActRaiserRegionalPopulation_Confirm,source,preview.town.removed)) {
+      SaveError error={{0}};char directory[512];
+      if(PopulationRecoveryPath(directory,sizeof(directory))) {
+        result=ActRaiserPopulation_Commit(cpu,&s_campaign,&preview,directory,&error);
+        fprintf(stderr,"[regional] population conversion result=%d recovery=%s%s%s\n",
+            result,directory,error.message[0]?" error=":"",error.message);
+      } else result=kActRaiserPopulation_RecoveryFailed;
+      const ActRaiserRegionalPopulationNotice notice=result==kActRaiserPopulation_Committed?
+          kActRaiserRegionalPopulation_Complete:result==kActRaiserPopulation_NamePending?
+          kActRaiserRegionalPopulation_NamePending:kActRaiserRegionalPopulation_Failed;
+      (void)s_population.prompt(s_population.context,notice,source,preview.town.removed);
+    }
+  } else if(result!=kActRaiserPopulation_Unchanged && s_population.prompt) {
+    fprintf(stderr,"[regional] population conversion not started: result=%d source=%d\n",result,source);
+    const uint16_t none[6]={0};
+    (void)s_population.prompt(s_population.context,kActRaiserRegionalPopulation_Failed,source,none);
+  }
+  /* Original LDY and selector continuation retain their exact CPU/stack ABI. */
+  s_population.delegate=true;
+  const RecompReturn native=bank_01_85A2_M1X0(cpu);
+  s_population.delegate=false;
+  return native;
 }
 
 bool ActRaiserRegional_CopyPrices(ArRegionalCostSnapshot *prices) {
@@ -192,6 +275,10 @@ bool ActRaiserRegional_CopyRulesView(ActRaiserRegionalRulesView *out) {
   out->lair_reload_ready = s_campaign.active.reloads.initialized_towns==0x3f &&
       !s_campaign.active.reloads.diverged_towns;
   memcpy(out->campaign, s_campaign.active.campaign, sizeof(out->campaign));
+  out->population_pending=s_population.pending && s_population.revision==out->revision &&
+      !memcmp(s_population.campaign,out->campaign,16);
+  out->pending_population=s_population.source;
+  out->arrival_locked=s_campaign.active.arrival_locked;
   return true;
 }
 
@@ -206,6 +293,18 @@ ActRaiserRegionalEditResult ActRaiserRegional_RequestRules(
     return kActRaiserRegionalEdit_Stale;
   bool ok;
   switch (group) {
+    case kActRaiserRegionalSetting_Arrival:
+      ok=ArRegionalSession_RequestArrival(&s_campaign.active,view->revision,source);break;
+    case kActRaiserRegionalSetting_Population: {
+      ArRegionalSession candidate=s_campaign.active;
+      if(!ArRegionalSession_SetPopulationProfile(&candidate,view->revision,source))return kActRaiserRegionalEdit_Invalid;
+      if(candidate.revision==view->revision) {s_population.pending=false;return kActRaiserRegionalEdit_Unchanged;}
+      s_population.pending=true;s_population.source=source;s_population.revision=view->revision;
+      memcpy(s_population.campaign,view->campaign,16);
+      return kActRaiserRegionalEdit_Deferred;
+    }
+    case kActRaiserRegionalSetting_Construction:
+      ok=ArRegionalSession_RequestConstruction(&s_campaign.active,view->revision,source);break;
     case kActRaiserRegionalSetting_SimAi: {
       ArRegionalSimAiPolicy policy;
       if (!ArRegionalSimAi_Init(&policy,source)) return kActRaiserRegionalEdit_Invalid;
@@ -217,6 +316,10 @@ ActRaiserRegionalEditResult ActRaiserRegional_RequestRules(
       ok=ArRegionalSession_RequestSimCombat(&s_campaign.active,view->revision,&policy);break;
     }
     case kActRaiserRegionalSetting_LevelGoals:
+      if(source!=kArRegionalSource_Japan) {
+        ArRegionalRules candidate=s_campaign.active.requested;candidate.level_goals=source;
+        if(!ArRegionalRules_PopulationCompatible(&candidate))return kActRaiserRegionalEdit_Incompatible;
+      }
       ok=ArRegionalSession_RequestLevelGoals(&s_campaign.active,view->revision,source);break;
     case kActRaiserRegionalSetting_TownStatus: {
       ArRegionalTownStatusPolicy policy;
@@ -229,6 +332,9 @@ ActRaiserRegionalEditResult ActRaiserRegional_RequestRules(
       ok=ArRegionalSession_RequestLairReloads(&s_campaign.active,view->revision,source); break;
     case kActRaiserRegionalSetting_Story: {
       ArRegionalStoryPolicy policy;
+      ArRegionalRules candidate=s_campaign.active.requested;
+      ArRegionalStory_Init(&candidate.story,source);
+      if(!ArRegionalRules_PopulationCompatible(&candidate))return kActRaiserRegionalEdit_Incompatible;
       ok=ArRegionalStory_Init(&policy,source) && ArRegionalSession_RequestStory(&s_campaign.active,view->revision,&policy);
       break;
     }
@@ -350,7 +456,9 @@ bool ActRaiserRegional_ReplayDigest(void *unused, uint8_t out[32], bool *baselin
       !ArRegionalLairHistory_Fingerprint(digest,history,&pending,&active,digest,&lairs_native) ||
       !ArRegionalLairReloads_Fingerprint(digest,reloads,requested->lair_reloads,effective->lair_reloads,
                                         digest,&reloads_native) ||
-      !ArRegionalSimActors_Fingerprint(digest,actors,digest,&actors_native)) return false;
+      !ArRegionalSimActors_Fingerprint(digest,actors,digest,&actors_native) ||
+      !ArRegionalArrivalLock_Fingerprint(digest,requested->arrival,effective->arrival,
+          s_campaign.active_valid?s_campaign.active.arrival_locked:s_boot_arrival_locked,digest)) return false;
   if (s_campaign.active_valid && s_completion_state!=kScoreIdle && (!rules_native || !lairs_native)) {
     uint8_t completion[51]="ARSCORECLEAR-R1";
     memcpy(completion+16,digest,32);
@@ -623,8 +731,19 @@ bool ActRaiserRegional_LevelGoalsSnapshot(bool activate,bool *japanese) {
 
 bool ActRaiserRegional_TownStatusSnapshot(bool activate, ArRegionalTownStatusSnapshot *out) {
   if (!s_campaign.active_valid || !out) return false;
-  return activate ? ArRegionalSession_BeginTownStatus(&s_campaign.active,out) :
-      ArRegionalTownStatus_Resolve(&s_campaign.active.effective.town_status,out);
+  /* Unchanged batches need only their small value snapshot, not a complete
+   * retained-history validation. Session validation remains on every change. */
+  if (!activate || !memcmp(&s_campaign.active.requested.town_status,
+                          &s_campaign.active.effective.town_status,sizeof(s_campaign.active.effective.town_status)))
+    return ArRegionalTownStatus_Resolve(&s_campaign.active.effective.town_status,out);
+  return ArRegionalSession_BeginTownStatus(&s_campaign.active,out);
+}
+
+bool ActRaiserRegional_ConstructionSnapshot(bool activate, bool *japanese) {
+  if (!s_campaign.active_valid || !japanese) return false;
+  if (!activate || s_campaign.active.requested.construction==s_campaign.active.effective.construction)
+    return ArRegionalConstruction_Resolve(s_campaign.active.effective.construction,japanese);
+  return ArRegionalSession_BeginConstruction(&s_campaign.active,japanese);
 }
 
 bool ActRaiser_RegionalStoryThresholdEntry(CpuState *cpu) {

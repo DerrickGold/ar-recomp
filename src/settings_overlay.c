@@ -336,8 +336,8 @@ static int s_match_game_scale_percent = kPercentScale;
 static char s_status[256];
 static struct {
   SettingsOverlayDecisionResult result;
-  bool accept_selected;
-  char title[96], body[96], accept[96];
+  bool accept_selected,body_text,notice;
+  char title[96], body[2048], accept[96];
 } s_decision;
 static uint64_t s_status_until;
 static bool s_editing;
@@ -617,7 +617,8 @@ static bool ActiveTabIsRegional(void) { return ActiveTab()->regional_rules; }
 
 static const char *RegionalNotice(void) {
   return Ui(!s_regional_valid ? "overlay.region.enter_campaign" :
-      !s_regional_view.editable ? "overlay.region.replay_locked" : "overlay.region.saved_with_story");
+      !s_regional_view.editable ? "overlay.region.replay_locked" :
+      s_regional_view.population_pending ? "overlay.region.population_pending" : "overlay.region.saved_with_story");
 }
 
 /* System > Game is the one registry-backed tab with semantic subsections.
@@ -1661,18 +1662,32 @@ void SettingsOverlay_Close(void) {
   fprintf(stderr, "[settings-menu] closed\n");
 }
 
-bool SettingsOverlay_BeginDecision(const char *title, const char *body, const char *accept) {
+static bool BeginDecision(const char *title,const char *body,const char *accept,bool body_text) {
   if (s_open || s_decision.result != kOverlayDecision_None || !s_render_device ||
       !ArRenderTexture_IsValid(SettingsOverlayArtwork_Get()->fonts[kText_Normal]) ||
       !title || !body || !accept || !*title || !*body || !*accept ||
-      strlen(title) >= sizeof(s_decision.title) || strlen(body) >= sizeof(s_decision.body) ||
+      strlen(title) >= sizeof(s_decision.title) || strlen(body) >= (body_text?sizeof(s_decision.body):96) ||
       strlen(accept) >= sizeof(s_decision.accept)) return false;
   SettingsOverlay_Open();
   strcpy(s_decision.title, title);
   strcpy(s_decision.body, body);
   strcpy(s_decision.accept, accept);
   s_decision.accept_selected = false;
+  s_decision.notice=false;
+  s_decision.body_text=body_text;
   s_decision.result = kOverlayDecision_Pending;
+  return true;
+}
+
+bool SettingsOverlay_BeginDecision(const char *title,const char *body,const char *accept) {
+  return BeginDecision(title,body,accept,false);
+}
+bool SettingsOverlay_BeginDecisionText(const char *title,const char *body,const char *accept) {
+  return BeginDecision(title,body,accept,true);
+}
+bool SettingsOverlay_BeginNotice(const char *title,const char *body,const char *dismiss) {
+  if(!BeginDecision(title,body,dismiss,false))return false;
+  s_decision.notice=s_decision.accept_selected=true;
   return true;
 }
 
@@ -1784,8 +1799,9 @@ void SettingsOverlay_TickAtForTest(uint64_t now_ms) {
 static void ApplyMenuNav(MenuNav nav, bool repeat) {
   if (s_decision.result == kOverlayDecision_Pending) {
     if (repeat) return;
-    if (nav == kMenuNav_Up || nav == kMenuNav_Down || nav == kMenuNav_Left || nav == kMenuNav_Right)
-      s_decision.accept_selected = !s_decision.accept_selected;
+    if (nav == kMenuNav_Up || nav == kMenuNav_Down || nav == kMenuNav_Left || nav == kMenuNav_Right) {
+      if(!s_decision.notice)s_decision.accept_selected = !s_decision.accept_selected;
+    }
     else if (nav == kMenuNav_Confirm) {
       s_decision.result = s_decision.accept_selected ? kOverlayDecision_Accepted : kOverlayDecision_Cancelled;
       SettingsOverlay_Close();
@@ -2703,11 +2719,11 @@ static void DrawDecision(const MenuLayout *layout) {
   DrawDialogPanel(layout, x, y, width, height);
   DrawWrappedSmallText(layout, x + 16, y + 12, Ui(s_decision.title),
                        (width - 32) / kDebugGlyphWidth, 2, kGameGold);
-  DrawWrappedSmallText(layout, x + 16, y + 36, Ui(s_decision.body),
+  DrawWrappedSmallText(layout, x + 16, y + 36, s_decision.body_text?s_decision.body:Ui(s_decision.body),
                        (width - 32) / kDebugGlyphWidth,
                        (height - 100) / kSmallLineHeight, kSteelBlue);
   const int choices_y = y + height - 48;
-  for (unsigned n = 0; n < 2; ++n) {
+  for (unsigned n = 0; n < (s_decision.notice?1u:2u); ++n) {
     const bool selected = s_decision.accept_selected == (n == 0);
     if (selected) FillLogicalRect(layout, x + 8, choices_y + n * 16 - 2, width - 16, 14, kPanel);
     DrawSmallText(layout, x + 16, choices_y + n * 16, selected ? ">" : " ", kSelectYellow);

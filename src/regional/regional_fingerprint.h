@@ -19,6 +19,10 @@ bool ArRegionalCosts_Fingerprint(const ArRegionalCostPolicy *requested,
 bool ArRegionalRules_Fingerprint(const ArRegionalRules *requested,
     const ArRegionalRules *effective,
     uint8_t out[32], bool *baseline);
+/* A decided JP/mixed final arrival must not become eligible again on replay.
+ * All-Western policy aliases preserve old replay identities. */
+bool ArRegionalArrivalLock_Fingerprint(const uint8_t previous[32],ArRegionalSource requested,
+    ArRegionalSource effective,bool locked,uint8_t out[32]);
 /* Retained generations can remain Japanese after requested/effective return
  * to US. Include their identity separately, just like retained lair history. */
 bool ArRegionalSimActors_Fingerprint(const uint8_t previous[32],const ArRegionalSimActors *actors,

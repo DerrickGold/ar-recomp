@@ -1,5 +1,6 @@
 #include "regional/regional_campaign.h"
 #include "host/campaign_identity.h"
+#include "snesrecomp/support/utf8_fs.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -185,6 +186,179 @@ static void Acknowledge(SaveFileFormat format) {
   Remove(path);
 }
 
+static void RecoveryCopy(SaveBackend backend) {
+  const char *native = "regional-recovery-test.srm", *ini = "regional-recovery-test.ini";
+  const char *path = backend == kSaveBackend_Ini ? ini : native;
+  const SaveFileFormat format = backend == kSaveBackend_Ini ? kSaveFileFormat_Ini : kSaveFileFormat_NativeSrm;
+  const char *folder = "regional-recovery-copy", *copy = "regional-recovery-copy/save.srm";
+  const char *copy_name = "regional-recovery-copy/save.srm.arname";
+  char name_path[256], journal_path[256];
+  snprintf(name_path, sizeof(name_path), "%s.arname", path);
+  snprintf(journal_path, sizeof(journal_path), "%s.archeckpoint", path);
+  Remove(native); Remove(ini); Remove(copy); remove(copy_name); REMOVE_DIR(folder);
+  remove(name_path);
+  uint8_t image[kActRaiserSramSize] = {0}, disk[kActRaiserSramSize], sequence = 0;
+  memcpy(image + 0x1439, "ELISE", 5);
+  Save_RecomputeChecksum(image);
+  SaveError error = {{0}};
+  CHECK(SaveSystem_Attach(image, sizeof(image), backend, native, ini, &error));
+  CHECK(!SaveSystem_CreateRecoveryCopy(folder, &error));
+  CHECK(!sr_path_exists(folder));
+  CHECK(Save_WriteFile(format, path, image, &error));
+  CHECK(SaveSystem_LoadActive(&error));
+  ArRegionalCampaign campaign;
+  ArRegionalCampaign_Init(&campaign, 0, Identity, &sequence);
+  SaveCommitHost host = ArRegionalCampaign_SaveHost(&campaign);
+  CHECK(SaveSystem_SetCommitHost(&host));
+  CHECK(ArRegionalCampaign_Continue(&campaign, path, image, &error));
+  ArRegionalCampaign before = campaign;
+  CHECK(SaveSystem_CreateRecoveryCopy(folder, &error));
+  CHECK(Save_LoadFile(kSaveFileFormat_NativeSrm, copy, disk, &error));
+  CHECK(!memcmp(disk, image, sizeof(disk)));
+  ArRegionalSession loaded;
+  CHECK(ArRegionalSession_Load(&loaded, 0, copy, disk, &error) == kSaveCheckpoint_Missing);
+  CHECK(!memcmp(&campaign, &before, sizeof(campaign)));
+  Remove(copy); CHECK(REMOVE_DIR(folder) == 0);
+
+  ArRegionalCostPolicy jp, eu;
+  ArRegionalCosts_Init(&jp, kArRegionalSource_Japan);
+  ArRegionalCosts_Init(&eu, kArRegionalSource_Europe);
+  CHECK(ArRegionalCampaign_NewGame(&campaign, &jp, &error));
+  CHECK(SaveSystem_SetLocalizedPlayerName("Élise", "ELISE"));
+  CHECK(!SaveSystem_CreateRecoveryCopy(folder, &error)); /* Unpersisted name. */
+  CHECK(SaveSystem_BeginNativeWrite(&error));
+  CHECK(!SaveSystem_CreateRecoveryCopy(folder, &error));
+  CHECK(SaveSystem_EndNativeWrite(true, &error));
+  CHECK(!SaveSystem_CreateRecoveryCopy(folder, &error)); /* Same SRAM, pending metadata. */
+  CHECK(!sr_path_exists(folder));
+  CHECK(SaveSystem_WriteActive(&error));
+  ArRegionalSession saved = campaign.active;
+  CHECK(ArRegionalCampaign_NewGame(&campaign, &eu, &error));
+  before = campaign;
+  CHECK(SaveSystem_CreateRecoveryCopy(folder, &error));
+  CHECK(!memcmp(&campaign, &before, sizeof(campaign)));
+  CHECK(Save_LoadFile(kSaveFileFormat_NativeSrm, copy, disk, &error));
+  CHECK(!memcmp(disk, image, sizeof(disk)));
+  CHECK(ArRegionalSession_Load(&loaded, 0, copy, disk, &error) == kSaveCheckpoint_Ready);
+  CHECK(!memcmp(&loaded, &saved, sizeof(loaded))); /* Not the unsaved EU campaign. */
+  CHECK(!SaveSystem_CreateRecoveryCopy(folder, &error)); /* Never overwrite. */
+  CHECK(SaveSystem_CopyDurableImage(disk) && !memcmp(disk, image, sizeof(disk)));
+  CHECK(Save_LoadFile(format, path, disk, &error) && !memcmp(disk, image, sizeof(disk)));
+
+  /* Cold-load the recovery using the normal codec: native-compatible bytes,
+   * regional identity/policies, and Unicode name all round-trip together. */
+  CHECK(SaveSystem_Attach(disk, sizeof(disk), kSaveBackend_NativeSrm,
+                         copy, "regional-recovery-copy/unused.ini", &error));
+  CHECK(SaveSystem_LoadActive(&error));
+  char name[64];
+  CHECK(SaveSystem_CopyLocalizedPlayerName("ELISE", name, sizeof(name)));
+  CHECK(!strcmp(name, "Élise"));
+  CHECK(ArRegionalCampaign_Continue(&campaign, copy, disk, &error));
+  CHECK(!memcmp(&campaign.active, &saved, sizeof(saved)));
+  Remove(copy); remove(copy_name); CHECK(REMOVE_DIR(folder) == 0);
+
+  CHECK(SaveSystem_Attach(image, sizeof(image), backend, native, ini, &error));
+  CHECK(SaveSystem_LoadActive(&error));
+  CHECK(SaveSystem_SetCommitHost(&host));
+  /* Session-only or external image edits cannot silently become the recovery. */
+  image[123] ^= 1; Save_RecomputeChecksum(image); SaveSystem_ResyncShadow();
+  CHECK(!SaveSystem_CreateRecoveryCopy(folder, &error));
+  CHECK(!sr_path_exists(folder));
+  CHECK(SaveSystem_LoadActive(&error));
+  memcpy(disk, image, sizeof(disk)); disk[0x1ff0] ^= 1;
+  CHECK(Save_WriteFile(format, path, disk, &error));
+  CHECK(!SaveSystem_CreateRecoveryCopy(folder, &error));
+  CHECK(!sr_path_exists(folder));
+  CHECK(Save_WriteFile(format, path, image, &error));
+  SaveCommitHost unsupported = host; unsupported.copy_recovery = NULL;
+  CHECK(SaveSystem_SetCommitHost(&unsupported));
+  CHECK(!SaveSystem_CreateRecoveryCopy(folder, &error));
+  CHECK(!sr_path_exists(folder));
+  CHECK(SaveSystem_SetCommitHost(&host));
+
+  /* A damaged source companion must not produce an apparently complete SRAM
+   * recovery or change the source/live session. Partial directory is retained. */
+  FILE *bad = fopen(journal_path, "wb");
+  CHECK(bad != NULL);
+  if (bad) { CHECK(fputs("broken", bad) >= 0); CHECK(fclose(bad) == 0); }
+  before = campaign;
+  CHECK(!SaveSystem_CreateRecoveryCopy(folder, &error));
+  CHECK(sr_path_is_directory(folder) && !sr_path_exists(copy));
+  CHECK(sr_path_exists(copy_name)); /* Name is durable before native image. */
+  CHECK(!memcmp(&campaign, &before, sizeof(campaign)));
+  CHECK(Save_LoadFile(format, path, disk, &error) && !memcmp(disk, image, sizeof(disk)));
+  CHECK(!SaveSystem_CreateRecoveryCopy(folder, &error));
+  remove(copy_name); CHECK(REMOVE_DIR(folder) == 0);
+  Remove(native); Remove(ini); remove(name_path);
+}
+
+static void StorySnapshot(SaveBackend backend) {
+  const char *native="regional-snapshot-test.srm", *ini="regional-snapshot-test.ini";
+  const char *path=backend==kSaveBackend_Ini?ini:native;
+  const SaveFileFormat format=backend==kSaveBackend_Ini?kSaveFileFormat_Ini:kSaveFileFormat_NativeSrm;
+  Remove(native); Remove(ini);
+  char blocked[256], name_path[256];
+  snprintf(name_path,sizeof(name_path),"%s.arname",path); remove(name_path);
+  uint8_t live[kActRaiserSramSize]={0}, candidate[kActRaiserSramSize], disk[kActRaiserSramSize], old[kActRaiserSramSize];
+  uint8_t sequence=0;
+  memcpy(live+0x1439,"ELISE",5); Save_RecomputeChecksum(live);
+  memcpy(old,live,sizeof(old)); memcpy(candidate,live,sizeof(candidate));
+  candidate[99]=73; Save_RecomputeChecksum(candidate);
+  SaveError error={{0}};
+  CHECK(SaveSystem_Attach(live,sizeof(live),backend,native,ini,&error));
+  CHECK(Save_WriteFile(format,path,live,&error) && SaveSystem_LoadActive(&error));
+  ArRegionalCampaign campaign; ArRegionalCampaign_Init(&campaign,0,Identity,&sequence);
+  SaveCommitHost host=ArRegionalCampaign_SaveHost(&campaign);
+  CHECK(SaveSystem_SetCommitHost(&host));
+  CHECK(SaveSystem_CommitStorySnapshot(candidate,&error)==kSaveStorySnapshot_NotCommitted);
+  CHECK(!memcmp(live,old,sizeof(live)));
+  ArRegionalCostPolicy jp; ArRegionalCosts_Init(&jp,kArRegionalSource_Japan);
+  CHECK(ArRegionalCampaign_NewGame(&campaign,&jp,&error));
+  CHECK(SaveSystem_SetLocalizedPlayerName("Élise","ELISE"));
+  CHECK(SaveSystem_BeginNativeWrite(&error));
+  CHECK(SaveSystem_CommitStorySnapshot(candidate,&error)==kSaveStorySnapshot_NotCommitted);
+  CHECK(SaveSystem_EndNativeWrite(true,&error));
+  CHECK(SaveSystem_CommitStorySnapshot(candidate,&error)==kSaveStorySnapshot_NotCommitted);
+  CHECK(SaveSystem_WriteActive(&error));
+  CHECK(!campaign.pending_valid);
+  const ArRegionalCampaign before=campaign;
+  candidate[0]^=1;
+  CHECK(SaveSystem_CommitStorySnapshot(candidate,&error)==kSaveStorySnapshot_NotCommitted);
+  candidate[0]^=1;
+  CHECK(SaveSystem_CommitStorySnapshot(NULL,&error)==kSaveStorySnapshot_NotCommitted);
+  CHECK(SaveSystem_CommitStorySnapshot(live,&error)==kSaveStorySnapshot_NotCommitted);
+  /* Fail after journal staging, before native replacement. A cold read still
+   * chooses the original image. No pending snapshot or live/shadow mutation. */
+  snprintf(blocked,sizeof(blocked),"%s.tmp",path); CHECK(MAKE_DIR(blocked)==0);
+  CHECK(SaveSystem_CommitStorySnapshot(candidate,&error)==kSaveStorySnapshot_NotCommitted);
+  CHECK(!memcmp(live,old,sizeof(live)) && !memcmp(&campaign,&before,sizeof(campaign)));
+  CHECK(SaveSystem_CopyDurableImage(disk) && !memcmp(disk,old,sizeof(disk)));
+  CHECK(Save_LoadFile(format,path,disk,&error) && !memcmp(disk,old,sizeof(disk)));
+  ArRegionalSession loaded;
+  CHECK(ArRegionalSession_Load(&loaded,0,path,disk,&error)==kSaveCheckpoint_Ready);
+  CHECK(!memcmp(&loaded,&campaign.active,sizeof(loaded)));
+  CHECK(REMOVE_DIR(blocked)==0);
+  /* Name failure is explicitly post-commit. Retrying auto-persistence must
+   * repair only the companion, not run conversion or revert campaign data. */
+  snprintf(blocked,sizeof(blocked),"%s.arname.tmp",path); CHECK(MAKE_DIR(blocked)==0);
+  CHECK(SaveSystem_CommitStorySnapshot(candidate,&error)==kSaveStorySnapshot_NamePending);
+  CHECK(!memcmp(live,candidate,sizeof(live)) && !memcmp(&campaign,&before,sizeof(campaign)));
+  CHECK(SaveSystem_CopyDurableImage(disk) && !memcmp(disk,candidate,sizeof(disk)));
+  CHECK(Save_LoadFile(format,path,disk,&error) && !memcmp(disk,candidate,sizeof(disk)));
+  CHECK(ArRegionalSession_Load(&loaded,0,path,disk,&error)==kSaveCheckpoint_Ready);
+  CHECK(!memcmp(&loaded,&campaign.active,sizeof(loaded)));
+  CHECK(REMOVE_DIR(blocked)==0 && SaveSystem_AutoPersistIfChanged(&error));
+  CHECK(SaveSystem_LoadActive(&error));
+  char name[64]; CHECK(SaveSystem_CopyLocalizedPlayerName("ELISE",name,sizeof(name)) && !strcmp(name,"Élise"));
+  /* Semantic snapshots cannot overwrite a newer external image. */
+  CHECK(ArRegionalCampaign_Continue(&campaign,path,live,&error));
+  disk[5]^=1; Save_RecomputeChecksum(disk); CHECK(Save_WriteFile(format,path,disk,&error));
+  CHECK(SaveSystem_CommitStorySnapshot(old,&error)==kSaveStorySnapshot_NotCommitted);
+  CHECK(!memcmp(live,candidate,sizeof(live)));
+  CHECK(Save_LoadFile(format,path,old,&error) && !memcmp(old,disk,sizeof(old)));
+  Remove(native); Remove(ini); remove(name_path);
+}
+
 int main(void) {
   uint8_t a[16], b[16];
   CHECK(HostCampaignIdentity_Create(NULL, a));
@@ -194,5 +368,7 @@ int main(void) {
   CHECK(!HostCampaignIdentity_Create(NULL, NULL));
   Run(kSaveBackend_NativeSrm); Run(kSaveBackend_Ini);
   Acknowledge(kSaveFileFormat_NativeSrm); Acknowledge(kSaveFileFormat_Ini);
+  RecoveryCopy(kSaveBackend_NativeSrm); RecoveryCopy(kSaveBackend_Ini);
+  StorySnapshot(kSaveBackend_NativeSrm); StorySnapshot(kSaveBackend_Ini);
   return failures ? 1 : 0;
 }

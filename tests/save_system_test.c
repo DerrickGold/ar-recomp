@@ -606,6 +606,39 @@ static void TestNativeWriteBoundary(SaveBackend backend) {
   remove(native); remove(ini);
 }
 
+static void TestRecoveryWithoutFeatureHost(void) {
+  const char *path = "actraiser-recovery-test.srm";
+  const char *directory = "actraiser-recovery-test-copy";
+  const char *copy = "actraiser-recovery-test-copy/save.srm";
+  uint8_t live[kActRaiserSramSize], original[kActRaiserSramSize], disk[kActRaiserSramSize];
+  MakeFixture(live); memcpy(original, live, sizeof(live));
+  SaveError error = {{0}};
+  CHECK(SaveSystem_Attach(live, sizeof(live), kSaveBackend_NativeSrm,
+                         path, "unused-recovery-test.ini", &error));
+  CHECK(SaveSystem_WriteActive(&error));
+  CHECK(!SaveSystem_CreateRecoveryCopy(NULL, &error));
+  CHECK(!SaveSystem_CreateRecoveryCopy("", &error));
+  char long_path[600]; memset(long_path, 'x', sizeof(long_path)); long_path[599] = 0;
+  CHECK(!SaveSystem_CreateRecoveryCopy(long_path, &error));
+  CHECK(SaveSystem_CreateRecoveryCopy(directory, &error));
+  CHECK(Save_LoadFile(kSaveFileFormat_NativeSrm, copy, disk, &error));
+  CHECK(!memcmp(disk, original, sizeof(disk)));
+  CHECK(!SaveSystem_CreateRecoveryCopy(directory, &error));
+  /* Aborted native saves remain blocked even if the checksum is repaired. */
+  CHECK(SaveSystem_BeginNativeWrite(&error));
+  CHECK(!SaveSystem_EndNativeWrite(false, &error));
+  CHECK(!SaveSystem_CreateRecoveryCopy("actraiser-recovery-must-not-exist", &error));
+  CHECK(!memcmp(live, original, sizeof(live)));
+  CHECK(SaveSystem_CopyDurableImage(disk) && !memcmp(disk, original, sizeof(disk)));
+  remove(copy);
+#ifdef _WIN32
+  CHECK(_rmdir(directory) == 0);
+#else
+  CHECK(rmdir(directory) == 0);
+#endif
+  remove(path);
+}
+
 int main(void) {
   TestChecksumAndFields();
   TestNativeAndIniCodecs();
@@ -615,6 +648,7 @@ int main(void) {
   TestNativeWriteBoundary(kSaveBackend_Ini);
   TestLocalizedNameExtension(kSaveBackend_NativeSrm);
   TestLocalizedNameExtension(kSaveBackend_Ini);
+  TestRecoveryWithoutFeatureHost();
   if (s_failures) {
     fprintf(stderr, "save system tests: %d failure(s)\n", s_failures);
     return 1;

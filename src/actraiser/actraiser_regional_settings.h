@@ -30,6 +30,9 @@ typedef enum ActRaiserRegionalSettingGroup {
   kActRaiserRegionalSetting_LevelGoals,
   kActRaiserRegionalSetting_SimCombat,
   kActRaiserRegionalSetting_SimAi,
+  kActRaiserRegionalSetting_Construction,
+  kActRaiserRegionalSetting_Population,
+  kActRaiserRegionalSetting_Arrival,
   kActRaiserRegionalSetting_Count,
 } ActRaiserRegionalSettingGroup;
 
@@ -44,6 +47,9 @@ typedef struct ActRaiserRegionalRulesView {
   bool miracle_in_progress;
   bool lair_history_ready;
   bool lair_reload_ready;
+  bool population_pending;
+  ArRegionalSource pending_population;
+  bool arrival_locked;
 } ActRaiserRegionalRulesView;
 
 typedef enum ActRaiserRegionalEditResult {
@@ -53,13 +59,17 @@ typedef enum ActRaiserRegionalEditResult {
   kActRaiserRegionalEdit_Unchanged,
   kActRaiserRegionalEdit_Applied,
   kActRaiserRegionalEdit_HistoryUnavailable,
+  kActRaiserRegionalEdit_Deferred,
+  kActRaiserRegionalEdit_Incompatible,
 } ActRaiserRegionalEditResult;
 
 /* False until an accepted New Game/Continue, without modifying output. */
 bool ActRaiserRegional_CopyRulesView(ActRaiserRegionalRulesView *out);
 /* The view's campaign/revision identifies the requested edit; its editable
  * and policy fields are display data, not authority. Validate again on apply.
- * Changes persist with the next completed native story save. */
+ * Ordinary changes persist with the next completed native story save.
+ * Population queues only a volatile request; the Palace owner confirms and
+ * commits it with its recovery copy and compatible goal changes. */
 ActRaiserRegionalEditResult ActRaiserRegional_RequestRules(
     const ActRaiserRegionalRulesView *view, ActRaiserRegionalSettingGroup group,
     ArRegionalSource source);

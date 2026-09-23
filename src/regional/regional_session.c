@@ -29,7 +29,10 @@ enum { kHeaderBytes = 36, kPayloadCapacity = kSaveCheckpointPayloadMax,
        kV22RecordCount = kV21RecordCount + kArRegionalTownStatus_Count,
        kV23RecordCount = kV22RecordCount + 1,
        kV24RecordCount = kV23RecordCount + kArRegionalSimCombat_Count,
-       kRecordCount = kV24RecordCount + kArRegionalSimAi_Count };
+       kV25RecordCount = kV24RecordCount + kArRegionalSimAi_Count,
+       kV26RecordCount = kV25RecordCount + 1,
+       kV27RecordCount = kV26RecordCount + kArRegionalSupport_Count,
+       kRecordCount = kV27RecordCount + 1 };
 _Static_assert(kArRegionalCostRule_Count == 9 && kArRegionalTimerRule_Count == 6,
                "extend the legacy record mapping explicitly when adding family leaves");
 _Static_assert(kArRegionalDevelopmentRule_Count == 3,"version5 has three development leaves");
@@ -66,7 +69,14 @@ static bool Valid(const ArRegionalSession *session) {
   unsigned pending_projection, active_projection;
   if (!ArRegionalLairAccounting_Projection(&requested,&pending_projection) ||
       !ArRegionalLairAccounting_Projection(&effective,&active_projection)) return false;
-  return has_id && ArRegionalCosts_Resolve(&session->requested.costs, &unused) &&
+  return has_id && ArRegionalArrival_Resolve(session->requested.arrival,&unused_level) &&
+      ArRegionalArrival_Resolve(session->effective.arrival,&unused_level) &&
+      ArRegionalRules_PopulationCompatible(&session->requested) &&
+      ArRegionalRules_PopulationCompatible(&session->effective) &&
+      !memcmp(&session->requested.support,&session->effective.support,sizeof(session->requested.support)) &&
+      ArRegionalCosts_Resolve(&session->requested.costs, &unused) &&
+      ArRegionalConstruction_Resolve(session->requested.construction,&unused_level) &&
+      ArRegionalConstruction_Resolve(session->effective.construction,&unused_level) &&
       ArRegionalSimAi_Resolve(&session->requested.sim_ai,&unused_ai) &&
       ArRegionalSimAi_Resolve(&session->effective.sim_ai,&unused_ai) &&
       ArRegionalSimCombat_Resolve(&session->requested.sim_combat,&unused_combat) &&
@@ -386,9 +396,42 @@ bool ArRegionalSession_BeginQuake(ArRegionalSession *session, ArRegionalQuakeSna
   return true;
 }
 
+bool ArRegionalSession_RequestArrival(ArRegionalSession *session,uint32_t revision,ArRegionalSource source) {
+  bool unused;
+  if(!Valid(session) || revision!=session->revision || !ArRegionalArrival_Resolve(source,&unused))return false;
+  if(session->requested.arrival==source)return true;
+  if(session->revision==UINT32_MAX)return false;
+  session->requested.arrival=source;++session->revision;return true;
+}
+bool ArRegionalSession_BeginArrival(ArRegionalSession *session,bool continuing,bool *japanese) {
+  if(!japanese || !Valid(session))return false;
+  if(!session->arrival_locked) {
+    if(session->revision==UINT32_MAX)return false;
+    if(!continuing)session->effective.arrival=session->requested.arrival;
+    session->arrival_locked=true;++session->revision;
+  }
+  return ArRegionalArrival_Resolve(session->effective.arrival,japanese);
+}
+
+bool ArRegionalSession_SetPopulationProfile(ArRegionalSession *session,uint32_t revision,ArRegionalSource source) {
+  if (!Valid(session) || session->revision!=revision || (unsigned)source>=kArRegionalSource_Count) return false;
+  ArRegionalRules requested=session->requested, effective=session->effective;
+  ArRegionalSupport_Init(&requested.support,source);
+  effective.support=requested.support;
+  requested.level_goals=effective.level_goals=source;
+  requested.story.source[kArRegionalStory_FillmoreHint]=effective.story.source[kArRegionalStory_FillmoreHint]=source;
+  requested.story.source[kArRegionalStory_KasandoraTablet]=effective.story.source[kArRegionalStory_KasandoraTablet]=source;
+  if (!memcmp(&requested,&session->requested,sizeof(requested)) &&
+      !memcmp(&effective,&session->effective,sizeof(effective))) return true;
+  if (session->revision==UINT32_MAX) return false;
+  session->requested=requested;session->effective=effective;++session->revision;return true;
+}
+
 bool ArRegionalSession_RequestLevelGoals(ArRegionalSession *session,uint32_t revision,ArRegionalSource source) {
   bool unused;
   if (!Valid(session) || revision!=session->revision || !ArRegionalLevelGoals_Resolve(source,&unused)) return false;
+  ArRegionalRules candidate=session->requested;candidate.level_goals=source;
+  if (!ArRegionalRules_PopulationCompatible(&candidate)) return false;
   if (session->requested.level_goals==source) return true;
   if (session->revision==UINT32_MAX) return false;
   session->requested.level_goals=source;++session->revision;return true;
@@ -423,9 +466,31 @@ bool ArRegionalSession_BeginTownStatus(ArRegionalSession *session, ArRegionalTow
   *snapshot=next; return true;
 }
 
+bool ArRegionalSession_RequestConstruction(ArRegionalSession *session, uint32_t revision, ArRegionalSource source) {
+  if (!Valid(session) || revision != session->revision || (unsigned)source >= kArRegionalSource_Count) return false;
+  if (session->requested.construction == source) return true;
+  if (session->revision == UINT32_MAX) return false;
+  session->requested.construction = source;
+  ++session->revision;
+  return true;
+}
+bool ArRegionalSession_BeginConstruction(ArRegionalSession *session, bool *japanese) {
+  if (!japanese || !Valid(session)) return false;
+  const bool changed = session->requested.construction != session->effective.construction;
+  if (changed && session->revision == UINT32_MAX) return false;
+  bool next;
+  if (!ArRegionalConstruction_Resolve(session->requested.construction, &next)) return false;
+  session->effective.construction = session->requested.construction;
+  if (changed) ++session->revision;
+  *japanese = next;
+  return true;
+}
+
 bool ArRegionalSession_RequestStory(ArRegionalSession *session, uint32_t revision, const ArRegionalStoryPolicy *policy) {
   ArRegionalStorySnapshot unused;
   if (!Valid(session) || revision!=session->revision || !ArRegionalStory_Resolve(policy,&unused)) return false;
+  ArRegionalRules candidate=session->requested;candidate.story=*policy;
+  if (!ArRegionalRules_PopulationCompatible(&candidate)) return false;
   if (!memcmp(policy,&session->requested.story,sizeof(*policy))) return true;
   if (session->revision==UINT32_MAX) return false;
   session->requested.story=*policy; ++session->revision; return true;
@@ -626,6 +691,18 @@ bool ArRegionalSession_BeginSimActor(ArRegionalSession *session,unsigned town,un
 /* The wire shape is shared, not the units: stable keys select the descriptor
  * for resource counts, initial BCD times, booleans or town service counts. */
 static const char *Record(unsigned i, const uint16_t **values) {
+  if(i==kV27RecordCount) {
+    const ArRegionalArrivalDescriptor *desc=ArRegionalArrival_Descriptor();
+    *values=desc->japanese;return desc->key;
+  }
+  if (i>=kV26RecordCount) {
+    const ArRegionalSupportDescriptor *desc=ArRegionalSupport_Descriptor((ArRegionalSupportRule)(i-kV26RecordCount));
+    *values=desc->amount;return desc->key;
+  }
+  if (i==kV25RecordCount) {
+    const ArRegionalConstructionDescriptor *desc=ArRegionalConstruction_Descriptor();
+    *values=desc->japanese;return desc->key;
+  }
   if (i>=kV24RecordCount) {
     const ArRegionalSimAiDescriptor *desc=ArRegionalSimAi_Descriptor((ArRegionalSimAiRule)(i-kV24RecordCount));
     *values=desc->value;return desc->key;
@@ -743,6 +820,10 @@ static const char *Record(unsigned i, const uint16_t **values) {
 }
 
 static ArRegionalSource RecordSource(const ArRegionalSession *session, unsigned i, bool requested) {
+  if(i==kV27RecordCount)return requested?session->requested.arrival:session->effective.arrival;
+  if (i>=kV26RecordCount) return requested?session->requested.support.source[i-kV26RecordCount]:
+      session->effective.support.source[i-kV26RecordCount];
+  if (i==kV25RecordCount) return requested?session->requested.construction:session->effective.construction;
   if (i>=kV24RecordCount) return requested?session->requested.sim_ai.source[i-kV24RecordCount]:
       session->effective.sim_ai.source[i-kV24RecordCount];
   if (i>=kV23RecordCount) return requested?session->requested.sim_combat.source[i-kV23RecordCount]:
@@ -821,7 +902,7 @@ static bool Encode(const ArRegionalSession *session, uint8_t *out, size_t *size)
   if (!Valid(session)) return false;
   memset(out, 0, kHeaderBytes);
   memcpy(out, kMagic, sizeof(kMagic));
-  ByteOrder_WriteLe16(out + 8, 25);
+  ByteOrder_WriteLe16(out + 8, 28);
   ByteOrder_WriteLe16(out + 10, kRecordCount);
   ByteOrder_WriteLe32(out + 12, session->slot);
   memcpy(out + 16, session->campaign, 16);
@@ -848,7 +929,10 @@ static bool Encode(const ArRegionalSession *session, uint8_t *out, size_t *size)
   if (!ArRegionalLairReloads_Encode(&session->reloads,out+offset,kPayloadCapacity-offset)) return false;
   offset += kArRegionalLairReloadEncodedBytes;
   if (!ArRegionalSimActors_Encode(&session->sim_actors,out+offset,kPayloadCapacity-offset)) return false;
-  *size = offset + kArRegionalSimActorsEncodedBytes;
+  offset+=kArRegionalSimActorsEncodedBytes;
+  if(kPayloadCapacity-offset<9)return false;
+  memcpy(out+offset,"ARARRIV1",8);out[offset+8]=session->arrival_locked;
+  *size=offset+9;
   return true;
 }
 
@@ -863,7 +947,7 @@ static SaveCheckpointStatus Decode(const uint8_t *bytes, size_t size, ArRegional
   const bool pricing_only = !memcmp(bytes, kPriceMagic, sizeof(kPriceMagic));
   if (!pricing_only && memcmp(bytes, kMagic, sizeof(kMagic))) return kSaveCheckpoint_Invalid;
   const unsigned version = ByteOrder_ReadLe16(bytes + 8);
-  if (version < 1 || version > (pricing_only ? 1u : 25u)) return kSaveCheckpoint_Unsupported;
+  if (version < 1 || version > (pricing_only ? 1u : 28u)) return kSaveCheckpoint_Unsupported;
   const unsigned count = pricing_only ? kArRegionalCostRule_Count :
       version == 1 ? kV1RecordCount : version == 2 ? kV2RecordCount :
       version == 3 ? kV3RecordCount : version == 4 ? kV4RecordCount :
@@ -876,7 +960,8 @@ static SaveCheckpointStatus Decode(const uint8_t *bytes, size_t size, ArRegional
       version == 18 ? kV18RecordCount : version == 19 ? kV19RecordCount :
       version == 20 ? kV20RecordCount : version == 21 ? kV21RecordCount :
       version == 22 ? kV22RecordCount : version == 23 ? kV23RecordCount :
-      version == 24 ? kV24RecordCount : kRecordCount;
+      version == 24 ? kV24RecordCount : version == 25 ? kV25RecordCount :
+      version == 26 ? kV26RecordCount : version == 27 ? kV27RecordCount : kRecordCount;
   if (ByteOrder_ReadLe16(bytes + 10) != count) return kSaveCheckpoint_Unsupported;
   ArRegionalSession next = {.slot = ByteOrder_ReadLe32(bytes + 12), .revision = ByteOrder_ReadLe32(bytes + 32)};
   memcpy(next.campaign, bytes + 16, sizeof(next.campaign));
@@ -904,7 +989,14 @@ static SaveCheckpointStatus Decode(const uint8_t *bytes, size_t size, ArRegional
       return kSaveCheckpoint_Unsupported;
     if (values[requested] != ByteOrder_ReadLe16(bytes + offset + 4) ||
         values[effective] != ByteOrder_ReadLe16(bytes + offset + 6)) return kSaveCheckpoint_Unsupported;
-    if (rule>=kV24RecordCount) {
+    if (rule==kV27RecordCount) {
+      next.requested.arrival=requested;next.effective.arrival=effective;
+    } else if (rule>=kV26RecordCount) {
+      next.requested.support.source[rule-kV26RecordCount]=requested;
+      next.effective.support.source[rule-kV26RecordCount]=effective;
+    } else if (rule==kV25RecordCount) {
+      next.requested.construction=requested;next.effective.construction=effective;
+    } else if (rule>=kV24RecordCount) {
       next.requested.sim_ai.source[rule-kV24RecordCount]=requested;
       next.effective.sim_ai.source[rule-kV24RecordCount]=effective;
     } else if (rule>=kV23RecordCount) {
@@ -987,7 +1079,14 @@ static SaveCheckpointStatus Decode(const uint8_t *bytes, size_t size, ArRegional
       offset+=reload_size;
       if (version>=24) {
         if (size-offset>=8 && !memcmp(bytes+offset,"ARSIMAC",7) && bytes[offset+7]!=(version==24?'1':'2')) return kSaveCheckpoint_Unsupported;
-        if (!ArRegionalSimActors_Decode(bytes+offset,size-offset,&next.sim_actors)) return kSaveCheckpoint_Invalid;
+        const size_t actors_size=version>=28?kArRegionalSimActorsEncodedBytes:size-offset;
+        if (actors_size>size-offset || !ArRegionalSimActors_Decode(bytes+offset,actors_size,&next.sim_actors)) return kSaveCheckpoint_Invalid;
+        offset+=actors_size;
+        if(version>=28) {
+          if(size-offset>=8 && !memcmp(bytes+offset,"ARARRIV",7) && bytes[offset+7]!='1')return kSaveCheckpoint_Unsupported;
+          if(size-offset!=9 || memcmp(bytes+offset,"ARARRIV1",8) || bytes[offset+8]>1)return kSaveCheckpoint_Invalid;
+          next.arrival_locked=bytes[offset+8]!=0;
+        }
       }
     }
   } else if (offset != size) return kSaveCheckpoint_Invalid;

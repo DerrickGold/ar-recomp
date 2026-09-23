@@ -614,15 +614,38 @@ either census preserves every record and returns population74, with support
 64/32 respectively. This proves the local contracts, not natural construction
 reachability, maximum town populations or an implemented live-switch feature.
 
-The existing `ActRaiser_TownCensus` HLE is the integration owner. Extend its
-support coefficients, including completed extension bridges (32 US /16 JP),
-rather than introducing a second town model. The census itself preserves
+`ActRaiser_TownCensus` remains the integration owner, now separated into
+`actraiser_town_census.c`. Its parameterized body accepts five support
+coefficients, including completed extension bridges (32 US /16 JP), while
+the bridge owner supplies validation and deduplication. The live entry resolves
+the campaign's effective support policy; only confirmed redevelopment may change
+that policy. Mixed-profile
+tests cover every structure flag byte, and 6,144 US/JP ROM-decoded census cases
+verify the native register/scratch/output contract. The census itself preserves
 standing structures, the adjustment word US `$7F:9F57+2N` / JP
 `$7F:9F4B+2N`, and earned levels.
 Towns with no act completion skip census output stores; retain that gate.
 The decoded US references to the adjustment are census plus save/restore;
 they do not establish its full initialization/indirect-write lifecycle or a
 separate regional adjustment rule. Do not reset it based on that limited scan.
+
+The custom Recomp conversion uses `$01:85A2`, after Palace intro/arrival/event
+processing and native `$03:8168` actor-cache retirement, before the next
+`$01:8B7D` selector. It is not a native regional earthquake variant. It preserves
+road/development lists `$7F:9250`, town construction timers and protected records,
+retires removed current-town visual slots and the seven `$7F:9758` queue IDs,
+and lets normal `$03:9D4D` town entry rebuild the display. No synthetic native
+call or hidden town update is required to create the recovery image.
+
+Empty-town population must remain positive: `$03:807F` treats zero as a new
+town and initializes population2 and civilization1. Conversion therefore
+rejects a developed town's adjustment of2 or more instead of resetting that
+adjustment or letting subtraction underflow. Its rebuilding allowance is a
+bounded reserve floor, not additive destruction credit: native offscreen
+construction does not debit growth, so repeated additive refunds could be
+farmed. The floor covers removed houses at the selected construction price,
+or one start in a support-only town; larger existing reserves remain.
+Player behavior and recovery are described in [Regional settings](regional-settings.md#population-rules-and-rebuilding).
 
 Refresh order is explicit at US `$03:829E–82A6` / JP `$03:8292–829A`:
 census, total-population refresh, then level-award wrapper. The total helper
@@ -664,6 +687,60 @@ implementation and validation. Do not charge ordinary miracle SP or trigger
 ordinary lair/house-loss rewards merely for conversion. This is not an
 original regional mechanic or an implemented feature. Neither a fixed cap
 nor a proof of every published population maximum is required for it.
+
+The bounded redevelopment mutation core now preflights all affected towns
+before writing any of them. Its removable allowlist is active classes0/2/3/4;
+bridges and classes5/6 remain. Matching one-cell/2×2 marks become `$08`, and
+the retired record's flags byte becomes zero, matching the non-reward portion
+of native action7 (`$03:A44F` for houses, `$03:A477` for support buildings).
+It rejects inconsistent/overlapping footprints, unsupported classes, pending
+structure actions and a bias that would make the emptied census underflow.
+Initialized action0 is not inherently busy: `$03:A004` latches bit7, and many
+completed buildings remain in that state. This bit does not certify completion
+of the separate visual program; that owner still needs a safe retirement boundary.
+
+US construction charges `2*civilization+2` growth units per new structure,
+including support buildings. `$03:8529` computes up to six affordable starts;
+`$03:8422–8438` debits one such cost when the animated construction starts.
+The custom core grants a reconstruction allowance for the houses actually
+removed, using the selected construction price. Support buildings receive no
+per-record credit: native visible construction returns their price at
+completion. If a support-only reset would leave less than one start available,
+the allowance tops up only that missing amount. It is not a reconstruction of
+historical spending and invokes no ordinary house-loss rewards. Reapplying the
+same preview is rejected; a fresh preview of the empty town grants no credit.
+1,344 original-CPU checks cover budgeting, payment and support-return slices,
+off-screen placement, and US action7 retirement with native redraw suppression. These bounded checks and
+read-only previews of recorded developed towns are not a live redevelopment
+or a demonstration of reconstruction. The switch remains unavailable until
+checkpoint, quiescence/redraw, persistence, confirmation and rebuild acceptance
+are integrated.
+
+Japan uses a fixed four-unit cost instead: batch budgeting at `$03:84F2–851A`
+subtracts4 up to six times, and the construction payment at `$03:8400–840C`
+debits4. This is a separate gameplay rule from the low-growth *report* threshold
+already selectable in Recomp. Recomp now pins the independent construction
+selection across `$03:82DB` (visible batch) and `$03:84B9` (off-screen batch),
+composing the existing town-status transaction without merging their settings.
+Three prefixes substitute the fixed four-unit price: `$853B→8544` for budgeting,
+`$8425→842E` for payment, and `$848E→8497` for the support-building return.
+They preserve the original frames and native continuations; US/Europe retain
+the original expressions. A change during a batch waits for the next batch.
+Predecessors and loop-back targets have explicit generated roots; adding a
+conditional prefix alone otherwise permits old arithmetic to remain inlined.
+A 12,532-tick Continue/Fillmore comparison exercises23 visible payments:
+eight units each in US mode, four with Japanese pricing. US final WRAM/SRAM
+matches the pre-integration control byte-for-byte; both runs exit normally.
+
+US/Europe support return `$848A–849B` explicitly clears carry during price
+calculation. Japan `$845E–8464` loads4 without clearing carry before its growth
+helper. Checks with both carry inputs produce4/5 in Japan and4/6/8 in the
+Western versions; the replacement preserves this distinction rather than
+inventing `growth += 4`. Off-screen house callbacks (US `$95B3`, JP `$939E`)
+and Western support callback `$944B` consume the start token without debiting
+growth. The off-screen selection changes affordability, not that native
+accounting asymmetry. Unchanged policy snapshots resolve only their small
+value fields; complete retained-history validation runs when a policy changes.
 
 The US full-development scan `$03:C037–C071` is also not a maximum-population
 formula: it returns carry set only after all128 records are active and every
@@ -2696,6 +2773,31 @@ Both incomplete-town controls return to Northwall without unlocking Death
 Heim. Both completed routes retain the island on a later map visit and do not
 repeat the announcement. Fourteen isolated guard cases additionally verify
 the already-announced return and every incomplete-town position.
+
+The host's I06 adapters now join those owners at `$00:A343` and `$01:861E`.
+Alternate `$A315/$A32A/$A337` generated entries terminate at the departure
+boundary. The US route delegates both bodies; Japan reproduces the town-return
+leaf and Palace guard, then uses the US message/cleanup suffix. Departure
+retains word-wide completion comparisons, while the JP Palace guard retains
+byte-wide comparisons and native X/Y/flag clobbers. There are no score,
+reward, background-asset or music-upload overrides in this controller.
+
+A campaign route lock is captured at the eligible final departure, before a
+possible town save. An already-unlocked legacy event retains its effective
+route. Later settings requests cannot change that transaction or clear native
+story bits. The lock is separate from those native bits and is included in
+the regional companion/replay identity. It is not a persistent command to
+replay the transition.
+
+Controller coverage includes 336 source/flag/incomplete-town/current-town
+cases, plus all native escape tokens and delayed-setting cases. Another 336
+optional original-JP-ROM differential cases compare both translated fragments;
+the announcement body deliberately remains delegated. A production-runtime
+scratch-save control with six completed acts and no unlock bits reaches the
+Palace through native Continue/navigation: JP announces once and sets bits
+0/1; the matching US control leaves them clear. This controlled eligibility
+fixture does not claim a natural final-boss kill. Full reveal choreography
+retains the native body documented below.
 
 The US-only presentation is mapped separately from those persistent flags:
 
