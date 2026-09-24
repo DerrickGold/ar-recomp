@@ -9,4 +9,8 @@ bool ActRaiser_InventoryPickupArtEntry(CpuState *cpu);
 RecompReturn ActRaiser_InventoryPickupArt(CpuState *cpu);
 bool ActRaiser_InventoryIconEntry(CpuState *cpu);
 RecompReturn ActRaiser_InventoryIcon(CpuState *cpu);
+bool ActRaiser_InventoryHealthDmaEntry(CpuState *cpu);
+RecompReturn ActRaiser_InventoryHealthDma(CpuState *cpu);
+bool ActRaiser_InventoryInitialIconEntry(CpuState *cpu);
+RecompReturn ActRaiser_InventoryInitialIcon(CpuState *cpu);
 #endif

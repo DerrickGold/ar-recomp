@@ -4,16 +4,17 @@
 package localization
 
 import (
-	"crypto/sha256"
 	_ "embed"
 	"encoding/json"
 	"fmt"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/DerrickGold/ar-recomp/installer/internal/gamerom"
 )
 
 const (
-	romSize         = 0x100000
+	romSize         = gamerom.Size
 	dictionaryBytes = 128 * 12
 	// Bound malformed synthetic inputs as well as recognized retail records.
 	maxRecordBytes = 0x10000
@@ -53,7 +54,7 @@ type decoderProfile struct {
 	ID                   string            `json:"id"`
 	Locale               string            `json:"locale"`
 	Label                string            `json:"label"`
-	SHA256               string            `json:"sha256"`
+	SHA256               string            `json:"-"`
 	Encoding             string            `json:"encoding"`
 	Dictionary           int               `json:"dictionary"`
 	FullEntrySeparator   string            `json:"interactive_full_entry_separator"`
@@ -82,6 +83,16 @@ var decoderFacts = func() decoderFactsData {
 	if err := json.Unmarshal(decoderProfileJSON, &facts); err != nil {
 		panic("invalid embedded localization profiles: " + err.Error())
 	}
+	for i := range facts.Profiles {
+		for _, release := range gamerom.Releases() {
+			if facts.Profiles[i].ID == release.ID {
+				facts.Profiles[i].SHA256 = release.SHA256
+			}
+		}
+		if facts.Profiles[i].SHA256 == "" {
+			panic("text profile has no recognized retail identity")
+		}
+	}
 	return facts
 }()
 
@@ -98,16 +109,16 @@ type Decoder struct {
 // heuristic, region guess, patched image, or copier-header normalization can
 // silently select a decoder with different native behavior.
 func NewDecoder(rom []byte) (*Decoder, error) {
-	if len(rom) != romSize {
-		return nil, fmt.Errorf("expected 1 MiB headerless ROM, got %d bytes", len(rom))
+	release, err := gamerom.Identify(rom)
+	if err != nil {
+		return nil, err
 	}
-	digest := fmt.Sprintf("%x", sha256.Sum256(rom))
 	for _, profile := range decoderFacts.Profiles {
-		if profile.SHA256 == digest {
+		if profile.ID == release.ID {
 			return newDecoder(rom, profile)
 		}
 	}
-	return nil, fmt.Errorf("unsupported ROM SHA-256 %s; an exact supported clean ROM is required", digest)
+	return nil, fmt.Errorf("no text decoder for recognized release %s", release.ID)
 }
 
 func newDecoder(rom []byte, profile decoderProfile) (*Decoder, error) {

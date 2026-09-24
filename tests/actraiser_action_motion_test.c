@@ -5,6 +5,7 @@
 #include "regional/regional_collision.h"
 #include "regional/regional_fire_enemy.h"
 #include "regional/regional_difficulty.h"
+#include "regional/regional_poses.h"
 #include "quintet_lzss.h"
 #include "byte_order.h"
 #include <assert.h>
@@ -13,6 +14,8 @@
 
 static uint8_t memory[65536];
 static uint16_t snapshot;
+static uint8_t pose_snapshot;
+uint8_t ActRaiserRegional_PoseSnapshot(void){return pose_snapshot;}
 static uint8_t emitters;
 static uint64_t bosses;
 static uint8_t collision;
@@ -942,7 +945,84 @@ static void CheckNorthwallRoms(char **paths) {
   bosses=0;decode_extents=false;
   puts("Northwall: all five ROM timelines, complete impact compositions and native workspace bounds match");
 }
+static CpuState SetupPose(unsigned state,unsigned row,unsigned flip,unsigned width,bool birth) {
+  CpuState cpu=Setup(0,state,row,flip<<14,width);memory[0x18]=4;memory[0x19]=1;
+  Write(0x912,state==10?0xce39:0xce48);
+  if(birth) {cpu.Y=Read(0x912);Write(cpu.S+1,0x969d);Write(0x912,0xbad);}
+  Write(0x4000,0x200);Write(0x4002+2*state,0x100);
+  const uint8_t shared[]={1,5,0,0,5,19,0,0,7,5,0,0,3,19,0,0,255};
+  const uint8_t humanoid[]={0,7,0,0,4,11,0,0,6,3,0,0,2,11,0,0,255};
+  memcpy(memory+0x4100,state==10?shared:humanoid,17);
+  for(unsigned i=0;i<8;++i) {
+    Write(0x4200+2*i,0x300+16*i);
+    memset(memory+0x4300+16*i,16,4);memory[0x4304+16*i]=1;
+    memory[0x430a+16*i]=(uint8_t)i;
+  }
+  return cpu;
+}
+static void CheckPoses(void) {
+  snapshot=emitters=bosses=collision=fire=0;decode_extents=true;difficulty=(ArRegionalDifficultySnapshot){0};
+  for(unsigned rule=0;rule<2;++rule)for(unsigned row=0;row<5;++row)
+  for(unsigned mask=0;mask<4;++mask)for(unsigned flip=0;flip<4;++flip)
+  for(unsigned width=0;width<2;++width)for(unsigned birth=0;birth<2;++birth) {
+    const unsigned state=rule?45:10;
+    CpuState cpu=SetupPose(state,row,flip,width,birth),reference=cpu;pose_snapshot=mask;
+    uint8_t initial[sizeof(memory)],expected[sizeof(memory)];memcpy(initial,memory,sizeof(memory));
+    const uint8_t original=memory[0x4100+row*4];uint8_t desired=original;
+    const bool changed=ArRegionalPoses_Visual(mask,state,row,original,&desired) && desired!=original;
+    assert(ActRaiser_ActionMotionEntry(&cpu)==changed);
+    if(changed)Write(0x91c,(uint16_t)((int)desired-original));
+    assert(Native(&reference)==RECOMP_RETURN_NORMAL);
+    Write(0x91c,0);memcpy(expected,memory,sizeof(memory));memcpy(memory,initial,sizeof(memory));
+    assert((changed?ActRaiser_ActionMotion(&cpu):Native(&cpu))==RECOMP_RETURN_NORMAL);
+    assert(!memcmp(memory,expected,sizeof(memory)) && !memcmp(&cpu,&reference,sizeof(cpu)));
+  }
+  for(unsigned bad=0;bad<14;++bad) {
+    CpuState cpu=SetupPose(10,0,0,0,false);pose_snapshot=3;
+    switch(bad) {
+      case 0:cpu.DB=1;break;case 1:cpu.PB=1;break;case 2:cpu.D=1;break;case 3:cpu.x_flag=1;break;
+      case 4:cpu.X++;break;case 5:Write(0x912,0xce48);break;case 6:memory[0x19]=2;break;
+      case 7:Write(0x8f6,0x5000);break;case 8:memory[0x4101]++;break;case 9:memory[0x4102]++;break;
+      case 10:memory[0x4330]++;break;case 11:Write(0x91c,1);break;case 12:Write(0x4000,0xfff);break;
+      case 13:cpu.P|=CPU_P_D;break;
+    }
+    assert(!ActRaiser_ActionMotionEntry(&cpu));
+  }
+  for(unsigned escape=1;escape<=RECOMP_RETURN_OWNED_UNWIND;++escape) {
+    CpuState cpu=SetupPose(45,3,0,0,false),before=cpu;pose_snapshot=3;native_result=escape;
+    uint8_t initial[sizeof(memory)];memcpy(initial,memory,sizeof(memory));
+    assert(ActRaiser_ActionMotion(&cpu)==native_result && !memcmp(&before,&cpu,sizeof(cpu)) && !memcmp(initial,memory,sizeof(memory)));
+  }
+  pose_snapshot=0;decode_extents=false;native_result=RECOMP_RETURN_NORMAL;
+  puts("Aitos poses: independent policies, two owners, all rows/facings/widths, birth and escapes passed");
+}
+static void CheckPoseRoms(char **paths) {
+  static const unsigned source[]={0xc4c17,0xc1b1c,0xc4185,0xc3798,0xc3798};
+  static uint8_t rom[1048576],assets[5][4096];
+  for(unsigned region=0;region<5;++region) {
+    FILE *file=fopen(paths[region],"rb");assert(file);assert(fread(rom,1,sizeof(rom),file)==sizeof(rom));fclose(file);
+    const unsigned size=ByteOrder_ReadLe16(rom+source[region]);assert(size<=4096);
+    assert(QuintetLzss_DecompressAsset(rom+source[region],sizeof(rom)-source[region],assets[region],size,NULL));
+    for(unsigned kind=0;kind<2;++kind) {
+      const unsigned state=kind?45:10;
+      const uint8_t *asset=assets[region],*baseline=assets[0];
+      const unsigned at=ByteOrder_ReadLe16(asset+2+2*state),us=ByteOrder_ReadLe16(baseline+2+2*state);
+      assert(at+17<=size && asset[at+16]==255);
+      for(unsigned row=0;row<4;++row) {
+        uint8_t visual;
+        assert(ArRegionalPoses_Visual(region==1?3:0,state,row,baseline[us+row*4],&visual));
+        assert(visual==asset[at+row*4] && !memcmp(asset+at+row*4+1,baseline+us+row*4+1,3));
+        const unsigned comp=ByteOrder_ReadLe16(asset+ByteOrder_ReadLe16(asset)+2*visual);
+        const unsigned native=ByteOrder_ReadLe16(baseline+ByteOrder_ReadLe16(baseline)+2*baseline[us+row*4]);
+        assert(comp+5<=size && !memcmp(asset+comp,baseline+native,4));
+      }
+    }
+  }
+  puts("Aitos poses: five-ROM order/duration/motion/collision headers agree");
+}
 int main(int argc,char **argv) {
+  CheckPoses();
+  if(argc==2 && !strcmp(argv[1],"--poses"))return 0;
   assert(argc==1 || argc==6);
   CheckHeadProgram();
   CheckCollision();
@@ -989,6 +1069,6 @@ int main(int argc,char **argv) {
     }
     assert(!ActRaiser_ActionMotionEntry(&cpu));
   }
-  if(argc==6){CheckRoms(argv+1);CheckCollisionRoms(argv+1);CheckNorthwallRoms(argv+1);}
+  if(argc==6){CheckRoms(argv+1);CheckCollisionRoms(argv+1);CheckNorthwallRoms(argv+1);CheckPoseRoms(argv+1);}
   printf("action motion: 57 owner/rows x%u mixes x4 facings x2 widths, escape and shape checks passed\n",1u<<kArRegionalActionMotion_HeadWithdrawal);return 0;
 }

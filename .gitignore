@@ -56,6 +56,8 @@ game-assets/manifest.ini
 # reference text or user-owned work. Never publish them with the source tree.
 *.arproject
 *.arlang
+# Private, validated regional graphics extracted from the player's own ROMs.
+*.armedia
 # Two independently authored demo messages, validated against the source
 # example. All user publications and ROM-derived backups remain ignored.
 !examples/example.fr-ca.arlang

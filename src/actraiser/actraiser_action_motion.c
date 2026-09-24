@@ -180,6 +180,33 @@ static bool Initializing(CpuState *cpu) {
    * Initial motion is subsequently cleared by the common initializer. */
   return cpu_read16(cpu,0,(uint16_t)(cpu->S+1))==0x969d;
 }
+static bool PosePlan(CpuState *cpu,uint16_t *offset) {
+  const uint8_t snapshot=ActRaiserRegional_PoseSnapshot();
+  if(!snapshot || !ActorShape(cpu) || cpu_read16(cpu,0,0x18)!=0x0104)return false;
+  const unsigned x=cpu->X;
+  if(x==cpu_read16(cpu,0,0x8a) || cpu_read16(cpu,0,x+0x16)!=0x4000 ||
+      cpu_read8(cpu,0,x+0x18)!=0x7e || cpu_read16(cpu,0,x+0x3c))return false;
+  const unsigned source=Initializing(cpu)?cpu->Y:cpu_read16(cpu,0,x+0x32);
+  const unsigned state=cpu_read16(cpu,0,x+0x1a),row=cpu_read16(cpu,0,x+0x1c);
+  if(row>=4 || !((source==0xce39 && state==10) || (source==0xce48 && state==45)))return false;
+  const unsigned table=cpu_read16(cpu,0x7e,0x4000),sequence=cpu_read16(cpu,0x7e,0x4002+2*state);
+  if(sequence<2+2*(state+1) || sequence+17>table || table+16>0x1000)return false;
+  static const uint8_t shared[]={1,5,0,0,5,19,0,0,7,5,0,0,3,19,0,0,255};
+  static const uint8_t humanoid[]={0,7,0,0,4,11,0,0,6,3,0,0,2,11,0,0,255};
+  const uint8_t *expected=state==10?shared:humanoid;
+  for(unsigned i=0;i<17;++i)if(cpu_read8(cpu,0x7e,0x4000+sequence+i)!=expected[i])return false;
+  uint8_t visual;
+  if(!ArRegionalPoses_Visual(snapshot,state,row,expected[row*4],&visual) || visual==expected[row*4])return false;
+  /* Do not import foreign collision headers with a draw-only pose change.
+   * Both swapped US compositions must have the same measured extents. */
+  const unsigned old=cpu_read16(cpu,0x7e,0x4000+table+expected[row*4]*2);
+  const unsigned next=cpu_read16(cpu,0x7e,0x4000+table+visual*2);
+  if(old<table+16 || next<table+16 || old+5>0x1000 || next+5>0x1000)return false;
+  for(unsigned i=0;i<4;++i)if(cpu_read8(cpu,0x7e,0x4000+old+i)!=16 ||
+      cpu_read8(cpu,0x7e,0x4000+next+i)!=16)return false;
+  if(offset)*offset=(uint16_t)((int)visual-expected[row*4]);
+  return true;
+}
 static bool CollisionPlan(CpuState *cpu,bool birth,ArRegionalCollisionExtents *out) {
   const uint8_t collision=ActRaiserRegional_CollisionSnapshot();
   if(!collision || !ActorShape(cpu) || (!birth && Initializing(cpu)))return false;
@@ -397,16 +424,18 @@ static bool Plan(CpuState *cpu,MotionRow *out) {
 }
 bool ActRaiser_ActionMotionEntry(CpuState *cpu) {
   if(s_delegate){s_delegate=false;return false;}
-  return Plan(cpu,NULL) || CollisionPlan(cpu,false,NULL) || AnimationProgram(cpu,NULL);
+  return Plan(cpu,NULL) || CollisionPlan(cpu,false,NULL) || AnimationProgram(cpu,NULL) || PosePlan(cpu,NULL);
 }
 RecompReturn ActRaiser_ActionMotion(CpuState *cpu) {
   MotionRow row={0};ArRegionalCollisionExtents extents;
   const bool motion=Plan(cpu,&row),collision=CollisionPlan(cpu,false,&extents);
   ProgramRow program={0};const bool expanded=AnimationProgram(cpu,&program);
-  if(!motion && !collision && !expanded)ActRaiserHleFatal("Unsupported regional animation-row entry");
+  uint16_t pose_offset=0;const bool pose=PosePlan(cpu,&pose_offset);
+  if(!motion && !collision && !expanded && !pose)ActRaiserHleFatal("Unsupported regional animation-row entry");
   const uint16_t object=cpu->X;
   const uint16_t old_row=(row.skip_rows || expanded)?cpu_read16(cpu,0,object+0x1c):0;
   if(row.skip_rows)cpu_write16(cpu,0,object+0x1c,row.next_row);
+  if(pose)cpu_write16(cpu,0,object+0x3c,pose_offset);
   if(expanded) {
     /* Borrow only this actor's row and visual-offset fields during the
      * non-yielding reader. All velocities, extents, poses and flags remain
@@ -417,7 +446,7 @@ RecompReturn ActRaiser_ActionMotion(CpuState *cpu) {
   s_delegate=true;
   const RecompReturn result=cpu->m_flag?bank_00_8E2F_M1X0(cpu):bank_00_8E2F_M0X0(cpu);
   s_delegate=false;
-  if(expanded)cpu_write16(cpu,0,object+0x3c,0);
+  if(expanded || pose)cpu_write16(cpu,0,object+0x3c,0);
   if(result!=RECOMP_RETURN_NORMAL) {
     /* Audited reader never yields; preserve an unexpected escape token and
      * do not leave our speculative cursor edit behind. */

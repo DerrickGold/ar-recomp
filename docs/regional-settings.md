@@ -33,6 +33,18 @@ regional artwork and independent music choices are separate.
 
 ## Action and resource rules
 
+### Death Heim artwork
+
+**Death Heim artwork** chooses whether the first statue has the Japanese
+horns or the Western design. It applies at the next room entry or retry, in
+both native and enhanced background rendering. Boss rules, terrain and
+Death Heim's arrival sequence do not change.
+
+The Japanese choice requires a locally extracted `jp.armedia` package.
+Without it, US graphics remain active and the description explains the
+fallback. Your requested choice stays saved. See
+[regional media installation](regional-media.md#install-death-heim-artwork).
+
 ### Scene music
 
 **Scene music** selects the regional track assignment. Japan keeps the
@@ -250,9 +262,14 @@ setting. The native 256-pickup count wrap to zero is preserved. If that wrap
 happens during a cast, completion leaves the collection empty instead of
 reproducing the cartridge's out-of-range inventory read.
 
-The spell pickups and HUD use graphics already present in the US ROM. The
-health-growth pickup temporarily uses the full-apple graphic; exact European
-health-growth artwork and smaller European HUD icons remain media work.
+**Action item artwork** independently selects European small spell-HUD icons
+and the health-growth graphic when using this inventory model. It applies on
+room entry or retry, not during a live pickup or cast. Any supported European
+donor supplies the same pixels; Story items remain unchanged. Missing donors
+retain US spell icons and the full-apple health-growth fallback, as the menu
+description reports. See [media installation](regional-media.md#install-european-action-mode-item-graphics).
+The European model also uses its original pickup sound requests, including
+the distinct whole-apple and score-item sounds; those require no donor ROM.
 First-run profile selection is available through the title-screen overlay.
 
 **Enemy collision shapes** selects Kasandora Act 2's pose bounds and Marahna's

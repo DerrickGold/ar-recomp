@@ -3,9 +3,9 @@ package localization
 import (
 	"bytes"
 	"fmt"
-	"math/bits"
 	"slices"
 
+	"github.com/DerrickGold/ar-recomp/installer/internal/gameassets"
 	"github.com/DerrickGold/ar-recomp/installer/internal/quintet"
 )
 
@@ -14,10 +14,8 @@ func decompressNative(rom []byte, offset int) ([]byte, int, error) {
 	return quintet.Decompress(rom, offset)
 }
 
-const assetScriptBase = 0x28000
-const assetScriptLimit = assetScriptBase + 0x7ff0
-
-var assetOperandCounts = [8]int{6, 5, 3, 1, 4, 7, 6, 6}
+const assetScriptBase = gameassets.ScriptBase
+const assetScriptLimit = gameassets.ScriptLimit
 
 type assetCommand struct {
 	code     byte
@@ -30,49 +28,19 @@ type assetEntry struct {
 }
 
 func (d *Decoder) assetScript() ([]assetEntry, error) {
-	entries := []assetEntry{}
-	cursor := assetScriptBase + 3
-	read := func(count int) ([]byte, error) {
-		if cursor > assetScriptLimit-count {
-			return nil, fmt.Errorf("asset script crosses its bounded table")
-		}
-		data, err := d.span(cursor, count)
-		if err == nil {
-			cursor += count
-		}
-		return data, err
+	parsed, err := gameassets.Script(d.rom)
+	if err != nil {
+		return nil, err
 	}
-	for cursor < assetScriptLimit {
-		start := cursor
-		selectors, err := read(2)
-		if err != nil {
-			return nil, err
-		}
-		entry := assetEntry{mode: selectors[0], submode: selectors[1], start: start, commands: []assetCommand{}}
-		for {
-			raw, err := read(1)
-			if err != nil {
-				return nil, err
-			}
-			code := raw[0]
-			if code == 0 {
-				break
-			}
-			operands, err := read(assetOperandCounts[bits.Len8(code)-1])
-			if err != nil {
-				return nil, err
-			}
-			entry.commands = append(entry.commands, assetCommand{code, operands})
-		}
-		entry.end = cursor
-		entries = append(entries, entry)
-		// The final boss (07/08) is not the end of this table: 08/01
-		// owns the credits palette, alternate font and all twenty page maps.
-		if entry.mode == 8 && entry.submode == 1 {
-			return entries, nil
+	entries := make([]assetEntry, len(parsed))
+	for i, entry := range parsed {
+		entries[i] = assetEntry{mode: entry.Mode, submode: entry.Submode,
+			start: entry.Start, end: entry.End, commands: []assetCommand{}}
+		for _, command := range entry.Commands {
+			entries[i].commands = append(entries[i].commands, assetCommand{command.Code, command.Operands})
 		}
 	}
-	return nil, fmt.Errorf("asset script end marker missing")
+	return entries, nil
 }
 
 type nativeFontAsset struct {

@@ -5,8 +5,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"os"
-	"path/filepath"
 
 	"github.com/DerrickGold/ar-recomp/installer/internal/localization"
 )
@@ -25,7 +23,7 @@ func RunLocalizationExtractCommand(args []string, cwd string, output io.Writer) 
 	if flags.NArg() != 0 || *romPath == "" || *outPath == "" || (*format != "pack" && *format != "catalog" && *format != "runtime-routes" && *format != "compose-routes") {
 		return fmt.Errorf("usage: actraiser-builder localization-extract --rom game.sfc --out new-file [--format pack|catalog|runtime-routes|compose-routes]")
 	}
-	d, err := readLocalizationROM(resolveLocalizationPath(cwd, *romPath))
+	d, err := readLocalizationROM(resolveToolPath(cwd, *romPath))
 	if err != nil {
 		return err
 	}
@@ -60,57 +58,18 @@ func RunLocalizationExtractCommand(args []string, cwd string, output io.Writer) 
 			return encoder.Encode(evidence)
 		}
 	}
-	path := resolveLocalizationPath(cwd, *outPath)
-	if err := writeNewLocalizationFile(path, write); err != nil {
+	path := resolveToolPath(cwd, *outPath)
+	if err := writeNewToolFile(path, write); err != nil {
 		return err
 	}
 	fmt.Fprintf(output, "Extracted %s %s to %s. Local reference only; source packs are not publications or installed automatically.\n", d.ReleaseID(), *format, path)
 	return nil
 }
 
-func resolveLocalizationPath(cwd, path string) string {
-	if filepath.IsAbs(path) {
-		return path
-	}
-	return filepath.Join(cwd, path)
-}
-
 func readLocalizationROM(path string) (*localization.Decoder, error) {
-	input, err := os.Open(path)
+	data, err := readGameROMFile(path)
 	if err != nil {
 		return nil, err
-	}
-	data, err := io.ReadAll(io.LimitReader(input, (1<<20)+1))
-	closeErr := input.Close()
-	if err != nil {
-		return nil, err
-	}
-	if closeErr != nil {
-		return nil, closeErr
 	}
 	return localization.NewDecoder(data)
-}
-
-// An output is never opened until extraction/validation succeeds. O_EXCL also
-// rejects symlinks/existing files; a failed writer removes only its new file.
-func writeNewLocalizationFile(path string, write func(io.Writer) error) error {
-	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
-	if err != nil {
-		return err
-	}
-	complete := false
-	defer func() {
-		_ = file.Close()
-		if !complete {
-			_ = os.Remove(path)
-		}
-	}()
-	if err := write(file); err != nil {
-		return err
-	}
-	if err := file.Close(); err != nil {
-		return err
-	}
-	complete = true
-	return nil
 }

@@ -4,6 +4,8 @@
 #include "snesrecomp/game/cpu.h"
 #include "snesrecomp/runner.h"
 #include "snesrecomp/spc_upload.h"
+#include "actraiser_regional_media.h"
+#include "actraiser_regional_runtime.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -24,6 +26,24 @@ enum {
 
 static bool s_resident_completion_pending;
 static SrRunnerHandle *s_runner;
+
+static bool regional_sequence(const SrSpcUploadContext *upload,uint32 source24) {
+  unsigned rule;
+  if(source24==0x0ef69f)rule=0;
+  else if(source24==0x19fa4b)rule=1;
+  else return true;
+  /* Exact US song image: five segments, native sample-count/first-index
+   * terminator and final script offset. No bootstrap, SFX or arbitrary data.
+   * The SDK has already copied these blocks under its normal APU lock. */
+  const uint16_t entry=rule?0x1d06:0x1108;
+  const uint64_t offset=(rule?0xcfa4bu:0x7769fu)+(rule?1435u:2353u);
+  if(upload->block_count!=5 || upload->entry_point!=entry || upload->script_offset!=offset)return true;
+  bool enabled;
+  if(!ActRaiserRegional_BeginSongSequence(rule,&enabled))return false;
+  const ArRegionalMediaBytes donor=ActRaiserRegionalMedia_Sequence(rule,enabled);
+  if(donor.data)memcpy(upload->apu_ram+0x1200,donor.data,donor.size);
+  return true;
+}
 
 void ActRaiser_SpcUploadBindRunner(SrRunnerHandle *runner) {
   s_runner = runner;
@@ -93,7 +113,6 @@ bool ActRaiser_SpcUploadCustomize(CpuState *cpu,
   uint16 last_length = 0u;
   size_t pool_offset;
   bool success;
-  (void)source24;
   if (cpu == NULL || !upload_context_valid(upload) ||
       upload->rom_data == NULL || upload->rom_byte_size == 0u ||
       upload->rom_byte_size > SIZE_MAX || upload->script_offset > SIZE_MAX)
@@ -119,6 +138,7 @@ bool ActRaiser_SpcUploadCustomize(CpuState *cpu,
     g_ram[(uint16)(d + 3u)] = (uint8)(last_destination >> 8);
     g_ram[(uint16)(d + 8u)] = (uint8)last_length;
     g_ram[(uint16)(d + 9u)] = (uint8)(last_length >> 8);
+    success=regional_sequence(upload,source24);
   }
   return success;
 }

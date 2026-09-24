@@ -1,4 +1,6 @@
 #include "actraiser/actraiser_action_room_graphics.h"
+#include "actraiser/actraiser_regional_media.h"
+#include "actraiser/actraiser_actor_art.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -27,6 +29,16 @@ static uint16_t vram_word_address;
 static uint8_t cgram_color_address;
 static unsigned cgram_byte_phase;
 static int failures;
+static uint8_t artwork;
+uint8_t ActRaiserRegional_ArtworkSnapshot(void) {return artwork;}
+static bool actor_artwork;
+static uint8_t actor_character_bank, actor_palette_bank;
+bool ActRaiserRegional_ActorArtwork(unsigned area, bool activate, bool *enabled) {
+  (void)activate;
+  if (area >= 7 || !enabled) return false;
+  *enabled = actor_artwork;
+  return true;
+}
 
 #define CHECK(condition)                                                   \
   do {                                                                     \
@@ -37,8 +49,11 @@ static int failures;
   } while (0)
 
 static uint8_t *BankMemory(uint8_t bank) {
+  if (bank && bank == actor_character_bank) return character_source_bank;
+  if (bank && bank == actor_palette_bank) return palette_source_bank;
   if (bank == kScriptBank) return script_bank;
   if (bank == kCharacterSourceBank) return character_source_bank;
+  if (bank == 0x0f) return character_source_bank;
   if (bank == kPaletteSourceBank) return palette_source_bank;
   return NULL;
 }
@@ -320,7 +335,102 @@ static void TestGuardedFallbacks(void) {
   CHECK(unsetenv("AR_ACTION_ROOM_GFX_HLE") == 0);
 }
 
+static void TestDeathHeimDonor(void) {
+  uint8_t donor[8192];for(unsigned i=0;i<sizeof(donor);++i)donor[i]=(uint8_t)(i*17u+3);
+  const ArRegionalMediaView view={.release=kArRegionalMediaRelease_Japan,.count=1,
+      .entries={{kArRegionalMedia_DeathHeimBG2,{donor,sizeof(donor)}}}};
+  static uint8_t native_ram[sizeof(wram)],native_vram[sizeof(vram)];
+  for(unsigned present=0;present<2;++present)for(unsigned selected=0;selected<2;++selected)
+    for(unsigned which=0;which<4;++which)for(unsigned address=0;address<2;++address) {
+      const uint16_t scenes[]={0x0107,0x0807,0x0207,0x0101};
+      const uint16_t source=address?0xd246:0xd146;
+      CpuState native_cpu={0};
+      for(unsigned enabled=0;enabled<2;++enabled) {
+        ResetFixture();ActRaiserRegionalMedia_ClearDonors();artwork=enabled?selected:0;
+        if(present) {CHECK(ActRaiserRegionalMedia_AddDonor(&view));CHECK(!ActRaiserRegionalMedia_AddDonor(&view));}
+        BuildAlternatingAsset(character_source_bank,source,8192,0x12,0x34);
+        script_bank[kScriptAddress+1]=0x10;script_bank[kScriptAddress+2]=0x10;
+        WriteLinearOperand(&script_bank[kScriptAddress+3],0x0f,source);
+        WriteWram16(0x18,scenes[which]);CpuState cpu=MakeCpu();
+        CHECK(ActRaiser_ActionCharacterLoadHleEnabled(&cpu));
+        CHECK(ActRaiser_LoadActionCharacters(&cpu)==RECOMP_RETURN_NORMAL);
+        if(!enabled) {native_cpu=cpu;memcpy(native_ram,wram,sizeof(wram));memcpy(native_vram,vram,sizeof(vram));}
+        else {
+          CHECK(!memcmp(&cpu,&native_cpu,sizeof(cpu)) && !memcmp(wram,native_ram,sizeof(wram)));
+          const bool changed=present && selected && which<2 && !address;
+          if(changed)memcpy(native_vram+0x2000,donor,sizeof(donor));
+          CHECK(!memcmp(vram,native_vram,sizeof(vram)));
+          CpuState guard=MakeCpu();setenv("AR_ACTION_ROOM_GFX_HLE","0",1);
+          CHECK(ActRaiser_ActionCharacterLoadHleEnabled(&guard)==changed);unsetenv("AR_ACTION_ROOM_GFX_HLE");
+        }
+      }
+    }
+  ActRaiserRegionalMedia_ClearDonors();artwork=0;
+  CHECK(!ActRaiserRegionalMedia_AvailableArtwork() && !ActRaiserRegionalMedia_AddDonor(NULL));
+}
+static void Put32(uint8_t *out, unsigned value) {
+  for (unsigned i = 0; i < 4; ++i) out[i] = (uint8_t)(value >> (8*i));
+}
+static void TestActorDonor(void) {
+  uint8_t data[44+8192+128] = {0};
+  memcpy(data,"ARACTOR1",8);Put32(data+8,2);
+  data[12]=data[13]=data[28]=data[29]=2;
+  data[14]=1;data[30]=2;
+  Put32(data+16,44);Put32(data+20,8192);
+  Put32(data+32,44+8192);Put32(data+36,128);
+  for(unsigned i=44;i<sizeof(data);++i)data[i]=(uint8_t)(i*17u+3);
+  ArRegionalActorArtView donor;
+  CHECK(ArRegionalActorArt_Parse((ArRegionalMediaBytes){data,sizeof(data)},&donor));
+  static uint8_t native_ram[sizeof(wram)],native_vram[sizeof(vram)],native_cgram[sizeof(cgram)];
+  for(unsigned kind=1;kind<=2;++kind)for(unsigned present=0;present<2;++present)
+    for(unsigned selected=0;selected<2;++selected)for(unsigned wrong=0;wrong<3;++wrong) {
+      CpuState native_cpu={0};
+      const ArRegionalActorArtBinding *binding=ArRegionalActorArt_Binding(0x0202,(ArRegionalActorArtKind)kind,0);
+      CHECK(binding);
+      const uint32_t source=binding->source+(wrong==1?64:0);
+      const uint8_t bank=(uint8_t)(source>>15);
+      const uint16_t address=(uint16_t)(0x8000|(source&0x7fff));
+      const uint16_t scene=wrong==2?0x0101:0x0202;
+      for(unsigned enabled=0;enabled<2;++enabled) {
+        ResetFixture();actor_artwork=enabled && selected;
+        ActRaiserActorArt_Initialize(present?&donor:NULL);
+        ActRaiserActorArt_BeginRoom(scene);WriteWram16(0x18,scene);
+        if(kind==1) {
+          actor_character_bank=bank;
+          BuildAlternatingAsset(character_source_bank,address,8192,0x12,0x34);
+        } else {
+          actor_palette_bank=bank;
+          for(unsigned i=0;i<128;++i)palette_source_bank[address+i]=(uint8_t)(i^0x5a);
+        }
+        script_bank[kScriptAddress+1]=kind==1?0x10:0x40;
+        script_bank[kScriptAddress+2]=kind==1?0x30:0x80;
+        WriteLinearOperand(script_bank+kScriptAddress+3,bank,address);
+        CpuState cpu=MakeCpu();
+        CHECK(kind==1?ActRaiser_ActionCharacterLoadHleEnabled(&cpu):ActRaiser_ActionPaletteLoadHleEnabled(&cpu));
+        CHECK((kind==1?ActRaiser_LoadActionCharacters(&cpu):ActRaiser_LoadActionPalette(&cpu))==RECOMP_RETURN_NORMAL);
+        if(!enabled) {
+          native_cpu=cpu;memcpy(native_ram,wram,sizeof(wram));
+          memcpy(native_vram,vram,sizeof(vram));memcpy(native_cgram,cgram,sizeof(cgram));
+        } else {
+          CHECK(!memcmp(&cpu,&native_cpu,sizeof(cpu)) && !memcmp(wram,native_ram,sizeof(wram)));
+          const bool changed=present && selected && !wrong;
+          if(changed) {
+            if(kind==1)memcpy(native_vram+0x6000,data+44,8192);
+            else memcpy(native_cgram+0x100,data+44+8192,128);
+          }
+          CHECK(!memcmp(vram,native_vram,sizeof(vram)) && !memcmp(cgram,native_cgram,sizeof(cgram)));
+          CpuState guard=MakeCpu();setenv("AR_ACTION_ROOM_GFX_HLE","0",1);
+          CHECK((kind==1?ActRaiser_ActionCharacterLoadHleEnabled(&guard):ActRaiser_ActionPaletteLoadHleEnabled(&guard))==changed);
+          unsetenv("AR_ACTION_ROOM_GFX_HLE");
+        }
+      }
+    }
+  ActRaiserActorArt_Shutdown();actor_artwork=false;
+  actor_character_bank=actor_palette_bank=0;
+}
 int main(void) {
+  TestActorDonor();
+  TestDeathHeimDonor();
   TestCharacterLoad(0x10, 0x10, 0x2000);
   TestCharacterLoad(0x08, 0x50, 0x1000);
   TestPaletteLoad();

@@ -35,6 +35,7 @@ typedef struct ActRaiserActionBgObserver {
   size_t rom_size;
   ActionRoomScene *room_scene;
   uint8_t terrain_profile, mosaic_pattern;
+  ArRegionalMediaBytes death_heim_characters;
   ActionRoomSceneFrameState room_frame;
   ActionRoomSceneFrameState previous_room_frame;
   ActionRoomSceneFrameState authentic_room_frame;
@@ -642,6 +643,7 @@ bool ActRaiserActionBg_InitRoomScenes(const uint8_t *rom, size_t rom_size) {
   s_observer.rom = rom;
   s_observer.rom_size = rom_size;
   s_observer.terrain_profile = s_observer.mosaic_pattern = 0;
+  s_observer.death_heim_characters=(ArRegionalMediaBytes){0};
   s_observer.room_scene_valid = false;
   s_observer.room_scene_attempted = false;
   s_observer.room_frame_valid = false;
@@ -705,7 +707,8 @@ void ActRaiserActionBg_Reset(void) {
   s_observer.forced_blank = false;
 }
 
-void ActRaiserActionBg_BeginRoomVariants(uint8_t profile,uint8_t mosaic) {
+void ActRaiserActionBg_BeginRoomVariants(uint8_t profile,uint8_t mosaic,ArRegionalMediaBytes death_heim_characters) {
+  s_observer.death_heim_characters=death_heim_characters;
   s_observer.mosaic_pattern = mosaic;
   s_observer.terrain_profile = profile;
   ResetWorlds();
@@ -777,6 +780,9 @@ static bool EnsureRoomScene(uint8_t map_group, uint8_t map_number) {
             map_group, map_number);
     return false;
   }
+  const ArRegionalMediaBytes donor=s_observer.death_heim_characters;
+  if(donor.data && donor.size==8192 && map_group==7 && (map_number==1 || map_number==8))
+    memcpy(s_observer.room_scene->characters+8192,donor.data,8192);
   s_observer.room_scene_valid = true;
   s_observer.diagnostics.room_scene_loads++;
   return true;

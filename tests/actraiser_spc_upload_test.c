@@ -3,13 +3,14 @@
 #include "snesrecomp/game/cpu.h"
 #include "snesrecomp/runner.h"
 #include "snesrecomp/spc_upload.h"
+#include "actraiser/actraiser_regional_media.h"
 
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
-static uint8 test_rom[0x80000];
+static uint8 test_rom[0x100000];
 static uint8 test_aram[SR_APU_RAM_BYTE_COUNT];
 uint8 g_ram[kSnesWramSize];
 const uint8 *g_rom = test_rom;
@@ -18,6 +19,18 @@ const char *g_last_recomp_func;
 static int failures;
 static uint16_t fake_spc_pc;
 static int control_calls;
+static bool sequence_enabled,sequence_available,sequence_ready=true;
+static unsigned sequence_calls;
+static uint8_t sequence_data[2197];
+bool ActRaiserRegional_BeginSongSequence(unsigned rule,bool *enabled) {
+  ++sequence_calls;
+  if(!enabled || rule>=2 || !sequence_ready)return false;
+  *enabled=sequence_enabled;return true;
+}
+ArRegionalMediaBytes ActRaiserRegionalMedia_Sequence(unsigned rule,bool enabled) {
+  return rule<2 && enabled && sequence_available?
+      (ArRegionalMediaBytes){sequence_data,rule?1325u:2197u}:(ArRegionalMediaBytes){0};
+}
 
 static void check(bool condition, const char *message) {
   if (condition) return;
@@ -175,12 +188,47 @@ static void test_bootstrap_and_resident_completion(void) {
   ActRaiser_SpcUploadBindRunner(NULL);
 }
 
+static void test_regional_sequences(void) {
+  uint8_t expected[SR_APU_RAM_BYTE_COUNT];
+  for(unsigned i=0;i<sizeof(sequence_data);++i)sequence_data[i]=(uint8_t)(i*37+5);
+  for(unsigned rule=0;rule<2;++rule)for(unsigned enabled=0;enabled<2;++enabled)
+    for(unsigned available=0;available<2;++available)for(unsigned malformed=0;malformed<7;++malformed) {
+    CpuState cpu={0};SrSpcUploadContext upload=make_upload();
+    const uint32_t source=rule?0x19fa4b:0x0ef69f;
+    upload.script_offset=(rule?0xcfa4bu:0x7769fu)+(rule?1435u:2353u);
+    upload.entry_point=rule?0x1d06:0x1108;upload.block_count=5;
+    memset(test_rom,0,sizeof(test_rom));memset(test_aram,0x5a,sizeof(test_aram));memset(g_ram,0,sizeof(g_ram));
+    sequence_enabled=enabled;sequence_available=available;sequence_calls=0;
+    g_last_recomp_func="Func_02_9964";
+    if(malformed==1)++upload.script_offset;
+    if(malformed==2)--upload.block_count;
+    if(malformed==3)upload.entry_point^=0x100;
+    if(malformed==4)g_last_recomp_func="Func_02_9A56";
+    if(malformed==5)upload.entry_point=0;
+    memcpy(expected,test_aram,sizeof(expected));
+    if(!malformed && enabled && available)memcpy(expected+0x1200,sequence_data,rule?1325:2197);
+    check(ActRaiser_SpcUploadCustomize(&cpu,&upload,source+(malformed==6)),"regional sequence upload accepted");
+    check(sequence_calls==!malformed,"only the recognized song upload activates its sequence policy");
+    check(!memcmp(test_aram,expected,sizeof(expected)),"regional sequence changes only its ARAM span; missing donors preserve US data");
+    check(!cpu.A && !cpu.X && !cpu.Y && !cpu.P && !cpu.S && !cpu.D,"sequence projection preserves CPU state");
+  }
+  sequence_ready=false;sequence_calls=0;
+  CpuState cpu={0};SrSpcUploadContext upload=make_upload();
+  upload.script_offset=0x7769f+2353;upload.entry_point=0x1108;upload.block_count=5;
+  g_last_recomp_func="Func_02_9964";
+  memcpy(expected,test_aram,sizeof(expected));
+  check(!ActRaiser_SpcUploadCustomize(&cpu,&upload,0x0ef69f),"failed policy activation refuses donor projection");
+  check(sequence_calls==1 && !memcmp(expected,test_aram,sizeof(expected)),"failed activation leaves ARAM intact");
+  sequence_ready=true;
+}
+
 int main(void) {
   CpuState cpu;
   memset(&cpu, 0, sizeof(cpu));
   test_source_and_stack_policy();
   test_sample_pool_policy(&cpu);
   test_bootstrap_and_resident_completion();
+  test_regional_sequences();
   if (failures == 0) puts("ActRaiser SPC upload adapter: PASS");
   return failures == 0 ? 0 : 1;
 }

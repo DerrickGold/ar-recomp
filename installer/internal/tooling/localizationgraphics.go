@@ -21,7 +21,7 @@ func RunLocalizationGraphicsCommand(args []string, cwd string, output io.Writer)
 	if flags.NArg() != 0 || *romPath == "" || *outPath == "" {
 		return fmt.Errorf("usage: actraiser-builder localization-graphics --rom game.sfc --out reference.zip")
 	}
-	decoder, err := readLocalizationROM(resolveLocalizationPath(cwd, *romPath))
+	decoder, err := readLocalizationROM(resolveToolPath(cwd, *romPath))
 	if err != nil {
 		return err
 	}
@@ -34,8 +34,8 @@ func RunLocalizationGraphicsCommand(args []string, cwd string, output io.Writer)
 		names = append(names, name)
 	}
 	slices.Sort(names)
-	destination := resolveLocalizationPath(cwd, *outPath)
-	if err := writeNewLocalizationFile(destination, func(w io.Writer) error {
+	destination := resolveToolPath(cwd, *outPath)
+	if err := writeNewToolFile(destination, func(w io.Writer) error {
 		archive := zip.NewWriter(w)
 		for _, name := range names {
 			member, err := archive.Create(name)

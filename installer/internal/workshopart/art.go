@@ -10,12 +10,14 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+
+	"github.com/DerrickGold/ar-recomp/installer/internal/gamerom"
 )
 
 const (
 	Version = 3
 	// Same exact headerless retail identity as the native-US language profile.
-	SourceSHA256  = "b8055844825653210d252d29a2229f9a3e7e512004e83940620173c57d8723f0"
+	SourceSHA256  = gamerom.USSHA256
 	AtlasWidth    = 960
 	AtlasHeight   = 1728
 	cellSize      = 96
@@ -78,7 +80,8 @@ func compositions() []composition {
 }
 
 func Extract(data []byte) (*Assets, error) {
-	if len(data) != 1<<20 || fmt.Sprintf("%x", sha256.Sum256(data)) != SourceSHA256 {
+	release, err := gamerom.Identify(data)
+	if err != nil || release.ID != "us" {
 		return nil, fmt.Errorf("workshop scenery requires the clean, headerless US ROM")
 	}
 	return extract(data)

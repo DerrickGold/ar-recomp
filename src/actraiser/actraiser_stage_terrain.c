@@ -1,4 +1,5 @@
 #include "actraiser_stage_terrain.h"
+#include "actraiser_regional_media.h"
 #include "actraiser_stage_placements.h"
 #include "actraiser_regional_runtime.h"
 #include "actraiser_action_bg.h"
@@ -43,7 +44,9 @@ RecompReturn ActRaiser_StageTerrain(CpuState *cpu) {
     if (y == 23*16 || y == 25*16)
       cpu_write16(cpu,0,0x0330,(uint16_t)(16*ArRegionalTerrain_FillmoreCheckpointY(profile)));
   }
-  ActRaiserActionBg_BeginRoomVariants(profile,ActRaiserRegional_MosaicSnapshot());
+  ActRaiserActionBg_BeginRoomVariants(profile,ActRaiserRegional_MosaicSnapshot(),
+      ActRaiserRegionalMedia_DeathHeimCharacters(
+          (ActRaiserRegional_ArtworkSnapshot()&(1u<<kArRegionalArtwork_DeathHeim))!=0,scene));
   /* LDX #0 only; native continuation rebuilds attributes, collision, camera
    * and staged tilemaps after the complete asset VM, before any actors run. */
   cpu->X = 0;

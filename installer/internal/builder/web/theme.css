@@ -1373,3 +1373,9 @@ pre {
 #game-folder-dialog .dialog-actions{margin-top:12px}
 #dock .status-badge{max-width:min(60vw,520px);white-space:normal;overflow-wrap:anywhere}
 @media(max-width:800px){.sidebar-tools{display:flex;flex-wrap:wrap;margin:0}.sidebar-tools button{width:auto;flex:1 1 180px}.sidebar-tools:has(>button:not([hidden])){padding-bottom:12px}.dialog-actions>button:not(:only-child){flex:1 1 150px}}
+/* Regional media installs independently of external music/title replacements. */
+.regional-media-card {max-width:850px;padding:1.5rem;border:1px solid var(--line);border-radius:12px;background:var(--panel);}
+.regional-media-actions {display:flex;flex-wrap:wrap;gap:.75rem;margin-top:1rem;}
+.regional-media-donors {list-style:none;padding:0;margin:1.5rem 0;}
+.regional-media-donors li {display:grid;grid-template-columns:1fr auto;gap:.35rem 1rem;padding:.8rem 0;border-bottom:1px solid var(--line);}
+.regional-media-donors small {grid-column:1/-1;color:var(--muted);}

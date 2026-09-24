@@ -255,6 +255,7 @@ type application struct {
 	// same time. Serializing the read/merge/install transaction prevents the
 	// second request from rebuilding a manifest from stale text.
 	assetMu           sync.Mutex
+	regionalMediaMu   sync.Mutex
 	directoryPickerMu sync.Mutex
 	interfaceMu       sync.Mutex
 	localization      localizationSession
@@ -404,6 +405,10 @@ func (app *application) ServeHTTP(response http.ResponseWriter, request *http.Re
 	}
 	if strings.HasPrefix(endpoint, "localization/") {
 		app.serveLocalization(response, request, strings.TrimPrefix(endpoint, "localization/"))
+		return
+	}
+	if endpoint == "regional-media" {
+		app.serveRegionalMedia(response, request)
 		return
 	}
 	switch {

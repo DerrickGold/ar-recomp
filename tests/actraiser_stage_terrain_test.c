@@ -3,6 +3,7 @@
 #include "action/action_room_terrain.h"
 #include "regional/regional_terrain.h"
 #include "byte_order.h"
+#include "actraiser/actraiser_regional_media.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -21,7 +22,13 @@ bool ActRaiserStagePlacements_Prepare(uint16_t scene,const ArRegionalPlacementPo
   assert(terrain==profile);return true;
 }
 uint8_t ActRaiserRegional_MosaicSnapshot(void) { return 2; }
-void ActRaiserActionBg_BeginRoomVariants(uint8_t p,uint8_t mosaic) { assert(mosaic==2);presented=p;++publishes; }
+uint8_t ActRaiserRegional_ArtworkSnapshot(void) {return 0;}
+ArRegionalMediaBytes ActRaiserRegionalMedia_DeathHeimCharacters(bool enabled,uint16_t scene) {
+  (void)scene;assert(!enabled);return (ArRegionalMediaBytes){0};
+}
+void ActRaiserActionBg_BeginRoomVariants(uint8_t p,uint8_t mosaic,ArRegionalMediaBytes donor) {
+  assert(mosaic==2 && !donor.data);presented=p;++publishes;
+}
 int cpu_hle_tailcall_request(uint32_t pc,uint32_t site) { target=pc;origin=site;return 1; }
 uint8 cpu_read8(CpuState *cpu,uint8 b,uint16 at) {
   (void)cpu;assert(b==0 || b==0x7e || b==0x0a);

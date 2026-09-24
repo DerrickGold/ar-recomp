@@ -43,7 +43,19 @@ bool ArRegionalRules_Fingerprint(const ArRegionalRules *requested,
   if(!ArRegionalPlacements_Valid(&requested->placements) ||
       !ArRegionalPlacements_Valid(&effective->placements))return false;
   uint8_t music_requested,music_effective;
+  uint8_t artwork_requested,artwork_effective;
+  uint8_t actor_art_requested,actor_art_effective;
+  if(!ArRegionalActorArtwork_Resolve(&requested->actor_artwork,&actor_art_requested) ||
+      !ArRegionalActorArtwork_Resolve(&effective->actor_artwork,&actor_art_effective))return false;
+  if(!ArRegionalArtwork_Resolve(&requested->artwork,&artwork_requested) ||
+      !ArRegionalArtwork_Resolve(&effective->artwork,&artwork_effective))return false;
   uint8_t mosaic_requested,mosaic_effective;
+  uint8_t poses_requested,poses_effective;
+  uint8_t sequences_requested,sequences_effective;
+  if(!ArRegionalSequences_Resolve(&requested->sequences,&sequences_requested) ||
+      !ArRegionalSequences_Resolve(&effective->sequences,&sequences_effective))return false;
+  if(!ArRegionalPoses_Resolve(&requested->poses,&poses_requested) ||
+      !ArRegionalPoses_Resolve(&effective->poses,&poses_effective))return false;
   if(!ArRegionalMosaic_Resolve(requested->mosaic,&mosaic_requested) ||
       !ArRegionalMosaic_Resolve(effective->mosaic,&mosaic_effective))return false;
   if(!ArRegionalMusic_Resolve(requested->music,&music_requested) ||
@@ -539,9 +551,27 @@ bool ArRegionalRules_Fingerprint(const ArRegionalRules *requested,
     if(!sr_support_sha256(bytes,sizeof(bytes),out))return false;
     *baseline=false;
   }
+  if(artwork_requested || artwork_effective) {
+    uint8_t bytes[50]="ARARTWORK-R1";memcpy(bytes+16,out,32);
+    bytes[48]=artwork_requested;bytes[49]=artwork_effective;
+    if(!sr_support_sha256(bytes,sizeof(bytes),out))return false;
+    *baseline=false;
+  }
   if(mosaic_requested || mosaic_effective) {
     uint8_t bytes[50]="ARMOSAIC-R1";memcpy(bytes+16,out,32);
     bytes[48]=mosaic_requested;bytes[49]=mosaic_effective;
+    if(!sr_support_sha256(bytes,sizeof(bytes),out))return false;
+    *baseline=false;
+  }
+  if(poses_requested || poses_effective) {
+    uint8_t bytes[50]="ARPOSES-R1";memcpy(bytes+16,out,32);
+    bytes[48]=poses_requested;bytes[49]=poses_effective;
+    if(!sr_support_sha256(bytes,sizeof(bytes),out))return false;
+    *baseline=false;
+  }
+  if(sequences_requested || sequences_effective) {
+    uint8_t bytes[50]="ARSEQUENCE-R1";memcpy(bytes+16,out,32);
+    bytes[48]=sequences_requested;bytes[49]=sequences_effective;
     if(!sr_support_sha256(bytes,sizeof(bytes),out))return false;
     *baseline=false;
   }
@@ -554,6 +584,12 @@ bool ArRegionalRules_Fingerprint(const ArRegionalRules *requested,
   if(mode_requested || mode_effective) {
     uint8_t bytes[50]="ARMODEENTRY-R1";memcpy(bytes+16,out,32);
     bytes[48]=mode_requested;bytes[49]=mode_effective;
+    if(!sr_support_sha256(bytes,sizeof(bytes),out))return false;
+    *baseline=false;
+  }
+  if(actor_art_requested || actor_art_effective) {
+    uint8_t bytes[50]="ARACTORART-R1";memcpy(bytes+16,out,32);
+    bytes[48]=actor_art_requested;bytes[49]=actor_art_effective;
     if(!sr_support_sha256(bytes,sizeof(bytes),out))return false;
     *baseline=false;
   }

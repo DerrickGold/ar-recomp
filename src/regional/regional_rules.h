@@ -45,6 +45,8 @@
 #include "regional_terrain.h"
 #include "regional_music.h"
 #include "regional_mosaic.h"
+#include "regional_poses.h"
+#include "regional_artwork.h"
 #include "regional_placement_policy.h"
 
 /* Game-owned value snapshot. No campaign identity, persistence, native memory
@@ -54,7 +56,11 @@ typedef struct ArRegionalRules {
   ArRegionalSource hazards;
   ArRegionalSource terrain;
   ArRegionalSource music;
+  ArRegionalSequencePolicy sequences;
   ArRegionalSource mosaic;
+  ArRegionalPosePolicy poses;
+  ArRegionalArtworkPolicy artwork;
+  ArRegionalActorArtworkPolicy actor_artwork;
   ArRegionalPlacementPolicy placements;
   ArRegionalModePolicy mode_entry;
   ArRegionalCostPolicy costs;

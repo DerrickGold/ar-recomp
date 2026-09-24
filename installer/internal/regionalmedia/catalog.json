@@ -1,0 +1,30 @@
+[
+  {"id":1,"key":"death_heim_bg2","size":8192,"hashes":{
+    "us":"706afca97bfc14b2dda924680b0969b172570a83d3b877a5d6de36ee923e0251",
+    "jp":"f06974b31fac83a23ba4ad4b89846f4bfe70a165bfe50878ea9e1365f8d4ad6a",
+    "eu-en":"706afca97bfc14b2dda924680b0969b172570a83d3b877a5d6de36ee923e0251",
+    "de":"706afca97bfc14b2dda924680b0969b172570a83d3b877a5d6de36ee923e0251",
+    "fr":"706afca97bfc14b2dda924680b0969b172570a83d3b877a5d6de36ee923e0251"}},
+  {"id":2,"key":"action_health_pickup","size":128,"hashes":{
+    "eu-en":"884640caa38d561aeeb848e30b859428e6165f39e88e86ce753b6d8615b76888",
+    "de":"884640caa38d561aeeb848e30b859428e6165f39e88e86ce753b6d8615b76888",
+    "fr":"884640caa38d561aeeb848e30b859428e6165f39e88e86ce753b6d8615b76888"}},
+  {"id":3,"key":"action_spell_hud","size":768,"hashes":{
+    "eu-en":"cf1badb37e9e915f397828438c65bea4b7be550c033194f3bd01534b643d6938",
+    "de":"cf1badb37e9e915f397828438c65bea4b7be550c033194f3bd01534b643d6938",
+    "fr":"cf1badb37e9e915f397828438c65bea4b7be550c033194f3bd01534b643d6938"}},
+  {"id":4,"key":"town_follower_symbols","size":256,"hashes":{
+    "jp":"502a1a8b2a53a6c756cb07bc056e8cd1c7604edaa91d482b8a21a821c08c4e99"}},
+  {"id":5,"key":"town_lair_symbols","size":128,"hashes":{
+    "jp":"b7a9aa929817364ed4bbe2f1e6c811e98a2d9a95bea9f1a31898deb77a2ef44b"}},
+  {"id":6,"key":"town_pyramid_detail","size":32,"hashes":{
+    "jp":"a07b122df7ced0895aa0e9b3d50a348151753f12b88260bc9af757fdcaf39d08"}},
+  {"id":7,"key":"title_background","size":33024,"hashes":{
+    "jp":"511b8f10e75b8aa99da42832b296e5f4e48f482296ab9b40d17e97861b54c906"}},
+  {"id":8,"key":"song_09_sequence","size":2197,"hashes":{
+    "jp":"a72903c2133dbbb5a004dd58ab19c425c94128af85101a26132cc46f3b00940d"}},
+  {"id":9,"key":"song_12_sequence","size":1325,"hashes":{
+    "jp":"ec57bd4d83313da9eb469b0b1d5f7f65a4643c9e8275eb13391a469c2fb1d568"}},
+  {"id":10,"key":"action_actor_drawing","size":480388,"hashes":{
+    "jp":"d62d5eba4fc5f92806d408f66d561acb0eee70eb2a3d81fd67f3db487311523d"}}
+]

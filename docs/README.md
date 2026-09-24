@@ -34,6 +34,7 @@ marked uncertain should not be treated as verified offsets or behavior.
 
 - [RAM map](ram-map.md) and [ROM map](rom-map.md) — known state and data regions.
 - [Regional differences: technical evidence](regional-differences-technical.md)
+- [Regional media extraction and package format](regional-media.md)
   — ROM tables, code boundaries, measurements, and limits of the evidence
   behind the reader-facing article.
 - [Symbol map](research-symbol-map.md) — ROM addresses and their known purposes.

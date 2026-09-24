@@ -128,6 +128,7 @@
 
   <section class="panel" id="panel-assets" role="tabpanel" aria-labelledby="tab-assets" hidden>
     <div class="page-heading"><div><p class="eyebrow" data-i18n="builder.assets.eyebrow">SET THE STAGE</p><h1 data-i18n="builder.assets.title">Sights &amp; sounds</h1><p data-i18n="builder.assets.intro">Choose the title treatment, audition music from every realm, and save the arrangement for your next journey.</p></div></div>
+      <div class="asset-categories" aria-label="Asset categories" data-i18n-aria="builder.assets.categories"><button type="button" data-asset-category="music" aria-pressed="true"><span data-i18n="builder.assets.music">Music</span> <span class="count">17</span></button><button type="button" data-asset-category="title" aria-pressed="false" data-i18n="builder.assets.title_art">Title artwork</button><button type="button" data-asset-category="regions" aria-pressed="false" data-i18n="builder.media.category">Regional media</button></div>
     <form id="assets-form">
       <div class="asset-bar" id="asset-bar" data-dirty="false">
         <div class="asset-bar-text">
@@ -139,7 +140,6 @@
           <button type="submit" id="save-assets-top" disabled data-i18n="builder.assets.save_changes">Save changes</button>
         </div>
       </div>
-      <div class="asset-categories" aria-label="Asset categories" data-i18n-aria="builder.assets.categories"><button type="button" data-asset-category="music" aria-pressed="true"><span data-i18n="builder.assets.music">Music</span> <span class="count">17</span></button><button type="button" data-asset-category="title" aria-pressed="false" data-i18n="builder.assets.title_art">Title artwork</button></div>
 
       <div class="asset-title-card" id="asset-title-view" hidden>
         <img id="title-preview" src="title-logo.png" width="2212" height="760" loading="lazy"
@@ -187,6 +187,17 @@
 
       <div id="asset-state" role="status" hidden></div>
       <p class="section-note" data-i18n="builder.assets.restart_note">Saved changes take effect the next time the game starts.</p>
+    </form>
+    <form id="regional-media-form" class="regional-media-card" hidden>
+      <h2 data-i18n="builder.media.title">Bring another region’s sights and sounds along</h2>
+      <p data-i18n="builder.media.help">Extract private graphics and music sequences from a supported regional ROM, or install a .armedia file you extracted earlier. This never replaces your US build ROM or selects gameplay rules.</p>
+      <label for="regional-media-file" data-i18n="builder.media.file">Regional ROM or private .armedia file</label>
+      <input id="regional-media-file" type="file" accept=".sfc,.smc,.armedia" required>
+      <div class="regional-media-actions"><button id="regional-media-install" type="submit" data-i18n="builder.media.install">Extract &amp; install</button><button id="regional-media-refresh" type="button" class="secondary" data-i18n="builder.media.refresh">Refresh installed files</button></div>
+      <p id="regional-media-status" role="status" aria-live="polite"></p>
+      <ul id="regional-media-donors" class="regional-media-donors" aria-label="Regional media availability" data-i18n-aria="builder.media.availability"></ul>
+      <p class="section-note" data-i18n="builder.media.choose">After installation, restart the game and choose regional artwork or music under Settings → Localization → Regional rules. Missing donors use the US fallback; gameplay rules do not require a donor ROM.</p>
+      <p class="section-note" data-i18n="builder.media.private">These files contain ROM-derived graphics and music data. Keep them private; they are not shareable language packs.</p>
     </form>
   </section>
 
@@ -239,6 +250,7 @@
   <div class="dialog-actions"><button class="quiet" type="button" id="import-install-skip" data-i18n="builder.import.skip">Cancel</button><button type="button" id="import-install-apply" disabled data-i18n="builder.import.apply">Import into game output</button><button type="button" id="import-install-reload" hidden data-i18n="builder.import.reload">Reload Workshop</button></div>
 </dialog>
 <script src="builder/app.js" defer></script>
+<script src="builder/regional-media.js" defer></script>
 <script src="builder/install-import.js" defer></script>
 <dialog id="game-folder-dialog" aria-labelledby="game-folder-title"><h2 id="game-folder-title" data-i18n="builder.output.change">Change game folder…</h2><p data-i18n="builder.output.next_launch">Changes take effect after you close and reopen the Builder. This session keeps its current folder.</p><iframe id="game-folder-frame" title="Choose game folder" data-i18n-title="builder.output.choose"></iframe><div class="dialog-actions"><button class="secondary" type="button" id="game-folder-dismiss" data-i18n="builder.output.close">Close</button></div></dialog>
 <script src="builder/game-folder.js" defer></script>

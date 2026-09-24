@@ -8,6 +8,10 @@
 #include "actraiser/actraiser_lzss.h"
 #include "actraiser_action_room_hle_internal.h"
 #include "actraiser_game.h"
+#include "actraiser_regional_runtime.h"
+#include "actraiser_regional_media.h"
+#include "actraiser_actor_art.h"
+#include "actraiser_hle_fatal.h"
 
 enum {
   kDpUploadBegin = 0x00,
@@ -50,7 +54,7 @@ static bool ActionRoomGraphicsEnabled(void) {
 }
 
 static bool IsActionRoomGraphics(CpuState *cpu) {
-  if (!cpu || !ActionRoomGraphicsEnabled() || cpu->emulation ||
+  if (!cpu || cpu->emulation ||
       !cpu->m_flag || cpu->x_flag || cpu->DB != 0)
     return false;
   return ActRaiser_IsActionMapGroup(cpu_read8(
@@ -89,6 +93,16 @@ bool ActRaiser_ActionCharacterLoadHleEnabled(CpuState *cpu) {
 
   const uint8_t end = PeekOperand(cpu, 1);
   if (end != 0x08 && end != 0x10) return false;
+  const unsigned destination = PeekOperand(cpu, 2);
+  const bool actor_upload = (destination == 0x30 || destination == 0x40) &&
+      ActRaiserActorArt_NeedsUpload(cpu_read16(cpu, 0, 0x18),
+          kArRegionalActorArt_Characters, (destination - 0x30) / 0x10,
+          PeekLinearPointer(cpu, 3));
+  if (!ActionRoomGraphicsEnabled() && !actor_upload && !(destination==0x10 &&
+      PeekLinearPointer(cpu,3)==0x7d146 &&
+      ActRaiserRegionalMedia_DeathHeimCharacters(
+          (ActRaiserRegional_ArtworkSnapshot()&(1u<<kArRegionalArtwork_DeathHeim))!=0,
+          cpu_read16(cpu,0,0x18)).data)) return false;
   const uint16_t expected_bytes = (uint16_t)((unsigned)end << 9);
   const uint32_t source = LinearToSnes(PeekLinearPointer(cpu, 3));
   return cpu_read16(cpu, (uint8_t)(source >> 16), (uint16_t)source) ==
@@ -100,6 +114,10 @@ bool ActRaiser_ActionPaletteLoadHleEnabled(CpuState *cpu) {
       PeekOperand(cpu, 1) != 0x40)
     return false;
   const uint8_t destination = PeekOperand(cpu, 2);
+  if (!ActionRoomGraphicsEnabled() && !(destination == 0x80 &&
+      ActRaiserActorArt_NeedsUpload(cpu_read16(cpu, 0, 0x18),
+          kArRegionalActorArt_Palette, 0, PeekLinearPointer(cpu, 3))))
+    return false;
   return destination == 0x00 || destination == 0x40 ||
       destination == 0x80;
 }
@@ -187,6 +205,16 @@ RecompReturn ActRaiser_LoadActionCharacters(CpuState *cpu) {
   ActionRoomHle_WriteDirectPage16(cpu, kDpUploadEnd, copy_bytes);
 
   const uint16_t destination = ReadOperand(cpu);
+  const uint32_t source_linear = PeekLinearPointer(cpu,0);
+  ArRegionalMediaBytes donor = destination==0x10 && source_linear==0x7d146 && copy_bytes==8192?
+      ActRaiserRegionalMedia_DeathHeimCharacters(
+          (ActRaiserRegional_ArtworkSnapshot()&(1u<<kArRegionalArtwork_DeathHeim))!=0,
+          cpu_read16(cpu,0,0x18)):(ArRegionalMediaBytes){0};
+  if (copy_bytes == 8192 && (destination == 0x30 || destination == 0x40) &&
+      !ActRaiserActorArt_Upload(cpu_read16(cpu, 0, 0x18),
+          kArRegionalActorArt_Characters, (destination - 0x30) / 0x10,
+          source_linear, &donor))
+    ActRaiserHleFatal("Cannot capture regional actor character upload");
   ActRaiserCpuHle_PushWord(cpu, destination);
   cpu_write16(cpu, cpu->DB, kPpuVramAddress,
               (uint16_t)(destination << 8));
@@ -213,7 +241,10 @@ RecompReturn ActRaiser_LoadActionCharacters(CpuState *cpu) {
     cpu->A = cpu_read16(
         cpu, kSnesLowWramBank,
         (uint16_t)(kCharacterWorkspace + cpu->X));
-    cpu_write16(cpu, cpu->DB, kPpuVramDataLow, cpu->A);
+    /* Preserve native workspace, source cursor and CPU/stack residue; only
+     * the declared character upload uses donor pixels. No ROM mutation. */
+    const uint16_t pixels=donor.data?(uint16_t)(donor.data[cpu->X]|(uint16_t)donor.data[cpu->X+1]<<8):cpu->A;
+    cpu_write16(cpu, cpu->DB, kPpuVramDataLow, pixels);
     cpu->X = (uint16_t)(cpu->X + 2u);
   }
 
@@ -241,6 +272,11 @@ RecompReturn ActRaiser_LoadActionPalette(CpuState *cpu) {
   ActionRoomHle_WriteDirectPage16(cpu, kDpUploadBegin, source_begin);
   ActionRoomHle_WriteDirectPage16(cpu, kDpUploadEnd, source_end);
   const uint8_t destination = ReadOperand(cpu);
+  ArRegionalMediaBytes donor = {0};
+  if (destination == 0x80 && source_begin == 0 && source_end == 128 &&
+      !ActRaiserActorArt_Upload(cpu_read16(cpu, 0, 0x18),
+          kArRegionalActorArt_Palette, 0, PeekLinearPointer(cpu, 0), &donor))
+    ActRaiserHleFatal("Cannot capture regional actor palette upload");
   SetAccumulator8(cpu);
   cpu_write8(cpu, cpu->DB, kPpuCgramAddress, destination);
 
@@ -253,11 +289,11 @@ RecompReturn ActRaiser_LoadActionPalette(CpuState *cpu) {
     const uint8_t low =
         ActionRoomHle_ReadLongIndexed(cpu, kDpSource, cpu->Y++);
     cpu->A = (uint16_t)((cpu->A & 0xFF00u) | low);
-    cpu_write8(cpu, cpu->DB, kPpuCgramData, low);
+    cpu_write8(cpu, cpu->DB, kPpuCgramData, donor.data ? donor.data[cpu->Y - 1] : low);
     const uint8_t high =
         ActionRoomHle_ReadLongIndexed(cpu, kDpSource, cpu->Y++);
     cpu->A = (uint16_t)((cpu->A & 0xFF00u) | high);
-    cpu_write8(cpu, cpu->DB, kPpuCgramData, high);
+    cpu_write8(cpu, cpu->DB, kPpuCgramData, donor.data ? donor.data[cpu->Y - 1] : high);
   }
   cpu->Y = ActRaiserCpuHle_PopWord(cpu); /* PLY */
 

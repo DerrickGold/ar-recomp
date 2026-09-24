@@ -24,6 +24,11 @@ static int failures;
 static unsigned native_calls, timer_calls;
 static RecompReturn native_result;
 static bool replace_time;
+static unsigned artwork_calls;
+void ActRaiserActorArt_BeginRoom(uint16_t scene) {
+  (void)scene;
+  ++artwork_calls;
+}
 
 #define CHECK(condition)                                                   \
   do {                                                                     \
@@ -266,6 +271,7 @@ static void TestRegionalWrapper(void) {
       unsigned before = timer_calls, calls_before = native_calls;
       CHECK(ActRaiser_RunActionVideoConfig(&actual) == RECOMP_RETURN_NORMAL);
       CHECK(timer_calls == before + 1 && native_calls == calls_before + native);
+      CHECK(artwork_calls == timer_calls);
       CHECK(!memcmp(&actual, &expected, sizeof(actual)));
       CHECK(!memcmp(ppu, saved_ppu, sizeof(ppu)));
       if (changed) { expected_ram[0xE6] = 0; expected_ram[0xE7] = 2; }
@@ -278,6 +284,7 @@ static void TestRegionalWrapper(void) {
   const unsigned calls = timer_calls;
   CHECK(ActRaiser_RunActionVideoConfig(&cpu) == native_result);
   CHECK(timer_calls == calls && !memcmp(&cpu, &before, sizeof(cpu)));
+  CHECK(artwork_calls == timer_calls);
   CHECK(ActRaiser_ActionVideoConfigEntry(&cpu)); /* guard restored on escape */
   CHECK(unsetenv("AR_ACTION_ROOM_VIDEO_HLE") == 0);
 }

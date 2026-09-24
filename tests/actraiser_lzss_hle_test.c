@@ -61,6 +61,16 @@ static void PutBits(size_t *bit, unsigned value, unsigned count) {
   }
 }
 
+static unsigned observations;
+static void Observe(void *context,uint32_t source,uint16_t destination,
+    const uint8_t *bytes,size_t size) {
+  CHECK(context==&observations);++observations;
+  CHECK(source==0x059000);
+  CHECK((destination==0x4000 && size==6) || (destination==0x4100 && size==1));
+  CHECK(bytes!=wram+destination && !memcmp(bytes,wram+destination,size));
+  CHECK(!memcmp(bytes,size==6?"AAAAAA":"Z",size));
+}
+
 static void TestCpuContract(void) {
   memset(wram, 0xCC, sizeof(wram));
   memset(source_bank, 0, sizeof(source_bank));
@@ -162,6 +172,14 @@ static void TestLiteralAccumulatorExit(void) {
 int main(void) {
   TestCpuContract();
   TestLiteralAccumulatorExit();
+  CHECK(observations==0);
+  ActRaiserLzss_SetObserver(Observe,&observations);
+  TestCpuContract();
+  TestLiteralAccumulatorExit();
+  CHECK(observations==2);
+  ActRaiserLzss_SetObserver(NULL,NULL);
+  TestCpuContract();
+  CHECK(observations==2);
   if (failures) {
     printf("actraiser lzss HLE: %d failure(s)\n", failures);
     return 1;

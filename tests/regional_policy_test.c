@@ -226,8 +226,14 @@ static void CheckMenuAdapter(void) {
       view.requested.spell_inventory=(ArRegionalSource)source;
       view.requested.hazards=(ArRegionalSource)source;
       view.requested.terrain=(ArRegionalSource)source;
+      for(unsigned i=0;i<kArRegionalActorArtwork_Count;++i)
+        view.requested.actor_artwork.source[i]=(ArRegionalSource)source;
       view.requested.music=(ArRegionalSource)source;
       view.requested.mosaic=(ArRegionalSource)source;
+      view.requested.poses=(ArRegionalPosePolicy){{source,source}};
+      view.requested.sequences=(ArRegionalSequencePolicy){{source,source}};
+      for(unsigned art=0;art<kArRegionalArtwork_Count;++art)
+        view.requested.artwork.source[art]=(ArRegionalSource)source;
       view.requested.placements=(ArRegionalPlacementPolicy){source,source};
       CHECK(ArRegionalActionStart_Init(&view.requested.action_start,(ArRegionalSource)source));
       CHECK(ArRegionalMode_Init(&view.requested.mode_entry,(ArRegionalSource)source));

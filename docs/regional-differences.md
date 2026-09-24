@@ -1361,8 +1361,11 @@ Marahna Act 1. This was checked against the music actually loaded when the
 original game enters the scene.
 
 Of the 17 compared US/Japanese song data sets, 15 match after accounting for
-their different locations in the ROM. Two have changed sequence data, and
-several scenes select music differently.
+their different locations in the ROM. The two revised sequences are the theme
+used in the Western Fillmore caves, Kasandora Act 2 and Marahna Act 1, and the
+Northwall theme. All three European releases share the US versions. Their
+sample choices are unchanged; the differences are in the musical sequences.
+Three-minute renders confirm that each revision changes the audio output.
 
 All five ROMs contain a silent music entry used by the final world-map
 transition before the credits. Western Music Mode exposes it as selection
@@ -1372,7 +1375,7 @@ scene-local selector. A normal route through that extra declaration has not
 been established; the silent resource itself is not unused.
 
 Evidence: [Fillmore Act 2 music](regional-differences-technical.md#fillmore-act-2-music-residency),
-[song-data survey](regional-differences-technical.md#structured-census),
+[regional song sequences](regional-differences-technical.md#regional-song-sequences),
 [silent Palace resource](regional-differences-technical.md#extra-palace-music-resource-silent-upload).
 
 ### Artwork

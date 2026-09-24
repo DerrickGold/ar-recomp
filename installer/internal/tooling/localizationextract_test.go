@@ -30,7 +30,7 @@ func TestNewLocalizationFileCleanup(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "source.zip")
 	errWrite := errors.New("injected writer failure")
-	if err := writeNewLocalizationFile(path, func(w io.Writer) error { _, _ = w.Write([]byte("partial")); return errWrite }); !errors.Is(err, errWrite) {
+	if err := writeNewToolFile(path, func(w io.Writer) error { _, _ = w.Write([]byte("partial")); return errWrite }); !errors.Is(err, errWrite) {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
@@ -45,7 +45,7 @@ func TestNewLocalizationFileCleanup(t *testing.T) {
 				t.Skip("symlink not available", err)
 			}
 		}
-		if err := writeNewLocalizationFile(target, func(io.Writer) error { t.Fatal("opened existing destination"); return nil }); err == nil {
+		if err := writeNewToolFile(target, func(io.Writer) error { t.Fatal("opened existing destination"); return nil }); err == nil {
 			t.Fatal("existing output accepted")
 		}
 		data, err := os.ReadFile(path)

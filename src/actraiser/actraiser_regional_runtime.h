@@ -33,10 +33,26 @@ ArRegionalCollisionSnapshot ActRaiserRegional_CollisionSnapshot(void);
 uint8_t ActRaiserRegional_HazardSnapshot(void);
 uint8_t ActRaiserRegional_TerrainSnapshot(void);
 uint8_t ActRaiserRegional_MosaicSnapshot(void);
+uint8_t ActRaiserRegional_PoseSnapshot(void);
+uint8_t ActRaiserRegional_ArtworkSnapshot(void);
+/* Zero-based action area. A read is side-effect-free; only the real sprite
+ * stage-entry resource loader activates a captured area choice. No donor availability is
+ * folded into the requested/effective policy. */
+bool ActRaiserRegional_ActorArtwork(unsigned area,bool activate,bool *enabled);
+/* Capture town-only art at the first accepted BG bank upload, before OBJ.
+ * The subsequent OBJ upload uses the same town generation. */
+bool ActRaiserRegional_BeginTownArtwork(uint16_t scene,uint8_t *mask);
+uint8_t ActRaiserRegional_TownArtworkSnapshot(uint16_t scene);
+/* Title-only activation, before its palette/CHR/map uploads. Does not bind
+ * Continue or a new campaign; later title edits remain pending until reload. */
+bool ActRaiserRegional_BeginTitleArtwork(uint8_t *mask);
+uint8_t ActRaiserRegional_TitleArtworkSnapshot(void);
 bool ActRaiserRegional_PlacementSnapshot(ArRegionalPlacementPolicy *policy,
     ArRegionalDifficulty *difficulty);
 /* Accepted scene track declaration; native selector/cache/upload remain owners. */
 bool ActRaiserRegional_BeginSceneMusic(uint8_t *profile);
+/* Actual recognized song upload, not a scene request or per-audio-frame hook. */
+bool ActRaiserRegional_BeginSongSequence(unsigned rule,bool *enabled);
 ArRegionalPlatformSkullSnapshot ActRaiserRegional_PlatformSkullSnapshot(void);
 ArRegionalCastHoldSnapshot ActRaiserRegional_CastHoldSnapshot(void);
 ArRegionalFireSnapshot ActRaiserRegional_FireSnapshot(void);

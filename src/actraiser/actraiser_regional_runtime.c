@@ -1,5 +1,6 @@
 #include "actraiser_regional_runtime.h"
 #include "actraiser_stage_placements.h"
+#include "actraiser_regional_media.h"
 
 #include "actraiser/actraiser_hle_fatal.h"
 #include "actraiser/actraiser_miracle.h"
@@ -69,6 +70,8 @@ static ArRegionalCampaign s_campaign;
  * campaign. Continue discards the draft and restores its own bound rules. */
 static ArRegionalSession s_title_draft;
 static bool s_title_open;
+static uint8_t s_title_artwork;
+static void PrepareTitleDraft(void);
 static ArRegionalRules s_return_rules;
 static bool s_return_rules_valid;
 static struct {
@@ -92,6 +95,14 @@ static ArRegionalScoreSnapshot s_score;
 enum { kScoreIdle, kScoreAwaitDeparture, kScoreSettledAtCard };
 static unsigned s_completion_state;
 static uint16_t s_completion_scene;
+bool ActRaiserRegional_ActorArtwork(unsigned area,bool activate,bool *enabled) {
+  if(!enabled || area>=kArRegionalActorArtwork_Count)return false;
+  if(!s_campaign.active_valid) {*enabled=false;return true;}
+  if(activate)return ArRegionalSession_BeginActorArtwork(&s_campaign.active,area,enabled);
+  const ArRegionalSource source=s_campaign.active.requested.actor_artwork.source[area];
+  if((unsigned)source>=kArRegionalSource_Count)return false;
+  *enabled=source==kArRegionalSource_Japan;return true;
+}
 static void ActivateLairAccounting(CpuState *cpu);
 static void ActivateLairReloads(CpuState *cpu);
 static ArRegionalRules s_boot_requested, s_boot_effective;
@@ -103,6 +114,8 @@ typedef struct ActionRuleCache {
   uint8_t hazards;
   uint8_t terrain;
   uint8_t mosaic;
+  uint8_t poses;
+  uint8_t artwork;
   ArRegionalPlacementPolicy placements;
   ArRegionalDifficulty placement_difficulty;
   ArRegionalActionMotionSnapshot motion;
@@ -120,6 +133,8 @@ typedef struct ActionRuleCache {
 /* Published only after every room-boundary activation succeeds. One aggregate
  * also guarantees title/recovery resets cannot leave an older family cached. */
 static ActionRuleCache s_action;
+static uint16_t s_town_art_scene;
+static uint8_t s_town_artwork;
 static bool s_miracle_active, s_prices_valid;
 static bool s_trace;
 static bool s_quake_active, s_quake_delegate;
@@ -137,6 +152,7 @@ static ArRegionalCostSnapshot s_prices, s_miracle_prices;
 bool ActRaiserRegional_Initialize(ArRegionalCampaignIdentity identity, void *context) {
   s_title_open=false;
   s_title_draft=(ArRegionalSession){0};
+  s_town_art_scene=0;s_town_artwork=0;
   s_return_rules_valid=false;
   ArRegionalSpellInventory_Reset(&s_inventory,false);s_inventory_icon_pending=false;
   if (!identity) return false;
@@ -366,6 +382,7 @@ bool ActRaiserRegional_ReturnToTitle(void) {
   if(s_title_open || !s_campaign.active_valid)return false;
   s_return_rules=s_campaign.active.requested;s_return_rules_valid=true;
   s_return_rules.difficulty.level=kArRegionalDifficulty_Normal;
+  s_town_art_scene=0;s_town_artwork=0;
   ArRegionalSpellInventory_Reset(&s_inventory,false);s_inventory_icon_pending=false;
   s_action=(ActionRuleCache){0};ActRaiserStagePlacements_Reset();
   return true;
@@ -387,6 +404,9 @@ bool ActRaiserRegional_CopyRulesView(ActRaiserRegionalRulesView *out) {
       !memcmp(s_population.campaign,out->campaign,16);
   out->pending_population=s_population.source;
   out->arrival_locked=session->arrival_locked;
+  out->artwork_available=ActRaiserRegionalMedia_AvailableArtwork();
+  out->sequences_available=ActRaiserRegionalMedia_AvailableSequences();
+  out->actor_artwork_available=ActRaiserRegionalMedia_ActorArt()!=NULL;
   return true;
 }
 
@@ -402,6 +422,11 @@ ActRaiserRegionalEditResult ActRaiserRegional_RequestRules(
     return kActRaiserRegionalEdit_Stale;
   bool ok;
   switch (group) {
+    case kActRaiserRegionalSetting_ActorArt: {
+      ArRegionalActorArtworkPolicy policy;
+      for(unsigned i=0;i<kArRegionalActorArtwork_Count;++i)policy.source[i]=source;
+      ok=ArRegionalSession_RequestActorArtwork(session,view->revision,&policy);break;
+    }
     case kActRaiserRegionalSetting_ModeEntry: {
       ArRegionalModePolicy policy;ArRegionalMode_Init(&policy,source);
       ok=ArRegionalSession_RequestModeEntry(session,view->revision,&policy);break;
@@ -417,6 +442,26 @@ ActRaiserRegionalEditResult ActRaiserRegional_RequestRules(
     }
     case kActRaiserRegionalSetting_Music:
       ok=ArRegionalSession_RequestMusic(session,view->revision,source);break;
+    case kActRaiserRegionalSetting_Sequences: {
+      ArRegionalSequencePolicy policy={{source,source}};
+      ok=ArRegionalSession_RequestSequences(session,view->revision,&policy);break;
+    }
+    case kActRaiserRegionalSetting_DeathHeimArt:
+      ok=ArRegionalSession_RequestArtwork(session,view->revision,kArRegionalArtwork_DeathHeim,source);break;
+    case kActRaiserRegionalSetting_ActionItemArt:
+      ok=ArRegionalSession_RequestArtwork(session,view->revision,kArRegionalArtwork_ActionItems,source);break;
+    case kActRaiserRegionalSetting_FollowerArt:
+      ok=ArRegionalSession_RequestArtwork(session,view->revision,kArRegionalArtwork_FollowerSymbols,source);break;
+    case kActRaiserRegionalSetting_LairArt:
+      ok=ArRegionalSession_RequestArtwork(session,view->revision,kArRegionalArtwork_LairSymbols,source);break;
+    case kActRaiserRegionalSetting_PyramidArt:
+      ok=ArRegionalSession_RequestArtwork(session,view->revision,kArRegionalArtwork_PyramidDetail,source);break;
+    case kActRaiserRegionalSetting_TitleArt:
+      ok=ArRegionalSession_RequestArtwork(session,view->revision,kArRegionalArtwork_TitleBackground,source);break;
+    case kActRaiserRegionalSetting_AitosPoses: {
+      const ArRegionalPosePolicy policy={{source,source}};
+      ok=ArRegionalSession_RequestPoses(session,view->revision,&policy);break;
+    }
     case kActRaiserRegionalSetting_Mosaic:
       ok=ArRegionalSession_RequestMosaic(session,view->revision,source);break;
     case kActRaiserRegionalSetting_Terrain:
@@ -596,6 +641,25 @@ ActRaiserRegionalEditResult ActRaiserRegional_RequestDifficulty(
 uint8_t ActRaiserRegional_HazardSnapshot(void) { return s_action.hazards; }
 uint8_t ActRaiserRegional_TerrainSnapshot(void) { return s_action.terrain; }
 uint8_t ActRaiserRegional_MosaicSnapshot(void) { return s_action.mosaic; }
+uint8_t ActRaiserRegional_PoseSnapshot(void) { return s_action.poses; }
+uint8_t ActRaiserRegional_ArtworkSnapshot(void) { return s_action.artwork; }
+bool ActRaiserRegional_BeginTitleArtwork(uint8_t *mask) {
+  if(!mask)return false;
+  if(!s_title_open)PrepareTitleDraft();
+  uint8_t next=0;
+  if(!ArRegionalSession_BeginTitleArtwork(&s_title_draft,&next))return false;
+  s_title_artwork=next;*mask=next;return true;
+}
+uint8_t ActRaiserRegional_TitleArtworkSnapshot(void) { return s_title_open?s_title_artwork:0; }
+uint8_t ActRaiserRegional_TownArtworkSnapshot(uint16_t scene) {
+  return s_campaign.active_valid && scene==s_town_art_scene?s_town_artwork:0;
+}
+bool ActRaiserRegional_BeginTownArtwork(uint16_t scene,uint8_t *mask) {
+  if(!mask || (scene&255) || scene<0x0100 || scene>0x0600)return false;
+  uint8_t next=0;
+  if(s_campaign.active_valid && !ArRegionalSession_BeginTownArtwork(&s_campaign.active,&next))return false;
+  s_town_art_scene=scene;s_town_artwork=next;*mask=next;return true;
+}
 bool ActRaiserRegional_PlacementSnapshot(ArRegionalPlacementPolicy *policy,ArRegionalDifficulty *difficulty) {
   if(!policy || !difficulty)return false;
   *policy=s_action.placements;*difficulty=s_action.placement_difficulty;return true;
@@ -605,6 +669,11 @@ bool ActRaiserRegional_BeginSceneMusic(uint8_t *profile) {
   if(!profile)return false;
   if(!s_campaign.active_valid) {*profile=0;return true;}
   return ArRegionalSession_BeginMusic(&s_campaign.active,profile);
+}
+bool ActRaiserRegional_BeginSongSequence(unsigned rule,bool *enabled) {
+  if(!enabled || rule>=kArRegionalSequence_Count)return false;
+  if(!s_campaign.active_valid) {*enabled=false;return true;}
+  return ArRegionalSession_BeginSequence(&s_campaign.active,rule,enabled);
 }
 
 bool ActRaiserRegional_BeginActionRoom(uint8_t profile, uint16_t native_bcd, uint16_t *out_bcd) {
@@ -624,6 +693,8 @@ bool ActRaiserRegional_BeginActionRoom(uint8_t profile, uint16_t native_bcd, uin
       !ArRegionalSession_BeginHazards(&candidate,&next.hazards) ||
       !ArRegionalSession_BeginTerrain(&candidate,&next.terrain) ||
       !ArRegionalSession_BeginMosaic(&candidate,&next.mosaic) ||
+      !ArRegionalSession_BeginPoses(&candidate,&next.poses) ||
+      !ArRegionalSession_BeginArtwork(&candidate,&next.artwork) ||
       !ArRegionalSession_BeginPlacements(&candidate,&next.placements) ||
       !ArRegionalSession_BeginScoreLives(&candidate,&next.score_lives) ||
       !ArRegionalSession_BeginCollision(&candidate,&next.collision) ||
@@ -1539,7 +1610,7 @@ bool ActRaiser_RegionalTitleEntry(CpuState *cpu) {
       cpu->D == 0 && !cpu->emulation;
 }
 
-RecompReturn ActRaiser_RegionalTitle(CpuState *cpu) {
+static void PrepareTitleDraft(void) {
   ArRegionalCampaign draft;
   ArRegionalCampaign_Init(&draft,s_campaign.slot,s_campaign.identity,s_campaign.identity_context);
   ArRegionalCostPolicy defaults;ArRegionalCosts_Init(&defaults,kArRegionalSource_US);
@@ -1560,16 +1631,23 @@ RecompReturn ActRaiser_RegionalTitle(CpuState *cpu) {
     draft.active.effective.story=s_return_rules.story;
     s_return_rules_valid=false;
   }
-  s_title_draft=draft.active;s_title_open=true;
+  s_title_draft=draft.active;s_title_artwork=0;s_title_open=true;
+}
+RecompReturn ActRaiser_RegionalTitle(CpuState *cpu) {
+  /* Normal entry follows the title asset script, which prepares this draft
+   * before its three artwork planes. Keep direct/debug entry safe too. */
+  if(!s_title_open)PrepareTitleDraft();
   /* The native title routine owns selection, checksum validation, restoration
    * and fades. Its normal return is accepted entry, including the no-save
-   * path (which bypasses Continue's selection loop). No resources have run yet.
+   * path (which bypasses Continue's selection loop). Action/SIM assets have
+   * not run yet; the title graphics already belong to this draft.
    * The original JSL frame remains owned by the generated routine. */
   s_delegate = true;
   RecompReturn result = bank_02_A622_M1X0(cpu);
   s_delegate = false;
   s_title_open=false;
   if (result != RECOMP_RETURN_NORMAL) return result;
+  SaveError error={{0}};
   bool ok;
   const unsigned selection = cpu_read8(cpu, 0, 0x0336);
   if (selection == 1) {
@@ -1590,6 +1668,7 @@ RecompReturn ActRaiser_RegionalTitle(CpuState *cpu) {
   if (!ok) ActRaiserHleFatal("Cannot enter regional campaign; saves preserved: %s",
                             error.message[0] ? error.message : "no durable save image");
   s_lair_seed_pending=selection!=1;
+  s_town_art_scene=0;s_town_artwork=0;
   ArRegionalSpellInventory_Reset(&s_inventory,false);s_inventory_icon_pending=false;
   s_action=(ActionRuleCache){0};ActRaiserStagePlacements_Reset();
   s_completion_state=kScoreIdle;

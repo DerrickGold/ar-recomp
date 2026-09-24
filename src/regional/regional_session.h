@@ -47,11 +47,28 @@ bool ArRegionalSession_BeginActionStart(ArRegionalSession *session,ArRegionalAct
 bool ArRegionalSession_RequestInventory(ArRegionalSession *session,uint32_t revision,ArRegionalSource source);
 bool ArRegionalSession_RequestMusic(ArRegionalSession *session,uint32_t revision,ArRegionalSource source);
 bool ArRegionalSession_RequestMosaic(ArRegionalSession *session,uint32_t revision,ArRegionalSource source);
+bool ArRegionalSession_RequestArtwork(ArRegionalSession *session,uint32_t revision,ArRegionalArtworkRule rule,ArRegionalSource source);
+bool ArRegionalSession_BeginArtwork(ArRegionalSession *session,uint8_t *mask);
+/* Independent activation boundaries: action room entry must not activate
+ * pending town art, nor may a town upload activate pending action art. */
+bool ArRegionalSession_BeginTownArtwork(ArRegionalSession *session,uint8_t *mask);
+bool ArRegionalSession_BeginTitleArtwork(ArRegionalSession *session,uint8_t *mask);
+bool ArRegionalSession_RequestActorArtwork(ArRegionalSession *session,uint32_t revision,
+    const ArRegionalActorArtworkPolicy *policy);
+/* Zero-based area. Only a real, coherent sprite-resource load activates that
+ * area's policy; inherited rooms and unrelated areas retain their snapshots. */
+bool ArRegionalSession_BeginActorArtwork(ArRegionalSession *session,unsigned area,bool *enabled);
+bool ArRegionalSession_RequestPoses(ArRegionalSession *session,uint32_t revision,const ArRegionalPosePolicy *policy);
+bool ArRegionalSession_BeginPoses(ArRegionalSession *session,uint8_t *snapshot);
 bool ArRegionalSession_BeginMosaic(ArRegionalSession *session,uint8_t *snapshot);
 bool ArRegionalSession_RequestPlacements(ArRegionalSession *session,uint32_t revision,
     const ArRegionalPlacementPolicy *policy);
 bool ArRegionalSession_BeginPlacements(ArRegionalSession *session,ArRegionalPlacementPolicy *snapshot);
 bool ArRegionalSession_BeginMusic(ArRegionalSession *session,uint8_t *snapshot);
+bool ArRegionalSession_RequestSequences(ArRegionalSession *session,uint32_t revision,const ArRegionalSequencePolicy *policy);
+/* One recognized song upload only. A change never restarts a resident song
+ * nor marks the other song's pending policy active before it is loaded. */
+bool ArRegionalSession_BeginSequence(ArRegionalSession *session,unsigned rule,bool *enabled);
 bool ArRegionalSession_RequestTerrain(ArRegionalSession *session,uint32_t revision,ArRegionalSource source);
 bool ArRegionalSession_BeginTerrain(ArRegionalSession *session,uint8_t *snapshot);
 bool ArRegionalSession_RequestHazards(ArRegionalSession *session,uint32_t revision,ArRegionalSource source);

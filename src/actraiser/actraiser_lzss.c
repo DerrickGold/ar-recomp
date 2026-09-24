@@ -27,6 +27,12 @@ typedef struct ActRaiserLzssReader {
   uint8_t source_bank;
 } ActRaiserLzssReader;
 
+static ActRaiserLzssObserver s_observer;
+static void *s_observer_context;
+void ActRaiserLzss_SetObserver(ActRaiserLzssObserver observer,void *context) {
+  s_observer=observer;s_observer_context=observer?context:NULL;
+}
+
 static uint16_t ReadDp16(CpuState *cpu, uint16_t offset) {
   return cpu_read16(cpu, kSnesLowWramBank, (uint16_t)(cpu->D + offset));
 }
@@ -130,6 +136,8 @@ RecompReturn ActRaiser_LzssDecompress(CpuState *cpu) {
   for (unsigned i = 0; i < kQuintetLzssDictionaryBytes; i++)
     cpu_write8(cpu, kSnesLowWramBank,
                (uint16_t)(kLzssDictionaryAddress + i), state.dictionary[i]);
+  if(s_observer)s_observer(s_observer_context,
+      (uint32_t)source_bank<<16|source_address,output_address,output,output_size);
   free(output);
 
   const uint16_t source_end =

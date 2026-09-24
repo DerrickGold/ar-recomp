@@ -6,6 +6,7 @@
 
 #include "actraiser_action_room_hle_internal.h"
 #include "actraiser_game.h"
+#include "actraiser_actor_art.h"
 #include "actraiser/actraiser_regional_runtime.h"
 #include "actraiser/actraiser_hle_fatal.h"
 
@@ -102,6 +103,7 @@ RecompReturn ActRaiser_RunActionVideoConfig(CpuState *cpu) {
   uint16_t resolved;
   if (!ActRaiserRegional_BeginActionRoom(profile, native_bcd, &resolved))
     ActRaiserHleFatal("Cannot initialize regional action rules for profile %02x", profile);
+  ActRaiserActorArt_BeginRoom(cpu_read16(cpu, 0, 0x18));
   if (resolved != native_bcd)
     ActionRoomHle_WriteDirectPage16(cpu, 0xE6, resolved);
   return result;

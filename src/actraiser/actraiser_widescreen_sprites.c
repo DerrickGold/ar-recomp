@@ -23,6 +23,7 @@
 #include "action/action_obj_apron.h"
 #include "actraiser_game.h"
 #include "actraiser_rtl.h"
+#include "actraiser/actraiser_actor_art.h"
 #include "display_geometry.h"
 #include "snesrecomp/runner.h"
 #include "settings.h"
@@ -794,17 +795,19 @@ RecompReturn ActRaiser_BuildObjectSprites(CpuState *cpu) {
   uint16 object_address = cpu->X;
   uint16 oam_offset = cpu->Y;
   int oam_full = 0;
+  const int16 native_left = (int16)cpu_read16(cpu, cpu->DB,
+      object_address + kActRaiserActionObject_LeftExtent);
+  const int16 native_top = (int16)cpu_read16(cpu, cpu->DB,
+      object_address + kActRaiserActionObject_TopExtent);
   uint16 screen_origin_x = (uint16)(
       cpu_read16(cpu, cpu->DB,
                  (uint16)(object_address + kActRaiserActionObject_WorldX)) -
-      cpu_read16(cpu, cpu->DB,
-                 (uint16)(object_address + kActRaiserActionObject_LeftExtent)) -
+      native_left -
       ws_dp16(cpu, kSpriteDp_CameraOriginX));
   uint16 screen_origin_y = (uint16)(
       cpu_read16(cpu, cpu->DB,
                  (uint16)(object_address + kActRaiserActionObject_WorldY)) -
-      cpu_read16(cpu, cpu->DB,
-                 (uint16)(object_address + kActRaiserActionObject_TopExtent)) -
+      native_top -
       ws_dp16(cpu, kSpriteDp_CameraOriginY));
   ws_dp16w(cpu, kSpriteDp_ScreenOriginX, screen_origin_x);
   ws_dp16w(cpu, kSpriteDp_ScreenOriginY, screen_origin_y);
@@ -832,6 +835,15 @@ RecompReturn ActRaiser_BuildObjectSprites(CpuState *cpu) {
   uint16 component_count =
       cpu_read8(cpu, definition_bank, definition_address);
   definition_address++;
+  ActRaiserActorArtDraw regional_draw = {0};
+  const bool regional = ActRaiserActorArt_Active() && definition_bank == 0x7E && ActRaiserActorArt_Draw(
+      cpu_read16(cpu, cpu->DB, object_address + kActRaiserActionObject_AnimationAddress),
+      cpu_read16(cpu, cpu->DB, object_address + kActRaiserActionObject_Composition),
+      cpu_read16(cpu, cpu->DB, object_address + kActRaiserActionObject_Visual),
+      &regional_draw);
+  if (regional && !regional_draw.attributes_only)
+    component_count = (uint16)regional_draw.picture.count;
+  unsigned component_index = 0;
   ws_dp16w(cpu, kSpriteDp_ComponentCount, component_count);
 
   if (ws_object_slot_log_enabled()) {
@@ -880,15 +892,23 @@ RecompReturn ActRaiser_BuildObjectSprites(CpuState *cpu) {
 
   for (;;) {
     flip_attributes = ws_dp16(cpu, kSpriteDp_FlipAttributes);
-    uint16 y_offsets = (uint16)(
-        cpu_read8(cpu, definition_bank,
-                  (uint16)(definition_address + kActionPartYOffsets)) |
-        (cpu_read8(cpu, definition_bank,
-                   (uint16)(definition_address +
-                            kActionPartYOffsets + 1)) << 8));
-    uint16 component_offset_y =
-        (flip_attributes & kDefinitionFlipVertical)
-            ? (uint16)(y_offsets >> 8) : (uint16)(y_offsets & 0xFF);
+    const bool flip_x = (flip_attributes & kDefinitionFlipHorizontal) != 0;
+    const bool flip_y = (flip_attributes & kDefinitionFlipVertical) != 0;
+    ActRaiserActorArtPart part = {0};
+    if (!regional || regional_draw.attributes_only) {
+      part.x = cpu_read8(cpu, definition_bank,
+          (uint16)(definition_address + kActionPartXOffsets + flip_x));
+      part.y = cpu_read8(cpu, definition_bank,
+          (uint16)(definition_address + kActionPartYOffsets + flip_y));
+      part.attributes = cpu_read16(cpu, definition_bank,
+          (uint16)(definition_address + kActionPartTileAttributes));
+      part.large = (cpu_read8(cpu, definition_bank,
+          (uint16)(definition_address + kActionPartFlags)) & 1) != 0;
+    }
+    if (regional)
+      ActRaiserActorArt_ResolvePart(&regional_draw, component_index, flip_x,
+          flip_y, native_left, native_top, &part);
+    const int component_offset_y = part.y;
     uint16 biased_y = (uint16)(
         component_offset_y + ws_dp16(cpu, kSpriteDp_ScreenOriginY));
 
@@ -905,13 +925,7 @@ RecompReturn ActRaiser_BuildObjectSprites(CpuState *cpu) {
                            kOamYFieldOffset),
                   stored_y);
 
-      uint16 tile_attributes = (uint16)(
-          cpu_read8(cpu, definition_bank,
-                    (uint16)(definition_address +
-                             kActionPartTileAttributes)) |
-          (cpu_read8(cpu, definition_bank,
-                     (uint16)(definition_address +
-                              kActionPartTileAttributes + 1)) << 8));
+      uint16 tile_attributes = part.attributes;
       uint16 rendered_attributes = (uint16)(
           (tile_attributes ^ flip_attributes) |
           ws_dp16(cpu, kSpriteDp_AttributeBias));
@@ -920,15 +934,7 @@ RecompReturn ActRaiser_BuildObjectSprites(CpuState *cpu) {
                            kOamTileAttributeOffset),
                   rendered_attributes);
 
-      uint16 x_offsets = (uint16)(
-          cpu_read8(cpu, definition_bank,
-                    (uint16)(definition_address + kActionPartXOffsets)) |
-          (cpu_read8(cpu, definition_bank,
-                     (uint16)(definition_address +
-                              kActionPartXOffsets + 1)) << 8));
-      uint16 component_offset_x =
-          (flip_attributes & kDefinitionFlipHorizontal)
-              ? (uint16)(x_offsets >> 8) : (uint16)(x_offsets & 0xFF);
+      const int component_offset_x = part.x;
       uint16 biased_x = (uint16)(
           component_offset_x + ws_dp16(cpu, kSpriteDp_ScreenOriginX));
 
@@ -945,10 +951,7 @@ RecompReturn ActRaiser_BuildObjectSprites(CpuState *cpu) {
 
         uint8 acc = g_ram[(uint16)(cpu->D + 0x00)];
         acc = (uint8)((acc >> 1) | (((screen_x >> 8) & 1) << 7));
-        acc = (uint8)((acc >> 1) |
-                      ((cpu_read8(cpu, definition_bank,
-                                  (uint16)(definition_address +
-                                           kActionPartFlags)) & 1) << 7));
+        acc = (uint8)((acc >> 1) | ((unsigned)part.large << 7));
         g_ram[(uint16)(cpu->D + 0x00)] = acc;
 
         /* Publish the exact position now that BOTH axes are stored and the
@@ -958,7 +961,7 @@ RecompReturn ActRaiser_BuildObjectSprites(CpuState *cpu) {
          * scanline would draw the parked tile at the failed part's Y with X
          * decoding to the parked 128. Values are the un-truncated forms of
          * exactly what the stored bytes encode (screen_origin is signed, the
-         * component offsets are small unsigned part offsets), which is what
+         * component offsets include signed regional anchor compensation), which is what
          * keeps a slot with an exact position byte-identical wherever the
          * encoding was not lossy. */
         const int exact_x =
@@ -1017,9 +1020,7 @@ RecompReturn ActRaiser_BuildObjectSprites(CpuState *cpu) {
         if (apron_geom.apron > 0 &&
             ws_biased_in_window(biased_x, resolve_left, resolve_right,
                                 kSpriteBiasedWidth)) {
-          const int part_large = cpu_read8(
-              cpu, definition_bank,
-              (uint16)(definition_address + kActionPartFlags)) & 1;
+          const int part_large = part.large;
           const int exact_x =
               (int)(int16)ws_dp16(cpu, kSpriteDp_ScreenOriginX) +
               (int)component_offset_x - kSpriteDrawBias;
@@ -1039,6 +1040,7 @@ RecompReturn ActRaiser_BuildObjectSprites(CpuState *cpu) {
 
     definition_address =
         (uint16)(definition_address + kSpriteDefinitionPartBytes);
+    ++component_index;
     component_count--;
     ws_dp16w(cpu, kSpriteDp_ComponentCount, component_count);
     if (component_count == 0)

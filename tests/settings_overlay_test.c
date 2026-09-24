@@ -290,6 +290,21 @@ static ActRaiserRegionalEditResult FakeRegionalEdit(const ActRaiserRegionalRules
     s_fake_region.requested.music=source;
   else if(group==kActRaiserRegionalSetting_Mosaic)
     s_fake_region.requested.mosaic=source;
+  else if(group==kActRaiserRegionalSetting_AitosPoses)
+    s_fake_region.requested.poses=(ArRegionalPosePolicy){{source,source}};
+  else if(group==kActRaiserRegionalSetting_Sequences)
+    s_fake_region.requested.sequences=(ArRegionalSequencePolicy){{source,source}};
+  else if(group==kActRaiserRegionalSetting_ActorArt) {
+    for(unsigned i=0;i<kArRegionalActorArtwork_Count;++i)s_fake_region.requested.actor_artwork.source[i]=source;
+  }
+  else if(group==kActRaiserRegionalSetting_DeathHeimArt)
+    s_fake_region.requested.artwork.source[kArRegionalArtwork_DeathHeim]=source;
+  else if(group==kActRaiserRegionalSetting_ActionItemArt)
+    s_fake_region.requested.artwork.source[kArRegionalArtwork_ActionItems]=source;
+  else if(group==kActRaiserRegionalSetting_TitleArt)
+    s_fake_region.requested.artwork.source[kArRegionalArtwork_TitleBackground]=source;
+  else if(group>=kActRaiserRegionalSetting_FollowerArt && group<=kActRaiserRegionalSetting_PyramidArt)
+    s_fake_region.requested.artwork.source[group-kActRaiserRegionalSetting_DeathHeimArt]=source;
   else if(group==kActRaiserRegionalSetting_EnemyPlacements)
     s_fake_region.requested.placements.enemies=source;
   else if(group==kActRaiserRegionalSetting_PickupPlacements)
@@ -956,11 +971,111 @@ static void CheckRegionalControls(SDL_Renderer *renderer, SDL_Surface *surface) 
     CHECK(used==length && !strchr(help,'{'));
   }
   CHECK(SettingsOverlay_HandleKey(SDLK_DOWN,true,false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(),"regional_death_heim_art"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT,true,false));
+  CHECK(s_region_edits==51 && s_fake_region.requested.artwork.source[0]==1 && !s_fake_region.effective.artwork.source[0]);
+  for(unsigned locale=0;locale<kArUiLocale_Count;++locale)for(unsigned available=0;available<2;++available) {
+    s_fake_region.artwork_available=(uint8_t)available;
+    char help[2048];CHECK(SettingsOverlayRegions_ViewDescription(locale,&s_fake_region,kActRaiserRegionalSetting_DeathHeimArt,help,sizeof(help)));
+    size_t used=0,length=strlen(help);
+    for(unsigned line=0;line<4 && used<length;++line) {
+      ArInterfaceTextLine slice;CHECK(ArInterfaceText_WrapLine(help+used,length-used,98,kArInterfaceTextMaximumBytes,&slice));
+      CHECK(slice.consumed);used+=slice.consumed;
+    }
+    CHECK(used==length && !strchr(help,'{'));
+  }
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN,true,false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "regional_action_item_art"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_LEFT,true,false));
+  CHECK(s_region_edits==52 && s_fake_region.requested.artwork.source[1]==2 && !s_fake_region.effective.artwork.source[1]);
+  for(unsigned locale=0;locale<kArUiLocale_Count;++locale)for(unsigned available=0;available<2;++available) {
+    s_fake_region.artwork_available=(uint8_t)(available<<1);
+    char help[2048];CHECK(SettingsOverlayRegions_ViewDescription(locale,&s_fake_region,kActRaiserRegionalSetting_ActionItemArt,help,sizeof(help)));
+    size_t used=0,length=strlen(help);
+    for(unsigned line=0;line<4 && used<length;++line) {
+      ArInterfaceTextLine slice;CHECK(ArInterfaceText_WrapLine(help+used,length-used,98,kArInterfaceTextMaximumBytes,&slice));
+      CHECK(slice.consumed);used+=slice.consumed;
+    }
+    CHECK(used==length && !strchr(help,'{'));
+  }
+  const char *town_art_keys[]={"regional_follower_art","regional_lair_art","regional_pyramid_art"};
+  for(unsigned i=0;i<3;++i) {
+    CHECK(SettingsOverlay_HandleKey(SDLK_DOWN,true,false));
+    CHECK(!strcmp(SettingsOverlay_SelectedKey(),town_art_keys[i]));
+    CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT,true,false));
+    CHECK(s_region_edits==53+i && s_fake_region.requested.artwork.source[2+i]==1);
+    for(unsigned locale=0;locale<kArUiLocale_Count;++locale)for(unsigned available=0;available<2;++available) {
+      s_fake_region.artwork_available=(uint8_t)(available<<(i+2));
+      char help[2048];CHECK(SettingsOverlayRegions_ViewDescription(locale,&s_fake_region,kActRaiserRegionalSetting_FollowerArt+i,help,sizeof(help)));
+      size_t used=0,length=strlen(help);
+      for(unsigned line=0;line<4 && used<length;++line) {
+        ArInterfaceTextLine slice;CHECK(ArInterfaceText_WrapLine(help+used,length-used,98,kArInterfaceTextMaximumBytes,&slice));
+        CHECK(slice.consumed);used+=slice.consumed;
+      }
+      CHECK(used==length && !strchr(help,'{'));
+    }
+  }
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN,true,false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "regional_title_art"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT,true,false));
+  CHECK(s_region_edits==56 && s_fake_region.requested.artwork.source[kArRegionalArtwork_TitleBackground]==1);
+  for(unsigned locale=0;locale<kArUiLocale_Count;++locale)for(unsigned available=0;available<2;++available) {
+    s_fake_region.artwork_available=available?kArRegionalArtwork_TitleMask:0;
+    char help[2048];CHECK(SettingsOverlayRegions_ViewDescription(locale,&s_fake_region,kActRaiserRegionalSetting_TitleArt,help,sizeof(help)));
+    size_t used=0,length=strlen(help);
+    for(unsigned line=0;line<4 && used<length;++line) {
+      ArInterfaceTextLine slice;CHECK(ArInterfaceText_WrapLine(help+used,length-used,98,kArInterfaceTextMaximumBytes,&slice));
+      CHECK(slice.consumed);used+=slice.consumed;
+    }
+    CHECK(used==length && !strchr(help,'{'));
+  }
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN,true,false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "regional_aitos_poses"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT,true,false));
+  CHECK(s_region_edits==57 && s_fake_region.requested.poses.source[0]==1 && s_fake_region.requested.poses.source[1]==1);
+  for(unsigned locale=0;locale<kArUiLocale_Count;++locale) {
+    char help[2048];CHECK(SettingsOverlayRegions_ViewDescription(locale,&s_fake_region,kActRaiserRegionalSetting_AitosPoses,help,sizeof(help)));
+    size_t used=0,length=strlen(help);
+    for(unsigned line=0;line<4 && used<length;++line) {
+      ArInterfaceTextLine slice;CHECK(ArInterfaceText_WrapLine(help+used,length-used,98,kArInterfaceTextMaximumBytes,&slice));
+      CHECK(slice.consumed);used+=slice.consumed;
+    }
+    CHECK(used==length && !strchr(help,'{'));
+  }
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN,true,false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "regional_sequences"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT,true,false));
+  CHECK(s_region_edits==58 && s_fake_region.requested.sequences.source[0]==1 && s_fake_region.requested.sequences.source[1]==1);
+  for(unsigned locale=0;locale<kArUiLocale_Count;++locale)for(unsigned available=0;available<4;++available) {
+    s_fake_region.sequences_available=available;
+    char help[2048];CHECK(SettingsOverlayRegions_ViewDescription(locale,&s_fake_region,kActRaiserRegionalSetting_Sequences,help,sizeof(help)));
+    size_t used=0,length=strlen(help);
+    for(unsigned line=0;line<4 && used<length;++line) {
+      ArInterfaceTextLine slice;CHECK(ArInterfaceText_WrapLine(help+used,length-used,98,kArInterfaceTextMaximumBytes,&slice));
+      CHECK(slice.consumed);used+=slice.consumed;
+    }
+    CHECK(used==length && !strchr(help,'{'));
+  }
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN,true,false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "regional_actor_art"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT,true,false));
+  CHECK(s_region_edits==59 && s_fake_region.requested.actor_artwork.source[0]==1);
+  for(unsigned locale=0;locale<kArUiLocale_Count;++locale)for(unsigned available=0;available<2;++available) {
+    s_fake_region.actor_artwork_available=available;
+    char help[2048];CHECK(SettingsOverlayRegions_ViewDescription(locale,&s_fake_region,kActRaiserRegionalSetting_ActorArt,help,sizeof(help)));
+    size_t used=0,length=strlen(help);
+    for(unsigned line=0;line<4 && used<length;++line) {
+      ArInterfaceTextLine slice;CHECK(ArInterfaceText_WrapLine(help+used,length-used,98,kArInterfaceTextMaximumBytes,&slice));
+      CHECK(slice.consumed);used+=slice.consumed;
+    }
+    CHECK(used==length && !strchr(help,'{'));
+  }
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN,true,false));
   CHECK(!strcmp(SettingsOverlay_SelectedKey(), "regional_scroll_prices")); /* no global reset row */
   s_fake_region.editable = false;
   CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
   CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
-  CHECK(s_region_edits == 50);
+  CHECK(s_region_edits == 59);
   CHECK(!memcmp(&before, &g_settings, sizeof(before)));
   s_fake_region.editable = true;
   SettingsOverlay_Close(); /* clear transient status for the preview */

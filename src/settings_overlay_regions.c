@@ -2,6 +2,18 @@
 
 #include <stdio.h>
 
+static int ArtworkRule(ActRaiserRegionalSettingGroup group) {
+  switch(group) {
+    case kActRaiserRegionalSetting_DeathHeimArt:return kArRegionalArtwork_DeathHeim;
+    case kActRaiserRegionalSetting_ActionItemArt:return kArRegionalArtwork_ActionItems;
+    case kActRaiserRegionalSetting_FollowerArt:return kArRegionalArtwork_FollowerSymbols;
+    case kActRaiserRegionalSetting_LairArt:return kArRegionalArtwork_LairSymbols;
+    case kActRaiserRegionalSetting_PyramidArt:return kArRegionalArtwork_PyramidDetail;
+    case kActRaiserRegionalSetting_TitleArt:return kArRegionalArtwork_TitleBackground;
+    default:return -1;
+  }
+}
+
 unsigned SettingsOverlayRegions_DescriptionLines(ActRaiserRegionalSettingGroup group) {
   return group==kActRaiserRegionalSetting_Bosses?6:4;
 }
@@ -31,7 +43,16 @@ const char *SettingsOverlayRegions_RowKey(ActRaiserRegionalSettingGroup group) {
     case kActRaiserRegionalSetting_Hazards:return "regional_hazards";
     case kActRaiserRegionalSetting_Terrain:return "regional_terrain";
     case kActRaiserRegionalSetting_Music:return "regional_music";
+    case kActRaiserRegionalSetting_Sequences:return "regional_sequences";
+    case kActRaiserRegionalSetting_ActorArt:return "regional_actor_art";
     case kActRaiserRegionalSetting_Mosaic:return "regional_mosaic";
+    case kActRaiserRegionalSetting_DeathHeimArt:return "regional_death_heim_art";
+    case kActRaiserRegionalSetting_ActionItemArt:return "regional_action_item_art";
+    case kActRaiserRegionalSetting_FollowerArt:return "regional_follower_art";
+    case kActRaiserRegionalSetting_LairArt:return "regional_lair_art";
+    case kActRaiserRegionalSetting_PyramidArt:return "regional_pyramid_art";
+    case kActRaiserRegionalSetting_TitleArt:return "regional_title_art";
+    case kActRaiserRegionalSetting_AitosPoses:return "regional_aitos_poses";
     case kActRaiserRegionalSetting_EnemyPlacements:return "regional_enemy_placements";
     case kActRaiserRegionalSetting_PickupPlacements:return "regional_pickup_placements";
     case kActRaiserRegionalSetting_Inventory:return "regional_inventory";
@@ -88,8 +109,26 @@ const char *SettingsOverlayRegions_RowLabel(ArUiLocale locale, ActRaiserRegional
       return ArUiCatalog_Text(locale,"overlay.region.terrain_label",NULL);
     case kActRaiserRegionalSetting_Music:
       return ArUiCatalog_Text(locale,"overlay.region.music_label",NULL);
+    case kActRaiserRegionalSetting_Sequences:
+      return ArUiCatalog_Text(locale,"overlay.region.sequences_label",NULL);
+    case kActRaiserRegionalSetting_ActorArt:
+      return ArUiCatalog_Text(locale,"overlay.region.actor_art_label",NULL);
     case kActRaiserRegionalSetting_Mosaic:
       return ArUiCatalog_Text(locale,"overlay.region.mosaic_label",NULL);
+    case kActRaiserRegionalSetting_DeathHeimArt:
+      return ArUiCatalog_Text(locale,"overlay.region.death_heim_art_label",NULL);
+    case kActRaiserRegionalSetting_ActionItemArt:
+      return ArUiCatalog_Text(locale,"overlay.region.action_item_art_label",NULL);
+    case kActRaiserRegionalSetting_FollowerArt:
+      return ArUiCatalog_Text(locale,"overlay.region.follower_art_label",NULL);
+    case kActRaiserRegionalSetting_LairArt:
+      return ArUiCatalog_Text(locale,"overlay.region.lair_art_label",NULL);
+    case kActRaiserRegionalSetting_PyramidArt:
+      return ArUiCatalog_Text(locale,"overlay.region.pyramid_art_label",NULL);
+    case kActRaiserRegionalSetting_TitleArt:
+      return ArUiCatalog_Text(locale,"overlay.region.title_art_label",NULL);
+    case kActRaiserRegionalSetting_AitosPoses:
+      return ArUiCatalog_Text(locale,"overlay.region.aitos_poses_label",NULL);
     case kActRaiserRegionalSetting_EnemyPlacements:
       return ArUiCatalog_Text(locale,"overlay.region.enemy_placements_label",NULL);
     case kActRaiserRegionalSetting_PickupPlacements:
@@ -232,6 +271,35 @@ bool SettingsOverlayRegions_ViewBadge(const ActRaiserRegionalRulesView *view,
     const ArRegionalSource source=effective?view->effective.music:view->requested.music;
     uint8_t profile;if(!ArRegionalMusic_Resolve(source,&profile))return false;
     *badge=SourceBadge(source);return true;
+  }
+  const int artwork_rule=ArtworkRule(group);
+  if(group==kActRaiserRegionalSetting_ActorArt) {
+    const ArRegionalActorArtworkPolicy *policy=effective?&view->effective.actor_artwork:&view->requested.actor_artwork;
+    uint8_t mask;if(!ArRegionalActorArtwork_Resolve(policy,&mask))return false;
+    bool same=true;
+    for(unsigned i=1;i<kArRegionalActorArtwork_Count;++i)same &= policy->source[i]==policy->source[0];
+    *badge=same?SourceBadge(policy->source[0]):mask==0?kOverlayRegionBadge_US:
+        mask==0x7f?kOverlayRegionBadge_Japan:kOverlayRegionBadge_Mixed;
+    return true;
+  }
+  if(group==kActRaiserRegionalSetting_Sequences) {
+    const ArRegionalSequencePolicy *policy=effective?&view->effective.sequences:&view->requested.sequences;
+    uint8_t mask;if(!ArRegionalSequences_Resolve(policy,&mask))return false;
+    *badge=policy->source[0]==policy->source[1]?SourceBadge(policy->source[0]):
+        mask==0?kOverlayRegionBadge_US:mask==3?kOverlayRegionBadge_Japan:kOverlayRegionBadge_Mixed;
+    return true;
+  }
+  if(group==kActRaiserRegionalSetting_AitosPoses) {
+    const ArRegionalPosePolicy *policy=effective?&view->effective.poses:&view->requested.poses;
+    uint8_t snapshot;if(!ArRegionalPoses_Resolve(policy,&snapshot))return false;
+    *badge=policy->source[0]==policy->source[1]?SourceBadge(policy->source[0]):
+        snapshot==0?kOverlayRegionBadge_US:snapshot==3?kOverlayRegionBadge_Japan:kOverlayRegionBadge_Mixed;
+    return true;
+  }
+  if(artwork_rule>=0) {
+    const ArRegionalArtworkPolicy *policy=effective?&view->effective.artwork:&view->requested.artwork;
+    uint8_t mask;if(!ArRegionalArtwork_Resolve(policy,&mask))return false;
+    *badge=SourceBadge(policy->source[artwork_rule]);return true;
   }
   if(group==kActRaiserRegionalSetting_Mosaic) {
     const ArRegionalSource source=effective?view->effective.mosaic:view->requested.mosaic;
@@ -603,6 +671,12 @@ bool SettingsOverlayRegions_ViewDescription(ArUiLocale locale,
     char *output, size_t capacity) {
   SettingsOverlayRegionBadge badge;
   if (!SettingsOverlayRegions_ViewBadge(view, group, false, &badge)) return false;
+  if(group==kActRaiserRegionalSetting_ActorArt) {
+    uint8_t mask;if(!ArRegionalActorArtwork_Resolve(&view->requested.actor_artwork,&mask))return false;
+    const char *key=mask && !view->actor_artwork_available?"overlay.region.actor_art_missing":"overlay.region.actor_art_help";
+    const int length=snprintf(output,capacity,"%s",ArUiCatalog_Text(locale,key,NULL));
+    return length>=0 && (size_t)length<capacity;
+  }
   if(group==kActRaiserRegionalSetting_EnemyPlacements || group==kActRaiserRegionalSetting_PickupPlacements) {
     const char *keys[]={"overlay.region.enemy_placements_us","overlay.region.enemy_placements_jp","overlay.region.enemy_placements_eu"};
     const char *key=group==kActRaiserRegionalSetting_PickupPlacements?
@@ -615,13 +689,52 @@ bool SettingsOverlayRegions_ViewDescription(ArUiLocale locale,
     const int length=snprintf(output,capacity,"%s",ArUiCatalog_Text(locale,key,NULL));
     return length>=0 && (size_t)length<capacity;
   }
+  if(group==kActRaiserRegionalSetting_Sequences) {
+    uint8_t mask;if(!ArRegionalSequences_Resolve(&view->requested.sequences,&mask))return false;
+    const char *key=(mask&~view->sequences_available)?"overlay.region.sequences_missing":"overlay.region.sequences_help";
+    const int length=snprintf(output,capacity,"%s",ArUiCatalog_Text(locale,key,NULL));
+    return length>=0 && (size_t)length<capacity;
+  }
   if(group==kActRaiserRegionalSetting_Terrain) {
     const char *keys[]={"overlay.region.terrain_us","overlay.region.terrain_jp","overlay.region.terrain_eu"};
     const int length=snprintf(output,capacity,"%s",ArUiCatalog_Text(locale,keys[view->requested.terrain],NULL));
     return length>=0 && (size_t)length<capacity;
   }
+  if(group==kActRaiserRegionalSetting_DeathHeimArt) {
+    const bool requested=view->requested.artwork.source[kArRegionalArtwork_DeathHeim]==kArRegionalSource_Japan;
+    const char *key=requested && !(view->artwork_available&(1u<<kArRegionalArtwork_DeathHeim))?
+        "overlay.region.death_heim_art_missing":"overlay.region.death_heim_art_help";
+    const int length=snprintf(output,capacity,"%s",ArUiCatalog_Text(locale,key,NULL));
+    return length>=0 && (size_t)length<capacity;
+  }
+  if(group==kActRaiserRegionalSetting_ActionItemArt) {
+    const bool requested=view->requested.artwork.source[kArRegionalArtwork_ActionItems]==kArRegionalSource_Europe;
+    const char *key=requested && !(view->artwork_available&(1u<<kArRegionalArtwork_ActionItems))?
+        "overlay.region.action_item_art_missing":"overlay.region.action_item_art_help";
+    const int length=snprintf(output,capacity,"%s",ArUiCatalog_Text(locale,key,NULL));
+    return length>=0 && (size_t)length<capacity;
+  }
+  if(group>=kActRaiserRegionalSetting_FollowerArt && group<=kActRaiserRegionalSetting_PyramidArt) {
+    const int rule=ArtworkRule(group);
+    const char *keys[]={"overlay.region.follower_art_help","overlay.region.lair_art_help","overlay.region.pyramid_art_help"};
+    const bool missing=view->requested.artwork.source[rule]==kArRegionalSource_Japan && !(view->artwork_available&(1u<<rule));
+    const char *key=missing?"overlay.region.town_art_missing":keys[group-kActRaiserRegionalSetting_FollowerArt];
+    const int length=snprintf(output,capacity,"%s",ArUiCatalog_Text(locale,key,NULL));
+    return length>=0 && (size_t)length<capacity;
+  }
   if(group==kActRaiserRegionalSetting_Mosaic) {
     const int length=snprintf(output,capacity,"%s",ArUiCatalog_Text(locale,"overlay.region.mosaic_help",NULL));
+    return length>=0 && (size_t)length<capacity;
+  }
+  if(group==kActRaiserRegionalSetting_AitosPoses) {
+    const int length=snprintf(output,capacity,"%s",ArUiCatalog_Text(locale,"overlay.region.aitos_poses_help",NULL));
+    return length>=0 && (size_t)length<capacity;
+  }
+  if(group==kActRaiserRegionalSetting_TitleArt) {
+    const bool missing=view->requested.artwork.source[kArRegionalArtwork_TitleBackground]==kArRegionalSource_Japan &&
+        !(view->artwork_available&kArRegionalArtwork_TitleMask);
+    const char *key=missing?"overlay.region.title_art_missing":"overlay.region.title_art_help";
+    const int length=snprintf(output,capacity,"%s",ArUiCatalog_Text(locale,key,NULL));
     return length>=0 && (size_t)length<capacity;
   }
   if(group==kActRaiserRegionalSetting_Hazards) {

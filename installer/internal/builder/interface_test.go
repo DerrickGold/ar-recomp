@@ -165,7 +165,7 @@ func TestInterfaceBootstrapAndBindings(t *testing.T) {
 	if strings.Index(w.Body.String(), `src="builder/i18n.js"`) > strings.Index(w.Body.String(), `src="localization/editor.js"`) {
 		t.Fatal("interface bootstrap must precede editor execution")
 	}
-	for _, name := range []string{"web/index.html", "web/app.js", "web/file-input.js", "web/scene.js", "web/i18n.js", "localization.js", "localization_playback.js", "localization_styling.js"} {
+	for _, name := range []string{"web/index.html", "web/app.js", "web/file-input.js", "web/regional-media.js", "web/scene.js", "web/i18n.js", "localization.js", "localization_playback.js", "localization_styling.js"} {
 		data, err := frontendFiles.ReadFile(name)
 		if name == "web/index.html" {
 			data = []byte(pageHTML)

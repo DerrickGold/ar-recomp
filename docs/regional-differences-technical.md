@@ -5076,13 +5076,28 @@ room/retry initialization cancels only the pending cast and preserves stock.
 Health/max health each increment below24, independently of each other.
 
 Pickup source selection `$96E3` reuses US `$06:A400/A480/A500/A580`, which
-match the four spell pickups in all PAL ROMs byte-for-byte. The full-apple
-fallback distinguishes health growth from the incorrect native life graphic;
-it is not claimed to match the European health-growth art. The HUD uses the
-retained US spell graphics too, not the smaller PAL `$06:AC00` icons.
-Dirty-only `$02:AC20` publishes128 bytes through native PPU ports, leaving
-adjacent pickup tiles intact, then executes original JSR `$AF30` with caller
-word `$AC22`. Ordinary unchanged frames have no additional upload.
+match the four spell pickups in all PAL ROMs byte-for-byte. The independently
+selected European item artwork uses donor `$06:A880` for health growth and
+`$06:AC00 + index*$80` for the small spell icons. Empty inventory selects
+zero-based index4 in both native PAL upload paths. Story retains its own
+graphics; its extra-life source `$06:A080` is not the health-growth picture.
+Without a donor, health growth uses a full apple and spells use US icons.
+
+US `$02:BCED–BCF9` uploads the complete 256-byte entry window using the host
+collection's top spell, while retaining the native accumulator, counter,
+flags and PLP/RTL owner. Dirty-only `$02:AC20` publishes128 bytes through PPU
+ports, then executes original JSR `$AF30` with caller word `$AC22`. Ordinary
+unchanged frames have no additional upload. The health request retains its
+US item1 identity in queue `$D0–D5`; a narrowly guarded `$02:AF3D` wrapper
+delegates actual DMA/RTS and replaces only the resulting128 pixel bytes.
+DMA source/count residue and VRAM's final address remain native. Both
+uploads consume startup-validated, immutable donor views without file I/O.
+
+PAL Action pickup sound requests are BRK `$0F` for all four spells, the whole
+apple and the score item; health growth uses COP `$8D`. The latter two shared
+effects still execute the US native continuations `$8825` and `$8832`, but
+now receive the PAL sound request rather than US `$0D`. Sword power remains
+native, with sound `$25`. These sound requests require no donor graphics.
 
 Explicit generated boundaries prevent pickup-source, post-cast and NMI hooks
 from being inlined away. Codec54 defaults older companions to US inventory.
@@ -5541,6 +5556,49 @@ Private PCM captures and source-image hashes repeat exactly. This closes
 the Fillmore theme-selection lead, not the separate reachability question
 for the extra US/PAL Sky Palace song declaration.
 
+### Regional song sequences
+
+Two of the first 17 song-table entries differ between US and JP. The matching
+images in all three European ROMs are identical to US. Their five-block
+upload shape and sample-selection tail match across regions except for the
+sequence block at ARAM `$1200`:
+
+| Zero-based table entry | Native use | US source / sequence bytes | JP source / sequence bytes |
+| --- | --- | --- | --- |
+| 9 | Western Fillmore Act 2, Kasandora Act 2, Marahna Act 1 | `$0E:F69F` / 2224 | `$18:8000` / 2197 |
+| 12 | Northwall | `$19:FA4B` / 1326 | `$1A:B1E1` / 1325 |
+
+Music Mode uses one-based IDs10 and13. Unchanged blocks target
+`$2E48/$2F00/$2C30/$11FD`; the BRR pool at file`0x40000–4FFFF` also matches.
+The production Go extractor exports only each Japanese `$1200` block, with
+its reviewed hash, as media resources8/9. It does not export an audio driver.
+
+At the existing game-owned SPC upload customization boundary, recognized US
+sources additionally require five blocks, exact final entry words`$1108/$1D06`
+and script offsets`0x77FD0/0xCFFE6`. After the normal sample upload succeeds,
+the selected sequence replaces only its ARAM span. The native resident-source
+cache and playback handshakes are unchanged. Each song's requested policy
+becomes effective only when that song is uploaded; selecting a setting does
+not restart music or activate the other song prematurely. Missing donors
+retain US data. Session codec68 adds two independently named sequence leaves.
+
+The existing Go preview SPC/DSP implementation renders 180 seconds per song.
+For each, the projected sequence produces sample-for-sample identical PCM to
+the complete Japanese song image running on the US driver; both differ from
+the US sequence. A separate Japanese-driver control also differs, so sequence
+compatibility must not be described as complete Japanese audio fidelity.
+JP's bootstrap is `$02:983E` (2916 program bytes), versus US `$02:9ACD`
+(2893 bytes). Its initial timer wait uses absolute `$00FD`, where US uses the
+direct-page form. No foreign firmware, audio clock or external music override
+is changed by this policy.
+
+Two US-host12000-tick controls, with and without a Japanese package, load
+both songs under JP, US and European choices. CPU/full-WRAM state matches
+the native upload path; ARAM changes only inside the declared donor span.
+A second cave room with the same resident song performs no upload. Both
+runs exit normally. These are controlled native scene loads, not complete
+act traversal or subjective listening acceptance.
+
 ### European SIM state-program comparison
 
 US, EU English, German and French have identical bytes at
@@ -5654,6 +5712,54 @@ with no extra pixels outside it. All 89 follow-up files, including the
 85 new PNGs, reproduce byte-for-byte. The production renderer is unchanged.
 
 #### Shared-bank and palette completion
+
+The regional-media extractor now separates drawing parts from the native
+animation programs. Its five-ROM contract finds the same 115 scene-keyed
+character, palette and picture declarations in every release. Western
+draw resources match US apart from the four inserted Northwall impact
+descriptors already accounted for by the PAL boss rules. This is a resource
+identity check, not proof that every decoded picture is reached in gameplay.
+
+Three ordinal exceptions matter when applying Japanese artwork to US rules.
+Bloodpool Act 2's extra US picture `$3A` uses tile `$B9`, which is transparent
+in both character sheets; no out-of-range Japanese ordinal is needed to
+retain that blank. Marahna's extra US flashing-arrow picture `$36` instead
+needs the Japanese arrow `$2C`, not the next table entry. These picture
+choices must remain independent of arrow velocity and collision settings.
+Pharaoh's extra US picture `$28` keeps its native beam parts: tile `$A8` is
+identical in the Japanese character sheets for both the original encounter
+and the Death Heim rematch. Five-ROM extraction tests verify these fallback
+tiles rather than clamping into unrelated Japanese pictures.
+The [actor drawing format](regional-media.md#actor-drawing-resource) contains
+no executable animation or actor collision fields. The live adapter replaces
+only the accepted character/palette uploads and sprite drawing parts. Native
+decompression results, actor extents, animation programs and timing remain
+unchanged. The plant boss substitutes attributes only, retaining the part
+count and positions owned by its independent gameplay-geometry adapter.
+
+The native binding inventory resolves 43 character uploads, 40 palette
+uploads and 32 animation declarations. All 40 sprite-loading scene scripts
+pair at least one character bank with the `$80–BF` palette; the other action
+scenes inherit those resources. Animation and character slot numbers do not
+identify the same owner.
+
+Activation is stricter than simply encountering a character upload. Thirteen
+scripts replace the ordinary animation bank: the twelve act entrances and
+Death Heim. They capture the requested area choice on their first accepted
+actor upload; subsequent rooms retain it, including partial boss reloads.
+This prevents a newly selected palette from recoloring an inherited atlas.
+The drawing lookup uses the actual decoded source, visual ordinal and native
+composition pointer, not a guessed room-to-sprite mapping. Derived Northwall
+compositions therefore stay with their existing geometry owner.
+
+Nor is an animation slot an exclusive 4 KiB allocation. Fillmore's first
+boss image is 5353 bytes at `$5000`, Death Heim's ordinary image is 4926 bytes
+at `$4000`, and Marahna's second boss image is 4149 bytes at `$5000`. A later
+decode can therefore overwrite a subset of an earlier image. The derived
+residency tracker observes completed decodes and retires overlapping picture
+allocations; a write into an image's table/program prefix retires its complete
+binding. It does not alter native allocation, restore overwritten pictures
+or infer that unused-looking data was originally meant to be active.
 
 Fillmore Act 2 pictures `$28–2B` reference both the ordinary enemy atlas and
 the common action atlas at `$07:8000` (file `0x38000`). Under the ordinary
@@ -5785,12 +5891,58 @@ playthrough screenshots. No player or camera positions were changed.
 | Title entry `00/00` | Mode-7 raw character sheet at file `0x58300`, separately selected map/palette, reconstructed as a 1024×1024 canvas. Western canvases match; Japan changes the A, r, emblem and Japanese lettering. Copyright/company order is **not** baked into this canvas. |
 | Death Heim entry `07/01` | Separate BG1/BG2 compressed CHR, metatiles and chunk maps. Use action mask `$ECFF`, BG1 attribute `$1000` and BG2 `$0100`. BG1 matches; BG2 contains the first-statue horn redraw. Western BG2 resources render identically. Spare pages in the resource are not evidence of visible extra scenery. |
 
+Death Heim's host option captures `death_heim_art` at command3's room-profile
+boundary, before character loading. US file `0x7D146` at command7 destination
+VRAM word `$1000` identifies the compatible BG2 bank in rooms `$0107` and
+`$0807`. The data-only Japanese donor supplies 8192 decoded character bytes;
+native workspace, source cursors, flags and stack residue remain US-owned.
+The enhanced immutable scene receives the same bank after asset loading.
+Other rooms, OBJ graphics, palettes and gameplay metadata are untouched.
+Without a validated donor, both paths retain US characters. Package identity,
+size and content are validated once at startup, not during drawing.
+See [the package contract](regional-media.md).
+
+The town donor adapter replaces only reviewed character spans, not whole
+regional banks. Follower OBJ tiles `$1A2/$1A3/$1B2/$1B3` and
+`$1A8/$1A9/$1B8/$1B9` retain the common seven composition records and palette.
+The early BG bank replaces lair tiles `$1CE/$1CF/$1DE/$1DF`; the late bank
+does not. Both banks use the same Japanese pyramid tile `$113`. Other
+changed or unused-looking characters in those banks remain untouched.
+These BG characters occur in structure definitions, not in the immutable
+terrain atlas used by world navigation. Enhanced original-canvas and sprite
+paths receive the native VRAM changes; separately authored 3D models do not.
+The guarded `$02:B2C1` raw-copy tail follows the native act-completion filter,
+so selecting Japanese artwork never changes which bank the game loads.
+
 Go-extracted `title.copyright` records independently establish the footer:
 US `$02:A9DE` (1991 Enix/Quintet), JP `$02:A754` (1990 Quintet/Enix),
 EU/DE `$02:AA1D` and FR `$02:AA07` (1992 Enix/Quintet). Japan's record lacks
 the Western Nintendo licensing line. France translates the rights-reserved
 line. The five catalog ROM hashes and their source-operation hashes are
 retained; this comparison introduces no alternate text decoder.
+
+The title donor adapter captures `title_background` at `$02:B34D`, the
+initial palette tail, before `$02:A622` prepares the interactive title menu.
+The regional new-game draft therefore begins at that asset boundary; the
+later menu reuses it, and Continue still discards its requested rules. The
+raw CHR tail `$02:B2D2` and map-upload tail `$02:B4AB` consume the captured
+choice. Requests after the palette wait for another title load. Guards
+require scene `$0000` and the exact US source/extent/CPU shape; other asset
+commands retain native execution.
+
+| Title plane | US file source | Japanese file source | Extent |
+| --- | --- | --- | ---: |
+| Characters | `0x58300` | `0x58300` | 16384 bytes |
+| Map cells, after dimensions | `0x28E7F` | `0x28E79` | 16384 bytes |
+| Palette | `0xE3A93` | `0xE1CDD` | 256 bytes |
+
+One validated resource contains all three planes. The native raw map copy
+to `$7E:C000` and its adjustment call remain unchanged; only low VRAM bytes
+are substituted at upload. Character pixels use high VRAM bytes. Palette
+substitution writes the same ports and keeps the US accumulator residue.
+All Western planes match, and five-ROM tests verify the shared 38-byte title
+color-cycle table and unchanged initial colors `$20..29`. Native spin/fade,
+copyright composition, text font and language-pack routes remain separate.
 
 The broad bubble-family render survey includes menu reuse and relocated
 family layouts. Only the seven natively exercised family-8 identities above
@@ -6038,6 +6190,24 @@ four regional pictures for 6, 20, 6 and 20 updates, respectively. Native
 room loading supplies the `$4000` resource and placed enemies; their states,
 timers and controllers are not injected. SRAM is unchanged. This closes
 the ordinary state-10 ownership gap, not all branches of the shared controller.
+
+The recompilation exposes these as two independent, room-pinned presentation
+policies. At the existing US `$00:8E2F` reader, exact source/state/program and
+composition-header checks admit only the two measured swaps. The adapter
+temporarily supplies the native visual offset, delegates to the original
+reader, and restores the borrowed word on both normal and abnormal returns.
+Fresh actors are identified from descriptor Y at return `$969D`, before their
+`+32` source field is installed. Native row indices, delays, motion, collision
+extents and coroutine state remain unchanged; no donor ROM is needed.
+
+Five-ROM tests compare both programs and their selected collision headers.
+Decoder tests cover every row, policy mix, facing, accumulator width and
+birth/reuse path, including malformed shapes and escape restoration. A US-host
+run from the valid Aitos entrance reaches all four shared-enemy rows and compares
+CPU state and full WRAM against native execution, allowing only the selected
+visual/composition pointer to differ. It also verifies a queued US change stays
+inactive until retry. That controlled run does not reach the second humanoid;
+it is not full-act traversal or visual acceptance.
 
 ### Extra Palace music resource: silent upload
 

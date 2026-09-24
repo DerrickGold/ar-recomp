@@ -54,6 +54,15 @@ typedef enum ActRaiserRegionalSettingGroup {
   kActRaiserRegionalSetting_EnemyPlacements,
   kActRaiserRegionalSetting_PickupPlacements,
   kActRaiserRegionalSetting_Mosaic,
+  kActRaiserRegionalSetting_DeathHeimArt,
+  kActRaiserRegionalSetting_ActionItemArt,
+  kActRaiserRegionalSetting_FollowerArt,
+  kActRaiserRegionalSetting_LairArt,
+  kActRaiserRegionalSetting_PyramidArt,
+  kActRaiserRegionalSetting_TitleArt,
+  kActRaiserRegionalSetting_AitosPoses,
+  kActRaiserRegionalSetting_Sequences,
+  kActRaiserRegionalSetting_ActorArt,
   kActRaiserRegionalSetting_Count,
 } ActRaiserRegionalSettingGroup;
 
@@ -72,6 +81,9 @@ typedef struct ActRaiserRegionalRulesView {
   bool population_pending;
   ArRegionalSource pending_population;
   bool arrival_locked;
+  uint8_t artwork_available; /* validated donor resources, independent of policy */
+  uint8_t sequences_available;
+  bool actor_artwork_available;
 } ActRaiserRegionalRulesView;
 
 typedef enum ActRaiserRegionalEditResult {

@@ -44,6 +44,9 @@
 #include "frame_slot.h"
 #include "hd_replacement_host.h"
 #include "host/font_resources.h"
+#include "host/regional_media_files.h"
+#include "actraiser/actraiser_regional_media.h"
+#include "actraiser/actraiser_actor_art.h"
 #include "host/host_audio.h"
 #include "host/host_display.h"
 #include "host/host_display_pacing.h"
@@ -1514,6 +1517,24 @@ static int AppBoot_CreateVideo(AppBoot *app) {
 }
 
 static ArHostFontResources s_font_resources;
+static ArHostRegionalMediaFiles s_regional_media;
+
+static void LoadRegionalMedia(void) {
+  static const char *const donors[]={"us","jp","eu-en","de","fr"};
+  for(unsigned i=0;i<sizeof(donors)/sizeof(donors[0]);++i) {
+    char path[128],error[192];
+    snprintf(path,sizeof(path),"game-assets/regions/%s.armedia",donors[i]);
+    if(!sr_path_exists(path))continue;
+    if(!ArHostRegionalMediaFiles_Load(&s_regional_media,path,(ArRegionalMediaRelease)(i+1),error,sizeof(error))) {
+      fprintf(stderr,"[regional-media] %s: %s; US graphics retained\n",path,error);continue;
+    }
+    const ArRegionalMediaView *view=ArHostRegionalMediaFiles_View(&s_regional_media,(ArRegionalMediaRelease)(i+1));
+    if(!ActRaiserRegionalMedia_AddDonor(view)) {
+      fprintf(stderr,"[regional-media] %s: donor does not match filename; US graphics retained\n",path);continue;
+    }
+    fprintf(stderr,"[regional-media] loaded %s (%zu reviewed resources)\n",donors[i],view->count);
+  }
+}
 
 static ArFontResourceId RegisterLocalizedFont(
     void *context, const char *manifest, const char *member,
@@ -1673,6 +1694,8 @@ static void AppBoot_InstallSubsystems(AppBoot *app) {
     fprintf(stderr, "[world-navigation] native town ground unavailable\n");
   if (!Diorama_InitRomBackdrops(app->rom_data, app->rom_size))
     fprintf(stderr, "[diorama] named ROM backdrops unavailable\n");
+  LoadRegionalMedia();
+  ActRaiserActorArt_Initialize(ActRaiserRegionalMedia_ActorArt());
   if (!ActRaiserActionBg_InitRoomScenes(app->rom_data, app->rom_size))
     fprintf(stderr, "[action-room-scene] immutable loader unavailable\n");
   /* Per-room diorama layer overrides. Absent file is the normal case and leaves
@@ -2542,6 +2565,9 @@ static int AppShutdown(AppBoot *app, char **argv) {
   s_town_pixel_work = NULL;
   s_town_pixel_work_attempted = false;
   ActRaiserActionBg_Shutdown();
+  ActRaiserActorArt_Shutdown();
+  ActRaiserRegionalMedia_ClearDonors();
+  ArHostRegionalMediaFiles_Destroy(&s_regional_media);
   ActRaiserLocalizationRuntime_Shutdown();
   ActRaiserLocalizationRuntime_SetPresentationHost(NULL);
   ActRaiserLocalizationRuntime_SetPackHost(NULL);

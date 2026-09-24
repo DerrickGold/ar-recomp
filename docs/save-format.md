@@ -654,6 +654,46 @@ The optional `ARCASTHOLD-R1` digest domain appends the requested/effective
 three-bit masks after prior domains. All-US/Japanese aliases preserve the
 previous replay identity.
 
+Versions 65–69 extend the same named-record codec without changing cartridge
+SRAM. Each older version defaults newly introduced fields to US; requested
+and effective source choices remain separate.
+
+| Version | Total records | Added fields | Activation owner |
+| --- | ---: | --- | --- |
+| 65 | 242 | `follower_symbols`, `lair_symbols`, `pyramid_detail` | Next accepted town graphics load |
+| 66 | 243 | `title_background` | Next title palette/character/map load |
+| 67 | 245 | `aitos_shared_pose_order`, `aitos_humanoid_pose_order` | Next room/retry |
+| 68 | 247 | The two regional song-sequence fields | Actual upload of that song, independently |
+| 69 | 254 | Seven `*_actor_art` fields, one per action area | Next stage entry in that area |
+
+Town/title choices extend `ARARTWORK-R1`. Pose order uses `ARPOSES-R1`,
+sequences use `ARSEQUENCE-R1`, and area artwork uses `ARACTORART-R1`. The
+new domains are omitted when both requested and effective values resolve to
+US, preserving previous replay identities for equivalent source aliases.
+Artwork bytes, derived residency caches and file paths are never saved.
+Actor artwork is pinned across the stage's rooms. Boss rooms can replace
+only part of the character set, so their uploads retain that stage's choice
+instead of combining a new palette with inherited graphics. The thirteen
+stage-entry scripts replace the ordinary animation bank and provide the
+activation boundary. Missing donor data preserves the requested choice but
+uses US pixels; no donor bytes enter the companion.
+
+Version 64 appends `action_item_art` (239 records, 8565 bytes), resolving
+US/Japan/Europe to 0/0/1. Versions 1–63 initialize it to US without changing
+the older Death Heim choice. The second `ARARTWORK-R1` mask bit binds requested
+and effective item artwork; existing bit-zero-only fingerprints are unchanged.
+Room/retry activation is separate from the new-run inventory model. No donor
+pixels or file paths enter the native save or companion.
+
+Version 63 appends `death_heim_art` (238 records, 8542 bytes). Sources
+US/Japan/Europe resolve to 0/1/0. Versions 1–62 default to US. The optional
+`ARARTWORK-R1` replay domain records the requested/effective semantic masks;
+all-US/European aliases preserve earlier identities. Room entry/retry
+captures this presentation policy. Donor bytes and availability are not
+serialized: each installation validates its own private media at startup
+and explicitly falls back to US graphics if the Japanese donor is absent.
+Cartridge SRAM is unchanged.
+
 Version 62 appends `aitos_mosaic_pattern` (237 records, 8519 bytes).
 Requested/effective sources resolve to patterns 0/1/2 for US/Japan/Europe.
 Versions 1–61 initialize it to US. Room entry/retry captures the selection;

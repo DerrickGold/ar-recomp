@@ -66,8 +66,15 @@ enum { kHeaderBytes = 36, kPayloadCapacity = kSaveCheckpointPayloadMax,
        kV59RecordCount = kV58RecordCount + 1,
        kV60RecordCount = kV59RecordCount + 1,
        kV61RecordCount = kV60RecordCount + 2,
-       kRecordCount = kV61RecordCount + 1 };
+       kV62RecordCount = kV61RecordCount + 1,
+       kV66RecordCount = kV62RecordCount + 6,
+       kV67RecordCount = kV66RecordCount + 2,
+       kV68RecordCount = kV67RecordCount + 2,
+       kRecordCount = kV68RecordCount + kArRegionalActorArtwork_Count };
+_Static_assert(kArRegionalSequence_Count==2,"preserve v68 sequence ordinals");
+_Static_assert(kArRegionalPose_Count==2,"preserve v67 pose ordinals");
 _Static_assert(kArRegionalPlacement_Count==2,"preserve placement record ordinals");
+_Static_assert(kArRegionalArtwork_Count==6,"freeze prior artwork ordinals before extending the codec");
 _Static_assert(kArRegionalMode_Count==2,"preserve mode-entry record ordinals");
 _Static_assert(kArRegionalActionStart_Count==2,"preserve action-start record ordinals");
 _Static_assert(kArRegionalDifficultyRule_Count==5,"preserve difficulty record ordinals");
@@ -98,6 +105,13 @@ static bool Valid(const ArRegionalSession *session) {
   if (!session || !session->revision || !ArRegionalLairHistory_Valid(&session->lairs) ||
       !ArRegionalLairReloads_Valid(&session->reloads) || !ArRegionalSimActors_Valid(&session->sim_actors)) return false;
   bool has_id = false;
+  uint8_t poses;
+  if(!ArRegionalPoses_Resolve(&session->requested.poses,&poses) ||
+      !ArRegionalPoses_Resolve(&session->effective.poses,&poses))return false;
+  if(!ArRegionalSequences_Resolve(&session->requested.sequences,&poses) ||
+      !ArRegionalSequences_Resolve(&session->effective.sequences,&poses))return false;
+  if(!ArRegionalActorArtwork_Resolve(&session->requested.actor_artwork,&poses) ||
+      !ArRegionalActorArtwork_Resolve(&session->effective.actor_artwork,&poses))return false;
   for (unsigned i = 0; i < sizeof(session->campaign); ++i) has_id |= session->campaign[i] != 0;
   ArRegionalCostSnapshot unused;
   ArRegionalDevelopmentSnapshot unused_development;
@@ -123,7 +137,9 @@ static bool Valid(const ArRegionalSession *session) {
   bool unused_lives;
   uint8_t unused_mode;
   ArRegionalActionStartSnapshot unused_start;
-  return has_id && ArRegionalMosaic_Resolve(session->requested.mosaic,&unused_mode) &&
+  return has_id && ArRegionalArtwork_Resolve(&session->requested.artwork,&unused_mode) &&
+      ArRegionalArtwork_Resolve(&session->effective.artwork,&unused_mode) &&
+      ArRegionalMosaic_Resolve(session->requested.mosaic,&unused_mode) &&
       ArRegionalMosaic_Resolve(session->effective.mosaic,&unused_mode) && ArRegionalPlacements_Valid(&session->requested.placements) &&
       ArRegionalPlacements_Valid(&session->effective.placements) &&
       ArRegionalMusic_Resolve(session->requested.music,&unused_mode) &&
@@ -250,6 +266,82 @@ bool ArRegionalSession_BeginTerrain(ArRegionalSession *session,uint8_t *snapshot
   session->effective.terrain=session->requested.terrain;
   if(changed)++session->revision;
   *snapshot=next;return true;
+}
+bool ArRegionalSession_RequestArtwork(ArRegionalSession *session,uint32_t revision,
+                                     ArRegionalArtworkRule rule,ArRegionalSource source) {
+  if(!Valid(session) || revision!=session->revision || (unsigned)rule>=kArRegionalArtwork_Count ||
+      (unsigned)source>=kArRegionalSource_Count)return false;
+  if(session->requested.artwork.source[rule]==source)return true;
+  if(session->revision==UINT32_MAX)return false;
+  session->requested.artwork.source[rule]=source;++session->revision;return true;
+}
+bool ArRegionalSession_RequestActorArtwork(ArRegionalSession *session,uint32_t revision,const ArRegionalActorArtworkPolicy *policy) {
+  uint8_t mask;
+  if(!Valid(session) || revision!=session->revision || !ArRegionalActorArtwork_Resolve(policy,&mask))return false;
+  if(!memcmp(policy,&session->requested.actor_artwork,sizeof(*policy)))return true;
+  if(session->revision==UINT32_MAX)return false;
+  session->requested.actor_artwork=*policy;++session->revision;return true;
+}
+bool ArRegionalSession_BeginActorArtwork(ArRegionalSession *session,unsigned area,bool *enabled) {
+  if(!enabled || area>=kArRegionalActorArtwork_Count || !Valid(session))return false;
+  const ArRegionalSource source=session->requested.actor_artwork.source[area];
+  if(source!=session->effective.actor_artwork.source[area]) {
+    if(session->revision==UINT32_MAX)return false;
+    session->effective.actor_artwork.source[area]=source;++session->revision;
+  }
+  *enabled=source==kArRegionalSource_Japan;return true;
+}
+bool ArRegionalSession_RequestSequences(ArRegionalSession *session,uint32_t revision,const ArRegionalSequencePolicy *policy) {
+  uint8_t mask;
+  if(!Valid(session) || revision!=session->revision || !ArRegionalSequences_Resolve(policy,&mask))return false;
+  if(!memcmp(policy,&session->requested.sequences,sizeof(*policy)))return true;
+  if(session->revision==UINT32_MAX)return false;
+  session->requested.sequences=*policy;++session->revision;return true;
+}
+bool ArRegionalSession_BeginSequence(ArRegionalSession *session,unsigned rule,bool *enabled) {
+  if(!enabled || rule>=kArRegionalSequence_Count || !Valid(session))return false;
+  const ArRegionalSource source=session->requested.sequences.source[rule];
+  if(source!=session->effective.sequences.source[rule]) {
+    if(session->revision==UINT32_MAX)return false;
+    session->effective.sequences.source[rule]=source;++session->revision;
+  }
+  *enabled=source==kArRegionalSource_Japan;return true;
+}
+bool ArRegionalSession_RequestPoses(ArRegionalSession *session,uint32_t revision,const ArRegionalPosePolicy *policy) {
+  uint8_t snapshot;
+  if(!Valid(session) || revision!=session->revision || !ArRegionalPoses_Resolve(policy,&snapshot))return false;
+  if(!memcmp(policy,&session->requested.poses,sizeof(*policy)))return true;
+  if(session->revision==UINT32_MAX)return false;
+  session->requested.poses=*policy;++session->revision;return true;
+}
+bool ArRegionalSession_BeginPoses(ArRegionalSession *session,uint8_t *snapshot) {
+  if(!snapshot || !Valid(session))return false;
+  const bool changed=memcmp(&session->requested.poses,&session->effective.poses,sizeof(session->requested.poses))!=0;
+  if(changed && session->revision==UINT32_MAX)return false;
+  uint8_t next;if(!ArRegionalPoses_Resolve(&session->requested.poses,&next))return false;
+  session->effective.poses=session->requested.poses;if(changed)++session->revision;
+  *snapshot=next;return true;
+}
+static bool BeginArtworkGroup(ArRegionalSession *session,uint8_t scope,uint8_t *mask) {
+  if(!mask || !Valid(session))return false;
+  ArRegionalArtworkPolicy candidate=session->effective.artwork;
+  for(unsigned i=0;i<kArRegionalArtwork_Count;++i)
+    if(scope&(1u<<i))candidate.source[i]=session->requested.artwork.source[i];
+  const bool changed=memcmp(&candidate,&session->effective.artwork,sizeof(candidate))!=0;
+  if(changed && session->revision==UINT32_MAX)return false;
+  uint8_t next;if(!ArRegionalArtwork_Resolve(&candidate,&next))return false;
+  session->effective.artwork=candidate;
+  if(changed)++session->revision;
+  *mask=next&scope;return true;
+}
+bool ArRegionalSession_BeginArtwork(ArRegionalSession *session,uint8_t *mask) {
+  return BeginArtworkGroup(session,kArRegionalArtwork_ActionMask,mask);
+}
+bool ArRegionalSession_BeginTownArtwork(ArRegionalSession *session,uint8_t *mask) {
+  return BeginArtworkGroup(session,kArRegionalArtwork_TownMask,mask);
+}
+bool ArRegionalSession_BeginTitleArtwork(ArRegionalSession *session,uint8_t *mask) {
+  return BeginArtworkGroup(session,kArRegionalArtwork_TitleMask,mask);
 }
 bool ArRegionalSession_RequestMosaic(ArRegionalSession *session,uint32_t revision,ArRegionalSource source) {
   uint8_t unused;
@@ -1098,6 +1190,22 @@ bool ArRegionalSession_BeginSimActor(ArRegionalSession *session,unsigned town,un
 /* The wire shape is shared, not the units: stable keys select the descriptor
  * for resource counts, initial BCD times, booleans or town service counts. */
 static const char *Record(unsigned i, const uint16_t **values) {
+  if(i>=kV68RecordCount) {
+    const ArRegionalArtworkDescriptor *desc=ArRegionalActorArtwork_Descriptor(i-kV68RecordCount);
+    *values=desc->enabled;return desc->key;
+  }
+  if(i>=kV67RecordCount) {
+    const ArRegionalMusicDescriptor *desc=ArRegionalSequences_Descriptor(i-kV67RecordCount);
+    *values=desc->profile;return desc->key;
+  }
+  if(i>=kV66RecordCount) {
+    const ArRegionalPoseDescriptor *desc=ArRegionalPoses_Descriptor(i-kV66RecordCount);
+    *values=desc->enabled;return desc->key;
+  }
+  if(i>=kV62RecordCount) {
+    const ArRegionalArtworkDescriptor *desc=ArRegionalArtwork_Descriptor(i-kV62RecordCount);
+    *values=desc->enabled;return desc->key;
+  }
   if(i==kV61RecordCount) {
     const ArRegionalMosaicDescriptor *desc=ArRegionalMosaic_Descriptor();
     *values=desc->profile;return desc->key;
@@ -1343,6 +1451,10 @@ static const char *Record(unsigned i, const uint16_t **values) {
 }
 
 static ArRegionalSource RecordSource(const ArRegionalSession *session, unsigned i, bool requested) {
+  if(i>=kV68RecordCount)return requested?session->requested.actor_artwork.source[i-kV68RecordCount]:session->effective.actor_artwork.source[i-kV68RecordCount];
+  if(i>=kV67RecordCount)return requested?session->requested.sequences.source[i-kV67RecordCount]:session->effective.sequences.source[i-kV67RecordCount];
+  if(i>=kV66RecordCount)return requested?session->requested.poses.source[i-kV66RecordCount]:session->effective.poses.source[i-kV66RecordCount];
+  if(i>=kV62RecordCount)return requested?session->requested.artwork.source[i-kV62RecordCount]:session->effective.artwork.source[i-kV62RecordCount];
   if(i==kV61RecordCount)return requested?session->requested.mosaic:session->effective.mosaic;
   if(i>=kV60RecordCount) {
     const ArRegionalPlacementPolicy *policy=requested?&session->requested.placements:&session->effective.placements;
@@ -1457,7 +1569,7 @@ static bool Encode(const ArRegionalSession *session, uint8_t *out, size_t *size)
   if (!Valid(session)) return false;
   memset(out, 0, kHeaderBytes);
   memcpy(out, kMagic, sizeof(kMagic));
-  ByteOrder_WriteLe16(out + 8, 62);
+  ByteOrder_WriteLe16(out + 8, 69);
   ByteOrder_WriteLe16(out + 10, kRecordCount);
   ByteOrder_WriteLe32(out + 12, session->slot);
   memcpy(out + 16, session->campaign, 16);
@@ -1508,7 +1620,7 @@ static SaveCheckpointStatus Decode(const uint8_t *bytes, size_t size, ArRegional
   const bool pricing_only = !memcmp(bytes, kPriceMagic, sizeof(kPriceMagic));
   if (!pricing_only && memcmp(bytes, kMagic, sizeof(kMagic))) return kSaveCheckpoint_Invalid;
   const unsigned version = ByteOrder_ReadLe16(bytes + 8);
-  if (version < 1 || version > (pricing_only ? 1u : 62u)) return kSaveCheckpoint_Unsupported;
+  if (version < 1 || version > (pricing_only ? 1u : 69u)) return kSaveCheckpoint_Unsupported;
   const unsigned count = pricing_only ? kArRegionalCostRule_Count :
       version == 1 ? kV1RecordCount : version == 2 ? kV2RecordCount :
       version == 3 ? kV3RecordCount : version == 4 ? kV4RecordCount :
@@ -1539,7 +1651,10 @@ static SaveCheckpointStatus Decode(const uint8_t *bytes, size_t size, ArRegional
       version == 54 ? kV54RecordCount : version == 55 ? kV55RecordCount :
       version == 56 ? kV56RecordCount : version == 57 ? kV57RecordCount :
       version == 58 ? kV58RecordCount : version == 59 ? kV59RecordCount :
-      version == 60 ? kV60RecordCount : version == 61 ? kV61RecordCount : kRecordCount;
+      version == 60 ? kV60RecordCount : version == 61 ? kV61RecordCount : version == 62 ? kV62RecordCount :
+      version == 63 ? kV62RecordCount+1 : version == 64 ? kV62RecordCount+2 :
+      version == 65 ? kV62RecordCount+5 : version == 66 ? kV66RecordCount : version == 67 ? kV67RecordCount :
+      version == 68 ? kV68RecordCount : kRecordCount;
   if (ByteOrder_ReadLe16(bytes + 10) != count) return kSaveCheckpoint_Unsupported;
   ArRegionalSession next = {.slot = ByteOrder_ReadLe32(bytes + 12), .revision = ByteOrder_ReadLe32(bytes + 32)};
   memcpy(next.campaign, bytes + 16, sizeof(next.campaign));
@@ -1567,7 +1682,19 @@ static SaveCheckpointStatus Decode(const uint8_t *bytes, size_t size, ArRegional
       return kSaveCheckpoint_Unsupported;
     if (values[requested] != ByteOrder_ReadLe16(bytes + offset + 4) ||
         values[effective] != ByteOrder_ReadLe16(bytes + offset + 6)) return kSaveCheckpoint_Unsupported;
-    if(rule==kV61RecordCount) {
+    if(rule>=kV68RecordCount) {
+      next.requested.actor_artwork.source[rule-kV68RecordCount]=requested;
+      next.effective.actor_artwork.source[rule-kV68RecordCount]=effective;
+    } else if(rule>=kV67RecordCount) {
+      next.requested.sequences.source[rule-kV67RecordCount]=requested;
+      next.effective.sequences.source[rule-kV67RecordCount]=effective;
+    } else if(rule>=kV66RecordCount) {
+      next.requested.poses.source[rule-kV66RecordCount]=requested;
+      next.effective.poses.source[rule-kV66RecordCount]=effective;
+    } else if(rule>=kV62RecordCount) {
+      next.requested.artwork.source[rule-kV62RecordCount]=requested;
+      next.effective.artwork.source[rule-kV62RecordCount]=effective;
+    } else if(rule==kV61RecordCount) {
       next.requested.mosaic=requested;next.effective.mosaic=effective;
     } else if(rule==kV60RecordCount) {
       next.requested.placements.enemies=requested;next.effective.placements.enemies=effective;

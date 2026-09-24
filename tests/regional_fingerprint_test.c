@@ -45,6 +45,92 @@ int main(void) {
   CHECK(!ArRegionalRules_Fingerprint(&empty_placements,&invalid_placements,current,&baseline));
   uint8_t hazard_hashes[9][32];
   uint8_t mosaic_hashes[9][32];
+  uint8_t art_hashes[4][32];bool art_seen[4]={0};
+  uint8_t pose_hashes[16][32];bool pose_seen[16]={0};
+  for(unsigned choices=0;choices<81;++choices) {
+    ArRegionalRules req={0},eff={0};unsigned digits=choices,index=0;
+    for(unsigned i=0;i<2;++i) {
+      req.poses.source[i]=digits%3;digits/=3;eff.poses.source[i]=digits%3;digits/=3;
+      index|=(req.poses.source[i]==1)<<(i*2);index|=(eff.poses.source[i]==1)<<(i*2+1);
+    }
+    uint8_t hash[32];CHECK(ArRegionalRules_Fingerprint(&req,&eff,hash,&baseline) && baseline==!index);
+    if(pose_seen[index])CHECK(!memcmp(hash,pose_hashes[index],32));
+    else {for(unsigned i=0;i<16;++i)if(pose_seen[i])CHECK(memcmp(hash,pose_hashes[i],32));memcpy(pose_hashes[index],hash,32);pose_seen[index]=true;}
+  }
+  ArRegionalRules bad_pose={.poses={{0,3}}},native_pose={0};
+  CHECK(!ArRegionalRules_Fingerprint(&bad_pose,&native_pose,current,&baseline));
+  uint8_t sequence_hashes[16][32];bool sequence_seen[16]={0};
+  for(unsigned choices=0;choices<81;++choices) {
+    ArRegionalRules req={0},eff={0};unsigned digits=choices,index=0;
+    for(unsigned i=0;i<2;++i) {
+      req.sequences.source[i]=digits%3;digits/=3;eff.sequences.source[i]=digits%3;digits/=3;
+      index|=(req.sequences.source[i]==1)<<(i*2);index|=(eff.sequences.source[i]==1)<<(i*2+1);
+    }
+    uint8_t hash[32];CHECK(ArRegionalRules_Fingerprint(&req,&eff,hash,&baseline) && baseline==!index);
+    if(sequence_seen[index])CHECK(!memcmp(hash,sequence_hashes[index],32));
+    else {for(unsigned i=0;i<16;++i)if(sequence_seen[i])CHECK(memcmp(hash,sequence_hashes[i],32));memcpy(sequence_hashes[index],hash,32);sequence_seen[index]=true;}
+    if(index)for(unsigned i=0;i<16;++i)CHECK(memcmp(hash,pose_hashes[i],32));
+  }
+  ArRegionalRules bad_sequence={.sequences={{0,3}}};
+  uint8_t actor_art_hashes[256][32];
+  for(unsigned mask=0;mask<256;++mask) {
+    ArRegionalRules req={0},eff={0};
+    for(unsigned i=0;i<7;++i)req.actor_artwork.source[i]=(mask>>i)&1;
+    eff.actor_artwork.source[3]=(mask>>7)&1;
+    CHECK(ArRegionalRules_Fingerprint(&req,&eff,actor_art_hashes[mask],&baseline) && baseline==!mask);
+    for(unsigned i=0;i<7;++i)if(!req.actor_artwork.source[i])req.actor_artwork.source[i]=kArRegionalSource_Europe;
+    uint8_t equivalent[32];
+    CHECK(ArRegionalRules_Fingerprint(&req,&eff,equivalent,&baseline) && !memcmp(equivalent,actor_art_hashes[mask],32));
+  }
+  qsort(actor_art_hashes,256,32,CompareDigest);
+  for(unsigned i=1;i<256;++i)CHECK(memcmp(actor_art_hashes[i-1],actor_art_hashes[i],32));
+  ArRegionalRules bad_actor_art={0};bad_actor_art.actor_artwork.source[6]=3;
+  CHECK(!ArRegionalRules_Fingerprint(&bad_actor_art,&native_pose,current,&baseline));
+  CHECK(!ArRegionalRules_Fingerprint(&native_pose,&bad_actor_art,current,&baseline));
+  CHECK(!ArRegionalRules_Fingerprint(&bad_sequence,&native_pose,current,&baseline));
+  for(unsigned request=0;request<3;++request)for(unsigned active=0;active<3;++active) {
+    ArRegionalRules req={.artwork={{request}}},eff={.artwork={{active}}};
+    uint8_t hash[32];const unsigned index=(request==1)*2+(active==1);
+    CHECK(ArRegionalRules_Fingerprint(&req,&eff,hash,&baseline) && baseline==!index);
+    if(art_seen[index])CHECK(!memcmp(hash,art_hashes[index],32));
+    else {for(unsigned i=0;i<4;++i)if(art_seen[i])CHECK(memcmp(hash,art_hashes[i],32));memcpy(art_hashes[index],hash,32);art_seen[index]=true;}
+  }
+  ArRegionalRules bad_art={.artwork={{3}}},no_art={0};
+  CHECK(!ArRegionalRules_Fingerprint(&bad_art,&no_art,current,&baseline));
+  CHECK(!ArRegionalRules_Fingerprint(&no_art,&bad_art,current,&baseline));
+  uint8_t item_art_hashes[4][32];bool item_art_seen[4]={0};
+  uint8_t town_art_hashes[kArRegionalArtwork_Count-2][4][32];
+  for(unsigned rule=2;rule<kArRegionalArtwork_Count;++rule) {
+    bool seen[4]={0};
+    for(unsigned request=0;request<3;++request)for(unsigned active=0;active<3;++active) {
+      ArRegionalRules req={0},eff={0};req.artwork.source[rule]=request;eff.artwork.source[rule]=active;
+      uint8_t hash[32];const unsigned index=(request==1)*2+(active==1);
+      CHECK(ArRegionalRules_Fingerprint(&req,&eff,hash,&baseline) && baseline==!index);
+      if(seen[index])CHECK(!memcmp(hash,town_art_hashes[rule-2][index],32));
+      else {
+        for(unsigned i=0;i<4;++i)if(seen[i])CHECK(memcmp(hash,town_art_hashes[rule-2][i],32));
+        memcpy(town_art_hashes[rule-2][index],hash,32);seen[index]=true;
+      }
+      if(index) {
+        for(unsigned i=0;i<4;++i)CHECK(memcmp(hash,art_hashes[i],32));
+        for(unsigned r=2;r<rule;++r)for(unsigned i=0;i<4;++i)CHECK(memcmp(hash,town_art_hashes[r-2][i],32));
+      }
+    }
+    bad_art=(ArRegionalRules){0};bad_art.artwork.source[rule]=3;
+    CHECK(!ArRegionalRules_Fingerprint(&bad_art,&no_art,current,&baseline));
+    CHECK(!ArRegionalRules_Fingerprint(&no_art,&bad_art,current,&baseline));
+  }
+  for(unsigned request=0;request<3;++request)for(unsigned active=0;active<3;++active) {
+    ArRegionalRules req={.artwork={{0,request}}},eff={.artwork={{0,active}}};
+    uint8_t hash[32];const unsigned index=(request==2)*2+(active==2);
+    CHECK(ArRegionalRules_Fingerprint(&req,&eff,hash,&baseline) && baseline==!index);
+    if(item_art_seen[index])CHECK(!memcmp(hash,item_art_hashes[index],32));
+    else {for(unsigned i=0;i<4;++i)if(item_art_seen[i])CHECK(memcmp(hash,item_art_hashes[i],32));memcpy(item_art_hashes[index],hash,32);item_art_seen[index]=true;}
+    if(index)for(unsigned i=0;i<4;++i)CHECK(memcmp(hash,art_hashes[i],32));
+  }
+  bad_art=(ArRegionalRules){.artwork={{0,3}}};
+  CHECK(!ArRegionalRules_Fingerprint(&bad_art,&no_art,current,&baseline));
+  CHECK(!ArRegionalRules_Fingerprint(&no_art,&bad_art,current,&baseline));
   for(unsigned request=0;request<3;++request)for(unsigned active=0;active<3;++active) {
     ArRegionalRules req={.mosaic=request},eff={.mosaic=active};
     const unsigned index=request*3+active;
