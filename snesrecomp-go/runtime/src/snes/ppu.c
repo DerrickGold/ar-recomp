@@ -506,6 +506,7 @@ void PpuClearOverlayCaptures(Ppu *ppu) {
     memset(ppu->overlayCaptures, 0, sizeof(ppu->overlayCaptures));
     ppu->overlayObjRelocatedFirst = ppu->overlayObjRelocatedCount = 0u;
     memset(&ppu->objRangeCapture, 0, sizeof(ppu->objRangeCapture));
+    memset(&ppu->objWinnerCapture, 0, sizeof(ppu->objWinnerCapture));
     memset(&ppu->m7Override, 0, sizeof(ppu->m7Override));
 }
 
@@ -585,22 +586,34 @@ bool PpuSetOverlayRelocatedOamRange(Ppu *ppu, uint8_t first, uint8_t count) {
     return true;
 }
 
-bool PpuSetObjRangeCapture(Ppu *ppu, uint8_t first, uint8_t count,
+static bool set_obj_range_capture(PpuObjRangeCapture *capture, uint8_t first, uint8_t count,
         int x, int y, int width, int height, uint8_t *pixels, size_t pitch) {
-    if (ppu == NULL || pixels == NULL || first >= 128u || count == 0u ||
+    if (capture == NULL || pixels == NULL || first >= 128u || count == 0u ||
         count > 128u - first || width <= 0 || height <= 0 || y < 0 ||
         y + height > kPpuYPixels || pitch % 4u != 0u ||
         pitch / 4u < kPpuXPixels || pitch / 4u > kPpuSurfaceWidth ||
         x < INT16_MIN || x + width > INT16_MAX) return false;
-    ppu->objRangeCapture.x0 = (int16_t)x;
-    ppu->objRangeCapture.x1 = (int16_t)(x + width);
-    ppu->objRangeCapture.y0 = (int16_t)y;
-    ppu->objRangeCapture.y1 = (int16_t)(y + height);
-    ppu->objRangeCapture.first = first;
-    ppu->objRangeCapture.count = count;
-    ppu->objRangeCapture.pixels = pixels;
-    ppu->objRangeCapture.pitch = (uint32_t)pitch;
+    capture->x0 = (int16_t)x;
+    capture->x1 = (int16_t)(x + width);
+    capture->y0 = (int16_t)y;
+    capture->y1 = (int16_t)(y + height);
+    capture->first = first;
+    capture->count = count;
+    capture->pixels = pixels;
+    capture->pitch = (uint32_t)pitch;
     return true;
+}
+
+bool PpuSetObjRangeCapture(Ppu *ppu, uint8_t first, uint8_t count,
+        int x, int y, int width, int height, uint8_t *pixels, size_t pitch) {
+    return ppu && set_obj_range_capture(&ppu->objRangeCapture, first, count,
+        x, y, width, height, pixels, pitch);
+}
+
+bool PpuSetObjWinnerCapture(Ppu *ppu, uint8_t first, uint8_t count,
+        int x, int y, int width, int height, uint8_t *pixels, size_t pitch) {
+    return ppu && set_obj_range_capture(&ppu->objWinnerCapture, first, count,
+        x, y, width, height, pixels, pitch);
 }
 
 bool PpuBindMode7OverlaySurface(Ppu *ppu, uint8_t *pixels, size_t pitch,
@@ -1728,6 +1741,7 @@ static void build_obj_sample_cache(Ppu *ppu, PpuObjSampleCache *cache,
                 index = x + kPpuExtraLeftRight;
                 current = cache->pixels.data[index];
                 if ((current & 0xffu) == 0u || rank > (current >> 8)) {
+                    cache->slots[index] = (uint8_t)slot;
                     cache->pixels.data[index] = (PpuZbufType)(
                         ((PpuZbufType)rank << 8) | (palette_base + pixel));
                     if ((unsigned)x < kPpuXPixels)
@@ -1993,6 +2007,19 @@ static void capture_obj_sources(Ppu *ppu, int x, int y, int obj_offset) {
             int origin = surface_origin_x(ppu, ppu->objRangeCapture.pitch);
             uint32_t *row = (uint32_t *)(ppu->objRangeCapture.pixels +
                 (size_t)y * ppu->objRangeCapture.pitch);
+            row[origin + x] = color_argb(ppu, pixel.color);
+        }
+    }
+    const PpuObjRangeCapture *winners = &ppu->objWinnerCapture;
+    if (winners->count && x >= winners->x0 && x < winners->x1 &&
+        y >= winners->y0 && y < winners->y1) {
+        SrPpuPixel pixel;
+        int slot = -1;
+        if (sample_obj_filtered(ppu, x, y, obj_offset, 0, 0, 0, 0,
+                                &pixel, &slot) &&
+            slot >= winners->first && slot < winners->first + winners->count) {
+            int origin = surface_origin_x(ppu, winners->pitch);
+            uint32_t *row = (uint32_t *)(winners->pixels + (size_t)y * winners->pitch);
             row[origin + x] = color_argb(ppu, pixel.color);
         }
     }
@@ -2482,6 +2509,11 @@ static bool native_capture_line_needed(const Ppu *ppu, int screen_y) {
         range->x1 > 0 && range->x0 < kPpuXPixels &&
         screen_y >= range->y0 && screen_y < range->y1)
         return true;
+    range = &ppu->objWinnerCapture;
+    if (range->count != 0u && range->pixels != NULL &&
+        range->x1 > 0 && range->x0 < kPpuXPixels &&
+        screen_y >= range->y0 && screen_y < range->y1)
+        return true;
     for (int source = 0; source < kPpuOverlaySource_Count; ++source) {
         if (capture_surface_bound(ppu, source) &&
             native_capture_intersects(
@@ -2493,6 +2525,10 @@ static bool native_capture_line_needed(const Ppu *ppu, int screen_y) {
 
 static bool native_capture_policy_on_line(const Ppu *ppu, int screen_y) {
     const PpuObjRangeCapture *range = &ppu->objRangeCapture;
+    if (range->count != 0u && range->pixels != NULL &&
+        screen_y >= range->y0 && screen_y < range->y1)
+        return true;
+    range = &ppu->objWinnerCapture;
     if (range->count != 0u && range->pixels != NULL &&
         screen_y >= range->y0 && screen_y < range->y1)
         return true;
@@ -3806,8 +3842,7 @@ static void native_write_overlay_packed(
 }
 
 static void native_write_obj_range_capture(Ppu *ppu, int screen_y,
-                                           int obj_offset) {
-    PpuObjRangeCapture *capture = &ppu->objRangeCapture;
+        int obj_offset, PpuObjRangeCapture *capture, bool winners) {
     PpuObjSampleCache *cache;
     uint32_t *row;
     int origin, left, right;
@@ -3816,7 +3851,7 @@ static void native_write_obj_range_capture(Ppu *ppu, int screen_y,
         capture->x1 <= 0 || capture->x0 >= kPpuXPixels) return;
     cache = get_obj_sample_cache(
         ppu, screen_y, obj_offset,
-        capture->first, capture->count, 0, 0);
+        winners ? 0 : capture->first, winners ? 0 : capture->count, 0, 0);
     if (cache == NULL) return;
     row = (uint32_t *)(capture->pixels +
         (size_t)screen_y * capture->pitch);
@@ -3825,7 +3860,10 @@ static void native_write_obj_range_capture(Ppu *ppu, int screen_y,
     right = capture->x1 > kPpuXPixels ? kPpuXPixels : capture->x1;
     for (int x = left; x < right; ++x) {
         uint16_t packed = native_obj_cache_pixel(cache, x);
-        if (packed != 0u)
+        if (packed == 0u) continue;
+        const unsigned slot = cache->slots[x + kPpuExtraLeftRight];
+        if (!winners ||
+            (slot >= capture->first && slot < capture->first + capture->count))
             row[origin + x] = color_argb(ppu, ppu->cgram[packed & 0xffu]);
     }
 }
@@ -4195,7 +4233,10 @@ static bool render_native_capture_line(Ppu *ppu, int screen_y,
         }
 #undef RESOLVE_OBJ_MARGIN_SPAN
     }
-    native_write_obj_range_capture(ppu, screen_y, obj_offset);
+    native_write_obj_range_capture(ppu, screen_y, obj_offset,
+                                   &ppu->objRangeCapture, false);
+    native_write_obj_range_capture(ppu, screen_y, obj_offset,
+                                   &ppu->objWinnerCapture, true);
     if (capture_surface_bound(ppu, kPpuOverlaySource_Obj) &&
         native_capture_intersects(obj_capture, screen_y) &&
         obj_capture->oamCount != 0u) {
@@ -4823,6 +4864,11 @@ static void render_line(Ppu *ppu, int line) {
         memset(ppu->objRangeCapture.pixels +
                (size_t)screen_y * ppu->objRangeCapture.pitch, 0,
                ppu->objRangeCapture.pitch);
+    if (ppu->objWinnerCapture.count != 0u && screen_y >= ppu->objWinnerCapture.y0 &&
+        screen_y < ppu->objWinnerCapture.y1)
+        memset(ppu->objWinnerCapture.pixels +
+               (size_t)screen_y * ppu->objWinnerCapture.pitch, 0,
+               ppu->objWinnerCapture.pitch);
     bool authentic_done = render_line_to(
         ppu, screen_y, ppu->renderBuffer, ppu->renderPitch,
         ppu->renderHeight, true, false);

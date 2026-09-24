@@ -195,8 +195,7 @@ static void TestCoastalLandPreserved(void) {
   for (int y = 48; y < 65; ++y)
     for (int x = 48; x < 112; ++x) map[y*128+x] = 0;
   assert(SimWorldMap_PublishBuiltTilemap(map));
-  assert(SimWorldNavigationTerrain_RebuildWorldPrior(SimWorldMap_BakedPixels(),
-      kSimWorldMapPixels,SimWorldMap_GeographySerial()));
+  assert(SimWorldNavigationTerrain_RebuildWorldPrior());
   /* A coastal connection between two equally registered plains cannot dip
    * just because there is ocean next to the road. Include the shoreline
    * vertices, not merely far-inland samples or continuity at a single seam. */
@@ -210,8 +209,7 @@ static void TestCoastalLandPreserved(void) {
   for (int y = 0; y < 128; ++y)
     for (int x = 24; x < 128; ++x) map[y*128+x] = 0;
   assert(SimWorldMap_PublishBuiltTilemap(map));
-  assert(SimWorldNavigationTerrain_RebuildWorldPrior(SimWorldMap_BakedPixels(),
-      kSimWorldMapPixels,SimWorldMap_GeographySerial()));
+  assert(SimWorldNavigationTerrain_RebuildWorldPrior());
   /* Kasandora's authored contour reaches the coast unchanged; no invented
    * four-cell descent through otherwise flat, buildable land. */
   for (float x = 24; x <= 30; x += .25f) {
@@ -229,12 +227,53 @@ static void TestCoastalLandPreserved(void) {
   puts("coastal registration: level connecting road; native land/water contours preserved; inferred ocean grades outside town");
 }
 
+static void TestPaletteIndependentWorldMaterials(void) {
+  uint8_t *rom = calloc(1, kRomBytes);
+  assert(rom);
+  memset(rom + kChrOffset, 0x08, 64);
+  memset(rom + kChrOffset + 64, 0x10, 64);
+  memset(rom + kChrOffset + 128, 0x44, 64);
+  uint8_t map[kSimWorldMapBytes], temporary[kSimWorldMapBytes];
+  memset(temporary, 2, sizeof(temporary));
+  for (int y = 0; y < 128; ++y)
+    for (int x = 0; x < 128; ++x) map[y*128+x] = x < 8 ? 1 : 0;
+  memcpy(rom + kMapOffset, map, sizeof(map));
+  float heights[3];
+  const uint16_t palettes[] = {0x7c00, 0x0000, 0x03e0};
+  for (unsigned variant = 0; variant < 3; ++variant) {
+    /* Every material has the SAME colour, then all go black, then green.
+     * This is deliberately impossible for an RGB classifier to distinguish. */
+    for (unsigned index = 0; index < 256; ++index) {
+      rom[0xe3f93 + index*2] = (uint8_t)palettes[variant];
+      rom[0xe3f94 + index*2] = (uint8_t)(palettes[variant] >> 8);
+    }
+    assert(SimWorldMap_Init(rom, kRomBytes));
+    for (unsigned change = 0; change <= variant; ++change) {
+      assert(SimWorldMap_PublishBuiltTilemap(temporary));
+      assert(SimWorldMap_PublishBuiltTilemap(map));
+    }
+    assert(SimWorldNavigationTerrain_RebuildWorldPrior());
+    const float samples[] = {
+      SimWorldNavigationTerrain_HeightUnits(1, 50),
+      SimWorldNavigationTerrain_HeightUnits(8, 50),
+      SimWorldNavigationTerrain_HeightUnits(12, 50),
+    };
+    if (!variant) memcpy(heights, samples, sizeof(heights));
+    else for (unsigned i = 0; i < 3; ++i) assert(samples[i] == heights[i]);
+    assert(samples[0] == 0 && samples[2] > 0);
+    assert(SimWorldMap_VegetationCoverage(12, 50) == 1);
+    assert(SimWorldMap_VegetationCoverage(1, 50) == 0);
+  }
+  SimWorldMap_Shutdown();
+  free(rom);
+}
+
 int main(void) {
   TestTownInfluenceRejection();
   uint8_t *rom = calloc(1, kRomBytes);
   assert(rom);
   /* Green lowland, bright desert, bright snow, authored mountain rock. */
-  const uint8_t material[] = {0x08, 0x2F, 0x1D, 0x44, 0x02};
+  const uint8_t material[] = {0x08, 0x2F, 0x1D, 0x44, 0x10};
   for (int tile = 0; tile < 5; tile++)
     memset(rom + kChrOffset + tile * 64, material[tile], 64);
   const uint16_t colours[] = {0x226C, 0x4AFF, 0x7FFF, 0x21B0, 0x7C21};
@@ -245,9 +284,7 @@ int main(void) {
   }
   assert(SimWorldMap_Init(rom, kRomBytes));
   free(rom);
-  const uint32_t *pixels = SimWorldMap_BakedPixels();
-  assert(SimWorldNavigationTerrain_RebuildWorldPrior(
-      pixels, kSimWorldMapPixels, SimWorldMap_GeographySerial()));
+  assert(SimWorldNavigationTerrain_RebuildWorldPrior());
   TestCliffOwnership();
   TestSampleConsistency();
 
@@ -280,9 +317,7 @@ int main(void) {
   for (int y = 72; y < 78; y++)
     for (int x = 58; x < 64; x++) map[y * 128 + x] = 4;
   assert(SimWorldMap_PublishBuiltTilemap(map) > 0);
-  assert(SimWorldNavigationTerrain_RebuildWorldPrior(
-      SimWorldMap_BakedPixels(), kSimWorldMapPixels,
-      SimWorldMap_GeographySerial()));
+  assert(SimWorldNavigationTerrain_RebuildWorldPrior());
   /* Mountain relief must survive exact-town constraints and continue through
    * both a shared town boundary and the otherwise inferred outside region. */
   assert(SimWorldNavigationTerrain_HeightUnits(32, 64) > seam_floor + 3.0f);
@@ -318,8 +353,7 @@ int main(void) {
   const float height = SimWorldNavigationTerrain_HeightUnits(32, 64);
   (void)SimWorldMap_SetWaterAnimationSource(kWorldWaterSourceFirst);
   assert(SimWorldMap_GeographySerial() == geography);
-  assert(SimWorldNavigationTerrain_RebuildWorldPrior(
-      SimWorldMap_BakedPixels(), kSimWorldMapPixels, geography));
+  assert(SimWorldNavigationTerrain_RebuildWorldPrior());
   assert(SimWorldNavigationTerrain_HeightUnits(32, 64) == height);
   uint8_t replacement[kSimWorldMapBytes] = {0};
   for (int y = 58; y < 70; y++)
@@ -393,9 +427,10 @@ int main(void) {
   TestSampleConsistency();
   assert(SimWorldNavigationTerrain_FloorHeightUnits(NAN, 0) == 0);
   assert(SimWorldNavigationTerrain_FloorHeightUnits(0, INFINITY) == 0);
-  assert(!SimWorldNavigationTerrain_RebuildWorldPrior(NULL, 1024, 1));
   TestCoastalLandPreserved();
+  TestPaletteIndependentWorldMaterials();
   SimWorldMap_Shutdown();
+  assert(!SimWorldNavigationTerrain_RebuildWorldPrior());
   puts("sim_world_navigation_terrain_test: PASS");
   return 0;
 }

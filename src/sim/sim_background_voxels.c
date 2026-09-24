@@ -385,16 +385,6 @@ static void MarkOccupied(bool occupied[kCellCount], int x, int y,
     }
 }
 
-/* Used only to choose the ground eraser tile. Object classification is driven
- * by terrain metatile identity, because rendered chroma cannot tell Bloodpool's
- * mottled marsh from a canopy, nor Northwall's grey-white firs from snow. */
-static bool StrongTreePixel(uint32_t argb) {
-  unsigned red = (argb >> 16) & 0xFF;
-  unsigned green = (argb >> 8) & 0xFF;
-  unsigned blue = argb & 0xFF;
-  return green >= 8 && green * 10 > red * 13 && green * 10 > blue * 12;
-}
-
 typedef enum FoliageClass {
   kFoliage_None,
   /* Clearable brush: one cell of decoration the player can remove, never part
@@ -531,19 +521,6 @@ static bool FindBridgeWaterSource(
     }
   }
   return false;
-}
-
-static int CellTreePixelCount(const uint32_t *pixels, int cell_x, int cell_y) {
-  int count = 0;
-  int x0 = cell_x * kSimBackgroundCellPixels;
-  int y0 = cell_y * kSimBackgroundCellPixels;
-  for (int y = 0; y < kSimBackgroundCellPixels; y++)
-    for (int x = 0; x < kSimBackgroundCellPixels; x++)
-      if (StrongTreePixel(
-              pixels[(size_t)(y0 + y) * kSimTownCanvasPixels +
-                     (size_t)(x0 + x)]))
-        count++;
-  return count;
 }
 
 void SimBackgroundVoxels_Classify(uint8_t town, const uint8_t *wram,
@@ -916,165 +893,29 @@ static bool CellIsMasked(int cell_x, int cell_y) {
   return false;
 }
 
-static void BuildGeneralGroundSourceMask(
-    const SimBackgroundVoxelScene *scene, const uint8_t *wram,
-    bool out[kCellCount]) {
-  /* Unlike rendered RGB, the semantic cell survives brightness fades and
-   * palette animation. A source selected on the first black map frame must
-   * still be reusable horizontal land when its visible pixels arrive on later
-   * frames. Town-aware classifiers matter here: Marahna reuses common mountain
-   * ids, while its plateau walls are authored face topology rather than a
-   * globally unique tile range. */
-  for (int cell_y = 0; cell_y < kSimBackgroundTownCells; cell_y++)
-    for (int cell_x = 0; cell_x < kSimBackgroundTownCells; cell_x++) {
-      const size_t cell = CellIndex(cell_x, cell_y);
-      const uint8_t tile =
-          CellMapValue(scene->town, wram, cell_x, cell_y);
-      out[cell] =
-          !IsBridgeTile(tile) && !IsWateryTerrain(tile) &&
-          !SimBackgroundMountains_CellOccupied(
-              &scene->mountains, cell_x, cell_y) &&
-          !SimTownTerrain_IsFaceCell(scene->town, cell_x, cell_y);
-    }
-}
-
-static uint32_t GeneralGroundColour(
-    const uint32_t *pixels, const bool source_cell[kCellCount]) {
-  enum { kMaxColours = 1024, kColourTableSize = 2048 };
-  uint32_t colours[kColourTableSize] = {0};
-  uint32_t counts[kColourTableSize] = {0};
-  uint16_t order[kColourTableSize] = {0};
-  bool used[kColourTableSize] = {false};
-  _Static_assert(
-      (kColourTableSize & (kColourTableSize - 1)) == 0,
-      "ground-colour hash table size must be a power of two");
-  int colour_count = 0;
-  for (int y = 0; y < kSimTownCanvasPixels; y++)
-    for (int x = 0; x < kSimTownCanvasPixels; x++) {
-      size_t at = (size_t)y * kSimTownCanvasPixels + (size_t)x;
-      /* Bridge codes 2-5 have their own same-cell water replacement. Letting
-       * their long river borders vote here could select water as the general
-       * eraser beneath an unrelated house or forest. */
-      if (g_object_mask[at] != kEnhancedReplacement_Ground) continue;
-      static const int dx[] = {0, 1, 0, -1};
-      static const int dy[] = {-1, 0, 1, 0};
-      for (int edge = 0; edge < 4; edge++) {
-        int nx = x + dx[edge], ny = y + dy[edge];
-        if (nx < 0 || nx >= kSimTownCanvasPixels ||
-            ny < 0 || ny >= kSimTownCanvasPixels)
-          continue;
-        size_t next = (size_t)ny * kSimTownCanvasPixels + (size_t)nx;
-        if (!source_cell[CellIndex(
-                nx / kSimBackgroundCellPixels,
-                ny / kSimBackgroundCellPixels)])
-          continue;
-        uint32_t colour = pixels[next];
-        if (g_object_mask[next] || StrongTreePixel(colour)) continue;
-        uint32_t mixed = colour * 0x9E3779B1u;
-        int index = (int)(mixed & (kColourTableSize - 1));
-        while (used[index] && colours[index] != colour)
-          index = (index + 1) & (kColourTableSize - 1);
-        if (!used[index]) {
-          if (colour_count >= kMaxColours) continue;
-          used[index] = true;
-          colours[index] = colour;
-          counts[index] = 0;
-          order[index] = (uint16_t)colour_count;
-          colour_count++;
-        }
-        counts[index]++;
+static bool FindGeneralGroundCell(const SimBackgroundVoxelScene *scene,
+    const uint8_t *wram, int *ground_cell_x, int *ground_cell_y) {
+  /* $08 is the cleared plain; $00 is its undeveloped terrain variant. Their
+   * native town palette supplies grass, sand or snow. Select only a displayed
+   * plain, never a tree whose logical cell was cleared before its animation
+   * finished, nor a landmark, river or cliff with a similar colour. */
+  const uint8_t plains[] = {0x08, 0x00};
+  for (unsigned kind = 0; kind < sizeof(plains); ++kind)
+    for (int y = 0; y < kSimBackgroundTownCells; ++y)
+      for (int x = 0; x < kSimBackgroundTownCells; ++x) {
+        if (CellIsMasked(x, y) ||
+            SimBackgroundMountains_CellOccupied(&scene->mountains, x, y) ||
+            SimTownTerrain_IsFaceCell(scene->town, x, y)) continue;
+        const uint8_t displayed = DisplayedCellMetatile(scene->town, wram, x, y);
+        if (displayed != plains[kind]) continue;
+        uint16_t live[4];
+        LiveCellEntries(wram, x, y, live);
+        if (!TerrainMetatileMatches(wram, displayed, live)) continue;
+        *ground_cell_x = x;
+        *ground_cell_y = y;
+        return true;
       }
-  }
-  int best = -1;
-  for (int i = 0; i < kColourTableSize; i++)
-    if (used[i] &&
-        (best < 0 || counts[i] > counts[best] ||
-         (counts[i] == counts[best] && order[i] < order[best])))
-      best = i;
-  return best >= 0 ? colours[best] : pixels[0];
-}
-
-static bool SnowLikePixel(uint32_t colour) {
-  unsigned red = (colour >> 16) & 0xFF;
-  unsigned green = (colour >> 8) & 0xFF;
-  unsigned blue = colour & 0xFF;
-  unsigned minimum = red < green ? red : green;
-  if (blue < minimum) minimum = blue;
-  unsigned maximum = red > green ? red : green;
-  if (blue > maximum) maximum = blue;
-  return minimum >= 144 && maximum - minimum <= 80;
-}
-
-static bool FindSnowGroundCell(const uint32_t *pixels,
-                               const bool source_cell[kCellCount],
-                               int *ground_cell_x, int *ground_cell_y) {
-  int best_score = 0, best_x = 0, best_y = 0;
-  for (int cell_y = 0; cell_y < kSimBackgroundTownCells; cell_y++)
-    for (int cell_x = 0; cell_x < kSimBackgroundTownCells; cell_x++) {
-      if (CellIsMasked(cell_x, cell_y)) continue;
-      if (!source_cell[CellIndex(cell_x, cell_y)]) continue;
-      int score = 0;
-      int x0 = cell_x * kSimBackgroundCellPixels;
-      int y0 = cell_y * kSimBackgroundCellPixels;
-      for (int y = 0; y < kSimBackgroundCellPixels; y++)
-        for (int x = 0; x < kSimBackgroundCellPixels; x++)
-          if (SnowLikePixel(
-                  pixels[(size_t)(y0 + y) * kSimTownCanvasPixels +
-                         (size_t)(x0 + x)]))
-            score++;
-      if (score > best_score) {
-        best_score = score;
-        best_x = cell_x;
-        best_y = cell_y;
-      }
-    }
-  if (!best_score) return false;
-  *ground_cell_x = best_x;
-  *ground_cell_y = best_y;
-  return true;
-}
-
-static bool FindGeneralGroundCell(
-    const uint32_t *pixels, uint8_t town,
-    const bool source_cell[kCellCount],
-    int *ground_cell_x, int *ground_cell_y) {
-  /* Northwall contains deliberately green landmark plots. Their long border
-   * can dominate the object-neighbour vote even though the general terrain is
-   * snow, producing a conspicuous green rectangle under a replaced landmark.
-   * Prefer a complete unmasked snow cell and retain the ordinary colour vote
-   * as a fallback for fades or unusual captures with no detectable snow. */
-  if (town == kSimBackgroundTownCount && FindSnowGroundCell(
-          pixels, source_cell, ground_cell_x, ground_cell_y))
-    return true;
-  uint32_t ground_colour = GeneralGroundColour(pixels, source_cell);
-  int best_score = -1, best_x = 0, best_y = 0;
-  for (int cell_y = 0; cell_y < kSimBackgroundTownCells; cell_y++)
-    for (int cell_x = 0; cell_x < kSimBackgroundTownCells; cell_x++) {
-      if (CellIsMasked(cell_x, cell_y)) continue;
-      if (!source_cell[CellIndex(cell_x, cell_y)]) continue;
-      int green = CellTreePixelCount(pixels, cell_x, cell_y);
-      if (green * 10 >= kSimBackgroundCellPixels *
-          kSimBackgroundCellPixels)
-        continue;
-      int score = 0;
-      int x0 = cell_x * kSimBackgroundCellPixels;
-      int y0 = cell_y * kSimBackgroundCellPixels;
-      for (int y = 0; y < kSimBackgroundCellPixels; y++)
-        for (int x = 0; x < kSimBackgroundCellPixels; x++)
-          if (pixels[(size_t)(y0 + y) * kSimTownCanvasPixels +
-                     (size_t)(x0 + x)] ==
-              ground_colour)
-            score++;
-      if (score > best_score) {
-        best_score = score;
-        best_x = cell_x;
-        best_y = cell_y;
-      }
-    }
-  if (best_score < 0) return false;
-  *ground_cell_x = best_x;
-  *ground_cell_y = best_y;
-  return true;
+  return false;
 }
 
 static bool FindMountainScratchCell(
@@ -1288,8 +1129,7 @@ static void BuildStructureHeights(const SimBackgroundVoxelScene *scene) {
 }
 
 static void BuildEnhancedReplacementPlan(
-    const uint8_t *wram, const uint32_t *pixels,
-    const SimBackgroundVoxelScene *scene) {
+    const uint8_t *wram, const SimBackgroundVoxelScene *scene) {
   memset(g_object_mask, 0, sizeof(g_object_mask));
   memset(g_atlas_alpha, 0, sizeof(g_atlas_alpha));
   /* Mountain cells keep the current town's authored colours but take their
@@ -1347,11 +1187,9 @@ static void BuildEnhancedReplacementPlan(
       }
   }
 
-  bool general_ground_source[kCellCount];
-  BuildGeneralGroundSourceMask(scene, wram, general_ground_source);
   int ground_cell_x, ground_cell_y;
   g_background.have_general_ground = FindGeneralGroundCell(
-      pixels, scene->town, general_ground_source,
+      scene, wram,
       &ground_cell_x, &ground_cell_y);
   if (g_background.have_general_ground) {
     g_background.general_ground_cell_x = (uint8_t)ground_cell_x;
@@ -1736,7 +1574,7 @@ void SimBackgroundVoxels_BuildWithRows(uint8_t town, const uint8_t *wram,
   if (scene_changed) {
     SimBackgroundVoxels_Classify(town, wram, wind_stops_all,
                                  &g_background.scene);
-    BuildEnhancedReplacementPlan(wram, canvas_pixels, &g_background.scene);
+    BuildEnhancedReplacementPlan(wram, &g_background.scene);
     BuildMountainBaselines(&g_background.scene);
     BuildStructureHeights(&g_background.scene);
     SaveSceneInputs(town, wram, canvas_layout_serial, wind_stops_all);

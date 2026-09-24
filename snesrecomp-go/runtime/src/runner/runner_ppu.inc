@@ -522,13 +522,15 @@ static SrResult configure_ppu_obj_capture(
         SrRunnerHandle *runner, const SrPpuObjCaptureRequest *request) {
     Snes *snes = runner_from_handle(runner);
     const uint32_t supported = SR_PPU_OBJ_CAPTURE_RANGE |
-        SR_PPU_OBJ_CAPTURE_RELOCATED;
+        SR_PPU_OBJ_CAPTURE_RELOCATED | SR_PPU_OBJ_CAPTURE_WINNERS;
     Ppu *ppu;
     bool range_clear = false;
     bool relocated_clear = false;
     if (snes == NULL || request == NULL ||
         request->struct_size < SR_PPU_OBJ_CAPTURE_REQUEST_V2_SIZE ||
-        request->flags == 0u || (request->flags & ~supported) != 0u ||
+        request->flags == 0u ||
+        (request->flags & (SR_PPU_OBJ_CAPTURE_RANGE | SR_PPU_OBJ_CAPTURE_WINNERS)) ==
+            (SR_PPU_OBJ_CAPTURE_RANGE | SR_PPU_OBJ_CAPTURE_WINNERS) || (request->flags & ~supported) != 0u ||
         request->reserved[0] != 0u || request->reserved[1] != 0u)
         return SR_RESULT_INVALID_ARGUMENT;
     if (request->lifetime_generation != snes->abiLifetimeGeneration)
@@ -536,7 +538,7 @@ static SrResult configure_ppu_obj_capture(
     ppu = ppu_output_control_target(snes);
     if (ppu == NULL) return SR_RESULT_UNAVAILABLE;
 
-    if ((request->flags & SR_PPU_OBJ_CAPTURE_RANGE) != 0u) {
+    if ((request->flags & (SR_PPU_OBJ_CAPTURE_RANGE | SR_PPU_OBJ_CAPTURE_WINNERS)) != 0u) {
         range_clear = request->range_count == 0u;
         if (range_clear) {
             if (request->range_first != 0u || request->range_x != 0 ||
@@ -591,10 +593,13 @@ static SrResult configure_ppu_obj_capture(
         }
     }
 
-    if ((request->flags & SR_PPU_OBJ_CAPTURE_RANGE) != 0u) {
+    if ((request->flags & (SR_PPU_OBJ_CAPTURE_RANGE | SR_PPU_OBJ_CAPTURE_WINNERS)) != 0u) {
+        const bool winners = (request->flags & SR_PPU_OBJ_CAPTURE_WINNERS) != 0u;
+        PpuObjRangeCapture *capture = winners
+            ? &ppu->objWinnerCapture : &ppu->objRangeCapture;
         if (range_clear) {
-            memset(&ppu->objRangeCapture, 0, sizeof(ppu->objRangeCapture));
-        } else if (!PpuSetObjRangeCapture(
+            memset(capture, 0, sizeof(*capture));
+        } else if (!(winners ? PpuSetObjWinnerCapture : PpuSetObjRangeCapture)(
                        ppu, (uint8_t)request->range_first,
                        (uint8_t)request->range_count, request->range_x,
                        request->range_y, (int)request->range_width,
@@ -1118,7 +1123,9 @@ static bool valid_background_view(const Ppu *ppu,
         background_view_overlaps(view, ppu->authenticRenderBuffer,
             (uint64_t)ppu->authenticRenderPitch * ppu->authenticRenderHeight) ||
         background_view_overlaps(view, ppu->objRangeCapture.pixels,
-            (uint64_t)ppu->objRangeCapture.pitch * kPpuYPixels))
+            (uint64_t)ppu->objRangeCapture.pitch * kPpuYPixels) ||
+        background_view_overlaps(view, ppu->objWinnerCapture.pixels,
+            (uint64_t)ppu->objWinnerCapture.pitch * kPpuYPixels))
         return false;
     for (int source = 0; source < kPpuOverlaySource_Count; ++source) {
         uint64_t bytes = (uint64_t)ppu->overlayRenderPitch[source] *

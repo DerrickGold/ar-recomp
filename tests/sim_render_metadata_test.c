@@ -2158,122 +2158,29 @@ static void TestWorldNavigationCloudCeiling(void) {
   CHECK(SimWorldNavigationScene_MasterFadeAlpha(255) == 0);
 }
 
-static void HideAllNavigationOam(uint16_t oam[256]) {
-  for (int slot = 0; slot < 128; slot++) {
-    oam[slot * 2] = 0xE000;
-    oam[slot * 2 + 1] = 0xE000;
-  }
-}
-
-static void PopulateNavigationComposition(uint16_t oam[256], int label_count) {
-  static const uint8_t palace_x[9] =
-      {104, 120, 136, 104, 120, 136, 104, 120, 136};
-  static const uint8_t palace_y[9] =
-      {81, 81, 81, 97, 97, 97, 113, 113, 113};
-  static const uint8_t palace_tile[9] =
-      {0x06, 0x08, 0x0A, 0x0C, 0x0E, 0x26, 0x60, 0x62, 0x64};
-  HideAllNavigationOam(oam);
-  for (int slot = 0; slot < label_count; slot++) {
-    oam[slot * 2] =
-        (uint16_t)((25u << 8) | (uint8_t)(156 + slot * 8));
-    oam[slot * 2 + 1] = (uint16_t)(0x3000u | (uint8_t)slot);
-  }
-  for (int cell = 0; cell < 12; ++cell) {
-    const int slot = label_count + cell;
-    oam[slot * 2] = (uint16_t)(
-        (17u + (unsigned)(cell / 6) * 8u) << 8 |
-        (144u + (unsigned)(cell % 6) * 16u));
-    oam[slot * 2 + 1] =
-        (uint16_t)(0x3200u | (cell < 6 ? 0x28u : 0x38u));
-  }
-  const int palace_first = label_count + 12;
-  for (int i = 0; i < 9; i++) {
-    oam[(palace_first + i) * 2] =
-        (uint16_t)(palace_x[i] | ((uint16_t)palace_y[i] << 8));
-    oam[(palace_first + i) * 2 + 1] =
-        (uint16_t)(palace_tile[i] | 0x3200u);
-  }
-}
-
-static void TestWorldNavigationOamClassifier(void) {
-  uint16_t oam[256];
+static void TestWorldNavigationOwnership(void) {
+  ActRaiserSpriteOwnership owner = {.valid = true, .map = 9, .location = 3};
   SimWorldNavigationComposition composition;
-  HideAllNavigationOam(oam);
-  CHECK(SimWorldNavigationScene_ClassifyOam(oam, &composition));
-  CHECK(composition.valid);
+  CHECK(SimWorldNavigationScene_FromOwnership(&owner, &composition));
   CHECK(composition.empty_animation);
-  CHECK(!composition.palace.visible);
-  CHECK(!composition.label.visible);
-  CHECK(!composition.plaque.visible);
-
-  /* Synthetic copy of gf370: eight glyphs, the fixed 6x2 plaque, then the
-   * fixed 3x3 Palace. */
-  PopulateNavigationComposition(oam, 8);
-  CHECK(SimWorldNavigationScene_ClassifyOam(oam, &composition));
-  CHECK(composition.valid);
-  CHECK(!composition.empty_animation);
-  CHECK(composition.label.visible);
-  CHECK(composition.label.oam_first == 0);
-  CHECK(composition.label.oam_count == 8);
-  CHECK(composition.plaque.visible);
-  CHECK(composition.plaque.oam_first == 8);
-  CHECK(composition.plaque.oam_count == 12);
-  CHECK(composition.palace.visible);
-  CHECK(composition.palace.oam_first == 20);
-  CHECK(composition.palace.oam_count == 9);
-
-  /* The retail destinations do not all have Fillmore's eight glyphs. The
-   * classifier keys the immutable artwork from the back, so every measured
-   * short/long prefix -- and the transition frame with no label -- retains
-   * exact label/plaque/Palace ownership. */
-  static const uint8_t label_counts[] = {0, 5, 6, 7, 8, 9};
-  for (size_t i = 0; i < sizeof(label_counts); ++i) {
-    const uint8_t label_count = label_counts[i];
-    PopulateNavigationComposition(oam, label_count);
-    CHECK(SimWorldNavigationScene_ClassifyOam(oam, &composition));
-    CHECK(composition.valid && !composition.empty_animation);
-    CHECK(composition.label.visible == (label_count != 0));
-    CHECK(composition.label.oam_count == label_count);
-    CHECK(composition.plaque.oam_first == label_count);
-    CHECK(composition.plaque.oam_count == 12);
-    CHECK(composition.palace.oam_first == label_count + 12);
-    CHECK(composition.palace.oam_count == 9);
-  }
-
-  /* Captured Kasandora gf614: the last glyph is inserted back at x=204.
-   * Preserve the original ranges and sprite priority for every traversal,
-   * including reverse order, not just this one nine-glyph permutation. */
-  static const uint8_t kasandora_x[] = {156, 164, 172, 180, 188, 196, 212, 220, 204};
-  for (int reverse = 0; reverse < 2; ++reverse) {
-    PopulateNavigationComposition(oam, 9);
-    for (int i = 0; i < 9; ++i)
-      oam[i * 2] = (uint16_t)(25u << 8 | kasandora_x[reverse ? 8 - i : i]);
-    uint16_t original[256];
-    memcpy(original, oam, sizeof(original));
-    CHECK(SimWorldNavigationScene_ClassifyOam(oam, &composition));
-    CHECK(memcmp(original, oam, sizeof(original)) == 0);
-    CHECK(composition.label.oam_count == 9);
-    CHECK(composition.plaque.oam_first == 9);
-    CHECK(composition.palace.oam_first == 21);
-  }
-  PopulateNavigationComposition(oam, 9);
-  oam[8 * 2] = oam[7 * 2];  /* A duplicate anchor remains unsupported. */
-  CHECK(!SimWorldNavigationScene_ClassifyOam(oam, &composition));
-  PopulateNavigationComposition(oam, 9);
-  oam[8 * 2] = (25u << 8) | 232u; /* Outside label ownership. */
-  CHECK(!SimWorldNavigationScene_ClassifyOam(oam, &composition));
-  oam[8 * 2] = (24u << 8) | 220u;
-  CHECK(!SimWorldNavigationScene_ClassifyOam(oam, &composition));
-  PopulateNavigationComposition(oam, 9);
-  oam[8 * 2 + 1] = 0x3200; /* Plaque palette is not a label glyph. */
-  CHECK(!SimWorldNavigationScene_ClassifyOam(oam, &composition));
-
-  PopulateNavigationComposition(oam, 8);
-  oam[20 * 2] ^= 1;  /* Palace no longer fills the fixed 3x3 grid. */
-  CHECK(!SimWorldNavigationScene_ClassifyOam(oam, &composition));
-  oam[20 * 2] ^= 1;
-  oam[29 * 2] = 0x1001;  /* Unexpected active OAM after the Palace. */
-  CHECK(!SimWorldNavigationScene_ClassifyOam(oam, &composition));
+  /* Artwork can change slot counts and ordering; producer identity persists. */
+  memset(owner.slots, kActRaiserSprite_WorldPalace, 11);
+  memset(owner.slots + 11, kActRaiserSprite_WorldLabel, 7);
+  memset(owner.slots + 18, kActRaiserSprite_WorldPlaque, 14);
+  CHECK(SimWorldNavigationScene_FromOwnership(&owner, &composition));
+  CHECK(!composition.empty_animation && composition.label_location == 3);
+  CHECK(composition.palace.oam_first == 0 && composition.palace.oam_count == 11);
+  CHECK(composition.label.oam_first == 11 && composition.label.oam_count == 7);
+  CHECK(composition.plaque.oam_first == 18 && composition.plaque.oam_count == 14);
+  owner.slots[15] = kActRaiserSprite_Unowned;
+  CHECK(!SimWorldNavigationScene_FromOwnership(&owner, &composition));
+  owner.slots[15] = kActRaiserSprite_WorldLabel;
+  owner.unowned_emitted = true;
+  CHECK(!SimWorldNavigationScene_FromOwnership(&owner, &composition));
+  owner.unowned_emitted = false;
+  owner.map = 7;
+  CHECK(!SimWorldNavigationScene_FromOwnership(&owner, &composition));
+  CHECK(!SimWorldNavigationScene_FromOwnership(NULL, &composition));
 }
 
 static uint8 *ReadWramFixture(const char *path) {
@@ -2290,23 +2197,8 @@ static uint8 *ReadWramFixture(const char *path) {
   return wram;
 }
 
-static bool ReadOamFixture(const char *path, uint16_t oam[256]) {
-  FILE *file = fopen(path, "rb");
-  if (!file) return false;
-  uint8_t bytes[512];
-  const size_t got = fread(bytes, 1, sizeof(bytes), file);
-  const int extra = fgetc(file);
-  fclose(file);
-  if (got != sizeof(bytes) || extra != EOF) return false;
-  for (int i = 0; i < 256; i++)
-    oam[i] = (uint16_t)(bytes[i * 2] | ((uint16_t)bytes[i * 2 + 1] << 8));
-  return true;
-}
-
 static void TestCapturedWorldNavigationFixtures(const char *steady_path,
-                                                const char *animation_path,
-                                                const char *steady_oam_path,
-                                                const char *animation_oam_path) {
+                                                const char *animation_path) {
   uint8 *steady = ReadWramFixture(steady_path);
   uint8 *animation = ReadWramFixture(animation_path);
   CHECK(steady != NULL);
@@ -2319,22 +2211,8 @@ static void TestCapturedWorldNavigationFixtures(const char *steady_path,
   MakeDevelopedWorldMapAvailable();
   CheckSteadyWorldNavigation(steady);
   CheckAnimatedWorldNavigation(animation);
-  if (steady_oam_path && animation_oam_path) {
-    uint16_t steady_oam[256], animation_oam[256];
-    SimWorldNavigationComposition composition;
-    CHECK(ReadOamFixture(steady_oam_path, steady_oam));
-    CHECK(ReadOamFixture(animation_oam_path, animation_oam));
-    CHECK(SimWorldNavigationScene_ClassifyOam(steady_oam, &composition));
-    CHECK(composition.valid && !composition.empty_animation);
-    CHECK(composition.label.oam_first == 0);
-    CHECK(composition.label.oam_count == 8);
-    CHECK(composition.plaque.oam_first == 8);
-    CHECK(composition.plaque.oam_count == 12);
-    CHECK(composition.palace.oam_first == 20);
-    CHECK(composition.palace.oam_count == 9);
-    CHECK(SimWorldNavigationScene_ClassifyOam(animation_oam, &composition));
-    CHECK(composition.valid && composition.empty_animation);
-  }
+  /* Historical fixtures predate producer metadata; they still verify the
+   * navigation state, but cannot reconstruct uploaded ownership from OAM. */
   SimWorldMap_Shutdown();
   puts("world-navigation fixture metadata: PASS");
   free(animation);
@@ -3354,15 +3232,12 @@ int main(int argc, char **argv) {
   TestConnectedWorldFrameContract();
   TestSkyPalaceFrameContract();
   TestWorldNavigationCloudCeiling();
-  TestWorldNavigationOamClassifier();
-  if ((argc == 4 || argc == 6) && strcmp(argv[1], "--fixtures") == 0)
-    TestCapturedWorldNavigationFixtures(
-        argv[2], argv[3], argc == 6 ? argv[4] : NULL,
-        argc == 6 ? argv[5] : NULL);
+  TestWorldNavigationOwnership();
+  if (argc == 4 && strcmp(argv[1], "--fixtures") == 0)
+    TestCapturedWorldNavigationFixtures(argv[2], argv[3]);
   else if (argc != 1) {
     fprintf(stderr,
-            "usage: %s [--fixtures STEADY_WRAM ANIMATION_WRAM "
-            "[STEADY_OAM ANIMATION_OAM]]\n", argv[0]);
+            "usage: %s [--fixtures STEADY_WRAM ANIMATION_WRAM]\n", argv[0]);
     failures++;
   }
   if (failures) {

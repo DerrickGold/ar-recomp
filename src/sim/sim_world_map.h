@@ -98,6 +98,8 @@ uint32_t SimWorldMap_GeographySerial(void);
  * ($40-$45). Desert sand ($2C-$2F), snow, forests and buildings are separate
  * materials. Zero for unavailable/out-of-range cells. */
 float SimWorldMap_MountainCoverage(int tile_x, int tile_y);
+/* Native lowland source ramp $01..$09; independent of RGB and fades. */
+float SimWorldMap_VegetationCoverage(int tile_x, int tile_y);
 /* True only when every texel in the developed cell belongs to the authored
  * ocean/wave palette ($10/$11). Mixed shores and unknown cells return false.
  * Animated tiles must qualify in every wave phase, so this is geography,

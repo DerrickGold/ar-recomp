@@ -895,6 +895,14 @@ if(BUILD_TESTING)
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_credits COMMAND actraiser_credits_test)
 
+    add_executable(actraiser_sprite_ownership_test
+        tests/actraiser_sprite_ownership_test.c
+        src/actraiser/actraiser_sprite_ownership.c
+        src/actraiser/actraiser_sprite_upload.c)
+    target_include_directories(actraiser_sprite_ownership_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    add_test(NAME actraiser_sprite_ownership COMMAND actraiser_sprite_ownership_test)
+
     add_executable(actraiser_hud_test
         tests/actraiser_hud_test.c
         src/actraiser/actraiser_hud.c
@@ -1169,6 +1177,7 @@ if(BUILD_TESTING)
         src/scene3d_math.c
         src/sim/sim_world_map.c
         src/sim/sim_world_navigation_scene.c
+        src/actraiser/actraiser_sprite_ownership.c
         src/sim/sim_world_navigation_art.c
         src/sim/sim_town_ground_art.c
         src/sim/sim_background_mountains.c
@@ -1985,6 +1994,7 @@ if(BUILD_TESTING)
         src/sim/sim_render_visibility.c
         src/sim/sim_world_map.c
         src/sim/sim_world_navigation_scene.c
+        src/actraiser/actraiser_sprite_ownership.c
         src/sim/sim_world_navigation_towns.c
         src/sim/sim_background_voxel_landmarks.c
         src/sim/sim_town_layout.c
@@ -2553,6 +2563,7 @@ if(BUILD_TESTING)
         src/sim/sim_render_metadata_trace.c
         src/sim/sim_world_map.c
         src/sim/sim_world_navigation_scene.c
+        src/actraiser/actraiser_sprite_ownership.c
         src/sim/sim_world_navigation_towns.c
         src/sim/sim_world_navigation_capture.c
         src/sim/sim_world_navigation_palace.c
@@ -2631,6 +2642,7 @@ if(BUILD_TESTING)
         src/sim/sim_render_visibility.c
         src/sim/sim_world_map.c
         src/sim/sim_world_navigation_scene.c
+        src/actraiser/actraiser_sprite_ownership.c
         src/sim/sim_world_navigation_towns.c
         src/sim/sim_background_voxel_landmarks.c
         src/sim/sim_town_layout.c

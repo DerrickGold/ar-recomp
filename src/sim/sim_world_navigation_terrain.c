@@ -84,33 +84,17 @@ static float GridHeightAt(const float *grid, float tile_x, float tile_y) {
   return north + (south - north) * v;
 }
 
-static WorldVisualCell ClassifyWorldCell(
-    const uint32_t *pixels, int pitch_pixels, int cell_x, int cell_y) {
-  float blue = 0.0f, green = 0.0f;
-  for (int y = 0; y < kSimWorldMapTilePixels; y++) {
-    const uint32_t *row = pixels +
-        (size_t)(cell_y * kSimWorldMapTilePixels + y) * pitch_pixels +
-        cell_x * kSimWorldMapTilePixels;
-    for (int x = 0; x < kSimWorldMapTilePixels; x++) {
-      const uint32_t pixel = row[x];
-      const float red = (float)((pixel >> 16) & 0xFF);
-      const float value_green = (float)((pixel >> 8) & 0xFF);
-      const float value_blue = (float)(pixel & 0xFF);
-      if (value_blue > 48.0f && value_blue > red * 1.16f &&
-          value_blue > value_green * 1.04f && value_blue - red > 18.0f)
-        blue += 1.0f;
-      if (value_green > 42.0f && value_green > red * 1.06f &&
-          value_green > value_blue * 0.82f)
-        green += 1.0f;
-    }
-  }
-  const float samples =
-      (float)(kSimWorldMapTilePixels * kSimWorldMapTilePixels);
-  const float water = Smoothstep((blue / samples - 0.24f) / 0.58f);
+static WorldVisualCell ClassifyWorldCell(int cell_x, int cell_y) {
+  uint8_t mask[64];
+  unsigned water_pixels = 0;
+  if (SimWorldMap_OpenWaterMask(cell_x, cell_y, mask))
+    for (unsigned pixel = 0; pixel < sizeof(mask); ++pixel)
+      water_pixels += mask[pixel] != 0;
+  const float water = Smoothstep((water_pixels / 64.0f - 0.24f) / 0.58f);
   const float rock = SimWorldMap_MountainCoverage(cell_x, cell_y);
   return (WorldVisualCell){
     .land = 1.0f - water,
-    .vegetation = green / samples,
+    .vegetation = SimWorldMap_VegetationCoverage(cell_x, cell_y),
     .coast_distance = water > 0.58f ? 0.0f : 10000.0f,
     .rock = rock,
     .rock_distance = rock >= 0.18f ? 10000.0f : 0.0f,
@@ -278,14 +262,13 @@ float SimWorldNavigationTerrain_MaxMountainRise(void) {
   return kMountainBaseRise + kMountainDistanceLimit * kMountainRisePerTile;
 }
 
-bool SimWorldNavigationTerrain_RebuildWorldPrior(
-    const uint32_t *pixels, int pitch_pixels, uint32_t serial) {
-  if (!pixels || pitch_pixels < kSimWorldMapPixels || !serial) return false;
+bool SimWorldNavigationTerrain_RebuildWorldPrior(void) {
+  const uint32_t serial = SimWorldMap_GeographySerial();
+  if (!serial) return false;
   if (serial == s_world_prior_serial) return true;
   for (int y = 0; y < kWorldCells; y++)
     for (int x = 0; x < kWorldCells; x++)
-      s_visual[CellIndex(x, y)] = ClassifyWorldCell(
-          pixels, pitch_pixels, x, y);
+      s_visual[CellIndex(x, y)] = ClassifyWorldCell(x, y);
   SeedOceanDistance();
   BuildCoastDistance();
   BuildMountainRelief();

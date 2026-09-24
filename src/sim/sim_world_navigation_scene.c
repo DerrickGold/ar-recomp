@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "constants.h"
+#include "actraiser_game.h"
 #include "sim_world_map.h"
 
 enum {
@@ -13,32 +14,6 @@ enum {
   kMode7MatrixFixedPointUnit = 256,
   kHardwareMaximumBrightness = 15,
   kAlphaPerBrightnessStep = UINT8_MAX / kHardwareMaximumBrightness,
-  kOamWordsPerSlot = 2,
-  kOamSlotCount =
-      kSimWorldNavigationOamWords / kOamWordsPerSlot,
-  kOamHiddenY = 0xE0,
-  kPlaqueGridColumns = 6,
-  kPlaqueGridRows = 2,
-  kPlaqueOamCount = kPlaqueGridColumns * kPlaqueGridRows,
-  kPlaqueOriginX = 144,
-  kPlaqueOriginY = 17,
-  kPlaqueCellWidth = 16,
-  kPlaqueCellHeight = 8,
-  kPlaqueAttributesHigh = 0x32,
-  /* A label can be hidden between locations, but the fixed plaque remains. */
-  kPalaceFirstSlotMinimum = kPlaqueOamCount,
-  kPalaceGridColumns = 3,
-  kPalaceGridRows = 3,
-  kPalaceOamCount = kPalaceGridColumns * kPalaceGridRows,
-  kPalaceOriginX = 104,
-  kPalaceOriginY = 81,
-  kPalaceCellPixels = 16,
-  kPalaceAttributesHigh = 0x32,
-  kPalaceOccupiedMask = (1u << kPalaceOamCount) - 1,
-  kUiPriorityShift = 12,
-  kUiPriorityMask = 3,
-  kUiRequiredPriority = 3,
-  kLabelAttributesHigh = 0x30,
 };
 
 static const float kCameraAltitudePerZoomUnit = 0.25f;
@@ -261,141 +236,36 @@ float SimWorldNavigationScene_LocationHaze(
   return t * t * (3.0f - 2.0f * t);
 }
 
-static bool OamSlotHidden(const uint16_t oam[kSimWorldNavigationOamWords], int slot) {
-  return (oam[slot * kOamWordsPerSlot] >> 8) == kOamHiddenY;
-}
-
-static bool PalaceSignatureAt(const uint16_t oam[kSimWorldNavigationOamWords], int first) {
-  if (first < kPalaceFirstSlotMinimum ||
-      first > kOamSlotCount - kPalaceOamCount)
-    return false;
-  unsigned occupied = 0;
-  for (int i = 0; i < kPalaceOamCount; i++) {
-    const int word = (first + i) * kOamWordsPerSlot;
-    const uint16_t position = oam[word];
-    const uint16_t attributes = oam[word + 1];
-    const int x = position & UINT8_MAX;
-    const int y = position >> 8;
-    if (x < kPalaceOriginX ||
-        x > kPalaceOriginX +
-                (kPalaceGridColumns - 1) * kPalaceCellPixels ||
-        (x - kPalaceOriginX) % kPalaceCellPixels ||
-        y < kPalaceOriginY ||
-        y > kPalaceOriginY +
-                (kPalaceGridRows - 1) * kPalaceCellPixels ||
-        (y - kPalaceOriginY) % kPalaceCellPixels ||
-        (attributes >> 8) != kPalaceAttributesHigh)
-      return false;
-    const unsigned cell =
-        (unsigned)((y - kPalaceOriginY) / kPalaceCellPixels *
-                       kPalaceGridColumns +
-                   (x - kPalaceOriginX) / kPalaceCellPixels);
-    if (occupied & (1u << cell)) return false;
-    occupied |= 1u << cell;
-  }
-  /* The ROM changes tile numbers and traversal order between Palace animation
-   * frames. The invariant is the complete fixed-centre 3x3 grid, one slot per
-   * cell, all with the same palette/priority attributes. */
-  return occupied == kPalaceOccupiedMask;
-}
-
-static bool PlaqueSignatureAt(
-    const uint16_t oam[kSimWorldNavigationOamWords], int first) {
-  if (first < 0 || first > kOamSlotCount - kPlaqueOamCount) return false;
-  unsigned occupied = 0;
-  for (int i = 0; i < kPlaqueOamCount; ++i) {
-    const int word = (first + i) * kOamWordsPerSlot;
-    const uint16_t position = oam[word];
-    const int x = position & UINT8_MAX;
-    const int y = position >> 8;
-    if (x < kPlaqueOriginX ||
-        x > kPlaqueOriginX +
-                (kPlaqueGridColumns - 1) * kPlaqueCellWidth ||
-        (x - kPlaqueOriginX) % kPlaqueCellWidth ||
-        y < kPlaqueOriginY ||
-        y > kPlaqueOriginY +
-                (kPlaqueGridRows - 1) * kPlaqueCellHeight ||
-        (y - kPlaqueOriginY) % kPlaqueCellHeight ||
-        (oam[word + 1] >> 8) != kPlaqueAttributesHigh)
-      return false;
-    const unsigned cell =
-        (unsigned)((y - kPlaqueOriginY) / kPlaqueCellHeight *
-                       kPlaqueGridColumns +
-                   (x - kPlaqueOriginX) / kPlaqueCellWidth);
-    if (occupied & (1u << cell)) return false;
-    occupied |= 1u << cell;
-  }
-  return occupied == (1u << kPlaqueOamCount) - 1u;
-}
-
-bool SimWorldNavigationScene_ClassifyOam(
-    const uint16_t oam[kSimWorldNavigationOamWords],
+bool SimWorldNavigationScene_FromOwnership(
+    const ActRaiserSpriteOwnership *ownership,
     SimWorldNavigationComposition *out) {
   if (!out) return false;
-  memset(out, 0, sizeof(*out));
-  if (!oam) return false;
-
-  bool all_hidden = true;
-  for (int slot = 0; slot < kOamSlotCount; slot++) {
-    if (!OamSlotHidden(oam, slot)) {
-      all_hidden = false;
-      break;
-    }
+  *out = (SimWorldNavigationComposition){0};
+  if (!ownership || !ownership->valid || ownership->unowned_emitted ||
+      ownership->group != kActRaiserMapGroup_NonAction ||
+      ownership->map != kActRaiserNonActionMap_WorldMap)
+    return false;
+  SimWorldNavigationComposition result = {.valid = true,
+      .label_location = ownership->location};
+  SimWorldNavigationCompositionLayer *layers[] = {
+    &result.label, &result.plaque, &result.palace,
+  };
+  const ActRaiserSpriteRole roles[] = {
+    kActRaiserSprite_WorldLabel, kActRaiserSprite_WorldPlaque,
+    kActRaiserSprite_WorldPalace,
+  };
+  bool any = false;
+  for (unsigned i = 0; i < 3; ++i) {
+    layers[i]->visible = ActRaiserSpriteOwnership_Range(ownership, roles[i],
+        &layers[i]->oam_first, &layers[i]->oam_count);
+    bool emitted = false;
+    for (unsigned slot = 0; slot < kActRaiserSpriteSlots; ++slot)
+      emitted |= ownership->slots[slot] == roles[i];
+    if (emitted && !layers[i]->visible) return false;
+    any |= emitted;
   }
-  if (all_hidden) {
-    out->valid = true;
-    out->empty_animation = true;
-    return true;
-  }
-
-  int palace_first = -1;
-  for (int slot = kPalaceFirstSlotMinimum;
-       slot <= kOamSlotCount - kPalaceOamCount; slot++) {
-    if (PalaceSignatureAt(oam, slot)) {
-      palace_first = slot;
-      break;
-    }
-  }
-  if (palace_first < kPalaceFirstSlotMinimum) return false;
-  const int plaque_first = palace_first - kPlaqueOamCount;
-  if (!PlaqueSignatureAt(oam, plaque_first)) return false;
-
-  /* Native glyph traversal is not screen order: Kasandora, for example,
-   * emits its x=204 glyph after x=220. Validate ownership and distinct
-   * anchors without reordering OAM (which would change overlap priority). */
-  bool occupied_x[kSimWorldNavigationLabelWidth] = {false};
-  for (int slot = 0; slot < plaque_first; slot++) {
-    const uint16_t position = oam[slot * kOamWordsPerSlot];
-    const uint16_t attributes =
-        oam[slot * kOamWordsPerSlot + 1];
-    const int x = position & UINT8_MAX;
-    const int y = position >> 8;
-    if (OamSlotHidden(oam, slot) ||
-        ((attributes >> kUiPriorityShift) & kUiPriorityMask) !=
-            kUiRequiredPriority ||
-        (attributes >> 8) != kLabelAttributesHigh ||
-        y != kSimWorldNavigationLabelY || x < kSimWorldNavigationLabelX ||
-        x >= kSimWorldNavigationLabelX + kSimWorldNavigationLabelWidth)
-      return false;
-    const int column = x - kSimWorldNavigationLabelX;
-    if (occupied_x[column]) return false;
-    occupied_x[column] = true;
-  }
-  for (int slot = palace_first + kPalaceOamCount;
-       slot < kOamSlotCount; slot++)
-    if (!OamSlotHidden(oam, slot)) return false;
-
-  out->valid = true;
-  if (plaque_first) {
-    out->label.visible = true;
-    out->label.oam_first = 0;
-    out->label.oam_count = (uint8_t)plaque_first;
-  }
-  out->plaque.visible = true;
-  out->plaque.oam_first = (uint8_t)plaque_first;
-  out->plaque.oam_count = kPlaqueOamCount;
-  out->palace.visible = true;
-  out->palace.oam_first = (uint8_t)palace_first;
-  out->palace.oam_count = kPalaceOamCount;
+  if (any && (!result.palace.visible || !result.plaque.visible)) return false;
+  result.empty_animation = !any;
+  *out = result;
   return true;
 }

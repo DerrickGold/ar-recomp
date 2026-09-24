@@ -1041,10 +1041,7 @@ static void PrepareWorldNavigationTerrain(void) {
   s_world_terrain.samples_ready = false;
   /* Prior publication is owner-only. All following samples read immutable
    * world/town inputs, and each job writes disjoint rows. */
-  const uint32_t *world_pixels = SimWorldMap_BakedPixels();
-  if (world_pixels)
-    (void)SimWorldNavigationTerrain_RebuildWorldPrior(
-        world_pixels, kSimWorldMapPixels, world_serial);
+  (void)SimWorldNavigationTerrain_RebuildWorldPrior();
   float maximum[kWorldNavigationTerrainAxis];
   WorldNavigationTerrainWork work = {s_world_terrain.height, s_world_terrain.floor,
       s_world_terrain.authored, maximum};

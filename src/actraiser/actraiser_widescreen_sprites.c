@@ -22,6 +22,7 @@
 #include "action/action_effect_clock.h"
 #include "action/action_obj_apron.h"
 #include "actraiser_game.h"
+#include "actraiser/actraiser_sprite_ownership.h"
 #include "actraiser_rtl.h"
 #include "actraiser/regional/actraiser_actor_art.h"
 #include "display_geometry.h"
@@ -510,6 +511,8 @@ RecompReturn ActRaiser_ObjectVisibilityScanWide(CpuState *cpu) {
    * make that stale position look authoritative. Clearing here means "no
    * override" and "not emitted" are the same statement. */
   ws_action_begin_obj_metadata();
+  ActRaiserSpriteOwnership_Begin(g_ram[kActRaiserWram_MapGroup],
+      g_ram[kActRaiserWram_CurrentMap], 0);
 
   cpu->A = saved_stack_pointer;
   cpu->X = 0;
@@ -530,9 +533,12 @@ RecompReturn ActRaiser_ObjectVisibilityScanWide(CpuState *cpu) {
     cpu->S = call_s;
     if (r != RECOMP_RETURN_NORMAL) {
       ws_action_commit_obj_metadata();
+      ActRaiserSpriteOwnership_Reset();
       return r;
     }
   }
+
+  ActRaiserSpriteOwnership_Record(kActRaiserSprite_HudIcon, 0, cpu->Y);
 
   uint16 object_address = kActRaiserWram_ActionObjectTable;
   uint16 oam_offset = cpu->Y;
@@ -693,6 +699,7 @@ RecompReturn ActRaiser_ObjectVisibilityScanWide(CpuState *cpu) {
         cpu->S = call_s;
         if (r != RECOMP_RETURN_NORMAL) {
           ws_action_commit_obj_metadata();
+          ActRaiserSpriteOwnership_Reset();
           return r;
         }
         oam_offset = cpu->Y;
@@ -784,6 +791,7 @@ RecompReturn ActRaiser_ObjectVisibilityScanWide(CpuState *cpu) {
    * Either nested HLE can return abnormally above; such an aborted scan did
    * not produce the gameplay/OAM frame whose effect clocks this serial owns. */
   ws_action_commit_obj_metadata();
+  ActRaiserSpriteOwnership_Complete(g_ram + kActRaiserOamShadow);
   ActionEffectGameplayClock_CompletePass();
   return RECOMP_RETURN_NORMAL;
 }
@@ -794,6 +802,7 @@ RecompReturn ActRaiser_ObjectVisibilityScanWide(CpuState *cpu) {
 RecompReturn ActRaiser_BuildObjectSprites(CpuState *cpu) {
   uint16 object_address = cpu->X;
   uint16 oam_offset = cpu->Y;
+  const uint16 oam_before = oam_offset;
   int oam_full = 0;
   const int16 native_left = (int16)cpu_read16(cpu, cpu->DB,
       object_address + kActRaiserActionObject_LeftExtent);
@@ -1062,6 +1071,10 @@ RecompReturn ActRaiser_BuildObjectSprites(CpuState *cpu) {
                    (cpu->_flag_C ? 0x01 : 0));
   cpu->m_flag = 0;
   cpu->P &= (uint8)~0x20;
+
+  ActRaiserSpriteOwnership_RecordAction(cpu_read16(cpu, cpu->DB,
+      object_address + kActRaiserActionObject_SourceDescriptor),
+      oam_before, oam_offset);
 
   /* Emulate the replaced RTS; the generated paired caller then restores S. */
   cpu->S = (uint16)(cpu->S + 2);
@@ -1847,6 +1860,8 @@ static RecompReturn ws_sim_build_sprites(CpuState *cpu, int alternate_attr) {
    * question about the widescreen margin and is left alone. */
 
   SimRenderMetadata_EndRecord(oam);
+  ActRaiserSpriteOwnership_RecordSim(record, cpu_read16(cpu, cpu->DB,
+      record + kSimRecord_Type), oam_before, oam);
   if (s_sim_ppu_state_valid && position_update_count != 0u) {
     (void)ws_update_obj_metadata(
         &s_sim_ppu_state, 0u, position_updates, position_update_count);

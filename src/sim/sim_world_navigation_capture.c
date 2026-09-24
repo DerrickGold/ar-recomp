@@ -1,4 +1,5 @@
 #include "sim_world_navigation_capture.h"
+#include "actraiser_game.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -198,7 +199,10 @@ bool SimWorldNavigationCapture_Capture(SimFrameData *frame,
     return NavigationCaptureFailed(frame, kNavigationCapture_Mode);
   if ((ppu.flags & SR_PPU_STATE_FORCED_BLANK) != 0u)
     return NavigationCaptureFailed(frame, kNavigationCapture_Blank);
-  if (!SimWorldNavigationScene_ClassifyOam(oam.data, &composition))
+  const ActRaiserSpriteOwnership ownership =
+      ActRaiserSpriteOwnership_Presented(g_ram[kActRaiserWram_MapGroup],
+          g_ram[kActRaiserWram_CurrentMap]);
+  if (!SimWorldNavigationScene_FromOwnership(&ownership, &composition))
     return NavigationCaptureFailed(frame, kNavigationCapture_Oam);
 
   /* Unlike town separated capture, navigation has no reason to inherit the

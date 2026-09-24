@@ -106,6 +106,7 @@ enum { kPpuObjSampleCacheCount = 8 };
  * output pixel. */
 typedef struct PpuObjSampleCache {
     PpuPixelPrioBufs pixels;
+    uint8_t slots[kPpuXPixels + 2 * kPpuExtraLeftRight];
     PpuBitWord opaque[kPpuPixelMaskWords];
     int16_t screen_y, x_offset;
     uint8_t include_first, include_count;
@@ -326,6 +327,7 @@ struct Ppu {
     PpuOverlayCapture overlayCaptures[kPpuOverlaySource_Count];
     uint8_t overlayObjRelocatedFirst, overlayObjRelocatedCount;
     PpuObjRangeCapture objRangeCapture;
+    PpuObjRangeCapture objWinnerCapture;
     uint32_t renderPitch;
     uint32_t renderHeight;
     uint8_t *renderBuffer;
@@ -522,6 +524,8 @@ bool PpuSetOverlayOamRange(Ppu *, uint8_t, uint8_t);
 bool PpuSetOverlayRelocatedOamRange(Ppu *, uint8_t, uint8_t);
 bool PpuSetObjRangeCapture(Ppu *, uint8_t, uint8_t, int, int, int, int,
                            uint8_t *, size_t);
+bool PpuSetObjWinnerCapture(Ppu *, uint8_t, uint8_t, int, int, int, int,
+                            uint8_t *, size_t);
 bool PpuBindMode7OverlaySurface(Ppu *, uint8_t *, size_t, uint8_t, uint32_t);
 bool PpuSetMode7Override(Ppu *, const uint32_t *, int, int, int, int,
                          int, int, uint8_t);

@@ -72,13 +72,10 @@ bool SimWorldNavigationTerrain_TownCellCorners(
 /* Upper bound of inferred rock rise before native-boundary registration. */
 float SimWorldNavigationTerrain_MaxMountainRise(void);
 
-/* Rebuilds the lowland prior and mountain layer from developed world artwork
- * and SimWorldMap's ROM-palette rock coverage. Town base elevations remain
- * relative contours from SimTownTerrain. `pixels` is the owned
- * kSimWorldMapPixels-square ARGB8888 bake. Repeating a non-zero serial is a
- * no-op. Use GeographySerial, not the water-animation image serial. */
-bool SimWorldNavigationTerrain_RebuildWorldPrior(
-    const uint32_t *pixels, int pitch_pixels, uint32_t serial);
+/* Rebuild from the developed tilemap's native material indices. The geography
+ * serial owns this cache; palette changes and animated waves cannot alter
+ * terrain height. Town base elevations retain their native relative contours. */
+bool SimWorldNavigationTerrain_RebuildWorldPrior(void);
 
 /* Serial of the last accepted world prior, or zero while the deterministic
  * town-edge fallback is in use. */

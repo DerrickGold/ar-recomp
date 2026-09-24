@@ -3,6 +3,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include "actraiser/actraiser_sprite_ownership.h"
 
 enum {
   /* OAM low table in 16-bit words (128 sprites x 2). Mirrors ppu.h's
@@ -17,7 +18,7 @@ enum {
   kSimWorldNavigationAffineComponentCount = 6,
   kSimWorldNavigationGroundVertexCount = 4,
   /* Authentic screen-space ownership of the variable-length native location
-   * glyphs. The OAM classifier and enhanced localization adapter share this
+   * glyphs. Native capture and the enhanced localization adapter share this
    * rectangle so capture and replacement cannot drift independently. */
   kSimWorldNavigationLabelX = 156,
   kSimWorldNavigationLabelY = 25,
@@ -59,6 +60,7 @@ typedef struct SimWorldNavigationCompositionLayer {
 typedef struct SimWorldNavigationComposition {
   bool valid;
   bool empty_animation;
+  uint16_t label_location;
   SimWorldNavigationCompositionLayer palace;
   /* The label glyphs and their authentic plaque are separate ownership
    * ranges. Enhanced localization may replace only `label`; `plaque` remains
@@ -167,14 +169,10 @@ float SimWorldNavigationScene_LocationHaze(
     const SimWorldNavigationScene *scene,
     float source_x, float source_y, float lead);
 
-/* Pure OAM ownership classifier. `oam` is the PPU's 256-word low table
- * (position/attributes pairs). It recognizes either the fixed Palace
- * signature with the packed label/plaque prefix, or the all-hidden
- * action-entry state.
- * Anything else fails closed. Raster bounds are filled later by the PPU-backed
- * capture step. */
-bool SimWorldNavigationScene_ClassifyOam(
-    const uint16_t oam[kSimWorldNavigationOamWords],
+/* Consume the native producers' uploaded ranges. Pixel data is used only by
+ * the subsequent raster capture, never to identify the composition. */
+bool SimWorldNavigationScene_FromOwnership(
+    const ActRaiserSpriteOwnership *ownership,
     SimWorldNavigationComposition *out);
 
 #endif  /* SIM_WORLD_NAVIGATION_SCENE_H */

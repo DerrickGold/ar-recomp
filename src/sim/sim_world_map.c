@@ -58,6 +58,7 @@ static struct {
   uint32_t serial;
   uint32_t geography_serial;
   uint8_t mountain_pixels[kWorldTileCount];
+  uint8_t vegetation_pixels[kWorldTileCount];
   bool open_water[kWorldTileCount];
   uint8_t water_mask[kWorldTileCount][kWorldTileBytes];
   /* One flag per tile (tilemap is one byte per tile, so this is indexed
@@ -122,6 +123,10 @@ bool SimWorldMap_Init(const uint8_t *rom_data, size_t rom_size) {
   for (int tile = 0; tile < kWorldTileCount; tile++)
     for (int pixel = 0; pixel < kWorldTileBytes; pixel++) {
       const uint8_t material = g_world.tiles[tile * kWorldTileBytes + pixel];
+      /* Native lowland vegetation ramp; snow, water and rock have separate
+       * source indices even when a donor palette gives them similar colours. */
+      if (material >= 0x01 && material <= 0x09)
+        g_world.vegetation_pixels[tile]++;
       if (material >= 0x40 && material <= 0x45)
         g_world.mountain_pixels[tile]++;
     }
@@ -258,6 +263,14 @@ float SimWorldMap_MountainCoverage(int tile_x, int tile_y) {
     return 0.0f;
   const uint8_t tile = g_world.tilemap[tile_y * kSimWorldMapTiles + tile_x];
   return g_world.mountain_pixels[tile] / (float)kWorldTileBytes;
+}
+
+float SimWorldMap_VegetationCoverage(int tile_x, int tile_y) {
+  if (!g_world.available || tile_x < 0 || tile_y < 0 ||
+      tile_x >= kSimWorldMapTiles || tile_y >= kSimWorldMapTiles)
+    return 0.0f;
+  const uint8_t tile = g_world.tilemap[tile_y * kSimWorldMapTiles + tile_x];
+  return g_world.vegetation_pixels[tile] / (float)kWorldTileBytes;
 }
 
 bool SimWorldMap_CellIsOpenWater(int tile_x, int tile_y) {

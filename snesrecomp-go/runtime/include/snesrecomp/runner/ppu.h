@@ -686,6 +686,10 @@ typedef struct SrPpuFrameResetRequest {
  * moved to an independent presentation layer. A zero count clears that facet.
  * The range surface remains caller-owned and must stay alive through scanout. */
 #define SR_PPU_OBJ_CAPTURE_RANGE UINT32_C(0x00000001)
+/* Independent surface containing only full-OAM winners belonging to the
+ * requested range. Uses range_* fields; cannot combine with RANGE in one
+ * request. Neither capture changes native OBJ composition. */
+#define SR_PPU_OBJ_CAPTURE_WINNERS UINT32_C(0x00000004)
 #define SR_PPU_OBJ_CAPTURE_RELOCATED UINT32_C(0x00000002)
 
 typedef struct SrPpuObjCaptureRequest {

@@ -17,6 +17,7 @@
 #include "actraiser/actraiser_hud.h"
 #include "actraiser/regional/actraiser_regional_runtime.h"
 #include "actraiser/actraiser_bg3_upload.h"
+#include "actraiser/actraiser_sprite_ownership.h"
 #include "actraiser/actraiser_localization_routes.h"
 #include "action/action_bg_tuner.h"
 #include "action/action_effects.h"
@@ -171,6 +172,7 @@ bool ActRaiser_InitializeGame(
     const RtlGameInitializeContext *context) {
   ActRaiserSimMenu_Reset();
   ActRaiserBg3Upload_Reset();
+  ActRaiserSpriteOwnership_Reset();
   s_rom_setup_result = (ActRaiserRomSetupResult){0};
   if (!context ||
       context->struct_size < RTL_GAME_INITIALIZE_CONTEXT_V1_SIZE)
@@ -2584,22 +2586,10 @@ bool ActRaiser_HudObjSurfaceView(SrPpuSurfaceView *surface) {
   return true;
 }
 
-/* Promote a validated fixed-screen HUD icon out of OAM.
- *
- * Action's $00:923A icon uses tiles $D4-$D7 in the first four slots.
- * Simulation's hourglass uses x=$94/$9B, y=$0B/$13; ROM frames
- * $01:DD4B/$DD60/$DD75/$DD8A cycle upper tiles $EC-$EF and paired lower tiles
- * $FC-$FF, with horizontal flip on each right half. Both non-action icons move
- * to later slots when menu/dialog sprites appear and are scanned by their pure
- * helpers in actraiser_game.h.
- *
- * All three land on the same 16x16 footprint, which is what lets the host draw
- * whatever this promotes as one 16x16 chunk beside the right HUD group. No
- * OAM/WRAM state is changed. */
+/* Promote the HUD producer's uploaded sprite range into the fixed HUD. */
 static SrResult ActRaiser_WidescreenHudObjPromoteTransaction(
     void *user_data, SrRunnerHandle *runner,
     const SrPpuFrameTransactionContext *context) {
-  enum { kActRaiserPpuOamSlots = SR_PPU_OAM_WORD_COUNT / 2 };
   (void)user_data;
   (void)runner;
   s_hud_obj_icon_first = 0;
@@ -2630,16 +2620,6 @@ static SrResult ActRaiser_WidescreenHudObjPromoteTransaction(
       context->frame.hud_left_only_y == kActRaiserActionHudEnemyRowY;
   if ((split_action_hud || native_flat_diorama) &&
       ActRaiser_IsActionMapGroup(map_group)) {
-    for (int slot = 0; slot < kActRaiserHudObjOamCount; slot++) {
-      int index = slot * 2;
-      uint8 tile = (uint8)context->oam.data[index + 1];
-      uint8 y = (uint8)(context->oam.data[index] >> 8);
-      uint8 expected_y = slot < 2
-          ? kActRaiserHudObjUpperY : kActRaiserHudObjLowerY;
-      if (tile != (uint8)(kActRaiserMagicHudFirstTile + slot) ||
-          y != expected_y)
-        return SR_RESULT_OK;
-    }
     capture_height = kActRaiserActionHudHeight;
   } else if (context->frame.hud_split_height ==
                  kActRaiserSimulationHudHeight &&
@@ -2651,57 +2631,29 @@ static SrResult ActRaiser_WidescreenHudObjPromoteTransaction(
              map_group == kActRaiserMapGroup_NonAction &&
              map_number >= kActRaiserSimulationTown_First &&
              map_number <= kActRaiserNonActionMap_SkyPalace) {
-    if (map_number == kActRaiserNonActionMap_SkyPalace) {
-      /* Sky Palace magic icon shifts OAM slots when dialog sprites appear, and
-       * changes SHAPE with the selected spell (see the two forms documented on
-       * ActRaiser_SkyPalaceMagicIconSlots) -- so scan the complete OAM table
-       * for the signature rather than hardcoding either a slot or a count. */
-      const int large_px = context->state.object_large_size_pixels;
-      int found_slot = -1, found_count = 0;
-      ActRaiser_FindSkyPalaceMagicIcon(
-          context->oam.data, context->high_oam.data,
-          kActRaiserPpuOamSlots, large_px,
-          &found_slot, &found_count);
-      /* AR_HUDICON=1: one line per change of scan outcome, the same
-       * change-triggered shape as the [widescreen] policy line above. This is
-       * the answer to "why is the magic icon still at centre screen?" — a
-       * slot=-1 line names the spell whose OAM shape the scan does not know,
-       * which is exactly how the four-small-slots/one-large-slot split was
-       * found. The environment gate is snapshotted before emulation starts. */
-      if (ActRaiser_DeveloperFlagEnabled(
-              kActRaiserDeveloperFlag_HudIconLog)) {
-        static int last_spell = -1, last_slot = -2, last_count = -1;
-        int spell = g_ram[kActRaiserWram_SelectedMagic];
-        if (spell != last_spell || found_slot != last_slot ||
-            found_count != last_count) {
-          last_spell = spell; last_slot = found_slot; last_count = found_count;
-          fprintf(stderr,
-                  "[hud-icon] gf=%u sky-palace spell=%d -> slot=%d count=%d\n",
-                  (unsigned)ActRaiser_ReadWram16(kActRaiserWram_GameFrame),
-                  spell, found_slot, found_count);
-        }
-      }
-      if (found_slot < 0)
-        return SR_RESULT_OK;
-      capture_height = kActRaiserSimulationHudHeight;
-      capture_first = (uint8_t)found_slot;
-      capture_count = (uint8_t)found_count;
-    } else {
-      /* Town sim: menus can push the four-sprite hourglass out of slots 0-3.
-       * Scan for the complete phase-relative signature instead of assuming an
-       * allocation; runs/20260810-231616 places it in slots 11-14. */
-      const int found_slot = ActRaiser_FindSimulationHourglass(
-          context->oam.data, context->high_oam.data,
-          kActRaiserPpuOamSlots);
-      if (found_slot < 0)
-        return SR_RESULT_OK;
-      capture_height = kActRaiserSimulationHudHeight;
-      capture_first = (uint8_t)found_slot;
-      capture_count = kActRaiserHudObjOamCount;
-    }
+    capture_height = kActRaiserSimulationHudHeight;
   } else {
     return SR_RESULT_OK;
   }
+
+  const ActRaiserSpriteOwnership ownership =
+      ActRaiserSpriteOwnership_Presented(map_group, map_number);
+  const bool owned = ActRaiserSpriteOwnership_Range(
+      &ownership, kActRaiserSprite_HudIcon, &capture_first, &capture_count);
+  if (map_number == kActRaiserNonActionMap_SkyPalace &&
+      map_group == kActRaiserMapGroup_NonAction &&
+      ActRaiser_DeveloperFlagEnabled(kActRaiserDeveloperFlag_HudIconLog)) {
+    static int last_spell = -1, last_slot = -2, last_count = -1;
+    const int spell = g_ram[kActRaiserWram_SelectedMagic];
+    const int slot = owned ? capture_first : -1;
+    if (spell != last_spell || slot != last_slot || capture_count != last_count) {
+      fprintf(stderr, "[hud-icon] gf=%u sky-palace spell=%d -> slot=%d count=%u\n",
+          (unsigned)ActRaiser_ReadWram16(kActRaiserWram_GameFrame),
+          spell, slot, capture_count);
+      last_spell = spell; last_slot = slot; last_count = capture_count;
+    }
+  }
+  if (!owned) return SR_RESULT_OK;
 
   const SrPpuOverlayCaptureState expected =
       ActRaiser_OverlayCaptureState(
@@ -3002,27 +2954,37 @@ static void ActRaiser_DioramaHudObjFinish(int width) {
   }
 }
 
-/* Promote Death Heim's BG2 statues and attach their seven red-eye ornaments.
- *
- * The ROM models the eyes as priority-2 sprites so it can blink them without
- * rewriting the background. That is indistinguishable from being painted in
- * the sockets in flat presentation, but Diorama correctly gives OBJ and BG2
- * different depth transforms: the eyes then float in front of the faces. The
- * room manifest promotes the face band to BG2Far at focal z. Because 0701 is
- * native-only, the upper BG2 rows are split after scanout; then only the pixels
- * won by the complete measured eye range move from OBJ2 to that same surface.
- * Gameplay OAM, native composition, the water, portals, player, and every
- * other room stay untouched.
- *
- * Comparing the rasterized range against the captured OBJ pixel is important:
- * if an earlier OAM slot ever covers an eye, that earlier winner remains on
- * its own OBJ plane instead of being mistaken for part of the statue. */
-enum {
-  kDeathHeimHubFaceRows = 9 * 16,
-  kDeathHeimHubEyeRasterMaxHeight = 128,
-};
-static uint32_t s_death_heim_hub_eye_raster[
-    kActRaiserAuthenticWidth * kDeathHeimHubEyeRasterMaxHeight];
+/* Native actor ownership identifies the eyes. Scanout records which pixels
+ * their actual OAM slots win, including overlaps with identical colours. */
+enum { kDeathHeimHubFaceRows = 9 * 16 };
+static uint32_t s_death_heim_hub_eye_winners[
+    kActRaiserAuthenticWidth * kActRaiserAuthenticHeight];
+static bool s_death_heim_hub_eyes_ready;
+
+static void ActRaiser_DioramaDeathHeimEyesPrepare(void) {
+  extern bool g_diorama_frame_active;
+  s_death_heim_hub_eyes_ready = false;
+  const SrPpuFrameTransactionContext *frame = ActRaiser_PpuFrame();
+  if (!frame || !g_diorama_frame_active) return;
+  const ActRaiserSpriteOwnership ownership = ActRaiserSpriteOwnership_Presented(
+      g_ram[kActRaiserWram_MapGroup], g_ram[kActRaiserWram_CurrentMap]);
+  uint8_t first, count;
+  if (!ActRaiserSpriteOwnership_Range(&ownership, kActRaiserSprite_StatueEyes,
+                                     &first, &count)) return;
+  const SrPpuObjCaptureRequest request = {
+    .struct_size = sizeof(request),
+    .flags = SR_PPU_OBJ_CAPTURE_WINNERS,
+    .lifetime_generation = frame->lifetime_generation,
+    .range_first = first, .range_count = count,
+    .range_width = kActRaiserAuthenticWidth,
+    .range_height = kActRaiserAuthenticHeight,
+    .range_pixels = (uint8_t *)s_death_heim_hub_eye_winners,
+    .range_pixel_byte_size = sizeof(s_death_heim_hub_eye_winners),
+    .range_pitch_bytes = kActRaiserAuthenticWidth * sizeof(uint32_t),
+  };
+  s_death_heim_hub_eyes_ready = ActRaiser_ConfigurePpuObjCapture(&request);
+}
+
 static bool s_death_heim_hub_faces_promoted;
 
 bool ActRaiser_DioramaDeathHeimHubFacesPromoted(void) {
@@ -3083,51 +3045,23 @@ static void ActRaiser_DioramaDeathHeimHubStatuesFinish(int width) {
     }
   }
 
-  const int first = ActRaiser_FindDeathHeimHubEyes(
-      frame->oam.data, frame->high_oam.data, SR_PPU_OAM_WORD_COUNT / 2);
-  if (first < 0) return;
-
-  enum { kEyePriority = 2 };
-  SrPpuObjResolveResult bounds;
-  if (!ActRaiser_ResolvePpuObjRange(
-          (uint8_t)first, kActRaiserDeathHeimHubEyeOamCount,
-          kEyePriority, &bounds))
-    return;
-  const int raster_width = bounds.x1 - bounds.x0;
-  const int raster_height = bounds.y1 - bounds.y0;
-  if (raster_width <= 0 || raster_width > kActRaiserAuthenticWidth ||
-      raster_height <= 0 ||
-      raster_height > kDeathHeimHubEyeRasterMaxHeight || bounds.x0 < 0 ||
-      bounds.x1 > kActRaiserAuthenticWidth)
-    return;
-  SrPpuObjRasterResult raster;
-  if (!ActRaiser_RasterizePpuObjRange(
-          (uint8_t)first, kActRaiserDeathHeimHubEyeOamCount,
-          kEyePriority, s_death_heim_hub_eye_raster,
-          (size_t)raster_width * sizeof(uint32_t),
-          sizeof(s_death_heim_hub_eye_raster), &raster))
-    return;
-
-  uint32_t *eyes = (uint32_t *)g_diorama_layer_pixels[kDioramaPlane_Obj2];
-  if (!eyes) return;
-
-  for (int y = 0; y < raster_height; y++) {
-    const int screen_y = bounds.y0 + y;
-    if (screen_y < 0 || screen_y >= kActRaiserAuthenticHeight) continue;
-    for (int x = 0; x < raster_width; x++) {
-      const uint32_t expected =
-          s_death_heim_hub_eye_raster[(size_t)y * raster_width + x];
-      if (!expected) continue;
-      const int column = ActionApron_SurfaceColumn(&geom, bounds.x0 + x);
-      if (column < 0 || column >= plane_width) continue;
-      const size_t index =
-          (size_t)(screen_y + g_ws_extra_top) * plane_width + column;
-      const uint32_t captured = eyes[index];
-      if (!captured ||
-          (captured & 0x00ffffffu) != (expected & 0x00ffffffu))
+  if (!s_death_heim_hub_eyes_ready) return;
+  for (int y = 0; y < kActRaiserAuthenticHeight; ++y) {
+    for (int x = 0; x < kActRaiserAuthenticWidth; ++x) {
+      if (!s_death_heim_hub_eye_winners[y * kActRaiserAuthenticWidth + x])
         continue;
-      faces[index] = captured;
-      eyes[index] = 0;
+      const size_t index = (size_t)(y + g_ws_extra_top) * plane_width +
+          ActionApron_SurfaceColumn(&geom, x);
+      /* Use the captured winner's band, allowing artwork to change priority.
+       * The mask supplies identity; the plane supplies its final colour/math. */
+      for (int priority = 0; priority < 4; ++priority) {
+        uint32_t *plane = (uint32_t *)g_diorama_layer_pixels[
+            ActRaiser_DioramaObjPlaneForPriority(priority)];
+        if (plane && plane[index]) {
+          faces[index] = plane[index];
+          plane[index] = 0;
+        }
+      }
     }
   }
 }
@@ -4120,6 +4054,7 @@ static SrResult ActRaiser_DrawPpuFrameTransaction(
   /* Resolve the stable OAM footprint before scanout; the live sprite evaluator
    * writes the selected range to the HUD surface while each line is fetched. */
   ActRaiser_DioramaHudObjPrepare();
+  ActRaiser_DioramaDeathHeimEyesPrepare();
 
   SrPpuBackgroundViewRequest skybox_view = ActRaiser_PrepareSkyboxView(
       context, scanout_api, scanout_ready, profile_diorama);
@@ -4689,6 +4624,7 @@ static bool CreateGameCoroutine(void) {
  * run against a clean exit stays quiet. Safe to call without a coroutine. */
 void ActRaiser_DestroyGameCoroutine(void) {
   ActRaiserBg3Upload_Reset();
+  ActRaiserSpriteOwnership_Reset();
   ActRaiserHleFatal_RegisterHostEscape(NULL);
   g_game_coroutine_executing = false;
 #ifdef _WIN32

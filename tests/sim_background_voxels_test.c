@@ -374,6 +374,10 @@ static void CheckMarahnaGroundSourceRejectsWaterDuringFade(void) {
       TownCellIndex(kMarahnaTown - 1, shrub_x, shrub_y)] = kTileShrub;
   s_ground_source_fade.wram[
       TownCellIndex(kMarahnaTown - 1, land_x, land_y)] = kTileGrass;
+  SetTerrainDefinition(s_ground_source_fade.wram, kTileGrass,
+      0x0101, 0x0101, 0x0101, 0x0101);
+  SetCanvasCell(s_ground_source_fade.wram, land_x, land_y,
+      0x0101, 0x0101, 0x0101, 0x0101);
 
   SimBackgroundVoxels_Reset();
   SimBackgroundVoxels_Build(
@@ -413,8 +417,14 @@ static void CheckMarahnaGroundSourceRejectsCliffDuringFade(void) {
       TownCellIndex(kMarahnaTown - 1, shrub_x, shrub_y)] = kTileShrub;
   s_ground_source_fade.wram[
       TownCellIndex(kMarahnaTown - 1, cliff_x, cliff_y)] = kTileGrass;
+  SetCanvasCell(s_ground_source_fade.wram, cliff_x, cliff_y,
+      0x0101, 0x0101, 0x0101, 0x0101);
   s_ground_source_fade.wram[
       TownCellIndex(kMarahnaTown - 1, land_x, land_y)] = kTileGrass;
+  SetTerrainDefinition(s_ground_source_fade.wram, kTileGrass,
+      0x0101, 0x0101, 0x0101, 0x0101);
+  SetCanvasCell(s_ground_source_fade.wram, land_x, land_y,
+      0x0101, 0x0101, 0x0101, 0x0101);
 
   SimBackgroundVoxels_Reset();
   SimBackgroundVoxels_Build(
@@ -1159,6 +1169,9 @@ int main(int argc, char **argv) {
       pixels[(size_t)y * kSimTownCanvasPixels + x] =
           (x % 16 == 8 && y % 16 == 8) ? 0xFF6A8018 : 0xFF647814;
 
+  SetTerrainDefinition(wram, 0, 0x0101, 0x0101, 0x0101, 0x0101);
+  SetCanvasCell(wram, 0, 0, 0x0101, 0x0101, 0x0101, 0x0101);
+
   /* Crossing the quadrant boundary exercises the real paged cell map. */
   wram[CellIndex(15, 15)] = 0xC2;
   wram[CellIndex(16, 15)] = 0xC3;
@@ -1419,6 +1432,8 @@ int main(int argc, char **argv) {
     for (int x = 0; x < kSimTownCanvasPixels; x++)
       pixels[(size_t)y * kSimTownCanvasPixels + x] =
           (x % 16 == 8 && y % 16 == 8) ? 0xFFFFFFFF : 0xFFF0F2E8;
+  SetTerrainDefinition(wram, 0, 0x0101, 0x0101, 0x0101, 0x0101);
+  SetCanvasCell(wram, 0, 0, 0x0101, 0x0101, 0x0101, 0x0101);
   uint8_t *snow_house = wram + kRecords + 5 * kRecordsPerTown;
   snow_house[0] = 4;
   snow_house[1] = 5;

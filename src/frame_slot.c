@@ -806,7 +806,7 @@ void FrameSlot_Capture(FrameSlot *dst, const SimFrameData *annotated_sim) {
           !dst->sim.world_navigation_scene.composition.empty_animation) {
         ActRaiserLocalizationRuntime_AppendWorldNavigationLabel(
             &dst->localization,
-            dst->sim.world_navigation_scene.active_location,
+            dst->sim.world_navigation_scene.composition.label_location,
             dst->sim.world_navigation_scene.composition.label.visible,
             cgram.data, cgram.element_count);
       }

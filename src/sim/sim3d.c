@@ -15,6 +15,7 @@
 #include <string.h>
 
 #include "actraiser_game.h"
+#include "actraiser/actraiser_sprite_ownership.h"
 #include "constants.h"
 #include "deterministic_hash.h"
 #include "snes_bgr555.h"
@@ -190,22 +191,13 @@ static bool StandardTownHudCapture(
   if (capture->y1 != kActRaiserSimulationHudHeight ||
       capture->flags != SR_PPU_OVERLAY_REMOVE_FROM_GAME)
     return false;
-  /* The town menu consumes the leading OAM entries, so the fixed-screen
-   * hourglass moves from its ordinary slots 0-3 (observed at 11-14 in
-   * runs/20260810-231616 and runs/20260811-145909). The widescreen HUD
-   * promoter already discovers that range from the complete sprite signature;
-   * validate against the same per-frame fact here instead of accidentally
-   * treating a fixed screen position as a fixed OAM allocation. */
-  if (context->oam.data == NULL ||
-      context->oam.element_count < SR_PPU_OAM_WORD_COUNT ||
-      context->high_oam.data == NULL ||
-      context->high_oam.byte_size < SR_PPU_HIGH_OAM_BYTE_COUNT)
-    return false;
-  enum { kPpuOamSlots = SR_PPU_OAM_WORD_COUNT / 2 };
-  const int hourglass_first = ActRaiser_FindSimulationHourglass(
-      context->oam.data, context->high_oam.data, kPpuOamSlots);
-  return hourglass_first >= 0 && capture->oam_first == hourglass_first &&
-      capture->oam_count == kActRaiserHudObjOamCount;
+  const ActRaiserSpriteOwnership ownership =
+      ActRaiserSpriteOwnership_Presented(g_ram[kActRaiserWram_MapGroup],
+          g_ram[kActRaiserWram_CurrentMap]);
+  uint8_t first, count;
+  return ActRaiserSpriteOwnership_Range(&ownership, kActRaiserSprite_HudIcon,
+                                       &first, &count) &&
+      capture->oam_first == first && capture->oam_count == count;
 }
 
 static bool OverlayPolicyConflicts(

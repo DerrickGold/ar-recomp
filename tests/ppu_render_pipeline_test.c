@@ -766,6 +766,14 @@ static void TestWorldNavigationPartialBrightnessCapture(void) {
     ppu->oam[slot * 2 + 1] = 0xE000;
   }
 
+  uint8_t shadow[kActRaiserSpriteShadowBytes] = {0};
+  g_ram[kActRaiserWram_MapGroup] = 0;
+  g_ram[kActRaiserWram_CurrentMap] = 9;
+  ActRaiserSpriteOwnership_Reset();
+  ActRaiserSpriteOwnership_Begin(0, 9, 1);
+  ActRaiserSpriteOwnership_Complete(shadow);
+  ActRaiserSpriteOwnership_Upload(0, 9, shadow);
+
   for (uint8_t brightness = 0; brightness <= 15; brightness++) {
     SimFrameData frame = {0};
     frame.view = kSimView_WorldNavigation;
@@ -814,6 +822,12 @@ static void TestWorldNavigationPartialBrightnessCapture(void) {
     ppu->oam[(20 + i) * 2 + 1] =
         (uint16_t)(palace_tile[i] | 0x3200u);
   }
+  ActRaiserSpriteOwnership_Begin(0, 9, 1);
+  ActRaiserSpriteOwnership_RecordSim(0x06a0, 0x33, 0, 32);
+  ActRaiserSpriteOwnership_RecordSim(0x06b2, 0x32, 32, 80);
+  ActRaiserSpriteOwnership_RecordSim(0x06c4, 0x31, 80, 116);
+  ActRaiserSpriteOwnership_Complete(shadow);
+  ActRaiserSpriteOwnership_Upload(0, 9, shadow);
   SimFrameData composed = {0};
   composed.view = kSimView_WorldNavigation;
   composed.world_navigation_scene.valid = true;
@@ -1308,6 +1322,15 @@ static void TestSim3DWidescreenHudCaptureHandoff(void) {
   };
   memcpy(&ppu->oam[kMenuHourglassFirst * 2], kMenuHourglass,
          sizeof(kMenuHourglass));
+  uint8_t shadow[kActRaiserSpriteShadowBytes] = {0};
+  g_ram[kActRaiserWram_MapGroup] = 0;
+  g_ram[kActRaiserWram_CurrentMap] = 1;
+  ActRaiserSpriteOwnership_Begin(0, 1, 0);
+  ActRaiserSpriteOwnership_RecordSim(0x083e, 2,
+      kMenuHourglassFirst * 4, (kMenuHourglassFirst + 4) * 4);
+  ActRaiserSpriteOwnership_Complete(shadow);
+  ActRaiserSpriteOwnership_Upload(0, 1, shadow);
+
 
   /* PpuSetOverlayCapture stores flags through a WHITELIST, so a flag that is
    * declared in ppu.h but missing from that mask is accepted by the setter and

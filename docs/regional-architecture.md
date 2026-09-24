@@ -87,6 +87,10 @@ remain separate from donor drawing data. See [Media contracts](regional-media.md
 [ROM hooks](rom-map.md#regional-presentation-hooks) and
 [RAM ownership](ram-map.md#regional-actor-presentation-ownership).
 
+[Native presentation ownership](native-presentation-ownership.md) traces HUD,
+world-navigation and Death Heim sprites from their native producers through OAM
+upload, and describes palette-independent terrain classification.
+
 European difficulty is independent of the selected region; runtime pacing
 remains 60 Hz. Language, fonts, physical bindings, game fixes and randomizer
 settings are outside regional profiles.

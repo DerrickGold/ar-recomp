@@ -3106,6 +3106,19 @@ int main(void) {
                         snes->ppu->overlayObjRelocatedFirst == 2u &&
                         snes->ppu->overlayObjRelocatedCount == 2u,
                     "PPU OBJ capture configuration failed");
+    obj_capture_request.flags = SR_PPU_OBJ_CAPTURE_WINNERS;
+    obj_capture_request.range_first = 5u;
+    failed |= check(api->configure_ppu_obj_capture(runner, &obj_capture_request) == SR_RESULT_OK &&
+                    snes->ppu->objWinnerCapture.first == 5u &&
+                    snes->ppu->objRangeCapture.first == 2u,
+                    "independent OBJ winner capture failed");
+    obj_capture_request.flags |= SR_PPU_OBJ_CAPTURE_RANGE;
+    failed |= check(api->configure_ppu_obj_capture(runner, &obj_capture_request) == SR_RESULT_INVALID_ARGUMENT &&
+                    snes->ppu->objWinnerCapture.first == 5u &&
+                    snes->ppu->objRangeCapture.first == 2u,
+                    "ambiguous OBJ capture request partially applied");
+    obj_capture_request.flags = SR_PPU_OBJ_CAPTURE_RANGE | SR_PPU_OBJ_CAPTURE_RELOCATED;
+    obj_capture_request.range_first = 2u;
     obj_capture_request.range_pixel_byte_size = 1u;
     failed |= check(api->configure_ppu_obj_capture(
                         runner, &obj_capture_request) ==

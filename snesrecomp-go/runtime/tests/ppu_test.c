@@ -2035,6 +2035,56 @@ cleanup:
     ppu_free(sources[1]);
 }
 
+static void test_obj_winner_capture(void) {
+    enum { kPixels = kPpuXPixels * kPpuYPixels };
+    static uint32_t output[kPixels], range[2][kPixels], winners[2][kPixels];
+    for (int scenario = 0; scenario < 3; ++scenario) {
+        memset(range, 0, sizeof(range));
+        memset(winners, 0, sizeof(winners));
+        for (int reference = 0; reference < 2; ++reference) {
+            Ppu *ppu = ppu_init();
+            CHECK(ppu != NULL);
+            if (!ppu) return;
+            ppu_reset(ppu);
+            ppu->inidisp = 15;
+            ppu->bgmode = 1;
+            ppu->screenEnabled[0] = 0x10;
+            ppu->cgram[0x81] = 0x001f;
+            for (int slot = 0; slot < 128; ++slot)
+                ppu->oam[slot * 2] = 0xe000;
+            for (int row = 0; row < 8; ++row) ppu->vram[row] = 0x00ff;
+            ppu->oam[0] = 10 | (20 << 8);
+            ppu->oam[1] = 2 << 12;
+            ppu->oam[2] = 14 | (20 << 8);
+            ppu->oam[3] = (scenario == 1 ? 3 : 2) << 12;
+            if (scenario == 2) { ppu->oamaddh = 0x80; ppu->oamaddl = 2; }
+            PpuBeginDrawing(ppu, (uint8_t *)output, kPpuXPixels * 4,
+                reference ? kPpuRenderFlags_ReferencePixelRenderer : 0);
+            CHECK(PpuSetObjRangeCapture(ppu, 1, 1, 0, 0, 256, 224,
+                (uint8_t *)range[reference], kPpuXPixels * 4));
+            CHECK(PpuSetObjWinnerCapture(ppu, 1, 1, 0, 0, 256, 224,
+                (uint8_t *)winners[reference], kPpuXPixels * 4));
+            ppu_runLine(ppu, 0);
+            ppu_runLine(ppu, 21);
+            /* Both sprites use the SAME colour. Identity comes from the winning
+             * slot, including priority rotation, rather than RGB equality. */
+            for (int x = 0; x < 256; ++x) {
+                CHECK((range[reference][20*256+x] != 0) == (x >= 14 && x < 22));
+                CHECK((winners[reference][20*256+x] != 0) ==
+                    (x >= (scenario ? 14 : 18) && x < 22));
+            }
+            ppu->cgram[0x81] = 0x7c00; /* Endpoint edits cannot rewrite row 20. */
+            ppu_runLine(ppu, 22);
+            CHECK(winners[reference][20*256+20] == 0xffff0000);
+            PpuClearOverlayCaptures(ppu);
+            CHECK(ppu->objRangeCapture.count == 0 && ppu->objWinnerCapture.count == 0);
+            ppu_free(ppu);
+        }
+        CHECK(!memcmp(range[0], range[1], sizeof(range[0])));
+        CHECK(!memcmp(winners[0], winners[1], sizeof(winners[0])));
+    }
+}
+
 int main(void) {
     Ppu *ppu = ppu_init();
     CHECK(ppu != NULL);
@@ -2057,6 +2107,7 @@ int main(void) {
         test_mode6_offset_geometry();
         test_native_fast_path_parity();
         test_native_capture_path_parity();
+        test_obj_winner_capture();
         test_main_winner_masks();
         test_unbound_capture_fails_open();
         test_native_virtual_fast_path_parity();

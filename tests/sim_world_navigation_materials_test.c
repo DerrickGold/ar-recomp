@@ -1180,8 +1180,7 @@ static void CheckCompactVolcanoGroundAndSeal(const SimWorldNavigationTownGround 
     assert(pixels[0] == 0x5a5a5a5au);
   }
   free(pixels);
-  assert(SimWorldNavigationTerrain_RebuildWorldPrior(SimWorldMap_BakedPixels(),1024,
-      SimWorldMap_GeographySerial()));
+  assert(SimWorldNavigationTerrain_RebuildWorldPrior());
   SimWorldNavigationTerrain_SetMountainReplacement(scene->replacement);
   for (unsigned i = 0; i < sizeof(cells)/sizeof(cells[0]); ++i)
     for (int x = 0; x <= 4; ++x) for (int y = 0; y <= 4; ++y) {
@@ -1254,8 +1253,7 @@ static void TestCapturedMountainScene(const char *rom_path, const char *wram_pat
     }
     assert(!ferror(audit) && fclose(audit) == 0);
   }
-  assert(SimWorldNavigationTerrain_RebuildWorldPrior(SimWorldMap_BakedPixels(), 1024,
-      SimWorldMap_GeographySerial()));
+  assert(SimWorldNavigationTerrain_RebuildWorldPrior());
   SimWorldNavigationMountainTransition transition = {0};
   assert(SimWorldNavigationMountainTransition_Build(&scene, &ground, &transition));
   SimWorldNavigationTerrain_SetMountainReplacement(scene.replacement);
