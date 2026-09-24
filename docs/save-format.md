@@ -688,6 +688,7 @@ sequences use `ARSEQUENCE-R1`, and area artwork uses `ARACTORART-R1`. The
 new domains are omitted when both requested and effective values resolve to
 US, preserving previous replay identities for equivalent source aliases.
 Artwork bytes, derived residency caches and file paths are never saved.
+
 Actor artwork is pinned across the stage's rooms. Boss rooms can replace
 only part of the character set, so their uploads retain that stage's choice
 instead of combining a new palette with inherited graphics. The thirteen
@@ -953,6 +954,39 @@ When all accounting policies are US/European, inactive histories cannot affect
 execution and preserve the baseline recording identity.
 Rule edits are disabled during recording/replay, including live takeover,
 because these overlay actions are not yet events in the input stream.
+
+### Randomizer recipe (version 70)
+
+Version 70 retains version 69's 254 regional records and appends a 28-byte
+`ARRANDO1` recipe after `ARDIFF01`. No cartridge SRAM bytes change. The same
+campaign checkpoint transaction captures both the recipe and the actual
+requested/effective regional rules; Continue restores those rules directly.
+
+| Recipe offset | Bytes | Meaning |
+| --- | ---: | --- |
+| 0 | 8 | `ARRANDO1` |
+| 8 | 1 | Generator version, currently 1 |
+| 9 | 1 | Randomizer enabled, 0 or 1 |
+| 10 | 4 | Little-endian seed, 0–999999999 |
+| 14, 16 | 2 each | HP and attack percentages, 10–1000 |
+| 18, 19 | 1 each | Enemy-type shuffle and map/act scope |
+| 20, 21 | 1 each | Statue-drop mode and statue-position shuffle |
+| 22, 23 | 1 each | Lair-position shuffle and lair-monster mode |
+| 24, 25 | 1 each | Regional Action and Town rolls, 0 or 1 |
+| 26 | 2 | Reserved; must be zero |
+
+Shuffle fields use 0=off and 1=shuffle; statue drops and lair monsters also
+accept 2=random. Scope uses 0=map and 1=act. Unknown generators, invalid values,
+reserved bits or truncated records are rejected without replacing a save.
+The authoritative codec is `src/randomizer_config.c`; replay fingerprints use
+the same canonical bytes, not C struct layout.
+
+Versions 1–69 load with an explicitly unknown recipe. Their bytes remain
+unchanged when merely copied or edited without adopting a campaign. Continue
+uses unrandomized content rather than guessing a seed from current preferences;
+the next completed story save records that baseline recipe. New campaigns
+record generator 1 even with the randomizer off. See [Seeded campaigns](randomizer.md)
+for user-facing setup and backup guidance.
 
 ### 4.1 Lossless INI schema (version 1)
 

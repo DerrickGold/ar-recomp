@@ -1480,6 +1480,8 @@ static void CheckLayerEditorSection(void) {
   NavToTab(0);
   RowToKey("rando_seed");
   RowToKey("rando_reroll");
+  RowToKey("rando_regional_action");
+  RowToKey("rando_regional_towns");
   NavToTab(1);
   RowToKey("rando_enemy_hp");
   RowToKey("rando_enemy_types");
@@ -1496,6 +1498,16 @@ static void CheckLayerEditorSection(void) {
   CHECK(SettingsOverlay_HandleKey(SDLK_LEFT, true, false));
   CHECK(!g_settings.rando_enable);
   CHECK(!Settings_IsAvailable(Settings_Find("rando_seed")));
+  {
+    RandomizerConfig saved=RandomizerConfig_Default();saved.enabled=true;saved.seed=654321;saved.hp_percent=200;
+    CHECK(Randomizer_BindCampaign(&saved));
+    CHECK(g_settings.rando_seed==654321);
+    CHECK(!Settings_IsAvailable(Settings_Find("rando_enable")) && !Settings_IsAvailable(Settings_Find("rando_seed")));
+    CHECK(Settings_SetLong(Settings_Find("rando_seed"),7)==kSettingChange_Rejected);
+    CHECK(Settings_SetLong(Settings_Find("rando_enable"),0)==kSettingChange_Rejected);
+    Randomizer_Reroll();CHECK(Randomizer_CurrentConfig().seed==654321);
+    Randomizer_ReleaseCampaign();CHECK(!g_settings.rando_enable);
+  }
   /* Back out to the nav column so the sections below start where they expect. */
   CHECK(SettingsOverlay_HandleKey(SDLK_X, true, false));
 

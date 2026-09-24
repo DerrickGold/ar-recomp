@@ -2038,7 +2038,7 @@ if(BUILD_TESTING)
         # settings.c's randomizer rows call into the transform for their
         # availability gate and their on-change refresh. It is pure ROM-buffer
         # work with no SDL/PPU closure, so linking it here costs nothing.
-        src/randomizer.c src/action/action_placements.c
+        src/randomizer.c src/randomizer_config.c src/action/action_placements.c
         src/input_map.c
         src/user_data_dir.c
     )
@@ -2252,7 +2252,7 @@ if(BUILD_TESTING)
         src/settings.c
         src/display_geometry.c
         src/atomic_replace.c
-        src/randomizer.c src/action/action_placements.c
+        src/randomizer.c src/randomizer_config.c src/action/action_placements.c
         src/settings_overlay.c
         src/settings_overlay/menu_input.c
         src/settings_overlay_artwork.c
@@ -2724,7 +2724,9 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_regional_session_test
         src/regional/regional_profiles.c
+        src/regional/regional_randomizer.c
         tests/regional_profiles_checks.c
+        tests/regional_randomizer_checks.c
         src/regional/action/regional_difficulty.c src/regional/action/regional_score_lives.c src/regional/action/regional_action_start.c src/regional/action/regional_spell_inventory.c src/regional/action/regional_mode_entry.c src/regional/action/regional_hazards.c src/regional/action/regional_terrain.c src/regional/presentation/regional_music.c src/regional/presentation/regional_mosaic.c src/regional/presentation/regional_poses.c src/regional/presentation/regional_artwork.c src/regional/action/regional_placement_policy.c
         tests/regional_session_test.c
         src/regional/action/regional_timers.c
@@ -2745,7 +2747,7 @@ if(BUILD_TESTING)
         src/regional/interaction/regional_magic_gesture.c
         src/regional/towns/regional_lair_history.c src/regional/towns/regional_lair_reloads.c src/regional/towns/regional_stock.c
         src/regional/session/regional_session.c
-        src/regional/session/regional_session_codec.c
+        src/regional/session/regional_session_codec.c src/randomizer_config.c
         src/regional/session/regional_session_action.c
         src/regional/regional_costs.c
         src/save_checkpoint.c
@@ -2781,7 +2783,7 @@ if(BUILD_TESTING)
         src/regional/session/regional_campaign.c
         src/regional/towns/regional_lair_history.c src/regional/towns/regional_lair_reloads.c src/regional/towns/regional_stock.c
         src/regional/session/regional_session.c
-        src/regional/session/regional_session_codec.c
+        src/regional/session/regional_session_codec.c src/randomizer_config.c
         src/regional/session/regional_session_action.c
         src/regional/regional_costs.c
         src/host/campaign_identity.c
@@ -2821,6 +2823,8 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_statue_volley COMMAND actraiser_statue_volley_test)
 
     add_executable(actraiser_actor_stats_test tests/actraiser_actor_stats_test.c
+        src/randomizer.c src/randomizer_config.c src/action/action_placements.c
+        src/actraiser/actraiser_difficulty.c src/regional/action/regional_difficulty.c
         src/actraiser/actraiser_actor_stats.c src/actraiser/actraiser_platform_skull.c src/actraiser/actraiser_cast_hold.c
         src/actraiser/actraiser_cpu_hle_internal.c src/actraiser/actraiser_hle_fatal.c
         src/regional/action/regional_actor_stats.c src/regional/action/regional_cast_hold.c src/regional/action/regional_platform_skull.c)
@@ -2935,8 +2939,13 @@ if(BUILD_TESTING)
     target_include_directories(actraiser_regional_mosaic_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     add_test(NAME actraiser_regional_mosaic COMMAND actraiser_regional_mosaic_test)
 
+    add_executable(randomizer_stats_test tests/randomizer_stats_test.c
+        src/randomizer.c src/randomizer_config.c src/action/action_placements.c)
+    target_include_directories(randomizer_stats_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    add_test(NAME randomizer_stats COMMAND randomizer_stats_test)
+
     add_executable(randomizer_placements_test tests/randomizer_placements_test.c
-        src/randomizer.c src/action/action_placements.c src/regional/action/regional_placements.c src/regional/action/regional_placement_policy.c)
+        src/randomizer.c src/randomizer_config.c src/action/action_placements.c src/regional/action/regional_placements.c src/regional/action/regional_placement_policy.c)
     target_include_directories(randomizer_placements_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     add_test(NAME randomizer_placements COMMAND randomizer_placements_test)
 
@@ -3003,6 +3012,7 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_regional_runtime_test
         src/regional/regional_profiles.c
+        src/regional/regional_randomizer.c
         src/regional/action/regional_difficulty.c src/regional/action/regional_score_lives.c src/regional/action/regional_action_start.c src/regional/action/regional_spell_inventory.c src/regional/action/regional_mode_entry.c src/regional/action/regional_hazards.c src/regional/action/regional_terrain.c src/regional/presentation/regional_music.c src/regional/presentation/regional_mosaic.c src/regional/presentation/regional_poses.c src/regional/presentation/regional_artwork.c src/regional/action/regional_placement_policy.c
         tests/actraiser_regional_runtime_test.c
         src/regional/action/regional_timers.c
@@ -3043,7 +3053,7 @@ if(BUILD_TESTING)
         src/regional/regional_costs.c src/regional/session/regional_campaign.c
         src/regional/towns/regional_lair_history.c src/regional/towns/regional_lair_reloads.c src/regional/towns/regional_stock.c
         src/regional/session/regional_session.c
-        src/regional/session/regional_session_codec.c
+        src/regional/session/regional_session_codec.c src/randomizer_config.c
         src/regional/session/regional_session_action.c
         src/regional/session/regional_fingerprint.c
         src/regional/session/regional_lair_fingerprint.c

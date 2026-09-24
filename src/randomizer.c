@@ -54,6 +54,8 @@ enum {
   kRecHp    = 8,      /* -> obj +$2C */
   kRecFlagPickup = 0x0200,
   kRecFlagBoss = 0x4000,
+  kSpawnRecordBytes = 12,
+  kStatBankBytes = 0x8000,
 };
 
 /* Bank $0A level index and placement-stream opcodes. */
@@ -89,9 +91,92 @@ static uint8 *g_rom_live;
 static uint8 *g_rom_pristine;
 static uint32 g_rom_size;
 static RandomizerSummary g_summary;
+static RandomizerStatScale g_stat_scale = {kPercentScale, kPercentScale};
+/* Aliases share one definition. Also identifies the records whose copied
+ * bytes need rebasing when a regional policy replaces their authored stats. */
+static uint8 g_scaled_records[kStatBankBytes / 8];
+static bool g_campaign_bound;
+static RandomizerConfig g_campaign_config, g_title_config;
+
+bool Randomizer_CaptureConfig(RandomizerConfig *out) {
+  if(!out)return false;
+  /* Validate before narrowing settings to the persisted representation. */
+  if(g_settings.rando_seed<0 || g_settings.rando_seed>999999999 ||
+      g_settings.rando_enemy_hp<10 || g_settings.rando_enemy_hp>1000 ||
+      g_settings.rando_enemy_atk<10 || g_settings.rando_enemy_atk>1000 ||
+      (unsigned)g_settings.rando_enemy_types>1 || (unsigned)g_settings.rando_enemy_scope>1 ||
+      (unsigned)g_settings.rando_statue_drops>2 || (unsigned)g_settings.rando_statue_spots>1 ||
+      (unsigned)g_settings.rando_lair_spots>1 || (unsigned)g_settings.rando_lair_types>2)return false;
+  *out=(RandomizerConfig){.generator=kRandomizerGenerator,.enabled=g_settings.rando_enable,
+      .seed=g_settings.rando_seed,.hp_percent=g_settings.rando_enemy_hp,.attack_percent=g_settings.rando_enemy_atk,
+      .enemy_types=g_settings.rando_enemy_types,.enemy_scope=g_settings.rando_enemy_scope,
+      .statue_drops=g_settings.rando_statue_drops,.statue_spots=g_settings.rando_statue_spots,
+      .lair_spots=g_settings.rando_lair_spots,.lair_types=g_settings.rando_lair_types,
+      .regional_action=g_settings.rando_regional_action,.regional_towns=g_settings.rando_regional_towns};
+  return true;
+}
+static void ShowConfig(const RandomizerConfig *c) {
+  g_settings.rando_enable=c->enabled;g_settings.rando_seed=c->seed;
+  g_settings.rando_enemy_hp=c->hp_percent;g_settings.rando_enemy_atk=c->attack_percent;
+  g_settings.rando_enemy_types=c->enemy_types;g_settings.rando_enemy_scope=c->enemy_scope;
+  g_settings.rando_statue_drops=c->statue_drops;g_settings.rando_statue_spots=c->statue_spots;
+  g_settings.rando_lair_spots=c->lair_spots;g_settings.rando_lair_types=c->lair_types;
+  g_settings.rando_regional_action=c->regional_action;g_settings.rando_regional_towns=c->regional_towns;
+}
+RandomizerConfig Randomizer_CurrentConfig(void) {
+  RandomizerConfig c=RandomizerConfig_Default();
+  if(g_campaign_bound)return g_campaign_config;
+  (void)Randomizer_CaptureConfig(&c);
+  return c;
+}
+bool Randomizer_CampaignBound(void) {return g_campaign_bound;}
+bool Randomizer_BindCampaign(const RandomizerConfig *config) {
+  if(!RandomizerConfig_Valid(config) || (config->enabled && !Randomizer_IsAvailable()))return false;
+  if(!g_campaign_bound)g_title_config=Randomizer_CurrentConfig();
+  g_campaign_config=config->generator?*config:RandomizerConfig_Default();
+  g_campaign_bound=true;
+  ShowConfig(&g_campaign_config);Randomizer_Apply();return true;
+}
+void Randomizer_ReleaseCampaign(void) {
+  if(!g_campaign_bound)return;
+  g_campaign_bound=false;ShowConfig(&g_title_config);Randomizer_Apply();
+}
 
 bool Randomizer_IsAvailable(void) { return g_rom_pristine != NULL; }
 const RandomizerSummary *Randomizer_LastSummary(void) { return &g_summary; }
+RandomizerStatScale Randomizer_AppliedStatScale(void) { return g_stat_scale; }
+
+uint8_t Randomizer_ScaleStat(uint8_t base, int percent) {
+  if (!base) return 0;
+  const int64_t scaled = ((int64_t)base * percent + kPercentRoundingBias) / kPercentScale;
+  return (uint8_t)(scaled < 1 ? 1 : scaled > UINT8_MAX ? UINT8_MAX : scaled);
+}
+
+bool Randomizer_SpawnStatBasis(uint32_t offset, uint16_t hp, uint16_t attack,
+                              RandomizerSpawnStatBasis *out) {
+  if (!out || hp > UINT8_MAX || attack > UINT8_MAX || offset > kStatBankBytes-kSpawnRecordBytes)
+    return false;
+  RandomizerSpawnStatBasis basis = {(uint8_t)hp, (uint8_t)attack, {kPercentScale, kPercentScale}};
+  if (g_scaled_records[offset >> 3] & (1u << (offset & 7u))) {
+    const uint8_t *original = g_rom_pristine + offset, *live = g_rom_live + offset;
+    basis.hp = original[kRecHp];
+    basis.attack = original[kRecAtk];
+    basis.scale = g_stat_scale;
+    if (hp != Randomizer_ScaleStat(basis.hp, basis.scale.hp_percent) ||
+        attack != Randomizer_ScaleStat(basis.attack, basis.scale.attack_percent)) return false;
+    for (unsigned i = 0; i < kSpawnRecordBytes; ++i) {
+      const uint8_t expected = i == kRecHp ? hp : i == kRecAtk ? attack : original[i];
+      if (live[i] != expected) return false;
+    }
+  }
+  *out = basis;
+  return true;
+}
+
+static void ResetStatScale(void) {
+  g_stat_scale = (RandomizerStatScale){kPercentScale, kPercentScale};
+  memset(g_scaled_records, 0, sizeof(g_scaled_records));
+}
 
 /* ----------------------------------------------------------------------- rng
  *
@@ -162,17 +247,13 @@ static bool IsSpawnRecord(uint32 offset) {
  * that breaks a statue, not durability, and their ATK 0 is not damage.
  *
  * Some handlers overwrite $2C at runtime for phase
- * changes and sub-object spawns. Those bosses will ignore this pass. The
- * summary counts records rewritten, not enemies actually affected.
+ * changes and sub-object spawns. Those writes ignore the ROM pass unless the
+ * game adapter explicitly composes their regional base with AppliedStatScale
+ * (currently Tanzra's minion HP and projectile attack). The summary counts
+ * records rewritten, not enemies actually affected.
  */
 static void ScaleStat(uint32 off, int percent) {
-  if (percent == kPercentScale) return;
-  int v = RomU8(off);
-  if (v == 0) return;                       /* 0 means "deals/has nothing" */
-  int scaled = (v * percent + kPercentRoundingBias) / kPercentScale;
-  if (scaled < 1) scaled = 1;               /* never silently delete a stat */
-  if (scaled > UINT8_MAX) scaled = UINT8_MAX;
-  RomWrite8(off, (uint8)scaled);
+  RomWrite8(off, Randomizer_ScaleStat(RomU8(off), percent));
 }
 
 /* Walk one region's object-type table. The tables carry no count: the nearest
@@ -196,22 +277,22 @@ static void ForEachRecord(int region, void (*fn)(uint32 rec_off, void *ctx),
 
 typedef struct {
   int hp_percent, atk_percent, count;
-  uint8 visited[0x8000 / 8]; /* aliases in the type tables share one definition */
 } StatCtx;
 
 static void ApplyStatsToRecord(uint32 rec, void *vctx) {
   StatCtx *c = (StatCtx *)vctx;
-  if (!IsSpawnRecord(rec)) return;
+  if (rec > kStatBankBytes-kSpawnRecordBytes || !IsSpawnRecord(rec)) return;
   uint16 flags = RomU16(rec + kRecFlags);
   if (flags & kRecFlagPickup) return;       /* pickup/statue, not an enemy */
-  if (c->visited[rec >> 3] & (1u << (rec & 7u))) return;
-  c->visited[rec >> 3] |= (uint8)(1u << (rec & 7u));
+  if (g_scaled_records[rec >> 3] & (1u << (rec & 7u))) return;
+  g_scaled_records[rec >> 3] |= (uint8)(1u << (rec & 7u));
   ScaleStat(rec + kRecAtk, c->atk_percent);
   ScaleStat(rec + kRecHp, c->hp_percent);
   c->count++;
 }
 
 static void PassEnemyStats(int hp_percent, int atk_percent) {
+  g_stat_scale = (RandomizerStatScale){hp_percent, atk_percent};
   if (hp_percent == kPercentScale && atk_percent == kPercentScale) return;
   StatCtx ctx = {0};
   ctx.hp_percent = hp_percent;
@@ -521,18 +602,18 @@ bool Randomizer_ApplyPlacementPrograms(const RandomizerPlacementMap *maps,
     if (objects > kActTypePlacementCapacity) return false;
   }
   RandomizerSummary result = {0};
-  if (!g_settings.rando_enable) { if (summary) *summary = result; return true; }
-  if (!Randomizer_IsAvailable() ||
-      (unsigned)g_settings.rando_enemy_types >= kRandomMode_Count ||
-      (unsigned)g_settings.rando_enemy_scope >= kRandomScope_Count ||
-      (unsigned)g_settings.rando_statue_drops >= kRandomMode_Count ||
-      (unsigned)g_settings.rando_statue_spots >= kRandomMode_Count) return false;
+  if(!g_campaign_bound && !g_settings.rando_enable) {if(summary)*summary=result;return true;}
+  RandomizerConfig config;
+  if(g_campaign_bound)config=g_campaign_config;
+  else if(!Randomizer_CaptureConfig(&config))return false;
+  if (!config.enabled) { if (summary) *summary = result; return true; }
+  if (!Randomizer_IsAvailable())return false;
   result.applied = true;
-  result.seed = (uint32)g_settings.rando_seed;
-  StatueCtx statues = {(RandomizerMode)g_settings.rando_statue_drops,
-      (RandomizerMode)g_settings.rando_statue_spots, result.seed, &result};
+  result.seed = config.seed;
+  StatueCtx statues = {(RandomizerMode)config.statue_drops,
+      (RandomizerMode)config.statue_spots, result.seed, &result};
   TypeCtx types = {0};
-  types.scope = (RandomizerScope)g_settings.rando_enemy_scope;
+  types.scope = (RandomizerScope)config.enemy_scope;
   types.seed = result.seed;
   types.summary = &result;
   types.cur_mode = 0xff;
@@ -547,11 +628,11 @@ bool Randomizer_ApplyPlacementPrograms(const RandomizerPlacementMap *maps,
       list.items[list.count++] = (Placement){0,row,row->x,row->y,row->parameter,row->type,wave};
     }
     StatueList(maps[i].scene & 255, maps[i].scene >> 8, &list, &statues);
-    if (g_settings.rando_enemy_types != kRandomMode_Off)
+    if (config.enemy_types != kRandomMode_Off)
       TypeList(maps[i].scene & 255, maps[i].scene >> 8, &list, &types);
   }
   TypeFlush(&types);
-  if (statues.drops || statues.spots || g_settings.rando_enemy_types)
+  if (statues.drops || statues.spots || config.enemy_types)
     result.maps_touched = (int)count;
   if (summary) *summary = result;
   return true;
@@ -620,10 +701,12 @@ static void PassLairs(RandomizerMode spots, RandomizerMode types, uint32 seed) {
 /* ------------------------------------------------------------------- driver */
 
 bool Randomizer_Init(uint8 *rom, uint32 size) {
+  g_campaign_bound=false;
   g_rom_live = NULL;
   g_rom_pristine = NULL;
   g_rom_size = 0;
   memset(&g_summary, 0, sizeof g_summary);
+  ResetStatScale();
   if (!rom || size != ROM_SIZE_EXPECTED) {
     fprintf(stderr, "[randomizer] disabled: unexpected ROM image (%u bytes)\n",
             (unsigned)size);
@@ -648,30 +731,31 @@ void Randomizer_Apply(void) {
    * main (including deterministic visual-data adjustments applied first). */
   memcpy(g_rom_live, g_rom_pristine, g_rom_size);
   memset(&g_summary, 0, sizeof g_summary);
+  ResetStatScale();
 
-  if (!g_settings.rando_enable) return;
+  const RandomizerConfig config=Randomizer_CurrentConfig();
+  if (!config.enabled) return;
 
-  uint32 seed = (uint32)g_settings.rando_seed;
+  uint32 seed = config.seed;
   g_summary.applied = true;
   g_summary.seed = seed;
 
-  PassEnemyStats(g_settings.rando_enemy_hp, g_settings.rando_enemy_atk);
+  PassEnemyStats(config.hp_percent, config.attack_percent);
 
-  if (g_settings.rando_statue_drops != kRandomMode_Off ||
-      g_settings.rando_statue_spots != kRandomMode_Off) {
+  if (config.statue_drops != kRandomMode_Off || config.statue_spots != kRandomMode_Off) {
     StatueCtx ctx;
     ctx.summary = &g_summary;
-    ctx.drops = (RandomizerMode)g_settings.rando_statue_drops;
-    ctx.spots = (RandomizerMode)g_settings.rando_statue_spots;
+    ctx.drops = (RandomizerMode)config.statue_drops;
+    ctx.spots = (RandomizerMode)config.statue_spots;
     ctx.seed = seed;
     g_summary.maps_touched = ForEachMap(StatuePass, &ctx);
   }
 
-  if (g_settings.rando_enemy_types != kRandomMode_Off) {
+  if (config.enemy_types != kRandomMode_Off) {
     TypeCtx ctx;
     memset(&ctx, 0, sizeof ctx);
     ctx.summary = &g_summary;
-    ctx.scope = (RandomizerScope)g_settings.rando_enemy_scope;
+    ctx.scope = (RandomizerScope)config.enemy_scope;
     ctx.seed = seed;
     ctx.cur_mode = 0xFF;
     int maps = ForEachMap(TypePass, &ctx);
@@ -679,8 +763,7 @@ void Randomizer_Apply(void) {
     if (maps > g_summary.maps_touched) g_summary.maps_touched = maps;
   }
 
-  PassLairs((RandomizerMode)g_settings.rando_lair_spots,
-            (RandomizerMode)g_settings.rando_lair_types, seed);
+  PassLairs((RandomizerMode)config.lair_spots, (RandomizerMode)config.lair_types, seed);
 
   fprintf(stderr,
           "[randomizer] seed %u applied: %d stat records, %d drops, %d statue "
@@ -691,6 +774,7 @@ void Randomizer_Apply(void) {
 }
 
 void Randomizer_Reroll(void) {
+  if(g_campaign_bound)return;
   /* Cheap, and it only has to be unpredictable to a human choosing a run. */
   static uint64 counter;
   Rng r;
@@ -700,6 +784,5 @@ void Randomizer_Reroll(void) {
   long seed = (long)(RngNext(&r) % kGeneratedSeedModulo);
   const SettingDesc *d = Settings_Find("rando_seed");
   if (d) Settings_SetLong(d, seed);
-  else g_settings.rando_seed = seed;
-  Randomizer_Apply();
+  else {g_settings.rando_seed = seed;Randomizer_Apply();}
 }

@@ -466,21 +466,20 @@ typedef struct Settings {
   uint8 pin_count;
   SettingsPin pins[32];
 
-  /* Randomizer (src/randomizer.c). Every field is read only by the ROM-image
-   * transform, so changing one re-runs the transform rather than moving a
-   * per-frame gate: stat edits land at the next spawn, placement edits at the
-   * next level load. Master defaults OFF so the stock image stays byte-exact
-   * for the A/B visual-regression harness. */
+  /* Randomizer title draft. Confirmed campaigns bind a saved recipe; these
+   * rows display that recipe and cannot reroll it during play. Defaults OFF. */
   bool rando_enable;
   int  rando_seed;
-  int  rando_enemy_hp;        /* percent of stock HP,  100 = unchanged */
-  int  rando_enemy_atk;       /* percent of stock ATK, 100 = unchanged */
+  int  rando_enemy_hp;        /* percent of selected regional base HP, 100 = unchanged */
+  int  rando_enemy_atk;       /* percent of selected regional base ATK, 100 = unchanged */
   int  rando_enemy_types;     /* RandomizerMode */
   int  rando_enemy_scope;     /* RandomizerScope */
   int  rando_statue_drops;    /* RandomizerMode */
   int  rando_statue_spots;    /* RandomizerMode (shuffle only in practice) */
   int  rando_lair_spots;      /* RandomizerMode */
   int  rando_lair_types;      /* RandomizerMode */
+  bool rando_regional_action;
+  bool rando_regional_towns;
 
   /* Widescreen behavior. All default ON; the per-frame gates read these. */
   bool ws_action;             /* AR_WS_ACTION            action stages wide */
@@ -779,6 +778,7 @@ bool Settings_SetLocalizationPacks(const SettingsLocalizationPack *packs,
                                     size_t count);
 const char *Settings_LocalizationPackPath(int content);
 bool Settings_IsAvailable(const SettingDesc *desc);
+bool Settings_IsRandomizer(const SettingDesc *desc);
 /* Video boot/reset publishes tested semantic features. Unsupported switches
  * are blocked for this session without overwriting the saved preference. */
 void Settings_ApplyRenderCapabilities(uint32_t supported);

@@ -18,7 +18,7 @@ set(_public_game_docs
     README.md manual.md builder-workshop.md desktop-packaging.md
     language-pack-format.md language-packs.md language-authoring-reference.json
     language-archive.schema.json ram-map.md rom-map.md research-symbol-map.md
-    save-format.md sim-object-catalog.md diorama-depth-shapes.md
+    save-format.md randomizer.md sim-object-catalog.md diorama-depth-shapes.md
     dialogue-system.md snes-native-audio-channels.md performance-overlay.md
     GAME-LICENSE.txt)
 set(_public_runtime_docs

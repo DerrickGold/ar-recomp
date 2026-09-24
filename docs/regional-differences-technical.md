@@ -5403,6 +5403,30 @@ rewrite is involved. All five ROM instruction signatures,2,592 mixed-source/
 inherited-value cases and40 invalid-owner/CPU cases check this adapter.
 Full encounters remain a distinct validation gate.
 
+Host randomizer composition uses the selected regional values as its basis.
+The native ROM stat pass remains responsible for US/unmapped initializers.
+For its marked records, `Randomizer_SpawnStatBasis` validates the freshly copied
+HP/attack against the last applied transformation and recovers pristine bytes;
+it does not inverse-scale rounded or saturated values. The game-owned `$966C`
+adapter applies regional selection to those bytes, then the same rounded,
+1–255-clamped percentages once (zero remains zero), before `$966F` owns the
+existing difficulty adjustment. Unmapped fields retain their original scaling.
+Tanzra's explicit minion HP and projectile attack use the same applied scale
+after regional selection; minion rewards remain independent. No running actor
+is healed or rescaled. Other controller-owned stat assignments are not implied
+to participate. The game replay digest chains `ARSTATBASE-R1` and both applied
+percentages when nonidentity, so older stat-scaling semantics cannot silently
+share the new checkpoint identity. No native instruction or WRAM layout changes.
+
+`randomizer_stats_test` covers byte-range rounding, saturation, alias exclusion,
+pristine recovery, stale/mutated inputs and restore/reapply behavior.
+`actraiser_actor_stats_test` composes all 54 owners, mixed HP/attack sources and
+skull rules at nine percentage pairs, then restores the disabled baseline
+(19,440 full CPU/memory comparisons). Child tests also repeat at each scale,
+and the actual EU spawn-difficulty adapter is exercised after composition.
+The optional five-ROM invocation takes US, JP, EU-English, German, French
+in that order; it checks donor bytes and repeats composition against US records.
+
 ### Native narrative comparisons
 
 The Go Builder's `localization-extract --format catalog` supplies all five

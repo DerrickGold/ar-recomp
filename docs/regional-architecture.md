@@ -94,3 +94,35 @@ upload, and describes palette-independent terrain classification.
 European difficulty is independent of the selected region; runtime pacing
 remains 60 Hz. Language, fonts, physical bindings, game fixes and randomizer
 settings are outside regional profiles.
+
+The randomizer composes with regional data through numerical adapters. Selected
+placement programs are randomized before publishing a room snapshot. At actor
+birth, `Randomizer_SpawnStatBasis` recovers pristine initializer values and the
+last applied HP/damage percentages for records changed by the ROM pass. The
+game adapter selects regional stats from that basis, scales once, and resumes
+the existing mode/difficulty adjustment. This avoids both double scaling and
+attempting to invert rounded or clamped values. The portable regional policy
+still knows nothing about ROM offsets, settings or the randomizer.
+
+The record-ownership bitset is built during randomizer application; birth-time
+checks are constant-size, with no allocation or ROM scan. Explicit Tanzra child
+HP/damage initializers use the same applied scale, but rewards do not. Replay
+identity includes a versioned stat-scale contribution whenever either percentage
+differs from 100%; the identity case preserves existing replay fingerprints.
+
+`RandomizerConfig` is a value-only, versioned campaign recipe. Title settings
+are a draft; the confirmed title return captures the recipe and performs
+regional rolls once. `ArRegionalProfiles_SelectSources` shares the profile
+inventory's typed fields and descriptor keys with the pure regional selector,
+so there is no second menu/ordinal-to-rule map. Each leaf's roll is keyed by
+seed and descriptor key, with population compatibility enforced before the
+new session is published. Difficulty and interaction/presentation are excluded.
+
+`ArRegionalSession` carries the recipe through the existing exact-image save
+journal, pending story snapshots, imports and recovery copies. Continue never
+regenerates rules. The randomizer binds the loaded recipe before gameplay and
+uses it for both ROM passes and numerical placement programs; mutable global
+settings cannot redirect the active run. Returning to title restores the draft.
+No seed is written into SRAM. Recipes missing from old saves are not guessed.
+Enabled recipes contribute their canonical bytes under `ARRANDSTATE-R1` to
+replay identity, including seeds whose current room happens to look identical.

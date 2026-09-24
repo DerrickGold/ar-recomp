@@ -70,4 +70,14 @@ bool ArRegionalProfiles_Describe(const ArRegionalRules *rules,
 bool ArRegionalProfiles_Changes(const ArRegionalRules *a,const ArRegionalRules *b,
     uint16_t *groups);
 
+/* Pure source selection through the same ownership inventory as profiles.
+ * Keys are stable consumer-descriptor keys, not menu positions or ordinals.
+ * Several numerical rows can share a source field/key (lair stock/reloads);
+ * a selector must return the same choice for a key throughout one visit.
+ * Does not activate rules or authorize a population conversion. */
+typedef ArRegionalSource (*ArRegionalSourceSelector)(void *context,const char *key,
+    ArRegionalProfileGroup group,ArRegionalSource current);
+bool ArRegionalProfiles_SelectSources(const ArRegionalRules *current,
+    ArRegionalSourceSelector select,void *context,ArRegionalRules *out);
+
 #endif

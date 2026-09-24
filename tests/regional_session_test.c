@@ -2170,6 +2170,37 @@ static void CheckFeatureCodec(void) {
   remove(path); remove(companion);
 }
 
+static void CheckRandomizerRecipe(void) {
+  const char *path="regional-randomizer-codec.srm",*companion="regional-randomizer-codec.srm.archeckpoint";
+  remove(path);remove(companion);
+  const uint8_t id[16]={17};const ArRegionalCostPolicy costs={{0}};
+  ArRegionalSession session,loaded;SaveError error;
+  uint8_t image[kActRaiserSramSize];Image(image,17);
+  CHECK(ArRegionalSession_NewGame(&session,0,id,&costs));
+  session.randomizer=RandomizerConfig_Default();session.randomizer.enabled=true;
+  session.randomizer.seed=987654321;session.randomizer.regional_action=true;
+  CHECK(ArRegionalSession_Save(&session,kSaveFileFormat_NativeSrm,path,NULL,image,&error));
+  uint8_t payload[kSaveCheckpointPayloadMax],mutated[kSaveCheckpointPayloadMax];size_t size=0;
+  CHECK(SaveCheckpoint_Read(path,image,payload,sizeof(payload),&size,&error)==kSaveCheckpoint_Ready);
+  CHECK(ByteOrder_ReadLe16(payload+8)==70 && size==8966+kRandomizerConfigBytes);
+  CHECK(ArRegionalSession_Load(&loaded,0,path,image,&error)==kSaveCheckpoint_Ready);
+  CHECK(loaded.randomizer.seed==987654321 && loaded.randomizer.regional_action);
+  const ArRegionalSession before=loaded;
+  for(unsigned bad=0;bad<4;++bad) {
+    memcpy(mutated,payload,size);size_t length=size;
+    if(bad==0)mutated[size-kRandomizerConfigBytes+8]=2; /* future generator */
+    if(bad==1)mutated[size-1]=1; /* reserved byte */
+    if(bad==2)--length;
+    if(bad==3)ByteOrder_WriteLe32(mutated+size-kRandomizerConfigBytes+10,1000000000);
+    CHECK(SaveCheckpoint_Commit(kSaveFileFormat_NativeSrm,path,image,image,mutated,length,AcceptOpaque,NULL,&error));
+    const SaveCheckpointStatus status=ArRegionalSession_Load(&loaded,0,path,image,&error);
+    CHECK(status==(bad==0?kSaveCheckpoint_Unsupported:kSaveCheckpoint_Invalid));
+    CHECK(!memcmp(&loaded,&before,sizeof(loaded)));
+    /* A newer/corrupt bound recipe must not be rotated away by a normal save. */
+    CHECK(!ArRegionalSession_Save(&session,kSaveFileFormat_NativeSrm,path,image,image,&error));
+  }
+  remove(path);remove(companion);
+}
 /* Captured from the pre-refactor v69 encoder. These fingerprints lock the
  * exact payload bytes, not merely agreement between a new encoder/decoder. */
 static void CheckCodecGolden(void) {
@@ -2216,6 +2247,9 @@ static void CheckCodecGolden(void) {
 }
 
 int main(void) {
+  CheckRandomizerRecipe();
+  extern void TestRegionalRandomizer(void);
+  TestRegionalRandomizer();
   CheckCodecGolden();
   extern void TestRegionalProfiles(void);
   TestRegionalProfiles();

@@ -175,7 +175,7 @@ bool RuntimeSettings_HandleAction(const SettingDesc *desc) {
     break;
   }
   case kSettingAction_Reroll: {
-    if (!Randomizer_IsAvailable()) return false;
+    if (!Randomizer_IsAvailable() || Randomizer_CampaignBound()) return false;
     Randomizer_Reroll();
     break;
   }

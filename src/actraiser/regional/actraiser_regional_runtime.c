@@ -31,6 +31,9 @@
 #include "actraiser/actraiser_localization_runtime.h"
 #include "actraiser/regional/actraiser_regional_settings.h"
 #include "input_replay.h"
+#include "randomizer.h"
+#include "byte_order.h"
+#include "regional/regional_randomizer.h"
 #include "regional/session/regional_fingerprint.h"
 #include "regional/session/regional_lair_fingerprint.h"
 #include "snesrecomp/support/digest.h"
@@ -141,6 +144,7 @@ static uint32_t s_prices_revision;
 static ArRegionalCostSnapshot s_prices, s_miracle_prices;
 
 bool ActRaiserRegional_Initialize(ArRegionalCampaignIdentity identity, void *context) {
+  Randomizer_ReleaseCampaign();
   s_profile_cache = (ArRegionalProfileCache){0};
   s_title_open=false;
   s_title_draft=(ArRegionalSession){0};
@@ -567,8 +571,27 @@ bool ActRaiserRegional_ReplayDigest(void *unused, uint8_t out[32], bool *baselin
   }
   if(!ArRegionalSpellInventory_Fingerprint(digest,&s_inventory,digest) ||
       !ActRaiserStagePlacements_Fingerprint(digest,digest,&placements_native))return false;
+  /* The runner hashes hardware state, not this host-owned spawn policy. Its
+   * version also distinguishes regional-base-first scaling from older runs.
+   * Leave the identity case byte-for-byte compatible with existing replays. */
+  const RandomizerStatScale scale=Randomizer_AppliedStatScale();
+  const bool stats_native=scale.hp_percent==100 && scale.attack_percent==100;
+  if(!stats_native) {
+    uint8_t stats[56]="ARSTATBASE-R1";
+    memcpy(stats+16,digest,32);
+    ByteOrder_WriteLe32(stats+48,(uint32_t)scale.hp_percent);
+    ByteOrder_WriteLe32(stats+52,(uint32_t)scale.attack_percent);
+    if(!sr_support_sha256(stats,sizeof(stats),digest))return false;
+  }
+  const RandomizerConfig recipe=Randomizer_CurrentConfig();
+  if(recipe.enabled) {
+    uint8_t randomized[48+kRandomizerConfigBytes]="ARRANDSTATE-R1";
+    memcpy(randomized+16,digest,32);
+    if(!RandomizerConfig_Encode(&recipe,randomized+48) ||
+        !sr_support_sha256(randomized,sizeof(randomized),digest))return false;
+  }
   memcpy(out,digest,sizeof(digest));
-  *baseline = rules_native && lairs_native && reloads_native && actors_native && placements_native && !s_inventory.enabled;
+  *baseline = rules_native && lairs_native && reloads_native && actors_native && placements_native && stats_native && !s_inventory.enabled && !recipe.enabled;
   return true;
 }
 
@@ -1382,6 +1405,8 @@ static bool PrepareContinue(void) {
 
 RecompReturn ActRaiser_RegionalContinue(CpuState *cpu) {
   if (PrepareContinue()) {
+    if(!Randomizer_BindCampaign(&s_campaign.active.randomizer))
+      ActRaiserHleFatal("Cannot restore this save's randomizer recipe; saves preserved");
     if (s_trace) fprintf(stderr, "[regional] Continue history ready before native restoration\n");
     const RecompReturn result = ActRaiserNativeCall(cpu, bank_03_A83A_M1X0, 3, 0xa7a2, true);
     if (result != RECOMP_RETURN_NORMAL) return result;
@@ -1411,6 +1436,7 @@ bool ActRaiser_RegionalTitleEntry(CpuState *cpu) {
 }
 
 static void PrepareTitleDraft(void) {
+  Randomizer_ReleaseCampaign();
   s_population.intent.pending=false;
   ArRegionalCampaign draft;
   ArRegionalCampaign_Init(&draft,s_campaign.slot,s_campaign.identity,s_campaign.identity_context);
@@ -1460,6 +1486,18 @@ RecompReturn ActRaiser_RegionalTitle(CpuState *cpu) {
     if (ok && s_campaign.active.lairs.initialized_towns==0x3f && !s_campaign.active.reloads.initialized_towns)
       ok=ActRaiserLairReloads_AdoptSaved(&s_campaign.active.reloads,image);
   } else if (selection == 0 || selection == 2) {
+    RandomizerConfig recipe;
+    ArRegionalRules rules;
+    if(!Randomizer_CaptureConfig(&recipe) ||
+        !ArRegionalRandomizer_Choose(&s_title_draft.requested,&recipe,&rules))
+      ActRaiserHleFatal("Cannot prepare seeded new-game rules; saves preserved");
+    s_title_draft.randomizer=recipe;
+    s_title_draft.requested=rules;
+    /* New, empty towns need no reset. Numerical support and its reachable
+     * goals start together; other families retain their native boundaries. */
+    s_title_draft.effective.support=rules.support;
+    s_title_draft.effective.level_goals=rules.level_goals;
+    s_title_draft.effective.story=rules.story;
     s_campaign.active=s_title_draft;
     s_campaign.active_valid=true;
     ok=true;
@@ -1468,6 +1506,14 @@ RecompReturn ActRaiser_RegionalTitle(CpuState *cpu) {
   }
   if (!ok) ActRaiserHleFatal("Cannot enter regional campaign; saves preserved: %s",
                             error.message[0] ? error.message : "no durable save image");
+  if(!s_campaign.active.randomizer.generator) {
+    /* A historical seed cannot be inferred from SRAM or current preferences.
+     * Preserve the saved regional rules; never roll a developed campaign. */
+    s_campaign.active.randomizer=RandomizerConfig_Default();
+    fprintf(stderr,"[randomizer] legacy save has no recorded seed; using unrandomized content\n");
+  }
+  if(!Randomizer_BindCampaign(&s_campaign.active.randomizer))
+    ActRaiserHleFatal("Cannot bind this campaign's randomizer recipe; saves preserved");
   s_lair_seed_pending=selection!=1;
   s_town_art_scene=0;s_town_artwork=0;
   ArRegionalSpellInventory_Reset(&s_inventory,false);s_inventory_icon_pending=false;

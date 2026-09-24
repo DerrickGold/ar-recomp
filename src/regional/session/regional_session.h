@@ -5,6 +5,7 @@
 #include "regional/towns/regional_lair_history.h"
 #include "regional/towns/regional_sim_actors.h"
 #include "save_checkpoint.h"
+#include "randomizer_config.h"
 
 /* Campaign identity is host-supplied (never inferred from name/locale/ROM).
  * Slot 0 is today's sole slot. This codec covers the integrated rule families;
@@ -17,6 +18,7 @@ typedef struct ArRegionalSession {
   ArRegionalLairReloads reloads;
   ArRegionalSimActors sim_actors;
   bool arrival_locked;
+  RandomizerConfig randomizer;
 } ArRegionalSession;
 
 /* Caller-owned state; no singleton, filesystem access or old-save mutation. */

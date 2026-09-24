@@ -122,6 +122,12 @@ pending changes and save recovery. Some artwork and music need a locally
 extracted [regional media package](regional-media.md); missing media falls back
 to US assets without changing your requested region or language.
 
+The experimental **Randomizer** section appears with **Show debug settings**
+enabled. Configure it at the title screen before New Game; its seed and options
+belong to that campaign and are restored on Continue. Independent Action and
+Town options can roll regional rules as well as the existing content shuffles.
+See [Seeded campaigns](randomizer.md) for exclusions and backup requirements.
+
 ## Controls
 
 **Settings → Controls** stores separate keyboard and gamepad bindings. *Input

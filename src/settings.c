@@ -1134,15 +1134,15 @@ static const char *const kRandoShuffleLabels[] = { "Off", "Shuffle" };
 static const char *const kRandoScopeLabels[] = { "Within map", "Within act" };
 
 static bool RandoAvailable(void) {
-  return Randomizer_IsAvailable() && g_settings.rando_enable;
+  return Randomizer_IsAvailable() && !Randomizer_CampaignBound() && g_settings.rando_enable;
 }
 static bool RandoRuntimeAvailable(void) {
-  return Randomizer_IsAvailable();
+  return Randomizer_IsAvailable() && !Randomizer_CampaignBound();
 }
 static bool RandoEnemyTypesOn(void) {
   return RandoAvailable() && g_settings.rando_enemy_types != kRandomMode_Off;
 }
-/* Any randomizer row changing re-runs the whole transform. It restores the
+/* Title-draft randomizer changes re-run the whole transform. It restores the
  * pristine image first, so re-applying is idempotent and toggling a row off
  * genuinely gives back stock data. */
 static void RandoChanged(const SettingDesc *desc) {
@@ -2406,32 +2406,43 @@ const SettingDesc g_setting_descs[] = {
     kSettingType_Custom, kApply_Passive, kSettingCat_Extras,
     &g_settings.warp_target, 0x0101, 0, 0xffff, 1, false, NULL, 0,
     NULL, NULL, ParseWarpTarget, FormatWarpTarget, .menu_hidden = true },
-  /* ---- Randomizer (src/randomizer.c). Descriptors only; every one of these
-   * is read by the ROM-image transform, which re-runs whenever one changes. */
+  /* ---- Randomizer title draft (src/randomizer.c). Confirmed campaigns bind
+   * the full recipe, rather than reading mutable per-install settings. */
   BOOL_SETTING(rando_enable, "AR_RANDO", "Randomizer",
-               "Rewrite the game's content tables from the seed below. Off "
-               "restores the non-randomized ROM baseline. Stat changes take "
-               "effect at the next spawn, placement changes at the next level "
-               "load.",
+               "Choose a randomizer setup before New Game. The seed and options "
+               "are saved with that campaign and restored on Continue. Return "
+               "to the title screen to configure a different run.",
                kSettingCat_RandoSeed, 0, false, RandoRuntimeAvailable,
                RandoChanged),
   INT_SETTING(rando_seed, "AR_RANDO_SEED", "Seed",
-              "Runs with the same seed and the same options are identical. "
-              "Each option draws from its own stream, so toggling one does not "
-              "shift what another produces.",
+              "The seed determines the next campaign's rolls. The same seed, "
+              "options and starting regional rules reproduce the same setup. "
+              "Continue restores the saved seed without rerolling.",
               kSettingCat_RandoSeed, 1, 0, 999999999, NULL, RandoAvailable),
   { "rando_reroll", NULL, "New seed",
-    "Draw a fresh random seed and re-apply.",
+    "Draw a fresh seed for the next New Game. Existing saves keep their own seed.",
     kSettingType_Action, kApply_Action, kSettingCat_RandoSeed,
     NULL, 0, 0, 0, 0, false, NULL, 0, RandoAvailable, NULL, NULL, NULL,
     .action = kSettingAction_Reroll },
 
+  BOOL_SETTING(rando_regional_action, "AR_RANDO_REGIONAL_ACTION", "Regional action rules",
+               "Roll each action gameplay rule between US, Japanese and European "
+               "versions at New Game. HP and damage multipliers apply afterward. "
+               "Difficulty, title access, controls and artwork stay as selected.",
+               kSettingCat_RandoSeed, 0, false, RandoAvailable, RandoChanged),
+  BOOL_SETTING(rando_regional_towns, "AR_RANDO_REGIONAL_TOWNS", "Regional town rules",
+               "Roll town gameplay rules at New Game, including construction, "
+               "lairs and miracles. Population support and story goals stay "
+               "compatible. Continue never rerolls developed towns.",
+               kSettingCat_RandoSeed, 0, false, RandoAvailable, RandoChanged),
+
   INT_SETTING(rando_enemy_hp, "AR_RANDO_ENEMY_HP", "Enemy health",
-              "Percent of stock hit points for every enemy and boss. A handful "
-              "of bosses set their own HP at runtime and ignore this.",
+              "Scales each enemy's selected regional base HP. Applied at spawn "
+              "before difficulty adjustments; some bosses later replace their own HP.",
               kSettingCat_RandoEnemies, 100, 10, 1000, NULL, RandoAvailable),
   INT_SETTING(rando_enemy_atk, "AR_RANDO_ENEMY_ATK", "Enemy damage",
-              "Percent of stock contact and attack damage for every enemy.",
+              "Scales each enemy's selected regional base contact and attack damage. "
+              "Applied at spawn before difficulty adjustments; terrain damage is separate.",
               kSettingCat_RandoEnemies, 100, 10, 1000, NULL, RandoAvailable),
   { "rando_enemy_types", "AR_RANDO_ENEMY_TYPES", "Enemy types",
     "Shuffle which enemy stands where. Bosses and item statues are left alone.",
@@ -2874,6 +2885,10 @@ bool Settings_IsAvailable(const SettingDesc *desc) {
          (desc->category == kSettingCat_Cheats ||
           !desc->available || desc->available());
 }
+bool Settings_IsRandomizer(const SettingDesc *desc) {
+  return desc && (desc->category==kSettingCat_RandoSeed || desc->category==kSettingCat_RandoEnemies ||
+      desc->category==kSettingCat_RandoItems || desc->category==kSettingCat_RandoSim);
+}
 
 /* Kept in the registry so old files/env values parse without warnings and so
  * descriptor indexes stay stable, but these are not active user settings.
@@ -2971,6 +2986,7 @@ static SettingChangeResult FinishChange(const SettingDesc *desc,
   if (g_settings.localization_content != 0)
     g_settings.localization_presentation = 1;
   if (desc->on_change) desc->on_change(desc);
+  else if(Settings_IsRandomizer(desc))Randomizer_Apply();
   SettingChangeResult result = sticky_disable
       ? kSettingChange_AppliedStickyDisable
       : desc->apply == kApply_Restart
@@ -2981,6 +2997,7 @@ static SettingChangeResult FinishChange(const SettingDesc *desc,
 }
 
 SettingChangeResult Settings_SetLong(const SettingDesc *desc, long value) {
+  if(Settings_IsRandomizer(desc) && Randomizer_CampaignBound())return kSettingChange_Rejected;
   long old_value;
   if (!Settings_GetLong(desc, &old_value)) return kSettingChange_Rejected;
   value = NormalizeLong(desc, value);

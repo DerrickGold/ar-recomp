@@ -72,11 +72,13 @@ typedef struct Visit {
   const ArRegionalRules *other;
   ArRegionalProfileSummary summary[kArRegionalProfile_Count];
   ArRegionalSource uniform[kArRegionalProfile_Count];
+  ArRegionalSourceSelector select;
+  void *context;
 } Visit;
 
 static bool VisitRegionalSource(Visit *visit, ArRegionalSource *field, ArRegionalSource other,
                                 ArRegionalProfileGroup group,
-                                const uint16_t values[kArRegionalSource_Count]) {
+                                const uint16_t values[kArRegionalSource_Count],const char *key) {
   if ((unsigned)*field >= kArRegionalSource_Count ||
       (visit->other && (unsigned)other >= kArRegionalSource_Count))
     return false;
@@ -96,6 +98,10 @@ static bool VisitRegionalSource(Visit *visit, ArRegionalSource *field, ArRegiona
   }
   if (visit->other && values[*field] != values[other]) visit->changes |= (uint16_t)(1u << group);
   if (visit->expand & (1u << group)) *field = visit->source;
+  if(visit->select) {
+    *field=visit->select(visit->context,key,group,*field);
+    if((unsigned)*field>=kArRegionalSource_Count)return false;
+  }
   return true;
 }
 
@@ -106,11 +112,11 @@ static bool VisitProfileMembers(ArRegionalRules *rules, Visit *visit) {
   if ((unsigned)rules->difficulty.level >= kArRegionalDifficulty_Count ||
       (visit->other && (unsigned)visit->other->difficulty.level >= kArRegionalDifficulty_Count))
     return false;
-#define FIELD(group, member, values)                                                            \
+#define FIELD(group, member, values, key)                                                       \
   do {                                                                                          \
     if (!VisitRegionalSource(visit, &rules->member,                                             \
                              visit->other ? visit->other->member : kArRegionalSource_US, group, \
-                             values))                                                           \
+                             values,key))                                                       \
       return false;                                                                             \
   } while (0)
 #define FAMILY(group, member, count, type, getter, values) \
@@ -118,21 +124,23 @@ static bool VisitProfileMembers(ArRegionalRules *rules, Visit *visit) {
     for (unsigned i = 0; i < count; ++i) {                 \
       const type *d = getter(i);                           \
       if (!d) return false;                                \
-      FIELD(group, member.source[i], d->values);           \
+      FIELD(group, member.source[i], d->values, d->key);   \
     }                                                      \
   } while (0)
-#define SINGLE(group, member, getter, values) FIELD(group, member, getter()->values)
+#define SINGLE(group, member, getter, values) FIELD(group, member, getter()->values,getter()->key)
   /* Action: stage design, combat, magic, lives and scoring. */
   SINGLE(kArRegionalProfile_Stage, terrain, ArRegionalTerrain_Descriptor, profile);
   FIELD(kArRegionalProfile_Stage, placements.enemies,
-        ArRegionalPlacements_Descriptor(kArRegionalPlacement_Enemies)->profile);
+        ArRegionalPlacements_Descriptor(kArRegionalPlacement_Enemies)->profile,
+        ArRegionalPlacements_Descriptor(kArRegionalPlacement_Enemies)->key);
   FIELD(kArRegionalProfile_Stage, placements.pickups,
-        ArRegionalPlacements_Descriptor(kArRegionalPlacement_Pickups)->profile);
+        ArRegionalPlacements_Descriptor(kArRegionalPlacement_Pickups)->profile,
+        ArRegionalPlacements_Descriptor(kArRegionalPlacement_Pickups)->key);
   FAMILY(kArRegionalProfile_Stage, timers, kArRegionalTimerRule_Count, ArRegionalTimerDescriptor,
          ArRegionalTimers_Descriptor, bcd);
   for (unsigned i = 0; i < kArRegionalDifficultyRule_Count; ++i) {
     const ArRegionalDifficultyDescriptor *d = ArRegionalDifficulty_Descriptor(i);
-    FIELD(kArRegionalProfile_Difficulty, difficulty.source[i], d->value);
+    FIELD(kArRegionalProfile_Difficulty, difficulty.source[i], d->value,d->key);
   }
   SINGLE(kArRegionalProfile_Combat, hazards, ArRegionalHazards_Descriptor, profile);
   SINGLE(kArRegionalProfile_Combat, statue_volley, ArRegionalVolley_Descriptor, shots);
@@ -155,7 +163,7 @@ static bool VisitProfileMembers(ArRegionalRules *rules, Visit *visit) {
     const ArRegionalCostDescriptor *d = ArRegionalCosts_Descriptor(i);
     FIELD(d->group == kArRegionalCostGroup_Scrolls ? kArRegionalProfile_Magic
                                                    : kArRegionalProfile_Resources,
-          costs.source[i], d->price);
+          costs.source[i], d->price,d->key);
   }
   SINGLE(kArRegionalProfile_Magic, spell_inventory, ArRegionalInventory_Descriptor, enabled);
   FAMILY(kArRegionalProfile_Magic, cast_hold, kArRegionalCastHold_Count,
@@ -180,11 +188,11 @@ static bool VisitProfileMembers(ArRegionalRules *rules, Visit *visit) {
   FAMILY(kArRegionalProfile_Population, town_status, kArRegionalTownStatus_Count,
          ArRegionalTownStatusDescriptor, ArRegionalTownStatus_Descriptor, japanese);
   for (unsigned i = 0; i < kArRegionalLairCount; ++i) {
-    FIELD(kArRegionalProfile_Lairs, lair_seeds, ArRegionalLair_SeedDescriptor(i)->stock);
+    FIELD(kArRegionalProfile_Lairs, lair_seeds, ArRegionalLair_SeedDescriptor(i)->stock,"lair_stock");
     uint16_t reload[kArRegionalSource_Count];
     for (unsigned source = 0; source < kArRegionalSource_Count; ++source)
       if (!ArRegionalLair_Reload(source, i, &reload[source])) return false;
-    FIELD(kArRegionalProfile_Lairs, lair_reloads, reload);
+    FIELD(kArRegionalProfile_Lairs, lair_reloads, reload,"lair_reload_japanese");
   }
   FAMILY(kArRegionalProfile_Lairs, sim_combat, kArRegionalSimCombat_Count,
          ArRegionalSimCombatDescriptor, ArRegionalSimCombat_Descriptor, value);
@@ -237,6 +245,14 @@ bool ArRegionalProfiles_Expand(const ArRegionalRules *current, ArRegionalProfile
     candidate.difficulty.level = kArRegionalDifficulty_Normal;
   *out = candidate;
   return true;
+}
+bool ArRegionalProfiles_SelectSources(const ArRegionalRules *current,
+    ArRegionalSourceSelector select,void *context,ArRegionalRules *out) {
+  if(!current || !select || !out)return false;
+  ArRegionalRules candidate=*current;
+  Visit visit={.select=select,.context=context};
+  if(!VisitProfileMembers(&candidate,&visit))return false;
+  *out=candidate;return true;
 }
 bool ArRegionalProfiles_Describe(const ArRegionalRules *rules,
                                  ArRegionalProfileSummary out[kArRegionalProfile_Count]) {

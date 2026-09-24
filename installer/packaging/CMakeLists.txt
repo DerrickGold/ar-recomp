@@ -476,6 +476,7 @@ install(FILES
     ${GAME_ROOT}/docs/rom-map.md
     ${GAME_ROOT}/docs/research-symbol-map.md
     ${GAME_ROOT}/docs/save-format.md
+    ${GAME_ROOT}/docs/randomizer.md
     ${GAME_ROOT}/docs/sim-object-catalog.md
     ${GAME_ROOT}/docs/diorama-depth-shapes.md
     ${GAME_ROOT}/docs/dialogue-system.md

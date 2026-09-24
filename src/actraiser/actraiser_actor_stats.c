@@ -5,6 +5,7 @@
 #include "actraiser_cpu_hle_internal.h"
 #include "actraiser_hle_fatal.h"
 #include "actraiser_game.h"
+#include "randomizer.h"
 typedef struct SpawnOwner { uint16_t source,actor; } SpawnOwner;
 /* US initializer addresses stay in this game adapter, never the portable
  * policy. Sorted for lookup at birth only; direct-handler records excluded. */
@@ -80,8 +81,16 @@ static bool Plan(CpuState *cpu,uint16_t *hp,uint16_t *attack) {
   if(cpu_read16(cpu,0,x+0x16)!=cpu_read16(cpu,0,cpu->Y) ||
       cpu_read8(cpu,0,x+0x18)!=cpu_read8(cpu,0,cpu->Y+2) ||
       cpu_read16(cpu,0,x+0x1a)!=cpu_read8(cpu,0,cpu->Y+6))return false;
-  return ActRaiserRegional_ActorStats(kOwners[lo].actor,cpu_read16(cpu,0,x+0x2c),
-      cpu_read16(cpu,0,x+0x2a),hp,attack);
+  const uint16_t copied_hp=cpu_read16(cpu,0,x+0x2c),copied_attack=cpu_read16(cpu,0,x+0x2a);
+  RandomizerSpawnStatBasis basis;
+  /* Native allocation copied the already-scaled US ROM. Select the regional
+   * base from pristine bytes, then apply that same scale exactly once. This
+   * preserves the policy's stock-value guards, even after rounding/clamping. */
+  if(!Randomizer_SpawnStatBasis(cpu->Y&0x7fff,copied_hp,copied_attack,&basis) ||
+      !ActRaiserRegional_ActorStats(kOwners[lo].actor,basis.hp,basis.attack,hp,attack))return false;
+  *hp=Randomizer_ScaleStat((uint8_t)*hp,basis.scale.hp_percent);
+  *attack=Randomizer_ScaleStat((uint8_t)*attack,basis.scale.attack_percent);
+  return *hp!=copied_hp || *attack!=copied_attack;
 }
 bool ActRaiser_ActorStatsEntry(CpuState *cpu) {
   uint16_t hp,attack;return Plan(cpu,&hp,&attack) || ActRaiser_PlatformSkullSpawnEntry(cpu) || ActRaiser_CastHoldSpawnEntry(cpu);
@@ -112,8 +121,17 @@ static bool TanzraChild(CpuState *cpu,uint16_t handler,uint16_t flags) {
       cpu_read8(cpu,0,x+0x18)==0x7e && cpu_read16(cpu,0,x+0x12)==handler &&
       cpu_read16(cpu,0,x)==0 && cpu_read16(cpu,0,x+0x30)==flags;
 }
+static uint16_t TanzraMinionHp(void) {
+  const uint16_t base=ActRaiserRegional_ActorChildStat(kArRegionalActorStat_TanzraMinionHp);
+  return base==1 || base==2 ? Randomizer_ScaleStat((uint8_t)base,Randomizer_AppliedStatScale().hp_percent) : UINT16_MAX;
+}
+static uint16_t TanzraProjectileAttack(void) {
+  const uint16_t base=ActRaiserRegional_ActorChildStat(kArRegionalActorStat_TanzraProjectileAttack);
+  return base>=3 && base<=5 ? Randomizer_ScaleStat((uint8_t)base,Randomizer_AppliedStatScale().attack_percent) : UINT16_MAX;
+}
 bool ActRaiser_TanzraMinionHpEntry(CpuState *cpu) {
-  return ActRaiserRegional_ActorChildStat(kArRegionalActorStat_TanzraMinionHp)==1 &&
+  const uint16_t hp=TanzraMinionHp();
+  return hp!=UINT16_MAX && hp!=2 &&
       TanzraChild(cpu,0xfc8d,0) && cpu->A==2;
 }
 bool ActRaiser_TanzraMinionRewardEntry(CpuState *cpu) {
@@ -121,14 +139,14 @@ bool ActRaiser_TanzraMinionRewardEntry(CpuState *cpu) {
       TanzraChild(cpu,0xfc8d,0) && cpu->A==2;
 }
 bool ActRaiser_TanzraProjectileAttackEntry(CpuState *cpu) {
-  const uint16_t attack=ActRaiserRegional_ActorChildStat(kArRegionalActorStat_TanzraProjectileAttack);
-  return (attack==4 || attack==5) && TanzraChild(cpu,0xfd25,0x20) && cpu->A==0x20;
+  const uint16_t attack=TanzraProjectileAttack();
+  return attack!=UINT16_MAX && attack!=3 && TanzraChild(cpu,0xfd25,0x20) && cpu->A==0x20;
 }
 RecompReturn ActRaiser_TanzraMinionHp(CpuState *cpu) {
   if(!ActRaiser_TanzraMinionHpEntry(cpu))ActRaiserHleFatal("Unsupported Tanzra minion HP initializer");
   /* Replace STA's value, not the live accumulator: the following independent
    * reward store must still see the native A=2. STA does not modify flags. */
-  cpu_write16(cpu,0,cpu->X+0x2c,1);
+  cpu_write16(cpu,0,cpu->X+0x2c,TanzraMinionHp());
   if(!cpu_hle_tailcall_request(0x00fc99,0x00fc96))ActRaiserHleFatal("Minion HP has no native continuation");
   return RECOMP_RETURN_TAILCALL;
 }
@@ -140,7 +158,7 @@ RecompReturn ActRaiser_TanzraMinionReward(CpuState *cpu) {
 }
 RecompReturn ActRaiser_TanzraProjectileAttack(CpuState *cpu) {
   if(!ActRaiser_TanzraProjectileAttackEntry(cpu))ActRaiserHleFatal("Unsupported Tanzra projectile initializer");
-  cpu->A=ActRaiserRegional_ActorChildStat(kArRegionalActorStat_TanzraProjectileAttack);
+  cpu->A=TanzraProjectileAttack();
   ActRaiserCpuHle_SetNegativeZero16(cpu,cpu->A);
   if(!cpu_hle_tailcall_request(0x00fd31,0x00fd2e))ActRaiserHleFatal("Tanzra projectile has no native continuation");
   return RECOMP_RETURN_TAILCALL;

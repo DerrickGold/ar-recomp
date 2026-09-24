@@ -56,6 +56,9 @@ static void Run(SaveBackend backend) {
   ArRegionalCosts_Init(&jp, kArRegionalSource_Japan);
   ArRegionalCosts_Init(&eu, kArRegionalSource_Europe);
   CHECK(ArRegionalCampaign_NewGame(&campaign, &jp, &error));
+  campaign.active.randomizer=RandomizerConfig_Default();
+  campaign.active.randomizer.enabled=true;campaign.active.randomizer.seed=123456;
+  campaign.active.randomizer.hp_percent=200;campaign.active.randomizer.regional_action=true;
   CHECK(ArRegionalSession_RequestTimers(&campaign.active, campaign.active.revision, kArRegionalSource_Japan));
   CHECK(ArRegionalSession_RequestRetryScore(&campaign.active, campaign.active.revision, kArRegionalSource_Japan));
   ArRegionalSession saving = campaign.active;
@@ -67,6 +70,8 @@ static void Run(SaveBackend backend) {
   CHECK(SaveSystem_EndNativeWrite(true, &error));
   CHECK(campaign.pending_valid);
   CHECK(ArRegionalCampaign_NewGame(&campaign, &eu, &error));
+  campaign.active.randomizer=RandomizerConfig_Default();
+  campaign.active.randomizer.enabled=true;campaign.active.randomizer.seed=654321;
   CHECK(campaign.active.requested.timers.source[0] == kArRegionalSource_US);
   CHECK(Save_LoadFile(format, path, disk, &error));
   CHECK(!memcmp(disk, durable, sizeof(disk)));
@@ -88,6 +93,7 @@ static void Run(SaveBackend backend) {
   CHECK(SaveSystem_AutoPersistIfChanged(&error));
   CHECK(ArRegionalSession_Load(&loaded, 0, path, image, &error) == kSaveCheckpoint_Ready);
   CHECK(!memcmp(loaded.campaign, saving.campaign, 16));
+  CHECK(loaded.randomizer.seed==123456 && loaded.randomizer.hp_percent==200);
   SaveEditRequest edits;
   SaveEditRequest_Clear(&edits); edits.master_level = 5;
   CHECK(SaveSystem_ApplyEdits(&edits, true, true, false, &error));
@@ -95,6 +101,7 @@ static void Run(SaveBackend backend) {
   CHECK(loaded.requested.costs.source[0] == kArRegionalSource_Japan);
   CHECK(loaded.requested.timers.source[0] == kArRegionalSource_Japan);
   CHECK(loaded.requested.retry_score == kArRegionalSource_Japan);
+  CHECK(loaded.randomizer.seed==123456);
 
   /* Foreign import gets its own identity/provenance, never the running game's. */
   memset(disk, 0, sizeof(disk)); Save_RecomputeChecksum(disk);
@@ -107,6 +114,7 @@ static void Run(SaveBackend backend) {
   CHECK(SaveSystem_CopyDurableImage(durable));
   CHECK(ArRegionalCampaign_Continue(&campaign, path, durable, &error));
   CHECK(campaign.active.requested.costs.source[0] == kArRegionalSource_Europe);
+
 
   /* Same-image story saves still commit pending metadata; SRAM memcmp alone
    * must not swallow a region-only change. */

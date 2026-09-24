@@ -11,6 +11,8 @@
 #include "actraiser/regional/actraiser_population_conversion.h"
 #include "actraiser/actraiser_arrival_runtime.h"
 #include "actraiser/actraiser_stage_placements.h"
+#include "randomizer.h"
+#include "regional/regional_randomizer.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -54,6 +56,15 @@ void ActRaiserConstructionRuntime_Reset(void) {}
 void ActRaiserLevelGoalsRuntime_Reset(void) {}
 void ActRaiserArrivalRuntime_Reset(void) {}
 static unsigned placement_resets;
+static RandomizerStatScale applied_scale={100,100};
+RandomizerStatScale Randomizer_AppliedStatScale(void){return applied_scale;}
+static RandomizerConfig draft_recipe;
+static RandomizerConfig bound_recipe;
+static bool recipe_bound;
+bool Randomizer_CaptureConfig(RandomizerConfig *out){*out=draft_recipe.generator?draft_recipe:RandomizerConfig_Default();return true;}
+bool Randomizer_BindCampaign(const RandomizerConfig *c){assert(RandomizerConfig_Valid(c));bound_recipe=c->generator?*c:RandomizerConfig_Default();recipe_bound=true;return true;}
+void Randomizer_ReleaseCampaign(void){recipe_bound=false;}
+RandomizerConfig Randomizer_CurrentConfig(void){RandomizerConfig c;Randomizer_CaptureConfig(&c);return recipe_bound?bound_recipe:c;}
 void ActRaiserStagePlacements_Reset(void) { ++placement_resets; }
 bool ActRaiserStagePlacements_Fingerprint(const uint8_t previous[32],uint8_t out[32],bool *native) {
   memmove(out,previous,32);*native=true;return true;
@@ -1744,6 +1755,15 @@ int main(void) {
   assert(ActRaiserRegional_BeginActionStart(&start_snapshot) && start_snapshot.spares==4 && start_snapshot.health==24);
   uint8_t boot_digest[32];bool boot_baseline=false;
   assert(ActRaiserRegional_ReplayDigest(NULL,boot_digest,&boot_baseline) && boot_baseline);
+  uint8_t scaled_digest[32],repeated_digest[32];
+  applied_scale=(RandomizerStatScale){200,100};
+  assert(ActRaiserRegional_ReplayDigest(NULL,scaled_digest,&boot_baseline) && !boot_baseline);
+  assert(memcmp(boot_digest,scaled_digest,32));
+  assert(ActRaiserRegional_ReplayDigest(NULL,repeated_digest,&boot_baseline) && !memcmp(scaled_digest,repeated_digest,32));
+  applied_scale=(RandomizerStatScale){100,200};
+  assert(ActRaiserRegional_ReplayDigest(NULL,repeated_digest,&boot_baseline) && !boot_baseline && memcmp(scaled_digest,repeated_digest,32));
+  applied_scale=(RandomizerStatScale){100,100};
+  assert(ActRaiserRegional_ReplayDigest(NULL,repeated_digest,&boot_baseline) && boot_baseline && !memcmp(boot_digest,repeated_digest,32));
   ActRaiserRegional_SetContinuePrompt(ContinuePrompt,&prompt_calls);
   cpu=(CpuState){.PB=2,.DB=2,.m_flag=1,.S=0x1ee0}; ram[0x336]=1;
   edits_allowed=false; assert(!ActRaiser_RegionalContinueEntry(&cpu));
@@ -1879,6 +1899,30 @@ int main(void) {
         view.profiles[kArRegionalProfile_Gameplay].source==source);
   }
   assert(Save_LoadFile(kSaveFileFormat_NativeSrm,path,unchanged_image,&error) && !memcmp(image,unchanged_image,sizeof(image)));
+  /* New Game captures a recipe and rolls rules once; a different title draft
+   * cannot change the saved campaign on Continue, including after restart. */
+  draft_recipe=RandomizerConfig_Default();draft_recipe.enabled=true;draft_recipe.seed=123456;
+  draft_recipe.hp_percent=200;draft_recipe.regional_action=draft_recipe.regional_towns=true;
+  assert(ActRaiserRegional_Initialize(Identity,NULL));
+  title_edits=0;title_return=RECOMP_RETURN_NORMAL;
+  cpu=(CpuState){.PB=2,.DB=2,.m_flag=1};ram[0x336]=0;
+  assert(ActRaiser_RegionalTitle(&cpu)==RECOMP_RETURN_NORMAL && recipe_bound && bound_recipe.seed==123456);
+  ArRegionalRules rolled;
+  assert(ArRegionalRandomizer_Choose(&title_view.requested,&draft_recipe,&rolled));
+  assert(ActRaiserRegional_CopyRulesView(&view) && !memcmp(&rolled,&view.requested,sizeof(rolled)));
+  uint8_t recipe_digest[32],same_recipe_digest[32];bool recipe_native;
+  assert(ActRaiserRegional_ReplayDigest(NULL,recipe_digest,&recipe_native) && !recipe_native);
+  draft_recipe.seed=999999;
+  assert(ActRaiserRegional_ReplayDigest(NULL,same_recipe_digest,&recipe_native) && !memcmp(recipe_digest,same_recipe_digest,32));
+  assert(SaveSystem_BeginNativeWrite(&error));image[100]^=1;Save_RecomputeChecksum(image);
+  assert(SaveSystem_EndNativeWrite(true,&error) && SaveSystem_AutoPersistIfChanged(&error));
+  assert(ArRegionalSession_Load(&loaded,0,path,image,&error)==kSaveCheckpoint_Ready);
+  assert(loaded.randomizer.seed==123456 && loaded.randomizer.hp_percent==200 && loaded.randomizer.regional_towns);
+  assert(ActRaiserRegional_Initialize(Identity,NULL) && !recipe_bound);
+  cpu=(CpuState){.PB=2,.DB=2,.m_flag=1};ram[0x336]=1;
+  assert(ActRaiser_RegionalTitle(&cpu)==RECOMP_RETURN_NORMAL && recipe_bound && bound_recipe.seed==123456);
+  assert(ActRaiserRegional_CopyRulesView(&view) && !memcmp(&view.requested,&rolled,sizeof(rolled)));
+  draft_recipe=(RandomizerConfig){0};
   remove(path); remove(companion);
   return 0;
 }

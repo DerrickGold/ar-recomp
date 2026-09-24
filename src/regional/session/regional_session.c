@@ -7,7 +7,7 @@
  * are in regional_session_codec.c. No menu order or ROM addresses live here. */
 
 bool ArRegionalSession_Valid(const ArRegionalSession *session) {
-  if (!session || !session->revision || !ArRegionalLairHistory_Valid(&session->lairs) ||
+  if (!session || !session->revision || !RandomizerConfig_Valid(&session->randomizer) || !ArRegionalLairHistory_Valid(&session->lairs) ||
       !ArRegionalLairReloads_Valid(&session->reloads) || !ArRegionalSimActors_Valid(&session->sim_actors)) return false;
   bool has_id = false;
   uint8_t poses;

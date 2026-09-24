@@ -15,6 +15,11 @@ artwork, visual effects and music choices. Both require confirmation, even
 before a new game. Neither changes language, fonts, physical button bindings,
 randomizer settings or game fixes.
 
+For seeded mixes, the experimental randomizer can select independent Action
+and Town gameplay rules when a new campaign starts. It saves the seed and
+options with that campaign; Continue restores them without another roll.
+See [Seeded campaigns](randomizer.md) for setup, exclusions and save backups.
+
 The description header shows **Current: US / JP / EU / Custom** separately from
 the preset you are browsing. This describes the rules already active, not a
 choice waiting for confirmation or its next activation point. At the title
@@ -436,6 +441,18 @@ one summoned minion has 2/2/1 HP and gives 20/20/10 points. These values are
 assigned at the child's activation, not reapplied to a damaged enemy. Terrain
 damage and Aitos skull rewards remain separate. European base values give Aitos's platform
 skulls 2 HP and attack2, independently of their deflection/proximity setting.
+
+The randomizer's **Enemy health** and **Enemy damage** percentages scale these
+selected regional bases, rather than replacing them with scaled US values.
+For example, a Japanese attack value of 4 becomes 8 at 200% damage. The order
+is regional base, randomizer percentage, then the existing mode/difficulty
+adjustment. Each result rounds to the nearest whole number, with halves rounded
+up; nonzero stats stay between 1 and 255, and zero stays zero. Tanzra's explicit
+minion HP and projectile damage follow the same regional-base-first scaling
+at activation, but their point rewards do not scale. Other bosses that later
+assign their own HP can still override the spawn value. Percentage changes
+are fixed for the campaign; regional source changes still wait for the next
+room or retry. Neither setting rewrites the HP of enemies already fighting you.
 
 **Platforms during magic** controls three linked platform pieces in Fillmore.
 US/Japanese rules keep them following their parent during a spell; European

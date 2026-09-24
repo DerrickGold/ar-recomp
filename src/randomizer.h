@@ -2,16 +2,17 @@
 #define RANDOMIZER_H
 #include "snesrecomp/game/types.h"
 #include "action/action_placements.h"
+#include "randomizer_config.h"
 
 /* Seeded content randomizer.
  *
- * Everything it changes is ROM *data* — the object-type stat records, the
+ * The native data passes change the object-type stat records, the
  * bank-$0A object placement streams, and the sim-mode lair table — all mapped
  * in docs/research-symbol-map.md and docs/regional-differences-technical.md.
  * The existing native path transforms the loaded ROM image: register the live
  * cart buffer once, keep a pristine copy, and rewrite data from a seed. Regional
- * placement programs have a separate value-only entry point using the same
- * shuffle implementation. Neither path patches room-control instructions.
+ * placement programs and regional actor stats have value-only entry points
+ * using the same transforms. Neither path patches room-control instructions.
  *
  * Every pass in this first slice is a PERMUTATION of data the game already
  * ships (or a scale applied to it). That is a deliberate safety property: a
@@ -19,9 +20,9 @@
  * can put an object inside a wall and none of them need the collision oracle.
  * Placing objects at *arbitrary* tiles is a later step and does need it.
  *
- * Re-applying is safe at any time: the pristine copy is restored first, so
- * passes never compound. Stat changes take effect at the next spawn, placement
- * changes at the next level load.
+ * Re-applying restores the pristine copy first, so passes never compound.
+ * Title settings configure the next campaign; a bound campaign always uses
+ * its saved recipe. Spawn and level-load consumers read the applied values.
  */
 
 /* What a pass does with the values it owns. */
@@ -61,17 +62,57 @@ typedef struct {
  * entry point becomes a no-op and the stock ROM stays live. */
 bool Randomizer_Init(uint8 *rom, uint32 size);
 
-/* Restore the pristine image, then apply the passes enabled in g_settings.
- * Safe to call repeatedly. No-op (but still restores) when the master is off. */
+/* Restore the pristine image, then apply the bound campaign recipe or, at
+ * title, the settings draft. Safe to call repeatedly. With the master off,
+ * restores the baseline without applying passes. */
 void Randomizer_Apply(void);
 
-/* Draw a fresh seed and re-apply. Bound to the menu's "New seed" action. */
+/* Draw a fresh title-draft seed and re-apply. Does nothing during a bound
+ * campaign. Bound to the menu's "New seed" action. */
 void Randomizer_Reroll(void);
 
 const RandomizerSummary *Randomizer_LastSummary(void);
 
 /* True once Randomizer_Init has taken a usable snapshot. */
 bool Randomizer_IsAvailable(void);
+
+/* Title settings are a draft. A confirmed campaign binds a frozen recipe;
+ * all ROM and numerical passes then read it, not mutable global settings.
+ * Bind also shows the saved values in the settings UI. Release restores the
+ * title draft. Neither operation writes a save or chooses regional rules. */
+bool Randomizer_CaptureConfig(RandomizerConfig *out);
+bool Randomizer_BindCampaign(const RandomizerConfig *config);
+void Randomizer_ReleaseCampaign(void);
+bool Randomizer_CampaignBound(void);
+RandomizerConfig Randomizer_CurrentConfig(void);
+
+typedef struct RandomizerStatScale {
+  int hp_percent, attack_percent;
+} RandomizerStatScale;
+
+/* Last applied scale, not pending settings. Identity when disabled/unavailable.
+ * Explicit game-owned child initializers also use this scale after selecting
+ * their regional base; rewards and other non-combat fields must not use it. */
+RandomizerStatScale Randomizer_AppliedStatScale(void);
+
+/* Same rounding/clamping as the ROM pass: zero stays zero, nonzero stays 1..255. */
+uint8_t Randomizer_ScaleStat(uint8_t base, int percent);
+
+typedef struct RandomizerSpawnStatBasis {
+  uint8_t hp, attack;
+  RandomizerStatScale scale;
+} RandomizerSpawnStatBasis;
+
+/* Recover the ORIGINAL basis of a freshly copied initializer, never by inverse
+ * scaling rounded/clamped bytes. record_offset is a linear ROM offset. Only
+ * records owned by the last stat pass recover pristine values and its scale;
+ * other records return the copied values with identity scaling. Stale/mutated
+ * scaled records or non-byte stats fail without touching out. The game adapter
+ * owns descriptor/actor identity and applies regional selection to this basis,
+ * then scales once, before its existing difficulty adjustment. No ROM pointers
+ * or CPU state cross this boundary. */
+bool Randomizer_SpawnStatBasis(uint32_t record_offset, uint16_t copied_hp,
+                              uint16_t copied_attack, RandomizerSpawnStatBasis *out);
 
 typedef struct RandomizerPlacementMap {
   uint16_t scene;

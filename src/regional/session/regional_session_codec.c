@@ -4,7 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 
-/* Stable v1-v69 persistence, separate from live activation. See
+/* Stable v1-v70 persistence, separate from live activation. See
  * docs/save-format.md and docs/regional-architecture.md before extending. */
 enum {
   kHeaderBytes = 36,
@@ -391,7 +391,7 @@ static bool Encode(const ArRegionalSession *session, uint8_t *out, size_t *size)
   if (!ArRegionalSession_Valid(session)) return false;
   memset(out, 0, kHeaderBytes);
   memcpy(out, kMagic, sizeof(kMagic));
-  ByteOrder_WriteLe16(out + 8, 69);
+  ByteOrder_WriteLe16(out + 8, session->randomizer.generator ? 70 : 69);
   ByteOrder_WriteLe16(out + 10, kRecordCount);
   ByteOrder_WriteLe32(out + 12, session->slot);
   memcpy(out + 16, session->campaign, 16);
@@ -436,7 +436,13 @@ static bool Encode(const ArRegionalSession *session, uint8_t *out, size_t *size)
   /* Stable choice bytes; neither foreign RAM values nor region keys. */
   out[offset + 8] = (uint8_t)session->requested.difficulty.level;
   out[offset + 9] = (uint8_t)session->effective.difficulty.level;
-  *size = offset + 10;
+  offset += 10;
+  if(session->randomizer.generator) {
+    if(kPayloadCapacity-offset<kRandomizerConfigBytes ||
+        !RandomizerConfig_Encode(&session->randomizer,out+offset))return false;
+    offset+=kRandomizerConfigBytes;
+  }
+  *size = offset;
   return true;
 }
 
@@ -451,7 +457,7 @@ static SaveCheckpointStatus Decode(const uint8_t *bytes, size_t size, ArRegional
   const bool pricing_only = !memcmp(bytes, kPriceMagic, sizeof(kPriceMagic));
   if (!pricing_only && memcmp(bytes, kMagic, sizeof(kMagic))) return kSaveCheckpoint_Invalid;
   const unsigned version = ByteOrder_ReadLe16(bytes + 8);
-  if (version < 1 || version > (pricing_only ? 1u : 69u)) return kSaveCheckpoint_Unsupported;
+  if (version < 1 || version > (pricing_only ? 1u : 70u)) return kSaveCheckpoint_Unsupported;
   const unsigned count = pricing_only    ? kArRegionalCostRule_Count
                          : version == 1  ? kV1RecordCount
                          : version == 2  ? kV2RecordCount
@@ -595,7 +601,7 @@ static SaveCheckpointStatus Decode(const uint8_t *bytes, size_t size, ArRegional
           if (size - offset >= 8 && !memcmp(bytes + offset, "ARARRIV", 7) &&
               bytes[offset + 7] != '1')
             return kSaveCheckpoint_Unsupported;
-          if (size - offset != (version >= 51 ? 19u : 9u) ||
+          if (size - offset != (version >= 70 ? 19u+kRandomizerConfigBytes : version >= 51 ? 19u : 9u) ||
               memcmp(bytes + offset, "ARARRIV1", 8) || bytes[offset + 8] > 1)
             return kSaveCheckpoint_Invalid;
           next.arrival_locked = bytes[offset + 8] != 0;
@@ -607,6 +613,13 @@ static SaveCheckpointStatus Decode(const uint8_t *bytes, size_t size, ArRegional
               return kSaveCheckpoint_Invalid;
             next.requested.difficulty.level = (ArRegionalDifficulty)bytes[offset + 8];
             next.effective.difficulty.level = (ArRegionalDifficulty)bytes[offset + 9];
+            if(version>=70) {
+              offset+=10;
+              if(memcmp(bytes+offset,"ARRANDO1",8) || bytes[offset+8]!=kRandomizerGenerator)
+                return kSaveCheckpoint_Unsupported;
+              if(!RandomizerConfig_Decode(bytes+offset,size-offset,&next.randomizer))
+                return kSaveCheckpoint_Invalid;
+            }
           }
         }
       }

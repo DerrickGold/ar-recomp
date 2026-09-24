@@ -24,7 +24,7 @@ func TestLocalizationPackageGate(t *testing.T) {
 	files := []string{
 		"utils/docs/README.md", "utils/docs/manual.md", "utils/docs/builder-workshop.md",
 		"utils/docs/desktop-packaging.md", "utils/docs/ram-map.md", "utils/docs/rom-map.md",
-		"utils/docs/research-symbol-map.md", "utils/docs/save-format.md", "utils/docs/sim-object-catalog.md",
+		"utils/docs/research-symbol-map.md", "utils/docs/save-format.md", "utils/docs/randomizer.md", "utils/docs/sim-object-catalog.md",
 		"utils/docs/diorama-depth-shapes.md", "utils/docs/dialogue-system.md",
 		"utils/docs/snes-native-audio-channels.md", "utils/docs/performance-overlay.md", "utils/docs/GAME-LICENSE.txt",
 		"utils/snesrecomp-go/runtime/docs/README.md", "utils/snesrecomp-go/runtime/docs/API_REFERENCE.md",

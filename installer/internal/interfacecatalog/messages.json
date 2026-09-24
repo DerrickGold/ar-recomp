@@ -3668,46 +3668,67 @@
   {
     "key": "setting.rando_enable.help",
     "text": [
-      "Rewrite the game's content tables from the seed below. Off restores the non-randomized ROM baseline. Stat changes take effect at the next spawn, placement changes at the next level load.",
-      "Réécrit les tables de contenu du jeu avec la graine ci-dessous. Désactivé rétablit la ROM non aléatoire. Les statistiques changent à la prochaine apparition, les placements au prochain chargement du niveau.",
-      "Schreibt Inhaltstabellen anhand des Startwerts unten um. Aus stellt die unveränderte ROM-Basis wieder her. Werte ändern sich beim nächsten Erscheinen, Platzierungen beim nächsten Laden des Levels.",
-      "下のシードでゲーム内容テーブルを書き換えます。オフで未ランダム化ROMの基準に戻します。能力値は次の出現時、配置は次のステージ読込時に反映されます。"
+      "Choose a randomizer setup before New Game. The seed and options are saved with that campaign and restored on Continue. Return to the title screen to configure a different run.",
+      "Réglez le randomiseur avant une nouvelle partie. La graine et les options sont sauvegardées avec cette partie et restaurées en la reprenant. Revenez au titre pour préparer une autre partie.",
+      "Konfiguriere den Randomizer vor einem neuen Spiel. Startwert und Optionen werden mit dem Spielstand gespeichert und beim Fortsetzen wiederhergestellt. Für einen anderen Durchlauf kehre zum Titel zurück.",
+      "ニューゲーム前にランダマイザーを設定します。シードと設定はセーブに保存され、続きから遊ぶときに復元されます。別のプレイ設定はタイトル画面で行ってください。"
     ]
   },
   {
     "key": "setting.rando_seed.help",
     "text": [
-      "Runs with the same seed and the same options are identical. Each option draws from its own stream, so toggling one does not shift what another produces.",
-      "Même graine et mêmes options donnent une partie identique. Chaque option a son propre flux aléatoire : en changer une ne décale pas les autres.",
-      "Gleicher Startwert und gleiche Optionen ergeben identische Abläufe. Jede Option hat ihren eigenen Zufallsstrom; Umschalten einer Option verschiebt die anderen nicht.",
-      "同じシードと設定なら同じ結果になります。設定ごとに独立した乱数列を使うため、1つを切り替えても他の結果はずれません。"
+      "The seed determines the next campaign's rolls. The same seed, options and starting regional rules reproduce the same setup. Continue restores the saved seed without rerolling.",
+      "La graine détermine les tirages de la prochaine partie. Une même graine, les mêmes options et règles régionales initiales reproduisent la même configuration. Reprendre restaure la graine sans nouveau tirage.",
+      "Der Startwert bestimmt die Zufallsauswahl des nächsten Spiels. Gleiche Werte, Optionen und anfängliche Regionalregeln ergeben dieselbe Konfiguration. Fortsetzen lädt den gespeicherten Startwert ohne neue Auslosung.",
+      "次のプレイの抽選を決める値です。同じシード・設定・開始時の地域ルールなら同じ構成になります。続きから遊ぶ場合は再抽選せず保存済みのシードを復元します。"
     ]
   },
   {
     "key": "setting.rando_reroll.help",
     "text": [
-      "Draw a fresh random seed and re-apply.",
-      "Tire une nouvelle graine aléatoire et l'applique.",
-      "Neuen zufälligen Startwert erzeugen und anwenden.",
-      "新しいランダムシードを生成して適用します。"
+      "Draw a fresh seed for the next New Game. Existing saves keep their own seed.",
+      "Tire une nouvelle graine pour la prochaine nouvelle partie. Les sauvegardes existantes gardent leur graine.",
+      "Erzeugt einen neuen Startwert für das nächste neue Spiel. Vorhandene Spielstände behalten ihren eigenen.",
+      "次のニューゲーム用に新しいシードを生成します。既存のセーブのシードは変わりません。"
     ]
   },
   {
+    "key": "setting.rando_regional_action.help",
+    "text": [
+      "Roll each action gameplay rule between US, Japanese and European versions at New Game. HP and damage multipliers apply afterward. Difficulty, title access, controls and artwork stay as selected.",
+      "À la nouvelle partie, tire chaque règle d'action parmi les versions US, japonaise et européenne. Les multiplicateurs de PV et dégâts suivent. Difficulté, accès aux modes, commandes et graphismes restent tels que choisis.",
+      "Lost bei einem neuen Spiel jede Action-Regel aus US-, japanischer oder europäischer Fassung aus. LP- und Schadensmultiplikatoren folgen danach. Schwierigkeit, Moduszugang, Steuerung und Grafik bleiben wie gewählt.",
+      "ニューゲーム時にアクションの各ルールをUS・JP・EUから抽選します。その後HP・ダメージ倍率を適用します。難易度、モード選択、操作、画像は選択済みの設定を保ちます。"
+    ]
+  },
+  {
+    "key": "setting.rando_regional_towns.help",
+    "text": [
+      "Roll town gameplay rules at New Game, including construction, lairs and miracles. Population support and story goals stay compatible. Continue never rerolls developed towns.",
+      "Tire les règles des villes à la nouvelle partie, dont construction, antres et miracles. Ressources de population et objectifs restent compatibles. Reprendre ne relance jamais le tirage des villes déjà développées.",
+      "Lost Stadtregeln wie Bau, Monsterhöhlen und Wunder bei einem neuen Spiel aus. Bevölkerungsversorgung und Handlungsziele bleiben vereinbar. Fortsetzen lost entwickelte Städte nicht neu aus.",
+      "ニューゲーム時に建設・巣・奇跡などの街ルールを抽選します。人口維持能力と物語の目標は両立する組み合わせにします。続きから遊んでも発展済みの街は再抽選しません。"
+    ]
+  },
+  {"key":"setting.rando_regional_action.label","text":["Regional action rules","Règles d'action régionales","Regionale Action-Regeln","地域別アクションルール"]},
+  {"key":"setting.rando_regional_towns.label","text":["Regional town rules","Règles des villes régionales","Regionale Stadtregeln","地域別の街ルール"]},
+  {"key":"overlay.randomizer.campaign_locked","text":["This campaign keeps its saved seed and randomizer options. Return to the title screen to configure the next New Game. Continue always restores this save's setup.","Cette partie garde sa graine et ses options sauvegardées. Revenez au titre pour préparer une nouvelle partie. Reprendre restaure toujours la configuration de cette sauvegarde.","Dieses Spiel behält seinen gespeicherten Startwert und seine Optionen. Kehre zum Titel zurück, um das nächste neue Spiel vorzubereiten. Fortsetzen lädt immer die Konfiguration dieses Spielstands.","このプレイでは保存済みのシードと設定を使います。次のニューゲームの設定はタイトル画面で行ってください。続きから遊ぶとセーブの設定が復元されます。"]},
+  {
     "key": "setting.rando_enemy_hp.help",
     "text": [
-      "Percent of stock hit points for every enemy and boss. A handful of bosses set their own HP at runtime and ignore this.",
-      "Pourcentage des PV d'origine de chaque ennemi et boss. Quelques boss fixent leurs PV à l'exécution et ignorent ce réglage.",
-      "Prozent der originalen Trefferpunkte aller Gegner und Bosse. Einige Bosse setzen ihre TP zur Laufzeit selbst und ignorieren dies.",
-      "各敵・ボスの元のHPに対する割合。一部のボスは実行時に独自のHPを設定するため、この値を無視します。"
+      "Scales each enemy's selected regional base HP. Applied at spawn before difficulty adjustments; some bosses later replace their own HP.",
+      "Multiplie les PV de base de chaque ennemi selon la région choisie. Appliqué à l'apparition avant les ajustements de difficulté ; certains boss remplacent ensuite leurs PV.",
+      "Skaliert die Basis-LP jedes Gegners aus der gewählten Region. Gilt beim Erscheinen vor Schwierigkeitsanpassungen; einige Bosse setzen ihre LP später selbst neu.",
+      "選択した地域の敵の基本HPに倍率をかけます。出現時に難易度補正より先に適用しますが、一部のボスは後から独自のHPに変更します。"
     ]
   },
   {
     "key": "setting.rando_enemy_atk.help",
     "text": [
-      "Percent of stock contact and attack damage for every enemy.",
-      "Pourcentage des dégâts de contact et d'attaque d'origine de chaque ennemi.",
-      "Prozent des originalen Kontakt- und Angriffsschadens aller Gegner.",
-      "各敵の元の接触・攻撃ダメージに対する割合。"
+      "Scales each enemy's selected regional base contact and attack damage. Applied at spawn before difficulty adjustments; terrain damage is separate.",
+      "Multiplie les dégâts de contact et d'attaque de base de chaque ennemi selon la région choisie. Appliqué à l'apparition avant les ajustements de difficulté ; les dégâts du terrain restent séparés.",
+      "Skaliert den Basis-Kontakt- und Angriffsschaden jedes Gegners aus der gewählten Region. Gilt beim Erscheinen vor Schwierigkeitsanpassungen; Geländeschaden bleibt unabhängig.",
+      "選択した地域の敵の基本接触・攻撃ダメージに倍率をかけます。出現時に難易度補正より先に適用し、地形ダメージには影響しません。"
     ]
   },
   {

@@ -4,12 +4,21 @@
 #include "regional/action/regional_platform_skull.h"
 #include "regional/action/regional_cast_hold.h"
 #include "actraiser/actraiser_cast_hold.h"
+#include "actraiser/actraiser_difficulty.h"
+#include "regional/action/regional_difficulty.h"
+#include "randomizer.h"
+#include "settings.h"
 #include "byte_order.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
 static uint8_t memory[65536],skull;
 static uint8_t cast_hold;
+Settings g_settings;
+const SettingDesc *Settings_Find(const char *key){(void)key;return NULL;}
+SettingChangeResult Settings_SetLong(const SettingDesc *d,long value){(void)d;(void)value;return 0;}
+static ArRegionalDifficultySnapshot difficulty;
+ArRegionalDifficultySnapshot ActRaiserRegional_DifficultySnapshot(void){return difficulty;}
 uint8_t ActRaiserRegional_CastHoldSnapshot(void){return cast_hold;}
 static ArRegionalActorStatsSnapshot snapshot;
 static unsigned target,origin;
@@ -92,9 +101,18 @@ static CpuState Setup(const Owner *owner,uint16_t hp,uint16_t attack) {
   Write(x+0x2c,hp);Write(x+0x2a,attack);Write(x+0x2e,memory[source+9]);Write(x+0x32,0xbeef);
   CpuState cpu={.A=0xa5a5,.X=x,.Y=source,.S=0x1ef0,.P=CPU_P_V|CPU_P_C};cpu_p_to_mirrors(&cpu);return cpu;
 }
-static unsigned RunOwner(const Owner *owner) {
+static uint16_t ExpectedScale(unsigned value,unsigned percent) {
+  if(!value)return 0;
+  unsigned scaled=(value*percent+50)/100;
+  return scaled<1?1:scaled>255?255:(uint16_t)scaled;
+}
+static unsigned RunOwnerScaled(const Owner *owner,const uint8_t *pristine) {
   unsigned cases=0;
-  const unsigned source=owner->source[0];const uint16_t native_hp=memory[source+8],native_attack=memory[source+7];
+  const unsigned source=owner->source[0];
+  const uint16_t copied_hp=memory[source+8],copied_attack=memory[source+7];
+  const uint16_t native_hp=pristine?pristine[source-0x8000+8]:copied_hp;
+  const uint16_t native_attack=pristine?pristine[source-0x8000+7]:copied_attack;
+  const RandomizerStatScale scale=Randomizer_AppliedStatScale();
   for(unsigned health=0;health<3;++health)for(unsigned contact=0;contact<3;++contact)for(unsigned armor=0;armor<4;++armor) {
     ArRegionalActorStatsPolicy policy={{0}};uint16_t hp=native_hp,attack=native_attack;
     for(unsigned i=0;i<kArRegionalActorStat_Count;++i) {
@@ -103,10 +121,11 @@ static unsigned RunOwner(const Owner *owner) {
       policy.source[i]=d->field==kArRegionalActorStat_HP?health:contact;
       if(d->field==kArRegionalActorStat_HP)hp=d->value[health];else attack=d->value[contact];
     }
+    hp=ExpectedScale(hp,scale.hp_percent);attack=ExpectedScale(attack,scale.attack_percent);
     assert(ArRegionalActorStats_Resolve(&policy,&snapshot));skull=armor;
-    CpuState cpu=Setup(owner,native_hp,native_attack),expected=cpu;
+    CpuState cpu=Setup(owner,copied_hp,copied_attack),expected=cpu;
     const bool skull_changed=owner->actor==0x040c && armor;
-    const bool changed=hp!=native_hp || attack!=native_attack || skull_changed;
+    const bool changed=hp!=copied_hp || attack!=copied_attack || skull_changed;
     uint8_t wanted[65536];memcpy(wanted,memory,sizeof(memory));
     assert(ActRaiser_ActorStatsEntry(&cpu)==changed);
     if(changed) {
@@ -122,6 +141,7 @@ static unsigned RunOwner(const Owner *owner) {
   }
   return cases;
 }
+static unsigned RunOwner(const Owner *owner){return RunOwnerScaled(owner,NULL);}
 static void CheckSynthetic(void) {
   memset(memory,0,sizeof(memory));unsigned cases=0;
   for(unsigned o=0;o<sizeof(kOwners)/sizeof(kOwners[0]);++o) {
@@ -167,6 +187,7 @@ static CpuState Child(unsigned slot,bool projectile,unsigned inherited,unsigned 
 }
 static void CheckChildren(void) {
   unsigned cases=0;
+  const RandomizerStatScale scale=Randomizer_AppliedStatScale();
   const unsigned slots[]={0,19,71},inherited[]={0,2,0xff,0xffff},flags[]={0,CPU_P_C|CPU_P_V,CPU_P_Z,CPU_P_N};
   for(unsigned hp=0;hp<3;++hp)for(unsigned reward=0;reward<3;++reward)for(unsigned attack=0;attack<3;++attack) {
     ArRegionalActorStatsPolicy policy={{0}};
@@ -174,26 +195,28 @@ static void CheckChildren(void) {
     policy.source[kArRegionalActorStat_TanzraMinionReward]=reward;
     policy.source[kArRegionalActorStat_TanzraProjectileAttack]=attack;
     assert(ArRegionalActorStats_Resolve(&policy,&snapshot) && !snapshot.changed);
+    const uint16_t wanted_hp=ExpectedScale(hp==2?1:2,scale.hp_percent);
+    const uint16_t wanted_attack=ExpectedScale(3+attack,scale.attack_percent);
     uint16_t ignored=0xaaaa;assert(!ArRegionalActorStats_Apply(&snapshot,0x0800,2,3,&ignored,&ignored) && ignored==0xaaaa);
     for(unsigned slot=0;slot<3;++slot)for(unsigned n=0;n<4;++n)for(unsigned f=0;f<4;++f) {
       CpuState cpu=Child(slots[slot],false,inherited[n],flags[f]),expected=cpu;
       uint8_t wanted[65536];memcpy(wanted,memory,sizeof(wanted));
-      assert(ActRaiser_TanzraMinionHpEntry(&cpu)==(hp==2));
-      if(hp==2)assert(ActRaiser_TanzraMinionHp(&cpu)==RECOMP_RETURN_TAILCALL && target==0xfc99 && origin==0xfc96);
+      assert(ActRaiser_TanzraMinionHpEntry(&cpu)==(wanted_hp!=2));
+      if(wanted_hp!=2)assert(ActRaiser_TanzraMinionHp(&cpu)==RECOMP_RETURN_TAILCALL && target==0xfc99 && origin==0xfc96);
       else Write(cpu.X+0x2c,cpu.A); /* unchanged native STA */
       assert(ActRaiser_TanzraMinionRewardEntry(&cpu)==(reward==2));
       if(reward==2)assert(ActRaiser_TanzraMinionReward(&cpu)==RECOMP_RETURN_TAILCALL && target==0xfc9c && origin==0xfc99);
       else Write(cpu.X+0x2e,cpu.A);
-      ByteOrder_WriteLe16(wanted+cpu.X+0x2c,hp==2?1:2);
+      ByteOrder_WriteLe16(wanted+cpu.X+0x2c,wanted_hp);
       ByteOrder_WriteLe16(wanted+cpu.X+0x2e,reward==2?1:2);
       assert(!memcmp(wanted,memory,sizeof(wanted)) && !memcmp(&cpu,&expected,sizeof(cpu)));++cases;
       cpu=Child(slots[slot],true,inherited[n],flags[f]);expected=cpu;memcpy(wanted,memory,sizeof(wanted));
-      assert(ActRaiser_TanzraProjectileAttackEntry(&cpu)==(attack!=0));
-      if(attack)assert(ActRaiser_TanzraProjectileAttack(&cpu)==RECOMP_RETURN_TAILCALL && target==0xfd31 && origin==0xfd2e);
+      assert(ActRaiser_TanzraProjectileAttackEntry(&cpu)==(wanted_attack!=3));
+      if(wanted_attack!=3)assert(ActRaiser_TanzraProjectileAttack(&cpu)==RECOMP_RETURN_TAILCALL && target==0xfd31 && origin==0xfd2e);
       else {cpu.A=3;ActRaiserCpuHle_SetNegativeZero16(&cpu,cpu.A);}
-      expected.A=(uint16_t)(3+attack);ActRaiserCpuHle_SetNegativeZero16(&expected,expected.A);
+      expected.A=wanted_attack;ActRaiserCpuHle_SetNegativeZero16(&expected,expected.A);
       assert(!memcmp(wanted,memory,sizeof(wanted)) && !memcmp(&cpu,&expected,sizeof(cpu)));
-      Write(cpu.X+0x2a,cpu.A);ByteOrder_WriteLe16(wanted+cpu.X+0x2a,3+attack);
+      Write(cpu.X+0x2a,cpu.A);ByteOrder_WriteLe16(wanted+cpu.X+0x2a,wanted_attack);
       assert(!memcmp(wanted,memory,sizeof(wanted)));++cases;
     }
   }
@@ -302,6 +325,71 @@ static void CheckRoms(char **paths) {
   }
   printf("five-ROM stat bytes: 63 base fields and 3 child overrides x5 releases; %u actual-record adapter combinations passed\n",cases);
 }
+static void CheckDifficultyOrder(const Owner *owner) {
+  ArRegionalActorStatsPolicy policy;
+  assert(ArRegionalActorStats_Init(&policy,2) && ArRegionalActorStats_Resolve(&policy,&snapshot));
+  skull=cast_hold=0;
+  const unsigned source=owner->source[0];
+  for(unsigned mode=1;mode<=3;++mode) {
+    difficulty=(ArRegionalDifficultySnapshot){.spawn_hp=mode};
+    CpuState cpu=Setup(owner,memory[source+8],memory[source+7]);
+    if(ActRaiser_ActorStatsEntry(&cpu))assert(ActRaiser_ActorStats(&cpu)==RECOMP_RETURN_TAILCALL);
+    else {cpu.A=cpu_read16(&cpu,0,cpu.X+0x30);ActRaiserCpuHle_SetNegativeZero16(&cpu,cpu.A);}
+    const uint16_t hp=cpu_read16(&cpu,0,cpu.X+0x2c);
+    const bool eligible=!(cpu.A&0x8231);
+    const uint16_t wanted=eligible && mode==2 && hp==2?1:eligible && mode==3 && hp==1?2:hp;
+    assert(ActRaiser_DifficultySpawnEntry(&cpu));
+    assert(ActRaiser_DifficultySpawn(&cpu)==RECOMP_RETURN_TAILCALL && target==0x968f && origin==0x966f);
+    assert(cpu_read16(&cpu,0,cpu.X+0x2c)==wanted);
+  }
+  difficulty=(ArRegionalDifficultySnapshot){0};
+}
+static void CheckComposition(const char *path) {
+  static uint8_t rom[0x100000],pristine[0x100000];
+  if(path) {
+    FILE *file=fopen(path,"rb");assert(file && fread(rom,1,sizeof(rom),file)==sizeof(rom) && !fclose(file));
+  } else {
+    memcpy(rom,memory+0x8000,0x8000);
+    static const unsigned tables[]={0x96af,0xa8f6,0xb449,0xc11e,0xcd9b,0xd928,0xe722,0xf39a};
+    for(unsigned o=0;o<sizeof(kOwners)/sizeof(kOwners[0]);++o) {
+      const Owner *owner=&kOwners[o];
+      ByteOrder_WriteLe16(rom+(tables[owner->actor>>8]&0x7fff)+2*(owner->actor&255),owner->source[0]);
+    }
+  }
+  memcpy(pristine,rom,sizeof(rom));assert(Randomizer_Init(rom,sizeof(rom)));
+  const unsigned scales[][2]={{100,100},{200,100},{100,200},{200,200},{10,1000},{1000,10},{50,125},{125,50},{1000,1000}};
+  unsigned cases=0;
+  for(unsigned s=0;s<sizeof(scales)/sizeof(scales[0]);++s) {
+    g_settings=(Settings){.rando_enable=true,.rando_enemy_hp=scales[s][0],.rando_enemy_atk=scales[s][1]};
+    Randomizer_Apply();memcpy(memory+0x8000,rom,0x8000);
+    for(unsigned o=0;o<sizeof(kOwners)/sizeof(kOwners[0]);++o) {
+      const Owner *owner=&kOwners[o];const unsigned offset=owner->source[0]&0x7fff;
+      assert(rom[offset+8]==ExpectedScale(pristine[offset+8],scales[s][0]));
+      assert(rom[offset+7]==ExpectedScale(pristine[offset+7],scales[s][1]));
+      cases+=RunOwnerScaled(owner,pristine);
+      CheckDifficultyOrder(owner);
+    }
+    CheckChildren();
+    Randomizer_Apply();assert(!memcmp(memory+0x8000,rom,0x8000)); /* no compounding */
+  }
+  /* Neither edits that have not been applied nor a damaged/stale actor may
+   * silently supply a different base or percentage at the fresh-spawn seam. */
+  g_settings.rando_enable=false;
+  assert(Randomizer_AppliedStatScale().hp_percent==1000);
+  const Owner *owner=&kOwners[0];const unsigned at=owner->source[0];
+  ArRegionalActorStatsPolicy policy;
+  assert(ArRegionalActorStats_Init(&policy,2) && ArRegionalActorStats_Resolve(&policy,&snapshot));
+  CpuState cpu=Setup(owner,memory[at+8]+1,memory[at+7]);
+  assert(!ActRaiser_ActorStatsEntry(&cpu));
+  cpu=Setup(owner,memory[at+8],memory[at+7]+1);assert(!ActRaiser_ActorStatsEntry(&cpu));
+  Randomizer_Apply();assert(!memcmp(rom,pristine,sizeof(rom)));
+  assert(Randomizer_AppliedStatScale().hp_percent==100 && Randomizer_AppliedStatScale().attack_percent==100);
+  memcpy(memory+0x8000,rom,0x8000);skull=0;
+  for(unsigned o=0;o<sizeof(kOwners)/sizeof(kOwners[0]);++o)cases+=RunOwner(&kOwners[o]);
+  CheckChildren();
+  printf("regional/randomizer composition: %u full CPU/memory cases plus child, difficulty-order and reapply checks (%s)\n",cases,path?"US ROM":"synthetic");
+}
 int main(int argc,char **argv) {
-  assert(argc==1 || argc==6);CheckSynthetic();CheckChildren();CheckCastHold();if(argc==6)CheckRoms(argv+1);return 0;
+  assert(argc==1 || argc==6);CheckSynthetic();CheckChildren();CheckCastHold();if(argc==6)CheckRoms(argv+1);
+  CheckComposition(argc==6?argv[1]:NULL);return 0;
 }
