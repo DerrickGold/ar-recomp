@@ -1,9 +1,9 @@
 #include "actraiser/actraiser_stage_terrain.h"
 #include "actraiser/actraiser_stage_placements.h"
 #include "action/action_room_terrain.h"
-#include "regional/regional_terrain.h"
+#include "regional/action/regional_terrain.h"
 #include "byte_order.h"
-#include "actraiser/actraiser_regional_media.h"
+#include "actraiser/regional/actraiser_regional_media.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>

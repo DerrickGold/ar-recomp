@@ -1,5 +1,5 @@
 #include "actraiser_sim_ai_runtime.h"
-#include "actraiser_regional_runtime.h"
+#include "actraiser/regional/actraiser_regional_runtime.h"
 #include "actraiser_hle_fatal.h"
 static bool Entry(CpuState *cpu,ActRaiserSimAiSeam seam) {
   unsigned town,slot;uint16_t snapshot,value;

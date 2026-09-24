@@ -1,5 +1,5 @@
 #include "actraiser/actraiser_sources.h"
-#include "regional/regional_sources.h"
+#include "regional/towns/regional_sources.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>

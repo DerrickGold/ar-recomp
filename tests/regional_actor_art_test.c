@@ -1,5 +1,5 @@
-#include "regional/regional_actor_art.h"
-#include "regional/regional_actor_art_residency.h"
+#include "regional/media/regional_actor_art.h"
+#include "regional/media/regional_actor_art_residency.h"
 
 #include <assert.h>
 #include <stdio.h>

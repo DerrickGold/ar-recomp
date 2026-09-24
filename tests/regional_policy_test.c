@@ -1,6 +1,7 @@
 #include "regional/regional_costs.h"
-#include "regional/regional_stock.h"
-#include "settings_overlay_regions.h"
+#include "regional/towns/regional_stock.h"
+#include "settings_overlay/regional/regional_ui.h"
+#include "settings_overlay/regional/regional_menu.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -108,54 +109,6 @@ static void CheckPolicies(void) {
   CHECK(!ArRegionalCosts_GroupSource(&baseline, kArRegionalCostGroup_Scrolls, NULL));
 }
 
-static void CheckDescriptions(void) {
-  ArRegionalCostPolicy policy;
-  for (int locale = 0; locale < kArUiLocale_Count; ++locale) {
-    for (int source = 0; source < kArRegionalSource_Count; ++source) {
-      CHECK(ArRegionalCosts_Init(&policy, (ArRegionalSource)source));
-      for (int group = 0; group < kArRegionalCostGroup_Count; ++group) {
-        char text[2048] = "unchanged";
-        CHECK(SettingsOverlayRegions_CostDescription((ArUiLocale)locale, &policy,
-              (ArRegionalCostGroup)group, text, sizeof(text)));
-        CHECK(text[0] && !strchr(text, '{') && !strchr(text, '}'));
-        SettingsOverlayRegionBadge badge;
-        CHECK(SettingsOverlayRegions_CostBadge(&policy, (ArRegionalCostGroup)group, &badge));
-        CHECK(strstr(text, SettingsOverlayRegions_BadgeLabel((ArUiLocale)locale, badge)));
-        for (unsigned i = group ? 4 : 0; i < (group ? 9u : 4u); ++i) {
-          char number[8];
-          snprintf(number, sizeof(number), "%u", kExpected[source][i]);
-          CHECK(strstr(text, number));
-        }
-        strcpy(text, "unchanged");
-        CHECK(!SettingsOverlayRegions_CostDescription((ArUiLocale)locale, &policy,
-              (ArRegionalCostGroup)group, text, 4));
-        CHECK(!strcmp(text, "unchanged"));
-      }
-    }
-  }
-  CHECK(ArRegionalCosts_Init(&policy, kArRegionalSource_US));
-  CHECK(ArRegionalCosts_SetRule(&policy, kArRegionalCost_Light, kArRegionalSource_Japan));
-  SettingsOverlayRegionBadge badge;
-  CHECK(SettingsOverlayRegions_CostBadge(&policy, kArRegionalCostGroup_Scrolls, &badge));
-  CHECK(badge == kOverlayRegionBadge_Mixed);
-  char text[2048];
-  CHECK(SettingsOverlayRegions_CostDescription(kArUiLocale_English, &policy,
-        kArRegionalCostGroup_Scrolls, text, sizeof(text)));
-  CHECK(strstr(text, "Custom scroll costs: Fire 1, Stardust 1, Aura 1, Light 4."));
-  CHECK(strstr(text, "inventory and controls stay unchanged"));
-  CHECK(strstr(text, "never a cast in progress"));
-  CHECK(SettingsOverlayRegions_CostBadge(&policy, kArRegionalCostGroup_Miracles, &badge));
-  CHECK(badge == kOverlayRegionBadge_US);
-  /* Mixed provenance with identical prices is not a Custom gameplay rule. */
-  CHECK(ArRegionalCosts_SetRule(&policy, kArRegionalCost_Rain, kArRegionalSource_Europe));
-  CHECK(SettingsOverlayRegions_CostBadge(&policy, kArRegionalCostGroup_Miracles, &badge));
-  CHECK(badge == kOverlayRegionBadge_US);
-  CHECK(!SettingsOverlayRegions_CostBadge(NULL, kArRegionalCostGroup_Miracles, &badge));
-  CHECK(badge == kOverlayRegionBadge_US);
-  CHECK(!SettingsOverlayRegions_CostDescription(kArUiLocale_English, &policy,
-        kArRegionalCostGroup_Count, text, sizeof(text)));
-}
-
 static void CheckStockEstimate(void) {
   const uint32_t cases[][5] = {
     {100, 200, 250, 65535, 150}, {230, 200, 250, 65535, 280},
@@ -187,115 +140,126 @@ static void CheckStockEstimate(void) {
   CHECK(sentinel == 123);
 }
 
-static void CheckMenuAdapter(void) {
-  ActRaiserRegionalRulesView view = {0};
-  for (int group = 0; group < kActRaiserRegionalSetting_Count; ++group) {
-    CHECK(SettingsOverlayRegions_RowKey((ActRaiserRegionalSettingGroup)group)[0]);
-    for (int source = 0; source < kArRegionalSource_Count; ++source) {
-      CHECK(ArRegionalCosts_Init(&view.requested.costs, (ArRegionalSource)source));
-      CHECK(ArRegionalTimers_Init(&view.requested.timers, (ArRegionalSource)source));
-      view.requested.retry_score = (ArRegionalSource)source;
-      view.requested.town_wait = (ArRegionalSource)source;
-      view.requested.fishing = (ArRegionalSource)source;
-      CHECK(ArRegionalDevelopment_Init(&view.requested.development,(ArRegionalSource)source));
-      CHECK(ArRegionalRecovery_Init(&view.requested.recovery, (ArRegionalSource)source));
-      CHECK(ArRegionalQuake_Init(&view.requested.quake, (ArRegionalSource)source));
-      view.requested.score_page = (ArRegionalSource)source;
-      view.requested.lives_display = (ArRegionalSource)source;
-      CHECK(ArRegionalSources_Init(&view.requested.sources,(ArRegionalSource)source));
-      view.requested.skull_wait=(ArRegionalSource)source;
-      CHECK(ArRegionalStory_Init(&view.requested.story,(ArRegionalSource)source));
-      CHECK(ArRegionalTownStatus_Init(&view.requested.town_status,(ArRegionalSource)source));
-      view.requested.level_goals=(ArRegionalSource)source;
-      view.requested.construction=(ArRegionalSource)source;
-      view.requested.arrival=(ArRegionalSource)source;
-      view.requested.statue_volley=(ArRegionalSource)source;
-      CHECK(ArRegionalSupport_Init(&view.requested.support,(ArRegionalSource)source));
-      CHECK(ArRegionalSimCombat_Init(&view.requested.sim_combat,(ArRegionalSource)source));
-      CHECK(ArRegionalSimAi_Init(&view.requested.sim_ai,(ArRegionalSource)source));
-      CHECK(ArRegionalActionMotion_Init(&view.requested.action_motion,(ArRegionalSource)source));
-      CHECK(ArRegionalEmitter_Init(&view.requested.emitters,(ArRegionalSource)source));
-      CHECK(ArRegionalBoss_Init(&view.requested.bosses,(ArRegionalSource)source));
-      CHECK(ArRegionalCollision_Init(&view.requested.collision,(ArRegionalSource)source));
-      CHECK(ArRegionalPlatformSkull_Init(&view.requested.platform_skull,(ArRegionalSource)source));
-      CHECK(ArRegionalActorStats_Init(&view.requested.actor_stats,(ArRegionalSource)source));
-      CHECK(ArRegionalCastHold_Init(&view.requested.cast_hold,(ArRegionalSource)source));
-      CHECK(ArRegionalFire_Init(&view.requested.fire_enemy,(ArRegionalSource)source));
-      CHECK(ArRegionalDifficulty_Init(&view.requested.difficulty,(ArRegionalSource)source,kArRegionalDifficulty_Normal));
-      view.requested.score_lives=(ArRegionalSource)source;
-      view.requested.spell_inventory=(ArRegionalSource)source;
-      view.requested.hazards=(ArRegionalSource)source;
-      view.requested.terrain=(ArRegionalSource)source;
-      for(unsigned i=0;i<kArRegionalActorArtwork_Count;++i)
-        view.requested.actor_artwork.source[i]=(ArRegionalSource)source;
-      view.requested.music=(ArRegionalSource)source;
-      view.requested.mosaic=(ArRegionalSource)source;
-      view.requested.poses=(ArRegionalPosePolicy){{source,source}};
-      view.requested.sequences=(ArRegionalSequencePolicy){{source,source}};
-      for(unsigned art=0;art<kArRegionalArtwork_Count;++art)
-        view.requested.artwork.source[art]=(ArRegionalSource)source;
-      view.requested.placements=(ArRegionalPlacementPolicy){source,source};
-      CHECK(ArRegionalActionStart_Init(&view.requested.action_start,(ArRegionalSource)source));
-      CHECK(ArRegionalMode_Init(&view.requested.mode_entry,(ArRegionalSource)source));
-      view.requested.menu_return = (ArRegionalSource)source;
-      view.requested.speed_range = (ArRegionalSource)source;
-      view.requested.magic_gesture = (ArRegionalSource)source;
-      view.requested.lair_seeds = (ArRegionalSource)source;
-      view.requested.lair_reloads = (ArRegionalSource)source;
-      view.lair_reload_ready = true;
-      view.requested.house_credit = (ArRegionalSource)source;
-      CHECK(ArRegionalScore_Init(&view.requested.score_feedback,(ArRegionalSource)source));
-      view.lair_history_ready = true;
-      ArRegionalSource next;
-      if(group==kActRaiserRegionalSetting_DifficultyLevel) {
-        CHECK(!SettingsOverlayRegions_NextSource(&view,(ActRaiserRegionalSettingGroup)group,1,&next));
-      } else {
-        CHECK(SettingsOverlayRegions_NextSource(&view, (ActRaiserRegionalSettingGroup)group, 1, &next));
-        CHECK(next == (ArRegionalSource)((source + 1) % 3));
-        CHECK(SettingsOverlayRegions_NextSource(&view, (ActRaiserRegionalSettingGroup)group, -1, &next));
-        CHECK(next == (ArRegionalSource)((source + 2) % 3));
+static void CheckProfileMenu(void) {
+  ActRaiserRegionalRulesView view={0};
+  CHECK(!OverlayRegionMenu_Count(kOverlayRegionPage_Count));
+  CHECK(!OverlayRegionMenu_Row(kOverlayRegionPage_Presets,2));
+  unsigned seen[kActRaiserRegionalSetting_Count]={0}, presets=0, difficulty=0;
+  for(unsigned page=0;page<kOverlayRegionPage_Count;++page) {
+    CHECK(OverlayRegionMenu_Count(page)>0 && OverlayRegionMenu_Count(page)<32);
+    for(unsigned i=0;i<OverlayRegionMenu_Count(page);++i) {
+      const OverlayRegionRow *row=OverlayRegionMenu_Row(page,i);
+      char catalog_key[128];
+      snprintf(catalog_key, sizeof(catalog_key), "overlay.region.menu.%s.label", row->key);
+      CHECK(row->label_key && !strcmp(catalog_key, row->label_key));
+      snprintf(catalog_key, sizeof(catalog_key), "overlay.region.menu.%s.help", row->key);
+      CHECK(row->help_key && !strcmp(catalog_key, row->help_key));
+      if(row->kind==kOverlayRegionRow_Preset) {
+        ++presets;
+        char key[96];
+        snprintf(key, sizeof(key), "regional_profile_%s", ArRegionalProfiles_Key(row->group));
+        CHECK(!strcmp(key, row->key)); // Screen labels and semantic IDs must agree.
       }
-      for (int locale = 0; locale < kArUiLocale_Count; ++locale) {
-        char text[2048];
-        CHECK(SettingsOverlayRegions_ViewDescription((ArUiLocale)locale, &view,
-            (ActRaiserRegionalSettingGroup)group, text, sizeof(text)));
-        CHECK(text[0] && !strchr(text, '{') && !strchr(text, '}'));
-        if (group == kActRaiserRegionalSetting_RoomTimes) {
-          CHECK(strstr(text, source == kArRegionalSource_Japan ? "200/100" : "300/200"));
-          CHECK(strstr(text, source == kArRegionalSource_Japan ? "100/100" : "200/200"));
+      if(row->kind==kOverlayRegionRow_Setting) ++seen[row->setting];
+      if(row->kind==kOverlayRegionRow_Difficulty) ++difficulty;
+      for(unsigned source=0;source<3;++source) {
+        CHECK(ArRegionalProfiles_Expand(&view.requested,kArRegionalProfile_Gameplay,source,&view.requested));
+        CHECK(ArRegionalProfiles_Expand(&view.requested,kArRegionalProfile_Presentation,source,&view.requested));
+        CHECK(ArRegionalProfiles_Describe(&view.requested,view.profiles));
+        CHECK(ArRegionalProfiles_Describe(&view.effective,view.active_profiles));
+        CHECK(ArRegionalProfiles_Changes(&view.requested,&view.effective,&view.pending_groups));
+        ActRaiserRegionalSettings_DescribeChoices(&view.requested,&view.effective,view.choices);
+        for(unsigned locale=0;locale<kArUiLocale_Count;++locale) {
+          const char *label=OverlayRegionMenu_Label(locale,row);
+          CHECK(label && label[0] && !strstr(label,"overlay.region."));
+          char text[2048];SettingsOverlayRegionBadge badge;
+          CHECK(OverlayRegionMenu_Value(locale,&view,row,false,text,sizeof(text),&badge));
+          if(row->kind!=kOverlayRegionRow_Difficulty) {
+            CHECK(badge==source);
+            CHECK(OverlayRegionMenu_RowSource(&view,row,false)==source);
+            CHECK(OverlayRegionMenu_RowSource(&view,row,true)==0);
+          }
+          CHECK(OverlayRegionMenu_Description(locale,&view,row,text,sizeof(text)));
+          CHECK(text[0] && !strstr(text,"overlay.region.") && !strchr(text,'{'));
+          CHECK(!OverlayRegionMenu_Description(locale,&view,row,text,2));
         }
-        if (group == kActRaiserRegionalSetting_TownWait)
-          CHECK(strstr(text, source == kArRegionalSource_Japan ? "150" : "1"));
-        if (group == kActRaiserRegionalSetting_Fishing)
-          CHECK(strstr(text, source == kArRegionalSource_Japan ? "128" : "255"));
-        if(group==kActRaiserRegionalSetting_Development)
-          CHECK(strstr(text,source==kArRegionalSource_Japan?"480":"720"));
       }
-    }
-    for (int locale = 0; locale < kArUiLocale_Count; ++locale) {
-      CHECK(SettingsOverlayRegions_RowLabel((ArUiLocale)locale, (ActRaiserRegionalSettingGroup)group)[0]);
-      for (int result = kActRaiserRegionalEdit_Invalid; result <= kActRaiserRegionalEdit_Applied; ++result)
-        CHECK(SettingsOverlayRegions_EditStatus((ArUiLocale)locale, (ActRaiserRegionalEditResult)result)[0]);
     }
   }
-  ArRegionalSource next;
-  CHECK(!SettingsOverlayRegions_NextSource(&view, kActRaiserRegionalSetting_Count, 1, &next));
-  CHECK(!SettingsOverlayRegions_NextSource(NULL, kActRaiserRegionalSetting_Miracles, 1, &next));
-  CHECK(!SettingsOverlayRegions_NextSource(&view, kActRaiserRegionalSetting_Miracles, 1, NULL));
-  CHECK(!SettingsOverlayRegions_RowKey(kActRaiserRegionalSetting_Count)[0]);
-  CHECK(ArRegionalCosts_SetRule(&view.requested.costs, kArRegionalCost_Light, kArRegionalSource_Japan));
-  CHECK(SettingsOverlayRegions_NextSource(&view, kActRaiserRegionalSetting_Scrolls, 1, &next));
-  CHECK(next == kArRegionalSource_US);
-  CHECK(ArRegionalTimers_SetRule(&view.requested.timers, kArRegionalTimer_MarahnaBoss, kArRegionalSource_Japan));
-  CHECK(SettingsOverlayRegions_NextSource(&view, kActRaiserRegionalSetting_RoomTimes, -1, &next));
-  CHECK(next == kArRegionalSource_Europe);
+  CHECK(presets==2 && difficulty==1);
+  for(unsigned i=0;i<kActRaiserRegionalSetting_Count;++i) {
+    const bool internal=i==kActRaiserRegionalSetting_DifficultyRules || i==kActRaiserRegionalSetting_DifficultyLevel ||
+        i==kActRaiserRegionalSetting_LevelGoals || i==kActRaiserRegionalSetting_Story ||
+        i==kActRaiserRegionalSetting_ActionStart || i==kActRaiserRegionalSetting_Recovery;
+    CHECK(seen[i]==(internal?0:1)); // Every narrow feature is reachable, exactly once.
+  }
+  const OverlayRegionRow *art=OverlayRegionMenu_Row(kOverlayRegionPage_Presentation,1);
+  char text[2048];SettingsOverlayRegionBadge badge;
+  // A valid European donor supplies item art without requiring JP actor art.
+  view.artwork_available=(1u<<kArRegionalArtwork_ActionItems);
+  CHECK(OverlayRegionMenu_Value(0,&view,art,false,text,sizeof(text),&badge));
+  CHECK(badge==kOverlayRegionBadge_Europe && !strstr(text,"partial"));
+  CHECK(ArRegionalProfiles_Expand(&view.requested,kArRegionalProfile_Presentation,1,&view.requested));
+  CHECK(ArRegionalProfiles_Describe(&view.requested,view.profiles));
+  ActRaiserRegionalSettings_DescribeChoices(&view.requested,&view.effective,view.choices);
+  CHECK(OverlayRegionMenu_Value(0,&view,art,false,text,sizeof(text),&badge));
+  CHECK(badge==kOverlayRegionBadge_Japan && !strstr(text,"partial"));
+  CHECK(ArRegionalProfiles_Changes(&view.requested, &view.effective, &view.pending_groups));
+  for (unsigned locale = 0; locale < kArUiLocale_Count; ++locale) {
+    CHECK(view.choices[art->setting].pending);
+    CHECK(OverlayRegionMenu_Value(locale, &view, art, false, text, sizeof(text), &badge));
+    CHECK(strchr(text, '*')); // Missing donor and queued activation coexist.
+    CHECK(OverlayRegionMenu_Description(locale, &view, art, text, sizeof(text)));
+    CHECK(!strncmp(text, ArUiCatalog_Text(locale, "overlay.region.menu.media_missing", NULL),
+                   strlen(ArUiCatalog_Text(locale, "overlay.region.menu.media_missing", NULL))));
+    CHECK(strstr(text, ArUiCatalog_Text(locale, "overlay.region.menu.activation_pending", NULL)));
+    CHECK(OverlayRegionMenu_Value(locale, &view, art, true, text, sizeof(text), &badge));
+    CHECK(!strchr(text, '*')); // The active readout is never itself pending.
+  }
+  view.artwork_available=63;view.actor_artwork_available=true;view.sequences_available=3;
+  CHECK(OverlayRegionMenu_Value(0,&view,art,false,text,sizeof(text),&badge) && !strstr(text,"partial"));
+  view.population_pending=view.pending_profile=true;
+  view.pending_profile_group=kArRegionalProfile_Gameplay;view.pending_population=1;
+  CHECK(OverlayRegionMenu_Source(&view,kArRegionalProfile_Gameplay,false)==1);
+  CHECK(OverlayRegionMenu_Source(&view,kArRegionalProfile_Combat,false)==1);
+  CHECK(OverlayRegionMenu_Source(&view,kArRegionalProfile_Combat,true)==0);
+  CHECK(OverlayRegionMenu_Description(0,&view,OverlayRegionMenu_Row(kOverlayRegionPage_Presets,0),text,sizeof(text)));
+  CHECK(strstr(text,"no part") && strstr(text,"confirmation"));
+  CHECK(ArRegionalDifficulty_Select(kArRegionalDifficultyChoice_Expert, &view.requested.difficulty));
+  CHECK(ActRaiserRegionalSettings_DifficultyChoice(&view, false) == kArRegionalDifficultyChoice_Original);
+  view.pending_population = kArRegionalSource_Europe;
+  CHECK(ActRaiserRegionalSettings_DifficultyChoice(&view, false) == kArRegionalDifficultyChoice_Normal);
+  CHECK(ActRaiserRegionalSettings_DifficultyChoice(&view, true) == kArRegionalDifficultyChoice_Original);
+  view.population_pending = view.pending_profile = false;
+  // Difficulty changes pending EU layout filtering, not authored US/JP counts.
+  view.requested.placements.enemies = view.effective.placements.enemies = kArRegionalSource_Europe;
+  ActRaiserRegionalSettings_DescribeChoices(&view.requested, &view.effective, view.choices);
+  CHECK(view.choices[kActRaiserRegionalSetting_EnemyPlacements].pending);
+  view.requested.placements.enemies = view.effective.placements.enemies = kArRegionalSource_US;
+  ActRaiserRegionalSettings_DescribeChoices(&view.requested, &view.effective, view.choices);
+  CHECK(!view.choices[kActRaiserRegionalSetting_EnemyPlacements].pending);
+  // Difficulty selected on the US baseline must be real, not a dormant level.
+  const OverlayRegionRow *difficulty_row=OverlayRegionMenu_Row(kOverlayRegionPage_Action,0);
+  for(unsigned choice=0;choice<kArRegionalDifficultyChoice_Count;++choice) {
+    CHECK(ArRegionalDifficulty_Select(choice,&view.requested.difficulty));
+    CHECK(ArRegionalDifficulty_Choice(&view.requested.difficulty)==choice);
+    ArRegionalDifficultySnapshot snapshot;
+    CHECK(ArRegionalDifficulty_Resolve(&view.requested.difficulty,&snapshot));
+    CHECK(snapshot.spawn_hp==(choice==0?0:choice==1?2:choice==2?1:3));
+    CHECK(OverlayRegionMenu_Value(0,&view,difficulty_row,false,text,sizeof(text),&badge));
+    CHECK(strstr(text,choice?"EU":"Original"));
+    ArRegionalRules copy;
+    CHECK(ArRegionalProfiles_Expand(&view.requested,kArRegionalProfile_Stage,1,&copy));
+    CHECK(!memcmp(&copy.difficulty,&view.requested.difficulty,sizeof(copy.difficulty)));
+    CHECK(ArRegionalProfiles_Expand(&view.requested,kArRegionalProfile_Combat,2,&copy));
+    CHECK(!memcmp(&copy.difficulty,&view.requested.difficulty,sizeof(copy.difficulty)));
+  }
 }
 
 int main(void) {
   CheckPolicies();
-  CheckDescriptions();
   CheckStockEstimate();
-  CheckMenuAdapter();
+  CheckProfileMenu();
   if (failures) fprintf(stderr, "%d regional policy failures\n", failures);
   else puts("regional policy: 19683 cost mixes, four UI languages, stock bounds passed");
   return failures ? 1 : 0;

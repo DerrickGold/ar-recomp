@@ -1,7 +1,7 @@
 #ifndef ACTRAISER_STAGE_PLACEMENTS_H
 #define ACTRAISER_STAGE_PLACEMENTS_H
 #include "snesrecomp/game/cpu.h"
-#include "regional/regional_placements.h"
+#include "regional/action/regional_placements.h"
 
 /* Game-thread, non-yielding room preparation. Captures numerical programs and
  * randomization before actor creation; failure leaves the previous snapshot

@@ -1,4 +1,4 @@
-#include "regional/regional_campaign.h"
+#include "regional/session/regional_campaign.h"
 #include "host/campaign_identity.h"
 #include "snesrecomp/support/utf8_fs.h"
 

@@ -1,4 +1,4 @@
-#include "regional/regional_fingerprint.h"
+#include "regional/session/regional_fingerprint.h"
 #include "snesrecomp/support/digest.h"
 #include <stdio.h>
 #include <stdlib.h>

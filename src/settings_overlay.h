@@ -9,7 +9,7 @@
 #include "render/render_device.h"
 #include "localization/text_backend.h"
 #include "settings_overlay_render.h"
-#include "settings_overlay_regions.h"
+#include "settings_overlay/regional/regional_ui.h"
 
 /* Game-owned campaign settings, injected as copied views and guarded edits.
  * Never persisted through the global settings.ini registry. */

@@ -45,8 +45,8 @@
 #include "hd_replacement_host.h"
 #include "host/font_resources.h"
 #include "host/regional_media_files.h"
-#include "actraiser/actraiser_regional_media.h"
-#include "actraiser/actraiser_actor_art.h"
+#include "actraiser/regional/actraiser_regional_media.h"
+#include "actraiser/regional/actraiser_actor_art.h"
 #include "host/host_audio.h"
 #include "host/host_display.h"
 #include "host/host_display_pacing.h"
@@ -78,7 +78,7 @@
 #include "runtime_settings.h"
 #include "save_system.h"
 #include "host/campaign_identity.h"
-#include "actraiser/actraiser_regional_runtime.h"
+#include "actraiser/regional/actraiser_regional_runtime.h"
 #include "scheduled_settings.h"
 #include "session_fatal.h"
 #include "session_recovery.h"
@@ -919,7 +919,7 @@ static bool RegionalContinuePrompt(void *context, ActRaiserRegionalContinueNotic
 }
 
 static bool RegionalPopulationPrompt(void *context,ActRaiserRegionalPopulationNotice notice,
-    ArRegionalSource source,const uint16_t removed[6]) {
+    ArRegionalSource source,bool gameplay_profile,const uint16_t removed[6]) {
   const AppBoot *app=context;
   if(!app || app->headless)return false;
   bool opened;
@@ -927,6 +927,12 @@ static bool RegionalPopulationPrompt(void *context,ActRaiserRegionalPopulationNo
     char body[2048];
     if(!SettingsOverlayRegions_PopulationConfirmation((ArUiLocale)g_settings.interface_language,
         source,removed,body,sizeof(body)))return false;
+    if(gameplay_profile) {
+      const size_t used=strlen(body);
+      const char *scope=ArUiCatalog_Text((ArUiLocale)g_settings.interface_language,"overlay.region.menu.confirm_gameplay",NULL);
+      const int written=snprintf(body+used,sizeof(body)-used,"\n\n%s",scope);
+      if(written<0 || (size_t)written>=sizeof(body)-used)return false;
+    }
     opened=SettingsOverlay_BeginDecisionText("overlay.region.population_label",body,
         "overlay.region.population_accept");
   } else {
@@ -1705,8 +1711,11 @@ static void AppBoot_InstallSubsystems(AppBoot *app) {
       HostDevTools_FormatInspectorInfo);
   static const SettingsOverlayRegionalHooks kRegionalHooks = {
     .copy = ActRaiserRegional_CopyRulesView,
-    .request = ActRaiserRegional_RequestRules,
-    .difficulty = ActRaiserRegional_RequestDifficulty,
+    .request = ActRaiserRegional_RequestProfile,
+    .difficulty = ActRaiserRegional_RequestDifficultyChoice,
+    .setting = ActRaiserRegional_RequestRules,
+    .preview_setting = ActRaiserRegional_PreviewRules,
+    .preview = ActRaiserRegional_PreviewProfile,
   };
   SettingsOverlay_SetRegionalHooks(&kRegionalHooks);
   /* The layer editor (Settings > Layers, developer-only) edits the override

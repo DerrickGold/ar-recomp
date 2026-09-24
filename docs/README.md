@@ -7,8 +7,8 @@ start with the [project README](https://github.com/DerrickGold/ar-recomp#quick-s
 ## Playing and customizing
 
 - [Manual](manual.md) — controls, settings, saves, and troubleshooting.
-- [Regional settings](regional-settings.md) — per-campaign spell and miracle
-  pricing, activation boundaries, and saving your choices.
+- [Regional settings](regional-settings.md) — per-campaign gameplay and
+  presentation presets, customization groups, safe switching and saving.
 - [Regional differences](regional-differences.md) — a plain-English comparison
   of the releases, their mechanics, and what is still being investigated.
 - [Unused content and oddities](unused-content.md) — debug facilities,
@@ -28,6 +28,9 @@ start with the [project README](https://github.com/DerrickGold/ar-recomp#quick-s
   reporting a slow scene.
 
 ## Modding references
+
+- [Regional architecture](regional-architecture.md) — ownership, activation,
+  save compatibility and donor-media boundaries.
 
 The game-data references describe the US ROM unless stated otherwise. Entries
 marked uncertain should not be treated as verified offsets or behavior.

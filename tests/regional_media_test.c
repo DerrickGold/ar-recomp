@@ -1,6 +1,6 @@
-#include "regional/regional_media.h"
+#include "regional/media/regional_media.h"
 #include "host/regional_media_files.h"
-#include "actraiser/actraiser_regional_media.h"
+#include "actraiser/regional/actraiser_regional_media.h"
 
 #include <assert.h>
 #include <stdio.h>

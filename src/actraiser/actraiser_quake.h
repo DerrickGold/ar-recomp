@@ -1,7 +1,7 @@
 #ifndef ACTRAISER_QUAKE_H
 #define ACTRAISER_QUAKE_H
 
-#include "regional/regional_quake.h"
+#include "regional/towns/regional_quake.h"
 #include "snesrecomp/game/cpu.h"
 
 bool ActRaiserQuake_SelectorEntry(const CpuState *cpu);

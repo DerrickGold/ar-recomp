@@ -1,5 +1,5 @@
 #include "action_room_terrain.h"
-#include "regional/regional_terrain.h"
+#include "regional/action/regional_terrain.h"
 
 static uint8_t Read(void *context, ArRegionalTerrainPlane plane, size_t offset) {
   const ActionRoomSceneBg *bg = context;

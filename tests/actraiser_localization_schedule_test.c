@@ -13,7 +13,7 @@
 #include "localization/language_contract.h"
 #include "save_system.h"
 #include "settings.h"
-#include "actraiser/actraiser_regional_runtime.h"
+#include "actraiser/regional/actraiser_regional_runtime.h"
 
 static ArRegionalSource s_price_source = kArRegionalSource_US;
 bool ActRaiserRegional_CopyPrices(ArRegionalCostSnapshot *prices) {

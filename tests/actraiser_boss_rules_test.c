@@ -1,6 +1,6 @@
 #include "actraiser/actraiser_boss_rules.h"
 #include "actraiser/actraiser_cpu_hle_internal.h"
-#include "regional/regional_boss_rules.h"
+#include "regional/action/regional_boss_rules.h"
 #include "quintet_lzss.h"
 #include "byte_order.h"
 #include <assert.h>

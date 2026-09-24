@@ -3,7 +3,8 @@
 #include "snesrecomp/game/cpu.h"
 bool ActRaiser_PlantTendrilEntry(CpuState *cpu);
 RecompReturn ActRaiser_PlantTendril(CpuState *cpu);
-/* Shared native animation-row acquisition seam. Independent policies change
+/* US $00:8E2F, shared native animation-row acquisition seam. Regional motion
+ * and pose policies are inputs, not owners of this native decoder. They change
  * fresh actor outputs or select an existing pose through the native reader;
  * never elapsed phases or native CPU/return ownership. Northwall's four
  * derived impact compositions occupy validated, room-owned workspace slots;

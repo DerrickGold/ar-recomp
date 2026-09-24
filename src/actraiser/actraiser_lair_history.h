@@ -1,7 +1,7 @@
 #ifndef ACTRAISER_LAIR_HISTORY_H
 #define ACTRAISER_LAIR_HISTORY_H
 
-#include "regional/regional_lair_history.h"
+#include "regional/towns/regional_lair_history.h"
 #include "snesrecomp/game/cpu.h"
 #include "save_system.h"
 

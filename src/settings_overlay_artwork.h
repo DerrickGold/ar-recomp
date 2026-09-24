@@ -24,6 +24,7 @@ typedef enum SettingsOverlayIcon {
   kOverlayIcon_Manual,
   kOverlayIcon_System,
   kOverlayIcon_Localization,
+  kOverlayIcon_Regional,
   kOverlayIcon_Randomizer,
   kOverlayIcon_Layers,
   kOverlayIcon_Count,

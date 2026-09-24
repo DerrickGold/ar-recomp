@@ -7,7 +7,7 @@
 
 #include "action/action_bg_plan.h"
 #include "action/action_bg_world.h"
-#include "regional/regional_media.h"
+#include "regional/media/regional_media.h"
 #include "snesrecomp/runner.h"
 
 struct DioramaRoomOverride;

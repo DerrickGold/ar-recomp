@@ -91,7 +91,11 @@ func TestGeneratedCAndExplicitOverlayKeys(t *testing.T) {
 	for _, entry := range entries {
 		keys[entry.Key] = true
 	}
-	for _, file := range []string{"settings_overlay.c", "settings_overlay_localization.c", "settings_overlay_regions.c", "settings_overlay_layers_localization.c", "manual/manual_caption.c"} {
+	for _, file := range []string{
+		"settings_overlay.c", "settings_overlay_localization.c", "settings_overlay_layers_localization.c",
+		"settings_overlay/regional/regional_ui.c", "settings_overlay/regional/regional_menu.c",
+		"manual/manual_caption.c",
+	} {
 		data, err := os.ReadFile(filepath.Join(root, "src", file))
 		if err != nil {
 			t.Fatal(err)

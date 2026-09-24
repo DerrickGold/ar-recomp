@@ -1,7 +1,7 @@
 #ifndef ACTRAISER_TOWN_STATUS_H
 #define ACTRAISER_TOWN_STATUS_H
 
-#include "regional/regional_town_status.h"
+#include "regional/towns/regional_town_status.h"
 #include "snesrecomp/game/cpu.h"
 
 /* Prefix adapters for the US ABI. A captured transaction owns selection;

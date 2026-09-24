@@ -1,7 +1,7 @@
 #ifndef AR_HOST_REGIONAL_MEDIA_FILES_H
 #define AR_HOST_REGIONAL_MEDIA_FILES_H
 
-#include "regional/regional_media.h"
+#include "regional/media/regional_media.h"
 
 typedef struct ArHostRegionalMediaFiles {
   void *implementation;

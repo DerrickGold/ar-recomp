@@ -32,11 +32,16 @@ also contains three small town-art resources, a matched title-background bundle,
 and the two sequences.
 
 Japanese extraction also includes the action actor drawing resource described
-below, used by the **Enemy and boss artwork** setting.
+below, included in the **Regional artwork** group.
+
+Open **Settings → Regions → Artwork & music** for **Regional artwork** and
+**Regional music**. **Presets → Presentation** sets both together. The sections below
+describe their individual resources, not extra settings rows. Missing resources
+show **partial**; they do not change a requested Japanese preset to Custom.
 
 ## Install Japanese enemy artwork
 
-After extracting the Japanese donor, select **Enemy and boss artwork → Japan**
+After extracting the Japanese donor, select **Regional artwork → Japan**
 in Regional rules. US and Europe use Western artwork. A change takes effect
 at the next stage entry, not between rooms: some boss rooms reload only part
 of the sprite set and must keep the stage's matching graphics and palette.
@@ -52,7 +57,7 @@ builder reports missing resources.
 
 Create `game-assets/regions` in the game's data folder, then extract the
 Japanese ROM directly to `game-assets/regions/jp.armedia`. Restart the game
-and select **Settings → Localization → Regional rules → Death Heim artwork**.
+and select **Regional artwork → Japan** in the menu above.
 The Japanese choice restores the first statue's horns at the next room entry
 or retry. US and European choices use the original US artwork. Boss behavior
 and the island's arrival sequence are separate settings.
@@ -72,8 +77,8 @@ donor's slot. Renaming a US file to `jp.armedia` cannot supply Japanese art.
 ## Install European Action Mode item graphics
 
 Extract a European English, German or French ROM into the corresponding
-filename above, then restart. Select **Action item artwork → Europe** under
-Regional rules. When using the European Action inventory, this supplies the
+filename above, then restart. Select **Regional artwork → Europe** in the
+menu above. When using the European Action inventory, this supplies the
 smaller spell icons and health-growth pickup. It does not change pickup
 effects, switch the inventory model, or alter Story-mode item graphics.
 The choice takes effect on room entry or retry.
@@ -85,9 +90,9 @@ the menu reports the fallback.
 
 ## Install Japanese town artwork
 
-After extracting the Japanese donor, the regional settings offer independent
-choices for **Follower symbols**, **Skull Head lair artwork** and **Pyramid
-decoration**. Japan selects the Japanese images; US and Europe select the
+After extracting the Japanese donor, **Regional artwork** covers follower
+symbols, Skull Head lair artwork and pyramid decoration together.
+Japan selects the Japanese images; US and Europe select the
 baseline images. Changes take effect the next time a town is entered. Missing
 donors leave the US images in place and are reported in the setting's help.
 
@@ -105,7 +110,7 @@ the builder reports that their reviewed resource set is incomplete.
 
 ## Install Japanese title artwork
 
-Select **Title background → Japan** after installing the Japanese donor.
+Select **Regional artwork → Japan** after installing the Japanese donor.
 The original emblem and Japanese logo lettering are applied together with
 their matching map and colors the next time the title screen loads. US and
 Europe use the Western artwork. Without the donor, the setting is retained
@@ -121,11 +126,12 @@ rules rather than adopting edits from the new-game title draft.
 
 ## Install Japanese music sequences
 
-After installing the Japanese donor, select **Regional music sequences →
-Japan** in Regional rules. This changes two songs: the theme used in the
+After installing the Japanese donor, select **Regional music → Japan**
+in the customization menu above. This changes two songs: the theme used in the
 Western Fillmore caves, Kasandora Act 2 and Marahna Act 1, and the Northwall
-theme. US and Europe use the Western sequences. The choice is independent
-of the Fillmore Act 2 track-selection setting.
+theme. US and Europe use the Western sequences. The same group selects
+Fillmore Act 2's scene-to-track assignment. Internally these remain independent
+members; choosing one group does not couple either of them to gameplay rules.
 
 Changes apply when an affected song is next uploaded. They do not interrupt
 the current song or force a reload between rooms that share it. Missing donor

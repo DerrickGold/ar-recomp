@@ -1,5 +1,5 @@
 #include "actraiser_stage_hazards.h"
-#include "actraiser_regional_runtime.h"
+#include "actraiser/regional/actraiser_regional_runtime.h"
 #include "actraiser_game.h"
 #include "actraiser_hle_fatal.h"
 

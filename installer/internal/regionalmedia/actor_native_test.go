@@ -22,7 +22,7 @@ func TestGeneratedActorBindingsCurrent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := os.ReadFile("../../../src/regional/regional_actor_art_native.inc")
+	got, err := os.ReadFile("../../../src/regional/media/regional_actor_art_native.inc")
 	if err != nil {
 		t.Fatal(err)
 	}

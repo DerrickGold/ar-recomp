@@ -1,6 +1,6 @@
 #include "randomizer.h"
 #include "settings.h"
-#include "regional/regional_placements.h"
+#include "regional/action/regional_placements.h"
 #include "byte_order.h"
 #include <assert.h>
 #include <stdio.h>

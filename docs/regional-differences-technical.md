@@ -7,6 +7,9 @@ integration constraints behind that article. Implementation task tracking
 remains separate in the project's private development notes.
 
 This is a reverse-engineering reference, **not a list of implemented settings**.
+For implemented options, see [Regional settings](regional-settings.md); for
+ownership and activation contracts, see [Regional architecture](regional-architecture.md).
+
 The comparisons below were checked against the exact headerless retail ROMs
 on 2026-09-20–22. Table/code comparisons were supplemented with 84,499 isolated
 native-routine fixtures, 836 booted SIM/action/save traces, and 442 complete controlled
@@ -1708,13 +1711,15 @@ on the restored timeline. Legacy/foreign companion reconciliation is separate.
 In the controlled Save traces, payload writes are visible at frames61–63 and
 the valid checksum is committed at67. US `$03:A82E/$A833`, JP `$03:A5FE/$A603`
 write the final checksum words. These timings are fixtures, not an API promise.
-A future regional companion must bind to a completed save transaction, not the
+A regional companion must bind to a completed save transaction, not the
 first changed SRAM byte. Do not equate reference-core frames with host yields:
 the bounded native save body contains only DB-setup and checksum calls, no
 frame waits; the host's checksum HLE is yield-free and auto-persistence runs
 after the game coroutine returns. Static inspection therefore does not show
-a normal-path partial-save exposure. A host trace (including abnormal exits)
-is still needed before claiming such a bug or choosing a companion commit hook.
+a normal-path partial-save exposure. The host's implemented completion,
+checkpoint and recovery contracts are documented under
+[regional campaign checkpoints](save-format.md#regional-campaign-checkpoints);
+the native traces alone do not establish a partial-save bug.
 
 ### SIM enemy state differences
 
@@ -2388,7 +2393,7 @@ owners. Their instruction differences are relocated calls/table addresses,
 translated text pointers and the regional held-inventory base. All 78 files
 (33 JSON, plus states, WRAM and images) match an independent repeat exactly.
 
-A future regional-policy switch must preserve this in-flight transaction:
+A regional-policy switch must preserve this in-flight transaction:
 the technology flag can already be set while the item is still held. Do not
 restart delivery or infer complete settlement from that flag alone. No
 runtime policy switch is implemented or tested by these native fixtures.
@@ -5159,6 +5164,12 @@ draft, with Normal difficulty and retained rule choices. No save/marker is
 written. A separate US Continue/Action/Game Over control retains its native
 restart and allowances. These are selection/lifecycle checks with staged
 death, not natural complete campaigns or final visual acceptance.
+
+The subsequent independent-settings UX revision preserves the chosen difficulty
+on this return instead of resetting it to Normal. Mode routing no longer owns
+difficulty selection; the runtime regression now covers Expert surviving the
+return, new title draft and subsequent Action run. The original ROM flow above
+is unchanged by this host-side convenience.
 
 The generic transfer contract has a 200-cycle generated-code regression:
 constant activation depth, no resumption of discarded callers, and a final

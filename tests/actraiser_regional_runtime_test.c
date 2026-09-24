@@ -1,13 +1,14 @@
-#include "actraiser/actraiser_regional_runtime.h"
+#include "actraiser/regional/actraiser_regional_runtime.h"
 #include "actraiser/actraiser_miracle.h"
-#include "actraiser/actraiser_regional_settings.h"
+#include "actraiser/regional/actraiser_regional_settings.h"
+#include "actraiser/regional/actraiser_regional_editor.h"
 #include "actraiser/actraiser_development.h"
 #include "actraiser/actraiser_quake.h"
 #include "actraiser/actraiser_report_command.h"
 #include "actraiser/actraiser_town_status_runtime.h"
 #include "actraiser/actraiser_level_goals_runtime.h"
 #include "actraiser/actraiser_construction_runtime.h"
-#include "actraiser/actraiser_population_conversion.h"
+#include "actraiser/regional/actraiser_population_conversion.h"
 #include "actraiser/actraiser_arrival_runtime.h"
 #include "actraiser/actraiser_stage_placements.h"
 
@@ -26,14 +27,25 @@ ActRaiserPopulationResult ActRaiserPopulation_Preview(CpuState *cpu,const ArRegi
   (void)cpu;(void)campaign;*out=(ActRaiserPopulationPreview){.source=source};
   out->town.removed[0]=4;return kActRaiserPopulation_Ready;
 }
+ActRaiserPopulationResult ActRaiserPopulation_PreviewProfile(CpuState *cpu,const ArRegionalCampaign *campaign,
+    ArRegionalProfileGroup group,ArRegionalSource source,ActRaiserPopulationPreview *out) {
+  const ActRaiserPopulationResult result=ActRaiserPopulation_Preview(cpu,campaign,source,out);
+  out->profile=true;out->group=group;return result;
+}
 ActRaiserPopulationResult ActRaiserPopulation_Commit(CpuState *cpu,ArRegionalCampaign *campaign,
     const ActRaiserPopulationPreview *preview,const char *directory,SaveError *error) {
   (void)cpu;(void)error;assert(directory && strstr(directory,".redevelopment-"));++population_commit_calls;
   assert(ArRegionalSession_SetPopulationProfile(&campaign->active,campaign->active.revision,preview->source));
+  if(preview->profile) {
+    ArRegionalRules rules;
+    assert(ArRegionalProfiles_Expand(&campaign->active.requested,preview->group,preview->source,&rules));
+    assert(ArRegionalSession_RequestRules(&campaign->active,campaign->active.revision,&rules));
+  }
   return kActRaiserPopulation_Committed;
 }
 static bool PopulationPrompt(void *context,ActRaiserRegionalPopulationNotice notice,
-    ArRegionalSource source,const uint16_t removed[6]) {
+    ArRegionalSource source,bool gameplay_profile,const uint16_t removed[6]) {
+  (void)gameplay_profile;
   (void)context;(void)source;assert(notice==kActRaiserRegionalPopulation_Failed || removed[0]==4);
   return population_accept;
 }
@@ -298,7 +310,7 @@ RecompReturn bank_02_A622_M1X0(CpuState *cpu) {
   assert(ActRaiserRegional_CopyRulesView(&title_view) && title_view.new_game);
   if(title_edits==3) {
     assert(title_view.requested.spell_inventory==2 && title_view.requested.mode_entry.source[0]==2);
-    assert(title_view.requested.difficulty.level==kArRegionalDifficulty_Normal);
+    assert(ArRegionalDifficulty_Choice(&title_view.requested.difficulty)==kArRegionalDifficultyChoice_Expert);
     assert(title_view.lair_history_ready && title_view.lair_reload_ready && !title_view.population_pending);
     ++title_calls;return title_return;
   }
@@ -527,7 +539,135 @@ static void Install(const char *path, uint8_t *image, ArRegionalSource source) {
                                 path, image, image, &error));
   assert(SaveSystem_LoadActive(&error));
 }
+static void CheckProfilePreview(void) {
+  ArRegionalSession session;
+  ArRegionalCostPolicy costs;
+  const uint8_t id[16]={31};
+  assert(ArRegionalCosts_Init(&costs,kArRegionalSource_US));
+  assert(ArRegionalSession_NewGame(&session,0,id,&costs));
+  for(unsigned town=0;town<6;++town)assert(ArRegionalLairHistory_InitTown(&session.lairs,town));
+  assert(ArRegionalLairReloads_Init(&session.reloads));
+  ActRaiserRegionalPopulationIntent intent={0};
+  ActRaiserRegionalEditContext edit={.session=&session,.population=&intent,.editable=true};
+  ActRaiserRegionalRulesView view={.revision=session.revision};
+  memcpy(view.campaign,id,sizeof(id));
+  const ArRegionalSession before=session;
+  for(unsigned group=0;group<kArRegionalProfile_Count;++group)
+    for(unsigned source=0;source<kArRegionalSource_Count;++source) {
+      ActRaiserRegionalEditImpact impact;
+      const ActRaiserRegionalEditResult result=ActRaiserRegionalEditor_PreviewProfile(&edit,&view,group,source,&impact);
+      assert(result==kActRaiserRegionalEdit_Applied || result==kActRaiserRegionalEdit_Unchanged ||
+             result==kActRaiserRegionalEdit_Deferred);
+      assert(!memcmp(&session,&before,sizeof(session)) && !intent.pending);
+      assert(!impact.estimated_history);
+      if(source==kArRegionalSource_US)assert(!impact.towns);
+      if(source==kArRegionalSource_Europe)assert(impact.towns!=kArRegionalTownImpact_Redevelopment);
+      if(source==kArRegionalSource_Japan)assert(impact.towns==ArRegionalProfiles_TownImpact(group));
+    }
+  session.lairs.approximate_towns=session.reloads.approximate_towns=63;
+  ActRaiserRegionalEditImpact impact={0};
+  assert(ActRaiserRegionalEditor_PreviewProfile(&edit,&view,kArRegionalProfile_Lairs,1,&impact)==kActRaiserRegionalEdit_Applied);
+  assert(impact.estimated_history && impact.towns==kArRegionalTownImpact_Future);
+  assert(ActRaiserRegionalEditor_PreviewProfile(&edit,&view,kArRegionalProfile_Artwork,1,&impact)==kActRaiserRegionalEdit_Applied);
+  assert(!impact.estimated_history && !impact.towns);
+  edit.new_game=view.new_game=true;
+  assert(ActRaiserRegionalEditor_PreviewProfile(&edit,&view,kArRegionalProfile_Gameplay,1,&impact)==kActRaiserRegionalEdit_Applied);
+  assert(!impact.estimated_history && !impact.towns && !intent.pending);
+  const ActRaiserRegionalEditImpact sentinel={kArRegionalTownImpact_Redevelopment,true};
+  impact=sentinel; ++view.revision;
+  assert(ActRaiserRegionalEditor_PreviewProfile(&edit,&view,kArRegionalProfile_Gameplay,1,&impact)==kActRaiserRegionalEdit_Stale);
+  assert(impact.towns==sentinel.towns && impact.estimated_history);
+  --view.revision; edit.editable=false;view.editable=true;
+  assert(ActRaiserRegionalEditor_PreviewProfile(&edit,&view,kArRegionalProfile_Gameplay,1,&impact)==kActRaiserRegionalEdit_Locked);
+  edit.editable=true;session.lairs.diverged_towns=1;
+  assert(ActRaiserRegionalEditor_PreviewProfile(&edit,&view,kArRegionalProfile_Lairs,1,&impact)==kActRaiserRegionalEdit_HistoryUnavailable);
+}
+
+static void CheckNarrowMenuEdits(void) {
+  ArRegionalSession base;
+  ArRegionalCostPolicy costs;
+  const uint8_t id[16] = {19};
+  assert(ArRegionalCosts_Init(&costs, kArRegionalSource_US));
+  assert(ArRegionalSession_NewGame(&base, 0, id, &costs));
+  for (unsigned town = 0; town < 6; ++town) assert(ArRegionalLairHistory_InitTown(&base.lairs, town));
+  assert(ArRegionalLairReloads_Init(&base.reloads));
+  for (unsigned group = 0; group < kActRaiserRegionalSetting_Count; ++group) {
+    if (group == kActRaiserRegionalSetting_DifficultyLevel) continue; // Its own typed API.
+    for (unsigned source = 0; source < kArRegionalSource_Count; ++source) {
+      ArRegionalSession session = base;
+      ActRaiserRegionalPopulationIntent intent = {0};
+      ActRaiserRegionalEditContext edit = {&session, &intent, true, true};
+      ActRaiserRegionalRulesView view = {.revision = session.revision, .new_game = true};
+      memcpy(view.campaign, id, 16);
+      ActRaiserRegionalEditImpact impact = {0};
+      const ActRaiserRegionalEditResult preview = ActRaiserRegionalEditor_PreviewRules(&edit, &view, group, source, &impact);
+      assert(preview == kActRaiserRegionalEdit_Applied || preview == kActRaiserRegionalEdit_Unchanged);
+      assert(!memcmp(&base, &session, sizeof(base)) && !intent.pending && !impact.towns);
+      assert(ActRaiserRegionalEditor_RequestRules(&edit, &view, group, source) == preview);
+      ActRaiserRegionalChoiceView choices[kActRaiserRegionalSetting_Count];
+      ActRaiserRegionalSettings_DescribeChoices(&session.requested, &base.requested, choices);
+      for (unsigned other = 0; other < kActRaiserRegionalSetting_Count; ++other) {
+        if (other == group) continue;
+        if ((group == kActRaiserRegionalSetting_ActionStart &&
+             (other == kActRaiserRegionalSetting_StartingHealth || other == kActRaiserRegionalSetting_StartingLives)) ||
+            ((group == kActRaiserRegionalSetting_StartingHealth || group == kActRaiserRegionalSetting_StartingLives) &&
+             other == kActRaiserRegionalSetting_ActionStart) ||
+            (group == kActRaiserRegionalSetting_Recovery &&
+             (other == kActRaiserRegionalSetting_SpRecovery || other == kActRaiserRegionalSetting_AngelRecovery)) ||
+            ((group == kActRaiserRegionalSetting_SpRecovery || group == kActRaiserRegionalSetting_AngelRecovery) &&
+             other == kActRaiserRegionalSetting_Recovery)) continue;
+        // These aliases name overlapping data for integration callers only.
+        if ((group == kActRaiserRegionalSetting_Population &&
+             (other == kActRaiserRegionalSetting_LevelGoals || other == kActRaiserRegionalSetting_Story)) ||
+            (group == kActRaiserRegionalSetting_LevelGoals && other == kActRaiserRegionalSetting_Population) ||
+            (group == kActRaiserRegionalSetting_Story &&
+             (other == kActRaiserRegionalSetting_Population || other == kActRaiserRegionalSetting_CompassReturn)) ||
+            (group == kActRaiserRegionalSetting_CompassReturn && other == kActRaiserRegionalSetting_Story)) continue;
+        assert(!choices[other].pending);
+      }
+      // A narrow region edit cannot turn off an explicit difficulty selection.
+      session = base;
+      assert(ArRegionalDifficulty_Select(kArRegionalDifficultyChoice_Expert, &session.requested.difficulty));
+      const ArRegionalDifficultyPolicy selected = session.requested.difficulty;
+      const ActRaiserRegionalEditResult result = ActRaiserRegionalEditor_RequestRules(&edit, &view, group, source);
+      assert(result == kActRaiserRegionalEdit_Applied || result == kActRaiserRegionalEdit_Unchanged);
+      if (group != kActRaiserRegionalSetting_DifficultyRules)
+        assert(!memcmp(&selected, &session.requested.difficulty, sizeof(selected)));
+    }
+  }
+  // On each base region, choose difficulty in one atomic edit, then inspect the
+  // real room-owned snapshot. No change to terrain, stats, placements or HP now.
+  for (unsigned source = 0; source < kArRegionalSource_Count; ++source)
+    for (unsigned choice = 0; choice < kArRegionalDifficultyChoice_Count; ++choice) {
+      ArRegionalSession session = base;
+      ActRaiserRegionalPopulationIntent intent = {0};
+      ActRaiserRegionalEditContext edit = {&session, &intent, true, true};
+      ActRaiserRegionalRulesView view = {.revision = session.revision, .new_game = true};
+      memcpy(view.campaign, id, 16);
+      const ActRaiserRegionalEditResult preset = ActRaiserRegionalEditor_RequestProfile(&edit, &view, kArRegionalProfile_Gameplay, source);
+      assert(preset == kActRaiserRegionalEdit_Applied || preset == kActRaiserRegionalEdit_Unchanged);
+      view.revision = session.revision;
+      const ArRegionalRules before = session.requested;
+      const ActRaiserRegionalEditResult result = ActRaiserRegionalEditor_RequestDifficultyChoice(&edit, &view, choice);
+      assert(result == kActRaiserRegionalEdit_Applied || result == kActRaiserRegionalEdit_Unchanged);
+      ArRegionalRules normalized = session.requested;
+      normalized.difficulty = before.difficulty;
+      assert(!memcmp(&normalized, &before, sizeof(before)));
+      ArRegionalDifficultySnapshot snapshot;
+      assert(ArRegionalSession_BeginDifficulty(&session, &snapshot));
+      assert(snapshot.spawn_hp == (choice == 0 ? 0 : choice == 1 ? 2 : choice == 2 ? 1 : 3));
+      assert(snapshot.timer_reload == (choice == 1 ? 71 : choice == 3 ? 47 : 59));
+      assert(snapshot.contact_extra == (choice == 3));
+      const ArRegionalSession applied = session;
+      edit.editable = false;
+      assert(ActRaiserRegionalEditor_RequestDifficultyChoice(&edit, &view, 0) == kActRaiserRegionalEdit_Locked);
+      assert(!memcmp(&session, &applied, sizeof(applied)));
+    }
+}
+
 int main(void) {
+  CheckProfilePreview();
+  CheckNarrowMenuEdits();
   const char *path = "actraiser-regional-runtime-test.srm";
   const char *companion = "actraiser-regional-runtime-test.srm.archeckpoint";
   remove(path); remove(companion);
@@ -1672,7 +1812,8 @@ int main(void) {
   assert(ActRaiserRegional_TitleArtworkSnapshot()==kArRegionalArtwork_TitleMask);
   title_edits=3;cpu.PB=2;
   assert(ActRaiser_RegionalTitle(&cpu)==RECOMP_RETURN_NORMAL);
-  assert(ActRaiserRegional_CopyRulesView(&view) && view.requested.spell_inventory==2 && !view.requested.difficulty.level);
+  assert(ActRaiserRegional_CopyRulesView(&view) && view.requested.spell_inventory==2 &&
+      ArRegionalDifficulty_Choice(&view.requested.difficulty)==kArRegionalDifficultyChoice_Expert);
   assert(ActRaiserRegional_BeginActionStart(&start_snapshot) && start_snapshot.health==8);
   assert(ActRaiserRegional_StartInventory() && ActRaiserRegional_InventoryView().enabled);
   title_edits=1;
@@ -1692,6 +1833,52 @@ int main(void) {
   assert(ActRaiserRegional_CopyRulesView(&view) && !view.requested.spell_inventory);
   assert(ActRaiserRegional_BeginActionStart(&start_snapshot) && start_snapshot.health==24);
   edits_allowed=true;title_edits=0;
+  // Bundles use authoritative state, not the UI copy, and deferred gameplay
+  // presets publish nothing until the Palace confirmation accepts them.
+  assert(ActRaiserRegional_CopyRulesView(&view));
+  assert(view.lair_history_ready && view.lair_reload_ready);
+  assert(ActRaiserRegional_RequestProfile(&view,kArRegionalProfile_Artwork,1)==kActRaiserRegionalEdit_Applied);
+  assert(ActRaiserRegional_CopyRulesView(&view));
+  const ArRegionalRules original_rules=view.requested;
+  ActRaiserRegional_SetPopulationPrompt(PopulationPrompt,NULL);
+  assert(ActRaiserRegional_RequestProfile(&view,kArRegionalProfile_Gameplay,1)==kActRaiserRegionalEdit_Deferred);
+  assert(ActRaiserRegional_CopyRulesView(&view) && view.population_pending && view.pending_profile &&
+      view.pending_profile_group==kArRegionalProfile_Gameplay);
+  assert(!memcmp(&view.requested,&original_rules,sizeof(original_rules)));
+  const unsigned pending_revision=view.revision;
+  bool pending_actor_art;
+  assert(ActRaiserRegional_ActorArtwork(0,true,&pending_actor_art) && pending_actor_art);
+  assert(ActRaiserRegional_CopyRulesView(&view) && view.revision>pending_revision && view.population_pending);
+  cpu=(CpuState){.PB=1,.DB=1,.m_flag=1,.S=0x1ee0};population_accept=false;
+  assert(ActRaiser_RegionalPopulation(&cpu)==RECOMP_RETURN_TAILCALL);
+  assert(ActRaiserRegional_CopyRulesView(&view) && !view.population_pending &&
+      !memcmp(&view.requested,&original_rules,sizeof(original_rules)));
+  assert(ActRaiserRegional_RequestProfile(&view,kArRegionalProfile_Gameplay,1)==kActRaiserRegionalEdit_Deferred);
+  assert(ActRaiserRegional_RequestProfile(&view,kArRegionalProfile_Gameplay,0)==kActRaiserRegionalEdit_Unchanged);
+  assert(ActRaiserRegional_CopyRulesView(&view) && !view.population_pending);
+  assert(ActRaiserRegional_RequestProfile(&view,kArRegionalProfile_Gameplay,1)==kActRaiserRegionalEdit_Deferred);
+  population_accept=true;
+  assert(ActRaiser_RegionalPopulation(&cpu)==RECOMP_RETURN_TAILCALL);
+  const ActRaiserRegionalRulesView obsolete=view;
+  assert(ActRaiserRegional_CopyRulesView(&view) && !view.population_pending &&
+      view.profiles[kArRegionalProfile_Gameplay].source==1 && view.pending_groups);
+  assert(ActRaiserRegional_RequestProfile(&obsolete,kArRegionalProfile_Presentation,1)==kActRaiserRegionalEdit_Stale);
+  edits_allowed=false;view.editable=true;
+  assert(ActRaiserRegional_RequestProfile(&view,kArRegionalProfile_Presentation,1)==kActRaiserRegionalEdit_Locked);
+  edits_allowed=true;
+  assert(ActRaiserRegional_RequestProfile(&view,kArRegionalProfile_Presentation,1)==kActRaiserRegionalEdit_Applied);
+  assert(ActRaiserRegional_CopyRulesView(&view) && !view.actor_artwork_available &&
+      view.profiles[kArRegionalProfile_Presentation].source==1); // Missing donor is not Custom.
+  assert(ActRaiserRegional_RequestProfile(&view,kArRegionalProfile_Combat,0)==kActRaiserRegionalEdit_Applied);
+  assert(ActRaiserRegional_CopyRulesView(&view) && view.profiles[kArRegionalProfile_Gameplay].source==kArRegionalSource_Count);
+  assert(ActRaiserRegional_ReturnToTitle() && ActRaiserRegional_BeginTitleArtwork(&title_art));
+  assert(ActRaiserRegional_CopyRulesView(&view) && view.new_game);
+  for(unsigned source=0;source<3;++source) {
+    assert(ActRaiserRegional_RequestProfile(&view,kArRegionalProfile_Gameplay,source)==kActRaiserRegionalEdit_Applied);
+    assert(ActRaiserRegional_CopyRulesView(&view) && !view.population_pending &&
+        view.profiles[kArRegionalProfile_Gameplay].source==source);
+  }
+  assert(Save_LoadFile(kSaveFileFormat_NativeSrm,path,unchanged_image,&error) && !memcmp(image,unchanged_image,sizeof(image)));
   remove(path); remove(companion);
   return 0;
 }

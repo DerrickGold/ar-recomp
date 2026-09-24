@@ -1,6 +1,6 @@
 #include "actraiser/actraiser_statue_volley.h"
 #include "actraiser/actraiser_cpu_hle_internal.h"
-#include "regional/regional_volley.h"
+#include "regional/action/regional_volley.h"
 #include "quintet_lzss.h"
 #include "byte_order.h"
 #include <assert.h>

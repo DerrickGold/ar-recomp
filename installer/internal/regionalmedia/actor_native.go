@@ -30,4 +30,4 @@ func NativeActorBindings() []NativeActorBinding {
 	return result
 }
 
-//go:generate go run ./cmd/genactors ../../../src/regional/regional_actor_art_native.inc
+//go:generate go run ./cmd/genactors ../../../src/regional/media/regional_actor_art_native.inc

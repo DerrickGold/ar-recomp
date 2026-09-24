@@ -1,5 +1,5 @@
-#include "regional/regional_lair_history.h"
-#include "regional/regional_lair_reloads.h"
+#include "regional/towns/regional_lair_history.h"
+#include "regional/towns/regional_lair_reloads.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>

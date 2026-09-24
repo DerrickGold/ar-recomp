@@ -1,6 +1,6 @@
 #ifndef ACTRAISER_DEVELOPMENT_H
 #define ACTRAISER_DEVELOPMENT_H
-#include "regional/regional_development.h"
+#include "regional/towns/regional_development.h"
 #include "snesrecomp/game/cpu.h"
 
 /* Bounded coordinator bodies. Native callees retain event/actor/census/reward

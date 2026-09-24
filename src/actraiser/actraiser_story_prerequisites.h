@@ -2,7 +2,7 @@
 #define ACTRAISER_STORY_PREREQUISITES_H
 
 #include "snesrecomp/game/cpu.h"
-#include "regional/regional_story_prerequisites.h"
+#include "regional/towns/regional_story_prerequisites.h"
 
 /* US $03:E13E LDA prefix; $E142 keeps the original strict comparison and
  * prerequisite setter. Only the two identified ROM records are replaceable. */

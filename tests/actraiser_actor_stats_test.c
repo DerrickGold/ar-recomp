@@ -1,8 +1,8 @@
 #include "actraiser/actraiser_actor_stats.h"
 #include "actraiser/actraiser_cpu_hle_internal.h"
-#include "regional/regional_actor_stats.h"
-#include "regional/regional_platform_skull.h"
-#include "regional/regional_cast_hold.h"
+#include "regional/action/regional_actor_stats.h"
+#include "regional/action/regional_platform_skull.h"
+#include "regional/action/regional_cast_hold.h"
 #include "actraiser/actraiser_cast_hold.h"
 #include "byte_order.h"
 #include <assert.h>

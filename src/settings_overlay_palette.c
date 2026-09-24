@@ -80,6 +80,7 @@ bool SettingsOverlayPalette_ApplyNav(MenuNav nav, bool repeat) {
       break;
     case kMenuNav_TabPrev:
     case kMenuNav_TabNext:
+    case kMenuNav_Details:
       break;
   }
   return true;

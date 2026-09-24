@@ -1,7 +1,7 @@
 #ifndef ACTRAISER_RECOVERY_H
 #define ACTRAISER_RECOVERY_H
 
-#include "regional/regional_recovery.h"
+#include "regional/towns/regional_recovery.h"
 #include "snesrecomp/game/cpu.h"
 
 bool ActRaiserRecovery_CycleEntry(const CpuState *cpu);

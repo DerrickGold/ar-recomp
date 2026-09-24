@@ -1,5 +1,5 @@
 #include "actraiser_score_lives.h"
-#include "actraiser_regional_runtime.h"
+#include "actraiser/regional/actraiser_regional_runtime.h"
 #include "actraiser_hle_fatal.h"
 
 extern RecompReturn bank_00_873C_M0X0(CpuState *cpu);

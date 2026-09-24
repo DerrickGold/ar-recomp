@@ -1,5 +1,5 @@
 #include "actraiser/actraiser_tree_attack.h"
-#include "regional/regional_action_motion.h"
+#include "regional/action/regional_action_motion.h"
 #include "byte_order.h"
 #include "quintet_lzss.h"
 #include <assert.h>

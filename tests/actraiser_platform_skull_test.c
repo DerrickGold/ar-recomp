@@ -1,6 +1,6 @@
 #include "actraiser/actraiser_platform_skull.h"
 #include "actraiser/actraiser_cpu_hle_internal.h"
-#include "regional/regional_platform_skull.h"
+#include "regional/action/regional_platform_skull.h"
 #include "byte_order.h"
 #include <assert.h>
 #include <stdio.h>

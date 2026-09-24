@@ -1,11 +1,11 @@
 #include "actraiser_stage_terrain.h"
-#include "actraiser_regional_media.h"
+#include "actraiser/regional/actraiser_regional_media.h"
 #include "actraiser_stage_placements.h"
-#include "actraiser_regional_runtime.h"
+#include "actraiser/regional/actraiser_regional_runtime.h"
 #include "actraiser_action_bg.h"
 #include "actraiser_game.h"
 #include "actraiser_hle_fatal.h"
-#include "regional/regional_terrain.h"
+#include "regional/action/regional_terrain.h"
 
 static bool Context(CpuState *cpu, bool byte_a, uint8_t bank) {
   return cpu && !cpu->emulation && cpu->m_flag == byte_a && !cpu->x_flag &&

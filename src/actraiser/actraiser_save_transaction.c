@@ -1,7 +1,7 @@
 #include "actraiser/actraiser_save_transaction.h"
 
 #include "actraiser/actraiser_hle_fatal.h"
-#include "actraiser/actraiser_regional_runtime.h"
+#include "actraiser/regional/actraiser_regional_runtime.h"
 #include "save_system.h"
 
 extern RecompReturn bank_03_A656_M0X0(CpuState *cpu);

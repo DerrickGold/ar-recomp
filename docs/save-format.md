@@ -221,7 +221,7 @@ modeling the exact routine footprint.
 Booted fixtures verify the cache payload byte-for-byte and a pending class16
 soul surviving a cold load: stock stays zero and the soul credits one growth
 on its later return. This actor cache must not be confused with the unsaved
-ambient scene index in §3.3.2. Companion metadata for future regional rules
+ambient scene index in §3.3.2. Companion metadata for regional rules
 must distinguish restored actors from new spawns.
 
 Native town-switch fixtures also preserve the pending soul while visiting
@@ -366,7 +366,14 @@ made from the INI backend: select the native backend before using this manual
 procedure. Ordinary Import does not restore the Unicode-name companion.
 
 This storage covers [the implemented regional gameplay and report options](regional-settings.md)
-and retained lair histories, not full gameplay presets.
+and retained lair histories. Gameplay/presentation presets expand into the
+same individual records; there is no second saved preset name or new wire
+format. A pending population-changing preset is volatile until its confirmed
+Palace transaction commits the complete selection and town reset together.
+The pending intent belongs to the campaign and its requested rules. Normal
+activation or town progress does not cancel it; another rule edit, title/Continue
+or a restart does. The Palace owner creates a fresh revision-checked preview
+before asking for confirmation. No queued demolition is stored in the companion.
 Ordinary overlay changes remain in memory until the next completed Progress Log save;
 they are not written to the global `settings.ini`. Older pricing-only companions
 load with US room limits and retain all their prices. They are upgraded only
@@ -665,6 +672,16 @@ and effective source choices remain separate.
 | 67 | 245 | `aitos_shared_pose_order`, `aitos_humanoid_pose_order` | Next room/retry |
 | 68 | 247 | The two regional song-sequence fields | Actual upload of that song, independently |
 | 69 | 254 | Seven `*_actor_art` fields, one per action area | Next stage entry in that area |
+
+The implementation lives in
+[regional_session_codec.c](../src/regional/session/regional_session_codec.c), separate
+from live rule activation. Its typed `Record` binding supplies each record's
+key, regional values and source field to both encoding and decoding. The 24
+lair-seed records deliberately alias one policy; contradictory decoded aliases
+are rejected. This organization does not change version 69 or its bytes.
+Pre-refactor payload fingerprints and historical-version tests are in
+[regional_session_test.c](../tests/regional_session_test.c). See the
+[regional architecture](regional-architecture.md) for the editing/activation boundaries.
 
 Town/title choices extend `ARARTWORK-R1`. Pose order uses `ARPOSES-R1`,
 sequences use `ARSEQUENCE-R1`, and area artwork uses `ARACTORART-R1`. The

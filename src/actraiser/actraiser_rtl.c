@@ -15,7 +15,7 @@
 #include "actraiser/actraiser_event_bugfixes.h"
 #include "actraiser/actraiser_credits.h"
 #include "actraiser/actraiser_hud.h"
-#include "actraiser/actraiser_regional_runtime.h"
+#include "actraiser/regional/actraiser_regional_runtime.h"
 #include "actraiser/actraiser_bg3_upload.h"
 #include "actraiser/actraiser_localization_routes.h"
 #include "action/action_bg_tuner.h"

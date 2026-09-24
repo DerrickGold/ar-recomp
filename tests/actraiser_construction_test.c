@@ -1,6 +1,6 @@
 #include "actraiser/actraiser_construction_runtime.h"
 #include "actraiser/actraiser_town_status_runtime.h"
-#include "regional/regional_construction.h"
+#include "regional/towns/regional_construction.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>

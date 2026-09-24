@@ -1,6 +1,6 @@
 #ifndef ACTRAISER_TOWN_CENSUS_H
 #define ACTRAISER_TOWN_CENSUS_H
-#include "regional/regional_support.h"
+#include "regional/towns/regional_support.h"
 #include "snesrecomp/game/cpu.h"
 /* Existing $03:C07E owner, parameterized only by support coefficients. Keeps
  * native house occupancy, adjustment arithmetic, act-completion gate, scratch,

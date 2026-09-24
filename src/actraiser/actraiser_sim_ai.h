@@ -1,6 +1,6 @@
 #ifndef ACTRAISER_SIM_AI_H
 #define ACTRAISER_SIM_AI_H
-#include "regional/regional_sim_ai.h"
+#include "regional/towns/regional_sim_ai.h"
 #include "snesrecomp/game/cpu.h"
 typedef enum ActRaiserSimAiSeam {
   kActRaiserSimAi_DragonReset,

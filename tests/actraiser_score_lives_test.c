@@ -1,5 +1,5 @@
 #include "actraiser/actraiser_score_lives.h"
-#include "regional/regional_score_lives.h"
+#include "regional/action/regional_score_lives.h"
 #include "byte_order.h"
 #include "cpu_65816_math.h"
 #include <assert.h>

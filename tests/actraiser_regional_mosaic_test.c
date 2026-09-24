@@ -1,6 +1,6 @@
-#include "actraiser/actraiser_regional_mosaic.h"
+#include "actraiser/regional/actraiser_regional_mosaic.h"
 #include "action/action_room_mosaic.h"
-#include "regional/regional_mosaic.h"
+#include "regional/presentation/regional_mosaic.h"
 #include "byte_order.h"
 #include <assert.h>
 #include <stdio.h>

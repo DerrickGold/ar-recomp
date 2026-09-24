@@ -1,6 +1,6 @@
 #include "actraiser/actraiser_stage_placements.h"
 #include "actraiser/actraiser_native_call.h"
-#include "regional/regional_terrain.h"
+#include "regional/action/regional_terrain.h"
 #include "randomizer.h"
 #include "byte_order.h"
 #include <assert.h>

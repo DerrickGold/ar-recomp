@@ -1,4 +1,4 @@
-#include "regional/regional_lair_fingerprint.h"
+#include "regional/session/regional_lair_fingerprint.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>

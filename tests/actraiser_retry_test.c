@@ -1,6 +1,6 @@
 #include "actraiser/actraiser_retry.h"
 #include "actraiser/actraiser_cpu_hle_internal.h"
-#include "regional/regional_retry.h"
+#include "regional/action/regional_retry.h"
 
 #include <assert.h>
 #include <stdio.h>

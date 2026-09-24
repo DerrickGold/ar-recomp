@@ -1,4 +1,4 @@
-#include "actraiser/actraiser_population_conversion.h"
+#include "actraiser/regional/actraiser_population_conversion.h"
 #include "actraiser/actraiser_cell_map.h"
 #include "actraiser/actraiser_story_snapshot.h"
 #include "snesrecomp/support/utf8_fs.h"
@@ -83,7 +83,12 @@ static void Remove(const char *path){
   snprintf(extra,sizeof(extra),"%s.archeckpoint",path);remove(extra);
   snprintf(extra,sizeof(extra),"%s.arname",path);remove(extra);
 }
-static void Run(SaveBackend backend,unsigned failure,unsigned source) {
+static ActRaiserPopulationResult Preview(CpuState *cpu,const ArRegionalCampaign *campaign,
+    unsigned source,bool profile,ActRaiserPopulationPreview *out) {
+  return profile?ActRaiserPopulation_PreviewProfile(cpu,campaign,kArRegionalProfile_Gameplay,source,out):
+      ActRaiserPopulation_Preview(cpu,campaign,source,out);
+}
+static void Run(SaveBackend backend,unsigned failure,unsigned source,bool profile) {
   const char *native="population-conversion.srm",*ini="population-conversion.ini",*folder="population-recovery";
   const char *path=backend==kSaveBackend_Ini?ini:native;
   const SaveFileFormat format=backend==kSaveBackend_Ini?kSaveFileFormat_Ini:kSaveFileFormat_NativeSrm;
@@ -95,6 +100,8 @@ static void Run(SaveBackend backend,unsigned failure,unsigned source) {
   assert(SaveSystem_Attach(sram,sizeof(sram),backend,native,ini,&error) && SaveSystem_LoadActive(&error));
   ArRegionalCampaign campaign;ArRegionalCampaign_Init(&campaign,0,Identity,NULL);
   ArRegionalCostPolicy defaults={{0}};assert(ArRegionalCampaign_NewGame(&campaign,&defaults,&error));
+  for(unsigned town=0;town<6;++town)assert(ArRegionalLairHistory_InitTown(&campaign.active.lairs,town));
+  assert(ArRegionalLairReloads_Init(&campaign.active.reloads));
   if(source==0)assert(ArRegionalSession_SetPopulationProfile(&campaign.active,campaign.active.revision,1));
   const ArRegionalSession previous=campaign.active;
   char name_block[256];snprintf(name_block,sizeof(name_block),"%s.arname.tmp",path);
@@ -105,11 +112,14 @@ static void Run(SaveBackend backend,unsigned failure,unsigned source) {
   uint8_t before[sizeof(wram)], checkpoint[kActRaiserSramSize], disk[kActRaiserSramSize];
   memcpy(before,wram,sizeof(wram));assert(ActRaiserStorySnapshot_Capture(&cpu,checkpoint));
   ActRaiserPopulationPreview preview;
-  cpu.PB=0;assert(ActRaiserPopulation_Preview(&cpu,&campaign,source,&preview)==kActRaiserPopulation_Unsafe);cpu.PB=1;
-  Word(wram,0x18,0x0100);assert(ActRaiserPopulation_Preview(&cpu,&campaign,source,&preview)==kActRaiserPopulation_Unsafe);Word(wram,0x18,0x0700);
-  assert(ActRaiserPopulation_Preview(&cpu,&campaign,source,&preview)==kActRaiserPopulation_Ready);
+  cpu.PB=0;assert(Preview(&cpu,&campaign,source,profile,&preview)==kActRaiserPopulation_Unsafe);cpu.PB=1;
+  Word(wram,0x18,0x0100);assert(Preview(&cpu,&campaign,source,profile,&preview)==kActRaiserPopulation_Unsafe);Word(wram,0x18,0x0700);
+  assert(ActRaiserPopulation_PreviewProfile(&cpu,&campaign,kArRegionalProfile_Artwork,source,&preview)==kActRaiserPopulation_Unsafe);
+  assert(Preview(&cpu,&campaign,source,profile,&preview)==kActRaiserPopulation_Ready);
+  assert(preview.profile==profile);
+  uint16_t credit;assert(ArRegionalConstruction_Price(profile && source==1,3,&credit));
   assert(preview.redevelop==(source!=2) && preview.town.affected_towns==(source==2?0:63));
-  for(unsigned town=0;town<6;++town)assert(preview.town.removed[town]==(source==2?0:2) && preview.town.growth_credit[town]==(source==2?0:8));
+  for(unsigned town=0;town<6;++town)assert(preview.town.removed[town]==(source==2?0:2) && preview.town.growth_credit[town]==(source==2?0:credit));
   if(source!=2) {
     ++wram[0x19efa];assert(ActRaiserPopulation_Commit(&cpu,&campaign,&preview,folder,&error)==kActRaiserPopulation_Stale);--wram[0x19efa];
   }
@@ -125,10 +135,16 @@ static void Run(SaveBackend backend,unsigned failure,unsigned source) {
     if(failure>1)assert(Save_LoadFile(format,path,disk,&error) && !memcmp(disk,checkpoint,sizeof(disk)));
   } else {
     assert(campaign.active.effective.support.source[0]==source);
+    if(profile) {
+      ArRegionalProfileSummary summary[kArRegionalProfile_Count];
+      assert(ArRegionalProfiles_Describe(&campaign.active.requested,summary));
+      assert(summary[kArRegionalProfile_Gameplay].source==source);
+      assert(summary[kArRegionalProfile_Presentation].source==kArRegionalSource_US);
+    }
     for(unsigned town=0;source!=2 && town<6;++town) {
       assert(!wram[0x16be9+town*512] && !wram[0x16bed+town*512] && wram[0x16bf1+town*512]==0x81);
       Word(before,0x21c+town*2,2);Word(before,0x16b26+town*2,source==1?16:32);
-      Word(before,0x19efa+town*2,8);
+      Word(before,0x19efa+town*2,credit);
       for(unsigned slot=0;slot<2;++slot)before[0x16be9+town*512+4*slot]=0;
       before[0x12000+ActRaiser_CellMarkIndex(town,2,2)]=8;
       for(unsigned dy=0;dy<2;++dy)for(unsigned dx=0;dx<2;++dx)before[0x12000+ActRaiser_CellMarkIndex(town,4+dx,4+dy)]=8;
@@ -140,7 +156,7 @@ static void Run(SaveBackend backend,unsigned failure,unsigned source) {
     Word(before,0x297,source==1?1800:2200);
     assert(!memcmp(wram,before,sizeof(wram))); /* Includes unchanged roads, plots, clocks, awards, story and actors. */
     assert(ActRaiserPopulation_Commit(&cpu,&campaign,&preview,folder,&error)==kActRaiserPopulation_Stale);
-    assert(ActRaiserPopulation_Preview(&cpu,&campaign,source,&preview)==kActRaiserPopulation_Unchanged);
+    assert(Preview(&cpu,&campaign,source,profile,&preview)==kActRaiserPopulation_Unchanged);
     assert(faults.calls==2);
     if(failure==4)assert(REMOVE_DIR(name_block)==0 && SaveSystem_AutoPersistIfChanged(&error));
     assert(Save_LoadFile(format,path,disk,&error) && !memcmp(disk,sram,sizeof(disk)));
@@ -148,7 +164,7 @@ static void Run(SaveBackend backend,unsigned failure,unsigned source) {
     assert(!memcmp(&saved,&campaign.active,sizeof(saved)));
     /* A loaded converted save contains no replayable demolition command. */
     assert(SaveSystem_LoadActive(&error) && ArRegionalCampaign_Continue(&campaign,path,sram,&error));
-    assert(ActRaiserPopulation_Preview(&cpu,&campaign,source,&preview)==kActRaiserPopulation_Unchanged);
+    assert(Preview(&cpu,&campaign,source,profile,&preview)==kActRaiserPopulation_Unchanged);
   }
   if(failure!=1 && failure!=2) {
     assert(Save_LoadFile(kSaveFileFormat_NativeSrm,recovered,disk,&error) && !memcmp(disk,checkpoint,sizeof(disk)));
@@ -158,8 +174,9 @@ static void Run(SaveBackend backend,unsigned failure,unsigned source) {
   Remove(native);Remove(ini);Remove(recovered);if(failure!=1)assert(REMOVE_DIR(folder)==0);
 }
 int main(void) {
-  for(unsigned backend=0;backend<2;++backend)for(unsigned failure=0;failure<5;++failure)for(unsigned source=0;source<3;++source)
-    Run(backend,failure,source);
+  for(unsigned profile=0;profile<2;++profile)for(unsigned backend=0;backend<2;++backend)
+    for(unsigned failure=0;failure<5;++failure)for(unsigned source=0;source<3;++source)
+      Run(backend,failure,source,profile!=0);
   puts("population conversion: both directions/backends, stale previews, recovery, rollback and cold reload passed");
   return 0;
 }

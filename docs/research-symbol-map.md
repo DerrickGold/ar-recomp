@@ -5,6 +5,11 @@ Addresses are the stable identifiers; names are descriptive and may change as
 a routine is better understood. See the [RAM map](ram-map.md) and
 [ROM map](rom-map.md) for field layouts.
 
+Selectable rules are organized by feature under `src/regional`; native adapters
+remain under `src/actraiser`. See [Regional architecture](regional-architecture.md)
+for their boundaries. Candidate native names here are not always the identifiers
+used by the C implementation.
+
 | Confidence | Meaning |
 |---|---|
 | Observed | A call pattern or effect was seen, but the full behavior is not mapped. |
@@ -66,6 +71,19 @@ for timer/contact addresses, tested scope and integration boundaries.
 | `$01:93CB` | `Nmi_AckReenableBracket` | Verified | Single `LDA $004210` ack plus `$4200=#$A1` re-enable bracket; legitimately called twice per frame by sim effect paths, so it is **not** a vblank spin. |
 
 ### Action objects, sprites, and HUD
+
+Regional presentation uses these existing native seams, not new ROM routines:
+
+| US seam | C implementation | Added ownership contract |
+| --- | --- | --- |
+| `$00:8D68` | `ActRaiser_BuildObjectSprites` → `ActRaiserActorArt_Draw` | Cached resident donor drawing parts only; native animation, extents and actor lifetime remain authoritative. |
+| `$00:8E2F` | `ActRaiser_ActionMotion` | Also admits the measured Aitos `$CE39/$CE48` pose swaps. Exact program/header guards and restoration of the borrowed word preserve native collision, motion and timing. This is broader than an ordinary-enemy velocity adapter. |
+| `$02:C5C9` | `ActRaiser_LzssDecompress` → completed-decode observer | Metadata-only overlap invalidation for the native `$4000/$5000` images; no assumed fixed 4 KiB ownership. |
+| `$02:B28E/$B330` | `ActRaiser_LoadActionCharacters` / `ActRaiser_LoadActionPalette` | Donor choice activates at ordinary-bank stage entrances and survives partial boss reloads. |
+
+Resource identities, title hooks and the relevant RAM fields are collected in
+the [ROM presentation index](rom-map.md#regional-presentation-hooks) and
+[RAM ownership note](ram-map.md#regional-actor-presentation-ownership).
 
 The regional magic-gesture seams are US `$00:9843` (standing dedicated-button
 gate) and `$00:9A6E` (shared ground-attack prefix). Their native continuations,

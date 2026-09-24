@@ -1,5 +1,6 @@
 #define _POSIX_C_SOURCE 200809L
-#include "regional/regional_session.h"
+#include "regional/session/regional_session.h"
+#include "regional/regional_profiles.h"
 #include "byte_order.h"
 
 #include <stdio.h>
@@ -1062,9 +1063,19 @@ static void CheckSessionState(void) {
   CHECK(ArRegionalSession_BeginRecovery(&session, &recovery, &changed) && changed == 3);
   CHECK(!recovery.cycle_sp && recovery.angel_calls == 60);
   CHECK(ArRegionalSession_BeginRecovery(&session, &recovery, &changed) && !changed);
-  session.requested.recovery.source[kArRegionalRecovery_SP] = kArRegionalSource_US;
+  ArRegionalRecoveryPolicy partial = session.requested.recovery;
+  partial.source[kArRegionalRecovery_SP] = kArRegionalSource_US;
+  before = session;
+  CHECK(!ArRegionalSession_RequestRecoveryPolicy(&session, session.revision, NULL));
+  CHECK(!ArRegionalSession_RequestRecoveryPolicy(&session, session.revision - 1, &partial));
+  CHECK(EqualSession(&session, &before));
+  CHECK(ArRegionalSession_RequestRecoveryPolicy(&session, session.revision, &partial));
   CHECK(ArRegionalSession_BeginRecovery(&session, &recovery, &changed) && changed == 1);
   CHECK(recovery.cycle_sp && recovery.angel_calls == 60);
+  before = session;
+  partial.source[kArRegionalRecovery_Angel] = kArRegionalSource_Count;
+  CHECK(!ArRegionalSession_RequestRecoveryPolicy(&session, session.revision, &partial));
+  CHECK(EqualSession(&session, &before));
   CHECK(ArRegionalSession_RequestRecovery(&session, session.revision, kArRegionalSource_US));
   session.revision = UINT32_MAX; before = session;
   CHECK(!ArRegionalSession_BeginRecovery(&session, &recovery, &changed) && changed == 1);
@@ -2159,7 +2170,55 @@ static void CheckFeatureCodec(void) {
   remove(path); remove(companion);
 }
 
+/* Captured from the pre-refactor v69 encoder. These fingerprints lock the
+ * exact payload bytes, not merely agreement between a new encoder/decoder. */
+static void CheckCodecGolden(void) {
+  static const uint64_t expected[] = {
+    UINT64_C(0x5d38674da232b3cb), UINT64_C(0xfa206a7d77317ca6), UINT64_C(0xbb3c832ff7fee12e),
+    UINT64_C(0x1b0fc42ae8ae5198), UINT64_C(0x586cd2132ad8f62d), UINT64_C(0x6c6474454a06c131),
+    UINT64_C(0x449db3d71f758f42), UINT64_C(0x463cea1055f6b4bb), UINT64_C(0xef7356c0b78dc313),
+  };
+  const char *path = "regional-codec-golden.srm";
+  const char *companion = "regional-codec-golden.srm.archeckpoint";
+  remove(path); remove(companion);
+  uint8_t image[kActRaiserSramSize]; Image(image, 42);
+  for (unsigned fixture = 0; fixture < 9; ++fixture) {
+    ArRegionalSession session, loaded;
+    const uint8_t id[16] = {42};
+    const ArRegionalCostPolicy costs = {{0}};
+    CHECK(ArRegionalSession_NewGame(&session, 0, id, &costs));
+    for (unsigned town = 0; town < 6; ++town) CHECK(ArRegionalLairHistory_InitTown(&session.lairs, town));
+    CHECK(ArRegionalLairReloads_Init(&session.reloads));
+    CHECK(ArRegionalProfiles_Expand(&session.requested, kArRegionalProfile_Gameplay, fixture / 3, &session.requested));
+    CHECK(ArRegionalProfiles_Expand(&session.requested, kArRegionalProfile_Presentation, fixture / 3, &session.requested));
+    CHECK(ArRegionalProfiles_Expand(&session.effective, kArRegionalProfile_Gameplay, fixture % 3, &session.effective));
+    CHECK(ArRegionalProfiles_Expand(&session.effective, kArRegionalProfile_Presentation, fixture % 3, &session.effective));
+    // Population conversion is atomic; the other families may still be pending.
+    session.effective.support = session.requested.support;
+    session.effective.level_goals = session.requested.level_goals;
+    session.effective.story = session.requested.story;
+    session.effective.town_status = session.requested.town_status;
+    session.requested.difficulty.level = fixture / 3;
+    session.effective.difficulty.level = fixture % 3;
+    SaveError error;
+    CHECK(ArRegionalSession_Save(&session, kSaveFileFormat_NativeSrm, path, fixture ? image : NULL, image, &error));
+    uint8_t payload[kSaveCheckpointPayloadMax]; size_t size = 0;
+    CHECK(SaveCheckpoint_Read(path, image, payload, sizeof(payload), &size, &error) == kSaveCheckpoint_Ready);
+    CHECK(size == 8966);
+    uint64_t hash = UINT64_C(14695981039346656037);
+    for (size_t i = 0; i < size; ++i) hash = (hash ^ payload[i]) * UINT64_C(1099511628211);
+    CHECK(hash == expected[fixture]);
+    CHECK(ArRegionalSession_Load(&loaded, 0, path, image, &error) == kSaveCheckpoint_Ready);
+    CHECK(!memcmp(&loaded.requested, &session.requested, sizeof(session.requested)));
+    CHECK(!memcmp(&loaded.effective, &session.effective, sizeof(session.effective)));
+  }
+  remove(path); remove(companion);
+}
+
 int main(void) {
+  CheckCodecGolden();
+  extern void TestRegionalProfiles(void);
+  TestRegionalProfiles();
   CheckActorArtwork();
   CheckPayloadBoundary();
   CheckFire();

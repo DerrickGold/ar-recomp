@@ -6,7 +6,7 @@
 #include "settings.h"
 #include "actraiser/actraiser_localization_schedule.h"
 #include "actraiser/actraiser_localization_runtime.h"
-#include "actraiser/actraiser_regional_runtime.h"
+#include "actraiser/regional/actraiser_regional_runtime.h"
 #include "actraiser/actraiser_miracle.h"
 
 typedef RecompReturn (*Routine)(CpuState *);

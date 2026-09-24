@@ -1,4 +1,4 @@
-#include "regional/regional_spell_inventory.h"
+#include "regional/action/regional_spell_inventory.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>

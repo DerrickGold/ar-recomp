@@ -1,5 +1,5 @@
 #include "actraiser/actraiser_stage_hazards.h"
-#include "regional/regional_hazards.h"
+#include "regional/action/regional_hazards.h"
 #include "byte_order.h"
 #include <assert.h>
 #include <stdio.h>

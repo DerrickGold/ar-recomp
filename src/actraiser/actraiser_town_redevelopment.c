@@ -2,7 +2,7 @@
 
 #include "actraiser_cell_map.h"
 #include "deterministic_hash.h"
-#include "regional/regional_construction.h"
+#include "regional/towns/regional_construction.h"
 
 #include <string.h>
 

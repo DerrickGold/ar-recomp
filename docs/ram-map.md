@@ -195,6 +195,30 @@ apron channel) must read it here and resolve through
 | slot `+3A` | 2 | Spawner backlink. The cast controller and player sword-beam child point to player `$08A0`; Bloodpool boss-lightning strike child `$08E0` points to boss `$12E0`, while its floor child `$0920` points to `$08E0`. Marahna split fireballs point to their retired `$E047` orb, snake fireballs point to their validated `$DE96` parent, linked-lightning children point to the first `$E18E` endpoint while the `$E254` partner occupies the next slot, and both `$E483` boss bolt stages point to boss `$12E0`. Death Heim's room owner is `$001C`; the Viper parent and the visible Flaming Wheel body retain it in their rematches. Minotaur axes and Ice Dragon balls instead point to a live parent with the same original/rematch source. The original Flaming Wheel body is root-owned (`0`); helper/child records have action-object backlinks and are rejected. Combined with `+32`, this validates linked families and remains stable while other control-flow fields change. |
 | `$7E:00F4/$00F8/$00F9` | 2 each | Input-enable mask, cast-active gate, and cast-transition state used by `$9DE1-$9F10` |
 
+### Regional actor presentation ownership
+
+The [actor-art adapter](../src/actraiser/regional/actraiser_actor_art.c) adds host-owned
+residency metadata, not a new emulated allocation. Native animation images
+commonly begin at `$7E:4000` and `$7E:5000`, but those bases do **not** imply
+exclusive 4 KiB banks. Verified images extend beyond that size; completed
+LZSS decodes invalidate overlapping pictures, or the whole binding when they
+overwrite its table/program prefix. See the
+[resource contracts](regional-differences-technical.md#shared-bank-and-palette-completion).
+
+Drawing resolves the native animation base (`+16` plus bank byte `+18`),
+composition pointer (`+20`) and visual ordinal (`+22`) against that metadata.
+It must not change collision extents (`+0A/+0C/+0E/+10`), row state (`+1A/+1C`)
+or delay (`+24`). Actor-art selection stays with a stage across partial room
+uploads; a current room number alone cannot establish resource ownership.
+
+Aitos pose-only projection at `$00:8E2F` additionally checks source records
+`$CE39/$CE48` in `+32`, exact native programs and composition headers. During
+birth, return `$969D` identifies the descriptor in Y before `+32` is installed.
+The adapter borrows and restores one visual word for native decoding; no
+foreign animation program becomes persistent WRAM state. The
+[native adapter](../src/actraiser/actraiser_action_motion.c) and its
+[parity tests](../tests/actraiser_action_motion_test.c) own this contract.
+
 Regional Pharaoh fixtures distinguish original source US `$C1A2` / JP `$C239`
 in raw room `$0603` from rematch `$F6FA/$F779` in `$0407`.
 The HP-owning root, health helper, sphere, converted wall head and

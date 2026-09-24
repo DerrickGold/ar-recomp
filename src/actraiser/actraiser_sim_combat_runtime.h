@@ -1,7 +1,7 @@
 #ifndef ACTRAISER_SIM_COMBAT_RUNTIME_H
 #define ACTRAISER_SIM_COMBAT_RUNTIME_H
 #include "actraiser_sim_combat.h"
-#include "actraiser_regional_runtime.h"
+#include "actraiser/regional/actraiser_regional_runtime.h"
 bool ActRaiser_RegionalSimCacheEntry(CpuState *cpu);
 RecompReturn ActRaiser_RegionalSimCacheLoad(CpuState *cpu);
 RecompReturn ActRaiser_RegionalSimCacheSave(CpuState *cpu);

@@ -1,6 +1,6 @@
 #ifndef ACTRAISER_SIM_COMBAT_H
 #define ACTRAISER_SIM_COMBAT_H
-#include "regional/regional_sim_combat.h"
+#include "regional/towns/regional_sim_combat.h"
 #include "snesrecomp/game/cpu.h"
 bool ActRaiserSimCombat_CacheTown(CpuState *cpu,unsigned *town);
 bool ActRaiserSimCombat_BirthSlot(CpuState *cpu,unsigned *town,unsigned *slot);

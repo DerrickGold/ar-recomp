@@ -42,7 +42,7 @@ func TestGeneratedCatalogCurrent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := os.ReadFile("../../../src/regional/regional_media_catalog.inc")
+	got, err := os.ReadFile("../../../src/regional/media/regional_media_catalog.inc")
 	if err != nil {
 		t.Fatal(err)
 	}

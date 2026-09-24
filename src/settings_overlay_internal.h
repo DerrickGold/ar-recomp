@@ -45,6 +45,7 @@ typedef enum {
   kMenuNav_TabPrev,  /* previous tab of the current section */
   kMenuNav_TabNext,
   kMenuNav_Close,
+  kMenuNav_Details,  /* read-only expanded explanation of a regional option */
 } MenuNav;
 
 /* Resolved per-frame geometry for one overlay draw pass. */

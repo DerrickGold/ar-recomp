@@ -1,4 +1,4 @@
-#include "actraiser/actraiser_actor_art.h"
+#include "actraiser/regional/actraiser_actor_art.h"
 #include "actraiser/actraiser_lzss.h"
 
 #include <assert.h>

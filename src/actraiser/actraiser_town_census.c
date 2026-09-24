@@ -1,7 +1,7 @@
 #include "actraiser_town_census.h"
 #include "actraiser_bridge_extension.h"
 #include "actraiser_hle_fatal.h"
-#include "actraiser_regional_runtime.h"
+#include "actraiser/regional/actraiser_regional_runtime.h"
 
 enum {
   kVar_TownIndexWord=0x7bfb, kVar_AllocSlot=0x7c05, kVar_AllocRemaining=0x7c1d,

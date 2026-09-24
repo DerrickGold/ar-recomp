@@ -1,6 +1,6 @@
-#include "actraiser/actraiser_town_art.h"
-#include "actraiser/actraiser_regional_media.h"
-#include "regional/regional_artwork.h"
+#include "actraiser/regional/actraiser_town_art.h"
+#include "actraiser/regional/actraiser_regional_media.h"
+#include "regional/presentation/regional_artwork.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>

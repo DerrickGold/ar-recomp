@@ -1,7 +1,7 @@
 #include "actraiser/actraiser_localization_schedule.h"
 #include "actraiser/actraiser_sim_menu.h"
 #include "actraiser/actraiser_miracle_text.h"
-#include "actraiser/actraiser_regional_runtime.h"
+#include "actraiser/regional/actraiser_regional_runtime.h"
 
 #include <stdio.h>
 #include <stdlib.h>

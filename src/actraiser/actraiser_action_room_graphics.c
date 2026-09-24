@@ -8,9 +8,9 @@
 #include "actraiser/actraiser_lzss.h"
 #include "actraiser_action_room_hle_internal.h"
 #include "actraiser_game.h"
-#include "actraiser_regional_runtime.h"
-#include "actraiser_regional_media.h"
-#include "actraiser_actor_art.h"
+#include "actraiser/regional/actraiser_regional_runtime.h"
+#include "actraiser/regional/actraiser_regional_media.h"
+#include "actraiser/regional/actraiser_actor_art.h"
 #include "actraiser_hle_fatal.h"
 
 enum {

@@ -12,7 +12,7 @@ import (
 	"github.com/DerrickGold/ar-recomp/installer/internal/gamerom"
 )
 
-//go:generate go run ./cmd/gencatalog ../../../src/regional/regional_media_catalog.inc
+//go:generate go run ./cmd/gencatalog ../../../src/regional/media/regional_media_catalog.inc
 //go:embed catalog.json
 var catalogJSON []byte
 

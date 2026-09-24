@@ -3,7 +3,7 @@
 #include "snesrecomp/game/cpu.h"
 #include "snesrecomp/runner.h"
 #include "snesrecomp/spc_upload.h"
-#include "actraiser/actraiser_regional_media.h"
+#include "actraiser/regional/actraiser_regional_media.h"
 
 #include <stdbool.h>
 #include <stdint.h>

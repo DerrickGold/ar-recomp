@@ -1,6 +1,6 @@
 #include "actraiser/actraiser_difficulty.h"
 #include "actraiser/actraiser_cpu_hle_internal.h"
-#include "regional/regional_difficulty.h"
+#include "regional/action/regional_difficulty.h"
 #include "byte_order.h"
 #include "quintet_lzss.h"
 #include <assert.h>

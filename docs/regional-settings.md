@@ -1,20 +1,124 @@
 # Regional settings
 
-Open **Settings → Localization → Regional rules** at the title screen or during
+Open **Settings → Regions** (the **Regional rules** section) at the title screen or during
 a game. Title-screen choices apply to a new game; **Continue** restores the
 saved campaign's rules instead. The draft does not change your existing save.
-You can choose spell-scroll costs, miracle SP costs, initial room
-time limits, checkpoint-retry score handling, development pacing, construction
-waits, Fillmore's fishing target, town recovery, earthquake destruction and
-the Master report's score page, town-menu return behavior, message-speed
-choices, magic controls, monster reserves, house-loss and act-score feedback,
-the action HUD's life-count convention, Source activation, the Magic Skull
-wait, story prerequisites, lair respawn delays, town growth reports and level
-population goals independently. Population support changes use the confirmed
-conversion described below rather than an immediate toggle. A title-screen
-draft has no developed towns, so it needs no conversion or recovery copy.
-The flag and name beside each choice identify its source rules, not the
-language of your game.
+
+US is the default. Each row outside **Presets** changes only the feature it
+names. The first row of a tab is not a parent setting for the rows below it.
+
+On **Presets**, use Left/Right to choose a region, then Confirm to review
+the changes. Browsing does not apply anything. **Apply gameplay preset…**
+replaces action, town and interface rules, including difficulty: EU presets
+select EU Normal; US/JP select Original. **Apply art/music preset…** replaces
+artwork, visual effects and music choices. Both require confirmation, even
+before a new game. Neither changes language, fonts, physical button bindings,
+randomizer settings or game fixes.
+
+Use L/R on a controller or [ / ] on a keyboard to switch tabs directly.
+The tab counter shows your position (for example, 1/5); partial labels and
+arrows indicate more tabs. Press **X** (game button) or **F3** while selecting
+an option to read its full description. Up/Down scrolls, Left/Right pages,
+and Back/Esc returns to the same option without changing it. **Y** still
+resets the selected option. The compact footer keeps the same height in every
+section; an ellipsis means more text is available in Details.
+The tabs contain separate choices, not regional bundles:
+
+| Tab | Examples of independent choices | When changes apply |
+| --- | --- | --- |
+| Action | Difficulty; terrain; enemy and item placements; time limits; traps; enemy stats; movement; hit areas; attacks; spell costs; casting pauses; inventory; starting health; starting lives; retry score; extra lives; mode access | Room entry/retry, or the next applicable cast, run start or reward |
+| Towns | Population and goals; construction; development; fishing; lair reserves and timing; monster combat and targets; costs; SP recovery; angel-health recovery; earthquakes; resource credit; Sources; reports; story prerequisites; island arrival | Subsequent activity or reports; population support requires Palace review; an arrival already started stays fixed |
+| Controls & menus | Cast magic; lives display; Master score page; return after town dialogs; message-speed choices | Next use/menu; an already-open menu finishes unchanged |
+| Artwork & music | Enemy sprites; individual scene/item/symbol graphics; Aitos poses and distortion; stage music choice; music versions | Next room/scene or track load; current playback is not interrupted |
+
+Flags with **US / EU / JP** identify rule provenance, not your
+game's language. Full region names remain in help and confirmations.
+Europe represents gameplay shared by its releases; it is not a language selector.
+
+Mixed rules show **Custom**. Equal-valued regional rules may still match a
+preset. A `*` marks a choice waiting for its next room, scene or use; the
+help also shows the currently active choice. Missing donor media shows
+an explanation at the start of the option description: the requested region
+is retained, with US assets used where donor data is missing. Missing media
+is not a separate option value. The `*` still indicates pending activation,
+independently of that fallback.
+See [regional media](regional-media.md) for extraction and installation.
+
+## Mixing difficulty with other rules
+
+**Action → Difficulty adjustments** selects **Original**, **EU Beginner**,
+**EU Normal** or **EU Expert** in a single step. EU choices enable their
+adjustments on top of US, Japanese or European base combat rules; no EU ROM is
+needed. Changing another individual row does not turn them off.
+
+Difficulty governs eligible enemy HP, contact-damage adjustments, countdown
+speed and the documented dragon/tendril changes. **Starting time limits**
+still chooses how much time a room starts with, while **Base enemy stats**
+chooses the numbers before difficulty adjustments. Neither is disabled because
+both remain meaningful. Terrain and trap damage remain independent.
+
+Only European enemy layouts contain difficulty-marked placements. With those
+layouts, the level also selects which enemies appear; Original uses the Normal
+placement set. US/JP layouts retain their authored counts. The selected-row
+help identifies this limitation; choosing Expert never silently replaces a
+US layout with a European one.
+
+For example, keep US terrain and enemies, select JP boss patterns, then choose
+EU Beginner. The Beginner adjustments apply without changing those choices.
+Applying a whole gameplay preset later deliberately replaces them together;
+its confirmation lists that scope.
+
+## Controls and menus
+
+These choices are separate from physical button bindings and language:
+
+| Choice | US/EU behavior | JP behavior |
+| --- | --- | --- |
+| Cast magic | Magic button | Up + attack |
+| Lives display | Includes the current life | Spare lives only; 0 still permits an attempt |
+| Master score page | Shown | Hidden; recorded scores are kept |
+| After town dialogs | Resume angel control | Keep the command menu open and simulation paused |
+| Message-speed choices | 0–9 | 0–7 |
+
+Changing the lives display does not grant or remove attempts. Changing the
+message-speed range does not select a new speed or language.
+
+## Changing rules during a campaign
+
+The gold note below each setting describes its town impact:
+
+- **No town rebuild**: switching does not itself redevelop towns. Gameplay can
+  still have indirect consequences, and activation may wait for a room or scene.
+- **Changes future development**: subsequent construction, resources or monster
+  behavior use the new rules; past events are not replayed.
+- **May rebuild towns | Fresh save recommended**: a support-capacity change
+  requires redevelopment. Starting fresh avoids that disruption but is optional.
+- **Estimated history**: the save uses approximated regional counters from an
+  older campaign. New campaigns track those counters from the beginning.
+
+Consequential mid-game edits show a cancel-default warning before applying or
+queuing the selection. This preview compares actual rules and retained history;
+equivalent US/EU support does not trigger a redevelopment warning. New-game
+drafts do not need these warnings. Unavailable history and replay locks still
+prevent unsafe changes.
+
+On an existing campaign, a selection that changes population support stays
+pending in its entirety until you confirm redevelopment at the Palace. This
+includes a full Gameplay preset: combat and economy do not switch early.
+The confirmation covers the whole selection and creates a pre-change recovery
+copy. Cancel leaves all those rules unchanged. Selecting the current profile
+cancels a queued conversion; another rule edit invalidates its old preview.
+A new-game draft has no developed towns and needs no conversion or backup.
+
+Ordinary choices are saved with the Progress Log, not global settings.
+Recording/replay locks changes, but you can still browse the groups.
+
+## Detailed rule reference
+
+The sections below explain the rules behind the named choices. Some describe
+individual parts of a feature rather than additional menu rows. Population
+support and its compatible level/story goals deliberately remain together;
+growth reports and the failed-Act-2 Compass prerequisite are separate choices.
 
 ## Death Heim arrival
 
@@ -69,10 +173,11 @@ It does not change the effect's speed, the room's terrain or its enemies.
 
 ### Difficulty rules
 
-**Difficulty rules** selects the US/Japanese or European transformations;
-**European difficulty** chooses Beginner, Normal or Expert. These are saved
-with your campaign and take effect at the next room entry or retry. Selecting
-a level has no effect on rules that still use US/Japanese behavior.
+**Difficulty adjustments** enables or disables the European transformations
+and selects their level in one operation. The choice is saved with your
+campaign and takes effect at the next room entry or retry. Original retains
+the native US/Japanese handling; EU Normal is distinct from Original in
+action-only mode.
 
 | Rule | US / Japan | European Beginner | European Normal | European Expert |
 | --- | --- | --- | --- | --- |
@@ -89,9 +194,10 @@ does not change terrain hazards. The clock keeps its current countdown and
 pause gates, and all choices run at 60 Hz. Existing enemies, projectiles and
 attacks are never reset by editing a setting. No donor ROM is needed.
 
-The five internal difficulty rules are independently selectable. Enemy
-placement, terrain, initial room time and the action-only campaign's entry
-and inventory rules are separate features, not implied by this setting.
+The five internal difficulty rules remain individually represented for old
+mixes and debugging. A partial legacy mix is shown as Custom until a complete
+choice is selected. Terrain, initial room time and action-only mode access
+and inventory remain separate features, not implied by this setting.
 
 ### Stage terrain
 
@@ -216,7 +322,8 @@ or retry and never grant rewards for earlier points or reset current lives.
 This rule does not enable Action Mode, change starting attempts, or select
 European items or difficulty.
 
-**Action Mode starting stats** selects the allowance for a new Action run:
+**Action-mode starting HP** and **Action-mode attempts** independently select
+the allowance for a new Action run:
 
 | Rules | Total attempts | Starting and maximum health |
 | --- | ---: | ---: |
@@ -224,7 +331,7 @@ European items or difficulty.
 | Japan | 3 | 24 |
 | Europe | 5 | 8 |
 
-Attempts and health are independent internally. A request never overwrites
+Changing either choice leaves the other intact. A request never overwrites
 the current run's lives or health, and ordinary retries and room changes do
 not activate it. The native new-run initializer still clears score, scrolls,
 equipped magic and sword power. Story mode is unaffected.
@@ -240,9 +347,10 @@ return to the title after Game Over. Enable access in the title overlay, then
 press Start or change the highlighted choice. Continue is only offered when
 the native save checksum is valid; no completion marker is written.
 
-The European return retains your requested regional rules for the next run
-but resets difficulty to Normal. Choose another difficulty in the overlay
-before starting. A US/Japanese Game Over starts another Action run directly.
+The European return retains your requested regional rules, including difficulty,
+for the next run. Unlike the native European title flow, returning does not
+reset the independently selected difficulty. A US/Japanese Game Over starts
+another Action run directly.
 The return policy is captured when you press Start on Game Over. Neither
 route changes the battery save; Continue always restores its own rules.
 Mode labels remain owned by the selected language, not the rules preset.
@@ -589,7 +697,8 @@ resetting its clocks. Open menus and effects retain their native pause rules;
 these counts are not a promise of elapsed seconds. Construction waits, fishing
 targets, HP/SP recovery and the host's 60 Hz clock are separate.
 
-**Town recovery** selects the routine HP/SP recovery rules. US/Europe replaces
+**SP from construction** and **Angel health recovery** independently select
+the routine recovery rules. US/Europe replaces
 the pending recovery amounts each long cycle with one tenth of maximum SP and
 one quarter of the angel's maximum HP, rounded down. The angel's normal update
 drains one queued SP on every fourth frame phase and one HP on every sixteenth.
@@ -597,8 +706,8 @@ Japan has no cycle-based SP refill; the angel instead recovers one HP every
 60 eligible movement-service calls. Native pauses still apply, including the
 Japanese exclusion for angel state 4. These are service counts, not seconds.
 
-The choice applies at the next recovery service. Changing a recovery rule
-discards its old pending queue or partial clock without removing HP/SP already
+Each choice applies at the next recovery service. Changing one recovery rule
+discards only its old pending queue or partial clock without removing HP/SP already
 earned. It does not grant an immediate refill. Switching between equal US and
 European rules preserves the queue. Level-up, lair-sealing and other rewards
 remain independent, as does the selected development clock.

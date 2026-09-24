@@ -1,9 +1,9 @@
 #include "actraiser_action_inventory.h"
-#include "actraiser_regional_runtime.h"
+#include "actraiser/regional/actraiser_regional_runtime.h"
 #include "actraiser_cpu_hle_internal.h"
 #include "actraiser_native_call.h"
 #include "actraiser_hle_fatal.h"
-#include "actraiser_regional_media.h"
+#include "actraiser/regional/actraiser_regional_media.h"
 
 extern RecompReturn bank_02_AF30_M1X0(CpuState *cpu);
 extern RecompReturn bank_02_AF3D_M1X0(CpuState *cpu);

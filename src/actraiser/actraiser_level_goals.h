@@ -1,7 +1,7 @@
 #ifndef ACTRAISER_LEVEL_GOALS_H
 #define ACTRAISER_LEVEL_GOALS_H
 #include "snesrecomp/game/cpu.h"
-#include "regional/regional_level_goals.h"
+#include "regional/towns/regional_level_goals.h"
 
 bool ActRaiserLevelGoals_PrefixEntry(const CpuState *cpu);
 bool ActRaiserLevelGoals_Compare(CpuState *cpu,bool japanese);

@@ -6,7 +6,7 @@
 
 #include <stdio.h>
 #include "actraiser/actraiser_sim_menu.h"
-#include "actraiser/actraiser_regional_runtime.h"
+#include "actraiser/regional/actraiser_regional_runtime.h"
 #include "actraiser/actraiser_miracle_translation.h"
 #include "localization/unicode_grapheme.h"
 #include "actraiser/actraiser_localization_style.h"

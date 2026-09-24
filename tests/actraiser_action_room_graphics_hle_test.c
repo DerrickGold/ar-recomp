@@ -1,6 +1,6 @@
 #include "actraiser/actraiser_action_room_graphics.h"
-#include "actraiser/actraiser_regional_media.h"
-#include "actraiser/actraiser_actor_art.h"
+#include "actraiser/regional/actraiser_regional_media.h"
+#include "actraiser/regional/actraiser_actor_art.h"
 
 #include <stdio.h>
 #include <stdlib.h>

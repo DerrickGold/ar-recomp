@@ -1,6 +1,6 @@
 #include "actraiser_score_feedback.h"
 #include "actraiser_cpu_hle_internal.h"
-#include "regional/regional_score_feedback.h"
+#include "regional/towns/regional_score_feedback.h"
 
 bool ActRaiserScoreFeedback_Entry(const CpuState *cpu) {
   return cpu && cpu->PB==3 && cpu->DB==0x7f && !cpu->D && !cpu->emulation &&

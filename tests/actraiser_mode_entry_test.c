@@ -1,6 +1,6 @@
 #include "actraiser/actraiser_mode_entry.h"
 #include "actraiser/actraiser_native_call.h"
-#include "regional/regional_mode_entry.h"
+#include "regional/action/regional_mode_entry.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>

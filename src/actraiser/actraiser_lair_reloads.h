@@ -1,7 +1,7 @@
 #ifndef ACTRAISER_LAIR_RELOADS_H
 #define ACTRAISER_LAIR_RELOADS_H
 
-#include "regional/regional_lair_reloads.h"
+#include "regional/towns/regional_lair_reloads.h"
 #include "snesrecomp/game/cpu.h"
 #include "save_system.h"
 

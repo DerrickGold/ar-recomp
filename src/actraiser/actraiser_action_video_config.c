@@ -6,8 +6,8 @@
 
 #include "actraiser_action_room_hle_internal.h"
 #include "actraiser_game.h"
-#include "actraiser_actor_art.h"
-#include "actraiser/actraiser_regional_runtime.h"
+#include "actraiser/regional/actraiser_actor_art.h"
+#include "actraiser/regional/actraiser_regional_runtime.h"
 #include "actraiser/actraiser_hle_fatal.h"
 
 extern RecompReturn bank_02_B4E8_M1X0(CpuState *cpu);

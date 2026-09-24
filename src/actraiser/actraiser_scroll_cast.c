@@ -1,7 +1,7 @@
 #include "actraiser/actraiser_scroll_cast.h"
 #include "actraiser/actraiser_cpu_hle_internal.h"
 #include "actraiser/actraiser_hle_fatal.h"
-#include "actraiser/actraiser_regional_runtime.h"
+#include "actraiser/regional/actraiser_regional_runtime.h"
 
 bool ActRaiserScrollCast_Entry(const CpuState *cpu) {
   return cpu && cpu->PB == 0 && cpu->DB == 0 && cpu->D == 0 &&

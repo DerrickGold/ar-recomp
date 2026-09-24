@@ -1,6 +1,6 @@
 #include "actraiser/actraiser_scroll_cast.h"
 #include "actraiser/actraiser_cpu_hle_internal.h"
-#include "actraiser/actraiser_regional_runtime.h"
+#include "actraiser/regional/actraiser_regional_runtime.h"
 
 #include <assert.h>
 #include <stdio.h>

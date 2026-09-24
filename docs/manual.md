@@ -97,6 +97,31 @@ Known `AR_*` settings in `config.ini` use the config tier. Diagnostic-only
 `AR_*` and `SNESREF_*` keys retain the environment bridge, so command-line
 environment values override both files.
 
+## Language and regional choices
+
+**Settings → Localization** keeps game text separate from regional mechanics.
+Choose an installed language pack by name under **Text source**. The built-in
+US text supports native or enhanced fonts; translations use enhanced rendering.
+See [language packs](language-packs.md) for installation and authoring.
+
+Open **Settings → Regions** for regional rules. **Presets** lets you choose,
+review and apply a whole gameplay or artwork/music preset; browsing applies
+nothing. Other tabs contain independent feature choices, not parent settings.
+Difficulty adjustments work with any region's base combat rules. US remains
+the default. Gold impact notes and mid-game confirmations
+explain town consequences without requiring a new game.
+Choices belong to the campaign and are saved with the Progress Log; title-screen
+choices prepare a new game, while Continue restores the saved campaign.
+Changes wait for safe boundaries. Population support changes require a
+confirmed redevelopment at the Palace with a recovery backup.
+Press SNES **X** or **F3** on a regional option to read its full description;
+Up/Down scrolls, Left/Right pages, and Back/Esc returns to the same option.
+
+The [regional settings reference](regional-settings.md) explains each group,
+pending changes and save recovery. Some artwork and music need a locally
+extracted [regional media package](regional-media.md); missing media falls back
+to US assets without changing your requested region or language.
+
 ## Controls
 
 **Settings → Controls** stores separate keyboard and gamepad bindings. *Input

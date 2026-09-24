@@ -16,6 +16,26 @@ through the fade. The guarded regional acknowledgement precedes that restore;
 cancellation returns to `$02:A75B` without replacing the native title frame.
 New Game and Professional bypass the Continue restore.
 
+## Regional presentation hooks
+
+These are US entry points. Their C owners preserve the boundaries described in
+[Regional architecture](regional-architecture.md). Donor ROM addresses remain
+release-specific data, not callable replacements for these entries.
+
+| US address | C owner / configuration | Regional presentation contract |
+| --- | --- | --- |
+| `$00:8E2F` | `ActRaiser_ActionMotion`, [bank00.cfg](../recomp/bank00.cfg) | Native animation-reader adapter for motion/timelines, guarded collision policies and Aitos pose selection. Pose-only swaps for sources `$CE39/$CE48` preserve timing and collision; the borrowed visual word is restored on normal and abnormal returns. |
+| `$00:8D68` | `ActRaiser_BuildObjectSprites`, [sprite emitter](../src/actraiser/actraiser_widescreen_sprites.c) | Uses validated resident donor drawing parts, not donor animation programs or collision headers. Missing/unowned pictures retain native or existing gameplay-owned geometry. |
+| `$02:B28E/$B330` | `ActRaiser_LoadActionCharacters` / `ActRaiser_LoadActionPalette`, [bank02.cfg](../recomp/bank02.cfg) | Accepted CHR/palette uploads capture actor artwork at stage entry. Partial boss reloads keep the stage choice; native resource operands and upload ABI remain owners. |
+| `$02:C5C9` | `ActRaiser_LzssDecompress` | Completed native-equivalent decode notifies actor-art residency. Overlap invalidation is metadata-only; it does not replace animation bytes or reserve new WRAM. |
+| `$02:B34D/$B2D2/$B4AB` | `ActRaiser_LoadTitlePalette` / `ActRaiser_LoadTitleCharacters` / `ActRaiser_LoadTitleMap` | One captured title-art selection supplies the three donor planes; native animation and language-owned copyright/text remain separate. |
+
+The checked source inventory is
+[actor-native.json](../installer/internal/regionalmedia/actor-native.json).
+See [shared-bank ownership](regional-differences-technical.md#shared-bank-and-palette-completion)
+and [Aitos pose evidence](regional-differences-technical.md#aitos-humanoid-pose-order)
+for the five-ROM resource and program comparisons.
+
 ## Interrupt Vectors
 
 | Vector | Address | Purpose |

@@ -1,5 +1,5 @@
 #include "actraiser_actor_stats.h"
-#include "actraiser_regional_runtime.h"
+#include "actraiser/regional/actraiser_regional_runtime.h"
 #include "actraiser_platform_skull.h"
 #include "actraiser_cast_hold.h"
 #include "actraiser_cpu_hle_internal.h"

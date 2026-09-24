@@ -1,5 +1,5 @@
 #include "actraiser_mode_entry.h"
-#include "actraiser_regional_runtime.h"
+#include "actraiser/regional/actraiser_regional_runtime.h"
 #include "actraiser_cpu_hle_internal.h"
 #include "actraiser_native_call.h"
 #include "actraiser_hle_fatal.h"

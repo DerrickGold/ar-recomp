@@ -4,8 +4,8 @@
 #include "snesrecomp/game/cpu.h"
 #include "snesrecomp/runner.h"
 #include "snesrecomp/spc_upload.h"
-#include "actraiser_regional_media.h"
-#include "actraiser_regional_runtime.h"
+#include "actraiser/regional/actraiser_regional_media.h"
+#include "actraiser/regional/actraiser_regional_runtime.h"
 
 #include <stddef.h>
 #include <stdint.h>

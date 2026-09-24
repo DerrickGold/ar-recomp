@@ -23,7 +23,7 @@
 #include "action/action_obj_apron.h"
 #include "actraiser_game.h"
 #include "actraiser_rtl.h"
-#include "actraiser/actraiser_actor_art.h"
+#include "actraiser/regional/actraiser_actor_art.h"
 #include "display_geometry.h"
 #include "snesrecomp/runner.h"
 #include "settings.h"

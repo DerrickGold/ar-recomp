@@ -1,6 +1,6 @@
 #include "actraiser/actraiser_sim_ai_runtime.h"
 #include "actraiser/actraiser_cpu_hle_internal.h"
-#include "regional/regional_sim_actors.h"
+#include "regional/towns/regional_sim_actors.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>

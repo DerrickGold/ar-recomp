@@ -1,8 +1,8 @@
 #include "actraiser/actraiser_action_inventory.h"
-#include "actraiser/actraiser_regional_runtime.h"
+#include "actraiser/regional/actraiser_regional_runtime.h"
 #include "actraiser/actraiser_native_call.h"
 #include "actraiser/actraiser_scroll_cast.h"
-#include "actraiser/actraiser_regional_media.h"
+#include "actraiser/regional/actraiser_regional_media.h"
 #include "actraiser/actraiser_cpu_hle_internal.h"
 #include "byte_order.h"
 #include <assert.h>

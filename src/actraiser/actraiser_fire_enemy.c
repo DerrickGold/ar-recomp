@@ -1,5 +1,5 @@
 #include "actraiser_fire_enemy.h"
-#include "actraiser_regional_runtime.h"
+#include "actraiser/regional/actraiser_regional_runtime.h"
 #include "actraiser_cpu_hle_internal.h"
 #include "actraiser_hle_fatal.h"
 #include "actraiser_game.h"

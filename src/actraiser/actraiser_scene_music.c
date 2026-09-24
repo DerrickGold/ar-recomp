@@ -1,7 +1,7 @@
 #include "actraiser_scene_music.h"
-#include "actraiser_regional_runtime.h"
+#include "actraiser/regional/actraiser_regional_runtime.h"
 #include "actraiser_hle_fatal.h"
-#include "regional/regional_music.h"
+#include "regional/presentation/regional_music.h"
 
 bool ActRaiser_SceneMusicEntry(CpuState *cpu) {
   return cpu && !cpu->emulation && cpu->m_flag && !cpu->x_flag && !cpu->D &&
