@@ -34,6 +34,9 @@ static bool EqualSession(const ArRegionalSession *a, const ArRegionalSession *b)
       !memcmp(&a->effective.action_start,&b->effective.action_start,sizeof(a->effective.action_start)) &&
       a->requested.score_lives==b->requested.score_lives && a->effective.score_lives==b->effective.score_lives &&
       a->requested.spell_inventory==b->requested.spell_inventory && a->effective.spell_inventory==b->effective.spell_inventory &&
+      a->requested.hazards==b->requested.hazards && a->effective.hazards==b->effective.hazards &&
+      a->requested.terrain==b->requested.terrain && a->effective.terrain==b->effective.terrain &&
+      a->requested.music==b->requested.music && a->effective.music==b->effective.music &&
       !memcmp(&a->requested.difficulty,&b->requested.difficulty,sizeof(a->requested.difficulty)) &&
       !memcmp(&a->effective.difficulty,&b->effective.difficulty,sizeof(a->effective.difficulty)) &&
       a->requested.statue_volley==b->requested.statue_volley && a->effective.statue_volley==b->effective.statue_volley &&
@@ -234,8 +237,8 @@ static void CheckVolley(void) {
 static void CheckBosses(void) {
   const uint8_t id[16]={1};const ArRegionalCostPolicy defaults={{0}};
   ArRegionalSession session;CHECK(ArRegionalSession_NewGame(&session,0,id,&defaults));
-  const unsigned bounds[]={0,7,11,13,15,19,22,kArRegionalBoss_Count},combinations[]={2187,81,9,9,81,27,81};
-  for(unsigned group=0;group<7;++group)for(unsigned n=0;n<combinations[group];++n) {
+  const unsigned bounds[]={0,7,11,13,15,19,22,26,30,kArRegionalBoss_Count},combinations[]={2187,81,9,9,81,27,81,81,3};
+  for(unsigned group=0;group<9;++group)for(unsigned n=0;n<combinations[group];++n) {
     ArRegionalBossPolicy policy={{0}};unsigned digits=n;
     for(unsigned i=bounds[group];i<bounds[group+1];++i){policy.source[i]=digits%3;digits/=3;}
     uint64_t expected=UINT64_MAX,snapshot=UINT64_MAX;
@@ -1258,7 +1261,7 @@ static void CheckFeatureCodec(void) {
     CHECK(!ArRegionalSession_Save(&session, kSaveFileFormat_NativeSrm, path, image, image, &error));
   }
   /* Reordering valid named fields is supported; they are not enum ordinals. */
-  enum { records = kArRegionalCostRule_Count + kArRegionalTimerRule_Count + 17 + kArRegionalDevelopmentRule_Count + kArRegionalRecovery_Count + kArRegionalQuake_Count + kArRegionalLairCount + kArRegionalScore_Count + kArRegionalSourceItem_Count + kArRegionalStory_Count + kArRegionalTownStatus_Count + kArRegionalSimCombat_Count + kArRegionalSimAi_Count + kArRegionalSupport_Count + kArRegionalActionMotion_Count + kArRegionalEmitter_Count + kArRegionalBoss_Count + kArRegionalCollision_Count + kArRegionalPlatformSkull_Count + kArRegionalActorStat_Count + kArRegionalCastHold_Count + kArRegionalFire_Count + kArRegionalDifficultyRule_Count + kArRegionalActionStart_Count + kArRegionalMode_Count };
+  enum { records = kArRegionalCostRule_Count + kArRegionalTimerRule_Count + 20 + kArRegionalDevelopmentRule_Count + kArRegionalRecovery_Count + kArRegionalQuake_Count + kArRegionalLairCount + kArRegionalScore_Count + kArRegionalSourceItem_Count + kArRegionalStory_Count + kArRegionalTownStatus_Count + kArRegionalSimCombat_Count + kArRegionalSimAi_Count + kArRegionalSupport_Count + kArRegionalActionMotion_Count + kArRegionalEmitter_Count + kArRegionalBoss_Count + kArRegionalCollision_Count + kArRegionalPlatformSkull_Count + kArRegionalActorStat_Count + kArRegionalCastHold_Count + kArRegionalFire_Count + kArRegionalDifficultyRule_Count + kArRegionalActionStart_Count + kArRegionalMode_Count + kArRegionalPlacement_Count + 1 };
   CHECK(ByteOrder_ReadLe16(original + 10) == records);
   if(ByteOrder_ReadLe16(original+10)!=records)return; /* Do not cascade into invalid fixture offsets. */
   size_t offsets[records], offset = 36;
@@ -1764,6 +1767,121 @@ static void CheckFeatureCodec(void) {
       mutated,v54_bytes+size-rules_end,AcceptOpaque,NULL,&error));
   CHECK(ArRegionalSession_Load(&loaded,2,path,image,&error)==kSaveCheckpoint_Ready);
   CHECK(!loaded.requested.mode_entry.source[0] && !loaded.effective.mode_entry.source[1]);
+  const size_t v55_bytes=offsets[226];
+  memcpy(mutated,original,v55_bytes);ByteOrder_WriteLe16(mutated+8,55);ByteOrder_WriteLe16(mutated+10,226);
+  memcpy(mutated+v55_bytes,original+rules_end,size-rules_end);
+  CHECK(SaveCheckpoint_Commit(kSaveFileFormat_NativeSrm,path,image,image,
+      mutated,v55_bytes+size-rules_end,AcceptOpaque,NULL,&error));
+  CHECK(ArRegionalSession_Load(&loaded,2,path,image,&error)==kSaveCheckpoint_Ready);
+  for(unsigned i=26;i<30;++i)CHECK(!loaded.requested.bosses.source[i] && !loaded.effective.bosses.source[i]);
+  const size_t v56_bytes=offsets[230];
+  memcpy(mutated,original,v56_bytes);ByteOrder_WriteLe16(mutated+8,56);ByteOrder_WriteLe16(mutated+10,230);
+  memcpy(mutated+v56_bytes,original+rules_end,size-rules_end);
+  CHECK(SaveCheckpoint_Commit(kSaveFileFormat_NativeSrm,path,image,image,
+      mutated,v56_bytes+size-rules_end,AcceptOpaque,NULL,&error));
+  CHECK(ArRegionalSession_Load(&loaded,2,path,image,&error)==kSaveCheckpoint_Ready);
+  CHECK(!loaded.requested.bosses.source[30] && !loaded.effective.bosses.source[30]);
+  const size_t v57_bytes=offsets[231];
+  memcpy(mutated,original,v57_bytes);ByteOrder_WriteLe16(mutated+8,57);ByteOrder_WriteLe16(mutated+10,231);
+  memcpy(mutated+v57_bytes,original+rules_end,size-rules_end);
+  CHECK(SaveCheckpoint_Commit(kSaveFileFormat_NativeSrm,path,image,image,
+      mutated,v57_bytes+size-rules_end,AcceptOpaque,NULL,&error));
+  CHECK(ArRegionalSession_Load(&loaded,2,path,image,&error)==kSaveCheckpoint_Ready);
+  CHECK(!loaded.requested.hazards && !loaded.effective.hazards);
+  const size_t v58_bytes=offsets[232];
+  memcpy(mutated,original,v58_bytes);ByteOrder_WriteLe16(mutated+8,58);ByteOrder_WriteLe16(mutated+10,232);
+  memcpy(mutated+v58_bytes,original+rules_end,size-rules_end);
+  CHECK(SaveCheckpoint_Commit(kSaveFileFormat_NativeSrm,path,image,image,
+      mutated,v58_bytes+size-rules_end,AcceptOpaque,NULL,&error));
+  CHECK(ArRegionalSession_Load(&loaded,2,path,image,&error)==kSaveCheckpoint_Ready);
+  CHECK(!loaded.requested.terrain && !loaded.effective.terrain);
+  const size_t v59_bytes=offsets[233];
+  memcpy(mutated,original,v59_bytes);ByteOrder_WriteLe16(mutated+8,59);ByteOrder_WriteLe16(mutated+10,233);
+  memcpy(mutated+v59_bytes,original+rules_end,size-rules_end);
+  CHECK(SaveCheckpoint_Commit(kSaveFileFormat_NativeSrm,path,image,image,
+      mutated,v59_bytes+size-rules_end,AcceptOpaque,NULL,&error));
+  CHECK(ArRegionalSession_Load(&loaded,2,path,image,&error)==kSaveCheckpoint_Ready);
+  CHECK(!loaded.requested.music && !loaded.effective.music);
+  uint8_t music=255;
+  const size_t v61_bytes=offsets[236];
+  memcpy(mutated,original,v61_bytes);ByteOrder_WriteLe16(mutated+8,61);ByteOrder_WriteLe16(mutated+10,236);
+  memcpy(mutated+v61_bytes,original+rules_end,size-rules_end);
+  CHECK(SaveCheckpoint_Commit(kSaveFileFormat_NativeSrm,path,image,image,
+      mutated,v61_bytes+size-rules_end,AcceptOpaque,NULL,&error));
+  CHECK(ArRegionalSession_Load(&loaded,2,path,image,&error)==kSaveCheckpoint_Ready);
+  CHECK(!loaded.requested.mosaic && !loaded.effective.mosaic);
+  uint8_t mosaic=255;
+  CHECK(!ArRegionalSession_RequestMosaic(&session,session.revision-1,1));
+  CHECK(!ArRegionalSession_RequestMosaic(&session,session.revision,3));
+  CHECK(ArRegionalSession_RequestMosaic(&session,session.revision,1));
+  CHECK(!session.effective.mosaic && !ArRegionalSession_BeginMosaic(&session,NULL));
+  CHECK(ArRegionalSession_BeginMosaic(&session,&mosaic) && mosaic==1);
+  CHECK(ArRegionalSession_RequestMosaic(&session,session.revision,2));
+  CHECK(session.effective.mosaic==1);
+  CHECK(ArRegionalSession_Save(&session,kSaveFileFormat_NativeSrm,path,image,image,&error));
+  CHECK(ArRegionalSession_Load(&loaded,2,path,image,&error)==kSaveCheckpoint_Ready);
+  CHECK(loaded.requested.mosaic==2 && loaded.effective.mosaic==1);
+  ArRegionalSession mosaic_exhausted=session;mosaic_exhausted.revision=UINT32_MAX;
+  CHECK(!ArRegionalSession_BeginMosaic(&mosaic_exhausted,&mosaic) && mosaic==1);
+  CHECK(!ArRegionalSession_RequestMosaic(&mosaic_exhausted,UINT32_MAX,0));
+  const size_t v60_bytes=offsets[234];
+  memcpy(mutated,original,v60_bytes);ByteOrder_WriteLe16(mutated+8,60);ByteOrder_WriteLe16(mutated+10,234);
+  memcpy(mutated+v60_bytes,original+rules_end,size-rules_end);
+  CHECK(SaveCheckpoint_Commit(kSaveFileFormat_NativeSrm,path,image,image,
+      mutated,v60_bytes+size-rules_end,AcceptOpaque,NULL,&error));
+  CHECK(ArRegionalSession_Load(&loaded,2,path,image,&error)==kSaveCheckpoint_Ready);
+  CHECK(!loaded.requested.placements.enemies && !loaded.effective.placements.enemies);
+  CHECK(!loaded.requested.placements.pickups && !loaded.effective.placements.pickups);
+  ArRegionalPlacementPolicy placements={2,1},placement_snapshot={0};
+  CHECK(!ArRegionalSession_RequestPlacements(&session,session.revision-1,&placements));
+  CHECK(!ArRegionalSession_RequestPlacements(&session,session.revision,NULL));
+  CHECK(!ArRegionalSession_RequestPlacements(&session,session.revision,&(ArRegionalPlacementPolicy){3,0}));
+  CHECK(ArRegionalSession_RequestPlacements(&session,session.revision,&placements));
+  CHECK(!session.effective.placements.enemies && !ArRegionalSession_BeginPlacements(&session,NULL));
+  CHECK(ArRegionalSession_BeginPlacements(&session,&placement_snapshot));
+  CHECK(placement_snapshot.enemies==2 && placement_snapshot.pickups==1);
+  placements=(ArRegionalPlacementPolicy){1,2};
+  CHECK(ArRegionalSession_RequestPlacements(&session,session.revision,&placements));
+  CHECK(ArRegionalSession_Save(&session,kSaveFileFormat_NativeSrm,path,image,image,&error));
+  CHECK(ArRegionalSession_Load(&loaded,2,path,image,&error)==kSaveCheckpoint_Ready);
+  CHECK(loaded.requested.placements.enemies==1 && loaded.requested.placements.pickups==2);
+  CHECK(loaded.effective.placements.enemies==2 && loaded.effective.placements.pickups==1);
+  ArRegionalSession placement_exhausted=session;placement_exhausted.revision=UINT32_MAX;
+  CHECK(!ArRegionalSession_BeginPlacements(&placement_exhausted,&placement_snapshot) && placement_snapshot.enemies==2);
+  CHECK(!ArRegionalSession_RequestPlacements(&placement_exhausted,UINT32_MAX,&placement_snapshot));
+  CHECK(!ArRegionalSession_RequestMusic(&session,session.revision-1,1));
+  CHECK(!ArRegionalSession_RequestMusic(&session,session.revision,3));
+  CHECK(ArRegionalSession_RequestMusic(&session,session.revision,1));
+  CHECK(!session.effective.music && !ArRegionalSession_BeginMusic(&session,NULL));
+  CHECK(ArRegionalSession_BeginMusic(&session,&music) && music==1);
+  CHECK(ArRegionalSession_RequestMusic(&session,session.revision,2));
+  CHECK(session.effective.music==1);
+  ArRegionalSession music_exhausted=session;music_exhausted.revision=UINT32_MAX;
+  CHECK(!ArRegionalSession_BeginMusic(&music_exhausted,&music) && music==1);
+  CHECK(!ArRegionalSession_RequestMusic(&music_exhausted,UINT32_MAX,0));
+  uint8_t terrain=255;
+  CHECK(!ArRegionalSession_RequestTerrain(&session,session.revision-1,1));
+  CHECK(!ArRegionalSession_RequestTerrain(&session,session.revision,3));
+  CHECK(ArRegionalSession_RequestTerrain(&session,session.revision,1));
+  CHECK(!session.effective.terrain);
+  CHECK(!ArRegionalSession_BeginTerrain(&session,NULL));
+  CHECK(ArRegionalSession_BeginTerrain(&session,&terrain) && terrain==1);
+  CHECK(ArRegionalSession_RequestTerrain(&session,session.revision,2));
+  CHECK(session.effective.terrain==1);
+  ArRegionalSession terrain_exhausted=session;terrain_exhausted.revision=UINT32_MAX;
+  CHECK(!ArRegionalSession_BeginTerrain(&terrain_exhausted,&terrain) && terrain==1);
+  CHECK(!ArRegionalSession_RequestTerrain(&terrain_exhausted,UINT32_MAX,0));
+  uint8_t hazards;
+  CHECK(!ArRegionalSession_RequestHazards(&session,session.revision-1,1));
+  CHECK(!ArRegionalSession_RequestHazards(&session,session.revision,3));
+  CHECK(ArRegionalSession_RequestHazards(&session,session.revision,1));
+  CHECK(!session.effective.hazards);
+  CHECK(ArRegionalSession_BeginHazards(&session,&hazards) && hazards==1);
+  CHECK(ArRegionalSession_RequestHazards(&session,session.revision,2));
+  CHECK(session.effective.hazards==1);
+  ArRegionalSession exhausted=session;exhausted.revision=UINT32_MAX;
+  CHECK(!ArRegionalSession_BeginHazards(&exhausted,&hazards) && hazards==1);
+  CHECK(!ArRegionalSession_RequestHazards(&exhausted,UINT32_MAX,0));
   ArRegionalModePolicy mode_policy={{2,1}};uint8_t mode_snapshot;
   CHECK(!ArRegionalSession_RequestModeEntry(&session,session.revision-1,&mode_policy));
   CHECK(ArRegionalSession_RequestModeEntry(&session,session.revision,&mode_policy));
@@ -1827,7 +1945,7 @@ static void CheckFeatureCodec(void) {
   CHECK(ArRegionalSession_RequestCollision(&session,session.revision,&collision_policy));
   CHECK(ArRegionalSession_BeginCollision(&session,&collision_snapshot) && collision_snapshot==1);
   collision_policy.source[1]=1;CHECK(ArRegionalSession_RequestCollision(&session,session.revision,&collision_policy));
-  ArRegionalBossPolicy boss_policy={{1,2,0,2,1,2,0,1,1,0,2,1,0,2,0,1,2,0,2,1,2,1,1,2,0,2}};uint64_t boss_snapshot;
+  ArRegionalBossPolicy boss_policy={{1,2,0,2,1,2,0,1,1,0,2,1,0,2,0,1,2,0,2,1,2,1,1,2,0,2,2,1,0,2,1}};uint64_t boss_snapshot;
   CHECK(ArRegionalSession_RequestBosses(&session,session.revision,&boss_policy));
   CHECK(ArRegionalSession_BeginBosses(&session,&boss_snapshot));
   boss_policy.source[5]=1;boss_policy.source[6]=1;boss_policy.source[7]=0;boss_policy.source[9]=1;
@@ -1836,6 +1954,8 @@ static void CheckFeatureCodec(void) {
   boss_policy.source[15]=0;boss_policy.source[16]=0;boss_policy.source[17]=2;boss_policy.source[18]=1;
   boss_policy.source[19]=0;boss_policy.source[20]=1;boss_policy.source[21]=2;
   boss_policy.source[22]=0;boss_policy.source[23]=0;boss_policy.source[24]=2;boss_policy.source[25]=0;
+  boss_policy.source[26]=0;boss_policy.source[27]=2;boss_policy.source[28]=2;boss_policy.source[29]=1;
+  boss_policy.source[30]=0;
   CHECK(ArRegionalSession_RequestBosses(&session,session.revision,&boss_policy));
   bool double_shot;
   CHECK(ArRegionalSession_RequestVolley(&session,session.revision,2));

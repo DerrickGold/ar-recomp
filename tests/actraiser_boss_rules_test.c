@@ -11,9 +11,9 @@ static uint64_t snapshot;
 static unsigned target,origin;
 uint64_t ActRaiserRegional_BossSnapshot(void){return snapshot;}
 int cpu_hle_tailcall_request(uint32_t pc,uint32_t from){target=pc;origin=from;return 1;}
-uint8 cpu_read8(CpuState *cpu,uint8 bank,uint16 at){(void)cpu;assert(!bank);return memory[at];}
+uint8 cpu_read8(CpuState *cpu,uint8 bank,uint16 at){(void)cpu;assert(!bank || bank==0x7e);return memory[at];}
 uint16 cpu_read16(CpuState *cpu,uint8 bank,uint16 at){return cpu_read8(cpu,bank,at)|(uint16)cpu_read8(cpu,bank,at+1)<<8;}
-void cpu_write8(CpuState *cpu,uint8 bank,uint16 at,uint8 value){(void)cpu;assert(!bank);memory[at]=value;}
+void cpu_write8(CpuState *cpu,uint8 bank,uint16 at,uint8 value){(void)cpu;assert(!bank || bank==0x7e);memory[at]=value;}
 void cpu_write16(CpuState *cpu,uint8 bank,uint16 at,uint16 value){cpu_write8(cpu,bank,at,value);cpu_write8(cpu,bank,at+1,value>>8);}
 static void Write(unsigned at,uint16_t value){ByteOrder_WriteLe16(memory+at,value);}
 static CpuState Setup(unsigned wizard,unsigned encounter) {
@@ -580,8 +580,158 @@ static void CheckPlantRoms(char **paths) {
   }
   printf("Plant: %u five-ROM rows and exposure-program signatures verified; body artwork explicitly separate\n",cases);
 }
+static CpuState Northwall(bool impact) {
+  CpuState cpu=Setup(0,0);Write(0x18,0x0406);Write(cpu.X+0x32,0xe7c6);
+  Write(cpu.X+0x1a,impact?0:2);Write(cpu.X+0x12,impact?0xe8b5:0x8661);return cpu;
+}
+static void CheckNorthwall(void) {
+  for(unsigned mix=0;mix<81;++mix)for(unsigned impact=0;impact<2;++impact)for(unsigned y=0;y<65536;y+=257) {
+    ArRegionalBossPolicy policy={{0}};unsigned digits=mix;
+    for(unsigned i=26;i<30;++i){policy.source[i]=digits%3;digits/=3;}
+    assert(ArRegionalBoss_Resolve(&policy,&snapshot));
+    CpuState cpu=Northwall(impact),expected=cpu;Write(cpu.X,0x1234);Write(cpu.X+4,y);
+    uint8_t wanted[65536];memcpy(wanted,memory,sizeof(memory));
+    const bool changed=policy.source[impact?29:28]==2;
+    assert((impact?ActRaiser_NorthwallImpactOffsetEntry(&cpu):ActRaiser_NorthwallThrowOffsetEntry(&cpu))==changed);
+    if(changed) {
+      assert((impact?ActRaiser_NorthwallImpactOffset(&cpu):ActRaiser_NorthwallThrowOffset(&cpu))==RECOMP_RETURN_TAILCALL);
+      expected.A=impact?1:(uint16_t)-16;ActRaiserCpuHle_SetNegativeZero16(&expected,expected.A);
+      if(impact){ByteOrder_WriteLe16(wanted+cpu.X,0);ByteOrder_WriteLe16(wanted+cpu.X+4,(uint16_t)(y+2));}
+      assert(target==(impact?0xe8bb:0xe87b) && origin==(impact?0xe8b5:0xe878));
+    }
+    assert(!memcmp(&cpu,&expected,sizeof(cpu)) && !memcmp(wanted,memory,sizeof(memory)));
+  }
+  ArRegionalBossPolicy policy;assert(ArRegionalBoss_Init(&policy,2) && ArRegionalBoss_Resolve(&policy,&snapshot));
+  for(unsigned impact=0;impact<2;++impact)for(unsigned bad=0;bad<15;++bad) {
+    CpuState cpu=Northwall(impact);
+    switch(bad) {
+      case 0:cpu.PB=1;break;case 1:cpu.DB=1;break;case 2:cpu.D=1;break;
+      case 3:cpu.m_flag=1;break;case 4:cpu.x_flag=1;break;case 5:cpu.emulation=1;break;
+      case 6:cpu.P|=CPU_P_D;break;case 7:cpu.X++;break;case 8:cpu.X=0x1aa0;break;
+      case 9:Write(0x18,0x0806);break;case 10:Write(cpu.X+0x32,0);break;
+      case 11:Write(cpu.X+0x16,0x4000);break;case 12:memory[cpu.X+0x18]=7;break;
+      case 13:Write(cpu.X+0x1a,1);break;
+      case 14:Write(cpu.X+(impact?0x12:0x3a),1);break;
+    }
+    assert(!(impact?ActRaiser_NorthwallImpactOffsetEntry(&cpu):ActRaiser_NorthwallThrowOffsetEntry(&cpu)));
+  }
+  puts("Northwall offsets:81 mixes, coordinate wrap, native flags/returns and invalid contexts passed");
+}
+static void CheckNorthwallRoms(char **paths) {
+  static uint8_t rom[1048576];const unsigned throw_at[]={0xe878,0xe8f7,0xe577,0xe579,0xe57c};
+  const unsigned impact_at[]={0xe8b5,0xe934,0xe5b4,0xe5b6,0xe5b9};
+  for(unsigned region=0;region<5;++region) {
+    FILE *f=fopen(paths[region],"rb");assert(f && fread(rom,1,sizeof(rom),f)==sizeof(rom) && !fclose(f));
+    const uint8_t *p=rom+throw_at[region]-0x8000;
+    assert(p[0]==0xa9 && ByteOrder_ReadLe16(p+1)==(uint16_t)(region>=2?-16:-8) && p[3]==0x20);
+    assert(ByteOrder_ReadLe16(p+4)==(region>=2?0x8621:region?0x86f8:0x8709));
+    p=rom+impact_at[region]-0x8000;
+    assert(!memcmp(p,(uint8_t[]){0x9e,0,0},3));p+=3;
+    if(region>=2){assert(!memcmp(p,(uint8_t[]){0xfe,4,0,0xfe,4,0},6));p+=6;}
+    assert(!memcmp(p,(uint8_t[]){0xa9,1,0,0x20},4));
+  }
+  puts("Northwall offsets: all five ROM instruction windows verified");
+}
+static CpuState PlantGeometry(unsigned flip,const uint8_t *blob) {
+  CpuState cpu=Plant(0);Write(cpu.X+0x20,0x52a0);Write(cpu.X+0x22,0);Write(cpu.X+0x28,flip<<14);
+  Write(cpu.X+0xa,flip&1?40:24);Write(cpu.X+0xe,flip&1?24:40);
+  Write(cpu.X+0xc,flip&2?112:96);Write(cpu.X+0x10,flip&2?96:112);
+  if(blob)memcpy(memory+0x5000,blob,4073);
+  else {
+    const uint8_t counts[]={44,2,2,4,4,47,47,47,47,1,1,5,3,5,5,5,5,7,7,5,5,5,5,3,7,5,7,3,2,3,4,5,3,5,3,5,5,5,5,5,3,5,3,5,5,5,5,5,1,4,8,8,8};
+    Write(0x5000,0x236);unsigned at=0x2a0;
+    for(unsigned visual=0;visual<53;++visual) {
+      Write(0x5236+visual*2,at);memory[0x5004+at]=counts[visual];
+      if(visual==0 || (visual>=5 && visual<=8)) {
+        Write(0x5000+at,0x2818);Write(0x5002+at,0x7060);
+        for(unsigned p=0;p<counts[visual];++p) {
+          const unsigned part=0x5005+at+7*p,y=p>=counts[visual]-4?192:(p%12)*16;
+          memory[part]=1;memory[part+1]=(p%4)*16;memory[part+2]=48-memory[part+1];
+          memory[part+3]=y;memory[part+4]=192-y;
+          memory[part+5]=(uint8_t)p;memory[part+6]=(uint8_t)(p^0xa5);
+        }
+      } else if(visual==48){Write(0x5000+at,0x0404);Write(0x5002+at,0x0503);}
+      at+=5+7*counts[visual];
+    }
+    assert(at==4073);
+  }
+  return cpu;
+}
+static void CheckPlantGeometry(void) {
+  for(unsigned region=0;region<3;++region)for(unsigned flip=0;flip<4;++flip)for(unsigned y=0;y<65536;y+=257) {
+    ArRegionalBossPolicy policy={{0}};policy.source[kArRegionalBoss_PlantGeometry]=region;
+    assert(ArRegionalBoss_Resolve(&policy,&snapshot));
+    CpuState cpu=PlantGeometry(flip,NULL),expected=cpu;Write(cpu.X+4,y);
+    uint8_t before[65536],wanted[65536];memcpy(before,memory,sizeof(memory));memcpy(wanted,memory,sizeof(memory));
+    assert(ActRaiser_PlantGeometryEntry(&cpu)==(region==1));
+    if(region==1) {
+      for(unsigned visual=0;visual<53;++visual) {
+        const unsigned at=0x5000+ByteOrder_ReadLe16(before+0x5236+visual*2);
+        if(visual==0 || (visual>=5 && visual<=8)) {
+          wanted[at+3]=96;wanted[at+4]-=4;
+          for(unsigned p=0;p<wanted[at+4];++p)wanted[at+9+7*p]-=16;
+        } else if(visual==48)wanted[at+2]=wanted[at+3]=4;
+      }
+      ByteOrder_WriteLe16(wanted+cpu.X+(flip&2?0xc:0x10),96);
+      if(!(flip&2))ByteOrder_WriteLe16(wanted+cpu.X+4,(uint16_t)(y+16));
+      assert(ActRaiser_PlantGeometry(&cpu)==RECOMP_RETURN_TAILCALL && target==0xd98a && origin==0xd980);
+      /* A second root birth from the already-projected asset must not shift
+       * geometry, native coordinates, flags, CHR or metadata addresses again. */
+      assert(ActRaiser_PlantGeometryEntry(&cpu) && ActRaiser_PlantGeometry(&cpu)==RECOMP_RETURN_TAILCALL);
+    }
+    assert(!memcmp(wanted,memory,sizeof(memory)) && !memcmp(&cpu,&expected,sizeof(cpu)));
+    if(region==1) {
+      snapshot=0;
+      assert(ActRaiser_PlantGeometryEntry(&cpu) && ActRaiser_PlantGeometry(&cpu)==RECOMP_RETURN_TAILCALL);
+      assert(target==0xd980 && origin==0xd980 && !ActRaiser_PlantGeometryEntry(&cpu));
+      assert(!memcmp(before,memory,sizeof(memory)) && !memcmp(&cpu,&expected,sizeof(cpu)));
+    }
+  }
+  ArRegionalBossPolicy jp={{0}};jp.source[kArRegionalBoss_PlantGeometry]=1;assert(ArRegionalBoss_Resolve(&jp,&snapshot));
+  for(unsigned bad=0;bad<18;++bad) {
+    CpuState cpu=PlantGeometry(0,NULL);
+    switch(bad) {
+      case 0:cpu.DB=1;break;case 1:cpu.PB=1;break;case 2:cpu.m_flag=1;break;case 3:cpu.x_flag=1;break;
+      case 4:cpu.D=1;break;case 5:cpu.emulation=1;break;case 6:cpu.P|=CPU_P_D;break;case 7:cpu.X++;break;
+      case 8:Write(0x18,0x0805);break;case 9:Write(cpu.X+0x3a,0x920);break;case 10:Write(cpu.X+0x1a,1);break;
+      case 11:Write(cpu.X+0x20,0x52a1);break;case 12:Write(cpu.X+0x22,1);break;
+      case 13:memory[0x52a4]--;break;case 14:memory[0x52a9]=0;break;
+      case 15:Write(0x5238,0xffff);break;case 16:Write(cpu.X+0x10,111);break;
+      case 17:memory[0x5444]=96;break; /* Partially projected body. */
+    }
+    uint8_t before[65536];memcpy(before,memory,sizeof(memory));const CpuState expected=cpu;
+    assert(!ActRaiser_PlantGeometryEntry(&cpu) && !memcmp(before,memory,sizeof(memory)) && !memcmp(&cpu,&expected,sizeof(cpu)));
+  }
+  puts("Plant geometry: three sources, four flips, coordinate wrap, idempotent profile and fail-before-mutation checks passed");
+}
+static void CheckPlantGeometryRoms(char **paths) {
+  static uint8_t rom[1048576],us[4096],blob[8192];
+  for(unsigned region=0;region<5;++region) {
+    FILE *f=fopen(paths[region],"rb");assert(f && fread(rom,1,sizeof(rom),f)==sizeof(rom) && !fclose(f));
+    const unsigned off=region==1?0xbdaf9:0xa749d,size=ByteOrder_ReadLe16(rom+off);
+    assert(size<=sizeof(blob) && QuintetLzss_DecompressAsset(rom+off,sizeof(rom)-off,blob,size,NULL));
+    if(!region){assert(size==4073);memcpy(us,blob,size);}
+    ArRegionalBossPolicy policy={{0}};policy.source[kArRegionalBoss_PlantGeometry]=region==1?1:0;
+    assert(ArRegionalBoss_Resolve(&policy,&snapshot));CpuState cpu=PlantGeometry(0,us);Write(cpu.X+4,112);
+    if(region==1){assert(ActRaiser_PlantGeometryEntry(&cpu));assert(ActRaiser_PlantGeometry(&cpu)==RECOMP_RETURN_TAILCALL);}
+    const unsigned poses[]={0,5,6,7,8,48};
+    for(unsigned n=0;n<6;++n) {
+      const unsigned visual=poses[n],at=0x5000+ByteOrder_ReadLe16(us+0x236+visual*2);
+      const unsigned other=ByteOrder_ReadLe16(blob+ByteOrder_ReadLe16(blob)+visual*2);
+      assert(!memcmp(memory+at,blob+other,5));
+      for(unsigned p=0;p<blob[other+4];++p) {
+        assert(!memcmp(memory+at+5+7*p,blob+other+5+7*p,5));
+        /* Palette/CHR differences remain art, never a geometry override. */
+        assert(!memcmp(memory+at+10+7*p,us+at-0x5000+10+7*p,2));
+      }
+    }
+    assert(ByteOrder_ReadLe16(memory+cpu.X+4)==(region==1?128:112));
+  }
+  puts("Plant geometry: six complete pose geometries match all five ROMs; US tile/palette references retained");
+}
 int main(int argc,char **argv) {
   assert(argc==1 || argc==6);CheckPrefixes();CheckClock();CheckAntlion();CheckDragon();
-  CheckViper();CheckPharaoh();CheckPlant();if(argc==6){CheckOriginal(argv+1);CheckDragonRoms(argv+1);CheckViperRoms(argv+1);CheckPharaohRoms(argv+1);CheckPlantRoms(argv+1);}
+  CheckViper();CheckPharaoh();CheckPlant();CheckNorthwall();if(argc==6){CheckOriginal(argv+1);CheckDragonRoms(argv+1);CheckViperRoms(argv+1);CheckPharaohRoms(argv+1);CheckPlantRoms(argv+1);CheckNorthwallRoms(argv+1);}
+  CheckPlantGeometry();if(argc==6)CheckPlantGeometryRoms(argv+1);
   puts("boss rules: native prefix and mixed-policy checks passed");return 0;
 }

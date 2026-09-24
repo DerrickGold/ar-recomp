@@ -1903,7 +1903,7 @@ if(BUILD_TESTING)
         src/quintet_lzss.c
         src/action/action_bg_plan.c
         src/action/action_bg_world.c
-        src/action/action_room_scene.c
+        src/action/action_room_scene.c src/action/action_room_terrain.c src/action/action_room_mosaic.c src/regional/regional_terrain.c
         src/actraiser/actraiser_action_bg.c
         src/diorama/diorama_layer_order.c
     )
@@ -2024,7 +2024,7 @@ if(BUILD_TESTING)
         # settings.c's randomizer rows call into the transform for their
         # availability gate and their on-change refresh. It is pure ROM-buffer
         # work with no SDL/PPU closure, so linking it here costs nothing.
-        src/randomizer.c
+        src/randomizer.c src/action/action_placements.c
         src/input_map.c
         src/user_data_dir.c
     )
@@ -2169,7 +2169,7 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_regional_lair_projection COMMAND actraiser_regional_lair_projection_test)
 
     add_executable(actraiser_regional_policy_test
-        src/regional/regional_difficulty.c src/regional/regional_score_lives.c src/regional/regional_action_start.c src/regional/regional_spell_inventory.c src/regional/regional_mode_entry.c
+        src/regional/regional_difficulty.c src/regional/regional_score_lives.c src/regional/regional_action_start.c src/regional/regional_spell_inventory.c src/regional/regional_mode_entry.c src/regional/regional_hazards.c src/regional/regional_terrain.c src/regional/regional_music.c src/regional/regional_mosaic.c src/regional/regional_placement_policy.c
         tests/regional_policy_test.c
         src/regional/regional_timers.c
         src/regional/regional_retry.c
@@ -2203,7 +2203,7 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_settings_persistence COMMAND actraiser_settings_persistence_test)
 
     add_executable(actraiser_settings_overlay_test
-        src/regional/regional_difficulty.c src/regional/regional_score_lives.c src/regional/regional_action_start.c src/regional/regional_spell_inventory.c src/regional/regional_mode_entry.c
+        src/regional/regional_difficulty.c src/regional/regional_score_lives.c src/regional/regional_action_start.c src/regional/regional_spell_inventory.c src/regional/regional_mode_entry.c src/regional/regional_hazards.c src/regional/regional_terrain.c src/regional/regional_music.c src/regional/regional_mosaic.c src/regional/regional_placement_policy.c
         tests/settings_overlay_test.c
         src/regional/regional_timers.c
         src/regional/regional_retry.c
@@ -2232,7 +2232,7 @@ if(BUILD_TESTING)
         src/settings.c
         src/display_geometry.c
         src/atomic_replace.c
-        src/randomizer.c
+        src/randomizer.c src/action/action_placements.c
         src/settings_overlay.c
         src/settings_overlay_artwork.c
         src/settings_overlay_palette.c
@@ -2700,7 +2700,7 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_story_snapshot COMMAND actraiser_story_snapshot_test)
 
     add_executable(actraiser_regional_session_test
-        src/regional/regional_difficulty.c src/regional/regional_score_lives.c src/regional/regional_action_start.c src/regional/regional_spell_inventory.c src/regional/regional_mode_entry.c
+        src/regional/regional_difficulty.c src/regional/regional_score_lives.c src/regional/regional_action_start.c src/regional/regional_spell_inventory.c src/regional/regional_mode_entry.c src/regional/regional_hazards.c src/regional/regional_terrain.c src/regional/regional_music.c src/regional/regional_mosaic.c src/regional/regional_placement_policy.c
         tests/regional_session_test.c
         src/regional/regional_timers.c
         src/regional/regional_retry.c
@@ -2733,7 +2733,7 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_regional_timers COMMAND actraiser_regional_timers_test)
 
     add_executable(actraiser_regional_campaign_test
-        src/regional/regional_difficulty.c src/regional/regional_score_lives.c src/regional/regional_action_start.c src/regional/regional_spell_inventory.c src/regional/regional_mode_entry.c
+        src/regional/regional_difficulty.c src/regional/regional_score_lives.c src/regional/regional_action_start.c src/regional/regional_spell_inventory.c src/regional/regional_mode_entry.c src/regional/regional_hazards.c src/regional/regional_terrain.c src/regional/regional_music.c src/regional/regional_mosaic.c src/regional/regional_placement_policy.c
         tests/regional_campaign_test.c
         src/regional/regional_timers.c
         src/regional/regional_retry.c
@@ -2840,6 +2840,50 @@ if(BUILD_TESTING)
     target_include_directories(actraiser_action_inventory_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     add_test(NAME actraiser_action_inventory COMMAND actraiser_action_inventory_test)
 
+    add_executable(actraiser_stage_hazards_test tests/actraiser_stage_hazards_test.c
+        src/actraiser/actraiser_stage_hazards.c src/regional/regional_hazards.c
+        src/actraiser/actraiser_hle_fatal.c)
+    target_include_directories(actraiser_stage_hazards_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    add_test(NAME actraiser_stage_hazards COMMAND actraiser_stage_hazards_test)
+
+    add_executable(actraiser_stage_terrain_test tests/actraiser_stage_terrain_test.c
+        src/actraiser/actraiser_stage_terrain.c src/regional/regional_terrain.c
+        src/action/action_room_scene.c src/action/action_room_terrain.c src/action/action_room_mosaic.c
+        src/quintet_lzss.c src/actraiser/actraiser_hle_fatal.c)
+    target_include_directories(actraiser_stage_terrain_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    add_test(NAME actraiser_stage_terrain COMMAND actraiser_stage_terrain_test)
+
+    add_executable(actraiser_stage_placements_test tests/actraiser_stage_placements_test.c
+        ${SNESRECOMP_RUNNER_ROOT}/src/support/sha256.c
+        src/actraiser/actraiser_stage_placements.c src/regional/regional_placements.c src/regional/regional_placement_policy.c
+        src/action/action_placements.c src/regional/regional_terrain.c
+        src/actraiser/actraiser_hle_fatal.c)
+    target_include_directories(actraiser_stage_placements_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    add_test(NAME actraiser_stage_placements COMMAND actraiser_stage_placements_test)
+
+    add_executable(actraiser_regional_mosaic_test tests/actraiser_regional_mosaic_test.c
+        src/actraiser/actraiser_regional_mosaic.c src/actraiser/actraiser_hle_fatal.c
+        src/action/action_room_mosaic.c src/action/action_room_scene.c src/quintet_lzss.c
+        src/regional/regional_mosaic.c)
+    target_include_directories(actraiser_regional_mosaic_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    add_test(NAME actraiser_regional_mosaic COMMAND actraiser_regional_mosaic_test)
+
+    add_executable(randomizer_placements_test tests/randomizer_placements_test.c
+        src/randomizer.c src/action/action_placements.c src/regional/regional_placements.c src/regional/regional_placement_policy.c)
+    target_include_directories(randomizer_placements_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    add_test(NAME randomizer_placements COMMAND randomizer_placements_test)
+
+    add_executable(regional_placements_test tests/regional_placements_test.c
+        src/regional/regional_placements.c src/regional/regional_placement_policy.c src/action/action_placements.c)
+    target_include_directories(regional_placements_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    add_test(NAME regional_placements COMMAND regional_placements_test)
+
+    add_executable(actraiser_scene_music_test tests/actraiser_scene_music_test.c
+        src/actraiser/actraiser_scene_music.c src/regional/regional_music.c
+        src/actraiser/actraiser_hle_fatal.c)
+    target_include_directories(actraiser_scene_music_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    add_test(NAME actraiser_scene_music COMMAND actraiser_scene_music_test)
+
     add_executable(actraiser_boss_rules_test tests/actraiser_boss_rules_test.c
         src/actraiser/actraiser_boss_rules.c src/actraiser/actraiser_cpu_hle_internal.c
         src/actraiser/actraiser_hle_fatal.c src/regional/regional_boss_rules.c src/quintet_lzss.c)
@@ -2865,7 +2909,7 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_action_motion COMMAND actraiser_action_motion_test)
 
     add_executable(actraiser_regional_fingerprint_test
-        src/regional/regional_difficulty.c src/regional/regional_score_lives.c src/regional/regional_action_start.c src/regional/regional_spell_inventory.c src/regional/regional_mode_entry.c
+        src/regional/regional_difficulty.c src/regional/regional_score_lives.c src/regional/regional_action_start.c src/regional/regional_spell_inventory.c src/regional/regional_mode_entry.c src/regional/regional_hazards.c src/regional/regional_terrain.c src/regional/regional_music.c src/regional/regional_mosaic.c src/regional/regional_placement_policy.c
         tests/regional_fingerprint_test.c
         src/regional/regional_fingerprint.c
         src/regional/regional_timers.c
@@ -2891,7 +2935,7 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_regional_fingerprint COMMAND actraiser_regional_fingerprint_test)
 
     add_executable(actraiser_regional_runtime_test
-        src/regional/regional_difficulty.c src/regional/regional_score_lives.c src/regional/regional_action_start.c src/regional/regional_spell_inventory.c src/regional/regional_mode_entry.c
+        src/regional/regional_difficulty.c src/regional/regional_score_lives.c src/regional/regional_action_start.c src/regional/regional_spell_inventory.c src/regional/regional_mode_entry.c src/regional/regional_hazards.c src/regional/regional_terrain.c src/regional/regional_music.c src/regional/regional_mosaic.c src/regional/regional_placement_policy.c
         tests/actraiser_regional_runtime_test.c
         src/regional/regional_timers.c
         src/regional/regional_retry.c

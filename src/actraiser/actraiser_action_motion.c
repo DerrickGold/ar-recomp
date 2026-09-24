@@ -23,6 +23,7 @@ static int16_t SignedExtent(uint8_t value) {
 enum { kExpandedProgramMarker=0x100 };
 typedef struct ProgramRow {
   uint16_t row,native_row,visual_offset,duration;
+  uint8_t northwall_expansion;
   bool end,replace_duration;
 } ProgramRow;
 static bool HeadProgram(CpuState *cpu,ProgramRow *out) {
@@ -111,8 +112,67 @@ static bool TendrilProgram(CpuState *cpu,ProgramRow *out) {
       .duration=delays[row],.replace_duration=row<6,.end=row==6};
   return true;
 }
+/* Room0406 owns a 1549-byte boss blob at5000..560C. Its remaining animation
+ * page is not a general scratch allocator: only this validated US profile
+ * may use the final four64-byte slots, before graphics/raster RAM at6000.
+ * Fixed per-pose addresses let simultaneous impacts retain independent poses.
+ * Native OAM, collision, widescreen and 3D all continue reading native +20. */
+enum { kNorthwallExpansionBase=0x5f00, kNorthwallExpansionStride=64 };
+static bool NorthwallProgram(CpuState *cpu,ProgramRow *out) {
+  const unsigned x=cpu->X,state=cpu_read16(cpu,0,x+0x1a),stored=cpu_read16(cpu,0,x+0x1c);
+  if((state!=1 && state!=2) || cpu_read16(cpu,0,0x18)!=0x0406 ||
+      cpu_read16(cpu,0,x+0x32)!=0xe7c6 || cpu_read16(cpu,0,x+0x16)!=0x5000 ||
+      cpu_read8(cpu,0,x+0x18)!=0x7e || cpu_read16(cpu,0,x+0x3c) ||
+      cpu_read16(cpu,0,cpu->S+1)==0x969d)return false;
+  const bool active=stored>=kExpandedProgramMarker && stored<=kExpandedProgramMarker+(state==1?10:7);
+  const unsigned row=active?stored-kExpandedProgramMarker:stored;
+  const uint64_t policy=active?UINT64_C(2)<<(2*(state==1?kArRegionalBoss_NorthwallImpact:kArRegionalBoss_NorthwallThrow)):
+      ActRaiserRegional_BossSnapshot();
+  unsigned native_row,expansion;uint16_t duration;bool end;
+  if(!ArRegionalBoss_NorthwallRow(policy,state,row,&native_row,&duration,&expansion,&end))return false;
+  if(cpu_read16(cpu,0x7e,0x5000)!=0xc6 || cpu_read16(cpu,0x7e,0x5004)!=0x1f ||
+      cpu_read16(cpu,0x7e,0x5006)!=0x38)return false;
+  unsigned next=0xf0;
+  for(unsigned pose=0;pose<21;++pose) {
+    if(cpu_read16(cpu,0x7e,0x50c6+2*pose)!=next || next+5>0x60d)return false;
+    next+=5+7*cpu_read8(cpu,0x7e,0x5004+next);
+  }
+  if(next!=0x60d)return false;
+  static const uint8_t impact[]={3,5,0,0,4,5,0,0,5,5,0,0,6,7,0,0,7,7,0,0,8,7,0,0,255};
+  static const uint8_t throwing[]={20,5,0,0,10,7,0,0,11,7,0,0,12,17,0,0,13,3,0,0,14,3,0,0,15,1,0,0,255};
+  const uint8_t *expected=state==1?impact:throwing;
+  const unsigned length=state==1?sizeof(impact):sizeof(throwing),at=state==1?0x501f:0x5038;
+  for(unsigned i=0;i<length;++i)if(cpu_read8(cpu,0x7e,at+i)!=expected[i])return false;
+  /* The four added poses rearrange only these retained two CHR references. */
+  static const uint8_t seed[]={16,16,8,0,4,0,0,24,0,0,62,2,0,8,16,0,0,63,2,
+      0,16,8,0,0,62,2,0,24,0,0,0,63,2};
+  if(cpu_read16(cpu,0x7e,0x50d6)!=0x16c)return false;
+  for(unsigned i=0;i<sizeof(seed);++i)if(cpu_read8(cpu,0x7e,0x516c+i)!=seed[i])return false;
+  if(out)*out=(ProgramRow){.row=(uint16_t)row,.native_row=(uint16_t)native_row,
+      .duration=duration,.northwall_expansion=(uint8_t)expansion,.replace_duration=!end,.end=end};
+  return true;
+}
+static void NorthwallExpand(CpuState *cpu,unsigned object,unsigned step) {
+  uint8_t composition[61];
+  for(unsigned i=0;i<33;++i)composition[i]=cpu_read8(cpu,0x7e,0x516c+i);
+  for(unsigned n=1;n<=step;++n) {
+    const bool right=n==2;
+    for(unsigned part=0;part<composition[4];++part)composition[5+7*part+(right?2:1)]+=8;
+    const unsigned at=5+7*composition[4],width=(composition[4]+1)*8;
+    composition[at]=0;composition[at+1]=right?width-8:0;composition[at+2]=right?0:width-8;
+    composition[at+3]=composition[at+4]=0;
+    composition[at+5]=(n==1 || n==4)?63:62;composition[at+6]=2;
+    ++composition[4];composition[0]=composition[1]=(uint8_t)(width/2);
+  }
+  const unsigned pointer=kNorthwallExpansionBase+(step-1)*kNorthwallExpansionStride;
+  for(unsigned i=0;i<5+7u*composition[4];++i)cpu_write8(cpu,0x7e,pointer+i,composition[i]);
+  cpu_write16(cpu,0,object+0x20,(uint16_t)pointer);
+  cpu_write16(cpu,0,object+0x0a,composition[0]);cpu_write16(cpu,0,object+0x0e,composition[1]);
+  /* Top/bottom and flips are unchanged from the native seed pose. +22 keeps
+   * its valid US visual8 alias; drawing consumes the full +20 pointer. */
+}
 static bool AnimationProgram(CpuState *cpu,ProgramRow *out) {
-  return ActorShape(cpu) && (HeadProgram(cpu,out) || PlantProgram(cpu,out) || TendrilProgram(cpu,out));
+  return ActorShape(cpu) && (HeadProgram(cpu,out) || PlantProgram(cpu,out) || TendrilProgram(cpu,out) || NorthwallProgram(cpu,out));
 }
 static bool Initializing(CpuState *cpu) {
   /* Real 969B JSR return word. During this call +32 may still be a previous
@@ -350,7 +410,7 @@ RecompReturn ActRaiser_ActionMotion(CpuState *cpu) {
   if(expanded) {
     /* Borrow only this actor's row and visual-offset fields during the
      * non-yielding reader. All velocities, extents, poses and flags remain
-     * native outputs. No shared animation or composition bytes are changed. */
+     * native outputs, except for the explicitly owned Northwall expansion. */
     cpu_write16(cpu,0,object+0x1c,program.native_row);
     cpu_write16(cpu,0,object+0x3c,program.visual_offset);
   }
@@ -371,6 +431,7 @@ RecompReturn ActRaiser_ActionMotion(CpuState *cpu) {
      * it. No other routine in this source family consumes the row index. */
     if(!program.end)cpu_write16(cpu,0,object+0x1c,kExpandedProgramMarker+program.row);
     if(program.replace_duration)cpu_write16(cpu,0,object+0x24,program.duration);
+    if(program.northwall_expansion)NorthwallExpand(cpu,object,program.northwall_expansion);
     return result;
   }
   if(row.skip_rows)return result; /* Native reader acquired the selected row. */

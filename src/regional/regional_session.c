@@ -59,7 +59,15 @@ enum { kHeaderBytes = 36, kPayloadCapacity = kSaveCheckpointPayloadMax,
        kV52RecordCount = kV51RecordCount + 1,
        kV53RecordCount = kV52RecordCount + kArRegionalActionStart_Count,
        kV54RecordCount = kV53RecordCount + 1,
-       kRecordCount = kV54RecordCount + kArRegionalMode_Count };
+       kV55RecordCount = kV54RecordCount + kArRegionalMode_Count,
+       kV56RecordCount = kV55RecordCount + 4,
+       kV57RecordCount = kV56RecordCount + 1,
+       kV58RecordCount = kV57RecordCount + 1,
+       kV59RecordCount = kV58RecordCount + 1,
+       kV60RecordCount = kV59RecordCount + 1,
+       kV61RecordCount = kV60RecordCount + 2,
+       kRecordCount = kV61RecordCount + 1 };
+_Static_assert(kArRegionalPlacement_Count==2,"preserve placement record ordinals");
 _Static_assert(kArRegionalMode_Count==2,"preserve mode-entry record ordinals");
 _Static_assert(kArRegionalActionStart_Count==2,"preserve action-start record ordinals");
 _Static_assert(kArRegionalDifficultyRule_Count==5,"preserve difficulty record ordinals");
@@ -68,7 +76,7 @@ _Static_assert(kArRegionalCastHold_Count==3,"preserve cast-hold record ordinals"
 _Static_assert(kArRegionalActorStat_BaseCount==63 && kArRegionalActorStat_Count==66,"preserve historical stat record ordinals");
 _Static_assert(kArRegionalPlatformSkull_Count==4,"preserve historical skull record ordinals");
 _Static_assert(kArRegionalCollision_Count==2,"preserve historical collision record ordinals");
-_Static_assert(kArRegionalBoss_Count==26,"preserve historical boss record ordinals");
+_Static_assert(kArRegionalBoss_Count==31,"preserve historical boss record ordinals");
 _Static_assert(kArRegionalEmitter_Count==2,"preserve historical emitter record ordinals");
 _Static_assert(kArRegionalActionMotion_Count==14,"preserve historical motion record ordinals");
 _Static_assert(kArRegionalCostRule_Count == 9 && kArRegionalTimerRule_Count == 6,
@@ -115,7 +123,16 @@ static bool Valid(const ArRegionalSession *session) {
   bool unused_lives;
   uint8_t unused_mode;
   ArRegionalActionStartSnapshot unused_start;
-  return has_id && ArRegionalMode_Resolve(&session->requested.mode_entry,&unused_mode) &&
+  return has_id && ArRegionalMosaic_Resolve(session->requested.mosaic,&unused_mode) &&
+      ArRegionalMosaic_Resolve(session->effective.mosaic,&unused_mode) && ArRegionalPlacements_Valid(&session->requested.placements) &&
+      ArRegionalPlacements_Valid(&session->effective.placements) &&
+      ArRegionalMusic_Resolve(session->requested.music,&unused_mode) &&
+      ArRegionalMusic_Resolve(session->effective.music,&unused_mode) &&
+      ArRegionalTerrain_Resolve(session->requested.terrain,&unused_mode) &&
+      ArRegionalTerrain_Resolve(session->effective.terrain,&unused_mode) &&
+      ArRegionalHazards_Resolve(session->requested.hazards,&unused_mode) &&
+      ArRegionalHazards_Resolve(session->effective.hazards,&unused_mode) &&
+      ArRegionalMode_Resolve(&session->requested.mode_entry,&unused_mode) &&
       ArRegionalMode_Resolve(&session->effective.mode_entry,&unused_mode) &&
       ArRegionalActionStart_Resolve(&session->requested.action_start,&unused_start) &&
       ArRegionalInventory_Resolve(session->requested.spell_inventory,&unused_lives) &&
@@ -201,7 +218,71 @@ static bool Valid(const ArRegionalSession *session) {
         session->effective.score_feedback.source[kArRegionalScore_Phase]!=kArRegionalSource_Japan) ||
        session->lairs.initialized_towns == 0x3f);
 }
-
+bool ArRegionalSession_RequestTerrain(ArRegionalSession *session,uint32_t revision,ArRegionalSource source) {
+  uint8_t unused;
+  if(!Valid(session) || revision!=session->revision || !ArRegionalTerrain_Resolve(source,&unused))return false;
+  if(session->requested.terrain==source)return true;
+  if(session->revision==UINT32_MAX)return false;
+  session->requested.terrain=source;++session->revision;return true;
+}
+bool ArRegionalSession_RequestPlacements(ArRegionalSession *session,uint32_t revision,
+    const ArRegionalPlacementPolicy *policy) {
+  if(!Valid(session) || revision!=session->revision || !ArRegionalPlacements_Valid(policy))return false;
+  if(session->requested.placements.enemies==policy->enemies &&
+      session->requested.placements.pickups==policy->pickups)return true;
+  if(session->revision==UINT32_MAX)return false;
+  session->requested.placements=*policy;++session->revision;return true;
+}
+bool ArRegionalSession_BeginPlacements(ArRegionalSession *session,ArRegionalPlacementPolicy *snapshot) {
+  if(!snapshot || !Valid(session))return false;
+  const bool changed=session->requested.placements.enemies!=session->effective.placements.enemies ||
+      session->requested.placements.pickups!=session->effective.placements.pickups;
+  if(changed && session->revision==UINT32_MAX)return false;
+  session->effective.placements=session->requested.placements;
+  if(changed)++session->revision;
+  *snapshot=session->effective.placements;return true;
+}
+bool ArRegionalSession_BeginTerrain(ArRegionalSession *session,uint8_t *snapshot) {
+  if(!snapshot || !Valid(session))return false;
+  const bool changed=session->requested.terrain!=session->effective.terrain;
+  if(changed && session->revision==UINT32_MAX)return false;
+  uint8_t next;if(!ArRegionalTerrain_Resolve(session->requested.terrain,&next))return false;
+  session->effective.terrain=session->requested.terrain;
+  if(changed)++session->revision;
+  *snapshot=next;return true;
+}
+bool ArRegionalSession_RequestMosaic(ArRegionalSession *session,uint32_t revision,ArRegionalSource source) {
+  uint8_t unused;
+  if(!Valid(session) || revision!=session->revision || !ArRegionalMosaic_Resolve(source,&unused))return false;
+  if(session->requested.mosaic==source)return true;
+  if(session->revision==UINT32_MAX)return false;
+  session->requested.mosaic=source;++session->revision;return true;
+}
+bool ArRegionalSession_BeginMosaic(ArRegionalSession *session,uint8_t *snapshot) {
+  if(!snapshot || !Valid(session))return false;
+  const bool changed=session->requested.mosaic!=session->effective.mosaic;
+  if(changed && session->revision==UINT32_MAX)return false;
+  uint8_t next;if(!ArRegionalMosaic_Resolve(session->requested.mosaic,&next))return false;
+  session->effective.mosaic=session->requested.mosaic;
+  if(changed)++session->revision;
+  *snapshot=next;return true;
+}
+bool ArRegionalSession_RequestMusic(ArRegionalSession *session,uint32_t revision,ArRegionalSource source) {
+  uint8_t unused;
+  if(!Valid(session) || revision!=session->revision || !ArRegionalMusic_Resolve(source,&unused))return false;
+  if(session->requested.music==source)return true;
+  if(session->revision==UINT32_MAX)return false;
+  session->requested.music=source;++session->revision;return true;
+}
+bool ArRegionalSession_BeginMusic(ArRegionalSession *session,uint8_t *snapshot) {
+  if(!snapshot || !Valid(session))return false;
+  const bool changed=session->requested.music!=session->effective.music;
+  if(changed && session->revision==UINT32_MAX)return false;
+  uint8_t next;if(!ArRegionalMusic_Resolve(session->requested.music,&next))return false;
+  session->effective.music=session->requested.music;
+  if(changed)++session->revision;
+  *snapshot=next;return true;
+}
 bool ArRegionalSession_RequestLairReloads(ArRegionalSession *session, uint32_t revision, ArRegionalSource source) {
   if (!Valid(session) || revision!=session->revision || (unsigned)source>=kArRegionalSource_Count ||
       session->reloads.initialized_towns!=0x3f || session->reloads.diverged_towns) return false;
@@ -579,6 +660,22 @@ bool ArRegionalSession_BeginModeEntry(ArRegionalSession *session,uint8_t *snapsh
   if(changed && session->revision==UINT32_MAX)return false;
   uint8_t next;if(!ArRegionalMode_Resolve(&session->requested.mode_entry,&next))return false;
   session->effective.mode_entry=session->requested.mode_entry;
+  if(changed)++session->revision;
+  *snapshot=next;return true;
+}
+bool ArRegionalSession_RequestHazards(ArRegionalSession *session,uint32_t revision,ArRegionalSource source) {
+  uint8_t unused;
+  if(!Valid(session) || revision!=session->revision || !ArRegionalHazards_Resolve(source,&unused))return false;
+  if(session->requested.hazards==source)return true;
+  if(session->revision==UINT32_MAX)return false;
+  session->requested.hazards=source;++session->revision;return true;
+}
+bool ArRegionalSession_BeginHazards(ArRegionalSession *session,uint8_t *snapshot) {
+  if(!snapshot || !Valid(session))return false;
+  const bool changed=session->requested.hazards!=session->effective.hazards;
+  if(changed && session->revision==UINT32_MAX)return false;
+  uint8_t next;if(!ArRegionalHazards_Resolve(session->requested.hazards,&next))return false;
+  session->effective.hazards=session->requested.hazards;
   if(changed)++session->revision;
   *snapshot=next;return true;
 }
@@ -1001,6 +1098,34 @@ bool ArRegionalSession_BeginSimActor(ArRegionalSession *session,unsigned town,un
 /* The wire shape is shared, not the units: stable keys select the descriptor
  * for resource counts, initial BCD times, booleans or town service counts. */
 static const char *Record(unsigned i, const uint16_t **values) {
+  if(i==kV61RecordCount) {
+    const ArRegionalMosaicDescriptor *desc=ArRegionalMosaic_Descriptor();
+    *values=desc->profile;return desc->key;
+  }
+  if(i>=kV60RecordCount) {
+    const ArRegionalPlacementDescriptor *desc=ArRegionalPlacements_Descriptor(i-kV60RecordCount);
+    *values=desc->profile;return desc->key;
+  }
+  if(i==kV59RecordCount) {
+    const ArRegionalMusicDescriptor *desc=ArRegionalMusic_Descriptor();
+    *values=desc->profile;return desc->key;
+  }
+  if(i==kV58RecordCount) {
+    const ArRegionalTerrainDescriptor *desc=ArRegionalTerrain_Descriptor();
+    *values=desc->profile;return desc->key;
+  }
+  if(i==kV57RecordCount) {
+    const ArRegionalHazardDescriptor *desc=ArRegionalHazards_Descriptor();
+    *values=desc->profile;return desc->key;
+  }
+  if(i==kV56RecordCount) {
+    const ArRegionalBossDescriptor *desc=ArRegionalBoss_Descriptor(kArRegionalBoss_PlantGeometry);
+    *values=desc->value;return desc->key;
+  }
+  if(i>=kV55RecordCount) {
+    const ArRegionalBossDescriptor *desc=ArRegionalBoss_Descriptor(26+i-kV55RecordCount);
+    *values=desc->value;return desc->key;
+  }
   if(i>=kV54RecordCount) {
     const ArRegionalModeDescriptor *desc=ArRegionalMode_Descriptor(i-kV54RecordCount);
     *values=desc->value;return desc->key;
@@ -1218,6 +1343,16 @@ static const char *Record(unsigned i, const uint16_t **values) {
 }
 
 static ArRegionalSource RecordSource(const ArRegionalSession *session, unsigned i, bool requested) {
+  if(i==kV61RecordCount)return requested?session->requested.mosaic:session->effective.mosaic;
+  if(i>=kV60RecordCount) {
+    const ArRegionalPlacementPolicy *policy=requested?&session->requested.placements:&session->effective.placements;
+    return i==kV60RecordCount?policy->enemies:policy->pickups;
+  }
+  if(i==kV59RecordCount)return requested?session->requested.music:session->effective.music;
+  if(i==kV58RecordCount)return requested?session->requested.terrain:session->effective.terrain;
+  if(i==kV57RecordCount)return requested?session->requested.hazards:session->effective.hazards;
+  if(i==kV56RecordCount)return requested?session->requested.bosses.source[kArRegionalBoss_PlantGeometry]:session->effective.bosses.source[kArRegionalBoss_PlantGeometry];
+  if(i>=kV55RecordCount)return requested?session->requested.bosses.source[26+i-kV55RecordCount]:session->effective.bosses.source[26+i-kV55RecordCount];
   if(i>=kV54RecordCount)return requested?session->requested.mode_entry.source[i-kV54RecordCount]:session->effective.mode_entry.source[i-kV54RecordCount];
   if(i==kV53RecordCount)return requested?session->requested.spell_inventory:session->effective.spell_inventory;
   if(i>=kV52RecordCount)return requested?session->requested.action_start.source[i-kV52RecordCount]:session->effective.action_start.source[i-kV52RecordCount];
@@ -1322,7 +1457,7 @@ static bool Encode(const ArRegionalSession *session, uint8_t *out, size_t *size)
   if (!Valid(session)) return false;
   memset(out, 0, kHeaderBytes);
   memcpy(out, kMagic, sizeof(kMagic));
-  ByteOrder_WriteLe16(out + 8, 55);
+  ByteOrder_WriteLe16(out + 8, 62);
   ByteOrder_WriteLe16(out + 10, kRecordCount);
   ByteOrder_WriteLe32(out + 12, session->slot);
   memcpy(out + 16, session->campaign, 16);
@@ -1373,7 +1508,7 @@ static SaveCheckpointStatus Decode(const uint8_t *bytes, size_t size, ArRegional
   const bool pricing_only = !memcmp(bytes, kPriceMagic, sizeof(kPriceMagic));
   if (!pricing_only && memcmp(bytes, kMagic, sizeof(kMagic))) return kSaveCheckpoint_Invalid;
   const unsigned version = ByteOrder_ReadLe16(bytes + 8);
-  if (version < 1 || version > (pricing_only ? 1u : 55u)) return kSaveCheckpoint_Unsupported;
+  if (version < 1 || version > (pricing_only ? 1u : 62u)) return kSaveCheckpoint_Unsupported;
   const unsigned count = pricing_only ? kArRegionalCostRule_Count :
       version == 1 ? kV1RecordCount : version == 2 ? kV2RecordCount :
       version == 3 ? kV3RecordCount : version == 4 ? kV4RecordCount :
@@ -1401,7 +1536,10 @@ static SaveCheckpointStatus Decode(const uint8_t *bytes, size_t size, ArRegional
       version == 48 ? kV48RecordCount : version == 49 ? kV49RecordCount :
       version == 50 ? kV50RecordCount : version == 51 ? kV51RecordCount :
       version == 52 ? kV52RecordCount : version == 53 ? kV53RecordCount :
-      version == 54 ? kV54RecordCount : kRecordCount;
+      version == 54 ? kV54RecordCount : version == 55 ? kV55RecordCount :
+      version == 56 ? kV56RecordCount : version == 57 ? kV57RecordCount :
+      version == 58 ? kV58RecordCount : version == 59 ? kV59RecordCount :
+      version == 60 ? kV60RecordCount : version == 61 ? kV61RecordCount : kRecordCount;
   if (ByteOrder_ReadLe16(bytes + 10) != count) return kSaveCheckpoint_Unsupported;
   ArRegionalSession next = {.slot = ByteOrder_ReadLe32(bytes + 12), .revision = ByteOrder_ReadLe32(bytes + 32)};
   memcpy(next.campaign, bytes + 16, sizeof(next.campaign));
@@ -1429,7 +1567,25 @@ static SaveCheckpointStatus Decode(const uint8_t *bytes, size_t size, ArRegional
       return kSaveCheckpoint_Unsupported;
     if (values[requested] != ByteOrder_ReadLe16(bytes + offset + 4) ||
         values[effective] != ByteOrder_ReadLe16(bytes + offset + 6)) return kSaveCheckpoint_Unsupported;
-    if(rule>=kV54RecordCount) {
+    if(rule==kV61RecordCount) {
+      next.requested.mosaic=requested;next.effective.mosaic=effective;
+    } else if(rule==kV60RecordCount) {
+      next.requested.placements.enemies=requested;next.effective.placements.enemies=effective;
+    } else if(rule==kV60RecordCount+1) {
+      next.requested.placements.pickups=requested;next.effective.placements.pickups=effective;
+    } else if(rule==kV59RecordCount) {
+      next.requested.music=requested;next.effective.music=effective;
+    } else if(rule==kV58RecordCount) {
+      next.requested.terrain=requested;next.effective.terrain=effective;
+    } else if(rule==kV57RecordCount) {
+      next.requested.hazards=requested;next.effective.hazards=effective;
+    } else if(rule==kV56RecordCount) {
+      next.requested.bosses.source[kArRegionalBoss_PlantGeometry]=requested;
+      next.effective.bosses.source[kArRegionalBoss_PlantGeometry]=effective;
+    } else if(rule>=kV55RecordCount) {
+      next.requested.bosses.source[26+rule-kV55RecordCount]=requested;
+      next.effective.bosses.source[26+rule-kV55RecordCount]=effective;
+    } else if(rule>=kV54RecordCount) {
       next.requested.mode_entry.source[rule-kV54RecordCount]=requested;
       next.effective.mode_entry.source[rule-kV54RecordCount]=effective;
     } else if(rule==kV53RecordCount) {

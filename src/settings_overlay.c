@@ -2826,7 +2826,11 @@ static MenuChrome ComputeMenuChrome(const MenuLayout *layout) {
   const int margin = 8;
   const int gap = 8;
   const int left_width = 152;
-  const int bottom_height = 72;
+  const int help_lines = ActiveTabIsRegional()
+      ? (int)SettingsOverlayRegions_DescriptionLines((ActRaiserRegionalSettingGroup)s_row) : 4;
+  /* Keep the native frame tile-aligned when a larger regional group needs
+   * extra description lines. The scrollable list uses the remaining height. */
+  const int bottom_height = (72 + (help_lines - 4) * kSmallLineHeight + 7) & ~7;
   const int panel_right =
       SnapPanelEdge(margin, layout->logical_width - margin);
   const int panel_bottom =
@@ -3339,7 +3343,8 @@ static void DrawMenuFooter(const MenuLayout *layout, const MenuChrome *c,
     if (!s_regional_valid || !SettingsOverlayRegions_ViewDescription(InterfaceLocale(),
         &s_regional_view, group, help, sizeof(help)))
       snprintf(help, sizeof(help), "%s", RegionalNotice());
-    DrawWrappedSmallText(layout, description_x, header_y + 14, help, description_chars, 4,
+    DrawWrappedSmallText(layout, description_x, header_y + 14, help, description_chars,
+        (int)SettingsOverlayRegions_DescriptionLines(group),
         ARGB(255, 208, 220, 232));
   } else if (help_row) {
     SettingsOverlayLayerText text;

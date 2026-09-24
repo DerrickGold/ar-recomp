@@ -30,6 +30,13 @@ bool ActRaiserRegional_DoubleStatueVolley(void);
 ArRegionalBossSnapshot ActRaiserRegional_BossSnapshot(void);
 ArRegionalDifficultySnapshot ActRaiserRegional_DifficultySnapshot(void);
 ArRegionalCollisionSnapshot ActRaiserRegional_CollisionSnapshot(void);
+uint8_t ActRaiserRegional_HazardSnapshot(void);
+uint8_t ActRaiserRegional_TerrainSnapshot(void);
+uint8_t ActRaiserRegional_MosaicSnapshot(void);
+bool ActRaiserRegional_PlacementSnapshot(ArRegionalPlacementPolicy *policy,
+    ArRegionalDifficulty *difficulty);
+/* Accepted scene track declaration; native selector/cache/upload remain owners. */
+bool ActRaiserRegional_BeginSceneMusic(uint8_t *profile);
 ArRegionalPlatformSkullSnapshot ActRaiserRegional_PlatformSkullSnapshot(void);
 ArRegionalCastHoldSnapshot ActRaiserRegional_CastHoldSnapshot(void);
 ArRegionalFireSnapshot ActRaiserRegional_FireSnapshot(void);

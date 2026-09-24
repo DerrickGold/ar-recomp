@@ -40,6 +40,20 @@ bool ArRegionalRules_Fingerprint(const ArRegionalRules *requested,
   uint8_t mode_requested,mode_effective;
   if(!ArRegionalMode_Resolve(&requested->mode_entry,&mode_requested) ||
       !ArRegionalMode_Resolve(&effective->mode_entry,&mode_effective))return false;
+  if(!ArRegionalPlacements_Valid(&requested->placements) ||
+      !ArRegionalPlacements_Valid(&effective->placements))return false;
+  uint8_t music_requested,music_effective;
+  uint8_t mosaic_requested,mosaic_effective;
+  if(!ArRegionalMosaic_Resolve(requested->mosaic,&mosaic_requested) ||
+      !ArRegionalMosaic_Resolve(effective->mosaic,&mosaic_effective))return false;
+  if(!ArRegionalMusic_Resolve(requested->music,&music_requested) ||
+      !ArRegionalMusic_Resolve(effective->music,&music_effective))return false;
+  uint8_t terrain_requested,terrain_effective;
+  if(!ArRegionalTerrain_Resolve(requested->terrain,&terrain_requested) ||
+      !ArRegionalTerrain_Resolve(effective->terrain,&terrain_effective))return false;
+  uint8_t hazards_requested,hazards_effective;
+  if(!ArRegionalHazards_Resolve(requested->hazards,&hazards_requested) ||
+      !ArRegionalHazards_Resolve(effective->hazards,&hazards_effective))return false;
   bool inventory_requested,inventory_effective;
   if(!ArRegionalInventory_Resolve(requested->spell_inventory,&inventory_requested) ||
       !ArRegionalInventory_Resolve(effective->spell_inventory,&inventory_effective))return false;
@@ -499,6 +513,41 @@ bool ArRegionalRules_Fingerprint(const ArRegionalRules *requested,
   if(inventory_requested || inventory_effective) {
     uint8_t bytes[50]="ARINVENTORY-R1";memcpy(bytes+16,out,32);
     bytes[48]=inventory_requested;bytes[49]=inventory_effective;
+    if(!sr_support_sha256(bytes,sizeof(bytes),out))return false;
+    *baseline=false;
+  }
+  if(requested->placements.enemies || requested->placements.pickups ||
+      effective->placements.enemies || effective->placements.pickups) {
+    uint8_t bytes[54]="ARPLACEMENTS-R1";memcpy(bytes+16,out,32);
+    bytes[48]=requested->placements.enemies;bytes[49]=requested->placements.pickups;
+    bytes[50]=effective->placements.enemies;bytes[51]=effective->placements.pickups;
+    bytes[52]=requested->placements.enemies==kArRegionalSource_Europe?requested->difficulty.level:0;
+    bytes[53]=effective->placements.enemies==kArRegionalSource_Europe?effective->difficulty.level:0;
+    if(!sr_support_sha256(bytes,sizeof(bytes),out))return false;
+    *baseline=false;
+  }
+  if(music_requested || music_effective) {
+    /* Scene routing is independent of the per-room raster choice. */
+    uint8_t bytes[50]="ARMUSICROUTE-R1";memcpy(bytes+16,out,32);
+    bytes[48]=music_requested;bytes[49]=music_effective;
+    if(!sr_support_sha256(bytes,sizeof(bytes),out))return false;
+    *baseline=false;
+  }
+  if(terrain_requested || terrain_effective) {
+    uint8_t bytes[50]="ARTERRAIN-R1";memcpy(bytes+16,out,32);
+    bytes[48]=terrain_requested;bytes[49]=terrain_effective;
+    if(!sr_support_sha256(bytes,sizeof(bytes),out))return false;
+    *baseline=false;
+  }
+  if(mosaic_requested || mosaic_effective) {
+    uint8_t bytes[50]="ARMOSAIC-R1";memcpy(bytes+16,out,32);
+    bytes[48]=mosaic_requested;bytes[49]=mosaic_effective;
+    if(!sr_support_sha256(bytes,sizeof(bytes),out))return false;
+    *baseline=false;
+  }
+  if(hazards_requested || hazards_effective) {
+    uint8_t bytes[50]="ARHAZARDS-R1";memcpy(bytes+16,out,32);
+    bytes[48]=hazards_requested;bytes[49]=hazards_effective;
     if(!sr_support_sha256(bytes,sizeof(bytes),out))return false;
     *baseline=false;
   }

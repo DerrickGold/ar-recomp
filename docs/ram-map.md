@@ -82,6 +82,24 @@ separate these fields from PAL display timing and from authored hazard damage.
 
 ### Action damage boxes and terrain lookup
 
+After the native asset script, `$00:8329` projects room-owned terrain at
+`$7E:8000` and metatile definitions at `$7E:2100`. The latter are little-endian
+words; the shared host scene representation uses big-endian bytes. Both complete
+planes and the page dimensions (`$2E/$30 >> 8`) are validated before writing.
+Native `$02:BAC1` subsequently rebuilds `$05A0`, extracting bit `$0200` from
+each of the four words. Rendering consumes the same selected layout.
+
+Fillmore's paired start/retry prefixes are `$00:933C` and `$00:94B1`. At room
+load only, an active checkpoint (`$032C != 0`) at X=`156*16` and Y=`23*16` or
+`25*16` is normalized to the selected terrain. Other saved/debug coordinates
+are untouched. The native player initializer consumes and clears `$032E/$0330`.
+
+The regional adapter at `$00:940C` may replace a completed US expansion with
+the room-pinned regional box list before the native count is published. It
+validates all US records first, writes only the selected records and scratch
+count `$00`, and leaves the US source cursor and return frame intact. Unused
+record tails are not cleared; `$1AE2` bounds every native contact traversal.
+
 These are room-owned gameplay data, separate from the sprite hitboxes and
 render-layer maps. Native US/JP expansion and contact rules match; regional
 differences are in the authored streams. See the
@@ -155,6 +173,7 @@ apron channel) must read it here and resolve through
 | Address / field | Size | Description |
 |---|---:|---|
 | `$7E:06A0-$1A9F` | 80 × `$40` | Action object slots. Magic cohort slots are `$06A0-$0820`; cast controller is `$0860`; player is `$08A0` |
+| Action wave gate `+02/+04`, `+34/+36`, `+38` | 2 each | Retry coordinates, trigger coordinates, and actual US placement cursor after `$FE`. Initial handler `$A813` becomes `$A82D` to load the later wave. Regional numerical placement programs preserve this cursor identity and the native gate slot; they do not store host pointers in WRAM. |
 | `$7E:02D0-$02E0` | 17 | **US PRNG state pool.** `$00:84C0` advances it (a carry-chain `ADC` down the pool, then a multi-byte counter increment) and returns the byte at `$02D1` in A. Every randomized spell decision goes through it — e.g. Magical Stardust's launch site picks top-vs-right edge and its Y offset from one call (`$00:A0E8`). JP `$00:84BA` uses the relocated pool `$02CF-$02DF` and returns `$02D0`; do not seed/read JP at US offsets in regional fixtures. |
 | `$7E:08A2/$08A4` | 2+2 | Player object world X/Y (`$08A0 + $02/+04`). The arrival gate uses initialized X `$08A2` to reconstruct the native horizontal activation camera before `$97A6` transfers camera-subject ownership through `$8A`; drawing uses horizontally fitted `$22` and native vertical `$24`. |
 | `$7E:08B2` | 2 | Player primary handler (`$08A0 + $12`). Action entry advances `$97A6 → $97C9 → $97E4`; `$97E4` installs `$9832`, the first handler that reads held input. This lifecycle gates only extra horizontal activation, never widescreen drawing or camera presentation. |
@@ -406,7 +425,8 @@ addresses are shared scratch in other game modes.
 |---------|------|-------------|
 | $7E:00A2 | 3 | Asset-script long pointer. `$02:B1F7` and its command handlers address the current operand as `[$A2],Y`; the guarded action HLEs advance Y exactly as the native handlers do. |
 | $7E:00A5 | 3 | Long pointer to compressed input byte |
-| $7E:00AB | 3 | Long pointer to current music data |
+| $7E:00A5/$00A7 | 2+1 | Asset-script requested resource pointer, reused by non-music commands. At accepted music boundary `$02:B653`, Japan's Fillmore cave routing may replace the recognized `$0E:F69F` request with US `$18:947F`. Not the resident source cache. |
+| $7E:00AB | 3 | Resident music-source cache, owned by native upload/comparison at `$02:B655`. Regional setting edits do not write it. |
 | $7E:00AE | 1 | Bit weight (0x80, 0x40... 0x01) |
 | $7E:00AF | 2 | Sliding window position |
 | $7E:00B1 | 2 | Source position in sliding window |
@@ -617,8 +637,10 @@ screen coordinates are not. Native camera/screen offsets still apply to anchors.
 |---------|------|-------------|
 | $7E:4000+ | varies | Per-act decompressed ordinary-object animation/composition blob. Loaded by `$02:B69C` only at act-entry maps and inherited by later maps in the same act. Bloodpool scene composition pointers `$45EF/$4610/$46FE/$479D`, Marahna orb pointers `$4504/$4510/$451C/$4528`, snake-shot pointers `$4869/$487C`, split/link pointers `$4597/$4BCD/$4BD9/$45B8/$45C4/$45D0/$45DC/$4AA1/$4B82`, excluded reaper-orb pointers `$47E5/$4806/$4827/$4848`, excluded platform pointer `$4BE5`, and Aitos `$4D21/$4D2D` are addresses inside this mutable WRAM blob, not ROM symbols. Marahna boss-room pointers `$57C2/$5868/$59DE/$5CE0/$5D01/$5D0D/$5D2E` live in its separate `$7E:5000` bank. |
 | $7E:5000+ | varies | Per-map decompressed boss animation/composition blob selected by the same asset-script command with nonzero destination flag. Aitos boss-volley visuals `$20/$21/$23` resolve to mutable WRAM compositions `$56BE/$56D8/$56FE` in run `20260812-000613`; Flaming Wheel's full rings use `$5276/$5398/$54BA/$55DC` and its cyan shots use `$51B5/$51C1/$51CD/$51D9`. Like every loaded pointer, these addresses identify artwork only inside the validated map/source lifecycle. |
+| `$7E:5F00/$5F40/$5F80/$5FC0`, room `0406` only | 4 × 64-byte slots | Regional Northwall impact compositions derived from US visual8, up to61 bytes each. Validated native boss blob occupies `$5000–560C`; its21 composition records remain unchanged. Actors retain a valid US visual8 alias at `+22`, but native and host rendering use their full `+20` composition pointer. Fixed per-pose slots prevent concurrent impacts overwriting each other. This is not general free WRAM in other rooms. |
 | $7E:6000-$7E:7FFF | 8KB | Shared action character/metatile decompression workspace and persistent-raster table storage. R1-R6/R8 use `$6000`, R7/R10 BG1 use `$6800`, R9 uses `$7000`, and R10 BG2 uses `$6000`; untouched bytes can remain presentation-visible. |
 | $7F:2000+ | varies | Arrangement data |
+| $7E:6000-$60E0 (Aitos room $0504) | 225 | Mosaic HDMA: 112 two-byte records `{2, value}`, then a zero terminator. `$02:9382` uses DP `$00/$01` as a 16-bit waveform index and DP `$0C` as a112-band counter. The regional loop writes the224 record bytes; native `$02:93BA` retains terminator/setup ownership. Other rooms reuse this workspace. |
 | $7F:6800+ | varies | Road construction data (one word per 4x4 block) |
 | $7F:B000-$7F:B7FF | 2KB | BG3 tilemap |
 

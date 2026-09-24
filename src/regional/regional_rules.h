@@ -41,11 +41,21 @@
 #include "regional_action_start.h"
 #include "regional_spell_inventory.h"
 #include "regional_mode_entry.h"
+#include "regional_hazards.h"
+#include "regional_terrain.h"
+#include "regional_music.h"
+#include "regional_mosaic.h"
+#include "regional_placement_policy.h"
 
 /* Game-owned value snapshot. No campaign identity, persistence, native memory
  * or UI ownership. Each family keeps its own units and activation boundary;
  * this aggregate is not a request to activate all families together. */
 typedef struct ArRegionalRules {
+  ArRegionalSource hazards;
+  ArRegionalSource terrain;
+  ArRegionalSource music;
+  ArRegionalSource mosaic;
+  ArRegionalPlacementPolicy placements;
   ArRegionalModePolicy mode_entry;
   ArRegionalCostPolicy costs;
   ArRegionalTimerPolicy timers;

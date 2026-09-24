@@ -286,6 +286,18 @@ static ActRaiserRegionalEditResult FakeRegionalEdit(const ActRaiserRegionalRules
     ArRegionalActionStart_Init(&s_fake_region.requested.action_start,source);
   else if(group==kActRaiserRegionalSetting_Inventory)
     s_fake_region.requested.spell_inventory=source;
+  else if(group==kActRaiserRegionalSetting_Music)
+    s_fake_region.requested.music=source;
+  else if(group==kActRaiserRegionalSetting_Mosaic)
+    s_fake_region.requested.mosaic=source;
+  else if(group==kActRaiserRegionalSetting_EnemyPlacements)
+    s_fake_region.requested.placements.enemies=source;
+  else if(group==kActRaiserRegionalSetting_PickupPlacements)
+    s_fake_region.requested.placements.pickups=source;
+  else if(group==kActRaiserRegionalSetting_Terrain)
+    s_fake_region.requested.terrain=source;
+  else if(group==kActRaiserRegionalSetting_Hazards)
+    s_fake_region.requested.hazards=source;
   else if(group==kActRaiserRegionalSetting_DifficultyRules)
     ArRegionalDifficulty_Init(&s_fake_region.requested.difficulty,source,s_fake_region.requested.difficulty.level);
   else if (group == kActRaiserRegionalSetting_MenuReturn)
@@ -712,7 +724,8 @@ static void CheckRegionalControls(SDL_Renderer *renderer, SDL_Surface *surface) 
     ActRaiserRegionalRulesView preview=s_fake_region;ArRegionalBoss_Init(&preview.requested.bosses,source);
     char help[2048];CHECK(SettingsOverlayRegions_ViewDescription((ArUiLocale)locale,&preview,kActRaiserRegionalSetting_Bosses,help,sizeof(help)));
     size_t used=0,length=strlen(help);
-    for(unsigned line=0;line<4 && used<length;++line) {
+    CHECK(SettingsOverlayRegions_DescriptionLines(kActRaiserRegionalSetting_Bosses)==6);
+    for(unsigned line=0;line<SettingsOverlayRegions_DescriptionLines(kActRaiserRegionalSetting_Bosses) && used<length;++line) {
       ArInterfaceTextLine slice;CHECK(ArInterfaceText_WrapLine(help+used,length-used,98,kArInterfaceTextMaximumBytes,&slice));
       CHECK(slice.consumed);used+=slice.consumed;
     }
@@ -869,11 +882,85 @@ static void CheckRegionalControls(SDL_Renderer *renderer, SDL_Surface *surface) 
     CHECK(used==length && !strchr(help,'{'));
   }
   CHECK(SettingsOverlay_HandleKey(SDLK_DOWN,true,false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(),"regional_hazards"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_LEFT,true,false));
+  CHECK(s_region_edits==45 && s_fake_region.requested.hazards==2 && !s_fake_region.effective.hazards);
+  for(unsigned locale=0;locale<kArUiLocale_Count;++locale)for(unsigned source=0;source<3;++source) {
+    ActRaiserRegionalRulesView preview=s_fake_region;preview.requested.hazards=source;
+    char help[2048];CHECK(SettingsOverlayRegions_ViewDescription(locale,&preview,kActRaiserRegionalSetting_Hazards,help,sizeof(help)));
+    size_t used=0,length=strlen(help);
+    for(unsigned line=0;line<4 && used<length;++line) {
+      ArInterfaceTextLine slice;CHECK(ArInterfaceText_WrapLine(help+used,length-used,98,kArInterfaceTextMaximumBytes,&slice));
+      CHECK(slice.consumed);used+=slice.consumed;
+    }
+    CHECK(used==length && !strchr(help,'{'));
+  }
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN,true,false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(),"regional_terrain"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_LEFT,true,false));
+  CHECK(s_region_edits==46 && s_fake_region.requested.terrain==2 && !s_fake_region.effective.terrain);
+  for(unsigned locale=0;locale<kArUiLocale_Count;++locale)for(unsigned source=0;source<3;++source) {
+    ActRaiserRegionalRulesView preview=s_fake_region;preview.requested.terrain=source;
+    char help[2048];CHECK(SettingsOverlayRegions_ViewDescription(locale,&preview,kActRaiserRegionalSetting_Terrain,help,sizeof(help)));
+    size_t used=0,length=strlen(help);
+    for(unsigned line=0;line<4 && used<length;++line) {
+      ArInterfaceTextLine slice;CHECK(ArInterfaceText_WrapLine(help+used,length-used,98,kArInterfaceTextMaximumBytes,&slice));
+      CHECK(slice.consumed);used+=slice.consumed;
+    }
+    CHECK(used==length && !strchr(help,'{'));
+  }
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN,true,false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(),"regional_music"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_LEFT,true,false));
+  CHECK(s_region_edits==47 && s_fake_region.requested.music==2 && !s_fake_region.effective.music);
+  for(unsigned locale=0;locale<kArUiLocale_Count;++locale)for(unsigned source=0;source<3;++source) {
+    ActRaiserRegionalRulesView preview=s_fake_region;preview.requested.music=source;
+    char help[2048];CHECK(SettingsOverlayRegions_ViewDescription(locale,&preview,kActRaiserRegionalSetting_Music,help,sizeof(help)));
+    size_t used=0,length=strlen(help);
+    for(unsigned line=0;line<4 && used<length;++line) {
+      ArInterfaceTextLine slice;CHECK(ArInterfaceText_WrapLine(help+used,length-used,98,kArInterfaceTextMaximumBytes,&slice));
+      CHECK(slice.consumed);used+=slice.consumed;
+    }
+    CHECK(used==length && !strchr(help,'{'));
+  }
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN,true,false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(),"regional_enemy_placements"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_LEFT,true,false));
+  CHECK(s_region_edits==48 && s_fake_region.requested.placements.enemies==2 && !s_fake_region.effective.placements.enemies);
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN,true,false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(),"regional_pickup_placements"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_LEFT,true,false));
+  CHECK(s_region_edits==49 && s_fake_region.requested.placements.pickups==2 && !s_fake_region.effective.placements.pickups);
+  for(unsigned locale=0;locale<kArUiLocale_Count;++locale)for(unsigned source=0;source<3;++source)
+    for(unsigned group=kActRaiserRegionalSetting_EnemyPlacements;group<=kActRaiserRegionalSetting_PickupPlacements;++group) {
+      ActRaiserRegionalRulesView preview=s_fake_region;preview.requested.placements=(ArRegionalPlacementPolicy){source,source};
+      char help[2048];CHECK(SettingsOverlayRegions_ViewDescription(locale,&preview,group,help,sizeof(help)));
+      size_t used=0,length=strlen(help);
+      for(unsigned line=0;line<4 && used<length;++line) {
+        ArInterfaceTextLine slice;CHECK(ArInterfaceText_WrapLine(help+used,length-used,98,kArInterfaceTextMaximumBytes,&slice));
+        CHECK(slice.consumed);used+=slice.consumed;
+      }
+      CHECK(used==length && !strchr(help,'{'));
+    }
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN,true,false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(),"regional_mosaic"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_LEFT,true,false));
+  CHECK(s_region_edits==50 && s_fake_region.requested.mosaic==2 && !s_fake_region.effective.mosaic);
+  for(unsigned locale=0;locale<kArUiLocale_Count;++locale) {
+    char help[2048];CHECK(SettingsOverlayRegions_ViewDescription(locale,&s_fake_region,kActRaiserRegionalSetting_Mosaic,help,sizeof(help)));
+    size_t used=0,length=strlen(help);
+    for(unsigned line=0;line<4 && used<length;++line) {
+      ArInterfaceTextLine slice;CHECK(ArInterfaceText_WrapLine(help+used,length-used,98,kArInterfaceTextMaximumBytes,&slice));
+      CHECK(slice.consumed);used+=slice.consumed;
+    }
+    CHECK(used==length && !strchr(help,'{'));
+  }
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN,true,false));
   CHECK(!strcmp(SettingsOverlay_SelectedKey(), "regional_scroll_prices")); /* no global reset row */
   s_fake_region.editable = false;
   CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
   CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
-  CHECK(s_region_edits == 44);
+  CHECK(s_region_edits == 50);
   CHECK(!memcmp(&before, &g_settings, sizeof(before)));
   s_fake_region.editable = true;
   SettingsOverlay_Close(); /* clear transient status for the preview */

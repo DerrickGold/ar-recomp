@@ -7,6 +7,8 @@
 
 #include "actraiser_game.h"
 #include "action/action_room_scene.h"
+#include "action/action_room_terrain.h"
+#include "action/action_room_mosaic.h"
 #include "deterministic_hash.h"
 #include "diorama/diorama_layer_order.h"
 #include "snesrecomp/runner.h"
@@ -32,6 +34,7 @@ typedef struct ActRaiserActionBgObserver {
   const uint8_t *rom;
   size_t rom_size;
   ActionRoomScene *room_scene;
+  uint8_t terrain_profile, mosaic_pattern;
   ActionRoomSceneFrameState room_frame;
   ActionRoomSceneFrameState previous_room_frame;
   ActionRoomSceneFrameState authentic_room_frame;
@@ -638,6 +641,7 @@ static bool RoomSceneCompareVerbose(void) {
 bool ActRaiserActionBg_InitRoomScenes(const uint8_t *rom, size_t rom_size) {
   s_observer.rom = rom;
   s_observer.rom_size = rom_size;
+  s_observer.terrain_profile = s_observer.mosaic_pattern = 0;
   s_observer.room_scene_valid = false;
   s_observer.room_scene_attempted = false;
   s_observer.room_frame_valid = false;
@@ -701,6 +705,12 @@ void ActRaiserActionBg_Reset(void) {
   s_observer.forced_blank = false;
 }
 
+void ActRaiserActionBg_BeginRoomVariants(uint8_t profile,uint8_t mosaic) {
+  s_observer.mosaic_pattern = mosaic;
+  s_observer.terrain_profile = profile;
+  ResetWorlds();
+}
+
 static void RecordFallback(ActRaiserActionBgFallbackReason reason,
                            unsigned layer, uint8_t map_group,
                            uint8_t map_number,
@@ -756,7 +766,11 @@ static bool EnsureRoomScene(uint8_t map_group, uint8_t map_number) {
   if (!s_observer.room_scene || !s_observer.rom || !s_observer.rom_size ||
       !ActionRoomScene_Load(s_observer.room_scene,
                             s_observer.rom, s_observer.rom_size,
-                            map_group, map_number)) {
+                            map_group, map_number) ||
+      (s_observer.terrain_profile &&
+       !ActionRoomTerrain_Project(s_observer.room_scene,s_observer.terrain_profile)) ||
+      (s_observer.mosaic_pattern &&
+       !ActionRoomMosaic_Project(s_observer.room_scene,s_observer.mosaic_pattern))) {
     s_observer.diagnostics.room_scene_load_failures++;
     fprintf(stderr,
             "[action-room-scene] load failed map=%02X/%02X\n",

@@ -216,6 +216,13 @@ Fillmore's opening forest and Northwall Act 2. Their checked boundaries
 match the US boxes. These authored values apply independently of the
 difficulty selection: Beginner does not make a 24-HP box harmless.
 
+Europe also changes which parts of some terrain tiles block movement, even
+when their graphics are identical to the US version. Smaller changes rearrange
+terrain in Aitos and Northwall. These collision changes are separate from the
+damage boxes: identical-looking spikes do not establish that two releases
+have the same collision or damage rules. European English, German and French
+share the compared terrain data.
+
 European Story and Action Mode also select separate placement tables. Seven
 shared room layouts change pickup entries between modes; their player starts
 and damage-box lists match. Item numbers need to be interpreted with the selected
@@ -601,8 +608,11 @@ Japan's other measured phases are 12 frames opening, 12 closing and 90 closed.
 Its closed-head protection applies in normal and Special mode. European
 observations cover Action Mode on all three difficulties.
 
-The measured main boss position is eight pixels lower in Japan, and its body
-uses a different arrangement of sprite parts.
+The main boss starts eight pixels lower in Japan. Its body is one16-pixel
+tile row shorter: five large poses use four fewer sprite pieces, reducing
+their height from208 to192 pixels. The closed head also has slightly different
+vertical bounds. These geometry changes are separate from its vulnerability
+cycle and redrawn artwork.
 
 **European plant attacks.** Beginner gives one tendril a slower bobbing
 cycle in place of two quicker cycles, without changing when the next
@@ -674,8 +684,10 @@ Evidence: [Act 1 boss phases and protection](regional-differences-technical.md#m
 **Act 1: European boss.** Its throwing animation takes 15 updates instead of
 50 in the US. The projectile appears eight pixels farther from the boss
 horizontally. On impact, its effect expands
-to a wider collision footprint but disappears sooner—20 updates instead of
-42. These changes are larger than ordinary PAL timing compensation.
+to a 64-pixel collision footprint instead of 32 pixels, but disappears
+sooner—20 updates instead of 42. The four extra poses repeat the existing
+impact tiles, and the effect starts two pixels lower. These changes are
+larger than ordinary PAL timing compensation.
 
 **Act 2: Ice Dragon wind-up.** The examined wind-up lasts 118 active frames
 in the original Northwall fight in every release. In Death Heim, the US and

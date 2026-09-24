@@ -5,7 +5,9 @@ bool ActRaiser_PlantTendrilEntry(CpuState *cpu);
 RecompReturn ActRaiser_PlantTendril(CpuState *cpu);
 /* Shared native animation-row acquisition seam. Independent policies change
  * fresh actor outputs or select an existing pose through the native reader;
- * never shared asset bytes, elapsed phases or native CPU/return ownership. */
+ * never elapsed phases or native CPU/return ownership. Northwall's four
+ * derived impact compositions occupy validated, room-owned workspace slots;
+ * existing asset bytes and composition-table ordinals remain unchanged. */
 bool ActRaiser_ActionMotionEntry(CpuState *cpu);
 RecompReturn ActRaiser_ActionMotion(CpuState *cpu);
 /* Common spawn/reinitialization after first row, before bottom anchoring.

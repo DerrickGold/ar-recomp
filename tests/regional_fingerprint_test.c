@@ -24,6 +24,64 @@ int main(void) {
   CHECK(ArRegionalCosts_Fingerprint(&eu, &us, current, &baseline) && baseline);
   CHECK(!memcmp(native, current, 32));
   ArRegionalRules r = {.costs = us}, e = {.costs = eu};
+  uint8_t placement_hashes[81][32];
+  for(unsigned i=0;i<81;++i) {
+    ArRegionalRules req={.placements={i%3,i/3%3}},eff={.placements={i/9%3,i/27}};
+    CHECK(ArRegionalRules_Fingerprint(&req,&eff,placement_hashes[i],&baseline) && baseline==!i);
+    for(unsigned j=0;j<i;++j)CHECK(memcmp(placement_hashes[i],placement_hashes[j],32));
+  }
+  for(unsigned source=0;source<3;++source) {
+    ArRegionalRules req={.placements={source,0}},eff={0};
+    uint8_t levels[3][32];
+    for(unsigned level=0;level<3;++level) {
+      req.difficulty.level=level;
+      CHECK(ArRegionalRules_Fingerprint(&req,&eff,levels[level],&baseline));
+      for(unsigned j=0;j<level;++j)CHECK((memcmp(levels[level],levels[j],32)!=0)==(source==2));
+    }
+  }
+  ArRegionalRules invalid_placements={.placements={3,0}},empty_placements={0};
+  CHECK(!ArRegionalRules_Fingerprint(&invalid_placements,&empty_placements,current,&baseline));
+  invalid_placements.placements=(ArRegionalPlacementPolicy){0,3};
+  CHECK(!ArRegionalRules_Fingerprint(&empty_placements,&invalid_placements,current,&baseline));
+  uint8_t hazard_hashes[9][32];
+  uint8_t mosaic_hashes[9][32];
+  for(unsigned request=0;request<3;++request)for(unsigned active=0;active<3;++active) {
+    ArRegionalRules req={.mosaic=request},eff={.mosaic=active};
+    const unsigned index=request*3+active;
+    CHECK(ArRegionalRules_Fingerprint(&req,&eff,mosaic_hashes[index],&baseline) && baseline==!index);
+    for(unsigned j=0;j<index;++j)CHECK(memcmp(mosaic_hashes[index],mosaic_hashes[j],32));
+  }
+  ArRegionalRules invalid_mosaic={.mosaic=3},empty_mosaic={0};
+  CHECK(!ArRegionalRules_Fingerprint(&invalid_mosaic,&empty_mosaic,current,&baseline));
+  CHECK(!ArRegionalRules_Fingerprint(&empty_mosaic,&invalid_mosaic,current,&baseline));
+  for(unsigned request=0;request<3;++request)for(unsigned active=0;active<3;++active) {
+    ArRegionalRules req={.hazards=request},eff={.hazards=active};
+    const unsigned index=request*3+active;
+    CHECK(ArRegionalRules_Fingerprint(&req,&eff,hazard_hashes[index],&baseline) && baseline==!index);
+    for(unsigned j=0;j<index;++j)CHECK(memcmp(hazard_hashes[index],hazard_hashes[j],32));
+  }
+  ArRegionalRules invalid_hazard={.hazards=3},empty_hazard={0};
+  CHECK(!ArRegionalRules_Fingerprint(&invalid_hazard,&empty_hazard,current,&baseline));
+  uint8_t music_hashes[4][32];bool music_seen[4]={0};
+  for(unsigned request=0;request<3;++request)for(unsigned active=0;active<3;++active) {
+    ArRegionalRules req={.music=request},eff={.music=active};
+    const unsigned index=(request==1)|((active==1)<<1);
+    CHECK(ArRegionalRules_Fingerprint(&req,&eff,current,&baseline) && baseline==!index);
+    if(music_seen[index])CHECK(!memcmp(music_hashes[index],current,32));
+    else {memcpy(music_hashes[index],current,32);music_seen[index]=true;}
+  }
+  for(unsigned i=0;i<4;++i)for(unsigned j=0;j<i;++j)CHECK(memcmp(music_hashes[i],music_hashes[j],32));
+  ArRegionalRules invalid_music={.music=3},empty_music={0};
+  CHECK(!ArRegionalRules_Fingerprint(&invalid_music,&empty_music,current,&baseline));
+  uint8_t terrain_hashes[9][32];
+  for(unsigned request=0;request<3;++request)for(unsigned active=0;active<3;++active) {
+    ArRegionalRules req={.terrain=request},eff={.terrain=active};
+    const unsigned index=request*3+active;
+    CHECK(ArRegionalRules_Fingerprint(&req,&eff,terrain_hashes[index],&baseline) && baseline==!index);
+    for(unsigned j=0;j<index;++j)CHECK(memcmp(terrain_hashes[index],terrain_hashes[j],32));
+  }
+  ArRegionalRules invalid_terrain={.terrain=3},empty_terrain={0};
+  CHECK(!ArRegionalRules_Fingerprint(&invalid_terrain,&empty_terrain,current,&baseline));
   uint8_t mode_hashes[16][32];bool mode_seen[16]={0};
   for(unsigned combination=0;combination<81;++combination) {
     ArRegionalRules req={0},eff={0};unsigned digits=combination,index=0;
@@ -267,6 +325,36 @@ int main(void) {
   for(unsigned i=0;i<256;++i)CHECK(plant_seen[i]);
   qsort(plant_digests,256,32,CompareDigest);
   for(unsigned i=1;i<256;++i)CHECK(memcmp(plant_digests[i-1],plant_digests[i],32));
+  uint8_t northwall_digests[256][32];bool northwall_seen[256]={false};
+  for(unsigned n=0;n<6561;++n) {
+    ArRegionalRules request={0},active={0};unsigned digits=n,index=0;
+    for(unsigned i=26;i<30;++i) {
+      request.bosses.source[i]=digits%3;digits/=3;active.bosses.source[i]=digits%3;digits/=3;
+      index|=(unsigned)(request.bosses.source[i]==2)<<(2*(i-26));
+      index|=(unsigned)(active.bosses.source[i]==2)<<(2*(i-26)+1);
+    }
+    CHECK(ArRegionalRules_Fingerprint(&request,&active,current,&baseline) && baseline==!index);
+    if(northwall_seen[index])CHECK(!memcmp(northwall_digests[index],current,32));
+    else {northwall_seen[index]=true;memcpy(northwall_digests[index],current,32);}
+    if(index)CHECK(!bsearch(current,plant_digests,256,32,CompareDigest));
+  }
+  CHECK(!memcmp(native,northwall_digests[0],32));
+  for(unsigned i=0;i<256;++i)CHECK(northwall_seen[i]);
+  qsort(northwall_digests,256,32,CompareDigest);
+  for(unsigned i=1;i<256;++i)CHECK(memcmp(northwall_digests[i-1],northwall_digests[i],32));
+  uint8_t geometry_digests[4][32];bool geometry_seen[4]={false};
+  for(unsigned req=0;req<3;++req)for(unsigned eff=0;eff<3;++eff) {
+    ArRegionalRules request={0},active={0};request.bosses.source[30]=req;active.bosses.source[30]=eff;
+    const unsigned index=(req==1?1u:0u)|(eff==1?2u:0u);
+    CHECK(ArRegionalRules_Fingerprint(&request,&active,current,&baseline) && baseline==!index);
+    if(geometry_seen[index])CHECK(!memcmp(geometry_digests[index],current,32));
+    else {geometry_seen[index]=true;memcpy(geometry_digests[index],current,32);}
+    if(index)CHECK(!bsearch(current,northwall_digests,256,32,CompareDigest));
+  }
+  CHECK(!memcmp(native,geometry_digests[0],32));
+  for(unsigned i=0;i<4;++i)CHECK(geometry_seen[i]);
+  qsort(geometry_digests,4,32,CompareDigest);
+  for(unsigned i=1;i<4;++i)CHECK(memcmp(geometry_digests[i-1],geometry_digests[i],32));
   for(unsigned n=0;n<81;++n) {
     ArRegionalRules request={0},active={0};unsigned digits=n,index=0;
     for(unsigned i=13;i<15;++i) {

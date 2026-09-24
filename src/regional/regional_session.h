@@ -45,6 +45,18 @@ bool ArRegionalSession_RequestActionStart(ArRegionalSession *session,uint32_t re
 /* Confirmed Action Mode new run only, never a room/retry or settings edit. */
 bool ArRegionalSession_BeginActionStart(ArRegionalSession *session,ArRegionalActionStartSnapshot *snapshot);
 bool ArRegionalSession_RequestInventory(ArRegionalSession *session,uint32_t revision,ArRegionalSource source);
+bool ArRegionalSession_RequestMusic(ArRegionalSession *session,uint32_t revision,ArRegionalSource source);
+bool ArRegionalSession_RequestMosaic(ArRegionalSession *session,uint32_t revision,ArRegionalSource source);
+bool ArRegionalSession_BeginMosaic(ArRegionalSession *session,uint8_t *snapshot);
+bool ArRegionalSession_RequestPlacements(ArRegionalSession *session,uint32_t revision,
+    const ArRegionalPlacementPolicy *policy);
+bool ArRegionalSession_BeginPlacements(ArRegionalSession *session,ArRegionalPlacementPolicy *snapshot);
+bool ArRegionalSession_BeginMusic(ArRegionalSession *session,uint8_t *snapshot);
+bool ArRegionalSession_RequestTerrain(ArRegionalSession *session,uint32_t revision,ArRegionalSource source);
+bool ArRegionalSession_BeginTerrain(ArRegionalSession *session,uint8_t *snapshot);
+bool ArRegionalSession_RequestHazards(ArRegionalSession *session,uint32_t revision,ArRegionalSource source);
+/* Completed room initialization, never an active contact pass. */
+bool ArRegionalSession_BeginHazards(ArRegionalSession *session,uint8_t *snapshot);
 bool ArRegionalSession_RequestModeEntry(ArRegionalSession *session,uint32_t revision,const ArRegionalModePolicy *policy);
 bool ArRegionalSession_BeginModeEntry(ArRegionalSession *session,uint8_t *snapshot);
 /* New Action run only; never reinterprets a live collection. */

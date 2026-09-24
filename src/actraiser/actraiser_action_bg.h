@@ -275,6 +275,9 @@ uint8_t ActRaiserActionBg_BindPlanWithVirtualLayers(
  * binds or republishes a renderer provider and never mutates emulated memory. */
 void ActRaiserActionBg_ObserveFrame(const uint8_t *wram, size_t wram_size);
 void ActRaiserActionBg_Reset(void);
+/* Room-load publication only, after native terrain has been projected. The
+ * renderer receives a value, never mutable settings or CPU ownership. */
+void ActRaiserActionBg_BeginRoomVariants(uint8_t terrain,uint8_t mosaic);
 void ActRaiserActionBg_Shutdown(void);
 const ActRaiserActionBgDiagnostics *ActRaiserActionBg_GetDiagnostics(void);
 

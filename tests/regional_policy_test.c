@@ -224,6 +224,11 @@ static void CheckMenuAdapter(void) {
       CHECK(ArRegionalDifficulty_Init(&view.requested.difficulty,(ArRegionalSource)source,kArRegionalDifficulty_Normal));
       view.requested.score_lives=(ArRegionalSource)source;
       view.requested.spell_inventory=(ArRegionalSource)source;
+      view.requested.hazards=(ArRegionalSource)source;
+      view.requested.terrain=(ArRegionalSource)source;
+      view.requested.music=(ArRegionalSource)source;
+      view.requested.mosaic=(ArRegionalSource)source;
+      view.requested.placements=(ArRegionalPlacementPolicy){source,source};
       CHECK(ArRegionalActionStart_Init(&view.requested.action_start,(ArRegionalSource)source));
       CHECK(ArRegionalMode_Init(&view.requested.mode_entry,(ArRegionalSource)source));
       view.requested.menu_return = (ArRegionalSource)source;

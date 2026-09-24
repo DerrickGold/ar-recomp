@@ -9,6 +9,7 @@
 #include "actraiser/actraiser_construction_runtime.h"
 #include "actraiser/actraiser_population_conversion.h"
 #include "actraiser/actraiser_arrival_runtime.h"
+#include "actraiser/actraiser_stage_placements.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -40,6 +41,11 @@ void ActRaiserTownStatusRuntime_Reset(void) {}
 void ActRaiserConstructionRuntime_Reset(void) {}
 void ActRaiserLevelGoalsRuntime_Reset(void) {}
 void ActRaiserArrivalRuntime_Reset(void) {}
+static unsigned placement_resets;
+void ActRaiserStagePlacements_Reset(void) { ++placement_resets; }
+bool ActRaiserStagePlacements_Fingerprint(const uint8_t previous[32],uint8_t out[32],bool *native) {
+  memmove(out,previous,32);*native=true;return true;
+}
 void ActRaiserLevelGoalsRuntime_RefreshReport(CpuState *cpu) { (void)cpu; }
 static uint8_t ram[65536];
 static uint8_t town_ram[65536];
@@ -1346,6 +1352,78 @@ int main(void) {
   assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_Collision,0)==kActRaiserRegionalEdit_Applied);
   assert(ActRaiserRegional_CollisionSnapshot()==3);
   assert(ActRaiserRegional_BeginActionRoom(3,0x300,&motion_time) && !ActRaiserRegional_CollisionSnapshot());
+  assert(ActRaiserRegional_CopyRulesView(&view));
+  assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_Hazards,1)==kActRaiserRegionalEdit_Applied);
+  assert(!ActRaiserRegional_HazardSnapshot());
+  assert(!ActRaiserRegional_BeginActionRoom(3,0x300,NULL) && !ActRaiserRegional_HazardSnapshot());
+  assert(ActRaiserRegional_BeginActionRoom(3,0x300,&motion_time) && ActRaiserRegional_HazardSnapshot()==1);
+  assert(ActRaiserRegional_CopyRulesView(&view));
+  assert(view.requested.hazards==1 && view.effective.hazards==1);
+  assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_Hazards,2)==kActRaiserRegionalEdit_Applied);
+  assert(ActRaiserRegional_HazardSnapshot()==1);
+  assert(ActRaiserRegional_BeginActionRoom(3,0x300,&motion_time) && ActRaiserRegional_HazardSnapshot()==2);
+  assert(ActRaiserRegional_CopyRulesView(&view));
+  assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_Hazards,0)==kActRaiserRegionalEdit_Applied);
+  assert(ActRaiserRegional_BeginActionRoom(3,0x300,&motion_time) && !ActRaiserRegional_HazardSnapshot());
+  assert(!ActRaiserRegional_PlatformSkullSnapshot());
+  assert(ActRaiserRegional_CopyRulesView(&view));
+  uint8_t music_profile=255;
+  assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_Mosaic,1)==kActRaiserRegionalEdit_Applied);
+  assert(!ActRaiserRegional_MosaicSnapshot());
+  assert(!ActRaiserRegional_BeginActionRoom(3,0x300,NULL) && !ActRaiserRegional_MosaicSnapshot());
+  assert(ActRaiserRegional_BeginActionRoom(3,0x300,&motion_time) && ActRaiserRegional_MosaicSnapshot()==1);
+  assert(ActRaiserRegional_CopyRulesView(&view) && view.effective.mosaic==1);
+  assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_Mosaic,2)==kActRaiserRegionalEdit_Applied);
+  assert(ActRaiserRegional_MosaicSnapshot()==1);
+  assert(ActRaiserRegional_BeginActionRoom(3,0x300,&motion_time) && ActRaiserRegional_MosaicSnapshot()==2);
+  assert(ActRaiserRegional_CopyRulesView(&view) && view.effective.mosaic==2);
+  assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_Mosaic,0)==kActRaiserRegionalEdit_Applied);
+  assert(ActRaiserRegional_BeginActionRoom(3,0x300,&motion_time) && !ActRaiserRegional_MosaicSnapshot());
+  assert(ActRaiserRegional_CopyRulesView(&view));
+  ArRegionalPlacementPolicy placements={2,2};ArRegionalDifficulty placement_difficulty=kArRegionalDifficulty_Expert;
+  assert(!ActRaiserRegional_PlacementSnapshot(&placements,NULL) && placements.enemies==2);
+  assert(!ActRaiserRegional_PlacementSnapshot(NULL,&placement_difficulty) && placement_difficulty==kArRegionalDifficulty_Expert);
+  assert(ActRaiserRegional_PlacementSnapshot(&placements,&placement_difficulty) && !placements.enemies && !placements.pickups);
+  assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_EnemyPlacements,2)==kActRaiserRegionalEdit_Applied);
+  assert(ActRaiserRegional_CopyRulesView(&view));
+  assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_PickupPlacements,1)==kActRaiserRegionalEdit_Applied);
+  assert(ActRaiserRegional_PlacementSnapshot(&placements,&placement_difficulty) && !placements.enemies && !placements.pickups);
+  const unsigned old_placement_resets=placement_resets;
+  assert(!ActRaiserRegional_BeginActionRoom(3,0x300,NULL) && old_placement_resets==placement_resets);
+  assert(ActRaiserRegional_BeginActionRoom(3,0x300,&motion_time) && placement_resets==old_placement_resets+1);
+  assert(ActRaiserRegional_PlacementSnapshot(&placements,&placement_difficulty) && placements.enemies==2 && placements.pickups==1);
+  assert(ActRaiserRegional_CopyRulesView(&view) && placement_difficulty==view.effective.difficulty.level);
+  assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_EnemyPlacements,0)==kActRaiserRegionalEdit_Applied);
+  assert(ActRaiserRegional_CopyRulesView(&view));
+  assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_PickupPlacements,0)==kActRaiserRegionalEdit_Applied);
+  assert(ActRaiserRegional_BeginActionRoom(3,0x300,&motion_time));
+  assert(ActRaiserRegional_PlacementSnapshot(&placements,&placement_difficulty) && !placements.enemies && !placements.pickups);
+  assert(ActRaiserRegional_CopyRulesView(&view));
+  assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_Music,1)==kActRaiserRegionalEdit_Applied);
+  assert(ActRaiserRegional_CopyRulesView(&view) && !view.effective.music);
+  assert(!ActRaiserRegional_BeginSceneMusic(NULL));
+  assert(ActRaiserRegional_CopyRulesView(&view) && !view.effective.music);
+  assert(ActRaiserRegional_BeginSceneMusic(&music_profile) && music_profile==1);
+  assert(ActRaiserRegional_CopyRulesView(&view) && view.effective.music==1);
+  assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_Music,2)==kActRaiserRegionalEdit_Applied);
+  assert(ActRaiserRegional_CopyRulesView(&view) && view.effective.music==1);
+  assert(ActRaiserRegional_BeginSceneMusic(&music_profile) && !music_profile);
+  assert(ActRaiserRegional_CopyRulesView(&view) && view.effective.music==2);
+  assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_Music,0)==kActRaiserRegionalEdit_Applied);
+  assert(ActRaiserRegional_BeginSceneMusic(&music_profile) && !music_profile);
+  assert(ActRaiserRegional_CopyRulesView(&view));
+  assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_Terrain,1)==kActRaiserRegionalEdit_Applied);
+  assert(!ActRaiserRegional_TerrainSnapshot());
+  assert(!ActRaiserRegional_BeginActionRoom(3,0x300,NULL) && !ActRaiserRegional_TerrainSnapshot());
+  assert(ActRaiserRegional_BeginActionRoom(3,0x300,&motion_time) && ActRaiserRegional_TerrainSnapshot()==1);
+  assert(ActRaiserRegional_CopyRulesView(&view));
+  assert(view.requested.terrain==1 && view.effective.terrain==1);
+  assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_Terrain,2)==kActRaiserRegionalEdit_Applied);
+  assert(ActRaiserRegional_TerrainSnapshot()==1);
+  assert(ActRaiserRegional_BeginActionRoom(3,0x300,&motion_time) && ActRaiserRegional_TerrainSnapshot()==2);
+  assert(ActRaiserRegional_CopyRulesView(&view));
+  assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_Terrain,0)==kActRaiserRegionalEdit_Applied);
+  assert(ActRaiserRegional_BeginActionRoom(3,0x300,&motion_time) && !ActRaiserRegional_TerrainSnapshot());
   assert(!ActRaiserRegional_PlatformSkullSnapshot());
   assert(ActRaiserRegional_CopyRulesView(&view));
   assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_PlatformSkull,1)==kActRaiserRegionalEdit_Applied);

@@ -654,6 +654,64 @@ The optional `ARCASTHOLD-R1` digest domain appends the requested/effective
 three-bit masks after prior domains. All-US/Japanese aliases preserve the
 previous replay identity.
 
+Version 62 appends `aitos_mosaic_pattern` (237 records, 8519 bytes).
+Requested/effective sources resolve to patterns 0/1/2 for US/Japan/Europe.
+Versions 1–61 initialize it to US. Room entry/retry captures the selection;
+there is no serialized HDMA table or imported code. The optional
+`ARMOSAIC-R1` replay domain binds both choices; an all-US selection leaves
+previous replay identities unchanged. German's measured pattern is US,
+while French matches European English; language selection is independent.
+
+Version 61 appends `enemy_placements` and `pickup_placements` (236 records,
+8490 bytes). Each retains independent requested/effective sources 0/1/2 for
+US/Japan/Europe. Versions 1–60 initialize both to US. Room entry/retry
+captures the policy and European difficulty before building actors; it does
+not rebuild the current room. `ARPLACEMENTS-R1` binds both source pairs and
+the relevant European difficulty. `ARLIVEPLACE-R1` additionally binds the
+prepared numerical room program after randomization, including later waves.
+That transient program is not serialized into SRAM or the companion; ordinary
+Continue prepares it through the next room load. US delegation omits both
+domains and preserves the earlier replay identity.
+
+Version 60 appends `scene_music_route` (234 records, 8439 bytes). Requested
+and effective sources resolve to values 0/1/0 for US/Japan/Europe. Versions
+1–59 default to US. An accepted scene music declaration activates the request;
+there is no mid-track restart or serialized SPC state. The optional
+`ARMUSICROUTE-R1` replay domain records both semantic choices; US/European
+aliases leave previous replay identities unchanged. Native SRAM is unchanged.
+
+Version 59 appends `terrain_layout` (233 records, 8413 bytes). Requested and
+effective values 0/1/2 select US/Japanese/European terrain and its paired entry
+and checkpoint coordinates. Versions 1–58 default to US. Room entry/retry
+captures the profile; native WRAM retains the live geometry. The optional
+`ARTERRAIN-R1` replay domain records requested/effective choices without changing
+earlier identities when both are US. No SRAM bytes or graphics payloads are added.
+
+Version 58 appends `terrain_hazards` (232 records, 8390 bytes). Requested and
+effective values 0/1/2 identify the ordered US/Japanese/European rectangle and
+damage profiles. Versions 1–57 default to US. Selection is captured on room
+entry/retry; live boxes remain native WRAM, not new SRAM fields. The optional
+`ARHAZARDS-R1` replay domain records both choices, preserving all-US identities.
+The three profiles differ semantically, including Japanese trap geometry;
+European language and mode variants share one profile.
+
+Version 57 appends `plant_body_geometry` (231 records,8366 bytes). Requested/effective
+values208/192/208 describe the coherent US/JP/European body-height profile,
+including initial anchoring and closed-head bounds. Versions1–56 defaultUS.
+Boss snapshot bits60–61 retain the existing `ARBOSS-R1` domain; US/European
+aliases leave previous replay identities unchanged. Root/child positions and
+derived metadata remain native encounter state, not cartridge save fields.
+
+Version 56 appends `northwall_throw_sequence`, `northwall_impact_sequence`,
+`northwall_projectile_offset` and `northwall_impact_offset` (230 records,
+8338-byte payload).
+Requested/effective values are respectively50/50/15,42/42/20,8/8/16 and0/0/2
+for US/JP/Europe. Versions1–55 default these four leaves to US. They occupy
+boss snapshot bits52–59 in the existing `ARBOSS-R1` digest domain; US/JP
+aliases leave older identities unchanged. Room/retry entry activates them.
+Derived sprite composition records are transient native animation workspace,
+not cartridge SRAM or persistent host state.
+
 Version 55 appends `action_mode_unlocked` and `action_game_over_title` (226
 records, 8203 bytes). Each stores independent requested/effective sources and
 values 0/0/1. Versions 1–54 default to US mode entry. Title choice construction

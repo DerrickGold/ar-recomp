@@ -30,6 +30,11 @@ typedef enum ArRegionalBossRule {
   kArRegionalBoss_PlantOpen,
   kArRegionalBoss_PlantHighWindup,
   kArRegionalBoss_PlantLowWindup,
+  kArRegionalBoss_NorthwallThrow,
+  kArRegionalBoss_NorthwallImpact,
+  kArRegionalBoss_NorthwallThrowOffset,
+  kArRegionalBoss_NorthwallImpactOffset,
+  kArRegionalBoss_PlantGeometry,
   kArRegionalBoss_Count
 } ArRegionalBossRule;
 typedef struct ArRegionalBossPolicy { ArRegionalSource source[kArRegionalBoss_Count]; } ArRegionalBossPolicy;
@@ -69,4 +74,8 @@ bool ArRegionalBoss_PlantPhase(ArRegionalBossSnapshot snapshot,unsigned previous
 bool ArRegionalBoss_PlantOpenRow(ArRegionalBossSnapshot snapshot,unsigned row,unsigned *native_row,uint8_t *visual);
 bool ArRegionalBoss_PlantWindup(ArRegionalBossSnapshot snapshot,unsigned state,unsigned row,
     uint8_t visual,uint16_t *duration,int16_t dx,int16_t dy);
+/* Northwall Act 1: expanded impact rows reuse US row5's tiles. The caller
+ * owns native composition encoding; expansion is 1..4 only for added poses. */
+bool ArRegionalBoss_NorthwallRow(ArRegionalBossSnapshot snapshot,unsigned state,unsigned row,
+    unsigned *native_row,uint16_t *duration,unsigned *expansion,bool *end);
 #endif

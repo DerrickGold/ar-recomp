@@ -2,6 +2,10 @@
 
 #include <stdio.h>
 
+unsigned SettingsOverlayRegions_DescriptionLines(ActRaiserRegionalSettingGroup group) {
+  return group==kActRaiserRegionalSetting_Bosses?6:4;
+}
+
 bool SettingsOverlayRegions_PopulationConfirmation(ArUiLocale locale,
     ArRegionalSource source,const uint16_t removed[6],char *output,size_t capacity) {
   if((unsigned)source>=kArRegionalSource_Count || !removed)return false;
@@ -24,6 +28,12 @@ bool SettingsOverlayRegions_PopulationConfirmation(ArUiLocale locale,
 const char *SettingsOverlayRegions_RowKey(ActRaiserRegionalSettingGroup group) {
   switch (group) {
     case kActRaiserRegionalSetting_ModeEntry:return "regional_mode_entry";
+    case kActRaiserRegionalSetting_Hazards:return "regional_hazards";
+    case kActRaiserRegionalSetting_Terrain:return "regional_terrain";
+    case kActRaiserRegionalSetting_Music:return "regional_music";
+    case kActRaiserRegionalSetting_Mosaic:return "regional_mosaic";
+    case kActRaiserRegionalSetting_EnemyPlacements:return "regional_enemy_placements";
+    case kActRaiserRegionalSetting_PickupPlacements:return "regional_pickup_placements";
     case kActRaiserRegionalSetting_Inventory:return "regional_inventory";
     case kActRaiserRegionalSetting_ActionStart:return "regional_action_start";
     case kActRaiserRegionalSetting_ScoreLives: return "regional_score_lives";
@@ -72,6 +82,18 @@ const char *SettingsOverlayRegions_RowKey(ActRaiserRegionalSettingGroup group) {
 
 const char *SettingsOverlayRegions_RowLabel(ArUiLocale locale, ActRaiserRegionalSettingGroup group) {
   switch (group) {
+    case kActRaiserRegionalSetting_Hazards:
+      return ArUiCatalog_Text(locale,"overlay.region.hazards_label",NULL);
+    case kActRaiserRegionalSetting_Terrain:
+      return ArUiCatalog_Text(locale,"overlay.region.terrain_label",NULL);
+    case kActRaiserRegionalSetting_Music:
+      return ArUiCatalog_Text(locale,"overlay.region.music_label",NULL);
+    case kActRaiserRegionalSetting_Mosaic:
+      return ArUiCatalog_Text(locale,"overlay.region.mosaic_label",NULL);
+    case kActRaiserRegionalSetting_EnemyPlacements:
+      return ArUiCatalog_Text(locale,"overlay.region.enemy_placements_label",NULL);
+    case kActRaiserRegionalSetting_PickupPlacements:
+      return ArUiCatalog_Text(locale,"overlay.region.pickup_placements_label",NULL);
     case kActRaiserRegionalSetting_ModeEntry:
       return ArUiCatalog_Text(locale,"overlay.region.mode_label",NULL);
     case kActRaiserRegionalSetting_Inventory:
@@ -193,12 +215,38 @@ static SettingsOverlayRegionBadge SourceBadge(ArRegionalSource source) {
 bool SettingsOverlayRegions_ViewBadge(const ActRaiserRegionalRulesView *view,
     ActRaiserRegionalSettingGroup group, bool effective, SettingsOverlayRegionBadge *badge) {
   if (!view || !badge || (unsigned)group >= kActRaiserRegionalSetting_Count) return false;
+  if(group==kActRaiserRegionalSetting_EnemyPlacements || group==kActRaiserRegionalSetting_PickupPlacements) {
+    const ArRegionalPlacementPolicy *policy=effective?&view->effective.placements:&view->requested.placements;
+    if(!ArRegionalPlacements_Valid(policy))return false;
+    *badge=SourceBadge(group==kActRaiserRegionalSetting_EnemyPlacements?policy->enemies:policy->pickups);
+    return true;
+  }
   if(group==kActRaiserRegionalSetting_ModeEntry) {
     const ArRegionalModePolicy *policy=effective?&view->effective.mode_entry:&view->requested.mode_entry;
     uint8_t snapshot;ArRegionalSource source;
     if(!ArRegionalMode_Resolve(policy,&snapshot))return false;
     *badge=ArRegionalMode_GroupSource(policy,&source)?SourceBadge(source):kOverlayRegionBadge_Mixed;
     return true;
+  }
+  if(group==kActRaiserRegionalSetting_Music) {
+    const ArRegionalSource source=effective?view->effective.music:view->requested.music;
+    uint8_t profile;if(!ArRegionalMusic_Resolve(source,&profile))return false;
+    *badge=SourceBadge(source);return true;
+  }
+  if(group==kActRaiserRegionalSetting_Mosaic) {
+    const ArRegionalSource source=effective?view->effective.mosaic:view->requested.mosaic;
+    uint8_t pattern;if(!ArRegionalMosaic_Resolve(source,&pattern))return false;
+    *badge=SourceBadge(source);return true;
+  }
+  if(group==kActRaiserRegionalSetting_Terrain) {
+    const ArRegionalSource source=effective?view->effective.terrain:view->requested.terrain;
+    uint8_t profile;if(!ArRegionalTerrain_Resolve(source,&profile))return false;
+    *badge=SourceBadge(source);return true;
+  }
+  if(group==kActRaiserRegionalSetting_Hazards) {
+    const ArRegionalSource source=effective?view->effective.hazards:view->requested.hazards;
+    uint8_t profile;if(!ArRegionalHazards_Resolve(source,&profile))return false;
+    *badge=SourceBadge(source);return true;
   }
   if(group==kActRaiserRegionalSetting_Inventory) {
     const ArRegionalSource source=effective?view->effective.spell_inventory:view->requested.spell_inventory;
@@ -555,6 +603,32 @@ bool SettingsOverlayRegions_ViewDescription(ArUiLocale locale,
     char *output, size_t capacity) {
   SettingsOverlayRegionBadge badge;
   if (!SettingsOverlayRegions_ViewBadge(view, group, false, &badge)) return false;
+  if(group==kActRaiserRegionalSetting_EnemyPlacements || group==kActRaiserRegionalSetting_PickupPlacements) {
+    const char *keys[]={"overlay.region.enemy_placements_us","overlay.region.enemy_placements_jp","overlay.region.enemy_placements_eu"};
+    const char *key=group==kActRaiserRegionalSetting_PickupPlacements?
+        "overlay.region.pickup_placements_help":keys[view->requested.placements.enemies];
+    const int length=snprintf(output,capacity,"%s",ArUiCatalog_Text(locale,key,NULL));
+    return length>=0 && (size_t)length<capacity;
+  }
+  if(group==kActRaiserRegionalSetting_Music) {
+    const char *key=view->requested.music==kArRegionalSource_Japan?"overlay.region.music_jp":"overlay.region.music_us";
+    const int length=snprintf(output,capacity,"%s",ArUiCatalog_Text(locale,key,NULL));
+    return length>=0 && (size_t)length<capacity;
+  }
+  if(group==kActRaiserRegionalSetting_Terrain) {
+    const char *keys[]={"overlay.region.terrain_us","overlay.region.terrain_jp","overlay.region.terrain_eu"};
+    const int length=snprintf(output,capacity,"%s",ArUiCatalog_Text(locale,keys[view->requested.terrain],NULL));
+    return length>=0 && (size_t)length<capacity;
+  }
+  if(group==kActRaiserRegionalSetting_Mosaic) {
+    const int length=snprintf(output,capacity,"%s",ArUiCatalog_Text(locale,"overlay.region.mosaic_help",NULL));
+    return length>=0 && (size_t)length<capacity;
+  }
+  if(group==kActRaiserRegionalSetting_Hazards) {
+    const char *keys[]={"overlay.region.hazards_us","overlay.region.hazards_jp","overlay.region.hazards_eu"};
+    const int length=snprintf(output,capacity,"%s",ArUiCatalog_Text(locale,keys[view->requested.hazards],NULL));
+    return length>=0 && (size_t)length<capacity;
+  }
   if(group==kActRaiserRegionalSetting_ModeEntry) {
     uint8_t snapshot;if(!ArRegionalMode_Resolve(&view->requested.mode_entry,&snapshot))return false;
     const ArUiTextArgument args[]={
@@ -640,7 +714,7 @@ bool SettingsOverlayRegions_ViewDescription(ArUiLocale locale,
     enum { kCommonRules=kArRegionalBoss_DragonProjectileDelay };
     static const char *names[]={"idle","throw_end","throw","jump","offset","wizard","ice","closing","clock","turn","minion","trigger","strategy"};
     _Static_assert(sizeof(names)/sizeof(names[0])==kCommonRules,"name the common boss rules");
-    char values[kArRegionalBoss_Count][8],common[1024],dragon[24],viper[192],pharaoh[192],plant[192];ArUiTextArgument args[kCommonRules];
+    char values[kArRegionalBoss_Count][8],common[1024],dragon[24],viper[192],pharaoh[192],plant[192],northwall[256];ArUiTextArgument args[kCommonRules];
     for(unsigned i=0;i<kArRegionalBoss_Count;++i) {
       const ArRegionalBossDescriptor *desc=ArRegionalBoss_Descriptor(i);
       snprintf(values[i],sizeof(values[i]),"%u",desc->value[view->requested.bosses.source[i]]+desc->phase_extra_updates);
@@ -667,14 +741,19 @@ bool SettingsOverlayRegions_ViewDescription(ArUiLocale locale,
       {"cycle",ArUiCatalog_Text(locale,view->requested.bosses.source[kArRegionalBoss_PlantCycle]==kArRegionalSource_US?
           "overlay.region.plant_open":"overlay.region.plant_retracts",NULL)},
       {"head",values[kArRegionalBoss_PlantOpen]},{"high",values[kArRegionalBoss_PlantHighWindup]},
-      {"low",values[kArRegionalBoss_PlantLowWindup]}};
+      {"low",values[kArRegionalBoss_PlantLowWindup]},{"height",values[kArRegionalBoss_PlantGeometry]}};
+    const ArUiTextArgument northwall_args[]={
+      {"throw",values[kArRegionalBoss_NorthwallThrow]},{"impact",values[kArRegionalBoss_NorthwallImpact]},
+      {"offset",values[kArRegionalBoss_NorthwallThrowOffset]},{"height",values[kArRegionalBoss_NorthwallImpactOffset]},
+      {"width",view->requested.bosses.source[kArRegionalBoss_NorthwallImpact]==kArRegionalSource_Europe?"64":"32"}};
     if(!ArUiCatalog_Format(common,sizeof(common),ArUiCatalog_Text(locale,"overlay.region.bosses_common",NULL),args,kCommonRules) ||
         !ArUiCatalog_Format(pharaoh,sizeof(pharaoh),ArUiCatalog_Text(locale,"overlay.region.pharaoh",NULL),pharaoh_args,3) ||
-        !ArUiCatalog_Format(plant,sizeof(plant),ArUiCatalog_Text(locale,"overlay.region.plant",NULL),plant_args,4))return false;
+        !ArUiCatalog_Format(plant,sizeof(plant),ArUiCatalog_Text(locale,"overlay.region.plant",NULL),plant_args,5) ||
+        !ArUiCatalog_Format(northwall,sizeof(northwall),ArUiCatalog_Text(locale,"overlay.region.northwall_boss",NULL),northwall_args,5))return false;
     const ArUiTextArgument summary[]={
       {"region",SettingsOverlayRegions_BadgeLabel(locale,badge)},
-      {"common",common},{"dragon",dragon},{"viper",viper},{"pharaoh",pharaoh},{"plant",plant}};
-    return ArUiCatalog_Format(output,capacity,ArUiCatalog_Text(locale,"overlay.region.bosses",NULL),summary,6);
+      {"common",common},{"dragon",dragon},{"viper",viper},{"pharaoh",pharaoh},{"plant",plant},{"northwall",northwall}};
+    return ArUiCatalog_Format(output,capacity,ArUiCatalog_Text(locale,"overlay.region.bosses",NULL),summary,7);
   }
   if(group==kActRaiserRegionalSetting_StatueVolley) {
     bool double_shot;

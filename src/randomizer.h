@@ -1,14 +1,17 @@
 #ifndef RANDOMIZER_H
 #define RANDOMIZER_H
 #include "snesrecomp/game/types.h"
+#include "action/action_placements.h"
 
 /* Seeded content randomizer.
  *
  * Everything it changes is ROM *data* — the object-type stat records, the
  * bank-$0A object placement streams, and the sim-mode lair table — all mapped
- * in docs/SEAMS.md "Content / randomizer seams". So the whole feature is one
- * transform of the loaded ROM image rather than a set of code hooks: register
- * the live cart buffer once, keep a pristine copy, and rewrite it from a seed.
+ * in docs/research-symbol-map.md and docs/regional-differences-technical.md.
+ * The existing native path transforms the loaded ROM image: register the live
+ * cart buffer once, keep a pristine copy, and rewrite data from a seed. Regional
+ * placement programs have a separate value-only entry point using the same
+ * shuffle implementation. Neither path patches room-control instructions.
  *
  * Every pass in this first slice is a PERMUTATION of data the game already
  * ships (or a scale applied to it). That is a deliberate safety property: a
@@ -69,5 +72,18 @@ const RandomizerSummary *Randomizer_LastSummary(void);
 
 /* True once Randomizer_Init has taken a usable snapshot. */
 bool Randomizer_IsAvailable(void);
+
+typedef struct RandomizerPlacementMap {
+  uint16_t scene;
+  ActionPlacementProgram *program;
+} RandomizerPlacementMap;
+/* Numerical alternative to the ROM placement adapter. The room owner passes
+ * fresh selected programs in area/room order, including every room of an act
+ * when using Act scope. Preflight is atomic: invalid inputs change nothing.
+ * Only object positions/item IDs/enemy types change, never IDs, reservations,
+ * wave gates or native ROM bytes. Reports are separate from the ROM summary.
+ * Apply once per fresh room snapshot, never cumulatively to a live program. */
+bool Randomizer_ApplyPlacementPrograms(const RandomizerPlacementMap *maps, size_t count,
+                                     RandomizerSummary *summary);
 
 #endif /* RANDOMIZER_H */

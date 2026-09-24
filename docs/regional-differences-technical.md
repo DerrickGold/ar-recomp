@@ -3039,7 +3039,35 @@ Native state/end handling clears it; no shared animation table is rewritten.
 Exact program/pose signatures guard the mapping. Projectile preparation changes
 only the first row's delay in body states4/6. CPU flags, motion, collision
 decoding, allocation and waits remain native. This integrates the phase and
-timing mechanics, not Japanese body geometry/placement or Beginner's tendril.
+timing mechanics independently of the geometry profile below and Beginner's
+tendril program.
+
+**Host geometry profile.** `$00:D980` now has a guarded root-initializer
+boundary before the first linked allocation at`$D98A`. For sourceD974,
+room0305, first pose0 and the validated53-composition US layout, it shortens
+compositions0/5/6/7/8 by removing their last four bottom-row parts, changes
+bottom112→96 and subtracts16 from retained parts' vertically mirrored Y.
+Closed composition48 becomes top/bottom4/4. All table addresses and original
+CHR/palette references remain; discarded parts remain in their allocated
+tail so the operation can be reversed. JP's one changed part palette and
+closed-head tile are artwork, not geometry, and are not transplanted.
+
+The first native row was already bottom-anchored. The adapter corrects only
+that subtraction (+16 unreflected,0 vertically reflected), then skips US's
+extra root+8. Children still use the real native allocators and linked-body−8
+placement. A repeated birth from projected data receives no second shift.
+Returning to US restores the original metadata and anchor, then re-enters
+the now-native D980 prefix for its exact ADC/flags; this handles retained
+animation RAM as well as reloads. Validation precedes every write and the
+projection runs only at fresh root birth, not on each animation frame.
+
+Unit checks cover all four flips, wrapping coordinates, idempotence, exact
+US restoration and malformed/partial-profile refusal. Six complete pose
+geometries match all five ROMs; graphics references remain byte-identical
+to US. Held-player host runs confirm root/bodyY120/112 US versus128/120 JP,
+with the JP open/closed/protected cycle continuing. Both14,500-tick runs exit
+normally with zero background mismatches. This is controlled encounter
+evidence, not natural traversal, a full victory or donor-artwork acceptance.
 
 Matched host runs reached the encounter through its preceding room loads and
 verified the resident animation bundle before holding the player at two heights.
@@ -4116,6 +4144,40 @@ death are excluded, not silently treated as parity evidence.
 
 ### Authored pickup differences
 
+The host's numerical placement catalogue now retains the ordered programs for
+all 49 action roots in US, Japan, European Story and European Action modes.
+All three European releases agree. Enemy/wave and pickup sources can be
+resolved independently, and European enemy markers are filtered before any
+randomization. A shared room-local row ID preserves identity through those
+transforms. Tests compare every pure program with the ROM streams, following
+native jumps, and validate all 2,646 mixed source/mode/difficulty combinations.
+The runtime captures these choices at full room initialization. Preparation
+after the asset VM at `$00:8329` resolves all act programs for the existing
+randomizer and publishes only the selected room. There is no per-frame
+placement scan, donor-code execution or mutation of the ROM.
+
+The initial adapter replaces `$00:941C–946D`, calls the original `$9557`
+initializer for each numerical object and resumes the native `$946E`
+sentinel/return epilogue. The later-wave adapter enters at `$9500`, after the
+original `$94F2` prologue, and resumes `$954D` for sentinel/stack restoration.
+Calls use real native JSR return identities `$9461/$9540`. Gate records keep
+the actual US after-`$FE` cursor at slot `+$38`, not a foreign or invented
+pointer. Wave allocation preserves the native gate/player slots and checks
+capacity before writes. Fillmore's retry height follows the terrain choice.
+US/US delegates to the original loader. Unit coverage compares the complete
+memory footprint, guards and escaped returns for all 2,646 combinations;
+controlled live room/wave checks are not proof of natural traversal or every
+deliberately mixed terrain route.
+
+The randomizer exposes a value-only program transform alongside its existing
+ROM adapter. Both share the same permutation code, keep statues within their
+wave, and leave program IDs, wave gates and reservations alone. Type tables
+also contain direct code entries: parameter `$FF` controllers must not be
+shuffled as ordinary enemies, nor may their instruction bytes be scaled as
+HP/attack. Spawn definitions are checked before either operation, and aliases
+of one definition are scaled once. Correcting those older randomizer bugs
+changes affected seed results; non-randomized native data remains untouched.
+
 All 49 shared action-layout roots were joined to their owning acts, following
 placement-stream jumps and retaining order, reservations and wave boundaries.
 Eighteen roots change item placements. In the tables below, a raw key is
@@ -4172,6 +4234,91 @@ Geometry, placement, wave gates and checkpoint payloads need compatibility
 checks before offering independently mixed layouts.
 
 ### Terrain and damage-box contracts
+
+**Implemented hazard seam.** `regional_hazards` owns numerical ordered lists
+for all 49 shared rooms; `actraiser_stage_hazards` owns the native-memory
+adapter. European English, German and French lists match in both Story and
+Action mode. Twenty rooms differ from US in each non-US profile. Selection
+is captured with the other action rules at complete room initialization.
+At `$00:940C`, after native `$93A9` has expanded the US stream, the conditional
+prefix validates its count, every record, X and source terminator. It replaces
+only the selected records and scratch count, reproduces `LDA $00`, then tails
+to `$940E`. Native `STA $1AE2 / INY / PLX / RTS` retains the US placement
+cursor and real caller frame. US and identical lists delegate unchanged.
+No ROM mutation, donor graphics, terrain replacement or new per-frame work
+is involved. The later native contact pass, including overlap order, slowing
+flags and hit/invulnerability gates, is unchanged. Complete terrain/placement
+bundles remain separate implementation work.
+
+Tests independently decode all five ROMs and both European modes; compare
+the adapter's complete memory footprint, flags/registers and tail target;
+reject malformed context and unknown resident records; and exercise pending
+selection, room activation, v1–57 migration and nine replay-identity pairs.
+
+**Implemented terrain projection.** `regional_terrain` owns numerical map
+deltas and European solidity-bit changes. `action_room_terrain` adapts the
+immutable US room scene; `actraiser_stage_terrain` adapts native WRAM through
+the same two-plane contract. Neither portable policy nor scene loader reads
+settings or owns CPU memory. Scene-loading tools and reference skybox artwork
+continue to load the unmodified US reference unless explicitly projected.
+
+The `$00:8329→832C` prefix runs after the complete asset VM, before actors,
+`$02:BAC1` attribute generation and native tilemap staging. Full-plane FNV
+signatures and dimensions recognize US and previously projected data before
+any writes. Map and definition generations are validated independently because
+native room scripts can reload only one plane. Repeated projection is
+idempotent; switching to US restores the original data. The operation is
+allocation-free and room-load-only. The host renderer receives the accepted
+profile and invalidates its cached room, not a pointer into mutable settings.
+
+All 898 changed JP map cells across 11 roots can be expressed through exact
+matches in the corresponding US metatile tables. Eight of those roots have
+348 changed collision cells; the other changes are decorative arrangement.
+CHR and palette data match in all 11. No Japanese graphics are needed for
+these layouts. The two Death Heim maps' 26 changed characters remain a separate
+artwork feature, not part of terrain projection.
+
+Fillmore's `$933C→9343` prefix substitutes the entry Y27 for US Y34; the
+`$94B1→94B7` prefix substitutes checkpoint Y25 for Y23 while leaving trigger
+coordinates and the US stream cursor intact. At room/retry load, only an
+active cached `(156,23)` or `(156,25)` checkpoint is normalized to the selected
+layout. Arbitrary debug coordinates are not rewritten. All European player
+start records match US in both Story and Action tables. Wave ownership and
+enemy/pickup stream replacement remain separate placement work.
+
+**European terrain is not US-identical.** All three PAL BG1 map/definition
+sets agree. Seventeen map IDs differ in two roots: `$0304` Aitos (12 cells,
+four collision changes) and `$0406` Northwall (five cells, five collision
+changes). Other changed definitions differ only in word bit `$0200`, with
+identical character data. The native attribute builder is byte-identical:
+US `$02:BAC1`, EU `$02:C0B9`, DE `$02:C0C2`, FR `$02:C0AB`. These flags therefore
+have the same quadrant-solidity meaning, not a PAL encoding difference.
+
+| European raw roots | Collision cells differing from US, per root |
+| --- | --- |
+| `$0201`, `$0301` | 74, 18 |
+| `$0302`, `$0402`, `$0502`, `$0702` | 11, 12, 20, 20 |
+| `$0403`, `$0503` | 20, 12 |
+| `$0304` | 4 |
+| `$0505`, `$0605`, `$0705` | 13, 36, 36 |
+| `$0106`, `$0206`, `$0306`, `$0406` | 30, 17, 14, 5 |
+
+This is 342 root-relative collision cells; alternate entry roots that share
+a map are counted separately. Nine belong to rearranged map cells and 333
+to definition changes. Some other rooms retain changed but unused definitions.
+Neither difficulty nor PAL refresh timing changes these authored layouts.
+
+`actraiser_stage_terrain_test` compares all 49 roots against all five ROMs,
+including every combination of incoming map/definition profile and outgoing
+profile, full CPU/RAM footprints, reversal, repeat application and malformed
+data refusal. ROM-free tests cover anchor continuations; session/runtime tests
+cover pending choices, v1–58 migration and nine replay identities. These checks
+do not establish safe natural traversal for arbitrary mixed placements.
+Controlled native loading of all 49 rooms under each profile also matches
+every map byte, metatile definition and collision attribute, with zero
+background-world/tile mismatches. The frame oracle reports separate BG2
+vertical-scroll/screen-selection differences during this warped traversal;
+that run is not evidence of full-frame or natural-play parity.
 
 **The native terrain lookup matches regionally.** US `$00:91C3–920E` / JP
 `$00:91CF–921A` reads the chunked metatile map at `$7E:8000` and the 256-byte
@@ -5353,6 +5500,30 @@ owns the choice. Existing actors retain their flags until room reload.
 
 ### Fillmore Act 2 music residency
 
+The `scene_music_route` policy is integrated at US `$02:B653–B655`, after
+the native scene selector accepts the declaration and before the resident
+source comparison. For scene keys `$0201/$0301` only, Japan replaces the
+recognized track-1/selector-0 request `$0E:F69F` with US `$18:947F`. Room 4's
+boss declaration, other tracks and unrecognized/custom resources are untouched.
+All five ROMs' cave declarations and the complete shared Fillmore SPC upload
+image are covered by the optional ROM test. No donor resource is required.
+
+The adapter reproduces `LDX $A5` and its N/Z flags, then tails native `$B655`.
+It never writes resident `$AB/$AD`, APU ports or playback commands: native
+code retains upload suppression, handshakes and playback ownership. Activation
+comes from the active campaign at the accepted music declaration, independently
+of the action-room cache, since music command 2 precedes video command 3.
+Settings edits leave the current resident track alone. Regional sequence
+payloads remain a separate policy and extraction task.
+
+An eight-load US-host integration control verifies US→Japan→Europe→US routing
+and the unchanged boss source. Consecutive cave rooms using the same source
+produce no extra upload/play commands; the settings edit itself leaves the
+resident cache unchanged. The live entry has PB2/**DB0**, M1X0 and D0. The
+run exits normally, captures nonzero PCM and reports no action-background tile
+mismatches. These are controlled scene loads, not a full-act playthrough or
+subjective audio approval.
+
 Five booted scene loads request Fillmore room 2 through the native pending
 scene field. Each produces nonzero audio, reaches the requested scene with
 positive HP and retains lives/private SRAM. The actual loaded source cache,
@@ -6468,6 +6639,26 @@ The Aitos Act-1 `$04/00` raster is horizontal parallax, not a rising-lava
 controller. Neither this result nor the mosaic difference resolves the
 separate reported lava-speed claim.
 
+**Host integration:** `action_room_mosaic` stores only the 175 reachable
+one-bit values for each of the three distinct patterns. Room entry/retry
+captures `aitos_mosaic_pattern` and projects the same immutable values into
+the enhanced room source. The guarded native `$02:939C → $02:93BA` seam
+replaces the complete 112-band loop, retaining native setup, terminator,
+HDMA publication and return. It requires room `$0504`, scratch high byte1
+and the expected entry registers; US and unrelated contexts delegate.
+The final carry retains the US instruction's source-bit4 behavior, which
+is independent of the displayed bit0. No foreign code is imported.
+
+Tests compare all64 phases and eligible status-flag combinations, plus
+the normalized values against all five ROMs. The host raster continues
+to display the previous tick's table, including the native first-frame
+hold. A 13,000-tick US/JP/European settings fixture covers all phases,
+pending edits and room transitions: 4,361 compared frames and 4,923,569
+raster-register comparisons have no mismatches, including MOSAIC. It also
+reports no background tile mismatches or live-source fallbacks. These are
+controlled room loads, not a natural full-act playthrough. Simulation
+remains60Hz for every profile.
+
 ### Remaining European boss-program differences
 
 The five outstanding PAL resource leads now have native row-consumer and
@@ -6571,6 +6762,33 @@ and impact activation `$E5B4–E5C6`; DE/FR add 2/5. US equivalents are
 addresses. The existing absolute-memory comparisons in the linked visual
 controller remain outside these gameplay changes; they are not silently
 rewritten as immediate constants.
+
+**Recomp integration.** Four room-pinned leaves select these timelines and
+offsets independently. `$00:E878→E87B` changes only LDA/NZ before the real
+facing helper. `$E8B5→E8BB` retains STZ, performs the two PAL Y increments and
+LDA1, then resumes the actual animation call. No allocation or return frames
+are synthesized. The guarded `$8E2F` adapter borrows only the actor's row and
+visual-offset fields while the native non-yielding reader runs, then publishes
+a high-byte-tagged logical cursor and selected delay.
+
+US file`0xDC622` expands to1549 bytes at`$5000–560C`; its21 contiguous
+compositions end exactly there. Command0's `$02:B69C` loader writes the stated
+length; graphics/raster workspace begins at`$6000`. Only this validated
+room0406/sourceE7C6/base5000 profile may populate the four64-byte slots at
+`$5F00/$5F40/$5F80/$5FC0`. Each added pose repeats the seed pose's two CHR
+references`$023E/$023F`; complete5–8-part records match all three PAL ROMs.
+Existing asset bytes and ordinals remain intact. Native OAM, host widescreen
+and collision consume the same full composition pointer/extents. No donor
+pixels, general-purpose WRAM allocation or renderer-only substitution.
+
+Tests cover81 source mixes, both accumulator widths, all four flips, native
+CPU/return effects, cacheless active-program completion, malformed profiles,
+escaped-return rollback, wrapping Y inputs and five-ROM row/composition/code
+comparisons. Controlled live US/European encounters use cumulative room
+loads and a held player, without enemy/RNG edits:24/36 completed impacts by
+the three-thousand-update checkpoint, original/expanded widths32/64 and
+Y448/450. Both15,500-tick runs exit normally with zero background mismatches.
+These are controlled encounters, not natural traversal or full victories.
 
 #### Tanzra second-form minion
 

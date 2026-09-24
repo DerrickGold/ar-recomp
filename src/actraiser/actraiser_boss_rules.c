@@ -18,9 +18,121 @@ static bool RootShape(CpuState *cpu,uint16_t original,uint16_t rematch,unsigned 
       cpu_read8(cpu,0,x+kActRaiserActionObject_AnimationBank)==0x7e &&
       cpu_read16(cpu,0,x+kActRaiserActionObject_AnimationState)==state;
 }
+static bool PlantBodyPose(unsigned visual) { return visual==0 || (visual>=5 && visual<=8); }
+/* One room-owned metadata profile, established before linked children exist.
+ * Keep all53 US table ordinals/addresses and all CHR/palette references. This
+ * is geometry, not donor artwork. Shorter records leave unused trailing bytes
+ * in their original allocation; no new WRAM range is borrowed. */
+static bool PlantGeometryProfile(CpuState *cpu,bool *projected) {
+  if(cpu_read16(cpu,0x7e,0x5000)!=0x236 || cpu_read16(cpu,0x7e,0x5236)!=0x2a0)return false;
+  const unsigned bottom=cpu_read8(cpu,0x7e,0x52a3);
+  if(bottom!=112 && bottom!=96)return false;
+  const bool jp=bottom==96;unsigned next=0x2a0;
+  for(unsigned visual=0;visual<53;++visual) {
+    if(cpu_read16(cpu,0x7e,0x5236+2*visual)!=next || next+5>4073)return false;
+    const unsigned at=0x5000+next,count=cpu_read8(cpu,0x7e,at+4);
+    if(next+5+7*count>4073)return false;
+    if(PlantBodyPose(visual)) {
+      if(cpu_read16(cpu,0x7e,at)!=0x2818 || cpu_read8(cpu,0x7e,at+2)!=96 ||
+          cpu_read8(cpu,0x7e,at+3)!=bottom || count!=(visual?47u:44u)-(jp?4:0))return false;
+      const unsigned allocated=count+(jp?4:0),retained=allocated-4;
+      if(next+5+7*allocated>4073)return false;
+      for(unsigned p=0;p<allocated;++p) {
+        const unsigned part=at+5+7*p;
+        if(cpu_read8(cpu,0x7e,part)!=1 ||
+            cpu_read8(cpu,0x7e,part+1)+cpu_read8(cpu,0x7e,part+2)!=48 ||
+            cpu_read8(cpu,0x7e,part+3)+cpu_read8(cpu,0x7e,part+4)!=(jp && p<retained?176:192))return false;
+        if(!jp && p<retained && cpu_read8(cpu,0x7e,part+4)<16)return false;
+        if(p>=retained && (cpu_read8(cpu,0x7e,part+3)!=192 || cpu_read8(cpu,0x7e,part+4)))return false;
+      }
+    } else if(visual==48) {
+      if(count!=1 || cpu_read16(cpu,0x7e,at)!=0x0404 ||
+          cpu_read16(cpu,0x7e,at+2)!=(jp?0x0404:0x0503))return false;
+      for(unsigned p=0;p<5;++p)if(cpu_read8(cpu,0x7e,at+5+p))return false;
+    }
+    next+=5+7*count+(jp && PlantBodyPose(visual)?28:0);
+  }
+  if(next!=4073)return false;
+  if(projected)*projected=jp;
+  return true;
+}
+bool ActRaiser_PlantGeometryEntry(CpuState *cpu) {
+  const unsigned height=ArRegionalBoss_Value(ActRaiserRegional_BossSnapshot(),kArRegionalBoss_PlantGeometry);
+  if((height!=192 && height!=208) ||
+      !RootShape(cpu,0xd974,0,5,0,0) || cpu_read16(cpu,0,0x18)!=0x0305 ||
+      cpu_read16(cpu,0,cpu->X+0x3a) || cpu_read16(cpu,0,cpu->X+0x3c) ||
+      cpu_read16(cpu,0,cpu->X+0x20)!=0x52a0 || cpu_read16(cpu,0,cpu->X+0x22))return false;
+  bool projected;if(!PlantGeometryProfile(cpu,&projected))return false;
+  if(height==208 && !projected)return false;
+  const unsigned flip=cpu_read16(cpu,0,cpu->X+0x28),bottom=projected?96:112;
+  return cpu_read16(cpu,0,cpu->X+0x0a)==(flip&0x4000?40:24) &&
+      cpu_read16(cpu,0,cpu->X+0x0e)==(flip&0x4000?24:40) &&
+      cpu_read16(cpu,0,cpu->X+0x0c)==(flip&0x8000?bottom:96) &&
+      cpu_read16(cpu,0,cpu->X+0x10)==(flip&0x8000?96:bottom);
+}
+RecompReturn ActRaiser_PlantGeometry(CpuState *cpu) {
+  bool projected;
+  if(!ActRaiser_PlantGeometryEntry(cpu) || !PlantGeometryProfile(cpu,&projected))
+    ActRaiserHleFatal("Unsupported Marahna body geometry");
+  const bool japanese=ArRegionalBoss_Value(ActRaiserRegional_BossSnapshot(),kArRegionalBoss_PlantGeometry)==192;
+  if(projected!=japanese) {
+    for(unsigned visual=0;visual<53;++visual) {
+      const unsigned at=0x5000+cpu_read16(cpu,0x7e,0x5236+2*visual);
+      if(PlantBodyPose(visual)) {
+        const unsigned count=cpu_read8(cpu,0x7e,at+4)+(japanese?-4:4),retained=count-(japanese?0:4);
+        cpu_write8(cpu,0x7e,at+3,japanese?96:112);cpu_write8(cpu,0x7e,at+4,count);
+        for(unsigned p=0;p<retained;++p) {
+          const unsigned y=at+5+7*p+4;
+          cpu_write8(cpu,0x7e,y,(uint8_t)(cpu_read8(cpu,0x7e,y)+(japanese?-16:16)));
+        }
+      } else if(visual==48)cpu_write16(cpu,0x7e,at+2,japanese?0x0404:0x0503);
+    }
+    /* The common initializer already bottom-anchored this first pose using
+     * the old header. Correct only that subtraction; vertical reflection
+     * uses the unchanged top96 as its bottom, so needs no position delta. */
+    const bool vertical=(cpu_read16(cpu,0,cpu->X+0x28)&0x8000)!=0;
+    if(!vertical)cpu_write16(cpu,0,cpu->X+4,(uint16_t)(cpu_read16(cpu,0,cpu->X+4)+(japanese?16:-16)));
+    cpu_write16(cpu,0,cpu->X+(vertical?0x0c:0x10),japanese?96:112);
+  }
+  /* JP omits US's +8 root adjustment. The real allocator/linked-body -8
+   * placement below D98A remains native. A later birth from projected data
+   * was already anchored by the common initializer: never shift it twice. */
+  /* On restoration, re-enter the now-native US prefix to retain its exact
+   * ADC/flags. The read-only predicate rejects the restored profile, so this
+   * dispatch cannot loop. It also handles retries that retain asset RAM. */
+  if(!cpu_hle_tailcall_request(japanese?0x00d98a:0x00d980,0x00d980))ActRaiserHleFatal("Plant geometry has no initializer owner");
+  return RECOMP_RETURN_TAILCALL;
+}
 bool ActRaiser_WizardPauseEntry(CpuState *cpu) {
   return ArRegionalBoss_Value(ActRaiserRegional_BossSnapshot(),kArRegionalBoss_WizardPause)==0 &&
       RootShape(cpu,0xbdff,0xf6e2,2,0x0b,0);
+}
+bool ActRaiser_NorthwallThrowOffsetEntry(CpuState *cpu) {
+  return ArRegionalBoss_Value(ActRaiserRegional_BossSnapshot(),kArRegionalBoss_NorthwallThrowOffset)==16 &&
+      RootShape(cpu,0xe7c6,0,6,2,0) && cpu_read16(cpu,0,0x18)==0x0406 &&
+      !cpu_read16(cpu,0,cpu->X+0x3a);
+}
+RecompReturn ActRaiser_NorthwallThrowOffset(CpuState *cpu) {
+  if(!ActRaiser_NorthwallThrowOffsetEntry(cpu))ActRaiserHleFatal("Unsupported Northwall throw offset");
+  cpu->A=(uint16_t)-16;ActRaiserCpuHle_SetNegativeZero16(cpu,cpu->A);
+  /* Keep the real facing-relative helper and its allocated/scratch Y. */
+  if(!cpu_hle_tailcall_request(0x00e87b,0x00e878))ActRaiserHleFatal("Northwall throw has no continuation");
+  return RECOMP_RETURN_TAILCALL;
+}
+bool ActRaiser_NorthwallImpactOffsetEntry(CpuState *cpu) {
+  return ArRegionalBoss_Value(ActRaiserRegional_BossSnapshot(),kArRegionalBoss_NorthwallImpactOffset)==2 &&
+      RootShape(cpu,0xe7c6,0,6,0,0) && cpu_read16(cpu,0,0x18)==0x0406 &&
+      cpu_read16(cpu,0,cpu->X+0x12)==0xe8b5;
+}
+RecompReturn ActRaiser_NorthwallImpactOffset(CpuState *cpu) {
+  if(!ActRaiser_NorthwallImpactOffsetEntry(cpu))ActRaiserHleFatal("Unsupported Northwall impact offset");
+  cpu_write16(cpu,0,cpu->X,0); /* Original STZ. */
+  cpu_write16(cpu,0,cpu->X+4,(uint16_t)(cpu_read16(cpu,0,cpu->X+4)+2));
+  /* Native LDA1 immediately replaces NZ; our prefix's added arithmetic is
+   * not observable after that instruction. Its carry is untouched by INC. */
+  cpu->A=1;ActRaiserCpuHle_SetNegativeZero16(cpu,1);
+  if(!cpu_hle_tailcall_request(0x00e8bb,0x00e8b5))ActRaiserHleFatal("Northwall impact has no continuation");
+  return RECOMP_RETURN_TAILCALL;
 }
 RecompReturn ActRaiser_WizardPause(CpuState *cpu) {
   /* Only the new hold is skipped. Native position/HP decisions, first/second

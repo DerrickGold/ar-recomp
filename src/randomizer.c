@@ -8,9 +8,10 @@
 
 /* ---------------------------------------------------------------- ROM layout
  *
- * All addresses below are documented in docs/SEAMS.md "Content / randomizer
- * seams" and dumped by tools/act_content.py, which is the reference decoder
- * for everything this file rewrites. Offsets are LINEAR file offsets, matching
+ * Addresses are mapped in docs/research-symbol-map.md and
+ * docs/regional-differences-technical.md, and dumped by tools/act_content.py.
+ * The native ROM path and host placement path share the transforms below.
+ * ROM offsets are LINEAR file offsets, matching
  * RomFixedPtr's LoROM mapping: file = (bank << 15) | (addr & 0x7fff).
  */
 #define ROM_SIZE_EXPECTED 0x100000u
@@ -143,13 +144,24 @@ static void RomWrite8(uint32 off, uint8 v) {
   if (off < g_rom_size) g_rom_live[off] = v;
 }
 
+/* Type tables contain both 12-byte spawn definitions and direct code entries.
+ * The native loader distinguishes them with placement parameter $FF. These
+ * are the audited animation storage forms in US spawn definitions; instruction
+ * bytes at a direct handler must never be treated as flags, HP or attack. */
+static bool IsSpawnRecord(uint32 offset) {
+  const uint16 animation = RomU16(offset);
+  const uint8 bank = RomU8(offset + 2);
+  return (bank == 0x7e && (animation == 0x4000 || animation == 0x5000)) ||
+      (bank == 6 && (animation == 0x8000 || animation == 0xa800));
+}
+
 /* --------------------------------------------------------- pass 1: enemy stats
  *
  * Scale ATK ($2A) and HP ($2C) in every record of every region table. Records
  * with the pickup flag ($0200) are skipped: their "HP 1" is the one sword hit
  * that breaks a statue, not durability, and their ATK 0 is not damage.
  *
- * CAVEAT (SEAMS §1): about a dozen handlers overwrite $2C at runtime for phase
+ * Some handlers overwrite $2C at runtime for phase
  * changes and sub-object spawns. Those bosses will ignore this pass. The
  * summary counts records rewritten, not enemies actually affected.
  */
@@ -165,7 +177,7 @@ static void ScaleStat(uint32 off, int percent) {
 
 /* Walk one region's object-type table. The tables carry no count: the nearest
  * forward pointer target bounds them, and a zero word is an unused type slot
- * rather than a terminator (SEAMS "Object & spawn-handler model"). */
+ * rather than a terminator. Direct code entries are not spawn definitions. */
 static void ForEachRecord(int region, void (*fn)(uint32 rec_off, void *ctx),
                           void *ctx) {
   uint16 base = kTypeTables[region];
@@ -182,12 +194,18 @@ static void ForEachRecord(int region, void (*fn)(uint32 rec_off, void *ctx),
   }
 }
 
-typedef struct { int hp_percent, atk_percent, count; } StatCtx;
+typedef struct {
+  int hp_percent, atk_percent, count;
+  uint8 visited[0x8000 / 8]; /* aliases in the type tables share one definition */
+} StatCtx;
 
 static void ApplyStatsToRecord(uint32 rec, void *vctx) {
   StatCtx *c = (StatCtx *)vctx;
+  if (!IsSpawnRecord(rec)) return;
   uint16 flags = RomU16(rec + kRecFlags);
   if (flags & kRecFlagPickup) return;       /* pickup/statue, not an enemy */
+  if (c->visited[rec >> 3] & (1u << (rec & 7u))) return;
+  c->visited[rec >> 3] |= (uint8)(1u << (rec & 7u));
   ScaleStat(rec + kRecAtk, c->atk_percent);
   ScaleStat(rec + kRecHp, c->hp_percent);
   c->count++;
@@ -195,7 +213,9 @@ static void ApplyStatsToRecord(uint32 rec, void *vctx) {
 
 static void PassEnemyStats(int hp_percent, int atk_percent) {
   if (hp_percent == kPercentScale && atk_percent == kPercentScale) return;
-  StatCtx ctx = { hp_percent, atk_percent, 0 };
+  StatCtx ctx = {0};
+  ctx.hp_percent = hp_percent;
+  ctx.atk_percent = atk_percent;
   for (int r = 0; r < kObjectRegionTableCount; r++)
     ForEachRecord(r, ApplyStatsToRecord, &ctx);
   g_summary.enemy_records = ctx.count;
@@ -203,11 +223,13 @@ static void PassEnemyStats(int hp_percent, int atk_percent) {
 
 /* ------------------------------------------------------- placement stream walk
  *
- * One collected placement entry. `off` is the linear offset of its 4-byte
- * record, so a pass can rewrite bytes in place.
+ * One collected placement entry. `row` identifies caller-owned numerical data;
+ * otherwise `off` identifies a four-byte record in the legacy ROM adapter.
+ * The original field values are snapshots, so shuffles do not compound.
  */
 typedef struct {
   uint32 off;
+  ActionPlacement *row; /* NULL for the legacy ROM-data adapter */
   uint8 tx, ty, param, type;
   uint8 wave;      /* which $FE-gated batch this entry belongs to */
 } Placement;
@@ -252,6 +274,7 @@ static void CollectPlacements(uint16 stream_addr, PlacementList *out) {
       if (out->count < kMaxPlacements) {
         Placement *p = &out->items[out->count++];
         p->off   = LoRom(0x0A, y);
+        p->row   = NULL;
         p->tx    = RomU8(p->off);
         p->ty    = RomU8(p->off + 1);
         p->param = RomU8(p->off + kPlacementParamByte);
@@ -309,17 +332,23 @@ typedef struct {
   RandomizerMode drops;
   RandomizerMode spots;
   uint32 seed;
+  RandomizerSummary *summary;
 } StatueCtx;
 
-static void StatuePass(uint8 mode, uint8 sub, uint16 stream, void *vctx) {
-  StatueCtx *c = (StatueCtx *)vctx;
-  PlacementList list;
-  list.count = 0;
-  CollectPlacements(stream, &list);
+static void WritePlacement(uint32 off, ActionPlacement *row, unsigned field, uint8 value) {
+  if (!row) { RomWrite8(off + field, value); return; }
+  switch (field) {
+    case 0: row->x = value; break;
+    case 1: row->y = value; break;
+    case kPlacementParamByte: row->parameter = value; break;
+    case kPlacementTypeByte: row->type = value; break;
+  }
+}
+static void StatueList(uint8 mode, uint8 sub, const PlacementList *list, StatueCtx *c) {
 
   int idx[kMaxPlacements], n = 0;
-  for (int i = 0; i < list.count; i++)
-    if (list.items[i].type == kTypeStatue && n < kMaxPlacements) idx[n++] = i;
+  for (int i = 0; i < list->count; i++)
+    if (list->items[i].type == kTypeStatue && n < kMaxPlacements) idx[n++] = i;
   if (n == 0) return;
 
   /* Per-map stream so one map's result never depends on another's count. */
@@ -333,17 +362,17 @@ static void StatuePass(uint8 mode, uint8 sub, uint16 stream, void *vctx) {
       for (int i = 0; i < n; i++) order[i] = i;
       RngShuffle(&rng, order, n);
       uint8 vals[kMaxPlacements];
-      for (int i = 0; i < n; i++) vals[i] = list.items[idx[i]].param;
+      for (int i = 0; i < n; i++) vals[i] = list->items[idx[i]].param;
       for (int i = 0; i < n; i++) {
         uint8 v = vals[order[i]];
-        if (v != list.items[idx[i]].param) g_summary.statue_drops++;
-        RomWrite8(list.items[idx[i]].off + kPlacementParamByte, v);
+        if (v != list->items[idx[i]].param) c->summary->statue_drops++;
+        WritePlacement(list->items[idx[i]].off, list->items[idx[i]].row, kPlacementParamByte, v);
       }
     } else {
       for (int i = 0; i < n; i++) {
         uint8 v = (uint8)RngBelow(&rng, kItemCount);
-        if (v != list.items[idx[i]].param) g_summary.statue_drops++;
-        RomWrite8(list.items[idx[i]].off + kPlacementParamByte, v);
+        if (v != list->items[idx[i]].param) c->summary->statue_drops++;
+        WritePlacement(list->items[idx[i]].off, list->items[idx[i]].row, kPlacementParamByte, v);
       }
     }
   }
@@ -358,26 +387,32 @@ static void StatuePass(uint8 mode, uint8 sub, uint16 stream, void *vctx) {
     for (int w = 0; w <= UINT8_MAX; w++) {
       int wid[kMaxPlacements], wn = 0;
       for (int i = 0; i < n; i++)
-        if (list.items[idx[i]].wave == (uint8)w) wid[wn++] = idx[i];
-      if (wn == 0) { if (w > list.items[idx[n - 1]].wave) break; continue; }
+        if (list->items[idx[i]].wave == (uint8)w) wid[wn++] = idx[i];
+      if (wn == 0) { if (w > list->items[idx[n - 1]].wave) break; continue; }
       if (wn < 2) continue;
       int order[kMaxPlacements];
       for (int i = 0; i < wn; i++) order[i] = i;
       RngShuffle(&rng, order, wn);
       uint8 xs[kMaxPlacements], ys[kMaxPlacements];
       for (int i = 0; i < wn; i++) {
-        xs[i] = list.items[wid[i]].tx;
-        ys[i] = list.items[wid[i]].ty;
+        xs[i] = list->items[wid[i]].tx;
+        ys[i] = list->items[wid[i]].ty;
       }
       for (int i = 0; i < wn; i++) {
         uint8 nx = xs[order[i]], ny = ys[order[i]];
-        if (nx != list.items[wid[i]].tx || ny != list.items[wid[i]].ty)
-          g_summary.statue_moves++;
-        RomWrite8(list.items[wid[i]].off + 0, nx);
-        RomWrite8(list.items[wid[i]].off + 1, ny);
+        if (nx != list->items[wid[i]].tx || ny != list->items[wid[i]].ty)
+          c->summary->statue_moves++;
+        WritePlacement(list->items[wid[i]].off, list->items[wid[i]].row, 0, nx);
+        WritePlacement(list->items[wid[i]].off, list->items[wid[i]].row, 1, ny);
       }
     }
   }
+}
+
+static void StatuePass(uint8 mode, uint8 sub, uint16 stream, void *ctx) {
+  PlacementList list = {0};
+  CollectPlacements(stream, &list);
+  StatueList(mode, sub, &list, ctx);
 }
 
 /* ------------------------------------------------------ pass 4: enemy types
@@ -386,18 +421,20 @@ static void StatuePass(uint8 mode, uint8 sub, uint16 stream, void *vctx) {
  * means something different in each region's table, and its frames resolve
  * against the per-ACT animation blob at $7E:4000. Map scope is trivially safe;
  * Act scope is the widest safe scope, because all maps of one act share a blob
- * (SEAMS §5 — only 13 maps load one, at the act entries).
+ * (only 13 maps load one, at the act entries).
  *
  * Excluded from the permutation: statues ($80 and every other bit-7 "common"
- * type, which resolve against a different table entirely), and bosses//special
- * records, identified by the $4000 boss flag on their type record. Moving a
- * boss would need its boss blob moved too.
+ * type, which resolve against a different table entirely), direct controllers
+ * (parameter $FF), unrecognized definitions and $4000 boss records. Moving a
+ * boss would need its boss animation data moved too.
  */
 typedef struct {
   RandomizerScope scope;
   uint32 seed;
   /* Act-scope accumulation: entries collected across the act's maps. */
   uint32 offs[kActTypePlacementCapacity];
+  ActionPlacement *rows[kActTypePlacementCapacity];
+  RandomizerSummary *summary;
   uint8 types[kActTypePlacementCapacity];
   int n;
   uint8 cur_mode, cur_act;
@@ -413,6 +450,7 @@ static bool TypeIsMovable(uint8 region, uint8 type) {
   if (slot >= (uint16)(base + kObjectTypeTableMaximumBytes)) return false;
   uint16 ptr = RomU16(LoRom(0x00, slot));
   if (ptr == 0 || ptr <= base) return false;
+  if (!IsSpawnRecord(LoRom(0x00, ptr))) return false;
   return (RomU16(LoRom(0x00, ptr) + kRecFlags) & kRecFlagBoss) == 0;
 }
 
@@ -432,32 +470,91 @@ static void TypeFlush(TypeCtx *c) {
     RngShuffle(&rng, order, c->n);
     for (int i = 0; i < c->n; i++) {
       uint8 v = c->types[order[i]];
-      if (v != c->types[i]) g_summary.enemy_type_moves++;
-      RomWrite8(c->offs[i] + kPlacementTypeByte, v);
+      if (v != c->types[i]) c->summary->enemy_type_moves++;
+      WritePlacement(c->offs[i], c->rows[i], kPlacementTypeByte, v);
     }
   }
   c->n = 0;
 }
 
-static void TypePass(uint8 mode, uint8 sub, uint16 stream, void *vctx) {
-  TypeCtx *c = (TypeCtx *)vctx;
+static void TypeList(uint8 mode, uint8 sub, const PlacementList *list, TypeCtx *c) {
   uint8 act = ActOf(mode, sub);
   bool per_map = (c->scope == kRandomScope_Map);
   if (per_map || mode != c->cur_mode || act != c->cur_act) TypeFlush(c);
   c->cur_mode = mode;
   c->cur_act = act;
 
-  PlacementList list;
-  list.count = 0;
-  CollectPlacements(stream, &list);
-  for (int i = 0; i < list.count; i++) {
-    if (!TypeIsMovable(mode, list.items[i].type)) continue;
+  for (int i = 0; i < list->count; i++) {
+    if (list->items[i].param == 0xff) continue; /* direct room controller */
+    if (!TypeIsMovable(mode, list->items[i].type)) continue;
     if (c->n >= (int)(sizeof(c->types) / sizeof(c->types[0]))) break;
-    c->offs[c->n] = list.items[i].off;
-    c->types[c->n] = list.items[i].type;
+    c->offs[c->n] = list->items[i].off;
+    c->rows[c->n] = list->items[i].row;
+    c->types[c->n] = list->items[i].type;
     c->n++;
   }
   if (per_map) TypeFlush(c);
+}
+
+static void TypePass(uint8 mode, uint8 sub, uint16 stream, void *ctx) {
+  PlacementList list = {0};
+  CollectPlacements(stream, &list);
+  TypeList(mode, sub, &list, ctx);
+}
+
+bool Randomizer_ApplyPlacementPrograms(const RandomizerPlacementMap *maps,
+                                     size_t count, RandomizerSummary *summary) {
+  if (!maps || !count || count > 49) return false;
+  unsigned prior = 0, group = 0, objects = 0;
+  for (size_t i = 0; i < count; ++i) {
+    const unsigned area = maps[i].scene & 255, room = maps[i].scene >> 8;
+    const unsigned order = (area << 8) | room;
+    if (!area || area > 7 || !room || room > 8 || order <= prior ||
+        !ActionPlacements_Validate(maps[i].program)) return false;
+    for (size_t j = 0; j < i; ++j)
+      if (maps[j].program == maps[i].program) return false;
+    prior = order;
+    const unsigned next_group = (area << 8) | ActOf(area, room);
+    if (group != next_group) { group = next_group; objects = 0; }
+    /* Include even excluded objects in this conservative capacity bound. */
+    objects += (unsigned)maps[i].program->count;
+    if (objects > kActTypePlacementCapacity) return false;
+  }
+  RandomizerSummary result = {0};
+  if (!g_settings.rando_enable) { if (summary) *summary = result; return true; }
+  if (!Randomizer_IsAvailable() ||
+      (unsigned)g_settings.rando_enemy_types >= kRandomMode_Count ||
+      (unsigned)g_settings.rando_enemy_scope >= kRandomScope_Count ||
+      (unsigned)g_settings.rando_statue_drops >= kRandomMode_Count ||
+      (unsigned)g_settings.rando_statue_spots >= kRandomMode_Count) return false;
+  result.applied = true;
+  result.seed = (uint32)g_settings.rando_seed;
+  StatueCtx statues = {(RandomizerMode)g_settings.rando_statue_drops,
+      (RandomizerMode)g_settings.rando_statue_spots, result.seed, &result};
+  TypeCtx types = {0};
+  types.scope = (RandomizerScope)g_settings.rando_enemy_scope;
+  types.seed = result.seed;
+  types.summary = &result;
+  types.cur_mode = 0xff;
+  for (size_t i = 0; i < count; ++i) {
+    ActionPlacementProgram *program = maps[i].program;
+    PlacementList list = {0};
+    uint8 wave = 0;
+    for (size_t j = 0; j < program->count; ++j) {
+      ActionPlacement *row = &program->rows[j];
+      if (row->kind == kActionPlacement_Wave) ++wave;
+      if (row->kind != kActionPlacement_Object) continue;
+      list.items[list.count++] = (Placement){0,row,row->x,row->y,row->parameter,row->type,wave};
+    }
+    StatueList(maps[i].scene & 255, maps[i].scene >> 8, &list, &statues);
+    if (g_settings.rando_enemy_types != kRandomMode_Off)
+      TypeList(maps[i].scene & 255, maps[i].scene >> 8, &list, &types);
+  }
+  TypeFlush(&types);
+  if (statues.drops || statues.spots || g_settings.rando_enemy_types)
+    result.maps_touched = (int)count;
+  if (summary) *summary = result;
+  return true;
 }
 
 /* --------------------------------------------------------- pass 5: sim lairs
@@ -563,6 +660,7 @@ void Randomizer_Apply(void) {
   if (g_settings.rando_statue_drops != kRandomMode_Off ||
       g_settings.rando_statue_spots != kRandomMode_Off) {
     StatueCtx ctx;
+    ctx.summary = &g_summary;
     ctx.drops = (RandomizerMode)g_settings.rando_statue_drops;
     ctx.spots = (RandomizerMode)g_settings.rando_statue_spots;
     ctx.seed = seed;
@@ -572,6 +670,7 @@ void Randomizer_Apply(void) {
   if (g_settings.rando_enemy_types != kRandomMode_Off) {
     TypeCtx ctx;
     memset(&ctx, 0, sizeof ctx);
+    ctx.summary = &g_summary;
     ctx.scope = (RandomizerScope)g_settings.rando_enemy_scope;
     ctx.seed = seed;
     ctx.cur_mode = 0xFF;

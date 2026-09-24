@@ -48,6 +48,12 @@ typedef enum ActRaiserRegionalSettingGroup {
   kActRaiserRegionalSetting_ActionStart,
   kActRaiserRegionalSetting_Inventory,
   kActRaiserRegionalSetting_ModeEntry,
+  kActRaiserRegionalSetting_Hazards,
+  kActRaiserRegionalSetting_Terrain,
+  kActRaiserRegionalSetting_Music,
+  kActRaiserRegionalSetting_EnemyPlacements,
+  kActRaiserRegionalSetting_PickupPlacements,
+  kActRaiserRegionalSetting_Mosaic,
   kActRaiserRegionalSetting_Count,
 } ActRaiserRegionalSettingGroup;
 

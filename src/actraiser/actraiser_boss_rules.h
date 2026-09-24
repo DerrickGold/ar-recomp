@@ -25,4 +25,10 @@ bool ActRaiser_PharaohHeadRepeatEntry(CpuState *cpu);
 RecompReturn ActRaiser_PharaohHeadRepeat(CpuState *cpu);
 bool ActRaiser_PlantPhaseEntry(CpuState *cpu);
 RecompReturn ActRaiser_PlantPhase(CpuState *cpu);
+bool ActRaiser_NorthwallThrowOffsetEntry(CpuState *cpu);
+RecompReturn ActRaiser_NorthwallThrowOffset(CpuState *cpu);
+bool ActRaiser_NorthwallImpactOffsetEntry(CpuState *cpu);
+RecompReturn ActRaiser_NorthwallImpactOffset(CpuState *cpu);
+bool ActRaiser_PlantGeometryEntry(CpuState *cpu);
+RecompReturn ActRaiser_PlantGeometry(CpuState *cpu);
 #endif

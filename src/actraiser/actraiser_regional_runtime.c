@@ -1,4 +1,5 @@
 #include "actraiser_regional_runtime.h"
+#include "actraiser_stage_placements.h"
 
 #include "actraiser/actraiser_hle_fatal.h"
 #include "actraiser/actraiser_miracle.h"
@@ -99,6 +100,11 @@ static ArRegionalLairReloads s_boot_reloads;
 static ArRegionalSimActors s_boot_sim_actors;
 static bool s_boot_valid,s_boot_arrival_locked;
 typedef struct ActionRuleCache {
+  uint8_t hazards;
+  uint8_t terrain;
+  uint8_t mosaic;
+  ArRegionalPlacementPolicy placements;
+  ArRegionalDifficulty placement_difficulty;
   ArRegionalActionMotionSnapshot motion;
   ArRegionalEmitterSnapshot emitters;
   bool statue_volley;
@@ -156,7 +162,7 @@ bool ActRaiserRegional_Initialize(ArRegionalCampaignIdentity identity, void *con
   s_boot_reloads = (ArRegionalLairReloads){0};
   s_boot_sim_actors = (ArRegionalSimActors){0};
   s_boot_arrival_locked=false;
-  s_action=(ActionRuleCache){0};
+  s_action=(ActionRuleCache){0};ActRaiserStagePlacements_Reset();
   s_miracle_active = s_prices_valid = false;
   s_quake_active = s_quake_delegate = false;
   s_report_active = s_report_delegate = false;
@@ -361,7 +367,7 @@ bool ActRaiserRegional_ReturnToTitle(void) {
   s_return_rules=s_campaign.active.requested;s_return_rules_valid=true;
   s_return_rules.difficulty.level=kArRegionalDifficulty_Normal;
   ArRegionalSpellInventory_Reset(&s_inventory,false);s_inventory_icon_pending=false;
-  s_action=(ActionRuleCache){0};
+  s_action=(ActionRuleCache){0};ActRaiserStagePlacements_Reset();
   return true;
 }
 
@@ -402,6 +408,21 @@ ActRaiserRegionalEditResult ActRaiserRegional_RequestRules(
     }
     case kActRaiserRegionalSetting_Inventory:
       ok=ArRegionalSession_RequestInventory(session,view->revision,source);break;
+    case kActRaiserRegionalSetting_EnemyPlacements:
+    case kActRaiserRegionalSetting_PickupPlacements: {
+      ArRegionalPlacementPolicy policy=session->requested.placements;
+      if(group==kActRaiserRegionalSetting_EnemyPlacements)policy.enemies=source;
+      else policy.pickups=source;
+      ok=ArRegionalSession_RequestPlacements(session,view->revision,&policy);break;
+    }
+    case kActRaiserRegionalSetting_Music:
+      ok=ArRegionalSession_RequestMusic(session,view->revision,source);break;
+    case kActRaiserRegionalSetting_Mosaic:
+      ok=ArRegionalSession_RequestMosaic(session,view->revision,source);break;
+    case kActRaiserRegionalSetting_Terrain:
+      ok=ArRegionalSession_RequestTerrain(session,view->revision,source);break;
+    case kActRaiserRegionalSetting_Hazards:
+      ok=ArRegionalSession_RequestHazards(session,view->revision,source);break;
     case kActRaiserRegionalSetting_ActionStart: {
       ArRegionalActionStartPolicy policy;ArRegionalActionStart_Init(&policy,source);
       ok=ArRegionalSession_RequestActionStart(session,view->revision,&policy);break;
@@ -572,9 +593,23 @@ ActRaiserRegionalEditResult ActRaiserRegional_RequestDifficulty(
   return view->revision==session->revision?kActRaiserRegionalEdit_Unchanged:kActRaiserRegionalEdit_Applied;
 }
 
+uint8_t ActRaiserRegional_HazardSnapshot(void) { return s_action.hazards; }
+uint8_t ActRaiserRegional_TerrainSnapshot(void) { return s_action.terrain; }
+uint8_t ActRaiserRegional_MosaicSnapshot(void) { return s_action.mosaic; }
+bool ActRaiserRegional_PlacementSnapshot(ArRegionalPlacementPolicy *policy,ArRegionalDifficulty *difficulty) {
+  if(!policy || !difficulty)return false;
+  *policy=s_action.placements;*difficulty=s_action.placement_difficulty;return true;
+}
+
+bool ActRaiserRegional_BeginSceneMusic(uint8_t *profile) {
+  if(!profile)return false;
+  if(!s_campaign.active_valid) {*profile=0;return true;}
+  return ArRegionalSession_BeginMusic(&s_campaign.active,profile);
+}
+
 bool ActRaiserRegional_BeginActionRoom(uint8_t profile, uint16_t native_bcd, uint16_t *out_bcd) {
   if (!out_bcd) return false;
-  if (!s_campaign.active_valid) { s_action=(ActionRuleCache){0};*out_bcd = native_bcd; return true; }
+  if (!s_campaign.active_valid) { s_action=(ActionRuleCache){0};ActRaiserStagePlacements_Reset();*out_bcd = native_bcd; return true; }
   uint16_t resolved;
   ArRegionalTimerPolicy snapshot;
   ActionRuleCache next={0};
@@ -586,13 +621,18 @@ bool ActRaiserRegional_BeginActionRoom(uint8_t profile, uint16_t native_bcd, uin
       !ArRegionalSession_BeginVolley(&candidate,&next.statue_volley) ||
       !ArRegionalSession_BeginBosses(&candidate,&next.bosses) ||
       !ArRegionalSession_BeginDifficulty(&candidate,&next.difficulty) ||
+      !ArRegionalSession_BeginHazards(&candidate,&next.hazards) ||
+      !ArRegionalSession_BeginTerrain(&candidate,&next.terrain) ||
+      !ArRegionalSession_BeginMosaic(&candidate,&next.mosaic) ||
+      !ArRegionalSession_BeginPlacements(&candidate,&next.placements) ||
       !ArRegionalSession_BeginScoreLives(&candidate,&next.score_lives) ||
       !ArRegionalSession_BeginCollision(&candidate,&next.collision) ||
       !ArRegionalSession_BeginPlatformSkull(&candidate,&next.platform_skull) ||
       !ArRegionalSession_BeginActorStats(&candidate,&next.actor_stats) ||
       !ArRegionalSession_BeginCastHold(&candidate,&next.cast_hold) ||
       !ArRegionalSession_BeginFire(&candidate,&next.fire_enemy)) return false;
-  s_campaign.active=candidate;s_action=next;
+  next.placement_difficulty=candidate.effective.difficulty.level;
+  s_campaign.active=candidate;s_action=next;ActRaiserStagePlacements_Reset();
   ArRegionalSpellInventory_Interrupt(&s_inventory);
   s_inventory_icon_pending=s_inventory.enabled;
   /* Only an accepted retry/new-room initialization abandons an interrupted
@@ -639,7 +679,7 @@ bool ActRaiserRegional_ReplayDigest(void *unused, uint8_t out[32], bool *baselin
   const ArRegionalLairAccounting pending = ArRegionalRules_LairAccounting(requested), active = ArRegionalRules_LairAccounting(effective);
   const ArRegionalLairReloads *reloads=s_campaign.active_valid?&s_campaign.active.reloads:&s_boot_reloads;
   const ArRegionalSimActors *actors=s_campaign.active_valid?&s_campaign.active.sim_actors:&s_boot_sim_actors;
-  uint8_t digest[32]; bool rules_native, lairs_native, reloads_native, actors_native;
+  uint8_t digest[32]; bool rules_native, lairs_native, reloads_native, actors_native, placements_native;
   if (!ArRegionalRules_Fingerprint(requested,effective,digest,&rules_native) ||
       !ArRegionalLairHistory_Fingerprint(digest,history,&pending,&active,digest,&lairs_native) ||
       !ArRegionalLairReloads_Fingerprint(digest,reloads,requested->lair_reloads,effective->lair_reloads,
@@ -655,9 +695,10 @@ bool ActRaiserRegional_ReplayDigest(void *unused, uint8_t out[32], bool *baselin
     completion[50]=(uint8_t)(s_completion_scene>>8);
     if (!sr_support_sha256(completion,sizeof(completion),digest)) return false;
   }
-  if(!ArRegionalSpellInventory_Fingerprint(digest,&s_inventory,digest))return false;
+  if(!ArRegionalSpellInventory_Fingerprint(digest,&s_inventory,digest) ||
+      !ActRaiserStagePlacements_Fingerprint(digest,digest,&placements_native))return false;
   memcpy(out,digest,sizeof(digest));
-  *baseline = rules_native && lairs_native && reloads_native && actors_native && !s_inventory.enabled;
+  *baseline = rules_native && lairs_native && reloads_native && actors_native && placements_native && !s_inventory.enabled;
   return true;
 }
 
@@ -1411,6 +1452,7 @@ RecompReturn ActRaiser_RegionalScoreDeparture(CpuState *cpu) {
       settled?"already completed at card":"completed now",cpu_read16(cpu,0,0x001f));
   s_completion_state=kScoreIdle;
   s_completion_scene=0;
+  ActRaiserStagePlacements_Reset();
   return ScoreTransfer(true,0x00a311,0x00a30d);
 }
 
@@ -1549,7 +1591,7 @@ RecompReturn ActRaiser_RegionalTitle(CpuState *cpu) {
                             error.message[0] ? error.message : "no durable save image");
   s_lair_seed_pending=selection!=1;
   ArRegionalSpellInventory_Reset(&s_inventory,false);s_inventory_icon_pending=false;
-  s_action=(ActionRuleCache){0};
+  s_action=(ActionRuleCache){0};ActRaiserStagePlacements_Reset();
   s_completion_state=kScoreIdle;
   s_completion_scene=0;
   if (s_lair_seed_pending) TryInitializeLairs(cpu);

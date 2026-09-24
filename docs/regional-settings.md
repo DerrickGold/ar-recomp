@@ -33,6 +33,28 @@ regional artwork and independent music choices are separate.
 
 ## Action and resource rules
 
+### Scene music
+
+**Scene music** selects the regional track assignment. Japan keeps the
+Fillmore theme in both rooms of Act 2's caves; US and Europe use the theme
+also heard in Kasandora Act 2 and Marahna Act 1. The boss theme is unchanged.
+No Japanese ROM is needed: the same Fillmore music data is in the US ROM.
+
+Changing this option does not interrupt the current track. The next scene's
+music declaration applies it, keeping the game's normal handling of tracks
+that are already loaded. Regional versions of the music itself are a separate
+feature; this setting changes the track assignment, not its instruments or notes.
+
+### Aitos mosaic pattern
+
+**Aitos mosaic pattern** changes the distortion in the final room of Aitos
+Act 2. US and German releases share one pattern, Japan has another, and
+European English and French share the third. The European choice selects
+that third pattern; changing the game's language does not select a pattern.
+
+The choice applies at the next room entry or retry and needs no donor ROM.
+It does not change the effect's speed, the room's terrain or its enemies.
+
 ### Difficulty rules
 
 **Difficulty rules** selects the US/Japanese or European transformations;
@@ -58,6 +80,47 @@ attacks are never reset by editing a setting. No donor ROM is needed.
 The five internal difficulty rules are independently selectable. Enemy
 placement, terrain, initial room time and the action-only campaign's entry
 and inventory rules are separate features, not implied by this setting.
+
+### Stage terrain
+
+**Stage terrain** selects US, Japanese or European platforms and terrain at
+the next room entry or retry. The visible background and collision data change
+together. Japan also uses its matching Fillmore entry and retry heights;
+switching back restores the US positions. Nothing moves during an active room.
+
+The Japanese layouts reuse existing US tiles, so no donor ROM is required.
+European terrain includes changed solidity flags and small layout changes in
+Aitos and Northwall. It is independent of European difficulty. Trap damage,
+enemy and pickup placement, and regional artwork are separate choices; terrain
+alone is not a complete regional stage preset.
+
+### Enemy and item placement
+
+**Enemy placements** and **Pickup placements** independently select each
+region's authored encounters and items. European enemy placement also uses
+the selected Beginner/Normal/Expert level; European pickups distinguish Story
+and Action Mode. These choices need no donor ROM. Item effects, enemy stats,
+terrain and artwork remain separate.
+
+Both choices apply at the next room entry or retry, including that room's
+later waves. Changing a setting does not replace live enemies or respawn
+collected items. The randomizer transforms the chosen placement set using its
+existing settings. For an original regional layout, choose matching terrain
+and placements; deliberately mixed layouts need not offer the same routes to
+every item.
+
+### Stage traps
+
+**Stage traps** selects the ordered damage boxes placed in each room. US
+uses the original US traps. Japan restores its additional or differently
+positioned traps, often dealing 24 HP. Europe keeps US positions but changes
+many spikes to 24 HP, or 2 HP in the opening forest and Northwall's tree.
+Some lethal traps are shared by all releases. Slowing zones are unchanged.
+
+The choice takes effect at the next room entry or retry. It neither changes
+an ongoing hit nor moves the player, and needs no donor ROM. Difficulty does
+not reduce these authored damage values. Terrain and artwork remain separate:
+this option alone does not reproduce the complete Japanese stage layout.
 
 ### Enemy behavior
 
@@ -257,6 +320,16 @@ collision or parent movement, and requires no donor ROM.
 | Marahna plant's head cycle | Always exposed | Opens, closes, then protected | Opens, closes, then protected |
 | Plant's open-head animation, one repetition | 8 updates | 8 updates | 16 updates, four poses |
 | Plant's high / low projectile preparation | 9 /9 updates | 9 /9 updates | 25 /25 updates |
+| Plant body height / initial main-boss Y | 208 px /120 | 192 px /128 | 208 px /120 |
+| Northwall Act-1 throw preparation | 50 updates | 50 updates | 15 updates |
+| Northwall projectile impact | 42 updates, 32 px final width | 42 updates, 32 px final width | 20 updates, 64 px final width |
+| Northwall projectile's facing-relative launch offset | −8 px | −8 px | −16 px |
+| Northwall impact's downward offset | 0 px | 0 px | 2 px |
+
+Northwall's four rules are independent internally. Its wider impact reuses
+US tiles, so it does not need a donor ROM. The animation and collision box
+expand together, including when several impacts are active. Like the other
+boss rules, changes wait until the next room or retry.
 
 The axe offset and Wizard pause also apply to their Death Heim rematches.
 Viper's choice test, original/rematch lightning travel and floor descent are
@@ -294,7 +367,12 @@ animation five times, closes for12, then stays protected for90. The European
 head sequence restores a narrower intermediate pose rather than stretching
 the two US poses. High and low projectile wind-ups are separate internally.
 These changes use retained US animations; selecting them does not change the
-body artwork, initial placement or the difficulty-specific tendril pattern.
+body geometry or the difficulty-specific tendril pattern, which have their
+own internal rules. The Japanese geometry profile shortens the body by one
+tile row, moves its initial anchor, and adjusts the closed head's bounds as
+one operation. It keeps the chosen sprite pixels and palettes; selecting
+Japanese geometry alone does not supply Japanese artwork. Switching profiles
+waits for a fresh encounter and is reversible without starting a new game.
 
 | Cost | US / Europe | Japan |
 | --- | ---: | ---: |

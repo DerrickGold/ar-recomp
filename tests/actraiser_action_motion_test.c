@@ -817,6 +817,131 @@ static void CheckTendril(void) {
   difficulty=(ArRegionalDifficultySnapshot){0};native_result=RECOMP_RETURN_NORMAL;
   puts("Beginner tendril: expanded48-update program, cacheless completion, signature guards and native repeat ownership passed");
 }
+static const uint8_t northwall_rows[]={3,5,0,0,4,5,0,0,5,5,0,0,6,7,0,0,7,7,0,0,8,7,0,0,255,
+    20,5,0,0,10,7,0,0,11,7,0,0,12,17,0,0,13,3,0,0,14,3,0,0,15,1,0,0,255};
+static const uint8_t northwall_seed[]={16,16,8,0,4,0,0,24,0,0,62,2,0,8,16,0,0,63,2,
+    0,16,8,0,0,62,2,0,24,0,0,0,63,2};
+static CpuState Northwall(unsigned state,unsigned row,unsigned flip,unsigned width,const uint8_t *blob) {
+  CpuState cpu=Setup(0,state,row,flip<<14,width);Write(0x18,0x0406);Write(cpu.X+0x32,0xe7c6);
+  Write(cpu.X+0x16,0x5000);decode_extents=true;
+  if(blob)memcpy(memory+0x5000,blob,1549);
+  else {
+    Write(0x5000,0xc6);Write(0x5004,0x1f);Write(0x5006,0x38);
+    memcpy(memory+0x501f,northwall_rows,sizeof(northwall_rows));
+    const uint8_t counts[]={1,1,1,1,2,2,2,2,4,3,18,18,14,21,15,10,13,9,18,7,10};
+    unsigned at=0xf0;
+    for(unsigned i=0;i<21;++i) {
+      Write(0x50c6+i*2,at);memory[0x5000+at]=memory[0x5001+at]=8;
+      memory[0x5002+at]=16;memory[0x5004+at]=counts[i];at+=5+7*counts[i];
+    }
+    assert(at==1549);memcpy(memory+0x516c,northwall_seed,sizeof(northwall_seed));
+  }
+  memset(memory+0x5f00,0xa5,256);return cpu;
+}
+static unsigned NorthwallExpected(unsigned expansion,uint8_t *out) {
+  static const uint8_t positions[4][8]={{8,16,24,32,0},{8,16,24,32,0,40},
+      {16,24,32,40,8,48,0},{24,32,40,48,16,56,8,0}};
+  const unsigned count=4+expansion,width=count*8;out[0]=out[1]=width/2;out[2]=8;out[3]=0;out[4]=count;
+  for(unsigned p=0;p<count;++p) {
+    unsigned at=5+p*7;out[at]=0;out[at+1]=positions[expansion-1][p];out[at+2]=width-8-out[at+1];
+    out[at+3]=out[at+4]=0;out[at+5]=(p==1 || p==3 || p==4 || p==7)?63:62;out[at+6]=2;
+  }
+  return 5+7*count;
+}
+static void CheckNorthwall(void) {
+  for(unsigned mix=0;mix<81;++mix)for(unsigned state=1;state<=2;++state)
+  for(unsigned flip=0;flip<4;++flip)for(unsigned width=0;width<2;++width) {
+    unsigned digits=mix;ArRegionalBossPolicy policy={{0}};
+    for(unsigned i=26;i<30;++i){policy.source[i]=digits%3;digits/=3;}
+    assert(ArRegionalBoss_Resolve(&policy,&bosses));
+    const bool enhanced=policy.source[state==1?27:26]==2;const unsigned last=state==1?(enhanced?10:6):7;
+    for(unsigned row=0;row<=last;++row)for(unsigned resume=0;resume<2;++resume) {
+      CpuState cpu=Northwall(state,row+(enhanced && resume?0x100:0),flip,width,NULL),expected=cpu;
+      uint8_t before[65536],wanted[65536];memcpy(before,memory,sizeof(memory));
+      const uint64_t saved_policy=bosses;if(enhanced && resume)bosses=0;
+      assert(ActRaiser_ActionMotionEntry(&cpu)==enhanced);
+      unsigned nr=row,expansion=0;uint16_t delay=0;bool end=false;
+      if(enhanced) {
+        assert(ArRegionalBoss_NorthwallRow(saved_policy,state,row,&nr,&delay,&expansion,&end));
+        Write(cpu.X+0x1c,nr);
+      }
+      assert(Native(&expected)==RECOMP_RETURN_NORMAL);
+      if(enhanced && !end) {
+        Write(cpu.X+0x1c,0x100+row);Write(cpu.X+0x24,delay);
+        if(expansion) {
+          const unsigned at=0x5f00+64*(expansion-1);uint8_t comp[61];
+          const unsigned size=NorthwallExpected(expansion,comp);memcpy(memory+at,comp,size);
+          Write(cpu.X+0x20,at);Write(cpu.X+0x0a,comp[0]);Write(cpu.X+0x0e,comp[1]);
+        }
+      }
+      memcpy(wanted,memory,sizeof(memory));memcpy(memory,before,sizeof(memory));
+      assert((enhanced?ActRaiser_ActionMotion(&cpu):Native(&cpu))==RECOMP_RETURN_NORMAL);
+      assert(!memcmp(wanted,memory,sizeof(memory)) && !memcmp(&expected,&cpu,sizeof(cpu)));
+      bosses=saved_policy;
+    }
+  }
+  ArRegionalBossPolicy eu;assert(ArRegionalBoss_Init(&eu,2) && ArRegionalBoss_Resolve(&eu,&bosses));
+  {
+    CpuState cpu=Northwall(1,6,0,0,NULL);
+    for(unsigned step=1;step<=4;++step) {
+      const unsigned object=0x8e0+64*step;memcpy(memory+object,memory+0x8e0,64);
+      cpu.X=object;Write(object+0x1c,5+step);
+      assert(ActRaiser_ActionMotionEntry(&cpu) && ActRaiser_ActionMotion(&cpu)==RECOMP_RETURN_NORMAL);
+    }
+    for(unsigned step=1;step<=4;++step) {
+      uint8_t expected[61];const unsigned size=NorthwallExpected(step,expected);
+      const unsigned pointer=Read(0x8e0+64*step+0x20);
+      assert(pointer==0x5f00+(step-1)*64 && !memcmp(memory+pointer,expected,size));
+    }
+    /* Re-publishing an earlier pose must not change another active actor's. */
+    cpu.X=0x920;Write(cpu.X+0x1c,6);assert(ActRaiser_ActionMotion(&cpu)==RECOMP_RETURN_NORMAL);
+    uint8_t expected[61];const unsigned size=NorthwallExpected(4,expected);
+    assert(!memcmp(memory+Read(0x9e0+0x20),expected,size));
+  }
+  for(unsigned token=1;token<=RECOMP_RETURN_OWNED_UNWIND;++token) {
+    CpuState cpu=Northwall(1,0x106,0,0,NULL),expected=cpu;uint8_t before[65536];memcpy(before,memory,sizeof(memory));
+    native_result=(RecompReturn)token;
+    assert(ActRaiser_ActionMotion(&cpu)==token && !memcmp(before,memory,sizeof(memory)) && !memcmp(&expected,&cpu,sizeof(cpu)));
+  }
+  for(unsigned bad=0;bad<sizeof(northwall_rows)+sizeof(northwall_seed)+21;++bad) {
+    CpuState cpu=Northwall(1,6,0,0,NULL);
+    if(bad<sizeof(northwall_rows))memory[0x501f+bad]^=1;
+    else if(bad<sizeof(northwall_rows)+sizeof(northwall_seed))memory[0x516c+bad-sizeof(northwall_rows)]^=1;
+    else memory[0x50c6+2*(bad-sizeof(northwall_rows)-sizeof(northwall_seed))]^=1;
+    /* The unselected throw sequence is deliberately irrelevant to impacts. */
+    if(bad>=25 && bad<sizeof(northwall_rows))continue;
+    assert(!ActRaiser_ActionMotionEntry(&cpu));
+  }
+  bosses=0;decode_extents=false;native_result=RECOMP_RETURN_NORMAL;
+  puts("Northwall programs:81 mixes,4 facings,2 widths, fixed composition slots, cacheless completion, guards and escape rollback passed");
+}
+static void CheckNorthwallRoms(char **paths) {
+  static uint8_t rom[1048576],blobs[5][4096];const unsigned offsets[]={902690,896241,891041,818000,818000};
+  for(unsigned region=0;region<5;++region) {
+    FILE *f=fopen(paths[region],"rb");assert(f && fread(rom,1,sizeof(rom),f)==sizeof(rom) && !fclose(f));
+    const unsigned off=offsets[region],size=ByteOrder_ReadLe16(rom+off);
+    assert(size==(region<2?1549:1775) && QuintetLzss_DecompressAsset(rom+off,sizeof(rom)-off,blobs[region],size,NULL));
+    ArRegionalBossPolicy policy;assert(ArRegionalBoss_Init(&policy,region<2?region:2) && ArRegionalBoss_Resolve(&policy,&bosses));
+    const uint8_t *us=blobs[0],*other=blobs[region];
+    for(unsigned state=1;state<=2;++state) {
+      const unsigned seq=ByteOrder_ReadLe16(other+2+state*2);unsigned total=0;
+      for(unsigned row=0;;++row) {
+        CpuState cpu=Northwall(state,row,0,0,us);
+        const bool enhanced=region>=2;assert(ActRaiser_ActionMotionEntry(&cpu)==enhanced);
+        assert((enhanced?ActRaiser_ActionMotion(&cpu):Native(&cpu))==RECOMP_RETURN_NORMAL);
+        const uint8_t *r=other+seq+4*row;
+        if(r[0]==255){assert(cpu._flag_C);break;}
+        assert(!cpu._flag_C && Read(cpu.X+0x24)==r[1] && Read(cpu.X+6)==(uint16_t)Signed(r[2]) && Read(cpu.X+8)==(uint16_t)Signed(r[3]));
+        const unsigned comp=ByteOrder_ReadLe16(other+ByteOrder_ReadLe16(other)+2*r[0]);
+        assert(!memcmp(memory+Read(cpu.X+0x20),other+comp,5+7*other[comp+4]));
+        total+=Read(cpu.X+0x24)+1;
+      }
+      assert(total==(state==1?(region<2?42:20):(region<2?50:15)));
+    }
+  }
+  bosses=0;decode_extents=false;
+  puts("Northwall: all five ROM timelines, complete impact compositions and native workspace bounds match");
+}
 int main(int argc,char **argv) {
   assert(argc==1 || argc==6);
   CheckHeadProgram();
@@ -826,6 +951,7 @@ int main(int argc,char **argv) {
   CheckViperRows();
   CheckPharaohRows();
   CheckPlantProgram();CheckPlantWindups();CheckTendril();
+  CheckNorthwall();
   CheckIceRows();
   CheckTanzraRows();
   CheckBossRows();
@@ -863,6 +989,6 @@ int main(int argc,char **argv) {
     }
     assert(!ActRaiser_ActionMotionEntry(&cpu));
   }
-  if(argc==6){CheckRoms(argv+1);CheckCollisionRoms(argv+1);}
+  if(argc==6){CheckRoms(argv+1);CheckCollisionRoms(argv+1);CheckNorthwallRoms(argv+1);}
   printf("action motion: 57 owner/rows x%u mixes x4 facings x2 widths, escape and shape checks passed\n",1u<<kArRegionalActionMotion_HeadWithdrawal);return 0;
 }

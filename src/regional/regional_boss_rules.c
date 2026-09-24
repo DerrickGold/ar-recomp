@@ -27,6 +27,11 @@ static const ArRegionalBossDescriptor kRules[] = {
   {"plant_open_sequence", {8,8,16},0},
   {"plant_high_shot_windup", {7,7,23},2},
   {"plant_low_shot_windup", {7,7,23},2},
+  {"northwall_throw_sequence", {50,50,15},0},
+  {"northwall_impact_sequence", {42,42,20},0},
+  {"northwall_projectile_offset", {8,8,16},0},
+  {"northwall_impact_offset", {0,0,2},0},
+  {"plant_body_geometry", {208,192,208},0},
 };
 _Static_assert(kArRegionalBoss_Count>0 && kArRegionalBoss_Count<=32,"boss snapshot capacity");
 _Static_assert(sizeof(kRules)/sizeof(kRules[0])==kArRegionalBoss_Count,"describe every boss rule");
@@ -111,6 +116,18 @@ bool ArRegionalBoss_PlantWindup(ArRegionalBossSnapshot snapshot,unsigned state,u
   const unsigned rule=state==6?kArRegionalBoss_PlantHighWindup:kArRegionalBoss_PlantLowWindup;
   if(ArRegionalBoss_Value(snapshot,rule)!=23)return false;
   *duration=23;return true;
+}
+bool ArRegionalBoss_NorthwallRow(ArRegionalBossSnapshot snapshot,unsigned state,unsigned row,
+    unsigned *native_row,uint16_t *duration,unsigned *expansion,bool *end) {
+  if(!native_row || !duration || !expansion || !end)return false;
+  if(state==1 && row<=10 && ArRegionalBoss_Value(snapshot,kArRegionalBoss_NorthwallImpact)==20) {
+    *native_row=row==10?6:row>5?5:row;
+    *duration=1;*expansion=row>=6 && row<10?row-5:0;*end=row==10;return true;
+  }
+  if(state==2 && row<=7 && ArRegionalBoss_Value(snapshot,kArRegionalBoss_NorthwallThrow)==15) {
+    *native_row=row;*duration=row==3?2:1;*expansion=0;*end=row==7;return true;
+  }
+  return false;
 }
 bool ArRegionalBoss_TanzraRow(ArRegionalBossSnapshot snapshot,unsigned state,unsigned row,
     uint16_t *duration,int16_t dx,int16_t dy) {
