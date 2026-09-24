@@ -15,31 +15,58 @@ artwork, visual effects and music choices. Both require confirmation, even
 before a new game. Neither changes language, fonts, physical button bindings,
 randomizer settings or game fixes.
 
-Use L/R on a controller or [ / ] on a keyboard to switch tabs directly.
+The description header shows **Current: US / JP / EU / Custom** separately from
+the preset you are browsing. This describes the rules already active, not a
+choice waiting for confirmation or its next activation point. At the title
+screen, **New game** identifies the draft instead. Custom means the rules do
+not match a complete regional preset; you can still choose any preset to apply.
+
+Use the tab controls shown in the footer to switch tabs directly. Keyboard
+shortcuts [ / ] and Tab remain available regardless of game bindings.
 The tab counter shows your position (for example, 1/5); partial labels and
-arrows indicate more tabs. Press **X** (game button) or **F3** while selecting
-an option to read its full description. Up/Down scrolls, Left/Right pages,
-and Back/Esc returns to the same option without changing it. **Y** still
-resets the selected option. The compact footer keeps the same height in every
-section; an ellipsis means more text is available in Details.
+arrows indicate more tabs. Use **Details** (or **F3** on a keyboard) while
+selecting an option to read its full description. Up/Down scrolls, Left/Right
+pages, and Back/Esc returns to the same option without changing it. Reset
+restores the selected option's default. The footer names your actual keyboard
+bindings or the selected controller's physical buttons, and follows whichever
+device you use in Auto mode. Unbound commands are omitted unless a fixed
+keyboard shortcut provides them. Enter, Escape and the arrow keys always work;
+while typing a value, Enter applies and Escape cancels.
+
+The compact footer reserves two hint lines and keeps the same height in every
+section, including after switching devices. An ellipsis in the description
+means more text is available in Details.
+Each explanation starts with the effect on play, then compares the regional
+mechanics in complete sentences. Activation timing, side effects and missing
+media notices follow. Timing identifies the action that activates the change,
+such as entering another room, restarting from a checkpoint or starting a new
+Action-only run; these are not interchangeable. On **Controls**, the compact
+preview explains the selected behavior immediately; Details provides the full
+regional comparison. The note below the preview highlights pending changes,
+missing media and town-development consequences in gold. **No town rebuild**
+is a muted, neutral note. Details keeps the full explanation and town-impact
+information before campaign-saving notes.
 The tabs contain separate choices, not regional bundles:
 
 | Tab | Examples of independent choices | When changes apply |
 | --- | --- | --- |
 | Action | Difficulty; terrain; enemy and item placements; time limits; traps; enemy stats; movement; hit areas; attacks; spell costs; casting pauses; inventory; starting health; starting lives; retry score; extra lives; mode access | Room entry/retry, or the next applicable cast, run start or reward |
 | Towns | Population and goals; construction; development; fishing; lair reserves and timing; monster combat and targets; costs; SP recovery; angel-health recovery; earthquakes; resource credit; Sources; reports; story prerequisites; island arrival | Subsequent activity or reports; population support requires Palace review; an arrival already started stays fixed |
-| Controls & menus | Cast magic; lives display; Master score page; return after town dialogs; message-speed choices | Next use/menu; an already-open menu finishes unchanged |
-| Artwork & music | Enemy sprites; individual scene/item/symbol graphics; Aitos poses and distortion; stage music choice; music versions | Next room/scene or track load; current playback is not interrupted |
+| Controls | Cast magic; lives display; Master score page; return after town dialogs; message-speed choices | Next use/menu; an already-open menu finishes unchanged |
+| Art & music | Enemy sprites; individual scene/item/symbol graphics; Aitos poses and distortion; stage music choice; music versions | Next room/scene or track load; current playback is not interrupted |
 
 Flags with **US / EU / JP** identify rule provenance, not your
-game's language. Full region names remain in help and confirmations.
+game's language. The flags and codes occupy aligned columns, including on
+Controls; behavior descriptions do not crowd the setting names. Full region
+names remain in help and confirmations.
 Europe represents gameplay shared by its releases; it is not a language selector.
 
 Mixed rules show **Custom**. Equal-valued regional rules may still match a
 preset. A `*` marks a choice waiting for its next room, scene or use; the
-help also shows the currently active choice. Missing donor media shows
-an explanation at the start of the option description: the requested region
-is retained, with US assets used where donor data is missing. Missing media
+help shows **Active** only when a change is pending and the active value differs
+from the selected value. Missing donor media shows an explanation after the option's mechanics
+and caveats: the requested region is retained, with US assets used where donor
+data is missing. Missing media
 is not a separate option value. The `*` still indicates pending activation,
 independently of that fallback.
 See [regional media](regional-media.md) for extraction and installation.
@@ -85,7 +112,8 @@ message-speed range does not select a new speed or language.
 
 ## Changing rules during a campaign
 
-The gold note below each setting describes its town impact:
+When no pending-change or missing-media notice takes priority, the note below
+each setting describes its town impact:
 
 - **No town rebuild**: switching does not itself redevelop towns. Gameplay can
   still have indirect consequences, and activation may wait for a room or scene.
@@ -201,7 +229,7 @@ and inventory remain separate features, not implied by this setting.
 
 ### Stage terrain
 
-**Stage terrain** selects US, Japanese or European platforms and terrain at
+**Platforms and terrain** selects US, Japanese or European platforms and terrain at
 the next room entry or retry. The visible background and collision data change
 together. Japan also uses its matching Fillmore entry and retry heights;
 switching back restores the US positions. Nothing moves during an active room.
@@ -278,7 +306,7 @@ needed. A full enemy pool can prevent one or both seeds from appearing; the
 tree proceeds normally and does not retry a failed spawn. A setting change
 waits until the next room or retry, without interrupting existing plants.
 
-**Cave fireball emitters** controls Fillmore Act 2's firing interval and launch
+**Cave orb firing** controls Fillmore Act 2's firing interval and launch
 points. Both are independently selectable internally and apply on the next
 room entry/retry. Existing waits and projectiles are not reset.
 
@@ -355,7 +383,7 @@ The return policy is captured when you press Start on Game Over. Neither
 route changes the battery save; Continue always restores its own rules.
 Mode labels remain owned by the selected language, not the rules preset.
 
-**Action Mode items & spells** selects a new run's inventory model. US and
+**Action-mode inventory** selects a new run's inventory model. US and
 Japanese rules use shared scrolls and the equipped spell. European rules
 collect individual spells and cast the most recently collected one first;
 the spell is removed only after its effect and graphics restoration finish.
@@ -546,7 +574,7 @@ US/Europe displays 3 for three attempts and 1 for the last; Japan displays
 native or enhanced text. Starting lives, retries, extra-life rewards and the
 Palace's Master report are unchanged.
 
-**Source activation** chooses when Source of Life and Source of Magic take
+**Source item activation** chooses when Source of Life and Source of Magic take
 effect. US/Europe applies the bonus when you collect the offering; Japan
 stores it for **Use Offering**. Source of Life adds one to the persistent
 life allowance, not maximum HP. Source of Magic adds a scroll to the persistent
@@ -680,7 +708,12 @@ does not change monster reserves or introduce new events. Old-save histories
 are estimates because the save cannot reveal every past reduction; unexplained
 values are preserved and prevent this setting from being switched.
 
-**Construction wait** sets the pause between town construction phases: one
+**Building growth costs** sets the stored growth consumed per construction
+start. US/Europe spends 4, 6 or 8 units as civilization advances; Japan always
+spends 4. It applies to future construction without changing population support,
+timing, existing structures or credits from destroyed houses.
+
+**Construction pauses** sets the pause between town construction phases: one
 town update for US/Europe, or 150 for Japan. These are calls to the town's wait
 handler, not seconds. Each town finishes its current wait before using the new
 reload. Switching back does not immediately erase an outstanding Japanese wait.
@@ -781,7 +814,7 @@ are not reset. House-loss and score-conversion rules remain separate from this
 choice. Missing or inconsistent history prevents a switch instead of guessing
 again or overwriting your progress.
 
-**House-loss feedback** changes the amount contributed by each destroyed house.
+**Destroyed-house credit** changes the amount contributed by each destroyed house.
 US/Europe uses 4, 6 or 8 units according to the house's tier; Japan always uses
 four. The game distributes these units among unsealed lairs, replenishing their
 monster reserves. If all four lairs are sealed, it adds them to the town's
@@ -812,7 +845,7 @@ earlier award is not repeated at departure. Settlement timing changes future
 clears only: every retained stock history uses the score from the one settlement
 you actually played, not a second hypothetical tally.
 
-**Magic Skull wait** keeps the US/European 90-frame pause after sealing, or
+**Magic Skull delay** keeps the US/European 90-frame pause after sealing, or
 uses Japan's immediate consumption. The choice is captured when you begin
 Use Offering and stays fixed through the picker and completion. This does not
 change which lair accepts the Skull, its growth reward, or cancellation: an
@@ -830,16 +863,18 @@ population prerequisites remain enabled; completed events are not replayed,
 and changing the setting does not grant an item. Other story conditions and
 event priority still apply.
 
-The same bundle includes Bloodpool's failed-Act-2 check: US/Europe clears the
-Compass prerequisite alongside the disputes prerequisite; Japan clears only
+The separate **Failed Act 2 prerequisites** option controls Bloodpool's check:
+US/Europe clears the Compass prerequisite alongside the disputes prerequisite;
+Japan clears only
 the disputes prerequisite. The normal event loop still gives disputes priority.
 This is not an option to obtain the Compass early.
 
 ## Saving your choices
 
 These choices belong to the current campaign. **Save with the Progress Log to
-keep them.** Closing the overlay is not a save. New Game starts with US rules;
-Continue restores the choices saved with that campaign. Keep the matching
+keep them.** Closing the overlay is not a save. New Game uses the title-screen
+choices, which default to US rules; Continue restores the choices saved with
+that campaign. Keep the matching
 `.archeckpoint` companion beside your save when copying it to another Recomp
 installation. The `.srm` itself remains compatible with SNES emulators. See
 [save companions](save-format.md#regional-campaign-checkpoints) for backup and
@@ -859,9 +894,8 @@ silently discard an existing history.
 Regional changes are locked during recording and replay, including after
 taking over from a replay. Start a normal session to edit them.
 
-These are **individual options, not complete regional presets**. They do not
-change spell inventory, action-enemy behavior or stats,
-artwork or language. In particular, choosing European costs
-does not enable the European Action-mode spell stack. No donor ROM is needed
-for these rules. The [regional comparison](regional-differences.md)
-describes the wider set of differences separately.
+Individual options affect only their named feature; use **Presets** to apply
+a whole regional ruleset. For example, European spell prices do not enable
+the European Action inventory. Numerical gameplay rules require no donor ROM;
+some artwork and music do. The [regional comparison](regional-differences.md)
+describes the original releases rather than the scope of any single option.

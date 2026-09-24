@@ -1358,6 +1358,21 @@ static void TestInputBindingHints(void) {
   InputMap_FormatBindingHint(hint,sizeof(hint),
       INPUT_BIND_MAKE(kInputBind_PadButton,SDL_GAMEPAD_BUTTON_WEST,false),SDL_GAMEPAD_TYPE_PS4);
   CHECK(!strcmp(hint,"Square"));
+  const uint32 shoulder = INPUT_BIND_MAKE(kInputBind_PadButton, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, false);
+  InputMap_FormatBindingHint(hint, sizeof(hint), shoulder, SDL_GAMEPAD_TYPE_XBOXONE);
+  CHECK(!strcmp(hint, "LB"));
+  InputMap_FormatBindingHint(hint, sizeof(hint), shoulder, SDL_GAMEPAD_TYPE_PS5);
+  CHECK(!strcmp(hint, "L1"));
+  InputMap_FormatBindingHint(hint, sizeof(hint), shoulder, SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO);
+  CHECK(!strcmp(hint, "L"));
+  CHECK(InputMap_ActionHintForDevice(hint, sizeof(hint), kInputAction_B, kInputClass_Keyboard));
+  CHECK(!strcmp(hint, "Z"));
+  CHECK(InputMap_ActionHintForDevice(hint, sizeof(hint), kInputAction_B, kInputClass_Gamepad));
+  CHECK(!strcmp(hint, "A"));
+  CHECK(!InputMap_ActionHintForDevice(hint, sizeof(hint), kInputAction_Count, kInputClass_Keyboard));
+  CHECK(!*hint);
+  CHECK(!InputMap_ActionHintForDevice(hint, sizeof(hint), kInputAction_B, -1));
+  CHECK(!*hint);
   InputMap_FormatBindingHint(hint,sizeof(hint),0,SDL_GAMEPAD_TYPE_STANDARD);
   CHECK(!hint[0]);
   InputMap_FormatBindingHint(hint,sizeof(hint),

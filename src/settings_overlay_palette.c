@@ -119,7 +119,7 @@ static bool RebuildLayerPaletteTexture(void) {
 void SettingsOverlayPalette_Draw(const MenuLayout *layout) {
   if (!s_layer_palette_open) return;
   enum {
-    kPickerWidth = 172,
+    kPickerWidth = 288,
     kPickerHeight = 190,
     kPickerGridX = 14,
     kPickerGridY = 25,
@@ -158,6 +158,26 @@ void SettingsOverlayPalette_Draw(const MenuLayout *layout) {
   char selected[32];
   snprintf(selected, sizeof(selected), "CGRAM $%02X", (unsigned)s_layer_palette_cursor);
   DrawSmallText(layout, x + 14, y + 173, selected, kGameGold);
-  DrawSmallTextN(layout, x + 76, y + 173, Ui("overlay.palette.hint"),
-                 (kPickerWidth - 90) / kDebugGlyphWidth, kMutedText);
+  /* Keep commands beside the grid: physical pad names do not fit beside the
+   * CGRAM value. Use the same modal mapping as the main settings footer. */
+  const InputClass device = SettingsOverlay_MenuInputDevice();
+  const struct { MenuNav nav; const char *label; } hints[] = {
+    {kMenuNav_Confirm, "overlay.hint.apply"},
+    {kMenuNav_Reset, "overlay.hint.clear"},
+    {kMenuNav_Back, "overlay.hint.cancel"},
+  };
+  for (unsigned i = 0; i < sizeof(hints) / sizeof(hints[0]); ++i) {
+    char key[64];
+    const char *label = hints[i].label;
+    OverlayMenuInput_Hint(key, sizeof(key), hints[i].nav, device);
+    if (!*key && hints[i].nav == kMenuNav_Back) {
+      OverlayMenuInput_Hint(key, sizeof(key), kMenuNav_Close, device);
+      label = "overlay.hint.close";
+    }
+    if (!*key) continue;
+    const int hint_x = x + 174, hint_y = y + 34 + (int)i * 40;
+    const int columns = (kPickerWidth - 188) / kDebugGlyphWidth;
+    DrawSmallTextN(layout, hint_x, hint_y, key, columns, kSteelBlue);
+    DrawSmallTextN(layout, hint_x, hint_y + 10, Ui(label), columns, kMutedText);
+  }
 }

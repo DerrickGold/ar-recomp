@@ -1,6 +1,7 @@
 #include "settings_overlay/regional/regional_menu.h"
 
 #include <stdio.h>
+#include <string.h>
 
 /* Each visible row binds its catalog text to a narrow game-owned setting.
  * Only Presets expand profiles from regional/regional_profiles.c. */
@@ -335,14 +336,17 @@ const OverlayRegionRow *OverlayRegionMenu_Row(OverlayRegionPage page, unsigned r
 const char *OverlayRegionMenu_Label(ArUiLocale locale, const OverlayRegionRow *row) {
   return row ? ArUiCatalog_Text(locale, row->label_key, NULL) : "";
 }
-const char *OverlayRegionMenu_ImpactLabel(ArUiLocale locale, const ActRaiserRegionalRulesView *view,
-                                          const OverlayRegionRow *row) {
-  if (!row || !view) return "";
-  const ArRegionalTownImpact impact = row->kind != kOverlayRegionRow_Difficulty &&
+static ArRegionalTownImpact RowTownImpact(const OverlayRegionRow *row) {
+  return row->kind != kOverlayRegionRow_Difficulty &&
       !(row->kind == kOverlayRegionRow_Setting &&
         (row->setting == kActRaiserRegionalSetting_TownStatus || row->setting == kActRaiserRegionalSetting_CompassReturn))
                                           ? ArRegionalProfiles_TownImpact(row->group)
                                           : kArRegionalTownImpact_None;
+}
+const char *OverlayRegionMenu_ImpactLabel(ArUiLocale locale, const ActRaiserRegionalRulesView *view,
+                                          const OverlayRegionRow *row) {
+  if (!row || !view) return "";
+  const ArRegionalTownImpact impact = RowTownImpact(row);
   const char *key = impact == kArRegionalTownImpact_Redevelopment
                         ? "overlay.region.impact.redevelopment"
                     : impact == kArRegionalTownImpact_Future ? "overlay.region.impact.future"
@@ -360,6 +364,10 @@ static uint16_t ConfirmationMask(const ActRaiserRegionalRulesView *view) {
              ? 0
              : ArRegionalProfiles_Mask(view->pending_profile ? view->pending_profile_group
                                                              : kArRegionalProfile_Population);
+}
+static bool RowAwaitingConfirmation(const ActRaiserRegionalRulesView *view, const OverlayRegionRow *row) {
+  return (view->pending_profile && (ConfirmationMask(view) & ArRegionalProfiles_Mask(row->group))) ||
+      (view->population_pending && row->kind == kOverlayRegionRow_Setting && row->setting == kActRaiserRegionalSetting_Population);
 }
 ArRegionalSource OverlayRegionMenu_Source(const ActRaiserRegionalRulesView *view,
                                           ArRegionalProfileGroup group, bool effective) {
@@ -379,17 +387,14 @@ ArRegionalSource OverlayRegionMenu_RowSource(const ActRaiserRegionalRulesView *v
   if (!view || !row) return kArRegionalSource_Count;
   if (row->kind != kOverlayRegionRow_Setting)
     return OverlayRegionMenu_Source(view, row->group, effective);
-  if (!effective && ((view->pending_profile && (ConfirmationMask(view) & ArRegionalProfiles_Mask(row->group))) ||
-      (view->population_pending && row->setting == kActRaiserRegionalSetting_Population)))
+  if (!effective && RowAwaitingConfirmation(view, row))
     return view->pending_population;
   return effective ? view->choices[row->setting].active_source : view->choices[row->setting].source;
 }
 static bool RowPending(const ActRaiserRegionalRulesView *view, const OverlayRegionRow *row) {
   if (view->new_game) return false;
   if (row->kind != kOverlayRegionRow_Setting) return OverlayRegionMenu_Pending(view, row->group);
-  return (view->pending_profile && (ConfirmationMask(view) & ArRegionalProfiles_Mask(row->group))) ||
-      (view->population_pending && row->setting == kActRaiserRegionalSetting_Population) ||
-      view->choices[row->setting].pending;
+  return RowAwaitingConfirmation(view, row) || view->choices[row->setting].pending;
 }
 static SettingsOverlayRegionBadge Badge(ArRegionalSource source) {
   return source == kArRegionalSource_US       ? kOverlayRegionBadge_US
@@ -451,18 +456,18 @@ const char *OverlayRegionMenu_DifficultyLabel(ArUiLocale locale, ArRegionalDiffi
       kArRegionalDifficultyChoice_Custom], NULL);
 }
 
-static const char *BinaryValue(ArUiLocale locale, const OverlayRegionRow *row, ArRegionalSource source) {
+static const char *ControlsPreviewKey(const OverlayRegionRow *row, ArRegionalSource source) {
   const bool jp = source == kArRegionalSource_Japan;
   const char *key = NULL;
   switch (row->setting) {
-    case kActRaiserRegionalSetting_MagicGesture: key = jp ? "overlay.region.value.up_attack" : "overlay.region.value.magic_button"; break;
-    case kActRaiserRegionalSetting_LivesDisplay: key = jp ? "overlay.region.value.spares" : "overlay.region.value.current_life"; break;
-    case kActRaiserRegionalSetting_ScorePage: key = jp ? "overlay.region.value.hidden" : "overlay.region.value.shown"; break;
-    case kActRaiserRegionalSetting_MenuReturn: key = jp ? "overlay.region.value.keep_menu" : "overlay.region.value.resume"; break;
-    case kActRaiserRegionalSetting_SpeedRange: return jp ? "0-7" : "0-9";
-    default: return "";
+    case kActRaiserRegionalSetting_MagicGesture: key = jp ? "overlay.region.preview.up_attack" : "overlay.region.preview.magic_button"; break;
+    case kActRaiserRegionalSetting_LivesDisplay: key = jp ? "overlay.region.preview.spares" : "overlay.region.preview.current_life"; break;
+    case kActRaiserRegionalSetting_ScorePage: key = jp ? "overlay.region.preview.hidden" : "overlay.region.preview.shown"; break;
+    case kActRaiserRegionalSetting_MenuReturn: key = jp ? "overlay.region.preview.keep_menu" : "overlay.region.preview.resume"; break;
+    case kActRaiserRegionalSetting_SpeedRange: key = jp ? "overlay.region.preview.speed_japanese" : "overlay.region.preview.speed_western"; break;
+    default: break;
   }
-  return ArUiCatalog_Text(locale, key, NULL);
+  return key;
 }
 bool OverlayRegionMenu_Value(ArUiLocale locale, const ActRaiserRegionalRulesView *view,
                              const OverlayRegionRow *row, bool effective, char *out,
@@ -476,8 +481,7 @@ bool OverlayRegionMenu_Value(ArUiLocale locale, const ActRaiserRegionalRulesView
   }
   const ArRegionalSource source = OverlayRegionMenu_RowSource(view, row, effective);
   *badge = Badge(source);
-  ArUiTextArgument args[] = {{"region", row->binary ? BinaryValue(locale, row, source) :
-      SettingsOverlayRegions_BadgeCode(locale, *badge)}};
+  ArUiTextArgument args[] = {{"region", SettingsOverlayRegions_BadgeCode(locale, *badge)}};
   const char *key = !effective && RowPending(view, row)
                         ? "overlay.region.menu.pending"
                         : "overlay.region.menu.value";
@@ -486,14 +490,12 @@ bool OverlayRegionMenu_Value(ArUiLocale locale, const ActRaiserRegionalRulesView
 bool OverlayRegionMenu_Description(ArUiLocale locale, const ActRaiserRegionalRulesView *view,
                                    const OverlayRegionRow *row, char *out, size_t capacity) {
   if (!view || !row || !out || !capacity) return false;
-  const ArRegionalSource source = OverlayRegionMenu_RowSource(view, row, false);
   const bool missing = MissingMedia(view, row, false);
   const char *state = "";
   char combined[1024];
   {
     const char *key = NULL;
-    if ((view->pending_profile && (ConfirmationMask(view) & ArRegionalProfiles_Mask(row->group))) ||
-        (view->population_pending && row->kind == kOverlayRegionRow_Setting && row->setting == kActRaiserRegionalSetting_Population))
+    if (RowAwaitingConfirmation(view, row))
       key = "overlay.region.menu.confirm_pending";
     else if (missing) {
       const char *missing_text = ArUiCatalog_Text(locale, "overlay.region.menu.media_missing", NULL);
@@ -512,7 +514,7 @@ bool OverlayRegionMenu_Description(ArUiLocale locale, const ActRaiserRegionalRul
     if (key) state = ArUiCatalog_Text(locale, key, NULL);
   }
   const ArUiTextArgument args[] = {
-      {"region", SettingsOverlayRegions_BadgeLabel(locale, Badge(source))}, {"state", missing ? "" : state},
+      {"state", state},
       {"placements", ArUiCatalog_Text(locale, (view->pending_profile &&
           (ConfirmationMask(view) & ArRegionalProfiles_Mask(kArRegionalProfile_Stage))
           ? view->pending_population : view->requested.placements.enemies) == kArRegionalSource_Europe
@@ -524,13 +526,63 @@ bool OverlayRegionMenu_Description(ArUiLocale locale, const ActRaiserRegionalRul
         "overlay.region.difficulty.normal_help", "overlay.region.difficulty.expert_help", "overlay.region.difficulty.custom_help"};
     key = help[choice];
   }
-  if (!missing) return ArUiCatalog_Format(out, capacity, ArUiCatalog_Text(locale, key, NULL), args, 3);
-  char help[2048];
-  if (!ArUiCatalog_Format(help, sizeof(help), ArUiCatalog_Text(locale, key, NULL), args, 3)) return false;
-  // Missing donor data is an explanation, not a selectable "partial" mode.
-  // Lead with it so the compact preview cannot hide the fallback.
-  const int written = snprintf(out, capacity, "%s\n%s", state, help);
+  // Authored impact and regional mechanics lead; transient notices follow.
+  if (!ArUiCatalog_Format(out, capacity, ArUiCatalog_Text(locale, key, NULL), args, 2)) return false;
+  // An absent notice must not leave empty paragraphs in the details reader.
+  size_t length = strlen(out);
+  while (length && (out[length - 1] == '\n' || out[length - 1] == ' ')) out[--length] = 0;
+  return true;
+}
+
+bool OverlayRegionMenu_Preview(ArUiLocale locale, const ActRaiserRegionalRulesView *view,
+                              const OverlayRegionRow *row, char *out, size_t capacity) {
+  if (!view || !row || !out || !capacity) return false;
+  const ArRegionalSource source = OverlayRegionMenu_RowSource(view, row, false);
+  const char *key = row->binary && (unsigned)source < kArRegionalSource_Count
+      ? ControlsPreviewKey(row, source) : NULL;
+  if (!key) return OverlayRegionMenu_Description(locale, view, row, out, capacity);
+  const int written = snprintf(out, capacity, "%s", ArUiCatalog_Text(locale, key, NULL));
   return written >= 0 && (size_t)written < capacity;
+}
+
+bool OverlayRegionMenu_StateLabel(ArUiLocale locale, const ActRaiserRegionalRulesView *view,
+                                  const OverlayRegionRow *row, char *out, size_t capacity) {
+  if (!view || !row || !out || !capacity) return false;
+  *out = 0;
+  /* The preset row is an apply target, not a summary. Always show the actual
+   * running profile separately, or the draft at the title screen. A pending
+   * Palace confirmation must never be presented as already applied. */
+  if (row->kind == kOverlayRegionRow_Preset) {
+    const ArRegionalSource source = view->new_game
+        ? view->profiles[row->group].source : view->active_profiles[row->group].source;
+    const ArUiTextArgument args[] = {{"region", SettingsOverlayRegions_BadgeCode(locale, Badge(source))}};
+    return ArUiCatalog_Format(out, capacity, ArUiCatalog_Text(locale, view->new_game
+        ? "overlay.region.draft" : "overlay.region.current", NULL), args, 1);
+  }
+  if (!RowPending(view, row)) return true;
+  /* Mixed policies can differ internally while both display Custom. The
+   * pending note still explains that state; repeating Custom adds no context. */
+  if (row->kind == kOverlayRegionRow_Difficulty
+          ? ActRaiserRegionalSettings_DifficultyChoice(view, false) == ActRaiserRegionalSettings_DifficultyChoice(view, true)
+          : OverlayRegionMenu_RowSource(view, row, false) == OverlayRegionMenu_RowSource(view, row, true)) return true;
+  char active[128];
+  SettingsOverlayRegionBadge badge;
+  if (!OverlayRegionMenu_Value(locale, view, row, true, active, sizeof(active), &badge)) return false;
+  const ArUiTextArgument args[] = {{"region", active}};
+  return ArUiCatalog_Format(out, capacity, ArUiCatalog_Text(locale, "overlay.region.active", NULL), args, 1);
+}
+
+OverlayRegionNote OverlayRegionMenu_Note(ArUiLocale locale, const ActRaiserRegionalRulesView *view,
+                                         const OverlayRegionRow *row) {
+  if (!view || !row) return (OverlayRegionNote){"", false};
+  const char *key = NULL;
+  if (RowAwaitingConfirmation(view, row))
+    key = "overlay.region.note.review";
+  else if (MissingMedia(view, row, false)) key = "overlay.region.note.media";
+  else if (RowPending(view, row)) key = "overlay.region.note.pending";
+  if (key) return (OverlayRegionNote){ArUiCatalog_Text(locale, key, NULL), true};
+  const char *impact = OverlayRegionMenu_ImpactLabel(locale, view, row);
+  return (OverlayRegionNote){impact, RowTownImpact(row) != kArRegionalTownImpact_None};
 }
 
 bool OverlayRegionMenu_PresetWarning(ArUiLocale locale, const OverlayRegionRow *row,

@@ -28,6 +28,11 @@ typedef struct OverlayRegionRow {
   bool binary;
 } OverlayRegionRow;
 
+typedef struct OverlayRegionNote {
+  const char *text;
+  bool attention;
+} OverlayRegionNote;
+
 unsigned OverlayRegionMenu_Count(OverlayRegionPage page);
 const OverlayRegionRow *OverlayRegionMenu_Row(OverlayRegionPage page, unsigned row);
 const char *OverlayRegionMenu_ImpactLabel(ArUiLocale locale, const ActRaiserRegionalRulesView *view,
@@ -38,6 +43,16 @@ bool OverlayRegionMenu_Value(ArUiLocale locale, const ActRaiserRegionalRulesView
                              size_t capacity, SettingsOverlayRegionBadge *badge);
 bool OverlayRegionMenu_Description(ArUiLocale locale, const ActRaiserRegionalRulesView *view,
                                    const OverlayRegionRow *row, char *out, size_t capacity);
+/* Compact controls prose describes the selected behavior; Details retains
+ * the full regional comparison. Other rows use their normal description. */
+bool OverlayRegionMenu_Preview(ArUiLocale locale, const ActRaiserRegionalRulesView *view,
+                              const OverlayRegionRow *row, char *out, size_t capacity);
+/* Presets always show the current profile (or new-game draft), independently
+ * of the apply target. Other rows show Active only for a differing pending value. */
+bool OverlayRegionMenu_StateLabel(ArUiLocale locale, const ActRaiserRegionalRulesView *view,
+                                  const OverlayRegionRow *row, char *out, size_t capacity);
+OverlayRegionNote OverlayRegionMenu_Note(ArUiLocale locale, const ActRaiserRegionalRulesView *view,
+                                         const OverlayRegionRow *row);
 ArRegionalSource OverlayRegionMenu_Source(const ActRaiserRegionalRulesView *view,
                                           ArRegionalProfileGroup group, bool effective);
 bool OverlayRegionMenu_Pending(const ActRaiserRegionalRulesView *view,

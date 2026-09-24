@@ -210,21 +210,27 @@ static void CheckProfileMenu(void) {
     CHECK(OverlayRegionMenu_Value(locale, &view, art, false, text, sizeof(text), &badge));
     CHECK(strchr(text, '*')); // Missing donor and queued activation coexist.
     CHECK(OverlayRegionMenu_Description(locale, &view, art, text, sizeof(text)));
-    CHECK(!strncmp(text, ArUiCatalog_Text(locale, "overlay.region.menu.media_missing", NULL),
-                   strlen(ArUiCatalog_Text(locale, "overlay.region.menu.media_missing", NULL))));
+    const char *authored = ArUiCatalog_Text(locale, art->help_key, NULL);
+    const char *mechanics = strchr(authored, '\n');
+    CHECK(mechanics && !strncmp(text, authored, (size_t)(mechanics - authored)));
+    const char *notice = strstr(text, ArUiCatalog_Text(locale, "overlay.region.menu.media_missing", NULL));
+    CHECK(notice && notice > text + (mechanics ? mechanics - authored : 0));
     CHECK(strstr(text, ArUiCatalog_Text(locale, "overlay.region.menu.activation_pending", NULL)));
     CHECK(OverlayRegionMenu_Value(locale, &view, art, true, text, sizeof(text), &badge));
     CHECK(!strchr(text, '*')); // The active readout is never itself pending.
   }
   view.artwork_available=63;view.actor_artwork_available=true;view.sequences_available=3;
   CHECK(OverlayRegionMenu_Value(0,&view,art,false,text,sizeof(text),&badge) && !strstr(text,"partial"));
+  CHECK(OverlayRegionMenu_Description(0,&view,art,text,sizeof(text)));
+  CHECK(!strstr(text, ArUiCatalog_Text(0, "overlay.region.menu.media_missing", NULL)));
+  CHECK(*text && text[strlen(text) - 1] != '\n' && text[strlen(text) - 1] != ' ');
   view.population_pending=view.pending_profile=true;
   view.pending_profile_group=kArRegionalProfile_Gameplay;view.pending_population=1;
   CHECK(OverlayRegionMenu_Source(&view,kArRegionalProfile_Gameplay,false)==1);
   CHECK(OverlayRegionMenu_Source(&view,kArRegionalProfile_Combat,false)==1);
   CHECK(OverlayRegionMenu_Source(&view,kArRegionalProfile_Combat,true)==0);
   CHECK(OverlayRegionMenu_Description(0,&view,OverlayRegionMenu_Row(kOverlayRegionPage_Presets,0),text,sizeof(text)));
-  CHECK(strstr(text,"no part") && strstr(text,"confirmation"));
+  CHECK(strstr(text,ArUiCatalog_Text(0,"overlay.region.menu.confirm_pending",NULL)));
   CHECK(ArRegionalDifficulty_Select(kArRegionalDifficultyChoice_Expert, &view.requested.difficulty));
   CHECK(ActRaiserRegionalSettings_DifficultyChoice(&view, false) == kArRegionalDifficultyChoice_Original);
   view.pending_population = kArRegionalSource_Europe;
@@ -256,10 +262,91 @@ static void CheckProfileMenu(void) {
   }
 }
 
+static void CheckControlsPresentation(void) {
+  for (unsigned locale = 0; locale < kArUiLocale_Count; ++locale)
+    for (unsigned i = 0; i < OverlayRegionMenu_Count(kOverlayRegionPage_Controls); ++i) {
+      const OverlayRegionRow *row = OverlayRegionMenu_Row(kOverlayRegionPage_Controls, i);
+      ActRaiserRegionalRulesView view = {0};
+      char previews[3][512], text[256];
+      SettingsOverlayRegionBadge badge;
+      for (unsigned source = 0; source < kArRegionalSource_Count; ++source) {
+        view.choices[row->setting].source = source;
+        CHECK(OverlayRegionMenu_Value(locale, &view, row, false, text, sizeof(text), &badge));
+        CHECK(badge == source && !strcmp(text, SettingsOverlayRegions_BadgeCode(locale, badge)));
+        CHECK(OverlayRegionMenu_Preview(locale, &view, row, previews[source], sizeof(previews[source])));
+        CHECK(!strchr(previews[source], '{') && !strstr(previews[source], "overlay.region."));
+        CHECK(!OverlayRegionMenu_Preview(locale, &view, row, text, 2));
+        CHECK(OverlayRegionMenu_StateLabel(locale, &view, row, text, sizeof(text)) && !*text);
+        CHECK(!OverlayRegionMenu_Note(locale, &view, row).attention);
+      }
+      CHECK(!strcmp(previews[kArRegionalSource_US], previews[kArRegionalSource_Europe]));
+      CHECK(strcmp(previews[kArRegionalSource_US], previews[kArRegionalSource_Japan]));
+      view.choices[row->setting].source = kArRegionalSource_Japan;
+      view.choices[row->setting].pending = true;
+      CHECK(OverlayRegionMenu_StateLabel(locale, &view, row, text, sizeof(text)) && *text);
+      CHECK(strstr(text, "US") && !strchr(text, '*'));
+      CHECK(OverlayRegionMenu_Note(locale, &view, row).attention);
+      CHECK(!strcmp(OverlayRegionMenu_Note(locale, &view, row).text,
+          ArUiCatalog_Text(locale, "overlay.region.note.pending", NULL)));
+      view.choices[row->setting].active_source = kArRegionalSource_Japan;
+      CHECK(OverlayRegionMenu_StateLabel(locale, &view, row, text, sizeof(text)) && !*text);
+      CHECK(OverlayRegionMenu_Note(locale, &view, row).attention);
+      view.choices[row->setting].active_source = kArRegionalSource_US;
+      view.new_game = true;
+      CHECK(OverlayRegionMenu_StateLabel(locale, &view, row, text, sizeof(text)) && !*text);
+      CHECK(!OverlayRegionMenu_Note(locale, &view, row).attention);
+      view.new_game = false;
+      view.population_pending = view.pending_profile = true;
+      view.pending_profile_group = kArRegionalProfile_Gameplay;
+      view.pending_population = kArRegionalSource_Japan;
+      CHECK(OverlayRegionMenu_Preview(locale, &view, row, text, sizeof(text)));
+      CHECK(!strcmp(text, previews[kArRegionalSource_Japan]));
+      CHECK(!strcmp(OverlayRegionMenu_Note(locale, &view, row).text,
+          ArUiCatalog_Text(locale, "overlay.region.note.review", NULL)));
+    }
+  ActRaiserRegionalRulesView view = {0};
+  const OverlayRegionRow *art = OverlayRegionMenu_Row(kOverlayRegionPage_Presentation, 0);
+  CHECK(ArRegionalProfiles_Expand(&view.requested, kArRegionalProfile_Presentation,
+      kArRegionalSource_Japan, &view.requested));
+  CHECK(OverlayRegionMenu_Note(0, &view, art).attention);
+  CHECK(!strcmp(OverlayRegionMenu_Note(0, &view, art).text,
+      ArUiCatalog_Text(0, "overlay.region.note.media", NULL)));
+}
+
+static void CheckPresetStateLabels(void) {
+  for (unsigned locale = 0; locale < kArUiLocale_Count; ++locale)
+    for (unsigned i = 0; i < OverlayRegionMenu_Count(kOverlayRegionPage_Presets); ++i) {
+      const OverlayRegionRow *row = OverlayRegionMenu_Row(kOverlayRegionPage_Presets, i);
+      ActRaiserRegionalRulesView view = {0};
+      char text[256], expected[256];
+      for (unsigned source = 0; source <= kArRegionalSource_Count; ++source) {
+        view.active_profiles[row->group].source = source;
+        view.profiles[row->group].source = kArRegionalSource_Japan;
+        view.population_pending = view.pending_profile = true;
+        view.pending_profile_group = row->group;
+        view.pending_population = kArRegionalSource_Europe;
+        const ArUiTextArgument args[] = {{"region", SettingsOverlayRegions_BadgeCode(locale, source)}};
+        CHECK(ArUiCatalog_Format(expected, sizeof(expected),
+            ArUiCatalog_Text(locale, "overlay.region.current", NULL), args, 1));
+        CHECK(OverlayRegionMenu_StateLabel(locale, &view, row, text, sizeof(text)));
+        CHECK(!strcmp(text, expected)); // Not the queued or requested choice.
+        CHECK(!OverlayRegionMenu_StateLabel(locale, &view, row, text, 2));
+      }
+      view.new_game = true;
+      const ArUiTextArgument args[] = {{"region", "JP"}};
+      CHECK(ArUiCatalog_Format(expected, sizeof(expected),
+          ArUiCatalog_Text(locale, "overlay.region.draft", NULL), args, 1));
+      CHECK(OverlayRegionMenu_StateLabel(locale, &view, row, text, sizeof(text)));
+      CHECK(!strcmp(text, expected));
+    }
+}
+
 int main(void) {
   CheckPolicies();
   CheckStockEstimate();
   CheckProfileMenu();
+  CheckControlsPresentation();
+  CheckPresetStateLabels();
   if (failures) fprintf(stderr, "%d regional policy failures\n", failures);
   else puts("regional policy: 19683 cost mixes, four UI languages, stock bounds passed");
   return failures ? 1 : 0;

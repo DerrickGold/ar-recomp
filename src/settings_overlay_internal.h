@@ -9,6 +9,7 @@
 #include <SDL3/SDL.h>
 
 #include "render/render_device.h"
+#include "settings_overlay/menu_input.h"
 
 /* ARGB pixel packing for overlay artwork and UI colors. */
 #define ARGB(a, r, g, b) \
@@ -34,19 +35,8 @@ typedef enum DebugTextStyle {
   kDebugTextStyle_Count,
 } DebugTextStyle;
 
-typedef enum {
-  kMenuNav_Up,
-  kMenuNav_Down,
-  kMenuNav_Left,
-  kMenuNav_Right,
-  kMenuNav_Confirm,
-  kMenuNav_Back,     /* leave the submenu, or close from the nav column */
-  kMenuNav_Reset,    /* restore the selected row's default */
-  kMenuNav_TabPrev,  /* previous tab of the current section */
-  kMenuNav_TabNext,
-  kMenuNav_Close,
-  kMenuNav_Details,  /* read-only expanded explanation of a regional option */
-} MenuNav;
+/* Modal UI input activity, with the disconnected-pad keyboard fallback. */
+InputClass SettingsOverlay_MenuInputDevice(void);
 
 /* Resolved per-frame geometry for one overlay draw pass. */
 typedef struct MenuLayout {

@@ -421,6 +421,17 @@ int InputMap_FormatBindingHint(char *buffer, int buffer_size, uint32 binding,
       static const char *const standard[] = {"A", "B", "X", "Y"};
       return snprintf(buffer, buffer_size, "%s", standard[code]);
     }
+    if (code == SDL_GAMEPAD_BUTTON_LEFT_SHOULDER || code == SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER) {
+      const bool left = code == SDL_GAMEPAD_BUTTON_LEFT_SHOULDER;
+      const bool playstation = gamepad_type == SDL_GAMEPAD_TYPE_PS3 ||
+          gamepad_type == SDL_GAMEPAD_TYPE_PS4 || gamepad_type == SDL_GAMEPAD_TYPE_PS5;
+      const bool nintendo = gamepad_type == SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO ||
+          gamepad_type == SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_LEFT ||
+          gamepad_type == SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_RIGHT ||
+          gamepad_type == SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_PAIR;
+      return snprintf(buffer, buffer_size, "%s", playstation ? (left ? "L1" : "R1") :
+          nintendo ? (left ? "L" : "R") : (left ? "LB" : "RB"));
+    }
   }
   if (kind == kInputBind_PadAxis) {
     static const char *const axes[][2] = {
@@ -435,10 +446,19 @@ int InputMap_FormatBindingHint(char *buffer, int buffer_size, uint32 binding,
   return InputMap_DescribeBinding(buffer, buffer_size, binding);
 }
 
-int InputMap_GameActionHint(char *buffer, int buffer_size, InputAction action) {
+int InputMap_ActionHintForDevice(char *buffer, int buffer_size, InputAction action,
+                                 InputClass device) {
   if (!buffer || buffer_size <= 0) return 0;
   buffer[0] = 0;
-  if (action < 0 || action >= kInputAction_Count) return 0;
+  if (action < 0 || action >= kInputAction_Count ||
+      (device != kInputClass_Keyboard && device != kInputClass_Gamepad)) return 0;
+  GamepadSlot *pad = SelectedGamepad();
+  return InputMap_FormatBindingHint(buffer, buffer_size,
+      g_settings.input_bind[device][action],
+      pad ? SDL_GetGamepadType(pad->pad) : SDL_GAMEPAD_TYPE_STANDARD);
+}
+
+int InputMap_GameActionHint(char *buffer, int buffer_size, InputAction action) {
   if (!s_pad_count || g_settings.input_device == kInputDevice_Keyboard)
     s_hint_class = kInputClass_Keyboard;
   else if (g_settings.input_device == kInputDevice_Gamepad ||
@@ -446,10 +466,7 @@ int InputMap_GameActionHint(char *buffer, int buffer_size, InputAction action) {
     s_hint_class = kInputClass_Gamepad;
   else if (s_key_bits || s_host_key_held)
     s_hint_class = kInputClass_Keyboard;
-  GamepadSlot *pad = SelectedGamepad();
-  return InputMap_FormatBindingHint(buffer, buffer_size,
-      g_settings.input_bind[s_hint_class][action],
-      pad ? SDL_GetGamepadType(pad->pad) : SDL_GAMEPAD_TYPE_STANDARD);
+  return InputMap_ActionHintForDevice(buffer, buffer_size, action, s_hint_class);
 }
 
 static bool EqualsIgnoreCase(const char *a, const char *b) {

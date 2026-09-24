@@ -74,6 +74,45 @@ func TestRejectInvalidCatalog(t *testing.T) {
 	}
 }
 
+// Regional help is authored in reading order: impact, mechanics, caveats,
+// then runtime notices. Keep all shipped languages usable in the compact view.
+func TestRegionalDescriptionStructure(t *testing.T) {
+	entries, err := Entries()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Guard against the clipped activation prose this menu previously shipped.
+	// This is a regression check for known shorthand, not a grammar checker;
+	// short option labels and controller hints are intentionally out of scope.
+	shorthand := []string{"Applies next", "Applies on", "Applies at", "room entry/retry", "US/EU:", "JP:", "EU:"}
+	for _, entry := range entries {
+		option := strings.HasPrefix(entry.Key, "overlay.region.menu.regional_") && strings.HasSuffix(entry.Key, ".help")
+		difficulty := strings.HasPrefix(entry.Key, "overlay.region.difficulty.") && strings.HasSuffix(entry.Key, "_help")
+		if !option && !difficulty {
+			continue
+		}
+		for _, phrase := range shorthand {
+			if strings.Contains(entry.Text[0], phrase) {
+				t.Errorf("%s: explain the trigger or regional mechanics in full instead of %q", entry.Key, phrase)
+			}
+		}
+		for locale, text := range entry.Text {
+			impact, rest, ok := strings.Cut(text, "\n")
+			if !ok || strings.ContainsAny(impact, "{}") ||
+				!(strings.HasSuffix(impact, ".") || strings.HasSuffix(impact, "。")) {
+				t.Errorf("%s locale %d: begin with a complete impact sentence", entry.Key, locale)
+			}
+			mechanics, caveats, ok := strings.Cut(rest, "\n\n")
+			if !ok || strings.TrimSpace(mechanics) == "" || strings.TrimSpace(strings.TrimSuffix(caveats, "\n\n{state}")) == "" {
+				t.Errorf("%s locale %d: mechanics must precede caveats", entry.Key, locale)
+			}
+			if !strings.HasSuffix(text, "\n\n{state}") || strings.Count(text, "{state}") != 1 {
+				t.Errorf("%s locale %d: append runtime notices after authored help", entry.Key, locale)
+			}
+		}
+	}
+}
+
 func TestGeneratedCAndExplicitOverlayKeys(t *testing.T) {
 	root := filepath.Join("..", "..", "..")
 	if _, err := os.Stat(filepath.Join(root, "src", "settings_overlay.c")); os.IsNotExist(err) {

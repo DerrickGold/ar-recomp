@@ -391,6 +391,15 @@ static uint64_t s_reset_armed_until;
 /* The keyboard key of the event currently being dispatched (0 for a pad), so a
  * hold started deep inside ApplyMenuNav knows which key release will end it. */
 static SDL_Keycode s_input_key;
+/* Modal input has its own device history: it must not leave gameplay buttons
+ * held just to choose accurate control hints. */
+static InputClass s_menu_input_device;
+
+InputClass SettingsOverlay_MenuInputDevice(void) {
+  if (!InputMap_GamepadCount() || g_settings.input_device == kInputDevice_Keyboard)
+    return kInputClass_Keyboard;
+  return g_settings.input_device == kInputDevice_Gamepad ? kInputClass_Gamepad : s_menu_input_device;
+}
 /* Binding capture: the row is armed and the NEXT physical input on the
  * matching device becomes its binding. Held separately from s_editing because
  * capture consumes raw events rather than text. */
@@ -1742,6 +1751,10 @@ void SettingsOverlay_Open(void) {
   if (s_decision.result == kOverlayDecision_Pending) return;
   s_details.open = false;
   s_regional_preset_choice[0] = s_regional_preset_choice[1] = -1;
+  s_menu_input_device = InputMap_GamepadCount() &&
+      (g_settings.input_device == kInputDevice_Gamepad ||
+       (g_settings.input_device != kInputDevice_Keyboard && InputMap_GamepadIsActive()))
+          ? kInputClass_Gamepad : kInputClass_Keyboard;
   StopEditing();
   EndValueHold();
   ClearSectionResetArm();
@@ -1911,17 +1924,12 @@ static void OpenRegionalDetails(void) {
   if (!ActiveTabIsRegional() || !s_submenu_open || !s_regional_valid) return;
   const OverlayRegionRow *row = SelectedRegionRow();
   if (!row) return;
-  char help[2048], active[128], current[256] = "";
-  SettingsOverlayRegionBadge badge;
+  char help[2048], current[256] = "";
   if (!OverlayRegionMenu_Description(InterfaceLocale(), &s_regional_view, row, help, sizeof(help))) return;
-  if (!s_regional_view.new_game && OverlayRegionMenu_Value(InterfaceLocale(),
-      &s_regional_view, row, true, active, sizeof(active), &badge)) {
-    const ArUiTextArgument args[] = {{"region", active}};
-    ArUiCatalog_Format(current, sizeof(current), Ui("overlay.region.active"), args, 1);
-  }
-  const int written = snprintf(s_details.body, sizeof(s_details.body), "%s%s%s\n\n%s\n\n%s",
-      OverlayRegionMenu_ImpactLabel(InterfaceLocale(), &s_regional_view, row),
-      *current ? "\n" : "", current, help, RegionalNotice());
+  if (!OverlayRegionMenu_StateLabel(InterfaceLocale(), &s_regional_view, row, current, sizeof(current))) return;
+  const int written = snprintf(s_details.body, sizeof(s_details.body), "%s\n\n%s%s%s\n\n%s",
+      help, OverlayRegionMenu_ImpactLabel(InterfaceLocale(), &s_regional_view, row),
+      *current ? "\n" : "", current, RegionalNotice());
   if (written < 0 || (size_t)written >= sizeof(s_details.body)) return;
   snprintf(s_details.title, sizeof(s_details.title), "%s", OverlayRegionMenu_Label(InterfaceLocale(), row));
   s_details.top_line = s_details.total_lines = 0;
@@ -2066,6 +2074,7 @@ bool SettingsOverlay_HandleCaptureEvent(const SDL_Event *event) {
 
   uint32 binding = 0;
   if (!InputMap_DecodeEvent(event, klass, &binding)) return true;
+  s_menu_input_device = klass;
 
   const SettingDesc *desc = s_capture_desc;
   s_capture_desc = NULL;
@@ -2097,6 +2106,8 @@ bool SettingsOverlay_HandleGamepadEvent(const SDL_Event *event) {
     return true;
   }
 
+  s_menu_input_device = kInputClass_Gamepad;
+
   /* A text-entry field cannot be typed into with a pad; the two edge cases
    * that still make sense there are commit and cancel. */
   if (s_editing) {
@@ -2105,67 +2116,9 @@ bool SettingsOverlay_HandleGamepadEvent(const SDL_Event *event) {
     return true;
   }
 
-  switch (action) {
-    case kInputAction_Up:     ApplyMenuNav(kMenuNav_Up, false); break;
-    case kInputAction_Down:   ApplyMenuNav(kMenuNav_Down, false); break;
-    case kInputAction_Left:   ApplyMenuNav(kMenuNav_Left, false); break;
-    case kInputAction_Right:  ApplyMenuNav(kMenuNav_Right, false); break;
-    case kInputAction_B:      ApplyMenuNav(kMenuNav_Confirm, false); break;
-    case kInputAction_A:      ApplyMenuNav(kMenuNav_Back, false); break;
-    case kInputAction_Y:      ApplyMenuNav(kMenuNav_Reset, false); break;
-    case kInputAction_X:      ApplyMenuNav(kMenuNav_Details, false); break;
-    /* Shoulders page the tab bar — the same idiom as the system menus on
-     * every console this build targets, and free on a Deck. */
-    case kInputAction_L:      ApplyMenuNav(kMenuNav_TabPrev, false); break;
-    case kInputAction_R:      ApplyMenuNav(kMenuNav_TabNext, false); break;
-    case kInputAction_Menu:
-    case kInputAction_Start:  ApplyMenuNav(kMenuNav_Close, false); break;
-    default: break;
-  }
+  MenuNav nav;
+  if (OverlayMenuInput_ActionNav(action, &nav)) ApplyMenuNav(nav, false);
   return true;
-}
-
-/* True when `key` is the keyboard binding the player assigned to `action`.
- * Bindings store scancodes, so translate the keycode first (NULL modstate:
- * menu control is layout-position based, like the game input path). */
-static bool MenuKeyMatchesBinding(SDL_Keycode key, InputAction action) {
-  uint32 binding = g_settings.input_bind[kInputClass_Keyboard][action];
-  if (INPUT_BIND_KIND(binding) != kInputBind_Key) return false;
-  return (int)SDL_GetScancodeFromKey(key, NULL) ==
-      (int)INPUT_BIND_CODE(binding);
-}
-
-/* Maps a keycode to a menu command through the player's OWN keyboard bindings,
- * so rebinding B/A/X/Y/L/R or a direction moves those controls in the menu too —
- * the hint line names them by SNES button, and this is what makes that promise
- * true. It mirrors the gamepad path (SettingsOverlay_HandleGamepadEvent), with
- * one deliberate exception: Start/Select/Menu are NOT mapped here. Their
- * keyboard defaults collide with the universal keyboard conventions the menu
- * keeps (Start defaults to Return, which the menu already uses to confirm), so
- * on a keyboard the conventions win and Esc/Enter own open-close instead.
- * Returns false when the key is not one of these bound controls. */
-static bool MenuNavForBoundKey(SDL_Keycode key, MenuNav *out) {
-  static const struct {
-    InputAction action;
-    MenuNav nav;
-  } kMap[] = {
-    { kInputAction_Up,    kMenuNav_Up },
-    { kInputAction_Down,  kMenuNav_Down },
-    { kInputAction_Left,  kMenuNav_Left },
-    { kInputAction_Right, kMenuNav_Right },
-    { kInputAction_B,     kMenuNav_Confirm },
-    { kInputAction_A,     kMenuNav_Back },
-    { kInputAction_Y,     kMenuNav_Reset },
-    { kInputAction_X,     kMenuNav_Details },
-    { kInputAction_L,     kMenuNav_TabPrev },
-    { kInputAction_R,     kMenuNav_TabNext },
-  };
-  for (size_t i = 0; i < sizeof(kMap) / sizeof(kMap[0]); i++)
-    if (MenuKeyMatchesBinding(key, kMap[i].action)) {
-      *out = kMap[i].nav;
-      return true;
-    }
-  return false;
 }
 
 bool SettingsOverlay_HandleKey(SDL_Keycode key, bool pressed, bool repeat) {
@@ -2187,6 +2140,7 @@ bool SettingsOverlay_HandleKey(SDL_Keycode key, bool pressed, bool repeat) {
   /* Dispatch is keyboard-sourced; a held step started now is released by this
    * same key coming up. */
   s_input_key = key;
+  s_menu_input_device = kInputClass_Keyboard;
   /* Capture is fed raw events by main.c (SettingsOverlay_HandleCaptureEvent)
    * because a scancode, not a keycode, is what gets bound. */
   if (s_capture_desc) return true;
@@ -2216,55 +2170,8 @@ bool SettingsOverlay_HandleKey(SDL_Keycode key, bool pressed, bool repeat) {
     return true;
   }
 
-  /* Universal keyboard controls, deliberately fixed and independent of the
-   * game bindings: arrows navigate, Enter confirms, Esc/F1 close, [/]+Tab
-   * cycle tabs. These alone fully operate the menu, which matters because the
-   * menu is the only place to repair a broken binding — so it must stay usable
-   * even if the player has unbound or mangled their SNES keys. Matched by
-   * SCANCODE (physical position) not keycode, so the arrow/Enter/Esc positions
-   * navigate the menu the same way on a non-US layout (AZERTY etc.). */
-  SDL_Scancode sc = SDL_GetScancodeFromKey(key, NULL);
-  switch (sc) {
-    case SDL_SCANCODE_F3:
-      ApplyMenuNav(kMenuNav_Details, repeat);
-      break;
-    case SDL_SCANCODE_ESCAPE:
-    case SDL_SCANCODE_F1:
-      ApplyMenuNav(kMenuNav_Close, repeat);
-      break;
-    case SDL_SCANCODE_UP:
-      ApplyMenuNav(kMenuNav_Up, repeat);
-      break;
-    case SDL_SCANCODE_DOWN:
-      ApplyMenuNav(kMenuNav_Down, repeat);
-      break;
-    case SDL_SCANCODE_LEFT:
-      ApplyMenuNav(kMenuNav_Left, repeat);
-      break;
-    case SDL_SCANCODE_RIGHT:
-      ApplyMenuNav(kMenuNav_Right, repeat);
-      break;
-    case SDL_SCANCODE_RETURN:
-    case SDL_SCANCODE_KP_ENTER:
-      ApplyMenuNav(kMenuNav_Confirm, repeat);
-      break;
-    case SDL_SCANCODE_LEFTBRACKET:
-      ApplyMenuNav(kMenuNav_TabPrev, repeat);
-      break;
-    case SDL_SCANCODE_RIGHTBRACKET:
-    case SDL_SCANCODE_TAB:
-      ApplyMenuNav(kMenuNav_TabNext, repeat);
-      break;
-    default: {
-      /* Everything the hint line labels by SNES button — B confirm, A back,
-       * Y reset, L/R tab, and the directions — follows the player's own
-       * keyboard bindings (default Z/X/A, Q/W, arrows), so a rebind moves the
-       * menu control with it. */
-      MenuNav nav;
-      if (MenuNavForBoundKey(key, &nav)) ApplyMenuNav(nav, repeat);
-      break;
-    }
-  }
+  MenuNav nav;
+  if (OverlayMenuInput_KeyNav(key, &nav)) ApplyMenuNav(nav, repeat);
   return true;
 }
 
@@ -2904,6 +2811,73 @@ static void DrawSmallTextPreview(const MenuLayout *layout, int x, int y,
   }
 }
 
+enum { kMenuHintMax = 7 };
+typedef struct MenuHints {
+  int count;
+  struct { const char *key, *label; } items[kMenuHintMax];
+} MenuHints;
+
+static void AddMenuHint(MenuHints *hints, const char *key, const char *label) {
+  if (!key || !*key || hints->count >= kMenuHintMax) return;
+  hints->items[hints->count].key = key;
+  hints->items[hints->count++].label = label;
+}
+
+static void DrawHintText(const MenuLayout *layout, int x, int y,
+                         const char *text, int width, uint32_t color) {
+  const int columns = width / kDebugGlyphWidth;
+  if (SmallTextWidth(text) <= width || columns < 4)
+    DrawSmallTextN(layout, x, y, text, columns, color);
+  else
+    DrawSmallTextPreview(layout, x, y, text, columns, 1, color);
+}
+
+static void DrawMenuHints(const MenuLayout *layout, int x, int y, int width,
+                          const MenuHints *hints, uint32_t key_color, uint32_t label_color) {
+  if (!hints->count || width <= 0) return;
+  enum { kKeyGap = 5, kHintGap = 11 };
+  int sizes[kMenuHintMax], total = 0;
+  for (int i = 0; i < hints->count; ++i) {
+    sizes[i] = SmallTextWidth(hints->items[i].key) + kKeyGap + SmallTextWidth(hints->items[i].label);
+    total += sizes[i] + (i ? kHintGap : 0);
+  }
+  /* Preserve every command. Prefer one line; otherwise balance two fixed
+   * lines. Unusually long remapped keys are clipped inside their own cell,
+   * never allowed to overlap another hint or the frame. */
+  int split = hints->count;
+  if (total > width) {
+    int left = 0, best = total;
+    for (int i = 1; i < hints->count; ++i) {
+      left += sizes[i - 1] + (i > 1 ? kHintGap : 0);
+      int right = total - left - kHintGap;
+      int widest = left > right ? left : right;
+      if (widest < best) { split = i; best = widest; }
+    }
+  }
+  for (int line = 0; line < (split == hints->count ? 1 : 2); ++line) {
+    const int begin = line ? split : 0, end = line ? hints->count : split;
+    int content = 0;
+    for (int i = begin; i < end; ++i) content += sizes[i];
+    const int available = width - (end - begin - 1) * kHintGap;
+    int cursor = x;
+    for (int i = begin; i < end; ++i) {
+      const int cell = content > available ? sizes[i] * available / content : sizes[i];
+      int key_width = SmallTextWidth(hints->items[i].key);
+      int label_minimum = SmallTextWidth(hints->items[i].label);
+      if (label_minimum > 4 * kDebugGlyphWidth) label_minimum = 4 * kDebugGlyphWidth;
+      if (key_width > cell - kKeyGap - label_minimum)
+        key_width = cell - kKeyGap - label_minimum;
+      if (key_width < kDebugGlyphWidth) key_width = kDebugGlyphWidth;
+      if (key_width > cell) key_width = cell;
+      DrawHintText(layout, cursor, y + line * kSmallLineHeight,
+          hints->items[i].key, key_width, key_color);
+      DrawHintText(layout, cursor + key_width + kKeyGap, y + line * kSmallLineHeight,
+          hints->items[i].label, cell - key_width - kKeyGap, label_color);
+      cursor += cell + kHintGap;
+    }
+  }
+}
+
 static void DrawDetails(const MenuLayout *layout) {
   const int x = 8, y = 8;
   const int width = (layout->logical_width - 16) / 8 * 8;
@@ -2914,7 +2888,7 @@ static void DrawDetails(const MenuLayout *layout) {
   DrawDialogPanel(layout, x, y, width, height);
   DrawWrappedSmallText(layout, x + 16, y + 12, s_details.title, columns, 2, kGameGold);
   FillLogicalRect(layout, x + 16, y + 33, width - 32, 1, kSteelDim);
-  s_details.visible_lines = (height - 66) / kSmallLineHeight;
+  s_details.visible_lines = (height - 66 - kSmallLineHeight) / kSmallLineHeight;
   if (s_details.visible_lines < 1) s_details.visible_lines = 1;
   s_details.total_lines = 0;
   const size_t length = strlen(s_details.body);
@@ -2943,8 +2917,18 @@ static void DrawDetails(const MenuLayout *layout) {
   }
   DrawScrollBar(layout, x + width - 13, y + 40, s_details.visible_lines * kSmallLineHeight,
       s_details.total_lines, s_details.visible_lines, s_details.top_line, kSteelBlue);
-  DrawSmallTextPreview(layout, x + 16, y + height - 17, Ui("overlay.details.controls"),
-      (width - 32) / kDebugGlyphWidth, 1, kMutedText);
+  const InputClass device = SettingsOverlay_MenuInputDevice();
+  char scroll[128], page[128], back[64];
+  OverlayMenuInput_PairHint(scroll, sizeof(scroll), kMenuNav_Up, kMenuNav_Down, device);
+  OverlayMenuInput_PairHint(page, sizeof(page), kMenuNav_Left, kMenuNav_Right, device);
+  OverlayMenuInput_Hint(back, sizeof(back), kMenuNav_Back, device);
+  if (!*back) OverlayMenuInput_Hint(back, sizeof(back), kMenuNav_Close, device);
+  MenuHints hints = {0};
+  AddMenuHint(&hints, scroll, Ui("overlay.hint.scroll"));
+  AddMenuHint(&hints, page, Ui("overlay.hint.page"));
+  AddMenuHint(&hints, back, Ui("overlay.hint.back"));
+  DrawMenuHints(layout, x + 16, y + height - 17 - kSmallLineHeight, width - 32,
+                &hints, kSteelBlue, kMutedText);
 }
 
 static void DrawDecision(const MenuLayout *layout, const OverlayDecision *decision) {
@@ -3055,7 +3039,9 @@ static MenuChrome ComputeMenuChrome(const MenuLayout *layout) {
   const int gap = 8;
   const int left_width = 152;
   /* Stable across sections; longer explanations use the details reader. */
-  const int bottom_height = 72;
+  /* Two fixed hint rows accommodate translated labels and physical button
+   * names without resizing the panel when the selection/device changes. */
+  const int bottom_height = 72 + kSmallLineHeight;
   const int panel_right =
       SnapPanelEdge(margin, layout->logical_width - margin);
   const int panel_bottom =
@@ -3197,9 +3183,9 @@ static int DrawMenuHeader(const MenuLayout *layout, const MenuChrome *c,
     }
 
     const int chevron = kDebugGlyphWidth;
-    /* The strip lives between the "L" and "R" button letters. */
-    const int strip_x0 = right_text_x + chevron + 5;
-    const int strip_x1 = value_right - chevron - 3;
+    /* Only overflow gets arrows; the footer names the actual tab controls. */
+    const int strip_x0 = right_text_x;
+    const int strip_x1 = value_right;
 
     int total = 0;
     for (int i = 0; i < vcount; i++) total += vwidth[i] + 2;
@@ -3219,7 +3205,6 @@ static int DrawMenuHeader(const MenuLayout *layout, const MenuChrome *c,
       s_tab_scroll++;
     }
 
-    DrawSmallText(layout, right_text_x, tab_y + 2, "L", kSteelDim);
     if (overflow && s_tab_scroll > 0)
       DrawSmallText(layout, strip_x0, tab_y + 2, "<", kSelectYellow);
 
@@ -3250,8 +3235,7 @@ static int DrawMenuHeader(const MenuLayout *layout, const MenuChrome *c,
       if (partial) break;
     }
     if (overflow && (last_shown < vcount - 1 || partial_tab))
-      DrawSmallText(layout, inner_x1 + 2, tab_y + 2, ">", kSelectYellow);
-    DrawSmallText(layout, value_right - chevron + 2, tab_y + 2, "R", kSteelDim);
+      DrawSmallText(layout, inner_x1, tab_y + 2, ">", kSelectYellow);
     rule_y = tab_y + 13;
   }
   /* Accent rule under the header ties the title, tabs, and row list into one
@@ -3299,6 +3283,19 @@ static void DrawMenuRows(const MenuLayout *layout, const MenuChrome *c,
    * reset is per-room and already in the list. */
   if (ActiveTabIsRegional()) {
     const int count = TabSettingRowCount();
+    /* Region codes share one column, with room for either a pending marker
+     * or a preset arrow. Mixed values can widen the entire column, never just
+     * push an individual flag into its setting's label. Difficulty is text. */
+    int region_value_chars = 4;
+    for (int row = 0; s_regional_valid && row < count; ++row) {
+      const OverlayRegionRow *entry = OverlayRegionMenu_Row(ActiveTab()->regional_page, (unsigned)row);
+      char value[128];
+      SettingsOverlayRegionBadge badge;
+      if (entry->kind != kOverlayRegionRow_Setting ||
+          !OverlayRegionMenu_Value(InterfaceLocale(), &s_regional_view, entry, false, value, sizeof(value), &badge)) continue;
+      const int length = CappedTextLength(value, value_chars);
+      if (length > region_value_chars) region_value_chars = length;
+    }
     for (int row = 0; row < count; ++row) {
       ++row_index;
       if (row < s_top_row || row >= s_top_row + s_visible_rows) continue;
@@ -3326,11 +3323,13 @@ static void DrawMenuRows(const MenuLayout *layout, const MenuChrome *c,
         DrawGlyph(layout, selector_x + CursorBlinkOffset(), y, '>', kText_Warning);
       }
       const TextStyle style = s_submenu_open && s_regional_view.editable ? kText_Normal : kText_Dim;
-      const int shown = CappedTextLength(value, value_chars);
+      const int shown = entry->kind == kOverlayRegionRow_Difficulty
+          ? CappedTextLength(value, value_chars) : region_value_chars;
       const int badge_x = value_right - shown * kGlyphSize - (entry->kind == kOverlayRegionRow_Difficulty ? 0 : 16);
       DrawTextN(layout, label_x, y, OverlayRegionMenu_Label(InterfaceLocale(), entry),
                 (badge_x - label_x - 4) / kGlyphSize, style);
-      DrawTextRight(layout, value_right, y, value, value_chars, style == kText_Normal ? kText_Value : style);
+      DrawTextN(layout, value_right - shown * kGlyphSize, y, value, shown,
+          style == kText_Normal ? kText_Value : style);
       const ArRenderTexture texture = SettingsOverlayArtwork_Get()->region_badges;
       if (entry->kind!=kOverlayRegionRow_Difficulty && ArRenderTexture_IsValid(texture)) {
         const ArRenderRectF source = {(float)(badge * kRegionBadgeWidth), 0,
@@ -3565,27 +3564,22 @@ static void DrawMenuFooter(const MenuLayout *layout, const MenuChrome *c,
         ? OverlayRegionMenu_Label(InterfaceLocale(), entry) : Ui("overlay.region.tab");
     char help[2048];
     char current[256] = "";
-    SettingsOverlayRegionBadge effective;
-    char active[128];
-    if (s_regional_valid && !s_regional_view.new_game && entry &&
-        OverlayRegionMenu_Value(InterfaceLocale(),&s_regional_view,entry,true,active,sizeof(active),&effective)) {
-      const ArUiTextArgument args[] = {{"region", active}};
-      ArUiCatalog_Format(current, sizeof(current), Ui("overlay.region.active"), args, 1);
-    }
+    if (s_regional_valid && entry)
+      OverlayRegionMenu_StateLabel(InterfaceLocale(), &s_regional_view, entry, current, sizeof(current));
     const int current_x = panel_right - 12 - SmallTextWidth(current);
     DrawSmallTextN(layout, description_x, header_y, label,
         (current_x - description_x - 8) / kDebugGlyphWidth, structure);
     DrawSmallText(layout, current_x, header_y, current, kMutedText);
     FillLogicalRect(layout, description_x, header_y + 10, bottom_width - 24, 1, structure_dim);
-    if (!s_regional_valid || !OverlayRegionMenu_Description(InterfaceLocale(),
+    if (!s_regional_valid || !OverlayRegionMenu_Preview(InterfaceLocale(),
         &s_regional_view, entry, help, sizeof(help)))
       snprintf(help, sizeof(help), "%s", RegionalNotice());
-    DrawSmallTextN(layout, description_x, header_y + 14,
-        s_regional_valid ? OverlayRegionMenu_ImpactLabel(InterfaceLocale(), &s_regional_view, entry) : "",
-        description_chars, kGameGold);
-    DrawSmallTextPreview(layout, description_x, header_y + 14 + kSmallLineHeight, help, description_chars,
-        3,
-        ARGB(255, 208, 220, 232));
+    DrawSmallTextPreview(layout, description_x, header_y + 14, help, description_chars,
+        3, ARGB(255, 208, 220, 232));
+    const OverlayRegionNote note = s_regional_valid
+        ? OverlayRegionMenu_Note(InterfaceLocale(), &s_regional_view, entry) : (OverlayRegionNote){"", false};
+    DrawSmallTextN(layout, description_x, header_y + 14 + 3 * kSmallLineHeight,
+        note.text, description_chars, note.attention ? kGameGold : kMutedText);
   } else if (help_row) {
     SettingsOverlayLayerText text;
     LocalizeLayerRow(help_row, &text);
@@ -3664,23 +3658,29 @@ static void DrawMenuFooter(const MenuLayout *layout, const MenuChrome *c,
   /* ── Hint line ────────────────────────────────────────────────────────── */
   static const uint32_t kKeyColor = ARGB(255, 146, 200, 244);
   static const uint32_t kHintColor = ARGB(255, 112, 132, 150);
-  /* Flat key/label pairs. Key names take the bright color so the line reads
-   * as controls rather than as one more grey sentence. */
-  const char *hints[14];
-  int hint_count = 0;
-#define HINT(key, text) do { \
-    hints[hint_count++] = (key); hints[hint_count++] = Ui(text); \
-  } while (0)
+  const InputClass device = SettingsOverlay_MenuInputDevice();
+  char select[128], change[128], tabs[128], confirm[64], back[64], reset[64], details[64];
+  OverlayMenuInput_PairHint(select, sizeof(select), kMenuNav_Up, kMenuNav_Down, device);
+  OverlayMenuInput_PairHint(change, sizeof(change), kMenuNav_Left, kMenuNav_Right, device);
+  OverlayMenuInput_PairHint(tabs, sizeof(tabs), kMenuNav_TabPrev, kMenuNav_TabNext, device);
+  OverlayMenuInput_Hint(confirm, sizeof(confirm), kMenuNav_Confirm, device);
+  OverlayMenuInput_Hint(back, sizeof(back), kMenuNav_Back, device);
+  OverlayMenuInput_Hint(reset, sizeof(reset), kMenuNav_Reset, device);
+  OverlayMenuInput_Hint(details, sizeof(details), kMenuNav_Details, device);
+  const bool back_available = *back != 0;
+  if (!back_available) OverlayMenuInput_Hint(back, sizeof(back), kMenuNav_Close, device);
+  MenuHints hints = {0};
+#define HINT(key, text) AddMenuHint(&hints, key, Ui(text))
   if (s_capture_desc) {
     HINT(Ui("overlay.key.any"), "overlay.hint.bind");
     HINT("ESC", "overlay.hint.cancel");
   } else if (s_editing) {
-    HINT("RETURN", "overlay.hint.apply");
-    HINT("A/ESC", "overlay.hint.cancel");
+    HINT(device == kInputClass_Keyboard ? "Return" : confirm, "overlay.hint.apply");
+    HINT(device == kInputClass_Keyboard ? "Escape" : (back_available ? back : ""), "overlay.hint.cancel");
   } else if (s_submenu_open) {
     /* Omitted when the only row is a notice: there is nothing to select, and
      * offering the verb would suggest otherwise. */
-    if (!help_row || help_row->selectable) HINT("UP/DOWN", "overlay.hint.select");
+    if (!help_row || help_row->selectable) HINT(select, "overlay.hint.select");
     if (help_row) {
       /* The editor's verbs differ enough to be worth spelling out: Left/Right
        * cycles the SHAPE on a plane row but steps a number on a parameter row,
@@ -3688,57 +3688,58 @@ static void DrawMenuFooter(const MenuLayout *layout, const MenuChrome *c,
       if (help_row->owner == kLayerMenuRow_ActionBg) {
         switch (help_row->source.action_bg.kind) {
           case kActionBgTunerRow_Layer:
-            HINT("B", "overlay.hint.settings");
-            HINT("Y", "overlay.hint.clear_layer");
+            HINT(confirm, "overlay.hint.settings");
+            HINT(reset, "overlay.hint.clear_layer");
             break;
           case kActionBgTunerRow_BandHeader:
-            HINT("B", "overlay.hint.settings");
-            HINT("Y", "overlay.hint.canonical_bands");
+            HINT(confirm, "overlay.hint.settings");
+            HINT(reset, "overlay.hint.canonical_bands");
             break;
           case kActionBgTunerRow_Print:
-            HINT("B", "overlay.hint.print");
+            HINT(confirm, "overlay.hint.print");
             break;
           case kActionBgTunerRow_Reset:
-            HINT("B", "overlay.hint.reset_draft");
+            HINT(confirm, "overlay.hint.reset_draft");
             break;
           case kActionBgTunerRow_Header:
             break;
           default:
-            HINT("LEFT/RIGHT", "overlay.hint.adjust");
-            HINT("Y", "overlay.hint.canonical");
+            HINT(change, "overlay.hint.adjust");
+            HINT(reset, "overlay.hint.canonical");
             break;
         }
       } else {
         switch (help_row->source.diorama.kind) {
           case kDioramaEditorRow_Plane:
-            HINT("LEFT/RIGHT", "overlay.hint.shape");
-            HINT("B", "overlay.hint.settings");
-            HINT("Y", "overlay.hint.clear_plane");
+            HINT(change, "overlay.hint.shape");
+            HINT(confirm, "overlay.hint.settings");
+            HINT(reset, "overlay.hint.clear_plane");
             break;
           case kDioramaEditorRow_ResetRoom:
-            HINT("B", "overlay.hint.reset_room");
+            HINT(confirm, "overlay.hint.reset_room");
             break;
           case kDioramaEditorRow_Header:
             break;
           default:
-            HINT("LEFT/RIGHT", "overlay.hint.adjust");
-            HINT("Y", "overlay.hint.clear");
+            HINT(change, "overlay.hint.adjust");
+            HINT(reset, "overlay.hint.clear");
             break;
         }
       }
       if (VisibleTabCount(s_section) > 1)
-        HINT("L/R", help_row->owner == kLayerMenuRow_ActionBg
+        HINT(tabs, help_row->owner == kLayerMenuRow_ActionBg
                         ? "overlay.hint.tab" : "overlay.hint.level");
     } else if (ActiveTabIsRegional() && ActiveTab()->regional_page == kOverlayRegionPage_Presets) {
-      HINT("LEFT/RIGHT", "overlay.hint.select");
-      HINT("B", "overlay.region.hint.review");
-      HINT("L/R", "overlay.hint.tab");
+      HINT(change, "overlay.hint.select");
+      HINT(confirm, "overlay.region.hint.review");
+      HINT(tabs, "overlay.hint.tab");
     } else if (ActiveTabIsRegional()) {
-      HINT("LEFT/RIGHT", "overlay.hint.change");
-      HINT("L/R", "overlay.hint.tab");
+      HINT(change, "overlay.hint.change");
+      HINT(tabs, "overlay.hint.tab");
+      HINT(reset, "overlay.hint.reset");
     } else if (SelectedRowIsSectionReset()) {
-      HINT("B", "overlay.hint.reset");
-      if (VisibleTabCount(s_section) > 1) HINT("L/R", "overlay.hint.tab");
+      HINT(confirm, "overlay.hint.reset");
+      if (VisibleTabCount(s_section) > 1) HINT(tabs, "overlay.hint.tab");
     } else {
       /* The verbs track what the selected row actually does: an Int row
        * adjusts (hold to accelerate — felt, not spelled out, to keep the line
@@ -3747,28 +3748,22 @@ static void DrawMenuFooter(const MenuLayout *layout, const MenuChrome *c,
       bool numeric = row && row->type == kSettingType_Int;
       bool textual = row && (row->type == kSettingType_Mask ||
                              row->type == kSettingType_Custom);
-      HINT("LEFT/RIGHT", numeric ? "overlay.hint.adjust" : "overlay.hint.change");
-      if (VisibleTabCount(s_section) > 1) HINT("L/R", "overlay.hint.tab");
-      if (textual) HINT("B", "overlay.hint.type");
-      HINT("Y", "overlay.hint.reset");
+      HINT(change, numeric ? "overlay.hint.adjust" : "overlay.hint.change");
+      if (VisibleTabCount(s_section) > 1) HINT(tabs, "overlay.hint.tab");
+      if (textual) HINT(confirm, "overlay.hint.type");
+      HINT(reset, "overlay.hint.reset");
     }
-    if (ActiveTabIsRegional() && s_regional_valid) HINT("X/F3", "overlay.hint.details");
-    HINT("A", "overlay.hint.back");
+    if (ActiveTabIsRegional() && s_regional_valid) HINT(details, "overlay.hint.details");
+    HINT(back, back_available ? "overlay.hint.back" : "overlay.hint.close");
   } else {
-    HINT("UP/DOWN", "overlay.hint.section");
-    if (VisibleTabCount(s_section) > 1) HINT("L/R", "overlay.hint.tab");
-    HINT("B", "overlay.hint.open");
-    HINT("A", "overlay.hint.close");
+    HINT(select, "overlay.hint.section");
+    if (VisibleTabCount(s_section) > 1) HINT(tabs, "overlay.hint.tab");
+    HINT(confirm, "overlay.hint.open");
+    HINT(back, "overlay.hint.close");
   }
 #undef HINT
-  int hint_x = description_x;
-  const int hint_y = bottom_y + bottom_height - 13;
-  for (int i = 0; i + 1 < hint_count; i += 2) {
-    DrawSmallText(layout, hint_x, hint_y, hints[i], kKeyColor);
-    hint_x += SmallTextWidth(hints[i]) + 5;
-    DrawSmallText(layout, hint_x, hint_y, hints[i + 1], kHintColor);
-    hint_x += SmallTextWidth(hints[i + 1]) + 11;
-  }
+  DrawMenuHints(layout, description_x, bottom_y + bottom_height - 13 - kSmallLineHeight,
+                bottom_width - 24, &hints, kKeyColor, kHintColor);
 }
 
 static void DrawMenu(const MenuLayout *layout) {

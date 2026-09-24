@@ -230,6 +230,10 @@ int InputMap_DescribeBinding(char *buffer, int buffer_size, uint32 binding);
  * unbound controls yield an empty string. These names are not persisted. */
 int InputMap_FormatBindingHint(char *buffer, int buffer_size, uint32 binding,
                               SDL_GamepadType gamepad_type);
+/* Explicit device for modal UIs which own their input activity. Does not change
+ * gameplay's last-device state or silently substitute keyboard bindings. */
+int InputMap_ActionHintForDevice(char *buffer, int buffer_size, InputAction action,
+                                 InputClass device);
 /* Retains the last active input device after release, respecting forced mode
  * and the disconnected-gamepad keyboard fallback. Call during frame capture. */
 int InputMap_GameActionHint(char *buffer, int buffer_size, InputAction action);

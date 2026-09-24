@@ -2254,6 +2254,7 @@ if(BUILD_TESTING)
         src/atomic_replace.c
         src/randomizer.c src/action/action_placements.c
         src/settings_overlay.c
+        src/settings_overlay/menu_input.c
         src/settings_overlay_artwork.c
         src/settings_overlay_palette.c
         src/localization/interface_text.c

@@ -9,6 +9,7 @@
 #include "settings.h"
 #include "randomizer.h"
 #include "settings_overlay.h"
+#include "settings_overlay_internal.h"
 #include "settings_overlay/regional/regional_menu.h"
 #include "settings_overlay_artwork.h"
 #include "settings_overlay_localization.h"
@@ -329,9 +330,13 @@ static void CheckRegionalControls(SDL_Renderer *renderer, SDL_Surface *surface) 
   // Preset arrows select a candidate only; Confirm opens a cancel-default
   // review even for non-destructive presets. Palette browsing never applies.
   CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT,true,false) && !s_region_edits);
+  int preset_tab = -1;
+  CHECK(SettingsOverlay_GetTabState(&preset_tab, NULL) && preset_tab == kOverlayRegionPage_Presets);
   CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false) && !s_region_edits);
   CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false) && !s_region_edits); // Cancel.
   CHECK(SettingsOverlay_IsOpen());
+  CHECK(SettingsOverlay_GetTabState(&preset_tab, NULL) && preset_tab == kOverlayRegionPage_Presets);
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "regional_profile_gameplay"));
   CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false) && !s_region_edits);
   AcceptRegionalWarning();
   CHECK(s_region_edits==1 && s_fake_region.population_pending && !s_fake_region.requested.retry_score);
@@ -460,6 +465,7 @@ static void CheckRegionalControls(SDL_Renderer *renderer, SDL_Surface *surface) 
     CHECK(SettingsOverlay_HandleKey(SDLK_F3, true, false));
     SettingsOverlay_Close(); SettingsOverlay_Open();
     CHECK(SettingsOverlay_HandleKey(SDLK_RETURN, true, false));
+    RowToKey(key);
     CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
     CHECK(strcmp(SettingsOverlay_SelectedKey(), key) != 0);
     RowToKey(key);
@@ -477,13 +483,24 @@ static void CheckRegionalControls(SDL_Renderer *renderer, SDL_Surface *surface) 
           display.pending_groups=(1u << kArRegionalProfile_GroupCount) - 1;
           const OverlayRegionRow *row=OverlayRegionMenu_Row(p,r);
           char help[2048]; CHECK(OverlayRegionMenu_Description(locale,&display,row,help,sizeof(help)));
-          size_t used=0,length=strlen(help);
-          for(unsigned line=0;line<6 && used<length;++line) {
+          // Impact leads both views and fits within two compact-footer lines.
+          const char *mechanics = strchr(help, '\n');
+          CHECK(mechanics && mechanics > help && !strchr(help, '{'));
+          size_t used=0,length=mechanics ? (size_t)(mechanics-help) : strlen(help);
+          for(unsigned line=0;line<2 && used<length;++line) {
             ArInterfaceTextLine slice;
             CHECK(ArInterfaceText_WrapLine(help+used,length-used,70,kArInterfaceTextMaximumBytes,&slice));
             CHECK(slice.consumed);used+=slice.consumed;
           }
-          if(used<length)fprintf(stderr,"regional help overflow %s locale=%u\n",row->key,locale);
+          if(used<length)fprintf(stderr,"regional impact overflow %s locale=%u\n",row->key,locale);
+          CHECK(used==length);
+          // Mechanics and caveats may scroll in Details; they need not fit the footer.
+          used=0;length=strlen(help);
+          for(unsigned line=0;line<40 && used<length;++line) {
+            ArInterfaceTextLine slice;
+            CHECK(ArInterfaceText_WrapLine(help+used,length-used,70,kArInterfaceTextMaximumBytes,&slice));
+            CHECK(slice.consumed);used+=slice.consumed;
+          }
           CHECK(used==length);
           const char *impact=OverlayRegionMenu_ImpactLabel(locale,&display,row);
           CHECK(impact && *impact && !strstr(impact,"overlay.region."));
@@ -502,6 +519,24 @@ static void CheckRegionalControls(SDL_Renderer *renderer, SDL_Surface *surface) 
             CHECK(used==length);
           }
         }
+  // The selected behavior is fully visible without opening Details, in every
+  // locale and with either the Western or Japanese controls selected.
+  for (unsigned r = 0; r < OverlayRegionMenu_Count(kOverlayRegionPage_Controls); ++r)
+    for (unsigned locale = 0; locale < kArUiLocale_Count; ++locale)
+      for (unsigned source = 0; source < kArRegionalSource_Count; ++source) {
+        const OverlayRegionRow *row = OverlayRegionMenu_Row(kOverlayRegionPage_Controls, r);
+        ActRaiserRegionalRulesView view = {0};
+        view.choices[row->setting].source = source;
+        char text[512];
+        CHECK(OverlayRegionMenu_Preview(locale, &view, row, text, sizeof(text)));
+        size_t used = 0, length = strlen(text);
+        for (unsigned line = 0; line < 3 && used < length; ++line) {
+          ArInterfaceTextLine slice;
+          CHECK(ArInterfaceText_WrapLine(text + used, length - used, 70, kArInterfaceTextMaximumBytes, &slice));
+          CHECK(slice.consumed); used += slice.consumed;
+        }
+        CHECK(used == length);
+      }
   SettingsOverlay_SetRegionalHooks(NULL); SettingsOverlay_Close();
 }
 
@@ -519,6 +554,53 @@ static void RegionalReviewFrame(SDL_Renderer *renderer, SDL_Surface *surface,
   CHECK(SDL_RenderPresent(renderer));
   CHECK(SDL_SaveBMP(surface,path));
   fprintf(timeline,"file '%03u.bmp'\nduration %.2f\n",(*index)++,seconds);
+}
+
+/* A chronological highlights capture: render after EVERY input, including
+ * confirmation cancellation and intermediate tab/row navigation. Never splice
+ * frames from another visit with a different horizontal tab-scroll position. */
+static void CaptureRegionalHighlights(SDL_Renderer *renderer, SDL_Surface *surface,
+    FILE *timeline, const char *directory, unsigned *frame) {
+  NavToSection(kSection_Regional); NavToTab(kOverlayRegionPage_Presets);
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  RowToKey("regional_profile_gameplay");
+  RegionalReviewFrame(renderer, surface, timeline, directory, frame, 1.0);
+  const struct { SDL_Keycode key; double seconds; const char *row; } steps[] = {
+    {SDLK_RIGHT, 0.9, NULL}, {SDLK_Z, 2.4, NULL},
+    {SDLK_X, 0.9, "regional_profile_gameplay"},
+    {SDLK_RIGHTBRACKET, 0.7, "regional_difficulty_level"},
+    {SDLK_RIGHT, 0.6, NULL}, {SDLK_RIGHT, 0.6, NULL}, {SDLK_RIGHT, 0.9, NULL},
+    {SDLK_DOWN, 0.7, "regional_terrain"}, {SDLK_F3, 2.4, NULL},
+    {SDLK_ESCAPE, 0.5, "regional_terrain"},
+    {SDLK_DOWN, 0.12, NULL}, {SDLK_DOWN, 0.12, NULL}, {SDLK_DOWN, 0.12, NULL},
+    {SDLK_DOWN, 0.12, NULL}, {SDLK_DOWN, 0.12, NULL}, {SDLK_DOWN, 0.12, NULL},
+    {SDLK_DOWN, 0.12, NULL}, {SDLK_DOWN, 0.12, NULL}, {SDLK_DOWN, 0.12, NULL},
+    {SDLK_DOWN, 0.8, "regional_bosses"},
+    {SDLK_DOWN, 0.12, NULL}, {SDLK_DOWN, 0.12, NULL}, {SDLK_DOWN, 0.7, "regional_scrolls"},
+    {SDLK_RIGHTBRACKET, 1.0, "regional_profile_population"},
+    {SDLK_DOWN, 0.12, NULL}, {SDLK_DOWN, 0.12, NULL}, {SDLK_DOWN, 0.12, NULL},
+    {SDLK_DOWN, 0.12, NULL}, {SDLK_DOWN, 0.12, NULL}, {SDLK_DOWN, 0.8, "regional_lair_reserves"},
+    {SDLK_DOWN, 0.12, NULL}, {SDLK_DOWN, 0.12, NULL}, {SDLK_DOWN, 0.12, NULL},
+    {SDLK_DOWN, 0.7, "regional_miracles"},
+    {SDLK_RIGHTBRACKET, 1.0, "regional_magic_gesture"},
+    {SDLK_RIGHT, 1.6, "regional_magic_gesture"},
+    {SDLK_DOWN, 0.6, "regional_lives_display"}, {SDLK_DOWN, 0.12, NULL},
+    {SDLK_DOWN, 0.12, NULL}, {SDLK_DOWN, 0.7, "regional_speed_range"},
+    {SDLK_RIGHTBRACKET, 0.9, "regional_actor_art"},
+    {SDLK_DOWN, 0.12, NULL}, {SDLK_DOWN, 0.12, NULL}, {SDLK_DOWN, 0.12, NULL},
+    {SDLK_DOWN, 0.12, NULL}, {SDLK_DOWN, 0.12, NULL}, {SDLK_DOWN, 0.6, "regional_title_art"},
+    {SDLK_DOWN, 0.12, NULL}, {SDLK_DOWN, 0.12, NULL}, {SDLK_DOWN, 0.8, "regional_music"},
+    {SDLK_DOWN, 1.0, "regional_sequences"},
+  };
+  for (unsigned i = 0; i < sizeof(steps) / sizeof(steps[0]); ++i) {
+    CHECK(SettingsOverlay_HandleKey(steps[i].key, true, false));
+    if (steps[i].row) CHECK(!strcmp(SettingsOverlay_SelectedKey(), steps[i].row));
+    if (i == 2) {
+      int tab = -1;
+      CHECK(SettingsOverlay_GetTabState(&tab, NULL) && tab == kOverlayRegionPage_Presets);
+    }
+    RegionalReviewFrame(renderer, surface, timeline, directory, frame, steps[i].seconds);
+  }
 }
 
 static void CaptureRegionalReview(SDL_Renderer *renderer, SDL_Surface *surface) {
@@ -544,54 +626,58 @@ static void CaptureRegionalReview(SDL_Renderer *renderer, SDL_Surface *surface) 
   SettingsOverlay_SetRegionalHooks(&hooks);
   SettingsOverlay_Close(); SettingsOverlay_Open(); NavToSection(kSection_Video);
   unsigned frame=0;
-  RegionalReviewFrame(renderer,surface,timeline,directory,&frame,0.6);
-  for(unsigned section=0;section<kSection_Regional;++section) {
-    CHECK(SettingsOverlay_HandleKey(SDLK_DOWN,true,false));
-    RegionalReviewFrame(renderer,surface,timeline,directory,&frame,0.22);
-  }
-  NavToTab(kOverlayRegionPage_Presets);
-  RegionalReviewFrame(renderer,surface,timeline,directory,&frame,1.8);
-  CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
-  for(unsigned page=0;page<kOverlayRegionPage_Count;++page) {
-    NavToTab(page);
-    for(unsigned row=0;row<OverlayRegionMenu_Count(page);++row) {
-      RowToKey(OverlayRegionMenu_Row(page,row)->key);
+  if (getenv("AR_OVERLAY_REGIONAL_TOUR_SHORT")) {
+    CaptureRegionalHighlights(renderer, surface, timeline, directory, &frame);
+  } else {
+    RegionalReviewFrame(renderer,surface,timeline,directory,&frame,0.6);
+    for(unsigned section=0;section<kSection_Regional;++section) {
+      CHECK(SettingsOverlay_HandleKey(SDLK_DOWN,true,false));
+      RegionalReviewFrame(renderer,surface,timeline,directory,&frame,0.22);
+    }
+    NavToTab(kOverlayRegionPage_Presets);
+    RegionalReviewFrame(renderer,surface,timeline,directory,&frame,1.8);
+    CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
+    for(unsigned page=0;page<kOverlayRegionPage_Count;++page) {
+      NavToTab(page);
+      for(unsigned row=0;row<OverlayRegionMenu_Count(page);++row) {
+        RowToKey(OverlayRegionMenu_Row(page,row)->key);
+        RegionalReviewFrame(renderer,surface,timeline,directory,&frame,3.0);
+      }
+    }
+    // Review both warnings without accepting edits or queuing redevelopment.
+    NavToTab(kOverlayRegionPage_Towns); RowToKey("regional_development");
+    CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT,true,false));
+    RegionalReviewFrame(renderer,surface,timeline,directory,&frame,4.0);
+    CHECK(SettingsOverlay_HandleKey(SDLK_X,true,false));
+    RowToKey("regional_profile_population"); CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT,true,false));
+    RegionalReviewFrame(renderer,surface,timeline,directory,&frame,5.0);
+    CHECK(SettingsOverlay_HandleKey(SDLK_X,true,false));
+    s_fake_region.lair_history_estimated=s_fake_region.lair_reload_estimated=true;
+    RowToKey("regional_lair_reserves");
+    RegionalReviewFrame(renderer,surface,timeline,directory,&frame,3.0);
+    CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT,true,false));
+    RegionalReviewFrame(renderer,surface,timeline,directory,&frame,4.0);
+    CHECK(SettingsOverlay_HandleKey(SDLK_X,true,false));
+    // Requested JP art without a donor stays JP; help explains the US fallback.
+    NavToTab(kOverlayRegionPage_Presentation); RowToKey("regional_actor_art");
+    CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT,true,false));
+    SettingsOverlay_Close(); SettingsOverlay_Open(); CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
+    RegionalReviewFrame(renderer,surface,timeline,directory,&frame,3.0);
+    CHECK(SettingsOverlay_HandleKey(SDLK_F3,true,false));
+    RegionalReviewFrame(renderer,surface,timeline,directory,&frame,5.0);
+    CHECK(SettingsOverlay_HandleKey(SDLK_ESCAPE,true,false));
+    NavToTab(kOverlayRegionPage_Action); RowToKey("regional_difficulty_level");
+    for (unsigned choice = 0; choice < kArRegionalDifficultyChoice_Count; ++choice) {
+      if (choice) CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT,true,false));
       RegionalReviewFrame(renderer,surface,timeline,directory,&frame,3.0);
     }
+    NavToTab(kOverlayRegionPage_Presets); RowToKey("regional_profile_gameplay");
+    CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT,true,false));
+    RegionalReviewFrame(renderer,surface,timeline,directory,&frame,2.0);
+    CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
+    RegionalReviewFrame(renderer,surface,timeline,directory,&frame,5.0);
+    CHECK(SettingsOverlay_HandleKey(SDLK_X,true,false));
   }
-  // Review both warnings without accepting edits or queuing redevelopment.
-  NavToTab(kOverlayRegionPage_Towns); RowToKey("regional_development");
-  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT,true,false));
-  RegionalReviewFrame(renderer,surface,timeline,directory,&frame,4.0);
-  CHECK(SettingsOverlay_HandleKey(SDLK_X,true,false));
-  RowToKey("regional_profile_population"); CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT,true,false));
-  RegionalReviewFrame(renderer,surface,timeline,directory,&frame,5.0);
-  CHECK(SettingsOverlay_HandleKey(SDLK_X,true,false));
-  s_fake_region.lair_history_estimated=s_fake_region.lair_reload_estimated=true;
-  RowToKey("regional_lair_reserves");
-  RegionalReviewFrame(renderer,surface,timeline,directory,&frame,3.0);
-  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT,true,false));
-  RegionalReviewFrame(renderer,surface,timeline,directory,&frame,4.0);
-  CHECK(SettingsOverlay_HandleKey(SDLK_X,true,false));
-  // Requested JP art without a donor stays JP; help explains the US fallback.
-  NavToTab(kOverlayRegionPage_Presentation); RowToKey("regional_actor_art");
-  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT,true,false));
-  SettingsOverlay_Close(); SettingsOverlay_Open(); CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
-  RegionalReviewFrame(renderer,surface,timeline,directory,&frame,3.0);
-  CHECK(SettingsOverlay_HandleKey(SDLK_F3,true,false));
-  RegionalReviewFrame(renderer,surface,timeline,directory,&frame,5.0);
-  CHECK(SettingsOverlay_HandleKey(SDLK_ESCAPE,true,false));
-  NavToTab(kOverlayRegionPage_Action); RowToKey("regional_difficulty_level");
-  for (unsigned choice = 0; choice < kArRegionalDifficultyChoice_Count; ++choice) {
-    if (choice) CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT,true,false));
-    RegionalReviewFrame(renderer,surface,timeline,directory,&frame,3.0);
-  }
-  NavToTab(kOverlayRegionPage_Presets); RowToKey("regional_profile_gameplay");
-  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT,true,false));
-  RegionalReviewFrame(renderer,surface,timeline,directory,&frame,2.0);
-  CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
-  RegionalReviewFrame(renderer,surface,timeline,directory,&frame,5.0);
-  CHECK(SettingsOverlay_HandleKey(SDLK_X,true,false));
   fprintf(timeline,"file '%03u.bmp'\n",frame-1);
   CHECK(!fclose(timeline));
   SettingsOverlay_Close(); SettingsOverlay_SetRegionalHooks(NULL);
@@ -1071,6 +1157,158 @@ static uint8_t *ReadOptionalRom(size_t *size_out) {
 static bool MenuGamepadOwns(int input_device, int gamepad_count) {
   return input_device != kInputDevice_Keyboard && gamepad_count > 0;
 }
+static void CheckMenuInputHints(void) {
+  const Settings saved = g_settings;
+  char text[128];
+  MenuNav nav;
+  CHECK(OverlayMenuInput_KeyNav(SDLK_RETURN, &nav) && nav == kMenuNav_Confirm);
+  CHECK(OverlayMenuInput_KeyNav(SDLK_ESCAPE, &nav) && nav == kMenuNav_Close);
+  CHECK(!OverlayMenuInput_KeyNav(SDLK_F2, &nav));
+  CHECK(OverlayMenuInput_Hint(text, sizeof(text), kMenuNav_Confirm, kInputClass_Keyboard));
+  CHECK(!strcmp(text, "Z"));
+  CHECK(OverlayMenuInput_Hint(text, sizeof(text), kMenuNav_Back, kInputClass_Keyboard));
+  CHECK(!strcmp(text, "X"));
+  /* Every displayed keyboard hint must actually invoke its command. Reserved
+   * keys win, duplicate imported bindings use dispatch order, and an unbound
+   * control is omitted unless a universal shortcut can perform it. */
+  const SDL_Scancode keys[] = {SDL_SCANCODE_UNKNOWN, SDL_SCANCODE_F1, SDL_SCANCODE_F2,
+      SDL_SCANCODE_F3, SDL_SCANCODE_ESCAPE, SDL_SCANCODE_RETURN, SDL_SCANCODE_UP,
+      SDL_SCANCODE_TAB, SDL_SCANCODE_LEFTBRACKET, SDL_SCANCODE_G};
+  for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); ++i) {
+    for (int action = kInputAction_B; action <= kInputAction_R; ++action)
+      g_settings.input_bind[kInputClass_Keyboard][action] = keys[i]
+          ? INPUT_BIND_MAKE(kInputBind_Key, keys[i], false) : 0;
+    for (int command = kMenuNav_Up; command <= kMenuNav_Details; ++command) {
+      if (!OverlayMenuInput_Hint(text, sizeof(text), command, kInputClass_Keyboard)) continue;
+      SDL_Scancode code = SDL_GetScancodeFromName(text);
+      CHECK(code != SDL_SCANCODE_UNKNOWN);
+      CHECK(OverlayMenuInput_KeyNav(SDL_GetKeyFromScancode(code, 0, false), &nav));
+      CHECK(nav == command);
+    }
+  }
+  g_settings = saved;
+  g_settings.input_bind[kInputClass_Keyboard][kInputAction_L] = INPUT_BIND_MAKE(kInputBind_Key, SDL_SCANCODE_F2, false);
+  CHECK(OverlayMenuInput_Hint(text, sizeof(text), kMenuNav_TabPrev, kInputClass_Keyboard));
+  CHECK(!strcmp(text, "["));
+  CHECK(OverlayMenuInput_PairHint(text, sizeof(text), kMenuNav_TabPrev, kMenuNav_TabNext, kInputClass_Gamepad));
+  CHECK(!strcmp(text, "LB/RB"));
+  CHECK(OverlayMenuInput_PairHint(text, sizeof(text), kMenuNav_Up, kMenuNav_Down, kInputClass_Gamepad));
+  CHECK(!strcmp(text, "D-Pad Up/Down"));
+  g_settings.input_bind[kInputClass_Gamepad][kInputAction_Up] = 0;
+  g_settings.input_stick_as_dpad = true;
+  CHECK(OverlayMenuInput_Hint(text, sizeof(text), kMenuNav_Up, kInputClass_Gamepad));
+  CHECK(!strcmp(text, "LS Up"));
+  g_settings.input_stick_as_dpad = false;
+  CHECK(!OverlayMenuInput_Hint(text, sizeof(text), kMenuNav_Up, kInputClass_Gamepad));
+  g_settings = saved;
+}
+
+static void CheckMenuHintDevice(SDL_Renderer *renderer, SDL_Surface *surface) {
+  const Settings saved = g_settings;
+  for (int device = kInputClass_Keyboard; device <= kInputClass_Gamepad; ++device)
+    for (int action = 0; action < kInputAction_Count; ++action)
+      g_settings.input_bind[device][action] = InputMap_DefaultBinding(action, device);
+  g_settings.input_bind[kInputClass_Gamepad][kInputAction_Up] =
+      INPUT_BIND_MAKE(kInputBind_PadButton, SDL_GAMEPAD_BUTTON_NORTH, false);
+  g_settings.input_bind[kInputClass_Gamepad][kInputAction_X] =
+      INPUT_BIND_MAKE(kInputBind_PadButton, SDL_GAMEPAD_BUTTON_DPAD_UP, false);
+  CHECK(SDL_InitSubSystem(SDL_INIT_GAMEPAD));
+  SDL_VirtualJoystickDesc desc;
+  SDL_INIT_INTERFACE(&desc);
+  desc.type = SDL_JOYSTICK_TYPE_GAMEPAD;
+  desc.nbuttons = SDL_GAMEPAD_BUTTON_COUNT;
+  desc.button_mask = (1u << SDL_GAMEPAD_BUTTON_COUNT) - 1;
+  desc.name = "Overlay hint test";
+  const SDL_JoystickID id = SDL_AttachVirtualJoystick(&desc);
+  CHECK(id != 0);
+  if (!id) { SDL_QuitSubSystem(SDL_INIT_GAMEPAD); return; }
+  SDL_Event event = {0};
+  event.type = SDL_EVENT_GAMEPAD_ADDED; event.gdevice.which = id;
+  InputMap_HandleEvent(&event);
+  CHECK(InputMap_GamepadCount() == 1);
+  s_fake_region_active = true;
+  s_fake_region = (ActRaiserRegionalRulesView){.revision = 1, .editable = true,
+      .lair_history_ready = true, .lair_reload_ready = true, .campaign = {42}};
+  s_fake_region.effective.retry_score = kArRegionalSource_Japan;
+  s_fake_region.requested = s_fake_region.effective;
+  const SettingsOverlayRegionalHooks hooks = {.copy = FakeRegionalView, .request = FakeRegionalEdit,
+      .difficulty = FakeDifficultyEdit, .preview = FakeRegionalPreview,
+      .setting = FakeSettingEdit, .preview_setting = FakeSettingPreview};
+  SettingsOverlay_SetRegionalHooks(&hooks);
+  g_settings.input_device = kInputDevice_Gamepad;
+  SettingsOverlay_Open();
+  CHECK(SettingsOverlay_MenuInputDevice() == kInputClass_Gamepad);
+  g_settings.input_device = kInputDevice_Auto;
+  NavToSection(kSection_Regional); NavToTab(kOverlayRegionPage_Presets);
+  SettingsOverlay_HandleKey(SDLK_RETURN, true, false);
+  RowToKey("regional_profile_presentation");
+  CHECK(SettingsOverlay_MenuInputDevice() == kInputClass_Keyboard);
+  event.type = SDL_EVENT_GAMEPAD_BUTTON_DOWN;
+  event.gbutton.which = id + 1; event.gbutton.button = SDL_GAMEPAD_BUTTON_NORTH;
+  SettingsOverlay_HandleGamepadEvent(&event);
+  CHECK(SettingsOverlay_MenuInputDevice() == kInputClass_Keyboard);
+  event.gbutton.which = id;
+  SettingsOverlay_HandleGamepadEvent(&event);
+  CHECK(SettingsOverlay_MenuInputDevice() == kInputClass_Gamepad);
+  char hint[64];
+  CHECK(OverlayMenuInput_Hint(hint, sizeof(hint), kMenuNav_Up, SettingsOverlay_MenuInputDevice()));
+  CHECK(!strcmp(hint, "Y")); // Physical label of the rebound North button.
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "regional_profile_gameplay"));
+  event.type = SDL_EVENT_GAMEPAD_BUTTON_UP;
+  SettingsOverlay_HandleGamepadEvent(&event);
+  CHECK(SettingsOverlay_MenuInputDevice() == kInputClass_Gamepad);
+  CHECK(InputMap_State() == 0); /* Modal activity never holds game buttons. */
+  /* Render every official interface locale with physical controller hints. */
+  for (unsigned locale = 0; locale < kArUiLocale_Count; ++locale) {
+    g_settings.interface_language = (int)locale;
+    SettingsOverlay_Refresh();
+    CHECK(SDL_RenderClear(renderer));
+    SettingsOverlay_Render((ArRenderRectI){0, 0, surface->w, surface->h});
+    CHECK(SDL_RenderPresent(renderer));
+    const char *preview = getenv("AR_OVERLAY_HINT_TEST_BMP");
+    if (preview && *preview) {
+      char path[1024];
+      const int n = snprintf(path, sizeof(path), "%s-%s.bmp", preview, ArUiCatalog_LocaleTag(locale));
+      CHECK(n > 0 && (size_t)n < sizeof(path));
+      if (n > 0 && (size_t)n < sizeof(path)) CHECK(SDL_SaveBMP(surface, path));
+    }
+  }
+  const unsigned edits_before = s_region_edits;
+  event.type = SDL_EVENT_GAMEPAD_BUTTON_DOWN;
+  event.gbutton.button = SDL_GAMEPAD_BUTTON_SOUTH;
+  SettingsOverlay_HandleGamepadEvent(&event); // Review the preset.
+  event.gbutton.button = SDL_GAMEPAD_BUTTON_EAST;
+  SettingsOverlay_HandleGamepadEvent(&event); // Cancel, keeping the same row/tab.
+  int tab = -1;
+  CHECK(SettingsOverlay_GetTabState(&tab, NULL) && tab == kOverlayRegionPage_Presets);
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "regional_profile_gameplay"));
+  CHECK(s_region_edits == edits_before && SettingsOverlay_IsOpen());
+  SettingsOverlay_HandleKey(SDLK_F3, true, false);
+  CHECK(SettingsOverlay_MenuInputDevice() == kInputClass_Keyboard);
+  SettingsOverlay_HandleGamepadEvent(&event); // Back from Details, not the submenu.
+  CHECK(SettingsOverlay_MenuInputDevice() == kInputClass_Gamepad);
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "regional_profile_gameplay"));
+  CHECK(s_region_edits == edits_before && InputMap_State() == 0);
+  SettingsOverlay_Close();
+  SettingsOverlay_Open(); // Idle pad in Auto must not inherit the previous visit's device.
+  CHECK(SettingsOverlay_MenuInputDevice() == kInputClass_Keyboard);
+  g_settings.input_device = kInputDevice_Keyboard;
+  CHECK(SettingsOverlay_MenuInputDevice() == kInputClass_Keyboard);
+  g_settings.input_device = kInputDevice_Gamepad;
+  CHECK(SettingsOverlay_MenuInputDevice() == kInputClass_Gamepad);
+  event.type = SDL_EVENT_GAMEPAD_REMOVED; event.gdevice.which = id;
+  InputMap_HandleEvent(&event);
+  CHECK(SettingsOverlay_MenuInputDevice() == kInputClass_Keyboard);
+  SettingsOverlay_Close();
+  InputMap_Shutdown();
+  SDL_DetachVirtualJoystick(id);
+  SDL_QuitSubSystem(SDL_INIT_GAMEPAD);
+  SettingsOverlay_SetRegionalHooks(NULL);
+  s_fake_region_active = false;
+  g_settings = saved;
+  SettingsOverlay_Refresh();
+}
+
 static void CheckMenuDeviceGateTruthTable(void) {
   const struct {
     int input_device;
@@ -1640,6 +1878,7 @@ int main(int argc, char **argv) {
   if (surface_height <= 0) surface_height = 480;
 
   CHECK(SDL_Init(SDL_INIT_VIDEO));
+  CheckMenuInputHints();
   SDL_Surface *surface = SDL_CreateSurface(
       surface_width, surface_height, SDL_PIXELFORMAT_ARGB8888);
   CHECK(surface != NULL);
@@ -2578,6 +2817,7 @@ int main(int argc, char **argv) {
   CheckLayerEditorSection();
   SettingsOverlay_Close();
   CheckRegionalControls(renderer, surface);
+  CheckMenuHintDevice(renderer, surface);
   CaptureRegionalReview(renderer, surface);
 
   /* Debug panels avoid the inspected point and can be moved without a click
