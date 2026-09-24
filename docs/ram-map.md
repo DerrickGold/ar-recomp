@@ -4,6 +4,38 @@ SNES WRAM: 128KB at banks $7E-$7F.
 Direct page and stack in first 8KB ($7E:0000-$7E:1FFF), mirrored at $00-$3F:0000-$1FFF.
 Unless a release is explicitly named, addresses below describe the US ROM.
 
+## Regional host state and native projections
+
+Regional selections do not change the baseline's address layout. The HLE
+adapters translate verified foreign behavior into the US fields below; JP/PAL
+addresses elsewhere in this document are research references, not alternate
+host locations. The [HLE binding index](research-symbol-map.md#regional-hle-bindings)
+identifies each producer and its activation boundary.
+
+| State / native output | Ownership |
+| --- | --- |
+| Seed, randomizer options, generator version, requested/effective regional rules | Host `RandomizerConfig` / `ArRegionalSession`, bound to the selected save slot and exact SRAM image through its checkpoint. **No ROM, WRAM or SRAM address** is assigned. New Game chooses once; Continue restores. Title drafts and unconfirmed overlay edits are not native save fields. |
+| Resolved room policies and numerical placement programs | Host room caches, rebuilt at accepted room/retry setup. Native outputs include terrain `$7E:8000`, definitions `$7E:2100`, hazard records bounded by `$1AE2`, and actors at `$06A0` with stride `$40`. These caches are not spare fields in the object array. |
+| Action initializer HP/attack | Record bytes `+8/+7` become actor words `+2C/+2A`. At `$00:966C`, Y is the selected initializer; actor `+32` is not yet the new source. Pristine/randomizer provenance is host-owned, not encoded in HP or source bits. Regional base selection and scaling happen only at birth; explicit Tanzra child assignments use their own guarded prefixes. |
+| Alternate lair stock/reload histories | Host accounting and approximation/quarantine metadata. Selected projections use US `$7F:96B8+` stocks and `$9628+` reloads. `$9658+` running countdowns retain native ownership; the alternate counters do not occupy adjacent WRAM. |
+| SIM combat/AI generations | Host live/cached snapshots accompany the four lair-monster slots inside the native eight-record cache. `$03:B9EE` marks a new generation; `$03:813F/$8168` restore/cache it. Native actor `+24` remains accumulated arrow damage, not a policy identifier. |
+| European spell stack | Host `ArRegionalSpellInventory` for the current action run. Native working count `$0021`, selected spell `$02AC` and icon uploads are adapted at their original consumers. The PAL stack at `$1C00` and PAL mode/difficulty fields are **not** transplanted into the US layout. |
+| Support conversion | Confirmed, quiescent Palace transaction at `$01:85A2`, not the ordinary earthquake selectors. Redevelopment changes validated structure records/cell marks and growth reserves, then recomputes town populations, support, total and next goal using the existing US fields. It preserves earned level, civilization, story progress and population bias; unsafe bias/footprints fail before mutation. |
+| Donor art and music | Host validated media/residency. Uploads target the existing VRAM/CGRAM/ARAM ranges; drawing metadata does not reserve new emulated memory. Source programs/collision remain native except the explicit gameplay projections described below. |
+
+Not every regional projection is read-only. Marahna plant geometry temporarily
+projects identified composition headers in the loaded `$5000` boss image;
+Northwall impact graphics use the room-specific `$5F00/$5F40/$5F80/$5FC0`
+slots documented below. Reader adapters may borrow actor row/visual fields
+during a native call and restore them afterward; expanded programs retain a
+guarded `+1C` progress marker. These are named, scene-owned contracts, **not
+general free WRAM** or allocations for seed/settings data.
+
+The [save format](save-format.md#regional-campaign-checkpoints) specifies which
+host histories persist; native SRAM remains 8 KiB and emulator-compatible.
+The checkpoint is required to reproduce enhanced campaign behavior. Rebuilding
+a host cache is not permission to reset native counters or reroll the campaign.
+
 ## Core Game State ($7E:0000+)
 
 ### Game Mode & Navigation
@@ -542,7 +574,7 @@ requires all eight town slots to be empty; held items do not block it. See
 | $7E:0291 | 2 | Level |
 | $7E:0293 | 2 | HP |
 | $7E:0295 | 2 | Magic points — PERSISTENT copy. `$21` is the act/working copy, loaded from here at `$02:84E0` (`LDA $0295; STA $21`); act-mode pickups INC only `$21` ($00:887E); sim reward grants INC BOTH via long addressing (`$01:9CD6`). New-game STZ at $02:BE69. No other direct writers in ROM — stats-block writes use `AF/8F`-form long addressing |
-| $7E:0297 | 2 | Population needed for next level |
+| $7E:0297 | 2 | Derived population goal for the next level. Regional award reads are `$03:B3C7/$B3CD/$B407`; Master-report opening may refresh this word without awarding/demoting a level. Maximum level displays zero, not the ROM table's 9999 sentinel. |
 | $7E:0299 | 9 | Magic inventory |
 | $7E:02A2 | 9 | Offerings inventory |
 | $7E:02AB | 1 | Persistent, zero-based starting lives. Source of Life `$01:9CBD` increments this byte; ordinary action entry loads it into `$1C`. Not an HP increase or level-up award. |
@@ -730,6 +762,7 @@ AR_WRAM_TRACE=structrec.jsonl AR_TRACE_LO=0x16BE7 AR_TRACE_HI=0x16DE6 \
 | $7F:7C05 / $7F:7C07 | Shared census/scan scratch (house-population sum before +2/adjustment, support sum; reused for allocator slot index and other scans) |
 | $7F:7C11/13/15/17 | Record-scan rectangle X0/Y0/X1/Y1 (cell coords); shared scratch. Miracle story dispatch `$03:F921` instead uses `$7C11/$7C13` for aim square X/Y, or `$7C11=$FFFF` to bypass location for Earthquake/Wind |
 | $7F:7C1D | Record-scan remaining counter |
+| $7F:7C19 | Shared plot-operation scratch read by the displaced `LDA` at regional food-attempt prefix `$03:9271`; not a persistent regional setting |
 | $7F:7C33/$7C35/$7C37 | Plot-operation controls: stamp roads / attempt buildings / remaining allocation budget. Complete offscreen caller `$03:90DE` sets budget to 0 or 1 from the growth resource `$9560` (JP `$9554`) and debits that resource only if consumed. Shared addresses in all five ROMs; not a population cap. |
 | $7F:7C3D | Construction-attempt marker used by growth-status calculation, not a completed-building count. Available house candidates set it in all five ROMs. JP also sets it for an available food footprint, including with budget0; Western versions do not. [Producer/store distinction](regional-differences-technical.md#regional-growth-status-producer). |
 | $7F:7C41/$7C43/$7C49 | Construction plot X/Y (0–7) and template index (0–11). The iterator expands each plot to 4×4 cells and stages sixteen availability words at `$7C51-$7C70`. |
@@ -924,7 +957,10 @@ Regional read/write cautions:
   construction. `$03:8620` compares it with `$91DA+2N` to detect newly raised
   warning bits. Regional status rules leave this native copy/comparison intact.
 - US `$7E:0B04/$0B05` are byte HP/SP recovery queues; JP `$7E:0B04` is a
-  **word** recovery phase. Never project one ROM's structure onto the other.
+  **word** recovery phase. The mixed-policy host instead uses byte `$0B04`
+  as the Japanese angel phase at `$01:9C30/$9C34`, leaving the independent SP
+  byte `$0B05` intact. Changing one recovery policy clears only its own byte.
+  Never project the JP word onto the US queues.
 - `$7F:91FE` is the long development clock; `$9200` is its subcycle. JP's
   `$7F:7CED` divider is also advanced by the miracle frame service while those
   clocks are held. Menus and miracle effects have different actor/recovery

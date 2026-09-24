@@ -16,6 +16,36 @@ through the fade. The guarded regional acknowledgement precedes that restore;
 cancellation returns to `$02:A75B` without replacing the native title frame.
 New Game and Professional bypass the Continue restore.
 
+## Regional execution and data boundaries
+
+The complete current [regional HLE binding index](research-symbol-map.md#regional-hle-bindings)
+links each feature family to its US hook and C owner. The tables below separate
+original data from host projections: selecting JP/EU rules does not relocate
+the US executable or install the donor's RAM layout. For a headerless LoROM,
+file offset is `(bank << 15) | (address & $7FFF)` for the mapped ROM banks here.
+
+| Original source | Runtime owner / projection |
+| --- | --- |
+| `$02:893E`, 28-byte action profiles, initial BCD time at `+25` | `$02:B4E8` → `ActRaiser_RunActionVideoConfig` captures room rules after the native-equivalent video profile. Subsequent `$02:BC8A` controls the timer divider, not the initial limit. |
+| `$00:95DD`, eight type-table pointers; initializer attack/HP bytes `+7/+8` | Native `$00:95F0` copies the record. `$00:966C` composes regional bases and randomizer scaling before `$966F` applies mode/difficulty. Explicit Tanzra child writes have separate guarded entries. |
+| `$0A:B100`, US scene/placement index and streams | `$00:941C/$9500` consume a room-pinned regional numerical program; the same randomizer transforms run on that program. Native US streams remain the fallback. PAL bank `$1F` indices are extraction sources, not US callable addresses. |
+| `$03:B825`, 24 nine-byte lair seeds | `$03:B7C6` initializes native arrays. The randomizer may shuffle positions/types in the live ROM copy; regional stock/reload histories are separate host projections. A regional switch never reseeds developed towns. |
+| `$03:DC74`, six structure-list pointers; `$03:B40E` level goals | `$03:C07E` retains native house occupancy and uses selected support coefficients. `$03:B3C7/$B3CD/$B407` read selected goal values inside a captured award transaction; they do not replace the max-SP table at `$03:B432`. |
+| `$05:8000`, scene asset scripts | Existing native VM/loaders remain the owners. Terrain, donor art, pose and music choices enter at their individual validated consumers; no foreign script/code is executed. |
+
+The randomizer's pristine/live ROM buffers are host allocations. Its passes
+change the in-memory data above, not the user's `.sfc` file or native instruction
+streams. Regional numerical tables under `src/regional` are not a second ROM
+mapping. Room-owned WRAM outputs and transient patches are listed in the
+[RAM map](ram-map.md#regional-host-state-and-native-projections).
+
+Seed selection adds no HLE entry: accepted New Game at `$02:A622` chooses rules
+once; guarded Continue at `$02:A79F` binds the saved recipe before `$03:A83A`
+restores native state. The common title return also binds before gameplay on
+the record/replay path. `$03:A656` remains the completed native-save boundary.
+The recipe is host checkpoint data, never a hidden ROM or SRAM field; see the
+[version-70 format](save-format.md#randomizer-recipe-version-70).
+
 ## Regional presentation hooks
 
 These are US entry points. Their C owners preserve the boundaries described in
@@ -342,14 +372,16 @@ for non-action modes or any operand shape outside the stock action census.
 | 6 | `$02:B330` / `0x013330` | 6 | Palette slice upload through CGRAM `$2121/$2122`; audited action slices are 128 bytes. | Guarded `ActRaiser_LoadActionPalette`; native fallback |
 | 5 | `$02:B363` / `0x013363` | 7 | Decompress and byte-swap a 2 KiB metatile-definition table into `$7E:2100` (BG1) or `$7E:2900` (BG2). | Guarded `ActRaiser_LoadActionMetatiles`; native fallback |
 | 4 | `$02:B3EB` / `0x0133EB` | 4 | Read `[widthChunks,heightChunks,size16]`, publish pixel dimensions, and decompress the page-major metatile-id map to `$7E:8000` (BG1) or `$7E:C000` (BG2). | Guarded `ActRaiser_LoadActionMap`; native fallback |
-| 3 | `$02:B4E8` / `0x0134E8` | 1 | Apply one 28-byte `$02:893E` video profile to PPU and direct-page presentation state. | Guarded `ActRaiser_ApplyActionVideoConfig`; native fallback |
+| 3 | `$02:B4E8` / `0x0134E8` | 1 | Apply one 28-byte `$02:893E` video profile to PPU and direct-page presentation state. | Registered `ActRaiser_RunActionVideoConfig` captures room rules after guarded `ActRaiser_ApplyActionVideoConfig` or the native fallback |
 | 2 | `$02:B631` / `0x013631` | 3 | Semantics were not resolved by the presentation-loader work. | Native VM |
 | 1 | `$02:B63B` / `0x01363B` | 5 | Script-driven song change. | Native VM |
 | 0 | `$02:B69C` / `0x01369C` | 6 | Decompress ordinary/boss OBJ animation/composition data to `$7E:4000/$5000`; ending scene 08/01 uses this producer for twenty BG3 page maps. | Native VM |
 
 The per-region object-type tables at `$00:96AF/$A8F6/$B449/$C11E/$CD9B/$D928/$E722/$F39A`
-(already listed above) are the **enemy stat tables**: each 12-byte record carries ATK at `+7`,
-HP at `+8` and death score at `+9`. `tools/act_content.py --tables` decodes all eight.
+contain **pointers**, not consecutive stat records. Referenced 12-byte initializer
+records carry ATK at `+7`, HP at `+8` and death score at `+9`; direct-handler
+entries are not stat records. Aliased initializers must be transformed only
+once. `tools/act_content.py --tables` decodes all eight tables.
 
 ### Action camera and tile-streaming control
 
@@ -759,7 +791,7 @@ observed 112, and `$1016` 8x16 = 128 against 128. Scripts loop, so a run must
 be matched to the right cycle.
 
 Watching that same record execute (run `20260818-190000`-era replay of
-`saves/aitos-eruption.rec`, sim build serials):
+`saves/legacy/aitos-eruption.rec`, sim build serials):
 
 | builds | record position | `+$1C` | phase |
 |--------|-----------------|--------|-------|

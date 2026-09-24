@@ -506,7 +506,7 @@ def parse_args(argv):
     parser.add_argument("--binary", default="build-release/ActRaiserRecomp")
     parser.add_argument("--rom", default="ar.sfc")
     parser.add_argument("--config", default="config.ini")
-    parser.add_argument("--replay", default="saves/fillmore-act-2.rec")
+    parser.add_argument("--replay", default="saves/legacy/fillmore-act-2.rec")
     parser.add_argument("--targets", type=parse_targets,
                         default=list(DEFAULT_TARGETS))
     parser.add_argument("--warp-frame", type=int, default=400)

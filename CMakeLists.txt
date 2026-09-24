@@ -2059,7 +2059,7 @@ if(BUILD_TESTING)
         src/regional/towns/regional_score_feedback.c
         src/actraiser/actraiser_cpu_hle_internal.c src/actraiser/actraiser_hle_fatal.c
         src/regional/towns/regional_lair_history.c src/regional/towns/regional_lair_reloads.c src/regional/towns/regional_stock.c
-        src/save_system.c src/atomic_replace.c src/localization/unicode_grapheme.c)
+        src/save_system.c src/save_paths.c src/atomic_replace.c src/localization/unicode_grapheme.c)
     target_include_directories(actraiser_lair_history_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_lair_history COMMAND actraiser_lair_history_test)
@@ -2077,7 +2077,7 @@ if(BUILD_TESTING)
         src/actraiser/actraiser_lair_reloads.c src/regional/towns/regional_lair_reloads.c
         src/regional/towns/regional_lair_history.c src/regional/session/regional_lair_fingerprint.c
         src/regional/towns/regional_stock.c src/regional/towns/regional_score_feedback.c
-        src/save_system.c src/atomic_replace.c src/localization/unicode_grapheme.c
+        src/save_system.c src/save_paths.c src/atomic_replace.c src/localization/unicode_grapheme.c
         ${SNESRECOMP_RUNNER_ROOT}/src/support/sha256.c)
     target_include_directories(actraiser_lair_reloads_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
@@ -2690,7 +2690,7 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_save_system_test
         tests/save_system_test.c
-        src/save_system.c
+        src/save_system.c src/save_paths.c
         src/atomic_replace.c
         src/localization/unicode_grapheme.c
     )
@@ -2707,7 +2707,7 @@ if(BUILD_TESTING)
         tests/actraiser_save_transaction_test.c
         src/actraiser/actraiser_save_transaction.c
         src/actraiser/actraiser_hle_fatal.c
-        src/save_system.c
+        src/save_system.c src/save_paths.c
         src/atomic_replace.c
         src/localization/unicode_grapheme.c)
     target_include_directories(actraiser_save_transaction_test PRIVATE
@@ -2717,7 +2717,7 @@ if(BUILD_TESTING)
     add_executable(actraiser_story_snapshot_test
         tests/actraiser_story_snapshot_test.c
         src/actraiser/actraiser_story_snapshot.c
-        src/save_system.c src/atomic_replace.c src/localization/unicode_grapheme.c)
+        src/save_system.c src/save_paths.c src/atomic_replace.c src/localization/unicode_grapheme.c)
     target_include_directories(actraiser_story_snapshot_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_story_snapshot COMMAND actraiser_story_snapshot_test)
@@ -2751,7 +2751,7 @@ if(BUILD_TESTING)
         src/regional/session/regional_session_action.c
         src/regional/regional_costs.c
         src/save_checkpoint.c
-        src/save_system.c
+        src/save_system.c src/save_paths.c
         src/atomic_replace.c
         src/localization/unicode_grapheme.c)
     target_include_directories(actraiser_regional_session_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
@@ -2788,12 +2788,28 @@ if(BUILD_TESTING)
         src/regional/regional_costs.c
         src/host/campaign_identity.c
         src/save_checkpoint.c
-        src/save_system.c
+        src/save_system.c src/save_paths.c
         src/atomic_replace.c
         src/localization/unicode_grapheme.c)
     target_include_directories(actraiser_regional_campaign_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_regional_campaign COMMAND actraiser_regional_campaign_test)
+
+    add_executable(actraiser_save_paths_test tests/save_paths_test.c src/save_paths.c)
+    target_include_directories(actraiser_save_paths_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    add_test(NAME actraiser_save_paths COMMAND actraiser_save_paths_test)
+
+    get_target_property(AR_SAVE_SLOT_TEST_SOURCES actraiser_regional_campaign_test SOURCES)
+    list(REMOVE_ITEM AR_SAVE_SLOT_TEST_SOURCES tests/regional_campaign_test.c)
+    add_executable(actraiser_save_slots_test tests/save_slots_test.c
+        ${AR_SAVE_SLOT_TEST_SOURCES} src/save_slots.c src/save_slot_manager.c
+        src/regional/regional_profiles.c src/regional/regional_randomizer.c
+        src/actraiser/regional/actraiser_regional_editor.c
+        src/actraiser/regional/actraiser_regional_choices.c)
+    target_include_directories(actraiser_save_slots_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    add_test(NAME actraiser_save_slots COMMAND actraiser_save_slots_test)
 
     # Exercise the conversion against the same complete campaign/save stack.
     get_target_property(AR_POPULATION_TEST_SOURCES actraiser_regional_campaign_test SOURCES)
@@ -3057,7 +3073,7 @@ if(BUILD_TESTING)
         src/regional/session/regional_session_action.c
         src/regional/session/regional_fingerprint.c
         src/regional/session/regional_lair_fingerprint.c
-        src/save_checkpoint.c src/save_system.c src/atomic_replace.c
+        src/save_checkpoint.c src/save_system.c src/save_paths.c src/atomic_replace.c
         src/localization/unicode_grapheme.c
         ${SNESRECOMP_RUNNER_ROOT}/src/support/sha256.c)
     target_include_directories(actraiser_regional_runtime_test PRIVATE
@@ -3183,7 +3199,7 @@ if(BUILD_TESTING)
         tests/actraiser_save_checksum_hle_test.c
         src/actraiser/actraiser_save_checksum.c
         src/cpu_65816_math.c
-        src/save_system.c
+        src/save_system.c src/save_paths.c
         src/atomic_replace.c
         src/localization/unicode_grapheme.c
     )
@@ -3226,7 +3242,7 @@ if(BUILD_TESTING)
         tests/actraiser_localization_schedule_test.c
         src/sim/sim_menu_model.c
         src/sim/sim_menu_help.c
-        src/save_system.c
+        src/save_system.c src/save_paths.c
         src/atomic_replace.c
         src/localization/text_presentation.c
         src/actraiser/actraiser_localization_schedule.c

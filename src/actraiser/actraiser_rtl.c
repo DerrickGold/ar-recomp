@@ -2906,7 +2906,7 @@ static void ActRaiser_DioramaHudObjFinish(int width) {
    * and the wrong column, so the promoted icon was never erased from the tilted
    * plane -- it rode the OBJ plane into the scene as a full-size sprite (the
    * priority-3 fire icon floating mid-scene, measured at gf1636 of
-   * saves/artifacts2.rec).
+   * saves/legacy/artifacts2.rec).
    *
    * The plane side goes through the apron geometry rather than re-deriving it,
    * so this function and the apron pass cannot disagree about where a screen

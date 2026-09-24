@@ -87,13 +87,13 @@ static void InspectorInfo(char *buffer, size_t buffer_size) {
  * "press Down four times" style broke every time a row landed above the one
  * under test. */
 enum {
-  kSection_Video = 0,
+  kSection_Save = 0,
+  kSection_Video,
   kSection_Action3D,
   kSection_Town3D,
   kSection_Audio,
   kSection_Controls,
   kSection_Cheats,
-  kSection_Save,
   /* The in-game manual: a player-facing section, so it sits ahead of System's
    * host commands. */
   kSection_Manual,
@@ -151,9 +151,10 @@ static void CheckManualSectionAvailability(void) {
   CHECK(SettingsOverlay_GetNavigationState(&selected, NULL, NULL, &total));
   CHECK(selected == kSection_Save);
   CHECK(total == kPlayerSectionCountWithoutManual);
+  NavToSection(kSection_Cheats);
 
   /* DOWN skips the hidden raw Manual section and lands on System. Its visible
-   * ordinal closes the gap, followed by Localization, Regions and then Video. */
+   * ordinal closes the gap, followed by Localization, Regions and then Saves. */
   CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
   CHECK(SettingsOverlay_GetNavigationState(&selected, NULL, NULL, NULL));
   CHECK(selected == kSystemVisibleOrdinalWithoutManual);
@@ -165,7 +166,7 @@ static void CheckManualSectionAvailability(void) {
   CHECK(selected == kSection_Regional - 1);
   CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
   CHECK(SettingsOverlay_GetNavigationState(&selected, NULL, NULL, NULL));
-  CHECK(selected == kSection_Video);
+  CHECK(selected == kSection_Save);
 
   /* UP must likewise skip the missing section. Restoring availability inserts
    * Manual back ahead of System and makes it reachable again. */
@@ -1851,6 +1852,322 @@ static uint64_t CheckRegionBadges(ArRenderDevice *device, SDL_Renderer *renderer
   return hash;
 }
 
+static int slot_start_calls;
+static bool slot_start_succeeds, slot_fixture_full, slot_fixture_prepared, slot_fixture_unavailable;
+static bool slot_fixture_randomized=true;
+static uint32_t slot_fixture_seed=678901;
+static unsigned slot_draft_calls;
+static uint64_t slot_active_fingerprint=111;
+static uint64_t slot_empty_fingerprint=222;
+static ArRegionalSession slot_started_draft;
+static bool FakeSlotsScan(SaveSlotCollection *out) {
+  *out=(SaveSlotCollection){.active=0,.writable=true};
+  out->slots[0]=(SaveSlotDetails){.state=kSaveSlot_Ready,.fingerprint=slot_active_fingerprint,.saved_at=1790270000,
+      .summary={.name="ASTRA",.level=5,.acts_cleared=3,.death_heim=0}};
+  out->slots[0].randomizer=RandomizerConfig_Default();
+  for(int i=1;i<kSaveSlotCount;++i)out->slots[i]=(SaveSlotDetails){.state=kSaveSlot_Empty,.fingerprint=slot_empty_fingerprint};
+  out->slots[2]=out->slots[0];
+  snprintf(out->slots[2].summary.name,sizeof(out->slots[2].summary.name),"LUNA");
+  out->slots[2].summary.level=10;out->slots[2].summary.acts_cleared=8;
+  out->slots[2].randomizer.enabled=slot_fixture_randomized;out->slots[2].randomizer.seed=slot_fixture_seed;
+  CHECK(ArRegionalProfiles_Expand(&out->slots[0].regions.requested,kArRegionalProfile_Gameplay,
+      kArRegionalSource_Japan,&out->slots[2].regions.requested));
+  out->slots[2].regions.effective=out->slots[2].regions.requested;
+  for(int i=0;i<kSaveSlotCount;++i)if(out->slots[i].state==kSaveSlot_Ready) {
+    ActRaiserRegionalRulesView *view=&out->slots[i].regions;
+    CHECK(ArRegionalProfiles_Describe(&view->requested,view->profiles));
+    CHECK(ArRegionalProfiles_Describe(&view->effective,view->active_profiles));
+    ActRaiserRegionalSettings_DescribeChoices(&view->requested,&view->effective,view->choices);
+  }
+  if(slot_fixture_prepared) {
+    out->slots[1].prepared=true;
+    out->slots[1].regions=out->slots[2].regions;
+    out->slots[1].randomizer=out->slots[2].randomizer;
+  }
+  if(slot_fixture_full)
+    for(int i=1;i<kSaveSlotCount;++i)out->slots[i]=out->slots[0];
+  if(slot_fixture_unavailable)out->slots[1].state=kSaveSlot_Unavailable;
+  return true;
+}
+static bool FakeSlotDraft(unsigned slot,ArRegionalSession *out,SaveError *error) {
+  (void)error;*out=(ArRegionalSession){.slot=slot,.campaign={7},.revision=1};
+  ++slot_draft_calls;
+  out->randomizer=RandomizerConfig_Default();out->randomizer.seed=42;
+  if(slot_fixture_prepared){out->randomizer.enabled=slot_fixture_randomized;out->randomizer.seed=slot_fixture_seed;}
+  return true;
+}
+static bool FakeSlotView(const ArRegionalSession *draft,ActRaiserRegionalRulesView *out) {
+  *out=(ActRaiserRegionalRulesView){.requested=draft->requested,.effective=draft->effective,
+      .new_game=true,.editable=true,.revision=draft->revision};
+  memcpy(out->campaign,draft->campaign,sizeof(out->campaign));
+  if(!ArRegionalProfiles_Describe(&out->requested,out->profiles) ||
+      !ArRegionalProfiles_Describe(&out->effective,out->active_profiles))return false;
+  ActRaiserRegionalSettings_DescribeChoices(&out->requested,&out->effective,out->choices);
+  return true;
+}
+static bool FakeSlotStart(unsigned slot,uint64_t fingerprint,const ArRegionalSession *draft,SaveError *error) {
+  CHECK(slot==1 && fingerprint==slot_empty_fingerprint && draft);++slot_start_calls;
+  if(draft)slot_started_draft=*draft;
+  if(!slot_start_succeeds){slot_empty_fingerprint=333;snprintf(error->message,sizeof(error->message),"Fixture write failed; source retained.");return false;}
+  SettingsOverlay_Close();return true;
+}
+static void SlotReviewFrame(SDL_Renderer *renderer,SDL_Surface *surface,const char *name) {
+  const char *directory=getenv("AR_SAVE_SLOTS_REVIEW_DIR");if(!renderer || !directory)return;
+  SDL_SetRenderDrawColor(renderer,12,22,34,255);CHECK(SDL_RenderClear(renderer));
+  SettingsOverlay_Render((ArRenderRectI){0,0,surface->w,surface->h});CHECK(SDL_RenderPresent(renderer));
+  char path[1024];snprintf(path,sizeof(path),"%s/%s.bmp",directory,name);CHECK(SDL_SaveBMP(surface,path));
+}
+static void TestSaveSlotMenu(SDL_Renderer *renderer,SDL_Surface *surface) {
+  SettingsOverlay_Close();Settings_Init();g_settings.show_debug_settings=true;
+  const SettingsOverlaySaveSlotHooks hooks={.scan=FakeSlotsScan,.draft=FakeSlotDraft,.view=FakeSlotView,.start=FakeSlotStart};
+  SettingsOverlay_SetSaveSlotHooks(&hooks);SettingsOverlay_Open();
+  NavToSection(kSection_Save);
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false)); /* Direct entry, no Actions tab. */
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(),"slot_list"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_UP,true,false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(),"slot_advanced"));
+  SlotReviewFrame(renderer,surface,"slots-advanced-button");
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
+  RowToKey("save_export_srm");
+  CHECK(SettingsOverlay_HandleKey(SDLK_X,true,false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(),"slot_advanced"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN,true,false));
+  SlotReviewFrame(renderer,surface,"slots-summary");
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(),"slot_use"));
+  SlotReviewFrame(renderer,surface,"slots-focus");
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));CHECK(!slot_start_calls); /* active occupied slot */
+  CHECK(SettingsOverlay_HandleKey(SDLK_X,true,false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_X,true,false));
+  CHECK(SettingsOverlay_IsOpen()); /* Back returns to the settings overlay */
+  CHECK(SettingsOverlay_OpenSaveSlots(true));
+  int original_seed=g_settings.rando_seed;bool original_enabled=g_settings.rando_enable;
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));CHECK(!strcmp(SettingsOverlay_SelectedKey(),"slot_type"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN,true,false));CHECK(!strcmp(SettingsOverlay_SelectedKey(),"slot_seed"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_UP,true,false));
+  SlotReviewFrame(renderer,surface,"slots-seed");
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(),"slot_seed"));
+  RowToKey("slot_options");CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(),"rando_regional_action"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT,true,false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_W,true,false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(),"rando_enemy_hp"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT,true,false));
+  SlotReviewFrame(renderer,surface,"slots-options");
+  CHECK(SettingsOverlay_HandleKey(SDLK_F3,true,false));
+  SlotReviewFrame(renderer,surface,"slots-option-help");
+  CHECK(SettingsOverlay_HandleKey(SDLK_X,true,false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_X,true,false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(),"slot_options"));
+  /* Returning to the list and reopening this draft must not reroll its seed. */
+  unsigned drafts_before=slot_draft_calls;
+  CHECK(SettingsOverlay_HandleKey(SDLK_X,true,false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
+  CHECK(slot_draft_calls==drafts_before);
+  RowToKey("slot_regions");CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_X,true,false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(),"slot_regions"));
+  RowToKey("slot_start");
+  SlotReviewFrame(renderer,surface,"slots-new-game");
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));CHECK(!strcmp(SettingsOverlay_SelectedKey(),"slot_confirm"));
+  SlotReviewFrame(renderer,surface,"slots-confirm");
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));CHECK(!slot_start_calls); /* Cancel is default */
+  CHECK(SettingsOverlay_IsOpen() && !strcmp(SettingsOverlay_SelectedKey(),"slot_start"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));CHECK(SettingsOverlay_HandleKey(SDLK_UP,true,false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));CHECK(slot_start_calls==1 && SettingsOverlay_IsOpen());
+  CHECK(slot_started_draft.randomizer.enabled && slot_started_draft.randomizer.seed==100000042);
+  CHECK(slot_started_draft.randomizer.regional_action && slot_started_draft.randomizer.hp_percent==101);
+  CHECK(g_settings.rando_seed==original_seed && g_settings.rando_enable==original_enabled);
+  slot_start_succeeds=true;
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));CHECK(SettingsOverlay_HandleKey(SDLK_UP,true,false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));CHECK(slot_start_calls==2 && !SettingsOverlay_IsOpen());
+  /* Prepared campaigns remain distinct from truly free slots; reopening one
+   * preserves its recipe even from the ordinary (non-randomizer) entry. */
+  slot_fixture_prepared=true;
+  g_settings.show_debug_settings=false;
+  SettingsOverlay_Open();CHECK(SettingsOverlay_OpenSaveSlots(false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN,true,false));
+  SlotReviewFrame(renderer,surface,"slots-prepared");
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(),"slot_regions"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN,true,false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(),"slot_start"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN,true,false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(),"slot_regions")); /* No hidden type/seed/options rows. */
+  RowToKey("slot_start");CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
+  SlotReviewFrame(renderer,surface,"slots-prepared-confirm-debug-off");
+  CHECK(SettingsOverlay_HandleKey(SDLK_UP,true,false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));CHECK(slot_start_calls==3);
+  CHECK(slot_started_draft.randomizer.enabled && slot_started_draft.randomizer.seed==678901);
+  SettingsOverlay_Close();slot_fixture_prepared=false;
+  slot_fixture_full=true;g_settings.show_debug_settings=true;
+  SettingsOverlay_Open();CHECK(SettingsOverlay_OpenSaveSlots(true));
+  SlotReviewFrame(renderer,surface,"slots-full");
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(),"slot_use"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));CHECK(slot_start_calls==3);
+  SettingsOverlay_Close();slot_fixture_full=false;
+  slot_fixture_unavailable=true;
+  SettingsOverlay_Open();CHECK(SettingsOverlay_OpenSaveSlots(false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN,true,false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));CHECK(slot_start_calls==3);
+  SlotReviewFrame(renderer,surface,"slots-unavailable");
+  SettingsOverlay_Close();slot_fixture_unavailable=false;
+  slot_empty_fingerprint=222;
+  SettingsOverlay_SetSaveSlotHooks(NULL);
+}
+
+static uint64_t SlotFrameHash(SDL_Renderer *renderer,SDL_Surface *surface) {
+  CHECK(SDL_SetRenderDrawColor(renderer,12,22,34,255));CHECK(SDL_RenderClear(renderer));
+  SettingsOverlay_Render((ArRenderRectI){0,0,surface->w,surface->h});CHECK(SDL_RenderPresent(renderer));
+  uint64_t hash=UINT64_C(14695981039346656037);
+  const uint8_t *pixels=surface->pixels;
+  for(int i=0;i<surface->pitch*surface->h;++i){hash^=pixels[i];hash*=UINT64_C(1099511628211);}
+  return hash;
+}
+static void TestSaveSlotRandomizerGate(SDL_Renderer *renderer,SDL_Surface *surface) {
+  const SettingsOverlaySaveSlotHooks hooks={.scan=FakeSlotsScan,.draft=FakeSlotDraft,.view=FakeSlotView,.start=FakeSlotStart};
+  uint64_t frames[2][3][2]={0};
+  for(int debug=0;debug<2;++debug)for(int variant=0;variant<3;++variant) {
+    SettingsOverlay_Close();Settings_Init();g_settings.show_debug_settings=debug;
+    slot_fixture_seed=variant==1?123456789:678901;
+    slot_fixture_randomized=variant!=2;
+    SettingsOverlay_SetSaveSlotHooks(&hooks);SettingsOverlay_Open();
+    if(!debug)CHECK(!SettingsOverlay_OpenSaveSlots(true));
+    CHECK(SettingsOverlay_OpenSaveSlots(false));
+    int tab=-1,count=0;
+    CHECK(SettingsOverlay_GetTabState(&tab,&count) && tab==0 && count==(debug?3:2));
+    CHECK(SettingsOverlay_HandleKey(SDLK_LEFT,true,false));
+    CHECK(SettingsOverlay_GetTabState(&tab,NULL) && tab==count-1);
+    CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT,true,false));
+    CHECK(SettingsOverlay_GetTabState(&tab,NULL) && tab==0);
+    CHECK(SettingsOverlay_HandleKey(SDLK_DOWN,true,false));
+    CHECK(SettingsOverlay_HandleKey(SDLK_DOWN,true,false)); /* Saved randomized campaign. */
+    CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
+    for(int row=0;row<10;++row)CHECK(SettingsOverlay_HandleKey(SDLK_DOWN,true,false));
+    frames[debug][variant][0]=SlotFrameHash(renderer,surface);
+    if(!variant)SlotReviewFrame(renderer,surface,debug?"slots-debug-on":"slots-debug-off");
+    CHECK(SettingsOverlay_HandleKey(SDLK_F3,true,false));
+    for(int row=0;row<10;++row) {
+      frames[debug][variant][1]^=SlotFrameHash(renderer,surface);
+      frames[debug][variant][1]*=UINT64_C(1099511628211);
+      CHECK(SettingsOverlay_HandleKey(SDLK_DOWN,true,false));
+    }
+  }
+  for(int view=0;view<2;++view) {
+    CHECK(frames[0][0][view]==frames[0][1][view]); /* Seed does not affect hidden UI. */
+    CHECK(frames[0][0][view]==frames[0][2][view]); /* Neither does the on/off status. */
+    CHECK(frames[1][0][view]!=frames[1][1][view]); /* Debug UI still shows the stored seed. */
+  }
+  slot_fixture_seed=678901;slot_fixture_randomized=true;
+  SettingsOverlay_Close();Settings_Init();g_settings.show_debug_settings=true;
+  SettingsOverlay_SetSaveSlotHooks(&hooks);SettingsOverlay_Open();
+  CHECK(SettingsOverlay_OpenSaveSlots(true));
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
+  RowToKey("slot_seed");CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
+  g_settings.show_debug_settings=false;SettingsOverlay_Refresh();
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(),"slot_regions"));
+  RowToKey("slot_start");CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_UP,true,false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
+  CHECK(!slot_started_draft.randomizer.enabled); /* A fresh draft cannot bypass the gate. */
+  SettingsOverlay_Open();CHECK(SettingsOverlay_OpenSaveSlots(false));
+  g_settings.show_debug_settings=true;SettingsOverlay_Refresh();NavToTab(2);
+  CHECK(SettingsOverlay_HandleKey(SDLK_F3,true,false));
+  g_settings.show_debug_settings=false;SettingsOverlay_Refresh();
+  int tab=-1,count=0;
+  CHECK(SettingsOverlay_GetTabState(&tab,&count) && tab==0 && count==2);
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN,true,false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(),"slot_regions")); /* Details were dismissed. */
+  SettingsOverlay_Close();SettingsOverlay_SetSaveSlotHooks(NULL);
+}
+
+/* Exercise localized layout through the same input path as the release tour.
+ * Native-renderer snapshots are optional; navigation assertions always run. */
+static void TestSaveAdvancedActions(SDL_Renderer *renderer,SDL_Surface *surface) {
+  SettingsOverlay_Close();Settings_Init();g_settings.show_debug_settings=true;
+  const SettingsOverlaySaveSlotHooks hooks={.scan=FakeSlotsScan};
+  SettingsOverlay_SetSaveSlotHooks(&hooks);SettingsOverlay_Open();NavToSection(kSection_Save);
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN,true,false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN,true,false)); /* Preview LUNA. */
+  for(unsigned i=0;i<3;++i)CHECK(SettingsOverlay_HandleKey(SDLK_UP,true,false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(),"slot_advanced"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
+  RowToKey("save_import");SlotReviewFrame(renderer,surface,"advanced-active-target");
+  int calls=s_action_calls;
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(),"slot_confirm"));
+  SlotReviewFrame(renderer,surface,"advanced-import-confirm");
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));CHECK(s_action_calls==calls); /* Default cancel. */
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_X,true,false));CHECK(s_action_calls==calls);
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
+  ++slot_active_fingerprint;
+  CHECK(SettingsOverlay_HandleKey(SDLK_UP,true,false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));CHECK(s_action_calls==calls); /* Changed target. */
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_UP,true,false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
+  CHECK(s_action_calls==++calls && s_action_desc==Settings_Find("save_import"));
+  const char *edits[]={"save_apply_session","save_apply_persist"};
+  for(unsigned i=0;i<2;++i) {
+    RowToKey(edits[i]);CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
+    CHECK(!strcmp(SettingsOverlay_SelectedKey(),"slot_confirm"));
+    CHECK(SettingsOverlay_HandleKey(SDLK_X,true,false));CHECK(s_action_calls==calls);
+    CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
+    CHECK(SettingsOverlay_HandleKey(SDLK_UP,true,false));CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
+    CHECK(s_action_calls==++calls && s_action_desc==Settings_Find(edits[i]));
+  }
+  SettingsOverlay_Close();SettingsOverlay_SetSaveSlotHooks(NULL);slot_active_fingerprint=111;
+}
+static void TestSaveSlotLocales(SDL_Renderer *renderer,SDL_Surface *surface) {
+  for(unsigned locale=0;locale<kArUiLocale_Count;++locale) {
+    SettingsOverlay_Close();Settings_Init();g_settings.show_debug_settings=true;
+    g_settings.interface_language=locale;
+    const SettingsOverlaySaveSlotHooks hooks={.scan=FakeSlotsScan,.draft=FakeSlotDraft,.view=FakeSlotView};
+    SettingsOverlay_SetSaveSlotHooks(&hooks);SettingsOverlay_Open();NavToSection(kSection_Save);
+    char name[96];
+#define SLOT_LOCALE_FRAME(label) do { \
+      snprintf(name,sizeof(name),"%s-%s",ArUiCatalog_LocaleTag(locale),label); \
+      SlotReviewFrame(renderer,surface,name); \
+    } while(0)
+    SLOT_LOCALE_FRAME("navigation");
+    CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
+    CHECK(!strcmp(SettingsOverlay_SelectedKey(),"slot_list"));
+    CHECK(SettingsOverlay_HandleKey(SDLK_DOWN,true,false));
+    CHECK(SettingsOverlay_HandleKey(SDLK_DOWN,true,false));
+    SLOT_LOCALE_FRAME("summary");
+    CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT,true,false));SLOT_LOCALE_FRAME("regions");
+    CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT,true,false));SLOT_LOCALE_FRAME("randomizer");
+    CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));SLOT_LOCALE_FRAME("switch-action");
+    CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
+    CHECK(!strcmp(SettingsOverlay_SelectedKey(),"slot_confirm"));SLOT_LOCALE_FRAME("switch-confirm");
+    CHECK(SettingsOverlay_HandleKey(SDLK_X,true,false));CHECK(SettingsOverlay_HandleKey(SDLK_X,true,false));
+    CHECK(SettingsOverlay_HandleKey(SDLK_UP,true,false));CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
+    CHECK(!strcmp(SettingsOverlay_SelectedKey(),"slot_type"));
+    CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false)); /* Randomized setup. */
+    RowToKey("slot_regions");CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));SLOT_LOCALE_FRAME("setup-regions");
+    CHECK(SettingsOverlay_HandleKey(SDLK_X,true,false));
+    CHECK(!strcmp(SettingsOverlay_SelectedKey(),"slot_regions"));
+    RowToKey("slot_start");CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));SLOT_LOCALE_FRAME("setup-confirm");
+    CHECK(SettingsOverlay_HandleKey(SDLK_X,true,false));CHECK(SettingsOverlay_HandleKey(SDLK_X,true,false));
+    CHECK(SettingsOverlay_HandleKey(SDLK_UP,true,false));CHECK(SettingsOverlay_HandleKey(SDLK_UP,true,false));
+    CHECK(!strcmp(SettingsOverlay_SelectedKey(),"slot_advanced"));
+    CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));RowToKey("save_import");SLOT_LOCALE_FRAME("advanced-target");
+    CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));SLOT_LOCALE_FRAME("advanced-confirm");
+#undef SLOT_LOCALE_FRAME
+    SettingsOverlay_Close();
+  }
+  Settings_Init();SettingsOverlay_SetSaveSlotHooks(NULL);
+}
+
+#include "save_slots_release_capture.inc"
+
 int main(int argc, char **argv) {
   if (argc == 2 && !strcmp(argv[1], "--dump-layer-help")) {
     s_dump_catalog = true;
@@ -2559,6 +2876,8 @@ int main(int argc, char **argv) {
   NavToSection(kSection_Save);
   NavToTab(kSaveEditorPage_Actions);
   CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "save_slots"));
+  RowToKey("save_backend");
   CHECK(!strcmp(SettingsOverlay_SelectedKey(), "save_backend"));
   CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
   CHECK(g_settings.save_backend == 1);
@@ -2890,6 +3209,11 @@ int main(int argc, char **argv) {
     CHECK(!SettingsOverlay_BeginDebugPanelDrag(0, 0));
   }
 
+  TestSaveSlotMenu(renderer,surface);
+  TestSaveSlotRandomizerGate(renderer,surface);
+  TestSaveAdvancedActions(renderer,surface);
+  TestSaveSlotLocales(renderer,surface);
+  CaptureSaveSlotsReleaseTour(renderer,surface);
   SettingsOverlay_SetManualHooks(NULL);
   SettingsOverlay_Destroy();
 #ifdef AR_OVERLAY_UI_FONT

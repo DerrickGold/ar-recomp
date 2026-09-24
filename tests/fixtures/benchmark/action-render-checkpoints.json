@@ -3,7 +3,7 @@
   "checkpoints": {
     "aitos-flat": {
       "description": "Wide Aitos action traversal, native flat composition with enhanced effects",
-      "replay": "saves/aitos-r4-natural.rec",
+      "replay": "saves/legacy/aitos-r4-natural.rec",
       "sram_base64": "tests/fixtures/benchmark/action-routes-seed.srm.b64",
       "sram_sha256": "11dcdfb6c28cbf97f4ccd5f3c8ba1cf831f1864d029d6f8aaf67ad962ab79858",
       "settings": "tests/fixtures/benchmark/action-render-settings.ini",
@@ -18,7 +18,7 @@
     },
     "aitos-diorama": {
       "description": "Same Aitos traversal, enabling enhanced action after native room entry",
-      "replay": "saves/aitos-r4-natural.rec",
+      "replay": "saves/legacy/aitos-r4-natural.rec",
       "sram_base64": "tests/fixtures/benchmark/action-routes-seed.srm.b64",
       "sram_sha256": "11dcdfb6c28cbf97f4ccd5f3c8ba1cf831f1864d029d6f8aaf67ad962ab79858",
       "settings": "tests/fixtures/benchmark/action-render-settings.ini",
@@ -33,7 +33,7 @@
     },
     "death-heim-flat": {
       "description": "Wide Death Heim action and effects traversal, flat composition",
-      "replay": "saves/death-heim-r8-r10-natural.rec",
+      "replay": "saves/legacy/death-heim-r8-r10-natural.rec",
       "sram_base64": "tests/fixtures/benchmark/action-routes-seed.srm.b64",
       "sram_sha256": "11dcdfb6c28cbf97f4ccd5f3c8ba1cf831f1864d029d6f8aaf67ad962ab79858",
       "settings": "tests/fixtures/benchmark/action-render-settings.ini",
@@ -48,7 +48,7 @@
     },
     "death-heim-diorama": {
       "description": "Same Death Heim traversal with enhanced action composition",
-      "replay": "saves/death-heim-r8-r10-natural.rec",
+      "replay": "saves/legacy/death-heim-r8-r10-natural.rec",
       "sram_base64": "tests/fixtures/benchmark/action-routes-seed.srm.b64",
       "sram_sha256": "11dcdfb6c28cbf97f4ccd5f3c8ba1cf831f1864d029d6f8aaf67ad962ab79858",
       "settings": "tests/fixtures/benchmark/action-render-settings.ini",

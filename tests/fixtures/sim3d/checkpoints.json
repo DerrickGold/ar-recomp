@@ -3,7 +3,7 @@
   "checkpoints": {
     "D0-fillmore-idle": {
       "description": "Fillmore baseline with no position-picker transition",
-      "replay": "saves/sim.rec",
+      "replay": "saves/legacy/sim.rec",
       "sram_base64": "tests/fixtures/sim3d/fillmore-legacy-seed.srm.b64",
       "sram_sha256": "645a38e35665a1bf8d1e8e5b830219d40a5cae58769e5de97dd4ae74b5537f89",
       "quit_frames": 1200,
@@ -26,7 +26,7 @@
     },
     "D0-fillmore-picker": {
       "description": "Fillmore baseline plus one Direct the People / Building Direction picker sequence",
-      "replay": "saves/simdev.rec",
+      "replay": "saves/legacy/simdev.rec",
       "sram_base64": "tests/fixtures/sim3d/fillmore-legacy-seed.srm.b64",
       "sram_sha256": "645a38e35665a1bf8d1e8e5b830219d40a5cae58769e5de97dd4ae74b5537f89",
       "quit_frames": 5000,
@@ -62,7 +62,7 @@
     },
     "D0-fillmore-repeat-picker": {
       "description": "Fillmore baseline plus Direct the People / Building Direction and two targeted-miracle picker sequences",
-      "replay": "saves/lairseal.rec",
+      "replay": "saves/legacy/lairseal.rec",
       "sram_base64": "tests/fixtures/sim3d/fillmore-legacy-seed.srm.b64",
       "sram_sha256": "645a38e35665a1bf8d1e8e5b830219d40a5cae58769e5de97dd4ae74b5537f89",
       "quit_frames": 6000,
@@ -108,7 +108,7 @@
     },
     "D0-fillmore-actions": {
       "description": "Fillmore miracle, Napper, Blue Dragon lightning, and house-fire behavior coverage",
-      "replay": "saves/sim-actions.rec",
+      "replay": "saves/legacy/sim-actions.rec",
       "sram_base64": "tests/fixtures/sim3d/sim-actions-seed.srm.b64",
       "sram_sha256": "1a6f35b3c8ba771633b86f07bc924eb1b45dceede5f6c8543442bc511ec86749",
       "settings": "tests/fixtures/sim3d/sim-actions-settings.ini",
@@ -185,7 +185,7 @@
     },
     "D0-fillmore-wide-full-edge": {
       "description": "Wide Full preserves the native left town-camera extent while finite margins suppress Wide Raw tile wrapping",
-      "replay": "saves/sim-actions.rec",
+      "replay": "saves/legacy/sim-actions.rec",
       "sram_base64": "tests/fixtures/sim3d/sim-actions-seed.srm.b64",
       "sram_sha256": "1a6f35b3c8ba771633b86f07bc924eb1b45dceede5f6c8543442bc511ec86749",
       "settings": "tests/fixtures/sim3d/sim-actions-settings.ini",
@@ -215,7 +215,7 @@
     },
     "D1-metadata-actions": {
       "description": "D1 frame-owned SIM record/OAM metadata plus complete semantic OBJ atlas over every captured miracle and enemy/effect variation; output remains authentic",
-      "replay": "saves/sim-actions.rec",
+      "replay": "saves/legacy/sim-actions.rec",
       "sram_base64": "tests/fixtures/sim3d/sim-actions-seed.srm.b64",
       "sram_sha256": "1a6f35b3c8ba771633b86f07bc924eb1b45dceede5f6c8543442bc511ec86749",
       "settings": "tests/fixtures/sim3d/sim-actions-settings.ini",
@@ -337,7 +337,7 @@
     },
     "D2-flat-actions": {
       "description": "D2 same-frame A0 authentic versus A1 pitch-zero separated Mode-1 recomposition across miracles, pickers, enemies, and grounded effects",
-      "replay": "saves/sim-actions.rec",
+      "replay": "saves/legacy/sim-actions.rec",
       "sram_base64": "tests/fixtures/sim3d/sim-actions-seed.srm.b64",
       "sram_sha256": "1a6f35b3c8ba771633b86f07bc924eb1b45dceede5f6c8543442bc511ec86749",
       "settings": "tests/fixtures/sim3d/sim-actions-settings.ini",
@@ -486,7 +486,7 @@
     },
     "D3a-ground-projection": {
       "description": "D3a A1 flat separated composite versus A2 projected BG1 ground, with fixed OBJ/UI bypass and picker fallback",
-      "replay": "saves/sim-actions.rec",
+      "replay": "saves/legacy/sim-actions.rec",
       "sram_base64": "tests/fixtures/sim3d/sim-actions-seed.srm.b64",
       "sram_sha256": "1a6f35b3c8ba771633b86f07bc924eb1b45dceede5f6c8543442bc511ec86749",
       "settings": "tests/fixtures/sim3d/sim-actions-settings.ini",
@@ -593,7 +593,7 @@
     },
     "D3b-object-billboards": {
       "description": "D3b A2 projected ground versus A3 per-object, shared-foot, screen-facing world billboards with picker fallback",
-      "replay": "saves/sim-actions.rec",
+      "replay": "saves/legacy/sim-actions.rec",
       "sram_base64": "tests/fixtures/sim3d/sim-actions-seed.srm.b64",
       "sram_sha256": "1a6f35b3c8ba771633b86f07bc924eb1b45dceede5f6c8543442bc511ec86749",
       "settings": "tests/fixtures/sim3d/sim-actions-settings.ini",
@@ -700,7 +700,7 @@
     },
     "D3b-wide-hud-handoff": {
       "description": "Wide Full D3b keeps the relocated hourglass out of the projected BG1 ground while restoring the standard HUD capture",
-      "replay": "saves/sim-actions.rec",
+      "replay": "saves/legacy/sim-actions.rec",
       "sram_base64": "tests/fixtures/sim3d/sim-actions-seed.srm.b64",
       "sram_sha256": "1a6f35b3c8ba771633b86f07bc924eb1b45dceede5f6c8543442bc511ec86749",
       "settings": "tests/fixtures/sim3d/sim-actions-settings.ini",
@@ -793,7 +793,7 @@
     },
     "D3c-virtual-height": {
       "description": "D3c A3 world billboards versus A4 classified virtual height across the angel, arrow, enemy families, people, animals, boats, building lightning, ground fire, and Napper pluck",
-      "replay": "saves/sim-actions.rec",
+      "replay": "saves/legacy/sim-actions.rec",
       "sram_base64": "tests/fixtures/sim3d/sim-actions-seed.srm.b64",
       "sram_sha256": "1a6f35b3c8ba771633b86f07bc924eb1b45dceede5f6c8543442bc511ec86749",
       "settings": "tests/fixtures/sim3d/sim-actions-settings.ini",
@@ -912,7 +912,7 @@
     },
     "D3c-height-variations": {
       "description": "D3c object-variation matrix: the full action replay must classify the angel arrow, Napper ground-pluck, Blue Dragon building lightning, and ground fire onto their documented planes without lifting a map object",
-      "replay": "saves/sim-actions.rec",
+      "replay": "saves/legacy/sim-actions.rec",
       "sram_base64": "tests/fixtures/sim3d/sim-actions-seed.srm.b64",
       "sram_sha256": "1a6f35b3c8ba771633b86f07bc924eb1b45dceede5f6c8543442bc511ec86749",
       "settings": "tests/fixtures/sim3d/sim-actions-settings.ini",
@@ -1009,7 +1009,7 @@
     },
     "D4a-hard-shadows": {
       "description": "D4a A4 virtual height versus A5 ground-only hard shadows: only classified casters contribute a silhouette, lifted casters offset along the light, and the arrow, building lightning, ground fire, miracle clouds, cursors, and fixed HUD leave the ground untouched",
-      "replay": "saves/sim-actions.rec",
+      "replay": "saves/legacy/sim-actions.rec",
       "sram_base64": "tests/fixtures/sim3d/sim-actions-seed.srm.b64",
       "sram_sha256": "1a6f35b3c8ba771633b86f07bc924eb1b45dceede5f6c8543442bc511ec86749",
       "settings": "tests/fixtures/sim3d/sim-actions-settings.ini",
@@ -1124,7 +1124,7 @@
     },
     "D4b-soft-shadows": {
       "description": "D4b A5 hard shadows versus A6 soft shadows: the blur changes only edge softness on the ground mask, never a shadow's position, its opacity ownership, or any scene geometry",
-      "replay": "saves/sim-actions.rec",
+      "replay": "saves/legacy/sim-actions.rec",
       "sram_base64": "tests/fixtures/sim3d/sim-actions-seed.srm.b64",
       "sram_sha256": "1a6f35b3c8ba771633b86f07bc924eb1b45dceede5f6c8543442bc511ec86749",
       "settings": "tests/fixtures/sim3d/sim-actions-settings.ini",
@@ -1251,7 +1251,7 @@
     },
     "D4c-rim-light": {
       "description": "D4c A6 soft shadows versus A7 rim light: the lit edge is confined to billboard silhouettes, and disabling it restores unmodified sprite colour",
-      "replay": "saves/sim-actions.rec",
+      "replay": "saves/legacy/sim-actions.rec",
       "sram_base64": "tests/fixtures/sim3d/sim-actions-seed.srm.b64",
       "sram_sha256": "1a6f35b3c8ba771633b86f07bc924eb1b45dceede5f6c8543442bc511ec86749",
       "settings": "tests/fixtures/sim3d/sim-actions-settings.ini",
@@ -1379,7 +1379,7 @@
     },
     "D2-margin-object-exit": {
       "description": "D2 fidelity at a map edge: an actor whose X wraps negative rasterizes into the widescreen margin columns, where the collapsed live area means the hardware shows black. Every frame of this replay must stay byte-exact, so no arrow leaving the screen sideways can drop a frame to the authentic composite",
-      "replay": "saves/sim-arrowbug.rec",
+      "replay": "saves/legacy/sim-arrowbug.rec",
       "sram_base64": "tests/fixtures/sim3d/sim-actions-seed.srm.b64",
       "sram_sha256": "1a6f35b3c8ba771633b86f07bc924eb1b45dceede5f6c8543442bc511ec86749",
       "settings": "tests/fixtures/sim3d/sim-arrow-margin-settings.ini",
@@ -1445,7 +1445,7 @@
     },
     "D5a-world-underlay": {
       "description": "D5a A7 rim light versus A8 world underlay: the live world map extends the ground past the town edge, the town's own 32x32-tile window stays punched out so nothing is drawn twice, and the D2 byte-equality gate is untouched because the underlay is present-side only",
-      "replay": "saves/sim-actions.rec",
+      "replay": "saves/legacy/sim-actions.rec",
       "sram_base64": "tests/fixtures/sim3d/sim-actions-seed.srm.b64",
       "sram_sha256": "1a6f35b3c8ba771633b86f07bc924eb1b45dceede5f6c8543442bc511ec86749",
       "settings": "tests/fixtures/sim3d/sim-actions-settings.ini",
@@ -1577,7 +1577,7 @@
     },
     "D6a-lightning-miracle": {
       "description": "Frame-owned Lightning miracle emitter with portable additive local light and deterministic strike particles; disabling the two effect stages restores the identical projected scene",
-      "replay": "saves/sim-actions.rec",
+      "replay": "saves/legacy/sim-actions.rec",
       "sram_base64": "tests/fixtures/sim3d/sim-actions-seed.srm.b64",
       "sram_sha256": "1a6f35b3c8ba771633b86f07bc924eb1b45dceede5f6c8543442bc511ec86749",
       "settings": "tests/fixtures/sim3d/sim-actions-settings.ini",
@@ -1706,7 +1706,7 @@
     },
     "D6b-blue-ground-fire": {
       "description": "Palette-2 blue ground fire emitted by Lightning impact children and shared enemy transitions, with continuous local light and rising particles",
-      "replay": "saves/sim-actions.rec",
+      "replay": "saves/legacy/sim-actions.rec",
       "sram_base64": "tests/fixtures/sim3d/sim-actions-seed.srm.b64",
       "sram_sha256": "1a6f35b3c8ba771633b86f07bc924eb1b45dceede5f6c8543442bc511ec86749",
       "settings": "tests/fixtures/sim3d/sim-actions-settings.ini",
@@ -1835,7 +1835,7 @@
     },
     "D6c-blue-dragon-lightning": {
       "description": "Blue Dragon state-6 building strike using the shared lightning renderer while preserving body-frame gaps inside one record lifecycle",
-      "replay": "saves/sim-actions.rec",
+      "replay": "saves/legacy/sim-actions.rec",
       "sram_base64": "tests/fixtures/sim3d/sim-actions-seed.srm.b64",
       "sram_sha256": "1a6f35b3c8ba771633b86f07bc924eb1b45dceede5f6c8543442bc511ec86749",
       "settings": "tests/fixtures/sim3d/sim-actions-settings.ini",
@@ -1967,7 +1967,7 @@
       "description": "D7 background voxel town: Aitos renders authored models, mountain relief, the volcano and audited terrain through the real GPU depth path. The composite must differ from AR_SIM3D_VOXEL_PRESET=Off, must be identical across two identical passes, must match this host's recorded reference, and must leave the authentic framebuffer untouched",
       "default_binary": "build-release/ActRaiserRecomp",
       "default_config": "dev-config.ini",
-      "replay": "saves/aitos-eruption.rec",
+      "replay": "saves/legacy/aitos-eruption.rec",
       "sram_base64": "tests/fixtures/sim3d/aitos-voxel-seed.srm.b64",
       "sram_sha256": "26ec2474882a69dff576f518f614a094f58f1428c807faf83230d72fe4c13568",
       "settings": "tests/fixtures/sim3d/aitos-voxel-settings.ini",

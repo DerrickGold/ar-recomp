@@ -143,7 +143,13 @@ static bool s_inventory_icon_pending;
 static uint32_t s_prices_revision;
 static ArRegionalCostSnapshot s_prices, s_miracle_prices;
 
+static bool s_prepared_new_game;
+static ArRegionalRules s_prepared_rules;
 bool ActRaiserRegional_Initialize(ArRegionalCampaignIdentity identity, void *context) {
+  return ActRaiserRegional_InitializeSlot(0,identity,context);
+}
+bool ActRaiserRegional_InitializeSlot(uint32_t slot,ArRegionalCampaignIdentity identity,void *context) {
+  s_prepared_new_game=false;
   Randomizer_ReleaseCampaign();
   s_profile_cache = (ArRegionalProfileCache){0};
   s_title_open=false;
@@ -182,7 +188,7 @@ bool ActRaiserRegional_Initialize(ArRegionalCampaignIdentity identity, void *con
   s_speed_active = s_speed_delegate = s_speed_scale_delegate = false;
   s_speed_maximum = 9;
   s_trace = getenv("AR_REGIONAL_TRACE") != NULL;
-  ArRegionalCampaign_Init(&s_campaign, 0, identity, context);
+  ArRegionalCampaign_Init(&s_campaign, slot, identity, context);
   /* Initialization may follow a previous campaign in the same process. Reset
    * every family before overlaying an available durable companion. */
   s_boot_requested = (ArRegionalRules){0};
@@ -219,7 +225,7 @@ bool ActRaiserRegional_Initialize(ArRegionalCampaignIdentity identity, void *con
   if (SaveSystem_CopyDurableImage(image)) {
     ArRegionalSession loaded;
     SaveError error = {{0}};
-    SaveCheckpointStatus status = ArRegionalSession_Load(&loaded, 0,
+    SaveCheckpointStatus status = ArRegionalSession_Load(&loaded, slot,
         SaveSystem_ActivePath(), image, &error);
     s_boot_valid = status == kSaveCheckpoint_Ready || status == kSaveCheckpoint_Missing;
     if (status == kSaveCheckpoint_Ready) {
@@ -233,6 +239,16 @@ bool ActRaiserRegional_Initialize(ArRegionalCampaignIdentity identity, void *con
   }
   SaveCommitHost host = ArRegionalCampaign_SaveHost(&s_campaign);
   return SaveSystem_SetCommitHost(&host);
+}
+
+bool ActRaiserRegional_StageNewGame(const ArRegionalSession *draft) {
+  if(!draft || draft->slot!=s_campaign.slot || s_title_open || s_campaign.active_valid)return false;
+  uint8_t bytes[kSaveCheckpointPayloadMax];size_t size;
+  if(!ArRegionalSession_Encode(draft,bytes,sizeof(bytes),&size) ||
+      !Randomizer_StageTitleConfig(&draft->randomizer))return false;
+  s_prepared_rules=draft->requested;s_prepared_new_game=true;
+  s_boot_requested=s_boot_effective=draft->requested;
+  return true;
 }
 
 bool ActRaiserRegional_CopySupport(ArRegionalSupportSnapshot *snapshot) {
@@ -307,10 +323,8 @@ bool ActRaiser_RegionalPopulationEntry(CpuState *cpu) {
 static bool PopulationRecoveryPath(char *path,size_t capacity) {
   uint8_t id[16];
   if(!s_campaign.identity || !s_campaign.identity(s_campaign.identity_context,id))return false;
-  const int prefix=snprintf(path,capacity,"%s.redevelopment-",SaveSystem_ActivePath());
-  if(prefix<=0 || (size_t)prefix+33>capacity)return false;
-  for(unsigned i=0;i<16;++i)snprintf(path+prefix+2*i,3,"%02x",id[i]);
-  return true;
+  SaveError error={{0}};
+  return SaveSystem_RecoveryPath(id,path,capacity,&error);
 }
 
 RecompReturn ActRaiser_RegionalPopulation(CpuState *cpu) {
@@ -1368,7 +1382,7 @@ static bool PrepareContinue(void) {
   for (;;) {
     uint8_t image[kActRaiserSramSize];
     SaveError error = {{0}};
-    if (!SaveSystem_CopyDurableImage(image) ||
+    if (!SaveSystem_ValidateActive(&error) || !SaveSystem_CopyDurableImage(image) ||
         !ArRegionalCampaign_Continue(&s_campaign, SaveSystem_ActivePath(), image, &error)) {
       s_campaign.active_valid = false;
       fprintf(stderr, "[regional] Continue preserved saves: %s\n", error.message);
@@ -1381,7 +1395,8 @@ static bool PrepareContinue(void) {
        * history. Upgrade the bound companion once; never modify SRAM. */
       const SaveFileFormat format=SaveSystem_ActiveBackend()==kSaveBackend_Ini?kSaveFileFormat_Ini:kSaveFileFormat_NativeSrm;
       if (ActRaiserLairReloads_AdoptSaved(&s_campaign.active.reloads,image) &&
-          ArRegionalSession_Save(&s_campaign.active,format,SaveSystem_ActivePath(),image,image,&error)) return true;
+          ArRegionalSession_Save(&s_campaign.active,format,SaveSystem_ActivePath(),image,image,&error) &&
+          SaveSystem_ValidateActive(&error)) return true;
       s_campaign.active_valid=false;
       if (!s_continue_prompt(s_continue_context,kActRaiserRegionalContinue_SaveFailed)) return false;
       continue;
@@ -1457,6 +1472,13 @@ static void PrepareTitleDraft(void) {
     draft.active.effective.level_goals=s_return_rules.level_goals;
     draft.active.effective.story=s_return_rules.story;
     s_return_rules_valid=false;
+  }
+  if(s_prepared_new_game) {
+    draft.active.requested=s_prepared_rules;
+    draft.active.effective.support=s_prepared_rules.support;
+    draft.active.effective.level_goals=s_prepared_rules.level_goals;
+    draft.active.effective.story=s_prepared_rules.story;
+    s_prepared_new_game=false;
   }
   s_title_draft=draft.active;s_title_artwork=0;s_title_open=true;
 }

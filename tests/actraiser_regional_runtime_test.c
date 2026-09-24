@@ -64,6 +64,7 @@ static bool recipe_bound;
 bool Randomizer_CaptureConfig(RandomizerConfig *out){*out=draft_recipe.generator?draft_recipe:RandomizerConfig_Default();return true;}
 bool Randomizer_BindCampaign(const RandomizerConfig *c){assert(RandomizerConfig_Valid(c));bound_recipe=c->generator?*c:RandomizerConfig_Default();recipe_bound=true;return true;}
 void Randomizer_ReleaseCampaign(void){recipe_bound=false;}
+bool Randomizer_StageTitleConfig(const RandomizerConfig *config){if(recipe_bound || !RandomizerConfig_Valid(config))return false;draft_recipe=*config;return true;}
 RandomizerConfig Randomizer_CurrentConfig(void){RandomizerConfig c;Randomizer_CaptureConfig(&c);return recipe_bound?bound_recipe:c;}
 void ActRaiserStagePlacements_Reset(void) { ++placement_resets; }
 bool ActRaiserStagePlacements_Fingerprint(const uint8_t previous[32],uint8_t out[32],bool *native) {
@@ -316,9 +317,15 @@ void cpu_write16(CpuState *cpu, uint8 bank, uint16 address, uint16 value) {
 }
 static unsigned title_edits;
 static ActRaiserRegionalRulesView title_view;
+static const ArRegionalRules *expected_prepared_rules;
 RecompReturn bank_02_A622_M1X0(CpuState *cpu) {
   assert(!ActRaiser_RegionalTitleEntry(cpu)); /* delegates exactly once */
   assert(ActRaiserRegional_CopyRulesView(&title_view) && title_view.new_game);
+  if(expected_prepared_rules) {
+    assert(!memcmp(&title_view.requested,expected_prepared_rules,sizeof(title_view.requested)));
+    assert(title_view.lair_history_ready && title_view.lair_reload_ready && !title_view.population_pending);
+    ++title_calls;return title_return;
+  }
   if(title_edits==3) {
     assert(title_view.requested.spell_inventory==2 && title_view.requested.mode_entry.source[0]==2);
     assert(ArRegionalDifficulty_Choice(&title_view.requested.difficulty)==kArRegionalDifficultyChoice_Expert);
@@ -1924,5 +1931,44 @@ int main(void) {
   assert(ActRaiserRegional_CopyRulesView(&view) && !memcmp(&view.requested,&rolled,sizeof(rolled)));
   draft_recipe=(RandomizerConfig){0};
   remove(path); remove(companion);
+  /* A prepared slot can restart repeatedly before its first native save.
+   * The exact seed and requested rules reach New Game, then Continue binds
+   * that slot's saved recipe even when the global title draft has changed. */
+  ArRegionalSession prepared;const uint8_t prepared_id[16]={8};
+  const ArRegionalCostPolicy baseline_costs={{0}};
+  assert(ArRegionalSession_NewGame(&prepared,4,prepared_id,&baseline_costs));
+  assert(ArRegionalProfiles_Expand(&prepared.requested,kArRegionalProfile_Gameplay,kArRegionalSource_Japan,&prepared.effective));
+  prepared.requested=prepared.effective;
+  for(unsigned town=0;town<6;++town)assert(ArRegionalLairHistory_InitTown(&prepared.lairs,town));
+  assert(ArRegionalLairReloads_Init(&prepared.reloads));
+  prepared.randomizer=RandomizerConfig_Default();prepared.randomizer.enabled=true;
+  prepared.randomizer.seed=0;prepared.randomizer.regional_action=true;
+  for(unsigned restart=0;restart<2;++restart) {
+    memset(image,0x60,sizeof(image));
+    assert(SaveSystem_Attach(image,sizeof(image),kSaveBackend_NativeSrm,path,"unused-regional-runtime.ini",&error));
+    assert(SaveSystem_LoadActive(&error));
+    assert(ActRaiserRegional_InitializeSlot(4,Identity,NULL));
+    prepared.slot=3;assert(!ActRaiserRegional_StageNewGame(&prepared));prepared.slot=4;
+    assert(ActRaiserRegional_StageNewGame(&prepared));
+    assert(!recipe_bound && draft_recipe.seed==0 && draft_recipe.enabled);
+    assert(ActRaiserRegional_BeginTitleArtwork(&title_art));
+    assert(ActRaiserRegional_CopyRulesView(&view) && view.new_game &&
+        !memcmp(&view.requested,&prepared.requested,sizeof(view.requested)));
+    assert(!ActRaiserRegional_StageNewGame(&prepared)); /* cannot replace an open title */
+  }
+  assert(ArRegionalRandomizer_Choose(&prepared.requested,&prepared.randomizer,&rolled));
+  expected_prepared_rules=&prepared.requested;
+  cpu=(CpuState){.PB=2,.DB=2,.m_flag=1};ram[0x336]=0;
+  assert(ActRaiser_RegionalTitle(&cpu)==RECOMP_RETURN_NORMAL && recipe_bound && bound_recipe.seed==0);
+  expected_prepared_rules=NULL;
+  assert(ActRaiserRegional_CopyRulesView(&view) && !memcmp(&view.requested,&rolled,sizeof(rolled)));
+  assert(SaveSystem_BeginNativeWrite(&error));memset(image,0,sizeof(image));Save_RecomputeChecksum(image);
+  assert(SaveSystem_EndNativeWrite(true,&error) && SaveSystem_AutoPersistIfChanged(&error));
+  assert(ArRegionalSession_Load(&loaded,4,path,image,&error)==kSaveCheckpoint_Ready && loaded.randomizer.seed==0);
+  draft_recipe.seed=777;
+  assert(ActRaiserRegional_InitializeSlot(4,Identity,NULL));ram[0x336]=1;
+  assert(ActRaiser_RegionalTitle(&cpu)==RECOMP_RETURN_NORMAL && recipe_bound && bound_recipe.seed==0);
+  assert(ActRaiserRegional_CopyRulesView(&view) && !memcmp(&view.requested,&rolled,sizeof(rolled)));
+  remove(path);remove(companion);
   return 0;
 }

@@ -23,13 +23,17 @@ Usage:
   python3 diff_mx.py <recomp_mx> <oracle_mx> [--offset N] [--from GF] [--to GF] [--context M]
 
 Capture recipe (play each LIVE; cheats OFF on the recomp so its run is faithful):
+  # Work on a copy so the archived starting save stays unchanged:
+  capture_dir=$(mktemp -d)
+  cp saves/legacy/save.srm "$capture_dir/save.srm"
   # recomp -- play to the boss; it will crash in the transition (fine, the
   # AR_MX_OUT trace is flushed up to the crash):
   env AR_INF_HP=0 AR_FREEZE_TIMER=0 AR_MOONJUMP=0 AR_NO_KNOCKBACK=0 \
+      AR_SAVE_NATIVE_PATH="$capture_dir/save.srm" \
       AR_MX_OUT=/tmp/recomp_mx.txt ./build/ActRaiserRecomp ar.sfc --config dev-config.ini
   # oracle -- play live (window opens), beat the boss, watch it enter sim:
   cd tools/oracle && env SNESREF_MX_OUT=/tmp/oracle_mx.txt \
-      SNESREF_SRAM_IN=../../saves/save.srm ./snesref ./snes9x_libretro.dylib ../../ar.sfc
+      SNESREF_SRAM_IN=../../saves/legacy/save.srm ./snesref ./snes9x_libretro.dylib ../../ar.sfc
   python3 diff_mx.py /tmp/recomp_mx.txt /tmp/oracle_mx.txt
 """
 import sys

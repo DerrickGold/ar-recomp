@@ -112,8 +112,10 @@ static void TestDefaultsAndMetadata(void) {
    * source, presentation, and enhanced-font preferences, plus an independent
    * host interface language. Connected SIM adds one default-on underlay row.
    * The Graphics API choice adds one restart-class Display row. Modern SIM
-   * adds its presentation choice, player scale, and two independent Describe bindings. */
-  CHECK(g_setting_desc_count == 297);
+   * adds its presentation choice, player scale, and two independent Describe bindings.
+   * Seeded regional rolls add two options; save slots add two entry actions. */
+  if(g_setting_desc_count != 301)fprintf(stderr,"Setting descriptors: expected 301, got %d\n",g_setting_desc_count);
+  CHECK(g_setting_desc_count == 302);
   for (int i = 0; i < g_setting_desc_count; i++) {
     const SettingDesc *a = &g_setting_descs[i];
     CHECK(a->key && a->key[0] && a->label && a->tooltip);
@@ -1712,8 +1714,7 @@ static void TestScalePercentToOutput(void) {
   Settings_SetHostPixelDensity(1.0f);          /* restore for later tests */
 }
 
-/* Portable data stays relative to the working root. A packaged game anchors
- * that root beside its executable; a developer run keeps its launch cwd. */
+/* The launcher selects portable/custom/per-user CWD before data IO. */
 static void TestUserDataFile(void) {
   char buf[1024];
   UserDataFile(buf, sizeof buf, "settings.ini");
@@ -1722,6 +1723,8 @@ static void TestUserDataFile(void) {
   char srm[1024];
   UserDataFile(srm, sizeof srm, "saves/save.srm");
   CHECK(strcmp(srm, "saves/save.srm") == 0);
+  char short_path[4]="old";UserDataFile(short_path,sizeof(short_path),"settings.ini");
+  CHECK(!short_path[0]);
 }
 
 /* W4-2: the "Rim light" row must disappear when the renderer cannot honour the

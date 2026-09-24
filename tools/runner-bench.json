@@ -43,14 +43,14 @@
     {
       "name": "mode7_worldmap",
       "description": "Repeated authentic-width Mode 7 and world-map transitions",
-      "replay": "saves/fillmore-r1-natural.rec",
+      "replay": "saves/legacy/fillmore-r1-natural.rec",
       "frames": 6000,
       "save_seed": "tests/fixtures/benchmark/fillmore-natural-seed.srm.b64"
     },
     {
       "name": "sky_palace_wide",
       "description": "Wide Sky Palace margin patch and restore transaction",
-      "replay": "saves/fillmore-r1-natural.rec",
+      "replay": "saves/legacy/fillmore-r1-natural.rec",
       "frames": 1200,
       "save_seed": "tests/fixtures/benchmark/fillmore-natural-seed.srm.b64",
       "environment": {
@@ -63,7 +63,7 @@
     {
       "name": "sim_actions",
       "description": "Simulation-mode actions with the replay's pinned settings",
-      "replay": "saves/sim-actions.rec",
+      "replay": "saves/legacy/sim-actions.rec",
       "frames": 6000,
       "settings": "tests/fixtures/sim3d/sim-actions-settings.ini",
       "save_seed": "tests/fixtures/sim3d/sim-actions-seed.srm.b64"
@@ -71,7 +71,7 @@
     {
       "name": "aitos_wide",
       "description": "Wide action-mode traversal with background HLE enabled",
-      "replay": "saves/aitos-r4-natural.rec",
+      "replay": "saves/legacy/aitos-r4-natural.rec",
       "frames": 4000,
       "save_seed": "tests/fixtures/benchmark/action-routes-seed.srm.b64",
       "required_output": ["[act-enter] $18=04 $19=04"],
@@ -91,7 +91,7 @@
     {
       "name": "death_heim_wide",
       "description": "Wide late-game action and effects workload",
-      "replay": "saves/death-heim-r8-r10-natural.rec",
+      "replay": "saves/legacy/death-heim-r8-r10-natural.rec",
       "frames": 4000,
       "save_seed": "tests/fixtures/benchmark/action-routes-seed.srm.b64",
       "required_output": ["[act-enter] $18=07 $19=01"],

@@ -6,6 +6,8 @@
 
 /* After SaveSystem Attach/Load, before the first CPU dispatch. */
 bool ActRaiserRegional_Initialize(ArRegionalCampaignIdentity identity, void *context);
+bool ActRaiserRegional_InitializeSlot(uint32_t slot,ArRegionalCampaignIdentity identity,void *context);
+bool ActRaiserRegional_StageNewGame(const ArRegionalSession *draft);
 typedef enum ActRaiserRegionalPopulationNotice {
   kActRaiserRegionalPopulation_Confirm,
   kActRaiserRegionalPopulation_Failed,

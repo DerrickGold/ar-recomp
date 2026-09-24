@@ -66,7 +66,7 @@ static bool Identity(void *context,uint8_t id[16]){(void)context;memset(id,7,16)
 typedef struct Faults {SaveCommitHost inner;unsigned calls,fail_at;bool recovery_fail,name_fail;const char *name_block;} Faults;
 static bool Prepare(void *context,SaveError *error){Faults *f=context;return f->inner.prepare_story(f->inner.context,error);}
 static bool Commit(void *context,SaveFileFormat format,const char *path,const uint8_t *expected,
-    const uint8_t *image,SaveCommitKind kind,const char *import,SaveError *error) {
+    const uint8_t *image,SaveCommitKind kind,const SaveImportSource *import,SaveError *error) {
   Faults *f=context;++f->calls;
   if(f->calls==f->fail_at)return false;
   const bool ok=f->inner.commit(f->inner.context,format,path,expected,image,kind,import,error);

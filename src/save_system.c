@@ -1,6 +1,7 @@
 #include "snesrecomp/support/utf8_fs.h"
 
 #include "save_system.h"
+#include "save_paths.h"
 
 #include "byte_order.h"
 #include "atomic_replace.h"
@@ -88,9 +89,13 @@ typedef struct SaveRuntime {
   bool native_write_aborted;
   bool story_pending;
   SaveCommitHost commit_host;
+  SaveStorageHooks storage_hooks;
+  SavePaths paths;
+  bool paths_valid;
   bool backup_taken;
   bool localized_name_valid;
   bool localized_name_dirty;
+  bool localized_name_clear_pending;
   char localized_compatibility[kActRaiserPlayerNameStorageBytes];
   char localized_name[kLocalizedNameCapacity];
 } SaveRuntime;
@@ -151,6 +156,59 @@ static bool ValidLocalizedName(const char *name, uint8_t *grapheme_count) {
   return count != 0;
 }
 
+/* Both the slot browser and live loader use the same companion validation.
+ * A stale, truncated or foreign-name sidecar never replaces the native name. */
+static bool ReadLocalizedName(FILE *file, const uint8_t *image,
+                              const char *native_name, char *out, size_t capacity) {
+  uint8_t header[kLocalizedNameMagicBytes + 4 + kActRaiserPlayerNameStorageBytes + 2];
+  if (fread(header, 1, sizeof(header), file) != sizeof(header) ||
+      memcmp(header, "ARNAME1\0", kLocalizedNameMagicBytes)) return false;
+  char compatibility[kActRaiserPlayerNameStorageBytes];
+  memcpy(compatibility, header + kLocalizedNameMagicBytes + 4, sizeof(compatibility));
+  compatibility[sizeof(compatibility) - 1] = 0;
+  const uint16_t length = ByteOrder_ReadLe16(header + sizeof(header) - 2);
+  char name[kLocalizedNameCapacity] = {0};
+  if (!length || length >= sizeof(name) || length >= capacity ||
+      fread(name, 1, length, file) != length || fgetc(file) != EOF || ferror(file) ||
+      ByteOrder_ReadLe32(header + kLocalizedNameMagicBytes) != Save_ComputeChecksum(image) ||
+      strcmp(compatibility, native_name) || strlen(name) != length ||
+      !ValidLocalizedName(name, NULL)) return false;
+  memcpy(out, name, length + 1);
+  return true;
+}
+
+bool Save_ReadSummary(const char *path,const uint8_t *image,SaveSummary *out) {
+  if(!path || !image || !out || !Save_ChecksumValid(image))return false;
+  SaveSummary next={.level=-1,.acts_cleared=0,.death_heim=-1};
+  size_t name_size=0;
+  for(;name_size<kActRaiserPlayerNameCharacterLimit;++name_size) {
+    uint8_t c=image[kSavePlayerName+name_size];if(!c || c==255)break;
+    if(c<32 || c>126){name_size=0;break;}
+    next.name[name_size]=(char)c;
+  }
+  next.name[name_size]=0;
+  unsigned level=ByteOrder_ReadLe16(image+kSaveMasterLevel);
+  if(level>=1 && level<=17)next.level=(int)level;
+  for(unsigned i=0;i<kActRaiserSaveRegionCount;++i) {
+    int state=-1;Save_GetRegionState(image,i,&state);next.towns[i]=state;
+    if(state==2 || state==3){if(next.acts_cleared>=0)++next.acts_cleared;}
+    else if(state==4){if(next.acts_cleared>=0)next.acts_cleared+=2;}
+    else if(state!=0){next.towns[i]=-1;next.acts_cleared=-1;}
+  }
+  if(image[kSaveDeathHeimState]==3)next.death_heim=4;
+  else if(!image[kSaveDeathHeimState])next.death_heim=(image[kSaveDeathHeimUnlocked]&1)?1:0;
+  char companion[kLocalizedNamePathBytes];
+  int n=snprintf(companion,sizeof(companion),"%s.arname",path);
+  FILE *f=n>0 && (size_t)n<sizeof(companion)?sr_fopen(companion,"rb"):NULL;
+  if(f) {
+    char name[kLocalizedNameCapacity];
+    if(ReadLocalizedName(f,image,next.name,name,sizeof(name)))
+      snprintf(next.name,sizeof(next.name),"%s",name);
+    fclose(f);
+  }
+  *out=next;return true;
+}
+
 bool SaveSystem_SetLocalizedPlayerName(const char *utf8_name,
                                        const char *compatibility_name) {
   if (!s_runtime.live || !ValidLocalizedName(utf8_name, NULL) ||
@@ -171,6 +229,7 @@ bool SaveSystem_SetLocalizedPlayerName(const char *utf8_name,
            sizeof(s_runtime.localized_compatibility), "%s",
            compatibility_name);
   s_runtime.localized_name_valid = true;
+  s_runtime.localized_name_clear_pending = false;
   s_runtime.localized_name_dirty = true;
   return true;
 }
@@ -648,6 +707,12 @@ static bool WriteLocalizedNameBody(FILE *file, const void *context,
 
 static bool WriteLocalizedNameExtension(SaveError *error) {
   if (!s_runtime.localized_name_valid) {
+    if(s_runtime.localized_name_clear_pending) {
+      char path[kLocalizedNamePathBytes];
+      if(!LocalizedNamePath(path,sizeof(path)) || (sr_remove(path) && errno!=ENOENT))
+        return Fail(error,"cannot retire the previous campaign name");
+      s_runtime.localized_name_clear_pending=false;
+    }
     s_runtime.localized_name_dirty = false;
     return true;
   }
@@ -678,51 +743,27 @@ static bool WriteLocalizedNameExtension(SaveError *error) {
 static void LoadLocalizedNameExtension(void) {
   s_runtime.localized_name_valid = false;
   s_runtime.localized_name_dirty = false;
+  s_runtime.localized_name_clear_pending = false;
   char path[kLocalizedNamePathBytes];
   if (!LocalizedNamePath(path, sizeof(path))) return;
   FILE *file = sr_fopen(path, "rb");
   if (!file) return;
-  static const uint8_t kMagic[kLocalizedNameMagicBytes] = {
-      'A', 'R', 'N', 'A', 'M', 'E', '1', 0};
-  uint8_t header[kLocalizedNameMagicBytes + 4 +
-                 kActRaiserPlayerNameStorageBytes + 2] = {0};
-  const bool header_read =
-      fread(header, 1, sizeof(header), file) == sizeof(header);
-  const uint32_t checksum = header_read
-      ? ByteOrder_ReadLe32(header + kLocalizedNameMagicBytes) : 0;
-  char compatibility[kActRaiserPlayerNameStorageBytes];
-  if (header_read) {
-    memcpy(compatibility, header + kLocalizedNameMagicBytes + 4,
-           sizeof(compatibility));
-    compatibility[sizeof(compatibility) - 1u] = 0;
-  } else {
-    compatibility[0] = 0;
-  }
-  const uint16_t utf8_bytes = header_read
-      ? ByteOrder_ReadLe16(
-            header + kLocalizedNameMagicBytes + 4 +
-                kActRaiserPlayerNameStorageBytes)
-      : 0;
-  char name[kLocalizedNameCapacity] = {0};
-  const bool body_read = utf8_bytes && utf8_bytes < sizeof(name) &&
-      fread(name, 1, utf8_bytes, file) == utf8_bytes && fgetc(file) == EOF;
+  char native_name[kActRaiserPlayerNameStorageBytes], name[kLocalizedNameCapacity];
+  const bool valid = CopyNativePlayerName(native_name, sizeof(native_name)) &&
+      ReadLocalizedName(file, s_runtime.live, native_name, name, sizeof(name));
   fclose(file);
-  char native_name[kActRaiserPlayerNameStorageBytes];
-  if (!header_read || memcmp(header, kMagic, sizeof(kMagic)) || !body_read ||
-      checksum != Save_ComputeChecksum(s_runtime.live) ||
-      !CopyNativePlayerName(native_name, sizeof(native_name)) ||
-      strcmp(native_name, compatibility) || strlen(name) != utf8_bytes ||
-      !ValidLocalizedName(name, NULL)) {
+  if (!valid) {
     fprintf(stderr,
             "[saves] ignored stale or invalid localized-name extension %s\n",
             path);
     return;
   }
   snprintf(s_runtime.localized_compatibility,
-           sizeof(s_runtime.localized_compatibility), "%s", compatibility);
+           sizeof(s_runtime.localized_compatibility), "%s", native_name);
   snprintf(s_runtime.localized_name, sizeof(s_runtime.localized_name), "%s",
            name);
   s_runtime.localized_name_valid = true;
+  s_runtime.localized_name_clear_pending = false;
 }
 
 bool SaveSystem_Attach(uint8_t *live_sram, size_t size,
@@ -797,6 +838,26 @@ void SaveSystem_ResyncShadowRange(size_t offset, size_t size) {
   memcpy(s_runtime.shadow + offset, s_runtime.live + offset, size);
 }
 
+bool SaveSystem_SetStorageRoot(const char *root,int slot,SaveError *error) {
+  if(!s_runtime.live)return Fail(error,"save system is not attached");
+  SavePaths paths;
+  if(!SavePaths_Init(&paths,root,slot,error))return false;
+  s_runtime.paths=paths;s_runtime.paths_valid=true;return true;
+}
+bool SaveSystem_DefaultImportPath(char *out,size_t capacity,SaveError *error) {
+  return s_runtime.paths_valid ? SavePaths_Import(&s_runtime.paths,out,capacity,error) :
+      Fail(error,"save storage location is not configured");
+}
+bool SaveSystem_RecoveryPath(const uint8_t id[16],char *out,size_t capacity,SaveError *error) {
+  if(s_runtime.paths_valid && s_runtime.paths.slot>=0)
+    return SavePaths_Recovery(&s_runtime.paths,id,out,capacity,error);
+  if(!id || !out || !capacity || !s_runtime.live)return Fail(error,"no active recovery location");
+  const int prefix=snprintf(out,capacity,"%s.redevelopment-",ActivePath());
+  if(prefix<=0 || (size_t)prefix+33>capacity)return Fail(error,"recovery path is too long");
+  for(unsigned i=0;i<16;++i)snprintf(out+prefix+2*i,3,"%02x",id[i]);
+  return true;
+}
+
 bool SaveSystem_SetCommitHost(const SaveCommitHost *host) {
   if (!s_runtime.live || s_runtime.native_write_active ||
       s_runtime.native_write_aborted || s_runtime.story_pending ||
@@ -807,17 +868,36 @@ bool SaveSystem_SetCommitHost(const SaveCommitHost *host) {
 }
 
 static bool CommitImage(const uint8_t *image, SaveCommitKind kind,
-                         const char *import_path, SaveError *error) {
+                         const SaveImportSource *import_source, SaveError *error) {
   const SaveCommitHost *host = &s_runtime.commit_host;
+  if(kind==kSaveCommit_Import && import_source && import_source->payload_size && !host->commit)
+    return Fail(error,"campaign metadata requires its game feature owner");
+  if(s_runtime.storage_hooks.before_commit &&
+      !s_runtime.storage_hooks.before_commit(s_runtime.storage_hooks.context,error))return false;
   bool ok = host->commit
       ? host->commit(host->context, ActiveFormat(), ActivePath(),
                      s_runtime.durable_valid ? s_runtime.durable : NULL,
-                     image, kind, import_path, error)
+                     image, kind, import_source, error)
       : Save_WriteFile(ActiveFormat(), ActivePath(), image, error);
   if (!ok) return false;
   memcpy(s_runtime.durable, image, kActRaiserSramSize);
   s_runtime.durable_valid = true;
+  if(s_runtime.storage_hooks.committed)
+    s_runtime.storage_hooks.committed(s_runtime.storage_hooks.context,image);
   return true;
+}
+
+void SaveSystem_SetStorageHooks(const SaveStorageHooks *hooks) {
+  s_runtime.storage_hooks=hooks?*hooks:(SaveStorageHooks){0};
+}
+bool SaveSystem_ValidateActive(SaveError *error) {
+  return !s_runtime.storage_hooks.validate ||
+      s_runtime.storage_hooks.validate(s_runtime.storage_hooks.context,error);
+}
+bool SaveSystem_FlushForSwitch(SaveError *error) {
+  if(!s_runtime.live || s_runtime.native_write_active || s_runtime.native_write_aborted)
+    return Fail(error,"A native save is unfinished. Complete or reload it before changing slots.");
+  return SaveSystem_AutoPersistIfChanged(error);
 }
 
 static void NotifyReload(void) {
@@ -827,6 +907,7 @@ static void NotifyReload(void) {
 }
 
 bool SaveSystem_LoadActive(SaveError *error) {
+  if(!SaveSystem_ValidateActive(error))return false;
   ClearError(error);
   if (!s_runtime.live) return Fail(error, "save system is not attached");
   if (s_runtime.native_write_active)
@@ -953,35 +1034,17 @@ SaveBackend SaveSystem_ActiveBackend(void) {
   return s_runtime.backend;
 }
 
-/* Named BackupCopyFile, not CopyFile: <windows.h> #defines CopyFile -> CopyFileA,
- * which would token-rewrite this definition and its call into a conflict with the
- * Win32 CopyFileA prototype (a hard MSVC/MinGW compile error). */
-static bool BackupCopyFile(const char *source, const char *destination,
-                           SaveError *error) {
-  FILE *in = sr_fopen(source, "rb");
-  if (!in) return Fail(error, "cannot read %s: %s", source, strerror(errno));
-  FILE *out = sr_fopen(destination, "wb");
-  if (!out) {
-    fclose(in);
-    return Fail(error, "cannot write %s: %s", destination, strerror(errno));
-  }
-  bool success = true;
-  uint8_t buffer[kSaveCopyBufferBytes];
-  size_t count;
-  while ((count = fread(buffer, 1, sizeof(buffer), in)) != 0) {
-    if (fwrite(buffer, 1, count, out) != count) {
-      success = Fail(error, "error writing backup %s", destination);
-      break;
-    }
-  }
-  if (ferror(in)) success = Fail(error, "error reading %s", source);
-  if (fclose(in) != 0) success = Fail(error, "error closing %s", source);
-  if (fflush(out) != 0)
-    success = Fail(error, "error flushing backup %s", destination);
-  if (fclose(out) != 0)
-    success = Fail(error, "error closing backup %s", destination);
-  if (!success) sr_remove(destination);
-  return success;
+#include "save_campaign_archive.inc"
+
+bool SaveSystem_ExportToLibrary(SaveFileFormat format,bool campaign,SaveError *error) {
+  if(!s_runtime.paths_valid)return Fail(error,"save storage location is not configured");
+  char path[kHostPathCapacity];
+  const char *extension=campaign?"arsave":format==kSaveFileFormat_Ini?"ini":"srm";
+  if(!SavePaths_Export(&s_runtime.paths,extension,path,sizeof(path),error))return false;
+  bool ok=campaign?SaveSystem_ExportCampaign(path,error):SaveSystem_Export(format,path,error);
+  SavePaths_Release(path);
+  if(ok)fprintf(stderr,"[saves] export -> %s\n",path);
+  return ok;
 }
 
 static bool BackupActiveOnce(bool enabled, SaveError *error) {
@@ -997,6 +1060,13 @@ static bool BackupActiveOnce(bool enabled, SaveError *error) {
                 strerror(errno));
   }
   fclose(probe);
+  if(s_runtime.paths_valid && s_runtime.paths.slot>=0) {
+    char backup[kHostPathCapacity];
+    if(!SavePaths_Backup(&s_runtime.paths,backup,sizeof(backup),error))return false;
+    bool ok=SaveSystem_ExportCampaign(backup,error);SavePaths_Release(backup);
+    if(!ok)return false;
+    s_runtime.backup_taken=true;fprintf(stderr,"[saves] backup -> %s\n",backup);return true;
+  }
   time_t now = time(NULL);
   struct tm local_time;
 #ifdef _WIN32
@@ -1007,8 +1077,12 @@ static bool BackupActiveOnce(bool enabled, SaveError *error) {
   char timestamp[32];
   strftime(timestamp, sizeof(timestamp), "%Y%m%d-%H%M%S", &local_time);
   char backup[kSaveBackupPathBytes];
-  snprintf(backup, sizeof(backup), "%s.bak-%s", path, timestamp);
-  if (!BackupCopyFile(path, backup, error)) return false;
+  unsigned serial=0;
+  do {
+    int n=snprintf(backup,sizeof(backup),"%s.bak-%s-%03u.arsave",path,timestamp,serial++);
+    if(n<0 || (size_t)n>=sizeof(backup) || serial>1000)return Fail(error,"cannot reserve a campaign backup path");
+  } while(ArchivePathExists(backup));
+  if (!SaveSystem_ExportCampaign(backup, error)) return false;
   s_runtime.backup_taken = true;
   fprintf(stderr, "[saves] backup -> %s\n", backup);
   return true;
@@ -1232,15 +1306,30 @@ bool SaveSystem_Import(const char *path, bool auto_backup, SaveError *error) {
     return Fail(error, "invalid save import request");
   if (s_runtime.native_write_active || s_runtime.native_write_aborted || s_runtime.story_pending)
     return Fail(error, "cannot import during an incomplete native save transaction");
-  uint8_t scratch[kActRaiserSramSize];
-  if (!Save_LoadFile(FormatFromPath(path), path, scratch, error)) return false;
-  if (!BackupActiveOnce(auto_backup, error)) return false;
-  if (!CommitImage(scratch, kSaveCommit_Import, path, error)) return false;
-  memcpy(s_runtime.live, scratch, sizeof(scratch));
+  SaveCampaignArchive *archive=calloc(1,sizeof(*archive));
+  if(!archive)return Fail(error,"out of memory reading campaign archive");
+  bool is_archive=false;
+  if(!ReadCampaignImport(path,archive,&is_archive,error)){free(archive);return false;}
+  SaveImportSource source={.path=path,.payload=is_archive?archive->payload:NULL,
+    .payload_size=archive->payload_size,.archive=is_archive};
+  if(!BackupActiveOnce(auto_backup,error) ||
+      !CommitImage(archive->image,kSaveCommit_Import,&source,error)){free(archive);return false;}
+  memcpy(s_runtime.live,archive->image,sizeof(archive->image));
   SaveSystem_ResyncShadow();
-  /* Import is a save replacement, not a gameplay update. Never carry pending
-   * metadata from the previous game into an unrelated imported image. */
-  LoadLocalizedNameExtension();
+  s_runtime.localized_name_valid=false;
+  s_runtime.localized_name_dirty=true;
+  s_runtime.localized_name_clear_pending=!archive->name[0];
+  if(archive->name[0]) {
+    snprintf(s_runtime.localized_name,sizeof(s_runtime.localized_name),"%s",archive->name);
+    CopyNativePlayerName(s_runtime.localized_compatibility,sizeof(s_runtime.localized_compatibility));
+    s_runtime.localized_name_valid=true;
+  }
+  free(archive);
+  /* Gameplay and its feature checkpoint are already committed. Name writes
+   * are retryable, just like a completed native story save; do not report a
+   * failed import that invites replacing the campaign a second time. */
+  if(!WriteLocalizedNameExtension(error))
+    fprintf(stderr,"[saves] campaign imported; enhanced-name write will retry: %s\n",error?error->message:"");
   return true;
 }
 

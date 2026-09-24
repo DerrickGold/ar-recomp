@@ -265,6 +265,93 @@ This `save.ini` is game data and is separate from the menu-owned
 `settings.ini`. The latter stores runtime preferences such as the chosen save
 backend; it must never contain the SRAM payload.
 
+### Managed save slots
+
+Normal interactive boots use ten numbered directories, `saves/slots/01` through
+`saves/slots/10`, beneath the launcher-selected game data root. Each holds
+`save.srm` or `save.ini`, its `.archeckpoint`/`.arname` companions, and optional
+`new-game.ardraft`. Visible numbers map to internal slot IDs 0–9. `save_backend`
+selects the format for new slots; occupied slots retain their pinned format.
+Diagnostic paths, recording/replay and headless boots keep the external-save
+behavior. Import/export exchange files use `saves/imports` and `saves/exports`;
+managed backups and redevelopment recovery directories use `saves/backups/01`
+through `saves/backups/10`.
+
+Native launchers resolve portable/custom/per-user storage and pass an absolute
+`AR_USER_DATA_DIR`. The game honors it before executable-relative folder-bundle
+anchoring, preserves absolute launch arguments for restart, and resolves all
+save/settings leaves beneath that working root. Slot indexes contain only IDs,
+formats and relative layout information. See [data locations](manual.md#launching-the-game)
+for the Windows, macOS and Linux roots.
+
+The collection owns a process lock at `saves/slots.lock`. It reads only the
+selected format for each slot and does not select a backend by modification
+time. Missing occupied images, orphan companions, corrupt indexes and malformed
+prepared games require recovery. They cannot silently become fresh SRAM.
+
+`slots.armanager` is a 264-byte canonical little-endian record: eight-byte
+`ARSLOTS3` magic, active/previous slot bytes, a layout byte (2 or 3), a pending
+legacy-native-adoption byte (0 or 1), four reserved zero bytes, ten
+24-byte records, and an eight-byte FNV-1a checksum. Each slot record contains
+backend, ever-saved, prepared, checkpoint-required and prepared-backend bytes,
+three reserved zero bytes, a 64-bit Unix
+last-commit time and a 64-bit hash of the committed 8 KiB image. Legacy or changed
+images show filesystem modification time as approximate. Timestamps follow a
+successful native image/checkpoint commit, rather than viewing or selecting a
+slot; Unicode name-companion writes retain their existing retry behavior.
+
+Version 1 and 2 indexes migrate on open under the same collection lock. Version
+3 with layout 2 records an interrupted migration: old paths remain authoritative
+until every destination copy is verified and layout 3 is atomically published.
+The original index, root save files and drafts are retained in `legacy-layout`.
+Root originals are removed only after publication and only when byte-identical
+to their retained copies; cleanup can retry. Destination or retained-copy
+conflicts stop migration without replacing either version. Pending slot-switch
+fingerprints survive because they bind contents rather than absolute paths.
+Historical `actraiser.srm` adoption converts to the selected backend and carries
+matching companions; a genuine metadata-free save remains legacy.
+
+An observed checkpoint, a prior managed
+commit, or a prepared campaign establishes the checkpoint requirement. A genuine
+legacy Slot 1 remains eligible for adoption. The requirement is persisted before
+managed writes and after metadata-only upgrades; a missing physical or logical
+checkpoint then blocks load/Continue, export and further writes. It never becomes
+a legacy US/default campaign merely because its companion disappeared.
+
+Preparing an empty slot stores its proposed format separately. The running
+writer keeps the committed backend through failed requests. Only acknowledgement
+of a validated new-game restart promotes the prepared backend to the slot's
+committed backend.
+
+`slot-switch.arrequest` is a 40-byte restart intent with `ARSWITCH` magic,
+version 1, source/destination/new-game bytes, four reserved zero bytes, a 64-bit
+destination fingerprint, eight reserved zero bytes, and an eight-byte FNV-1a
+checksum. The fingerprint includes the selected file, `.archeckpoint`, `.arname`
+and prepared draft with explicit presence and length markers. It detects files
+changed after review. FNV is an integrity/change detector, not authentication.
+
+Before requesting restart, the host completes outgoing durable writes, rejects
+unfinished native transactions, flushes settings and disarms unscoped boot
+editor overrides. The source stays active until the next boot has validated and
+loaded the destination, initialized its regional/randomizer state, and
+acknowledged the request. It then removes the intent before allowing gameplay
+writes. Failed requests preserve the source; failed boots offer recovery.
+
+An empty destination stores its copied recipe and starting rules in
+`slots/02/new-game.ardraft` (numbered by visible slot) using the canonical regional
+session codec. The normal title/new-game path consumes that setup without
+rerolling the seed. The draft remains available across launches before the
+first Progress Log save. It is retained afterward for recovery diagnostics;
+the occupied slot's native save and checkpoint become authoritative. A durable
+ever-saved intent precedes the first native write so an interrupted first save
+cannot be mistaken for an unused slot.
+
+`tests/save_slots_test.c` covers routing, formats, lock ownership, restart
+revalidation and failed writes. `tests/save_slots_boot_test.py` accepts the game
+executable, fixture-test executable and a local ROM to exercise prepared-game
+boots, native legacy adoption, a Unicode launcher-selected data root, and
+relocation of a complete collection. All use temporary directories.
+
 ### Unicode player names and emulator interchange
 
 Unicode names do **not** change the 8 KiB SRAM layout, its native name field,
@@ -277,8 +364,9 @@ The full UTF-8 name is stored in a separate companion file by appending
 `.arname` to the active save path: `save.srm.arname` or `save.ini.arname`.
 Copy both files together to retain the enhanced spelling on another Recomp
 installation. A SNES emulator needs only the ordinary `.srm`; it displays the
-native fallback name. The save editor's import/export operations transfer the
-game image, not an imported companion file.
+native fallback name. Campaign archives include the enhanced name; raw SRAM/INI
+exports contain only the game image. Raw import accepts a matching valid name
+companion when one is supplied beside the source.
 
 Companions contain `ARNAME1\0`, the native 32-bit checksum (little-endian),
 nine compatibility-name bytes, a 16-bit UTF-8 byte length (little-endian), and
@@ -317,10 +405,42 @@ matching checkpoint. Legacy saves without metadata start with US rules in
 memory; this does not claim that historical lair counts have been reconstructed.
 Automatic completion-marker writes and persistent editor changes retain the
 durable campaign's settings, even while a different unsaved game is running.
-Import reads a matching regional companion beside the source save when present.
-Export still writes the selected game-image format only; carry the matching
-regional companion separately. This differs from the Unicode-name import
-behavior described above.
+**Export campaign** and automatic backups use a single `.arsave` archive.
+`SaveSystem_ExportCampaign` reads the durable disk image and its matching feature
+payload and optional enhanced name. It rejects changed images, invalid companions
+and incomplete native transactions. It never copies an unsaved New Game's rules.
+The atomic archive contains:
+
+| Field | Encoding |
+| --- | --- |
+| Magic | Eight bytes `ARSAVE01` |
+| Payload/name sizes | Two little-endian 32-bit lengths |
+| Native image | All 8,192 canonical SRAM bytes |
+| Campaign payload | Canonical regional-session encoding, at most 32,768 bytes; zero for legacy |
+| Enhanced name | UTF-8 bytes, no terminator; optional, at most 256 bytes |
+| Integrity | Little-endian FNV-1a 64-bit hash of all preceding bytes |
+
+Import validates bounds, exact length, integrity, SRAM checksum, name and feature
+codec before replacing gameplay. The feature owner rebinds only the destination
+slot ID; campaign identity, histories, requested/effective regional rules, seed
+and generator recipe are retained. Import commits through the normal checkpoint
+transaction, installs the donor name (or retires the previous name), and the
+menu requests a restart. A post-commit name failure remains retryable and does
+not falsely report that the gameplay import failed. The source archive remains
+available for recovery.
+
+Raw SRAM/INI exports still contain only cartridge data for emulator interchange.
+Raw import accepts a matching regional companion and optional valid name beside
+the source; missing regional metadata uses legacy defaults, and a companion from
+a different slot is rejected. Use the campaign archive to transfer between slots.
+Managed automatic backups use `backups/01/backup-YYYYMMDD-HHMMSS-NNN.arsave`,
+numbered by slot, and preserve the entire pre-edit campaign once per process
+session. Exports use `exports/slot-01-YYYYMMDD-HHMMSS-NNN.<format>`. An exclusive
+`.pending` directory reserves each name; it is released on success or failure,
+and an interrupted reservation is never reused. Failed backups block the edit.
+External diagnostic saves retain their adjacent `<active-save>.bak-...arsave`
+backup behavior. Default imports prefer `imports/import.arsave`, `.srm`, then
+`.ini`, with the older root-level names as fallbacks. `AR_SAVE_IMPORT` wins.
 
 The complete recovery-copy API is separate from ordinary Export. It reserves a
 new directory and writes `save.srm`, its matching regional companion (if present)
@@ -332,7 +452,8 @@ the caller must first persist a coherent story image, including cached actors.
 Regional metadata comes from that saved campaign, even if a different unsaved
 New Game is running. Population conversion creates this copy after confirming
 the current game state in the Sky Palace. Restoration is manual, as described
-below; ordinary save Export is not a substitute for the complete copy.
+below. Campaign archives offer the portable import/export path; raw exports do
+not substitute for a complete recovery copy.
 
 `ActRaiserStorySnapshot_Capture` provides a read-only projection of the US
 writer at `$03:A656`. It copies current WRAM into a separate SRAM-sized buffer,
@@ -353,7 +474,8 @@ destructive conversion because that companion write failed. Neither API
 alone makes redevelopment safe. The game-owned conversion runs at the Palace
 selector boundary `$01:85A2`, after native active-town cache retirement. It
 revalidates the confirmed campaign/revision and town footprint, saves a complete
-pre-change image, and reserves `<active-save>.redevelopment-<random-id>/` before
+pre-change image, and reserves `backups/<slot>/redevelopment-<random-id>/`
+(or `<active-save>.redevelopment-<random-id>/` for diagnostic saves) before
 mutating structures. Rule changes and the post-conversion image commit together;
 a failed candidate commit restores the exact changed WRAM ranges and old rules.
 
@@ -363,7 +485,7 @@ active `.srm` and its companions together, using the active save's basename.
 Remove an old companion if the recovery has none; do not pair old metadata with
 the restored image. Recovery copies always use native `.srm`, including copies
 made from the INI backend: select the native backend before using this manual
-procedure. Ordinary Import does not restore the Unicode-name companion.
+procedure. Campaign-archive Import restores the enhanced name automatically.
 
 This storage covers [the implemented regional gameplay and report options](regional-settings.md)
 and retained lair histories. Gameplay/presentation presets expand into the

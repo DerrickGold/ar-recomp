@@ -6,7 +6,7 @@
 # same save, same replayed input, one toggle (AR_ERUPT_OFF), so the traced
 # range has to come back byte-identical with the stage on and off.
 #
-#   ./tools/erupt_ab.sh saves/aitos-eruption.rec [quit_frames]
+#   ./tools/erupt_ab.sh saves/legacy/aitos-eruption.rec [quit_frames]
 #
 # WHAT THIS CAN AND CANNOT PROVE, because it is easy to over-read.
 #

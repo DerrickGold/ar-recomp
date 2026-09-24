@@ -2,7 +2,9 @@
 
 For player-facing options, see [Regional settings](regional-settings.md).
 ROM findings belong in the [technical reference](regional-differences-technical.md);
-this note covers implementation boundaries that are not obvious from filenames.
+the [HLE binding index](research-symbol-map.md#regional-hle-bindings) maps current
+native entries to their C owners. This note covers implementation boundaries
+that are not obvious from filenames.
 
 ## Ownership
 
@@ -126,3 +128,13 @@ settings cannot redirect the active run. Returning to title restores the draft.
 No seed is written into SRAM. Recipes missing from old saves are not guessed.
 Enabled recipes contribute their canonical bytes under `ARRANDSTATE-R1` to
 replay identity, including seeds whose current room happens to look identical.
+
+These seed operations reuse existing seams: `ActRaiser_RegionalTitle` at
+US `$02:A622`, the guarded `ActRaiser_RegionalContinue` at `$02:A79F`, and
+`ActRaiser_SaveStory` at `$03:A656`. They introduce no ROM entry or native
+memory allocation. Initialization/slot attachment releases any prior bound
+recipe; accepted New Game captures the current title recipe, while Continue
+loads the selected slot's exact-image checkpoint. A pending completed save
+owns a copied session, so a later unsaved campaign cannot replace its recipe.
+Host persistence and transient/native projections are distinguished in the
+[RAM ownership map](ram-map.md#regional-host-state-and-native-projections).

@@ -1,15 +1,13 @@
-/* Portable user-data paths.
- *
- * Shipped bundles anchor the process working directory beside the executable
- * before any file is opened (see portable_paths.c). Developer builds keep the
- * caller's working directory. Keeping every settings/save caller behind this
- * helper makes the load and save paths agree without sending portable data to
- * a machine-global preference directory. */
+/* The launcher establishes the data working directory before file IO. This
+ * helper deliberately does not infer a home directory or use executable paths:
+ * installed application resources may be read-only and separate from data. */
 #include "user_data_dir.h"
 
 #include <stdio.h>
 
 char *UserDataFile(char *buf, size_t size, const char *leaf) {
-  snprintf(buf, size, "%s", leaf);
+  if(!buf || !size)return buf;
+  int n=leaf?snprintf(buf,size,"%s",leaf):-1;
+  if(n<0 || (size_t)n>=size)buf[0]=0;
   return buf;
 }

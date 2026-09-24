@@ -2,14 +2,18 @@
 #include "host/campaign_identity.h"
 #include "snesrecomp/support/utf8_fs.h"
 
+#include "byte_order.h"
+#include "deterministic_hash.h"
 #include <stdio.h>
 #include <string.h>
 #ifdef _WIN32
 #include <direct.h>
+#include <windows.h>
 #define MAKE_DIR(p) _mkdir(p)
 #define REMOVE_DIR(p) _rmdir(p)
 #else
 #include <sys/stat.h>
+#include <dirent.h>
 #include <unistd.h>
 #define MAKE_DIR(p) mkdir(p, 0700)
 #define REMOVE_DIR(p) rmdir(p)
@@ -367,7 +371,114 @@ static void StorySnapshot(SaveBackend backend) {
   Remove(native); Remove(ini); remove(name_path);
 }
 
+static bool FindArchiveBackup(char *out,size_t capacity) {
+#ifdef _WIN32
+  WIN32_FIND_DATAA data;
+  HANDLE search=FindFirstFileA("regional-archive-test/backups/03/backup-*.arsave",&data);
+  if(search==INVALID_HANDLE_VALUE)return false;
+  snprintf(out,capacity,"regional-archive-test/backups/03/%s",data.cFileName);FindClose(search);return true;
+#else
+  DIR *dir=opendir("regional-archive-test/backups/03");if(!dir)return false;
+  struct dirent *entry;bool found=false;
+  while((entry=readdir(dir)))if(!strncmp(entry->d_name,"backup-",7) && strstr(entry->d_name,".arsave")) {
+    snprintf(out,capacity,"regional-archive-test/backups/03/%s",entry->d_name);found=true;break;
+  }
+  closedir(dir);return found;
+#endif
+}
+static void CampaignArchive(SaveBackend backend) {
+  const char *root="regional-archive-test",*donor="regional-archive-test/donor.srm";
+  const char *native="regional-archive-test/target.srm",*ini="regional-archive-test/target.ini";
+  const char *path=backend==kSaveBackend_Ini?ini:native;
+  const char *archive="regional-archive-test/campaign.arsave",*bad="regional-archive-test/bad.arsave";
+  CHECK(MAKE_DIR(root)==0);
+  SaveError error={{0}};uint8_t image[kActRaiserSramSize]={0},saved[kActRaiserSramSize],disk[kActRaiserSramSize];
+  memcpy(image+0x1439,"ELISE",5);Save_RecomputeChecksum(image);
+  uint8_t sequence=0;ArRegionalCampaign campaign;
+  ArRegionalCampaign_Init(&campaign,7,Identity,&sequence);
+  ArRegionalCostPolicy jp,eu;ArRegionalCosts_Init(&jp,kArRegionalSource_Japan);ArRegionalCosts_Init(&eu,kArRegionalSource_Europe);
+  CHECK(ArRegionalCampaign_NewGame(&campaign,&jp,&error));
+  campaign.active.randomizer=RandomizerConfig_Default();campaign.active.randomizer.enabled=true;
+  campaign.active.randomizer.seed=424242;campaign.active.randomizer.regional_action=true;
+  CHECK(ArRegionalSession_RequestTimers(&campaign.active,campaign.active.revision,kArRegionalSource_Europe));
+  CHECK(ArRegionalLairHistory_InitTown(&campaign.active.lairs,0));
+  CHECK(ArRegionalSession_Save(&campaign.active,kSaveFileFormat_NativeSrm,donor,NULL,image,&error));
+  ArRegionalSession exported=campaign.active;
+  CHECK(SaveSystem_Attach(image,sizeof(image),kSaveBackend_NativeSrm,donor,"unused-archive.ini",&error));
+  CHECK(SaveSystem_LoadActive(&error));SaveCommitHost host=ArRegionalCampaign_SaveHost(&campaign);
+  CHECK(SaveSystem_SetCommitHost(&host));
+  CHECK(SaveSystem_SetLocalizedPlayerName("Élise","ELISE") && SaveSystem_AutoPersistIfChanged(&error));
+  CHECK(ArRegionalCampaign_NewGame(&campaign,&eu,&error)); /* Export is the durable JP campaign. */
+  CHECK(SaveSystem_ExportCampaign(archive,&error));
+  char blocked[256];snprintf(blocked,sizeof(blocked),"%s.tmp",archive);CHECK(MAKE_DIR(blocked)==0);
+  CHECK(!SaveSystem_ExportCampaign(archive,&error));CHECK(REMOVE_DIR(blocked)==0); /* Prior archive survives. */
+  SaveCommitHost unsupported=host;unsupported.read_campaign=NULL;
+  CHECK(SaveSystem_SetCommitHost(&unsupported));CHECK(!SaveSystem_ExportCampaign(bad,&error));
+  CHECK(!sr_path_exists(bad));
+
+  ArRegionalCampaign_Init(&campaign,2,Identity,&sequence);CHECK(ArRegionalCampaign_NewGame(&campaign,&eu,&error));
+  campaign.active.randomizer=RandomizerConfig_Default();campaign.active.randomizer.seed=555;
+  ArRegionalSession previous=campaign.active;
+  image[100]=42;Save_RecomputeChecksum(image);memcpy(saved,image,sizeof(saved));
+  CHECK(ArRegionalSession_Save(&campaign.active,(SaveFileFormat)backend,path,NULL,image,&error));
+  CHECK(SaveSystem_Attach(image,sizeof(image),backend,native,ini,&error) && SaveSystem_LoadActive(&error));
+  host=ArRegionalCampaign_SaveHost(&campaign);CHECK(SaveSystem_SetCommitHost(&host));
+  CHECK(SaveSystem_SetStorageRoot(root,2,&error));
+  CHECK(SaveSystem_SetLocalizedPlayerName("エリーゼ","ELISE") && SaveSystem_AutoPersistIfChanged(&error));
+  CHECK(SaveSystem_Import(archive,true,&error));
+  ArRegionalSession loaded;exported.slot=2;
+  CHECK(ArRegionalSession_Load(&loaded,2,path,image,&error)==kSaveCheckpoint_Ready);
+  CHECK(!memcmp(&loaded,&exported,sizeof(loaded)));
+  char name[64];CHECK(SaveSystem_CopyLocalizedPlayerName("ELISE",name,sizeof(name)) && !strcmp(name,"Élise"));
+  CHECK(SaveSystem_LoadActive(&error));
+  CHECK(SaveSystem_CopyLocalizedPlayerName("ELISE",name,sizeof(name)) && !strcmp(name,"Élise"));
+  char backup[512]={0};CHECK(FindArchiveBackup(backup,sizeof(backup)));
+  CHECK(SaveSystem_Import(backup,false,&error));
+  CHECK(!memcmp(image,saved,sizeof(image)));
+  CHECK(ArRegionalSession_Load(&loaded,2,path,image,&error)==kSaveCheckpoint_Ready && !memcmp(&loaded,&previous,sizeof(loaded)));
+  CHECK(SaveSystem_CopyLocalizedPlayerName("ELISE",name,sizeof(name)) && !strcmp(name,"エリーゼ"));
+
+  /* Reject truncated, corrupt, future-version and invalid feature payloads
+   * before replacing native bytes, campaign metadata or the enhanced name. */
+  uint8_t bytes[kSaveCampaignPayloadCapacity+kActRaiserSramSize+512];
+  FILE *file=fopen(archive,"rb");CHECK(file!=NULL);size_t count=file?fread(bytes,1,sizeof(bytes),file):0;
+  if(file)fclose(file);CHECK(count>16+kActRaiserSramSize);
+  for(unsigned fault=0;fault<4;++fault) {
+    size_t length=count;
+    unsigned offset=fault==1?100:fault==2?7:16+kActRaiserSramSize;
+    if(!fault)--length;else bytes[offset]^=0x40;
+    if(fault>=2) {
+      uint64_t hash=DeterministicHash_Fnv1a64(DETERMINISTIC_HASH_FNV1A64_OFFSET,bytes,length-8);
+      ByteOrder_WriteLe32(bytes+length-8,(uint32_t)hash);ByteOrder_WriteLe32(bytes+length-4,(uint32_t)(hash>>32));
+    }
+    CHECK(Save_WriteCompanionFile(bad,bytes,length,&error));CHECK(!SaveSystem_Import(bad,false,&error));
+    CHECK(Save_LoadFile((SaveFileFormat)backend,path,disk,&error) && !memcmp(disk,saved,sizeof(disk)));
+    CHECK(ArRegionalSession_Load(&loaded,2,path,disk,&error)==kSaveCheckpoint_Ready && !memcmp(&loaded,&previous,sizeof(loaded)));
+    CHECK(SaveSystem_CopyLocalizedPlayerName("ELISE",name,sizeof(name)) && !strcmp(name,"エリーゼ"));
+    if(fault)bytes[offset]^=0x40;
+  }
+  snprintf(blocked,sizeof(blocked),"%s.tmp",path);CHECK(MAKE_DIR(blocked)==0);
+  CHECK(!SaveSystem_Import(archive,false,&error));CHECK(REMOVE_DIR(blocked)==0);
+  CHECK(Save_LoadFile((SaveFileFormat)backend,path,disk,&error) && !memcmp(disk,saved,sizeof(disk)));
+  CHECK(ArRegionalSession_Load(&loaded,2,path,disk,&error)==kSaveCheckpoint_Ready && !memcmp(&loaded,&previous,sizeof(loaded)));
+  /* A post-commit name failure is reported as committed and retried without
+   * rerunning the import or losing the imported campaign/seed. */
+  snprintf(blocked,sizeof(blocked),"%s.arname.tmp",path);CHECK(MAKE_DIR(blocked)==0);
+  CHECK(SaveSystem_Import(archive,false,&error));CHECK(!SaveSystem_AutoPersistIfChanged(&error));
+  CHECK(REMOVE_DIR(blocked)==0);CHECK(SaveSystem_AutoPersistIfChanged(&error));
+  CHECK(SaveSystem_LoadActive(&error));
+  CHECK(SaveSystem_CopyLocalizedPlayerName("ELISE",name,sizeof(name)) && !strcmp(name,"Élise"));
+  CHECK(ArRegionalSession_Load(&loaded,2,path,image,&error)==kSaveCheckpoint_Ready && !memcmp(&loaded,&exported,sizeof(loaded)));
+  Remove(donor);Remove(native);Remove(ini);remove(archive);remove(bad);remove(backup);
+  snprintf(blocked,sizeof(blocked),"%s.arname",donor);remove(blocked);
+  snprintf(blocked,sizeof(blocked),"%s.arname",path);remove(blocked);
+  CHECK(REMOVE_DIR("regional-archive-test/backups/03")==0);
+  CHECK(REMOVE_DIR("regional-archive-test/backups")==0);CHECK(REMOVE_DIR(root)==0);
+}
+
 int main(void) {
+  CampaignArchive(kSaveBackend_NativeSrm);
+  CampaignArchive(kSaveBackend_Ini);
   uint8_t a[16], b[16];
   CHECK(HostCampaignIdentity_Create(NULL, a));
   CHECK(HostCampaignIdentity_Create(NULL, b));

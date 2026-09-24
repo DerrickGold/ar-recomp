@@ -40,7 +40,9 @@ marked uncertain should not be treated as verified offsets or behavior.
 - [Regional media extraction and package format](regional-media.md)
   — ROM tables, code boundaries, measurements, and limits of the evidence
   behind the reader-facing article.
-- [Symbol map](research-symbol-map.md) — ROM addresses and their known purposes.
+- [Symbol map](research-symbol-map.md) — ROM addresses and their known purposes,
+  including the [regional HLE bindings](research-symbol-map.md#regional-hle-bindings)
+  from native entries to current C owners.
 - [Dialogue and menu text](dialogue-system.md) — text encoding, source identities,
   and replacement boundaries.
 - [Simulation command menu](sim-menu-reference.md) — actions, original icons,

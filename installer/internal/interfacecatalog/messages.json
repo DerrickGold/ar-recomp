@@ -1,4 +1,94 @@
 [
+  {"key":"setting.save_export_campaign.label","text":["Export campaign","Exporter la partie","Kampagne exportieren","ゲーム全体を書き出す"]},
+  {"key":"setting.save_export_campaign.help","text":["Export saved progress, campaign settings and name to a new .arsave file in saves/exports. Unsaved gameplay is not included.","Exporte la progression enregistrée, les réglages de la partie et le nom dans un nouveau fichier .arsave de saves/exports.","Gespeicherten Fortschritt, Kampagneneinstellungen und Namen in eine neue .arsave-Datei unter saves/exports exportieren.","保存済みの進行状況、ゲーム設定と名前をsaves/exportsの新しい.arsaveファイルに書き出します。未保存の進行状況は含みません。"]},
+  {"key":"slots.advanced.target","text":["Active {slot}: {name}","Actif {slot} : {name}","Aktiv {slot}: {name}","使用中{slot}：{name}"]},
+  {"key":"slots.advanced.confirm","text":["{action}: {name}, Slot {slot}?","{action} : {name}, emplacement {slot} ?","{action}: {name}, Platz {slot}?","{action}：{name}（スロット{slot}）？"]},
+  {"key":"slots.advanced.import","text":["Replace this active campaign and restart? Unsaved progress will be lost. Automatic backups preserve the complete previous campaign when enabled.","Remplacer cette partie active et redémarrer ? La progression non sauvegardée sera perdue. Les sauvegardes automatiques conservent la partie précédente complète si elles sont activées.","Aktive Kampagne ersetzen und neu starten? Ungespeicherter Fortschritt geht verloren. Aktivierte automatische Backups sichern die gesamte vorherige Kampagne.","使用中のゲームを置き換えて再起動します。未保存の進行状況は失われます。自動バックアップが有効なら、以前のゲーム全体を保存します。"]},
+  {"key":"slots.advanced.edit","text":["Apply the staged edits to this active campaign? The action uses the active slot shown here.","Appliquer les modifications à cette partie active ? Cette action utilise l’emplacement actif indiqué ici.","Vorgemerkte Änderungen auf diese aktive Kampagne anwenden? Die Aktion betrifft den hier angezeigten aktiven Platz.","この使用中のゲームに編集を適用しますか？ここに表示された使用中のスロットが対象です。"]},
+  {"key":"slots.advanced.replace","text":["Replace and restart","Remplacer et redémarrer","Ersetzen und neu starten","置き換えて再起動"]},
+  {"key":"slots.advanced.apply","text":["Apply edits","Appliquer les modifications","Änderungen anwenden","編集を適用"]},
+  {"key":"slots.advanced.changed","text":["The active save changed or is unavailable. Review the target again before editing.","La sauvegarde active a changé ou est indisponible. Vérifiez à nouveau la cible.","Der aktive Spielstand hat sich geändert oder ist nicht verfügbar. Ziel erneut prüfen.","使用中のセーブが変更されたか、利用できません。編集前に対象を再確認してください。"]},
+
+  {"key":"slots.regions_tab","text":["Regions","Régions","Regionen","地域"]},
+  {"key":"slots.advanced","text":["Advanced","Avancé","Erweitert","詳細設定"]},
+  {"key":"slots.advanced.help","text":["Tools for the active campaign, named at the top of Advanced. Back returns to your selected preview slot.","Outils pour la partie active, nommée en haut. Retour revient à l’emplacement consulté.","Werkzeuge für die oben benannte aktive Kampagne. Zurück führt zum zuvor betrachteten Platz.","詳細設定の上部に表示される使用中のゲームが対象です。戻ると閲覧中のスロットに戻ります。"]},
+  {"key":"slots.prepared","text":["Prepared","Préparé","Vorbereitet","準備済み"]},
+  {"key":"slots.prepared.help","text":["This new game is prepared but has no saved progress yet. Review its existing setup before restarting.","Cette partie est préparée mais sans progression sauvegardée. Vérifiez sa configuration avant de redémarrer.","Dieses neue Spiel ist vorbereitet, hat aber noch keinen gespeicherten Fortschritt. Einstellungen vor dem Neustart prüfen.","新しいゲームの設定は準備済みですが、進行状況は未保存です。再起動前に設定を確認できます。"]},
+  {"key":"slots.review_setup","text":["Review new game setup","Vérifier la configuration","Vorbereitung prüfen","新規ゲーム設定を確認"]},
+  {"key":"slots.full","text":["All 10 slots are occupied or reserved. Select an existing campaign to review or resume it.","Les 10 emplacements sont occupés ou réservés. Choisissez une partie à consulter ou reprendre.","Alle 10 Plätze sind belegt oder reserviert. Bestehenden Spielstand ansehen oder fortsetzen.","10個のスロットがすべて使用または予約されています。既存のゲームを選んで確認・再開できます。"]},
+  {"key":"slots.file_time","text":["File modified (approx.)","Fichier modifié (env.)","Dateidatum (ca.)","ファイル更新（推定）"]},
+  {"key":"slots.file_time.help","text":["This save predates slot tracking or was changed outside the game. Its file modification time is shown as an estimate.","Cette sauvegarde est antérieure au suivi ou a été modifiée hors du jeu. La date du fichier est une estimation.","Dieser Spielstand ist älter oder wurde außerhalb des Spiels geändert. Das Dateidatum ist eine Schätzung.","スロット管理導入前のセーブ、または外部で変更されたセーブです。ファイル更新日時を目安として表示します。"]},
+  {"key":"slots.switch","text":["Switch to this save","Utiliser cette sauvegarde","Diesen Spielstand laden","このセーブに切り替え"]},
+  {"key":"slots.already_active","text":["Already active","Déjà actif","Bereits aktiv","使用中"]},
+  {"key":"slots.switch_restart","text":["Switch and restart","Changer et redémarrer","Wechseln und neu starten","切り替えて再起動"]},
+  {"key":"slots.start_restart","text":["Start and restart","Commencer et redémarrer","Beginnen und neu starten","開始して再起動"]},
+  {"key":"slots.confirm.switch_title","text":["Switch to {name}, Slot {slot}?","Passer à {name}, emplacement {slot} ?","Zu {name}, Platz {slot} wechseln?","{name}（スロット{slot}）に切り替えますか？"]},
+  {"key":"slots.confirm.create_title","text":["New game in Slot {slot}?","Nouvelle partie dans {slot} ?","Neues Spiel in Platz {slot}?","スロット{slot}で新しいゲーム？"]},
+  {"key":"slots.read_failed","text":["Unable to read save slots. Reopen Saves to retry.","Lecture impossible. Rouvrez Sauvegardes pour réessayer.","Spielstände konnten nicht gelesen werden. Menü erneut öffnen.","スロットを読み込めません。セーブメニューを開き直してください。"]},
+  {"key":"slots.draft_failed","text":["Unable to prepare this slot. Your current campaign is still active.","Préparation impossible. La partie actuelle reste active.","Vorbereitung fehlgeschlagen. Der aktuelle Spielstand bleibt aktiv.","スロットを準備できません。現在のゲームは使用中のままです。"]},
+  {"key":"slots.start_failed","text":["Unable to restart with this slot. Review its details and try again.","Redémarrage impossible. Vérifiez les détails et réessayez.","Neustart fehlgeschlagen. Details prüfen und erneut versuchen.","このスロットで再起動できません。詳細を確認して再試行してください。"]},
+  {"key":"slots.select_hint","text":["Select","Choisir","Auswahl","選択"]},
+  {"key":"slots.open","text":["Open save slots","Ouvrir les sauvegardes","Spielstände öffnen","セーブスロットを開く"]},
+  {"key":"slots.overview","text":["Keep up to 10 campaigns, each with its own regional settings. Review a save, then switch and restart.","Conservez jusqu’à 10 parties avec leurs propres régions. Consultez une sauvegarde, puis changez de partie et redémarrez.","Bis zu 10 Spielstände mit eigenen Regionseinstellungen. Spielstand prüfen, wechseln und neu starten.","最大10個のゲームを、それぞれの地域設定とともに保存できます。セーブを確認して切り替えると再起動します。"]},
+  {"key":"setting.save_slots.label","text":["Slots","Emplacements","Speicherplätze","スロット"]},
+  {"key":"setting.save_slots.help","text":["Manage campaigns and start a new game in an empty slot.","Gérez vos parties et commencez dans un emplacement vide.","Spielstände verwalten und in einem freien Platz neu beginnen.","セーブを管理し、空きスロットで新しいゲームを始めます。"]},
+  {"key":"setting.rando_start.label","text":["Start new randomized game...","Nouvelle partie aléatoire...","Neues Zufallsspiel...","新しいランダムゲーム..."]},
+  {"key":"setting.rando_start.help","text":["Copy this setup into an empty slot. The current campaign stays unchanged.","Copiez cette configuration dans un emplacement vide. La partie actuelle reste intacte.","Diese Einstellungen in einen freien Platz kopieren. Der laufende Spielstand bleibt erhalten.","この設定を空きスロットにコピーします。現在のゲームは変更しません。"]},
+  {"key":"slots.title","text":["SAVE SLOTS","SAUVEGARDES","SPIELSTÄNDE","セーブスロット"]},
+  {"key":"slots.manager","text":["Save manager","Gestion des sauvegardes","Spielstandverwaltung","セーブ管理"]},
+  {"key":"slots.new_game","text":["New game","Nouvelle partie","Neues Spiel","新しいゲーム"]},
+  {"key":"slots.setup","text":["New game settings","Réglages de la partie","Einstellungen für neues Spiel","新しいゲームの設定"]},
+  {"key":"slots.summary","text":["Summary","Résumé","Übersicht","概要"]},
+  {"key":"slots.regions","text":["Regional differences","Différences régionales","Regionale Unterschiede","地域設定の違い"]},
+  {"key":"slots.randomizer","text":["Randomizer","Aléatoire","Zufallsgenerator","ランダマイザー"]},
+  {"key":"slots.empty","text":["Empty","Vide","Leer","空き"]},
+  {"key":"slots.unavailable","text":["Unavailable","Indisponible","Nicht verfügbar","利用不可"]},
+  {"key":"slots.unknown","text":["Unknown","Inconnu","Unbekannt","不明"]},
+  {"key":"slots.active","text":["Active","Actif","Aktiv","使用中"]},
+  {"key":"slots.active.help","text":["This slot is already active. Up/Down scrolls its saved details.","Cet emplacement est déjà actif. Haut/bas fait défiler ses détails enregistrés.","Dieser Speicherplatz ist bereits aktiv. Oben/Unten scrollt die gespeicherten Details.","このスロットは使用中です。上下で保存済みの詳細を確認できます。"]},
+  {"key":"slots.not_saved","text":["Not saved yet","Pas encore sauvegardé","Noch nicht gespeichert","未保存"]},
+  {"key":"slots.recovery","text":["Recovery required","Restauration requise","Wiederherstellung nötig","復元が必要"]},
+  {"key":"slots.empty.help","text":["Start a new game here with its own regional settings. Save progress through the normal Progress Log.","Commencez une partie avec ses régions. Sauvegardez par le journal habituel.","Hier ein Spiel mit eigenen Regionen beginnen. Fortschritt wie gewohnt im Fortschrittsprotokoll speichern.","独自の地域設定で新しいゲームを開始します。進行状況は通常の記録メニューで保存します。"]},
+  {"key":"slots.last_saved","text":["Last saved","Dernière sauvegarde","Zuletzt gespeichert","最終保存"]},
+  {"key":"slots.level","text":["Level","Niveau","Stufe","レベル"]},
+  {"key":"slots.acts","text":["Town acts cleared","Actes terminés","Abgeschlossene Akte","クリアしたアクト"]},
+  {"key":"slots.cleared","text":["Cleared","Terminé","Abgeschlossen","クリア"]},
+  {"key":"slots.unlocked","text":["Unlocked","Débloqué","Freigeschaltet","解放済み"]},
+  {"key":"slots.locked","text":["Locked","Verrouillé","Gesperrt","未解放"]},
+  {"key":"slots.gameplay","text":["Gameplay","Règles du jeu","Spielregeln","ゲームルール"]},
+  {"key":"slots.presentation","text":["Art and music","Image et musique","Grafik und Musik","画像と音楽"]},
+  {"key":"slots.difficulty","text":["Difficulty","Difficulté","Schwierigkeit","難易度"]},
+  {"key":"slots.seed","text":["Seed","Graine","Startwert","シード"]},
+  {"key":"slots.generator","text":["Generator version","Version du générateur","Generatorversion","生成バージョン"]},
+  {"key":"slots.legacy","text":["Legacy: loads unrandomized","Ancien : sans aléatoire","Alt: lädt ohne Zufall","旧形式：ランダム化なし"]},
+  {"key":"slots.on","text":["On","Oui","Ein","オン"]},
+  {"key":"slots.off","text":["Off","Non","Aus","オフ"]},
+  {"key":"slots.pending","text":["Active > saved choice","Actif > choix enregistré","Aktiv > gespeicherte Wahl","現在有効 > 保存設定"]},
+  {"key":"slots.same","text":["Same saved choices","Mêmes choix enregistrés","Gleiche gespeicherte Auswahl","保存設定は同じ"]},
+  {"key":"slots.compared","text":["Compared with Slot {slot} (saved)","Comparé à {slot} (sauvegardé)","Vergleich mit Platz {slot} (gespeichert)","スロット{slot}の保存設定と比較"]},
+  {"key":"slots.type","text":["Game type","Type de partie","Spieltyp","ゲームの種類"]},
+  {"key":"slots.standard","text":["Standard","Normal","Standard","通常"]},
+  {"key":"slots.randomized","text":["Randomized","Aléatoire","Zufällig","ランダム"]},
+  {"key":"slots.new_seed","text":["New seed","Nouvelle graine","Neuer Startwert","新しいシード"]},
+  {"key":"slots.options","text":["Randomizer options...","Options aléatoires...","Zufallsoptionen...","ランダム設定..."]},
+  {"key":"slots.starting_regions","text":["Starting regions...","Régions de départ...","Anfängliche Regionen...","開始時の地域設定..."]},
+  {"key":"slots.start","text":["Start new game and restart","Commencer et redémarrer","Neues Spiel starten und neustarten","再起動して新しいゲームを開始"]},
+  {"key":"slots.confirm.load","text":["The game will restart with this save and its regional settings. Progress since your last in-game save will be lost.","Le jeu redémarrera avec cette sauvegarde et ses régions. La progression non sauvegardée sera perdue.","Das Spiel startet mit diesem Spielstand und seinen Regionen neu. Ungespeicherter Fortschritt geht verloren.","このセーブと地域設定で再起動します。ゲーム内で最後に保存してからの進行状況は失われます。"]},
+  {"key":"slots.confirm.new","text":["The game will restart with this setup. Progress since your last in-game save will be lost.","Le jeu redémarrera avec ces réglages. La progression non sauvegardée sera perdue.","Das Spiel startet mit diesen Einstellungen neu. Ungespeicherter Fortschritt geht verloren.","この設定で再起動します。ゲーム内で最後に保存してからの進行状況は失われます。"]},
+  {"key":"slots.confirm.random","text":["Seed {seed}. The game will restart with this setup. Progress since your last in-game save will be lost.","Graine {seed}. Le jeu redémarrera avec ces réglages. La progression non sauvegardée sera perdue.","Startwert {seed}. Das Spiel startet mit diesen Einstellungen neu. Ungespeicherter Fortschritt geht verloren.","シード{seed}。この設定で再起動します。ゲーム内で最後に保存してからの進行状況は失われます。"]},
+  {"key":"slots.incompatible","text":["Those regional choices are incompatible. Choose a matching population/goal preset.","Ces choix sont incompatibles. Choisissez un préréglage cohérent.","Diese Regionen sind inkompatibel. Passende Bevölkerungs- und Zielvorlage wählen.","地域設定が両立しません。人口と目標の組み合わせを確認してください。"]},
+  {"key":"slots.seed.help","text":["Choose a digit with Left/Right. Change it with Up/Down. Confirm keeps this exact seed.","Choisissez un chiffre avec gauche/droite, modifiez avec haut/bas, puis validez.","Ziffer mit Links/Rechts wählen, mit Oben/Unten ändern und bestätigen.","左右で桁を選び、上下で数字を変え、決定してください。"]},
+  {"key":"slots.select","text":["Select a slot to review it. Browsing does not change your active save.","Choisissez un emplacement à consulter. La sauvegarde active reste inchangée.","Platz zur Ansicht wählen. Beim Blättern bleibt der aktive Spielstand unverändert.","スロットを選んで確認します。閲覧だけでは使用中のセーブは変わりません。"]},
+  {"key":"slots.use","text":["Confirm to use this slot and restart. Up/Down scrolls its details.","Validez pour utiliser cet emplacement et redémarrer. Haut/bas fait défiler les détails.","Bestätigen zum Laden und Neustarten. Oben/Unten scrollt Details.","決定でこのスロットを使って再起動します。上下で詳細をスクロールします。"]},
+  {"key":"slots.draft.help","text":["Preparing a new campaign. These edits do not change the current game.","Préparation d’une nouvelle partie. Ces réglages ne modifient pas la partie actuelle.","Ein neues Spiel wird vorbereitet. Diese Änderungen betreffen nicht das laufende Spiel.","新しいゲームの準備中です。現在のゲームの設定は変わりません。"]},
+  {"key":"slots.choose","text":["choose","choisir","wählen","選択"]},
+  {"key":"slots.act1","text":["Act 1","Acte 1","Akt 1","アクト1"]},
+  {"key":"slots.act1_done","text":["Act 1 cleared","Acte 1 terminé","Akt 1 abgeschlossen","アクト1クリア"]},
+  {"key":"slots.act2","text":["Act 2","Acte 2","Akt 2","アクト2"]},
+  {"key":"slots.just_saved","text":["Just saved","À l’instant","Gerade gespeichert","保存直後"]},
+  {"key":"slots.minutes","text":["{n}m ago","Il y a {n} min","Vor {n} Min.","{n}分前"]},
+  {"key":"slots.hours","text":["{n}h ago","Il y a {n} h","Vor {n} Std.","{n}時間前"]},
+  {"key":"slots.days","text":["{n}d ago","Il y a {n} j","Vor {n} Tagen","{n}日前"]},
   {"key":"overlay.region.navigation","text":["Regions","Régions","Regionen","地域別ルール"]},
   {"key":"overlay.hint.details","text":["details","détails","Details","詳細"]},
   {"key":"overlay.hint.scroll","text":["scroll","défiler","scrollen","スクロール"]},
@@ -3896,10 +3986,10 @@
   {
     "key": "setting.save_backend.help",
     "text": [
-      "Choose the authoritative native-srm or lossless INI backend after restart.",
-      "Choisit le stockage de référence native-srm ou INI sans perte après redémarrage.",
-      "Nach Neustart maßgeblichen Speicher native-srm oder verlustfreies INI wählen.",
-      "再起動後の正式な保存先をnative-srmまたは可逆INIから選びます。"
+      "New slots use this format. Existing slots keep their own format. Diagnostic saves use it after restart.",
+      "Les nouveaux emplacements utilisent ce format. Les emplacements existants conservent le leur. Les sauvegardes de diagnostic l'utilisent après redémarrage.",
+      "Neue Speicherplätze verwenden dieses Format. Bestehende behalten ihr Format. Diagnosespielstände verwenden es nach einem Neustart.",
+      "新規スロットに使う形式です。既存スロットの形式は変わりません。診断用セーブには再起動後に適用されます。"
     ]
   },
   {
@@ -3911,15 +4001,7 @@
       "安全スイッチ。「適用」操作と次回起動時の予約変更によるSRAMの書き換えを許可します。"
     ]
   },
-  {
-    "key": "setting.save_autobackup.help",
-    "text": [
-      "Back up the active save before the first persistent editor change.",
-      "Sauvegarde le fichier actif avant la première modification persistante de l'éditeur.",
-      "Aktiven Spielstand vor der ersten dauerhaften Editoränderung sichern.",
-      "エディターで最初の永続的な変更を行う前に、現在のセーブをバックアップします。"
-    ]
-  },
+  {"key":"setting.save_autobackup.help","text":["Back up the active campaign to saves/backups/<slot> before the first persistent edit or import.","Sauvegarde la partie active dans saves/backups/<emplacement> avant la première modification persistante ou importation.","Aktive Kampagne vor der ersten dauerhaften Bearbeitung oder einem Import unter saves/backups/<Platz> sichern.","最初の永続的な編集や読み込みの前に、使用中のゲームをsaves/backups/<スロット>へバックアップします。"]},
   {
     "key": "setting.save_editor_page.help",
     "text": [
@@ -4334,33 +4416,9 @@
       "予約した項目をバックアップして保存します。その後ゲームを再起動し、「つづきから」を選んでください。"
     ]
   },
-  {
-    "key": "setting.save_import.help",
-    "text": [
-      "Import saves/import.srm, then saves/import.ini, or AR_SAVE_IMPORT.",
-      "Importe saves/import.srm, puis saves/import.ini, ou AR_SAVE_IMPORT.",
-      "saves/import.srm, dann saves/import.ini oder AR_SAVE_IMPORT importieren.",
-      "saves/import.srm、次にsaves/import.ini、またはAR_SAVE_IMPORTから読み込みます。"
-    ]
-  },
-  {
-    "key": "setting.save_export_srm.help",
-    "text": [
-      "Export the current exact image to saves/export.srm.",
-      "Exporte l'image exacte actuelle vers saves/export.srm.",
-      "Aktuelles exaktes Speicherabbild nach saves/export.srm exportieren.",
-      "現在の正確なイメージをsaves/export.srmに書き出します。"
-    ]
-  },
-  {
-    "key": "setting.save_export_ini.help",
-    "text": [
-      "Export the current lossless image to saves/export.ini.",
-      "Exporte l'image actuelle sans perte vers saves/export.ini.",
-      "Aktuelles verlustfreies Speicherabbild nach saves/export.ini exportieren.",
-      "現在の可逆イメージをsaves/export.iniに書き出します。"
-    ]
-  },
+  {"key":"setting.save_import.help","text":["Replace the active campaign from saves/imports/import.arsave, import.srm or import.ini, then restart. AR_SAVE_IMPORT and old import paths still work.","Remplace la partie active depuis saves/imports/import.arsave, import.srm ou import.ini, puis redémarre. AR_SAVE_IMPORT et les anciens chemins restent acceptés.","Aktive Kampagne aus saves/imports/import.arsave, import.srm oder import.ini ersetzen und neu starten. AR_SAVE_IMPORT und alte Importpfade bleiben gültig.","saves/imports/import.arsave、import.srm、import.iniから使用中のゲームを置き換え、再起動します。AR_SAVE_IMPORTと以前のパスも使えます。"]},
+  {"key":"setting.save_export_srm.help","text":["Export only cartridge data to a new .srm file in saves/exports. Use Export campaign to preserve campaign settings and enhanced name.","Exporte seulement les données de cartouche dans un nouveau .srm de saves/exports. Exporter la partie conserve ses réglages et le nom.","Nur Moduldaten in eine neue .srm-Datei unter saves/exports exportieren. Kampagne exportieren bewahrt Kampagneneinstellungen und Namen.","カートリッジデータのみをsaves/exportsの新しい.srmファイルに書き出します。ゲーム設定と拡張名を保持するにはゲーム全体を書き出してください。"]},
+  {"key":"setting.save_export_ini.help","text":["Export only cartridge data to a new .ini file in saves/exports. Use Export campaign to preserve campaign settings and enhanced name.","Exporte seulement les données de cartouche dans un nouveau .ini de saves/exports. Exporter la partie conserve ses réglages et le nom.","Nur Moduldaten in eine neue .ini-Datei unter saves/exports exportieren. Kampagne exportieren bewahrt Kampagneneinstellungen und Namen.","カートリッジデータのみをsaves/exportsの新しい.iniファイルに書き出します。ゲーム設定と拡張名を保持するにはゲーム全体を書き出してください。"]},
   {
     "key": "setting.cheat_all_magic.help",
     "text": [
@@ -4856,7 +4914,7 @@
   {"key":"setting.take_snapshot.label","text":["Take snapshot","Prendre une capture","Momentaufnahme erstellen","スナップショットを撮る"]},
   {"key":"setting.restart_game.label","text":["Restart game","Redémarrer le jeu","Spiel neu starten","ゲームを再起動"]},
   {"key":"setting.exit_desktop.label","text":["Exit to desktop","Quitter vers le bureau","Zum Desktop zurückkehren","デスクトップに戻る"]},
-  {"key":"setting.save_backend.label","text":["Save storage format","Format des sauvegardes","Speicherformat","セーブの保存形式"]},
+  {"key":"setting.save_backend.label","text":["New slot format","Format des nouveaux emplacements","Format neuer Speicherplätze","新規スロット形式"]},
   {"key":"setting.save_backend.value.0","text":["native-srm","native-srm","native-srm","native-srm"]},
   {"key":"setting.save_backend.value.1","text":["ini","ini","ini","ini"]},
   {"key":"setting.save_edit_armed.label","text":["Allow save edits","Autoriser les modifications de sauvegarde","Spielstandbearbeitung erlauben","セーブ編集を許可"]},
@@ -5101,8 +5159,8 @@
   {"key":"setting.save_apply_session.label","text":["Apply for session","Appliquer pour la session","Für diese Sitzung anwenden","今回のプレイに適用"]},
   {"key":"setting.save_apply_persist.label","text":["Apply and save","Appliquer et sauvegarder","Anwenden und speichern","適用して保存"]},
   {"key":"setting.save_import.label","text":["Import save","Importer une sauvegarde","Spielstand importieren","セーブを読み込む"]},
-  {"key":"setting.save_export_srm.label","text":["Export native SRAM","Exporter la SRAM d’origine","Original-SRAM exportieren","元の形式のSRAMを書き出す"]},
-  {"key":"setting.save_export_ini.label","text":["Export structured INI","Exporter un INI structuré","Strukturierte INI exportieren","構造化INIを書き出す"]},
+  {"key":"setting.save_export_srm.label","text":["Export raw SRAM","Exporter la SRAM seule","Nur SRAM exportieren","SRAMのみを書き出す"]},
+  {"key":"setting.save_export_ini.label","text":["Export raw INI","Exporter l’INI seul","Nur INI exportieren","INIのみを書き出す"]},
   {"key":"setting.cheat_all_magic.label","text":["All magic","Toutes les magies","Alle Zauber","すべての魔法"]},
   {"key":"setting.cheat_ranged_sword.label","text":["Ranged sword","Épée à distance","Fernkampfschwert","飛び道具の剣"]},
   {"key":"setting.cheat_inf_mp.label","text":["Infinite MP","PM infinis","Unendliche MP","MP無限"]},
@@ -5827,8 +5885,8 @@
   {"key":"overlay.section.controls.help","text":["Input device, analog tuning and every key binding.","Périphérique d’entrée, réglages analogiques et touches.","Eingabegerät, Analogsteuerung und Tastenbelegung.","入力機器、アナログ入力、各ボタンの割り当て。"]},
   {"key":"overlay.section.cheats","text":["Cheats","Triches","Cheats","チート"]},
   {"key":"overlay.section.cheats.help","text":["Gameplay assists and raw memory pins.","Aides de jeu et valeurs mémoire imposées.","Spielhilfen und festgesetzte Speicherwerte.","ゲームの補助機能とメモリ値の固定。"]},
-  {"key":"overlay.section.save","text":["Save","Sauvegarde","Spielstand","セーブデータ"]},
-  {"key":"overlay.section.save.help","text":["Inspect and stage edits to the battery save.","Consultez la sauvegarde et préparez des modifications.","Prüfe den Spielstand und bereite Änderungen vor.","バッテリーセーブを確認し、変更内容を準備します。"]},
+  {"key":"overlay.section.save","text":["Saves","Sauvegardes","Spielstände","セーブ"]},
+  {"key":"overlay.section.save.help","text":["Manage save slots, start campaigns, and inspect saved progress.","Gérez les emplacements, commencez une partie et consultez la progression sauvegardée.","Speicherplätze verwalten, Spiele beginnen und gespeicherten Fortschritt ansehen.","セーブスロットを管理し、新しいゲームを始めたり保存済みの進行状況を確認します。"]},
   {"key":"overlay.section.manual","text":["Manual","Manuel","Handbuch","説明書"]},
   {"key":"overlay.section.manual.help","text":["Read the game's manual.","Lisez le manuel du jeu.","Lies das Handbuch zum Spiel.","ゲームの説明書を読みます。"]},
   {"key":"overlay.section.system","text":["System","Système","System","システム"]},

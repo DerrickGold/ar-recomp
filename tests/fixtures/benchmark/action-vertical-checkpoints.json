@@ -3,7 +3,7 @@
   "checkpoints": {
     "aitos-vertical-32": {
       "description": "Wide Aitos enhanced traversal with up to 32 extra world rows per vertical side",
-      "replay": "saves/aitos-r4-natural.rec",
+      "replay": "saves/legacy/aitos-r4-natural.rec",
       "sram_base64": "tests/fixtures/benchmark/action-routes-seed.srm.b64",
       "sram_sha256": "11dcdfb6c28cbf97f4ccd5f3c8ba1cf831f1864d029d6f8aaf67ad962ab79858",
       "settings": "tests/fixtures/benchmark/action-vertical-32-settings.ini",
@@ -18,7 +18,7 @@
     },
     "aitos-vertical-64": {
       "description": "Wide Aitos enhanced traversal at the 64-row-per-side vertical limit",
-      "replay": "saves/aitos-r4-natural.rec",
+      "replay": "saves/legacy/aitos-r4-natural.rec",
       "sram_base64": "tests/fixtures/benchmark/action-routes-seed.srm.b64",
       "sram_sha256": "11dcdfb6c28cbf97f4ccd5f3c8ba1cf831f1864d029d6f8aaf67ad962ab79858",
       "settings": "tests/fixtures/benchmark/action-vertical-64-settings.ini",

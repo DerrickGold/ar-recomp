@@ -7,11 +7,20 @@ at the title screen.
 
 ## Starting a run
 
+To keep another ongoing campaign, open **Saves → Slots**, select an empty slot
+and choose **Randomized**. **Randomizer → Start new randomized game…** opens the
+same setup. It copies your displayed seed/options and requested starting regions
+into a separate draft. Edit the exact seed, choose **New seed** explicitly, or
+adjust the draft's options and regions, then confirm **Start new game and
+restart**. The recipe survives the restart and subsequent launches before the
+first Progress Log save. Browsing, cancelling and confirming never reroll it.
+
 Turn on **Randomizer**, enter a seed or choose **New seed**, and select the
 options you want. Starting **New Game** captures that setup for the campaign.
 The seed and every randomizer option are saved when you save your game.
-They cannot be changed during that run; return to the title screen to prepare
-another one. This does not replace an existing save until you actually save
+They cannot be changed during that run; use an empty slot or return to the title
+screen to prepare another one. A native title-screen New Game in the active slot
+does not replace its existing save until you actually save
 the new campaign.
 
 **Continue** restores the saved seed and options, regardless of the current
@@ -49,6 +58,12 @@ and game version. The seed chooses content and regional rules; it does not
 replace the game's moment-to-moment RNG or reproduce player input.
 
 ## Moving or backing up a save
+
+For a complete managed collection, copy the entire `saves/` directory while the
+game is closed. Slots 1–10 store their saves and companions under
+`saves/slots/01/` through `saves/slots/10/`. Collection
+metadata records the active slot and each slot's format. Do not move a checkpoint
+between numbered slots by hand: its campaign identity includes the slot number.
 
 Keep `save.srm.archeckpoint` alongside `save.srm` (or the corresponding
 companion for an INI save). The checkpoint binds the recipe and regional state

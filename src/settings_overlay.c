@@ -264,6 +264,7 @@ _Static_assert((int)(sizeof(kTabsLayers) / sizeof(kTabsLayers[0])) ==
  * unselected, the colored game slot palette when current); all chrome is the
  * shared steel-blue/yellow game scheme. */
 static const MenuSection kSections[] = {
+  SECTION(Save, "overlay.section.save", "overlay.section.save.help", kTabsSave),
   SECTION(Video, "overlay.section.video", "overlay.section.video.help",
           kTabsVideo),
   /* Both 3D sections are named for the MODE they apply to, not the technique
@@ -281,8 +282,6 @@ static const MenuSection kSections[] = {
           kTabsControls),
   SECTION(Cheats, "overlay.section.cheats", "overlay.section.cheats.help",
           kTabsCheats),
-  SECTION(Save, "overlay.section.save", "overlay.section.save.help",
-          kTabsSave),
   /* Before System: the manual is something a PLAYER reaches for, while System
    * holds host commands, restart and exit. Inserting here renumbers everything
    * below it, and tests/settings_overlay_test.c indexes sections positionally,
@@ -326,6 +325,18 @@ static const char kSectionResetKey[] = "reset_section_defaults";
 ArRenderDevice *s_render_device;  /* extern: debug panel shares the device */
 static SDL_Window *s_window;      /* SDL input service only; never renders */
 static bool s_open;
+static bool SlotMenuActive(void);
+static bool SlotDecisionActive(void);
+static bool SlotConfirmAdvancedAction(const SettingDesc *desc);
+static const char *SlotAdvancedTitle(void);
+static bool SlotMenuAvailable(void);
+static bool SlotReturnFromAdvanced(void);
+static bool SlotMenuNav(MenuNav nav,bool repeat);
+static void SlotMenuRender(const MenuLayout *layout);
+static void SlotMenuClose(void);
+static void SlotMenuRefresh(void);
+static void SlotTabState(int *active_tab,int *tab_count);
+static const char *SlotMenuKey(void);
 static bool s_submenu_open;
 static int s_section;
 /* Per-section tab memory: leaving Town 3D on its Weather tab and coming back
@@ -355,7 +366,7 @@ static OverlayDecision s_decision;
 /* Read-only overlay-local help; never shares host confirmation state. */
 static struct {
   bool open;
-  char title[256], body[3072];
+  char title[256], body[16384];
   int top_line, total_lines, visible_lines;
 } s_details;
 /* Overlay-local advisory. Separate from host-owned save/Continue decisions:
@@ -1101,7 +1112,10 @@ static void CommitEditing(void) {
 static void InvokeSelectedAction(void) {
   const SettingDesc *desc = SelectedDesc();
   if (!desc || desc->type != kSettingType_Action) return;
-  SetStatus(Settings_InvokeAction(desc) ? Ui("overlay.status.action_complete") : Ui("overlay.status.action_failed"));
+  if(SlotConfirmAdvancedAction(desc))return;
+  bool success=Settings_InvokeAction(desc);
+  if(success && SlotMenuActive())s_status[0]=0;
+  else SetStatus(Ui(success?"overlay.status.action_complete":"overlay.status.action_failed"));
 }
 
 /* Int rows are adjusted entirely by stepping (with hold-to-accelerate); they
@@ -1632,6 +1646,7 @@ static void SkipUnselectableRow(void) {
 void SettingsOverlay_Refresh(void) {
   if (!s_open)
     return;
+  SlotMenuRefresh();
   if (NormalizeNavigation()) {
     EndValueHold();
     StopEditing();
@@ -1672,6 +1687,7 @@ static void MoveRow(int direction) {
  * the row cursor: the two lists have nothing in common, so carrying an index
  * across would land somewhere arbitrary. */
 static void MoveTab(int direction) {
+  if(!s_submenu_open && ActiveSection()->icon==kOverlayIcon_Save && SlotMenuAvailable())return;
   const MenuSection *section = ActiveSection();
   if (VisibleTabCount(s_section) <= 1) return;
   EndValueHold();
@@ -1696,6 +1712,10 @@ static void MoveTab(int direction) {
 
 static void EnterSection(void) {
   ClearSectionResetArm();
+  if(ActiveSection()->icon==kOverlayIcon_Save && SlotMenuAvailable()) {
+    if(!SettingsOverlay_OpenSaveSlots(false))SetStatus(Ui("slots.read_failed"));
+    return;
+  }
   s_submenu_open = true;
   s_row = 0;
   s_top_row = 0;
@@ -1722,6 +1742,7 @@ bool SettingsOverlay_ReloadTextures(const uint8_t *rom_data, size_t rom_size) {
 }
 
 void SettingsOverlay_Destroy(void) {
+  SlotMenuClose();SettingsOverlay_SetSaveSlotHooks(NULL);
   StopEditing();
   ArUiTextRenderer_Destroy(&s_ui_text);
   SettingsOverlayArtwork_Destroy();
@@ -1769,6 +1790,7 @@ void SettingsOverlay_Open(void) {
 
 void SettingsOverlay_Close(void) {
   if (!s_open) return;
+  SlotMenuClose();
   s_details.open = false;
   memset(&s_regional_confirmation, 0, sizeof(s_regional_confirmation));
   if (s_decision.result == kOverlayDecision_Pending)
@@ -1825,6 +1847,7 @@ SettingsOverlayDecisionResult SettingsOverlay_TakeDecisionResult(void) {
 
 const char *SettingsOverlay_SelectedKey(void) {
   if (!s_open) return "";
+  if(SlotMenuActive() || SlotDecisionActive())return SlotMenuKey();
   if (ActiveTabIsRegional()) return s_regional_valid && SelectedRegionRow()
       ? SelectedRegionRow()->key : "regional_no_campaign";
   /* The layer editor's rows have no descriptor key, so they report a synthesized
@@ -1867,6 +1890,7 @@ bool SettingsOverlay_GetNavigationState(int *selected_ordinal,
 
 bool SettingsOverlay_GetTabState(int *active_tab, int *tab_count) {
   if (!s_open) return false;
+  if(SlotMenuActive()){SlotTabState(active_tab,tab_count);return true;}
   /* Report positions among the VISIBLE tabs — hidden (all-debug) tabs are not
    * shown and cannot be navigated to, so a caller counting tabs must not see
    * them. */
@@ -1986,6 +2010,7 @@ static void ApplyMenuNav(MenuNav nav, bool repeat) {
     return;
   }
   if (SettingsOverlayPalette_ApplyNav(nav, repeat)) return;
+  if(SlotMenuNav(nav,repeat))return;
   if (!s_submenu_open) {
     switch (nav) {
       case kMenuNav_Up:      MoveSection(-1); break;
@@ -2027,7 +2052,7 @@ static void ApplyMenuNav(MenuNav nav, bool repeat) {
       if (!repeat) {
         EndValueHold();
         ClearSectionResetArm();
-        s_submenu_open = false;
+        if(!SlotReturnFromAdvanced())s_submenu_open = false;
       }
       break;
     case kMenuNav_Close:
@@ -3157,7 +3182,7 @@ static int DrawMenuHeader(const MenuLayout *layout, const MenuChrome *c,
   if (visible_tabs > 1) snprintf(position, sizeof(position), "%d/%d", ActiveVisibleTabPosition() + 1, visible_tabs);
   const int position_x = value_right - SmallTextWidth(position);
   DrawTextN(layout, right_text_x + kIconSize + 6, right_title_y,
-            Ui(section->label), (position_x - right_text_x - kIconSize - 14) / kGlyphSize, kText_Normal);
+            SlotAdvancedTitle()?SlotAdvancedTitle():Ui(section->label), (position_x - right_text_x - kIconSize - 14) / kGlyphSize, kText_Normal);
   DrawSmallText(layout, position_x, right_title_y + 1, position, kMutedText);
   /* Translated feedback belongs in the full-width description panel below,
    * not beside the title where longer reset/save messages collide with it. */
@@ -3759,7 +3784,7 @@ static void DrawMenuFooter(const MenuLayout *layout, const MenuChrome *c,
     HINT(back, back_available ? "overlay.hint.back" : "overlay.hint.close");
   } else {
     HINT(select, "overlay.hint.section");
-    if (VisibleTabCount(s_section) > 1) HINT(tabs, "overlay.hint.tab");
+    if (VisibleTabCount(s_section) > 1 && !(section->icon==kOverlayIcon_Save && SlotMenuAvailable())) HINT(tabs, "overlay.hint.tab");
     HINT(confirm, "overlay.hint.open");
     HINT(back, "overlay.hint.close");
   }
@@ -3790,10 +3815,23 @@ static void DrawMenu(const MenuLayout *layout) {
   const bool custom_rows = ActiveSectionIsCustom() || ActiveTabIsRegional();
 
   DrawMenuNavColumn(layout, &chrome);
-  const int rule_y = DrawMenuHeader(layout, &chrome, section);
-  DrawMenuRows(layout, &chrome, section, rule_y, custom_rows);
+  if(!s_submenu_open && section->icon==kOverlayIcon_Save && SlotMenuAvailable()) {
+    DrawSectionIcon(layout,chrome.right_text_x,chrome.top_y+8,kIconSize,s_section,true,255);
+    DrawTextN(layout,chrome.right_text_x+kIconSize+6,chrome.top_y+10,
+        Ui("slots.title"),(chrome.right_width-56)/kGlyphSize,kText_Normal);
+    DrawTextN(layout,chrome.right_text_x,chrome.top_y+36,
+        Ui("slots.open"),(chrome.right_width-32)/kGlyphSize,kText_Value);
+    DrawWrappedSmallText(layout,chrome.right_text_x,chrome.top_y+56,
+        Ui("slots.overview"),(chrome.right_width-32)/kDebugGlyphWidth,
+        (chrome.top_height-68)/kSmallLineHeight,kSteelBlue);
+  } else {
+    const int rule_y = DrawMenuHeader(layout, &chrome, section);
+    DrawMenuRows(layout, &chrome, section, rule_y, custom_rows);
+  }
   DrawMenuFooter(layout, &chrome, section);
 }
+
+#include "settings_overlay/save_slots/slot_view.inc"
 
 void SettingsOverlay_Render(ArRenderRectI game_viewport) {
   SettingsOverlay_Refresh();
@@ -3839,6 +3877,7 @@ void SettingsOverlay_Render(ArRenderRectI game_viewport) {
     DrawDetails(&layout);
     return;
   }
+  if(SlotMenuActive() || SlotDecisionActive()){SlotMenuRender(&layout);return;}
   DrawMenu(&layout);
   SettingsOverlayPalette_Draw(&layout);
 }

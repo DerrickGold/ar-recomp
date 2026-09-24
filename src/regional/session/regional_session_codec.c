@@ -631,6 +631,17 @@ static SaveCheckpointStatus Decode(const uint8_t *bytes, size_t size, ArRegional
   return kSaveCheckpoint_Ready;
 }
 
+bool ArRegionalSession_Encode(const ArRegionalSession *session,void *out,size_t capacity,size_t *size) {
+  if(!session || !out || !size)return false;
+  uint8_t bytes[kPayloadCapacity];size_t length=0;
+  if(!Encode(session,bytes,&length) || length>capacity)return false;
+  memcpy(out,bytes,length);*size=length;return true;
+}
+SaveCheckpointStatus ArRegionalSession_Decode(const void *bytes,size_t size,ArRegionalSession *out) {
+  if(!bytes || !out)return kSaveCheckpoint_Invalid;
+  return Decode(bytes,size,out);
+}
+
 SaveCheckpointStatus ArRegionalSession_Load(ArRegionalSession *session, uint32_t slot,
                                             const char *path, const uint8_t *image,
                                             SaveError *error) {

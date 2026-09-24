@@ -9,6 +9,10 @@ remains separate in the project's private development notes.
 This is a reverse-engineering reference, **not a list of implemented settings**.
 For implemented options, see [Regional settings](regional-settings.md); for
 ownership and activation contracts, see [Regional architecture](regional-architecture.md).
+The [regional HLE binding index](research-symbol-map.md#regional-hle-bindings)
+links the current US entry points to their C owners, including shared native
+readers, upload callbacks and host-only campaign state. Donor addresses below
+must not be used as replacement US call targets.
 
 The comparisons below were checked against the exact headerless retail ROMs
 on 2026-09-20–22. Table/code comparisons were supplemented with 84,499 isolated
@@ -276,12 +280,13 @@ consumers differ, representing two shared source pairs: six towns use US file
 These are two source differences, not eight independently identified features;
 named visual meaning still requires inspection.
 
-Unresolved semantic areas include unexercised actor/boss branches and hitbox
-ownership, complete developed-town population maxima, donor-art bundle
-boundaries, and European difficulty variants. Native status-page navigation
-and the final-act/emergence/announcement sequence are covered below; mixed-
-policy implementation remains separate. No byte census alone can prove that
-no further gameplay differences exist.
+The initial byte census did not establish actor/boss branch semantics, hitbox
+ownership, population maxima, donor bundle boundaries or European difficulty.
+The named investigations and integration contracts below supersede that early
+scope: identified rule families, donor boundaries and difficulty consumers are
+now mapped. Exhaustive natural-play equivalence and all attainable developed-
+town maxima are still not established. No byte census alone can prove that no
+further gameplay differences exist.
 
 ## Native-routine and content follow-up
 
@@ -675,21 +680,12 @@ refresh derived displays without invoking award side effects from a settings
 callback, then let the normal wrapper process eligible awards. Repeatedly
 toggling must not refill SP, replay awards or lower already-earned levels.
 
-**Planned host transition, approved September 22:** changes to effective
-population-support rules will require confirmed redevelopment of affected
-developed towns. A custom redevelopment earthquake will clear eligible
-housing/support structures while retaining roads, bridges, story progress,
-sealed lairs and earned levels. This supersedes the earlier non-destructive
-support-switch proposal; it does not change what the original censuses do.
-The ordinary player/Skull earthquake must retain its native behavior.
-Reconstruction is planned to use normal town construction, with explicit
-rebuilding resources so sealed or exhausted lairs cannot strand the town.
-Checkpoint recovery, structure/cache cleanup, growth-budget reconciliation,
-pending-event safety and supported policy combinations still require host
-implementation and validation. Do not charge ordinary miracle SP or trigger
-ordinary lair/house-loss rewards merely for conversion. This is not an
-original regional mechanic or an implemented feature. Neither a fixed cap
-nor a proof of every published population maximum is required for it.
+The implemented redevelopment transaction supersedes the earlier
+non-destructive support-switch proposal. Reconstruction uses normal town
+construction, with the bounded allowance described below. This is a custom
+host feature, not an original regional mechanic: it must neither charge
+miracle SP nor trigger ordinary lair/house-loss rewards. Neither a fixed cap
+nor proof of every published population maximum is required for this contract.
 
 The bounded redevelopment mutation core now preflights all affected towns
 before writing any of them. Its removable allowlist is active classes0/2/3/4;
@@ -700,7 +696,8 @@ It rejects inconsistent/overlapping footprints, unsupported classes, pending
 structure actions and a bias that would make the emptied census underflow.
 Initialized action0 is not inherently busy: `$03:A004` latches bit7, and many
 completed buildings remain in that state. This bit does not certify completion
-of the separate visual program; that owner still needs a safe retirement boundary.
+of the separate visual program. The Palace transaction retires those visual
+slots only after its quiescence checks; the standalone mutation core does not.
 
 US construction charges `2*civilization+2` growth units per new structure,
 including support buildings. `$03:8529` computes up to six affordable starts;
@@ -715,9 +712,9 @@ same preview is rejected; a fresh preview of the empty town grants no credit.
 1,344 original-CPU checks cover budgeting, payment and support-return slices,
 off-screen placement, and US action7 retirement with native redraw suppression. These bounded checks and
 read-only previews of recorded developed towns are not a live redevelopment
-or a demonstration of reconstruction. The switch remains unavailable until
-checkpoint, quiescence/redraw, persistence, confirmation and rebuild acceptance
-are integrated.
+or a demonstration of reconstruction. The implemented Palace coordinator owns
+checkpoint recovery, quiescence/redraw, persistence and confirmation; those
+bounded mutation tests alone do not establish ordinary-play reconstruction.
 
 Japan uses a fixed four-unit cost instead: batch budgeting at `$03:84F2–851A`
 subtracts4 up to six times, and the construction payment at `$03:8400–840C`
@@ -3022,9 +3019,10 @@ also posts event-audio ID `$A1` US / `$21` JP; do not misclassify that COP as
 an extra enemy spawn or claim audio parity from these collision tests.
 
 This closes the named root phase/damage-gate and spawn-anchor questions.
-Full victories, all child attack/death paths, magic interactions, mixed-media
-presentation and actual host policy switching still need implementation or
-encounter-level validation. It does not close other bosses or Death Heim.
+Full victories, all child attack/death paths, magic interactions and mixed-media
+presentation remain encounter-level validation concerns. The host phase,
+geometry and room-boundary switching implementations are described below;
+the bounded native findings alone do not prove their full-playthrough parity.
 
 The host phase adapter now selects the retained states through the real
 `$00:D9DE JSR $8669`. Native repeat counts and the `$D9E0` yield word own
@@ -4252,8 +4250,8 @@ to `$940E`. Native `STA $1AE2 / INY / PLX / RTS` retains the US placement
 cursor and real caller frame. US and identical lists delegate unchanged.
 No ROM mutation, donor graphics, terrain replacement or new per-frame work
 is involved. The later native contact pass, including overlap order, slowing
-flags and hit/invulnerability gates, is unchanged. Complete terrain/placement
-bundles remain separate implementation work.
+flags and hit/invulnerability gates, is unchanged. Terrain and placement
+projection have separate owners and activation contracts, described below.
 
 Tests independently decode all five ROMs and both European modes; compare
 the adapter's complete memory footprint, flags/registers and tail target;
@@ -4289,7 +4287,8 @@ coordinates and the US stream cursor intact. At room/retry load, only an
 active cached `(156,23)` or `(156,25)` checkpoint is normalized to the selected
 layout. Arbitrary debug coordinates are not rewritten. All European player
 start records match US in both Story and Action tables. Wave ownership and
-enemy/pickup stream replacement remain separate placement work.
+enemy/pickup stream replacement belong to the separate `$00:941C/$9500`
+placement adapter, not this terrain prefix.
 
 **European terrain is not US-identical.** All three PAL BG1 map/definition
 sets agree. Seventeen map IDs differ in two roots: `$0304` Aitos (12 cells,
@@ -5124,9 +5123,9 @@ draft while the native title coroutine is open. Accepted New Game/Action
 publishes that draft; Continue instead loads the save-bound companion.
 Abnormal title returns discard the draft without changing the active campaign.
 Difficulty and inventory choices can therefore precede the first room/run
-initializer rather than requiring a Game Over restart. This does not yet
-couple difficulty selection to the translated title artwork: the overlay
-provides the host difficulty selector.
+initializer rather than requiring a Game Over restart. Difficulty selection
+is independent of translated title artwork: the overlay provides the host
+difficulty selector.
 
 New-game history starts with exact seed/reload projections, but observers and
 regional projections remain gated until native baseline initialization has
@@ -5269,7 +5268,8 @@ Codec53 preserves independent requested/effective choices; old companions
 default to US. Tests cover all nine source pairs, both accumulator high-byte
 cases, every valid entry flag combination, rejected shapes, escaped returns
 and all five original initializers. First-run profile selection and European
-Game Over/title routing remain separate mode-entry work.
+Game Over/title routing use the separate title/mode-entry adapters described
+in [Story save and Continue](#european-story-save-and-continue).
 
 Three US-host controls entered Game Over through the native death flag with
 zero lives after Continue/Palace/Fight. Start invoked the generated initializer
@@ -5365,7 +5365,8 @@ They are authored values before difficulty, contact and controller changes.
 
 Fillmore types `1C/1D/1E` change flags `$0032→$8032`; the extra bit gates
 their updates during casting, as checked [below](#european-linked-prop-cast-freeze).
-It is not an independently implemented toggle. US/JP retain the previously
+The host exposes these as independent linked-prop policy leaves, sharing the
+fresh-stat seam rather than adding a per-frame controller. US/JP retain the previously
 mapped 21 changed keys among 173 shared records. Animation resources are
 joined through script load/inheritance and initial state, but their entire
 state graphs and indirect child controllers are not declared equivalent.
@@ -5426,6 +5427,17 @@ skull rules at nine percentage pairs, then restores the disabled baseline
 and the actual EU spawn-difficulty adapter is exercised after composition.
 The optional five-ROM invocation takes US, JP, EU-English, German, French
 in that order; it checks donor bytes and repeats composition against US records.
+
+Seeded regional selection is host policy, not a newly discovered ROM routine.
+`ArRegionalRandomizer_Choose` uses the shared profile-member inventory and
+stable descriptor keys at accepted New Game (`$02:A622`), with separate Action
+and Town options. It preserves manually chosen difficulty, interaction and
+presentation rules, and couples reduced population support to reachable goals.
+Continue restores actual saved rules instead of rerolling. The full versioned
+recipe is stored beside the native SRAM image; enabled recipes also contribute
+`ARRANDSTATE-R1` to replay identity. See the
+[recipe format](save-format.md#randomizer-recipe-version-70) and
+[execution boundaries](rom-map.md#regional-execution-and-data-boundaries).
 
 ### Native narrative comparisons
 

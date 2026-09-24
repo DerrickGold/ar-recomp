@@ -77,6 +77,9 @@
 #include "runtime_diagnostics.h"
 #include "runtime_settings.h"
 #include "save_system.h"
+#include "save_slot_manager.h"
+#include "save_paths.h"
+#include "randomizer.h"
 #include "host/campaign_identity.h"
 #include "actraiser/regional/actraiser_regional_runtime.h"
 #include "scheduled_settings.h"
@@ -730,6 +733,115 @@ static void DrawAndPresentFrame(HostDisplayPresentMode present_mode,
  * multiplying SRAM scans or host/APU policy checks by presentation throughput
  * both wastes work and contaminates the rendering measurement. */
 static SettingsPersistence *s_settings_writer;
+static SaveSlots s_save_slots;
+static bool s_managed_slots;
+
+static bool SlotValidateActive(void *context,SaveError *error);
+static bool SlotBeforeCommit(void *context,SaveError *error) {
+  SaveSlots *slots=context;
+  if(slots->records[slots->active].checkpoint_required &&
+      slots->records[slots->active].ever_saved && !slots->first_write_in_progress &&
+      !SlotValidateActive(context,error))return false;
+  return SaveSlots_BeforeCommit(context,error);
+}
+static void SlotDidCommit(void *context,const uint8_t *image) {
+  SaveSlots_DidCommit(context,image);
+}
+static bool SlotValidateActive(void *context,SaveError *error) {
+  SaveSlots *slots=context;SaveSlotDetails details;
+  if(!SaveSlots_ObserveCheckpoints(slots,error))return false;
+  if(SaveSlotManager_Inspect(slots,slots->active,&details))return true;
+  if(error)*error=details.error;return false;
+}
+static bool SlotScan(SaveSlotCollection *out) {
+  if(!out)return false;
+  *out=(SaveSlotCollection){.active=s_save_slots.active,
+    .writable=s_managed_slots && InputReplay_PolicyChangesAllowed() && !s_save_slots.pending};
+  if(!s_managed_slots) {
+    snprintf(out->error.message,sizeof(out->error.message),"External save: slot switching is unavailable for diagnostic paths and recordings.");
+    for(unsigned i=0;i<kSaveSlotCount;++i)out->slots[i].state=kSaveSlot_Unavailable;
+    return true;
+  }
+  if(!out->writable)snprintf(out->error.message,sizeof(out->error.message),"Save slots are read-only during recording, replay or a pending restart.");
+  for(unsigned i=0;i<kSaveSlotCount;++i)(void)SaveSlotManager_Inspect(&s_save_slots,i,&out->slots[i]);
+  return true;
+}
+static bool SlotDraft(unsigned slot,ArRegionalSession *out,SaveError *error) {
+  if(!s_managed_slots || slot>=kSaveSlotCount) {
+    snprintf(error->message,sizeof(error->message),"This save slot is unavailable.");return false;
+  }
+  if(s_save_slots.records[slot].prepared)
+    return SaveSlotManager_ReadDraft(&s_save_slots,slot,out,error);
+  uint8_t id[16];
+  if(!HostCampaignIdentity_Create(NULL,id)) {
+    snprintf(error->message,sizeof(error->message),"Cannot create a new campaign identity.");return false;
+  }
+  ActRaiserRegionalRulesView current;ArRegionalSession baseline;
+  const ArRegionalCostPolicy costs={{0}};
+  if(!ArRegionalSession_NewGame(&baseline,slot,id,&costs))return false;
+  const ArRegionalRules *rules=ActRaiserRegional_CopyRulesView(&current)?&current.requested:&baseline.requested;
+  RandomizerConfig recipe=Randomizer_CurrentConfig();
+  if(!SaveSlotManager_Draft(out,slot,id,rules,&recipe)) {
+    snprintf(error->message,sizeof(error->message),"Cannot prepare this new-game setup.");return false;
+  }
+  return true;
+}
+static bool SlotDraftView(const ArRegionalSession *draft,ActRaiserRegionalRulesView *out) {
+  if(!SaveSlotManager_View(draft,true,out))return false;
+  ActRaiserRegionalRulesView current;
+  if(ActRaiserRegional_CopyRulesView(&current)) {
+    out->artwork_available=current.artwork_available;out->sequences_available=current.sequences_available;
+    out->actor_artwork_available=current.actor_artwork_available;
+  }
+  return true;
+}
+static bool SlotStart(unsigned slot,uint64_t fingerprint,const ArRegionalSession *draft,SaveError *error) {
+  ActRaiserRegionalRulesView current;
+  if(!s_managed_slots || !InputReplay_PolicyChangesAllowed() || s_save_slots.pending ||
+      RuntimeSettings_LifecycleRequest()!=kRuntimeLifecycle_None ||
+      (ActRaiserRegional_CopyRulesView(&current) && (current.population_pending || current.miracle_in_progress))) {
+    snprintf(error->message,sizeof(error->message),"Finish the current game operation before changing saves.");return false;
+  }
+  SaveSlotDetails target;
+  if(!SaveSlotManager_Inspect(&s_save_slots,slot,&target)){*error=target.error;return false;}
+  if(target.fingerprint!=fingerprint){snprintf(error->message,sizeof(error->message),"The slot changed. Close and reopen Saves to review it.");return false;}
+  uint8_t bytes[kSaveSlotDraftCapacity];size_t size=0;
+  if(draft) {
+    ArRegionalSession validated;
+    if(draft->slot!=slot || !SaveSlotManager_Draft(&validated,slot,draft->campaign,&draft->requested,&draft->randomizer) ||
+        !ArRegionalSession_Encode(&validated,bytes,sizeof(bytes),&size)) {
+      snprintf(error->message,sizeof(error->message),"The new-game configuration is invalid.");return false;
+    }
+  }
+  if(!SaveSystem_FlushForSwitch(error) || !SaveSlots_Flush(&s_save_slots,error))return false;
+  char settings_path[kHostPathCapacity];
+  const char *path=getenv("AR_SETTINGS_PATH");
+  if(!path || !*path)path=UserDataFile(settings_path,sizeof(settings_path),"settings.ini");
+  /* Global editor overrides have no destination identity. Disarm them before
+   * persisting the restart; manual editor actions remain available per slot. */
+  g_settings.save_edit_armed=false;
+  if(!Settings_Save(path)){snprintf(error->message,sizeof(error->message),"Could not save preferences. The current slot remains active.");return false;}
+  if(!SaveSlots_Request(&s_save_slots,slot,fingerprint,draft?bytes:NULL,size,(SaveBackend)g_settings.save_backend,error))return false;
+  RuntimeSettings_RequestPreparedRestart();return true;
+}
+
+static void SlotValidateBoot(void) {
+  for(;;) {
+    SaveError error={{0}};SaveSlotDetails details;
+    bool valid=SaveSlots_ValidateDestination(&s_save_slots,&error);
+    if(valid && !SaveSlotManager_Inspect(&s_save_slots,s_save_slots.destination,&details)) {
+      error=details.error;valid=false;
+    }
+    if(valid)return;
+    const SDL_MessageBoxButtonData buttons[]={
+      {SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT,0,"Exit"},
+      {0,1,"Return to previous slot"},{SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT,2,"Retry"}};
+    char message[512];snprintf(message,sizeof(message),"Slot %u could not be opened.\n%s\n\nYour saves have been preserved.",s_save_slots.destination+1,error.message);
+    SDL_MessageBoxData box={SDL_MESSAGEBOX_ERROR,g_window,"Save recovery",message,3,buttons,NULL};int choice=0;
+    if(!SDL_ShowMessageBox(&box,&choice) || choice<=0)Die(message);
+    if(choice==1 && !SaveSlots_ReturnToPrevious(&s_save_slots,&error))Die(error.message);
+  }
+}
 
 static void RunPostTickHousekeeping(void) {
   const PerformanceScope performance = PerformanceMetrics_Begin(kPerformance_Housekeeping);
@@ -956,37 +1068,55 @@ static bool RegionalPopulationPrompt(void *context,ActRaiserRegionalPopulationNo
 static int AppBoot_ParseArgs(AppBoot *app, int argc, char **argv) {
   app->rom_path = NULL;
   app->config_path = NULL;
+  int rom_argument=0,config_argument=0;
 
   for (int i = 1; i < argc; i++) {
     if (strcmp(argv[i], "--config") == 0 && i + 1 < argc) {
-      app->config_path = argv[++i];
+      app->config_path = argv[++i];config_argument=i;
     } else if (argv[i][0] != '-') {
-      app->rom_path = argv[i];
+      app->rom_path = argv[i];rom_argument=i;
     }
   }
 
-  /* Portability: in a shipped bundle, chdir next to the executable so
-   * config.ini, settings.ini, saves/, runs/, and game-assets/ resolve — and
-   * are regenerated by the existing mkdir paths — beside the binary no matter
-   * where it was launched from (double-click, moved folder, script). ROM and
-   * config arguments are absolutized first so a relative path on the command
-   * line still resolves after the chdir. An in-tree dev build has no marker
-   * beside build/ActRaiserRecomp, so the CWD stays authoritative and the dev
-   * workflow is unchanged. Must precede RunDirInit (console tee into runs/)
-   * and any relative file access. */
-  static char rom_abs[kHostPathCapacity], config_abs[kHostPathCapacity];
-  if (PortablePaths_IsBundle()) {
-    if (app->rom_path && snesrecomp_abspath(app->rom_path, rom_abs, sizeof rom_abs))
-      app->rom_path = rom_abs;
-    if (app->config_path &&
-        snesrecomp_abspath(app->config_path, config_abs, sizeof config_abs))
-      app->config_path = config_abs;
-    snesrecomp_anchor_to_exe_dir();
-    /* A folder release is directly executable (not dependent on a generated
-     * .bat/.command wrapper). Explicit ROM arguments still take precedence. */
-    if (!app->rom_path &&
-        snesrecomp_exe_dir_path("user-rom.sfc", rom_abs, sizeof rom_abs))
-      app->rom_path = rom_abs;
+  /* Desktop launchers resolve portable/custom/global storage once and pass
+   * AR_USER_DATA_DIR. Honor it before folder-bundle anchoring; application
+   * resources and writable player data may live in different directories. */
+  static char rom_abs[kHostPathCapacity],config_abs[kHostPathCapacity],executable_abs[kHostPathCapacity];
+  const char *data_root=SDL_getenv_unsafe("AR_USER_DATA_DIR");
+  const bool explicit_data=data_root && *data_root;
+  const bool folder_bundle=PortablePaths_IsBundle();
+  if(explicit_data || folder_bundle) {
+    /* Preserve launch arguments for an eventual exec after changing CWD. */
+    const char *executable_name=strrchr(argv[0],'/');
+#ifdef _WIN32
+    const char *separator=strrchr(argv[0],'\\');
+    if(separator && (!executable_name || separator>executable_name))executable_name=separator;
+#endif
+    if(executable_name) {
+      if(!snesrecomp_abspath(argv[0],executable_abs,sizeof(executable_abs)))return 1;
+      argv[0]=executable_abs;
+    } else if(snesrecomp_exe_dir_path(argv[0],executable_abs,sizeof(executable_abs)) && sr_path_exists(executable_abs))
+      argv[0]=executable_abs;
+    if(app->rom_path) {
+      if(!snesrecomp_abspath(app->rom_path,rom_abs,sizeof(rom_abs)))return 1;
+      app->rom_path=rom_abs;argv[rom_argument]=rom_abs;
+    }
+    if(app->config_path) {
+      if(!snesrecomp_abspath(app->config_path,config_abs,sizeof(config_abs)))return 1;
+      app->config_path=config_abs;argv[config_argument]=config_abs;
+    }
+    if(explicit_data) {
+      SaveError error={{0}};char absolute_root[kHostPathCapacity];
+      if(!snesrecomp_abspath(data_root,absolute_root,sizeof(absolute_root)) ||
+          !SavePaths_EnsureDirectory(absolute_root,&error) || sr_utf8_chdir(absolute_root)) {
+        fprintf(stderr,"[storage] Cannot use the selected data directory: %s\n",data_root);return 1;
+      }
+      /* Restart inherits this absolute root, including when the original
+       * explicit path was relative to the caller's working directory. */
+      if(SDL_setenv_unsafe("AR_USER_DATA_DIR",absolute_root,1)!=0)return 1;
+    } else snesrecomp_anchor_to_exe_dir();
+    if(!app->rom_path && folder_bundle && snesrecomp_exe_dir_path("user-rom.sfc",rom_abs,sizeof(rom_abs)))
+      app->rom_path=rom_abs;
   }
 
   /* Per-run artifact ringfence (runs/<ts>/): must run before anything prints
@@ -1853,6 +1983,17 @@ static void AppBoot_StartGame(AppBoot *app) {
     SaveError error = {{0}};
     const char *native_path = getenv("AR_SAVE_NATIVE_PATH");
     const char *ini_path = getenv("AR_SAVE_INI_PATH");
+    s_managed_slots=!app->headless && !(native_path && *native_path) && !(ini_path && *ini_path) &&
+        !getenv("AR_SAVE_BACKEND") && !getenv("AR_INPUT_REPLAY") && !getenv("AR_INPUT_RECORD");
+    SaveBackend backend=(SaveBackend)g_settings.save_backend;
+    if(s_managed_slots) {
+      if(!SaveSlots_Open(&s_save_slots,saves_dir,backend,&error))Die(error.message);
+      SlotValidateBoot();
+      if(!SaveSlots_Paths(&s_save_slots,s_save_slots.destination,save_srm,save_ini,sizeof(save_srm)))
+        Die("Save slot path is too long.");
+      native_path=save_srm;ini_path=save_ini;
+      backend=SaveSlots_DestinationBackend(&s_save_slots);
+    }
     if (!native_path || !native_path[0]) {
       UserDataFile(save_srm, sizeof save_srm, "saves/save.srm");
       native_path = save_srm;
@@ -1862,13 +2003,13 @@ static void AppBoot_StartGame(AppBoot *app) {
       ini_path = save_ini;
     }
     if (!SaveSystem_Attach(g_sram, (size_t)g_sram_size,
-                           (SaveBackend)g_settings.save_backend,
+                           backend,
                            native_path, ini_path, &error))
       Die(error.message);
+    if(!SaveSystem_SetStorageRoot(saves_dir,s_managed_slots?(int)s_save_slots.destination:-1,&error))Die(error.message);
     snprintf(legacy_srm, sizeof(legacy_srm), "%s/%s.srm",
              saves_dir, RtlGameIdentifier());
-    if (!SaveSystem_MigrateLegacyNative(legacy_srm, &error))
-      Die(error.message);
+    if(!s_managed_slots && !SaveSystem_MigrateLegacyNative(legacy_srm,&error))Die(error.message);
     if (!SaveSystem_LoadActive(&error)) {
       char message[512];
       snprintf(message, sizeof(message),
@@ -1881,6 +2022,7 @@ static void AppBoot_StartGame(AppBoot *app) {
     }
 
     SaveEditRequest edits;
+    if(s_managed_slots)g_settings.save_edit_armed=false;
     bool staged = RuntimeSettings_BuildSaveEditRequest(&edits);
     if (staged && g_settings.save_edit_armed) {
       if (!SaveSystem_ApplyEdits(
@@ -1898,8 +2040,17 @@ static void AppBoot_StartGame(AppBoot *app) {
   OracleTrace_Init(RtlGameRunner());
   ForcedInput_Init();
   InputReplay_Init();
-  if (!ActRaiserRegional_Initialize(HostCampaignIdentity_Create, NULL))
+  if (!ActRaiserRegional_InitializeSlot(s_managed_slots?s_save_slots.destination:0,HostCampaignIdentity_Create, NULL))
     Die("Regional campaign storage could not be initialized; saves preserved.");
+  if(s_managed_slots) {
+    SaveSlotDetails details;
+    if(!SaveSlotManager_Inspect(&s_save_slots,s_save_slots.destination,&details))Die(details.error.message);
+    if(details.state==kSaveSlot_Empty && details.prepared) {
+      ArRegionalSession draft;SaveError error={{0}};
+      if(!SaveSlotManager_ReadDraft(&s_save_slots,s_save_slots.destination,&draft,&error) ||
+          !ActRaiserRegional_StageNewGame(&draft))Die("Cannot stage the prepared new game; saves preserved.");
+    }
+  }
   ActRaiserRegional_SetContinuePrompt(RegionalContinuePrompt, app);
   ActRaiserRegional_SetPopulationPrompt(RegionalPopulationPrompt, app);
   if (!InputReplay_SetPolicyDigest(ActRaiserRegional_ReplayDigest, NULL))
@@ -1939,6 +2090,14 @@ static void AppBoot_StartGame(AppBoot *app) {
         "output device, then restart the game. You can also change the "
         "audio buffer or sample-rate setting before launching again.");
   }
+  if(s_managed_slots) {
+    SaveError error={{0}};
+    if(!SaveSlots_Acknowledge(&s_save_slots,&error))Die(error.message);
+    const SaveStorageHooks storage={&s_save_slots,SlotBeforeCommit,SlotDidCommit,SlotValidateActive};
+    SaveSystem_SetStorageHooks(&storage);
+  }
+  const SettingsOverlaySaveSlotHooks slots={SlotScan,SlotDraft,SaveSlotManager_Edit,SlotDraftView,SlotStart};
+  SettingsOverlay_SetSaveSlotHooks(&slots);
 }
 
 /* Drop resource caches before checking the rebuilt feature set. A retained
@@ -2654,8 +2813,17 @@ static int AppShutdown(AppBoot *app, char **argv) {
   }
   SDL_Quit();
   free(app->rom_data);
+  if(s_managed_slots) {
+    SaveError error={{0}};
+    if(!SaveSlots_Flush(&s_save_slots,&error))save_flush_failed=true;
+    SaveSlots_Close(&s_save_slots);
+  }
 
   if (RuntimeSettings_LifecycleRequest() == kRuntimeLifecycle_Restart) {
+    if(save_flush_failed || settings_flush_failed || fatal_session) {
+      fprintf(stderr,"[lifecycle] restart stopped after a persistence failure; the request is retained for recovery\n");
+      return 1;
+    }
     fprintf(stderr, "[lifecycle] restarting process\n");
 #ifdef _WIN32
     sr_execvp(argv[0], (const char *const *)argv);

@@ -20,6 +20,104 @@ used by the C implementation.
 Direct-page locations are often scratch with caller-specific meaning. Do not
 assume that one observed use establishes a global variable.
 
+## Regional HLE bindings
+
+This index connects the native addresses below to the current handwritten
+owners. Addresses are **US CPU entry points**, not file offsets or foreign-ROM
+entry points. Multiple entries in one cell belong to the same bank unless a
+new bank is written. Configuration in [bank00](../recomp/bank00.cfg),
+[bank01](../recomp/bank01.cfg), [bank02](../recomp/bank02.cfg) and
+[bank03](../recomp/bank03.cfg) names the exact `hle_func_if` adapter and guard.
+The linked C owner defines the guard, native continuation and CPU effects;
+the function-candidate tables below explain the native mechanics.
+
+The [regional runtime][regional-runtime] coordinates session activation. Its
+portable rules live under `src/regional/{action,towns,interaction,presentation}`;
+`regional_profiles.c:VisitProfileMembers` is the shared policy-family inventory,
+not a second set of native hooks. A selected rule may share a seam with other
+rules, and a native consumer need not have its own replacement.
+
+### Action and encounter bindings
+
+| Family | US entries | C owner and activation |
+| --- | --- | --- |
+| Room snapshot and initial time | `$02:B4E8` | [action_video_config](../src/actraiser/actraiser_action_video_config.c): `ActRaiser_RunActionVideoConfig` brackets native-equivalent configuration, then captures the complete room policy. The inner `ActRaiser_ApplyActionVideoConfig` is not the registered wrapper. |
+| Terrain, player start and checkpoint | `$00:8329/$933C/$94B1` | [stage_terrain](../src/actraiser/actraiser_stage_terrain.c); selected room geometry after the asset VM, before native collision/actors. |
+| Initial and later-wave placements | `$00:941C/$9500` | [stage_placements](../src/actraiser/actraiser_stage_placements.c); one room-pinned numerical program, with randomization after regional selection. |
+| Terrain hazards | `$00:940C` | [stage_hazards](../src/actraiser/actraiser_stage_hazards.c); completed native expansion, before publishing the count. |
+| Base HP/damage and Tanzra child overrides | `$00:966C/$FC96/$FC99/$FD2E` | [actor_stats](../src/actraiser/actraiser_actor_stats.c); fresh initializers only. Regional base → applied randomizer scale → native mode/difficulty handling where applicable. |
+| Platform-skull armor, reward and proximity | Shared `$00:966C`; `$00:D39A/$D3A2` | [platform_skull](../src/actraiser/actraiser_platform_skull.c); birth dispatch is owned by `ActRaiser_ActorStats`, not a second registered birth hook. |
+| Linked-prop cast freeze | Shared `$00:966C` | [cast_hold](../src/actraiser/actraiser_cast_hold.c); fresh flag projection. Native `$8943–894A` remains the per-frame consumer. |
+| Motion, emitters, collision and shared boss/pose timelines | `$00:8E2F/$B3CB/$B3E4/$C908/$DADD/$969E` | [action_motion](../src/actraiser/actraiser_action_motion.c); guarded native-reader projections and initializer prefixes consume the room snapshot. See the individual source/state signatures below. |
+| Tree seed controller and preparation | `$00:A9BF/$A975` | [tree_attack](../src/actraiser/actraiser_tree_attack.c); selected encounter policy, retained native allocation and yields. |
+| Statue volley | `$00:BD9F/$BDA8` | [statue_volley](../src/actraiser/actraiser_statue_volley.c); native repeat counter and coroutine ownership. |
+| Minotaur, Wizard and Antlion branches | `$00:AFDB/$BE78/$C67D/$C718/$C721` | [boss_rules](../src/actraiser/actraiser_boss_rules.c); encounter-guarded room choices. |
+| Pharaoh heads, plant geometry/phases | `$00:C2CB/$C2D1/$D980/$D9DB` | [boss_rules](../src/actraiser/actraiser_boss_rules.c); retained native state/return paths; shared-reader work remains in `action_motion`. |
+| Dragon projectiles, Viper, Northwall and Tanzra clock | `$00:A655/$A65E/$E4DB/$E878/$E8B5/$F8FC` | [boss_rules](../src/actraiser/actraiser_boss_rules.c); guarded prefixes, with timeline projections at `$8E2F`. |
+| Kasandora fire-enemy decisions | `$00:C3DD/$C3EA/$C405/$C40A` | [fire_enemy](../src/actraiser/actraiser_fire_enemy.c); unchanged native RNG/allocator, selected decision and movement rules. |
+| European difficulty | `$00:966F/$8A24/$D766`; `$02:BC8A` | [difficulty](../src/actraiser/actraiser_difficulty.c); room-cached HP, contact, dragon gate and expired timer reload. EU placement filtering and plant behavior use the placement/reader owners above. |
+| Score-earned lives | `$00:873C` | [score_lives](../src/actraiser/actraiser_score_lives.c); native decimal-add wrapper, room-selected rule. |
+| Retry score | `$00:981C` | [regional runtime][regional-runtime] → [retry](../src/actraiser/actraiser_retry.c); retry boundary, not a live score edit. |
+| New Action-run health/lives | `$02:AB05` | [action_start](../src/actraiser/actraiser_action_start.c); complete native run initializer, distinct from room/retry activation. |
+| Spell inventory and item/icon artwork | `$00:879D/$9EFC/$96E3`; `$02:AC20/$AF3D/$BCED` | [action_inventory](../src/actraiser/actraiser_action_inventory.c); run-owned spell stack, accepted casts and original upload boundaries. Item-art policy remains independent of inventory rules. |
+| Scroll price and magic gesture | `$00:9DE1/$9843/$9A6E` | [regional runtime][regional-runtime] → [scroll_cast](../src/actraiser/actraiser_scroll_cast.c), [magic_gesture](../src/actraiser/actraiser_magic_gesture.c); cast transaction and input-release activation, respectively. |
+
+### Town and interaction bindings
+
+| Family | US entries | C owner and activation |
+| --- | --- | --- |
+| Development clocks and effect servicing | `$03:8193`; `$01:9460/$948E` | [regional runtime][regional-runtime] → [development](../src/actraiser/actraiser_development.c); new-cycle pacing capture, shared effect divider, retained native town callees. |
+| Town wait and fishing | `$03:872A/$E865` | [regional runtime][regional-runtime] → [town_wait](../src/actraiser/actraiser_town_wait.c), [fishing](../src/actraiser/actraiser_fishing.c); running wait completes before reload; fishing reconciles at its callback. |
+| Construction prices | `$03:82DB/$84B9/$853B/$8425/$848E` | [construction_runtime](../src/actraiser/actraiser_construction_runtime.c); one outer transaction also captures town-status rules. Prefixes cannot independently activate settings. |
+| Growth-status producers and reports | `$03:BF8C/$91AE/$91BC/$8566/$85A3/$85C3/$9271/$BF9E/$BFA2`; shared `$03:82DB` | [town_status_runtime](../src/actraiser/actraiser_town_status_runtime.c) → [town_status](../src/actraiser/actraiser_town_status.c); construction/report/standalone-plot snapshots, including all six report iterations. |
+| Population census and confirmed redevelopment | `$03:C07E`; `$01:85A2` | [town_census](../src/actraiser/actraiser_town_census.c) reads effective support only. [population_conversion](../src/actraiser/regional/actraiser_population_conversion.c), reached through the [regional runtime][regional-runtime], owns confirmed Palace redevelopment and recovery/save transactions. |
+| Level awards and displayed goal | `$03:E414/$B3BA/$B3C7/$B3CD/$B407` | [level_goals_runtime](../src/actraiser/actraiser_level_goals_runtime.c) → [level_goals](../src/actraiser/actraiser_level_goals.c); full award-loop snapshot. Master-report refresh changes only the derived next goal. |
+| Population/story and Compass prerequisites | `$03:E13E/$EB35` | [regional runtime][regional-runtime] → [story_prerequisites](../src/actraiser/actraiser_story_prerequisites.c); native event-evaluation boundary. |
+| Recovery queues and Japanese angel phase | `$03:8271`; `$01:B257/$9C30/$9C34` | [regional runtime][regional-runtime] → [recovery](../src/actraiser/actraiser_recovery.c); independent SP/angel leaves, US RAM widths. |
+| Earthquake decisions | `$01:97E5/$9840`; `$03:A066/$A144/$A1E8/$A284/$A2E3` | [regional runtime][regional-runtime] captures the complete user/posted effect; [quake](../src/actraiser/actraiser_quake.c) replaces only selected structure-class decisions. Not the custom redevelopment transaction. |
+| Lair stock and reload history | `$03:B7C6/$B6BF/$BADD/$BA42/$B4A6/$D095` | [regional runtime][regional-runtime] → [lair_history](../src/actraiser/actraiser_lair_history.c), [lair_reloads](../src/actraiser/actraiser_lair_reloads.c); observe completed native events, preserve alternate histories, project at safe boundaries. |
+| House/score feedback and completion timing | `$03:B4B8/$D0B3/$D0D4/$B525`; `$00:A754/$A30D` | [regional runtime][regional-runtime] → [score_feedback](../src/actraiser/actraiser_score_feedback.c); arithmetic prefixes plus one score-settlement owner per completed act. |
+| SIM actor policy identity and combat | `$03:813F/$8168/$B9EE`; `$01:B018/$B0CC` | [sim_combat_runtime](../src/actraiser/actraiser_sim_combat_runtime.c) → [sim_combat](../src/actraiser/actraiser_sim_combat.c); snapshot at birth, retain through cache/restore, read at collision. |
+| SIM target/search behavior | `$01:BA67/$BA6A/$BB5C/$BCBC/$BD46/$BEE3/$BF72` | [sim_ai_runtime](../src/actraiser/actraiser_sim_ai_runtime.c) → [sim_ai](../src/actraiser/actraiser_sim_ai.c); same actor-generation lifetime as combat, native RNG/return owners. |
+| Source collection and Magic Skull wait | `$01:8916/$9CCE/$9CF0/$9EE7/$9F80` | [regional runtime][regional-runtime] → [sources](../src/actraiser/actraiser_sources.c); collection/Use call-chain ownership, captured Skull-use wait. |
+| Miracle pricing and report-menu return | `$01:81D7` (dispatch); shared selectors `$01:8B7D/$8CF0/$8D92/$8C43` | [sim_menu](../src/actraiser/actraiser_sim_menu.c) → [regional runtime][regional-runtime] → [miracle](../src/actraiser/actraiser_miracle.c), [report_command](../src/actraiser/actraiser_report_command.c). Command-scoped capture works with original or modern menus; selector/confirmation seams also serve nonregional UI. |
+| Master score page and message-speed range | `$01:899B/$89EE/$8AF5/$8B18/$8B59/$8C98` | [regional runtime][regional-runtime] → [speed_selector](../src/actraiser/actraiser_speed_selector.c); report-open and speed-menu-open snapshots, native cleanup. |
+| Lives display | `$02:C280` | [regional runtime][regional-runtime] → [lives_display](../src/actraiser/actraiser_lives_display.c); display conversion only. |
+| Death Heim arrival | `$00:A343`; `$01:861E` | [arrival_runtime](../src/actraiser/actraiser_arrival_runtime.c); departure/Palace transaction, locked after the sequence begins. |
+
+### Media and campaign bindings
+
+| Family | US entries / host boundary | C owner and activation |
+| --- | --- | --- |
+| Action art and Death Heim backdrop | `$02:B28E/$B330`; `$00:8D68`; `$02:C5C9` | [action_room_graphics](../src/actraiser/actraiser_action_room_graphics.c), [actor_art](../src/actraiser/regional/actraiser_actor_art.c), [sprite emitter](../src/actraiser/actraiser_widescreen_sprites.c), [lzss](../src/actraiser/actraiser_lzss.c). Stage-owned donor residency, guarded uploads, completed-decode observation and draw-only parts. |
+| Retained geometry loaders | `$02:B363/$B3EB` | [action_room_loader](../src/actraiser/actraiser_action_room_loader.c); native-equivalent metatile/map producers. Regional terrain is applied later at `$00:8329`, not by importing a foreign command VM. |
+| Town symbols/lairs/pyramid | `$02:B2C1`, shared `$02:B28E` | [town_art](../src/actraiser/regional/actraiser_town_art.c); capture on accepted town BG upload, same generation for following OBJ upload. |
+| Title artwork | `$02:B34D/$B2D2/$B4AB` | [title_art](../src/actraiser/regional/actraiser_title_art.c); one title-draft choice for palette/CHR/map, separate from text/copyright. |
+| Aitos mosaic and pose order | `$02:939C`; shared `$00:8E2F` | [regional_mosaic](../src/actraiser/regional/actraiser_regional_mosaic.c), [action_motion](../src/actraiser/actraiser_action_motion.c); room-owned pattern/poses, no donor required. |
+| Scene song and song-sequence data | `$02:B653`; SPC upload `$02:9964/$9A56` | [scene_music](../src/actraiser/actraiser_scene_music.c), [spc_upload](../src/actraiser/actraiser_spc_upload.c); accepted declaration versus actual validated upload are separate activation points. |
+| Title access and Game Over destination | `$02:A70D/$A72D/$A748/$A751/$A7E9/$AAF9/$AB00/$AB03` | [mode_entry](../src/actraiser/actraiser_mode_entry.c); native checksum/selection preserved, controlled return to retained `$00:8024` title setup. |
+| New campaign / Continue | `$02:A622/$A79F` | [regional runtime][regional-runtime]; accepted New Game captures the seed recipe and rolls requested rules once; Continue restores the selected save's recipe/rules. |
+| Completed story save | `$03:A656` | [save_transaction](../src/actraiser/actraiser_save_transaction.c); bracket native SRAM writer, publish a checksummed snapshot on normal return, then use the existing host checkpoint transaction. |
+
+Host-only editing, presets, seeded selection, save-slot identity and recipe
+serialization have **no ROM entry or newly allocated WRAM field**. See
+[regional architecture](regional-architecture.md),
+[host-state ownership](ram-map.md#regional-host-state-and-native-projections) and
+[the recipe format](save-format.md#randomizer-recipe-version-70).
+Source extraction addresses and package identities belong in the
+[media contract](regional-media.md); they are not additional US HLE entries.
+
+Three callback paths complement the entry table. The completed NMI service in
+[actraiser_rtl.c](../src/actraiser/actraiser_rtl.c) calls
+`ActRaiserRegional_ObserveInputRelease` after restoring interrupted registers;
+it observes gesture release without replacing NMI or the pad latch. The LZSS
+owner notifies its registered actor-art observer after a completed decode.
+Campaign initialization registers `ArRegionalCampaign_SaveHost` with
+`SaveSystem_SetCommitHost`; this is the host snapshot/commit boundary used by
+native saves and confirmed redevelopment, not another ROM save instruction.
+
+[regional-runtime]: ../src/actraiser/regional/actraiser_regional_runtime.c
+
 ## Function candidates
 
 ### European-only research contracts
@@ -358,6 +456,7 @@ ROM by shape; run it after any bank00.cfg handler work.
 | `$03:95B3` | `Town_TryAllocateHouse` | Native-fixture verified | JP `$03:939E`. Requires a pending budget and old population ≤ support+2, then allocates a whole house; no final-population clamp. Failure sets status `$0010` without spending the budget. |
 | `$03:8E10` | `Town_RefreshPopulationTotal` | Native-fixture verified | JP `$03:8CFD`. Copies selected town population to `$021A` and sums six populations into `$0218` (JP `$0219/$0217`); does not aggregate support. |
 | `$03:B3BA/$03:E414` | `Master_TryAwardOneLevel` / `Master_ProcessLevelAwards` | Leaf/no-award native fixtures; regional host integration | JP `$03:B18B/$03:DF19`. Leaf awards once, never demotes. Wrapper loops with sound/dialogue, publishes next threshold, refills SP after awards and handles maximum level17. Regional table snapshot spans the entire wrapper; Master-report refresh changes only the derived goal. See [integration](regional-differences-technical.md#level-goal-integration) and [native switching boundaries](regional-differences-technical.md#population-switching-established-boundaries). |
+| `$03:B3C7→B3CB`, `$03:B3CD→B3D1`, `$03:B407→B40B` | `Master_ComparePopulationGoal` / `LoadUnmetGoal` / `LoadNextGoal` | Guarded HLE table-read prefixes | `ActRaiser_RegionalLevelCompare/Load/Next` use the table captured by the complete award owner. M0X0, D0, binary mode, even X within 18 words. Compare preserves A and reproduces CMP flags; loads reproduce LDA/NZ. Native continuations retain HP/SP/level stores and original return frames. |
 | `$03:B4A6/$03:B50F/$03:B54E` | `Lair_HouseFeedback` / `Lair_AdjustFromScore` / `Town_CreditGrowthWithCarry` | Native-fixture verified | House destruction distributes4/6/8 stock units (JP4) across unsealed lairs, restarting at the first slot for each house, or credits growth if all sealed. All16 Skull-origin seal masks verified. Score helper adds `A >> 2` to each stock; JP subtracts instead. Growth leaf inherits incoming carry. See [regional reference](regional-differences-technical.md#lair-stock-is-not-monotonic) before replacing these with host arithmetic. |
 | `$03:B4B8-$B4BB` → `$03:B4BC` | `Lair_HouseUnitsPrefix` | Regional HLE + native controls | M0X0 after the native subtype calculation. JP substitutes four in A/Y; US/EU retains AND/TAY. B4A6 must end at B4B8 in the generated CFG so both M0/M1 callers actually enter the prefix. The shared continuation retains native distribution and all-sealed growth; the wrapper retains the US caller ABI. |
 | `$03:D095/$03:D0D4` | `Town_ApplyActionScore` / `Town_ConvertActionScore` | Mapped + native conversion fixtures | Completed-act count selects stock versus growth; US converter returns `2*floor(score/10)`, unlike JP's thresholded converter. Score is BCD; output binary. |
@@ -379,6 +478,10 @@ ROM by shape; run it after any bank00.cfg handler work.
 | `$00:A754` → `$A757`; `$00:A30D` → `$A311` | `Action_CaptureScoreCompletion` / `Action_SettleOrSkipScore` | Regional HLE + compiled-game clear controls | Captures policy at the accepted clear. JP settles before `$85B7` finalizes the display object; departure skips an already-settled event. US retains its original departure call. Shared coroutine CFG ends prevent bypasses; see the [completion contract](regional-differences-technical.md#death-heim-transition-and-music). |
 | `$03:BF8C/$03:C037/$03:C072` | `Town_RefreshGrowthReports` / `Town_CheckFullDevelopment` / `Town_ReportPopulationThresholds` | Mapped + native report fixtures | US report calculation scans structures and six thresholds; JP `$03:BCC1` uses a different flag-based classifier. Regional integration pins one policy through all six towns, including the `$BF9A` back edge. Thresholds are not a proof of attainable population maxima. |
 | `$03:82DB/$03:855C/$03:91AE/$03:91BC` | `Town_ConstructionCalculation` / `Town_RebuildStatus` / `Town_ProbePlots` / `Town_ProbeVisiblePlots` | Verified + regional integration | Calculation owns the attempt marker and status producer; standalone plot roots share its snapshot when nested. Five independent status leaves preserve native construction callbacks and stores. [Prefix contracts](regional-differences-technical.md#town-status-integration). |
+| `$03:82DB/$03:84B9`; `$03:853B→8544`, `$03:8425→842E`, `$03:848E→8497` | `Town_CaptureConstructionPrices` / `BudgetPrice` / `PaymentPrice` / `SupportReturnPrice` | Transaction wrapper + guarded HLE prefixes | Visible/offscreen batches capture prices and status together. JP-selected prefixes load A=4 with LDA N/Z effects, preserving carry into the native support-return ADC. PB3/DB7F/D0/M0X0; prefixes require the active captured transaction. `$01:853B` is an unrelated report-menu wrapper. |
+| `$03:8566→856B`, `$03:BFA2→BFA7` | `Town_StatusLowGrowthThreshold` | Guarded HLE prefixes | A=4 inside the captured status transaction, with LDA N/Z; construction and the US-style report classifier share this leaf. Native scratch store/comparison remains. |
+| `$03:85A3→85A7`, `$03:85C3→85C6` | `Town_StatusComparePlots` / `MergePersistentFlags` | Guarded HLE prefixes | Compare selected expected plot count without changing A; JP merge skips only the scratch OR after native `old & $50`. Does not rewrite flags from a menu callback. |
+| `$03:9271→9274`, `$03:BF9E→C022` | `Town_StatusMarkFoodAttempt` / `ClassifyGrowthReport` | Guarded HLE prefixes | Food path writes `$7F:7C3D=1`, then performs displaced `LDA $7C19`. Classifier derives JP report code from US population `$021C+X`, gate `$7CEF+X` and flags `$91DA+X`. PB3/DB7F/D0/M0X0; indexed entries require even X<12. `$BF9A` must end at `$BF9E` so all six report iterations enter the guard. |
 | `$03:9975/$03:99A4` | `Bridge_BuildAtCrossing` | Mapped | Road-crossing checkers: on a river cell (probe `$97B0`) with the crossing flag clear, allocate bridge record type `$01`/`$11` and set road-map bit `$0080`/`$0100` at `$7F:6800+cell*2`. |
 | `$03:A374` | `Bridge_BuildSteps` | Mapped | Bridge construction action handler (class `$7D1F`=2, variant = stage \| orientation, +8 Northwall ice) staging visual step programs via `$A4B8`. |
 | `$03:A435` | `Bridge_ActionNoop` (preserving reset) | Verified | Bridge action-table rows 2-6 preserve the record but queue action 0 when town gate `$919E+N` is zero, otherwise action 1. Not literally side-effect-free: complete earthquake fixtures preserve both orientations with either gate but can differ in visual completion time. |
@@ -492,8 +595,8 @@ All addresses here are USA. Detailed contracts and regional cautions are in
 
 | Address | Candidate symbol | Status | Contract / observation |
 |---|---|---|---|
-| `$02:A622` | `Title_RunContinueMenu` | Mapped + delegated campaign boundary | Continue/new-game state machine; branches on save checksum validity. Normal return binds the regional campaign after native selection/restoration/fades. `$0336 == 1` resumes the durable save; 0/2 create fresh in-memory campaign identities. The no-valid-save path also returns here with selection 0. |
-| `$02:A79F` / `$A7A3` / `$A75B` | `Title_ContinueRestore` / `Title_ContinueFade` / `Title_WaitSelection` | Mapped + guarded acknowledgement | Selection1 calls `$03:A83A` with JSL return word `$A7A2`, then waits/fades at `$A7A3`. The regional host may pause before restoration to acknowledge missing lair history. Cancellation waits for `$4219 & $D0` to release, then resumes `$A75B` with the same native title frame. Recording/replay uses the original path without implicit acknowledgement. |
+| `$02:A622` | `Title_RunContinueMenu` | Mapped + delegated campaign boundary | `ActRaiser_RegionalTitle` retains native checksum/selection/fades. Normal return binds the selected campaign: `$0336 == 1` restores its saved rules/seed recipe; 0/2 capture the title draft and perform seeded regional selection once. The no-valid-save path returns with selection 0. New Game does not overwrite the previous durable checkpoint. |
+| `$02:A79F` / `$A7A3` / `$A75B` | `Title_ContinueRestore` / `Title_ContinueFade` / `Title_WaitSelection` | Mapped + guarded acknowledgement | Selection1 calls `$03:A83A` with JSL return word `$A7A2`, then waits/fades at `$A7A3`. `ActRaiser_RegionalContinue` acknowledges missing lair history and binds the saved randomizer recipe before restoration. Cancellation waits for `$4219 & $D0` release, then resumes `$A75B` with the same native title frame. Recording/replay skips the prompt; common `$A622` return still binds before gameplay, without rerolling. |
 | `$02:A88D` | `Save_VerifyChecksum` | Verified | ADD/XOR checksum of SRAM through `$701FEB`; returns validity via carry. |
 | `$00:84F3` | `Save_AccumulateChecksum` | Verified + whole-body HLE | Bounded 4,086-word SRAM scan shared by save validation and writes. Accumulates the ADD checksum into `$14`/`X` and XOR checksum into `$16`/`Y`/`A`. The HLE reuses `Save_ComputeChecksum`, preserves the decimal-mode edge and reconstructs DP/register/P/RTL effects. |
 | `$03:A656–A839` | `Save_WriteStoryImage` | Mapped + delegated save boundary | Copies town/status data into battery SRAM. Final checksum sequence: JSL `$00:84F3` at `$A827`, REP `$20`, sum store `$70:1FEC` at `$A82E`, XOR store `$70:1FEE` at `$A833`, then PLB/PLP/RTL. The adapter brackets the original generated body, preserving entry width and JSL return ownership; host persistence is deferred until normal return with a valid checksum. A checksum calculation alone is not evidence that a save has completed. |
@@ -610,7 +713,7 @@ polymorphic fields and temporary direct-page values should remain local.
 | `$7E:0334` | `CurrentSongId` | Selected/requested song id; values observed during Death Heim transitions identify music selections, not a distinct ending-state flag or proof an upload has completed. |
 | `$7E:0347` | `DeathHeimProgress` | Boss-rush progress (`$19 - 1` after each boss); `7` = all bosses beaten. |
 | `$7E:035A/$035B` | `CopEventRequest` / `BrkSfxRequest` | Software-interrupt request ports (music/event id, SFX id). |
-| `$7F:6B18` | `RegionCompletionFlags` | Six-region completion bitset checked by the post-Death-Heim return stager. |
+| `$7F:6B18–6B23` | `TownActCompletionCounts` | Six word-sized completed-act counts, not a bitset. Final-act departure requires every word to equal 2; Palace arrival uses the corresponding byte comparisons. |
 | `$7E:6000-$7FFF` | `ActionGraphicsRasterWorkspace` | Shared command-7/5 decompression workspace and R1-R10 raster-table storage; retained decompression bytes can be presentation-visible. |
 | `$7E:8000+/$C000+` | `ActionBg1Map/ActionBg2Map` | Active page-major action map prefixes. Sizes derive from the command-4 chunk dimensions; `$C000-$FFFF` is world/town scratch outside action mode. |
 | `$7E:C000-$FFFF` | `WorldMapScratch` | Shared scratch. It is a world-map shadow only during `$19=09` build/presentation; action BG2 command 4 overwrites only its active prefix and towns reuse rows 0-7, so handwritten rendering must not treat it as persistent state. |

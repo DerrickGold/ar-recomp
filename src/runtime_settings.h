@@ -19,5 +19,7 @@ bool RuntimeSettings_HandleAction(const SettingDesc *desc);
 bool RuntimeSettings_BuildSaveEditRequest(SaveEditRequest *edits);
 
 RuntimeLifecycleRequest RuntimeSettings_LifecycleRequest(void);
+/* Caller has already durably staged and validated a slot restart. */
+void RuntimeSettings_RequestPreparedRestart(void);
 
 #endif /* RUNTIME_SETTINGS_H */

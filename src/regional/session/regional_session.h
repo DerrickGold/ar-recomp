@@ -7,8 +7,8 @@
 #include "save_checkpoint.h"
 #include "randomizer_config.h"
 
-/* Campaign identity is host-supplied (never inferred from name/locale/ROM).
- * Slot 0 is today's sole slot. This codec covers the integrated rule families;
+/* Campaign and slot identities are host-supplied, never inferred from native
+ * name/locale/ROM state. This codec covers the integrated rule families;
  * legacy histories remain empty until the explicit adoption workflow. */
 typedef struct ArRegionalSession {
   uint8_t campaign[16];
@@ -237,5 +237,12 @@ SaveCheckpointStatus ArRegionalSession_Load(ArRegionalSession *session,
 bool ArRegionalSession_Save(const ArRegionalSession *session, SaveFileFormat format,
     const char *native_path, const uint8_t *expected,
     const uint8_t image[kActRaiserSramSize], SaveError *error);
+
+/* Same canonical codec for a host-owned prepared new game. This does not
+ * create a checkpoint or claim that a native story save exists. */
+bool ArRegionalSession_Encode(const ArRegionalSession *session, void *out,
+    size_t capacity, size_t *size);
+SaveCheckpointStatus ArRegionalSession_Decode(const void *bytes, size_t size,
+    ArRegionalSession *out);
 
 #endif

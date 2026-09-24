@@ -27,6 +27,10 @@
 #include "user_data_dir.h"
 
 static RuntimeLifecycleRequest s_lifecycle_request;
+void RuntimeSettings_RequestPreparedRestart(void) {
+  s_lifecycle_request=kRuntimeLifecycle_Restart;
+  SettingsOverlay_Close();
+}
 
 extern SDL_Window *g_window;
 extern bool g_sim3d_textures_ready;
@@ -144,6 +148,8 @@ bool RuntimeSettings_HandleAction(const SettingDesc *desc) {
   if (!desc || desc->type != kSettingType_Action) return false;
 
   switch (desc->action) {
+  case kSettingAction_SaveSlots: return SettingsOverlay_OpenSaveSlots(false);
+  case kSettingAction_NewRandomizedGame: return SettingsOverlay_OpenSaveSlots(true);
   case kSettingAction_TogglePause: {
     HostInput_TogglePause();
     break;
@@ -210,16 +216,13 @@ bool RuntimeSettings_HandleAction(const SettingDesc *desc) {
   }
   case kSettingAction_SaveImport: {
     const char *path = getenv("AR_SAVE_IMPORT");
-    if (!path || !path[0]) {
-      FILE *probe = sr_fopen("saves/import.srm", "rb");
-      if (probe) {
-        fclose(probe);
-        path = "saves/import.srm";
-      } else {
-        path = "saves/import.ini";
+    char selected[kHostPathCapacity];SaveError error={{0}};
+    if(!path || !*path) {
+      if(!SaveSystem_DefaultImportPath(selected,sizeof(selected),&error)) {
+        fprintf(stderr,"[saves] import failed: %s\n",error.message);return false;
       }
+      path=selected;
     }
-    SaveError error = {{0}};
     if (!SaveSystem_Import(path, g_settings.save_autobackup, &error)) {
       fprintf(stderr, "[save-editor] import %s failed: %s\n", path,
               error.message);
@@ -227,21 +230,23 @@ bool RuntimeSettings_HandleAction(const SettingDesc *desc) {
     }
     fprintf(stderr, "[save-editor] imported %s -> %s\n", path,
             SaveSystem_ActivePath());
+    RuntimeSettings_RequestPreparedRestart();
+    break;
+  }
+  case kSettingAction_SaveExportCampaign: {
+    SaveError error={{0}};
+    if(!SaveSystem_ExportToLibrary(kSaveFileFormat_NativeSrm,true,&error)) {
+      fprintf(stderr,"[saves] campaign export failed: %s\n",error.message);return false;
+    }
     break;
   }
   case kSettingAction_SaveExportSrm:
   case kSettingAction_SaveExportIni: {
     const bool ini = desc->action == kSettingAction_SaveExportIni;
-    const char *path = ini ? "saves/export.ini" : "saves/export.srm";
     SaveError error = {{0}};
-    if (!SaveSystem_Export(ini ? kSaveFileFormat_Ini
-                               : kSaveFileFormat_NativeSrm,
-                           path, &error)) {
-      fprintf(stderr, "[save-editor] export %s failed: %s\n", path,
-              error.message);
-      return false;
+    if(!SaveSystem_ExportToLibrary(ini?kSaveFileFormat_Ini:kSaveFileFormat_NativeSrm,false,&error)) {
+      fprintf(stderr,"[saves] raw export failed: %s\n",error.message);return false;
     }
-    fprintf(stderr, "[save-editor] export -> %s\n", path);
     break;
   }
   case kSettingAction_Restart:

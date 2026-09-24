@@ -92,6 +92,25 @@ bool Save_WriteFile(SaveFileFormat format, const char *path,
 bool Save_WriteCompanionFile(const char *path, const void *data, size_t size,
                              SaveError *error);
 
+typedef struct SaveSummary {
+  char name[kActRaiserPlayerNameStorageBytes * 32];
+  int level, acts_cleared, death_heim; /* -1 means unknown, Death Heim: 0/1/4 */
+  int towns[kActRaiserSaveRegionCount];
+} SaveSummary;
+/* Pure file/image inspection; never borrows the live SRAM or name state. */
+bool Save_ReadSummary(const char *path, const uint8_t *image, SaveSummary *out);
+
+typedef struct SaveStorageHooks {
+  void *context;
+  bool (*before_commit)(void *context, SaveError *error);
+  void (*committed)(void *context, const uint8_t *image);
+  bool (*validate)(void *context, SaveError *error);
+} SaveStorageHooks;
+void SaveSystem_SetStorageHooks(const SaveStorageHooks *hooks);
+bool SaveSystem_ValidateActive(SaveError *error);
+/* Rejects incomplete native writes before flushing completed save work. */
+bool SaveSystem_FlushForSwitch(SaveError *error);
+
 /* Runtime owner for the one canonical g_sram image. The active backend is
  * snapshotted at boot; changing the corresponding setting takes effect after
  * restart and never redirects writes halfway through a session. */
@@ -104,6 +123,12 @@ bool SaveSystem_Attach(uint8_t *live_sram, size_t size,
 bool SaveSystem_MigrateLegacyNative(const char *legacy_path,
                                     SaveError *error);
 bool SaveSystem_LoadActive(SaveError *error);
+/* The host supplies the saves subtree selected by its launcher, and -1 for
+ * external diagnostic saves. Attach clears this routing along with live state. */
+bool SaveSystem_SetStorageRoot(const char *root,int slot,SaveError *error);
+bool SaveSystem_DefaultImportPath(char *out,size_t capacity,SaveError *error);
+bool SaveSystem_ExportToLibrary(SaveFileFormat format,bool campaign,SaveError *error);
+bool SaveSystem_RecoveryPath(const uint8_t id[16],char *out,size_t capacity,SaveError *error);
 bool SaveSystem_WriteActive(SaveError *error);
 bool SaveSystem_AutoPersistIfChanged(SaveError *error);
 /* Native story saves are multi-write transactions. The game adapter brackets
@@ -148,13 +173,24 @@ SaveStorySnapshotResult SaveSystem_CommitStorySnapshot(
  * StorySnapshot commits capture current feature state synchronously (without
  * prepare_story/pending); other kinds retain their existing ownership.
  * No CPU, overlay or regional-policy types cross this boundary. */
+enum { kSaveCampaignPayloadCapacity = 32768 };
+typedef struct SaveImportSource {
+  const char *path; /* Raw import, with optional checkpoint companion. */
+  const uint8_t *payload; /* Complete campaign archive; NULL for raw imports. */
+  size_t payload_size;
+  bool archive;
+} SaveImportSource;
 typedef struct SaveCommitHost {
   void *context;
   bool (*prepare_story)(void *context, SaveError *error);
   bool (*commit)(void *context, SaveFileFormat format, const char *path,
                  const uint8_t *expected, const uint8_t *image,
-                 SaveCommitKind kind, const char *import_path, SaveError *error);
+                 SaveCommitKind kind, const SaveImportSource *import_source, SaveError *error);
   void (*reloaded)(void *context);
+  /* Read and validate only the metadata bound to the supplied durable image.
+   * An explicitly legacy image returns size zero. Never read live policy. */
+  bool (*read_campaign)(void *context, const char *path, const uint8_t *image,
+                        void *payload, size_t capacity, size_t *size, SaveError *error);
   /* Optional complete recovery-copy support. Read metadata bound to image at
    * source_path, never the currently running (possibly unsaved) campaign.
    * destination_path is an empty native-SRM slot in a newly reserved directory.
@@ -199,7 +235,14 @@ bool SaveSystem_ApplyEdits(const SaveEditRequest *edits,
 bool SaveSystem_ApplyRegionEdits(const int edits[kActRaiserSaveRegionCount],
                                  bool armed, bool persist,
                                  bool auto_backup, SaveError *error);
+/* True means gameplay/feature metadata committed; a post-commit enhanced-name
+ * failure remains dirty for normal persistence retry. Do not repeat the import. */
 bool SaveSystem_Import(const char *path, bool auto_backup, SaveError *error);
+/* Atomic .arsave archive of the last durable campaign: canonical SRAM,
+ * validated feature payload and enhanced name. Imports rebind its slot only.
+ * Unsaved/session-only gameplay is not included. */
+bool SaveSystem_ExportCampaign(const char *path, SaveError *error);
+/* Emulator-compatible raw export. Intentionally excludes feature metadata. */
 bool SaveSystem_Export(SaveFileFormat format, const char *path,
                        SaveError *error);
 /* Permanent recovery copy of an already completed/persisted native save.

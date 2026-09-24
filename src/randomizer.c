@@ -773,15 +773,22 @@ void Randomizer_Apply(void) {
           g_summary.lair_moves, g_summary.lair_type_moves);
 }
 
-void Randomizer_Reroll(void) {
-  if(g_campaign_bound)return;
+uint32_t Randomizer_NewSeed(void) {
   /* Cheap, and it only has to be unpredictable to a human choosing a run. */
   static uint64 counter;
   Rng r;
   counter += 0x9E3779B9u;
   const uint32 counter_seed = (uint32)counter;
   RngSeed(&r, (uint32)(uintptr_t)&counter ^ counter_seed, counter_seed);
-  long seed = (long)(RngNext(&r) % kGeneratedSeedModulo);
+  return RngNext(&r) % kGeneratedSeedModulo;
+}
+bool Randomizer_StageTitleConfig(const RandomizerConfig *config) {
+  if(g_campaign_bound || !config || !config->generator || !RandomizerConfig_Valid(config))return false;
+  ShowConfig(config);Randomizer_Apply();return true;
+}
+void Randomizer_Reroll(void) {
+  if(g_campaign_bound)return;
+  long seed = (long)Randomizer_NewSeed();
   const SettingDesc *d = Settings_Find("rando_seed");
   if (d) Settings_SetLong(d, seed);
   else {g_settings.rando_seed = seed;Randomizer_Apply();}

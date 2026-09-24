@@ -10,6 +10,9 @@
 #include "localization/text_backend.h"
 #include "settings_overlay_render.h"
 #include "settings_overlay/regional/regional_ui.h"
+#include "save_slot_manager.h"
+void SettingsOverlay_SetSaveSlotHooks(const SettingsOverlaySaveSlotHooks *hooks);
+bool SettingsOverlay_OpenSaveSlots(bool randomized);
 
 /* Game-owned campaign settings, injected as copied views and guarded edits.
  * Never persisted through the global settings.ini registry. */

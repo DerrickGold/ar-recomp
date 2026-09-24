@@ -70,6 +70,9 @@ void Randomizer_Apply(void);
 /* Draw a fresh title-draft seed and re-apply. Does nothing during a bound
  * campaign. Bound to the menu's "New seed" action. */
 void Randomizer_Reroll(void);
+/* Returns a new draft seed without changing settings, ROM or campaign state. */
+uint32_t Randomizer_NewSeed(void);
+bool Randomizer_StageTitleConfig(const RandomizerConfig *config);
 
 const RandomizerSummary *Randomizer_LastSummary(void);
 

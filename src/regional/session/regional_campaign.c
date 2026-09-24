@@ -104,7 +104,7 @@ static bool Prepare(void *context, SaveError *error) {
 
 static bool Commit(void *context, SaveFileFormat format, const char *path,
     const uint8_t *expected, const uint8_t *image, SaveCommitKind kind,
-    const char *import_path, SaveError *error) {
+    const SaveImportSource *import_source, SaveError *error) {
   ArRegionalCampaign *campaign = context;
   if (!campaign) return Fail(error, "missing regional campaign owner");
   ArRegionalSession session;
@@ -116,7 +116,17 @@ static bool Commit(void *context, SaveFileFormat format, const char *path,
       return Fail(error, "story snapshot has no quiescent regional campaign");
     session = campaign->active;
   } else if (kind == kSaveCommit_Import) {
-    if (!import_path || !LoadOrAdopt(campaign, import_path, image, &session, error)) return false;
+    if(!import_source)return Fail(error,"missing campaign import source");
+    if(import_source->archive && import_source->payload_size) {
+      if(ArRegionalSession_Decode(import_source->payload,import_source->payload_size,&session)!=kSaveCheckpoint_Ready)
+        return Fail(error,"invalid or unsupported archived campaign");
+      /* Slot placement changes, but campaign identity, region history and
+       * the exact randomizer recipe remain the archived campaign's own. */
+      session.slot=campaign->slot;
+    } else if(import_source->archive) {
+      ArRegionalCostPolicy baseline;ArRegionalCosts_Init(&baseline,kArRegionalSource_US);
+      if(!Create(campaign,&baseline,&session,error))return false;
+    } else if(!LoadOrAdopt(campaign,import_source->path,image,&session,error))return false;
   } else {
     /* Completion markers/editor changes belong to the durable campaign, even
      * when a different unsaved New Game is currently running. */
@@ -154,8 +164,19 @@ static bool CopyRecovery(void *context, const char *source_path,
                                 destination_path, NULL, image, error);
 }
 
+static bool ReadCampaign(void *context,const char *path,const uint8_t *image,
+    void *payload,size_t capacity,size_t *size,SaveError *error) {
+  const ArRegionalCampaign *campaign=context;
+  ArRegionalSession session;
+  SaveCheckpointStatus status=ArRegionalSession_Load(&session,campaign->slot,path,image,error);
+  if(status==kSaveCheckpoint_Missing){*size=0;return true;}
+  if(status!=kSaveCheckpoint_Ready)return false;
+  if(!ArRegionalSession_Encode(&session,payload,capacity,size))return Fail(error,"cannot archive campaign metadata");
+  return true;
+}
+
 SaveCommitHost ArRegionalCampaign_SaveHost(ArRegionalCampaign *campaign) {
   if (!campaign) return (SaveCommitHost){0};
   return (SaveCommitHost){.context = campaign, .prepare_story = Prepare,
-      .commit = Commit, .reloaded = Reloaded, .copy_recovery = CopyRecovery};
+      .commit = Commit, .reloaded = Reloaded, .read_campaign = ReadCampaign, .copy_recovery = CopyRecovery};
 }

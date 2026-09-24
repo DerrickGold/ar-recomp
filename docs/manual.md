@@ -14,6 +14,7 @@ settings overlay (`Esc`/`F1`) also explains each selected row.
 - [The settings overlay](#the-settings-overlay)
 - [Display and scaling](#display-and-scaling)
 - [Audio](#audio)
+- [Save slots](#save-slots)
 - [Save editor](#save-editor)
 - [Scene inspector](#scene-inspector)
 - [Cheats](#cheats)
@@ -55,6 +56,21 @@ launch; `AR_NO_RUN_DIR=1` disables bundling in any build.
 you pass carries its own `[Graphics]`/`[Sound]` sections too), so
 `dev-config.ini` and `nocheats-config.ini` are complete, self-contained configs,
 not overlays.
+
+All paths below are relative to the selected **game data directory**. Portable
+folder releases keep data beside the game; portable native apps use their
+`.portable` sidecar's data folder. Installed native launchers use:
+
+| Platform | Default game data directory |
+| --- | --- |
+| Windows | `%LOCALAPPDATA%/ActRaiserRecomp/game` |
+| macOS | `~/Library/Application Support/ActRaiserRecomp/game` |
+| Linux | `$XDG_DATA_HOME/ActRaiserRecomp/game`, or `~/.local/share/ActRaiserRecomp/game` |
+
+The native launcher's `--data-dir`, `--portable`, and `--global` options control
+that choice. The game honors the launcher's `AR_USER_DATA_DIR` before applying
+folder-bundle defaults. Source builds without an explicit data directory retain
+their launch directory. Save metadata contains no machine-specific absolute paths.
 
 ## Configuration files
 
@@ -236,8 +252,9 @@ Keyboard only, not re-bindable:
 
 ## The settings overlay
 
-The overlay is available from every game state. Its navigation column contains
-Video, Action 3D, Town 3D, Audio, Controls, Cheats, Save, and System. Enabling
+The overlay is available from every game state. **Saves** is its first section,
+with the game's Progress Log quill icon. The remaining sections include
+Video, Action 3D, Town 3D, Audio, Controls, Cheats, and System. Enabling
 *Show debug settings* adds the developer-only Layers section.
 
 | Context | Controls |
@@ -420,6 +437,70 @@ identities and controls are catalogued in
 Custom music (OGG streaming in place of SPC songs) is covered in
 [Asset replacement](#asset-replacement-hd-art--music) below.
 
+## Save slots
+
+Open **Saves** to keep ten independent campaigns. Slot 1 adopts your
+existing save. The highlighted slot is a preview; **Active** marks the campaign
+the game currently uses. Each slot keeps its own regional rules, pending
+regional choices, campaign history, randomizer recipe and enhanced player name.
+Interface language, fonts, controls and other application preferences remain
+shared.
+
+The summary shows the saved character name, level, completed town acts, Death
+Heim status and last save time. Older or externally changed saves use the file's
+modification time, labeled **File modified (approx.)** in the details. Regional
+differences compare the selected save with the active slot's **saved** choices.
+With **Show debug settings** enabled, the randomizer page shows the recorded
+seed, generator version and options. With it disabled, all randomizer details
+and setup controls are hidden, including seed information in summaries and
+confirmations. Existing campaigns and prepared games still restore their saved
+recipes unchanged; fresh slots start as standard games. Left/Right or the page
+bindings change pages; Confirm enters the details, Up/Down scrolls them, and
+**F3 / SNES X** opens the full text. Back returns to the slot list.
+
+The slot list has a scrollbar, with **Advanced** at the bottom for the save
+editor, import/export and storage format. Its header names the **active** slot
+that these tools affect, even when another slot was being previewed. Import and
+Apply ask you to confirm that target; Cancel is selected by default. Back returns
+to the same preview slot.
+**Prepared** means a new game has its regions and seed reserved but no saved
+progress yet. Reopening it preserves that setup. Returning from a setup page
+keeps the cursor on the control you came from.
+
+To change campaigns, select an occupied slot, review its details, then Confirm
+again on **Switch to this save**. The confirmation names the character and slot,
+and defaults to Cancel. Accepting restarts the game with that slot attached; choose **Continue** at the title. Save current progress with
+the normal **Progress Log** first: switching does not capture unsaved gameplay.
+
+An empty slot opens **New game settings**. Choose starting regional rules and,
+with **Show debug settings** enabled, Standard or Randomized. A randomized setup
+copies the displayed options and seed. You can edit individual seed digits,
+explicitly choose **New seed**, and adjust the copied options. These edits apply
+only to this setup. **Start new game and restart** preserves the exact recipe
+and opens the normal new-game/naming flow. Restarting before the first Progress
+Log save retains the prepared setup. **Randomizer → Start new randomized game…**
+opens the same flow at the first unreserved empty slot. If all ten slots are
+occupied or prepared, the browser explains that no free slot remains.
+
+**New slot format** chooses native SRAM or lossless INI for future slots.
+Existing slots retain their own format. A missing or damaged occupied save is
+shown as unavailable; it is never treated as an empty slot. A managed campaign
+with a missing regional checkpoint also requires recovery instead of falling
+back to legacy settings. Startup recovery
+offers Retry, Return to previous slot, or Exit and preserves the save files.
+Only one game process may own a collection at a time. Explicit diagnostic save
+paths, recording/replay and headless runs use external saves and cannot switch
+slots.
+
+Every slot, including Slot 1, stores its native/INI save, companions, and prepared
+new-game file together under `saves/slots/01` through `saves/slots/10`. Imports,
+exports, and numbered backup directories are separate. Upgrading an older layout
+copies and verifies the files before switching the collection index. Original
+root saves and drafts are retained in `saves/legacy-layout`; conflicting files
+stop migration without being overwritten. Existing historical backups remain
+where they were; new backups and redevelopment recovery copies use the numbered
+backup directories. Move the entire `saves` directory when moving a collection.
+
 ## Save editor
 
 The **Save editor** stages changes without discarding unknown town-map data.
@@ -431,7 +512,10 @@ speed, magic, items, and act scores.
 it Off while browsing; turn it On only when you are ready to apply changes.
 With it Off, both Apply actions and next-boot staged overrides are refused and
 cannot change live or stored SRAM. With it On, an explicit Apply works now;
-staged values also become session-only boot overrides on the next launch.
+staged values also become session-only boot overrides on the next launch when
+using an external diagnostic save. Managed slots disarm boot overrides because
+those global values have no destination-slot identity; use an explicit Apply
+action while the intended slot is active.
 Rows default to **Leave as-is**, so only values deliberately selected on any
 page are written.
 
@@ -445,15 +529,26 @@ Then run one of these actions:
   enabled), atomically writes the active backend, and updates live SRAM. This
   is the practical menu-testing path: run it, choose the top-level **Restart
   Game** action, then Continue.
-- **Export native SRAM** and **Export structured INI** write
-  `saves/export.srm` and `saves/export.ini` without changing the active save.
-- **Import save** reads `saves/import.srm`, falls back to `saves/import.ini`
-  (or uses `AR_SAVE_IMPORT=<path>`), fully validates it, backs up the active
-  save, and converts it into the active backend without silently changing
-  backend selection.
+- **Export campaign** creates a uniquely named `.arsave` in `saves/exports`, containing
+  saved progress, regional settings and history, randomizer recipe/seed, and the
+  enhanced character name. Unsaved gameplay is not included.
+- **Export raw SRAM** and **Export raw INI** create uniquely named `.srm` and
+  `.ini` files in `saves/exports` for emulator interchange. They contain cartridge data only.
+- **Import save** looks in `saves/imports` for `import.arsave`, `import.srm`, then
+  `import.ini` (or uses `AR_SAVE_IMPORT=<path>`). The old filenames directly
+  under `saves` remain fallbacks. It replaces the confirmed
+  active slot and restarts automatically. A campaign archive preserves its
+  settings and seed even when imported into a different slot or save format.
+  Raw imports use matching companions when supplied; a native-only legacy
+  import uses the legacy regional defaults.
 
-The storage-format row selects the authoritative `saves/save.srm` or lossless
-`saves/save.ini` backend after restart. INI files retain all 8192 raw bytes in
+Automatic backups preserve the previous saved campaign in a timestamped
+`saves/backups/01/backup-...arsave` file (numbered by active slot) before the first
+destructive edit or import in a session. To restore one, copy it to `saves/imports/import.arsave` and import it into
+the intended active slot. Keep backups until the restored game is verified.
+
+The storage-format row chooses native SRAM or lossless INI for new slots.
+Existing slots keep their format. INI files retain all 8192 raw bytes in
 128 required chunks and add readable verified region fields; unknown terrain,
 town state, fill history, and the ending marker are therefore preserved.
 Malformed/truncated files never partially replace live SRAM, and every editor

@@ -291,7 +291,7 @@ durations are not frame-rate benchmarks.
 The next pass uses independent copies of `backup-testing-2.srm` (SHA-256
 `480a8375b6255ad681202986640c5b06889458125ec0f82641a0e4fb425c0d45`).
 The original save is unchanged. Native transition requests `AR_WARP=0001`
-through `0006` at game frame 1800, following `saves/aitos-eruption.rec` with
+through `0006` at game frame 1800, following `saves/legacy/aitos-eruption.rec` with
 replay-nostop, load each town's actual WRAM/VRAM/CGRAM. Snapshots at frame 2600
 are checked for `$18=00`, `$19=town` before paired rendering. These are native
 town loads, not hand-authored terrain/object state. They do not exercise the
