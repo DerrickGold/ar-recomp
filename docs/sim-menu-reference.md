@@ -112,10 +112,7 @@ Use Offering action is the entry corresponding to giving/using a held item.
 | 15 | Other | `message_speed` | `$8559` | `$8AF5` prompt and 0–9 selector; accepted value writes `$0200`; sample/cancel message. |
 
 Status text sources are `$F484` (Master), `$F4DC` (cities), `$F5BC` (scores).
-Use the typed live-value resolver in
-[`actraiser_localization_values.c`](../src/actraiser/actraiser_localization_values.c)
-and existing `status.report.*` contracts instead of parsing their displayed
-numbers. Master/score/cities are standalone native screens, with their own
+Master/score/cities are standalone native screens, with their own
 composition, acknowledgement and cleanup. The cathedral owns its separate
 offering-transfer menu; Use Offering owns the held-item selector.
 
@@ -279,11 +276,8 @@ from the Listen portrait and the world angel. Yes/No use `$A321/$A325`.
 Both variants use the same pixel tiles with different palettes (typically
 4/5 selected, 6/7 unselected). Some 16×16 icons comprise four 8×8 parts;
 do not assume a single tile. The catalogue includes each part's tile number,
-palette, dimensions, flags and flips. Reuse
-[`SimRenderAtlas_Build`](../src/sim/sim_render_atlas.c) and the runner's
-`rasterize_ppu_obj_parts` API as the model for turning parts into owned RGBA
-art. [`ActRaiserLocalizationArt_Capture`](../src/actraiser/actraiser_localization_art.c)
-only handles small 2bpp BG3 objects; it is not a 4bpp menu-icon decoder.
+palette, dimensions, flags and flips. These 4bpp OBJ compositions use a
+different decoder from the small 2bpp BG3 text objects.
 
 The live atlas contains submitted/visible objects; it is not a complete static
 menu asset library. Rendering previously hidden entries requires resolving

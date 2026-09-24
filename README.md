@@ -1,5 +1,7 @@
 # ActRaiser Recomp
 
+[AI disclosure](#ai-disclosure)
+
 **A native port of ActRaiser (SNES, USA release) that recompiles your own
 cartridge dump into a standalone executable.**
 
@@ -11,7 +13,7 @@ cartridge dump and converts its 65816 machine code into C, which is then linked
 with a hand-written SDL3 runtime. Running the game as native code allows
 widescreen rendering, layered 3D action stages, height-mapped towns and a
 3D globe, GPU and CRT effects, replacement art and music, language packs,
-and rebindable controls. An in-game settings menu and manual explain the options.
+and rebindable controls. The in-game settings menu explains each option.
 
 **[Quick start](#quick-start)** · **[Features](#features)** ·
 **[Manual](docs/manual.md)** · **[Game documentation](docs/README.md)** ·
@@ -26,26 +28,28 @@ and rebindable controls. An in-game settings menu and manual explain the options
 >
 > Thank you for taking an interest in the project and for sharing it with
 > others. The current build is based on the USA release, which differs from the
-> Japanese version in many ways beyond the language itself. Language-pack
-> support is now available, including tools for Japanese text. I am continuing
-> work toward Japanese-language coverage and the Japanese version's regional
-> features; language packs alone do not change the game mechanics.
+> Japanese version in many ways beyond the language itself. Language packs and
+> Japanese gameplay rules are now available, with supported regional artwork
+> and music extracted locally from your own ROMs. Japanese-language coverage
+> and regional play-testing are still in progress; language packs alone do not
+> change the game mechanics.
 >
-> 本プロジェクトに関心を寄せていただき、ありがとうございます。また、本作を広めてくださった皆さまにも心より御礼申し上げます。現在のビルドは北米版をベースとしており、日本版とは言語以外にも多くの違いがあります。日本語のテキストにも対応した言語パック機能が利用できるようになりました。引き続き、日本語化と日本版独自の要素への対応を進めています。なお、言語パックだけではゲームの仕様は日本版に変わりません。
+> 本プロジェクトに関心を寄せていただき、ありがとうございます。また、本作を広めてくださった皆さまにも心より御礼申し上げます。現在のビルドは北米版をベースとしており、日本版とは言語以外にも多くの違いがあります。日本語のテキストに対応した言語パックに加え、日本版のゲームルールも選べるようになりました。対応する画像や音楽は、お持ちのROMから抽出して使用できます。日本語化と各地域のルールでのプレイ検証は引き続き進めています。なお、言語パックだけではゲームの仕様は日本版に変わりません。
 
 ---
 
 ## Progress at a glance
 
-Development is active, and bugs remain.
+Development is active.
 
 | | |
 |---|---|
 | ✅ | **Action stages:** All USA action routes across the six regions and Death Heim have been completed end to end. |
 | 🟡 | **Simulation mode:** Event coverage is confirmed in Fillmore, Bloodpool, Kasandora, Aitos, and Marahna; Northwall remains to be validated. |
 | 🟡 | **Diorama mode:** Every action route except Northwall has been play-tested, with further room-by-room refinement planned. |
-| 🟡 | **Platforms:** macOS arm64 and Steam Deck are confirmed. macOS x86_64, generic Linux, and Windows still need representative launch testing. |
-| 🟡 | **Localization and regional support:** Enhanced fonts, language packs, and Workshop authoring are available. [Regional settings](docs/regional-settings.md) provide separate gameplay and presentation presets, with grouped customization. [Regional artwork and music](docs/regional-media.md) can be extracted from supported donor ROMs. Combined play-testing is ongoing. |
+| 🟡 | **Platforms:** Windows, macOS arm64, and Steam Deck have been tested and boot successfully. macOS x86_64 and generic Linux still need representative launch testing. |
+| 🟡 | **Localization and regional support:** Language packs, enhanced fonts, and Workshop authoring are available. [US, Japanese, and European gameplay presets](docs/regional-settings.md) support per-campaign customization, with independent [regional artwork and music](docs/regional-media.md). Combined regional play-testing is ongoing. |
+| 📋 | **Achievements:** In planning. |
 
 ---
 
@@ -354,7 +358,7 @@ to translated dialogue.
 
 The Workshop interface supports English, French, German, and Japanese;
 its language is independent of the game's selected pack. Translation coverage
-depends on the pack, and Japanese-version game mechanics are not yet included.
+depends on the pack; gameplay rules are selected separately in Regional settings.
 See the [language-pack guide](docs/language-packs.md) for installation and
 authoring details.
 
@@ -371,6 +375,45 @@ local language pack, not a complete or bundled Japanese translation.
 ![ROM-sourced Japanese dialogue and menu text in the Sky Palace above Fillmore](/assets/language-japanese.png)
 
 ![Editing an example English rewrite alongside the original US dialogue in the Workshop](/assets/language-workshop.png)
+
+### Regional rules, artwork, and music
+
+The game still builds from your USA ROM. Under **Settings → Regions**, choose
+a US, Japanese, or European gameplay preset, or combine individual rules.
+Art and music have their own presets; neither changes your language or button
+bindings.
+
+- **Action stages:** Choose regional terrain, enemy and item placements,
+  traps, enemy stats and boss behavior, spell costs, starting lives, and
+  action-only inventory rules.
+- **Town simulation:** Select population requirements and housing support,
+  construction and development pacing, monster-lair reserves and behavior,
+  miracle costs, health/SP recovery, and regional story-event rules.
+- **Difficulty:** Apply European Beginner, Normal, or Expert adjustments over
+  any regional base. For example, keep US stage layouts while using Japanese
+  boss behavior and EU Beginner adjustments.
+- **Controls and menus:** Choose between a dedicated magic button and Japan's
+  Up + attack command, total or spare-life displays, and whether town dialogs
+  return to angel control or leave the command menu open.
+- **Artwork:** Select Japanese title and enemy artwork, Death Heim's horned
+  statue, town symbols and pyramid decoration, or European Action Mode item
+  graphics independently of their gameplay rules.
+- **Music:** Choose Fillmore Act 2's regional track assignment and the two
+  supported Japanese song versions without changing gameplay.
+
+Gameplay rules need no additional ROM. For supported regional art and music,
+use the Workshop's **Assets → Regional media** tool to extract and install
+private packages from your own donor ROMs. Missing media falls back to US
+assets while retaining your selection.
+
+Save regional choices with the Progress Log; **Continue** restores that
+campaign's rules rather than the title screen's new-game choices. Changes that
+require town redevelopment ask for confirmation and create a recovery copy
+before applying.
+
+See [regional settings](docs/regional-settings.md) for the full option list
+and activation timing, and [regional media](docs/regional-media.md) for artwork
+and music requirements.
 
 ### Live authentic comparison
 
@@ -405,19 +448,47 @@ Settings are saved automatically to `settings.ini`.
 
 ![An illustrative tour of the settings overlay using the original dialog font; the current menu also includes localization controls](/assets/overlay.gif)
 
+### Save management
+
+The **Saves** menu holds ten independent campaigns, with previews of each
+character's level, completed acts, and last save time.
+
+- Each campaign keeps its own regional rules, randomizer seed and options,
+  and enhanced character name. Language, fonts, and controls stay shared.
+- Import and export complete `.arsave` archives to move saved progress and
+  campaign settings between slots or installations. Raw SRAM and lossless
+  INI exports are also available, but do not include the enhanced campaign
+  settings.
+- Optional automatic backups preserve the previous saved campaign before
+  destructive edits or imports. Missing or damaged saves are marked
+  unavailable rather than treated as empty slots.
+
+Save with the normal **Progress Log** before switching campaigns: changing
+slots restarts the game and does not capture unsaved gameplay. See
+[save slots and recovery](docs/manual.md#save-slots) and
+[save editing, import, and export](docs/manual.md#save-editor) for details.
+
+The [experimental randomizer](docs/randomizer.md) is available at the title
+screen after enabling **Show debug settings**. It supports seeded campaigns,
+including independent rolls for regional action and town rules. A complete
+randomized campaign has not yet been play-tested.
+
 ### Quality of life
 
 | | |
 |---|---|
 | **Rebindable controls** | Bind every keyboard and gamepad control independently in Settings → Controls. Keyboard bindings use physical key positions, so they remain in place when the keyboard layout changes. |
 | **Full gamepad support** | The default mapping follows a SNES-on-Xbox layout, with support for multiple hotpluggable pads and `gamecontrollerdb.txt`. Bind controls for the menu, pause, turbo, camera reset, and rendering comparison. |
+| **Modern town menu** | An optional categorized command menu remembers selections and lets you read descriptions without using a miracle or offering. It has its own scale control and works with or without 3D towns. See [Modern SIM menu](docs/manual.md#modern-sim-menu). |
 | **Steam Deck** | The dedicated bundle includes Valve's Steam Runtime SDL3. It works with the default Steam Input mapping, or with SDL's HIDAPI Steam driver in desktop mode. L3 opens the menu. |
 | **Camera controls** | The right stick orbits, the triggers zoom, and R3 recentres the view. Sensitivity, deadzone, and invert-Y are configurable, and orbit speed remains consistent across frame rates. |
 | **Turbo** | Press `T` to fast-forward at eight game frames per rendered frame, configurable from 2 to 64. |
 | **Render scale and refresh** | Choose an internal render scale from 1× to 8×, downsampled to the window. Presentation modes include renderer-paced VSync, display-relative Uncapped, a selected FPS limit, and unthrottled Unlimited, with windowed, borderless, and exclusive fullscreen options. |
+| **Graphics API selection** | Choose an available graphics API to troubleshoot slow rendering or display problems. Changes take effect after restart, with automatic fallback if the selected API cannot start. |
 | **Independent HUD and menu scaling** | The promoted widescreen HUD and settings menu can be scaled independently of the game framebuffer, from 25–400% and 100–800% respectively. |
-| **Save editor** | After enabling an explicit safety switch, inspect and stage changes to town states, unlocks, levels, magic, items, and scores. The editor creates backups, maintains checksums, and supports lossless INI import and export. |
+| **Save editor** | Inspect town states, unlocks, levels, magic, items, and scores, then enable an explicit safety switch to apply changes. The editor preserves unedited data and maintains save checksums. |
 | **Bridge-free structure limit** | This optional fix stops completed bridges from consuming a town's 128-structure population cap. It applies retroactively while preserving bridge tiles, crossings, and 32-person support. |
+| **Original-game fixes** | Configurable fixes correct overlapping Aitos messages and keep newly built windmills still during the no-wind event. The windmill fix affects the enhanced town view only. |
 | **Cheats** | Infinite HP, MP, and SP; moonjump; invincibility; all magic; ranged sword; angel health; and a generic Pro Action Replay code pinner can all be toggled from the menu. |
 | **Audio** | Music, sound effects, and master volume have independent controls. An optional 40-voice mode preserves all eight song voices while queued native effects use 32 additional voices. Output is available at 32.04, 44.1, or 48 kHz, and dialogue blips can be muted separately. |
 
@@ -482,6 +553,7 @@ go -C snesrecomp-go test ./...
 
 Regression testing combines CTest, Go tests, and recorded gameplay replays.
 Replay benchmarks verify equivalent game state before comparing performance.
+
 For benchmark definitions and development details, see
 [`tools/runner-bench.json`](tools/runner-bench.json), the
 [`installer` documentation](installer/README.md) and
@@ -496,6 +568,8 @@ For benchmark definitions and development details, see
 | [`docs/builder-workshop.md`](docs/builder-workshop.md) | Builder and Workshop user guide |
 | [`docs/language-pack-format.md`](docs/language-pack-format.md) | UTF-8 translation pack authoring and validation contract |
 | [`docs/language-packs.md`](docs/language-packs.md) | Direct `.arlang` installation, sharing, and editor-free/AI authoring |
+| [`docs/regional-settings.md`](docs/regional-settings.md) | Regional gameplay presets, independent options, and campaign saving |
+| [`docs/regional-media.md`](docs/regional-media.md) | Extracting and using regional artwork and music from your own ROMs |
 | [`installer/README.md`](installer/README.md) | ActRaiser Builder ownership and developer entry points |
 | [`docs/diorama-depth-shapes.md`](docs/diorama-depth-shapes.md) | Depth effects for custom action-room layouts |
 | [`docs/save-format.md`](docs/save-format.md) | SRAM fields, checksums, and save editing |

@@ -4,38 +4,6 @@ SNES WRAM: 128KB at banks $7E-$7F.
 Direct page and stack in first 8KB ($7E:0000-$7E:1FFF), mirrored at $00-$3F:0000-$1FFF.
 Unless a release is explicitly named, addresses below describe the US ROM.
 
-## Regional host state and native projections
-
-Regional selections do not change the baseline's address layout. The HLE
-adapters translate verified foreign behavior into the US fields below; JP/PAL
-addresses elsewhere in this document are research references, not alternate
-host locations. The [HLE binding index](research-symbol-map.md#regional-hle-bindings)
-identifies each producer and its activation boundary.
-
-| State / native output | Ownership |
-| --- | --- |
-| Seed, randomizer options, generator version, requested/effective regional rules | Host `RandomizerConfig` / `ArRegionalSession`, bound to the selected save slot and exact SRAM image through its checkpoint. **No ROM, WRAM or SRAM address** is assigned. New Game chooses once; Continue restores. Title drafts and unconfirmed overlay edits are not native save fields. |
-| Resolved room policies and numerical placement programs | Host room caches, rebuilt at accepted room/retry setup. Native outputs include terrain `$7E:8000`, definitions `$7E:2100`, hazard records bounded by `$1AE2`, and actors at `$06A0` with stride `$40`. These caches are not spare fields in the object array. |
-| Action initializer HP/attack | Record bytes `+8/+7` become actor words `+2C/+2A`. At `$00:966C`, Y is the selected initializer; actor `+32` is not yet the new source. Pristine/randomizer provenance is host-owned, not encoded in HP or source bits. Regional base selection and scaling happen only at birth; explicit Tanzra child assignments use their own guarded prefixes. |
-| Alternate lair stock/reload histories | Host accounting and approximation/quarantine metadata. Selected projections use US `$7F:96B8+` stocks and `$9628+` reloads. `$9658+` running countdowns retain native ownership; the alternate counters do not occupy adjacent WRAM. |
-| SIM combat/AI generations | Host live/cached snapshots accompany the four lair-monster slots inside the native eight-record cache. `$03:B9EE` marks a new generation; `$03:813F/$8168` restore/cache it. Native actor `+24` remains accumulated arrow damage, not a policy identifier. |
-| European spell stack | Host `ArRegionalSpellInventory` for the current action run. Native working count `$0021`, selected spell `$02AC` and icon uploads are adapted at their original consumers. The PAL stack at `$1C00` and PAL mode/difficulty fields are **not** transplanted into the US layout. |
-| Support conversion | Confirmed, quiescent Palace transaction at `$01:85A2`, not the ordinary earthquake selectors. Redevelopment changes validated structure records/cell marks and growth reserves, then recomputes town populations, support, total and next goal using the existing US fields. It preserves earned level, civilization, story progress and population bias; unsafe bias/footprints fail before mutation. |
-| Donor art and music | Host validated media/residency. Uploads target the existing VRAM/CGRAM/ARAM ranges; drawing metadata does not reserve new emulated memory. Source programs/collision remain native except the explicit gameplay projections described below. |
-
-Not every regional projection is read-only. Marahna plant geometry temporarily
-projects identified composition headers in the loaded `$5000` boss image;
-Northwall impact graphics use the room-specific `$5F00/$5F40/$5F80/$5FC0`
-slots documented below. Reader adapters may borrow actor row/visual fields
-during a native call and restore them afterward; expanded programs retain a
-guarded `+1C` progress marker. These are named, scene-owned contracts, **not
-general free WRAM** or allocations for seed/settings data.
-
-The [save format](save-format.md#regional-campaign-checkpoints) specifies which
-host histories persist; native SRAM remains 8 KiB and emulator-compatible.
-The checkpoint is required to reproduce enhanced campaign behavior. Rebuilding
-a host cache is not permission to reset native counters or reroll the campaign.
-
 ## Core Game State ($7E:0000+)
 
 ### Game Mode & Navigation
@@ -93,8 +61,8 @@ separate these fields from PAL display timing and from authored hazard damage.
 
 | Address | Size | Description |
 |---------|------|-------------|
-| $7E:0022 | 2 | BG1/camera X. Action writer/HLE seam `$02:B091`: native clamp `[0,$2E-$100]`; corrected action-wide clamp `[left,$2E-$100-right]` when the complete requested view fits, otherwise native. Town writer `$01:B4C6`: native `[0,$0100]`, corrected-wide `[extra,$0100-extra]` (16:9: `[$002B,$00D5]`, directly validated 2026-07-14). All six scroll regs upload from `$22-$2D` via `$02:ADC3` (10-bit). |
-| $7E:0024 | 2 | BG1/camera Y. Action `$02:B091`: native `[0,$30-$E1]`; corrected Diorama interval `[top,$30-$E1-bottom]` when it fits. Town writer `$01:B4C6` clamps to `[0,$011F]`. |
+| $7E:0022 | 2 | BG1/camera X. Action `$02:B091` clamps to `[0,$2E-$100]`; town `$01:B4C6` clamps to `[0,$0100]`. `$02:ADC3` uploads the six 10-bit scroll registers from `$22-$2D`. |
+| $7E:0024 | 2 | BG1/camera Y. Action `$02:B091` clamps to `[0,$30-$E1]`; town `$01:B4C6` clamps to `[0,$011F]`. |
 | $7E:0026/$0028 | 2+2 | BG2 H/V scroll (parallax, $02:B9D5/$02:BA0B from ratio nibbles $3A-$45) |
 | $7E:002A/$002C | 2+2 | BG3 H/V scroll ($2C pinned $FFFC: HUD up 4px) |
 | $7E:002E/$0030 | 2+2 | **BG1 layer = LEVEL pixel width/height** (Fillmore act1: 4096x768) — the camera clamp bounds |
@@ -105,32 +73,24 @@ separate these fields from PAL display timing and from authored hazard damage.
 | $7E:0052/$0056 | 2 ea | BG1/BG2 metatile-definition table bases in WRAM; four little-endian tile words per metatile. |
 | $7E:0054/$0058 | 2 ea | BG1/BG2 tile-word masks applied before the layer attribute merge. `$02:B6D3-$B6F6` writes `$ECFF` for action map groups (`$18 != 0`) and `$FDFF` otherwise. |
 | $7E:005E/$0060/$0062/$0064 | 2 ea | record-buffer cursors: BG1col $3900 / BG1row $3A02 / BG2col $3B04 / BG2row $3C06 |
-| $7E:006B/$006F | 1 ea | BG1/BG2 action tile-word attribute merges, indexed by layer stride 4. `$02:B4E8-$B54C` clears both, then installs `$10` for BG1 (palette-bank bit in the tile word's high byte) and `$01` for BG2 (tile-bank bit) when `$18 != 0`. Together with `$46/$52/$54`, these are the complete `ActionBgWorld` decoder records. |
-| $7E:007C/$007E | 2+2 | camera H/V delta this frame (16-bit signed; strip/parallax/player input). `$02:B030` stages the requested motion; the corrected `$02:B091` HLE reconciles it to motion that actually fit a presentation-aware bound before downstream consumers. Native/fallback paths preserve the request. |
+| $7E:006B/$006F | 1 ea | BG1/BG2 action tile-word attribute merges, indexed by layer stride 4. `$02:B4E8-$B54C` clears both, then installs `$10` for BG1 (palette-bank bit in the tile word's high byte) and `$01` for BG2 (tile-bank bit) when `$18 != 0`. |
+| $7E:007C/$007E | 2+2 | camera H/V delta this frame (16-bit signed; strip/parallax/player input). |
 | $7E:0080/$0082 | 2+2 | Cached action-camera subject X/Y. The selected object's `+02/+04` coordinates initialize this pair; `$82` is the vertical focus consumed by `$02:B030`, while action-object code also uses the pair to derive subject motion. |
-| $7E:008A | 2 | WRAM offset of the action object selected as the camera subject. `$02:B030` reads subject X from `[$8A]+$02`; object spawn/control paths update the selector when camera-follow ownership changes. Arrival handler `$97A6` does not install the player `$08A0` here until the approach reaches its target, so an entry-time host policy must not assume `$8A` already names the player on the first object scan. |
+| $7E:008A | 2 | WRAM offset of the action object selected as the camera subject. `$02:B030` reads subject X from `[$8A]+$02`; object spawn/control paths update the selector when camera-follow ownership changes. |
 | $7E:008E | 1 | parallax disable bits (bit0 BG2H, bit1 BG2V = script-driven) |
 | $7E:0093 | 1 | strip-request flags: $80 BG1col $40 BG1row $20 BG2col $10 BG2row (set by $02:B091 on 16px crossings, TRB-consumed by dispatcher $02:B127) |
 
 ### Action damage boxes and terrain lookup
 
-After the native asset script, `$00:8329` projects room-owned terrain at
+After the asset script, `$00:8329` is the boundary before terrain use at
 `$7E:8000` and metatile definitions at `$7E:2100`. The latter are little-endian
-words; the shared host scene representation uses big-endian bytes. Both complete
-planes and the page dimensions (`$2E/$30 >> 8`) are validated before writing.
-Native `$02:BAC1` subsequently rebuilds `$05A0`, extracting bit `$0200` from
-each of the four words. Rendering consumes the same selected layout.
+words. `$02:BAC1` subsequently rebuilds `$05A0`, extracting bit `$0200` from
+each of the four words.
 
 Fillmore's paired start/retry prefixes are `$00:933C` and `$00:94B1`. At room
 load only, an active checkpoint (`$032C != 0`) at X=`156*16` and Y=`23*16` or
 `25*16` is normalized to the selected terrain. Other saved/debug coordinates
 are untouched. The native player initializer consumes and clears `$032E/$0330`.
-
-The regional adapter at `$00:940C` may replace a completed US expansion with
-the room-pinned regional box list before the native count is published. It
-validates all US records first, writes only the selected records and scratch
-count `$00`, and leaves the US source cursor and return frame intact. Unused
-record tails are not cleared; `$1AE2` bounds every native contact traversal.
 
 These are room-owned gameplay data, separate from the sprite hitboxes and
 render-layer maps. Native US/JP expansion and contact rules match; regional
@@ -139,7 +99,7 @@ differences are in the authored streams. See the
 for tested boundaries, overlaps and changed rooms.
 
 | Address | Size | Description |
-| --- | --- | --- |
+|---|---|---|
 | `$7E:1AE2` | 2 | Expanded damage-box count, US `$00:93A9` / JP `$00:93D1` |
 | `$7E:1AE4` onward | 10 per box | Five words: left `16*x0-4`, width `16*(x1-x0)+24`, top `16*y0-16`, height `16*(y1-y0)+48`, zero-extended damage/flag byte. Coordinates wrap to16 bits; not unpadded tile bounds |
 | US `$7E:00ED` / JP `$7E:00F0` | 1 | Nonzero skips the damage-box pass. Player pointer `$8A`, player flags `+$30 & $2058` also gate entry. Contact is hot-point-based; top extent `+$0C <25` subtracts16 from effective height. Overlapping boxes all execute in stream order |
@@ -162,15 +122,9 @@ unrelated actor's use of bit `$8000`.
 The 544-byte shadow and DMA are common, but action (`$00:8C98/$00:8D68`)
 and town (`$01:ACD9/$01:ADAD/$01:AE6F`) rebuild it independently.
 
-The action-effect gameplay-pass serial derived from completed `$00:8C98`
-calls has **no WRAM address**. It is game-thread-only host observer state,
-excluded from savestates; reset/load invalidates the delta consumer, whose next
-capture seeds from the current serial. Do not alias it to `$0088` or the
-emulator frame counter: both continue advancing during ActRaiser's native pause.
-
 | Address | Size | Description |
 |---------|------|-------------|
-| $7E:0380 | 512 | OAM shadow: 128 x 4-byte entries (x, y-1, tile, attr); cleared to x=$80,y=$E0 each frame via a stack-push fill. Both details are load-bearing for the diorama vertical band: the y field is 8 bits mod 256 against 224 lines, so the `$E0` park value IS screen -32 and collides with genuine above-screen positions, and a sprite near the screen BOTTOM aliases into the band through the same wrap. `PpuSetObjExactPosition` carries the emitter's un-truncated x AND y beside this table |
+| $7E:0380 | 512 | OAM shadow: 128 x 4-byte entries (x, y-1, tile, attr); cleared to x=$80,y=$E0 each frame via a stack-push fill. Both details are load-bearing for the diorama vertical band: the y field is 8 bits mod 256 against 224 lines, so the `$E0` park value IS screen -32 and collides with genuine above-screen positions, and a sprite near the screen BOTTOM aliases into the band through the same wrap. |
 | $7E:0580 | 32 | OAM high table shadow: 2 bits/sprite (bit0 = x bit 8, bit1 = size), packed 4 sprites/byte |
 | $7E:0000 | 1 | (during sprite build) high-table bit accumulator — bits ROR'd in from the top, flushed every 4 sprites |
 | $7E:000C/$000E | 2 ea | sprite-build counters/scratch; exact ownership is routine-specific. Town `ADAD/AE6F` obtains the part count from byte 0 of the frame definition, not from world record `+0E`. |
@@ -195,17 +149,15 @@ emulator frame counter: both continue advancing during ActRaiser's native pause.
 
 Both offset pairs carry BOTH orientations rather than being negated at runtime,
 which is why an H-flipped part is not simply mirrored about the object origin.
-Bit 0 of +0 is the only route to a part's pixel SIZE: it selects between the two
-entries `OBSEL` picks, so a host that builds a part WITHOUT an OAM slot (the OBJ
-apron channel) must read it here and resolve through
-`PpuObjSizeForSizeBit` — there is no size information in the tile/attr word.
+Bit 0 of +0 selects between the two object sizes configured by `OBSEL`.
+The tile/attribute word contains no size information.
 
 ### Action objects and magic cohorts (action mode only)
 
 | Address / field | Size | Description |
-|---|---:|---|
+| --- | ---: | --- |
 | `$7E:06A0-$1A9F` | 80 × `$40` | Action object slots. Magic cohort slots are `$06A0-$0820`; cast controller is `$0860`; player is `$08A0` |
-| Action wave gate `+02/+04`, `+34/+36`, `+38` | 2 each | Retry coordinates, trigger coordinates, and actual US placement cursor after `$FE`. Initial handler `$A813` becomes `$A82D` to load the later wave. Regional numerical placement programs preserve this cursor identity and the native gate slot; they do not store host pointers in WRAM. |
+| Action wave gate `+02/+04`, `+34/+36`, `+38` | 2 each | Retry coordinates, trigger coordinates, and actual US placement cursor after `$FE`. Initial handler `$A813` becomes `$A82D` to load the later wave. |
 | `$7E:02D0-$02E0` | 17 | **US PRNG state pool.** `$00:84C0` advances it (a carry-chain `ADC` down the pool, then a multi-byte counter increment) and returns the byte at `$02D1` in A. Every randomized spell decision goes through it — e.g. Magical Stardust's launch site picks top-vs-right edge and its Y offset from one call (`$00:A0E8`). JP `$00:84BA` uses the relocated pool `$02CF-$02DF` and returns `$02D0`; do not seed/read JP at US offsets in regional fixtures. |
 | `$7E:08A2/$08A4` | 2+2 | Player object world X/Y (`$08A0 + $02/+04`). The arrival gate uses initialized X `$08A2` to reconstruct the native horizontal activation camera before `$97A6` transfers camera-subject ownership through `$8A`; drawing uses horizontally fitted `$22` and native vertical `$24`. |
 | `$7E:08B2` | 2 | Player primary handler (`$08A0 + $12`). Action entry advances `$97A6 → $97C9 → $97E4`; `$97E4` installs `$9832`, the first handler that reads held input. This lifecycle gates only extra horizontal activation, never widescreen drawing or camera presentation. |
@@ -221,35 +173,20 @@ apron channel) must read it here and resolve through
 | slot `+20/+22/+24` | 2 each | Current composition pointer, visual ID, and animation wait counter |
 | slot `+28`/`+29` | 1+1 (see note) | Attribute/transform. Masking the 16-bit read at `+28` with `$C000` selects the horizontal/vertical flip, which works because the bits live in the **byte at `+29`**; `+28`'s own byte measured `$00` on every spell actor observed, and `$00:95F0` writes `+28` byte-wise. Treat as two bytes rather than one word until a case is found that needs the low half. `+19` carries the same base attribute value as `+29`. |
 | slot `+2A/+2C/+2E` | 2 each | Attack, HP, and BCD death-score value copied from spawn-record bytes `+7/+8/+9` by `$00:95F0`. Death-score units are tens of displayed points: Aitos skull `$20` means 200 points, not20. |
-| slot `+30` | 2 | Object flags. Bit `$0001` marks an attacker (including the player sword beam); bit `$0400` means outside the **currently selected activation window**, not necessarily outside the draw window or native viewport. With extended activation enabled it covers fitted camera `$22` plus live horizontal margins; during `$08B2=$97A6/$97C9/$97E4` it uses the reconstructed native 256px horizontal camera and authentic vertical `$24`. Object drawing is decided independently and may remain visible in the margins while `$0400` is set. The scene-effect observer keeps lifecycle identity but does not submit the object while the bit is set. |
+| slot `+30` | 2 | Object flags. Bit `$0001` marks an attacker (including the player sword beam); bit `$0400` marks an object outside the activation window. This is distinct from whether its sprite is drawn. |
 | slot `+32` | 2 | Source/spawn-record pointer retained by ordinary action actors. Bloodpool trap lightning uses `$BD2A`, boss-lightning children use `$BDFF`, and the two fireball directions use `$BD76` and `$BD84`. Marahna orb/split fireballs retain `$E047`, snake enemies/projectiles retain `$DE96`, and the excluded reaper/orb family retains `$E0BA`; `$E2F3/$E304/$E315/$E326/$E351/$E368` are moving-platform roots. Its linked-lightning source endpoint/child retain `$E18E`, the partner retains `$E254`, and the boss electrical family retains `$E483`. Aitos lava fireballs retain `$CF9E` throughout their cyclic rise/wait/return phases; launched molten rocks and their stationary mouths retain the distinct `$CEEC` source. The original/Death Heim boss-family pairs are Minotaur `$AF5D/$F6CA`, Wizard `$BDFF/$F6E2`, Flaming Wheel `$D838/$F712`, Viper `$E483/$F72A`, and Ice Dragon `$F161/$F760`; Tanzara uses `$F80F`. Player sword-beam captures observed `$979A` and `$9810`; validate equality with the linked player's current source instead of hardcoding either. This is a useful slot-reuse discriminator, not a globally unique actor ID. |
 | slot `+38` | 2 | Role-specific counter/flag. Controller `$0860+38` is selected spell ID; cohort spells reuse `+38` for repeat counts. Original/rematch Pharaoh root uses it as a pending-sphere flag: successful allocation increments it, the child clears it through `+$3A` after formation, and the root checks between waiting sequences. It is not a shared boss timer. |
 | slot `+3A` | 2 | Spawner backlink. The cast controller and player sword-beam child point to player `$08A0`; Bloodpool boss-lightning strike child `$08E0` points to boss `$12E0`, while its floor child `$0920` points to `$08E0`. Marahna split fireballs point to their retired `$E047` orb, snake fireballs point to their validated `$DE96` parent, linked-lightning children point to the first `$E18E` endpoint while the `$E254` partner occupies the next slot, and both `$E483` boss bolt stages point to boss `$12E0`. Death Heim's room owner is `$001C`; the Viper parent and the visible Flaming Wheel body retain it in their rematches. Minotaur axes and Ice Dragon balls instead point to a live parent with the same original/rematch source. The original Flaming Wheel body is root-owned (`0`); helper/child records have action-object backlinks and are rejected. Combined with `+32`, this validates linked families and remains stable while other control-flow fields change. |
 | `$7E:00F4/$00F8/$00F9` | 2 each | Input-enable mask, cast-active gate, and cast-transition state used by `$9DE1-$9F10` |
 
-### Regional actor presentation ownership
+### Regional actor identities
 
-The [actor-art adapter](../src/actraiser/regional/actraiser_actor_art.c) adds host-owned
-residency metadata, not a new emulated allocation. Native animation images
-commonly begin at `$7E:4000` and `$7E:5000`, but those bases do **not** imply
-exclusive 4 KiB banks. Verified images extend beyond that size; completed
-LZSS decodes invalidate overlapping pictures, or the whole binding when they
-overwrite its table/program prefix. See the
-[resource contracts](regional-differences-technical.md#shared-bank-and-palette-completion).
-
-Drawing resolves the native animation base (`+16` plus bank byte `+18`),
-composition pointer (`+20`) and visual ordinal (`+22`) against that metadata.
-It must not change collision extents (`+0A/+0C/+0E/+10`), row state (`+1A/+1C`)
-or delay (`+24`). Actor-art selection stays with a stage across partial room
-uploads; a current room number alone cannot establish resource ownership.
-
-Aitos pose-only projection at `$00:8E2F` additionally checks source records
-`$CE39/$CE48` in `+32`, exact native programs and composition headers. During
-birth, return `$969D` identifies the descriptor in Y before `+32` is installed.
-The adapter borrows and restores one visual word for native decoding; no
-foreign animation program becomes persistent WRAM state. The
-[native adapter](../src/actraiser/actraiser_action_motion.c) and its
-[parity tests](../tests/actraiser_action_motion_test.c) own this contract.
+Native animation images commonly begin at `$7E:4000` and `$7E:5000`,
+but some extend beyond 4 KiB. These are resource bases, not exclusive banks.
+Actor `+16/+18` identifies the animation base/bank, `+20` the composition,
+and `+22` its visual ordinal. Collision extents are at `+0A/+0C/+0E/+10`;
+`+1A/+1C` and `+24` hold row state and delay. See the
+[resource evidence](regional-differences-technical.md#shared-bank-and-palette-completion).
 
 Regional Pharaoh fixtures distinguish original source US `$C1A2` / JP `$C239`
 in raw room `$0603` from rematch `$F6FA/$F779` in `$0407`.
@@ -366,7 +303,7 @@ US head/peer `$0F60/$0FA0`, JP `$1020/$1060`; these are not universal IDs.
 See [tree timing/ownership](regional-differences-technical.md#fillmore-act-1-tree-seed-controller-and-pre-shot-wait).
 
 | Kind | Positive live identity |
-|---|---|
+| --- | --- |
 | Enemy fireball (`$18=$02`, `$19=$02-$08`) | `+32=$BD76/$BD84`, `+12=$BDF0`, `+1E=$BDD9`, `+16/+18=$4000/$7E`, `+1A=$23`, and `(+22,+20)=($17,$45EF)` or `($18,$4610)`. The full Bloodpool Act-2 range is valid because its ordinary-enemy blob is shared across all seven rooms. |
 | Bloodpool statue / startup child (US/JP) | Types `$26/$1E` sources US `$BD76/$BD84`, JP `$BE0A/$BE18` identify a **family**, not just a projectile. Parents play `$0E/$0F`, HP3; children retain source/facing/attack with HP0 and `+$3A` parent backlink, start `$21` then fly `$23`. JP's second `$0F` uses a different saved resume, so state-only logs miss that phase. Flight culls on `$0400` only at the two-row sequence boundary. Allocation exhaustion scratch `$1AA2` is outside the live pool and must not become an actor identity. See [regional contract](regional-differences-technical.md#bloodpool-act-2-statues-single-versus-double-volley). |
 | Lightning trap (`$18=$02`, `$19=$02-$08`) | `+32=$BD2A`, `+1E=$BD69`, `+16/+18=$4000/$7E`, `+1A=$14`, `+12=$BD36` or `$8683`, and `(+22,+20)=($1F,$46FE)` or `($20,$479D)`; the live vertical extents are `+0C=+10=$58` (88px each side). Identical records outside Bloodpool Act 2 are rejected. |
@@ -384,7 +321,7 @@ See [tree timing/ownership](regional-differences-technical.md#fillmore-act-1-tre
 | Flaming Wheel cyan shot (`$04/$07` or `$07/$05`) | Same room/source pair and a backlink to its active same-source root, handler/resume `$8661/$A65D`, animation `$7E:5000`, index 1, flags `$0020`, and 8px extents. States `$08-$0C` use local counter equal to state, velocities `(-1,+1)/(0,+1)/(+1,+1)/(-1,0)/(+1,0)`, and exact visuals/compositions `$00/$51B5`, `$01/$51C1`, `$02/$51CD`, or `$03/$51D9`. All five simultaneous children are independent effect records. Their raw part priority is zero, so presentation inherits bits 12-13 of live `$008F`; original Aitos measured priority 2, while Death Heim remains free to select a different band. |
 | Death Heim Viper lightning (`$18/$19=$07/$06`) | Same charge/orb/bolt/ground tuples as Marahna `$05/$08`, with source `$F72A` replacing `$E483` consistently on parent and children. The rematch parent retains backlink `$001C`; diagonal and floor children retain their normal parent link. |
 | Ice Dragon ball (`$06/$08` or `$07/$07`) | Original/rematch source `$F161/$F760`, handler/resume `$8661/$F2CA`, animation `$7E:5000`, and backlink to a live same-source parent. Visuals `$12-$15` are state `$19` with compositions `$5D9C/$5DA8/$5DB4/$5DC0`; visuals `$16-$19` are state `$1A` with `$5DCC/$5DD8/$5DE4/$5DF0`. |
-| Tanzara projectile (`$07/$08`) | Source `$F80F`, handler `$8661`, animation `$7E:5000`, and an exact allowlist of 50 resume/state/visual/composition tuples covering the observed projectile families. The tuple table is authoritative in `src/action/action_effects.c` and its regression fixture; unlisted boss-body or helper artwork is rejected. |
+| Tanzara projectile (`$07/$08`) | Source `$F80F`, handler `$8661`, animation `$7E:5000`. The final encounter shares the source with the boss body and helper objects, so the source alone does not identify a projectile. |
 | Wall torch | Not an action slot. Bloodpool uses exact BG1 pair `$47` over `$4F` throughout `$18=$02`, anchored at `(8,15)` in the 16×32 pair. Marahna maps `$05/$04-$08` use one complete `$43` metatile anchored at `(8,11)` in its 16×16 cell; Death Heim Viper room `$07/$06` reuses that same authored `$43` rule. All use the shared bounded map view; Marahna limits publication to a 256px camera margin because `$04-$07` share 31 torches; original boss map `$05/$08` has ten in its separate 512×512 map. |
 | Aitos lava pit (`$18/$19=$04/$01`) | Not an action slot. Exact BG1 signature is `$DC`, one-to-six `$DD`, then `$DE`, over equally wide `$DF` and (when map height permits) `$E7` bubbly rows. Observed 64px rims begin at world `(1648,976)`, `(1888,992)`, and `(2144,976)`; the 128px rim begins at `(3616,928)`. Capture publishes the full bubbly volume on BG1 within a 256px camera margin. |
 | Aitos Act-2 side lava (`$18=$04`, `$19=$04-$06`) | Not an action slot. A maximal three-to-63-cell `$01` BG1 lip sits above animated/transparent `$02-$04` cells (`$77` also occurs in map `$06`) and `$05` lava body, bounded by measured bank pairs `$33/$34`, `$2C/$32`, or `$33/$32`. Capture can walk left beyond the bounded scan to recover the bank of map `$06`'s 640px reservoir, then publishes one broad world-overlay emitter. |
@@ -399,13 +336,13 @@ See [tree timing/ownership](regional-differences-technical.md#fillmore-act-1-tre
 | $7E:06A0-$09FF | 48 × $12 | Fixed-screen/overlay animation records. `$01:ACD9` tests `+10 & $8000`, runs `$01:AC70`, and emits with camera-independent origins. |
 | $7E:0A00+ | 44 × $26 | Town world-object records. Known render fields: `+08` frame-composition pointer, `+0A/+0C` world X/Y, `+10` render status (`$C000` = skip), `+25` delay/timer. `+12` is a behavior dispatch selector outside the OAM leaf. |
 | $7E:0A00+`+0E` | 2 | World-record **class**, indexing the `$01:B8D0` dispatch: `$0C` angel, `$11` town position controller, `$12` Blue Dragon, `$13` Napper Bat, `$14` Red Demon, `$15` Skull Head. Slots are recycled, so a class can change under a stable composition. |
-| $7E:0A00+`+0E` | 2 | **Packed form.** Scripted town actors additionally carry their spawn list in the high byte over class `$01` in the low byte, so the field reads as a 16-bit identity rather than a small class index: `$0A01` burning house, `$0E01` volcanic eruption. Runs `20260818-070141`/`073455` see `$0E01` on all eight live eruption records and on nothing else. Effect classifiers gate on the packed word **and** an exact composition, so neither the list nor the art can claim a family alone. |
+| $7E:0A00+`+0E` | 2 | **Packed form.** Scripted town actors additionally carry their spawn list in the high byte over class `$01` in the low byte, so the field reads as a 16-bit identity rather than a small class index: `$0A01` burning house, `$0E01` volcanic eruption. Runs `20260818-070141`/`073455` see `$0E01` on all eight live eruption records and on nothing else. |
 | $7E:0A00+`+00` | 2 | **Animation frame timer** for the record's `+$02` script cursor. Decrements once per game frame (measured Δ of -18/-14/-12 across snapshot gaps of 18/14/12) and cycles `+1..+4` on the eruption ground fire's authored four-tick frames. A held (`0`-duration) frame lets it free-run negative, which is why a staged record reaches -70. **It is not an altitude** — the sim town has none, and drawn position is exactly `world - camera`. |
-| $7E:0A00+`+1A/+1C` | 2+2 | **Per-tick map velocity**, X and Y, applied by the record's own class handler; `$01:B44B` is the angel-arrow case. For the volcanic eruption `+1C` names which of the ROM's three phases a record is in: `-8` climbing out of the crater, `+8` falling back onto the town, `0` staged offscreen. Composition follows it exactly — `$E7A6` always reads `+8` and `$E7D0` never does. One record walks all three in turn, so this is a state machine rather than two populations. Recorded here as measurement only: the eruption presentation is keyed on the script's own clock and on which column the record stands in, so nothing in the tree currently reads this field. |
-| $7E:0A00+`+22` | 2 | **Wait counter**, written by actor-script command `$09` (`$01:CE5F`): the command fetches two script bytes, assembles a 16-bit value, `STA $0022,X`, and sets state 2. Decrements once per game frame alongside `+00`. Observed 1..76 on staged eruption records — and the script that drives record `$0FA4` opens `09 4C 00`, i.e. wait $004C = 76, exactly the value seen. It does not encode the landing row; the `$03` run that follows does. **It is the only live source for a wait already in progress**, because `$01:CE5F` advances the cursor past the `$09` before the countdown starts: walking the script from the cursor sees no wait at all, so a wait's remaining frames exist nowhere else. The eruption presentation reads it for exactly that reason. |
+| $7E:0A00+`+1A/+1C` | 2+2 | **Per-tick map velocity**, X and Y, applied by the record's own class handler; `$01:B44B` is the angel-arrow case. For the volcanic eruption `+1C` names which of the ROM's three phases a record is in: `-8` climbing out of the crater, `+8` falling back onto the town, `0` staged offscreen. Composition follows it exactly — `$E7A6` always reads `+8` and `$E7D0` never does. One record walks all three in turn, so this is a state machine rather than two populations. |
+| $7E:0A00+`+22` | 2 | **Wait counter**, written by actor-script command `$09` (`$01:CE5F`): the command fetches two script bytes, assembles a 16-bit value, `STA $0022,X`, and sets state 2. Decrements once per game frame alongside `+00`. Observed 1..76 on staged eruption records — and the script that drives record `$0FA4` opens `09 4C 00`, i.e. wait $004C = 76, exactly the value seen. It does not encode the landing row; the `$03` run that follows does. **It is the only live source for a wait already in progress**, because `$01:CE5F` advances the cursor past the `$09` before the countdown starts: walking the script from the cursor sees no wait at all, so a wait's remaining frames exist nowhere else. |
 | $7E:0A00+`+14/+16` | 2+2 | **Actor-script base and cursor.** `$01:CFC7` fetches the next command byte and post-increments `+16`; the bank it fetches from is selected by the class byte `+$0E & $00FF` — **zero reads `$7F:0000,X` (RAM), non-zero reads `$0A:0000,X` (ROM)**. Townspeople are class 0 and run generated RAM scripts; the eruption is class `$01`, so its scripts are **static bank-`$0A` ROM data** and are decodable offline. `$7F` = end of script (`$01:CD35` branches to `$B891`); anything else indexes the 18-entry command table `$01:CD6F`. |
 | $7E:0A00+`+1E` | 2 | Per-command step scale/duration written by the command handlers — cmd `$03` sets `$0010`, and one branch of cmd `$04` sets `$0002` after scaling `+1A/+1C` by 8. With cmd `$03`'s `+1C = +1` this yields the measured 16 map pixels of descent per command. |
-| $7E:0A00+`+12` | 2 | Masked `& $7FFF`, the **state** index inside that class's own table. `(class $12, state 6)` is the Blue Dragon's 33-frame building strike. sim3d keys presentation height on the `(class, state)` pair. |
+| $7E:0A00+`+12` | 2 | Masked `& $7FFF`, the **state** index inside that class's own table. `(class $12, state 6)` is the Blue Dragon's 33-frame building strike. |
 | $7E:0A00+`+14/+16/+18/+1E` (class `$15` only) | 2 each | Skull Head state timer / target pixel X / target pixel Y / overloaded interruption countdown and resume marker. State `$0B` uses `+1E` for24 calls, then writes1 and returns to state3; state5 retains remaining `+14` when resuming. These are not the scripted-town-actor cursor fields above. [Native target/timer contract](regional-differences-technical.md#skull-head-target-and-earthquake-state-contract). |
 | $7E:0F0C-$1016 | 8 × $26 | The volcanic eruption story event (fires once a town's region has no lairs left), mapped 2026-08-18. All eight records carry `+0E=$0E01` and run one of three consecutive spawn scripts (`$01:A853`/`$A857`/`$A85B` in `+06`). Positive live identity: staged = `+08=$E7D0`, `+1C=0`, `world_y=-16`, `+22` counting down; crater jet = `+08=$E7D0`, `+1C=-8`, fixed map column (144 in Aitos); falling = `+08=$E7A6`, `+1C=+8`, constant column, `world_y` rising 8 a tick from -16; landed = `+08=$DD9F/$DDA5/$DDAB`, `+1C=0`. Measured fall ranges are 80-368 map pixels to fourteen distinct landing rows (64..352, all multiples of 16). |
 | $7E:0AE4 | $26 | Angel world record (index 6), class `$0C`. Its class handler `$B904` is a no-op because another subsystem drives it. Identify the angel by this address plus class — the `$A627-$A792` pose compositions are also borrowed by miracle effect records. |
@@ -423,22 +360,22 @@ See [tree timing/ownership](regional-differences-technical.md#fillmore-act-1-tre
 | $7E:00C4-$00CA | — | Fade gate/config and background page-flip counters: `$C5/$C6` are page masks, `$C7/$C8` current offsets, `$C9/$CA` packed reload/countdown bytes. `$02:BC27` services both pairs. Aitos Act 1 rooms 2/3 use mask `$0C`, counter `$40`: offsets 4/8/12/0 held five calls each. Same checked settings/cycle in all five ROMs; PAL addresses are one higher. [Native profile checks](regional-differences-technical.md#aitos-background-animation-and-video-profiles). |
 | $7E:00CB/$00CD/$00CE/$00CF | 2+1+1+1 | CGRAM upload descriptor: src addr/bank, CGADD, row count ($02:AE75) |
 | $7E:00D0-$00D6 | 7 | VRAM DMA descriptor slot 0: src16/bank/VMADD/size (size=0 idle; $02:AF30) |
-| $7E:00D7-$00DD | 7 | VRAM DMA descriptor slot 1 = tile-anim upload. Action/town `$02:BC56` uses `[$D9]:$D7 = $7F:B800+n*$E1`; world navigation's `$02:AF86` instead fixes bank `$0A`, with `$D7 = $B000/$B040/$B080/$B0C0` for the four water frames. `$D7` remains after `$DC` is drained, so the host-owned map can synchronize phase without reading VRAM. |
+| $7E:00D7-$00DD | 7 | VRAM DMA descriptor slot 1 = tile-anim upload. Action/town `$02:BC56` uses `[$D9]:$D7 = $7F:B800+n*$E1`; world navigation's `$02:AF86` instead fixes bank `$0A`, with `$D7 = $B000/$B040/$B080/$B0C0` for the four water frames. |
 | $7E:00DE-$00E1 | 1+1+1+2 | tile-anim: tick period mask / frame count-1 / frame index / frame stride (bytes); $FF/$FF/-/0 = disabled |
 | $7E:00F1 | 1 | one-shot flag: re-stream BG3 map rows 4-26 ($7F:B100 -> VRAM $5880) next NMI |
 | $7F:B000-$B6BF | 1728 | HUD/BG3 tilemap compose buffer (rows 0-3 streamed every frame to VRAM $5800; rows 4-26 on $F1) |
-| $7F:0000-$1FFF | 8192 | **Full town BG1 tilemap**, the whole 64x64-tile (512x512 pixel) town, not just the on-screen window. Quadrant-paged: `$03:9B5A/$03:9C43` write each cell's 2x2 tile block at `quadrant*2048 + (cellY & 15)*128 + (cellX & 15)*4`, four words at `+$00/+$02/+$40/+$42`, using terrain/structure definitions respectively. Both HLE wrappers and bridge-side rendering share `ActRaiser_CopyTownMetatile`. Row stride is 32 tiles, quadrant stride 32x32 tiles. A row-major read looks like an unrelated layer — it was mistaken for BG2 twice before `$9C43` was disassembled. This is the authoritative displayed cell artwork across staged construction and Marahna's water-to-land event; the semantic `$7F:2000` value can lead the visible redraw, so presentation observes this range plus live VRAM/CGRAM rather than reconstructing the image from cell ids |
+| $7F:0000-$1FFF | 8192 | **Full town BG1 tilemap**, the whole 64x64-tile (512x512 pixel) town, not just the on-screen window. Quadrant-paged: `$03:9B5A/$03:9C43` write each cell's 2x2 tile block at `quadrant*2048 + (cellY & 15)*128 + (cellX & 15)*4`, four words at `+$00/+$02/+$40/+$42`, using terrain/structure definitions respectively. Row stride is 32 tiles, quadrant stride 32x32 tiles. A row-major read looks like an unrelated layer — it was mistaken for BG2 twice before `$9C43` was disassembled. This is the authoritative displayed cell artwork across staged construction and Marahna's water-to-land event; the semantic `$7F:2000` value can lead the visible redraw, so presentation observes this range plus live VRAM/CGRAM rather than reconstructing the image from cell ids |
 | $7F:1000-$1FFF | 4096 | (Within the above.) The lower two quadrant pages happen to be the range the graphics orchestrator streams to VRAM; this is part of the same buffer |
 | $7E:2100-$28FF | 2048 | Mode-dependent BG1 metatile definitions, 8 bytes (four tilemap words) per ID. In towns, `$03:9B5A` expands this terrain atlas into the live tilemap and `$03:96EF` tests top-left bit `$0200` as its impassable marker. In action rooms, command 5 installs the BG1 rendering/collision definitions here. |
 | $7E:2900-$30FF | 2048 | Action BG2 metatile definitions, 8 bytes (four tilemap words) per ID, installed by command 5. Outside action mode this range is shared and must not be treated as persistent BG2 authority. |
-| $7F:2000-$37FF | 6144 | **Six town terrain cell maps**, one 32x32-cell, `$400`-byte block per town. Each block is quadrant-paged as four 16x16 pages at +0/+256/+512/+768. Values are semantic terrain ids or temporary/special structure marks: terrain redraws expand `$7E:2100` through `$03:9B5A`, while structure rebuilds expand `$7E:3100` through `$03:9C43`; structure records' `+0/+1` cell X/Y address the active block. During staged animation this semantic value may change before the displayed 2x2 words at `$7F:0000`, so it is not a presentation oracle. `$03:9710` computes its index through the shared `ActRaiser_CellMarkIndex` HLE; `$03:96EF` consumes the indexed terrain ID through the traversal-predicate HLE; `$02:865C` consumes all six blocks when stamping the authentic developed world map, while the host's pure `SimWorldMap_ComposeDeveloped` reads the same bytes explicitly. |
-| $7E:3100+ | 2048 | Structure metatile table: 8 bytes (four BG1 tilemap words) per metatile index, consumed by the shared `$03:9C43` metatile-copy HLE and bridge-side renderer. Note the cell value is **not** a direct index — expansion is a write path the game runs on change, and cell → 2x2 block is only ~62-77% single-valued when inverted, so read `$7F:0000` rather than trying to rebuild it |
+| $7F:2000-$37FF | 6144 | **Six town terrain cell maps**, one 32x32-cell, `$400`-byte block per town. Each block is quadrant-paged as four 16x16 pages at +0/+256/+512/+768. Values are semantic terrain ids or temporary/special structure marks: terrain redraws expand `$7E:2100` through `$03:9B5A`, while structure rebuilds expand `$7E:3100` through `$03:9C43`; structure records' `+0/+1` cell X/Y address the active block. During staged animation this semantic value may change before the displayed 2x2 words at `$7F:0000`, so it is not a presentation oracle. |
+| $7E:3100+ | 2048 | Structure metatile table: 8 bytes (four BG1 tilemap words) per metatile index, consumed by the shared `$03:9C43` metatile-copy routine. Note the cell value is **not** a direct index — expansion is a write path the game runs on change, and cell → 2x2 block is only ~62-77% single-valued when inverted, so read `$7F:0000` rather than trying to rebuild it |
 | $7F:B800-$BFFF | `$1000` | Contiguous 4 KiB character-animation snapshot used by action mode and sim towns (`$18=0`, `$19!=0,9`). During scene entry `$02:BAF5` reads `$1000` bytes of character VRAM beginning at word `$DA` (`$0000` or `$1000`) into this range; `$02:BC56` later selects `$E1`-byte phase `($E0 & $DF)` and `$02:AF30` uploads it back. Raw config cadence bit 7 marks a continuation and makes `$BAF5` retain the prior capture. Only the separate sim `$19=0 or 9` branch uses ROM bank `$0A` directly through `$02:AF86`. |
 
 ### Mode 7 / World Map
 | Address | Size | Description |
 |---------|------|-------------|
-| $7E:C000-$FFFF | 16384 | **Shared scratch; world-map tilemap shadow only while `$19=09` is being built/presented.** Row-major 128x128, one byte per tile, and byte-identical to Mode-7 VRAM after `$02:B475` completes. It is not persistent world-map state: action stages durably clobber rows 0-79 and town frames reuse rows 0-7. Host rendering never reads or writes it: `SimWorldMap_ComposeDeveloped` builds a separate complete map from the ROM base and explicit simulation inputs. Static tiles are `$0E:8000`, palette `$1C:BF93`; tiles `$00/$AA` are replaced by the four water frames at `$0A:B000-$B0FF`. |
+| $7E:C000-$FFFF | 16384 | **Shared scratch; world-map tilemap shadow only while `$19=09` is being built/presented.** Row-major 128x128, one byte per tile, and byte-identical to Mode-7 VRAM after `$02:B475` completes. It is not persistent world-map state: action stages durably clobber rows 0-79 and town frames reuse rows 0-7. Static tiles are `$0E:8000`, palette `$1C:BF93`; tiles `$00/$AA` are replaced by the four water frames at `$0A:B000-$B0FF`. |
 | $7E:0300-$0303 | 4 | World-navigation focus X/Y in source pixels. At `$02:8213` movement advances these with `$22/$24`; the stable difference is the authentic half-screen `(128,112)` |
 | $7E:0304-$030B | 8 | Current signed Mode-7 A/B/C/D matrix uploaded for the displayed `$09` frame |
 | $7E:030C-$0313 | 8 | Staged next signed A/B/C/D matrix |
@@ -451,10 +388,8 @@ See [tree timing/ownership](regional-differences-technical.md#fillmore-act-1-tre
 
 ## Action-room bootstrap background staging (mapped 2026-08-22)
 
-These ranges are the exact resident background image produced by asset-script
-commands 5 and 4. The guarded CPU HLE and `ActionRoomScene` staging path both
-preserve bytes outside the active ranges, which matters because several of the
-addresses are shared scratch in other game modes.
+These ranges hold the resident background image produced by asset-script
+commands 5 and 4. Several addresses serve as scratch space in other game modes.
 
 | Address | Size | Action-room meaning |
 |---------|------|---------------------|
@@ -479,7 +414,7 @@ addresses are shared scratch in other game modes.
 
 | Address | Size | Description |
 |---------|------|-------------|
-| $7E:00A2 | 3 | Asset-script long pointer. `$02:B1F7` and its command handlers address the current operand as `[$A2],Y`; the guarded action HLEs advance Y exactly as the native handlers do. |
+| $7E:00A2 | 3 | Asset-script long pointer. |
 | $7E:00A5 | 3 | Long pointer to compressed input byte |
 | $7E:00A5/$00A7 | 2+1 | Asset-script requested resource pointer, reused by non-music commands. At accepted music boundary `$02:B653`, Japan's Fillmore cave routing may replace the recognized `$0E:F69F` request with US `$18:947F`. Not the resident source cache. |
 | $7E:00AB | 3 | Resident music-source cache, owned by native upload/comparison at `$02:B655`. Regional setting edits do not write it. |
@@ -498,17 +433,8 @@ addresses are shared scratch in other game modes.
 | $7E:0200 | 1 | Text display speed |
 | $7E:0336 | 1 | Title `CONTINUE / NEW GAME` selection index. Observed values are 0–2; `$02:A622` initializes/reads it and `$02:A7E9` remaps it for the unlocked ending/professional-state marker. |
 
-The directly captured interactive title state at game-frame 821 also has
-`$0300=$0100`, `$0302=$0110`, `$92=$0C`, and `$0336<=2`. Those presentation
-values remain useful evidence about the native title renderer, but the
-host-settings overlay no longer depends on them: Escape/F1 opens it globally
-before emulated input dispatch.
-
-The overlay itself has no emulated WRAM state to map. Its open flag, selection,
-scroll position, decoded font/frame textures, and menu input live entirely on
-the host. Opening and closing clear the host joypad accumulator before the next
-NMI sample; while open, game-frame advancement is frozen, so no hidden
-in-game “settings mode” byte or PPU page is introduced.
+The observed interactive title state at game-frame 821 has `$0300=$0100`,
+`$0302=$0110`, `$92=$0C`, and `$0336<=2`.
 
 ## Town Simulation Data ($7E:0200+)
 
@@ -616,10 +542,8 @@ See [dialogue-system.md](dialogue-system.md) for the control and clear paths.
 | --- | --- |
 | `DB:Y` | Interactive or fixed source cursor; caller determines bank |
 | DP `$14` | Packed row/column saved by `$02:BF60` from A; not a global message ID |
-| DP `$10/$12` (sound-test modal only) | Music/effect selection counters; the routine changes their low bytes in ranges 1–22 and 1–38. Native numeric formatting and the localization value adapter read the words. These are reused scratch, not global current-song/SFX state. |
+| DP `$10/$12` (sound-test modal only) | Music/effect selection counters; the routine changes their low bytes in ranges 1–22 and 1–38. These are reused scratch, not global current-song/SFX state. |
 | `$7E:0200` | Dialogue pacing/retained-row mode: `$901C` delays non-space glyphs by this many `$9284` frames; zero selects clear at `$02` continuation, nonzero selects row advancement/scroll. Enhanced sessions apply this interval per authored Unicode grapheme through caller-scoped `$9278` (return `$9026`), not per compressed source token. Authored pages retain the same zero/nonzero window policy. |
-| `$7E:0201` | Text presentation-state byte initialized to `$FF` on interpreter entry; not a standalone host page counter |
-| `$7E:0202` | Native dialogue cursor; reset and row advancement belong to the text interpreter, independently of the host's page/reveal snapshot |
 | `$7E:0288-$028F` | Eight live native player-name slots read by interactive `$06`; can precede SRAM `$1439` until the next save. `$0290` is terminator/padding. Never UTF-8 storage. |
 | `$7E:034B/$034C/$034D` | Name-entry selected column / row / entered length |
 | `$7F:B000-$B7FF` | 32×32 BG3 tilemap staging; byte offset = `row*64 + column*2` |
@@ -639,9 +563,7 @@ state and explicit save/load handling, not writes into these native slots.
 
 ### Town command state
 
-These USA addresses describe the native owner shared by the original and
-modern presentations. The host's navigation phase, remembered category rows,
-Describe session, scale and binding hint have no additional WRAM allocation.
+These USA addresses describe the native town command menu state.
 See the [command flow](sim-menu-reference.md#entry-selection-and-dispatch)
 and [dialogue boundaries](dialogue-system.md#town-command-dialogue-and-selectors).
 
@@ -693,7 +615,6 @@ screen coordinates are not. Native camera/screen offsets still apply to anchors.
 |---------|------|-------------|
 | $7E:4000+ | varies | Per-act decompressed ordinary-object animation/composition blob. Loaded by `$02:B69C` only at act-entry maps and inherited by later maps in the same act. Bloodpool scene composition pointers `$45EF/$4610/$46FE/$479D`, Marahna orb pointers `$4504/$4510/$451C/$4528`, snake-shot pointers `$4869/$487C`, split/link pointers `$4597/$4BCD/$4BD9/$45B8/$45C4/$45D0/$45DC/$4AA1/$4B82`, excluded reaper-orb pointers `$47E5/$4806/$4827/$4848`, excluded platform pointer `$4BE5`, and Aitos `$4D21/$4D2D` are addresses inside this mutable WRAM blob, not ROM symbols. Marahna boss-room pointers `$57C2/$5868/$59DE/$5CE0/$5D01/$5D0D/$5D2E` live in its separate `$7E:5000` bank. |
 | $7E:5000+ | varies | Per-map decompressed boss animation/composition blob selected by the same asset-script command with nonzero destination flag. Aitos boss-volley visuals `$20/$21/$23` resolve to mutable WRAM compositions `$56BE/$56D8/$56FE` in run `20260812-000613`; Flaming Wheel's full rings use `$5276/$5398/$54BA/$55DC` and its cyan shots use `$51B5/$51C1/$51CD/$51D9`. Like every loaded pointer, these addresses identify artwork only inside the validated map/source lifecycle. |
-| `$7E:5F00/$5F40/$5F80/$5FC0`, room `0406` only | 4 × 64-byte slots | Regional Northwall impact compositions derived from US visual8, up to61 bytes each. Validated native boss blob occupies `$5000–560C`; its21 composition records remain unchanged. Actors retain a valid US visual8 alias at `+22`, but native and host rendering use their full `+20` composition pointer. Fixed per-pose slots prevent concurrent impacts overwriting each other. This is not general free WRAM in other rooms. |
 | $7E:6000-$7E:7FFF | 8KB | Shared action character/metatile decompression workspace and persistent-raster table storage. R1-R6/R8 use `$6000`, R7/R10 BG1 use `$6800`, R9 uses `$7000`, and R10 BG2 uses `$6000`; untouched bytes can remain presentation-visible. |
 | $7F:2000+ | varies | Arrangement data |
 | $7E:6000-$60E0 (Aitos room $0504) | 225 | Mosaic HDMA: 112 two-byte records `{2, value}`, then a zero terminator. `$02:9382` uses DP `$00/$01` as a 16-bit waveform index and DP `$0C` as a112-band counter. The regional loop writes the224 record bytes; native `$02:93BA` retains terminator/setup ownership. Other rooms reuse this workspace. |
@@ -718,11 +639,11 @@ from the later bank. [Source and tests](regional-differences-technical.md#town-t
 ### Structure records & town capacity
 | Address | Description |
 |---------|-------------|
-| $7F:3800-$7F:53FF | Per-cell flag maps, `$400` per town (32×32 cells; bit0 set at road/build commit `$03:9623`, bit1 at `$03:8E48`, transient pathfinder visited bit2 set at `$03:9A50` and tested by the `$03:96EF` HLE). Construction predicate `$03:96BE` requires bit2 **set**, plus tile `$08` or `$D0-$DA`; a visually empty cell is not necessarily available. |
+| $7F:3800-$7F:53FF | Construction predicate `$03:96BE` requires bit2 **set**, plus tile `$08` or `$D0-$DA`; a visually empty cell is not necessarily available. |
 | $7F:6BCF+2N / $7F:6BDB+2N | X/Y plot coordinates consumed as the flood-fill seed by US/PAL `$03:9156` / JP `$03:8F3B`. Each is multiplied by four to obtain cell coordinates. The wrapper clears/rebuilds the town's visited bits; treating every eligible terrain cell as visited bypasses real construction constraints. |
 | $7F:6B26+2N | Per-town **support capacity** (census `$03:C07E`: US32/48/72, JP16/24/32; bridges32US/16JP). Admission checks old population ≤ support+2; not a resident cap |
 | $7F:6BE7-$7F:77E6 | Per-town **structure-record arrays**, `$200` each (base = `word[$03:DC74+town*2]`): 128 × 4-byte records `{cell X, cell Y, flags/type, action/progress}`. Flags byte: bit7 active, **bit6 not-yet-contributing / per-class visual variant — NOT a construction flag** (the allocator never sets it; on a class-3 windmill it is the "no wind" story state), bits 4-5 subtype (house civ level / wheat `$10` / bridge orientation), low nibble type class (0 house, 1 bridge, 2 field, 3/4 factory tier). Action byte bit7 is the `$03:A004` initialization latch; completed records can remain at initialized action0. It is not a visual-program completion flag. Allocator `$03:9D9F`; the 128-slot exhaustion is the game's 128-structure cap |
-| $7F:77E7-$7F:7BE6 | Per-record visual step-machine slots, 128 × 8 bytes (armed by the construction `$03:A4B8` / rebuild `$03:A4A8` HLE pair through one shared resolver/armer, then walked by the `$89F7`/`$8A7E` 8-frame stepper). Completed sidecar bridges bypass this pool: the `$89F0` HLE resolves and replays their single native rebuild draw through the same model. Slot layout, from interpreter `$03:A4F7` (decoded 2026-08-17): `+0` countdown, decremented once per tick, entry executes when it hits 0; `+1` loop repeat counter; `+2` program cursor (bank-`$03` address of the NEXT entry); `+4` loop restart address, set by the program's `$FF` opcode; `+6` address of the CURRENT entry's draw-list pointer word, which `$03:A591` dereferences to redraw. The armer initialises `+0`/`+1`/`+2`/`+4` only, so `+6` is stale until the first tick |
+| $7F:77E7-$7F:7BE6 | Slot layout, from interpreter `$03:A4F7` (decoded 2026-08-17): `+0` countdown, decremented once per tick, entry executes when it hits 0; `+1` loop repeat counter; `+2` program cursor (bank-`$03` address of the NEXT entry); `+4` loop restart address, set by the program's `$FF` opcode; `+6` address of the CURRENT entry's draw-list pointer word, which `$03:A591` dereferences to redraw. The armer initialises `+0`/`+1`/`+2`/`+4` only, so `+6` is stale until the first tick |
 | $7F:7BE7 | Step/tick scratch variable (record index during scanner passes) |
 | $7F:7BE9 | Scanner gate: nonzero makes `$03:A4A8/$03:A4B8` (arm rebuild/construction visual step) and `$03:A4F7` early-out |
 
@@ -903,14 +824,6 @@ kind 0 people, 2 horse, 4 dog, 6 sheep, 8 boat, 10 flame.
 
 ### Saved SIM actor cache ($7F:97DA-$7F:9EF9)
 
-Regional combat/AI metadata keeps four live policy snapshots and 24 cached
-snapshots in the save companion, not in these native records. Native copies
-at `$03:813F/$03:8168` synchronize the corresponding policy copies; `$03:B9EE`
-pins only a verified new generation. The combat scan uses the first four slots
-(`$0B30/$0B56/$0B7C/$0BA2`); the other four cached actors stay native. Accumulated
-arrow damage remains the native byte at actor `+$24`, and never changes merely
-because a regional option is edited. [Integration contract](regional-differences-technical.md#sim-combat-integration).
-
 For these monsters, `+$0E` is the species byte; `+$0F` is behavior state,
 including a Bat's carrying flag. Treating the pair as a 16-bit species ID
 incorrectly loses ownership after that flag changes. `+$14` is state-local:
@@ -957,10 +870,7 @@ Regional read/write cautions:
   construction. `$03:8620` compares it with `$91DA+2N` to detect newly raised
   warning bits. Regional status rules leave this native copy/comparison intact.
 - US `$7E:0B04/$0B05` are byte HP/SP recovery queues; JP `$7E:0B04` is a
-  **word** recovery phase. The mixed-policy host instead uses byte `$0B04`
-  as the Japanese angel phase at `$01:9C30/$9C34`, leaving the independent SP
-  byte `$0B05` intact. Changing one recovery policy clears only its own byte.
-  Never project the JP word onto the US queues.
+  **word** recovery phase. The JP word overlaps both independent US queues.
 - `$7F:91FE` is the long development clock; `$9200` is its subcycle. JP's
   `$7F:7CED` divider is also advanced by the miracle frame service while those
   clocks are held. Menus and miracle effects have different actor/recovery
@@ -1018,22 +928,9 @@ source doc: many counters are stored as decimal-looking hex (screen "28" = $28).
 | Addr | Label (pin value) | Notes |
 |---|---|---|
 | `$7E:001D` | INF HP ($08) | player HP (matches our AR_INF_HP cheat) |
-| `$7E:001C` | INF LIVES ($01) |  |
-| `$7E:00E6` | INF TIME ($01) |  |
-| `$7E:08D1` | INVULNERABILITY ($20) |  |
-| `$7E:0BCC` | NO BOSS HEALTH 1 ($00) |  |
-| `$7E:134C` | NO BOSS HEALTH 2 ($00) |  |
-| `$7E:0CCC` | NO BOSS HEALTH 3 ($00) |  |
-| `$7E:130C` | NO BOSS HEALTH 4 ($00) |  |
-| `$7E:0ECC` | NO BOSS HEALTH 5 ($00) |  |
 | `$7E:0021` | INF MP ($0A) | **MP / magic-scroll count** — WORKING copy of persistent `$0295` (see Master block above); pinning this gives castable MP but does not persist |
 | `$7E:0282` | INF SP ($FF) | SP is 16-bit ($0282/$0283) |
-| `$7E:00E4` | RANGED SWORD ($80) |  |
-| `$7E:001F` | MAX SCORE ($99) |  |
-| `$7E:0020` | MAX SCORE ($99) |  |
-| `$7E:00C3` | ROOM ALWAYS LIT ($00) |  |
 | `$7E:02A2-$02A9` | item slots 1-8 (item ids) | 16 item ids exist; 8 story-critical (codes 16-23 pin the useful set) |
-| `$7E:0286` | INF HP [SIM] ($08) |  |
 | `$7E:022E` | MAX QUALITY 1 ($03) | town quality, stride 2, six towns ($022E..$0238) |
 | `$7F:9EFA-$9F04` | INF SOUL POINTS 1-6 (40) | per-town soul/population points, stride 2 (codes 31-36) |
 | `$7E:0299-$029C` | HAVE FIRE/STARDUST/AURA/LIGHT (01/02/03/04) | spell-unlock flags, one byte each: Fire/Stardust/Aura/Light (§7.18 secondary) |

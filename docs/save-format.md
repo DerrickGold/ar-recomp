@@ -179,18 +179,9 @@ reclaimed; a matching bridge still present in the main array wins for census,
 marks, and rendering, preventing an interrupted or older migration from being
 double-counted.
 
-Migration is transactional with the game's save command. The host recomputes
-the live checksum immediately, then resynchronizes only the sidecar and
-checksum ranges in the auto-persistence shadow. That makes the migration
-session-only: exiting without a native save cannot leak newly migrated bridge
-records to disk. The ROM's normal `$03:A656` save transaction later changes
-the native town block; auto-persistence then commits the complete, already
-checksummed 8 KiB image, including the sidecar. A save-system regression test
-covers both halves of this boundary. The bridge owner in
-`src/actraiser/actraiser_bugfixes.c` supplies marks, scene-finish rendering and
-the census's read-only validated/deduplicated bridge count. The census lives
-in `actraiser_town_census.c`; it does not interpret extension storage. The ROM
-itself never reads the area.
+Bridge migration remains session-only until the normal game save commits
+the complete checksummed image. Exiting without saving does not persist newly
+migrated records. The original ROM never reads this extension area.
 
 ### 3.5 Lairs, growth and SIM actor cache
 
@@ -346,12 +337,6 @@ the occupied slot's native save and checkpoint become authoritative. A durable
 ever-saved intent precedes the first native write so an interrupted first save
 cannot be mistaken for an unused slot.
 
-`tests/save_slots_test.c` covers routing, formats, lock ownership, restart
-revalidation and failed writes. `tests/save_slots_boot_test.py` accepts the game
-executable, fixture-test executable and a local ROM to exercise prepared-game
-boots, native legacy adoption, a Unicode launcher-selected data root, and
-relocation of a complete collection. All use temporary directories.
-
 ### Unicode player names and emulator interchange
 
 Unicode names do **not** change the 8 KiB SRAM layout, its native name field,
@@ -454,14 +439,6 @@ New Game is running. Population conversion creates this copy after confirming
 the current game state in the Sky Palace. Restoration is manual, as described
 below. Campaign archives offer the portable import/export path; raw exports do
 not substitute for a complete recovery copy.
-
-`ActRaiserStorySnapshot_Capture` provides a read-only projection of the US
-writer at `$03:A656`. It copies current WRAM into a separate SRAM-sized buffer,
-retains bytes the native writer does not own (including extension bridges),
-and recomputes the native checksum. It does not refresh the active town's actor
-cache or establish a safe save boundary. Ordinary saves still execute the
-original writer. Randomized original-CPU comparisons cover all 8,192 bytes,
-both native accumulator entry widths and both carry states.
 
 `SaveSystem_CommitStorySnapshot` persists such a completed game-owned projection
 with the current campaign's metadata, then replaces live SRAM and its shadow.
@@ -795,16 +772,6 @@ and effective source choices remain separate.
 | 68 | 247 | The two regional song-sequence fields | Actual upload of that song, independently |
 | 69 | 254 | Seven `*_actor_art` fields, one per action area | Next stage entry in that area |
 
-The implementation lives in
-[regional_session_codec.c](../src/regional/session/regional_session_codec.c), separate
-from live rule activation. Its typed `Record` binding supplies each record's
-key, regional values and source field to both encoding and decoding. The 24
-lair-seed records deliberately alias one policy; contradictory decoded aliases
-are rejected. This organization does not change version 69 or its bytes.
-Pre-refactor payload fingerprints and historical-version tests are in
-[regional_session_test.c](../tests/regional_session_test.c). See the
-[regional architecture](regional-architecture.md) for the editing/activation boundaries.
-
 Town/title choices extend `ARARTWORK-R1`. Pose order uses `ARPOSES-R1`,
 sequences use `ARSEQUENCE-R1`, and area artwork uses `ARACTORART-R1`. The
 new domains are omitted when both requested and effective values resolve to
@@ -1100,8 +1067,7 @@ requested/effective regional rules; Continue restores those rules directly.
 Shuffle fields use 0=off and 1=shuffle; statue drops and lair monsters also
 accept 2=random. Scope uses 0=map and 1=act. Unknown generators, invalid values,
 reserved bits or truncated records are rejected without replacing a save.
-The authoritative codec is `src/randomizer_config.c`; replay fingerprints use
-the same canonical bytes, not C struct layout.
+Replay fingerprints use these same canonical bytes, not C struct layout.
 
 Versions 1–69 load with an explicitly unknown recipe. Their bytes remain
 unchanged when merely copied or edited without adopting a campaign. Continue

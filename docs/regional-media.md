@@ -228,18 +228,3 @@ discards collision headers, animation programs and timing. Missing picture
 ordinals are not clamped or wrapped: regional exceptions need explicit
 semantic mappings. In particular, PAL's added Northwall impact geometry
 belongs to the boss rules, not this artwork resource.
-
-## Code ownership
-
-The game-specific Go packages `gamerom` and `gameassets` own retail ROM
-identification and the bounded native asset-script reader. Language,
-workshop-art and regional-media tools share those owners. `regionalmedia`
-owns extraction and the package contract; its catalog generates the C
-validation facts without embedding graphics or music bytes. None of this belongs to
-the game-agnostic `snesbuild` tool.
-
-The portable C parser in `src/regional` borrows immutable bytes and performs
-no file or renderer operations. The desktop owner in `src/host` reads and
-retains validated packages at startup. Duplicate donor loads are rejected
-until restart so a consumer cannot keep a dangling resource view. Parsing
-and hashing are load-time work, never frame-time work.

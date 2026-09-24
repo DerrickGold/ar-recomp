@@ -29,26 +29,20 @@ start with the [project README](https://github.com/DerrickGold/ar-recomp#quick-s
 
 ## Modding references
 
-- [Regional architecture](regional-architecture.md) — ownership, activation,
-  save compatibility and donor-media boundaries.
-
 The game-data references describe the US ROM unless stated otherwise. Entries
 marked uncertain should not be treated as verified offsets or behavior.
 
 - [RAM map](ram-map.md) and [ROM map](rom-map.md) — known state and data regions.
 - [Regional differences: technical evidence](regional-differences-technical.md)
+  — ROM tables, native code boundaries, measurements, and limits of the evidence.
 - [Regional media extraction and package format](regional-media.md)
-  — ROM tables, code boundaries, measurements, and limits of the evidence
-  behind the reader-facing article.
-- [Symbol map](research-symbol-map.md) — ROM addresses and their known purposes,
-  including the [regional HLE bindings](research-symbol-map.md#regional-hle-bindings)
-  from native entries to current C owners.
+- [Symbol map](research-symbol-map.md) — ROM addresses and their known purposes.
 - [Dialogue and menu text](dialogue-system.md) — text encoding, source identities,
   and replacement boundaries.
 - [Simulation command menu](sim-menu-reference.md) — actions, original icons,
   offering inventories, and description/confirmation boundaries.
-- [Reusable dialogue host](text-template-core.md) — templates, mixed typography,
-  shared playback mechanics and the standalone sample.
+- [Text templates and standalone sample](text-template-core.md) — mixed typography,
+  playback controls and a runnable example for other hosts.
 - [Save format](save-format.md) — SRAM layout, checksum, and editable fields.
 - [Native audio channels](snes-native-audio-channels.md) — original SPC driver
   voices, requests, and effect sequences.
@@ -60,5 +54,9 @@ For other game ports and native extensions, see the
 [recompiler guide](https://github.com/DerrickGold/ar-recomp/tree/main/snesrecomp-go) and
 [runner SDK](../snesrecomp-go/runtime/docs/README.md).
 
-Internal architecture notes, investigations, plans, and validation reports belong
-in the ignored `development/` tree, not in this public documentation set.
+Public documentation covers player/modder guides, file formats, reusable-tool
+and SDK usage, overall project status, and durable reverse-engineering findings.
+Implementation ownership maps, task handovers, plans, benchmark runs and
+validation journals belong in the ignored `development/` tree. Keep native-game
+evidence separate from the port's implementation history; public links must not
+depend on local-only records.

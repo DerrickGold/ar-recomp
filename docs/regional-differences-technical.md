@@ -2,30 +2,10 @@
 
 For the plain-English comparison of the releases, read
 [ActRaiser: regional differences](regional-differences.md). This companion
-preserves the ROM identities, addresses, measurements, qualifications and
-integration constraints behind that article. Implementation task tracking
-remains separate in the project's private development notes.
-
-This is a reverse-engineering reference, **not a list of implemented settings**.
-For implemented options, see [Regional settings](regional-settings.md); for
-ownership and activation contracts, see [Regional architecture](regional-architecture.md).
-The [regional HLE binding index](research-symbol-map.md#regional-hle-bindings)
-links the current US entry points to their C owners, including shared native
-readers, upload callbacks and host-only campaign state. Donor addresses below
-must not be used as replacement US call targets.
-
-The comparisons below were checked against the exact headerless retail ROMs
-on 2026-09-20–22. Table/code comparisons were supplemented with 84,499 isolated
-native-routine fixtures, 836 booted SIM/action/save traces, and 442 complete controlled
-earthquake-matrix transactions in the Snes9x reference core. Booted traces also
-include effects; do not count those casts again as separate matrix cases. These establish the
-listed behaviors, not complete playthrough equivalence or safe live switching
-between profiles. Booted fixtures use unmodified ROMs and separate scratch
-states; their RAM setup is not a claim of unassisted playthrough coverage.
-Ten additional Ice Dragon positive controls use explicitly modified in-memory
-waveform data; they are separate from those unmodified-ROM trace counts.
-Twenty-five debug/menu controls are also counted separately because their
-entry adapters or activation patches modify the in-memory ROM.
+preserves the ROM identities, addresses, measurements and qualifications
+behind that article. It describes native releases rather than the port's
+implementation history. Available game options are documented in
+[Regional settings](regional-settings.md).
 
 | Release | Size | SHA-256 |
 | --- | ---: | --- |
@@ -97,12 +77,6 @@ Timers are BCD, not binary. Map keys below use `region/room`, not act numbers.
 | `$25` | Northwall room 1 | 200 | 100 |
 | `$26` | Northwall room 2 | 200 | 100 |
 
-Recomp resolves this choice at the normal return of the audited action-only
-`$02:B4E8` profile initializer, replacing only `$E6/$E7`. The native or HLE
-profile body still owns PPU writes, CPU flags and stack return. Disabling the
-video HLE retains the selected gameplay limit. No frame-time patch, live-clock
-rescaling or setting-change refill is involved.
-
 ### Changed used object records
 
 The eight pointer roots start at US `$00:95DD` / JP `$00:9605`.
@@ -162,13 +136,6 @@ World-actor passes are **outside** JP's development divider (US `$03:8207` /
 JP `$03:8212`). Pauses, effects, and menu ownership can gate entry. Raw service
 counts must not be presented as universal real-time delays.
 
-The Recomp construction-wait option replaces only the leaf at `$03:872A–873B`.
-It decrements `$7F:7CE1[town]`, reloads it on expiry, and advances
-`$7F:7CC9[town]` once. The pending rule activates at that expiry, preserving an
-existing wait and leaving the native reload table `$7F:7CD5[town]`, other towns,
-master divider and cycle untouched. All five ROMs have the same leaf opcodes
-(JP `$03:86DA–86EB`); initialization loads1 in US/EU/DE/FR and150 in JP.
-
 The earthquake RNG helper reduces modulo its argument (`$FF` here); do not
 silently replace it with an unrelated host coin flip.
 
@@ -216,23 +183,6 @@ JP $03:B1DF: 0,80,200,400,550,650,750,1050,1400,1600,1800,1900,2000,2200,2400,26
 
 The 18-entry maximum-SP tables (US `$03:B432`, JP `$03:B203`) are identical.
 Level checks at US `$03:B3BA` / JP `$03:B18B` award upward, not downward.
-
-#### Level-goal integration
-
-The US-rooted regional adapter replaces only the three population-table reads:
-`$03:B3C7 → B3CB` performs the selected comparison, `$B3CD → B3D1` loads the
-unmet goal, and `$B407 → B40B` loads the following goal after an award. Generated
-entry boundaries keep all three reads behind their guards; HP/SP changes,
-level increments and the original PHP/PLP/return behavior remain native.
-
-`ActRaiserLevelGoalsRuntime` captures one table for the complete `$03:E414`
-award wrapper, including its repeated `$B3BA` calls, yields and dialogue.
-Standalone `$B3BA` entries also capture, while nested calls reuse the wrapper's
-snapshot. Settings changes cannot replace the table midway through an award.
-The existing Master-report owner refreshes only `$7E:0297` when Japanese goals
-are active or being replaced with US goals; it never calls the award wrapper.
-The maximum-level display stays zero, distinct from the table's 9999 sentinel.
-Population support and redevelopment have separate activation contracts.
 
 ### Monster lairs
 
@@ -290,12 +240,8 @@ further gameplay differences exist.
 
 ## Native-routine and content follow-up
 
-The following results use the same exact ROM hashes. The native fixtures run
-unchanged routine bodies and inspected callees from an in-memory research copy
-with an isolated reset trampoline. Tests explicitly called *fragments* stop at
-a named instruction before unrelated scene/render initialization. They do not
-load player SRAM, validate full scene transitions, or emulate host HLE policies.
-Code decoding and reference searches use the Go `snesbuild` tools.
+The following results use the same exact ROM hashes. Isolated native-routine
+checks establish bounded behavior; booted traces are identified separately.
 
 ### Lair stock is not monotonic
 
@@ -327,29 +273,6 @@ different semantics in a host accountant. The house callback derives
 the census's four-person fallback for that subtype and does not establish a
 normally reachable ten-person house tier.
 
-For selectable house feedback, Recomp changes only the US `$03:B4B8` unit
-prefix (`AND #$00FF; TAY`) to a fixed four under the Japanese policy, then
-rejoins `$03:B4BC`. The shared native distributor still handles round-robin
-stock increments, word overflow, all-sealed growth and register/stack cleanup.
-US/European selections use the original prefix. The effective policy cannot
-change inside a house callback, miracle or earthquake. Existing growth is not
-reprojected when the retained stock history switches. The wrapper preserves
-the US caller's flag contract rather than importing JP's pre-`PHP` `LDY` flags.
-
-Selectable score arithmetic retains the US `$03:D095` transaction and replaces
-three bounded prefixes: `$D0B3` chooses the destination, `$D0D4` converts the
-score, and `$B525-$B548` performs JP stock subtraction. Explicit CFG boundaries
-retain the native prologues and cleanup. Conversion returns through the original
-`$D10A` RTS, rather than manually popping a host-invented frame. All10,000 valid
-four-digit scores match the unmodified JP converter, including A, Y, flags and
-scratch words `$7F:7C05/$7C07`. The converters leave carry clear for the shared
-growth helper. Conversion, stock operation and destination have independent
-internal policy keys; their UI bundle captures them for one settlement.
-The separate clear-card-versus-departure timing member captures one completion
-transaction, as described below. Phase is prospective; all retained stock
-projections consume the same actual settled score rather than fabricating a
-second tally when the player later switches rules.
-
 The qualifying miracle path (US `$03:BA42`, JP `$03:B7CB`) skips flags `$C000`,
 the `$90F5` busy gate and zero stock. Its depletion branch subtracts ten, but
 **the growth credit is not always ten**: `$03:B54E` / JP `$03:B2DA` uses `ADC`
@@ -370,55 +293,6 @@ A delay mutator at US `$03:B6BF` / JP `$03:B448` sets each current-town reload
 to `(delay >> 2) + 1`. Its ordinary gameplay caller has not been established;
 do not expose it as a confirmed regional rule or overwrite potential event
 modifications by reapplying seed delays every frame.
-
-Recomp's **Lair respawn delays** setting stages a whole-table replacement at
-the `$03:8193` town-master boundary. It verifies all 24 old `$7F:9628` words
-before writing any replacement and never writes `$7F:9658` countdowns, flags,
-actors or stock. `$03:B97F` remains native, including the `$1000` bypass and
-the `$B9C0/$B9C3` reload on expiry. US/Europe share numerical values; there is
-no PAL clock conversion. The owner does no table scan when no edit is pending.
-
-The `$03:B6BF` observer delegates the original M0/M1 body, then commits both
-retained projections only when native return and table values match. It does
-not add a caller for the unconfirmed path. New games initialize exact history
-after `$03:B7C6`; old saves retain their actual US values and estimate the fewest
-town-wide reductions consistent with those values. Fixed-point ambiguity
-(`1 -> 1`) is explicitly approximate. Unknown patterns or later unobserved
-writes quarantine history, rather than repairing native state. See
-[save format](save-format.md) for the independent `ARLDELY1` block.
-
-Recomp observes whole native transactions at `$03:BADD` (matched monster
-defeat), `$03:BA42` (miracle), `$03:B4A6` (one house) and `$03:D095`
-(action-score settlement). The first two capture eligible candidates before
-the active stock's zero early-out. Defeat matches the first actor-record
-address; it does not add a seal guard absent from the native leaf. Miracle
-capture retains the `$C000` flags, effect kind and posted-effect busy gate.
-House capture retains subtype and the four seal bits. Score capture uses the
-completed region at `$0341`, not the previously selected town.
-
-Each original body retains its native call frame, registers, flags and reward
-side effects. After its return the observer computes a candidate history,
-checks its active projection against native stocks, and commits only if they
-match. An escape or mismatch retains the old history marked diverged; it never
-repairs WRAM to fit the model. New-game initialization uses `$03:B7C6` or its
-already-installed result, checking all24 seeds before starting exact tracking.
-Completed saves perform another projection check before feature capture.
-Live accounting switching runs before the `$03:8193` development controller
-or the `$03:D095` score transaction,
-outside active stock, miracle and earthquake transactions. It validates all24
-native stocks against the effective projection before writing any counter,
-then changes only `$7F:96B8-$96E7` and publishes the staged effective policy.
-Registers, flags, actors, reloads, countdowns, sealing and rewards are untouched.
-Unknown or quarantined history blocks switching; mismatches quarantine the
-affected history without repairing WRAM. An unchanged policy takes a constant-time
-early exit, with no per-frame history copy, stock scan or disk access.
-For older saves, the normal Continue acknowledgement at `$02:A79F` reads the
-24 durable stock words from SRAM `$1603-$1632`, not from transient WRAM. It
-estimates only missing towns and persists the feature checkpoint before the
-original `$03:A83A` restoration. Known histories must match their US projection;
-divergent records are preserved for recovery. Cancel resumes the existing title
-frame at `$02:A75B` after release of the native `$4219 & $D0` accept mask.
-Record/replay follows its original route without fabricating acknowledgement.
 
 ### Census, construction and status are separate contracts
 
@@ -452,34 +326,6 @@ Text localization alone cannot reproduce this difference. Derived reports,
 construction policy and underlying status-flag producers need one consistent
 regional model. Geography, allocation, events and the bias still prevent a
 claim that all twelve US/JP final population maxima have been proved.
-
-### Town-status integration
-
-The US-rooted runtime keeps five independent policy leaves: report classifier,
-low-growth test, expected plot count, food-attempt marker and persistent flag
-merge. The overlay groups these as **Town growth reports**. US and Europe use
-the same numeric rules. Support coefficients and level goals are separate.
-
-`ActRaiserTownStatusRuntime` captures a resolved snapshot around native
-`$03:82DB` (complete construction calculation), `$03:BF8C` (six-town report),
-or standalone `$03:91AE/$91BC` plot operations. Nested calls reuse that snapshot;
-ordinary returns, coroutine yields and nonlocal return tokens retain native
-ownership. Prefix replacements use the US RAM layout and native continuations:
-
-| Prefix → continuation | Selected Japanese operation |
-| --- | --- |
-| `$8566 → $856B` | Load fixed threshold 4, retaining the US scratch store and comparison |
-| `$85A3 → $85A7` | Compare against the Japanese plot count, preserving A and native CMP flags |
-| `$85C3 → $85C6` | Omit scratch OR after the native `old & $50` |
-| `$9271 → $9274` | Mark the eligible food attempt, then perform the displaced native load |
-| `$BF9E → $C022` | Resolve the JP report code from US population, gate and stored flags |
-| `$BFA2 → $BFA7` | Use threshold 4 when combined with the US report classifier |
-
-The `$BF9A` loop root explicitly ends at `$BF9E`; otherwise generated code can
-inline the US classifier on towns after the first. No menu callback rewrites
-flags. A report before the next construction update intentionally sees stored
-flags from the earlier policy. New Japanese status calculations keep only the
-old `$10/$40` bits, even though temporary flags were computed.
 
 ### Regional growth-status producer
 
@@ -622,41 +468,8 @@ either census preserves every record and returns population74, with support
 64/32 respectively. This proves the local contracts, not natural construction
 reachability, maximum town populations or an implemented live-switch feature.
 
-`ActRaiser_TownCensus` remains the integration owner, now separated into
-`actraiser_town_census.c`. Its parameterized body accepts five support
-coefficients, including completed extension bridges (32 US /16 JP), while
-the bridge owner supplies validation and deduplication. The live entry resolves
-the campaign's effective support policy; only confirmed redevelopment may change
-that policy. Mixed-profile
-tests cover every structure flag byte, and 6,144 US/JP ROM-decoded census cases
-verify the native register/scratch/output contract. The census itself preserves
-standing structures, the adjustment word US `$7F:9F57+2N` / JP
-`$7F:9F4B+2N`, and earned levels.
-Towns with no act completion skip census output stores; retain that gate.
-The decoded US references to the adjustment are census plus save/restore;
-they do not establish its full initialization/indirect-write lifecycle or a
-separate regional adjustment rule. Do not reset it based on that limited scan.
-
-The custom Recomp conversion uses `$01:85A2`, after Palace intro/arrival/event
-processing and native `$03:8168` actor-cache retirement, before the next
-`$01:8B7D` selector. It is not a native regional earthquake variant. It preserves
-road/development lists `$7F:9250`, town construction timers and protected records,
-retires removed current-town visual slots and the seven `$7F:9758` queue IDs,
-and lets normal `$03:9D4D` town entry rebuild the display. No synthetic native
-call or hidden town update is required to create the recovery image.
-
-Empty-town population must remain positive: `$03:807F` treats zero as a new
-town and initializes population2 and civilization1. Conversion therefore
-rejects a developed town's adjustment of2 or more instead of resetting that
-adjustment or letting subtraction underflow. Its rebuilding allowance is a
-bounded reserve floor, not additive destruction credit: native offscreen
-construction does not debit growth, so repeated additive refunds could be
-farmed. The floor covers removed houses at the selected construction price,
-or one start in a support-only town; larger existing reserves remain.
-Player behavior and recovery are described in [Regional settings](regional-settings.md#population-rules-and-rebuilding).
-
-Refresh order is explicit at US `$03:829E–82A6` / JP `$03:8292–829A`:
-census, total-population refresh, then level-award wrapper. The total helper
+Refresh order at US `$03:829E–82A6` / JP `$03:8292–829A` is census,
+total-population refresh, then level awards. The total helper
 US `$03:8E10–8E2F` / JP `$03:8CFD–8D1C` copies the selected town's population
 to US `$7E:021A` / JP `$7E:0219` and sums all six population words into
 US `$7E:0218` / JP `$7E:0217`. It does not sum support.
@@ -680,57 +493,13 @@ refresh derived displays without invoking award side effects from a settings
 callback, then let the normal wrapper process eligible awards. Repeatedly
 toggling must not refill SP, replay awards or lower already-earned levels.
 
-The implemented redevelopment transaction supersedes the earlier
-non-destructive support-switch proposal. Reconstruction uses normal town
-construction, with the bounded allowance described below. This is a custom
-host feature, not an original regional mechanic: it must neither charge
-miracle SP nor trigger ordinary lair/house-loss rewards. Neither a fixed cap
-nor proof of every published population maximum is required for this contract.
-
-The bounded redevelopment mutation core now preflights all affected towns
-before writing any of them. Its removable allowlist is active classes0/2/3/4;
-bridges and classes5/6 remain. Matching one-cell/2×2 marks become `$08`, and
-the retired record's flags byte becomes zero, matching the non-reward portion
-of native action7 (`$03:A44F` for houses, `$03:A477` for support buildings).
-It rejects inconsistent/overlapping footprints, unsupported classes, pending
-structure actions and a bias that would make the emptied census underflow.
-Initialized action0 is not inherently busy: `$03:A004` latches bit7, and many
-completed buildings remain in that state. This bit does not certify completion
-of the separate visual program. The Palace transaction retires those visual
-slots only after its quiescence checks; the standalone mutation core does not.
-
 US construction charges `2*civilization+2` growth units per new structure,
 including support buildings. `$03:8529` computes up to six affordable starts;
 `$03:8422–8438` debits one such cost when the animated construction starts.
-The custom core grants a reconstruction allowance for the houses actually
-removed, using the selected construction price. Support buildings receive no
-per-record credit: native visible construction returns their price at
-completion. If a support-only reset would leave less than one start available,
-the allowance tops up only that missing amount. It is not a reconstruction of
-historical spending and invokes no ordinary house-loss rewards. Reapplying the
-same preview is rejected; a fresh preview of the empty town grants no credit.
-1,344 original-CPU checks cover budgeting, payment and support-return slices,
-off-screen placement, and US action7 retirement with native redraw suppression. These bounded checks and
-read-only previews of recorded developed towns are not a live redevelopment
-or a demonstration of reconstruction. The implemented Palace coordinator owns
-checkpoint recovery, quiescence/redraw, persistence and confirmation; those
-bounded mutation tests alone do not establish ordinary-play reconstruction.
 
-Japan uses a fixed four-unit cost instead: batch budgeting at `$03:84F2–851A`
-subtracts4 up to six times, and the construction payment at `$03:8400–840C`
-debits4. This is a separate gameplay rule from the low-growth *report* threshold
-already selectable in Recomp. Recomp now pins the independent construction
-selection across `$03:82DB` (visible batch) and `$03:84B9` (off-screen batch),
-composing the existing town-status transaction without merging their settings.
-Three prefixes substitute the fixed four-unit price: `$853B→8544` for budgeting,
-`$8425→842E` for payment, and `$848E→8497` for the support-building return.
-They preserve the original frames and native continuations; US/Europe retain
-the original expressions. A change during a batch waits for the next batch.
-Predecessors and loop-back targets have explicit generated roots; adding a
-conditional prefix alone otherwise permits old arithmetic to remain inlined.
-A 12,532-tick Continue/Fillmore comparison exercises23 visible payments:
-eight units each in US mode, four with Japanese pricing. US final WRAM/SRAM
-matches the pre-integration control byte-for-byte; both runs exit normally.
+Japan uses a fixed four-unit cost: batch budgeting at `$03:84F2–851A`
+subtracts 4 up to six times, and payment at `$03:8400–840C` debits 4.
+This is separate from the low-growth report threshold.
 
 US/Europe support return `$848A–849B` explicitly clears carry during price
 calculation. Japan `$845E–8464` loads4 without clearing carry before its growth
@@ -739,8 +508,7 @@ Western versions; the replacement preserves this distinction rather than
 inventing `growth += 4`. Off-screen house callbacks (US `$95B3`, JP `$939E`)
 and Western support callback `$944B` consume the start token without debiting
 growth. The off-screen selection changes affordability, not that native
-accounting asymmetry. Unchanged policy snapshots resolve only their small
-value fields; complete retained-history validation runs when a policy changes.
+accounting asymmetry.
 
 The US full-development scan `$03:C037–C071` is also not a maximum-population
 formula: it returns carry set only after all128 records are active and every
@@ -766,15 +534,7 @@ match at `$03:F8DF` spans `PHY; LDA long,X` opcodes, not a continuation table.
 The configured US scan also found no caller. Indirect/cross-bank references
 and why the helpers were retained remain unproved.
 
-These findings close the census/admission and level-award **design questions**.
-They do not close developed-town/geography/event validation. A fixed “maximum
-population” toggle remains unsupported. Support, level requirements and report
-classification can be separately selected policies, but each consumer must use
-the effective policy and consistent canonical state at a completed simulation
-transaction boundary. Exact host activation hooks and replay tests remain
-implementation work.
-
-### Magic gesture integration
+### Native magic gesture
 
 US standing input `$00:9832` checks the attack bit first, then the dedicated
 A/X gate at `$9843–984D`. JP `$00:985C` has no dedicated gate. Its ground
@@ -783,42 +543,7 @@ Up before choosing the sword or common cast body. The corresponding US
 prefix begins at `$9A6E`; walking attacks also enter there. Airborne and
 crouching attack entries are separate and are not replaced by this rule.
 
-Recomp's Japanese gesture bypasses `$9843–984D` to `$984E` and replaces only
-the ground prefix, continuing at US `$9A73` for a sword swing or `$9DE1` for
-the existing cast gate. JP's mask word `$F9` maps to US `$F6`; the tested
-input remains the word at `$A1`. The adapter preserves the prefix's register,
-flag and mask effects, native return ownership and ordinary spell payment.
-It does not remap controller buttons or make every Up + Y combination a cast.
-
-A campaign request activates after completed NMI sampling when raw latched
-Up/Y/A/X are all released. The debounced input word is not a release test:
-it can be zero while Y remains physically held. The observer changes only
-campaign metadata, not input latches, native masks, CPU registers or bindings.
-The US/European paths remain generated native code. Unit tests cover every
-16-bit release sample and 4,194,304 ground-prefix input/flag/mask cases; the
-optional JP-ROM control interprets the original prefix, rather than using
-the generated host code as its oracle.
-
 ### Lives convention
-
-The integrated I02 option replaces only the two glyph writes in US
-`$02:C280..C2A3`, resuming the common HUD at `$02:C2A4`. Entry is native
-M0X0, PB2, D0, decimal clear, X `$0050`; the preceding `$C375` restores X.
-JP writes the raw `$1C` nibbles as ASCII to `$7F:B050/$B052`, leaving their
-attribute bytes untouched. Exit is M1 with A's high byte preserved, low byte
-`$30+($1C&15)`, and N/Z/C/V clear. US/Europe delegates the original BCD
-increment, including its debug-value behavior. Unsupported entry shapes stay
-native. `$C206` ends at the seam so its generated body cannot bypass the hook.
-No life debit or death dispatcher changes are needed for this display option.
-Enhanced HUD text consumes the same final glyphs and invalidates only the
-changed numeric cache entry.
-
-The native oracle checks all 256 stock bytes in both ROMs; the host-prefix
-test covers all input flag combinations with decimal clear and both high-byte
-patterns. Two ordinary 1,800-tick Continue-to-Fillmore controls retain stored
-`$1C=2` and differ only in the last lives glyph (`03` versus `02`) in the
-HUD tile buffer. Their frame-1400 captures differ only within that glyph.
-These are display controls, not new death/retry coverage.
 
 US HUD `$02:C280–C2A3` draws stored lives **plus one** in BCD; JP
 `$04:91C5–91DE` draws the stored byte unchanged. Death dispatch is at US
@@ -840,13 +565,6 @@ Start then restarts Fillmore with stored lives 4/2 and score zero in both ROMs.
 Thus “JP clears score on every death” is too broad: the owner is the action
 respawn transaction. These tests enter the native death dispatcher by setting
 its player flag; they do not replay lethal damage or every checkpoint.
-
-Recomp's selectable score rule intercepts only the US `$00:981C–9825` prefix.
-It retains `REP #$20`, the marker word load, marker consumption and resulting
-A/N/Z; Japan adds the word clear at `$1F/$20`. Continuations `$9826` (retry)
-and `$982F` (no marker) keep allocation and subsequent player logic native.
-The captured rule is activated only for a nonzero marker. It does not insert
-a score write into the death dispatcher, life debit or Palace loader.
 
 Native Fight/Yes after normal Palace return reloads the persistent life allowance
 (two in both fixtures), clears score, and reaches playable Fillmore. This is
@@ -941,14 +659,6 @@ Developed-town geography, live sealing/target-picker contention, other effect
 combinations and complete selector RNG ordering remain separate tests. Do not
 substitute synthetic coordinates for a geographically valid developed town.
 
-The Recomp selector integration captures five independently stored choices at
-the complete native player effect `$01:97E5` (kind4 only) or posted effect
-`$01:9840` (pending kind4). It does not intercept bridges or the already-random
-class6. US/Europe falls through to the original selectors. JP uses the native
-`$03:AF65` RNG and rejoins the original preserve/destroy continuations, including
-the house-only `$03:B4A6` feedback call. House-credit quantities remain a separate
-regional rule. Settings edits cannot change a captured effect partway through.
-
 Selector tests cover20,480 JP-prefix/native-US-continuation cases against the
 JP ROM and5,120 US/PAL subtype cases across the four other ROMs, plus all243
 mixed policies. Native helper contracts are modeled in these bounded tests;
@@ -979,48 +689,11 @@ visual service `$03:9C15` every fifth pass even while `$7F:91FE/$9200` are held;
 US calls its structure visual service `$03:9E40` each pass. Do not restore the
 pre-effect JP divider as though every paused development clock were frozen.
 
-The Recomp development policy implements those three counts as independent
-leaves, exposed as one pacing choice. Its bounded master coordinator preserves
-scene-mode 7's early exit, the pending callback before the divider, and the
-actor/recovery pass outside it. Both effect coordinators use the effective
-policy and retain their existing actor/no-actor distinction. Their common
-native callees still own events, actors, census, rendering and audio; choosing
-JP pacing does not substitute JP media helpers. A pending choice activates
-only in an eligible master call with both `$7F:91FE` and `$7F:9200` zero. It
-does not reset those counters or `$7F:7CED`.
-
-Implementation tests compare 26,880 master-coordinator cases (including all
-five ROMs, with explicit address/callee normalization) and 896 effect cases
-(including the US ROM). These compare CPU state, RAM, call order and native
-frames, not the bodies of regional callees. All 27 source combinations also
-test full cycles and independent actor counts; an interleaved effect/master
-case verifies shared divider ownership. Native nonlocal returns are tested at
-each called leaf. These are implementation tests, separate from the research
-fixture totals below.
-
 JP angel recovery is one HP per 60 eligible calls, capped at the current max;
 state low nibble 4 freezes the recovery phase. A controlled US cast with two
 HP and three SP already queued starts at HP 3 / SP 200, pays 160, and finishes
 at HP 5 / SP 43 with both queues drained, while the development clock never
 advances. No new long-cycle queue is generated during that effect.
-
-Recomp keeps SP and angel recovery independently keyed under one town-recovery
-menu choice. The cycle queue prefix and normal-angel drain retain the native
-division/saturation callees. The JP eligible-call clock runs from both movement
-decoder continuations, not just the US normal-state drain. Its native word at
-`$0B04` overlaps the US SP queue byte at `$0B05`: the mixed-rule integration
-therefore uses only byte `$0B04` for the bounded 0–59 phase. It never treats
-pending SP as the high byte of that clock. On a numerical rule change, only
-the changed queue/phase is retired at the next recovery service; current HP/SP
-is retained. Equal US/European choices do not retire it. Initialization still
-belongs to the native scene/load lifecycle, without a second persistent clock.
-
-The recovery integration has 78,928 reference/ROM cases: US/PAL queue prefixes,
-US drain and JP eligible-call leaf, with normalized PAL/JP stat addresses.
-Native helper bodies remain observed contracts in these tests. Another 15,360
-cases vary every valid JP phase against every possible adjacent SP queue byte.
-Mixed rules, changed-leaf retirement, incoming widths and native escape tokens
-have separate tests. These counts are not part of the earlier research totals.
 
 The helpers US `$03:AF54/$AF47` (JP `$03:AD1C/$AD0F`) around the posted effect
 write interrupt-control `$4200` (`$A1` / `$01`). They must not be modeled as a
@@ -1080,13 +753,6 @@ controlled Bloodpool fixtures, not a complete lake/story playthrough. Do not
 give every seal the guidance reward bundle; keep a policy snapshot through
 item consumption, not merely through the initial seal write.
 
-The regional runtime captures S20 at `$01:9EE7`. Its Japanese wait choice
-redirects only `$01:9F80` (M0/X0, PB=DB=1, D=0) to `$01:9F87`, bypassing
-`LDA #$005A; JSL $03:B20C`. The destination's native `SEP`, item-ID load,
-`JSR $921B`, `PLX` and `$9C85` cleanup remain intact. The donor counterpart
-reaches consumption directly at `$01:9F56`. The setting does not replace the
-target picker, seal wrapper, reward or inventory code.
-
 Twelve further booted arrow-contact fixtures cover stock 0/1/200, sealed or
 unsealed, in both ROMs. The original Blue Dragon dies, stock saturates at zero,
 and seal flags do not change. There is also a **separate delayed growth award**:
@@ -1138,31 +804,6 @@ Use handler also removes the old held item after its acknowledgement. This
 is a reproduced compatibility hazard for mixed policies, not an ordinary
 Western acquisition bug. Simply calling the old Use handler during an
 automatic collection would lose the carry-over item.
-
-The integrated S18 policy retains US automatic collection as the default and
-offers separate internal Life/Magic leaves under one overlay group. The
-accepted collection prefix `$01:8916` captures the policy after the native
-town slot is cleared and the item ID pushed. US resumes at `$8922`, Japan
-at `$892D`; the original effect or held-insertion flow owns the remaining
-transaction. Other item IDs keep the native branch. Policy edits do not
-convert existing inventory or alter an acknowledgement already in progress.
-
-Only the two Source consumption calls, `$01:9CCE/$9CF0`, can be bypassed.
-At those sites, automatic collection has dispatcher return `$9C82` at S+1
-and collection return `$8924` at S+4, with the saved P between them. If an
-older same-ID Source is held, the adapter resumes at `$9CD1/$9CF3` without
-removing it. Without that exact native chain and item match, the original
-removal executes, including explicit Use under either policy. The native
-effect, dialogue, sound request, P restore and town return remain intact.
-There is no host modal flag, inventory snapshot/restore, or guessed refund.
-
-Entries require M1X0, PB/DB1, D0, decimal clear. The collector reproduces the
-native CMP flags: automatic C1/Z1/N0, manual C1 and Z only for item5, preserving
-A and V. The bank coroutine root ends before `$88C3`; that owner ends at
-`$8916`. The two effect owners end at their respective consumption calls,
-preventing generated inlining from bypassing the guarded seams. No Japanese
-graphics donor is required. The eighteen original-ROM transactions and twenty
-Go windows above remain the independent reference, not host-game test claims.
 
 Thirteen compiled-game controls follow normal Continue, Palace, Fillmore and
 temple menus with a seeded offering in a scratch save. They cover automatic
@@ -1277,14 +918,6 @@ policy. This threshold and the offering's automatic/manual activation policy
 are independent settings and require no
 Japanese artwork donor.
 
-The Recomp adapter replaces only Fillmore's `$03:E865–E88B` prefix. It keeps
-the native initialization-bit helpers and fishing-scene call, then transfers
-to `$E88C` (continue waiting) or `$E895` (completion). Native eligibility/fired
-guards and reward insertion remain in charge. A numerical target change
-reconciles progress already at or above the new target; unchanged targets keep
-the original increment-before-equality behavior, including byte wrap in unusual
-debug states. No setting write changes the counter or grants an item directly.
-
 The other item-6 callbacks are Fillmore 7/13, Bloodpool 1, Kasandora 3/7,
 Aitos 5 and Northwall 5. All eight grant sites have rooted callback joins
 and hash-checked Go-extracted messages in all five ROMs; this census does
@@ -1352,12 +985,6 @@ An empty callback is therefore not evidence that its dialogue is unused.
 The regional slot-3/29 and Marahna slot-9/10 text spans were checked against
 the Go catalogue and ROM hashes; their distinct roles must not be merged.
 
-Integration: preserve this shared byte for native compatibility. Replacing
-it with independent Marahna and Northwall timers would change the wait and
-requires an explicit behavioral decision, not a routine data-model cleanup.
-Keep completion flags town-specific so an unrelated reset cannot regrant
-completed rewards. No regional toggle or QoL fix is implemented by this research.
-
 #### Full inventories and one-time discoveries
 
 Held inventory and each town's offerings have separate eight-slot limits.
@@ -1413,13 +1040,6 @@ its ordinary-play reachability and save/reload recovery remain unverified.
 The [grant-owner census](#offering-grant-owners-and-capacity-limits) below
 narrows the source accounting without supplying that campaign proof. Do not
 label it a new JP-only bug or infer that every grant caller ignores carry.
-
-Integration: inventory insertion must report success separately from story
-completion. Keep the native held-capacity gate under both activation policies
-unless an explicit QoL option changes it. Likewise, deferring a rejected
-one-time reward would change shared native behavior, not select JP rules.
-Any such policy needs explicit pending-reward ownership and exactly-once
-delivery; clearing fired/global flags to retry would also replay story effects.
 
 #### Offering grant owners and capacity limits
 
@@ -1705,18 +1325,10 @@ duplicate reward bug. A companion must restore the matching progress and
 pending rewards too; session-wide deduplication would suppress a valid reward
 on the restored timeline. Legacy/foreign companion reconciliation is separate.
 
-In the controlled Save traces, payload writes are visible at frames61–63 and
-the valid checksum is committed at67. US `$03:A82E/$A833`, JP `$03:A5FE/$A603`
-write the final checksum words. These timings are fixtures, not an API promise.
-A regional companion must bind to a completed save transaction, not the
-first changed SRAM byte. Do not equate reference-core frames with host yields:
-the bounded native save body contains only DB-setup and checksum calls, no
-frame waits; the host's checksum HLE is yield-free and auto-persistence runs
-after the game coroutine returns. Static inspection therefore does not show
-a normal-path partial-save exposure. The host's implemented completion,
-checkpoint and recovery contracts are documented under
-[regional campaign checkpoints](save-format.md#regional-campaign-checkpoints);
-the native traces alone do not establish a partial-save bug.
+In the controlled Save traces, payload writes are visible at frames 61–63
+and the valid checksum is committed at 67. US `$03:A82E/$A833` and
+JP `$03:A5FE/$A603` write the final checksum words. These timings belong
+to the fixtures; completion of the checksum is the reliable save boundary.
 
 ### SIM enemy state differences
 
@@ -1740,35 +1352,6 @@ enters the native knockback state. Consumers are arrow collision US `$01:AFC8`
 combat policy per actor generation; changing a threshold underneath an
 already-damaged actor is not equivalent to changing only spawn stock.
 
-#### SIM combat integration
-
-The host implements five independent combat leaves; it does not add switches
-for unchanged values. Each verified native birth captures combat and AI snapshots
-together through the shared `regional_sim_actors` owner.
-The narrow prefixes `$01:B018→B01C` and `$01:B0CC→B0D0` replace the threshold
-load and contact subtraction, preserving accumulator high bytes, native flags,
-the strict death comparison and subsequent native effects. Arrow accumulation,
-SP awards, knockback, lair stock changes and soul rewards retain their owners.
-All five cartridge tables were compared; the four Western releases agree.
-
-The collision scan `$01:B147` checks four `$26`-byte records starting at `$0B30`.
-All 24 lair seed records map their town's four lairs to those same four slots.
-The birth hook at `$03:B9EE` validates town, slot, species and the inactive flag
-before displacing `LDA #0`; the uninterrupted native field clearing follows.
-The spawner's `$B993` back edge is an explicit decode boundary, so later births
-cannot bypass the hook through an inlined native loop.
-
-Actor policy has separate active and six-town cached copies. Successful native
-cache load/save bodies `$03:813F/$03:8168` synchronize the matching policy copy;
-restoration is not treated as a new spawn. This preserves an older cached soul
-even after its live slot becomes a new monster, until native caching actually
-replaces it. The companion binds both snapshots to the native completed-save
-image; old companions assign US rules to their existing actors. Collision
-lookups are constant-time and never inspect other towns or activate a request.
-See the [companion layout](save-format.md) and [player setting](regional-settings.md).
-
-The four SIM species' 64 state entries were paired separately from scheduling:
-
 - Blue Dragon state 1: US target search every eligible update, JP only after
   the eight-count gate at `$01:BA0C–BA1A` (US state entry `$01:BA5F`).
 - US Blue Dragon state 6 calls the world-actor pass again at `$01:BB5C` after
@@ -1781,39 +1364,6 @@ The four SIM species' 64 state entries were paired separately from scheduling:
 - Shared target selection US `$01:BCB0–BD89` biases random candidates using
   town offsets `$7F:6B9F/$6BAB` and a smaller local range. JP
   `$01:BC5F–BD13` samples the wider 32-cell grid without those offsets.
-
-#### SIM AI integration
-
-Six independent numeric leaves select the search interval, extra actor pass,
-candidate range, lookup pool, Bat fallback threshold and Bat wait. Like combat,
-they activate only on a verified birth and survive native actor cache copies.
-An overlay edit cannot change a live monster's search or attack halfway through.
-
-| US seam → continuation | Japanese-rule prefix | Native work retained |
-| --- | --- | --- |
-| `$01:BA67 → BA6A` | Reset Dragon search counter after animation setup | Original `$D072` call and its return contract |
-| `$01:BA6A → BA6D` or `$BA79` | Increment counter; search every eighth eligible update | Fallback attack still runs on skipped searches |
-| `$01:BB5C → BB60` | Omit only the extra world-actor pass | Strike effect, destruction, sound and state advance |
-| `$01:BCBC → BD45` | Generate the wider-grid candidate | Sealing gate before the prefix; exactly two calls to native `$03:AF65` |
-| `$01:BD46 → BD4A` | Call existing full-pool `$03:BDE1` instead of sliced `$BDEF` | Found/class/flag checks, stack restoration and target assignment |
-| `$01:BEE3 → BEE5` | Compare the random byte with 250 | Native fallback branch and animation |
-| `$01:BF72 → BF75` | Load the wait value 60 | Store, immediate decrement and subsequent Bat states |
-
-The candidate prefix changes coordinate generation only. A generic `$FF` target
-still follows the native acceptance rule; failed lookup does not erase an old
-target. The pool and coordinate rules are separate leaves, so mixed selections
-do not accidentally select both at once. All random draws and structure scans
-remain native; the adapter neither invents a host RNG nor adds a per-frame scan.
-
-`$01:BB5C` resolves ownership from the parent Dragon's stacked X. The preceding
-strike-effect allocator may already have changed live X; using that effect or
-a global “current monster” would fail during nested actor passes. Species checks
-read `actor+$0E` as a byte, leaving Bat carrying state at `+$0F` independent.
-Native helper escapes propagate without running a continuation; US-valued
-leaves take their original code. The candidate prefix has ROM-decoded parity
-tests over all 32×32 draws, both alignments, three target classes and four input
-flag combinations. Separate tests cover helper call frames, continuations,
-per-generation ownership, saved histories and old combat-only replay digests.
 
 Address-normalized state comparisons are not whole-world equivalence proofs:
 shared callees, animation, RNG order and US `BRK` versus JP `COP` audio dispatch
@@ -2087,12 +1637,6 @@ remaining 28 rows agree. These are prerequisites, not census limits, level
 requirements, or proof of the first naturally attainable population at which
 each scene appears. Normal selection and event callbacks have further state.
 
-The regional runtime replaces only the threshold load at `$03:E13E` for
-US record pointers `$F543` (Fillmore5) and `$F56C` (Kasandora9). It verifies
-the town and original record identity before loading the selected value.
-Native `$E142` keeps the strict comparison, `$F479` sets the prerequisite,
-and the original list walk/selector handles all other records and fired flags.
-
 The following road-location producer, US/PAL `$03:E15D–E19B` / JP
 `$03:DC62–DCA0`, reads six lists at `$03:F59D` / `$03:F079`. Their
 `{square_x, square_y, event_id}` records also end with `$FF`. All five ROMs
@@ -2241,12 +1785,6 @@ inside the Compass callback. They are controlled states, not attainable-route
 proofs. Live regional policy must preserve actual prerequisite/fired state
 instead of reconstructing it from a guide's recommended order.
 
-S22's runtime seam is `$03:EB35`, after native prerequisite-8 clearing.
-Japan skips the three instructions that clear prerequisite9 and resumes at
-`$EB3D`; US/Europe delegates that original body. The original `REP`, two
-`PLX`, `PLA`, `SEC` and `RTS` retain rejection/stack ownership. Policy activation
-does not set a prerequisite, alter fired flags or call the Compass reward.
-
 Western Music use also brackets its audio routine with helpers
 `$01:93BE–93DB` that write `$4200=$01`, then `$A1` after acknowledging
 `$4210`; JP omits those two calls. This is an interrupt-handling difference
@@ -2389,11 +1927,6 @@ Fifteen bounded Go windows preserve the delivery, consumption and callback
 owners. Their instruction differences are relocated calls/table addresses,
 translated text pointers and the regional held-inventory base. All 78 files
 (33 JSON, plus states, WRAM and images) match an independent repeat exactly.
-
-A regional-policy switch must preserve this in-flight transaction:
-the technology flag can already be set while the item is still held. Do not
-restart delivery or infer complete settlement from that flag alone. No
-runtime policy switch is implemented or tested by these native fixtures.
 
 ### Aitos dying-man scene flag mismatch
 
@@ -2645,15 +2178,6 @@ and four booted crop flows. Eight further town-menu traces below bring this batc
 to 254 isolated cases, 17 booted fixtures and 32 bounded Go windows. These do
 not establish all city-report, campaign, or European behavior.
 
-Expose score-page availability as a presentation policy, independent of
-recording/settling scores, language selection and gameplay rewards. Capture
-it when the report opens; a mid-report setting change takes effect on the
-next opening, without cancelling a page or replaying a transaction. The
-Recomp option now wraps US `$01:899B`, delegates its native body, and, for the
-captured JP policy, routes `$01:89EE` directly to native cleanup `$01:8A2F`.
-The original `$01:9261` release/press wait still runs. Score recording and
-settlement are untouched; the surrounding menu's lifetime remains independent.
-
 ### Town-menu return behavior and message-speed choices
 
 The shared report does not own the surrounding command menu's lifetime.
@@ -2686,44 +2210,6 @@ native packed destination adds `$0B11` in US and `$0B12` in JP, through each
 region's own fixed-text composer. Neither the cap nor its layout proves
 equal pacing for corresponding values in the different text engines.
 
-Keep **town-menu return behavior**, **score-page visibility** and **offered
-speed range** separate in a regional presentation model. Snapshot return
-behavior when dispatching a command, and range/page choices when opening
-their respective screens. Preserve native cleanup, cache/save work, response
-dialogues and release barriers. Reopening a menu must not perform the action
-again. When integrating a narrower speed range, explicitly handle an existing
-value 8/9 without changing stored pacing merely because settings were toggled;
-the user should be able to cancel with their previous value intact. Native
-and modern menu owners need the same effective policy, not renderer hooks.
-
-The Recomp return option now captures the policy at the accepted `$01:81D7`
-command boundary for actions12–15. A small game-owned adapter retains the US
-report, city-census/cache preparation, save and message-speed callees with
-their exact JSR/JSL return addresses. US/Europe also retains `$8CB6` close and
-`$9270` release; JP omits only those two calls and returns carry set. This is
-the JP menu-return rule on US report/save behavior, not a replacement of the
-whole command with JP code. The native and modern menu owners consume the
-same carry result. Escaped native returns terminate the command without
-performing its remaining calls.
-
-The message-speed adapter captures the offered range at `$01:8AF5`, separately
-from command-menu return behavior. The original prompt, polling calls, movement
-sound, sample/cancel text and cleanup remain native. Bounded prefixes at
-`$8B18` and `$8B59` change cursor geometry and the upper limit. If an existing
-speed is 8/9, only temporary `$0A` is clamped for the JP selector; `$0200` changes
-only along the original confirmation branch. A captured range cannot change
-under an open selector.
-
-US scale `$01:FA9A` begins at `$0C12`; JP `$01:F9A5` begins at `$0C13`.
-The JP eight-cell row is centered inside the US ten-cell claim. Native
-composition first completes synchronously; the adapter changes only the ten
-digit bytes at `$7F:B324 + 2*i`, preserving attributes and the normal upload
-flag. Enhanced composition projects the authored numeric row to the same
-captured grid, retaining translated labels, artwork offsets, styles, hard
-boundaries and bidi spans. A JP eight-field source can also be used with US
-choices; absent 8/9 fields get numeric fallbacks. Neither renderer nor language
-locale decides the gameplay range.
-
 ### Death Heim transition and music
 
 Score settlement has different callers, not just a different conversion
@@ -2740,23 +2226,6 @@ score tally (stored score `$1799`). Neither changes lair stock in these
 fixtures. This is not an equal-final-score formula
 comparison; the [score settlement contract](#lair-stock-is-not-monotonic)
 describes the independent conversion rules.
-
-Recomp inserts the selected early settlement at US `$00:A754`, the equivalent
-of JP `$00:A713`, after the native completion count and clear-card text have
-been published. It then calls the original `$00:85B7` display-object finalizer
-and returns through `$00:A757`. Departure at `$00:A30D` either retains its
-original `$03:D095` call or skips it when this clear already settled, then
-rejoins `$00:A311`. Policies are pinned from clear through departure; stock
-projection changes wait until that transaction closes. Retry/new-room and
-accepted title entry discard an interrupted completion marker. Debug snapshot
-restoration remains rejected by the existing execution-lifecycle guard.
-
-The departure tail is shared by several coroutine resumes. CFG ends at A30D
-are required for A1CE, A1FC, A20D, A22F, A264, A285, A2B5 and A2C6;
-splitting only A2B5 leaves other generated bodies bypassing the hook. The
-clear-card body similarly ends at A754. The adapter uses public native-call
-and paired-tail contracts, preserving native return ownership rather than
-editing a return word or manually popping the clear/departure frame.
 
 US `$00:A343–A381`, reached after the action completion animation, checks all
 six completed-act counts. When all are two it sets `$7F:9101` bit 0, stages
@@ -2775,14 +2244,6 @@ Both incomplete-town controls return to Northwall without unlocking Death
 Heim. Both completed routes retain the island on a later map visit and do not
 repeat the announcement. Fourteen isolated guard cases additionally verify
 the already-announced return and every incomplete-town position.
-
-The host's I06 adapters now join those owners at `$00:A343` and `$01:861E`.
-Alternate `$A315/$A32A/$A337` generated entries terminate at the departure
-boundary. The US route delegates both bodies; Japan reproduces the town-return
-leaf and Palace guard, then uses the US message/cleanup suffix. Departure
-retains word-wide completion comparisons, while the JP Palace guard retains
-byte-wide comparisons and native X/Y/flag clobbers. There are no score,
-reward, background-asset or music-upload overrides in this controller.
 
 A campaign route lock is captured at the eligible final departure, before a
 possible town save. An already-unlocked legacy event retains its effective
@@ -2835,16 +2296,6 @@ The extra US **Palace** selector-4 declaration points instead to file
 declaration to emergence too strongly. Per-frame source/selector snapshots
 and stereo PCM captures establish this sequence; the source cache is not an
 audio playback-position API and can contain transient scratch during a stop.
-
-Integration: capture a completion-flow policy for the whole departure/
-announcement transaction. Settle the score once, preserve both story bits,
-and apply setting changes only to a future eligible event. Never clear those
-bits to replay the reveal. Presentation, map visibility, music residency and
-score ownership need separate contracts even if initially exposed as one
-regional-flow choice. Mixed-policy execution, alternate final-town routes,
-the unused-on-this-route Palace music declaration, and host 2D/3D presentation
-remain separate validation work; this closes the original-ROM Northwall-final
-sequence, not every combination.
 
 ### Minotaur timing and room inheritance
 
@@ -2910,7 +2361,7 @@ Animation IDs and WRAM composition addresses therefore cannot be copied
 between encounter types without their owning table. This does not establish
 CHR/palette equivalence or authorize swapping complete donor artwork.
 
-**Verification and integration.** The new traces preserve lives, positive
+**Verification.** The new traces preserve lives, positive
 player HP and root HP24. Special is selected before native room loading;
 fixtures set HP/max24 before preparation and observation and player X176
 before activation. No actor phase, animation or RNG is replaced. The 112
@@ -2921,26 +2372,6 @@ captures cover the family and helpers. An independent run reproduces all
 121 evidence files byte-for-byte. These extend, rather than replace,
 the four earlier original-only traces; neither their seed setup nor repeated
 runs count as extra gameplay coverage.
-
-Runtime integration keeps four original-encounter animation durations separate:
-idle row0 of state0, throw row4 of state2, initial row0 of states1 and4. Only
-source `$AF5D`, map1, bank`$7E`/base`$5000` is eligible; rematch `$F6CA` and
-inherited-source axes are excluded. The common `$8E2F` reader owns the row,
-pose, collision, facing and vertical motion; the adapter changes only a newly
-acquired delay. An independent `$AFDB→AFDE` LDA prefix selects the axe offset
-in both encounters before the original `$8709` facing helper. Allocation,
-including its exhausted-pool scratch result, remains native. Five-ROM checks
-cover470 rows across both assets, their velocities/extents and axe immediates.
-
-Keep original-fight idle and follow-through durations, and the shared-across-
-encounters regional axe offset, as separate semantic policy fields. Select
-by encounter identity, freeze the policy for root and descendants, and defer
-live changes until the next encounter. Do not apply the US original's 48-frame
-idle to the US rematch, or expose the common rematch speed-up as a JP-only
-rule. US assets already support the examined JP mechanics through these
-parameters. Preserve source/backlink generations, pending throws and existing
-damage. Full defeats, transition cleanup, magic contacts and mixed host-policy
-validation remain separate tests.
 
 Skipping directly from Fillmore room 1 to room 4 was rejected as a boss
 fixture: it retained act-1 terrain/background resources and blocked movement.
@@ -3009,77 +2440,9 @@ has parent0, body/spawner `$1320` and lower child `$1360` link to it, and
 incorrectly treat every one as the vulnerable boss. Root and linked children
 must retain a consistent encounter policy/generation.
 
-Implementation boundary: capture this named boss's effective behavior at
-room/spawn initialization, keep HP/damage/death handling shared, and defer
-mid-fight selection changes until the next encounter. JP's root phases can
-use states1/2/3/20 already present in US animation data; semantic AI does not
-require shipping JP ROM code. Native JP geometry/art remains a separate,
-validated combination—not an unchecked media/header swap. The linked spawner
-also posts event-audio ID `$A1` US / `$21` JP; do not misclassify that COP as
-an extra enemy spawn or claim audio parity from these collision tests.
-
 This closes the named root phase/damage-gate and spawn-anchor questions.
 Full victories, all child attack/death paths, magic interactions and mixed-media
-presentation remain encounter-level validation concerns. The host phase,
-geometry and room-boundary switching implementations are described below;
-the bounded native findings alone do not prove their full-playthrough parity.
-
-The host phase adapter now selects the retained states through the real
-`$00:D9DE JSR $8669`. Native repeat counts and the `$D9E0` yield word own
-progress; the source/room/root/state guards exclude linked spawners and health
-helpers. On each completed phase, `$D9DB` selects1, then2 repeated5 times,
-then3, then20; it sets protection `$0020` only before20 and clears it on leaving
-20. The original actor collision routine remains responsible for rejecting
-damage. Native death/state changes abandon the loop through their existing
-handlers. A missing host cache after a debug restore still clears completed
-protection before returning to the US state2 loop.
-
-The open-head timeline and high/low projectile wind-ups are independent
-room-pinned leaves. The existing animation-reader adapter maps the four-row
-European head sequence onto retained US compositions, using a tagged logical
-cursor in `+$1C` and a temporary actor-local visual offset during decoding.
-Native state/end handling clears it; no shared animation table is rewritten.
-Exact program/pose signatures guard the mapping. Projectile preparation changes
-only the first row's delay in body states4/6. CPU flags, motion, collision
-decoding, allocation and waits remain native. This integrates the phase and
-timing mechanics independently of the geometry profile below and Beginner's
-tendril program.
-
-**Host geometry profile.** `$00:D980` now has a guarded root-initializer
-boundary before the first linked allocation at`$D98A`. For sourceD974,
-room0305, first pose0 and the validated53-composition US layout, it shortens
-compositions0/5/6/7/8 by removing their last four bottom-row parts, changes
-bottom112→96 and subtracts16 from retained parts' vertically mirrored Y.
-Closed composition48 becomes top/bottom4/4. All table addresses and original
-CHR/palette references remain; discarded parts remain in their allocated
-tail so the operation can be reversed. JP's one changed part palette and
-closed-head tile are artwork, not geometry, and are not transplanted.
-
-The first native row was already bottom-anchored. The adapter corrects only
-that subtraction (+16 unreflected,0 vertically reflected), then skips US's
-extra root+8. Children still use the real native allocators and linked-body−8
-placement. A repeated birth from projected data receives no second shift.
-Returning to US restores the original metadata and anchor, then re-enters
-the now-native D980 prefix for its exact ADC/flags; this handles retained
-animation RAM as well as reloads. Validation precedes every write and the
-projection runs only at fresh root birth, not on each animation frame.
-
-Unit checks cover all four flips, wrapping coordinates, idempotence, exact
-US restoration and malformed/partial-profile refusal. Six complete pose
-geometries match all five ROMs; graphics references remain byte-identical
-to US. Held-player host runs confirm root/bodyY120/112 US versus128/120 JP,
-with the JP open/closed/protected cycle continuing. Both14,500-tick runs exit
-normally with zero background mismatches. This is controlled encounter
-evidence, not natural traversal, a full victory or donor-artwork acceptance.
-
-Matched host runs reached the encounter through its preceding room loads and
-verified the resident animation bundle before holding the player at two heights.
-JP completed25 full154-update cycles and Europe20 full194-update cycles; US
-remained open. Protection was present only in closed state20. Seven high and
-six low preparations per profile retained first-row delays7/7/23. All three
-14,500-tick runs exited normally without background-data mismatches or changes
-to the user's save. These controlled checks do not establish full-combat or
-visual acceptance, and they deliberately retain US geometry.
+presentation remain encounter-level validation concerns.
 
 ### Northwall Act-2 boss: original versus Death Heim
 
@@ -3139,25 +2502,6 @@ US `$00:8E2F` / JP `$00:8E3B`; yield/finish wrappers US `$00:8657–8668` / JP
 `$00:8646–8657`. Twenty-four repeated isolated native fixtures check both
 encounters' normal/Special spawn values and the changed stationary-row
 boundaries, including the actual loaded collision extents.
-
-Implementation boundary: use a named **Death Heim Ice Dragon wind-up policy**,
-captured for the whole boss family at encounter initialization. US remains
-default; a JP option can select the two shorter semantic sequences using US
-visuals, without requiring a JP ROM. Do not globally edit state numbers or
-replace the original fight's animation blob. Defer mid-fight setting changes
-until the next encounter; do not reset HP, root/child generations, RNG or
-projectiles to apply them. Full defeat/cleanup, magic/contact coverage and
-actual mixed-policy runtime validation remain separate gates.
-
-The integrated `$8E2F` adapter selects those two row skips only for source
-`$F760`, map7, bank`$7E`/base`$5000`, and the matching state/index/three-row
-signature. It advances the native cursor before delegating the complete row
-reader, which still owns pose/extents, facing, movement, flags and return state.
-An unexpected escaped token restores only that speculative cursor edit and is
-propagated unchanged. The original `$F161` owner and projectile states25/26
-remain native. One room-captured rule controls both sequences; no live setting
-change can shorten only one part of a wind-up. Five-ROM comparisons cover the
-full head/body and projectile timelines, not merely their final durations.
 
 ### Apples: equal recovery rules, different placements
 
@@ -3249,31 +2593,6 @@ the129-update hold. Five-ROM tests match the complete retained programs and13
 composition records used by the restored seed family. The PAL animation blobs
 are at file `0xCD696` English / `0xCCE78` German and French.
 
-Implementation boundary: one named tree attack-family policy, US default,
-captured on room/family creation and shared by the head, peer and descendants.
-Represent the peer relationship explicitly, preserve native allocation failure,
-terrain, collision and yield behavior, and defer live changes until the next
-room/family initialization. Neither live HP nor a pending attack should reset.
-The host integration now captures `action_tree_seed_family` with the room's
-motion policy (US0, JP/Europe1). `$A975` applies state10, requests only a verified
-adjacent peer, then lets native `+$24` expire before resuming the original
-`$A97B` orb code. The restored peer, seeds and visual children share the retained
-`$A9BF` handler. Slot-local `+$3E` tags distinguish their phases; existing
-children finish after a debug-cache reset. The native dispatcher still owns
-movement, active-frame waits, death and slot reuse. Bounded RTS calls reuse
-the original allocation, animation, terrain and facing helpers. No donor code,
-host countdown, foreign-PC dispatch or shared animation mutation is needed.
-
-Zero/one/two seed-slot tests retain successful allocations without retrying
-failures; visual allocation failures are also ignored like the original.
-Controlled US/JP/European host runs verify64 versus129 preparation updates,
-two seeds at X1760/1824,Y416 after28 updates, and subsequent landing, walking,
-withering and retirement. Each12,500-tick run self-exits. The player/camera
-position fixture yields the same background-check warning in all three, so
-these are lifecycle checks, not visual acceptance or natural traversal.
-Full tree defeat/bridge extension, magic and broader contact coverage remain
-separate encounter-level validation gates.
-
 ### Bloodpool Act-2 statues: single versus double volley
 
 Bloodpool types `$26/$1E` are the two facing variants of the firing statue.
@@ -3349,29 +2668,6 @@ reviewed visual composition records also match. This supports a semantic
 double-volley option using US data; it does **not** prove identical CHR,
 palettes, every enemy sequence or complete combat compatibility.
 
-Implementation boundary: a named statue-volley policy, US default, captured
-at room/family initialization and shared with its children. Keep appearance
-selection separate; defer an in-flight policy change until the next owning
-initialization rather than resetting an existing volley or creating/removing
-its second shot. Preserve active HP, attack promotion, allocation order and
-retirement timing. Host mixed-policy tests, parent defeat during a pending
-shot, full contact/magic interactions and exact artwork remain validation
-gates; the shot-count and timing discovery is closed.
-
-Implemented adapter: `$BD9F→BDA2` initializes the root's local counter `+$38`
-to1 and executes the native first wind-up. `$BDA8→BDA2` consumes that counter
-once and adds the second wind-up; the next `$BDA8` delegates the post-shot idle.
-The root's ordinary `$8657` sequence helper does not use the local counter
-(`$8669`, which does, is not called here). Native actor destruction/reuse owns
-its lifetime; no parallel host slot table is needed. The inherited-source
-projectiles are excluded by states `$21/$23`. The original allocator, scratch
-exhaustion behavior, facing, child backlinks and native return/yield frames
-remain delegated. Offscreen state is deliberately not rechecked mid-volley.
-Policy is captured at complete room/retry initialization with the other action
-rules. Five-ROM root-call traces and adapter boundary tests cover allocation
-failure, activation changes and termination between shots; this is not a claim
-of a new full combat/contact or manual visual pass.
-
 ### Kasandora Act-2: wall heads, Pharaoh and blue spheres
 
 These are three distinct families. Ordinary wall heads use types `$0E/$0F`
@@ -3389,15 +2685,6 @@ The `$4000` sequences themselves match: state2 lasts8 frames, state3 lasts90,
 and the restart takes one frame. All14 authored wall-head placements match,
 including a duplicated placement in room4; this is a count of records, not
 unique coordinates.
-
-The host implements two independent ordinary-head pause rules, one for each
-animation-base variant. A complete room initialization captures them with the
-other motion/timing choices. The `$00:C908` adapter only bypasses the new
-pause for the selected Japanese variant and tail-transfers to `$C90E`, where
-native LDA2 starts the ordinary animation/allocation/recovery sequence. Existing
-wait continuations never re-enter this prefix. Source/base checks exclude the
-Pharaoh family, other scenes, unknown actors and incompatible CPU modes.
-Registers, RAM and the native return owner stay intact at the transfer.
 
 Five-ROM opcode checks confirm the activation prefix and Western LDA30/delay
 versus JP's immediate state2. Controller cases cover all four sources, four
@@ -3465,7 +2752,7 @@ axis per update; the full restart cycle is177 frames. All nine placements
 match. This supplies no basis for a regional slowdown setting for this
 enemy. It does not establish parity for unrelated projectiles or other acts.
 
-**Evidence and integration.** Twelve booted traces preserve the room,
+**Evidence.** Twelve booted traces preserve the room,
 player lives and nonzero HP throughout. They use native act-entry loading
 followed by the owning room chain; Special is selected before loading.
 Fixtures set HP/max24 and, except for the blue-enemy walk, player position.
@@ -3480,19 +2767,6 @@ Loaded animation/composition assets: `$4000` from file US `0xD9943` / JP
 entry `$0303`. The three reviewed `$4000` wall-head/arrow compositions and
 the first40 `$5000` compositions match byte-for-byte. This is metadata
 compatibility, not verification of identical CHR pixels or palettes.
-
-Represent **ordinary wall-head delay**, **Pharaoh landing hold**, and
-**Pharaoh wall-head lifetime** as separate semantic choices, US by default.
-Capture the two boss choices together in an encounter policy so descendants
-keep a consistent snapshot. US assets already contain
-the shared sequences needed for those JP behaviors; a JP ROM need not be a
-runtime requirement for the mechanics. Capture the ordinary policy at room
-initialization and the boss policy for the entire encounter family. Defer
-setting changes until the next owning initialization; never restart a wait,
-spawn a replacement sphere, clear existing heads or replay rewards when a
-toggle changes. See the [rematch comparison below](#pharaoh-death-heim-rematch)
-for encounter-specific timing. Exact regional artwork, death/magic/cleanup
-interactions, full victories and host mixed-policy validation remain gates.
 
 ### Pharaoh Death Heim rematch
 
@@ -3575,46 +2849,6 @@ each region/encounter. No actor phase, animation or RNG is replaced.
 An independent run reproduces all121 report/trace/state/WRAM/screenshot files
 byte-for-byte.
 
-Keep the landing-hold choice encounter-aware: JP means removing the extra
-US row, not subtracting16 frames in every room. Freeze landing and head-lifetime
-choices for the encounter, and propagate them to descendants. Keep shared
-rematch speeds/timing attached to encounter identity. US assets contain the
-sequences required for these mechanics without a JP donor ROM. Full defeat,
-magic, room-exit cleanup and mixed-policy host execution remain validation
-gates; attack-loop/rematch discovery is closed.
-
-The host implements three room/retry-pinned choices: original landing,
-rematch landing and repeated head firing. The animation reader recognizes
-the ten-row bounce plus encounter-specific final hold, then lets the native
-reader consume the real terminator when that hold is omitted. It changes no
-shared resource bytes or root allocation/pending-flag logic.
-
-At `$00:C2CB`, repeated heads select retained idle state3 instead of withdrawal
-state27 and tail to the original `$C2CE` JSR. Its native return word `$C2D0`
-and state3 identify completion at `$C2D1`, which returns to firing at `$C2A1`.
-That in-flight idle can finish even if a debug restore loses the policy cache.
-The ordinary withdrawal/retirement path remains native. Exact source, room,
-animation base and CPU shape checks exclude ordinary heads, spheres and arrows;
-no currently live parent is required. Upstream generated boundaries end at
-the native sequence/allocation continuations so inlining cannot bypass either
-adapter. Neither path creates an emulated return frame or host timer.
-
-Five-ROM checks compare338 rows and their complete pose records, plus the
-head-loop opcodes. Host tests cover mixed landing/lifetime choices, both
-encounters, CPU flags/widths, facings, invalid ownership, dropped-shot context,
-missing caches and unexpected animation-reader returns. These bounded tests
-do not establish full-victory, magic or manual presentation parity.
-
-Four controlled host runs now verify the complete US/JP attack loops in both
-encounters. Native room loads supply the checked1863-byte US animation bundle;
-only the player's position, hold and invulnerability are prepared. The original
-landing measures40/24 updates over27/30 completed cycles, and the rematch56/24
-over29/37. Japanese heads repeat at136-update intervals in both rooms; Western
-heads retire after their30/15-update withdrawal while fired arrows continue.
-All four runs exit normally, with no background preflight mismatches and no
-changes to the player's SRAM. They are controlled encounters, not natural
-traversals, full victories or a manual visual comparison.
-
 ### Aitos Act 1: platform skulls and volcano fireballs
 
 **Skull collision and proximity.** Raw room `$0104`, type `$0C`, retains
@@ -3684,7 +2918,7 @@ There is no evidence for a regional speed setting for this family. Other lava
 objects, terrain or presentation mechanisms are not established as equivalent
 by these tests; the broader reported slowdown remains unassigned.
 
-**Evidence and integration.** Eight booted traces and108 repeated isolated
+**Evidence.** Eight booted traces and108 repeated isolated
 cases cover both regions and modes. The92 proximity cases cover signed axis
 thresholds, corners and the offscreen gate;16 sword cases cover native/reversed
 protection and one/two resolver calls. Twenty bounded Go disassemblies supply
@@ -3701,34 +2935,6 @@ full sword-playthrough or magic-reachability tests.
 
 The owning animation/composition blobs are file US `0xC4C17` / JP `0xC1B1C`.
 States `$21–$24/$2F/$30` and the seven reviewed compositions42/43/47–51 match.
-
-The B10 host policy integrates four independent room-scoped leaves: armor,
-BCD death reward, exclusive horizontal range and exclusive vertical range.
-At `$966C→966F` the initializer projects only fresh flags/reward, then executes
-the native professional promotion, animation and bottom anchoring. First birth
-uses descriptor Y: source field`+$32` is not installed until `$95B9`, after
-the common initializer returns. Reused-slot source bytes are not identity.
-At `$D39A→D39D` and `$D3A2→D3A5`, exact CMP24 prefixes retain the original
-distance helpers, offscreen gate, waits, sound, explosion and retirement.
-No hit resolver, score award routine, pool or per-frame scheduler is replaced.
-
-Five-ROM checks confirm PAL uses the US armor/reward/proximity values, but
-its base record has HP2/attack2 rather than US/JP's HP0/attack1. Those use
-the independent A06 stat policy, not an implicit effect of B10. The new tests
-cover all 16-bit CMP inputs and mixed armor/reward/range choices; the earlier
-native collision fixtures establish deflection/reward semantics. This is not
-a new full host playthrough of the platform ride or a full magic-interaction
-test. Live setting changes remain deferred until room/retry entry.
-This proves metadata compatibility, not identical CHR pixels or palettes.
-
-Keep **skull sword protection**, **kill-score value** and **proximity bounds**
-as separate semantic fields in a room-scoped policy, US by default. A regional
-preset can select them together without coupling them to the language or donor
-art. The shared US metadata supports the examined JP mechanics without a JP
-ROM at runtime. Defer changes until the next room initialization; never revive
-a retired skull, cancel an explosion or award points when toggling. Host mixed
-policies, magic contacts and full traversal remain implementation tests. Do not
-create a speculative volcano-speed option from the unverified broader claim.
 
 ### Wizard original fight and rematch
 
@@ -3948,27 +3154,6 @@ US assets plus normalized timing/movement parameters support these mechanics
 without requiring JP graphics. Complete victories, magic, pool contention
 across whole families and host mixed-policy behavior remain validation gates.
 
-The host now integrates closing duration, phase-two clock behavior and upper
-turn as independent room-cached policies. The native animation reader owns
-poses, mirrored movement and return state; the adapter changes only the
-audited row delays (state10/row7 and state48/row0). `$00:F8FC→F8FE` skips the
-8-bit `STZ $E8` for Japan, retaining the current divider, remaining time and
-surrounding collision/cast-gate clears. Its guard requires the defeated first
-form's native secondary handler, not simply any actor inheriting `$F80F`.
-Five-ROM program tests verify row bytes, total durations, collision headers
-and displacement; clock tests cover all256 low gate values and preserve
-adjacent memory/CPU state.
-
-Three host integration runs now load Death Heim through native pending-room
-requests after an ordinary Continue/Palace/Fight entry. A held player remains
-at the authored final-room entrance; one controlled native first-form defeat
-dispatch reaches phase two. Production guards accept the Japanese clock skip
-and Japanese/European projectile values. End WRAM retains the stopped Japanese
-clock, running US/European clocks, and minion HP/reward2/2 versus European1/1.
-All runs exit normally with positive HP and unchanged native SRAM. These are
-controlled transitions, not evidence of a naturally completed campaign or
-victory; the explicit room requests and defeat preparation are part of setup.
-
 The accepted four-family batch comprises 40 booted fixtures, 1,928 isolated
 native cases (852 logic/boundary cases and 1,076 animation-row decodes), and
 45 bounded Go disassembly windows. An independent complete rerun reproduced
@@ -4056,38 +3241,6 @@ verify the first 36-frame state-12 hold, absent in JP. Isolated native cases
 check trigger X values `$08FF/$0900/$097F/$0980` and signed distances
 ±63/±64 in both modes. These are separate from the allocation tests above.
 
-Expose **encounter threshold** and **post-volley strategy** independently,
-US by default. Freeze the threshold before the room's intro and the attack
-strategy for the encounter. A toggle must not restart the intro, replay a
-volley, or reinterpret an existing native/animation wait. Full combat,
-mixed-policy integration and family-wide contention remain validation gates.
-
-Implementation uses the US artwork and original six-shot allocation. Prefix
-`$C67D→C680` changes only the threshold CMP. `$C718→C71E` skips state12 for
-the Japanese strategy, leaving `$85BE` to calculate distance. At `$C721`, a
-near result resumes `$C726`; a far result follows the native `$86FA` wait
-contract: zero motion, delay60 at slot+24, and `$C6E3` at slot+12. Returning
-through Antlion's native RTS leaf `$C682` preserves the real dispatch owner;
-there is no fabricated stack return, host timer, or recheck after the wait.
-This equivalent continuation goes directly to the firing preparation instead
-of storing Japan's relocated branch instruction. The room snapshot keeps
-threshold and strategy independent, including when settings change mid-wait.
-Five-ROM instruction signatures and1,944 mixed-source/slot/CPU cases cover
-the two prefixes and decision outputs;32 invalid-owner cases reject children,
-wrong rooms, widths and shifted slots.
-
-Controlled recompilation runs then exercise the full native dispatcher for
-12,500 ticks. After Continue and an ordinary Palace/Fight entry, a debug room
-request loads Kasandora2; a held, invulnerable player supplies a fixed distant
-target. The US control produces60 volleys at exactly48-update intervals;
-the Japanese rule produces39 at exactly73. Both exit normally with positive
-HP, unchanged lives and byte-identical private SRAM. A first implementation
-returned from the HLE without consuming the native dispatch return; this live
-test caught that error and the final path uses `$C682` as described above.
-The forced room transition also produces background-preflight mismatches in
-both controls; these runs validate encounter timing, not stage traversal,
-terrain/render parity, a complete victory or the near-player phase sequence.
-
 ### Aitos bamboo spike traps
 
 The previously unidentified Aitos Act-1 type `$06` is the falling bamboo
@@ -4147,40 +3300,6 @@ death are excluded, not silently treated as parity evidence.
 
 ### Authored pickup differences
 
-The host's numerical placement catalogue now retains the ordered programs for
-all 49 action roots in US, Japan, European Story and European Action modes.
-All three European releases agree. Enemy/wave and pickup sources can be
-resolved independently, and European enemy markers are filtered before any
-randomization. A shared room-local row ID preserves identity through those
-transforms. Tests compare every pure program with the ROM streams, following
-native jumps, and validate all 2,646 mixed source/mode/difficulty combinations.
-The runtime captures these choices at full room initialization. Preparation
-after the asset VM at `$00:8329` resolves all act programs for the existing
-randomizer and publishes only the selected room. There is no per-frame
-placement scan, donor-code execution or mutation of the ROM.
-
-The initial adapter replaces `$00:941C–946D`, calls the original `$9557`
-initializer for each numerical object and resumes the native `$946E`
-sentinel/return epilogue. The later-wave adapter enters at `$9500`, after the
-original `$94F2` prologue, and resumes `$954D` for sentinel/stack restoration.
-Calls use real native JSR return identities `$9461/$9540`. Gate records keep
-the actual US after-`$FE` cursor at slot `+$38`, not a foreign or invented
-pointer. Wave allocation preserves the native gate/player slots and checks
-capacity before writes. Fillmore's retry height follows the terrain choice.
-US/US delegates to the original loader. Unit coverage compares the complete
-memory footprint, guards and escaped returns for all 2,646 combinations;
-controlled live room/wave checks are not proof of natural traversal or every
-deliberately mixed terrain route.
-
-The randomizer exposes a value-only program transform alongside its existing
-ROM adapter. Both share the same permutation code, keep statues within their
-wave, and leave program IDs, wave gates and reservations alone. Type tables
-also contain direct code entries: parameter `$FF` controllers must not be
-shuffled as ordinary enemies, nor may their instruction bytes be scaled as
-HP/attack. Spawn definitions are checked before either operation, and aliases
-of one definition are scaled once. Correcting those older randomizer bugs
-changes affected seed results; non-randomized native data remains untouched.
-
 All 49 shared action-layout roots were joined to their owning acts, following
 placement-stream jumps and retaining order, reservations and wave boundaries.
 Eighteen roots change item placements. In the tables below, a raw key is
@@ -4238,57 +3357,12 @@ checks before offering independently mixed layouts.
 
 ### Terrain and damage-box contracts
 
-**Implemented hazard seam.** `regional_hazards` owns numerical ordered lists
-for all 49 shared rooms; `actraiser_stage_hazards` owns the native-memory
-adapter. European English, German and French lists match in both Story and
-Action mode. Twenty rooms differ from US in each non-US profile. Selection
-is captured with the other action rules at complete room initialization.
-At `$00:940C`, after native `$93A9` has expanded the US stream, the conditional
-prefix validates its count, every record, X and source terminator. It replaces
-only the selected records and scratch count, reproduces `LDA $00`, then tails
-to `$940E`. Native `STA $1AE2 / INY / PLX / RTS` retains the US placement
-cursor and real caller frame. US and identical lists delegate unchanged.
-No ROM mutation, donor graphics, terrain replacement or new per-frame work
-is involved. The later native contact pass, including overlap order, slowing
-flags and hit/invulnerability gates, is unchanged. Terrain and placement
-projection have separate owners and activation contracts, described below.
-
-Tests independently decode all five ROMs and both European modes; compare
-the adapter's complete memory footprint, flags/registers and tail target;
-reject malformed context and unknown resident records; and exercise pending
-selection, room activation, v1–57 migration and nine replay-identity pairs.
-
-**Implemented terrain projection.** `regional_terrain` owns numerical map
-deltas and European solidity-bit changes. `action_room_terrain` adapts the
-immutable US room scene; `actraiser_stage_terrain` adapts native WRAM through
-the same two-plane contract. Neither portable policy nor scene loader reads
-settings or owns CPU memory. Scene-loading tools and reference skybox artwork
-continue to load the unmodified US reference unless explicitly projected.
-
-The `$00:8329→832C` prefix runs after the complete asset VM, before actors,
-`$02:BAC1` attribute generation and native tilemap staging. Full-plane FNV
-signatures and dimensions recognize US and previously projected data before
-any writes. Map and definition generations are validated independently because
-native room scripts can reload only one plane. Repeated projection is
-idempotent; switching to US restores the original data. The operation is
-allocation-free and room-load-only. The host renderer receives the accepted
-profile and invalidates its cached room, not a pointer into mutable settings.
-
 All 898 changed JP map cells across 11 roots can be expressed through exact
 matches in the corresponding US metatile tables. Eight of those roots have
 348 changed collision cells; the other changes are decorative arrangement.
 CHR and palette data match in all 11. No Japanese graphics are needed for
 these layouts. The two Death Heim maps' 26 changed characters remain a separate
 artwork feature, not part of terrain projection.
-
-Fillmore's `$933C→9343` prefix substitutes the entry Y27 for US Y34; the
-`$94B1→94B7` prefix substitutes checkpoint Y25 for Y23 while leaving trigger
-coordinates and the US stream cursor intact. At room/retry load, only an
-active cached `(156,23)` or `(156,25)` checkpoint is normalized to the selected
-layout. Arbitrary debug coordinates are not rewritten. All European player
-start records match US in both Story and Action tables. Wave ownership and
-enemy/pickup stream replacement belong to the separate `$00:941C/$9500`
-placement adapter, not this terrain prefix.
 
 **European terrain is not US-identical.** All three PAL BG1 map/definition
 sets agree. Seventeen map IDs differ in two roots: `$0304` Aitos (12 cells,
@@ -4311,18 +3385,6 @@ This is 342 root-relative collision cells; alternate entry roots that share
 a map are counted separately. Nine belong to rearranged map cells and 333
 to definition changes. Some other rooms retain changed but unused definitions.
 Neither difficulty nor PAL refresh timing changes these authored layouts.
-
-`actraiser_stage_terrain_test` compares all 49 roots against all five ROMs,
-including every combination of incoming map/definition profile and outgoing
-profile, full CPU/RAM footprints, reversal, repeat application and malformed
-data refusal. ROM-free tests cover anchor continuations; session/runtime tests
-cover pending choices, v1–58 migration and nine replay identities. These checks
-do not establish safe natural traversal for arbitrary mixed placements.
-Controlled native loading of all 49 rooms under each profile also matches
-every map byte, metatile definition and collision attribute, with zero
-background-world/tile mismatches. The frame oracle reports separate BG2
-vertical-scroll/screen-selection differences during this warped traversal;
-that run is not evidence of full-frame or natural-play parity.
 
 **The native terrain lookup matches regionally.** US `$00:91C3–920E` / JP
 `$00:91CF–921A` reads the chunked metatile map at `$7E:8000` and the 256-byte
@@ -4556,21 +3618,6 @@ the player and waits through state 36 before allocating a shot:
 | Repeated successful firing interval | 360 active frames | 180 active frames |
 | First observed shot after controlled positioning | Frame 362 | Frame 182 |
 
-The host implements cadence and launch offset as independent, room-stable
-policies. `$B3CB→B3D5` substitutes only the PAL coordinate arithmetic, with
-matching NZCV flags. `$B3E4→B3E7` selects one repetition for JP/PAL; generated
-code still owns the repeat-helper call frame, activation, allocation and child
-continuations. The US two-repetition path remains the native default.
-
-PAL state36 is one stationary255-update row. Both US rows have the identical
-visual37, zero movement and the same collision/composition record. The host
-therefore uses one127+128-update cycle of those US rows, adjusting only their
-fresh delays through `$8E2F`. This reproduces the255-update hold without a donor
-asset or a virtual animation stream. It does not claim identical internal row
-indices to PAL. Five-ROM tests verify the totals and stationary composition;
-all65536 X inputs verify the position prefix's arithmetic and flags. Existing
-room snapshots and live projectiles are never rewritten by a settings edit.
-
 Owned states 10/11/36 and their composition records match. Apart from the
 repeat argument/helper choice, all reviewed program differences are
 relocations. The first-shot timestamps include this fixture's initial
@@ -4597,10 +3644,6 @@ the boot traces. No enemy, RNG, terrain or per-frame state is edited.
 This confirms a cadence difference, not the reported reduction in active
 statue placements: the twelve authored emitters are present in both ROMs.
 The complete decorative-background-to-emitter artwork join remains separate.
-Implement a named emitter-cadence policy with US default, captured at room
-initialization. Defer live changes until the next room; preserve an existing
-wait, child lifetime and allocation failure. Do not couple this to statue art.
-
 ### Marahna splitting fireballs
 
 Type `$05/10`, source US `$00:E047` / JP `$00:E0DD`, is a hovering orb which
@@ -4654,10 +3697,6 @@ retires at 92. Children move in the four expected directions on 83. Another
 100 native distance-boundary and 40 allocation cases cover the branch edges.
 These are controlled scene observations, not unassisted route playthroughs
 or a boot test of the extra `$0505` placement itself.
-
-Implementation: include the extra orb in the room placement profile, frozen
-on load with the adjoining collision/pickup bundle. Do not invent a separate
-JP orb-speed/charge setting or restart live actors when a setting changes.
 
 **Emitter/slow-zone/orb batch evidence.** Adds 616 isolated cases and 12 booted
 fixtures. Sixteen exact-endpoint Go windows cover eight paired programs;
@@ -4716,43 +3755,6 @@ duration, signed X/Y velocity and collision extents. Together with the two
 routing checks below, this batch adds 158 isolated cases and 28 booted traces.
 Fourteen exact-endpoint Go disassembly windows support the comparisons;
 an independent repeat reproduces all 761 evidence files byte-for-byte.
-
-Implementation: expose named family movement/wind-up/recovery values, captured
-on room or actor-generation initialization. Do not swap whole animation blobs
-merely to change artwork: those blobs also carry gameplay data. Preserve live
-phase progress and descendants; a setting change must not restart an attack.
-
-The host implements these seven speed/delay leaves, plus the two Bloodpool
-swordsman delays described below, with a complete-room
-snapshot. The accepted `$02:B4E8` profile boundary atomically captures room
-time and motion; a failed validation publishes neither. This also covers
-later spawns without maintaining a parallel lifetime table for action actors.
-Changing a setting during a room leaves its existing snapshot unchanged.
-
-At `$00:8E2F`, the adapter checks the native source identity, map group,
-animation bank/base and exact row. It delegates the original reader, then
-changes only actor `+$06` and `+$24` on a normal return. It never patches
-shared animation bytes, graphics, collision extents, vertical movement or
-CPU/stack state. Unknown shapes and the native-US snapshot stay native;
-escape tokens propagate without postprocessing. No donor media is needed.
-
-All 53 reviewed rows are compared with the five actual ROMs: 265 numerical,
-vertical-motion, visual-ordinal and collision-extent checks. For this subset
-all three PAL releases use the US values. Controller tests exercise those
-53 rows across 512 mixed snapshots, four facing combinations and both M
-widths, plus malformed ownership and return-token cases. The reader itself
-is delegated in production; the unit stand-in is not an independent native
-CPU proof. Existing original-CPU row evidence above supplies that reference.
-The unchanged US row shape is intentional: future artwork integration must
-preserve the independently selected motion metadata.
-
-Controlled host saves additionally enter Fillmore Act 1 through the Palace's
-ordinary Fight/confirmation flow. The JP motion capture observes a native
-bird row acquire DX4; the US control bypasses the adapter. Both 11,500-tick
-captures preserve positive HP and lives. Cold replays in the production
-binary accept their initial identities, exit at the recording end, and match
-their respective final WRAM/SRAM byte-for-byte. This is live bird/room-lifecycle
-evidence, not a live test of every cave or caster branch.
 
 ### Unused world-map placement root
 
@@ -4934,55 +3936,6 @@ An independent repeat reproduces all436 files byte-for-byte. These are
 attack-phase/difficulty results, not complete victories, Story playthroughs,
 magic interactions or proof that every European boss matches another region.
 
-### Difficulty integration in the US host
-
-The game-owned difficulty policy has five independent source leaves: spawn
-HP, contact damage, countdown reload, dragon attack availability and plant
-tendril motion. The selected level is a separate host enum, not a regional
-source or a write to European `$0205`. Requested/effective choices persist
-in companion codec51; the native SRAM image retains its original layout.
-All five effects are captured atomically at complete room/retry initialization.
-No settings callback rewrites active HP, children, hit transactions or time.
-
-- `$00:966F` runs after base-stat and fresh-flag projections at `$966C`.
-  Descriptor Y and copied animation identity guard initialization before
-  source `+32` is installed. A selected PAL HP rule reproduces the `$8231`
-  exemption and Beginner2→1/Expert1→2 transformations, then rejoins `$968F`.
-  This bypasses US Professional promotion, including its attack promotion;
-  US/JP selections leave the original `$0201`/`$0349` path intact.
-- `$00:8A24` changes only an accepted enemy-contact SBC. Expert adds1 to the
-  attack in eight bits, then subtracts with the native carry/sign/overflow
-  semantics. `$8A27` retains the store and original sign-based zero clamp.
-  Damage-box contact `$8C12`, magic and native hit eligibility are untouched.
-- `$02:BC8A` supplies reload71/59/47 only after the US divider has expired.
-  US `$E5` is the divider, `$E6` the BCD time and `$E8` the hold gate. It does
-  not substitute PAL offsets or rescale the host's60Hz simulation.
-- `$00:D766` returns through native RTS `$D76B` on Beginner before allocating
-  the Aitos dragon's producer. Existing producers/children are not removed.
-- `$00:DADD` requests one repeat of retained state16 through real JSR `$DAE0`.
-  The reader maps logical rows0–6 to native rows0/1/1/2/3/3/4, with delays
-  3/3/15/3/3/15 and the native terminator. Pose27, mirrored velocities and
-  collision remain native:48updates, one four-pixel bob, zero net Y travel.
-  `+1C` marker100 owns in-progress logical rows across missing host caches;
-  native state initialization/end clears it. No shared resource is patched.
-
-The renderer-independent adapter tests cover all256×256 contact operands,
-HP flag masks, pending/effective state, migration, timer guards and expanded
-rows in both widths/facings. Five-ROM checks verify promotion masks, reload
-tables, difficulty branches and the complete retained tendril pose/program.
-Controlled Continue/Palace/Fight runs then loaded the plant and dragon rooms
-through native pending-room transitions. All six Normal/Beginner/Expert runs
-exited normally. Beginner countdown reload71 produced72-update intervals;
-Expert reload47 produced48. Expert enemy contacts reduced20→18 and18→16
-health for base attack1. Plant Beginner used the six expanded rows once per
-48-update cycle; Normal/Expert retained two native bobs in the same period.
-The dragon's Beginner gate skipped four producers, while Normal/Expert
-allocated native projectile pairs. Existing actors and random state were not
-edited. Plant background checks reported no mismatch; the controlled dragon
-warp reported the same background mismatch in all three runs, so it is not
-evidence of visual correctness. Complete fights and visual acceptance remain
-separate from these numerical, ABI and controlled-lifecycle checks.
-
 ### European items and spell inventory
 
 All three PAL ROMs share the following checked bank-00 addresses. Pickup
@@ -5042,142 +3995,7 @@ the post-PLP icon entry must be decoded at M0, and the push helper at M1.
 An independent repeat reproduces all73 files byte-for-byte, including the
 three complete casting traces.
 
-The integrated score-life rule wraps US `$00:873C–874D` only after a room/
-retry boundary captures its source. The original helper owns BCD score
-addition, saturation and its RTS/PHP/PLP contract in both accumulator widths.
-The adapter compares the old and resulting score, checks US Action-mode
-progression `$0349`, and performs one uncapped decimal life increment. COP8D
-uses the existing runtime interrupt boundary, preserving audio extension and
-trace handling. PAL's final old-score accumulator return is also reproduced;
-an escaped native return receives no postprocessing. The rule does not
-change item pickups, lives display, retry debits or starting allowances.
-Codec52 and replay identity retain requested/effective choices independently.
-Tests cover36,000 width/mode/score/life transactions, all256 life bytes,
-unsupported entry shapes, escaped returns and all five original helpers.
-Three booted US/Japan/Europe controls each executed56 additional transactions
-through the generated US helper after normal Continue/Palace/Fight. These
-checked actual RTS balance, flags, score saturation, single/multiple band
-crossings, the99→00 life edge and COP8D. Staged score, lives, mode, registers
-and stack were restored immediately; these are bounded integration checks,
-not naturally earned20,000-point playthroughs. All three exited normally with
-zero action-background mismatches.
-
-The US-host implementation captures the inventory model only on a confirmed
-Action new run, after the bounded native initializer returns normally. Its
-256-byte collection, count, displayed icon and in-flight spell are host-owned;
-PAL `$1C00` is not presumed free in US memory. Native US stock byte `$21`
-mirrors the count, without touching adjacent camera state `$22`. The host
-collection is volatile Action-run state, not a change to cartridge SRAM.
-Replay includes live ordered entries and transaction state, excluding dead
-storage. Debug-state restore remains rejected before mutation.
-
-Changed pickup effects enter at `$00:879D` and rejoin the original PLP/RTS
-epilogue `$884E`. Shared sword/heal/score paths remain native. The regional
-cast gate selects the last spell without quoting or spending generic scrolls;
-the selected model remains fixed even if settings change during the effect.
-Actual native cleanup `$9EFC` consumes it after graphics restoration. Accepted
-room/retry initialization cancels only the pending cast and preserves stock.
-Health/max health each increment below24, independently of each other.
-
-Pickup source selection `$96E3` reuses US `$06:A400/A480/A500/A580`, which
-match the four spell pickups in all PAL ROMs byte-for-byte. The independently
-selected European item artwork uses donor `$06:A880` for health growth and
-`$06:AC00 + index*$80` for the small spell icons. Empty inventory selects
-zero-based index4 in both native PAL upload paths. Story retains its own
-graphics; its extra-life source `$06:A080` is not the health-growth picture.
-Without a donor, health growth uses a full apple and spells use US icons.
-
-US `$02:BCED–BCF9` uploads the complete 256-byte entry window using the host
-collection's top spell, while retaining the native accumulator, counter,
-flags and PLP/RTL owner. Dirty-only `$02:AC20` publishes128 bytes through PPU
-ports, then executes original JSR `$AF30` with caller word `$AC22`. Ordinary
-unchanged frames have no additional upload. The health request retains its
-US item1 identity in queue `$D0–D5`; a narrowly guarded `$02:AF3D` wrapper
-delegates actual DMA/RTS and replaces only the resulting128 pixel bytes.
-DMA source/count residue and VRAM's final address remain native. Both
-uploads consume startup-validated, immutable donor views without file I/O.
-
-PAL Action pickup sound requests are BRK `$0F` for all four spells, the whole
-apple and the score item; health growth uses COP `$8D`. The latter two shared
-effects still execute the US native continuations `$8825` and `$8832`, but
-now receive the PAL sound request rather than US `$0D`. Sword power remains
-native, with sound `$25`. These sound requests require no donor graphics.
-
-Explicit generated boundaries prevent pickup-source, post-cast and NMI hooks
-from being inlined away. Codec54 defaults older companions to US inventory.
-Unit tests cover all256 push depths, delayed debit/interruption, independent
-HP caps, CPU/stack/return contracts, rejected entry shapes, exact icon upload
-length, migration, replay aliases and the five-ROM instructions/assets.
-Controlled live checks complete all four effects, retain stock across an
-interruption and retry, and compare nine HUD uploads against source tiles.
-A separate staged boss-death/act-clear route retains three spells, increased
-maximum HP and lives, clears sword power, then resets the populated collection
-on Game Over restart. Its direct room warp is not evidence of natural encounter
-or background-rendering parity. Full encounters and donor-media acceptance
-remain separate checks.
-
 ### European Story save and Continue
-
-The host's `$02:A622` title owner now exposes a separate new-game settings
-draft while the native title coroutine is open. Accepted New Game/Action
-publishes that draft; Continue instead loads the save-bound companion.
-Abnormal title returns discard the draft without changing the active campaign.
-Difficulty and inventory choices can therefore precede the first room/run
-initializer rather than requiring a Game Over restart. Difficulty selection
-is independent of translated title artwork: the overlay provides the host
-difficulty selector.
-
-New-game history starts with exact seed/reload projections, but observers and
-regional projections remain gated until native baseline initialization has
-been verified. Title population selection needs no destructive redevelopment:
-there is no developed town in the draft. Existing-campaign conversion retains
-its separate confirmation/recovery path. Draft and active edit tokens are
-distinct, including after acceptance; neither path writes SRAM from settings.
-
-Regional mode entry uses two independent leaves: completion-gated access and
-Game Over destination. `$02:A70D` captures the original checksum result, then
-chooses the native title branch. European access routes a no-save title into
-the existing selector, with Start composed at `$A748/$A751` instead of a
-misleading Continue label. `$A7E9→A813` cycles only eligible choices; the
-completion marker remains untouched. Late enabling at the already-visible
-Start prompt routes `$A72D` back to `$A72F`, while a populated menu can gain
-the additional choice on its next navigation input.
-
-The European Game Over prefix at `$AAF9` waits through the real `$AAEF` call
-boundary, clears the retained US text map with bounded RTS leaf `$ABC4`, and
-resets the corresponding US progression/sword fields and fourteen bytes at
-`$7F:6B18`. `$AAFD` retains its native PHA and `$AB00` changes the target
-operand from `$8058` to `$8023`. The `$AB03` adapter models the original
-PHX/RTL stack effects, then explicitly retires all discarded host callers
-through the runner's reset-root transfer contract. Ordinary dispatch here
-would leave an extra compiled title/mainline activation on every Game Over.
-The reset driver resumes at the new PC without resetting CPU or memory. This enters
-the original US title setup at `$00:8024`, not a whole-CPU reset. PAL source
-blocks are EU `$AB5F`, German `$AB68`, French `$AB51`; the tilemap clear
-matches US byte-for-byte. US/Japanese restart branches remain native.
-
-Four controlled host runs cover initial and late configuration with both
-empty and valid, non-completion-unlocked saves. Each reaches its first
-European-inventory Action run and returns through Game Over to a new title
-draft, with Normal difficulty and retained rule choices. No save/marker is
-written. A separate US Continue/Action/Game Over control retains its native
-restart and allowances. These are selection/lifecycle checks with staged
-death, not natural complete campaigns or final visual acceptance.
-
-The subsequent independent-settings UX revision preserves the chosen difficulty
-on this return instead of resetting it to Normal. Mode routing no longer owns
-difficulty selection; the runtime regression now covers Expert surviving the
-return, new title draft and subsequent Action run. The original ROM flow above
-is unchanged by this host-side convenience.
-
-The generic transfer contract has a 200-cycle generated-code regression:
-constant activation depth, no resumption of discarded callers, and a final
-ordinary nested return. Invalid/foreign scopes, live hardware frames and
-repeated consumption are rejected. This API is separate from ordinary
-branch-only HLE tails and does not infer terminal transfers from stack height.
-Three consecutive controlled in-game Action runs also return with one title
-root each time and unchanged native stack balance. The private test exits
-normally after13,000 ticks with zero action-background comparison mismatches.
 
 Nine complete button-only transactions cover EU English/German/French and
 all three difficulties. Each resumes its same-ROM fresh Story predecessor,
@@ -5252,31 +4070,6 @@ story timing, level-award wrappers and developed-town maxima still require
 their own coverage; do not generalize these results into “Europe equals US.”
 
 ### European Action retry and new-run inventory
-
-The US-host starting-allowance adapter wraps the complete `$02:AB05–AB2F`
-initializer with its original JSL/RTL frame. Requested spare-life and health
-sources activate at that boundary, not at ordinary retry or room loading.
-After a normal native return it writes only `$1C/$1D/$1E`, returning the
-selected byte health in A with matching N/Z. Native score, stock, equipped
-spell, sword power, progression and destination resets remain authoritative.
-Escaped returns receive no postprocessing. Japan's equivalent initializer is
-`$02:A84B`; PAL entries are EU `$AB9E`, German `$ABA7`, French `$AB90`.
-PAL initializes health earlier and uses different progression/sword fields;
-only verified allowance values are projected, not its RAM layout or ordering.
-
-Codec53 preserves independent requested/effective choices; old companions
-default to US. Tests cover all nine source pairs, both accumulator high-byte
-cases, every valid entry flag combination, rejected shapes, escaped returns
-and all five original initializers. First-run profile selection and European
-Game Over/title routing use the separate title/mode-entry adapters described
-in [Story save and Continue](#european-story-save-and-continue).
-
-Three US-host controls entered Game Over through the native death flag with
-zero lives after Continue/Palace/Fight. Start invoked the generated initializer
-with a balanced original return frame; the next Fillmore room had4/24,
-2/24 and4/8 spares/health. Score, stock, equipped spell and sword power were
-cleared. All three exited normally with no background mismatch. These test
-restart routing, not a naturally lethal hit or selection from the first title.
 
 Twenty-seven booted fixtures cover three routes × three difficulties × three
 PAL ROMs. Each begins at native playable Fillmore with explicitly seeded
@@ -5365,8 +4158,7 @@ They are authored values before difficulty, contact and controller changes.
 
 Fillmore types `1C/1D/1E` change flags `$0032→$8032`; the extra bit gates
 their updates during casting, as checked [below](#european-linked-prop-cast-freeze).
-The host exposes these as independent linked-prop policy leaves, sharing the
-fresh-stat seam rather than adding a per-frame controller. US/JP retain the previously
+US/JP retain the previously
 mapped 21 changed keys among 173 shared records. Animation resources are
 joined through script load/inheritance and initial state, but their entire
 state graphs and indirect child controllers are not declared equivalent.
@@ -5378,66 +4170,6 @@ the original ROM record and a placed parameter. US `$00:95F0–968E`, JP
 stopping before animation loading. Thus the PAL HP mask/rule is checked
 against every joined record, not only synthetic HP examples. This does not
 execute every record's controller, contact path or later animation phase.
-
-The host now integrates the 63 changed base fields (21 HP,42 attack) across
-54 US-owned initializers. Stable area/type keys and numerical tables live in
-the portable policy; native source-address mapping stays in the game adapter.
-The `$966C→966F` prefix uses descriptor Y, not a reused slot's `+$32`, and
-applies selected values before the existing native promotion. Every changed
-field is independently selectable. The shared room-policy cache is published
-only after all room-boundary activations succeed; no lookup runs per animation
-frame. Baseline settings bypass the projection without searching the table.
-
-The skull armor/reward prefix composes at the same boundary; it does not
-overwrite selected skull HP/attack. Native record signature/animation-identity
-checks reject incompatible inputs. Five-ROM stat bytes and 1,944 combinations
-of real records, HP/attack sources and skull rules verify the adapter; another
-1,944 synthetic cases test untouched fields and reused-slot identities.
-The table integration does not change difficulty or terrain rectangles.
-Explicit child assignments are handled by separate initializer prefixes:
-Tanzra minion HP`$FC96→FC99` and reward`$FC99→FC9C` replace their own store
-values independently, preserving A=2 and all flags. Projectile`$FD2E→FD31`
-replaces the attack LDA and its N/Z result; the native STA follows. The final
-room, inherited source/animation identity, active handler and fresh flags
-guard each prefix. No parent-state polling, allocator replacement or live-HP
-rewrite is involved. All five ROM instruction signatures,2,592 mixed-source/
-inherited-value cases and40 invalid-owner/CPU cases check this adapter.
-Full encounters remain a distinct validation gate.
-
-Host randomizer composition uses the selected regional values as its basis.
-The native ROM stat pass remains responsible for US/unmapped initializers.
-For its marked records, `Randomizer_SpawnStatBasis` validates the freshly copied
-HP/attack against the last applied transformation and recovers pristine bytes;
-it does not inverse-scale rounded or saturated values. The game-owned `$966C`
-adapter applies regional selection to those bytes, then the same rounded,
-1–255-clamped percentages once (zero remains zero), before `$966F` owns the
-existing difficulty adjustment. Unmapped fields retain their original scaling.
-Tanzra's explicit minion HP and projectile attack use the same applied scale
-after regional selection; minion rewards remain independent. No running actor
-is healed or rescaled. Other controller-owned stat assignments are not implied
-to participate. The game replay digest chains `ARSTATBASE-R1` and both applied
-percentages when nonidentity, so older stat-scaling semantics cannot silently
-share the new checkpoint identity. No native instruction or WRAM layout changes.
-
-`randomizer_stats_test` covers byte-range rounding, saturation, alias exclusion,
-pristine recovery, stale/mutated inputs and restore/reapply behavior.
-`actraiser_actor_stats_test` composes all 54 owners, mixed HP/attack sources and
-skull rules at nine percentage pairs, then restores the disabled baseline
-(19,440 full CPU/memory comparisons). Child tests also repeat at each scale,
-and the actual EU spawn-difficulty adapter is exercised after composition.
-The optional five-ROM invocation takes US, JP, EU-English, German, French
-in that order; it checks donor bytes and repeats composition against US records.
-
-Seeded regional selection is host policy, not a newly discovered ROM routine.
-`ArRegionalRandomizer_Choose` uses the shared profile-member inventory and
-stable descriptor keys at accepted New Game (`$02:A622`), with separate Action
-and Town options. It preserves manually chosen difficulty, interaction and
-presentation rules, and couples reduced population support to reachable goals.
-Continue restores actual saved rules instead of rerolling. The full versioned
-recipe is stored beside the native SRAM image; enabled recipes also contribute
-`ARRANDSTATE-R1` to replay identity. See the
-[recipe format](save-format.md#randomizer-recipe-version-70) and
-[execution boundaries](rom-map.md#regional-execution-and-data-boundaries).
 
 ### Native narrative comparisons
 
@@ -5498,12 +4230,6 @@ outside the 256-byte storage remain intact. The icon still shows the newly
 collected spell. This establishes a boundary behavior, not that an ordinary
 run can accumulate 256 spells.
 
-The host retains this byte-count wrap. One defensive exception is a wrap
-during an in-flight effect: completion clears the pending cast and leaves an
-empty collection. It does not reproduce the PAL word-debit underflow into
-unrelated WRAM, invent a spell, or terminate the game. A dedicated test covers
-255 collected spells, a cast, a 256th pickup and completion.
-
 Cast owner `$00:9925–9AB9` selects the top Action spell before the effect,
 but debits it afterward. It sets player flag `$0010` and `$FA`, spawns the
 effect, waits for completion, reloads graphics and clears the casting state.
@@ -5519,12 +4245,6 @@ After the room transition, the first route retains its one spell; the second
 has none. Neither leaves `$FA` or the player's casting flag active. All end
 with positive HP and unchanged lives/private SRAM. These are forced room
 requests, not proof of a player-accessible spell-cancellation exploit.
-
-A host inventory-policy switch must therefore either wait for the cast to
-finish or preserve its selected spell, payment state and owning policy.
-Re-reading a newly selected policy at the old cast's completion could charge
-the wrong inventory. Retry, completed act and ordinary room load remain
-separate lifecycle events, as documented above.
 
 ### European linked-prop cast freeze
 
@@ -5547,44 +4267,7 @@ three changed flags. It does not test every rider or the complete linked
 platform group during a naturally initiated cast. The 63 fixtures here plus
 the 15 inventory fixtures above form one 78-case isolated batch.
 
-The recompilation exposes three room-scoped flag choices at US spawn prefix
-`$00:966C→966F`. US descriptors `$AC02/$AC32/$AC5E` carry the same states
-38/39/40 and base `$7E:4000`; only their fresh `$0032` flags become `$8032`.
-The US dispatcher already has the corresponding hold at `$8943–894A`, using
-`$F9` rather than PAL `$FA`. No imported dispatcher or per-frame policy is
-needed. Twelve US suffix fixtures confirm the new flag survives original
-promotion/animation initialization, and twelve dispatcher fixtures confirm
-hold/resume against the original `$AC11/$AC41/$AC6D` continuations. This is
-isolated native execution, not a complete natural rider/cast playthrough.
-Adapter tests cover3,888 source/slot/flag cases,22 malformed contexts and all
-five ROM descriptors. The native initializer's Y, not stale slot field+32,
-owns the choice. Existing actors retain their flags until room reload.
-
 ### Fillmore Act 2 music residency
-
-The `scene_music_route` policy is integrated at US `$02:B653–B655`, after
-the native scene selector accepts the declaration and before the resident
-source comparison. For scene keys `$0201/$0301` only, Japan replaces the
-recognized track-1/selector-0 request `$0E:F69F` with US `$18:947F`. Room 4's
-boss declaration, other tracks and unrecognized/custom resources are untouched.
-All five ROMs' cave declarations and the complete shared Fillmore SPC upload
-image are covered by the optional ROM test. No donor resource is required.
-
-The adapter reproduces `LDX $A5` and its N/Z flags, then tails native `$B655`.
-It never writes resident `$AB/$AD`, APU ports or playback commands: native
-code retains upload suppression, handshakes and playback ownership. Activation
-comes from the active campaign at the accepted music declaration, independently
-of the action-room cache, since music command 2 precedes video command 3.
-Settings edits leave the current resident track alone. Regional sequence
-payloads remain a separate policy and extraction task.
-
-An eight-load US-host integration control verifies US→Japan→Europe→US routing
-and the unchanged boss source. Consecutive cave rooms using the same source
-produce no extra upload/play commands; the settings edit itself leaves the
-resident cache unchanged. The live entry has PB2/**DB0**, M1X0 and D0. The
-run exits normally, captures nonzero PCM and reports no action-background tile
-mismatches. These are controlled scene loads, not a full-act playthrough or
-subjective audio approval.
 
 Five booted scene loads request Fillmore room 2 through the native pending
 scene field. Each produces nonzero audio, reaches the requested scene with
@@ -5617,18 +4300,6 @@ sequence block at ARAM `$1200`:
 
 Music Mode uses one-based IDs10 and13. Unchanged blocks target
 `$2E48/$2F00/$2C30/$11FD`; the BRR pool at file`0x40000–4FFFF` also matches.
-The production Go extractor exports only each Japanese `$1200` block, with
-its reviewed hash, as media resources8/9. It does not export an audio driver.
-
-At the existing game-owned SPC upload customization boundary, recognized US
-sources additionally require five blocks, exact final entry words`$1108/$1D06`
-and script offsets`0x77FD0/0xCFFE6`. After the normal sample upload succeeds,
-the selected sequence replaces only its ARAM span. The native resident-source
-cache and playback handshakes are unchanged. Each song's requested policy
-becomes effective only when that song is uploaded; selecting a setting does
-not restart music or activate the other song prematurely. Missing donors
-retain US data. Session codec68 adds two independently named sequence leaves.
-
 The existing Go preview SPC/DSP implementation renders 180 seconds per song.
 For each, the projected sequence produces sample-for-sample identical PCM to
 the complete Japanese song image running on the US driver; both differ from
@@ -5636,15 +4307,7 @@ the US sequence. A separate Japanese-driver control also differs, so sequence
 compatibility must not be described as complete Japanese audio fidelity.
 JP's bootstrap is `$02:983E` (2916 program bytes), versus US `$02:9ACD`
 (2893 bytes). Its initial timer wait uses absolute `$00FD`, where US uses the
-direct-page form. No foreign firmware, audio clock or external music override
-is changed by this policy.
-
-Two US-host12000-tick controls, with and without a Japanese package, load
-both songs under JP, US and European choices. CPU/full-WRAM state matches
-the native upload path; ARAM changes only inside the declared donor span.
-A second cave room with the same resident song performs no upload. Both
-runs exit normally. These are controlled native scene loads, not complete
-act traversal or subjective listening acceptance.
+direct-page form.
 
 ### European SIM state-program comparison
 
@@ -5778,11 +4441,7 @@ identical in the Japanese character sheets for both the original encounter
 and the Death Heim rematch. Five-ROM extraction tests verify these fallback
 tiles rather than clamping into unrelated Japanese pictures.
 The [actor drawing format](regional-media.md#actor-drawing-resource) contains
-no executable animation or actor collision fields. The live adapter replaces
-only the accepted character/palette uploads and sprite drawing parts. Native
-decompression results, actor extents, animation programs and timing remain
-unchanged. The plant boss substitutes attributes only, retaining the part
-count and positions owned by its independent gameplay-geometry adapter.
+no executable animation or actor collision fields.
 
 The native binding inventory resolves 43 character uploads, 40 palette
 uploads and 32 animation declarations. All 40 sprite-loading scene scripts
@@ -5790,23 +4449,14 @@ pair at least one character bank with the `$80–BF` palette; the other action
 scenes inherit those resources. Animation and character slot numbers do not
 identify the same owner.
 
-Activation is stricter than simply encountering a character upload. Thirteen
-scripts replace the ordinary animation bank: the twelve act entrances and
-Death Heim. They capture the requested area choice on their first accepted
-actor upload; subsequent rooms retain it, including partial boss reloads.
-This prevents a newly selected palette from recoloring an inherited atlas.
-The drawing lookup uses the actual decoded source, visual ordinal and native
-composition pointer, not a guessed room-to-sprite mapping. Derived Northwall
-compositions therefore stay with their existing geometry owner.
+Thirteen scene scripts replace the ordinary animation bank: the twelve act
+entrances and Death Heim. Subsequent rooms can inherit earlier resources,
+including partial boss reloads.
 
 Nor is an animation slot an exclusive 4 KiB allocation. Fillmore's first
 boss image is 5353 bytes at `$5000`, Death Heim's ordinary image is 4926 bytes
 at `$4000`, and Marahna's second boss image is 4149 bytes at `$5000`. A later
-decode can therefore overwrite a subset of an earlier image. The derived
-residency tracker observes completed decodes and retires overlapping picture
-allocations; a write into an image's table/program prefix retires its complete
-binding. It does not alter native allocation, restore overwritten pictures
-or infer that unused-looking data was originally meant to be active.
+decode can therefore overwrite a subset of an earlier image. Unused-looking data is not proof of an unused actor or a gameplay route.
 
 Fillmore Act 2 pictures `$28–2B` reference both the ordinary enemy atlas and
 the common action atlas at `$07:8000` (file `0x38000`). Under the ordinary
@@ -5938,44 +4588,12 @@ playthrough screenshots. No player or camera positions were changed.
 | Title entry `00/00` | Mode-7 raw character sheet at file `0x58300`, separately selected map/palette, reconstructed as a 1024×1024 canvas. Western canvases match; Japan changes the A, r, emblem and Japanese lettering. Copyright/company order is **not** baked into this canvas. |
 | Death Heim entry `07/01` | Separate BG1/BG2 compressed CHR, metatiles and chunk maps. Use action mask `$ECFF`, BG1 attribute `$1000` and BG2 `$0100`. BG1 matches; BG2 contains the first-statue horn redraw. Western BG2 resources render identically. Spare pages in the resource are not evidence of visible extra scenery. |
 
-Death Heim's host option captures `death_heim_art` at command3's room-profile
-boundary, before character loading. US file `0x7D146` at command7 destination
-VRAM word `$1000` identifies the compatible BG2 bank in rooms `$0107` and
-`$0807`. The data-only Japanese donor supplies 8192 decoded character bytes;
-native workspace, source cursors, flags and stack residue remain US-owned.
-The enhanced immutable scene receives the same bank after asset loading.
-Other rooms, OBJ graphics, palettes and gameplay metadata are untouched.
-Without a validated donor, both paths retain US characters. Package identity,
-size and content are validated once at startup, not during drawing.
-See [the package contract](regional-media.md).
-
-The town donor adapter replaces only reviewed character spans, not whole
-regional banks. Follower OBJ tiles `$1A2/$1A3/$1B2/$1B3` and
-`$1A8/$1A9/$1B8/$1B9` retain the common seven composition records and palette.
-The early BG bank replaces lair tiles `$1CE/$1CF/$1DE/$1DF`; the late bank
-does not. Both banks use the same Japanese pyramid tile `$113`. Other
-changed or unused-looking characters in those banks remain untouched.
-These BG characters occur in structure definitions, not in the immutable
-terrain atlas used by world navigation. Enhanced original-canvas and sprite
-paths receive the native VRAM changes; separately authored 3D models do not.
-The guarded `$02:B2C1` raw-copy tail follows the native act-completion filter,
-so selecting Japanese artwork never changes which bank the game loads.
-
 Go-extracted `title.copyright` records independently establish the footer:
 US `$02:A9DE` (1991 Enix/Quintet), JP `$02:A754` (1990 Quintet/Enix),
 EU/DE `$02:AA1D` and FR `$02:AA07` (1992 Enix/Quintet). Japan's record lacks
 the Western Nintendo licensing line. France translates the rights-reserved
 line. The five catalog ROM hashes and their source-operation hashes are
 retained; this comparison introduces no alternate text decoder.
-
-The title donor adapter captures `title_background` at `$02:B34D`, the
-initial palette tail, before `$02:A622` prepares the interactive title menu.
-The regional new-game draft therefore begins at that asset boundary; the
-later menu reuses it, and Continue still discards its requested rules. The
-raw CHR tail `$02:B2D2` and map-upload tail `$02:B4AB` consume the captured
-choice. Requests after the palette wait for another title load. Guards
-require scene `$0000` and the exact US source/extent/CPU shape; other asset
-commands retain native execution.
 
 | Title plane | US file source | Japanese file source | Extent |
 | --- | --- | --- | ---: |
@@ -6032,21 +4650,10 @@ stream: a future appearance-only toggle must preserve the selected gameplay
 velocities rather than blindly replacing that entire stream. Existing live
 projectiles should retain their chosen policy through cleanup.
 
-The host speed option uses the complete-room snapshot for both trap sources
-`$DFE5/$DFF3` and their copied-source children. State41's two Western rows keep
-their visual and stored delay1; only horizontal magnitude2 becomes3. Actual
-JP data has one row with delay0, so importing its entire sequence would also
-silently change flashing. US/PAL and JP velocities are checked against all
-five ROMs while explicitly retaining the selected Western timeline.
-
 This comparison also identified an independent collision difference: both
 Western arrow compositions have left/right/top/bottom extents `8,8,8,0`,
 whereas JP's single `$2C` composition is `16,16,8,0`. These are decoder input
-bytes before facing mirroring. They belong to the A04 collision policy, not
-the B12 speed or P01 artwork selector. The B12 speed adapter retains native US
-extents unless the independent room-scoped collision policy selects Japanese
-bounds. Both US flashing poses map to those same Japanese bounds; this does
-not import Japanese art.
+bytes before facing mirroring. Collision bounds differ independently of artwork and arrow velocity.
 
 ### Kasandora swordsman collision extents
 
@@ -6084,29 +4691,9 @@ the native decoder without assigning it an unsupported enemy name. An
 appearance-only option should not import donor collision headers unless
 the corresponding gameplay variation is also selected.
 
-The host's collision policy now projects these headers at the shared `$8E2F`
-row-acquisition boundary. It identifies the two swordsman sources above and
-the type`03/0D` source`$C863` state10/visual8 path. The latter is retained in
-the resource/controller but its ordinary entry unconditionally branches past
-the state10 selection; supporting that header does not establish natural use.
-Fresh extents are mirrored with `+$28` into `+$0A/$0E/$0C/$10`; the native
-reader still owns pose, duration, motion, registers and return state. Header
-signatures and bounded sequence/composition offsets reject incompatible assets.
-No shared animation or composition bytes are rewritten.
-
-The first pose has a separate `$969E→96A1` initializer continuation using the
-descriptor restored in Y. The reader recognizes its real `$969D` return word
-and leaves this call to that birth hook; it cannot mistake a stale `+$32` for
-the new enemy's identity. Extents are installed before the original bottom
-anchoring. All changed headers here retain their native bottom extent, so this
-does not move the authored spawn position. Later rows use the installed source.
-
 Native contact `$8970–8A3B` consumes these four extent words. Sword/magic
 resolution `$8A3C–8B66` also reads victim extents, then checks **attacker**
-composition parts through `$8B67`. The policy does not replace that narrow
-test, damage subtraction, deflection, rewards or death. It is independent
-from the Marahna arrow-speed rule and from graphics. Room/retry capture keeps
-current enemies stable after a settings edit; old companions default to US.
+composition parts through `$8B67`.
 
 ### European SIM helper and behavior-resource follow-up
 
@@ -6237,24 +4824,6 @@ four regional pictures for 6, 20, 6 and 20 updates, respectively. Native
 room loading supplies the `$4000` resource and placed enemies; their states,
 timers and controllers are not injected. SRAM is unchanged. This closes
 the ordinary state-10 ownership gap, not all branches of the shared controller.
-
-The recompilation exposes these as two independent, room-pinned presentation
-policies. At the existing US `$00:8E2F` reader, exact source/state/program and
-composition-header checks admit only the two measured swaps. The adapter
-temporarily supplies the native visual offset, delegates to the original
-reader, and restores the borrowed word on both normal and abnormal returns.
-Fresh actors are identified from descriptor Y at return `$969D`, before their
-`+32` source field is installed. Native row indices, delays, motion, collision
-extents and coroutine state remain unchanged; no donor ROM is needed.
-
-Five-ROM tests compare both programs and their selected collision headers.
-Decoder tests cover every row, policy mix, facing, accumulator width and
-birth/reuse path, including malformed shapes and escape restoration. A US-host
-run from the valid Aitos entrance reaches all four shared-enemy rows and compares
-CPU state and full WRAM against native execution, allowing only the selected
-visual/composition pointer to differ. It also verifies a queued US change stays
-inactive until retry. That controlled run does not reach the second humanoid;
-it is not full-act traversal or visual acceptance.
 
 ### Extra Palace music resource: silent upload
 
@@ -6601,13 +5170,6 @@ German +2 and French +5. The nine-entry straight attack's last delay is
 versus 23. Both choices were reached natively with different player heights.
 These are complete state durations, not whole fight or jump-cycle periods.
 
-The host's room-stable motion adapter implements the two swordsman delays
-independently. Only state29 row8 and state30 row4 of source `$BBA8` in map
-group2 are eligible. The original reader still selects the pose and collision
-header. Current attacks and later spawns keep their room snapshot until the
-next full room load/retry; no Japanese artwork is required. All fourteen rows
-of both attacks are included in the five-ROM and controller comparisons above.
-
 Marahna head records start at US `$00:E3A1`, JP `$00:E422`, EU `$00:E0A0`,
 German +2 and French +5. State `$23` is US/PAL visuals `$28,$26,$25` with
 delays `7,3,3`; JP inserts visual `$27`, delay 3, after `$28`. Native playback
@@ -6615,24 +5177,7 @@ therefore differs by four frames. This belongs to the ordinary room-6 head
 enemy, not the Act 1 plant boss or Viper.
 
 All four compositions37–40—including the inserted39, its four sprite parts,
-and bottom extent21—are retained byte-identically in the US bundle. The host
-withdrawal policy therefore needs no Japanese artwork. The room-pinned reader
-adapter maps the expanded logical sequence onto existing native rows/poses;
-native motion, mirrored extents and end-of-sequence handling still execute.
-It borrows only the current actor's row and visual-offset words during the
-non-yielding decode, never shared asset bytes. A tagged logical cursor in
-`+$1C` lets an in-flight sequence finish after a debug restore without depending
-on a host-only counter; native state initialization and the terminator clear
-it. Sources, room, complete US sequence and retained pose header are checked
-before applying this mapping. It is not a general-purpose donor-table editor.
-
-Paired held-player host runs follow the native Marahna room-loading chain and
-verify the resident ordinary animation bundle before measuring the sequence.
-They observe the three US poses over16 updates and four JP poses over20,
-then an untagged cursor in the next native state. Both exit normally. Earlier
-direct-warp fixtures retained the previous area's animation data and were
-discarded. These checks establish the animation lifecycle, not natural
-traversal, full contact/combat parity or manual visual acceptance.
+and bottom extent21—are retained byte-identically in the US bundle.
 
 ### Kasandora fire-enemy motion and spawn decisions
 
@@ -6676,22 +5221,6 @@ allocators and child-handler assignments execute unchanged. Horizontal/
 bouncing children use US `$C447/$C429`, JP `$C4D6/$C4B8`, PAL
 EU `$C10E/$C0F0` with the same language offsets. All results reproduce.
 
-The runtime implements four room-pinned policies: movement curves,
-close-player strategy and the two child-choice thresholds. The guarded
-`$8E2F` reader adapter projects only verified US rows13/14 into Japanese
-velocities, preserving native visual/duration outputs and facing mirrors.
-`$C3DD` handles the already-computed mirrored near-player decision;
-`$C3EA→C3F6` skips the Western hover and second curve. Threshold prefixes
-`$C405→C408` and `$C40A→C40D` replace only CMP flags after the original RNG
-call. Native allocators, child handlers, stack/yield ownership and pool-full
-failure paths remain unchanged. Explicit `$C3DA/$C3DD/$C3F9` boundaries
-prevent incoming branches from inlining past those hooks.
-
-Curves and strategy can be mixed without importing artwork or replacing
-shared animation buffers. Active rooms retain their captured policy through
-all parent/child generations; edits apply on the next room/retry. Shared
-initialization calls are excluded until descriptor ownership is established.
-
 ### European Wizard and Viper branch contracts
 
 The previously checked US/JP Wizard positioning and five Viper auxiliary
@@ -6724,7 +5253,7 @@ The main attack-choice prefix is a separate difference: US `$E4DB` uses
 `AND #3/BNE`, JP `$E55C` uses `LSR/BCS`, and European English `$E1DA`
 uses `AND #1/BNE` (German +2, French +5). Thus JP and PAL select lightning
 for the same 128 of 256 byte inputs, versus 64 in US. Their accumulator and
-carry results differ, so the integration retains separate choice programs.
+carry results differ, so these instruction sequences are not interchangeable.
 All follow the existing native RNG call without drawing a second value.
 
 States 4–6 select the three lightning directions. Their first movement
@@ -6758,24 +5287,6 @@ per-frame enemy-state edits are made, and SRAM is unchanged. Independent
 repeats have identical parsed JSON and trace data; ordering of some report
 object keys varies because the private harness iterates a set.
 
-The room-policy integration projects only the changed reader outputs at
-`$00:8E2F`: root sources `$E483/$F72A`, rooms `$0805/$0607`, state4–6 row0;
-floor sources `$E5CF/$E606`, original room only, state9/8 rows6–9. Exact US
-row signatures and `$7E:5000` ownership guard the adapter. The original reader
-still owns visuals, collision headers, register effects and coroutine state;
-shared animation buffers are not rewritten. The choice prefix `$E4DB` resumes
-native `$E4E0` or `$E4F7`. Explicit `$E4D2/$E4D8` boundaries prevent incoming
-controller paths from bypassing the hook. Numerical options need no donor art.
-
-Six controlled host encounters verify the integrated US/JP/European profiles
-in both original and rematch rooms. They preserve native enemies and RNG,
-hold a positioned invulnerable player, and exit normally without modifying
-the player's save. Observed state4 lightning segments are22/22/18 updates
-and11/11/9 in the rematch. Both original floor parts match their four-row
-22-versus15-update descent. Other lightning directions retain five-ROM reader
-and adapter coverage; these controls are not full victories or visual parity
-tests, and direct debug room requests are not natural traversal evidence.
-
 A separate static inventory now compares all 19 distinct boss-slot program
 sets across five ROMs, including row counts, visuals, durations, velocities
 and extents. It is a resource-difference inventory, not a claim that every
@@ -6804,12 +5315,6 @@ intent. No overall percentage of PAL changes has been classified as
 compensation. A host implementation should distinguish source gameplay
 parameters from source clock/pacing policy: blindly using PAL update counts
 with a US-rate clock can reproduce neither release's real-time behavior.
-
-**Planned host policy, approved September 22:** regional options will retain
-the existing nominal 60 Hz simulation, including European profiles. Selected
-regional update counts will not receive automatic 50/60 rescaling. This is
-European rules at normal host pacing, not native PAL wall-clock reproduction;
-the original-ROM measurements above remain unchanged.
 
 ### Regional action raster tables
 
@@ -6856,26 +5361,6 @@ The Aitos Act-1 `$04/00` raster is horizontal parallax, not a rising-lava
 controller. Neither this result nor the mosaic difference resolves the
 separate reported lava-speed claim.
 
-**Host integration:** `action_room_mosaic` stores only the 175 reachable
-one-bit values for each of the three distinct patterns. Room entry/retry
-captures `aitos_mosaic_pattern` and projects the same immutable values into
-the enhanced room source. The guarded native `$02:939C → $02:93BA` seam
-replaces the complete 112-band loop, retaining native setup, terminator,
-HDMA publication and return. It requires room `$0504`, scratch high byte1
-and the expected entry registers; US and unrelated contexts delegate.
-The final carry retains the US instruction's source-bit4 behavior, which
-is independent of the displayed bit0. No foreign code is imported.
-
-Tests compare all64 phases and eligible status-flag combinations, plus
-the normalized values against all five ROMs. The host raster continues
-to display the previous tick's table, including the native first-frame
-hold. A 13,000-tick US/JP/European settings fixture covers all phases,
-pending edits and room transitions: 4,361 compared frames and 4,923,569
-raster-register comparisons have no mismatches, including MOSAIC. It also
-reports no background tile mismatches or live-source fallbacks. These are
-controlled room loads, not a natural full-act playthrough. Simulation
-remains60Hz for every profile.
-
 ### Remaining European boss-program differences
 
 The five outstanding PAL resource leads now have native row-consumer and
@@ -6917,24 +5402,6 @@ The projectile-producing attack still obeys the previously documented
 Beginner gate. Its animation delay, mandatory flight interval and actual
 offscreen test are distinct mechanics; the delay alone is insufficient
 to reproduce the European behavior.
-
-The host's two room-pinned leaves now implement the delay and mandatory
-flight interval separately. The native `$8E2F` adapter validates both complete
-US one-row programs before changing their delay from0 to15. At `$A655`, the
-regional prefix places four remaining repetitions in the high byte of the
-projectile's local state selector `+$38`; its low byte stays1 or2. `$A65E`
-decrements that count and tails to the real `$A65B JSR $8657`, feeding only
-the original state index. Once the count reaches zero, the native flag test,
-repeat branch and retirement code resume unchanged. This field is owned by
-this projectile controller; its `$8657` helper does not use `+$38`.
-
-Guards require room `$0304`, inherited descriptor `$D646`, animation
-`$7E:5000`, matching child state and the real `$A65D` yield-return word.
-There is no host timer or synthetic return frame. An initialized count is
-honored even without the host room cache after a debug restore, preventing a
-packed value from reaching the original animation-index load. The counter is
-discarded on native death/slot reuse; no live projectile is restarted by an
-overlay request. Beginner's producer gate remains a separate difficulty rule.
 
 #### Marahna head and projectile preparation
 
@@ -6980,24 +5447,6 @@ addresses. The existing absolute-memory comparisons in the linked visual
 controller remain outside these gameplay changes; they are not silently
 rewritten as immediate constants.
 
-**Recomp integration.** Four room-pinned leaves select these timelines and
-offsets independently. `$00:E878→E87B` changes only LDA/NZ before the real
-facing helper. `$E8B5→E8BB` retains STZ, performs the two PAL Y increments and
-LDA1, then resumes the actual animation call. No allocation or return frames
-are synthesized. The guarded `$8E2F` adapter borrows only the actor's row and
-visual-offset fields while the native non-yielding reader runs, then publishes
-a high-byte-tagged logical cursor and selected delay.
-
-US file`0xDC622` expands to1549 bytes at`$5000–560C`; its21 contiguous
-compositions end exactly there. Command0's `$02:B69C` loader writes the stated
-length; graphics/raster workspace begins at`$6000`. Only this validated
-room0406/sourceE7C6/base5000 profile may populate the four64-byte slots at
-`$5F00/$5F40/$5F80/$5FC0`. Each added pose repeats the seed pose's two CHR
-references`$023E/$023F`; complete5–8-part records match all three PAL ROMs.
-Existing asset bytes and ordinals remain intact. Native OAM, host widescreen
-and collision consume the same full composition pointer/extents. No donor
-pixels, general-purpose WRAM allocation or renderer-only substitution.
-
 Tests cover81 source mixes, both accumulator widths, all four flips, native
 CPU/return effects, cacheless active-program completion, malformed profiles,
 escaped-return rollback, wrapping Y inputs and five-ROM row/composition/code
@@ -7022,16 +5471,6 @@ the sequence, the controller faces the player and selects movement state
 23/24/25 according to vertical distance. Removing the first two poses
 therefore changes both the interim collision footprint and when the next
 direction is chosen, not just the displayed animation.
-
-The host's independently selectable turn policy now advances the US state22
-cursor from row0 to row2 before the native reader. All four original row
-signatures must match before applying it. The reader then acquires the actual
-remaining pose and collision header; no donor graphics or fabricated pose
-metadata are needed. The phase-two stats have their own initializer policies,
-so choosing the short turn alone does not reduce minion HP or score reward.
-Mixed timing policies, both accumulator widths/facings, malformed owners and
-unexpected reader-return tokens are covered by1,944 adapter cases. Native
-full-fight, damage and pool-contention validation remains separate.
 
 **Evidence scope.** 634 isolated animation-row inputs and 580 auxiliary
 fixtures cover all five ROMs, both facings, native actor-loop delays,

@@ -761,7 +761,7 @@ its message, then follow this trace back to the template. Inspect the
 placeholder in that body to see where a number receives italics or a word gets
 a different role. For a runtime value's producer, see
 `src/actraiser/actraiser_localization_values.c`; the semantic catalog lists its
-allowed routes and type. [Following a text template](text-template-core.md)
+allowed routes and type. [Text templates and standalone sample](text-template-core.md)
 documents the full code path and the independent portable host.
 
 ## Locked anchors and safe extension

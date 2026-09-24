@@ -78,4 +78,3 @@ artificially large peak. These stages overlap existing parent stages.
 
 The existing per-scene window still resets on scene changes. It is not a
 cross-transition hitch trace, and a short-lived scene may end before a report.
-See [frame-pacing work](frame-pacing.md) for scope and validation.

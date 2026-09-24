@@ -1,4 +1,4 @@
-# Following a text template
+# Text templates and the standalone dialogue sample
 
 V2 packs keep wording, typed values and appearance in readable templates.
 The builder performs v1 migration; the game consumes explicit v2 presentation.
@@ -47,18 +47,6 @@ Physical source lines join with spaces, including within a tag scope. Close
 tags before explicit structural commands or `|` cell separators. Escape a
 literal `<` as `\<`, a backslash as `\\`, and braces as `{{` and `}}`.
 
-The code path is short enough to follow directly:
-
-| Step | Entry point | What to inspect |
-| --- | --- | --- |
-| Parse | `ArLanguagePack_ParseDocument` in `src/localization/language_pack.c` | Script path/line, message ID, defaults, typed operations and named treatments |
-| Substitute and progress | `ArDialogueSession_BeginSource` and `GetPage` in `src/localization/dialogue_session.c` | Host value contract, resolved UTF-8, style ranges, waits/controls and origin |
-| Resolve appearance | `ArTextTemplate_ResolveAppearance` in `src/localization/text_template.c` | Named inks, host palette bindings, font role and authored scale |
-| Shape and wrap | `ArSdlBidiText_CreateStyled` in `src/platform/sdl/bidi_text_sdl.c` | Bidi/script order, actual styled advances, preferred breaks and line baselines |
-| Shape one contextual run | `ArSdlStyledRun_Create` in `src/platform/sdl/styled_run_sdl.c` | Selected font variant, SDL glyph operations, complete cluster boundaries |
-| Paint | `ArSdlStyledPaint_Apply` in `src/platform/sdl/styled_paint_sdl.c` | Concrete inks, selective numeral slant, shadow and pixel ownership |
-| Fit and retain | `ArSdlTextRasterizer` and `ArTextSurfaceCache` | Final size, immutable complete-page bitmap, cache identity and reveal geometry |
-
 Font/size/italic changes require a complete shaped-cluster boundary in both
 neighboring variants. For example, changing the font halfway through a ligature
 can produce an explicit diagnostic; styling the complete word avoids it. Color
@@ -70,8 +58,7 @@ directional/script text and reshapes at actual wrap boundaries.
 The complete page is measured before its first character appears. Each line
 retains its own top, baseline and height, including at least the default font's
 strut. Reveal advances logical text while pixels follow their owning shaped
-cluster. A font role's primary/fallback assets are leased by a backend instance;
-active layouts pin the font variants they use. At most 32 variants are retained.
+cluster.
 
 ## Run the independent host
 
@@ -107,27 +94,8 @@ pixels, line metrics and cluster metadata belong to the rasterizer until
 `ArTextRasterizer_ReleaseBitmap`. Cache metadata belongs to its cache entry.
 Stable session state must be serialized by named fields, never as a raw C struct.
 
-The game adapter now follows this path:
-
-1. `dialogue_session` expands typed values and returns text, style ranges and
-   the requested/resolved message IDs with the actual template path and line.
-2. `actraiser_localization_runtime` normalizes text into one owned
-   `ActRaiserResolvedText`. The composer, HUD, credits and destination label use
-   that result. Name-entry edits move its value and style ranges together.
-3. `actraiser_localization_text_style` compiles only the appearances used by the
-   message. Native inks keep a symbolic binding until the current frame samples
-   their source. Frame storage owns the resolved appearance and template origin.
-4. `localized_text_presenter` sends whole pages or grid-cell views to the shared
-   renderer. The view offset keeps styles attached to the original words.
-   Cache identity includes appearances; revealing more characters reuses the
-   already fitted layout.
-
-Layout names and native inks are declared in
-`tools/data/localization/semantic-catalog-v1.json` and generated for both the C
-runtime and Go authoring tools. The machine-readable
-[authoring reference](language-authoring-reference.json) lists each route's
-layout and the available ink sources. The catalog's filename version refers to
-its schema, independently of a language pack's format version.
+The machine-readable [authoring reference](language-authoring-reference.json)
+lists each route's layout and available ink sources.
 
 Placement policies never flatten explicit template breaks. Fitted labels can
 disable automatic word wrapping while retaining `@line` and paragraph spacing;
@@ -154,24 +122,7 @@ shares a 512-span pool. Exceeding presentation capacity keeps
 the affected native surface. These are host presentation budgets; the portable
 parser's larger limits are independent. Workshop validation enforces those budgets before saving, previewing or publishing.
 
-The game and Workshop share retained-page composition in
-`actraiser_dialogue_window`, fixed-page normalization in
-`actraiser_localization_fixed_text`, and the name-entry, credits, HUD and
-world-label adapters. The preview worker (`--text-preview-v1`) runs without a
-ROM or settings file against immutable private snapshots. It returns bounded
-PNG sheets, reveal clocks, controls and source/font diagnostics; the browser
-only plays these images. This prevents browser font metrics from diverging
-from the game. The protocol version is independent of pack format version.
-
-The name-entry field preserves eight fixed cells and uniform underlines while
-its surrounding keyboard uses explicit gutters. Styled field edits retain the
-background layout. Font provenance identifies actual fallback resources and
-fitted size, and survives layout caching. Arabic, Hebrew, Japanese and mixed
-Latin/script fixtures exercise the real supplied fonts.
-
-The native game owns gameplay, scene palettes, hardware observations and native
-art capture. Preview inputs supply sample values/colors; reserved artwork is
-clearly identified. Reusing the portable core in another game requires a source
+Reusing the portable core in another game requires a source
 and value contract, control acknowledgements, font resources and a renderer
 host. ActRaiser route IDs, palettes, geometry, ROM control timing and v1 migration
 remain outside the portable parser/session/shaping mechanics.
