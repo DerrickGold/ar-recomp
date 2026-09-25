@@ -9,7 +9,6 @@ import (
 	"mime/multipart"
 	"os"
 	"path/filepath"
-	"runtime"
 )
 
 type stagedAsset struct {
@@ -131,32 +130,9 @@ func readVorbisUpload(header *multipart.FileHeader, label string) ([]byte, error
 }
 
 func replaceStagedFile(asset stagedAsset) error {
-	if err := os.Rename(asset.Temporary, asset.Final); err == nil {
-		return nil
-	} else if runtime.GOOS != "windows" {
-		return err
-	}
-	// Windows does not replace an existing file with Rename. Keep the previous
-	// file as a backup until its replacement is in place.
-	if _, err := os.Stat(asset.Final); err != nil {
-		return os.Rename(asset.Temporary, asset.Final)
-	}
-	backupFile, err := os.CreateTemp(filepath.Dir(asset.Final), ".snesbuild-backup-*")
-	if err != nil {
-		return err
-	}
-	backup := backupFile.Name()
-	_ = backupFile.Close()
-	_ = os.Remove(backup)
-	if err := os.Rename(asset.Final, backup); err != nil {
-		return err
-	}
-	if err := os.Rename(asset.Temporary, asset.Final); err != nil {
-		_ = os.Rename(backup, asset.Final)
-		return err
-	}
-	_ = os.Remove(backup)
-	return nil
+	// Go also replaces existing files on Windows. If replacement fails, leave
+	// the original in place rather than moving it away and attempting a rollback.
+	return os.Rename(asset.Temporary, asset.Final)
 }
 
 func writeAtomicFile(path string, content []byte) error {

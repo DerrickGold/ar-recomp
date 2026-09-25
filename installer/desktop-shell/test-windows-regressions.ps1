@@ -3,22 +3,43 @@
 param(
     [Parameter(Mandatory = $true)][string]$TestsDirectory,
     [ValidateSet('amd64', 'arm64')][string]$Architecture = 'arm64',
-    [string]$OtherDriveRoot
+    [string]$OtherDriveRoot,
+    # A writable folder on exFAT/FAT32 exercises portable-drive installation.
+    [string]$MediaDriveRoot,
+    # Optional built game (or preview worker) and bundled font for playback.
+    [string]$GameExecutable,
+    [string]$BuiltinFont
 )
 $ErrorActionPreference = 'Stop'
 if ($env:OS -ne 'Windows_NT') { throw 'This test must run on Windows.' }
 $tests = (Resolve-Path -LiteralPath $TestsDirectory).Path
 $oldOther = $env:AR_WINDOWS_TEST_OTHER_DRIVE
+$oldMedia = $env:AR_WINDOWS_TEST_MEDIA_ROOT
+$oldPreview = $env:AR_AUTHOR_TEXT_PREVIEW
+$oldFont = $env:AR_AUTHOR_PREVIEW_FONT
+if ([bool]$GameExecutable -ne [bool]$BuiltinFont) {
+    throw 'Supply both -GameExecutable and -BuiltinFont to check Unicode playback.'
+}
 $patterns = @{
     desktop = '^(TestPathWithin|TestWindowsContainmentAcrossVolumes|TestWindowsOtherDriveOutputAndImport|TestLocalDataPathsAcceptNativeSeparatorsAndRejectEscapes|TestNativeDataPathsSeedDefaultsAssetsAndArchiveHelper|TestNestedPortableMarkerUsesNativeContainmentAndPortableContents)$'
-    builder = '^(TestStoreROMReplacesExistingCopy|TestStoreROMLockedDestinationPreservesPreviousCopy)$'
+    builder = '^(TestStoreROMReplacesExistingCopy|TestStoreROMLockedDestinationPreservesPreviousCopy|TestWriteAtomicFileReplacesExisting|TestWriteAtomicFileLockedDestinationPreservesOriginal)$'
+    regionalmedia = '^(TestDonorPublicationPreservesExisting|TestDonorPublicationConcurrent|TestDonorWindowsPaths|TestWindowsDonorPublicationLongPath|TestWindowsDonorPublicationOnSelectedDrive)$'
+    textpreview = '^TestGamePlaybackUnicodePaths$'
     launcher = '^(TestGameStartupFailureHasShareableLog|TestSnesbuildCancellationAfterStdoutCloses)$'
     host = '^(TestWindowsJobReapsCompilersButPreservesDetachedGame|TestBackendShutdownWaitsForOwnedHelperCleanup|TestBackendStartupCancellationReapsProcess|TestBackendAlreadyCancelledDoesNotStart|TestWorkspaceLock)$'
 }
 try {
     [Environment]::SetEnvironmentVariable('AR_WINDOWS_TEST_OTHER_DRIVE', $null, 'Process')
+    [Environment]::SetEnvironmentVariable('AR_WINDOWS_TEST_MEDIA_ROOT', $null, 'Process')
     if ($OtherDriveRoot) { $env:AR_WINDOWS_TEST_OTHER_DRIVE = (Resolve-Path -LiteralPath $OtherDriveRoot).Path }
-    foreach ($package in @('desktop', 'builder', 'launcher', 'host')) {
+    if ($MediaDriveRoot) { $env:AR_WINDOWS_TEST_MEDIA_ROOT = (Resolve-Path -LiteralPath $MediaDriveRoot).Path }
+    $packages = @('desktop', 'builder', 'regionalmedia', 'launcher', 'host')
+    if ($GameExecutable) {
+        $env:AR_AUTHOR_TEXT_PREVIEW = (Resolve-Path -LiteralPath $GameExecutable).Path
+        $env:AR_AUTHOR_PREVIEW_FONT = (Resolve-Path -LiteralPath $BuiltinFont).Path
+        $packages += 'textpreview'
+    }
+    foreach ($package in $packages) {
         $test = Join-Path $tests "actraiser-$package-windows-hardening-$Architecture.test.exe"
         if (-not (Test-Path -LiteralPath $test)) { throw "Missing test executable: $test" }
         # These fixtures are self-contained. Other package tests intentionally
@@ -32,6 +53,11 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "UTF-8 filesystem tests failed ($LASTEXITCODE)." }
     Write-Host 'PASS: native Windows Builder hardening regressions'
     if (-not $OtherDriveRoot) { Write-Host 'SKIP: real cross-drive filesystem test (supply -OtherDriveRoot); lexical drive tests still ran.' }
+    if (-not $MediaDriveRoot) { Write-Host 'SKIP: exFAT/FAT32 media installation (supply -MediaDriveRoot).' }
+    if (-not $GameExecutable) { Write-Host 'SKIP: Unicode playback (supply -GameExecutable and -BuiltinFont).' }
 } finally {
     [Environment]::SetEnvironmentVariable('AR_WINDOWS_TEST_OTHER_DRIVE', $oldOther, 'Process')
+    [Environment]::SetEnvironmentVariable('AR_WINDOWS_TEST_MEDIA_ROOT', $oldMedia, 'Process')
+    [Environment]::SetEnvironmentVariable('AR_AUTHOR_TEXT_PREVIEW', $oldPreview, 'Process')
+    [Environment]::SetEnvironmentVariable('AR_AUTHOR_PREVIEW_FONT', $oldFont, 'Process')
 }

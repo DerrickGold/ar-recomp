@@ -5,15 +5,17 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	lk "github.com/DerrickGold/ar-recomp/installer/internal/localization"
 	"image"
 	"image/draw"
 	"image/png"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"testing/fstest"
+
+	lk "github.com/DerrickGold/ar-recomp/installer/internal/localization"
 )
 
 const testManifest = `[pack]
@@ -381,4 +383,74 @@ func TestGamePlaybackBinaryScenario(t *testing.T) {
 	if len(movie.Frames) == 0 || movie.Frames[len(movie.Frames)-1].Kind != "end" {
 		t.Fatal("binary request did not finish playback")
 	}
+}
+
+// Use a Unicode TEMP directory as well as a Unicode font path: both the
+// worker's file reads and its report/image writes must honor UTF-8 argv.
+func TestGamePlaybackUnicodePaths(t *testing.T) {
+	binary := os.Getenv("AR_AUTHOR_TEXT_PREVIEW")
+	if binary == "" {
+		t.Skip("set AR_AUTHOR_TEXT_PREVIEW to the native worker or game")
+	}
+	builtin := os.Getenv("AR_AUTHOR_PREVIEW_FONT")
+	if builtin == "" {
+		root, err := filepath.Abs("../../..")
+		if err != nil {
+			t.Fatal(err)
+		}
+		builtin = filepath.Join(root, "game-assets/fonts/noto/NotoSans-SemiCondensedExtraBold.ttf")
+	}
+	root := filepath.Join(t.TempDir(), "Playback 日本 🎮")
+	if err := os.Mkdir(root, 0700); err != nil {
+		t.Fatal(err)
+	}
+	font, err := os.ReadFile(builtin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	builtin = filepath.Join(root, "フォント.ttf")
+	if err := os.WriteFile(builtin, font, 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"TMPDIR", "TMP", "TEMP"} {
+		t.Setenv(key, root)
+	}
+	pack, err := lk.LoadAuthorPack(fstest.MapFS{
+		"pack.ini":            {Data: []byte(testManifest)},
+		"text/example.artext": {Data: []byte(":: dialogue.event.relay.aitos\n@layout flow\nUnicode paths.\n@end\n")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	movie, err := Run(context.Background(), binary, builtin, "dialogue.event.relay.aitos", pack, pack, Defaults())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(movie.Frames) == 0 || len(movie.Sheets) == 0 || movie.Frames[len(movie.Frames)-1].Kind != "end" {
+		t.Fatal("Unicode path playback did not produce a complete movie")
+	}
+	t.Run("report write error", func(t *testing.T) {
+		manifest, err := snapshot(filepath.Join(root, "draft"), pack)
+		if err != nil {
+			t.Fatal(err)
+		}
+		output := filepath.Join(root, "blocked-output")
+		// A directory at the report filename fails the open on every platform,
+		// including elevated test runners where read-only permissions do not.
+		if err := os.MkdirAll(filepath.Join(output, "report.json"), 0700); err != nil {
+			t.Fatal(err)
+		}
+		input, err := encodeScenario(Defaults())
+		if err != nil {
+			t.Fatal(err)
+		}
+		command := exec.CommandContext(t.Context(), binary, "--text-preview-v1", manifest, manifest, builtin,
+			"dialogue.event.relay.aitos", output)
+		command.Dir = root
+		command.Stdin = bytes.NewReader(input)
+		diagnostic, err := command.CombinedOutput()
+		if err == nil || !strings.Contains(string(diagnostic), "cannot open playback report:") {
+			t.Fatalf("report failure did not identify file access: %s (%v)", diagnostic, err)
+		}
+	})
 }

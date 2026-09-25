@@ -145,7 +145,7 @@ func publishDonor(dir *os.Root, name string, data []byte, replace bool) error {
 	if err = file.Close(); err != nil {
 		return err
 	}
-	// Go1.24 lacks Root.Rename/Link. Verify the pinned directory before the
+	// Go 1.24 lacks Root.Rename/Link. Verify the pinned directory before the
 	// same-directory atomic publication; never truncate a previous donor.
 	opened, err := dir.Stat(".")
 	if err != nil {
@@ -160,9 +160,8 @@ func publishDonor(dir *os.Root, name string, data []byte, replace bool) error {
 	}
 	from, to := filepath.Join(dir.Name(), temporary), filepath.Join(dir.Name(), name)
 	if !replace {
-		// Link is an exclusive publication: a concurrent install cannot be
-		// silently overwritten after our initial existence check.
-		if err = os.Link(from, to); errors.Is(err, os.ErrExist) {
+		// A concurrent install must not be overwritten after the initial check.
+		if err = publishNewDonor(from, to); errors.Is(err, os.ErrExist) {
 			return ErrReplaceRequired
 		}
 		return err

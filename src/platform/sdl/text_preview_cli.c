@@ -1,3 +1,5 @@
+#include "snesrecomp/support/utf8_fs.h"
+
 #include "platform/sdl/text_preview_cli.h"
 
 #include <SDL3/SDL.h>
@@ -635,10 +637,17 @@ static bool Playback(Preview *p) {
   if (!SkipToPage(p) || !ArDialogueSession_GetPage(&p->session, &page))
     return false;
   char path[4096];
-  snprintf(path, sizeof(path), "%s/report.json", p->output);
-  p->report = fopen(path, "wb");
-  if (!p->report)
+  int length = snprintf(path, sizeof(path), "%s/report.json", p->output);
+  if (length < 0 || (size_t)length >= sizeof(path)) {
+    snprintf(p->error, sizeof(p->error), "playback report path is too long");
     return false;
+  }
+  p->report = sr_fopen(path, "wb");
+  if (!p->report) {
+    snprintf(p->error, sizeof(p->error), "cannot open playback report: %s",
+             strerror(errno));
+    return false;
+  }
   fprintf(p->report,
           "{\"version\":1,\"width\":%d,\"height\":%d,\"page\":%u,\"pages\":%u,"
           "\"nativeBounds\":%s,\"source\":",
@@ -775,8 +784,11 @@ int ArSdlTextPreview_Run(int argc, char **argv) {
                   (int)sizeof(poster))
       ok = SDL_SavePNG(p->canvas, poster);
   }
-  if (p->report && fclose(p->report))
+  if (p->report && fclose(p->report)) {
+    snprintf(p->error, sizeof(p->error), "cannot finish playback report: %s",
+             strerror(errno));
     ok = false;
+  }
   if (!ok)
     fprintf(stderr, "text preview: %s\n",
             p->error[0]         ? p->error
