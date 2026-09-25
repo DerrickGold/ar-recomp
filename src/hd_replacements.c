@@ -1,6 +1,7 @@
 #include "snesrecomp/support/utf8_fs.h"
 
 #include <stdio.h>
+#include <limits.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -154,6 +155,53 @@ int HdReplacements_Load(const char *path) {
               "and not implemented yet; entry inert\n", entry->name);
   }
   return g_hd_replacement_count;
+}
+
+bool HdReplacements_PrepareTitleCoverage(HdReplacement *entry,
+    const uint8_t *rgba, int width, int height,
+    uint8_t **padded_rgba, int *padded_width) {
+  if (!entry || !rgba || width <= 0 || height <= 0 ||
+      !padded_rgba || !padded_width) return false;
+  *padded_rgba = NULL;
+  *padded_width = width;
+  const bool screen = entry->plane == kHdPlane_Screen &&
+      entry->source == SR_PPU_OVERLAY_BG1 &&
+      !strcmp(entry->name, "title-logo") &&
+      entry->x0 == 11 && entry->y0 == 27 &&
+      entry->x1 == 248 && entry->y1 == 122;
+  const bool canvas = entry->plane == kHdPlane_Mode7 &&
+      !strcmp(entry->name, "title-swirl") &&
+      entry->canvas_x0 == 139 && entry->canvas_y0 == 156 &&
+      entry->canvas_x1 == 376 && entry->canvas_y1 == 251;
+  /* Native JP bounds are [8,27,248,122), versus US [11,27,248,122).
+   * Keep the screen texture and destination unchanged: even an exact
+   * rational padding can disturb the GPU's nearest-texel tie rounding. */
+  if (screen) {
+    entry->x0 -= 3;
+    entry->image_inset_left = 3;
+    return true;
+  }
+  /* Three of 237 canvas pixels = 1/79 of the image width. The bundled
+   * 2212x760 art therefore needs exactly 28 transparent columns. Moving
+   * both image and native-removal bounds left by three keeps every original
+   * texel at its authored location, including throughout the Mode-7 swirl.
+   * Do not round a fractional gutter: that would subtly stretch custom art. */
+  if (!canvas || width % 79 != 0) return true;
+  const int padding = width / 79;
+  if (width > INT_MAX - padding) return false;
+  const int expanded_width = width + padding;
+  if (expanded_width > INT_MAX / 4 ||
+      (size_t)height > SIZE_MAX / ((size_t)expanded_width * 4u)) return false;
+  const size_t pitch = (size_t)expanded_width * 4u;
+  uint8_t *expanded = calloc((size_t)height, pitch);
+  if (!expanded) return false;
+  for (int y = 0; y < height; ++y)
+    memcpy(expanded + (size_t)y * pitch + (size_t)padding * 4u,
+           rgba + (size_t)y * (size_t)width * 4u, (size_t)width * 4u);
+  entry->canvas_x0 -= 3;
+  *padded_rgba = expanded;
+  *padded_width = expanded_width;
+  return true;
 }
 
 /* ---- per-frame policy -------------------------------------------------- */

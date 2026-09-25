@@ -67,6 +67,32 @@ func TestTitleSourceSelectors(t *testing.T) {
 		if !bytes.Equal(order, []byte{1, 2, 3}) {
 			t.Fatal(name, "title upload order", order)
 		}
+		// The HD title's US placement starts at x=11, but JP has nine ink
+		// pixels at x=8..10. The host's exact three-pixel coverage gutter
+		// must contain the union without moving/scaling the authored image.
+		outsideUS := 0
+		for y := 0; y < 140; y++ {
+			for x := 0; x < 256; x++ {
+				cx, cy := x+128, y+129
+				tile := int(tiles[(cy/8)*128+cx/8])
+				if characters[tile*64+(cy%8)*8+cx%8] == 0 {
+					continue
+				}
+				if x < 8 || x >= 248 || y < 27 || y >= 122 {
+					t.Fatalf("%s native title pixel (%d,%d) outside HD coverage", name, x, y)
+				}
+				if x < 11 {
+					outsideUS++
+				}
+			}
+		}
+		wantOutside := 0
+		if name == "ar-jp.sfc" {
+			wantOutside = 9
+		}
+		if outsideUS != wantOutside {
+			t.Fatalf("%s left-edge coverage: %d pixels, want %d", name, outsideUS, wantOutside)
+		}
 		if !bytes.Equal(palette[0x20*2:0x2a*2], us[0xe3a93+0x20*2:0xe3a93+0x2a*2]) ||
 			!bytes.Contains(rom, us[0x12a76:0x12a9c]) {
 			t.Fatal(name, "native title palette cycle incompatible")

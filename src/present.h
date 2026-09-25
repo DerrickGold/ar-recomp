@@ -82,6 +82,7 @@ typedef struct FrameSlotHdEntry {
   bool active;
   int source;
   bool brightness_mod;
+  int image_inset_left; /* preserve image placement inside an erasure gutter */
   /* Opaque host texture, valid for a synchronous present. Texture reloads and
    * render-target resets invalidate retained slots, so their handlers must call
    * HostDisplay_InvalidatePresentHistory(). Any new FrameSlot retention site

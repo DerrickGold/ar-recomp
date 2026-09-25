@@ -308,12 +308,102 @@ static void TestEvaluateGates(void) {
   CHECK(g_capture_log.calls == 0 && !g_hd_replacements[0].active);
 }
 
+static void TestRegionalTitleCoverage(void) {
+  const int width = 2212, height = 760, padding = 28;
+  const size_t pitch = (size_t)width * 4u;
+  uint8_t *rgba = malloc(pitch * height);
+  CHECK(rgba != NULL);
+  if (!rgba) return;
+  for (size_t i = 0; i < pitch * height; ++i) rgba[i] = (uint8_t)(i * 13u);
+  for (int mode7 = 0; mode7 <= 1; ++mode7) {
+    CHECK(HdReplacements_Load(WriteManifest(kTitleManifest)) == 1);
+    HdReplacement *entry = &g_hd_replacements[0];
+    if (mode7) {
+      strcpy(entry->name, "title-swirl");
+      entry->plane = kHdPlane_Mode7;
+      entry->canvas_x0 = 139; entry->canvas_y0 = 156;
+      entry->canvas_x1 = 376; entry->canvas_y1 = 251;
+    }
+    uint8_t *padded = NULL;
+    int expanded_width = 0;
+    CHECK(HdReplacements_PrepareTitleCoverage(entry, rgba, width, height,
+                                            &padded, &expanded_width));
+    CHECK(mode7 ? padded && expanded_width == 2240
+                : !padded && expanded_width == width && entry->image_inset_left == 3);
+    if (mode7 && !padded) continue;
+    const size_t expanded_pitch = (size_t)expanded_width * 4u;
+    const uint8_t clear[28 * 4] = {0};
+    for (int y = 0; mode7 && y < height; ++y) {
+      CHECK(!memcmp(padded + (size_t)y * expanded_pitch, clear, sizeof(clear)));
+      CHECK(!memcmp(padded + (size_t)y * expanded_pitch + padding * 4u,
+                    rgba + (size_t)y * pitch, pitch));
+    }
+    /* Exact mapping: same texel scale and original image origin, not a
+     * widened/stretched logo. Canvas and screen differ only by scroll. */
+    const int old_left = mode7 ? 139 : 11;
+    const int left = mode7 ? entry->canvas_x0 : entry->x0;
+    const int right = mode7 ? entry->canvas_x1 : entry->x1;
+    CHECK(left == old_left - 3 && right - left == 240);
+    if (mode7) {
+      CHECK(expanded_width * 237 == width * 240);
+      CHECK((old_left - left) * expanded_width == padding * 240);
+    } else {
+      CHECK(left + entry->image_inset_left == old_left);
+      CHECK(right - left - entry->image_inset_left == 237);
+    }
+    ResetRuntime(); MakeTitleState();
+    if (mode7) {
+      entry->pixels = padded;
+      entry->pixels_width = expanded_width; entry->pixels_height = height;
+      g_ppu_state.mode7_matrix[1] = 0x123;
+      entry->conditions[3].negate = 1; // non-identity title swirl
+    } else entry->texture = (ArRenderTexture){1};
+    HdReplacements_EvaluateFrame();
+    if (mode7) CHECK(g_m7_log.calls == 1 && g_m7_log.x0 == 136 &&
+                     g_m7_log.x1 == 376 && g_m7_log.width == expanded_width);
+    else CHECK(g_capture_log.calls == 1 && g_capture_log.x == 8 &&
+               g_capture_log.width == 240);
+    // Repeat preparation does not add a second gutter.
+    uint8_t *again = NULL; int again_width = 0;
+    CHECK(HdReplacements_PrepareTitleCoverage(entry, mode7 ? padded : rgba,
+        expanded_width, height, &again, &again_width));
+    CHECK(!again && again_width == expanded_width);
+    g_settings.hd_replacements = false;
+    HdReplacements_EvaluateFrame();
+    CHECK(!entry->active);
+    free(padded);
+  }
+  for (int custom = 0; custom < 4; ++custom) {
+    CHECK(HdReplacements_Load(WriteManifest(kTitleManifest)) == 1);
+    HdReplacement *entry = &g_hd_replacements[0];
+    int image_width = width;
+    if (custom == 0) strcpy(entry->name, "custom-title");
+    if (custom == 1) entry->x0 = 7;
+    if (custom == 2) entry->source = SR_PPU_OVERLAY_BG2;
+    if (custom == 3) { // No fractional-gutter rounding for custom affine art.
+      image_width = 2087;
+      entry->plane = kHdPlane_Mode7;
+      strcpy(entry->name, "title-swirl");
+      entry->canvas_x0 = 139; entry->canvas_y0 = 156;
+      entry->canvas_x1 = 376; entry->canvas_y1 = 251;
+    }
+    const HdReplacement before = *entry;
+    uint8_t *padded = NULL; int expanded_width = 0;
+    CHECK(HdReplacements_PrepareTitleCoverage(entry, rgba, image_width, height,
+                                            &padded, &expanded_width));
+    CHECK(!padded && expanded_width == image_width);
+    CHECK(!memcmp(entry, &before, sizeof(before)));
+  }
+  free(rgba);
+}
+
 int main(void) {
   TestParseTitleEntry();
   TestParseRejections();
   TestReservedPlanesParseButStayInert();
   TestMode7Entries();
   TestEvaluateGates();
+  TestRegionalTitleCoverage();
   if (g_failures) {
     fprintf(stderr, "hd manifest tests: %d failure(s)\n", g_failures);
     return 1;

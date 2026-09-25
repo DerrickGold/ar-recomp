@@ -820,6 +820,7 @@ void FrameSlot_Capture(FrameSlot *dst, const SimFrameData *annotated_sim) {
     d->active = e->active;
     d->source = e->source;
     d->brightness_mod = e->brightness_mod;
+    d->image_inset_left = e->image_inset_left;
     d->texture = e->texture;
   }
 

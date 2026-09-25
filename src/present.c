@@ -636,7 +636,8 @@ static void PresentHdReplacements(const FrameSlot *slot,
     if (capture->x1 <= capture->x0 || capture->y1 <= capture->y0 ||
         !(capture->flags & kFrameSlotOverlayFlag_RemoveFromGame))
       continue;
-    int dx0 = (int)((capture->x0 + extra - vis_x0) * scale_x + 0.5);
+    int dx0 = (int)((capture->x0 + entry->image_inset_left + extra - vis_x0) *
+                    scale_x + 0.5);
     int dx1 = (int)((capture->x1 + extra - vis_x0) * scale_x + 0.5);
     int dy0 = (int)(capture->y0 * scale_y + 0.5);
     int dy1 = (int)(capture->y1 * scale_y + 0.5);

@@ -156,6 +156,16 @@ void HdReplacementHost_LoadTextures(void) {
       continue;
     }
 
+    uint8_t *padded_rgba = NULL;
+    if (!HdReplacements_PrepareTitleCoverage(
+            entry, rgba, width, height, &padded_rgba, &width)) {
+      fprintf(stderr, "[hd-manifest] [replace:%s] title coverage allocation failed\n",
+              entry->name);
+      stbi_image_free(rgba);
+      continue;
+    }
+    const stbi_uc *image = padded_rgba ? padded_rgba : rgba;
+
     if (entry->plane == kHdPlane_Mode7) {
       /* The engine sampler consumes raw ARGB words, not an SDL texture. */
       uint32_t *argb = malloc(
@@ -164,7 +174,7 @@ void HdReplacementHost_LoadTextures(void) {
         for (size_t pixel = 0;
              pixel < (size_t)width * (size_t)height;
              pixel++) {
-          const stbi_uc *source = rgba + pixel * kRgbaChannelCount;
+          const stbi_uc *source = image + pixel * kRgbaChannelCount;
           argb[pixel] = (uint32_t)source[3] << 24 |
                         (uint32_t)source[0] << 16 |
                         (uint32_t)source[1] << 8 |
@@ -177,6 +187,7 @@ void HdReplacementHost_LoadTextures(void) {
         fprintf(stderr, "[hd-manifest] [replace:%s] %s (%dx%d, mode7)\n",
                 entry->name, entry->image, width, height);
       }
+      free(padded_rgba);
       stbi_image_free(rgba);
       continue;
     }
@@ -193,7 +204,7 @@ void HdReplacementHost_LoadTextures(void) {
     ArRenderTexture texture = ArRenderTexture_Invalid();
     if (ArRenderDevice_CreateTexture(&g_render_device, &desc, &texture) &&
         ArRenderDevice_UpdateTexture(
-            &g_render_device, texture, NULL, rgba,
+            &g_render_device, texture, NULL, image,
             width * kArgbBytesPerPixel)) {
       entry->texture = texture;
       loaded_art_count++;
@@ -204,6 +215,7 @@ void HdReplacementHost_LoadTextures(void) {
       fprintf(stderr, "[hd-manifest] [replace:%s] texture upload failed: %s\n",
               entry->name, ArRenderDevice_LastError(&g_render_device));
     }
+    free(padded_rgba);
     stbi_image_free(rgba);
   }
   fprintf(stderr, "[hd-manifest] %d entries, %d with art\n",

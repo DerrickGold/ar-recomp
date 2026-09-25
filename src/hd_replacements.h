@@ -52,6 +52,7 @@ typedef struct HdReplacement {
   HdPlane plane;
   int source; /* PpuOverlaySource for the screen plane */
   int x0, y0, x1, y1; /* screen-space rect, x1/y1 exclusive */
+  int image_inset_left; /* native erasure gutter, not part of the drawn image */
   /* mode7 plane: the Mode-7 canvas-pixel rect the art maps onto, and
    * whether wrapped canvas repetitions are substituted too (default 0:
    * only the primary instance; wraps keep the authentic faint sampling). */
@@ -78,6 +79,19 @@ extern int g_hd_replacement_count;
 /* Parse a manifest. Returns the number of entries loaded; 0 with no error
  * output if the file simply does not exist. Safe to call once at startup. */
 int HdReplacements_Load(const char *path);
+
+/* Compatibility for the standard title hooks, whose authored placement was
+ * measured against US artwork. JP native lettering extends three pixels
+ * farther left. Extend screen erasure independently from image placement;
+ * for Mode 7, pad a transparent gutter and expand the canvas together. Never
+ * resample or move artwork. Custom hooks/bounds and Mode-7 image widths that
+ * cannot represent that gutter exactly are untouched.
+ * On success, *padded_rgba is NULL (unchanged) or a free()-owned RGBA buffer;
+ * the caller still owns rgba. On failure the entry remains unchanged. This
+ * is ActRaiser asset policy, not a special case in the generic runner. */
+bool HdReplacements_PrepareTitleCoverage(HdReplacement *entry,
+    const uint8_t *rgba, int width, int height,
+    uint8_t **padded_rgba, int *padded_width);
 
 /* The game adapter publishes the active opaque runner for gate queries and
  * synchronous capture claims, and clears it before runner destruction. */
