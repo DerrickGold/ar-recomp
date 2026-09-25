@@ -880,28 +880,65 @@ static void setup_native_fast_fixture(Ppu *ppu, uint8_t mode,
     ppu->oamaddh = 0x80u;
 }
 
-static void compare_native_fast_render(uint8_t mode, uint8_t big_tiles,
-                                       bool bg3_priority, bool main_only,
-                                       bool unwindowed_subscreen,
-                                       uint8_t mosaic_size,
-                                       uint8_t mosaic_layers) {
+/* The main-screen winner mask is filled only while a capture surface is
+ * bound. winner_mask binds one with no capture rectangle, which keeps every
+ * line on its ordinary path while both renderers fill the mask. */
+static bool bind_winner_mask_surfaces(Ppu *fast, Ppu *reference,
+                                      uint8_t *fast_overlay,
+                                      uint8_t *reference_overlay) {
+    const size_t pitch = (size_t)kPpuSurfaceWidth * sizeof(uint32_t);
+    return PpuBindOverlaySurface(fast, kPpuOverlaySource_Bg1, fast_overlay,
+                                 pitch) &&
+           PpuBindOverlaySurface(reference, kPpuOverlaySource_Bg1,
+                                 reference_overlay, pitch);
+}
+
+/* The two renderers' masks agree, and they were written exactly when a
+ * capture surface was bound. */
+static void check_winner_masks(const Ppu *fast, const Ppu *reference,
+                               bool winner_mask) {
+    PpuPixelPrioBufs sentinel;
+    memset(&sentinel, 0xa5, sizeof(sentinel));
+    CHECK(memcmp(&fast->bgBuffers[0], &reference->bgBuffers[0],
+                 sizeof(fast->bgBuffers[0])) == 0);
+    CHECK((memcmp(&fast->bgBuffers[0], &sentinel, sizeof(sentinel)) != 0) ==
+          winner_mask);
+}
+
+static void compare_native_fast_render_pass(uint8_t mode, uint8_t big_tiles,
+                                            bool bg3_priority, bool main_only,
+                                            bool unwindowed_subscreen,
+                                            uint8_t mosaic_size,
+                                            uint8_t mosaic_layers,
+                                            bool winner_mask) {
     enum { kRows = 48 };
+    const size_t overlay_bytes =
+        (size_t)kPpuBufHeight * kPpuSurfaceWidth * sizeof(uint32_t);
     size_t pixel_count = (size_t)kPpuXPixels * kRows;
     uint32_t *fast_pixels = calloc(pixel_count, sizeof(*fast_pixels));
     uint32_t *reference_pixels = calloc(pixel_count, sizeof(*reference_pixels));
     uint32_t *fast_authentic = calloc(pixel_count, sizeof(*fast_authentic));
     uint32_t *reference_authentic = calloc(pixel_count,
                                             sizeof(*reference_authentic));
+    uint8_t *fast_overlay = calloc(1, overlay_bytes);
+    uint8_t *reference_overlay = calloc(1, overlay_bytes);
     Ppu *fast = ppu_init();
     Ppu *reference = ppu_init();
     CHECK(fast_pixels != NULL && reference_pixels != NULL &&
           fast_authentic != NULL && reference_authentic != NULL &&
+          fast_overlay != NULL && reference_overlay != NULL &&
           fast != NULL && reference != NULL);
     if (fast_pixels == NULL || reference_pixels == NULL ||
         fast_authentic == NULL || reference_authentic == NULL ||
+        fast_overlay == NULL || reference_overlay == NULL ||
         fast == NULL || reference == NULL) goto cleanup;
     setup_native_fast_fixture(fast, mode, big_tiles, bg3_priority);
     setup_native_fast_fixture(reference, mode, big_tiles, bg3_priority);
+    memset(&fast->bgBuffers[0], 0xa5, sizeof(fast->bgBuffers[0]));
+    memset(&reference->bgBuffers[0], 0xa5, sizeof(reference->bgBuffers[0]));
+    if (winner_mask)
+        CHECK(bind_winner_mask_surfaces(fast, reference, fast_overlay,
+                                        reference_overlay));
     if (mosaic_size > 1u) {
         fast->mosaic = reference->mosaic = (uint8_t)(
             ((mosaic_size - 1u) << 4) | (mosaic_layers & 0x0fu));
@@ -953,8 +990,7 @@ static void compare_native_fast_render(uint8_t mode, uint8_t big_tiles,
                  pixel_count * sizeof(*fast_pixels)) == 0);
     CHECK(memcmp(fast_authentic, reference_authentic,
                  pixel_count * sizeof(*fast_authentic)) == 0);
-    CHECK(memcmp(&fast->bgBuffers[0], &reference->bgBuffers[0],
-                 sizeof(fast->bgBuffers[0])) == 0);
+    check_winner_masks(fast, reference, winner_mask);
 cleanup:
     ppu_free(fast);
     ppu_free(reference);
@@ -962,6 +998,19 @@ cleanup:
     free(reference_pixels);
     free(fast_authentic);
     free(reference_authentic);
+    free(fast_overlay);
+    free(reference_overlay);
+}
+
+static void compare_native_fast_render(uint8_t mode, uint8_t big_tiles,
+                                       bool bg3_priority, bool main_only,
+                                       bool unwindowed_subscreen,
+                                       uint8_t mosaic_size,
+                                       uint8_t mosaic_layers) {
+    for (int pass = 0; pass < 2; ++pass)
+        compare_native_fast_render_pass(mode, big_tiles, bg3_priority,
+                                        main_only, unwindowed_subscreen,
+                                        mosaic_size, mosaic_layers, pass == 1);
 }
 
 static void test_native_fast_path_parity(void) {
@@ -1523,6 +1572,68 @@ static bool virtual_fast_band_lookup(const void *context, int32_t tile_x,
     return true;
 }
 
+/* The main-screen winner mask exists for capture consumers. With no capture
+ * surface bound both renderers must leave it untouched, and the visible picture
+ * must not depend on whether it was filled. */
+static void compare_winner_mask_capture(unsigned kind, uint32_t render_flags) {
+    enum { kRows = 24 };
+    const size_t bytes = (size_t)kPpuXPixels * kRows * sizeof(uint32_t);
+    uint32_t *plain = calloc(1, bytes);
+    uint32_t *captured = calloc(1, bytes);
+    uint32_t *overlay = calloc(1, bytes);
+    Ppu *without = ppu_init();
+    Ppu *with = ppu_init();
+    PpuPixelPrioBufs sentinel;
+    memset(&sentinel, 0xa5, sizeof(sentinel));
+    CHECK(plain != NULL && captured != NULL && overlay != NULL &&
+          without != NULL && with != NULL);
+    if (plain == NULL || captured == NULL || overlay == NULL ||
+        without == NULL || with == NULL) goto cleanup;
+    for (unsigned index = 0u; index < 2u; ++index) {
+        Ppu *ppu = index == 0u ? without : with;
+        setup_native_fast_fixture(ppu, 1u, 0u, false);
+        memset(&ppu->bgBuffers[0], 0xa5, sizeof(ppu->bgBuffers[0]));
+        if (index == 1u && kind == 0u) {
+            CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg1,
+                (uint8_t *)overlay, kPpuXPixels * sizeof(uint32_t)));
+            CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg1, 0, 1,
+                kPpuXPixels, kRows - 2,
+                (uint8_t)kPpuOverlayFlag_MarkMainScreenWinner));
+        } else if (index == 1u && kind == 1u) {
+            CHECK(PpuSetObjRangeCapture(ppu, 0, 128, 0, 1,
+                kPpuXPixels, kRows - 2, (uint8_t *)overlay,
+                kPpuXPixels * sizeof(uint32_t)));
+        } else if (index == 1u) {
+            /* A winner-only consumer must not rely on range capture also
+             * being bound, as it happens to be in the OBJ identity test. */
+            CHECK(PpuSetObjWinnerCapture(ppu, 0, 128, 0, 1,
+                kPpuXPixels, kRows - 2, (uint8_t *)overlay,
+                kPpuXPixels * sizeof(uint32_t)));
+        }
+        PpuBeginDrawing(ppu,
+            (uint8_t *)(index == 0u ? plain : captured),
+            kPpuXPixels * sizeof(uint32_t), render_flags);
+        ppu_runLine(ppu, 0);
+        for (int line = 1; line <= kRows; ++line) ppu_runLine(ppu, line);
+    }
+    CHECK(memcmp(plain, captured, bytes) == 0);
+    CHECK(memcmp(&without->bgBuffers[0], &sentinel, sizeof(sentinel)) == 0);
+    CHECK(memcmp(&with->bgBuffers[0], &sentinel, sizeof(sentinel)) != 0);
+cleanup:
+    ppu_free(without);
+    ppu_free(with);
+    free(plain);
+    free(captured);
+    free(overlay);
+}
+
+static void test_winner_mask_only_when_captured(void) {
+    for (unsigned kind = 0u; kind < 3u; ++kind) {
+        compare_winner_mask_capture(kind, 0u);
+        compare_winner_mask_capture(kind, kPpuRenderFlags_ReferencePixelRenderer);
+    }
+}
+
 static void test_native_virtual_fast_path_parity(void) {
     enum { kRows = 48 };
     const size_t pixel_count = (size_t)kPpuXPixels * kRows;
@@ -1804,27 +1915,38 @@ static void test_native_virtual_capture_path_parity(void) {
     }
 }
 
-static void compare_native_vram_margin(
+static void compare_native_vram_margin_pass(
         uint8_t mode, uint8_t big_tiles, PpuWidescreenBandFill fill,
         PpuWidescreenMotion motion, bool finite_extents,
-        uint8_t mosaic_size) {
+        uint8_t mosaic_size, bool winner_mask) {
     enum {
         kExtraX = 16,
         kExtraY = 8,
         kWidth = kPpuXPixels + kExtraX * 2,
         kHeight = kPpuYPixels + kExtraY * 2
     };
+    const size_t overlay_bytes =
+        (size_t)kPpuBufHeight * kPpuSurfaceWidth * sizeof(uint32_t);
     const size_t pixel_count = (size_t)kWidth * kHeight;
     Ppu *fast = ppu_init();
     Ppu *reference = ppu_init();
     uint32_t *fast_pixels = calloc(pixel_count, sizeof(uint32_t));
     uint32_t *reference_pixels = calloc(pixel_count, sizeof(uint32_t));
+    uint8_t *fast_overlay = calloc(1, overlay_bytes);
+    uint8_t *reference_overlay = calloc(1, overlay_bytes);
     CHECK(fast != NULL && reference != NULL && fast_pixels != NULL &&
-          reference_pixels != NULL);
+          reference_pixels != NULL && fast_overlay != NULL &&
+          reference_overlay != NULL);
     if (fast == NULL || reference == NULL || fast_pixels == NULL ||
-        reference_pixels == NULL) goto cleanup;
+        reference_pixels == NULL || fast_overlay == NULL ||
+        reference_overlay == NULL) goto cleanup;
     setup_native_fast_fixture(fast, mode, big_tiles, mode == 1u);
     setup_native_fast_fixture(reference, mode, big_tiles, mode == 1u);
+    memset(&fast->bgBuffers[0], 0xa5, sizeof(fast->bgBuffers[0]));
+    memset(&reference->bgBuffers[0], 0xa5, sizeof(reference->bgBuffers[0]));
+    if (winner_mask)
+        CHECK(bind_winner_mask_surfaces(fast, reference, fast_overlay,
+                                        reference_overlay));
     if (mosaic_size > 1u) {
         fast->mosaic = reference->mosaic =
             (uint8_t)(((mosaic_size - 1u) << 4) | 0x0fu);
@@ -1883,13 +2005,24 @@ static void compare_native_vram_margin(
         }
         CHECK(false);
     }
-    CHECK(memcmp(&fast->bgBuffers[0], &reference->bgBuffers[0],
-                 sizeof(fast->bgBuffers[0])) == 0);
+    check_winner_masks(fast, reference, winner_mask);
 cleanup:
     ppu_free(fast);
     ppu_free(reference);
     free(fast_pixels);
     free(reference_pixels);
+    free(fast_overlay);
+    free(reference_overlay);
+}
+
+static void compare_native_vram_margin(
+        uint8_t mode, uint8_t big_tiles, PpuWidescreenBandFill fill,
+        PpuWidescreenMotion motion, bool finite_extents,
+        uint8_t mosaic_size) {
+    for (int pass = 0; pass < 2; ++pass)
+        compare_native_vram_margin_pass(mode, big_tiles, fill, motion,
+                                        finite_extents, mosaic_size,
+                                        pass == 1);
 }
 
 static void test_native_vram_margin_path_parity(void) {
@@ -2109,6 +2242,7 @@ int main(void) {
         test_native_capture_path_parity();
         test_obj_winner_capture();
         test_main_winner_masks();
+        test_winner_mask_only_when_captured();
         test_unbound_capture_fails_open();
         test_native_virtual_fast_path_parity();
         test_native_virtual_capture_path_parity();

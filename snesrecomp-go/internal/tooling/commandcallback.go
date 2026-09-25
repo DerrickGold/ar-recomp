@@ -83,7 +83,7 @@ type ShadowCommandCallbackPath struct {
 type ShadowCommandCallbackReturn struct {
 	PC       uint32 `json:"pc"`
 	TargetPC uint32 `json:"target_pc"`
-	Source   string `json:"source"` // matched_jsr, matched_jsl, or command_pea
+	Source   string `json:"source"` // matched_jsr, matched_jsl, command_pea or consumer_pea
 	PushPC   uint32 `json:"push_pc"`
 }
 
@@ -103,6 +103,10 @@ func shadowCallbackConstant(v uint16) shadowCallbackWord {
 }
 func (w shadowCallbackWord) cursor() (int, bool) {
 	return w.lo.Delta, w.lo.Source == "entry_y" && w.hi.Source == "entry_y" && w.lo.Part == 0 && w.hi.Part == 1 && w.lo.Delta == w.hi.Delta
+}
+
+func (w shadowCallbackWord) literal() (uint16, bool) {
+	return uint16(w.lo.Value) | uint16(w.hi.Value)<<8, w.lo.Source == "constant" && w.hi.Source == "constant" && w.lo.Part == 0 && w.hi.Part == 1
 }
 
 func (w shadowCallbackWord) streamRead() *ShadowCommandCursorRead {
@@ -332,6 +336,12 @@ func (a *shadowCallbackAnalyzer) nativePaths(stream ShadowCommandStream, c Shado
 }
 
 func (a *shadowCallbackAnalyzer) queryFrame(stream ShadowCommandStream, target uint32, f *ShadowCommandFrame, prefixes []uint32) []ShadowCommandCallbackPath {
+	return a.queryFrameY(stream, target, f, prefixes, nil)
+}
+
+// A nil entry Y is the command cursor at the frame's live delta. A frame that
+// the stream command does not own (a deferred consumer) supplies its own Y.
+func (a *shadowCallbackAnalyzer) queryFrameY(stream ShadowCommandStream, target uint32, f *ShadowCommandFrame, prefixes []uint32, entryY *shadowCallbackWord) []ShadowCommandCallbackPath {
 	base := ShadowCommandCallbackPath{TargetPC: target, StopPC: target, Obligations: []string{
 		"conditional_operand_not_proven_code_or_reachability", "native_M0X0_and_decoded_PB_context",
 		"native_memory_stack_ROM_mapping_and_HLE_noninterference", "required_branches_not_proven_feasible",
@@ -349,7 +359,11 @@ func (a *shadowCallbackAnalyzer) queryFrame(stream ShadowCommandStream, target u
 			return []ShadowCommandCallbackPath{base}
 		}
 	}
-	queue := []shadowCallbackState{{pc: target, a: shadowCallbackUnknown(), y: shadowCallbackCursor(f.CursorDelta), db: f.DB, stack: slices.Clone(f.Stack), carry: f.Carry, decimal: f.Decimal, path: base, seen: map[uint32]bool{}, owned: map[int]int{}}}
+	y := shadowCallbackCursor(f.CursorDelta)
+	if entryY != nil {
+		y = *entryY
+	}
+	queue := []shadowCallbackState{{pc: target, a: shadowCallbackUnknown(), y: y, db: f.DB, stack: slices.Clone(f.Stack), carry: f.Carry, decimal: f.Decimal, path: base, seen: map[uint32]bool{}, owned: map[int]int{}}}
 	var out []ShadowCommandCallbackPath
 	for len(queue) > 0 {
 		s := queue[0]
@@ -417,6 +431,9 @@ func (a *shadowCallbackAnalyzer) queryFrame(stream ShadowCommandStream, target u
 				}
 			case "LDY":
 				s.y = unknown
+				if i.Mode == cpu65816.IMM {
+					s.y = shadowCallbackConstant(uint16(i.Operand))
+				}
 			case "TYA":
 				s.a = s.y
 			case "TAY":
@@ -539,6 +556,9 @@ func (a *shadowCallbackAnalyzer) queryFrame(stream ShadowCommandStream, target u
 					}
 					if delta, known := value.cursor(); known {
 						s.path.CursorPublications = append(s.path.CursorPublications, ShadowCommandCursorStore{PC: s.pc, Mode: i.Mode.String(), Operand: uint16(i.Operand), CursorDelta: delta})
+					} else if literal, known := value.literal(); known {
+						// An absolute cursor names no stream bank; the reload supplies it.
+						s.path.CursorPublications = append(s.path.CursorPublications, ShadowCommandCursorStore{PC: s.pc, Mode: i.Mode.String(), Operand: uint16(i.Operand), Literal: true, Value: literal})
 					}
 				}
 			case "LDX", "TAX", "TYX", "INX", "DEX", "BIT", "NOP", "CLV", "STX", "STZ", "TRB", "TSB":

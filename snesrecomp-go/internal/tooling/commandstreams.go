@@ -48,6 +48,10 @@ type ShadowCommandCursorStore struct {
 	Mode        string `json:"mode"`
 	Operand     uint16 `json:"operand"`
 	CursorDelta int    `json:"cursor_delta"`
+	// A literal cursor is an absolute stream address in the reloading stream's
+	// bank, not a delta from the command entry Y. CursorDelta is then zero.
+	Literal bool   `json:"literal_cursor,omitempty"`
+	Value   uint16 `json:"literal_cursor_value,omitempty"`
 }
 
 type ShadowCommandCallback struct {
@@ -235,7 +239,7 @@ func summarizeShadowCommandPrefix(graph *decoder.Graph, entry decoder.DecodeKey,
 				r.StopReason = "unmodeled_memory_write"
 				return r
 			}
-			r.CursorStores = append(r.CursorStores, ShadowCommandCursorStore{at.PC, i.Mode.String(), uint16(i.Operand), r.CursorDelta})
+			r.CursorStores = append(r.CursorStores, ShadowCommandCursorStore{PC: at.PC, Mode: i.Mode.String(), Operand: uint16(i.Operand), CursorDelta: r.CursorDelta})
 		case "PHB":
 			b := db
 			b.pushPC = 0 // This is a new byte push, not the original PEA word.

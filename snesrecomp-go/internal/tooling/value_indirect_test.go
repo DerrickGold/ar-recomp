@@ -13,14 +13,15 @@ import (
 func indirectValueFixture(t *testing.T, extra []byte) (rom.Image, []*decoder.Graph) {
 	t.Helper()
 	image := make(rom.Image, 0x8000)
-	// Select a record arithmetically, save/reload its address, and publish a
-	// table field. No authored dispatch entries or observed targets are used.
+	// Select a record arithmetically, save/reload its address, publish a table
+	// field and seed the state slot. No authored dispatch entries or observed
+	// targets are used. The consumer's state reload has no local definition.
 	copy(image, []byte{0x4b, 0xab, 0xd8, 0xa5, 0x70, 0x29, 1, 0,
 		0x0a, 0x0a, 0x0a, 0x0a, 0x18, 0x69, 0, 0x90, 0x8d, 0, 4,
-		0xac, 0, 4, 0xb9, 0x0b, 0, 0x8d, 2, 4, 0x60})
+		0xac, 0, 4, 0xb9, 0x0b, 0, 0x8d, 2, 4, 0xa9, 2, 0, 0x8d, 4, 4, 0x60})
 	// Three-byte state records: word handler / byte next state. A scratch
 	// pointer is overwritten with the handler only AFTER the indirect reads.
-	code := []byte{0x4b, 0xab, 0xd8, 0xa9, 2, 0, 0x8d, 4, 4,
+	code := []byte{0x4b, 0xab, 0xd8,
 		0xad, 4, 4, 0x0a, 0x18, 0x6d, 4, 4, 0x6d, 2, 4, 0x85, 0x42,
 		0xa0, 2, 0, 0xb1, 0x42, 0x29, 0xff, 0, 0x8d, 4, 4}
 	code = append(code, extra...)
@@ -67,6 +68,29 @@ func TestColdIndirectValueClosure(t *testing.T) {
 	after, _ := json.Marshal(graphs)
 	if string(before) != string(after) {
 		t.Fatal("query changed decoded instructions")
+	}
+}
+
+func TestColdIndirectLocalStateSeedDominatesPublication(t *testing.T) {
+	image, _ := indirectValueFixture(t, nil)
+	// A consumer that seeds its own state immediately before the reload
+	// dispatches only that state: the stored next state is overwritten on
+	// every invocation and is not a reaching definition.
+	copy(image[0x100:], []byte{0x4b, 0xab, 0xd8, 0xa9, 2, 0, 0x8d, 4, 4,
+		0xad, 4, 4, 0x0a, 0x18, 0x6d, 4, 4, 0x6d, 2, 4, 0x85, 0x42,
+		0xa0, 2, 0, 0xb1, 0x42, 0x29, 0xff, 0, 0x8d, 4, 4,
+		0xb2, 0x42, 0x85, 0x42, 0xf4, 0xff, 0x81, 0x6c, 0x42, 0})
+	var graphs []*decoder.Graph
+	for _, pc := range []uint16{0x8000, 0x8100} {
+		g, err := decoder.DecodeFunction(image, 0, pc, 0, 0, decoder.Options{MaxInstructions: 128})
+		if err != nil {
+			t.Fatal(err)
+		}
+		graphs = append(graphs, g)
+	}
+	got := AnalyzeColdValueProvenance(image, nil, graphs, graphs)
+	if want := []uint32{0x009410, 0x009430}; !got.Converged || !slices.Equal(got.IndirectTargets, want) {
+		t.Fatalf("got %X want %X: %s", got.IndirectTargets, want, got.Summary())
 	}
 }
 
@@ -126,12 +150,12 @@ func TestColdIndirectValueOwnership(t *testing.T) {
 
 func TestColdIndirectMaskCycleNeedsAnIndependentSeed(t *testing.T) {
 	image, graphs := indirectValueFixture(t, nil)
-	copy(image[0x103:], []byte{0xad, 4, 4}) // self-copy, not literal state 2
-	g, err := decoder.DecodeFunction(image, 0, 0x8100, 0, 0, decoder.Options{})
+	copy(image[0x1c:], []byte{0xad, 4, 4}) // self-copy, not literal state 2
+	g, err := decoder.DecodeFunction(image, 0, 0x8000, 0, 0, decoder.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	graphs[1] = g
+	graphs[0] = g
 	got := AnalyzeColdValueProvenance(image, nil, graphs, graphs)
 	if !got.Converged || len(got.IndirectTargets) != 0 {
 		t.Fatalf("unseeded next-state byte manufactured a root: %s", got.Summary())

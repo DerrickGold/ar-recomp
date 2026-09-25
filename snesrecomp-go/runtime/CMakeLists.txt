@@ -365,6 +365,26 @@ if(BUILD_TESTING)
     add_test(NAME snesrecomp_runtime_cpu_infra
         COMMAND snesrecomp_runtime_cpu_infra_test)
 
+    # The same contract with the diagnostic watchdog compiled in, and a small
+    # loop-header budget so its trip is exercised.
+    add_executable(snesrecomp_runtime_cpu_infra_watchdog_test
+        tests/cpu_infra_test.c src/core/common_cpu_infra.c src/core/paired_tail.c
+        src/runner/runner_game_module.c src/snes/saveload.c)
+    target_include_directories(snesrecomp_runtime_cpu_infra_watchdog_test PRIVATE
+        ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
+        ${SNESRECOMP_RUNTIME_PRIVATE_INCLUDE_DIRS})
+    target_compile_definitions(snesrecomp_runtime_cpu_infra_watchdog_test PRIVATE
+        SNESRECOMP_WATCHDOG=1 SNESRECOMP_WATCHDOG_LOOP_HEADER_LIMIT=64
+        SNESRECOMP_TRACE=0 SNESRECOMP_REVERSE_DEBUG=0)
+    if(MSVC)
+        target_compile_options(snesrecomp_runtime_cpu_infra_watchdog_test PRIVATE /W4)
+    else()
+        target_compile_options(snesrecomp_runtime_cpu_infra_watchdog_test PRIVATE
+            -Wall -Wextra -Wpedantic)
+    endif()
+    add_test(NAME snesrecomp_runtime_cpu_infra_watchdog
+        COMMAND snesrecomp_runtime_cpu_infra_watchdog_test)
+
     add_executable(snesrecomp_runtime_diagnostic_test
         tests/diagnostic_test.c src/core/diagnostic.c)
     target_include_directories(snesrecomp_runtime_diagnostic_test PRIVATE
@@ -484,6 +504,7 @@ if(BUILD_TESTING)
     if(NOT SNESRECOMP_PPU_BIT_WORD_BITS STREQUAL "auto")
         foreach(_target
                 snesrecomp_runtime_cpu_infra_test
+                snesrecomp_runtime_cpu_infra_watchdog_test
                 snesrecomp_runtime_diagnostic_test
                 snesrecomp_runtime_cpu_trace_test
                 snesrecomp_runtime_spc_upload_test)

@@ -371,13 +371,13 @@ else()
         "ActRaiserRecomp: per-run diagnostic bundles default OFF (play/release build)")
 endif()
 
-# SNESRECOMP_WATCHDOG: the 5s hang watchdog. Bring-up instrumentation — it exists to
-# catch an infinite loop in recompiled code during porting, and once a build is
-# verified there is nothing left for it to find. It is not free: the generated
+# SNESRECOMP_WATCHDOG: deterministic bring-up instrumentation that reports
+# excessive loop work within a frame, independent of host load. A watchdog
+# yield is not a valid emulated frame boundary. It is not free: the generated
 # code calls WatchdogCheck at EVERY loop header (thousands of sites per bank),
 # and escaping a stuck frame necessarily abandons it. Default ON for the
 # development configurations and OFF for Release, so shipping builds carry
-# neither the per-loop-header clock check nor the abandon path.
+# neither the per-loop-header budget check nor the abandon path.
 if(NOT DEFINED SNESRECOMP_WATCHDOG)
     if(CMAKE_BUILD_TYPE STREQUAL "Release" OR CMAKE_BUILD_TYPE STREQUAL "MinSizeRel")
         set(_SNESRECOMP_WATCHDOG_DEFAULT OFF)
@@ -387,7 +387,7 @@ if(NOT DEFINED SNESRECOMP_WATCHDOG)
 else()
     set(_SNESRECOMP_WATCHDOG_DEFAULT ${SNESRECOMP_WATCHDOG})
 endif()
-option(SNESRECOMP_WATCHDOG "Build the 5s hang watchdog (dev instrumentation)"
+option(SNESRECOMP_WATCHDOG "Build the loop-header watchdog (dev instrumentation)"
        ${_SNESRECOMP_WATCHDOG_DEFAULT})
 if(SNESRECOMP_WATCHDOG)
     set(_SNESRECOMP_WATCHDOG 1)

@@ -343,7 +343,15 @@ without restoring S/PB; the reset driver alone consumes the request, once no
 compiled activations remain. This prevents recursively nesting title/mainline
 drivers. It neither resets the machine nor authorizes guessing a return target.
 Ordinary HLE branches must continue using `cpu_hle_tailcall_request` instead.
-Terminal shutdown clears abandoned records. Watchdog resets outside an active
+Terminal shutdown clears abandoned records. The diagnostic watchdog permits
+`SNESRECOMP_WATCHDOG_LOOP_HEADER_LIMIT` executed loop headers per frame (2^28
+unless overridden at build time); the next header trips it once. The boot
+frame is exempt. For the same generated program and input, the verdict does
+not depend on host load, core type or wall time. Changing generated loop
+instrumentation can change the count. This is a bounded-progress diagnostic,
+not proof of a hang; external test timeouts remain useful for uninstrumented
+code or boot stalls but must not be treated as emulated watchdog verdicts.
+Watchdog resets outside an active
 synchronous checkpoint invalidate records without resurrecting old owners;
 they must not be used as normal continuation transfers.
 An adopted paired tail carries an explicit outer-driver owner token. Only that

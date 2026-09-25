@@ -25,11 +25,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
-
-#if defined(_WIN32) && SNESRECOMP_WATCHDOG
-#include <windows.h>
-#endif
 
 enum { kRecompStackCapacity = 64 };
 
@@ -959,34 +954,22 @@ void RecompStackDump(void) {
 }
 
 #if SNESRECOMP_WATCHDOG
-static uint64 monotonic_nanoseconds(void) {
-#if defined(_WIN32)
-    LARGE_INTEGER frequency;
-    LARGE_INTEGER counter;
-    uint64 ticks;
-    uint64 rate;
-    QueryPerformanceFrequency(&frequency);
-    QueryPerformanceCounter(&counter);
-    ticks = (uint64)counter.QuadPart;
-    rate = (uint64)frequency.QuadPart;
-    if (rate == 0u) return 0u;
-    return (ticks / rate) * 1000000000ull +
-           ((ticks % rate) * 1000000000ull) / rate;
-#else
-    struct timespec value;
-    clock_gettime(CLOCK_MONOTONIC, &value);
-    return (uint64)value.tv_sec * 1000000000ull + (uint64)value.tv_nsec;
+/* Loop headers one frame may execute before the diagnostic watchdog calls it
+ * a stall. Counting the program's own progress instead of host time makes the
+ * verdict a property of the program and its input: load, core type, paging
+ * cannot trip it for the same generated loop instrumentation. Legitimate
+ * long frames, such as an APU upload whose handshakes
+ * wait out the port dwell, execute tens of millions. */
+#ifndef SNESRECOMP_WATCHDOG_LOOP_HEADER_LIMIT
+#define SNESRECOMP_WATCHDOG_LOOP_HEADER_LIMIT (UINT64_C(1) << 28)
 #endif
-}
 
-static uint64 g_watchdog_started;
-static unsigned g_watchdog_poll_count;
+static uint64 g_watchdog_frame_loop_headers;
 static bool g_watchdog_enabled;
 void (*g_watchdog_yield_hook)(void);
 
 void WatchdogFrameStart(void) {
-    g_watchdog_started = monotonic_nanoseconds();
-    g_watchdog_poll_count = 0u;
+    g_watchdog_frame_loop_headers = 0u;
     g_watchdog_enabled = true;
     g_watchdog_tripped = 0;
     if (!s_execution_checkpoint_active) clear_execution_context();
@@ -995,17 +978,16 @@ void WatchdogFrameStart(void) {
 void WatchdogFrameEnd(void) { g_watchdog_enabled = false; }
 
 void WatchdogCheck(void) {
-    double elapsed;
     ++g_watchdog_loop_headers;
-    if (!g_watchdog_enabled || ++g_watchdog_poll_count < 10000u) return;
-    g_watchdog_poll_count = 0u;
-    if (snes_frame_counter == 0) return;
-    elapsed = (double)(monotonic_nanoseconds() - g_watchdog_started) / 1e9;
-    if (elapsed <= 5.0) return;
-    fprintf(stderr, "watchdog: frame %d exceeded %.1f seconds\n",
-            snes_frame_counter, elapsed);
-    RecompStackDump();
+    if (!g_watchdog_enabled ||
+        ++g_watchdog_frame_loop_headers <= SNESRECOMP_WATCHDOG_LOOP_HEADER_LIMIT)
+        return;
     g_watchdog_enabled = false;
+    if (snes_frame_counter == 0) return;
+    fprintf(stderr, "watchdog: frame %d exceeded %llu loop headers\n",
+            snes_frame_counter,
+            (unsigned long long)SNESRECOMP_WATCHDOG_LOOP_HEADER_LIMIT);
+    RecompStackDump();
     g_watchdog_tripped = 1;
     if (g_watchdog_yield_hook != NULL) g_watchdog_yield_hook();
 }

@@ -1895,6 +1895,18 @@ static bool capture_surface_bound(const Ppu *ppu, int source) {
            ppu->overlayRenderPitch[source] != 0u;
 }
 
+/* The main-screen winner mask is observable only through a bound capture
+ * surface. Ordinary scanout binds none, so filling it for every pixel of every
+ * scanline is work nothing can read. */
+static bool capture_masks_wanted(const Ppu *ppu) {
+    for (int source = 0; source < kPpuOverlaySource_Count; ++source)
+        if (capture_surface_bound(ppu, source)) return true;
+    return (ppu->objRangeCapture.pixels != NULL &&
+            ppu->objRangeCapture.count != 0u) ||
+           (ppu->objWinnerCapture.pixels != NULL &&
+            ppu->objWinnerCapture.count != 0u);
+}
+
 static void clear_overlay_row(Ppu *ppu, int source, int screen_y) {
     PpuOverlayCapture *capture = &ppu->overlayCaptures[source];
     bool active = capture->x1 > capture->x0 && capture->y1 > capture->y0;
@@ -3310,6 +3322,12 @@ static void native_resolve_bg(Ppu *SR_RESTRICT ppu, int layer, int screen_y,
         (!sub_always && !sub_variable)) return;
     if (main_variable || sub_variable)
         native_window_runs(ppu, layer, &window_runs);
+    /* A tile's rank depends only on the mode, the layer and the entry's
+     * priority bit. None of those change inside one scanline, so resolve both
+     * ranks here instead of walking the rank table for every tile. */
+    const uint8_t rank_for_priority[2] = {
+        layer_rank(ppu, layer, 0), layer_rank(ppu, layer, 1)
+    };
     while (x < kPpuXPixels) {
         int world_x, world_y;
         int map_x, map_y, in_x, in_y;
@@ -3383,7 +3401,7 @@ static void native_resolve_bg(Ppu *SR_RESTRICT ppu, int layer, int screen_y,
             palette_base = ((entry >> 10) & 7u) * 16u;
         else
             palette_base = 0u;
-        rank = layer_rank(ppu, layer, (entry >> 13) & 1u);
+        rank = rank_for_priority[(entry >> 13) & 1u];
         if (run > kPpuXPixels - x) run = kPpuXPixels - x;
         /* Most ordinary scanlines do not request a subscreen.  Keep that
          * invariant outside the eight-pixel group so its fixed-shift stores
@@ -3697,7 +3715,14 @@ static uint32_t native_final_rgb(Ppu *ppu, uint16_t main, uint16_t sub,
     if (main_layer == kPpuOverlaySource_Obj && main_palette < 0xc0u)
         eligible = false;
     if (clipped) color = 0u;
-    if (!eligible) return color_rgb(ppu, color);
+    if (!eligible) {
+        /* Identical to color_rgb(ppu, color): the palette cache holds exactly
+         * that conversion and is dropped whenever CGRAM or brightness changes,
+         * and a clipped pixel is black at every brightness. */
+        if (clipped) return 0u;
+        if (!ppu->cgramRgbValid) rebuild_cgram_rgb(ppu);
+        return ppu->cgramRgb[main_palette];
+    }
     {
         unsigned sub_layer = native_pixel_layer(sub);
         bool use_sub = add_subscreen && sub_layer != 5u;
@@ -3882,6 +3907,7 @@ static bool render_native_mode7_wide_line(Ppu *ppu, int screen_y,
     bool authentic_y = screen_y >= 0 && screen_y < kPpuYPixels;
     int left = -ppu->extraLeftCur;
     int right = kPpuXPixels + ppu->extraRightCur;
+    const bool capture_masks = capture_masks_wanted(ppu);
     if (!ppu->cgramRgbValid) rebuild_cgram_rgb(ppu);
     for (int x = left; x < right; ++x) {
         int index = x + kPpuExtraLeftRight;
@@ -3953,8 +3979,9 @@ static bool render_native_mode7_wide_line(Ppu *ppu, int screen_y,
                 if (native_pixel_layer(main) == kPpuOverlaySource_Obj)
                     palette = (palette - 0x80u) >> 4;
                 row[origin + x] = color;
-                ppu->bgBuffers[0].data[index] = (PpuZbufType)(
-                    (native_pixel_rank(main) << 8) | palette);
+                if (capture_masks)
+                    ppu->bgBuffers[0].data[index] = (PpuZbufType)(
+                        (native_pixel_rank(main) << 8) | palette);
                 if (dual_authentic)
                     authentic_row[authentic_origin + x] = color;
             }
@@ -3978,8 +4005,9 @@ static bool render_native_mode7_wide_line(Ppu *ppu, int screen_y,
                         add_subscreen, subtract, half);
                 if (native_pixel_layer(main) == kPpuOverlaySource_Obj)
                     palette = (palette - 0x80u) >> 4;
-                ppu->bgBuffers[0].data[index] = (PpuZbufType)(
-                    (native_pixel_rank(main) << 8) | palette);
+                if (capture_masks)
+                    ppu->bgBuffers[0].data[index] = (PpuZbufType)(
+                        (native_pixel_rank(main) << 8) | palette);
             }
         }
     }
@@ -4006,6 +4034,7 @@ static bool render_native_capture_line(Ppu *ppu, int screen_y,
     uint8_t source_mask = (uint8_t)(1u << kPpuOverlaySource_Obj);
     NativeOverlayLinePlan overlay_plans[kPpuOverlaySource_Count];
     uint16_t backdrop = native_pack_pixel(0u, 1u, 5u);
+    const bool capture_masks = capture_masks_wanted(ppu);
     /* The composed subscreen is read only where colour math or a hires mode
      * can consume it.  A single source additionally needs its own subscreen
      * rendering when the overlay capture owns it there: Marahna authors BG1
@@ -4522,7 +4551,7 @@ static bool render_native_capture_line(Ppu *ppu, int screen_y,
                     : native_final_rgb(
                         ppu, main, sub, clipped, math_enabled,
                         add_subscreen, subtract, half);
-                {
+                if (capture_masks) {
                     unsigned palette = main & 0xffu;
                     if (native_pixel_layer(main) ==
                         kPpuOverlaySource_Obj)
@@ -4567,7 +4596,7 @@ static bool render_native_capture_line(Ppu *ppu, int screen_y,
                     : native_final_rgb(
                         ppu, main, sub, clipped, math_enabled,
                         add_subscreen, subtract, half);
-                {
+                if (capture_masks) {
                     unsigned palette = main & 0xffu;
                     if (native_pixel_layer(main) ==
                         kPpuOverlaySource_Obj)
@@ -4607,6 +4636,7 @@ static bool render_native_fast_line(Ppu *ppu, int screen_y,
             authentic_row, authentic_origin);
     want_sub = PPU_addSubscreen(ppu) || PPU_pseudoHires(ppu) ||
         PPU_mode(ppu) == 5 || PPU_mode(ppu) == 6;
+    const bool capture_masks = capture && capture_masks_wanted(ppu);
     for (int x = 0; x < kPpuXPixels; ++x)
         main_pixels[x] = backdrop;
     if (want_sub) {
@@ -4648,7 +4678,7 @@ static bool render_native_fast_line(Ppu *ppu, int screen_y,
                     uint16_t main = main_pixels[x];
                     row[origin + x] = clipped
                         ? 0u : ppu->cgramRgb[main & 0xffu];
-                    if (capture) {
+                    if (capture_masks) {
                         unsigned palette = main & 0xffu;
                         if (native_pixel_layer(main) ==
                             kPpuOverlaySource_Obj)
@@ -4659,6 +4689,7 @@ static bool render_native_fast_line(Ppu *ppu, int screen_y,
                     }
                 }
             } else {
+                if (!ppu->cgramRgbValid) rebuild_cgram_rgb(ppu);
                 for (int x = color_runs.edges[run];
                      x < color_runs.edges[run + 1]; ++x) {
                     uint16_t main = main_pixels[x];
@@ -4668,7 +4699,7 @@ static bool render_native_fast_line(Ppu *ppu, int screen_y,
                         clipped, math_enabled,
                         add_subscreen, subtract, half);
                     row[origin + x] = color;
-                    if (capture) {
+                    if (capture_masks) {
                         unsigned palette = main & 0xffu;
                         if (native_pixel_layer(main) ==
                             kPpuOverlaySource_Obj)
@@ -4740,6 +4771,7 @@ static bool render_line_to(Ppu *ppu, int screen_y, uint8_t *buffer,
     int left = authentic ? 0 : -ppu->extraLeftCur;
     int right = authentic ? kPpuXPixels : kPpuXPixels + ppu->extraRightCur;
     bool native_center = false;
+    const bool capture_masks = capture && capture_masks_wanted(ppu);
     if (buffer == NULL || pitch == 0u || row_index < 0 ||
         row_index >= (int)height || row_index >= kPpuBufHeight)
         return false;
@@ -4788,7 +4820,7 @@ static bool render_line_to(Ppu *ppu, int screen_y, uint8_t *buffer,
                 ppu, final_color(ppu, x, &original_main, &original_sub));
         if (capture) {
             int index = x + kPpuExtraLeftRight;
-            if (index >= 0 && index < kPpuBufWidth)
+            if (capture_masks && index >= 0 && index < kPpuBufWidth)
                 ppu->bgBuffers[0].data[index] =
                     (PpuZbufType)((main.rank << 8) | main.palette);
             if (!dual_authentic) {

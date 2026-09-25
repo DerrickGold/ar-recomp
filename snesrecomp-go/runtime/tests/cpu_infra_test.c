@@ -1625,6 +1625,46 @@ static void test_reset_tail(void) {
           "terminal invalidation cannot revive root transfer");
 }
 
+#if SNESRECOMP_WATCHDOG
+static int watchdog_yields;
+
+static void count_watchdog_yield(void) { ++watchdog_yields; }
+
+/* The verdict depends only on loop headers executed in the frame, so the same
+ * program and input trip at the same point on any host. */
+static void test_watchdog_budget(void) {
+    const uint64_t limit = SNESRECOMP_WATCHDOG_LOOP_HEADER_LIMIT;
+    uint64_t index;
+    g_watchdog_yield_hook = count_watchdog_yield;
+    snes_frame_counter = 0;
+    WatchdogFrameStart();
+    for (index = 0u; index < 2u * limit; ++index) WatchdogCheck();
+    check(!g_watchdog_tripped && watchdog_yields == 0,
+          "the boot frame is exempt from the watchdog");
+    snes_frame_counter = 7;
+    WatchdogFrameStart();
+    for (index = 0u; index < limit; ++index) WatchdogCheck();
+    check(!g_watchdog_tripped && watchdog_yields == 0,
+          "a frame within the loop-header budget runs");
+    WatchdogCheck();
+    check(g_watchdog_tripped && watchdog_yields == 1,
+          "the first loop header past the budget trips the watchdog");
+    WatchdogCheck();
+    check(watchdog_yields == 1, "a tripped frame yields once");
+    WatchdogFrameStart();
+    check(!g_watchdog_tripped, "a frame start clears the verdict");
+    for (index = 0u; index < limit; ++index) WatchdogCheck();
+    WatchdogFrameEnd();
+    for (index = 0u; index < limit; ++index) WatchdogCheck();
+    check(!g_watchdog_tripped && watchdog_yields == 1,
+          "the budget is per frame and stops at the frame boundary");
+    check(g_watchdog_loop_headers == 5u * limit + 2u,
+          "every loop header is counted");
+    g_watchdog_yield_hook = NULL;
+    snes_frame_counter = 0;
+}
+#endif
+
 int main(void) {
     test_reset_tail();
     test_owned_ancestor_unwind();
@@ -1643,11 +1683,15 @@ int main(void) {
     test_abandoned_continuation_cleanup();
     test_return_ownership();
     test_call_scope_after_caller_stack_reset();
+#if SNESRECOMP_WATCHDOG
+    test_watchdog_budget();
+#else
     WatchdogFrameStart();
     WatchdogCheck();
     WatchdogFrameEnd();
     check(g_watchdog_loop_headers == 1u && !g_watchdog_tripped,
           "production watchdog accounting");
+#endif
     if (failures != 0) return 1;
     puts("runtime CPU infra: PASS");
     return 0;

@@ -226,6 +226,21 @@ static void render_first_line(Ppu *ppu) {
   ppu_runLine(ppu, 1);
 }
 
+/* Priority words are a capture product, not persistent ordinary scanout state.
+ * Bind a surface without a rectangle to request them on the normal path, then
+ * verify the render actually overwrote the sentinel before comparing masks. */
+static void render_first_line_with_winner_mask(Ppu *ppu) {
+  static uint32_t overlay[kPpuSurfaceWidth];
+  PpuZbufType sentinel[kW];
+  memset(sentinel, 0xa5, sizeof(sentinel));
+  memset(&ppu->bgBuffers[0], 0xa5, sizeof(ppu->bgBuffers[0]));
+  CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg1,
+                             (uint8_t *)overlay, sizeof(overlay)));
+  render_first_line(ppu);
+  CHECK(memcmp(ppu->bgBuffers[0].data + kPpuExtraLeftRight,
+               sentinel, sizeof(sentinel)) != 0);
+}
+
 static void fill_virtual_native_ring(Ppu *ppu, uint16_t even_entry,
                                      uint16_t odd_entry) {
   for (int tile_y = 0; tile_y < 64; tile_y++) {
@@ -248,10 +263,10 @@ static void TestVirtualTilemapMargins(void) {
   static uint32_t center_pixels[kW];
   static PpuZbufType center_priority[kW];
 
-  /* The unbound pass is the exact native reference for both resolved pixels
+  /* The unbound tilemap pass is the exact native reference for resolved pixels
    * and the PPU's priority/color words. */
   setup_virtual_bg(ppu, kExtra, fb, sizeof(fb));
-  render_first_line(ppu);
+  render_first_line_with_winner_mask(ppu);
   memcpy(center_pixels, (uint32_t *)(void *)fb + kExtra,
          sizeof(center_pixels));
   memcpy(center_priority,
@@ -273,7 +288,7 @@ static void TestVirtualTilemapMargins(void) {
   };
   setup_virtual_bg(ppu, kExtra, fb, sizeof(fb));
   CHECK(PpuSetVirtualTilemap(ppu, (uint8_t)bg1, &binding));
-  render_first_line(ppu);
+  render_first_line_with_winner_mask(ppu);
   const uint32_t *row = (const uint32_t *)(const void *)fb;
   CHECK(row[0] == rgb555(0, 0, 31));
   CHECK(row[kWidth - 1] == rgb555(0, 31, 0));
@@ -485,7 +500,7 @@ static void TestVirtualTilemapAuthenticParity(void) {
    * boundaries. The lookup range proves the authentic span was provider-owned. */
   setup_virtual_bg(ppu, 0, fb, sizeof(fb));
   fill_virtual_native_ring(ppu, even_entry, odd_entry);
-  render_first_line(ppu);
+  render_first_line_with_winner_mask(ppu);
   memcpy(native_pixels, fb, sizeof(native_pixels));
   memcpy(native_priority,
          ppu->bgBuffers[0].data + kPpuExtraLeftRight,
@@ -494,7 +509,7 @@ static void TestVirtualTilemapAuthenticParity(void) {
   setup_virtual_bg(ppu, 0, fb, sizeof(fb));
   fill_virtual_native_ring(ppu, even_entry, odd_entry);
   CHECK(PpuSetVirtualTilemap(ppu, (uint8_t)bg1, &binding));
-  render_first_line(ppu);
+  render_first_line_with_winner_mask(ppu);
   CHECK(map.calls > 0);
   CHECK(map.first_x == 1 && map.last_x == 32);
   CHECK(map.first_y == 0 && map.last_y == 0);
@@ -507,7 +522,7 @@ static void TestVirtualTilemapAuthenticParity(void) {
   setup_virtual_bg(ppu, 0, fb, sizeof(fb));
   fill_virtual_native_ring(ppu, even_entry, odd_entry);
   ppu->mosaic = (uint8_t)((3 << 4) | (1u << bg1));
-  render_first_line(ppu);
+  render_first_line_with_winner_mask(ppu);
   memcpy(native_pixels, fb, sizeof(native_pixels));
   memcpy(native_priority,
          ppu->bgBuffers[0].data + kPpuExtraLeftRight,
@@ -518,7 +533,7 @@ static void TestVirtualTilemapAuthenticParity(void) {
   ppu->mosaic = (uint8_t)((3 << 4) | (1u << bg1));
   map.calls = 0;
   CHECK(PpuSetVirtualTilemap(ppu, (uint8_t)bg1, &binding));
-  render_first_line(ppu);
+  render_first_line_with_winner_mask(ppu);
   CHECK(map.calls > 0);
   CHECK(memcmp(fb, native_pixels, sizeof(native_pixels)) == 0);
   CHECK(memcmp(ppu->bgBuffers[0].data + kPpuExtraLeftRight,

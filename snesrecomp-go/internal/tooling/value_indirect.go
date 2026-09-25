@@ -7,6 +7,7 @@ import (
 // Arithmetic remains cold inventory. Unknown decimal mode is an explicit
 // binary-arithmetic condition, not an inferred CPU flag or a dispatch proof.
 // Carry, unlike decimal mode, is never guessed: it must have a finite origin.
+// Operands bound to one index definition are combined only when they agree.
 func (e *coldValueEngine) add(q coldValueQuery, carryOnly bool) []coldWordValue {
 	w := e.walks[q.site.graph]
 	if q.site.key.M != 0 {
@@ -37,12 +38,16 @@ func (e *coldValueEngine) add(q coldValueQuery, carryOnly bool) []coldWordValue 
 				a = o
 			}
 			for _, c := range carry {
+				binding, ok := coldBind(b.binding, c.binding)
+				if !ok {
+					continue
+				}
 				sum := uint32(a) + uint32(b.word) + uint32(c.word)
 				word := uint16(sum)
 				if carryOnly {
 					word = uint16(sum >> 16)
 				}
-				out = append(out, coldWordValue{word: word})
+				out = append(out, coldWordValue{word: word, binding: binding, speculative: b.speculative || c.speculative})
 			}
 		}
 		return out
@@ -54,13 +59,21 @@ func (e *coldValueEngine) add(q coldValueQuery, carryOnly bool) []coldWordValue 
 	var out []coldWordValue
 	for _, a := range left {
 		for _, b := range right {
+			ab, ok := coldBind(a.binding, b.binding)
+			if !ok {
+				continue
+			}
 			for _, c := range carry {
+				binding, ok := coldBind(ab, c.binding)
+				if !ok {
+					continue
+				}
 				sum := uint32(a.word) + uint32(b.word) + uint32(c.word)
 				word := uint16(sum)
 				if carryOnly {
 					word = uint16(sum >> 16)
 				}
-				out = append(out, coldWordValue{word: word})
+				out = append(out, coldWordValue{word: word, binding: binding, speculative: a.speculative || b.speculative || c.speculative})
 			}
 		}
 	}
@@ -124,7 +137,7 @@ func (e *coldValueEngine) carry(q coldValueQuery) []coldWordValue {
 				if i.Mnemonic == "ASL" {
 					bit = v.word >> 15
 				}
-				out = append(out, coldWordValue{word: bit})
+				out = append(out, coldWordValue{word: bit, binding: v.binding, speculative: v.speculative})
 			}
 			return out
 		}
@@ -235,7 +248,16 @@ func (e *coldValueEngine) indirectRead(q coldValueQuery) []coldWordValue {
 	}
 	var out []coldWordValue
 	for _, p := range pointers {
-		out = append(out, e.readWords(bank, p.word, indices)...)
+		var agreeing []coldWordValue
+		for _, y := range indices {
+			binding, ok := coldBind(p.binding, y.binding)
+			if !ok {
+				continue
+			}
+			y.binding = binding
+			agreeing = append(agreeing, y)
+		}
+		out = append(out, e.readWords(bank, p.word, agreeing, coldReadFamily{})...)
 	}
 	return out
 }

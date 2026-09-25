@@ -29,16 +29,17 @@ type ShadowCommandWalk struct {
 }
 
 type ShadowCommandWalkStep struct {
-	Kind         string                     `json:"kind,omitempty"`
-	FetchPC      uint32                     `json:"fetch_pc"`
-	Word         uint16                     `json:"command_word"`
-	Index        int                        `json:"command_index"`
-	Handler      uint32                     `json:"native_handler"`
-	Operands     []ShadowCommandROMOperand  `json:"conditional_operands,omitempty"`
-	NextPC       *uint32                    `json:"next_fetch_pc,omitempty"`
-	DataPath     *ShadowCommandDataPath     `json:"conditional_native_data_path,omitempty"`
-	CallbackPath *ShadowCommandCallbackPath `json:"conditional_native_callback_path,omitempty"`
-	NativePath   *ShadowCommandCallbackPath `json:"conditional_native_command_path,omitempty"`
+	Kind          string                      `json:"kind,omitempty"`
+	FetchPC       uint32                      `json:"fetch_pc"`
+	Word          uint16                      `json:"command_word"`
+	Index         int                         `json:"command_index"`
+	Handler       uint32                      `json:"native_handler"`
+	Operands      []ShadowCommandROMOperand   `json:"conditional_operands,omitempty"`
+	NextPC        *uint32                     `json:"next_fetch_pc,omitempty"`
+	DataPath      *ShadowCommandDataPath      `json:"conditional_native_data_path,omitempty"`
+	CallbackPath  *ShadowCommandCallbackPath  `json:"conditional_native_callback_path,omitempty"`
+	NativePath    *ShadowCommandCallbackPath  `json:"conditional_native_command_path,omitempty"`
+	ConsumerPaths []ShadowCommandConsumerPath `json:"conditional_deferred_consumer_paths,omitempty"`
 }
 
 type ShadowCommandROMOperand struct {
@@ -234,6 +235,11 @@ func walkShadowCommandStreamPathsWithCallbacks(image romimage.Image, s ShadowCom
 		queue = queue[1:]
 		part := walkShadowCommandSegment(image, s, current.pc, fetchOperand, shadowCommandWalkLimit-len(current.w.Steps), current.seen)
 		part.FirstFetchPC = first
+		if callbacks != nil && callbacks.nativeCommands {
+			for n := range part.Steps {
+				part.Steps[n].ConsumerPaths = callbacks.consumerPaths(s, part.Steps[n])
+			}
+		}
 		part.Steps = append(append([]ShadowCommandWalkStep(nil), current.w.Steps...), part.Steps...)
 		if callbacks != nil && part.StopReason == "native_refetch_unproven" && len(part.Steps) != 0 {
 			last := len(part.Steps) - 1
@@ -258,6 +264,7 @@ func walkShadowCommandStreamPathsWithCallbacks(image romimage.Image, s ShadowCom
 				}
 			}
 			if len(paths) != 0 {
+				paths = distinctShadowCommandPathOutcomes(paths)
 				if len(out)+len(queue)+len(paths) > shadowCommandWalkPathLimit {
 					part.StopReason = "stream_path_budget"
 					out = append(out, part)
@@ -374,6 +381,9 @@ func writeShadowCommandWalks(out io.Writer, walks []ShadowCommandWalk) {
 			if p := step.CallbackPath; p != nil {
 				fmt.Fprintf(out, "  callback=%s (conditional native frame evidence)\n", shadowCallbackSummary(*p))
 			}
+			for _, p := range step.ConsumerPaths {
+				fmt.Fprintf(out, "  deferred-consumer=%s callback=%s cursor-publications=%d (conditional native frame evidence)\n", shadowAddress(p.DispatchPC), shadowCallbackSummary(p.Path), len(p.Path.CursorPublications))
+			}
 			if p := step.DataPath; p != nil {
 				fmt.Fprintf(out, "  data=%s native=%s fetch-Y%+d required-branches=%v cursor-publications=%d\n", shadowAddress(step.FetchPC), p.Status, p.CursorDelta, p.Branches, len(p.Publications))
 			}
@@ -406,4 +416,39 @@ func shadowCommandWalkCounts(walks []ShadowCommandWalk) (starts, rawOperands, un
 		}
 	}
 	return len(positions), rawOperands, len(operands), len(addresses)
+}
+
+// Native or callback alternatives that differ only in proof detail (native
+// path, required branches, obligations, stop PC) continue a walk identically.
+// Keep the first representative of each walk-relevant outcome so equivalent
+// branch arms cannot exhaust the path budget on their own. Distinct status,
+// entry decimal condition, cursor, stack, DB, stream cursor read, publication
+// or owned-return outcomes all remain separate alternatives.
+func distinctShadowCommandPathOutcomes(paths []ShadowCommandCallbackPath) []ShadowCommandCallbackPath {
+	type outcome struct {
+		Status                string
+		EntryDecimalCondition string
+		CursorDelta           int
+		CursorKnown           bool
+		StackBytes            int
+		DBSource              string
+		StreamCursorRead      *ShadowCommandCursorRead
+		CursorPublications    []ShadowCommandCursorStore
+		Returns               []ShadowCommandCallbackReturn
+	}
+	seen := map[string]bool{}
+	var out []ShadowCommandCallbackPath
+	for _, p := range paths {
+		key, err := json.Marshal(outcome{p.Status, p.EntryDecimalCondition, p.CursorDelta, p.CursorKnown, p.StackBytes, p.DBSource, p.StreamCursorRead, p.CursorPublications, p.Returns})
+		if err != nil {
+			out = append(out, p)
+			continue
+		}
+		if seen[string(key)] {
+			continue
+		}
+		seen[string(key)] = true
+		out = append(out, p)
+	}
+	return out
 }

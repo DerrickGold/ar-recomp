@@ -17,7 +17,9 @@ extern "C" {
  *  @{
  */
 
-/** Update an IEEE 802.3 CRC32 using zlib's running-state convention. */
+/** Advance a raw IEEE 802.3 CRC32 register (not zlib's pre/post-inverted
+ *  state): start from 0xFFFFFFFF and XOR the final state with 0xFFFFFFFF.
+ *  crc32_compute is exactly that for one span. */
 uint32_t crc32_update(uint32_t state, const uint8_t *data, size_t len);
 /** Compute an IEEE 802.3 CRC32 for one complete byte span. */
 uint32_t crc32_compute(const uint8_t *data, size_t len);

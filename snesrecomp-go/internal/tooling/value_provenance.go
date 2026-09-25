@@ -50,8 +50,12 @@ type coldValueOrigin struct {
 	record bool // selected through a self-delimiting record-pointer prefix
 }
 type coldWordValue struct {
-	word   uint16
-	origin coldValueOrigin
+	word    uint16
+	origin  coldValueOrigin
+	binding coldValueBindings // index selections this value was read through
+	// speculative: enumerated from a mask's finite domain rather than
+	// established by a rooted input; heuristic bounds may prune only these.
+	speculative bool
 }
 type coldValueContext struct {
 	caller coldValueSite
@@ -76,8 +80,19 @@ type coldValueEngine struct {
 	banks                  coldBankQueries
 	stores                 map[uint16][]coldValueSite
 	callers                map[int][]coldValueSite // physical destination, not guessed bank spelling
+	dispatchers            map[int][]coldValueSite // resolved indirect transfers; memory effects only, never caller contexts
 	reads                  map[[2]uint32][]coldValueSite
 	bankCache              map[coldValueSite][]byte
+	entryGraphs            map[int][]int           // physical entry offset -> graphs
+	slotWrites             map[uint32][]int        // low-memory byte -> graphs spelling a write
+	slotAncestors          map[uint32]map[int]bool // nil: ancestor budget exceeded
+	aliasFloor             []uint32                // graph -> lowest low-WRAM address its aliased writes reach
+	opaque                 []bool                  // graph transfers into code with unknown memory effects
+	successors             [][]int                 // graph -> graphs entered by its direct or resolved transfers
+	forwardEffects         map[int]coldForwardEffect
+	slotDefs               map[coldValueSite]coldSlotDefinitions
+	defBanks               map[coldDefinitionBankKey][]byte
+	families               map[coldReadFamily]*coldRecordFamily
 	contexts               []coldValueContext // zero is an unbound entry
 	contextIDs             map[coldValueContext]int
 	seeds                  []coldValueEntrySeed
@@ -89,6 +104,8 @@ type coldValueEngine struct {
 	current                int
 	work                   int
 	failed                 bool
+	domainFallback         bool         // second phase: unresolved loads may use mask supersets
+	pendingDomain          map[int]bool // loads that withheld a mask superset in the first phase
 	boundaries, conditions map[string]bool
 }
 
@@ -193,9 +210,18 @@ func newColdValueEngine(image rom.Image, configs map[byte]*config.Config, graphs
 		}
 		return a.X < b.X
 	})
-	e := &coldValueEngine{image: image, a: a, graphs: native, banks: coldBankQueries{a: a}, stores: map[uint16][]coldValueSite{}, callers: map[int][]coldValueSite{}, reads: map[[2]uint32][]coldValueSite{}, bankCache: map[coldValueSite][]byte{}, contexts: []coldValueContext{{}}, contextIDs: map[coldValueContext]int{}, ids: map[coldValueQuery]int{}, queued: map[int]bool{}, current: -1, boundaries: map[string]bool{}, conditions: map[string]bool{}}
+	e := &coldValueEngine{image: image, a: a, graphs: native, banks: coldBankQueries{a: a}, stores: map[uint16][]coldValueSite{}, callers: map[int][]coldValueSite{}, dispatchers: map[int][]coldValueSite{}, reads: map[[2]uint32][]coldValueSite{}, bankCache: map[coldValueSite][]byte{},
+		entryGraphs: map[int][]int{}, slotWrites: map[uint32][]int{}, slotAncestors: map[uint32]map[int]bool{}, forwardEffects: map[int]coldForwardEffect{}, slotDefs: map[coldValueSite]coldSlotDefinitions{}, defBanks: map[coldDefinitionBankKey][]byte{}, families: map[coldReadFamily]*coldRecordFamily{},
+		contexts: []coldValueContext{{}}, contextIDs: map[coldValueContext]int{}, ids: map[coldValueQuery]int{}, queued: map[int]bool{}, current: -1, pendingDomain: map[int]bool{}, boundaries: map[string]bool{}, conditions: map[string]bool{}}
+	e.aliasFloor = make([]uint32, len(native))
+	e.opaque = make([]bool, len(native))
+	transfers := make([][]coldTransfer, len(native))
 	for gi, g := range native {
+		e.aliasFloor[gi] = 0x10000
 		e.walks = append(e.walks, shadowPointerWalk{graph: g, preds: shadowPredecessors(g)})
+		if off, ok := a.offset(g.Entry.PC); ok {
+			e.entryGraphs[off] = append(e.entryGraphs[off], gi)
+		}
 		for _, key := range g.Order {
 			d := g.Instructions[key]
 			if d == nil {
@@ -206,21 +232,72 @@ func newColdValueEngine(image rom.Image, configs map[byte]*config.Config, graphs
 			if reg, width := coldValueStore(d); reg != "" && width == 2 && (i.Mode == cpu65816.DP || i.Mode == cpu65816.ABS) && i.Operand < 0x1fff {
 				e.stores[uint16(i.Operand)] = append(e.stores[uint16(i.Operand)], s)
 			}
+			address, width, spelled, alias := coldSpelledWrite(d)
+			if spelled && address < 0x2000 {
+				for n := uint32(0); n < uint32(width); n++ {
+					if w := e.slotWrites[address+n]; len(w) == 0 || w[len(w)-1] != gi {
+						e.slotWrites[address+n] = append(w, gi)
+					}
+				}
+			}
+			if alias {
+				e.aliasFloor[gi] = min(e.aliasFloor[gi], coldAliasFloor(d))
+			}
 			var target uint32
 			switch i.Opcode {
 			case 0x20, 0x4c:
 				target = key.PC&0xff0000 | i.Operand
 			case 0x22, 0x5c:
 				target = i.Operand
+			case 0xfc, 0x7c, 0x6c, 0xdc: // JSR (a,X), JMP (a,X), JMP (a), JML [a]
+				if len(i.DispatchEntries) == 0 {
+					e.opaque[gi] = true // unknown callees: unknown memory effects
+				}
+				for _, entry := range i.DispatchEntries {
+					if off, ok := a.offset(entry); ok {
+						e.dispatchers[off] = append(e.dispatchers[off], s)
+					}
+					transfers[gi] = append(transfers[gi], coldTransfer{entry, i.Opcode == 0xfc})
+				}
 			}
 			if target != 0 {
 				if off, ok := a.offset(target); ok {
 					e.callers[off] = append(e.callers[off], s)
 				}
+				transfers[gi] = append(transfers[gi], coldTransfer{target, i.Opcode == 0x20 || i.Opcode == 0x22})
 			}
 			if i.Mode == cpu65816.ABSX || i.Mode == cpu65816.ABSY {
 				e.reads[[2]uint32{key.PC >> 16, i.Operand}] = append(e.reads[[2]uint32{key.PC >> 16, i.Operand}], s)
 			}
+		}
+	}
+	// A transfer into code without a native graph (undecoded, HLE or authored
+	// override) has unknown memory effects. Jumps that stay inside the graph
+	// are ordinary control flow.
+	e.successors = make([][]int, len(native))
+	for gi, list := range transfers {
+		var pcs map[uint32]bool
+		for _, t := range list {
+			if off, ok := a.offset(t.target); ok && len(e.entryGraphs[off]) != 0 {
+				for _, next := range e.entryGraphs[off] {
+					if next != gi && !slices.Contains(e.successors[gi], next) {
+						e.successors[gi] = append(e.successors[gi], next)
+					}
+				}
+				continue
+			}
+			if !t.call {
+				if pcs == nil {
+					pcs = map[uint32]bool{}
+					for _, key := range native[gi].Order {
+						pcs[key.PC] = true
+					}
+				}
+				if pcs[t.target] {
+					continue
+				}
+			}
+			e.opaque[gi] = true
 		}
 	}
 	return e
@@ -257,7 +334,28 @@ func (e *coldValueEngine) values(q coldValueQuery) []coldWordValue {
 	}
 	return e.nodes[id].values
 }
+
+// solve reaches the precise fixpoint first. Only loads still unresolved there
+// then receive their mask supersets, and the worklist settles again.
 func (e *coldValueEngine) solve() {
+	for !e.failed {
+		e.drain()
+		if e.failed || e.domainFallback || len(e.pendingDomain) == 0 {
+			return
+		}
+		e.domainFallback = true
+		var pending []int
+		for id := range e.pendingDomain {
+			pending = append(pending, id)
+		}
+		slices.Sort(pending)
+		for _, id := range pending {
+			e.enqueue(id)
+		}
+	}
+}
+
+func (e *coldValueEngine) drain() {
 	for len(e.queue) != 0 && !e.failed {
 		if e.work >= coldValueWorkLimit {
 			e.failed = true
@@ -275,6 +373,14 @@ func (e *coldValueEngine) solve() {
 		v := e.evaluate(e.nodes[id].query)
 		e.current = -1
 		v = coldWordSet(v)
+		if len(v) > shadowInitializerDomainLimit {
+			// Correlation only refines a query. When index bindings alone
+			// exceed the domain budget, keep the uncorrelated superset.
+			if plain := coldWithoutBindings(v); len(plain) <= shadowInitializerDomainLimit {
+				e.boundaries["value_correlation_budget"] = true
+				v = plain
+			}
+		}
 		if len(v) > shadowInitializerDomainLimit {
 			e.boundaries["value_cardinality_budget"] = true
 			// A cycle which increments a finite set must not alternate
@@ -314,9 +420,19 @@ func coldWordSet(v []coldWordValue) []coldWordValue {
 		if a.origin.base != b.origin.base {
 			return a.origin.base < b.origin.base
 		}
-		return a.origin.cell < b.origin.cell
+		if a.origin.cell != b.origin.cell {
+			return a.origin.cell < b.origin.cell
+		}
+		if a.binding != b.binding {
+			return coldBindingLess(a.binding, b.binding)
+		}
+		return !a.speculative && b.speculative
 	})
-	return slices.Compact(v)
+	// An established value subsumes a speculative copy of itself.
+	return slices.CompactFunc(v, func(a, b coldWordValue) bool {
+		a.speculative, b.speculative = false, false
+		return a == b
+	})
 }
 
 func (e *coldValueEngine) evaluate(q coldValueQuery) []coldWordValue {
@@ -334,7 +450,7 @@ func (e *coldValueEngine) evaluate(q coldValueQuery) []coldWordValue {
 	if q.reg == "indexed" {
 		i := w.graph.Instructions[q.site.key].Instruction
 		indices := e.values(coldValueQuery{q.site, "X", q.context})
-		return e.readWords(byte(q.site.key.PC>>16), uint16(i.Operand), indices)
+		return e.readWords(byte(q.site.key.PC>>16), uint16(i.Operand), indices, coldReadFamily{})
 	}
 	x := w.indexExpression(q.site.key, q.reg, true)
 	// A backedge does not erase the separately supplied external entry input.
@@ -376,16 +492,27 @@ func (e *coldValueEngine) evaluate(q coldValueQuery) []coldWordValue {
 			e.boundaries[x.Source.Kind+":"+x.Source.Reason] = true
 		}
 	}
-	deferDomain := false
+	deferDomain, indexedLoad := false, false
 	if x.Source.Kind == "load" {
 		i := w.graph.Instructions[x.sourceKey].Instruction
 		// An indirect ROM read is a dependency, not an independent mask
 		// seed. Seeding its result can make a cyclic state table prove itself.
 		deferDomain = i.Mode == cpu65816.DPINDIR || i.Mode == cpu65816.INDIRY
+		indexedLoad = i.Mode == cpu65816.ABSX || i.Mode == cpu65816.ABSY || i.Mode == cpu65816.LONGX
 	}
 	if len(v) == 0 && len(x.DomainValues) != 0 && !deferDomain {
+		// An indexed table/record read whose index or bank resolves later must
+		// not first publish the mask's whole domain into shared slots and
+		// cycles; its superset waits for the precise fixpoint. Scalar-slot
+		// publications are inherently incomplete and keep the mask superset.
+		if indexedLoad && !e.domainFallback {
+			if e.current >= 0 {
+				e.pendingDomain[e.current] = true
+			}
+			return v
+		}
 		for _, word := range x.DomainValues {
-			v = append(v, coldWordValue{word: word})
+			v = append(v, coldWordValue{word: word, speculative: true})
 		}
 		return v // DomainValues already includes the operations.
 	}
@@ -475,8 +602,20 @@ func (e *coldValueEngine) read(q coldValueQuery) []coldWordValue {
 	if (i.Mode == cpu65816.DP && i.Operand < 0x1fff) || conditionalSlotRead {
 		e.conditions["scalar_slot_alias_and_lifetime"] = true
 		var values []coldWordValue
+		// A local reaching definition separates reused slot lifetimes; only a
+		// load without one falls back to every publication of the spelling.
+		if defs, ok := e.slotDefinitions(q.site); ok {
+			for _, def := range defs {
+				if def.reg == "" {
+					values = append(values, coldWordValue{})
+				} else {
+					values = append(values, e.values(coldValueQuery{def.site, def.reg, q.context})...)
+				}
+			}
+			return values
+		}
 		for _, s := range e.stores[uint16(i.Operand)] {
-			if !e.scalarSlot(s) {
+			if !e.slotPublication(s) {
 				continue
 			}
 			r, _ := coldValueStore(e.graphs[s.graph].Instructions[s.key])
@@ -504,6 +643,11 @@ func (e *coldValueEngine) read(q coldValueQuery) []coldWordValue {
 			e.conditions["same_table_bank_identity"] = true
 		}
 		if len(banks) == 0 {
+			if banks = e.definitionBanks(q.site, r.IndexRegister); len(banks) != 0 {
+				e.conditions["same_index_definition_bank"] = true
+			}
+		}
+		if len(banks) == 0 {
 			for _, v := range indices {
 				if v.origin.valid {
 					banks = append(banks, v.origin.bank)
@@ -519,9 +663,14 @@ func (e *coldValueEngine) read(q coldValueQuery) []coldWordValue {
 	if len(banks) == 0 {
 		e.boundaries["unknown_rom_read_bank"] = true
 	}
+	family := coldReadFamily{}
+	if def, ok := e.indexDefinition(q.site, r.IndexRegister); ok {
+		family = coldReadFamily{def, q.context}
+		e.noteRecordFamily(family, banks, uint16(i.Operand), indices)
+	}
 	var values []coldWordValue
 	for _, bank := range banks {
-		values = append(values, e.readWords(bank, uint16(i.Operand), indices)...)
+		values = append(values, e.readWords(bank, uint16(i.Operand), indices, family)...)
 	}
 	return values
 }
@@ -544,7 +693,10 @@ func (e *coldValueEngine) tableBanks(s coldValueSite) []byte {
 	return banks
 }
 
-func (e *coldValueEngine) readWords(bank byte, base uint16, indices []coldWordValue) []coldWordValue {
+// readWords reads one word per index. A family names the index definition:
+// results are bound to the index value that selected them, and a known record
+// family bound excludes address-valued indices past pointed storage.
+func (e *coldValueEngine) readWords(bank byte, base uint16, indices []coldWordValue, family coldReadFamily) []coldWordValue {
 	// Raw ROM words reused as indices are record pointers. Keep their source
 	// cells before the earliest forward record, including nullable tables.
 	ends := map[[2]uint32]int{}
@@ -567,6 +719,11 @@ func (e *coldValueEngine) readWords(bank byte, base uint16, indices []coldWordVa
 		}
 		ends[group] = end
 	}
+	var records *coldRecordFamily
+	bind := family.key != (decoder.DecodeKey{})
+	if bind {
+		records = e.families[family]
+	}
 	var result []coldWordValue
 	for _, v := range indices {
 		boundedRecord := false
@@ -576,11 +733,17 @@ func (e *coldValueEngine) readWords(bank byte, base uint16, indices []coldWordVa
 			}
 			o := v.origin
 			cell, ok := e.a.offset(uint32(o.bank)<<16 | uint32(o.cell))
-			if !ok || cell+2 > ends[[2]uint32{uint32(o.bank), uint32(o.base)}] {
+			// The table-end hypothesis may prune speculative selections only;
+			// an established index reads its cell regardless.
+			if !ok || v.speculative && cell+2 > ends[[2]uint32{uint32(o.bank), uint32(o.base)}] {
 				continue
 			}
 			start, valid := e.a.offset(uint32(o.bank)<<16 | uint32(o.base))
 			boundedRecord = valid && ends[[2]uint32{uint32(o.bank), uint32(o.base)}] < start+0x10000-int(o.base)
+		} else if records != nil && records.has && v.speculative && v.word >= 0x100 && v.word >= records.bound {
+			// A pointed-storage bound limits a speculative record scan; it is
+			// never a reason to drop an independently established record.
+			continue
 		}
 		address := uint32(base) + uint32(v.word)
 		if address > 0xfffe {
@@ -591,7 +754,13 @@ func (e *coldValueEngine) readWords(bank byte, base uint16, indices []coldWordVa
 		if !ok {
 			continue
 		}
-		result = append(result, coldWordValue{word: word, origin: coldValueOrigin{bank: bank, base: base, cell: uint16(address), valid: true, record: boundedRecord}})
+		binding := v.binding
+		if bind {
+			if binding, ok = coldBind(binding, coldValueBindings{{key: family.key, value: v.word}}); !ok {
+				continue
+			}
+		}
+		result = append(result, coldWordValue{word: word, origin: coldValueOrigin{bank: bank, base: base, cell: uint16(address), valid: true, record: boundedRecord}, binding: binding, speculative: v.speculative})
 	}
 	return result
 }

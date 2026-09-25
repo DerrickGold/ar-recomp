@@ -53,6 +53,20 @@ func stackedFieldTableTargets(image rom.Image, graphs []*Graph, openPrefixes map
 		}
 		return w.g.Instructions[p[0]]
 	}
+	// Offsets of decoded routine entries, built only when a table outgrows the
+	// open window and its end must be proven.
+	var entries map[int]bool
+	decodedEntry := func(offset int) bool {
+		if entries == nil {
+			entries = map[int]bool{}
+			for _, w := range walks {
+				if off, err := image.Offset(byte(w.g.Entry.PC>>16), uint16(w.g.Entry.PC)); err == nil {
+					entries[off] = true
+				}
+			}
+		}
+		return entries[offset]
+	}
 	// The unique backwards path may carry a register only across explicitly
 	// transparent operations. Width truncation, arithmetic and calls stop it.
 	type origin struct {
@@ -326,13 +340,19 @@ func stackedFieldTableTargets(image rom.Image, graphs []*Graph, openPrefixes map
 					continue
 				}
 				limit := uint32(0x10000) - uint32(uint16(loAddr))
-				var extension []uint32
-				for index := uint32(0); index/uint32(stride) < 256 && index+3 <= limit; index += uint32(stride) {
+				var extension, beyond []uint32
+				for index := uint32(0); index+3 <= limit; index += uint32(stride) {
 					target, ok := readTarget(uint16(index))
 					bank, pc := byte(target>>16), uint16(target)
 					if !ok || targetIsPadding(image, bank, pc) || inDataRegion(regions, bank, pc) {
 						if index <= uint32(maximum) {
 							extension = nil
+						}
+						// Records past the 256-record window need a proven end:
+						// this first invalid record must be exactly where a
+						// decoded routine begins, never a guessed table length.
+						if len(beyond) != 0 && decodedEntry(source+int(index)) {
+							extension = append(extension, beyond...)
 						}
 						break
 					}
@@ -345,8 +365,10 @@ func stackedFieldTableTargets(image rom.Image, graphs []*Graph, openPrefixes map
 							break
 						}
 					}
-					if index > uint32(maximum) {
+					if index > uint32(maximum) && index/uint32(stride) < 256 {
 						extension = append(extension, target)
+					} else if index > uint32(maximum) {
+						beyond = append(beyond, target)
 					}
 				}
 				for _, target := range extension {

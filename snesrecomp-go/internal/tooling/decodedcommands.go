@@ -129,78 +129,113 @@ func AnalyzeDecodedCommands(image rom.Image, configs map[byte]*config.Config, gr
 	return r
 }
 
-// A pair of independently recovered indices anchors a pointer-record window.
-// Probe at most 32 records in each direction from the ORIGINAL anchors, never
-// recursively from a probe. Nulls, mapping/ownership boundaries and the first
-// pointed stream stop each ray. This is an open neighbor inventory, not an
-// argument value proof or a license to scan arbitrary stream bytes for tags.
+// Independently recovered, stride-aligned indices of one pointer table anchor
+// an open stream-reference inventory. Anchors pool across contextual roots only
+// when the table (constant data bank, base operand, shift stride) and its
+// stream interpretation (constant stream bank, selector, fetch and cursor
+// arithmetic) are identical, and only ORIGINAL references pool. Between two
+// adjacent anchors every aligned slot belongs to the same indexed table; beyond
+// the outermost anchors probe at most 32 records, never recursively from a
+// probe. A null slot is an unused table entry: it is skipped, never referenced,
+// and still counts toward the outer window. Mapping/ownership boundaries, a
+// nonzero slot that is not a mapped stream, and the first pointed stream stop
+// each ray. This is an open inventory, not an argument value proof or a license
+// to scan arbitrary stream bytes for tags.
 func extendColdCommandPointerNeighbors(image rom.Image, roots []ShadowCommandRoot, a *shadowCallbackAnalyzer) []ShadowCommandRoot {
-	out := append([]ShadowCommandRoot(nil), roots...)
-	for n := range out {
-		r := &out[n]
+	type pointerTable struct {
+		bank, streamBank                       byte
+		operand, selector, fetch, fetchOperand uint32
+		stride, delta                          int
+	}
+	identity := func(r *ShadowCommandRoot) (pointerTable, bool) {
 		bank, ok := shadowStreamConstantBank(r.TableRead.DataBank)
 		if !ok {
-			continue
+			return pointerTable{}, false
 		}
-		if _, ok := shadowStreamConstantBank(r.StreamBank); !ok {
-			continue
+		streamBank, ok := shadowStreamConstantBank(r.StreamBank)
+		if !ok {
+			return pointerTable{}, false
 		}
 		ops := r.TableRead.Index.Operations
 		if len(ops) < 1 || len(ops) > 4 {
-			continue
+			return pointerTable{}, false
 		}
 		stride := 1
 		for _, op := range ops {
 			if op.Mnemonic != "ASL" {
-				stride = 0
-				break
+				return pointerTable{}, false
 			}
 			stride *= 2
 		}
-		if stride < 2 {
+		return pointerTable{bank, streamBank, uint32(uint16(r.TableRead.Operand)), uint32(r.SelectorPC), uint32(r.FetchPC), uint32(r.FetchOperand), stride, int(r.FetchCursorDelta)}, true
+	}
+	anchors := map[pointerTable]map[int]bool{}
+	fetches := map[pointerTable][]uint32{}
+	for n := range roots {
+		t, ok := identity(&roots[n])
+		if !ok {
 			continue
 		}
-		anchors := map[int]bool{}
-		seen := map[uint16]bool{}
-		base, err := image.Offset(bank, uint16(r.TableRead.Operand))
+		for _, ref := range roots[n].References {
+			if ref.FirstFetchPC == nil || ref.StreamPC == nil || ref.Pointer == nil || *ref.Pointer == 0 || ref.TableIndex%uint16(t.stride) != 0 {
+				continue
+			}
+			if anchors[t] == nil {
+				anchors[t] = map[int]bool{}
+			}
+			anchors[t][int(ref.TableIndex)] = true
+			fetches[t] = append(fetches[t], *ref.FirstFetchPC)
+		}
+	}
+	out := append([]ShadowCommandRoot(nil), roots...)
+	for n := range out {
+		r := &out[n]
+		t, ok := identity(r)
+		if !ok || len(anchors[t]) < 2 {
+			continue
+		}
+		base, err := image.Offset(t.bank, uint16(t.operand))
 		if err != nil {
 			continue
 		}
-		end := base + 65536 - int(uint16(r.TableRead.Operand))
-		for _, ref := range r.References {
-			seen[ref.TableIndex] = true
-			if ref.FirstFetchPC == nil || ref.StreamPC == nil || ref.Pointer == nil || *ref.Pointer == 0 || ref.TableIndex%uint16(stride) != 0 {
-				continue
-			}
-			anchors[int(ref.TableIndex)] = true
-			if off, ok := a.offset(*ref.FirstFetchPC); ok && off >= base && off < end {
+		end := base + 65536 - int(t.operand)
+		for _, pc := range fetches[t] {
+			if off, ok := a.offset(pc); ok && off >= base && off < end {
 				end = off
 			}
 		}
-		if len(anchors) < 2 {
-			continue
+		seen := map[uint16]bool{}
+		for _, ref := range r.References {
+			seen[ref.TableIndex] = true
 		}
 		var indices []int
-		for index := range anchors {
+		for index := range anchors[t] {
 			indices = append(indices, index)
 		}
 		sort.Ints(indices)
 		r.References = append([]ShadowCommandRootReference(nil), r.References...)
-		for _, anchor := range indices {
+		for i, anchor := range indices {
 			for _, direction := range []int{-1, 1} {
-				for step := 1; step <= 32; step++ {
-					index := anchor + direction*step*stride
-					if index < 0 || index > 65535 || int(r.TableRead.Operand)+index > 65534 {
+				steps, status := 32, "open_neighbor_ROM_stream_reference"
+				if next := i + direction; next >= 0 && next < len(indices) {
+					steps, status = (indices[next]-anchor)*direction/t.stride, "open_interpolated_ROM_stream_reference"
+				}
+				for step := 1; step <= steps; step++ {
+					index := anchor + direction*step*t.stride
+					if index < 0 || int(t.operand)+index > 65534 {
 						break
 					}
-					pc := uint32(bank)<<16 | uint32(int(r.TableRead.Operand)+index)
+					pc := uint32(t.bank)<<16 | uint32(int(t.operand)+index)
 					off, ok := a.offset(pc)
 					if !ok || off < base || off+2 > end || a.starts[off] || a.interiors[off] || a.starts[off+1] || a.interiors[off+1] {
 						break
 					}
 					ref := ShadowCommandRootReference{TableIndex: uint16(index)}
 					resolveShadowStreamPointer(image, *r, &ref)
-					if ref.FirstFetchPC == nil || ref.Pointer == nil || *ref.Pointer == 0 {
+					if ref.Pointer != nil && *ref.Pointer == 0 {
+						continue
+					}
+					if ref.FirstFetchPC == nil {
 						break
 					}
 					if stream, ok := a.offset(*ref.FirstFetchPC); ok && stream >= base && stream < end {
@@ -217,7 +252,7 @@ func extendColdCommandPointerNeighbors(image rom.Image, roots []ShadowCommandRoo
 						break
 					}
 					seen[ref.TableIndex] = true
-					ref.Status = "open_neighbor_ROM_stream_reference"
+					ref.Status = status
 					r.References = append(r.References, ref)
 				}
 			}

@@ -16,16 +16,23 @@ import (
 // participate; actual native stores, target reads and live M/X remain intact.
 func LiteralLongPointerTargets(image rom.Image, graphs []*Graph, regions []DataRegion) []uint32 {
 	byWrite := map[uint16]map[uint16]bool{}
+	addBase := func(base uint16) {
+		for delta := -1; delta <= 2; delta++ {
+			at := uint16(int(base) + delta)
+			if byWrite[at] == nil {
+				byWrite[at] = map[uint16]bool{}
+			}
+			byWrite[at][base] = true
+		}
+	}
 	for _, g := range graphs {
+		pred := forwardedFieldPredecessors(g)
 		for _, d := range g.Instructions {
 			if i := d.Instruction; i.Opcode == 0xdc && i.Operand < 0x1ffe {
 				base := uint16(i.Operand)
-				for delta := -1; delta <= 2; delta++ {
-					at := uint16(int(base) + delta)
-					if byWrite[at] == nil {
-						byWrite[at] = map[uint16]bool{}
-					}
-					byWrite[at][base] = true
+				addBase(base)
+				if source, ok := copiedLongPointerSource(g, pred, d.Key, base); ok {
+					addBase(source)
 				}
 			}
 		}
@@ -115,4 +122,52 @@ func LiteralLongPointerTargets(image rom.Image, graphs []*Graph, regions []DataR
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i] < result[j] })
 	return result
+}
+
+// A JML [slot] that first copies a whole pointer from another low-WRAM field,
+// lane by lane through immediate LDA/LDX/LDY field+k; STA/STX/STY slot+k
+// pairs on the unique path before the jump, reads that field's writers too.
+// Every lane must come from one source base. A transform, STZ, width change,
+// call, branch or mixed source leaves only the directly spelled slot.
+func copiedLongPointerSource(g *Graph, pred map[DecodeKey][]DecodeKey, jml DecodeKey, base uint16) (uint16, bool) {
+	var source [3]int
+	resolved := uint8(0)
+	at := forwardedFieldPrevious(g, pred, jml)
+	for steps := 0; steps < 32 && at != nil && resolved != 7; steps++ {
+		ins := at.Instruction
+		switch ins.Mnemonic {
+		case "STA", "STX", "STY":
+			if (ins.Mode != cpu65816.DP && ins.Mode != cpu65816.ABS) || ins.Operand >= 0x1fff {
+				return 0, false
+			}
+			reg := ins.Mnemonic[2:]
+			width := 2 - int(at.Key.X)
+			if reg == "A" {
+				width = 2 - int(at.Key.M)
+			}
+			load := forwardedFieldPrevious(g, pred, at.Key)
+			for n := 0; n < width; n++ {
+				lane := int(uint16(ins.Operand)) + n - int(base)
+				if lane < 0 || lane > 2 || resolved&(1<<lane) != 0 {
+					continue
+				}
+				if load == nil || load.Instruction.Mnemonic != "LD"+reg ||
+					(load.Instruction.Mode != cpu65816.DP && load.Instruction.Mode != cpu65816.ABS) ||
+					load.Instruction.Operand >= 0x1fff || load.Key.M != at.Key.M || load.Key.X != at.Key.X {
+					return 0, false
+				}
+				source[lane] = int(uint16(load.Instruction.Operand)) + n - lane
+				resolved |= 1 << lane
+			}
+		case "LDA", "LDX", "LDY", "NOP", "CLC", "SEC", "CLD", "SED":
+		default:
+			return 0, false
+		}
+		at = forwardedFieldPrevious(g, pred, at.Key)
+	}
+	if resolved != 7 || source[0] != source[1] || source[1] != source[2] ||
+		source[0] < 0 || source[0] == int(base) || source[0] >= 0x1ffe {
+		return 0, false
+	}
+	return uint16(source[0]), true
 }

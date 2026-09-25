@@ -26,6 +26,7 @@ type ShadowCommandPublishedResume struct {
 	NativeStop            string                    `json:"native_path_stop"`
 	Obligations           []string                  `json:"proof_obligations"`
 	FieldInput            *ShadowCommandFieldInput  `json:"conditional_rebased_field,omitempty"`
+	ConsumerDispatchPC    uint32                    `json:"deferred_consumer_dispatch_pc,omitempty"`
 }
 
 type coldCommandPosition struct{ selector, fetch uint32 }
@@ -174,6 +175,7 @@ func expandColdCommandResumes(image rom.Image, inventory *DecodedCommandInventor
 						p             ShadowCommandCursorStore
 						base          int
 						decimal, stop string
+						consumer      uint32
 					}
 					var writes []write
 					// Callback scouts begin at the callback, not at its command
@@ -184,18 +186,27 @@ func expandColdCommandResumes(image rom.Image, inventory *DecodedCommandInventor
 							continue
 						}
 						for _, p := range command.CursorStores {
-							writes = append(writes, write{p, int(uint16(step.FetchPC)) - s.TagByteOffset + 1 + s.EntryCursorDelta, "", "command_prefix:" + command.StopReason})
+							writes = append(writes, write{p, int(uint16(step.FetchPC)) - s.TagByteOffset + 1 + s.EntryCursorDelta, "", "command_prefix:" + command.StopReason, 0})
 						}
 					}
 					if step.DataPath != nil {
 						for _, p := range step.DataPath.Publications {
-							writes = append(writes, write{p, int(uint16(step.FetchPC)) - s.TagByteOffset + 1, "", step.DataPath.Status})
+							writes = append(writes, write{p, int(uint16(step.FetchPC)) - s.TagByteOffset + 1, "", step.DataPath.Status, 0})
 						}
 					}
 					for _, path := range []*ShadowCommandCallbackPath{step.NativePath, step.CallbackPath} {
 						if path != nil {
 							for _, p := range path.CursorPublications {
-								writes = append(writes, write{p, int(uint16(step.FetchPC)) - s.TagByteOffset + 1 + s.EntryCursorDelta, path.EntryDecimalCondition, path.Status})
+								writes = append(writes, write{p, int(uint16(step.FetchPC)) - s.TagByteOffset + 1 + s.EntryCursorDelta, path.EntryDecimalCondition, path.Status, 0})
+							}
+						}
+					}
+					// A deferred consumer's Y is not this command's cursor. Only a
+					// literal cursor from its callback names a stream position.
+					for _, consumer := range step.ConsumerPaths {
+						for _, p := range consumer.Path.CursorPublications {
+							if p.Literal {
+								writes = append(writes, write{p, 0, "", consumer.Path.Status, consumer.DispatchPC})
 							}
 						}
 					}
@@ -205,6 +216,9 @@ func expandColdCommandResumes(image rom.Image, inventory *DecodedCommandInventor
 								continue
 							}
 							cursor := wr.base + wr.p.CursorDelta
+							if wr.p.Literal {
+								cursor = int(wr.p.Value)
+							}
 							fetch := cursor + load.FetchDelta + s.TagByteOffset - 1
 							if cursor < 0 || cursor > 65535 || fetch < 0 || fetch > 65534 {
 								continue
@@ -224,8 +238,13 @@ func expandColdCommandResumes(image rom.Image, inventory *DecodedCommandInventor
 							seen[key] = true
 							pointer := uint16(cursor)
 							streamPC := pc&0xff0000 | uint32(pointer)
-							evidence := &ShadowCommandPublishedResume{ParentFetchPC: step.FetchPC, Publication: wr.p, Reload: load, EntryDecimalCondition: wr.decimal, NativeStop: wr.stop, Obligations: []string{"conditional_native_publication_not_a_return", "D_DB_X_field_alias_and_lifetime_unproven", "publication_must_reach_reload_without_overwrite", "reload_stream_bank_must_match_parent_stream", "no_frame_skip_or_closed_entry_promotion"}}
-							roots = append(roots, ShadowCommandRoot{SelectorPC: s.SelectorPC, FetchPC: s.FetchPC, FetchOperand: uint16(s.TagByteOffset - 1), FetchCursorDelta: load.FetchDelta, References: []ShadowCommandRootReference{{Pointer: &pointer, StreamPC: &streamPC, FirstFetchPC: &pc, Status: "conditional_published_cursor_reload", PublishedResume: evidence}}, ProofObligations: evidence.Obligations})
+							status, obligations := "conditional_published_cursor_reload", []string{"conditional_native_publication_not_a_return", "D_DB_X_field_alias_and_lifetime_unproven", "publication_must_reach_reload_without_overwrite", "reload_stream_bank_must_match_parent_stream", "no_frame_skip_or_closed_entry_promotion"}
+							if wr.consumer != 0 {
+								status = "conditional_consumer_published_cursor_reload"
+								obligations = append(obligations, "deferred_field_must_reach_consumer_invocation", "consumer_required_branches_not_proven_feasible")
+							}
+							evidence := &ShadowCommandPublishedResume{ParentFetchPC: step.FetchPC, Publication: wr.p, Reload: load, EntryDecimalCondition: wr.decimal, NativeStop: wr.stop, Obligations: obligations, ConsumerDispatchPC: wr.consumer}
+							roots = append(roots, ShadowCommandRoot{SelectorPC: s.SelectorPC, FetchPC: s.FetchPC, FetchOperand: uint16(s.TagByteOffset - 1), FetchCursorDelta: load.FetchDelta, References: []ShadowCommandRootReference{{Pointer: &pointer, StreamPC: &streamPC, FirstFetchPC: &pc, Status: status, PublishedResume: evidence}}, ProofObligations: evidence.Obligations})
 						}
 					}
 				}

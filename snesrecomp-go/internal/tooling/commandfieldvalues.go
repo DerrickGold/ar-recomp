@@ -75,7 +75,7 @@ func (q *coldCommandValueQueries) rebasedCursorRoots(wave []ShadowCommandWalk, r
 						}
 						if p := step.NativePath; p != nil && p.EntryDecimalCondition != "set" {
 							for _, store := range p.CursorPublications {
-								if store.Mode != "dp,x" {
+								if store.Mode != "dp,x" || store.Literal {
 									continue
 								}
 								query, ok := q.fieldQuery(gi, store.PC, ctx)
