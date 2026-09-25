@@ -36,5 +36,10 @@ bool ArRegionalCampaign_AcknowledgeLairHistory(ArRegionalCampaign *campaign,
     const uint8_t image[kActRaiserSramSize],
     const uint16_t remaining[kArRegionalLairCount], SaveError *error);
 SaveCommitHost ArRegionalCampaign_SaveHost(ArRegionalCampaign *campaign);
+/* Persist only requested choices against the unchanged durable image. Never
+ * copy live histories, effective snapshots or the randomizer recipe. */
+bool ArRegionalCampaign_SaveSettings(const ArRegionalSession *before,
+    const ArRegionalSession *after, SaveFileFormat format, const char *path,
+    const uint8_t image[kActRaiserSramSize], SaveError *error);
 
 #endif

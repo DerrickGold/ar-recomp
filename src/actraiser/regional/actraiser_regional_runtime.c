@@ -78,10 +78,13 @@ static bool s_story_compass_delegate;
 static uint16_t s_skull_frames;
 static ArRegionalCampaign s_campaign;
 static ArRegionalProfileCache s_profile_cache;
-/* Title choices are an unsaved new-game draft, never an alias of the loaded
- * campaign. Continue discards the draft and restores its own bound rules. */
+/* A title view is never an alias of live gameplay. Interactive boots restore
+ * the selected slot; diagnostic/replay boots retain their recorded draft. */
 static ArRegionalSession s_title_draft;
 static bool s_title_open;
+static bool s_title_saved;
+static ActRaiserRegionalSettingsWriter s_settings_writer;
+static void *s_settings_context;
 static uint8_t s_title_artwork;
 static void PrepareTitleDraft(void);
 static ArRegionalRules s_return_rules;
@@ -153,6 +156,8 @@ bool ActRaiserRegional_InitializeSlot(uint32_t slot,ArRegionalCampaignIdentity i
   Randomizer_ReleaseCampaign();
   s_profile_cache = (ArRegionalProfileCache){0};
   s_title_open=false;
+  s_title_saved=false;
+  s_settings_writer=NULL;s_settings_context=NULL;
   s_title_draft=(ArRegionalSession){0};
   s_town_art_scene=0;s_town_artwork=0;
   s_return_rules_valid=false;
@@ -249,6 +254,10 @@ bool ActRaiserRegional_StageNewGame(const ArRegionalSession *draft) {
   s_prepared_rules=draft->requested;s_prepared_new_game=true;
   s_boot_requested=s_boot_effective=draft->requested;
   return true;
+}
+
+void ActRaiserRegional_SetSettingsWriter(ActRaiserRegionalSettingsWriter writer,void *context) {
+  s_settings_writer=writer;s_settings_context=context;
 }
 
 bool ActRaiserRegional_CopySupport(ArRegionalSupportSnapshot *snapshot) {
@@ -407,7 +416,8 @@ bool ActRaiserRegional_CopyRulesView(ActRaiserRegionalRulesView *out) {
   if (!out || !session) return false;
   *out = (ActRaiserRegionalRulesView){.revision = session->revision,
       .requested = session->requested, .effective = session->effective,
-      .new_game = s_title_open,
+      .new_game = s_title_open && !s_title_saved,
+      .persistent = s_settings_writer != NULL,
       .editable = InputReplay_PolicyChangesAllowed(), .miracle_in_progress = s_miracle_active};
   out->lair_history_ready = session->lairs.initialized_towns == 0x3f &&
       !session->lairs.diverged_towns;
@@ -438,44 +448,84 @@ bool ActRaiserRegional_CopyRulesView(ActRaiserRegionalRulesView *out) {
 static ActRaiserRegionalEditContext CurrentEditor(void) {
   return (ActRaiserRegionalEditContext){
       .session = EditableSession(), .population = &s_population.intent,
-      .new_game = s_title_open, .editable = InputReplay_PolicyChangesAllowed()};
+      .new_game = s_title_open && !s_title_saved, .editable = InputReplay_PolicyChangesAllowed()};
+}
+
+/* Persist before publishing the copy. UI failure never leaves a changed live
+ * request; the storage owner commits choices, not live history/activation. */
+static ActRaiserRegionalEditResult FinishSettingsEdit(ActRaiserRegionalEditResult result,
+    const ActRaiserRegionalEditContext *edit,ArRegionalSession *candidate,
+    const ActRaiserRegionalPopulationIntent *population) {
+  if (result!=kActRaiserRegionalEdit_Applied && result!=kActRaiserRegionalEdit_Unchanged &&
+      result!=kActRaiserRegionalEdit_Deferred)return result;
+  if (s_settings_writer && s_title_open && s_title_saved && result==kActRaiserRegionalEdit_Deferred)
+    return kActRaiserRegionalEdit_RequiresGame;
+  if (s_settings_writer && result==kActRaiserRegionalEdit_Applied) {
+    SaveError error={{0}};
+    if (!s_settings_writer(s_settings_context,edit->session,candidate,&error)) {
+      fprintf(stderr,"[regional] settings not saved: %s\n",error.message);
+      return kActRaiserRegionalEdit_SaveFailed;
+    }
+  }
+  *edit->session=*candidate;*edit->population=*population;
+  return result;
+}
+
+/* One transaction wrapper for the four public edit shapes. The pure editor
+ * continues to own validation, preview and town-redevelopment decisions. */
+typedef enum SettingsEditKind { kSettingsRules,kSettingsProfile,kSettingsDifficulty,kSettingsDifficultyChoice } SettingsEditKind;
+static ActRaiserRegionalEditResult RequestSettings(const ActRaiserRegionalRulesView *view,
+    SettingsEditKind kind,unsigned key,unsigned choice) {
+  const ActRaiserRegionalEditContext edit=CurrentEditor();
+  if(!edit.session)return kActRaiserRegionalEdit_Invalid;
+  ArRegionalSession candidate=*edit.session;
+  ActRaiserRegionalPopulationIntent population=*edit.population;
+  ActRaiserRegionalEditContext scratch=edit;scratch.session=&candidate;scratch.population=&population;
+  ActRaiserRegionalEditResult result;
+  switch(kind) {
+    case kSettingsRules: result=ActRaiserRegionalEditor_RequestRules(&scratch,view,key,choice);break;
+    case kSettingsProfile: result=ActRaiserRegionalEditor_RequestProfile(&scratch,view,key,choice);break;
+    case kSettingsDifficulty: result=ActRaiserRegionalEditor_RequestDifficulty(&scratch,view,choice);break;
+    default: result=ActRaiserRegionalEditor_RequestDifficultyChoice(&scratch,view,choice);break;
+  }
+  return FinishSettingsEdit(result,&edit,&candidate,&population);
 }
 
 ActRaiserRegionalEditResult ActRaiserRegional_PreviewRules(
     const ActRaiserRegionalRulesView *view, ActRaiserRegionalSettingGroup group,
     ArRegionalSource source, ActRaiserRegionalEditImpact *out) {
   const ActRaiserRegionalEditContext edit = CurrentEditor();
-  return ActRaiserRegionalEditor_PreviewRules(&edit, view, group, source, out);
+  const ActRaiserRegionalEditResult result=ActRaiserRegionalEditor_PreviewRules(&edit,view,group,source,out);
+  return s_settings_writer && s_title_open && s_title_saved && result==kActRaiserRegionalEdit_Deferred
+      ? kActRaiserRegionalEdit_RequiresGame : result;
 }
 ActRaiserRegionalEditResult ActRaiserRegional_RequestDifficultyChoice(
     const ActRaiserRegionalRulesView *view, ArRegionalDifficultyChoice choice) {
-  const ActRaiserRegionalEditContext edit = CurrentEditor();
-  return ActRaiserRegionalEditor_RequestDifficultyChoice(&edit, view, choice);
+  return RequestSettings(view,kSettingsDifficultyChoice,0,choice);
 }
 
 ActRaiserRegionalEditResult ActRaiserRegional_RequestProfile(
     const ActRaiserRegionalRulesView *view, ArRegionalProfileGroup group, ArRegionalSource source) {
-  const ActRaiserRegionalEditContext edit = CurrentEditor();
-  return ActRaiserRegionalEditor_RequestProfile(&edit, view, group, source);
+  return RequestSettings(view,kSettingsProfile,group,source);
 }
 
 ActRaiserRegionalEditResult ActRaiserRegional_PreviewProfile(
     const ActRaiserRegionalRulesView *view, ArRegionalProfileGroup group,
     ArRegionalSource source, ActRaiserRegionalEditImpact *out) {
   const ActRaiserRegionalEditContext edit = CurrentEditor();
-  return ActRaiserRegionalEditor_PreviewProfile(&edit, view, group, source, out);
+  const ActRaiserRegionalEditResult result=ActRaiserRegionalEditor_PreviewProfile(&edit,view,group,source,out);
+  return s_settings_writer && s_title_open && s_title_saved && result==kActRaiserRegionalEdit_Deferred
+      ? kActRaiserRegionalEdit_RequiresGame : result;
 }
 
 ActRaiserRegionalEditResult ActRaiserRegional_RequestRules(
     const ActRaiserRegionalRulesView *view, ActRaiserRegionalSettingGroup group, ArRegionalSource source) {
-  const ActRaiserRegionalEditContext edit = CurrentEditor();
-  return ActRaiserRegionalEditor_RequestRules(&edit, view, group, source);
+  return RequestSettings(view,kSettingsRules,group,source);
 }
 
 ActRaiserRegionalEditResult ActRaiserRegional_RequestDifficulty(
     const ActRaiserRegionalRulesView *view, ArRegionalDifficulty level) {
-  const ActRaiserRegionalEditContext edit = CurrentEditor();
-  return ActRaiserRegionalEditor_RequestDifficulty(&edit, view, level);
+  return RequestSettings(view,kSettingsDifficulty,0,level);
 }
 
 uint8_t ActRaiserRegional_HazardSnapshot(void) { return s_action.hazards; }
@@ -1480,6 +1530,14 @@ static void PrepareTitleDraft(void) {
     draft.active.effective.story=s_prepared_rules.story;
     s_prepared_new_game=false;
   }
+  s_title_saved=false;
+  uint8_t image[kActRaiserSramSize];
+  if(s_settings_writer && SaveSystem_CopyDurableImage(image)) {
+    if(!SaveSystem_ValidateActive(&error) ||
+        !ArRegionalCampaign_Continue(&draft,SaveSystem_ActivePath(),image,&error))
+      ActRaiserHleFatal("Cannot restore title settings; saves preserved: %s",error.message);
+    s_title_saved=true;
+  }
   s_title_draft=draft.active;s_title_artwork=0;s_title_open=true;
 }
 RecompReturn ActRaiser_RegionalTitle(CpuState *cpu) {
@@ -1508,6 +1566,20 @@ RecompReturn ActRaiser_RegionalTitle(CpuState *cpu) {
     if (ok && s_campaign.active.lairs.initialized_towns==0x3f && !s_campaign.active.reloads.initialized_towns)
       ok=ActRaiserLairReloads_AdoptSaved(&s_campaign.active.reloads,image);
   } else if (selection == 0 || selection == 2) {
+    if(s_title_saved) {
+      /* New Game inherits choices, never the occupied slot's identity, lair
+       * history or active actors. Continue remains that saved campaign. */
+      const ArRegionalRules starting=s_title_draft.requested;
+      ArRegionalCampaign fresh;
+      ArRegionalCampaign_Init(&fresh,s_campaign.slot,s_campaign.identity,s_campaign.identity_context);
+      const ArRegionalCostPolicy defaults={{0}};
+      if(!ArRegionalCampaign_NewGame(&fresh,&defaults,&error))
+        ActRaiserHleFatal("Cannot initialize new campaign: %s",error.message);
+      for(unsigned town=0;town<6;++town)
+        if(!ArRegionalLairHistory_InitTown(&fresh.active.lairs,town))ActRaiserHleFatal("Cannot initialize new lair history");
+      if(!ArRegionalLairReloads_Init(&fresh.active.reloads))ActRaiserHleFatal("Cannot initialize new lair delays");
+      s_title_draft=fresh.active;s_title_draft.requested=starting;
+    }
     RandomizerConfig recipe;
     ArRegionalRules rules;
     if(!Randomizer_CaptureConfig(&recipe) ||

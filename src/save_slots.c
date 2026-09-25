@@ -257,6 +257,32 @@ SaveBackend SaveSlots_DestinationBackend(const SaveSlots *s) {
   const SaveSlotRecord *record=&s->records[s->destination];
   return s->pending && s->new_game?record->prepared_backend:record->backend;
 }
+static bool WriteDraft(SaveSlots *s,unsigned slot,const void *draft,size_t size,
+    SaveBackend backend,SaveError *e) {
+  char path[kSaveSlotPathCapacity];
+  Path(s,"slots",path,sizeof(path));if(sr_mkdir(path) && errno!=EEXIST)return Fail(e,"Cannot create slots directory.");
+  char leaf[32];snprintf(leaf,sizeof(leaf),"slots/%02u",slot+1);Path(s,leaf,path,sizeof(path));
+  if(sr_mkdir(path) && errno!=EEXIST)return Fail(e,"Cannot create the slot directory.");
+  DraftPath(s,slot,path);if(!Save_WriteCompanionFile(path,draft,size,e))return false;
+  if(s->records[slot].prepared)return true; /* Only the existing draft changed. */
+  const SaveSlotRecord previous=s->records[slot];const bool was_dirty=s->dirty;
+  s->records[slot].prepared_backend=backend;
+  s->records[slot].prepared=true;s->dirty=true;
+  if(SaveSlots_Flush(s,e))return true;
+  s->records[slot]=previous;s->dirty=was_dirty;
+  /* This slot had no draft before the call. Don't leave an unindexed setup
+   * that would turn an otherwise empty slot into a recovery error. */
+  if(sr_remove(path) && errno!=ENOENT)return Fail(e,"Could not roll back the uncommitted new-game setup.");
+  return false;
+}
+bool SaveSlots_UpdateDraft(SaveSlots *s,const void *draft,size_t size,SaveError *e) {
+  if(!s || !s->lock || s->pending || s->active>=kSaveSlotCount || !draft || !size || size>kSaveSlotDraftCapacity)
+    return Fail(e,"Cannot save this new-game setup.");
+  SaveSlotInspection current;
+  if(!SaveSlots_Inspect(s,s->active,&current)){if(e)*e=current.error;return false;}
+  if(current.state!=kSaveSlot_Empty)return Fail(e,"The active slot already contains a campaign.");
+  return WriteDraft(s,s->active,draft,size,s->records[s->active].backend,e);
+}
 bool SaveSlots_Request(SaveSlots *s,unsigned slot,uint64_t inspected,const void *draft,size_t size,SaveBackend new_backend,SaveError *e) {
   if(!s || !s->lock || s->pending || slot>=kSaveSlotCount ||
       (size && (!draft || (unsigned)new_backend>=kSaveBackend_Count)) || size>kSaveSlotDraftCapacity)return Fail(e,"Cannot switch to this slot.");
@@ -266,14 +292,7 @@ bool SaveSlots_Request(SaveSlots *s,unsigned slot,uint64_t inspected,const void 
   if(slot==s->active && before.state==kSaveSlot_Ready)return Fail(e,"This slot is already active.");
   if((before.state==kSaveSlot_Empty)!=!!size)return Fail(e,"An empty slot needs a new-game setup; an occupied slot must be loaded.");
   char path[kSaveSlotPathCapacity];
-  if(size) {
-    Path(s,"slots",path,sizeof(path));if(sr_mkdir(path) && errno!=EEXIST)return Fail(e,"Cannot create slots directory.");
-    char leaf[32];snprintf(leaf,sizeof(leaf),"slots/%02u",slot+1);Path(s,leaf,path,sizeof(path));
-    if(sr_mkdir(path) && errno!=EEXIST)return Fail(e,"Cannot create the slot directory.");
-    DraftPath(s,slot,path);if(!Save_WriteCompanionFile(path,draft,size,e))return false;
-    if(!s->records[slot].prepared)s->records[slot].prepared_backend=new_backend;
-    s->records[slot].prepared=true;s->dirty=true;if(!SaveSlots_Flush(s,e))return false;
-  }
+  if(size && !WriteDraft(s,slot,draft,size,new_backend,e))return false;
   SaveSlotInspection after;
   if(!SaveSlots_Inspect(s,slot,&after)){if(e)*e=after.error;return false;}
   uint8_t bytes[kRequestSize]={0};memcpy(bytes,"ARSWITCH",8);bytes[8]=1;

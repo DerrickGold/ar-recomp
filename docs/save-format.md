@@ -473,8 +473,25 @@ The pending intent belongs to the campaign and its requested rules. Normal
 activation or town progress does not cancel it; another rule edit, title/Continue
 or a restart does. The Palace owner creates a fresh revision-checked preview
 before asking for confirmation. No queued demolition is stored in the companion.
-Ordinary overlay changes remain in memory until the next completed Progress Log save;
-they are not written to the global `settings.ini`. Older pricing-only companions
+Normal interactive overlay changes persist immediately for the selected slot;
+they are not written to the global `settings.ini`. `ArRegionalCampaign_SaveSettings`
+loads the checkpoint for the unchanged durable SRAM image, checks the campaign
+and previous requested rules, and commits only the new requested rules through
+the existing same-image checkpoint writer. Saved effective snapshots, lair and
+actor histories, arrival lock and randomizer recipe are retained. Numerical
+support conversion cannot pass this path. The host finishes any completed
+native save first; it does not create a new gameplay snapshot for a setting edit.
+Failure leaves the live request unchanged and is reported in the overlay.
+
+Empty managed slots use `SaveSlots_UpdateDraft` and the existing
+`new-game.ardraft` format without scheduling a restart or creating SRAM.
+The interactive title restores the selected slot before the palette upload;
+New Game inherits its choices but receives a fresh identity and histories.
+Title-screen population conversions require entering the game for Palace review.
+External diagnostic paths retain their session-only title drafts and story-save
+persistence; replay/recording edits remain locked.
+
+Older pricing-only companions
 load with US room limits and retain all their prices. They are upgraded only
 with the next completed save, not merely by loading them.
 Pricing-only and initial-time companions also default to keeping score on
@@ -864,8 +881,9 @@ records, 8203 bytes). Each stores independent requested/effective sources and
 values 0/0/1. Versions 1–54 default to US mode entry. Title choice construction
 and Game Over acceptance activate the policy; no SRAM unlock byte is changed.
 `ARMODEENTRY-R1` extends the rules digest with requested/effective two-bit
-masks. US/Japanese aliases preserve previous identities. New-game title
-drafts and Game Over's pending title handoff are volatile, not save slots.
+masks. US/Japanese aliases preserve previous identities. Game Over's pending
+title handoff is volatile. Interactive empty-slot choices persist in the
+prepared new-game file; diagnostic title drafts remain volatile.
 
 Version 54 appends `action_spell_inventory` (224 total), requested/effective
 source pairs with values0/0/1. Versions1–53 default to generic US inventory.

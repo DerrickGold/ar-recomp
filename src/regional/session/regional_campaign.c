@@ -102,6 +102,27 @@ static bool Prepare(void *context, SaveError *error) {
   return true;
 }
 
+bool ArRegionalCampaign_SaveSettings(const ArRegionalSession *before,
+    const ArRegionalSession *after, SaveFileFormat format, const char *path,
+    const uint8_t *image, SaveError *error) {
+  if (!before || !after || before->slot != after->slot ||
+      memcmp(before->campaign, after->campaign, sizeof(before->campaign)))
+    return Fail(error, "regional settings belong to a different campaign");
+  ArRegionalSession saved;
+  SaveCheckpointStatus status = ArRegionalSession_Load(&saved, before->slot, path, image, error);
+  if (status == kSaveCheckpoint_Missing) {
+    const ArRegionalCostPolicy baseline = {{0}};
+    if (!ArRegionalSession_NewGame(&saved, before->slot, before->campaign, &baseline))
+      return Fail(error, "cannot prepare legacy campaign settings");
+  } else if (status != kSaveCheckpoint_Ready) return false;
+  if (memcmp(saved.campaign, before->campaign, sizeof(saved.campaign)) ||
+      memcmp(&saved.requested, &before->requested, sizeof(saved.requested)))
+    return Fail(error, "saved campaign changed; reload it before editing regional settings");
+  if (!ArRegionalSession_RequestRules(&saved, saved.revision, &after->requested))
+    return Fail(error, "these rules require saved history or a confirmed town redevelopment");
+  return ArRegionalSession_Save(&saved, format, path, image, image, error);
+}
+
 static bool Commit(void *context, SaveFileFormat format, const char *path,
     const uint8_t *expected, const uint8_t *image, SaveCommitKind kind,
     const SaveImportSource *import_source, SaveError *error) {

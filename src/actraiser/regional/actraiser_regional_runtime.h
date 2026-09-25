@@ -8,6 +8,11 @@
 bool ActRaiserRegional_Initialize(ArRegionalCampaignIdentity identity, void *context);
 bool ActRaiserRegional_InitializeSlot(uint32_t slot,ArRegionalCampaignIdentity identity,void *context);
 bool ActRaiserRegional_StageNewGame(const ArRegionalSession *draft);
+/* Interactive host only. Recording/replay keeps its session-only behavior.
+ * Called on confirmed edits, before publishing them; false rolls the edit back. */
+typedef bool (*ActRaiserRegionalSettingsWriter)(void *context,
+    const ArRegionalSession *before,const ArRegionalSession *after,SaveError *error);
+void ActRaiserRegional_SetSettingsWriter(ActRaiserRegionalSettingsWriter writer,void *context);
 typedef enum ActRaiserRegionalPopulationNotice {
   kActRaiserRegionalPopulation_Confirm,
   kActRaiserRegionalPopulation_Failed,

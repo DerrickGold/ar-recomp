@@ -126,10 +126,12 @@ nothing. Other tabs contain independent feature choices, not parent settings.
 Difficulty adjustments work with any region's base combat rules. US remains
 the default. Gold impact notes and mid-game confirmations
 explain town consequences without requiring a new game.
-Choices belong to the campaign and are saved with the Progress Log; title-screen
-choices prepare a new game, while Continue restores the saved campaign.
+Choices are saved immediately for the selected slot, including at the title
+screen, and survive restarting. Empty slots retain a new-game setup; occupied
+slots update their campaign settings without saving gameplay progress.
 Changes wait for safe boundaries. Population support changes require a
-confirmed redevelopment at the Palace with a recovery backup.
+confirmed redevelopment at the Palace with a recovery backup; continue the
+game before requesting one. The Progress Log still saves gameplay progress.
 Press SNES **X** or **F3** on a regional option to read its full description;
 Up/Down scrolls, Left/Right pages, and Back/Esc returns to the same option.
 
@@ -459,7 +461,9 @@ bindings change pages; Confirm enters the details, Up/Down scrolls them, and
 **F3 / SNES X** opens the full text. Back returns to the slot list.
 
 The slot list has a scrollbar, with **Advanced** at the bottom for the save
-editor, import/export and storage format. Its header names the **active** slot
+editor, import/export and storage format. Press **SNES Y** (default keyboard
+**A**) anywhere in the list or its detail pane to open Advanced directly.
+The footer shows your configured binding. Its header names the **active** slot
 that these tools affect, even when another slot was being previewed. Import and
 Apply ask you to confirm that target; Cancel is selected by default. Back returns
 to the same preview slot.

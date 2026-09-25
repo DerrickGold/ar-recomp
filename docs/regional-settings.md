@@ -1,8 +1,9 @@
 # Regional settings
 
 Open **Settings → Regions** (the **Regional rules** section) at the title screen or during
-a game. Title-screen choices apply to a new game; **Continue** restores the
-saved campaign's rules instead. The draft does not change your existing save.
+a game. Choices are saved immediately for the selected save slot, including
+at the title screen. An empty slot keeps them as its new-game setup; an occupied
+slot updates its campaign settings without saving gameplay progress.
 
 US is the default. Each row outside **Presets** changes only the feature it
 names. The first row of a tab is not a parent setting for the rows below it.
@@ -23,7 +24,7 @@ See [Seeded campaigns](randomizer.md) for setup, exclusions and save backups.
 The description header shows **Current: US / JP / EU / Custom** separately from
 the preset you are browsing. This describes the rules already active, not a
 choice waiting for confirmation or its next activation point. At the title
-screen, **New game** identifies the draft instead. Custom means the rules do
+screen for an empty slot, **New game** identifies its setup instead. Custom means the rules do
 not match a complete regional preset; you can still choose any preset to apply.
 
 Use the tab controls shown in the footer to switch tabs directly. Keyboard
@@ -143,7 +144,7 @@ copy. Cancel leaves all those rules unchanged. Selecting the current profile
 cancels a queued conversion; another rule edit invalidates its old preview.
 A new-game draft has no developed towns and needs no conversion or backup.
 
-Ordinary choices are saved with the Progress Log, not global settings.
+Ordinary choices are saved immediately for this slot, not in global settings.
 Recording/replay locks changes, but you can still browse the groups.
 
 ## Detailed rule reference
@@ -888,16 +889,27 @@ This is not an option to obtain the Compass early.
 
 ## Saving your choices
 
-These choices belong to the current campaign. **Save with the Progress Log to
-keep them.** Closing the overlay is not a save. New Game uses the title-screen
-choices, which default to US rules; Continue restores the choices saved with
-that campaign. Keep the matching
+**Confirmed choices are saved immediately for the selected slot.** They survive
+quitting or restarting without a Progress Log save. Gameplay progress still
+requires the Progress Log. Empty slots retain their new-game setup without
+creating a gameplay save; occupied slots retain the last saved progress and
+regional histories. New Game starts fresh with the selected choices, while
+Continue restores the saved campaign with its updated choices.
+
+Each change still activates at its documented boundary. In particular, title
+artwork is restored before the title loads on the next boot, so selecting JP
+and restarting displays the extracted Japanese title artwork. A failed settings
+write leaves the previous choice selected and reports an error. Keep the matching
 `.archeckpoint` companion beside your save when copying it to another Recomp
 installation. The `.srm` itself remains compatible with SNES emulators. See
 [save companions](save-format.md#regional-campaign-checkpoints) for backup and
 recovery details.
-The confirmed population conversion is an exception: it saves immediately and
-also keeps a complete pre-change recovery copy.
+Population conversion remains an exception: continue the game before requesting
+it, then confirm the Palace review. That transaction saves the rebuilt towns
+and rules together and keeps a complete pre-change recovery copy. A pending
+conversion is not committed by an ordinary setting edit or by restarting.
+External diagnostic save paths retain session-only edits until a story save;
+recording and replay do not write regional preferences.
 
 On the first normal Continue of an older save, the game asks to estimate its
 missing regional monster-lair history. The estimate preserves current US counts

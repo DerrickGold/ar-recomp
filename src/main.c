@@ -795,6 +795,36 @@ static bool SlotDraftView(const ArRegionalSession *draft,ActRaiserRegionalRulesV
   }
   return true;
 }
+static bool SlotSaveRegionalSettings(void *context,const ArRegionalSession *before,
+    const ArRegionalSession *after,SaveError *error) {
+  SaveSlots *slots=context;
+  if(!InputReplay_PolicyChangesAllowed() || slots->pending || before->slot!=slots->active ||
+      RuntimeSettings_LifecycleRequest()!=kRuntimeLifecycle_None) {
+    snprintf(error->message,sizeof(error->message),"Save routing is not ready for regional settings.");return false;
+  }
+  /* Finish any already-completed native save first. Never take a new gameplay
+   * snapshot just because a menu setting changed. */
+  if(!SaveSystem_FlushForSwitch(error) || !SaveSystem_ValidateActive(error))return false;
+  uint8_t image[kActRaiserSramSize];
+  if(SaveSystem_CopyDurableImage(image)) {
+    SaveFileFormat format=SaveSystem_ActiveBackend()==kSaveBackend_Ini?kSaveFileFormat_Ini:kSaveFileFormat_NativeSrm;
+    if(!ArRegionalCampaign_SaveSettings(before,after,format,SaveSystem_ActivePath(),image,error))return false;
+    /* The companion is already durable. A failed index refresh is retryable
+     * by normal validation; don't report the committed edit as rolled back. */
+    SaveError index_error={{0}};
+    if(!SaveSlots_ObserveCheckpoints(slots,&index_error))
+      fprintf(stderr,"[regional] checkpoint index refresh pending: %s\n",index_error.message);
+    return true;
+  }
+  ArRegionalSession draft;
+  const RandomizerConfig recipe=Randomizer_CurrentConfig();
+  uint8_t bytes[kSaveSlotDraftCapacity];size_t size;
+  if(!SaveSlotManager_Draft(&draft,after->slot,after->campaign,&after->requested,&recipe) ||
+      !ArRegionalSession_Encode(&draft,bytes,sizeof(bytes),&size)) {
+    snprintf(error->message,sizeof(error->message),"Cannot prepare the new-game settings.");return false;
+  }
+  return SaveSlots_UpdateDraft(slots,bytes,size,error);
+}
 static bool SlotStart(unsigned slot,uint64_t fingerprint,const ArRegionalSession *draft,SaveError *error) {
   ActRaiserRegionalRulesView current;
   if(!s_managed_slots || !InputReplay_PolicyChangesAllowed() || s_save_slots.pending ||
@@ -2095,6 +2125,7 @@ static void AppBoot_StartGame(AppBoot *app) {
     if(!SaveSlots_Acknowledge(&s_save_slots,&error))Die(error.message);
     const SaveStorageHooks storage={&s_save_slots,SlotBeforeCommit,SlotDidCommit,SlotValidateActive};
     SaveSystem_SetStorageHooks(&storage);
+    ActRaiserRegional_SetSettingsWriter(SlotSaveRegionalSettings,&s_save_slots);
   }
   const SettingsOverlaySaveSlotHooks slots={SlotScan,SlotDraft,SaveSlotManager_Edit,SlotDraftView,SlotStart};
   SettingsOverlay_SetSaveSlotHooks(&slots);

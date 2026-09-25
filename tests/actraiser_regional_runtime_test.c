@@ -61,6 +61,17 @@ RandomizerStatScale Randomizer_AppliedStatScale(void){return applied_scale;}
 static RandomizerConfig draft_recipe;
 static RandomizerConfig bound_recipe;
 static bool recipe_bound;
+static unsigned settings_writes;
+static bool settings_fail;
+static ArRegionalSession persisted_draft;
+static bool WriteSettings(void *context,const ArRegionalSession *before,const ArRegionalSession *after,SaveError *error) {
+  (void)context;++settings_writes;
+  if(settings_fail)return false;
+  uint8_t image[kActRaiserSramSize];
+  if(SaveSystem_CopyDurableImage(image))
+    return ArRegionalCampaign_SaveSettings(before,after,kSaveFileFormat_NativeSrm,SaveSystem_ActivePath(),image,error);
+  persisted_draft=*after;persisted_draft.randomizer=RandomizerConfig_Default();return true;
+}
 bool Randomizer_CaptureConfig(RandomizerConfig *out){*out=draft_recipe.generator?draft_recipe:RandomizerConfig_Default();return true;}
 bool Randomizer_BindCampaign(const RandomizerConfig *c){assert(RandomizerConfig_Valid(c));bound_recipe=c->generator?*c:RandomizerConfig_Default();recipe_bound=true;return true;}
 void Randomizer_ReleaseCampaign(void){recipe_bound=false;}
@@ -320,7 +331,10 @@ static ActRaiserRegionalRulesView title_view;
 static const ArRegionalRules *expected_prepared_rules;
 RecompReturn bank_02_A622_M1X0(CpuState *cpu) {
   assert(!ActRaiser_RegionalTitleEntry(cpu)); /* delegates exactly once */
-  assert(ActRaiserRegional_CopyRulesView(&title_view) && title_view.new_game);
+  assert(ActRaiserRegional_CopyRulesView(&title_view) && (title_view.new_game || title_view.persistent));
+  if(title_view.persistent && !title_view.new_game) {
+    assert(!title_edits);++title_calls;return title_return;
+  }
   if(expected_prepared_rules) {
     assert(!memcmp(&title_view.requested,expected_prepared_rules,sizeof(title_view.requested)));
     assert(title_view.lair_history_ready && title_view.lair_reload_ready && !title_view.population_pending);
@@ -535,8 +549,8 @@ RecompReturn ActRaiserMiracle_Run(CpuState *cpu, unsigned action,
   ++miracle_calls;
   return miracle_return;
 }
-static bool Identity(void *unused, uint8_t id[16]) {
-  (void)unused; memset(id, 0, 16); id[0] = 42; return true;
+static bool Identity(void *context, uint8_t id[16]) {
+  memset(id, 0, 16); id[0] = context ? ++*(uint8_t *)context : 42; return true;
 }
 static void CheckPrices(ArRegionalSource source) {
   ArRegionalCostPolicy policy;
@@ -1969,6 +1983,61 @@ int main(void) {
   assert(ActRaiserRegional_InitializeSlot(4,Identity,NULL));ram[0x336]=1;
   assert(ActRaiser_RegionalTitle(&cpu)==RECOMP_RETURN_NORMAL && recipe_bound && bound_recipe.seed==0);
   assert(ActRaiserRegional_CopyRulesView(&view) && !memcmp(&view.requested,&rolled,sizeof(rolled)));
+  /* Normal interactive title edits persist to the selected campaign. The
+   * next boot captures that choice before loading title graphics. */
+  uint8_t identity_sequence=80;
+  assert(ActRaiserRegional_InitializeSlot(4,Identity,&identity_sequence));
+  ActRaiserRegional_SetSettingsWriter(WriteSettings,NULL);
+  assert(ActRaiserRegional_BeginTitleArtwork(&title_art) && !title_art);
+  assert(ActRaiserRegional_CopyRulesView(&view) && !view.new_game && view.persistent);
+  assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_TitleArt,1)==kActRaiserRegionalEdit_Applied);
+  assert(settings_writes==1 && !ActRaiserRegional_TitleArtworkSnapshot());
+  assert(Save_LoadFile(kSaveFileFormat_NativeSrm,path,unchanged_image,&error) && !memcmp(image,unchanged_image,sizeof(image)));
+  assert(ArRegionalSession_Load(&loaded,4,path,image,&error)==kSaveCheckpoint_Ready);
+  assert(loaded.requested.artwork.source[kArRegionalArtwork_TitleBackground]==1 && loaded.randomizer.seed==0);
+  assert(ActRaiserRegional_InitializeSlot(4,Identity,&identity_sequence));
+  ActRaiserRegional_SetSettingsWriter(WriteSettings,NULL);
+  assert(ActRaiserRegional_BeginTitleArtwork(&title_art) && title_art==kArRegionalArtwork_TitleMask);
+  assert(ActRaiserRegional_CopyRulesView(&view) && !view.new_game);
+  assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_TitleArt,1)==kActRaiserRegionalEdit_Unchanged);
+  assert(settings_writes==1);
+  settings_fail=true;
+  assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_TitleArt,0)==kActRaiserRegionalEdit_SaveFailed);
+  assert(ActRaiserRegional_CopyRulesView(&after_title) && after_title.revision==view.revision &&
+      !memcmp(&after_title.requested,&view.requested,sizeof(view.requested)));
+  settings_fail=false;
+  ActRaiserRegionalEditImpact rebuild_impact;
+  assert(ActRaiserRegional_PreviewRules(&view,kActRaiserRegionalSetting_Population,0,&rebuild_impact)==kActRaiserRegionalEdit_RequiresGame);
+  assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_Population,0)==kActRaiserRegionalEdit_RequiresGame);
+  assert(ActRaiserRegional_CopyRulesView(&view) && !view.population_pending);
+  ram[0x336]=1;cpu.PB=2;title_edits=0;
+  assert(ActRaiser_RegionalTitle(&cpu)==RECOMP_RETURN_NORMAL);
+  assert(ActRaiserRegional_CopyRulesView(&view) && view.requested.artwork.source[kArRegionalArtwork_TitleBackground]==1);
+  assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_TitleArt,0)==kActRaiserRegionalEdit_Applied);
+  assert(ArRegionalSession_Load(&loaded,4,path,image,&error)==kSaveCheckpoint_Ready &&
+      !loaded.requested.artwork.source[kArRegionalArtwork_TitleBackground]);
+  const ArRegionalSession saved_before_new=loaded;
+  assert(ActRaiserRegional_ReturnToTitle() && ActRaiserRegional_BeginTitleArtwork(&title_art));
+  ram[0x336]=0;cpu.PB=2;
+  assert(ActRaiser_RegionalTitle(&cpu)==RECOMP_RETURN_NORMAL);
+  assert(ActRaiserRegional_CopyRulesView(&view) && view.lair_history_ready && view.lair_reload_ready);
+  assert(memcmp(view.campaign,saved_before_new.campaign,sizeof(view.campaign)));
+  assert(ArRegionalSession_Load(&loaded,4,path,image,&error)==kSaveCheckpoint_Ready &&
+      !memcmp(&loaded,&saved_before_new,sizeof(loaded))); /* unsaved New Game cannot replace Continue */
   remove(path);remove(companion);
+  memset(image,0x60,sizeof(image));
+  assert(SaveSystem_Attach(image,sizeof(image),kSaveBackend_NativeSrm,path,"unused-regional-runtime.ini",&error));
+  assert(SaveSystem_LoadActive(&error));
+  assert(ActRaiserRegional_InitializeSlot(4,Identity,NULL));
+  ActRaiserRegional_SetSettingsWriter(WriteSettings,NULL);
+  assert(ActRaiserRegional_BeginTitleArtwork(&title_art) && !title_art);
+  assert(ActRaiserRegional_CopyRulesView(&view) && view.new_game);
+  assert(ActRaiserRegional_RequestRules(&view,kActRaiserRegionalSetting_TitleArt,1)==kActRaiserRegionalEdit_Applied);
+  assert(persisted_draft.requested.artwork.source[kArRegionalArtwork_TitleBackground]==1);
+  assert(ActRaiserRegional_InitializeSlot(4,Identity,NULL));
+  assert(ActRaiserRegional_StageNewGame(&persisted_draft));
+  ActRaiserRegional_SetSettingsWriter(WriteSettings,NULL);
+  assert(ActRaiserRegional_BeginTitleArtwork(&title_art) && title_art==kArRegionalArtwork_TitleMask);
+  assert(!SaveSystem_CopyDurableImage(unchanged_image));
   return 0;
 }

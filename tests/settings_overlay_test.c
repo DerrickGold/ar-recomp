@@ -2088,6 +2088,70 @@ static void TestSaveSlotRandomizerGate(SDL_Renderer *renderer,SDL_Surface *surfa
 
 /* Exercise localized layout through the same input path as the release tour.
  * Native-renderer snapshots are optional; navigation assertions always run. */
+static void TestSaveAdvancedShortcut(SDL_Renderer *renderer,SDL_Surface *surface) {
+  SettingsOverlay_Close();Settings_Init();
+  const SettingsOverlaySaveSlotHooks hooks={.scan=FakeSlotsScan};
+  SettingsOverlay_SetSaveSlotHooks(&hooks);SettingsOverlay_Open();
+  CHECK(SettingsOverlay_OpenSaveSlots(false));
+  int actions=s_action_calls,starts=slot_start_calls;
+  /* No wrap/scroll to the footer required from the initially active slot. */
+  CHECK(SettingsOverlay_HandleKey(SDLK_A,true,true));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(),"slot_list"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_A,true,false));
+  CHECK(strncmp(SettingsOverlay_SelectedKey(),"slot_",5));
+  g_settings.save_backend=kSaveBackend_Ini;
+  CHECK(SettingsOverlay_HandleKey(SDLK_A,true,true)); /* held shortcut must not reset Advanced's row */
+  CHECK(g_settings.save_backend==kSaveBackend_Ini);
+  CHECK(SettingsOverlay_HandleKey(SDLK_X,true,false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(),"slot_list"));
+  /* Browsing another save must not retarget the active-save tools, switch
+   * slots, or lose the selected preview/page/detail focus on return. */
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN,true,false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN,true,false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT,true,false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(),"slot_use"));
+  SlotReviewFrame(renderer,surface,"slots-advanced-shortcut-hint");
+  g_settings.input_bind[kInputClass_Keyboard][kInputAction_Y]=INPUT_BIND_MAKE(kInputBind_Key,SDL_SCANCODE_V,false);
+  char hint[64];
+  CHECK(OverlayMenuInput_Hint(hint,sizeof(hint),kMenuNav_Reset,kInputClass_Keyboard) && !strcmp(hint,"V"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_A,true,false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(),"slot_use"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_V,true,false));
+  CHECK(strncmp(SettingsOverlay_SelectedKey(),"slot_",5));
+  CHECK(SettingsOverlay_HandleKey(SDLK_X,true,false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(),"slot_use"));
+  int tab=-1;CHECK(SettingsOverlay_GetTabState(&tab,NULL) && tab==1);
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(),"slot_confirm"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_V,true,false)); /* shortcut cannot escape a confirmation */
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(),"slot_confirm"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_X,true,false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_F3,true,false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_V,true,false)); /* or a read-only Details dialog */
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(),"slot_use"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_F3,true,false));
+  CHECK(SDL_InitSubSystem(SDL_INIT_GAMEPAD));
+  SDL_VirtualJoystickDesc pad;
+  SDL_INIT_INTERFACE(&pad);
+  pad.type=SDL_JOYSTICK_TYPE_GAMEPAD;pad.nbuttons=SDL_GAMEPAD_BUTTON_COUNT;
+  pad.button_mask=(1u<<SDL_GAMEPAD_BUTTON_COUNT)-1;pad.name="Save shortcut test";
+  const SDL_JoystickID id=SDL_AttachVirtualJoystick(&pad);CHECK(id!=0);
+  SDL_Event event={0};event.type=SDL_EVENT_GAMEPAD_ADDED;event.gdevice.which=id;
+  InputMap_HandleEvent(&event);
+  event.type=SDL_EVENT_GAMEPAD_BUTTON_DOWN;event.gbutton.which=id;
+  const uint32 binding=g_settings.input_bind[kInputClass_Gamepad][kInputAction_Y];
+  CHECK(INPUT_BIND_KIND(binding)==kInputBind_PadButton);
+  event.gbutton.button=INPUT_BIND_CODE(binding);
+  CHECK(SettingsOverlay_HandleGamepadEvent(&event));
+  CHECK(strncmp(SettingsOverlay_SelectedKey(),"slot_",5));
+  CHECK(SettingsOverlay_HandleKey(SDLK_X,true,false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(),"slot_use"));
+  CHECK(s_action_calls==actions && slot_start_calls==starts);
+  event.type=SDL_EVENT_GAMEPAD_REMOVED;event.gdevice.which=id;InputMap_HandleEvent(&event);
+  InputMap_Shutdown();SDL_DetachVirtualJoystick(id);SDL_QuitSubSystem(SDL_INIT_GAMEPAD);
+  SettingsOverlay_Close();SettingsOverlay_SetSaveSlotHooks(NULL);Settings_Init();
+}
 static void TestSaveAdvancedActions(SDL_Renderer *renderer,SDL_Surface *surface) {
   SettingsOverlay_Close();Settings_Init();g_settings.show_debug_settings=true;
   const SettingsOverlaySaveSlotHooks hooks={.scan=FakeSlotsScan};
@@ -3211,6 +3275,7 @@ int main(int argc, char **argv) {
 
   TestSaveSlotMenu(renderer,surface);
   TestSaveSlotRandomizerGate(renderer,surface);
+  TestSaveAdvancedShortcut(renderer,surface);
   TestSaveAdvancedActions(renderer,surface);
   TestSaveSlotLocales(renderer,surface);
   CaptureSaveSlotsReleaseTour(renderer,surface);

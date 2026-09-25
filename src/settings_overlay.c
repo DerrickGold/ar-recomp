@@ -674,8 +674,9 @@ static bool ActiveTabIsRegional(void) { return ActiveTab()->regional_rules; }
 static const char *RegionalNotice(void) {
   return Ui(!s_regional_valid ? "overlay.region.enter_campaign" :
       !s_regional_view.editable ? "overlay.region.replay_locked" :
-      s_regional_view.new_game ? "overlay.region.new_game_draft" :
-      s_regional_view.population_pending ? "overlay.region.population_pending" : "overlay.region.saved_with_story");
+      s_regional_view.new_game ? (s_regional_view.persistent ? "overlay.region.empty_slot_saved" : "overlay.region.new_game_draft") :
+      s_regional_view.population_pending ? "overlay.region.population_pending" :
+      s_regional_view.persistent ? "overlay.region.saved_immediately" : "overlay.region.saved_with_story");
 }
 
 /* System > Game is the one registry-backed tab with semantic subsections.
@@ -2046,7 +2047,7 @@ static void ApplyMenuNav(MenuNav nav, bool repeat) {
     case kMenuNav_TabPrev: MoveTab(-1); break;
     case kMenuNav_TabNext: MoveTab(1); break;
     case kMenuNav_Confirm: ActivateSelectedRow(); break;
-    case kMenuNav_Reset:   ResetSelectedValue(); break;
+    case kMenuNav_Reset:   if (!repeat) ResetSelectedValue(); break;
     case kMenuNav_Details: if (!repeat) OpenRegionalDetails(); break;
     case kMenuNav_Back:
       if (!repeat) {

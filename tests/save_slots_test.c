@@ -331,8 +331,50 @@ static int BootFixture(const char *mode,const char *root) {
   } else assert(false);
   SaveSlots_Close(&slots);return 0;
 }
+static void UpdateEmptyDraft(const char *root,SaveBackend backend) {
+  assert(!MKDIR(root));
+  SaveSlots slots;SaveError error={{0}};
+  assert(SaveSlots_Open(&slots,root,backend,&error));
+  ArRegionalSession draft,loaded;const uint8_t id[16]={11};ArRegionalRules rules={0};
+  rules.artwork.source[kArRegionalArtwork_TitleBackground]=kArRegionalSource_Japan;
+  RandomizerConfig recipe=RandomizerConfig_Default();recipe.seed=987;
+  assert(SaveSlotManager_Draft(&draft,0,id,&rules,&recipe));
+  uint8_t bytes[kSaveSlotDraftCapacity];size_t size;
+  assert(ArRegionalSession_Encode(&draft,bytes,sizeof(bytes),&size));
+  char blocked[512];snprintf(blocked,sizeof(blocked),"%s/slots.armanager.tmp",root);assert(!MKDIR(blocked));
+  assert(!SaveSlots_UpdateDraft(&slots,bytes,size,&error));
+  assert(!slots.records[0].prepared && !slots.records[0].ever_saved);
+  SaveSlotDetails details;
+  assert(SaveSlotManager_Inspect(&slots,0,&details) && details.state==kSaveSlot_Empty);
+  assert(!RMDIR(blocked));
+  assert(SaveSlots_UpdateDraft(&slots,bytes,size,&error));
+  assert(!slots.pending && !slots.records[0].ever_saved && slots.records[0].prepared);
+  SaveSlots_Close(&slots);assert(SaveSlots_Open(&slots,root,backend,&error));
+  assert(SaveSlotManager_ReadDraft(&slots,0,&loaded,&error));
+  assert(!memcmp(&loaded,&draft,sizeof(draft)) && loaded.randomizer.seed==987);
+  assert(SaveSlots_DestinationBackend(&slots)==backend);
+  assert(SaveSlotManager_Inspect(&slots,0,&details) && details.state==kSaveSlot_Empty);
+  snprintf(blocked,sizeof(blocked),"%s/slots/01/new-game.ardraft.tmp",root);assert(!MKDIR(blocked));
+  draft.requested.artwork.source[kArRegionalArtwork_TitleBackground]=kArRegionalSource_US;
+  draft.effective=draft.requested;
+  assert(ArRegionalSession_Encode(&draft,bytes,sizeof(bytes),&size));
+  assert(!SaveSlots_UpdateDraft(&slots,bytes,size,&error));assert(!RMDIR(blocked));
+  assert(SaveSlotManager_ReadDraft(&slots,0,&loaded,&error));
+  assert(loaded.requested.artwork.source[kArRegionalArtwork_TitleBackground]==kArRegionalSource_Japan);
+  assert(SaveSlots_UpdateDraft(&slots,bytes,size,&error));
+  char native[512],ini[512];assert(SaveSlots_Paths(&slots,0,native,ini,sizeof(native)));
+  uint8_t image[kActRaiserSramSize]={0};Save_RecomputeChecksum(image);
+  assert(SaveSlots_BeforeCommit(&slots,&error));
+  assert(ArRegionalSession_Save(&draft,(SaveFileFormat)backend,backend==kSaveBackend_Ini?ini:native,NULL,image,&error));
+  SaveSlots_DidCommit(&slots,image);
+  assert(!SaveSlots_UpdateDraft(&slots,bytes,size,&error)); /* occupied slots use their checkpoint */
+  SaveSlots_Close(&slots);RemoveCollection(root);
+}
+
 int main(int argc,char **argv) {
   if(argc==3)return BootFixture(argv[1],argv[2]);
+  UpdateEmptyDraft("save-slots-draft-native",kSaveBackend_NativeSrm);
+  UpdateEmptyDraft("save-slots-draft-ini",kSaveBackend_Ini);
   LegacyAdoption();
   MigrationResume("save-layout-native-resume",kSaveBackend_NativeSrm);
   MigrationResume("save-layout-ini-resume",kSaveBackend_Ini);

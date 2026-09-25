@@ -80,6 +80,10 @@ const char *SettingsOverlayRegions_EditStatus(ArUiLocale locale,
       return ArUiCatalog_Text(locale, "overlay.region.population_pending", NULL);
     case kActRaiserRegionalEdit_Incompatible:
       return ArUiCatalog_Text(locale, "overlay.region.population_incompatible", NULL);
+    case kActRaiserRegionalEdit_SaveFailed:
+      return ArUiCatalog_Text(locale, "overlay.region.save_failed", NULL);
+    case kActRaiserRegionalEdit_RequiresGame:
+      return ArUiCatalog_Text(locale, "overlay.region.continue_for_redevelopment", NULL);
     default:
       return ArUiCatalog_Text(locale, "overlay.status.unavailable", NULL);
   }

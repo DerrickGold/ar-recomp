@@ -366,7 +366,10 @@ static bool SlotMenuNav(MenuNav nav,bool repeat) {
   }
   int direction=(nav==kMenuNav_Up || nav==kMenuNav_Left || nav==kMenuNav_TabPrev)?-1:1;
   if(s_slots.screen==kSlotScreen_List) {
-    if(nav==kMenuNav_Up || nav==kMenuNav_Down) {
+    /* Nothing is reset in the slot list. Reuse the bound Y action as a
+     * shortcut to the same active-save tools as the Advanced footer row. */
+    if(nav==kMenuNav_Reset && !repeat)SlotOpenAdvanced();
+    else if(nav==kMenuNav_Up || nav==kMenuNav_Down) {
       if(s_slots.detail_focus) {
         if(direction>0 || s_slots.scroll>0)s_slots.scroll+=direction;
       } else {

@@ -96,8 +96,9 @@ typedef struct ActRaiserRegionalRulesView {
   uint16_t pending_groups;
   ActRaiserRegionalChoiceView choices[kActRaiserRegionalSetting_Count];
   bool editable;
-  bool new_game; /* title draft, discarded by Continue */
+  bool new_game; /* empty-slot setup, or a diagnostic title draft */
   bool miracle_in_progress;
+  bool persistent; /* Interactive slot settings are saved immediately. */
   bool lair_history_ready;
   bool lair_reload_ready;
   bool lair_history_estimated;
@@ -125,6 +126,8 @@ typedef enum ActRaiserRegionalEditResult {
   kActRaiserRegionalEdit_HistoryUnavailable,
   kActRaiserRegionalEdit_Deferred,
   kActRaiserRegionalEdit_Incompatible,
+  kActRaiserRegionalEdit_SaveFailed,
+  kActRaiserRegionalEdit_RequiresGame,
 } ActRaiserRegionalEditResult;
 
 /* Read-only, game-authoritative consequences for one proposed selection.
@@ -140,15 +143,17 @@ ActRaiserRegionalEditResult ActRaiserRegional_PreviewRules(
     const ActRaiserRegionalRulesView *view, ActRaiserRegionalSettingGroup group,
     ArRegionalSource source, ActRaiserRegionalEditImpact *out);
 
-/* Title edits target an unsaved new-game draft. Continue loads its own rules;
- * outside title/gameplay this returns false without modifying output. */
+/* Interactive title edits target the selected slot, or its empty-slot setup.
+ * Diagnostic title drafts remain session-only. Outside title/gameplay this
+ * returns false without modifying output. */
 bool ActRaiserRegional_CopyRulesView(ActRaiserRegionalRulesView *out);
 ActRaiserRegionalEditResult ActRaiserRegional_RequestProfile(
     const ActRaiserRegionalRulesView *view, ArRegionalProfileGroup group,
     ArRegionalSource source);
 /* The view's campaign/revision identifies the requested edit; its editable
  * and policy fields are display data, not authority. Validate again on apply.
- * Ordinary changes persist with the next completed native story save.
+ * The interactive host persists ordinary requests immediately, independently
+ * of gameplay progress. Effective state still changes at its native boundary.
  * Population queues only a volatile request; the Palace owner confirms and
  * commits it with its recovery copy and compatible goal changes. */
 ActRaiserRegionalEditResult ActRaiserRegional_RequestRules(

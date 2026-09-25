@@ -39,6 +39,8 @@ void SaveSlots_Close(SaveSlots *slots);
 bool SaveSlots_Paths(const SaveSlots *slots, unsigned slot, char *native, char *ini, size_t capacity);
 bool SaveSlots_Inspect(const SaveSlots *slots, unsigned slot, SaveSlotInspection *out);
 bool SaveSlots_ReadDraft(const SaveSlots *slots, unsigned slot, void *out, size_t capacity, size_t *size, SaveError *error);
+/* Update the active empty slot's setup without scheduling a restart. */
+bool SaveSlots_UpdateDraft(SaveSlots *slots, const void *draft, size_t size, SaveError *error);
 /* A prepared format does not redirect the live source writer. It becomes the
  * committed format only when the destination acknowledges a successful boot. */
 SaveBackend SaveSlots_DestinationBackend(const SaveSlots *slots);

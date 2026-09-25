@@ -476,7 +476,59 @@ static void CampaignArchive(SaveBackend backend) {
   CHECK(REMOVE_DIR("regional-archive-test/backups")==0);CHECK(REMOVE_DIR(root)==0);
 }
 
+static void SettingsOnly(SaveFileFormat format) {
+  const char *path="regional-settings-only.srm";
+  Remove(path);
+  uint8_t image[kActRaiserSramSize]={0},disk[kActRaiserSramSize];
+  Save_RecomputeChecksum(image);SaveError error={{0}};
+  const uint8_t id[16]={19};const ArRegionalCostPolicy costs={{0}};
+  ArRegionalSession saved,live,after,loaded;
+  CHECK(ArRegionalSession_NewGame(&saved,2,id,&costs));
+  for(unsigned town=0;town<6;++town)CHECK(ArRegionalLairHistory_InitTown(&saved.lairs,town));
+  CHECK(ArRegionalLairReloads_Init(&saved.reloads));
+  saved.randomizer=RandomizerConfig_Default();saved.randomizer.enabled=true;saved.randomizer.seed=321;
+  CHECK(ArRegionalSession_Save(&saved,format,path,NULL,image,&error));
+  live=saved;
+  live.arrival_locked=true;live.effective.terrain=kArRegionalSource_Japan;
+  live.randomizer.seed=999; /* Live data must not be copied into the old save. */
+  after=live;
+  CHECK(ArRegionalSession_RequestArtwork(&after,after.revision,kArRegionalArtwork_TitleBackground,kArRegionalSource_Japan));
+  CHECK(ArRegionalCampaign_SaveSettings(&live,&after,format,path,image,&error));
+  CHECK(Save_LoadFile(format,path,disk,&error) && !memcmp(image,disk,sizeof(image)));
+  CHECK(ArRegionalSession_Load(&loaded,2,path,image,&error)==kSaveCheckpoint_Ready);
+  CHECK(loaded.requested.artwork.source[kArRegionalArtwork_TitleBackground]==kArRegionalSource_Japan);
+  CHECK(!memcmp(&loaded.effective,&saved.effective,sizeof(saved.effective)));
+  CHECK(!memcmp(&loaded.lairs,&saved.lairs,sizeof(saved.lairs)));
+  CHECK(!memcmp(&loaded.reloads,&saved.reloads,sizeof(saved.reloads)));
+  CHECK(!memcmp(&loaded.sim_actors,&saved.sim_actors,sizeof(saved.sim_actors)));
+  CHECK(!loaded.arrival_locked && loaded.randomizer.seed==321);
+  CHECK(!ArRegionalCampaign_SaveSettings(&live,&after,format,path,image,&error)); /* stale request */
+  live=loaded;after=live;after.campaign[0]^=1;
+  CHECK(!ArRegionalCampaign_SaveSettings(&live,&after,format,path,image,&error));
+  after=live;
+  CHECK(ArRegionalSession_SetPopulationProfile(&after,after.revision,kArRegionalSource_Japan));
+  CHECK(!ArRegionalCampaign_SaveSettings(&live,&after,format,path,image,&error)); /* no silent town reset */
+  after=live;CHECK(ArRegionalSession_RequestTerrain(&after,after.revision,kArRegionalSource_Japan));
+  char blocked[256];snprintf(blocked,sizeof(blocked),"%s.archeckpoint.tmp",path);CHECK(MAKE_DIR(blocked)==0);
+  CHECK(!ArRegionalCampaign_SaveSettings(&live,&after,format,path,image,&error));
+  CHECK(REMOVE_DIR(blocked)==0);
+  CHECK(ArRegionalSession_Load(&loaded,2,path,image,&error)==kSaveCheckpoint_Ready && !memcmp(&live,&loaded,sizeof(live)));
+  disk[100]=1;Save_RecomputeChecksum(disk);CHECK(Save_WriteFile(format,path,disk,&error));
+  CHECK(!ArRegionalCampaign_SaveSettings(&live,&after,format,path,image,&error)); /* external file edit */
+  Remove(path);
+  /* A cosmetic edit may create metadata for a legacy save, but never invents
+   * lair history or acknowledges the Continue prompt. */
+  CHECK(Save_WriteFile(format,path,image,&error));
+  CHECK(ArRegionalSession_NewGame(&live,2,id,&costs));after=live;
+  CHECK(ArRegionalSession_RequestArtwork(&after,after.revision,kArRegionalArtwork_TitleBackground,kArRegionalSource_Japan));
+  CHECK(ArRegionalCampaign_SaveSettings(&live,&after,format,path,image,&error));
+  CHECK(ArRegionalSession_Load(&loaded,2,path,image,&error)==kSaveCheckpoint_Ready);
+  CHECK(!loaded.lairs.initialized_towns && !loaded.reloads.initialized_towns && !loaded.randomizer.generator);
+  Remove(path);
+}
+
 int main(void) {
+  SettingsOnly(kSaveFileFormat_NativeSrm);SettingsOnly(kSaveFileFormat_Ini);
   CampaignArchive(kSaveBackend_NativeSrm);
   CampaignArchive(kSaveBackend_Ini);
   uint8_t a[16], b[16];

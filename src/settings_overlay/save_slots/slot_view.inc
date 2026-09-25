@@ -221,13 +221,14 @@ static void SlotMenuRender(const MenuLayout *layout) {
   }
   const char *message=s_slots.error[0]?s_slots.error:s_slots.collection.error.message[0]?s_slots.collection.error.message:Ui(action);
   DrawSmallTextPreview(layout,20,bottom+10,message,(width-40)/kDebugGlyphWidth,2,s_slots.error[0]?kGameGold:kSteelBlue);
-  char move[64],tabs[64],confirm[64],back[64],details[64];
+  char move[64],tabs[64],confirm[64],back[64],details[64],advanced[64];
   InputClass device=SettingsOverlay_MenuInputDevice();
   OverlayMenuInput_PairHint(move,sizeof(move),kMenuNav_Up,kMenuNav_Down,device);
   OverlayMenuInput_PairHint(tabs,sizeof(tabs),kMenuNav_TabPrev,kMenuNav_TabNext,device);
   OverlayMenuInput_Hint(confirm,sizeof(confirm),kMenuNav_Confirm,device);
   OverlayMenuInput_Hint(back,sizeof(back),kMenuNav_Back,device);
   OverlayMenuInput_Hint(details,sizeof(details),kMenuNav_Details,device);
+  OverlayMenuInput_Hint(advanced,sizeof(advanced),kMenuNav_Reset,device);
   MenuHints hints={0};
   AddMenuHint(&hints,move,Ui(s_slots.screen==kSlotScreen_Seed?"overlay.hint.adjust":
       list && !s_slots.detail_focus?"slots.select_hint":"overlay.hint.scroll"));
@@ -238,6 +239,7 @@ static void SlotMenuRender(const MenuLayout *layout) {
   if((list && !s_slots.advanced_focus) || s_slots.screen==kSlotScreen_Regions || s_slots.screen==kSlotScreen_Randomizer)
     AddMenuHint(&hints,tabs,Ui("overlay.hint.page"));
   AddMenuHint(&hints,confirm,Ui("slots.choose"));AddMenuHint(&hints,back,Ui("overlay.hint.back"));
+  if(list)AddMenuHint(&hints,advanced,Ui("slots.advanced.shortcut"));
   if((list && !s_slots.advanced_focus) || s_slots.screen==kSlotScreen_Regions || s_slots.screen==kSlotScreen_Randomizer)
     AddMenuHint(&hints,details,Ui("overlay.hint.details"));
   DrawMenuHints(layout,20,bottom+37,width-40,&hints,kSteelBlue,kMutedText);
