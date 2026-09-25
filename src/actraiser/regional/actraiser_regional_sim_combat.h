@@ -1,5 +1,9 @@
-#ifndef ACTRAISER_SIM_COMBAT_RUNTIME_H
-#define ACTRAISER_SIM_COMBAT_RUNTIME_H
+#ifndef AR_ACTRAISER_REGIONAL_SIM_COMBAT_H
+#define AR_ACTRAISER_REGIONAL_SIM_COMBAT_H
+/* Regional SIM combat hooks, named in recomp/bank*.cfg: the town actor cache load and save,
+ * actor birth, collision threshold and contact damage for the selected region.
+ * Phase: capture (runs on CPU state).
+ * Tests: tests/actraiser_sim_combat_test.c */
 #include "actraiser/actraiser_sim_combat.h"
 #include "actraiser/regional/actraiser_regional_runtime.h"
 bool ActRaiser_RegionalSimCacheEntry(CpuState *cpu);

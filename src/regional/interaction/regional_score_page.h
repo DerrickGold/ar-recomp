@@ -1,5 +1,8 @@
 #ifndef AR_REGIONAL_SCORE_PAGE_H
 #define AR_REGIONAL_SCORE_PAGE_H
+/* RegionalScorePage: whether the Master's score page is shown, per region.
+ * Phase: pure.
+ * Tests: tests/actraiser_score_feedback_test.c */
 
 #include "regional/regional_source.h"
 #include <stdbool.h>

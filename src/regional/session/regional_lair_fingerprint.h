@@ -1,5 +1,9 @@
 #ifndef AR_REGIONAL_LAIR_FINGERPRINT_H
 #define AR_REGIONAL_LAIR_FINGERPRINT_H
+/* RegionalLairFingerprint: chains lair history and reload state onto the rules fingerprint for
+ * replay identity.
+ * Phase: pure.
+ * Tests: tests/regional_lair_projection_test.c */
 
 #include "regional/towns/regional_lair_history.h"
 #include "regional/towns/regional_lair_reloads.h"

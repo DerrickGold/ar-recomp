@@ -1,5 +1,9 @@
 #ifndef AR_REGIONAL_CAMPAIGN_H
 #define AR_REGIONAL_CAMPAIGN_H
+/* RegionalCampaign: the caller-owned campaign coordinator holding the active and pending
+ * regional sessions for one save slot.
+ * Phase: pure.
+ * Tests: tests/regional_campaign_test.c */
 
 #include "regional/session/regional_session.h"
 

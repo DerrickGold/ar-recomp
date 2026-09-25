@@ -1,5 +1,9 @@
 #ifndef AR_REGIONAL_LAIR_HISTORY_H
 #define AR_REGIONAL_LAIR_HISTORY_H
+/* RegionalLairHistory: each town's lair stock history across region changes, and the seeds that
+ * start it.
+ * Phase: pure.
+ * Tests: tests/regional_lair_history_test.c */
 
 #include "regional/regional_costs.h"
 #include <stddef.h>

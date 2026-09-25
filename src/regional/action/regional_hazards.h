@@ -1,5 +1,9 @@
 #ifndef AR_REGIONAL_HAZARDS_H
 #define AR_REGIONAL_HAZARDS_H
+/* RegionalHazards: per-region stage hazard boxes (position, size and damage), resolved once per
+ * room and never on the contact or frame path.
+ * Phase: pure.
+ * Tests: tests/actraiser_stage_hazards_test.c */
 
 #include "regional/regional_source.h"
 #include <stdbool.h>

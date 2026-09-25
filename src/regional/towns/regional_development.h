@@ -1,5 +1,9 @@
 #ifndef AR_REGIONAL_DEVELOPMENT_H
 #define AR_REGIONAL_DEVELOPMENT_H
+/* RegionalDevelopment: per-region town development rates (effect and service dividers, the long
+ * cycle).
+ * Phase: pure.
+ * Tests: tests/actraiser_development_test.c */
 #include "regional/regional_source.h"
 #include <stdbool.h>
 #include <stdint.h>

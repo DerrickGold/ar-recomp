@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_REGIONAL_RUNTIME_H
-#define ACTRAISER_REGIONAL_RUNTIME_H
+#ifndef AR_ACTRAISER_REGIONAL_RUNTIME_H
+#define AR_ACTRAISER_REGIONAL_RUNTIME_H
 
 #include "regional/session/regional_campaign.h"
 #include "snesrecomp/game/cpu.h"

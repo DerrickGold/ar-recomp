@@ -1,5 +1,9 @@
 #ifndef AR_REGIONAL_COLLISION_H
 #define AR_REGIONAL_COLLISION_H
+/* RegionalCollision: the Kasandora and arrow collision rules, per region, resolved to a two-bit
+ * mask. A uniform PAL request keeps its own badge although its values alias US.
+ * Phase: pure.
+ * Tests: tests/actraiser_action_motion_test.c */
 #include "regional/regional_source.h"
 #include <stdbool.h>
 #include <stdint.h>

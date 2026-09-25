@@ -1,5 +1,9 @@
 #ifndef AR_REGIONAL_PLATFORM_SKULL_H
 #define AR_REGIONAL_PLATFORM_SKULL_H
+/* RegionalPlatformSkull: per-region platform skull armor, reward and trigger range, resolved to
+ * a four-bit mask.
+ * Phase: pure.
+ * Tests: tests/actraiser_platform_skull_test.c */
 #include "regional/regional_source.h"
 #include <stdbool.h>
 #include <stdint.h>

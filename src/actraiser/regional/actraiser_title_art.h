@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_TITLE_ART_H
-#define ACTRAISER_TITLE_ART_H
+#ifndef AR_ACTRAISER_TITLE_ART_H
+#define AR_ACTRAISER_TITLE_ART_H
 #include "snesrecomp/game/cpu.h"
 /* US title loaders: palette $02:B34D, characters $02:B2D2, map $02:B4AB.
  * The palette entry captures one media choice for all three planes. Each

@@ -1,5 +1,9 @@
 #ifndef AR_REGIONAL_ARTWORK_H
 #define AR_REGIONAL_ARTWORK_H
+/* RegionalArtwork: per-region artwork choices (Death Heim, action items, follower and lair
+ * symbols, pyramid detail, title background) and their action, town and title masks.
+ * Phase: pure.
+ * Tests: tests/actraiser_title_art_test.c, tests/actraiser_town_art_test.c */
 #include "regional/regional_source.h"
 #include <stdbool.h>
 #include <stdint.h>

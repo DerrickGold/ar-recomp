@@ -1,7 +1,7 @@
 #ifndef AR_REGIONAL_RULES_H
 #define AR_REGIONAL_RULES_H
 
-#include "regional_costs.h"
+#include "regional/regional_costs.h"
 #include "regional/action/regional_timers.h"
 #include "regional/action/regional_retry.h"
 #include "regional/towns/regional_town_wait.h"

@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_REGIONAL_MEDIA_H
-#define ACTRAISER_REGIONAL_MEDIA_H
+#ifndef AR_ACTRAISER_REGIONAL_MEDIA_H
+#define AR_ACTRAISER_REGIONAL_MEDIA_H
 #include "regional/media/regional_media.h"
 #include "regional/media/regional_actor_art.h"
 

@@ -1,5 +1,9 @@
 #ifndef AR_REGIONAL_SPELL_INVENTORY_H
 #define AR_REGIONAL_SPELL_INVENTORY_H
+/* RegionalSpellInventory: the collected-spell stack some regions keep during an Action run: its
+ * enable rule and the run state it drives.
+ * Phase: pure (Action-run state, not SRAM or settings).
+ * Tests: tests/regional_spell_inventory_test.c */
 
 #include "regional/regional_source.h"
 #include <stdbool.h>

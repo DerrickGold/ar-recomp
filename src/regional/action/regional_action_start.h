@@ -1,5 +1,8 @@
 #ifndef AR_REGIONAL_ACTION_START_H
 #define AR_REGIONAL_ACTION_START_H
+/* RegionalActionStart: spare lives and starting health for a new Action run, per region.
+ * Phase: pure.
+ * Tests: tests/actraiser_action_start_test.c */
 #include "regional/regional_source.h"
 #include <stdbool.h>
 #include <stdint.h>

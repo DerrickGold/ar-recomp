@@ -1,5 +1,9 @@
 #ifndef AR_REGIONAL_MUSIC_H
 #define AR_REGIONAL_MUSIC_H
+/* RegionalMusic: per-region scene music routing and the song 09 and 12 sequence variants (note
+ * programs only).
+ * Phase: pure.
+ * Tests: tests/actraiser_scene_music_test.c */
 #include "regional/regional_source.h"
 #include <stdbool.h>
 #include <stdint.h>

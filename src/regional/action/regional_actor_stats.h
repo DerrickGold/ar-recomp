@@ -1,5 +1,9 @@
 #ifndef AR_REGIONAL_ACTOR_STATS_H
 #define AR_REGIONAL_ACTOR_STATS_H
+/* RegionalActorStats: per-region HP, attack and reward values for Action actors, including the
+ * three Tanzra child stats.
+ * Phase: pure.
+ * Tests: tests/actraiser_actor_stats_test.c */
 #include "regional/regional_source.h"
 #include <stdbool.h>
 #include <stdint.h>

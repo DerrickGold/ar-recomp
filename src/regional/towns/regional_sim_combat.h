@@ -1,5 +1,9 @@
 #ifndef AR_REGIONAL_SIM_COMBAT_H
 #define AR_REGIONAL_SIM_COMBAT_H
+/* RegionalSimCombat: per-region SIM enemy durability and contact damage (demons, dragons and
+ * skulls).
+ * Phase: pure.
+ * Tests: tests/actraiser_sim_combat_test.c */
 #include "regional/regional_source.h"
 #include <stdbool.h>
 #include <stddef.h>

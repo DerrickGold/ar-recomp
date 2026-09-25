@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_TOWN_STATUS_RUNTIME_H
-#define ACTRAISER_TOWN_STATUS_RUNTIME_H
+#ifndef AR_ACTRAISER_REGIONAL_TOWN_STATUS_H
+#define AR_ACTRAISER_REGIONAL_TOWN_STATUS_H
 
 #include "actraiser/actraiser_town_status.h"
 

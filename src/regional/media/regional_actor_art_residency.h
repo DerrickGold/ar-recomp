@@ -1,5 +1,9 @@
 #ifndef AR_REGIONAL_ACTOR_ART_RESIDENCY_H
 #define AR_REGIONAL_ACTOR_ART_RESIDENCY_H
+/* RegionalActorArtResidency: which native picture allocations stay resident when regional actor
+ * art replaces them.
+ * Phase: pure.
+ * Tests: tests/regional_actor_art_test.c */
 
 #include "regional/media/regional_actor_art.h"
 

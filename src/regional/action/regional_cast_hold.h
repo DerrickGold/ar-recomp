@@ -1,5 +1,9 @@
 #ifndef AR_REGIONAL_CAST_HOLD_H
 #define AR_REGIONAL_CAST_HOLD_H
+/* RegionalCastHold: the Fillmore prop cast-hold rules (left, upper and right props), per region,
+ * resolved to a three-bit mask.
+ * Phase: pure.
+ * Tests: tests/actraiser_actor_stats_test.c */
 #include "regional/regional_source.h"
 #include <stdbool.h>
 #include <stdint.h>

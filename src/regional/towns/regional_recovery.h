@@ -1,5 +1,8 @@
 #ifndef AR_REGIONAL_RECOVERY_H
 #define AR_REGIONAL_RECOVERY_H
+/* RegionalRecovery: SP and angel recovery amounts, per region.
+ * Phase: pure.
+ * Tests: tests/actraiser_recovery_test.c */
 
 #include "regional/regional_costs.h"
 

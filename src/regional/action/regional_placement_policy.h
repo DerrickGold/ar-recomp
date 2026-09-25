@@ -1,5 +1,9 @@
 #ifndef AR_REGIONAL_PLACEMENT_POLICY_H
 #define AR_REGIONAL_PLACEMENT_POLICY_H
+/* RegionalPlacements policy: which region's enemy and pickup placements a campaign uses. The
+ * placement data is in regional/action/regional_placements.[ch].
+ * Phase: pure.
+ * Tests: tests/regional_placements_test.c */
 #include "regional/regional_source.h"
 #include <stdbool.h>
 #include <stdint.h>

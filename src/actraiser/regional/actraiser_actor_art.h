@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_ACTOR_ART_H
-#define ACTRAISER_ACTOR_ART_H
+#ifndef AR_ACTRAISER_ACTOR_ART_H
+#define AR_ACTRAISER_ACTOR_ART_H
 
 #include "regional/media/regional_actor_art_residency.h"
 

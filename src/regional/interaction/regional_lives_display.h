@@ -1,5 +1,8 @@
 #ifndef AR_REGIONAL_LIVES_DISPLAY_H
 #define AR_REGIONAL_LIVES_DISPLAY_H
+/* RegionalLivesDisplay: whether the lives counter is shown zero-based, per region.
+ * Phase: pure.
+ * Tests: tests/actraiser_lives_display_test.c */
 
 #include "regional/regional_source.h"
 #include <stdbool.h>

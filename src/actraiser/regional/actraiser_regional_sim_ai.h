@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_SIM_AI_RUNTIME_H
-#define ACTRAISER_SIM_AI_RUNTIME_H
+#ifndef AR_ACTRAISER_REGIONAL_SIM_AI_H
+#define AR_ACTRAISER_REGIONAL_SIM_AI_H
 #include "actraiser/actraiser_sim_ai.h"
 /* Recompiler hooks for the regional SIM AI rules (hle_func_if in bank01.cfg).
  * Each ...Entry predicate is true when the active regional value differs from

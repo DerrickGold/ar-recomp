@@ -1,5 +1,8 @@
 #ifndef AR_REGIONAL_POSES_H
 #define AR_REGIONAL_POSES_H
+/* RegionalPoses: the Aitos humanoid and shared poses, per region.
+ * Phase: pure.
+ * Tests: tests/actraiser_action_motion_test.c */
 #include "regional/regional_source.h"
 #include <stdbool.h>
 #include <stdint.h>

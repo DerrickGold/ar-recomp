@@ -1,5 +1,8 @@
 #ifndef AR_REGIONAL_SOURCES_H
 #define AR_REGIONAL_SOURCES_H
+/* RegionalSources: whether life and magic sources are collected automatically, per region.
+ * Phase: pure.
+ * Tests: tests/actraiser_sources_test.c */
 
 #include "regional/regional_source.h"
 #include <stdbool.h>

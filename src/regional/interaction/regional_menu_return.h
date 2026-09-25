@@ -1,5 +1,8 @@
 #ifndef AR_REGIONAL_MENU_RETURN_H
 #define AR_REGIONAL_MENU_RETURN_H
+/* RegionalMenuReturn: whether the town menu stays open after a command, per region.
+ * Phase: pure.
+ * Tests: tests/actraiser_regional_runtime_test.c */
 
 #include "regional/regional_costs.h"
 

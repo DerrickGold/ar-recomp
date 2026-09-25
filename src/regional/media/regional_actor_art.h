@@ -1,5 +1,9 @@
 #ifndef AR_REGIONAL_ACTOR_ART_H
 #define AR_REGIONAL_ACTOR_ART_H
+/* RegionalActorArt: regional actor artwork packages (characters, pictures and palettes) and
+ * their size limits.
+ * Phase: pure.
+ * Tests: tests/regional_actor_art_test.c */
 
 #include "regional/media/regional_media.h"
 

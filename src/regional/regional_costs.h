@@ -3,7 +3,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
-#include "regional_source.h"
+#include "regional/regional_source.h"
 
 /* Game-owned, renderer/platform/ROM-independent policy. This is the pricing
  * subset, NOT a complete regional preset. No locale, donor availability,

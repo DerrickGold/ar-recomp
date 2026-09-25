@@ -1,5 +1,8 @@
 #ifndef AR_REGIONAL_MAGIC_GESTURE_H
 #define AR_REGIONAL_MAGIC_GESTURE_H
+/* RegionalMagicGesture: whether magic is cast with the up-attack gesture, per region.
+ * Phase: pure.
+ * Tests: tests/actraiser_magic_gesture_test.c */
 
 #include "regional/regional_costs.h"
 

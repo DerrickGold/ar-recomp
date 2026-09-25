@@ -1,5 +1,8 @@
 #ifndef AR_REGIONAL_RETRY_H
 #define AR_REGIONAL_RETRY_H
+/* RegionalRetry: whether a checkpoint retry clears the score, per region.
+ * Phase: pure.
+ * Tests: tests/actraiser_retry_test.c */
 
 #include <stdbool.h>
 #include <stdint.h>

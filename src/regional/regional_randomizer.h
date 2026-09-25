@@ -1,6 +1,6 @@
 #ifndef AR_REGIONAL_RANDOMIZER_H
 #define AR_REGIONAL_RANDOMIZER_H
-#include "regional_profiles.h"
+#include "regional/regional_profiles.h"
 #include "randomizer_config.h"
 
 /* New-campaign preparation only. Each selected gameplay leaf draws from its

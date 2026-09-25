@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_LEVEL_GOALS_RUNTIME_H
-#define ACTRAISER_LEVEL_GOALS_RUNTIME_H
+#ifndef AR_ACTRAISER_REGIONAL_LEVEL_GOALS_H
+#define AR_ACTRAISER_REGIONAL_LEVEL_GOALS_H
 #include "actraiser/actraiser_level_goals.h"
 
 /* Campaign-owner bridge. Reads don't activate pending changes. */

@@ -1,5 +1,9 @@
 #ifndef AR_REGIONAL_SIM_AI_H
 #define AR_REGIONAL_SIM_AI_H
+/* RegionalSimAi: per-region SIM enemy AI rules (bat fallback and wait, dragon search and extra
+ * pass, target pool and coordinates).
+ * Phase: pure.
+ * Tests: tests/actraiser_sim_ai_test.c */
 #include "regional/regional_source.h"
 #include <stdbool.h>
 #include <stdint.h>

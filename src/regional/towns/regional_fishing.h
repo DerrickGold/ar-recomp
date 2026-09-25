@@ -1,5 +1,8 @@
 #ifndef AR_REGIONAL_FISHING_H
 #define AR_REGIONAL_FISHING_H
+/* RegionalFishing: the Fillmore fishing target, per region.
+ * Phase: pure.
+ * Tests: tests/actraiser_fishing_test.c */
 #include "regional/regional_source.h"
 #include <stdbool.h>
 #include <stdint.h>

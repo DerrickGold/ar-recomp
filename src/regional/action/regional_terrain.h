@@ -1,5 +1,9 @@
 #ifndef AR_REGIONAL_TERRAIN_H
 #define AR_REGIONAL_TERRAIN_H
+/* RegionalTerrain: per-region stage terrain patches (the Japanese map, and the European map and
+ * definitions) applied to action rooms.
+ * Phase: pure.
+ * Tests: tests/actraiser_stage_terrain_test.c */
 
 #include "regional/regional_source.h"
 #include <stdbool.h>

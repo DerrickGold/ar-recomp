@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_REGIONAL_EDITOR_H
-#define ACTRAISER_REGIONAL_EDITOR_H
+#ifndef AR_ACTRAISER_REGIONAL_EDITOR_H
+#define AR_ACTRAISER_REGIONAL_EDITOR_H
 
 #include "actraiser/regional/actraiser_regional_settings.h"
 #include "regional/session/regional_session.h"
@@ -24,8 +24,6 @@ typedef struct ActRaiserRegionalEditContext {
 
 bool ActRaiserRegionalEditor_PopulationPending(const ActRaiserRegionalPopulationIntent *intent,
                                                const ArRegionalSession *session);
-void ActRaiserRegionalEditor_InvalidatePopulation(ActRaiserRegionalPopulationIntent *intent,
-                                                  const ArRegionalSession *session);
 ActRaiserRegionalEditResult ActRaiserRegionalEditor_PreviewProfile(
     const ActRaiserRegionalEditContext *edit, const ActRaiserRegionalRulesView *view,
     ArRegionalProfileGroup group, ArRegionalSource source, ActRaiserRegionalEditImpact *out);

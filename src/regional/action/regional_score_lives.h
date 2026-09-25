@@ -1,5 +1,8 @@
 #ifndef AR_REGIONAL_SCORE_LIVES_H
 #define AR_REGIONAL_SCORE_LIVES_H
+/* RegionalScoreLives: whether score bands award extra lives in Action mode, per region.
+ * Phase: pure.
+ * Tests: tests/actraiser_score_lives_test.c */
 
 #include "regional/regional_source.h"
 #include <stdbool.h>

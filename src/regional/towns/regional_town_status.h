@@ -1,5 +1,9 @@
 #ifndef AR_REGIONAL_TOWN_STATUS_H
 #define AR_REGIONAL_TOWN_STATUS_H
+/* RegionalTownStatus: per-region town status reporting rules (classifier, food attempts, low
+ * growth, persistent flags and plot counts).
+ * Phase: pure.
+ * Tests: tests/actraiser_town_status_test.c */
 
 #include "regional/regional_source.h"
 #include <stdbool.h>

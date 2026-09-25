@@ -1,5 +1,8 @@
 #ifndef AR_REGIONAL_TOWN_WAIT_H
 #define AR_REGIONAL_TOWN_WAIT_H
+/* RegionalTownWait: the town countdown length, per region.
+ * Phase: pure.
+ * Tests: tests/actraiser_town_wait_test.c */
 
 #include "regional/regional_source.h"
 #include <stdbool.h>

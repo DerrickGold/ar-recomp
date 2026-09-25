@@ -34,7 +34,7 @@ bool ArRegionalFire_GroupSource(const ArRegionalFirePolicy *policy,ArRegionalSou
     eu &= policy->source[i] == kArRegionalSource_Europe;
   *source=bits?kArRegionalSource_Japan:eu?kArRegionalSource_Europe:kArRegionalSource_US;return true;
 }
-uint16_t ArRegionalFire_Value(ArRegionalFireSnapshot snapshot,unsigned rule) {
+static uint16_t FireValue(ArRegionalFireSnapshot snapshot,unsigned rule) {
   return snapshot > 15 || rule >= kArRegionalFire_Count
       ? UINT16_MAX
       : kRules[rule].value[(snapshot >> rule) & 1];
@@ -46,7 +46,7 @@ bool ArRegionalFire_CurveRow(ArRegionalFireSnapshot snapshot,unsigned state,unsi
     {{1,0},{1,1},{1,2},{2,3},{2,3},{2,3},{2,2},{2,1}}};
   static const int8_t japanese_x[]={-2,-1,-1,0,0,1,1,2};
   static const int8_t japanese_y[]={2,2,4,4,4,4,2,2};
-  if(!dx || !dy || ArRegionalFire_Value(snapshot,kArRegionalFire_Curve)!=1 ||
+  if(!dx || !dy || FireValue(snapshot,kArRegionalFire_Curve)!=1 ||
       (state!=13 && state!=14) || row>=8 || visual!=32+row/4 || duration!=1)return false;
   if(*dx!=native[state-13][row][0] || *dy!=native[state-13][row][1])return false;
   *dx=japanese_x[row];*dy=(int16_t)(japanese_y[row]*(state==13?-1:1));return true;

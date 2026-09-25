@@ -12,8 +12,8 @@ bool ActRaiserRegionalEditor_PopulationPending(const ActRaiserRegionalPopulation
          !memcmp(&intent->base_rules, &session->requested, sizeof(session->requested));
 }
 
-void ActRaiserRegionalEditor_InvalidatePopulation(ActRaiserRegionalPopulationIntent *intent,
-                                                  const ArRegionalSession *session) {
+static void InvalidatePopulation(ActRaiserRegionalPopulationIntent *intent,
+                                 const ArRegionalSession *session) {
   if (intent && !ActRaiserRegionalEditor_PopulationPending(intent, session))
     intent->pending = false;
 }
@@ -115,7 +115,7 @@ ActRaiserRegionalEditResult ActRaiserRegionalEditor_RequestProfile(
   if (group == kArRegionalProfile_Population || group == kArRegionalProfile_Gameplay)
     edit->population->pending = false;
   *edit->session = candidate;
-  ActRaiserRegionalEditor_InvalidatePopulation(edit->population, edit->session);
+  InvalidatePopulation(edit->population, edit->session);
   return result;
 }
 
@@ -440,7 +440,7 @@ ActRaiserRegionalEditResult ActRaiserRegionalEditor_RequestRules(
       return kActRaiserRegionalEdit_Invalid;
   }
   if (!ok) return kActRaiserRegionalEdit_Invalid;
-  ActRaiserRegionalEditor_InvalidatePopulation(edit->population, session);
+  InvalidatePopulation(edit->population, session);
   return view->revision == session->revision ? kActRaiserRegionalEdit_Unchanged
                                              : kActRaiserRegionalEdit_Applied;
 }
@@ -495,7 +495,7 @@ static ActRaiserRegionalEditResult RequestDifficultyPolicy(
     return kActRaiserRegionalEdit_Stale;
   if (!ArRegionalSession_RequestDifficulty(session, view->revision, policy))
     return kActRaiserRegionalEdit_Invalid;
-  ActRaiserRegionalEditor_InvalidatePopulation(edit->population, session);
+  InvalidatePopulation(edit->population, session);
   return view->revision == session->revision ? kActRaiserRegionalEdit_Unchanged
                                              : kActRaiserRegionalEdit_Applied;
 }

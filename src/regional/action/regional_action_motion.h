@@ -1,5 +1,10 @@
 #ifndef AR_REGIONAL_ACTION_MOTION_H
 #define AR_REGIONAL_ACTION_MOTION_H
+/* RegionalActionMotion: per-region Action motion rules (bird, leaper and arrow speeds, cave-
+ * enemy recoveries, caster windups, the head withdrawal and the tree seeds), resolved to a
+ * bitmask snapshot.
+ * Phase: pure.
+ * Tests: tests/actraiser_action_motion_test.c */
 #include "regional/regional_source.h"
 #include <stdbool.h>
 #include <stdint.h>

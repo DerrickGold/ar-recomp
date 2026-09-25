@@ -1,5 +1,9 @@
 #ifndef AR_REGIONAL_MEDIA_H
 #define AR_REGIONAL_MEDIA_H
+/* RegionalMedia: the catalog of regional media assets (title and town artwork, HUD graphics,
+ * music sequences and actor art) and the releases they come from.
+ * Phase: pure.
+ * Tests: tests/regional_media_test.c */
 
 #include <stdbool.h>
 #include <stddef.h>

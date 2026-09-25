@@ -1,5 +1,10 @@
-#ifndef ACTRAISER_POPULATION_CONVERSION_H
-#define ACTRAISER_POPULATION_CONVERSION_H
+#ifndef AR_ACTRAISER_POPULATION_CONVERSION_H
+#define AR_ACTRAISER_POPULATION_CONVERSION_H
+/* ActRaiserPopulationConversion: the confirmed town redevelopment that applies a population or
+ * gameplay profile: preview, capture of the exact native write footprint, then commit or
+ * rollback.
+ * Phase: capture (native town memory, on the game thread).
+ * Tests: tests/actraiser_population_conversion_test.c */
 
 #include "actraiser/actraiser_town_redevelopment.h"
 #include "regional/session/regional_campaign.h"

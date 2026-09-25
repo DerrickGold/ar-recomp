@@ -1,5 +1,9 @@
 #ifndef AR_REGIONAL_FIRE_ENEMY_H
 #define AR_REGIONAL_FIRE_ENEMY_H
+/* RegionalFire: per-region fire-enemy rules (curve, close strategy, child and bounce
+ * thresholds), resolved to a four-bit mask.
+ * Phase: pure.
+ * Tests: tests/actraiser_fire_enemy_test.c */
 #include "regional/regional_source.h"
 #include <stdbool.h>
 #include <stdint.h>
@@ -22,7 +26,6 @@ const ArRegionalFireDescriptor *ArRegionalFire_Descriptor(unsigned rule);
 bool ArRegionalFire_Init(ArRegionalFirePolicy *policy,ArRegionalSource source);
 bool ArRegionalFire_Resolve(const ArRegionalFirePolicy *policy,ArRegionalFireSnapshot *snapshot);
 bool ArRegionalFire_GroupSource(const ArRegionalFirePolicy *policy,ArRegionalSource *source);
-uint16_t ArRegionalFire_Value(ArRegionalFireSnapshot snapshot,unsigned rule);
 /* Exact Western row input, signed movement before native facing transforms.
  * Rejected rows leave both outputs unchanged. No random draw or allocation. */
 bool ArRegionalFire_CurveRow(ArRegionalFireSnapshot snapshot,unsigned state,unsigned row,

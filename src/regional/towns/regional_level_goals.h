@@ -1,5 +1,9 @@
 #ifndef AR_REGIONAL_LEVEL_GOALS_H
 #define AR_REGIONAL_LEVEL_GOALS_H
+/* RegionalLevelGoals: the experience goal for each level (Japanese or Western table), per
+ * region.
+ * Phase: pure.
+ * Tests: tests/actraiser_level_goals_test.c */
 #include "regional/regional_source.h"
 #include <stdbool.h>
 #include <stdint.h>

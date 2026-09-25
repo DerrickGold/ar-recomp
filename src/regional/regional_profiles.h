@@ -1,7 +1,7 @@
 #ifndef AR_REGIONAL_PROFILES_H
 #define AR_REGIONAL_PROFILES_H
 
-#include "regional_rules.h"
+#include "regional/regional_rules.h"
 
 /* Semantic UI groups, independent of save-record order and ROM addresses. */
 typedef enum ArRegionalProfileGroup {

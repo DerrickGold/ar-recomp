@@ -1,5 +1,8 @@
 #ifndef AR_REGIONAL_MOSAIC_H
 #define AR_REGIONAL_MOSAIC_H
+/* RegionalMosaic: the Aitos mosaic pattern, per region.
+ * Phase: pure.
+ * Tests: tests/actraiser_regional_mosaic_test.c */
 #include "regional/regional_source.h"
 #include <stdbool.h>
 #include <stdint.h>

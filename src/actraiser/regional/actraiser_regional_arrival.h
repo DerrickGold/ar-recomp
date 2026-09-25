@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_ARRIVAL_RUNTIME_H
-#define ACTRAISER_ARRIVAL_RUNTIME_H
+#ifndef AR_ACTRAISER_REGIONAL_ARRIVAL_H
+#define AR_ACTRAISER_REGIONAL_ARRIVAL_H
 #include "snesrecomp/game/cpu.h"
 /* Capture only at an eligible final departure or Japanese Palace gate. An
  * already-started event keeps its effective policy through announcement. */

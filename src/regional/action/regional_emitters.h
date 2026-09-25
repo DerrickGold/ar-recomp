@@ -1,5 +1,9 @@
 #ifndef AR_REGIONAL_EMITTERS_H
 #define AR_REGIONAL_EMITTERS_H
+/* RegionalEmitter: per-region emitter cadence and launch position, resolved to one byte (cadence
+ * 0-2, bit 2 for the PAL launch offset).
+ * Phase: pure.
+ * Tests: tests/actraiser_action_motion_test.c */
 #include "regional/regional_source.h"
 #include <stdbool.h>
 #include <stdint.h>

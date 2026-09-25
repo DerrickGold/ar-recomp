@@ -1,5 +1,9 @@
 #ifndef AR_REGIONAL_BOSS_RULES_H
 #define AR_REGIONAL_BOSS_RULES_H
+/* RegionalBoss: per-region boss timings and strategies (Minotaur, Antlion, Dragon, Ice and the
+ * other bosses), resolved to a 64-bit rule mask.
+ * Phase: pure.
+ * Tests: tests/actraiser_boss_rules_test.c */
 #include "regional/regional_source.h"
 #include <stdbool.h>
 #include <stdint.h>

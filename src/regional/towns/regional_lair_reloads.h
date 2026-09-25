@@ -1,5 +1,8 @@
 #ifndef AR_REGIONAL_LAIR_RELOADS_H
 #define AR_REGIONAL_LAIR_RELOADS_H
+/* RegionalLairReloads: lair reload reductions per town, as native quarter-plus-one steps.
+ * Phase: pure.
+ * Tests: tests/regional_lair_history_test.c */
 
 #include "regional/towns/regional_lair_history.h"
 

@@ -1,5 +1,9 @@
 #ifndef AR_REGIONAL_MODE_ENTRY_H
 #define AR_REGIONAL_MODE_ENTRY_H
+/* RegionalMode: whether Action mode is available before completion and whether Game Over returns
+ * to the title, per region.
+ * Phase: pure.
+ * Tests: tests/actraiser_mode_entry_test.c */
 #include "regional/regional_source.h"
 #include <stdbool.h>
 #include <stdint.h>
