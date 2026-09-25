@@ -32,6 +32,15 @@
 #   release preset first, so newly promoted feature defaults cannot remain
 #   stale in an existing CMake cache.
 #
+#   make check        run every check that needs no ROM: check-constants, the
+#                     C/Python test suite (Debug, in build-check/), the Go tests
+#                     of all three modules, and the shader header check when its
+#                     tools are installed (it prints SKIPPED otherwise). The
+#                     parts are also targets of their own: check-c, check-go,
+#                     check-shaders. Set CHECK_JOBS=1 to run the tests serially.
+#                     Without a ROM this cannot prove the game links: run
+#                     `snesbuild build --hermetic` or `make check-cross` for the
+#                     shipped build path.
 #   make check-constants  reject high-risk duplicate literals in authored code.
 #   make check-appimage   Linux-only, ROM-free finished AppImage acceptance.
 #                     Uses the same packaging code and pinned tools shipped in
@@ -68,11 +77,34 @@ ROM ?= ar.sfc
 
 # Regenerable artifacts, grouped. Never lists the ROM, saves/*.srm, recordings,
 # or authored source; only the specific generated sidecars inside saves/.
-CLEAN_BUILD_DIRS := build build-release build-control build-terrain build-asan build-trace $(PACKAGING)/build snesrecomp-go/build installer/build
+CLEAN_BUILD_DIRS := build build-release build-control build-terrain build-asan build-trace build-check $(PACKAGING)/build snesrecomp-go/build installer/build
 CLEAN_GENERATED  := src/gen recomp/funcs.h saves/gen_meta.json saves/rts_webs.txt saves/rts_webs.prev.txt
 CLEAN_RELEASE    := release
 
-.PHONY: dev release $(addprefix release-,$(PLATFORMS)) check-constants check-appimage check-cross check-localization-roms check-localization-workflow clean clean-all clean-release clean-packaging-mounts
+.PHONY: dev release $(addprefix release-,$(PLATFORMS)) check check-c check-go check-shaders check-constants check-appimage check-cross check-localization-roms check-localization-workflow clean clean-all clean-release clean-packaging-mounts
+
+# The ROM-free gate, built as Debug in a tree of its own so it never disturbs
+# the play or dev presets.
+CHECK_BUILD := build-check
+CHECK_JOBS ?= $(shell getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)
+GO_MODULES := snesrecomp-go installer installer/desktop-shell
+
+check: check-constants check-c check-go check-shaders
+	@echo "make check: every check that ran passed (any SKIPPED check is named above)"
+
+check-c:
+	cmake -S . -B $(CHECK_BUILD) -G Ninja -DAR_TESTS_ONLY=ON -DCMAKE_BUILD_TYPE=Debug
+	cmake --build $(CHECK_BUILD)
+	ctest --test-dir $(CHECK_BUILD) --output-on-failure -j $(CHECK_JOBS)
+
+check-go:
+	@for m in $(GO_MODULES); do \
+	  echo "=== go test $$m ==="; \
+	  go -C $$m test ./... || exit 1; \
+	done
+
+check-shaders:
+	@python3 tools/build_shaders.py --check --skip-if-tools-missing
 
 check-constants:
 	@sh tools/check_constants.sh

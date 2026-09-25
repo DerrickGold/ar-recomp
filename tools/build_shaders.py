@@ -62,7 +62,7 @@ def die(message):
     sys.exit("build_shaders: " + message)
 
 
-def check_tools():
+def missing_tools():
     missing = []
     for tool, hint in REQUIRED_TOOLS.items():
         override = os.environ.get(tool.upper().replace("-", "_"))
@@ -71,6 +71,11 @@ def check_tools():
             missing.append(f"  {tool} — {hint}")
         else:
             TOOL_COMMANDS[tool] = command
+    return missing
+
+
+def check_tools():
+    missing = missing_tools()
     if missing:
         die(
             "missing required tools:\n"
@@ -288,8 +293,22 @@ def main():
         action="store_true",
         help="verify committed headers match their sources; do not write",
     )
+    parser.add_argument(
+        "--skip-if-tools-missing",
+        action="store_true",
+        help="with --check: print SKIPPED and exit 0 when a required tool is "
+        "missing, so an aggregate check can run wherever the tools exist",
+    )
     args = parser.parse_args()
 
+    if args.skip_if_tools_missing:
+        if not args.check:
+            die("--skip-if-tools-missing only applies with --check")
+        missing = missing_tools()
+        if missing:
+            print("shader header check SKIPPED; missing tools:\n"
+                  + "\n".join(missing))
+            return
     check_tools()
 
     sources = sorted(SHADER_DIR.glob("*.frag.glsl")) + \

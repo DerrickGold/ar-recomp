@@ -2,11 +2,31 @@ if(NOT DEFINED GAME_SOURCE_ROOT)
     message(FATAL_ERROR "GAME_SOURCE_ROOT is required")
 endif()
 
+# Every pattern below must match at least one file. A pattern that matches
+# nothing is almost always a file that was moved or renamed, and it would let
+# this check pass while checking nothing. The explicit file lists need no such
+# guard: reading a missing file is already an error.
+set(_boundary_script "${CMAKE_CURRENT_LIST_FILE}")
+function(ar_glob_required out_var mode)
+    set(_matched_all "")
+    foreach(_pattern IN LISTS ARGN)
+        file(${mode} _matched "${_pattern}")
+        if(NOT _matched)
+            message(FATAL_ERROR
+                "Boundary check pattern matches no files:\n  ${_pattern}\n"
+                "A file it covered was probably moved or renamed. Update the "
+                "pattern in ${_boundary_script} so the check keeps covering it.")
+        endif()
+        list(APPEND _matched_all ${_matched})
+    endforeach()
+    set(${out_var} "${_matched_all}" PARENT_SCOPE)
+endfunction()
+
 # The portable localization core is held to the same rule as src/render: pack
 # loading, contracts, sessions, grapheme handling and the rasterizer/backend
 # contracts must not name an SDL type. Desktop enumeration lives in
 # src/platform/sdl/pack_discovery_sdl.c, not here.
-file(GLOB_RECURSE _portable_render_files
+ar_glob_required(_portable_render_files GLOB_RECURSE
     "${GAME_SOURCE_ROOT}/performance*.c"
     "${GAME_SOURCE_ROOT}/performance*.h"
     "${GAME_SOURCE_ROOT}/present_world_nav*.c"
@@ -113,7 +133,7 @@ list(REMOVE_DUPLICATES _portable_render_files)
 # Font byte acquisition is host policy, not a renderer/frame responsibility.
 # Keep both the portable contracts and the SDL rasterizer free of path opens;
 # the backend receives immutable leased bytes, including for new raster sizes.
-file(GLOB _font_resource_files
+ar_glob_required(_font_resource_files GLOB
     "${GAME_SOURCE_ROOT}/localization/font_resource*.[ch]"
     "${GAME_SOURCE_ROOT}/localization/text_backend*.[ch]"
     "${GAME_SOURCE_ROOT}/localization/text_presentation*.[ch]"
@@ -136,7 +156,7 @@ endforeach()
 # depend on the game, and may not name one of its screens. Cell geometry for a
 # fixed menu arrives as an ArLocalizationTextGrid published by the game
 # adapter, so nothing here needs to know which menu it is drawing.
-file(GLOB_RECURSE _game_neutral_files
+ar_glob_required(_game_neutral_files GLOB_RECURSE
     "${GAME_SOURCE_ROOT}/render/*.c"
     "${GAME_SOURCE_ROOT}/render/*.h"
     "${GAME_SOURCE_ROOT}/localization/*.c"
@@ -163,7 +183,7 @@ endif()
 # render_types.h, the shared pixel/rectangle vocabulary the rasterizer contract
 # deliberately speaks so upload code needs no native graphics header.
 set(_layer_violations "")
-file(GLOB_RECURSE _localization_files
+ar_glob_required(_localization_files GLOB_RECURSE
     "${GAME_SOURCE_ROOT}/localization/*.c"
     "${GAME_SOURCE_ROOT}/localization/*.h")
 foreach(_file IN LISTS _localization_files)
@@ -202,7 +222,7 @@ endif()
 # Native renderer/texture access is an implementation detail of SDL-owned
 # adapters. Focused tests may include the internal header, but no game or host
 # source outside platform/sdl may acquire a native graphics handle.
-file(GLOB_RECURSE _game_source_files
+ar_glob_required(_game_source_files GLOB_RECURSE
     "${GAME_SOURCE_ROOT}/*.c"
     "${GAME_SOURCE_ROOT}/*.h")
 set(_sdl_internal_violations "")

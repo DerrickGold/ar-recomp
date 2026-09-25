@@ -15,6 +15,12 @@ endif()
 file(GLOB_RECURSE _private_headers
   LIST_DIRECTORIES false
   "${SNESRECOMP_RUNNER_PRIVATE_ROOT}/*.h")
+# An empty scan means a wrong or moved root, and the check below would then
+# pass without checking anything.
+if(NOT _private_headers)
+  message(FATAL_ERROR
+    "No runner headers found under ${SNESRECOMP_RUNNER_PRIVATE_ROOT}")
+endif()
 set(_private_include_names "")
 foreach(_header IN LISTS _private_headers)
   file(RELATIVE_PATH _relative
@@ -37,6 +43,9 @@ file(GLOB_RECURSE _sources
   LIST_DIRECTORIES false
   "${GAME_SOURCE_ROOT}/*.c"
   "${GAME_SOURCE_ROOT}/*.h")
+if(NOT _sources)
+  message(FATAL_ERROR "No game sources found under ${GAME_SOURCE_ROOT}")
+endif()
 
 set(_violations "")
 set(_private_audio_symbol_violations "")

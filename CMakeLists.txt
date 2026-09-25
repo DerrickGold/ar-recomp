@@ -519,6 +519,19 @@ if(BUILD_TESTING)
                 ${CMAKE_SOURCE_DIR}/tests/sim3d_metadata_tool_test.py)
         set_tests_properties(actraiser_sim3d_metadata_tool PROPERTIES
             ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
+        # Shipped builds compile from snesbuild.ini; prove it matches src/
+        # without the ROM the game target needs.
+        add_test(NAME actraiser_source_manifest
+            COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_SOURCE_DIR}/tools/check_source_manifest.py)
+        set_tests_properties(actraiser_source_manifest PROPERTIES
+            ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
+        # Layout ratchet: no authored file may gain style violations.
+        add_test(NAME actraiser_style
+            COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_SOURCE_DIR}/tools/check_style.py)
+        set_tests_properties(actraiser_style PROPERTIES
+            ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
     endif()
     if(Python3_Interpreter_FOUND AND TARGET actraiser_font_coverage)
         add_test(NAME actraiser_language_font_coverage

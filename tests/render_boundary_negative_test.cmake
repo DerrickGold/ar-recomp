@@ -89,6 +89,23 @@ foreach(_relative IN LISTS _font_cases)
     endif()
     file(WRITE "${_path}" "${_original}")
 endforeach()
+# A moved or renamed file must fail the check instead of silently dropping out
+# of a glob. present_sky_palace.[ch] are the only files one pattern covers.
+set(_moved_files "present_sky_palace.c" "present_sky_palace.h")
+foreach(_relative IN LISTS _moved_files)
+    file(RENAME "${_scratch}/${_relative}" "${_scratch}/${_relative}.moved")
+endforeach()
+execute_process(
+    COMMAND "${CMAKE_COMMAND}" "-DGAME_SOURCE_ROOT=${_scratch}" -P "${BOUNDARY_CHECK}"
+    RESULT_VARIABLE _result OUTPUT_VARIABLE _stdout ERROR_VARIABLE _stderr)
+if(_result STREQUAL "0" OR NOT _stderr MATCHES "pattern matches no files" OR
+   NOT _stderr MATCHES "present_sky_palace")
+    file(REMOVE_RECURSE "${_scratch}")
+    message(FATAL_ERROR "Boundary checker accepted a pattern that matches nothing: ${_stdout}${_stderr}")
+endif()
+foreach(_relative IN LISTS _moved_files)
+    file(RENAME "${_scratch}/${_relative}.moved" "${_scratch}/${_relative}")
+endforeach()
 set(_reference_path "${_scratch}/sim/sim3d_depth_pass.h")
 file(READ "${_reference_path}" _original)
 foreach(_probe IN ITEMS "#include \"sim3d_depth_reference.h\"" "void *Sim3DDepthPass_CreateModelMesh(void)")
@@ -102,4 +119,4 @@ foreach(_probe IN ITEMS "#include \"sim3d_depth_reference.h\"" "void *Sim3DDepth
     endif()
 endforeach()
 file(REMOVE_RECURSE "${_scratch}")
-message(STATUS "Navigation, font-resource and depth-reference boundary negative cases: PASS")
+message(STATUS "Navigation, font-resource, moved-file and depth-reference boundary negative cases: PASS")
