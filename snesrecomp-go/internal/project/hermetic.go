@@ -309,12 +309,16 @@ func HermeticBuild(options HermeticOptions) (string, error) {
 
 	newestGameHeader := newestHeaderTime(mutableIncludeDirs(options, includeDirs), paths.BuildDir)
 	newestRunnerHeader := time.Time{}
+	var runnerHeaderDirs []string
 	if runnerSourceCount > 0 {
-		runnerHeaderDirs := append([]string(nil), runner.SourceManifest.PublicIncludes...)
+		runnerHeaderDirs = append([]string(nil), runner.SourceManifest.PublicIncludes...)
 		runnerHeaderDirs = append(runnerHeaderDirs,
 			runner.SourceManifest.PrivateIncludes...)
 		newestRunnerHeader = newestHeaderTime(mutableIncludeDirs(options, runnerHeaderDirs), paths.BuildDir)
 	}
+	// Runner and manifest sources come first; generated sources follow and
+	// include only headers.
+	authoredSourceCount := runnerSourceCount + len(manifest.Sources)
 
 	type job struct {
 		source, object string
@@ -327,9 +331,21 @@ func HermeticBuild(options HermeticOptions) (string, error) {
 		isRunner := sourceIndex < runnerSourceCount
 		flagsChanged := gameFlagsChanged
 		newestHeader := newestGameHeader
+		searchDirs := includeDirs
 		if isRunner {
 			flagsChanged = runnerFlagsChanged
 			newestHeader = newestRunnerHeader
+			searchDirs = runnerHeaderDirs
+		}
+		// An authored source can also include implementation files (a unity
+		// component, a vendored .c) that no header scan sees; the runtime
+		// archive follows them the same way. Immutable inputs are already
+		// covered by their verified digest.
+		if sourceIndex < authoredSourceCount &&
+			(options.InputID == "" || !underImmutableRoot(options.Root, source)) {
+			if included := newestImplementationIncludeTime(source, searchDirs...); included.After(newestHeader) {
+				newestHeader = included
+			}
 		}
 		if !flagsChanged && immutableObjectFresh(options, source, object, newestHeader) {
 			cached++
@@ -569,9 +585,15 @@ func objectFresh(source, object string, newestHeader time.Time) bool {
 }
 
 // newestHeaderTime scans each include directory recursively for the newest
-// *.h mtime. Nested layouts like <include>/SDL3/SDL_render.h must count, so a
-// staleness check that only listed the top level would miss a header updated
-// one directory down. An unreadable subtree is skipped rather than fatal.
+// *.h or *.inc mtime. Nested layouts like <include>/SDL3/SDL_render.h must
+// count, so a staleness check that only listed the top level would miss a
+// header updated one directory down. An unreadable subtree is skipped rather
+// than fatal.
+//
+// *.inc fragments count as headers. Sources and headers include them by
+// relative, sibling or include-directory paths, so tracking them here, as
+// coarsely as headers, is the only way an edited table cannot leave a stale
+// object behind.
 //
 // skipDir prunes the build directory. The manifest lists `include = .`, so
 // without this the walk descends into build/ and finds the SDL3 headers a
@@ -593,7 +615,8 @@ func newestHeaderTime(includeDirs []string, skipDir string) time.Time {
 			if entry.IsDir() && skipDir != "" && path == skipDir {
 				return filepath.SkipDir
 			}
-			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".h") {
+			if entry.IsDir() || !(strings.HasSuffix(entry.Name(), ".h") ||
+				strings.HasSuffix(entry.Name(), ".inc")) {
 				return nil
 			}
 			info, infoErr := entry.Info()

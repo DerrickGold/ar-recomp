@@ -131,8 +131,10 @@ func runtimeDebugObjectArgs(runtimeDir, target, source string) []string {
 // newestImplementationIncludeTime follows quoted implementation includes used
 // by unity translation units. These files are intentionally absent from the
 // manifest source list, so checking only the unit's own timestamp could reuse a
-// stale cached object after one of its component sources changes.
-func newestImplementationIncludeTime(source string) time.Time {
+// stale cached object after one of its component sources changes. Each include
+// is resolved like the compiler resolves a quoted include: beside the including
+// file first, then in includeDirs in order.
+func newestImplementationIncludeTime(source string, includeDirs ...string) time.Time {
 	newest := time.Time{}
 	visited := make(map[string]bool)
 	var visit func(string)
@@ -167,15 +169,32 @@ func newestImplementationIncludeTime(source string) time.Time {
 			if end < 0 {
 				continue
 			}
-			includedPath := filepath.Join(filepath.Dir(path), filepath.FromSlash(include[1:1+end]))
-			switch strings.ToLower(filepath.Ext(includedPath)) {
+			relative := filepath.FromSlash(include[1 : 1+end])
+			switch strings.ToLower(filepath.Ext(relative)) {
 			case ".c", ".cc", ".cpp", ".cxx", ".inc":
-				visit(includedPath)
+				visit(resolveQuotedInclude(path, relative, includeDirs))
 			}
 		}
 	}
 	visit(source)
 	return newest
+}
+
+// resolveQuotedInclude returns the first existing candidate for a quoted
+// include, or the includer-relative path when none exists (visit then skips
+// it, as the compiler would have failed on it anyway).
+func resolveQuotedInclude(includer, relative string, includeDirs []string) string {
+	local := filepath.Join(filepath.Dir(includer), relative)
+	if _, err := os.Stat(local); err == nil {
+		return local
+	}
+	for _, directory := range includeDirs {
+		candidate := filepath.Join(directory, relative)
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+	}
+	return local
 }
 
 // BuildRuntimeArchive creates a deterministic, reusable runner library. It

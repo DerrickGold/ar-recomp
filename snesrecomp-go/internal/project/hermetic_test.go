@@ -165,6 +165,50 @@ func TestNewestHeaderTime(t *testing.T) {
 	}
 }
 
+func TestNewestHeaderTimeCountsIncludeFragments(t *testing.T) {
+	// A table fragment included through a header or an include-directory
+	// path must invalidate objects exactly like a header does.
+	directory := t.TempDir()
+	nested := filepath.Join(directory, "localization")
+	writeTestFile(t, filepath.Join(directory, "a.h"), "x")
+	writeTestFile(t, filepath.Join(nested, "table_data.inc"), "{1},\n")
+	old := time.Now().Add(-2 * time.Hour)
+	if err := os.Chtimes(filepath.Join(directory, "a.h"), old, old); err != nil {
+		t.Fatal(err)
+	}
+	edited := time.Now().Add(2 * time.Hour)
+	if err := os.Chtimes(filepath.Join(nested, "table_data.inc"), edited, edited); err != nil {
+		t.Fatal(err)
+	}
+	newest := newestHeaderTime([]string{directory}, "")
+	if newest.Before(edited.Add(-time.Second)) {
+		t.Fatalf("header scan missed localization/table_data.inc: got %v want ~%v", newest, edited)
+	}
+}
+
+func TestNewestImplementationIncludeTimeSearchesIncludeDirs(t *testing.T) {
+	// music.c includes "stb_vorbis.c", which lives only in an -I directory.
+	root := t.TempDir()
+	unit := filepath.Join(root, "src", "music.c")
+	vendor := filepath.Join(root, "third_party", "stb")
+	writeTestFile(t, unit, "#include \"stb_vorbis.c\"\n")
+	writeTestFile(t, filepath.Join(vendor, "stb_vorbis.c"), "int decode;\n")
+	old := time.Now().Add(-2 * time.Hour)
+	if err := os.Chtimes(unit, old, old); err != nil {
+		t.Fatal(err)
+	}
+	updated := time.Now().Add(2 * time.Hour)
+	if err := os.Chtimes(filepath.Join(vendor, "stb_vorbis.c"), updated, updated); err != nil {
+		t.Fatal(err)
+	}
+	if newest := newestImplementationIncludeTime(unit); newest.After(old.Add(time.Second)) {
+		t.Fatalf("without include dirs the vendored file is unreachable, got %v", newest)
+	}
+	if newest := newestImplementationIncludeTime(unit, vendor); newest.Before(updated.Add(-time.Second)) {
+		t.Fatalf("include-dir search missed stb_vorbis.c: got %v want ~%v", newest, updated)
+	}
+}
+
 func TestNewestImplementationIncludeTimeWalksUnitySources(t *testing.T) {
 	directory := t.TempDir()
 	unit := filepath.Join(directory, "unit.cpp")
