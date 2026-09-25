@@ -72,7 +72,7 @@ func (work *localizationWork) checkFontCoverage(ctx context.Context, p *lk.Autho
 	if p.Origin() != "native-source" {
 		source := work.nativeLocalizationSource()
 		if source == nil {
-			return lk.FontCoverageReport{}, fmt.Errorf("extract the native US source before checking this translation's font coverage")
+			return lk.FontCoverageReport{}, errLocalizationSourceRequired
 		}
 		fallback = source.Pack()
 	}
@@ -86,7 +86,7 @@ func (work *localizationWork) requireFontCoverage(ctx context.Context, p *lk.Aut
 	}
 	if !report.Complete {
 		first := report.Missing[0]
-		return fmt.Errorf("font stack is missing %d character(s), starting with %s (%s). Open Fonts → Check coverage for message locations; add a suitable fallback font before installing or exporting", report.MissingCount, first.Codepoint, first.Character)
+		return fmt.Errorf("%w: %d character(s), starting with %s (%s). Open Fonts → Check coverage for message locations; add a suitable fallback font before installing or exporting", errLocalizationMissingCharacters, report.MissingCount, first.Codepoint, first.Character)
 	}
 	return nil
 }

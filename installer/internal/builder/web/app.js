@@ -1,5 +1,7 @@
 (() => {
 "use strict";
+  const fetchResponse = (...args) => window.workshopFeedback?.request ?
+    window.workshopFeedback.request(...args) : fetch(...args);
 const ui=window.workshopI18n;
 const form=document.querySelector("#build-form"), build=document.querySelector("#build"), launch=document.querySelector("#launch");
 const state=document.querySelector("#state"), log=document.querySelector("#log"), closeButton=document.querySelector("#close");
@@ -158,7 +160,7 @@ async function loadHomeProjects(){
   if(closed||!localizationReady){ document.querySelector("#home-translations").hidden=true; return; }
   const request=++homeRequest;
   try {
-    const rows=await responseJSON(await fetch("localization/projects",{cache:"no-store"}));
+    const rows=await responseJSON(await fetchResponse("localization/projects",{cache:"no-store"}));
     if(!closed&&localizationReady&&request===homeRequest) projectCards(document.querySelector("#home-projects"),rows,4);
   } catch(error){
     if(!closed&&localizationReady&&request===homeRequest){
@@ -459,7 +461,7 @@ async function loadAssetConfiguration(){
   assetState.dataset.kind="loading";
   ui.set(assetState,"builder.assets.loading");
   try {
-    const config=await responseJSON(await fetch("assets",{cache:"no-store"}));
+    const config=await responseJSON(await fetchResponse("assets",{cache:"no-store"}));
     // A read started on tab entry must not overwrite a change made while the
     // request was in flight. Keeping the existing draft also keeps file inputs.
     if(assetBar.dataset.dirty==="true"){
@@ -529,7 +531,7 @@ function paintAudioPreviewStatus(status){
 async function loadAudioPreviewStatus(){
   clearTimeout(previewTimer);
   try {
-    const status=await responseJSON(await fetch("audio-previews",{cache:"no-store"}));
+    const status=await responseJSON(await fetchResponse("audio-previews",{cache:"no-store"}));
     previewPolling=paintAudioPreviewStatus(status);
   } catch(error){
     previewPolling=false;
@@ -547,7 +549,7 @@ async function startAudioPreviews(force){
   previewState.dataset.kind="loading";
   ui.set(previewState,force?"builder.assets.preview_regenerating":"builder.assets.preview_starting");
   try {
-    const status=await responseJSON(await fetch(
+    const status=await responseJSON(await fetchResponse(
       force?"audio-previews?force=1":"audio-previews",{method:"POST"}));
     paintAudioPreviewStatus(status);
     previewPolling=true;
@@ -825,7 +827,7 @@ assetForm.addEventListener("submit",async event=>{
   assetState.dataset.kind="loading";
   ui.set(assetState,"builder.assets.copying");
   try {
-    const result=await responseJSON(await fetch("assets",{method:"POST",body:new FormData(assetForm)}));
+    const result=await responseJSON(await fetchResponse("assets",{method:"POST",body:new FormData(assetForm)}));
     /* Clear the pickers BEFORE repainting: paintAssetConfiguration derives each
        row from what is still selected, and a file left in an input would make a
        saved row read as pending again. */
@@ -941,6 +943,7 @@ const manualSave=document.querySelector("#manual-save");
 const manualMessage=document.querySelector("#manual-message");
 
 function paintManualStatus(status){
+  window.workshopFeedback?.clear(manualMessage);
   const present=!!status?.present;
   manualEmpty.hidden=present;
   manualFrame.hidden=!present;
@@ -977,24 +980,26 @@ function paintManualStatus(status){
 }
 
 async function loadManualStatus(){
-  try { paintManualStatus(await responseJSON(await fetch("manual",{cache:"no-store"}))); }
+  try { paintManualStatus(await responseJSON(await fetchResponse("manual",{cache:"no-store"}))); }
   catch(error){
     manualMessage.hidden=false;
     manualMessage.dataset.kind="failed";
     manualMessage.textContent=error.message;
+    window.workshopFeedback?.show(manualMessage,error,{operation:"Read manual status",retry:loadManualStatus});
   }
 }
 
 manualForm?.addEventListener("submit",async event=>{
   event.preventDefault();
   if(!manualFile.files.length) return;
+  window.workshopFeedback?.clear(manualMessage);
   manualSave.disabled=true; manualRemove.disabled=true;
   manualMessage.hidden=false;
   manualMessage.dataset.kind="loading";
   ui.set(manualMessage,"builder.help.manual_installing");
   try {
     const status=await responseJSON(
-      await fetch("manual",{method:"POST",body:new FormData(manualForm)}));
+      await fetchResponse("manual",{method:"POST",body:new FormData(manualForm)}));
     manualFile.value="";
     paintManualStatus(status);
   } catch(error){
@@ -1006,12 +1011,14 @@ manualForm?.addEventListener("submit",async event=>{
 });
 
 manualRemove?.addEventListener("click",async()=>{
+  window.workshopFeedback?.clear(manualMessage);
   manualSave.disabled=true; manualRemove.disabled=true;
-  try { paintManualStatus(await responseJSON(await fetch("manual",{method:"DELETE"}))); }
+  try { paintManualStatus(await responseJSON(await fetchResponse("manual",{method:"DELETE"}))); }
   catch(error){
     manualMessage.hidden=false;
     manualMessage.dataset.kind="failed";
     manualMessage.textContent=error.message;
+    window.workshopFeedback?.show(manualMessage,error,{operation:"Remove manual"});
   }
   manualSave.disabled=false; manualRemove.disabled=false;
 });
@@ -1030,7 +1037,7 @@ async function responseJSON(response){
 async function refresh(){
   if(closed) return;
   try {
-    const data=await responseJSON(await fetch("status",{cache:"no-store"}));
+    const data=await responseJSON(await fetchResponse("status",{cache:"no-store"}));
     if(closed) return;
     if(data.log){ ui.unbind(log); log.textContent=data.log; log.scrollTop=log.scrollHeight; }
     applyMode(data);
@@ -1077,7 +1084,7 @@ form.addEventListener("submit",async event=>{
   dock.dataset.kind="building"; dock.dataset.open="true";
   ui.set(dockPhase,"builder.build.preparing_rom"); dockPct.textContent="…"; track.hidden=false; dockLaunch.hidden=true;
   track.removeAttribute("aria-valuenow");
-  try { await responseJSON(await fetch("build",{method:"POST",body:new FormData(form)})); polling=true; refresh(); }
+  try { await responseJSON(await fetchResponse("build",{method:"POST",body:new FormData(form)})); polling=true; refresh(); }
   catch(error){ showKey("failed","builder.request_failed",{detail:error.message},error,"Start game build"); build.disabled=false; announce("failed"); }
 });
 
@@ -1088,7 +1095,7 @@ async function doLaunch(){
   const previous=buttons.map(button=>button.disabled);
   buttons.forEach(button=>button.disabled=true);
   showKey("idle","builder.build.launching");
-  try { await responseJSON(await fetch("launch",{method:"POST"})); showKey("succeeded","builder.build.launched"); }
+  try { await responseJSON(await fetchResponse("launch",{method:"POST"})); showKey("succeeded","builder.build.launched"); }
   catch(error){ showKey("failed","builder.request_failed",{detail:error.message},error,"Launch game"); }
   finally { launching=false; if(!closed) buttons.forEach((button,i)=>button.disabled=previous[i]); }
 }
@@ -1102,7 +1109,7 @@ slimButton.addEventListener("click",async()=>{
   slimButton.disabled=true; slimDismiss.disabled=true;
   showKey("building","builder.build.removing_tools");
   try {
-    await responseJSON(await fetch("slim",{method:"POST"}));
+    await responseJSON(await fetchResponse("slim",{method:"POST"}));
     /* One poll settles everything: the server has re-probed, so the offer
      * disappears, the confirmation appears, and the page drops into launcher
      * mode without the page having to guess any of it. */
@@ -1124,7 +1131,7 @@ closeButton.addEventListener("click",async()=>{
     if(!window.confirm(ui.text("builder.close_confirm"))) return;
   }
   try {
-    await responseJSON(await fetch("close",{method:"POST"}));
+    await responseJSON(await fetchResponse("close",{method:"POST"}));
     showKey("idle","builder.closed");
     closed=true; polling=false; clearTimeout(previewTimer);
     document.dispatchEvent(new Event("workshop:closed"));

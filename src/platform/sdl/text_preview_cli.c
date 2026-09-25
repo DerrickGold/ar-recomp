@@ -5,6 +5,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef _WIN32
+#include <fcntl.h>
+#include <io.h>
+#endif
 
 #include "actraiser/actraiser_dialogue_window.h"
 #include "actraiser/actraiser_localization_credits.h"
@@ -713,6 +717,13 @@ int ArSdlTextPreview_Run(int argc, char **argv) {
                     "OUTPUT_DIRECTORY < scenario.bin\n");
     return 2;
   }
+#ifdef _WIN32
+  /* Lengths, colors and UTF-8 bytes must not undergo newline/EOF translation. */
+  if (_setmode(_fileno(stdin), _O_BINARY) == -1) {
+    fprintf(stderr, "text preview: cannot configure binary request input\n");
+    return 2;
+  }
+#endif
   Preview *p = calloc(1, sizeof(*p));
   if (!p)
     return 2;

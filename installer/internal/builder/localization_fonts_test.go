@@ -14,6 +14,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/DerrickGold/ar-recomp/installer/internal/fontprobe"
 	lk "github.com/DerrickGold/ar-recomp/installer/internal/localization"
 )
 
@@ -95,7 +96,7 @@ func TestLocalizationCoverageGatesPublicationAndInstallation(t *testing.T) {
 	q = locIdentity(app)
 	for _, endpoint := range []string{"install", "installation-check", "publish", "publication-check"} {
 		q.ConfirmRights = endpoint == "publish" || endpoint == "publication-check"
-		if body := locJSON(t, app, endpoint, q, 400).Body.String(); !strings.Contains(body, "U+65E5") {
+		if body := locJSON(t, app, endpoint, q, 422).Body.String(); !strings.Contains(body, "U+65E5") {
 			t.Fatal(endpoint, body)
 		}
 	}
@@ -124,11 +125,11 @@ func TestLocalizationCoverageGatesPublicationAndInstallation(t *testing.T) {
 	q = locIdentity(app)
 	q.ConfirmRights = true
 	locJSON(t, app, "publication-check", q, 200)
-	locJSON(t, app, "installation-check", locIdentity(app), 400)
+	locJSON(t, app, "installation-check", locIdentity(app), 422)
 	q.IncludeWIP = true
-	locJSON(t, app, "publication-check", q, 400)
+	locJSON(t, app, "publication-check", q, 422)
 	app.options.fontCoverageProbe = nil
-	if body := locJSON(t, app, "font-coverage", locIdentity(app), 400).Body.String(); !strings.Contains(body, "finish building") {
+	if body := locJSON(t, app, "font-coverage", locIdentity(app), 409).Body.String(); !strings.Contains(body, "finish building") {
 		t.Fatal(body)
 	}
 }
@@ -212,5 +213,29 @@ func TestLocalizationActualGameFontBackend(t *testing.T) {
 	}
 	if entries, err := os.ReadDir(dir); err != nil || len(entries) != 0 {
 		t.Fatal("headless command changed working directory", entries, err)
+	}
+}
+
+func TestLocalizationProbeFailuresDoNotInstallOrReplaceProject(t *testing.T) {
+	app := editableWorkflowFixture(t)
+	original := app.localization.current
+	app.options.fontCoverageProbe = func(context.Context, []lk.FontCoverageSource, []rune) (lk.FontCoverageProbeResult, error) {
+		return lk.FontCoverageProbeResult{}, fmt.Errorf("%w: record 1 for U+0041", fontprobe.ErrProtocol)
+	}
+	for _, endpoint := range []string{"install", "installation-check"} {
+		response := locJSON(t, app, endpoint, locIdentity(app), 500)
+		var body localizationErrorResponse
+		if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		if body.ErrorCode != "builder.errors.font_protocol" || body.RecoveryKey != "builder.recovery.font_protocol" {
+			t.Fatal(body)
+		}
+		if app.localization.current != original {
+			t.Fatal("font failure changed the project")
+		}
+	}
+	if _, err := os.Stat(filepath.Join(app.localizationRoot(), "packs", locIdentity(app).ProjectID)); !os.IsNotExist(err) {
+		t.Fatal("failed font check wrote installed files", err)
 	}
 }

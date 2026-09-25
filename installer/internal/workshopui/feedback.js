@@ -13,17 +13,38 @@
       .replace(/[A-Z]:\\Users\\[^\\\r\n]+/gi,"~")
       .replace(/\b(?:authorization|cookie|token|password|secret)\s*[:=]\s*[^\r\n]+/gi,"[sensitive field omitted]");
   }
-  async function readJSON(response){
+  // Classify only a failed fetch as a connection problem. A TypeError raised
+  // while rendering or processing a response is an application error.
+  async function request(input,options){
+    try { return await fetch(input,options); }
+    catch(error){
+      if(error?.name==="TypeError"){
+        const failure=new Error(text("connection","The connection to the local Builder was interrupted. Check its status before retrying."));
+        failure.code="AR_NETWORK";failure.detail=error.message;throw failure;
+      }
+      throw error;
+    }
+  }
+  function responseError(body,status){
+    const summary=typeof body?.error==="string"?body.error:text("failed","The operation could not be completed.");
+    const detail=typeof body?.detail==="string"?body.detail:summary;
+    const code=typeof body?.errorCode==="string"?body.errorCode:"AR_HTTP_"+status;
+    const known=code.startsWith("builder.")&&window.workshopI18n?.text(code,{},"");
+    const error=new Error(known?window.workshopI18n.text(code,{detail}):summary);
+    error.code=code;error.status=status;error.detail=detail;
+    if(known){error.uiKey=code;error.uiArgs={detail};}
+    if(typeof body?.recoveryKey==="string"&&body.recoveryKey.startsWith("builder.recovery."))
+      error.recoveryKey=body.recoveryKey;
+    return error;
+  }
+  async function readJSON(response,acceptedStatuses=[]){
     let body;
     try { body=await response.json();if(body===null||typeof body!=="object")throw new Error("invalid response"); }
     catch {
       const error=new Error(text("unreadable","The Builder returned an unreadable response. Check the details below before retrying."));
       error.code="AR_RESPONSE";error.status=response.status;throw error;
     }
-    if(!response.ok){
-      const error=new Error(typeof body?.error==="string"?body.error:text("failed","The operation could not be completed."));
-      error.code=body?.errorCode||"AR_HTTP_"+response.status;error.status=response.status;throw error;
-    }
+    if(!response.ok&&!acceptedStatuses.includes(response.status))throw responseError(body,response.status);
     return body;
   }
   function clear(target){
@@ -31,11 +52,12 @@
   }
   function show(target,error,options={}){
     if(!target)return;
-    const network=error instanceof TypeError||error?.code==="AR_NETWORK";
-    const detail=sanitize(error?.uiArgs?.detail||error?.message||error||"Unknown error");
+    const network=error?.code==="AR_NETWORK";
+    const detail=sanitize(error?.detail||error?.uiArgs?.detail||error?.message||error||"Unknown error");
     const code=error?.code||error?.status&&"AR_HTTP_"+error.status||(network?"AR_NETWORK":"AR_OPERATION");
     const version=document.querySelector('meta[name="workshop-version"]')?.content;
-    const report=["ActRaiserRecomp Workshop", "Operation: "+sanitize(options.operation||"Workshop"),
+    const report=["ActRaiserRecomp Workshop", "Operation: "+sanitize(error?.operation||options.operation||"Workshop"),
+      error?.outcome?"Outcome: "+sanitize(error.outcome):"",
       version?"Builder version: "+sanitize(version):"",
       "Code: "+sanitize(code), error?.status?"HTTP status: "+error.status:"",
       "Client: "+sanitize(navigator.userAgent||"unavailable"), "Details: "+detail,
@@ -45,7 +67,9 @@
     const card=document.createElement("section");card.className="workshop-feedback";
     const hint=document.createElement("p");label(hint,network?"connection":"help",network
       ?"The connection to the local Builder was interrupted. Check status again; save any open edits before closing or restarting."
-      :"Review the details below. If you need help, copy the report and include what you were trying to do. Save open edits before restarting.");
+      :"Keep your current work open. If the cause is unclear, copy this report for support and describe the action you were taking.");
+    if(error?.recoveryKey&&window.workshopI18n)
+      window.workshopI18n.set(hint,error.recoveryKey);
     const details=document.createElement("details"),summary=document.createElement("summary"),reportBox=document.createElement("textarea");
     label(summary,"details","Error details");reportBox.readOnly=true;reportBox.rows=8;reportBox.value="Recorded: "+new Date().toISOString()+"\n"+report;
     if(window.workshopI18n)window.workshopI18n.attribute(reportBox,"aria-label","builder.feedback.report");
@@ -76,5 +100,5 @@
     }
     card.append(hint,details,note,actions,status);target.after(card);cards.set(target,{card,report});
   }
-  window.workshopFeedback=Object.freeze({sanitize,readJSON,show,clear});
+  window.workshopFeedback=Object.freeze({sanitize,request,responseError,readJSON,show,clear});
 })();

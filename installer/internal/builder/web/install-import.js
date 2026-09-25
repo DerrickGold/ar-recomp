@@ -2,12 +2,14 @@
    browsers and desktop webviews. Paths and filenames are always text, not HTML. */
 (() => {
   "use strict";
+  const fetchResponse = (...args) => window.workshopFeedback?.request ?
+    window.workshopFeedback.request(...args) : fetch(...args);
   const ui=window.workshopI18n, node=id=>document.getElementById("import-install"+id);
   const dialog=node(""), open=node("-open"), source=node("-source"), candidates=node("-candidates"), status=node("-status");
   const confirm=node("-confirm"), apply=node("-apply"), details=node("-details"), files=node("-files"), reload=node("-reload");
   let plan=null, busy=false, exact=false, imported=false;
   async function request(endpoint,body){
-    const response=await fetch("installation-import/"+endpoint,body===undefined?{}:{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+    const response=await fetchResponse("installation-import/"+endpoint,body===undefined?{}:{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
     if(window.workshopFeedback)return window.workshopFeedback.readJSON(response);
     const value=await response.json(); if(!response.ok) throw new Error(value.error||String(response.status)); return value;
   }

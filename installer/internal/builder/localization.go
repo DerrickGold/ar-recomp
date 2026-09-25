@@ -3,7 +3,6 @@ package builder
 import (
 	"bytes"
 	_ "embed"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,8 +10,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	lk "github.com/DerrickGold/ar-recomp/installer/internal/localization"
 )
 
 // The GUI is an adapter over localization, not another script parser or ROM
@@ -154,16 +151,6 @@ func (app *application) serveLocalization(w http.ResponseWriter, r *http.Request
 	} else {
 		reply.write(w, r)
 	}
-}
-
-func writeLocalizationError(w http.ResponseWriter, err error) {
-	code := http.StatusBadRequest
-	key := "builder.language.request_failed"
-	if errors.Is(err, lk.ErrProjectConflict) {
-		code = http.StatusConflict
-		key = "builder.language.request_conflict"
-	}
-	writeJSON(w, code, map[string]string{"error": err.Error(), "errorCode": key})
 }
 
 // The prepared archive is immutable once published, so it is served from a

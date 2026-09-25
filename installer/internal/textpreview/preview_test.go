@@ -344,3 +344,41 @@ func lastFramePixels(t *testing.T, movie Movie) []byte {
 	draw.Draw(bitmap, bitmap.Bounds(), sheet, image.Pt(0, int(frame.Index)*movie.Height), draw.Src)
 	return bitmap.Pix
 }
+
+// Windows text-mode stdin interprets 0x1a as EOF and folds CRLF. Exercise both
+// in valid binary fields through the real worker, including on Windows runners.
+func TestGamePlaybackBinaryScenario(t *testing.T) {
+	binary := os.Getenv("AR_AUTHOR_TEXT_PREVIEW")
+	if binary == "" {
+		t.Skip("set AR_AUTHOR_TEXT_PREVIEW to the native worker or game")
+	}
+	root, err := filepath.Abs("../../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pack, err := lk.LoadAuthorPack(fstest.MapFS{
+		"pack.ini":            {Data: []byte(testManifest)},
+		"text/example.artext": {Data: []byte(":: dialogue.event.relay.aitos\n@layout flow\nA binary scenario.\n@end\n")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	scenario := Defaults()
+	scenario.Values["master_name"] = strings.Repeat("A", 26)
+	scenario.Inks["native:hud.body"] = "#0A0D1A"
+	encoded, err := encodeScenario(scenario)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(encoded, []byte{0x1a, 0x0d, 0x0a}) {
+		t.Fatal("fixture does not exercise Windows stream translation")
+	}
+	movie, err := Run(context.Background(), binary, filepath.Join(root, "game-assets/fonts/noto/NotoSans-SemiCondensedExtraBold.ttf"),
+		"dialogue.event.relay.aitos", pack, pack, scenario)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(movie.Frames) == 0 || movie.Frames[len(movie.Frames)-1].Kind != "end" {
+		t.Fatal("binary request did not finish playback")
+	}
+}

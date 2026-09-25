@@ -227,3 +227,21 @@ test("asset errors use stable actionable codes and retain raw details and pendin
   assert.equal(s.node("asset-state").textContent,s.ui.text("builder.assets.save_failed",{detail:"disk full: /tmp/<file>{detail}"}));
   assert.equal(s.rows[0].file.files,files);assert.equal(s.node("asset-bar").dataset.dirty,"true");
 });
+
+test("manual errors name removal and a successful install clears the previous report",async()=>{
+  const s=setupAssetApp(),reports=new Map();
+  s.context.window.workshopFeedback={clear:target=>reports.delete(target),show:(target,error,options)=>reports.set(target,{error,options}),readJSON:async response=>{
+    const body=await response.json();if(!response.ok)throw new Error(body.error);return body;
+  }};
+  s.context.FormData=class {};
+  s.context.fetch=async()=>({ok:false,json:async()=>({error:"Permission denied"})});
+  await s.node("manual-remove").fire("click");
+  assert.equal(reports.get(s.node("manual-message")).options.operation,"Remove manual");
+  s.node("manual-file").files=[{name:"book.pdf"}];
+  await s.node("manual-form").fire("submit",{preventDefault(){}});
+  assert.equal(reports.get(s.node("manual-message")).options.operation,"Install manual");
+  s.context.fetch=async()=>({ok:true,json:async()=>({present:true,bytes:128,pages:2,width:640,height:480})});
+  await s.node("manual-form").fire("submit",{preventDefault(){}});
+  assert.equal(reports.has(s.node("manual-message")),false);
+  assert.equal(s.node("manual-message").dataset.kind,"succeeded");
+});

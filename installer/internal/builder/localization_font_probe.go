@@ -2,7 +2,6 @@ package builder
 
 import (
 	"context"
-	"fmt"
 	"path/filepath"
 
 	"github.com/DerrickGold/ar-recomp/installer/internal/fontprobe"
@@ -18,7 +17,7 @@ func (app *application) probeLocalizationFonts(ctx context.Context, fonts []lk.F
 	binary, building := app.result.BinaryPath, app.state == "building"
 	app.mu.Unlock()
 	if binary == "" || building {
-		return lk.FontCoverageProbeResult{}, fmt.Errorf("finish building the game before checking font coverage or installing/exporting language packs")
+		return lk.FontCoverageProbeResult{}, errLocalizationBuildRequired
 	}
 	builtin := filepath.Join(app.options.ProjectRoot, "game-assets", "fonts", "noto", "NotoSans-SemiCondensedExtraBold.ttf")
 	return fontprobe.Run(ctx, binary, builtin, fonts, scalars)

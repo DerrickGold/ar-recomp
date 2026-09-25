@@ -3,6 +3,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef _WIN32
+#include <fcntl.h>
+#include <io.h>
+#endif
 
 #include "platform/sdl/text_rasterizer_sdl.h"
 #include "host/font_resources.h"
@@ -12,6 +16,13 @@ int ArSdlFontCoverage_Run(int argc, char **argv) {
     fprintf(stderr, "usage: %s FONT [FALLBACK ...] < scalars.txt\n", argv[0]);
     return 2;
   }
+#ifdef _WIN32
+  /* Keep the machine protocol identical when stdout is a Windows pipe. */
+  if (_setmode(_fileno(stdout), _O_BINARY) == -1) {
+    fprintf(stderr, "font coverage: cannot configure protocol output\n");
+    return 2;
+  }
+#endif
   ArHostFontResources store = {0};
   ArFontResourceId fonts[9] = {0};
   ArSdlTextRasterizer adapter = {0};

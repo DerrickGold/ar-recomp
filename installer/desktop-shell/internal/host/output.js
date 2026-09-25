@@ -1,9 +1,11 @@
 (() => {
   "use strict";
+  const fetchResponse = (...args) => window.workshopFeedback?.request ?
+    window.workshopFeedback.request(...args) : fetch(...args);
   const $=id=>document.getElementById(id);
   let plan=null, busy=false, saved=false, current="";
   async function request(endpoint, body) {
-    const response=await fetch(endpoint,body===undefined?{cache:"no-store"}:{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+    const response=await fetchResponse(endpoint,body===undefined?{cache:"no-store"}:{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
     if(window.workshopFeedback)return window.workshopFeedback.readJSON(response);
     const value=await response.json(); if(!response.ok)throw Error(value.error||String(response.status)); return value;
   }

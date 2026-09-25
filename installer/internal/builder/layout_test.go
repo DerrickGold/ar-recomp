@@ -78,10 +78,10 @@ func TestAssetsTabHasTitleToggleAndIdentifiedTrackPickers(t *testing.T) {
 			t.Errorf("Assets tab is missing %s", want)
 		}
 	}
-	if !strings.Contains(body, `fetch("assets",{method:"POST",body:new FormData(assetForm)})`) {
+	if !strings.Contains(body, `fetchResponse("assets",{method:"POST",body:new FormData(assetForm)})`) {
 		t.Error("Assets form is not wired to the save endpoint")
 	}
-	if !strings.Contains(body, `fetch(
+	if !strings.Contains(body, `fetchResponse(
       force?"audio-previews?force=1":"audio-previews",{method:"POST"})`) {
 		t.Error("original-audio extraction is not wired to the preview endpoint")
 	}

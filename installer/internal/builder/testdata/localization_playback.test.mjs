@@ -6,7 +6,9 @@ import {messages} from "./interface_dom.mjs";
 
 class Element {
   constructor(tag) {this.tagName=tag;this.children=[];this.listeners={};this.dataset={};this.style={};this.value="";this.textContent="";this.draws=[];}
-  append(...children) {this.children.push(...children);}
+  append(...children) {this.children.push(...children);for(const child of children)if(typeof child!=="string")child.parent=this;}
+  after(node) {this.parent.children.splice(this.parent.children.indexOf(this)+1,0,node);node.parent=this.parent;}
+  remove() {if(this.parent)this.parent.children.splice(this.parent.children.indexOf(this),1);}
   replaceChildren(...children) {this.children=[...children];}
   setAttribute(name,value) {this[name]=value;}
   addEventListener(name,action) {(this.listeners[name]??=[]).push(action);}
@@ -27,9 +29,10 @@ function setup() {
   let answer=async()=>({ok:true,json:async()=>response()});
   const ui={set(node,key,args={}) {node.textContent=this.text(key,args);}, unbind(){}, attribute(node,name,key){node.setAttribute(name,this.text(key));}, text(key,args={}) {let value=messages[key]?.[0]??key;for(const [name,text] of Object.entries(args)) value=value.replaceAll("{"+name+"}",String(text));return value;}};
   class Image {set src(value) {this.url=value;queueMicrotask(()=>this.onload());}}
-  const context={window:{workshopI18n:ui},document:{createElement:tag=>new Element(tag),createTextNode:text=>String(text),addEventListener:()=>{}},URL,location:{href:"http://localhost:1/secret/"},Image,AbortController,structuredClone,
+  const context={window:{workshopI18n:ui},navigator:{userAgent:"Playback test browser"},document:{querySelector:()=>null,createElement:tag=>new Element(tag),createTextNode:text=>String(text),addEventListener:()=>{}},URL,location:{href:"http://localhost:1/secret/"},Image,AbortController,structuredClone,
     performance:{now:()=>now},requestAnimationFrame:callback=>{const id=next++;animations.set(id,callback);return id;},cancelAnimationFrame:id=>animations.delete(id),
     fetch:async(url,options)=>{requests.push({url:String(url),...options});return answer(url,options);}};
+  runInNewContext(readFileSync(new URL("../../workshopui/feedback.js",import.meta.url),"utf8"),context);
   runInNewContext(readFileSync(new URL("../localization_playback.js",import.meta.url),"utf8"),context);
   const player=context.window.workshopPlayback.create(host,()=>({projectID:"pack",revision:"r1",id:"message.one",body:"Unsaved <i>words</i>",status:"wip"}),error=>errors.push(error));
   return {host,player,requests,errors,respond(fn){answer=fn;},tick(time){now=time;const callbacks=[...animations.values()];animations.clear();callbacks.forEach(fn=>fn(now));},button(text,index=0){return host.querySelectorAll("button").filter(b=>b.textContent===text)[index];}};
@@ -105,4 +108,19 @@ test("validating an edited message starts at page zero and retains scenario sett
  assert.equal(request.sourceScenario.page,0);
  assert.equal(request.scenario.size,140);
  for(const canvas of s.host.querySelectorAll("canvas")) assert.equal(canvas.draws.at(-1)[2],0);
+});
+
+
+test("playback reports response metadata and clears it after a successful retry",async()=>{
+ const s=setup();
+ s.respond(async()=>({ok:false,status:504,json:async()=>({error:"worker deadline",errorCode:"builder.errors.timeout",recoveryKey:"builder.recovery.timeout"})}));
+ await s.player.show();
+ const report=s.host.querySelectorAll("textarea").find(node=>node.readOnly);
+ assert.match(report.value,/Operation: Render language playback/);
+ assert.match(report.value,/Code: builder.errors.timeout/);
+ assert.match(report.value,/HTTP status: 504/);
+ assert.match(report.value,/Details: worker deadline/);
+ s.respond(async()=>({ok:true,json:async()=>response()}));
+ await s.player.show();
+ assert.equal(s.host.querySelectorAll("textarea").filter(node=>node.readOnly).length,0);
 });

@@ -2,6 +2,8 @@
  * displays its images and sends the same clock/input to independent timelines. */
 (() => {
   "use strict";
+  const fetchResponse = (...args) => window.workshopFeedback?.request ?
+    window.workshopFeedback.request(...args) : fetch(...args);
   window.workshopPlayback = {create};
 
   function create(host, capture, reportError, locateTemplate) {
@@ -141,6 +143,7 @@
       host.hidden = false;
       rebuild.disabled = true;
       bind(status, "rendering");
+      window.workshopFeedback?.clear(status);
       try {
         const body = {...capture()};
         const uploads = body.fontUploads || [];
@@ -159,10 +162,11 @@
           uploads.forEach(([, file], i) => payload.set("font" + i, file));
           headers = {};
         }
-        const response = await fetch(new URL("localization/playback", location.href), {
+        const response = await fetchResponse(new URL("localization/playback", location.href), {
           method: "POST", headers, body: payload, signal: abort.signal
         });
-        const next = await response.json();
+        const next = window.workshopFeedback?.readJSON ?
+          await window.workshopFeedback.readJSON(response) : await response.json();
         if (!response.ok) throw new Error(next.error || String(response.status));
         const images = await Promise.all([loadImages(next.source), loadImages(next.draft)]);
         if (ownGeneration !== generation || abort.signal.aborted) return;
@@ -183,6 +187,7 @@
         ui.unbind(status);
         status.textContent = error.message;
         reportError(error.message);
+        window.workshopFeedback?.show(status, error, {operation: "Render language playback"});
       } finally {
         if (ownGeneration === generation) {
           pending = null;

@@ -428,6 +428,8 @@ The shipped headless host protocol is `ActRaiserRecomp --font-coverage-v1 FONT
 [FALLBACK ...]`. It reads one hexadecimal Unicode scalar per stdin line and
 writes `HEX<TAB>0/1` per input line in order. Exit 0 means the query completed
 (inspect the 0/1 results); exit 2 means invalid input or an unavailable backend.
+The game writes LF endings; the builder also accepts CRLF from older Windows
+builds. Other whitespace, extra records and invalid coverage values are rejected.
 It opens no ROM, window, settings or save file. The builder supplies immutable
 private font snapshots and bounds input, output and run time. This adapter uses
 the same SDL3_ttf primary/fallback implementation as live text rendering.

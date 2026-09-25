@@ -20,6 +20,8 @@ class Element extends Node {
   set className(value){this.setAttribute("class",value);}
   append(...nodes){for(const n of nodes){this.content.push(n);if(typeof n!=="string")n.parent=this;}}
   appendChild(node){this.append(node);return node;}
+  after(node){const index=this.parent.content.indexOf(this);this.parent.content.splice(index+1,0,node);node.parent=this.parent;}
+  remove(){if(this.parent)this.parent.content.splice(this.parent.content.indexOf(this),1);}
   prepend(...nodes){this.content.unshift(...nodes);for(const n of nodes)if(typeof n!=="string")n.parent=this;}
   replaceChildren(...nodes){this.content=[];this.append(...nodes);}
   get options(){return this.querySelectorAll("option");}
@@ -83,6 +85,8 @@ function setupEditor(){
   s.doc.getElementById=id=>root.querySelector("#"+id)||originalGet(id);
   s.doc.createElement=tag=>{const node=new Element(tag);node.focus=()=>{s.doc.activeElement=node;};return node;};
   s.doc.createTextNode=text=>String(text);
+  s.doc.querySelector=selector=>root.querySelector(selector);
+  s.context.navigator={userAgent:"Workshop test browser"};
   const requests=[];const confirmations=[];
   let reply=async()=>{throw Error("unexpected request");};
   s.context.window.addEventListener=()=>{};
@@ -102,6 +106,7 @@ function setupEditor(){
     return reply(endpoint,data,Object.fromEntries(new URL(url).searchParams));
   }});
   s.ui.apply(root);
+  runInNewContext(readFileSync(new URL("../../workshopui/feedback.js",import.meta.url),"utf8"),s.context);
   runInNewContext(readFileSync(new URL("../localization_styling.js",import.meta.url),"utf8"),s.context);
   for (const name of ["localization_font_editor.js", "localization_library.js", "localization_import_editor.js", "localization.js"])
     runInNewContext(readFileSync(new URL("../" + name,import.meta.url),"utf8"),s.context);
@@ -1075,4 +1080,80 @@ test("invalid styling leaves drafts untouched; unsaved font roles are available"
  await s.node("font-role-remove").fire("click");
  assert.equal(s.node("style-font").value,"body");
  assert.ok(!s.node("style-font").options.some(o=>o.value==="quiet"));
+});
+
+test("failed font check preserves imported state, specific code and recovery without a second check",async()=>{
+  const s=setupEditor();importResponder(s);await s.doc.fire("drop",dragEvent(s));
+  const detail="invalid game font-check response: record 2";
+  s.response(async endpoint=>{
+    if(endpoint==="accept-import")return {ok:true,json:async()=>projectSnapshot()};
+    if(endpoint==="projects"||endpoint==="tree")return {ok:true,json:async()=>[]};
+    if(endpoint==="installation")return {ok:true,json:async()=>({installed:false})};
+    if(endpoint==="install")return {ok:false,status:500,json:async()=>({error:detail,errorCode:"builder.errors.font_protocol",recoveryKey:"builder.recovery.font_protocol"})};
+    throw Error("unexpected recovery request: "+endpoint);
+  });
+  await s.node("accept-import").fire("click");
+  assert.equal(s.node("feedback").textContent,s.ui.text("builder.language.import_partial",{detail:s.ui.text("builder.errors.font_protocol")}));
+  assert.equal(s.requests.filter(r=>r.endpoint==="install").length,1);
+  assert.equal(s.requests.filter(r=>r.endpoint==="installation-check").length,0);
+  const report=s.root.querySelector(".workshop-feedback textarea").value;
+  assert.match(report,/Code: builder.errors.font_protocol/);assert.match(report,/Operation: Install language pack/);
+  assert.match(report,/Outcome: Project imported into Workshop/);assert.ok(report.includes(detail));
+  for(const locale of ["fr","de","ja","en"]){
+    s.picker.value=locale;await s.picker.fire("change");
+    assert.equal(s.root.querySelector(".workshop-feedback p").textContent,s.ui.text("builder.recovery.font_protocol"));
+  }
+  assert.equal(s.node("install").disabled,false);
+});
+
+test("language errors retain server codes and malformed responses get a response code",async()=>{
+  for(const malformed of [false,true]){
+    const s=setupEditor();
+    s.response(async()=>({ok:false,status:409,json:async()=>{
+      if(malformed)throw new SyntaxError("Unexpected HTML");
+      return {error:"Project revision changed",errorCode:"builder.language.request_conflict"};
+    }}));
+    await s.context.window.localizationActivate();
+    const report=s.root.querySelector(".workshop-feedback textarea").value;
+    assert.match(report,malformed?/Code: AR_RESPONSE/:/Code: builder.language.request_conflict/);
+    assert.match(report,/Operation: Read language workspace/);
+    assert.doesNotMatch(report,/Unexpected HTML/);
+  }
+});
+
+test("connection loss after import reports an uncertain installation without retrying",async()=>{
+  const s=setupEditor();importResponder(s);await s.doc.fire("drop",dragEvent(s));
+  s.response(async endpoint=>{
+    if(endpoint==="accept-import")return {ok:true,json:async()=>projectSnapshot()};
+    if(endpoint==="projects"||endpoint==="tree")return {ok:true,json:async()=>[]};
+    if(endpoint==="installation")return {ok:true,json:async()=>({installed:false})};
+    if(endpoint==="install")throw new TypeError("Failed to fetch");
+    throw Error("unexpected endpoint "+endpoint);
+  });
+  await s.node("accept-import").fire("click");
+  assert.match(s.node("feedback").textContent,/Installation could not be confirmed/);
+  assert.equal(s.requests.filter(r=>r.endpoint==="install").length,1);
+  const report=s.root.querySelector(".workshop-feedback textarea").value;
+  assert.match(report,/Code: AR_NETWORK/);assert.match(report,/Outcome: .*could not be confirmed/);
+  assert.equal(s.node("install").disabled,false);
+});
+
+test("installation conflicts retain their original diagnostic when refreshing choices fails",async()=>{
+  const s=setupEditor();importResponder(s);await s.doc.fire("drop",dragEvent(s));
+  let reads=0;
+  s.response(async endpoint=>{
+    if(endpoint==="accept-import")return {ok:true,json:async()=>projectSnapshot()};
+    if(endpoint==="projects"||endpoint==="tree")return {ok:true,json:async()=>[]};
+    if(endpoint==="installation"){
+      if(++reads>1)throw new TypeError("status refresh lost connection");
+      return {ok:true,json:async()=>({installed:false})};
+    }
+    if(endpoint==="install")return {ok:false,status:409,json:async()=>({error:"Original installation conflict",errorCode:"builder.language.request_conflict",recoveryKey:"builder.recovery.conflict"})};
+    throw Error("unexpected endpoint "+endpoint);
+  });
+  await s.node("accept-import").fire("click");
+  const report=s.root.querySelector(".workshop-feedback textarea").value;
+  assert.match(report,/Original installation conflict/);assert.match(report,/Code: builder.language.request_conflict/);
+  assert.doesNotMatch(report,/lost connection/);
+  assert.equal(s.requests.filter(r=>r.endpoint==="installation-check").length,0);
 });

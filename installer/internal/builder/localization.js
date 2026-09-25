@@ -1,5 +1,7 @@
 (() => {
   "use strict";
+  const fetchResponse = (...args) => window.workshopFeedback?.request ?
+    window.workshopFeedback.request(...args) : fetch(...args);
   const ui = window.workshopI18n;
   const $ = id => document.getElementById("loc-" + id);
   const label = (id, key, args = {}) => ui.set($(id), key, args);
@@ -47,6 +49,7 @@
   }
   function failure(key, args = {}) {
     const error = new Error(ui.text(key, args));
+    error.code = key;
     error.uiKey = key;
     error.uiArgs = args;
     return error;
@@ -297,51 +300,88 @@
   function identity() {
     return {projectID: state.project?.metadata.id, revision: state.project?.revision};
   }
-  async function request(endpoint, data, query = {}) {
-    if (closed)
-      throw failure("builder.closed");
-    const url = new URL("localization/" + endpoint, location.href);
-    if (data === undefined)
-      for (const [key, value] of Object.entries(query))
-        url.searchParams.set(key, value);
-    const response = await fetch(url,
-      data === undefined         ? {cache: "no-store"} :
-        data instanceof FormData ? {method: "POST", body: data} :
-                                   {
-                                     method: "POST",
-                                     headers: {"Content-Type": "application/json"},
-                                     body: JSON.stringify(data)
-                                   });
-    if (closed)
-      throw failure("builder.closed");
+  const actionNames = {
+    state: "Read language workspace",
+    projects: "List language projects",
+    catalog: "List installed language packs",
+    open: "Open language project",
+    import: "Inspect language pack",
+    directory: "Inspect language pack folder",
+    "accept-import": "Import language project",
+    "choose-directory": "Choose language pack folder",
+    install: "Install language pack",
+    "installation-check": "Check language pack for installation",
+    installation: "Read language pack installation",
+    publish: "Export language pack",
+    "publication-check": "Check language pack for export",
+    "font-coverage": "Check language pack fonts",
+    save: "Save language project",
+    backup: "Back up language project",
+    uninstall: "Uninstall language pack",
+    "set-enabled": "Change language pack availability",
+    preview: "Validate translated message"
+  };
+  async function readResponse(response) {
+    if (window.workshopFeedback?.readJSON)
+      return window.workshopFeedback.readJSON(response);
+    const body = await response.json();
     if (!response.ok) {
-      let body;
-      try {
-        body = await response.json();
-      } catch {
-        body = {};
-      }
-      const key =
-        [
-          "builder.language.request_conflict", "builder.language.request_failed",
-          "builder.language.chooser_unavailable", "builder.language.chooser_failed",
-          "builder.language.chooser_busy"
-        ].includes(body.errorCode) ?
-        body.errorCode :
-        "builder.language.request_failed";
-      const error = failure(key, {detail: body.error || String(response.status)});
+      const error = failure(body.errorCode || "builder.language.request_failed", {detail: body.error});
       error.status = response.status;
+      error.detail = body.error;
+      error.recoveryKey = body.recoveryKey;
       throw error;
     }
-    return response;
+    return body;
+  }
+  async function request(endpoint, data, query = {}) {
+    try {
+      if (closed)
+        throw failure("builder.closed");
+      const url = new URL("localization/" + endpoint, location.href);
+      if (data === undefined)
+        for (const [key, value] of Object.entries(query))
+          url.searchParams.set(key, value);
+      const response = await fetchResponse(url,
+        data === undefined ? {cache: "no-store"} :
+        data instanceof FormData ? {method: "POST", body: data} : {
+          method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(data)
+        });
+      if (closed)
+        throw failure("builder.closed");
+      if (!response.ok)
+        await readResponse(response);
+      return response;
+    } catch (error) {
+      error.operation = actionNames[endpoint] || "Language editor: " + endpoint;
+      throw error;
+    }
   }
   async function json(endpoint, data, query) {
-    const response = await request(endpoint, data, query);
-    const result = await (
-      window.workshopFeedback ? window.workshopFeedback.readJSON(response) : response.json());
-    if (closed)
-      throw failure("builder.closed");
-    return result;
+    try {
+      const result = await readResponse(await request(endpoint, data, query));
+      if (closed)
+        throw failure("builder.closed");
+      return result;
+    } catch (error) {
+      error.operation = actionNames[endpoint] || "Language editor: " + endpoint;
+      throw error;
+    }
+  }
+  function reportFailure(error) {
+    feedbackKey(error.uiKey || "builder.language.request_failed",
+      error.uiArgs || {detail: error.message}, true);
+    window.workshopFeedback?.show($("feedback"), error, {operation: "Edit language project"});
+  }
+  function withOutcome(error, key, outcome) {
+    // Keep the underlying code, action and raw detail when adding a partial
+    // success message. Recovery must not repeat the operation that just failed.
+    error.detail ||= error.uiArgs?.detail || error.message;
+    error.uiArgs = {detail: error.message};
+    error.uiKey = key;
+    error.message = ui.text(key, error.uiArgs);
+    error.outcome = outcome;
+    return error;
   }
   function readonly() {
     if (closed)
@@ -365,6 +405,7 @@
     if (busy || closed)
       return;
     busy = true;
+    window.workshopFeedback?.clear($("feedback"));
     const controls =
       [...panel.querySelectorAll("button,input,textarea,select")]
         .filter(el => !el.closest("#loc-playback")).map(el => [el, el.disabled]);
@@ -375,9 +416,7 @@
       await action();
     } catch (error) {
       if (!closed) {
-        feedbackKey(error.uiKey || "builder.language.request_failed",
-          error.uiArgs || {detail: error.message}, true);
-        window.workshopFeedback?.show($("feedback"), error, {operation: "Language pack / editor"});
+        reportFailure(error);
       }
     } finally {
       for (const [el, disabled] of controls)
@@ -873,9 +912,10 @@
       try {
         await installCurrent(replaceInstall);
       } catch (error) {
-        await prepareReview("install");
-        throw failure(
-          "builder.language.import_partial", {detail: error.uiArgs?.detail || error.message});
+        const uncertain = error.code === "AR_NETWORK" || error.code === "AR_RESPONSE";
+        throw withOutcome(error,
+          uncertain ? "builder.language.import_uncertain" : "builder.language.import_partial",
+          "Project imported into Workshop; installation " + (uncertain ? "could not be confirmed." : "did not complete."));
       }
     } else
       feedbackKey("builder.language.imported_edit");
@@ -980,8 +1020,14 @@
       }
       await adopt(next, true);
       const update = next.installationUpdate;
-      if (update?.error)
-        feedbackKey("builder.language.saved_update_failed", {detail: update.error}, true);
+      if (update?.error) {
+        const error = window.workshopFeedback?.responseError ?
+          window.workshopFeedback.responseError(update, 200) :
+          failure(update.errorCode || "builder.language.request_failed", {detail: update.error});
+        error.operation = "Update installed language pack after saving";
+        reportFailure(withOutcome(error, "builder.language.saved_update_failed",
+          "Workshop project saved; installed copy was not updated."));
+      }
       else if (update?.updated)
         feedbackKey(update.enabled ? "builder.language.saved_installed" :
                                      "builder.language.saved_disabled");
@@ -1137,7 +1183,21 @@
   async function installCurrent(replace) {
     if (hasEdits())
       throw failure("builder.language.save_before_install");
-    const data = await json("install", {...identity(), replace});
+    let data;
+    try {
+      data = await json("install", {...identity(), replace});
+    } catch (error) {
+      if (error.code === "builder.language.request_conflict") {
+        try {
+          installedExists = !!(await json("installation", identity())).installed;
+          workflowView();
+        } catch {
+          // Refreshing the replacement choice is optional. Retain the original
+          // conflict if the read fails, and never rerun font validation here.
+        }
+      }
+      throw error;
+    }
     installedExists = true;
     $("installed-upgrade").hidden = !data.report.upgrade;
     label("publication-report", "builder.language.installed_report",
@@ -1157,13 +1217,7 @@
   $("install").addEventListener("click", () => run(async () => {
     if (installedExists && !$("replace-install").checked)
       throw failure("builder.language.confirm_replace");
-    try {
-      await installCurrent($("replace-install").checked);
-    } catch (error) {
-      if (error.status === 409)
-        await prepareReview("install");
-      throw error;
-    }
+    await installCurrent($("replace-install").checked);
   }));
   async function startWorkflow(kind) {
     if (!discard())

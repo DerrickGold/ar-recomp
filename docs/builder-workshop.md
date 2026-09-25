@@ -74,6 +74,19 @@ Forward return to sections without unloading the editor. Unsaved message text
 and file selections stay in place when changing sections, but are not durable
 browser drafts. Save before closing.
 
+When an action fails, follow the recovery guidance above **Error details**.
+**Copy error details** includes the action, error code and original diagnostic.
+Keep unsaved edits open while resolving the problem. An imported project can
+remain saved in Workshop even if installation fails; the error identifies that
+partial success. If the connection drops during installation, check the installed
+package before retrying because Workshop may not have received the result.
+
+For missing characters, open **Fonts → Check coverage**, add a suitable fallback
+font and save before retrying. An unexpected font-check response instead indicates
+a problem communicating with the game: keep the pack and include the report and
+game version when requesting support. Rebuild with the current Workshop if the
+game was built with an older version.
+
 Music search accepts translated track names, the original English names and
 manifest IDs such as `song-01`. Switching the interface language preserves the
 selected track, search text, pending files, per-level choices and audio playback.

@@ -8,10 +8,12 @@ import (
 )
 
 type localizationInstallationUpdate struct {
-	Installed bool   `json:"installed"`
-	Updated   bool   `json:"updated"`
-	Enabled   bool   `json:"enabled"`
-	Error     string `json:"error,omitempty"`
+	Installed   bool   `json:"installed"`
+	Updated     bool   `json:"updated"`
+	Enabled     bool   `json:"enabled"`
+	Error       string `json:"error,omitempty"`
+	ErrorCode   string `json:"errorCode,omitempty"`
+	RecoveryKey string `json:"recoveryKey,omitempty"`
 }
 
 // The author archive is already saved. An installation failure must report that
@@ -35,7 +37,8 @@ func (work *localizationWork) refreshSavedLocalization(ctx context.Context, p *l
 		}
 	}
 	if err != nil {
-		result.Error = err.Error()
+		failure, _ := describeLocalizationError(err)
+		result.Error, result.ErrorCode, result.RecoveryKey = failure.Error, failure.ErrorCode, failure.RecoveryKey
 	}
 	return result
 }

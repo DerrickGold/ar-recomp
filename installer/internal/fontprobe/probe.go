@@ -4,9 +4,8 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
-	lk "github.com/DerrickGold/ar-recomp/installer/internal/localization"
-	"github.com/DerrickGold/ar-recomp/installer/internal/subprocess"
 	"io"
 	"os"
 	"os/exec"
@@ -14,6 +13,17 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	lk "github.com/DerrickGold/ar-recomp/installer/internal/localization"
+	"github.com/DerrickGold/ar-recomp/installer/internal/subprocess"
+)
+
+// Callers can distinguish a worker failure from invalid pack contents without
+// parsing diagnostic text. Wrapped OS/context errors remain available too.
+var (
+	ErrProtocol    = errors.New("invalid game font-check response")
+	ErrUnavailable = errors.New("game font checker is unavailable")
+	ErrFailed      = errors.New("game font check failed")
 )
 
 // Do not buffer unlimited child output, even if an incompatible executable
@@ -25,7 +35,7 @@ type fontProbeOutput struct {
 
 func (w *fontProbeOutput) Write(data []byte) (int, error) {
 	if len(data) > w.remaining {
-		return 0, fmt.Errorf("font-backend output exceeds its protocol limit")
+		return 0, fmt.Errorf("%w: output exceeds its protocol limit", ErrProtocol)
 	}
 	w.remaining -= len(data)
 	return w.Buffer.Write(data)
@@ -57,7 +67,11 @@ func Run(ctx context.Context, binary, builtin string, fonts []lk.FontCoverageSou
 				return result, fmt.Errorf("bundled font unavailable: %w", err)
 			}
 			stat, err := f.Stat()
-			if err != nil || !stat.Mode().IsRegular() {
+			if err != nil {
+				f.Close()
+				return result, fmt.Errorf("bundled font unavailable: %w", err)
+			}
+			if !stat.Mode().IsRegular() {
 				f.Close()
 				return result, fmt.Errorf("bundled font is not a readable regular file")
 			}
@@ -84,7 +98,10 @@ func Run(ctx context.Context, binary, builtin string, fonts []lk.FontCoverageSou
 		digest := sha256.New()
 		copied, copyErr := io.Copy(io.MultiWriter(target, digest), io.LimitReader(input, size+1))
 		inputErr, closeErr := input.Close(), target.Close()
-		if copyErr != nil || inputErr != nil || closeErr != nil || copied != size {
+		if err := errors.Join(copyErr, inputErr, closeErr); err != nil {
+			return result, fmt.Errorf("could not snapshot font dependency %q: %w", font.Reference, err)
+		}
+		if copied != size {
 			return result, fmt.Errorf("could not snapshot font dependency %q", font.Reference)
 		}
 		result.Fonts = append(result.Fonts, lk.FontCoverageIdentity{Reference: font.Reference, SHA256: fmt.Sprintf("%x", digest.Sum(nil))})
@@ -109,22 +126,40 @@ func Run(ctx context.Context, binary, builtin string, fonts []lk.FontCoverageSou
 		if ctx.Err() != nil {
 			return result, fmt.Errorf("font check cancelled or timed out: %w", ctx.Err())
 		}
-		return result, fmt.Errorf("game font check failed (rebuild if the game predates font checking): %s: %w", strings.TrimSpace(stderr.String()), err)
+		if errors.Is(err, ErrProtocol) {
+			return result, err
+		}
+		var startError *os.PathError
+		if errors.As(err, &startError) {
+			return result, fmt.Errorf("%w: %w", ErrUnavailable, err)
+		}
+		return result, fmt.Errorf("%w: %s: %w", ErrFailed, strings.TrimSpace(stderr.String()), err)
 	}
-	lines := strings.Split(strings.TrimSuffix(stdout.String(), "\n"), "\n")
-	if len(scalars) == 0 && stdout.Len() == 0 {
-		lines = nil
+	result.Provided, err = parseResponse(stdout.String(), scalars)
+	return result, err
+}
+
+func parseResponse(output string, scalars []rune) ([]bool, error) {
+	lines := strings.SplitAfter(output, "\n")
+	if lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
 	}
 	if len(lines) != len(scalars) {
-		return result, fmt.Errorf("incomplete game font-check response")
+		return nil, fmt.Errorf("%w: expected %d records, received %d", ErrProtocol, len(scalars), len(lines))
 	}
+	provided := make([]bool, 0, len(scalars))
 	for i, line := range lines {
+		// Windows text-mode stdout emits CRLF. Remove only the line ending;
+		// spaces, extra fields and stray carriage returns remain invalid.
+		if strings.HasSuffix(line, "\n") {
+			line = strings.TrimSuffix(strings.TrimSuffix(line, "\n"), "\r")
+		}
 		hex, covered, found := strings.Cut(line, "\t")
 		value, err := strconv.ParseUint(hex, 16, 32)
 		if !found || err != nil || rune(value) != scalars[i] || (covered != "0" && covered != "1") {
-			return result, fmt.Errorf("invalid game font-check response")
+			return nil, fmt.Errorf("%w: record %d for U+%04X contains %q", ErrProtocol, i+1, scalars[i], line[:min(len(line), 80)])
 		}
-		result.Provided = append(result.Provided, covered == "1")
+		provided = append(provided, covered == "1")
 	}
-	return result, nil
+	return provided, nil
 }

@@ -13,11 +13,11 @@ class Node {
   focus(){this.focused=true;}
   select(){this.selected=true;}
 }
-function setup(clipboard){
+function setup(clipboard, fetch=async()=>{throw new TypeError("Failed to fetch");}){
   const window={},document={createElement:tag=>new Node(tag),querySelector:()=>({content:"test-version"})};
   const navigator={userAgent:"Test webview",clipboard};
-  runInNewContext(readFileSync(new URL("feedback.js",import.meta.url),"utf8"),{window,document,navigator,TypeError,Error,Date});
-  return {api:window.workshopFeedback,target:new Node("p")};
+  runInNewContext(readFileSync(new URL("feedback.js",import.meta.url),"utf8"),{window,document,navigator,TypeError,Error,Date,fetch});
+  return {api:window.workshopFeedback,target:new Node("p"),window};
 }
 const find=(node,tag)=>node.children.flatMap(child=>[...(child.tag===tag?[child]:[]),...find(child,tag)]);
 test("reports strip session addresses, tokens and home names without changing payload hashes",()=>{
@@ -49,7 +49,7 @@ test("clipboard denial selects the report for manual copy without losing the err
 });
 test("status retries are explicit and errors without a safe retry do not offer one",async()=>{
   const {api,target}=setup();let retries=0;
-  api.show(target,new TypeError("Failed to fetch"),{retry:async()=>{retries++;}});assert.equal(retries,0);
+  api.show(target,Object.assign(new Error("Failed to fetch"),{code:"AR_NETWORK"}),{retry:async()=>{retries++;}});assert.equal(retries,0);
   assert.match(target.next.children[0].textContent,/connection/);
   await find(target.next,"button")[1].events.click();assert.equal(retries,1);
   api.show(target,new Error("import failed"));assert.equal(find(target.next,"button").length,1);
@@ -60,4 +60,37 @@ test("a failed status recheck remains visible without an unhandled rejection",as
   await find(target.next,"button")[1].events.click();
   assert.match(find(target.next,"textarea")[0].value,/still offline/);
   assert.equal(find(target.next,"button")[1].disabled,false);
+});
+
+test("only fetch failures are classified as network errors; cancellation is retained",async()=>{
+  const {api,target}=setup();
+  await assert.rejects(api.request("status"),error=>error.code==="AR_NETWORK");
+  api.show(target,new TypeError("Cannot read properties of undefined"));
+  assert.doesNotMatch(target.next.children[0].textContent,/connection/);
+  assert.match(find(target.next,"textarea")[0].value,/Code: AR_OPERATION/);
+  const abort=Object.assign(new Error("cancelled"),{name:"AbortError"});
+  const cancelled=setup(undefined,async()=>{throw abort;});
+  await assert.rejects(cancelled.api.request("status"),error=>error===abort);
+});
+
+test("structured errors keep localized guidance, raw details, exact action and partial outcome",async()=>{
+  const {api,target,window}=setup();
+  window.workshopI18n={text:(key,args,fallback)=>key==="builder.errors.font_protocol"?"Font check failed":fallback,
+    set:(node,key)=>{node.textContent=key;},attribute(){}};
+  const error=api.responseError({error:"invalid response: record 2",errorCode:"builder.errors.font_protocol",recoveryKey:"builder.recovery.font_protocol"},500);
+  assert.equal(error.message,"Font check failed");assert.equal(error.detail,"invalid response: record 2");
+  assert.equal(error.uiKey,"builder.errors.font_protocol");
+  error.operation="Install language pack";error.outcome="Project imported; installation failed.";
+  api.show(target,error,{operation:"Language editor"});
+  const report=find(target.next,"textarea")[0].value;
+  assert.match(report,/Operation: Install language pack/);assert.match(report,/Outcome: Project imported/);
+  assert.match(report,/Code: builder.errors.font_protocol/);assert.match(report,/Details: invalid response: record 2/);
+  assert.equal(target.next.children[0].textContent,"builder.recovery.font_protocol");
+  assert.equal(api.responseError({error:"Readable fallback",errorCode:"builder.unknown"},400).uiKey,undefined);
+});
+
+test("expected conflict responses remain available to explicit confirmation flows",async()=>{
+  const {api}=setup();const body={code:"replace_required",release:"jp"};
+  assert.equal(await api.readJSON({status:409,ok:false,json:async()=>body},[409]),body);
+  await assert.rejects(api.readJSON({status:500,ok:false,json:async()=>({error:"failed"})},[409]),error=>error.status===500);
 });
