@@ -33,8 +33,10 @@ bool ArRegionalMedia_Parse(const void *data,size_t size,ArRegionalMediaView *out
     if(Read32(record)!=definition->id || Read32(record+4)!=cursor ||
         Read32(record+8)!=definition->size || definition->size>size-cursor)return false;
     uint8_t digest[32];
-    if(!sr_support_sha256(p+cursor,definition->size,digest) || memcmp(digest,expected,32))return false;
-    candidate.entries[candidate.count++]=(ArRegionalMediaEntry){definition->id,{p+cursor,definition->size}};
+    if (!sr_support_sha256(p + cursor, definition->size, digest) || memcmp(digest, expected, 32))
+      return false;
+    candidate.entries[candidate.count++] =
+        (ArRegionalMediaEntry){ definition->id, { p + cursor, definition->size } };
     cursor+=definition->size;
   }
   if(candidate.count!=p[11] || cursor!=size)return false;

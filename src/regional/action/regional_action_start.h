@@ -21,6 +21,8 @@ typedef struct ArRegionalActionStartSnapshot {
 } ArRegionalActionStartSnapshot;
 const ArRegionalActionStartDescriptor *ArRegionalActionStart_Descriptor(unsigned rule);
 bool ArRegionalActionStart_Init(ArRegionalActionStartPolicy *policy,ArRegionalSource source);
-bool ArRegionalActionStart_Resolve(const ArRegionalActionStartPolicy *policy,ArRegionalActionStartSnapshot *snapshot);
-bool ArRegionalActionStart_GroupSource(const ArRegionalActionStartPolicy *policy,ArRegionalSource *source);
+bool ArRegionalActionStart_Resolve(const ArRegionalActionStartPolicy *policy,
+                                   ArRegionalActionStartSnapshot *snapshot);
+bool ArRegionalActionStart_GroupSource(const ArRegionalActionStartPolicy *policy,
+                                       ArRegionalSource *source);
 #endif

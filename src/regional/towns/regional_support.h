@@ -14,12 +14,20 @@ typedef enum ArRegionalSupportRule {
   kArRegionalSupport_Other,
   kArRegionalSupport_Count
 } ArRegionalSupportRule;
-typedef struct ArRegionalSupportPolicy { ArRegionalSource source[kArRegionalSupport_Count]; } ArRegionalSupportPolicy;
-typedef struct ArRegionalSupportSnapshot { uint16_t amount[kArRegionalSupport_Count]; } ArRegionalSupportSnapshot;
-typedef struct ArRegionalSupportDescriptor { const char *key; uint16_t amount[kArRegionalSource_Count]; } ArRegionalSupportDescriptor;
+typedef struct ArRegionalSupportPolicy {
+  ArRegionalSource source[kArRegionalSupport_Count];
+} ArRegionalSupportPolicy;
+typedef struct ArRegionalSupportSnapshot {
+  uint16_t amount[kArRegionalSupport_Count];
+} ArRegionalSupportSnapshot;
+typedef struct ArRegionalSupportDescriptor {
+  const char *key;
+  uint16_t amount[kArRegionalSource_Count];
+} ArRegionalSupportDescriptor;
 const ArRegionalSupportDescriptor *ArRegionalSupport_Descriptor(ArRegionalSupportRule rule);
 bool ArRegionalSupport_Init(ArRegionalSupportPolicy *policy,ArRegionalSource source);
-bool ArRegionalSupport_Resolve(const ArRegionalSupportPolicy *policy,ArRegionalSupportSnapshot *snapshot);
+bool ArRegionalSupport_Resolve(const ArRegionalSupportPolicy *policy,
+                               ArRegionalSupportSnapshot *snapshot);
 bool ArRegionalSupport_Valid(const ArRegionalSupportSnapshot *snapshot);
 bool ArRegionalSupport_GroupSource(const ArRegionalSupportPolicy *policy,ArRegionalSource *source);
 #endif

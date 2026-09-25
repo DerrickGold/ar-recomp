@@ -18,7 +18,8 @@ bool ArRegionalSimAi_Init(ArRegionalSimAiPolicy *policy,ArRegionalSource source)
   for (unsigned i=0;i<kArRegionalSimAi_Count;++i) policy->source[i]=source;
   return true;
 }
-bool ArRegionalSimAi_Resolve(const ArRegionalSimAiPolicy *policy,ArRegionalSimAiSnapshot *snapshot) {
+bool ArRegionalSimAi_Resolve(const ArRegionalSimAiPolicy *policy,
+                             ArRegionalSimAiSnapshot *snapshot) {
   if (!policy || !snapshot) return false;
   uint16_t next=0;
   for (unsigned i=0;i<kArRegionalSimAi_Count;++i) {

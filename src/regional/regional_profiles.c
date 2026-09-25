@@ -83,9 +83,10 @@ static bool VisitRegionalSource(Visit *visit, ArRegionalSource *field, ArRegiona
   if ((unsigned)*field >= kArRegionalSource_Count ||
       (visit->other && (unsigned)other >= kArRegionalSource_Count))
     return false;
-  const unsigned scopes[] = {group, (ArRegionalProfiles_Mask(kArRegionalProfile_Gameplay) & (1u << group))
-                                        ? kArRegionalProfile_Gameplay
-                                        : kArRegionalProfile_Presentation};
+  const unsigned scopes[] = { group,
+                              (ArRegionalProfiles_Mask(kArRegionalProfile_Gameplay) & (1u << group))
+                                  ? kArRegionalProfile_Gameplay
+                                  : kArRegionalProfile_Presentation };
   for (unsigned i = 0; i < 2; ++i) {
     ArRegionalProfileSummary *s = &visit->summary[scopes[i]];
     if (!s->members) {
@@ -285,12 +286,14 @@ bool ArRegionalProfiles_Changes(const ArRegionalRules *a, const ArRegionalRules 
   if (!ArRegionalDifficulty_Resolve(&a->difficulty, &x) ||
       !ArRegionalDifficulty_Resolve(&b->difficulty, &y))
     return false;
-  if (x.timer_reload != y.timer_reload || x.spawn_hp != y.spawn_hp || x.contact_extra != y.contact_extra ||
-      x.skip_dragon_attack != y.skip_dragon_attack || x.single_tendril_bob != y.single_tendril_bob)
+  if (x.timer_reload != y.timer_reload || x.spawn_hp != y.spawn_hp ||
+      x.contact_extra != y.contact_extra || x.skip_dragon_attack != y.skip_dragon_attack ||
+      x.single_tendril_bob != y.single_tendril_bob)
     visit.changes |= 1u << kArRegionalProfile_Difficulty;
   /* EU placement markers also consume the level, including later waves. */
   if (a->difficulty.level != b->difficulty.level &&
-      (a->placements.enemies == kArRegionalSource_Europe || b->placements.enemies == kArRegionalSource_Europe))
+      (a->placements.enemies == kArRegionalSource_Europe ||
+       b->placements.enemies == kArRegionalSource_Europe))
     visit.changes |= (1u << kArRegionalProfile_Difficulty) | (1u << kArRegionalProfile_Stage);
   *groups = visit.changes;
   return true;

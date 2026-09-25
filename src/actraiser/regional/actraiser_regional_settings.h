@@ -81,8 +81,9 @@ typedef struct ActRaiserRegionalChoiceView {
   bool pending;
 } ActRaiserRegionalChoiceView;
 /* Pure display projection; no UI labels, mutable session or native memory. */
-void ActRaiserRegionalSettings_DescribeChoices(const ArRegionalRules *requested,
-    const ArRegionalRules *effective, ActRaiserRegionalChoiceView out[kActRaiserRegionalSetting_Count]);
+void ActRaiserRegionalSettings_DescribeChoices(
+    const ArRegionalRules *requested, const ArRegionalRules *effective,
+    ActRaiserRegionalChoiceView out[kActRaiserRegionalSetting_Count]);
 
 /* Game-thread settings boundary. UI gets value copies and an optimistic edit
  * token, never a session pointer, CPU/WRAM, or save-path ownership. Only the

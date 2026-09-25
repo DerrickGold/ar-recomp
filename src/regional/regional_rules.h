@@ -119,15 +119,22 @@ static inline bool ArRegionalRules_PopulationCompatible(const ArRegionalRules *r
       !ArRegionalLevelGoals_Resolve(rules->level_goals,&japanese)) return false;
   bool reduced=false;
   for (unsigned i=0;i<kArRegionalSupport_Count;++i)
-    reduced |= support.amount[i] < ArRegionalSupport_Descriptor((ArRegionalSupportRule)i)->amount[kArRegionalSource_US];
-  return !reduced || (japanese &&
-      story.value[kArRegionalStory_FillmoreHint]==ArRegionalStory_Descriptor(kArRegionalStory_FillmoreHint)->value[kArRegionalSource_Japan] &&
-      story.value[kArRegionalStory_KasandoraTablet]==ArRegionalStory_Descriptor(kArRegionalStory_KasandoraTablet)->value[kArRegionalSource_Japan]);
+    reduced |= support.amount[i] <
+        ArRegionalSupport_Descriptor((ArRegionalSupportRule)i)->amount[kArRegionalSource_US];
+  return !reduced ||
+      (japanese &&
+       story.value[kArRegionalStory_FillmoreHint] ==
+           ArRegionalStory_Descriptor(kArRegionalStory_FillmoreHint)
+               ->value[kArRegionalSource_Japan] &&
+       story.value[kArRegionalStory_KasandoraTablet] ==
+           ArRegionalStory_Descriptor(kArRegionalStory_KasandoraTablet)
+               ->value[kArRegionalSource_Japan]);
 }
 
 /* One mapping for activation, observation and replay identity. The retained
  * projection bits remain feature-codec details, never rule-field ordinals. */
-static inline ArRegionalLairAccounting ArRegionalRules_LairAccounting(const ArRegionalRules *rules) {
+static inline ArRegionalLairAccounting
+ArRegionalRules_LairAccounting(const ArRegionalRules *rules) {
   ArRegionalLairAccounting result;
   result.seeds=rules->lair_seeds;
   result.house_credit=rules->house_credit;
@@ -136,7 +143,8 @@ static inline ArRegionalLairAccounting ArRegionalRules_LairAccounting(const ArRe
   result.score_route=rules->score_feedback.source[kArRegionalScore_Route];
   return result;
 }
-static inline bool ArRegionalRules_SameAccounting(const ArRegionalRules *a, const ArRegionalRules *b) {
+static inline bool ArRegionalRules_SameAccounting(const ArRegionalRules *a,
+                                                  const ArRegionalRules *b) {
   if (a->lair_seeds!=b->lair_seeds || a->house_credit!=b->house_credit) return false;
   /* Phase is captured by the completion owner, not by a town stock switch. */
   for (unsigned i=0; i<kArRegionalScore_Phase; ++i)

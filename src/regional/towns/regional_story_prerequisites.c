@@ -17,7 +17,8 @@ bool ArRegionalStory_Init(ArRegionalStoryPolicy *policy, ArRegionalSource source
   for (unsigned i=0;i<kArRegionalStory_Count;++i) policy->source[i]=source;
   return true;
 }
-bool ArRegionalStory_Resolve(const ArRegionalStoryPolicy *policy, ArRegionalStorySnapshot *snapshot) {
+bool ArRegionalStory_Resolve(const ArRegionalStoryPolicy *policy,
+                             ArRegionalStorySnapshot *snapshot) {
   if (!policy || !snapshot) return false;
   ArRegionalStorySnapshot next;
   for (unsigned i=0;i<kArRegionalStory_Count;++i) {
@@ -34,7 +35,8 @@ bool ArRegionalStory_GroupSource(const ArRegionalStoryPolicy *policy, ArRegional
   if (uniform) { *source=policy->source[0]; return true; }
   for (unsigned candidate=0;candidate<kArRegionalSource_Count;++candidate) {
     bool equal=true;
-    for (unsigned i=0;i<kArRegionalStory_Count;++i) equal &= snapshot.value[i]==kRules[i].value[candidate];
+    for (unsigned i = 0; i < kArRegionalStory_Count; ++i)
+      equal &= snapshot.value[i] == kRules[i].value[candidate];
     if (equal) { *source=(ArRegionalSource)candidate; return true; }
   }
   return false;

@@ -7,15 +7,21 @@
  * simulation numeric rules". All European difficulties share these prices;
  * this does not equate their inventory, enemies or other gameplay rules. */
 static const ArRegionalCostDescriptor kCosts[kArRegionalCostRule_Count] = {
-  [kArRegionalCost_Fire]       = {"scroll_fire",       kArRegionalCostGroup_Scrolls,  {1, 1, 1}},
-  [kArRegionalCost_Stardust]   = {"scroll_stardust",   kArRegionalCostGroup_Scrolls,  {1, 2, 1}},
-  [kArRegionalCost_Aura]       = {"scroll_aura",       kArRegionalCostGroup_Scrolls,  {1, 3, 1}},
-  [kArRegionalCost_Light]      = {"scroll_light",      kArRegionalCostGroup_Scrolls,  {1, 4, 1}},
-  [kArRegionalCost_Lightning]  = {"miracle_lightning", kArRegionalCostGroup_Miracles, {10, 12, 10}},
-  [kArRegionalCost_Rain]       = {"miracle_rain",      kArRegionalCostGroup_Miracles, {20, 16, 20}},
-  [kArRegionalCost_Sunlight]   = {"miracle_sunlight",  kArRegionalCostGroup_Miracles, {30, 18, 30}},
-  [kArRegionalCost_Wind]       = {"miracle_wind",      kArRegionalCostGroup_Miracles, {80, 24, 80}},
-  [kArRegionalCost_Earthquake] = {"miracle_earthquake", kArRegionalCostGroup_Miracles, {160, 60, 160}},
+  [kArRegionalCost_Fire] = { "scroll_fire", kArRegionalCostGroup_Scrolls, { 1, 1, 1 } },
+  [kArRegionalCost_Stardust] = { "scroll_stardust", kArRegionalCostGroup_Scrolls, { 1, 2, 1 } },
+  [kArRegionalCost_Aura] = { "scroll_aura", kArRegionalCostGroup_Scrolls, { 1, 3, 1 } },
+  [kArRegionalCost_Light] = { "scroll_light", kArRegionalCostGroup_Scrolls, { 1, 4, 1 } },
+  [kArRegionalCost_Lightning] = { "miracle_lightning",
+                                  kArRegionalCostGroup_Miracles,
+                                  { 10, 12, 10 } },
+  [kArRegionalCost_Rain] = { "miracle_rain", kArRegionalCostGroup_Miracles, { 20, 16, 20 } },
+  [kArRegionalCost_Sunlight] = { "miracle_sunlight",
+                                 kArRegionalCostGroup_Miracles,
+                                 { 30, 18, 30 } },
+  [kArRegionalCost_Wind] = { "miracle_wind", kArRegionalCostGroup_Miracles, { 80, 24, 80 } },
+  [kArRegionalCost_Earthquake] = { "miracle_earthquake",
+                                   kArRegionalCostGroup_Miracles,
+                                   { 160, 60, 160 } },
 };
 
 _Static_assert(kArRegionalCostRule_Count <= 16, "cost preview mask capacity");

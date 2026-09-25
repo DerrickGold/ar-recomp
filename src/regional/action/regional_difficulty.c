@@ -28,18 +28,26 @@ bool ArRegionalDifficulty_Resolve(const ArRegionalDifficultyPolicy *policy,
     if ((unsigned)policy->source[i] >= kArRegionalSource_Count) return false;
   const bool beginner=policy->level==kArRegionalDifficulty_Beginner;
   const bool expert=policy->level==kArRegionalDifficulty_Expert;
-  *snapshot=(ArRegionalDifficultySnapshot){
-    .spawn_hp=policy->source[kArRegionalDifficulty_SpawnHp]==kArRegionalSource_Europe ?
-        (uint8_t)(1u+policy->level) : 0,
-    .contact_extra=policy->source[kArRegionalDifficulty_Contact]==kArRegionalSource_Europe && expert,
-    .timer_reload=policy->source[kArRegionalDifficulty_Countdown]==kArRegionalSource_Europe ?
-        (beginner?71:expert?47:59) : 59,
-    .skip_dragon_attack=policy->source[kArRegionalDifficulty_DragonAttack]==kArRegionalSource_Europe && beginner,
-    .single_tendril_bob=policy->source[kArRegionalDifficulty_PlantTendril]==kArRegionalSource_Europe && beginner,
+  *snapshot = (ArRegionalDifficultySnapshot){
+    .spawn_hp = policy->source[kArRegionalDifficulty_SpawnHp] == kArRegionalSource_Europe
+        ? (uint8_t)(1u + policy->level)
+        : 0,
+    .contact_extra =
+        policy->source[kArRegionalDifficulty_Contact] == kArRegionalSource_Europe && expert,
+    .timer_reload = policy->source[kArRegionalDifficulty_Countdown] == kArRegionalSource_Europe
+        ? (beginner     ? 71
+               : expert ? 47
+                        : 59)
+        : 59,
+    .skip_dragon_attack =
+        policy->source[kArRegionalDifficulty_DragonAttack] == kArRegionalSource_Europe && beginner,
+    .single_tendril_bob =
+        policy->source[kArRegionalDifficulty_PlantTendril] == kArRegionalSource_Europe && beginner,
   };
   return true;
 }
-bool ArRegionalDifficulty_GroupSource(const ArRegionalDifficultyPolicy *policy, ArRegionalSource *source) {
+bool ArRegionalDifficulty_GroupSource(const ArRegionalDifficultyPolicy *policy,
+                                      ArRegionalSource *source) {
   ArRegionalDifficultySnapshot snapshot;
   if (!source || !ArRegionalDifficulty_Resolve(policy,&snapshot)) return false;
   bool uniform=true, native=true;
@@ -64,7 +72,8 @@ ArRegionalDifficultyChoice ArRegionalDifficulty_Choice(const ArRegionalDifficult
     default: return kArRegionalDifficultyChoice_Custom;
   }
 }
-bool ArRegionalDifficulty_Select(ArRegionalDifficultyChoice choice, ArRegionalDifficultyPolicy *out) {
+bool ArRegionalDifficulty_Select(ArRegionalDifficultyChoice choice,
+                                 ArRegionalDifficultyPolicy *out) {
   if ((unsigned)choice >= kArRegionalDifficultyChoice_Count) return false;
   const ArRegionalDifficulty level = choice == kArRegionalDifficultyChoice_Beginner
       ? kArRegionalDifficulty_Beginner : choice == kArRegionalDifficultyChoice_Expert

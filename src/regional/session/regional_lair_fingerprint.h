@@ -4,8 +4,10 @@
 #include "regional/towns/regional_lair_history.h"
 #include "regional/towns/regional_lair_reloads.h"
 
-bool ArRegionalLairReloads_Fingerprint(const uint8_t prior[32], const ArRegionalLairReloads *history,
-    ArRegionalSource requested, ArRegionalSource effective, uint8_t out[32], bool *native);
+bool ArRegionalLairReloads_Fingerprint(const uint8_t prior[32],
+                                       const ArRegionalLairReloads *history,
+                                       ArRegionalSource requested, ArRegionalSource effective,
+                                       uint8_t out[32], bool *native);
 
 /* Chain onto the other gameplay rules. Numerical US/Europe projections preserve
  * the prior digest exactly: their inactive histories cannot affect a replay

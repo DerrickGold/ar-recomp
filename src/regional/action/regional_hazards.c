@@ -2,7 +2,10 @@
 #include <stddef.h>
 
 typedef struct HazardStream { const uint8_t (*boxes)[5]; unsigned count; } HazardStream;
-typedef struct HazardRoom { uint16_t scene; HazardStream streams[kArRegionalSource_Count]; } HazardRoom;
+typedef struct HazardRoom {
+  uint16_t scene;
+  HazardStream streams[kArRegionalSource_Count];
+} HazardRoom;
 #include "regional/action/regional_hazards_data.inc"
 
 static const ArRegionalHazardDescriptor kDescriptor = {"terrain_hazards", {0,1,2}};

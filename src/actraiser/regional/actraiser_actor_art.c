@@ -37,11 +37,13 @@ void ActRaiserActorArt_Shutdown(void) {
   s_donor=(ArRegionalActorArtView){0};
   s_residency=(ArRegionalActorArtResidency){0};
   s_pictures[0]=s_pictures[1]=(ArRegionalMediaBytes){0};
-  s_active=s_selected=false;s_load.scene=0;
+  s_active = s_selected = false;
+  s_load.scene = 0;
   s_load.boundary=s_load.captured=s_load.enabled=false;
 }
 void ActRaiserActorArt_BeginRoom(uint16_t scene) {
-  s_load.scene=scene;s_load.captured=s_load.enabled=false;
+  s_load.scene = scene;
+  s_load.captured = s_load.enabled = false;
   // The 13 act-entry scripts replace the ordinary animation bank. Other
   // rooms may change only the boss atlas, retaining ordinary graphics and
   // their shared palette. Do not activate a new region in that partial load.
@@ -49,7 +51,9 @@ void ActRaiserActorArt_BeginRoom(uint16_t scene) {
 }
 static const ArRegionalActorArtBinding *UploadBinding(uint16_t scene,
     ArRegionalActorArtKind kind,unsigned slot,uint32_t source) {
-  if(scene!=s_load.scene || (kind!=kArRegionalActorArt_Characters && kind!=kArRegionalActorArt_Palette))return NULL;
+  if (scene != s_load.scene ||
+      (kind != kArRegionalActorArt_Characters && kind != kArRegionalActorArt_Palette))
+    return NULL;
   const ArRegionalActorArtBinding *binding=ArRegionalActorArt_Binding(scene,kind,slot);
   return binding && binding->source==source?binding:NULL;
 }
@@ -73,7 +77,8 @@ bool ActRaiserActorArt_Upload(uint16_t scene,ArRegionalActorArtKind kind,
     if(s_load.boundary &&
         !ActRaiserRegional_ActorArtwork((scene&255)-1,true,&s_load.enabled))return false;
     s_selected=s_load.enabled;
-    s_load.captured=true;s_active=s_load.enabled && s_donor.count;
+    s_load.captured = true;
+    s_active = s_load.enabled && s_donor.count;
   }
   if(!s_active) {*out=(ArRegionalMediaBytes){0};return true;}
   const ArRegionalMediaBytes bytes=ArRegionalActorArt_Find(&s_donor,scene,kind,slot);
@@ -89,7 +94,8 @@ bool ActRaiserActorArt_Draw(uint16_t base,uint16_t composition,unsigned visual,
   unsigned donor_visual=visual;
   if(binding->scene==0x0405 && binding->slot==0 && visual==0x36)donor_visual=0x2c;
   ActRaiserActorArtDraw result={0};
-  if(!ArRegionalActorArt_Picture(s_pictures[binding->slot],donor_visual,&result.picture))return false;
+  if (!ArRegionalActorArt_Picture(s_pictures[binding->slot], donor_visual, &result.picture))
+    return false;
   // This body's height/cardinality and the closed head's anchor are already
   // governed by B19. Donor art may change attributes, never undo that choice.
   result.attributes_only=binding->scene==0x0305 && binding->slot==1;

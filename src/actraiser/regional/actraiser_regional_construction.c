@@ -25,7 +25,9 @@ static RecompReturn Run(CpuState *cpu, RecompReturn (*native)(CpuState *)) {
   return result;
 }
 RecompReturn ActRaiser_RegionalConstruction(CpuState *cpu) { return Run(cpu, bank_03_82DB_M0X0); }
-RecompReturn ActRaiser_RegionalOffscreenConstruction(CpuState *cpu) { return Run(cpu, bank_03_84B9_M0X0); }
+RecompReturn ActRaiser_RegionalOffscreenConstruction(CpuState *cpu) {
+  return Run(cpu, bank_03_84B9_M0X0);
+}
 bool ActRaiser_RegionalConstructionPriceEntry(CpuState *cpu) {
   return s_active && s_japanese && ActRaiserTownStatus_Entry(cpu, true);
 }
@@ -40,6 +42,12 @@ static RecompReturn Price(CpuState *cpu, uint32_t target, uint32_t origin) {
     ActRaiserHleFatal("Construction price prefix has no native continuation");
   return RECOMP_RETURN_TAILCALL;
 }
-RecompReturn ActRaiser_RegionalConstructionBudget(CpuState *cpu) { return Price(cpu, 0x038544, 0x03853b); }
-RecompReturn ActRaiser_RegionalConstructionPayment(CpuState *cpu) { return Price(cpu, 0x03842e, 0x038425); }
-RecompReturn ActRaiser_RegionalConstructionReturn(CpuState *cpu) { return Price(cpu, 0x038497, 0x03848e); }
+RecompReturn ActRaiser_RegionalConstructionBudget(CpuState *cpu) {
+  return Price(cpu, 0x038544, 0x03853b);
+}
+RecompReturn ActRaiser_RegionalConstructionPayment(CpuState *cpu) {
+  return Price(cpu, 0x03842e, 0x038425);
+}
+RecompReturn ActRaiser_RegionalConstructionReturn(CpuState *cpu) {
+  return Price(cpu, 0x038497, 0x03848e);
+}

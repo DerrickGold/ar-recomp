@@ -49,7 +49,8 @@ bool ArRegionalBoss_Resolve(const ArRegionalBossPolicy *policy,ArRegionalBossSna
   for(unsigned i=0;i<kArRegionalBoss_Count;++i) {
     if((unsigned)policy->source[i]>=kArRegionalSource_Count)return false;
     const uint16_t value=kRules[i].value[policy->source[i]];
-    unsigned canonical=0;while(kRules[i].value[canonical]!=value)++canonical;
+    unsigned canonical = 0;
+    while (kRules[i].value[canonical] != value) ++canonical;
     result|=(uint64_t)canonical<<(2*i);
   }
   *snapshot=result;return true;
@@ -62,10 +63,12 @@ uint16_t ArRegionalBoss_Value(ArRegionalBossSnapshot snapshot,unsigned rule) {
   return source<kArRegionalSource_Count?kRules[rule].value[source]:UINT16_MAX;
 }
 bool ArRegionalBoss_GroupSource(const ArRegionalBossPolicy *policy,ArRegionalSource *source) {
-  uint64_t snapshot;if(!source || !ArRegionalBoss_Resolve(policy,&snapshot))return false;
+  uint64_t snapshot;
+  if (!source || !ArRegionalBoss_Resolve(policy, &snapshot)) return false;
   for(unsigned region=0;region<kArRegionalSource_Count;++region) {
     bool match=true;
-    for(unsigned i=0;i<kArRegionalBoss_Count;++i)match&=ArRegionalBoss_Value(snapshot,i)==kRules[i].value[region];
+    for (unsigned i = 0; i < kArRegionalBoss_Count; ++i)
+      match &= ArRegionalBoss_Value(snapshot, i) == kRules[i].value[region];
     if(match){*source=(ArRegionalSource)region;return true;}
   }
   return false;
@@ -83,18 +86,23 @@ bool ArRegionalBoss_MinoRow(ArRegionalBossSnapshot snapshot,unsigned state,unsig
   if(next==UINT16_MAX || *duration!=kRules[rule].value[0])return false;
   *duration=next;return true;
 }
-bool ArRegionalBoss_IceSkip(ArRegionalBossSnapshot snapshot,unsigned state,unsigned row,unsigned *next) {
+bool ArRegionalBoss_IceSkip(ArRegionalBossSnapshot snapshot, unsigned state, unsigned row,
+                            unsigned *next) {
   if(!next || ArRegionalBoss_Value(snapshot,kArRegionalBoss_IceWindup)!=106 ||
       !((state==17 && row==5) || (state==18 && row==6)))return false;
   *next=row+2;return true;
 }
 bool ArRegionalBoss_PharaohSkip(ArRegionalBossSnapshot snapshot,bool rematch,
     unsigned state,unsigned row,unsigned *next) {
-  if(!next || state!=11 || row!=10 || ArRegionalBoss_Value(snapshot,
-      rematch?kArRegionalBoss_PharaohRematchLanding:kArRegionalBoss_PharaohLanding)!=24)return false;
+  if (!next || state != 11 || row != 10 ||
+      ArRegionalBoss_Value(snapshot,
+                           rematch ? kArRegionalBoss_PharaohRematchLanding
+                                   : kArRegionalBoss_PharaohLanding) != 24)
+    return false;
   *next=11;return true;
 }
-bool ArRegionalBoss_PlantPhase(ArRegionalBossSnapshot snapshot,unsigned previous,ArRegionalPlantPhase *next) {
+bool ArRegionalBoss_PlantPhase(ArRegionalBossSnapshot snapshot, unsigned previous,
+                               ArRegionalPlantPhase *next) {
   if(!next || ArRegionalBoss_Value(snapshot,kArRegionalBoss_PlantCycle)!=1)return false;
   switch(previous) {
     case 0:case 20:*next=(ArRegionalPlantPhase){1,1};return true;
@@ -104,8 +112,11 @@ bool ArRegionalBoss_PlantPhase(ArRegionalBossSnapshot snapshot,unsigned previous
     default:return false;
   }
 }
-bool ArRegionalBoss_PlantOpenRow(ArRegionalBossSnapshot snapshot,unsigned row,unsigned *native_row,uint8_t *visual) {
-  if(!native_row || !visual || row>4 || ArRegionalBoss_Value(snapshot,kArRegionalBoss_PlantOpen)!=16)return false;
+bool ArRegionalBoss_PlantOpenRow(ArRegionalBossSnapshot snapshot, unsigned row,
+                                 unsigned *native_row, uint8_t *visual) {
+  if (!native_row || !visual || row > 4 ||
+      ArRegionalBoss_Value(snapshot, kArRegionalBoss_PlantOpen) != 16)
+    return false;
   static const uint8_t rows[]={0,0,1,0,2},poses[]={2,3,4,3,255};
   *native_row=rows[row];*visual=poses[row];return true;
 }
@@ -140,8 +151,11 @@ bool ArRegionalBoss_TanzraRow(ArRegionalBossSnapshot snapshot,unsigned state,uns
   if(value==UINT16_MAX || *duration!=kRules[rule].value[0])return false;
   *duration=value;return true;
 }
-bool ArRegionalBoss_TanzraMinionSkip(ArRegionalBossSnapshot snapshot,unsigned state,unsigned row,unsigned *next) {
-  if(!next || ArRegionalBoss_Value(snapshot,kArRegionalBoss_TanzraMinionTurn)!=8 || state!=22 || row)return false;
+bool ArRegionalBoss_TanzraMinionSkip(ArRegionalBossSnapshot snapshot, unsigned state, unsigned row,
+                                     unsigned *next) {
+  if (!next || ArRegionalBoss_Value(snapshot, kArRegionalBoss_TanzraMinionTurn) != 8 ||
+      state != 22 || row)
+    return false;
   *next=2;return true;
 }
 bool ArRegionalBoss_DragonRow(ArRegionalBossSnapshot snapshot,unsigned state,unsigned row,
@@ -152,11 +166,13 @@ bool ArRegionalBoss_DragonRow(ArRegionalBossSnapshot snapshot,unsigned state,uns
   if(next!=15)return false;
   *duration=next;return true;
 }
-bool ArRegionalBoss_ViperRow(ArRegionalBossSnapshot snapshot,bool rematch,unsigned state,unsigned row,
-    uint8_t visual,uint16_t *duration,int16_t dx,int16_t *dy) {
+bool ArRegionalBoss_ViperRow(ArRegionalBossSnapshot snapshot, bool rematch, unsigned state,
+                             unsigned row, uint8_t visual, uint16_t *duration, int16_t dx,
+                             int16_t *dy) {
   if(!duration || !dy)return false;
   if(state>=4 && state<=6 && !row) {
-    const unsigned rule=rematch?kArRegionalBoss_ViperRematchLightning:kArRegionalBoss_ViperLightning;
+    const unsigned rule =
+        rematch ? kArRegionalBoss_ViperRematchLightning : kArRegionalBoss_ViperLightning;
     static const uint8_t visuals[]={17,25,26};
     const int velocity=rematch?8:4;
     if(visual!=visuals[state-4] || *duration!=(rematch?10:21) ||
@@ -167,8 +183,10 @@ bool ArRegionalBoss_ViperRow(ArRegionalBossSnapshot snapshot,bool rematch,unsign
   }
   if(!rematch && (state==8 || state==9) && row>=6 && row<=9 && !dx &&
       visual==(state==8?27:16) && ArRegionalBoss_Value(snapshot,kArRegionalBoss_ViperFloor)==15) {
-    static const uint8_t us_delay[]={1,1,1,15},us_dy[]={1,2,4,6},pal_delay[]={2,1,1,7},pal_dy[]={2,4,8,10};
-    const unsigned i=row-6;if(*duration!=us_delay[i] || *dy!=us_dy[i])return false;
+    static const uint8_t us_delay[] = { 1, 1, 1, 15 }, us_dy[] = { 1, 2, 4, 6 },
+                         pal_delay[] = { 2, 1, 1, 7 }, pal_dy[] = { 2, 4, 8, 10 };
+    const unsigned i = row - 6;
+    if (*duration != us_delay[i] || *dy != us_dy[i]) return false;
     *duration=pal_delay[i];*dy=pal_dy[i];return true;
   }
   return false;

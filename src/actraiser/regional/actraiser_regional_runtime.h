@@ -6,7 +6,8 @@
 
 /* After SaveSystem Attach/Load, before the first CPU dispatch. */
 bool ActRaiserRegional_Initialize(ArRegionalCampaignIdentity identity, void *context);
-bool ActRaiserRegional_InitializeSlot(uint32_t slot,ArRegionalCampaignIdentity identity,void *context);
+bool ActRaiserRegional_InitializeSlot(uint32_t slot, ArRegionalCampaignIdentity identity,
+                                      void *context);
 bool ActRaiserRegional_StageNewGame(const ArRegionalSession *draft);
 /* Interactive host only. Recording/replay keeps its session-only behavior.
  * Called on confirmed edits, before publishing them; false rolls the edit back. */
@@ -23,7 +24,9 @@ typedef enum ActRaiserRegionalPopulationNotice {
  * six towns. The host does not receive a CPU, session or transaction pointer.
  * Only Confirm consumes the boolean response; other notices acknowledge. */
 typedef bool (*ActRaiserRegionalPopulationPrompt)(void *context,
-    ActRaiserRegionalPopulationNotice notice,ArRegionalSource source,bool gameplay_profile,const uint16_t removed[6]);
+                                                  ActRaiserRegionalPopulationNotice notice,
+                                                  ArRegionalSource source, bool gameplay_profile,
+                                                  const uint16_t removed[6]);
 void ActRaiserRegional_SetPopulationPrompt(ActRaiserRegionalPopulationPrompt prompt,void *context);
 bool ActRaiser_RegionalPopulationEntry(CpuState *cpu);
 RecompReturn ActRaiser_RegionalPopulation(CpuState *cpu);
@@ -85,7 +88,8 @@ bool ActRaiserRegional_BeginSpell(uint8_t *spell);
 bool ActRaiserRegional_FinishSpell(void);
 void ActRaiserRegional_InventoryIconUploaded(void);
 bool ActRaiserRegional_ActorStatsEnabled(void);
-bool ActRaiserRegional_ActorStats(uint16_t actor,uint16_t native_hp,uint16_t native_attack,uint16_t *hp,uint16_t *attack);
+bool ActRaiserRegional_ActorStats(uint16_t actor, uint16_t native_hp, uint16_t native_attack,
+                                  uint16_t *hp, uint16_t *attack);
 /* Cached child value by semantic rule ID; UINT16_MAX before room activation
  * or for a non-child rule. No session or native memory exposed to callers. */
 uint16_t ActRaiserRegional_ActorChildStat(unsigned rule);
@@ -97,7 +101,8 @@ typedef enum ActRaiserRegionalContinueNotice {
 /* Host presents a localized, cancellable decision while suspending the game
  * coroutine. No renderer, SDL types or save paths cross this boundary. True
  * means acknowledge/retry; false means return to the unchanged title menu. */
-typedef bool (*ActRaiserRegionalContinuePrompt)(void *context, ActRaiserRegionalContinueNotice notice);
+typedef bool (*ActRaiserRegionalContinuePrompt)(void *context,
+                                                ActRaiserRegionalContinueNotice notice);
 void ActRaiserRegional_SetContinuePrompt(ActRaiserRegionalContinuePrompt prompt, void *context);
 bool ActRaiser_RegionalContinueEntry(CpuState *cpu);
 RecompReturn ActRaiser_RegionalContinue(CpuState *cpu);

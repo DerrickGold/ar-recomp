@@ -32,8 +32,10 @@ bool ArRegionalActorArt_ObserveDecode(ArRegionalActorArtResidency *residency,
     ArRegionalActorArtResidentBank *bank=&residency->banks[slot];
     if(!bank->binding)continue;
     const unsigned base=0x4000+slot*0x1000;
-    if(Overlap(destination,decoded.size,base,base+bank->binding->table+2u*bank->binding->pictures)) {
-      bank->binding=NULL;continue;
+    if (Overlap(destination, decoded.size, base,
+                base + bank->binding->table + 2u * bank->binding->pictures)) {
+      bank->binding = NULL;
+      continue;
     }
     for(unsigned v=0;v<bank->binding->pictures;++v)
       if(Overlap(destination,decoded.size,bank->begin[v],bank->end[v]))bank->valid[v]=0;
@@ -44,7 +46,8 @@ bool ArRegionalActorArt_ObserveDecode(ArRegionalActorArtResidency *residency,
   for(size_t i=0;i<sizeof(kActorBindings)/sizeof(kActorBindings[0]);++i) {
     const ArRegionalActorArtBinding *r=&kActorBindings[i];
     if(r->kind==kArRegionalActorArt_Pictures && r->slot==slot && r->source==source) {
-      binding=r;break;
+      binding = r;
+      break;
     }
   }
   if(!binding || decoded.size!=binding->size || decoded.size<2 ||
@@ -57,12 +60,15 @@ bool ArRegionalActorArt_ObserveDecode(ArRegionalActorArtResidency *residency,
     const unsigned at=Read16(decoded.data+binding->table+v*2);
     if(at<first || at>decoded.size || decoded.size-at<5)return false;
     const unsigned count=decoded.data[at+4],end=at+5+count*7;
-    if(!count || count>kArRegionalActorArt_MaximumParts || end>decoded.size || destination+end>0xffff)return false;
+    if (!count || count > kArRegionalActorArt_MaximumParts || end > decoded.size ||
+        destination + end > 0xffff)
+      return false;
     candidate.begin[v]=(uint16_t)(destination+at);
     candidate.end[v]=(uint16_t)(destination+end);
     candidate.valid[v]=1;
   }
-  residency->banks[slot]=candidate;return true;
+  residency->banks[slot] = candidate;
+  return true;
 }
 const ArRegionalActorArtBinding *ArRegionalActorArt_Resident(
     const ArRegionalActorArtResidency *residency,uint16_t base,

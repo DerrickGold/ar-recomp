@@ -23,10 +23,13 @@ bool ArRegionalSpellInventory_Push(ArRegionalSpellInventory *inventory,unsigned 
   return true;
 }
 bool ArRegionalSpellInventory_BeginCast(ArRegionalSpellInventory *inventory,uint8_t *spell) {
-  if(!inventory || !spell || !inventory->enabled || !inventory->count || inventory->casting)return false;
+  if (!inventory || !spell || !inventory->enabled || !inventory->count || inventory->casting)
+    return false;
   const uint8_t top=inventory->spells[inventory->count-1];
   if(!top || top>4)return false;
-  inventory->casting=top;*spell=top;return true;
+  inventory->casting = top;
+  *spell = top;
+  return true;
 }
 bool ArRegionalSpellInventory_FinishCast(ArRegionalSpellInventory *inventory) {
   if(!inventory || !inventory->enabled || !inventory->casting)return false;

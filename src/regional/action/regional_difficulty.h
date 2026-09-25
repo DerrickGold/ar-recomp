@@ -36,7 +36,8 @@ typedef enum ArRegionalDifficultyChoice {
   kArRegionalDifficultyChoice_Custom = kArRegionalDifficultyChoice_Count,
 } ArRegionalDifficultyChoice;
 ArRegionalDifficultyChoice ArRegionalDifficulty_Choice(const ArRegionalDifficultyPolicy *policy);
-bool ArRegionalDifficulty_Select(ArRegionalDifficultyChoice choice, ArRegionalDifficultyPolicy *out);
+bool ArRegionalDifficulty_Select(ArRegionalDifficultyChoice choice,
+                                 ArRegionalDifficultyPolicy *out);
 typedef struct ArRegionalDifficultyDescriptor {
   const char *key;
   uint16_t value[kArRegionalSource_Count];
@@ -52,7 +53,8 @@ bool ArRegionalDifficulty_Init(ArRegionalDifficultyPolicy *policy, ArRegionalSou
     ArRegionalDifficulty level);
 bool ArRegionalDifficulty_Resolve(const ArRegionalDifficultyPolicy *policy,
     ArRegionalDifficultySnapshot *snapshot);
-bool ArRegionalDifficulty_GroupSource(const ArRegionalDifficultyPolicy *policy, ArRegionalSource *source);
+bool ArRegionalDifficulty_GroupSource(const ArRegionalDifficultyPolicy *policy,
+                                      ArRegionalSource *source);
 /* Stable semantic encoding used for replay identity; does not encode labels. */
 uint8_t ArRegionalDifficulty_Identity(const ArRegionalDifficultySnapshot *snapshot);
 /* Transforms selected base stats at birth. Native mode promotion remains the

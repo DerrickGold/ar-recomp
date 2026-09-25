@@ -31,22 +31,39 @@ RecompReturn ActRaiserRegionalTownStatus_Run(CpuState *cpu, RecompReturn (*nativ
   s_active=false;
   return result;
 }
-RecompReturn ActRaiser_RegionalTownStatusCycle(CpuState *cpu) { return ActRaiserRegionalTownStatus_Run(cpu,bank_03_82DB_M0X0); }
-RecompReturn ActRaiser_RegionalTownStatusPlot(CpuState *cpu) { return ActRaiserRegionalTownStatus_Run(cpu,bank_03_91AE_M0X0); }
-RecompReturn ActRaiser_RegionalTownStatusVisiblePlot(CpuState *cpu) { return ActRaiserRegionalTownStatus_Run(cpu,bank_03_91BC_M0X0); }
+RecompReturn ActRaiser_RegionalTownStatusCycle(CpuState *cpu) {
+  return ActRaiserRegionalTownStatus_Run(cpu, bank_03_82DB_M0X0);
+}
+RecompReturn ActRaiser_RegionalTownStatusPlot(CpuState *cpu) {
+  return ActRaiserRegionalTownStatus_Run(cpu, bank_03_91AE_M0X0);
+}
+RecompReturn ActRaiser_RegionalTownStatusVisiblePlot(CpuState *cpu) {
+  return ActRaiserRegionalTownStatus_Run(cpu, bank_03_91BC_M0X0);
+}
 RecompReturn ActRaiser_RegionalTownStatusReport(CpuState *cpu) {
   return ActRaiserRegionalTownStatus_Run(cpu,cpu->m_flag?bank_03_BF8C_M1X0:bank_03_BF8C_M0X0);
 }
 static bool Selected(CpuState *cpu, ArRegionalTownStatusRule rule, bool indexed) {
   return s_active && s_snapshot.japanese[rule] && ActRaiserTownStatus_Entry(cpu,indexed);
 }
-bool ActRaiser_RegionalTownStatusLowEntry(CpuState *cpu) { return Selected(cpu,kArRegionalTownStatus_LowGrowth,true); }
-bool ActRaiser_RegionalTownStatusPlotCountEntry(CpuState *cpu) { return Selected(cpu,kArRegionalTownStatus_PlotCount,true); }
-bool ActRaiser_RegionalTownStatusMergeEntry(CpuState *cpu) { return Selected(cpu,kArRegionalTownStatus_PersistentFlags,true); }
-bool ActRaiser_RegionalTownStatusFoodEntry(CpuState *cpu) { return Selected(cpu,kArRegionalTownStatus_FoodAttempt,false); }
-bool ActRaiser_RegionalTownStatusClassifierEntry(CpuState *cpu) { return Selected(cpu,kArRegionalTownStatus_Classifier,true); }
+bool ActRaiser_RegionalTownStatusLowEntry(CpuState *cpu) {
+  return Selected(cpu, kArRegionalTownStatus_LowGrowth, true);
+}
+bool ActRaiser_RegionalTownStatusPlotCountEntry(CpuState *cpu) {
+  return Selected(cpu, kArRegionalTownStatus_PlotCount, true);
+}
+bool ActRaiser_RegionalTownStatusMergeEntry(CpuState *cpu) {
+  return Selected(cpu, kArRegionalTownStatus_PersistentFlags, true);
+}
+bool ActRaiser_RegionalTownStatusFoodEntry(CpuState *cpu) {
+  return Selected(cpu, kArRegionalTownStatus_FoodAttempt, false);
+}
+bool ActRaiser_RegionalTownStatusClassifierEntry(CpuState *cpu) {
+  return Selected(cpu, kArRegionalTownStatus_Classifier, true);
+}
 static RecompReturn Tail(bool valid, uint32_t target, uint32_t source) {
-  if (!valid || !cpu_hle_tailcall_request(target,source)) ActRaiserHleFatal("Town status prefix has no native continuation");
+  if (!valid || !cpu_hle_tailcall_request(target, source))
+    ActRaiserHleFatal("Town status prefix has no native continuation");
   return RECOMP_RETURN_TAILCALL;
 }
 RecompReturn ActRaiser_RegionalTownStatusLow(CpuState *cpu) {

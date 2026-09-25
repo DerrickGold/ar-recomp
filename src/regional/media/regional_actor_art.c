@@ -60,7 +60,8 @@ bool ArRegionalActorArt_Parse(ArRegionalMediaBytes bytes,ArRegionalActorArtView 
         break;
       default:return false;
     }
-    previous=Key(record);cursor+=size;
+    previous = Key(record);
+    cursor += size;
   }
   if(cursor!=bytes.size)return false;
   *out=(ArRegionalActorArtView){bytes,count};return true;
@@ -90,17 +91,23 @@ bool ArRegionalActorArt_Picture(ArRegionalMediaBytes table,unsigned ordinal,
     ArRegionalActorArtPicture *out) {
   if(!table.data || !out || table.size<12)return false;
   const unsigned count=Read16(table.data);
-  if(count>kArRegionalActorArt_MaximumPictures || ordinal>=count || table.size<4u+4u*(count+1))return false;
+  if (count > kArRegionalActorArt_MaximumPictures || ordinal >= count ||
+      table.size < 4u + 4u * (count + 1))
+    return false;
   const size_t start=Read32(table.data+4+ordinal*4),end=Read32(table.data+8+ordinal*4);
-  if(start<4u+4u*(count+1) || start>table.size || end>table.size || end<start || end-start<4)return false;
+  if (start < 4u + 4u * (count + 1) || start > table.size || end > table.size || end < start ||
+      end - start < 4)
+    return false;
   const unsigned parts=Read16(table.data+start);
   if(!parts || parts>kArRegionalActorArt_MaximumParts || end-start!=4u+12u*parts)return false;
   *out=(ArRegionalActorArtPicture){{table.data+start+4,12u*parts},parts};return true;
 }
 bool ArRegionalActorArt_Part(const ArRegionalActorArtPicture *picture,unsigned index,
     ArRegionalActorArtPart *out) {
-  if(!picture || !out || !picture->parts.data || index>=picture->count ||
-      picture->count>kArRegionalActorArt_MaximumParts || picture->parts.size!=12u*picture->count)return false;
+  if (!picture || !out || !picture->parts.data || index >= picture->count ||
+      picture->count > kArRegionalActorArt_MaximumParts ||
+      picture->parts.size != 12u * picture->count)
+    return false;
   const uint8_t *p=picture->parts.data+12*index;
   *out=(ArRegionalActorArtPart){{Signed16(p+2),Signed16(p+4)},
       {Signed16(p+6),Signed16(p+8)},Read16(p+10),p[0]!=0};

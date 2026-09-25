@@ -139,13 +139,15 @@ static bool Commit(void *context, SaveFileFormat format, const char *path,
   } else if (kind == kSaveCommit_Import) {
     if(!import_source)return Fail(error,"missing campaign import source");
     if(import_source->archive && import_source->payload_size) {
-      if(ArRegionalSession_Decode(import_source->payload,import_source->payload_size,&session)!=kSaveCheckpoint_Ready)
+      if (ArRegionalSession_Decode(import_source->payload, import_source->payload_size, &session) !=
+          kSaveCheckpoint_Ready)
         return Fail(error,"invalid or unsupported archived campaign");
       /* Slot placement changes, but campaign identity, region history and
        * the exact randomizer recipe remain the archived campaign's own. */
       session.slot=campaign->slot;
     } else if(import_source->archive) {
-      ArRegionalCostPolicy baseline;ArRegionalCosts_Init(&baseline,kArRegionalSource_US);
+      ArRegionalCostPolicy baseline;
+      ArRegionalCosts_Init(&baseline, kArRegionalSource_US);
       if(!Create(campaign,&baseline,&session,error))return false;
     } else if(!LoadOrAdopt(campaign,import_source->path,image,&session,error))return false;
   } else {
@@ -192,12 +194,17 @@ static bool ReadCampaign(void *context,const char *path,const uint8_t *image,
   SaveCheckpointStatus status=ArRegionalSession_Load(&session,campaign->slot,path,image,error);
   if(status==kSaveCheckpoint_Missing){*size=0;return true;}
   if(status!=kSaveCheckpoint_Ready)return false;
-  if(!ArRegionalSession_Encode(&session,payload,capacity,size))return Fail(error,"cannot archive campaign metadata");
+  if (!ArRegionalSession_Encode(&session, payload, capacity, size))
+    return Fail(error, "cannot archive campaign metadata");
   return true;
 }
 
 SaveCommitHost ArRegionalCampaign_SaveHost(ArRegionalCampaign *campaign) {
   if (!campaign) return (SaveCommitHost){0};
-  return (SaveCommitHost){.context = campaign, .prepare_story = Prepare,
-      .commit = Commit, .reloaded = Reloaded, .read_campaign = ReadCampaign, .copy_recovery = CopyRecovery};
+  return (SaveCommitHost){ .context = campaign,
+                           .prepare_story = Prepare,
+                           .commit = Commit,
+                           .reloaded = Reloaded,
+                           .read_campaign = ReadCampaign,
+                           .copy_recovery = CopyRecovery };
 }

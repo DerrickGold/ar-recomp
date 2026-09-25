@@ -5,7 +5,8 @@ static const ArRegionalCastHoldDescriptor kRules[]={
   {"fillmore_upper_prop_cast_hold",{0,0,1}},
   {"fillmore_right_prop_cast_hold",{0,0,1}},
 };
-_Static_assert(sizeof(kRules)/sizeof(kRules[0])==kArRegionalCastHold_Count,"describe every linked prop");
+_Static_assert(sizeof(kRules) / sizeof(kRules[0]) == kArRegionalCastHold_Count,
+               "describe every linked prop");
 const ArRegionalCastHoldDescriptor *ArRegionalCastHold_Descriptor(unsigned rule) {
   return rule<kArRegionalCastHold_Count?&kRules[rule]:NULL;
 }
@@ -14,7 +15,8 @@ bool ArRegionalCastHold_Init(ArRegionalCastHoldPolicy *policy,ArRegionalSource s
   for(unsigned i=0;i<kArRegionalCastHold_Count;++i)policy->source[i]=source;
   return true;
 }
-bool ArRegionalCastHold_Resolve(const ArRegionalCastHoldPolicy *policy,ArRegionalCastHoldSnapshot *snapshot) {
+bool ArRegionalCastHold_Resolve(const ArRegionalCastHoldPolicy *policy,
+                                ArRegionalCastHoldSnapshot *snapshot) {
   if(!policy || !snapshot)return false;
   uint8_t bits=0;
   for(unsigned i=0;i<kArRegionalCastHold_Count;++i) {
@@ -23,9 +25,13 @@ bool ArRegionalCastHold_Resolve(const ArRegionalCastHoldPolicy *policy,ArRegiona
   }
   *snapshot=bits;return true;
 }
-bool ArRegionalCastHold_GroupSource(const ArRegionalCastHoldPolicy *policy,ArRegionalSource *source) {
-  uint8_t bits;if(!source || !ArRegionalCastHold_Resolve(policy,&bits))return false;
+bool ArRegionalCastHold_GroupSource(const ArRegionalCastHoldPolicy *policy,
+                                    ArRegionalSource *source) {
+  uint8_t bits;
+  if (!source || !ArRegionalCastHold_Resolve(policy, &bits)) return false;
   if(bits && bits!=7)return false;
-  bool jp=true;for(unsigned i=0;i<kArRegionalCastHold_Count;++i)jp&=policy->source[i]==kArRegionalSource_Japan;
+  bool jp = true;
+  for (unsigned i = 0; i < kArRegionalCastHold_Count; ++i)
+    jp &= policy->source[i] == kArRegionalSource_Japan;
   *source=bits?kArRegionalSource_Europe:jp?kArRegionalSource_Japan:kArRegionalSource_US;return true;
 }

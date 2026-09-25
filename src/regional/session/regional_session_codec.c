@@ -312,7 +312,10 @@ static SaveCheckpointStatus Decode(const uint8_t *bytes, size_t size, ArRegional
           if (size - offset >= 8 && !memcmp(bytes + offset, "ARARRIV", 7) &&
               bytes[offset + 7] != '1')
             return kSaveCheckpoint_Unsupported;
-          if (size - offset != (version >= 70 ? 19u+kRandomizerConfigBytes : version >= 51 ? 19u : 9u) ||
+          if (size - offset !=
+                  (version >= 70       ? 19u + kRandomizerConfigBytes
+                       : version >= 51 ? 19u
+                                       : 9u) ||
               memcmp(bytes + offset, "ARARRIV1", 8) || bytes[offset + 8] > 1)
             return kSaveCheckpoint_Invalid;
           next.arrival_locked = bytes[offset + 8] != 0;
@@ -342,13 +345,18 @@ static SaveCheckpointStatus Decode(const uint8_t *bytes, size_t size, ArRegional
   return kSaveCheckpoint_Ready;
 }
 
-bool ArRegionalSession_Encode(const ArRegionalSession *session,void *out,size_t capacity,size_t *size) {
+bool ArRegionalSession_Encode(const ArRegionalSession *session, void *out, size_t capacity,
+                              size_t *size) {
   if(!session || !out || !size)return false;
-  uint8_t bytes[kPayloadCapacity];size_t length=0;
+  uint8_t bytes[kPayloadCapacity];
+  size_t length = 0;
   if(!Encode(session,bytes,&length) || length>capacity)return false;
-  memcpy(out,bytes,length);*size=length;return true;
+  memcpy(out, bytes, length);
+  *size = length;
+  return true;
 }
-SaveCheckpointStatus ArRegionalSession_Decode(const void *bytes,size_t size,ArRegionalSession *out) {
+SaveCheckpointStatus ArRegionalSession_Decode(const void *bytes, size_t size,
+                                              ArRegionalSession *out) {
   if(!bytes || !out)return kSaveCheckpoint_Invalid;
   return Decode(bytes,size,out);
 }

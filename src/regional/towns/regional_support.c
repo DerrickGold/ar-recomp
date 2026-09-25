@@ -15,7 +15,8 @@ bool ArRegionalSupport_Init(ArRegionalSupportPolicy *policy,ArRegionalSource sou
   for(unsigned i=0;i<kArRegionalSupport_Count;++i)policy->source[i]=source;
   return true;
 }
-bool ArRegionalSupport_Resolve(const ArRegionalSupportPolicy *policy,ArRegionalSupportSnapshot *snapshot) {
+bool ArRegionalSupport_Resolve(const ArRegionalSupportPolicy *policy,
+                               ArRegionalSupportSnapshot *snapshot) {
   if (!policy || !snapshot) return false;
   ArRegionalSupportSnapshot next;
   for(unsigned i=0;i<kArRegionalSupport_Count;++i) {
@@ -27,7 +28,8 @@ bool ArRegionalSupport_Resolve(const ArRegionalSupportPolicy *policy,ArRegionalS
 bool ArRegionalSupport_Valid(const ArRegionalSupportSnapshot *snapshot) {
   if(!snapshot)return false;
   for(unsigned i=0;i<kArRegionalSupport_Count;++i)
-    if(snapshot->amount[i]!=kRules[i].amount[0] && snapshot->amount[i]!=kRules[i].amount[1])return false;
+    if (snapshot->amount[i] != kRules[i].amount[0] && snapshot->amount[i] != kRules[i].amount[1])
+      return false;
   return true;
 }
 bool ArRegionalSupport_GroupSource(const ArRegionalSupportPolicy *policy,ArRegionalSource *source) {
@@ -36,7 +38,8 @@ bool ArRegionalSupport_GroupSource(const ArRegionalSupportPolicy *policy,ArRegio
   bool uniform=true,us=true,jp=true;
   for(unsigned i=0;i<kArRegionalSupport_Count;++i) {
     uniform &= policy->source[i]==policy->source[0];
-    us &= snapshot.amount[i]==kRules[i].amount[0];jp &= snapshot.amount[i]==kRules[i].amount[1];
+    us &= snapshot.amount[i] == kRules[i].amount[0];
+    jp &= snapshot.amount[i] == kRules[i].amount[1];
   }
   if(uniform)*source=policy->source[0];
   else if(us)*source=kArRegionalSource_US;

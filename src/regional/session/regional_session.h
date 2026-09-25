@@ -31,32 +31,46 @@ bool ArRegionalSession_NewGame(ArRegionalSession *session, uint32_t slot,
  * synchronized without rebuilding towns. One revision, or no mutation. */
 bool ArRegionalSession_RequestRules(ArRegionalSession *session,uint32_t revision,
     const ArRegionalRules *requested);
-bool ArRegionalSession_RequestArrival(ArRegionalSession *session,uint32_t revision,ArRegionalSource source);
+bool ArRegionalSession_RequestArrival(ArRegionalSession *session, uint32_t revision,
+                                      ArRegionalSource source);
 bool ArRegionalSession_RequestActionMotion(ArRegionalSession *session,uint32_t revision,
     const ArRegionalActionMotionPolicy *policy);
 /* Complete room initialization only: later settings never alter an existing
  * actor's current or future phases until the next room/retry. */
-bool ArRegionalSession_BeginActionMotion(ArRegionalSession *session,ArRegionalActionMotionSnapshot *snapshot);
-bool ArRegionalSession_RequestEmitters(ArRegionalSession *session,uint32_t revision,const ArRegionalEmitterPolicy *policy);
-bool ArRegionalSession_BeginEmitters(ArRegionalSession *session,ArRegionalEmitterSnapshot *snapshot);
-bool ArRegionalSession_RequestVolley(ArRegionalSession *session, uint32_t revision, ArRegionalSource source);
+bool ArRegionalSession_BeginActionMotion(ArRegionalSession *session,
+                                         ArRegionalActionMotionSnapshot *snapshot);
+bool ArRegionalSession_RequestEmitters(ArRegionalSession *session, uint32_t revision,
+                                       const ArRegionalEmitterPolicy *policy);
+bool ArRegionalSession_BeginEmitters(ArRegionalSession *session,
+                                     ArRegionalEmitterSnapshot *snapshot);
+bool ArRegionalSession_RequestVolley(ArRegionalSession *session, uint32_t revision,
+                                     ArRegionalSource source);
 bool ArRegionalSession_BeginVolley(ArRegionalSession *session, bool *double_shot);
-bool ArRegionalSession_RequestBosses(ArRegionalSession *session,uint32_t revision,const ArRegionalBossPolicy *policy);
+bool ArRegionalSession_RequestBosses(ArRegionalSession *session, uint32_t revision,
+                                     const ArRegionalBossPolicy *policy);
 bool ArRegionalSession_BeginBosses(ArRegionalSession *session,ArRegionalBossSnapshot *snapshot);
 bool ArRegionalSession_RequestDifficulty(ArRegionalSession *session, uint32_t revision,
     const ArRegionalDifficultyPolicy *policy);
 /* Room/retry boundary: never modify a live enemy, hit or countdown. */
-bool ArRegionalSession_BeginDifficulty(ArRegionalSession *session, ArRegionalDifficultySnapshot *snapshot);
-bool ArRegionalSession_RequestScoreLives(ArRegionalSession *session,uint32_t revision,ArRegionalSource source);
+bool ArRegionalSession_BeginDifficulty(ArRegionalSession *session,
+                                       ArRegionalDifficultySnapshot *snapshot);
+bool ArRegionalSession_RequestScoreLives(ArRegionalSession *session, uint32_t revision,
+                                         ArRegionalSource source);
 /* Room/retry boundary, before any score additions. No retroactive awards. */
 bool ArRegionalSession_BeginScoreLives(ArRegionalSession *session,bool *enabled);
-bool ArRegionalSession_RequestActionStart(ArRegionalSession *session,uint32_t revision,const ArRegionalActionStartPolicy *policy);
+bool ArRegionalSession_RequestActionStart(ArRegionalSession *session, uint32_t revision,
+                                          const ArRegionalActionStartPolicy *policy);
 /* Confirmed Action Mode new run only, never a room/retry or settings edit. */
-bool ArRegionalSession_BeginActionStart(ArRegionalSession *session,ArRegionalActionStartSnapshot *snapshot);
-bool ArRegionalSession_RequestInventory(ArRegionalSession *session,uint32_t revision,ArRegionalSource source);
-bool ArRegionalSession_RequestMusic(ArRegionalSession *session,uint32_t revision,ArRegionalSource source);
-bool ArRegionalSession_RequestMosaic(ArRegionalSession *session,uint32_t revision,ArRegionalSource source);
-bool ArRegionalSession_RequestArtwork(ArRegionalSession *session,uint32_t revision,ArRegionalArtworkRule rule,ArRegionalSource source);
+bool ArRegionalSession_BeginActionStart(ArRegionalSession *session,
+                                        ArRegionalActionStartSnapshot *snapshot);
+bool ArRegionalSession_RequestInventory(ArRegionalSession *session, uint32_t revision,
+                                        ArRegionalSource source);
+bool ArRegionalSession_RequestMusic(ArRegionalSession *session, uint32_t revision,
+                                    ArRegionalSource source);
+bool ArRegionalSession_RequestMosaic(ArRegionalSession *session, uint32_t revision,
+                                     ArRegionalSource source);
+bool ArRegionalSession_RequestArtwork(ArRegionalSession *session, uint32_t revision,
+                                      ArRegionalArtworkRule rule, ArRegionalSource source);
 bool ArRegionalSession_BeginArtwork(ArRegionalSession *session,uint8_t *mask);
 /* Independent activation boundaries: action room entry must not activate
  * pending town art, nor may a town upload activate pending action art. */
@@ -67,36 +81,51 @@ bool ArRegionalSession_RequestActorArtwork(ArRegionalSession *session,uint32_t r
 /* Zero-based area. Only a real, coherent sprite-resource load activates that
  * area's policy; inherited rooms and unrelated areas retain their snapshots. */
 bool ArRegionalSession_BeginActorArtwork(ArRegionalSession *session,unsigned area,bool *enabled);
-bool ArRegionalSession_RequestPoses(ArRegionalSession *session,uint32_t revision,const ArRegionalPosePolicy *policy);
+bool ArRegionalSession_RequestPoses(ArRegionalSession *session, uint32_t revision,
+                                    const ArRegionalPosePolicy *policy);
 bool ArRegionalSession_BeginPoses(ArRegionalSession *session,uint8_t *snapshot);
 bool ArRegionalSession_BeginMosaic(ArRegionalSession *session,uint8_t *snapshot);
 bool ArRegionalSession_RequestPlacements(ArRegionalSession *session,uint32_t revision,
     const ArRegionalPlacementPolicy *policy);
-bool ArRegionalSession_BeginPlacements(ArRegionalSession *session,ArRegionalPlacementPolicy *snapshot);
+bool ArRegionalSession_BeginPlacements(ArRegionalSession *session,
+                                       ArRegionalPlacementPolicy *snapshot);
 bool ArRegionalSession_BeginMusic(ArRegionalSession *session,uint8_t *snapshot);
-bool ArRegionalSession_RequestSequences(ArRegionalSession *session,uint32_t revision,const ArRegionalSequencePolicy *policy);
+bool ArRegionalSession_RequestSequences(ArRegionalSession *session, uint32_t revision,
+                                        const ArRegionalSequencePolicy *policy);
 /* One recognized song upload only. A change never restarts a resident song
  * nor marks the other song's pending policy active before it is loaded. */
 bool ArRegionalSession_BeginSequence(ArRegionalSession *session,unsigned rule,bool *enabled);
-bool ArRegionalSession_RequestTerrain(ArRegionalSession *session,uint32_t revision,ArRegionalSource source);
+bool ArRegionalSession_RequestTerrain(ArRegionalSession *session, uint32_t revision,
+                                      ArRegionalSource source);
 bool ArRegionalSession_BeginTerrain(ArRegionalSession *session,uint8_t *snapshot);
-bool ArRegionalSession_RequestHazards(ArRegionalSession *session,uint32_t revision,ArRegionalSource source);
+bool ArRegionalSession_RequestHazards(ArRegionalSession *session, uint32_t revision,
+                                      ArRegionalSource source);
 /* Completed room initialization, never an active contact pass. */
 bool ArRegionalSession_BeginHazards(ArRegionalSession *session,uint8_t *snapshot);
-bool ArRegionalSession_RequestModeEntry(ArRegionalSession *session,uint32_t revision,const ArRegionalModePolicy *policy);
+bool ArRegionalSession_RequestModeEntry(ArRegionalSession *session, uint32_t revision,
+                                        const ArRegionalModePolicy *policy);
 bool ArRegionalSession_BeginModeEntry(ArRegionalSession *session,uint8_t *snapshot);
 /* New Action run only; never reinterprets a live collection. */
 bool ArRegionalSession_BeginInventory(ArRegionalSession *session,bool *enabled);
-bool ArRegionalSession_RequestCollision(ArRegionalSession *session,uint32_t revision,const ArRegionalCollisionPolicy *policy);
-bool ArRegionalSession_BeginCollision(ArRegionalSession *session,ArRegionalCollisionSnapshot *snapshot);
-bool ArRegionalSession_RequestPlatformSkull(ArRegionalSession *session,uint32_t revision,const ArRegionalPlatformSkullPolicy *policy);
-bool ArRegionalSession_BeginPlatformSkull(ArRegionalSession *session,ArRegionalPlatformSkullSnapshot *snapshot);
-bool ArRegionalSession_RequestActorStats(ArRegionalSession *session,uint32_t revision,const ArRegionalActorStatsPolicy *policy);
-bool ArRegionalSession_BeginActorStats(ArRegionalSession *session,ArRegionalActorStatsSnapshot *snapshot);
-bool ArRegionalSession_RequestCastHold(ArRegionalSession *session,uint32_t revision,const ArRegionalCastHoldPolicy *policy);
-bool ArRegionalSession_RequestFire(ArRegionalSession *session,uint32_t revision,const ArRegionalFirePolicy *policy);
+bool ArRegionalSession_RequestCollision(ArRegionalSession *session, uint32_t revision,
+                                        const ArRegionalCollisionPolicy *policy);
+bool ArRegionalSession_BeginCollision(ArRegionalSession *session,
+                                      ArRegionalCollisionSnapshot *snapshot);
+bool ArRegionalSession_RequestPlatformSkull(ArRegionalSession *session, uint32_t revision,
+                                            const ArRegionalPlatformSkullPolicy *policy);
+bool ArRegionalSession_BeginPlatformSkull(ArRegionalSession *session,
+                                          ArRegionalPlatformSkullSnapshot *snapshot);
+bool ArRegionalSession_RequestActorStats(ArRegionalSession *session, uint32_t revision,
+                                         const ArRegionalActorStatsPolicy *policy);
+bool ArRegionalSession_BeginActorStats(ArRegionalSession *session,
+                                       ArRegionalActorStatsSnapshot *snapshot);
+bool ArRegionalSession_RequestCastHold(ArRegionalSession *session, uint32_t revision,
+                                       const ArRegionalCastHoldPolicy *policy);
+bool ArRegionalSession_RequestFire(ArRegionalSession *session, uint32_t revision,
+                                   const ArRegionalFirePolicy *policy);
 bool ArRegionalSession_BeginFire(ArRegionalSession *session,ArRegionalFireSnapshot *snapshot);
-bool ArRegionalSession_BeginCastHold(ArRegionalSession *session,ArRegionalCastHoldSnapshot *snapshot);
+bool ArRegionalSession_BeginCastHold(ArRegionalSession *session,
+                                     ArRegionalCastHoldSnapshot *snapshot);
 /* Once per campaign, at the eligible final departure/Palace gate. Continuing
  * an already-unlocked native event retains the saved effective policy rather
  * than adopting a new request midway through its reveal/announcement. A later
@@ -165,9 +194,12 @@ bool ArRegionalSession_BeginLivesDisplay(ArRegionalSession *session, bool *zero_
 bool ArRegionalSession_RequestSources(ArRegionalSession *session, uint32_t revision,
                                      const ArRegionalSourcesPolicy *policy);
 /* Accepted Source collection only, not menu opening or explicit Use. */
-bool ArRegionalSession_BeginSources(ArRegionalSession *session, ArRegionalSourcesSnapshot *snapshot);
-bool ArRegionalSession_RequestSkullWait(ArRegionalSession *session, uint32_t revision, ArRegionalSource source);
-bool ArRegionalSession_RequestStory(ArRegionalSession *session, uint32_t revision, const ArRegionalStoryPolicy *policy);
+bool ArRegionalSession_BeginSources(ArRegionalSession *session,
+                                    ArRegionalSourcesSnapshot *snapshot);
+bool ArRegionalSession_RequestSkullWait(ArRegionalSession *session, uint32_t revision,
+                                        ArRegionalSource source);
+bool ArRegionalSession_RequestStory(ArRegionalSession *session, uint32_t revision,
+                                    const ArRegionalStoryPolicy *policy);
 /* Next applicable native prerequisite check. No event-state mutation here. */
 bool ArRegionalSession_BeginStory(ArRegionalSession *session, ArRegionalStorySnapshot *snapshot);
 /* Capture before the complete Magic Skull use, including its picker/cancel. */
@@ -196,15 +228,19 @@ bool ArRegionalSession_BeginLairReloads(ArRegionalSession *session);
 bool ArRegionalSession_RequestTownStatus(ArRegionalSession *session, uint32_t revision,
                                         const ArRegionalTownStatusPolicy *policy);
 /* Capture a whole construction/report transaction. No flag mutation here. */
-bool ArRegionalSession_BeginTownStatus(ArRegionalSession *session, ArRegionalTownStatusSnapshot *snapshot);
-bool ArRegionalSession_RequestLevelGoals(ArRegionalSession *session,uint32_t revision,ArRegionalSource source);
+bool ArRegionalSession_BeginTownStatus(ArRegionalSession *session,
+                                       ArRegionalTownStatusSnapshot *snapshot);
+bool ArRegionalSession_RequestLevelGoals(ArRegionalSession *session, uint32_t revision,
+                                         ArRegionalSource source);
 bool ArRegionalSession_BeginLevelGoals(ArRegionalSession *session,bool *japanese);
 bool ArRegionalSession_RequestSimCombat(ArRegionalSession *session,uint32_t revision,
                                       const ArRegionalSimCombatPolicy *policy);
 /* Verified native birth only. Existing/cached actors retain their snapshots. */
 bool ArRegionalSession_BeginSimActor(ArRegionalSession *session,unsigned town,unsigned slot);
-bool ArRegionalSession_RequestSimAi(ArRegionalSession *session,uint32_t revision,const ArRegionalSimAiPolicy *policy);
-bool ArRegionalSession_RequestConstruction(ArRegionalSession *session, uint32_t revision, ArRegionalSource source);
+bool ArRegionalSession_RequestSimAi(ArRegionalSession *session, uint32_t revision,
+                                    const ArRegionalSimAiPolicy *policy);
+bool ArRegionalSession_RequestConstruction(ArRegionalSession *session, uint32_t revision,
+                                           ArRegionalSource source);
 /* Capture budget, animated payment and support-building return together.
  * Off-screen batches capture at their own outer native entry. */
 bool ArRegionalSession_BeginConstruction(ArRegionalSession *session, bool *japanese);

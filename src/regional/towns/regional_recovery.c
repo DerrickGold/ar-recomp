@@ -16,7 +16,8 @@ bool ArRegionalRecovery_Init(ArRegionalRecoveryPolicy *policy, ArRegionalSource 
   return true;
 }
 
-bool ArRegionalRecovery_Resolve(const ArRegionalRecoveryPolicy *policy, ArRegionalRecoverySnapshot *snapshot) {
+bool ArRegionalRecovery_Resolve(const ArRegionalRecoveryPolicy *policy,
+                                ArRegionalRecoverySnapshot *snapshot) {
   if (!policy || !snapshot) return false;
   for (unsigned i = 0; i < kArRegionalRecovery_Count; ++i)
     if ((unsigned)policy->source[i] >= kArRegionalSource_Count) return false;
@@ -25,7 +26,8 @@ bool ArRegionalRecovery_Resolve(const ArRegionalRecoveryPolicy *policy, ArRegion
   return true;
 }
 
-bool ArRegionalRecovery_GroupSource(const ArRegionalRecoveryPolicy *policy, ArRegionalSource *source) {
+bool ArRegionalRecovery_GroupSource(const ArRegionalRecoveryPolicy *policy,
+                                    ArRegionalSource *source) {
   ArRegionalRecoverySnapshot unused;
   if (!source || !ArRegionalRecovery_Resolve(policy, &unused)) return false;
   if (policy->source[0] == policy->source[1]) {

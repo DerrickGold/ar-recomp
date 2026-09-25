@@ -19,7 +19,8 @@ static bool PalaceBoundary(CpuState *cpu) {
 
 static bool Candidate(ArRegionalSession *session,ArRegionalSource source,
     bool profile,ArRegionalProfileGroup group) {
-  if(profile && group!=kArRegionalProfile_Population && group!=kArRegionalProfile_Gameplay)return false;
+  if (profile && group != kArRegionalProfile_Population && group != kArRegionalProfile_Gameplay)
+    return false;
   if(!ArRegionalSession_SetPopulationProfile(session,session->revision,source))return false;
   if(!profile)return true;
   ArRegionalRules requested;
@@ -30,7 +31,8 @@ static bool Candidate(ArRegionalSession *session,ArRegionalSource source,
 static ActRaiserPopulationResult Preview(CpuState *cpu,
     const ArRegionalCampaign *campaign, ArRegionalSource source, bool profile,
     ArRegionalProfileGroup group, ActRaiserPopulationPreview *out) {
-  if (!out || !campaign || !campaign->active_valid || campaign->pending_valid || !PalaceBoundary(cpu))
+  if (!out || !campaign || !campaign->active_valid || campaign->pending_valid ||
+      !PalaceBoundary(cpu))
     return kActRaiserPopulation_Unsafe;
   ArRegionalSession candidate=campaign->active;
   if (!Candidate(&candidate,source,profile,group))
@@ -39,16 +41,18 @@ static ActRaiserPopulationResult Preview(CpuState *cpu,
   ArRegionalSupportSnapshot before,after;
   bool japanese;
   uint16_t threshold;
-  if (!ArRegionalSupport_Resolve(&campaign->active.effective.support,&before) ||
-      !ArRegionalSupport_Resolve(&candidate.effective.support,&after) ||
-      !ArRegionalConstruction_Resolve(candidate.requested.construction,&japanese) ||
-      !ArRegionalLevelGoals_Display(source==kArRegionalSource_Japan,cpu_read16(cpu,0,0x0291),&threshold))
+  if (!ArRegionalSupport_Resolve(&campaign->active.effective.support, &before) ||
+      !ArRegionalSupport_Resolve(&candidate.effective.support, &after) ||
+      !ArRegionalConstruction_Resolve(candidate.requested.construction, &japanese) ||
+      !ArRegionalLevelGoals_Display(source == kArRegionalSource_Japan, cpu_read16(cpu, 0, 0x0291),
+                                    &threshold))
     return kActRaiserPopulation_Unsafe;
   ActRaiserPopulationPreview next={.revision=campaign->active.revision,.source=source,
       .profile=profile,.group=group,
       .redevelop=memcmp(&before,&after,sizeof(before))!=0};
   memcpy(next.campaign,campaign->active.campaign,sizeof(next.campaign));
-  if (ActRaiserTownRedevelopment_Preview(cpu,next.redevelop?63:0,japanese,&next.town)!=kActRaiserRedevelopment_Ready)
+  if (ActRaiserTownRedevelopment_Preview(cpu, next.redevelop ? 63 : 0, japanese, &next.town) !=
+      kActRaiserRedevelopment_Ready)
     return kActRaiserPopulation_InvalidTown;
   *out=next;return kActRaiserPopulation_Ready;
 }
@@ -69,7 +73,8 @@ typedef struct Undo {
   uint8_t marks[0x1800], records[0x0c00], visuals[0x0400];
   uint8_t growth[12], support[12], populations[16], next_goal[2], queue[14];
 } Undo;
-static void Bytes(CpuState *cpu,bool restore,uint8_t bank,uint16_t address,uint8_t *bytes,size_t size) {
+static void Bytes(CpuState *cpu, bool restore, uint8_t bank, uint16_t address, uint8_t *bytes,
+                  size_t size) {
   for(size_t i=0;i<size;++i) {
     if(restore)cpu_write8(cpu,bank,address+i,bytes[i]);
     else bytes[i]=cpu_read8(cpu,bank,address+i);
@@ -86,7 +91,8 @@ static void Backup(CpuState *cpu,Undo *undo,bool restore) {
   Bytes(cpu,restore,0x7f,0x9758,undo->queue,sizeof(undo->queue));
 }
 
-static void RetireVisuals(CpuState *cpu,const Undo *undo,const ActRaiserTownRedevelopmentPlan *town) {
+static void RetireVisuals(CpuState *cpu, const Undo *undo,
+                          const ActRaiserTownRedevelopmentPlan *town) {
   const unsigned current=cpu_read16(cpu,0x7f,0x7bfb)/2;
   if (town->affected_towns&(1u<<current)) {
     for(unsigned slot=0;slot<128;++slot) {
@@ -104,52 +110,65 @@ static bool Refresh(CpuState *cpu,const ArRegionalSession *candidate,bool census
   if(census) {
     ArRegionalSupportSnapshot snapshot;
     if(!ArRegionalSupport_Resolve(&candidate->effective.support,&snapshot))return false;
-    for(unsigned town=0;town<6;++town)if(!ActRaiserTownCensus_Refresh(cpu,town,&snapshot))return false;
+    for (unsigned town = 0; town < 6; ++town)
+      if (!ActRaiserTownCensus_Refresh(cpu, town, &snapshot)) return false;
     /* Semantic equivalent of $03:8E10; no CPU scratch or award side effects. */
     uint16_t total=0;
     for(unsigned town=0;town<6;++town)total+=cpu_read16(cpu,0,0x021c+town*2);
     cpu_write16(cpu,0,0x0218,total);
     cpu_write16(cpu,0,0x021a,cpu_read16(cpu,0,0x021c+cpu_read16(cpu,0x7f,0x7bfb)));
   }
-  return ActRaiserLevelGoals_RefreshDisplay(cpu,candidate->effective.level_goals==kArRegionalSource_Japan);
+  return ActRaiserLevelGoals_RefreshDisplay(
+      cpu, candidate->effective.level_goals == kArRegionalSource_Japan);
 }
 
 ActRaiserPopulationResult ActRaiserPopulation_Commit(CpuState *cpu,
     ArRegionalCampaign *campaign,const ActRaiserPopulationPreview *confirmed,
     const char *directory,SaveError *error) {
   if(error)error->message[0]=0;
-  if(!confirmed || !campaign || !campaign->active_valid || confirmed->revision!=campaign->active.revision ||
-      memcmp(confirmed->campaign,campaign->active.campaign,16))return kActRaiserPopulation_Stale;
+  if (!confirmed || !campaign || !campaign->active_valid ||
+      confirmed->revision != campaign->active.revision ||
+      memcmp(confirmed->campaign, campaign->active.campaign, 16))
+    return kActRaiserPopulation_Stale;
   ActRaiserPopulationPreview fresh;
   const ActRaiserPopulationResult preview=Preview(cpu,campaign,confirmed->source,
       confirmed->profile,confirmed->group,&fresh);
   if(preview!=kActRaiserPopulation_Ready)return preview;
-  if(fresh.redevelop!=confirmed->redevelop || fresh.town.fingerprint!=confirmed->town.fingerprint ||
-      fresh.town.affected_towns!=confirmed->town.affected_towns ||
-      memcmp(fresh.town.removed,confirmed->town.removed,sizeof(fresh.town.removed)) ||
-      memcmp(fresh.town.growth_credit,confirmed->town.growth_credit,sizeof(fresh.town.growth_credit)))
+  if (fresh.redevelop != confirmed->redevelop ||
+      fresh.town.fingerprint != confirmed->town.fingerprint ||
+      fresh.town.affected_towns != confirmed->town.affected_towns ||
+      memcmp(fresh.town.removed, confirmed->town.removed, sizeof(fresh.town.removed)) ||
+      memcmp(fresh.town.growth_credit, confirmed->town.growth_credit,
+             sizeof(fresh.town.growth_credit)))
     return kActRaiserPopulation_Stale;
   const ArRegionalSession previous=campaign->active;
   ArRegionalSession candidate=previous;
-  if(!Candidate(&candidate,confirmed->source,confirmed->profile,confirmed->group))return kActRaiserPopulation_Stale;
+  if (!Candidate(&candidate, confirmed->source, confirmed->profile, confirmed->group))
+    return kActRaiserPopulation_Stale;
   uint8_t image[kActRaiserSramSize];
   if(!ActRaiserStorySnapshot_Capture(cpu,image) ||
       SaveSystem_CommitStorySnapshot(image,error)!=kSaveStorySnapshot_Committed)
     return kActRaiserPopulation_CheckpointFailed;
   if(!SaveSystem_CreateRecoveryCopy(directory,error))return kActRaiserPopulation_RecoveryFailed;
-  Undo undo;Backup(cpu,&undo,false);
+  Undo undo;
+  Backup(cpu, &undo, false);
   if(ActRaiserTownRedevelopment_Apply(cpu,&fresh.town)!=kActRaiserRedevelopment_Ready) {
-    if(error)snprintf(error->message,sizeof(error->message),"town changed after recovery checkpoint");
+    if (error)
+      snprintf(error->message, sizeof(error->message), "town changed after recovery checkpoint");
     return kActRaiserPopulation_Stale;
   }
   if(fresh.town.affected_towns)RetireVisuals(cpu,&undo,&fresh.town);
   if(!Refresh(cpu,&candidate,fresh.redevelop) || !ActRaiserStorySnapshot_Capture(cpu,image)) {
-    Backup(cpu,&undo,true);return kActRaiserPopulation_RolledBack;
+    Backup(cpu, &undo, true);
+    return kActRaiserPopulation_RolledBack;
   }
   campaign->active=candidate;
   const SaveStorySnapshotResult result=SaveSystem_CommitStorySnapshot(image,error);
   if(result==kSaveStorySnapshot_NotCommitted) {
-    campaign->active=previous;Backup(cpu,&undo,true);return kActRaiserPopulation_RolledBack;
+    campaign->active = previous;
+    Backup(cpu, &undo, true);
+    return kActRaiserPopulation_RolledBack;
   }
-  return result==kSaveStorySnapshot_NamePending?kActRaiserPopulation_NamePending:kActRaiserPopulation_Committed;
+  return result == kSaveStorySnapshot_NamePending ? kActRaiserPopulation_NamePending
+                                                  : kActRaiserPopulation_Committed;
 }

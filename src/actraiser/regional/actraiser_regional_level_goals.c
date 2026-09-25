@@ -18,7 +18,10 @@ bool ActRaiser_RegionalLevelAwardEntry(CpuState *cpu) {
 static RecompReturn Run(CpuState *cpu,RecompReturn (*native)(CpuState *)) {
   if (s_active || !ActRaiserRegional_LevelGoalsSnapshot(true,&s_japanese))
     ActRaiserHleFatal("Cannot capture level-award rules");
-  s_active=true;const RecompReturn result=native(cpu);s_active=false;return result;
+  s_active = true;
+  const RecompReturn result = native(cpu);
+  s_active = false;
+  return result;
 }
 RecompReturn ActRaiser_RegionalLevelAward(CpuState *cpu) { return Run(cpu,bank_03_E414_M0X0); }
 RecompReturn ActRaiser_RegionalLevelLeaf(CpuState *cpu) {
@@ -28,7 +31,8 @@ bool ActRaiser_RegionalLevelPrefixEntry(CpuState *cpu) {
   return s_active && s_japanese && ActRaiserLevelGoals_PrefixEntry(cpu);
 }
 static RecompReturn Tail(bool ok,uint32_t target,uint32_t source) {
-  if (!ok || !cpu_hle_tailcall_request(target,source)) ActRaiserHleFatal("Level prefix has no native continuation");
+  if (!ok || !cpu_hle_tailcall_request(target, source))
+    ActRaiserHleFatal("Level prefix has no native continuation");
   return RECOMP_RETURN_TAILCALL;
 }
 RecompReturn ActRaiser_RegionalLevelCompare(CpuState *cpu) {

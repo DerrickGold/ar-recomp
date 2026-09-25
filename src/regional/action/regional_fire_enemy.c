@@ -6,7 +6,8 @@ static const ArRegionalFireDescriptor kRules[]={
   {"kasandora_fire_child_threshold",{160,128,160}},
   {"kasandora_fire_bounce_threshold",{242,210,242}},
 };
-_Static_assert(sizeof(kRules)/sizeof(kRules[0])==kArRegionalFire_Count,"describe every fire-enemy rule");
+_Static_assert(sizeof(kRules) / sizeof(kRules[0]) == kArRegionalFire_Count,
+               "describe every fire-enemy rule");
 const ArRegionalFireDescriptor *ArRegionalFire_Descriptor(unsigned rule) {
   return rule<kArRegionalFire_Count?&kRules[rule]:NULL;
 }
@@ -25,13 +26,18 @@ bool ArRegionalFire_Resolve(const ArRegionalFirePolicy *policy,ArRegionalFireSna
   *snapshot=bits;return true;
 }
 bool ArRegionalFire_GroupSource(const ArRegionalFirePolicy *policy,ArRegionalSource *source) {
-  uint8_t bits;if(!source || !ArRegionalFire_Resolve(policy,&bits))return false;
+  uint8_t bits;
+  if (!source || !ArRegionalFire_Resolve(policy, &bits)) return false;
   if(bits && bits!=15)return false;
-  bool eu=true;for(unsigned i=0;i<kArRegionalFire_Count;++i)eu&=policy->source[i]==kArRegionalSource_Europe;
+  bool eu = true;
+  for (unsigned i = 0; i < kArRegionalFire_Count; ++i)
+    eu &= policy->source[i] == kArRegionalSource_Europe;
   *source=bits?kArRegionalSource_Japan:eu?kArRegionalSource_Europe:kArRegionalSource_US;return true;
 }
 uint16_t ArRegionalFire_Value(ArRegionalFireSnapshot snapshot,unsigned rule) {
-  return snapshot>15 || rule>=kArRegionalFire_Count?UINT16_MAX:kRules[rule].value[(snapshot>>rule)&1];
+  return snapshot > 15 || rule >= kArRegionalFire_Count
+      ? UINT16_MAX
+      : kRules[rule].value[(snapshot >> rule) & 1];
 }
 bool ArRegionalFire_CurveRow(ArRegionalFireSnapshot snapshot,unsigned state,unsigned row,
     uint8_t visual,uint16_t duration,int16_t *dx,int16_t *dy) {

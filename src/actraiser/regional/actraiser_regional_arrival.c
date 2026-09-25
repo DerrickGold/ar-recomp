@@ -34,14 +34,17 @@ static bool JapanesePalaceGuard(CpuState *cpu,uint8_t flags) {
   cpu->A=(cpu->A&0xff00)|(flags&2);
   ActRaiserCpuHle_SetNegativeZero8(cpu,(uint8_t)cpu->A);
   if(flags&2)return false;
-  cpu->Y=6;cpu->X=0;
+  cpu->Y = 6;
+  cpu->X = 0;
   for(unsigned town=0;town<6;++town) {
     const uint8_t count=cpu_read8(cpu,0x7f,0x6b18+2*town);
     cpu->A=(cpu->A&0xff00)|count;
-    cpu->_flag_C=count>=2;cpu->P=(cpu->P&~CPU_P_C)|(count>=2?CPU_P_C:0);
+    cpu->_flag_C = count >= 2;
+    cpu->P = (cpu->P & ~CPU_P_C) | (count >= 2 ? CPU_P_C : 0);
     ActRaiserCpuHle_SetNegativeZero8(cpu,(uint8_t)(count-2));
     if(count!=2)return false;
-    cpu->X+=2;--cpu->Y;
+    cpu->X += 2;
+    --cpu->Y;
     ActRaiserCpuHle_SetNegativeZero16(cpu,cpu->Y);
   }
   /* Native US suffix will atomically add announced bit1 before its first
@@ -57,7 +60,8 @@ RecompReturn ActRaiser_RegionalArrivalDeparture(CpuState *cpu) {
   if(!japanese) {
     s_departure_delegate=true;
     const RecompReturn result=bank_00_A343_M0X0(cpu);
-    s_departure_delegate=false;return result;
+    s_departure_delegate = false;
+    return result;
   }
   /* JP $00:A335: SEP/LDA current town/STA next scene/STZ subscene/REP/RTS.
    * No unlock bit, reveal marker, music selection, score or reward writes.
@@ -65,7 +69,8 @@ RecompReturn ActRaiser_RegionalArrivalDeparture(CpuState *cpu) {
   const uint8_t town=cpu_read8(cpu,0,0x0341);
   cpu->A=(cpu->A&0xff00)|town;
   ActRaiserCpuHle_SetNegativeZero8(cpu,town);
-  cpu_write8(cpu,0,0x001a,town);cpu_write8(cpu,0,0x001b,0);
+  cpu_write8(cpu, 0, 0x001a, town);
+  cpu_write8(cpu, 0, 0x001b, 0);
   cpu->S=(uint16_t)(cpu->S+2);
   return RECOMP_RETURN_NORMAL;
 }
@@ -87,5 +92,6 @@ RecompReturn ActRaiser_RegionalArrivalPalace(CpuState *cpu) {
   }
   s_palace_delegate=true;
   const RecompReturn result=bank_01_861E_M1X0(cpu);
-  s_palace_delegate=false;return result;
+  s_palace_delegate = false;
+  return result;
 }

@@ -31,7 +31,9 @@ typedef enum ArRegionalActionMotionFamily {
   kArRegionalActionMotion_Arrow,
   kArRegionalActionMotionFamily_Count
 } ArRegionalActionMotionFamily;
-typedef struct ArRegionalActionMotionPolicy { ArRegionalSource source[kArRegionalActionMotion_Count]; } ArRegionalActionMotionPolicy;
+typedef struct ArRegionalActionMotionPolicy {
+  ArRegionalSource source[kArRegionalActionMotion_Count];
+} ArRegionalActionMotionPolicy;
 /* Numerical room snapshot: one bit per independently selectable alternate rule.
  * No native pointers, actor memory, artwork or host lifecycle in this layer. */
 typedef uint16_t ArRegionalActionMotionSnapshot;
@@ -42,10 +44,13 @@ typedef struct ArRegionalActionMotionDescriptor {
    * Zero for velocity rules; it is not part of the native row or wire value. */
   uint16_t phase_extra_updates;
 } ArRegionalActionMotionDescriptor;
-const ArRegionalActionMotionDescriptor *ArRegionalActionMotion_Descriptor(ArRegionalActionMotionRule rule);
+const ArRegionalActionMotionDescriptor *
+ArRegionalActionMotion_Descriptor(ArRegionalActionMotionRule rule);
 bool ArRegionalActionMotion_Init(ArRegionalActionMotionPolicy *policy,ArRegionalSource source);
-bool ArRegionalActionMotion_Resolve(const ArRegionalActionMotionPolicy *policy,ArRegionalActionMotionSnapshot *snapshot);
-bool ArRegionalActionMotion_GroupSource(const ArRegionalActionMotionPolicy *policy,ArRegionalSource *source);
+bool ArRegionalActionMotion_Resolve(const ArRegionalActionMotionPolicy *policy,
+                                    ArRegionalActionMotionSnapshot *snapshot);
+bool ArRegionalActionMotion_GroupSource(const ArRegionalActionMotionPolicy *policy,
+                                        ArRegionalSource *source);
 /* Only the audited numerical row members change. Duration is the stored row
  * delay, not total phase length. DX is signed, before native facing mirroring.
  * Unknown/mismatched rows are rejected without changing the caller's values. */

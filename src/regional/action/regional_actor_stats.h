@@ -3,7 +3,11 @@
 #include "regional/regional_source.h"
 #include <stdbool.h>
 #include <stdint.h>
-typedef enum ArRegionalActorStatField { kArRegionalActorStat_HP, kArRegionalActorStat_Attack, kArRegionalActorStat_Reward } ArRegionalActorStatField;
+typedef enum ArRegionalActorStatField {
+  kArRegionalActorStat_HP,
+  kArRegionalActorStat_Attack,
+  kArRegionalActorStat_Reward
+} ArRegionalActorStatField;
 enum {
   /* Frozen v39 base-record/replay order. Child IDs are semantic owners, not
    * placed type-table keys and must never enter the base-stat projection. */
@@ -16,7 +20,9 @@ enum {
 #include "regional/action/regional_actor_stats_data.inc"
 #undef AR_ACTOR_STAT
 };
-typedef struct ArRegionalActorStatsPolicy { ArRegionalSource source[kArRegionalActorStat_Count]; } ArRegionalActorStatsPolicy;
+typedef struct ArRegionalActorStatsPolicy {
+  ArRegionalSource source[kArRegionalActorStat_Count];
+} ArRegionalActorStatsPolicy;
 typedef struct ArRegionalActorStatsSnapshot {
   uint8_t value[kArRegionalActorStat_Count];
   bool changed; /* Base-record fields only; explicit child fields are separate. */
@@ -29,8 +35,10 @@ typedef struct ArRegionalActorStatDescriptor {
 } ArRegionalActorStatDescriptor;
 const ArRegionalActorStatDescriptor *ArRegionalActorStats_Descriptor(unsigned rule);
 bool ArRegionalActorStats_Init(ArRegionalActorStatsPolicy *policy,ArRegionalSource source);
-bool ArRegionalActorStats_Resolve(const ArRegionalActorStatsPolicy *policy,ArRegionalActorStatsSnapshot *snapshot);
-bool ArRegionalActorStats_GroupSource(const ArRegionalActorStatsPolicy *policy,ArRegionalSource *source);
+bool ArRegionalActorStats_Resolve(const ArRegionalActorStatsPolicy *policy,
+                                  ArRegionalActorStatsSnapshot *snapshot);
+bool ArRegionalActorStats_GroupSource(const ArRegionalActorStatsPolicy *policy,
+                                      ArRegionalSource *source);
 /* Validated cached snapshot, semantic area/type, and freshly copied US fields.
  * Return false without outputs on baseline/unmapped/incompatible input. This
  * never promotes difficulty, heals a running actor or edits its death reward. */

@@ -12,12 +12,18 @@ typedef enum ArRegionalSimAiRule {
   kArRegionalSimAi_BatWait,
   kArRegionalSimAi_Count
 } ArRegionalSimAiRule;
-typedef struct ArRegionalSimAiPolicy { ArRegionalSource source[kArRegionalSimAi_Count]; } ArRegionalSimAiPolicy;
+typedef struct ArRegionalSimAiPolicy {
+  ArRegionalSource source[kArRegionalSimAi_Count];
+} ArRegionalSimAiPolicy;
 typedef uint16_t ArRegionalSimAiSnapshot;
-typedef struct ArRegionalSimAiDescriptor { const char *key; uint16_t value[kArRegionalSource_Count]; } ArRegionalSimAiDescriptor;
+typedef struct ArRegionalSimAiDescriptor {
+  const char *key;
+  uint16_t value[kArRegionalSource_Count];
+} ArRegionalSimAiDescriptor;
 const ArRegionalSimAiDescriptor *ArRegionalSimAi_Descriptor(ArRegionalSimAiRule rule);
 bool ArRegionalSimAi_Init(ArRegionalSimAiPolicy *policy,ArRegionalSource source);
 bool ArRegionalSimAi_Resolve(const ArRegionalSimAiPolicy *policy,ArRegionalSimAiSnapshot *snapshot);
 bool ArRegionalSimAi_GroupSource(const ArRegionalSimAiPolicy *policy,ArRegionalSource *source);
-bool ArRegionalSimAi_Value(ArRegionalSimAiSnapshot snapshot,ArRegionalSimAiRule rule,uint16_t *value);
+bool ArRegionalSimAi_Value(ArRegionalSimAiSnapshot snapshot, ArRegionalSimAiRule rule,
+                           uint16_t *value);
 #endif

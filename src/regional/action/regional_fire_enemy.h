@@ -10,9 +10,14 @@ typedef enum ArRegionalFireRule {
   kArRegionalFire_BounceThreshold,
   kArRegionalFire_Count
 } ArRegionalFireRule;
-typedef struct ArRegionalFirePolicy { ArRegionalSource source[kArRegionalFire_Count]; } ArRegionalFirePolicy;
+typedef struct ArRegionalFirePolicy {
+  ArRegionalSource source[kArRegionalFire_Count];
+} ArRegionalFirePolicy;
 typedef uint8_t ArRegionalFireSnapshot;
-typedef struct ArRegionalFireDescriptor { const char *key;uint16_t value[kArRegionalSource_Count]; } ArRegionalFireDescriptor;
+typedef struct ArRegionalFireDescriptor {
+  const char *key;
+  uint16_t value[kArRegionalSource_Count];
+} ArRegionalFireDescriptor;
 const ArRegionalFireDescriptor *ArRegionalFire_Descriptor(unsigned rule);
 bool ArRegionalFire_Init(ArRegionalFirePolicy *policy,ArRegionalSource source);
 bool ArRegionalFire_Resolve(const ArRegionalFirePolicy *policy,ArRegionalFireSnapshot *snapshot);

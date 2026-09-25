@@ -42,7 +42,8 @@ bool ArRegionalScore_Convert(ArRegionalSource source, uint16_t bcd_score, uint16
   for (unsigned n=0; n<4; ++n) {
     const unsigned digit=(bcd_score>>(n*4)) & 15;
     if (digit>9) return false;
-    score+=digit*place; place*=10;
+    score += digit * place;
+    place *= 10;
   }
   *units=(uint16_t)(source==kArRegionalSource_Japan ?
       (score>650 ? (score-650)/32*10 : 0) : score/10*2);

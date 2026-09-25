@@ -22,7 +22,9 @@ typedef struct ArRegionalRecoveryDescriptor {
 
 const ArRegionalRecoveryDescriptor *ArRegionalRecovery_Descriptor(ArRegionalRecoveryRule rule);
 bool ArRegionalRecovery_Init(ArRegionalRecoveryPolicy *policy, ArRegionalSource source);
-bool ArRegionalRecovery_Resolve(const ArRegionalRecoveryPolicy *policy, ArRegionalRecoverySnapshot *snapshot);
-bool ArRegionalRecovery_GroupSource(const ArRegionalRecoveryPolicy *policy, ArRegionalSource *source);
+bool ArRegionalRecovery_Resolve(const ArRegionalRecoveryPolicy *policy,
+                                ArRegionalRecoverySnapshot *snapshot);
+bool ArRegionalRecovery_GroupSource(const ArRegionalRecoveryPolicy *policy,
+                                    ArRegionalSource *source);
 
 #endif

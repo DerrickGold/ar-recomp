@@ -21,7 +21,9 @@ bool ArRegionalLairReloads_Check(ArRegionalLairReloads *history, ArRegionalSourc
                                 const uint16_t native[kArRegionalLairCount]);
 /* One actual B6BF native modifier event, not a synthetic regional event. */
 bool ArRegionalLairReloads_ReduceTown(ArRegionalLairReloads *history, unsigned town);
-bool ArRegionalLairReloads_Encode(const ArRegionalLairReloads *history, uint8_t *out, size_t capacity);
-bool ArRegionalLairReloads_Decode(const uint8_t *bytes, size_t size, ArRegionalLairReloads *history);
+bool ArRegionalLairReloads_Encode(const ArRegionalLairReloads *history, uint8_t *out,
+                                  size_t capacity);
+bool ArRegionalLairReloads_Decode(const uint8_t *bytes, size_t size,
+                                  ArRegionalLairReloads *history);
 
 #endif

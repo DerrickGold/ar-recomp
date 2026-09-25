@@ -37,7 +37,9 @@ typedef enum ArRegionalBossRule {
   kArRegionalBoss_PlantGeometry,
   kArRegionalBoss_Count
 } ArRegionalBossRule;
-typedef struct ArRegionalBossPolicy { ArRegionalSource source[kArRegionalBoss_Count]; } ArRegionalBossPolicy;
+typedef struct ArRegionalBossPolicy {
+  ArRegionalSource source[kArRegionalBoss_Count];
+} ArRegionalBossPolicy;
 /* Two canonical source bits per semantic rule; numeric aliases use the first
  * matching source. Stable ordinals preserve older replay domains when rules
  * are appended. No native pointers or encounter-local state. */
@@ -59,19 +61,24 @@ bool ArRegionalBoss_MinoRow(ArRegionalBossSnapshot snapshot, unsigned state,
     unsigned row, uint16_t *duration, int16_t dx, int16_t dy);
 /* One coherent head/body policy; not two independently desynchronizable
  * sequence edits. Caller proves rematch ownership and the US row shape. */
-bool ArRegionalBoss_IceSkip(ArRegionalBossSnapshot snapshot,unsigned state,unsigned row,unsigned *next);
+bool ArRegionalBoss_IceSkip(ArRegionalBossSnapshot snapshot, unsigned state, unsigned row,
+                            unsigned *next);
 bool ArRegionalBoss_TanzraRow(ArRegionalBossSnapshot snapshot,unsigned state,unsigned row,
     uint16_t *duration,int16_t dx,int16_t dy);
-bool ArRegionalBoss_TanzraMinionSkip(ArRegionalBossSnapshot snapshot,unsigned state,unsigned row,unsigned *next);
+bool ArRegionalBoss_TanzraMinionSkip(ArRegionalBossSnapshot snapshot, unsigned state, unsigned row,
+                                     unsigned *next);
 bool ArRegionalBoss_DragonRow(ArRegionalBossSnapshot snapshot,unsigned state,unsigned row,
     uint8_t visual,uint16_t *duration,int16_t dx,int16_t dy);
-bool ArRegionalBoss_ViperRow(ArRegionalBossSnapshot snapshot,bool rematch,unsigned state,unsigned row,
-    uint8_t visual,uint16_t *duration,int16_t dx,int16_t *dy);
+bool ArRegionalBoss_ViperRow(ArRegionalBossSnapshot snapshot, bool rematch, unsigned state,
+                             unsigned row, uint8_t visual, uint16_t *duration, int16_t dx,
+                             int16_t *dy);
 bool ArRegionalBoss_PharaohSkip(ArRegionalBossSnapshot snapshot,bool rematch,
     unsigned state,unsigned row,unsigned *next);
 typedef struct ArRegionalPlantPhase { uint8_t state,repetitions; } ArRegionalPlantPhase;
-bool ArRegionalBoss_PlantPhase(ArRegionalBossSnapshot snapshot,unsigned previous,ArRegionalPlantPhase *next);
-bool ArRegionalBoss_PlantOpenRow(ArRegionalBossSnapshot snapshot,unsigned row,unsigned *native_row,uint8_t *visual);
+bool ArRegionalBoss_PlantPhase(ArRegionalBossSnapshot snapshot, unsigned previous,
+                               ArRegionalPlantPhase *next);
+bool ArRegionalBoss_PlantOpenRow(ArRegionalBossSnapshot snapshot, unsigned row,
+                                 unsigned *native_row, uint8_t *visual);
 bool ArRegionalBoss_PlantWindup(ArRegionalBossSnapshot snapshot,unsigned state,unsigned row,
     uint8_t visual,uint16_t *duration,int16_t dx,int16_t dy);
 /* Northwall Act 1: expanded impact rows reuse US row5's tiles. The caller

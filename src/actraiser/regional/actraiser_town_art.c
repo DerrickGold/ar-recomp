@@ -15,7 +15,8 @@ static bool TownBank(CpuState *cpu,ActRaiserTownArtBank *bank) {
   return false;
 }
 bool ActRaiser_TownArtEntry(CpuState *cpu) {
-  if(!cpu || cpu->emulation || cpu->m_flag || cpu->x_flag || cpu->D || cpu->DB || cpu->PB!=2)return false;
+  if (!cpu || cpu->emulation || cpu->m_flag || cpu->x_flag || cpu->D || cpu->DB || cpu->PB != 2)
+    return false;
   const uint16_t scene=cpu_read16(cpu,0,0x18);
   ActRaiserTownArtBank bank;
   return !(scene&255) && scene>=0x0100 && scene<=0x0600 &&

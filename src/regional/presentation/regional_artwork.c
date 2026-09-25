@@ -8,7 +8,8 @@ static const ArRegionalArtworkDescriptor kDescriptors[]={
   {"pyramid_detail",{0,1,0}},
   {"title_background",{0,1,0}},
 };
-_Static_assert(sizeof(kDescriptors)/sizeof(kDescriptors[0])==kArRegionalArtwork_Count,"artwork descriptors");
+_Static_assert(sizeof(kDescriptors) / sizeof(kDescriptors[0]) == kArRegionalArtwork_Count,
+               "artwork descriptors");
 _Static_assert(kArRegionalArtwork_Count<=8,"artwork snapshot mask capacity");
 const ArRegionalArtworkDescriptor *ArRegionalArtwork_Descriptor(unsigned rule) {
   return rule<kArRegionalArtwork_Count?&kDescriptors[rule]:NULL;
@@ -31,7 +32,9 @@ static const ArRegionalArtworkDescriptor kActorDescriptors[]={
   {"northwall_actor_art",{0,1,0}},
   {"death_heim_actor_art",{0,1,0}},
 };
-_Static_assert(sizeof(kActorDescriptors)/sizeof(kActorDescriptors[0])==kArRegionalActorArtwork_Count,"actor artwork descriptors");
+_Static_assert(sizeof(kActorDescriptors) / sizeof(kActorDescriptors[0]) ==
+                   kArRegionalActorArtwork_Count,
+               "actor artwork descriptors");
 _Static_assert(kArRegionalActorArtwork_Count<=8,"actor artwork mask capacity");
 const ArRegionalArtworkDescriptor *ArRegionalActorArtwork_Descriptor(unsigned area) {
   return area<kArRegionalActorArtwork_Count?&kActorDescriptors[area]:NULL;

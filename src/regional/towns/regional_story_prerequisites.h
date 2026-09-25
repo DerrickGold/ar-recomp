@@ -25,7 +25,8 @@ typedef struct ArRegionalStorySnapshot {
 } ArRegionalStorySnapshot;
 const ArRegionalStoryDescriptor *ArRegionalStory_Descriptor(ArRegionalStoryRule rule);
 bool ArRegionalStory_Init(ArRegionalStoryPolicy *policy, ArRegionalSource source);
-bool ArRegionalStory_Resolve(const ArRegionalStoryPolicy *policy, ArRegionalStorySnapshot *snapshot);
+bool ArRegionalStory_Resolve(const ArRegionalStoryPolicy *policy,
+                             ArRegionalStorySnapshot *snapshot);
 bool ArRegionalStory_GroupSource(const ArRegionalStoryPolicy *policy, ArRegionalSource *source);
 
 #endif

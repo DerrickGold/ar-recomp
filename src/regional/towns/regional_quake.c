@@ -28,7 +28,8 @@ bool ArRegionalQuake_GroupSource(const ArRegionalQuakePolicy *policy, ArRegional
   ArRegionalQuakeSnapshot snapshot;
   if (!source || !ArRegionalQuake_Resolve(policy, &snapshot)) return false;
   bool same = true;
-  for (unsigned i = 1; i < kArRegionalQuake_Count; ++i) same &= policy->source[i] == policy->source[0];
+  for (unsigned i = 1; i < kArRegionalQuake_Count; ++i)
+    same &= policy->source[i] == policy->source[0];
   if (same) { *source = policy->source[0]; return true; }
   for (unsigned i = 1; i < kArRegionalQuake_Count; ++i)
     if (snapshot.random[i] != snapshot.random[0]) return false;

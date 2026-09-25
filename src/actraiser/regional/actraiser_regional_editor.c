@@ -447,14 +447,17 @@ ActRaiserRegionalEditResult ActRaiserRegionalEditor_RequestRules(
 
 /* Run the same validated narrow edit against a local candidate. Neither the
  * live session nor its queued Palace intent can be changed by a preview. */
-ActRaiserRegionalEditResult ActRaiserRegionalEditor_PreviewRules(
-    const ActRaiserRegionalEditContext *edit, const ActRaiserRegionalRulesView *view,
-    ActRaiserRegionalSettingGroup group, ArRegionalSource source, ActRaiserRegionalEditImpact *out) {
+ActRaiserRegionalEditResult
+ActRaiserRegionalEditor_PreviewRules(const ActRaiserRegionalEditContext *edit,
+                                     const ActRaiserRegionalRulesView *view,
+                                     ActRaiserRegionalSettingGroup group, ArRegionalSource source,
+                                     ActRaiserRegionalEditImpact *out) {
   if (!edit || !edit->session || !edit->population || !out) return kActRaiserRegionalEdit_Invalid;
   ArRegionalSession candidate = *edit->session;
   ActRaiserRegionalPopulationIntent intent = *edit->population;
   const ActRaiserRegionalEditContext local = {&candidate, &intent, edit->new_game, edit->editable};
-  const ActRaiserRegionalEditResult result = ActRaiserRegionalEditor_RequestRules(&local, view, group, source);
+  const ActRaiserRegionalEditResult result =
+      ActRaiserRegionalEditor_RequestRules(&local, view, group, source);
   if (result != kActRaiserRegionalEdit_Applied && result != kActRaiserRegionalEdit_Unchanged &&
       result != kActRaiserRegionalEdit_Deferred) return result;
   ActRaiserRegionalEditImpact impact = {0};
@@ -463,15 +466,17 @@ ActRaiserRegionalEditResult ActRaiserRegionalEditor_PreviewRules(
     if (!ArRegionalProfiles_Changes(&edit->session->requested, &candidate.requested, &changes))
       return kActRaiserRegionalEdit_Invalid;
     for (unsigned i = 0; i < kArRegionalProfile_GroupCount; ++i)
-      if (group != kActRaiserRegionalSetting_TownStatus && group != kActRaiserRegionalSetting_CompassReturn &&
+      if (group != kActRaiserRegionalSetting_TownStatus &&
+          group != kActRaiserRegionalSetting_CompassReturn &&
           (changes & ArRegionalProfiles_Mask(i)) && ArRegionalProfiles_TownImpact(i))
         impact.towns = kArRegionalTownImpact_Future;
-    if (result == kActRaiserRegionalEdit_Deferred) impact.towns = kArRegionalTownImpact_Redevelopment;
+    if (result == kActRaiserRegionalEdit_Deferred)
+      impact.towns = kArRegionalTownImpact_Redevelopment;
     const ArRegionalRules *before = &edit->session->requested, *after = &candidate.requested;
-    impact.estimated_history =
-        ((!ArRegionalRules_SameAccounting(before, after) ||
-          memcmp(&before->score_feedback, &after->score_feedback, sizeof(before->score_feedback))) &&
-         edit->session->lairs.approximate_towns) ||
+    impact.estimated_history = ((!ArRegionalRules_SameAccounting(before, after) ||
+                                 memcmp(&before->score_feedback, &after->score_feedback,
+                                        sizeof(before->score_feedback))) &&
+                                edit->session->lairs.approximate_towns) ||
         (before->lair_reloads != after->lair_reloads && edit->session->reloads.approximate_towns);
   }
   *out = impact;

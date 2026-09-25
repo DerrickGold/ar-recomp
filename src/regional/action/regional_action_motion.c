@@ -18,7 +18,8 @@ static const ArRegionalActionMotionDescriptor kRules[kArRegionalActionMotion_Cou
 };
 enum { kMask=(1u<<kArRegionalActionMotion_Count)-1 };
 _Static_assert(kArRegionalActionMotion_Count<=16,"extend the motion snapshot for new leaves");
-const ArRegionalActionMotionDescriptor *ArRegionalActionMotion_Descriptor(ArRegionalActionMotionRule rule) {
+const ArRegionalActionMotionDescriptor *
+ArRegionalActionMotion_Descriptor(ArRegionalActionMotionRule rule) {
   return (unsigned)rule<kArRegionalActionMotion_Count?&kRules[rule]:NULL;
 }
 bool ArRegionalActionMotion_Init(ArRegionalActionMotionPolicy *policy,ArRegionalSource source) {
@@ -26,7 +27,8 @@ bool ArRegionalActionMotion_Init(ArRegionalActionMotionPolicy *policy,ArRegional
   for(unsigned i=0;i<kArRegionalActionMotion_Count;++i)policy->source[i]=source;
   return true;
 }
-bool ArRegionalActionMotion_Resolve(const ArRegionalActionMotionPolicy *policy,ArRegionalActionMotionSnapshot *snapshot) {
+bool ArRegionalActionMotion_Resolve(const ArRegionalActionMotionPolicy *policy,
+                                    ArRegionalActionMotionSnapshot *snapshot) {
   if(!policy || !snapshot)return false;
   uint16_t next=0;
   for(unsigned i=0;i<kArRegionalActionMotion_Count;++i) {
@@ -35,10 +37,13 @@ bool ArRegionalActionMotion_Resolve(const ArRegionalActionMotionPolicy *policy,A
   }
   *snapshot=next;return true;
 }
-bool ArRegionalActionMotion_GroupSource(const ArRegionalActionMotionPolicy *policy,ArRegionalSource *source) {
-  uint16_t snapshot;if(!source || !ArRegionalActionMotion_Resolve(policy,&snapshot))return false;
+bool ArRegionalActionMotion_GroupSource(const ArRegionalActionMotionPolicy *policy,
+                                        ArRegionalSource *source) {
+  uint16_t snapshot;
+  if (!source || !ArRegionalActionMotion_Resolve(policy, &snapshot)) return false;
   bool uniform=true;
-  for(unsigned i=1;i<kArRegionalActionMotion_Count;++i)uniform &= policy->source[i]==policy->source[0];
+  for (unsigned i = 1; i < kArRegionalActionMotion_Count; ++i)
+    uniform &= policy->source[i] == policy->source[0];
   if(uniform)*source=policy->source[0];
   else if(!snapshot)*source=kArRegionalSource_US;
   else if(snapshot==kMask)*source=kArRegionalSource_Japan;
@@ -52,14 +57,17 @@ bool ArRegionalActionMotion_Row(uint16_t snapshot,ArRegionalActionMotionFamily f
   switch(family) {
     case kArRegionalActionMotion_Bird:
       if(state!=21 || row>=2 || *duration!=1)return false;
-      rule=kArRegionalActionMotion_BirdSpeed;break;
+      rule = kArRegionalActionMotion_BirdSpeed;
+      break;
     case kArRegionalActionMotion_Leaper:
       if(!((state==30 && row==10 && *duration==7) ||
           (state>=31 && state<=33 && row<4 && *duration==5)))return false;
-      rule=kArRegionalActionMotion_LeaperSpeed;break;
+      rule = kArRegionalActionMotion_LeaperSpeed;
+      break;
     case kArRegionalActionMotion_Cave:
       if(state!=31 || row!=0)return false;
-      rule=kArRegionalActionMotion_CaveRecovery;break;
+      rule = kArRegionalActionMotion_CaveRecovery;
+      break;
     case kArRegionalActionMotion_CaveAttacker:
       if(state==39 && row==1)rule=kArRegionalActionMotion_CaveStraightRecovery;
       else if(state==41 && row==4)rule=kArRegionalActionMotion_CaveHighRecovery;
@@ -67,7 +75,8 @@ bool ArRegionalActionMotion_Row(uint16_t snapshot,ArRegionalActionMotionFamily f
       break;
     case kArRegionalActionMotion_Caster:
       if(row!=0 || (state!=16 && state!=19))return false;
-      rule=state==16?kArRegionalActionMotion_CasterLowWindup:kArRegionalActionMotion_CasterHighWindup;
+      rule = state == 16 ? kArRegionalActionMotion_CasterLowWindup
+                         : kArRegionalActionMotion_CasterHighWindup;
       break;
     case kArRegionalActionMotion_Swordsman:
       if(state==29 && row==8)rule=kArRegionalActionMotion_SwordStraightRecovery;
@@ -78,7 +87,8 @@ bool ArRegionalActionMotion_Row(uint16_t snapshot,ArRegionalActionMotionFamily f
       /* Preserve the two-row Western flashing timeline. JP artwork/cadence
        * is a separate presentation choice; only per-update velocity changes. */
       if(state!=41 || row>=2 || *duration!=1)return false;
-      rule=kArRegionalActionMotion_ArrowSpeed;break;
+      rule = kArRegionalActionMotion_ArrowSpeed;
+      break;
     default:return false;
   }
   const ArRegionalActionMotionDescriptor *desc=&kRules[rule];
@@ -92,7 +102,8 @@ bool ArRegionalActionMotion_Row(uint16_t snapshot,ArRegionalActionMotionFamily f
   }
   return true;
 }
-bool ArRegionalActionMotion_HeadRow(uint16_t snapshot,unsigned logical_row,unsigned *native_row,uint8_t *visual) {
+bool ArRegionalActionMotion_HeadRow(uint16_t snapshot, unsigned logical_row, unsigned *native_row,
+                                    uint8_t *visual) {
   if(!native_row || !visual || (snapshot&~kMask) ||
       !(snapshot&(1u<<kArRegionalActionMotion_HeadWithdrawal)) || logical_row>4)return false;
   static const uint8_t rows[]={0,1,1,2,3},visuals[]={40,39,38,37,255};

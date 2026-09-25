@@ -151,17 +151,21 @@ static ArRegionalRules s_prepared_rules;
 bool ActRaiserRegional_Initialize(ArRegionalCampaignIdentity identity, void *context) {
   return ActRaiserRegional_InitializeSlot(0,identity,context);
 }
-bool ActRaiserRegional_InitializeSlot(uint32_t slot,ArRegionalCampaignIdentity identity,void *context) {
+bool ActRaiserRegional_InitializeSlot(uint32_t slot, ArRegionalCampaignIdentity identity,
+                                      void *context) {
   s_prepared_new_game=false;
   Randomizer_ReleaseCampaign();
   s_profile_cache = (ArRegionalProfileCache){0};
   s_title_open=false;
   s_title_saved=false;
-  s_settings_writer=NULL;s_settings_context=NULL;
+  s_settings_writer = NULL;
+  s_settings_context = NULL;
   s_title_draft=(ArRegionalSession){0};
-  s_town_art_scene=0;s_town_artwork=0;
+  s_town_art_scene = 0;
+  s_town_artwork = 0;
   s_return_rules_valid=false;
-  ArRegionalSpellInventory_Reset(&s_inventory,false);s_inventory_icon_pending=false;
+  ArRegionalSpellInventory_Reset(&s_inventory, false);
+  s_inventory_icon_pending = false;
   if (!identity) return false;
   s_delegate = false;
   memset(&s_population,0,sizeof(s_population));
@@ -248,24 +252,30 @@ bool ActRaiserRegional_InitializeSlot(uint32_t slot,ArRegionalCampaignIdentity i
 
 bool ActRaiserRegional_StageNewGame(const ArRegionalSession *draft) {
   if(!draft || draft->slot!=s_campaign.slot || s_title_open || s_campaign.active_valid)return false;
-  uint8_t bytes[kSaveCheckpointPayloadMax];size_t size;
+  uint8_t bytes[kSaveCheckpointPayloadMax];
+  size_t size;
   if(!ArRegionalSession_Encode(draft,bytes,sizeof(bytes),&size) ||
       !Randomizer_StageTitleConfig(&draft->randomizer))return false;
-  s_prepared_rules=draft->requested;s_prepared_new_game=true;
+  s_prepared_rules = draft->requested;
+  s_prepared_new_game = true;
   s_boot_requested=s_boot_effective=draft->requested;
   return true;
 }
 
 void ActRaiserRegional_SetSettingsWriter(ActRaiserRegionalSettingsWriter writer,void *context) {
-  s_settings_writer=writer;s_settings_context=context;
+  s_settings_writer = writer;
+  s_settings_context = context;
 }
 
 bool ActRaiserRegional_CopySupport(ArRegionalSupportSnapshot *snapshot) {
   const ArRegionalSupportPolicy native={{0}};
-  return ArRegionalSupport_Resolve(s_campaign.active_valid?&s_campaign.active.effective.support:&native,snapshot);
+  return ArRegionalSupport_Resolve(
+      s_campaign.active_valid ? &s_campaign.active.effective.support : &native, snapshot);
 }
 
-ArRegionalActionMotionSnapshot ActRaiserRegional_ActionMotionSnapshot(void) { return s_action.motion; }
+ArRegionalActionMotionSnapshot ActRaiserRegional_ActionMotionSnapshot(void) {
+  return s_action.motion;
+}
 bool ActRaiserRegional_ScoreLivesEnabled(void) {return s_action.score_lives;}
 bool ActRaiserRegional_BeginActionStart(ArRegionalActionStartSnapshot *snapshot) {
   const ArRegionalActionStartPolicy native={{0}};
@@ -274,8 +284,10 @@ bool ActRaiserRegional_BeginActionStart(ArRegionalActionStartSnapshot *snapshot)
 }
 bool ActRaiserRegional_StartInventory(void) {
   bool enabled=false;
-  if(s_campaign.active_valid && !ArRegionalSession_BeginInventory(&s_campaign.active,&enabled))return false;
-  ArRegionalSpellInventory_Reset(&s_inventory,enabled);s_inventory_icon_pending=enabled;
+  if (s_campaign.active_valid && !ArRegionalSession_BeginInventory(&s_campaign.active, &enabled))
+    return false;
+  ArRegionalSpellInventory_Reset(&s_inventory, enabled);
+  s_inventory_icon_pending = enabled;
   return true;
 }
 ActRaiserInventoryView ActRaiserRegional_InventoryView(void) {
@@ -284,26 +296,33 @@ ActRaiserInventoryView ActRaiserRegional_InventoryView(void) {
 }
 bool ActRaiserRegional_PushSpell(unsigned spell) {
   if(!ArRegionalSpellInventory_Push(&s_inventory,spell))return false;
-  s_inventory_icon_pending=true;return true;
+  s_inventory_icon_pending = true;
+  return true;
 }
 bool ActRaiserRegional_BeginSpell(uint8_t *spell) {
   return ArRegionalSpellInventory_BeginCast(&s_inventory,spell);
 }
 bool ActRaiserRegional_FinishSpell(void) {
   if(!ArRegionalSpellInventory_FinishCast(&s_inventory))return false;
-  s_inventory_icon_pending=true;return true;
+  s_inventory_icon_pending = true;
+  return true;
 }
 void ActRaiserRegional_InventoryIconUploaded(void) {s_inventory_icon_pending=false;}
 ArRegionalEmitterSnapshot ActRaiserRegional_EmitterSnapshot(void) { return s_action.emitters; }
 bool ActRaiserRegional_DoubleStatueVolley(void) { return s_action.statue_volley; }
 ArRegionalBossSnapshot ActRaiserRegional_BossSnapshot(void) { return s_action.bosses; }
-ArRegionalDifficultySnapshot ActRaiserRegional_DifficultySnapshot(void) { return s_action.difficulty; }
+ArRegionalDifficultySnapshot ActRaiserRegional_DifficultySnapshot(void) {
+  return s_action.difficulty;
+}
 ArRegionalCollisionSnapshot ActRaiserRegional_CollisionSnapshot(void) { return s_action.collision; }
-ArRegionalPlatformSkullSnapshot ActRaiserRegional_PlatformSkullSnapshot(void) { return s_action.platform_skull; }
+ArRegionalPlatformSkullSnapshot ActRaiserRegional_PlatformSkullSnapshot(void) {
+  return s_action.platform_skull;
+}
 ArRegionalCastHoldSnapshot ActRaiserRegional_CastHoldSnapshot(void) { return s_action.cast_hold; }
 ArRegionalFireSnapshot ActRaiserRegional_FireSnapshot(void) { return s_action.fire_enemy; }
 bool ActRaiserRegional_ActorStatsEnabled(void) { return s_action.actor_stats.changed; }
-bool ActRaiserRegional_ActorStats(uint16_t actor,uint16_t native_hp,uint16_t native_attack,uint16_t *hp,uint16_t *attack) {
+bool ActRaiserRegional_ActorStats(uint16_t actor, uint16_t native_hp, uint16_t native_attack,
+                                  uint16_t *hp, uint16_t *attack) {
   return ArRegionalActorStats_Apply(&s_action.actor_stats,actor,native_hp,native_attack,hp,attack);
 }
 uint16_t ActRaiserRegional_ActorChildStat(unsigned rule) {
@@ -315,18 +334,22 @@ uint16_t ActRaiserRegional_ActorChildStat(unsigned rule) {
 bool ActRaiserRegional_ArrivalSnapshot(bool latch,bool continuing,bool *japanese) {
   if(!s_campaign.active_valid || !japanese)return false;
   if(latch)return ArRegionalSession_BeginArrival(&s_campaign.active,continuing,japanese);
-  return ArRegionalArrival_Resolve(s_campaign.active.arrival_locked?s_campaign.active.effective.arrival:
-      s_campaign.active.requested.arrival,japanese);
+  return ArRegionalArrival_Resolve(s_campaign.active.arrival_locked
+                                       ? s_campaign.active.effective.arrival
+                                       : s_campaign.active.requested.arrival,
+                                   japanese);
 }
 
 void ActRaiserRegional_SetPopulationPrompt(ActRaiserRegionalPopulationPrompt prompt,void *context) {
-  s_population.prompt=prompt;s_population.context=context;
+  s_population.prompt = prompt;
+  s_population.context = context;
 }
 
 bool ActRaiser_RegionalPopulationEntry(CpuState *cpu) {
   if(s_population.delegate){s_population.delegate=false;return false;}
-  return s_population.intent.pending && s_campaign.active_valid && InputReplay_PolicyChangesAllowed() &&
-      cpu && cpu->PB==1 && cpu->DB==1 && cpu->m_flag && !cpu->x_flag && !cpu->D && !cpu->emulation;
+  return s_population.intent.pending && s_campaign.active_valid &&
+      InputReplay_PolicyChangesAllowed() && cpu && cpu->PB == 1 && cpu->DB == 1 && cpu->m_flag &&
+      !cpu->x_flag && !cpu->D && !cpu->emulation;
 }
 
 static bool PopulationRecoveryPath(char *path,size_t capacity) {
@@ -338,7 +361,8 @@ static bool PopulationRecoveryPath(char *path,size_t capacity) {
 
 RecompReturn ActRaiser_RegionalPopulation(CpuState *cpu) {
   const ArRegionalSource source=s_population.intent.source;
-  const bool gameplay_profile=s_population.intent.profile && s_population.intent.group==kArRegionalProfile_Gameplay;
+  const bool gameplay_profile =
+      s_population.intent.profile && s_population.intent.group == kArRegionalProfile_Gameplay;
   const bool current=PopulationPending(&s_campaign.active) && InputReplay_PolicyChangesAllowed();
   s_population.intent.pending=false; /* A failed/cancelled request is never replayed. */
   ActRaiserPopulationPreview preview;
@@ -347,7 +371,8 @@ RecompReturn ActRaiser_RegionalPopulation(CpuState *cpu) {
       ActRaiserPopulation_PreviewProfile(cpu,&s_campaign,s_population.intent.group,source,&preview):
       ActRaiserPopulation_Preview(cpu,&s_campaign,source,&preview);
   if(result==kActRaiserPopulation_Ready && s_population.prompt) {
-    if(s_population.prompt(s_population.context,kActRaiserRegionalPopulation_Confirm,source,gameplay_profile,preview.town.removed)) {
+    if (s_population.prompt(s_population.context, kActRaiserRegionalPopulation_Confirm, source,
+                            gameplay_profile, preview.town.removed)) {
       SaveError error={{0}};char directory[512];
       if(PopulationRecoveryPath(directory,sizeof(directory))) {
         result=ActRaiserPopulation_Commit(cpu,&s_campaign,&preview,directory,&error);
@@ -357,12 +382,15 @@ RecompReturn ActRaiser_RegionalPopulation(CpuState *cpu) {
       const ActRaiserRegionalPopulationNotice notice=result==kActRaiserPopulation_Committed?
           kActRaiserRegionalPopulation_Complete:result==kActRaiserPopulation_NamePending?
           kActRaiserRegionalPopulation_NamePending:kActRaiserRegionalPopulation_Failed;
-      (void)s_population.prompt(s_population.context,notice,source,gameplay_profile,preview.town.removed);
+      (void)s_population.prompt(s_population.context, notice, source, gameplay_profile,
+                                preview.town.removed);
     }
   } else if(result!=kActRaiserPopulation_Unchanged && s_population.prompt) {
-    fprintf(stderr,"[regional] population conversion not started: result=%d source=%d\n",result,source);
+    fprintf(stderr, "[regional] population conversion not started: result=%d source=%d\n", result,
+            source);
     const uint16_t none[6]={0};
-    (void)s_population.prompt(s_population.context,kActRaiserRegionalPopulation_Failed,source,gameplay_profile,none);
+    (void)s_population.prompt(s_population.context, kActRaiserRegionalPopulation_Failed, source,
+                              gameplay_profile, none);
   }
   /* Original LDY and selector continuation retain their exact CPU/stack ABI. */
   s_population.delegate=true;
@@ -403,10 +431,13 @@ bool ActRaiserRegional_ModeEntry(bool activate,uint8_t *snapshot) {
 bool ActRaiserRegional_ReturnToTitle(void) {
   if(s_title_open || !s_campaign.active_valid)return false;
   s_population.intent.pending=false;
-  s_return_rules=s_campaign.active.requested;s_return_rules_valid=true;
+  s_return_rules = s_campaign.active.requested;
+  s_return_rules_valid = true;
   // Mode access/return routing must not reset the independently chosen difficulty.
-  s_town_art_scene=0;s_town_artwork=0;
-  ArRegionalSpellInventory_Reset(&s_inventory,false);s_inventory_icon_pending=false;
+  s_town_art_scene = 0;
+  s_town_artwork = 0;
+  ArRegionalSpellInventory_Reset(&s_inventory, false);
+  s_inventory_icon_pending = false;
   s_action=(ArRegionalActionRoomSnapshot){0};ActRaiserStagePlacements_Reset();
   return true;
 }
@@ -473,19 +504,32 @@ static ActRaiserRegionalEditResult FinishSettingsEdit(ActRaiserRegionalEditResul
 
 /* One transaction wrapper for the four public edit shapes. The pure editor
  * continues to own validation, preview and town-redevelopment decisions. */
-typedef enum SettingsEditKind { kSettingsRules,kSettingsProfile,kSettingsDifficulty,kSettingsDifficultyChoice } SettingsEditKind;
+typedef enum SettingsEditKind {
+  kSettingsRules,
+  kSettingsProfile,
+  kSettingsDifficulty,
+  kSettingsDifficultyChoice
+} SettingsEditKind;
 static ActRaiserRegionalEditResult RequestSettings(const ActRaiserRegionalRulesView *view,
     SettingsEditKind kind,unsigned key,unsigned choice) {
   const ActRaiserRegionalEditContext edit=CurrentEditor();
   if(!edit.session)return kActRaiserRegionalEdit_Invalid;
   ArRegionalSession candidate=*edit.session;
   ActRaiserRegionalPopulationIntent population=*edit.population;
-  ActRaiserRegionalEditContext scratch=edit;scratch.session=&candidate;scratch.population=&population;
+  ActRaiserRegionalEditContext scratch = edit;
+  scratch.session = &candidate;
+  scratch.population = &population;
   ActRaiserRegionalEditResult result;
   switch(kind) {
-    case kSettingsRules: result=ActRaiserRegionalEditor_RequestRules(&scratch,view,key,choice);break;
-    case kSettingsProfile: result=ActRaiserRegionalEditor_RequestProfile(&scratch,view,key,choice);break;
-    case kSettingsDifficulty: result=ActRaiserRegionalEditor_RequestDifficulty(&scratch,view,choice);break;
+    case kSettingsRules:
+      result = ActRaiserRegionalEditor_RequestRules(&scratch, view, key, choice);
+      break;
+    case kSettingsProfile:
+      result = ActRaiserRegionalEditor_RequestProfile(&scratch, view, key, choice);
+      break;
+    case kSettingsDifficulty:
+      result = ActRaiserRegionalEditor_RequestDifficulty(&scratch, view, choice);
+      break;
     default: result=ActRaiserRegionalEditor_RequestDifficultyChoice(&scratch,view,choice);break;
   }
   return FinishSettingsEdit(result,&edit,&candidate,&population);
@@ -495,9 +539,12 @@ ActRaiserRegionalEditResult ActRaiserRegional_PreviewRules(
     const ActRaiserRegionalRulesView *view, ActRaiserRegionalSettingGroup group,
     ArRegionalSource source, ActRaiserRegionalEditImpact *out) {
   const ActRaiserRegionalEditContext edit = CurrentEditor();
-  const ActRaiserRegionalEditResult result=ActRaiserRegionalEditor_PreviewRules(&edit,view,group,source,out);
-  return s_settings_writer && s_title_open && s_title_saved && result==kActRaiserRegionalEdit_Deferred
-      ? kActRaiserRegionalEdit_RequiresGame : result;
+  const ActRaiserRegionalEditResult result =
+      ActRaiserRegionalEditor_PreviewRules(&edit, view, group, source, out);
+  return s_settings_writer && s_title_open && s_title_saved &&
+          result == kActRaiserRegionalEdit_Deferred
+      ? kActRaiserRegionalEdit_RequiresGame
+      : result;
 }
 ActRaiserRegionalEditResult ActRaiserRegional_RequestDifficultyChoice(
     const ActRaiserRegionalRulesView *view, ArRegionalDifficultyChoice choice) {
@@ -513,13 +560,17 @@ ActRaiserRegionalEditResult ActRaiserRegional_PreviewProfile(
     const ActRaiserRegionalRulesView *view, ArRegionalProfileGroup group,
     ArRegionalSource source, ActRaiserRegionalEditImpact *out) {
   const ActRaiserRegionalEditContext edit = CurrentEditor();
-  const ActRaiserRegionalEditResult result=ActRaiserRegionalEditor_PreviewProfile(&edit,view,group,source,out);
-  return s_settings_writer && s_title_open && s_title_saved && result==kActRaiserRegionalEdit_Deferred
-      ? kActRaiserRegionalEdit_RequiresGame : result;
+  const ActRaiserRegionalEditResult result =
+      ActRaiserRegionalEditor_PreviewProfile(&edit, view, group, source, out);
+  return s_settings_writer && s_title_open && s_title_saved &&
+          result == kActRaiserRegionalEdit_Deferred
+      ? kActRaiserRegionalEdit_RequiresGame
+      : result;
 }
 
-ActRaiserRegionalEditResult ActRaiserRegional_RequestRules(
-    const ActRaiserRegionalRulesView *view, ActRaiserRegionalSettingGroup group, ArRegionalSource source) {
+ActRaiserRegionalEditResult ActRaiserRegional_RequestRules(const ActRaiserRegionalRulesView *view,
+                                                           ActRaiserRegionalSettingGroup group,
+                                                           ArRegionalSource source) {
   return RequestSettings(view,kSettingsRules,group,source);
 }
 
@@ -538,7 +589,9 @@ bool ActRaiserRegional_BeginTitleArtwork(uint8_t *mask) {
   if(!s_title_open)PrepareTitleDraft();
   uint8_t next=0;
   if(!ArRegionalSession_BeginTitleArtwork(&s_title_draft,&next))return false;
-  s_title_artwork=next;*mask=next;return true;
+  s_title_artwork = next;
+  *mask = next;
+  return true;
 }
 uint8_t ActRaiserRegional_TitleArtworkSnapshot(void) { return s_title_open?s_title_artwork:0; }
 uint8_t ActRaiserRegional_TownArtworkSnapshot(uint16_t scene) {
@@ -547,10 +600,15 @@ uint8_t ActRaiserRegional_TownArtworkSnapshot(uint16_t scene) {
 bool ActRaiserRegional_BeginTownArtwork(uint16_t scene,uint8_t *mask) {
   if(!mask || (scene&255) || scene<0x0100 || scene>0x0600)return false;
   uint8_t next=0;
-  if(s_campaign.active_valid && !ArRegionalSession_BeginTownArtwork(&s_campaign.active,&next))return false;
-  s_town_art_scene=scene;s_town_artwork=next;*mask=next;return true;
+  if (s_campaign.active_valid && !ArRegionalSession_BeginTownArtwork(&s_campaign.active, &next))
+    return false;
+  s_town_art_scene = scene;
+  s_town_artwork = next;
+  *mask = next;
+  return true;
 }
-bool ActRaiserRegional_PlacementSnapshot(ArRegionalPlacementPolicy *policy,ArRegionalDifficulty *difficulty) {
+bool ActRaiserRegional_PlacementSnapshot(ArRegionalPlacementPolicy *policy,
+                                         ArRegionalDifficulty *difficulty) {
   if(!policy || !difficulty)return false;
   *policy=s_action.placements;*difficulty=s_action.placement_difficulty;return true;
 }
@@ -568,8 +626,14 @@ bool ActRaiserRegional_BeginSongSequence(unsigned rule,bool *enabled) {
 
 bool ActRaiserRegional_BeginActionRoom(uint8_t profile, uint16_t native_bcd, uint16_t *out_bcd) {
   if (!out_bcd) return false;
-  if (!s_campaign.active_valid) { s_action=(ArRegionalActionRoomSnapshot){0};ActRaiserStagePlacements_Reset();*out_bcd = native_bcd; return true; }
-  if (!ArRegionalSession_BeginActionRoom(&s_campaign.active, profile, native_bcd, out_bcd, &s_action))
+  if (!s_campaign.active_valid) {
+    s_action = (ArRegionalActionRoomSnapshot){ 0 };
+    ActRaiserStagePlacements_Reset();
+    *out_bcd = native_bcd;
+    return true;
+  }
+  if (!ArRegionalSession_BeginActionRoom(&s_campaign.active, profile, native_bcd, out_bcd,
+                                         &s_action))
     return false;
   ActRaiserStagePlacements_Reset();
   ArRegionalSpellInventory_Interrupt(&s_inventory);
@@ -611,21 +675,33 @@ RecompReturn ActRaiserRegional_RunMiracle(CpuState *cpu) {
 bool ActRaiserRegional_ReplayDigest(void *unused, uint8_t out[32], bool *baseline) {
   (void)unused;
   if (!out || !baseline || (!s_campaign.active_valid && !s_boot_valid)) return false;
-  const ArRegionalRules *requested = s_campaign.active_valid ? &s_campaign.active.requested : &s_boot_requested;
-  const ArRegionalRules *effective = s_campaign.active_valid ? &s_campaign.active.effective : &s_boot_effective;
-  const ArRegionalLairHistory *history = s_campaign.active_valid ? &s_campaign.active.lairs : &s_boot_lairs;
-  const ArRegionalLairAccounting pending = ArRegionalRules_LairAccounting(requested), active = ArRegionalRules_LairAccounting(effective);
-  const ArRegionalLairReloads *reloads=s_campaign.active_valid?&s_campaign.active.reloads:&s_boot_reloads;
-  const ArRegionalSimActors *actors=s_campaign.active_valid?&s_campaign.active.sim_actors:&s_boot_sim_actors;
-  uint8_t digest[32]; bool rules_native, lairs_native, reloads_native, actors_native, placements_native;
-  if (!ArRegionalRules_Fingerprint(requested,effective,digest,&rules_native) ||
-      !ArRegionalLairHistory_Fingerprint(digest,history,&pending,&active,digest,&lairs_native) ||
-      !ArRegionalLairReloads_Fingerprint(digest,reloads,requested->lair_reloads,effective->lair_reloads,
-                                        digest,&reloads_native) ||
-      !ArRegionalSimActors_Fingerprint(digest,actors,digest,&actors_native) ||
-      !ArRegionalArrivalLock_Fingerprint(digest,requested->arrival,effective->arrival,
-          s_campaign.active_valid?s_campaign.active.arrival_locked:s_boot_arrival_locked,digest)) return false;
-  if (s_campaign.active_valid && s_completion_state!=kScoreIdle && (!rules_native || !lairs_native)) {
+  const ArRegionalRules *requested =
+      s_campaign.active_valid ? &s_campaign.active.requested : &s_boot_requested;
+  const ArRegionalRules *effective =
+      s_campaign.active_valid ? &s_campaign.active.effective : &s_boot_effective;
+  const ArRegionalLairHistory *history =
+      s_campaign.active_valid ? &s_campaign.active.lairs : &s_boot_lairs;
+  const ArRegionalLairAccounting pending = ArRegionalRules_LairAccounting(requested),
+                                 active = ArRegionalRules_LairAccounting(effective);
+  const ArRegionalLairReloads *reloads =
+      s_campaign.active_valid ? &s_campaign.active.reloads : &s_boot_reloads;
+  const ArRegionalSimActors *actors =
+      s_campaign.active_valid ? &s_campaign.active.sim_actors : &s_boot_sim_actors;
+  uint8_t digest[32];
+  bool rules_native, lairs_native, reloads_native, actors_native, placements_native;
+  if (!ArRegionalRules_Fingerprint(requested, effective, digest, &rules_native) ||
+      !ArRegionalLairHistory_Fingerprint(digest, history, &pending, &active, digest,
+                                         &lairs_native) ||
+      !ArRegionalLairReloads_Fingerprint(digest, reloads, requested->lair_reloads,
+                                         effective->lair_reloads, digest, &reloads_native) ||
+      !ArRegionalSimActors_Fingerprint(digest, actors, digest, &actors_native) ||
+      !ArRegionalArrivalLock_Fingerprint(digest, requested->arrival, effective->arrival,
+                                         s_campaign.active_valid ? s_campaign.active.arrival_locked
+                                                                 : s_boot_arrival_locked,
+                                         digest))
+    return false;
+  if (s_campaign.active_valid && s_completion_state != kScoreIdle &&
+      (!rules_native || !lairs_native)) {
     uint8_t completion[51]="ARSCORECLEAR-R1";
     memcpy(completion+16,digest,32);
     completion[48]=(uint8_t)s_completion_state;
@@ -655,7 +731,8 @@ bool ActRaiserRegional_ReplayDigest(void *unused, uint8_t out[32], bool *baselin
         !sr_support_sha256(randomized,sizeof(randomized),digest))return false;
   }
   memcpy(out,digest,sizeof(digest));
-  *baseline = rules_native && lairs_native && reloads_native && actors_native && placements_native && stats_native && !s_inventory.enabled && !recipe.enabled;
+  *baseline = rules_native && lairs_native && reloads_native && actors_native &&
+      placements_native && stats_native && !s_inventory.enabled && !recipe.enabled;
   return true;
 }
 
@@ -670,10 +747,12 @@ RecompReturn ActRaiserRegional_RunReportCommand(CpuState *cpu) {
     ActRaiserHleFatal("Cannot capture regional command return");
   const unsigned action = (uint8_t)cpu->A;
   s_report_command_active = true;
-  if (s_trace) fprintf(stderr, "[regional] report command=%u keep-open=%u begin\n", action, keep_open);
+  if (s_trace)
+    fprintf(stderr, "[regional] report command=%u keep-open=%u begin\n", action, keep_open);
   const RecompReturn result = ActRaiserReportCommand_Run(cpu, action, keep_open);
   s_report_command_active = false;
-  if (s_trace) fprintf(stderr, "[regional] report command=%u return=%u\n", action, (unsigned)result);
+  if (s_trace)
+    fprintf(stderr, "[regional] report command=%u return=%u\n", action, (unsigned)result);
   return result;
 }
 
@@ -712,8 +791,9 @@ static ArRegionalRecoverySnapshot CaptureRecovery(CpuState *cpu) {
         ArRegionalRecovery_Resolve(&s_campaign.active.effective.recovery, &snapshot)))
     ActRaiserHleFatal("Cannot capture regional recovery policy");
   if (changed) ActRaiserRecovery_Reconcile(cpu, changed);
-  if (s_trace && pending) fprintf(stderr, "[regional] recovery cycle-sp=%u angel-calls=%u retired=%u\n",
-      snapshot.cycle_sp, snapshot.angel_calls, changed);
+  if (s_trace && pending)
+    fprintf(stderr, "[regional] recovery cycle-sp=%u angel-calls=%u retired=%u\n",
+            snapshot.cycle_sp, snapshot.angel_calls, changed);
   return snapshot;
 }
 static RecompReturn RecoveryTransfer(RecompReturn result, uint32_t target, uint32_t source) {
@@ -724,17 +804,20 @@ static RecompReturn RecoveryTransfer(RecompReturn result, uint32_t target, uint3
   return RECOMP_RETURN_TAILCALL;
 }
 RecompReturn ActRaiser_RegionalRecoveryCycle(CpuState *cpu) {
-  if (!ActRaiser_RegionalRecoveryCycleEntry(cpu)) ActRaiserHleFatal("Invalid regional recovery cycle");
+  if (!ActRaiser_RegionalRecoveryCycleEntry(cpu))
+    ActRaiserHleFatal("Invalid regional recovery cycle");
   const ArRegionalRecoverySnapshot snapshot = CaptureRecovery(cpu);
   return RecoveryTransfer(ActRaiserRecovery_Cycle(cpu, &snapshot), 0x038298, 0x038271);
 }
 RecompReturn ActRaiser_RegionalRecoveryDrain(CpuState *cpu) {
-  if (!ActRaiser_RegionalRecoveryDrainEntry(cpu)) ActRaiserHleFatal("Invalid regional recovery drain");
+  if (!ActRaiser_RegionalRecoveryDrainEntry(cpu))
+    ActRaiserHleFatal("Invalid regional recovery drain");
   const ArRegionalRecoverySnapshot snapshot = CaptureRecovery(cpu);
   return RecoveryTransfer(ActRaiserRecovery_Drain(cpu, &snapshot), 0x01b281, 0x01b257);
 }
 static RecompReturn RecoveryMotion(CpuState *cpu, bool stopped) {
-  if (!ActRaiser_RegionalRecoveryMotionEntry(cpu)) ActRaiserHleFatal("Invalid regional recovery motion");
+  if (!ActRaiser_RegionalRecoveryMotionEntry(cpu))
+    ActRaiserHleFatal("Invalid regional recovery motion");
   const ArRegionalRecoverySnapshot snapshot = CaptureRecovery(cpu);
   ActRaiserRecovery_Motion(cpu, &snapshot, stopped);
   return RecoveryTransfer(RECOMP_RETURN_NORMAL, stopped ? 0x019c3c : 0x019c32,
@@ -750,19 +833,22 @@ bool ActRaiser_RegionalEffectEntry(CpuState *cpu) {
   return s_campaign.active_valid && ActRaiserDevelopment_EffectEntry(cpu);
 }
 RecompReturn ActRaiser_RegionalDevelopment(CpuState *cpu) {
-  if(!ActRaiser_RegionalDevelopmentEntry(cpu))ActRaiserHleFatal("Invalid regional development entry");
+  if (!ActRaiser_RegionalDevelopmentEntry(cpu))
+    ActRaiserHleFatal("Invalid regional development entry");
   ActivateLairAccounting(cpu);
   ActivateLairReloads(cpu);
   ArRegionalDevelopmentSnapshot snapshot;
   const bool new_cycle=cpu_read16(cpu,0,0x0347)!=7 &&
       !cpu_read16(cpu,0x7f,0x91fe) && !cpu_read16(cpu,0x7f,0x9200);
-  const bool pending=memcmp(&s_campaign.active.requested.development,&s_campaign.active.effective.development,
-                            sizeof(s_campaign.active.requested.development))!=0;
+  const bool pending =
+      memcmp(&s_campaign.active.requested.development, &s_campaign.active.effective.development,
+             sizeof(s_campaign.active.requested.development)) != 0;
   if(!(new_cycle ? ArRegionalSession_BeginDevelopment(&s_campaign.active,&snapshot) :
        ArRegionalDevelopment_Resolve(&s_campaign.active.effective.development,&snapshot)))
     ActRaiserHleFatal("Cannot capture regional development cycle");
-  if(s_trace && new_cycle && pending)fprintf(stderr,"[regional] development divider=%u cycle=%u effects=%u\n",
-      snapshot.service_divider,snapshot.long_cycle,snapshot.effect_divider);
+  if (s_trace && new_cycle && pending)
+    fprintf(stderr, "[regional] development divider=%u cycle=%u effects=%u\n",
+            snapshot.service_divider, snapshot.long_cycle, snapshot.effect_divider);
   return ActRaiserDevelopment_Master(cpu,&snapshot);
 }
 static RecompReturn RegionalEffect(CpuState *cpu,bool world_actors) {
@@ -781,7 +867,8 @@ RecompReturn ActRaiser_RegionalFishing(CpuState *cpu) {
   if (!ActRaiser_RegionalFishingEntry(cpu) ||
       !ArRegionalSession_BeginFishing(&s_campaign.active, &target, &reconcile))
     ActRaiserHleFatal("Cannot capture regional fishing target");
-  const RecompReturn result = ActRaiserFishing_Prefix(cpu, (uint8_t)target, reconcile, &continuation);
+  const RecompReturn result =
+      ActRaiserFishing_Prefix(cpu, (uint8_t)target, reconcile, &continuation);
   if (result != RECOMP_RETURN_NORMAL)
     return result >= RECOMP_RETURN_TAILCALL ? result : (RecompReturn)(result - 1);
   if (s_trace && (reconcile || continuation == 0xe895))
@@ -868,7 +955,8 @@ static bool QuakeSelectorEntry(CpuState *cpu, ArRegionalQuakeRule rule) {
   return s_quake_active && s_quake.random[rule] && ActRaiserQuake_SelectorEntry(cpu);
 }
 static RecompReturn QuakeSelect(CpuState *cpu, ArRegionalQuakeRule rule) {
-  if (!QuakeSelectorEntry(cpu, rule)) ActRaiserHleFatal("Earthquake selector outside its captured effect");
+  if (!QuakeSelectorEntry(cpu, rule))
+    ActRaiserHleFatal("Earthquake selector outside its captured effect");
   if (s_trace) ++s_quake_selections[rule];
   uint32_t target;
   RecompReturn result = ActRaiserQuake_Select(cpu, rule, &target);
@@ -916,22 +1004,30 @@ void ActRaiserRegional_SimActorCache(bool load,unsigned town) {
   if (!s_campaign.active_valid) return;
   const bool ok=load?ArRegionalSimActors_LoadTown(&s_campaign.active.sim_actors,town):
       ArRegionalSimActors_SaveTown(&s_campaign.active.sim_actors,town);
-  if (s_trace) fprintf(stderr,"[regional] SIM cache %s town=%u captured=%u\n",load?"load":"save",town,ok);
+  if (s_trace)
+    fprintf(stderr, "[regional] SIM cache %s town=%u captured=%u\n", load ? "load" : "save", town,
+            ok);
 }
 void ActRaiserRegional_SimActorBirth(unsigned town,unsigned slot) {
   if (!s_campaign.active_valid) return;
   const bool ok=ArRegionalSession_BeginSimActor(&s_campaign.active,town,slot);
-  if (s_trace) fprintf(stderr,"[regional] SIM birth town=%u slot=%u captured=%u combat=%u ai=%u\n",town,slot,ok,
-      ok?s_campaign.active.sim_actors.active[slot].combat:0,ok?s_campaign.active.sim_actors.active[slot].ai:0);
+  if (s_trace)
+    fprintf(stderr, "[regional] SIM birth town=%u slot=%u captured=%u combat=%u ai=%u\n", town,
+            slot, ok, ok ? s_campaign.active.sim_actors.active[slot].combat : 0,
+            ok ? s_campaign.active.sim_actors.active[slot].ai : 0);
 }
 bool ActRaiserRegional_SimActorSnapshot(unsigned town,unsigned slot,uint16_t *snapshot) {
   ArRegionalSimActorRules rules;
-  if (!snapshot || !s_campaign.active_valid || !ArRegionalSimActors_Read(&s_campaign.active.sim_actors,town,slot,&rules)) return false;
+  if (!snapshot || !s_campaign.active_valid ||
+      !ArRegionalSimActors_Read(&s_campaign.active.sim_actors, town, slot, &rules))
+    return false;
   *snapshot=rules.combat;return true;
 }
 bool ActRaiserRegional_SimActorAiSnapshot(unsigned town,unsigned slot,uint16_t *snapshot) {
   ArRegionalSimActorRules rules;
-  if (!snapshot || !s_campaign.active_valid || !ArRegionalSimActors_Read(&s_campaign.active.sim_actors,town,slot,&rules)) return false;
+  if (!snapshot || !s_campaign.active_valid ||
+      !ArRegionalSimActors_Read(&s_campaign.active.sim_actors, town, slot, &rules))
+    return false;
   *snapshot=rules.ai;return true;
 }
 bool ActRaiserRegional_LevelGoalsSnapshot(bool activate,bool *japanese) {
@@ -944,15 +1040,17 @@ bool ActRaiserRegional_TownStatusSnapshot(bool activate, ArRegionalTownStatusSna
   if (!s_campaign.active_valid || !out) return false;
   /* Unchanged batches need only their small value snapshot, not a complete
    * retained-history validation. Session validation remains on every change. */
-  if (!activate || !memcmp(&s_campaign.active.requested.town_status,
-                          &s_campaign.active.effective.town_status,sizeof(s_campaign.active.effective.town_status)))
+  if (!activate ||
+      !memcmp(&s_campaign.active.requested.town_status, &s_campaign.active.effective.town_status,
+              sizeof(s_campaign.active.effective.town_status)))
     return ArRegionalTownStatus_Resolve(&s_campaign.active.effective.town_status,out);
   return ArRegionalSession_BeginTownStatus(&s_campaign.active,out);
 }
 
 bool ActRaiserRegional_ConstructionSnapshot(bool activate, bool *japanese) {
   if (!s_campaign.active_valid || !japanese) return false;
-  if (!activate || s_campaign.active.requested.construction==s_campaign.active.effective.construction)
+  if (!activate ||
+      s_campaign.active.requested.construction == s_campaign.active.effective.construction)
     return ArRegionalConstruction_Resolve(s_campaign.active.effective.construction,japanese);
   return ArRegionalSession_BeginConstruction(&s_campaign.active,japanese);
 }
@@ -1032,9 +1130,12 @@ RecompReturn ActRaiser_RegionalSourceCollection(CpuState *cpu) {
       !ArRegionalSession_BeginSources(&s_campaign.active,&snapshot))
     ActRaiserHleFatal("Cannot capture Source collection policy");
   const uint8_t item=(uint8_t)cpu->A;
-  const bool automatic=snapshot.automatic[item==5?kArRegionalSourceItem_Life:kArRegionalSourceItem_Magic];
+  const bool automatic =
+      snapshot.automatic[item == 5 ? kArRegionalSourceItem_Life : kArRegionalSourceItem_Magic];
   const uint32_t target=ActRaiserSources_CollectionRoute(cpu,automatic);
-  if (s_trace) fprintf(stderr,"[regional] Source item=%u collection=%s\n",item,automatic?"automatic":"held");
+  if (s_trace)
+    fprintf(stderr, "[regional] Source item=%u collection=%s\n", item,
+            automatic ? "automatic" : "held");
   if (!cpu_hle_tailcall_request(target,0x018916))
     ActRaiserHleFatal("Source collection has no native return owner");
   return RECOMP_RETURN_TAILCALL;
@@ -1066,7 +1167,8 @@ bool ActRaiser_RegionalLivesDisplayEntry(CpuState *cpu) {
        s_campaign.active.effective.lives_display == kArRegionalSource_Japan);
 }
 RecompReturn ActRaiser_RegionalLivesDisplay(CpuState *cpu) {
-  if (!ActRaiser_RegionalLivesDisplayEntry(cpu)) ActRaiserHleFatal("Unsupported regional lives HUD entry");
+  if (!ActRaiser_RegionalLivesDisplayEntry(cpu))
+    ActRaiserHleFatal("Unsupported regional lives HUD entry");
   bool zero_based = s_campaign.active.effective.lives_display == kArRegionalSource_Japan;
   /* The stable per-frame path does not scan/validate the campaign history. */
   if (s_campaign.active.requested.lives_display != s_campaign.active.effective.lives_display) {
@@ -1100,7 +1202,8 @@ RecompReturn ActRaiser_RegionalMasterReport(CpuState *cpu) {
     ActRaiserHleFatal("Cannot capture regional Master report");
   s_report_active = s_report_delegate = true;
   ActRaiserRegionalLevelGoals_RefreshReport(cpu);
-  if (s_trace) fprintf(stderr, "[regional] Master report score-page=%u begin\n", s_report_score_page);
+  if (s_trace)
+    fprintf(stderr, "[regional] Master report score-page=%u begin\n", s_report_score_page);
   /* The native body still composes the report and owns inventory objects,
    * button release/press waits and cleanup. Only its optional branch changes. */
   RecompReturn result = bank_01_899B_M1X0(cpu);
@@ -1135,7 +1238,8 @@ void ActRaiserRegional_ObserveInputRelease(CpuState *cpu) {
 bool ActRaiser_RegionalMagicGestureEntry(CpuState *cpu) {
   bool up_attack;
   return s_campaign.active_valid && ActRaiserMagicGesture_Entry(cpu) &&
-      ArRegionalMagicGesture_Resolve(s_campaign.active.effective.magic_gesture, &up_attack) && up_attack;
+      ArRegionalMagicGesture_Resolve(s_campaign.active.effective.magic_gesture, &up_attack) &&
+      up_attack;
 }
 RecompReturn ActRaiser_RegionalMagicDedicated(CpuState *cpu) {
   if (!ActRaiser_RegionalMagicGestureEntry(cpu) ||
@@ -1201,27 +1305,38 @@ RecompReturn ActRaiser_RegionalSpeedScale(CpuState *cpu) {
 
 static void ReportLairDivergence(unsigned previous) {
   const unsigned changed=s_campaign.active.lairs.diverged_towns & ~previous;
-  if (changed) fprintf(stderr,"[regional] unaccounted lair stock write; retained histories quarantined for towns=%02x\n",changed);
+  if (changed)
+    fprintf(
+        stderr,
+        "[regional] unaccounted lair stock write; retained histories quarantined for towns=%02x\n",
+        changed);
 }
 static void ReportReloadDivergence(unsigned previous) {
   const unsigned changed=s_campaign.active.reloads.diverged_towns & ~previous;
-  if (changed) fprintf(stderr,"[regional] unaccounted lair delay write; retained delays quarantined for towns=%02x\n",changed);
+  if (changed)
+    fprintf(stderr,
+            "[regional] unaccounted lair delay write; retained delays quarantined for towns=%02x\n",
+            changed);
 }
 void ActRaiserRegional_CheckLairHistory(CpuState *cpu) {
   if (!s_campaign.active_valid || s_lair_seed_pending) return;
   const unsigned before=s_campaign.active.lairs.diverged_towns;
-  const ArRegionalLairAccounting active = ArRegionalRules_LairAccounting(&s_campaign.active.effective);
+  const ArRegionalLairAccounting active =
+      ArRegionalRules_LairAccounting(&s_campaign.active.effective);
   ActRaiserLairHistory_Check(&s_campaign.active.lairs,cpu,&active);
   ReportLairDivergence(before);
   const unsigned reload_before=s_campaign.active.reloads.diverged_towns;
-  ActRaiserLairReloads_Check(&s_campaign.active.reloads,cpu,s_campaign.active.effective.lair_reloads);
+  ActRaiserLairReloads_Check(&s_campaign.active.reloads, cpu,
+                             s_campaign.active.effective.lair_reloads);
   ReportReloadDivergence(reload_before);
 }
 static void ActivateLairReloads(CpuState *cpu) {
-  if (!s_campaign.active_valid || s_lair_seed_pending || s_reload_active || s_lair_active || s_quake_active || s_miracle_active ||
-      s_campaign.active.requested.lair_reloads==s_campaign.active.effective.lair_reloads ||
-      s_campaign.active.reloads.initialized_towns!=0x3f || s_campaign.active.reloads.diverged_towns ||
-      !ActRaiserLairHistory_Entry(cpu)) return;
+  if (!s_campaign.active_valid || s_lair_seed_pending || s_reload_active || s_lair_active ||
+      s_quake_active || s_miracle_active ||
+      s_campaign.active.requested.lair_reloads == s_campaign.active.effective.lair_reloads ||
+      s_campaign.active.reloads.initialized_towns != 0x3f ||
+      s_campaign.active.reloads.diverged_towns || !ActRaiserLairHistory_Entry(cpu))
+    return;
   ArRegionalSession next=s_campaign.active;
   if (!ArRegionalSession_BeginLairReloads(&next)) return;
   if (!ActRaiserLairReloads_Project(&next.reloads,cpu,s_campaign.active.effective.lair_reloads,
@@ -1232,46 +1347,57 @@ static void ActivateLairReloads(CpuState *cpu) {
     return;
   }
   s_campaign.active=next;
-  if (s_trace) fprintf(stderr,"[regional] lair reload source=%u activated; running countdowns preserved\n",
-                       (unsigned)next.effective.lair_reloads);
+  if (s_trace)
+    fprintf(stderr, "[regional] lair reload source=%u activated; running countdowns preserved\n",
+            (unsigned)next.effective.lair_reloads);
 }
 bool ActRaiser_RegionalLairReductionEntry(CpuState *cpu) {
   if (s_reload_delegate) { s_reload_delegate=false; return false; }
-  return s_campaign.active_valid && !s_lair_seed_pending && !s_reload_active && s_campaign.active.reloads.initialized_towns &&
-      ActRaiserLairReloads_Entry(cpu);
+  return s_campaign.active_valid && !s_lair_seed_pending && !s_reload_active &&
+      s_campaign.active.reloads.initialized_towns && ActRaiserLairReloads_Entry(cpu);
 }
 RecompReturn ActRaiser_RegionalLairReduction(CpuState *cpu) {
   const unsigned previous=s_campaign.active.reloads.diverged_towns;
   ArRegionalLairReloads candidate;
   unsigned town;
   const ArRegionalSource source=s_campaign.active.effective.lair_reloads;
-  const bool captured=ActRaiserLairReloads_BeginReduction(&s_campaign.active.reloads,cpu,source,&candidate,&town);
+  const bool captured = ActRaiserLairReloads_BeginReduction(&s_campaign.active.reloads, cpu, source,
+                                                            &candidate, &town);
   s_reload_active=s_reload_delegate=true;
   const RecompReturn result=cpu->m_flag?bank_03_B6BF_M1X0(cpu):bank_03_B6BF_M0X0(cpu);
   s_reload_active=s_reload_delegate=false;
   if (captured) {
-    const bool matched=ActRaiserLairReloads_EndReduction(&s_campaign.active.reloads,cpu,source,&candidate,town,result);
-    if (s_trace) fprintf(stderr,"[regional] native delay reduction town=%u matched=%u\n",town,matched);
+    const bool matched = ActRaiserLairReloads_EndReduction(&s_campaign.active.reloads, cpu, source,
+                                                           &candidate, town, result);
+    if (s_trace)
+      fprintf(stderr, "[regional] native delay reduction town=%u matched=%u\n", town, matched);
   }
   ReportReloadDivergence(previous);
   return result;
 }
 static void ActivateLairAccounting(CpuState *cpu) {
-  if (s_completion_state != kScoreIdle || s_lair_seed_pending || s_lair_active || s_quake_active || s_miracle_active || !s_campaign.active_valid ||
-      ArRegionalRules_SameAccounting(&s_campaign.active.requested,&s_campaign.active.effective) ||
+  if (s_completion_state != kScoreIdle || s_lair_seed_pending || s_lair_active || s_quake_active ||
+      s_miracle_active || !s_campaign.active_valid ||
+      ArRegionalRules_SameAccounting(&s_campaign.active.requested, &s_campaign.active.effective) ||
       s_campaign.active.lairs.initialized_towns != 0x3f || s_campaign.active.lairs.diverged_towns ||
-      !ActRaiserLairHistory_ProjectionEntry(cpu)) return;
+      !ActRaiserLairHistory_ProjectionEntry(cpu))
+    return;
   ArRegionalSession next = s_campaign.active;
   ArRegionalLairAccounting target;
   if (!ArRegionalSession_BeginLairAccounting(&next,&target)) return;
-  const ArRegionalLairAccounting current = ArRegionalRules_LairAccounting(&s_campaign.active.effective);
+  const ArRegionalLairAccounting current =
+      ArRegionalRules_LairAccounting(&s_campaign.active.effective);
   const unsigned previous = s_campaign.active.lairs.diverged_towns;
-  const ArRegionalLairProjectionResult result = ActRaiserLairHistory_Project(&next.lairs,cpu,&current,&target);
+  const ArRegionalLairProjectionResult result =
+      ActRaiserLairHistory_Project(&next.lairs, cpu, &current, &target);
   if (result == kArRegionalLairProjection_Ready) {
     s_campaign.active = next;
-    if (s_trace) fprintf(stderr,"[regional] retained lair projection activated: seeds=%u house=%u score=%u/%u/%u\n",
-        (unsigned)target.seeds, (unsigned)target.house_credit, (unsigned)target.score_conversion,
-        (unsigned)target.score_operation, (unsigned)target.score_route);
+    if (s_trace)
+      fprintf(stderr,
+              "[regional] retained lair projection activated: seeds=%u house=%u score=%u/%u/%u\n",
+              (unsigned)target.seeds, (unsigned)target.house_credit,
+              (unsigned)target.score_conversion, (unsigned)target.score_operation,
+              (unsigned)target.score_route);
   } else {
     s_campaign.active.lairs = next.lairs; /* Preserve mismatch evidence, not the staged policy. */
     ReportLairDivergence(previous);
@@ -1279,8 +1405,8 @@ static void ActivateLairAccounting(CpuState *cpu) {
 }
 bool ActRaiser_RegionalLairEntry(CpuState *cpu) {
   if (s_lair_delegate) { s_lair_delegate=false; return false; }
-  return s_campaign.active_valid && !s_lair_seed_pending && s_campaign.active.lairs.initialized_towns &&
-      ActRaiserLairHistory_Entry(cpu);
+  return s_campaign.active_valid && !s_lair_seed_pending &&
+      s_campaign.active.lairs.initialized_towns && ActRaiserLairHistory_Entry(cpu);
 }
 bool ActRaiser_RegionalLairSeedEntry(CpuState *cpu) {
   if (s_lair_delegate) { s_lair_delegate=false; return false; }
@@ -1292,7 +1418,8 @@ static void TryInitializeLairs(CpuState *cpu) {
   /* Draft histories are exact initial values but cannot be observed/projected
    * until the native new-game initializer has established its baseline. */
   next.lairs=(ArRegionalLairHistory){0};next.reloads=(ArRegionalLairReloads){0};
-  if (ActRaiserLairHistory_Initialize(&next.lairs,cpu) && ActRaiserLairReloads_Initialize(&next.reloads,cpu)) {
+  if (ActRaiserLairHistory_Initialize(&next.lairs, cpu) &&
+      ActRaiserLairReloads_Initialize(&next.reloads, cpu)) {
     s_campaign.active=next;
     s_lair_seed_pending=false;
     if (s_trace) fprintf(stderr,"[regional] exact lair histories initialized for new campaign\n");
@@ -1309,7 +1436,8 @@ static RecompReturn ObserveLairs(CpuState *cpu, ActRaiserLairEvent event,
                                  ActRaiserNativeLeaf m0, ActRaiserNativeLeaf m1) {
   const unsigned previous=s_campaign.active.lairs.diverged_towns;
   ActRaiserLairCapture capture;
-  const ArRegionalLairAccounting active = ArRegionalRules_LairAccounting(&s_campaign.active.effective);
+  const ArRegionalLairAccounting active =
+      ArRegionalRules_LairAccounting(&s_campaign.active.effective);
   const bool observed=ActRaiserLairHistory_Begin(&s_campaign.active.lairs,cpu,event,
                                                &active,&capture);
   const bool was_active = s_lair_active;
@@ -1364,9 +1492,15 @@ RecompReturn ActRaiser_RegionalLairScore(CpuState *cpu) {
 static bool ScoreEntry(CpuState *cpu, ArRegionalScoreRule rule) {
   return s_score_active && s_score.japanese[rule] && ActRaiserScoreFeedback_Entry(cpu);
 }
-bool ActRaiser_RegionalScoreRouteEntry(CpuState *cpu) { return ScoreEntry(cpu,kArRegionalScore_Route); }
-bool ActRaiser_RegionalScoreConversionEntry(CpuState *cpu) { return ScoreEntry(cpu,kArRegionalScore_Conversion); }
-bool ActRaiser_RegionalScoreSubtractEntry(CpuState *cpu) { return ScoreEntry(cpu,kArRegionalScore_Operation); }
+bool ActRaiser_RegionalScoreRouteEntry(CpuState *cpu) {
+  return ScoreEntry(cpu, kArRegionalScore_Route);
+}
+bool ActRaiser_RegionalScoreConversionEntry(CpuState *cpu) {
+  return ScoreEntry(cpu, kArRegionalScore_Conversion);
+}
+bool ActRaiser_RegionalScoreSubtractEntry(CpuState *cpu) {
+  return ScoreEntry(cpu, kArRegionalScore_Operation);
+}
 static RecompReturn ScoreTransfer(bool valid, uint32_t target, uint32_t origin) {
   if (!valid || !cpu_hle_tailcall_request(target,origin))
     ActRaiserHleFatal("Regional score-feedback prefix violated its native contract");
@@ -1402,7 +1536,8 @@ RecompReturn ActRaiser_RegionalScoreCard(CpuState *cpu) {
     if (!ArRegionalSession_BeginScoreCompletion(&s_campaign.active,&policy))
       ActRaiserHleFatal("Cannot capture regional score-completion policy");
     s_completion_scene=scene;
-    s_completion_state=policy.japanese[kArRegionalScore_Phase] ? kScoreSettledAtCard : kScoreAwaitDeparture;
+    s_completion_state =
+        policy.japanese[kArRegionalScore_Phase] ? kScoreSettledAtCard : kScoreAwaitDeparture;
     if (s_trace) fprintf(stderr,"[regional] clear-card score phase=%s scene=%04x score=%04x\n",
         s_completion_state==kScoreSettledAtCard?"card":"departure",scene,cpu_read16(cpu,0,0x001f));
     if (s_completion_state==kScoreSettledAtCard) {
@@ -1459,22 +1594,29 @@ static bool PrepareContinue(void) {
         !ArRegionalCampaign_Continue(&s_campaign, SaveSystem_ActivePath(), image, &error)) {
       s_campaign.active_valid = false;
       fprintf(stderr, "[regional] Continue preserved saves: %s\n", error.message);
-      if (!s_continue_prompt(s_continue_context, kActRaiserRegionalContinue_LoadFailed)) return false;
+      if (!s_continue_prompt(s_continue_context, kActRaiserRegionalContinue_LoadFailed))
+        return false;
       continue;
     }
     if (s_campaign.active.lairs.initialized_towns == 0x3f) {
       if (s_campaign.active.reloads.initialized_towns) return true;
       /* Stock-history acknowledgement also covers old, unknowable delay
        * history. Upgrade the bound companion once; never modify SRAM. */
-      const SaveFileFormat format=SaveSystem_ActiveBackend()==kSaveBackend_Ini?kSaveFileFormat_Ini:kSaveFileFormat_NativeSrm;
-      if (ActRaiserLairReloads_AdoptSaved(&s_campaign.active.reloads,image) &&
-          ArRegionalSession_Save(&s_campaign.active,format,SaveSystem_ActivePath(),image,image,&error) &&
-          SaveSystem_ValidateActive(&error)) return true;
+      const SaveFileFormat format = SaveSystem_ActiveBackend() == kSaveBackend_Ini
+          ? kSaveFileFormat_Ini
+          : kSaveFileFormat_NativeSrm;
+      if (ActRaiserLairReloads_AdoptSaved(&s_campaign.active.reloads, image) &&
+          ArRegionalSession_Save(&s_campaign.active, format, SaveSystem_ActivePath(), image, image,
+                                 &error) &&
+          SaveSystem_ValidateActive(&error))
+        return true;
       s_campaign.active_valid=false;
-      if (!s_continue_prompt(s_continue_context,kActRaiserRegionalContinue_SaveFailed)) return false;
+      if (!s_continue_prompt(s_continue_context, kActRaiserRegionalContinue_SaveFailed))
+        return false;
       continue;
     }
-    if (!acknowledged && !s_continue_prompt(s_continue_context, kActRaiserRegionalContinue_Estimate)) {
+    if (!acknowledged &&
+        !s_continue_prompt(s_continue_context, kActRaiserRegionalContinue_Estimate)) {
       s_campaign.active_valid = false;
       return false;
     }
@@ -1528,7 +1670,8 @@ static void PrepareTitleDraft(void) {
   s_population.intent.pending=false;
   ArRegionalCampaign draft;
   ArRegionalCampaign_Init(&draft,s_campaign.slot,s_campaign.identity,s_campaign.identity_context);
-  ArRegionalCostPolicy defaults;ArRegionalCosts_Init(&defaults,kArRegionalSource_US);
+  ArRegionalCostPolicy defaults;
+  ArRegionalCosts_Init(&defaults, kArRegionalSource_US);
   SaveError error={{0}};
   if(!ArRegionalCampaign_NewGame(&draft,&defaults,&error))
     ActRaiserHleFatal("Cannot prepare new-game rules; saves preserved: %s",error.message);
@@ -1561,7 +1704,9 @@ static void PrepareTitleDraft(void) {
       ActRaiserHleFatal("Cannot restore title settings; saves preserved: %s",error.message);
     s_title_saved=true;
   }
-  s_title_draft=draft.active;s_title_artwork=0;s_title_open=true;
+  s_title_draft = draft.active;
+  s_title_artwork = 0;
+  s_title_open = true;
 }
 RecompReturn ActRaiser_RegionalTitle(CpuState *cpu) {
   /* Normal entry follows the title asset script, which prepares this draft
@@ -1586,7 +1731,8 @@ RecompReturn ActRaiser_RegionalTitle(CpuState *cpu) {
         ArRegionalCampaign_Continue(&s_campaign, SaveSystem_ActivePath(), image, &error);
     /* Record/replay deliberately skips consent and disk writes. Only an
      * already acknowledged older companion can acquire an in-memory estimate. */
-    if (ok && s_campaign.active.lairs.initialized_towns==0x3f && !s_campaign.active.reloads.initialized_towns)
+    if (ok && s_campaign.active.lairs.initialized_towns == 0x3f &&
+        !s_campaign.active.reloads.initialized_towns)
       ok=ActRaiserLairReloads_AdoptSaved(&s_campaign.active.reloads,image);
   } else if (selection == 0 || selection == 2) {
     if(s_title_saved) {
@@ -1594,14 +1740,18 @@ RecompReturn ActRaiser_RegionalTitle(CpuState *cpu) {
        * history or active actors. Continue remains that saved campaign. */
       const ArRegionalRules starting=s_title_draft.requested;
       ArRegionalCampaign fresh;
-      ArRegionalCampaign_Init(&fresh,s_campaign.slot,s_campaign.identity,s_campaign.identity_context);
+      ArRegionalCampaign_Init(&fresh, s_campaign.slot, s_campaign.identity,
+                              s_campaign.identity_context);
       const ArRegionalCostPolicy defaults={{0}};
       if(!ArRegionalCampaign_NewGame(&fresh,&defaults,&error))
         ActRaiserHleFatal("Cannot initialize new campaign: %s",error.message);
       for(unsigned town=0;town<6;++town)
-        if(!ArRegionalLairHistory_InitTown(&fresh.active.lairs,town))ActRaiserHleFatal("Cannot initialize new lair history");
-      if(!ArRegionalLairReloads_Init(&fresh.active.reloads))ActRaiserHleFatal("Cannot initialize new lair delays");
-      s_title_draft=fresh.active;s_title_draft.requested=starting;
+        if (!ArRegionalLairHistory_InitTown(&fresh.active.lairs, town))
+          ActRaiserHleFatal("Cannot initialize new lair history");
+      if (!ArRegionalLairReloads_Init(&fresh.active.reloads))
+        ActRaiserHleFatal("Cannot initialize new lair delays");
+      s_title_draft = fresh.active;
+      s_title_draft.requested = starting;
     }
     RandomizerConfig recipe;
     ArRegionalRules rules;
@@ -1632,8 +1782,10 @@ RecompReturn ActRaiser_RegionalTitle(CpuState *cpu) {
   if(!Randomizer_BindCampaign(&s_campaign.active.randomizer))
     ActRaiserHleFatal("Cannot bind this campaign's randomizer recipe; saves preserved");
   s_lair_seed_pending=selection!=1;
-  s_town_art_scene=0;s_town_artwork=0;
-  ArRegionalSpellInventory_Reset(&s_inventory,false);s_inventory_icon_pending=false;
+  s_town_art_scene = 0;
+  s_town_artwork = 0;
+  ArRegionalSpellInventory_Reset(&s_inventory, false);
+  s_inventory_icon_pending = false;
   s_action=(ArRegionalActionRoomSnapshot){0};ActRaiserStagePlacements_Reset();
   s_completion_state=kScoreIdle;
   s_completion_scene=0;

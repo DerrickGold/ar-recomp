@@ -18,9 +18,11 @@ bool ArRegionalCosts_Fingerprint(const ArRegionalCostPolicy *requested,
     size_t length = strlen(rule->key);
     if (length > 255 || length + 5 > sizeof(bytes) - used) return false;
     bytes[used++] = (uint8_t)length;
-    memcpy(bytes + used, rule->key, length); used += length;
+    memcpy(bytes + used, rule->key, length);
+    used += length;
     ByteOrder_WriteLe16(bytes + used, pending.price[i]);
-    ByteOrder_WriteLe16(bytes + used + 2, active.price[i]); used += 4;
+    ByteOrder_WriteLe16(bytes + used + 2, active.price[i]);
+    used += 4;
     native &= pending.price[i] == rule->price[kArRegionalSource_US] &&
               active.price[i] == rule->price[kArRegionalSource_US];
   }
@@ -444,8 +446,11 @@ bool ArRegionalSpellInventory_Fingerprint(const uint8_t previous[32],
     const ArRegionalSpellInventory *inventory,uint8_t out[32]) {
   if(!previous || !out || !ArRegionalSpellInventory_Valid(inventory))return false;
   if(!inventory->enabled) {memmove(out,previous,32);return true;}
-  uint8_t bytes[51+256]="ARSPELLSTACK-R1";memcpy(bytes+16,previous,32);
-  bytes[48]=inventory->count;bytes[49]=inventory->icon;bytes[50]=inventory->casting;
+  uint8_t bytes[51 + 256] = "ARSPELLSTACK-R1";
+  memcpy(bytes + 16, previous, 32);
+  bytes[48] = inventory->count;
+  bytes[49] = inventory->icon;
+  bytes[50] = inventory->casting;
   memcpy(bytes+51,inventory->spells,inventory->count);
   return sr_support_sha256(bytes,51+inventory->count,out);
 }
@@ -453,9 +458,13 @@ bool ArRegionalSpellInventory_Fingerprint(const uint8_t previous[32],
 bool ArRegionalArrivalLock_Fingerprint(const uint8_t previous[32],ArRegionalSource requested,
     ArRegionalSource effective,bool locked,uint8_t out[32]) {
   bool req,eff;
-  if(!previous || !out || !ArRegionalArrival_Resolve(requested,&req) || !ArRegionalArrival_Resolve(effective,&eff))return false;
+  if (!previous || !out || !ArRegionalArrival_Resolve(requested, &req) ||
+      !ArRegionalArrival_Resolve(effective, &eff))
+    return false;
   if(!req && !eff){memmove(out,previous,32);return true;}
-  uint8_t bytes[49]="ARARRLOCK-R1";memcpy(bytes+16,previous,32);bytes[48]=locked;
+  uint8_t bytes[49] = "ARARRLOCK-R1";
+  memcpy(bytes + 16, previous, 32);
+  bytes[48] = locked;
   return sr_support_sha256(bytes,sizeof(bytes),out);
 }
 
@@ -463,14 +472,23 @@ bool ArRegionalSimActors_Fingerprint(const uint8_t previous[32],const ArRegional
                                     uint8_t out[32],bool *baseline) {
   if (!previous || !out || !baseline || !ArRegionalSimActors_Valid(actors)) return false;
   bool native=true,ai_native=true;
-  for (unsigned i=0;i<24;++i) { native &= !actors->cached[i].combat;ai_native &= !actors->cached[i].ai; }
-  for (unsigned i=0;i<4;++i) { native &= !actors->active[i].combat;ai_native &= !actors->active[i].ai; }
+  for (unsigned i = 0; i < 24; ++i) {
+    native &= !actors->cached[i].combat;
+    ai_native &= !actors->cached[i].ai;
+  }
+  for (unsigned i = 0; i < 4; ++i) {
+    native &= !actors->active[i].combat;
+    ai_native &= !actors->active[i].ai;
+  }
   native &= ai_native;
   if (native) { memmove(out,previous,32);*baseline=true;return true; }
   uint8_t bytes[48+kArRegionalSimActorsEncodedBytes]="ARSIMACTOR-R1";
   if (!ai_native) memcpy(bytes,"ARSIMACTOR-R2",13);
   memcpy(bytes+16,previous,32);
-  const size_t encoded=ai_native?kArRegionalSimActorsV1EncodedBytes:kArRegionalSimActorsEncodedBytes;
-  if (!ArRegionalSimActors_EncodeVersion(actors,bytes+48,encoded,ai_native?1:2) || !sr_support_sha256(bytes,48+encoded,out)) return false;
+  const size_t encoded =
+      ai_native ? kArRegionalSimActorsV1EncodedBytes : kArRegionalSimActorsEncodedBytes;
+  if (!ArRegionalSimActors_EncodeVersion(actors, bytes + 48, encoded, ai_native ? 1 : 2) ||
+      !sr_support_sha256(bytes, 48 + encoded, out))
+    return false;
   *baseline=false;return true;
 }

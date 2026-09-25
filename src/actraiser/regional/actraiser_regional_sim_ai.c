@@ -2,17 +2,23 @@
 #include "actraiser/regional/actraiser_regional_runtime.h"
 #include "actraiser/actraiser_hle_fatal.h"
 static bool Entry(CpuState *cpu,ActRaiserSimAiSeam seam) {
-  unsigned town,slot;uint16_t snapshot,value;
-  if (!ActRaiserSimAi_Entry(cpu,seam,&town,&slot) || !ActRaiserRegional_SimActorAiSnapshot(town,slot,&snapshot)) return false;
+  unsigned town, slot;
+  uint16_t snapshot, value;
+  if (!ActRaiserSimAi_Entry(cpu, seam, &town, &slot) ||
+      !ActRaiserRegional_SimActorAiSnapshot(town, slot, &snapshot))
+    return false;
   const ArRegionalSimAiRule rule=ActRaiserSimAi_Rule(seam);
-  return ArRegionalSimAi_Value(snapshot,rule,&value) && value!=ArRegionalSimAi_Descriptor(rule)->value[kArRegionalSource_US];
+  return ArRegionalSimAi_Value(snapshot, rule, &value) &&
+      value != ArRegionalSimAi_Descriptor(rule)->value[kArRegionalSource_US];
 }
 static RecompReturn Run(CpuState *cpu,ActRaiserSimAiSeam seam) {
   uint32_t target;
   if (!Entry(cpu,seam)) ActRaiserHleFatal("SIM AI rule lost its generation owner");
   const RecompReturn result=ActRaiserSimAi_Run(cpu,seam,&target);
-  if (result!=RECOMP_RETURN_NORMAL) return result>=RECOMP_RETURN_TAILCALL?result:(RecompReturn)(result-1);
-  if (!cpu_hle_tailcall_request(target,ActRaiserSimAi_SourcePC(seam))) ActRaiserHleFatal("SIM AI has no native continuation");
+  if (result != RECOMP_RETURN_NORMAL)
+    return result >= RECOMP_RETURN_TAILCALL ? result : (RecompReturn)(result - 1);
+  if (!cpu_hle_tailcall_request(target, ActRaiserSimAi_SourcePC(seam)))
+    ActRaiserHleFatal("SIM AI has no native continuation");
   return RECOMP_RETURN_TAILCALL;
 }
 

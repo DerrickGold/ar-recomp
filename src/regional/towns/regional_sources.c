@@ -13,7 +13,8 @@ bool ArRegionalSources_Init(ArRegionalSourcesPolicy *policy, ArRegionalSource so
   for (unsigned i=0;i<kArRegionalSourceItem_Count;++i) policy->source[i]=source;
   return true;
 }
-bool ArRegionalSources_Resolve(const ArRegionalSourcesPolicy *policy, ArRegionalSourcesSnapshot *snapshot) {
+bool ArRegionalSources_Resolve(const ArRegionalSourcesPolicy *policy,
+                               ArRegionalSourcesSnapshot *snapshot) {
   if (!policy || !snapshot) return false;
   ArRegionalSourcesSnapshot next;
   for (unsigned i=0;i<kArRegionalSourceItem_Count;++i) {
@@ -23,7 +24,8 @@ bool ArRegionalSources_Resolve(const ArRegionalSourcesPolicy *policy, ArRegional
   *snapshot=next;
   return true;
 }
-bool ArRegionalSources_GroupSource(const ArRegionalSourcesPolicy *policy, ArRegionalSource *source) {
+bool ArRegionalSources_GroupSource(const ArRegionalSourcesPolicy *policy,
+                                   ArRegionalSource *source) {
   ArRegionalSourcesSnapshot snapshot;
   if (!source || !ArRegionalSources_Resolve(policy,&snapshot)) return false;
   if (policy->source[0]==policy->source[1]) { *source=policy->source[0]; return true; }

@@ -8,7 +8,8 @@ static const ArRegionalDevelopmentDescriptor kRules[kArRegionalDevelopmentRule_C
   {"development_long_cycle", {720,480,720}},
   {"development_effect_divider", {1,5,1}},
 };
-const ArRegionalDevelopmentDescriptor *ArRegionalDevelopment_Descriptor(ArRegionalDevelopmentRule rule) {
+const ArRegionalDevelopmentDescriptor *
+ArRegionalDevelopment_Descriptor(ArRegionalDevelopmentRule rule) {
   return (unsigned)rule < kArRegionalDevelopmentRule_Count ? &kRules[rule] : NULL;
 }
 bool ArRegionalDevelopment_Init(ArRegionalDevelopmentPolicy *policy, ArRegionalSource source) {
@@ -30,11 +31,13 @@ bool ArRegionalDevelopment_SnapshotValid(const ArRegionalDevelopmentSnapshot *sn
       (snapshot->long_cycle==720 || snapshot->long_cycle==480) &&
       (snapshot->effect_divider==1 || snapshot->effect_divider==5);
 }
-bool ArRegionalDevelopment_GroupSource(const ArRegionalDevelopmentPolicy *policy, ArRegionalSource *source) {
+bool ArRegionalDevelopment_GroupSource(const ArRegionalDevelopmentPolicy *policy,
+                                       ArRegionalSource *source) {
   ArRegionalDevelopmentSnapshot unused;
   if(!source || !ArRegionalDevelopment_Resolve(policy,&unused))return false;
   bool uniform=true;
-  for(unsigned i=1;i<kArRegionalDevelopmentRule_Count;++i)uniform &= policy->source[i]==policy->source[0];
+  for (unsigned i = 1; i < kArRegionalDevelopmentRule_Count; ++i)
+    uniform &= policy->source[i] == policy->source[0];
   if(uniform){*source=policy->source[0];return true;}
   for(unsigned candidate=0;candidate<kArRegionalSource_Count;++candidate) {
     bool equal=true;

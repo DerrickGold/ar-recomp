@@ -26,7 +26,8 @@ bool ActRaiser_TitleMapEntry(CpuState *cpu) {
  * port sequences; only the bytes sent to the PPU come from the donor. */
 static RecompReturn Finish(CpuState *cpu) {
   cpu->Y=ActRaiserCpuHle_PopWord(cpu);
-  cpu->P=cpu_read8(cpu,0,++cpu->S);cpu_p_to_mirrors(cpu);
+  cpu->P = cpu_read8(cpu, 0, ++cpu->S);
+  cpu_p_to_mirrors(cpu);
   cpu->S=(uint16_t)(cpu->S+k65816RtsStackBytes);
   return RECOMP_RETURN_NORMAL;
 }
@@ -47,8 +48,10 @@ RecompReturn ActRaiser_LoadTitlePalette(CpuState *cpu) {
 }
 RecompReturn ActRaiser_LoadTitleCharacters(CpuState *cpu) {
   if(!ActRaiser_TitleCharactersEntry(cpu))ActRaiserHleFatal("Unsupported title characters upload");
-  const ActRaiserTitleArt art=ActRaiserRegionalMedia_Title(ActRaiserRegional_TitleArtworkSnapshot()&kArRegionalArtwork_TitleMask);
-  cpu->X=0;cpu_write16(cpu,0,0x2116,0);
+  const ActRaiserTitleArt art = ActRaiserRegionalMedia_Title(
+      ActRaiserRegional_TitleArtworkSnapshot() & kArRegionalArtwork_TitleMask);
+  cpu->X = 0;
+  cpu_write16(cpu, 0, 0x2116, 0);
   ActRaiserCpuHle_PushWord(cpu,cpu->Y);
   for(cpu->Y=0;cpu->Y<0x4000;++cpu->Y) {
     ReadAccumulatorByte(cpu,0x0b,(uint16_t)(0x8300+cpu->Y));
@@ -58,11 +61,13 @@ RecompReturn ActRaiser_LoadTitleCharacters(CpuState *cpu) {
 }
 RecompReturn ActRaiser_LoadTitleMap(CpuState *cpu) {
   if(!ActRaiser_TitleMapEntry(cpu))ActRaiserHleFatal("Unsupported title map upload");
-  const ActRaiserTitleArt art=ActRaiserRegionalMedia_Title(ActRaiserRegional_TitleArtworkSnapshot()&kArRegionalArtwork_TitleMask);
+  const ActRaiserTitleArt art = ActRaiserRegionalMedia_Title(
+      ActRaiserRegional_TitleArtworkSnapshot() & kArRegionalArtwork_TitleMask);
   for(cpu->X=0;cpu->X<0x4000;++cpu->X) {
     ReadAccumulatorByte(cpu,0x7e,(uint16_t)(0xc000+cpu->X));
     cpu_write8(cpu,0,0x2118,art.map.data?art.map.data[cpu->X]:(uint8_t)cpu->A);
   }
-  cpu->A=(uint16_t)((cpu->A&0xff00)|0x80);cpu_write8(cpu,0,0x2115,0x80);
+  cpu->A = (uint16_t)((cpu->A & 0xff00) | 0x80);
+  cpu_write8(cpu, 0, 0x2115, 0x80);
   return Finish(cpu);
 }

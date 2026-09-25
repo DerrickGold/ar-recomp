@@ -13,10 +13,11 @@ typedef enum ArRegionalArtworkRule {
   kArRegionalArtwork_Count,
 } ArRegionalArtworkRule;
 enum {
-  kArRegionalArtwork_ActionMask = (1u<<kArRegionalArtwork_DeathHeim) | (1u<<kArRegionalArtwork_ActionItems),
-  kArRegionalArtwork_TownMask = (1u<<kArRegionalArtwork_FollowerSymbols) |
-      (1u<<kArRegionalArtwork_LairSymbols) | (1u<<kArRegionalArtwork_PyramidDetail),
-  kArRegionalArtwork_TitleMask = 1u<<kArRegionalArtwork_TitleBackground,
+  kArRegionalArtwork_ActionMask =
+      (1u << kArRegionalArtwork_DeathHeim) | (1u << kArRegionalArtwork_ActionItems),
+  kArRegionalArtwork_TownMask = (1u << kArRegionalArtwork_FollowerSymbols) |
+      (1u << kArRegionalArtwork_LairSymbols) | (1u << kArRegionalArtwork_PyramidDetail),
+  kArRegionalArtwork_TitleMask = 1u << kArRegionalArtwork_TitleBackground,
 };
 typedef struct ArRegionalArtworkPolicy {
   ArRegionalSource source[kArRegionalArtwork_Count];

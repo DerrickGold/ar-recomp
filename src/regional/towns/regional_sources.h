@@ -23,7 +23,8 @@ typedef struct ArRegionalSourcesDescriptor {
 
 const ArRegionalSourcesDescriptor *ArRegionalSources_Descriptor(ArRegionalSourceItem item);
 bool ArRegionalSources_Init(ArRegionalSourcesPolicy *policy, ArRegionalSource source);
-bool ArRegionalSources_Resolve(const ArRegionalSourcesPolicy *policy, ArRegionalSourcesSnapshot *snapshot);
+bool ArRegionalSources_Resolve(const ArRegionalSourcesPolicy *policy,
+                               ArRegionalSourcesSnapshot *snapshot);
 bool ArRegionalSources_GroupSource(const ArRegionalSourcesPolicy *policy, ArRegionalSource *source);
 
 #endif

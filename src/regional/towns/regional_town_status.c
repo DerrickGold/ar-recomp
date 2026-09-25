@@ -8,7 +8,8 @@ static const ArRegionalTownStatusDescriptor kRules[kArRegionalTownStatus_Count] 
   {"town_status_food_attempt", {0,1,0}},
   {"town_status_discard_computed_flags", {0,1,0}},
 };
-const ArRegionalTownStatusDescriptor *ArRegionalTownStatus_Descriptor(ArRegionalTownStatusRule rule) {
+const ArRegionalTownStatusDescriptor *
+ArRegionalTownStatus_Descriptor(ArRegionalTownStatusRule rule) {
   return (unsigned)rule<kArRegionalTownStatus_Count ? &kRules[rule] : NULL;
 }
 bool ArRegionalTownStatus_Init(ArRegionalTownStatusPolicy *policy, ArRegionalSource source) {
@@ -16,7 +17,8 @@ bool ArRegionalTownStatus_Init(ArRegionalTownStatusPolicy *policy, ArRegionalSou
   for (unsigned i=0;i<kArRegionalTownStatus_Count;++i) policy->source[i]=source;
   return true;
 }
-bool ArRegionalTownStatus_Resolve(const ArRegionalTownStatusPolicy *policy, ArRegionalTownStatusSnapshot *snapshot) {
+bool ArRegionalTownStatus_Resolve(const ArRegionalTownStatusPolicy *policy,
+                                  ArRegionalTownStatusSnapshot *snapshot) {
   if (!policy || !snapshot) return false;
   ArRegionalTownStatusSnapshot next;
   for (unsigned i=0;i<kArRegionalTownStatus_Count;++i) {
@@ -25,11 +27,13 @@ bool ArRegionalTownStatus_Resolve(const ArRegionalTownStatusPolicy *policy, ArRe
   }
   *snapshot=next; return true;
 }
-bool ArRegionalTownStatus_GroupSource(const ArRegionalTownStatusPolicy *policy, ArRegionalSource *source) {
+bool ArRegionalTownStatus_GroupSource(const ArRegionalTownStatusPolicy *policy,
+                                      ArRegionalSource *source) {
   ArRegionalTownStatusSnapshot snapshot;
   if (!source || !ArRegionalTownStatus_Resolve(policy,&snapshot)) return false;
   bool uniform=true;
-  for (unsigned i=1;i<kArRegionalTownStatus_Count;++i) uniform &= policy->source[i]==policy->source[0];
+  for (unsigned i = 1; i < kArRegionalTownStatus_Count; ++i)
+    uniform &= policy->source[i] == policy->source[0];
   if (uniform) { *source=policy->source[0]; return true; }
   for (unsigned candidate=0;candidate<kArRegionalSource_Count;++candidate) {
     bool equal=true;
@@ -39,7 +43,8 @@ bool ArRegionalTownStatus_GroupSource(const ArRegionalTownStatusPolicy *policy, 
   }
   return false;
 }
-uint16_t ArRegionalTownStatus_JapaneseCode(uint16_t population, uint16_t development_gate, uint16_t flags) {
+uint16_t ArRegionalTownStatus_JapaneseCode(uint16_t population, uint16_t development_gate,
+                                           uint16_t flags) {
   if (!population) return 0;
   if (development_gate) return 1;
   if (flags & 1) return 5;

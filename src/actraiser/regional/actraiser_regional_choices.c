@@ -16,7 +16,8 @@ ArRegionalDifficultyChoice ActRaiserRegionalSettings_DifficultyChoice(
       ArRegionalProfiles_Expand(&view->requested, view->pending_profile_group,
                                 view->pending_population, &candidate))
     return ArRegionalDifficulty_Choice(&candidate.difficulty);
-  return ArRegionalDifficulty_Choice(effective ? &view->effective.difficulty : &view->requested.difficulty);
+  return ArRegionalDifficulty_Choice(effective ? &view->effective.difficulty
+                                               : &view->requested.difficulty);
 }
 
 static ArRegionalSource PopulationSource(const ArRegionalRules *r) {
@@ -28,7 +29,8 @@ static ArRegionalSource PopulationSource(const ArRegionalRules *r) {
       !ArRegionalStory_Resolve(&r->story, &story)) return kArRegionalSource_Count;
   if (japanese != (source == kArRegionalSource_Japan)) return kArRegionalSource_Count;
   for (unsigned i = kArRegionalStory_FillmoreHint; i <= kArRegionalStory_KasandoraTablet; ++i)
-    if (story.value[i] != ArRegionalStory_Descriptor(i)->value[source]) return kArRegionalSource_Count;
+    if (story.value[i] != ArRegionalStory_Descriptor(i)->value[source])
+      return kArRegionalSource_Count;
   return source;
 }
 

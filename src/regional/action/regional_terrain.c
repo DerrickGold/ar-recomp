@@ -24,7 +24,8 @@ static const TerrainRoom *Room(uint16_t scene) {
 }
 bool ArRegionalTerrain_HasScene(uint16_t scene) { return Room(scene) != NULL; }
 
-static uint32_t Hash(const ArRegionalTerrainStorage *s, ArRegionalTerrainPlane plane, size_t count) {
+static uint32_t Hash(const ArRegionalTerrainStorage *s, ArRegionalTerrainPlane plane,
+                     size_t count) {
   uint32_t hash = UINT32_C(2166136261);
   for (size_t i = 0; i < count; ++i)
     hash = (hash ^ s->read(s->context,plane,i)) * UINT32_C(16777619);

@@ -74,7 +74,8 @@ bool ArRegionalLairHistory_InitTown(ArRegionalLairHistory *h, unsigned town) {
 bool ArRegionalLairHistory_AdoptTown(ArRegionalLairHistory *h, unsigned town,
     ArRegionalSource source, const uint16_t remaining[4]) {
   if (!ArRegionalLairHistory_Valid(h) || !remaining || town >= kArRegionalLairTowns ||
-      (h->initialized_towns & (1u << town)) || (unsigned)source >= kArRegionalSource_Count) return false;
+      (h->initialized_towns & (1u << town)) || (unsigned)source >= kArRegionalSource_Count)
+    return false;
   uint16_t estimates[2][4];
   for (unsigned seed=0;seed<2;++seed) for (unsigned n=0;n<4;++n) {
     uint32_t value;
@@ -152,8 +153,10 @@ bool ArRegionalLairHistory_SettleScore(ArRegionalLairHistory *h, unsigned town,
   uint16_t converted[2];
   ArRegionalScoreDestination destination[2];
   for (unsigned source=0; source<2; ++source)
-    if (!ArRegionalScore_Convert((ArRegionalSource)source,bcd_score,&converted[source]) ||
-        !ArRegionalScore_Destination((ArRegionalSource)source,completed_acts,&destination[source])) return false;
+    if (!ArRegionalScore_Convert((ArRegionalSource)source, bcd_score, &converted[source]) ||
+        !ArRegionalScore_Destination((ArRegionalSource)source, completed_acts,
+                                     &destination[source]))
+      return false;
   for (unsigned p=0;p<kArRegionalLairProjections;++p) {
     if (destination[!!(p & kRouteJP)]!=kArRegionalScoreDestination_Stocks) continue;
     const unsigned delta=converted[!!(p & kConversionJP)]>>2;
@@ -183,11 +186,14 @@ static bool Canonical(const ArRegionalLairHistory *h) {
 bool ArRegionalLairHistory_Encode(const ArRegionalLairHistory *h, uint8_t *bytes, size_t capacity) {
   if (!bytes || capacity<kArRegionalLairHistoryEncodedBytes || !Canonical(h)) return false;
   memcpy(bytes,kHistoryMagic,8);
-  bytes[8]=h->initialized_towns; bytes[9]=h->approximate_towns;
-  bytes[10]=h->diverged_towns; bytes[11]=0;
+  bytes[8] = h->initialized_towns;
+  bytes[9] = h->approximate_towns;
+  bytes[10] = h->diverged_towns;
+  bytes[11] = 0;
   size_t at=12;
   for (unsigned p=0;p<kArRegionalLairProjections;++p)
-    for (unsigned l=0;l<kArRegionalLairCount;++l,at+=2) ByteOrder_WriteLe16(bytes+at,h->stock[p][l]);
+    for (unsigned l = 0; l < kArRegionalLairCount; ++l, at += 2)
+      ByteOrder_WriteLe16(bytes + at, h->stock[p][l]);
   return true;
 }
 bool ArRegionalLairHistory_Decode(const uint8_t *bytes, size_t size, ArRegionalLairHistory *h) {
@@ -197,7 +203,8 @@ bool ArRegionalLairHistory_Decode(const uint8_t *bytes, size_t size, ArRegionalL
                              .diverged_towns=bytes[10]};
   size_t at=12;
   for (unsigned p=0;p<kArRegionalLairProjections;++p)
-    for (unsigned l=0;l<kArRegionalLairCount;++l,at+=2) next.stock[p][l]=ByteOrder_ReadLe16(bytes+at);
+    for (unsigned l = 0; l < kArRegionalLairCount; ++l, at += 2)
+      next.stock[p][l] = ByteOrder_ReadLe16(bytes + at);
   if (!Canonical(&next)) return false;
   *h=next;
   return true;
