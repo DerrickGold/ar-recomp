@@ -3355,6 +3355,29 @@ room entry, never respawn already collected items by rebuilding a live room.
 Geometry, placement, wave gates and checkpoint payloads need compatibility
 checks before offering independently mixed layouts.
 
+**Initial loader ownership.** The US loader at `$00:9354–939F` creates either
+one player or a statue and descending light. It takes the two-object path when
+`$FC.low != 0` and `$0341.word != 7`; Death Heim is the explicit exception.
+After eight further reserved slots, `$00:941C` receives X=`$0AE0` or `$0B20`,
+respectively. A regional hook accepting only `$0AE0` silently delegates statue
+entries to US placements, even when Japanese terrain and enemies are selected.
+This reproduces the buried Fillmore beasts: the first pair is authored at
+Y34 in US versus Y27 in JP. Both initial entry paths must be validated separately
+from retries and later waves; warp-only tests do not establish statue-entry
+coverage.
+
+The pool ends before `$1AA0`. After reserving the native `$946E` sentinel,
+ordinary entry has room for 62 initial slots, while statue/light entry has 61.
+Objects, explicit reservations and the wave gate all consume this allowance.
+The regional adapter preflights the complete initial batch against the actual
+entry slot before writing any actor or changing CPU state. The format validator's
+62-slot ceiling alone is insufficient. Capacity failure uses the existing fatal
+runtime boundary, not native fallback, so it cannot silently substitute US
+placements. Later waves separately count live free slots, including their
+`$954D` sentinel, before initialization. Exact-fit and one-slot-overflow tests
+cover both entry paths and retained-actor wave loads; current authored regional
+combinations fit without removing or relocating objects.
+
 ### Terrain and damage-box contracts
 
 All 898 changed JP map cells across 11 roots can be expressed through exact

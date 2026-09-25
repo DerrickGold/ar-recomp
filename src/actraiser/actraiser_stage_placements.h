@@ -14,6 +14,9 @@ void ActRaiserStagePlacements_Reset(void);
 /* Binds the captured numerical generation, including randomization, without
  * rescanning placements. US delegation preserves the prior digest verbatim. */
 bool ActRaiserStagePlacements_Fingerprint(const uint8_t previous[32],uint8_t out[32],bool *native);
+/* $941C initial batch: native cursor plus $0AE0 ordinary / $0B20 statue-light
+ * entry slot, selected by the original $9354 predicate. Preflight the actual
+ * capacity including the sentinel before any writes. No live-pool rewrite. */
 bool ActRaiser_StagePlacementsEntry(CpuState *cpu);
 RecompReturn ActRaiser_StagePlacements(CpuState *cpu);
 bool ActRaiser_StageWaveEntry(CpuState *cpu);

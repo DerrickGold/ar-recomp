@@ -3,9 +3,11 @@
 bool ActionPlacements_Validate(const ActionPlacementProgram *program) {
   if (!program || !program->count || program->count > kActionPlacementCapacity)
     return false;
-  /* 80 native slots: eight magic slots, player, eight reserved slots and an
-   * end sentinel. The later wave reuses the pool but retains its controller
-   * and player. Conservatively bound it to the same 62 available slots. */
+  /* Format ceiling: an ordinary entry leaves 62 slots after eight magic
+   * slots, one player, eight reserved slots and a sentinel. Statue/light
+   * entry leaves only 61; the room adapter must preflight its actual batch
+   * capacity. Later waves retain live actors and need their own free-slot
+   * check, even with this conservative 62-slot format limit. */
   unsigned slots = 0, waves = 0;
   for (size_t i = 0; i < program->count; ++i) {
     const ActionPlacement *row = &program->rows[i];

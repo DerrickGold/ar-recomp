@@ -26,8 +26,10 @@ typedef struct ActionPlacementProgram {
   ActionPlacement rows[kActionPlacementCapacity];
 } ActionPlacementProgram;
 
-/* Validate structure/capacity before mutating actors. One wave at most; native
- * later-wave loader accepts only objects and the final terminator. */
+/* Validate structure and the format's capacity ceiling, not live free space.
+ * The room owner must preflight its entry-specific pool, including a sentinel,
+ * before mutating actors. One wave at most; the native later-wave loader accepts
+ * only objects and the final terminator. */
 bool ActionPlacements_Validate(const ActionPlacementProgram *program);
 
 #endif

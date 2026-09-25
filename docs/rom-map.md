@@ -58,6 +58,11 @@ Title, timer and contact addresses relocate independently; use the
 [European address table](regional-differences-technical.md#selection-and-timer).
 Never use the PAL placement offset as a US donor address.
 
+US initial placement ownership is selected at `$00:9354–939F`
+(file `0x01354–0x0139F`): ordinary entry creates one player, while statue
+materialization creates two objects. The resulting `$00:941C` placement batch
+starts at `$0AE0` or `$0B20`; see [action slot ownership](ram-map.md#action-objects-and-magic-cohorts-action-mode-only).
+
 Two PAL boss source/program ranges are EU `$00:D30D–D4F7` (Aitos Act1
 dragon04/0D) and `$00:D635–D848` (Marahna Act1 plant05/05). German adds2,
 French adds5. Difficulty changes descendant spawning or tendril motion;

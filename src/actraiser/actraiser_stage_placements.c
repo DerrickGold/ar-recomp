@@ -88,7 +88,13 @@ static bool Context(CpuState *cpu) {
       (!s_root->wave || cpu_read8(cpu,0x0a,s_root->wave-5) == 0xfe);
 }
 bool ActRaiser_StagePlacementsEntry(CpuState *cpu) {
-  return Context(cpu) && cpu->X == kFirstPlacedSlot && cpu->Y == s_root->first;
+  if (!Context(cpu) || cpu->Y != s_root->first) return false;
+  /* $932E/$9354 initializes one player on ordinary loads, but a statue and
+   * descending light when $FC.low != 0 and $0341.word != 7. After $930B's
+   * eight reserved slots, $941C therefore starts at $0AE0 or $0B20. Retain
+   * both native entry paths without accepting a partly consumed batch. */
+  const bool materializing = cpu_read8(cpu,0,0x00fc) != 0 && cpu_read16(cpu,0,0x0341) != 7;
+  return cpu->X == kFirstPlacedSlot + (materializing ? kSlotBytes : 0);
 }
 static RecompReturn Tail(unsigned target,unsigned source) {
   if (!cpu_hle_tailcall_request(target,source)) ActRaiserHleFatal("Placement loader lost its native return owner");
@@ -108,10 +114,32 @@ static RecompReturn Object(CpuState *cpu,const ActionPlacement *row,uint16_t cal
     ActRaiserHleFatal("Placement initializer violated its register contract");
   return result;
 }
+static bool InitialBatchFits(unsigned first_slot) {
+  const unsigned available = (kSlotEnd-first_slot)/kSlotBytes;
+  unsigned needed = 1; /* Native $946E writes the terminating sentinel. */
+  for (size_t i = 0; i < s_program.count; ++i) {
+    const ActionPlacement *row = &s_program.rows[i];
+    switch (row->kind) {
+      case kActionPlacement_End: return needed <= available;
+      case kActionPlacement_Wave: return needed+1 <= available;
+      case kActionPlacement_Object: ++needed;break;
+      case kActionPlacement_Reserve: needed += row->reserve;break;
+      default: return false;
+    }
+  }
+  return false;
+}
 RecompReturn ActRaiser_StagePlacements(CpuState *cpu) {
   if (!ActRaiser_StagePlacementsEntry(cpu)) ActRaiserHleFatal("Invalid regional placement entry");
-  /* The complete program was validated before publication. No settings or
-   * randomization is reread while installing this captured generation. */
+  /* Structural validation allows the ordinary-entry maximum. Statue/light
+   * entry consumes one more slot; preflight the entire initial batch before
+   * writing anything, including reservations, a wave gate and the sentinel.
+   * Keep this out of the entry predicate: insufficient capacity must not
+   * silently fall back to a different region's placements. */
+  if (!InitialBatchFits(cpu->X))
+    ActRaiserHleFatal("Regional initial placements have insufficient free actor slots");
+  /* No settings or randomization is reread while installing this captured
+   * generation. */
   for (size_t i = 0; i < s_program.count; ++i) {
     const ActionPlacement *row = &s_program.rows[i];
     if (!Slot(cpu->X)) ActRaiserHleFatal("Regional placement pool overflow");
