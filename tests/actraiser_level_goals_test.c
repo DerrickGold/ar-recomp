@@ -1,4 +1,4 @@
-#include "actraiser/actraiser_level_goals_runtime.h"
+#include "actraiser/regional/actraiser_regional_level_goals.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -32,7 +32,7 @@ static RecompReturn Native(CpuState *cpu) {
     assert(ActRaiser_RegionalLevelNext(cpu)==RECOMP_RETURN_TAILCALL && target==0x03b40b && origin==0x03b407 && cpu->A==650);
   }
   Word(0x291,5);Word(0x297,0xffff);const unsigned captured=captures;
-  ActRaiserLevelGoalsRuntime_RefreshReport(cpu);
+  ActRaiserRegionalLevelGoals_RefreshReport(cpu);
   assert(captures==captured && cpu_read16(cpu,0,0x297)==(effective?650:0xffff));
   return token;
 }
@@ -72,9 +72,9 @@ int main(void) {
   cpu.P=CPU_P_D;assert(!ActRaiserLevelGoals_PrefixEntry(&cpu));cpu.P=0;
   cpu._flag_D=1;assert(!ActRaiserLevelGoals_PrefixEntry(&cpu));cpu._flag_D=0;
   for(unsigned old=0;old<2;++old)for(unsigned next=0;next<3;++next)for(unsigned level=0;level<19;++level) {
-    ActRaiserLevelGoalsRuntime_Reset();effective=old;requested=(ArRegionalSource)next;
+    ActRaiserRegionalLevelGoals_Reset();effective=old;requested=(ArRegionalSource)next;
     memset(memory,0xa7,sizeof(memory));Word(0x291,level);Word(0x297,12345);memcpy(before,memory,sizeof(memory));
-    writes=captures=0;const CpuState original=cpu;ActRaiserLevelGoalsRuntime_RefreshReport(&cpu);
+    writes=captures=0;const CpuState original=cpu;ActRaiserRegionalLevelGoals_RefreshReport(&cpu);
     assert(captures==1 && !memcmp(&cpu,&original,sizeof(cpu)));
     if ((old || next==1) && level<18) {
       uint16_t display;assert(ArRegionalLevelGoals_Display(next==1,level,&display));
@@ -85,7 +85,7 @@ int main(void) {
   const RecompReturn results[]={RECOMP_RETURN_NORMAL,RECOMP_RETURN_SKIP_1,RECOMP_RETURN_SKIP_2,
       RECOMP_RETURN_SKIP_3,RECOMP_RETURN_TAILCALL,RECOMP_RETURN_PARKED_WAIT,RECOMP_RETURN_OWNED_UNWIND};
   for(unsigned owner=0;owner<3;++owner)for(unsigned source=0;source<3;++source)for(unsigned i=0;i<sizeof(results)/sizeof(results[0]);++i) {
-    ActRaiserLevelGoalsRuntime_Reset();requested=(ArRegionalSource)source;token=results[i];captures=calls=0;
+    ActRaiserRegionalLevelGoals_Reset();requested=(ArRegionalSource)source;token=results[i];captures=calls=0;
     cpu=(CpuState){.PB=3,.DB=0x7f,.m_flag=owner==2};
     assert(ActRaiser_RegionalLevelLeafEntry(&cpu));
     assert(ActRaiser_RegionalLevelAwardEntry(&cpu)==!cpu.m_flag);

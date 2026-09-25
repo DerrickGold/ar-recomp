@@ -1,11 +1,11 @@
-#include "actraiser_level_goals_runtime.h"
-#include "actraiser_hle_fatal.h"
+#include "actraiser/regional/actraiser_regional_level_goals.h"
+#include "actraiser/actraiser_hle_fatal.h"
 
 extern RecompReturn bank_03_E414_M0X0(CpuState *cpu);
 extern RecompReturn bank_03_B3BA_M0X0(CpuState *cpu);
 extern RecompReturn bank_03_B3BA_M1X0(CpuState *cpu);
 static bool s_active,s_japanese;
-void ActRaiserLevelGoalsRuntime_Reset(void) { s_active=s_japanese=false; }
+void ActRaiserRegionalLevelGoals_Reset(void) { s_active=s_japanese=false; }
 bool ActRaiser_RegionalLevelLeafEntry(CpuState *cpu) {
   bool unused;
   return !s_active && cpu && cpu->PB==3 && !cpu->D && !cpu->x_flag &&
@@ -40,7 +40,7 @@ RecompReturn ActRaiser_RegionalLevelLoad(CpuState *cpu) {
 RecompReturn ActRaiser_RegionalLevelNext(CpuState *cpu) {
   return Tail(ActRaiserLevelGoals_Load(cpu,s_japanese),0x03b40b,0x03b407);
 }
-void ActRaiserLevelGoalsRuntime_RefreshReport(CpuState *cpu) {
+void ActRaiserRegionalLevelGoals_RefreshReport(CpuState *cpu) {
   bool previous=s_japanese,current=s_japanese;
   if (!cpu) return;
   if (!s_active && (!ActRaiserRegional_LevelGoalsSnapshot(false,&previous) ||

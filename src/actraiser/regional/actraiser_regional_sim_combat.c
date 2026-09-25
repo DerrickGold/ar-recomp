@@ -1,6 +1,6 @@
-#include "actraiser_sim_combat_runtime.h"
-#include "actraiser_cpu_hle_internal.h"
-#include "actraiser_hle_fatal.h"
+#include "actraiser/regional/actraiser_regional_sim_combat.h"
+#include "actraiser/actraiser_cpu_hle_internal.h"
+#include "actraiser/actraiser_hle_fatal.h"
 #include <stdio.h>
 #include <stdlib.h>
 

@@ -27,7 +27,7 @@
   "long-line": 13,
   "packed": 3
  },
- "src/actraiser/actraiser_arrival_runtime.c": {
+ "src/actraiser/regional/actraiser_regional_arrival.c": {
   "packed": 6
  },
  "src/actraiser/actraiser_boss_rules.c": {
@@ -38,7 +38,7 @@
   "long-line": 2,
   "packed": 1
  },
- "src/actraiser/actraiser_construction_runtime.c": {
+ "src/actraiser/regional/actraiser_regional_construction.c": {
   "long-line": 4
  },
  "src/actraiser/actraiser_development.c": {
@@ -74,7 +74,7 @@
   "long-line": 3,
   "packed": 3
  },
- "src/actraiser/actraiser_level_goals_runtime.c": {
+ "src/actraiser/regional/actraiser_regional_level_goals.c": {
   "long-line": 1,
   "packed": 1
  },
@@ -152,19 +152,15 @@
   "long-line": 10,
   "packed": 8
  },
- "src/actraiser/actraiser_sim_ai_runtime.c": {
-  "long-line": 5,
+ "src/actraiser/regional/actraiser_regional_sim_ai.c": {
+  "long-line": 4,
   "packed": 1
- },
- "src/actraiser/actraiser_sim_ai_runtime.h": {
-  "long-line": 1,
-  "packed": 2
  },
  "src/actraiser/actraiser_sim_combat.c": {
   "long-line": 1,
   "packed": 4
  },
- "src/actraiser/actraiser_sim_combat_runtime.c": {
+ "src/actraiser/regional/actraiser_regional_sim_combat.c": {
   "long-line": 7,
   "packed": 2
  },
@@ -202,7 +198,7 @@
  "src/actraiser/actraiser_town_status.c": {
   "packed": 1
  },
- "src/actraiser/actraiser_town_status_runtime.c": {
+ "src/actraiser/regional/actraiser_regional_town_status.c": {
   "long-line": 9
  },
  "src/actraiser/actraiser_tree_attack.c": {
@@ -222,7 +218,7 @@
   "packed": 3
  },
  "src/actraiser/regional/actraiser_regional_choices.c": {
-  "long-line": 7
+  "long-line": 2
  },
  "src/actraiser/regional/actraiser_regional_editor.c": {
   "long-line": 5
@@ -236,7 +232,7 @@
   "packed": 2
  },
  "src/actraiser/regional/actraiser_regional_runtime.c": {
-  "long-line": 94,
+  "long-line": 93,
   "packed": 22
  },
  "src/actraiser/regional/actraiser_regional_runtime.h": {
@@ -513,7 +509,7 @@
   "long-line": 1
  },
  "src/regional/regional_profiles.c": {
-  "long-line": 4
+  "long-line": 3
  },
  "src/regional/regional_rules.h": {
   "long-line": 5
@@ -523,8 +519,8 @@
   "packed": 1
  },
  "src/regional/session/regional_fingerprint.c": {
-  "long-line": 24,
-  "packed": 78
+  "long-line": 5,
+  "packed": 5
  },
  "src/regional/session/regional_lair_fingerprint.c": {
   "long-line": 2,
@@ -804,7 +800,7 @@
   "long-line": 43,
   "packed": 59
  },
- "tests/actraiser_arrival_runtime_test.c": {
+ "tests/actraiser_regional_arrival_test.c": {
   "long-line": 12,
   "packed": 37
  },

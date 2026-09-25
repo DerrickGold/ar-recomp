@@ -1,14 +1,14 @@
-#include "actraiser_construction_runtime.h"
+#include "actraiser/regional/actraiser_regional_construction.h"
 
-#include "actraiser_cpu_hle_internal.h"
-#include "actraiser_hle_fatal.h"
-#include "actraiser_town_status_runtime.h"
+#include "actraiser/actraiser_cpu_hle_internal.h"
+#include "actraiser/actraiser_hle_fatal.h"
+#include "actraiser/regional/actraiser_regional_town_status.h"
 
 extern RecompReturn bank_03_82DB_M0X0(CpuState *cpu);
 extern RecompReturn bank_03_84B9_M0X0(CpuState *cpu);
 static bool s_active, s_japanese;
 
-void ActRaiserConstructionRuntime_Reset(void) { s_active = s_japanese = false; }
+void ActRaiserRegionalConstruction_Reset(void) { s_active = s_japanese = false; }
 bool ActRaiser_RegionalConstructionEntry(CpuState *cpu) {
   bool unused;
   return !s_active && ActRaiser_RegionalTownStatusCycleEntry(cpu) &&
@@ -20,7 +20,7 @@ static RecompReturn Run(CpuState *cpu, RecompReturn (*native)(CpuState *)) {
   s_active = true;
   /* One outer owner composes the independent price and reporting families.
    * Nested plot/off-screen work inherits the complete transaction snapshot. */
-  const RecompReturn result = ActRaiserTownStatusRuntime_Run(cpu, native);
+  const RecompReturn result = ActRaiserRegionalTownStatus_Run(cpu, native);
   s_active = false;
   return result;
 }

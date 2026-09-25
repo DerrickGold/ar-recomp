@@ -1,6 +1,7 @@
 #include "regional/session/regional_fingerprint.h"
 
 #include "byte_order.h"
+#include "regional/regional_families.h"
 #include "snesrecomp/support/digest.h"
 #include <string.h>
 
@@ -28,571 +29,414 @@ bool ArRegionalCosts_Fingerprint(const ArRegionalCostPolicy *requested,
   return true;
 }
 
+/* The rules fingerprint is a chain of layers seeded by the cost digest. Each
+ * layer hashes its tag (zero-padded to the digest position), the previous
+ * digest and its payload, and is applied only when its rules differ from the
+ * native values; so a digest never changes when a newly added rule stays
+ * native. The layer list below is frozen history: its order, tags, offsets
+ * and payload layouts are part of every recorded identity. Append new layers;
+ * never edit or reorder existing ones. */
+
+/* One side's rule values in the form the layers hash. */
+typedef enum Flag {
+  kFlag_Retry, kFlag_ScorePage, kFlag_Menu, kFlag_Gesture, kFlag_Seeds, kFlag_House,
+  kFlag_Phase, kFlag_Lives, kFlag_Reload, kFlag_Level, kFlag_Construction, kFlag_Arrival,
+  kFlag_Emitter, kFlag_Volley, kFlag_Collision, kFlag_PlatformSkull, kFlag_CastHold,
+  kFlag_Fire, kFlag_Difficulty, kFlag_ScoreLives, kFlag_Inventory, kFlag_Music, kFlag_Terrain,
+  kFlag_Artwork, kFlag_Mosaic, kFlag_Poses, kFlag_Sequences, kFlag_Hazards, kFlag_ModeEntry,
+  kFlag_ActorArt, kFlag_Count
+} Flag;
+
+typedef struct Resolved {
+  uint8_t flag[kFlag_Count];
+  uint16_t wait, fish, speed, skull, combat, ai, motion;
+  uint64_t boss;
+  ArRegionalQuakeSnapshot quake;
+  ArRegionalScoreSnapshot score;
+  ArRegionalSourcesSnapshot sources;
+  ArRegionalStorySnapshot story;
+  ArRegionalTownStatusSnapshot status;
+  ArRegionalSupportSnapshot support;
+  ArRegionalActorStatsSnapshot stats;
+  ArRegionalActionStartSnapshot start;
+} Resolved;
+
+typedef struct Side {
+  const ArRegionalRules *rules;
+  Resolved resolved;
+} Side;
+
+/* Every family the fingerprint depends on must resolve; any invalid source
+ * rejects the whole fingerprint. */
+static bool ResolveSide(const ArRegionalRules *r, Resolved *out) {
+  memset(out, 0, sizeof(*out));
+  uint8_t *flag = out->flag;
+  if ((unsigned)r->lair_reloads >= kArRegionalSource_Count ||
+      (unsigned)r->lair_seeds >= kArRegionalSource_Count ||
+      (unsigned)r->house_credit >= kArRegionalSource_Count ||
+      !ArRegionalTimers_Valid(&r->timers) || !ArRegionalPlacements_Valid(&r->placements))
+    return false;
+  bool retry, score_page, menu, gesture, lives, level, construction, arrival, volley;
+  bool score_lives, inventory;
+  ArRegionalDevelopmentSnapshot development;
+  ArRegionalRecoverySnapshot recovery;
+  ArRegionalDifficultySnapshot difficulty;
+  if (!ArRegionalMode_Resolve(&r->mode_entry, &flag[kFlag_ModeEntry]) ||
+      !ArRegionalActorArtwork_Resolve(&r->actor_artwork, &flag[kFlag_ActorArt]) ||
+      !ArRegionalArtwork_Resolve(&r->artwork, &flag[kFlag_Artwork]) ||
+      !ArRegionalSequences_Resolve(&r->sequences, &flag[kFlag_Sequences]) ||
+      !ArRegionalPoses_Resolve(&r->poses, &flag[kFlag_Poses]) ||
+      !ArRegionalMosaic_Resolve(r->mosaic, &flag[kFlag_Mosaic]) ||
+      !ArRegionalMusic_Resolve(r->music, &flag[kFlag_Music]) ||
+      !ArRegionalTerrain_Resolve(r->terrain, &flag[kFlag_Terrain]) ||
+      !ArRegionalHazards_Resolve(r->hazards, &flag[kFlag_Hazards]) ||
+      !ArRegionalInventory_Resolve(r->spell_inventory, &inventory) ||
+      !ArRegionalActionStart_Resolve(&r->action_start, &out->start) ||
+      !ArRegionalScoreLives_Resolve(r->score_lives, &score_lives) ||
+      !ArRegionalDifficulty_Resolve(&r->difficulty, &difficulty) ||
+      !ArRegionalFire_Resolve(&r->fire_enemy, &flag[kFlag_Fire]) ||
+      !ArRegionalCastHold_Resolve(&r->cast_hold, &flag[kFlag_CastHold]) ||
+      !ArRegionalActorStats_Resolve(&r->actor_stats, &out->stats) ||
+      !ArRegionalPlatformSkull_Resolve(&r->platform_skull, &flag[kFlag_PlatformSkull]) ||
+      !ArRegionalCollision_Resolve(&r->collision, &flag[kFlag_Collision]) ||
+      !ArRegionalBoss_Resolve(&r->bosses, &out->boss) ||
+      !ArRegionalVolley_Resolve(r->statue_volley, &volley) ||
+      !ArRegionalEmitter_Resolve(&r->emitters, &flag[kFlag_Emitter]) ||
+      !ArRegionalActionMotion_Resolve(&r->action_motion, &out->motion) ||
+      !ArRegionalArrival_Resolve(r->arrival, &arrival) ||
+      !ArRegionalRetry_Resolve(r->retry_score, &retry) ||
+      !ArRegionalTownWait_Resolve(r->town_wait, &out->wait) ||
+      !ArRegionalFishing_Resolve(r->fishing, &out->fish) ||
+      !ArRegionalDevelopment_Resolve(&r->development, &development) ||
+      !ArRegionalRecovery_Resolve(&r->recovery, &recovery) ||
+      !ArRegionalQuake_Resolve(&r->quake, &out->quake) ||
+      !ArRegionalSupport_Resolve(&r->support, &out->support) ||
+      !ArRegionalConstruction_Resolve(r->construction, &construction) ||
+      !ArRegionalSimAi_Resolve(&r->sim_ai, &out->ai) ||
+      !ArRegionalSimCombat_Resolve(&r->sim_combat, &out->combat) ||
+      !ArRegionalLevelGoals_Resolve(r->level_goals, &level) ||
+      !ArRegionalTownStatus_Resolve(&r->town_status, &out->status) ||
+      !ArRegionalStory_Resolve(&r->story, &out->story) ||
+      !ArRegionalSkullWait_Resolve(r->skull_wait, &out->skull) ||
+      !ArRegionalSources_Resolve(&r->sources, &out->sources) ||
+      !ArRegionalLivesDisplay_Resolve(r->lives_display, &lives) ||
+      !ArRegionalScorePage_Resolve(r->score_page, &score_page) ||
+      !ArRegionalMenuReturn_Resolve(r->menu_return, &menu) ||
+      !ArRegionalSpeedRange_Resolve(r->speed_range, &out->speed) ||
+      !ArRegionalMagicGesture_Resolve(r->magic_gesture, &gesture) ||
+      !ArRegionalScore_Resolve(&r->score_feedback, &out->score))
+    return false;
+  flag[kFlag_Retry] = retry;
+  flag[kFlag_ScorePage] = score_page;
+  flag[kFlag_Menu] = menu;
+  flag[kFlag_Gesture] = gesture;
+  flag[kFlag_Seeds] = r->lair_seeds == kArRegionalSource_Japan;
+  flag[kFlag_House] = r->house_credit == kArRegionalSource_Japan;
+  flag[kFlag_Phase] = out->score.japanese[kArRegionalScore_Phase];
+  flag[kFlag_Lives] = lives;
+  flag[kFlag_Reload] = r->lair_reloads == kArRegionalSource_Japan;
+  flag[kFlag_Level] = level;
+  flag[kFlag_Construction] = construction;
+  flag[kFlag_Arrival] = arrival;
+  flag[kFlag_Volley] = volley;
+  flag[kFlag_Difficulty] = ArRegionalDifficulty_Identity(&difficulty);
+  flag[kFlag_ScoreLives] = score_lives;
+  flag[kFlag_Inventory] = inventory;
+  return true;
+}
+
+/* A layer's hash input: tag and padding, previous digest, then payload. */
+typedef struct Payload {
+  uint8_t *bytes;
+  size_t used, capacity;
+  bool failed;
+} Payload;
+
+static void PutByte(Payload *p, unsigned value) {
+  if (p->used + 1 > p->capacity) { p->failed = true; return; }
+  p->bytes[p->used++] = (uint8_t)value;
+}
+static void PutWord(Payload *p, unsigned value) {
+  if (p->used + 2 > p->capacity) { p->failed = true; return; }
+  ByteOrder_WriteLe16(p->bytes + p->used, (uint16_t)value);
+  p->used += 2;
+}
+static void PutKeyed(Payload *p, const char *key, uint16_t pending, uint16_t active) {
+  const size_t length = strlen(key);
+  if (length > 255 || length + 5 > p->capacity - p->used) { p->failed = true; return; }
+  p->bytes[p->used++] = (uint8_t)length;
+  memcpy(p->bytes + p->used, key, length);
+  p->used += length;
+  PutWord(p, pending);
+  PutWord(p, active);
+}
+
+/* Layer builders write the payload and return whether the layer is native.
+ * Each keeps its original native test verbatim. */
+typedef bool (*LayerBuild)(const Side *pending, const Side *active, Payload *payload);
+
+/* Keyed list over a family's descriptor values; native when both sides
+ * resolve to the US value of every rule. */
+static bool KeyedFamily(const Side *pending, const Side *active, Payload *p,
+                        ArRegionalFamilyId family) {
+  const ArRegionalFamily *row = ArRegionalFamilies_Get(family);
+  bool native = true;
+  for (unsigned rule = 0; rule < row->rules; ++rule) {
+    const ArRegionalRuleInfo info = row->info(rule);
+    const uint16_t now = info.values[ArRegionalFamilies_Source(pending->rules, family, rule)];
+    const uint16_t then = info.values[ArRegionalFamilies_Source(active->rules, family, rule)];
+    PutKeyed(p, info.key, now, then);
+    native &= now == info.values[kArRegionalSource_US] &&
+              then == info.values[kArRegionalSource_US];
+  }
+  return native;
+}
+static bool TimersLayer(const Side *pending, const Side *active, Payload *p) {
+  return KeyedFamily(pending, active, p, kArRegionalFamily_Timers);
+}
+static bool DevelopmentLayer(const Side *pending, const Side *active, Payload *p) {
+  return KeyedFamily(pending, active, p, kArRegionalFamily_Development);
+}
+static bool RecoveryLayer(const Side *pending, const Side *active, Payload *p) {
+  return KeyedFamily(pending, active, p, kArRegionalFamily_Recovery);
+}
+static bool QuakeLayer(const Side *pending, const Side *active, Payload *p) {
+  bool native = true;
+  for (unsigned i = 0; i < kArRegionalQuake_Count; ++i) {
+    const bool now = pending->resolved.quake.random[i], then = active->resolved.quake.random[i];
+    PutKeyed(p, ArRegionalQuake_Descriptor((ArRegionalQuakeRule)i)->key, now, then);
+    native &= !now && !then;
+  }
+  return native;
+}
+/* Keeps the v15 arithmetic identity: phase has its own layer. */
+static bool ScoreStockLayer(const Side *pending, const Side *active, Payload *p) {
+  bool native = true;
+  for (unsigned i = 0; i < kArRegionalScore_Phase; ++i) {
+    const bool now = pending->resolved.score.japanese[i], then = active->resolved.score.japanese[i];
+    PutKeyed(p, ArRegionalScore_Descriptor((ArRegionalScoreRule)i)->key, now, then);
+    native &= !now && !then;
+  }
+  return native;
+}
+static bool WordPair(Payload *p, uint16_t now, uint16_t then, uint16_t native) {
+  PutWord(p, now);
+  PutWord(p, then);
+  return now == native && then == native;
+}
+static bool TownWaitLayer(const Side *pending, const Side *active, Payload *p) {
+  return WordPair(p, pending->resolved.wait, active->resolved.wait,
+                  ArRegionalTownWait_Descriptor()->updates[kArRegionalSource_US]);
+}
+static bool FishingLayer(const Side *pending, const Side *active, Payload *p) {
+  return WordPair(p, pending->resolved.fish, active->resolved.fish,
+                  ArRegionalFishing_Descriptor()->updates[kArRegionalSource_US]);
+}
+static bool SkullWaitLayer(const Side *pending, const Side *active, Payload *p) {
+  return WordPair(p, pending->resolved.skull, active->resolved.skull, 90);
+}
+static bool SimCombatLayer(const Side *pending, const Side *active, Payload *p) {
+  return WordPair(p, pending->resolved.combat, active->resolved.combat, 0);
+}
+static bool SimAiLayer(const Side *pending, const Side *active, Payload *p) {
+  return WordPair(p, pending->resolved.ai, active->resolved.ai, 0);
+}
+static bool ActionMotionLayer(const Side *pending, const Side *active, Payload *p) {
+  return WordPair(p, pending->resolved.motion, active->resolved.motion, 0);
+}
+static bool SpeedRangeLayer(const Side *pending, const Side *active, Payload *p) {
+  PutByte(p, pending->resolved.speed);
+  PutByte(p, active->resolved.speed);
+  return pending->resolved.speed == 9 && active->resolved.speed == 9;
+}
+static bool SourcesLayer(const Side *pending, const Side *active, Payload *p) {
+  _Static_assert(kArRegionalSourceItem_Count == 2, "ARSOURCES-R1 has two collection leaves");
+  bool native = true;
+  for (unsigned i = 0; i < kArRegionalSourceItem_Count; ++i) {
+    const bool now = pending->resolved.sources.automatic[i];
+    const bool then = active->resolved.sources.automatic[i];
+    PutByte(p, now);
+    PutByte(p, then);
+    native &= now && then;
+  }
+  return native;
+}
+static bool StoryLayer(const Side *pending, const Side *active, Payload *p) {
+  _Static_assert(kArRegionalStory_Count == 3, "ARSTORY-R1 has three prerequisite leaves");
+  bool native = true;
+  for (unsigned i = 0; i < kArRegionalStory_Count; ++i) {
+    const unsigned us =
+        ArRegionalStory_Descriptor((ArRegionalStoryRule)i)->value[kArRegionalSource_US];
+    native &= WordPair(p, pending->resolved.story.value[i], active->resolved.story.value[i], us);
+  }
+  return native;
+}
+static bool TownStatusLayer(const Side *pending, const Side *active, Payload *p) {
+  _Static_assert(kArRegionalTownStatus_Count == 5, "ARTOWNSTATUS-R1 has five reporting leaves");
+  bool native = true;
+  for (unsigned i = 0; i < kArRegionalTownStatus_Count; ++i) {
+    const uint16_t now = pending->resolved.status.japanese[i];
+    const uint16_t then = active->resolved.status.japanese[i];
+    PutByte(p, now);
+    PutByte(p, then);
+    native &= !now && !then;
+  }
+  return native;
+}
+static bool SupportLayer(const Side *pending, const Side *active, Payload *p) {
+  bool native = true;
+  for (unsigned i = 0; i < kArRegionalSupport_Count; ++i) {
+    const unsigned us =
+        ArRegionalSupport_Descriptor((ArRegionalSupportRule)i)->amount[kArRegionalSource_US];
+    native &= WordPair(p, pending->resolved.support.amount[i], active->resolved.support.amount[i],
+                       us);
+  }
+  return native;
+}
+static bool BossLayer(const Side *pending, const Side *active, Payload *p) {
+  for (unsigned i = 0; i < 8; ++i) PutByte(p, (uint8_t)(pending->resolved.boss >> (8 * i)));
+  for (unsigned i = 0; i < 8; ++i) PutByte(p, (uint8_t)(active->resolved.boss >> (8 * i)));
+  return !pending->resolved.boss && !active->resolved.boss;
+}
+static bool ActorStatsLayer(const Side *pending, const Side *active, Payload *p) {
+  _Static_assert(kArRegionalActorStat_BaseCount == 63, "preserve actor-stat replay domain");
+  for (unsigned i = 0; i < kArRegionalActorStat_BaseCount; ++i)
+    PutByte(p, pending->resolved.stats.value[i]);
+  for (unsigned i = 0; i < kArRegionalActorStat_BaseCount; ++i)
+    PutByte(p, active->resolved.stats.value[i]);
+  return !pending->resolved.stats.changed && !active->resolved.stats.changed;
+}
+static bool ChildStatsLayer(const Side *pending, const Side *active, Payload *p) {
+  _Static_assert(kArRegionalActorStat_Count - kArRegionalActorStat_BaseCount == 3,
+                 "preserve child-stat replay domain");
+  bool native = true;
+  for (unsigned i = kArRegionalActorStat_BaseCount; i < kArRegionalActorStat_Count; ++i) {
+    const uint16_t us = ArRegionalActorStats_Descriptor(i)->value[0];
+    native &= pending->resolved.stats.value[i] == us && active->resolved.stats.value[i] == us;
+  }
+  for (unsigned i = kArRegionalActorStat_BaseCount; i < kArRegionalActorStat_Count; ++i)
+    PutByte(p, pending->resolved.stats.value[i]);
+  for (unsigned i = kArRegionalActorStat_BaseCount; i < kArRegionalActorStat_Count; ++i)
+    PutByte(p, active->resolved.stats.value[i]);
+  return native;
+}
+static bool ActionStartLayer(const Side *pending, const Side *active, Payload *p) {
+  const ArRegionalActionStartSnapshot now = pending->resolved.start, then = active->resolved.start;
+  PutByte(p, now.spares);
+  PutByte(p, now.health);
+  PutByte(p, then.spares);
+  PutByte(p, then.health);
+  return now.spares == 4 && now.health == 24 && then.spares == 4 && then.health == 24;
+}
+static bool PlacementsLayer(const Side *pending, const Side *active, Payload *p) {
+  const ArRegionalRules *now = pending->rules, *then = active->rules;
+  PutByte(p, now->placements.enemies);
+  PutByte(p, now->placements.pickups);
+  PutByte(p, then->placements.enemies);
+  PutByte(p, then->placements.pickups);
+  PutByte(p, now->placements.enemies == kArRegionalSource_Europe ? now->difficulty.level : 0);
+  PutByte(p, then->placements.enemies == kArRegionalSource_Europe ? then->difficulty.level : 0);
+  return !now->placements.enemies && !now->placements.pickups &&
+         !then->placements.enemies && !then->placements.pickups;
+}
+
+/* A layer either runs a builder or hashes one resolved flag per side, native
+ * when both equal `native`. */
+typedef struct Layer {
+  const char *tag;
+  uint8_t digest_offset;
+  uint16_t capacity;
+  LayerBuild build;
+  uint8_t flag, native;
+} Layer;
+enum { kLayerCapacity = 512 };
+static const Layer kLayers[] = {
+  {"ARTIME-R1", 9, 512, TimersLayer, 0, 0},
+  {"ARRETRY-R1", 10, 64, NULL, kFlag_Retry, 0},
+  {"ARTOWNWAIT-R1", 14, 64, TownWaitLayer, 0, 0},
+  {"ARFISHING-R1", 12, 64, FishingLayer, 0, 0},
+  {"ARDEVELOP-R1", 12, 256, DevelopmentLayer, 0, 0},
+  {"ARRECOVERY-R1", 14, 256, RecoveryLayer, 0, 0},
+  {"ARQUAKE-R1", 10, 256, QuakeLayer, 0, 0},
+  {"ARSCOREPAGE-R1", 14, 48, NULL, kFlag_ScorePage, 1},
+  {"ARMENURETURN-R1", 16, 50, NULL, kFlag_Menu, 0},
+  {"ARSPEEDRANGE-R1", 16, 50, SpeedRangeLayer, 0, 0},
+  {"ARMAGICGESTURE-R1", 18, 52, NULL, kFlag_Gesture, 0},
+  {"ARLAIRSEEDS-R1", 16, 50, NULL, kFlag_Seeds, 0},
+  {"ARHOUSECREDIT-R1", 16, 50, NULL, kFlag_House, 0},
+  {"ARSCORESTOCK-R1", 16, 192, ScoreStockLayer, 0, 0},
+  {"ARSCOREPHASE-R1", 16, 50, NULL, kFlag_Phase, 0},
+  {"ARLIFEDISPLAY-R1", 16, 50, NULL, kFlag_Lives, 0},
+  {"ARSOURCES-R1", 16, 52, SourcesLayer, 0, 0},
+  {"ARSKULLWAIT-R1", 16, 52, SkullWaitLayer, 0, 0},
+  {"ARSTORY-R1", 16, 60, StoryLayer, 0, 0},
+  {"ARRELOADPOL-R1", 16, 50, NULL, kFlag_Reload, 0},
+  {"ARTOWNSTATUS-R1", 16, 58, TownStatusLayer, 0, 0},
+  {"ARLEVELGOALS-R1", 16, 50, NULL, kFlag_Level, 0},
+  {"ARSIMCOMBAT-R1", 16, 52, SimCombatLayer, 0, 0},
+  {"ARSIMAI-R1", 16, 52, SimAiLayer, 0, 0},
+  {"ARBUILDPRICE-R1", 16, 50, NULL, kFlag_Construction, 0},
+  {"ARSUPPORT-R1", 16, 48 + 4 * kArRegionalSupport_Count, SupportLayer, 0, 0},
+  {"ARARRIVAL-R1", 16, 50, NULL, kFlag_Arrival, 0},
+  {"ARACTIONMOVE-R1", 16, 52, ActionMotionLayer, 0, 0},
+  {"AREMITTER-R1", 16, 50, NULL, kFlag_Emitter, 0},
+  {"ARVOLLEY-R1", 16, 50, NULL, kFlag_Volley, 0},
+  {"ARBOSS-R1", 16, 64, BossLayer, 0, 0},
+  {"ARCOLLISION-R1", 16, 50, NULL, kFlag_Collision, 0},
+  {"ARPLATSKULL-R1", 16, 50, NULL, kFlag_PlatformSkull, 0},
+  {"ARACTORSTAT-R1", 16, 48 + 2 * kArRegionalActorStat_BaseCount, ActorStatsLayer, 0, 0},
+  {"ARCHILDSTAT-R1", 16, 54, ChildStatsLayer, 0, 0},
+  {"ARCASTHOLD-R1", 16, 50, NULL, kFlag_CastHold, 0},
+  {"ARFIRE-R1", 16, 50, NULL, kFlag_Fire, 0},
+  {"ARDIFF-R1", 16, 50, NULL, kFlag_Difficulty, 0},
+  {"ARSCORELIVES-R1", 16, 50, NULL, kFlag_ScoreLives, 0},
+  {"ARACTIONSTART-R1", 16, 52, ActionStartLayer, 0, 0},
+  {"ARINVENTORY-R1", 16, 50, NULL, kFlag_Inventory, 0},
+  {"ARPLACEMENTS-R1", 16, 54, PlacementsLayer, 0, 0},
+  {"ARMUSICROUTE-R1", 16, 50, NULL, kFlag_Music, 0},
+  {"ARTERRAIN-R1", 16, 50, NULL, kFlag_Terrain, 0},
+  {"ARARTWORK-R1", 16, 50, NULL, kFlag_Artwork, 0},
+  {"ARMOSAIC-R1", 16, 50, NULL, kFlag_Mosaic, 0},
+  {"ARPOSES-R1", 16, 50, NULL, kFlag_Poses, 0},
+  {"ARSEQUENCE-R1", 16, 50, NULL, kFlag_Sequences, 0},
+  {"ARHAZARDS-R1", 16, 50, NULL, kFlag_Hazards, 0},
+  {"ARMODEENTRY-R1", 16, 50, NULL, kFlag_ModeEntry, 0},
+  {"ARACTORART-R1", 16, 50, NULL, kFlag_ActorArt, 0},
+};
+
 bool ArRegionalRules_Fingerprint(const ArRegionalRules *requested,
     const ArRegionalRules *effective,
     uint8_t out[32], bool *baseline) {
-  if (!requested || !effective || !out || !baseline ||
-      (unsigned)requested->lair_reloads>=kArRegionalSource_Count ||
-      (unsigned)effective->lair_reloads>=kArRegionalSource_Count ||
-      !ArRegionalTimers_Valid(&requested->timers) ||
-      !ArRegionalTimers_Valid(&effective->timers)) return false;
-  bool retry_requested, retry_effective;
-  uint8_t mode_requested,mode_effective;
-  if(!ArRegionalMode_Resolve(&requested->mode_entry,&mode_requested) ||
-      !ArRegionalMode_Resolve(&effective->mode_entry,&mode_effective))return false;
-  if(!ArRegionalPlacements_Valid(&requested->placements) ||
-      !ArRegionalPlacements_Valid(&effective->placements))return false;
-  uint8_t music_requested,music_effective;
-  uint8_t artwork_requested,artwork_effective;
-  uint8_t actor_art_requested,actor_art_effective;
-  if(!ArRegionalActorArtwork_Resolve(&requested->actor_artwork,&actor_art_requested) ||
-      !ArRegionalActorArtwork_Resolve(&effective->actor_artwork,&actor_art_effective))return false;
-  if(!ArRegionalArtwork_Resolve(&requested->artwork,&artwork_requested) ||
-      !ArRegionalArtwork_Resolve(&effective->artwork,&artwork_effective))return false;
-  uint8_t mosaic_requested,mosaic_effective;
-  uint8_t poses_requested,poses_effective;
-  uint8_t sequences_requested,sequences_effective;
-  if(!ArRegionalSequences_Resolve(&requested->sequences,&sequences_requested) ||
-      !ArRegionalSequences_Resolve(&effective->sequences,&sequences_effective))return false;
-  if(!ArRegionalPoses_Resolve(&requested->poses,&poses_requested) ||
-      !ArRegionalPoses_Resolve(&effective->poses,&poses_effective))return false;
-  if(!ArRegionalMosaic_Resolve(requested->mosaic,&mosaic_requested) ||
-      !ArRegionalMosaic_Resolve(effective->mosaic,&mosaic_effective))return false;
-  if(!ArRegionalMusic_Resolve(requested->music,&music_requested) ||
-      !ArRegionalMusic_Resolve(effective->music,&music_effective))return false;
-  uint8_t terrain_requested,terrain_effective;
-  if(!ArRegionalTerrain_Resolve(requested->terrain,&terrain_requested) ||
-      !ArRegionalTerrain_Resolve(effective->terrain,&terrain_effective))return false;
-  uint8_t hazards_requested,hazards_effective;
-  if(!ArRegionalHazards_Resolve(requested->hazards,&hazards_requested) ||
-      !ArRegionalHazards_Resolve(effective->hazards,&hazards_effective))return false;
-  bool inventory_requested,inventory_effective;
-  if(!ArRegionalInventory_Resolve(requested->spell_inventory,&inventory_requested) ||
-      !ArRegionalInventory_Resolve(effective->spell_inventory,&inventory_effective))return false;
-  ArRegionalActionStartSnapshot start_requested,start_effective;
-  if(!ArRegionalActionStart_Resolve(&requested->action_start,&start_requested) ||
-      !ArRegionalActionStart_Resolve(&effective->action_start,&start_effective))return false;
-  bool score_lives_requested,score_lives_effective;
-  if(!ArRegionalScoreLives_Resolve(requested->score_lives,&score_lives_requested) ||
-      !ArRegionalScoreLives_Resolve(effective->score_lives,&score_lives_effective))return false;
-  bool arrival_requested,arrival_effective;
-  uint16_t motion_requested,motion_effective;
-  bool volley_requested,volley_effective;
-  uint64_t boss_requested,boss_effective;
-  uint8_t collision_requested,collision_effective;
-  uint8_t platform_skull_requested,platform_skull_effective;
-  ArRegionalActorStatsSnapshot stats_requested,stats_effective;
-  uint8_t hold_requested,hold_effective;
-  uint8_t fire_requested,fire_effective;
-  ArRegionalDifficultySnapshot difficulty_requested,difficulty_effective;
-  if(!ArRegionalDifficulty_Resolve(&requested->difficulty,&difficulty_requested) ||
-      !ArRegionalDifficulty_Resolve(&effective->difficulty,&difficulty_effective))return false;
-  if(!ArRegionalFire_Resolve(&requested->fire_enemy,&fire_requested) ||
-      !ArRegionalFire_Resolve(&effective->fire_enemy,&fire_effective))return false;
-  if(!ArRegionalCastHold_Resolve(&requested->cast_hold,&hold_requested) ||
-      !ArRegionalCastHold_Resolve(&effective->cast_hold,&hold_effective))return false;
-  if(!ArRegionalActorStats_Resolve(&requested->actor_stats,&stats_requested) ||
-      !ArRegionalActorStats_Resolve(&effective->actor_stats,&stats_effective))return false;
-  if(!ArRegionalPlatformSkull_Resolve(&requested->platform_skull,&platform_skull_requested) ||
-      !ArRegionalPlatformSkull_Resolve(&effective->platform_skull,&platform_skull_effective))return false;
-  if(!ArRegionalCollision_Resolve(&requested->collision,&collision_requested) ||
-      !ArRegionalCollision_Resolve(&effective->collision,&collision_effective))return false;
-  if(!ArRegionalBoss_Resolve(&requested->bosses,&boss_requested) ||
-      !ArRegionalBoss_Resolve(&effective->bosses,&boss_effective))return false;
-  if(!ArRegionalVolley_Resolve(requested->statue_volley,&volley_requested) ||
-      !ArRegionalVolley_Resolve(effective->statue_volley,&volley_effective))return false;
-  uint8_t emitter_requested,emitter_effective;
-  if(!ArRegionalEmitter_Resolve(&requested->emitters,&emitter_requested) ||
-      !ArRegionalEmitter_Resolve(&effective->emitters,&emitter_effective))return false;
-  if(!ArRegionalActionMotion_Resolve(&requested->action_motion,&motion_requested) ||
-      !ArRegionalActionMotion_Resolve(&effective->action_motion,&motion_effective))return false;
-  if(!ArRegionalArrival_Resolve(requested->arrival,&arrival_requested) ||
-      !ArRegionalArrival_Resolve(effective->arrival,&arrival_effective))return false;
-  if (!ArRegionalRetry_Resolve(requested->retry_score, &retry_requested) ||
-      !ArRegionalRetry_Resolve(effective->retry_score, &retry_effective)) return false;
-  uint16_t wait_requested, wait_effective;
-  if (!ArRegionalTownWait_Resolve(requested->town_wait, &wait_requested) ||
-      !ArRegionalTownWait_Resolve(effective->town_wait, &wait_effective)) return false;
-  uint16_t fish_requested, fish_effective;
-  if (!ArRegionalFishing_Resolve(requested->fishing, &fish_requested) ||
-      !ArRegionalFishing_Resolve(effective->fishing, &fish_effective)) return false;
-  ArRegionalDevelopmentSnapshot development;
-  if(!ArRegionalDevelopment_Resolve(&requested->development,&development) ||
-     !ArRegionalDevelopment_Resolve(&effective->development,&development))return false;
-  ArRegionalRecoverySnapshot recovery;
-  if (!ArRegionalRecovery_Resolve(&requested->recovery, &recovery) ||
-      !ArRegionalRecovery_Resolve(&effective->recovery, &recovery)) return false;
-  ArRegionalQuakeSnapshot quake_requested, quake_effective;
-  if (!ArRegionalQuake_Resolve(&requested->quake, &quake_requested) ||
-      !ArRegionalQuake_Resolve(&effective->quake, &quake_effective)) return false;
-  bool score_requested, score_effective;
-  ArRegionalStorySnapshot story_requested,story_effective;
-  ArRegionalTownStatusSnapshot status_requested,status_effective;
-  bool level_requested,level_effective;
-  bool construction_requested,construction_effective;
-  ArRegionalSupportSnapshot support_requested,support_effective;
-  if (!ArRegionalSupport_Resolve(&requested->support,&support_requested) ||
-      !ArRegionalSupport_Resolve(&effective->support,&support_effective)) return false;
-  if (!ArRegionalConstruction_Resolve(requested->construction,&construction_requested) ||
-      !ArRegionalConstruction_Resolve(effective->construction,&construction_effective)) return false;
-  uint16_t combat_requested,combat_effective;
-  uint16_t ai_requested,ai_effective;
-  if (!ArRegionalSimAi_Resolve(&requested->sim_ai,&ai_requested) ||
-      !ArRegionalSimAi_Resolve(&effective->sim_ai,&ai_effective)) return false;
-  if (!ArRegionalSimCombat_Resolve(&requested->sim_combat,&combat_requested) ||
-      !ArRegionalSimCombat_Resolve(&effective->sim_combat,&combat_effective)) return false;
-  if (!ArRegionalLevelGoals_Resolve(requested->level_goals,&level_requested) ||
-      !ArRegionalLevelGoals_Resolve(effective->level_goals,&level_effective)) return false;
-  if (!ArRegionalTownStatus_Resolve(&requested->town_status,&status_requested) ||
-      !ArRegionalTownStatus_Resolve(&effective->town_status,&status_effective)) return false;
-  if (!ArRegionalStory_Resolve(&requested->story,&story_requested) ||
-      !ArRegionalStory_Resolve(&effective->story,&story_effective)) return false;
-  uint16_t skull_requested, skull_effective;
-  if (!ArRegionalSkullWait_Resolve(requested->skull_wait,&skull_requested) ||
-      !ArRegionalSkullWait_Resolve(effective->skull_wait,&skull_effective)) return false;
-  ArRegionalSourcesSnapshot sources_requested, sources_effective;
-  if (!ArRegionalSources_Resolve(&requested->sources,&sources_requested) ||
-      !ArRegionalSources_Resolve(&effective->sources,&sources_effective)) return false;
-  bool lives_requested, lives_effective;
-  if (!ArRegionalLivesDisplay_Resolve(requested->lives_display, &lives_requested) ||
-      !ArRegionalLivesDisplay_Resolve(effective->lives_display, &lives_effective)) return false;
-  if (!ArRegionalScorePage_Resolve(requested->score_page, &score_requested) ||
-      !ArRegionalScorePage_Resolve(effective->score_page, &score_effective)) return false;
-  bool menu_requested, menu_effective;
-  if (!ArRegionalMenuReturn_Resolve(requested->menu_return, &menu_requested) ||
-      !ArRegionalMenuReturn_Resolve(effective->menu_return, &menu_effective)) return false;
-  uint8_t bytes[512] = "ARTIME-R1", digest[32];
-  uint16_t speed_requested, speed_effective;
-  if (!ArRegionalSpeedRange_Resolve(requested->speed_range, &speed_requested) ||
-      !ArRegionalSpeedRange_Resolve(effective->speed_range, &speed_effective)) return false;
-  bool gesture_requested, gesture_effective;
-  if (!ArRegionalMagicGesture_Resolve(requested->magic_gesture, &gesture_requested) ||
-      !ArRegionalMagicGesture_Resolve(effective->magic_gesture, &gesture_effective)) return false;
-  if ((unsigned)requested->lair_seeds >= kArRegionalSource_Count ||
-      (unsigned)effective->lair_seeds >= kArRegionalSource_Count) return false;
-  const bool seeds_requested=requested->lair_seeds==kArRegionalSource_Japan;
-  const bool seeds_effective=effective->lair_seeds==kArRegionalSource_Japan;
-  if ((unsigned)requested->house_credit >= kArRegionalSource_Count ||
-      (unsigned)effective->house_credit >= kArRegionalSource_Count) return false;
-  const bool house_requested=requested->house_credit==kArRegionalSource_Japan;
-  const bool house_effective=effective->house_credit==kArRegionalSource_Japan;
-  ArRegionalScoreSnapshot score_pending, score_active;
-  if (!ArRegionalScore_Resolve(&requested->score_feedback,&score_pending) ||
-      !ArRegionalScore_Resolve(&effective->score_feedback,&score_active)) return false;
-  bool costs_native;
-  if (!ArRegionalCosts_Fingerprint(&requested->costs, &effective->costs, digest, &costs_native))
+  if (!requested || !effective || !out || !baseline) return false;
+  Side pending = {requested}, active = {effective};
+  if (!ResolveSide(requested, &pending.resolved) || !ResolveSide(effective, &active.resolved))
     return false;
-  memcpy(bytes + 9, digest, sizeof(digest));
-  size_t used = 9 + sizeof(digest);
-  bool timers_native = true;
-  for (unsigned i = 0; i < kArRegionalTimerRule_Count; ++i) {
-    const ArRegionalTimerDescriptor *rule = ArRegionalTimers_Descriptor((ArRegionalTimerRule)i);
-    const uint16_t pending = rule->bcd[requested->timers.source[i]];
-    const uint16_t active = rule->bcd[effective->timers.source[i]];
-    const size_t length = strlen(rule->key);
-    if (length > 255 || length + 5 > sizeof(bytes) - used) return false;
-    bytes[used++] = (uint8_t)length;
-    memcpy(bytes + used, rule->key, length); used += length;
-    ByteOrder_WriteLe16(bytes + used, pending);
-    ByteOrder_WriteLe16(bytes + used + 2, active); used += 4;
-    timers_native &= pending == rule->bcd[kArRegionalSource_US] &&
-                     active == rule->bcd[kArRegionalSource_US];
+  uint8_t digest[32];
+  bool native;
+  if (!ArRegionalCosts_Fingerprint(&requested->costs, &effective->costs, digest, &native))
+    return false;
+  for (unsigned i = 0; i < sizeof(kLayers) / sizeof(kLayers[0]); ++i) {
+    const Layer *layer = &kLayers[i];
+    uint8_t bytes[kLayerCapacity] = {0};
+    memcpy(bytes, layer->tag, strlen(layer->tag));
+    memcpy(bytes + layer->digest_offset, digest, sizeof(digest));
+    Payload payload = {bytes, layer->digest_offset + sizeof(digest), layer->capacity, false};
+    bool layer_native;
+    if (layer->build) {
+      layer_native = layer->build(&pending, &active, &payload);
+    } else {
+      const uint8_t now = pending.resolved.flag[layer->flag];
+      const uint8_t then = active.resolved.flag[layer->flag];
+      PutByte(&payload, now);
+      PutByte(&payload, then);
+      layer_native = now == layer->native && then == layer->native;
+    }
+    if (payload.failed) return false;
+    if (!layer_native && !sr_support_sha256(bytes, payload.used, digest)) return false;
+    native &= layer_native;
   }
-  if (!timers_native && !sr_support_sha256(bytes, used, digest)) return false;
-  if (retry_requested || retry_effective) {
-    /* Preserve every older digest when this new rule is numerically native. */
-    uint8_t retry_bytes[64] = "ARRETRY-R1";
-    memcpy(retry_bytes + 10, digest, sizeof(digest));
-    retry_bytes[42] = retry_requested;
-    retry_bytes[43] = retry_effective;
-    if (!sr_support_sha256(retry_bytes, 44, digest)) return false;
-  }
-  const uint16_t native_wait = ArRegionalTownWait_Descriptor()->updates[kArRegionalSource_US];
-  const bool wait_native = wait_requested == native_wait && wait_effective == native_wait;
-  if (!wait_native) {
-    uint8_t wait_bytes[64] = "ARTOWNWAIT-R1";
-    memcpy(wait_bytes + 14, digest, sizeof(digest));
-    ByteOrder_WriteLe16(wait_bytes + 46, wait_requested);
-    ByteOrder_WriteLe16(wait_bytes + 48, wait_effective);
-    if (!sr_support_sha256(wait_bytes, 50, digest)) return false;
-  }
-  const uint16_t native_fish = ArRegionalFishing_Descriptor()->updates[kArRegionalSource_US];
-  const bool fish_native = fish_requested == native_fish && fish_effective == native_fish;
-  if (!fish_native) {
-    uint8_t fish_bytes[64] = "ARFISHING-R1";
-    memcpy(fish_bytes + 12, digest, sizeof(digest));
-    ByteOrder_WriteLe16(fish_bytes + 44, fish_requested);
-    ByteOrder_WriteLe16(fish_bytes + 46, fish_effective);
-    if (!sr_support_sha256(fish_bytes, 48, digest)) return false;
-  }
-  uint8_t development_bytes[256]="ARDEVELOP-R1";
-  memcpy(development_bytes+12,digest,sizeof(digest));used=12+sizeof(digest);
-  bool development_native=true;
-  for(unsigned i=0;i<kArRegionalDevelopmentRule_Count;++i) {
-    const ArRegionalDevelopmentDescriptor *rule=ArRegionalDevelopment_Descriptor((ArRegionalDevelopmentRule)i);
-    const uint16_t pending=rule->updates[requested->development.source[i]],active=rule->updates[effective->development.source[i]];
-    const size_t length=strlen(rule->key);
-    if(length>255 || length+5>sizeof(development_bytes)-used)return false;
-    development_bytes[used++]=(uint8_t)length;
-    memcpy(development_bytes+used,rule->key,length);used+=length;
-    ByteOrder_WriteLe16(development_bytes+used,pending);
-    ByteOrder_WriteLe16(development_bytes+used+2,active);used+=4;
-    development_native &= pending==rule->updates[kArRegionalSource_US] && active==rule->updates[kArRegionalSource_US];
-  }
-  if(!development_native && !sr_support_sha256(development_bytes,used,digest))return false;
-  uint8_t recovery_bytes[256] = "ARRECOVERY-R1";
-  memcpy(recovery_bytes + 14, digest, sizeof(digest));
-  used = 14 + sizeof(digest);
-  bool recovery_native = true;
-  for (unsigned i = 0; i < kArRegionalRecovery_Count; ++i) {
-    const ArRegionalRecoveryDescriptor *rule = ArRegionalRecovery_Descriptor((ArRegionalRecoveryRule)i);
-    const uint16_t pending = rule->value[requested->recovery.source[i]];
-    const uint16_t active = rule->value[effective->recovery.source[i]];
-    const size_t length = strlen(rule->key);
-    if (length > 255 || length + 5 > sizeof(recovery_bytes) - used) return false;
-    recovery_bytes[used++] = (uint8_t)length;
-    memcpy(recovery_bytes + used, rule->key, length); used += length;
-    ByteOrder_WriteLe16(recovery_bytes + used, pending);
-    ByteOrder_WriteLe16(recovery_bytes + used + 2, active); used += 4;
-    recovery_native &= pending == rule->value[kArRegionalSource_US] && active == rule->value[kArRegionalSource_US];
-  }
-  if (!recovery_native && !sr_support_sha256(recovery_bytes, used, digest)) return false;
-  uint8_t quake_bytes[256] = "ARQUAKE-R1";
-  memcpy(quake_bytes + 10, digest, sizeof(digest)); used = 10 + sizeof(digest);
-  bool quake_native = true;
-  for (unsigned i = 0; i < kArRegionalQuake_Count; ++i) {
-    const ArRegionalQuakeDescriptor *rule = ArRegionalQuake_Descriptor((ArRegionalQuakeRule)i);
-    const size_t length = strlen(rule->key);
-    if (length > 255 || length + 5 > sizeof(quake_bytes) - used) return false;
-    quake_bytes[used++] = (uint8_t)length;
-    memcpy(quake_bytes + used, rule->key, length); used += length;
-    ByteOrder_WriteLe16(quake_bytes + used, quake_requested.random[i]);
-    ByteOrder_WriteLe16(quake_bytes + used + 2, quake_effective.random[i]); used += 4;
-    quake_native &= !quake_requested.random[i] && !quake_effective.random[i];
-  }
-  if (!quake_native && !sr_support_sha256(quake_bytes, used, digest)) return false;
-  if (!score_requested || !score_effective) {
-    uint8_t score_bytes[48] = "ARSCOREPAGE-R1";
-    memcpy(score_bytes + 14, digest, sizeof(digest));
-    score_bytes[46] = score_requested; score_bytes[47] = score_effective;
-    if (!sr_support_sha256(score_bytes, sizeof(score_bytes), digest)) return false;
-  }
-  if (menu_requested || menu_effective) {
-    uint8_t menu_bytes[50] = "ARMENURETURN-R1";
-    memcpy(menu_bytes + 16, digest, sizeof(digest));
-    menu_bytes[48] = menu_requested; menu_bytes[49] = menu_effective;
-    if (!sr_support_sha256(menu_bytes, sizeof(menu_bytes), digest)) return false;
-  }
-  const bool speed_native = speed_requested == 9 && speed_effective == 9;
-  if (!speed_native) {
-    uint8_t speed_bytes[50] = "ARSPEEDRANGE-R1";
-    memcpy(speed_bytes + 16, digest, sizeof(digest));
-    speed_bytes[48] = (uint8_t)speed_requested; speed_bytes[49] = (uint8_t)speed_effective;
-    if (!sr_support_sha256(speed_bytes, sizeof(speed_bytes), digest)) return false;
-  }
-  if (gesture_requested || gesture_effective) {
-    uint8_t gesture_bytes[52] = "ARMAGICGESTURE-R1";
-    memcpy(gesture_bytes+18,digest,sizeof(digest));
-    gesture_bytes[50]=gesture_requested; gesture_bytes[51]=gesture_effective;
-    if (!sr_support_sha256(gesture_bytes,sizeof(gesture_bytes),digest)) return false;
-  }
-  if (seeds_requested || seeds_effective) {
-    uint8_t seed_bytes[50] = "ARLAIRSEEDS-R1";
-    memcpy(seed_bytes+16,digest,sizeof(digest));
-    seed_bytes[48]=seeds_requested; seed_bytes[49]=seeds_effective;
-    if (!sr_support_sha256(seed_bytes,sizeof(seed_bytes),digest)) return false;
-  }
-  if (house_requested || house_effective) {
-    uint8_t house_bytes[50] = "ARHOUSECREDIT-R1";
-    memcpy(house_bytes+16,digest,sizeof(digest));
-    house_bytes[48]=house_requested; house_bytes[49]=house_effective;
-    if (!sr_support_sha256(house_bytes,sizeof(house_bytes),digest)) return false;
-  }
-  uint8_t score_bytes[192]="ARSCORESTOCK-R1";
-  memcpy(score_bytes+16,digest,sizeof(digest)); used=16+sizeof(digest);
-  bool score_feedback_native=true;
-  /* Keep the v15 arithmetic identity unchanged when phase remains US. */
-  for (unsigned i=0; i<kArRegionalScore_Phase; ++i) {
-    const ArRegionalScoreDescriptor *rule=ArRegionalScore_Descriptor((ArRegionalScoreRule)i);
-    const size_t length=strlen(rule->key);
-    if (length>255 || length+5>sizeof(score_bytes)-used) return false;
-    score_bytes[used++]=(uint8_t)length;
-    memcpy(score_bytes+used,rule->key,length); used+=length;
-    ByteOrder_WriteLe16(score_bytes+used,score_pending.japanese[i]);
-    ByteOrder_WriteLe16(score_bytes+used+2,score_active.japanese[i]); used+=4;
-    score_feedback_native &= !score_pending.japanese[i] && !score_active.japanese[i];
-  }
-  if (!score_feedback_native && !sr_support_sha256(score_bytes,used,digest)) return false;
-  const bool phase_pending=score_pending.japanese[kArRegionalScore_Phase];
-  const bool phase_active=score_active.japanese[kArRegionalScore_Phase];
-  if (phase_pending || phase_active) {
-    uint8_t phase_bytes[50]="ARSCOREPHASE-R1";
-    memcpy(phase_bytes+16,digest,sizeof(digest));
-    phase_bytes[48]=phase_pending; phase_bytes[49]=phase_active;
-    if (!sr_support_sha256(phase_bytes,sizeof(phase_bytes),digest)) return false;
-    score_feedback_native=false;
-  }
-  if (lives_requested || lives_effective) {
-    uint8_t lives_bytes[50]="ARLIFEDISPLAY-R1";
-    memcpy(lives_bytes+16,digest,sizeof(digest));
-    lives_bytes[48]=lives_requested; lives_bytes[49]=lives_effective;
-    if (!sr_support_sha256(lives_bytes,sizeof(lives_bytes),digest)) return false;
-  }
-  bool sources_native=true;
-  _Static_assert(kArRegionalSourceItem_Count==2,"ARSOURCES-R1 has two independent collection leaves");
-  uint8_t source_bytes[52]="ARSOURCES-R1";
-  memcpy(source_bytes+16,digest,sizeof(digest));
-  for(unsigned i=0;i<kArRegionalSourceItem_Count;++i) {
-    source_bytes[48+2*i]=sources_requested.automatic[i];
-    source_bytes[49+2*i]=sources_effective.automatic[i];
-    sources_native &= sources_requested.automatic[i] && sources_effective.automatic[i];
-  }
-  if (!sources_native && !sr_support_sha256(source_bytes,sizeof(source_bytes),digest)) return false;
-  const bool skull_native=skull_requested==90 && skull_effective==90;
-  if (!skull_native) {
-    uint8_t skull_bytes[52]="ARSKULLWAIT-R1";
-    memcpy(skull_bytes+16,digest,sizeof(digest));
-    ByteOrder_WriteLe16(skull_bytes+48,skull_requested);
-    ByteOrder_WriteLe16(skull_bytes+50,skull_effective);
-    if (!sr_support_sha256(skull_bytes,sizeof(skull_bytes),digest)) return false;
-  }
-  bool story_native=true;
-  _Static_assert(kArRegionalStory_Count==3,"ARSTORY-R1 has three prerequisite leaves");
-  uint8_t story_bytes[60]="ARSTORY-R1";
-  memcpy(story_bytes+16,digest,sizeof(digest));
-  for (unsigned i=0;i<kArRegionalStory_Count;++i) {
-    const unsigned native=ArRegionalStory_Descriptor((ArRegionalStoryRule)i)->value[kArRegionalSource_US];
-    story_native &= story_requested.value[i]==native && story_effective.value[i]==native;
-    ByteOrder_WriteLe16(story_bytes+48+4*i,story_requested.value[i]);
-    ByteOrder_WriteLe16(story_bytes+50+4*i,story_effective.value[i]);
-  }
-  if (!story_native && !sr_support_sha256(story_bytes,sizeof(story_bytes),digest)) return false;
-  const bool reload_native=requested->lair_reloads!=kArRegionalSource_Japan &&
-      effective->lair_reloads!=kArRegionalSource_Japan;
-  if (!reload_native) {
-    uint8_t reload_bytes[50]="ARRELOADPOL-R1";
-    memcpy(reload_bytes+16,digest,32);
-    reload_bytes[48]=requested->lair_reloads==kArRegionalSource_Japan;
-    reload_bytes[49]=effective->lair_reloads==kArRegionalSource_Japan;
-    if (!sr_support_sha256(reload_bytes,sizeof(reload_bytes),digest)) return false;
-  }
-  bool status_native=true;
-  _Static_assert(kArRegionalTownStatus_Count==5,"ARTOWNSTATUS-R1 has five reporting leaves");
-  uint8_t status_bytes[58]="ARTOWNSTATUS-R1";
-  memcpy(status_bytes+16,digest,sizeof(digest));
-  for (unsigned i=0;i<kArRegionalTownStatus_Count;++i) {
-    status_bytes[48+2*i]=(uint8_t)status_requested.japanese[i];
-    status_bytes[49+2*i]=(uint8_t)status_effective.japanese[i];
-    status_native &= !status_requested.japanese[i] && !status_effective.japanese[i];
-  }
-  if (!status_native && !sr_support_sha256(status_bytes,sizeof(status_bytes),digest)) return false;
-  if (level_requested || level_effective) {
-    uint8_t level_bytes[50]="ARLEVELGOALS-R1";
-    memcpy(level_bytes+16,digest,sizeof(digest));
-    level_bytes[48]=level_requested;level_bytes[49]=level_effective;
-    if (!sr_support_sha256(level_bytes,sizeof(level_bytes),digest)) return false;
-  }
-  if (combat_requested || combat_effective) {
-    uint8_t combat_bytes[52]="ARSIMCOMBAT-R1";
-    memcpy(combat_bytes+16,digest,sizeof(digest));
-    ByteOrder_WriteLe16(combat_bytes+48,combat_requested);ByteOrder_WriteLe16(combat_bytes+50,combat_effective);
-    if (!sr_support_sha256(combat_bytes,sizeof(combat_bytes),digest)) return false;
-  }
-  if (ai_requested || ai_effective) {
-    uint8_t ai_bytes[52]="ARSIMAI-R1";
-    memcpy(ai_bytes+16,digest,sizeof(digest));
-    ByteOrder_WriteLe16(ai_bytes+48,ai_requested);ByteOrder_WriteLe16(ai_bytes+50,ai_effective);
-    if (!sr_support_sha256(ai_bytes,sizeof(ai_bytes),digest)) return false;
-  }
-  if (construction_requested || construction_effective) {
-    uint8_t construction_bytes[50]="ARBUILDPRICE-R1";
-    memcpy(construction_bytes+16,digest,sizeof(digest));
-    construction_bytes[48]=construction_requested;construction_bytes[49]=construction_effective;
-    if (!sr_support_sha256(construction_bytes,sizeof(construction_bytes),digest)) return false;
-  }
-  uint8_t support_bytes[48+4*kArRegionalSupport_Count]="ARSUPPORT-R1";
-  memcpy(support_bytes+16,digest,sizeof(digest));
-  bool support_native=true;
-  for (unsigned i=0;i<kArRegionalSupport_Count;++i) {
-    ByteOrder_WriteLe16(support_bytes+48+i*4,support_requested.amount[i]);
-    ByteOrder_WriteLe16(support_bytes+50+i*4,support_effective.amount[i]);
-    const unsigned native=ArRegionalSupport_Descriptor((ArRegionalSupportRule)i)->amount[kArRegionalSource_US];
-    support_native &= support_requested.amount[i]==native && support_effective.amount[i]==native;
-  }
-  if (!support_native && !sr_support_sha256(support_bytes,sizeof(support_bytes),digest)) return false;
-  memcpy(out,digest,sizeof(digest));
-  *baseline = costs_native && timers_native && !retry_requested && !retry_effective && wait_native && fish_native && development_native && recovery_native && quake_native && score_requested && score_effective && !menu_requested && !menu_effective && speed_native && !gesture_requested && !gesture_effective && !seeds_requested && !seeds_effective && !house_requested && !house_effective && score_feedback_native;
-  *baseline &= !lives_requested && !lives_effective && sources_native && skull_native && story_native && reload_native && status_native;
-  *baseline &= !level_requested && !level_effective && !combat_requested && !combat_effective;
-  *baseline &= !ai_requested && !ai_effective;
-  *baseline &= !construction_requested && !construction_effective;
-  *baseline &= support_native;
-  if(arrival_requested || arrival_effective) {
-    uint8_t arrival_bytes[50]="ARARRIVAL-R1";
-    memcpy(arrival_bytes+16,digest,32);arrival_bytes[48]=arrival_requested;arrival_bytes[49]=arrival_effective;
-    if(!sr_support_sha256(arrival_bytes,sizeof(arrival_bytes),out))return false;
-    *baseline=false;
-  }
-  if(motion_requested || motion_effective) {
-    uint8_t bytes[52]="ARACTIONMOVE-R1";memcpy(bytes+16,out,32);
-    ByteOrder_WriteLe16(bytes+48,motion_requested);ByteOrder_WriteLe16(bytes+50,motion_effective);
-    if(!sr_support_sha256(bytes,sizeof(bytes),out))return false;
-    *baseline=false;
-  }
-  if(emitter_requested || emitter_effective) {
-    uint8_t bytes[50]="AREMITTER-R1";memcpy(bytes+16,out,32);
-    bytes[48]=emitter_requested;bytes[49]=emitter_effective;
-    if(!sr_support_sha256(bytes,sizeof(bytes),out))return false;
-    *baseline=false;
-  }
-  if(volley_requested || volley_effective) {
-    uint8_t bytes[50]="ARVOLLEY-R1";memcpy(bytes+16,out,32);
-    bytes[48]=volley_requested;bytes[49]=volley_effective;
-    if(!sr_support_sha256(bytes,sizeof(bytes),out))return false;
-    *baseline=false;
-  }
-  if(boss_requested || boss_effective) {
-    uint8_t bytes[64]="ARBOSS-R1";memcpy(bytes+16,out,32);
-    for(unsigned i=0;i<8;++i) {bytes[48+i]=(uint8_t)(boss_requested>>(8*i));bytes[56+i]=(uint8_t)(boss_effective>>(8*i));}
-    if(!sr_support_sha256(bytes,sizeof(bytes),out))return false;
-    *baseline=false;
-  }
-  if(collision_requested || collision_effective) {
-    uint8_t bytes[50]="ARCOLLISION-R1";memcpy(bytes+16,out,32);
-    bytes[48]=collision_requested;bytes[49]=collision_effective;
-    if(!sr_support_sha256(bytes,sizeof(bytes),out))return false;
-    *baseline=false;
-  }
-  if(platform_skull_requested || platform_skull_effective) {
-    uint8_t bytes[50]="ARPLATSKULL-R1";memcpy(bytes+16,out,32);
-    bytes[48]=platform_skull_requested;bytes[49]=platform_skull_effective;
-    if(!sr_support_sha256(bytes,sizeof(bytes),out))return false;
-    *baseline=false;
-  }
-  if(stats_requested.changed || stats_effective.changed) {
-    _Static_assert(kArRegionalActorStat_BaseCount==63,"preserve actor-stat replay domain");
-    uint8_t bytes[48+2*kArRegionalActorStat_BaseCount]="ARACTORSTAT-R1";memcpy(bytes+16,out,32);
-    memcpy(bytes+48,stats_requested.value,kArRegionalActorStat_BaseCount);
-    memcpy(bytes+48+kArRegionalActorStat_BaseCount,stats_effective.value,kArRegionalActorStat_BaseCount);
-    if(!sr_support_sha256(bytes,sizeof(bytes),out))return false;
-    *baseline=false;
-  }
-  bool child_changed=false;
-  for(unsigned i=kArRegionalActorStat_BaseCount;i<kArRegionalActorStat_Count;++i)
-    child_changed|=stats_requested.value[i]!=ArRegionalActorStats_Descriptor(i)->value[0] ||
-        stats_effective.value[i]!=ArRegionalActorStats_Descriptor(i)->value[0];
-  if(child_changed) {
-    _Static_assert(kArRegionalActorStat_Count-kArRegionalActorStat_BaseCount==3,"preserve child-stat replay domain");
-    uint8_t bytes[54]="ARCHILDSTAT-R1";memcpy(bytes+16,out,32);
-    memcpy(bytes+48,stats_requested.value+kArRegionalActorStat_BaseCount,3);
-    memcpy(bytes+51,stats_effective.value+kArRegionalActorStat_BaseCount,3);
-    if(!sr_support_sha256(bytes,sizeof(bytes),out))return false;
-    *baseline=false;
-  }
-  if(hold_requested || hold_effective) {
-    uint8_t bytes[50]="ARCASTHOLD-R1";memcpy(bytes+16,out,32);
-    bytes[48]=hold_requested;bytes[49]=hold_effective;
-    if(!sr_support_sha256(bytes,sizeof(bytes),out))return false;
-    *baseline=false;
-  }
-  if(fire_requested || fire_effective) {
-    uint8_t bytes[50]="ARFIRE-R1";memcpy(bytes+16,out,32);
-    bytes[48]=fire_requested;bytes[49]=fire_effective;
-    if(!sr_support_sha256(bytes,sizeof(bytes),out))return false;
-    *baseline=false;
-  }
-  const uint8_t difficulty_pending=ArRegionalDifficulty_Identity(&difficulty_requested);
-  const uint8_t difficulty_active=ArRegionalDifficulty_Identity(&difficulty_effective);
-  if(difficulty_pending || difficulty_active) {
-    uint8_t bytes[50]="ARDIFF-R1";memcpy(bytes+16,out,32);
-    bytes[48]=difficulty_pending;bytes[49]=difficulty_active;
-    if(!sr_support_sha256(bytes,sizeof(bytes),out))return false;
-    *baseline=false;
-  }
-  if(score_lives_requested || score_lives_effective) {
-    uint8_t bytes[50]="ARSCORELIVES-R1";memcpy(bytes+16,out,32);
-    bytes[48]=score_lives_requested;bytes[49]=score_lives_effective;
-    if(!sr_support_sha256(bytes,sizeof(bytes),out))return false;
-    *baseline=false;
-  }
-  if(start_requested.spares!=4 || start_requested.health!=24 || start_effective.spares!=4 || start_effective.health!=24) {
-    uint8_t bytes[52]="ARACTIONSTART-R1";memcpy(bytes+16,out,32);
-    bytes[48]=start_requested.spares;bytes[49]=start_requested.health;
-    bytes[50]=start_effective.spares;bytes[51]=start_effective.health;
-    if(!sr_support_sha256(bytes,sizeof(bytes),out))return false;
-    *baseline=false;
-  }
-  if(inventory_requested || inventory_effective) {
-    uint8_t bytes[50]="ARINVENTORY-R1";memcpy(bytes+16,out,32);
-    bytes[48]=inventory_requested;bytes[49]=inventory_effective;
-    if(!sr_support_sha256(bytes,sizeof(bytes),out))return false;
-    *baseline=false;
-  }
-  if(requested->placements.enemies || requested->placements.pickups ||
-      effective->placements.enemies || effective->placements.pickups) {
-    uint8_t bytes[54]="ARPLACEMENTS-R1";memcpy(bytes+16,out,32);
-    bytes[48]=requested->placements.enemies;bytes[49]=requested->placements.pickups;
-    bytes[50]=effective->placements.enemies;bytes[51]=effective->placements.pickups;
-    bytes[52]=requested->placements.enemies==kArRegionalSource_Europe?requested->difficulty.level:0;
-    bytes[53]=effective->placements.enemies==kArRegionalSource_Europe?effective->difficulty.level:0;
-    if(!sr_support_sha256(bytes,sizeof(bytes),out))return false;
-    *baseline=false;
-  }
-  if(music_requested || music_effective) {
-    /* Scene routing is independent of the per-room raster choice. */
-    uint8_t bytes[50]="ARMUSICROUTE-R1";memcpy(bytes+16,out,32);
-    bytes[48]=music_requested;bytes[49]=music_effective;
-    if(!sr_support_sha256(bytes,sizeof(bytes),out))return false;
-    *baseline=false;
-  }
-  if(terrain_requested || terrain_effective) {
-    uint8_t bytes[50]="ARTERRAIN-R1";memcpy(bytes+16,out,32);
-    bytes[48]=terrain_requested;bytes[49]=terrain_effective;
-    if(!sr_support_sha256(bytes,sizeof(bytes),out))return false;
-    *baseline=false;
-  }
-  if(artwork_requested || artwork_effective) {
-    uint8_t bytes[50]="ARARTWORK-R1";memcpy(bytes+16,out,32);
-    bytes[48]=artwork_requested;bytes[49]=artwork_effective;
-    if(!sr_support_sha256(bytes,sizeof(bytes),out))return false;
-    *baseline=false;
-  }
-  if(mosaic_requested || mosaic_effective) {
-    uint8_t bytes[50]="ARMOSAIC-R1";memcpy(bytes+16,out,32);
-    bytes[48]=mosaic_requested;bytes[49]=mosaic_effective;
-    if(!sr_support_sha256(bytes,sizeof(bytes),out))return false;
-    *baseline=false;
-  }
-  if(poses_requested || poses_effective) {
-    uint8_t bytes[50]="ARPOSES-R1";memcpy(bytes+16,out,32);
-    bytes[48]=poses_requested;bytes[49]=poses_effective;
-    if(!sr_support_sha256(bytes,sizeof(bytes),out))return false;
-    *baseline=false;
-  }
-  if(sequences_requested || sequences_effective) {
-    uint8_t bytes[50]="ARSEQUENCE-R1";memcpy(bytes+16,out,32);
-    bytes[48]=sequences_requested;bytes[49]=sequences_effective;
-    if(!sr_support_sha256(bytes,sizeof(bytes),out))return false;
-    *baseline=false;
-  }
-  if(hazards_requested || hazards_effective) {
-    uint8_t bytes[50]="ARHAZARDS-R1";memcpy(bytes+16,out,32);
-    bytes[48]=hazards_requested;bytes[49]=hazards_effective;
-    if(!sr_support_sha256(bytes,sizeof(bytes),out))return false;
-    *baseline=false;
-  }
-  if(mode_requested || mode_effective) {
-    uint8_t bytes[50]="ARMODEENTRY-R1";memcpy(bytes+16,out,32);
-    bytes[48]=mode_requested;bytes[49]=mode_effective;
-    if(!sr_support_sha256(bytes,sizeof(bytes),out))return false;
-    *baseline=false;
-  }
-  if(actor_art_requested || actor_art_effective) {
-    uint8_t bytes[50]="ARACTORART-R1";memcpy(bytes+16,out,32);
-    bytes[48]=actor_art_requested;bytes[49]=actor_art_effective;
-    if(!sr_support_sha256(bytes,sizeof(bytes),out))return false;
-    *baseline=false;
-  }
+  memcpy(out, digest, sizeof(digest));
+  *baseline = native;
   return true;
 }
 

@@ -1,11 +1,11 @@
-#include "actraiser_arrival_runtime.h"
-#include "actraiser_cpu_hle_internal.h"
-#include "actraiser_hle_fatal.h"
+#include "actraiser/regional/actraiser_regional_arrival.h"
+#include "actraiser/actraiser_cpu_hle_internal.h"
+#include "actraiser/actraiser_hle_fatal.h"
 
 extern RecompReturn bank_00_A343_M0X0(CpuState *cpu);
 extern RecompReturn bank_01_861E_M1X0(CpuState *cpu);
 static bool s_departure_delegate,s_palace_delegate;
-void ActRaiserArrivalRuntime_Reset(void){s_departure_delegate=s_palace_delegate=false;}
+void ActRaiserRegionalArrival_Reset(void){s_departure_delegate=s_palace_delegate=false;}
 static bool Shape(CpuState *cpu,unsigned bank,bool narrow) {
   bool unused;
   return cpu && cpu->PB==bank && cpu->DB==bank && !cpu->D && cpu->m_flag==narrow &&

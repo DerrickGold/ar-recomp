@@ -2129,7 +2129,7 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_story_prerequisites COMMAND actraiser_story_prerequisites_test)
 
     add_executable(actraiser_town_status_test tests/actraiser_town_status_test.c
-        src/actraiser/actraiser_town_status.c src/actraiser/actraiser_town_status_runtime.c
+        src/actraiser/actraiser_town_status.c src/actraiser/regional/actraiser_regional_town_status.c
         src/regional/towns/regional_town_status.c src/actraiser/actraiser_cpu_hle_internal.c
         src/actraiser/actraiser_hle_fatal.c)
     target_include_directories(actraiser_town_status_test PRIVATE
@@ -2137,8 +2137,8 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_town_status COMMAND actraiser_town_status_test)
 
     add_executable(actraiser_construction_test tests/actraiser_construction_test.c
-        src/actraiser/actraiser_construction_runtime.c src/regional/towns/regional_construction.c
-        src/actraiser/actraiser_town_status.c src/actraiser/actraiser_town_status_runtime.c
+        src/actraiser/regional/actraiser_regional_construction.c src/regional/towns/regional_construction.c
+        src/actraiser/actraiser_town_status.c src/actraiser/regional/actraiser_regional_town_status.c
         src/regional/towns/regional_town_status.c src/actraiser/actraiser_cpu_hle_internal.c
         src/actraiser/actraiser_hle_fatal.c)
     target_include_directories(actraiser_construction_test PRIVATE
@@ -2146,7 +2146,7 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_construction COMMAND actraiser_construction_test)
 
     add_executable(actraiser_sim_combat_test tests/actraiser_sim_combat_test.c
-        src/actraiser/actraiser_sim_combat.c src/actraiser/actraiser_sim_combat_runtime.c src/actraiser/actraiser_sim_actor.c
+        src/actraiser/actraiser_sim_combat.c src/actraiser/regional/actraiser_regional_sim_combat.c src/actraiser/actraiser_sim_actor.c
         src/regional/towns/regional_sim_combat.c src/regional/towns/regional_sim_ai.c src/regional/towns/regional_sim_actors.c src/actraiser/actraiser_cpu_hle_internal.c
         src/actraiser/actraiser_hle_fatal.c)
     target_include_directories(actraiser_sim_combat_test PRIVATE
@@ -2154,7 +2154,7 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_sim_combat COMMAND actraiser_sim_combat_test)
 
     add_executable(actraiser_sim_ai_test tests/actraiser_sim_ai_test.c
-        src/actraiser/actraiser_sim_ai.c src/actraiser/actraiser_sim_ai_runtime.c
+        src/actraiser/actraiser_sim_ai.c src/actraiser/regional/actraiser_regional_sim_ai.c
         src/actraiser/actraiser_sim_actor.c src/regional/towns/regional_sim_ai.c
         src/regional/towns/regional_sim_actors.c src/actraiser/actraiser_native_call.c
         src/actraiser/actraiser_cpu_hle_internal.c src/actraiser/actraiser_hle_fatal.c)
@@ -2179,7 +2179,7 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_town_redevelopment COMMAND actraiser_town_redevelopment_test)
 
     add_executable(actraiser_level_goals_test tests/actraiser_level_goals_test.c
-        src/actraiser/actraiser_level_goals.c src/actraiser/actraiser_level_goals_runtime.c
+        src/actraiser/actraiser_level_goals.c src/actraiser/regional/actraiser_regional_level_goals.c
         src/regional/towns/regional_level_goals.c src/actraiser/actraiser_cpu_hle_internal.c
         src/actraiser/actraiser_hle_fatal.c)
     target_include_directories(actraiser_level_goals_test PRIVATE
@@ -2196,6 +2196,7 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_regional_lair_projection COMMAND actraiser_regional_lair_projection_test)
 
     add_executable(actraiser_regional_policy_test
+        src/regional/regional_families.c
         src/actraiser/regional/actraiser_regional_choices.c
         src/regional/regional_profiles.c src/regional/towns/regional_lair_history.c src/regional/towns/regional_lair_reloads.c
         src/settings_overlay/regional/regional_menu.c
@@ -2233,6 +2234,7 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_settings_persistence COMMAND actraiser_settings_persistence_test)
 
     add_executable(actraiser_settings_overlay_test
+        src/regional/regional_families.c
         src/actraiser/regional/actraiser_regional_choices.c
         src/regional/regional_profiles.c src/regional/towns/regional_lair_history.c src/regional/towns/regional_lair_reloads.c src/regional/towns/regional_stock.c
         src/settings_overlay/regional/regional_menu.c
@@ -2736,6 +2738,7 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_story_snapshot COMMAND actraiser_story_snapshot_test)
 
     add_executable(actraiser_regional_session_test
+        src/regional/regional_families.c
         src/regional/regional_profiles.c
         src/regional/regional_randomizer.c
         tests/regional_profiles_checks.c
@@ -2775,6 +2778,7 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_regional_timers COMMAND actraiser_regional_timers_test)
 
     add_executable(actraiser_regional_campaign_test
+        src/regional/regional_families.c
         src/regional/action/regional_difficulty.c src/regional/action/regional_score_lives.c src/regional/action/regional_action_start.c src/regional/action/regional_spell_inventory.c src/regional/action/regional_mode_entry.c src/regional/action/regional_hazards.c src/regional/action/regional_terrain.c src/regional/presentation/regional_music.c src/regional/presentation/regional_mosaic.c src/regional/presentation/regional_poses.c src/regional/presentation/regional_artwork.c src/regional/action/regional_placement_policy.c
         tests/regional_campaign_test.c
         src/regional/action/regional_timers.c
@@ -2816,6 +2820,7 @@ if(BUILD_TESTING)
     get_target_property(AR_SAVE_SLOT_TEST_SOURCES actraiser_regional_campaign_test SOURCES)
     list(REMOVE_ITEM AR_SAVE_SLOT_TEST_SOURCES tests/regional_campaign_test.c)
     add_executable(actraiser_save_slots_test tests/save_slots_test.c
+        src/regional/regional_families.c
         ${AR_SAVE_SLOT_TEST_SOURCES} src/save_slots.c src/save_slot_manager.c
         src/regional/regional_profiles.c src/regional/regional_randomizer.c
         src/actraiser/regional/actraiser_regional_editor.c
@@ -2828,6 +2833,7 @@ if(BUILD_TESTING)
     get_target_property(AR_POPULATION_TEST_SOURCES actraiser_regional_campaign_test SOURCES)
     list(REMOVE_ITEM AR_POPULATION_TEST_SOURCES tests/regional_campaign_test.c)
     add_executable(actraiser_population_conversion_test
+        src/regional/regional_families.c
         tests/actraiser_population_conversion_test.c ${AR_POPULATION_TEST_SOURCES}
         src/regional/regional_profiles.c
         src/actraiser/regional/actraiser_population_conversion.c
@@ -2839,11 +2845,11 @@ if(BUILD_TESTING)
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_population_conversion COMMAND actraiser_population_conversion_test)
 
-    add_executable(actraiser_arrival_runtime_test tests/actraiser_arrival_runtime_test.c
-        src/actraiser/actraiser_arrival_runtime.c src/actraiser/actraiser_cpu_hle_internal.c
+    add_executable(actraiser_regional_arrival_test tests/actraiser_regional_arrival_test.c
+        src/actraiser/regional/actraiser_regional_arrival.c src/actraiser/actraiser_cpu_hle_internal.c
         src/actraiser/actraiser_hle_fatal.c)
-    target_include_directories(actraiser_arrival_runtime_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
-    add_test(NAME actraiser_arrival_runtime COMMAND actraiser_arrival_runtime_test)
+    target_include_directories(actraiser_regional_arrival_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    add_test(NAME actraiser_regional_arrival COMMAND actraiser_regional_arrival_test)
 
     add_executable(actraiser_statue_volley_test tests/actraiser_statue_volley_test.c
         src/actraiser/actraiser_statue_volley.c src/actraiser/actraiser_cpu_hle_internal.c
@@ -3014,6 +3020,7 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_action_motion COMMAND actraiser_action_motion_test)
 
     add_executable(actraiser_regional_fingerprint_test
+        src/regional/regional_families.c
         src/regional/action/regional_difficulty.c src/regional/action/regional_score_lives.c src/regional/action/regional_action_start.c src/regional/action/regional_spell_inventory.c src/regional/action/regional_mode_entry.c src/regional/action/regional_hazards.c src/regional/action/regional_terrain.c src/regional/presentation/regional_music.c src/regional/presentation/regional_mosaic.c src/regional/presentation/regional_poses.c src/regional/presentation/regional_artwork.c src/regional/action/regional_placement_policy.c
         tests/regional_fingerprint_test.c
         src/regional/session/regional_fingerprint.c
@@ -3034,12 +3041,15 @@ if(BUILD_TESTING)
         src/regional/interaction/regional_speed_range.c
         src/regional/interaction/regional_magic_gesture.c
         src/regional/regional_costs.c
+        src/regional/towns/regional_lair_history.c src/regional/towns/regional_lair_reloads.c
+        src/regional/towns/regional_stock.c
         ${SNESRECOMP_RUNNER_ROOT}/src/support/sha256.c)
     target_include_directories(actraiser_regional_fingerprint_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_regional_fingerprint COMMAND actraiser_regional_fingerprint_test)
 
     add_executable(actraiser_regional_runtime_test
+        src/regional/regional_families.c
         src/regional/regional_profiles.c
         src/regional/regional_randomizer.c
         src/regional/action/regional_difficulty.c src/regional/action/regional_score_lives.c src/regional/action/regional_action_start.c src/regional/action/regional_spell_inventory.c src/regional/action/regional_mode_entry.c src/regional/action/regional_hazards.c src/regional/action/regional_terrain.c src/regional/presentation/regional_music.c src/regional/presentation/regional_mosaic.c src/regional/presentation/regional_poses.c src/regional/presentation/regional_artwork.c src/regional/action/regional_placement_policy.c
@@ -3092,6 +3102,70 @@ if(BUILD_TESTING)
     target_include_directories(actraiser_regional_runtime_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_regional_runtime COMMAND actraiser_regional_runtime_test)
+
+    add_executable(actraiser_regional_characterization_test
+        src/regional/regional_families.c
+        tests/regional_characterization_test.c
+        src/regional/regional_profiles.c
+        src/regional/regional_randomizer.c
+        src/regional/action/regional_difficulty.c src/regional/action/regional_score_lives.c src/regional/action/regional_action_start.c src/regional/action/regional_spell_inventory.c src/regional/action/regional_mode_entry.c src/regional/action/regional_hazards.c src/regional/action/regional_terrain.c src/regional/presentation/regional_music.c src/regional/presentation/regional_mosaic.c src/regional/presentation/regional_poses.c src/regional/presentation/regional_artwork.c src/regional/action/regional_placement_policy.c
+        src/regional/action/regional_timers.c
+        src/regional/action/regional_retry.c
+        src/regional/towns/regional_town_wait.c
+        src/regional/towns/regional_fishing.c
+        src/regional/towns/regional_development.c
+        src/regional/towns/regional_recovery.c
+        src/regional/towns/regional_quake.c
+        src/regional/towns/regional_score_feedback.c
+        src/regional/interaction/regional_score_page.c
+        src/regional/interaction/regional_lives_display.c
+        src/regional/towns/regional_skull_wait.c
+        src/regional/towns/regional_story_prerequisites.c src/regional/towns/regional_town_status.c src/regional/towns/regional_level_goals.c src/regional/towns/regional_sim_combat.c src/regional/towns/regional_sim_ai.c src/regional/towns/regional_sim_actors.c src/regional/towns/regional_construction.c src/regional/towns/regional_support.c src/regional/interaction/regional_arrival.c src/regional/action/regional_action_motion.c src/regional/action/regional_emitters.c src/regional/action/regional_volley.c src/regional/action/regional_boss_rules.c src/regional/action/regional_collision.c src/regional/action/regional_platform_skull.c src/regional/action/regional_actor_stats.c src/regional/action/regional_cast_hold.c src/regional/action/regional_fire_enemy.c
+        src/regional/towns/regional_sources.c
+        src/regional/interaction/regional_menu_return.c
+        src/regional/interaction/regional_speed_range.c
+        src/regional/interaction/regional_magic_gesture.c
+        src/regional/regional_costs.c
+        src/regional/towns/regional_lair_history.c src/regional/towns/regional_lair_reloads.c src/regional/towns/regional_stock.c
+        src/regional/session/regional_session.c
+        src/regional/session/regional_session_codec.c src/randomizer_config.c
+        src/regional/session/regional_session_action.c
+        src/regional/session/regional_fingerprint.c
+        src/actraiser/regional/actraiser_regional_choices.c
+        src/save_checkpoint.c src/save_system.c src/save_paths.c src/atomic_replace.c
+        src/localization/unicode_grapheme.c
+        ${SNESRECOMP_RUNNER_ROOT}/src/support/sha256.c)
+    target_include_directories(actraiser_regional_characterization_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    add_test(NAME actraiser_regional_characterization
+        COMMAND actraiser_regional_characterization_test)
+
+    add_executable(actraiser_regional_families_test
+        tests/regional_families_test.c
+        src/regional/regional_families.c
+        src/regional/regional_costs.c
+        src/regional/action/regional_difficulty.c src/regional/action/regional_score_lives.c src/regional/action/regional_action_start.c src/regional/action/regional_spell_inventory.c src/regional/action/regional_mode_entry.c src/regional/action/regional_hazards.c src/regional/action/regional_terrain.c src/regional/presentation/regional_music.c src/regional/presentation/regional_mosaic.c src/regional/presentation/regional_poses.c src/regional/presentation/regional_artwork.c src/regional/action/regional_placement_policy.c
+        src/regional/action/regional_timers.c
+        src/regional/action/regional_retry.c
+        src/regional/towns/regional_town_wait.c
+        src/regional/towns/regional_fishing.c
+        src/regional/towns/regional_development.c
+        src/regional/towns/regional_recovery.c
+        src/regional/towns/regional_quake.c
+        src/regional/towns/regional_score_feedback.c
+        src/regional/interaction/regional_score_page.c
+        src/regional/interaction/regional_lives_display.c
+        src/regional/towns/regional_skull_wait.c
+        src/regional/towns/regional_story_prerequisites.c src/regional/towns/regional_town_status.c src/regional/towns/regional_level_goals.c src/regional/towns/regional_sim_combat.c src/regional/towns/regional_sim_ai.c src/regional/towns/regional_sim_actors.c src/regional/towns/regional_construction.c src/regional/towns/regional_support.c src/regional/interaction/regional_arrival.c src/regional/action/regional_action_motion.c src/regional/action/regional_emitters.c src/regional/action/regional_volley.c src/regional/action/regional_boss_rules.c src/regional/action/regional_collision.c src/regional/action/regional_platform_skull.c src/regional/action/regional_actor_stats.c src/regional/action/regional_cast_hold.c src/regional/action/regional_fire_enemy.c
+        src/regional/towns/regional_sources.c
+        src/regional/interaction/regional_menu_return.c
+        src/regional/interaction/regional_speed_range.c
+        src/regional/interaction/regional_magic_gesture.c
+        src/regional/towns/regional_lair_history.c src/regional/towns/regional_lair_reloads.c
+        src/regional/towns/regional_stock.c)
+    target_include_directories(actraiser_regional_families_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    add_test(NAME actraiser_regional_families COMMAND actraiser_regional_families_test)
 
     add_executable(actraiser_scroll_cast_test tests/actraiser_scroll_cast_test.c
         src/actraiser/actraiser_scroll_cast.c src/actraiser/actraiser_cpu_hle_internal.c

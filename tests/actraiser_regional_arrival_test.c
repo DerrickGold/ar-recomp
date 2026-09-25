@@ -1,4 +1,4 @@
-#include "actraiser/actraiser_arrival_runtime.h"
+#include "actraiser/regional/actraiser_regional_arrival.h"
 #include "actraiser/actraiser_cpu_hle_internal.h"
 #include <assert.h>
 #include <stdio.h>
@@ -85,7 +85,7 @@ static void Setup(bool japanese) {
   low[0x341]=6;low[0x32c]=42;low[0x31a]=0x5a;low[0x334]=0x9a;
   requested=effective=japanese;locked=false;available=true;
   departure_calls=palace_calls=announcements=0;native_result=RECOMP_RETURN_NORMAL;
-  ActRaiserArrivalRuntime_Reset();
+  ActRaiserRegionalArrival_Reset();
 }
 static void CheckOriginal(const char *path) {
   FILE *file=fopen(path,"rb");assert(file);

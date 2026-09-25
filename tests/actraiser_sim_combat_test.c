@@ -1,4 +1,4 @@
-#include "actraiser/actraiser_sim_combat_runtime.h"
+#include "actraiser/regional/actraiser_regional_sim_combat.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>

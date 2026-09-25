@@ -1,4 +1,4 @@
-#include "actraiser/actraiser_sim_ai_runtime.h"
+#include "actraiser/regional/actraiser_regional_sim_ai.h"
 #include "actraiser/actraiser_cpu_hle_internal.h"
 #include "regional/towns/regional_sim_actors.h"
 #include <assert.h>

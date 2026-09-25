@@ -5,7 +5,7 @@
 
 /* Campaign-owned value boundary. Prefixes never activate a pending policy. */
 bool ActRaiserRegional_ConstructionSnapshot(bool activate, bool *japanese);
-void ActRaiserConstructionRuntime_Reset(void);
+void ActRaiserRegionalConstruction_Reset(void);
 bool ActRaiser_RegionalConstructionEntry(CpuState *cpu);
 RecompReturn ActRaiser_RegionalConstruction(CpuState *cpu);
 RecompReturn ActRaiser_RegionalOffscreenConstruction(CpuState *cpu);

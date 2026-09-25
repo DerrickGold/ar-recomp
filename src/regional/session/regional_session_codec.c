@@ -1,4 +1,5 @@
 #include "regional/session/regional_session_internal.h"
+#include "regional/regional_families.h"
 #include "byte_order.h"
 
 #include <stdio.h>
@@ -9,72 +10,102 @@
 enum {
   kHeaderBytes = 36,
   kPayloadCapacity = kSaveCheckpointPayloadMax,
-  kV1RecordCount = kArRegionalCostRule_Count + kArRegionalTimerRule_Count,
-  kV2RecordCount = kV1RecordCount + 1,
-  kV3RecordCount = kV2RecordCount + 1,
-  kV4RecordCount = kV3RecordCount + 1,
-  kV5RecordCount = kV4RecordCount + kArRegionalDevelopmentRule_Count,
-  kV6RecordCount = kV5RecordCount + kArRegionalRecovery_Count,
-  kV7RecordCount = kV6RecordCount + kArRegionalQuake_Count,
-  kV8RecordCount = kV7RecordCount + 1,
-  kV9RecordCount = kV8RecordCount + 1,
-  kV10RecordCount = kV9RecordCount + 1,
-  kV12RecordCount = kV10RecordCount + 1,
-  kV13RecordCount = kV12RecordCount + kArRegionalLairCount,
-  kV14RecordCount = kV13RecordCount + 1,
-  kV15RecordCount = kV14RecordCount + 3,
-  kV16RecordCount = kV14RecordCount + kArRegionalScore_Count,
-  kV17RecordCount = kV16RecordCount + 1,
-  kV18RecordCount = kV17RecordCount + kArRegionalSourceItem_Count,
-  kV19RecordCount = kV18RecordCount + 1,
-  kV20RecordCount = kV19RecordCount + kArRegionalStory_Count,
-  kV21RecordCount = kV20RecordCount + 1,
-  kV22RecordCount = kV21RecordCount + kArRegionalTownStatus_Count,
-  kV23RecordCount = kV22RecordCount + 1,
-  kV24RecordCount = kV23RecordCount + kArRegionalSimCombat_Count,
-  kV25RecordCount = kV24RecordCount + kArRegionalSimAi_Count,
-  kV26RecordCount = kV25RecordCount + 1,
-  kV27RecordCount = kV26RecordCount + kArRegionalSupport_Count,
-  kV28RecordCount = kV27RecordCount + 1,
-  kV29RecordCount = kV28RecordCount + 7,
-  kV30RecordCount = kV28RecordCount + 9,
-  kV31RecordCount = kV28RecordCount + 10,
-  kV32RecordCount = kV28RecordCount + 12,
-  kV33RecordCount = kV32RecordCount + 2,
-  kV34RecordCount = kV33RecordCount + 1,
-  kV35RecordCount = kV34RecordCount + 6,
-  kV36RecordCount = kV34RecordCount + 7,
-  kV37RecordCount = kV36RecordCount + 2,
-  kV38RecordCount = kV37RecordCount + 4,
-  kV39RecordCount = kV38RecordCount + 63,
-  kV40RecordCount = kV38RecordCount + 66,
-  kV41RecordCount = kV40RecordCount + 4,
-  kV42RecordCount = kV41RecordCount + 3,
-  kV43RecordCount = kV42RecordCount + 2,
-  kV44RecordCount = kV43RecordCount + kArRegionalFire_Count,
-  kV45RecordCount = kV44RecordCount + 2,
-  kV46RecordCount = kV45RecordCount + 4,
-  kV47RecordCount = kV46RecordCount + 1,
-  kV48RecordCount = kV47RecordCount + 3,
-  kV49RecordCount = kV48RecordCount + 4,
-  kV50RecordCount = kV49RecordCount + 1,
-  kV51RecordCount = kV50RecordCount + kArRegionalDifficultyRule_Count,
-  kV52RecordCount = kV51RecordCount + 1,
-  kV53RecordCount = kV52RecordCount + kArRegionalActionStart_Count,
-  kV54RecordCount = kV53RecordCount + 1,
-  kV55RecordCount = kV54RecordCount + kArRegionalMode_Count,
-  kV56RecordCount = kV55RecordCount + 4,
-  kV57RecordCount = kV56RecordCount + 1,
-  kV58RecordCount = kV57RecordCount + 1,
-  kV59RecordCount = kV58RecordCount + 1,
-  kV60RecordCount = kV59RecordCount + 1,
-  kV61RecordCount = kV60RecordCount + 2,
-  kV62RecordCount = kV61RecordCount + 1,
-  kV66RecordCount = kV62RecordCount + 6,
-  kV67RecordCount = kV66RecordCount + 2,
-  kV68RecordCount = kV67RecordCount + 2,
-  kRecordCount = kV68RecordCount + kArRegionalActorArtwork_Count
+  /* Upper bound for the per-decode duplicate table; WireRecordCount() is the
+   * real total and is checked against it. */
+  kRecordCapacity = 512,
 };
+
+/* Save wire order: records were appended one format version at a time, and a
+ * record's position never changes once written. This list is frozen history.
+ * Extend it only by appending a span with the new version, never by growing an
+ * existing span. A span covers the family's rules [first, first + count). */
+typedef struct WireSpan {
+  uint8_t version;
+  uint8_t family;
+  uint8_t first, count;
+} WireSpan;
+static const WireSpan kWire[] = {
+  {1, kArRegionalFamily_Costs, 0, kArRegionalCostRule_Count},
+  {1, kArRegionalFamily_Timers, 0, kArRegionalTimerRule_Count},
+  {2, kArRegionalFamily_RetryScore, 0, 1},
+  {3, kArRegionalFamily_TownWait, 0, 1},
+  {4, kArRegionalFamily_Fishing, 0, 1},
+  {5, kArRegionalFamily_Development, 0, kArRegionalDevelopmentRule_Count},
+  {6, kArRegionalFamily_Recovery, 0, kArRegionalRecovery_Count},
+  {7, kArRegionalFamily_Quake, 0, kArRegionalQuake_Count},
+  {8, kArRegionalFamily_ScorePage, 0, 1},
+  {9, kArRegionalFamily_MenuReturn, 0, 1},
+  {10, kArRegionalFamily_SpeedRange, 0, 1},
+  {11, kArRegionalFamily_MagicGesture, 0, 1},
+  {13, kArRegionalFamily_LairSeeds, 0, kArRegionalLairCount},
+  {14, kArRegionalFamily_HouseCredit, 0, 1},
+  {15, kArRegionalFamily_ScoreFeedback, 0, kArRegionalScore_Phase},
+  {16, kArRegionalFamily_ScoreFeedback, kArRegionalScore_Phase, 1},
+  {17, kArRegionalFamily_LivesDisplay, 0, 1},
+  {18, kArRegionalFamily_Sources, 0, kArRegionalSourceItem_Count},
+  {19, kArRegionalFamily_SkullWait, 0, 1},
+  {20, kArRegionalFamily_Story, 0, kArRegionalStory_Count},
+  {21, kArRegionalFamily_LairReloads, 0, 1},
+  {22, kArRegionalFamily_TownStatus, 0, kArRegionalTownStatus_Count},
+  {23, kArRegionalFamily_LevelGoals, 0, 1},
+  {24, kArRegionalFamily_SimCombat, 0, kArRegionalSimCombat_Count},
+  {25, kArRegionalFamily_SimAi, 0, kArRegionalSimAi_Count},
+  {26, kArRegionalFamily_Construction, 0, 1},
+  {27, kArRegionalFamily_Support, 0, kArRegionalSupport_Count},
+  {28, kArRegionalFamily_Arrival, 0, 1},
+  {29, kArRegionalFamily_ActionMotion, 0, 7},
+  {30, kArRegionalFamily_ActionMotion, 7, 2},
+  {31, kArRegionalFamily_ActionMotion, 9, 1},
+  {32, kArRegionalFamily_ActionMotion, 10, 2},
+  {33, kArRegionalFamily_Emitters, 0, kArRegionalEmitter_Count},
+  {34, kArRegionalFamily_StatueVolley, 0, 1},
+  {35, kArRegionalFamily_Bosses, 0, 6},
+  {36, kArRegionalFamily_Bosses, 6, 1},
+  {37, kArRegionalFamily_Collision, 0, kArRegionalCollision_Count},
+  {38, kArRegionalFamily_PlatformSkull, 0, kArRegionalPlatformSkull_Count},
+  {39, kArRegionalFamily_ActorStats, 0, kArRegionalActorStat_BaseCount},
+  {40, kArRegionalFamily_ActorStats, kArRegionalActorStat_BaseCount,
+   kArRegionalActorStat_Count - kArRegionalActorStat_BaseCount},
+  {41, kArRegionalFamily_Bosses, 7, 4},
+  {42, kArRegionalFamily_CastHold, 0, kArRegionalCastHold_Count},
+  {43, kArRegionalFamily_Bosses, 11, 2},
+  {44, kArRegionalFamily_FireEnemy, 0, kArRegionalFire_Count},
+  {45, kArRegionalFamily_Bosses, 13, 2},
+  {46, kArRegionalFamily_Bosses, 15, 4},
+  {47, kArRegionalFamily_ActionMotion, kArRegionalActionMotion_HeadWithdrawal, 1},
+  {48, kArRegionalFamily_Bosses, 19, 3},
+  {49, kArRegionalFamily_Bosses, 22, 4},
+  {50, kArRegionalFamily_ActionMotion, kArRegionalActionMotion_TreeSeeds, 1},
+  {51, kArRegionalFamily_Difficulty, 0, kArRegionalDifficultyRule_Count},
+  {52, kArRegionalFamily_ScoreLives, 0, 1},
+  {53, kArRegionalFamily_ActionStart, 0, kArRegionalActionStart_Count},
+  {54, kArRegionalFamily_SpellInventory, 0, 1},
+  {55, kArRegionalFamily_ModeEntry, 0, kArRegionalMode_Count},
+  {56, kArRegionalFamily_Bosses, 26, 4},
+  {57, kArRegionalFamily_Bosses, kArRegionalBoss_PlantGeometry, 1},
+  {58, kArRegionalFamily_Hazards, 0, 1},
+  {59, kArRegionalFamily_Terrain, 0, 1},
+  {60, kArRegionalFamily_Music, 0, 1},
+  {61, kArRegionalFamily_Placements, 0, kArRegionalPlacement_Count},
+  {62, kArRegionalFamily_Mosaic, 0, 1},
+  {63, kArRegionalFamily_Artwork, 0, 1},
+  {64, kArRegionalFamily_Artwork, 1, 1},
+  {65, kArRegionalFamily_Artwork, 2, 3},
+  {66, kArRegionalFamily_Artwork, 5, 1},
+  {67, kArRegionalFamily_Poses, 0, kArRegionalPose_Count},
+  {68, kArRegionalFamily_Sequences, 0, kArRegionalSequence_Count},
+  {69, kArRegionalFamily_ActorArtwork, 0, kArRegionalActorArtwork_Count},
+};
+
+/* Records a payload of this format version carries: every span introduced
+ * at or before it. v11 and v12, and v69 and v70, share a count. */
+static unsigned WireRecordCount(unsigned version) {
+  unsigned count = 0;
+  for (unsigned i = 0; i < sizeof(kWire) / sizeof(kWire[0]); ++i)
+    if (kWire[i].version <= version) count += kWire[i].count;
+  return count;
+}
+static unsigned LatestRecordCount(void) { return WireRecordCount(UINT8_MAX); }
 _Static_assert(kArRegionalSequence_Count == 2, "preserve v68 sequence ordinals");
 _Static_assert(kArRegionalPose_Count == 2, "preserve v67 pose ordinals");
 _Static_assert(kArRegionalPlacement_Count == 2, "preserve placement record ordinals");
@@ -107,281 +138,26 @@ static const char *const kSourceKeys[] = {"us", "jp", "eu"};
 _Static_assert(sizeof(kSourceKeys) / sizeof(kSourceKeys[0]) == kArRegionalSource_Count,
                "each persisted source needs a stable key");
 
-/* One typed record inventory owns the key, regional values and source field.
- * Encode and decode use this same binding: no layout offsets or duplicate
- * ordinal-to-field switches. Historical append order remains part of v69. */
+/* One record binds a stable key, its regional values and the source field,
+ * resolved through the family table in wire order (kWire). Encode and decode
+ * use this same binding, so neither keeps an ordinal-to-field switch. */
 typedef struct RuleRecord {
   const char *key;
   const uint16_t *values;
   ArRegionalSource *source;
 } RuleRecord;
 
-static RuleRecord Record(ArRegionalRules *rules, unsigned i) {
-  if (i >= kV68RecordCount) {
-    const ArRegionalArtworkDescriptor *desc =
-        ArRegionalActorArtwork_Descriptor(i - kV68RecordCount);
-    return (RuleRecord){desc->key, desc->enabled,
-                        &rules->actor_artwork.source[i - kV68RecordCount]};
+static RuleRecord Record(ArRegionalRules *rules, unsigned index) {
+  for (unsigned i = 0; i < sizeof(kWire) / sizeof(kWire[0]); ++i) {
+    if (index < kWire[i].count) {
+      const ArRegionalFamilyId family = (ArRegionalFamilyId)kWire[i].family;
+      const unsigned rule = kWire[i].first + index;
+      const ArRegionalRuleInfo info = ArRegionalFamilies_Get(family)->info(rule);
+      return (RuleRecord){info.key, info.values, ArRegionalFamilies_Field(rules, family, rule)};
+    }
+    index -= kWire[i].count;
   }
-  if (i >= kV67RecordCount) {
-    const ArRegionalMusicDescriptor *desc = ArRegionalSequences_Descriptor(i - kV67RecordCount);
-    return (RuleRecord){desc->key, desc->profile, &rules->sequences.source[i - kV67RecordCount]};
-  }
-  if (i >= kV66RecordCount) {
-    const ArRegionalPoseDescriptor *desc = ArRegionalPoses_Descriptor(i - kV66RecordCount);
-    return (RuleRecord){desc->key, desc->enabled, &rules->poses.source[i - kV66RecordCount]};
-  }
-  if (i >= kV62RecordCount) {
-    const ArRegionalArtworkDescriptor *desc = ArRegionalArtwork_Descriptor(i - kV62RecordCount);
-    return (RuleRecord){desc->key, desc->enabled, &rules->artwork.source[i - kV62RecordCount]};
-  }
-  if (i == kV61RecordCount) {
-    const ArRegionalMosaicDescriptor *desc = ArRegionalMosaic_Descriptor();
-    return (RuleRecord){desc->key, desc->profile, &rules->mosaic};
-  }
-  if (i >= kV60RecordCount) {
-    const ArRegionalPlacementDescriptor *desc =
-        ArRegionalPlacements_Descriptor(i - kV60RecordCount);
-    return (RuleRecord){
-        desc->key, desc->profile,
-        i == kV60RecordCount ? &rules->placements.enemies : &rules->placements.pickups};
-  }
-  if (i == kV59RecordCount) {
-    const ArRegionalMusicDescriptor *desc = ArRegionalMusic_Descriptor();
-    return (RuleRecord){desc->key, desc->profile, &rules->music};
-  }
-  if (i == kV58RecordCount) {
-    const ArRegionalTerrainDescriptor *desc = ArRegionalTerrain_Descriptor();
-    return (RuleRecord){desc->key, desc->profile, &rules->terrain};
-  }
-  if (i == kV57RecordCount) {
-    const ArRegionalHazardDescriptor *desc = ArRegionalHazards_Descriptor();
-    return (RuleRecord){desc->key, desc->profile, &rules->hazards};
-  }
-  if (i == kV56RecordCount) {
-    const ArRegionalBossDescriptor *desc = ArRegionalBoss_Descriptor(kArRegionalBoss_PlantGeometry);
-    return (RuleRecord){desc->key, desc->value,
-                        &rules->bosses.source[kArRegionalBoss_PlantGeometry]};
-  }
-  if (i >= kV55RecordCount) {
-    const ArRegionalBossDescriptor *desc = ArRegionalBoss_Descriptor(26 + i - kV55RecordCount);
-    return (RuleRecord){desc->key, desc->value, &rules->bosses.source[26 + i - kV55RecordCount]};
-  }
-  if (i >= kV54RecordCount) {
-    const ArRegionalModeDescriptor *desc = ArRegionalMode_Descriptor(i - kV54RecordCount);
-    return (RuleRecord){desc->key, desc->value, &rules->mode_entry.source[i - kV54RecordCount]};
-  }
-  if (i == kV53RecordCount) {
-    const ArRegionalInventoryDescriptor *desc = ArRegionalInventory_Descriptor();
-    return (RuleRecord){desc->key, desc->enabled, &rules->spell_inventory};
-  }
-  if (i >= kV52RecordCount) {
-    const ArRegionalActionStartDescriptor *desc =
-        ArRegionalActionStart_Descriptor(i - kV52RecordCount);
-    return (RuleRecord){desc->key, desc->value, &rules->action_start.source[i - kV52RecordCount]};
-  }
-  if (i == kV51RecordCount) {
-    const ArRegionalScoreLivesDescriptor *desc = ArRegionalScoreLives_Descriptor();
-    return (RuleRecord){desc->key, desc->enabled, &rules->score_lives};
-  }
-  if (i >= kV50RecordCount) {
-    const ArRegionalDifficultyDescriptor *desc =
-        ArRegionalDifficulty_Descriptor(i - kV50RecordCount);
-    return (RuleRecord){desc->key, desc->value, &rules->difficulty.source[i - kV50RecordCount]};
-  }
-  if (i == kV49RecordCount) {
-    const ArRegionalActionMotionDescriptor *desc =
-        ArRegionalActionMotion_Descriptor(kArRegionalActionMotion_TreeSeeds);
-    return (RuleRecord){desc->key, desc->value,
-                        &rules->action_motion.source[kArRegionalActionMotion_TreeSeeds]};
-  }
-  if (i >= kV48RecordCount) {
-    const ArRegionalBossDescriptor *desc = ArRegionalBoss_Descriptor(22 + i - kV48RecordCount);
-    return (RuleRecord){desc->key, desc->value, &rules->bosses.source[22 + i - kV48RecordCount]};
-  }
-  if (i >= kV47RecordCount) {
-    const ArRegionalBossDescriptor *desc = ArRegionalBoss_Descriptor(19 + i - kV47RecordCount);
-    return (RuleRecord){desc->key, desc->value, &rules->bosses.source[19 + i - kV47RecordCount]};
-  }
-  if (i == kV46RecordCount) {
-    const ArRegionalActionMotionDescriptor *desc =
-        ArRegionalActionMotion_Descriptor(kArRegionalActionMotion_HeadWithdrawal);
-    return (RuleRecord){desc->key, desc->value,
-                        &rules->action_motion.source[kArRegionalActionMotion_HeadWithdrawal]};
-  }
-  if (i >= kV45RecordCount) {
-    const ArRegionalBossDescriptor *desc = ArRegionalBoss_Descriptor(15 + i - kV45RecordCount);
-    return (RuleRecord){desc->key, desc->value, &rules->bosses.source[15 + i - kV45RecordCount]};
-  }
-  if (i >= kV44RecordCount) {
-    const ArRegionalBossDescriptor *desc = ArRegionalBoss_Descriptor(13 + i - kV44RecordCount);
-    return (RuleRecord){desc->key, desc->value, &rules->bosses.source[13 + i - kV44RecordCount]};
-  }
-  if (i >= kV43RecordCount) {
-    const ArRegionalFireDescriptor *desc = ArRegionalFire_Descriptor(i - kV43RecordCount);
-    return (RuleRecord){desc->key, desc->value, &rules->fire_enemy.source[i - kV43RecordCount]};
-  }
-  if (i >= kV42RecordCount) {
-    const ArRegionalBossDescriptor *desc = ArRegionalBoss_Descriptor(11 + i - kV42RecordCount);
-    return (RuleRecord){desc->key, desc->value, &rules->bosses.source[11 + i - kV42RecordCount]};
-  }
-  if (i >= kV41RecordCount) {
-    const ArRegionalCastHoldDescriptor *desc = ArRegionalCastHold_Descriptor(i - kV41RecordCount);
-    return (RuleRecord){desc->key, desc->enabled, &rules->cast_hold.source[i - kV41RecordCount]};
-  }
-  if (i >= kV40RecordCount) {
-    const ArRegionalBossDescriptor *desc = ArRegionalBoss_Descriptor(7 + i - kV40RecordCount);
-    return (RuleRecord){desc->key, desc->value, &rules->bosses.source[7 + i - kV40RecordCount]};
-  }
-  if (i >= kV38RecordCount) {
-    const ArRegionalActorStatDescriptor *desc =
-        ArRegionalActorStats_Descriptor(i - kV38RecordCount);
-    return (RuleRecord){desc->key, desc->value, &rules->actor_stats.source[i - kV38RecordCount]};
-  }
-  if (i >= kV37RecordCount) {
-    const ArRegionalPlatformSkullDescriptor *desc =
-        ArRegionalPlatformSkull_Descriptor(i - kV37RecordCount);
-    return (RuleRecord){desc->key, desc->value, &rules->platform_skull.source[i - kV37RecordCount]};
-  }
-  if (i >= kV36RecordCount) {
-    const ArRegionalCollisionDescriptor *desc = ArRegionalCollision_Descriptor(i - kV36RecordCount);
-    return (RuleRecord){desc->key, desc->japanese, &rules->collision.source[i - kV36RecordCount]};
-  }
-  if (i >= kV34RecordCount) {
-    const ArRegionalBossDescriptor *desc = ArRegionalBoss_Descriptor(i - kV34RecordCount);
-    return (RuleRecord){desc->key, desc->value, &rules->bosses.source[i - kV34RecordCount]};
-  }
-  if (i == kV33RecordCount) {
-    const ArRegionalVolleyDescriptor *desc = ArRegionalVolley_Descriptor();
-    return (RuleRecord){desc->key, desc->shots, &rules->statue_volley};
-  }
-  if (i >= kV32RecordCount) {
-    const ArRegionalEmitterDescriptor *desc = ArRegionalEmitter_Descriptor(i - kV32RecordCount);
-    return (RuleRecord){desc->key, desc->value, &rules->emitters.source[i - kV32RecordCount]};
-  }
-  if (i >= kV28RecordCount) {
-    const ArRegionalActionMotionDescriptor *desc =
-        ArRegionalActionMotion_Descriptor((ArRegionalActionMotionRule)(i - kV28RecordCount));
-    return (RuleRecord){desc->key, desc->value, &rules->action_motion.source[i - kV28RecordCount]};
-  }
-  if (i == kV27RecordCount) {
-    const ArRegionalArrivalDescriptor *desc = ArRegionalArrival_Descriptor();
-    return (RuleRecord){desc->key, desc->japanese, &rules->arrival};
-  }
-  if (i >= kV26RecordCount) {
-    const ArRegionalSupportDescriptor *desc =
-        ArRegionalSupport_Descriptor((ArRegionalSupportRule)(i - kV26RecordCount));
-    return (RuleRecord){desc->key, desc->amount, &rules->support.source[i - kV26RecordCount]};
-  }
-  if (i == kV25RecordCount) {
-    const ArRegionalConstructionDescriptor *desc = ArRegionalConstruction_Descriptor();
-    return (RuleRecord){desc->key, desc->japanese, &rules->construction};
-  }
-  if (i >= kV24RecordCount) {
-    const ArRegionalSimAiDescriptor *desc =
-        ArRegionalSimAi_Descriptor((ArRegionalSimAiRule)(i - kV24RecordCount));
-    return (RuleRecord){desc->key, desc->value, &rules->sim_ai.source[i - kV24RecordCount]};
-  }
-  if (i >= kV23RecordCount) {
-    const ArRegionalSimCombatDescriptor *desc =
-        ArRegionalSimCombat_Descriptor((ArRegionalSimCombatRule)(i - kV23RecordCount));
-    return (RuleRecord){desc->key, desc->value, &rules->sim_combat.source[i - kV23RecordCount]};
-  }
-  if (i == kV22RecordCount) {
-    const ArRegionalLevelGoalsDescriptor *desc = ArRegionalLevelGoals_Descriptor();
-    return (RuleRecord){desc->key, desc->japanese, &rules->level_goals};
-  }
-  if (i >= kV21RecordCount) {
-    const ArRegionalTownStatusDescriptor *desc =
-        ArRegionalTownStatus_Descriptor((ArRegionalTownStatusRule)(i - kV21RecordCount));
-    return (RuleRecord){desc->key, desc->japanese, &rules->town_status.source[i - kV21RecordCount]};
-  }
-  if (i >= kV20RecordCount) {
-    static const uint16_t japanese[kArRegionalSource_Count] = {0, 1, 0};
-    return (RuleRecord){"lair_reload_japanese", japanese, &rules->lair_reloads};
-  }
-  if (i >= kV19RecordCount) {
-    const ArRegionalStoryDescriptor *desc =
-        ArRegionalStory_Descriptor((ArRegionalStoryRule)(i - kV19RecordCount));
-    return (RuleRecord){desc->key, desc->value, &rules->story.source[i - kV19RecordCount]};
-  }
-  if (i == kV18RecordCount) {
-    const ArRegionalSkullWaitDescriptor *desc = ArRegionalSkullWait_Descriptor();
-    return (RuleRecord){desc->key, desc->frames, &rules->skull_wait};
-  }
-  if (i >= kV17RecordCount) {
-    const ArRegionalSourcesDescriptor *desc =
-        ArRegionalSources_Descriptor((ArRegionalSourceItem)(i - kV17RecordCount));
-    return (RuleRecord){desc->key, desc->automatic, &rules->sources.source[i - kV17RecordCount]};
-  }
-  if (i == kV16RecordCount) {
-    const ArRegionalLivesDisplayDescriptor *desc = ArRegionalLivesDisplay_Descriptor();
-    return (RuleRecord){desc->key, desc->zero_based, &rules->lives_display};
-  }
-  if (i >= kV14RecordCount) {
-    const ArRegionalScoreDescriptor *desc =
-        ArRegionalScore_Descriptor((ArRegionalScoreRule)(i - kV14RecordCount));
-    return (RuleRecord){desc->key, desc->japanese,
-                        &rules->score_feedback.source[i - kV14RecordCount]};
-  }
-  if (i == kV13RecordCount) {
-    const ArRegionalHouseCreditDescriptor *desc = ArRegionalHouseCredit_Descriptor();
-    return (RuleRecord){desc->key, desc->tiered, &rules->house_credit};
-  }
-  if (i >= kV12RecordCount) {
-    const ArRegionalLairSeedDescriptor *desc = ArRegionalLair_SeedDescriptor(i - kV12RecordCount);
-    return (RuleRecord){desc->key, desc->stock, &rules->lair_seeds};
-  }
-  if (i == kV10RecordCount) {
-    const ArRegionalMagicGestureDescriptor *desc = ArRegionalMagicGesture_Descriptor();
-    return (RuleRecord){desc->key, desc->up_attack, &rules->magic_gesture};
-  }
-  if (i == kV9RecordCount) {
-    const ArRegionalSpeedRangeDescriptor *desc = ArRegionalSpeedRange_Descriptor();
-    return (RuleRecord){desc->key, desc->maximum, &rules->speed_range};
-  }
-  if (i == kV8RecordCount) {
-    const ArRegionalMenuReturnDescriptor *desc = ArRegionalMenuReturn_Descriptor();
-    return (RuleRecord){desc->key, desc->keep_open, &rules->menu_return};
-  }
-  if (i == kV7RecordCount) {
-    const ArRegionalScorePageDescriptor *desc = ArRegionalScorePage_Descriptor();
-    return (RuleRecord){desc->key, desc->enabled, &rules->score_page};
-  }
-  if (i >= kV6RecordCount) {
-    const ArRegionalQuakeDescriptor *desc =
-        ArRegionalQuake_Descriptor((ArRegionalQuakeRule)(i - kV6RecordCount));
-    return (RuleRecord){desc->key, desc->random, &rules->quake.source[i - kV6RecordCount]};
-  }
-  if (i >= kV5RecordCount) {
-    const ArRegionalRecoveryDescriptor *desc =
-        ArRegionalRecovery_Descriptor((ArRegionalRecoveryRule)(i - kV5RecordCount));
-    return (RuleRecord){desc->key, desc->value, &rules->recovery.source[i - kV5RecordCount]};
-  }
-  if (i >= kV4RecordCount) {
-    const ArRegionalDevelopmentDescriptor *desc =
-        ArRegionalDevelopment_Descriptor((ArRegionalDevelopmentRule)(i - kV4RecordCount));
-    return (RuleRecord){desc->key, desc->updates, &rules->development.source[i - kV4RecordCount]};
-  }
-  if (i == kV3RecordCount) {
-    const ArRegionalFishingDescriptor *desc = ArRegionalFishing_Descriptor();
-    return (RuleRecord){desc->key, desc->updates, &rules->fishing};
-  }
-  if (i == kV2RecordCount) {
-    const ArRegionalTownWaitDescriptor *desc = ArRegionalTownWait_Descriptor();
-    return (RuleRecord){desc->key, desc->updates, &rules->town_wait};
-  }
-  if (i == kV1RecordCount) {
-    const ArRegionalRetryDescriptor *desc = ArRegionalRetry_Descriptor();
-    return (RuleRecord){desc->key, desc->clear_score, &rules->retry_score};
-  }
-  if (i < kArRegionalCostRule_Count) {
-    const ArRegionalCostDescriptor *desc = ArRegionalCosts_Descriptor((ArRegionalCostRule)i);
-    return (RuleRecord){desc->key, desc->price, &rules->costs.source[i]};
-  }
-  const ArRegionalTimerDescriptor *desc =
-      ArRegionalTimers_Descriptor((ArRegionalTimerRule)(i - kArRegionalCostRule_Count));
-  return (RuleRecord){desc->key, desc->bcd, &rules->timers.source[i - kArRegionalCostRule_Count]};
+  return (RuleRecord){NULL, NULL, NULL};
 }
 
 /* Compact explicit codec, never fwrite a C struct or persist enum ordinals.
@@ -392,7 +168,8 @@ static bool Encode(const ArRegionalSession *session, uint8_t *out, size_t *size)
   memset(out, 0, kHeaderBytes);
   memcpy(out, kMagic, sizeof(kMagic));
   ByteOrder_WriteLe16(out + 8, session->randomizer.generator ? 70 : 69);
-  ByteOrder_WriteLe16(out + 10, kRecordCount);
+  const unsigned record_count = LatestRecordCount();
+  ByteOrder_WriteLe16(out + 10, record_count);
   ByteOrder_WriteLe32(out + 12, session->slot);
   memcpy(out + 16, session->campaign, 16);
   ByteOrder_WriteLe32(out + 32, session->revision);
@@ -401,7 +178,7 @@ static bool Encode(const ArRegionalSession *session, uint8_t *out, size_t *size)
   ArRegionalRules requested_rules = session->requested;
   ArRegionalRules effective_rules = session->effective;
   size_t offset = kHeaderBytes;
-  for (unsigned i = 0; i < kRecordCount; ++i) {
+  for (unsigned i = 0; i < record_count; ++i) {
     const RuleRecord record = Record(&requested_rules, i);
     const char *key = record.key;
     const uint16_t *values = record.values;
@@ -458,82 +235,16 @@ static SaveCheckpointStatus Decode(const uint8_t *bytes, size_t size, ArRegional
   if (!pricing_only && memcmp(bytes, kMagic, sizeof(kMagic))) return kSaveCheckpoint_Invalid;
   const unsigned version = ByteOrder_ReadLe16(bytes + 8);
   if (version < 1 || version > (pricing_only ? 1u : 70u)) return kSaveCheckpoint_Unsupported;
-  const unsigned count = pricing_only    ? kArRegionalCostRule_Count
-                         : version == 1  ? kV1RecordCount
-                         : version == 2  ? kV2RecordCount
-                         : version == 3  ? kV3RecordCount
-                         : version == 4  ? kV4RecordCount
-                         : version == 5  ? kV5RecordCount
-                         : version == 6  ? kV6RecordCount
-                         : version == 7  ? kV7RecordCount
-                         : version == 8  ? kV8RecordCount
-                         : version == 9  ? kV9RecordCount
-                         : version == 10 ? kV10RecordCount
-                         : version <= 12 ? kV12RecordCount
-                         : version == 13 ? kV13RecordCount
-                         : version == 14 ? kV14RecordCount
-                         : version == 15 ? kV15RecordCount
-                         : version == 16 ? kV16RecordCount
-                         : version == 17 ? kV17RecordCount
-                         : version == 18 ? kV18RecordCount
-                         : version == 19 ? kV19RecordCount
-                         : version == 20 ? kV20RecordCount
-                         : version == 21 ? kV21RecordCount
-                         : version == 22 ? kV22RecordCount
-                         : version == 23 ? kV23RecordCount
-                         : version == 24 ? kV24RecordCount
-                         : version == 25 ? kV25RecordCount
-                         : version == 26 ? kV26RecordCount
-                         : version == 27 ? kV27RecordCount
-                         : version == 28 ? kV28RecordCount
-                         : version == 29 ? kV29RecordCount
-                         : version == 30 ? kV30RecordCount
-                         : version == 31 ? kV31RecordCount
-                         : version == 32 ? kV32RecordCount
-                         : version == 33 ? kV33RecordCount
-                         : version == 34 ? kV34RecordCount
-                         : version == 35 ? kV35RecordCount
-                         : version == 36 ? kV36RecordCount
-                         : version == 37 ? kV37RecordCount
-                         : version == 38 ? kV38RecordCount
-                         : version == 39 ? kV39RecordCount
-                         : version == 40 ? kV40RecordCount
-                         : version == 41 ? kV41RecordCount
-                         : version == 42 ? kV42RecordCount
-                         : version == 43 ? kV43RecordCount
-                         : version == 44 ? kV44RecordCount
-                         : version == 45 ? kV45RecordCount
-                         : version == 46 ? kV46RecordCount
-                         : version == 47 ? kV47RecordCount
-                         : version == 48 ? kV48RecordCount
-                         : version == 49 ? kV49RecordCount
-                         : version == 50 ? kV50RecordCount
-                         : version == 51 ? kV51RecordCount
-                         : version == 52 ? kV52RecordCount
-                         : version == 53 ? kV53RecordCount
-                         : version == 54 ? kV54RecordCount
-                         : version == 55 ? kV55RecordCount
-                         : version == 56 ? kV56RecordCount
-                         : version == 57 ? kV57RecordCount
-                         : version == 58 ? kV58RecordCount
-                         : version == 59 ? kV59RecordCount
-                         : version == 60 ? kV60RecordCount
-                         : version == 61 ? kV61RecordCount
-                         : version == 62 ? kV62RecordCount
-                         : version == 63 ? kV62RecordCount + 1
-                         : version == 64 ? kV62RecordCount + 2
-                         : version == 65 ? kV62RecordCount + 5
-                         : version == 66 ? kV66RecordCount
-                         : version == 67 ? kV67RecordCount
-                         : version == 68 ? kV68RecordCount
-                                         : kRecordCount;
+  const unsigned count =
+      pricing_only ? (unsigned)kArRegionalCostRule_Count : WireRecordCount(version);
+  if (count > kRecordCapacity) return kSaveCheckpoint_Invalid;
   if (ByteOrder_ReadLe16(bytes + 10) != count) return kSaveCheckpoint_Unsupported;
   ArRegionalSession next = {.slot = ByteOrder_ReadLe32(bytes + 12),
                             .revision = ByteOrder_ReadLe32(bytes + 32)};
   memcpy(next.campaign, bytes + 16, sizeof(next.campaign));
   ArRegionalTimers_Init(&next.requested.timers, kArRegionalSource_US);
   next.effective.timers = next.requested.timers;
-  bool seen[kRecordCount] = {0};
+  bool seen[kRecordCapacity] = {0};
   bool seed_seen = false;
   size_t offset = kHeaderBytes;
   for (unsigned n = 0; n < count; ++n) {

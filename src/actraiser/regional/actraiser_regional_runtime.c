@@ -18,11 +18,11 @@
 #include "actraiser/actraiser_magic_gesture.h"
 #include "actraiser/actraiser_lair_history.h"
 #include "actraiser/actraiser_lair_reloads.h"
-#include "actraiser/actraiser_town_status_runtime.h"
-#include "actraiser/actraiser_construction_runtime.h"
+#include "actraiser/regional/actraiser_regional_town_status.h"
+#include "actraiser/regional/actraiser_regional_construction.h"
 #include "actraiser/regional/actraiser_population_conversion.h"
-#include "actraiser/actraiser_arrival_runtime.h"
-#include "actraiser/actraiser_level_goals_runtime.h"
+#include "actraiser/regional/actraiser_regional_arrival.h"
+#include "actraiser/regional/actraiser_regional_level_goals.h"
 #include "actraiser/actraiser_score_feedback.h"
 #include "actraiser/actraiser_lives_display.h"
 #include "actraiser/actraiser_sources.h"
@@ -173,10 +173,10 @@ bool ActRaiserRegional_InitializeSlot(uint32_t slot,ArRegionalCampaignIdentity i
   s_continue_context = NULL;
   s_lair_delegate = s_lair_seed_pending = s_lair_active = false;
   s_reload_delegate = s_reload_active = false;
-  ActRaiserTownStatusRuntime_Reset();
-  ActRaiserConstructionRuntime_Reset();
-  ActRaiserLevelGoalsRuntime_Reset();
-  ActRaiserArrivalRuntime_Reset();
+  ActRaiserRegionalTownStatus_Reset();
+  ActRaiserRegionalConstruction_Reset();
+  ActRaiserRegionalLevelGoals_Reset();
+  ActRaiserRegionalArrival_Reset();
   s_score_active = false;
   s_score = (ArRegionalScoreSnapshot){0};
   s_completion_state = kScoreIdle;
@@ -878,15 +878,38 @@ static RecompReturn QuakeSelect(CpuState *cpu, ArRegionalQuakeRule rule) {
     ActRaiserHleFatal("Earthquake selector has no native return owner");
   return RECOMP_RETURN_TAILCALL;
 }
-#define QUAKE_SELECTOR(name, rule) \
-  bool ActRaiser_RegionalQuake##name##Entry(CpuState *cpu) { return QuakeSelectorEntry(cpu, rule); } \
-  RecompReturn ActRaiser_RegionalQuake##name(CpuState *cpu) { return QuakeSelect(cpu, rule); }
-QUAKE_SELECTOR(Houses, kArRegionalQuake_Houses)
-QUAKE_SELECTOR(Fields, kArRegionalQuake_Fields)
-QUAKE_SELECTOR(Class3, kArRegionalQuake_Class3)
-QUAKE_SELECTOR(Class4, kArRegionalQuake_Class4)
-QUAKE_SELECTOR(Class5, kArRegionalQuake_Class5)
-#undef QUAKE_SELECTOR
+/* Recompiler hooks (hle_func_if in bank03.cfg), written out so that snesbuild
+ * doctor and a text search can both find each definition. */
+bool ActRaiser_RegionalQuakeHousesEntry(CpuState *cpu) {
+  return QuakeSelectorEntry(cpu, kArRegionalQuake_Houses);
+}
+RecompReturn ActRaiser_RegionalQuakeHouses(CpuState *cpu) {
+  return QuakeSelect(cpu, kArRegionalQuake_Houses);
+}
+bool ActRaiser_RegionalQuakeFieldsEntry(CpuState *cpu) {
+  return QuakeSelectorEntry(cpu, kArRegionalQuake_Fields);
+}
+RecompReturn ActRaiser_RegionalQuakeFields(CpuState *cpu) {
+  return QuakeSelect(cpu, kArRegionalQuake_Fields);
+}
+bool ActRaiser_RegionalQuakeClass3Entry(CpuState *cpu) {
+  return QuakeSelectorEntry(cpu, kArRegionalQuake_Class3);
+}
+RecompReturn ActRaiser_RegionalQuakeClass3(CpuState *cpu) {
+  return QuakeSelect(cpu, kArRegionalQuake_Class3);
+}
+bool ActRaiser_RegionalQuakeClass4Entry(CpuState *cpu) {
+  return QuakeSelectorEntry(cpu, kArRegionalQuake_Class4);
+}
+RecompReturn ActRaiser_RegionalQuakeClass4(CpuState *cpu) {
+  return QuakeSelect(cpu, kArRegionalQuake_Class4);
+}
+bool ActRaiser_RegionalQuakeClass5Entry(CpuState *cpu) {
+  return QuakeSelectorEntry(cpu, kArRegionalQuake_Class5);
+}
+RecompReturn ActRaiser_RegionalQuakeClass5(CpuState *cpu) {
+  return QuakeSelect(cpu, kArRegionalQuake_Class5);
+}
 
 bool ActRaiserRegional_SimActorsReady(void) { return s_campaign.active_valid; }
 void ActRaiserRegional_SimActorCache(bool load,unsigned town) {
@@ -1076,7 +1099,7 @@ RecompReturn ActRaiser_RegionalMasterReport(CpuState *cpu) {
       !ArRegionalSession_BeginScorePage(&s_campaign.active, &s_report_score_page))
     ActRaiserHleFatal("Cannot capture regional Master report");
   s_report_active = s_report_delegate = true;
-  ActRaiserLevelGoalsRuntime_RefreshReport(cpu);
+  ActRaiserRegionalLevelGoals_RefreshReport(cpu);
   if (s_trace) fprintf(stderr, "[regional] Master report score-page=%u begin\n", s_report_score_page);
   /* The native body still composes the report and owns inventory objects,
    * button release/press waits and cleanup. Only its optional branch changes. */

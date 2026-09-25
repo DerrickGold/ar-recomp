@@ -1,4 +1,5 @@
 #include "regional/session/regional_session_internal.h"
+#include "regional/regional_families.h"
 
 #include <string.h>
 
@@ -9,6 +10,10 @@
 bool ArRegionalSession_Valid(const ArRegionalSession *session) {
   if (!session || !session->revision || !RandomizerConfig_Valid(&session->randomizer) || !ArRegionalLairHistory_Valid(&session->lairs) ||
       !ArRegionalLairReloads_Valid(&session->reloads) || !ArRegionalSimActors_Valid(&session->sim_actors)) return false;
+  /* Range-check every family's sources; the checks below add each family's
+   * own semantics and the cross-family rules. */
+  if (!ArRegionalFamilies_SourcesValid(&session->requested) ||
+      !ArRegionalFamilies_SourcesValid(&session->effective)) return false;
   bool has_id = false;
   uint8_t poses;
   if(!ArRegionalPoses_Resolve(&session->requested.poses,&poses) ||
@@ -97,8 +102,6 @@ bool ArRegionalSession_Valid(const ArRegionalSession *session) {
       ArRegionalLevelGoals_Resolve(session->effective.level_goals,&unused_level) &&
       ArRegionalTownStatus_Resolve(&session->requested.town_status,&unused_status) &&
       ArRegionalTownStatus_Resolve(&session->effective.town_status,&unused_status) &&
-      (unsigned)session->requested.lair_reloads<kArRegionalSource_Count &&
-      (unsigned)session->effective.lair_reloads<kArRegionalSource_Count &&
       ((session->requested.lair_reloads!=kArRegionalSource_Japan &&
         session->effective.lair_reloads!=kArRegionalSource_Japan) || session->reloads.initialized_towns==0x3f) &&
       ArRegionalStory_Resolve(&session->requested.story,&unused_story) &&
@@ -110,30 +113,12 @@ bool ArRegionalSession_Valid(const ArRegionalSession *session) {
       ArRegionalCosts_Resolve(&session->effective.costs, &unused) &&
       ArRegionalTimers_Valid(&session->requested.timers) &&
       ArRegionalTimers_Valid(&session->effective.timers) &&
-      (unsigned)session->requested.retry_score < kArRegionalSource_Count &&
-      (unsigned)session->effective.retry_score < kArRegionalSource_Count &&
-      (unsigned)session->requested.town_wait < kArRegionalSource_Count &&
-      (unsigned)session->effective.town_wait < kArRegionalSource_Count &&
-      (unsigned)session->requested.fishing < kArRegionalSource_Count &&
-      (unsigned)session->effective.fishing < kArRegionalSource_Count &&
       ArRegionalDevelopment_Resolve(&session->requested.development,&unused_development) &&
       ArRegionalDevelopment_Resolve(&session->effective.development,&unused_development) &&
       ArRegionalRecovery_Resolve(&session->requested.recovery, &unused_recovery) &&
       ArRegionalRecovery_Resolve(&session->effective.recovery, &unused_recovery) &&
       ArRegionalQuake_Resolve(&session->requested.quake, &unused_quake) &&
       ArRegionalQuake_Resolve(&session->effective.quake, &unused_quake) &&
-      (unsigned)session->requested.score_page < kArRegionalSource_Count &&
-      (unsigned)session->effective.score_page < kArRegionalSource_Count &&
-      (unsigned)session->requested.lives_display < kArRegionalSource_Count &&
-      (unsigned)session->effective.lives_display < kArRegionalSource_Count &&
-      (unsigned)session->requested.skull_wait < kArRegionalSource_Count &&
-      (unsigned)session->effective.skull_wait < kArRegionalSource_Count &&
-      (unsigned)session->requested.menu_return < kArRegionalSource_Count &&
-      (unsigned)session->effective.menu_return < kArRegionalSource_Count &&
-      (unsigned)session->requested.speed_range < kArRegionalSource_Count &&
-      (unsigned)session->effective.speed_range < kArRegionalSource_Count &&
-      (unsigned)session->requested.magic_gesture < kArRegionalSource_Count &&
-      (unsigned)session->effective.magic_gesture < kArRegionalSource_Count &&
       ((!pending_projection && !active_projection &&
         session->requested.score_feedback.source[kArRegionalScore_Phase]!=kArRegionalSource_Japan &&
         session->effective.score_feedback.source[kArRegionalScore_Phase]!=kArRegionalSource_Japan) ||

@@ -1,4 +1,4 @@
-#include "actraiser/actraiser_town_status_runtime.h"
+#include "actraiser/regional/actraiser_regional_town_status.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -118,7 +118,7 @@ int main(void) {
       RECOMP_RETURN_SKIP_3,RECOMP_RETURN_TAILCALL,RECOMP_RETURN_PARKED_WAIT,RECOMP_RETURN_OWNED_UNWIND};
   for(unsigned w=0;w<4;++w)for(unsigned source=0;source<3;++source)for(unsigned token=0;token<sizeof(tokens)/sizeof(tokens[0]);++token)for(unsigned m=0;m<2;++m) {
     if(m && w!=3)continue;
-    ActRaiserTownStatusRuntime_Reset();ArRegionalTownStatus_Init(&requested,(ArRegionalSource)source);
+    ActRaiserRegionalTownStatus_Reset();ArRegionalTownStatus_Init(&requested,(ArRegionalSource)source);
     CpuState cpu={.PB=3,.DB=w==3?1:0x7f,.m_flag=m};
     assert(w==3?ActRaiser_RegionalTownStatusReportEntry(&cpu):ActRaiser_RegionalTownStatusCycleEntry(&cpu));
     result=tokens[token];activations=native_calls=0;

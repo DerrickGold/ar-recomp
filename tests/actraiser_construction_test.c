@@ -1,5 +1,5 @@
-#include "actraiser/actraiser_construction_runtime.h"
-#include "actraiser/actraiser_town_status_runtime.h"
+#include "actraiser/regional/actraiser_regional_construction.h"
+#include "actraiser/regional/actraiser_regional_town_status.h"
 #include "regional/towns/regional_construction.h"
 #include <assert.h>
 #include <stdio.h>
@@ -72,7 +72,7 @@ int main(void) {
       RECOMP_RETURN_SKIP_3,RECOMP_RETURN_TAILCALL,RECOMP_RETURN_PARKED_WAIT,RECOMP_RETURN_OWNED_UNWIND};
   for(unsigned offscreen=0;offscreen<2;++offscreen)for(unsigned cost=0;cost<2;++cost)
   for(unsigned report=0;report<2;++report)for(unsigned t=0;t<sizeof(tokens)/sizeof(tokens[0]);++t) {
-    ActRaiserConstructionRuntime_Reset();ActRaiserTownStatusRuntime_Reset();
+    ActRaiserRegionalConstruction_Reset();ActRaiserRegionalTownStatus_Reset();
     requested=cost;assert(ArRegionalTownStatus_Init(&status_requested,report));
     CpuState cpu={.PB=3,.DB=0x7f,.S=0x1ef0,.Y=0x9876};
     assert(ActRaiser_RegionalConstructionEntry(&cpu) && !ActRaiser_RegionalConstructionPriceEntry(&cpu));

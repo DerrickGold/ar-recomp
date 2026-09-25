@@ -1,4 +1,5 @@
 #include "regional_profiles.h"
+#include "regional/regional_families.h"
 
 #include <string.h>
 
@@ -105,132 +106,131 @@ static bool VisitRegionalSource(Visit *visit, ArRegionalSource *field, ArRegiona
   return true;
 }
 
+/* Profile membership in visit order. The order is behavior, not layout: an
+ * expansion or selection that rewrites a field is seen by later members, and a
+ * selector sees keys in this order. Keys and values come from the family
+ * table's consumer descriptors, never from copies of the regional tables or
+ * save-codec ordinals. Two rows are special: costs take their group from each
+ * rule (scrolls belong to Magic, miracles to Town resources), and the lairs
+ * interleave each lair's seed and reload under shared keys. */
+enum { kGroupPerCostRule = 0xff, kMemberLairs = 0xfe };
+typedef struct Member {
+  uint8_t group;
+  uint8_t family;
+} Member;
+static const Member kMembers[] = {
+  /* Action: stage design, combat, magic, lives and scoring. */
+  {kArRegionalProfile_Stage, kArRegionalFamily_Terrain},
+  {kArRegionalProfile_Stage, kArRegionalFamily_Placements},
+  {kArRegionalProfile_Stage, kArRegionalFamily_Timers},
+  {kArRegionalProfile_Difficulty, kArRegionalFamily_Difficulty},
+  {kArRegionalProfile_Combat, kArRegionalFamily_Hazards},
+  {kArRegionalProfile_Combat, kArRegionalFamily_StatueVolley},
+  {kArRegionalProfile_Combat, kArRegionalFamily_ActionMotion},
+  {kArRegionalProfile_Combat, kArRegionalFamily_Emitters},
+  {kArRegionalProfile_Combat, kArRegionalFamily_Bosses},
+  {kArRegionalProfile_Combat, kArRegionalFamily_Collision},
+  {kArRegionalProfile_Combat, kArRegionalFamily_PlatformSkull},
+  {kArRegionalProfile_Combat, kArRegionalFamily_ActorStats},
+  {kArRegionalProfile_Combat, kArRegionalFamily_FireEnemy},
+  {kGroupPerCostRule, kArRegionalFamily_Costs},
+  {kArRegionalProfile_Magic, kArRegionalFamily_SpellInventory},
+  {kArRegionalProfile_Magic, kArRegionalFamily_CastHold},
+  {kArRegionalProfile_Lives, kArRegionalFamily_RetryScore},
+  {kArRegionalProfile_Lives, kArRegionalFamily_ScoreLives},
+  {kArRegionalProfile_Lives, kArRegionalFamily_ActionStart},
+  {kArRegionalProfile_Lives, kArRegionalFamily_ModeEntry},
+  /* Towns: development, population, monsters/lairs and resources. */
+  {kArRegionalProfile_Development, kArRegionalFamily_TownWait},
+  {kArRegionalProfile_Development, kArRegionalFamily_Fishing},
+  {kArRegionalProfile_Development, kArRegionalFamily_Construction},
+  {kArRegionalProfile_Development, kArRegionalFamily_Development},
+  {kArRegionalProfile_Population, kArRegionalFamily_LevelGoals},
+  {kArRegionalProfile_Population, kArRegionalFamily_Support},
+  {kArRegionalProfile_Population, kArRegionalFamily_Story},
+  {kArRegionalProfile_Population, kArRegionalFamily_TownStatus},
+  {kArRegionalProfile_Lairs, kMemberLairs},
+  {kArRegionalProfile_Lairs, kArRegionalFamily_SimCombat},
+  {kArRegionalProfile_Lairs, kArRegionalFamily_SimAi},
+  {kArRegionalProfile_Resources, kArRegionalFamily_HouseCredit},
+  {kArRegionalProfile_Resources, kArRegionalFamily_SkullWait},
+  {kArRegionalProfile_Resources, kArRegionalFamily_Recovery},
+  {kArRegionalProfile_Resources, kArRegionalFamily_Quake},
+  {kArRegionalProfile_Resources, kArRegionalFamily_ScoreFeedback},
+  {kArRegionalProfile_Resources, kArRegionalFamily_Sources},
+  /* Controls & menus, then final island arrival. */
+  {kArRegionalProfile_Interaction, kArRegionalFamily_MagicGesture},
+  {kArRegionalProfile_Interaction, kArRegionalFamily_LivesDisplay},
+  {kArRegionalProfile_Interaction, kArRegionalFamily_ScorePage},
+  {kArRegionalProfile_Interaction, kArRegionalFamily_MenuReturn},
+  {kArRegionalProfile_Interaction, kArRegionalFamily_SpeedRange},
+  {kArRegionalProfile_Arrival, kArRegionalFamily_Arrival},
+  /* Presentation: regional artwork and music, independent of gameplay. */
+  {kArRegionalProfile_Artwork, kArRegionalFamily_Mosaic},
+  {kArRegionalProfile_Artwork, kArRegionalFamily_Poses},
+  {kArRegionalProfile_Artwork, kArRegionalFamily_Artwork},
+  {kArRegionalProfile_Artwork, kArRegionalFamily_ActorArtwork},
+  {kArRegionalProfile_Music, kArRegionalFamily_Music},
+  {kArRegionalProfile_Music, kArRegionalFamily_Sequences},
+};
+
+static ArRegionalSource OtherSource(const Visit *visit, ArRegionalFamilyId family,
+                                    unsigned rule) {
+  return visit->other ? ArRegionalFamilies_Source(visit->other, family, rule)
+                      : kArRegionalSource_US;
+}
+
+static bool VisitFamily(ArRegionalRules *rules, Visit *visit, unsigned group,
+                        ArRegionalFamilyId family) {
+  const ArRegionalFamily *row = ArRegionalFamilies_Get(family);
+  for (unsigned rule = 0; rule < row->rules; ++rule) {
+    const ArRegionalRuleInfo info = row->info(rule);
+    unsigned member_group = group;
+    if (group == kGroupPerCostRule)
+      member_group = ArRegionalCosts_Descriptor((ArRegionalCostRule)rule)->group ==
+                             kArRegionalCostGroup_Scrolls
+                         ? kArRegionalProfile_Magic
+                         : kArRegionalProfile_Resources;
+    if (!VisitRegionalSource(visit, ArRegionalFamilies_Field(rules, family, rule),
+                             OtherSource(visit, family, rule),
+                             (ArRegionalProfileGroup)member_group, info.values, info.key))
+      return false;
+  }
+  return true;
+}
+
+/* Each lair's seed stock, then its reload rule, under one key per kind. */
+static bool VisitLairs(ArRegionalRules *rules, Visit *visit) {
+  for (unsigned i = 0; i < kArRegionalLairCount; ++i) {
+    if (!VisitRegionalSource(visit, &rules->lair_seeds,
+                             OtherSource(visit, kArRegionalFamily_LairSeeds, 0),
+                             kArRegionalProfile_Lairs, ArRegionalLair_SeedDescriptor(i)->stock,
+                             "lair_stock"))
+      return false;
+    uint16_t reload[kArRegionalSource_Count];
+    for (unsigned source = 0; source < kArRegionalSource_Count; ++source)
+      if (!ArRegionalLair_Reload(source, i, &reload[source])) return false;
+    if (!VisitRegionalSource(visit, &rules->lair_reloads,
+                             OtherSource(visit, kArRegionalFamily_LairReloads, 0),
+                             kArRegionalProfile_Lairs, reload, "lair_reload_japanese"))
+      return false;
+  }
+  return true;
+}
+
 /* One typed ownership inventory serves expansion, Custom detection and
- * pending-state comparison. Values come from the consumer descriptors, not
- * copies of the regional tables or save-codec ordinals. */
+ * pending-state comparison. */
 static bool VisitProfileMembers(ArRegionalRules *rules, Visit *visit) {
   if ((unsigned)rules->difficulty.level >= kArRegionalDifficulty_Count ||
       (visit->other && (unsigned)visit->other->difficulty.level >= kArRegionalDifficulty_Count))
     return false;
-#define FIELD(group, member, values, key)                                                       \
-  do {                                                                                          \
-    if (!VisitRegionalSource(visit, &rules->member,                                             \
-                             visit->other ? visit->other->member : kArRegionalSource_US, group, \
-                             values,key))                                                       \
-      return false;                                                                             \
-  } while (0)
-#define FAMILY(group, member, count, type, getter, values) \
-  do {                                                     \
-    for (unsigned i = 0; i < count; ++i) {                 \
-      const type *d = getter(i);                           \
-      if (!d) return false;                                \
-      FIELD(group, member.source[i], d->values, d->key);   \
-    }                                                      \
-  } while (0)
-#define SINGLE(group, member, getter, values) FIELD(group, member, getter()->values,getter()->key)
-  /* Action: stage design, combat, magic, lives and scoring. */
-  SINGLE(kArRegionalProfile_Stage, terrain, ArRegionalTerrain_Descriptor, profile);
-  FIELD(kArRegionalProfile_Stage, placements.enemies,
-        ArRegionalPlacements_Descriptor(kArRegionalPlacement_Enemies)->profile,
-        ArRegionalPlacements_Descriptor(kArRegionalPlacement_Enemies)->key);
-  FIELD(kArRegionalProfile_Stage, placements.pickups,
-        ArRegionalPlacements_Descriptor(kArRegionalPlacement_Pickups)->profile,
-        ArRegionalPlacements_Descriptor(kArRegionalPlacement_Pickups)->key);
-  FAMILY(kArRegionalProfile_Stage, timers, kArRegionalTimerRule_Count, ArRegionalTimerDescriptor,
-         ArRegionalTimers_Descriptor, bcd);
-  for (unsigned i = 0; i < kArRegionalDifficultyRule_Count; ++i) {
-    const ArRegionalDifficultyDescriptor *d = ArRegionalDifficulty_Descriptor(i);
-    FIELD(kArRegionalProfile_Difficulty, difficulty.source[i], d->value,d->key);
+  for (unsigned i = 0; i < sizeof(kMembers) / sizeof(kMembers[0]); ++i) {
+    const bool ok = kMembers[i].family == kMemberLairs
+                        ? VisitLairs(rules, visit)
+                        : VisitFamily(rules, visit, kMembers[i].group,
+                                      (ArRegionalFamilyId)kMembers[i].family);
+    if (!ok) return false;
   }
-  SINGLE(kArRegionalProfile_Combat, hazards, ArRegionalHazards_Descriptor, profile);
-  SINGLE(kArRegionalProfile_Combat, statue_volley, ArRegionalVolley_Descriptor, shots);
-  FAMILY(kArRegionalProfile_Combat, action_motion, kArRegionalActionMotion_Count,
-         ArRegionalActionMotionDescriptor, ArRegionalActionMotion_Descriptor, value);
-  FAMILY(kArRegionalProfile_Combat, emitters, kArRegionalEmitter_Count, ArRegionalEmitterDescriptor,
-         ArRegionalEmitter_Descriptor, value);
-  FAMILY(kArRegionalProfile_Combat, bosses, kArRegionalBoss_Count, ArRegionalBossDescriptor,
-         ArRegionalBoss_Descriptor, value);
-  FAMILY(kArRegionalProfile_Combat, collision, kArRegionalCollision_Count,
-         ArRegionalCollisionDescriptor, ArRegionalCollision_Descriptor, japanese);
-  FAMILY(kArRegionalProfile_Combat, platform_skull, kArRegionalPlatformSkull_Count,
-         ArRegionalPlatformSkullDescriptor, ArRegionalPlatformSkull_Descriptor, value);
-  FAMILY(kArRegionalProfile_Combat, actor_stats, kArRegionalActorStat_Count,
-         ArRegionalActorStatDescriptor, ArRegionalActorStats_Descriptor, value);
-  FAMILY(kArRegionalProfile_Combat, fire_enemy, kArRegionalFire_Count, ArRegionalFireDescriptor,
-         ArRegionalFire_Descriptor, value);
-  /* Shared prices: scrolls belong to Magic; miracles to Town resources. */
-  for (unsigned i = 0; i < kArRegionalCostRule_Count; ++i) {
-    const ArRegionalCostDescriptor *d = ArRegionalCosts_Descriptor(i);
-    FIELD(d->group == kArRegionalCostGroup_Scrolls ? kArRegionalProfile_Magic
-                                                   : kArRegionalProfile_Resources,
-          costs.source[i], d->price,d->key);
-  }
-  SINGLE(kArRegionalProfile_Magic, spell_inventory, ArRegionalInventory_Descriptor, enabled);
-  FAMILY(kArRegionalProfile_Magic, cast_hold, kArRegionalCastHold_Count,
-         ArRegionalCastHoldDescriptor, ArRegionalCastHold_Descriptor, enabled);
-  SINGLE(kArRegionalProfile_Lives, retry_score, ArRegionalRetry_Descriptor, clear_score);
-  SINGLE(kArRegionalProfile_Lives, score_lives, ArRegionalScoreLives_Descriptor, enabled);
-  FAMILY(kArRegionalProfile_Lives, action_start, kArRegionalActionStart_Count,
-         ArRegionalActionStartDescriptor, ArRegionalActionStart_Descriptor, value);
-  FAMILY(kArRegionalProfile_Lives, mode_entry, kArRegionalMode_Count, ArRegionalModeDescriptor,
-         ArRegionalMode_Descriptor, value);
-  /* Towns: development, population, monsters/lairs and resources. */
-  SINGLE(kArRegionalProfile_Development, town_wait, ArRegionalTownWait_Descriptor, updates);
-  SINGLE(kArRegionalProfile_Development, fishing, ArRegionalFishing_Descriptor, updates);
-  SINGLE(kArRegionalProfile_Development, construction, ArRegionalConstruction_Descriptor, japanese);
-  FAMILY(kArRegionalProfile_Development, development, kArRegionalDevelopmentRule_Count,
-         ArRegionalDevelopmentDescriptor, ArRegionalDevelopment_Descriptor, updates);
-  SINGLE(kArRegionalProfile_Population, level_goals, ArRegionalLevelGoals_Descriptor, japanese);
-  FAMILY(kArRegionalProfile_Population, support, kArRegionalSupport_Count,
-         ArRegionalSupportDescriptor, ArRegionalSupport_Descriptor, amount);
-  FAMILY(kArRegionalProfile_Population, story, kArRegionalStory_Count, ArRegionalStoryDescriptor,
-         ArRegionalStory_Descriptor, value);
-  FAMILY(kArRegionalProfile_Population, town_status, kArRegionalTownStatus_Count,
-         ArRegionalTownStatusDescriptor, ArRegionalTownStatus_Descriptor, japanese);
-  for (unsigned i = 0; i < kArRegionalLairCount; ++i) {
-    FIELD(kArRegionalProfile_Lairs, lair_seeds, ArRegionalLair_SeedDescriptor(i)->stock,"lair_stock");
-    uint16_t reload[kArRegionalSource_Count];
-    for (unsigned source = 0; source < kArRegionalSource_Count; ++source)
-      if (!ArRegionalLair_Reload(source, i, &reload[source])) return false;
-    FIELD(kArRegionalProfile_Lairs, lair_reloads, reload,"lair_reload_japanese");
-  }
-  FAMILY(kArRegionalProfile_Lairs, sim_combat, kArRegionalSimCombat_Count,
-         ArRegionalSimCombatDescriptor, ArRegionalSimCombat_Descriptor, value);
-  FAMILY(kArRegionalProfile_Lairs, sim_ai, kArRegionalSimAi_Count, ArRegionalSimAiDescriptor,
-         ArRegionalSimAi_Descriptor, value);
-  SINGLE(kArRegionalProfile_Resources, house_credit, ArRegionalHouseCredit_Descriptor, tiered);
-  SINGLE(kArRegionalProfile_Resources, skull_wait, ArRegionalSkullWait_Descriptor, frames);
-  FAMILY(kArRegionalProfile_Resources, recovery, kArRegionalRecovery_Count,
-         ArRegionalRecoveryDescriptor, ArRegionalRecovery_Descriptor, value);
-  FAMILY(kArRegionalProfile_Resources, quake, kArRegionalQuake_Count, ArRegionalQuakeDescriptor,
-         ArRegionalQuake_Descriptor, random);
-  FAMILY(kArRegionalProfile_Resources, score_feedback, kArRegionalScore_Count,
-         ArRegionalScoreDescriptor, ArRegionalScore_Descriptor, japanese);
-  FAMILY(kArRegionalProfile_Resources, sources, kArRegionalSourceItem_Count,
-         ArRegionalSourcesDescriptor, ArRegionalSources_Descriptor, automatic);
-  /* Controls & menus, then final island arrival. */
-  SINGLE(kArRegionalProfile_Interaction, magic_gesture, ArRegionalMagicGesture_Descriptor,
-         up_attack);
-  SINGLE(kArRegionalProfile_Interaction, lives_display, ArRegionalLivesDisplay_Descriptor,
-         zero_based);
-  SINGLE(kArRegionalProfile_Interaction, score_page, ArRegionalScorePage_Descriptor, enabled);
-  SINGLE(kArRegionalProfile_Interaction, menu_return, ArRegionalMenuReturn_Descriptor, keep_open);
-  SINGLE(kArRegionalProfile_Interaction, speed_range, ArRegionalSpeedRange_Descriptor, maximum);
-  SINGLE(kArRegionalProfile_Arrival, arrival, ArRegionalArrival_Descriptor, japanese);
-  /* Presentation: regional artwork and music, independent of gameplay. */
-  SINGLE(kArRegionalProfile_Artwork, mosaic, ArRegionalMosaic_Descriptor, profile);
-  FAMILY(kArRegionalProfile_Artwork, poses, kArRegionalPose_Count, ArRegionalPoseDescriptor,
-         ArRegionalPoses_Descriptor, enabled);
-  FAMILY(kArRegionalProfile_Artwork, artwork, kArRegionalArtwork_Count, ArRegionalArtworkDescriptor,
-         ArRegionalArtwork_Descriptor, enabled);
-  FAMILY(kArRegionalProfile_Artwork, actor_artwork, kArRegionalActorArtwork_Count,
-         ArRegionalArtworkDescriptor, ArRegionalActorArtwork_Descriptor, enabled);
-  SINGLE(kArRegionalProfile_Music, music, ArRegionalMusic_Descriptor, profile);
-  FAMILY(kArRegionalProfile_Music, sequences, kArRegionalSequence_Count, ArRegionalMusicDescriptor,
-         ArRegionalSequences_Descriptor, profile);
-#undef SINGLE
-#undef FAMILY
-#undef FIELD
   return true;
 }
 

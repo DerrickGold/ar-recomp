@@ -5,11 +5,11 @@
 #include "actraiser/actraiser_development.h"
 #include "actraiser/actraiser_quake.h"
 #include "actraiser/actraiser_report_command.h"
-#include "actraiser/actraiser_town_status_runtime.h"
-#include "actraiser/actraiser_level_goals_runtime.h"
-#include "actraiser/actraiser_construction_runtime.h"
+#include "actraiser/regional/actraiser_regional_town_status.h"
+#include "actraiser/regional/actraiser_regional_level_goals.h"
+#include "actraiser/regional/actraiser_regional_construction.h"
 #include "actraiser/regional/actraiser_population_conversion.h"
-#include "actraiser/actraiser_arrival_runtime.h"
+#include "actraiser/regional/actraiser_regional_arrival.h"
 #include "actraiser/actraiser_stage_placements.h"
 #include "randomizer.h"
 #include "regional/regional_randomizer.h"
@@ -51,10 +51,10 @@ static bool PopulationPrompt(void *context,ActRaiserRegionalPopulationNotice not
   (void)context;(void)source;assert(notice==kActRaiserRegionalPopulation_Failed || removed[0]==4);
   return population_accept;
 }
-void ActRaiserTownStatusRuntime_Reset(void) {}
-void ActRaiserConstructionRuntime_Reset(void) {}
-void ActRaiserLevelGoalsRuntime_Reset(void) {}
-void ActRaiserArrivalRuntime_Reset(void) {}
+void ActRaiserRegionalTownStatus_Reset(void) {}
+void ActRaiserRegionalConstruction_Reset(void) {}
+void ActRaiserRegionalLevelGoals_Reset(void) {}
+void ActRaiserRegionalArrival_Reset(void) {}
 static unsigned placement_resets;
 static RandomizerStatScale applied_scale={100,100};
 RandomizerStatScale Randomizer_AppliedStatScale(void){return applied_scale;}
@@ -81,7 +81,7 @@ void ActRaiserStagePlacements_Reset(void) { ++placement_resets; }
 bool ActRaiserStagePlacements_Fingerprint(const uint8_t previous[32],uint8_t out[32],bool *native) {
   memmove(out,previous,32);*native=true;return true;
 }
-void ActRaiserLevelGoalsRuntime_RefreshReport(CpuState *cpu) { (void)cpu; }
+void ActRaiserRegionalLevelGoals_RefreshReport(CpuState *cpu) { (void)cpu; }
 static uint8_t ram[65536];
 static uint8_t town_ram[65536];
 static uint8_t story_rom[65536];
