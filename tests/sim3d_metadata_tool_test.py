@@ -1,10 +1,14 @@
 """The metadata validator distinguishes authored arcs from plane transitions."""
+import json
 from pathlib import Path
 import sys
+import tempfile
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
-from sim3d_demo import effect_anchor_valid, is_ballistic_effect, is_ballistic_object
+from sim3d.metadata_checks import effect_anchor_valid, is_ballistic_effect, is_ballistic_object
+from sim3d.metadata import read_metadata
+from sim3d.metadata_report import validate_expectations
 
 
 class BallisticMetadataTest(unittest.TestCase):
@@ -53,6 +57,41 @@ class BallisticMetadataTest(unittest.TestCase):
                          {"source_index": True}, {"tier": 0}, {"record": 0x0F32},
                          {"composition": 0xDD9F}):
             self.assertFalse(is_ballistic_object(dict(self.obj, **mutation), [self.source]))
+
+
+class MetadataStreamTest(unittest.TestCase):
+    def test_full_summary_and_diagnostic_contract(self):
+        fixture = Path(__file__).parent / "fixtures/sim3d/metadata-contract.json"
+        # Synthetic streams freeze the observable contract before extraction,
+        # including error ordering, the diagnostic cap and cross-frame state.
+        cases = json.loads(fixture.read_text())["cases"]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "metadata.jsonl"
+            for case in cases:
+                with self.subTest(case=case["name"]):
+                    path.write_text("".join(json.dumps(frame) + "\n" for frame in case["frames"]))
+                    self.assertEqual(read_metadata(path, case["allowed"]),
+                                     (case["summary"], case["errors"]))
+            # Every call owns a fresh validation session, even after a bad stream.
+            path.write_text("")
+            self.assertEqual(read_metadata(path)[0]["frame_count"], 0)
+
+    def test_parse_error_names_file_and_line(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "malformed.jsonl"
+            path.write_text("{broken\n")
+            with self.assertRaisesRegex(ValueError, r"malformed\.jsonl:1:"):
+                read_metadata(path)
+
+    def test_expectations_still_reject_failed_counts_and_picker_contract(self):
+        fixture = Path(__file__).parent / "fixtures/sim3d/metadata-contract.json"
+        case = json.loads(fixture.read_text())["cases"][1]
+        self.assertEqual(validate_expectations(case["summary"], {"picker_contract": False}), [])
+        errors = validate_expectations(case["summary"], {"frame_count_min": 4})
+        self.assertEqual(errors, [
+            "D1 frame_count: expected at least 4, got 3",
+            "D1 picker_flag_frame_count: replay entered no picker, so neither picker contract was exercised",
+        ])
 
 
 if __name__ == "__main__":

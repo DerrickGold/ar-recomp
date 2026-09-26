@@ -1,0 +1,4155 @@
+{
+  "cases": [
+    {
+      "name": "empty",
+      "frames": [],
+      "allowed": [],
+      "summary": {
+        "frame_count": 0,
+        "valid_frame_count": 0,
+        "invalid_frame_count": 0,
+        "picker_frame_count": 0,
+        "fallback_frame_count": 0,
+        "first_build_serial": null,
+        "last_build_serial": null,
+        "requested": [],
+        "effective": [],
+        "integrity_flags": [],
+        "priority_bands": [],
+        "max_source_count": 0,
+        "max_object_count": 0,
+        "max_emitted_oam_count": 0,
+        "max_synthetic_part_count": 0,
+        "max_world_record_occupancy": 0,
+        "synthetic_part_overflow_count_total": 0,
+        "synthetic_part_overflow_count_max": 0,
+        "effect_frame_count": 0,
+        "visible_effect_frame_count": 0,
+        "visible_effect_instance_count": 0,
+        "max_effect_count": 0,
+        "effect_metadata_invalid_frame_count": 0,
+        "effect_overflow_count_total": 0,
+        "effect_overflow_count_max": 0,
+        "effect_kind_counts": {},
+        "effect_phase_counts": {},
+        "effect_color_counts": {},
+        "effect_generation_counts": {},
+        "effect_compositions": {},
+        "atlas_valid_frame_count": 0,
+        "atlas_valid_object_count": 0,
+        "atlas_invalid_object_count": 0,
+        "max_atlas_used_width": 0,
+        "max_atlas_used_height": 0,
+        "unique_framebuffer_hashes": 0,
+        "separated_valid_frame_count": 0,
+        "separated_ready_frame_count": 0,
+        "separated_statuses": [],
+        "separated_status_counts": {},
+        "height_class_counts": {},
+        "max_virtual_height": 0,
+        "max_classified_height": 0,
+        "lifted_object_count": 0,
+        "height_ramp_step_count": 0,
+        "height_slew_violation_count": 0,
+        "ballistic_effect_instance_count": 0,
+        "ballistic_object_instance_count": 0,
+        "shadow_caster_count": 0,
+        "shadow_caster_lifted_count": 0,
+        "shadow_opacity_values": [],
+        "shadow_softness_values": [],
+        "light_values": [],
+        "picker_topdown_build": null,
+        "picker_flag_frame_count": 0,
+        "picker_flag_topdown_frame_count": 0,
+        "picker_flag_enhanced_frame_count": 0,
+        "picker_flag_map_plane_frame_count": 0,
+        "picker_exit_frames": [],
+        "separated_mismatch_pixels_total": 0,
+        "separated_mismatch_pixels_max": 0,
+        "unique_separated_hashes": 0,
+        "projection_cameras": [],
+        "accounting_error_count": 0
+      },
+      "errors": []
+    },
+    {
+      "name": "consecutive-height-and-effect-lifecycle",
+      "frames": [
+        {
+          "metadata_valid": true,
+          "view": "enhanced",
+          "build_serial": 1,
+          "game_frame": 101,
+          "requested": 1,
+          "effective": 1,
+          "integrity_flags": 0,
+          "framebuffer_hash": "aabb",
+          "separated_valid": true,
+          "separated_status": 12,
+          "separated_mismatch_pixels": 0,
+          "separated_hash": "ccdd",
+          "projection_camera": [
+            1,
+            2,
+            3
+          ],
+          "picker_topdown": true,
+          "picker_flag": 0,
+          "light": [
+            20,
+            40
+          ],
+          "shadow_opacity_pct": 50,
+          "shadow_softness_pct": 25,
+          "emitted_oam_count": 1,
+          "claimed_oam_count": 1,
+          "synthetic_part_count": 0,
+          "synthetic_part_overflow_count": 0,
+          "world_record_occupancy": 1,
+          "effect_visible_count": 1,
+          "effect_metadata_valid": true,
+          "effect_overflow_count": 0,
+          "atlas_valid": true,
+          "atlas_size": [
+            64,
+            64
+          ],
+          "atlas_used": [
+            8,
+            8
+          ],
+          "source_count": 1,
+          "object_count": 1,
+          "effect_count": 1,
+          "world_oam_count": 1,
+          "world_oam_first": 0,
+          "sources": [
+            {
+              "tier": 1,
+              "type": 257,
+              "record": 3840,
+              "composition": 4660,
+              "x": 20,
+              "y": 30,
+              "oam_first": 0,
+              "oam_count": 1,
+              "fragment_first": 0,
+              "fragment_count": 1,
+              "obj_palette_mask": 1
+            }
+          ],
+          "objects": [
+            {
+              "tier": 1,
+              "record": 3840,
+              "composition": 4660,
+              "source_index": 0,
+              "priority": 2,
+              "atlas_valid": true,
+              "atlas": [
+                0,
+                0,
+                8,
+                8
+              ],
+              "local_bounds": [
+                0,
+                0,
+                8,
+                8
+              ],
+              "oam_first": 0,
+              "oam_count": 1,
+              "height_class_name": "flying",
+              "classified_height": 12,
+              "virtual_height": 0,
+              "traits": 0,
+              "casts_shadow": true
+            }
+          ],
+          "effects": [
+            {
+              "kind": 1,
+              "kind_name": "lightning",
+              "phase_name": "active",
+              "color_name": "blue",
+              "record": 3840,
+              "composition": 4660,
+              "source_index": 0,
+              "world": [
+                20,
+                30
+              ],
+              "geometry": {
+                "kind_name": "point",
+                "space_name": "record_local",
+                "point": [
+                  0,
+                  0,
+                  0
+                ]
+              },
+              "generation": 1,
+              "flags": 1,
+              "age_ticks": 0,
+              "phase_ticks": 0,
+              "pulse_generation": 0,
+              "pulse_ticks": 0
+            }
+          ]
+        },
+        {
+          "metadata_valid": true,
+          "view": "enhanced",
+          "build_serial": 2,
+          "game_frame": 102,
+          "requested": 1,
+          "effective": 1,
+          "integrity_flags": 0,
+          "framebuffer_hash": "aabb",
+          "separated_valid": true,
+          "separated_status": 12,
+          "separated_mismatch_pixels": 0,
+          "separated_hash": "ccdd",
+          "projection_camera": [
+            1,
+            2,
+            3
+          ],
+          "picker_topdown": true,
+          "picker_flag": 0,
+          "light": [
+            20,
+            40
+          ],
+          "shadow_opacity_pct": 50,
+          "shadow_softness_pct": 25,
+          "emitted_oam_count": 1,
+          "claimed_oam_count": 1,
+          "synthetic_part_count": 0,
+          "synthetic_part_overflow_count": 0,
+          "world_record_occupancy": 1,
+          "effect_visible_count": 1,
+          "effect_metadata_valid": true,
+          "effect_overflow_count": 0,
+          "atlas_valid": true,
+          "atlas_size": [
+            64,
+            64
+          ],
+          "atlas_used": [
+            8,
+            8
+          ],
+          "source_count": 1,
+          "object_count": 1,
+          "effect_count": 1,
+          "world_oam_count": 1,
+          "world_oam_first": 0,
+          "sources": [
+            {
+              "tier": 1,
+              "type": 257,
+              "record": 3840,
+              "composition": 4660,
+              "x": 20,
+              "y": 30,
+              "oam_first": 0,
+              "oam_count": 1,
+              "fragment_first": 0,
+              "fragment_count": 1,
+              "obj_palette_mask": 1
+            }
+          ],
+          "objects": [
+            {
+              "tier": 1,
+              "record": 3840,
+              "composition": 4660,
+              "source_index": 0,
+              "priority": 2,
+              "atlas_valid": true,
+              "atlas": [
+                0,
+                0,
+                8,
+                8
+              ],
+              "local_bounds": [
+                0,
+                0,
+                8,
+                8
+              ],
+              "oam_first": 0,
+              "oam_count": 1,
+              "height_class_name": "flying",
+              "classified_height": 12,
+              "virtual_height": 4,
+              "traits": 0,
+              "casts_shadow": true
+            }
+          ],
+          "effects": [
+            {
+              "kind": 1,
+              "kind_name": "lightning",
+              "phase_name": "active",
+              "color_name": "blue",
+              "record": 3840,
+              "composition": 4660,
+              "source_index": 0,
+              "world": [
+                20,
+                30
+              ],
+              "geometry": {
+                "kind_name": "point",
+                "space_name": "record_local",
+                "point": [
+                  0,
+                  0,
+                  0
+                ]
+              },
+              "generation": 1,
+              "flags": 1,
+              "age_ticks": 1,
+              "phase_ticks": 1,
+              "pulse_generation": 0,
+              "pulse_ticks": 0
+            }
+          ]
+        },
+        {
+          "metadata_valid": true,
+          "view": "enhanced",
+          "build_serial": 3,
+          "game_frame": 103,
+          "requested": 1,
+          "effective": 1,
+          "integrity_flags": 0,
+          "framebuffer_hash": "aabb",
+          "separated_valid": true,
+          "separated_status": 12,
+          "separated_mismatch_pixels": 0,
+          "separated_hash": "ccdd",
+          "projection_camera": [
+            1,
+            2,
+            3
+          ],
+          "picker_topdown": true,
+          "picker_flag": 0,
+          "light": [
+            20,
+            40
+          ],
+          "shadow_opacity_pct": 50,
+          "shadow_softness_pct": 25,
+          "emitted_oam_count": 1,
+          "claimed_oam_count": 1,
+          "synthetic_part_count": 0,
+          "synthetic_part_overflow_count": 0,
+          "world_record_occupancy": 1,
+          "effect_visible_count": 1,
+          "effect_metadata_valid": true,
+          "effect_overflow_count": 0,
+          "atlas_valid": true,
+          "atlas_size": [
+            64,
+            64
+          ],
+          "atlas_used": [
+            8,
+            8
+          ],
+          "source_count": 1,
+          "object_count": 1,
+          "effect_count": 1,
+          "world_oam_count": 1,
+          "world_oam_first": 0,
+          "sources": [
+            {
+              "tier": 1,
+              "type": 257,
+              "record": 3840,
+              "composition": 4660,
+              "x": 20,
+              "y": 30,
+              "oam_first": 0,
+              "oam_count": 1,
+              "fragment_first": 0,
+              "fragment_count": 1,
+              "obj_palette_mask": 1
+            }
+          ],
+          "objects": [
+            {
+              "tier": 1,
+              "record": 3840,
+              "composition": 4660,
+              "source_index": 0,
+              "priority": 2,
+              "atlas_valid": true,
+              "atlas": [
+                0,
+                0,
+                8,
+                8
+              ],
+              "local_bounds": [
+                0,
+                0,
+                8,
+                8
+              ],
+              "oam_first": 0,
+              "oam_count": 1,
+              "height_class_name": "flying",
+              "classified_height": 12,
+              "virtual_height": 8,
+              "traits": 0,
+              "casts_shadow": true
+            }
+          ],
+          "effects": [
+            {
+              "kind": 1,
+              "kind_name": "lightning",
+              "phase_name": "active",
+              "color_name": "blue",
+              "record": 3840,
+              "composition": 4660,
+              "source_index": 0,
+              "world": [
+                20,
+                30
+              ],
+              "geometry": {
+                "kind_name": "point",
+                "space_name": "record_local",
+                "point": [
+                  0,
+                  0,
+                  0
+                ]
+              },
+              "generation": 1,
+              "flags": 1,
+              "age_ticks": 2,
+              "phase_ticks": 2,
+              "pulse_generation": 0,
+              "pulse_ticks": 0
+            }
+          ]
+        }
+      ],
+      "allowed": [],
+      "summary": {
+        "frame_count": 3,
+        "valid_frame_count": 3,
+        "invalid_frame_count": 0,
+        "picker_frame_count": 0,
+        "fallback_frame_count": 0,
+        "first_build_serial": 1,
+        "last_build_serial": 3,
+        "requested": [
+          1
+        ],
+        "effective": [
+          1
+        ],
+        "integrity_flags": [
+          0
+        ],
+        "priority_bands": [
+          2
+        ],
+        "max_source_count": 1,
+        "max_object_count": 1,
+        "max_emitted_oam_count": 1,
+        "max_synthetic_part_count": 0,
+        "max_world_record_occupancy": 1,
+        "synthetic_part_overflow_count_total": 0,
+        "synthetic_part_overflow_count_max": 0,
+        "effect_frame_count": 3,
+        "visible_effect_frame_count": 3,
+        "visible_effect_instance_count": 3,
+        "max_effect_count": 1,
+        "effect_metadata_invalid_frame_count": 0,
+        "effect_overflow_count_total": 0,
+        "effect_overflow_count_max": 0,
+        "effect_kind_counts": {
+          "lightning": 3
+        },
+        "effect_phase_counts": {
+          "lightning": {
+            "active": 3
+          }
+        },
+        "effect_color_counts": {
+          "lightning": {
+            "blue": 3
+          }
+        },
+        "effect_generation_counts": {
+          "lightning": 1
+        },
+        "effect_compositions": {
+          "lightning": [
+            "$1234"
+          ]
+        },
+        "atlas_valid_frame_count": 3,
+        "atlas_valid_object_count": 3,
+        "atlas_invalid_object_count": 0,
+        "max_atlas_used_width": 8,
+        "max_atlas_used_height": 8,
+        "unique_framebuffer_hashes": 1,
+        "separated_valid_frame_count": 3,
+        "separated_ready_frame_count": 3,
+        "separated_statuses": [
+          12
+        ],
+        "separated_status_counts": {
+          "ready": 3
+        },
+        "height_class_counts": {
+          "flying": 3
+        },
+        "max_virtual_height": 8,
+        "max_classified_height": 12,
+        "lifted_object_count": 2,
+        "height_ramp_step_count": 2,
+        "height_slew_violation_count": 0,
+        "ballistic_effect_instance_count": 0,
+        "ballistic_object_instance_count": 0,
+        "shadow_caster_count": 3,
+        "shadow_caster_lifted_count": 2,
+        "shadow_opacity_values": [
+          50
+        ],
+        "shadow_softness_values": [
+          25
+        ],
+        "light_values": [
+          [
+            20,
+            40
+          ]
+        ],
+        "picker_topdown_build": true,
+        "picker_flag_frame_count": 0,
+        "picker_flag_topdown_frame_count": 0,
+        "picker_flag_enhanced_frame_count": 0,
+        "picker_flag_map_plane_frame_count": 0,
+        "picker_exit_frames": [],
+        "separated_mismatch_pixels_total": 0,
+        "separated_mismatch_pixels_max": 0,
+        "unique_separated_hashes": 1,
+        "projection_cameras": [
+          [
+            1,
+            2,
+            3
+          ]
+        ],
+        "accounting_error_count": 0
+      },
+      "errors": []
+    },
+    {
+      "name": "picker-exit-and-contact-height",
+      "frames": [
+        {
+          "metadata_valid": true,
+          "view": "enhanced",
+          "build_serial": 1,
+          "game_frame": 101,
+          "requested": 1,
+          "effective": 1,
+          "integrity_flags": 0,
+          "framebuffer_hash": "aabb",
+          "separated_valid": true,
+          "separated_status": 12,
+          "separated_mismatch_pixels": 0,
+          "separated_hash": "ccdd",
+          "projection_camera": [
+            1,
+            2,
+            3
+          ],
+          "picker_topdown": true,
+          "picker_flag": 0,
+          "light": [
+            20,
+            40
+          ],
+          "shadow_opacity_pct": 50,
+          "shadow_softness_pct": 25,
+          "emitted_oam_count": 1,
+          "claimed_oam_count": 1,
+          "synthetic_part_count": 0,
+          "synthetic_part_overflow_count": 0,
+          "world_record_occupancy": 1,
+          "effect_visible_count": 1,
+          "effect_metadata_valid": true,
+          "effect_overflow_count": 0,
+          "atlas_valid": true,
+          "atlas_size": [
+            64,
+            64
+          ],
+          "atlas_used": [
+            8,
+            8
+          ],
+          "source_count": 1,
+          "object_count": 1,
+          "effect_count": 1,
+          "world_oam_count": 1,
+          "world_oam_first": 0,
+          "sources": [
+            {
+              "tier": 1,
+              "type": 257,
+              "record": 3840,
+              "composition": 4660,
+              "x": 20,
+              "y": 30,
+              "oam_first": 0,
+              "oam_count": 1,
+              "fragment_first": 0,
+              "fragment_count": 1,
+              "obj_palette_mask": 1
+            }
+          ],
+          "objects": [
+            {
+              "tier": 1,
+              "record": 3840,
+              "composition": 4660,
+              "source_index": 0,
+              "priority": 2,
+              "atlas_valid": true,
+              "atlas": [
+                0,
+                0,
+                8,
+                8
+              ],
+              "local_bounds": [
+                0,
+                0,
+                8,
+                8
+              ],
+              "oam_first": 0,
+              "oam_count": 1,
+              "height_class_name": "flying",
+              "classified_height": 12,
+              "virtual_height": 0,
+              "traits": 0,
+              "casts_shadow": true
+            }
+          ],
+          "effects": [
+            {
+              "kind": 1,
+              "kind_name": "lightning",
+              "phase_name": "active",
+              "color_name": "blue",
+              "record": 3840,
+              "composition": 4660,
+              "source_index": 0,
+              "world": [
+                20,
+                30
+              ],
+              "geometry": {
+                "kind_name": "point",
+                "space_name": "record_local",
+                "point": [
+                  0,
+                  0,
+                  0
+                ]
+              },
+              "generation": 1,
+              "flags": 1,
+              "age_ticks": 0,
+              "phase_ticks": 0,
+              "pulse_generation": 0,
+              "pulse_ticks": 0
+            }
+          ]
+        },
+        {
+          "metadata_valid": true,
+          "view": "authentic_picker",
+          "build_serial": 2,
+          "game_frame": 102,
+          "requested": 1,
+          "effective": 1,
+          "integrity_flags": 0,
+          "framebuffer_hash": "aabb",
+          "separated_valid": true,
+          "separated_status": 12,
+          "separated_mismatch_pixels": 0,
+          "separated_hash": "ccdd",
+          "projection_camera": [
+            1,
+            2,
+            3
+          ],
+          "picker_topdown": true,
+          "picker_flag": 1,
+          "light": [
+            20,
+            40
+          ],
+          "shadow_opacity_pct": 50,
+          "shadow_softness_pct": 25,
+          "emitted_oam_count": 1,
+          "claimed_oam_count": 1,
+          "synthetic_part_count": 0,
+          "synthetic_part_overflow_count": 0,
+          "world_record_occupancy": 1,
+          "effect_visible_count": 1,
+          "effect_metadata_valid": true,
+          "effect_overflow_count": 0,
+          "atlas_valid": true,
+          "atlas_size": [
+            64,
+            64
+          ],
+          "atlas_used": [
+            8,
+            8
+          ],
+          "source_count": 1,
+          "object_count": 1,
+          "effect_count": 1,
+          "world_oam_count": 1,
+          "world_oam_first": 0,
+          "sources": [
+            {
+              "tier": 1,
+              "type": 257,
+              "record": 3840,
+              "composition": 4660,
+              "x": 20,
+              "y": 30,
+              "oam_first": 0,
+              "oam_count": 1,
+              "fragment_first": 0,
+              "fragment_count": 1,
+              "obj_palette_mask": 1
+            }
+          ],
+          "objects": [
+            {
+              "tier": 1,
+              "record": 3840,
+              "composition": 4660,
+              "source_index": 0,
+              "priority": 2,
+              "atlas_valid": true,
+              "atlas": [
+                0,
+                0,
+                8,
+                8
+              ],
+              "local_bounds": [
+                0,
+                0,
+                8,
+                8
+              ],
+              "oam_first": 0,
+              "oam_count": 1,
+              "height_class_name": "flying",
+              "classified_height": 12,
+              "virtual_height": 4,
+              "traits": 0,
+              "casts_shadow": true
+            }
+          ],
+          "effects": [
+            {
+              "kind": 1,
+              "kind_name": "lightning",
+              "phase_name": "active",
+              "color_name": "blue",
+              "record": 3840,
+              "composition": 4660,
+              "source_index": 0,
+              "world": [
+                20,
+                30
+              ],
+              "geometry": {
+                "kind_name": "point",
+                "space_name": "record_local",
+                "point": [
+                  0,
+                  0,
+                  0
+                ]
+              },
+              "generation": 1,
+              "flags": 1,
+              "age_ticks": 1,
+              "phase_ticks": 1,
+              "pulse_generation": 0,
+              "pulse_ticks": 0
+            }
+          ]
+        },
+        {
+          "metadata_valid": true,
+          "view": "enhanced",
+          "build_serial": 3,
+          "game_frame": 103,
+          "requested": 1,
+          "effective": 1,
+          "integrity_flags": 0,
+          "framebuffer_hash": "aabb",
+          "separated_valid": true,
+          "separated_status": 12,
+          "separated_mismatch_pixels": 0,
+          "separated_hash": "ccdd",
+          "projection_camera": [
+            1,
+            2,
+            3
+          ],
+          "picker_topdown": true,
+          "picker_flag": 0,
+          "light": [
+            20,
+            40
+          ],
+          "shadow_opacity_pct": 50,
+          "shadow_softness_pct": 25,
+          "emitted_oam_count": 1,
+          "claimed_oam_count": 1,
+          "synthetic_part_count": 0,
+          "synthetic_part_overflow_count": 0,
+          "world_record_occupancy": 1,
+          "effect_visible_count": 1,
+          "effect_metadata_valid": true,
+          "effect_overflow_count": 0,
+          "atlas_valid": true,
+          "atlas_size": [
+            64,
+            64
+          ],
+          "atlas_used": [
+            8,
+            8
+          ],
+          "source_count": 1,
+          "object_count": 1,
+          "effect_count": 1,
+          "world_oam_count": 1,
+          "world_oam_first": 0,
+          "sources": [
+            {
+              "tier": 1,
+              "type": 257,
+              "record": 3840,
+              "composition": 4660,
+              "x": 20,
+              "y": 30,
+              "oam_first": 0,
+              "oam_count": 1,
+              "fragment_first": 0,
+              "fragment_count": 1,
+              "obj_palette_mask": 1
+            }
+          ],
+          "objects": [
+            {
+              "tier": 1,
+              "record": 3840,
+              "composition": 4660,
+              "source_index": 0,
+              "priority": 2,
+              "atlas_valid": true,
+              "atlas": [
+                0,
+                0,
+                8,
+                8
+              ],
+              "local_bounds": [
+                0,
+                0,
+                8,
+                8
+              ],
+              "oam_first": 0,
+              "oam_count": 1,
+              "height_class_name": "flying",
+              "classified_height": 12,
+              "virtual_height": 12,
+              "traits": 0,
+              "casts_shadow": true
+            }
+          ],
+          "effects": [
+            {
+              "kind": 1,
+              "kind_name": "lightning",
+              "phase_name": "active",
+              "color_name": "blue",
+              "record": 3840,
+              "composition": 4660,
+              "source_index": 0,
+              "world": [
+                20,
+                30
+              ],
+              "geometry": {
+                "kind_name": "point",
+                "space_name": "record_local",
+                "point": [
+                  0,
+                  0,
+                  0
+                ]
+              },
+              "generation": 1,
+              "flags": 1,
+              "age_ticks": 2,
+              "phase_ticks": 2,
+              "pulse_generation": 0,
+              "pulse_ticks": 0
+            }
+          ]
+        },
+        {
+          "metadata_valid": true,
+          "view": "enhanced",
+          "build_serial": 4,
+          "game_frame": 104,
+          "requested": 1,
+          "effective": 1,
+          "integrity_flags": 0,
+          "framebuffer_hash": "aabb",
+          "separated_valid": true,
+          "separated_status": 12,
+          "separated_mismatch_pixels": 0,
+          "separated_hash": "ccdd",
+          "projection_camera": [
+            1,
+            2,
+            3
+          ],
+          "picker_topdown": true,
+          "picker_flag": 0,
+          "light": [
+            20,
+            40
+          ],
+          "shadow_opacity_pct": 50,
+          "shadow_softness_pct": 25,
+          "emitted_oam_count": 1,
+          "claimed_oam_count": 1,
+          "synthetic_part_count": 0,
+          "synthetic_part_overflow_count": 0,
+          "world_record_occupancy": 1,
+          "effect_visible_count": 1,
+          "effect_metadata_valid": true,
+          "effect_overflow_count": 0,
+          "atlas_valid": true,
+          "atlas_size": [
+            64,
+            64
+          ],
+          "atlas_used": [
+            8,
+            8
+          ],
+          "source_count": 1,
+          "object_count": 1,
+          "effect_count": 1,
+          "world_oam_count": 1,
+          "world_oam_first": 0,
+          "sources": [
+            {
+              "tier": 1,
+              "type": 257,
+              "record": 3840,
+              "composition": 4660,
+              "x": 20,
+              "y": 30,
+              "oam_first": 0,
+              "oam_count": 1,
+              "fragment_first": 0,
+              "fragment_count": 1,
+              "obj_palette_mask": 1
+            }
+          ],
+          "objects": [
+            {
+              "tier": 1,
+              "record": 3840,
+              "composition": 4660,
+              "source_index": 0,
+              "priority": 2,
+              "atlas_valid": true,
+              "atlas": [
+                0,
+                0,
+                8,
+                8
+              ],
+              "local_bounds": [
+                0,
+                0,
+                8,
+                8
+              ],
+              "oam_first": 0,
+              "oam_count": 1,
+              "height_class_name": "ground_strike",
+              "classified_height": 0,
+              "virtual_height": 12,
+              "traits": 0,
+              "casts_shadow": true
+            }
+          ],
+          "effects": [
+            {
+              "kind": 1,
+              "kind_name": "lightning",
+              "phase_name": "active",
+              "color_name": "blue",
+              "record": 3840,
+              "composition": 4660,
+              "source_index": 0,
+              "world": [
+                20,
+                30
+              ],
+              "geometry": {
+                "kind_name": "point",
+                "space_name": "record_local",
+                "point": [
+                  0,
+                  0,
+                  0
+                ]
+              },
+              "generation": 1,
+              "flags": 1,
+              "age_ticks": 3,
+              "phase_ticks": 3,
+              "pulse_generation": 0,
+              "pulse_ticks": 0
+            }
+          ]
+        }
+      ],
+      "allowed": [],
+      "summary": {
+        "frame_count": 4,
+        "valid_frame_count": 4,
+        "invalid_frame_count": 0,
+        "picker_frame_count": 1,
+        "fallback_frame_count": 0,
+        "first_build_serial": 1,
+        "last_build_serial": 4,
+        "requested": [
+          1
+        ],
+        "effective": [
+          1
+        ],
+        "integrity_flags": [
+          0
+        ],
+        "priority_bands": [
+          2
+        ],
+        "max_source_count": 1,
+        "max_object_count": 1,
+        "max_emitted_oam_count": 1,
+        "max_synthetic_part_count": 0,
+        "max_world_record_occupancy": 1,
+        "synthetic_part_overflow_count_total": 0,
+        "synthetic_part_overflow_count_max": 0,
+        "effect_frame_count": 4,
+        "visible_effect_frame_count": 4,
+        "visible_effect_instance_count": 4,
+        "max_effect_count": 1,
+        "effect_metadata_invalid_frame_count": 0,
+        "effect_overflow_count_total": 0,
+        "effect_overflow_count_max": 0,
+        "effect_kind_counts": {
+          "lightning": 4
+        },
+        "effect_phase_counts": {
+          "lightning": {
+            "active": 4
+          }
+        },
+        "effect_color_counts": {
+          "lightning": {
+            "blue": 4
+          }
+        },
+        "effect_generation_counts": {
+          "lightning": 1
+        },
+        "effect_compositions": {
+          "lightning": [
+            "$1234"
+          ]
+        },
+        "atlas_valid_frame_count": 4,
+        "atlas_valid_object_count": 4,
+        "atlas_invalid_object_count": 0,
+        "max_atlas_used_width": 8,
+        "max_atlas_used_height": 8,
+        "unique_framebuffer_hashes": 1,
+        "separated_valid_frame_count": 4,
+        "separated_ready_frame_count": 4,
+        "separated_statuses": [
+          12
+        ],
+        "separated_status_counts": {
+          "ready": 4
+        },
+        "height_class_counts": {
+          "flying": 3,
+          "ground_strike": 1
+        },
+        "max_virtual_height": 12,
+        "max_classified_height": 12,
+        "lifted_object_count": 3,
+        "height_ramp_step_count": 0,
+        "height_slew_violation_count": 0,
+        "ballistic_effect_instance_count": 0,
+        "ballistic_object_instance_count": 0,
+        "shadow_caster_count": 4,
+        "shadow_caster_lifted_count": 3,
+        "shadow_opacity_values": [
+          50
+        ],
+        "shadow_softness_values": [
+          25
+        ],
+        "light_values": [
+          [
+            20,
+            40
+          ]
+        ],
+        "picker_topdown_build": true,
+        "picker_flag_frame_count": 1,
+        "picker_flag_topdown_frame_count": 1,
+        "picker_flag_enhanced_frame_count": 0,
+        "picker_flag_map_plane_frame_count": 0,
+        "picker_exit_frames": [
+          {
+            "game_frame": 103,
+            "view": "enhanced",
+            "separated_status": 12,
+            "separated_valid": true,
+            "effective": 1,
+            "map_plane_object_count": 0
+          }
+        ],
+        "separated_mismatch_pixels_total": 0,
+        "separated_mismatch_pixels_max": 0,
+        "unique_separated_hashes": 1,
+        "projection_cameras": [
+          [
+            1,
+            2,
+            3
+          ]
+        ],
+        "accounting_error_count": 1
+      },
+      "errors": [
+        "D1 metadata line 4: object 0 eases a contact-exact ground_strike to 12 px"
+      ]
+    },
+    {
+      "name": "atlas-and-oam-errors",
+      "frames": [
+        {
+          "metadata_valid": true,
+          "view": "enhanced",
+          "build_serial": 1,
+          "game_frame": 101,
+          "requested": 1,
+          "effective": 1,
+          "integrity_flags": 0,
+          "framebuffer_hash": "aabb",
+          "separated_valid": true,
+          "separated_status": 12,
+          "separated_mismatch_pixels": 0,
+          "separated_hash": "ccdd",
+          "projection_camera": [
+            1,
+            2,
+            3
+          ],
+          "picker_topdown": true,
+          "picker_flag": 0,
+          "light": [
+            20,
+            40
+          ],
+          "shadow_opacity_pct": 50,
+          "shadow_softness_pct": 25,
+          "emitted_oam_count": 1,
+          "claimed_oam_count": 3,
+          "synthetic_part_count": 0,
+          "synthetic_part_overflow_count": 0,
+          "world_record_occupancy": 1,
+          "effect_visible_count": 1,
+          "effect_metadata_valid": true,
+          "effect_overflow_count": 0,
+          "atlas_valid": true,
+          "atlas_size": [
+            64,
+            64
+          ],
+          "atlas_used": [
+            8,
+            8
+          ],
+          "source_count": 2,
+          "object_count": 2,
+          "effect_count": 2,
+          "world_oam_count": 2,
+          "world_oam_first": 3,
+          "sources": [
+            {
+              "tier": 1,
+              "type": 257,
+              "record": 3840,
+              "composition": 4660,
+              "x": 20,
+              "y": 30,
+              "oam_first": 0,
+              "oam_count": 1,
+              "fragment_first": 2,
+              "fragment_count": 1,
+              "obj_palette_mask": 0
+            }
+          ],
+          "objects": [
+            {
+              "tier": 1,
+              "record": 3840,
+              "composition": 4660,
+              "source_index": 0,
+              "priority": 2,
+              "atlas_valid": true,
+              "atlas": [
+                5,
+                0,
+                8,
+                9
+              ],
+              "local_bounds": [
+                0,
+                0,
+                4,
+                4
+              ],
+              "oam_first": 0,
+              "oam_count": 1,
+              "height_class_name": "flying",
+              "classified_height": 12,
+              "virtual_height": 0,
+              "traits": 0,
+              "casts_shadow": true
+            }
+          ],
+          "effects": [
+            {
+              "kind": 1,
+              "kind_name": "lightning",
+              "phase_name": "active",
+              "color_name": "blue",
+              "record": 3840,
+              "composition": 4660,
+              "source_index": 0,
+              "world": [
+                20,
+                30
+              ],
+              "geometry": {
+                "kind_name": "point",
+                "space_name": "record_local",
+                "point": [
+                  0,
+                  0,
+                  0
+                ]
+              },
+              "generation": 1,
+              "flags": 1,
+              "age_ticks": 0,
+              "phase_ticks": 0,
+              "pulse_generation": 0,
+              "pulse_ticks": 0
+            }
+          ]
+        }
+      ],
+      "allowed": [],
+      "summary": {
+        "frame_count": 1,
+        "valid_frame_count": 1,
+        "invalid_frame_count": 0,
+        "picker_frame_count": 0,
+        "fallback_frame_count": 0,
+        "first_build_serial": 1,
+        "last_build_serial": 1,
+        "requested": [
+          1
+        ],
+        "effective": [
+          1
+        ],
+        "integrity_flags": [
+          0
+        ],
+        "priority_bands": [
+          2
+        ],
+        "max_source_count": 1,
+        "max_object_count": 1,
+        "max_emitted_oam_count": 1,
+        "max_synthetic_part_count": 0,
+        "max_world_record_occupancy": 1,
+        "synthetic_part_overflow_count_total": 0,
+        "synthetic_part_overflow_count_max": 0,
+        "effect_frame_count": 1,
+        "visible_effect_frame_count": 1,
+        "visible_effect_instance_count": 1,
+        "max_effect_count": 1,
+        "effect_metadata_invalid_frame_count": 0,
+        "effect_overflow_count_total": 0,
+        "effect_overflow_count_max": 0,
+        "effect_kind_counts": {
+          "lightning": 1
+        },
+        "effect_phase_counts": {
+          "lightning": {
+            "active": 1
+          }
+        },
+        "effect_color_counts": {
+          "lightning": {
+            "blue": 1
+          }
+        },
+        "effect_generation_counts": {
+          "lightning": 1
+        },
+        "effect_compositions": {
+          "lightning": [
+            "$1234"
+          ]
+        },
+        "atlas_valid_frame_count": 1,
+        "atlas_valid_object_count": 1,
+        "atlas_invalid_object_count": 0,
+        "max_atlas_used_width": 8,
+        "max_atlas_used_height": 8,
+        "unique_framebuffer_hashes": 1,
+        "separated_valid_frame_count": 1,
+        "separated_ready_frame_count": 1,
+        "separated_statuses": [
+          12
+        ],
+        "separated_status_counts": {
+          "ready": 1
+        },
+        "height_class_counts": {
+          "flying": 1
+        },
+        "max_virtual_height": 0,
+        "max_classified_height": 12,
+        "lifted_object_count": 0,
+        "height_ramp_step_count": 0,
+        "height_slew_violation_count": 0,
+        "ballistic_effect_instance_count": 0,
+        "ballistic_object_instance_count": 0,
+        "shadow_caster_count": 1,
+        "shadow_caster_lifted_count": 0,
+        "shadow_opacity_values": [
+          50
+        ],
+        "shadow_softness_values": [
+          25
+        ],
+        "light_values": [
+          [
+            20,
+            40
+          ]
+        ],
+        "picker_topdown_build": true,
+        "picker_flag_frame_count": 0,
+        "picker_flag_topdown_frame_count": 0,
+        "picker_flag_enhanced_frame_count": 0,
+        "picker_flag_map_plane_frame_count": 0,
+        "picker_exit_frames": [],
+        "separated_mismatch_pixels_total": 0,
+        "separated_mismatch_pixels_max": 0,
+        "unique_separated_hashes": 1,
+        "projection_cameras": [
+          [
+            1,
+            2,
+            3
+          ]
+        ],
+        "accounting_error_count": 10
+      },
+      "errors": [
+        "D1 metadata line 1: object 0 atlas rect out of used bounds",
+        "D1 metadata line 1: object 0 local/atlas size mismatch",
+        "D1 metadata line 1: source_count does not match sources[]",
+        "D1 metadata line 1: object_count does not match objects[]",
+        "D1 metadata line 1: effect_count does not match effects[]",
+        "D1 metadata line 1: emitted 1 != claimed 3",
+        "D1 metadata line 1: source 0 has invalid OBJ palette mask 0",
+        "D1 metadata line 1: source 0 fragment range is out of bounds",
+        "D1 metadata line 1: world fragments do not equal world suffix count",
+        "D1 metadata line 1: world suffix begins at the wrong slot"
+      ]
+    },
+    {
+      "name": "effect-lifecycle-errors",
+      "frames": [
+        {
+          "metadata_valid": true,
+          "view": "enhanced",
+          "build_serial": 1,
+          "game_frame": 101,
+          "requested": 1,
+          "effective": 1,
+          "integrity_flags": 0,
+          "framebuffer_hash": "aabb",
+          "separated_valid": true,
+          "separated_status": 12,
+          "separated_mismatch_pixels": 0,
+          "separated_hash": "ccdd",
+          "projection_camera": [
+            1,
+            2,
+            3
+          ],
+          "picker_topdown": true,
+          "picker_flag": 0,
+          "light": [
+            20,
+            40
+          ],
+          "shadow_opacity_pct": 50,
+          "shadow_softness_pct": 25,
+          "emitted_oam_count": 1,
+          "claimed_oam_count": 1,
+          "synthetic_part_count": 0,
+          "synthetic_part_overflow_count": 0,
+          "world_record_occupancy": 1,
+          "effect_visible_count": 1,
+          "effect_metadata_valid": true,
+          "effect_overflow_count": 0,
+          "atlas_valid": true,
+          "atlas_size": [
+            64,
+            64
+          ],
+          "atlas_used": [
+            8,
+            8
+          ],
+          "source_count": 1,
+          "object_count": 1,
+          "effect_count": 1,
+          "world_oam_count": 1,
+          "world_oam_first": 0,
+          "sources": [
+            {
+              "tier": 1,
+              "type": 257,
+              "record": 3840,
+              "composition": 4660,
+              "x": 20,
+              "y": 30,
+              "oam_first": 0,
+              "oam_count": 1,
+              "fragment_first": 0,
+              "fragment_count": 1,
+              "obj_palette_mask": 1
+            }
+          ],
+          "objects": [
+            {
+              "tier": 1,
+              "record": 3840,
+              "composition": 4660,
+              "source_index": 0,
+              "priority": 2,
+              "atlas_valid": true,
+              "atlas": [
+                0,
+                0,
+                8,
+                8
+              ],
+              "local_bounds": [
+                0,
+                0,
+                8,
+                8
+              ],
+              "oam_first": 0,
+              "oam_count": 1,
+              "height_class_name": "flying",
+              "classified_height": 12,
+              "virtual_height": 0,
+              "traits": 0,
+              "casts_shadow": true
+            }
+          ],
+          "effects": [
+            {
+              "kind": 1,
+              "kind_name": "lightning",
+              "phase_name": "active",
+              "color_name": "blue",
+              "record": 3840,
+              "composition": 4660,
+              "source_index": 0,
+              "world": [
+                20,
+                30
+              ],
+              "geometry": {
+                "kind_name": "point",
+                "space_name": "record_local",
+                "point": [
+                  0,
+                  0,
+                  0
+                ]
+              },
+              "generation": 1,
+              "flags": 1,
+              "age_ticks": 0,
+              "phase_ticks": 0,
+              "pulse_generation": 0,
+              "pulse_ticks": 0
+            }
+          ]
+        },
+        {
+          "metadata_valid": true,
+          "view": "enhanced",
+          "build_serial": 2,
+          "game_frame": 102,
+          "requested": 1,
+          "effective": 1,
+          "integrity_flags": 0,
+          "framebuffer_hash": "aabb",
+          "separated_valid": true,
+          "separated_status": 12,
+          "separated_mismatch_pixels": 0,
+          "separated_hash": "ccdd",
+          "projection_camera": [
+            1,
+            2,
+            3
+          ],
+          "picker_topdown": true,
+          "picker_flag": 0,
+          "light": [
+            20,
+            40
+          ],
+          "shadow_opacity_pct": 50,
+          "shadow_softness_pct": 25,
+          "emitted_oam_count": 1,
+          "claimed_oam_count": 1,
+          "synthetic_part_count": 0,
+          "synthetic_part_overflow_count": 0,
+          "world_record_occupancy": 1,
+          "effect_visible_count": 1,
+          "effect_metadata_valid": true,
+          "effect_overflow_count": 0,
+          "atlas_valid": true,
+          "atlas_size": [
+            64,
+            64
+          ],
+          "atlas_used": [
+            8,
+            8
+          ],
+          "source_count": 1,
+          "object_count": 1,
+          "effect_count": 1,
+          "world_oam_count": 1,
+          "world_oam_first": 0,
+          "sources": [
+            {
+              "tier": 1,
+              "type": 257,
+              "record": 3840,
+              "composition": 4660,
+              "x": 20,
+              "y": 30,
+              "oam_first": 0,
+              "oam_count": 1,
+              "fragment_first": 0,
+              "fragment_count": 1,
+              "obj_palette_mask": 1
+            }
+          ],
+          "objects": [
+            {
+              "tier": 1,
+              "record": 3840,
+              "composition": 4660,
+              "source_index": 0,
+              "priority": 2,
+              "atlas_valid": true,
+              "atlas": [
+                0,
+                0,
+                8,
+                8
+              ],
+              "local_bounds": [
+                0,
+                0,
+                8,
+                8
+              ],
+              "oam_first": 0,
+              "oam_count": 1,
+              "height_class_name": "flying",
+              "classified_height": 12,
+              "virtual_height": 4,
+              "traits": 0,
+              "casts_shadow": true
+            }
+          ],
+          "effects": [
+            {
+              "kind": 1,
+              "kind_name": "lightning",
+              "phase_name": "active",
+              "color_name": "blue",
+              "record": 3840,
+              "composition": 4660,
+              "source_index": 0,
+              "world": [
+                20,
+                30
+              ],
+              "geometry": {
+                "kind_name": "point",
+                "space_name": "record_local",
+                "point": [
+                  0,
+                  0,
+                  0
+                ]
+              },
+              "generation": 1,
+              "flags": 1,
+              "age_ticks": 7,
+              "phase_ticks": 9,
+              "pulse_generation": 0,
+              "pulse_ticks": 0
+            }
+          ]
+        },
+        {
+          "metadata_valid": true,
+          "view": "enhanced",
+          "build_serial": 3,
+          "game_frame": 103,
+          "requested": 1,
+          "effective": 1,
+          "integrity_flags": 0,
+          "framebuffer_hash": "aabb",
+          "separated_valid": true,
+          "separated_status": 12,
+          "separated_mismatch_pixels": 0,
+          "separated_hash": "ccdd",
+          "projection_camera": [
+            1,
+            2,
+            3
+          ],
+          "picker_topdown": true,
+          "picker_flag": 0,
+          "light": [
+            20,
+            40
+          ],
+          "shadow_opacity_pct": 50,
+          "shadow_softness_pct": 25,
+          "emitted_oam_count": 1,
+          "claimed_oam_count": 1,
+          "synthetic_part_count": 0,
+          "synthetic_part_overflow_count": 0,
+          "world_record_occupancy": 1,
+          "effect_visible_count": 1,
+          "effect_metadata_valid": true,
+          "effect_overflow_count": 0,
+          "atlas_valid": true,
+          "atlas_size": [
+            64,
+            64
+          ],
+          "atlas_used": [
+            8,
+            8
+          ],
+          "source_count": 1,
+          "object_count": 1,
+          "effect_count": 1,
+          "world_oam_count": 1,
+          "world_oam_first": 0,
+          "sources": [
+            {
+              "tier": 1,
+              "type": 257,
+              "record": 3840,
+              "composition": 4660,
+              "x": 20,
+              "y": 30,
+              "oam_first": 0,
+              "oam_count": 1,
+              "fragment_first": 0,
+              "fragment_count": 1,
+              "obj_palette_mask": 1
+            }
+          ],
+          "objects": [
+            {
+              "tier": 1,
+              "record": 3840,
+              "composition": 4660,
+              "source_index": 0,
+              "priority": 2,
+              "atlas_valid": true,
+              "atlas": [
+                0,
+                0,
+                8,
+                8
+              ],
+              "local_bounds": [
+                0,
+                0,
+                8,
+                8
+              ],
+              "oam_first": 0,
+              "oam_count": 1,
+              "height_class_name": "flying",
+              "classified_height": 12,
+              "virtual_height": 8,
+              "traits": 0,
+              "casts_shadow": true
+            }
+          ],
+          "effects": [
+            {
+              "kind": 1,
+              "kind_name": "lightning",
+              "phase_name": "active",
+              "color_name": "blue",
+              "record": 3840,
+              "composition": 4660,
+              "source_index": 4,
+              "world": [
+                20,
+                30
+              ],
+              "geometry": {
+                "kind_name": "point",
+                "space_name": "record_local",
+                "point": [
+                  0,
+                  0,
+                  0
+                ]
+              },
+              "generation": 1,
+              "flags": 1,
+              "age_ticks": 2,
+              "phase_ticks": 2,
+              "pulse_generation": 0,
+              "pulse_ticks": 0
+            }
+          ]
+        }
+      ],
+      "allowed": [],
+      "summary": {
+        "frame_count": 3,
+        "valid_frame_count": 3,
+        "invalid_frame_count": 0,
+        "picker_frame_count": 0,
+        "fallback_frame_count": 0,
+        "first_build_serial": 1,
+        "last_build_serial": 3,
+        "requested": [
+          1
+        ],
+        "effective": [
+          1
+        ],
+        "integrity_flags": [
+          0
+        ],
+        "priority_bands": [
+          2
+        ],
+        "max_source_count": 1,
+        "max_object_count": 1,
+        "max_emitted_oam_count": 1,
+        "max_synthetic_part_count": 0,
+        "max_world_record_occupancy": 1,
+        "synthetic_part_overflow_count_total": 0,
+        "synthetic_part_overflow_count_max": 0,
+        "effect_frame_count": 3,
+        "visible_effect_frame_count": 3,
+        "visible_effect_instance_count": 3,
+        "max_effect_count": 1,
+        "effect_metadata_invalid_frame_count": 0,
+        "effect_overflow_count_total": 0,
+        "effect_overflow_count_max": 0,
+        "effect_kind_counts": {
+          "lightning": 3
+        },
+        "effect_phase_counts": {
+          "lightning": {
+            "active": 3
+          }
+        },
+        "effect_color_counts": {
+          "lightning": {
+            "blue": 3
+          }
+        },
+        "effect_generation_counts": {
+          "lightning": 1
+        },
+        "effect_compositions": {
+          "lightning": [
+            "$1234"
+          ]
+        },
+        "atlas_valid_frame_count": 3,
+        "atlas_valid_object_count": 3,
+        "atlas_invalid_object_count": 0,
+        "max_atlas_used_width": 8,
+        "max_atlas_used_height": 8,
+        "unique_framebuffer_hashes": 1,
+        "separated_valid_frame_count": 3,
+        "separated_ready_frame_count": 3,
+        "separated_statuses": [
+          12
+        ],
+        "separated_status_counts": {
+          "ready": 3
+        },
+        "height_class_counts": {
+          "flying": 3
+        },
+        "max_virtual_height": 8,
+        "max_classified_height": 12,
+        "lifted_object_count": 2,
+        "height_ramp_step_count": 2,
+        "height_slew_violation_count": 0,
+        "ballistic_effect_instance_count": 0,
+        "ballistic_object_instance_count": 0,
+        "shadow_caster_count": 3,
+        "shadow_caster_lifted_count": 2,
+        "shadow_opacity_values": [
+          50
+        ],
+        "shadow_softness_values": [
+          25
+        ],
+        "light_values": [
+          [
+            20,
+            40
+          ]
+        ],
+        "picker_topdown_build": true,
+        "picker_flag_frame_count": 0,
+        "picker_flag_topdown_frame_count": 0,
+        "picker_flag_enhanced_frame_count": 0,
+        "picker_flag_map_plane_frame_count": 0,
+        "picker_exit_frames": [],
+        "separated_mismatch_pixels_total": 0,
+        "separated_mismatch_pixels_max": 0,
+        "unique_separated_hashes": 1,
+        "projection_cameras": [
+          [
+            1,
+            2,
+            3
+          ]
+        ],
+        "accounting_error_count": 3
+      },
+      "errors": [
+        "D1 metadata line 2: effect 0 lifecycle age skipped",
+        "D1 metadata line 2: effect 0 phase age skipped",
+        "D1 metadata line 3: effect 0 source index is out of bounds"
+      ]
+    },
+    {
+      "name": "allowed-unpacked-atlas",
+      "frames": [
+        {
+          "metadata_valid": true,
+          "view": "enhanced",
+          "build_serial": 1,
+          "game_frame": 101,
+          "requested": 1,
+          "effective": 1,
+          "integrity_flags": 0,
+          "framebuffer_hash": "aabb",
+          "separated_valid": true,
+          "separated_status": 12,
+          "separated_mismatch_pixels": 0,
+          "separated_hash": "ccdd",
+          "projection_camera": [
+            1,
+            2,
+            3
+          ],
+          "picker_topdown": true,
+          "picker_flag": 0,
+          "light": [
+            20,
+            40
+          ],
+          "shadow_opacity_pct": 50,
+          "shadow_softness_pct": 25,
+          "emitted_oam_count": 1,
+          "claimed_oam_count": 1,
+          "synthetic_part_count": 0,
+          "synthetic_part_overflow_count": 0,
+          "world_record_occupancy": 1,
+          "effect_visible_count": 1,
+          "effect_metadata_valid": true,
+          "effect_overflow_count": 0,
+          "atlas_valid": true,
+          "atlas_size": [
+            64,
+            64
+          ],
+          "atlas_used": [
+            8,
+            8
+          ],
+          "source_count": 1,
+          "object_count": 1,
+          "effect_count": 1,
+          "world_oam_count": 1,
+          "world_oam_first": 0,
+          "sources": [
+            {
+              "tier": 1,
+              "type": 257,
+              "record": 3840,
+              "composition": 4660,
+              "x": 20,
+              "y": 30,
+              "oam_first": 0,
+              "oam_count": 1,
+              "fragment_first": 0,
+              "fragment_count": 1,
+              "obj_palette_mask": 1
+            }
+          ],
+          "objects": [
+            {
+              "tier": 1,
+              "record": 3840,
+              "composition": 4660,
+              "source_index": 0,
+              "priority": 2,
+              "atlas_valid": false,
+              "atlas": [
+                0,
+                0,
+                8,
+                8
+              ],
+              "local_bounds": [
+                0,
+                0,
+                8,
+                8
+              ],
+              "oam_first": 0,
+              "oam_count": 1,
+              "height_class_name": "flying",
+              "classified_height": 12,
+              "virtual_height": 0,
+              "traits": 0,
+              "casts_shadow": true
+            }
+          ],
+          "effects": [
+            {
+              "kind": 1,
+              "kind_name": "lightning",
+              "phase_name": "active",
+              "color_name": "blue",
+              "record": 3840,
+              "composition": 4660,
+              "source_index": 0,
+              "world": [
+                20,
+                30
+              ],
+              "geometry": {
+                "kind_name": "point",
+                "space_name": "record_local",
+                "point": [
+                  0,
+                  0,
+                  0
+                ]
+              },
+              "generation": 1,
+              "flags": 1,
+              "age_ticks": 0,
+              "phase_ticks": 0,
+              "pulse_generation": 0,
+              "pulse_ticks": 0
+            }
+          ]
+        }
+      ],
+      "allowed": [
+        {
+          "game_frame": 101,
+          "record": 3840,
+          "composition": 4660
+        }
+      ],
+      "summary": {
+        "frame_count": 1,
+        "valid_frame_count": 1,
+        "invalid_frame_count": 0,
+        "picker_frame_count": 0,
+        "fallback_frame_count": 0,
+        "first_build_serial": 1,
+        "last_build_serial": 1,
+        "requested": [
+          1
+        ],
+        "effective": [
+          1
+        ],
+        "integrity_flags": [
+          0
+        ],
+        "priority_bands": [
+          2
+        ],
+        "max_source_count": 1,
+        "max_object_count": 1,
+        "max_emitted_oam_count": 1,
+        "max_synthetic_part_count": 0,
+        "max_world_record_occupancy": 1,
+        "synthetic_part_overflow_count_total": 0,
+        "synthetic_part_overflow_count_max": 0,
+        "effect_frame_count": 1,
+        "visible_effect_frame_count": 1,
+        "visible_effect_instance_count": 1,
+        "max_effect_count": 1,
+        "effect_metadata_invalid_frame_count": 0,
+        "effect_overflow_count_total": 0,
+        "effect_overflow_count_max": 0,
+        "effect_kind_counts": {
+          "lightning": 1
+        },
+        "effect_phase_counts": {
+          "lightning": {
+            "active": 1
+          }
+        },
+        "effect_color_counts": {
+          "lightning": {
+            "blue": 1
+          }
+        },
+        "effect_generation_counts": {
+          "lightning": 1
+        },
+        "effect_compositions": {
+          "lightning": [
+            "$1234"
+          ]
+        },
+        "atlas_valid_frame_count": 1,
+        "atlas_valid_object_count": 0,
+        "atlas_invalid_object_count": 1,
+        "max_atlas_used_width": 8,
+        "max_atlas_used_height": 8,
+        "unique_framebuffer_hashes": 1,
+        "separated_valid_frame_count": 1,
+        "separated_ready_frame_count": 1,
+        "separated_statuses": [
+          12
+        ],
+        "separated_status_counts": {
+          "ready": 1
+        },
+        "height_class_counts": {
+          "flying": 1
+        },
+        "max_virtual_height": 0,
+        "max_classified_height": 12,
+        "lifted_object_count": 0,
+        "height_ramp_step_count": 0,
+        "height_slew_violation_count": 0,
+        "ballistic_effect_instance_count": 0,
+        "ballistic_object_instance_count": 0,
+        "shadow_caster_count": 1,
+        "shadow_caster_lifted_count": 0,
+        "shadow_opacity_values": [
+          50
+        ],
+        "shadow_softness_values": [
+          25
+        ],
+        "light_values": [
+          [
+            20,
+            40
+          ]
+        ],
+        "picker_topdown_build": true,
+        "picker_flag_frame_count": 0,
+        "picker_flag_topdown_frame_count": 0,
+        "picker_flag_enhanced_frame_count": 0,
+        "picker_flag_map_plane_frame_count": 0,
+        "picker_exit_frames": [],
+        "separated_mismatch_pixels_total": 0,
+        "separated_mismatch_pixels_max": 0,
+        "unique_separated_hashes": 1,
+        "projection_cameras": [
+          [
+            1,
+            2,
+            3
+          ]
+        ],
+        "accounting_error_count": 1
+      },
+      "errors": [
+        "D1 metadata line 1: object 0 casts a shadow despite tier/traits 1/0"
+      ]
+    },
+    {
+      "name": "unused-atlas-exception",
+      "frames": [
+        {
+          "metadata_valid": true,
+          "view": "enhanced",
+          "build_serial": 1,
+          "game_frame": 101,
+          "requested": 1,
+          "effective": 1,
+          "integrity_flags": 0,
+          "framebuffer_hash": "aabb",
+          "separated_valid": true,
+          "separated_status": 12,
+          "separated_mismatch_pixels": 0,
+          "separated_hash": "ccdd",
+          "projection_camera": [
+            1,
+            2,
+            3
+          ],
+          "picker_topdown": true,
+          "picker_flag": 0,
+          "light": [
+            20,
+            40
+          ],
+          "shadow_opacity_pct": 50,
+          "shadow_softness_pct": 25,
+          "emitted_oam_count": 1,
+          "claimed_oam_count": 1,
+          "synthetic_part_count": 0,
+          "synthetic_part_overflow_count": 0,
+          "world_record_occupancy": 1,
+          "effect_visible_count": 1,
+          "effect_metadata_valid": true,
+          "effect_overflow_count": 0,
+          "atlas_valid": true,
+          "atlas_size": [
+            64,
+            64
+          ],
+          "atlas_used": [
+            8,
+            8
+          ],
+          "source_count": 1,
+          "object_count": 1,
+          "effect_count": 1,
+          "world_oam_count": 1,
+          "world_oam_first": 0,
+          "sources": [
+            {
+              "tier": 1,
+              "type": 257,
+              "record": 3840,
+              "composition": 4660,
+              "x": 20,
+              "y": 30,
+              "oam_first": 0,
+              "oam_count": 1,
+              "fragment_first": 0,
+              "fragment_count": 1,
+              "obj_palette_mask": 1
+            }
+          ],
+          "objects": [
+            {
+              "tier": 1,
+              "record": 3840,
+              "composition": 4660,
+              "source_index": 0,
+              "priority": 2,
+              "atlas_valid": true,
+              "atlas": [
+                0,
+                0,
+                8,
+                8
+              ],
+              "local_bounds": [
+                0,
+                0,
+                8,
+                8
+              ],
+              "oam_first": 0,
+              "oam_count": 1,
+              "height_class_name": "flying",
+              "classified_height": 12,
+              "virtual_height": 0,
+              "traits": 0,
+              "casts_shadow": true
+            }
+          ],
+          "effects": [
+            {
+              "kind": 1,
+              "kind_name": "lightning",
+              "phase_name": "active",
+              "color_name": "blue",
+              "record": 3840,
+              "composition": 4660,
+              "source_index": 0,
+              "world": [
+                20,
+                30
+              ],
+              "geometry": {
+                "kind_name": "point",
+                "space_name": "record_local",
+                "point": [
+                  0,
+                  0,
+                  0
+                ]
+              },
+              "generation": 1,
+              "flags": 1,
+              "age_ticks": 0,
+              "phase_ticks": 0,
+              "pulse_generation": 0,
+              "pulse_ticks": 0
+            }
+          ]
+        }
+      ],
+      "allowed": [
+        {
+          "game_frame": 101,
+          "record": 3840,
+          "composition": 4660
+        }
+      ],
+      "summary": {
+        "frame_count": 1,
+        "valid_frame_count": 1,
+        "invalid_frame_count": 0,
+        "picker_frame_count": 0,
+        "fallback_frame_count": 0,
+        "first_build_serial": 1,
+        "last_build_serial": 1,
+        "requested": [
+          1
+        ],
+        "effective": [
+          1
+        ],
+        "integrity_flags": [
+          0
+        ],
+        "priority_bands": [
+          2
+        ],
+        "max_source_count": 1,
+        "max_object_count": 1,
+        "max_emitted_oam_count": 1,
+        "max_synthetic_part_count": 0,
+        "max_world_record_occupancy": 1,
+        "synthetic_part_overflow_count_total": 0,
+        "synthetic_part_overflow_count_max": 0,
+        "effect_frame_count": 1,
+        "visible_effect_frame_count": 1,
+        "visible_effect_instance_count": 1,
+        "max_effect_count": 1,
+        "effect_metadata_invalid_frame_count": 0,
+        "effect_overflow_count_total": 0,
+        "effect_overflow_count_max": 0,
+        "effect_kind_counts": {
+          "lightning": 1
+        },
+        "effect_phase_counts": {
+          "lightning": {
+            "active": 1
+          }
+        },
+        "effect_color_counts": {
+          "lightning": {
+            "blue": 1
+          }
+        },
+        "effect_generation_counts": {
+          "lightning": 1
+        },
+        "effect_compositions": {
+          "lightning": [
+            "$1234"
+          ]
+        },
+        "atlas_valid_frame_count": 1,
+        "atlas_valid_object_count": 1,
+        "atlas_invalid_object_count": 0,
+        "max_atlas_used_width": 8,
+        "max_atlas_used_height": 8,
+        "unique_framebuffer_hashes": 1,
+        "separated_valid_frame_count": 1,
+        "separated_ready_frame_count": 1,
+        "separated_statuses": [
+          12
+        ],
+        "separated_status_counts": {
+          "ready": 1
+        },
+        "height_class_counts": {
+          "flying": 1
+        },
+        "max_virtual_height": 0,
+        "max_classified_height": 12,
+        "lifted_object_count": 0,
+        "height_ramp_step_count": 0,
+        "height_slew_violation_count": 0,
+        "ballistic_effect_instance_count": 0,
+        "ballistic_object_instance_count": 0,
+        "shadow_caster_count": 1,
+        "shadow_caster_lifted_count": 0,
+        "shadow_opacity_values": [
+          50
+        ],
+        "shadow_softness_values": [
+          25
+        ],
+        "light_values": [
+          [
+            20,
+            40
+          ]
+        ],
+        "picker_topdown_build": true,
+        "picker_flag_frame_count": 0,
+        "picker_flag_topdown_frame_count": 0,
+        "picker_flag_enhanced_frame_count": 0,
+        "picker_flag_map_plane_frame_count": 0,
+        "picker_exit_frames": [],
+        "separated_mismatch_pixels_total": 0,
+        "separated_mismatch_pixels_max": 0,
+        "unique_separated_hashes": 1,
+        "projection_cameras": [
+          [
+            1,
+            2,
+            3
+          ]
+        ],
+        "accounting_error_count": 1
+      },
+      "errors": [
+        "D1 metadata line 0: allowed unpacked atlas object was not observed: (101, 3840, 4660)"
+      ]
+    },
+    {
+      "name": "bounded-diagnostics",
+      "frames": [
+        {
+          "metadata_valid": true,
+          "view": "enhanced",
+          "build_serial": 1,
+          "game_frame": 101,
+          "requested": 1,
+          "effective": 1,
+          "integrity_flags": 0,
+          "framebuffer_hash": "aabb",
+          "separated_valid": true,
+          "separated_status": 11,
+          "separated_mismatch_pixels": 4,
+          "separated_hash": "ccdd",
+          "projection_camera": [
+            1,
+            2,
+            3
+          ],
+          "picker_topdown": true,
+          "picker_flag": 0,
+          "light": [
+            20,
+            40
+          ],
+          "shadow_opacity_pct": 50,
+          "shadow_softness_pct": 25,
+          "emitted_oam_count": 1,
+          "claimed_oam_count": 1,
+          "synthetic_part_count": 0,
+          "synthetic_part_overflow_count": 0,
+          "world_record_occupancy": 1,
+          "effect_visible_count": 0,
+          "effect_metadata_valid": true,
+          "effect_overflow_count": 2,
+          "atlas_valid": true,
+          "atlas_size": [
+            64,
+            64
+          ],
+          "atlas_used": [
+            8,
+            8
+          ],
+          "source_count": 9,
+          "object_count": 1,
+          "effect_count": 1,
+          "world_oam_count": 1,
+          "world_oam_first": 0,
+          "sources": [
+            {
+              "tier": 1,
+              "type": 257,
+              "record": 3840,
+              "composition": 4660,
+              "x": 20,
+              "y": 30,
+              "oam_first": 0,
+              "oam_count": 1,
+              "fragment_first": 0,
+              "fragment_count": 1,
+              "obj_palette_mask": 1
+            }
+          ],
+          "objects": [
+            {
+              "tier": 1,
+              "record": 3840,
+              "composition": 4660,
+              "source_index": 0,
+              "priority": 2,
+              "atlas_valid": true,
+              "atlas": [
+                0,
+                0,
+                8,
+                8
+              ],
+              "local_bounds": [
+                0,
+                0,
+                8,
+                8
+              ],
+              "oam_first": 0,
+              "oam_count": 1,
+              "height_class_name": "flying",
+              "classified_height": 12,
+              "virtual_height": 0,
+              "traits": 0,
+              "casts_shadow": true
+            }
+          ],
+          "effects": [
+            {
+              "kind": 1,
+              "kind_name": "lightning",
+              "phase_name": "active",
+              "color_name": "blue",
+              "record": 3840,
+              "composition": 4660,
+              "source_index": 0,
+              "world": [
+                20,
+                30
+              ],
+              "geometry": {
+                "kind_name": "point",
+                "space_name": "record_local",
+                "point": [
+                  0,
+                  0,
+                  0
+                ]
+              },
+              "generation": 1,
+              "flags": 1,
+              "age_ticks": 0,
+              "phase_ticks": 0,
+              "pulse_generation": 0,
+              "pulse_ticks": 0
+            }
+          ]
+        },
+        {
+          "metadata_valid": true,
+          "view": "enhanced",
+          "build_serial": 1,
+          "game_frame": 101,
+          "requested": 1,
+          "effective": 1,
+          "integrity_flags": 0,
+          "framebuffer_hash": "aabb",
+          "separated_valid": true,
+          "separated_status": 11,
+          "separated_mismatch_pixels": 4,
+          "separated_hash": "ccdd",
+          "projection_camera": [
+            1,
+            2,
+            3
+          ],
+          "picker_topdown": true,
+          "picker_flag": 0,
+          "light": [
+            20,
+            40
+          ],
+          "shadow_opacity_pct": 50,
+          "shadow_softness_pct": 25,
+          "emitted_oam_count": 1,
+          "claimed_oam_count": 1,
+          "synthetic_part_count": 0,
+          "synthetic_part_overflow_count": 0,
+          "world_record_occupancy": 1,
+          "effect_visible_count": 0,
+          "effect_metadata_valid": true,
+          "effect_overflow_count": 2,
+          "atlas_valid": true,
+          "atlas_size": [
+            64,
+            64
+          ],
+          "atlas_used": [
+            8,
+            8
+          ],
+          "source_count": 9,
+          "object_count": 1,
+          "effect_count": 1,
+          "world_oam_count": 1,
+          "world_oam_first": 0,
+          "sources": [
+            {
+              "tier": 1,
+              "type": 257,
+              "record": 3840,
+              "composition": 4660,
+              "x": 20,
+              "y": 30,
+              "oam_first": 0,
+              "oam_count": 1,
+              "fragment_first": 0,
+              "fragment_count": 1,
+              "obj_palette_mask": 1
+            }
+          ],
+          "objects": [
+            {
+              "tier": 1,
+              "record": 3840,
+              "composition": 4660,
+              "source_index": 0,
+              "priority": 2,
+              "atlas_valid": true,
+              "atlas": [
+                0,
+                0,
+                8,
+                8
+              ],
+              "local_bounds": [
+                0,
+                0,
+                8,
+                8
+              ],
+              "oam_first": 0,
+              "oam_count": 1,
+              "height_class_name": "flying",
+              "classified_height": 12,
+              "virtual_height": 0,
+              "traits": 0,
+              "casts_shadow": true
+            }
+          ],
+          "effects": [
+            {
+              "kind": 1,
+              "kind_name": "lightning",
+              "phase_name": "active",
+              "color_name": "blue",
+              "record": 3840,
+              "composition": 4660,
+              "source_index": 0,
+              "world": [
+                20,
+                30
+              ],
+              "geometry": {
+                "kind_name": "point",
+                "space_name": "record_local",
+                "point": [
+                  0,
+                  0,
+                  0
+                ]
+              },
+              "generation": 1,
+              "flags": 1,
+              "age_ticks": 0,
+              "phase_ticks": 0,
+              "pulse_generation": 0,
+              "pulse_ticks": 0
+            }
+          ]
+        },
+        {
+          "metadata_valid": true,
+          "view": "enhanced",
+          "build_serial": 1,
+          "game_frame": 101,
+          "requested": 1,
+          "effective": 1,
+          "integrity_flags": 0,
+          "framebuffer_hash": "aabb",
+          "separated_valid": true,
+          "separated_status": 11,
+          "separated_mismatch_pixels": 4,
+          "separated_hash": "ccdd",
+          "projection_camera": [
+            1,
+            2,
+            3
+          ],
+          "picker_topdown": true,
+          "picker_flag": 0,
+          "light": [
+            20,
+            40
+          ],
+          "shadow_opacity_pct": 50,
+          "shadow_softness_pct": 25,
+          "emitted_oam_count": 1,
+          "claimed_oam_count": 1,
+          "synthetic_part_count": 0,
+          "synthetic_part_overflow_count": 0,
+          "world_record_occupancy": 1,
+          "effect_visible_count": 0,
+          "effect_metadata_valid": true,
+          "effect_overflow_count": 2,
+          "atlas_valid": true,
+          "atlas_size": [
+            64,
+            64
+          ],
+          "atlas_used": [
+            8,
+            8
+          ],
+          "source_count": 9,
+          "object_count": 1,
+          "effect_count": 1,
+          "world_oam_count": 1,
+          "world_oam_first": 0,
+          "sources": [
+            {
+              "tier": 1,
+              "type": 257,
+              "record": 3840,
+              "composition": 4660,
+              "x": 20,
+              "y": 30,
+              "oam_first": 0,
+              "oam_count": 1,
+              "fragment_first": 0,
+              "fragment_count": 1,
+              "obj_palette_mask": 1
+            }
+          ],
+          "objects": [
+            {
+              "tier": 1,
+              "record": 3840,
+              "composition": 4660,
+              "source_index": 0,
+              "priority": 2,
+              "atlas_valid": true,
+              "atlas": [
+                0,
+                0,
+                8,
+                8
+              ],
+              "local_bounds": [
+                0,
+                0,
+                8,
+                8
+              ],
+              "oam_first": 0,
+              "oam_count": 1,
+              "height_class_name": "flying",
+              "classified_height": 12,
+              "virtual_height": 0,
+              "traits": 0,
+              "casts_shadow": true
+            }
+          ],
+          "effects": [
+            {
+              "kind": 1,
+              "kind_name": "lightning",
+              "phase_name": "active",
+              "color_name": "blue",
+              "record": 3840,
+              "composition": 4660,
+              "source_index": 0,
+              "world": [
+                20,
+                30
+              ],
+              "geometry": {
+                "kind_name": "point",
+                "space_name": "record_local",
+                "point": [
+                  0,
+                  0,
+                  0
+                ]
+              },
+              "generation": 1,
+              "flags": 1,
+              "age_ticks": 0,
+              "phase_ticks": 0,
+              "pulse_generation": 0,
+              "pulse_ticks": 0
+            }
+          ]
+        },
+        {
+          "metadata_valid": true,
+          "view": "enhanced",
+          "build_serial": 1,
+          "game_frame": 101,
+          "requested": 1,
+          "effective": 1,
+          "integrity_flags": 0,
+          "framebuffer_hash": "aabb",
+          "separated_valid": true,
+          "separated_status": 11,
+          "separated_mismatch_pixels": 4,
+          "separated_hash": "ccdd",
+          "projection_camera": [
+            1,
+            2,
+            3
+          ],
+          "picker_topdown": true,
+          "picker_flag": 0,
+          "light": [
+            20,
+            40
+          ],
+          "shadow_opacity_pct": 50,
+          "shadow_softness_pct": 25,
+          "emitted_oam_count": 1,
+          "claimed_oam_count": 1,
+          "synthetic_part_count": 0,
+          "synthetic_part_overflow_count": 0,
+          "world_record_occupancy": 1,
+          "effect_visible_count": 0,
+          "effect_metadata_valid": true,
+          "effect_overflow_count": 2,
+          "atlas_valid": true,
+          "atlas_size": [
+            64,
+            64
+          ],
+          "atlas_used": [
+            8,
+            8
+          ],
+          "source_count": 9,
+          "object_count": 1,
+          "effect_count": 1,
+          "world_oam_count": 1,
+          "world_oam_first": 0,
+          "sources": [
+            {
+              "tier": 1,
+              "type": 257,
+              "record": 3840,
+              "composition": 4660,
+              "x": 20,
+              "y": 30,
+              "oam_first": 0,
+              "oam_count": 1,
+              "fragment_first": 0,
+              "fragment_count": 1,
+              "obj_palette_mask": 1
+            }
+          ],
+          "objects": [
+            {
+              "tier": 1,
+              "record": 3840,
+              "composition": 4660,
+              "source_index": 0,
+              "priority": 2,
+              "atlas_valid": true,
+              "atlas": [
+                0,
+                0,
+                8,
+                8
+              ],
+              "local_bounds": [
+                0,
+                0,
+                8,
+                8
+              ],
+              "oam_first": 0,
+              "oam_count": 1,
+              "height_class_name": "flying",
+              "classified_height": 12,
+              "virtual_height": 0,
+              "traits": 0,
+              "casts_shadow": true
+            }
+          ],
+          "effects": [
+            {
+              "kind": 1,
+              "kind_name": "lightning",
+              "phase_name": "active",
+              "color_name": "blue",
+              "record": 3840,
+              "composition": 4660,
+              "source_index": 0,
+              "world": [
+                20,
+                30
+              ],
+              "geometry": {
+                "kind_name": "point",
+                "space_name": "record_local",
+                "point": [
+                  0,
+                  0,
+                  0
+                ]
+              },
+              "generation": 1,
+              "flags": 1,
+              "age_ticks": 0,
+              "phase_ticks": 0,
+              "pulse_generation": 0,
+              "pulse_ticks": 0
+            }
+          ]
+        },
+        {
+          "metadata_valid": true,
+          "view": "enhanced",
+          "build_serial": 1,
+          "game_frame": 101,
+          "requested": 1,
+          "effective": 1,
+          "integrity_flags": 0,
+          "framebuffer_hash": "aabb",
+          "separated_valid": true,
+          "separated_status": 11,
+          "separated_mismatch_pixels": 4,
+          "separated_hash": "ccdd",
+          "projection_camera": [
+            1,
+            2,
+            3
+          ],
+          "picker_topdown": true,
+          "picker_flag": 0,
+          "light": [
+            20,
+            40
+          ],
+          "shadow_opacity_pct": 50,
+          "shadow_softness_pct": 25,
+          "emitted_oam_count": 1,
+          "claimed_oam_count": 1,
+          "synthetic_part_count": 0,
+          "synthetic_part_overflow_count": 0,
+          "world_record_occupancy": 1,
+          "effect_visible_count": 0,
+          "effect_metadata_valid": true,
+          "effect_overflow_count": 2,
+          "atlas_valid": true,
+          "atlas_size": [
+            64,
+            64
+          ],
+          "atlas_used": [
+            8,
+            8
+          ],
+          "source_count": 9,
+          "object_count": 1,
+          "effect_count": 1,
+          "world_oam_count": 1,
+          "world_oam_first": 0,
+          "sources": [
+            {
+              "tier": 1,
+              "type": 257,
+              "record": 3840,
+              "composition": 4660,
+              "x": 20,
+              "y": 30,
+              "oam_first": 0,
+              "oam_count": 1,
+              "fragment_first": 0,
+              "fragment_count": 1,
+              "obj_palette_mask": 1
+            }
+          ],
+          "objects": [
+            {
+              "tier": 1,
+              "record": 3840,
+              "composition": 4660,
+              "source_index": 0,
+              "priority": 2,
+              "atlas_valid": true,
+              "atlas": [
+                0,
+                0,
+                8,
+                8
+              ],
+              "local_bounds": [
+                0,
+                0,
+                8,
+                8
+              ],
+              "oam_first": 0,
+              "oam_count": 1,
+              "height_class_name": "flying",
+              "classified_height": 12,
+              "virtual_height": 0,
+              "traits": 0,
+              "casts_shadow": true
+            }
+          ],
+          "effects": [
+            {
+              "kind": 1,
+              "kind_name": "lightning",
+              "phase_name": "active",
+              "color_name": "blue",
+              "record": 3840,
+              "composition": 4660,
+              "source_index": 0,
+              "world": [
+                20,
+                30
+              ],
+              "geometry": {
+                "kind_name": "point",
+                "space_name": "record_local",
+                "point": [
+                  0,
+                  0,
+                  0
+                ]
+              },
+              "generation": 1,
+              "flags": 1,
+              "age_ticks": 0,
+              "phase_ticks": 0,
+              "pulse_generation": 0,
+              "pulse_ticks": 0
+            }
+          ]
+        },
+        {
+          "metadata_valid": true,
+          "view": "enhanced",
+          "build_serial": 1,
+          "game_frame": 101,
+          "requested": 1,
+          "effective": 1,
+          "integrity_flags": 0,
+          "framebuffer_hash": "aabb",
+          "separated_valid": true,
+          "separated_status": 11,
+          "separated_mismatch_pixels": 4,
+          "separated_hash": "ccdd",
+          "projection_camera": [
+            1,
+            2,
+            3
+          ],
+          "picker_topdown": true,
+          "picker_flag": 0,
+          "light": [
+            20,
+            40
+          ],
+          "shadow_opacity_pct": 50,
+          "shadow_softness_pct": 25,
+          "emitted_oam_count": 1,
+          "claimed_oam_count": 1,
+          "synthetic_part_count": 0,
+          "synthetic_part_overflow_count": 0,
+          "world_record_occupancy": 1,
+          "effect_visible_count": 0,
+          "effect_metadata_valid": true,
+          "effect_overflow_count": 2,
+          "atlas_valid": true,
+          "atlas_size": [
+            64,
+            64
+          ],
+          "atlas_used": [
+            8,
+            8
+          ],
+          "source_count": 9,
+          "object_count": 1,
+          "effect_count": 1,
+          "world_oam_count": 1,
+          "world_oam_first": 0,
+          "sources": [
+            {
+              "tier": 1,
+              "type": 257,
+              "record": 3840,
+              "composition": 4660,
+              "x": 20,
+              "y": 30,
+              "oam_first": 0,
+              "oam_count": 1,
+              "fragment_first": 0,
+              "fragment_count": 1,
+              "obj_palette_mask": 1
+            }
+          ],
+          "objects": [
+            {
+              "tier": 1,
+              "record": 3840,
+              "composition": 4660,
+              "source_index": 0,
+              "priority": 2,
+              "atlas_valid": true,
+              "atlas": [
+                0,
+                0,
+                8,
+                8
+              ],
+              "local_bounds": [
+                0,
+                0,
+                8,
+                8
+              ],
+              "oam_first": 0,
+              "oam_count": 1,
+              "height_class_name": "flying",
+              "classified_height": 12,
+              "virtual_height": 0,
+              "traits": 0,
+              "casts_shadow": true
+            }
+          ],
+          "effects": [
+            {
+              "kind": 1,
+              "kind_name": "lightning",
+              "phase_name": "active",
+              "color_name": "blue",
+              "record": 3840,
+              "composition": 4660,
+              "source_index": 0,
+              "world": [
+                20,
+                30
+              ],
+              "geometry": {
+                "kind_name": "point",
+                "space_name": "record_local",
+                "point": [
+                  0,
+                  0,
+                  0
+                ]
+              },
+              "generation": 1,
+              "flags": 1,
+              "age_ticks": 0,
+              "phase_ticks": 0,
+              "pulse_generation": 0,
+              "pulse_ticks": 0
+            }
+          ]
+        }
+      ],
+      "allowed": [],
+      "summary": {
+        "frame_count": 6,
+        "valid_frame_count": 6,
+        "invalid_frame_count": 0,
+        "picker_frame_count": 0,
+        "fallback_frame_count": 0,
+        "first_build_serial": 1,
+        "last_build_serial": 1,
+        "requested": [
+          1
+        ],
+        "effective": [
+          1
+        ],
+        "integrity_flags": [
+          0
+        ],
+        "priority_bands": [
+          2
+        ],
+        "max_source_count": 1,
+        "max_object_count": 1,
+        "max_emitted_oam_count": 1,
+        "max_synthetic_part_count": 0,
+        "max_world_record_occupancy": 1,
+        "synthetic_part_overflow_count_total": 0,
+        "synthetic_part_overflow_count_max": 0,
+        "effect_frame_count": 6,
+        "visible_effect_frame_count": 6,
+        "visible_effect_instance_count": 6,
+        "max_effect_count": 1,
+        "effect_metadata_invalid_frame_count": 0,
+        "effect_overflow_count_total": 12,
+        "effect_overflow_count_max": 2,
+        "effect_kind_counts": {
+          "lightning": 6
+        },
+        "effect_phase_counts": {
+          "lightning": {
+            "active": 6
+          }
+        },
+        "effect_color_counts": {
+          "lightning": {
+            "blue": 6
+          }
+        },
+        "effect_generation_counts": {
+          "lightning": 1
+        },
+        "effect_compositions": {
+          "lightning": [
+            "$1234"
+          ]
+        },
+        "atlas_valid_frame_count": 6,
+        "atlas_valid_object_count": 6,
+        "atlas_invalid_object_count": 0,
+        "max_atlas_used_width": 8,
+        "max_atlas_used_height": 8,
+        "unique_framebuffer_hashes": 1,
+        "separated_valid_frame_count": 6,
+        "separated_ready_frame_count": 0,
+        "separated_statuses": [
+          11
+        ],
+        "separated_status_counts": {
+          "pixel_mismatch": 6
+        },
+        "height_class_counts": {
+          "flying": 6
+        },
+        "max_virtual_height": 0,
+        "max_classified_height": 12,
+        "lifted_object_count": 0,
+        "height_ramp_step_count": 0,
+        "height_slew_violation_count": 0,
+        "ballistic_effect_instance_count": 0,
+        "ballistic_object_instance_count": 0,
+        "shadow_caster_count": 6,
+        "shadow_caster_lifted_count": 0,
+        "shadow_opacity_values": [
+          50
+        ],
+        "shadow_softness_values": [
+          25
+        ],
+        "light_values": [
+          [
+            20,
+            40
+          ]
+        ],
+        "picker_topdown_build": true,
+        "picker_flag_frame_count": 0,
+        "picker_flag_topdown_frame_count": 0,
+        "picker_flag_enhanced_frame_count": 0,
+        "picker_flag_map_plane_frame_count": 0,
+        "picker_exit_frames": [],
+        "separated_mismatch_pixels_total": 24,
+        "separated_mismatch_pixels_max": 4,
+        "unique_separated_hashes": 1,
+        "projection_cameras": [
+          [
+            1,
+            2,
+            3
+          ]
+        ],
+        "accounting_error_count": 30
+      },
+      "errors": [
+        "D1 metadata line 1: separated_valid frame does not report ready",
+        "D1 metadata line 1: separated_valid frame has pixel mismatches",
+        "D1 metadata line 1: effect_visible_count does not match visible flags",
+        "D1 metadata line 1: effect overflow did not invalidate effect metadata",
+        "D1 metadata line 1: source_count does not match sources[]",
+        "D1 metadata line 2: separated_valid frame does not report ready",
+        "D1 metadata line 2: separated_valid frame has pixel mismatches",
+        "D1 metadata line 2: effect_visible_count does not match visible flags",
+        "D1 metadata line 2: effect overflow did not invalidate effect metadata",
+        "D1 metadata line 2: source_count does not match sources[]",
+        "D1 metadata line 3: separated_valid frame does not report ready",
+        "D1 metadata line 3: separated_valid frame has pixel mismatches",
+        "D1 metadata line 3: effect_visible_count does not match visible flags",
+        "D1 metadata line 3: effect overflow did not invalidate effect metadata",
+        "D1 metadata line 3: source_count does not match sources[]",
+        "D1 metadata line 4: separated_valid frame does not report ready",
+        "D1 metadata line 4: separated_valid frame has pixel mismatches",
+        "D1 metadata line 4: effect_visible_count does not match visible flags",
+        "D1 metadata line 4: effect overflow did not invalidate effect metadata",
+        "D1 metadata line 4: source_count does not match sources[]",
+        "D1 metadata: 10 more error(s)"
+      ]
+    },
+    {
+      "name": "height-gap-resets-continuity",
+      "frames": [
+        {
+          "metadata_valid": true,
+          "view": "enhanced",
+          "build_serial": 1,
+          "game_frame": 101,
+          "requested": 1,
+          "effective": 1,
+          "integrity_flags": 0,
+          "framebuffer_hash": "aabb",
+          "separated_valid": true,
+          "separated_status": 12,
+          "separated_mismatch_pixels": 0,
+          "separated_hash": "ccdd",
+          "projection_camera": [
+            1,
+            2,
+            3
+          ],
+          "picker_topdown": true,
+          "picker_flag": 0,
+          "light": [
+            20,
+            40
+          ],
+          "shadow_opacity_pct": 50,
+          "shadow_softness_pct": 25,
+          "emitted_oam_count": 1,
+          "claimed_oam_count": 1,
+          "synthetic_part_count": 0,
+          "synthetic_part_overflow_count": 0,
+          "world_record_occupancy": 1,
+          "effect_visible_count": 1,
+          "effect_metadata_valid": true,
+          "effect_overflow_count": 0,
+          "atlas_valid": true,
+          "atlas_size": [
+            64,
+            64
+          ],
+          "atlas_used": [
+            8,
+            8
+          ],
+          "source_count": 1,
+          "object_count": 1,
+          "effect_count": 1,
+          "world_oam_count": 1,
+          "world_oam_first": 0,
+          "sources": [
+            {
+              "tier": 1,
+              "type": 257,
+              "record": 3840,
+              "composition": 4660,
+              "x": 20,
+              "y": 30,
+              "oam_first": 0,
+              "oam_count": 1,
+              "fragment_first": 0,
+              "fragment_count": 1,
+              "obj_palette_mask": 1
+            }
+          ],
+          "objects": [
+            {
+              "tier": 1,
+              "record": 3840,
+              "composition": 4660,
+              "source_index": 0,
+              "priority": 2,
+              "atlas_valid": true,
+              "atlas": [
+                0,
+                0,
+                8,
+                8
+              ],
+              "local_bounds": [
+                0,
+                0,
+                8,
+                8
+              ],
+              "oam_first": 0,
+              "oam_count": 1,
+              "height_class_name": "flying",
+              "classified_height": 12,
+              "virtual_height": 0,
+              "traits": 0,
+              "casts_shadow": true
+            }
+          ],
+          "effects": [
+            {
+              "kind": 1,
+              "kind_name": "lightning",
+              "phase_name": "active",
+              "color_name": "blue",
+              "record": 3840,
+              "composition": 4660,
+              "source_index": 0,
+              "world": [
+                20,
+                30
+              ],
+              "geometry": {
+                "kind_name": "point",
+                "space_name": "record_local",
+                "point": [
+                  0,
+                  0,
+                  0
+                ]
+              },
+              "generation": 1,
+              "flags": 1,
+              "age_ticks": 0,
+              "phase_ticks": 0,
+              "pulse_generation": 0,
+              "pulse_ticks": 0
+            }
+          ]
+        },
+        {
+          "metadata_valid": true,
+          "view": "enhanced",
+          "build_serial": 10,
+          "game_frame": 102,
+          "requested": 1,
+          "effective": 1,
+          "integrity_flags": 0,
+          "framebuffer_hash": "aabb",
+          "separated_valid": true,
+          "separated_status": 12,
+          "separated_mismatch_pixels": 0,
+          "separated_hash": "ccdd",
+          "projection_camera": [
+            1,
+            2,
+            3
+          ],
+          "picker_topdown": true,
+          "picker_flag": 0,
+          "light": [
+            20,
+            40
+          ],
+          "shadow_opacity_pct": 50,
+          "shadow_softness_pct": 25,
+          "emitted_oam_count": 1,
+          "claimed_oam_count": 1,
+          "synthetic_part_count": 0,
+          "synthetic_part_overflow_count": 0,
+          "world_record_occupancy": 1,
+          "effect_visible_count": 1,
+          "effect_metadata_valid": true,
+          "effect_overflow_count": 0,
+          "atlas_valid": true,
+          "atlas_size": [
+            64,
+            64
+          ],
+          "atlas_used": [
+            8,
+            8
+          ],
+          "source_count": 1,
+          "object_count": 1,
+          "effect_count": 1,
+          "world_oam_count": 1,
+          "world_oam_first": 0,
+          "sources": [
+            {
+              "tier": 1,
+              "type": 257,
+              "record": 3840,
+              "composition": 4660,
+              "x": 20,
+              "y": 30,
+              "oam_first": 0,
+              "oam_count": 1,
+              "fragment_first": 0,
+              "fragment_count": 1,
+              "obj_palette_mask": 1
+            }
+          ],
+          "objects": [
+            {
+              "tier": 1,
+              "record": 3840,
+              "composition": 4660,
+              "source_index": 0,
+              "priority": 2,
+              "atlas_valid": true,
+              "atlas": [
+                0,
+                0,
+                8,
+                8
+              ],
+              "local_bounds": [
+                0,
+                0,
+                8,
+                8
+              ],
+              "oam_first": 0,
+              "oam_count": 1,
+              "height_class_name": "flying",
+              "classified_height": 12,
+              "virtual_height": 12,
+              "traits": 0,
+              "casts_shadow": true
+            }
+          ],
+          "effects": [
+            {
+              "kind": 1,
+              "kind_name": "lightning",
+              "phase_name": "active",
+              "color_name": "blue",
+              "record": 3840,
+              "composition": 4660,
+              "source_index": 0,
+              "world": [
+                20,
+                30
+              ],
+              "geometry": {
+                "kind_name": "point",
+                "space_name": "record_local",
+                "point": [
+                  0,
+                  0,
+                  0
+                ]
+              },
+              "generation": 1,
+              "flags": 1,
+              "age_ticks": 1,
+              "phase_ticks": 1,
+              "pulse_generation": 0,
+              "pulse_ticks": 0
+            }
+          ]
+        },
+        {
+          "metadata_valid": true,
+          "view": "enhanced",
+          "build_serial": 11,
+          "game_frame": 103,
+          "requested": 1,
+          "effective": 1,
+          "integrity_flags": 0,
+          "framebuffer_hash": "aabb",
+          "separated_valid": true,
+          "separated_status": 12,
+          "separated_mismatch_pixels": 0,
+          "separated_hash": "ccdd",
+          "projection_camera": [
+            1,
+            2,
+            3
+          ],
+          "picker_topdown": true,
+          "picker_flag": 0,
+          "light": [
+            20,
+            40
+          ],
+          "shadow_opacity_pct": 50,
+          "shadow_softness_pct": 25,
+          "emitted_oam_count": 1,
+          "claimed_oam_count": 1,
+          "synthetic_part_count": 0,
+          "synthetic_part_overflow_count": 0,
+          "world_record_occupancy": 1,
+          "effect_visible_count": 1,
+          "effect_metadata_valid": true,
+          "effect_overflow_count": 0,
+          "atlas_valid": true,
+          "atlas_size": [
+            64,
+            64
+          ],
+          "atlas_used": [
+            8,
+            8
+          ],
+          "source_count": 1,
+          "object_count": 1,
+          "effect_count": 1,
+          "world_oam_count": 1,
+          "world_oam_first": 0,
+          "sources": [
+            {
+              "tier": 1,
+              "type": 257,
+              "record": 3840,
+              "composition": 4660,
+              "x": 20,
+              "y": 30,
+              "oam_first": 0,
+              "oam_count": 1,
+              "fragment_first": 0,
+              "fragment_count": 1,
+              "obj_palette_mask": 1
+            }
+          ],
+          "objects": [
+            {
+              "tier": 1,
+              "record": 3840,
+              "composition": 4660,
+              "source_index": 0,
+              "priority": 2,
+              "atlas_valid": true,
+              "atlas": [
+                0,
+                0,
+                8,
+                8
+              ],
+              "local_bounds": [
+                0,
+                0,
+                8,
+                8
+              ],
+              "oam_first": 0,
+              "oam_count": 1,
+              "height_class_name": "flying",
+              "classified_height": 12,
+              "virtual_height": 12,
+              "traits": 0,
+              "casts_shadow": true
+            }
+          ],
+          "effects": [
+            {
+              "kind": 1,
+              "kind_name": "lightning",
+              "phase_name": "active",
+              "color_name": "blue",
+              "record": 3840,
+              "composition": 4660,
+              "source_index": 0,
+              "world": [
+                20,
+                30
+              ],
+              "geometry": {
+                "kind_name": "point",
+                "space_name": "record_local",
+                "point": [
+                  0,
+                  0,
+                  0
+                ]
+              },
+              "generation": 1,
+              "flags": 1,
+              "age_ticks": 2,
+              "phase_ticks": 2,
+              "pulse_generation": 0,
+              "pulse_ticks": 0
+            }
+          ]
+        }
+      ],
+      "allowed": [],
+      "summary": {
+        "frame_count": 3,
+        "valid_frame_count": 3,
+        "invalid_frame_count": 0,
+        "picker_frame_count": 0,
+        "fallback_frame_count": 0,
+        "first_build_serial": 1,
+        "last_build_serial": 11,
+        "requested": [
+          1
+        ],
+        "effective": [
+          1
+        ],
+        "integrity_flags": [
+          0
+        ],
+        "priority_bands": [
+          2
+        ],
+        "max_source_count": 1,
+        "max_object_count": 1,
+        "max_emitted_oam_count": 1,
+        "max_synthetic_part_count": 0,
+        "max_world_record_occupancy": 1,
+        "synthetic_part_overflow_count_total": 0,
+        "synthetic_part_overflow_count_max": 0,
+        "effect_frame_count": 3,
+        "visible_effect_frame_count": 3,
+        "visible_effect_instance_count": 3,
+        "max_effect_count": 1,
+        "effect_metadata_invalid_frame_count": 0,
+        "effect_overflow_count_total": 0,
+        "effect_overflow_count_max": 0,
+        "effect_kind_counts": {
+          "lightning": 3
+        },
+        "effect_phase_counts": {
+          "lightning": {
+            "active": 3
+          }
+        },
+        "effect_color_counts": {
+          "lightning": {
+            "blue": 3
+          }
+        },
+        "effect_generation_counts": {
+          "lightning": 1
+        },
+        "effect_compositions": {
+          "lightning": [
+            "$1234"
+          ]
+        },
+        "atlas_valid_frame_count": 3,
+        "atlas_valid_object_count": 3,
+        "atlas_invalid_object_count": 0,
+        "max_atlas_used_width": 8,
+        "max_atlas_used_height": 8,
+        "unique_framebuffer_hashes": 1,
+        "separated_valid_frame_count": 3,
+        "separated_ready_frame_count": 3,
+        "separated_statuses": [
+          12
+        ],
+        "separated_status_counts": {
+          "ready": 3
+        },
+        "height_class_counts": {
+          "flying": 3
+        },
+        "max_virtual_height": 12,
+        "max_classified_height": 12,
+        "lifted_object_count": 2,
+        "height_ramp_step_count": 0,
+        "height_slew_violation_count": 0,
+        "ballistic_effect_instance_count": 0,
+        "ballistic_object_instance_count": 0,
+        "shadow_caster_count": 3,
+        "shadow_caster_lifted_count": 2,
+        "shadow_opacity_values": [
+          50
+        ],
+        "shadow_softness_values": [
+          25
+        ],
+        "light_values": [
+          [
+            20,
+            40
+          ]
+        ],
+        "picker_topdown_build": true,
+        "picker_flag_frame_count": 0,
+        "picker_flag_topdown_frame_count": 0,
+        "picker_flag_enhanced_frame_count": 0,
+        "picker_flag_map_plane_frame_count": 0,
+        "picker_exit_frames": [],
+        "separated_mismatch_pixels_total": 0,
+        "separated_mismatch_pixels_max": 0,
+        "unique_separated_hashes": 1,
+        "projection_cameras": [
+          [
+            1,
+            2,
+            3
+          ]
+        ],
+        "accounting_error_count": 0
+      },
+      "errors": []
+    },
+    {
+      "name": "ballistic-exception",
+      "frames": [
+        {
+          "metadata_valid": true,
+          "view": "enhanced",
+          "build_serial": 1,
+          "game_frame": 101,
+          "requested": 1,
+          "effective": 1,
+          "integrity_flags": 0,
+          "framebuffer_hash": "aabb",
+          "separated_valid": true,
+          "separated_status": 12,
+          "separated_mismatch_pixels": 0,
+          "separated_hash": "ccdd",
+          "projection_camera": [
+            1,
+            2,
+            3
+          ],
+          "picker_topdown": true,
+          "picker_flag": 0,
+          "light": [
+            20,
+            40
+          ],
+          "shadow_opacity_pct": 50,
+          "shadow_softness_pct": 25,
+          "emitted_oam_count": 1,
+          "claimed_oam_count": 1,
+          "synthetic_part_count": 0,
+          "synthetic_part_overflow_count": 0,
+          "world_record_occupancy": 1,
+          "effect_visible_count": 1,
+          "effect_metadata_valid": true,
+          "effect_overflow_count": 0,
+          "atlas_valid": true,
+          "atlas_size": [
+            64,
+            64
+          ],
+          "atlas_used": [
+            8,
+            8
+          ],
+          "source_count": 1,
+          "object_count": 1,
+          "effect_count": 1,
+          "world_oam_count": 1,
+          "world_oam_first": 0,
+          "sources": [
+            {
+              "tier": 1,
+              "type": 3585,
+              "record": 3840,
+              "composition": 59344,
+              "x": 20,
+              "y": 30,
+              "oam_first": 0,
+              "oam_count": 1,
+              "fragment_first": 0,
+              "fragment_count": 1,
+              "obj_palette_mask": 1
+            }
+          ],
+          "objects": [
+            {
+              "tier": 1,
+              "record": 3840,
+              "composition": 59344,
+              "source_index": 0,
+              "priority": 2,
+              "atlas_valid": true,
+              "atlas": [
+                0,
+                0,
+                8,
+                8
+              ],
+              "local_bounds": [
+                0,
+                0,
+                8,
+                8
+              ],
+              "oam_first": 0,
+              "oam_count": 1,
+              "height_class_name": "flying",
+              "classified_height": 12,
+              "virtual_height": 0,
+              "traits": 0,
+              "casts_shadow": true
+            }
+          ],
+          "effects": [
+            {
+              "kind": 7,
+              "kind_name": "volcano_fireball",
+              "phase_name": "active",
+              "color_name": "blue",
+              "record": 3840,
+              "composition": 59344,
+              "source_index": 0,
+              "world": [
+                40,
+                20
+              ],
+              "geometry": {
+                "kind_name": "point",
+                "space_name": "record_local",
+                "point": [
+                  0,
+                  0,
+                  0
+                ]
+              },
+              "generation": 1,
+              "flags": 1,
+              "age_ticks": 0,
+              "phase_ticks": 0,
+              "pulse_generation": 0,
+              "pulse_ticks": 0
+            }
+          ]
+        },
+        {
+          "metadata_valid": true,
+          "view": "enhanced",
+          "build_serial": 2,
+          "game_frame": 102,
+          "requested": 1,
+          "effective": 1,
+          "integrity_flags": 0,
+          "framebuffer_hash": "aabb",
+          "separated_valid": true,
+          "separated_status": 12,
+          "separated_mismatch_pixels": 0,
+          "separated_hash": "ccdd",
+          "projection_camera": [
+            1,
+            2,
+            3
+          ],
+          "picker_topdown": true,
+          "picker_flag": 0,
+          "light": [
+            20,
+            40
+          ],
+          "shadow_opacity_pct": 50,
+          "shadow_softness_pct": 25,
+          "emitted_oam_count": 1,
+          "claimed_oam_count": 1,
+          "synthetic_part_count": 0,
+          "synthetic_part_overflow_count": 0,
+          "world_record_occupancy": 1,
+          "effect_visible_count": 1,
+          "effect_metadata_valid": true,
+          "effect_overflow_count": 0,
+          "atlas_valid": true,
+          "atlas_size": [
+            64,
+            64
+          ],
+          "atlas_used": [
+            8,
+            8
+          ],
+          "source_count": 1,
+          "object_count": 1,
+          "effect_count": 1,
+          "world_oam_count": 1,
+          "world_oam_first": 0,
+          "sources": [
+            {
+              "tier": 1,
+              "type": 3585,
+              "record": 3840,
+              "composition": 59344,
+              "x": 20,
+              "y": 30,
+              "oam_first": 0,
+              "oam_count": 1,
+              "fragment_first": 0,
+              "fragment_count": 1,
+              "obj_palette_mask": 1
+            }
+          ],
+          "objects": [
+            {
+              "tier": 1,
+              "record": 3840,
+              "composition": 59344,
+              "source_index": 0,
+              "priority": 2,
+              "atlas_valid": true,
+              "atlas": [
+                0,
+                0,
+                8,
+                8
+              ],
+              "local_bounds": [
+                0,
+                0,
+                8,
+                8
+              ],
+              "oam_first": 0,
+              "oam_count": 1,
+              "height_class_name": "flying",
+              "classified_height": 12,
+              "virtual_height": 40,
+              "traits": 0,
+              "casts_shadow": true
+            }
+          ],
+          "effects": [
+            {
+              "kind": 7,
+              "kind_name": "volcano_fireball",
+              "phase_name": "active",
+              "color_name": "blue",
+              "record": 3840,
+              "composition": 59344,
+              "source_index": 0,
+              "world": [
+                40,
+                20
+              ],
+              "geometry": {
+                "kind_name": "point",
+                "space_name": "record_local",
+                "point": [
+                  0,
+                  0,
+                  0
+                ]
+              },
+              "generation": 1,
+              "flags": 1,
+              "age_ticks": 1,
+              "phase_ticks": 1,
+              "pulse_generation": 0,
+              "pulse_ticks": 0
+            }
+          ]
+        }
+      ],
+      "allowed": [],
+      "summary": {
+        "frame_count": 2,
+        "valid_frame_count": 2,
+        "invalid_frame_count": 0,
+        "picker_frame_count": 0,
+        "fallback_frame_count": 0,
+        "first_build_serial": 1,
+        "last_build_serial": 2,
+        "requested": [
+          1
+        ],
+        "effective": [
+          1
+        ],
+        "integrity_flags": [
+          0
+        ],
+        "priority_bands": [
+          2
+        ],
+        "max_source_count": 1,
+        "max_object_count": 1,
+        "max_emitted_oam_count": 1,
+        "max_synthetic_part_count": 0,
+        "max_world_record_occupancy": 1,
+        "synthetic_part_overflow_count_total": 0,
+        "synthetic_part_overflow_count_max": 0,
+        "effect_frame_count": 2,
+        "visible_effect_frame_count": 2,
+        "visible_effect_instance_count": 2,
+        "max_effect_count": 1,
+        "effect_metadata_invalid_frame_count": 0,
+        "effect_overflow_count_total": 0,
+        "effect_overflow_count_max": 0,
+        "effect_kind_counts": {
+          "volcano_fireball": 2
+        },
+        "effect_phase_counts": {
+          "volcano_fireball": {
+            "active": 2
+          }
+        },
+        "effect_color_counts": {
+          "volcano_fireball": {
+            "blue": 2
+          }
+        },
+        "effect_generation_counts": {
+          "volcano_fireball": 1
+        },
+        "effect_compositions": {
+          "volcano_fireball": [
+            "$E7D0"
+          ]
+        },
+        "atlas_valid_frame_count": 2,
+        "atlas_valid_object_count": 2,
+        "atlas_invalid_object_count": 0,
+        "max_atlas_used_width": 8,
+        "max_atlas_used_height": 8,
+        "unique_framebuffer_hashes": 1,
+        "separated_valid_frame_count": 2,
+        "separated_ready_frame_count": 2,
+        "separated_statuses": [
+          12
+        ],
+        "separated_status_counts": {
+          "ready": 2
+        },
+        "height_class_counts": {
+          "flying": 2
+        },
+        "max_virtual_height": 40,
+        "max_classified_height": 12,
+        "lifted_object_count": 1,
+        "height_ramp_step_count": 0,
+        "height_slew_violation_count": 0,
+        "ballistic_effect_instance_count": 2,
+        "ballistic_object_instance_count": 2,
+        "shadow_caster_count": 2,
+        "shadow_caster_lifted_count": 1,
+        "shadow_opacity_values": [
+          50
+        ],
+        "shadow_softness_values": [
+          25
+        ],
+        "light_values": [
+          [
+            20,
+            40
+          ]
+        ],
+        "picker_topdown_build": true,
+        "picker_flag_frame_count": 0,
+        "picker_flag_topdown_frame_count": 0,
+        "picker_flag_enhanced_frame_count": 0,
+        "picker_flag_map_plane_frame_count": 0,
+        "picker_exit_frames": [],
+        "separated_mismatch_pixels_total": 0,
+        "separated_mismatch_pixels_max": 0,
+        "unique_separated_hashes": 1,
+        "projection_cameras": [
+          [
+            1,
+            2,
+            3
+          ]
+        ],
+        "accounting_error_count": 0
+      },
+      "errors": []
+    }
+  ]
+}
