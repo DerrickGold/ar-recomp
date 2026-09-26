@@ -62,15 +62,18 @@ RecompReturn ActRaiserRecovery_Cycle(CpuState *cpu, const ArRegionalRecoverySnap
   if (snapshot->cycle_sp) {
     A16(cpu, cpu_read16(cpu, 0, 0x0284));
     cpu->X = cpu->A;
-    Width(cpu, true); A8(cpu, 10);
+    Width(cpu, true);
+    A8(cpu, 10);
     CALL(bank_03_AFBD_M1X0, 0x827c, false, 0x7f);
     cpu_write8(cpu, 0, 0x0b05, (uint8_t)cpu->A);
     Width(cpu, false);
   }
   if (!snapshot->angel_calls) {
     A16(cpu, cpu_read16(cpu, 0, 0x0287));
-    A16(cpu, cpu->A & 0xff); cpu->X = cpu->A;
-    Width(cpu, true); A8(cpu, 4);
+    A16(cpu, cpu->A & 0xff);
+    cpu->X = cpu->A;
+    Width(cpu, true);
+    A8(cpu, 4);
     CALL(bank_03_AFBD_M1X0, 0x8291, false, 0x7f);
     cpu_write8(cpu, 0, 0x0b04, (uint8_t)cpu->A);
     Width(cpu, false);
@@ -81,28 +84,33 @@ RecompReturn ActRaiserRecovery_Cycle(CpuState *cpu, const ArRegionalRecoverySnap
 RecompReturn ActRaiserRecovery_Drain(CpuState *cpu, const ArRegionalRecoverySnapshot *snapshot) {
   if (!ActRaiserRecovery_DrainEntry(cpu) || !Valid(snapshot))
     ActRaiserHleFatal("Invalid recovery drain entry");
-  cpu_mirrors_to_p(cpu); Width(cpu, true);
+  cpu_mirrors_to_p(cpu);
+  Width(cpu, true);
   RecompReturn result;
   if (!snapshot->angel_calls) {
-    A8(cpu, cpu_read8(cpu, 0, 0x88)); A8(cpu, (uint8_t)cpu->A & 15);
+    A8(cpu, cpu_read8(cpu, 0, 0x88));
+    A8(cpu, (uint8_t)cpu->A & 15);
     if (cpu->_flag_Z) {
       A8(cpu, cpu_read8(cpu, 1, 0x0b04));
       if (!cpu->_flag_Z) {
         const uint8_t next = (uint8_t)(cpu->A - 1);
         cpu_write8(cpu, 1, 0x0b04, next);
-        ActRaiserCpuHle_SetNegativeZero8(cpu, next); A8(cpu, 1);
+        ActRaiserCpuHle_SetNegativeZero8(cpu, next);
+        A8(cpu, 1);
         CALL(bank_03_B482_M1X0, 0xb26c, true, 1);
       }
     }
   }
   if (snapshot->cycle_sp) {
-    A8(cpu, cpu_read8(cpu, 0, 0x88)); A8(cpu, (uint8_t)cpu->A & 3);
+    A8(cpu, cpu_read8(cpu, 0, 0x88));
+    A8(cpu, (uint8_t)cpu->A & 3);
     if (cpu->_flag_Z) {
       A8(cpu, cpu_read8(cpu, 1, 0x0b05));
       if (!cpu->_flag_Z) {
         const uint8_t next = (uint8_t)(cpu->A - 1);
         cpu_write8(cpu, 1, 0x0b05, next);
-        ActRaiserCpuHle_SetNegativeZero8(cpu, next); A8(cpu, 1);
+        ActRaiserCpuHle_SetNegativeZero8(cpu, next);
+        A8(cpu, 1);
         CALL(bank_03_B456_M1X0, 0xb280, true, 1);
       }
     }
@@ -111,19 +119,25 @@ RecompReturn ActRaiserRecovery_Drain(CpuState *cpu, const ArRegionalRecoverySnap
 }
 #undef CALL
 
-void ActRaiserRecovery_Motion(CpuState *cpu, const ArRegionalRecoverySnapshot *snapshot, bool stopped) {
+void ActRaiserRecovery_Motion(CpuState *cpu, const ArRegionalRecoverySnapshot *snapshot,
+                              bool stopped) {
   if (!ActRaiserRecovery_MotionEntry(cpu) || !Valid(snapshot))
     ActRaiserHleFatal("Invalid angel recovery entry");
-  cpu_mirrors_to_p(cpu); Width(cpu, false);
+  cpu_mirrors_to_p(cpu);
+  Width(cpu, false);
   if (stopped) {
-    cpu_write16(cpu, 1, 0x0afe, 0); cpu_write16(cpu, 1, 0x0b00, 0);
+    cpu_write16(cpu, 1, 0x0afe, 0);
+    cpu_write16(cpu, 1, 0x0b00, 0);
   }
   if (!snapshot->angel_calls) return;
-  A16(cpu, cpu_read16(cpu, 1, 0x0af6)); A16(cpu, cpu->A & 15); Compare16(cpu, 4);
+  A16(cpu, cpu_read16(cpu, 1, 0x0af6));
+  A16(cpu, cpu->A & 15);
+  Compare16(cpu, 4);
   if (cpu->_flag_Z) return;
   /* The JP word overlaps the independent US SP queue. Its bounded phase fits
    * one byte; never read/write the adjacent SP byte in a mixed policy. */
-  A16(cpu, cpu_read8(cpu, 1, 0x0b04)); A16(cpu, cpu->A + 1);
+  A16(cpu, cpu_read8(cpu, 1, 0x0b04));
+  A16(cpu, cpu->A + 1);
   Compare16(cpu, snapshot->angel_calls);
   if (cpu->_flag_C) {
     Width(cpu, true);
@@ -135,9 +149,11 @@ void ActRaiserRecovery_Motion(CpuState *cpu, const ArRegionalRecoverySnapshot *s
     if (!cpu->_flag_Z) {
       /* Preserve the native equality test, including odd imported/debug HP. */
       const uint8_t hp = (uint8_t)(cpu->A + 1);
-      cpu_write8(cpu, 1, 0x0286, hp); ActRaiserCpuHle_SetNegativeZero8(cpu, hp);
+      cpu_write8(cpu, 1, 0x0286, hp);
+      ActRaiserCpuHle_SetNegativeZero8(cpu, hp);
     }
-    Width(cpu, false); A16(cpu, 0);
+    Width(cpu, false);
+    A16(cpu, 0);
   }
   cpu_write8(cpu, 1, 0x0b04, (uint8_t)cpu->A);
 }

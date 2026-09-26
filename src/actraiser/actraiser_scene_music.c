@@ -19,7 +19,8 @@ RecompReturn ActRaiser_SceneMusic(CpuState *cpu) {
   if(ArRegionalMusic_UseFillmore(profile,cpu_read16(cpu,0,0x18)) &&
       cpu_read16(cpu,0,0xa5)==0xf69f && cpu_read8(cpu,0,0xa7)==0x0e &&
       cpu_read8(cpu,0,0x8c)==1 && cpu_read8(cpu,0,0x8d)==0) {
-    cpu_write16(cpu,0,0xa5,0x947f);cpu_write8(cpu,0,0xa7,0x18);
+    cpu_write16(cpu, 0, 0xa5, 0x947f);
+    cpu_write8(cpu, 0, 0xa7, 0x18);
   }
   /* LDX $A5 only. Native comparison suppresses redundant uploads; the native
    * continuation owns SPC handshakes, resident cache and playback command. */

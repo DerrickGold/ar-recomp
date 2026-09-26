@@ -7,17 +7,21 @@ static bool Shape(CpuState *cpu,unsigned state) {
   if(!cpu || cpu->PB || cpu->DB || cpu->D || cpu->m_flag || cpu->x_flag ||
       cpu->emulation || cpu->_flag_D || (cpu->P&CPU_P_D))return false;
   const unsigned x=cpu->X;
-  return x>=kActRaiserWram_ActionObjectTable &&
-      x<kActRaiserWram_ActionObjectTable+kActRaiserActionObjectCount*kActRaiserActionObjectStride &&
-      !((x-kActRaiserWram_ActionObjectTable)%kActRaiserActionObjectStride) &&
-      cpu_read8(cpu,0,kActRaiserWram_MapGroup)==3 && cpu_read16(cpu,0,x+0x32)==0xc3a5 &&
-      cpu_read16(cpu,0,x+0x16)==0x4000 && cpu_read8(cpu,0,x+0x18)==0x7e && cpu_read16(cpu,0,x+0x1a)==state;
+  return x >= kActRaiserWram_ActionObjectTable &&
+      x < kActRaiserWram_ActionObjectTable +
+          kActRaiserActionObjectCount * kActRaiserActionObjectStride &&
+      !((x - kActRaiserWram_ActionObjectTable) % kActRaiserActionObjectStride) &&
+      cpu_read8(cpu, 0, kActRaiserWram_MapGroup) == 3 && cpu_read16(cpu, 0, x + 0x32) == 0xc3a5 &&
+      cpu_read16(cpu, 0, x + 0x16) == 0x4000 && cpu_read8(cpu, 0, x + 0x18) == 0x7e &&
+      cpu_read16(cpu, 0, x + 0x1a) == state;
 }
 static bool Japanese(unsigned rule) {
-  const uint8_t bits=ActRaiserRegional_FireSnapshot();return bits<=15 && (bits&(1u<<rule));
+  const uint8_t bits = ActRaiserRegional_FireSnapshot();
+  return bits <= 15 && (bits & (1u << rule));
 }
 static RecompReturn Tail(uint32_t next,uint32_t from) {
-  if(!cpu_hle_tailcall_request(next,from))ActRaiserHleFatal("Fire-enemy prefix has no native continuation");
+  if (!cpu_hle_tailcall_request(next, from))
+    ActRaiserHleFatal("Fire-enemy prefix has no native continuation");
   return RECOMP_RETURN_TAILCALL;
 }
 static void Compare(CpuState *cpu,unsigned value);
@@ -54,9 +58,11 @@ static void Compare(CpuState *cpu,unsigned value) {
 }
 RecompReturn ActRaiser_FireChild(CpuState *cpu) {
   if(!ActRaiser_FireChildEntry(cpu))ActRaiserHleFatal("Unsupported fire-enemy child threshold");
-  Compare(cpu,128);return Tail(0x00c408,0x00c405);
+  Compare(cpu, 128);
+  return Tail(0x00c408, 0x00c405);
 }
 RecompReturn ActRaiser_FireBounce(CpuState *cpu) {
   if(!ActRaiser_FireBounceEntry(cpu))ActRaiserHleFatal("Unsupported fire-enemy bounce threshold");
-  Compare(cpu,210);return Tail(0x00c40d,0x00c40a);
+  Compare(cpu, 210);
+  return Tail(0x00c40d, 0x00c40a);
 }

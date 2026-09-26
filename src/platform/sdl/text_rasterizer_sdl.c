@@ -752,10 +752,13 @@ static RasterAttemptResult RasterizeAtSize(
       DestroyRasterAttempt(attempt);
       return kRasterAttempt_Error;
     }
-    const ArTextBitmap ink = {.pixels=attempt->surface->pixels,
-        .width=attempt->surface->w, .height=attempt->surface->h,
-        .pitch_bytes=attempt->surface->pitch, .format=kArRenderPixelFormat_Rgba8888,
-        .reveal_clusters=attempt->reveal_clusters, .reveal_cluster_count=attempt->reveal_cluster_count};
+    const ArTextBitmap ink = { .pixels = attempt->surface->pixels,
+                               .width = attempt->surface->w,
+                               .height = attempt->surface->h,
+                               .pitch_bytes = attempt->surface->pitch,
+                               .format = kArRenderPixelFormat_Rgba8888,
+                               .reveal_clusters = attempt->reveal_clusters,
+                               .reveal_cluster_count = attempt->reveal_cluster_count };
     attempt->pixel_owners=ArTextBitmap_BuildOwnership(&ink);
     if (!attempt->pixel_owners) {
       SetError(error, error_capacity, "cannot allocate text effect ownership");
@@ -867,7 +870,8 @@ static RasterAttemptResult RasterizeAtSize(
   }
 
   if (attempt->reveal_clusters) {
-    uint32_t *remap = attempt->pixel_owners ? calloc(attempt->reveal_cluster_count+1, sizeof(*remap)) : NULL;
+    uint32_t *remap =
+        attempt->pixel_owners ? calloc(attempt->reveal_cluster_count + 1, sizeof(*remap)) : NULL;
     if (attempt->pixel_owners && !remap) {
       SetError(error, error_capacity, "cannot crop text effect ownership");
       DestroyRasterAttempt(attempt);

@@ -30,7 +30,8 @@ typedef struct ActRaiserLzssReader {
 static ActRaiserLzssObserver s_observer;
 static void *s_observer_context;
 void ActRaiserLzss_SetObserver(ActRaiserLzssObserver observer,void *context) {
-  s_observer=observer;s_observer_context=observer?context:NULL;
+  s_observer = observer;
+  s_observer_context = observer ? context : NULL;
 }
 
 static uint16_t ReadDp16(CpuState *cpu, uint16_t offset) {

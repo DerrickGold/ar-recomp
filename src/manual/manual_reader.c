@@ -282,13 +282,17 @@ static void ApplyIntent(ManualIntent intent, ArRenderRectI viewport) {
       ManualView_Zoom(&s_reader.view, 0.0001f, pw, ph, vw, vh);
       break;
     case kManualIntent_PanLeft:
-      ManualView_Pan(&s_reader.view, -pan_step, 0.0f, pw, ph, vw, vh); break;
+      ManualView_Pan(&s_reader.view, -pan_step, 0.0f, pw, ph, vw, vh);
+      break;
     case kManualIntent_PanRight:
-      ManualView_Pan(&s_reader.view, pan_step, 0.0f, pw, ph, vw, vh); break;
+      ManualView_Pan(&s_reader.view, pan_step, 0.0f, pw, ph, vw, vh);
+      break;
     case kManualIntent_PanUp:
-      ManualView_Pan(&s_reader.view, 0.0f, -pan_step, pw, ph, vw, vh); break;
+      ManualView_Pan(&s_reader.view, 0.0f, -pan_step, pw, ph, vw, vh);
+      break;
     case kManualIntent_PanDown:
-      ManualView_Pan(&s_reader.view, 0.0f, pan_step, pw, ph, vw, vh); break;
+      ManualView_Pan(&s_reader.view, 0.0f, pan_step, pw, ph, vw, vh);
+      break;
     case kManualIntent_Close: ManualReader_Close(); break;
     case kManualIntent_None: break;
   }

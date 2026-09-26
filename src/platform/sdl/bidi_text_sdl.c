@@ -165,7 +165,8 @@ static bool ShapingByte(const LayoutSource *source, size_t offset) {
   if ((uint8_t)source->text[offset] < 0x80) return true;
   size_t first = offset;
   while (first && ((uint8_t)source->text[first] & 0xc0u) == 0x80u) --first;
-  uint32_t scalar; size_t next;
+  uint32_t scalar;
+  size_t next;
   if (!ArUnicode_DecodeScalar(source->text, source->bytes, first, &scalar, &next)) return true;
   /* Explicit embedding/isolate controls affect bidi, not glyph layout. Keep
    * joining controls (ZWJ/ZWNJ) inside the shaped text. Applying the same rule
@@ -532,25 +533,29 @@ static bool VirtualSource(ArSdlBidiLayout *layout, const char *text,
     while (span < request->bidi_span_count && request->bidi_spans[span].end <= absolute) {
       if (open) {
         while (nested) { VirtualControl(layout, 0xa9, i); --nested; }
-        VirtualControl(layout, 0xa9, i); open = false;
+        VirtualControl(layout, 0xa9, i);
+        open = false;
       }
       ++span;
     }
     const bool in_span = i < request->utf8_bytes && span < request->bidi_span_count &&
         request->bidi_spans[span].start <= absolute;
-    uint32_t scalar = 0; size_t next = i;
+    uint32_t scalar = 0;
+    size_t next = i;
     if (i < request->utf8_bytes &&
         !ArUnicode_DecodeScalar(text, request->utf8_bytes, i, &scalar, &next)) return false;
     const bool newline = LineSeparator(scalar);
     if (open && (!in_span || newline)) {
       while (nested) { VirtualControl(layout, 0xa9, i); --nested; }
-      VirtualControl(layout, 0xa9, i); open = false;
+      VirtualControl(layout, 0xa9, i);
+      open = false;
     }
     if (in_span && !newline && !open) {
       const ArTextDirection direction = request->bidi_spans[span].direction;
       const uint8_t kind = direction == kArTextDirection_LeftToRight ? 0xa6 :
           direction == kArTextDirection_RightToLeft ? 0xa7 : 0xa8;
-      VirtualControl(layout, kind, i); open = true;
+      VirtualControl(layout, kind, i);
+      open = true;
     }
     if (i == request->utf8_bytes) break;
     /* A value's unmatched PDI must not close the host-created outer isolate.
@@ -562,7 +567,8 @@ static bool VirtualSource(ArSdlBidiLayout *layout, const char *text,
     else if (open && scalar == 0x2069 && nested) --nested;
     for (size_t j = i; j < next; ++j) {
       layout->logical_offsets[layout->layout_bytes] = j;
-      layout->virtual_text[layout->layout_bytes++] = unmatched && j == next-1 ? (char)0xa0 : text[j];
+      layout->virtual_text[layout->layout_bytes++] =
+          unmatched && j == next - 1 ? (char)0xa0 : text[j];
       layout->logical_offsets[layout->layout_bytes] = j + 1;
     }
     i = next;

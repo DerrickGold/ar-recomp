@@ -22,12 +22,15 @@ RecompReturn ActRaiserFishing_Prefix(CpuState *cpu, uint8_t target,
   if (!ActRaiserFishing_Entry(cpu) || !target || !continuation)
     ActRaiserHleFatal("Invalid Fillmore fishing prefix");
   cpu_mirrors_to_p(cpu);
-  cpu->P |= 0x20; cpu->m_flag = 1;
+  cpu->P |= 0x20;
+  cpu->m_flag = 1;
   RecompReturn result;
-#define CALL(leaf, caller) do { \
+#define CALL(leaf, caller) \
+  do { \
     result = ActRaiserNativeCall(cpu, leaf, 3, caller, false); \
     if (result != RECOMP_RETURN_NORMAL) goto nonlocal; \
-    if (cpu->PB != 3 || cpu->DB != 0x7f || cpu->D || cpu->emulation || !cpu->m_flag || cpu->x_flag) \
+    if (cpu->PB != 3 || cpu->DB != 0x7f || cpu->D || cpu->emulation || !cpu->m_flag || \
+        cpu->x_flag) \
       ActRaiserHleFatal("Fishing leaf returned outside its ABI"); \
   } while (0)
   A8(cpu, 25);
@@ -35,8 +38,10 @@ RecompReturn ActRaiserFishing_Prefix(CpuState *cpu, uint8_t target,
   if (cpu->_flag_Z) {
     A8(cpu, 25);
     CALL(bank_03_F4EA_M1X0, 0xe872);
-    A8(cpu, 0); cpu_write8(cpu, 0x7f, 0x916e, 0);
-    cpu->X = 0xe5f6; ActRaiserCpuHle_SetNegativeZero16(cpu, cpu->X);
+    A8(cpu, 0);
+    cpu_write8(cpu, 0x7f, 0x916e, 0);
+    cpu->X = 0xe5f6;
+    ActRaiserCpuHle_SetNegativeZero16(cpu, cpu->X);
     CALL(bank_03_CA93_M1X0, 0xe87e);
   }
   /* Native Palace initialization still restarts an unfinished expedition.
@@ -45,7 +50,8 @@ RecompReturn ActRaiserFishing_Prefix(CpuState *cpu, uint8_t target,
   const uint8_t before = cpu_read8(cpu, 0x7f, 0x916e);
   const bool reached = reconcile && before >= target;
   const uint8_t progress = reached ? before : (uint8_t)(before + 1u);
-  A8(cpu, progress); cpu_write8(cpu, 0x7f, 0x916e, progress);
+  A8(cpu, progress);
+  cpu_write8(cpu, 0x7f, 0x916e, progress);
   cpu->_flag_C = progress >= target;
   cpu->P = (cpu->P & ~1u) | cpu->_flag_C;
   ActRaiserCpuHle_SetNegativeZero8(cpu, (uint8_t)(progress - target));

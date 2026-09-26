@@ -23,12 +23,15 @@ bool ActRaiser_CastHoldSpawnEntry(CpuState *cpu) {
       !cpu_read16(cpu,0,x+0x2c) && !cpu_read16(cpu,0,x+0x2e);
 }
 RecompReturn ActRaiser_CastHoldSpawn(CpuState *cpu) {
-  if(!ActRaiser_CastHoldSpawnEntry(cpu))ActRaiserHleFatal("Unsupported linked-prop cast-hold initialization");
+  if (!ActRaiser_CastHoldSpawnEntry(cpu))
+    ActRaiserHleFatal("Unsupported linked-prop cast-hold initialization");
   cpu_write16(cpu,0,cpu->X+0x30,0x8032);
   /* Y owns this fresh descriptor; +32 can still belong to a reused slot.
    * Native 8943 uses F9 to hold actors bearing bit8000, then naturally resumes
    * their original linked-position handler. Preserve the other flag bits. */
-  cpu->A=0x8032;ActRaiserCpuHle_SetNegativeZero16(cpu,cpu->A);
-  if(!cpu_hle_tailcall_request(0x00966f,0x00966c))ActRaiserHleFatal("Linked prop has no native continuation");
+  cpu->A = 0x8032;
+  ActRaiserCpuHle_SetNegativeZero16(cpu, cpu->A);
+  if (!cpu_hle_tailcall_request(0x00966f, 0x00966c))
+    ActRaiserHleFatal("Linked prop has no native continuation");
   return RECOMP_RETURN_TAILCALL;
 }

@@ -46,7 +46,8 @@ bool ArLanguagePackCatalog_Add(ArLanguagePackCatalog *catalog,
       metadata.source_profile != kArLanguageSourceProfile_Us ||
       strcmp(metadata.package_id, directory_id) ||
       SamePortableId(metadata.package_id, "native-us")) {
-    if (error) snprintf(error->message, sizeof(error->message), "not a matching US runtime package");
+    if (error)
+      snprintf(error->message, sizeof(error->message), "not a matching US runtime package");
     return false;
   }
   for (size_t i = 0; i < catalog->conflict_count; ++i)
@@ -132,7 +133,8 @@ bool ArLanguagePackCatalog_ReadArchiveIndex(ArLanguagePackCatalog *catalog,
     char *token = strchr(id, '\t');
     if (token) *token++ = 0;
     if (!id[0] || strlen(id) >= kArLanguagePackageIdCapacity ||
-        strspn(id, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-") != strlen(id))
+        strspn(id, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-") !=
+            strlen(id))
       goto fail;
     if (!strcmp(line, "conflict") && !token) {
       ExcludeId(candidate, id);

@@ -17,7 +17,9 @@ typedef struct SettingsOverlayRegionalHooks {
   ActRaiserRegionalEditResult (*setting)(const ActRaiserRegionalRulesView *view,
       ActRaiserRegionalSettingGroup group, ArRegionalSource source);
   ActRaiserRegionalEditResult (*preview_setting)(const ActRaiserRegionalRulesView *view,
-      ActRaiserRegionalSettingGroup group, ArRegionalSource source, ActRaiserRegionalEditImpact *out);
+                                                 ActRaiserRegionalSettingGroup group,
+                                                 ArRegionalSource source,
+                                                 ActRaiserRegionalEditImpact *out);
   ActRaiserRegionalEditResult (*preview)(const ActRaiserRegionalRulesView *view,
                                          ArRegionalProfileGroup group, ArRegionalSource source,
                                          ActRaiserRegionalEditImpact *out);

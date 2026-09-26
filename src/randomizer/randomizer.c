@@ -101,27 +101,41 @@ static RandomizerConfig g_campaign_config, g_title_config;
 bool Randomizer_CaptureConfig(RandomizerConfig *out) {
   if(!out)return false;
   /* Validate before narrowing settings to the persisted representation. */
-  if(g_settings.rando_seed<0 || g_settings.rando_seed>999999999 ||
-      g_settings.rando_enemy_hp<10 || g_settings.rando_enemy_hp>1000 ||
-      g_settings.rando_enemy_atk<10 || g_settings.rando_enemy_atk>1000 ||
-      (unsigned)g_settings.rando_enemy_types>1 || (unsigned)g_settings.rando_enemy_scope>1 ||
-      (unsigned)g_settings.rando_statue_drops>2 || (unsigned)g_settings.rando_statue_spots>1 ||
-      (unsigned)g_settings.rando_lair_spots>1 || (unsigned)g_settings.rando_lair_types>2)return false;
-  *out=(RandomizerConfig){.generator=kRandomizerGenerator,.enabled=g_settings.rando_enable,
-      .seed=g_settings.rando_seed,.hp_percent=g_settings.rando_enemy_hp,.attack_percent=g_settings.rando_enemy_atk,
-      .enemy_types=g_settings.rando_enemy_types,.enemy_scope=g_settings.rando_enemy_scope,
-      .statue_drops=g_settings.rando_statue_drops,.statue_spots=g_settings.rando_statue_spots,
-      .lair_spots=g_settings.rando_lair_spots,.lair_types=g_settings.rando_lair_types,
-      .regional_action=g_settings.rando_regional_action,.regional_towns=g_settings.rando_regional_towns};
+  if (g_settings.rando_seed < 0 || g_settings.rando_seed > 999999999 ||
+      g_settings.rando_enemy_hp < 10 || g_settings.rando_enemy_hp > 1000 ||
+      g_settings.rando_enemy_atk < 10 || g_settings.rando_enemy_atk > 1000 ||
+      (unsigned)g_settings.rando_enemy_types > 1 || (unsigned)g_settings.rando_enemy_scope > 1 ||
+      (unsigned)g_settings.rando_statue_drops > 2 || (unsigned)g_settings.rando_statue_spots > 1 ||
+      (unsigned)g_settings.rando_lair_spots > 1 || (unsigned)g_settings.rando_lair_types > 2)
+    return false;
+  *out = (RandomizerConfig){ .generator = kRandomizerGenerator,
+                             .enabled = g_settings.rando_enable,
+                             .seed = g_settings.rando_seed,
+                             .hp_percent = g_settings.rando_enemy_hp,
+                             .attack_percent = g_settings.rando_enemy_atk,
+                             .enemy_types = g_settings.rando_enemy_types,
+                             .enemy_scope = g_settings.rando_enemy_scope,
+                             .statue_drops = g_settings.rando_statue_drops,
+                             .statue_spots = g_settings.rando_statue_spots,
+                             .lair_spots = g_settings.rando_lair_spots,
+                             .lair_types = g_settings.rando_lair_types,
+                             .regional_action = g_settings.rando_regional_action,
+                             .regional_towns = g_settings.rando_regional_towns };
   return true;
 }
 static void ShowConfig(const RandomizerConfig *c) {
-  g_settings.rando_enable=c->enabled;g_settings.rando_seed=c->seed;
-  g_settings.rando_enemy_hp=c->hp_percent;g_settings.rando_enemy_atk=c->attack_percent;
-  g_settings.rando_enemy_types=c->enemy_types;g_settings.rando_enemy_scope=c->enemy_scope;
-  g_settings.rando_statue_drops=c->statue_drops;g_settings.rando_statue_spots=c->statue_spots;
-  g_settings.rando_lair_spots=c->lair_spots;g_settings.rando_lair_types=c->lair_types;
-  g_settings.rando_regional_action=c->regional_action;g_settings.rando_regional_towns=c->regional_towns;
+  g_settings.rando_enable = c->enabled;
+  g_settings.rando_seed = c->seed;
+  g_settings.rando_enemy_hp = c->hp_percent;
+  g_settings.rando_enemy_atk = c->attack_percent;
+  g_settings.rando_enemy_types = c->enemy_types;
+  g_settings.rando_enemy_scope = c->enemy_scope;
+  g_settings.rando_statue_drops = c->statue_drops;
+  g_settings.rando_statue_spots = c->statue_spots;
+  g_settings.rando_lair_spots = c->lair_spots;
+  g_settings.rando_lair_types = c->lair_types;
+  g_settings.rando_regional_action = c->regional_action;
+  g_settings.rando_regional_towns = c->regional_towns;
 }
 RandomizerConfig Randomizer_CurrentConfig(void) {
   RandomizerConfig c=RandomizerConfig_Default();
@@ -135,11 +149,15 @@ bool Randomizer_BindCampaign(const RandomizerConfig *config) {
   if(!g_campaign_bound)g_title_config=Randomizer_CurrentConfig();
   g_campaign_config=config->generator?*config:RandomizerConfig_Default();
   g_campaign_bound=true;
-  ShowConfig(&g_campaign_config);Randomizer_Apply();return true;
+  ShowConfig(&g_campaign_config);
+  Randomizer_Apply();
+  return true;
 }
 void Randomizer_ReleaseCampaign(void) {
   if(!g_campaign_bound)return;
-  g_campaign_bound=false;ShowConfig(&g_title_config);Randomizer_Apply();
+  g_campaign_bound = false;
+  ShowConfig(&g_title_config);
+  Randomizer_Apply();
 }
 
 bool Randomizer_IsAvailable(void) { return g_rom_pristine != NULL; }
@@ -213,7 +231,9 @@ static uint32 RngBelow(Rng *r, uint32 n) {
 static void RngShuffle(Rng *r, int *idx, int count) {
   for (int i = count - 1; i > 0; i--) {
     int j = (int)RngBelow(r, (uint32)(i + 1));
-    int t = idx[i]; idx[i] = idx[j]; idx[j] = t;
+    int t = idx[i];
+    idx[i] = idx[j];
+    idx[j] = t;
   }
 }
 
@@ -783,8 +803,11 @@ uint32_t Randomizer_NewSeed(void) {
   return RngNext(&r) % kGeneratedSeedModulo;
 }
 bool Randomizer_StageTitleConfig(const RandomizerConfig *config) {
-  if(g_campaign_bound || !config || !config->generator || !RandomizerConfig_Valid(config))return false;
-  ShowConfig(config);Randomizer_Apply();return true;
+  if (g_campaign_bound || !config || !config->generator || !RandomizerConfig_Valid(config))
+    return false;
+  ShowConfig(config);
+  Randomizer_Apply();
+  return true;
 }
 void Randomizer_Reroll(void) {
   if(g_campaign_bound)return;

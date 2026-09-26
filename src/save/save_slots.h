@@ -4,7 +4,11 @@
 #include "save/save_system.h"
 
 enum { kSaveSlotCount = 10, kSaveSlotPathCapacity = 512, kSaveSlotDraftCapacity = 32768 };
-typedef enum SaveSlotState { kSaveSlot_Empty, kSaveSlot_Ready, kSaveSlot_Unavailable } SaveSlotState;
+typedef enum SaveSlotState {
+  kSaveSlot_Empty,
+  kSaveSlot_Ready,
+  kSaveSlot_Unavailable
+} SaveSlotState;
 typedef struct SaveSlotRecord {
   SaveBackend backend;
   bool ever_saved, prepared, checkpoint_required;
@@ -32,13 +36,16 @@ typedef struct SaveSlots {
   void *lock;
 } SaveSlots;
 
-bool SaveSlots_Open(SaveSlots *slots, const char *root, SaveBackend legacy_backend, SaveError *error);
+bool SaveSlots_Open(SaveSlots *slots, const char *root, SaveBackend legacy_backend,
+                    SaveError *error);
 /* Persist evidence that a companion exists, including metadata-only upgrades. */
 bool SaveSlots_ObserveCheckpoints(SaveSlots *slots,SaveError *error);
 void SaveSlots_Close(SaveSlots *slots);
-bool SaveSlots_Paths(const SaveSlots *slots, unsigned slot, char *native, char *ini, size_t capacity);
+bool SaveSlots_Paths(const SaveSlots *slots, unsigned slot, char *native, char *ini,
+                     size_t capacity);
 bool SaveSlots_Inspect(const SaveSlots *slots, unsigned slot, SaveSlotInspection *out);
-bool SaveSlots_ReadDraft(const SaveSlots *slots, unsigned slot, void *out, size_t capacity, size_t *size, SaveError *error);
+bool SaveSlots_ReadDraft(const SaveSlots *slots, unsigned slot, void *out, size_t capacity,
+                         size_t *size, SaveError *error);
 /* Update the active empty slot's setup without scheduling a restart. */
 bool SaveSlots_UpdateDraft(SaveSlots *slots, const void *draft, size_t size, SaveError *error);
 /* A prepared format does not redirect the live source writer. It becomes the

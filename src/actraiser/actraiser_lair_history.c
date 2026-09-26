@@ -70,10 +70,12 @@ bool ActRaiserLairHistory_Begin(ArRegionalLairHistory *history, CpuState *cpu,
   const unsigned town_word=cpu_read16(cpu,0x7f,0x7bfb);
   const unsigned town=event==kActRaiserLairEvent_Score ?
       (unsigned)cpu_read8(cpu,0,0x0341)-1 : town_word/2;
-  if (town>=6 || (event!=kActRaiserLairEvent_Score && (town_word & 1)) ||
-      !(history->initialized_towns & (1u<<town)) || history->diverged_towns & (1u<<town)) return false;
+  if (town >= 6 || (event != kActRaiserLairEvent_Score && (town_word & 1)) ||
+      !(history->initialized_towns & (1u << town)) || history->diverged_towns & (1u << town))
+    return false;
   if (!Matches(history,cpu,policy,town)) {
-    ArRegionalLairHistory_MarkDiverged(history,town); return false;
+    ArRegionalLairHistory_MarkDiverged(history, town);
+    return false;
   }
   ActRaiserLairCapture next={.event=event,.policy=*policy,.town=town};
   for (unsigned n=0;n<4;++n) {
@@ -112,15 +114,18 @@ bool ActRaiserLairHistory_End(ArRegionalLairHistory *history, CpuState *cpu,
             ArRegionalLairHistory_MiracleAttempt(&next,capture->town*4+n);
       break;
     case kActRaiserLairEvent_House:
-      valid=ArRegionalLairHistory_HouseLost(&next,capture->town,capture->subtype,capture->sealed_mask);
+      valid = ArRegionalLairHistory_HouseLost(&next, capture->town, capture->subtype,
+                                              capture->sealed_mask);
       break;
     case kActRaiserLairEvent_Score:
-      valid=ArRegionalLairHistory_SettleScore(&next,capture->town,capture->bcd_score,capture->completed_acts);
+      valid = ArRegionalLairHistory_SettleScore(&next, capture->town, capture->bcd_score,
+                                                capture->completed_acts);
       break;
     default: valid=false; break;
   }
   if (!valid || !Matches(&next,cpu,&capture->policy,capture->town)) {
-    ArRegionalLairHistory_MarkDiverged(history,capture->town); return false;
+    ArRegionalLairHistory_MarkDiverged(history, capture->town);
+    return false;
   }
   *history=next;
   return true;
@@ -131,7 +136,8 @@ bool ActRaiserLairHistory_Check(ArRegionalLairHistory *history, CpuState *cpu,
   if (!cpu || !ArRegionalLairHistory_Valid(history) ||
       !ArRegionalLairAccounting_Projection(policy,&projection)) return false;
   for (unsigned town=0;town<6;++town) {
-    if (!(history->initialized_towns & (1u<<town)) || history->diverged_towns & (1u<<town)) continue;
+    if (!(history->initialized_towns & (1u << town)) || history->diverged_towns & (1u << town))
+      continue;
     if (!Matches(history,cpu,policy,town)) ArRegionalLairHistory_MarkDiverged(history,town);
   }
   return !history->diverged_towns;

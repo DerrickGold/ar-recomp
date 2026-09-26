@@ -4,13 +4,16 @@
 #include "actraiser_hle_fatal.h"
 #include "actraiser_game.h"
 
-static bool RootShape(CpuState *cpu,uint16_t original,uint16_t rematch,unsigned area,unsigned state,unsigned narrow) {
+static bool RootShape(CpuState *cpu, uint16_t original, uint16_t rematch, unsigned area,
+                      unsigned state, unsigned narrow) {
   if(!cpu || cpu->PB || cpu->DB || cpu->D || cpu->m_flag!=narrow || cpu->x_flag ||
       cpu->emulation || cpu->_flag_D || (cpu->P&CPU_P_D))return false;
   const unsigned x=cpu->X;
-  if(x<kActRaiserWram_ActionObjectTable ||
-      x>=kActRaiserWram_ActionObjectTable+kActRaiserActionObjectCount*kActRaiserActionObjectStride ||
-      (x-kActRaiserWram_ActionObjectTable)%kActRaiserActionObjectStride)return false;
+  if (x < kActRaiserWram_ActionObjectTable ||
+      x >= kActRaiserWram_ActionObjectTable +
+              kActRaiserActionObjectCount * kActRaiserActionObjectStride ||
+      (x - kActRaiserWram_ActionObjectTable) % kActRaiserActionObjectStride)
+    return false;
   const uint16_t source=cpu_read16(cpu,0,x+kActRaiserActionObject_SourceDescriptor);
   const unsigned map=cpu_read8(cpu,0,kActRaiserWram_MapGroup);
   return ((map==area && source==original) || (map==7 && source==rematch)) &&
@@ -27,7 +30,8 @@ static bool PlantGeometryProfile(CpuState *cpu,bool *projected) {
   if(cpu_read16(cpu,0x7e,0x5000)!=0x236 || cpu_read16(cpu,0x7e,0x5236)!=0x2a0)return false;
   const unsigned bottom=cpu_read8(cpu,0x7e,0x52a3);
   if(bottom!=112 && bottom!=96)return false;
-  const bool jp=bottom==96;unsigned next=0x2a0;
+  const bool jp = bottom == 96;
+  unsigned next = 0x2a0;
   for(unsigned visual=0;visual<53;++visual) {
     if(cpu_read16(cpu,0x7e,0x5236+2*visual)!=next || next+5>4073)return false;
     const unsigned at=0x5000+next,count=cpu_read8(cpu,0x7e,at+4);
@@ -39,11 +43,15 @@ static bool PlantGeometryProfile(CpuState *cpu,bool *projected) {
       if(next+5+7*allocated>4073)return false;
       for(unsigned p=0;p<allocated;++p) {
         const unsigned part=at+5+7*p;
-        if(cpu_read8(cpu,0x7e,part)!=1 ||
-            cpu_read8(cpu,0x7e,part+1)+cpu_read8(cpu,0x7e,part+2)!=48 ||
-            cpu_read8(cpu,0x7e,part+3)+cpu_read8(cpu,0x7e,part+4)!=(jp && p<retained?176:192))return false;
+        if (cpu_read8(cpu, 0x7e, part) != 1 ||
+            cpu_read8(cpu, 0x7e, part + 1) + cpu_read8(cpu, 0x7e, part + 2) != 48 ||
+            cpu_read8(cpu, 0x7e, part + 3) + cpu_read8(cpu, 0x7e, part + 4) !=
+                (jp && p < retained ? 176 : 192))
+          return false;
         if(!jp && p<retained && cpu_read8(cpu,0x7e,part+4)<16)return false;
-        if(p>=retained && (cpu_read8(cpu,0x7e,part+3)!=192 || cpu_read8(cpu,0x7e,part+4)))return false;
+        if (p >= retained &&
+            (cpu_read8(cpu, 0x7e, part + 3) != 192 || cpu_read8(cpu, 0x7e, part + 4)))
+          return false;
       }
     } else if(visual==48) {
       if(count!=1 || cpu_read16(cpu,0x7e,at)!=0x0404 ||
@@ -57,12 +65,14 @@ static bool PlantGeometryProfile(CpuState *cpu,bool *projected) {
   return true;
 }
 bool ActRaiser_PlantGeometryEntry(CpuState *cpu) {
-  const unsigned height=ArRegionalBoss_Value(ActRaiserRegional_BossSnapshot(),kArRegionalBoss_PlantGeometry);
+  const unsigned height =
+      ArRegionalBoss_Value(ActRaiserRegional_BossSnapshot(), kArRegionalBoss_PlantGeometry);
   if((height!=192 && height!=208) ||
       !RootShape(cpu,0xd974,0,5,0,0) || cpu_read16(cpu,0,0x18)!=0x0305 ||
       cpu_read16(cpu,0,cpu->X+0x3a) || cpu_read16(cpu,0,cpu->X+0x3c) ||
       cpu_read16(cpu,0,cpu->X+0x20)!=0x52a0 || cpu_read16(cpu,0,cpu->X+0x22))return false;
-  bool projected;if(!PlantGeometryProfile(cpu,&projected))return false;
+  bool projected;
+  if (!PlantGeometryProfile(cpu, &projected)) return false;
   if(height==208 && !projected)return false;
   const unsigned flip=cpu_read16(cpu,0,cpu->X+0x28),bottom=projected?96:112;
   return cpu_read16(cpu,0,cpu->X+0x0a)==(flip&0x4000?40:24) &&
@@ -74,13 +84,15 @@ RecompReturn ActRaiser_PlantGeometry(CpuState *cpu) {
   bool projected;
   if(!ActRaiser_PlantGeometryEntry(cpu) || !PlantGeometryProfile(cpu,&projected))
     ActRaiserHleFatal("Unsupported Marahna body geometry");
-  const bool japanese=ArRegionalBoss_Value(ActRaiserRegional_BossSnapshot(),kArRegionalBoss_PlantGeometry)==192;
+  const bool japanese =
+      ArRegionalBoss_Value(ActRaiserRegional_BossSnapshot(), kArRegionalBoss_PlantGeometry) == 192;
   if(projected!=japanese) {
     for(unsigned visual=0;visual<53;++visual) {
       const unsigned at=0x5000+cpu_read16(cpu,0x7e,0x5236+2*visual);
       if(PlantBodyPose(visual)) {
         const unsigned count=cpu_read8(cpu,0x7e,at+4)+(japanese?-4:4),retained=count-(japanese?0:4);
-        cpu_write8(cpu,0x7e,at+3,japanese?96:112);cpu_write8(cpu,0x7e,at+4,count);
+        cpu_write8(cpu, 0x7e, at + 3, japanese ? 96 : 112);
+        cpu_write8(cpu, 0x7e, at + 4, count);
         for(unsigned p=0;p<retained;++p) {
           const unsigned y=at+5+7*p+4;
           cpu_write8(cpu,0x7e,y,(uint8_t)(cpu_read8(cpu,0x7e,y)+(japanese?-16:16)));
@@ -91,7 +103,9 @@ RecompReturn ActRaiser_PlantGeometry(CpuState *cpu) {
      * the old header. Correct only that subtraction; vertical reflection
      * uses the unchanged top96 as its bottom, so needs no position delta. */
     const bool vertical=(cpu_read16(cpu,0,cpu->X+0x28)&0x8000)!=0;
-    if(!vertical)cpu_write16(cpu,0,cpu->X+4,(uint16_t)(cpu_read16(cpu,0,cpu->X+4)+(japanese?16:-16)));
+    if (!vertical)
+      cpu_write16(cpu, 0, cpu->X + 4,
+                  (uint16_t)(cpu_read16(cpu, 0, cpu->X + 4) + (japanese ? 16 : -16)));
     cpu_write16(cpu,0,cpu->X+(vertical?0x0c:0x10),japanese?96:112);
   }
   /* JP omits US's +8 root adjustment. The real allocator/linked-body -8
@@ -100,7 +114,8 @@ RecompReturn ActRaiser_PlantGeometry(CpuState *cpu) {
   /* On restoration, re-enter the now-native US prefix to retain its exact
    * ADC/flags. The read-only predicate rejects the restored profile, so this
    * dispatch cannot loop. It also handles retries that retain asset RAM. */
-  if(!cpu_hle_tailcall_request(japanese?0x00d98a:0x00d980,0x00d980))ActRaiserHleFatal("Plant geometry has no initializer owner");
+  if (!cpu_hle_tailcall_request(japanese ? 0x00d98a : 0x00d980, 0x00d980))
+    ActRaiserHleFatal("Plant geometry has no initializer owner");
   return RECOMP_RETURN_TAILCALL;
 }
 bool ActRaiser_WizardPauseEntry(CpuState *cpu) {
@@ -108,30 +123,38 @@ bool ActRaiser_WizardPauseEntry(CpuState *cpu) {
       RootShape(cpu,0xbdff,0xf6e2,2,0x0b,0);
 }
 bool ActRaiser_NorthwallThrowOffsetEntry(CpuState *cpu) {
-  return ArRegionalBoss_Value(ActRaiserRegional_BossSnapshot(),kArRegionalBoss_NorthwallThrowOffset)==16 &&
-      RootShape(cpu,0xe7c6,0,6,2,0) && cpu_read16(cpu,0,0x18)==0x0406 &&
-      !cpu_read16(cpu,0,cpu->X+0x3a);
+  return ArRegionalBoss_Value(ActRaiserRegional_BossSnapshot(),
+                              kArRegionalBoss_NorthwallThrowOffset) == 16 &&
+      RootShape(cpu, 0xe7c6, 0, 6, 2, 0) && cpu_read16(cpu, 0, 0x18) == 0x0406 &&
+      !cpu_read16(cpu, 0, cpu->X + 0x3a);
 }
 RecompReturn ActRaiser_NorthwallThrowOffset(CpuState *cpu) {
-  if(!ActRaiser_NorthwallThrowOffsetEntry(cpu))ActRaiserHleFatal("Unsupported Northwall throw offset");
-  cpu->A=(uint16_t)-16;ActRaiserCpuHle_SetNegativeZero16(cpu,cpu->A);
+  if (!ActRaiser_NorthwallThrowOffsetEntry(cpu))
+    ActRaiserHleFatal("Unsupported Northwall throw offset");
+  cpu->A = (uint16_t)-16;
+  ActRaiserCpuHle_SetNegativeZero16(cpu, cpu->A);
   /* Keep the real facing-relative helper and its allocated/scratch Y. */
-  if(!cpu_hle_tailcall_request(0x00e87b,0x00e878))ActRaiserHleFatal("Northwall throw has no continuation");
+  if (!cpu_hle_tailcall_request(0x00e87b, 0x00e878))
+    ActRaiserHleFatal("Northwall throw has no continuation");
   return RECOMP_RETURN_TAILCALL;
 }
 bool ActRaiser_NorthwallImpactOffsetEntry(CpuState *cpu) {
-  return ArRegionalBoss_Value(ActRaiserRegional_BossSnapshot(),kArRegionalBoss_NorthwallImpactOffset)==2 &&
-      RootShape(cpu,0xe7c6,0,6,0,0) && cpu_read16(cpu,0,0x18)==0x0406 &&
-      cpu_read16(cpu,0,cpu->X+0x12)==0xe8b5;
+  return ArRegionalBoss_Value(ActRaiserRegional_BossSnapshot(),
+                              kArRegionalBoss_NorthwallImpactOffset) == 2 &&
+      RootShape(cpu, 0xe7c6, 0, 6, 0, 0) && cpu_read16(cpu, 0, 0x18) == 0x0406 &&
+      cpu_read16(cpu, 0, cpu->X + 0x12) == 0xe8b5;
 }
 RecompReturn ActRaiser_NorthwallImpactOffset(CpuState *cpu) {
-  if(!ActRaiser_NorthwallImpactOffsetEntry(cpu))ActRaiserHleFatal("Unsupported Northwall impact offset");
+  if (!ActRaiser_NorthwallImpactOffsetEntry(cpu))
+    ActRaiserHleFatal("Unsupported Northwall impact offset");
   cpu_write16(cpu,0,cpu->X,0); /* Original STZ. */
   cpu_write16(cpu,0,cpu->X+4,(uint16_t)(cpu_read16(cpu,0,cpu->X+4)+2));
   /* Native LDA1 immediately replaces NZ; our prefix's added arithmetic is
    * not observable after that instruction. Its carry is untouched by INC. */
-  cpu->A=1;ActRaiserCpuHle_SetNegativeZero16(cpu,1);
-  if(!cpu_hle_tailcall_request(0x00e8bb,0x00e8b5))ActRaiserHleFatal("Northwall impact has no continuation");
+  cpu->A = 1;
+  ActRaiserCpuHle_SetNegativeZero16(cpu, 1);
+  if (!cpu_hle_tailcall_request(0x00e8bb, 0x00e8b5))
+    ActRaiserHleFatal("Northwall impact has no continuation");
   return RECOMP_RETURN_TAILCALL;
 }
 RecompReturn ActRaiser_WizardPause(CpuState *cpu) {
@@ -178,12 +201,15 @@ static bool AntlionShape(CpuState *cpu,unsigned state) {
 static bool PlantRootShape(CpuState *cpu,unsigned *state) {
   if(!cpu)return false;
   const unsigned previous=cpu_read16(cpu,0,cpu->X+0x1a);
-  if(!RootShape(cpu,0xd974,0,5,previous,0) || cpu_read16(cpu,0,0x18)!=0x0305 ||
-      cpu_read16(cpu,0,cpu->X+0x3a) || (previous!=0 && previous!=1 && previous!=2 && previous!=3 && previous!=20))return false;
+  if (!RootShape(cpu, 0xd974, 0, 5, previous, 0) || cpu_read16(cpu, 0, 0x18) != 0x0305 ||
+      cpu_read16(cpu, 0, cpu->X + 0x3a) ||
+      (previous != 0 && previous != 1 && previous != 2 && previous != 3 && previous != 20))
+    return false;
   *state=previous;return true;
 }
 bool ActRaiser_PlantPhaseEntry(CpuState *cpu) {
-  unsigned previous;ArRegionalPlantPhase phase;
+  unsigned previous;
+  ArRegionalPlantPhase phase;
   if(!PlantRootShape(cpu,&previous))return false;
   return ArRegionalBoss_PlantPhase(ActRaiserRegional_BossSnapshot(),previous,&phase) ||
       (previous==20 && (cpu_read16(cpu,0,cpu->X+0x30)&0x20));
@@ -202,7 +228,8 @@ RecompReturn ActRaiser_PlantPhase(CpuState *cpu) {
    * completed closed phase before falling back to the US open loop. */
   cpu->A=(uint16_t)((unsigned)phase.state<<8|phase.repetitions);
   ActRaiserCpuHle_SetNegativeZero16(cpu,cpu->A);
-  if(!cpu_hle_tailcall_request(0x00d9de,0x00d9db))ActRaiserHleFatal("Plant phase has no sequence continuation");
+  if (!cpu_hle_tailcall_request(0x00d9de, 0x00d9db))
+    ActRaiserHleFatal("Plant phase has no sequence continuation");
   return RECOMP_RETURN_TAILCALL;
 }
 static bool PharaohHeadShape(CpuState *cpu,unsigned state) {
@@ -217,8 +244,10 @@ RecompReturn ActRaiser_PharaohHeadIdle(CpuState *cpu) {
   if(!ActRaiser_PharaohHeadIdleEntry(cpu))ActRaiserHleFatal("Unsupported Pharaoh head idle");
   /* Reuse the real JSR8657 and its native return/yield frame. State3 is the
    * retained 120-update idle; allocation success or failure arrives here. */
-  cpu->A=3;ActRaiserCpuHle_SetNegativeZero16(cpu,cpu->A);
-  if(!cpu_hle_tailcall_request(0x00c2ce,0x00c2cb))ActRaiserHleFatal("Pharaoh idle has no continuation");
+  cpu->A = 3;
+  ActRaiserCpuHle_SetNegativeZero16(cpu, cpu->A);
+  if (!cpu_hle_tailcall_request(0x00c2ce, 0x00c2cb))
+    ActRaiserHleFatal("Pharaoh idle has no continuation");
   return RECOMP_RETURN_TAILCALL;
 }
 bool ActRaiser_PharaohHeadRepeatEntry(CpuState *cpu) {
@@ -233,7 +262,8 @@ RecompReturn ActRaiser_PharaohHeadRepeat(CpuState *cpu) {
   return RECOMP_RETURN_TAILCALL;
 }
 bool ActRaiser_ViperChoiceEntry(CpuState *cpu) {
-  const uint16_t choice=ArRegionalBoss_Value(ActRaiserRegional_BossSnapshot(),kArRegionalBoss_ViperChoice);
+  const uint16_t choice =
+      ArRegionalBoss_Value(ActRaiserRegional_BossSnapshot(), kArRegionalBoss_ViperChoice);
   return (choice==1 || choice==2) &&
       RootShape(cpu,0xe483,0xf72a,5,10,0) &&
       cpu_read8(cpu,0,kActRaiserWram_MapGroup+1)==(cpu_read8(cpu,0,kActRaiserWram_MapGroup)==5?8:6);
@@ -244,18 +274,23 @@ RecompReturn ActRaiser_ViperChoice(CpuState *cpu) {
    * but their accumulator and carry contracts are distinct. */
   const bool other=cpu->A&1;
   if(ArRegionalBoss_Value(ActRaiserRegional_BossSnapshot(),kArRegionalBoss_ViperChoice)==1) {
-    cpu->_flag_C=other;cpu->P=(uint8_t)((cpu->P&~CPU_P_C)|(other?CPU_P_C:0));
+    cpu->_flag_C = other;
+    cpu->P = (uint8_t)((cpu->P & ~CPU_P_C) | (other ? CPU_P_C : 0));
     cpu->A>>=1;
   } else cpu->A&=1;
   ActRaiserCpuHle_SetNegativeZero16(cpu,cpu->A);
-  if(!cpu_hle_tailcall_request(other?0x00e4f7:0x00e4e0,0x00e4db))ActRaiserHleFatal("Viper choice has no native continuation");
+  if (!cpu_hle_tailcall_request(other ? 0x00e4f7 : 0x00e4e0, 0x00e4db))
+    ActRaiserHleFatal("Viper choice has no native continuation");
   return RECOMP_RETURN_TAILCALL;
 }
 static bool DragonProjectileShape(CpuState *cpu,unsigned state) {
   return RootShape(cpu,0xd646,0,4,state,0) && cpu_read16(cpu,0,kActRaiserWram_MapGroup)==0x0304;
 }
 bool ActRaiser_DragonFlightBeginEntry(CpuState *cpu) {
-  if(!cpu || ArRegionalBoss_Value(ActRaiserRegional_BossSnapshot(),kArRegionalBoss_DragonProjectileFlight)!=5)return false;
+  if (!cpu ||
+      ArRegionalBoss_Value(ActRaiserRegional_BossSnapshot(),
+                           kArRegionalBoss_DragonProjectileFlight) != 5)
+    return false;
   const unsigned state=cpu_read16(cpu,0,cpu->X+0x38);
   /* Children inherit the producer's state0, but their local word selects1/2. */
   return (state==1 || state==2) && DragonProjectileShape(cpu,0) &&
@@ -276,17 +311,21 @@ static RecompReturn DragonSequence(CpuState *cpu,unsigned local,uint32_t from) {
    * Feed only the original low-byte state to the real JSR. No host timers,
    * animation-pointer mutation or invented native return addresses. */
   cpu_write16(cpu,0,cpu->X+0x38,(uint16_t)local);
-  cpu->A=(uint16_t)(local&255);ActRaiserCpuHle_SetNegativeZero16(cpu,cpu->A);
-  if(!cpu_hle_tailcall_request(0x00a65b,from))ActRaiserHleFatal("Dragon projectile has no animation continuation");
+  cpu->A = (uint16_t)(local & 255);
+  ActRaiserCpuHle_SetNegativeZero16(cpu, cpu->A);
+  if (!cpu_hle_tailcall_request(0x00a65b, from))
+    ActRaiserHleFatal("Dragon projectile has no animation continuation");
   return RECOMP_RETURN_TAILCALL;
 }
 RecompReturn ActRaiser_DragonFlightBegin(CpuState *cpu) {
-  if(!ActRaiser_DragonFlightBeginEntry(cpu))ActRaiserHleFatal("Unsupported dragon projectile birth");
+  if (!ActRaiser_DragonFlightBeginEntry(cpu))
+    ActRaiserHleFatal("Unsupported dragon projectile birth");
   cpu_write16(cpu,0,cpu->X,0); /* original STZ */
   return DragonSequence(cpu,cpu_read16(cpu,0,cpu->X+0x38)|0x400,0x00a655);
 }
 RecompReturn ActRaiser_DragonFlightRepeat(CpuState *cpu) {
-  if(!ActRaiser_DragonFlightRepeatEntry(cpu))ActRaiserHleFatal("Unsupported dragon projectile repeat");
+  if (!ActRaiser_DragonFlightRepeatEntry(cpu))
+    ActRaiserHleFatal("Unsupported dragon projectile repeat");
   return DragonSequence(cpu,cpu_read16(cpu,0,cpu->X+0x38)-0x100,0x00a65e);
 }
 static void Compare(CpuState *cpu,uint16_t value) {
@@ -295,16 +334,22 @@ static void Compare(CpuState *cpu,uint16_t value) {
   ActRaiserCpuHle_SetNegativeZero16(cpu,(uint16_t)(cpu->A-value));
 }
 bool ActRaiser_AntlionTriggerEntry(CpuState *cpu) {
-  return ArRegionalBoss_Value(ActRaiserRegional_BossSnapshot(),kArRegionalBoss_AntlionTrigger)==2304 && AntlionShape(cpu,0);
+  return ArRegionalBoss_Value(ActRaiserRegional_BossSnapshot(), kArRegionalBoss_AntlionTrigger) ==
+      2304 &&
+      AntlionShape(cpu, 0);
 }
 RecompReturn ActRaiser_AntlionTrigger(CpuState *cpu) {
-  if(!ActRaiser_AntlionTriggerEntry(cpu))ActRaiserHleFatal("Unsupported Antlion introduction threshold");
+  if (!ActRaiser_AntlionTriggerEntry(cpu))
+    ActRaiserHleFatal("Unsupported Antlion introduction threshold");
   Compare(cpu,2304);
-  if(!cpu_hle_tailcall_request(0x00c680,0x00c67d))ActRaiserHleFatal("Antlion trigger has no native continuation");
+  if (!cpu_hle_tailcall_request(0x00c680, 0x00c67d))
+    ActRaiserHleFatal("Antlion trigger has no native continuation");
   return RECOMP_RETURN_TAILCALL;
 }
 bool ActRaiser_AntlionVolleyEntry(CpuState *cpu) {
-  return ArRegionalBoss_Value(ActRaiserRegional_BossSnapshot(),kArRegionalBoss_AntlionStrategy)==1 && AntlionShape(cpu,4);
+  return ArRegionalBoss_Value(ActRaiserRegional_BossSnapshot(), kArRegionalBoss_AntlionStrategy) ==
+      1 &&
+      AntlionShape(cpu, 4);
 }
 RecompReturn ActRaiser_AntlionVolley(CpuState *cpu) {
   /* The six native projectiles have already been allocated. Skip only state12;
@@ -317,10 +362,12 @@ bool ActRaiser_AntlionDecisionEntry(CpuState *cpu) {
   return ActRaiser_AntlionVolleyEntry(cpu);
 }
 RecompReturn ActRaiser_AntlionDecision(CpuState *cpu) {
-  if(!ActRaiser_AntlionDecisionEntry(cpu))ActRaiserHleFatal("Unsupported Antlion post-volley decision");
+  if (!ActRaiser_AntlionDecisionEntry(cpu))
+    ActRaiserHleFatal("Unsupported Antlion post-volley decision");
   Compare(cpu,64);
   if(!cpu->_flag_C) {
-    if(!cpu_hle_tailcall_request(0x00c726,0x00c721))ActRaiserHleFatal("Antlion near branch has no continuation");
+    if (!cpu_hle_tailcall_request(0x00c726, 0x00c721))
+      ActRaiserHleFatal("Antlion near branch has no continuation");
     return RECOMP_RETURN_TAILCALL;
   }
   /* Native 86FA coroutine contract without fabricating a JSR return word:
@@ -329,9 +376,13 @@ RecompReturn ActRaiser_AntlionDecision(CpuState *cpu) {
    * death, room exit and slot reuse discard it with the native actor.
    * Use this boss's native RTS leaf to consume the real emulated return.
    * A bare NORMAL return would leave a dispatcher return word on the stack. */
-  cpu_write16(cpu,0,cpu->X+0x06,0);cpu_write16(cpu,0,cpu->X+0x08,0);
-  cpu_write16(cpu,0,cpu->X+0x24,60);cpu_write16(cpu,0,cpu->X+0x12,0xc6e3);
-  cpu->A=0xc6e3;ActRaiserCpuHle_SetNegativeZero16(cpu,cpu->A);
-  if(!cpu_hle_tailcall_request(0x00c682,0x00c721))ActRaiserHleFatal("Antlion wait has no native RTS owner");
+  cpu_write16(cpu, 0, cpu->X + 0x06, 0);
+  cpu_write16(cpu, 0, cpu->X + 0x08, 0);
+  cpu_write16(cpu, 0, cpu->X + 0x24, 60);
+  cpu_write16(cpu, 0, cpu->X + 0x12, 0xc6e3);
+  cpu->A = 0xc6e3;
+  ActRaiserCpuHle_SetNegativeZero16(cpu, cpu->A);
+  if (!cpu_hle_tailcall_request(0x00c682, 0x00c721))
+    ActRaiserHleFatal("Antlion wait has no native RTS owner");
   return RECOMP_RETURN_TAILCALL;
 }

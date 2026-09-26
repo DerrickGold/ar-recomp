@@ -5,9 +5,16 @@
 #include "actraiser/actraiser_native_call.h"
 
 #define LEAF(bank, pc) extern RecompReturn bank_##bank##_##pc##_M1X0(CpuState *)
-LEAF(01, 8E29); LEAF(01, 8D92); LEAF(01, 8CB6); LEAF(01, 9754);
-LEAF(03, CA5E); LEAF(01, 97E5); LEAF(01, 93B4); LEAF(01, B1FE);
-LEAF(01, 9270); LEAF(01, 8CCE);
+LEAF(01, 8E29);
+LEAF(01, 8D92);
+LEAF(01, 8CB6);
+LEAF(01, 9754);
+LEAF(03, CA5E);
+LEAF(01, 97E5);
+LEAF(01, 93B4);
+LEAF(01, B1FE);
+LEAF(01, 9270);
+LEAF(01, 8CCE);
 #undef LEAF
 
 /* Native command bodies $01:8290..8490. The first three have identical

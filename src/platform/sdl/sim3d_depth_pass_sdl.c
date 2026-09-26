@@ -149,9 +149,10 @@ _Static_assert(sizeof(Sim3DDepthSphericalBodyVertex) == 16 &&
     offsetof(Sim3DDepthSphericalBodyVertex, opacity) == 12, "packed normal and opacity");
 _Static_assert(sizeof(Sim3DSurfaceGpuQuad) == 256 && offsetof(Sim3DSurfaceGpuQuad, mask_uv) == 224,
     "sixteen packed float4 surface attributes");
-_Static_assert(sizeof(Sim3DSurfaceUniform) == 304 && offsetof(Sim3DSurfaceUniform, spherical) == 160 &&
-    offsetof(Sim3DSurfaceUniform, shadow_basis) == 256,
-    "std140 shared surface transform and material");
+_Static_assert(sizeof(Sim3DSurfaceUniform) == 304 &&
+                   offsetof(Sim3DSurfaceUniform, spherical) == 160 &&
+                   offsetof(Sim3DSurfaceUniform, shadow_basis) == 256,
+               "std140 shared surface transform and material");
 _Static_assert(sizeof(Sim3DRadialUniform) == 128, "std140 radial transform");
 _Static_assert(sizeof(Sim3DDepthRadialVertex) == 40 &&
     offsetof(Sim3DDepthRadialVertex, elevation) == 12 &&
@@ -418,16 +419,19 @@ static bool CreateBodyPipeline(void) {
 
 static bool CreateSurfacePipelines(void) {
   if (g_depth_pass.surface_pipeline_attempted)
-    return g_depth_pass.surface_pipeline[0] && g_depth_pass.surface_pipeline[1] && g_depth_pass.surface_pipeline[2];
+    return g_depth_pass.surface_pipeline[0] && g_depth_pass.surface_pipeline[1] &&
+        g_depth_pass.surface_pipeline[2];
   g_depth_pass.surface_pipeline_attempted = true;
   g_depth_pass.surface_vertex = GpuShaderBlob_Create(g_depth_pass.device, &kSurfaceVertexBlobs,
       "SIM3D shared radial surface", SDL_GPU_SHADERSTAGE_VERTEX, 0, 1);
   g_depth_pass.surface_fragment = GpuShaderBlob_Create(g_depth_pass.device, &kSurfaceFragmentBlobs,
       "SIM3D affine surface material", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 0);
-  g_depth_pass.shadow_batch_vertex = GpuShaderBlob_Create(g_depth_pass.device, &kShadowBatchVertexBlobs,
-      "SIM3D batched surface shadows", SDL_GPU_SHADERSTAGE_VERTEX, 0, 1);
-  g_depth_pass.shadow_batch_fragment = GpuShaderBlob_Create(g_depth_pass.device, &kShadowBatchFragmentBlobs,
-      "SIM3D shadow transmittance", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 0);
+  g_depth_pass.shadow_batch_vertex =
+      GpuShaderBlob_Create(g_depth_pass.device, &kShadowBatchVertexBlobs,
+                           "SIM3D batched surface shadows", SDL_GPU_SHADERSTAGE_VERTEX, 0, 1);
+  g_depth_pass.shadow_batch_fragment =
+      GpuShaderBlob_Create(g_depth_pass.device, &kShadowBatchFragmentBlobs,
+                           "SIM3D shadow transmittance", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 0);
   if (!g_depth_pass.surface_vertex || !g_depth_pass.surface_fragment ||
       !g_depth_pass.shadow_batch_vertex || !g_depth_pass.shadow_batch_fragment) return false;
   const SDL_GPUVertexBufferDescription buffer = {
@@ -466,7 +470,8 @@ static bool CreateSurfacePipelines(void) {
   info.fragment_shader = g_depth_pass.shadow_batch_fragment;
   info.vertex_input_state.num_vertex_attributes = 8;
   g_depth_pass.surface_pipeline[2] = SDL_CreateGPUGraphicsPipeline(g_depth_pass.device, &info);
-  return g_depth_pass.surface_pipeline[0] && g_depth_pass.surface_pipeline[1] && g_depth_pass.surface_pipeline[2];
+  return g_depth_pass.surface_pipeline[0] && g_depth_pass.surface_pipeline[1] &&
+      g_depth_pass.surface_pipeline[2];
 }
 
 /* Prepared at video boot/reset. Attempts are retained so a rejected variant
@@ -501,13 +506,17 @@ static bool CreateModelPipeline(Sim3DModelPipeline variant) {
   bool hardware_clipping = true;
   switch (variant) {
     case kModelPipeline_Radial:
-      blobs = &kRadialBlobs; label = "SIM3D radial models";
-      vertex_attributes = radial_attributes; attribute_count = 4;
+      blobs = &kRadialBlobs;
+      label = "SIM3D radial models";
+      vertex_attributes = radial_attributes;
+      attribute_count = 4;
       stride = sizeof(Sim3DDepthRadialVertex);
       break;
     case kModelPipeline_Linear:
-      blobs = &kLinearBlobs; label = "SIM3D linear models";
-      vertex_attributes = linear_attributes; attribute_count = 3;
+      blobs = &kLinearBlobs;
+      label = "SIM3D linear models";
+      vertex_attributes = linear_attributes;
+      attribute_count = 3;
       stride = sizeof(Sim3DDepthLinearVertex);
       break;
 #if defined(AR_SIM3D_DEPTH_TEST_REFERENCE)
@@ -516,7 +525,8 @@ static bool CreateModelPipeline(Sim3DModelPipeline variant) {
       hardware_clipping = variant == kModelPipeline_ReferenceClipped;
       blobs = hardware_clipping ? &kModelClippedBlobs : &kModelBlobs;
       label = "SIM3D test reference models";
-      vertex_attributes = attributes; attribute_count = 2;
+      vertex_attributes = attributes;
+      attribute_count = 2;
       stride = sizeof(Sim3DDepthModelVertex);
       break;
 #endif
@@ -1298,7 +1308,8 @@ bool Sim3DDepthPass_Begin(ArRenderDevice *device, int width, int height,
 }
 
 static bool IsGeometryMesh(Sim3DMeshKind kind) {
-  return kind == kMeshGeometry || IsModelMesh(kind) || kind == kMeshRadial || kind == kMeshSurface || kind == kMeshLinear;
+  return kind == kMeshGeometry || IsModelMesh(kind) || kind == kMeshRadial ||
+      kind == kMeshSurface || kind == kMeshLinear;
 }
 
 static Sim3DDepthMesh *CreateMesh(Sim3DMeshKind kind) {
@@ -1306,7 +1317,8 @@ static Sim3DDepthMesh *CreateMesh(Sim3DMeshKind kind) {
   unsigned count = 0;
   for (Sim3DDepthMesh *mesh = s_meshes; mesh; mesh = mesh->next)
     count += IsGeometryMesh(mesh->kind) == IsGeometryMesh(kind);
-  if (count >= (IsGeometryMesh(kind) ? kMaximumGeometryMeshes : kMaximumRetainedMeshes)) return NULL;
+  if (count >= (IsGeometryMesh(kind) ? kMaximumGeometryMeshes : kMaximumRetainedMeshes))
+    return NULL;
   Sim3DDepthMesh *mesh = calloc(1, sizeof(*mesh));
   if (!mesh) return NULL;
   mesh->kind = kind;
@@ -1320,17 +1332,25 @@ Sim3DDepthMesh *Sim3DDepthPass_CreateSphericalMesh(void) { return CreateMesh(kMe
 Sim3DDepthMesh *Sim3DDepthPass_CreateGeometryMesh(void) { return CreateMesh(kMeshGeometry); }
 #if defined(AR_SIM3D_DEPTH_TEST_REFERENCE)
 Sim3DDepthMesh *Sim3DDepthPass_CreateModelMesh(void) {
-  return g_depth_pass.collecting && CreateModelPipeline(kModelPipeline_ReferenceAffine) ? CreateMesh(kMeshModel) : NULL;
+  return g_depth_pass.collecting && CreateModelPipeline(kModelPipeline_ReferenceAffine)
+      ? CreateMesh(kMeshModel)
+      : NULL;
 }
 Sim3DDepthMesh *Sim3DDepthPass_CreateHardwareClippedModelMesh(void) {
-  return g_depth_pass.collecting && CreateModelPipeline(kModelPipeline_ReferenceClipped) ? CreateMesh(kMeshModelClipped) : NULL;
+  return g_depth_pass.collecting && CreateModelPipeline(kModelPipeline_ReferenceClipped)
+      ? CreateMesh(kMeshModelClipped)
+      : NULL;
 }
 #endif
 Sim3DDepthMesh *Sim3DDepthPass_CreateLinearMesh(void) {
-  return g_depth_pass.collecting && CreateModelPipeline(kModelPipeline_Linear) ? CreateMesh(kMeshLinear) : NULL;
+  return g_depth_pass.collecting && CreateModelPipeline(kModelPipeline_Linear)
+      ? CreateMesh(kMeshLinear)
+      : NULL;
 }
 Sim3DDepthMesh *Sim3DDepthPass_CreateRadialMesh(void) {
-  return g_depth_pass.collecting && CreateModelPipeline(kModelPipeline_Radial) ? CreateMesh(kMeshRadial) : NULL;
+  return g_depth_pass.collecting && CreateModelPipeline(kModelPipeline_Radial)
+      ? CreateMesh(kMeshRadial)
+      : NULL;
 }
 Sim3DDepthMesh *Sim3DDepthPass_CreateSurfaceMesh(void) {
   return g_depth_pass.collecting && CreateSurfacePipelines() ? CreateMesh(kMeshSurface) : NULL;
@@ -1359,12 +1379,17 @@ static void ReleaseMeshStorage(Sim3DDepthMesh *mesh) {
   if (mesh->positions) SDL_ReleaseGPUBuffer(mesh->device, mesh->positions);
   if (mesh->transfer) SDL_ReleaseGPUTransferBuffer(mesh->device, mesh->transfer);
   if (mesh->selection) SDL_ReleaseGPUBuffer(mesh->device, mesh->selection);
-  if (mesh->selection_transfer) SDL_ReleaseGPUTransferBuffer(mesh->device, mesh->selection_transfer);
-  mesh->selection = NULL; mesh->selection_transfer = NULL;
+  if (mesh->selection_transfer)
+    SDL_ReleaseGPUTransferBuffer(mesh->device, mesh->selection_transfer);
+  mesh->selection = NULL;
+  mesh->selection_transfer = NULL;
   mesh->selection_count = mesh->selection_capacity = 0;
   mesh->selection_dirty = false;
-  mesh->surface_range_count = 0; mesh->surface_selected = false;
-  mesh->positions = NULL; mesh->transfer = NULL; mesh->device = NULL;
+  mesh->surface_range_count = 0;
+  mesh->surface_selected = false;
+  mesh->positions = NULL;
+  mesh->transfer = NULL;
+  mesh->device = NULL;
   mesh->count = mesh->capacity = 0;
   mesh->width = mesh->height = 0;
   mesh->dirty = mesh->queued = false;
@@ -1401,7 +1426,8 @@ static bool ReserveMesh(Sim3DDepthMesh *mesh, Uint32 count) {
       .usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD, .size = info.size,
     };
     SDL_GPUBuffer *buffer = SDL_CreateGPUBuffer(g_depth_pass.device, &info);
-    SDL_GPUTransferBuffer *transfer = SDL_CreateGPUTransferBuffer(g_depth_pass.device, &transfer_info);
+    SDL_GPUTransferBuffer *transfer =
+        SDL_CreateGPUTransferBuffer(g_depth_pass.device, &transfer_info);
     if (!buffer || !transfer) {
       if (buffer) SDL_ReleaseGPUBuffer(g_depth_pass.device, buffer);
       if (transfer) SDL_ReleaseGPUTransferBuffer(g_depth_pass.device, transfer);
@@ -1409,7 +1435,9 @@ static bool ReserveMesh(Sim3DDepthMesh *mesh, Uint32 count) {
     }
     ReleaseMeshStorage(mesh);
     mesh->device = g_depth_pass.device;
-    mesh->positions = buffer; mesh->transfer = transfer; mesh->capacity = capacity;
+    mesh->positions = buffer;
+    mesh->transfer = transfer;
+    mesh->capacity = capacity;
   }
   return true;
 }
@@ -1428,12 +1456,15 @@ static bool ValidPosition(Sim3DDepthPosition position) {
 static void MapPosition(Sim3DDepthPosition position, float out[4]) {
   out[0] = position.x * g_depth_pass.clip_x_scale - 1.0f;
   out[1] = 1.0f - position.y * g_depth_pass.clip_y_scale;
-  out[2] = position.depth; out[3] = 1.0f;
+  out[2] = position.depth;
+  out[3] = 1.0f;
 }
 
 static void PublishMesh(Sim3DDepthMesh *mesh, Uint32 count) {
   SDL_UnmapGPUTransferBuffer(g_depth_pass.device, mesh->transfer);
-  mesh->count = count; mesh->width = g_depth_pass.width; mesh->height = g_depth_pass.height;
+  mesh->count = count;
+  mesh->width = g_depth_pass.width;
+  mesh->height = g_depth_pass.height;
   mesh->dirty = true;
 }
 
@@ -1463,7 +1494,8 @@ bool Sim3DDepthPass_UpdateSphericalMesh(Sim3DDepthMesh *mesh,
   }
   const Uint32 count = (Uint32)quad_count * 4;
   if (!ReserveMesh(mesh, count)) return false;
-  Sim3DSphericalGpuQuad *mapped = SDL_MapGPUTransferBuffer(g_depth_pass.device, mesh->transfer, true);
+  Sim3DSphericalGpuQuad *mapped =
+      SDL_MapGPUTransferBuffer(g_depth_pass.device, mesh->transfer, true);
   if (!mapped) return false;
   for (size_t i = 0; i < quad_count; ++i)
     for (int p = 0; p < 4; ++p) {
@@ -1621,7 +1653,8 @@ bool Sim3DDepthPass_UpdateModelMesh(Sim3DDepthMesh *mesh,
     for (int p = 0; p < 3; ++p) {
       const float v = vertices[i].position[p];
       if (!isfinite(v)) return false;
-      low[p] = fminf(low[p], v); high[p] = fmaxf(high[p], v);
+      low[p] = fminf(low[p], v);
+      high[p] = fmaxf(high[p], v);
     }
   }
   if (!ReserveMesh(mesh, count)) return false;
@@ -1672,7 +1705,8 @@ static bool ModelTransformSafe(const Sim3DDepthMesh *mesh, const float matrix[16
 
 bool Sim3DDepthPass_AppendModelMesh(Sim3DDepthMesh *mesh, const float matrix[16]) {
   if (!Sim3DDepthPass_MeshReady(mesh) || !IsModelMesh(mesh->kind) || !matrix ||
-      g_depth_pass.geometry_sample_count == kMaximumGeometrySamples || !ModelTransformSafe(mesh, matrix))
+      g_depth_pass.geometry_sample_count == kMaximumGeometrySamples ||
+      !ModelTransformSafe(mesh, matrix))
     return false;
   Sim3DMeshSample *sample = &g_depth_pass.samples[g_depth_pass.sample_count++];
   ++g_depth_pass.geometry_sample_count;
@@ -1690,8 +1724,9 @@ bool Sim3DDepthPass_AppendModelMesh(Sim3DDepthMesh *mesh, const float matrix[16]
 
 bool Sim3DDepthPass_UpdateLinearMesh(Sim3DDepthMesh *mesh,
     const Sim3DDepthLinearVertex *vertices, size_t quad_count) {
-  if (!g_depth_pass.collecting || !mesh || mesh->kind != kMeshLinear ||
-      !vertices || !CreateModelPipeline(kModelPipeline_Linear) || !CanUpdateMesh(mesh, quad_count, kMeshLinear)) return false;
+  if (!g_depth_pass.collecting || !mesh || mesh->kind != kMeshLinear || !vertices ||
+      !CreateModelPipeline(kModelPipeline_Linear) || !CanUpdateMesh(mesh, quad_count, kMeshLinear))
+    return false;
   const Uint32 count = (Uint32)quad_count * 4;
   float extent[5] = {0};
   for (Uint32 i = 0; i < count; ++i) {
@@ -1841,7 +1876,8 @@ bool Sim3DDepthPass_SelectRadialMesh(Sim3DDepthMesh *mesh,
   Uint32 *mapped = SDL_MapGPUTransferBuffer(g_depth_pass.device, transfer, true);
   if (!mapped) {
     if (buffer != mesh->selection) SDL_ReleaseGPUBuffer(g_depth_pass.device, buffer);
-    if (transfer != mesh->selection_transfer) SDL_ReleaseGPUTransferBuffer(g_depth_pass.device, transfer);
+    if (transfer != mesh->selection_transfer)
+      SDL_ReleaseGPUTransferBuffer(g_depth_pass.device, transfer);
     return false;
   }
   const Uint32 order[] = {0,1,2,0,2,3};
@@ -1853,10 +1889,13 @@ bool Sim3DDepthPass_SelectRadialMesh(Sim3DDepthMesh *mesh,
   SDL_UnmapGPUTransferBuffer(g_depth_pass.device, transfer);
   if (buffer != mesh->selection) {
     if (mesh->selection) SDL_ReleaseGPUBuffer(g_depth_pass.device, mesh->selection);
-    if (mesh->selection_transfer) SDL_ReleaseGPUTransferBuffer(g_depth_pass.device, mesh->selection_transfer);
+    if (mesh->selection_transfer)
+      SDL_ReleaseGPUTransferBuffer(g_depth_pass.device, mesh->selection_transfer);
   }
-  mesh->selection = buffer; mesh->selection_transfer = transfer;
-  mesh->selection_capacity = capacity; mesh->selection_count = count;
+  mesh->selection = buffer;
+  mesh->selection_transfer = transfer;
+  mesh->selection_capacity = capacity;
+  mesh->selection_count = count;
   mesh->selection_dirty = true;
   return true;
 }
@@ -1920,8 +1959,9 @@ bool Sim3DDepthPass_AppendRadialMesh(Sim3DDepthMesh *mesh,
 bool Sim3DDepthPass_AppendMeshSample(Sim3DDepthPassLayer layer,
     Sim3DDepthMesh *mesh, const ArRenderPointF *uv, size_t quad_count,
     ArRenderColorF color) {
-  if (!Sim3DDepthPass_MeshReady(mesh) || mesh->kind != kMeshScreen || !MeshLayerSupported(layer) || !uv ||
-      !ValidSampleColor(color) || quad_count != mesh->count / 4 || g_depth_pass.lists[layer].count ||
+  if (!Sim3DDepthPass_MeshReady(mesh) || mesh->kind != kMeshScreen || !MeshLayerSupported(layer) ||
+      !uv || !ValidSampleColor(color) || quad_count != mesh->count / 4 ||
+      g_depth_pass.lists[layer].count ||
       g_depth_pass.sample_count - g_depth_pass.geometry_sample_count == kMaximumEffectSamples ||
       mesh->count > kMaximumSampleVertices - g_depth_pass.sample_vertices)
     return false;
@@ -1931,7 +1971,8 @@ bool Sim3DDepthPass_AppendMeshSample(Sim3DDepthPassLayer layer,
     while (capacity < count) capacity *= 2;
     void *storage = realloc(g_depth_pass.sample_uv, (size_t)capacity * sizeof(*uv));
     if (!storage) return false;
-    g_depth_pass.sample_uv = storage; g_depth_pass.sample_capacity = capacity;
+    g_depth_pass.sample_uv = storage;
+    g_depth_pass.sample_capacity = capacity;
   }
   memcpy(g_depth_pass.sample_uv + g_depth_pass.sample_vertices, uv, mesh->count * sizeof(*uv));
   g_depth_pass.samples[g_depth_pass.sample_count++] = (Sim3DMeshSample){
@@ -1957,17 +1998,22 @@ static bool ValidSphericalSample(const Sim3DDepthSphericalSample *sample) {
 static void StoreSphericalSample(Sim3DSphericalUniform *uniform,
     const Sim3DDepthSphericalSample *sample) {
   memcpy(uniform->rotation, sample->rotation, sizeof(uniform->rotation));
-  uniform->offset_extent[0] = sample->offset.x; uniform->offset_extent[1] = sample->offset.y;
-  uniform->offset_extent[2] = sample->texture_size.x; uniform->offset_extent[3] = sample->texture_size.y;
-  uniform->atlas[0] = (float)sample->atlas.x; uniform->atlas[1] = (float)sample->atlas.y;
-  uniform->atlas[2] = (float)sample->atlas.w; uniform->atlas[3] = (float)sample->atlas.h;
+  uniform->offset_extent[0] = sample->offset.x;
+  uniform->offset_extent[1] = sample->offset.y;
+  uniform->offset_extent[2] = sample->texture_size.x;
+  uniform->offset_extent[3] = sample->texture_size.y;
+  uniform->atlas[0] = (float)sample->atlas.x;
+  uniform->atlas[1] = (float)sample->atlas.y;
+  uniform->atlas[2] = (float)sample->atlas.w;
+  uniform->atlas[3] = (float)sample->atlas.h;
   memcpy(uniform->color, &sample->color, sizeof(uniform->color));
 }
 
 bool Sim3DDepthPass_AppendSphericalSample(Sim3DDepthPassLayer layer,
     Sim3DDepthMesh *mesh, const Sim3DDepthSphericalSample *sample) {
-  if (!Sim3DDepthPass_MeshReady(mesh) || mesh->kind != kMeshSpherical || !MeshLayerSupported(layer) ||
-      !ValidSphericalSample(sample) || g_depth_pass.lists[layer].count ||
+  if (!Sim3DDepthPass_MeshReady(mesh) || mesh->kind != kMeshSpherical ||
+      !MeshLayerSupported(layer) || !ValidSphericalSample(sample) ||
+      g_depth_pass.lists[layer].count ||
       g_depth_pass.sample_count - g_depth_pass.geometry_sample_count == kMaximumEffectSamples)
     return false;
   Sim3DMeshSample *command = &g_depth_pass.samples[g_depth_pass.sample_count++];
@@ -2041,7 +2087,8 @@ bool Sim3DDepthPass_AppendSphericalBodies(Sim3DDepthMesh *mesh,
   }
   Sim3DBodyView view = {0};
   memcpy(view.matrix,t->matrix,sizeof(view.matrix));
-  memcpy(view.centre_radius,t->centre,sizeof(t->centre)); view.centre_radius[3] = t->radius;
+  memcpy(view.centre_radius, t->centre, sizeof(t->centre));
+  view.centre_radius[3] = t->radius;
   for (unsigned r = 0; r < 3; ++r) {
     memcpy(view.basis[r],t->basis[r],sizeof(t->basis[r]));
     memcpy(view.texture_basis[r],t->texture_basis[r],sizeof(t->texture_basis[r]));
@@ -2089,16 +2136,20 @@ bool Sim3DDepthPass_UpdateSurfaceMeshWithMask(Sim3DDepthMesh *mesh,
     const Sim3DDepthSurfaceVertex *v = &vertices[i];
     Sim3DSurfaceGpuQuad *q = &mapped[i / 4];
     const unsigned p = i % 4;
-    memcpy(q->points[p], v->normal, sizeof(v->normal)); q->points[p][3] = v->elevation[0];
-    memcpy(q->shades[p], v->shade_normal, sizeof(v->shade_normal)); q->shades[p][3] = v->elevation[1];
+    memcpy(q->points[p], v->normal, sizeof(v->normal));
+    q->points[p][3] = v->elevation[0];
+    memcpy(q->shades[p], v->shade_normal, sizeof(v->shade_normal));
+    q->shades[p][3] = v->elevation[1];
     memcpy(q->colors[p], &v->color, sizeof(v->color));
     memcpy(q->uv[p], &v->uv, sizeof(v->uv));
     memcpy(q->mask_uv[p], mask_uv ? &mask_uv[i] : &v->uv, sizeof(v->uv));
   }
   memcpy(mesh->radial_extent, extent, sizeof(extent));
   mesh->surface_uv_extent = uv_extent;
-  mesh->surface_selected = false; mesh->surface_range_count = 0;
-  mesh->selection_count = 0; mesh->selection_dirty = false;
+  mesh->surface_selected = false;
+  mesh->surface_range_count = 0;
+  mesh->selection_count = 0;
+  mesh->selection_dirty = false;
   PublishMesh(mesh, count);
   return true;
 }
@@ -2108,8 +2159,10 @@ bool Sim3DDepthPass_SelectSurfaceMesh(Sim3DDepthMesh *mesh,
   if (!Sim3DDepthPass_MeshReady(mesh) || mesh->kind != kMeshSurface || mesh->queued ||
       range_count > kMaximumSurfaceRanges || (range_count && !ranges)) return false;
   if (!range_count) {
-    mesh->surface_selected = false; mesh->surface_range_count = 0;
-    mesh->selection_count = 0; mesh->selection_dirty = false;
+    mesh->surface_selected = false;
+    mesh->surface_range_count = 0;
+    mesh->selection_count = 0;
+    mesh->selection_dirty = false;
     return true;
   }
   size_t quads = 0;
@@ -2131,11 +2184,13 @@ bool Sim3DDepthPass_SelectSurfaceMesh(Sim3DDepthMesh *mesh,
     SDL_GPUBuffer *buffer = SDL_CreateGPUBuffer(g_depth_pass.device,&info);
     if (!buffer) return false;
     if (mesh->selection) SDL_ReleaseGPUBuffer(g_depth_pass.device,mesh->selection);
-    mesh->selection = buffer; mesh->selection_capacity = capacity;
+    mesh->selection = buffer;
+    mesh->selection_capacity = capacity;
   }
   memcpy(mesh->surface_ranges,ranges,range_count*sizeof(*ranges));
   mesh->surface_range_count = (Uint32)range_count;
-  mesh->surface_selected = true; mesh->selection_count = count;
+  mesh->surface_selected = true;
+  mesh->selection_count = count;
   mesh->selection_dirty = count != 0;
   return true;
 }
@@ -2153,14 +2208,17 @@ static bool SurfaceLayersSafe(Sim3DDepthMesh *mesh,
   /* Ambient/diffuse bounds plus unit-vector tolerance give RGB gain <2.003.
    * Leave rounding margin when bounding the affine attribute-times-W payload. */
   if (!Sim3DDepthPass_MeshReady(mesh) || mesh->kind != kMeshSurface || !transform ||
-      transform->radial.variant || !RadialTransformSafe(mesh, &transform->radial,
-          transform->extra_scale, fmax(2.01, mesh->surface_uv_extent)) ||
-      !UnitVectorOrZero(transform->light, true) ||
-      !isfinite(transform->ambient) || transform->ambient < 0 || transform->ambient > 1 ||
-      !isfinite(transform->diffuse) || transform->diffuse < 0 || transform->diffuse > 1 ||
+      transform->radial.variant ||
+      !RadialTransformSafe(mesh, &transform->radial, transform->extra_scale,
+                           fmax(2.01, mesh->surface_uv_extent)) ||
+      !UnitVectorOrZero(transform->light, true) || !isfinite(transform->ambient) ||
+      transform->ambient < 0 || transform->ambient > 1 || !isfinite(transform->diffuse) ||
+      transform->diffuse < 0 || transform->diffuse > 1 ||
       g_depth_pass.geometry_sample_count == kMaximumGeometrySamples ||
-      shadow_count > kMaximumEffectSamples - (g_depth_pass.sample_count - g_depth_pass.geometry_sample_count) ||
-      (shadow_count && (!shadows || g_depth_pass.lists[kSim3DDepthPass_CloudShadow].count))) return false;
+      shadow_count > kMaximumEffectSamples -
+              (g_depth_pass.sample_count - g_depth_pass.geometry_sample_count) ||
+      (shadow_count && (!shadows || g_depth_pass.lists[kSim3DDepthPass_CloudShadow].count)))
+    return false;
   const Sim3DDepthSurfaceFocus *focus=&transform->focus;
   if (!ValidSampleColor(focus->haze) || !isfinite(focus->dim) || focus->dim<0 || focus->dim>1 ||
       !isfinite(focus->feather) || focus->feather<0 || focus->feather>16 ||
@@ -2174,7 +2232,8 @@ static bool SurfaceLayersSafe(Sim3DDepthMesh *mesh,
       focus->clear_rect.h<0 || focus->clear_rect.h>16) return false;
   if (overlay_count > kSim3DDepthMaximumSurfaceOverlays || (overlay_count && !overlays) ||
       overlay_count > kMaximumEffectSamples -
-          (g_depth_pass.sample_count - g_depth_pass.geometry_sample_count) - shadow_count) return false;
+              (g_depth_pass.sample_count - g_depth_pass.geometry_sample_count) - shadow_count)
+    return false;
   unsigned overlay_mask = 0;
   for (size_t i = 0; i < overlay_count; ++i) {
     const Sim3DDepthSurfaceOverlay *o = &overlays[i];
@@ -2192,8 +2251,9 @@ static bool SurfaceLayersSafe(Sim3DDepthMesh *mesh,
     overlay_mask |= 1u << o->layer;
   }
   for (size_t i = 0; i < shadow_count; ++i) {
-    if (!ValidSphericalSample(&shadows[i]) ||
-        fabsf(shadows[i].offset.x) > FLT_MAX / 4 || fabsf(shadows[i].offset.y) > FLT_MAX / 4) return false;
+    if (!ValidSphericalSample(&shadows[i]) || fabsf(shadows[i].offset.x) > FLT_MAX / 4 ||
+        fabsf(shadows[i].offset.y) > FLT_MAX / 4)
+      return false;
     /* Bound the trigonometric input arithmetic as well as its final output.
      * Unlike arbitrary matrices, these pairs explicitly represent rotations. */
     for (unsigned p = 0; p < 4; p += 2) {
@@ -2228,7 +2288,8 @@ static void QueueSurfaceLayers(Sim3DDepthMesh *mesh, Sim3DDepthPassLayer opaque_
   Sim3DSurfaceUniform uniform = {0};
   memcpy(uniform.view.matrix, transform->radial.matrix, sizeof(uniform.view.matrix));
   for (unsigned row = 0; row < 3; ++row)
-    memcpy(uniform.view.basis[row], transform->radial.basis[row], sizeof(transform->radial.basis[row]));
+    memcpy(uniform.view.basis[row], transform->radial.basis[row],
+           sizeof(transform->radial.basis[row]));
   uniform.view.radial[0] = transform->radial.sphere_radius;
   uniform.view.radial[1] = transform->radial.reference_height;
   uniform.view.radial[2] = transform->radial.height_scale;
@@ -2242,11 +2303,14 @@ static void QueueSurfaceLayers(Sim3DDepthMesh *mesh, Sim3DDepthPassLayer opaque_
   if (focus->dim>0 || focus->haze.a>0) {
     uniform.material[1]=4;
     memcpy(uniform.spherical.color,&focus->haze,sizeof(focus->haze));
-    uniform.mask_rect[0]=focus->clear_rect.x; uniform.mask_rect[1]=focus->clear_rect.y;
+    uniform.mask_rect[0] = focus->clear_rect.x;
+    uniform.mask_rect[1] = focus->clear_rect.y;
     uniform.mask_rect[2]=focus->clear_rect.x+focus->clear_rect.w;
     uniform.mask_rect[3]=focus->clear_rect.y+focus->clear_rect.h;
-    uniform.mask[0]=focus->feather; uniform.mask[1]=focus->dim;
-    uniform.mask[2]=focus->corner_radius; uniform.mask[3]=focus->inset;
+    uniform.mask[0] = focus->feather;
+    uniform.mask[1] = focus->dim;
+    uniform.mask[2] = focus->corner_radius;
+    uniform.mask[3] = focus->inset;
   }
   for (unsigned r = 0; r < 3; ++r) for (unsigned c = 0; c < 3; ++c) {
     uniform.shadow_basis[r][c] = transform->shadow_basis[r][c];
@@ -2255,14 +2319,16 @@ static void QueueSurfaceLayers(Sim3DDepthMesh *mesh, Sim3DDepthPassLayer opaque_
   for (size_t i = 0; i <= shadow_count + overlay_count; ++i) {
     Sim3DDepthPassLayer layer = opaque_layer;
     if (i && i <= shadow_count) {
-      uniform.material[1] = 1; StoreSphericalSample(&uniform.spherical, &shadows[i - 1]);
+      uniform.material[1] = 1;
+      StoreSphericalSample(&uniform.spherical, &shadows[i - 1]);
       layer = kSim3DDepthPass_CloudShadow;
     } else if (i) {
       const Sim3DDepthSurfaceOverlay *o = &overlays[i - shadow_count - 1];
       layer = o->layer;
       uniform.material[1] = layer == kSim3DDepthPass_GroundHaze ? 3 : 2;
       memcpy(uniform.spherical.color, &o->color, sizeof(o->color));
-      uniform.mask_rect[0] = o->clear_rect.x; uniform.mask_rect[1] = o->clear_rect.y;
+      uniform.mask_rect[0] = o->clear_rect.x;
+      uniform.mask_rect[1] = o->clear_rect.y;
       uniform.mask_rect[2] = o->clear_rect.x + o->clear_rect.w;
       uniform.mask_rect[3] = o->clear_rect.y + o->clear_rect.h;
       uniform.mask[0] = o->feather;
@@ -2292,7 +2358,9 @@ bool Sim3DDepthPass_AppendSurfaceMeshBatches(
   if (!batches || !batch_count || batch_count > kMaximumGeometrySamples) return false;
   size_t geometry = 0, effects = 0;
   SDL_GPUTexture *textures[kMaximumGeometrySamples] = {0};
-  SDL_GPUTexture *overlay_textures[kMaximumGeometrySamples][kSim3DDepthMaximumSurfaceOverlays] = {{0}};
+  SDL_GPUTexture *overlay_textures[kMaximumGeometrySamples][kSim3DDepthMaximumSurfaceOverlays] = {
+    { 0 }
+  };
   for (size_t i = 0; i < batch_count; ++i) {
     Sim3DDepthMesh *mesh = batches[i].mesh;
     if (!Sim3DDepthPass_MeshReady(mesh) || mesh->kind != kMeshSurface) return false;
@@ -2305,25 +2373,28 @@ bool Sim3DDepthPass_AppendSurfaceMeshBatches(
     if ((b->layer != kSim3DDepthPass_Ground && b->layer != kSim3DDepthPass_Mountain &&
          b->layer != kSim3DDepthPass_WorldMountain) ||
         (b->layer != kSim3DDepthPass_Ground && (b->shadow_count || b->overlay_count)) ||
-        b->range.first_quad > quads || b->range.quad_count > quads-b->range.first_quad ||
-        !SurfaceLayersSafe(mesh,&b->transform,b->shadows,b->shadow_count,b->overlays,b->overlay_count))
+        b->range.first_quad > quads || b->range.quad_count > quads - b->range.first_quad ||
+        !SurfaceLayersSafe(mesh, &b->transform, b->shadows, b->shadow_count, b->overlays,
+                           b->overlay_count))
       return false;
     for (size_t o = 0; o < b->overlay_count; ++o)
       if (ArRenderTexture_IsValid(b->overlays[o].texture)) {
-        overlay_textures[i][o] = GpuTexture(ArSdlRenderBackend_UnwrapTexture(b->overlays[o].texture));
+        overlay_textures[i][o] =
+            GpuTexture(ArSdlRenderBackend_UnwrapTexture(b->overlays[o].texture));
         if (!overlay_textures[i][o]) return false;
       }
     if (b->range.quad_count) { ++geometry; effects += b->shadow_count+b->overlay_count; }
   }
-  if (geometry > kMaximumGeometrySamples-g_depth_pass.geometry_sample_count ||
-      effects > kMaximumEffectSamples-(g_depth_pass.sample_count-g_depth_pass.geometry_sample_count))
+  if (geometry > kMaximumGeometrySamples - g_depth_pass.geometry_sample_count ||
+      effects >
+          kMaximumEffectSamples - (g_depth_pass.sample_count - g_depth_pass.geometry_sample_count))
     return false;
   for (size_t i = 0; i < batch_count; ++i) {
     Sim3DDepthMesh *mesh = batches[i].mesh;
     const Sim3DDepthSurfaceBatch *b = &batches[i].batch;
     if (b->range.quad_count)
-      QueueSurfaceLayers(mesh,b->layer,b->range,textures[i],&b->transform,b->shadows,b->shadow_count,
-          b->overlays,b->overlay_count,overlay_textures[i]);
+      QueueSurfaceLayers(mesh, b->layer, b->range, textures[i], &b->transform, b->shadows,
+                         b->shadow_count, b->overlays, b->overlay_count, overlay_textures[i]);
   }
   return true;
 }
@@ -2614,18 +2685,23 @@ static bool PrepareMeshSamples(void) {
       .usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD, .size = capacity,
     };
     SDL_GPUBuffer *buffer = SDL_CreateGPUBuffer(g_depth_pass.device, &info);
-    SDL_GPUTransferBuffer *transfer = SDL_CreateGPUTransferBuffer(g_depth_pass.device, &transfer_info);
+    SDL_GPUTransferBuffer *transfer =
+        SDL_CreateGPUTransferBuffer(g_depth_pass.device, &transfer_info);
     if (!buffer || !transfer) {
       if (buffer) SDL_ReleaseGPUBuffer(g_depth_pass.device, buffer);
       if (transfer) SDL_ReleaseGPUTransferBuffer(g_depth_pass.device, transfer);
       return false;
     }
-    if (g_depth_pass.sample_buffer) SDL_ReleaseGPUBuffer(g_depth_pass.device, g_depth_pass.sample_buffer);
-    if (g_depth_pass.sample_transfer) SDL_ReleaseGPUTransferBuffer(g_depth_pass.device, g_depth_pass.sample_transfer);
-    g_depth_pass.sample_buffer = buffer; g_depth_pass.sample_transfer = transfer;
+    if (g_depth_pass.sample_buffer)
+      SDL_ReleaseGPUBuffer(g_depth_pass.device, g_depth_pass.sample_buffer);
+    if (g_depth_pass.sample_transfer)
+      SDL_ReleaseGPUTransferBuffer(g_depth_pass.device, g_depth_pass.sample_transfer);
+    g_depth_pass.sample_buffer = buffer;
+    g_depth_pass.sample_transfer = transfer;
     g_depth_pass.sample_gpu_bytes = capacity;
   }
-  uint8_t *mapped = SDL_MapGPUTransferBuffer(g_depth_pass.device, g_depth_pass.sample_transfer, true);
+  uint8_t *mapped =
+      SDL_MapGPUTransferBuffer(g_depth_pass.device, g_depth_pass.sample_transfer, true);
   if (!mapped) return false;
   if (uv_bytes) memcpy(mapped, g_depth_pass.sample_uv, uv_bytes);
   for (Uint32 i = 0; i < g_depth_pass.sample_count; ++i)
@@ -2778,7 +2854,8 @@ ArRenderTexture Sim3DDepthPass_Submit(
       .buffer = g_depth_pass.sample_buffer,
       .size = g_depth_pass.sample_upload_bytes,
     };
-    if (sample_destination.size) SDL_UploadToGPUBuffer(copy, &sample_source, &sample_destination, true);
+    if (sample_destination.size)
+      SDL_UploadToGPUBuffer(copy, &sample_source, &sample_destination, true);
     vertex_upload_bytes += sample_destination.size;
     for (Sim3DDepthMesh *mesh = s_meshes; mesh; mesh = mesh->next) {
       if (!mesh->queued) continue;
@@ -2791,7 +2868,8 @@ ArRenderTexture Sim3DDepthPass_Submit(
         vertex_upload_bytes += mesh_destination.size;
       }
       if (mesh->selection_dirty && mesh->kind != kMeshSurface) {
-        const SDL_GPUTransferBufferLocation selection_source = {.transfer_buffer = mesh->selection_transfer};
+        const SDL_GPUTransferBufferLocation selection_source = { .transfer_buffer =
+                                                                     mesh->selection_transfer };
         const SDL_GPUBufferRegion selection_destination = {
           .buffer = mesh->selection, .size = mesh->selection_count * (Uint32)sizeof(Uint32),
         };
@@ -2832,10 +2910,14 @@ ArRenderTexture Sim3DDepthPass_Submit(
         const Sim3DDepthMeshRange range = mesh->surface_ranges[i];
         if (!range.quad_count) continue;
         const Uint32 bytes = (Uint32)range.quad_count*sizeof(Sim3DSurfaceGpuQuad);
-        const SDL_GPUBufferLocation src = {mesh->positions,(Uint32)range.first_quad*sizeof(Sim3DSurfaceGpuQuad)};
+        const SDL_GPUBufferLocation src = {
+          mesh->positions, (Uint32)range.first_quad * sizeof(Sim3DSurfaceGpuQuad)
+        };
         const SDL_GPUBufferLocation dst = {mesh->selection,offset};
         SDL_CopyGPUBufferToBuffer(copy,&src,&dst,bytes,offset == 0);
-        offset += bytes; vertex_copy_bytes += bytes; ++vertex_copy_calls;
+        offset += bytes;
+        vertex_copy_bytes += bytes;
+        ++vertex_copy_calls;
       }
     }
     SDL_EndGPUCopyPass(copy);
@@ -2996,7 +3078,8 @@ ArRenderTexture Sim3DDepthPass_Submit(
         if (sample->layer != i) continue;
         const Uint32 shadow_batch = SurfaceShadowBatchSize(j);
         pipeline = sample->mesh->kind == kMeshSurface
-            ? g_depth_pass.surface_pipeline[shadow_batch > 1 ? 2 : 1] : MeshPipeline(sample->mesh->kind);
+            ? g_depth_pass.surface_pipeline[shadow_batch > 1 ? 2 : 1]
+            : MeshPipeline(sample->mesh->kind);
         if (pipeline != bound) {
           SDL_BindGPUGraphicsPipeline(pass, pipeline);
           bound = pipeline;
@@ -3005,7 +3088,8 @@ ArRenderTexture Sim3DDepthPass_Submit(
           const SDL_GPUBufferBinding binding = {sample->mesh->positions,0};
           SDL_BindGPUVertexBuffers(pass,0,&binding,1);
           SDL_PushGPUVertexUniformData(commands,0,&sample->body.view,sizeof(sample->body.view));
-          SDL_PushGPUFragmentUniformData(commands,0,&sample->body.sample,sizeof(sample->body.sample));
+          SDL_PushGPUFragmentUniformData(commands, 0, &sample->body.sample,
+                                         sizeof(sample->body.sample));
           SDL_DrawGPUIndexedPrimitives(pass,sample->mesh->count/4*6,1,0,0,0);
           continue;
         }
@@ -3027,17 +3111,21 @@ ArRenderTexture Sim3DDepthPass_Submit(
           } else if (sample->mesh->kind == kMeshSurface)
             SDL_PushGPUVertexUniformData(commands, 0, &sample->surface, sizeof(sample->surface));
           else
-            SDL_PushGPUVertexUniformData(commands, 0, &sample->spherical, sizeof(sample->spherical));
-          SDL_DrawGPUIndexedPrimitives(pass, 6,
-              (sample->mesh->kind == kMeshSurface ? sample->count : sample->mesh->count) / 4, 0, 0, 0);
+            SDL_PushGPUVertexUniformData(commands, 0, &sample->spherical,
+                                         sizeof(sample->spherical));
+          SDL_DrawGPUIndexedPrimitives(
+              pass, 6,
+              (sample->mesh->kind == kMeshSurface ? sample->count : sample->mesh->count) / 4, 0, 0,
+              0);
           j += shadow_batch - 1;
           continue;
         }
         const SDL_GPUBufferBinding bindings[] = {
-          {sample->mesh->positions, 0},
-          {g_depth_pass.sample_buffer, sample->first * (Uint32)sizeof(ArRenderPointF)},
-          {g_depth_pass.sample_buffer, g_depth_pass.sample_vertices * (Uint32)sizeof(ArRenderPointF) +
-              j * (Uint32)sizeof(ArRenderColorF)},
+          { sample->mesh->positions, 0 },
+          { g_depth_pass.sample_buffer, sample->first * (Uint32)sizeof(ArRenderPointF) },
+          { g_depth_pass.sample_buffer,
+            g_depth_pass.sample_vertices * (Uint32)sizeof(ArRenderPointF) +
+                j * (Uint32)sizeof(ArRenderColorF) },
         };
         SDL_BindGPUVertexBuffers(pass, 0, bindings, 3);
         SDL_DrawGPUIndexedPrimitives(pass, sample->mesh->count / 4 * 6, 1, 0, 0, 0);

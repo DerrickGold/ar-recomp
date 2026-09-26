@@ -77,8 +77,10 @@ int OverlayMenuInput_Hint(char *out, int capacity, MenuNav nav, InputClass devic
     if (device == kInputClass_Keyboard) {
       MenuNav actual;
       if (INPUT_BIND_KIND(binding) != kInputBind_Key ||
-          !OverlayMenuInput_KeyNav(SDL_GetKeyFromScancode(INPUT_BIND_CODE(binding), 0, false), &actual) ||
-          actual != nav) continue;
+          !OverlayMenuInput_KeyNav(SDL_GetKeyFromScancode(INPUT_BIND_CODE(binding), 0, false),
+                                   &actual) ||
+          actual != nav)
+        continue;
     }
     return InputMap_ActionHintForDevice(out, capacity, kCommands[i].action, device);
   }

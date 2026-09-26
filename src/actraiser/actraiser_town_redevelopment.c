@@ -37,8 +37,9 @@ static uint16_t ReadWord(CpuState *cpu, uint8_t bank, uint16_t address, uint64_t
   return lo | (uint16_t)ReadByte(cpu, bank, address + 1, hash) << 8;
 }
 
-ActRaiserRedevelopmentStatus ActRaiserTownRedevelopment_Preview(
-    CpuState *cpu, uint8_t towns, bool japanese_construction, ActRaiserTownRedevelopmentPlan *plan) {
+ActRaiserRedevelopmentStatus
+ActRaiserTownRedevelopment_Preview(CpuState *cpu, uint8_t towns, bool japanese_construction,
+                                   ActRaiserTownRedevelopmentPlan *plan) {
   if (!cpu || !plan || (towns & ~0x3fu)) return kActRaiserRedevelopment_Invalid;
   ActRaiserTownRedevelopmentPlan next = {
       .fingerprint = DETERMINISTIC_HASH_FNV1A64_OFFSET, .requested_towns = towns,
@@ -73,7 +74,8 @@ ActRaiserRedevelopmentStatus ActRaiserTownRedevelopment_Preview(
         return kActRaiserRedevelopment_StructureBusy;
       for (unsigned dy = 0; dy < width; ++dy) for (unsigned dx = 0; dx < width; ++dx) {
         const unsigned cell = (y + dy) * 32 + x + dx;
-        if (occupied[cell / 8] & (1u << (cell & 7))) return kActRaiserRedevelopment_InvalidFootprint;
+        if (occupied[cell / 8] & (1u << (cell & 7)))
+          return kActRaiserRedevelopment_InvalidFootprint;
         occupied[cell / 8] |= 1u << (cell & 7);
         if (Removable(type)) {
           const uint16_t index = ActRaiser_CellMarkIndex(town, x + dx, y + dy);
@@ -128,14 +130,17 @@ ActRaiserRedevelopmentStatus ActRaiserTownRedevelopment_Apply(
       const uint16_t record = base + slot * kRecordBytes;
       const uint8_t flags = cpu_read8(cpu, kTownBank, record + 2);
       if (!(flags & kActive) || !Removable(flags & 15)) continue;
-      const uint8_t x = cpu_read8(cpu, kTownBank, record), y = cpu_read8(cpu, kTownBank, record + 1);
+      const uint8_t x = cpu_read8(cpu, kTownBank, record),
+                    y = cpu_read8(cpu, kTownBank, record + 1);
       const unsigned width = Width(flags & 15);
       for (unsigned dy = 0; dy < width; ++dy) for (unsigned dx = 0; dx < width; ++dx)
-        cpu_write8(cpu, kTownBank, kCellMarks + ActRaiser_CellMarkIndex(town, x + dx, y + dy), kEmptyCell);
+          cpu_write8(cpu, kTownBank, kCellMarks + ActRaiser_CellMarkIndex(town, x + dx, y + dy),
+                     kEmptyCell);
       cpu_write8(cpu, kTownBank, record + 2, 0); /* Native action-7 retirement. */
     }
     const uint16_t address = kGrowth + town * 2;
-    cpu_write16(cpu, kTownBank, address, cpu_read16(cpu, kTownBank, address) + current.growth_credit[town]);
+    cpu_write16(cpu, kTownBank, address,
+                cpu_read16(cpu, kTownBank, address) + current.growth_credit[town]);
   }
   return kActRaiserRedevelopment_Ready;
 }

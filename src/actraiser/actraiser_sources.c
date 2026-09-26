@@ -10,11 +10,13 @@ bool ActRaiserSources_CollectionEntry(const CpuState *cpu) {
   return Shape(cpu) && ((uint8_t)cpu->A==5 || (uint8_t)cpu->A==6);
 }
 uint32_t ActRaiserSources_CollectionRoute(CpuState *cpu, bool automatic) {
-  if (!ActRaiserSources_CollectionEntry(cpu)) ActRaiserHleFatal("Unsupported Source collection entry");
+  if (!ActRaiserSources_CollectionEntry(cpu))
+    ActRaiserHleFatal("Unsupported Source collection entry");
   /* US's last compare equals item5/6; JP compares both against5 before taking
    * the held-insertion branch. CMP preserves A and overflow. */
   const uint8_t difference=automatic ? 0 : (uint8_t)cpu->A-5;
-  cpu->_flag_C=1; cpu->P|=CPU_P_C;
+  cpu->_flag_C = 1;
+  cpu->P |= CPU_P_C;
   ActRaiserCpuHle_SetNegativeZero8(cpu,difference);
   return automatic ? 0x018922 : 0x01892d;
 }

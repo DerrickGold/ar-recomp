@@ -88,7 +88,8 @@ static bool MenuColumns(ActRaiserLocalizationMenu menu, unsigned line,
     *next_column = 10;
     return true;
   }
-  if (menu == kActRaiserLocalizationMenu_MessageSpeed || menu == kActRaiserLocalizationMenu_MessageSpeedJP) {
+  if (menu == kActRaiserLocalizationMenu_MessageSpeed ||
+      menu == kActRaiserLocalizationMenu_MessageSpeedJP) {
     const bool short_range = menu == kActRaiserLocalizationMenu_MessageSpeedJP;
     if (line == 0 && field_count == (short_range ? 8u : 10u)) {
       *column = field_index + short_range;
@@ -126,8 +127,10 @@ static bool MenuValueCell(ActRaiserLocalizationMenu menu, unsigned line,
  * ticks and the labels anchored on either side of its arrow. */
 static bool MenuPhysicalCell(ActRaiserLocalizationMenu menu, unsigned line,
                              unsigned field_count) {
-  return (menu == kActRaiserLocalizationMenu_MessageSpeed || menu == kActRaiserLocalizationMenu_MessageSpeedJP) &&
-      ((line == 0 && field_count == (menu == kActRaiserLocalizationMenu_MessageSpeedJP ? 8u : 10u)) ||
+  return (menu == kActRaiserLocalizationMenu_MessageSpeed ||
+          menu == kActRaiserLocalizationMenu_MessageSpeedJP) &&
+      ((line == 0 &&
+        field_count == (menu == kActRaiserLocalizationMenu_MessageSpeedJP ? 8u : 10u)) ||
        (line == 2 && field_count == 3));
 }
 

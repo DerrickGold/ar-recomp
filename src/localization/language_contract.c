@@ -319,8 +319,12 @@ static bool ValidateBody(const ArLanguagePack *pack,
       /* Fixed/native field structure uses explicit authored breaks. A Unicode
        * separator must not bypass its row/choice contract as an opaque glyph. */
       if (route->shape != kArLanguagePresentation_Flow && text &&
-          (strstr(text, "\xc2\x85") || strstr(text, "\xe2\x80\xa8") || strstr(text, "\xe2\x80\xa9"))) {
-        SetError(error, "%s: use @line or @paragraph instead of Unicode line-separator controls in fixed fields", diagnostic_id);
+          (strstr(text, "\xc2\x85") || strstr(text, "\xe2\x80\xa8") ||
+           strstr(text, "\xe2\x80\xa9"))) {
+        SetError(
+            error,
+            "%s: use @line or @paragraph instead of Unicode line-separator controls in fixed fields",
+            diagnostic_id);
         return false;
       }
       ScanText(&scan, text);
@@ -331,7 +335,9 @@ static bool ValidateBody(const ArLanguagePack *pack,
       ScanBreak(&scan, 1);
     else if (operation->kind == kArLanguageOperation_PreferredLineBreak) {
       if (route->shape != kArLanguagePresentation_Flow) {
-        SetError(error, "%s: @preferred-line is only valid in flowing dialogue; use @line in fixed fields", diagnostic_id);
+        SetError(error,
+                 "%s: @preferred-line is only valid in flowing dialogue; use @line in fixed fields",
+                 diagnostic_id);
         return false;
       }
     }

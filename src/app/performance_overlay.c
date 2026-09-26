@@ -96,16 +96,18 @@ void PerformanceOverlay_Build(const PerformanceSnapshot *snapshot, int level,
       if (i == kPerformance_PostProcess || i == kPerformance_HostUi ||
           i == kPerformance_SettingsUi || i == kPerformance_Overlay ||
           i == kPerformance_Swap || i == kPerformance_Pacing) continue;
-      if (snapshot->stages[i].mean_ms > snapshot->stages[largest].mean_ms) largest = (PerformanceStage)i;
+      if (snapshot->stages[i].mean_ms > snapshot->stages[largest].mean_ms)
+        largest = (PerformanceStage)i;
     }
     Line(model, 0, 3, "Largest CPU stage: %s %.2f ms", PerformanceMetrics_StageName(largest),
         snapshot->stages[largest].mean_ms);
     Line(model, 0, 4, "Present/wait %.2f ms | sleep %.2f ms",
         snapshot->stages[kPerformance_Swap].mean_ms, snapshot->stages[kPerformance_Pacing].mean_ms);
     Line(model, 0, 5, "Owner %.2f / helpers* %.2f ms",
-        snapshot->stages[kPerformance_WorkOwner].mean_ms, snapshot->stages[kPerformance_WorkHelpers].mean_ms);
-    Line(model, 0, 6, "Join %.2f ms / jobs %.1f",
-        snapshot->stages[kPerformance_WorkJoin].mean_ms, snapshot->counts[kPerformanceCount_HelperJobs]);
+         snapshot->stages[kPerformance_WorkOwner].mean_ms,
+         snapshot->stages[kPerformance_WorkHelpers].mean_ms);
+    Line(model, 0, 6, "Join %.2f ms / jobs %.1f", snapshot->stages[kPerformance_WorkJoin].mean_ms,
+         snapshot->counts[kPerformanceCount_HelperJobs]);
     Line(model, 0, 7, "GPU execution: unavailable");
     Line(model, 0, 8, "*Parallel sum, not frame time");
     Line(model, 0, 9, "Full stage details in run log");
@@ -141,21 +143,25 @@ void PerformanceOverlay_Build(const PerformanceSnapshot *snapshot, int level,
     for (int i = 0; i < count; i++) Stage(model, snapshot, 1, 6 + i, (PerformanceStage)(first + i));
   }
   const double *work = snapshot->counts;
-  Line(model, 1, 26, "Scene batches %.0f / verts %.0f", work[kPerformanceCount_Draws], work[kPerformanceCount_Vertices]);
+  Line(model, 1, 26, "Scene batches %.0f / verts %.0f", work[kPerformanceCount_Draws],
+       work[kPerformanceCount_Vertices]);
   /* Upload calls sit beside the byte count because a per-call cost can dwarf
    * a per-byte one: bytes alone cannot say whether a stage is transfer-bound
    * or call-bound, and the two want opposite fixes. */
   Line(model, 1, 27, "Scene upload %.2f + %.2f MiB / %.0f calls",
-      work[kPerformanceCount_UploadBytes] / 1048576, work[kPerformanceCount_DepthUploadBytes] / 1048576,
-      work[kPerformanceCount_UploadCalls]);
+       work[kPerformanceCount_UploadBytes] / 1048576,
+       work[kPerformanceCount_DepthUploadBytes] / 1048576, work[kPerformanceCount_UploadCalls]);
   Line(model, 1, 28, "Scan %.2f MiB / skip %.0f / realloc %.0f",
       work[kPerformanceCount_ScanBytes] / 1048576,
       work[kPerformanceCount_UploadSkipped], work[kPerformanceCount_MirrorReallocs]);
-  Line(model, 1, 29, "Jobs %.1f / helpers %.1f", work[kPerformanceCount_WorkJobs], work[kPerformanceCount_HelperJobs]);
-  Line(model, 1, 30, "Fallback %.2f / failed %.2f", work[kPerformanceCount_Fallbacks], work[kPerformanceCount_FailedPresents]);
+  Line(model, 1, 29, "Jobs %.1f / helpers %.1f", work[kPerformanceCount_WorkJobs],
+       work[kPerformanceCount_HelperJobs]);
+  Line(model, 1, 30, "Fallback %.2f / failed %.2f", work[kPerformanceCount_Fallbacks],
+       work[kPerformanceCount_FailedPresents]);
   Line(model, 1, 31, "CPU project/stage %.0f / %.0f", work[kPerformanceCount_CpuProject],
       work[kPerformanceCount_CpuStage]);
-  Line(model, 1, 32, "GPU reuse/publish %.1f / %.1f", work[kPerformanceCount_GpuReuse], work[kPerformanceCount_GeometryPublish]);
+  Line(model, 1, 32, "GPU reuse/publish %.1f / %.1f", work[kPerformanceCount_GpuReuse],
+       work[kPerformanceCount_GeometryPublish]);
   Line(model, 1, 33, "Opt/limit/reject %.1f/%.1f/%.1f", work[kPerformanceCount_GeometryOptOut],
       work[kPerformanceCount_GeometryLimit], work[kPerformanceCount_GeometryRejected]);
   Line(model, 0, 34, "Atlas hit %.1f copy %.2fMiB/%.1f",
@@ -167,14 +173,16 @@ void PerformanceOverlay_Build(const PerformanceSnapshot *snapshot, int level,
 
 static bool DrawPanel(ArRenderDevice *device, const PerformanceOverlayModel *model,
                        int offset_x, int offset_y) {
-  const ArRenderRectF panel = {(float)(model->panel.x - offset_x), (float)(model->panel.y - offset_y),
-      (float)model->panel.w, (float)model->panel.h};
+  const ArRenderRectF panel = { (float)(model->panel.x - offset_x),
+                                (float)(model->panel.y - offset_y), (float)model->panel.w,
+                                (float)model->panel.h };
   if (!ArRenderDevice_DrawSolidRect(device, &panel,
           (ArRenderColorF){.015f, .025f, .05f, .91f}, kArRenderBlendMode_Alpha))
     return false;
   for (int i = 0; i < model->line_count; i++) {
     const PerformanceOverlayLine *line = &model->lines[i];
-    SettingsOverlay_DrawGameText(line->x - offset_x, line->y - offset_y, model->scale, 255, line->text);
+    SettingsOverlay_DrawGameText(line->x - offset_x, line->y - offset_y, model->scale, 255,
+                                 line->text);
   }
   return true;
 }
@@ -185,8 +193,9 @@ bool PerformanceOverlay_Render(ArRenderDevice *device,
   if (!snapshot || !ArRenderDevice_IsReady(device)) return true;
   /* Both formatting and glyph submission are sample-rate work. Warm frames
    * draw one retained panel; optional target failures keep the direct path. */
-  if (!s_cache.initialized || s_cache.revision != snapshot->revision || s_cache.ready != snapshot->ready ||
-      s_cache.level != level || s_cache.width != output.width || s_cache.height != output.height) {
+  if (!s_cache.initialized || s_cache.revision != snapshot->revision ||
+      s_cache.ready != snapshot->ready || s_cache.level != level || s_cache.width != output.width ||
+      s_cache.height != output.height) {
     PerformanceOverlay_Build(snapshot, level, output, &s_cache.model);
     s_cache.revision = snapshot->revision;
     s_cache.ready = snapshot->ready;
@@ -195,7 +204,8 @@ bool PerformanceOverlay_Render(ArRenderDevice *device,
     s_cache.height = output.height;
     s_cache.initialized = true;
     s_cache.texture_ready = false;
-    if (s_cache.texture_width != s_cache.model.panel.w || s_cache.texture_height != s_cache.model.panel.h) {
+    if (s_cache.texture_width != s_cache.model.panel.w ||
+        s_cache.texture_height != s_cache.model.panel.h) {
       ArRenderDevice_DestroyTexture(device, s_cache.texture);
       s_cache.texture = ArRenderTexture_Invalid();
       s_cache.texture_width = s_cache.model.panel.w;
@@ -210,12 +220,15 @@ bool PerformanceOverlay_Render(ArRenderDevice *device,
         .format = kArRenderPixelFormat_Argb8888, .usage = kArRenderTextureUsage_Target,
         .filter = kArRenderFilter_Nearest, .blend = kArRenderBlendMode_AlphaPremultiplied};
     if (!ArRenderCapabilities_Has(ArRenderDevice_Capabilities(device),
-            kArRenderCapability_ScopedRenderTargets | kArRenderCapability_RenderTargets) ||
-        (!ArRenderTexture_IsValid(s_cache.texture) && !ArRenderDevice_CreateTexture(device, &desc, &s_cache.texture))) {
+                                  kArRenderCapability_ScopedRenderTargets |
+                                      kArRenderCapability_RenderTargets) ||
+        (!ArRenderTexture_IsValid(s_cache.texture) &&
+         !ArRenderDevice_CreateTexture(device, &desc, &s_cache.texture))) {
       s_cache.texture_unavailable = true;
     } else {
       ArRenderTargetState saved;
-      const ArRenderTargetBeginResult begin = ArRenderDevice_BeginTarget(device, s_cache.texture, &saved);
+      const ArRenderTargetBeginResult begin =
+          ArRenderDevice_BeginTarget(device, s_cache.texture, &saved);
       if (begin == kArRenderTargetBegin_StateLost) return false;
       if (begin == kArRenderTargetBegin_Ready) {
         if (ArRenderDevice_Clear(device, (ArRenderColorF){0})) {

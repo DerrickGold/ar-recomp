@@ -453,14 +453,17 @@ static void RunOneEmulatedTickWork(bool *stop_running) {
     extern void snes_catchup_stats(uint64_t *calls, uint64_t *cycles);
     static uint64_t win_start, run_ms_sum, run_ms_max;
     static int win_frames;
-    static uint64_t last_cu_calls, last_cu_cycles; static unsigned last_gf;
+    static uint64_t last_cu_calls, last_cu_cycles;
+    static unsigned last_gf;
     uint64_t t1 = SDL_GetTicks();
     uint64_t dt = t1 - perf_t0;
-    run_ms_sum += dt; if (dt > run_ms_max) run_ms_max = dt;
+    run_ms_sum += dt;
+    if (dt > run_ms_max) run_ms_max = dt;
     win_frames++;
     if (!win_start) win_start = t1;
     if (t1 - win_start >= kPerformanceReportIntervalMs) {
-      uint64_t cc, cy; snes_catchup_stats(&cc, &cy);
+      uint64_t cc, cy;
+      snes_catchup_stats(&cc, &cy);
       const unsigned gf =
           ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
       fprintf(stderr, "[perf] fps=%d run-ms avg=%.1f max=%llu gf+=%u "
@@ -471,8 +474,13 @@ static void RunOneEmulatedTickWork(bool *stop_running) {
               (unsigned long long)(cc - last_cu_calls),
               (unsigned long long)(cy - last_cu_cycles),
               g_ram[kActRaiserWram_MapGroup]);
-      last_cu_calls = cc; last_cu_cycles = cy; last_gf = gf;
-      win_start = t1; run_ms_sum = 0; run_ms_max = 0; win_frames = 0;
+      last_cu_calls = cc;
+      last_cu_cycles = cy;
+      last_gf = gf;
+      win_start = t1;
+      run_ms_sum = 0;
+      run_ms_max = 0;
+      win_frames = 0;
     }
   }
 }
@@ -683,9 +691,12 @@ static void DrawAndPresentFrame(HostDisplayPresentMode present_mode,
     }
     const unsigned gf =
         ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
-    int want = 0; char fname[320]; fname[0] = 0;
+    int want = 0;
+    char fname[320];
+    fname[0] = 0;
     if (shot_at_enabled && !shot_done && gf >= shot_at) {
-      shot_done = true; want = 1;
+      shot_done = true;
+      want = 1;
       RunDirFile(fname, sizeof(fname), "shot.ppm");
     } else if (shot_series_enabled && gf >= shot_from && gf <= shot_to &&
                (gf % shot_every) == 0) {
@@ -748,41 +759,52 @@ static void SlotDidCommit(void *context,const uint8_t *image) {
   SaveSlots_DidCommit(context,image);
 }
 static bool SlotValidateActive(void *context,SaveError *error) {
-  SaveSlots *slots=context;SaveSlotDetails details;
+  SaveSlots *slots = context;
+  SaveSlotDetails details;
   if(!SaveSlots_ObserveCheckpoints(slots,error))return false;
   if(SaveSlotManager_Inspect(slots,slots->active,&details))return true;
-  if(error)*error=details.error;return false;
+  if (error) *error = details.error;
+  return false;
 }
 static bool SlotScan(SaveSlotCollection *out) {
   if(!out)return false;
   *out=(SaveSlotCollection){.active=s_save_slots.active,
     .writable=s_managed_slots && InputReplay_PolicyChangesAllowed() && !s_save_slots.pending};
   if(!s_managed_slots) {
-    snprintf(out->error.message,sizeof(out->error.message),"External save: slot switching is unavailable for diagnostic paths and recordings.");
+    snprintf(out->error.message, sizeof(out->error.message),
+             "External save: slot switching is unavailable for diagnostic paths and recordings.");
     for(unsigned i=0;i<kSaveSlotCount;++i)out->slots[i].state=kSaveSlot_Unavailable;
     return true;
   }
-  if(!out->writable)snprintf(out->error.message,sizeof(out->error.message),"Save slots are read-only during recording, replay or a pending restart.");
-  for(unsigned i=0;i<kSaveSlotCount;++i)(void)SaveSlotManager_Inspect(&s_save_slots,i,&out->slots[i]);
+  if (!out->writable)
+    snprintf(out->error.message, sizeof(out->error.message),
+             "Save slots are read-only during recording, replay or a pending restart.");
+  for (unsigned i = 0; i < kSaveSlotCount; ++i)
+    (void)SaveSlotManager_Inspect(&s_save_slots, i, &out->slots[i]);
   return true;
 }
 static bool SlotDraft(unsigned slot,ArRegionalSession *out,SaveError *error) {
   if(!s_managed_slots || slot>=kSaveSlotCount) {
-    snprintf(error->message,sizeof(error->message),"This save slot is unavailable.");return false;
+    snprintf(error->message, sizeof(error->message), "This save slot is unavailable.");
+    return false;
   }
   if(s_save_slots.records[slot].prepared)
     return SaveSlotManager_ReadDraft(&s_save_slots,slot,out,error);
   uint8_t id[16];
   if(!HostCampaignIdentity_Create(NULL,id)) {
-    snprintf(error->message,sizeof(error->message),"Cannot create a new campaign identity.");return false;
+    snprintf(error->message, sizeof(error->message), "Cannot create a new campaign identity.");
+    return false;
   }
-  ActRaiserRegionalRulesView current;ArRegionalSession baseline;
+  ActRaiserRegionalRulesView current;
+  ArRegionalSession baseline;
   const ArRegionalCostPolicy costs={{0}};
   if(!ArRegionalSession_NewGame(&baseline,slot,id,&costs))return false;
-  const ArRegionalRules *rules=ActRaiserRegional_CopyRulesView(&current)?&current.requested:&baseline.requested;
+  const ArRegionalRules *rules =
+      ActRaiserRegional_CopyRulesView(&current) ? &current.requested : &baseline.requested;
   RandomizerConfig recipe=Randomizer_CurrentConfig();
   if(!SaveSlotManager_Draft(out,slot,id,rules,&recipe)) {
-    snprintf(error->message,sizeof(error->message),"Cannot prepare this new-game setup.");return false;
+    snprintf(error->message, sizeof(error->message), "Cannot prepare this new-game setup.");
+    return false;
   }
   return true;
 }
@@ -790,7 +812,8 @@ static bool SlotDraftView(const ArRegionalSession *draft,ActRaiserRegionalRulesV
   if(!SaveSlotManager_View(draft,true,out))return false;
   ActRaiserRegionalRulesView current;
   if(ActRaiserRegional_CopyRulesView(&current)) {
-    out->artwork_available=current.artwork_available;out->sequences_available=current.sequences_available;
+    out->artwork_available = current.artwork_available;
+    out->sequences_available = current.sequences_available;
     out->actor_artwork_available=current.actor_artwork_available;
   }
   return true;
@@ -800,15 +823,21 @@ static bool SlotSaveRegionalSettings(void *context,const ArRegionalSession *befo
   SaveSlots *slots=context;
   if(!InputReplay_PolicyChangesAllowed() || slots->pending || before->slot!=slots->active ||
       RuntimeSettings_LifecycleRequest()!=kRuntimeLifecycle_None) {
-    snprintf(error->message,sizeof(error->message),"Save routing is not ready for regional settings.");return false;
+    snprintf(error->message, sizeof(error->message),
+             "Save routing is not ready for regional settings.");
+    return false;
   }
   /* Finish any already-completed native save first. Never take a new gameplay
    * snapshot just because a menu setting changed. */
   if(!SaveSystem_FlushForSwitch(error) || !SaveSystem_ValidateActive(error))return false;
   uint8_t image[kActRaiserSramSize];
   if(SaveSystem_CopyDurableImage(image)) {
-    SaveFileFormat format=SaveSystem_ActiveBackend()==kSaveBackend_Ini?kSaveFileFormat_Ini:kSaveFileFormat_NativeSrm;
-    if(!ArRegionalCampaign_SaveSettings(before,after,format,SaveSystem_ActivePath(),image,error))return false;
+    SaveFileFormat format = SaveSystem_ActiveBackend() == kSaveBackend_Ini
+        ? kSaveFileFormat_Ini
+        : kSaveFileFormat_NativeSrm;
+    if (!ArRegionalCampaign_SaveSettings(before, after, format, SaveSystem_ActivePath(), image,
+                                         error))
+      return false;
     /* The companion is already durable. A failed index refresh is retryable
      * by normal validation; don't report the committed edit as rolled back. */
     SaveError index_error={{0}};
@@ -818,29 +847,43 @@ static bool SlotSaveRegionalSettings(void *context,const ArRegionalSession *befo
   }
   ArRegionalSession draft;
   const RandomizerConfig recipe=Randomizer_CurrentConfig();
-  uint8_t bytes[kSaveSlotDraftCapacity];size_t size;
+  uint8_t bytes[kSaveSlotDraftCapacity];
+  size_t size;
   if(!SaveSlotManager_Draft(&draft,after->slot,after->campaign,&after->requested,&recipe) ||
       !ArRegionalSession_Encode(&draft,bytes,sizeof(bytes),&size)) {
-    snprintf(error->message,sizeof(error->message),"Cannot prepare the new-game settings.");return false;
+    snprintf(error->message, sizeof(error->message), "Cannot prepare the new-game settings.");
+    return false;
   }
   return SaveSlots_UpdateDraft(slots,bytes,size,error);
 }
-static bool SlotStart(unsigned slot,uint64_t fingerprint,const ArRegionalSession *draft,SaveError *error) {
+static bool SlotStart(unsigned slot, uint64_t fingerprint, const ArRegionalSession *draft,
+                      SaveError *error) {
   ActRaiserRegionalRulesView current;
-  if(!s_managed_slots || !InputReplay_PolicyChangesAllowed() || s_save_slots.pending ||
-      RuntimeSettings_LifecycleRequest()!=kRuntimeLifecycle_None ||
-      (ActRaiserRegional_CopyRulesView(&current) && (current.population_pending || current.miracle_in_progress))) {
-    snprintf(error->message,sizeof(error->message),"Finish the current game operation before changing saves.");return false;
+  if (!s_managed_slots || !InputReplay_PolicyChangesAllowed() || s_save_slots.pending ||
+      RuntimeSettings_LifecycleRequest() != kRuntimeLifecycle_None ||
+      (ActRaiserRegional_CopyRulesView(&current) &&
+       (current.population_pending || current.miracle_in_progress))) {
+    snprintf(error->message, sizeof(error->message),
+             "Finish the current game operation before changing saves.");
+    return false;
   }
   SaveSlotDetails target;
   if(!SaveSlotManager_Inspect(&s_save_slots,slot,&target)){*error=target.error;return false;}
-  if(target.fingerprint!=fingerprint){snprintf(error->message,sizeof(error->message),"The slot changed. Close and reopen Saves to review it.");return false;}
-  uint8_t bytes[kSaveSlotDraftCapacity];size_t size=0;
+  if (target.fingerprint != fingerprint) {
+    snprintf(error->message, sizeof(error->message),
+             "The slot changed. Close and reopen Saves to review it.");
+    return false;
+  }
+  uint8_t bytes[kSaveSlotDraftCapacity];
+  size_t size = 0;
   if(draft) {
     ArRegionalSession validated;
-    if(draft->slot!=slot || !SaveSlotManager_Draft(&validated,slot,draft->campaign,&draft->requested,&draft->randomizer) ||
-        !ArRegionalSession_Encode(&validated,bytes,sizeof(bytes),&size)) {
-      snprintf(error->message,sizeof(error->message),"The new-game configuration is invalid.");return false;
+    if (draft->slot != slot ||
+        !SaveSlotManager_Draft(&validated, slot, draft->campaign, &draft->requested,
+                               &draft->randomizer) ||
+        !ArRegionalSession_Encode(&validated, bytes, sizeof(bytes), &size)) {
+      snprintf(error->message, sizeof(error->message), "The new-game configuration is invalid.");
+      return false;
     }
   }
   if(!SaveSystem_FlushForSwitch(error) || !SaveSlots_Flush(&s_save_slots,error))return false;
@@ -850,9 +893,16 @@ static bool SlotStart(unsigned slot,uint64_t fingerprint,const ArRegionalSession
   /* Global editor overrides have no destination identity. Disarm them before
    * persisting the restart; manual editor actions remain available per slot. */
   g_settings.save_edit_armed=false;
-  if(!Settings_Save(path)){snprintf(error->message,sizeof(error->message),"Could not save preferences. The current slot remains active.");return false;}
-  if(!SaveSlots_Request(&s_save_slots,slot,fingerprint,draft?bytes:NULL,size,(SaveBackend)g_settings.save_backend,error))return false;
-  RuntimeSettings_RequestPreparedRestart();return true;
+  if (!Settings_Save(path)) {
+    snprintf(error->message, sizeof(error->message),
+             "Could not save preferences. The current slot remains active.");
+    return false;
+  }
+  if (!SaveSlots_Request(&s_save_slots, slot, fingerprint, draft ? bytes : NULL, size,
+                         (SaveBackend)g_settings.save_backend, error))
+    return false;
+  RuntimeSettings_RequestPreparedRestart();
+  return true;
 }
 
 static void SlotValidateBoot(void) {
@@ -860,14 +910,21 @@ static void SlotValidateBoot(void) {
     SaveError error={{0}};SaveSlotDetails details;
     bool valid=SaveSlots_ValidateDestination(&s_save_slots,&error);
     if(valid && !SaveSlotManager_Inspect(&s_save_slots,s_save_slots.destination,&details)) {
-      error=details.error;valid=false;
+      error = details.error;
+      valid = false;
     }
     if(valid)return;
     const SDL_MessageBoxButtonData buttons[]={
       {SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT,0,"Exit"},
       {0,1,"Return to previous slot"},{SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT,2,"Retry"}};
-    char message[512];snprintf(message,sizeof(message),"Slot %u could not be opened.\n%s\n\nYour saves have been preserved.",s_save_slots.destination+1,error.message);
-    SDL_MessageBoxData box={SDL_MESSAGEBOX_ERROR,g_window,"Save recovery",message,3,buttons,NULL};int choice=0;
+    char message[512];
+    snprintf(message, sizeof(message),
+             "Slot %u could not be opened.\n%s\n\nYour saves have been preserved.",
+             s_save_slots.destination + 1, error.message);
+    SDL_MessageBoxData box = {
+      SDL_MESSAGEBOX_ERROR, g_window, "Save recovery", message, 3, buttons, NULL
+    };
+    int choice = 0;
     if(!SDL_ShowMessageBox(&box,&choice) || choice<=0)Die(message);
     if(choice==1 && !SaveSlots_ReturnToPrevious(&s_save_slots,&error))Die(error.message);
   }
@@ -959,7 +1016,9 @@ static void RunPostTickHousekeeping(void) {
   PerformanceMetrics_RecordBatch(PerformanceMetrics_Epoch(), kPerformance_SettingsWrite,
       written.elapsed_ns, written.maximum_ns, written.writes);
   if (written.failed)
-    fprintf(stderr, "[settings] latest settings write failed; it will be retried by the next save or on exit\n");
+    fprintf(
+        stderr,
+        "[settings] latest settings write failed; it will be retried by the next save or on exit\n");
 
   /* Auto-persist battery SRAM the moment the game writes a save, so progress
    * survives a freeze/force-quit (the clean-exit save-system write never runs
@@ -1045,10 +1104,12 @@ typedef struct AppBoot {
 
 static bool RegionalContinuePrompt(void *context, ActRaiserRegionalContinueNotice notice) {
   const AppBoot *app = context;
-  if (!app || app->headless) return false; /* Never silently acknowledge or wait on an invisible menu. */
-  const char *body = notice == kActRaiserRegionalContinue_Estimate ? "overlay.region.legacy_estimate" :
-      notice == kActRaiserRegionalContinue_LoadFailed ? "overlay.region.continue_failed" :
-      "overlay.region.adoption_failed";
+  if (!app || app->headless)
+    return false; /* Never silently acknowledge or wait on an invisible menu. */
+  const char *body = notice == kActRaiserRegionalContinue_Estimate
+      ? "overlay.region.legacy_estimate"
+      : notice == kActRaiserRegionalContinue_LoadFailed ? "overlay.region.continue_failed"
+                                                        : "overlay.region.adoption_failed";
   const char *accept = notice == kActRaiserRegionalContinue_Estimate ?
       "overlay.region.acknowledge" : "overlay.decision.retry";
   if (!SettingsOverlay_BeginDecision("overlay.region.continue_title", body, accept)) return false;
@@ -1071,17 +1132,21 @@ static bool RegionalPopulationPrompt(void *context,ActRaiserRegionalPopulationNo
         source,removed,body,sizeof(body)))return false;
     if(gameplay_profile) {
       const size_t used=strlen(body);
-      const char *scope=ArUiCatalog_Text((ArUiLocale)g_settings.interface_language,"overlay.region.menu.confirm_gameplay",NULL);
+      const char *scope = ArUiCatalog_Text((ArUiLocale)g_settings.interface_language,
+                                           "overlay.region.menu.confirm_gameplay", NULL);
       const int written=snprintf(body+used,sizeof(body)-used,"\n\n%s",scope);
       if(written<0 || (size_t)written>=sizeof(body)-used)return false;
     }
     opened=SettingsOverlay_BeginDecisionText("overlay.region.population_label",body,
         "overlay.region.population_accept");
   } else {
-    const char *key=notice==kActRaiserRegionalPopulation_Complete?"overlay.region.population_complete":
-        notice==kActRaiserRegionalPopulation_NamePending?"overlay.region.population_name_pending":
-        "overlay.region.population_failed";
-    opened=SettingsOverlay_BeginNotice("overlay.region.population_label",key,"overlay.region.acknowledge");
+    const char *key = notice == kActRaiserRegionalPopulation_Complete
+        ? "overlay.region.population_complete"
+        : notice == kActRaiserRegionalPopulation_NamePending
+        ? "overlay.region.population_name_pending"
+        : "overlay.region.population_failed";
+    opened = SettingsOverlay_BeginNotice("overlay.region.population_label", key,
+                                         "overlay.region.acknowledge");
   }
   if(!opened)return false;
   SettingsOverlayDecisionResult result;
@@ -1102,16 +1167,19 @@ static int AppBoot_ParseArgs(AppBoot *app, int argc, char **argv) {
 
   for (int i = 1; i < argc; i++) {
     if (strcmp(argv[i], "--config") == 0 && i + 1 < argc) {
-      app->config_path = argv[++i];config_argument=i;
+      app->config_path = argv[++i];
+      config_argument = i;
     } else if (argv[i][0] != '-') {
-      app->rom_path = argv[i];rom_argument=i;
+      app->rom_path = argv[i];
+      rom_argument = i;
     }
   }
 
   /* Desktop launchers resolve portable/custom/global storage once and pass
    * AR_USER_DATA_DIR. Honor it before folder-bundle anchoring; application
    * resources and writable player data may live in different directories. */
-  static char rom_abs[kHostPathCapacity],config_abs[kHostPathCapacity],executable_abs[kHostPathCapacity];
+  static char rom_abs[kHostPathCapacity], config_abs[kHostPathCapacity],
+      executable_abs[kHostPathCapacity];
   const char *data_root=SDL_getenv_unsafe("AR_USER_DATA_DIR");
   const bool explicit_data=data_root && *data_root;
   const bool folder_bundle=PortablePaths_IsBundle();
@@ -1125,27 +1193,32 @@ static int AppBoot_ParseArgs(AppBoot *app, int argc, char **argv) {
     if(executable_name) {
       if(!snesrecomp_abspath(argv[0],executable_abs,sizeof(executable_abs)))return 1;
       argv[0]=executable_abs;
-    } else if(snesrecomp_exe_dir_path(argv[0],executable_abs,sizeof(executable_abs)) && sr_path_exists(executable_abs))
+    } else if (snesrecomp_exe_dir_path(argv[0], executable_abs, sizeof(executable_abs)) &&
+               sr_path_exists(executable_abs))
       argv[0]=executable_abs;
     if(app->rom_path) {
       if(!snesrecomp_abspath(app->rom_path,rom_abs,sizeof(rom_abs)))return 1;
-      app->rom_path=rom_abs;argv[rom_argument]=rom_abs;
+      app->rom_path = rom_abs;
+      argv[rom_argument] = rom_abs;
     }
     if(app->config_path) {
       if(!snesrecomp_abspath(app->config_path,config_abs,sizeof(config_abs)))return 1;
-      app->config_path=config_abs;argv[config_argument]=config_abs;
+      app->config_path = config_abs;
+      argv[config_argument] = config_abs;
     }
     if(explicit_data) {
       SaveError error={{0}};char absolute_root[kHostPathCapacity];
       if(!snesrecomp_abspath(data_root,absolute_root,sizeof(absolute_root)) ||
           !SavePaths_EnsureDirectory(absolute_root,&error) || sr_utf8_chdir(absolute_root)) {
-        fprintf(stderr,"[storage] Cannot use the selected data directory: %s\n",data_root);return 1;
+        fprintf(stderr, "[storage] Cannot use the selected data directory: %s\n", data_root);
+        return 1;
       }
       /* Restart inherits this absolute root, including when the original
        * explicit path was relative to the caller's working directory. */
       if(SDL_setenv_unsafe("AR_USER_DATA_DIR",absolute_root,1)!=0)return 1;
     } else snesrecomp_anchor_to_exe_dir();
-    if(!app->rom_path && folder_bundle && snesrecomp_exe_dir_path("user-rom.sfc",rom_abs,sizeof(rom_abs)))
+    if (!app->rom_path && folder_bundle &&
+        snesrecomp_exe_dir_path("user-rom.sfc", rom_abs, sizeof(rom_abs)))
       app->rom_path=rom_abs;
   }
 
@@ -1249,7 +1322,8 @@ static void AppBoot_ResolveDisplayAndSettings(AppBoot *app) {
    * bundle). Catalog scanning does not move it to the executable directory. */
   ArLanguagePackCatalog *catalog = calloc(1, sizeof(*catalog));
   SettingsLocalizationPack *choices = calloc(kSettingsLocalizationMaximumPacks, sizeof(*choices));
-  if (catalog && choices && ArLanguagePackCatalog_ScanDesktop(catalog, "game-assets/languages/packs")) {
+  if (catalog && choices &&
+      ArLanguagePackCatalog_ScanDesktop(catalog, "game-assets/languages/packs")) {
     for (size_t i = 0; i < catalog->count; ++i) {
       const ArLanguagePackCatalogEntry *entry = &catalog->entries[i];
       snprintf(choices[i].id, sizeof(choices[i].id), "%s", entry->metadata.package_id);
@@ -1691,12 +1765,17 @@ static void LoadRegionalMedia(void) {
     char path[128],error[192];
     snprintf(path,sizeof(path),"game-assets/regions/%s.armedia",donors[i]);
     if(!sr_path_exists(path))continue;
-    if(!ArHostRegionalMediaFiles_Load(&s_regional_media,path,(ArRegionalMediaRelease)(i+1),error,sizeof(error))) {
-      fprintf(stderr,"[regional-media] %s: %s; US graphics retained\n",path,error);continue;
+    if (!ArHostRegionalMediaFiles_Load(&s_regional_media, path, (ArRegionalMediaRelease)(i + 1),
+                                       error, sizeof(error))) {
+      fprintf(stderr, "[regional-media] %s: %s; US graphics retained\n", path, error);
+      continue;
     }
-    const ArRegionalMediaView *view=ArHostRegionalMediaFiles_View(&s_regional_media,(ArRegionalMediaRelease)(i+1));
+    const ArRegionalMediaView *view =
+        ArHostRegionalMediaFiles_View(&s_regional_media, (ArRegionalMediaRelease)(i + 1));
     if(!ActRaiserRegionalMedia_AddDonor(view)) {
-      fprintf(stderr,"[regional-media] %s: donor does not match filename; US graphics retained\n",path);continue;
+      fprintf(stderr, "[regional-media] %s: donor does not match filename; US graphics retained\n",
+              path);
+      continue;
     }
     fprintf(stderr,"[regional-media] loaded %s (%zu reviewed resources)\n",donors[i],view->count);
   }
@@ -1994,7 +2073,8 @@ static void AppBoot_StartGame(AppBoot *app) {
    * the reference so the save-validity check behaves identically. Only applies
    * to a fresh cart (cart_load zero-fills it); a real .sav load overrides. */
   {
-    extern uint8 *g_sram; extern int g_sram_size;
+    extern uint8 *g_sram;
+    extern int g_sram_size;
     const char *senv = getenv("AR_SRAM_FILL");
     int sfill = senv ? (int)strtoul(senv, NULL, 0)
                      : kDefaultPowerOnSramFill;
@@ -2009,7 +2089,8 @@ static void AppBoot_StartGame(AppBoot *app) {
   UserDataFile(saves_dir, sizeof saves_dir, "saves");
   mkdir(saves_dir, 0755);
   {
-    extern uint8 *g_sram; extern int g_sram_size;
+    extern uint8 *g_sram;
+    extern int g_sram_size;
     SaveError error = {{0}};
     const char *native_path = getenv("AR_SAVE_NATIVE_PATH");
     const char *ini_path = getenv("AR_SAVE_INI_PATH");
@@ -2019,9 +2100,11 @@ static void AppBoot_StartGame(AppBoot *app) {
     if(s_managed_slots) {
       if(!SaveSlots_Open(&s_save_slots,saves_dir,backend,&error))Die(error.message);
       SlotValidateBoot();
-      if(!SaveSlots_Paths(&s_save_slots,s_save_slots.destination,save_srm,save_ini,sizeof(save_srm)))
+      if (!SaveSlots_Paths(&s_save_slots, s_save_slots.destination, save_srm, save_ini,
+                           sizeof(save_srm)))
         Die("Save slot path is too long.");
-      native_path=save_srm;ini_path=save_ini;
+      native_path = save_srm;
+      ini_path = save_ini;
       backend=SaveSlots_DestinationBackend(&s_save_slots);
     }
     if (!native_path || !native_path[0]) {
@@ -2036,7 +2119,9 @@ static void AppBoot_StartGame(AppBoot *app) {
                            backend,
                            native_path, ini_path, &error))
       Die(error.message);
-    if(!SaveSystem_SetStorageRoot(saves_dir,s_managed_slots?(int)s_save_slots.destination:-1,&error))Die(error.message);
+    if (!SaveSystem_SetStorageRoot(saves_dir, s_managed_slots ? (int)s_save_slots.destination : -1,
+                                   &error))
+      Die(error.message);
     snprintf(legacy_srm, sizeof(legacy_srm), "%s/%s.srm",
              saves_dir, RtlGameIdentifier());
     if(!s_managed_slots && !SaveSystem_MigrateLegacyNative(legacy_srm,&error))Die(error.message);
@@ -2070,15 +2155,19 @@ static void AppBoot_StartGame(AppBoot *app) {
   OracleTrace_Init(RtlGameRunner());
   ForcedInput_Init();
   InputReplay_Init();
-  if (!ActRaiserRegional_InitializeSlot(s_managed_slots?s_save_slots.destination:0,HostCampaignIdentity_Create, NULL))
+  if (!ActRaiserRegional_InitializeSlot(s_managed_slots ? s_save_slots.destination : 0,
+                                        HostCampaignIdentity_Create, NULL))
     Die("Regional campaign storage could not be initialized; saves preserved.");
   if(s_managed_slots) {
     SaveSlotDetails details;
-    if(!SaveSlotManager_Inspect(&s_save_slots,s_save_slots.destination,&details))Die(details.error.message);
+    if (!SaveSlotManager_Inspect(&s_save_slots, s_save_slots.destination, &details))
+      Die(details.error.message);
     if(details.state==kSaveSlot_Empty && details.prepared) {
-      ArRegionalSession draft;SaveError error={{0}};
-      if(!SaveSlotManager_ReadDraft(&s_save_slots,s_save_slots.destination,&draft,&error) ||
-          !ActRaiserRegional_StageNewGame(&draft))Die("Cannot stage the prepared new game; saves preserved.");
+      ArRegionalSession draft;
+      SaveError error = { { 0 } };
+      if (!SaveSlotManager_ReadDraft(&s_save_slots, s_save_slots.destination, &draft, &error) ||
+          !ActRaiserRegional_StageNewGame(&draft))
+        Die("Cannot stage the prepared new game; saves preserved.");
     }
   }
   ActRaiserRegional_SetContinuePrompt(RegionalContinuePrompt, app);
@@ -2094,7 +2183,8 @@ static void AppBoot_StartGame(AppBoot *app) {
     const SettingsSaveHost host = SettingsPersistence_Host(s_settings_writer);
     Settings_SetSaveHost(&host);
     if (!s_settings_writer)
-      fprintf(stderr, "[settings] background writer unavailable; using durable synchronous saves\n");
+      fprintf(stderr,
+              "[settings] background writer unavailable; using durable synchronous saves\n");
   }
   ScheduledSettings_Init();
 
@@ -2123,11 +2213,13 @@ static void AppBoot_StartGame(AppBoot *app) {
   if(s_managed_slots) {
     SaveError error={{0}};
     if(!SaveSlots_Acknowledge(&s_save_slots,&error))Die(error.message);
-    const SaveStorageHooks storage={&s_save_slots,SlotBeforeCommit,SlotDidCommit,SlotValidateActive};
+    const SaveStorageHooks storage = { &s_save_slots, SlotBeforeCommit, SlotDidCommit,
+                                       SlotValidateActive };
     SaveSystem_SetStorageHooks(&storage);
     ActRaiserRegional_SetSettingsWriter(SlotSaveRegionalSettings,&s_save_slots);
   }
-  const SettingsOverlaySaveSlotHooks slots={SlotScan,SlotDraft,SaveSlotManager_Edit,SlotDraftView,SlotStart};
+  const SettingsOverlaySaveSlotHooks slots = { SlotScan, SlotDraft, SaveSlotManager_Edit,
+                                               SlotDraftView, SlotStart };
   SettingsOverlay_SetSaveSlotHooks(&slots);
 }
 
@@ -2737,7 +2829,8 @@ static int AppShutdown(AppBoot *app, char **argv) {
     UserDataFile(settings_path, sizeof(settings_path), "settings.ini");
     settings_flush_failed = !Settings_Save(settings_path);
     if (settings_flush_failed)
-      fprintf(stderr, "[settings] shutdown write failed; recent preferences may not have been saved\n");
+      fprintf(stderr,
+              "[settings] shutdown write failed; recent preferences may not have been saved\n");
   }
 
   /* Rendering is synchronous, so nothing can be mid-render during the reverse-
@@ -2852,7 +2945,9 @@ static int AppShutdown(AppBoot *app, char **argv) {
 
   if (RuntimeSettings_LifecycleRequest() == kRuntimeLifecycle_Restart) {
     if(save_flush_failed || settings_flush_failed || fatal_session) {
-      fprintf(stderr,"[lifecycle] restart stopped after a persistence failure; the request is retained for recovery\n");
+      fprintf(
+          stderr,
+          "[lifecycle] restart stopped after a persistence failure; the request is retained for recovery\n");
       return 1;
     }
     fprintf(stderr, "[lifecycle] restarting process\n");

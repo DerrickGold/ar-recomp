@@ -11,11 +11,14 @@
  * these root-only boundaries (their states are 21/23, not 0E/0F). */
 static bool RootShape(CpuState *cpu, unsigned state) {
   if (!ActRaiserRegional_DoubleStatueVolley() || !cpu || cpu->PB || cpu->DB || cpu->D ||
-      cpu->m_flag || cpu->x_flag || cpu->emulation || cpu->_flag_D || (cpu->P & CPU_P_D)) return false;
+      cpu->m_flag || cpu->x_flag || cpu->emulation || cpu->_flag_D || (cpu->P & CPU_P_D))
+    return false;
   const unsigned x = cpu->X;
   if (x < kActRaiserWram_ActionObjectTable ||
-      x >= kActRaiserWram_ActionObjectTable + kActRaiserActionObjectCount * kActRaiserActionObjectStride ||
-      (x - kActRaiserWram_ActionObjectTable) % kActRaiserActionObjectStride) return false;
+      x >= kActRaiserWram_ActionObjectTable +
+              kActRaiserActionObjectCount * kActRaiserActionObjectStride ||
+      (x - kActRaiserWram_ActionObjectTable) % kActRaiserActionObjectStride)
+    return false;
   const uint16_t source = cpu_read16(cpu, 0, x + kActRaiserActionObject_SourceDescriptor);
   return cpu_read8(cpu, 0, kActRaiserWram_MapGroup) == 2 &&
       (source == 0xbd76 || source == 0xbd84) &&
@@ -25,7 +28,8 @@ static bool RootShape(CpuState *cpu, unsigned state) {
 }
 bool ActRaiser_StatueVolleyBeginEntry(CpuState *cpu) { return RootShape(cpu, 0x0e); }
 bool ActRaiser_StatueVolleyRepeatEntry(CpuState *cpu) {
-  return RootShape(cpu, 0x0f) && cpu_read16(cpu, 0, cpu->X + kActRaiserActionObject_LocalCounter) == 1;
+  return RootShape(cpu, 0x0f) &&
+      cpu_read16(cpu, 0, cpu->X + kActRaiserActionObject_LocalCounter) == 1;
 }
 static RecompReturn WindUp(CpuState *cpu, uint16_t remaining, uint32_t origin) {
   cpu_write16(cpu, 0, cpu->X + kActRaiserActionObject_LocalCounter, remaining);
@@ -43,6 +47,7 @@ RecompReturn ActRaiser_StatueVolleyBegin(CpuState *cpu) {
   return WindUp(cpu, 1, 0x00bd9f);
 }
 RecompReturn ActRaiser_StatueVolleyRepeat(CpuState *cpu) {
-  if (!ActRaiser_StatueVolleyRepeatEntry(cpu)) ActRaiserHleFatal("Unsupported statue second wind-up");
+  if (!ActRaiser_StatueVolleyRepeatEntry(cpu))
+    ActRaiserHleFatal("Unsupported statue second wind-up");
   return WindUp(cpu, 0, 0x00bda8);
 }

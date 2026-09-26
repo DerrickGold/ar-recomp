@@ -216,10 +216,12 @@ bool RuntimeSettings_HandleAction(const SettingDesc *desc) {
   }
   case kSettingAction_SaveImport: {
     const char *path = getenv("AR_SAVE_IMPORT");
-    char selected[kHostPathCapacity];SaveError error={{0}};
+    char selected[kHostPathCapacity];
+    SaveError error = { { 0 } };
     if(!path || !*path) {
       if(!SaveSystem_DefaultImportPath(selected,sizeof(selected),&error)) {
-        fprintf(stderr,"[saves] import failed: %s\n",error.message);return false;
+        fprintf(stderr, "[saves] import failed: %s\n", error.message);
+        return false;
       }
       path=selected;
     }
@@ -236,7 +238,8 @@ bool RuntimeSettings_HandleAction(const SettingDesc *desc) {
   case kSettingAction_SaveExportCampaign: {
     SaveError error={{0}};
     if(!SaveSystem_ExportToLibrary(kSaveFileFormat_NativeSrm,true,&error)) {
-      fprintf(stderr,"[saves] campaign export failed: %s\n",error.message);return false;
+      fprintf(stderr, "[saves] campaign export failed: %s\n", error.message);
+      return false;
     }
     break;
   }
@@ -244,8 +247,10 @@ bool RuntimeSettings_HandleAction(const SettingDesc *desc) {
   case kSettingAction_SaveExportIni: {
     const bool ini = desc->action == kSettingAction_SaveExportIni;
     SaveError error = {{0}};
-    if(!SaveSystem_ExportToLibrary(ini?kSaveFileFormat_Ini:kSaveFileFormat_NativeSrm,false,&error)) {
-      fprintf(stderr,"[saves] raw export failed: %s\n",error.message);return false;
+    if (!SaveSystem_ExportToLibrary(ini ? kSaveFileFormat_Ini : kSaveFileFormat_NativeSrm, false,
+                                    &error)) {
+      fprintf(stderr, "[saves] raw export failed: %s\n", error.message);
+      return false;
     }
     break;
   }

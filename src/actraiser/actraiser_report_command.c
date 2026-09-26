@@ -5,8 +5,14 @@
 #include "actraiser_native_call.h"
 
 #define LEAF(bank, pc) extern RecompReturn bank_##bank##_##pc##_M1X0(CpuState *)
-LEAF(01, 899B); LEAF(03, BF8C); LEAF(01, 8A3F); LEAF(03, 8168);
-LEAF(01, 8A9A); LEAF(01, 8AF5); LEAF(01, 8CB6); LEAF(01, 9270);
+LEAF(01, 899B);
+LEAF(03, BF8C);
+LEAF(01, 8A3F);
+LEAF(03, 8168);
+LEAF(01, 8A9A);
+LEAF(01, 8AF5);
+LEAF(01, 8CB6);
+LEAF(01, 9270);
 #undef LEAF
 
 bool ActRaiserReportCommand_Entry(const CpuState *cpu, unsigned action) {
@@ -40,10 +46,12 @@ RecompReturn ActRaiserReportCommand_Run(CpuState *cpu, unsigned action, bool kee
     case 12: CALL(bank_01_899B_M1X0, 1, 0x8532, false); break;
     case 13:
       CALL(bank_03_BF8C_M1X0, 3, 0x853e, true);
-      CALL(bank_01_8A3F_M1X0, 1, 0x8541, false); break;
+      CALL(bank_01_8A3F_M1X0, 1, 0x8541, false);
+      break;
     case 14:
       CALL(bank_03_8168_M1X0, 3, 0x854d, true);
-      CALL(bank_01_8A9A_M1X0, 1, 0x8550, false); break;
+      CALL(bank_01_8A9A_M1X0, 1, 0x8550, false);
+      break;
     case 15: CALL(bank_01_8AF5_M1X0, 1, 0x855b, false); break;
   }
   if (!keep_open) {

@@ -10,7 +10,8 @@ static void Read(CpuState *cpu, uint16_t values[24]) {
 }
 bool ActRaiserLairReloads_Check(ArRegionalLairReloads *h, CpuState *cpu, ArRegionalSource source) {
   if (!cpu) return false;
-  uint16_t values[24]; Read(cpu,values);
+  uint16_t values[24];
+  Read(cpu, values);
   return ArRegionalLairReloads_Check(h,source,values);
 }
 bool ActRaiserLairReloads_Initialize(ArRegionalLairReloads *h, CpuState *cpu) {
@@ -19,7 +20,8 @@ bool ActRaiserLairReloads_Initialize(ArRegionalLairReloads *h, CpuState *cpu) {
   if (!ActRaiserLairReloads_Check(&next,cpu,kArRegionalSource_US)) return false;
   *h=next; return true;
 }
-bool ActRaiserLairReloads_AdoptSaved(ArRegionalLairReloads *h, const uint8_t image[kActRaiserSramSize]) {
+bool ActRaiserLairReloads_AdoptSaved(ArRegionalLairReloads *h,
+                                     const uint8_t image[kActRaiserSramSize]) {
   if (!image || !Save_ChecksumValid(image)) return false;
   uint16_t values[24];
   for (unsigned i=0;i<24;++i) values[i]=ByteOrder_ReadLe16(image+0x1573+2*i);
@@ -49,11 +51,14 @@ bool ActRaiserLairReloads_BeginReduction(ArRegionalLairReloads *h, CpuState *cpu
   *candidate=next; *town=index/2; return true;
 }
 bool ActRaiserLairReloads_EndReduction(ArRegionalLairReloads *h, CpuState *cpu,
-    ArRegionalSource source, const ArRegionalLairReloads *candidate, unsigned town, RecompReturn result) {
+                                       ArRegionalSource source,
+                                       const ArRegionalLairReloads *candidate, unsigned town,
+                                       RecompReturn result) {
   if (!h || !cpu || !candidate || town>=6 || !ArRegionalLairReloads_Valid(h)) return false;
   ArRegionalLairReloads next=*candidate;
   if (result!=RECOMP_RETURN_NORMAL || !ActRaiserLairReloads_Check(&next,cpu,source)) {
-    h->diverged_towns |= (uint8_t)(next.diverged_towns | (1u<<town)); return false;
+    h->diverged_towns |= (uint8_t)(next.diverged_towns | (1u << town));
+    return false;
   }
   *h=next; return true;
 }

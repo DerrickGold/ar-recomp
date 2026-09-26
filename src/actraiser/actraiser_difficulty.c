@@ -14,7 +14,8 @@ static bool Slot(unsigned x) {
       !((x-kActRaiserWram_ActionObjectTable)%kActRaiserActionObjectStride);
 }
 static RecompReturn Continue(uint32_t target, uint32_t origin) {
-  if (!cpu_hle_tailcall_request(target,origin)) ActRaiserHleFatal("Difficulty prefix has no native owner");
+  if (!cpu_hle_tailcall_request(target, origin))
+    ActRaiserHleFatal("Difficulty prefix has no native owner");
   return RECOMP_RETURN_TAILCALL;
 }
 static void Compare(CpuState *cpu, uint16_t operand) {
@@ -82,20 +83,23 @@ bool ActRaiser_DifficultyTimerEntry(CpuState *cpu) {
       !cpu_read8(cpu,0,0xe8) && (cpu_read8(cpu,0,0xe5)&0x80);
 }
 RecompReturn ActRaiser_DifficultyTimer(CpuState *cpu) {
-  if (!ActRaiser_DifficultyTimerEntry(cpu)) ActRaiserHleFatal("Unsupported difficulty countdown reload");
+  if (!ActRaiser_DifficultyTimerEntry(cpu))
+    ActRaiserHleFatal("Unsupported difficulty countdown reload");
   cpu->A=(cpu->A&0xff00)|ActRaiserRegional_DifficultySnapshot().timer_reload;
   ActRaiserCpuHle_SetNegativeZero8(cpu,(uint8_t)cpu->A);
   return Continue(0x02bc8c,0x02bc8a);
 }
 bool ActRaiser_DifficultyDragonEntry(CpuState *cpu) {
-  return ActRaiserRegional_DifficultySnapshot().skip_dragon_attack && Mode(cpu,0,0) && Slot(cpu->X) &&
-      cpu_read16(cpu,0,0x18)==0x0304 && cpu_read16(cpu,0,cpu->X+0x32)==0xd646 &&
-      cpu_read16(cpu,0,cpu->X+0x16)==0x5000 && cpu_read8(cpu,0,cpu->X+0x18)==0x7e &&
-      cpu_read16(cpu,0,cpu->X+0x1a)==7 && !cpu_read16(cpu,0,cpu->X+0x3a);
+  return ActRaiserRegional_DifficultySnapshot().skip_dragon_attack && Mode(cpu, 0, 0) &&
+      Slot(cpu->X) && cpu_read16(cpu, 0, 0x18) == 0x0304 &&
+      cpu_read16(cpu, 0, cpu->X + 0x32) == 0xd646 && cpu_read16(cpu, 0, cpu->X + 0x16) == 0x5000 &&
+      cpu_read8(cpu, 0, cpu->X + 0x18) == 0x7e && cpu_read16(cpu, 0, cpu->X + 0x1a) == 7 &&
+      !cpu_read16(cpu, 0, cpu->X + 0x3a);
 }
 RecompReturn ActRaiser_DifficultyDragon(CpuState *cpu) {
   /* Both real JSR D766 callers retain their frame. Return before allocation;
    * already-existing producers/children keep their native lifetime. */
-  if (!ActRaiser_DifficultyDragonEntry(cpu)) ActRaiserHleFatal("Unsupported difficulty dragon producer");
+  if (!ActRaiser_DifficultyDragonEntry(cpu))
+    ActRaiserHleFatal("Unsupported difficulty dragon producer");
   return Continue(0x00d76b,0x00d766);
 }

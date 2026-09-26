@@ -11,7 +11,8 @@ bool ActRaiserLairReloads_Initialize(ArRegionalLairReloads *history, CpuState *c
  * already-acknowledged companion). Durable image, never guessed live state. */
 bool ActRaiserLairReloads_AdoptSaved(ArRegionalLairReloads *history,
                                    const uint8_t image[kActRaiserSramSize]);
-bool ActRaiserLairReloads_Check(ArRegionalLairReloads *history, CpuState *cpu, ArRegionalSource source);
+bool ActRaiserLairReloads_Check(ArRegionalLairReloads *history, CpuState *cpu,
+                                ArRegionalSource source);
 bool ActRaiserLairReloads_Project(ArRegionalLairReloads *history, CpuState *cpu,
                                  ArRegionalSource current, ArRegionalSource target);
 /* Capture expected post-modifier values without touching CPU or native RAM.
@@ -19,6 +20,8 @@ bool ActRaiserLairReloads_Project(ArRegionalLairReloads *history, CpuState *cpu,
 bool ActRaiserLairReloads_BeginReduction(ArRegionalLairReloads *history, CpuState *cpu,
     ArRegionalSource source, ArRegionalLairReloads *candidate, unsigned *town);
 bool ActRaiserLairReloads_EndReduction(ArRegionalLairReloads *history, CpuState *cpu,
-    ArRegionalSource source, const ArRegionalLairReloads *candidate, unsigned town, RecompReturn result);
+                                       ArRegionalSource source,
+                                       const ArRegionalLairReloads *candidate, unsigned town,
+                                       RecompReturn result);
 
 #endif

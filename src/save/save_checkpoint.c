@@ -58,12 +58,14 @@ static SaveCheckpointStatus ReadJournal(const char *path, CheckpointJournal *jou
   const int extra = fgetc(file);
   failed |= ferror(file) != 0;
   if (fclose(file) != 0) failed = true;
-  if (failed) return Fail(error, kSaveCheckpoint_IoError, "error reading save checkpoint companion");
+  if (failed)
+    return Fail(error, kSaveCheckpoint_IoError, "error reading save checkpoint companion");
   const uint8_t *bytes = journal->bytes;
   if (extra != EOF || size < kHeaderBytes + kHashBytes || memcmp(bytes, kMagic, sizeof(kMagic)))
     return Fail(error, kSaveCheckpoint_Invalid, "invalid save checkpoint header or length");
   if (ByteOrder_ReadLe16(bytes + 8) != 1)
-    return Fail(error, kSaveCheckpoint_Unsupported, "unsupported save checkpoint version; companion preserved");
+    return Fail(error, kSaveCheckpoint_Unsupported,
+                "unsupported save checkpoint version; companion preserved");
   unsigned count = ByteOrder_ReadLe16(bytes + 10);
   uint64_t hash = DeterministicHash_Fnv1a64(DETERMINISTIC_HASH_FNV1A64_OFFSET,
                                           bytes, size - kHashBytes);
@@ -109,8 +111,11 @@ SaveCheckpointStatus SaveCheckpoint_Read(const char *native_path, const uint8_t 
   SaveCheckpointStatus status = ReadJournal(path, journal, error);
   if (status == kSaveCheckpoint_Ready) {
     const CheckpointRecord *record = Find(journal, image);
-    if (!record) status = Fail(error, kSaveCheckpoint_Mismatch, "no checkpoint matches this save; recovery required");
-    else if (!record->size) status = kSaveCheckpoint_Missing; /* Retained legacy save, no metadata yet. */
+    if (!record)
+      status = Fail(error, kSaveCheckpoint_Mismatch,
+                    "no checkpoint matches this save; recovery required");
+    else if (!record->size)
+      status = kSaveCheckpoint_Missing; /* Retained legacy save, no metadata yet. */
     else if (record->size > capacity)
       status = Fail(error, kSaveCheckpoint_Invalid, "save checkpoint payload buffer is too small");
     else {
@@ -125,7 +130,8 @@ SaveCheckpointStatus SaveCheckpoint_Read(const char *native_path, const uint8_t 
 static size_t WriteRecord(uint8_t *out, const CheckpointRecord *record) {
   ByteOrder_WriteLe32(out, (uint32_t)record->size);
   memcpy(out + kRecordHeaderBytes, record->image, kActRaiserSramSize);
-  if (record->size) memcpy(out + kRecordHeaderBytes + kActRaiserSramSize, record->payload, record->size);
+  if (record->size)
+    memcpy(out + kRecordHeaderBytes + kActRaiserSramSize, record->payload, record->size);
   return kRecordHeaderBytes + kActRaiserSramSize + record->size;
 }
 
@@ -153,7 +159,8 @@ bool SaveCheckpoint_Commit(SaveFileFormat format, const char *native_path,
   if (expected) {
     if (!Save_LoadFile(format, native_path, disk, error)) return false;
     if (memcmp(expected, disk, sizeof(disk))) {
-      Fail(error, kSaveCheckpoint_Mismatch, "save changed since checkpoint load; reload before saving");
+      Fail(error, kSaveCheckpoint_Mismatch,
+           "save changed since checkpoint load; reload before saving");
       return false;
     }
   } else {
@@ -189,7 +196,8 @@ bool SaveCheckpoint_Commit(SaveFileFormat format, const char *native_path,
   if (status == kSaveCheckpoint_Ready && !previous &&
       !(prepared && journal->count == 1 && prepared->size == size &&
         !memcmp(prepared->payload, payload, size))) {
-    Fail(error, kSaveCheckpoint_Mismatch, "unmatched companion preserved; explicit recovery required");
+    Fail(error, kSaveCheckpoint_Mismatch,
+         "unmatched companion preserved; explicit recovery required");
     goto done;
   }
   bool same_image = expected && !memcmp(expected, image, kActRaiserSramSize);
@@ -200,7 +208,8 @@ bool SaveCheckpoint_Commit(SaveFileFormat format, const char *native_path,
   const CheckpointRecord *retained = same_image ? NULL : previous;
   if (same_image) {
     for (unsigned i = 0; i < journal->count; ++i)
-      if (memcmp(image, journal->records[i].image, kActRaiserSramSize)) retained = &journal->records[i];
+      if (memcmp(image, journal->records[i].image, kActRaiserSramSize))
+        retained = &journal->records[i];
   }
   const CheckpointRecord candidate = {image, payload, size};
   memcpy(encoded, kMagic, sizeof(kMagic));

@@ -69,9 +69,11 @@ static bool Plan(CpuState *cpu,uint16_t *hp,uint16_t *attack) {
   if(!ActRaiserRegional_ActorStatsEnabled() || !cpu || cpu->PB || cpu->DB || cpu->D ||
       cpu->m_flag || cpu->x_flag || cpu->emulation || cpu->_flag_D || (cpu->P&CPU_P_D))return false;
   const unsigned x=cpu->X;
-  if(x<kActRaiserWram_ActionObjectTable ||
-      x>=kActRaiserWram_ActionObjectTable+kActRaiserActionObjectCount*kActRaiserActionObjectStride ||
-      (x-kActRaiserWram_ActionObjectTable)%kActRaiserActionObjectStride)return false;
+  if (x < kActRaiserWram_ActionObjectTable ||
+      x >= kActRaiserWram_ActionObjectTable +
+              kActRaiserActionObjectCount * kActRaiserActionObjectStride ||
+      (x - kActRaiserWram_ActionObjectTable) % kActRaiserActionObjectStride)
+    return false;
   unsigned lo=0,hi=sizeof(kOwners)/sizeof(kOwners[0]);
   while(lo<hi){const unsigned mid=lo+(hi-lo)/2;if(kOwners[mid].source<cpu->Y)lo=mid+1;else hi=mid;}
   if(lo==sizeof(kOwners)/sizeof(kOwners[0]) || kOwners[lo].source!=cpu->Y ||
@@ -93,16 +95,22 @@ static bool Plan(CpuState *cpu,uint16_t *hp,uint16_t *attack) {
   return *hp!=copied_hp || *attack!=copied_attack;
 }
 bool ActRaiser_ActorStatsEntry(CpuState *cpu) {
-  uint16_t hp,attack;return Plan(cpu,&hp,&attack) || ActRaiser_PlatformSkullSpawnEntry(cpu) || ActRaiser_CastHoldSpawnEntry(cpu);
+  uint16_t hp, attack;
+  return Plan(cpu, &hp, &attack) || ActRaiser_PlatformSkullSpawnEntry(cpu) ||
+      ActRaiser_CastHoldSpawnEntry(cpu);
 }
 RecompReturn ActRaiser_ActorStats(CpuState *cpu) {
-  uint16_t hp,attack;const bool stats=Plan(cpu,&hp,&attack),skull=ActRaiser_PlatformSkullSpawnEntry(cpu),hold=ActRaiser_CastHoldSpawnEntry(cpu);
+  uint16_t hp, attack;
+  const bool stats = Plan(cpu, &hp, &attack), skull = ActRaiser_PlatformSkullSpawnEntry(cpu),
+             hold = ActRaiser_CastHoldSpawnEntry(cpu);
   if(!stats && !skull && !hold)ActRaiserHleFatal("Unsupported regional actor initializer");
   if(stats){cpu_write16(cpu,0,cpu->X+0x2c,hp);cpu_write16(cpu,0,cpu->X+0x2a,attack);}
   if(skull)return ActRaiser_PlatformSkullSpawn(cpu);
   if(hold)return ActRaiser_CastHoldSpawn(cpu);
-  cpu->A=cpu_read16(cpu,0,cpu->X+0x30);ActRaiserCpuHle_SetNegativeZero16(cpu,cpu->A);
-  if(!cpu_hle_tailcall_request(0x00966f,0x00966c))ActRaiserHleFatal("Actor stats have no native continuation");
+  cpu->A = cpu_read16(cpu, 0, cpu->X + 0x30);
+  ActRaiserCpuHle_SetNegativeZero16(cpu, cpu->A);
+  if (!cpu_hle_tailcall_request(0x00966f, 0x00966c))
+    ActRaiserHleFatal("Actor stats have no native continuation");
   return RECOMP_RETURN_TAILCALL;
 }
 
@@ -110,9 +118,11 @@ static bool TanzraChild(CpuState *cpu,uint16_t handler,uint16_t flags) {
   if(!cpu || cpu->PB || cpu->DB || cpu->D || cpu->m_flag || cpu->x_flag ||
       cpu->emulation || cpu->_flag_D || (cpu->P&CPU_P_D))return false;
   const unsigned x=cpu->X;
-  if(x<kActRaiserWram_ActionObjectTable ||
-      x>=kActRaiserWram_ActionObjectTable+kActRaiserActionObjectCount*kActRaiserActionObjectStride ||
-      (x-kActRaiserWram_ActionObjectTable)%kActRaiserActionObjectStride)return false;
+  if (x < kActRaiserWram_ActionObjectTable ||
+      x >= kActRaiserWram_ActionObjectTable +
+              kActRaiserActionObjectCount * kActRaiserActionObjectStride ||
+      (x - kActRaiserWram_ActionObjectTable) % kActRaiserActionObjectStride)
+    return false;
   /* The native allocator copies the owner's source/animation identity and
    * installs this child handler. Do not require the parent's current state:
    * it may already have advanced, and no parent memory needs to be touched. */
@@ -123,11 +133,15 @@ static bool TanzraChild(CpuState *cpu,uint16_t handler,uint16_t flags) {
 }
 static uint16_t TanzraMinionHp(void) {
   const uint16_t base=ActRaiserRegional_ActorChildStat(kArRegionalActorStat_TanzraMinionHp);
-  return base==1 || base==2 ? Randomizer_ScaleStat((uint8_t)base,Randomizer_AppliedStatScale().hp_percent) : UINT16_MAX;
+  return base == 1 || base == 2
+      ? Randomizer_ScaleStat((uint8_t)base, Randomizer_AppliedStatScale().hp_percent)
+      : UINT16_MAX;
 }
 static uint16_t TanzraProjectileAttack(void) {
   const uint16_t base=ActRaiserRegional_ActorChildStat(kArRegionalActorStat_TanzraProjectileAttack);
-  return base>=3 && base<=5 ? Randomizer_ScaleStat((uint8_t)base,Randomizer_AppliedStatScale().attack_percent) : UINT16_MAX;
+  return base >= 3 && base <= 5
+      ? Randomizer_ScaleStat((uint8_t)base, Randomizer_AppliedStatScale().attack_percent)
+      : UINT16_MAX;
 }
 bool ActRaiser_TanzraMinionHpEntry(CpuState *cpu) {
   const uint16_t hp=TanzraMinionHp();
@@ -143,23 +157,29 @@ bool ActRaiser_TanzraProjectileAttackEntry(CpuState *cpu) {
   return attack!=UINT16_MAX && attack!=3 && TanzraChild(cpu,0xfd25,0x20) && cpu->A==0x20;
 }
 RecompReturn ActRaiser_TanzraMinionHp(CpuState *cpu) {
-  if(!ActRaiser_TanzraMinionHpEntry(cpu))ActRaiserHleFatal("Unsupported Tanzra minion HP initializer");
+  if (!ActRaiser_TanzraMinionHpEntry(cpu))
+    ActRaiserHleFatal("Unsupported Tanzra minion HP initializer");
   /* Replace STA's value, not the live accumulator: the following independent
    * reward store must still see the native A=2. STA does not modify flags. */
   cpu_write16(cpu,0,cpu->X+0x2c,TanzraMinionHp());
-  if(!cpu_hle_tailcall_request(0x00fc99,0x00fc96))ActRaiserHleFatal("Minion HP has no native continuation");
+  if (!cpu_hle_tailcall_request(0x00fc99, 0x00fc96))
+    ActRaiserHleFatal("Minion HP has no native continuation");
   return RECOMP_RETURN_TAILCALL;
 }
 RecompReturn ActRaiser_TanzraMinionReward(CpuState *cpu) {
-  if(!ActRaiser_TanzraMinionRewardEntry(cpu))ActRaiserHleFatal("Unsupported Tanzra minion reward initializer");
+  if (!ActRaiser_TanzraMinionRewardEntry(cpu))
+    ActRaiserHleFatal("Unsupported Tanzra minion reward initializer");
   cpu_write16(cpu,0,cpu->X+0x2e,1);
-  if(!cpu_hle_tailcall_request(0x00fc9c,0x00fc99))ActRaiserHleFatal("Minion reward has no native continuation");
+  if (!cpu_hle_tailcall_request(0x00fc9c, 0x00fc99))
+    ActRaiserHleFatal("Minion reward has no native continuation");
   return RECOMP_RETURN_TAILCALL;
 }
 RecompReturn ActRaiser_TanzraProjectileAttack(CpuState *cpu) {
-  if(!ActRaiser_TanzraProjectileAttackEntry(cpu))ActRaiserHleFatal("Unsupported Tanzra projectile initializer");
+  if (!ActRaiser_TanzraProjectileAttackEntry(cpu))
+    ActRaiserHleFatal("Unsupported Tanzra projectile initializer");
   cpu->A=TanzraProjectileAttack();
   ActRaiserCpuHle_SetNegativeZero16(cpu,cpu->A);
-  if(!cpu_hle_tailcall_request(0x00fd31,0x00fd2e))ActRaiserHleFatal("Tanzra projectile has no native continuation");
+  if (!cpu_hle_tailcall_request(0x00fd31, 0x00fd2e))
+    ActRaiserHleFatal("Tanzra projectile has no native continuation");
   return RECOMP_RETURN_TAILCALL;
 }

@@ -327,11 +327,17 @@ ArRenderRectI ArTextBitmap_InkBounds(const ArTextBitmap *bitmap,
   switch (bitmap->format) {
     case kArRenderPixelFormat_Argb8888:
     case kArRenderPixelFormat_Abgr8888:
-      bytes = 4; alpha_mask = UINT32_C(0xff000000); break;
+      bytes = 4;
+      alpha_mask = UINT32_C(0xff000000);
+      break;
     case kArRenderPixelFormat_Rgba8888:
-      bytes = 4; alpha_mask = UINT32_C(0xff); break;
+      bytes = 4;
+      alpha_mask = UINT32_C(0xff);
+      break;
     case kArRenderPixelFormat_Rgba4444:
-      bytes = 2; alpha_mask = UINT32_C(0xf); break;
+      bytes = 2;
+      alpha_mask = UINT32_C(0xf);
+      break;
     case kArRenderPixelFormat_Rgb565: bytes = 2; break;
     case kArRenderPixelFormat_A8: bytes = 1; alpha_mask = UINT32_C(0xff); break;
     default: return (ArRenderRectI){0};
@@ -626,7 +632,9 @@ bool ArTextBitmap_SlantAsciiNumerals(ArTextBitmap *b,
   uint32_t *pixels = band_area ? calloc(band_area, sizeof(*pixels)) : NULL;
   uint32_t *owners = band_area ? calloc(band_area, sizeof(*owners)) : NULL;
   if (band_area && (!pixels || !owners)) {
-    free(bottom); free(pixels); free(owners);
+    free(bottom);
+    free(pixels);
+    free(owners);
     return false;
   }
   /* Preserve the upright ink first. A slanted bearing may extend behind its
@@ -638,7 +646,9 @@ bool ArTextBitmap_SlantAsciiNumerals(ArTextBitmap *b,
         if (!owner || (bottom[owner] >= 0) != (pass != 0)) continue;
         const int target_x = x + (pass ? (bottom[owner] - y + 2) / 4 : 0);
         if (target_x >= b->width) {
-          free(bottom); free(pixels); free(owners);
+          free(bottom);
+          free(pixels);
+          free(owners);
           return false;
         }
         const size_t at = (size_t)(y - first_row) * b->width + target_x;
@@ -662,7 +672,9 @@ bool ArTextBitmap_SlantAsciiNumerals(ArTextBitmap *b,
     for (int x = 0; x < b->width; ++x)
       if (!row_owners[x]) memset(row + (size_t)x * 4, 0, 4);
   }
-  free(bottom); free(pixels); free(owners);
+  free(bottom);
+  free(pixels);
+  free(owners);
   return true;
 }
 

@@ -102,7 +102,8 @@ static bool EnsureEffect(ArRenderDevice *device,
   SDL_GPURenderState *state = SDL_CreateGPURenderState(
       renderer, &state_info);
   const float warm_uniforms[9] = {1, 1, 1, 0, 1, 0, 1, 0, 1};
-  const Uint32 warm_bytes = effect == kDioramaEffect_DofEdge ? sizeof(warm_uniforms) : 4 * sizeof(float);
+  const Uint32 warm_bytes =
+      effect == kDioramaEffect_DofEdge ? sizeof(warm_uniforms) : 4 * sizeof(float);
   if (!state || !GpuRenderPreparation_Warm(device, state, warm_uniforms, warm_bytes, false)) {
     fprintf(stderr, "[gpu-fx] %s render state creation failed: %s\n",
             kEffectNames[effect], SDL_GetError());

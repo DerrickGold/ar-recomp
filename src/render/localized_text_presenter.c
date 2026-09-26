@@ -941,8 +941,9 @@ static bool PrepareTable(
       goto fail;
     }
     if (surface.width > right - left || surface.height > bottom - top) goto fail;
-    const ArTextDirection effective_direction = snapshot->language.direction == kArTextDirection_Auto
-        ? surface.paragraph_direction : snapshot->language.direction;
+    const ArTextDirection effective_direction =
+        snapshot->language.direction == kArTextDirection_Auto ? surface.paragraph_direction
+                                                              : snapshot->language.direction;
     if (cell->follows_direction && alignment == kArTextHorizontalAlignment_Leading &&
         effective_direction == kArTextDirection_RightToLeft)
       alignment = kArTextHorizontalAlignment_Trailing;
@@ -1039,7 +1040,8 @@ static bool PrepareTable(
       text_dy[i] = baselines[line].desired - text->destination.y - text->surface.ascent;
       text->destination.y += text_dy[i];
     }
-    row_ink[line] = ArLocalizedTextLayout_UnionInk(row_ink[line], OutputInk(&text->surface, text->destination));
+    row_ink[line] =
+        ArLocalizedTextLayout_UnionInk(row_ink[line], OutputInk(&text->surface, text->destination));
   }
   for (unsigned i = 0; i < 2; ++i) {
     if (bracket_texts[i] >= 0) {
@@ -1098,7 +1100,9 @@ static bool PrepareIndicators(
         !ProjectTextDestination(chunks, chunk_count, projected[0], &destination))
       goto failed;
     ArRenderTexture texture;
-    if (!ArLocalizedTextArtwork_PrepareTexture(device, frame, kArLocalizationArtwork_Continue, &texture)) goto failed;
+    if (!ArLocalizedTextArtwork_PrepareTexture(device, frame, kArLocalizationArtwork_Continue,
+                                               &texture))
+      goto failed;
     prepared->indicators[prepared->indicator_count++] =
         (ArLocalizedPreparedIndicator){indicator->kind, destination, texture};
   }
@@ -1116,7 +1120,8 @@ static bool PrepareLabelFrame(
     kArLocalizationArtwork_LabelFrameLeft, kArLocalizationArtwork_LabelFrameRight,
   };
   for (unsigned i = 0; i < 2; ++i) {
-    if (!ArLocalizedTextArtwork_PrepareTexture(device, frame, kinds[i], &ends[i].texture)) return false;
+    if (!ArLocalizedTextArtwork_PrepareTexture(device, frame, kinds[i], &ends[i].texture))
+      return false;
     const ArLocalizationArtwork *art = &frame->artwork[kinds[i]];
     const int width = (art->width * cells.w + region.columns * 4) / (region.columns * 8);
     const int height = (art->height * cells.h + region.rows * 4) / (region.rows * 8);
@@ -2284,7 +2289,8 @@ bool ArLocalizedTextPresenter_PrepareScreenText(ArRenderDevice *device,
     if (!ArEnhancedTextSettings_Apply(&frame->settings, base_pixels, minimum_base_pixels, &request))
       return false;
     const int minimum_for_row = bounds.h / 2 > 0 ? bounds.h / 2 : 1;
-    if (request.minimum_font_pixels > minimum_for_row) request.minimum_font_pixels = minimum_for_row;
+    if (request.minimum_font_pixels > minimum_for_row)
+      request.minimum_font_pixels = minimum_for_row;
     if (snapshot->italic) request.flags |= kArTextRasterFlag_Italic;
   }
 

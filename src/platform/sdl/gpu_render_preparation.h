@@ -49,13 +49,15 @@ static inline bool GpuRenderPreparation_WarmTarget(ArRenderDevice *device,
     /* Force queued SDL commands to materialize their pipelines now. */
     if (ok) ok = ArSdlRenderBackend_SubmitPending(device);
     if (!SDL_SetGPURenderState(renderer, NULL)) {
-      SessionFatal_Request("Shader preparation could not restore its render state: %s", SDL_GetError());
+      SessionFatal_Request("Shader preparation could not restore its render state: %s",
+                           SDL_GetError());
       ok = false;
     }
   }
   if (begin == kArRenderTargetBegin_StateLost ||
       (begin == kArRenderTargetBegin_Ready && !ArRenderDevice_EndTarget(device, &saved))) {
-    SessionFatal_Request("Shader preparation could not restore its scratch target: %s", SDL_GetError());
+    SessionFatal_Request("Shader preparation could not restore its scratch target: %s",
+                         SDL_GetError());
     ok = false;
   }
   ArRenderDevice_DestroyTexture(device, source);

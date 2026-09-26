@@ -14,51 +14,20 @@
  "src/action/action_room_mosaic.c": {
   "long-line": 3
  },
- "src/actraiser/actraiser_action_bg.c": {
-  "long-line": 1
- },
  "src/actraiser/actraiser_action_bg.h": {
-  "header-comment": 1,
-  "long-line": 1
- },
- "src/actraiser/actraiser_action_inventory.c": {
-  "long-line": 4,
-  "packed": 9
+  "header-comment": 1
  },
  "src/actraiser/actraiser_action_inventory.h": {
   "header-comment": 1
  },
- "src/actraiser/actraiser_action_motion.c": {
-  "long-line": 37,
-  "packed": 17
- },
  "src/actraiser/actraiser_action_motion.h": {
   "header-comment": 1
- },
- "src/actraiser/actraiser_action_room_graphics.c": {
-  "long-line": 1
- },
- "src/actraiser/actraiser_action_start.c": {
-  "long-line": 1,
-  "packed": 1
  },
  "src/actraiser/actraiser_action_start.h": {
   "header-comment": 1
  },
- "src/actraiser/actraiser_actor_stats.c": {
-  "long-line": 13,
-  "packed": 3
- },
- "src/actraiser/actraiser_boss_rules.c": {
-  "long-line": 30,
-  "packed": 12
- },
  "src/actraiser/actraiser_boss_rules.h": {
   "header-comment": 1
- },
- "src/actraiser/actraiser_cast_hold.c": {
-  "long-line": 2,
-  "packed": 1
  },
  "src/actraiser/actraiser_cell_map.h": {
   "header-comment": 1
@@ -69,51 +38,20 @@
  "src/actraiser/actraiser_credits.h": {
   "header-comment": 1
  },
- "src/actraiser/actraiser_development.c": {
-  "long-line": 4,
-  "packed": 30
- },
- "src/actraiser/actraiser_development.h": {
-  "long-line": 1
- },
- "src/actraiser/actraiser_difficulty.c": {
-  "long-line": 4
- },
  "src/actraiser/actraiser_difficulty.h": {
   "header-comment": 1
- },
- "src/actraiser/actraiser_fire_enemy.c": {
-  "long-line": 2,
-  "packed": 3
  },
  "src/actraiser/actraiser_fire_enemy.h": {
   "header-comment": 1
  },
- "src/actraiser/actraiser_fishing.c": {
-  "long-line": 1,
-  "packed": 4
- },
  "src/actraiser/actraiser_hud.h": {
   "header-comment": 1
- },
- "src/actraiser/actraiser_lair_history.c": {
-  "long-line": 4,
-  "packed": 2
  },
  "src/actraiser/actraiser_lair_history.h": {
   "header-comment": 1
  },
- "src/actraiser/actraiser_lair_reloads.c": {
-  "long-line": 2,
-  "packed": 2
- },
  "src/actraiser/actraiser_lair_reloads.h": {
-  "header-comment": 1,
-  "long-line": 2
- },
- "src/actraiser/actraiser_level_goals.c": {
-  "long-line": 3,
-  "packed": 3
+  "header-comment": 1
  },
  "src/actraiser/actraiser_level_goals.h": {
   "header-comment": 1
@@ -121,20 +59,11 @@
  "src/actraiser/actraiser_lives_display.h": {
   "header-comment": 1
  },
- "src/actraiser/actraiser_localization_compose_state.c": {
-  "long-line": 1
- },
  "src/actraiser/actraiser_localization_compose_state.h": {
   "header-comment": 1
  },
- "src/actraiser/actraiser_localization_credits.c": {
-  "packed": 1
- },
  "src/actraiser/actraiser_localization_credits.h": {
   "header-comment": 1
- },
- "src/actraiser/actraiser_localization_grid.c": {
-  "long-line": 3
  },
  "src/actraiser/actraiser_localization_hud.h": {
   "header-comment": 1
@@ -145,16 +74,6 @@
  "src/actraiser/actraiser_localization_resolved_text.h": {
   "header-comment": 1
  },
- "src/actraiser/actraiser_localization_runtime.c": {
-  "long-line": 2,
-  "packed": 5
- },
- "src/actraiser/actraiser_localization_schedule.c": {
-  "packed": 1
- },
- "src/actraiser/actraiser_localization_text_normalize.c": {
-  "packed": 1
- },
  "src/actraiser/actraiser_localization_text_style.h": {
   "header-comment": 1
  },
@@ -164,60 +83,27 @@
  "src/actraiser/actraiser_localization_world_navigation.h": {
   "header-comment": 1
  },
- "src/actraiser/actraiser_lzss.c": {
-  "packed": 1
- },
  "src/actraiser/actraiser_magic_gesture.h": {
   "header-comment": 1
- },
- "src/actraiser/actraiser_miracle.c": {
-  "packed": 3
- },
- "src/actraiser/actraiser_miracle_translation.c": {
-  "long-line": 2
- },
- "src/actraiser/actraiser_mode_entry.c": {
-  "long-line": 6,
-  "packed": 11
  },
  "src/actraiser/actraiser_mode_entry.h": {
   "header-comment": 1
  },
- "src/actraiser/actraiser_native_call.c": {
-  "long-line": 1
- },
  "src/actraiser/actraiser_native_call.h": {
   "header-comment": 1
- },
- "src/actraiser/actraiser_platform_skull.c": {
-  "long-line": 8,
-  "packed": 1
  },
  "src/actraiser/actraiser_platform_skull.h": {
   "header-comment": 1
  },
- "src/actraiser/actraiser_quake.c": {
-  "packed": 2
- },
  "src/actraiser/actraiser_quake.h": {
   "header-comment": 1
  },
- "src/actraiser/actraiser_recovery.c": {
-  "long-line": 1,
-  "packed": 14
- },
  "src/actraiser/actraiser_recovery.h": {
-  "header-comment": 1,
-  "long-line": 1
- },
- "src/actraiser/actraiser_report_command.c": {
-  "packed": 4
+  "header-comment": 1
  },
  "src/actraiser/actraiser_rtl.c": {
   "long-line": 2,
-  "packed": 17,
-  "static-g-prefix": 12,
-  "trailing-space": 3
+  "static-g-prefix": 12
  },
  "src/actraiser/actraiser_rtl.h": {
   "header-comment": 1
@@ -225,54 +111,23 @@
  "src/actraiser/actraiser_save_transaction.h": {
   "header-comment": 1
  },
- "src/actraiser/actraiser_scene_music.c": {
-  "packed": 1
- },
  "src/actraiser/actraiser_scene_music.h": {
   "header-comment": 1
- },
- "src/actraiser/actraiser_score_feedback.c": {
-  "long-line": 1
  },
  "src/actraiser/actraiser_score_lives.h": {
   "header-comment": 1
  },
- "src/actraiser/actraiser_scroll_cast.c": {
-  "packed": 1
- },
- "src/actraiser/actraiser_sim_actor.c": {
-  "long-line": 1
- },
- "src/actraiser/actraiser_sim_ai.c": {
-  "long-line": 10,
-  "packed": 8
- },
  "src/actraiser/actraiser_sim_ai.h": {
   "header-comment": 1
- },
- "src/actraiser/actraiser_sim_combat.c": {
-  "long-line": 1,
-  "packed": 4
  },
  "src/actraiser/actraiser_sim_combat.h": {
   "header-comment": 1
  },
- "src/actraiser/actraiser_sim_menu.c": {
-  "long-line": 1,
-  "packed": 13
- },
  "src/actraiser/actraiser_sim_menu.h": {
   "header-comment": 1
  },
- "src/actraiser/actraiser_sources.c": {
-  "long-line": 1,
-  "packed": 1
- },
  "src/actraiser/actraiser_sources.h": {
   "header-comment": 1
- },
- "src/actraiser/actraiser_spc_upload.c": {
-  "long-line": 1
  },
  "src/actraiser/actraiser_sprite_ownership.h": {
   "header-comment": 1
@@ -280,54 +135,23 @@
  "src/actraiser/actraiser_stage_hazards.h": {
   "header-comment": 1
  },
- "src/actraiser/actraiser_stage_placements.c": {
-  "long-line": 3,
-  "packed": 16
- },
- "src/actraiser/actraiser_stage_terrain.c": {
-  "long-line": 1,
-  "packed": 3
- },
  "src/actraiser/actraiser_stage_terrain.h": {
   "header-comment": 1
- },
- "src/actraiser/actraiser_statue_volley.c": {
-  "long-line": 4
  },
  "src/actraiser/actraiser_statue_volley.h": {
   "header-comment": 1
  },
- "src/actraiser/actraiser_story_prerequisites.c": {
-  "long-line": 1
- },
- "src/actraiser/actraiser_town_census.c": {
-  "long-line": 4
- },
  "src/actraiser/actraiser_town_metatile.h": {
   "header-comment": 1
- },
- "src/actraiser/actraiser_town_redevelopment.c": {
-  "long-line": 5
  },
  "src/actraiser/actraiser_town_redevelopment.h": {
   "header-comment": 1
  },
- "src/actraiser/actraiser_town_status.c": {
-  "packed": 1
- },
  "src/actraiser/actraiser_town_structure_steps.h": {
   "header-comment": 1
  },
- "src/actraiser/actraiser_tree_attack.c": {
-  "long-line": 3,
-  "packed": 13
- },
  "src/actraiser/actraiser_tree_attack.h": {
   "header-comment": 1
- },
- "src/actraiser/actraiser_widescreen_sprites.c": {
-  "long-line": 1,
-  "packed": 1
  },
  "src/actraiser/cpu_65816_math.h": {
   "header-comment": 1
@@ -335,18 +159,11 @@
  "src/actraiser/quintet_lzss.h": {
   "header-comment": 1
  },
- "src/app/config.c": {
-  "packed": 1
- },
  "src/app/input_replay.h": {
   "header-comment": 1
  },
  "src/app/performance_metrics.c": {
-  "long-line": 14,
-  "packed": 1
- },
- "src/app/performance_overlay.c": {
-  "long-line": 14
+  "long-line": 5
  },
  "src/app/performance_overlay.h": {
   "header-comment": 1
@@ -354,24 +171,17 @@
  "src/app/run_dir.c": {
   "static-g-prefix": 2
  },
- "src/app/runtime_settings.c": {
-  "long-line": 1,
-  "packed": 4
- },
  "src/app/runtime_settings.h": {
   "header-comment": 1
  },
  "src/app/session_fatal.h": {
   "header-comment": 1
  },
- "src/app/session_recovery.c": {
-  "long-line": 2
- },
  "src/app/session_recovery.h": {
   "header-comment": 1
  },
  "src/app/settings.c": {
-  "long-line": 12
+  "long-line": 10
  },
  "src/audio/native_audio_mixer.h": {
   "header-comment": 1
@@ -386,7 +196,6 @@
   "header-comment": 1
  },
  "src/dev/hd_tile_census.c": {
-  "packed": 2,
   "static-g-prefix": 11
  },
  "src/dev/host_dev_tools.h": {
@@ -405,7 +214,6 @@
   "header-comment": 1
  },
  "src/diorama/diorama.c": {
-  "packed": 1,
   "static-g-prefix": 23
  },
  "src/diorama/diorama_edge_aa.h": {
@@ -413,12 +221,6 @@
  },
  "src/diorama/diorama_frame_generation.h": {
   "header-comment": 1
- },
- "src/diorama/diorama_layer_editor.c": {
-  "packed": 23
- },
- "src/diorama/diorama_performance.c": {
-  "long-line": 2
  },
  "src/diorama/diorama_performance.h": {
   "header-comment": 1
@@ -444,16 +246,8 @@
  "src/host/parallel_work.h": {
   "header-comment": 1
  },
- "src/host/regional_media_files.c": {
-  "long-line": 3,
-  "packed": 6
- },
  "src/host/regional_media_files.h": {
-  "header-comment": 1,
-  "long-line": 1
- },
- "src/localization/dialogue_session.c": {
-  "long-line": 3
+  "header-comment": 1
  },
  "src/localization/dialogue_session.h": {
   "header-comment": 1
@@ -465,19 +259,16 @@
   "header-comment": 1
  },
  "src/localization/language_contract.c": {
-  "long-line": 3
+  "long-line": 1
  },
  "src/localization/language_keyboard.c": {
-  "long-line": 5
+  "long-line": 3
  },
  "src/localization/language_pack.h": {
   "header-comment": 1
  },
  "src/localization/localization_frame.h": {
   "header-comment": 1
- },
- "src/localization/pack_discovery.c": {
-  "long-line": 2
  },
  "src/localization/text_appearance.h": {
   "header-comment": 1
@@ -491,9 +282,6 @@
  "src/localization/text_presentation.h": {
   "header-comment": 1
  },
- "src/localization/text_rasterizer.c": {
-  "packed": 6
- },
  "src/localization/text_rasterizer.h": {
   "header-comment": 1
  },
@@ -501,32 +289,14 @@
   "header-comment": 1
  },
  "src/main.c": {
-  "long-line": 46,
-  "packed": 34,
+  "long-line": 4,
   "static-g-prefix": 1
  },
  "src/manual/manual_caption.h": {
   "header-comment": 1
  },
- "src/manual/manual_reader.c": {
-  "packed": 4
- },
- "src/platform/sdl/bidi_text_sdl.c": {
-  "long-line": 1,
-  "packed": 5
- },
- "src/platform/sdl/diorama_effect_backend_sdl.c": {
-  "long-line": 1
- },
- "src/platform/sdl/gpu_render_preparation.h": {
-  "long-line": 2
- },
  "src/platform/sdl/gpu_texture_upload_layout.h": {
   "header-comment": 1
- },
- "src/platform/sdl/render_sdl.c": {
-  "long-line": 7,
-  "packed": 3
  },
  "src/platform/sdl/render_sdl.h": {
   "header-comment": 1
@@ -538,8 +308,7 @@
   "header-comment": 1
  },
  "src/platform/sdl/sim3d_depth_pass_sdl.c": {
-  "long-line": 46,
-  "packed": 35
+  "long-line": 1
  },
  "src/platform/sdl/styled_paint_sdl.h": {
   "header-comment": 1
@@ -547,49 +316,29 @@
  "src/platform/sdl/text_fonts_sdl.h": {
   "header-comment": 1
  },
- "src/platform/sdl/text_rasterizer_sdl.c": {
-  "long-line": 2
- },
  "src/platform/sdl/text_rasterizer_sdl.h": {
   "header-comment": 1
  },
  "src/present/frame_slot.c": {
-  "packed": 3,
   "static-g-prefix": 9
  },
  "src/present/present.c": {
-  "long-line": 1,
   "static-g-prefix": 6
  },
  "src/present/present_cadence_metrics.h": {
   "header-comment": 1
  },
- "src/present/presentation_view.c": {
-  "long-line": 1
- },
  "src/present/presentation_view.h": {
   "header-comment": 1
  },
  "src/randomizer/randomizer.c": {
-  "long-line": 5,
-  "packed": 10,
   "static-g-prefix": 8
- },
- "src/randomizer/randomizer_config.c": {
-  "long-line": 2,
-  "packed": 7
  },
  "src/render/bg3_composite_policy.h": {
   "header-comment": 1
  },
  "src/render/hud_layout.h": {
   "header-comment": 1
- },
- "src/render/localized_text_draw.c": {
-  "long-line": 1
- },
- "src/render/localized_text_presenter.c": {
-  "long-line": 5
  },
  "src/render/localized_text_presenter.h": {
   "header-comment": 1
@@ -600,9 +349,6 @@
  "src/render/text_cell_composite.h": {
   "header-comment": 1
  },
- "src/render/text_surface_cache.c": {
-  "packed": 1
- },
  "src/render/text_surface_cache.h": {
   "header-comment": 1
  },
@@ -612,88 +358,35 @@
  "src/replacements/manifest_utils.h": {
   "header-comment": 1
  },
- "src/replacements/music_replacements.c": {
-  "long-line": 3
- },
- "src/save/save_campaign_archive.inc": {
-  "long-line": 11,
-  "packed": 5
- },
- "src/save/save_checkpoint.c": {
-  "long-line": 8
- },
  "src/save/save_paths.c": {
-  "long-line": 11,
-  "packed": 10
+  "long-line": 1
  },
  "src/save/save_paths.h": {
-  "header-comment": 1,
-  "long-line": 2
- },
- "src/save/save_slot_manager.c": {
-  "long-line": 9,
-  "packed": 10
+  "header-comment": 1
  },
  "src/save/save_slot_manager.h": {
-  "header-comment": 1,
-  "long-line": 2
+  "header-comment": 1
  },
  "src/save/save_slots.c": {
-  "long-line": 37,
-  "packed": 48
+  "long-line": 1
  },
  "src/save/save_slots.h": {
-  "header-comment": 1,
-  "long-line": 4
- },
- "src/save/save_slots_migration.inc": {
-  "long-line": 8,
-  "packed": 14
- },
- "src/save/save_system.c": {
-  "long-line": 3,
-  "packed": 5
+  "header-comment": 1
  },
  "src/save/save_system.h": {
   "header-comment": 1
  },
- "src/settings_overlay/menu_input.c": {
-  "long-line": 1
- },
- "src/settings_overlay/regional/regional_menu.c": {
-  "long-line": 40
- },
  "src/settings_overlay/regional/regional_menu.h": {
   "header-comment": 1
  },
- "src/settings_overlay/regional/regional_ui.h": {
-  "long-line": 1
- },
- "src/settings_overlay/save_slots/slot_details.inc": {
-  "long-line": 17,
-  "packed": 11
- },
- "src/settings_overlay/save_slots/slot_menu.inc": {
-  "long-line": 32,
-  "packed": 5
- },
- "src/settings_overlay/save_slots/slot_view.inc": {
-  "long-line": 29,
-  "packed": 9
- },
  "src/settings_overlay/settings_overlay.c": {
-  "long-line": 51,
-  "packed": 2
+  "long-line": 5
  },
  "src/settings_overlay/settings_overlay.h": {
   "header-comment": 1
  },
  "src/settings_overlay/settings_overlay_artwork.c": {
   "long-line": 3
- },
- "src/settings_overlay/settings_overlay_layers_localization.c": {
-  "long-line": 5,
-  "packed": 2
  },
  "src/sim/menu/sim_menu_help.c": {
   "long-line": 9

@@ -66,7 +66,9 @@ void ParseConfigFile(const char *path) {
       setenv(key, val, 0);
 #else
       if (!getenv(key)) { char b[160];
-        snprintf(b, sizeof b, "%s=%s", key, val); _putenv(b); }
+        snprintf(b, sizeof b, "%s=%s", key, val);
+        _putenv(b);
+      }
 #endif
     }
   }

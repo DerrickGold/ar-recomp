@@ -37,7 +37,8 @@ static bool regional_sequence(const SrSpcUploadContext *upload,uint32 source24) 
    * The SDK has already copied these blocks under its normal APU lock. */
   const uint16_t entry=rule?0x1d06:0x1108;
   const uint64_t offset=(rule?0xcfa4bu:0x7769fu)+(rule?1435u:2353u);
-  if(upload->block_count!=5 || upload->entry_point!=entry || upload->script_offset!=offset)return true;
+  if (upload->block_count != 5 || upload->entry_point != entry || upload->script_offset != offset)
+    return true;
   bool enabled;
   if(!ActRaiserRegional_BeginSongSequence(rule,&enabled))return false;
   const ArRegionalMediaBytes donor=ActRaiserRegionalMedia_Sequence(rule,enabled);

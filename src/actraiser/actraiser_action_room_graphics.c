@@ -243,7 +243,9 @@ RecompReturn ActRaiser_LoadActionCharacters(CpuState *cpu) {
         (uint16_t)(kCharacterWorkspace + cpu->X));
     /* Preserve native workspace, source cursor and CPU/stack residue; only
      * the declared character upload uses donor pixels. No ROM mutation. */
-    const uint16_t pixels=donor.data?(uint16_t)(donor.data[cpu->X]|(uint16_t)donor.data[cpu->X+1]<<8):cpu->A;
+    const uint16_t pixels = donor.data
+        ? (uint16_t)(donor.data[cpu->X] | (uint16_t)donor.data[cpu->X + 1] << 8)
+        : cpu->A;
     cpu_write16(cpu, cpu->DB, kPpuVramDataLow, pixels);
     cpu->X = (uint16_t)(cpu->X + 2u);
   }

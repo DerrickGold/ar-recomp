@@ -8,18 +8,27 @@ bool ActRaiserLevelGoals_PrefixEntry(const CpuState *cpu) {
 }
 bool ActRaiserLevelGoals_Compare(CpuState *cpu,bool japanese) {
   uint16_t threshold;
-  if (!ActRaiserLevelGoals_PrefixEntry(cpu) || !ArRegionalLevelGoals_Threshold(japanese,cpu->X/2,&threshold)) return false;
+  if (!ActRaiserLevelGoals_PrefixEntry(cpu) ||
+      !ArRegionalLevelGoals_Threshold(japanese, cpu->X / 2, &threshold))
+    return false;
   cpu->_flag_C=cpu->A>=threshold;
   cpu->P=(cpu->P & ~CPU_P_C)|(cpu->_flag_C?CPU_P_C:0);
-  ActRaiserCpuHle_SetNegativeZero16(cpu,(uint16_t)(cpu->A-threshold));return true;
+  ActRaiserCpuHle_SetNegativeZero16(cpu, (uint16_t)(cpu->A - threshold));
+  return true;
 }
 bool ActRaiserLevelGoals_Load(CpuState *cpu,bool japanese) {
   uint16_t threshold;
-  if (!ActRaiserLevelGoals_PrefixEntry(cpu) || !ArRegionalLevelGoals_Threshold(japanese,cpu->X/2,&threshold)) return false;
-  cpu->A=threshold;ActRaiserCpuHle_SetNegativeZero16(cpu,threshold);return true;
+  if (!ActRaiserLevelGoals_PrefixEntry(cpu) ||
+      !ArRegionalLevelGoals_Threshold(japanese, cpu->X / 2, &threshold))
+    return false;
+  cpu->A = threshold;
+  ActRaiserCpuHle_SetNegativeZero16(cpu, threshold);
+  return true;
 }
 bool ActRaiserLevelGoals_RefreshDisplay(CpuState *cpu,bool japanese) {
   uint16_t threshold;
-  if (!cpu || !ArRegionalLevelGoals_Display(japanese,cpu_read16(cpu,0,0x0291),&threshold)) return false;
-  cpu_write16(cpu,0,0x0297,threshold);return true;
+  if (!cpu || !ArRegionalLevelGoals_Display(japanese, cpu_read16(cpu, 0, 0x0291), &threshold))
+    return false;
+  cpu_write16(cpu, 0, 0x0297, threshold);
+  return true;
 }

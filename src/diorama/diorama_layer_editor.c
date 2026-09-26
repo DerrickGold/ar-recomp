@@ -92,15 +92,24 @@ DioramaDepthStrategy DioramaLayerEditor_StrategyOfPlane(
  * instead of the starting one, which reads as the editor remembering something
  * the player cannot see. Zeroing makes "cycle away and back" idempotent. */
 static void ClearShapeKeys(DioramaPlaneOverride *p) {
-  p->set_rake = false;           p->rake = 0.0f;
-  p->set_bow = false;            p->bow = 0.0f;
-  p->set_thickness = false;      p->thickness = 0.0f;
-  p->set_stack = false;          p->stack = 0.0f;
-  p->set_stack_copies = false;   p->stack_copies = 0;
-  p->set_stack_density = false;  p->stack_density = 0.0f;
-  p->set_stack_direction = false; p->stack_direction = kDioramaStack_Forward;
-  p->set_voxel = false;          p->voxel = 0.0f;
-  p->set_voxel_copies = false;   p->voxel_copies = 0;
+  p->set_rake = false;
+  p->rake = 0.0f;
+  p->set_bow = false;
+  p->bow = 0.0f;
+  p->set_thickness = false;
+  p->thickness = 0.0f;
+  p->set_stack = false;
+  p->stack = 0.0f;
+  p->set_stack_copies = false;
+  p->stack_copies = 0;
+  p->set_stack_density = false;
+  p->stack_density = 0.0f;
+  p->set_stack_direction = false;
+  p->stack_direction = kDioramaStack_Forward;
+  p->set_voxel = false;
+  p->voxel = 0.0f;
+  p->set_voxel_copies = false;
+  p->voxel_copies = 0;
 }
 
 void DioramaLayerEditor_SetStrategy(DioramaPlaneOverride *p,
@@ -291,7 +300,9 @@ bool DioramaLayerEditor_StepParam(DioramaPlaneOverride *p,
         int next = ClampInt(base + (direction < 0 ? -1 : 1), 2,
                             kDioramaVoxelMax);
         if (p->set_voxel_copies && next == p->voxel_copies) return false;
-        p->voxel_copies = next; p->set_voxel_copies = true; return true;
+        p->voxel_copies = next;
+        p->set_voxel_copies = true;
+        return true;
       }
       if (strategy == kDioramaDepth_Stack) {
         int base = p->set_stack_copies ? p->stack_copies
@@ -315,11 +326,13 @@ bool DioramaLayerEditor_StepParam(DioramaPlaneOverride *p,
         int next = ClampInt(base + (direction < 0 ? -1 : 1), 2,
                             kDioramaStackMax);
         if (p->set_stack_copies && next == p->stack_copies) return false;
-        p->stack_copies = next; p->set_stack_copies = true;
+        p->stack_copies = next;
+        p->set_stack_copies = true;
         /* An explicit count outranks a density in Resolve, so authoring one
          * here must drop the density -- otherwise the density row would keep
          * showing a value that no longer has any effect. */
-        p->set_stack_density = false; p->stack_density = 0.0f;
+        p->set_stack_density = false;
+        p->stack_density = 0.0f;
         return true;
       }
       return false;
@@ -332,10 +345,12 @@ bool DioramaLayerEditor_StepParam(DioramaPlaneOverride *p,
           base + (direction < 0 ? -1.0f : 1.0f), 1.0f,
           (float)kEditorStackDensityMaximum);
       if (p->set_stack_density && next == p->stack_density) return false;
-      p->stack_density = next; p->set_stack_density = true;
+      p->stack_density = next;
+      p->set_stack_density = true;
       /* Mirror of the rule above: a density only takes effect when no explicit
        * count is authored, so choosing one drops the count. */
-      p->set_stack_copies = false; p->stack_copies = 0;
+      p->set_stack_copies = false;
+      p->stack_copies = 0;
       return true;
     }
     case kDioramaEditorParam_Direction: {
@@ -357,7 +372,9 @@ bool DioramaLayerEditor_StepParam(DioramaPlaneOverride *p,
       float base = p->set_z ? p->z : 0.0f;
       float next = StepFloat(base, direction, 0.0f, 1.0f);
       if (p->set_z && next == p->z) return false;
-      p->z = next; p->set_z = true; return true;
+      p->z = next;
+      p->set_z = true;
+      return true;
     }
     case kDioramaEditorParam_Alpha: {
       int base = p->set_alpha ? p->alpha : kDioramaLayerAlphaOpaque;
@@ -366,7 +383,9 @@ bool DioramaLayerEditor_StepParam(DioramaPlaneOverride *p,
       int next = ClampInt(base + (direction < 0 ? -5 : 5), 0,
                           kDioramaLayerAlphaOpaque);
       if (p->set_alpha && next == p->alpha) return false;
-      p->alpha = (uint8_t)next; p->set_alpha = true; return true;
+      p->alpha = (uint8_t)next;
+      p->set_alpha = true;
+      return true;
     }
     case kDioramaEditorParam_TransparentFill:
       /* Left/Right provides a quick OFF/BLACK toggle. Confirm opens the live
@@ -405,7 +424,9 @@ bool DioramaLayerEditor_StepParam(DioramaPlaneOverride *p,
       int next = ClampInt(base + (direction < 0 ? -1 : 1), 0,
                           kDioramaPlane_Count * 4 - 1);
       if (p->set_order && next == p->order) return false;
-      p->order = next; p->set_order = true; return true;
+      p->order = next;
+      p->set_order = true;
+      return true;
     }
     case kDioramaEditorParam_None:
     default:
@@ -425,21 +446,26 @@ void DioramaLayerEditor_ClearParam(DioramaPlaneOverride *p,
       ClearShapeKeys(p);
       break;
     case kDioramaEditorParam_Copies:
-      p->set_stack_copies = false; p->stack_copies = 0;
-      p->set_voxel_copies = false; p->voxel_copies = 0;
+      p->set_stack_copies = false;
+      p->stack_copies = 0;
+      p->set_voxel_copies = false;
+      p->voxel_copies = 0;
       break;
     case kDioramaEditorParam_Density:
-      p->set_stack_density = false; p->stack_density = 0.0f;
+      p->set_stack_density = false;
+      p->stack_density = 0.0f;
       break;
     case kDioramaEditorParam_Direction:
       p->set_stack_direction = false;
       p->stack_direction = kDioramaStack_Forward;
       break;
     case kDioramaEditorParam_Z:
-      p->set_z = false; p->z = 0.0f;
+      p->set_z = false;
+      p->z = 0.0f;
       break;
     case kDioramaEditorParam_Alpha:
-      p->set_alpha = false; p->alpha = 0;
+      p->set_alpha = false;
+      p->alpha = 0;
       break;
     case kDioramaEditorParam_TransparentFill:
       p->set_transparent_fill = false;
@@ -451,7 +477,8 @@ void DioramaLayerEditor_ClearParam(DioramaPlaneOverride *p,
       p->source = kDioramaLayerSource_Captured;
       break;
     case kDioramaEditorParam_Order:
-      p->set_order = false; p->order = 0;
+      p->set_order = false;
+      p->order = 0;
       break;
     case kDioramaEditorParam_None:
     default:

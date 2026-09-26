@@ -45,13 +45,15 @@ void SettingsOverlay_LocalizedDioramaRow(ArUiLocale locale,
       if (!row->room_live) {
         Caption(out->label, ArUiCatalog_Text(locale, "overlay.layer.diorama.enter", row->label));
       } else {
-        Format(out->label, locale, section ? "overlay.layer.room_section" : "overlay.layer.room", scope, 2);
+        Format(out->label, locale, section ? "overlay.layer.room_section" : "overlay.layer.room",
+               scope, 2);
         Caption(out->value, ArUiCatalog_Text(locale, "overlay.layer.here", row->value));
       }
       break;
     case kDioramaEditorRow_ResetRoom:
       out->help = ArUiCatalog_Text(locale, "overlay.layer.diorama.help.reset", native_help);
-      Format(out->label, locale, section ? "overlay.layer.reset_section" : "overlay.layer.reset_room", scope, 2);
+      Format(out->label, locale,
+             section ? "overlay.layer.reset_section" : "overlay.layer.reset_room", scope, 2);
       Caption(out->value, ArUiCatalog_Text(locale, "common.reset", row->value));
       break;
     case kDioramaEditorRow_Plane: {
@@ -75,7 +77,8 @@ void SettingsOverlay_LocalizedDioramaRow(ArUiLocale locale,
         Caption(out->label, ArUiCatalog_Text(locale, "overlay.layer.diorama.slices", row->label));
       if (row->param == kDioramaEditorParam_Direction)
         Caption(out->value, Indexed(locale, "diorama.direction", row->direction, row->value));
-      if (row->param == kDioramaEditorParam_Source && row->effective_source == kDioramaLayerSource_Captured)
+      if (row->param == kDioramaEditorParam_Source &&
+          row->effective_source == kDioramaLayerSource_Captured)
         Caption(out->value, ArUiCatalog_Text(locale, "overlay.layer.diorama.captured", row->value));
       if (row->param == kDioramaEditorParam_TransparentFill) {
         if (!row->effective_transparent_fill_set)
@@ -104,8 +107,12 @@ void SettingsOverlay_LocalizedActionBgRow(ArUiLocale locale,
       if (row->room_live) {
         char address[16];
         snprintf(address, sizeof(address), "%02X/%02X", row->map_group, row->map_number);
-        const ArUiTextArgument args[] = {{"room", address}, {"state",
-          ArUiCatalog_Text(locale, row->enum_value ? "overlay.layer.draft" : "overlay.layer.canonical", NULL)}};
+        const ArUiTextArgument args[] = {
+          { "room", address },
+          { "state",
+            ArUiCatalog_Text(
+                locale, row->enum_value ? "overlay.layer.draft" : "overlay.layer.canonical", NULL) }
+        };
         Format(out->value, locale, "overlay.layer.action.room_state", args, 2);
       }
       break;
@@ -114,14 +121,17 @@ void SettingsOverlay_LocalizedActionBgRow(ArUiLocale locale,
     case kActionBgTunerRow_Guides:
     case kActionBgTunerRow_IgnoreSideBounds:
     case kActionBgTunerRow_IgnoreVerticalBounds:
-      key = row->enum_value ? "common.on" : "common.off"; break;
+      key = row->enum_value ? "common.on" : "common.off";
+      break;
     case kActionBgTunerRow_Layer: {
       Caption(out->label, row->label); /* BG1/BG2 are authoring tokens. */
       const ArUiTextArgument args[] = {
         {"role", Indexed(locale, "action.role", row->role, "?")},
         {"source", Indexed(locale, "action.source", row->source, "?")},
       };
-      Format(out->value, locale, row->expanded ? "overlay.layer.action.layer_open" : "overlay.layer.action.layer", args, 2);
+      Format(out->value, locale,
+             row->expanded ? "overlay.layer.action.layer_open" : "overlay.layer.action.layer", args,
+             2);
       break;
     }
     case kActionBgTunerRow_BandHeader: {
@@ -149,7 +159,8 @@ void SettingsOverlay_LocalizedActionBgRow(ArUiLocale locale,
     case kActionBgTunerRow_BandMode: family = "action.extent"; break;
     case kActionBgTunerRow_BandDelete: key = "overlay.layer.delete"; break;
     case kActionBgTunerRow_BandAdd:
-      key = row->selectable ? "overlay.layer.add" : "overlay.layer.full"; break;
+      key = row->selectable ? "overlay.layer.add" : "overlay.layer.full";
+      break;
     case kActionBgTunerRow_Print: key = "overlay.layer.log"; break;
     case kActionBgTunerRow_Reset: key = "common.reset"; break;
     default: break; /* Numeric quantities and technical tokens stay literal. */

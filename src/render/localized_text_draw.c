@@ -182,7 +182,9 @@ static bool DrawOwnedPieces(ArRenderDevice *device,
     const unsigned at = count * 4;
     vertices[at] = (ArRenderVertex2D){{target.x, target.y}, color, {u, v}};
     vertices[at + 1] = (ArRenderVertex2D){{target.x + target.w, target.y}, color, {right, v}};
-    vertices[at + 2] = (ArRenderVertex2D){{target.x + target.w, target.y + target.h}, color, {right, bottom}};
+    vertices[at + 2] = (ArRenderVertex2D){ { target.x + target.w, target.y + target.h },
+                                           color,
+                                           { right, bottom } };
     vertices[at + 3] = (ArRenderVertex2D){{target.x, target.y + target.h}, color, {u, bottom}};
     const int32_t order[] = {0, 1, 2, 0, 2, 3};
     for (unsigned j = 0; j < 6; ++j) indices[count * 6 + j] = (int32_t)at + order[j];

@@ -22,6 +22,7 @@ RecompReturn ActRaiserNativeCall(CpuState *cpu, ActRaiserNativeLeaf leaf,
     cpu->PB = pb;
   cpu_return_scope_end(&scope);
   if (result == RECOMP_RETURN_NORMAL && (cpu->S != stack || cpu->PB != pb))
-    ActRaiserHleFatal("Native leaf at $%02X:%04X returned outside its frame contract", bank, caller);
+    ActRaiserHleFatal("Native leaf at $%02X:%04X returned outside its frame contract", bank,
+                      caller);
   return result;
 }

@@ -70,7 +70,8 @@ bool ActRaiserLocalizationCredits_PrepareText(ActRaiserResolvedText *text,
       if (i < span->start) before += 3;
       else if (i < span->end) inside += 3;
     }
-    span->start += before; span->end += before + inside;
+    span->start += before;
+    span->end += before + inside;
   }
   /* Relocate styles through the same inserted rows, from the end so source
    * offsets stay valid until each edit has been applied. */

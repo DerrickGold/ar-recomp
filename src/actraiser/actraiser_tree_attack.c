@@ -22,7 +22,9 @@ enum TreePhase {
   kWalking, kWithering, kVisualBorn, kVisualPlaying,
 };
 static uint16_t Read(CpuState *cpu,unsigned offset) {return cpu_read16(cpu,0,cpu->X+offset);}
-static void Write(CpuState *cpu,unsigned offset,uint16_t value) {cpu_write16(cpu,0,cpu->X+offset,value);}
+static void Write(CpuState *cpu, unsigned offset, uint16_t value) {
+  cpu_write16(cpu, 0, cpu->X + offset, value);
+}
 static bool Slot(unsigned x) {
   return x>=kActRaiserWram_ActionObjectTable &&
     x<kActRaiserWram_ActionObjectTable+kActRaiserActionObjectCount*kActRaiserActionObjectStride &&
@@ -57,7 +59,8 @@ static bool Compatible(CpuState *cpu) {
   for(unsigned i=0;i<sizeof(programs)/sizeof(programs[0]);++i) {
     const unsigned at=cpu_read16(cpu,0x7e,0x4002+2*programs[i].state),length=4*programs[i].rows;
     if(at<52 || at+length>=end || cpu_read8(cpu,0x7e,0x4000+at+length)!=255)return false;
-    for(unsigned j=0;j<length;++j)if(cpu_read8(cpu,0x7e,0x4000+at+j)!=programs[i].bytes[j])return false;
+    for (unsigned j = 0; j < length; ++j)
+      if (cpu_read8(cpu, 0x7e, 0x4000 + at + j) != programs[i].bytes[j]) return false;
   }
   const unsigned at=cpu_read16(cpu,0x7e,0x4016);
   return at>=52 && at+5<=end && cpu_read8(cpu,0x7e,0x4000+at)==6 &&
@@ -65,7 +68,8 @@ static bool Compatible(CpuState *cpu) {
     !cpu_read16(cpu,0x7e,0x4002+at) && cpu_read8(cpu,0x7e,0x4004+at)==255;
 }
 static RecompReturn Return(uint32_t target,uint32_t source) {
-  if(!cpu_hle_tailcall_request(target,source))ActRaiserHleFatal("Tree controller has no native return owner");
+  if (!cpu_hle_tailcall_request(target, source))
+    ActRaiserHleFatal("Tree controller has no native return owner");
   return RECOMP_RETURN_TAILCALL;
 }
 bool ActRaiser_TreePrepareEntry(CpuState *cpu) {
@@ -77,22 +81,29 @@ bool ActRaiser_TreePrepareEntry(CpuState *cpu) {
 }
 RecompReturn ActRaiser_TreePrepare(CpuState *cpu) {
   if(!ActRaiser_TreePrepareEntry(cpu))ActRaiserHleFatal("Unsupported tree preparation");
-  Write(cpu,0x1a,10);Write(cpu,0x1c,0);
+  Write(cpu, 0x1a, 10);
+  Write(cpu, 0x1c, 0);
   Leaf(cpu,bank_00_8E2F_M0X0);
   Write(cpu,0x78,(uint16_t)(Read(cpu,0x78)+1));
   /* JP/PAL apply the pose then wait128 separately. No copied donor PC or
    * fabricated yield word: resume the real US orb continuation after129
    * native updates. Its allocation, second shot and restart remain native. */
-  Write(cpu,6,0);Write(cpu,8,0);Write(cpu,0x24,128);Write(cpu,0x12,0xa97b);
+  Write(cpu, 6, 0);
+  Write(cpu, 8, 0);
+  Write(cpu, 0x24, 128);
+  Write(cpu, 0x12, 0xa97b);
   return Return(0x00a948,0x00a975);
 }
 static bool Row(CpuState *cpu) {
   Leaf(cpu,bank_00_8E2F_M0X0);
   if(cpu->_flag_C)return false;
-  Write(cpu,0x1c,(uint16_t)(Read(cpu,0x1c)+1));return true;
+  Write(cpu, 0x1c, (uint16_t)(Read(cpu, 0x1c) + 1));
+  return true;
 }
 static void Start(CpuState *cpu,uint16_t phase,uint16_t state) {
-  Write(cpu,0x3e,phase);Write(cpu,0x1a,state);Write(cpu,0x1c,0);
+  Write(cpu, 0x3e, phase);
+  Write(cpu, 0x1a, state);
+  Write(cpu, 0x1c, 0);
   if(!Row(cpu))ActRaiserHleFatal("Tree sequence has no initial row");
 }
 static bool Spawn(CpuState *cpu,bool after_peer,int offset,uint16_t phase,uint16_t animation) {
@@ -100,7 +111,8 @@ static bool Spawn(CpuState *cpu,bool after_peer,int offset,uint16_t phase,uint16
   if(cpu->_flag_C)return false; /* Full pool: retain earlier successful births. */
   const unsigned child=cpu->Y;
   if(!Slot(child))ActRaiserHleFatal("Tree allocator returned a non-slot child");
-  cpu_write16(cpu,0,child+0x12,0xa9bf);cpu_write16(cpu,0,child+0x3e,phase);
+  cpu_write16(cpu, 0, child + 0x12, 0xa9bf);
+  cpu_write16(cpu, 0, child + 0x3e, phase);
   cpu_write16(cpu,0,child+0x38,animation);
   if(after_peer) {
     cpu_write16(cpu,0,child+2,(uint16_t)(cpu_read16(cpu,0,child+2)+offset));
@@ -122,28 +134,41 @@ RecompReturn ActRaiser_TreeController(CpuState *cpu) {
   if(phase<kOpening || phase>kVisualPlaying) {
     Start(cpu,kOpening,7);
   } else if(phase==kSeedBorn) {
-    Write(cpu,0,0);Write(cpu,0x30,0);Write(cpu,0x2e,1);
-    Leaf(cpu,bank_00_85E9_M0X0);Start(cpu,kFalling,16);
+    Write(cpu, 0, 0);
+    Write(cpu, 0x30, 0);
+    Write(cpu, 0x2e, 1);
+    Leaf(cpu, bank_00_85E9_M0X0);
+    Start(cpu, kFalling, 16);
   } else if(phase==kVisualBorn) {
-    Write(cpu,0,0);Write(cpu,0x30,0x20);Start(cpu,kVisualPlaying,Read(cpu,0x38));
+    Write(cpu, 0, 0);
+    Write(cpu, 0x30, 0x20);
+    Start(cpu, kVisualPlaying, Read(cpu, 0x38));
   } else if(!Row(cpu)) {
     switch(phase) {
       case kOpening:
         if(Spawn(cpu,true,-32,kSeedBorn,0))Spawn(cpu,true,32,kSeedBorn,0);
-        Write(cpu,0x38,0);Write(cpu,0x3e,0);Write(cpu,6,0);Write(cpu,8,0);break;
+        Write(cpu, 0x38, 0);
+        Write(cpu, 0x3e, 0);
+        Write(cpu, 6, 0);
+        Write(cpu, 8, 0);
+        break;
       case kFalling:
         Leaf(cpu,bank_00_8FE7_M0X0);
-        Start(cpu,cpu->_flag_C?kLanded:kFalling,cpu->_flag_C?17:16);break;
+        Start(cpu, cpu->_flag_C ? kLanded : kFalling, cpu->_flag_C ? 17 : 16);
+        break;
       case kLanded:
-        Spawn(cpu,false,0,kVisualBorn,24);Spawn(cpu,false,0,kVisualBorn,22);
-        Start(cpu,kSprouting,23);break;
+        Spawn(cpu, false, 0, kVisualBorn, 24);
+        Spawn(cpu, false, 0, kVisualBorn, 22);
+        Start(cpu, kSprouting, 23);
+        break;
       case kSprouting: Write(cpu,0x38,16); /* fall through */
       case kWalking:
         if(phase==kWalking)Write(cpu,0x38,(uint16_t)(Read(cpu,0x38)-1));
         if(!Read(cpu,0x38)){Start(cpu,kWithering,20);break;}
         Leaf(cpu,bank_00_9108_M0X0);
         if(cpu->_flag_C)Leaf(cpu,bank_00_871E_M0X0);
-        Start(cpu,kWalking,18);break;
+        Start(cpu, kWalking, 18);
+        break;
       case kWithering: case kVisualPlaying:
         return Return(0x0085b7,0x00a9bf); /* Real native retire + RTS. */
       default:ActRaiserHleFatal("Invalid tree sequence phase");

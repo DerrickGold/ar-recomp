@@ -20,7 +20,8 @@ static void SlotTextRow(const MenuLayout *layout,int x,int y,int width,
     DrawTextN(layout,x+width-value_chars*cell,y,value,value_chars,kText_Value);
   }
 }
-static void SlotTabs(const MenuLayout *layout,int x,int y,int width,const char *const *tabs,int count) {
+static void SlotTabs(const MenuLayout *layout, int x, int y, int width, const char *const *tabs,
+                     int count) {
   int total=0;
   for(int i=0;i<count;++i)total+=SmallTextWidth(Ui(tabs[i]))+14;
   if(total<=width) {
@@ -34,9 +35,11 @@ static void SlotTabs(const MenuLayout *layout,int x,int y,int width,const char *
       x+=span+2;
     }
   } else {
-    char page[24];snprintf(page,sizeof(page),"< %d/%d >",s_slots.tab+1,count);
+    char page[24];
+    snprintf(page, sizeof(page), "< %d/%d >", s_slots.tab + 1, count);
     int page_width=SmallTextWidth(page);
-    DrawSmallTextN(layout,x,y,Ui(tabs[s_slots.tab]),(width-page_width-12)/kDebugGlyphWidth,kSelectYellow);
+    DrawSmallTextN(layout, x, y, Ui(tabs[s_slots.tab]),
+                   (width - page_width - 12) / kDebugGlyphWidth, kSelectYellow);
     DrawSmallText(layout,x+width-page_width,y,page,kSteelBlue);
   }
 }
@@ -47,13 +50,18 @@ static int SlotWrappedText(const MenuLayout *layout,int x,int y,const char *text
   while(remaining && lines<limit) {
     ArInterfaceTextLine slice;
     char buffer[kArInterfaceTextMaximumBytes+1];
-    if(!ArInterfaceText_WrapLine(text,remaining,columns,sizeof(buffer)-1,&slice) || !slice.consumed)break;
-    memcpy(buffer,text,slice.bytes);buffer[slice.bytes]=0;
+    if (!ArInterfaceText_WrapLine(text, remaining, columns, sizeof(buffer) - 1, &slice) ||
+        !slice.consumed)
+      break;
+    memcpy(buffer, text, slice.bytes);
+    buffer[slice.bytes] = 0;
     if(draw) {
       if(primary)DrawTextN(layout,x,y+lines*12,buffer,columns,kText_Normal);
       else DrawSmallText(layout,x,y+lines*kSmallLineHeight,buffer,kSteelBlue);
     }
-    text+=slice.consumed;remaining-=slice.consumed;++lines;
+    text += slice.consumed;
+    remaining -= slice.consumed;
+    ++lines;
   }
   return lines;
 }
@@ -61,7 +69,8 @@ static void SlotDrawConfirmation(const MenuLayout *layout) {
   const OverlayDecision *decision=&s_slots.decision;
   int width=layout->logical_width<448?layout->logical_width-32:416;
   int title_lines=SlotWrappedText(layout,0,0,decision->title,(width-32)/kGlyphSize,2,false,true);
-  int body_lines=SlotWrappedText(layout,0,0,decision->body,(width-32)/kDebugGlyphWidth,10,false,false);
+  int body_lines = SlotWrappedText(layout, 0, 0, decision->body, (width - 32) / kDebugGlyphWidth,
+                                   10, false, false);
   int height=title_lines*12+body_lines*kSmallLineHeight+80;
   if(height>layout->logical_height-32)height=layout->logical_height-32;
   int x=(layout->logical_width-width)/2,y=(layout->logical_height-height)/2;
@@ -92,18 +101,25 @@ static void SlotDrawList(const MenuLayout *layout,int width,int height) {
       FillLogicalRect(layout,14,y-4,width-22,29,s_slots.detail_focus?kPanel:kHighlight);
       if(!s_slots.detail_focus)FillLogicalRect(layout,14,y-4,2,29,kSelectYellow);
     }
-    const char *name=Ui(slot->state==kSaveSlot_Unavailable?"slots.unavailable":slot->prepared?"slots.prepared":"slots.empty");
-    if(slot->state==kSaveSlot_Ready)name=slot->summary.name[0]?slot->summary.name:Ui("slots.unknown");
+    const char *name = Ui(slot->state == kSaveSlot_Unavailable ? "slots.unavailable"
+                              : slot->prepared                 ? "slots.prepared"
+                                                               : "slots.empty");
+    if (slot->state == kSaveSlot_Ready)
+      name = slot->summary.name[0] ? slot->summary.name : Ui("slots.unknown");
     char label[128],note[64];
     snprintf(label,sizeof(label),"%02u %s",i+1,name);
     DrawTextN(layout,22,y,label,(width-34)/kGlyphSize,selected?kText_Normal:kText_Dim);
     if(slot->state==kSaveSlot_Ready)SlotRelativeTime(slot->saved_at,note,sizeof(note));
-    else snprintf(note,sizeof(note),"%s",Ui(slot->state==kSaveSlot_Empty?"slots.not_saved":"slots.recovery"));
+    else
+      snprintf(note, sizeof(note), "%s",
+               Ui(slot->state == kSaveSlot_Empty ? "slots.not_saved" : "slots.recovery"));
     bool active=i==(int)s_slots.collection.active;
     int cells=(width-34)/kDebugGlyphWidth;
     int active_cells=active?CappedTextLength(Ui("slots.active"),8):0;
     DrawSmallTextN(layout,22,y+13,note,cells-(active?active_cells+1:0),kMutedText);
-    if(active)DrawSmallTextN(layout,22+(cells-active_cells)*kDebugGlyphWidth,y+13,Ui("slots.active"),active_cells,kSteelBlue);
+    if (active)
+      DrawSmallTextN(layout, 22 + (cells - active_cells) * kDebugGlyphWidth, y + 13,
+                     Ui("slots.active"), active_cells, kSteelBlue);
   }
   DrawScrollBar(layout,8+width-12,38,visible*32,kSaveSlotCount,visible,s_slots.top,kSteelBlue);
   FillLogicalRect(layout,20,advanced_y-9,width-24,1,kSteelDim);
@@ -116,7 +132,8 @@ static void SlotMenuRender(const MenuLayout *layout) {
   int left=8,panel_width=width-16;
   if(list) {
     int list_width=152;
-    left=list_width+16;panel_width=width-left-8;
+    left = list_width + 16;
+    panel_width = width - left - 8;
     SlotDrawList(layout,list_width,top_height);
   }
   DrawDialogPanel(layout,left,8,panel_width,top_height);
@@ -138,7 +155,8 @@ static void SlotMenuRender(const MenuLayout *layout) {
     int content_y=65;
     if(s_slots.tab==kSlotPage_Regions && s_slots.selected!=(int)s_slots.collection.active &&
         s_slots.collection.slots[s_slots.collection.active].state==kSaveSlot_Ready) {
-      char baseline[96],number[16];snprintf(number,sizeof(number),"%u",s_slots.collection.active+1);
+      char baseline[96], number[16];
+      snprintf(number, sizeof(number), "%u", s_slots.collection.active + 1);
       ArUiTextArgument arg={"slot",number};
       ArUiCatalog_Format(baseline,sizeof(baseline),Ui("slots.compared"),&arg,1);
       DrawSmallTextN(layout,x,57,baseline,content_width/kDebugGlyphWidth,kMutedText);
@@ -146,37 +164,55 @@ static void SlotMenuRender(const MenuLayout *layout) {
     }
     if(selected->state==kSaveSlot_Unavailable) {
       const char *error=selected->error.message[0]?selected->error.message:Ui("slots.recovery");
-      DrawWrappedSmallText(layout,x,content_y,error,content_width/kDebugGlyphWidth,(action_y-content_y-8)/kSmallLineHeight,kSteelBlue);
+      DrawWrappedSmallText(layout, x, content_y, error, content_width / kDebugGlyphWidth,
+                           (action_y - content_y - 8) / kSmallLineHeight, kSteelBlue);
     } else if(selected->state==kSaveSlot_Empty && !selected->prepared) {
-      DrawWrappedSmallText(layout,x,content_y,Ui("slots.empty.help"),content_width/kDebugGlyphWidth,(action_y-content_y-8)/kSmallLineHeight,kSteelBlue);
+      DrawWrappedSmallText(layout, x, content_y, Ui("slots.empty.help"),
+                           content_width / kDebugGlyphWidth,
+                           (action_y - content_y - 8) / kSmallLineHeight, kSteelBlue);
     } else {
       SlotDetailLine lines[kSlotDetailCapacity];
       int count=SlotDetails(lines,false),visible=(action_y-content_y-8)/16;
       if(visible<1)visible=1;
       if(s_slots.scroll>count-visible)s_slots.scroll=count>visible?count-visible:0;
       for(int i=s_slots.scroll;i<count && i<s_slots.scroll+visible;++i) {
-        bool metadata=!strcmp(lines[i].label,Ui("slots.last_saved")) || !strcmp(lines[i].label,Ui("slots.file_time"));
-        SlotTextRow(layout,x,content_y+(i-s_slots.scroll)*16,content_width,lines[i].label,lines[i].value,false,metadata);
+        bool metadata = !strcmp(lines[i].label, Ui("slots.last_saved")) ||
+            !strcmp(lines[i].label, Ui("slots.file_time"));
+        SlotTextRow(layout, x, content_y + (i - s_slots.scroll) * 16, content_width, lines[i].label,
+                    lines[i].value, false, metadata);
       }
-      DrawScrollBar(layout,left+panel_width-10,content_y,visible*16,count,visible,s_slots.scroll,kSteelBlue);
+      DrawScrollBar(layout, left + panel_width - 10, content_y, visible * 16, count, visible,
+                    s_slots.scroll, kSteelBlue);
     }
     const char *action="slots.switch";
     bool enabled=s_slots.collection.writable;
-    if(selected->state==kSaveSlot_Unavailable){action="slots.unavailable";enabled=false;}
-    else if(selected->state==kSaveSlot_Empty)action=selected->prepared?"slots.review_setup":"slots.new_game";
-    else if(s_slots.selected==(int)s_slots.collection.active){action="slots.already_active";enabled=false;}
+    if(selected->state==kSaveSlot_Unavailable){action="slots.unavailable";enabled=false;
+    } else if (selected->state == kSaveSlot_Empty)
+      action = selected->prepared ? "slots.review_setup" : "slots.new_game";
+    else if (s_slots.selected == (int)s_slots.collection.active) {
+      action = "slots.already_active";
+      enabled = false;
+    }
     FillLogicalRect(layout,x,action_y-8,content_width,1,kSteelDim);
-    SlotTextRow(layout,x,action_y,content_width,Ui(action),"",s_slots.detail_focus && enabled,false);
+    SlotTextRow(layout, x, action_y, content_width, Ui(action), "", s_slots.detail_focus && enabled,
+                false);
   } else if(s_slots.screen==kSlotScreen_Seed) {
-    DrawWrappedSmallText(layout,x,44,Ui("slots.seed.help"),content_width/kDebugGlyphWidth,3,kSteelBlue);
-    char seed[16];snprintf(seed,sizeof(seed),"%09u",s_slots.draft.randomizer.seed);
+    DrawWrappedSmallText(layout, x, 44, Ui("slots.seed.help"), content_width / kDebugGlyphWidth, 3,
+                         kSteelBlue);
+    char seed[16];
+    snprintf(seed, sizeof(seed), "%09u", s_slots.draft.randomizer.seed);
     DrawTextN(layout,x,84,seed,kSlotSeedDigits,kText_Value);
     DrawSmallText(layout,x+s_slots.digit*kGlyphSize,96,"^",kSelectYellow);
   } else {
-    const char *random_tabs[]={"overlay.tab.seed","overlay.tab.enemies","overlay.tab.items","overlay.tab.simulation"};
-    const char *region_tabs[]={"overlay.region.tabs.presets","overlay.region.tabs.action","overlay.region.tabs.towns","overlay.region.tabs.controls","overlay.region.tabs.presentation"};
-    if(s_slots.screen==kSlotScreen_Randomizer)SlotTabs(layout,x,40,content_width,random_tabs,kSlotRandomPageCount);
-    else if(s_slots.screen==kSlotScreen_Regions)SlotTabs(layout,x,40,content_width,region_tabs,kOverlayRegionPage_Count);
+    const char *random_tabs[] = { "overlay.tab.seed", "overlay.tab.enemies", "overlay.tab.items",
+                                  "overlay.tab.simulation" };
+    const char *region_tabs[] = { "overlay.region.tabs.presets", "overlay.region.tabs.action",
+                                  "overlay.region.tabs.towns", "overlay.region.tabs.controls",
+                                  "overlay.region.tabs.presentation" };
+    if (s_slots.screen == kSlotScreen_Randomizer)
+      SlotTabs(layout, x, 40, content_width, random_tabs, kSlotRandomPageCount);
+    else if (s_slots.screen == kSlotScreen_Regions)
+      SlotTabs(layout, x, 40, content_width, region_tabs, kOverlayRegionPage_Count);
     else DrawSmallTextN(layout,x,40,Ui("slots.setup"),content_width/kDebugGlyphWidth,kSteelBlue);
     int count=SlotRowCount(),visible=(top_height-56)/20;
     if(visible<1)visible=1;
@@ -185,11 +221,18 @@ static void SlotMenuRender(const MenuLayout *layout) {
     bool view_valid=s_slots.screen!=kSlotScreen_Regions ||
         (s_slot_hooks.view && s_slot_hooks.view(&s_slots.draft,&s_slots.draft_view));
     for(int i=s_slots.scroll;i<count && i<s_slots.scroll+visible;++i) {
-      const char *label="";char value[128]="";
+      const char *label = "";
+      char value[128] = "";
       if(s_slots.screen==kSlotScreen_Setup) {
-        const char *labels[]={"slots.type","slots.seed","slots.new_seed","slots.options","slots.starting_regions","slots.start"};
-        int code=SlotSetupCode(i);label=Ui(labels[code]);
-        if(code==0)snprintf(value,sizeof(value),"%s",Ui(s_slots.draft.randomizer.enabled?"slots.randomized":"slots.standard"));
+        const char *labels[] = {
+          "slots.type", "slots.seed", "slots.new_seed", "slots.options", "slots.starting_regions",
+          "slots.start"
+        };
+        int code = SlotSetupCode(i);
+        label = Ui(labels[code]);
+        if (code == 0)
+          snprintf(value, sizeof(value), "%s",
+                   Ui(s_slots.draft.randomizer.enabled ? "slots.randomized" : "slots.standard"));
         else if(code==1)snprintf(value,sizeof(value),"%u",s_slots.draft.randomizer.seed);
         else if(code==3 || code==4)snprintf(value,sizeof(value),">");
       } else if(s_slots.screen==kSlotScreen_Randomizer) {
@@ -216,11 +259,16 @@ static void SlotMenuRender(const MenuLayout *layout) {
     else if(s_slots.full)action="slots.full";
     else if(selected->state==kSaveSlot_Unavailable)action="slots.recovery";
     else if(selected->prepared && selected->state==kSaveSlot_Empty)action="slots.prepared.help";
-    else if(s_slots.detail_focus && s_slots.selected==(int)s_slots.collection.active)action="slots.active.help";
-    else if(selected->approximate_time && s_slots.tab==kSlotPage_Summary)action="slots.file_time.help";
+    else if (s_slots.detail_focus && s_slots.selected == (int)s_slots.collection.active)
+      action = "slots.active.help";
+    else if (selected->approximate_time && s_slots.tab == kSlotPage_Summary)
+      action = "slots.file_time.help";
   }
-  const char *message=s_slots.error[0]?s_slots.error:s_slots.collection.error.message[0]?s_slots.collection.error.message:Ui(action);
-  DrawSmallTextPreview(layout,20,bottom+10,message,(width-40)/kDebugGlyphWidth,2,s_slots.error[0]?kGameGold:kSteelBlue);
+  const char *message = s_slots.error[0]    ? s_slots.error
+      : s_slots.collection.error.message[0] ? s_slots.collection.error.message
+                                            : Ui(action);
+  DrawSmallTextPreview(layout, 20, bottom + 10, message, (width - 40) / kDebugGlyphWidth, 2,
+                       s_slots.error[0] ? kGameGold : kSteelBlue);
   char move[64],tabs[64],confirm[64],back[64],details[64],advanced[64];
   InputClass device=SettingsOverlay_MenuInputDevice();
   OverlayMenuInput_PairHint(move,sizeof(move),kMenuNav_Up,kMenuNav_Down,device);
@@ -236,11 +284,14 @@ static void SlotMenuRender(const MenuLayout *layout) {
     OverlayMenuInput_PairHint(tabs,sizeof(tabs),kMenuNav_Left,kMenuNav_Right,device);
     AddMenuHint(&hints,tabs,Ui("slots.select_hint"));
   }
-  if((list && !s_slots.advanced_focus) || s_slots.screen==kSlotScreen_Regions || s_slots.screen==kSlotScreen_Randomizer)
+  if ((list && !s_slots.advanced_focus) || s_slots.screen == kSlotScreen_Regions ||
+      s_slots.screen == kSlotScreen_Randomizer)
     AddMenuHint(&hints,tabs,Ui("overlay.hint.page"));
-  AddMenuHint(&hints,confirm,Ui("slots.choose"));AddMenuHint(&hints,back,Ui("overlay.hint.back"));
+  AddMenuHint(&hints, confirm, Ui("slots.choose"));
+  AddMenuHint(&hints, back, Ui("overlay.hint.back"));
   if(list)AddMenuHint(&hints,advanced,Ui("slots.advanced.shortcut"));
-  if((list && !s_slots.advanced_focus) || s_slots.screen==kSlotScreen_Regions || s_slots.screen==kSlotScreen_Randomizer)
+  if ((list && !s_slots.advanced_focus) || s_slots.screen == kSlotScreen_Regions ||
+      s_slots.screen == kSlotScreen_Randomizer)
     AddMenuHint(&hints,details,Ui("overlay.hint.details"));
   DrawMenuHints(layout,20,bottom+37,width-40,&hints,kSteelBlue,kMutedText);
 }

@@ -182,7 +182,8 @@ bool Save_ReadSummary(const char *path,const uint8_t *image,SaveSummary *out) {
   SaveSummary next={.level=-1,.acts_cleared=0,.death_heim=-1};
   size_t name_size=0;
   for(;name_size<kActRaiserPlayerNameCharacterLimit;++name_size) {
-    uint8_t c=image[kSavePlayerName+name_size];if(!c || c==255)break;
+    uint8_t c = image[kSavePlayerName + name_size];
+    if (!c || c == 255) break;
     if(c<32 || c>126){name_size=0;break;}
     next.name[name_size]=(char)c;
   }
@@ -190,7 +191,9 @@ bool Save_ReadSummary(const char *path,const uint8_t *image,SaveSummary *out) {
   unsigned level=ByteOrder_ReadLe16(image+kSaveMasterLevel);
   if(level>=1 && level<=17)next.level=(int)level;
   for(unsigned i=0;i<kActRaiserSaveRegionCount;++i) {
-    int state=-1;Save_GetRegionState(image,i,&state);next.towns[i]=state;
+    int state = -1;
+    Save_GetRegionState(image, i, &state);
+    next.towns[i] = state;
     if(state==2 || state==3){if(next.acts_cleared>=0)++next.acts_cleared;}
     else if(state==4){if(next.acts_cleared>=0)next.acts_cleared+=2;}
     else if(state!=0){next.towns[i]=-1;next.acts_cleared=-1;}
@@ -842,7 +845,9 @@ bool SaveSystem_SetStorageRoot(const char *root,int slot,SaveError *error) {
   if(!s_runtime.live)return Fail(error,"save system is not attached");
   SavePaths paths;
   if(!SavePaths_Init(&paths,root,slot,error))return false;
-  s_runtime.paths=paths;s_runtime.paths_valid=true;return true;
+  s_runtime.paths = paths;
+  s_runtime.paths_valid = true;
+  return true;
 }
 bool SaveSystem_DefaultImportPath(char *out,size_t capacity,SaveError *error) {
   return s_runtime.paths_valid ? SavePaths_Import(&s_runtime.paths,out,capacity,error) :
@@ -1063,9 +1068,12 @@ static bool BackupActiveOnce(bool enabled, SaveError *error) {
   if(s_runtime.paths_valid && s_runtime.paths.slot>=0) {
     char backup[kHostPathCapacity];
     if(!SavePaths_Backup(&s_runtime.paths,backup,sizeof(backup),error))return false;
-    bool ok=SaveSystem_ExportCampaign(backup,error);SavePaths_Release(backup);
+    bool ok = SaveSystem_ExportCampaign(backup, error);
+    SavePaths_Release(backup);
     if(!ok)return false;
-    s_runtime.backup_taken=true;fprintf(stderr,"[saves] backup -> %s\n",backup);return true;
+    s_runtime.backup_taken = true;
+    fprintf(stderr, "[saves] backup -> %s\n", backup);
+    return true;
   }
   time_t now = time(NULL);
   struct tm local_time;
@@ -1080,7 +1088,8 @@ static bool BackupActiveOnce(bool enabled, SaveError *error) {
   unsigned serial=0;
   do {
     int n=snprintf(backup,sizeof(backup),"%s.bak-%s-%03u.arsave",path,timestamp,serial++);
-    if(n<0 || (size_t)n>=sizeof(backup) || serial>1000)return Fail(error,"cannot reserve a campaign backup path");
+    if (n < 0 || (size_t)n >= sizeof(backup) || serial > 1000)
+      return Fail(error, "cannot reserve a campaign backup path");
   } while(ArchivePathExists(backup));
   if (!SaveSystem_ExportCampaign(backup, error)) return false;
   s_runtime.backup_taken = true;
@@ -1321,7 +1330,8 @@ bool SaveSystem_Import(const char *path, bool auto_backup, SaveError *error) {
   s_runtime.localized_name_clear_pending=!archive->name[0];
   if(archive->name[0]) {
     snprintf(s_runtime.localized_name,sizeof(s_runtime.localized_name),"%s",archive->name);
-    CopyNativePlayerName(s_runtime.localized_compatibility,sizeof(s_runtime.localized_compatibility));
+    CopyNativePlayerName(s_runtime.localized_compatibility,
+                         sizeof(s_runtime.localized_compatibility));
     s_runtime.localized_name_valid=true;
   }
   free(archive);
@@ -1329,7 +1339,8 @@ bool SaveSystem_Import(const char *path, bool auto_backup, SaveError *error) {
    * are retryable, just like a completed native story save; do not report a
    * failed import that invites replacing the campaign a second time. */
   if(!WriteLocalizedNameExtension(error))
-    fprintf(stderr,"[saves] campaign imported; enhanced-name write will retry: %s\n",error?error->message:"");
+    fprintf(stderr, "[saves] campaign imported; enhanced-name write will retry: %s\n",
+            error ? error->message : "");
   return true;
 }
 

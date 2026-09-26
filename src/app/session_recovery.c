@@ -33,11 +33,13 @@ bool SessionRecovery_Format(char *output, size_t capacity, ArUiLocale locale,
   memcpy(bounded_detail, detail, bytes);
   bounded_detail[bytes] = 0;
   const ArUiTextArgument args[] = {
-      {"reason", ArUiCatalog_Text(locale, reasons[kind], NULL)},
-      {"detail", bounded_detail},
-      {"closed", kind == kSessionFailure_Startup ? "" : ArUiCatalog_Text(locale, "recovery.closed", NULL)},
-      {"settings", settings_failed ? ArUiCatalog_Text(locale, "recovery.settings_warning", NULL) : ""},
-      {"save", save_failed ? ArUiCatalog_Text(locale, "recovery.save_warning", NULL) : ""},
+    { "reason", ArUiCatalog_Text(locale, reasons[kind], NULL) },
+    { "detail", bounded_detail },
+    { "closed",
+      kind == kSessionFailure_Startup ? "" : ArUiCatalog_Text(locale, "recovery.closed", NULL) },
+    { "settings",
+      settings_failed ? ArUiCatalog_Text(locale, "recovery.settings_warning", NULL) : "" },
+    { "save", save_failed ? ArUiCatalog_Text(locale, "recovery.save_warning", NULL) : "" },
   };
   return ArUiCatalog_Format(output, capacity,
       ArUiCatalog_Text(locale, "recovery.message", NULL), args, sizeof(args)/sizeof(args[0]));

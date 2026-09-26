@@ -208,7 +208,8 @@ RecompReturn ActRaiser_LocalizationMenuAcknowledgement(CpuState *cpu) {
   /* An explicit successful acknowledgement of an audited pure-text prompt.
    * No pad state is changed; the next native confirmation owns a fresh edge. */
   cpu->A = (cpu->A & 0xff00u) | 0x80u;
-  cpu->_flag_Z = 0; cpu->_flag_N = 1;
+  cpu->_flag_Z = 0;
+  cpu->_flag_N = 1;
   cpu->P = (cpu->P & ~0x82u) | 0x80u;
   cpu->S += 2;
   return RECOMP_RETURN_NORMAL;

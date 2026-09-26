@@ -202,7 +202,8 @@ static bool ResolveSnapshot(
        resolved->menu == kActRaiserLocalizationMenu_MessageSpeedJP) &&
       !ActRaiserLocalizationSpeedText_Project(&resolved->text,
           resolved->menu == kActRaiserLocalizationMenu_MessageSpeedJP ? 7 : 9)) {
-    if (error && error_capacity) snprintf(error, error_capacity, "incompatible message-speed numeric row");
+    if (error && error_capacity)
+      snprintf(error, error_capacity, "incompatible message-speed numeric row");
     return false;
   }
   return true;

@@ -178,7 +178,8 @@ bool ActRaiserLocalizationText_MapBidiSpans(
     size_t a = value.start > source_offset ? value.start - source_offset : 0;
     size_t b = value.end - source_offset;
     if (b > source_bytes) b = source_bytes;
-    a = offsets[a]; b = offsets[b];
+    a = offsets[a];
+    b = offsets[b];
     if (a > normalized_bytes) a = normalized_bytes;
     if (b > normalized_bytes) b = normalized_bytes;
     while (a < b && (normalized[a] == ' ' || normalized[a] == '\n')) ++a;

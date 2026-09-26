@@ -19,11 +19,13 @@ static bool EuropeanArt(void) {
   return (ActRaiserRegional_ArtworkSnapshot()&(1u<<kArRegionalArtwork_ActionItems))!=0;
 }
 static RecompReturn Tail(unsigned target,unsigned owner) {
-  if(!cpu_hle_tailcall_request(target,owner))ActRaiserHleFatal("Inventory prefix has no native owner");
+  if (!cpu_hle_tailcall_request(target, owner))
+    ActRaiserHleFatal("Inventory prefix has no native owner");
   return RECOMP_RETURN_TAILCALL;
 }
 static void Load8(CpuState *cpu,uint8_t value) {
-  cpu->A=(cpu->A&0xff00)|value;ActRaiserCpuHle_SetNegativeZero8(cpu,value);
+  cpu->A = (cpu->A & 0xff00) | value;
+  ActRaiserCpuHle_SetNegativeZero8(cpu, value);
 }
 bool ActRaiser_InventoryPickupEntry(CpuState *cpu) {
   if(!Native(cpu,0))return false;
@@ -38,22 +40,29 @@ RecompReturn ActRaiser_InventoryPickup(CpuState *cpu) {
   /* Keep the US helper's PHP/PLP/RTS contract and original return frame.
    * Unchanged sword/heal/score effects remain native. PAL's shared heal and
    * score pickups use sound0F rather than US0D before those same effects. */
-  cpu_mirrors_to_p(cpu);cpu_write8(cpu,0,cpu->S--,cpu->P);
-  cpu->P|=CPU_P_M;cpu_p_to_mirrors(cpu);
+  cpu_mirrors_to_p(cpu);
+  cpu_write8(cpu, 0, cpu->S--, cpu->P);
+  cpu->P |= CPU_P_M;
+  cpu_p_to_mirrors(cpu);
   const uint8_t spell=ArRegionalSpellInventory_PickupSpell(item);
   if(item==5 || item==6) {
-    Load8(cpu,0x0f);if(g_cpu_brk_hook)g_cpu_brk_hook(cpu);
+    Load8(cpu, 0x0f);
+    if (g_cpu_brk_hook) g_cpu_brk_hook(cpu);
     return Tail(item==5?0x008825:0x008832,0x00879d);
   }
   if(spell) {
-    Load8(cpu,0x0f);if(g_cpu_brk_hook)g_cpu_brk_hook(cpu);
+    Load8(cpu, 0x0f);
+    if (g_cpu_brk_hook) g_cpu_brk_hook(cpu);
     if(!ActRaiserRegional_PushSpell(spell))ActRaiserHleFatal("Cannot push Action spell");
-    cpu_write8(cpu,0,0x21,ActRaiserRegional_InventoryView().count);Load8(cpu,spell);
+    cpu_write8(cpu, 0, 0x21, ActRaiserRegional_InventoryView().count);
+    Load8(cpu, spell);
   } else {
-    Load8(cpu,0x8d);if(g_cpu_cop_hook)g_cpu_cop_hook(cpu);
+    Load8(cpu, 0x8d);
+    if (g_cpu_cop_hook) g_cpu_cop_hook(cpu);
     const uint8_t hp=cpu_read8(cpu,0,0x1d),maximum=cpu_read8(cpu,0,0x1e);
     cpu_write8(cpu,0,0x1e,ArRegionalSpellInventory_GrowHealth(maximum));
-    cpu_write8(cpu,0,0x1d,ArRegionalSpellInventory_GrowHealth(hp));Load8(cpu,hp);
+    cpu_write8(cpu, 0, 0x1d, ArRegionalSpellInventory_GrowHealth(hp));
+    Load8(cpu, hp);
   }
   return Tail(0x00884e,0x00879d);
 }
@@ -70,7 +79,8 @@ RecompReturn ActRaiser_InventoryDebit(CpuState *cpu) {
   }
   /* This is the real post-effect cleanup, after graphics restoration. Earlier
    * room transitions never reach it and therefore retain their pending spell. */
-  cpu_write16(cpu,0,0xf9,0);return Tail(0x009efe,0x009efc);
+  cpu_write16(cpu, 0, 0xf9, 0);
+  return Tail(0x009efe, 0x009efc);
 }
 bool ActRaiser_InventoryPickupArtEntry(CpuState *cpu) {
   if(!Native(cpu,0) || cpu->m_flag)return false;
@@ -78,14 +88,16 @@ bool ActRaiser_InventoryPickupArtEntry(CpuState *cpu) {
   return item<8 && cpu->A==0xa000+item*0x80;
 }
 RecompReturn ActRaiser_InventoryPickupArt(CpuState *cpu) {
-  if(!ActRaiser_InventoryPickupArtEntry(cpu))ActRaiserHleFatal("Unsupported Action pickup art selection");
+  if (!ActRaiser_InventoryPickupArtEntry(cpu))
+    ActRaiserHleFatal("Unsupported Action pickup art selection");
   const unsigned item=cpu_read8(cpu,0,cpu->X+0x38);
   const uint8_t spell=ArRegionalSpellInventory_PickupSpell(item);
   /* Four PAL spell pickups are byte-identical to retained US spell tiles.
    * A080 identifies the genuine item1 request at the scoped NMI DMA seam.
    * Without donor art, a full apple avoids an incorrect extra-life graphic. */
-  cpu->A=spell?0xa400+(spell-1)*0x80:
-      item==1?(ActRaiserRegionalMedia_ActionHealth(EuropeanArt()).data?0xa080:0xa280):0xa000+item*0x80;
+  cpu->A = spell  ? 0xa400 + (spell - 1) * 0x80
+      : item == 1 ? (ActRaiserRegionalMedia_ActionHealth(EuropeanArt()).data ? 0xa080 : 0xa280)
+                  : 0xa000 + item * 0x80;
   ActRaiserCpuHle_SetNegativeZero16(cpu,cpu->A);
   cpu_write16(cpu,0,0xd0,cpu->A);
   return Tail(0x0096e5,0x0096e3);
@@ -143,7 +155,8 @@ bool ActRaiser_InventoryInitialIconEntry(CpuState *cpu) {
   return true;
 }
 RecompReturn ActRaiser_InventoryInitialIcon(CpuState *cpu) {
-  if(!ActRaiser_InventoryInitialIconEntry(cpu))ActRaiserHleFatal("Unsupported initial Action icon upload");
+  if (!ActRaiser_InventoryInitialIconEntry(cpu))
+    ActRaiserHleFatal("Unsupported initial Action icon upload");
   const unsigned spell=ActRaiserRegional_InventoryView().icon;
   const ArRegionalMediaBytes donor=ActRaiserRegionalMedia_ActionHud(EuropeanArt(),spell);
   for(unsigned i=0;i<256;i+=2) {

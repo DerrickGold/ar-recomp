@@ -22,10 +22,12 @@ RecompReturn ActRaiser_ActionStart(CpuState *cpu) {
   const RecompReturn result=bank_02_AB05_M1X0(cpu);
   s_delegate=false;
   if(result!=RECOMP_RETURN_NORMAL)return result;
-  if(!ActRaiserRegional_StartInventory())ActRaiserHleFatal("Cannot initialize action-run inventory");
+  if (!ActRaiserRegional_StartInventory())
+    ActRaiserHleFatal("Cannot initialize action-run inventory");
   cpu_write8(cpu,0,0x1c,start.spares);
   cpu->A=(cpu->A&0xff00)|start.health;
-  cpu_write8(cpu,0,0x1e,start.health);cpu_write8(cpu,0,0x1d,start.health);
+  cpu_write8(cpu, 0, 0x1e, start.health);
+  cpu_write8(cpu, 0, 0x1d, start.health);
   ActRaiserCpuHle_SetNegativeZero8(cpu,start.health);
   return result;
 }

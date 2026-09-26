@@ -21,14 +21,16 @@ RecompReturn ActRaiserQuake_Select(CpuState *cpu, ArRegionalQuakeRule rule, uint
   if (!ActRaiserQuake_SelectorEntry(cpu) || (unsigned)rule >= kArRegionalQuake_Count || !target)
     ActRaiserHleFatal("Invalid regional earthquake selector");
   cpu_mirrors_to_p(cpu);
-  cpu_write_a8(cpu, 0xff); ActRaiserCpuHle_SetNegativeZero8(cpu, 0xff);
+  cpu_write_a8(cpu, 0xff);
+  ActRaiserCpuHle_SetNegativeZero8(cpu, 0xff);
   /* Reuse the existing native random-class call site and RNG implementation.
    * No host random draw, branch on subtype, or extra resource callback. */
   RecompReturn result = ActRaiserNativeCall(cpu, bank_03_AF65_M1X0, 3, 0xa341, true);
   if (result != RECOMP_RETURN_NORMAL) return result;
   if (!ActRaiserQuake_SelectorEntry(cpu)) ActRaiserHleFatal("Earthquake RNG changed its ABI");
   const bool destroy = (uint8_t)cpu->A < 0x80;
-  cpu->_flag_C = !destroy; cpu->P = (cpu->P & ~1u) | cpu->_flag_C;
+  cpu->_flag_C = !destroy;
+  cpu->P = (cpu->P & ~1u) | cpu->_flag_C;
   ActRaiserCpuHle_SetNegativeZero8(cpu, (uint8_t)(cpu->A - 0x80));
   /* Classes3/4 keep and class5 destroy begin at their intercepted entry.
    * Use class6's identical native action continuations instead of re-entering

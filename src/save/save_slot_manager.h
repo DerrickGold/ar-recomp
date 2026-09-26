@@ -23,9 +23,11 @@ typedef struct SaveSlotCollection {
 bool SaveSlotManager_Inspect(const SaveSlots *slots,unsigned slot,SaveSlotDetails *out);
 bool SaveSlotManager_Draft(ArRegionalSession *out,unsigned slot,const uint8_t id[16],
     const ArRegionalRules *rules,const RandomizerConfig *randomizer);
-bool SaveSlotManager_View(const ArRegionalSession *session,bool draft,ActRaiserRegionalRulesView *out);
+bool SaveSlotManager_View(const ArRegionalSession *session, bool draft,
+                          ActRaiserRegionalRulesView *out);
 bool SaveSlotManager_Edit(ArRegionalSession *draft,const OverlayRegionRow *row,int choice);
-bool SaveSlotManager_ReadDraft(const SaveSlots *slots,unsigned slot,ArRegionalSession *out,SaveError *error);
+bool SaveSlotManager_ReadDraft(const SaveSlots *slots, unsigned slot, ArRegionalSession *out,
+                               SaveError *error);
 
 /* Overlay receives copies and host operations, never active SRAM or paths. */
 typedef struct SettingsOverlaySaveSlotHooks {

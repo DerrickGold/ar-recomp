@@ -119,8 +119,8 @@ static struct {
   unsigned total;                  /* file length, frames */
   bool loop;
   int gain_percent;
-  double src_carry;                /* fractional source frames per block == carried resample phase */
-  int16_t hist[2];                 /* prior block's final source frame (L,R), for the cubic left-edge tap */
+  double src_carry; /* fractional source frames per block == carried resample phase */
+  int16_t hist[2];  /* prior block's final source frame (L,R), for the cubic left-edge tap */
 } s;
 
 /* ---- parsing ------------------------------------------------------------ */
@@ -306,8 +306,10 @@ int MusicReplacements_Load(const char *manifest_path) {
   }
   int cached = 0;
   for (int i = 0; i < g_music_replacement_count; ++i) cached += s_encoded[i].data != NULL;
-  fprintf(stderr, "[music-manifest] %d entries, %d with audio; %d memory-backed (%zu bytes), %d file-backed\n",
-          g_music_replacement_count, with_audio, cached, s_encoded_bytes, with_audio - cached);
+  fprintf(
+      stderr,
+      "[music-manifest] %d entries, %d with audio; %d memory-backed (%zu bytes), %d file-backed\n",
+      g_music_replacement_count, with_audio, cached, s_encoded_bytes, with_audio - cached);
   return g_music_replacement_count;
 }
 

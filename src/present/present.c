@@ -1229,7 +1229,7 @@ static const float kDioramaLeanPitch = 0.12f;  /* rad, max pitch lean @ full ver
  * (AR_NO_KNOCKBACK), and now gets BOTH the jolt and the zoom-punch, making
  * it read as more dramatic than a routine landing (jolt only). */
 static float g_diorama_kick_pitch;       /* rad, landing/hit jolt, decays to 0 */
-static float g_diorama_kick_zoom;        /* fraction, hit zoom-punch, decays to 0 (negative = closer) */
+static float g_diorama_kick_zoom; /* fraction, hit zoom-punch, decays to 0 (negative = closer) */
 static uint64_t g_diorama_last_slot_ns;  /* detects a genuinely NEW FrameSlot capture */
 static const float kDioramaKickPitch = 0.05f;  /* rad */
 static const float kDioramaKickZoom = -0.15f;  /* fraction; "slight" zoom-in */

@@ -30,7 +30,8 @@ uint16_t ActRaiserScrollCast_Gate(CpuState *cpu,
     if(!cpu->_flag_Z)return 0x984e;
     uint8_t spell;
     if(!ActRaiserRegional_BeginSpell(&spell))ActRaiserHleFatal("Cannot select Action spell");
-    Load(cpu,spell);cpu_write16(cpu,0,0x2ac,spell);
+    Load(cpu, spell);
+    cpu_write16(cpu, 0, 0x2ac, spell);
     return 0x9e0e; /* No debit until the native effect completes. */
   }
   Load(cpu, cpu_read16(cpu, 0, 0x02ac));

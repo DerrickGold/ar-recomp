@@ -67,8 +67,10 @@ bool ActRaiser_TerrainStartEntry(CpuState *cpu) {
 }
 RecompReturn ActRaiser_TerrainStart(CpuState *cpu) {
   if (!ActRaiser_TerrainStartEntry(cpu)) ActRaiserHleFatal("Invalid regional terrain start");
-  cpu->A = ArRegionalTerrain_FillmoreStartY(1);++cpu->Y;
-  cpu->P &= ~(CPU_P_N|CPU_P_Z);cpu_p_to_mirrors(cpu);
+  cpu->A = ArRegionalTerrain_FillmoreStartY(1);
+  ++cpu->Y;
+  cpu->P &= ~(CPU_P_N | CPU_P_Z);
+  cpu_p_to_mirrors(cpu);
   cpu_hle_tailcall_request(0x009343,0x00933c);
   return RECOMP_RETURN_TAILCALL;
 }
@@ -80,9 +82,11 @@ bool ActRaiser_TerrainCheckpointEntry(CpuState *cpu) {
   return cpu_read16(cpu,0,cpu->X+2) == 156*16;
 }
 RecompReturn ActRaiser_TerrainCheckpoint(CpuState *cpu) {
-  if (!ActRaiser_TerrainCheckpointEntry(cpu)) ActRaiserHleFatal("Invalid regional terrain checkpoint");
+  if (!ActRaiser_TerrainCheckpointEntry(cpu))
+    ActRaiserHleFatal("Invalid regional terrain checkpoint");
   cpu->A = ArRegionalTerrain_FillmoreCheckpointY(1);
-  cpu->P &= ~(CPU_P_N|CPU_P_Z);cpu_p_to_mirrors(cpu);
+  cpu->P &= ~(CPU_P_N | CPU_P_Z);
+  cpu_p_to_mirrors(cpu);
   cpu_hle_tailcall_request(0x0094b7,0x0094b1);
   return RECOMP_RETURN_TAILCALL;
 }

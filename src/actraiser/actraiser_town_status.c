@@ -8,7 +8,8 @@ bool ActRaiserTownStatus_Entry(const CpuState *cpu, bool town_indexed) {
 }
 bool ActRaiserTownStatus_FixedThreshold(CpuState *cpu) {
   if (!ActRaiserTownStatus_Entry(cpu,true)) return false;
-  cpu->A=4; ActRaiserCpuHle_SetNegativeZero16(cpu,cpu->A);
+  cpu->A = 4;
+  ActRaiserCpuHle_SetNegativeZero16(cpu, cpu->A);
   return true;
 }
 bool ActRaiserTownStatus_ComparePlots(CpuState *cpu) {

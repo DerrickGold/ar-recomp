@@ -94,7 +94,8 @@ static bool CheckPage(KeyboardPage *page, unsigned index, bool allow_empty,
   if (!Lines(page->text, page->bytes, starts, ends,
              kArLanguageKeyboardMaximumLines, &count) ||
       count < kArLanguageKeyboardRows + 2) {
-    reason = "requires a name field, underline slot and five keyboard rows (within the documented line limit)";
+    reason =
+        "requires a name field, underline slot and five keyboard rows (within the documented line limit)";
   } else {
     const unsigned first = count - kArLanguageKeyboardRows;
     if (!page->marker[0] || page->marker[0] - 1 != starts[first - 2] ||
@@ -102,15 +103,18 @@ static bool CheckPage(KeyboardPage *page, unsigned index, bool allow_empty,
       reason = "put {master_name} alone on the line above the underline slot";
     }
     for (size_t i = starts[first - 1]; !reason && i < ends[first - 1]; ++i) {
-      if (page->text[i] != '-') reason = "keep a dash-only underline slot immediately before the keys";
+      if (page->text[i] != '-')
+        reason = "keep a dash-only underline slot immediately before the keys";
     }
     for (unsigned row = 0; !reason && row < kArLanguageKeyboardRows; ++row) {
       uint32_t start = 0, end = 0;
       if (!RowKey(page->text, page->bytes, starts[first + row], ends[first + row],
                    0, &start, &end)) {
-        if (error) snprintf(error->message, sizeof(error->message),
-            "%s: keyboard page %u row %u requires exactly %u grapheme keys separated by ASCII spaces",
-            id, index, row + 1, kArLanguageKeyboardColumns);
+        if (error)
+          snprintf(
+              error->message, sizeof(error->message),
+              "%s: keyboard page %u row %u requires exactly %u grapheme keys separated by ASCII spaces",
+              id, index, row + 1, kArLanguageKeyboardColumns);
         return false;
       }
     }
@@ -120,7 +124,8 @@ static bool CheckPage(KeyboardPage *page, unsigned index, bool allow_empty,
       if (!RowKey(page->text, page->bytes, starts[last], ends[last],
                     kArLanguageKeyboardColumns - 3 + action, &start, &end) ||
           page->marker[action] != start + 1 || end != start + 3)
-        reason = "keep {icon.name_entry.backspace} and {icon.name_entry.finish} in the final two key positions";
+        reason =
+            "keep {icon.name_entry.backspace} and {icon.name_entry.finish} in the final two key positions";
     }
   }
   if (reason && error) snprintf(error->message, sizeof(error->message),
@@ -157,7 +162,8 @@ bool ArLanguageKeyboard_ValidateMessage(const ArLanguagePack *pack,
         return false;
       }
       const size_t start = page.bytes + (page.pending_space ? 1 : 0);
-      appended = AppendByte(&page, '\xEF') && AppendByte(&page, '\xBF') && AppendByte(&page, '\xBC');
+      appended =
+          AppendByte(&page, '\xEF') && AppendByte(&page, '\xBF') && AppendByte(&page, '\xBC');
       page.marker[marker] = start + 1;
     } else if (op->kind == kArLanguageOperation_PageBreak) {
       if (!CheckPage(&page, index++, false, semantic_id, error)) return false;

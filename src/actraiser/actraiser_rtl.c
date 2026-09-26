@@ -865,21 +865,45 @@ typedef struct { uint16 A, X, Y, S, D; uint8 DB, PB, P, m_flag, x_flag,
   emulation, host_return_valid, fN, fV, fZ, fC, fI, fD; } CpuRegSnapshot;
 
 static void ActRaiser_SaveRegs(CpuState *c, CpuRegSnapshot *s) {
-  s->A = c->A; s->X = c->X; s->Y = c->Y; s->S = c->S; s->D = c->D;
-  s->DB = c->DB; s->PB = c->PB; s->P = c->P; s->m_flag = c->m_flag;
-  s->x_flag = c->x_flag; s->emulation = c->emulation;
+  s->A = c->A;
+  s->X = c->X;
+  s->Y = c->Y;
+  s->S = c->S;
+  s->D = c->D;
+  s->DB = c->DB;
+  s->PB = c->PB;
+  s->P = c->P;
+  s->m_flag = c->m_flag;
+  s->x_flag = c->x_flag;
+  s->emulation = c->emulation;
   s->host_return_valid = c->host_return_valid;
-  s->fN = c->_flag_N; s->fV = c->_flag_V; s->fZ = c->_flag_Z;
-  s->fC = c->_flag_C; s->fI = c->_flag_I; s->fD = c->_flag_D;
+  s->fN = c->_flag_N;
+  s->fV = c->_flag_V;
+  s->fZ = c->_flag_Z;
+  s->fC = c->_flag_C;
+  s->fI = c->_flag_I;
+  s->fD = c->_flag_D;
 }
 
 static void ActRaiser_RestoreRegs(CpuState *c, const CpuRegSnapshot *s) {
-  c->A = s->A; c->X = s->X; c->Y = s->Y; c->S = s->S; c->D = s->D;
-  c->DB = s->DB; c->PB = s->PB; c->P = s->P; c->m_flag = s->m_flag;
-  c->x_flag = s->x_flag; c->emulation = s->emulation;
+  c->A = s->A;
+  c->X = s->X;
+  c->Y = s->Y;
+  c->S = s->S;
+  c->D = s->D;
+  c->DB = s->DB;
+  c->PB = s->PB;
+  c->P = s->P;
+  c->m_flag = s->m_flag;
+  c->x_flag = s->x_flag;
+  c->emulation = s->emulation;
   c->host_return_valid = s->host_return_valid;
-  c->_flag_N = s->fN; c->_flag_V = s->fV; c->_flag_Z = s->fZ;
-  c->_flag_C = s->fC; c->_flag_I = s->fI; c->_flag_D = s->fD;
+  c->_flag_N = s->fN;
+  c->_flag_V = s->fV;
+  c->_flag_Z = s->fZ;
+  c->_flag_C = s->fC;
+  c->_flag_I = s->fI;
+  c->_flag_D = s->fD;
 }
 
 /* Set while an NMI/IRQ handler is executing on the host stack (the calls
@@ -1261,23 +1285,17 @@ RecompReturn ActRaiser_WaitForVblank(CpuState *cpu) {
       delta_x = (int16)(player_x - last_player_x);
       delta_y = (int16)(player_y - last_player_y);
     }
-    fprintf(stderr,
-      "[frame] f=%d gf=%u push+%lu callsite=%02x:%04x A=%04x m=%d $18=%02x $19=%02x $1A=%02x $1B=%02x $F4=%02x $F5=%02x $FB=%02x time$E6=%02x%02x HP$1D=%02x joy=%04x(raw=%04x) pos=%04x,%04x d=%+d,%+d vel=%+d,%+d h=%04x state=%04x boost=%02x crest=%02x\n",
-      snes_frame_counter, game_frame, g_recomp_push_count - last_push,
-      cpu->PB, ret,
-      cpu->A, cpu->m_flag,
-      map_group, current_map, g_ram[kActRaiserWram_DestinationMap],
-      g_ram[kActRaiserWram_DestinationMapGroup],
-      g_ram[kActRaiserWram_InputEnableMask],
-      g_ram[kActRaiserWram_InputEnableMask + 1],
-      g_ram[kActRaiserWram_TransitionRequest],
-      g_ram[kActRaiserWram_ActionTimerHigh],
-      g_ram[kActRaiserWram_ActionTimerLow],
-      g_ram[kActRaiserWram_PlayerHp], joy, joy_raw, player_x, player_y,
-      delta_x, delta_y, player_velocity_x, player_velocity_y,
-      player_handler, player_flags,
-      g_ram[kActRaiserWram_PlayerBoost],
-      g_ram[kActRaiserWram_PlayerCrest]);
+    fprintf(
+        stderr,
+        "[frame] f=%d gf=%u push+%lu callsite=%02x:%04x A=%04x m=%d $18=%02x $19=%02x $1A=%02x $1B=%02x $F4=%02x $F5=%02x $FB=%02x time$E6=%02x%02x HP$1D=%02x joy=%04x(raw=%04x) pos=%04x,%04x d=%+d,%+d vel=%+d,%+d h=%04x state=%04x boost=%02x crest=%02x\n",
+        snes_frame_counter, game_frame, g_recomp_push_count - last_push, cpu->PB, ret, cpu->A,
+        cpu->m_flag, map_group, current_map, g_ram[kActRaiserWram_DestinationMap],
+        g_ram[kActRaiserWram_DestinationMapGroup], g_ram[kActRaiserWram_InputEnableMask],
+        g_ram[kActRaiserWram_InputEnableMask + 1], g_ram[kActRaiserWram_TransitionRequest],
+        g_ram[kActRaiserWram_ActionTimerHigh], g_ram[kActRaiserWram_ActionTimerLow],
+        g_ram[kActRaiserWram_PlayerHp], joy, joy_raw, player_x, player_y, delta_x, delta_y,
+        player_velocity_x, player_velocity_y, player_handler, player_flags,
+        g_ram[kActRaiserWram_PlayerBoost], g_ram[kActRaiserWram_PlayerCrest]);
     last_player_x = player_x;
     last_player_y = player_y;
     last_map_group = map_group;
@@ -1332,13 +1350,13 @@ RecompReturn ActRaiser_WaitForVblank(CpuState *cpu) {
       const uint32_t ppu_display = RtlGamePpuDisplayState();
       const uint8_t display_control =
           RTL_GAME_PPU_DISPLAY_CONTROL(ppu_display);
-      fprintf(stderr, "[ppu] f=%d inidisp=%02x bright=%d fblank=%d bgmode=%02x main=%02x sub=%02x hdmaen=%02x\n",
-              snes_frame_counter, display_control, display_control & 0xf,
-              (display_control & 0x80) ? 1 : 0,
-              RTL_GAME_PPU_BG_MODE_CONTROL(ppu_display),
-              RTL_GAME_PPU_MAIN_SCREEN(ppu_display),
-              RTL_GAME_PPU_SUB_SCREEN(ppu_display),
-              ActRaiser_QueryHdmaActiveMask());
+      fprintf(
+          stderr,
+          "[ppu] f=%d inidisp=%02x bright=%d fblank=%d bgmode=%02x main=%02x sub=%02x hdmaen=%02x\n",
+          snes_frame_counter, display_control, display_control & 0xf,
+          (display_control & 0x80) ? 1 : 0, RTL_GAME_PPU_BG_MODE_CONTROL(ppu_display),
+          RTL_GAME_PPU_MAIN_SCREEN(ppu_display), RTL_GAME_PPU_SUB_SCREEN(ppu_display),
+          ActRaiser_QueryHdmaActiveMask());
     }
   }
 
@@ -1775,7 +1793,8 @@ static void ActRaiser_ResolveVerticalMarginPolicy(
         primary_layer * kActRaiserBgLayerStateStride;
     int cam_y = ActRaiser_ReadWram16(
         kActRaiserWram_Bg1CameraY + layer_offset);
-    char buf[512]; int n = 0;
+    char buf[512];
+    int n = 0;
     for (int py = cam_y - g_ws_extra_top; py < cam_y + 16; py += 8) {
       int off = base + (((py >> 3) & 0x1f) << 5);
       if ((py & 0x100) && higher) off += wider ? 0x800 : 0x400;
@@ -2243,14 +2262,14 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
 
       case kActRaiserNonActionMap_WorldMap:
                             /* Mode 7 world map: fully wide, no UI layers. */
-        wide = 1; 
+        wide = 1;
         break;
-      
+
       case kActRaiserNonActionMap_Title:
         // Title is always not wide screen since the backdrop is black
         wide = 0;
         break;
-    
+
       case kActRaiserNonActionMap_Fillmore:
       case kActRaiserNonActionMap_Bloodpool:
       case kActRaiserNonActionMap_Kasandora:
@@ -2310,7 +2329,10 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
       int L = developer_environment->widescreen_only_bg_layer;
       if (L >= 0 && L < 4)
         cpu_write8(&g_cpu, 0x00, 0x212c, (uint8)(1u << L));
-      wide = 1; clamp = 0; mirror = 0; repeat = 0;  /* raw tilemap data */
+      wide = 1;
+      clamp = 0;
+      mirror = 0;
+      repeat = 0; /* raw tilemap data */
       bg_presentation = (ActionBgPresentationPolicy){ 0 };
       bg_hle_allowed = 0;
       project_final_bg_policy = true;
@@ -2321,8 +2343,10 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
     const ActRaiserDeveloperEnvironment *developer_environment =
         ActRaiser_GetDeveloperEnvironment();
     if (developer_environment->widescreen_clamp_present) {
-      wide = 1; clamp = developer_environment->widescreen_clamp_mask;
-      mirror = 0; repeat = 0;
+      wide = 1;
+      clamp = developer_environment->widescreen_clamp_mask;
+      mirror = 0;
+      repeat = 0;
       bg_presentation = (ActionBgPresentationPolicy){ 0 };
       bg_hle_allowed = 0;
       project_final_bg_policy = true;
@@ -2340,13 +2364,19 @@ static void ActRaiser_ApplyWidescreenPolicy(void) {
    * because those policies are normally useful. The individual HLE builders
    * and sprite/activation seams are disabled by the RAW preset's ws_* flags. */
   if (g_settings.display_mode == kDisplayMode_43) {
-    wide = 0; clamp = 0; mirror = 0; repeat = 0;
+    wide = 0;
+    clamp = 0;
+    mirror = 0;
+    repeat = 0;
     bounded_world_margins = 0;
     bg_presentation = (ActionBgPresentationPolicy){ 0 };
     bg_hle_allowed = 0;
     project_final_bg_policy = true;
   } else if (g_settings.display_mode == kDisplayMode_WideRaw) {
-    wide = 1; clamp = 0; mirror = 0; repeat = 0;
+    wide = 1;
+    clamp = 0;
+    mirror = 0;
+    repeat = 0;
     bounded_world_margins = 0;
     bg_presentation = (ActionBgPresentationPolicy){ 0 };
     bg_hle_allowed = 0;
@@ -2650,7 +2680,9 @@ static SrResult ActRaiser_WidescreenHudObjPromoteTransaction(
       fprintf(stderr, "[hud-icon] gf=%u sky-palace spell=%d -> slot=%d count=%u\n",
           (unsigned)ActRaiser_ReadWram16(kActRaiserWram_GameFrame),
           spell, slot, capture_count);
-      last_spell = spell; last_slot = slot; last_count = capture_count;
+      last_spell = spell;
+      last_slot = slot;
+      last_count = capture_count;
     }
   }
   if (!owned) return SR_RESULT_OK;

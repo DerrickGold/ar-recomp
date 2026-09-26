@@ -391,8 +391,9 @@ static bool ResolveLocalizedTerm(const ArDialogueSource *source, const char *id,
   if (message && AppendPlainMessage(source->effective_pack, message, output,
                                     capacity, error)) {
     const ArLanguageDirection d = ArLanguagePack_GetMetadata(source->effective_pack)->direction;
-    *direction = d == kArLanguageDirection_RightToLeft ? kArTextDirection_RightToLeft :
-        d == kArLanguageDirection_LeftToRight ? kArTextDirection_LeftToRight : kArTextDirection_Auto;
+    *direction = d == kArLanguageDirection_RightToLeft ? kArTextDirection_RightToLeft
+        : d == kArLanguageDirection_LeftToRight        ? kArTextDirection_LeftToRight
+                                                       : kArTextDirection_Auto;
     return true;
   }
   if (source->term_fallback_pack &&
@@ -402,9 +403,11 @@ static bool ResolveLocalizedTerm(const ArDialogueSource *source, const char *id,
     message = ArLanguagePack_FindMessage(source->term_fallback_pack, id);
     if (message && AppendPlainMessage(source->term_fallback_pack, message,
                                       output, capacity, error)) {
-      const ArLanguageDirection d = ArLanguagePack_GetMetadata(source->term_fallback_pack)->direction;
-      *direction = d == kArLanguageDirection_RightToLeft ? kArTextDirection_RightToLeft :
-          d == kArLanguageDirection_LeftToRight ? kArTextDirection_LeftToRight : kArTextDirection_Auto;
+      const ArLanguageDirection d =
+          ArLanguagePack_GetMetadata(source->term_fallback_pack)->direction;
+      *direction = d == kArLanguageDirection_RightToLeft ? kArTextDirection_RightToLeft
+          : d == kArLanguageDirection_LeftToRight        ? kArTextDirection_LeftToRight
+                                                         : kArTextDirection_Auto;
       return true;
     }
   }

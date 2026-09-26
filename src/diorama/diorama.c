@@ -2175,7 +2175,8 @@ static float DioramaBisectLift(const float mvp[16], float half, float z_ref,
     if (!DioramaContentExtent(mvp, half, mid, z_ref, out_w, out_h, &top, &bottom))
       return hi;
     float value = use_centre ? 0.5f * (top + bottom) : bottom;
-    if (value > target) lo = mid; else hi = mid;
+    if (value > target) lo = mid;
+    else hi = mid;
   }
   return 0.5f * (lo + hi);
 }

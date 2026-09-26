@@ -621,11 +621,13 @@ bool ArSdlRenderBackend_Bind(ArRenderDevice *device,
   backend->gpu_device = gpu;
   if (gpu) {
     const SDL_PropertiesID gpu_properties = SDL_GetGPUDeviceProperties(gpu);
-    SDL_Log("[graphics-capabilities] backend=%s device=%s driver=%s version=%s shader-formats=$%x",
+    SDL_Log(
+        "[graphics-capabilities] backend=%s device=%s driver=%s version=%s shader-formats=$%x",
         SDL_GetGPUDeviceDriver(gpu),
         SDL_GetStringProperty(gpu_properties, SDL_PROP_GPU_DEVICE_NAME_STRING, "unreported"),
         SDL_GetStringProperty(gpu_properties, SDL_PROP_GPU_DEVICE_DRIVER_NAME_STRING, "unreported"),
-        SDL_GetStringProperty(gpu_properties, SDL_PROP_GPU_DEVICE_DRIVER_VERSION_STRING, "unreported"),
+        SDL_GetStringProperty(gpu_properties, SDL_PROP_GPU_DEVICE_DRIVER_VERSION_STRING,
+                              "unreported"),
         (unsigned)SDL_GetGPUShaderFormats(gpu));
     capabilities.flags |= kArRenderCapability_CustomShaders;
     if (SDL_GPUTextureSupportsFormat(
@@ -647,18 +649,23 @@ static SDL_GPUDevice *CreateOutputGpuDevice(SDL_Window *window,
   if (!props) return NULL;
   bool configured =
       SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_DEBUGMODE_BOOLEAN,
-          SDL_GetHintBoolean(SDL_HINT_RENDER_GPU_DEBUG, false)) &&
+                             SDL_GetHintBoolean(SDL_HINT_RENDER_GPU_DEBUG, false)) &&
       SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_PREFERLOWPOWER_BOOLEAN,
-          SDL_GetHintBoolean(SDL_HINT_RENDER_GPU_LOW_POWER, false)) &&
+                             SDL_GetHintBoolean(SDL_HINT_RENDER_GPU_LOW_POWER, false)) &&
       SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_SHADERS_SPIRV_BOOLEAN, true) &&
       SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_SHADERS_DXIL_BOOLEAN, true) &&
       SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_SHADERS_MSL_BOOLEAN, true) &&
-      SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_D3D12_ALLOW_FEWER_RESOURCE_SLOTS_BOOLEAN, true) &&
-      SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_FEATURE_CLIP_DISTANCE_BOOLEAN, false) &&
-      SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_FEATURE_DEPTH_CLAMPING_BOOLEAN, false) &&
-      SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_FEATURE_INDIRECT_DRAW_FIRST_INSTANCE_BOOLEAN, false) &&
+      SDL_SetBooleanProperty(
+          props, SDL_PROP_GPU_DEVICE_CREATE_D3D12_ALLOW_FEWER_RESOURCE_SLOTS_BOOLEAN, true) &&
+      SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_FEATURE_CLIP_DISTANCE_BOOLEAN,
+                             false) &&
+      SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_FEATURE_DEPTH_CLAMPING_BOOLEAN,
+                             false) &&
+      SDL_SetBooleanProperty(
+          props, SDL_PROP_GPU_DEVICE_CREATE_FEATURE_INDIRECT_DRAW_FIRST_INSTANCE_BOOLEAN, false) &&
       SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_FEATURE_ANISOTROPY_BOOLEAN, false) &&
-      SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_METAL_ALLOW_MACFAMILY1_BOOLEAN, false);
+      SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_METAL_ALLOW_MACFAMILY1_BOOLEAN,
+                             false);
   if (!gpu_driver && (SDL_GetWindowFlags(window) & SDL_WINDOW_VULKAN))
     gpu_driver = "vulkan";
   /* The SDL_GPU_DRIVER hint still outranks this property inside SDL. */
@@ -693,18 +700,24 @@ static bool CreateForWindowWithDriver(ArRenderDevice *device,
     SDL_GPUDevice *gpu = CreateOutputGpuDevice(window, gpu_driver);
     if (!gpu) { free(backend); return false; }
     if (!SDL_ClaimWindowForGPUDevice(gpu, window)) {
-      SDL_DestroyGPUDevice(gpu); free(backend); return false;
+      SDL_DestroyGPUDevice(gpu);
+      free(backend);
+      return false;
     }
     if (!SDL_SetGPUSwapchainParameters(gpu, window,
             SDL_GPU_SWAPCHAINCOMPOSITION_SDR, SDL_GPU_PRESENTMODE_VSYNC)) {
       SDL_ReleaseWindowFromGPUDevice(gpu, window);
-      SDL_DestroyGPUDevice(gpu); free(backend); return false;
+      SDL_DestroyGPUDevice(gpu);
+      free(backend);
+      return false;
     }
     SDL_Renderer *renderer = SDL_CreateGPURenderer(gpu, NULL);
     if (!renderer || !ArSdlRenderBackend_Bind(device, backend, renderer)) {
       if (renderer) SDL_DestroyRenderer(renderer);
       SDL_ReleaseWindowFromGPUDevice(gpu, window);
-      SDL_DestroyGPUDevice(gpu); free(backend); return false;
+      SDL_DestroyGPUDevice(gpu);
+      free(backend);
+      return false;
     }
     backend->output_window = window;
     backend->output_present_mode = SDL_GPU_PRESENTMODE_VSYNC;
@@ -826,7 +839,8 @@ bool ArSdlRenderBackend_SetVSync(ArRenderDevice *device, int requested,
     if (requested != 0 && requested != 1)
       return SDL_SetError("ordered GPU output supports vsync 0 or 1");
     SDL_GPUPresentMode mode = requested ? SDL_GPU_PRESENTMODE_VSYNC : SDL_GPU_PRESENTMODE_IMMEDIATE;
-    if (!requested && !SDL_WindowSupportsGPUPresentMode(backend->gpu_device, backend->output_window, mode))
+    if (!requested &&
+        !SDL_WindowSupportsGPUPresentMode(backend->gpu_device, backend->output_window, mode))
       mode = SDL_GPU_PRESENTMODE_MAILBOX;
     const bool applied = SDL_SetGPUSwapchainParameters(backend->gpu_device, backend->output_window,
         SDL_GPU_SWAPCHAINCOMPOSITION_SDR, mode);

@@ -37,7 +37,8 @@ static TownCensus Count(CpuState *cpu, uint8 db, uint16 town_index,
               : (f2 & kStructFlag_Subtype) ? snapshot->amount[kArRegionalSupport_UpgradedField]
               : snapshot->amount[kArRegionalSupport_RegularField];
       else if (cls == 3)
-        add = (f2 & kStructFlag_DisabledSupport) ? 0 : snapshot->amount[kArRegionalSupport_Factory3];
+        add =
+            (f2 & kStructFlag_DisabledSupport) ? 0 : snapshot->amount[kArRegionalSupport_Factory3];
       else if (cls == 4)
         add = snapshot->amount[kArRegionalSupport_Factory4];
       result.native_y = add;
@@ -51,7 +52,8 @@ static TownCensus Count(CpuState *cpu, uint8 db, uint16 town_index,
 
 static void Publish(CpuState *cpu, uint8 db, uint16 town_index, TownCensus count) {
   const uint16 bias = cpu_read16(cpu, db, (uint16)(kVar_HousePopBias + town_index));
-  cpu_write16(cpu, 0, (uint16)(kWram_PopulationBase + town_index), (uint16)(count.population + 2 - bias));
+  cpu_write16(cpu, 0, (uint16)(kWram_PopulationBase + town_index),
+              (uint16)(count.population + 2 - bias));
   cpu_write16(cpu, db, (uint16)(kVar_SupportCapacity + town_index), count.support);
 }
 
@@ -68,7 +70,8 @@ bool ActRaiserTownCensus_Refresh(CpuState *cpu, unsigned town,
  * modular bias arithmetic is deliberate; redevelopment must separately prove
  * its post-demolition population valid before committing any conversion. */
 RecompReturn ActRaiserTownCensus_Run(CpuState *cpu,const ArRegionalSupportSnapshot *snapshot) {
-  if (!cpu || !ArRegionalSupport_Valid(snapshot)) ActRaiserHleFatal("Invalid town census support profile");
+  if (!cpu || !ArRegionalSupport_Valid(snapshot))
+    ActRaiserHleFatal("Invalid town census support profile");
   const uint8 db = cpu->DB;
   const uint8 saved_p = cpu->P;      /* PHP */
   const uint16 saved_x = cpu->X;     /* PHX */
@@ -105,6 +108,7 @@ RecompReturn ActRaiserTownCensus_Run(CpuState *cpu,const ArRegionalSupportSnapsh
 
 RecompReturn ActRaiser_TownCensus(CpuState *cpu) {
   ArRegionalSupportSnapshot snapshot;
-  if(!ActRaiserRegional_CopySupport(&snapshot))ActRaiserHleFatal("Invalid active population support rules");
+  if (!ActRaiserRegional_CopySupport(&snapshot))
+    ActRaiserHleFatal("Invalid active population support rules");
   return ActRaiserTownCensus_Run(cpu,&snapshot);
 }

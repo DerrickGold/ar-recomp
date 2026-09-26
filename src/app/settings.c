@@ -1229,7 +1229,8 @@ const SettingDesc g_setting_descs[] = {
     "USA source supports both native and enhanced fonts.",
     kSettingType_Enum, kApply_Passive, kSettingCat_Localization,
     &g_settings.localization_content, 0, 0, kSettingsLocalizationMaximumPacks + 1, 1, false,
-    kLocalizationContentLabels, 2, NULL, NULL, ParseLocalizationContent, FormatLocalizationContent, true,
+    kLocalizationContentLabels, 2, NULL, NULL,
+    ParseLocalizationContent, FormatLocalizationContent, true,
     .enum_maximum = LocalizationContentMaximum, .serialize = SerializeLocalizationContent },
   { "localization_presentation", "AR_LOCALIZATION_PRESENTATION", "Text rendering",
     "Native retains the untouched USA text and font. External packs require "
@@ -2897,8 +2898,9 @@ bool Settings_IsAvailable(const SettingDesc *desc) {
           !desc->available || desc->available());
 }
 bool Settings_IsRandomizer(const SettingDesc *desc) {
-  return desc && (desc->category==kSettingCat_RandoSeed || desc->category==kSettingCat_RandoEnemies ||
-      desc->category==kSettingCat_RandoItems || desc->category==kSettingCat_RandoSim);
+  return desc &&
+      (desc->category == kSettingCat_RandoSeed || desc->category == kSettingCat_RandoEnemies ||
+       desc->category == kSettingCat_RandoItems || desc->category == kSettingCat_RandoSim);
 }
 
 /* Kept in the registry so old files/env values parse without warnings and so

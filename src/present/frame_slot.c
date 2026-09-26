@@ -729,10 +729,13 @@ void FrameSlot_Capture(FrameSlot *dst, const SimFrameData *annotated_sim) {
     for (int i = 0; i < kFrameSlotOverlaySourceCount; i++) {
       const SrPpuOverlayState *src = &ppu_frame->overlays[i];
       FrameSlotOverlayCapture *d = &dst->overlay_captures[i];
-      d->x0 = src->x0; d->x1 = src->x1;
-      d->y0 = src->y0; d->y1 = src->y1;
+      d->x0 = src->x0;
+      d->x1 = src->x1;
+      d->y0 = src->y0;
+      d->y1 = src->y1;
       d->flags = (uint8_t)src->flags;
-      d->oamFirst = src->oam_first; d->oamCount = src->oam_count;
+      d->oamFirst = src->oam_first;
+      d->oamCount = src->oam_count;
     }
 
     ActRaiser_HudObjIconRange(&dst->hud_icon_first, &dst->hud_icon_count,

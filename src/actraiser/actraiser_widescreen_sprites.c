@@ -472,7 +472,9 @@ static uint16 ws_authentic_action_camera_x(CpuState *cpu,
  * that silently zeroes the first one's reading. */
 static unsigned s_vext_unlocked;
 unsigned ActRaiser_TakeVextUnlockedObjects(void) {
-  unsigned n = s_vext_unlocked; s_vext_unlocked = 0; return n;
+  unsigned n = s_vext_unlocked;
+  s_vext_unlocked = 0;
+  return n;
 }
 
 static ActRaiserExactPositionOwner s_exact_position_owner;
@@ -845,11 +847,12 @@ RecompReturn ActRaiser_BuildObjectSprites(CpuState *cpu) {
       cpu_read8(cpu, definition_bank, definition_address);
   definition_address++;
   ActRaiserActorArtDraw regional_draw = {0};
-  const bool regional = ActRaiserActorArt_Active() && definition_bank == 0x7E && ActRaiserActorArt_Draw(
-      cpu_read16(cpu, cpu->DB, object_address + kActRaiserActionObject_AnimationAddress),
-      cpu_read16(cpu, cpu->DB, object_address + kActRaiserActionObject_Composition),
-      cpu_read16(cpu, cpu->DB, object_address + kActRaiserActionObject_Visual),
-      &regional_draw);
+  const bool regional =
+      ActRaiserActorArt_Active() && definition_bank == 0x7E &&
+      ActRaiserActorArt_Draw(
+          cpu_read16(cpu, cpu->DB, object_address + kActRaiserActionObject_AnimationAddress),
+          cpu_read16(cpu, cpu->DB, object_address + kActRaiserActionObject_Composition),
+          cpu_read16(cpu, cpu->DB, object_address + kActRaiserActionObject_Visual), &regional_draw);
   if (regional && !regional_draw.attributes_only)
     component_count = (uint16)regional_draw.picture.count;
   unsigned component_index = 0;

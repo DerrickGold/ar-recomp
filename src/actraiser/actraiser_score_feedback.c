@@ -11,7 +11,8 @@ bool ActRaiserScoreFeedback_Route(CpuState *cpu, bool japanese, uint32_t *contin
   if (!continuation || !ActRaiserScoreFeedback_Entry(cpu) || cpu->X>10 || (cpu->X&1)) return false;
   const uint16_t completed=cpu_read16(cpu,0x7f,(uint16_t)(0x6b18+cpu->X));
   ArRegionalScoreDestination destination;
-  ArRegionalScore_Destination(japanese?kArRegionalSource_Japan:kArRegionalSource_US,completed,&destination);
+  ArRegionalScore_Destination(japanese ? kArRegionalSource_Japan : kArRegionalSource_US, completed,
+                              &destination);
   if (japanese) {
     /* JP LDA / CMP #2, not the US pair of DEC instructions. V is untouched. */
     cpu->A=completed;

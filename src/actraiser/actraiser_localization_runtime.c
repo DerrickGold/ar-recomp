@@ -300,7 +300,8 @@ static bool EnsureConfigured(void) {
     ArLanguagePack_Init(&s_runtime.native_pack);
     ArDialogueSession_Init(&s_runtime.session);
     ActRaiserLocalizationComposeState_Init(&s_runtime.compose);
-    (void)ActRaiserLocalizationComposeState_SetMessageSpeedMaximum(&s_runtime.compose, s_message_speed_maximum);
+    (void)ActRaiserLocalizationComposeState_SetMessageSpeedMaximum(&s_runtime.compose,
+                                                                   s_message_speed_maximum);
     ActRaiserLocalizationNameEntryTracker_Init(&s_runtime.name_tracker);
     ActRaiserLocalizationWorldNavigation_Init(&s_runtime.world_navigation);
     s_runtime.content = -1;
@@ -1278,7 +1279,8 @@ void ActRaiserLocalizationRuntime_CaptureFrame(
           &s_runtime.compose, &compose_observations[index],
           ResolveComposeText, NULL, error, sizeof(error));
       if (s_runtime.presentation && !composed && error[0])
-        fprintf(stderr, "[localization] fixed text unavailable (%s); native text retained\n", error);
+        fprintf(stderr, "[localization] fixed text unavailable (%s); native text retained\n",
+                error);
       s_runtime.compose_observation_serial =
           compose_observations[index].serial;
     }
@@ -1676,7 +1678,8 @@ bool ActRaiserLocalizationRuntime_BeginMenuHelp(
   const ArTextDocumentSource text={"sim-menu-help.artext",script,(size_t)length};
   const ArTextDocumentConfig document={.id="sim-menu-help",.locale="en-US",
     .format_version=2,.sources=&text,.source_count=1};
-  ArLanguagePack pack; ArLanguagePack_Init(&pack);
+  ArLanguagePack pack;
+  ArLanguagePack_Init(&pack);
   bool valid=ArLanguagePack_ParseDocument(&pack,&document,&error);
   if (valid) {
     const ArDialogueSource source={.effective_pack=&pack,
@@ -1710,7 +1713,8 @@ bool ActRaiserLocalizationRuntime_PrepareMenuHelpStyle(
     if (span.end <= help->source_start || span.start >= help->source_end) continue;
     const size_t a = span.start > help->source_start ? span.start - help->source_start : 0;
     const size_t b = span.end < help->source_end ? span.end - help->source_start : bytes;
-    span.start = offsets[a]; span.end = offsets[b];
+    span.start = offsets[a];
+    span.end = offsets[b];
     if (span.start < span.end) {
       if (s_menu_help_bidi.count >= kArTextMaximumBidiSpans) valid = false;
       else s_menu_help_bidi.spans[s_menu_help_bidi.count++] = span;
@@ -1727,9 +1731,12 @@ void ActRaiserLocalizationRuntime_AppendMenuHelp(
       !cgram || cgram_count<4) return;
   const size_t revealed=help->revealed_glyphs==help->glyph_count?help->bytes:
       help->revealed_glyphs?help->text_ends[help->revealed_glyphs-1]:0;
-  size_t at=0,next; uint32_t total=0,visible=0;
+  size_t at = 0, next;
+  uint32_t total = 0, visible = 0;
   while(at<help->bytes && ArUnicodeGrapheme_Next(help->text,help->bytes,at,NULL,&next)) {
-    ++total; if(next<=revealed) ++visible; at=next;
+    ++total;
+    if (next <= revealed) ++visible;
+    at = next;
   }
   if(!ArLocalizationFrame_AddScreenText(frame,700,40,156,176,56,
     help->text,help->bytes,visible,total,
@@ -1743,7 +1750,8 @@ void ActRaiserLocalizationRuntime_AppendMenuHelp(
   ArLocalizationTextSnapshot *text=&frame->snapshots[frame->snapshot_count-1];
   text->revealed_utf8_bytes=(uint32_t)revealed;
   text->style_id=kArTextStyle_RetailPaletteBands;
-  text->shadow_enabled=true; text->shadow_shape=kArTextShadow_Diagonal;
+  text->shadow_enabled = true;
+  text->shadow_shape = kArTextShadow_Diagonal;
   text->shadow_rgb=ActRaiserLocalizationStyle_Rgb(cgram[1]);
   text->band_rgb=ActRaiserLocalizationStyle_Rgb(cgram[2]);
   text->body_rgb=ActRaiserLocalizationStyle_Rgb(cgram[3]);

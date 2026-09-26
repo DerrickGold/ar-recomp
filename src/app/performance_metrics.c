@@ -19,7 +19,8 @@ static struct {
   PerformanceContext context;
   uint64_t started, previous, frames, revision, maximum_interval;
   uint64_t intervals[kIntervalCapacity], interval_count;
-  uint64_t elapsed[kPerformanceStage_Count], maximum[kPerformanceStage_Count], calls[kPerformanceStage_Count];
+  uint64_t elapsed[kPerformanceStage_Count], maximum[kPerformanceStage_Count],
+      calls[kPerformanceStage_Count];
   uint64_t counts[kPerformanceCount_Count];
 } s_window;
 
@@ -54,7 +55,9 @@ const char *PerformanceMetrics_SceneName(PerformanceScene scene) {
   };
   return scene >= 0 && scene < kPerformanceScene_Count ? names[scene] : "unknown";
 }
-uint32_t PerformanceMetrics_Epoch(void) { return atomic_load_explicit(&s_epoch, memory_order_relaxed); }
+uint32_t PerformanceMetrics_Epoch(void) {
+  return atomic_load_explicit(&s_epoch, memory_order_relaxed);
+}
 bool PerformanceMetrics_Enabled(void) { return PerformanceMetrics_Epoch() != 0; }
 
 void PerformanceMetrics_Configure(bool enabled, bool log_reports) {
@@ -62,7 +65,9 @@ void PerformanceMetrics_Configure(bool enabled, bool log_reports) {
   if (enabled == PerformanceMetrics_Enabled()) return;
   atomic_store_explicit(&s_epoch, 0, memory_order_release);
   for (int i = 0; i < kPerformanceStage_Count; i++) {
-    atomic_store(&s_pending[i].elapsed, 0); atomic_store(&s_pending[i].maximum, 0); atomic_store(&s_pending[i].calls, 0);
+    atomic_store(&s_pending[i].elapsed, 0);
+    atomic_store(&s_pending[i].maximum, 0);
+    atomic_store(&s_pending[i].calls, 0);
   }
   for (int i = 0; i < kPerformanceCount_Count; i++) atomic_store(&s_counts[i], 0);
   memset(&s_window, 0, sizeof(s_window));
@@ -77,13 +82,16 @@ void PerformanceMetrics_Record(uint32_t epoch, PerformanceStage stage, uint64_t 
 }
 void PerformanceMetrics_RecordBatch(uint32_t epoch, PerformanceStage stage,
     uint64_t elapsed_ns, uint64_t maximum_ns, uint64_t calls) {
-  if (!epoch || epoch != PerformanceMetrics_Epoch() || stage < 0 || stage >= kPerformanceStage_Count) return;
+  if (!epoch || epoch != PerformanceMetrics_Epoch() || stage < 0 ||
+      stage >= kPerformanceStage_Count)
+    return;
   if (!calls) return;
   atomic_fetch_add_explicit(&s_pending[stage].elapsed, elapsed_ns, memory_order_relaxed);
   atomic_fetch_add_explicit(&s_pending[stage].calls, calls, memory_order_relaxed);
   uint_fast64_t maximum = atomic_load_explicit(&s_pending[stage].maximum, memory_order_relaxed);
-  while (maximum < maximum_ns && !atomic_compare_exchange_weak_explicit(
-      &s_pending[stage].maximum, &maximum, maximum_ns, memory_order_relaxed, memory_order_relaxed)) {}
+  while (maximum < maximum_ns &&
+         !atomic_compare_exchange_weak_explicit(&s_pending[stage].maximum, &maximum, maximum_ns,
+                                                memory_order_relaxed, memory_order_relaxed)) {}
 }
 void PerformanceMetrics_Add(PerformanceCount counter, uint64_t value) {
   if (PerformanceMetrics_Enabled() && counter >= 0 && counter < kPerformanceCount_Count)
@@ -116,7 +124,8 @@ static void Publish(uint64_t now) {
       .presents = s_window.frames, .seconds = (now - s_window.started) / 1e9, .ready = true};
   out->fps = (s_window.frames - 1) / out->seconds;
   out->frame_mean_ms = out->seconds * 1000 / (s_window.frames - 1);
-  size_t count = s_window.interval_count < kIntervalCapacity ? (size_t)s_window.interval_count : kIntervalCapacity;
+  size_t count = s_window.interval_count < kIntervalCapacity ? (size_t)s_window.interval_count
+                                                             : kIntervalCapacity;
   uint64_t sorted[kIntervalCapacity];
   memcpy(sorted, s_window.intervals, count * sizeof(*sorted));
   qsort(sorted, count, sizeof(*sorted), CompareIntervals);
@@ -128,9 +137,12 @@ static void Publish(uint64_t now) {
     out->stages[i] = (PerformanceValue){s_window.elapsed[i] / 1e6 / s_window.frames,
         s_window.maximum[i] / 1e6, s_window.calls[i]};
   }
-  for (int i = 0; i < kPerformanceCount_Count; i++) out->counts[i] = (double)s_window.counts[i] / s_window.frames;
+  for (int i = 0; i < kPerformanceCount_Count; i++)
+    out->counts[i] = (double)s_window.counts[i] / s_window.frames;
   if (s_log) {
-    fprintf(stderr, "[pipeline-perf] scene=%s host=%d map=%02x/%02x output=%dx%d frames=%" PRIu64
+    fprintf(
+        stderr,
+        "[pipeline-perf] scene=%s host=%d map=%02x/%02x output=%dx%d frames=%" PRIu64
         " fps=%.1f cadence-ms=%.3f p95=%.3f max=%.3f refresh=%d vsync=%d cap=%d gpu-ms=unavailable\n",
         PerformanceMetrics_SceneName(out->context.scene), out->context.host_mode,
         out->context.map_group, out->context.map_number, out->context.width, out->context.height,
@@ -139,26 +151,33 @@ static void Publish(uint64_t now) {
     for (int i = 0; i < kPerformanceStage_Count; i++) if (out->stages[i].calls)
       fprintf(stderr, "[pipeline-stage] %s mean-ms=%.4f peak-call-ms=%.4f calls=%" PRIu64 "\n",
           kNames[i], out->stages[i].mean_ms, out->stages[i].maximum_ms, out->stages[i].calls);
-    fprintf(stderr, "[pipeline-work] ticks=%.2f repre=%.2f draws=%.1f vertices=%.0f upload-MiB=%.3f depth-MiB=%.3f depth-copy-MiB=%.3f depth-copy-calls=%.2f jobs=%.2f helpers=%.2f fallback=%.2f failed=%.2f (per-present)\n",
+    fprintf(
+        stderr,
+        "[pipeline-work] ticks=%.2f repre=%.2f draws=%.1f vertices=%.0f upload-MiB=%.3f depth-MiB=%.3f depth-copy-MiB=%.3f depth-copy-calls=%.2f jobs=%.2f helpers=%.2f fallback=%.2f failed=%.2f (per-present)\n",
         out->counts[kPerformanceCount_Ticks], out->counts[kPerformanceCount_Represents],
         out->counts[kPerformanceCount_Draws], out->counts[kPerformanceCount_Vertices],
         out->counts[kPerformanceCount_UploadBytes] / 1048576,
         out->counts[kPerformanceCount_DepthUploadBytes] / 1048576,
         out->counts[kPerformanceCount_DepthCopyBytes] / 1048576,
-        out->counts[kPerformanceCount_DepthCopyCalls],
-        out->counts[kPerformanceCount_WorkJobs], out->counts[kPerformanceCount_HelperJobs],
-        out->counts[kPerformanceCount_Fallbacks], out->counts[kPerformanceCount_FailedPresents]);
-    fprintf(stderr, "[pipeline-traffic] upload-calls=%.2f skipped=%.2f scan-MiB=%.3f upload-MiB=%.3f mirror-realloc=%.2f (per-present)\n",
-        out->counts[kPerformanceCount_UploadCalls],
-        out->counts[kPerformanceCount_UploadSkipped],
+        out->counts[kPerformanceCount_DepthCopyCalls], out->counts[kPerformanceCount_WorkJobs],
+        out->counts[kPerformanceCount_HelperJobs], out->counts[kPerformanceCount_Fallbacks],
+        out->counts[kPerformanceCount_FailedPresents]);
+    fprintf(
+        stderr,
+        "[pipeline-traffic] upload-calls=%.2f skipped=%.2f scan-MiB=%.3f upload-MiB=%.3f mirror-realloc=%.2f (per-present)\n",
+        out->counts[kPerformanceCount_UploadCalls], out->counts[kPerformanceCount_UploadSkipped],
         out->counts[kPerformanceCount_ScanBytes] / 1048576,
         out->counts[kPerformanceCount_UploadBytes] / 1048576,
         out->counts[kPerformanceCount_MirrorReallocs]);
-    fprintf(stderr, "[pipeline-atlas] reuse=%.2f copy-MiB=%.3f copy-calls=%.2f (per-present; copies are GPU-only)\n",
+    fprintf(
+        stderr,
+        "[pipeline-atlas] reuse=%.2f copy-MiB=%.3f copy-calls=%.2f (per-present; copies are GPU-only)\n",
         out->counts[kPerformanceCount_AtlasReuse],
         out->counts[kPerformanceCount_AtlasCopyBytes] / 1048576,
         out->counts[kPerformanceCount_AtlasCopyCalls]);
-    fprintf(stderr, "[pipeline-path] cpu-project=%.2f cpu-stage=%.2f gpu-reuse=%.2f publish=%.2f opt-out=%.2f limit=%.2f rejected=%.2f (events/present, not view fallbacks)\n",
+    fprintf(
+        stderr,
+        "[pipeline-path] cpu-project=%.2f cpu-stage=%.2f gpu-reuse=%.2f publish=%.2f opt-out=%.2f limit=%.2f rejected=%.2f (events/present, not view fallbacks)\n",
         out->counts[kPerformanceCount_CpuProject], out->counts[kPerformanceCount_CpuStage],
         out->counts[kPerformanceCount_GpuReuse], out->counts[kPerformanceCount_GeometryPublish],
         out->counts[kPerformanceCount_GeometryOptOut], out->counts[kPerformanceCount_GeometryLimit],
@@ -178,7 +197,8 @@ void PerformanceMetrics_PresentCompleted(uint64_t now_ns) {
   for (int i = 0; i < kPerformanceStage_Count; i++) {
     s_window.elapsed[i] += atomic_exchange_explicit(&s_pending[i].elapsed, 0, memory_order_relaxed);
     s_window.calls[i] += atomic_exchange_explicit(&s_pending[i].calls, 0, memory_order_relaxed);
-    const uint64_t maximum = atomic_exchange_explicit(&s_pending[i].maximum, 0, memory_order_relaxed);
+    const uint64_t maximum =
+        atomic_exchange_explicit(&s_pending[i].maximum, 0, memory_order_relaxed);
     if (maximum > s_window.maximum[i]) s_window.maximum[i] = maximum;
   }
   for (int i = 0; i < kPerformanceCount_Count; i++)
@@ -191,7 +211,8 @@ void PerformanceMetrics_PresentCompleted(uint64_t now_ns) {
   }
   s_window.previous = now_ns;
   s_window.frames++;
-  if (s_window.frames > 1 && now_ns >= s_window.started && now_ns - s_window.started >= kReportNs) Publish(now_ns);
+  if (s_window.frames > 1 && now_ns >= s_window.started && now_ns - s_window.started >= kReportNs)
+    Publish(now_ns);
 }
 void PerformanceMetrics_Snapshot(PerformanceSnapshot *snapshot) {
   if (snapshot) *snapshot = s_window.snapshot;

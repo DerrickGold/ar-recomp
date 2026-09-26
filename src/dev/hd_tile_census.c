@@ -306,10 +306,12 @@ static int GroupIsPermutation(const uint16 *prev, const uint16 *cur) {
   memcpy(a, prev, sizeof(a));
   memcpy(b, cur, sizeof(b));
   for (int i = 1; i < 16; i++) {
-    uint16 va = a[i]; int j = i;
+    uint16 va = a[i];
+    int j = i;
     while (j > 0 && a[j - 1] > va) { a[j] = a[j - 1]; j--; }
     a[j] = va;
-    uint16 vb = b[i]; j = i;
+    uint16 vb = b[i];
+    j = i;
     while (j > 0 && b[j - 1] > vb) { b[j] = b[j - 1]; j--; }
     b[j] = vb;
   }

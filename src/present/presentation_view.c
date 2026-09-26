@@ -17,7 +17,8 @@ PresentationViewDecision PresentationView_Resolve(
   switch (slot->sim.view) {
     case kSimView_Enhanced:
       if (slot->sim.separated_valid &&
-          (slot->sim.effective_features & (kSimFeature_GroundProjection | kSimFeature_SeparatedComposite)) ==
+          (slot->sim.effective_features &
+           (kSimFeature_GroundProjection | kSimFeature_SeparatedComposite)) ==
               (kSimFeature_GroundProjection | kSimFeature_SeparatedComposite))
         result.scene = kPerformanceScene_Town;
       /* Disabling the separated/ground stage is an explicit flat profile. */

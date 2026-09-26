@@ -820,7 +820,9 @@ bool ArTextSurfaceCache_Acquire(
   }
   if (!BuildRevealPieces(source, metric_scale, mosaic_block, &reveal_pieces,
         &reveal_piece_count, &effect_metadata_bytes, cluster_ink_bounds)) {
-    free(treated_pixels);free(reveal_clusters);free(cluster_ink_bounds);
+    free(treated_pixels);
+    free(reveal_clusters);
+    free(cluster_ink_bounds);
     ReleaseGridAligned(&aligned);
     ArTextRasterizer_ReleaseBitmap(rasterizer, &bitmap);
     ++cache->stats.failures;

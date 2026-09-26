@@ -71,8 +71,15 @@ static uint8_t Call(CpuState *c, Routine routine, uint16_t a, uint16_t x,
   const uint8_t db=c->DB, pb=c->PB, p=c->P, m=c->m_flag, ix=c->x_flag,
       hr=c->host_return_valid, n=c->_flag_N, v=c->_flag_V, z=c->_flag_Z,
       carry=c->_flag_C, irq=c->_flag_I, decimal=c->_flag_D;
-  c->A=a; c->X=x; c->Y=y; c->D=0; c->DB=1; c->PB=1;
-  c->m_flag=1; c->x_flag=0; c->P=(c->P | 0x20) & ~0x10;
+  c->A = a;
+  c->X = x;
+  c->Y = y;
+  c->D = 0;
+  c->DB = 1;
+  c->PB = 1;
+  c->m_flag = 1;
+  c->x_flag = 0;
+  c->P = (c->P | 0x20) & ~0x10;
   cpu_write8(c,0,c->S--,return_address >> 8);
   cpu_write8(c,0,c->S--,return_address & 255);
   c->host_return_valid=1;
@@ -83,15 +90,29 @@ static uint8_t Call(CpuState *c, Routine routine, uint16_t a, uint16_t x,
     abort();
   }
   const uint8_t value=(uint8_t)c->A;
-  c->A=oa; c->X=ox; c->Y=oy; c->S=os; c->D=od;
-  c->DB=db; c->PB=pb; c->P=p; c->m_flag=m; c->x_flag=ix;
-  c->host_return_valid=hr; c->_flag_N=n; c->_flag_V=v; c->_flag_Z=z;
-  c->_flag_C=carry; c->_flag_I=irq; c->_flag_D=decimal;
+  c->A = oa;
+  c->X = ox;
+  c->Y = oy;
+  c->S = os;
+  c->D = od;
+  c->DB = db;
+  c->PB = pb;
+  c->P = p;
+  c->m_flag = m;
+  c->x_flag = ix;
+  c->host_return_valid = hr;
+  c->_flag_N = n;
+  c->_flag_V = v;
+  c->_flag_Z = z;
+  c->_flag_C = carry;
+  c->_flag_I = irq;
+  c->_flag_D = decimal;
   return value;
 }
 
 static void Carry(CpuState *c, bool carry) {
-  c->_flag_C=carry; c->P=(c->P & ~1u) | carry;
+  c->_flag_C = carry;
+  c->P = (c->P & ~1u) | carry;
 }
 
 void ActRaiserSimMenu_Reset(void) {
@@ -100,7 +121,8 @@ void ActRaiserSimMenu_Reset(void) {
   s_menu.generation=++s_generation;
   s_owner=s_action_guard=s_confirm_guard=false;
   s_input_guard=false;
-  s_action=0; s_confirmation_cancelled=false;
+  s_action = 0;
+  s_confirmation_cancelled = false;
   s_scene=0;
   s_description_aborted=s_description_fast=s_description_released=false;
 }
@@ -205,10 +227,12 @@ static void PaintHelp(CpuState *c) {
 }
 
 static void DescribeNeutral(CpuState *c, const char *id,const char *fallback) {
-  ArDialogueSession session; ArDialogueSession_Init(&session);
+  ArDialogueSession session;
+  ArDialogueSession_Init(&session);
   if(!ActRaiserLocalizationRuntime_BeginMenuHelp(&session,id,fallback)) return;
   Call(c,bank_01_8CCE_M1X0,0,0,0,0x82f8);
-  size_t start=0; unsigned page_index=0,delay=0;
+  size_t start = 0;
+  unsigned page_index = 0, delay = 0;
   bool build=true,fast=false,complete=false;
   ArDialoguePageSnapshot page;
   ArLanguagePackError error={{0}};
@@ -224,7 +248,9 @@ static void DescribeNeutral(CpuState *c, const char *id,const char *fallback) {
           page.direction==kArLanguageDirection_LeftToRight?
               kArTextDirection_LeftToRight:kArTextDirection_Auto;
       if (!ActRaiserLocalizationRuntime_PrepareMenuHelpStyle(&page, &s_help)) break;
-      build=false; complete=false; fast=false;
+      build = false;
+      complete = false;
+      fast = false;
       SimMenuModel_ReleaseBarrier(&s_menu);
     }
     const unsigned speed = cpu_read8(c, 0, 0x0200);
@@ -267,7 +293,8 @@ static void DescribeNeutral(CpuState *c, const char *id,const char *fallback) {
         ArDialogueSession_TickWait(&session,session.state.wait_frames_remaining);
       }
       if(!ArDialogueSession_AdvancePage(&session)) break;
-      ++page_index; start=0;
+      ++page_index;
+      start = 0;
     } else break;
     build=true;
   }
@@ -290,7 +317,8 @@ static void Describe(CpuState *c) {
     Call(c,bank_01_8E29_M1X0,0,0,source[action-5],caller[action-5]);
     Call(c,bank_01_8CCE_M1X0,0,0,0,0x82f8);
   } else {
-    char id[64]; const char *fallback;
+    char id[64];
+    const char *fallback;
     if(s_menu.return_phase==kSimMenu_Inventory) {
       const unsigned item=s_menu.items[s_menu.item_slot];
       snprintf(id,sizeof(id),"sim.help.item.%02u",item);
@@ -348,8 +376,9 @@ RecompReturn ActRaiser_SimMenuBrowse(CpuState *c) {
 
 bool ActRaiser_SimMenuActionEntry(CpuState *c) {
   if (s_action_guard) { s_action_guard=false; return false; }
-  return c && (s_owner || ActRaiserRegional_MiracleEntry(c) || ActRaiserRegional_ReportCommandEntry(c)) &&
-      cpu_read16(c,0,c->S+1) == 0x81c3;
+  return c &&
+      (s_owner || ActRaiserRegional_MiracleEntry(c) || ActRaiserRegional_ReportCommandEntry(c)) &&
+      cpu_read16(c, 0, c->S + 1) == 0x81c3;
 }
 
 RecompReturn ActRaiser_SimMenuAction(CpuState *c) {

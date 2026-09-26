@@ -9,7 +9,8 @@
 #include "host/host_clock.h"
 #include "app/performance_metrics.h"
 
-_Static_assert((int)kPerformance_ActionCount == (int)kDioramaPerformanceStage_Count, "Action metric stage mapping");
+_Static_assert((int)kPerformance_ActionCount == (int)kDioramaPerformanceStage_Count,
+               "Action metric stage mapping");
 
 enum { kDioramaPerformanceWindowNs = 1000000000 };
 
@@ -243,7 +244,8 @@ void DioramaPerformance_AddDraw(
     const int32_t *indices, int index_count, ArRenderBlendMode blend) {
   if (succeeded) {
     PerformanceMetrics_Add(kPerformanceCount_Draws, 1);
-    if (vertex_count > 0) PerformanceMetrics_Add(kPerformanceCount_Vertices, (uint64_t)vertex_count);
+    if (vertex_count > 0)
+      PerformanceMetrics_Add(kPerformanceCount_Vertices, (uint64_t)vertex_count);
   }
   /* The interactive overlay must not run the expensive CPU triangle-coverage
    * estimator. Retain that opt-in analysis only for the legacy log profiler. */
