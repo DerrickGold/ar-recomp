@@ -646,7 +646,7 @@ typedef struct Settings {
   bool diorama_shoebox;
 
   /* Graphics (kSettingCat_Graphics, GPU effects + frame generation).
-   * gpu_shaders_enabled is retained as a config migration mirror; main.c
+   * gpu_shaders_enabled is retained as a config migration mirror; host_video.c
    * requires SDL's GPU renderer and forces it true. The per-effect toggles
    * below remain live and independent. gpu_fx_shadow defaults OFF:
    * a known visual bug (shadow blur can bleed onto transparent gaps in a
@@ -854,7 +854,7 @@ int Settings_AudioFrequencyHz(void);
 void Settings_SetHdReplacementsAvailable(bool available);
 
 /* Backing pixels per window point for the window's current display
- * (SDL_GetWindowPixelDensity), pushed from main.c. */
+ * (SDL_GetWindowPixelDensity), pushed from host_display.c. */
 void Settings_SetHostPixelDensity(float density);
 float Settings_HostPixelDensity(void);
 

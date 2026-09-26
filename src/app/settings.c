@@ -12,6 +12,7 @@
 #include "host/atomic_replace.h"
 #include "sim/sim3d/sim3d_camera_limits.h"
 #include "sim/town/sim_town_terrain.h"
+#include "host/host_video.h"
 #include <errno.h>
 #include <limits.h>
 #include <stdio.h>
@@ -49,7 +50,7 @@ static int s_boot_display_mode;
 static bool s_boot_display_from_environment;
 
 /* The framebuffer width is derived from the canonical ActRaiser display
- * geometry, so this module does not need main.c's file-local g_snes_width. */
+ * geometry, so this module does not need host_display's g_snes_width. */
 
 static int InferDisplayMode(void);
 
@@ -1019,7 +1020,6 @@ static bool Sim3DPickerEaseAvailable(void) {
 
 /* Graphics availability gate (kSettingCat_Graphics): the per-effect rows
  * only matter once the mandatory GPU renderer is running. */
-extern bool g_gpu_shaders_active;
 static bool GpuShadersActive(void) { return g_gpu_shaders_active; }
 
 /* Automatic only until platform boot publishes its backends, so hosts that
@@ -2122,7 +2122,7 @@ const SettingDesc g_setting_descs[] = {
                kSettingCat_Graphics, 1, false,
                ActionEffectRendererAvailable, NULL),
   /* Load/save compatibility for configurations that exposed the old optional
-   * backend switch. main.c now forces this value on because SIM3D depth is a
+   * backend switch. host_video.c forces this value on because SIM3D depth is a
    * baseline renderer capability; the effect rows remain independently live. */
   { "gpu_shaders_enabled", "AR_GPU_SHADERS", "GPU shader effects",
     "The GPU renderer is required. This retained setting only preserves "
@@ -3818,7 +3818,7 @@ void Settings_SetHdReplacementsAvailable(bool available) {
 }
 
 /* Backing pixels per window point (SDL_GetWindowPixelDensity), pushed from
- * main.c whenever the window moves display or changes scale. 1.0 on a
+ * host_display.c whenever the window moves display or changes scale. 1.0 on a
  * non-scaled display; 2.0 on Retina; fractional under Wayland fractional
  * scaling.
  *

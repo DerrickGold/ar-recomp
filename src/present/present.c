@@ -56,18 +56,9 @@
 #include "render/render_output.h"
 #include "render/localized_text_presenter.h"
 #include "render/text_cell_composite.h"
+#include "host/host_video.h"
+#include "present/presentation_textures.h"
 
-
-extern ArRenderDevice g_render_device;
-extern ArRenderTexture g_texture;
-extern ArRenderTexture g_authentic_texture;
-extern ArRenderTexture g_hud_bg_texture;
-extern ArRenderTexture g_hud_obj_texture;
-extern ArRenderTexture g_diorama_textures[kDioramaPlane_Count];
-extern ArRenderTexture g_sim_obj_atlas_texture;
-
-extern ArRenderTexture g_sim3d_layer_textures[kSim3DPlane_Count];
-extern ArRenderTexture g_sim3d_flat_texture;
 static uint32_t s_diorama_uploaded_plane_mask;
 static DioramaCoverageMask
     s_diorama_coverage_masks[kDioramaPlane_Count];

@@ -3,6 +3,8 @@
  * prepare and finish around it) and restores the pixels it covered.
  * Phase: game (frame transaction). */
 #include "actraiser/enhancements/actraiser_enhancements_internal.h"
+#include "diorama/diorama.h"
+#include "host/host_frame_surfaces.h"
 
 /* The OAM slots ActRaiser_WidescreenHudObjPromote validated THIS frame.
  *
@@ -36,7 +38,6 @@ bool ActRaiser_HudObjSurfaceView(SrPpuSurfaceView *surface) {
   *surface = (SrPpuSurfaceView){0};
   if (!s_hud_obj_icon_count) return false;
 
-  extern uint8_t g_hud_obj_pixels[];
   const int width = kActRaiserAuthenticWidth + 2 * g_ws_extra;
   const int height = kActRaiserAuthenticHeight;
   if (width <= 0 || width > (int)SR_PPU_SURFACE_MAX_WIDTH ||
@@ -218,8 +219,6 @@ int ActRaiser_DioramaObjPlaneForPriority(int priority) {
 }
 
 void ActRaiser_DioramaHudObjPrepare(void) {
-  extern bool g_diorama_frame_active;
-  extern uint8_t g_hud_obj_pixels[];
   const SrPpuFrameTransactionContext *frame = ActRaiser_PpuFrame();
 
   s_hud_icon_ready = false;
@@ -354,8 +353,6 @@ void ActRaiser_DioramaHudObjPrepare(void) {
 }
 
 void ActRaiser_DioramaHudObjFinish(int width) {
-  extern uint8_t *g_diorama_layer_pixels[];
-  extern uint8_t g_hud_obj_pixels[];
 
   /* Bound against the PLANE width -- the wider of the two destinations, and the
    * one the apron grew. Both surfaces are allocated kPpuSurfaceWidth wide. */

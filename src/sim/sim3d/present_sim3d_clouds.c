@@ -19,12 +19,12 @@
 #include "sim/sim3d/sim3d_performance.h"
 #include "sim/sim3d/sim_cloud_effect_backend.h"
 #include "render/render_device.h"
+#include "host/host_video.h"
 
 #ifndef AR_SIM3D_TERRAIN_ELEVATION
 #define AR_SIM3D_TERRAIN_ELEVATION 0
 #endif
 
-extern ArRenderDevice g_render_device;
 
 static ArRenderTexture s_sim_cloud_texture;
 static bool s_sim_cloud_alloc_failed;

@@ -255,7 +255,7 @@ typedef struct FrameSlot {
   int diorama_reactive_strength;
   /* B4-vellean (followup doc): PlayerVelocityX/Y, self-calibrated against a
    * running per-session max and clamped to [-1,1] — see FrameSlot_Capture
-   * (main.c) for why normalization happens there (it owns the WRAM read and
+   * (frame_slot.c) for why normalization happens there (it owns the WRAM read and
    * the running-max state) rather than here. yaw follows horizontal
    * velocity (running), pitch follows vertical velocity (jump/fall), naming
    * matches which DioramaCameraPose field each drives. These fields are the
@@ -263,7 +263,7 @@ typedef struct FrameSlot {
   float diorama_dyncam_lean_yaw;
   float diorama_dyncam_lean_pitch;
   /* B4-kick (followup doc): rising-edge event flags, computed on the game
-   * thread (FrameSlot_Capture, main.c — it owns the WRAM reads and the
+   * thread (FrameSlot_Capture, frame_slot.c — it owns the WRAM reads and the
    * prior-state needed to detect an edge). True only on the ONE FrameSlot
    * capture where the underlying signal transitioned; present.c triggers a
    * fresh decaying impulse only when it sees a slot whose timestamp_ns it

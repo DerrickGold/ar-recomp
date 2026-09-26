@@ -2,9 +2,9 @@
 #include "sim/sim3d/present_sim3d_internal.h"
 #include "present/presentation_upload_mirror.h"
 #include "sim/world_nav/sim_world_navigation_capture.h"
+#include "host/host_video.h"
 #include <stdio.h>
 
-extern ArRenderDevice g_render_device;
 static WorldNavigationCompositionTextures s_textures;
 static PresentationUploadMirror s_palace_mirror, s_label_mirror, s_plaque_mirror;
 

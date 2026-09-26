@@ -41,22 +41,13 @@
 #include "render/render_device.h"
 #include "app/performance_metrics.h"
 #include "present/render_comparison.h"
-
-extern SDL_Window *g_window;
-extern ArRenderDevice g_render_device;
-extern ArRenderTexture g_texture;
-extern int g_snes_width;
-extern int g_snes_height;
-extern uint8_t g_pixels[
-    SR_PPU_SURFACE_MAX_WIDTH * 4 * kHostDisplayFramebufferHeight];
-extern uint8_t g_authentic_pixels[
-    SR_PPU_SURFACE_MAX_WIDTH * 4 * kHostDisplayFramebufferHeight];
-extern uint8_t g_hud_bg_pixels[
-    SR_PPU_SURFACE_MAX_WIDTH * 4 * kHostDisplayFramebufferHeight];
-extern uint8_t g_hud_obj_pixels[
-    SR_PPU_SURFACE_MAX_WIDTH * 4 * kHostDisplayFramebufferHeight];
+#include "host/host_video.h"
+#include "present/presentation_textures.h"
+#include "host/host_frame_surfaces.h"
 
 const uint64_t kHostDisplayEmulationFrameIntervalNs = RTL_NTSC_FRAME_INTERVAL_NS;
+int g_snes_width = kActRaiserAuthenticWidth,
+    g_snes_height = kActRaiserAuthenticHeight;
 int g_active_pixel_aspect = kPixelAspect_Crt43;
 
 enum {

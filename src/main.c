@@ -50,7 +50,9 @@
 #include "host/host_audio.h"
 #include "host/host_display.h"
 #include "host/host_display_pacing.h"
+#include "host/host_frame_surfaces.h"
 #include "host/host_input.h"
+#include "host/host_video.h"
 #include "host/parallel_work.h"
 #include "app/ini_upgrade_apply.h"
 #include "app/input_map.h"
@@ -70,6 +72,7 @@
 #include "app/portable_paths.h"
 #include "present/present.h"
 #include "present/presentation_frame_generation.h"
+#include "present/presentation_textures.h"
 #include "render/localized_text_presenter.h"
 #include "present/render_comparison.h"
 #include "present/render_preparation.h"
@@ -101,6 +104,7 @@
 #include "snesrecomp/game/bootstrap.h"
 #include "snesrecomp/game/cpu.h"
 #include "snesrecomp/game/generated_support.h"
+#include "snesrecomp/game/runtime.h"
 #include "snesrecomp/game/trace.h"
 #include "snesrecomp/game/types.h"
 #include "snesrecomp/host/launcher.h"
@@ -121,119 +125,7 @@ enum {
  * lookup off this, and a shipped .desktop file must share its basename. */
 #define AR_APP_IDENTIFIER "dev.quintet-enix.actraiser-recomp"
 #define AR_APP_VERSION "0.1.0-dev"
-/* Not static: present.c and host_display.c read these presentation resources
- * directly. They are boot-created once and, after that, either read-only
- * pointers or used synchronously on the main thread — not part of the
- * g_ppu/g_settings state boundary D6 fences off. */
-SDL_Window *g_window;
-ArRenderDevice g_render_device;
-/* The SDL GPU renderer is the presentation backend. Individual optional
- * shader effects still check their own AR_GPU_FX_* toggles; this flag reports
- * that the mandatory GPU device and renderer were created successfully. */
-bool g_gpu_shaders_requested;
-bool g_gpu_shaders_active;
-ArRenderTexture g_texture;
-ArRenderTexture g_authentic_texture;
-ArRenderTexture g_hud_bg_texture;
-ArRenderTexture g_hud_obj_texture;
-/* InspectorPresentationKind comes from the portable HUD-layout contract;
- * InspectorPresentationSelection lives in present.h. Both are shared by the
- * live hit-test and the FrameSlot-fed renderer. */
-/* external: read by FrameSlot_Capture (frame_slot.c) */
-InspectorPresentationSelection g_scene_inspector_presentation;
 static bool s_window_hidden;  /* true while MINIMIZED or HIDDEN: skip present */
-/* external: read by FrameSlot_Capture (frame_slot.c) */
-int g_snes_width = kActRaiserAuthenticWidth,
-    g_snes_height = kActRaiserAuthenticHeight;
-/* Framebuffer sized for the PPU's full widescreen budget (512 wide) so the
- * active width can change live without reallocating storage; each frame uses
- * only the leading g_snes_width*4 bytes per row. Rows follow the same rule on
- * the other axis: capacity for the full vertical margin band, of which a frame
- * uses only 224 + g_ws_extra_top + g_ws_extra_bottom. */
-_Static_assert(kHostDisplayFramebufferHeight >= SR_PPU_SURFACE_MAX_HEIGHT,
-               "frame surfaces must hold every row the PPU can render");
-uint8_t g_pixels[
-    SR_PPU_SURFACE_MAX_WIDTH * 4 * kHostDisplayFramebufferHeight];
-/* Complete native PPU result captured beside g_pixels before host presentation
- * extractions remove layers. It stays at the active scanline width (no OBJ
- * apron) because comparison presents only a native 256x224 crop. */
-uint8_t g_authentic_pixels[
-    SR_PPU_SURFACE_MAX_WIDTH * 4 * kHostDisplayFramebufferHeight];
-uint8_t g_hud_bg_pixels[
-    SR_PPU_SURFACE_MAX_WIDTH * 4 * kHostDisplayFramebufferHeight];
-uint8_t g_hud_obj_pixels[
-    SR_PPU_SURFACE_MAX_WIDTH * 4 * kHostDisplayFramebufferHeight];
-/* Flat-mode mask of pixels for which BG1 wins the priority resolve of its
- * owning PPU screen. This remains correct in Marahna/Viper rooms where BG1
- * and OBJ are TS-only inputs to the final colour-add composite. */
-uint8_t g_action_bg1_mask_pixels[
-    SR_PPU_SURFACE_MAX_WIDTH * 4 * kHostDisplayFramebufferHeight];
-/* Flat-mode mask of pixels for which BG2 wins the complete PPU main-screen
- * priority resolve. A BG2-stage presentation effect is multiplied by this
- * before compositing, so later BG1/OBJ art retains authentic occlusion. */
-uint8_t g_action_bg2_mask_pixels[
-    SR_PPU_SURFACE_MAX_WIDTH * 4 * kHostDisplayFramebufferHeight];
-
-/* Diorama per-plane capture buffers, indexed by kDioramaPlane_* (engine
- * sources = the priority-0 remainder of each layer, appended entries = the
- * priority-band splits; see diorama_planes.h). Dedicated set separate from
- * the HUD/HD overlay buffers (BG3/OBJ reuse those for the widescreen HUD
- * split, and HD replacements claim per-source capture slots — see §4.3).
- * Allocated lazily on first diorama capture (actraiser_rtl.c) and released at
- * shutdown. BG4 is never drawn in Mode 1, so excluded; the backdrop slot
- * stays NULL (RenderDiorama points it at g_pixels). */
-uint8_t *g_diorama_layer_pixels[kDioramaPlane_Count];
-bool g_diorama_dump_pending;
-bool g_diorama_frame_active;
-ArRenderTexture g_diorama_textures[kDioramaPlane_Count];
-ArRenderTexture g_sim_obj_atlas_texture;
-ArRenderTexture g_sim3d_layer_textures[kSim3DPlane_Count];
-ArRenderTexture g_sim3d_flat_texture;
-bool g_sim3d_textures_ready;
-bool g_sim3d_billboard_renderer_ready;
-
-static void DestroyDioramaTextures(void) {
-  for (int i = 0; i < kDioramaPlane_Count; i++) {
-    ArRenderDevice_DestroyTexture(&g_render_device, g_diorama_textures[i]);
-    g_diorama_textures[i] = ArRenderTexture_Invalid();
-  }
-}
-
-static void CreateDioramaTextures(void) {
-  /* Allocated at the PPU's full render-target size on BOTH axes, for the same
-   * reason: the ABI surface limits already cover every horizontal and vertical
-   * margin without a realloc. Only the leading snes_width x
-   * (snes_height + ws_extra_top + ws_extra_bottom) region is uploaded
-   * each frame; Diorama_Composite's UV window is expressed against these
-   * allocated dimensions. */
-  uint8_t *zero_fill =
-      calloc(1, (size_t)SR_PPU_SURFACE_MAX_WIDTH *
-                    SR_PPU_SURFACE_MAX_HEIGHT * 4);
-  for (int i = 0; i < kDioramaPlane_Count; i++) {
-    if (i == SR_PPU_OVERLAY_BG4)
-      continue;
-    const ArRenderTextureDesc desc = {
-      .width = SR_PPU_SURFACE_MAX_WIDTH,
-      .height = SR_PPU_SURFACE_MAX_HEIGHT,
-      .format = kArRenderPixelFormat_Argb8888,
-      .usage = kArRenderTextureUsage_Streaming,
-      .filter = kArRenderFilter_Nearest,
-      .blend = i == kDioramaPlane_Backdrop
-          ? kArRenderBlendMode_Opaque : kArRenderBlendMode_Alpha,
-    };
-    if (!ArRenderDevice_CreateTexture(
-            &g_render_device, &desc, &g_diorama_textures[i]))
-      continue;
-    if (zero_fill)
-      ArRenderDevice_UpdateTexture(
-          &g_render_device, g_diorama_textures[i], NULL, zero_fill,
-          SR_PPU_SURFACE_MAX_WIDTH * 4);
-  }
-  free(zero_fill);
-}
-
-extern const RtlGameModule kActRaiserGameModule;
-
 
 static bool SettingsOverlayLiveCgram(
     uint16_t out_cgram[kSettingsOverlayLayerPaletteEntries]) {
@@ -344,7 +236,6 @@ static bool RunOneRecompiledFrame(uint32 live_inputs, bool *stop_running) {
  * iteration by the headless loop (§3.6) and 0-N times per outer iteration by
  * the non-headless fixed-timestep accumulator loop (§3.1). */
 static void RunOneEmulatedTickWork(bool *stop_running) {
-  extern uint8 g_ram[];
   static int perf_on = -1;
   if (perf_on < 0) perf_on = getenv("AR_PERF") ? 1 : 0;
   uint64_t perf_t0 = perf_on ? SDL_GetTicks() : 0;
@@ -367,8 +258,6 @@ static void RunOneEmulatedTickWork(bool *stop_running) {
   unsigned long apuprof_push0 = 0;
   uint64_t apuprof_loop0 = 0;
   if (apuprof_ms > 0) {
-    extern unsigned long g_recomp_push_count;
-    extern uint64_t g_watchdog_loop_headers;
     RtlApuProfileReset();
     apuprof_push0 = g_recomp_push_count;
     apuprof_loop0 = g_watchdog_loop_headers;
@@ -408,8 +297,6 @@ static void RunOneEmulatedTickWork(bool *stop_running) {
   }
   if (apuprof_t0) {
     RtlApuProfile profile = {.struct_size = RTL_APU_PROFILE_V2_SIZE};
-    extern unsigned long g_recomp_push_count;
-    extern uint64_t g_watchdog_loop_headers;
     uint64_t dt_ns = SDL_GetTicksNS() - apuprof_t0;
     RtlApuProfileRead(&profile);
     if (dt_ns >=
@@ -521,7 +408,6 @@ static void DispatchTownPixelRows(void *context, size_t count,
 
 static void DrawAndPresentFrame(HostDisplayPresentMode present_mode,
                                 float alpha) {
-  extern uint8 g_ram[];
   static int perf_on = -1;
   if (perf_on < 0) perf_on = getenv("AR_PERF") ? 1 : 0;
 
@@ -542,7 +428,6 @@ static void DrawAndPresentFrame(HostDisplayPresentMode present_mode,
   SimFrameData sim;
   pipeline = PerformanceMetrics_Begin(kPerformance_Metadata);
   {
-    extern int snes_frame_counter;
     SimPhase0Trace_Frame((uint32)snes_frame_counter, g_ram,
                          RtlGameRunner());
     SimRenderMetadata_CaptureFrame(
@@ -932,7 +817,6 @@ static void SlotValidateBoot(void) {
 
 static void RunPostTickHousekeeping(void) {
   const PerformanceScope performance = PerformanceMetrics_Begin(kPerformance_Housekeeping);
-  extern uint8 g_ram[];
   /* Surface audio-chunk drops the callback counted (R12). Reported here, off
    * the audio thread, and coalesced so a sustained problem cannot spam. */
   {
@@ -1350,11 +1234,10 @@ static void AppBoot_ResolveDisplayAndSettings(AppBoot *app) {
 static void AppBoot_ArmDiagnostics(void) {
   /* SNESRECOMP_ENTRY_MX_CHECK=1: enable the per-function-entry m/x invariant check
    * (validates the emitter's static m/x analysis on every direct call). */
-  { extern int g_sr_entry_mx_check_enabled; const char *e = getenv("SNESRECOMP_ENTRY_MX_CHECK");
+  { const char *e = getenv("SNESRECOMP_ENTRY_MX_CHECK");
     g_sr_entry_mx_check_enabled = (e && e[0] && e[0] != '0') ? 1 : 0; }
   /* SNESRECOMP_MX_HISTORY=1: per-PC runtime m/x histogram + live misdecode anomaly trap. */
-  { extern int g_sr_mx_history_enabled; extern void sr_mx_history_dump(void);
-    const char *e = getenv("SNESRECOMP_MX_HISTORY");
+  { const char *e = getenv("SNESRECOMP_MX_HISTORY");
     g_sr_mx_history_enabled = (e && e[0] && e[0] != '0') ? 1 : 0;
     if (g_sr_mx_history_enabled) atexit(sr_mx_history_dump); }
   /* SNESRECOMP_EXIT_MX_CHECK=1: per-function EXIT m/x check — fires when a function's runtime
@@ -1362,231 +1245,23 @@ static void AppBoot_ArmDiagnostics(void) {
    * misdecode, e.g. $03:9156). SNESRECOMP_EXIT_STACK_CHECK=1: per-function EXIT stack-balance
    * check — fires when a paired frame's RTS/RTL drifts S (e.g. $01:B8CF).
    * Symmetric twins of SNESRECOMP_ENTRY_MX_CHECK; name the culprit at its own return. */
-  { extern int g_sr_exit_mx_check_enabled; const char *e = getenv("SNESRECOMP_EXIT_MX_CHECK");
+  { const char *e = getenv("SNESRECOMP_EXIT_MX_CHECK");
     g_sr_exit_mx_check_enabled = (e && e[0] && e[0] != '0') ? 1 : 0; }
-  { extern int g_sr_exit_stack_check_enabled; const char *e = getenv("SNESRECOMP_EXIT_STACK_CHECK");
+  { const char *e = getenv("SNESRECOMP_EXIT_STACK_CHECK");
     g_sr_exit_stack_check_enabled = (e && e[0] && e[0] != '0') ? 1 : 0; }
   /* SNESRECOMP_CALL_MX_CHECK=1: per-CALL-SITE m/x invariant check — fires at every JSR/JSL
    * when runtime (m,x) disagrees with what the decoder statically knew at
    * that exact instruction. Catches (m,x) corruption from ANYWHERE upstream
    * of a call (not just decode-time mistakes SNESRECOMP_ENTRY_MX_CHECK/SNESRECOMP_EXIT_MX_CHECK cover),
    * narrowed to the first call site downstream of the corruption. */
-  { extern int g_sr_call_mx_check_enabled; const char *e = getenv("SNESRECOMP_CALL_MX_CHECK");
+  { const char *e = getenv("SNESRECOMP_CALL_MX_CHECK");
     g_sr_call_mx_check_enabled = (e && e[0] && e[0] != '0') ? 1 : 0; }
 
   /* SNESRECOMP_TRAP_FUNCTION=<substring>: dump the recomp call stack the first time a matching
    * function is entered (finds the dispatch chain into a misdecode variant). */
-  { extern const char *g_sr_trap_function;
-    const char *e = getenv("SNESRECOMP_TRAP_FUNCTION");
+  { const char *e = getenv("SNESRECOMP_TRAP_FUNCTION");
     g_sr_trap_function = (e && e[0]) ? e : 0; }
 
-}
-
-/* Every presentation texture, created once the renderer exists: the base
- * framebuffer, the HUD BG/OBJ planes, the Mode-7 overlay, the D1b semantic OBJ
- * atlas, the D2 SIM capture family, and the diorama planes. Split out of
- * AppBoot_CreateVideo, which otherwise carried SDL init, window creation and
- * renderer configuration in the same 300 lines. */
-static void AppBoot_CreatePresentationTextures(void) {
-  const ArRenderTextureDesc base_texture = {
-    .width = SR_PPU_SURFACE_MAX_WIDTH,
-    .height = g_snes_height,
-    .format = kArRenderPixelFormat_Argb8888,
-    .usage = kArRenderTextureUsage_Streaming,
-    .filter = kArRenderFilter_Nearest,
-    .blend = kArRenderBlendMode_Opaque,
-  };
-  if (!ArRenderDevice_CreateTexture(
-          &g_render_device, &base_texture, &g_texture))
-    Die(ArRenderDevice_LastError(&g_render_device));
-  /* The base framebuffer is opaque: the PPU writes RGB with the alpha byte
-   * left 0 (see ppu_old.c). SDL2 defaulted new textures to BLENDMODE_NONE so
-   * that alpha was ignored, but SDL3 defaults them to BLENDMODE_BLEND — which
-   * would blend those alpha-0 pixels to fully transparent and present a BLACK
-   * screen. The descriptor's opaque blend mode preserves that behavior. (The
-   * HUD/overlay textures below deliberately use alpha; they carry real alpha.) */
-  /* SDL3 textures default to linear filtering; the SDL2 build set the global
-   * SDL_HINT_RENDER_SCALE_QUALITY=0 (nearest). The descriptor pins nearest
-   * filtering so the pixel-art framebuffer upscales crisply. */
-
-  const ArRenderTextureDesc authentic_texture = {
-    .width = SR_PPU_SURFACE_MAX_WIDTH,
-    .height = SR_PPU_SURFACE_MAX_HEIGHT,
-    .format = kArRenderPixelFormat_Argb8888,
-    .usage = kArRenderTextureUsage_Streaming,
-    .filter = kArRenderFilter_Nearest,
-    .blend = kArRenderBlendMode_Opaque,
-  };
-  if (!ArRenderDevice_CreateTexture(
-          &g_render_device, &authentic_texture, &g_authentic_texture))
-    Die(ArRenderDevice_LastError(&g_render_device));
-
-  const ArRenderTextureDesc hud_texture = {
-    .width = SR_PPU_SURFACE_MAX_WIDTH,
-    .height = g_snes_height,
-    .format = kArRenderPixelFormat_Argb8888,
-    .usage = kArRenderTextureUsage_Streaming,
-    .filter = kArRenderFilter_Nearest,
-    .blend = kArRenderBlendMode_Alpha,
-  };
-  if (!ArRenderDevice_CreateTexture(
-          &g_render_device, &hud_texture, &g_hud_bg_texture) ||
-      !ArRenderDevice_CreateTexture(
-          &g_render_device, &hud_texture, &g_hud_obj_texture))
-    Die(ArRenderDevice_LastError(&g_render_device));
-
-  /* D1b semantic OBJ atlas. It is uploaded every supported SIM frame but is
-   * not selected by the compositor until the later separated-composite
-   * capability lands, keeping this checkpoint visually authentic. */
-  const ArRenderTextureDesc sim_atlas_texture = {
-    .width = kSimObjAtlasWidth,
-    .height = kSimObjAtlasHeight,
-    .format = kArRenderPixelFormat_Argb8888,
-    .usage = kArRenderTextureUsage_Streaming,
-    .filter = kArRenderFilter_Nearest,
-    .blend = kArRenderBlendMode_Alpha,
-  };
-  if (ArRenderDevice_CreateTexture(
-          &g_render_device, &sim_atlas_texture,
-          &g_sim_obj_atlas_texture)) {
-    /* Static storage is zero-initialized before the game thread starts. */
-    ArRenderDevice_UpdateTexture(
-        &g_render_device, g_sim_obj_atlas_texture, NULL,
-        g_sim_obj_atlas_pixels, kSimObjAtlasPitch);
-  } else {
-    fprintf(stderr,
-            "[sim3d-d1] semantic atlas texture unavailable: %s\n",
-            ArRenderDevice_LastError(&g_render_device));
-  }
-  g_sim3d_billboard_renderer_ready =
-      ArRenderTexture_IsValid(g_sim_obj_atlas_texture);
-
-  /* D2's observational Mode-1 capture family. Layer textures are retained
-   * for inspector/future geometry use; the pitch-zero reference and its
-   * absolute-difference image have dedicated opaque streaming textures. */
-  g_sim3d_textures_ready = true;
-  const ArRenderTextureDesc sim_layer_texture = {
-    .width = kSim3DMaxWidth,
-    .height = kSim3DMaxHeight,
-    .format = kArRenderPixelFormat_Argb8888,
-    .usage = kArRenderTextureUsage_Streaming,
-    .filter = kArRenderFilter_Nearest,
-    .blend = kArRenderBlendMode_Alpha,
-  };
-  for (int plane = 0; plane < kSim3DPlane_Count; plane++) {
-    if (!ArRenderDevice_CreateTexture(
-            &g_render_device, &sim_layer_texture,
-            &g_sim3d_layer_textures[plane])) {
-      g_sim3d_textures_ready = false;
-      break;
-    }
-  }
-  const ArRenderTextureDesc sim_flat_texture = {
-    .width = kSim3DMaxWidth,
-    .height = kSim3DMaxHeight,
-    .format = kArRenderPixelFormat_Argb8888,
-    .usage = kArRenderTextureUsage_Streaming,
-    .filter = kArRenderFilter_Nearest,
-    .blend = kArRenderBlendMode_Opaque,
-  };
-  if (!ArRenderDevice_CreateTexture(
-          &g_render_device, &sim_flat_texture, &g_sim3d_flat_texture))
-    g_sim3d_textures_ready = false;
-  if (!g_sim3d_textures_ready) {
-    fprintf(stderr,
-            "[sim3d-d2] capture textures unavailable: %s\n",
-            ArRenderDevice_LastError(&g_render_device));
-    for (int plane = 0; plane < kSim3DPlane_Count; plane++) {
-      ArRenderDevice_DestroyTexture(
-          &g_render_device, g_sim3d_layer_textures[plane]);
-      g_sim3d_layer_textures[plane] = ArRenderTexture_Invalid();
-    }
-    ArRenderDevice_DestroyTexture(&g_render_device, g_sim3d_flat_texture);
-    g_sim3d_flat_texture = ArRenderTexture_Invalid();
-  }
-  if (g_settings.sim3d_mode && !g_sim3d_textures_ready) {
-    Die("Simulation town 3D is enabled, but its core capture textures could "
-        "not be created. Restart after checking graphics memory and driver "
-        "stability, or disable Simulation town 3D in settings.ini.");
-  }
-  if (g_settings.sim3d_mode &&
-      (Settings_Sim3DRequestedFeatures() & kSimFeature_ObjectBillboards) &&
-      !g_sim3d_billboard_renderer_ready) {
-    Die("Simulation object billboards are enabled, but their renderer atlas "
-        "could not be created. Restart after checking graphics memory and "
-        "driver stability, or disable object billboards in settings.ini.");
-  }
-
-  HdReplacementHost_LoadTextures();
-
-  /* One streaming texture per diorama plane (priority bands included).
-   * Only the backdrop is opaque — every other plane alpha-blends. */
-  /* Live report (2026-07-21): a persistent pink/garbage-colored line at
-   * the diorama's right edge, root-caused across two failed attempts (the
-   * B1b-crisp supersample copy, then suspected in the DOF/edge-AA shader)
-   * before landing on the actual source: every consumer that ever samples
-   * near the true edge of what Diorama_Upload writes (u=uv_u1 =
-   * snes_width/SR_PPU_SURFACE_MAX_WIDTH, always < 1.0 — the buffer is
-   * allocated at the PPU's max width but a layer's real content is narrower,
-   * capped by kActRaiserWidescreenExtraMax's tilemap-ring streaming limit)
-   * can reach into
-   * columns snes_width..SR_PPU_SURFACE_MAX_WIDTH-1, which Diorama_Upload's
-   * SDL_UpdateTexture never touches. SDL_TEXTUREACCESS_STREAMING content
-   * is undefined until written (no zero guarantee, confirmed non-zero in
-   * practice on this backend), so that tail is genuine garbage, not just
-   * theoretically risky — and every fix so far (B1b's UV-window clamp,
-   * B1b-crisp's valid-subrect blit, the skybox blur's UV inset) was
-   * patching ONE consumer at a time as each was discovered, while the DOF/
-   * edge-AA shader's own unclamped blur sampling proved there would always
-   * be another. Fix it once at the SOURCE instead: zero-fill each
-   * texture's FULL extent immediately after creation, before any real
-   * frame ever writes into it. Diorama_Upload only ever touches the valid
-   * {0,0,snes_width,snes_height} sub-rect afterward, so the margin stays
-   * deterministically transparent black (not garbage) for the texture's
-   * entire lifetime — every current and future consumer is safe without
-   * needing its own clamp/inset workaround. */
-  CreateDioramaTextures();
-}
-
-/* SDL GPU driver name for each GpuBackend. */
-static const char *const kGpuBackendDrivers[kGpuBackend_Count] = {
-  [kGpuBackend_Automatic] = NULL,
-  [kGpuBackend_Direct3D12] = "direct3d12",
-  [kGpuBackend_Vulkan] = "vulkan",
-  [kGpuBackend_Metal] = "metal",
-};
-
-/* Publishes the backends this build can offer and returns the SDL driver to
- * request, or NULL for SDL's own order. A saved choice this platform does not
- * offer (a settings.ini carried over from another OS) quietly means Automatic
- * and is kept for that other machine. */
-static const char *SelectGpuDriver(void) {
-  uint32_t offered = 1u << kGpuBackend_Automatic;
-  for (int backend = kGpuBackend_Automatic + 1; backend < kGpuBackend_Count;
-       ++backend) {
-#if defined(__APPLE__)
-    /* SDL's Apple builds compile Vulkan in (3.4.12 lists "metal vulkan"), but
-     * it needs MoltenVK, which is not shipped; Metal is the native API. */
-    if (backend == kGpuBackend_Vulkan) continue;
-#endif
-    if (ArSdlRenderBackend_HasGpuDriver(kGpuBackendDrivers[backend]))
-      offered |= 1u << backend;
-  }
-  Settings_SetGpuBackendsOffered(offered);
-  const int requested = g_settings.gpu_backend;
-  return Settings_ValueAvailable(Settings_Find("gpu_backend"), requested)
-      ? kGpuBackendDrivers[requested] : NULL;
-}
-
-static void PublishActiveGpuBackend(void) {
-  const char *driver = ArSdlRenderBackend_GpuDriver(&g_render_device);
-  for (int backend = kGpuBackend_Automatic + 1; backend < kGpuBackend_Count;
-       ++backend) {
-    if (driver && !SDL_strcasecmp(driver, kGpuBackendDrivers[backend])) {
-      Settings_SetGpuBackendActive(backend);
-      return;
-    }
-  }
 }
 
 /* SDL init, window, renderer, and every presentation texture. The window/renderer
@@ -1614,144 +1289,13 @@ static int AppBoot_CreateVideo(AppBoot *app) {
   }
 
   if (app->video) {
-    /* Which backend SDL actually chose. A "dummy"/"offscreen" driver makes
-     * every video call succeed while nothing reaches the screen (audio is
-     * unaffected), so a silent window is otherwise indistinguishable from a
-     * working one. Listing the compiled-in drivers also tells you instantly
-     * whether a hand-supplied libSDL3 was built without a real backend. */
-    const char *driver = SDL_GetCurrentVideoDriver();
-    fprintf(stderr, "[video] driver: %s (available:", driver ? driver : "(none)");
-    for (int i = 0, n = SDL_GetNumVideoDrivers(); i < n; i++)
-      fprintf(stderr, " %s", SDL_GetVideoDriver(i));
-    fprintf(stderr, ")\n");
-    if (driver && (SDL_strcmp(driver, "dummy") == 0 ||
-                   SDL_strcmp(driver, "offscreen") == 0))
-      Die("SIM3D requires a real GPU video driver; dummy/offscreen is unsupported");
-
-    int scale = g_settings.window_scale ? g_settings.window_scale : 3;
-    /* Window sized to the DISPLAY aspect: with the 4:3-corrected PAR the
-     * rendered width (e.g. 342) is narrower than the displayed width (16:9 of
-     * the height), so derive the window from the target ratio, not the
-     * framebuffer. Faithful mode keeps the historical width*scale.
-     *
-     * Must use the DISPLAY crop (Settings_VisibleWidth), not g_snes_width:
-     * diorama mode inflates the render width to the full
-     * kActRaiserWidescreenExtraMax margin
-     * (HostDisplay_ResolveVideoGeometry) while the displayed width stays
-     * aspect-derived. HostDisplay_CalculateWindowSize shares the same
-     * calculation with later explicit scale/aspect changes. */
-    /* Clamp the scale to what the desktop can actually hold — the setting
-     * allows up to 8x (~2400px wide), which overflows small laptop panels
-     * (1366x768) with no recourse: the oversized window's title bar can land
-     * off-screen. Usable bounds (excludes docks/taskbars) of the primary
-     * display, checked against the WIDEST possible window for this scale
-     * (the 16:9-of-height display width); shrink until it fits, floor 1x. */
-    /* Points, not pixels — the same conversion
-     * HostDisplay_ApplyWindowScale uses, so boot and later re-apply agree on
-     * what Nx means. The density is not known until the window exists, so use
-     * the primary display's content scale as the boot-time stand-in; the first
-     * HostDisplay_UpdateProperties call corrects it. */
-    {
-      float boot_scale = SDL_GetDisplayContentScale(SDL_GetPrimaryDisplay());
-      if (boot_scale > 1.0f) {
-        int points = (int)((float)scale / boot_scale + 0.5f);
-        scale = points > 0 ? points : 1;
-      }
-    }
-    {
-      SDL_Rect usable;
-      if (SDL_GetDisplayUsableBounds(SDL_GetPrimaryDisplay(), &usable)) {
-        while (scale > 1 &&
-               ((g_snes_height * scale * 16 + 4) / 9 > usable.w ||
-                g_snes_height * scale > usable.h))
-          scale--;
-      }
-    }
-    int win_w;
-    int win_h;
-    HostDisplay_CalculateWindowSize(scale, &win_w, &win_h);
-    /* SDL3 merged FULLSCREEN_DESKTOP into FULLSCREEN (borderless desktop is
-     * the default fullscreen mode when no exclusive video mode is set).
-     * Exclusive fullscreen's video mode is set after window creation by
-     * HostDisplay_ApplyWindowMode; at boot the flag just requests fullscreen. */
-    /* HIGH_PIXEL_DENSITY: request a native-resolution backing store on
-     * scaled displays (Retina macOS, scaled Wayland). Without it SDL creates
-     * a 1x store and the compositor upscales — the game, PAR resample, and
-     * overlay all render soft at logical resolution. Downstream needs no
-     * change: every consumer sizes itself from SDL_GetRenderOutputSize, and
-     * HostDisplay_WindowPointToOutput already maps window points to output
-     * pixels. */
-    SDL_WindowFlags window_flags = SDL_WINDOW_RESIZABLE |
-        SDL_WINDOW_HIGH_PIXEL_DENSITY |
-        (app->headless_video ? SDL_WINDOW_HIDDEN : 0) |
-        (g_settings.window_mode != kWindowMode_Windowed
-             ? SDL_WINDOW_FULLSCREEN : 0);
-    /* SDL3 SDL_CreateWindow no longer takes an x,y position; it is created at
-     * a default (centered) position. */
-    g_window = SDL_CreateWindow(
-      kWindowTitle,
-      win_w, win_h,
-      window_flags
-    );
-    if (!g_window) Die("SDL_CreateWindow failed");
-
-    /* SIM3D now relies on per-pixel depth testing, so SDL's cross-platform
-     * GPU renderer is a baseline requirement rather than an optional shader
-     * effects switch. Hidden capture windows use the same backend: a software
-     * renderer would produce screenshots from a different visibility model.
-     * SPIR-V feeds Vulkan, DXIL feeds D3D12, and MSL feeds Metal. Individual
-     * feature requirements are prepared and gated before gameplay below. */
-    g_gpu_shaders_requested = true;
-    g_settings.gpu_shaders_enabled = true;  /* legacy config/UI mirror */
-    if (!ArSdlRenderBackend_CreateForWindow(
-            &g_render_device, g_window, SelectGpuDriver()))
-      Die("SDL GPU render backend creation failed");
-    PublishActiveGpuBackend();
-    RenderFeatureMask prepared_features = 0;
-    const uint64_t preparation_started = SDL_GetTicks();
-    if (!RenderPreparation_Prepare(&g_render_device, &prepared_features))
-      Die("Graphics startup preparation failed; unable to safely prepare the renderer");
-    Settings_ApplyRenderCapabilities(prepared_features);
-    fprintf(stderr, "[graphics-prepare] completed in %llu ms; cpu-cores=%d system-ram=%d MB\n",
-        (unsigned long long)(SDL_GetTicks() - preparation_started),
-        SDL_GetNumLogicalCPUCores(), SDL_GetSystemRAM());
-    g_gpu_shaders_active = true;
-    /* Apply the selected refresh policy after renderer creation. Hidden-video
-     * automation requests vsync off and uses no host throttle; a platform
-     * swapchain may still serialize SDL_RenderPresent at its own cadence.
-     * Interactive Limit/Uncapped modes use host deadlines; VSync delegates to
-     * SDL and Unlimited deliberately has no host throttle. */
-    if (app->headless_video)
-      HostDisplay_DisableVsync();
-    else
-      HostDisplay_ApplyRefreshVsync();
-
-    /* Exclusive fullscreen needs its video mode set after creation; borderless
-     * and windowed are already handled by the creation flag. */
-    if (!app->headless_video && g_settings.window_mode == kWindowMode_Exclusive)
-      HostDisplay_ApplyWindowMode();
-    HostDisplay_UpdateProperties();
-
-    /* Aspect-correct letterboxing via SDL's logical presentation — one
-     * implementation shared with the resize/settings paths so boot and runtime
-     * can never disagree (4:3-PAR encodes the 7:6 stretch in the logical size;
-     * Screen ratio > Stretch opts out of aspect fitting). */
-    HostDisplay_RecomputeLogicalPresentation();
-
-    AppBoot_CreatePresentationTextures();
-
-    /* Take keyboard focus on launch. A window created by SDL is ordered in
-     * but the process is not necessarily activated — launched from a terminal
-     * (or as an un-bundled binary on macOS) the shell keeps focus and the
-     * game starts behind it, silently swallowing input until the user clicks
-     * on it. SDL_RaiseWindow both raises and, with the default
-     * SDL_HINT_WINDOW_ACTIVATE_WHEN_RAISED, activates the application.
-     * Deliberately last in the video setup so focus lands on a window that is
+    HostVideo_Create(kWindowTitle, app->headless_video);
+    PresentationTextures_Create();
+    HdReplacementHost_LoadTextures();
+    /* Deliberately last in the video setup so focus lands on a window that is
      * fully configured, and skipped for headless_video (that window is
      * SDL_WINDOW_HIDDEN and must never steal focus from a batch run). */
-    if (!app->headless_video && !SDL_RaiseWindow(g_window))
-      fprintf(stderr, "[window] could not raise to foreground: %s\n",
-              SDL_GetError());
+    if (!app->headless_video) HostVideo_TakeFocus();
   }
   return -1;
 }
@@ -2073,8 +1617,6 @@ static void AppBoot_StartGame(AppBoot *app) {
    * the reference so the save-validity check behaves identically. Only applies
    * to a fresh cart (cart_load zero-fills it); a real .sav load overrides. */
   {
-    extern uint8 *g_sram;
-    extern int g_sram_size;
     const char *senv = getenv("AR_SRAM_FILL");
     int sfill = senv ? (int)strtoul(senv, NULL, 0)
                      : kDefaultPowerOnSramFill;
@@ -2089,8 +1631,6 @@ static void AppBoot_StartGame(AppBoot *app) {
   UserDataFile(saves_dir, sizeof saves_dir, "saves");
   mkdir(saves_dir, 0755);
   {
-    extern uint8 *g_sram;
-    extern int g_sram_size;
     SaveError error = {{0}};
     const char *native_path = getenv("AR_SAVE_NATIVE_PATH");
     const char *ini_path = getenv("AR_SAVE_INI_PATH");
@@ -2230,8 +1770,7 @@ static void AppLoop_HandleGraphicsReset(AppBoot *app, Uint32 event_type) {
   if (event_type == SDL_EVENT_RENDER_DEVICE_RESET) {
     CrtPost_Shutdown(&g_render_device);
     Diorama_ResetRendererResources(&g_render_device);
-    DestroyDioramaTextures();
-    CreateDioramaTextures();
+    PresentationTextures_HandleDeviceReset();
   }
   ManualReader_DestroyTextures();
   HdReplacementHost_ReloadTextures();
@@ -2572,7 +2111,6 @@ static bool DevTools_ShouldAutoQuit(void) {
     const char *value = getenv("AR_QUIT_FRAMES");
     quit_frames = value ? atoi(value) : -1;
   }
-  extern int snes_frame_counter;
   return quit_frames > 0 && snes_frame_counter >= quit_frames;
 }
 
@@ -2879,17 +2417,6 @@ static int AppShutdown(AppBoot *app, char **argv) {
   SimTownGroundArt_Shutdown();
   DioramaFrameGeneration_Shutdown();
   Diorama_Shutdown(&g_render_device);
-  DestroyDioramaTextures();
-  ArRenderDevice_DestroyTexture(&g_render_device, g_sim_obj_atlas_texture);
-  g_sim_obj_atlas_texture = ArRenderTexture_Invalid();
-  g_sim3d_billboard_renderer_ready = false;
-  for (int plane = 0; plane < kSim3DPlane_Count; plane++) {
-    ArRenderDevice_DestroyTexture(
-        &g_render_device, g_sim3d_layer_textures[plane]);
-    g_sim3d_layer_textures[plane] = ArRenderTexture_Invalid();
-  }
-  ArRenderDevice_DestroyTexture(&g_render_device, g_sim3d_flat_texture);
-  g_sim3d_flat_texture = ArRenderTexture_Invalid();
   ManualReader_DestroyTextures();
   SettingsOverlay_Destroy();
   ArLocalizedTextPresenter_SetFontResources(NULL);
@@ -2902,23 +2429,12 @@ static int AppShutdown(AppBoot *app, char **argv) {
   InputMap_Shutdown();
   RuntimeDiagnostics_Unbind();
   SnesShutdown();
-  ArRenderDevice_DestroyTexture(&g_render_device, g_hud_obj_texture);
-  ArRenderDevice_DestroyTexture(&g_render_device, g_hud_bg_texture);
-  ArRenderDevice_DestroyTexture(&g_render_device, g_authentic_texture);
-  g_hud_obj_texture = ArRenderTexture_Invalid();
-  g_hud_bg_texture = ArRenderTexture_Invalid();
-  g_authentic_texture = ArRenderTexture_Invalid();
-  ArRenderDevice_DestroyTexture(&g_render_device, g_texture);
-  g_texture = ArRenderTexture_Invalid();
-  for (int plane = 0; plane < kDioramaPlane_Count; plane++) {
-    free(g_diorama_layer_pixels[plane]);
-    g_diorama_layer_pixels[plane] = NULL;
-  }
+  PresentationTextures_Destroy();
+  HostFrameSurfaces_ReleaseDioramaPlanes();
   /* Owns a full-window render target plus a GPU shader and render state, and
    * all three must go before the renderer that created them. */
   CrtPost_Shutdown(&g_render_device);
-  ArSdlRenderBackend_Destroy(&g_render_device);
-  SDL_DestroyWindow(g_window);
+  HostVideo_Destroy();
   if (fatal_session) {
     char message[kSessionRecoveryCapacity];
     const ArUiLocale locale = RecoveryLocale();

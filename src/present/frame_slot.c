@@ -7,6 +7,9 @@
 #include <string.h>
 
 #include "present/frame_slot.h"
+#include "dev/host_dev_tools.h"
+#include "host/host_display.h"
+#include "host/host_input.h"
 #include "actraiser/actraiser_sim_menu.h"
 #include "present/display_geometry.h"
 #include "host/host_clock.h"
@@ -35,9 +38,6 @@
 #include "app/session_fatal.h"
 #include "replacements/hd_replacement_host.h"
 #include "snesrecomp/runner.h"
-
-/* main.c-owned presentation state copied into the immutable slot. */
-extern bool g_diorama_frame_active;
 
 /* Self-calibrating velocity normalization uses a recent-activity EMA, not a
  * running or decaying peak. Live traces showed ordinary horizontal velocity at
@@ -542,7 +542,6 @@ void FrameSlot_Capture(FrameSlot *dst, const SimFrameData *annotated_sim) {
       SessionFatal_Request("SIM menu artwork capture failed after its native preflight.");
   }
 
-  extern int snes_frame_counter;
   const int elapsed_ticks = CaptureElapsedTicks(snes_frame_counter);
   /* A capture can follow multiple catch-up ticks. Presentation interpolation
    * and camera smoothing both use this elapsed period; paused redraws use zero.
@@ -599,7 +598,7 @@ void FrameSlot_Capture(FrameSlot *dst, const SimFrameData *annotated_sim) {
 
   /* Pair timestamp and feature gates for presentation-time frame generation. */
   dst->timestamp_ns = HostClock_Nanoseconds();
-  dst->turbo_active = g_turbo != 0;
+  dst->turbo_active = HostInput_IsTurbo();
   dst->interp_setting_enabled = g_settings.gpu_interp_enabled;
   dst->diorama_hud_flat = g_settings.diorama_hud_flat;
   /* Tick and retained-frame presentation share the same camera units and mode.
@@ -828,5 +827,5 @@ void FrameSlot_Capture(FrameSlot *dst, const SimFrameData *annotated_sim) {
   }
 
   dst->scene_inspector_enabled = g_settings.scene_inspector;
-  dst->inspector_selection = g_scene_inspector_presentation;
+  dst->inspector_selection = *HostDevTools_InspectorPresentation();
 }

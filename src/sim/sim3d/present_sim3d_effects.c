@@ -19,13 +19,12 @@
 #include "render/render_device.h"
 #include "sim/sim_render_atlas.h"
 #include "sim/sim3d/sim3d.h"
+#include "host/host_video.h"
+#include "present/presentation_textures.h"
 
 #ifndef AR_SIM3D_TERRAIN_ELEVATION
 #define AR_SIM3D_TERRAIN_ELEVATION 0
 #endif
-
-extern ArRenderDevice g_render_device;
-extern ArRenderTexture g_sim_obj_atlas_texture;
 
 enum {
   kSimMaxParticlesPerEffect = 12,

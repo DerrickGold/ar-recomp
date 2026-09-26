@@ -6,11 +6,11 @@
 #include "sim/sim3d/present_sim3d_internal.h"
 #include "sim/sim3d/present_sim3d_project.h"
 #include "sim/town/sim_town_terrain.h"
+#include "host/host_video.h"
 
 #ifndef AR_SIM3D_TERRAIN_ELEVATION
 #define AR_SIM3D_TERRAIN_ELEVATION 0
 #endif
-extern ArRenderDevice g_render_device;
 
 /* Cull proximity at a captured-texture point, 0..1. The conversion back to
  * the emitter's biased coordinates keeps the visual boundary identical to the

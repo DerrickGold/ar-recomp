@@ -11,11 +11,9 @@
 #include "host/host_input.h"
 #include "snesrecomp/runner.h"
 #include "app/settings.h"
+#include "host/host_frame_surfaces.h"
 
-extern bool g_diorama_frame_active;
-extern uint8_t g_pixels[];
-extern uint8_t g_hud_bg_pixels[];
-extern uint8_t g_hud_obj_pixels[];
+bool g_diorama_frame_active;
 
 /* The single diorama gate: capture and rendering both call this definition, so
  * mode and map-group policy cannot drift apart. The renderer capability that

@@ -1,7 +1,7 @@
 #include "sim/sim3d/present_sim3d_internal.h"
 #include "sim/sim3d/sim_backdrop_render.h"
 #include "sim/sim3d/sim3d_performance.h"
-extern ArRenderDevice g_render_device;
+#include "host/host_video.h"
 
 void DrawSimBackdrop(const FrameSlot *slot, ArRenderRectI viewport,
                      const float matrix[16]) {

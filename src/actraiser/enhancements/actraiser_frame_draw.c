@@ -3,6 +3,7 @@
  * captures, and the order the enhancement passes run in.
  * Phase: game (frame transaction). */
 #include "actraiser/enhancements/actraiser_enhancements_internal.h"
+#include "host/host_frame_surfaces.h"
 
 /* The diorama skybox view the last frame published; ActRaiser_LiveDioramaSkybox
  * hands out a copy. */
@@ -103,8 +104,6 @@ static void ActRaiser_ReportVerticalCaptureRows(void) {
      * changes, while the diorama planes are consumed in CAPTURE space and must
      * move by exactly the margin. Both on one line so a regression in either
      * is one diff apart. */
-    extern uint8_t g_hud_bg_pixels[];
-    extern uint8_t *g_diorama_layer_pixels[];
     int width = kActRaiserAuthenticWidth + 2 * g_ws_extra;
     size_t pitch = (size_t)width * 4;
     int hud0 = -1, hud1 = -1, plane0 = -1, plane1 = -1;
@@ -220,7 +219,6 @@ static void ActRaiser_PublishScanout(SrResult scanout_status,
 }
 
 static void ActRaiser_FinishSceneCapture(void) {
-  extern uint8_t g_pixels[];
   int width = kActRaiserAuthenticWidth + 2 * g_ws_extra;
   /* g_pixels is bound apron-wide; the authentic frame starts kPpuObjApron
    * columns in. Offset the base and pass the real pitch. */

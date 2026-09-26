@@ -61,7 +61,7 @@
 /* kPixelAspect_Crt43 and kDioramaCam_Free/kDioramaCam_Dynamic are plain enum
  * constants (not live state) — fine to pull in just for those. */
 #include "app/settings.h"
-extern ArRenderDevice g_render_device;
+#include "host/host_video.h"
 #include "sim/sim3d/present_sim3d_internal.h"
 #include "sim/world_nav/present_sim_globe.h"
 #include "sim/world_nav/present_sim_globe_mountains.h"

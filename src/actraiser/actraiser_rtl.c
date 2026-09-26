@@ -28,8 +28,6 @@
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #endif
 
-extern int snes_frame_counter;
-
 enum {
   kGameCoroutineStackReserveBytes = 2 * 1024 * 1024,
   kGameCoroutineStackCommitBytes = 64 * 1024,
@@ -492,11 +490,6 @@ static void ActRaiser_HleFatalEscapeToHost(const char *message) {
 static unsigned s_action_load_armed_frames;
 static unsigned s_action_load_hold_frames;
 static uint64_t s_action_load_one_shot_token;
-/* diagnostic.h declares the 2- and 3-argument variants but not this one;
- * both callers below need it, and one of them precedes the local extern
- * that used to be the only declaration. */
-extern int sr_block_history(uint32 *out, int max);
-
 void ActRaiser_OnInidispWrite(uint8_t value) {
   uint32_t block = 0;
   (void)sr_block_history(&block, 1);
@@ -609,8 +602,6 @@ bool ActRaiser_RecoverDispatchMiss(uint32 source_pc24, uint32 target_pc24) {
  * of basic blocks. Returning -1 delegates ordinary reads to the shared SNES
  * hardware model; a nonnegative result overrides the $4210 byte. */
 int ActRaiser_ReadRdnmi(const RtlRdnmiReadContext *context) {
-  extern uint32_t g_sr_block_ring[];
-  extern unsigned g_sr_block_index;
   static bool yielding;
   if (!context || context->struct_size < RTL_RDNMI_READ_CONTEXT_V2_SIZE)
     return -1;
@@ -702,8 +693,6 @@ int ActRaiser_ReadRdnmi(const RtlRdnmiReadContext *context) {
         static int last_frame = -1;
         if (snes_frame_counter != last_frame) {
           last_frame = snes_frame_counter;
-          extern uint16 sr_cpu_stack_pointer(void);
-          extern uint8 sr_cpu_program_bank(void);
           const uint32_t ppu_display = RtlGamePpuDisplayState();
           const uint8_t display_control =
               RTL_GAME_PPU_DISPLAY_CONTROL(ppu_display);
@@ -797,7 +786,6 @@ void ActRaiser_EmitInterrupt(SrInterruptKind kind, uint32 flags,
  * via g_cpu_brk_hook, then falls through to the next instruction. */
 static void ActRaiser_BrkHook(CpuState *cpu) {
   const uint8 id = (uint8)(cpu->A & 0xFF);
-  extern const char *g_last_recomp_func;
   const uint32 site = ActRaiser_LastBlockPc();
   const uint16 vector = cpu->emulation ? 0xfffeu : 0xffe6u;
   const bool observe_interrupt =
@@ -866,7 +854,6 @@ static void ActRaiser_CopHook(CpuState *cpu) {
   const uint16 vector = cpu->emulation ? 0xfff4u : 0xffe4u;
   const bool observe_interrupt =
       RtlGameEventEnabled(SR_EVENT_MASK_INTERRUPT);
-  extern const char *g_last_recomp_func;
   if (observe_interrupt) {
     ActRaiser_EmitInterrupt(
         SR_INTERRUPT_COP, SR_EVENT_INTERRUPT_ENTER, site, vector,
@@ -1086,8 +1073,6 @@ RecompReturn ActRaiser_WaitForVblank(CpuState *cpu) {
    * vblank yield to see what the main thread is doing frame to frame. Read the
    * return frame from the PRE-pop S (sp-2, since we already added 2 above). */
   if (ActRaiser_DeveloperFlagEnabled(kActRaiserDeveloperFlag_YieldLog)) {
-    extern const char *g_recomp_stack[];
-    extern int g_recomp_stack_top;
     int top = g_recomp_stack_top;
     fprintf(stderr, "[yield] f=%d S=%04x A=%04x P=%02x depth=%d:",
             snes_frame_counter, cpu->S, cpu->A, cpu->P, top);
@@ -1121,7 +1106,6 @@ RecompReturn ActRaiser_WaitForVblank(CpuState *cpu) {
    * actual movement result: position delta, velocity, current player handler/
    * flags, and the walking-cycle Crest/Boost counters ($08BC/$08C4). */
   if (ActRaiser_DeveloperFlagEnabled(kActRaiserDeveloperFlag_FrameLog)) {
-    extern unsigned long g_recomp_push_count;
     static unsigned long last_push;
     /* return frame is at pre-pop S (we already did S+=2 above) */
     uint16 sp = (uint16)(cpu->S - 2);
@@ -1479,8 +1463,7 @@ void RunOneFrameOfGame(void) {
 #if SNESRECOMP_WATCHDOG
     /* Give the runtime watchdog the coroutine yield to escape a stuck frame
      * with (the old longjmp out of this coroutine was UB / fiber-forbidden). */
-    { extern void (*g_watchdog_yield_hook)(void);
-      g_watchdog_yield_hook = ActRaiser_YieldToHost; }
+    g_watchdog_yield_hook = ActRaiser_YieldToHost;
 #endif
     if (!CreateGameCoroutine()) {
       SessionFatal_Request(

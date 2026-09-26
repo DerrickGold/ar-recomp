@@ -39,6 +39,16 @@ static inline HostDisplayPresentMode HostDisplay_EmulatedFramePresentMode(
  * as texture column 0 means screen x = -ws_extra on the horizontal axis. */
 enum { kHostDisplayFramebufferHeight = 352 };
 
+/* The active frame geometry, resolved by HostDisplay_ResolveVideoGeometry:
+ * the rendered width (the authentic 256 columns plus both widescreen margins)
+ * and the authentic height (vertical margin rows are counted separately, in
+ * g_ws_extra_top/bottom). Every frame surface and texture uses only this
+ * leading extent. */
+extern int g_snes_width, g_snes_height;
+/* The pixel-aspect mode in force (a PixelAspect value), latched from
+ * g_settings.pixel_aspect when the geometry is resolved. */
+extern int g_active_pixel_aspect;
+
 /* Mean NTSC field period, including the alternate field's four-cycle short line. */
 extern const uint64_t kHostDisplayEmulationFrameIntervalNs;
 

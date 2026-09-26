@@ -45,7 +45,7 @@ bool Diorama_InitRomBackdrops(const uint8_t *rom_data, size_t rom_size) {
 /* kSettingCat_Graphics "Soft shadow blur" row, independent of the other
  * GPU effect toggles. Read fresh every frame (same live-toggle pattern as
  * the diorama_layer_* visibility settings) — both this AND
- * gpu_shaders_enabled (the backend switch, main.c) must be on. */
+ * gpu_shaders_enabled (the backend switch, host_video.c) must be on. */
 static bool ShadowBlurEnabled(ArRenderDevice *device) {
   return g_settings.gpu_fx_shadow &&
       DioramaEffectBackend_IsAvailable(device, kDioramaEffect_Blur);

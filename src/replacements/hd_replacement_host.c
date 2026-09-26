@@ -30,29 +30,15 @@
 #define STBI_NO_LINEAR
 #define STBI_NO_HDR
 #include "stb_image.h"
+#include "host/host_video.h"
+#include "present/presentation_textures.h"
+#include "host/host_frame_surfaces.h"
 
 enum {
   kRgbaChannelCount = 4,
   kArgbBytesPerPixel = 4,
 };
 
-extern ArRenderDevice g_render_device;
-extern ArRenderTexture g_hud_bg_texture;
-extern ArRenderTexture g_hud_obj_texture;
-extern int g_snes_width;
-extern int g_snes_height;
-extern uint8_t g_pixels[
-    SR_PPU_SURFACE_MAX_WIDTH * kArgbBytesPerPixel *
-    kHostDisplayFramebufferHeight];
-extern uint8_t g_authentic_pixels[
-    SR_PPU_SURFACE_MAX_WIDTH * kArgbBytesPerPixel *
-    kHostDisplayFramebufferHeight];
-extern uint8_t g_hud_bg_pixels[
-    SR_PPU_SURFACE_MAX_WIDTH * kArgbBytesPerPixel *
-    kHostDisplayFramebufferHeight];
-extern uint8_t g_hud_obj_pixels[
-    SR_PPU_SURFACE_MAX_WIDTH * kArgbBytesPerPixel *
-    kHostDisplayFramebufferHeight];
 /* Authentic pixels captured for a replacement are never presented. These
  * bindings exist because RemoveFromGame only engages for a bound source;
  * BG3 and OBJ reuse the dedicated HUD surfaces. */

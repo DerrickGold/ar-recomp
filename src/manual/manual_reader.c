@@ -24,8 +24,8 @@
  * more STBI_ONLY_* beside the PNG one there -- the macros are a positive
  * allowlist, so the manual costs a #define rather than a dependency. */
 #include "stb_image.h"
+#include "host/host_video.h"
 
-extern ArRenderDevice g_render_device;
 
 enum {
   /* Only three pages are ever on screen at once -- the settled page, the leaf,

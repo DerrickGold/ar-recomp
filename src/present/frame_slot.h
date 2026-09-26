@@ -4,17 +4,8 @@
 /* Internal dependencies of the sole FrameSlot producer. The public capture API
  * and FrameSlot type remain in present.h. */
 
-#include "snesrecomp/game/types.h"
-#include "present/present.h"   /* InspectorPresentationSelection, FrameSlot */
+#include "present/present.h"   /* FrameSlot */
 #include "sim/sim3d/sim3d.h"     /* Sim3DTuning */
-
-/* Host/game state read by FrameSlot_Capture. main.c owns turbo, the inspector
- * selection, and the frame dimensions; host_display.c owns pixel-aspect
- * policy. */
-extern uint8 g_turbo;
-extern InspectorPresentationSelection g_scene_inspector_presentation;
-extern int g_snes_width, g_snes_height;
-extern int g_active_pixel_aspect;
 
 /* Shared by DrawAndPresentFrame's canonical annotation and FrameSlot_Capture's
  * fallback annotation. */

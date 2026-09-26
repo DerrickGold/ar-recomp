@@ -11,8 +11,8 @@
 #include "app/session_fatal.h"
 #include "app/settings.h"
 #include "app/performance_metrics.h"
+#include "host/host_video.h"
 
-extern ArRenderDevice g_render_device;
 
 static CrtPostConfig CurrentCrtConfig(void) {
   const float scale = (float)kPercentScale;

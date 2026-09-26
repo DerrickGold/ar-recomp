@@ -535,6 +535,16 @@ if(BUILD_TESTING)
                 ${CMAKE_SOURCE_DIR}/tools/check_private_headers.py --self-test)
         set_tests_properties(actraiser_private_headers actraiser_private_headers_negative
             PROPERTIES ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
+        # A .c file never re-declares another module's global variables;
+        # the owner's header declares each one.
+        add_test(NAME actraiser_global_owners
+            COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_SOURCE_DIR}/tools/check_global_owners.py)
+        add_test(NAME actraiser_global_owners_negative
+            COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_SOURCE_DIR}/tools/check_global_owners.py --self-test)
+        set_tests_properties(actraiser_global_owners actraiser_global_owners_negative
+            PROPERTIES ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
         # Layout ratchet: no authored file may gain style violations.
         add_test(NAME actraiser_style
             COMMAND ${Python3_EXECUTABLE}

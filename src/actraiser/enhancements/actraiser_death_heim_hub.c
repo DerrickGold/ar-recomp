@@ -2,6 +2,8 @@
  * which eye pixels their sprites win, and promoting the statue faces.
  * Phase: game (frame transaction). */
 #include "actraiser/enhancements/actraiser_enhancements_internal.h"
+#include "diorama/diorama.h"
+#include "host/host_frame_surfaces.h"
 
 /* Native actor ownership identifies the eyes. Scanout records which pixels
  * their actual OAM slots win, including overlaps with identical colours. */
@@ -11,7 +13,6 @@ static uint32_t s_death_heim_hub_eye_winners[
 static bool s_death_heim_hub_eyes_ready;
 
 void ActRaiser_DioramaDeathHeimEyesPrepare(void) {
-  extern bool g_diorama_frame_active;
   s_death_heim_hub_eyes_ready = false;
   const SrPpuFrameTransactionContext *frame = ActRaiser_PpuFrame();
   if (!frame || !g_diorama_frame_active) return;
@@ -41,8 +42,6 @@ bool ActRaiser_DioramaDeathHeimHubFacesPromoted(void) {
 }
 
 void ActRaiser_DioramaDeathHeimHubStatuesFinish(int width) {
-  extern bool g_diorama_frame_active;
-  extern uint8_t *g_diorama_layer_pixels[];
   const SrPpuFrameTransactionContext *frame = ActRaiser_PpuFrame();
 
   s_death_heim_hub_faces_promoted = false;

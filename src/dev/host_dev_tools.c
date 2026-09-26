@@ -1,8 +1,11 @@
 #include "action/action_obj_apron.h"
 #include "host_dev_tools.h"
 
+#include <string.h>
+
 #include "dev_tools.h"
 #include "present/display_geometry.h"
+#include "host/host_display.h"
 #include "snesrecomp/game_runtime.h"
 #include "host/host_input.h"
 #include "platform/sdl/dev_tools_readback_sdl.h"
@@ -10,18 +13,26 @@
 #include "snesrecomp/runner.h"
 #include "scene_inspector.h"
 #include "app/settings.h"
+#include "host/host_video.h"
+#include "present/presentation_textures.h"
+#include "host/host_frame_surfaces.h"
 
-extern ArRenderDevice g_render_device;
-extern ArRenderTexture g_hud_bg_texture;
-extern ArRenderTexture g_hud_obj_texture;
-extern uint8_t g_pixels[];
-extern uint8_t g_hud_bg_pixels[];
-extern uint8_t g_hud_obj_pixels[];
-extern uint8_t *g_diorama_layer_pixels[kDioramaPlane_Count];
-extern InspectorPresentationSelection g_scene_inspector_presentation;
-extern int g_snes_width;
-extern int g_snes_height;
-extern int g_active_pixel_aspect;
+/* What the renderer highlights for the inspector selection. The developer
+ * tools write it through their context; FrameSlot_Capture copies it.
+ * InspectorPresentationKind comes from the portable HUD-layout contract;
+ * InspectorPresentationSelection lives in present.h. Both are shared by the
+ * live hit-test and the FrameSlot-fed renderer. */
+static InspectorPresentationSelection s_inspector_presentation;
+bool g_diorama_dump_pending;
+
+const InspectorPresentationSelection *HostDevTools_InspectorPresentation(void) {
+  return &s_inspector_presentation;
+}
+
+void HostDevTools_ClearInspectorPresentation(void) {
+  memset(&s_inspector_presentation, 0, sizeof(s_inspector_presentation));
+}
+
 static DevToolsContext CurrentContext(void) {
   DevToolsContext context = {
     .readback = {
@@ -40,7 +51,7 @@ static DevToolsContext CurrentContext(void) {
     .hud_bg_pixels = g_hud_bg_pixels,
     .hud_obj_pixels = g_hud_obj_pixels,
     .diorama_layer_pixels = g_diorama_layer_pixels,
-    .inspector_presentation = &g_scene_inspector_presentation,
+    .inspector_presentation = &s_inspector_presentation,
     .snes_width = g_snes_width,
     .snes_height = g_snes_height,
     .pixel_aspect = g_active_pixel_aspect,

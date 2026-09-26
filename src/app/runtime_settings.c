@@ -25,16 +25,14 @@
 #include "app/session_fatal.h"
 #include "settings_overlay/settings_overlay.h"
 #include "app/user_data_dir.h"
+#include "host/host_video.h"
+#include "present/presentation_textures.h"
 
 static RuntimeLifecycleRequest s_lifecycle_request;
 void RuntimeSettings_RequestPreparedRestart(void) {
   s_lifecycle_request=kRuntimeLifecycle_Restart;
   SettingsOverlay_Close();
 }
-
-extern SDL_Window *g_window;
-extern bool g_sim3d_textures_ready;
-extern bool g_sim3d_billboard_renderer_ready;
 
 static int RuntimeSettings_QuickStateSlot(void) {
   const char *text = getenv("AR_QUICKSTATE_SLOT");

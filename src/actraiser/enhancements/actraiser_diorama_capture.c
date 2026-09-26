@@ -3,6 +3,10 @@
  * skybox views.
  * Phase: game (frame transaction). */
 #include "actraiser/enhancements/actraiser_enhancements_internal.h"
+#include "dev/host_dev_tools.h"
+#include "diorama/diorama.h"
+#include "present/presentation_textures.h"
+#include "host/host_frame_surfaces.h"
 
 ActionApronGeometry ActRaiser_ObjApronGeometry(void) {
   ActionApronGeometry g = { g_ws_extra, 0 };
@@ -35,7 +39,6 @@ ActionApronGeometry ActRaiser_ObjApronGeometry(void) {
  * claimed-set. That works because PpuClearOverlayRenderLine clears the full
  * bound pitch, apron included, every frame. */
 void ActRaiser_DioramaApronFinish(const ActionApronGeometry *geom) {
-  extern uint8_t *g_diorama_layer_pixels[];
   if (!geom || geom->apron <= 0 || !ActRaiser_PpuFrame() ||
       !ActionApron_Count())
     return;
@@ -144,12 +147,10 @@ static void ActRaiser_BindDioramaHudCapture(int width, size_t pitch,
                                             int capture_height,
                                             uint8_t capture_screens,
                                             uint8_t full_add_sub_sources) {
-  extern uint8_t *g_diorama_layer_pixels[];
   /* Rebind BG3 in both directions on every frame. Omitting it would retain
    * the previous destination across flat/tilted HUD toggles. The flat HUD uses
    * the narrow framebuffer pitch; tilted planes include the apron. */
   if (g_settings.diorama_hud_flat) {
-    extern uint8_t g_hud_bg_pixels[];
     /* The NARROW pitch, deliberately -- not the apron-wide `pitch` the
      * diorama planes bind at. This surface is not a diorama plane: it feeds
      * the anchored flat HUD overlay, which present.c uploads at
@@ -166,12 +167,9 @@ static void ActRaiser_BindDioramaHudCapture(int width, size_t pitch,
      * makes ownership independent of renderer setup order and preserves
      * the same policy through flat/tilted/flat toggle sequences. */
   } else {
-    if (!g_diorama_layer_pixels[SR_PPU_OVERLAY_BG3])
-      g_diorama_layer_pixels[SR_PPU_OVERLAY_BG3] = calloc(
-          1, SR_PPU_SURFACE_MAX_WIDTH * 4 * kHostDisplayFramebufferHeight);
     ActRaiser_BindPpuOutput(SR_PPU_OUTPUT_OVERLAY, SR_PPU_OVERLAY_BG3, 0u,
-                            g_diorama_layer_pixels[SR_PPU_OVERLAY_BG3], pitch,
-                            kHostDisplayFramebufferHeight);
+                            HostFrameSurfaces_DioramaPlane(SR_PPU_OVERLAY_BG3),
+                            pitch, kHostDisplayFramebufferHeight);
     if (capture_screens & (1 << SR_PPU_OVERLAY_BG3))
       ActRaiser_SetPpuOverlayCapture(
           SR_PPU_OVERLAY_BG3, -g_ws_extra, -g_ws_extra_top, width,
@@ -184,7 +182,6 @@ static void ActRaiser_BindDioramaHudCapture(int width, size_t pitch,
 }
 
 static void ActRaiser_BindDioramaPriorityBands(size_t pitch) {
-  extern uint8_t *g_diorama_layer_pixels[];
   /* Priority-band splits: scanout routes each captured pixel to the
    * surface matching its hardware priority (Mode-1 tile priority bit for
    * BGs, the 2-bit OAM priority for sprites), so the diorama can draw
@@ -215,13 +212,10 @@ static void ActRaiser_BindDioramaPriorityBands(size_t pitch) {
                                &virtual_room->virtual_layers[virtual_bg]))
         continue;
     }
-    if (!g_diorama_layer_pixels[kPrioBands[i].plane])
-      g_diorama_layer_pixels[kPrioBands[i].plane] = calloc(
-          1, SR_PPU_SURFACE_MAX_WIDTH * 4 * kHostDisplayFramebufferHeight);
     ActRaiser_BindPpuOutput(SR_PPU_OUTPUT_OVERLAY_PRIORITY, kPrioBands[i].src,
                             (uint32_t)kPrioBands[i].band,
-                            g_diorama_layer_pixels[kPrioBands[i].plane], pitch,
-                            kHostDisplayFramebufferHeight);
+                            HostFrameSurfaces_DioramaPlane(kPrioBands[i].plane),
+                            pitch, kHostDisplayFramebufferHeight);
   }
 }
 
@@ -232,10 +226,6 @@ void ActRaiser_PrepareDioramaCapture(const SrPpuStateSnapshot *ppu) {
    * so we don't collide with the HUD/HD overlay surfaces. The captures
    * overwrite whatever the widescreen HUD split and HD replacements set
    * above — mutual exclusion for this frame. */
-  extern bool Diorama_IsActiveThisFrame(void);
-  extern bool g_diorama_dump_pending;
-  extern bool g_diorama_frame_active;
-  extern uint8_t *g_diorama_layer_pixels[];
   bool active = Diorama_IsActiveThisFrame();
   bool want_capture =
       active || (g_diorama_dump_pending &&
@@ -287,11 +277,8 @@ void ActRaiser_PrepareDioramaCapture(const SrPpuStateSnapshot *ppu) {
                               sizeof(kCaptureLayersCommon[0]));
          i++) {
       uint32_t src = kCaptureLayersCommon[i];
-      if (!g_diorama_layer_pixels[src])
-        g_diorama_layer_pixels[src] = calloc(
-            1, SR_PPU_SURFACE_MAX_WIDTH * 4 * kHostDisplayFramebufferHeight);
       ActRaiser_BindPpuOutput(SR_PPU_OUTPUT_OVERLAY, src, 0u,
-                              g_diorama_layer_pixels[src], pitch,
+                              HostFrameSurfaces_DioramaPlane((int)src), pitch,
                               kHostDisplayFramebufferHeight);
       if (capture_screens & (1 << src)) {
         uint32_t flags = SR_PPU_OVERLAY_REMOVE_FROM_GAME;
@@ -393,8 +380,6 @@ void ActRaiser_PrepareSceneMasks(uint8_t map_group, uint8_t map_number) {
    * Diorama owns isolated planes and inserts effects directly after BG1/BG2;
    * a one-shot dump likewise owns these capture slots. HD replacements get
    * first refusal above—never overwrite another source policy. */
-  extern bool g_diorama_frame_active;
-  extern bool g_diorama_dump_pending;
   const bool action_effects_enabled =
       g_settings.action_effect_lighting || g_settings.action_effect_particles;
   if (action_effects_enabled && !g_diorama_frame_active &&
@@ -403,7 +388,6 @@ void ActRaiser_PrepareSceneMasks(uint8_t map_group, uint8_t map_number) {
     const SrPpuOverlayCaptureState *bg1 =
         ActRaiser_PpuCapture(SR_PPU_OVERLAY_BG1);
     if (bg1->x1 <= bg1->x0 || bg1->y1 <= bg1->y0) {
-      extern uint8_t g_action_bg1_mask_pixels[];
       const int width = kActRaiserAuthenticWidth + 2 * g_ws_extra;
       if (ActRaiser_BindPpuOutput(SR_PPU_OUTPUT_OVERLAY, SR_PPU_OVERLAY_BG1, 0u,
                                   g_action_bg1_mask_pixels, (size_t)width * 4,
@@ -421,7 +405,6 @@ void ActRaiser_PrepareSceneMasks(uint8_t map_group, uint8_t map_number) {
     const SrPpuOverlayCaptureState *bg2 =
         ActRaiser_PpuCapture(SR_PPU_OVERLAY_BG2);
     if (bg2->x1 <= bg2->x0 || bg2->y1 <= bg2->y0) {
-      extern uint8_t g_action_bg2_mask_pixels[];
       const int width = kActRaiserAuthenticWidth + 2 * g_ws_extra;
       if (ActRaiser_BindPpuOutput(SR_PPU_OUTPUT_OVERLAY, SR_PPU_OVERLAY_BG2, 0u,
                                   g_action_bg2_mask_pixels, (size_t)width * 4,
@@ -460,9 +443,6 @@ void ActRaiser_PrepareTownCapture(void) {
   /* D2: claim observational full-frame Mode-1 captures only after every
    * pre-existing HUD/HD/diorama policy has had a chance to declare a
    * conflict. The original PPU framebuffer remains intact as same-frame A0. */
-  extern bool g_sim3d_textures_ready;
-  extern bool g_sim3d_billboard_renderer_ready;
-  extern bool g_diorama_frame_active;
   uint8_t map_group = g_ram[kActRaiserWram_MapGroup];
   uint8_t map_number = g_ram[kActRaiserWram_CurrentMap];
   bool town = ActRaiser_IsSimulationTown(map_group, map_number);

@@ -13,6 +13,10 @@
 
 typedef struct SrRunnerHandle SrRunnerHandle;
 
+/* The game description main() hands the runner; defined in
+ * actraiser_cpu_infra.c. */
+extern const RtlGameModule kActRaiserGameModule;
+
 /* Lifecycle-owned runner binding. Game code retains only the opaque handle;
  * concrete console/component layouts remain runner-private. */
 void ActRaiser_BindRunner(SrRunnerHandle *runner);

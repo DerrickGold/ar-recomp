@@ -36,6 +36,11 @@ void Diorama_AdjustCamera(float d_yaw, float d_pitch, float d_zoom);
 bool Diorama_UpdateDynamicCamera(float elapsed_seconds, bool orbit_held);
 void Diorama_ResetCamera(void);
 bool Diorama_IsActiveThisFrame(void);
+/* Whether the frame being drawn is a diorama frame: the frame draw latches
+ * Diorama_IsActiveThisFrame into it once per frame, and turning diorama mode
+ * off clears it. The enhancements, FrameSlot_Capture and the host loop read
+ * it. Defined in diorama_host.c. */
+extern bool g_diorama_frame_active;
 void Diorama_OnModeChanged(void);
 
 float Diorama_DragRadPerPx(void);

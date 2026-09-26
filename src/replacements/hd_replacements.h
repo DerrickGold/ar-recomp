@@ -31,9 +31,9 @@
  *
  * Ownership mirrors the overlay contract: this module owns parsing and the
  * per-frame gate/capture policy (game side); the host owns image decoding,
- * textures, binding, and final composition (main.c). With no texture loaded
- * (headless, missing file) an entry never requests a capture, so emulated
- * output is untouched. */
+ * textures and binding (hd_replacement_host.c) and final composition
+ * (present.c). With no texture loaded (headless, missing file) an entry never
+ * requests a capture, so emulated output is untouched. */
 
 typedef enum HdPlane {
   kHdPlane_Screen = 0,

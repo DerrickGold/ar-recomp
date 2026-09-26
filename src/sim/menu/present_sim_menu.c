@@ -9,10 +9,8 @@
 #include "render/localized_text_presenter.h"
 #include "render/localized_text_layout.h"
 #include "render/text_cell_composite.h"
-
-extern ArRenderDevice g_render_device;
-extern ArRenderTexture g_hud_bg_texture;
-extern ArRenderTexture g_sim3d_layer_textures[kSim3DPlane_Count];
+#include "host/host_video.h"
+#include "present/presentation_textures.h"
 
 static ArRenderTexture s_icons;
 static uint32_t s_revision;

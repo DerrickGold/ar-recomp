@@ -16,22 +16,20 @@
 #include "app/runtime_settings.h"
 #include "present/render_comparison.h"
 #include "app/session_fatal.h"
+#include "dev/host_dev_tools.h"
 #include "dev/scene_inspector.h"
 #include "app/settings.h"
 #include "settings_overlay/settings_overlay.h"
 #include "sim/sim3d/sim3d.h"
 #include "constants.h"
+#include "present/presentation_textures.h"
 
-/* FrameSlot_Capture records turbo in the immutable presentation snapshot. */
-uint8 g_turbo;
+static bool s_turbo;
 
 static bool s_paused;
 static bool s_inspector_owns_pause;
 static bool s_paused_redraw_pending;
 static uint32_t s_input_state;
-
-extern bool g_sim3d_textures_ready;
-extern InspectorPresentationSelection g_scene_inspector_presentation;
 
 void HostInput_HandleKeyboard(int scancode, bool pressed, bool repeated) {
   InputMap_HandleKey(scancode, pressed, repeated);
@@ -77,7 +75,7 @@ bool HostInput_IsPaused(void) {
 }
 
 bool HostInput_IsTurbo(void) {
-  return g_turbo != 0;
+  return s_turbo;
 }
 
 void HostInput_TogglePause(void) {
@@ -86,8 +84,8 @@ void HostInput_TogglePause(void) {
 }
 
 void HostInput_ToggleTurbo(void) {
-  g_turbo = !g_turbo;
-  if (g_turbo)
+  s_turbo = !s_turbo;
+  if (s_turbo)
     fprintf(stderr, "[turbo] ON (%dx)\n", g_settings.turbo_multiplier);
   else
     fprintf(stderr, "[turbo] off\n");
@@ -141,8 +139,7 @@ void HostInput_OnInspectorSelection(bool had_selection) {
 void HostInput_CloseInspectorSelection(void) {
   SceneInspector_Clear();
   SettingsOverlay_HideDebugPanel();
-  memset(&g_scene_inspector_presentation, 0,
-         sizeof(g_scene_inspector_presentation));
+  HostDevTools_ClearInspectorPresentation();
   if (s_inspector_owns_pause) s_paused = false;
   s_inspector_owns_pause = false;
   HostInput_ClearHeld();

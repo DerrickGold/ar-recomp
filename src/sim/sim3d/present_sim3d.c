@@ -42,18 +42,12 @@
 #include "render/render_device.h"
 #include "render/render_output.h"
 #include "sim/sim3d/present_sim3d_canvas.h"
+#include "host/host_video.h"
+#include "present/presentation_textures.h"
 
 #ifndef AR_SIM3D_TERRAIN_ELEVATION
 #define AR_SIM3D_TERRAIN_ELEVATION 0
 #endif
-
-
-extern ArRenderDevice g_render_device;
-extern ArRenderTexture g_texture;
-extern ArRenderTexture g_sim_obj_atlas_texture;
-
-extern ArRenderTexture g_sim3d_layer_textures[kSim3DPlane_Count];
-extern ArRenderTexture g_sim3d_flat_texture;
 
 static ArRenderRectF PortableRect(ArRenderRectI rectangle) {
   return (ArRenderRectF){
