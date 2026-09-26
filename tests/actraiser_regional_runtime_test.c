@@ -11,7 +11,7 @@
 #include "actraiser/regional/actraiser_population_conversion.h"
 #include "actraiser/regional/actraiser_regional_arrival.h"
 #include "actraiser/actraiser_stage_placements.h"
-#include "randomizer.h"
+#include "randomizer/randomizer.h"
 #include "regional/regional_randomizer.h"
 
 #include <assert.h>

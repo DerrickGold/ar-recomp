@@ -27,14 +27,14 @@ endfunction()
 # contracts must not name an SDL type. Desktop enumeration lives in
 # src/platform/sdl/pack_discovery_sdl.c, not here.
 ar_glob_required(_portable_render_files GLOB_RECURSE
-    "${GAME_SOURCE_ROOT}/performance*.c"
-    "${GAME_SOURCE_ROOT}/performance*.h"
+    "${GAME_SOURCE_ROOT}/app/performance*.c"
+    "${GAME_SOURCE_ROOT}/app/performance*.h"
     "${GAME_SOURCE_ROOT}/present_world_nav*.c"
     "${GAME_SOURCE_ROOT}/present_world_nav*.h"
     "${GAME_SOURCE_ROOT}/present_sky_palace*.[ch]"
-    "${GAME_SOURCE_ROOT}/presentation_view*.[ch]"
-    "${GAME_SOURCE_ROOT}/render_preparation*.[ch]"
-    "${GAME_SOURCE_ROOT}/render_capabilities.h"
+    "${GAME_SOURCE_ROOT}/present/presentation_view*.[ch]"
+    "${GAME_SOURCE_ROOT}/present/render_preparation*.[ch]"
+    "${GAME_SOURCE_ROOT}/render/render_capabilities.h"
     "${GAME_SOURCE_ROOT}/render/*.c"
     "${GAME_SOURCE_ROOT}/render/*.h"
     "${GAME_SOURCE_ROOT}/localization/*.c"
@@ -50,12 +50,12 @@ ar_glob_required(_portable_render_files GLOB_RECURSE
 list(APPEND _portable_render_files
     "${GAME_SOURCE_ROOT}/sim/sim_background_voxels.c"
     "${GAME_SOURCE_ROOT}/sim/sim_background_voxels.h"
-    "${GAME_SOURCE_ROOT}/presentation_upload_mirror.c"
-    "${GAME_SOURCE_ROOT}/presentation_upload_mirror.h"
-    "${GAME_SOURCE_ROOT}/hd_replacement_host.c"
-    "${GAME_SOURCE_ROOT}/hd_replacement_host.h"
-    "${GAME_SOURCE_ROOT}/hd_replacements.h"
-    "${GAME_SOURCE_ROOT}/crt_post.h"
+    "${GAME_SOURCE_ROOT}/present/presentation_upload_mirror.c"
+    "${GAME_SOURCE_ROOT}/present/presentation_upload_mirror.h"
+    "${GAME_SOURCE_ROOT}/replacements/hd_replacement_host.c"
+    "${GAME_SOURCE_ROOT}/replacements/hd_replacement_host.h"
+    "${GAME_SOURCE_ROOT}/replacements/hd_replacements.h"
+    "${GAME_SOURCE_ROOT}/render/crt_post.h"
     "${GAME_SOURCE_ROOT}/diorama/diorama_upload.c"
     "${GAME_SOURCE_ROOT}/diorama/diorama_upload.h"
     "${GAME_SOURCE_ROOT}/diorama/diorama_rom_skybox_resource.c"
@@ -73,12 +73,12 @@ list(APPEND _portable_render_files
     "${GAME_SOURCE_ROOT}/dev/dev_tools.c"
     "${GAME_SOURCE_ROOT}/dev/dev_tools.h"
     "${GAME_SOURCE_ROOT}/dev/dev_tools_readback.h"
-    "${GAME_SOURCE_ROOT}/frame_slot.c"
-    "${GAME_SOURCE_ROOT}/frame_slot.h"
-    "${GAME_SOURCE_ROOT}/present.h"
-    "${GAME_SOURCE_ROOT}/present.c"
-    "${GAME_SOURCE_ROOT}/present_frame.c"
-    "${GAME_SOURCE_ROOT}/present_internal.h"
+    "${GAME_SOURCE_ROOT}/present/frame_slot.c"
+    "${GAME_SOURCE_ROOT}/present/frame_slot.h"
+    "${GAME_SOURCE_ROOT}/present/present.h"
+    "${GAME_SOURCE_ROOT}/present/present.c"
+    "${GAME_SOURCE_ROOT}/present/present_frame.c"
+    "${GAME_SOURCE_ROOT}/present/present_internal.h"
     "${GAME_SOURCE_ROOT}/present_world_nav.c"
     "${GAME_SOURCE_ROOT}/present_sim3d.c"
     "${GAME_SOURCE_ROOT}/present_sim3d_internal.h"
@@ -95,7 +95,7 @@ list(APPEND _portable_render_files
     "${GAME_SOURCE_ROOT}/present_sim3d_shadows.h"
     "${GAME_SOURCE_ROOT}/present_sim3d_terrain.c"
     "${GAME_SOURCE_ROOT}/present_sim3d_terrain.h"
-    "${GAME_SOURCE_ROOT}/settings_overlay_render.h"
+    "${GAME_SOURCE_ROOT}/settings_overlay/settings_overlay_render.h"
     # Action effect construction is game-side geometry generation. Keep its
     # public contract and pure batch builder portable even while the diorama
     # projection adapter still calls the native compositor implementation.
@@ -255,7 +255,7 @@ endif()
 # those subsystems move behind backend operations.
 set(_resource_owner_files
     "${GAME_SOURCE_ROOT}/main.c"
-    "${GAME_SOURCE_ROOT}/present.c"
+    "${GAME_SOURCE_ROOT}/present/present.c"
     "${GAME_SOURCE_ROOT}/present_sim3d.c"
     "${GAME_SOURCE_ROOT}/present_sim3d_internal.h"
     "${GAME_SOURCE_ROOT}/present_sim3d_effects.c"
@@ -299,13 +299,13 @@ endif()
 # Fullscreen post-processing exposes only semantic parameters and opaque
 # textures. Native shader/target ownership belongs to the selected adapter;
 # player settings remain frame-orchestration policy.
-if(EXISTS "${GAME_SOURCE_ROOT}/crt_post.c")
+if(EXISTS "${GAME_SOURCE_ROOT}/render/crt_post.c")
     list(APPEND _native_resource_violations
-        "${GAME_SOURCE_ROOT}/crt_post.c (CRT implementation outside adapter)")
+        "${GAME_SOURCE_ROOT}/render/crt_post.c (CRT implementation outside adapter)")
 endif()
 file(READ "${GAME_SOURCE_ROOT}/platform/sdl/crt_post_sdl.c"
      _crt_sdl_contents)
-if(_crt_sdl_contents MATCHES "g_settings|#[ \t]*include[ \t]*[<\"]settings.h")
+if(_crt_sdl_contents MATCHES "g_settings|#[ \t]*include[ \t]*[<\"](app/)?settings.h")
     list(APPEND _native_resource_violations
         "${GAME_SOURCE_ROOT}/platform/sdl/crt_post_sdl.c (player policy in adapter)")
 endif()

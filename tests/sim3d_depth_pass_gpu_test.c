@@ -12,7 +12,7 @@
 #include "sim/sim3d_mesh_set.h"
 #include "sim3d_depth_reference.h"
 #include "present_world_nav_geometry.h"
-#include "performance_metrics.h"
+#include "app/performance_metrics.h"
 
 enum {
   kTestWidth = 32,

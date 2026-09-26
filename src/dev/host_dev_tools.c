@@ -2,14 +2,14 @@
 #include "host_dev_tools.h"
 
 #include "dev_tools.h"
-#include "display_geometry.h"
+#include "present/display_geometry.h"
 #include "snesrecomp/game_runtime.h"
 #include "host/host_input.h"
 #include "platform/sdl/dev_tools_readback_sdl.h"
-#include "present.h"
+#include "present/present.h"
 #include "snesrecomp/runner.h"
 #include "scene_inspector.h"
-#include "settings.h"
+#include "app/settings.h"
 
 extern ArRenderDevice g_render_device;
 extern ArRenderTexture g_hud_bg_texture;

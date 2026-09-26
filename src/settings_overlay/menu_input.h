@@ -1,7 +1,7 @@
 #ifndef SETTINGS_OVERLAY_MENU_INPUT_H
 #define SETTINGS_OVERLAY_MENU_INPUT_H
 
-#include "input_map.h"
+#include "app/input_map.h"
 
 /* Private menu commands. Dispatch and displayed bindings share this mapping;
  * menu events never need to update gameplay's held-button state. */

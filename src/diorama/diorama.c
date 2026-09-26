@@ -4,7 +4,7 @@
 #include "diorama.h"
 #include "actraiser_game.h"
 #include "constants.h"
-#include "atomic_replace.h"
+#include "host/atomic_replace.h"
 #include "diorama_effect_backend.h"
 #include "diorama_aperture.h"
 #include "diorama_edge_aa.h"
@@ -20,8 +20,8 @@
 #include "host/host_clock.h"
 #include "render/render_output.h"
 #include "diorama_upload.h"
-#include "settings.h"
-#include "user_data_dir.h"
+#include "app/settings.h"
+#include "app/user_data_dir.h"
 #include <limits.h>
 #include <math.h>
 #include <stdio.h>

@@ -1,7 +1,7 @@
 #ifndef PRESENT_WORLD_NAV_COMPOSITION_H
 #define PRESENT_WORLD_NAV_COMPOSITION_H
 
-#include "frame_slot.h"
+#include "present/frame_slot.h"
 
 /* Borrowed capture textures. Upload and reset own their lifetime; scene
  * composition chooses where the Palace, plaque and native label are drawn. */

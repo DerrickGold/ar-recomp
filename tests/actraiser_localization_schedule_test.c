@@ -11,8 +11,8 @@
 #include "actraiser/actraiser_localization_text_normalize.h"
 #include "actraiser_game.h"
 #include "localization/language_contract.h"
-#include "save_system.h"
-#include "settings.h"
+#include "save/save_system.h"
+#include "app/settings.h"
 #include "actraiser/regional/actraiser_regional_runtime.h"
 
 static ArRegionalSource s_price_source = kArRegionalSource_US;

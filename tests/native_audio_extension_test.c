@@ -1,6 +1,6 @@
-#include "native_audio_extension.h"
+#include "audio/native_audio_extension.h"
 
-#include "settings.h"
+#include "app/settings.h"
 #include "snes/apu.h"
 #include "snes/dsp.h"
 #include "snes/saveload.h"

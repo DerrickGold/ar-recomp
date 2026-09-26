@@ -13,17 +13,17 @@
 #endif
 
 #include "actraiser_game.h"
-#include "actraiser_rtl.h"
+#include "actraiser/actraiser_rtl.h"
 #include "diorama/diorama.h"
 #include "host/host_display.h"
-#include "music_replacements.h"
-#include "present.h"
-#include "presentation_frame_generation.h"
-#include "run_dir.h"
+#include "replacements/music_replacements.h"
+#include "present/present.h"
+#include "present/presentation_frame_generation.h"
+#include "app/run_dir.h"
 #include "snesrecomp/runner.h"
 #include "scene_asset_dump.h"
 #include "scene_inspector.h"
-#include "settings.h"
+#include "app/settings.h"
 
 enum {
   kArgbBytesPerPixel = 4,

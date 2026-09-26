@@ -1,8 +1,8 @@
 #ifndef AR_PRESENT_SKY_PALACE_H
 #define AR_PRESENT_SKY_PALACE_H
 
-#include "present.h"
-#include "presentation_outcome.h"
+#include "present/present.h"
+#include "present/presentation_outcome.h"
 
 /* The selected Palace is one complete scene. Neither missing foreground nor
  * a rejected backdrop may be replaced by the native game framebuffer. */

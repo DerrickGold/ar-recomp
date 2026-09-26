@@ -5,8 +5,8 @@
 
 #include "actraiser/actraiser_hle_fatal.h"
 #include "byte_order.h"
-#include "cpu_65816_math.h"
-#include "save_system.h"
+#include "actraiser/cpu_65816_math.h"
+#include "save/save_system.h"
 
 extern uint8 *g_sram;
 extern int g_sram_size;

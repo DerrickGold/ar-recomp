@@ -3,7 +3,7 @@
 #include "action/action_room_scene.h"
 #include "actraiser_game.h"
 #include "byte_order.h"
-#include "quintet_lzss.h"
+#include "actraiser/quintet_lzss.h"
 #include "snes_bgr555.h"
 
 enum {

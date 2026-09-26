@@ -6,7 +6,7 @@
 #include "regional/action/regional_fire_enemy.h"
 #include "regional/action/regional_difficulty.h"
 #include "regional/presentation/regional_poses.h"
-#include "quintet_lzss.h"
+#include "actraiser/quintet_lzss.h"
 #include "byte_order.h"
 #include <assert.h>
 #include <stdio.h>

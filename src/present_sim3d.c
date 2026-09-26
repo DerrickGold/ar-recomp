@@ -26,7 +26,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "host/host_clock.h"
-#include "render_capabilities.h"
+#include "render/render_capabilities.h"
 #include "sim/sim_background_voxels.h"
 #include "sim/sim3d.h"
 #include "sim/sim3d_camera_limits.h"
@@ -37,8 +37,8 @@
 
 /* kPixelAspect_Crt43 and kDioramaCam_Free/kDioramaCam_Dynamic are plain enum
  * constants (not live state) — fine to pull in just for those. */
-#include "settings.h"
-#include "present_internal.h"
+#include "app/settings.h"
+#include "present/present_internal.h"
 #include "render/render_device.h"
 #include "render/render_output.h"
 #include "present_sim3d_canvas.h"

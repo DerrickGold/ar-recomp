@@ -1,8 +1,8 @@
 #include "sim/sim3d.h"
 #include "sim/sim3d_camera_limits.h"
 #include "actraiser_game.h"
-#include "settings.h"
-#include "user_data_dir.h"
+#include "app/settings.h"
+#include "app/user_data_dir.h"
 #include <assert.h>
 #include <math.h>
 #include <stdio.h>

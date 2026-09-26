@@ -5,10 +5,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "present.h"
+#include "present/present.h"
 #include "platform/sdl/presentation_geometry_sdl.h"
 #include "platform/sdl/render_sdl_internal.h"
-#include "presentation_frame_generation.h"
+#include "present/presentation_frame_generation.h"
 
 enum {
   kFrameGenerationMaximumPairSpanMs = 50,

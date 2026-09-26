@@ -1,4 +1,4 @@
-#include "actraiser_rtl.h"
+#include "actraiser/actraiser_rtl.h"
 
 #include "snesrecomp/game/cpu.h"
 #include "snesrecomp/runner.h"

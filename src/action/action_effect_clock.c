@@ -2,7 +2,7 @@
 
 #include <string.h>
 
-#include "frame_timing.h"
+#include "present/frame_timing.h"
 
 /* Written and read on the game thread. It is deliberately outside savestates:
  * FrameSlot_ResetActionEffects invalidates the consumer after a load, and the

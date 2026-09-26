@@ -5,7 +5,7 @@
 #include "actraiser_cpu_hle_internal.h"
 #include "actraiser_hle_fatal.h"
 #include "actraiser_game.h"
-#include "randomizer.h"
+#include "randomizer/randomizer.h"
 typedef struct SpawnOwner { uint16_t source,actor; } SpawnOwner;
 /* US initializer addresses stay in this game adapter, never the portable
  * policy. Sorted for lookup at birth only; direct-handler records excluded. */

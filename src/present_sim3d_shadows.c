@@ -11,7 +11,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "present_internal.h"
+#include "present/present_internal.h"
 #include "present_sim3d_internal.h"
 #include "present_sim3d_project.h"
 #include "present_sim3d_shadows.h"

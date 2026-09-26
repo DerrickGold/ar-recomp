@@ -4,7 +4,7 @@
 
 #include "byte_order.h"
 #include "deterministic_hash.h"
-#include "manifest_utils.h"
+#include "replacements/manifest_utils.h"
 #include "snes_bgr555.h"
 #include "text_parse_utils.h"
 

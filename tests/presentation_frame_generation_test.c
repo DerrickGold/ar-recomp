@@ -1,7 +1,7 @@
 #include <math.h>
 #include <stdio.h>
 
-#include "presentation_frame_generation.h"
+#include "present/presentation_frame_generation.h"
 
 static int failures;
 #define CHECK(expression) do {                                            \

@@ -6,7 +6,7 @@
 #include <stdio.h>
 
 #include "dev_tools_readback.h"
-#include "present.h"
+#include "present/present.h"
 #include "snesrecomp/runner.h"
 
 /* Live host-owned resources needed by diagnostic capture and inspector tools.

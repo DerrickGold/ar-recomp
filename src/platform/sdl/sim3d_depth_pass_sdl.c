@@ -1,5 +1,5 @@
 #include "gpu_texture_upload_layout.h"
-#include "performance_metrics.h"
+#include "app/performance_metrics.h"
 #include "sim/sim3d_depth_pass.h"
 #include "sim/sim3d_performance.h"
 

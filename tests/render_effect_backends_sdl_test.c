@@ -5,10 +5,10 @@
 #include <math.h>
 #include <string.h>
 
-#include "crt_post.h"
+#include "render/crt_post.h"
 #include "diorama/diorama_effect_backend.h"
 #include "platform/sdl/render_sdl_internal.h"
-#include "session_fatal.h"
+#include "app/session_fatal.h"
 #include "sim/sim_shadow_effect_backend.h"
 #include "sim/sim_cloud_effect_backend.h"
 

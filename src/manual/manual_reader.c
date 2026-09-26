@@ -9,17 +9,17 @@
 
 #include "host/host_display.h"
 #include "host/host_clock.h"
-#include "input_map.h"
+#include "app/input_map.h"
 #include "manual_input.h"
 #include "manual_caption.h"
 #include "manual_pages.h"
 #include "render/render_device.h"
 #include "scene3d_math.h"
-#include "settings.h"
+#include "app/settings.h"
 /* For the game's own menu font: the overlay owns the atlases. */
-#include "settings_overlay_render.h"
+#include "settings_overlay/settings_overlay_render.h"
 
-/* Declarations only. src/hd_replacement_host.c owns STB_IMAGE_IMPLEMENTATION
+/* Declarations only. src/replacements/hd_replacement_host.c owns STB_IMAGE_IMPLEMENTATION
  * for the whole binary; this file must not define it again. JPEG support is one
  * more STBI_ONLY_* beside the PNG one there -- the macros are a positive
  * allowlist, so the manual costs a #define rather than a dependency. */

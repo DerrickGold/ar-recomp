@@ -1,5 +1,5 @@
 #include "host/parallel_work.h"
-#include "performance_metrics.h"
+#include "app/performance_metrics.h"
 
 #include <SDL3/SDL.h>
 #include <stdbool.h>

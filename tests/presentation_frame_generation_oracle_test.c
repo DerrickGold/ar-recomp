@@ -20,7 +20,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "presentation_frame_generation.h"
+#include "present/presentation_frame_generation.h"
 
 static int failures;
 static int comparisons;   /* pairs where Analyze accepted and a vector was checked */

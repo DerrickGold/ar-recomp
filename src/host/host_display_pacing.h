@@ -4,7 +4,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "settings.h"
+#include "app/settings.h"
 
 typedef struct HostDisplayPacingOptions {
   RefreshMode refresh_mode;

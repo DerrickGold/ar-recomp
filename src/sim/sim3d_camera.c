@@ -9,9 +9,9 @@
 #include "constants.h"
 #include "host/host_clock.h"
 #include "scene3d_math.h"
-#include "settings.h"
+#include "app/settings.h"
 #include "sim3d_camera_limits.h"
-#include "user_data_dir.h"
+#include "app/user_data_dir.h"
 
 enum {
   kMilliradiansPerRadian = kPermilleScale,

@@ -8,7 +8,7 @@
 #include "sfx_census.h"
 #include "constants.h"
 #include "host/host_audio.h"
-#include "run_dir.h"
+#include "app/run_dir.h"
 #include "snesrecomp/game/runtime.h"
 #include "snesrecomp/game_runtime.h"
 #include "snesrecomp/runner.h"

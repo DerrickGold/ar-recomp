@@ -115,7 +115,7 @@ func TestRegionalDescriptionStructure(t *testing.T) {
 
 func TestGeneratedCAndExplicitOverlayKeys(t *testing.T) {
 	root := filepath.Join("..", "..", "..")
-	if _, err := os.Stat(filepath.Join(root, "src", "settings_overlay.c")); os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(root, "src", "settings_overlay", "settings_overlay.c")); os.IsNotExist(err) {
 		t.Skip("standalone Go source tree")
 	}
 	cmd := exec.Command("go", "run", "./cmd/generate", "-check", "-output", filepath.Join(root, "src/localization/ui_catalog_data.inc"))
@@ -131,7 +131,8 @@ func TestGeneratedCAndExplicitOverlayKeys(t *testing.T) {
 		keys[entry.Key] = true
 	}
 	for _, file := range []string{
-		"settings_overlay.c", "settings_overlay_localization.c", "settings_overlay_layers_localization.c",
+		"settings_overlay/settings_overlay.c", "settings_overlay/settings_overlay_localization.c",
+		"settings_overlay/settings_overlay_layers_localization.c",
 		"settings_overlay/regional/regional_ui.c", "settings_overlay/regional/regional_menu.c",
 		"manual/manual_caption.c",
 	} {

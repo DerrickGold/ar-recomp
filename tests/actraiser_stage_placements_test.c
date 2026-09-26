@@ -2,7 +2,7 @@
 #include "actraiser/actraiser_native_call.h"
 #include "actraiser/actraiser_hle_fatal.h"
 #include "regional/action/regional_terrain.h"
-#include "randomizer.h"
+#include "randomizer/randomizer.h"
 #include "byte_order.h"
 #include <assert.h>
 #include <setjmp.h>

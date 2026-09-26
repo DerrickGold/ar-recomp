@@ -5,7 +5,7 @@
 
 #include "action/action_bg_metatile.h"
 #include "actraiser_game.h"
-#include "quintet_lzss.h"
+#include "actraiser/quintet_lzss.h"
 
 enum {
   kAssetScriptBase = 0x05 * 0x8000,

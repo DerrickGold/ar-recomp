@@ -6,12 +6,12 @@
  * restore the words that the game did not change during scanout. */
 
 #include "actraiser_game.h"
-#include "actraiser_rtl.h"
-#include "display_geometry.h"
+#include "actraiser/actraiser_rtl.h"
+#include "present/display_geometry.h"
 #include "action/action_bg_metatile.h"
 #include "snesrecomp/game/runtime.h"
 #include "snesrecomp/runner.h"
-#include "settings.h"
+#include "app/settings.h"
 
 #include <stdio.h>
 #include <stdlib.h>

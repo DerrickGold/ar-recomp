@@ -1,7 +1,7 @@
 #ifndef ACTRAISER_STORY_SNAPSHOT_H
 #define ACTRAISER_STORY_SNAPSHOT_H
 
-#include "save_system.h"
+#include "save/save_system.h"
 #include "snesrecomp/game/cpu.h"
 
 /* Read-only projection of the US $03:A656 native save writer. The caller must

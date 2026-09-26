@@ -1,7 +1,7 @@
 #ifndef AR_REGIONAL_RANDOMIZER_H
 #define AR_REGIONAL_RANDOMIZER_H
 #include "regional/regional_profiles.h"
-#include "randomizer_config.h"
+#include "randomizer/randomizer_config.h"
 
 /* New-campaign preparation only. Each selected gameplay leaf draws from its
  * own stable key, independent of inventory order and other enabled groups.

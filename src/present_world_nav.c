@@ -17,7 +17,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "present.h"
+#include "present/present.h"
 #include "action/action_effect_render.h"
 #include "actraiser/actraiser_localization_world_navigation.h"
 #include "constants.h"
@@ -25,9 +25,9 @@
 #include "snesrecomp/game/types.h"
 #include "diorama/diorama.h"
 #include "host/host_clock.h"
-#include "performance_metrics.h"
-#include "presentation_outcome.h"
-#include "presentation_upload_mirror.h"
+#include "app/performance_metrics.h"
+#include "present/presentation_outcome.h"
+#include "present/presentation_upload_mirror.h"
 #include "render/render_device.h"
 #include "render/render_output.h"
 #include "render/localized_text_presenter.h"
@@ -60,7 +60,7 @@
 
 /* kPixelAspect_Crt43 and kDioramaCam_Free/kDioramaCam_Dynamic are plain enum
  * constants (not live state) — fine to pull in just for those. */
-#include "settings.h"
+#include "app/settings.h"
 extern ArRenderDevice g_render_device;
 #include "present_sim3d_internal.h"
 #include "present_sim_globe.h"

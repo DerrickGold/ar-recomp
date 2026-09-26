@@ -3,7 +3,7 @@
 
 #include "regional/towns/regional_lair_reloads.h"
 #include "snesrecomp/game/cpu.h"
-#include "save_system.h"
+#include "save/save_system.h"
 
 bool ActRaiserLairReloads_Entry(const CpuState *cpu);
 bool ActRaiserLairReloads_Initialize(ArRegionalLairReloads *history, CpuState *cpu);

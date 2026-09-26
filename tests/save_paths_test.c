@@ -1,5 +1,5 @@
-#include "save_paths.h"
-#include "save_system.h"
+#include "save/save_paths.h"
+#include "save/save_system.h"
 #include "snesrecomp/support/utf8_fs.h"
 #include <assert.h>
 #include <stdio.h>

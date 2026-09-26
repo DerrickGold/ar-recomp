@@ -1,8 +1,8 @@
-#include "native_audio_mixer.h"
+#include "audio/native_audio_mixer.h"
 
 #include "constants.h"
 #include "snesrecomp/runner.h"
-#include "settings.h"
+#include "app/settings.h"
 
 #include <stdio.h>
 #include <string.h>

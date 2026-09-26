@@ -3,14 +3,14 @@
 #include <string.h>
 
 #include "actraiser_game.h"
-#include "actraiser_rtl.h"
+#include "actraiser/actraiser_rtl.h"
 #include "snesrecomp/game/runtime.h"
 #include "snesrecomp/game_runtime.h"
 #include "diorama_layer_order.h"
 #include "host/host_display.h"
 #include "host/host_input.h"
 #include "snesrecomp/runner.h"
-#include "settings.h"
+#include "app/settings.h"
 
 extern bool g_diorama_frame_active;
 extern uint8_t g_pixels[];

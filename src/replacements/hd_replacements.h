@@ -1,0 +1,106 @@
+#ifndef HD_REPLACEMENTS_H
+#define HD_REPLACEMENTS_H
+
+#include <stdbool.h>
+#include "replacements/asset_condition.h"
+#include "render/render_types.h"
+#include "snesrecomp/runner.h"
+#include "snesrecomp/game/types.h"
+
+/* Manifest-driven HD graphics replacements (game-assets/manifest.ini).
+ *
+ * Each [replace:<name>] entry declares a substitution "plane" — the tool used
+ * to swap the graphic. Planes deliberately have different capability tiers:
+ *
+ *   screen  host-overlay substitution of a screen-locked, untransformed
+ *           graphic via the generic PPU capture API
+ *   mode7   canvas-space texture override sampled through the Mode-7 matrix;
+ *           one override owns a frame and conflicts are reported once
+ *   tiles   hash-keyed HD tile pack. Reserved and inert because it needs the
+ *           N-x RGBA-sideband renderer path.
+ *           An authored `tiles` entry logs "[hd-manifest] ... reserved and not
+ *           implemented yet; entry inert" rather than failing silently.
+ *
+ * The gate mini-language is a comma-separated conjunction of comparisons:
+ *
+ *   when = wram[0018]==0x00, wram[0019]==0x00, mode==7, m7==identity
+ *
+ * Operands: wram[<hex addr>] (byte), mode (BG mode 0-7), m7a/m7b/m7c/m7d
+ * (Mode-7 matrix elements, raw 16-bit), m7 (only "identity"). Operators:
+ * == and !=. Values parse with strtoul base 0 (0x for hex).
+ *
+ * Ownership mirrors the overlay contract: this module owns parsing and the
+ * per-frame gate/capture policy (game side); the host owns image decoding,
+ * textures, binding, and final composition (main.c). With no texture loaded
+ * (headless, missing file) an entry never requests a capture, so emulated
+ * output is untouched. */
+
+typedef enum HdPlane {
+  kHdPlane_Screen = 0,
+  kHdPlane_Mode7 = 1,
+  kHdPlane_Tiles = 2,
+} HdPlane;
+
+enum {
+  kHdMaxReplacements = 16,
+  kHdMaxName = 48,
+  kHdMaxPath = 512,
+};
+
+typedef struct HdReplacement {
+  char name[kHdMaxName];
+  HdPlane plane;
+  int source; /* PpuOverlaySource for the screen plane */
+  int x0, y0, x1, y1; /* screen-space rect, x1/y1 exclusive */
+  int image_inset_left; /* native erasure gutter, not part of the drawn image */
+  /* mode7 plane: the Mode-7 canvas-pixel rect the art maps onto, and
+   * whether wrapped canvas repetitions are substituted too (default 0:
+   * only the primary instance; wraps keep the authentic faint sampling). */
+  int canvas_x0, canvas_y0, canvas_x1, canvas_y1;
+  bool canvas_wrap;
+  char image[kHdMaxPath]; /* resolved relative to the manifest */
+  bool brightness_mod; /* default true: follow INIDISP master brightness */
+  AssetCondition conditions[kAssetMaxConditions];
+  int condition_count;
+
+  /* Host-owned art. Screen-plane resources use an opaque renderer handle.
+   * Mode7 plane art is malloc'd ARGB words in `pixels` and consumed by the
+   * engine sampler. Entries with neither stay fully inert. */
+  ArRenderTexture texture;
+  void *pixels;
+  int pixels_width, pixels_height;
+  /* Game-policy result, rebuilt every emulated frame. */
+  bool active;
+} HdReplacement;
+
+extern HdReplacement g_hd_replacements[kHdMaxReplacements];
+extern int g_hd_replacement_count;
+
+/* Parse a manifest. Returns the number of entries loaded; 0 with no error
+ * output if the file simply does not exist. Safe to call once at startup. */
+int HdReplacements_Load(const char *path);
+
+/* Compatibility for the standard title hooks, whose authored placement was
+ * measured against US artwork. JP native lettering extends three pixels
+ * farther left. Extend screen erasure independently from image placement;
+ * for Mode 7, pad a transparent gutter and expand the canvas together. Never
+ * resample or move artwork. Custom hooks/bounds and Mode-7 image widths that
+ * cannot represent that gutter exactly are untouched.
+ * On success, *padded_rgba is NULL (unchanged) or a free()-owned RGBA buffer;
+ * the caller still owns rgba. On failure the entry remains unchanged. This
+ * is ActRaiser asset policy, not a special case in the generic runner. */
+bool HdReplacements_PrepareTitleCoverage(HdReplacement *entry,
+    const uint8_t *rgba, int width, int height,
+    uint8_t **padded_rgba, int *padded_width);
+
+/* The game adapter publishes the active opaque runner for gate queries and
+ * synchronous capture claims, and clears it before runner destruction. */
+void HdReplacements_BindRunner(SrRunnerHandle *runner);
+
+/* Per-frame game policy: evaluate every screen-plane entry's gate and request
+ * overlay captures for the winners. Call from the frame hook after the other
+ * capture policies (HUD split, magic OAM) so source conflicts are detected
+ * rather than clobbered. */
+void HdReplacements_EvaluateFrame(void);
+
+#endif /* HD_REPLACEMENTS_H */

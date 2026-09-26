@@ -1,0 +1,1390 @@
+#include "snesrecomp/support/utf8_fs.h"
+
+#include "save/save_system.h"
+#include "save/save_paths.h"
+
+#include "byte_order.h"
+#include "host/atomic_replace.h"
+#include "localization/unicode_grapheme.h"
+#include "text_parse_utils.h"
+
+#include <ctype.h>
+#include <errno.h>
+#include <stdarg.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+
+#ifdef _WIN32
+#include <windows.h>
+#include <io.h>       /* _get_osfhandle/_fileno: WriteAtomic durability */
+#else
+#include <fcntl.h>    /* open: directory fsync after rename */
+#include <unistd.h>   /* fsync/fileno/close: WriteAtomic durability */
+#endif
+
+const SaveFieldDesc g_save_region_fields[kActRaiserSaveRegionCount] = {
+  { "fillmore",  "Fillmore",  0x1200 },
+  { "bloodpool", "Bloodpool", 0x1202 },
+  { "kasandora", "Kasandora", 0x1204 },
+  { "aitos",     "Aitos",     0x1206 },
+  { "marahna",   "Marahna",   0x1208 },
+  { "northwall", "Northwall", 0x120a },
+};
+
+enum {
+  /* The third-party template uses European offsets for this block and shifts
+   * them back two bytes for USA. These USA offsets map linearly to the WRAM
+   * save-stat block at $0282-$02AC by subtracting $11B1. */
+  kSaveMessageSpeed = 0x13b1,
+  kSaveRegionAct2Flags = 0x13b6,
+  kSaveDeathHeimState = 0x120c,
+  kSaveDeathHeimUnlocked = 0x1240,
+  kSaveAngelSpCurrent = 0x1433,
+  kSaveAngelSpMax = 0x1435,
+  kSaveAngelHpCurrent = 0x1437,
+  kSaveAngelHpMax = 0x1438,
+  kSavePlayerName = 0x1439,
+  kSaveMasterLevel = 0x1442,
+  kSaveMasterHp = 0x1444,
+  kSaveMasterMp = 0x1446,
+  kSaveMagicSlots = 0x144a,
+  kSaveItemSlots = 0x1453,
+  kSaveLives = 0x145c,
+  kSaveEquippedMagic = 0x145d,
+  kSaveScores = 0x1464,
+  kSaveProfessionalMode = 0x1ff0,
+
+  kSaveRuntimePathBytes = 512,
+  kSaveIniLineBytes = 1024,
+  kSaveIniRawChunkBytes = 64,
+  kSaveIniRawChunkHexCharacters = kSaveIniRawChunkBytes * 2,
+  kSaveIniRawOffsetHexCharacters = 4,
+  kProfessionalModeSignatureBytes = 3,
+  kDeathHeimStateLocked = 0,
+  kDeathHeimStateUnlocked = 1,
+  kDeathHeimStateCleared = 4,
+  kDeathHeimStoredCleared = 3,
+  kSaveBackupSuffixCapacity = 128,
+  kSaveBackupPathBytes =
+      kSaveRuntimePathBytes + kSaveBackupSuffixCapacity,
+  kSaveCopyBufferBytes = 4096,
+  kLocalizedNameCapacity = 257,
+  kLocalizedNamePathBytes = kSaveRuntimePathBytes + 16,
+  kLocalizedNameMagicBytes = 8,
+};
+
+typedef struct SaveRuntime {
+  uint8_t *live;
+  size_t size;
+  SaveBackend backend;
+  char native_path[kSaveRuntimePathBytes];
+  char ini_path[kSaveRuntimePathBytes];
+  uint8_t shadow[kActRaiserSramSize];
+  bool shadow_valid;
+  uint8_t durable[kActRaiserSramSize];
+  bool durable_valid;
+  bool native_write_active;
+  bool native_write_aborted;
+  bool story_pending;
+  SaveCommitHost commit_host;
+  SaveStorageHooks storage_hooks;
+  SavePaths paths;
+  bool paths_valid;
+  bool backup_taken;
+  bool localized_name_valid;
+  bool localized_name_dirty;
+  bool localized_name_clear_pending;
+  char localized_compatibility[kActRaiserPlayerNameStorageBytes];
+  char localized_name[kLocalizedNameCapacity];
+} SaveRuntime;
+
+static SaveRuntime s_runtime;
+
+static bool CopyNativePlayerName(char *destination, size_t capacity) {
+  if (!destination || !capacity) return false;
+  destination[0] = 0;
+  if (!s_runtime.live || s_runtime.size < kActRaiserSramSize) return false;
+  size_t length = 0;
+  while (length < kActRaiserPlayerNameCharacterLimit) {
+    const uint8_t byte = s_runtime.live[kSavePlayerName + length];
+    if (!byte || byte == 0xffu) break;
+    if (byte < 0x20u || byte > 0x7eu || length + 1u >= capacity) {
+      destination[0] = 0;
+      return false;
+    }
+    destination[length++] = (char)byte;
+  }
+  destination[length] = 0;
+  return length != 0;
+}
+
+bool SaveSystem_CopyPlayerName(char *destination, size_t capacity) {
+  return CopyNativePlayerName(destination, capacity);
+}
+
+bool SaveSystem_CopyLocalizedPlayerName(const char *compatibility_name,
+                                        char *destination, size_t capacity) {
+  if (!destination || !capacity) return false;
+  destination[0] = 0;
+  if (!s_runtime.localized_name_valid || !compatibility_name ||
+      strcmp(compatibility_name, s_runtime.localized_compatibility))
+    return false;
+  const size_t bytes = strlen(s_runtime.localized_name);
+  if (!bytes || bytes >= capacity) return false;
+  memcpy(destination, s_runtime.localized_name, bytes + 1u);
+  return true;
+}
+
+static bool ValidLocalizedName(const char *name, uint8_t *grapheme_count) {
+  if (grapheme_count) *grapheme_count = 0;
+  if (!name || !name[0]) return false;
+  const size_t bytes = strlen(name);
+  if (bytes >= kLocalizedNameCapacity) return false;
+  size_t offset = 0;
+  uint8_t count = 0;
+  while (offset < bytes) {
+    size_t next = 0;
+    if (!ArUnicodeGrapheme_Next(name, bytes, offset, NULL, &next) ||
+        next <= offset || count >= kActRaiserPlayerNameCharacterLimit)
+      return false;
+    offset = next;
+    ++count;
+  }
+  if (grapheme_count) *grapheme_count = count;
+  return count != 0;
+}
+
+/* Both the slot browser and live loader use the same companion validation.
+ * A stale, truncated or foreign-name sidecar never replaces the native name. */
+static bool ReadLocalizedName(FILE *file, const uint8_t *image,
+                              const char *native_name, char *out, size_t capacity) {
+  uint8_t header[kLocalizedNameMagicBytes + 4 + kActRaiserPlayerNameStorageBytes + 2];
+  if (fread(header, 1, sizeof(header), file) != sizeof(header) ||
+      memcmp(header, "ARNAME1\0", kLocalizedNameMagicBytes)) return false;
+  char compatibility[kActRaiserPlayerNameStorageBytes];
+  memcpy(compatibility, header + kLocalizedNameMagicBytes + 4, sizeof(compatibility));
+  compatibility[sizeof(compatibility) - 1] = 0;
+  const uint16_t length = ByteOrder_ReadLe16(header + sizeof(header) - 2);
+  char name[kLocalizedNameCapacity] = {0};
+  if (!length || length >= sizeof(name) || length >= capacity ||
+      fread(name, 1, length, file) != length || fgetc(file) != EOF || ferror(file) ||
+      ByteOrder_ReadLe32(header + kLocalizedNameMagicBytes) != Save_ComputeChecksum(image) ||
+      strcmp(compatibility, native_name) || strlen(name) != length ||
+      !ValidLocalizedName(name, NULL)) return false;
+  memcpy(out, name, length + 1);
+  return true;
+}
+
+bool Save_ReadSummary(const char *path,const uint8_t *image,SaveSummary *out) {
+  if(!path || !image || !out || !Save_ChecksumValid(image))return false;
+  SaveSummary next={.level=-1,.acts_cleared=0,.death_heim=-1};
+  size_t name_size=0;
+  for(;name_size<kActRaiserPlayerNameCharacterLimit;++name_size) {
+    uint8_t c=image[kSavePlayerName+name_size];if(!c || c==255)break;
+    if(c<32 || c>126){name_size=0;break;}
+    next.name[name_size]=(char)c;
+  }
+  next.name[name_size]=0;
+  unsigned level=ByteOrder_ReadLe16(image+kSaveMasterLevel);
+  if(level>=1 && level<=17)next.level=(int)level;
+  for(unsigned i=0;i<kActRaiserSaveRegionCount;++i) {
+    int state=-1;Save_GetRegionState(image,i,&state);next.towns[i]=state;
+    if(state==2 || state==3){if(next.acts_cleared>=0)++next.acts_cleared;}
+    else if(state==4){if(next.acts_cleared>=0)next.acts_cleared+=2;}
+    else if(state!=0){next.towns[i]=-1;next.acts_cleared=-1;}
+  }
+  if(image[kSaveDeathHeimState]==3)next.death_heim=4;
+  else if(!image[kSaveDeathHeimState])next.death_heim=(image[kSaveDeathHeimUnlocked]&1)?1:0;
+  char companion[kLocalizedNamePathBytes];
+  int n=snprintf(companion,sizeof(companion),"%s.arname",path);
+  FILE *f=n>0 && (size_t)n<sizeof(companion)?sr_fopen(companion,"rb"):NULL;
+  if(f) {
+    char name[kLocalizedNameCapacity];
+    if(ReadLocalizedName(f,image,next.name,name,sizeof(name)))
+      snprintf(next.name,sizeof(next.name),"%s",name);
+    fclose(f);
+  }
+  *out=next;return true;
+}
+
+bool SaveSystem_SetLocalizedPlayerName(const char *utf8_name,
+                                       const char *compatibility_name) {
+  if (!s_runtime.live || !ValidLocalizedName(utf8_name, NULL) ||
+      !compatibility_name || !compatibility_name[0] ||
+      strlen(compatibility_name) > kActRaiserPlayerNameCharacterLimit)
+    return false;
+  for (const unsigned char *byte = (const unsigned char *)compatibility_name;
+       *byte; ++byte)
+    if (*byte < 0x20u || *byte > 0x7eu)
+      return false;
+  if (s_runtime.localized_name_valid &&
+      !strcmp(s_runtime.localized_name, utf8_name) &&
+      !strcmp(s_runtime.localized_compatibility, compatibility_name))
+    return true;
+  snprintf(s_runtime.localized_name, sizeof(s_runtime.localized_name), "%s",
+           utf8_name);
+  snprintf(s_runtime.localized_compatibility,
+           sizeof(s_runtime.localized_compatibility), "%s",
+           compatibility_name);
+  s_runtime.localized_name_valid = true;
+  s_runtime.localized_name_clear_pending = false;
+  s_runtime.localized_name_dirty = true;
+  return true;
+}
+
+static bool Fail(SaveError *error, const char *format, ...) {
+  if (error) {
+    va_list args;
+    va_start(args, format);
+    vsnprintf(error->message, sizeof(error->message), format, args);
+    va_end(args);
+  }
+  return false;
+}
+
+static void ClearError(SaveError *error) {
+  if (error) error->message[0] = 0;
+}
+
+uint32_t Save_ComputeChecksum(const uint8_t sram[kActRaiserSramSize]) {
+  uint16_t xored = 0;
+  uint16_t summed = 0;
+  if (!sram) return 0;
+  for (int offset = 0; offset < kActRaiserSramChecksumOffset; offset += 2) {
+    uint16_t word = ByteOrder_ReadLe16(sram + offset);
+    xored ^= word;
+    summed = (uint16_t)(summed + word);
+  }
+  return ((uint32_t)xored << 16) | summed;
+}
+
+uint32_t Save_StoredChecksum(const uint8_t sram[kActRaiserSramSize]) {
+  return sram ? ByteOrder_ReadLe32(
+                    sram + kActRaiserSramChecksumOffset) : 0;
+}
+
+bool Save_ChecksumValid(const uint8_t sram[kActRaiserSramSize]) {
+  return sram && Save_StoredChecksum(sram) == Save_ComputeChecksum(sram);
+}
+
+uint32_t Save_RecomputeChecksum(uint8_t sram[kActRaiserSramSize]) {
+  uint32_t checksum = Save_ComputeChecksum(sram);
+  if (sram)
+    ByteOrder_WriteLe32(sram + kActRaiserSramChecksumOffset, checksum);
+  return checksum;
+}
+
+void SaveEditRequest_Clear(SaveEditRequest *edits) {
+  if (!edits) return;
+  memset(edits, 0xff, sizeof(*edits));
+  edits->player_name_set = false;
+  edits->player_name[0] = 0;
+}
+
+bool Save_GetRegionState(const uint8_t sram[kActRaiserSramSize],
+                         int region, int *value) {
+  if (!sram || !value || region < 0 || region >= kActRaiserSaveRegionCount)
+    return false;
+  int base = sram[g_save_region_fields[region].offset];
+  int act2 = sram[kSaveRegionAct2Flags + region * 2] & 1;
+  *value = base * 2 + act2;
+  return *value == kSaveRegionState_Act1 ||
+      *value == kSaveRegionState_Act1Cleared ||
+      *value == kSaveRegionState_Act2 ||
+      *value == kSaveRegionState_Act2Cleared;
+}
+
+bool Save_SetRegionState(uint8_t sram[kActRaiserSramSize],
+                         int region, int value) {
+  if (!sram || region < 0 || region >= kActRaiserSaveRegionCount ||
+      (value != kSaveRegionState_Act1 &&
+       value != kSaveRegionState_Act1Cleared &&
+       value != kSaveRegionState_Act2 &&
+       value != kSaveRegionState_Act2Cleared))
+    return false;
+  sram[g_save_region_fields[region].offset] = (uint8_t)(value / 2);
+  uint8_t *flag = &sram[kSaveRegionAct2Flags + region * 2];
+  *flag = (uint8_t)((*flag & ~1u) | (value & 1));
+  return true;
+}
+
+const char *Save_RegionStateName(int value) {
+  switch (value) {
+    case kSaveRegionState_Act1: return "act1";
+    case kSaveRegionState_Act1Cleared: return "act1-cleared";
+    case kSaveRegionState_Act2: return "act2";
+    case kSaveRegionState_Act2Cleared: return "act2-cleared";
+  }
+  return NULL;
+}
+
+bool Save_ParseRegionState(const char *text, int *value) {
+  if (!text || !value) return false;
+  static const int states[] = {
+    kSaveRegionState_Act1, kSaveRegionState_Act1Cleared,
+    kSaveRegionState_Act2, kSaveRegionState_Act2Cleared,
+  };
+  for (size_t i = 0; i < sizeof(states) / sizeof(states[0]); i++) {
+    if (!strcmp(text, Save_RegionStateName(states[i]))) {
+      *value = states[i];
+      return true;
+    }
+  }
+  return false;
+}
+
+static int HexDigit(char ch) {
+  if (ch >= '0' && ch <= '9') return ch - '0';
+  if (ch >= 'a' && ch <= 'f') return ch - 'a' + 10;
+  if (ch >= 'A' && ch <= 'F') return ch - 'A' + 10;
+  return -1;
+}
+
+static bool DecodeHexChunk(
+    const char *text, uint8_t out[kSaveIniRawChunkBytes]) {
+  if (!text || strlen(text) != kSaveIniRawChunkHexCharacters) return false;
+  for (int i = 0; i < kSaveIniRawChunkBytes; i++) {
+    int high = HexDigit(text[i * 2]);
+    int low = HexDigit(text[i * 2 + 1]);
+    if (high < 0 || low < 0) return false;
+    out[i] = (uint8_t)((high << 4) | low);
+  }
+  return true;
+}
+
+static bool LoadNative(const char *path,
+                       uint8_t scratch[kActRaiserSramSize],
+                       SaveError *error) {
+  FILE *file = sr_fopen(path, "rb");
+  if (!file) return Fail(error, "cannot read %s: %s", path, strerror(errno));
+  size_t size = fread(scratch, 1, kActRaiserSramSize, file);
+  int extra = fgetc(file);
+  bool io_ok = !ferror(file);
+  fclose(file);
+  if (!io_ok) return Fail(error, "error reading %s", path);
+  if (size != kActRaiserSramSize || extra != EOF)
+    return Fail(error, "%s must be exactly %d bytes", path,
+                kActRaiserSramSize);
+  if (!Save_ChecksumValid(scratch))
+    return Fail(error, "%s has an invalid ActRaiser checksum", path);
+  return true;
+}
+
+static int FindRegion(const char *key) {
+  for (int i = 0; i < kActRaiserSaveRegionCount; i++)
+    if (!strcmp(key, g_save_region_fields[i].key)) return i;
+  return -1;
+}
+
+static bool LoadIni(const char *path,
+                    uint8_t scratch[kActRaiserSramSize],
+                    SaveError *error) {
+  FILE *file = sr_fopen(path, "r");
+  if (!file) return Fail(error, "cannot read %s: %s", path, strerror(errno));
+
+  enum { kSection_None, kSection_Meta, kSection_Regions, kSection_Raw } section;
+  section = kSection_None;
+  bool raw_seen[kActRaiserSramSize / kSaveIniRawChunkBytes] = {0};
+  bool region_seen[kActRaiserSaveRegionCount] = {0};
+  int region_values[kActRaiserSaveRegionCount] = {0};
+  bool format_seen = false, version_seen = false, size_seen = false;
+  bool success = true;
+  char line[kSaveIniLineBytes];
+  int line_number = 0;
+  memset(scratch, 0, kActRaiserSramSize);
+
+  while (success && fgets(line, sizeof(line), file)) {
+    line_number++;
+    char *key = TextParse_TrimLeft(line);
+    TextParse_TrimRight(key);
+    if (!key[0] || key[0] == ';' || key[0] == '#') continue;
+    if (key[0] == '[') {
+      if (!strcmp(key, "[Meta]")) section = kSection_Meta;
+      else if (!strcmp(key, "[Regions]")) section = kSection_Regions;
+      else if (!strcmp(key, "[Raw]")) section = kSection_Raw;
+      else section = kSection_None;
+      continue;
+    }
+    char *equals = strchr(key, '=');
+    if (!equals) {
+      success = Fail(error, "%s:%d: expected key = value", path,
+                     line_number);
+      break;
+    }
+    *equals = 0;
+    TextParse_TrimRight(key);
+    char *value = TextParse_TrimLeft(equals + 1);
+    TextParse_StripInlineComment(value);
+
+    if (section == kSection_Meta) {
+      if (!strcmp(key, "format")) {
+        if (format_seen || strcmp(value, "actraiser-sram"))
+          success = Fail(error, "%s:%d: invalid/duplicate format", path,
+                         line_number);
+        format_seen = true;
+      } else if (!strcmp(key, "version")) {
+        if (version_seen || strcmp(value, "1"))
+          success = Fail(error, "%s:%d: unsupported/duplicate version", path,
+                         line_number);
+        version_seen = true;
+      } else if (!strcmp(key, "size")) {
+        char *end = NULL;
+        long declared = strtol(value, &end, 0);
+        if (size_seen || !end || *end || declared != kActRaiserSramSize)
+          success = Fail(error, "%s:%d: invalid/duplicate SRAM size", path,
+                         line_number);
+        size_seen = true;
+      } else if (!strcmp(key, "rom") && strcmp(value, "usa")) {
+        success = Fail(error, "%s:%d: unsupported ROM '%s'", path,
+                       line_number, value);
+      }
+    } else if (section == kSection_Regions) {
+      int region = FindRegion(key);
+      if (region >= 0) {
+        int parsed = 0;
+        if (region_seen[region] ||
+            !Save_ParseRegionState(value, &parsed)) {
+          success = Fail(error, "%s:%d: invalid/duplicate region '%s'", path,
+                         line_number, key);
+        } else {
+          region_seen[region] = true;
+          region_values[region] = parsed;
+        }
+      }
+    } else if (section == kSection_Raw) {
+      char *end = NULL;
+      long offset = strtol(key, &end, 16);
+      if (!end || *end || strlen(key) != kSaveIniRawOffsetHexCharacters ||
+          offset < 0 || offset >= kActRaiserSramSize ||
+          (offset % kSaveIniRawChunkBytes)) {
+        success = Fail(error, "%s:%d: invalid raw chunk '%s'", path,
+                       line_number, key);
+      } else {
+        int chunk = (int)offset / kSaveIniRawChunkBytes;
+        if (raw_seen[chunk] || !DecodeHexChunk(value, scratch + offset))
+          success = Fail(error, "%s:%d: invalid/duplicate raw chunk '%s'",
+                         path, line_number, key);
+        else
+          raw_seen[chunk] = true;
+      }
+    }
+  }
+  if (ferror(file) && success)
+    success = Fail(error, "error reading %s", path);
+  fclose(file);
+  if (!success) return false;
+  if (!format_seen || !version_seen || !size_seen)
+    return Fail(error, "%s is missing required [Meta] keys", path);
+  for (int i = 0; i < kActRaiserSramSize / kSaveIniRawChunkBytes; i++)
+    if (!raw_seen[i])
+      return Fail(error, "%s is missing raw chunk %04X", path,
+                  i * kSaveIniRawChunkBytes);
+  if (!Save_ChecksumValid(scratch))
+    return Fail(error, "%s raw image has an invalid checksum", path);
+
+  for (int i = 0; i < kActRaiserSaveRegionCount; i++)
+    if (region_seen[i])
+      Save_SetRegionState(scratch, i, region_values[i]);
+  Save_RecomputeChecksum(scratch);
+  return true;
+}
+
+bool Save_LoadFile(SaveFileFormat format, const char *path,
+                   uint8_t out[kActRaiserSramSize], SaveError *error) {
+  ClearError(error);
+  if (!path || !path[0] || !out) return Fail(error, "invalid save load request");
+  uint8_t scratch[kActRaiserSramSize];
+  bool ok = format == kSaveFileFormat_Ini
+      ? LoadIni(path, scratch, error) : LoadNative(path, scratch, error);
+  if (ok) memcpy(out, scratch, sizeof(scratch));
+  return ok;
+}
+
+typedef bool (*WriteBodyFn)(FILE *file, const void *context,
+                            SaveError *error);
+
+/* Flush this file's data blocks to stable storage. Portable half of the
+ * atomic-write durability recipe (see WriteAtomic). */
+static bool FlushFileData(FILE *file) {
+#ifdef _WIN32
+  HANDLE h = (HANDLE)_get_osfhandle(_fileno(file));
+  if (h == INVALID_HANDLE_VALUE) return false;
+  return FlushFileBuffers(h) != 0;
+#else
+  return fsync(fileno(file)) == 0;
+#endif
+}
+
+/* fsync the directory holding `path` so the rename that published the file is
+ * itself durable (POSIX fsync(2) explicitly does not cover the containing
+ * directory entry). No-op on Windows, where directories are not openable as
+ * files and MoveFileEx's metadata write-through covers the entry. */
+static void SyncContainingDirectory(const char *path) {
+#ifndef _WIN32
+  char dir[kHostPathCapacity];
+  snprintf(dir, sizeof dir, "%s", path);
+  char *slash = strrchr(dir, '/');
+  if (slash) *slash = '\0';
+  else snprintf(dir, sizeof dir, ".");
+  int fd = open(dir[0] ? dir : "/", O_RDONLY);
+  if (fd < 0) return;
+  (void)fsync(fd);
+  close(fd);
+#else
+  (void)path;
+#endif
+}
+
+static bool WriteAtomic(const char *path, WriteBodyFn body,
+                        const void *context, SaveError *error) {
+  size_t length = strlen(path);
+  char *temporary = (char *)malloc(length + 5);
+  if (!temporary) return Fail(error, "out of memory writing %s", path);
+  memcpy(temporary, path, length);
+  memcpy(temporary + length, ".tmp", 5);
+  FILE *file = sr_fopen(temporary, "wb");
+  if (!file) {
+    bool result = Fail(error, "cannot write %s: %s", temporary,
+                       strerror(errno));
+    free(temporary);
+    return result;
+  }
+  bool success = body(file, context, error);
+  if (fflush(file) != 0 || ferror(file))
+    success = Fail(error, "error flushing %s", temporary);
+  /* Durability, not just atomicity: the rename alone leaves the data blocks
+   * in the write-back cache, so a power cut just after a battery-SRAM flush
+   * could replace a good save with an EMPTY renamed file. Flush the file's
+   * own blocks before the rename on BOTH platforms:
+   *   - POSIX fsync(2): "Calling fsync() does not necessarily ensure that the
+   *     entry in the directory containing the file has also reached disk. For
+   *     that an explicit fsync() on a file descriptor for the directory is
+   *     also needed." -> SyncContainingDirectory below, after the rename.
+   *   - Windows: MOVEFILE_WRITE_THROUGH's documented flush guarantee is worded
+   *     for the copy-and-delete (cross-volume) case; our temp file is a
+   *     SAME-directory rename, so do not rely on it for the data blocks —
+   *     FlushFileBuffers the handle explicitly. */
+  if (success && !FlushFileData(file))
+    success = Fail(error, "error syncing %s: %s", temporary, strerror(errno));
+  if (fclose(file) != 0)
+    success = Fail(error, "error closing %s", temporary);
+  if (success && !AtomicReplaceFile(temporary, path))
+    success = Fail(error, "cannot replace %s: %s", path, strerror(errno));
+  /* Make the directory entry itself durable, so the rename cannot be lost
+   * while the (already-synced) file contents survive. Best-effort: a failure
+   * here does not invalidate a save that is otherwise written and renamed. */
+  if (success) SyncContainingDirectory(path);
+  if (!success) sr_remove(temporary);
+  free(temporary);
+  return success;
+}
+
+static bool WriteNativeBody(FILE *file, const void *context,
+                            SaveError *error) {
+  if (fwrite(context, 1, kActRaiserSramSize, file) != kActRaiserSramSize)
+    return Fail(error, "error writing native SRAM");
+  return true;
+}
+
+static bool WriteIniBody(FILE *file, const void *context,
+                         SaveError *error) {
+  uint8_t image[kActRaiserSramSize];
+  memcpy(image, context, sizeof(image));
+  Save_RecomputeChecksum(image);
+  if (fprintf(file,
+      "; ActRaiser Recompiled lossless battery save\n"
+      "[Meta]\nformat = actraiser-sram\nversion = 1\n"
+      "size = 0x2000\nrom = usa\n\n[Regions]\n") < 0)
+    return Fail(error, "error writing INI metadata");
+  for (int i = 0; i < kActRaiserSaveRegionCount; i++) {
+    int progress = 0;
+    if (!Save_GetRegionState(image, i, &progress))
+      return Fail(error, "invalid %s state bytes $%02X/$%02X",
+                  g_save_region_fields[i].label,
+                  image[g_save_region_fields[i].offset],
+                  image[kSaveRegionAct2Flags + i * 2] & 1);
+    if (fprintf(file, "%s = %s\n", g_save_region_fields[i].key,
+                Save_RegionStateName(progress)) < 0)
+      return Fail(error, "error writing INI regions");
+  }
+  if (fprintf(file, "\n[Raw]\n") < 0)
+    return Fail(error, "error writing INI raw header");
+  static const char hex[] = "0123456789abcdef";
+  char encoded[kSaveIniRawChunkHexCharacters + 1];
+  encoded[kSaveIniRawChunkHexCharacters] = 0;
+  for (int offset = 0; offset < kActRaiserSramSize;
+       offset += kSaveIniRawChunkBytes) {
+    for (int i = 0; i < kSaveIniRawChunkBytes; i++) {
+      encoded[i * 2] = hex[image[offset + i] >> 4];
+      encoded[i * 2 + 1] = hex[image[offset + i] & 15];
+    }
+    if (fprintf(file, "%04x = %s\n", offset, encoded) < 0)
+      return Fail(error, "error writing INI raw chunk %04X", offset);
+  }
+  return true;
+}
+
+bool Save_WriteFile(SaveFileFormat format, const char *path,
+                    const uint8_t sram[kActRaiserSramSize], SaveError *error) {
+  ClearError(error);
+  if (!path || !path[0] || !sram)
+    return Fail(error, "invalid save write request");
+  return WriteAtomic(path,
+                     format == kSaveFileFormat_Ini
+                         ? WriteIniBody : WriteNativeBody,
+                     sram, error);
+}
+
+static const char *ActivePath(void) {
+  return s_runtime.backend == kSaveBackend_Ini
+      ? s_runtime.ini_path : s_runtime.native_path;
+}
+
+typedef struct CompanionWriteContext {
+  const void *data;
+  size_t size;
+} CompanionWriteContext;
+
+static bool WriteCompanionBody(FILE *file, const void *context, SaveError *error) {
+  const CompanionWriteContext *bytes = context;
+  if (fwrite(bytes->data, 1, bytes->size, file) != bytes->size)
+    return Fail(error, "error writing save companion");
+  return true;
+}
+
+bool Save_WriteCompanionFile(const char *path, const void *data, size_t size,
+                             SaveError *error) {
+  ClearError(error);
+  if (!path || !path[0] || !data || !size)
+    return Fail(error, "invalid save companion write request");
+  const CompanionWriteContext context = {data, size};
+  return WriteAtomic(path, WriteCompanionBody, &context, error);
+}
+
+static SaveFileFormat ActiveFormat(void) {
+  return s_runtime.backend == kSaveBackend_Ini
+      ? kSaveFileFormat_Ini : kSaveFileFormat_NativeSrm;
+}
+
+typedef struct LocalizedNameWriteContext {
+  uint32_t save_checksum;
+  const char *compatibility_name;
+  const char *utf8_name;
+} LocalizedNameWriteContext;
+
+static bool LocalizedNamePath(char *path, size_t capacity) {
+  if (!path || !capacity || !s_runtime.live) return false;
+  const int written = snprintf(path, capacity, "%s.arname", ActivePath());
+  return written > 0 && (size_t)written < capacity;
+}
+
+static bool WriteLocalizedNameBody(FILE *file, const void *context,
+                                   SaveError *error) {
+  static const uint8_t kMagic[kLocalizedNameMagicBytes] = {
+      'A', 'R', 'N', 'A', 'M', 'E', '1', 0};
+  const LocalizedNameWriteContext *name =
+      (const LocalizedNameWriteContext *)context;
+  uint8_t header[kLocalizedNameMagicBytes + 4 +
+                 kActRaiserPlayerNameStorageBytes + 2] = {0};
+  memcpy(header, kMagic, sizeof(kMagic));
+  ByteOrder_WriteLe32(header + kLocalizedNameMagicBytes,
+                      name->save_checksum);
+  const size_t compatibility_bytes = strlen(name->compatibility_name);
+  memcpy(header + kLocalizedNameMagicBytes + 4,
+         name->compatibility_name, compatibility_bytes);
+  const size_t utf8_bytes = strlen(name->utf8_name);
+  ByteOrder_WriteLe16(
+      header + kLocalizedNameMagicBytes + 4 +
+          kActRaiserPlayerNameStorageBytes,
+      (uint16_t)utf8_bytes);
+  if (fwrite(header, 1, sizeof(header), file) != sizeof(header) ||
+      fwrite(name->utf8_name, 1, utf8_bytes, file) != utf8_bytes)
+    return Fail(error, "error writing localized player name");
+  return true;
+}
+
+static bool WriteLocalizedNameExtension(SaveError *error) {
+  if (!s_runtime.localized_name_valid) {
+    if(s_runtime.localized_name_clear_pending) {
+      char path[kLocalizedNamePathBytes];
+      if(!LocalizedNamePath(path,sizeof(path)) || (sr_remove(path) && errno!=ENOENT))
+        return Fail(error,"cannot retire the previous campaign name");
+      s_runtime.localized_name_clear_pending=false;
+    }
+    s_runtime.localized_name_dirty = false;
+    return true;
+  }
+  char native_name[kActRaiserPlayerNameStorageBytes];
+  if (!CopyNativePlayerName(native_name, sizeof(native_name)) ||
+      strcmp(native_name, s_runtime.localized_compatibility)) {
+    /* The accepted live name can precede the game's first battery save.
+     * Keep it in host memory without changing the older save or its sidecar. */
+    return true;
+  }
+  char path[kLocalizedNamePathBytes];
+  if (!LocalizedNamePath(path, sizeof(path)))
+    return Fail(error, "localized-name path exceeds runtime limit");
+  const LocalizedNameWriteContext context = {
+      .save_checksum = Save_ComputeChecksum(s_runtime.live),
+      .compatibility_name = s_runtime.localized_compatibility,
+      .utf8_name = s_runtime.localized_name,
+  };
+  /* A loaded name may not already be dirty when a later native save changes
+   * its checksum. Retain a retry if the companion write fails after SRAM. */
+  s_runtime.localized_name_dirty = true;
+  if (!WriteAtomic(path, WriteLocalizedNameBody, &context, error))
+    return false;
+  s_runtime.localized_name_dirty = false;
+  return true;
+}
+
+static void LoadLocalizedNameExtension(void) {
+  s_runtime.localized_name_valid = false;
+  s_runtime.localized_name_dirty = false;
+  s_runtime.localized_name_clear_pending = false;
+  char path[kLocalizedNamePathBytes];
+  if (!LocalizedNamePath(path, sizeof(path))) return;
+  FILE *file = sr_fopen(path, "rb");
+  if (!file) return;
+  char native_name[kActRaiserPlayerNameStorageBytes], name[kLocalizedNameCapacity];
+  const bool valid = CopyNativePlayerName(native_name, sizeof(native_name)) &&
+      ReadLocalizedName(file, s_runtime.live, native_name, name, sizeof(name));
+  fclose(file);
+  if (!valid) {
+    fprintf(stderr,
+            "[saves] ignored stale or invalid localized-name extension %s\n",
+            path);
+    return;
+  }
+  snprintf(s_runtime.localized_compatibility,
+           sizeof(s_runtime.localized_compatibility), "%s", native_name);
+  snprintf(s_runtime.localized_name, sizeof(s_runtime.localized_name), "%s",
+           name);
+  s_runtime.localized_name_valid = true;
+  s_runtime.localized_name_clear_pending = false;
+}
+
+bool SaveSystem_Attach(uint8_t *live_sram, size_t size,
+                       SaveBackend backend,
+                       const char *native_path, const char *ini_path,
+                       SaveError *error) {
+  ClearError(error);
+  if (!live_sram || size != kActRaiserSramSize ||
+      backend < 0 || backend >= kSaveBackend_Count ||
+      !native_path || !native_path[0] || !ini_path || !ini_path[0])
+    return Fail(error, "ActRaiser save system requires one 8192-byte SRAM");
+  if (strlen(native_path) >= sizeof(s_runtime.native_path) ||
+      strlen(ini_path) >= sizeof(s_runtime.ini_path))
+    return Fail(error, "save path exceeds the %zu-byte runtime limit",
+                sizeof(s_runtime.native_path) - 1);
+  memset(&s_runtime, 0, sizeof(s_runtime));
+  s_runtime.live = live_sram;
+  s_runtime.size = size;
+  s_runtime.backend = backend;
+  snprintf(s_runtime.native_path, sizeof(s_runtime.native_path), "%s",
+           native_path);
+  snprintf(s_runtime.ini_path, sizeof(s_runtime.ini_path), "%s", ini_path);
+  return true;
+}
+
+bool SaveSystem_MigrateLegacyNative(const char *legacy_path,
+                                    SaveError *error) {
+  ClearError(error);
+  if (!s_runtime.live) return Fail(error, "save system is not attached");
+  if (!legacy_path || !legacy_path[0])
+    return Fail(error, "legacy save path is empty");
+
+  const char *active_path = ActivePath();
+  FILE *probe = sr_fopen(active_path, "rb");
+  if (probe) {
+    fclose(probe);
+    return true;
+  }
+  if (errno != ENOENT)
+    return Fail(error, "cannot inspect %s: %s",
+                active_path, strerror(errno));
+
+  probe = sr_fopen(legacy_path, "rb");
+  if (!probe) {
+    if (errno == ENOENT) return true;
+    return Fail(error, "cannot inspect %s: %s",
+                legacy_path, strerror(errno));
+  }
+  fclose(probe);
+
+  uint8_t legacy[kActRaiserSramSize];
+  if (!LoadNative(legacy_path, legacy, error)) return false;
+  if (!Save_WriteFile(ActiveFormat(), active_path, legacy, error))
+    return false;
+  fprintf(stderr, "[saves] migrated legacy %s -> %s (%s backend)\n",
+          legacy_path, active_path,
+          s_runtime.backend == kSaveBackend_Ini ? "ini" : "native-srm");
+  return true;
+}
+
+void SaveSystem_ResyncShadow(void) {
+  if (!s_runtime.live || s_runtime.size != kActRaiserSramSize) return;
+  memcpy(s_runtime.shadow, s_runtime.live, kActRaiserSramSize);
+  s_runtime.shadow_valid = true;
+}
+
+void SaveSystem_ResyncShadowRange(size_t offset, size_t size) {
+  if (!s_runtime.live || !s_runtime.shadow_valid ||
+      s_runtime.size != kActRaiserSramSize ||
+      offset > kActRaiserSramSize || size > kActRaiserSramSize - offset)
+    return;
+  memcpy(s_runtime.shadow + offset, s_runtime.live + offset, size);
+}
+
+bool SaveSystem_SetStorageRoot(const char *root,int slot,SaveError *error) {
+  if(!s_runtime.live)return Fail(error,"save system is not attached");
+  SavePaths paths;
+  if(!SavePaths_Init(&paths,root,slot,error))return false;
+  s_runtime.paths=paths;s_runtime.paths_valid=true;return true;
+}
+bool SaveSystem_DefaultImportPath(char *out,size_t capacity,SaveError *error) {
+  return s_runtime.paths_valid ? SavePaths_Import(&s_runtime.paths,out,capacity,error) :
+      Fail(error,"save storage location is not configured");
+}
+bool SaveSystem_RecoveryPath(const uint8_t id[16],char *out,size_t capacity,SaveError *error) {
+  if(s_runtime.paths_valid && s_runtime.paths.slot>=0)
+    return SavePaths_Recovery(&s_runtime.paths,id,out,capacity,error);
+  if(!id || !out || !capacity || !s_runtime.live)return Fail(error,"no active recovery location");
+  const int prefix=snprintf(out,capacity,"%s.redevelopment-",ActivePath());
+  if(prefix<=0 || (size_t)prefix+33>capacity)return Fail(error,"recovery path is too long");
+  for(unsigned i=0;i<16;++i)snprintf(out+prefix+2*i,3,"%02x",id[i]);
+  return true;
+}
+
+bool SaveSystem_SetCommitHost(const SaveCommitHost *host) {
+  if (!s_runtime.live || s_runtime.native_write_active ||
+      s_runtime.native_write_aborted || s_runtime.story_pending ||
+      (host && (!host->commit || !host->prepare_story || !host->reloaded)))
+    return false;
+  s_runtime.commit_host = host ? *host : (SaveCommitHost){0};
+  return true;
+}
+
+static bool CommitImage(const uint8_t *image, SaveCommitKind kind,
+                         const SaveImportSource *import_source, SaveError *error) {
+  const SaveCommitHost *host = &s_runtime.commit_host;
+  if(kind==kSaveCommit_Import && import_source && import_source->payload_size && !host->commit)
+    return Fail(error,"campaign metadata requires its game feature owner");
+  if(s_runtime.storage_hooks.before_commit &&
+      !s_runtime.storage_hooks.before_commit(s_runtime.storage_hooks.context,error))return false;
+  bool ok = host->commit
+      ? host->commit(host->context, ActiveFormat(), ActivePath(),
+                     s_runtime.durable_valid ? s_runtime.durable : NULL,
+                     image, kind, import_source, error)
+      : Save_WriteFile(ActiveFormat(), ActivePath(), image, error);
+  if (!ok) return false;
+  memcpy(s_runtime.durable, image, kActRaiserSramSize);
+  s_runtime.durable_valid = true;
+  if(s_runtime.storage_hooks.committed)
+    s_runtime.storage_hooks.committed(s_runtime.storage_hooks.context,image);
+  return true;
+}
+
+void SaveSystem_SetStorageHooks(const SaveStorageHooks *hooks) {
+  s_runtime.storage_hooks=hooks?*hooks:(SaveStorageHooks){0};
+}
+bool SaveSystem_ValidateActive(SaveError *error) {
+  return !s_runtime.storage_hooks.validate ||
+      s_runtime.storage_hooks.validate(s_runtime.storage_hooks.context,error);
+}
+bool SaveSystem_FlushForSwitch(SaveError *error) {
+  if(!s_runtime.live || s_runtime.native_write_active || s_runtime.native_write_aborted)
+    return Fail(error,"A native save is unfinished. Complete or reload it before changing slots.");
+  return SaveSystem_AutoPersistIfChanged(error);
+}
+
+static void NotifyReload(void) {
+  s_runtime.story_pending = false;
+  if (s_runtime.commit_host.reloaded)
+    s_runtime.commit_host.reloaded(s_runtime.commit_host.context);
+}
+
+bool SaveSystem_LoadActive(SaveError *error) {
+  if(!SaveSystem_ValidateActive(error))return false;
+  ClearError(error);
+  if (!s_runtime.live) return Fail(error, "save system is not attached");
+  if (s_runtime.native_write_active)
+    return Fail(error, "cannot reload during a native save transaction");
+  const char *path = ActivePath();
+  FILE *probe = sr_fopen(path, "rb");
+  if (!probe) {
+    if (errno == ENOENT) {
+      s_runtime.durable_valid = false;
+      s_runtime.native_write_active = false;
+      s_runtime.native_write_aborted = false;
+      NotifyReload();
+      s_runtime.localized_name_valid = false;
+      s_runtime.localized_name_dirty = false;
+      SaveSystem_ResyncShadow();
+      fprintf(stderr, "[saves] %s backend: no existing %s; using fresh SRAM\n",
+              s_runtime.backend == kSaveBackend_Ini ? "ini" : "native-srm",
+              path);
+      return true;
+    }
+    return Fail(error, "cannot inspect %s: %s", path, strerror(errno));
+  }
+  fclose(probe);
+  if (!Save_LoadFile(ActiveFormat(), path, s_runtime.live, error)) return false;
+  memcpy(s_runtime.durable, s_runtime.live, kActRaiserSramSize);
+  s_runtime.durable_valid = true;
+  s_runtime.native_write_active = false;
+  s_runtime.native_write_aborted = false;
+  NotifyReload();
+  SaveSystem_ResyncShadow();
+  LoadLocalizedNameExtension();
+  fprintf(stderr, "[saves] loaded %s backend from %s\n",
+          s_runtime.backend == kSaveBackend_Ini ? "ini" : "native-srm", path);
+  return true;
+}
+
+bool SaveSystem_WriteActive(SaveError *error) {
+  ClearError(error);
+  if (!s_runtime.live) return Fail(error, "save system is not attached");
+  if (s_runtime.native_write_active || s_runtime.native_write_aborted)
+    return Fail(error, "native save transaction is incomplete; existing save preserved");
+  if (!CommitImage(s_runtime.live, s_runtime.story_pending
+                     ? kSaveCommit_Story : kSaveCommit_Automatic, NULL, error))
+    return false;
+  s_runtime.story_pending = false;
+  SaveSystem_ResyncShadow();
+  return WriteLocalizedNameExtension(error);
+}
+
+SaveStorySnapshotResult SaveSystem_CommitStorySnapshot(const uint8_t *image, SaveError *error) {
+  ClearError(error);
+  if (!s_runtime.live || !image || image == s_runtime.live || !Save_ChecksumValid(image)) {
+    Fail(error, "no separate, valid story snapshot to commit");
+    return kSaveStorySnapshot_NotCommitted;
+  }
+  if (s_runtime.native_write_active || s_runtime.native_write_aborted || s_runtime.story_pending) {
+    Fail(error, "complete the pending native save before a story snapshot");
+    return kSaveStorySnapshot_NotCommitted;
+  }
+  if (!CommitImage(image, kSaveCommit_StorySnapshot, NULL, error))
+    return kSaveStorySnapshot_NotCommitted;
+  memcpy(s_runtime.live, image, kActRaiserSramSize);
+  SaveSystem_ResyncShadow();
+  return WriteLocalizedNameExtension(error)
+      ? kSaveStorySnapshot_Committed : kSaveStorySnapshot_NamePending;
+}
+
+bool SaveSystem_AutoPersistIfChanged(SaveError *error) {
+  ClearError(error);
+  if (!s_runtime.live) return Fail(error, "save system is not attached");
+  if (s_runtime.native_write_aborted)
+    return Fail(error, "native save transaction was interrupted; existing save preserved");
+  if (s_runtime.native_write_active) return true;
+  if (!s_runtime.shadow_valid) {
+    SaveSystem_ResyncShadow();
+    return true;
+  }
+  if (!s_runtime.story_pending && !memcmp(s_runtime.shadow, s_runtime.live, kActRaiserSramSize))
+    return !s_runtime.localized_name_dirty ||
+        WriteLocalizedNameExtension(error);
+  if (!SaveSystem_WriteActive(error)) return false;
+  fprintf(stderr, "[saves] battery SRAM changed -> wrote %s\n", ActivePath());
+  return true;
+}
+
+bool SaveSystem_BeginNativeWrite(SaveError *error) {
+  ClearError(error);
+  if (!s_runtime.live) return Fail(error, "save system is not attached");
+  if (s_runtime.native_write_active || s_runtime.native_write_aborted)
+    return Fail(error, "cannot enter an unfinished native save transaction");
+  s_runtime.native_write_active = true;
+  return true;
+}
+
+bool SaveSystem_EndNativeWrite(bool completed, SaveError *error) {
+  ClearError(error);
+  if (!s_runtime.native_write_active)
+    return Fail(error, "no native save transaction is active");
+  s_runtime.native_write_active = false;
+  s_runtime.native_write_aborted = !completed || !Save_ChecksumValid(s_runtime.live);
+  if (s_runtime.native_write_aborted)
+    return Fail(error, "native save transaction did not complete a valid image");
+  if (s_runtime.commit_host.prepare_story &&
+      !s_runtime.commit_host.prepare_story(s_runtime.commit_host.context, error)) {
+    s_runtime.native_write_aborted = true;
+    return false;
+  }
+  s_runtime.story_pending = true;
+  fprintf(stderr, "[saves] native story transaction completed\n");
+  return true;
+}
+
+bool SaveSystem_CopyDurableImage(uint8_t out[kActRaiserSramSize]) {
+  if (!out || !s_runtime.durable_valid) return false;
+  memcpy(out, s_runtime.durable, kActRaiserSramSize);
+  return true;
+}
+
+const char *SaveSystem_ActivePath(void) {
+  return s_runtime.live ? ActivePath() : "";
+}
+
+SaveBackend SaveSystem_ActiveBackend(void) {
+  return s_runtime.backend;
+}
+
+#include "save/save_campaign_archive.inc"
+
+bool SaveSystem_ExportToLibrary(SaveFileFormat format,bool campaign,SaveError *error) {
+  if(!s_runtime.paths_valid)return Fail(error,"save storage location is not configured");
+  char path[kHostPathCapacity];
+  const char *extension=campaign?"arsave":format==kSaveFileFormat_Ini?"ini":"srm";
+  if(!SavePaths_Export(&s_runtime.paths,extension,path,sizeof(path),error))return false;
+  bool ok=campaign?SaveSystem_ExportCampaign(path,error):SaveSystem_Export(format,path,error);
+  SavePaths_Release(path);
+  if(ok)fprintf(stderr,"[saves] export -> %s\n",path);
+  return ok;
+}
+
+static bool BackupActiveOnce(bool enabled, SaveError *error) {
+  if (!enabled || s_runtime.backup_taken) return true;
+  const char *path = ActivePath();
+  FILE *probe = sr_fopen(path, "rb");
+  if (!probe) {
+    if (errno == ENOENT) {
+      s_runtime.backup_taken = true;
+      return true;
+    }
+    return Fail(error, "cannot inspect %s for backup: %s", path,
+                strerror(errno));
+  }
+  fclose(probe);
+  if(s_runtime.paths_valid && s_runtime.paths.slot>=0) {
+    char backup[kHostPathCapacity];
+    if(!SavePaths_Backup(&s_runtime.paths,backup,sizeof(backup),error))return false;
+    bool ok=SaveSystem_ExportCampaign(backup,error);SavePaths_Release(backup);
+    if(!ok)return false;
+    s_runtime.backup_taken=true;fprintf(stderr,"[saves] backup -> %s\n",backup);return true;
+  }
+  time_t now = time(NULL);
+  struct tm local_time;
+#ifdef _WIN32
+  localtime_s(&local_time, &now);
+#else
+  localtime_r(&now, &local_time);
+#endif
+  char timestamp[32];
+  strftime(timestamp, sizeof(timestamp), "%Y%m%d-%H%M%S", &local_time);
+  char backup[kSaveBackupPathBytes];
+  unsigned serial=0;
+  do {
+    int n=snprintf(backup,sizeof(backup),"%s.bak-%s-%03u.arsave",path,timestamp,serial++);
+    if(n<0 || (size_t)n>=sizeof(backup) || serial>1000)return Fail(error,"cannot reserve a campaign backup path");
+  } while(ArchivePathExists(backup));
+  if (!SaveSystem_ExportCampaign(backup, error)) return false;
+  s_runtime.backup_taken = true;
+  fprintf(stderr, "[saves] backup -> %s\n", backup);
+  return true;
+}
+
+static bool SetStagedU8(uint8_t *scratch, int offset, int value,
+                        int minimum, int maximum, const char *label,
+                        SaveError *error) {
+  if (value < 0) return true;
+  if (value < minimum || value > maximum)
+    return Fail(error, "%s must be %d..%d", label, minimum, maximum);
+  scratch[offset] = (uint8_t)value;
+  return true;
+}
+
+static bool SetStagedU16(uint8_t *scratch, int offset, int value,
+                         int minimum, int maximum, const char *label,
+                         SaveError *error) {
+  if (value < 0) return true;
+  if (value < minimum || value > maximum)
+    return Fail(error, "%s must be %d..%d", label, minimum, maximum);
+  ByteOrder_WriteLe16(scratch + offset, (uint16_t)value);
+  return true;
+}
+
+static bool SaveItemValueValid(int value) {
+  static const uint8_t values[] = {
+    0x00, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a,
+    0x0b, 0x0d, 0x0e, 0x0f, 0x12, 0x13, 0x14,
+  };
+  for (size_t i = 0; i < sizeof(values); i++)
+    if (value == values[i]) return true;
+  return false;
+}
+
+static bool ScoreToBcd(int score, uint16_t *encoded) {
+  if (!encoded || score < 0 || score > 99990 || score % 10) return false;
+  int value = score / 10;
+  uint16_t bcd = 0;
+  for (int shift = 0; shift < 16; shift += 4) {
+    bcd |= (uint16_t)((value % 10) << shift);
+    value /= 10;
+  }
+  if (value) return false;
+  *encoded = bcd;
+  return true;
+}
+
+bool SaveSystem_ApplyEdits(const SaveEditRequest *edits,
+                           bool armed, bool persist,
+                           bool auto_backup, SaveError *error) {
+  ClearError(error);
+  if (!s_runtime.live || !edits)
+    return Fail(error, "save system is not attached");
+  if (s_runtime.native_write_active || s_runtime.native_write_aborted || s_runtime.story_pending)
+    return Fail(error, "cannot edit an incomplete native save transaction");
+  if (!armed) return Fail(error, "save editing is not armed");
+  if (!Save_ChecksumValid(s_runtime.live))
+    return Fail(error, "current SRAM has no valid save checksum");
+  uint8_t scratch[kActRaiserSramSize];
+  memcpy(scratch, s_runtime.live, sizeof(scratch));
+  for (int i = 0; i < kActRaiserSaveRegionCount; i++) {
+    if (edits->region_state[i] < 0) continue;
+    if (!Save_SetRegionState(scratch, i, edits->region_state[i]))
+      return Fail(error, "invalid %s state value %d",
+                  g_save_region_fields[i].label, edits->region_state[i]);
+  }
+  if (edits->player_name_set) {
+    size_t length = strlen(edits->player_name);
+    if (length == 0 || length > kActRaiserPlayerNameCharacterLimit)
+      return Fail(error, "Player name must contain 1..%d characters",
+                  kActRaiserPlayerNameCharacterLimit);
+    for (size_t i = 0; i < length; i++) {
+      unsigned char ch = (unsigned char)edits->player_name[i];
+      if (ch < 0x20 || ch > 0x7e)
+        return Fail(error, "Player name must use printable ASCII");
+    }
+    /* The game reserves nine bytes at $1439-$1441 for an eight-character
+     * name plus terminator/padding; $1442 begins the level word. */
+    memset(scratch + kSavePlayerName, 0,
+           kActRaiserPlayerNameStorageBytes);
+    memcpy(scratch + kSavePlayerName, edits->player_name, length);
+  }
+  if (edits->professional_mode >= 0) {
+    if (edits->professional_mode > 1)
+      return Fail(error, "Professional mode must be locked or unlocked");
+    if (edits->professional_mode) {
+      scratch[kSaveProfessionalMode + 0] = 'A';
+      scratch[kSaveProfessionalMode + 1] = 'C';
+      scratch[kSaveProfessionalMode + 2] = 'T';
+    } else {
+      memset(scratch + kSaveProfessionalMode, 0xff,
+             kProfessionalModeSignatureBytes);
+    }
+  }
+  if (edits->death_heim_state >= 0) {
+    if (edits->death_heim_state != kDeathHeimStateLocked &&
+        edits->death_heim_state != kDeathHeimStateUnlocked &&
+        edits->death_heim_state != kDeathHeimStateCleared)
+      return Fail(error, "Death Heim state must be locked, unlocked, or cleared");
+    scratch[kSaveDeathHeimState] =
+        (uint8_t)(edits->death_heim_state == kDeathHeimStateCleared
+                      ? kDeathHeimStoredCleared : 0);
+    scratch[kSaveDeathHeimUnlocked] =
+        (uint8_t)((scratch[kSaveDeathHeimUnlocked] & ~1u) |
+                  (edits->death_heim_state != kDeathHeimStateLocked));
+  }
+  if (!SetStagedU16(scratch, kSaveMasterLevel, edits->master_level,
+                    1, 17, "Master level", error) ||
+      !SetStagedU16(scratch, kSaveMasterHp, edits->master_hp,
+                    1, 24, "Master HP", error) ||
+      !SetStagedU16(scratch, kSaveMasterMp, edits->master_mp,
+                    0, 10, "Master MP", error) ||
+      !SetStagedU16(scratch, kSaveAngelSpCurrent, edits->angel_sp_current,
+                    0, 999, "Angel current SP", error) ||
+      !SetStagedU16(scratch, kSaveAngelSpMax, edits->angel_sp_max,
+                    0, 999, "Angel maximum SP", error) ||
+      !SetStagedU8(scratch, kSaveAngelHpCurrent, edits->angel_hp_current,
+                   0, 24, "Angel current HP", error) ||
+      !SetStagedU8(scratch, kSaveAngelHpMax, edits->angel_hp_max,
+                   1, 24, "Angel maximum HP", error) ||
+      !SetStagedU8(scratch, kSaveMessageSpeed, edits->message_speed,
+                   0, 9, "Message speed", error))
+    return false;
+  if (edits->lives >= 0) {
+    if (edits->lives < 1 || edits->lives > 9)
+      return Fail(error, "Lives must be 1..9");
+    scratch[kSaveLives] = (uint8_t)(edits->lives - 1);
+  }
+  for (int i = 0; i < kActRaiserSaveMagicSlotCount; i++) {
+    if (edits->magic_slots[i] < 0) continue;
+    if (edits->magic_slots[i] > kActRaiserMagicSpellCount)
+      return Fail(error, "Magic slot %d must be empty or magic 1..%d", i + 1,
+                  kActRaiserMagicSpellCount);
+    scratch[kSaveMagicSlots + i] =
+        (uint8_t)((scratch[kSaveMagicSlots + i] & 0x80) |
+                  edits->magic_slots[i]);
+  }
+  if (edits->equipped_magic >= 0) {
+    if (edits->equipped_magic > kActRaiserMagicSpellCount)
+      return Fail(error, "Equipped magic must be none or spell 1..%d",
+                  kActRaiserMagicSpellCount);
+    for (int i = 0; i < kActRaiserSaveMagicSlotCount; i++)
+      scratch[kSaveMagicSlots + i] &= 0x7f;
+    if (edits->equipped_magic) {
+      int selected_slot = -1;
+      for (int i = 0; i < kActRaiserSaveMagicSlotCount; i++) {
+        if ((scratch[kSaveMagicSlots + i] & 0x7f) ==
+            edits->equipped_magic) {
+          selected_slot = i;
+          break;
+        }
+      }
+      if (selected_slot < 0)
+        return Fail(error, "Equipped spell %d is not present in a magic slot",
+                    edits->equipped_magic);
+      scratch[kSaveMagicSlots + selected_slot] |= 0x80;
+    }
+    scratch[kSaveEquippedMagic] = (uint8_t)edits->equipped_magic;
+  }
+  for (int i = 0; i < kActRaiserSaveItemSlotCount; i++) {
+    if (edits->item_slots[i] < 0) continue;
+    if (!SaveItemValueValid(edits->item_slots[i]))
+      return Fail(error, "Item slot %d has invalid item $%02X", i + 1,
+                  edits->item_slots[i]);
+    scratch[kSaveItemSlots + i] = (uint8_t)edits->item_slots[i];
+  }
+  for (int region = 0; region < kActRaiserSaveRegionCount; region++) {
+    for (int act = 0; act < kActRaiserSaveActCount; act++) {
+      int score = edits->scores[region][act];
+      if (score < 0) continue;
+      uint16_t bcd = 0;
+      if (!ScoreToBcd(score, &bcd))
+        return Fail(error, "%s Act %d score must be 0..99990 by 10",
+                    g_save_region_fields[region].label, act + 1);
+      ByteOrder_WriteLe16(scratch + kSaveScores +
+                    region * kActRaiserSaveActCount * (int)sizeof(uint16_t) +
+                    act * (int)sizeof(uint16_t),
+                bcd);
+    }
+  }
+  if (!memcmp(scratch, s_runtime.live, sizeof(scratch)))
+    return Fail(error, "no staged save edits change the image");
+  Save_RecomputeChecksum(scratch);
+  if (persist) {
+    if (!BackupActiveOnce(auto_backup, error)) return false;
+    if (!CommitImage(scratch, kSaveCommit_Editor, NULL, error))
+      return false;
+  }
+  memcpy(s_runtime.live, scratch, sizeof(scratch));
+  SaveSystem_ResyncShadow();
+  if (persist && s_runtime.localized_name_valid)
+    s_runtime.localized_name_dirty = true;
+  return true;
+}
+
+bool SaveSystem_ApplyRegionEdits(const int edits[kActRaiserSaveRegionCount],
+                                 bool armed, bool persist,
+                                 bool auto_backup, SaveError *error) {
+  if (!edits) return Fail(error, "invalid region edit request");
+  SaveEditRequest request;
+  SaveEditRequest_Clear(&request);
+  memcpy(request.region_state, edits, sizeof(request.region_state));
+  return SaveSystem_ApplyEdits(&request, armed, persist,
+                               auto_backup, error);
+}
+
+static SaveFileFormat FormatFromPath(const char *path) {
+  size_t length = path ? strlen(path) : 0;
+  const char *extension = length >= 4 ? path + length - 4 : "";
+  return length >= 4 && extension[0] == '.' &&
+      tolower((unsigned char)extension[1]) == 'i' &&
+      tolower((unsigned char)extension[2]) == 'n' &&
+      tolower((unsigned char)extension[3]) == 'i'
+      ? kSaveFileFormat_Ini : kSaveFileFormat_NativeSrm;
+}
+
+bool SaveSystem_Import(const char *path, bool auto_backup, SaveError *error) {
+  ClearError(error);
+  if (!s_runtime.live || !path || !path[0])
+    return Fail(error, "invalid save import request");
+  if (s_runtime.native_write_active || s_runtime.native_write_aborted || s_runtime.story_pending)
+    return Fail(error, "cannot import during an incomplete native save transaction");
+  SaveCampaignArchive *archive=calloc(1,sizeof(*archive));
+  if(!archive)return Fail(error,"out of memory reading campaign archive");
+  bool is_archive=false;
+  if(!ReadCampaignImport(path,archive,&is_archive,error)){free(archive);return false;}
+  SaveImportSource source={.path=path,.payload=is_archive?archive->payload:NULL,
+    .payload_size=archive->payload_size,.archive=is_archive};
+  if(!BackupActiveOnce(auto_backup,error) ||
+      !CommitImage(archive->image,kSaveCommit_Import,&source,error)){free(archive);return false;}
+  memcpy(s_runtime.live,archive->image,sizeof(archive->image));
+  SaveSystem_ResyncShadow();
+  s_runtime.localized_name_valid=false;
+  s_runtime.localized_name_dirty=true;
+  s_runtime.localized_name_clear_pending=!archive->name[0];
+  if(archive->name[0]) {
+    snprintf(s_runtime.localized_name,sizeof(s_runtime.localized_name),"%s",archive->name);
+    CopyNativePlayerName(s_runtime.localized_compatibility,sizeof(s_runtime.localized_compatibility));
+    s_runtime.localized_name_valid=true;
+  }
+  free(archive);
+  /* Gameplay and its feature checkpoint are already committed. Name writes
+   * are retryable, just like a completed native story save; do not report a
+   * failed import that invites replacing the campaign a second time. */
+  if(!WriteLocalizedNameExtension(error))
+    fprintf(stderr,"[saves] campaign imported; enhanced-name write will retry: %s\n",error?error->message:"");
+  return true;
+}
+
+bool SaveSystem_Export(SaveFileFormat format, const char *path,
+                       SaveError *error) {
+  ClearError(error);
+  if (!s_runtime.live) return Fail(error, "save system is not attached");
+  if (s_runtime.native_write_active || s_runtime.native_write_aborted)
+    return Fail(error, "cannot export an incomplete native save transaction");
+  if (!Save_ChecksumValid(s_runtime.live))
+    return Fail(error, "current SRAM has no valid save checksum");
+  return Save_WriteFile(format, path, s_runtime.live, error);
+}
+
+bool SaveSystem_CreateRecoveryCopy(const char *directory, SaveError *error) {
+  ClearError(error);
+  if (!s_runtime.live || !s_runtime.durable_valid)
+    return Fail(error, "no durable save for a recovery copy");
+  if (s_runtime.native_write_active || s_runtime.native_write_aborted ||
+      s_runtime.story_pending || s_runtime.localized_name_dirty ||
+      memcmp(s_runtime.live, s_runtime.durable, kActRaiserSramSize))
+    return Fail(error, "complete and persist the current story save before recovery copy");
+  const SaveCommitHost *host = &s_runtime.commit_host;
+  if (host->commit && !host->copy_recovery)
+    return Fail(error, "save feature owner cannot preserve recovery companions");
+  char path[kSaveRuntimePathBytes], name_path[kLocalizedNamePathBytes];
+  if (!directory || !directory[0]) return Fail(error, "recovery directory is empty");
+  const int written = snprintf(path, sizeof(path), "%s/save.srm", directory);
+  if (written <= 0 || (size_t)written >= sizeof(path))
+    return Fail(error, "recovery path exceeds runtime limit");
+  snprintf(name_path, sizeof(name_path), "%s.arname", path);
+  uint8_t disk[kActRaiserSramSize];
+  if (!Save_LoadFile(ActiveFormat(), ActivePath(), disk, error)) return false;
+  if (memcmp(disk, s_runtime.durable, sizeof(disk)))
+    return Fail(error, "save changed since load; reload before recovery copy");
+  char native_name[kActRaiserPlayerNameStorageBytes];
+  if (s_runtime.localized_name_valid &&
+      (!CopyNativePlayerName(native_name, sizeof(native_name)) ||
+       strcmp(native_name, s_runtime.localized_compatibility)))
+    return Fail(error, "localized name belongs to an unsaved campaign");
+
+  /* mkdir is the exclusive reservation, including against existing symlinks.
+   * Do not remove partial artifacts or overwrite a prior recovery on failure. */
+  if (sr_mkdir(directory) != 0)
+    return Fail(error, "cannot reserve recovery directory %s: %s", directory, strerror(errno));
+  SyncContainingDirectory(directory);
+  if (s_runtime.localized_name_valid) {
+    const LocalizedNameWriteContext name = {
+        .save_checksum = Save_ComputeChecksum(disk),
+        .compatibility_name = s_runtime.localized_compatibility,
+        .utf8_name = s_runtime.localized_name,
+    };
+    if (!WriteAtomic(name_path, WriteLocalizedNameBody, &name, error)) return false;
+  }
+  return host->commit
+      ? host->copy_recovery(host->context, ActivePath(), path, disk, error)
+      : Save_WriteFile(kSaveFileFormat_NativeSrm, path, disk, error);
+}

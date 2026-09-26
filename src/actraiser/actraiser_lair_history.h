@@ -3,7 +3,7 @@
 
 #include "regional/towns/regional_lair_history.h"
 #include "snesrecomp/game/cpu.h"
-#include "save_system.h"
+#include "save/save_system.h"
 
 typedef enum ActRaiserLairEvent {
   kActRaiserLairEvent_Kill,

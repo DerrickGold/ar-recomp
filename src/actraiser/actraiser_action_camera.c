@@ -18,9 +18,9 @@
 #include "action/action_camera_bounds.h"
 #include "actraiser_action_bg.h"
 #include "actraiser_game.h"
-#include "display_geometry.h"
+#include "present/display_geometry.h"
 #include "snesrecomp/game/cpu.h"
-#include "settings.h"
+#include "app/settings.h"
 
 #include <stdio.h>
 #include <stdlib.h>

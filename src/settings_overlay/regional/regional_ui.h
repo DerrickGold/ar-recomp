@@ -3,7 +3,7 @@
 
 #include "localization/ui_catalog.h"
 #include "regional/regional_costs.h"
-#include "settings_overlay_artwork.h"
+#include "settings_overlay/settings_overlay_artwork.h"
 #include "actraiser/regional/actraiser_regional_settings.h"
 
 /* Value-copy UI adapter. No CPU,

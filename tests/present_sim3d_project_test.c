@@ -3,7 +3,7 @@
 #include "present_sim3d_project.h"
 #include "sim/sim_world_navigation_terrain.h"
 #include "sim/sim_town_terrain.h"
-#include "performance_metrics.h"
+#include "app/performance_metrics.h"
 #undef NDEBUG
 #include <assert.h>
 #include <math.h>

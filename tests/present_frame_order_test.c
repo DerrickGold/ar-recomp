@@ -2,13 +2,13 @@
  * paints outside the game image black, so host UI must run afterward. Compile
  * the small orchestrator against stage stubs to keep that order testable on a
  * headless machine with no renderer or GPU. */
-#include "present.h"
-#include "present_internal.h"
+#include "present/present.h"
+#include "present/present_internal.h"
 #include "present_sim_menu.h"
-#include "crt_post.h"
-#include "render_comparison.h"
-#include "session_fatal.h"
-#include "settings.h"
+#include "render/crt_post.h"
+#include "present/render_comparison.h"
+#include "app/session_fatal.h"
+#include "app/settings.h"
 
 #include <stdio.h>
 #include <string.h>

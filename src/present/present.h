@@ -1,0 +1,429 @@
+#ifndef PRESENT_H
+#define PRESENT_H
+
+#include <stdbool.h>
+#include <stdint.h>
+#include "snesrecomp/game/types.h"
+#include "constants.h"
+#include "replacements/hd_replacements.h"
+#include "diorama/diorama.h"
+#include "sim/sim3d.h"
+#include "action/action_effects.h"
+#include "action/action_bg_plan.h"
+#include "present/presentation_frame_generation.h"
+#include "render/hud_layout.h"
+#include "sim/sim_menu_art.h"
+#include "render/render_device.h"
+#include "localization/localization_frame.h"
+#include "snesrecomp/runner.h"
+
+/* FrameSlot is the sole game-state contract for presentation. FrameSlot_Capture
+ * populates it immediately after RtlDrawPpuFrame; presentation consumes the
+ * captured values instead of reading g_ppu, g_settings, or geometry globals.
+ *
+ * PPU-bound pixel buffers travel as immutable, borrowed runner-ABI surface
+ * descriptors in the slot. Host-derived products (the SIM OBJ atlas, flat
+ * composite, town canvases, and presentation atlases) remain boot-owned
+ * globals and are not copied. Synchronous ordering guarantees Upload consumes
+ * every borrowed buffer before the next tick overwrites or invalidates it.
+ * The slot is not a cross-thread handoff. */
+
+/* Mirrors ppu.h's kPpuOverlaySource_* / kPpuOverlayFlag_RemoveFromGame.
+ * present.c does not include ppu.h (D6), so the order/value is pinned here
+ * and cross-checked by FrameSlot_Capture's _Static_assert against the real
+ * enum where it's populated (main.c, which does include ppu.h). */
+enum {
+  kFrameSlotOverlay_Bg1 = 0,
+  kFrameSlotOverlay_Bg2 = 1,
+  kFrameSlotOverlay_Bg3 = 2,
+  kFrameSlotOverlay_Bg4 = 3,
+  kFrameSlotOverlay_Obj = 4,
+  kFrameSlotOverlaySourceCount = 5,  /* SR_PPU_OVERLAY_SOURCE_COUNT */
+  /* Mirrors ppu.h's allocated layer-texture axes for the same D6 reason as the
+   * overlay enum above: present-time code must not include ppu.h. Width is the
+   * full surface (PPU buffer plus resolve aprons); height is the authentic 224
+   * rows plus both 64-row vertical-margin budgets. Captures occupy subregions,
+   * but normalized UV movement must always divide by these allocation sizes.
+   * Cross-checked by FrameSlot_Capture's _Static_asserts against the real
+   * constants. */
+  kFrameSlotLayerTextureWidth = 640,  /* kPpuSurfaceWidth (512 + 64*2) */
+  kFrameSlotLayerTextureHeight = 352, /* kPpuBufHeight (224 + 64*2) */
+  /* The authentic SNES screen dimensions, mirroring actraiser_game.h's
+   * kActRaiserAuthenticWidth/Height for the same D6 reason as the constants above:
+   * present-time code must not include actraiser_game.h, which declares g_ram and
+   * a pile of live WRAM accessors this side of the wall must not touch.
+   *
+   * This is the width of the AUTHENTIC image inside a possibly-wider framebuffer.
+   * The widescreen layout is [extra][256][extra], so `(snes_width - this) / 2` is
+   * the left margin and HUD source rects are expressed against this rather than
+   * against snes_width -- the HUD is authored for the authentic window and is
+   * anchored, not stretched. Do not confuse it with snes_width (the whole
+   * framebuffer, which varies) or with the fixed layer-texture allocation
+   * dimensions above, which normalize the U/V axes.
+   *
+   * Both are cross-checked against their actraiser_game.h counterparts by
+   * _Static_asserts in frame_slot.c. */
+  kFrameSlotAuthenticWidth = kActRaiserAuthenticWidth,
+  kFrameSlotAuthenticHeight = kActRaiserAuthenticHeight,
+};
+enum {
+  kFrameSlotOverlayFlag_RemoveFromGame = 1,
+  kFrameSlotOverlayFlag_MarkFullAddSubscreen = 16,
+};
+
+typedef struct FrameSlotOverlayCapture {
+  int16_t x0, x1;
+  int16_t y0, y1;
+  uint8_t flags;
+  uint8_t oamFirst, oamCount;
+} FrameSlotOverlayCapture;
+
+typedef struct FrameSlotHdEntry {
+  bool active;
+  int source;
+  bool brightness_mod;
+  int image_inset_left; /* preserve image placement inside an erasure gutter */
+  /* Opaque host texture, valid for a synchronous present. Texture reloads and
+   * render-target resets invalidate retained slots, so their handlers must call
+   * HostDisplay_InvalidatePresentHistory(). Any new FrameSlot retention site
+   * needs the same invalidation. */
+  ArRenderTexture texture;
+} FrameSlotHdEntry;
+
+typedef struct InspectorPresentationSelection {
+  InspectorPresentationKind kind;
+  double source_x;
+  double source_y;
+  int output_x;
+  int output_y;
+  int output_width;
+  int output_height;
+} InspectorPresentationSelection;
+
+typedef struct FrameSlot {
+  SimMenuFrame sim_menu;
+  /* Coherent, zero-copy views of the PPU output bindings that produced this
+   * frame. The descriptors are copied; their host-owned pixels are not. They
+   * remain valid through synchronous upload and retained re-presents between
+   * ticks, but never across a runner tick/reset/load or PPU surface rebind. */
+  SrPpuSurfaceSnapshot ppu_surfaces;
+  /* Application-owned products that coexist with, rather than replace, the
+   * PPU's current host bindings during separated SIM capture. */
+  Sim3DOutputSurfaceViews sim3d_output_surfaces;
+  /* The independent selected-magic range capture can coexist with a Diorama
+   * OBJ plane bound as the PPU source's primary surface. The primary binding
+   * snapshot therefore cannot name these pixels; publish their host-owned
+   * surface explicitly beside the frame. */
+  SrPpuSurfaceView hud_obj_surface;
+  /* Fixed-width, world-clamped BG view, captured alongside the PPU without
+   * rebinding the gameplay plane. Same synchronous-upload lifetime above. */
+  SrPpuSurfaceView diorama_skybox_surface;
+
+  /* Geometry, resolved (D3 — never call Settings_Visible*()/live globals from
+   * present-time code; these are the already-resolved results). */
+  int snes_width;
+  int snes_height;
+  int display_mode;
+  int pixel_aspect;
+  bool ws_active;
+  int ws_extra;
+  bool ignore_aspect_ratio;
+  int visible_x0;
+  int visible_width;
+  /* Centred 256x224 crop inside the independent native-camera PPU pass. */
+  int authentic_x0;
+  int authentic_y0;
+  /* Nonzero only after a complete native-camera pass for this geometry. */
+  uint64_t authentic_frame_serial;
+  /* Vertical margin the PPU actually rendered for this frame (the transpose of
+   * ws_extra). snes_height stays the AUTHENTIC visible height, so the captured
+   * surfaces are snes_height + ws_extra_top + ws_extra_bottom rows tall and
+   * authentic scanline 0
+   * lives at row ws_extra_top -- just as texture column 0 is screen
+   * x = -ws_extra. Zero on every non-diorama frame, which is what keeps the
+   * flat presentation path (which assumes row 0) correct by construction. */
+  int ws_extra_top;
+  int ws_extra_bottom;
+  /* Columns of RESOLVE apron each captured surface carries per side beyond the
+   * displayed span. Distinct from ws_extra, which is DISPLAY margin: the apron
+   * is never shown as extra world, it is headroom so a sprite is fully
+   * resolved before it reaches the visible plane edge instead of being clipped
+   * as it crosses. Screen x = 0 sits at surface column obj_apron + ws_extra. */
+  int obj_apron;
+  int hud_scale_percent;
+  bool show_fps;
+  int performance_overlay;
+
+  /* Diorama gate (D14 — Diorama_IsActiveThisFrame() result for this frame). */
+  bool diorama_active;
+  /* Upload policy and exact producer metadata for this captured frame. The
+   * request mask snapshots presentation settings; the content mask comes from
+   * PPU scanout and marks destinations that received a nontransparent pixel.
+   * PresentUpload intersects them without reading live settings or rescanning
+   * the CPU surfaces. */
+  uint32_t diorama_plane_request_mask;
+  uint32_t diorama_plane_content_mask;
+  /* Planes containing the resolved TS input to a full SNES colour add. The
+   * compositor draws this subset with saturated additive blending after the
+   * ordinary main-screen world planes. */
+  uint32_t diorama_plane_additive_mask;
+  /* Immutable key for scoped diorama layer overrides. The section is derived
+   * from positively identified captured scene art, never from present-time
+   * live WRAM. */
+  uint8_t diorama_map_group;
+  uint8_t diorama_map_number;
+  uint8_t diorama_layer_section;
+  /* Frame-resolved backing policy for base BG1/BG2. `configured` preserves
+   * explicit Off versus no authored override for ROM backdrop composition;
+   * zero ARGB means the configured policy is Off. CGRAM fills are resolved at
+   * capture time so retained/generated presents never observe a newer palette
+   * than their pixels. */
+  bool diorama_bg_transparent_fill_configured[2];
+  uint32_t diorama_bg_transparent_fill_argb[2];
+  /* True only when flat-mode PPU capture produced current winner masks.
+   * Presentation must not reuse stale mask texture content. BG1 uses the
+   * source's owning screen because Marahna/Viper wall art is TS-only; BG2's
+   * waterfall source is a main-screen plane. */
+  bool action_bg1_mask_valid;
+  bool action_bg2_mask_valid;
+
+  /* Simulation-town semantic payload. Presentation consumes this value copy;
+   * the live HLE producer state stays private. Disabled stages remain inert. */
+  SimFrameData sim;
+
+  /* Immutable enhanced-text payload captured beside the PPU pixels whose BG3
+   * cells it may replace. Empty means native presentation is untouched. */
+  ArLocalizationFrame localization;
+
+  /* Action-stage spell and scene lifecycles, captured from WRAM beside the
+   * frame they decorate. Payloads are inert outside positively identified
+   * source records/map objects. */
+  ActionEffectFrame action_effects;
+  ActionSceneEffectFrame action_scene_effects;
+  bool action_effect_lighting;
+  bool action_effect_particles;
+
+  /* "Cycle magic spell" cheat state, snapshotted rather than read live so
+   * present-time code never touches g_settings or WRAM (D6). While armed the composite
+   * draws a badge naming the current spell: a spell-swapped session must be
+   * self-evidently non-stock in any screenshot, recording, or bug report. */
+  bool magic_cycle_armed;
+  uint8_t magic_cycle_selected;   /* 0 = none, else 1..4 */
+
+  /* Pair metadata captured with the completed PPU image. Frame generation
+   * owns its previous endpoint internally; FrameSlot always describes only
+   * this immutable current capture. */
+  uint64_t timestamp_ns;
+  /* R17/C3: emulated ticks between the previous capture and this one — the
+   * TRUE period of the previous/current image pair, clamped to 1..8 by
+   * FrameSlot_Capture, and 0 while paused (a frozen re-capture is not a pair).
+   * The delayed pair phase accounts for this: the main loop can drain several
+   * ticks in one iteration while the snapshot advances once per present, so
+   * the presentation target starts one tick behind curr rather than all the
+   * way back at prev. */
+  uint8_t capture_ticks;
+  int16_t bg1_camera_x, bg1_camera_y;
+  int16_t bg2_camera_x, bg2_camera_y;
+  /* Turbo compresses many emulated ticks into one image submission, so the
+   * pair no longer describes a normally paced visual interval. */
+  bool turbo_active;
+  /* kSettingCat_Graphics "Frame interpolation" row, snapshotted here (not
+   * read live from present.c per D6) so presentation can reject generation
+   * before doing analysis or GPU work. */
+  bool interp_setting_enabled;
+  /* A5 (followup doc) "Flat HUD" row, snapshotted here (not read live from
+   * present.c per D6): true = diorama's PresentHudOverlayComposited call
+   * (A7) runs, drawing the anchored flat HUD; false = skip it — BG3 was
+   * left in the game-thread capture instead (actraiser_rtl.c), so it
+   * renders as diorama.c's ordinary tilted BG3 layer. */
+  bool diorama_hud_flat;
+  /* B4-split (followup doc): DioramaCameraMode (settings.h) plus both
+   * candidate authored poses, resolved at present-composite time into
+   * whichever is active this frame — see present.c's g_diorama_render_cam
+   * and the DioramaCameraPose comment (diorama.h) for the full rationale.
+   * Snapshotting both poses rather than resolving during capture keeps
+   * FrameSlot_Capture a plain field-by-field mirror of g_settings, matching
+   * every other row here. Presentation selects the pose and applies the
+   * captured reactive strength. */
+  int diorama_camera_mode;
+  DioramaCameraPose diorama_free_pose;
+  DioramaCameraPose diorama_dyncam_baseline;
+  /* Host-input orbit layered over the dynamic baseline. Unlike the baseline
+   * zoom, these offsets are not persisted and return to zero after release. */
+  float diorama_manual_orbit_yaw;
+  float diorama_manual_orbit_pitch;
+  int diorama_reactive_strength;
+  /* B4-vellean (followup doc): PlayerVelocityX/Y, self-calibrated against a
+   * running per-session max and clamped to [-1,1] — see FrameSlot_Capture
+   * (main.c) for why normalization happens there (it owns the WRAM read and
+   * the running-max state) rather than here. yaw follows horizontal
+   * velocity (running), pitch follows vertical velocity (jump/fall), naming
+   * matches which DioramaCameraPose field each drives. These fields are the
+   * normalized signals; present.c applies response constants and strength. */
+  float diorama_dyncam_lean_yaw;
+  float diorama_dyncam_lean_pitch;
+  /* B4-kick (followup doc): rising-edge event flags, computed on the game
+   * thread (FrameSlot_Capture, main.c — it owns the WRAM reads and the
+   * prior-state needed to detect an edge). True only on the ONE FrameSlot
+   * capture where the underlying signal transitioned; present.c triggers a
+   * fresh decaying impulse only when it sees a slot whose timestamp_ns it
+   * hasn't already processed (a present redraw of the same slot must not
+   * re-trigger). event_hit: PlayerFlags invuln bit rising edge (taking a
+   * hit). event_land: PlayerVelocityY falling-then-settled in one tick.
+   * event_boost: PlayerBoost 0-to-nonzero rising edge. */
+  bool diorama_dyncam_event_hit;
+  bool diorama_dyncam_event_land;
+  bool diorama_dyncam_event_boost;
+
+  /* Sim-town dynamic camera. Same shape as the diorama fields above and for
+   * the same reasons: the game thread owns the WRAM reads and the per-frame
+   * state an edge or a running average needs, present.c owns the actual
+   * camera formula.
+   *
+   * The signals differ from action mode's because the mode does. There is no
+   * jump and no ground, so "vertical velocity" is just the other axis of a
+   * planar drift: yaw leans toward horizontal travel and pitch toward
+   * vertical travel, and both come from the angel record's own +$1A/+$1C
+   * planar velocities rather than from PlayerVelocity, which is an
+   * action-stage concept. */
+  /* SimCameraMode. Free Cam's pose reaches present.c the ordinary way, inside
+   * sim.projection_*, because the game thread already resolved which pose is
+   * active; this only says whether the reactive offsets apply on top. */
+  int sim_camera_mode;
+  int sim_dyncam_strength;
+  /* In world navigation these same presentation-owned offsets rotate the
+   * whole globe for inspection; town reactive lean is never applied there. */
+  float sim_manual_orbit_yaw;
+  float sim_manual_orbit_pitch;
+  float sim_dyncam_lean_yaw;
+  float sim_dyncam_lean_pitch;
+  bool sim_dyncam_event_hit;
+
+  /* Widescreen HUD split + related PPU scalars (§2.8). */
+  uint8_t hud_split_height;
+  uint8_t hud_left_end;
+  uint8_t hud_right_start;
+  uint8_t hud_player_row_y;
+  uint8_t hud_left_only_y;
+  uint8_t extra_left_right;
+  /* The LIVE per-side margins the frame was
+   * rendered with (extra_left_right above is the fixed budget, which does not
+   * narrow at a world bound). Latched by ActRaiser_LiveMargins rather than read
+   * from g_ppu, which can be zeroed between the draw and this capture.
+   *
+   * A zeroed slot therefore means "live span = the authentic 256 only", which
+   * over-crops safely. Do NOT reinterpret 0 as "unset, use the full budget" —
+   * that reintroduces the black wedge at exactly camera_x == 0, the case this
+   * exists to fix. */
+  uint8_t extra_left_cur;
+  uint8_t extra_right_cur;
+  /* BH6/extents: exact plan that produced the captured BG1/BG2 planes.
+   * Ordinary action frames preserve canonical source, per-side extents, and
+   * row bands; explicit global overrides retain source metadata but project
+   * their executed edges. Non-action frames carry a native-source projection
+   * of the applied policy. `bg_capture_pad_to_budget` is deliberately
+   * separate: it is a frame-level capture execution fact, not a map-specific
+   * edge decision. */
+  ActionBgPlan action_bg_plan;
+  bool bg_capture_pad_to_budget;
+  /* Developer-only authoring guide gate, captured beside the exact plan so
+   * present code never reads the live tuner singleton. */
+  bool action_bg_extent_guides;
+  uint8_t inidisp;
+  uint8_t bg_mode;  /* PPU_mode(g_ppu) == (g_ppu->bgmode & 7) */
+  bool bg3_state_valid;
+  uint16_t bg3_hscroll, bg3_vscroll;
+  uint16_t bg3_tilemap_base_words;
+  uint8_t bg3_tilemap_width_tiles, bg3_tilemap_height_tiles;
+
+  FrameSlotOverlayCapture overlay_captures[kFrameSlotOverlaySourceCount];
+
+  /* OBJ HUD-icon promotion. The OAM slots ActRaiser_WidescreenHudObjPromote
+   * validated this frame, latched from ActRaiser_HudObjIconRange; a zero count
+   * means it promoted nothing.
+   *
+   * Do NOT re-derive this from overlay_captures[Obj].oamFirst/oamCount. That
+   * range is whatever policy claimed the ONE OBJ capture slot last, and in
+   * diorama mode that is the full-frame 0..127 scene claim, not the icon —
+   * which is exactly how the icon used to get lost and fall back to being
+   * drawn centered with the scene instead of anchored right. */
+  uint8_t hud_icon_first, hud_icon_count;
+  /* Rows the promote claimed, latched under that same rule and for the same
+   * reason: it describes hud_obj_surface, while overlay_captures[Obj].y1
+   * describes whatever claimed the OBJ slot last. Taking the extent from the
+   * capture while taking the pixels from the promoted surface is how the icon
+   * silently stopped being uploaded — a full-frame claim made y1 taller than
+   * that surface, so the upload was skipped and the texture stayed empty. */
+  uint8_t hud_icon_rows;
+
+  /* oam/high_oam are only populated when there is an OBJ overlay or a promoted
+   * icon to resolve (§2.8 cost note); oam_valid says whether this frame
+   * actually filled them. */
+  bool oam_valid;
+  uint16_t oam[0x100];
+  uint8_t high_oam[0x20];
+
+  /* Mode-7 override presentation. The src-rect is derived at present time
+   * from visible_x0/visible_width/snes_height (already resolved above), so
+   * only the active flag needs capturing here. */
+  bool m7_active;
+
+  /* HD replacements, resolved per-entry policy for this frame (source index
+   * matches overlay_captures[] above). */
+  FrameSlotHdEntry hd_entries[kHdMaxReplacements];
+  int hd_entry_count;
+
+  /* Scene inspector (present.c must not touch g_settings.scene_inspector or
+   * the live g_scene_inspector_presentation directly). */
+  bool scene_inspector_enabled;
+  InspectorPresentationSelection inspector_selection;
+} FrameSlot;
+
+/* Sole writer, implemented in frame_slot.c. Call on the game thread after
+ * RtlDrawPpuFrame. Pass that frame's annotated simulation data when available;
+ * NULL captures current metadata for a screenshot or paused redraw. The input
+ * is borrowed only for this call; the slot receives its own value copy. */
+void FrameSlot_Capture(FrameSlot *dst, const SimFrameData *annotated_sim);
+
+ArRenderRectI ComputePresentationViewport(
+    ArRenderDevice *device, bool ignore_aspect_ratio,
+    int pixel_aspect, int visible_width, int snes_height);
+ArRenderRectI ComputePresentationViewportWithOutput(
+    ArRenderDevice *device, bool ignore_aspect_ratio,
+    int pixel_aspect, int visible_width, int snes_height,
+    ArRenderExtentI *output_size);
+
+/* Present-time entry points, called synchronously on the render/main thread.
+ * Upload remains separate from composite so texture updates stay grouped ahead
+ * of the potentially vsync-blocking present. */
+void PresentUpload(const FrameSlot *slot);
+/* Last native-pass serial successfully synchronized to the GPU texture. */
+uint64_t PresentAuthenticUploadedFrameSerial(void);
+/* alpha: the sub-tick phase this present sits at — the main loop's
+ * accumulator remainder over kFrameNs, in [0,1) — or
+ * kPresentationFrameGenerationPhaseNone
+ * for a present that has no meaningful phase. Passed in
+ * rather than read from a clock here, so present-time code cannot disagree with
+ * the loop that owns the tick schedule. It is host timing, not game state, so
+ * it is a parameter rather than a FrameSlot field: the slot stays immutable
+ * after capture, and one retained slot can be re-composited at several
+ * different phases (which is the whole point of the re-present). */
+/* Owns the complete draw order: scene target begin, mode-specific scene,
+ * post-process resolve, then full-output host UI. The returned viewport is the
+ * exact image rectangle selected by the post-process resolve. Backend present
+ * remains caller-owned. */
+ArRenderRectI PresentFrame(const FrameSlot *slot, float alpha,
+                           double presentation_fps);
+
+/* Drops renderer-owned present caches (HUD composite, sim shadow/rim targets,
+ * town/world-navigation canvases, underlays and cloud fields) so the next
+ * present rebuilds them.
+ *
+ * MUST be called from the platform render-target/device-reset handler.
+ * Each of those textures is (re)written only when a GAME-side serial changes, or
+ * once at creation — never in response to device state — so after a reset the
+ * caches would short-circuit forever and keep presenting textures whose
+ * contents the driver discarded. See the comment on the definition. */
+void PresentRendererResources_Reset(void);
+
+#endif

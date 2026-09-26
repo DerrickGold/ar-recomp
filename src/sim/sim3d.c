@@ -7,7 +7,7 @@
 #include "sim_ppu_color_math.h"
 
 #include "sim_town_canvas.h"
-#include "performance_metrics.h"
+#include "app/performance_metrics.h"
 
 #include <limits.h>
 #include <stdio.h>

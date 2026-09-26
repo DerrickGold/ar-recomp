@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "settings.h"
+#include "app/settings.h"
 #include "actraiser/actraiser_localization_schedule.h"
 #include "actraiser/actraiser_localization_runtime.h"
 #include "actraiser/regional/actraiser_regional_runtime.h"

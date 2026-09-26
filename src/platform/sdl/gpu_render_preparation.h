@@ -2,7 +2,7 @@
 #define AR_GPU_RENDER_PREPARATION_H
 
 #include "platform/sdl/render_sdl_internal.h"
-#include "session_fatal.h"
+#include "app/session_fatal.h"
 
 /* Creating an SDL custom fragment state alone need not materialize its draw
  * pipelines. Exercise the ordinary blend variants against scratch targets

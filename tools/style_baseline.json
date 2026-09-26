@@ -549,14 +549,14 @@
  "src/actraiser_game.h": {
   "header-guard": 1
  },
- "src/actraiser_rtl.h": {
+ "src/actraiser/actraiser_rtl.h": {
   "header-comment": 1,
   "header-guard": 1
  },
- "src/asset_condition.h": {
+ "src/replacements/asset_condition.h": {
   "header-guard": 1
  },
- "src/atomic_replace.h": {
+ "src/host/atomic_replace.h": {
   "header-guard": 1
  },
  "src/byte_order.h": {
@@ -566,16 +566,16 @@
  "src/camera_orbit.h": {
   "header-guard": 1
  },
- "src/config.c": {
+ "src/app/config.c": {
   "packed": 1
  },
- "src/config.h": {
+ "src/app/config.h": {
   "header-guard": 1
  },
  "src/constants.h": {
   "header-guard": 1
  },
- "src/cpu_65816_math.h": {
+ "src/actraiser/cpu_65816_math.h": {
   "header-comment": 1,
   "header-guard": 1
  },
@@ -678,27 +678,27 @@
  "src/diorama/diorama_upload.h": {
   "header-guard": 1
  },
- "src/display_geometry.h": {
+ "src/present/display_geometry.h": {
   "header-guard": 1
  },
- "src/forced_input.h": {
+ "src/app/forced_input.h": {
   "header-guard": 1
  },
- "src/frame_slot.c": {
+ "src/present/frame_slot.c": {
   "packed": 3,
   "static-g-prefix": 9
  },
- "src/frame_slot.h": {
+ "src/present/frame_slot.h": {
   "header-guard": 1
  },
- "src/frame_timing.h": {
+ "src/present/frame_timing.h": {
   "header-guard": 1
  },
- "src/hd_replacement_host.h": {
+ "src/replacements/hd_replacement_host.h": {
   "header-comment": 1,
   "header-guard": 1
  },
- "src/hd_replacements.h": {
+ "src/replacements/hd_replacements.h": {
   "header-guard": 1
  },
  "src/host/campaign_identity.h": {
@@ -742,16 +742,16 @@
   "header-guard": 1,
   "long-line": 1
  },
- "src/ini_upgrade.h": {
+ "src/app/ini_upgrade.h": {
   "header-guard": 1
  },
- "src/ini_upgrade_apply.h": {
+ "src/app/ini_upgrade_apply.h": {
   "header-guard": 1
  },
- "src/input_map.h": {
+ "src/app/input_map.h": {
   "header-guard": 1
  },
- "src/input_replay.h": {
+ "src/app/input_replay.h": {
   "header-comment": 1,
   "header-guard": 1
  },
@@ -840,7 +840,7 @@
   "packed": 34,
   "static-g-prefix": 1
  },
- "src/manifest_utils.h": {
+ "src/replacements/manifest_utils.h": {
   "header-comment": 1,
   "header-guard": 1
  },
@@ -859,23 +859,23 @@
  "src/manual/manual_reader.h": {
   "header-guard": 1
  },
- "src/music_replacements.c": {
+ "src/replacements/music_replacements.c": {
   "long-line": 3
  },
- "src/music_replacements.h": {
+ "src/replacements/music_replacements.h": {
   "header-guard": 1
  },
- "src/native_audio_mixer.h": {
+ "src/audio/native_audio_mixer.h": {
   "header-comment": 1
  },
- "src/performance_metrics.c": {
+ "src/app/performance_metrics.c": {
   "long-line": 14,
   "packed": 1
  },
- "src/performance_overlay.c": {
+ "src/app/performance_overlay.c": {
   "long-line": 14
  },
- "src/performance_overlay.h": {
+ "src/app/performance_overlay.h": {
   "header-comment": 1
  },
  "src/platform/sdl/bidi_text_sdl.c": {
@@ -944,17 +944,17 @@
   "header-comment": 1,
   "header-guard": 1
  },
- "src/portable_paths.h": {
+ "src/app/portable_paths.h": {
   "header-guard": 1
  },
- "src/present.c": {
+ "src/present/present.c": {
   "long-line": 1,
   "static-g-prefix": 6
  },
- "src/present.h": {
+ "src/present/present.h": {
   "header-guard": 1
  },
- "src/present_cadence_metrics.h": {
+ "src/present/present_cadence_metrics.h": {
   "header-comment": 1,
   "header-guard": 1
  },
@@ -1040,28 +1040,28 @@
  "src/present_world_nav_test.h": {
   "header-guard": 1
  },
- "src/presentation_frame_generation.h": {
+ "src/present/presentation_frame_generation.h": {
   "header-guard": 1
  },
- "src/presentation_view.c": {
+ "src/present/presentation_view.c": {
   "long-line": 1
  },
- "src/presentation_view.h": {
+ "src/present/presentation_view.h": {
   "header-comment": 1
  },
- "src/quintet_lzss.h": {
+ "src/actraiser/quintet_lzss.h": {
   "header-comment": 1,
   "header-guard": 1
  },
- "src/randomizer.c": {
+ "src/randomizer/randomizer.c": {
   "long-line": 5,
   "packed": 10,
   "static-g-prefix": 8
  },
- "src/randomizer.h": {
+ "src/randomizer/randomizer.h": {
   "header-guard": 1
  },
- "src/randomizer_config.c": {
+ "src/randomizer/randomizer_config.c": {
   "long-line": 2,
   "packed": 7
  },
@@ -1101,66 +1101,66 @@
  "src/render/ui_text_renderer.h": {
   "header-guard": 1
  },
- "src/render_capabilities.h": {
+ "src/render/render_capabilities.h": {
   "header-guard": 1
  },
- "src/run_dir.c": {
+ "src/app/run_dir.c": {
   "static-g-prefix": 2
  },
- "src/run_dir.h": {
+ "src/app/run_dir.h": {
   "header-guard": 1
  },
- "src/runtime_diagnostics.h": {
+ "src/app/runtime_diagnostics.h": {
   "header-guard": 1
  },
- "src/runtime_settings.c": {
+ "src/app/runtime_settings.c": {
   "long-line": 1,
   "packed": 4
  },
- "src/runtime_settings.h": {
+ "src/app/runtime_settings.h": {
   "header-comment": 1,
   "header-guard": 1
  },
- "src/save_campaign_archive.inc": {
+ "src/save/save_campaign_archive.inc": {
   "long-line": 11,
   "packed": 5
  },
- "src/save_checkpoint.c": {
+ "src/save/save_checkpoint.c": {
   "long-line": 8
  },
- "src/save_paths.c": {
+ "src/save/save_paths.c": {
   "long-line": 11,
   "packed": 10
  },
- "src/save_paths.h": {
+ "src/save/save_paths.h": {
   "header-comment": 1,
   "long-line": 2
  },
- "src/save_slot_manager.c": {
+ "src/save/save_slot_manager.c": {
   "long-line": 9,
   "packed": 10
  },
- "src/save_slot_manager.h": {
+ "src/save/save_slot_manager.h": {
   "header-comment": 1,
   "long-line": 2
  },
- "src/save_slots.c": {
+ "src/save/save_slots.c": {
   "long-line": 37,
   "packed": 48
  },
- "src/save_slots.h": {
+ "src/save/save_slots.h": {
   "header-comment": 1,
   "long-line": 4
  },
- "src/save_slots_migration.inc": {
+ "src/save/save_slots_migration.inc": {
   "long-line": 8,
   "packed": 14
  },
- "src/save_system.c": {
+ "src/save/save_system.c": {
   "long-line": 3,
   "packed": 5
  },
- "src/save_system.h": {
+ "src/save/save_system.h": {
   "header-comment": 1,
   "header-guard": 1
  },
@@ -1168,29 +1168,29 @@
   "header-comment": 1,
   "header-guard": 1
  },
- "src/scheduled_settings.h": {
+ "src/app/scheduled_settings.h": {
   "header-guard": 1
  },
- "src/session_fatal.h": {
+ "src/app/session_fatal.h": {
   "header-comment": 1
  },
- "src/session_recovery.c": {
+ "src/app/session_recovery.c": {
   "long-line": 2
  },
- "src/session_recovery.h": {
+ "src/app/session_recovery.h": {
   "header-comment": 1
  },
- "src/settings.c": {
+ "src/app/settings.c": {
   "long-line": 12
  },
- "src/settings.h": {
+ "src/app/settings.h": {
   "header-guard": 1
  },
- "src/settings_overlay.c": {
+ "src/settings_overlay/settings_overlay.c": {
   "long-line": 51,
   "packed": 2
  },
- "src/settings_overlay.h": {
+ "src/settings_overlay/settings_overlay.h": {
   "header-comment": 1,
   "header-guard": 1
  },
@@ -1223,20 +1223,20 @@
   "long-line": 29,
   "packed": 9
  },
- "src/settings_overlay_artwork.c": {
+ "src/settings_overlay/settings_overlay_artwork.c": {
   "long-line": 3
  },
- "src/settings_overlay_artwork.h": {
+ "src/settings_overlay/settings_overlay_artwork.h": {
   "header-guard": 1
  },
- "src/settings_overlay_internal.h": {
+ "src/settings_overlay/settings_overlay_internal.h": {
   "header-guard": 1
  },
- "src/settings_overlay_layers_localization.c": {
+ "src/settings_overlay/settings_overlay_layers_localization.c": {
   "long-line": 5,
   "packed": 2
  },
- "src/settings_overlay_palette.h": {
+ "src/settings_overlay/settings_overlay_palette.h": {
   "header-guard": 1
  },
  "src/sim/sim3d.c": {
@@ -1518,7 +1518,7 @@
   "header-comment": 1,
   "header-guard": 1
  },
- "src/user_data_dir.h": {
+ "src/app/user_data_dir.h": {
   "header-guard": 1
  },
  "tests/action_effect_render_test.c": {

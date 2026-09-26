@@ -5,7 +5,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "cpu_65816_math.h"
+#include "actraiser/cpu_65816_math.h"
 
 enum {
   kStackBank = 0x00,

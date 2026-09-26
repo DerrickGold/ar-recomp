@@ -1,0 +1,237 @@
+#include "snesrecomp/support/utf8_fs.h"
+
+#include "app/run_dir.h"
+
+#include <stdarg.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+
+#ifndef _WIN32
+#include <sys/stat.h>
+#include <unistd.h>
+extern char **environ;
+#endif
+
+static char g_run_dir[256] = "saves";
+static int g_enabled;
+
+#ifndef AR_RUN_DIR_DEFAULT_ENABLED
+#define AR_RUN_DIR_DEFAULT_ENABLED 1
+#endif
+
+static int environment_option_enabled(const char *name) {
+  const char *value = getenv(name);
+  return value && value[0] && value[0] != '0';
+}
+
+static int run_dir_enabled_for_launch(void) {
+  if (environment_option_enabled("AR_NO_RUN_DIR")) return 0;
+  if (environment_option_enabled("AR_ENABLE_RUN_DIR")) return 1;
+  return AR_RUN_DIR_DEFAULT_ENABLED != 0;
+}
+
+/* Exit note: point at the one folder that holds every diagnostic from this
+ * run, ready to zip and hand over for investigation. */
+static void print_artifact_hint(void) {
+  fprintf(stderr, "[run-dir] all diagnostics from this run: %s/  "
+                  "(share with: zip -r report.zip %s)\n", g_run_dir, g_run_dir);
+}
+
+const char *RunDirPath(void) { return g_run_dir; }
+
+void RunDirFile(char *buf, size_t n, const char *fmt, ...) {
+  int off = snprintf(buf, n, "%s/", g_run_dir);
+  va_list ap;
+  va_start(ap, fmt);
+  vsnprintf(buf + off, n - off, fmt, ap);
+  va_end(ap);
+}
+
+void RunDirRecordTraceStatus(const char *status) {
+  if (!g_enabled || !status) return;
+  char path[300];
+  RunDirFile(path, sizeof path, "run_info.txt");
+  FILE *f = sr_fopen(path, "a");
+  if (!f) return;
+  fprintf(f, "--- resolved diagnostics (post-config) ---\n"
+             "runner_trace=%s\n", status);
+  fclose(f);
+}
+
+#ifndef _WIN32
+
+/* Duplicate stdout+stderr onto a `tee` child so the console still echoes
+ * while everything is captured. tee is a separate process: on a crash the
+ * kernel closes our end and tee flushes what it already received, so the
+ * log survives SIGSEGV/SIGBUS. */
+static void tee_console(const char *log_path) {
+  char cmd[300];
+  snprintf(cmd, sizeof cmd, "exec tee '%s'", log_path);
+  FILE *p = popen(cmd, "w");
+  if (!p) return;
+  setvbuf(p, NULL, _IONBF, 0);
+  fflush(stdout);
+  fflush(stderr);
+  dup2(fileno(p), STDOUT_FILENO);
+  dup2(fileno(p), STDERR_FILENO);
+  /* p stays open for the process lifetime; tee exits when our fds close. */
+}
+
+/* Bare filenames (no '/') for per-run outputs land inside the run dir, so
+ * `SNESRECOMP_TRACE_FILE=win.jsonl ./build/ActRaiserRecomp ...` doesn't litter the cwd. */
+static void rebase_bare_env(const char *name) {
+  const char *v = getenv(name);
+  if (!v || !v[0] || strchr(v, '/')) return;
+  char path[300];
+  RunDirFile(path, sizeof path, "%s", v);
+  setenv(name, path, 1);
+}
+
+static void write_run_info(int argc, char **argv) {
+  char path[300];
+  RunDirFile(path, sizeof path, "run_info.txt");
+  FILE *f = sr_fopen(path, "w");
+  if (!f) return;
+  fprintf(f, "cmd:");
+  for (int i = 0; i < argc; i++) fprintf(f, " %s", argv[i]);
+  time_t t = time(NULL);
+  char ts[64];
+  strftime(ts, sizeof ts, "%F %T", localtime(&t));
+  fprintf(f, "\ndate: %s\n--- AR_*/SNESRECOMP_* env (pre-config) ---\n", ts);
+  for (char **e = environ; *e; e++)
+    if (!strncmp(*e, "AR_", 3) || !strncmp(*e, "SNESRECOMP_", 11) ||
+        !strncmp(*e, "SNESREF_", 8))
+      fprintf(f, "%s\n", *e);
+  fclose(f);
+}
+
+void RunDirInit(int argc, char **argv) {
+  if (!run_dir_enabled_for_launch()) return;
+
+  if (mkdir("runs", 0755) != 0 && access("runs", W_OK) != 0) return;
+
+  time_t t = time(NULL);
+  char ts[32];
+  strftime(ts, sizeof ts, "%Y%m%d-%H%M%S", localtime(&t));
+  char dir[256];
+  snprintf(dir, sizeof dir, "runs/%s", ts);
+  for (int n = 1; mkdir(dir, 0755) != 0; n++) {
+    if (n > 99) return;
+    snprintf(dir, sizeof dir, "runs/%s-%d", ts, n);
+  }
+  snprintf(g_run_dir, sizeof g_run_dir, "%s", dir);
+  g_enabled = 1;
+
+  char log[300];
+  RunDirFile(log, sizeof log, "console.log");
+  tee_console(log);
+
+  /* Engine-side writers (fn_census, crash dispatch log) key off this. */
+  setenv("AR_RUN_DIR", g_run_dir, 1);
+
+  write_run_info(argc, argv);
+
+  unlink("runs/latest");
+  symlink(g_run_dir + strlen("runs/"), "runs/latest");   /* relative link */
+
+  fprintf(stderr, "[run-dir] %s (console.log + dumps ringfenced here; "
+                  "AR_NO_RUN_DIR=1 disables)\n", g_run_dir);
+  atexit(print_artifact_hint);
+  (void)g_enabled;
+}
+
+void RunDirRebaseEnvOutputs(void) {
+  /* Called after ParseConfigFile so ini-provided values (env-bridged via
+   * setenv) get the same treatment as command-line env vars. Bare names
+   * land in the run dir — or under saves/ when the run dir is disabled
+   * (RunDirPath falls back to "saves"), so a dev-config.ini line like
+   * `SNESRECOMP_TRACE_WATCH_FILE = anom` does the right thing in both layouts. */
+  rebase_bare_env("SNESRECOMP_TRACE_WATCH_FILE");
+  rebase_bare_env("SNESRECOMP_TRACE_FILE");
+  rebase_bare_env("AR_INPUT_RECORD");
+  rebase_bare_env("AR_DRIFT_LOG");
+  rebase_bare_env("AR_MX_OUT");
+  rebase_bare_env("AR_WRAM_TRACE");
+  rebase_bare_env("AR_SIM3D_TRACE");
+  rebase_bare_env("AR_SIM3D_D1_TRACE");
+}
+
+#else /* _WIN32: run-dir without tee/symlink (no clean Win32 analog). */
+#include <direct.h>   /* _mkdir  */
+#include <io.h>       /* _access */
+
+/* Bare filenames (no path separator) for per-run outputs land inside the
+ * run dir. Detect BOTH '/' and '\\' as "already a path". */
+static void rebase_bare_env(const char *name) {
+  const char *v = getenv(name);
+  if (!v || !v[0] || strchr(v, '/') || strchr(v, '\\')) return;
+  char path[300];
+  RunDirFile(path, sizeof path, "%s", v);
+  _putenv_s(name, path);
+}
+
+static void write_run_info(int argc, char **argv) {
+  char path[300];
+  RunDirFile(path, sizeof path, "run_info.txt");
+  FILE *f = sr_fopen(path, "w");
+  if (!f) return;
+  fprintf(f, "cmd:");
+  for (int i = 0; i < argc; i++) fprintf(f, " %s", argv[i]);
+  time_t t = time(NULL);
+  char ts[64];
+  strftime(ts, sizeof ts, "%Y-%m-%d %H:%M:%S", localtime(&t));
+  fprintf(f, "\ndate: %s\n--- AR_*/SNESRECOMP_* env (pre-config) ---\n", ts);
+  for (char **e = _environ; e && *e; e++)
+    if (!strncmp(*e, "AR_", 3) || !strncmp(*e, "SNESRECOMP_", 11) ||
+        !strncmp(*e, "SNESREF_", 8))
+      fprintf(f, "%s\n", *e);
+  fclose(f);
+}
+
+void RunDirInit(int argc, char **argv) {
+  if (!run_dir_enabled_for_launch()) return;
+
+  /* _mkdir returns 0 on create; if it already exists, probe writability
+   * (_access mode 02 == write). */
+  if (sr_mkdir("runs") != 0 && sr_access("runs", 02) != 0) return;
+
+  time_t t = time(NULL);
+  char ts[32];
+  strftime(ts, sizeof ts, "%Y%m%d-%H%M%S", localtime(&t));
+  char dir[256];
+  snprintf(dir, sizeof dir, "runs/%s", ts);
+  for (int n = 1; sr_mkdir(dir) != 0; n++) {
+    if (n > 99) return;
+    snprintf(dir, sizeof dir, "runs/%s-%d", ts, n);
+  }
+  snprintf(g_run_dir, sizeof g_run_dir, "%s", dir);
+  g_enabled = 1;
+
+  /* No tee (console stays on the OS console) and no symlink on Windows. */
+
+  /* Engine-side writers (fn_census, crash dispatch log) key off this. */
+  _putenv_s("AR_RUN_DIR", g_run_dir);
+
+  /* Trace capture is opt-in on every platform. */
+
+  write_run_info(argc, argv);
+
+  fprintf(stderr, "[run-dir] %s (dumps ringfenced here; "
+                  "AR_NO_RUN_DIR=1 disables)\n", g_run_dir);
+  atexit(print_artifact_hint);
+  (void)g_enabled;
+}
+
+void RunDirRebaseEnvOutputs(void) {
+  rebase_bare_env("SNESRECOMP_TRACE_WATCH_FILE");
+  rebase_bare_env("SNESRECOMP_TRACE_FILE");
+  rebase_bare_env("AR_INPUT_RECORD");
+  rebase_bare_env("AR_DRIFT_LOG");
+  rebase_bare_env("AR_MX_OUT");
+  rebase_bare_env("AR_WRAM_TRACE");
+  rebase_bare_env("AR_SIM3D_TRACE");
+  rebase_bare_env("AR_SIM3D_D1_TRACE");
+}
+#endif

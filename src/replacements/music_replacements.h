@@ -1,0 +1,159 @@
+#ifndef MUSIC_REPLACEMENTS_H
+#define MUSIC_REPLACEMENTS_H
+
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+#include "snesrecomp/game/types.h"
+#include "replacements/asset_condition.h"
+
+/* Manifest-driven music replacement ([music:<name>] sections of
+ * game-assets/manifest.ini): stream an OGG Vorbis file in place of an SPC
+ * driver song, keyed off the song's SPC-image upload source address.
+ *
+ * How a song plays authentically (decoded from $02:B63B / $00:A3FE and an
+ * AR_APULOG boot capture — see docs/SEAMS.md "Audio"):
+ *   1. CPU writes $F0 to APU port 0 ($2140): driver halts music, acks 0.
+ *   2. CPU writes $FF: driver parks in its resident uploader.
+ *   3. The $02:9964 HLE memcpys the song image + BRR samples into ARAM.
+ *      The image SOURCE ADDRESS uniquely names the song — our identity key.
+ *   4. CPU writes the song number (e.g. $01) to port 0: sequencer starts.
+ * Port 2 carries per-frame event ids (COP -> $035A), port 3 SFX ids
+ * (BRK -> $035B); both are forwarded by the NMI tail at $02:AC33.
+ *
+ * Replacement model: every port write and upload still happens authentically
+ * (no handshake is suppressed, so no soft-lock risk). When a play command
+ * names a song with a matching manifest entry whose .ogg exists, the host
+ * streams the file into the final mix and mutes DSP voices tagged Music by the
+ * logical-track observer. SRCN >= 0x0C remains only a startup fallback before
+ * a voice has a tag; explicit SFX voices stay audible regardless of sample.
+ * $F0 (halt) stops the stream; a new play command switches it. Missing file /
+ * no entry = fully authentic playback.
+ *
+ * Threading: trigger callbacks run on the game thread (under the APU lock —
+ * RtlApuWrite holds it); the mix callback runs on the audio thread inside
+ * RtlRenderAudio's locked region. All streamer state is therefore
+ * lock-serialised the same way msu1.c is. */
+
+enum {
+  kMusicMaxReplacements = 32,
+  kMusicNameCapacity = 48,
+  kMusicPathCapacity = 512,
+  kMusicSongAny = -1,
+};
+
+typedef struct MusicReplacement {
+  char name[kMusicNameCapacity];
+  uint32 src;            /* SPC image source address (BB:AAAA), the identity */
+  int song;              /* driver song number, kMusicSongAny = any */
+  char file[kMusicPathCapacity]; /* resolved relative to the manifest */
+  bool loop;             /* default true */
+  /* Loop points in sample frames at the FILE's rate. loop_end 0 = end of
+   * file. Manifest keys override LOOPSTART/LOOPLENGTH(-END) Vorbis comment
+   * tags, which override whole-file looping. */
+  uint32 loop_start, loop_end;
+  int gain_percent;      /* default 100 */
+  AssetCondition conditions[kAssetMaxConditions];
+  int condition_count;
+
+  /* Probe results (filled at load): the file exists and decodes. Entries
+   * without audio stay fully inert, mirroring the HD manifest convention. */
+  bool has_audio;
+  int file_rate;
+  unsigned file_frames;
+} MusicReplacement;
+
+extern MusicReplacement g_music_replacements[kMusicMaxReplacements];
+extern int g_music_replacement_count;
+
+/* Parse [music:] sections of the shared manifest and probe each entry's file
+ * (existence, rate, length, loop tags). Returns entries loaded; 0 with no
+ * output if the manifest does not exist. */
+int MusicReplacements_Load(const char *manifest_path);
+/* Load/Shutdown are lifecycle operations with the audio producer stopped.
+ * Encoded-file snapshots live until shutdown; duplicate paths share storage.
+ * A bounded cache removes filesystem access from normal streaming, not DSP
+ * work or the existing audio synchronization contract. */
+void MusicReplacements_Shutdown(void);
+
+/* Reset replacement playback state. The game module registers the three
+ * callbacks below with its immutable RtlGameAudioApi table. */
+void MusicReplacements_InstallHooks(void);
+void MusicReplacements_OnSpcUpload(uint32_t source24);
+void MusicReplacements_OnApuPortWrite(uint8_t port, uint8_t value);
+void MusicReplacements_MixOutput(int16_t *stereo_buffer, int frames);
+
+/* Apply the live enhanced-music setting. Disabling immediately stops the OGG
+ * stream and unmutes the authentic SPC voices; enabling can adopt the song
+ * already playing instead of waiting for the next song-change command. */
+void MusicReplacements_ApplySetting(void);
+
+/* Music-bus gain applied in addition to each manifest entry's authored gain.
+ * The caller holds the APU lock; 100 preserves the legacy mix exactly. */
+void MusicReplacements_SetMusicVolumePercent(int volume_percent);
+
+/* Suspend/resume the replacement decoder for host-owned pauses (P and the
+ * settings overlay). HostAudio gates the whole SDL device at the same edge so
+ * authentic SPC/SFX stop too. Native in-game pause is tracked independently
+ * from the driver's $F2 command. Neither path closes the replacement stream or
+ * advances its cursor; playback resumes only after both pause reasons clear. */
+void MusicReplacements_SetHostPaused(bool paused);
+
+/* Session-only output bypass. The decoder keeps advancing so the SPC
+ * sequencer and enhanced track remain on the same timeline; only which one
+ * reaches the final mix changes. The persistent setting is not modified. */
+void MusicReplacements_SetSessionBypassed(bool bypassed);
+
+/* Combined native/host pause state, exposed for diagnostics and tests. */
+bool MusicReplacements_IsPlaybackPaused(void);
+
+/* Snapshot the currently selected enhanced one-shot under the APU lock.
+ * Returns a nonzero generation token only while a non-looping replacement
+ * session is current, including after its decoder reaches the natural end.
+ * `completed` is true only for that natural end; authentic playback, looping
+ * replacements, open/decode failure, and stopped sessions return token 0.
+ * A caller may latch the token and later require the same token before acting,
+ * preventing an unrelated track change from satisfying the completion test. */
+uint64_t MusicReplacements_GetOneShotSnapshot(bool *completed);
+
+/* One-line identity for read-only diagnostics. Names a matching manifest
+ * track even when it is currently playing through the authentic SPC path. */
+void MusicReplacements_FormatPlaybackStatus(char *buffer, size_t buffer_size);
+
+/* Per-frame safety policy for non-registry writers of g_settings. */
+void MusicReplacements_FrameTick(void);
+
+/* First entry matching (src, song) whose gates pass and whose audio loaded;
+ * NULL if none. Entries are tried in manifest order, so gated variants
+ * placed above an ungated fallback win. Exposed for tests. */
+const MusicReplacement *MusicReplacements_Select(uint32 src, int song);
+
+/* True when a play command resolves to the stream that is ALREADY playing, so
+ * honouring it would rewind the track the player is currently hearing.
+ *
+ * This exists because a play command is not always a song CHANGE. The boss
+ * go-signal chain ($00:A3FE -> $00:A410) issues one with no preceding $F0 and
+ * no new upload, so the upload-derived identity (`s_loaded_src`) still names
+ * the OUTGOING song and selection resolves to the live session. Restarting
+ * there replays the previous track's opening until the chain's later $F0 —
+ * the reported "first few seconds of the previous song".
+ *
+ * `stream_open` must be the live decoder's state, not merely "a session
+ * exists": a finished one-shot deliberately keeps its session while closing
+ * the file, and re-triggering that IS a legitimate restart.
+ *
+ * Pure, so the decision is testable without an audio device or a real file. */
+bool MusicPlay_IsRedundantRestart(const MusicReplacement *live,
+                                 const MusicReplacement *selected,
+                                 bool stream_open);
+
+/* Loop-region slicing (pure, exposed for tests): with the read cursor at
+ * `pos` (frames) wanting `want` frames, return how many contiguous frames to
+ * decode now. When that many frames lands exactly on the loop point (or the
+ * end of a non-looping file is reached), *seek_to is set to the frame to
+ * seek to before continuing (loop start), or left untouched when no seek is
+ * needed. `total` is the file length in frames (loop_end 0 uses it). */
+int MusicLoop_NextRun(uint32 pos, int want, uint32 loop_start,
+                      uint32 loop_end, unsigned total, bool *hit_loop_point);
+
+#endif /* MUSIC_REPLACEMENTS_H */

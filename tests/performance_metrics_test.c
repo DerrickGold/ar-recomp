@@ -1,5 +1,5 @@
-#include "performance_metrics.h"
-#include "performance_overlay.h"
+#include "app/performance_metrics.h"
+#include "app/performance_overlay.h"
 #include <SDL3/SDL.h>
 #include <math.h>
 #include <stdio.h>

@@ -15,10 +15,10 @@
 #include <sys/stat.h>
 #endif
 
-#include "actraiser_rtl.h"
+#include "actraiser/actraiser_rtl.h"
 #include "snesrecomp/game/runtime.h"
 #include "snesrecomp/game/cpu.h"
-#include "run_dir.h"
+#include "app/run_dir.h"
 
 enum {
   kWramLastAddress = kActRaiserWramSize - 1,

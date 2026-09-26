@@ -30,8 +30,8 @@
 #include "localization/language_contract.h"
 #include "localization/language_pack.h"
 #include "localization/unicode_grapheme.h"
-#include "save_system.h"
-#include "settings.h"
+#include "save/save_system.h"
+#include "app/settings.h"
 
 enum { kManifestPathCapacity = 1024 };
 

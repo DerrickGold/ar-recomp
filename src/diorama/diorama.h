@@ -6,7 +6,7 @@
 #include "diorama_coverage.h"
 #include "diorama_planes.h"
 #include "diorama_skybox_uv.h"
-#include "presentation_outcome.h"
+#include "present/presentation_outcome.h"
 #include "render/render_device.h"
 
 /* The per-room ($18,$19) layer override table the editor edits and the draw

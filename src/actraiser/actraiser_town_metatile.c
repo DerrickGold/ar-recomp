@@ -5,7 +5,7 @@
 
 #include "actraiser/actraiser_cpu_hle_internal.h"
 #include "actraiser/actraiser_hle_fatal.h"
-#include "cpu_65816_math.h"
+#include "actraiser/cpu_65816_math.h"
 
 enum {
   kTownDrawCommandCount = 0x7C23,

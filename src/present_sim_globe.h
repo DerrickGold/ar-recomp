@@ -6,7 +6,7 @@
  * receives only synchronous presentation callbacks for its shared depth pass. */
 #ifndef AR_PRESENT_SIM_GLOBE_H
 #define AR_PRESENT_SIM_GLOBE_H
-#include "present.h"
+#include "present/present.h"
 #include "scene3d_math.h"
 #include "present_sim_globe_mapping.h"
 

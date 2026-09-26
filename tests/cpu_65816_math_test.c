@@ -1,4 +1,4 @@
-#include "cpu_65816_math.h"
+#include "actraiser/cpu_65816_math.h"
 
 #include <stddef.h>
 #include <stdio.h>

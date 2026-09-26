@@ -7,7 +7,7 @@
 #include "action_bg_plan.h"
 #include "action_bg_world.h"
 #include "actraiser_game.h"
-#include "frame_timing.h"
+#include "present/frame_timing.h"
 
 static int g_failures;
 

@@ -1,6 +1,6 @@
 #ifndef AR_SETTINGS_PERSISTENCE_SDL_H
 #define AR_SETTINGS_PERSISTENCE_SDL_H
-#include "settings.h"
+#include "app/settings.h"
 
 typedef struct SettingsPersistence SettingsPersistence;
 /* One destination per writer, at most one active and one pending snapshot.

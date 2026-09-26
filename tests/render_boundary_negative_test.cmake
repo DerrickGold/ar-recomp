@@ -20,9 +20,9 @@ if(NOT _result STREQUAL "0")
 endif()
 
 set(_cases
-    "performance_metrics.c"
-    "performance_overlay.c"
-    "performance_boundary_probe.h"
+    "app/performance_metrics.c"
+    "app/performance_overlay.c"
+    "app/performance_boundary_probe.h"
     "host/parallel_work.h"
     "sim/sim_cloud_effect_backend.h"
     "present_sim3d_underlay.c"
@@ -31,9 +31,9 @@ set(_cases
     "present_world_nav_model_mesh.c"
     "present_world_nav_model_mesh.h"
     "present_sky_palace.c"
-    "presentation_view.c"
-    "render_preparation.c"
-    "render_preparation_boundary_probe.h"
+    "present/presentation_view.c"
+    "present/render_preparation.c"
+    "present/render_preparation_boundary_probe.h"
     "present_world_nav_boundary_probe.h"
     "sim/sim_world_navigation_globe.c"
     # New headers must be covered without adding an explicit filename.

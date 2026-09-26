@@ -6,7 +6,7 @@
 #include <string.h>
 
 #include "host/host_clock.h"
-#include "performance_metrics.h"
+#include "app/performance_metrics.h"
 
 _Static_assert((int)kPerformance_SimCount == (int)kSim3DPerformanceStage_Count, "SIM metric stage mapping");
 

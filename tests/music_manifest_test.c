@@ -7,9 +7,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "music_replacements.h"
-#include "hd_replacements.h"
-#include "settings.h"
+#include "replacements/music_replacements.h"
+#include "replacements/hd_replacements.h"
+#include "app/settings.h"
 #define STB_VORBIS_HEADER_ONLY
 #include "stb_vorbis.c"
 

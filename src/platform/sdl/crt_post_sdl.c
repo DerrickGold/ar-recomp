@@ -1,4 +1,4 @@
-#include "crt_post.h"
+#include "render/crt_post.h"
 #include "gpu_render_preparation.h"
 
 #include <SDL3/SDL.h>
@@ -8,7 +8,7 @@
 #include "constants.h"
 #include "gpu_shader_blob.h"
 #include "platform/sdl/render_sdl_internal.h"
-#include "session_fatal.h"
+#include "app/session_fatal.h"
 #include "shaders/crt_frag.h"
 
 /* Mirrors src/shaders/crt.frag.glsl field-for-field. All scalars on purpose:

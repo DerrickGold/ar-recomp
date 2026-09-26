@@ -1,8 +1,8 @@
 #ifndef AR_PRESENT_SIM3D_SHADOWS_H
 #define AR_PRESENT_SIM3D_SHADOWS_H
 
-#include "present.h"
-#include "presentation_outcome.h"
+#include "present/present.h"
+#include "present/presentation_outcome.h"
 #include "render/render_types.h"
 #include "sim/sim_render_metadata.h"
 

@@ -10,8 +10,8 @@
  * user wrote is rewritten or removed, so the worst a bug here can do is fail to
  * add a setting -- never lose one. Most of these tests assert exactly that.
  */
-#include "ini_upgrade.h"
-#include "ini_upgrade_apply.h"
+#include "app/ini_upgrade.h"
+#include "app/ini_upgrade_apply.h"
 
 #include <stdio.h>
 #include <stdlib.h>

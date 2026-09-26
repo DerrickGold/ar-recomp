@@ -5,7 +5,7 @@
 
 #include "diorama/diorama_frame_generation.h"
 #include "platform/sdl/render_sdl_internal.h"
-#include "present.h"
+#include "present/present.h"
 
 static int failures;
 #define CHECK(expression) do {                                           \

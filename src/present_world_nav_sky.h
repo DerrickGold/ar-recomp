@@ -1,7 +1,7 @@
 /* Private Palace art direction, consuming an already prepared globe view. */
 #ifndef PRESENT_WORLD_NAV_SKY_H
 #define PRESENT_WORLD_NAV_SKY_H
-#include "present.h"
+#include "present/present.h"
 #include "present_world_nav_geometry.h"
 
 float PresentWorldNavSky_Horizon(ArRenderRectI viewport, const WorldNavigationProjection *projection);

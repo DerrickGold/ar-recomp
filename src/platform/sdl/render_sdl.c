@@ -1,5 +1,5 @@
 #include "render_sdl_internal.h"
-#include "performance_metrics.h"
+#include "app/performance_metrics.h"
 
 #include <limits.h>
 #include <stddef.h>

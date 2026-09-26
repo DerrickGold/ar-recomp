@@ -3,7 +3,7 @@
 #include <limits.h>
 
 #include "diorama_performance.h"
-#include "presentation_upload_mirror.h"
+#include "present/presentation_upload_mirror.h"
 
 static PresentationUploadMirror
     s_upload_mirrors[kDioramaPlane_Count];

@@ -6,7 +6,7 @@
 #include <string.h>
 
 #include "action/action_bg_metatile.h"
-#include "cpu_65816_math.h"
+#include "actraiser/cpu_65816_math.h"
 
 enum {
   kStackBank = 0x00,

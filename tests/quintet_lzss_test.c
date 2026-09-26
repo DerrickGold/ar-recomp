@@ -1,4 +1,4 @@
-#include "quintet_lzss.h"
+#include "actraiser/quintet_lzss.h"
 
 #include <stdio.h>
 #include <string.h>

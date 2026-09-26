@@ -4,7 +4,7 @@ bool ActRaiserRegional_CopySupport(ArRegionalSupportSnapshot *snapshot) {
 }
 #include "actraiser/actraiser_bridge_extension.h"
 #include "actraiser/actraiser_cpu_hle_internal.h"
-#include "settings.h"
+#include "app/settings.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>

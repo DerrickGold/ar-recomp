@@ -1,5 +1,5 @@
 #include "present_sky_palace.h"
-#include "present_internal.h"
+#include "present/present_internal.h"
 
 PresentationOutcome PresentSkyPalace_Draw(
     ArRenderDevice *device, const FrameSlot *slot, ArRenderRectI viewport,

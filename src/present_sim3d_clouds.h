@@ -1,9 +1,9 @@
 #ifndef AR_PRESENT_SIM3D_CLOUDS_H
 #define AR_PRESENT_SIM3D_CLOUDS_H
 
-#include "present.h"
+#include "present/present.h"
 #include "render/render_types.h"
-#include "presentation_outcome.h"
+#include "present/presentation_outcome.h"
 #include "present_sim_globe.h"
 
 /* SimCloudTexel and the layer table are declared in

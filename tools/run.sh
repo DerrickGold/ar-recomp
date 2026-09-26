@@ -3,7 +3,7 @@
 #
 # The per-run artifact ringfencing (runs/<timestamp>/ with console.log,
 # run_info.txt, anomaly captures, dumps, runs/latest symlink) is NATIVE —
-# src/run_dir.c does it on every invocation, so running the binary directly
+# src/app/run_dir.c does it on every invocation, so running the binary directly
 #     ./build/ActRaiserRecomp ar.sfc --config dev-config.ini
 # captures everything too. This script just saves typing the default args.
 # AR_NO_RUN_DIR=1 opts out (legacy flat saves/ layout).

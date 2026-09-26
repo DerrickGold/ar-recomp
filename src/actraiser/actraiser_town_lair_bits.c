@@ -4,7 +4,7 @@
 #include <stdbool.h>
 
 #include "actraiser/actraiser_cpu_hle_internal.h"
-#include "cpu_65816_math.h"
+#include "actraiser/cpu_65816_math.h"
 
 enum {
   kCurrentTownIndex = 0x7BFB,

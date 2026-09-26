@@ -5,8 +5,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "hd_replacements.h"
-#include "settings.h"
+#include "replacements/hd_replacements.h"
+#include "app/settings.h"
 
 static int g_failures;
 #define CHECK(cond) do { \

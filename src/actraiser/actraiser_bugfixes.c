@@ -9,8 +9,8 @@
 #include "actraiser_town_metatile.h"
 #include "actraiser_town_structure_steps.h"
 #include "snesrecomp/game/cpu.h"
-#include "save_system.h"
-#include "settings.h"
+#include "save/save_system.h"
+#include "app/settings.h"
 
 #include <stdio.h>
 #include <stdlib.h>

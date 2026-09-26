@@ -7,7 +7,7 @@
 #include <string.h>
 
 #include "host/host_clock.h"
-#include "performance_metrics.h"
+#include "app/performance_metrics.h"
 
 _Static_assert((int)kPerformance_ActionCount == (int)kDioramaPerformanceStage_Count, "Action metric stage mapping");
 

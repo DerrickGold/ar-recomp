@@ -5,8 +5,8 @@
 #include <stdio.h>
 #include <SDL3/SDL.h>
 #include "platform/sdl/render_sdl_internal.h"
-#include "presentation_upload_mirror.h"
-#include "performance_metrics.h"
+#include "present/presentation_upload_mirror.h"
+#include "app/performance_metrics.h"
 #include "sim/sim3d_performance.h"
 #include "diorama/diorama_performance.h"
 

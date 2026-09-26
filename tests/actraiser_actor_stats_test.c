@@ -6,8 +6,8 @@
 #include "actraiser/actraiser_cast_hold.h"
 #include "actraiser/actraiser_difficulty.h"
 #include "regional/action/regional_difficulty.h"
-#include "randomizer.h"
-#include "settings.h"
+#include "randomizer/randomizer.h"
+#include "app/settings.h"
 #include "byte_order.h"
 #include <assert.h>
 #include <stdio.h>

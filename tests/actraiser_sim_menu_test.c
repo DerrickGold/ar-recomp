@@ -1,6 +1,6 @@
 #include "actraiser/actraiser_sim_menu.h"
 #include "actraiser/actraiser_localization_runtime.h"
-#include "settings.h"
+#include "app/settings.h"
 #include "actraiser/regional/actraiser_regional_runtime.h"
 #include "actraiser/actraiser_miracle.h"
 #include <assert.h>

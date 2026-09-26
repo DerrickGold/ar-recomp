@@ -2,7 +2,7 @@
 
 #include <stdio.h>
 #include <string.h>
-#include "settings.h"
+#include "app/settings.h"
 
 static const struct {
   InputAction action;

@@ -4,7 +4,7 @@
 #include <stdlib.h>
 
 #include "actraiser/actraiser_hle_fatal.h"
-#include "quintet_lzss.h"
+#include "actraiser/quintet_lzss.h"
 
 enum {
   kLzssDpSource = 0x00A5,

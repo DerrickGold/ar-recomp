@@ -1,13 +1,13 @@
 #define _POSIX_C_SOURCE 200809L
-#include "config.h"
-#include "display_geometry.h"
-#include "input_map.h"
-#include "render_capabilities.h"
-#include "settings.h"
+#include "app/config.h"
+#include "present/display_geometry.h"
+#include "app/input_map.h"
+#include "render/render_capabilities.h"
+#include "app/settings.h"
 #include "platform/sdl/settings_persistence_sdl.h"
 #include "sim/sim3d_camera_limits.h"
 #include "sim/sim_town_terrain.h"
-#include "user_data_dir.h"
+#include "app/user_data_dir.h"
 
 #include <stdio.h>
 #include <stdlib.h>

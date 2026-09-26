@@ -1,5 +1,5 @@
-#include "randomizer.h"
-#include "settings.h"
+#include "randomizer/randomizer.h"
+#include "app/settings.h"
 #include "regional/action/regional_placements.h"
 #include "byte_order.h"
 #include <assert.h>

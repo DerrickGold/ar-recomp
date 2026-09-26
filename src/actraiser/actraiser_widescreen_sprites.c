@@ -23,11 +23,11 @@
 #include "action/action_obj_apron.h"
 #include "actraiser_game.h"
 #include "actraiser/actraiser_sprite_ownership.h"
-#include "actraiser_rtl.h"
+#include "actraiser/actraiser_rtl.h"
 #include "actraiser/regional/actraiser_actor_art.h"
-#include "display_geometry.h"
+#include "present/display_geometry.h"
 #include "snesrecomp/runner.h"
-#include "settings.h"
+#include "app/settings.h"
 #include "sim/sim_render_metadata.h"
 
 #include <stdio.h>

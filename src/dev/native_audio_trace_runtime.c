@@ -8,10 +8,10 @@
 #include <string.h>
 
 #include "snesrecomp/game/runtime.h"
-#include "native_audio_extension.h"
+#include "audio/native_audio_extension.h"
 #include "native_audio_pcm_capture.h"
 #include "snesrecomp/runner.h"
-#include "run_dir.h"
+#include "app/run_dir.h"
 
 enum {
   kRuntimeRequestCapacity = 32768,

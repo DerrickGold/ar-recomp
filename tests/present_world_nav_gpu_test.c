@@ -10,7 +10,7 @@
 #include <string.h>
 
 #include "platform/sdl/render_sdl_internal.h"
-#include "present_internal.h"
+#include "present/present_internal.h"
 #include "present_sim3d_internal.h"
 #include "present_sim_globe.h"
 #include "present_sim_globe_mountains.h"
@@ -20,8 +20,8 @@
 #include "present_world_nav_model_mesh.h"
 #include "render/render_output.h"
 #include "render/localized_text_presenter.h"
-#include "settings.h"
-#include "performance_metrics.h"
+#include "app/settings.h"
+#include "app/performance_metrics.h"
 #include "sim/sim3d_depth_pass.h"
 #include "sim/sim3d_camera_limits.h"
 #include "sim/sim3d_performance.h"
@@ -39,7 +39,7 @@
 #include "sim/sim_background_mountain_render.h"
 #include "present_sim3d_terrain.h"
 #include "present_sim3d_clouds.h"
-#include "session_fatal.h"
+#include "app/session_fatal.h"
 
 enum { kWidth = 800, kHeight = 600, kRomBytes = 0x100000, kWramBytes = 0x20000 };
 #define CHECK(test) do { if (!(test)) { \

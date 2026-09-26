@@ -1,9 +1,9 @@
 #define _POSIX_C_SOURCE 200809L
 
-#include "scheduled_settings.h"
+#include "app/scheduled_settings.h"
 
 #include "actraiser_game.h"
-#include "settings.h"
+#include "app/settings.h"
 
 #include <stdio.h>
 #include <stdlib.h>

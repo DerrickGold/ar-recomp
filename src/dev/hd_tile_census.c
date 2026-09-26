@@ -23,7 +23,7 @@
 #include "actraiser_game.h"
 #include "deterministic_hash.h"
 #include "hd_tile_census.h"
-#include "run_dir.h"
+#include "app/run_dir.h"
 
 enum {
   kCensusHashBits = 16, /* 65536 slots, open addressing */

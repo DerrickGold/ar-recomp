@@ -6,7 +6,7 @@
 #include <unistd.h>
 
 #include "actraiser_game.h"
-#include "input_replay.h"
+#include "app/input_replay.h"
 #include "snesrecomp/runner.h"
 #include "snesrecomp/runner/replay.h"
 

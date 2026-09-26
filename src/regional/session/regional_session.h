@@ -4,8 +4,8 @@
 #include "regional/regional_rules.h"
 #include "regional/towns/regional_lair_history.h"
 #include "regional/towns/regional_sim_actors.h"
-#include "save_checkpoint.h"
-#include "randomizer_config.h"
+#include "save/save_checkpoint.h"
+#include "randomizer/randomizer_config.h"
 
 /* Campaign and slot identities are host-supplied, never inferred from native
  * name/locale/ROM state. This codec covers the integrated rule families;
