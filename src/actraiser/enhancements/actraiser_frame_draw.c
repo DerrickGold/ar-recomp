@@ -3,6 +3,7 @@
  * captures, and the order the enhancement passes run in.
  * Phase: game (frame transaction). */
 #include "actraiser/enhancements/actraiser_enhancements_internal.h"
+#include "host/host_ppu_output.h"
 #include "host/host_frame_surfaces.h"
 
 /* The diorama skybox view the last frame published; ActRaiser_LiveDioramaSkybox
@@ -215,7 +216,7 @@ static void ActRaiser_PublishScanout(SrResult scanout_status,
        (result->final_state.flags & SR_PPU_STATE_FORCED_BLANK) != 0u ||
        result->final_state.bg_mode != 1u ||
        (result->flags & authentic_camera_flags) == authentic_camera_flags);
-  ActRaiser_AuthenticCaptureFrameCompleted(authentic_frame_valid);
+  HostPpuOutput_AuthenticFrameCompleted(authentic_frame_valid);
 }
 
 static void ActRaiser_FinishSceneCapture(void) {
@@ -243,7 +244,7 @@ static void ActRaiser_PublishFrameCapture(SrResult scanout_status,
   /* Latch the margin state the frame was ACTUALLY
    * rendered with, here, rather than letting FrameSlot_Capture read live g_ppu.
    * Between this function and the frame slot capture, main.c may call
-   * ActRaiser_RebindPpuOutputSurfaces(), whose public margin configuration
+   * HostPpuOutput_Rebind(), whose public margin configuration
    * zeroes both live margins — reading g_ppu later would silently describe a
    * different frame than the pixels came from. The non-diorama rebind gate
    * normally prevents this mismatch; latching at the producer boundary makes
@@ -271,7 +272,7 @@ void ActRaiserDrawPpuFrame(void) {
   /* Overlay bindings are host-owned and persistent; capture policy is
    * game-owned and rebuilt every frame so no prior mode can leak a region. */
   if (Sim3D_BeginFrame())
-    ActRaiser_RebindPpuOutputSurfaces();
+    HostPpuOutput_Rebind();
   if (!ActRaiser_ResetPpuFrameCaptures()) {
     SessionFatal_Request(
         "The runner could not reset frame capture policy. Restart after "

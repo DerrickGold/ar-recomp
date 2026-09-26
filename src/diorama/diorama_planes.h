@@ -2,6 +2,7 @@
 #define AR_DIORAMA_PLANES_H
 
 #include <stdbool.h>
+#include <stddef.h>
 
 #include "snesrecomp/runner.h"
 
@@ -23,6 +24,26 @@ enum {
   kDioramaPlane_Bg2Far,                              /* editor virtual band 0 */
   kDioramaPlane_Count
 };
+
+/* One routing table for PPU bindings, captured masks and texture upload.
+ * Primary surfaces use band zero; these are the additional priority bands. */
+typedef struct DioramaPriorityBand {
+  uint8_t source, band, plane;
+} DioramaPriorityBand;
+
+static inline const DioramaPriorityBand *DioramaPlanes_PriorityBands(size_t *count) {
+  static const DioramaPriorityBand kPriorityBands[] = {
+    {SR_PPU_OVERLAY_BG1, 1, kDioramaPlane_Bg1Hi},
+    {SR_PPU_OVERLAY_BG2, 1, kDioramaPlane_Bg2Hi},
+    {SR_PPU_OVERLAY_BG1, 2, kDioramaPlane_Bg1Far},
+    {SR_PPU_OVERLAY_BG2, 2, kDioramaPlane_Bg2Far},
+    {SR_PPU_OVERLAY_OBJ, 1, kDioramaPlane_Obj1},
+    {SR_PPU_OVERLAY_OBJ, 2, kDioramaPlane_Obj2},
+    {SR_PPU_OVERLAY_OBJ, 3, kDioramaPlane_Obj3},
+  };
+  *count = sizeof(kPriorityBands) / sizeof(kPriorityBands[0]);
+  return kPriorityBands;
+}
 
 /* Returns the authentic OBJ priority represented by a split plane, or -1 for
  * every BG/backdrop plane. Keep this mapping shared by capture-apron policy

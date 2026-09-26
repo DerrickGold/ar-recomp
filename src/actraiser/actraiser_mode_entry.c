@@ -1,11 +1,11 @@
 #include "actraiser_mode_entry.h"
+#include "actraiser/actraiser_rtl.h"
 #include "actraiser/regional/actraiser_regional_runtime.h"
 #include "actraiser_cpu_hle_internal.h"
 #include "actraiser_native_call.h"
 #include "actraiser_hle_fatal.h"
 
 extern RecompReturn bank_02_ABC4_M1X0(CpuState *cpu);
-extern RecompReturn ActRaiser_WaitForVblank(CpuState *cpu);
 static bool s_extended,s_continue,s_title_target;
 static bool Entry(CpuState *cpu,unsigned db) {
   return cpu && cpu->PB==2 && cpu->DB==db && !cpu->D && cpu->m_flag &&

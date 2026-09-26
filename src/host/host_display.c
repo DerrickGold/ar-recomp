@@ -23,7 +23,6 @@
 #include "diorama/diorama.h"
 #include "diorama/diorama_frame_generation.h"
 #include "present/display_geometry.h"
-#include "present/frame_slot.h"
 #include "host_display_pacing.h"
 #include "host_display_refresh_cache.h"
 #include "host_display_status.h"
@@ -41,6 +40,7 @@
 #include "render/render_device.h"
 #include "app/performance_metrics.h"
 #include "present/render_comparison.h"
+#include "host/host_ppu_output.h"
 #include "host/host_video.h"
 #include "host/host_input.h"
 #include "present/presentation_textures.h"
@@ -92,9 +92,9 @@ static void RefreshRetainedSimCamera(FrameSlot *slot) {
   slot->sim.projection_pitch_mrad = (int16_t)camera.pitch_mrad;
   slot->sim.projection_yaw_mrad = (int16_t)camera.yaw_mrad;
   slot->sim.projection_distance_x100 = (uint16_t)camera.distance_x100;
-  slot->sim_camera_mode = camera.mode;
-  slot->sim_manual_orbit_yaw = camera.orbit_yaw;
-  slot->sim_manual_orbit_pitch = camera.orbit_pitch;
+  slot->sim_camera.mode = camera.mode;
+  slot->sim_camera.orbit_yaw = camera.orbit_yaw;
+  slot->sim_camera.orbit_pitch = camera.orbit_pitch;
 }
 
 /* Action's camera is presentation-owned for the same reason as SIM's. Only
@@ -372,7 +372,7 @@ void HostDisplay_ResolveVideoGeometry(bool apply_runtime_changes) {
     memset(g_authentic_pixels, 0, sizeof(g_authentic_pixels));
     memset(g_hud_bg_pixels, 0, sizeof(g_hud_bg_pixels));
     memset(g_hud_obj_pixels, 0, sizeof(g_hud_obj_pixels));
-    ActRaiser_RebindPpuOutputSurfaces();
+    HostPpuOutput_Rebind();
     HostDisplay_ApplyWindowScale();
     HostDisplay_InvalidatePresentHistory();
   }

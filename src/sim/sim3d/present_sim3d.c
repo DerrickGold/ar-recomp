@@ -10,6 +10,7 @@
  * present.c internals to this file, never live game state. */
 
 #include "sim/sim3d/present_sim3d_internal.h"
+#include "render/present_hud.h"
 #include "sim/menu/present_sim_menu.h"
 #include "sim/world_nav/present_sim_globe.h"
 #include "sim/world_nav/present_sim_globe_project.h"
@@ -44,6 +45,7 @@
 #include "sim/sim3d/present_sim3d_canvas.h"
 #include "host/host_video.h"
 #include "present/presentation_textures.h"
+#include "sim/sim3d/sim3d_textures.h"
 
 #ifndef AR_SIM3D_TERRAIN_ELEVATION
 #define AR_SIM3D_TERRAIN_ELEVATION 0
@@ -228,9 +230,9 @@ static bool DrawSimCurvedMapPlane(const SimObjectDrawScene *scene,
     overlay[i] = (ArRenderVertex2D){{point.screen.x,point.screen.y},color,uv[i]};
   }
   if (scene->depth_billboards)
-    return Sim3DDepthPass_AppendBillboards(g_sim_obj_atlas_texture,depth,1);
+    return Sim3DDepthPass_AppendBillboards(Sim3DTextures_Atlas(),depth,1);
   const int32_t indices[6] = {0,1,2,0,2,3};
-  return ArRenderDevice_DrawGeometry(&g_render_device,g_sim_obj_atlas_texture,overlay,4,indices,6);
+  return ArRenderDevice_DrawGeometry(&g_render_device,Sim3DTextures_Atlas(),overlay,4,indices,6);
 }
 
 static bool DrawSimObjectPriorityFiltered(
@@ -250,7 +252,7 @@ static bool DrawSimObjectPriorityFiltered(
   bool depth_filter = filters->depth;
   float minimum_depth = filters->minimum_depth;
   float maximum_depth = filters->maximum_depth;
-  if (!ArRenderTexture_IsValid(g_sim_obj_atlas_texture) ||
+  if (!ArRenderTexture_IsValid(Sim3DTextures_Atlas()) ||
       !slot->sim.atlas_valid)
     return false;
   bool success = true;
@@ -527,9 +529,9 @@ static bool DrawSimObjectPriorityFiltered(
       if (scene->rim_light && slot->sim.rim_strength_pct) {
         const Sim3DDepthBillboardRim rim =
             SimBillboardRim(slot, ground_billboard ? &ground_axes : NULL);
-        drawn = Sim3DDepthPass_AppendRimBillboards(g_sim_obj_atlas_texture,quad,1,&rim);
+        drawn = Sim3DDepthPass_AppendRimBillboards(Sim3DTextures_Atlas(),quad,1,&rim);
       } else {
-        drawn = Sim3DDepthPass_AppendBillboards(g_sim_obj_atlas_texture,quad,1);
+        drawn = Sim3DDepthPass_AppendBillboards(Sim3DTextures_Atlas(),quad,1);
       }
     } else if (pass) {
       const ArRenderDrawState pass_state = {
@@ -538,16 +540,16 @@ static bool DrawSimObjectPriorityFiltered(
         .blend = pass->blend,
       };
       drawn = ArRenderDevice_DrawTextureWithState(
-          &g_render_device, g_sim_obj_atlas_texture,
+          &g_render_device, Sim3DTextures_Atlas(),
           &atlas, &destination, &pass_state);
     } else {
       drawn = half_add
           ? ArRenderDevice_DrawTextureTinted(
-                &g_render_device, g_sim_obj_atlas_texture,
+                &g_render_device, Sim3DTextures_Atlas(),
                 &atlas, &destination,
                 (ArRenderColorF){1.0f, 1.0f, 1.0f, 128.0f / 255.0f})
           : ArRenderDevice_DrawTexture(
-                &g_render_device, g_sim_obj_atlas_texture,
+                &g_render_device, Sim3DTextures_Atlas(),
                 &atlas, &destination);
     }
     if (drawn) {
@@ -844,7 +846,7 @@ static PresentationOutcome DrawSimRimLight(
     const float matrix[16], SimObjectTerrainFilter terrain_filter) {
   if (!slot->sim.rim_strength_pct)
     return kPresentationOutcome_Complete;
-  if (!ArRenderTexture_IsValid(g_sim_obj_atlas_texture) ||
+  if (!ArRenderTexture_IsValid(Sim3DTextures_Atlas()) ||
       !slot->sim.atlas_valid)
     return kPresentationOutcome_Complete;
   bool any_rim = false;
@@ -1238,116 +1240,8 @@ static void DrawSimGroundExtension(ArRenderTexture texture,
 }
 
 
-/* Sim-town dynamic camera.
- *
- * Same construction as the diorama reactive camera above -- a velocity lean
- * eased toward on a wall-clock exponential, plus additive impulses that decay
- * on another -- because the failure modes it was tuned against are the same
- * ones: a fixed per-frame damping factor is twice as stiff at 120Hz as at
- * 60Hz, and an impulse that replaces rather than stacks loses back-to-back
- * events.
- *
- * The magnitudes are smaller. The action stages look at the player from the
- * side, where a lean swings the whole scene across the screen; the town is
- * viewed from near-overhead, where the same angle mostly slides the ground
- * under a camera that is already looking down, and it takes very little
- * before the map appears to swim.
- *
- * Presentation-owned state, matching the diorama camera: FrameSlot hands over
- * a clamped signal and one-shot event flags, and the formula lives here. */
-static const float kSimLeanYaw = 0.045f;    /* rad at full lean */
-static const float kSimLeanPitch = 0.055f;  /* rad at full lean */
-static const float kSimDampTau = 0.22f;     /* s; slower than action mode */
-static const float kSimKickPitch = 0.030f;  /* rad */
-static const float kSimKickZoom = -0.09f;   /* fraction; slight punch in */
-static const float kSimKickTau = 0.18f;     /* s */
-
-typedef struct SimDynamicCameraState {
-  float lean_x, lean_y;
-  float kick_pitch, kick_zoom;
-  uint64_t last_ns;
-  uint64_t last_slot_ns;
-  bool active;
-} SimDynamicCameraState;
-
-static SimDynamicCameraState s_sim_dyncam;
-
-/* Folds the reactive offsets into the camera the projection is built from.
- * Returns with `camera` unchanged when the feature is off, so the pose stays
- * exactly what the pitch/yaw/distance settings describe. */
-static void ApplySimDynamicCamera(const FrameSlot *slot,
-                                  Scene3DCamera *camera) {
-  bool dynamic = slot->sim_camera_mode == kSimCam_Dynamic;
-  bool reactive = dynamic && slot->sim_dyncam_strength > 0;
-
-  /* A mode change snaps rather than eases. Easing across it would swing the
-   * camera from the free pose to the baseline over a visible fraction of a
-   * second, which reads as the camera being knocked rather than as the player
-   * having switched modes. Same rule the diorama camera uses. */
-  static int previous_mode = -1;
-  bool mode_changed = previous_mode != slot->sim_camera_mode;
-  previous_mode = slot->sim_camera_mode;
-
-  uint64_t now_ns = HostClock_Nanoseconds();
-  float dt = 0.0f;
-  if (s_sim_dyncam.last_ns != 0) {
-    dt = (float)(now_ns - s_sim_dyncam.last_ns) / 1e9f;
-    if (dt < 0.0f) dt = 0.0f;
-    if (dt > 1.0f) dt = 1.0f;   /* resuming from a pause is not a huge step */
-  }
-  s_sim_dyncam.last_ns = now_ns;
-
-  if (!dynamic) {
-    /* Cleared rather than left to decay, so switching the feature off is
-     * immediate and switching it back on starts level instead of resuming a
-     * lean from whenever it was turned off. */
-    s_sim_dyncam = (SimDynamicCameraState){ .last_ns = now_ns };
-    return;
-  }
-
-  float gain = (float)slot->sim_dyncam_strength / (float)kPercentScale;
-  float target_x = kSimLeanPitch * gain * slot->sim_dyncam_lean_pitch;
-  float target_y = kSimLeanYaw * gain * slot->sim_dyncam_lean_yaw;
-
-  if (!reactive) {
-    s_sim_dyncam.lean_x = 0.0f;
-    s_sim_dyncam.lean_y = 0.0f;
-    s_sim_dyncam.kick_pitch = 0.0f;
-    s_sim_dyncam.kick_zoom = 0.0f;
-    s_sim_dyncam.active = false;
-  } else if (!s_sim_dyncam.active || mode_changed || dt <= 0.0f) {
-    s_sim_dyncam.lean_x = target_x;
-    s_sim_dyncam.lean_y = target_y;
-    s_sim_dyncam.active = true;
-  } else {
-    float alpha = 1.0f - expf(-dt / kSimDampTau);
-    s_sim_dyncam.lean_x += (target_x - s_sim_dyncam.lean_x) * alpha;
-    s_sim_dyncam.lean_y += (target_y - s_sim_dyncam.lean_y) * alpha;
-  }
-
-  /* Impulses fire only on a genuinely new capture. Re-presenting a slot already
-   * processed must not re-trigger, or a paused frame would
-   * shake forever. Stacking is additive so a hit taken mid-jolt reads as
-   * stronger rather than restarting. */
-  if (reactive && slot->timestamp_ns != s_sim_dyncam.last_slot_ns) {
-    s_sim_dyncam.last_slot_ns = slot->timestamp_ns;
-    if (slot->sim_dyncam_event_hit) {
-      s_sim_dyncam.kick_pitch += kSimKickPitch * gain;
-      s_sim_dyncam.kick_zoom += kSimKickZoom * gain;
-    }
-  }
-  if (reactive && dt > 0.0f) {
-    float decay = expf(-dt / kSimKickTau);
-    s_sim_dyncam.kick_pitch *= decay;
-    s_sim_dyncam.kick_zoom *= decay;
-  }
-
-  camera->tilt_x += s_sim_dyncam.lean_x + s_sim_dyncam.kick_pitch +
-      slot->sim_manual_orbit_pitch;
-  camera->tilt_y += s_sim_dyncam.lean_y + slot->sim_manual_orbit_yaw;
-  camera->distance *= 1.0f + s_sim_dyncam.kick_zoom;
-  if (camera->distance < 2.0f) camera->distance = 2.0f;
-}
+/* Reactive history belongs to this presentation session, not GPU resources. */
+static Sim3DCameraPresenter s_sim_camera = SIM3D_CAMERA_PRESENTER_INIT;
 
 static void ClampSimCameraPitch(Scene3DCamera *camera) {
   float minimum = (float)kSim3DCameraPitchMinimumMrad / kPermilleScale;
@@ -1657,7 +1551,7 @@ bool PresentSimMenuFlatTown(const FrameSlot *slot, ArRenderRectI source,
       }
     } else if ((slot->sim.separated_plane_mask & (1u << plane)) &&
         !ArRenderDevice_DrawTexture(&g_render_device,
-            g_sim3d_layer_textures[plane], &src, &dst)) return false;
+            Sim3DTextures_Layer(plane), &src, &dst)) return false;
   }
   return true;
 }
@@ -1715,7 +1609,7 @@ static PresentationOutcome RenderSimProfile(
     const ArRenderRectF src = PortableRect(source);
     const ArRenderRectF dst = PortableRect(viewport);
     return ArRenderDevice_DrawTexture(
-               &g_render_device, g_sim3d_flat_texture, &src, &dst)
+               &g_render_device, Sim3DTextures_Flat(), &src, &dst)
         ? outcome : kPresentationOutcome_CoreFailure;
   }
 
@@ -1749,7 +1643,8 @@ static PresentationOutcome RenderSimProfile(
   /* Before the matrix is built, so every stage -- ground, billboards,
    * shadows, the cull boundary, the shroud -- sees one camera. Adjusting the
    * matrix afterwards would leave the object anchors on the old one. */
-  ApplySimDynamicCamera(slot, &camera);
+  Sim3DCamera_ApplyMotion(&s_sim_camera, &slot->sim_camera,
+      slot->timestamp_ns, HostClock_Nanoseconds(), &camera);
   ClampSimCameraPitch(&camera);
   const bool globe_underlay = underlay && background_voxels &&
       (features & kSimFeature_GlobeUnderlay) != 0;
@@ -1825,10 +1720,10 @@ static PresentationOutcome RenderSimProfile(
     bool live_ground_enabled = !background_voxels && (
         ((enabled_planes & (1u << kSim3DPlane_Bg1Low)) &&
          ArRenderTexture_IsValid(
-             g_sim3d_layer_textures[kSim3DPlane_Bg1Low])) ||
+             Sim3DTextures_Layer(kSim3DPlane_Bg1Low))) ||
         ((enabled_planes & (1u << kSim3DPlane_Bg1High)) &&
          ArRenderTexture_IsValid(
-             g_sim3d_layer_textures[kSim3DPlane_Bg1High])));
+             Sim3DTextures_Layer(kSim3DPlane_Bg1High))));
     ArRenderRectF live_ground = PortableRect(source);
     Sim3DPerformanceScope performance =
         Sim3DPerformance_Begin(kSim3DPerformance_Terrain);
@@ -1940,7 +1835,7 @@ static PresentationOutcome RenderSimProfile(
       }
     }
     if (!(captured_planes & (1u << plane))) continue;
-    ArRenderTexture texture = g_sim3d_layer_textures[plane];
+    ArRenderTexture texture = Sim3DTextures_Layer(plane);
     if (!ArRenderTexture_IsValid(texture)) continue;
     if (plane == kSim3DPlane_Bg1Low || plane == kSim3DPlane_Bg1High) {
       if (globe_underlay) continue; /* Native source is embedded once. */
@@ -2048,7 +1943,7 @@ static PresentationOutcome RenderSimProfile(
     }
     if (!SimPlaneIsMenu(plane)) continue;
     if (!(captured_planes & (1u << plane))) continue;
-    ArRenderTexture texture = g_sim3d_layer_textures[plane];
+    ArRenderTexture texture = Sim3DTextures_Layer(plane);
     if (ArRenderTexture_IsValid(texture)) {
       if (!ArRenderDevice_DrawTexture(
               &g_render_device, texture,
@@ -2147,7 +2042,7 @@ PresentationOutcome PresentSim3D(const FrameSlot *slot) {
    * single HUD presentation path for both the flat and projected views. */
   Sim3DPerformanceScope host_ui_performance =
       Sim3DPerformance_Begin(kSim3DPerformance_HostUi);
-  PresentHudOverlayComposited(slot, viewport);
+  PresentHud_DrawComposited(&g_render_device, slot, viewport);
   if (!DrawSimMasterFade(slot, &output_frame))
     outcome = kPresentationOutcome_CoreFailure;
   Sim3DPerformance_End(host_ui_performance);

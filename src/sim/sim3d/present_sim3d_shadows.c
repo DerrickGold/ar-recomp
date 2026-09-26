@@ -21,7 +21,7 @@
 #include "sim/sim3d/sim3d_performance.h"
 #include "sim/sim3d/sim_shadow_effect_backend.h"
 #include "host/host_video.h"
-#include "present/presentation_textures.h"
+#include "sim/sim3d/sim3d_textures.h"
 
 #ifndef AR_SIM3D_TERRAIN_ELEVATION
 #define AR_SIM3D_TERRAIN_ELEVATION 0
@@ -303,7 +303,7 @@ static PresentationOutcome BuildSimShadowMask(
     const SimBackgroundVoxelRenderParams *presentation_params,
     ArRenderTexture *out_mask) {
   *out_mask = ArRenderTexture_Invalid();
-  if (!ArRenderTexture_IsValid(g_sim_obj_atlas_texture) ||
+  if (!ArRenderTexture_IsValid(Sim3DTextures_Atlas()) ||
       !slot->sim.atlas_valid)
     return kPresentationOutcome_Complete;
   if (!slot->sim.shadow_opacity_pct)
@@ -456,7 +456,7 @@ static PresentationOutcome BuildSimShadowMask(
       .blend = kArRenderBlendMode_Alpha,
     };
     mask_valid = ArRenderDevice_DrawGeometryWithState(
-        &g_render_device, g_sim_obj_atlas_texture,
+        &g_render_device, Sim3DTextures_Atlas(),
         s_sim_shadow_vertices, vertex_count,
         s_sim_shadow_indices, index_count, &caster_state);
     if (mask_valid) {

@@ -1,3 +1,4 @@
+#include "host/host_ppu_output.h"
 #include "host/host_input.h"
 
 #include <stdio.h>
@@ -30,7 +31,7 @@
 #include "actraiser_game.h"
 #include "snesrecomp/game/runtime.h"
 
-#include "present/presentation_textures.h"
+#include "sim/sim3d/sim3d_textures.h"
 
 static bool s_turbo;
 
@@ -186,7 +187,7 @@ void HostInput_ApplyAnalogCamera(void) {
       !RenderComparison_FreezesGameplay() && Diorama_IsActiveThisFrame();
   const bool sim3d = !SettingsOverlay_IsOpen() &&
       !RenderComparison_FreezesGameplay() && !diorama &&
-      Sim3DCamera_ControlsAvailable(g_sim3d_textures_ready);
+      Sim3DCamera_ControlsAvailable(Sim3DTextures_Ready());
 
   const float elapsed_seconds =
       (float)elapsed_ns / (float)kNanosecondsPerSecond;
@@ -230,14 +231,14 @@ void HostInput_ApplyAnalogCamera(void) {
 }
 
 static bool AuthenticFrameReady(void) {
-  const uint64_t captured = ActRaiser_AuthenticFrameSerial();
+  const uint64_t captured = HostPpuOutput_AuthenticFrameSerial();
   return captured != 0 &&
       PresentAuthenticUploadedFrameSerial() == captured;
 }
 
 void HostInput_UpdateRenderComparison(void) {
   if (RenderComparison_RequiresAuthenticFrame() &&
-      !ActRaiser_AuthenticCaptureEnabled()) {
+      !HostPpuOutput_AuthenticEnabled()) {
     SessionFatal_Request(
         "Authentic comparison could not create a native rendering surface. "
         "Restart the game. If this happens again, update your graphics "
@@ -289,7 +290,7 @@ static void OnGamepadHostAction(InputAction action) {
       if (Diorama_IsActiveThisFrame()) {
         Diorama_ResetCamera();
       } else if (Sim3DCamera_ControlsAvailable(
-                     g_sim3d_textures_ready)) {
+                     Sim3DTextures_Ready())) {
         HostInput_ResetSim3DCamera();
       }
       break;
@@ -460,7 +461,7 @@ static void HandleMouse(const SDL_Event *event) {
         Diorama_ResetCamera();
     } else if (!SettingsOverlay_IsOpen() &&
                !RenderComparison_FreezesGameplay() &&
-               Sim3DCamera_ControlsAvailable(g_sim3d_textures_ready)) {
+               Sim3DCamera_ControlsAvailable(Sim3DTextures_Ready())) {
       if (event->button.button == SDL_BUTTON_RIGHT)
         Sim3DCamera_SetDragging(true);
       else if (event->button.button == SDL_BUTTON_MIDDLE)
@@ -490,7 +491,7 @@ static void HandleMouse(const SDL_Event *event) {
                            event->motion.yrel * Diorama_DragRadPerPx(), 0.0f);
     } else if (!RenderComparison_FreezesGameplay() &&
                Sim3DCamera_IsDragging() &&
-               Sim3DCamera_ControlsAvailable(g_sim3d_textures_ready)) {
+               Sim3DCamera_ControlsAvailable(Sim3DTextures_Ready())) {
       HostInput_AdjustSim3DCamera(event->motion.xrel * Diorama_DragRadPerPx(),
                                   event->motion.yrel * Diorama_DragRadPerPx(),
                                   0.0f);
@@ -510,7 +511,7 @@ static void HandleMouse(const SDL_Event *event) {
         Diorama_IsActiveThisFrame())
       Diorama_AdjustCamera(0.0f, 0.0f, -event->wheel.y * Diorama_ZoomStep());
     else if (!SettingsOverlay_IsOpen() && !RenderComparison_FreezesGameplay() &&
-             Sim3DCamera_ControlsAvailable(g_sim3d_textures_ready))
+             Sim3DCamera_ControlsAvailable(Sim3DTextures_Ready()))
       HostInput_AdjustSim3DCamera(0.0f, 0.0f,
                                   -event->wheel.y * Diorama_ZoomStep());
     break;

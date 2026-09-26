@@ -15,7 +15,7 @@ typedef struct DioramaProjection DioramaProjection;
 
 /* Immutable presentation inputs needed to map an action-world effect point.
  * Keeping this smaller than FrameSlot makes the camera/widescreen/Diorama
- * seam pure and directly testable while present.c remains the owner of the
+ * seam pure and directly testable while present_action_effects.c owns the
  * frame-slot-to-context copy. */
 typedef struct ActionEffectProjectionContext {
   int16_t bg1_camera_x, bg1_camera_y;

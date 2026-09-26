@@ -1,4 +1,3 @@
-#include "actraiser/actraiser_room_profiles.h"
 /* Present-time rendering is isolated from live game state. This file must NOT
  * declare or extern g_ppu, g_settings, g_snes_width, g_ws_extra,
  * g_active_pixel_aspect, or call Settings_Visible*() — every present-time
@@ -10,43 +9,31 @@
  * render/main thread. PPU-bound output surfaces arrive through FrameSlot's
  * runner-ABI snapshot. */
 
-#include <limits.h>
 #include <math.h>
-#include <stdatomic.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 #include "action/action_bg_tuner.h"
-#include "action/action_effect_projection.h"
 #include "present/present.h"
 #include "sim/menu/present_sim_menu.h"
 #include "sim/world_nav/present_sky_palace.h"
-#include "sim/sim3d/present_sim3d_canvas.h"
-#include "action/action_effect_render.h"
+#include "sim/sim3d/sim3d_textures.h"
+#include "action/present_action_effects.h"
+#include "render/effect_batch.h"
 #include "constants.h"
 #include "render/crt_post.h"
 #include "snesrecomp/game/types.h"
-#include "diorama/diorama.h"
-#include "diorama/diorama_frame_generation.h"
-#include "diorama/diorama_performance.h"
-#include "diorama/diorama_upload.h"
-#include "diorama/diorama_skybox_uv.h"
-#include "diorama/diorama_planes.h"
+#include "diorama/present_diorama.h"
+#include "present/presentation_surface.h"
 #include "replacements/hd_replacement_host.h"
-#include "host/host_clock.h"
 #include "settings_overlay/settings_overlay_render.h"
-#include "dev/scene_inspector.h"
+#include "dev/present_scene_inspector.h"
 #include "render/render_capabilities.h"
-#include "sim/sim_render_atlas.h"
-#include "sim/voxels/sim_background_voxel_renderer.h"
 #include "sim/sim3d/sim3d.h"
 #include "sim/sim3d/sim3d_performance.h"
 #include "app/performance_metrics.h"
 #include "app/performance_overlay.h"
-#include "sim/world_nav/sim_world_navigation_palace.h"
 
-/* kPixelAspect_Crt43 and kDioramaCam_Free/kDioramaCam_Dynamic are plain enum
- * constants (not live state) — fine to pull in just for those. */
+/* Pixel-aspect enum constants only; never live settings. */
 #include "app/settings.h"
 #include "present/present_internal.h"
 #include "present/render_comparison.h"
@@ -54,230 +41,23 @@
 #include "present/presentation_upload_mirror.h"
 #include "render/presentation_layout.h"
 #include "render/render_output.h"
-#include "render/localized_text_presenter.h"
-#include "render/text_cell_composite.h"
+#include "render/present_hud.h"
 #include "host/host_video.h"
 #include "present/presentation_textures.h"
-
-static uint32_t s_diorama_uploaded_plane_mask;
-static DioramaCoverageMask
-    s_diorama_coverage_masks[kDioramaPlane_Count];
-static uint64_t s_diorama_bg2_content_revision;
-static DioramaSkyboxView s_diorama_skybox_view;
-static ArRenderTexture s_diorama_skybox_texture;
-static PresentationUploadMirror s_diorama_skybox_mirror;
-static ArRenderTexture s_action_bg1_mask_texture;
-static ArRenderTexture s_action_bg2_mask_texture;
-static ArRenderTexture s_action_plane_effect_target;
-static int s_action_plane_effect_w, s_action_plane_effect_h;
-static bool s_action_plane_blend_supported = true;
-static ArRenderTexture s_action_heat_target;
-static int s_action_heat_w, s_action_heat_h;
-static bool s_action_heat_supported = true;
-static bool s_action_heat_engaged;
-static ArRenderTexture s_sky_palace_foreground_texture;
-static bool s_sky_palace_foreground_valid;
-static uint32_t s_sky_palace_foreground_pixels[
-    kSimWorldNavigationPalaceMaxWidth * kSimWorldNavigationPalaceMaxHeight];
-
-typedef struct ActionHeatPassState {
-  ArRenderTargetState target_state;
-  bool valid;
-} ActionHeatPassState;
-
-typedef struct ActionHeatMeshCache {
-  ActionHeatRenderMesh mesh;
-  ArRenderRectI viewport;
-  int target_width, target_height, source_width;
-  uint16_t game_frame;
-  bool valid;
-} ActionHeatMeshCache;
-
-static ActionHeatPassState s_action_heat_saved_state;
-static ActionHeatMeshCache s_action_heat_mesh_cache;
-
-static const SrPpuSurfaceView *BoundPpuSurface(
-    const SrPpuSurfaceView *surface) {
-  return surface && surface->data &&
-      (surface->flags & SR_PPU_SURFACE_BOUND) != 0u &&
-      surface->pixel_format == SR_PPU_PIXEL_FORMAT_ARGB8888_U32 &&
-      surface->pitch_bytes != 0u &&
-      surface->pitch_bytes <= INT_MAX &&
-      surface->width_pixels == surface->pitch_bytes / sizeof(uint32_t) &&
-      surface->byte_size >=
-          surface->pitch_bytes * (uint64_t)surface->height_pixels
-      ? surface : NULL;
-}
-
-static bool PpuSurfaceHolds(
-    const SrPpuSurfaceView *surface, int width, int height) {
-  surface = BoundPpuSurface(surface);
-  return surface && width > 0 && height > 0 &&
-      (uint32_t)width <= surface->width_pixels &&
-      (uint32_t)height <= surface->height_pixels;
-}
-
-static const uint8_t *PpuSurfaceRegion(
-    const SrPpuSurfaceView *surface, int x, int y, int width, int height) {
-  surface = BoundPpuSurface(surface);
-  if (!surface || x < 0 || y < 0 || width <= 0 || height <= 0 ||
-      (uint64_t)(uint32_t)x + (uint32_t)width > surface->width_pixels ||
-      (uint64_t)(uint32_t)y + (uint32_t)height > surface->height_pixels)
-    return NULL;
-  return surface->data + (size_t)y * (size_t)surface->pitch_bytes +
-      (size_t)x * sizeof(uint32_t);
-}
-
-static const SrPpuSurfaceView *DioramaPpuSurface(
-    const FrameSlot *slot, int plane) {
-  if (!slot) return NULL;
-  if (plane >= SR_PPU_OVERLAY_BG1 && plane <= SR_PPU_OVERLAY_OBJ)
-    return &slot->ppu_surfaces.overlays[plane][0];
-  switch (plane) {
-    case kDioramaPlane_Backdrop:
-      return &slot->ppu_surfaces.main;
-    case kDioramaPlane_Bg1Hi:
-      return &slot->ppu_surfaces.overlays[SR_PPU_OVERLAY_BG1][1];
-    case kDioramaPlane_Bg2Hi:
-      return &slot->ppu_surfaces.overlays[SR_PPU_OVERLAY_BG2][1];
-    case kDioramaPlane_Obj1:
-      return &slot->ppu_surfaces.overlays[SR_PPU_OVERLAY_OBJ][1];
-    case kDioramaPlane_Obj2:
-      return &slot->ppu_surfaces.overlays[SR_PPU_OVERLAY_OBJ][2];
-    case kDioramaPlane_Obj3:
-      return &slot->ppu_surfaces.overlays[SR_PPU_OVERLAY_OBJ][3];
-    case kDioramaPlane_Bg1Far:
-      return &slot->ppu_surfaces.overlays[SR_PPU_OVERLAY_BG1][2];
-    case kDioramaPlane_Bg2Far:
-      return &slot->ppu_surfaces.overlays[SR_PPU_OVERLAY_BG2][2];
-    default:
-      return NULL;
-  }
-}
-
-static const SrPpuSurfaceView *Sim3DPpuSurface(
-    const FrameSlot *slot, int plane) {
-  return slot && plane >= 0 && plane < kSim3DPlane_Count
-      ? &slot->sim3d_output_surfaces.planes[plane] : NULL;
-}
-
-static void CaptureDioramaPpuSurfaces(
-    const FrameSlot *slot,
-    const uint8_t *pixels[kDioramaPlane_Count],
-    size_t pitch_bytes[kDioramaPlane_Count]) {
-  const int width = slot->snes_width + slot->obj_apron * 2;
-  const int height = slot->snes_height +
-      slot->ws_extra_top + slot->ws_extra_bottom;
-  memset(pixels, 0, sizeof(*pixels) * kDioramaPlane_Count);
-  if (pitch_bytes)
-    memset(pitch_bytes, 0, sizeof(*pitch_bytes) * kDioramaPlane_Count);
-  for (int plane = 0; plane < kDioramaPlane_Count; plane++) {
-    const SrPpuSurfaceView *surface = DioramaPpuSurface(slot, plane);
-    if (!PpuSurfaceHolds(surface, width, height)) continue;
-    pixels[plane] = surface->data;
-    if (pitch_bytes)
-      pitch_bytes[plane] = (size_t)surface->pitch_bytes;
-  }
-}
-
-/* AR_PLANESTAT=1: report the alpha-bearing fraction and content bounding box
- * of each plane that actually synchronized for presentation. This runs while
- * the borrowed producer surfaces are still owned by PresentUpload; retained
- * re-presents must not rescan pointers that a later game tick can rewrite. */
-static void PlaneStatCensus(
-    const uint8_t *pixels[kDioramaPlane_Count],
-    const size_t pitch_bytes[kDioramaPlane_Count],
-    int width, int height, uint32_t plane_mask) {
-  static int enabled = -1;
-  static unsigned long frames;
-  static double covered_sum[kDioramaPlane_Count];
-  static double bbox_sum[kDioramaPlane_Count];
-  static unsigned long present_count[kDioramaPlane_Count];
-  if (enabled < 0) {
-    const char *value = getenv("AR_PLANESTAT");
-    enabled = value && value[0] && value[0] != '0';
-  }
-  if (!enabled || width <= 0 || height <= 0) return;
-  frames++;
-  for (int plane = 0; plane < kDioramaPlane_Count; plane++) {
-    if (!(plane_mask & (1u << plane)) ||
-        !pixels[plane] || !pitch_bytes[plane])
-      continue;
-    long covered = 0;
-    int x0 = width, x1 = -1, y0 = height, y1 = -1;
-    for (int y = 0; y < height; y++) {
-      const uint32_t *row = (const uint32_t *)(
-          pixels[plane] + (size_t)y * pitch_bytes[plane]);
-      for (int x = 0; x < width; x++) {
-        if ((row[x] >> 24) == 0u) continue;
-        covered++;
-        if (x < x0) x0 = x;
-        if (x > x1) x1 = x;
-        if (y < y0) y0 = y;
-        if (y > y1) y1 = y;
-      }
-    }
-    present_count[plane]++;
-    const double area = (double)width * (double)height;
-    covered_sum[plane] += (double)covered / area;
-    bbox_sum[plane] += x1 < 0 ? 0.0
-        : (double)(x1 - x0 + 1) * (double)(y1 - y0 + 1) / area;
-  }
-  if (frames % 300u != 0u) return;
-  fprintf(stderr, "[planestat] after %lu frames (%dx%d)\n",
-          frames, width, height);
-  for (int plane = 0; plane < kDioramaPlane_Count; plane++) {
-    if (!present_count[plane]) continue;
-    fprintf(stderr,
-            "  plane %2d: present %5.1f%% covered %5.1f%% bbox %5.1f%%\n",
-            plane, 100.0 * (double)present_count[plane] / (double)frames,
-            100.0 * covered_sum[plane] / (double)present_count[plane],
-            100.0 * bbox_sum[plane] / (double)present_count[plane]);
-  }
-}
-
-/* Effect builders are synchronous and presentation runs on one render thread,
- * so one reusable workspace covers actor and every depth-ordered decoration
- * pass. Keep these large bounded arrays out of automatic storage: the scene
- * batch alone is roughly half a MiB and can exhaust default Windows/custom
- * thread stacks before a backend driver gets its own frame. */
-typedef struct ActionEffectRenderScratch {
-  ActionEffectRenderBatch spell;
-  ActionSceneEffectRenderBatch scene;
-} ActionEffectRenderScratch;
-
-static ActionEffectRenderScratch s_action_effect_render_scratch;
 
 /* Streaming textures retain their last successfully uploaded pixels. Exact CPU
  * mirrors let static presentation surfaces cost no bus upload and locally
  * animated surfaces update only their changed bounding rectangle. Byte-exact
  * comparison avoids making rendering correctness depend on a hash. */
 enum {
-  kSim3DUploadSurface_Flat = kSim3DPlane_Count,
-  kSim3DUploadSurface_Atlas,
-  kSim3DUploadSurface_Count,
-};
-
-enum {
   kActionUploadSurface_Frame,
   kActionUploadSurface_Authentic,
-  kActionUploadSurface_Bg1Mask,
-  kActionUploadSurface_Bg2Mask,
-  kActionUploadSurface_HudBg,
-  kActionUploadSurface_HudObj,
   kActionUploadSurface_Count,
 };
 
 static PresentationUploadMirror
-    s_sim3d_upload_mirrors[kSim3DUploadSurface_Count];
-static PresentationUploadMirror
     s_action_upload_mirrors[kActionUploadSurface_Count];
 static uint64_t s_authentic_uploaded_frame_serial;
-
-static void ResetSim3DUploadMirrors(void) {
-  for (int surface = 0; surface < kSim3DUploadSurface_Count; surface++)
-    PresentationUploadMirror_Reset(&s_sim3d_upload_mirrors[surface]);
-}
 
 static void ResetActionUploadMirrors(void) {
   for (int surface = 0; surface < kActionUploadSurface_Count; surface++)
@@ -302,19 +82,6 @@ static bool UploadChangedSurface(
   return uploaded;
 }
 
-static bool UploadChangedSim3DSurface(
-    ArRenderTexture texture, int surface, const uint32_t *pixels,
-    int width, int height, int source_pitch_pixels) {
-  if (surface < 0 || surface >= kSim3DUploadSurface_Count ||
-      source_pitch_pixels > INT_MAX / (int)sizeof(uint32_t))
-    return false;
-  return UploadChangedSurface(
-      texture,
-      &s_sim3d_upload_mirrors[surface],
-      (const uint8_t *)pixels, width, height,
-      source_pitch_pixels * (int)sizeof(uint32_t), 0, 0);
-}
-
 /* The separated SIM profile consumes its published planes (or their flat
  * separated composite), never the ordinary PPU composite texture.  Keep this
  * decision at the presentation layer: the PPU still produces the authentic
@@ -330,32 +97,11 @@ static bool PresentationConsumesMainPpuTexture(const FrameSlot *slot) {
             kSimFeature_SeparatedComposite) != 0);
 }
 
-static void DisableActionPlaneEffect(const char *operation) {
-  if (!s_action_plane_blend_supported) return;
-  s_action_plane_blend_supported = false;
-  fprintf(stderr,
-          "[action-fx] flat BG-local effect unavailable at %s (%s); "
-          "disabled\n",
-          operation ? operation : "unknown operation",
-          ArRenderDevice_LastError(&g_render_device));
-}
-
 static ArRenderRectF ToRenderRectF(ArRenderRectI rectangle) {
   return (ArRenderRectF){
     (float)rectangle.x, (float)rectangle.y,
     (float)rectangle.w, (float)rectangle.h,
   };
-}
-
-static void RenderHudChunk(ArRenderTexture texture,
-                           ArRenderRectI src, ArRenderRectI dst) {
-  if (!ArRenderTexture_IsValid(texture) ||
-      src.w <= 0 || src.h <= 0 || dst.w <= 0 || dst.h <= 0)
-    return;
-  const ArRenderRectF source = ToRenderRectF(src);
-  const ArRenderRectF destination = ToRenderRectF(dst);
-  (void)ArRenderDevice_DrawTexture(
-      &g_render_device, texture, &source, &destination);
 }
 
 ArRenderRectI ComputePresentationViewport(
@@ -380,216 +126,6 @@ ArRenderRectI ComputePresentationViewportWithOutput(
   return ArPresentationLayout_ResolveViewport(
       out_w, out_h, ignore_aspect_ratio,
       pixel_aspect == kPixelAspect_Crt43, visible_width, snes_height);
-}
-
-static HudProjectionInputs BuildProjectionInputsFromSlot(const FrameSlot *slot) {
-  HudProjectionInputs in = {0};
-  in.hud_bg_texture = g_hud_bg_texture;
-  in.hud_obj_texture = g_hud_obj_texture;
-  in.hud_scale_percent = slot->hud_scale_percent;
-  in.crt_pixel_aspect = slot->pixel_aspect == kPixelAspect_Crt43;
-  in.snes_width = slot->snes_width;
-  in.snes_height = slot->snes_height;
-  in.visible_width = slot->visible_width;
-  in.authentic_width = kFrameSlotAuthenticWidth;
-  in.hud_split_height = slot->hud_split_height;
-  in.hud_left_end = slot->hud_left_end;
-  in.hud_right_start = slot->hud_right_start;
-  in.hud_player_row_y = slot->hud_player_row_y;
-  in.hud_left_only_y = slot->hud_left_only_y;
-  in.extra_left_right = slot->extra_left_right;
-  {
-    const FrameSlotOverlayCapture *bg3 =
-        &slot->overlay_captures[kFrameSlotOverlay_Bg3];
-    if (!PresentSimMenu_Active(slot) &&
-        bg3->y1 > (int16_t)slot->hud_split_height && bg3->y1 <= 240)
-      in.hud_body_y1 = (uint8_t)bg3->y1;
-  }
-
-  /* The promote's own latched range, NOT overlay_captures[Obj].oamFirst/Count:
-   * in diorama mode that capture describes the full-frame 0..127 scene claim
-   * that legitimately overwrote the icon's capture, so keying off it dropped
-   * obj_icon_valid and the icon fell back to whatever the scene did with it
-   * (drawn tilted and centered rather than anchored beside the right group).
-   *
-   * Any nonzero count, not ==4: the promote only ever latches a range it has
-   * validated as a 16x16 HUD icon, and Sky Palace spends 1 slot on that icon
-   * for three of the four spells and 4 for Magical Fire. Demanding 4 here was
-   * the second half of the bug that stranded those three at centre screen. */
-  if (slot->oam_valid && slot->hud_icon_count) {
-    int first = slot->hud_icon_first;
-    in.obj_icon_x = (slot->oam[first * 2] & 0xff) |
-        ((slot->high_oam[first >> 2] >> ((first & 3) * 2)) & 1) << 8;
-    in.obj_icon_y = slot->oam[first * 2] >> 8;
-    in.obj_icon_valid = true;
-  }
-  return in;
-}
-
-static void PresentHudChunksDirect(const FrameSlot *slot,
-                                   ArRenderRectI viewport) {
-  HudProjectionInputs in = BuildProjectionInputsFromSlot(slot);
-  HudPresentationChunk chunks[kHudPresentationChunkCapacity];
-  int count = ArHudLayout_BuildPresentationChunks(viewport, &in, chunks);
-  for (int i = 0; i < count; i++)
-    RenderHudChunk(chunks[i].texture, chunks[i].texture_source,
-                   chunks[i].output_destination);
-}
-
-static void PresentHudOverlay(const FrameSlot *slot, ArRenderRectI viewport) {
-  const FrameSlotOverlayCapture *bg3 =
-      &slot->overlay_captures[kFrameSlotOverlay_Bg3];
-  if (bg3->y1 > (int16_t)slot->hud_split_height)
-    PresentHudOverlayComposited(slot, viewport);
-  else
-    PresentHudChunksDirect(slot, viewport);
-}
-
-/* A7 (followup doc), diorama variant. A straight port of PresentHudOverlay
- * into the diorama branch produced visible seams between the ACT/TIME/SCORE
- * bands because the scene and overlay followed different viewport policies.
- * Both branches now receive the same aspect-fit viewport; retaining a single
- * composite texture also makes per-chunk rounding self-contained.
- *
- * Reconstruct the whole HUD into one dedicated texture first (recreated
- * whenever the output size changes — same resolution the chunks would have
- * rendered at, just isolated so any residual per-chunk rounding stays
- * self-contained instead of visible against the tilted scene), then draw
- * that single texture as a plain, undistorted screen overlay — same
- * screen-space blit as the flat branch, just one draw call instead of up to
- * kHudPresentationChunkCapacity. */
-static ArRenderTexture s_hud_composite_texture;
-static int s_hud_composite_w, s_hud_composite_h;
-
-static ArRenderTexture EnsureHudCompositeTexture(int w, int h) {
-  if (!ArRenderDevice_IsReady(&g_render_device) || w <= 0 || h <= 0)
-    return ArRenderTexture_Invalid();
-  if (ArRenderTexture_IsValid(s_hud_composite_texture) &&
-      s_hud_composite_w == w &&
-      s_hud_composite_h == h)
-    return s_hud_composite_texture;
-  ArRenderDevice_DestroyTexture(&g_render_device, s_hud_composite_texture);
-  s_hud_composite_texture = ArRenderTexture_Invalid();
-  s_hud_composite_w = w;
-  s_hud_composite_h = h;
-  const ArRenderTextureDesc desc = {
-    .width = w,
-    .height = h,
-    .format = kArRenderPixelFormat_Argb8888,
-    .usage = kArRenderTextureUsage_Target,
-    .filter = kArRenderFilter_Nearest,
-    .blend = kArRenderBlendMode_Alpha,
-  };
-  (void)ArRenderDevice_CreateTexture(
-      &g_render_device, &desc, &s_hud_composite_texture);
-  return s_hud_composite_texture;
-}
-
-void PresentHudOverlayComposited(const FrameSlot *slot,
-                                 ArRenderRectI viewport) {
-  ArRenderTexture composite = EnsureHudCompositeTexture(
-      viewport.w, viewport.h);
-  HudProjectionInputs in = BuildProjectionInputsFromSlot(slot);
-  HudPresentationChunk chunks[kHudPresentationChunkCapacity];
-  if (!ArRenderTexture_IsValid(composite)) {
-    PresentHudChunksDirect(slot, viewport);
-    return;
-  }
-
-  ArRenderRectI local_viewport = {0, 0, viewport.w, viewport.h};
-  int count = ArHudLayout_BuildPresentationChunks(
-      local_viewport, &in, chunks);
-  if (count <= 0) return;
-  ArLocalizedPreparedFrame localized;
-  ArLocalizedTextPresenter_Prepare(
-      &g_render_device, &slot->localization,
-      slot->bg3_state_valid, slot->bg3_tilemap_base_words,
-      slot->bg3_tilemap_width_tiles, slot->bg3_tilemap_height_tiles,
-      slot->bg3_hscroll, slot->bg3_vscroll,
-      kFrameSlotAuthenticWidth, kFrameSlotAuthenticHeight,
-      chunks, (size_t)count, &localized);
-
-  ArRenderTargetState target_state;
-  const ArRenderTargetBeginResult begin = ArRenderDevice_BeginTarget(
-      &g_render_device, composite, &target_state);
-  if (begin != kArRenderTargetBegin_Ready) {
-    if (begin == kArRenderTargetBegin_StateLost)
-      SessionFatal_Request(
-          "The renderer lost its scene target while beginning HUD composition "
-          "(%s). Restart the game; if this repeats, update your graphics "
-          "driver.", ArRenderDevice_LastError(&g_render_device));
-    else {
-      PresentHudChunksDirect(slot, viewport);
-    }
-    return;
-  }
-  bool target_ready =
-      ArRenderDevice_UseOutputCoordinates(&g_render_device) &&
-      ArRenderDevice_Clear(
-          &g_render_device,
-          (ArRenderColorF){0.0f, 0.0f, 0.0f, 0.0f});
-  bool localized_drawn = false;
-  if (target_ready) {
-    bool masks_valid = true;
-    for (int i = 0; i < count; i++) {
-      if (!localized.mask_count) {
-        RenderHudChunk(chunks[i].texture, chunks[i].texture_source,
-                       chunks[i].output_destination);
-        continue;
-      }
-      HudPresentationChunk pieces[kArTextCellMaximumChunkPieces];
-      const size_t piece_count = ArTextCellComposite_SubtractMasks(
-          &chunks[i], localized.masks, localized.mask_count,
-          pieces, kArTextCellMaximumChunkPieces);
-      if (piece_count == SIZE_MAX) {
-        masks_valid = false;
-        break;
-      }
-      for (size_t piece = 0; piece < piece_count; ++piece)
-        RenderHudChunk(pieces[piece].texture, pieces[piece].texture_source,
-                       pieces[piece].output_destination);
-    }
-    /* Discard a failed partial composite. Painting transparent native chunks
-     * over it cannot erase already-drawn enhanced ink. After restoring the
-     * output target below, draw only the untouched native chunks instead. */
-    const float text_brightness = slot->inidisp & 0x80 ? 0.0f : (slot->inidisp & 15) / 15.0f;
-    if (!masks_valid || !ArLocalizedTextPresenter_DrawWithBrightness(
-            &g_render_device, &localized, text_brightness)) {
-      target_ready = false;
-    } else {
-      localized_drawn = true;
-    }
-  }
-  if (!ArRenderDevice_EndTarget(&g_render_device, &target_state)) {
-    SessionFatal_Request(
-        "The renderer could not restore its scene target after composing the "
-        "HUD (%s). Restart the game; if this repeats, update your graphics "
-        "driver.", ArRenderDevice_LastError(&g_render_device));
-    return;
-  }
-  if (!target_ready) {
-    PresentHudChunksDirect(slot, viewport);
-    return;
-  }
-
-  const ArRenderRectF destination = {
-    viewport.x, viewport.y, viewport.w, viewport.h,
-  };
-  /* Ordinary alpha draws into a transparent target leave premultiplied RGB.
-   * Use the matching over operation when flattening that group, otherwise its
-   * alpha is applied twice and transparent texels can replace the scene with
-   * the target's clear colour on some GPU backends. */
-  const ArRenderDrawState over = {
-    .flags = kArRenderDrawState_Blend,
-    .blend = kArRenderBlendMode_AlphaPremultiplied,
-  };
-  if (ArRenderDevice_DrawTextureWithState(
-          &g_render_device, composite, NULL, &destination, &over)) {
-    if (localized_drawn)
-      ArTextPresentation_MarkReady(localized.ready_dialogue_ticket);
-  } else {
-    PresentHudChunksDirect(slot, viewport);
-  }
 }
 
 static void PresentMode7Composite(const FrameSlot *slot,
@@ -647,247 +183,13 @@ static void PresentHdReplacements(const FrameSlot *slot,
   }
 }
 
-static int InspectorScreenToOutputX(ArRenderRectI viewport, double screen_x,
-                                    const FrameSlot *slot) {
-  int visible_left = slot->visible_x0 - slot->ws_extra;
-  return viewport.x + (int)((screen_x - visible_left) * viewport.w /
-                            slot->visible_width + 0.5);
-}
-
-static int InspectorScreenToOutputY(ArRenderRectI viewport, double screen_y,
-                                    const FrameSlot *slot) {
-  return viewport.y + (int)(screen_y * viewport.h / slot->snes_height + 0.5);
-}
-
-static int HudSourceToOutputX(const HudPresentationChunk *chunk, double source_x) {
-  return chunk->output_destination.x +
-      (int)((source_x - chunk->screen_source.x) *
-            chunk->output_destination.w / chunk->screen_source.w + 0.5);
-}
-
-static int HudSourceToOutputY(const HudPresentationChunk *chunk, double source_y) {
-  return chunk->output_destination.y +
-      (int)((source_y - chunk->screen_source.y) *
-            chunk->output_destination.h / chunk->screen_source.h + 0.5);
-}
-
-static bool HudHighlightToOutput(const HudPresentationChunk *chunk,
-                                 int x0, int y0, int x1, int y1,
-                                 ArRenderRectI *output) {
-  if (!chunk || !output) return false;
-  x0 -= chunk->inspector_x_bias;
-  x1 -= chunk->inspector_x_bias;
-  const ArRenderRectI source = chunk->screen_source;
-  if (x0 < source.x) x0 = source.x;
-  if (y0 < source.y) y0 = source.y;
-  if (x1 > source.x + source.w) x1 = source.x + source.w;
-  if (y1 > source.y + source.h) y1 = source.y + source.h;
-  if (x1 <= x0 || y1 <= y0) return false;
-  int output_x0 = HudSourceToOutputX(chunk, x0);
-  int output_y0 = HudSourceToOutputY(chunk, y0);
-  int output_x1 = HudSourceToOutputX(chunk, x1);
-  int output_y1 = HudSourceToOutputY(chunk, y1);
-  *output = (ArRenderRectI){
-    output_x0, output_y0, output_x1 - output_x0, output_y1 - output_y0,
-  };
-  return output->w > 0 && output->h > 0;
-}
-
-static bool FindSelectedHudChunk(const FrameSlot *slot,
-                                 ArRenderRectI viewport,
-                                 HudPresentationChunk *selected) {
-  if (slot->inspector_selection.kind == kInspectorPresentation_Base)
-    return false;
-  HudProjectionInputs in = BuildProjectionInputsFromSlot(slot);
-  HudPresentationChunk chunks[kHudPresentationChunkCapacity];
-  int count = ArHudLayout_BuildPresentationChunks(
-      viewport, &in, chunks);
-  for (int i = count - 1; i >= 0; i--) {
-    const ArRenderRectI source = chunks[i].screen_source;
-    if (chunks[i].inspector_kind != slot->inspector_selection.kind ||
-        slot->inspector_selection.source_x < source.x ||
-        slot->inspector_selection.source_x >= source.x + source.w ||
-        slot->inspector_selection.source_y < source.y ||
-        slot->inspector_selection.source_y >= source.y + source.h)
-      continue;
-    if (selected) *selected = chunks[i];
-    return true;
-  }
-  return false;
-}
-
-static void PresentSceneInspector(const FrameSlot *slot,
-                                  ArRenderRectI viewport) {
-  if (!slot->scene_inspector_enabled || !SceneInspector_HasSelection())
-    return;
-  int x = 0, y = 0;
-  if (!SceneInspector_GetPoint(&x, &y)) return;
-  HudPresentationChunk hud_chunk;
-  bool hud_selection = FindSelectedHudChunk(slot, viewport, &hud_chunk);
-  int projected_px = hud_selection
-      ? HudSourceToOutputX(&hud_chunk, slot->inspector_selection.source_x)
-      : InspectorScreenToOutputX(viewport, slot->inspector_selection.source_x, slot);
-  int projected_py = hud_selection
-      ? HudSourceToOutputY(&hud_chunk, slot->inspector_selection.source_y)
-      : InspectorScreenToOutputY(viewport, slot->inspector_selection.source_y, slot);
-  int output_width = 0, output_height = 0;
-  (void)ArRenderDevice_GetOutputSize(
-      &g_render_device, &output_width, &output_height);
-  bool same_output = output_width == slot->inspector_selection.output_width &&
-                     output_height == slot->inspector_selection.output_height;
-  int px = same_output ? slot->inspector_selection.output_x : projected_px;
-  int py = same_output ? slot->inspector_selection.output_y : projected_py;
-  int anchor_dx = px - projected_px;
-  int anchor_dy = py - projected_py;
-
-  const ArRenderColorF gold = {
-    1.0f, 192.0f / 255.0f, 32.0f / 255.0f, 1.0f,
-  };
-  /* Crosshair arms scale with the output (7 SNES pixels' worth at the
-   * current viewport scale, min the historical 7px) — a fixed 7 output
-   * pixels is near-invisible at 4K/high-density output. */
-  enum { kInspectorCrosshairMinimumArmPixels = 7 };
-  int arm = viewport.h > 0
-      ? (viewport.h * kInspectorCrosshairMinimumArmPixels +
-         kFrameSlotAuthenticHeight / 2) /
-          kFrameSlotAuthenticHeight
-      : kInspectorCrosshairMinimumArmPixels;
-  if (arm < kInspectorCrosshairMinimumArmPixels)
-    arm = kInspectorCrosshairMinimumArmPixels;
-  (void)ArRenderDevice_DrawLine(
-      &g_render_device, (ArRenderPointF){(float)(px - arm), (float)py},
-      (ArRenderPointF){(float)(px + arm), (float)py},
-      1.0f, gold, kArRenderBlendMode_Alpha);
-  (void)ArRenderDevice_DrawLine(
-      &g_render_device, (ArRenderPointF){(float)px, (float)(py - arm)},
-      (ArRenderPointF){(float)px, (float)(py + arm)},
-      1.0f, gold, kArRenderBlendMode_Alpha);
-
-  int x0, y0, x1, y1;
-  if (SceneInspector_GetHighlight(&x0, &y0, &x1, &y1)) {
-    ArRenderRectI rect;
-    bool have_rect = hud_selection &&
-        HudHighlightToOutput(&hud_chunk, x0, y0, x1, y1, &rect);
-    if (!hud_selection) {
-      rect = (ArRenderRectI){
-        InspectorScreenToOutputX(viewport, x0, slot),
-        InspectorScreenToOutputY(viewport, y0, slot),
-        InspectorScreenToOutputX(viewport, x1, slot) -
-            InspectorScreenToOutputX(viewport, x0, slot),
-        InspectorScreenToOutputY(viewport, y1, slot) -
-            InspectorScreenToOutputY(viewport, y0, slot),
-      };
-      have_rect = rect.w > 0 && rect.h > 0;
-    }
-    if (have_rect) {
-      rect.x += anchor_dx;
-      rect.y += anchor_dy;
-      const float x0f = (float)rect.x;
-      const float y0f = (float)rect.y;
-      const float x1f = (float)(rect.x + rect.w);
-      const float y1f = (float)(rect.y + rect.h);
-      (void)ArRenderDevice_DrawLine(
-          &g_render_device, (ArRenderPointF){x0f, y0f},
-          (ArRenderPointF){x1f, y0f}, 1.0f, gold,
-          kArRenderBlendMode_Alpha);
-      (void)ArRenderDevice_DrawLine(
-          &g_render_device, (ArRenderPointF){x1f, y0f},
-          (ArRenderPointF){x1f, y1f}, 1.0f, gold,
-          kArRenderBlendMode_Alpha);
-      (void)ArRenderDevice_DrawLine(
-          &g_render_device, (ArRenderPointF){x1f, y1f},
-          (ArRenderPointF){x0f, y1f}, 1.0f, gold,
-          kArRenderBlendMode_Alpha);
-      (void)ArRenderDevice_DrawLine(
-          &g_render_device, (ArRenderPointF){x0f, y1f},
-          (ArRenderPointF){x0f, y0f}, 1.0f, gold,
-          kArRenderBlendMode_Alpha);
-    }
-  }
-  SettingsOverlay_RenderDebugPanel(
-      "SCENE INSPECTOR", SceneInspector_PanelText(),
-      (ArRenderPointI){ px, py });
-}
-
-static void UploadActionWinnerMask(ArRenderTexture *texture, int mirror,
-                                   const uint8_t *pixels,
-                                   int pitch_bytes,
-                                   const FrameSlot *slot) {
-  if (!texture || !pixels || !slot || mirror < 0 ||
-      mirror >= kActionUploadSurface_Count || pitch_bytes <= 0)
-    return;
-  if (!ArRenderTexture_IsValid(*texture)) {
-    const ArRenderTextureDesc desc = {
-      .width = kFrameSlotLayerTextureWidth,
-      .height = kFrameSlotAuthenticHeight,
-      .format = kArRenderPixelFormat_Argb8888,
-      .usage = kArRenderTextureUsage_Streaming,
-      .filter = kArRenderFilter_Nearest,
-      .blend = kArRenderBlendMode_Multiply,
-    };
-    (void)ArRenderDevice_CreateTexture(
-        &g_render_device, &desc, texture);
-  }
-  if (ArRenderTexture_IsValid(*texture)) {
-    const ArRenderRectI mask = {
-      0, 0, slot->snes_width, slot->snes_height,
-    };
-    UploadChangedSurface(
-        *texture, &s_action_upload_mirrors[mirror], pixels,
-        mask.w, mask.h, pitch_bytes,
-        mask.x, mask.y);
-  }
-}
-
-/* Consume borrowed capture pixels only during the slot's upload lifetime.
- * Retained presentations use the published texture, never the producer's
- * mutable mask. Invalid foreground is a selected-scene failure, not native
- * fallback permission. */
-static void UploadSkyPalaceForeground(const FrameSlot *slot) {
-  s_sky_palace_foreground_valid = false;
-  if (slot->sim.view != kSimView_SkyPalace || slot->diorama_active ||
-      slot->snes_width <= 0 || slot->snes_height <= 0 ||
-      slot->snes_width > kSimWorldNavigationPalaceMaxWidth ||
-      slot->snes_height > kSimWorldNavigationPalaceMaxHeight) return;
-  const SrPpuSurfaceView *native = BoundPpuSurface(&slot->ppu_surfaces.main);
-  const SrPpuSurfaceView *mask = BoundPpuSurface(
-      &slot->ppu_surfaces.overlays[SR_PPU_OVERLAY_BG1][0]);
-  const uint8_t *pixels = PpuSurfaceRegion(native,
-      native ? native->origin_x - slot->ws_extra : -1,
-      native ? native->origin_y - slot->ws_extra_top : -1,
-      slot->snes_width, slot->snes_height);
-  const uint8_t *winners = PpuSurfaceRegion(mask,
-      mask ? mask->origin_x - slot->ws_extra : -1,
-      mask ? mask->origin_y - slot->ws_extra_top : -1,
-      slot->snes_width, slot->snes_height);
-  const int pitch = kSimWorldNavigationPalaceMaxWidth * (int)sizeof(uint32_t);
-  if (!pixels || !winners || !SimWorldNavigationPalace_ComposeForeground(
-          s_sky_palace_foreground_pixels, pitch,
-          pixels, (int)native->pitch_bytes, winners, (int)mask->pitch_bytes,
-          slot->snes_width, slot->snes_height)) return;
-  if (!ArRenderTexture_IsValid(s_sky_palace_foreground_texture)) {
-    const ArRenderTextureDesc desc = {
-      .width = kSimWorldNavigationPalaceMaxWidth,
-      .height = kSimWorldNavigationPalaceMaxHeight,
-      .format = kArRenderPixelFormat_Argb8888,
-      .usage = kArRenderTextureUsage_Streaming,
-      .filter = kArRenderFilter_Nearest,
-      .blend = kArRenderBlendMode_Alpha,
-    };
-    if (!ArRenderDevice_CreateTexture(
-            &g_render_device, &desc, &s_sky_palace_foreground_texture)) return;
-  }
-  const ArRenderRectI rect = {0, 0, slot->snes_width, slot->snes_height};
-  s_sky_palace_foreground_valid = ArRenderDevice_UpdateTexture(
-      &g_render_device, s_sky_palace_foreground_texture, &rect,
-      s_sky_palace_foreground_pixels, pitch);
-}
-
 void PresentUpload(const FrameSlot *slot) {
-  s_sky_palace_foreground_valid = false;
-  s_diorama_skybox_view.texture = ArRenderTexture_Invalid();
   if (!ArRenderDevice_IsReady(&g_render_device) ||
-      !ArRenderTexture_IsValid(g_texture)) return;
+      !ArRenderTexture_IsValid(g_texture)) {
+    PresentSkyPalace_Upload(NULL, slot);
+    PresentDiorama_Upload(NULL, slot);
+    return;
+  }
   Sim3DPerformanceScope performance = {0};
   if (slot->sim.view == kSimView_Enhanced)
     performance = Sim3DPerformance_Begin(kSim3DPerformance_Upload);
@@ -897,8 +199,8 @@ void PresentUpload(const FrameSlot *slot) {
     const int authentic_height = slot->snes_height + slot->ws_extra_top +
                                  slot->ws_extra_bottom;
     const SrPpuSurfaceView *surface =
-        BoundPpuSurface(&slot->ppu_surfaces.authentic);
-    const uint8_t *pixels = PpuSurfaceRegion(
+        PresentationSurface_Bound(&slot->ppu_surfaces.authentic);
+    const uint8_t *pixels = PresentationSurface_Region(
         surface, 0, 0, slot->snes_width, authentic_height);
     if (pixels && UploadChangedSurface(
         g_authentic_texture,
@@ -918,103 +220,18 @@ void PresentUpload(const FrameSlot *slot) {
     }
   }
 
-  if (slot->diorama_active) {
-    bool skybox_changed = false;
-    const SrPpuSurfaceView *skybox = BoundPpuSurface(&slot->diorama_skybox_surface);
-    const uint8_t *skybox_pixels = PpuSurfaceRegion(skybox, 0, 0,
-        skybox ? (int)skybox->width_pixels : 0,
-        skybox ? (int)skybox->height_pixels : 0);
-    if (skybox_pixels) {
-      if (!ArRenderTexture_IsValid(s_diorama_skybox_texture)) {
-        const ArRenderTextureDesc desc = {
-          .width = kFrameSlotLayerTextureWidth,
-          .height = kFrameSlotLayerTextureHeight,
-          .format = kArRenderPixelFormat_Argb8888,
-          .usage = kArRenderTextureUsage_Streaming,
-          .filter = kArRenderFilter_Linear, .blend = kArRenderBlendMode_Opaque,
-        };
-        (void)ArRenderDevice_CreateTexture(
-            &g_render_device, &desc, &s_diorama_skybox_texture);
-      }
-      /* The blur prefilter visits the fixed allocation, not just the view.
-       * Initialize its padding, including after a capture extent shrinks. */
-      if (ArRenderTexture_IsValid(s_diorama_skybox_texture) &&
-          (!s_diorama_skybox_mirror.valid ||
-           s_diorama_skybox_mirror.width != (int)skybox->width_pixels ||
-           s_diorama_skybox_mirror.height != (int)skybox->height_pixels)) {
-        uint32_t *empty = calloc(kFrameSlotLayerTextureWidth *
-            kFrameSlotLayerTextureHeight, sizeof(uint32_t));
-        const bool cleared = empty && ArRenderDevice_UpdateTexture(
-            &g_render_device, s_diorama_skybox_texture, NULL, empty,
-            kFrameSlotLayerTextureWidth * sizeof(uint32_t));
-        free(empty);
-        if (!cleared) {
-          ArRenderDevice_DestroyTexture(&g_render_device, s_diorama_skybox_texture);
-          s_diorama_skybox_texture = ArRenderTexture_Invalid();
-        }
-        PresentationUploadMirror_Reset(&s_diorama_skybox_mirror);
-      }
-      PresentationUploadResult result;
-      if (ArRenderTexture_IsValid(s_diorama_skybox_texture) &&
-          PresentationUploadMirror_UploadArgb8888(
-              &s_diorama_skybox_mirror, &g_render_device,
-              s_diorama_skybox_texture, skybox_pixels,
-              (int)skybox->width_pixels, (int)skybox->height_pixels,
-              (int)skybox->pitch_bytes, 0, 0, &result)) {
-        skybox_changed = result.changed;
-        if (result.changed) s_diorama_skybox_view.revision++;
-        s_diorama_skybox_view.texture = s_diorama_skybox_texture;
-        s_diorama_skybox_view.width = (int)skybox->width_pixels;
-      }
-    }
-    const uint8_t *pixels[kDioramaPlane_Count];
-    size_t pitch_bytes[kDioramaPlane_Count];
-    CaptureDioramaPpuSurfaces(slot, pixels, pitch_bytes);
-    uint32_t upload_mask = slot->diorama_plane_request_mask &
-                           slot->diorama_plane_content_mask;
-    /* Row 0 is the top of the captured world band. Upload both sides; the
-     * authentic frame begins at ws_extra_top and the lower band follows it. */
-    const DioramaUploadResult upload = Diorama_Upload(
-        &g_render_device, g_diorama_textures, pixels, pitch_bytes,
-        slot->snes_width + slot->obj_apron * 2,
-        slot->snes_height + slot->ws_extra_top + slot->ws_extra_bottom,
-        slot->obj_apron, upload_mask);
-    s_diorama_uploaded_plane_mask = upload.synchronized_plane_mask;
-    if (upload.changed_plane_mask &
-        (UINT32_C(1) << SR_PPU_OVERLAY_BG2))
-      s_diorama_bg2_content_revision++;
-    memcpy(s_diorama_coverage_masks, upload.coverage_masks,
-           sizeof(s_diorama_coverage_masks));
-    PlaneStatCensus(
-        pixels, pitch_bytes,
-        slot->snes_width + slot->obj_apron * 2,
-        slot->snes_height + slot->ws_extra_top + slot->ws_extra_bottom,
-        s_diorama_uploaded_plane_mask);
-    /* A failed raw upload cannot be a valid endpoint: exclude it before
-     * retaining/analyzing the pair so generation never interpolates from an
-     * image that was not actually presentable. */
-    for (int plane = 0; plane < kDioramaPlane_Count; plane++)
-      if (!(s_diorama_uploaded_plane_mask & (1u << plane)))
-        pixels[plane] = NULL;
-    DioramaPerformanceScope frame_analysis =
-        DioramaPerformance_Begin(kDioramaPerformance_FrameAnalysis);
-    DioramaFrameGeneration_CaptureWithSkybox(
-        &g_render_device, slot, g_diorama_textures, pixels, pitch_bytes,
-        upload.changed_plane_mask, s_diorama_skybox_view.texture, skybox_changed);
-    DioramaPerformance_End(frame_analysis);
-  } else if (PresentationConsumesMainPpuTexture(slot)) {
-    s_diorama_uploaded_plane_mask = 0;
-    memset(s_diorama_coverage_masks, 0, sizeof(s_diorama_coverage_masks));
+  PresentDiorama_Upload(&g_render_device, slot);
+  if (!slot->diorama_active && PresentationConsumesMainPpuTexture(slot)) {
     ArRenderRectI upload = {
       0, 0, slot->snes_width, slot->snes_height,
     };
     const SrPpuSurfaceView *surface =
-        BoundPpuSurface(&slot->ppu_surfaces.main);
+        PresentationSurface_Bound(&slot->ppu_surfaces.main);
     /* The main view reports the physical column for screen x=0. Upload starts
      * at screen x=-ws_extra, leaving any resolve apron outside the texture. */
     const int source_x = surface ? surface->origin_x - slot->ws_extra : -1;
     const int source_y = surface ? surface->origin_y - slot->ws_extra_top : -1;
-    const uint8_t *pixels = PpuSurfaceRegion(
+    const uint8_t *pixels = PresentationSurface_Region(
         surface, source_x, source_y, upload.w, upload.h);
     if (pixels)
       UploadChangedSurface(
@@ -1022,89 +239,34 @@ void PresentUpload(const FrameSlot *slot) {
           &s_action_upload_mirrors[kActionUploadSurface_Frame],
           pixels, upload.w, upload.h, (int)surface->pitch_bytes,
           upload.x, upload.y);
-  } else {
-    s_diorama_uploaded_plane_mask = 0;
-    memset(s_diorama_coverage_masks, 0, sizeof(s_diorama_coverage_masks));
   }
 
-  UploadSkyPalaceForeground(slot);
+  PresentSkyPalace_Upload(&g_render_device, slot);
 
   const SrPpuSurfaceView *bg1_surface =
-      BoundPpuSurface(
+      PresentationSurface_Bound(
           &slot->ppu_surfaces.overlays[SR_PPU_OVERLAY_BG1][0]);
   const SrPpuSurfaceView *bg2_surface =
-      BoundPpuSurface(
+      PresentationSurface_Bound(
           &slot->ppu_surfaces.overlays[SR_PPU_OVERLAY_BG2][0]);
   if (!slot->diorama_active && slot->action_bg1_mask_valid &&
-      PpuSurfaceHolds(bg1_surface, slot->snes_width, slot->snes_height))
-    UploadActionWinnerMask(
-        &s_action_bg1_mask_texture, kActionUploadSurface_Bg1Mask,
-        bg1_surface->data, (int)bg1_surface->pitch_bytes, slot);
-  if (!slot->diorama_active && slot->action_bg2_mask_valid &&
-      PpuSurfaceHolds(bg2_surface, slot->snes_width, slot->snes_height))
-    UploadActionWinnerMask(
-        &s_action_bg2_mask_texture, kActionUploadSurface_Bg2Mask,
-        bg2_surface->data, (int)bg2_surface->pitch_bytes, slot);
-
-  /* Refresh HUD textures for both presentation paths. Diorama anchors the HUD
-   * through the same textures as flat mode; skipping this upload would combine
-   * stale pixels with the current frame's split geometry. */
-  const FrameSlotOverlayCapture *hud_bg_capture =
-      &slot->overlay_captures[kFrameSlotOverlay_Bg3];
-  const bool captured_bg3 =
-      hud_bg_capture->y1 > hud_bg_capture->y0 &&
-      (hud_bg_capture->flags & kFrameSlotOverlayFlag_RemoveFromGame) != 0u;
-  if (slot->hud_split_height || captured_bg3) {
-    int split_rows = slot->hud_split_height;
-    if (ArRenderTexture_IsValid(g_hud_bg_texture)) {
-      int rows = hud_bg_capture->y1;
-      if (rows < split_rows) rows = split_rows;
-      const ArRenderRectI hud = {0, 0, slot->snes_width, rows};
-      const SrPpuSurfaceView *surface = BoundPpuSurface(
-          &slot->sim3d_output_surfaces.hud_bg);
-      if (!surface)
-        surface = BoundPpuSurface(
-            &slot->ppu_surfaces.overlays[SR_PPU_OVERLAY_BG3][0]);
-      if (PpuSurfaceHolds(surface, hud.w, hud.h))
-        UploadChangedSurface(
-            g_hud_bg_texture,
-            &s_action_upload_mirrors[kActionUploadSurface_HudBg],
-            surface->data, hud.w, hud.h,
-            (int)surface->pitch_bytes, hud.x, hud.y);
-    }
-    if (ArRenderTexture_IsValid(g_hud_obj_texture)) {
-      /* Choose the surface before its extent: the two are not interchangeable.
-       * The promoted-icon surface is described by the promote's own latched
-       * row count, never by overlay_captures[Obj] -- that capture is whatever
-       * policy claimed the single OBJ slot last, and a full-frame scene claim
-       * legitimately overwrites it. Taking the extent from the capture while
-       * taking the pixels from the promoted surface asked for more rows than
-       * that surface has, so PpuSurfaceHolds refused and the icon's texture
-       * was silently never filled. It is the same rule hud_icon_first/count
-       * already follow. */
-      bool promoted_icon = false;
-      const SrPpuSurfaceView *surface = BoundPpuSurface(
-          &slot->sim3d_output_surfaces.hud_obj);
-      if (!surface) {
-        surface = BoundPpuSurface(&slot->hud_obj_surface);
-        promoted_icon = surface != NULL;
-      }
-      if (!surface)
-        surface = BoundPpuSurface(
-            &slot->ppu_surfaces.overlays[SR_PPU_OVERLAY_OBJ][0]);
-      int rows = promoted_icon
-          ? slot->hud_icon_rows
-          : slot->overlay_captures[kFrameSlotOverlay_Obj].y1;
-      if (rows < split_rows) rows = split_rows;
-      const ArRenderRectI hud = {0, 0, slot->snes_width, rows};
-      if (PpuSurfaceHolds(surface, hud.w, hud.h))
-        UploadChangedSurface(
-            g_hud_obj_texture,
-            &s_action_upload_mirrors[kActionUploadSurface_HudObj],
-            surface->data, hud.w, hud.h,
-            (int)surface->pitch_bytes, hud.x, hud.y);
-    }
+      PresentationSurface_Holds(bg1_surface, slot->snes_width, slot->snes_height)) {
+    const uint64_t bytes = PresentActionEffects_UploadMask(
+        &g_render_device, SR_PPU_OVERLAY_BG1, slot,
+        bg1_surface->data, (int)bg1_surface->pitch_bytes);
+    if (bytes) Sim3DPerformance_AddUpload(bytes);
   }
+  if (!slot->diorama_active && slot->action_bg2_mask_valid &&
+      PresentationSurface_Holds(bg2_surface, slot->snes_width, slot->snes_height)) {
+    const uint64_t bytes = PresentActionEffects_UploadMask(
+        &g_render_device, SR_PPU_OVERLAY_BG2, slot,
+        bg2_surface->data, (int)bg2_surface->pitch_bytes);
+    if (bytes) Sim3DPerformance_AddUpload(bytes);
+  }
+
+  const PresentHudUploadResult hud = PresentHud_Upload(&g_render_device, slot);
+  if (hud.background_bytes) Sim3DPerformance_AddUpload(hud.background_bytes);
+  if (hud.object_bytes) Sim3DPerformance_AddUpload(hud.object_bytes);
 
   if (ArRenderTexture_IsValid(g_m7_texture) && slot->m7_active) {
     const ArRenderRectI src = {
@@ -1113,9 +275,9 @@ void PresentUpload(const FrameSlot *slot) {
       slot->snes_height * kHdMode7Scale,
     };
     const SrPpuSurfaceView *surface =
-        BoundPpuSurface(&slot->ppu_surfaces.mode7);
+        PresentationSurface_Bound(&slot->ppu_surfaces.mode7);
     const uint8_t *pixels =
-        PpuSurfaceRegion(surface, src.x, src.y, src.w, src.h);
+        PresentationSurface_Region(surface, src.x, src.y, src.w, src.h);
     const ArRenderRectI destination = {src.x, src.y, src.w, src.h};
     if (pixels && ArRenderDevice_UpdateTexture(
             &g_render_device, g_m7_texture, &destination, pixels,
@@ -1125,269 +287,13 @@ void PresentUpload(const FrameSlot *slot) {
     }
   }
 
-  /* D1b: the raw atlas follows the same upload-before-release ownership as
-   * every other frame pixel buffer. Only the packed used rectangle is copied;
-   * all descriptors in this immutable slot are bounded by that rectangle. */
-  if (ArRenderTexture_IsValid(g_sim_obj_atlas_texture) &&
-      slot->sim.town && slot->sim.atlas_valid &&
-      slot->sim.atlas_used_width && slot->sim.atlas_used_height) {
-    const ArRenderRectI atlas = {
-      0, 0, slot->sim.atlas_used_width, slot->sim.atlas_used_height,
-    };
-    UploadChangedSim3DSurface(
-        g_sim_obj_atlas_texture, kSim3DUploadSurface_Atlas,
-        g_sim_obj_atlas_pixels, atlas.w, atlas.h,
-        kSimObjAtlasWidth);
-  }
-
-  if (slot->sim.separated_valid) {
-    const ArRenderRectI frame = {
-      0, 0, slot->snes_width, slot->snes_height,
-    };
-    uint32_t plane_upload_mask =
-        Sim3D_PlaneTextureUploadMask(
-            slot->sim.effective_features,
-            slot->sim.separated_plane_mask);
-    if (PresentSimMenu_Active(slot))
-      plane_upload_mask |= slot->sim.separated_plane_mask;
-    for (int plane = 0; plane < kSim3DPlane_Count; plane++) {
-      const SrPpuSurfaceView *surface =
-          BoundPpuSurface(Sim3DPpuSurface(slot, plane));
-      if ((plane_upload_mask & (1u << plane)) &&
-          ArRenderTexture_IsValid(g_sim3d_layer_textures[plane]) &&
-          PpuSurfaceHolds(surface, frame.w, frame.h)) {
-        UploadChangedSim3DSurface(
-            g_sim3d_layer_textures[plane], plane,
-            (const uint32_t *)surface->data,
-            frame.w, frame.h,
-            (int)(surface->pitch_bytes / sizeof(uint32_t)));
-      }
-    }
-    /* Ground projection samples the separated planes directly. Upload the
-     * CPU flat composite only for the fallback stage that actually draws it. */
-    if (ArRenderTexture_IsValid(g_sim3d_flat_texture) &&
-        !(slot->sim.effective_features & kSimFeature_GroundProjection)) {
-      UploadChangedSim3DSurface(
-          g_sim3d_flat_texture, kSim3DUploadSurface_Flat,
-          g_sim3d_flat_pixels,
-          frame.w, frame.h, frame.w);
-    }
-  }
-  SimBackgroundVoxelRenderer_Upload(&g_render_device);
-  const Sim3DGroundSource ground_source = Sim3D_ResolveGroundSource(
-      slot->sim.effective_features, slot->sim.background_voxel_enabled,
-      SimBackgroundVoxelRenderer_Ready(slot->sim.background_voxel_serial));
-  PresentSim3DCanvas_Upload(&g_render_device,
-      slot->sim.view == kSimView_Enhanced && slot->sim.separated_valid &&
-      ground_source == kSim3DGround_Canvas);
+  Sim3DTextures_Upload(&g_render_device, slot);
   UploadWorldNavigationComposition(slot);
   Sim3DPerformance_End(performance);
 }
 
-/* Session history survives retained frames, room changes and GPU resets. */
-static DioramaCameraPresenter s_diorama_camera = DIORAMA_CAMERA_PRESENTER_INIT;
-
-/* Host effects use the renderer abstraction's standard additive/alpha blend
- * modes and untextured geometry, not a backend shader. Those are portable
- * API paths,
- * but not a promise of pixel-identical rasterization across Metal, Vulkan,
- * Direct3D and software. Capability is verified at the point of use: a backend
- * may legally substitute the closest blend mode, so a successful set is
- * followed by a get-and-compare. Any rejection or substitution fails closed. */
-static atomic_int s_effect_blend_supported = ATOMIC_VAR_INIT(1);
-static atomic_int s_effect_geometry_supported = ATOMIC_VAR_INIT(1);
-
-void DisableEffectBlend(const char *operation) {
-  int expected = 1;
-  if (!atomic_compare_exchange_strong_explicit(
-          &s_effect_blend_supported, &expected, 0,
-          memory_order_acq_rel, memory_order_acquire))
-    return;
-  fprintf(stderr,
-          "[host-effects] effect blend pass unavailable at %s (%s) — "
-          "effect lighting and particles disabled\n",
-          operation, ArRenderDevice_LastError(&g_render_device));
-}
-
-static void DisableEffectGeometry(const char *operation) {
-  int expected = 1;
-  if (!atomic_compare_exchange_strong_explicit(
-          &s_effect_geometry_supported, &expected, 0,
-          memory_order_acq_rel, memory_order_acquire))
-    return;
-  fprintf(stderr,
-          "[host-effects] geometry pass unavailable at %s (%s) — "
-          "effect lighting and particles disabled\n",
-          operation, ArRenderDevice_LastError(&g_render_device));
-}
-
-bool EffectRendererAvailable(void) {
-  return atomic_load_explicit(
-             &s_effect_blend_supported, memory_order_acquire) != 0 &&
-      atomic_load_explicit(
-             &s_effect_geometry_supported, memory_order_acquire) != 0;
-}
-
-bool Present_EffectRendererSupported(void) {
-  return EffectRendererAvailable();
-}
-
-static void DisableActionHeat(const char *operation) {
-  if (!s_action_heat_supported) return;
-  s_action_heat_supported = false;
-  fprintf(stderr,
-          "[action-fx] lava heat refraction unavailable at %s (%s); "
-          "disabled\n",
-          operation ? operation : "unknown operation",
-          ArRenderDevice_LastError(&g_render_device));
-}
-
-static void FailActionHeatTargetState(const char *operation) {
-  DisableActionHeat(operation);
-  SessionFatal_Request(
-      "The action heat-refraction pass could not restore the active render "
-      "target (%s). Restart the game; if this repeats, update your graphics "
-      "driver or disable action particles.",
-      ArRenderDevice_LastError(&g_render_device));
-}
-
-static bool FrameUsesActionHeat(const FrameSlot *slot) {
-  if (!slot || !slot->action_effect_particles || slot->diorama_active ||
-      ActRaiserRoom_ProfileFor(
-          slot->diorama_map_group, slot->diorama_map_number) !=
-              kActRaiserRoomProfile_AitosAct2Lava ||
-      slot->action_scene_effects.decoration_overflow ||
-      slot->action_scene_effects.decoration_count >
-          kActionSceneDecorationMaxInstances)
-    return false;
-  const ActionEffectProjectionContext projection = {
-    .bg1_camera_x = slot->bg1_camera_x,
-    .bg1_camera_y = slot->bg1_camera_y,
-    .bg2_camera_x = slot->bg2_camera_x,
-    .bg2_camera_y = slot->bg2_camera_y,
-    .ws_extra = slot->ws_extra,
-    .visible_x0 = slot->visible_x0,
-    .visible_width = slot->visible_width,
-    .snes_height = slot->snes_height,
-  };
-  for (uint8_t i = 0;
-       i < slot->action_scene_effects.decoration_count; i++) {
-    const ActionEffectInstance *effect =
-        &slot->action_scene_effects.decorations[i];
-    if (effect->kind == kActionEffect_AitosLavaReservoir &&
-        effect->phase == kActionEffectPhase_AitosLavaReservoir &&
-        ActionEffectProjection_IntersectsFlatViewport(
-            &projection, effect))
-      return true;
-  }
-  return false;
-}
-
-static ArRenderTexture EnsureActionHeatTarget(int width, int height) {
-  if (!s_action_heat_supported || width <= 0 || height <= 0)
-    return ArRenderTexture_Invalid();
-  if (ArRenderTexture_IsValid(s_action_heat_target) &&
-      s_action_heat_w == width &&
-      s_action_heat_h == height)
-    return s_action_heat_target;
-  ArRenderDevice_DestroyTexture(&g_render_device, s_action_heat_target);
-  s_action_heat_target = ArRenderTexture_Invalid();
-  s_action_heat_w = width;
-  s_action_heat_h = height;
-  const ArRenderTextureDesc desc = {
-    .width = width,
-    .height = height,
-    .format = kArRenderPixelFormat_Argb8888,
-    .usage = kArRenderTextureUsage_Target,
-    .filter = kArRenderFilter_Linear,
-    .blend = kArRenderBlendMode_Opaque,
-  };
-  if (!ArRenderDevice_CreateTexture(
-          &g_render_device, &desc, &s_action_heat_target)) {
-    s_action_heat_w = s_action_heat_h = 0;
-    DisableActionHeat("target creation");
-  }
-  return s_action_heat_target;
-}
-
-static void ClearActionHeatSavedState(void) {
-  s_action_heat_saved_state = (ActionHeatPassState){0};
-}
-
-static bool ActionHeatMeshMatches(
-    const ActionHeatMeshCache *cache, uint16_t game_frame,
-    ArRenderRectI viewport, int target_width, int target_height,
-    int source_width) {
-  return cache && cache->valid && cache->game_frame == game_frame &&
-      cache->viewport.x == viewport.x && cache->viewport.y == viewport.y &&
-      cache->viewport.w == viewport.w && cache->viewport.h == viewport.h &&
-      cache->target_width == target_width &&
-      cache->target_height == target_height &&
-      cache->source_width == source_width;
-}
-
-static const ActionHeatRenderMesh *ActionHeatMeshFor(
-    uint16_t game_frame, ArRenderRectI viewport,
-    int target_width, int target_height, int source_width) {
-  if (ActionHeatMeshMatches(
-          &s_action_heat_mesh_cache, game_frame, viewport,
-          target_width, target_height, source_width))
-    return &s_action_heat_mesh_cache.mesh;
-  s_action_heat_mesh_cache.valid = false;
-  if (!ActionHeatRender_Build(
-          game_frame,
-          viewport,
-          target_width, target_height,
-          source_width, &s_action_heat_mesh_cache.mesh))
-    return NULL;
-  s_action_heat_mesh_cache.viewport = viewport;
-  s_action_heat_mesh_cache.target_width = target_width;
-  s_action_heat_mesh_cache.target_height = target_height;
-  s_action_heat_mesh_cache.source_width = source_width;
-  s_action_heat_mesh_cache.game_frame = game_frame;
-  s_action_heat_mesh_cache.valid = true;
-  return &s_action_heat_mesh_cache.mesh;
-}
-
-/* Route the world composite into a viewport-sized texture. Letterbox pixels
- * never enter this target, which avoids reserving and clearing memory that the
- * heat pass cannot display. The matching end pass clears the real output once
- * and resolves this texture with one subtly UV-warped mesh; HUD and host
- * overlays are intentionally drawn afterward. */
-static bool BeginActionHeat(const FrameSlot *slot, ArRenderRectI viewport) {
-  if (s_action_heat_engaged || !FrameUsesActionHeat(slot) ||
-      !EffectRendererAvailable() || !s_action_heat_supported)
-    return false;
-  if (viewport.w <= 0 || viewport.h <= 0) {
-    DisableActionHeat("invalid viewport");
-    return false;
-  }
-  const ArRenderTexture target = EnsureActionHeatTarget(
-      viewport.w, viewport.h);
-  if (!ArRenderTexture_IsValid(target)) return false;
-  ActionHeatPassState saved = {0};
-  const ArRenderTargetBeginResult begin = ArRenderDevice_BeginTarget(
-      &g_render_device, target, &saved.target_state);
-  if (begin != kArRenderTargetBegin_Ready) {
-    if (begin == kArRenderTargetBegin_StateLost)
-      FailActionHeatTargetState("failed-begin state restore");
-    else
-      DisableActionHeat("target bind");
-    return false;
-  }
-  saved.valid = true;
-  s_action_heat_saved_state = saved;
-  s_action_heat_engaged = true;
-  return true;
-}
-
-static ArRenderRectI ActionHeatSceneViewport(ArRenderRectI output_viewport) {
-  if (!s_action_heat_engaged) return output_viewport;
-  return (ArRenderRectI){0, 0, output_viewport.w, output_viewport.h};
-}
-
-static bool ResolveFrameOutputViewport(
-    const FrameSlot *slot, ArRenderRectI *viewport) {
+bool Present_ResolveOutputViewport(
+    ArRenderDevice *device, const FrameSlot *slot, ArRenderRectI *viewport) {
   if (!slot || !viewport) return false;
   const int aspect_width = slot->visible_width *
       (slot->pixel_aspect == kPixelAspect_Crt43 ? 7 : 1);
@@ -1395,455 +301,11 @@ static bool ResolveFrameOutputViewport(
       (slot->pixel_aspect == kPixelAspect_Crt43 ? 6 : 1);
   ArRenderRectI resolved;
   if (!ArRenderOutput_ResolveAspectFit(
-          &g_render_device, slot->ignore_aspect_ratio,
+          device, slot->ignore_aspect_ratio,
           aspect_width, aspect_height, &resolved, NULL, NULL))
     return false;
   *viewport = resolved;
   return true;
-}
-
-static void CancelActionHeat(void) {
-  if (!s_action_heat_engaged) return;
-  const ActionHeatPassState saved = s_action_heat_saved_state;
-  const bool target_restored =
-      saved.valid && ArRenderDevice_EndTarget(
-          &g_render_device, &saved.target_state);
-  ClearActionHeatSavedState();
-  s_action_heat_engaged = false;
-  if (!target_restored)
-    FailActionHeatTargetState("cancel state restore");
-}
-
-static void EndActionHeat(const FrameSlot *slot, ArRenderRectI viewport) {
-  if (!s_action_heat_engaged) return;
-  const ActionHeatPassState saved = s_action_heat_saved_state;
-  ClearActionHeatSavedState();
-  s_action_heat_engaged = false;
-  if (!saved.valid || !ArRenderDevice_EndTarget(
-          &g_render_device, &saved.target_state)) {
-    FailActionHeatTargetState("target restore");
-    return;
-  }
-
-  const ArRenderColorF black = {0.0f, 0.0f, 0.0f, 1.0f};
-  ArRenderOutputFrame output_frame;
-  if (!ArRenderOutputFrame_Begin(
-          &g_render_device,
-          viewport,
-          black, black, &output_frame)) {
-    DisableActionHeat("scene resolve scope");
-    return;
-  }
-  const ArRenderRectI local_viewport = {0, 0, viewport.w, viewport.h};
-  const ActionHeatRenderMesh *mesh = ActionHeatMeshFor(
-      slot->action_scene_effects.game_frame, local_viewport,
-      s_action_heat_w, s_action_heat_h, slot->visible_width);
-  const bool warped = mesh && ArRenderDevice_DrawGeometry(
-      &g_render_device, s_action_heat_target,
-      mesh->vertices, mesh->vertex_count,
-      mesh->indices, mesh->index_count);
-  bool fallback = false;
-  if (!warped) {
-    /* A runtime geometry rejection must drop only the enhancement, not the
-     * already-rendered world. Resolve the captured scene without refraction
-     * for this frame, then disable future heat attempts. */
-    const ArRenderRectF destination = {
-      0.0f, 0.0f, (float)viewport.w, (float)viewport.h,
-    };
-    fallback = ArRenderDevice_DrawTexture(
-        &g_render_device, s_action_heat_target, NULL, &destination);
-  }
-  if (!ArRenderOutputFrame_Finish(&output_frame)) {
-    DisableActionHeat("output-state restore");
-    SessionFatal_Request(
-        "The action heat-refraction pass could not restore the output "
-        "viewport and clip state (%s). Restart the game; if this repeats, "
-        "update your graphics driver or disable action particles.",
-        ArRenderDevice_LastError(&g_render_device));
-  } else if (!warped)
-    DisableActionHeat(fallback ? "refraction mesh" : "fallback resolve");
-}
-
-bool SubmitEffectBatch(EffectBatch *batch, ArRenderBlendMode blend) {
-  if (!batch || batch->overflow) {
-    static bool logged;
-    if (!logged) {
-      logged = true;
-      fprintf(stderr,
-              "[host-effects] internal geometry batch capacity exceeded — "
-              "effect pass skipped\n");
-    }
-    return false;
-  }
-  if (!batch->index_count) return true;
-  const ArRenderDrawState state = {
-    .flags = kArRenderDrawState_Blend,
-    .blend = blend,
-  };
-  if (ArRenderDevice_DrawGeometryWithState(
-          &g_render_device, ArRenderTexture_Invalid(), batch->vertices,
-          batch->vertex_count, batch->indices, batch->index_count, &state))
-    return true;
-  DisableEffectGeometry("geometry submit");
-  return false;
-}
-
-/* ── Action-stage presentation effects ────────────────────────────────── */
-
-_Static_assert(kActionEffectObjPriorityCount ==
-                   kDioramaObjectPriorityCount,
-               "action effects and diorama must agree on OBJ bands");
-
-static void DrawActionEffects(const FrameSlot *slot, ArRenderRectI viewport,
-                              const DioramaProjection *diorama_projection) {
-  if (!slot || (!slot->action_effects.visible_count &&
-                !slot->action_scene_effects.visible_count &&
-                !slot->action_scene_effects.decoration_visible_count) ||
-      (!slot->action_effect_lighting && !slot->action_effect_particles) ||
-      !EffectRendererAvailable())
-    return;
-
-  ActionEffectProjectionContext projection = {
-    .bg1_camera_x = slot->bg1_camera_x,
-    .bg1_camera_y = slot->bg1_camera_y,
-    .bg2_camera_x = slot->bg2_camera_x,
-    .bg2_camera_y = slot->bg2_camera_y,
-    .ws_extra = slot->ws_extra,
-    .ws_extra_top = slot->ws_extra_top,
-    .visible_x0 = slot->visible_x0,
-    .visible_width = slot->visible_width,
-    .snes_height = slot->snes_height,
-    .diorama_projection = diorama_projection,
-    .viewport = {viewport.x, viewport.y, viewport.w, viewport.h},
-  };
-  ActionEffectRenderBatch *geometry = &s_action_effect_render_scratch.spell;
-  ActionSceneEffectRenderBatch *scene_geometry =
-      &s_action_effect_render_scratch.scene;
-  geometry->vertex_count = geometry->index_count = 0;
-  scene_geometry->vertex_count = scene_geometry->index_count = 0;
-  if ((slot->action_effects.visible_count &&
-       !ActionEffectRender_Build(
-           &slot->action_effects, slot->action_effect_lighting,
-           slot->action_effect_particles,
-           ActionEffectProjection_ProjectPoint, &projection, geometry)) ||
-      (slot->action_scene_effects.visible_count &&
-       !ActionSceneEffectRender_Build(
-           &slot->action_scene_effects, slot->action_effect_lighting,
-           slot->action_effect_particles,
-           ActionEffectProjection_ProjectPoint, &projection,
-           scene_geometry)))
-    return;
-  const int actor_vertex_count = scene_geometry->vertex_count;
-  const int actor_index_count = scene_geometry->index_count;
-
-  EffectBatch spell_batch = {
-    .vertices = geometry->vertices,
-    .indices = geometry->indices,
-    .vertex_count = geometry->vertex_count,
-    .index_count = geometry->index_count,
-    .vertex_capacity = kActionEffectRenderMaxVertices,
-    .index_capacity = kActionEffectRenderMaxIndices,
-  };
-  EffectBatch scene_batch = {
-    .vertices = scene_geometry->vertices,
-    .indices = scene_geometry->indices,
-    .vertex_count = scene_geometry->vertex_count,
-    .index_count = scene_geometry->index_count,
-    .vertex_capacity = kActionSceneEffectRenderMaxVertices,
-    .index_capacity = kActionSceneEffectRenderMaxIndices,
-  };
-  bool spell_submitted = true;
-  bool scene_submitted = true;
-  if (spell_batch.index_count || scene_batch.index_count) {
-    spell_submitted = SubmitEffectBatch(
-        &spell_batch, kArRenderBlendMode_Add);
-    scene_submitted = SubmitEffectBatch(
-        &scene_batch, kArRenderBlendMode_Add);
-  }
-
-  /* Map-derived world decorations own a separate captured list and reuse the
-   * same scratch batch after actor submission. This preserves the actor
-   * budget without allocating another workspace. BG2 decorations and bottom
-   * atmosphere are submitted by their dedicated depth-ordered passes. */
-  bool decoration_submitted = false;
-  if (slot->action_scene_effects.decoration_visible_count &&
-      ActionSceneDecorationRender_Build(
-          &slot->action_scene_effects,
-          kActionEffectRenderLayer_WorldOverlay,
-          slot->action_effect_lighting, slot->action_effect_particles,
-          ActionEffectProjection_ProjectPoint, &projection,
-          scene_geometry) && scene_geometry->index_count) {
-    scene_batch.vertex_count = scene_geometry->vertex_count;
-    scene_batch.index_count = scene_geometry->index_count;
-    decoration_submitted = SubmitEffectBatch(
-        &scene_batch, kArRenderBlendMode_Add);
-  }
-  /* One line, once per process: the whole path (WRAM identity -> capture ->
-   * projection -> geometry submit) either produced pixels or it did not, and
-   * a run's console.log should say which without anyone re-deriving it. The
-   * silent version of this is what let a 16-bit read of the animation-bank
-   * BYTE reject every spell with no visible symptom but "nothing happens". */
-  static bool announced;
-  if (!announced && geometry->index_count && spell_submitted) {
-    announced = true;
-    fprintf(stderr, "[action-fx] first spell geometry submitted: %u effect(s), "
-            "%d vertices / %d indices (lighting=%d particles=%d)\n",
-            slot->action_effects.visible_count, geometry->vertex_count,
-            geometry->index_count, slot->action_effect_lighting,
-            slot->action_effect_particles);
-  }
-  static bool announced_scene;
-  if (!announced_scene && actor_index_count && scene_submitted) {
-    announced_scene = true;
-    fprintf(stderr,
-            "[action-fx] first scene accent geometry submitted: %u effect(s), "
-            "%d vertices / %d indices (lighting=%d particles=%d)\n",
-            slot->action_scene_effects.visible_count,
-            actor_vertex_count, actor_index_count,
-            slot->action_effect_lighting, slot->action_effect_particles);
-  }
-  static bool announced_decorations;
-  if (!announced_decorations && decoration_submitted) {
-    announced_decorations = true;
-    fprintf(stderr,
-            "[action-fx] first map decoration geometry submitted\n");
-  }
-}
-
-typedef struct ActionDioramaPlaneEffectContext {
-  const FrameSlot *slot;
-  ArRenderRectI viewport;
-} ActionDioramaPlaneEffectContext;
-
-static void DrawActionDioramaPlaneEffect(
-    void *userdata, int plane, const DioramaProjection *diorama_projection) {
-  ActionDioramaPlaneEffectContext *context =
-      (ActionDioramaPlaneEffectContext *)userdata;
-  if (!context || !context->slot ||
-      !context->slot->action_scene_effects.decoration_visible_count ||
-      !diorama_projection || !EffectRendererAvailable())
-    return;
-  uint8_t render_layer;
-  if (plane == SR_PPU_OVERLAY_BG1 &&
-      diorama_projection->bg1_plane.valid) {
-    render_layer = kActionEffectRenderLayer_Bg1Plane;
-  } else if (plane == SR_PPU_OVERLAY_BG2 &&
-             diorama_projection->bg2_plane.valid) {
-    render_layer = kActionEffectRenderLayer_Bg2Plane;
-  } else if (plane == kDioramaPlane_Bg1Hi &&
-             diorama_projection->bg1_high_plane.valid) {
-    render_layer = kActionEffectRenderLayer_Bg1HighPlane;
-  } else {
-    return;
-  }
-  const FrameSlot *slot = context->slot;
-  ActionEffectProjectionContext projection = {
-    .bg1_camera_x = slot->bg1_camera_x,
-    .bg1_camera_y = slot->bg1_camera_y,
-    .bg2_camera_x = slot->bg2_camera_x,
-    .bg2_camera_y = slot->bg2_camera_y,
-    .ws_extra = slot->ws_extra,
-    .ws_extra_top = slot->ws_extra_top,
-    .visible_x0 = slot->visible_x0,
-    .visible_width = slot->visible_width,
-    .snes_height = slot->snes_height,
-    .diorama_projection = diorama_projection,
-    .viewport = {
-      context->viewport.x, context->viewport.y,
-      context->viewport.w, context->viewport.h,
-    },
-  };
-  ActionSceneEffectRenderBatch *geometry =
-      &s_action_effect_render_scratch.scene;
-  if (!ActionSceneDecorationRender_Build(
-          &slot->action_scene_effects, render_layer,
-          slot->action_effect_lighting, slot->action_effect_particles,
-          ActionEffectProjection_ProjectPoint, &projection, geometry))
-    return;
-  EffectBatch batch = {
-    .vertices = geometry->vertices,
-    .indices = geometry->indices,
-    .vertex_count = geometry->vertex_count,
-    .index_count = geometry->index_count,
-    .vertex_capacity = kActionSceneEffectRenderMaxVertices,
-    .index_capacity = kActionSceneEffectRenderMaxIndices,
-  };
-  const bool submitted = geometry->index_count && SubmitEffectBatch(
-      &batch, kArRenderBlendMode_Add);
-  static bool announced_bg1;
-  if (!announced_bg1 && submitted &&
-      render_layer == kActionEffectRenderLayer_Bg1Plane) {
-    announced_bg1 = true;
-    fprintf(stderr,
-            "[action-fx] first BG1-local decoration geometry submitted "
-            "(Diorama, depth-ordered)\n");
-  }
-  static bool announced_bg2;
-  if (!announced_bg2 && submitted &&
-      render_layer == kActionEffectRenderLayer_Bg2Plane) {
-    announced_bg2 = true;
-    fprintf(stderr,
-            "[action-fx] first BG2-local waterfall geometry submitted "
-            "(Diorama)\n");
-  }
-  static bool announced_bg1_high;
-  if (!announced_bg1_high && submitted &&
-      render_layer == kActionEffectRenderLayer_Bg1HighPlane) {
-    announced_bg1_high = true;
-    fprintf(stderr,
-            "[action-fx] first BG1-high lava geometry submitted "
-            "(Diorama, depth-ordered)\n");
-  }
-
-  /* The finite-backdrop gap exists only in Diorama's vertical extension.
-   * Submit its unmasked atmosphere from the same after-BG2 callback, before
-   * later BG1 and OBJ planes, so source sprites remain in front. */
-  if (render_layer != kActionEffectRenderLayer_Bg2Plane) return;
-  if (!ActionSceneDecorationRender_Build(
-          &slot->action_scene_effects,
-          kActionEffectRenderLayer_Atmosphere,
-          slot->action_effect_lighting, slot->action_effect_particles,
-          ActionEffectProjection_ProjectPoint, &projection, geometry) ||
-      !geometry->index_count)
-    return;
-  batch.vertex_count = geometry->vertex_count;
-  batch.index_count = geometry->index_count;
-  /* Mist needs to obscure the finite BG2/skybox discontinuity, not merely
-   * brighten both sides of it. Standard source-alpha blending lets the
-   * staggered zero-alpha rims feather that boundary; the ordinary waterfall
-   * veil and all luminous effects remain additive. */
-  const bool atmosphere_submitted = SubmitEffectBatch(
-      &batch, kArRenderBlendMode_Alpha);
-  static bool announced_atmosphere;
-  if (!announced_atmosphere && atmosphere_submitted) {
-    announced_atmosphere = true;
-    fprintf(stderr,
-            "[action-fx] first waterfall bottom atmosphere submitted "
-            "(Diorama)\n");
-  }
-}
-
-static ArRenderTexture EnsureActionPlaneEffectTarget(int w, int h) {
-  if (!ArRenderDevice_IsReady(&g_render_device) || w <= 0 || h <= 0)
-    return ArRenderTexture_Invalid();
-  if (ArRenderTexture_IsValid(s_action_plane_effect_target) &&
-      s_action_plane_effect_w == w &&
-      s_action_plane_effect_h == h)
-    return s_action_plane_effect_target;
-  ArRenderDevice_DestroyTexture(
-      &g_render_device, s_action_plane_effect_target);
-  s_action_plane_effect_target = ArRenderTexture_Invalid();
-  s_action_plane_effect_w = w;
-  s_action_plane_effect_h = h;
-  const ArRenderTextureDesc desc = {
-    .width = w,
-    .height = h,
-    .format = kArRenderPixelFormat_Argb8888,
-    .usage = kArRenderTextureUsage_Target,
-    .filter = kArRenderFilter_Nearest,
-    .blend = kArRenderBlendMode_AddPremultiplied,
-  };
-  if (!ArRenderDevice_CreateTexture(
-          &g_render_device, &desc, &s_action_plane_effect_target)) {
-    DisableActionPlaneEffect("premultiplied target creation");
-  }
-  return s_action_plane_effect_target;
-}
-
-static void DrawActionPlaneEffectFlat(
-    const FrameSlot *slot, ArRenderRectI viewport, uint8_t render_layer,
-    bool mask_valid, ArRenderTexture mask_texture, const char *label) {
-  if (!slot || !mask_valid ||
-      !slot->action_scene_effects.decoration_visible_count ||
-      !ArRenderTexture_IsValid(mask_texture) ||
-      !s_action_plane_blend_supported ||
-      !EffectRendererAvailable())
-    return;
-  ActionEffectProjectionContext projection = {
-    .bg1_camera_x = slot->bg1_camera_x,
-    .bg1_camera_y = slot->bg1_camera_y,
-    .bg2_camera_x = slot->bg2_camera_x,
-    .bg2_camera_y = slot->bg2_camera_y,
-    .ws_extra = slot->ws_extra,
-    .visible_x0 = slot->visible_x0,
-    .visible_width = slot->visible_width,
-    .snes_height = slot->snes_height,
-    /* Geometry is rendered into a viewport-sized intermediate target. Keep its
-     * coordinates target-local; the final composite restores the output-space
-     * viewport offset below. */
-    .viewport = {0, 0, viewport.w, viewport.h},
-  };
-  ActionSceneEffectRenderBatch *geometry =
-      &s_action_effect_render_scratch.scene;
-  if (!ActionSceneDecorationRender_Build(
-          &slot->action_scene_effects, render_layer,
-          slot->action_effect_lighting, slot->action_effect_particles,
-          ActionEffectProjection_ProjectPoint, &projection, geometry) ||
-      !geometry->index_count)
-    return;
-  const ArRenderTexture target =
-      EnsureActionPlaneEffectTarget(viewport.w, viewport.h);
-  if (!ArRenderTexture_IsValid(target)) return;
-
-  ArRenderTargetState target_state = {0};
-  const ArRenderTargetBeginResult begin = ArRenderDevice_BeginTarget(
-      &g_render_device, target, &target_state);
-  if (begin != kArRenderTargetBegin_Ready) {
-    DisableActionPlaneEffect("effect-target bind");
-    return;
-  }
-  const bool target_ready = ArRenderDevice_Clear(
-      &g_render_device, (ArRenderColorF){0.0f, 0.0f, 0.0f, 0.0f});
-  if (!target_ready)
-    DisableActionPlaneEffect("effect-target clear");
-  EffectBatch batch = {
-    .vertices = geometry->vertices,
-    .indices = geometry->indices,
-    .vertex_count = geometry->vertex_count,
-    .index_count = geometry->index_count,
-    .vertex_capacity = kActionSceneEffectRenderMaxVertices,
-    .index_capacity = kActionSceneEffectRenderMaxIndices,
-  };
-  bool submitted = false;
-  bool masked = false;
-  if (target_ready)
-    submitted = SubmitEffectBatch(&batch, kArRenderBlendMode_Add);
-  if (submitted && s_action_plane_blend_supported) {
-    const ArRenderRectF src = {
-      (float)slot->visible_x0, 0.0f,
-      (float)slot->visible_width, (float)slot->snes_height,
-    };
-    const ArRenderRectF dst = {
-      0.0f, 0.0f, (float)viewport.w, (float)viewport.h,
-    };
-    const ArRenderDrawState mask_state = {
-      .flags = kArRenderDrawState_Blend,
-      .blend = kArRenderBlendMode_Multiply,
-    };
-    masked = ArRenderDevice_DrawTextureWithState(
-        &g_render_device, mask_texture, &src, &dst, &mask_state);
-    if (!masked) DisableActionPlaneEffect("winner-mask draw");
-  }
-  if (!ArRenderDevice_EndTarget(&g_render_device, &target_state)) {
-    DisableActionPlaneEffect("render-state restore");
-    return;
-  }
-  bool composited = false;
-  if (masked && s_action_plane_blend_supported) {
-    const ArRenderRectF dst = ToRenderRectF(viewport);
-    composited = ArRenderDevice_DrawTexture(
-        &g_render_device, target, NULL, &dst);
-    if (!composited) DisableActionPlaneEffect("masked-target composite");
-  }
-  static bool announced[kActionEffectRenderLayer_Count];
-  if (render_layer < kActionEffectRenderLayer_Count &&
-      !announced[render_layer] && composited) {
-    announced[render_layer] = true;
-    fprintf(stderr,
-            "[action-fx] first %s geometry submitted "
-            "(flat, winner-masked)\n",
-            label ? label : "BG-local decoration");
-  }
 }
 
 /* ── Cheat visibility badge ────────────────────────────────────────────── */
@@ -1985,7 +447,7 @@ void PresentHostUi(const FrameSlot *slot, ArRenderRectI viewport,
   if (!slot || !ArRenderDevice_IsReady(&g_render_device)) return;
   if (!ArRenderOutput_UseFull(&g_render_device, NULL, NULL)) return;
   PresentActionBgExtentGuides(slot, viewport);
-  PresentSceneInspector(slot, viewport);
+  PresentSceneInspector_Draw(slot, viewport);
   PresentCheatBadge(slot, viewport);
   const PerformanceScope settings = PerformanceMetrics_Begin(kPerformance_SettingsUi);
   SettingsOverlay_Render(viewport);
@@ -2004,6 +466,10 @@ void PresentHostUi(const FrameSlot *slot, ArRenderRectI viewport,
   }
 }
 
+bool Present_EffectRendererSupported(void) {
+  return EffectRenderer_Available();
+}
+
 /* Called from the host render-target/device-reset event handlers and once
  * during orderly shutdown. A device reset invalidates every texture, including
  * the size-keyed render targets
@@ -2020,41 +486,14 @@ void PresentHostUi(const FrameSlot *slot, ArRenderRectI viewport,
  * does not emit _DEVICE_RESET at all — this is a Windows-D3D and
  * Vulkan-backed (Steam Deck) bug. */
 void PresentRendererResources_Reset(void) {
-  ArRenderDevice_DestroyTexture(&g_render_device, s_diorama_skybox_texture);
-  s_diorama_skybox_texture = ArRenderTexture_Invalid();
-  s_diorama_skybox_view = (DioramaSkyboxView){0};
-  PresentationUploadMirror_Reset(&s_diorama_skybox_mirror);
+  PresentDiorama_Reset(&g_render_device);
   PerformanceOverlay_Reset(&g_render_device);
-  ResetSim3DUploadMirrors();
+  Sim3DTextures_ResetUploads();
   ResetActionUploadMirrors();
-  ArRenderDevice_DestroyTexture(&g_render_device, s_sky_palace_foreground_texture);
-  s_sky_palace_foreground_texture = ArRenderTexture_Invalid();
-  s_sky_palace_foreground_valid = false;
-  ArRenderDevice_DestroyTexture(&g_render_device, s_hud_composite_texture);
-  s_hud_composite_texture = ArRenderTexture_Invalid();
-  s_hud_composite_w = s_hud_composite_h = 0;
-  ArLocalizedTextPresenter_Reset(&g_render_device);
-  ArRenderDevice_DestroyTexture(&g_render_device, s_action_bg1_mask_texture);
-  ArRenderDevice_DestroyTexture(&g_render_device, s_action_bg2_mask_texture);
-  ArRenderDevice_DestroyTexture(
-      &g_render_device, s_action_plane_effect_target);
-  ArRenderDevice_DestroyTexture(&g_render_device, s_action_heat_target);
-  s_action_bg1_mask_texture = ArRenderTexture_Invalid();
-  s_action_bg2_mask_texture = ArRenderTexture_Invalid();
-  s_action_plane_effect_target = ArRenderTexture_Invalid();
-  s_action_plane_effect_w = s_action_plane_effect_h = 0;
-  s_action_plane_blend_supported = true;
-  s_action_heat_target = ArRenderTexture_Invalid();
-  ClearActionHeatSavedState();
-  s_action_heat_mesh_cache = (ActionHeatMeshCache){0};
-  s_action_heat_w = s_action_heat_h = 0;
-  s_action_heat_supported = true;
-  s_action_heat_engaged = false;
-  atomic_store_explicit(
-      &s_effect_blend_supported, 1, memory_order_release);
-  atomic_store_explicit(
-      &s_effect_geometry_supported, 1, memory_order_release);
-  DioramaFrameGeneration_Reset();
+  PresentSkyPalace_Reset(&g_render_device);
+  PresentHud_Reset(&g_render_device);
+  PresentActionEffects_Reset(&g_render_device);
+  EffectRenderer_Reset();
   PresentSim3D_ResetResources();
   PresentSimMenu_Reset();
 }
@@ -2112,189 +551,28 @@ void PresentCompositeScene(const FrameSlot *slot, float alpha) {
   }
 
   if (slot->diorama_active) {
-    DioramaPerformanceScope presentation_performance =
-        DioramaPerformance_Begin(kDioramaPerformance_Total);
-    const uint8_t *pixels[kDioramaPlane_Count];
-    CaptureDioramaPpuSurfaces(slot, pixels, NULL);
-    /* PresentUpload recorded exactly which requested/content-bearing surfaces
-     * uploaded successfully before releasing their producer. A NULL entry is
-     * already Diorama_Composite's established "plane absent" contract, and
-     * also prevents stale texture contents from resurfacing after an empty
-     * priority band or failed upload. */
-    for (int plane = 0; plane < kDioramaPlane_Count; plane++)
-      if (!(s_diorama_uploaded_plane_mask & (1u << plane)))
-        pixels[plane] = NULL;
-    ArRenderTexture current_textures[kDioramaPlane_Count];
-    ArRenderTexture scene_textures[kDioramaPlane_Count];
-    for (int plane = 0; plane < kDioramaPlane_Count; plane++)
-      current_textures[plane] = g_diorama_textures[plane];
-    DioramaPerformanceScope frame_synthesis =
-        DioramaPerformance_Begin(kDioramaPerformance_FrameSynthesis);
-    DioramaSkyboxView skybox_view = s_diorama_skybox_view;
-    const uint32_t generated_plane_mask = DioramaFrameGeneration_PrepareWithSkybox(
-        &g_render_device, slot, alpha, current_textures,
-        s_diorama_uploaded_plane_mask, scene_textures,
-        skybox_view.texture, &skybox_view.texture);
-    skybox_view.dynamic =
-        (generated_plane_mask & (1u << kDioramaFrameGenerationSkybox)) != 0;
-    DioramaPerformance_End(frame_synthesis);
-    /* The existing graphics setting now selects frame-space generation.
-     * Prepare fails individual planes closed when either endpoint or pair
-     * continuity is unavailable, leaving their current raw textures intact. */
-    const DioramaCameraView camera = DioramaCamera_Present(
-        &s_diorama_camera, &slot->diorama_camera,
-        slot->timestamp_ns, HostClock_Nanoseconds());
-
-    /* Fix B/BH6: resolve BG2's row-banded valid capture spans from the slot
-     * alone (D6 — this file never reads live g_ppu). ws_extra, not
-     * extra_left_right, is the offset: the capture pitch and Diorama_Upload's
-     * rect are both derived from ws_extra, so it is what texture column 0
-     * corresponds to. Keep the two concepts distinct even when their values are
-     * equal, so either can change without altering the other's meaning. */
-    DioramaBgValidSpanPlan bg2_valid_spans;
-    /* + obj_apron: each span is in SURFACE columns, and screen x = 0 sits at
-     * column obj_apron + ws_extra now that the surfaces carry resolve headroom
-     * on both sides. Without it the skybox would crop its sky an apron early. */
-    DioramaBgValidSpanPlan_Build(
-        slot->ws_extra + slot->obj_apron,
-        slot->extra_left_right,
-        slot->extra_left_cur, slot->extra_right_cur,
-        slot->bg_capture_pad_to_budget,
-        &slot->action_bg_plan.layer[kActionBgPlanLayerCount - 1],
-        slot->ws_extra_top,
-        slot->snes_height + slot->ws_extra_top + slot->ws_extra_bottom,
-        kFrameSlotLayerTextureWidth, &bg2_valid_spans);
-    ArRenderRectI output_viewport;
-    if (!ResolveFrameOutputViewport(slot, &output_viewport)) {
-      DioramaPerformance_End(presentation_performance);
-      DioramaPerformance_PresentCompleted();
-      SessionFatal_Request(
-          "The renderer could not resolve the Diorama output viewport (%s). "
-          "Restart the game; if this repeats, update your graphics driver.",
-          ArRenderDevice_LastError(&g_render_device));
-      return;
-    }
-    DioramaProjection action_projection;
-    const uint8_t required_effect_obj_priorities =
-        (slot->action_effect_lighting || slot->action_effect_particles)
-            ? ActionEffectProjection_RequiredObjPriorityMask(
-                  &slot->action_effects, &slot->action_scene_effects)
-            : 0;
-    const uint8_t effect_obj_priority_mask =
-        Diorama_FilterObjEffectProjectionMask(
-            required_effect_obj_priorities,
-            slot->diorama_plane_request_mask,
-            slot->diorama_plane_content_mask,
-            s_diorama_uploaded_plane_mask);
-    const uint32_t required_effect_bg_planes =
-        (slot->action_effect_lighting || slot->action_effect_particles)
-            ? ActionEffectProjection_RequiredBgPlaneMask(
-                  &slot->action_effects, &slot->action_scene_effects)
-            : 0;
-    const uint32_t effect_bg_plane_mask =
-        Diorama_FilterBgEffectProjectionMask(
-            required_effect_bg_planes,
-            slot->diorama_plane_request_mask,
-            slot->diorama_plane_content_mask,
-            s_diorama_uploaded_plane_mask);
-    (void)BeginActionHeat(slot, output_viewport);
-    const ArRenderRectI viewport = ActionHeatSceneViewport(output_viewport);
-    ActionDioramaPlaneEffectContext plane_effect = {slot, viewport};
-    const DioramaCapture capture = {
-        .width = slot->snes_width,
-        .height =
-            slot->snes_height + slot->ws_extra_top + slot->ws_extra_bottom,
-        .authentic_y0 = slot->ws_extra_top,
-        .obj_apron = slot->obj_apron,
-        .textures = scene_textures,
-        .pixels = pixels,
-        .bg_transparent_fill_configured =
-            slot->diorama_bg_transparent_fill_configured,
-        .bg_transparent_fill_argb = slot->diorama_bg_transparent_fill_argb,
-        .coverage_masks =
-            slot->interp_setting_enabled ? NULL : s_diorama_coverage_masks,
-        .bg2_valid_spans = &bg2_valid_spans,
-        .skybox = &skybox_view,
-        .bg2_revision = s_diorama_bg2_content_revision,
-        .bg2_dynamic =
-            (generated_plane_mask & (UINT32_C(1) << SR_PPU_OVERLAY_BG2)) != 0,
-    };
-    const DioramaView view = {
-        .camera = camera.pose,
-        .distance_scale = camera.distance_scale,
-        .center_camera_vertically = camera.center_vertically,
-        .pixel_aspect = slot->pixel_aspect,
-        .ignore_aspect_ratio = slot->ignore_aspect_ratio,
-        .visible_width = slot->visible_width,
-        .viewport = viewport,
-    };
-    const DioramaScene scene = {
-        .map_group = slot->diorama_map_group,
-        .map_number = slot->diorama_map_number,
-        .layer_section = slot->diorama_layer_section,
-        .additive_plane_mask =
-            slot->diorama_plane_additive_mask & s_diorama_uploaded_plane_mask,
-        .effect_obj_priority_mask = effect_obj_priority_mask,
-        .effect_bg_plane_mask = effect_bg_plane_mask,
-        .plane_effect = DrawActionDioramaPlaneEffect,
-        .plane_effect_userdata = &plane_effect,
-    };
-    const PresentationOutcome diorama = Diorama_Composite(
-        &g_render_device, &capture, &view, &scene, &action_projection);
-    if (!PresentationOutcome_IsUsable(diorama)) {
-      CancelActionHeat();
-      DioramaPerformance_End(presentation_performance);
-      DioramaPerformance_PresentCompleted();
-      SessionFatal_Request(
-          "The selected Diorama renderer could not complete its core scene "
-          "(%s). Restart the game. If this happens again, update your "
-          "graphics driver or disable Diorama mode before entering the room.",
-          ArRenderDevice_LastError(&g_render_device));
-      return;
-    }
-    DioramaPerformanceScope callback_performance =
-        DioramaPerformance_Begin(kDioramaPerformance_Callback);
-    DrawActionEffects(slot, viewport, &action_projection);
-    DioramaPerformance_End(callback_performance);
-    EndActionHeat(slot, output_viewport);
-    /* Flat HUD mode leaves BG3 in the same RemoveFromGame capture used by flat
-     * presentation. Reconstruct its split pieces into one texture before
-     * drawing the screen-space overlay; drawing them directly creates seams
-     * (see PresentHudOverlayComposited).
-     *
-     * With diorama_hud_flat off, capture rebinds BG3 into the diorama layer
-     * buffer so it renders as the ordinary tilted BG3 plane in
-     * Diorama_Composite's own
-     * per-layer loop above — skip the anchored overlay entirely here so the
-     * two don't both draw a HUD. */
-    if (slot->diorama_hud_flat)
-      PresentHudOverlayComposited(
-          slot, (ArRenderRectI){
-            output_viewport.x, output_viewport.y,
-            output_viewport.w, output_viewport.h,
-          });
-    DioramaPerformance_End(presentation_performance);
-    DioramaPerformance_PresentCompleted();
+    PresentDiorama_Draw(&g_render_device, slot, alpha);
     return;
   }
 
   ArRenderRectI output_viewport;
-  if (!ResolveFrameOutputViewport(slot, &output_viewport)) {
+  if (!Present_ResolveOutputViewport(&g_render_device, slot, &output_viewport)) {
     SessionFatal_Request(
         "The renderer could not resolve the game output viewport (%s). "
         "Restart the game; if this repeats, update your graphics driver.",
         ArRenderDevice_LastError(&g_render_device));
     return;
   }
-  (void)BeginActionHeat(slot, output_viewport);
-  const ArRenderRectI viewport = ActionHeatSceneViewport(output_viewport);
+  (void)PresentActionHeat_Begin(&g_render_device, slot, output_viewport);
+  if (SessionFatal_Requested()) return;
+  const ArRenderRectI viewport = PresentActionHeat_SceneViewport(output_viewport);
   const ArRenderColorF black = {0.0f, 0.0f, 0.0f, 1.0f};
   ArRenderOutputFrame output_frame;
   if (!ArRenderOutputFrame_Begin(
           &g_render_device,
           viewport,
           black, black, &output_frame)) {
-    CancelActionHeat();
+    PresentActionHeat_Cancel(&g_render_device);
     SessionFatal_Request(
         "The renderer could not begin the game scene output (%s). Restart "
         "the game; if this repeats, update your graphics driver.",
@@ -2314,24 +592,22 @@ void PresentCompositeScene(const FrameSlot *slot, float alpha) {
   if (slot->sim.view == kSimView_SkyPalace) {
     const PresentationOutcome palace = PresentSkyPalace_Draw(
         &g_render_device, slot, local_viewport,
-        s_sky_palace_foreground_valid ? s_sky_palace_foreground_texture
-                                     : ArRenderTexture_Invalid(),
         &source, &destination);
     if (!PresentationOutcome_IsUsable(palace)) {
       ArRenderOutputFrame_Abort(&output_frame);
-      CancelActionHeat();
+      PresentActionHeat_Cancel(&g_render_device);
       SessionFatal_Request(
           "The selected Sky Palace renderer could not complete its %s (%s). "
           "Restart the game; if this repeats, report the graphics settings "
           "and update your graphics driver.",
-          s_sky_palace_foreground_valid ? "scene" : "foreground capture/upload",
+          PresentSkyPalace_ForegroundReady() ? "scene" : "foreground capture/upload",
           ArRenderDevice_LastError(&g_render_device));
       return;
     }
   } else if (!ArRenderDevice_DrawTexture(
           &g_render_device, g_texture, &source, &destination)) {
     ArRenderOutputFrame_Abort(&output_frame);
-    CancelActionHeat();
+    PresentActionHeat_Cancel(&g_render_device);
     SessionFatal_Request(
         "The renderer rejected the base game framebuffer (%s). Restart the "
         "game; if this repeats, update your graphics driver.",
@@ -2340,35 +616,29 @@ void PresentCompositeScene(const FrameSlot *slot, float alpha) {
   }
 
   PresentMode7Composite(slot, local_viewport);
-  DrawActionPlaneEffectFlat(
-      slot, local_viewport, kActionEffectRenderLayer_Bg1Plane,
-      slot->action_bg1_mask_valid, s_action_bg1_mask_texture,
-      "BG1-local decoration");
-  DrawActionPlaneEffectFlat(
-      slot, local_viewport, kActionEffectRenderLayer_Bg1HighPlane,
-      slot->action_bg1_mask_valid, s_action_bg1_mask_texture,
-      "BG1-high lava decoration");
-  DrawActionPlaneEffectFlat(
-      slot, local_viewport, kActionEffectRenderLayer_Bg2Plane,
-      slot->action_bg2_mask_valid, s_action_bg2_mask_texture,
-      "BG2-local waterfall");
-  DrawActionEffects(slot, local_viewport, NULL);
+  if (!PresentActionEffects_DrawFlatPlanes(
+          &g_render_device, slot, local_viewport)) {
+    ArRenderOutputFrame_Abort(&output_frame);
+    PresentActionHeat_Cancel(&g_render_device);
+    return;
+  }
+  PresentActionEffects_Draw(&g_render_device, slot, local_viewport, NULL);
   if (!ArRenderOutputFrame_Finish(&output_frame)) {
-    CancelActionHeat();
+    PresentActionHeat_Cancel(&g_render_device);
     SessionFatal_Request(
         "The renderer could not restore the output after drawing the game "
         "scene (%s). Restart the game; if this repeats, update your graphics "
         "driver.", ArRenderDevice_LastError(&g_render_device));
     return;
   }
-  EndActionHeat(slot, output_viewport);
+  PresentActionHeat_End(&g_render_device, slot, output_viewport);
   if (SessionFatal_Requested()) return;
   PresentHdReplacements(slot, output_viewport);
   /* The captured BG3 surface is transparent outside its visible cells, so it
    * can be the final single unit without covering a BG1/BG2 HD replacement.
    * Drawing replacements first also makes the ordering explicit for future
    * enhanced glyph claims inside this same composite. */
-  PresentHudOverlay(slot, output_viewport);
+  PresentHud_Draw(&g_render_device, slot, output_viewport);
 }
 
 bool PresentAuthenticScene(const FrameSlot *slot, ArRenderRectI viewport) {
@@ -2406,7 +676,7 @@ bool PresentAuthenticScene(const FrameSlot *slot, ArRenderRectI viewport) {
       drawn = ArRenderDevice_DrawTexture(&g_render_device, g_texture,
                                          &clean_source, &destination);
     }
-    if (drawn) PresentHudOverlayComposited(slot, local);
+    if (drawn) PresentHud_DrawComposited(&g_render_device, slot, local);
   } else drawn = ArRenderDevice_DrawTexture(
       &g_render_device, g_authentic_texture, &source, &destination);
   if (!drawn) {

@@ -4,9 +4,9 @@
 
 #include "present/frame_timing.h"
 
-/* Written and read on the game thread. It is deliberately outside savestates:
- * FrameSlot_ResetActionEffects invalidates the consumer after a load, and the
- * next capture seeds from whichever completed pass serial is current. */
+/* Written and read on the game thread for the lifetime of the running game.
+ * This counts completed object/OAM passes; inspection snapshots do not
+ * restore execution or rewind this serial. */
 static uint32_t s_completed_pass_serial;
 
 void ActionEffectGameplayClock_CompletePass(void) {
@@ -30,9 +30,8 @@ unsigned ActionEffectTickClock_Capture(ActionEffectTickClock *clock) {
     return 0;
   }
 
-  /* Unsigned subtraction deliberately handles the serial's natural wrap. A
-   * savestate/restart reset invalidates this observer before sampling again,
-   * so a discontinuity cannot become a false catch-up burst. */
+  /* Unsigned subtraction handles the serial's natural wrap. Bound catch-up
+   * work when presentation skips multiple completed gameplay passes. */
   uint32_t elapsed = serial - clock->last_serial;
   clock->last_serial = serial;
   if (elapsed > kFrameTimingMaximumElapsedTicks)

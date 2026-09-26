@@ -8,6 +8,7 @@
 #include "action/action_obj_apron.h"
 #include "action/action_bg_plan.h"
 #include "snesrecomp/game.h"
+#include "snesrecomp/game/cpu.h"
 #include "snesrecomp/game/runtime.h"
 #include "snesrecomp/game/snes_regs.h"
 
@@ -21,7 +22,6 @@ extern const RtlGameModule kActRaiserGameModule;
  * concrete console/component layouts remain runner-private. */
 void ActRaiser_BindRunner(SrRunnerHandle *runner);
 void ActRaiserDrawPpuFrame(void);
-void ActRaiser_RebindPpuOutputSurfaces(void);
 
 typedef struct ActRaiserRomSetupResult {
   bool visual_patches_applied;
@@ -89,6 +89,8 @@ void ActRaiser_DestroyGameCoroutine(void);
 /* Suspend only from the executing game coroutine. Host UI decisions use this
  * without issuing a native VBlank/input/timer update while their menu is open. */
 void ActRaiser_YieldToHost(void);
+/* Native vblank replacement: consumes the JSR return frame and yields. */
+RecompReturn ActRaiser_WaitForVblank(CpuState *cpu);
 int ActRaiser_ReadRdnmi(const RtlRdnmiReadContext *context);
 bool ActRaiser_RecoverDispatchMiss(uint32 source_pc24, uint32 target_pc24);
 void ActRaiser_SpcUploaderCompleteTick(void);

@@ -13,14 +13,15 @@
 #include <string.h>
 
 #include "deterministic_hash.h"
-#include "present/present_internal.h"
+#include "present/present.h"
+#include "render/effect_batch.h"
 #include "sim/sim3d/present_sim3d_effects.h"
 #include "sim/sim3d/present_sim3d_project.h"
 #include "render/render_device.h"
 #include "sim/sim_render_atlas.h"
 #include "sim/sim3d/sim3d.h"
 #include "host/host_video.h"
-#include "present/presentation_textures.h"
+#include "sim/sim3d/sim3d_textures.h"
 
 #ifndef AR_SIM3D_TERRAIN_ELEVATION
 #define AR_SIM3D_TERRAIN_ELEVATION 0
@@ -489,7 +490,7 @@ static bool AppendSimEffectParticles(
 void DrawSimEffectLocalLighting(
     const FrameSlot *slot, bool lighting, const SimSceneProjection *scene) {
   if (!lighting || !slot->sim.effect_visible_count ||
-      !EffectRendererAvailable())
+      !EffectRenderer_Available())
     return;
   enum {
     kVertices = kSimMaxEffectInstances * 33,
@@ -511,13 +512,13 @@ void DrawSimEffectLocalLighting(
       break;
   }
   if (!batch.index_count && !batch.overflow) return;
-  SubmitEffectBatch(&batch, kArRenderBlendMode_Add);
+  EffectRenderer_Submit(&g_render_device, &batch, kArRenderBlendMode_Add);
 }
 
 void DrawSimEffectSceneFlash(const FrameSlot *slot, bool lighting,
                              ArRenderRectI viewport) {
   if (!lighting || !slot->sim.effect_visible_count ||
-      !EffectRendererAvailable())
+      !EffectRenderer_Available())
     return;
   SimEffectStyle strongest_style = {0};
   for (uint8_t i = 0; i < slot->sim.effect_count; i++) {
@@ -545,7 +546,7 @@ void DrawSimEffectSceneFlash(const FrameSlot *slot, bool lighting,
             red / 255.0f, green / 255.0f, blue / 255.0f, alpha / 255.0f,
           },
           kArRenderBlendMode_Add))
-    DisableEffectBlend("scene flash");
+    EffectRenderer_DisableBlend(&g_render_device, "scene flash");
 }
 
 
@@ -618,7 +619,7 @@ static bool DrawSimFireballHeadFragment(
       .blend = kArRenderBlendMode_Alpha,
     };
     return ArRenderDevice_DrawTextureWithState(
-        &g_render_device, g_sim_obj_atlas_texture,
+        &g_render_device, Sim3DTextures_Atlas(),
         &atlas, &destination, &state);
   }
   /* Every fragment turns about the SHARED anchor. Rotating each about its own
@@ -660,14 +661,14 @@ static bool DrawSimFireballHeadFragment(
     .blend = kArRenderBlendMode_Alpha,
   };
   return ArRenderDevice_DrawGeometryWithState(
-      &g_render_device, g_sim_obj_atlas_texture,
+      &g_render_device, Sim3DTextures_Atlas(),
       vertices, 4, indices, 6, &state);
 }
 
 void DrawSimEffectFireballHeads(
     const FrameSlot *slot, bool billboards, const SimSceneProjection *scene) {
   if (!billboards || !slot->sim.effect_count || !slot->sim.atlas_valid ||
-      !ArRenderTexture_IsValid(g_sim_obj_atlas_texture))
+      !ArRenderTexture_IsValid(Sim3DTextures_Atlas()))
     return;
 
   for (uint8_t i = 0; i < slot->sim.effect_count; i++) {
@@ -755,7 +756,7 @@ void DrawSimEffectFireballHeads(
 void DrawSimEffectParticles(
     const FrameSlot *slot, bool particles, const SimSceneProjection *scene) {
   if (!particles || !slot->sim.effect_count ||
-      !EffectRendererAvailable())
+      !EffectRenderer_Available())
     return;
   enum {
     kVertices = kSimMaxEffectInstances * kSimMaxEffectQuadsPerEffect * 4,
@@ -780,7 +781,7 @@ void DrawSimEffectParticles(
       break;
   }
   if (!batch.index_count && !batch.overflow) return;
-  SubmitEffectBatch(&batch, kArRenderBlendMode_Add);
+  EffectRenderer_Submit(&g_render_device, &batch, kArRenderBlendMode_Add);
 }
 
 bool SimObjectIsPromotedHud(const FrameSlot *slot,
@@ -840,5 +841,5 @@ void DrawSimMapPlaneObject(const FrameSlot *slot,
   };
   const int32_t indices[] = { 0, 1, 3, 0, 3, 2 };
   ArRenderDevice_DrawGeometry(
-      &g_render_device, g_sim_obj_atlas_texture, vertices, 4, indices, 6);
+      &g_render_device, Sim3DTextures_Atlas(), vertices, 4, indices, 6);
 }

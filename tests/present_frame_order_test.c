@@ -27,6 +27,8 @@ static uint8_t s_expected_transition_alpha;
 static int s_expected_stages;
 static uint64_t s_authentic_uploaded_serial;
 static bool s_dialogue_ready;
+static bool s_fail_scene;
+static int s_menu_draws;
 static const ArRenderRectI kFallback = {160, 0, 960, 720};
 static const ArRenderRectI kResolved = {161, 1, 958, 718};
 
@@ -93,6 +95,7 @@ void PresentCompositeScene(const FrameSlot *slot, float alpha) {
   CHECK(s_stage++ == 2);
   CHECK(slot == s_expected_slot);
   CHECK(alpha == s_expected_alpha);
+  if (s_fail_scene) SessionFatal_Request("injected scene target failure");
   if (s_dialogue_ready)
     ArTextPresentation_MarkReady(slot->localization.dialogue_ticket);
 }
@@ -115,6 +118,7 @@ bool PresentAuthenticPictureInPicture(const FrameSlot *slot,
 }
 
 void PresentSimMenu_Draw(const FrameSlot *slot, ArRenderRectI viewport) {
+  s_menu_draws++;
   CHECK(slot == s_expected_slot);
   CHECK(RectsEqual(viewport, kFallback));
 }
@@ -163,7 +167,7 @@ static void RunCase(FrameSlot *slot) {
   CHECK(RectsEqual(image, s_expected_host_viewport));
 }
 
-int main(void) {
+int main(int argc, char **argv) {
   g_settings.crt_enabled = true;
   g_settings.crt_curvature_x100 = 25;
   g_settings.crt_scanline_x100 = 50;
@@ -186,6 +190,14 @@ int main(void) {
   s_expected_host_viewport = kResolved;
   s_expected_transition_alpha = 0;
   s_expected_stages = 5;
+  if (argc == 2 && strcmp(argv[1], "scene-failure") == 0) {
+    s_fail_scene = true;
+    (void)PresentFrame(&slot, s_expected_alpha, s_expected_presentation_fps);
+    CHECK(SessionFatal_Requested());
+    CHECK(s_stage == 4); /* Unwind CRT, then stop before menu and host UI. */
+    CHECK(s_menu_draws == 0);
+    return s_failures ? 1 : 0;
+  }
   RunCase(&slot);
 
   slot.inidisp = 0x0f;

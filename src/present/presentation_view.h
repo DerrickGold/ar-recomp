@@ -6,7 +6,7 @@
  * Phase: present (FrameSlot only).
  * Tests: tests/presentation_view_test.c */
 
-#include "present/frame_slot.h"
+#include "present/present.h"
 #include "app/performance_metrics.h"
 #include "present/render_comparison.h"
 

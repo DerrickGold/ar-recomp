@@ -11,7 +11,6 @@
 #include "host/host_display.h"
 #include "host/host_frame_surfaces.h"
 #include "host/parallel_work.h"
-#include "present/frame_slot.h"
 #include "sim/sim3d/sim3d.h"
 #include "sim/sim_phase0_trace.h"
 #include "sim/sim_world_map_build.h"
@@ -21,6 +20,93 @@
 #include "snesrecomp/game/runtime.h"
 #include "snesrecomp/game_runtime.h"
 #include "snesrecomp/runner.h"
+
+/* Both produced frames and paused redraws resolve one coherent set of
+ * settings and camera controls before annotation. Keep that mapping with the
+ * SIM producer; the frame-slot transport does not interpret SIM policy. */
+static Sim3DTuning CaptureTuning(void) {
+  int sim_margin_left = 0, sim_margin_right = 0;
+  int sim_margin_top = 0, sim_margin_bottom = 0;
+  ActRaiser_SimSpriteMargins(&sim_margin_left, &sim_margin_right,
+                             &sim_margin_top, &sim_margin_bottom);
+  Sim3DCameraPresentationState sim_camera;
+  Sim3DCamera_CapturePresentationState(&sim_camera);
+  return (Sim3DTuning){
+      .pitch_mrad = sim_camera.pitch_mrad,
+      .yaw_mrad = sim_camera.yaw_mrad,
+      .distance_x100 = sim_camera.distance_x100,
+      .landscape_height_pct = g_settings.sim3d_landscape_height_pct,
+      .height_scale_x100 = g_settings.sim3d_height_scale_x100,
+      .voxel_preset = g_settings.sim3d_voxel_preset,
+      .voxel_detail = g_settings.sim3d_voxel_detail,
+      .voxel_lod = g_settings.sim3d_voxel_lod,
+      .voxel_shading = g_settings.sim3d_voxel_shading,
+      .voxel_style = g_settings.sim3d_voxel_style,
+      .voxel_facing = g_settings.sim3d_voxel_facing,
+      .voxel_render_scale = g_settings.sim3d_voxel_render_scale,
+      .shadow_opacity_pct = g_settings.sim3d_shadow_opacity_pct,
+      .height_pop_pct = g_settings.sim3d_height_pop_pct,
+      .light_azimuth_deg = g_settings.sim3d_light_azimuth_deg,
+      .light_elevation_deg = g_settings.sim3d_light_elevation_deg,
+      .shadow_softness_pct = g_settings.sim3d_shadow_softness_pct,
+      .rim_strength_pct = g_settings.sim3d_rim_strength_pct,
+      .underlay_haze_pct = g_settings.sim3d_underlay_haze_pct,
+      .cloud_opacity_pct = g_settings.sim3d_cloud_opacity_pct,
+      .cloud_falloff_px = g_settings.sim3d_cloud_falloff_px,
+      .cloud_inset_px = g_settings.sim3d_cloud_inset_px,
+      .cull_lead_px = g_settings.sim3d_cull_lead_px,
+      .cull_haze_pct = g_settings.sim3d_cull_haze_pct,
+      .cull_dim_pct = g_settings.sim3d_cull_dim_pct,
+      .cull_haze_lead_px = g_settings.sim3d_cull_haze_lead_px,
+      .cull_corner_px = g_settings.sim3d_cull_corner_px,
+      .underlay_defocus_pct = g_settings.sim3d_underlay_defocus_pct,
+      .cloud_altitude_px = g_settings.sim3d_cloud_altitude_px,
+      .cloud_drift_pct = g_settings.sim3d_cloud_drift_pct,
+      .world_navigation_lighting =
+          g_settings.sim3d_world_navigation_lighting,
+      .world_navigation_clouds =
+          g_settings.sim3d_world_navigation_clouds,
+      .sky_palace_volumetric_clouds = g_settings.sim3d_sky_palace_volumetric,
+      .world_navigation_cloud_shadows = g_settings.sim3d_world_navigation_cloud_shadows,
+      .world_navigation_atmosphere = g_settings.sim3d_world_navigation_atmosphere,
+      .world_navigation_models = g_settings.sim3d_world_navigation_towns,
+      .world_navigation_relief = g_settings.sim3d_world_navigation_relief,
+      .world_navigation_ground_detail = g_settings.sim3d_world_navigation_ground_detail,
+      .world_navigation_mountains = g_settings.sim3d_world_navigation_mountains,
+      .world_navigation_backdrop = g_settings.sim3d_backdrop,
+      .world_navigation_haze = g_settings.sim3d_cull_haze,
+      .cull_lift_inset = g_settings.sim3d_cull_lift_inset,
+      .backdrop_strength_pct = g_settings.sim3d_backdrop_strength_pct,
+      .backdrop_horizon_pct = g_settings.sim3d_backdrop_horizon_pct,
+      .windmill_wind_stops_all = g_settings.fix_windmill_wind_stop,
+      .sprite_margin_left = sim_margin_left,
+      .sprite_margin_right = sim_margin_right,
+      .sprite_margin_top = sim_margin_top,
+      .sprite_margin_bottom = sim_margin_bottom };
+}
+
+static void CaptureMetadata(SimFrameData *sim) {
+  SimRenderMetadata_CaptureFrame(
+      sim, g_ram, g_settings.sim3d_mode,
+      g_settings.sim3d_world_navigation,
+      Settings_Sim3DRequestedFeatures(),
+      g_settings.sim3d_diagnostic_layers, Sim3D_ImplementedFeatures());
+  SimRenderMetadata_CaptureSkyPalaceFrame(sim, g_ram,
+      g_settings.sim3d_world_navigation && g_settings.sim3d_sky_palace);
+  Sim3DTuning tuning = CaptureTuning();
+  Sim3D_AnnotateFrame(sim, &tuning);
+  SimWorldNavigationCapture_Capture(sim, RtlGameRunner());
+}
+
+static void CaptureCanvasSerials(SimFrameData *sim) {
+  sim->town_canvas_serial = SimTownCanvas_Serial();
+  sim->background_voxel_serial = SimBackgroundVoxels_Serial();
+}
+
+void SimFrameCapture_RefreshMetadata(SimFrameData *sim) {
+  CaptureMetadata(sim);
+  CaptureCanvasSerials(sim);
+}
 
 static bool CaptureTownCanvasPpuView(SrPpuStateSnapshot *ppu,
                                      SrBorrowedU16Span *vram,
@@ -74,16 +160,7 @@ void SimFrameCapture_Produce(SimFrameData *sim) {
   pipeline = PerformanceMetrics_Begin(kPerformance_Metadata);
   SimPhase0Trace_Frame((uint32)snes_frame_counter, g_ram,
                        RtlGameRunner());
-  SimRenderMetadata_CaptureFrame(
-      sim, g_ram, g_settings.sim3d_mode,
-      g_settings.sim3d_world_navigation,
-      Settings_Sim3DRequestedFeatures(),
-      g_settings.sim3d_diagnostic_layers, Sim3D_ImplementedFeatures());
-  SimRenderMetadata_CaptureSkyPalaceFrame(sim, g_ram,
-      g_settings.sim3d_world_navigation && g_settings.sim3d_sky_palace);
-  Sim3DTuning tuning = BuildSim3DTuning();
-  Sim3D_AnnotateFrame(sim, &tuning);
-  SimWorldNavigationCapture_Capture(sim, RtlGameRunner());
+  CaptureMetadata(sim);
   PerformanceMetrics_End(pipeline);
   pipeline = PerformanceMetrics_Begin(kPerformance_TownCanvas);
   /* This site runs for every drawn frame, including headless runs that never
@@ -100,8 +177,7 @@ void SimFrameCapture_Produce(SimFrameData *sim) {
       have_town_ppu_view ? &town_vram : NULL,
       have_town_ppu_view ? &town_cgram : NULL,
       DispatchTownPixelRows, NULL);
-  sim->town_canvas_serial = SimTownCanvas_Serial();
-  sim->background_voxel_serial = SimBackgroundVoxels_Serial();
+  CaptureCanvasSerials(sim);
   PerformanceMetrics_End(pipeline);
   Sim3D_LogViewTransition(sim);
   SceneInspector_SetSimFrameData(sim);

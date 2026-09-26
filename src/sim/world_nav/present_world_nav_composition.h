@@ -1,7 +1,7 @@
 #ifndef AR_PRESENT_WORLD_NAV_COMPOSITION_H
 #define AR_PRESENT_WORLD_NAV_COMPOSITION_H
 
-#include "present/frame_slot.h"
+#include "present/present.h"
 
 /* Borrowed capture textures. Upload and reset own their lifetime; scene
  * composition chooses where the Palace, plaque and native label are drawn. */

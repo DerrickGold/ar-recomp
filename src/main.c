@@ -37,6 +37,7 @@
 #include "actraiser/regional/actraiser_regional_media.h"
 #include "actraiser/regional/actraiser_actor_art.h"
 #include "audio/audio_session.h"
+#include "host/host_ppu_output.h"
 #include "host/host_display.h"
 #include "host/host_display_pacing.h"
 #include "host/host_frame_surfaces.h"
@@ -69,6 +70,7 @@
 #include "app/session_recovery.h"
 #include "app/settings.h"
 #include "settings_overlay/settings_overlay.h"
+#include "settings_overlay/regional/regional_host.h"
 #include "sim/sim3d/sim3d.h"
 #include "sim/sim_phase0_trace.h"
 #include "sim/sim_frame_capture.h"
@@ -98,25 +100,6 @@ enum {
 #define AR_APP_IDENTIFIER "dev.quintet-enix.actraiser-recomp"
 #define AR_APP_VERSION "0.1.0-dev"
 static bool s_window_hidden;  /* true while MINIMIZED or HIDDEN: skip present */
-
-static bool SettingsOverlayLiveCgram(
-    uint16_t out_cgram[kSettingsOverlayLayerPaletteEntries]) {
-  const SnesRunnerApi *api = sr_runner_get_api(SR_RUNNER_ABI_VERSION);
-  SrRunnerHandle *runner = RtlGameRunner();
-  SrBorrowedU16Span cgram = {
-    .struct_size = sizeof(cgram),
-  };
-  if (!api || !runner || !out_cgram ||
-      api->struct_size < SNES_RUNNER_API_PPU_STATE_SIZE ||
-      !(api->capabilities & SR_RUNNER_CAP_BORROWED_U16_SPANS) ||
-      api->borrow_u16_memory(runner, SR_MEMORY_CGRAM, &cgram) !=
-          SR_RESULT_OK ||
-      cgram.element_count < kSettingsOverlayLayerPaletteEntries)
-    return false;
-  memcpy(out_cgram, cgram.data,
-         sizeof(uint16_t) * kSettingsOverlayLayerPaletteEntries);
-  return true;
-}
 
 static ArUiLocale RecoveryLocale(void) {
   const char *override = getenv("AR_INTERFACE_LANGUAGE");
@@ -372,7 +355,7 @@ static void DrawAndPresentFrame(HostDisplayPresentMode present_mode,
               (unsigned long long)draw_ms_max,
               g_ram[kActRaiserWram_MapGroup],
               g_ram[kActRaiserWram_CurrentMap],
-              ActRaiser_AuthenticCaptureEnabled() ? "on" : "off");
+              HostPpuOutput_AuthenticEnabled() ? "on" : "off");
       draw_win_start = now;
       draw_ms_sum = 0;
       draw_ms_max = 0;
@@ -430,61 +413,6 @@ typedef struct AppBoot {
   bool ws_headless;     /* opt a headless run into the configured wide geometry */
   Snes *snes;
 } AppBoot;
-
-static bool RegionalContinuePrompt(void *context, ActRaiserRegionalContinueNotice notice) {
-  const AppBoot *app = context;
-  if (!app || app->headless)
-    return false; /* Never silently acknowledge or wait on an invisible menu. */
-  const char *body = notice == kActRaiserRegionalContinue_Estimate
-      ? "overlay.region.legacy_estimate"
-      : notice == kActRaiserRegionalContinue_LoadFailed ? "overlay.region.continue_failed"
-                                                        : "overlay.region.adoption_failed";
-  const char *accept = notice == kActRaiserRegionalContinue_Estimate ?
-      "overlay.region.acknowledge" : "overlay.decision.retry";
-  if (!SettingsOverlay_BeginDecision("overlay.region.continue_title", body, accept)) return false;
-  SettingsOverlayDecisionResult result;
-  do {
-    ActRaiser_YieldToHost();
-    result = SettingsOverlay_TakeDecisionResult();
-  } while (result == kOverlayDecision_Pending);
-  return result == kOverlayDecision_Accepted;
-}
-
-static bool RegionalPopulationPrompt(void *context,ActRaiserRegionalPopulationNotice notice,
-    ArRegionalSource source,bool gameplay_profile,const uint16_t removed[6]) {
-  const AppBoot *app=context;
-  if(!app || app->headless)return false;
-  bool opened;
-  if(notice==kActRaiserRegionalPopulation_Confirm) {
-    char body[2048];
-    if(!SettingsOverlayRegions_PopulationConfirmation((ArUiLocale)g_settings.interface_language,
-        source,removed,body,sizeof(body)))return false;
-    if(gameplay_profile) {
-      const size_t used=strlen(body);
-      const char *scope = ArUiCatalog_Text((ArUiLocale)g_settings.interface_language,
-                                           "overlay.region.menu.confirm_gameplay", NULL);
-      const int written=snprintf(body+used,sizeof(body)-used,"\n\n%s",scope);
-      if(written<0 || (size_t)written>=sizeof(body)-used)return false;
-    }
-    opened=SettingsOverlay_BeginDecisionText("overlay.region.population_label",body,
-        "overlay.region.population_accept");
-  } else {
-    const char *key = notice == kActRaiserRegionalPopulation_Complete
-        ? "overlay.region.population_complete"
-        : notice == kActRaiserRegionalPopulation_NamePending
-        ? "overlay.region.population_name_pending"
-        : "overlay.region.population_failed";
-    opened = SettingsOverlay_BeginNotice("overlay.region.population_label", key,
-                                         "overlay.region.acknowledge");
-  }
-  if(!opened)return false;
-  SettingsOverlayDecisionResult result;
-  do {
-    ActRaiser_YieldToHost();
-    result=SettingsOverlay_TakeDecisionResult();
-  } while(result==kOverlayDecision_Pending);
-  return result==kOverlayDecision_Accepted;
-}
 
 /* Argument parsing, the portable-bundle chdir, the per-run artifact dir, the
  * shipped-defaults ini upgrade, the config layer, and the ROM read.
@@ -754,22 +682,8 @@ static void AppBoot_InstallSubsystems(AppBoot *app) {
   Diorama_LoadLayerManifest();
   SettingsOverlay_SetInspectorInfoProvider(
       HostDevTools_FormatInspectorInfo);
-  static const SettingsOverlayRegionalHooks kRegionalHooks = {
-    .copy = ActRaiserRegional_CopyRulesView,
-    .request = ActRaiserRegional_RequestProfile,
-    .difficulty = ActRaiserRegional_RequestDifficultyChoice,
-    .setting = ActRaiserRegional_RequestRules,
-    .preview_setting = ActRaiserRegional_PreviewRules,
-    .preview = ActRaiserRegional_PreviewProfile,
-  };
-  SettingsOverlay_SetRegionalHooks(&kRegionalHooks);
-  /* The layer editor (Settings > Layers, developer-only) edits the override
-   * table loaded above and writes the manifest back. Injected rather than called
-   * directly from the overlay so that file stays testable without diorama.c --
-   * see settings_overlay.h. */
-  SettingsOverlay_SetLayerEditorHooks(Diorama_LayerOverrides, Diorama_LiveRoom,
-                                      Diorama_SaveLayerManifest);
-  SettingsOverlay_SetLayerPaletteProvider(SettingsOverlayLiveCgram);
+  SettingsOverlayRegionalHost_InstallHooks();
+  Diorama_InstallLayerEditor();
 
   /* The in-game manual, injected for the same reason: it owns textures and an
    * image decoder, and the overlay's own test links settings_overlay.c with no
@@ -832,7 +746,7 @@ static void AppBoot_StartGame(AppBoot *app) {
   }
 
   HdReplacementHost_BindSurfaces();
-  ActRaiser_RebindPpuOutputSurfaces();
+  HostPpuOutput_Rebind();
   /* Frame-0 margin state: pillarboxed-authentic (render the 256 columns
    * centered in the wide framebuffer). The ABI surface rebind above configures
    * it; ActRaiser_ApplyWidescreenPolicy reapplies per-frame policy after the
@@ -879,8 +793,7 @@ static void AppBoot_StartGame(AppBoot *app) {
   ForcedInput_Init();
   InputReplay_Init();
   SaveSlotHost_InitializeRegionalCampaign();
-  ActRaiserRegional_SetContinuePrompt(RegionalContinuePrompt, app);
-  ActRaiserRegional_SetPopulationPrompt(RegionalPopulationPrompt, app);
+  SettingsOverlayRegionalHost_InstallPrompts(app->headless);
   if (!InputReplay_SetPolicyDigest(ActRaiserRegional_ReplayDigest, NULL))
     Die("Regional replay identity could not be initialized.");
   SettingsSession_Start();
@@ -1041,7 +954,7 @@ static void AppRunMainLoop(AppBoot *app) {
     }
 
     HostInput_ApplyAnalogCamera();
-    ActRaiser_SetAuthenticCaptureEnabled(
+    HostPpuOutput_SetAuthenticEnabled(
         HostInput_RenderComparisonCaptureRequired());
     HostInput_UpdateRenderComparison();
 
@@ -1264,6 +1177,7 @@ static int AppShutdown(AppBoot *app, char **argv) {
   OracleTrace_Shutdown();
   NativeAudioTrace_Shutdown();
   HdReplacementHost_Shutdown();
+  HostPpuOutput_Reset();
   PresentRendererResources_Reset();
   SimTownGroundArt_Shutdown();
   DioramaFrameGeneration_Shutdown();

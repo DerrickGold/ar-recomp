@@ -2,15 +2,37 @@ if(NOT DEFINED GAME_SOURCE_ROOT)
     message(FATAL_ERROR "GAME_SOURCE_ROOT is required")
 endif()
 
-# The reactive camera receives its game observations and clocks explicitly.
-# Keeping live reads in diorama_host.c prevents retained presents from sampling
-# a newer game tick or a second, inconsistent clock inside the response model.
-file(READ "${GAME_SOURCE_ROOT}/diorama/diorama_camera.c" _camera_contents)
-if(_camera_contents MATCHES
-   "(^|[^A-Za-z0-9_])(g_settings|g_ram|g_ppu|ActRaiser_ReadWram16|HostClock_Nanoseconds|HostClock_Milliseconds)([^A-Za-z0-9_]|$)")
-    message(FATAL_ERROR
-        "Reactive camera bypasses its captured inputs: diorama/diorama_camera.c")
+# Action passes consume captured inputs and an explicit render device. Keep
+# ownership of live game state and the host device outside this feature.
+file(READ "${GAME_SOURCE_ROOT}/action/present_action_effects.c" _action_contents)
+if(_action_contents MATCHES
+   "(^|[^A-Za-z0-9_])(g_settings|g_ram|g_ppu|g_render_device|ActRaiser_ReadWram16|HostClock_Nanoseconds)([^A-Za-z0-9_]|$)")
+    message(FATAL_ERROR "Action effects bypass their presentation inputs")
 endif()
+
+# The diorama presenter owns GPU state, but receives completed game inputs.
+file(READ "${GAME_SOURCE_ROOT}/diorama/present_diorama.c" _diorama_contents)
+if(_diorama_contents MATCHES
+   "(^|[^A-Za-z0-9_])(g_settings|g_ram|g_ppu|g_render_device|ActRaiser_ReadWram16)([^A-Za-z0-9_]|$)")
+    message(FATAL_ERROR "Diorama presentation bypasses its captured inputs")
+endif()
+
+# HUD owns its textures and receives both the device and captured game inputs.
+file(READ "${GAME_SOURCE_ROOT}/render/present_hud.c" _hud_contents)
+if(_hud_contents MATCHES
+   "(^|[^A-Za-z0-9_])(g_settings|g_ram|g_ppu|g_render_device|ActRaiser_ReadWram16|HostClock_Nanoseconds)([^A-Za-z0-9_]|$)")
+    message(FATAL_ERROR "HUD presentation bypasses its captured inputs")
+endif()
+
+# Reactive cameras receive observations and clocks explicitly. Host adapters
+# capture live state; the response models cannot silently recapture it.
+foreach(_camera IN ITEMS diorama/diorama_camera.c sim/sim3d/sim3d_camera_motion.c)
+    file(READ "${GAME_SOURCE_ROOT}/${_camera}" _camera_contents)
+    if(_camera_contents MATCHES
+       "(^|[^A-Za-z0-9_])(g_settings|g_ram|g_ppu|ActRaiser_ReadWram16|HostClock_Nanoseconds|HostClock_Milliseconds)([^A-Za-z0-9_]|$)")
+        message(FATAL_ERROR "Reactive camera bypasses its captured inputs: ${_camera}")
+    endif()
+endforeach()
 
 # Every pattern below must match at least one file. A pattern that matches
 # nothing is almost always a file that was moved or renamed, and it would let
@@ -58,6 +80,10 @@ ar_glob_required(_portable_render_files GLOB_RECURSE
     "${GAME_SOURCE_ROOT}/sim/voxels/sim_background_voxel_*.c"
     "${GAME_SOURCE_ROOT}/sim/voxels/sim_background_voxel_*.h")
 list(APPEND _portable_render_files
+    "${GAME_SOURCE_ROOT}/host/host_ppu_output.c"
+    "${GAME_SOURCE_ROOT}/host/host_ppu_output.h"
+    "${GAME_SOURCE_ROOT}/sim/sim3d/sim3d_textures.c"
+    "${GAME_SOURCE_ROOT}/sim/sim3d/sim3d_textures.h"
     "${GAME_SOURCE_ROOT}/sim/voxels/sim_background_voxels.c"
     "${GAME_SOURCE_ROOT}/sim/voxels/sim_background_voxels.h"
     "${GAME_SOURCE_ROOT}/present/presentation_upload_mirror.c"
@@ -76,17 +102,26 @@ list(APPEND _portable_render_files
     "${GAME_SOURCE_ROOT}/diorama/diorama_aperture.h"
     "${GAME_SOURCE_ROOT}/diorama/diorama_effect_backend.h"
     "${GAME_SOURCE_ROOT}/diorama/diorama.c"
+    "${GAME_SOURCE_ROOT}/diorama/diorama_capture.c"
+    "${GAME_SOURCE_ROOT}/diorama/diorama_capture.h"
+    "${GAME_SOURCE_ROOT}/diorama/diorama_planes.h"
+    "${GAME_SOURCE_ROOT}/diorama/present_diorama.c"
+    "${GAME_SOURCE_ROOT}/diorama/present_diorama.h"
+    "${GAME_SOURCE_ROOT}/present/presentation_surface.h"
     "${GAME_SOURCE_ROOT}/diorama/diorama_camera.c"
     "${GAME_SOURCE_ROOT}/diorama/diorama_camera.h"
     "${GAME_SOURCE_ROOT}/diorama/diorama_performance.c"
     "${GAME_SOURCE_ROOT}/diorama/diorama_performance.h"
     "${GAME_SOURCE_ROOT}/host/host_clock.h"
     "${GAME_SOURCE_ROOT}/host/parallel_work.h"
+    "${GAME_SOURCE_ROOT}/dev/present_scene_inspector.c"
+    "${GAME_SOURCE_ROOT}/dev/present_scene_inspector.h"
     "${GAME_SOURCE_ROOT}/dev/dev_tools.c"
     "${GAME_SOURCE_ROOT}/dev/dev_tools.h"
     "${GAME_SOURCE_ROOT}/dev/dev_tools_readback.h"
+    "${GAME_SOURCE_ROOT}/action/action_effect_capture.c"
+    "${GAME_SOURCE_ROOT}/action/action_effect_capture.h"
     "${GAME_SOURCE_ROOT}/present/frame_slot.c"
-    "${GAME_SOURCE_ROOT}/present/frame_slot.h"
     "${GAME_SOURCE_ROOT}/present/present.h"
     "${GAME_SOURCE_ROOT}/present/present.c"
     "${GAME_SOURCE_ROOT}/present/present_frame.c"
@@ -117,6 +152,8 @@ list(APPEND _portable_render_files
     "${GAME_SOURCE_ROOT}/action/action_scene_lightning_render.c"
     "${GAME_SOURCE_ROOT}/action/action_effect_render_internal.h"
     "${GAME_SOURCE_ROOT}/action/action_effect_render.h"
+    "${GAME_SOURCE_ROOT}/action/present_action_effects.c"
+    "${GAME_SOURCE_ROOT}/action/present_action_effects.h"
     "${GAME_SOURCE_ROOT}/action/action_effect_projection.h"
     "${GAME_SOURCE_ROOT}/sim/sim3d/sim_backdrop_render.c"
     "${GAME_SOURCE_ROOT}/sim/sim3d/sim_backdrop_render.h"
@@ -126,6 +163,8 @@ list(APPEND _portable_render_files
     "${GAME_SOURCE_ROOT}/sim/sim3d/sim3d_mesh_set.h"
     "${GAME_SOURCE_ROOT}/sim/sim3d/sim3d_mesh_set.c"
     "${GAME_SOURCE_ROOT}/sim/sim3d/sim3d_camera.c"
+    "${GAME_SOURCE_ROOT}/sim/sim3d/sim3d_camera.h"
+    "${GAME_SOURCE_ROOT}/sim/sim3d/sim3d_camera_motion.c"
     "${GAME_SOURCE_ROOT}/sim/sim3d/sim3d_performance.c"
     "${GAME_SOURCE_ROOT}/sim/sim3d/sim3d_performance.h"
     "${GAME_SOURCE_ROOT}/sim/sim3d/sim_shadow_effect_backend.h"

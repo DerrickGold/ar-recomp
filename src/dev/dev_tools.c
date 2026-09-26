@@ -391,8 +391,8 @@ static void FillLiveHudProjectionInputs(const DevToolsContext *context,
       bg3_capture->y1 <= kHostDisplayFramebufferHeight)
     inputs->hud_body_y1 = (uint8_t)bg3_capture->y1;
 
-  /* Same source of truth the present path uses (present.c's
-   * BuildProjectionInputsFromSlot): the promote's latched range, not
+  /* Same source of truth the present path uses (present_hud.c's
+   * PresentHud_BuildChunks): the promote's latched range, not
    * overlayCaptures[Obj], whose OAM range diorama mode replaces with its
    * full-frame scene claim. Reading the capture here would make the inspector's
    * hit-test disagree with what was actually drawn. */

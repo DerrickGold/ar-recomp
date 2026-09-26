@@ -5,7 +5,7 @@
 #include "actraiser/enhancements/actraiser_enhancements_internal.h"
 #include "dev/host_dev_tools.h"
 #include "diorama/diorama.h"
-#include "present/presentation_textures.h"
+#include "sim/sim3d/sim3d_textures.h"
 #include "host/host_frame_surfaces.h"
 
 ActionApronGeometry ActRaiser_ObjApronGeometry(void) {
@@ -73,7 +73,7 @@ void ActRaiser_DioramaApronFinish(const ActionApronGeometry *geom) {
   uint32_t *planes[4];
   for (int p = 0; p < 4; p++)
     planes[p] = (uint32_t *)g_diorama_layer_pixels[
-        ActRaiser_DioramaObjPlaneForPriority(p)];
+        DioramaPlaneForObjectPriority(p)];
 
   for (int i = 0; i < count; i++) {
     const SrPpuObjPart *part = &parts[i];
@@ -188,33 +188,22 @@ static void ActRaiser_BindDioramaPriorityBands(size_t pitch) {
    * the true Mode-1 interleave — foreground tiles over sprites, low
    * priority sprites behind the playfield. Bound after their primaries
    * because a primary rebind drops the band family. */
-  static const struct {
-    uint32_t src;
-    int band;
-    int plane;
-  } kPrioBands[] = {
-      {SR_PPU_OVERLAY_BG1, 1, kDioramaPlane_Bg1Hi},
-      {SR_PPU_OVERLAY_BG2, 1, kDioramaPlane_Bg2Hi},
-      {SR_PPU_OVERLAY_BG1, 2, kDioramaPlane_Bg1Far},
-      {SR_PPU_OVERLAY_BG2, 2, kDioramaPlane_Bg2Far},
-      {SR_PPU_OVERLAY_OBJ, 1, kDioramaPlane_Obj1},
-      {SR_PPU_OVERLAY_OBJ, 2, kDioramaPlane_Obj2},
-      {SR_PPU_OVERLAY_OBJ, 3, kDioramaPlane_Obj3},
-  };
-  for (int i = 0; i < (int)(sizeof(kPrioBands) / sizeof(kPrioBands[0])); i++) {
-    if (kPrioBands[i].plane == kDioramaPlane_Bg1Far ||
-        kPrioBands[i].plane == kDioramaPlane_Bg2Far) {
+  size_t band_count;
+  const DioramaPriorityBand *bands = DioramaPlanes_PriorityBands(&band_count);
+  for (size_t i = 0; i < band_count; i++) {
+    if (bands[i].plane == kDioramaPlane_Bg1Far ||
+        bands[i].plane == kDioramaPlane_Bg2Far) {
       const DioramaRoomOverride *virtual_room =
           ActRaiser_CurrentVirtualLayerRoom();
       const int virtual_bg =
-          kPrioBands[i].plane == kDioramaPlane_Bg1Far ? 0 : 1;
+          bands[i].plane == kDioramaPlane_Bg1Far ? 0 : 1;
       if (!virtual_room || !DioramaLayerOrder_VirtualLayerIsAuthored(
                                &virtual_room->virtual_layers[virtual_bg]))
         continue;
     }
-    ActRaiser_BindPpuOutput(SR_PPU_OUTPUT_OVERLAY_PRIORITY, kPrioBands[i].src,
-                            (uint32_t)kPrioBands[i].band,
-                            HostFrameSurfaces_DioramaPlane(kPrioBands[i].plane),
+    ActRaiser_BindPpuOutput(SR_PPU_OUTPUT_OVERLAY_PRIORITY, bands[i].source,
+                            (uint32_t)bands[i].band,
+                            HostFrameSurfaces_DioramaPlane(bands[i].plane),
                             pitch, kHostDisplayFramebufferHeight);
   }
 }
@@ -469,9 +458,9 @@ void ActRaiser_PrepareTownCapture(void) {
                                    map_group, map_number,
                                    ActRaiser_ReadWramMirror16(
                                        kActRaiserWram_SimMapPickerFlag)),
-      .renderer_ready = g_sim3d_textures_ready,
+      .renderer_ready = Sim3DTextures_Ready(),
       .billboard_atlas_ready = billboard_atlas_ready,
-      .billboard_renderer_ready = g_sim3d_billboard_renderer_ready,
+      .billboard_renderer_ready = Sim3DTextures_BillboardsReady(),
       .diorama_active = g_diorama_frame_active,
       /* The inspector panel is the only on-screen reader of the capture's
        * diagnostic hash; with it off, that pass is skipped. */

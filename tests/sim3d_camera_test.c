@@ -148,6 +148,40 @@ static void TestTownRotationFromVisiblePose(void) {
   requested_features = kSimFeature_All;
 }
 
+static void TestCaptureUsesAngelRecord(void) {
+  g_settings.sim3d_camera_mode = kSimCam_Dynamic;
+  g_settings.sim3d_reactive_strength = 70;
+  g_ram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_Aitos;
+  Sim3DCameraFrame frame;
+  Sim3DCamera_CaptureFrame(&frame, 30);
+  assert(frame.motion.lean_yaw == 0 && !frame.motion.event_hit);
+  g_ram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_NonAction;
+  g_ram[kActRaiserWram_CurrentMap] = kActRaiserNonActionMap_Fillmore;
+  ActRaiser_WriteWram16(kActRaiserWram_PlayerVelocityX, INT16_MAX);
+  ActRaiser_WriteWram16(kActRaiserWram_SimAngelRecord + 0x1a, 2);
+  ActRaiser_WriteWram16(kActRaiserWram_SimAngelRecord + 0x1c, (uint16_t)-3);
+  g_ram[kActRaiserWram_AngelCurrentHp] = 8;
+  Sim3DCamera_CaptureFrame(&frame, 1);
+  assert(frame.mode == kSimCam_Dynamic && frame.reactive_strength == 70);
+  assert(frame.motion.lean_yaw > .1f && frame.motion.lean_yaw < .3f);
+  assert(frame.motion.lean_pitch < 0 && !frame.motion.event_hit);
+  const float lean = frame.motion.lean_yaw;
+  g_ram[kActRaiserWram_AngelCurrentHp] = 7;
+  Sim3DCamera_CaptureFrame(&frame, 0);
+  assert(frame.motion.event_hit && frame.motion.lean_yaw == lean);
+  Sim3DCamera_CaptureFrame(&frame, 0);
+  assert(!frame.motion.event_hit);
+  g_ram[kActRaiserWram_CurrentMap] = kActRaiserNonActionMap_WorldMap;
+  ActRaiser_WriteWram16(kActRaiserWram_SimAngelRecord + 0x1a, INT16_MAX);
+  Sim3DCamera_CaptureFrame(&frame, 60);
+  assert(frame.motion.lean_yaw == 0 && frame.motion.lean_pitch == 0);
+  g_ram[kActRaiserWram_CurrentMap] = kActRaiserNonActionMap_Fillmore;
+  ActRaiser_WriteWram16(kActRaiserWram_SimAngelRecord + 0x1a, 2);
+  g_ram[kActRaiserWram_AngelCurrentHp] = 1;
+  Sim3DCamera_CaptureFrame(&frame, 0);
+  assert(!frame.motion.event_hit && frame.motion.lean_yaw == lean);
+}
+
 int main(void) {
   g_settings.sim3d_world_navigation = true;
   g_settings.sim3d_camera_mode = kSimCam_Free;
@@ -253,6 +287,7 @@ int main(void) {
   assert(settings_writes == 0);
   TestTownZoomFromVisiblePose();
   TestTownRotationFromVisiblePose();
+  TestCaptureUsesAngelRecord();
   puts("sim3d_camera_test: PASS");
   return 0;
 }

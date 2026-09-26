@@ -1295,7 +1295,7 @@ static void TestGroundWorkerParity(void) {
       slot.sim.light_elevation_deg = 20 + i * 3;
       slot.sim.world_navigation.focus_x = 400 + i * 7;
       slot.sim.world_navigation.focus_y = 450 + i * 5;
-      slot.sim_manual_orbit_yaw = i * .03f;
+      slot.sim_camera.orbit_yaw = i * .03f;
       const ArRenderRectI viewport = {0, 0, 640 + i * 4, 480 + i * 3};
       backend.output_width = viewport.w; backend.output_height = viewport.h;
       if (slot.sim.view == kSimView_WorldNavigation) UploadWorldNavigationComposition(&slot);
@@ -1350,7 +1350,7 @@ static void TestModelWorkerParity(void) {
       slot.sim.world_navigation_relief = (c / 4) & 1;
       slot.sim.light_azimuth_deg = c * 43;
       slot.sim.world_navigation.active_location = 2;
-      slot.sim_manual_orbit_yaw = c * .02f;
+      slot.sim_camera.orbit_yaw = c * .02f;
       const ArRenderRectI viewport = {0, 0, 1792 - c * 16, 1344 - c * 8};
       backend.output_width = viewport.w; backend.output_height = viewport.h;
       for (int frame = 0; frame < kRepeats; ++frame) {
@@ -1937,20 +1937,20 @@ static void TestGlobeInspection(void) {
   ArRenderVertex2D rest[4];
   memcpy(rest, backend.ground_vertices, sizeof(rest));
   assert(backend.palace_draws == 1 && backend.ui_draws == 1);
-  slot.sim_manual_orbit_yaw = .6f;
+  slot.sim_camera.orbit_yaw = .6f;
   assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_Complete);
   assert(backend.palace_draws == 2 && backend.ui_draws == 2);
   assert(backend.palace_rect.x != palace.x);
   assert(!memcmp(&ui, &backend.ui_rect, sizeof(ui)));
   assert(memcmp(rest, backend.ground_vertices, sizeof(rest)));
-  slot.sim_manual_orbit_yaw = 3.14159265359f;
+  slot.sim_camera.orbit_yaw = 3.14159265359f;
   assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_Complete);
   assert(backend.palace_draws == 2 && backend.ui_draws == 3); /* Behind planet. */
-  slot.sim_manual_orbit_pitch = 1.57079632679f;
+  slot.sim_camera.orbit_pitch = 1.57079632679f;
   assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_Complete);
-  slot.sim_manual_orbit_pitch = -1.57079632679f;
+  slot.sim_camera.orbit_pitch = -1.57079632679f;
   assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_Complete);
-  slot.sim_manual_orbit_yaw = slot.sim_manual_orbit_pitch = 0;
+  slot.sim_camera.orbit_yaw = slot.sim_camera.orbit_pitch = 0;
   assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_Complete);
   assert(!memcmp(rest, backend.ground_vertices, sizeof(rest)));
   assert(!memcmp(&palace, &backend.palace_rect, sizeof(palace)));
@@ -1983,24 +1983,24 @@ static void TestGlobeInspection(void) {
   const int visible_faces = depth_solid_faces;
   assert(visible_faces > 0); /* Visible despite the former native-focus cutoff. */
   for (int sign = -1; sign <= 1; sign++) {
-    slot.sim_manual_orbit_yaw = sign * .00001f;
+    slot.sim_camera.orbit_yaw = sign * .00001f;
     for (int town = 0; town < 6; town++) {
       slot.sim.world_navigation.active_location = town;
       assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_Complete);
       assert(depth_solid_faces == visible_faces); /* No orbit/label selection pop. */
     }
   }
-  slot.sim_manual_orbit_yaw = .1f;
+  slot.sim_camera.orbit_yaw = .1f;
   assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_Complete);
   assert(depth_solid_faces > 0); /* Inspection selects by projected view/LOD. */
   int town_x, town_y;
   assert(SimWorldMap_OriginForTown(2, &town_x, &town_y));
   slot.sim.world_navigation.focus_x = (town_x + 16) * kSimWorldMapTilePixels;
   slot.sim.world_navigation.focus_y = (town_y + 16) * kSimWorldMapTilePixels;
-  slot.sim_manual_orbit_yaw = 3.14159265359f;
+  slot.sim_camera.orbit_yaw = 3.14159265359f;
   assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_Complete);
   assert(depth_solid_faces == 0); /* Hidden models never reach the depth batch. */
-  slot.sim_manual_orbit_yaw = 0;
+  slot.sim_camera.orbit_yaw = 0;
   slot.sim.world_navigation.focus_x = slot.sim.world_navigation.focus_y = 0;
   assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_Complete);
   assert(depth_solid_faces == visible_faces);

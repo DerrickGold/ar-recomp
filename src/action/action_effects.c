@@ -30,7 +30,7 @@
  *     active slot that matches nothing is captured into the frame's
  *     `unmatched` census instead of being rendered on a guess — so the first
  *     real cast of each either confirms the rule or prints exactly what it
- *     should have been. See frame_slot.c's [action-fx census] line. */
+ *     should have been. See action_effect_capture.c's [action-fx census] line. */
 
 enum {
   kAnyState = 0xFFFFu,
@@ -2147,7 +2147,7 @@ static bool AitosSplashStructureWidth(
 }
 
 /* AR_AITOS_WATERFALL_LOG=1: the veil appended below is what publishes the
- * `waterfall` section token (frame_slot.c), which is in turn what admits the
+ * `waterfall` section token (action_effect_capture.c), which in turn admits the
  * folded BG2 continuation (diorama.c). Those three live in different files, so
  * a capture-side dropout presents as a rendering bug at the far end and costs a
  * session to trace. Log the capture decision on CHANGE only, so a jump reads as

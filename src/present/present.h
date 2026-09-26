@@ -28,10 +28,8 @@
  * every borrowed buffer before the next tick overwrites or invalidates it.
  * The slot is not a cross-thread handoff. */
 
-/* Mirrors ppu.h's kPpuOverlaySource_* / kPpuOverlayFlag_RemoveFromGame.
- * present.c does not include ppu.h (D6), so the order/value is pinned here
- * and cross-checked by FrameSlot_Capture's _Static_assert against the real
- * enum where it's populated (main.c, which does include ppu.h). */
+/* Captured overlay identities and flags follow the public runner ABI.
+ * frame_slot.c checks their values against SR_PPU_* when it builds the slot. */
 enum {
   kFrameSlotOverlay_Bg1 = 0,
   kFrameSlotOverlay_Bg2 = 1,
@@ -39,19 +37,16 @@ enum {
   kFrameSlotOverlay_Bg4 = 3,
   kFrameSlotOverlay_Obj = 4,
   kFrameSlotOverlaySourceCount = 5,  /* SR_PPU_OVERLAY_SOURCE_COUNT */
-  /* Mirrors ppu.h's allocated layer-texture axes for the same D6 reason as the
-   * overlay enum above: present-time code must not include ppu.h. Width is the
+  /* Mirrors the public runner ABI surface dimensions. Width is the
    * full surface (PPU buffer plus resolve aprons); height is the authentic 224
    * rows plus both 64-row vertical-margin budgets. Captures occupy subregions,
    * but normalized UV movement must always divide by these allocation sizes.
    * Cross-checked by FrameSlot_Capture's _Static_asserts against the real
-   * constants. */
+   * constants in frame_slot.c. */
   kFrameSlotLayerTextureWidth = 640,  /* kPpuSurfaceWidth (512 + 64*2) */
   kFrameSlotLayerTextureHeight = 352, /* kPpuBufHeight (224 + 64*2) */
-  /* The authentic SNES screen dimensions, mirroring actraiser_game.h's
-   * kActRaiserAuthenticWidth/Height for the same D6 reason as the constants above:
-   * present-time code must not include actraiser_game.h, which declares g_ram and
-   * a pile of live WRAM accessors this side of the wall must not touch.
+  /* The authentic SNES dimensions come from constants.h. Keeping this value
+   * contract free of live WRAM accessors lets presentation read only the slot.
    *
    * This is the width of the AUTHENTIC image inside a possibly-wider framebuffer.
    * The widescreen layout is [extra][256][extra], so `(snes_width - this) / 2` is
@@ -231,8 +226,8 @@ typedef struct FrameSlot {
    * read live from present.c per D6) so presentation can reject generation
    * before doing analysis or GPU work. */
   bool interp_setting_enabled;
-  /* A5 (followup doc) "Flat HUD" row, snapshotted here (not read live from
-   * present.c per D6): true = diorama's PresentHudOverlayComposited call
+  /* "Flat HUD" setting, captured with this frame: true enables diorama's
+   * PresentHud_DrawComposited call
    * (A7) runs, drawing the anchored flat HUD; false = skip it — BG3 was
    * left in the game-thread capture instead (actraiser_rtl.c), so it
    * renders as diorama.c's ordinary tilted BG3 layer. */
@@ -241,27 +236,9 @@ typedef struct FrameSlot {
    * presents refresh only controls; diorama_camera.c owns response behavior. */
   DioramaCameraFrame diorama_camera;
 
-  /* Sim-town dynamic camera. Capture owns the WRAM observations and history;
-   * sim/sim3d/present_sim3d.c applies the camera response.
-   *
-   * The signals differ from action mode's because the mode does. There is no
-   * jump and no ground, so "vertical velocity" is just the other axis of a
-   * planar drift: yaw leans toward horizontal travel and pitch toward
-   * vertical travel, and both come from the angel record's own +$1A/+$1C
-   * planar velocities rather than from PlayerVelocity, which is an
-   * action-stage concept. */
-  /* SimCameraMode. Free Cam's pose reaches present.c the ordinary way, inside
-   * sim.projection_*, because the game thread already resolved which pose is
-   * active; this only says whether the reactive offsets apply on top. */
-  int sim_camera_mode;
-  int sim_dyncam_strength;
-  /* In world navigation these same presentation-owned offsets rotate the
-   * whole globe for inspection; town reactive lean is never applied there. */
-  float sim_manual_orbit_yaw;
-  float sim_manual_orbit_pitch;
-  float sim_dyncam_lean_yaw;
-  float sim_dyncam_lean_pitch;
-  bool sim_dyncam_event_hit;
+  /* SIM town response and world inspection orbit share one captured contract.
+   * The feature owns motion history; retained presents refresh mode/orbit. */
+  Sim3DCameraFrame sim_camera;
 
   /* Widescreen HUD split + related PPU scalars (§2.8). */
   uint8_t hud_split_height;
@@ -348,6 +325,10 @@ typedef struct FrameSlot {
  * NULL captures current metadata for a screenshot or paused redraw. The input
  * is borrowed only for this call; the slot receives its own value copy. */
 void FrameSlot_Capture(FrameSlot *dst, const SimFrameData *annotated_sim);
+
+/* Resolve the captured frame's aspect policy against the current output. */
+bool Present_ResolveOutputViewport(ArRenderDevice *device, const FrameSlot *slot,
+                                   ArRenderRectI *viewport);
 
 ArRenderRectI ComputePresentationViewport(
     ArRenderDevice *device, bool ignore_aspect_ratio,

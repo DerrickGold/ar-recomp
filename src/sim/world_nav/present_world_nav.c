@@ -522,7 +522,7 @@ static bool WorldNavigationFlatOutputPoint(
 }
 
 static bool WorldNavigationInspecting(const FrameSlot *slot) {
-  return slot->sim_manual_orbit_yaw != 0 || slot->sim_manual_orbit_pitch != 0;
+  return slot->sim_camera.orbit_yaw != 0 || slot->sim_camera.orbit_pitch != 0;
 }
 
 static float WorldNavigationModelHeightBound(const FrameSlot *slot) {
@@ -674,7 +674,7 @@ static bool PrepareWorldNavigationProjection(
           focus_y / kSimWorldMapTilePixels, heading, &out->globe_frame))
     return false;
   if (!SimWorldNavigationGlobe_OrbitFrame(&out->globe_frame,
-          slot->sim_manual_orbit_yaw, slot->sim_manual_orbit_pitch)) return false;
+          slot->sim_camera.orbit_yaw, slot->sim_camera.orbit_pitch)) return false;
   ArRenderPointF centre, east, south;
   if (!WorldNavigationFlatOutputPoint(
           slot, viewport, focus_x, focus_y, &centre) ||

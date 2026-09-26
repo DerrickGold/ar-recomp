@@ -19,22 +19,9 @@
 #include "present/presentation_outcome.h"
 #include "render/render_types.h"
 
-/* ---- shared effect types -------------------------------------------------
- * Both translation units need these by value / by field, so the definitions
- * live here rather than in either .c. Moved verbatim out of present.c. */
-typedef struct EffectBatch {
-  ArRenderVertex2D *vertices;
-  int32_t *indices;
-  int vertex_count, index_count;
-  int vertex_capacity, index_capacity;
-  bool overflow;
-} EffectBatch;
-
 /* ---- present.c helpers the sim renderer calls ----------------------------
  * These stay DEFINED in present.c and lost their `static` for this header.
  * ComputePresentationViewport is already public in present.h — not repeated. */
-void PresentHudOverlayComposited(
-    const FrameSlot *slot, ArRenderRectI viewport);
 void PresentCompositeScene(const FrameSlot *slot, float alpha);
 bool PresentAuthenticScene(const FrameSlot *slot, ArRenderRectI viewport);
 bool PresentAuthenticPictureInPicture(const FrameSlot *slot,
@@ -43,9 +30,6 @@ bool PresentComparisonTransitionOverlay(uint8_t alpha, const char *label);
 void PresentHostUi(const FrameSlot *slot, ArRenderRectI viewport,
                    ArRenderExtentI output_size,
                    double presentation_fps);
-bool EffectRendererAvailable(void);
-void DisableEffectBlend(const char *operation);
-bool SubmitEffectBatch(EffectBatch *batch, ArRenderBlendMode blend);
 
 /* ---- sim entry points present.c calls back into --------------------------
  * Defined in present_sim3d.c. PresentSim3D requires entry without a custom GPU

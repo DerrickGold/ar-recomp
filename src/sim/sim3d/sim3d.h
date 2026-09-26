@@ -15,6 +15,7 @@
 
 #include "snesrecomp/runner.h"
 #include "sim/sim3d/sim3d_planes.h"
+#include "sim/sim3d/sim3d_camera.h"
 #include "sim/sim_render_metadata.h"
 #include "snesrecomp/game/types.h"
 
@@ -114,37 +115,6 @@ void Sim3D_FinishCapture(uint8_t *authentic_pixels,
                          int authentic_pitch, uint16_t game_frame);
 
 SimRenderFeatureMask Sim3D_ImplementedFeatures(void);
-
-/* Host-side camera controls for enhanced towns and globe navigation. Render
- * textures remain host-owned, so availability accepts their current readiness
- * rather than reaching into main.c. In Dynamic mode, zoom edits the persisted
- * baseline while orbit is a transient offset that decays after release.
- * Globe inspection uses a separate visit-local orbit/zoom, never town settings;
- * orbit returns on release in either town-camera mode. Reset restores travel. */
-bool Sim3DCamera_ControlsAvailable(bool textures_ready);
-
-/* Camera fields are host-owned presentation state rather than emulated scene
- * content. A retained game frame may refresh this small snapshot between ticks
- * so high-rate presentation follows mouse orbit immediately without recapturing
- * mutable PPU/WRAM state. */
-typedef struct Sim3DCameraPresentationState {
-  int mode;
-  int pitch_mrad;
-  int yaw_mrad;
-  int distance_x100;
-  float orbit_yaw;
-  float orbit_pitch;
-} Sim3DCameraPresentationState;
-
-void Sim3DCamera_CapturePresentationState(
-    Sim3DCameraPresentationState *state);
-void Sim3DCamera_Adjust(float yaw_delta, float pitch_delta, float zoom_delta);
-bool Sim3DCamera_UpdateDynamic(float elapsed_seconds, bool orbit_held);
-void Sim3DCamera_GetDynamicOrbit(float *yaw, float *pitch);
-void Sim3DCamera_Reset(void);
-bool Sim3DCamera_IsDragging(void);
-void Sim3DCamera_SetDragging(bool dragging);
-void Sim3DCamera_FlushSettingsIfDirty(void);
 
 /* Console line on every enhanced<->authentic transition in a town, so a
  * one-frame flicker names its own cause without a trace pass. */

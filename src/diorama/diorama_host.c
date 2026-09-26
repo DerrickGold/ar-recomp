@@ -7,10 +7,12 @@
 #include "snesrecomp/game/runtime.h"
 #include "snesrecomp/game_runtime.h"
 #include "diorama_layer_order.h"
+#include "host/host_ppu_output.h"
 #include "host/host_display.h"
 #include "host/host_input.h"
 #include "snesrecomp/runner.h"
 #include "app/settings.h"
+#include "settings_overlay/settings_overlay.h"
 #include "host/host_frame_surfaces.h"
 
 bool g_diorama_frame_active;
@@ -72,6 +74,31 @@ bool Diorama_LiveRoom(uint8_t *out_group, uint8_t *out_map,
   return true;
 }
 
+static bool LayerEditorLiveCgram(
+    uint16_t out_cgram[kSettingsOverlayLayerPaletteEntries]) {
+  const SnesRunnerApi *api = sr_runner_get_api(SR_RUNNER_ABI_VERSION);
+  SrRunnerHandle *runner = RtlGameRunner();
+  SrBorrowedU16Span cgram = {
+    .struct_size = sizeof(cgram),
+  };
+  if (!api || !runner || !out_cgram ||
+      api->struct_size < SNES_RUNNER_API_PPU_STATE_SIZE ||
+      !(api->capabilities & SR_RUNNER_CAP_BORROWED_U16_SPANS) ||
+      api->borrow_u16_memory(runner, SR_MEMORY_CGRAM, &cgram) !=
+          SR_RESULT_OK ||
+      cgram.element_count < kSettingsOverlayLayerPaletteEntries)
+    return false;
+  memcpy(out_cgram, cgram.data,
+         sizeof(uint16_t) * kSettingsOverlayLayerPaletteEntries);
+  return true;
+}
+
+void Diorama_InstallLayerEditor(void) {
+  SettingsOverlay_SetLayerEditorHooks(Diorama_LayerOverrides, Diorama_LiveRoom,
+                                      Diorama_SaveLayerManifest);
+  SettingsOverlay_SetLayerPaletteProvider(LayerEditorLiveCgram);
+}
+
 /* The render margin widens while diorama mode is armed. Re-resolve geometry,
  * clear buffers at their new pitch, and rebind the PPU output surfaces. */
 void Diorama_OnModeChanged(void) {
@@ -85,7 +112,7 @@ void Diorama_OnModeChanged(void) {
          SR_PPU_SURFACE_MAX_WIDTH * 4 * kHostDisplayFramebufferHeight);
   memset(g_hud_obj_pixels, 0,
          SR_PPU_SURFACE_MAX_WIDTH * 4 * kHostDisplayFramebufferHeight);
-  ActRaiser_RebindPpuOutputSurfaces();
+  HostPpuOutput_Rebind();
   HostInput_RequestPausedRedraw();
   HostDisplay_InvalidatePresentHistory();
 }

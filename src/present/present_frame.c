@@ -101,7 +101,7 @@ static ArRenderRectI DrawFrame(const FrameSlot *slot, float alpha,
     (void)BeginCrtPost();
     if (SessionFatal_Requested()) return image;
     PresentCompositeScene(slot, alpha);
-    PresentSimMenu_Draw(slot, image);
+    if (!SessionFatal_Requested()) PresentSimMenu_Draw(slot, image);
     if (SessionFatal_Requested()) {
       (void)EndCrtPost(
           slot->visible_width, slot->snes_height, image);

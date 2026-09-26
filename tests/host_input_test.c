@@ -1,4 +1,5 @@
 /* Characterize modal input routing without a window, renderer or game. */
+#include "host/host_ppu_output.h"
 #include "host/host_input.h"
 #include "actraiser/actraiser_rtl.h"
 #include "actraiser/actraiser_sim_menu.h"
@@ -24,7 +25,7 @@
 #include "manual/manual_reader.h"
 #include "actraiser_game.h"
 #include "snesrecomp/game/runtime.h"
-#include "present/presentation_textures.h"
+#include "sim/sim3d/sim3d_textures.h"
 
 #include <SDL3/SDL.h>
 #include <assert.h>
@@ -43,16 +44,16 @@ static const ActRaiserDisplayGeometry s_geometry;
 const ActRaiserDisplayGeometry *const g_actraiser_display_geometry = &s_geometry;
 uint8 g_ram[0x20000];
 Settings g_settings;
-bool g_sim3d_textures_ready;
+bool Sim3DTextures_Ready(void) { return false; }
 int snes_frame_counter;
 
 bool ActRaiserSimMenu_OwnsInput(void) {
   return 0;
 }
-bool ActRaiser_AuthenticCaptureEnabled(void) {
+bool HostPpuOutput_AuthenticEnabled(void) {
   return 0;
 }
-uint64_t ActRaiser_AuthenticFrameSerial(void) {
+uint64_t HostPpuOutput_AuthenticFrameSerial(void) {
   return 0;
 }
 void ActRaiser_RequestMagicCycle(void) {

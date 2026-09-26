@@ -60,7 +60,6 @@ bool ActRaiser_ConfigurePpuObjCapture(
 
 /* ---- defined in actraiser_hud_icon_promotion.c ---- */
 void ActRaiser_WidescreenHudObjPromote(void);
-int ActRaiser_DioramaObjPlaneForPriority(int priority);
 void ActRaiser_DioramaHudObjPrepare(void);
 void ActRaiser_DioramaHudObjFinish(int width);
 

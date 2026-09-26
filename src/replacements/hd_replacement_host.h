@@ -2,7 +2,7 @@
 #define AR_HD_REPLACEMENT_HOST_H
 /* HdReplacementHost: host resources for HD replacements. Loads and reloads
  * the replacement textures, owns the Mode-7 overlay surface present.c draws,
- * and gates the authentic PPU scanout the replacements are matched against.
+ * and binds only the capture surfaces needed by replacement art.
  * Phase: host (main thread, between frames). */
 
 #include <stdbool.h>
@@ -22,12 +22,8 @@ void HdReplacementHost_BindSurfaces(void);
 void HdReplacementHost_ReloadTextures(void);
 void HdReplacementHost_Shutdown(void);
 
-/* Session-only demand gate for the independent authentic PPU scanout. */
-void ActRaiser_SetAuthenticCaptureEnabled(bool enabled);
-bool ActRaiser_AuthenticCaptureEnabled(void);
-/* Zero means no complete pass exists for the current surface/geometry. The
- * serial advances only after the final scanline of a bound native pass. */
-void ActRaiser_AuthenticCaptureFrameCompleted(bool frame_valid);
-uint64_t ActRaiser_AuthenticFrameSerial(void);
+/* Rebind existing art surfaces after the common PPU outputs are configured. */
+struct HostPpuOutputControl;
+void HdReplacementHost_RebindSurfaces(const struct HostPpuOutputControl *output);
 
 #endif /* AR_HD_REPLACEMENT_HOST_H */

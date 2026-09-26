@@ -716,9 +716,6 @@ if(BUILD_TESTING)
             src/render/localized_text_presenter.c
             src/render/localized_text_draw.c
             src/render/localized_text_artwork.c
-        src/render/localized_text_artwork.c
-        src/render/localized_text_draw.c
-        src/render/localized_text_artwork.c
             src/localization/text_cell_record.c
             src/render/text_cell_composite.c
             src/render/render_device.c
@@ -1086,6 +1083,12 @@ if(BUILD_TESTING)
     target_include_directories(actraiser_audio_session_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     target_link_libraries(actraiser_audio_session_test PRIVATE SDL3::SDL3)
     add_test(NAME actraiser_audio_session COMMAND actraiser_audio_session_test)
+
+    add_executable(actraiser_host_ppu_output_test
+        tests/host_ppu_output_test.c src/host/host_ppu_output.c src/host/host_frame_surfaces.c)
+    target_include_directories(actraiser_host_ppu_output_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    add_test(NAME actraiser_host_ppu_output COMMAND actraiser_host_ppu_output_test)
 
     add_executable(actraiser_host_input_test
         tests/host_input_test.c src/host/host_input.c)
@@ -1514,13 +1517,26 @@ if(BUILD_TESTING)
     target_link_libraries(actraiser_camera_orbit_test PRIVATE actraiser_math)
     add_test(NAME actraiser_camera_orbit COMMAND actraiser_camera_orbit_test)
 
+    add_executable(actraiser_sim_frame_capture_test
+        tests/sim_frame_capture_test.c src/sim/sim_frame_capture.c)
+    target_include_directories(actraiser_sim_frame_capture_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    add_test(NAME actraiser_sim_frame_capture COMMAND actraiser_sim_frame_capture_test)
+
     add_executable(actraiser_sim3d_camera_test
         tests/sim3d_camera_test.c src/sim/sim3d/sim3d_camera.c
+        src/sim/sim3d/sim3d_camera_motion.c
         src/render/camera_orbit.c src/render/scene3d_math.c)
     target_include_directories(actraiser_sim3d_camera_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     target_link_libraries(actraiser_sim3d_camera_test PRIVATE actraiser_math)
     add_test(NAME actraiser_sim3d_camera COMMAND actraiser_sim3d_camera_test)
+
+    add_executable(actraiser_sim3d_camera_motion_test
+        tests/sim3d_camera_motion_test.c src/sim/sim3d/sim3d_camera_motion.c)
+    target_include_directories(actraiser_sim3d_camera_motion_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    target_link_libraries(actraiser_sim3d_camera_motion_test PRIVATE actraiser_math)
+    add_test(NAME actraiser_sim3d_camera_motion COMMAND actraiser_sim3d_camera_motion_test)
 
     add_executable(actraiser_sim_town_canvas_test
         tests/sim_town_canvas_test.c
@@ -1811,6 +1827,13 @@ if(BUILD_TESTING)
     )
     add_test(NAME actraiser_game COMMAND actraiser_game_test)
 
+    add_executable(actraiser_action_effect_capture_test
+        tests/action_effect_capture_test.c
+        src/action/action_effect_capture.c src/action/action_effect_clock.c)
+    target_include_directories(actraiser_action_effect_capture_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    add_test(NAME actraiser_action_effect_capture COMMAND actraiser_action_effect_capture_test)
+
     add_executable(actraiser_action_effects_test
         tests/action_effects_test.c
         src/action/action_effect_clock.c
@@ -1999,8 +2022,7 @@ if(BUILD_TESTING)
             ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
     endif()
 
-    add_executable(actraiser_action_effect_render_test
-        tests/action_effect_render_test.c
+    set(AR_ACTION_EFFECT_TEST_SOURCES
         src/action/action_effect_render.c
         src/action/action_scene_effect_render.c
         src/action/action_scene_lightning_render.c
@@ -2009,6 +2031,8 @@ if(BUILD_TESTING)
         src/diorama/diorama_depth_shapes.c
         src/render/scene3d_math.c
     )
+    add_executable(actraiser_action_effect_render_test
+        tests/action_effect_render_test.c ${AR_ACTION_EFFECT_TEST_SOURCES})
     target_include_directories(actraiser_action_effect_render_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${CMAKE_SOURCE_DIR}/src/action
@@ -2021,6 +2045,38 @@ if(BUILD_TESTING)
     )
     add_test(NAME actraiser_action_effect_render
         COMMAND actraiser_action_effect_render_test)
+
+    add_executable(actraiser_sim3d_textures_test
+        tests/sim3d_textures_test.c src/sim/sim3d/sim3d_textures.c
+        src/present/presentation_upload_mirror.c src/render/render_device.c
+        src/app/performance_metrics.c)
+    target_include_directories(actraiser_sim3d_textures_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    add_test(NAME actraiser_sim3d_textures COMMAND actraiser_sim3d_textures_test)
+
+    add_executable(actraiser_present_hud_test
+        tests/present_hud_test.c src/render/present_hud.c
+        src/render/hud_layout.c src/render/text_cell_composite.c src/render/render_device.c
+        src/present/presentation_upload_mirror.c src/app/performance_metrics.c)
+    target_include_directories(actraiser_present_hud_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    target_link_libraries(actraiser_present_hud_test PRIVATE actraiser_math)
+    add_test(NAME actraiser_present_hud COMMAND actraiser_present_hud_test)
+
+    add_executable(actraiser_present_action_effects_test
+        tests/present_action_effects_test.c
+        src/action/present_action_effects.c
+        ${AR_ACTION_EFFECT_TEST_SOURCES}
+        src/render/effect_batch.c
+        src/render/render_device.c
+        src/render/render_output.c
+        src/render/presentation_layout.c
+        src/present/presentation_upload_mirror.c
+        src/app/performance_metrics.c)
+    target_include_directories(actraiser_present_action_effects_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    target_link_libraries(actraiser_present_action_effects_test PRIVATE actraiser_math)
+    add_test(NAME actraiser_present_action_effects COMMAND actraiser_present_action_effects_test)
 
     add_executable(actraiser_diorama_camera_test
         tests/diorama_camera_test.c src/diorama/diorama_camera.c)
@@ -2254,6 +2310,13 @@ if(BUILD_TESTING)
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_regional_lair_projection COMMAND actraiser_regional_lair_projection_test)
 
+    add_executable(actraiser_regional_host_test
+        tests/regional_host_test.c src/settings_overlay/regional/regional_host.c)
+    target_include_directories(actraiser_regional_host_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    target_link_libraries(actraiser_regional_host_test PRIVATE SDL3::SDL3)
+    add_test(NAME actraiser_regional_host COMMAND actraiser_regional_host_test)
+
     add_executable(actraiser_regional_policy_test
         src/actraiser/regional/actraiser_regional_choices.c
         src/settings_overlay/regional/regional_menu.c
@@ -2388,7 +2451,9 @@ if(BUILD_TESTING)
     # orchestrator is linked against test stubs so this remains deterministic
     # and GPU-free while guarding the order that keeps UI above pillar bars.
     add_executable(actraiser_presentation_view_test
-        tests/presentation_view_test.c src/present/presentation_view.c src/sim/world_nav/present_sky_palace.c)
+        tests/presentation_view_test.c src/present/presentation_view.c
+        src/sim/world_nav/present_sky_palace.c src/sim/world_nav/sim_world_navigation_palace.c
+        src/render/render_device.c)
     target_include_directories(actraiser_presentation_view_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_presentation_view COMMAND actraiser_presentation_view_test)
@@ -2416,6 +2481,8 @@ if(BUILD_TESTING)
     )
     add_test(NAME actraiser_present_frame_order
         COMMAND actraiser_present_frame_order_test)
+    add_test(NAME actraiser_present_frame_scene_failure
+        COMMAND actraiser_present_frame_order_test scene-failure)
 
     add_executable(actraiser_render_comparison_test
         tests/render_comparison_test.c
@@ -3217,6 +3284,13 @@ if(BUILD_TESTING)
         src/sim/menu/sim_menu_help.c src/localization/unicode_grapheme.c)
     target_include_directories(sim_menu_help_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     add_test(NAME sim_menu_help COMMAND sim_menu_help_test)
+    add_executable(sim_menu_capture_test
+        tests/sim_menu_capture_test.c src/sim/menu/sim_menu_capture.c)
+    target_include_directories(sim_menu_capture_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    target_link_libraries(sim_menu_capture_test PRIVATE SDL3::SDL3)
+    add_test(NAME sim_menu_capture COMMAND sim_menu_capture_test)
+
     add_executable(sim_menu_art_test tests/sim_menu_art_test.c src/sim/menu/sim_menu_art.c)
     target_include_directories(sim_menu_art_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
@@ -3488,8 +3562,14 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_action_obj_apron
         COMMAND actraiser_action_obj_apron_test)
 
-    # F4 (handback 2026-07-26): which captured layers are half-added with the
-    # subscreen and so must carry 50% alpha. Pure -- no SDL, no PPU struct.
+    # Shared PPU priority-band routing and captured diorama plane masks.
+    add_executable(actraiser_diorama_capture_test
+        tests/diorama_capture_test.c src/diorama/diorama_capture.c)
+    target_include_directories(actraiser_diorama_capture_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    add_test(NAME actraiser_diorama_capture COMMAND actraiser_diorama_capture_test)
+
+    # Which captured layers are half-added with the subscreen and carry 50% alpha.
     add_executable(actraiser_diorama_capture_blend_test
         tests/diorama_capture_blend_test.c
         src/diorama/diorama_capture_blend.c

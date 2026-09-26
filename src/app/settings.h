@@ -607,7 +607,7 @@ typedef struct Settings {
   bool diorama_layer_obj;
   bool diorama_layer_backdrop;
   /* A5 (followup doc): true (default) = BG3 excluded from the diorama
-   * capture, drawn via the anchored PresentHudOverlayComposited path (A7) —
+   * capture, drawn via the anchored PresentHud_DrawComposited path (A7) —
    * flat, widescreen-spread, readable. false = BG3 captured as a diorama
    * layer and drawn as an unanchored tilted plane —
    * kept as an A/B curiosity, not a real anchored alternative (see A5's

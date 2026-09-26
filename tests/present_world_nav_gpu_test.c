@@ -217,7 +217,7 @@ static void TestFraming(SDL_Renderer *renderer, FrameSlot *slot) {
   probe->sim.world_navigation_atmosphere = true;
   probe->sim.projection_pitch_mrad = -575;
   probe->sim.projection_yaw_mrad = 650;
-  probe->sim_manual_orbit_yaw = probe->sim_manual_orbit_pitch = 0;
+  probe->sim_camera.orbit_yaw = probe->sim_camera.orbit_pitch = 0;
   UploadWorldNavigationComposition(probe);
   for (int zoom = 3; zoom <= 10; zoom += zoom == 3 ? 2 : 5) {
     probe->sim.projection_distance_x100 = zoom * 100;
@@ -250,7 +250,7 @@ static void TestFraming(SDL_Renderer *renderer, FrameSlot *slot) {
    * centered radial eye, including manual rotation to the far hemisphere. */
   probe->sim.projection_distance_x100 = 300;
   for (int side = 0; side < 2; side++) {
-    probe->sim_manual_orbit_yaw = side * kPi;
+    probe->sim_camera.orbit_yaw = side * kPi;
     probe->sim.world_navigation_models = false;
     SDL_Surface *ground = Render(renderer, probe, NULL);
     probe->sim.world_navigation_models = true;
@@ -273,7 +273,7 @@ static void TestAtmosphereProfile(SDL_Renderer *renderer, const FrameSlot *slot)
   probe->sim.world_navigation_atmosphere = false;
   probe->sim.cloud_altitude_px = 512;
   probe->sim.projection_pitch_mrad = probe->sim.projection_yaw_mrad = 0;
-  probe->sim_manual_orbit_yaw = probe->sim_manual_orbit_pitch = 0;
+  probe->sim_camera.orbit_yaw = probe->sim_camera.orbit_pitch = 0;
   UploadWorldNavigationComposition(probe);
   SDL_Surface *off = Render(renderer, probe, NULL);
   const ArRenderRectI ocean = ColoredBounds(off);
@@ -336,8 +336,8 @@ static void TestWeatherMotion(SDL_Renderer *renderer, const FrameSlot *slot,
   const float views[][2] = {{0, 0}, {kPi, 0}, {0, kPi * .5f}, {0, -kPi * .5f}, {.8f, .6f}};
   const uint64_t boundaries[] = {151000, 153500, 166667, 3600000, UINT64_C(576000000)};
   for (size_t view = 0; view < sizeof(views) / sizeof(views[0]); view++) {
-    probe->sim_manual_orbit_yaw = views[view][0];
-    probe->sim_manual_orbit_pitch = views[view][1];
+    probe->sim_camera.orbit_yaw = views[view][0];
+    probe->sim_camera.orbit_pitch = views[view][1];
     weather_time_ms = 0;
     SDL_Surface *start = Render(renderer, probe, NULL);
     weather_time_ms = 60000;
@@ -375,7 +375,7 @@ static void TestWeatherMotion(SDL_Renderer *renderer, const FrameSlot *slot,
   }
   /* Below the cloud deck only displaced shadows remain. They must animate
    * too; turning weather off or drift to zero must stop every time change. */
-  probe->sim_manual_orbit_yaw = probe->sim_manual_orbit_pitch = 0;
+  probe->sim_camera.orbit_yaw = probe->sim_camera.orbit_pitch = 0;
   probe->sim.cloud_altitude_px = 256;
   CHECK(SimWorldNavigationScene_CloudVisibility(probe->sim.world_navigation.zoom_current, 256) == 0);
   weather_time_ms = 0;
@@ -385,8 +385,8 @@ static void TestWeatherMotion(SDL_Renderer *renderer, const FrameSlot *slot,
   CHECK(Differences(shadow, shadow_moved) > 1000);
   SDL_DestroySurface(shadow); SDL_DestroySurface(shadow_moved);
   for (size_t view = 0; view < sizeof(views) / sizeof(views[0]); view++) {
-    probe->sim_manual_orbit_yaw = views[view][0];
-    probe->sim_manual_orbit_pitch = views[view][1];
+    probe->sim_camera.orbit_yaw = views[view][0];
+    probe->sim_camera.orbit_pitch = views[view][1];
     weather_time_ms = 150992;
     SDL_Surface *before = Render(renderer, probe, NULL);
     weather_time_ms = 151008;
@@ -424,8 +424,8 @@ static void CaptureWeatherSequence(SDL_Renderer *renderer, const FrameSlot *slot
   CHECK(probe);
   memcpy(probe, slot, sizeof(*probe));
   probe->sim.cloud_drift_pct = 100;
-  probe->sim_manual_orbit_yaw = .8f;
-  probe->sim_manual_orbit_pitch = .6f;
+  probe->sim_camera.orbit_yaw = .8f;
+  probe->sim_camera.orbit_pitch = .6f;
   /* Thirty seconds of unchanged native geography and camera, including a
    * cloud-bank phase wrap, captured at half-second intervals. Extra adjacent
    * 16 ms probes catch jumps instead of merely producing a smooth-looking
@@ -1025,11 +1025,11 @@ static void TestGroundCacheRevisions(SDL_Renderer *renderer, const FrameSlot *sl
         case 2: probe->sim.light_azimuth_deg = 45; break;
         case 3: probe->sim.landscape_height_pct = 300; break;
         case 4: probe->sim.world_navigation_ground_detail = true; break;
-        case 5: probe->sim_manual_orbit_yaw = .4f; break;
+        case 5: probe->sim_camera.orbit_yaw = .4f; break;
         case 6: probe->sim.view = kSimView_SkyPalace; break;
         case 7:
           probe->sim.view = kSimView_WorldNavigation;
-          probe->sim_manual_orbit_yaw = 0;
+          probe->sim_camera.orbit_yaw = 0;
           break;
         case 8:
           /* Replace central synthetic land with ocean. Geography, not just
@@ -1138,7 +1138,7 @@ static void TestRetainedMountainSurfaces(SDL_Renderer *renderer, const FrameSlot
         case 3: probe->sim.landscape_height_pct = 250; break;
         case 4: probe->sim.world_navigation_mountains = false; break;
         case 5: probe->sim.world_navigation_mountains = true; break;
-        case 6: probe->sim_manual_orbit_yaw = .5f; break;
+        case 6: probe->sim_camera.orbit_yaw = .5f; break;
         case 7: probe->sim.view = kSimView_SkyPalace; break;
         case 8: ground->terrain[1][27 * 32 + 8] = 8; break;
         case 9: ground->terrain[1][27 * 32 + 8] = 0x89; break;
@@ -1211,7 +1211,7 @@ static void TestAdventClearance(SDL_Renderer *renderer, const FrameSlot *slot) {
     {640, 896}, /* Marahna's raised plateau/cliffs. */
   };
   const uint16_t heights[] = {0, 100, 400};
-  probe->sim_manual_orbit_yaw = probe->sim_manual_orbit_pitch = 0;
+  probe->sim_camera.orbit_yaw = probe->sim_camera.orbit_pitch = 0;
   probe->sim.projection_pitch_mrad = -575;
   probe->sim.projection_yaw_mrad = 0;
   probe->sim.projection_distance_x100 = 200;
@@ -1262,7 +1262,7 @@ static void TestTallModelViewport(SDL_Renderer *renderer, const FrameSlot *slot)
   probe->sim.world_navigation_lighting = probe->sim.world_navigation_backdrop = false;
   probe->sim.cloud_altitude_px = 0;
   probe->sim.height_scale_x100 = 400;
-  probe->sim_manual_orbit_pitch = probe->sim_manual_orbit_yaw = 0;
+  probe->sim_camera.orbit_pitch = probe->sim_camera.orbit_yaw = 0;
   probe->sim.world_navigation.focus_x = 512;
   probe->sim.world_navigation.focus_y = 136;
   probe->sim.world_navigation_towns.object_count = 1;
@@ -1341,7 +1341,7 @@ static void TestGpuGridRevisions(SDL_Renderer *renderer, const FrameSlot *slot) 
         case 1: probe->sim.light_azimuth_deg = 45; break;
         case 2: probe->sim.landscape_height_pct = 300; break;
         case 3: probe->sim.world_navigation_ground_detail = true; break;
-        case 4: probe->sim_manual_orbit_yaw = .4f; break;
+        case 4: probe->sim_camera.orbit_yaw = .4f; break;
         case 5: probe->sim.view = kSimView_SkyPalace; break;
         case 6: probe->sim.world_navigation_cloud_shadows = false; break;
         case 7: probe->sim.world_navigation_haze = false; break;
@@ -2078,7 +2078,7 @@ static void TestSynthetic(SDL_Renderer *renderer) {
   SDL_Surface *front = Render(renderer, slot, "synthetic-front");
   const uint32_t green = Pixel(front, kWidth / 2, kHeight / 2);
   CHECK(((green >> 8) & 255) > (green & 255));
-  slot->sim_manual_orbit_yaw = kPi;
+  slot->sim_camera.orbit_yaw = kPi;
   SDL_Surface *back = Render(renderer, slot, "synthetic-back");
   const uint32_t blue = Pixel(back, kWidth / 2, kHeight / 2);
   CHECK((blue & 255) > ((blue >> 8) & 255));
@@ -2096,7 +2096,7 @@ static void TestSynthetic(SDL_Renderer *renderer) {
   SDL_Surface *hidden = Render(renderer, slot, NULL);
   CHECK(Differences(back, hidden) == 0);
   SDL_DestroySurface(hidden);
-  slot->sim_manual_orbit_yaw = 0;
+  slot->sim_camera.orbit_yaw = 0;
   SDL_Surface *model = Render(renderer, slot, "synthetic-model");
   CHECK(Differences(front, model) > 20);
   slot->sim.world_navigation_models = false;
@@ -2107,7 +2107,7 @@ static void TestSynthetic(SDL_Renderer *renderer) {
 
   /* Full-world cloud cover must still contribute over unmapped ocean, then
    * toggling it off restores every pixel of the frozen background. */
-  slot->sim_manual_orbit_yaw = kPi;
+  slot->sim_camera.orbit_yaw = kPi;
   slot->sim.world_navigation_clouds = slot->sim.world_navigation_cloud_shadows = true;
   SDL_Surface *clouds = Render(renderer, slot, "synthetic-back-clouds");
   CHECK(Differences(back, clouds) > 1000);
@@ -2123,13 +2123,13 @@ static void TestSynthetic(SDL_Renderer *renderer) {
       {1.57079632679f, 0}, {-1.57079632679f, 0},
       {0, 1.57079632679f}, {0, -1.57079632679f}, {.8f, .6f}};
   for (size_t i = 0; i < sizeof(orbit) / sizeof(orbit[0]); i++) {
-    slot->sim_manual_orbit_yaw = orbit[i][0];
-    slot->sim_manual_orbit_pitch = orbit[i][1];
+    slot->sim_camera.orbit_yaw = orbit[i][0];
+    slot->sim_camera.orbit_pitch = orbit[i][1];
     SDL_Surface *view = Render(renderer, slot, NULL);
     CHECK(Differences(front, view) > 1000);
     SDL_DestroySurface(view);
   }
-  slot->sim_manual_orbit_yaw = slot->sim_manual_orbit_pitch = 0;
+  slot->sim_camera.orbit_yaw = slot->sim_camera.orbit_pitch = 0;
   PresentWorldNav_ResetResources();
   Sim3DDepthPass_Reset(&g_render_device);
   UploadWorldNavigationComposition(slot);
@@ -2151,15 +2151,15 @@ static void TestSynthetic(SDL_Renderer *renderer) {
     for (int x = 0; x < 32; x++)
       g_sim_world_navigation_plaque_pixels[y * 256 + x] = 0xff00ffff;
   UploadWorldNavigationComposition(slot);
-  slot->sim_manual_orbit_yaw = kPi;
+  slot->sim_camera.orbit_yaw = kPi;
   SDL_Surface *far_marker = Render(renderer, slot, NULL);
   CHECK(ColorCount(far_marker, 0xffff00ff) == 0);
   CHECK(ColorCount(far_marker, 0xff00ffff) > 500);
-  slot->sim_manual_orbit_yaw = 0;
+  slot->sim_camera.orbit_yaw = 0;
   SDL_Surface *near_marker = Render(renderer, slot, "synthetic-markers");
   CHECK(ColorCount(near_marker, 0xffff00ff) > 500);
   CHECK(ColorCount(near_marker, 0xff00ffff) == ColorCount(far_marker, 0xff00ffff));
-  slot->sim_manual_orbit_yaw = .6f;
+  slot->sim_camera.orbit_yaw = .6f;
   SDL_Surface *moved_marker = Render(renderer, slot, "synthetic-markers-orbit");
   /* Fractional-size artwork can cover one more/less pixel column as it
    * crosses the raster grid. Its submitted dimensions are checked exactly
@@ -2169,7 +2169,7 @@ static void TestSynthetic(SDL_Renderer *renderer) {
   CHECK(abs(FirstColorX(moved_marker, 0xffff00ff) - FirstColorX(near_marker, 0xffff00ff)) > 10);
   CHECK(FirstColorX(moved_marker, 0xff00ffff) == FirstColorX(near_marker, 0xff00ffff));
   CheckColorMaskEqual(moved_marker, near_marker, 0xff00ffff);
-  slot->sim_manual_orbit_yaw = 0;
+  slot->sim_camera.orbit_yaw = 0;
   restored = Render(renderer, slot, NULL);
   CHECK(Differences(near_marker, restored) == 0);
   SDL_DestroySurface(restored);
@@ -2339,7 +2339,7 @@ static void CaptureTownAcceptanceMatrix(SDL_Renderer *renderer, const FrameSlot 
       probe->sim.world_navigation.matrix[0] = probe->sim.world_navigation.matrix[3] = (int16_t)views[view].zoom;
       probe->sim.world_navigation.matrix[1] = probe->sim.world_navigation.matrix[2] = 0;
       probe->sim.projection_distance_x100 = views[view].distance;
-      probe->sim_manual_orbit_yaw = probe->sim_manual_orbit_pitch = 0;
+      probe->sim_camera.orbit_yaw = probe->sim_camera.orbit_pitch = 0;
       probe->sim.world_navigation_haze = true;
       probe->sim.underlay_haze_pct = probe->sim.underlay_defocus_pct = 25;
       probe->sim.cull_haze_lead_px = 64;
@@ -2448,7 +2448,7 @@ static void TestVolcanoCapViews(SDL_Renderer *renderer, const FrameSlot *slot) {
   probe->sim.game_frame = 17;
   probe->sim.world_navigation_brightness = 15;
   probe->sim.projection_distance_x100 = 300;
-  probe->sim_manual_orbit_yaw = probe->sim_manual_orbit_pitch = 0;
+  probe->sim_camera.orbit_yaw = probe->sim_camera.orbit_pitch = 0;
   const int16_t matrices[5][4] = {
     {64, 0, 0, 64}, {0, -64, 64, 0}, {-64, 0, 0, -64},
     {0, 64, -64, 0}, {64, 0, 0, 64},
@@ -2503,7 +2503,7 @@ static void TestMountainFitViews(SDL_Renderer *renderer, const FrameSlot *slot) 
     probe->sim.world_navigation_brightness = 15;
     probe->sim.projection_distance_x100 = 220;
     probe->sim.projection_pitch_mrad = -575;
-    probe->sim_manual_orbit_yaw = probe->sim_manual_orbit_pitch = 0;
+    probe->sim_camera.orbit_yaw = probe->sim_camera.orbit_pitch = 0;
     BuildScene(probe);
     char name[48];
     CHECK(snprintf(name, sizeof(name), "captured-mountain-fit-%d-%d", peak, view) > 0);
@@ -3267,13 +3267,13 @@ static void TestCaptured(SDL_Renderer *renderer, const char *rom_path, const cha
     {"captured-south", 0, -1.57079632679f}, {"captured-tilted", .8f, .6f},
   };
   for (size_t i = 0; i < sizeof(views) / sizeof(views[0]); i++) {
-    slot->sim_manual_orbit_yaw = views[i].yaw;
-    slot->sim_manual_orbit_pitch = views[i].pitch;
+    slot->sim_camera.orbit_yaw = views[i].yaw;
+    slot->sim_camera.orbit_pitch = views[i].pitch;
     SDL_Surface *view = Render(renderer, slot, views[i].name);
     CHECK(i ? Differences(front, view) > 1000 : Differences(front, view) == 0);
     SDL_DestroySurface(view);
   }
-  slot->sim_manual_orbit_yaw = slot->sim_manual_orbit_pitch = 0;
+  slot->sim_camera.orbit_yaw = slot->sim_camera.orbit_pitch = 0;
   SDL_Surface *restored = Render(renderer, slot, "captured-restored");
   CHECK(Differences(front, restored) == 0);
   CHECK(!memcmp(&navigation, &slot->sim.world_navigation, sizeof(navigation)));

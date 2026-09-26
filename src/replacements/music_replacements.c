@@ -9,6 +9,7 @@
 #include "replacements/music_replacements.h"
 #include "constants.h"
 #include "host/host_audio.h"
+#include "snesrecomp/game/runtime.h"
 #include "replacements/manifest_utils.h"
 #include "audio/native_audio_mixer.h"
 #include "app/settings.h"
@@ -22,10 +23,6 @@
 #endif
 
 enum { kMusicManifestLineCapacity = 1024 };
-
-/* Engine seams (snesrecomp-go/runtime). The APU mutex is recursive (SDL), so the
- * handlers below may take it even when the caller already holds it. */
-extern int RtlGetAudioOutputRate(void);
 
 /* ActRaiser's SPC driver: per-song instruments occupy srcn 0x0C and up; the
  * common sample bank (srcn 0x00-0x0B, uploaded once from 06:AC00) carries the

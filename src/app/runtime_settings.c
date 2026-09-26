@@ -23,7 +23,7 @@
 #include "app/session_fatal.h"
 #include "settings_overlay/settings_overlay.h"
 #include "app/user_data_dir.h"
-#include "present/presentation_textures.h"
+#include "sim/sim3d/sim3d_textures.h"
 
 static RuntimeLifecycleRequest s_lifecycle_request;
 void RuntimeSettings_RequestPreparedRestart(void) {
@@ -283,7 +283,7 @@ static void OnRuntimeSettingChanged(const SettingDesc *desc,
   AudioSession_ApplySetting(desc);
   HostInput_ApplySetting(desc);
   Diorama_ApplySetting(desc);
-  if (!PresentationTextures_ValidateSetting(desc))
+  if (!Sim3DTextures_ValidateSetting(desc))
     return;
   HostDisplay_ApplySetting(desc);
 }

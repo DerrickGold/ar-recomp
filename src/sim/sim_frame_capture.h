@@ -10,6 +10,11 @@
 #include "sim/sim_render_metadata.h"
 
 void SimFrameCapture_Produce(SimFrameData *sim);
+/* Screenshots and paused redraws capture current metadata/tuning without
+ * rebuilding the world map or town canvas, or advancing traces. The canvas
+ * serials refer to the last produced frame. Normal submission instead copies
+ * Produce's completed snapshot, including its newly rendered canvas serials. */
+void SimFrameCapture_RefreshMetadata(SimFrameData *sim);
 /* Releases the town canvas worker group. */
 void SimFrameCapture_Shutdown(void);
 

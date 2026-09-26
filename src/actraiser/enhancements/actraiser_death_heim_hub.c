@@ -104,7 +104,7 @@ void ActRaiser_DioramaDeathHeimHubStatuesFinish(int width) {
        * The mask supplies identity; the plane supplies its final colour/math. */
       for (int priority = 0; priority < 4; ++priority) {
         uint32_t *plane = (uint32_t *)g_diorama_layer_pixels[
-            ActRaiser_DioramaObjPlaneForPriority(priority)];
+            DioramaPlaneForObjectPriority(priority)];
         if (plane && plane[index]) {
           faces[index] = plane[index];
           plane[index] = 0;

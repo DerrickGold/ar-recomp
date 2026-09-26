@@ -314,3 +314,34 @@ void Sim3DCamera_FlushSettingsIfDirty(void) {
     fprintf(stderr, "[sim3d] failed to persist camera settings\n");
   }
 }
+
+/* Angel velocities are two planar axes, not the action player's jump/fall.
+ * Keep calibration independent from action stages and from manual controls. */
+static Sim3DCameraObserver s_motion_observer = SIM3D_CAMERA_OBSERVER_INIT;
+
+enum {
+  kSimRecordVelocityX = 0x1A,
+  kSimRecordVelocityY = 0x1C,
+};
+
+void Sim3DCamera_CaptureFrame(Sim3DCameraFrame *frame, int elapsed_ticks) {
+  Sim3DCameraPresentationState controls;
+  Sim3DCamera_CapturePresentationState(&controls);
+  frame->mode = controls.mode;
+  frame->reactive_strength = g_settings.sim3d_reactive_strength;
+  frame->orbit_yaw = controls.orbit_yaw;
+  frame->orbit_pitch = controls.orbit_pitch;
+  Sim3DCameraObservation input = {
+    .in_town = ActRaiser_IsSimulationTown(
+        g_ram[kActRaiserWram_MapGroup], g_ram[kActRaiserWram_CurrentMap]),
+  };
+  /* Outside town this memory belongs to another scene, not an angel record. */
+  if (input.in_town) {
+    input.velocity_x = (int16_t)ActRaiser_ReadWram16(
+        kActRaiserWram_SimAngelRecord + kSimRecordVelocityX);
+    input.velocity_y = (int16_t)ActRaiser_ReadWram16(
+        kActRaiserWram_SimAngelRecord + kSimRecordVelocityY);
+    input.hp = g_ram[kActRaiserWram_AngelCurrentHp];
+  }
+  frame->motion = Sim3DCamera_Observe(&s_motion_observer, &input, elapsed_ticks);
+}

@@ -6,6 +6,7 @@
 #include "actraiser/actraiser_rtl.h"
 #include "dev_tools.h"
 #include "present/display_geometry.h"
+#include "host/host_ppu_output.h"
 #include "host/host_display.h"
 #include "snesrecomp/game_runtime.h"
 #include "host/host_input.h"
@@ -15,7 +16,7 @@
 #include "scene_inspector.h"
 #include "app/settings.h"
 #include "host/host_video.h"
-#include "present/presentation_textures.h"
+#include "render/present_hud.h"
 #include "host/host_frame_surfaces.h"
 
 /* What the renderer highlights for the inspector selection. The developer
@@ -40,8 +41,8 @@ static DevToolsContext CurrentContext(void) {
       .context = &g_render_device,
     },
     .render_device = &g_render_device,
-    .hud_bg_texture = g_hud_bg_texture,
-    .hud_obj_texture = g_hud_obj_texture,
+    .hud_bg_texture = PresentHud_BackgroundTexture(),
+    .hud_obj_texture = PresentHud_ObjectTexture(),
     .runner = RtlGameRunner(),
     .framebuffer_pixels =
         g_pixels + ActionApron_DisplayOffset(SR_PPU_OBJ_APRON),
@@ -143,7 +144,7 @@ void HostDevTools_ServiceDioramaDump(void) {
   DevTools_DumpDioramaLayers(&context);
   s_diorama_dump_armed = false;
   if (!g_settings.diorama_mode)
-    ActRaiser_RebindPpuOutputSurfaces();
+    HostPpuOutput_Rebind();
 }
 
 DevToolsCaptureResult HostDevTools_WriteFramebufferPpm(FILE *file, bool require_composite) {

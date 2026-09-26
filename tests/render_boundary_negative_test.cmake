@@ -20,6 +20,26 @@ if(NOT _result STREQUAL "0")
 endif()
 
 set(_cases
+    "host/host_ppu_output.c"
+    "host/host_ppu_output.h"
+    "sim/sim3d/sim3d_textures.c"
+    "sim/sim3d/sim3d_textures.h"
+    "diorama/present_diorama.c"
+    "diorama/present_diorama.h"
+    "diorama/diorama_planes.h"
+    "present/presentation_surface.h"
+    "dev/present_scene_inspector.c"
+    "dev/present_scene_inspector.h"
+    "render/present_hud.c"
+    "render/present_hud.h"
+    "diorama/diorama_capture.c"
+    "diorama/diorama_capture.h"
+    "action/action_effect_capture.c"
+    "action/action_effect_capture.h"
+    "sim/sim3d/sim3d_camera.h"
+    "sim/sim3d/sim3d_camera_motion.c"
+    "action/present_action_effects.c"
+    "action/present_action_effects.h"
     "diorama/diorama_camera.c"
     "diorama/diorama_camera.h"
     "app/performance_metrics.c"
@@ -71,19 +91,63 @@ foreach(_relative IN LISTS _cases)
         file(REMOVE "${_path}")
     endif()
 endforeach()
-set(_camera_path "${_scratch}/diorama/diorama_camera.c")
-file(READ "${_camera_path}" _original)
-foreach(_probe IN ITEMS "g_settings.diorama_camera_mode" "g_ram[0]" "HostClock_Nanoseconds()")
-    file(WRITE "${_camera_path}" "${_original}\nvoid camera_probe(void) { (void)${_probe}; }\n")
+foreach(_camera IN ITEMS diorama/diorama_camera.c sim/sim3d/sim3d_camera_motion.c)
+    set(_camera_path "${_scratch}/${_camera}")
+    file(READ "${_camera_path}" _original)
+    foreach(_probe IN ITEMS "g_settings.diorama_camera_mode" "g_ram[0]" "HostClock_Nanoseconds()")
+        file(WRITE "${_camera_path}" "${_original}\nvoid camera_probe(void) { (void)${_probe}; }\n")
+        execute_process(
+            COMMAND "${CMAKE_COMMAND}" "-DGAME_SOURCE_ROOT=${_scratch}" -P "${BOUNDARY_CHECK}"
+            RESULT_VARIABLE _result OUTPUT_VARIABLE _stdout ERROR_VARIABLE _stderr)
+        if(_result STREQUAL "0" OR NOT _stderr MATCHES "Reactive camera bypasses its captured inputs")
+            file(REMOVE_RECURSE "${_scratch}")
+            message(FATAL_ERROR "Camera boundary accepted or misclassified ${_probe}: ${_stdout}${_stderr}")
+        endif()
+    endforeach()
+    file(WRITE "${_camera_path}" "${_original}")
+endforeach()
+
+set(_action_path "${_scratch}/action/present_action_effects.c")
+file(READ "${_action_path}" _original)
+foreach(_probe IN ITEMS "g_settings.action_particles" "g_ram[0]" "g_render_device")
+    file(WRITE "${_action_path}" "${_original}\nvoid action_probe(void) { (void)${_probe}; }\n")
     execute_process(
         COMMAND "${CMAKE_COMMAND}" "-DGAME_SOURCE_ROOT=${_scratch}" -P "${BOUNDARY_CHECK}"
         RESULT_VARIABLE _result OUTPUT_VARIABLE _stdout ERROR_VARIABLE _stderr)
-    if(_result STREQUAL "0" OR NOT _stderr MATCHES "Reactive camera bypasses its captured inputs")
+    if(_result STREQUAL "0" OR NOT _stderr MATCHES "Action effects bypass their presentation inputs")
         file(REMOVE_RECURSE "${_scratch}")
-        message(FATAL_ERROR "Camera boundary accepted or misclassified ${_probe}: ${_stdout}${_stderr}")
+        message(FATAL_ERROR "Action boundary accepted or misclassified ${_probe}: ${_stdout}${_stderr}")
     endif()
 endforeach()
-file(WRITE "${_camera_path}" "${_original}")
+file(WRITE "${_action_path}" "${_original}")
+
+set(_hud_path "${_scratch}/render/present_hud.c")
+file(READ "${_hud_path}" _original)
+foreach(_probe IN ITEMS "g_settings.hud_scale_percent" "g_ram[0]" "HostClock_Nanoseconds()" "g_render_device")
+    file(WRITE "${_hud_path}" "${_original}\nvoid hud_probe(void) { (void)${_probe}; }\n")
+    execute_process(
+        COMMAND "${CMAKE_COMMAND}" "-DGAME_SOURCE_ROOT=${_scratch}" -P "${BOUNDARY_CHECK}"
+        RESULT_VARIABLE _result OUTPUT_VARIABLE _stdout ERROR_VARIABLE _stderr)
+    if(_result STREQUAL "0" OR NOT _stderr MATCHES "HUD presentation bypasses its captured inputs")
+        file(REMOVE_RECURSE "${_scratch}")
+        message(FATAL_ERROR "HUD boundary accepted or misclassified ${_probe}: ${_stdout}${_stderr}")
+    endif()
+endforeach()
+file(WRITE "${_hud_path}" "${_original}")
+
+set(_diorama_path "${_scratch}/diorama/present_diorama.c")
+file(READ "${_diorama_path}" _original)
+foreach(_probe IN ITEMS "g_settings.diorama_mode" "g_ram[0]" "g_render_device")
+    file(WRITE "${_diorama_path}" "${_original}\nvoid diorama_probe(void) { (void)${_probe}; }\n")
+    execute_process(
+        COMMAND "${CMAKE_COMMAND}" "-DGAME_SOURCE_ROOT=${_scratch}" -P "${BOUNDARY_CHECK}"
+        RESULT_VARIABLE _result OUTPUT_VARIABLE _stdout ERROR_VARIABLE _stderr)
+    if(_result STREQUAL "0" OR NOT _stderr MATCHES "Diorama presentation bypasses its captured inputs")
+        file(REMOVE_RECURSE "${_scratch}")
+        message(FATAL_ERROR "Diorama boundary accepted or misclassified ${_probe}: ${_stdout}${_stderr}")
+    endif()
+endforeach()
+file(WRITE "${_diorama_path}" "${_original}")
 
 set(_font_cases
     "localization/text_backend.h"

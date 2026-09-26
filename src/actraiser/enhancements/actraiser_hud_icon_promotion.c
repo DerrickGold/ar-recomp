@@ -210,14 +210,6 @@ static uint8_t s_hud_restore_prio[kActRaiserHudIconRasterLimit *
 static uint32_t s_hud_restore_slot[kActRaiserHudIconRasterLimit *
                                    kActRaiserHudIconRasterLimit];
 
-/* g_diorama_layer_pixels[] index for an OBJ priority band. Band N is the plane
- * the diorama's kPrioBands table bound for band N, and band == OAM priority
- * (ppu.c's split does band = z >> 14, and SPRITE_PRIO_TO_PRIO puts the OAM
- * priority in those two bits). Band 0 is the primary source slot. */
-int ActRaiser_DioramaObjPlaneForPriority(int priority) {
-  return priority ? kDioramaPlane_Obj1 + (priority - 1) : SR_PPU_OVERLAY_OBJ;
-}
-
 void ActRaiser_DioramaHudObjPrepare(void) {
   const SrPpuFrameTransactionContext *frame = ActRaiser_PpuFrame();
 
@@ -365,9 +357,9 @@ void ActRaiser_DioramaHudObjFinish(int width) {
   const int raster_height = s_hud_icon_bounds.y1 - s_hud_icon_bounds.y0;
   /* Band index == OAM priority (ppu.c's priority-split resolve does
    * band = z >> 14, and SPRITE_PRIO_TO_PRIO puts the OAM priority in those two
-   * bits), so this is the same plane the diorama's kPrioBands table bound. */
+   * bits), so this is the same plane DioramaPlanes_PriorityBands binds. */
   uint32_t *plane = (uint32_t *)g_diorama_layer_pixels[
-      ActRaiser_DioramaObjPlaneForPriority(s_hud_icon_priority)];
+      DioramaPlaneForObjectPriority(s_hud_icon_priority)];
   const size_t pitch = (size_t)width * 4;
   const int extra = (width - kActRaiserAuthenticWidth) / 2;
   /* TWO destinations, TWO widths. g_hud_obj_pixels stays at the DISPLAY width
@@ -416,7 +408,7 @@ void ActRaiser_DioramaHudObjFinish(int width) {
       if (!s_hud_icon_ppu_relocated &&
           restore_priority != kActRaiserHudRestoreNone) {
         uint32_t *restore_plane = (uint32_t *)g_diorama_layer_pixels[
-            ActRaiser_DioramaObjPlaneForPriority(restore_priority)];
+            DioramaPlaneForObjectPriority(restore_priority)];
         if (restore_plane)
           restore_plane[plane_index] = s_hud_restore_argb[footprint_index];
       }

@@ -1,4 +1,5 @@
 #include "actraiser/regional/actraiser_regional_runtime.h"
+#include "actraiser/actraiser_rtl.h"
 #include "actraiser/regional/actraiser_regional_editor.h"
 #include "regional/session/regional_session_action.h"
 #include "actraiser/actraiser_stage_placements.h"
@@ -50,7 +51,6 @@
 
 extern RecompReturn bank_02_A622_M1X0(CpuState *cpu);
 extern RecompReturn bank_03_A83A_M1X0(CpuState *cpu);
-extern RecompReturn ActRaiser_WaitForVblank(CpuState *cpu);
 extern RecompReturn bank_01_97E5_M1X0(CpuState *cpu);
 extern RecompReturn bank_01_9840_M0X0(CpuState *cpu);
 extern RecompReturn bank_01_899B_M1X0(CpuState *cpu);

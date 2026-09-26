@@ -23,6 +23,9 @@ bool Diorama_InitRomBackdrops(const uint8_t *rom_data, size_t rom_size);
 void Diorama_LoadLayerManifest(void);
 bool Diorama_SaveLayerManifest(void);
 
+/* Install the live-room, override, persistence and CGRAM hooks after loading
+ * the manifest. The editor snapshots the palette only when its picker opens. */
+void Diorama_InstallLayerEditor(void);
 /* The room the draw loop is currently applying overrides to, for the layer
  * editor. False when no diorama room is running, in which case the outputs are
  * untouched -- so the editor reports a room exactly when authoring one would

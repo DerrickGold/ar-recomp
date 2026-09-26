@@ -11,6 +11,8 @@
 #include "render/text_cell_composite.h"
 #include "host/host_video.h"
 #include "present/presentation_textures.h"
+#include "sim/sim3d/sim3d_textures.h"
+#include "render/present_hud.h"
 
 static ArRenderTexture s_icons;
 static uint32_t s_revision;
@@ -229,7 +231,7 @@ static HudPresentationChunk PrepareTextInRect(const FrameSlot *slot,
     ArRenderRectI source, ArRenderRectF dest,
     ArLocalizedPreparedFrame *prepared) {
   HudPresentationChunk chunk={
-    .texture=g_hud_bg_texture,
+    .texture=PresentHud_BackgroundTexture(),
     /* Cell claims only project through chunks identified as native BG3. */
     .inspector_kind=kInspectorPresentation_HudBg,
     .texture_source={slot->ws_extra+source.x,source.y,source.w,source.h},
@@ -413,7 +415,7 @@ static float Dialogue(const FrameSlot *slot, ArRenderRectI view) {
     const int plane=p?kSim3DPlane_Bg2High:kSim3DPlane_Bg2Low;
     if (!(slot->sim.separated_plane_mask & (1u<<plane))) continue;
     for (int row=0;row<3;++row)
-      Texture(g_sim3d_layer_textures[plane],
+      Texture(Sim3DTextures_Layer(plane),
           (ArRenderRectF){slot->ws_extra+24,source_y[row],208,source_h[row]},
           DialogueRect(slot,view,24,dest_y[row],208,dest_h[row]));
   }
@@ -421,7 +423,7 @@ static float Dialogue(const FrameSlot *slot, ArRenderRectI view) {
       DialogueRect(slot,view,32,144-extra,192,72),&prepared);
   DrawNativeText(slot,chunk,&prepared);
   if (enhanced_help)
-    Texture(g_hud_bg_texture,(ArRenderRectF){slot->ws_extra+208,204,8,8},
+    Texture(PresentHud_BackgroundTexture(),(ArRenderRectF){slot->ws_extra+208,204,8,8},
             DialogueRect(slot,view,208,204,8,8));
   return 151-extra;
 }

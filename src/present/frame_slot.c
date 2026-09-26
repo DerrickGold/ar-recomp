@@ -1,30 +1,23 @@
 /* The sole FrameSlot producer. FrameSlot_Capture runs immediately after
  * RtlDrawPpuFrame, snapshots live game state, and hands presentation an
  * isolated value copy. */
-#include <stdio.h>
 #include <string.h>
 
-#include "present/frame_slot.h"
 #include "dev/host_dev_tools.h"
+#include "host/host_ppu_output.h"
 #include "host/host_display.h"
 #include "host/host_input.h"
-#include "actraiser/actraiser_sim_menu.h"
+#include "sim/menu/sim_menu_capture.h"
 #include "present/display_geometry.h"
 #include "host/host_clock.h"
 #include "present/present.h"
 #include "snesrecomp/game/types.h"
 #include "app/settings.h"
-#include "app/input_map.h"
-#include "diorama/diorama_planes.h"
+#include "diorama/diorama_capture.h"
 #include "diorama/diorama.h"
-#include "diorama/diorama_layer_order.h"
 #include "sim/sim3d/sim3d.h"
-#include "sim/sim_render_metadata.h"
-#include "sim/voxels/sim_background_voxels.h"
-#include "sim/town/sim_town_canvas.h"
-#include "sim/world_nav/sim_world_navigation_capture.h"
-#include "action/action_effect_clock.h"
-#include "action/action_effects.h"
+#include "sim/sim_frame_capture.h"
+#include "action/action_effect_capture.h"
 #include "action/action_bg_tuner.h"
 #include "actraiser_game.h"
 #include "actraiser/actraiser_localization_runtime.h"
@@ -33,73 +26,8 @@
 #include "snesrecomp/game_runtime.h"
 #include "snesrecomp/game/runtime.h" /* g_ram */
 #include "present/frame_timing.h"
-#include "render/camera_velocity.h"
-#include "app/session_fatal.h"
 #include "replacements/hd_replacement_host.h"
 #include "snesrecomp/runner.h"
-
-/* Captures are per PRESENTED frame, not per emulated tick: gameplay can batch
- * catch-up ticks into one capture below 60Hz present rates. Host pause/menu
- * redraws do not run an emulated tick and therefore produce a zero delta;
- * ActRaiser's native pause is different—it continues running emulated vblanks
- * and is intentionally filtered only by the action-effect gameplay clock.
- * Reactive-camera statistics follow this emulator-frame delta, not capture
- * call count, so their EMA remains anchored to the fixed 60.0988Hz rate. */
-static ActionEffectObserver s_action_effect_observer;
-static ActionEffectTickClock s_action_effect_tick_clock;
-
-void FrameSlot_ResetActionEffects(void) {
-  ActionEffectObserver_Reset(&s_action_effect_observer);
-  ActionEffectTickClock_Reset(&s_action_effect_tick_clock);
-}
-
-/* Sim-town reactive camera. Keep calibration separate from the action camera:
- * the two modes measure different actors moving at different scales, and
- * sharing an accumulator would make every town entry re-calibrate against
- * whatever the last action stage was doing. */
-static float s_sim_velx_avg = 4.0f;
-static float s_sim_vely_avg = 4.0f;
-static uint8_t s_sim_prev_hp;
-static bool s_sim_prev_in_town;
-
-/* Sim world-record planar velocities. The catalogue keeps every world record
- * on one flat map, so these are the whole of the angel's motion -- there is no
- * third axis to read and none is implied by the projection. */
-enum {
-  kSimRecordVelocityX = 0x1A,
-  kSimRecordVelocityY = 0x1C,
-};
-
-static uint32_t DioramaPlaneBit(int plane) {
-  return 1u << (unsigned)plane;
-}
-
-static uint32_t CaptureDioramaPlaneRequestMask(void) {
-  _Static_assert(kDioramaPlane_Count <= 32,
-                 "diorama request mask needs one bit per plane");
-  uint32_t mask = 0;
-  if (g_settings.diorama_layer_backdrop &&
-      g_settings.diorama_skybox != kDioramaSky_Only)
-    mask |= DioramaPlaneBit(kDioramaPlane_Backdrop);
-  if (g_settings.diorama_layer_bg1)
-    mask |= DioramaPlaneBit(SR_PPU_OVERLAY_BG1) |
-            DioramaPlaneBit(kDioramaPlane_Bg1Hi) |
-            DioramaPlaneBit(kDioramaPlane_Bg1Far);
-  if (g_settings.diorama_layer_bg2)
-    mask |= DioramaPlaneBit(SR_PPU_OVERLAY_BG2) |
-            DioramaPlaneBit(kDioramaPlane_Bg2Hi) |
-            DioramaPlaneBit(kDioramaPlane_Bg2Far);
-  else if (g_settings.diorama_skybox != kDioramaSky_Off)
-    mask |= DioramaPlaneBit(SR_PPU_OVERLAY_BG2);
-  if (g_settings.diorama_layer_obj)
-    mask |= DioramaPlaneBit(SR_PPU_OVERLAY_OBJ) |
-            DioramaPlaneBit(kDioramaPlane_Obj1) |
-            DioramaPlaneBit(kDioramaPlane_Obj2) |
-            DioramaPlaneBit(kDioramaPlane_Obj3);
-  if (g_settings.diorama_layer_bg3 && !g_settings.diorama_hud_flat)
-    mask |= DioramaPlaneBit(SR_PPU_OVERLAY_BG3);
-  return mask;
-}
 
 typedef struct FramePpuView {
   const SnesRunnerApi *api;
@@ -142,171 +70,13 @@ static bool FramePpuView_Capture(
       view->api->ppu_surface_snapshot_is_valid(view->runner, surfaces) != 0u;
 }
 
-static uint32_t CaptureDioramaPlaneContentMask(
-    const SrPpuFrameSnapshot *ppu_frame) {
-  uint32_t mask = DioramaPlaneBit(kDioramaPlane_Backdrop);
-  static const struct {
-    uint8_t source;
-    uint8_t band;
-    uint8_t plane;
-  } kSurfaces[] = {
-    { SR_PPU_OVERLAY_BG1, 0, SR_PPU_OVERLAY_BG1 },
-    { SR_PPU_OVERLAY_BG2, 0, SR_PPU_OVERLAY_BG2 },
-    { SR_PPU_OVERLAY_BG3, 0, SR_PPU_OVERLAY_BG3 },
-    { SR_PPU_OVERLAY_OBJ, 0, SR_PPU_OVERLAY_OBJ },
-    { SR_PPU_OVERLAY_BG1, 1, kDioramaPlane_Bg1Hi },
-    { SR_PPU_OVERLAY_BG2, 1, kDioramaPlane_Bg2Hi },
-    { SR_PPU_OVERLAY_BG1, 2, kDioramaPlane_Bg1Far },
-    { SR_PPU_OVERLAY_BG2, 2, kDioramaPlane_Bg2Far },
-    { SR_PPU_OVERLAY_OBJ, 1, kDioramaPlane_Obj1 },
-    { SR_PPU_OVERLAY_OBJ, 2, kDioramaPlane_Obj2 },
-    { SR_PPU_OVERLAY_OBJ, 3, kDioramaPlane_Obj3 },
-  };
-  for (size_t i = 0; i < sizeof(kSurfaces) / sizeof(kSurfaces[0]); i++) {
-    if ((ppu_frame->overlays[kSurfaces[i].source].content_band_mask &
-         (1u << kSurfaces[i].band)) != 0u)
-      mask |= DioramaPlaneBit(kSurfaces[i].plane);
-  }
-  if (ActRaiser_DioramaDeathHeimHubFacesPromoted())
-    mask |= DioramaPlaneBit(kDioramaPlane_Bg2Far);
-  return mask;
-}
-
-static uint32_t CaptureDioramaAdditivePlaneMask(
-    const SrPpuFrameSnapshot *ppu_frame) {
-  uint32_t mask = 0;
-  if (ppu_frame->overlays[SR_PPU_OVERLAY_BG1].flags &
-      SR_PPU_OVERLAY_MARK_FULL_ADD_SUBSCREEN)
-    mask |= DioramaPlaneBit(SR_PPU_OVERLAY_BG1) |
-            DioramaPlaneBit(kDioramaPlane_Bg1Hi) |
-            DioramaPlaneBit(kDioramaPlane_Bg1Far);
-  if (ppu_frame->overlays[SR_PPU_OVERLAY_BG2].flags &
-      SR_PPU_OVERLAY_MARK_FULL_ADD_SUBSCREEN)
-    mask |= DioramaPlaneBit(SR_PPU_OVERLAY_BG2) |
-            DioramaPlaneBit(kDioramaPlane_Bg2Hi) |
-            DioramaPlaneBit(kDioramaPlane_Bg2Far);
-  if (ppu_frame->overlays[SR_PPU_OVERLAY_BG3].flags &
-      SR_PPU_OVERLAY_MARK_FULL_ADD_SUBSCREEN)
-    mask |= DioramaPlaneBit(SR_PPU_OVERLAY_BG3);
-  if (ppu_frame->overlays[SR_PPU_OVERLAY_OBJ].flags &
-      SR_PPU_OVERLAY_MARK_FULL_ADD_SUBSCREEN)
-    mask |= DioramaPlaneBit(SR_PPU_OVERLAY_OBJ) |
-            DioramaPlaneBit(kDioramaPlane_Obj1) |
-            DioramaPlaneBit(kDioramaPlane_Obj2) |
-            DioramaPlaneBit(kDioramaPlane_Obj3);
-  return mask;
-}
-
-/* #16: the Sim3DTuning snapshot was spelled out identically at both
- * Sim3D_AnnotateFrame sites (FrameSlot_Capture and DrawAndPresentFrame). Build
- * it once here so the two can never drift. The camera helper also resolves
- * Free Cam's player-owned pose versus Dynamic Cam's reactive baseline in one
- * place; a different pose between the two annotation sites would be a
- * genuinely confusing bug. */
-Sim3DTuning BuildSim3DTuning(void) {
-  int sim_margin_left = 0, sim_margin_right = 0;
-  int sim_margin_top = 0, sim_margin_bottom = 0;
-  ActRaiser_SimSpriteMargins(&sim_margin_left, &sim_margin_right,
-                             &sim_margin_top, &sim_margin_bottom);
-  Sim3DCameraPresentationState sim_camera;
-  Sim3DCamera_CapturePresentationState(&sim_camera);
-  return (Sim3DTuning){
-      .pitch_mrad = sim_camera.pitch_mrad,
-      .yaw_mrad = sim_camera.yaw_mrad,
-      .distance_x100 = sim_camera.distance_x100,
-      .landscape_height_pct = g_settings.sim3d_landscape_height_pct,
-      .height_scale_x100 = g_settings.sim3d_height_scale_x100,
-      .voxel_preset = g_settings.sim3d_voxel_preset,
-      .voxel_detail = g_settings.sim3d_voxel_detail,
-      .voxel_lod = g_settings.sim3d_voxel_lod,
-      .voxel_shading = g_settings.sim3d_voxel_shading,
-      .voxel_style = g_settings.sim3d_voxel_style,
-      .voxel_facing = g_settings.sim3d_voxel_facing,
-      .voxel_render_scale = g_settings.sim3d_voxel_render_scale,
-      .shadow_opacity_pct = g_settings.sim3d_shadow_opacity_pct,
-      .height_pop_pct = g_settings.sim3d_height_pop_pct,
-      .light_azimuth_deg = g_settings.sim3d_light_azimuth_deg,
-      .light_elevation_deg = g_settings.sim3d_light_elevation_deg,
-      .shadow_softness_pct = g_settings.sim3d_shadow_softness_pct,
-      .rim_strength_pct = g_settings.sim3d_rim_strength_pct,
-      .underlay_haze_pct = g_settings.sim3d_underlay_haze_pct,
-      .cloud_opacity_pct = g_settings.sim3d_cloud_opacity_pct,
-      .cloud_falloff_px = g_settings.sim3d_cloud_falloff_px,
-      .cloud_inset_px = g_settings.sim3d_cloud_inset_px,
-      .cull_lead_px = g_settings.sim3d_cull_lead_px,
-      .cull_haze_pct = g_settings.sim3d_cull_haze_pct,
-      .cull_dim_pct = g_settings.sim3d_cull_dim_pct,
-      .cull_haze_lead_px = g_settings.sim3d_cull_haze_lead_px,
-      .cull_corner_px = g_settings.sim3d_cull_corner_px,
-      .underlay_defocus_pct = g_settings.sim3d_underlay_defocus_pct,
-      .cloud_altitude_px = g_settings.sim3d_cloud_altitude_px,
-      .cloud_drift_pct = g_settings.sim3d_cloud_drift_pct,
-      .world_navigation_lighting =
-          g_settings.sim3d_world_navigation_lighting,
-      .world_navigation_clouds =
-          g_settings.sim3d_world_navigation_clouds,
-      .sky_palace_volumetric_clouds = g_settings.sim3d_sky_palace_volumetric,
-      .world_navigation_cloud_shadows = g_settings.sim3d_world_navigation_cloud_shadows,
-      .world_navigation_atmosphere = g_settings.sim3d_world_navigation_atmosphere,
-      .world_navigation_models = g_settings.sim3d_world_navigation_towns,
-      .world_navigation_relief = g_settings.sim3d_world_navigation_relief,
-      .world_navigation_ground_detail = g_settings.sim3d_world_navigation_ground_detail,
-      .world_navigation_mountains = g_settings.sim3d_world_navigation_mountains,
-      .world_navigation_backdrop = g_settings.sim3d_backdrop,
-      .world_navigation_haze = g_settings.sim3d_cull_haze,
-      .cull_lift_inset = g_settings.sim3d_cull_lift_inset,
-      .backdrop_strength_pct = g_settings.sim3d_backdrop_strength_pct,
-      .backdrop_horizon_pct = g_settings.sim3d_backdrop_horizon_pct,
-      .windmill_wind_stops_all = g_settings.fix_windmill_wind_stop,
-      .sprite_margin_left = sim_margin_left,
-      .sprite_margin_right = sim_margin_right,
-      .sprite_margin_top = sim_margin_top,
-      .sprite_margin_bottom = sim_margin_bottom };
-}
-
-static void CaptureSimDynamicCamera(FrameSlot *dst, bool in_town,
-                                    int elapsed_ticks) {
-  Sim3DCameraPresentationState camera;
-  Sim3DCamera_CapturePresentationState(&camera);
-  dst->sim_camera_mode = camera.mode;
-  dst->sim_dyncam_strength = g_settings.sim3d_reactive_strength;
-  dst->sim_manual_orbit_yaw = camera.orbit_yaw;
-  dst->sim_manual_orbit_pitch = camera.orbit_pitch;
-
-  /* Outside a town there is no angel record to read: the memory holds
-   * whatever the action stage left there. Reporting a neutral camera and
-   * resetting the edge state means re-entering a town starts level instead of
-   * inheriting a lean from a stale read. */
-  if (!in_town) {
-    dst->sim_dyncam_lean_yaw = 0.0f;
-    dst->sim_dyncam_lean_pitch = 0.0f;
-    dst->sim_dyncam_event_hit = false;
-    s_sim_prev_in_town = false;
-    return;
-  }
-
-  int16_t vel_x = (int16_t)ActRaiser_ReadWram16(
-      kActRaiserWram_SimAngelRecord + kSimRecordVelocityX);
-  int16_t vel_y = (int16_t)ActRaiser_ReadWram16(
-      kActRaiserWram_SimAngelRecord + kSimRecordVelocityY);
-  dst->sim_dyncam_lean_yaw =
-      CameraVelocity_Normalize(vel_x, &s_sim_velx_avg, elapsed_ticks);
-  dst->sim_dyncam_lean_pitch =
-      CameraVelocity_Normalize(vel_y, &s_sim_vely_avg, elapsed_ticks);
-
-  /* Damage taken, on the frame it applies. Same reasoning as the action
-   * stage's revision: an HP decrease is the instant damage lands, whereas an
-   * invulnerability flag is set later, once hit-stun begins.
-   *
-   * The first town frame only seeds the previous value. Entering a town with
-   * less HP than the last one ended with is not a hit, and without this the
-   * camera jolts on arrival. */
-  uint8_t hp = g_ram[kActRaiserWram_AngelCurrentHp];
-  dst->sim_dyncam_event_hit = s_sim_prev_in_town && hp < s_sim_prev_hp;
-  s_sim_prev_hp = hp;
-  s_sim_prev_in_town = true;
-}
-
+/* Captures are per PRESENTED frame, not per emulated tick: gameplay can batch
+ * catch-up ticks into one capture below 60Hz present rates. Host pause/menu
+ * redraws do not run an emulated tick and therefore produce a zero delta;
+ * ActRaiser's native pause is different—it continues running emulated vblanks
+ * and is intentionally filtered only by the action-effect gameplay clock.
+ * Reactive-camera statistics follow this emulator-frame delta, not capture
+ * call count, so their EMA remains anchored to the fixed 60.0988Hz rate. */
 /* The first frame and a counter reset each contribute one tick. A host-paused
  * redraw contributes zero; catch-up batches are bounded for presentation. */
 static int CaptureElapsedTicks(int current_tick) {
@@ -323,165 +93,6 @@ static int CaptureElapsedTicks(int current_tick) {
   return elapsed;
 }
 
-static void CaptureActionEffects(FrameSlot *dst) {
-  /* $00:8C98 publishes only completed gameplay/OAM passes and is skipped by
-   * native pause/freeze. Capture through the shared adapter so production and
-   * its regression consume the identical publisher/read/delta chain. */
-  const unsigned action_effect_ticks =
-      ActionEffectTickClock_Capture(&s_action_effect_tick_clock);
-  ActionEffects_CaptureFrame(&s_action_effect_observer, &dst->action_effects,
-                             g_ram,
-                             kActRaiserWramSize, action_effect_ticks);
-  ActionSceneEffects_CaptureFrame(&s_action_effect_observer,
-                                  &dst->action_scene_effects, g_ram,
-                                  kActRaiserWramSize, action_effect_ticks);
-  dst->diorama_map_group = g_ram[kActRaiserWram_MapGroup];
-  dst->diorama_map_number = g_ram[kActRaiserWram_CurrentMap];
-  dst->diorama_layer_section = kDioramaLayerSection_Room;
-  if (!dst->action_scene_effects.decoration_overflow) {
-    for (unsigned i = 0;
-         i < dst->action_scene_effects.decoration_count; i++) {
-      if (dst->action_scene_effects.decorations[i].kind ==
-          kActionEffect_AitosWaterfall) {
-        dst->diorama_layer_section =
-            kDioramaLayerSection_AitosWaterfall;
-        break;
-      }
-    }
-  }
-  Diorama_PublishLiveLayerSection(
-      dst->diorama_map_group, dst->diorama_map_number,
-      dst->diorama_layer_section);
-  dst->action_effect_lighting = g_settings.action_effect_lighting;
-  dst->action_effect_particles = g_settings.action_effect_particles;
-}
-
-static void ReportCapturedActionEffects(const FrameSlot *dst) {
-  /* Capture-side twin of present.c's "[action-fx] first spell geometry
-   * submitted". Together the two lines localise any future silence: neither
-   * means no spell was ever identified in WRAM, capture-only means the
-   * identification works but the renderer never drew it. Chasing that
-   * distinction by hand is what exposed an incorrectly wide animation-bank
-   * read. */
-  if (dst->action_effects.effect_count) {
-    static bool announced;
-    if (!announced) {
-      announced = true;
-      fprintf(stderr, "[action-fx] first spell captured: kind=%u part(s)=%u "
-              "visible=%u (lighting=%d particles=%d)\n",
-              dst->action_effects.controller_kind,
-              dst->action_effects.effect_count,
-              dst->action_effects.visible_count,
-              g_settings.action_effect_lighting,
-              g_settings.action_effect_particles);
-    }
-  }
-  if (dst->action_scene_effects.effect_count ||
-      dst->action_scene_effects.decoration_count) {
-    static bool announced_scene;
-    if (!announced_scene) {
-      announced_scene = true;
-      fprintf(stderr,
-              "[action-fx] first scene accents captured: actors=%u/%u "
-              "decorations=%u/%u (lighting=%d particles=%d)\n",
-              dst->action_scene_effects.effect_count,
-              dst->action_scene_effects.visible_count,
-              dst->action_scene_effects.decoration_count,
-              dst->action_scene_effects.decoration_visible_count,
-              g_settings.action_effect_lighting,
-              g_settings.action_effect_particles);
-    }
-  }
-  /* Spawn probe for the reported "Stardust starts at ground level" bug. The
-   * catalogue says a star's launch position is chosen at the VIEWPORT TOP/
-   * RIGHT EDGE and it then descends; if it instead appears at the ground it
-   * exits the bottom of the screen almost immediately. Mid-flight snapshots
-   * cannot distinguish those, so this reports the FIRST frame of each actor
-   * (age_ticks 0) with the camera and the screen-relative Y that the launch
-   * arithmetic is supposed to have produced. Bounded so a 16-launch cast
-   * cannot flood the log. */
-  if (dst->action_effects.effect_count) {
-    static unsigned spawn_reports;
-    int16_t camera_x = (int16_t)ActRaiser_ReadWram16(kActRaiserWram_Bg1CameraX);
-    int16_t camera_y = (int16_t)ActRaiser_ReadWram16(kActRaiserWram_Bg1CameraY);
-    int ground = (int)(ActRaiser_ReadWram16(kActRaiserWram_PlayerPositionY) -
-                       camera_y + 16);
-    for (uint8_t i = 0;
-         i < dst->action_effects.effect_count && spawn_reports < 24u; i++) {
-      const ActionEffectInstance *e = &dst->action_effects.effects[i];
-      /* Two distinct moments, and confusing them is what made the first pass
-       * at this misleading:
-       *   CREATE — the actor appears on the player, still (velocity 0).
-       *   LAUNCH — the handler has relocated it and given it a velocity. THIS
-       *            is the position the catalogue says should be the viewport
-       *            top/right edge, and the one to compare against the ground.
-       * phase_ticks resets on every phase change, so ==0 is the entry frame. */
-      const char *moment = NULL;
-      if (e->phase == kActionEffectPhase_StardustPreLaunch && !e->age_ticks)
-        moment = "CREATE";
-      else if (e->phase == kActionEffectPhase_StardustLaunch &&
-               !e->phase_ticks)
-        moment = "LAUNCH";
-      if (!moment) continue;
-      spawn_reports++;
-      fprintf(stderr,
-              "[action-fx spawn] %s slot=$%04X world=(%d,%d) cam=(%d,%d) "
-              "screen=(%d,%d) vel=(%d,%d) age=%u "
-              "[viewport top screen_y=0, ground screen_y~%d]\n",
-              moment, e->record_address, e->world_x, e->world_y,
-              camera_x, camera_y, e->world_x - camera_x, e->world_y - camera_y,
-              e->velocity_x, e->velocity_y, e->age_ticks, ground);
-    }
-  }
-
-  /* Census: an active cohort slot the spell table did not recognise. Magical
-   * Fire's rules are measured, but Stardust/Aura/Light were transcribed from
-   * the ROM analysis and have never been seen against live WRAM — so rather
-   * than render them on a guess, an unrecognised slot prints its exact
-   * identity here. One cast of each spell (Cheats > Cycle magic spell) turns
-   * these lines into corrected rules in action_effects.c. Rate-limited to one
-   * report per controller kind so a 99-tick cast cannot flood the log. */
-  if (dst->action_effects.unmatched_count) {
-    static uint16_t reported_kinds;
-    uint16_t bit = (uint16_t)(1u << (dst->action_effects.controller_kind & 15));
-    if (!(reported_kinds & bit)) {
-      reported_kinds |= bit;
-      for (uint8_t i = 0; i < dst->action_effects.unmatched_count; i++) {
-        const ActionEffectUnmatched *u = &dst->action_effects.unmatched[i];
-        fprintf(stderr,
-                "[action-fx census] spell=%u slot=$%04X unmatched: "
-                "anim=$%02X:%04X state=%u visual=%u comp=$%04X "
-                "flip=$%04X status=$%04X\n",
-                dst->action_effects.controller_kind, u->record_address,
-                u->animation_bank, u->animation_address, u->animation_state,
-                u->visual, u->composition, u->flip_attributes, u->status);
-      }
-    }
-  }
-}
-
-/* Reuse the gameplay frame's annotation. Screenshots and paused redraws pass
- * NULL and capture the current metadata without advancing the town canvas. */
-static void CaptureSimMetadata(SimFrameData *dst,
-                               const SimFrameData *annotated) {
-  if (annotated) {
-    *dst = *annotated;
-    return;
-  }
-  SimRenderMetadata_CaptureFrame(
-      dst, g_ram, g_settings.sim3d_mode, g_settings.sim3d_world_navigation,
-      Settings_Sim3DRequestedFeatures(), g_settings.sim3d_diagnostic_layers,
-      Sim3D_ImplementedFeatures());
-  SimRenderMetadata_CaptureSkyPalaceFrame(dst, g_ram,
-                                          g_settings.sim3d_world_navigation &&
-                                              g_settings.sim3d_sky_palace);
-  Sim3DTuning tuning = BuildSim3DTuning();
-  Sim3D_AnnotateFrame(dst, &tuning);
-  SimWorldNavigationCapture_Capture(dst, RtlGameRunner());
-  dst->town_canvas_serial = SimTownCanvas_Serial();
-  dst->background_voxel_serial = SimBackgroundVoxels_Serial();
-}
-
 /* The sole FrameSlot writer.
  * Reads the coherent ABI PPU view, g_settings, g_snes_width/height,
  * g_scene_inspector_presentation, g_hd_replacements: legitimate here (this
@@ -495,18 +106,8 @@ void FrameSlot_Capture(FrameSlot *dst, const SimFrameData *annotated_sim) {
   FramePpuView ppu_view;
   const bool have_ppu_view =
       FramePpuView_Capture(&ppu_view, &dst->ppu_surfaces);
-  ActRaiserSimMenu_CopyModel(&dst->sim_menu.model);
-  ActRaiserSimMenu_CopyHelp(&dst->sim_menu.help);
-  dst->sim_menu.scale_percent=(uint8_t)g_settings.sim_menu_scale_percent;
-  if (have_ppu_view && dst->sim_menu.model.phase != kSimMenu_Closed &&
-      dst->sim_menu.model.phase != kSimMenu_Native) {
-    InputMap_GameActionHint(dst->sim_menu.describe_binding,
-        sizeof(dst->sim_menu.describe_binding), kInputAction_SimDescribe);
-    if (dst->sim_menu.model.phase == kSimMenu_Confirm)
-      dst->sim_menu.model.yes = g_ram[kActRaiserWram_MenuChoiceScratch] == 0;
-    if (!SimMenuArt_Capture(&dst->sim_menu, ppu_view.api, ppu_view.runner))
-      SessionFatal_Request("SIM menu artwork capture failed after its native preflight.");
-  }
+  SimMenu_CaptureFrame(&dst->sim_menu,
+      have_ppu_view ? ppu_view.api : NULL, ppu_view.runner);
 
   const int elapsed_ticks = CaptureElapsedTicks(snes_frame_counter);
   /* A capture can follow multiple catch-up ticks. Presentation interpolation
@@ -514,13 +115,17 @@ void FrameSlot_Capture(FrameSlot *dst, const SimFrameData *annotated_sim) {
    */
   dst->capture_ticks = (uint8_t)elapsed_ticks;
 
-  CaptureActionEffects(dst);
-  ReportCapturedActionEffects(dst);
+  ActionEffectCapture_CaptureFrame(dst);
   dst->magic_cycle_armed = g_settings.cheat_magic_cycle;
   dst->magic_cycle_selected =
       g_settings.cheat_magic_cycle ? ActRaiser_SelectedMagic() : 0;
 
-  CaptureSimMetadata(&dst->sim, annotated_sim);
+  /* Produced frames already include the completed canvas. Paused redraws
+   * refresh metadata only, retaining that canvas and its generation. */
+  if (annotated_sim)
+    dst->sim = *annotated_sim;
+  else
+    SimFrameCapture_RefreshMetadata(&dst->sim);
   Sim3D_CaptureOutputSurfaceViews(&dst->sim3d_output_surfaces);
 
   dst->snes_width = g_snes_width;
@@ -539,7 +144,7 @@ void FrameSlot_Capture(FrameSlot *dst, const SimFrameData *annotated_sim) {
    * crop no longer translates a completed enhanced scanout. */
   dst->authentic_x0 = g_ws_extra;
   dst->authentic_y0 = dst->ws_extra_top;
-  dst->authentic_frame_serial = ActRaiser_AuthenticFrameSerial();
+  dst->authentic_frame_serial = HostPpuOutput_AuthenticFrameSerial();
   dst->obj_apron = SR_PPU_OBJ_APRON;
   /* Density-corrected here, at the D6 producer, so present.c consumes a value
    * already expressed in PHYSICAL output pixels (0 = auto passes through). */
@@ -548,19 +153,7 @@ void FrameSlot_Capture(FrameSlot *dst, const SimFrameData *annotated_sim) {
   dst->show_fps = g_settings.show_fps;
   dst->performance_overlay = g_settings.performance_overlay;
 
-  dst->diorama_active = g_diorama_frame_active;
-  dst->diorama_plane_request_mask = 0;
-  dst->diorama_plane_content_mask = 0;
-  dst->diorama_plane_additive_mask = 0;
-  if (dst->diorama_active) {
-    dst->diorama_plane_request_mask = CaptureDioramaPlaneRequestMask();
-    if (have_ppu_view) {
-      dst->diorama_plane_content_mask =
-          CaptureDioramaPlaneContentMask(&ppu_view.state);
-      dst->diorama_plane_additive_mask =
-          CaptureDioramaAdditivePlaneMask(&ppu_view.state);
-    }
-  }
+  DioramaCapture_CaptureFrame(dst, have_ppu_view ? &ppu_view.state : NULL);
 
   /* Pair timestamp and feature gates for presentation-time frame generation. */
   dst->timestamp_ns = HostClock_Nanoseconds();
@@ -571,11 +164,7 @@ void FrameSlot_Capture(FrameSlot *dst, const SimFrameData *annotated_sim) {
    */
   DioramaCamera_CaptureFrame(&dst->diorama_camera, elapsed_ticks);
 
-  CaptureSimDynamicCamera(
-      dst,
-      ActRaiser_IsSimulationTown(g_ram[kActRaiserWram_MapGroup],
-                                 g_ram[kActRaiserWram_CurrentMap]),
-      elapsed_ticks);
+  Sim3DCamera_CaptureFrame(&dst->sim_camera, elapsed_ticks);
   /* Stable game-authored camera coordinates used by action effect projection.
    * Read before HDMA mutates the PPU scroll registers. */
   dst->bg1_camera_x = (int16_t)ActRaiser_ReadWram16(kActRaiserWram_Bg1CameraX);
