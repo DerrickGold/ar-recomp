@@ -795,3 +795,30 @@ MenuLayout BuildLayoutAtScale(int output_width, int output_height, int scale) {
       (output_height - used_height) / 2,
   };
 }
+
+static const char *DecisionUi(const char *key) {
+  return ArUiCatalog_Text(SettingsOverlay_InterfaceLocale(), key, key);
+}
+
+void DrawDecision(const MenuLayout *layout, const OverlayDecision *decision) {
+  const int width = (layout->logical_width < 496 ? layout->logical_width - 32 : 464) / 8 * 8;
+  const int height = (layout->logical_height < 288 ? layout->logical_height - 32 : 256) / 8 * 8;
+  const int x = (layout->logical_width - width) / 2;
+  const int y = (layout->logical_height - height) / 2;
+  FillLogicalRect(layout, 0, 0, layout->logical_width, layout->logical_height, ARGB(180, 0, 0, 0));
+  DrawDialogPanel(layout, x, y, width, height);
+  DrawWrappedSmallText(layout, x + 16, y + 12, DecisionUi(decision->title),
+                       (width - 32) / kDebugGlyphWidth, 2, kGameGold);
+  DrawWrappedSmallText(
+      layout, x + 16, y + 36, decision->body_text ? decision->body : DecisionUi(decision->body),
+      (width - 32) / kDebugGlyphWidth, (height - 100) / kSmallLineHeight, kSteelBlue);
+  const int choices_y = y + height - 48;
+  for (unsigned n = 0; n < (decision->notice?1u:2u); ++n) {
+    const bool selected = decision->accept_selected == (n == 0);
+    if (selected) FillLogicalRect(layout, x + 8, choices_y + n * 16 - 2, width - 16, 14, kPanel);
+    DrawSmallText(layout, x + 16, choices_y + n * 16, selected ? ">" : " ", kSelectYellow);
+    DrawSmallText(layout, x + 30, choices_y + n * 16,
+                  DecisionUi(n ? "overlay.decision.cancel" : decision->accept),
+                  selected ? kSelectYellow : kSteelBlue);
+  }
+}

@@ -11,6 +11,7 @@
 
 #include "render/render_device.h"
 #include "settings_overlay/menu_input.h"
+#include "settings_overlay/settings_overlay.h"
 #include "settings_overlay/settings_overlay_artwork.h"
 
 /* ARGB pixel packing for overlay artwork and UI colors. */
@@ -119,6 +120,20 @@ typedef struct SettingsOverlayDetailsText {
 void SettingsOverlay_ShowDetails(const SettingsOverlayDetailsText *text);
 void SettingsOverlay_CloseDetails(void);
 void SettingsOverlay_SetStatus(const char *text);
+
+typedef struct OverlayDecision {
+  SettingsOverlayDecisionResult result;
+  bool accept_selected,body_text,notice;
+  char title[96], body[2048], accept[96];
+} OverlayDecision;
+void DrawDecision(const MenuLayout *layout, const OverlayDecision *decision);
+
+/* Feature renderers receive a viewport, never the shell's navigation globals. */
+typedef struct MenuRowViewport {
+  int x, width, first_y, value_right;
+  int top, visible, selected, cursor_offset;
+  bool focused;
+} MenuRowViewport;
 
 /* Defined in settings_overlay_debug_panel.c. Clears all panel state; called by
  * SettingsOverlay_Destroy so teardown owns no panel internals directly. */

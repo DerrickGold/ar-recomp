@@ -2399,6 +2399,7 @@ if(BUILD_TESTING)
         src/host/atomic_replace.c
         src/randomizer/randomizer.c src/randomizer/randomizer_config.c src/action/action_placements.c
         src/settings_overlay/settings_overlay.c
+        src/settings_overlay/regional/regional_panel.c
         src/settings_overlay/settings_overlay_widgets.c
         src/settings_overlay/save_slots/save_slot_menu.c
         src/settings_overlay/menu_input.c
