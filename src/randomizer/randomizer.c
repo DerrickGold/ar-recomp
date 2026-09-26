@@ -144,6 +144,15 @@ RandomizerConfig Randomizer_CurrentConfig(void) {
   return c;
 }
 bool Randomizer_CampaignBound(void) {return s_campaign_bound;}
+
+bool Randomizer_CanEditDraft(void) { return !s_campaign_bound; }
+
+void Randomizer_DraftSettingChanged(const SettingDesc *desc) {
+  (void)desc;
+  /* Restore the pristine image first, so edits never compound transforms. */
+  Randomizer_Apply();
+}
+
 bool Randomizer_BindCampaign(const RandomizerConfig *config) {
   if(!RandomizerConfig_Valid(config) || (config->enabled && !Randomizer_IsAvailable()))return false;
   if(!s_campaign_bound)s_title_config=Randomizer_CurrentConfig();

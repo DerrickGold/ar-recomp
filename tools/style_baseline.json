@@ -18,7 +18,7 @@
   "long-line": 3
  },
  "src/main.c": {
-  "long-line": 4
+  "long-line": 3
  },
  "src/save/save_paths.c": {
   "long-line": 1
@@ -270,7 +270,7 @@
   "packed": 26
  },
  "tests/actraiser_town_status_test.c": {
-  "long-line": 11,
+  "long-line": 10,
   "packed": 22
  },
  "tests/actraiser_town_wait_test.c": {
@@ -414,7 +414,7 @@
  },
  "tests/presentation_view_test.c": {
   "long-line": 4,
-  "packed": 3
+  "packed": 1
  },
  "tests/randomizer_placements_test.c": {
   "long-line": 6,

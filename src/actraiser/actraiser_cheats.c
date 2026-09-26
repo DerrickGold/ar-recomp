@@ -402,7 +402,7 @@ void ActRaiser_ApplyCheats(void) {
  * into Fillmore act 1: $1B=01 (-> $18 region), $1A=01 (-> $19 act), $FB|=0x80
  * (request). We replicate that. Best triggered from a transition-capable state
  * (the intro, $18==00, which WORKS — unlike the post-act sim cascade). Hooked to
- * F6 in main.c with the raw target from AR_WARP=<region_hex><map_hex>. The map
+ * the Warp action in runtime_settings.c, using AR_WARP=<region_hex><map_hex>. The map
  * byte is written directly to $19 and is not a uniform act number. */
 void ActRaiser_Warp(unsigned region, unsigned map) {
   uint8 source_map_group = g_ram[kActRaiserWram_MapGroup];

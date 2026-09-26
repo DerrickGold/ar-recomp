@@ -114,6 +114,8 @@ void ActRaiser_RequestMagicCycle(void);
  * slot so the presentation layer can name the armed cheat's current spell
  * without presentation reading live WRAM. */
 uint8 ActRaiser_SelectedMagic(void);
+/* Stage the native level transition from a host debug action between ticks. */
+void ActRaiser_Warp(unsigned region, unsigned map);
 
 /* BG-only widescreen presentation helpers. The Sky Palace pair temporarily
  * decodes a box-free source map into only BG2's margin columns, then restores

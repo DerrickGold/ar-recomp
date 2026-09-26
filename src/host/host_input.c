@@ -11,7 +11,6 @@
 #include "snesrecomp/game/bootstrap.h"
 #include "diorama/diorama.h"
 #include "app/forced_input.h"
-#include "replacements/hd_replacement_host.h"
 #include "app/input_map.h"
 #include "present/present.h"
 #include "app/runtime_settings.h"

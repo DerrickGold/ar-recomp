@@ -67,6 +67,12 @@ bool Randomizer_Init(uint8 *rom, uint32 size);
  * restores the baseline without applying passes. */
 void Randomizer_Apply(void);
 
+/* Settings callbacks for the editable title draft. Campaign recipes remain
+ * frozen even when a caller bypasses menu availability checks. */
+struct SettingDesc;
+bool Randomizer_CanEditDraft(void);
+void Randomizer_DraftSettingChanged(const struct SettingDesc *desc);
+
 /* Draw a fresh title-draft seed and re-apply. Does nothing during a bound
  * campaign. Bound to the menu's "New seed" action. */
 void Randomizer_Reroll(void);

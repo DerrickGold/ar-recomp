@@ -2020,6 +2020,46 @@ static void TestSaveSlotMenu(SDL_Renderer *renderer,SDL_Surface *surface) {
   SettingsOverlay_SetSaveSlotHooks(NULL);
 }
 
+/* A child menu can open from any settings section. Advanced temporarily uses
+ * Save rows, but leaving the slot menu must recover the original tab and row. */
+static void TestSaveSlotParentNavigation(void) {
+  SettingsOverlay_Close();
+  Settings_Init();
+  const SettingsOverlaySaveSlotHooks hooks = {.scan = FakeSlotsScan};
+  SettingsOverlay_SetSaveSlotHooks(&hooks);
+  SettingsOverlay_Open();
+  NavToSection(kSection_Video);
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  NavToTab(1);
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+  char parent_key[128];
+  snprintf(parent_key, sizeof(parent_key), "%s", SettingsOverlay_SelectedKey());
+  int parent_section = -1, parent_tab = -1;
+  CHECK(SettingsOverlay_GetNavigationState(&parent_section, NULL, NULL, NULL));
+  CHECK(SettingsOverlay_GetTabState(&parent_tab, NULL));
+  for (int advanced = 0; advanced < 2; ++advanced) {
+    CHECK(SettingsOverlay_OpenSaveSlots(false));
+    if (advanced) {
+      CHECK(SettingsOverlay_HandleKey(SDLK_A, true, false));
+      RowToKey("save_export_srm");
+      CHECK(SettingsOverlay_HandleKey(SDLK_X, true, false));
+      CHECK(!strcmp(SettingsOverlay_SelectedKey(), "slot_list"));
+    }
+    CHECK(SettingsOverlay_HandleKey(SDLK_X, true, false));
+    CHECK(SettingsOverlay_IsOpen());
+    CHECK(!strcmp(SettingsOverlay_SelectedKey(), parent_key));
+    int section = -1, tab = -1;
+    CHECK(SettingsOverlay_GetNavigationState(&section, NULL, NULL, NULL));
+    CHECK(SettingsOverlay_GetTabState(&tab, NULL));
+    CHECK(section == parent_section && tab == parent_tab);
+  }
+  CHECK(SettingsOverlay_HandleKey(SDLK_X, true, false));
+  CHECK(SettingsOverlay_IsOpen()); /* Restored submenu backs out to navigation. */
+  CHECK(SettingsOverlay_HandleKey(SDLK_X, true, false));
+  CHECK(!SettingsOverlay_IsOpen());
+  SettingsOverlay_SetSaveSlotHooks(NULL);
+}
+
 static uint64_t SlotFrameHash(SDL_Renderer *renderer,SDL_Surface *surface) {
   CHECK(SDL_SetRenderDrawColor(renderer,12,22,34,255));CHECK(SDL_RenderClear(renderer));
   SettingsOverlay_Render((ArRenderRectI){0,0,surface->w,surface->h});CHECK(SDL_RenderPresent(renderer));
@@ -3274,6 +3314,7 @@ int main(int argc, char **argv) {
   }
 
   TestSaveSlotMenu(renderer,surface);
+  TestSaveSlotParentNavigation();
   TestSaveSlotRandomizerGate(renderer,surface);
   TestSaveAdvancedShortcut(renderer,surface);
   TestSaveAdvancedActions(renderer,surface);

@@ -4,6 +4,7 @@
 #include "app/input_map.h"
 #include "render/render_capabilities.h"
 #include "app/settings.h"
+#include "randomizer/randomizer.h"
 #include "platform/sdl/settings_persistence_sdl.h"
 #include "sim/sim3d/sim3d_camera_limits.h"
 #include "sim/town/sim_town_terrain.h"
@@ -2223,6 +2224,59 @@ static void TestGpuBackendChoice(void) {
   Settings_Init();
 }
 
+static void TestRandomizerDraftEdits(void) {
+  ClearSettingsEnv();
+  Settings_Init();
+  Settings_SetChangeObserver(NULL);
+  static uint8_t rom[0x100000];
+  CHECK(Randomizer_Init(rom, sizeof(rom)));
+  CHECK(Randomizer_CanEditDraft());
+  /* Staging is independent of menu visibility and the master enable switch. */
+  const SettingDesc *seed = Settings_Find("rando_seed");
+  CHECK(!Settings_IsAvailable(seed));
+  CHECK(Settings_SetText(seed, "12345") == kSettingChange_Applied);
+  CHECK(Settings_SetLong(Settings_Find("rando_enable"), 1) ==
+        kSettingChange_Applied);
+  CHECK(Randomizer_LastSummary()->applied);
+  CHECK(Randomizer_LastSummary()->seed == 12345);
+  CHECK(Settings_SetLong(seed, 54321) == kSettingChange_Applied);
+  CHECK(Randomizer_LastSummary()->seed == 54321);
+  CHECK(Settings_SetLong(Settings_Find("rando_enemy_hp"), 250) ==
+        kSettingChange_Applied);
+  CHECK(Randomizer_AppliedStatScale().hp_percent == 250);
+  CHECK(Settings_SetText(Settings_Find("rando_enemy_atk"), "175") ==
+        kSettingChange_Applied);
+  CHECK(Randomizer_AppliedStatScale().attack_percent == 175);
+
+  RandomizerConfig campaign = Randomizer_CurrentConfig();
+  CHECK(Randomizer_BindCampaign(&campaign));
+  CHECK(!Randomizer_CanEditDraft());
+  for (int i = 0; i < g_setting_desc_count; i++) {
+    const SettingDesc *desc = &g_setting_descs[i];
+    if (!Settings_IsRandomizer(desc) || desc->type == kSettingType_Action)
+      continue;
+    long before = 0, after = 0;
+    CHECK(Settings_GetLong(desc, &before));
+    CHECK(Settings_SetLong(desc, before) == kSettingChange_Rejected);
+    CHECK(Settings_SetLong(desc, before == desc->minval
+        ? desc->maxval : desc->minval) == kSettingChange_Rejected);
+    CHECK(Settings_SetText(desc, "1") == kSettingChange_Rejected);
+    CHECK(Settings_Reset(desc) == kSettingChange_Rejected);
+    CHECK(Settings_GetLong(desc, &after) && after == before);
+  }
+  CHECK(Randomizer_LastSummary()->seed == 54321);
+  CHECK(Randomizer_AppliedStatScale().hp_percent == 250);
+  Randomizer_ReleaseCampaign();
+  CHECK(Randomizer_CanEditDraft());
+  CHECK(Settings_Reset(Settings_Find("rando_enemy_hp")) ==
+        kSettingChange_Applied);
+  CHECK(Randomizer_AppliedStatScale().hp_percent == 100);
+  CHECK(Settings_SetLong(Settings_Find("rando_enable"), 0) ==
+        kSettingChange_Applied);
+  CHECK(!Randomizer_LastSummary()->applied);
+  CHECK(Randomizer_AppliedStatScale().attack_percent == 100);
+}
+
 int main(int argc,char **argv) {
   if(argc==2&&!strcmp(argv[1],"--dump-ui-catalog")) {DumpInterfaceInventory();return 0;}
   TestLocalizationPackIdentity();
@@ -2251,6 +2305,7 @@ int main(int argc,char **argv) {
   TestInputHintDeviceRetention();
   TestHardwareCapabilities();
   TestGpuBackendChoice();
+  TestRandomizerDraftEdits();
   ClearSettingsEnv();
   Settings_SetChangeObserver(NULL);
   Settings_SetActionObserver(NULL);

@@ -321,6 +321,9 @@ struct SettingDesc {
   SaveEditorPage save_page;
   SettingAction action;
   bool menu_hidden;
+  /* Runtime edits may be locked by their feature owner independently of menu
+   * availability. NULL permits edits; boot-time loading bypasses this gate. */
+  bool (*can_change)(void);
 };
 
 typedef enum {

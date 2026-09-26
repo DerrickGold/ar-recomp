@@ -16,6 +16,7 @@
 #include "host/campaign_identity.h"
 #include "host/host_video.h"
 #include "randomizer/randomizer.h"
+#include "save/save_editor.h"
 #include "save/save_slot_manager.h"
 #include "save/save_slots.h"
 #include "save/save_system.h"
@@ -267,7 +268,7 @@ void SaveSlotHost_AttachBatterySave(bool headless) {
 
     SaveEditRequest edits;
     if(s_managed_slots)g_settings.save_edit_armed=false;
-    bool staged = RuntimeSettings_BuildSaveEditRequest(&edits);
+    bool staged = SaveEditor_BuildRequest(&g_settings, &edits);
     if (staged && g_settings.save_edit_armed) {
       if (!SaveSystem_ApplyEdits(
               &edits, true, false, g_settings.save_autobackup, &error))

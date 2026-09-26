@@ -1057,6 +1057,15 @@ if(BUILD_TESTING)
     target_include_directories(actraiser_hle_fatal_test_support PUBLIC
         ${CMAKE_SOURCE_DIR}/src)
 
+    # Tests using the real save store share its complete dependency closure.
+    # Narrow adapters can still substitute SaveSystem functions by omitting this
+    # target, as save_editor_test does. Production uses the shipping manifest.
+    add_library(actraiser_save_test_support STATIC
+        src/save/save_system.c src/save/save_paths.c
+        src/host/atomic_replace.c src/localization/unicode_grapheme.c)
+    target_include_directories(actraiser_save_test_support PUBLIC
+        ${CMAKE_SOURCE_DIR}/src)
+
     add_executable(actraiser_consolidated_utils_test
         tests/consolidated_utils_test.c
         src/replacements/manifest_utils.c
@@ -2180,8 +2189,9 @@ if(BUILD_TESTING)
     add_executable(actraiser_lair_history_test
         tests/actraiser_lair_history_test.c src/actraiser/actraiser_lair_history.c
         src/actraiser/actraiser_cpu_hle_internal.c src/actraiser/actraiser_hle_fatal.c
-        src/save/save_system.c src/save/save_paths.c src/host/atomic_replace.c src/localization/unicode_grapheme.c)
-    target_link_libraries(actraiser_lair_history_test PRIVATE actraiser_regional_rules)
+    )
+    target_link_libraries(actraiser_lair_history_test PRIVATE
+        actraiser_regional_rules actraiser_save_test_support)
     target_include_directories(actraiser_lair_history_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_lair_history COMMAND actraiser_lair_history_test)
@@ -2195,9 +2205,9 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_lair_reloads_test tests/actraiser_lair_reloads_test.c
         src/actraiser/actraiser_lair_reloads.c
-        src/save/save_system.c src/save/save_paths.c src/host/atomic_replace.c src/localization/unicode_grapheme.c
         ${SNESRECOMP_RUNNER_ROOT}/src/support/sha256.c)
-    target_link_libraries(actraiser_lair_reloads_test PRIVATE actraiser_regional_rules)
+    target_link_libraries(actraiser_lair_reloads_test PRIVATE
+        actraiser_regional_rules actraiser_save_test_support)
     target_include_directories(actraiser_lair_reloads_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_lair_reloads COMMAND actraiser_lair_reloads_test)
@@ -2356,6 +2366,7 @@ if(BUILD_TESTING)
         src/host/atomic_replace.c
         src/randomizer/randomizer.c src/randomizer/randomizer_config.c src/action/action_placements.c
         src/settings_overlay/settings_overlay.c
+        src/settings_overlay/save_slots/save_slot_menu.c
         src/settings_overlay/menu_input.c
         src/settings_overlay/settings_overlay_artwork.c
         src/settings_overlay/settings_overlay_palette.c
@@ -2792,12 +2803,16 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_music_manifest COMMAND actraiser_music_manifest_test
         ${CMAKE_SOURCE_DIR}/tests/fixtures/audio/stream-probe.ogg)
 
+    add_executable(actraiser_save_editor_test
+        tests/save_editor_test.c src/save/save_editor.c)
+    target_include_directories(actraiser_save_editor_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    add_test(NAME actraiser_save_editor COMMAND actraiser_save_editor_test)
+
     add_executable(actraiser_save_system_test
         tests/save_system_test.c
-        src/save/save_system.c src/save/save_paths.c
-        src/host/atomic_replace.c
-        src/localization/unicode_grapheme.c
     )
+    target_link_libraries(actraiser_save_system_test PRIVATE actraiser_save_test_support)
     target_include_directories(actraiser_save_system_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
@@ -2811,9 +2826,8 @@ if(BUILD_TESTING)
         tests/actraiser_save_transaction_test.c
         src/actraiser/actraiser_save_transaction.c
         src/actraiser/actraiser_hle_fatal.c
-        src/save/save_system.c src/save/save_paths.c
-        src/host/atomic_replace.c
-        src/localization/unicode_grapheme.c)
+    )
+    target_link_libraries(actraiser_save_transaction_test PRIVATE actraiser_save_test_support)
     target_include_directories(actraiser_save_transaction_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_save_transaction COMMAND actraiser_save_transaction_test)
@@ -2821,7 +2835,8 @@ if(BUILD_TESTING)
     add_executable(actraiser_story_snapshot_test
         tests/actraiser_story_snapshot_test.c
         src/actraiser/actraiser_story_snapshot.c
-        src/save/save_system.c src/save/save_paths.c src/host/atomic_replace.c src/localization/unicode_grapheme.c)
+    )
+    target_link_libraries(actraiser_story_snapshot_test PRIVATE actraiser_save_test_support)
     target_include_directories(actraiser_story_snapshot_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_story_snapshot COMMAND actraiser_story_snapshot_test)
@@ -2832,10 +2847,9 @@ if(BUILD_TESTING)
         tests/regional_session_test.c
         src/randomizer/randomizer_config.c
         src/save/save_checkpoint.c
-        src/save/save_system.c src/save/save_paths.c
-        src/host/atomic_replace.c
-        src/localization/unicode_grapheme.c)
-    target_link_libraries(actraiser_regional_session_test PRIVATE actraiser_regional_rules)
+    )
+    target_link_libraries(actraiser_regional_session_test PRIVATE
+        actraiser_regional_rules actraiser_save_test_support)
     target_include_directories(actraiser_regional_session_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     add_test(NAME actraiser_regional_session COMMAND actraiser_regional_session_test)
 
@@ -2849,10 +2863,9 @@ if(BUILD_TESTING)
         src/randomizer/randomizer_config.c
         src/host/campaign_identity.c
         src/save/save_checkpoint.c
-        src/save/save_system.c src/save/save_paths.c
-        src/host/atomic_replace.c
-        src/localization/unicode_grapheme.c)
-    target_link_libraries(actraiser_regional_campaign_test PRIVATE actraiser_regional_rules)
+    )
+    target_link_libraries(actraiser_regional_campaign_test PRIVATE
+        actraiser_regional_rules actraiser_save_test_support)
     target_include_directories(actraiser_regional_campaign_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_regional_campaign COMMAND actraiser_regional_campaign_test)
@@ -2868,7 +2881,8 @@ if(BUILD_TESTING)
         ${AR_SAVE_SLOT_TEST_SOURCES} src/save/save_slots.c src/save/save_slot_manager.c
         src/actraiser/regional/actraiser_regional_editor.c
         src/actraiser/regional/actraiser_regional_choices.c)
-    target_link_libraries(actraiser_save_slots_test PRIVATE actraiser_regional_rules)
+    target_link_libraries(actraiser_save_slots_test PRIVATE
+        actraiser_regional_rules actraiser_save_test_support)
     target_include_directories(actraiser_save_slots_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_save_slots COMMAND actraiser_save_slots_test)
@@ -2883,7 +2897,8 @@ if(BUILD_TESTING)
         src/actraiser/actraiser_town_census.c src/actraiser/actraiser_level_goals.c
         src/actraiser/actraiser_cell_map.c src/actraiser/actraiser_cpu_hle_internal.c
         src/actraiser/actraiser_hle_fatal.c src/actraiser/cpu_65816_math.c)
-    target_link_libraries(actraiser_population_conversion_test PRIVATE actraiser_regional_rules)
+    target_link_libraries(actraiser_population_conversion_test PRIVATE
+        actraiser_regional_rules actraiser_save_test_support)
     target_include_directories(actraiser_population_conversion_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_population_conversion COMMAND actraiser_population_conversion_test)
@@ -3111,10 +3126,10 @@ if(BUILD_TESTING)
         src/actraiser/actraiser_cpu_hle_internal.c
         src/actraiser/actraiser_hle_fatal.c
         src/randomizer/randomizer_config.c
-        src/save/save_checkpoint.c src/save/save_system.c src/save/save_paths.c src/host/atomic_replace.c
-        src/localization/unicode_grapheme.c
+        src/save/save_checkpoint.c
         ${SNESRECOMP_RUNNER_ROOT}/src/support/sha256.c)
-    target_link_libraries(actraiser_regional_runtime_test PRIVATE actraiser_regional_rules)
+    target_link_libraries(actraiser_regional_runtime_test PRIVATE
+        actraiser_regional_rules actraiser_save_test_support)
     target_include_directories(actraiser_regional_runtime_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_regional_runtime COMMAND actraiser_regional_runtime_test)
@@ -3123,10 +3138,10 @@ if(BUILD_TESTING)
         tests/regional_characterization_test.c
         src/randomizer/randomizer_config.c
         src/actraiser/regional/actraiser_regional_choices.c
-        src/save/save_checkpoint.c src/save/save_system.c src/save/save_paths.c src/host/atomic_replace.c
-        src/localization/unicode_grapheme.c
+        src/save/save_checkpoint.c
         ${SNESRECOMP_RUNNER_ROOT}/src/support/sha256.c)
-    target_link_libraries(actraiser_regional_characterization_test PRIVATE actraiser_regional_rules)
+    target_link_libraries(actraiser_regional_characterization_test PRIVATE
+        actraiser_regional_rules actraiser_save_test_support)
     target_include_directories(actraiser_regional_characterization_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_regional_characterization
@@ -3261,10 +3276,8 @@ if(BUILD_TESTING)
         tests/actraiser_save_checksum_hle_test.c
         src/actraiser/actraiser_save_checksum.c
         src/actraiser/cpu_65816_math.c
-        src/save/save_system.c src/save/save_paths.c
-        src/host/atomic_replace.c
-        src/localization/unicode_grapheme.c
     )
+    target_link_libraries(actraiser_save_checksum_hle_test PRIVATE actraiser_save_test_support)
     target_include_directories(actraiser_save_checksum_hle_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
@@ -3311,8 +3324,6 @@ if(BUILD_TESTING)
         tests/actraiser_localization_schedule_test.c
         src/sim/menu/sim_menu_model.c
         src/sim/menu/sim_menu_help.c
-        src/save/save_system.c src/save/save_paths.c
-        src/host/atomic_replace.c
         src/localization/text_presentation.c
         src/actraiser/actraiser_localization_schedule.c
         src/actraiser/actraiser_miracle_text.c
@@ -3341,9 +3352,9 @@ if(BUILD_TESTING)
         src/localization/language_keyboard.c
         src/localization/language_contract.c
         src/localization/language_row_shape.c
-        src/localization/unicode_grapheme.c
         ${AR_LOCALIZATION_FRAME_SOURCES})
-    target_link_libraries(actraiser_localization_schedule_test PRIVATE actraiser_regional_rules)
+    target_link_libraries(actraiser_localization_schedule_test PRIVATE
+        actraiser_regional_rules actraiser_save_test_support)
     target_include_directories(actraiser_localization_schedule_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_localization_schedule

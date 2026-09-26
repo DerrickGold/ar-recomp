@@ -3,6 +3,7 @@
 #include "localization/unicode_grapheme.h"
 #include "localization/interface_text.h"
 #include "settings_overlay/settings_overlay_internal.h"
+#include "settings_overlay/save_slots/save_slot_menu.h"
 #include "settings_overlay/settings_overlay_artwork.h"
 #include "settings_overlay/settings_overlay_palette.h"
 #include "settings_overlay/settings_overlay_localization.h"
@@ -36,7 +37,6 @@ enum {
   /* Nav rows are as tall as a section icon; the eight sections then fill the
    * column without scrolling at any ordinary window size. */
   kNavRowHeight = 17,
-  kSmallLineHeight = 9,
   kTabBarHeight = 12,
   /* Hold-to-accelerate timing. The initial delay is what separates a tap
    * (single fine step) from a hold; after it, a step fires every interval. */
@@ -47,10 +47,10 @@ enum {
 
 /* ARGB() is defined in settings_overlay_internal.h (shared with the panel). */
 
-static const uint32_t kPanel = ARGB(255, 0, 0, 0);
+const uint32_t kPanel = ARGB(255, 0, 0, 0);
 static const uint32_t kFrameDark = ARGB(255, 45, 63, 78);
 static const uint32_t kFrameLight = ARGB(255, 164, 196, 219);
-static const uint32_t kHighlight = ARGB(255, 22, 57, 83);
+const uint32_t kHighlight = ARGB(255, 22, 57, 83);
 
 /* Colors sampled from the game's own Sky Palace menu CGRAM (runs/.../cgram),
  * so the overlay reads as ActRaiser rather than drifting into a custom scheme:
@@ -62,7 +62,7 @@ static const uint32_t kHighlight = ARGB(255, 22, 57, 83);
  *  - the warm gold is the game's own highlight text color (CGRAM pal0 #6),
  *    used for the blinking cursor and the restart marker. */
 const uint32_t kSteelBlue = ARGB(255, 164, 196, 219);
-static const uint32_t kSteelDim = ARGB(255, 74, 104, 130);
+const uint32_t kSteelDim = ARGB(255, 74, 104, 130);
 const uint32_t kSelectYellow = ARGB(255, 255, 230, 0);
 const uint32_t kGameGold = ARGB(255, 255, 180, 65);
 static const uint32_t kQualityOfLifeBlue = ARGB(255, 156, 205, 255);
@@ -326,18 +326,6 @@ static const char kSectionResetKey[] = "reset_section_defaults";
 ArRenderDevice *s_render_device;  /* extern: debug panel shares the device */
 static SDL_Window *s_window;      /* SDL input service only; never renders */
 static bool s_open;
-static bool SlotMenuActive(void);
-static bool SlotDecisionActive(void);
-static bool SlotConfirmAdvancedAction(const SettingDesc *desc);
-static const char *SlotAdvancedTitle(void);
-static bool SlotMenuAvailable(void);
-static bool SlotReturnFromAdvanced(void);
-static bool SlotMenuNav(MenuNav nav,bool repeat);
-static void SlotMenuRender(const MenuLayout *layout);
-static void SlotMenuClose(void);
-static void SlotMenuRefresh(void);
-static void SlotTabState(int *active_tab,int *tab_count);
-static const char *SlotMenuKey(void);
 static bool s_submenu_open;
 static int s_section;
 /* Per-section tab memory: leaving Town 3D on its Weather tab and coming back
@@ -353,6 +341,10 @@ static int s_tab_scroll;
 static int s_nav_top_row;
 static int s_nav_visible_rows = 9;
 static int s_row;
+static struct {
+  int section, row, top, tab;
+  bool submenu;
+} s_slot_parent;
 static int s_top_row;
 static int s_visible_rows = 9;
 static int s_auto_menu_scale_percent = kPercentScale;
@@ -370,6 +362,17 @@ static struct {
   char title[256], body[16384];
   int top_line, total_lines, visible_lines;
 } s_details;
+void SettingsOverlay_CloseDetails(void) { s_details.open = false; }
+
+void SettingsOverlay_ShowDetails(const SettingsOverlayDetailsText *text) {
+  if (!text || !text->body[0]) return;
+  snprintf(s_details.title, sizeof(s_details.title), "%s", text->title);
+  snprintf(s_details.body, sizeof(s_details.body), "%s", text->body);
+  s_details.top_line = s_details.total_lines = 0;
+  s_details.visible_lines = 1;
+  s_details.open = true;
+}
+
 /* Overlay-local advisory. Separate from host-owned save/Continue decisions:
  * dismissing it returns to the same tab; no host can consume its result. */
 static struct {
@@ -957,6 +960,8 @@ static void SetStatus(const char *text) {
 /* Persist the current settings to disk and report the outcome. Split from the
  * apply step so a held value can be applied live every frame but written once
  * on release. */
+void SettingsOverlay_SetStatus(const char *text) { SetStatus(text); }
+
 static void PersistChange(SettingChangeResult result) {
   char settings_file[kHostPathCapacity];
   const char *settings_path = getenv("AR_OVERLAY_TEST_SETTINGS_PATH");
@@ -1120,9 +1125,9 @@ static void CommitEditing(void) {
 static void InvokeSelectedAction(void) {
   const SettingDesc *desc = SelectedDesc();
   if (!desc || desc->type != kSettingType_Action) return;
-  if(SlotConfirmAdvancedAction(desc))return;
+  if(SaveSlotMenu_ConfirmEditorAction(desc))return;
   bool success=Settings_InvokeAction(desc);
-  if(success && SlotMenuActive())s_status[0]=0;
+  if(success && SaveSlotMenu_Active())s_status[0]=0;
   else SetStatus(Ui(success?"overlay.status.action_complete":"overlay.status.action_failed"));
 }
 
@@ -1665,7 +1670,7 @@ static void SkipUnselectableRow(void) {
 void SettingsOverlay_Refresh(void) {
   if (!s_open)
     return;
-  SlotMenuRefresh();
+  SaveSlotMenu_Refresh();
   if (NormalizeNavigation()) {
     EndValueHold();
     StopEditing();
@@ -1706,7 +1711,7 @@ static void MoveRow(int direction) {
  * the row cursor: the two lists have nothing in common, so carrying an index
  * across would land somewhere arbitrary. */
 static void MoveTab(int direction) {
-  if(!s_submenu_open && ActiveSection()->icon==kOverlayIcon_Save && SlotMenuAvailable())return;
+  if(!s_submenu_open && ActiveSection()->icon==kOverlayIcon_Save && SaveSlotMenu_Available())return;
   const MenuSection *section = ActiveSection();
   if (VisibleTabCount(s_section) <= 1) return;
   EndValueHold();
@@ -1731,7 +1736,7 @@ static void MoveTab(int direction) {
 
 static void EnterSection(void) {
   ClearSectionResetArm();
-  if(ActiveSection()->icon==kOverlayIcon_Save && SlotMenuAvailable()) {
+  if(ActiveSection()->icon==kOverlayIcon_Save && SaveSlotMenu_Available()) {
     if(!SettingsOverlay_OpenSaveSlots(false))SetStatus(Ui("slots.read_failed"));
     return;
   }
@@ -1741,6 +1746,27 @@ static void EnterSection(void) {
   SettingsOverlay_Refresh();
   SkipUnselectableRow();
   EnsureSelectedRowVisible();
+}
+
+void SettingsOverlay_SetSaveSlotHooks(const SettingsOverlaySaveSlotHooks *hooks) {
+  SaveSlotMenu_SetHooks(hooks);
+}
+
+bool SettingsOverlay_OpenSaveSlots(bool randomized) {
+  if (!s_open || !SaveSlotMenu_Available() ||
+      (randomized && !g_settings.show_debug_settings)) return false;
+  if (!randomized && SaveSlotMenu_ReturnFromEditor()) {
+    s_status[0] = 0;
+    return true;
+  }
+  if (!SaveSlotMenu_Open(randomized)) return false;
+  s_slot_parent.section = s_section;
+  s_slot_parent.row = s_row;
+  s_slot_parent.top = s_top_row;
+  s_slot_parent.tab = s_tab[s_section];
+  s_slot_parent.submenu = s_submenu_open;
+  s_status[0] = 0;
+  return true;
 }
 
 bool SettingsOverlay_Init(ArRenderDevice *render_device, SDL_Window *window,
@@ -1761,7 +1787,8 @@ bool SettingsOverlay_ReloadTextures(const uint8_t *rom_data, size_t rom_size) {
 }
 
 void SettingsOverlay_Destroy(void) {
-  SlotMenuClose();
+  SaveSlotMenu_Close();
+  s_status[0] = 0;
   SettingsOverlay_SetSaveSlotHooks(NULL);
   StopEditing();
   ArUiTextRenderer_Destroy(&s_ui_text);
@@ -1810,7 +1837,8 @@ void SettingsOverlay_Open(void) {
 
 void SettingsOverlay_Close(void) {
   if (!s_open) return;
-  SlotMenuClose();
+  SaveSlotMenu_Close();
+  s_status[0] = 0;
   s_details.open = false;
   memset(&s_regional_confirmation, 0, sizeof(s_regional_confirmation));
   if (s_decision.result == kOverlayDecision_Pending)
@@ -1869,7 +1897,7 @@ SettingsOverlayDecisionResult SettingsOverlay_TakeDecisionResult(void) {
 
 const char *SettingsOverlay_SelectedKey(void) {
   if (!s_open) return "";
-  if(SlotMenuActive() || SlotDecisionActive())return SlotMenuKey();
+  if(SaveSlotMenu_Active() || SaveSlotMenu_DecisionActive())return SaveSlotMenu_SelectedKey();
   if (ActiveTabIsRegional()) return s_regional_valid && SelectedRegionRow()
       ? SelectedRegionRow()->key : "regional_no_campaign";
   /* The layer editor's rows have no descriptor key, so they report a synthesized
@@ -1912,7 +1940,7 @@ bool SettingsOverlay_GetNavigationState(int *selected_ordinal,
 
 bool SettingsOverlay_GetTabState(int *active_tab, int *tab_count) {
   if (!s_open) return false;
-  if(SlotMenuActive()){SlotTabState(active_tab,tab_count);return true;}
+  if(SaveSlotMenu_Active()){SaveSlotMenu_TabState(active_tab,tab_count);return true;}
   /* Report positions among the VISIBLE tabs — hidden (all-debug) tabs are not
    * shown and cannot be navigated to, so a caller counting tabs must not see
    * them. */
@@ -2041,7 +2069,31 @@ static void ApplyMenuNav(MenuNav nav, bool repeat) {
     return;
   }
   if (SettingsOverlayPalette_ApplyNav(nav, repeat)) return;
-  if(SlotMenuNav(nav,repeat))return;
+  switch (SaveSlotMenu_HandleNav(nav, repeat)) {
+    case kSaveSlotMenuNav_Unhandled: break;
+    case kSaveSlotMenuNav_Handled: return;
+    case kSaveSlotMenuNav_CloseOverlay:
+      SettingsOverlay_Close();
+      return;
+    case kSaveSlotMenuNav_OpenEditor:
+      for (int section = 0; section < kSectionCount; section++)
+        if (kSections[section].icon == kOverlayIcon_Save) s_section = section;
+      s_submenu_open = true;
+      s_row = s_top_row = 0;
+      s_tab[s_section] = kSaveEditorPage_Actions;
+      s_status[0] = 0;
+      SettingsOverlay_Refresh();
+      return;
+    case kSaveSlotMenuNav_ReturnToParent:
+      s_submenu_open = s_slot_parent.submenu;
+      s_section = s_slot_parent.section;
+      s_row = s_slot_parent.row;
+      s_top_row = s_slot_parent.top;
+      s_tab[s_section] = s_slot_parent.tab;
+      s_status[0] = 0;
+      SettingsOverlay_Refresh();
+      return;
+  }
   if (!s_submenu_open) {
     switch (nav) {
       case kMenuNav_Up:      MoveSection(-1); break;
@@ -2083,7 +2135,8 @@ static void ApplyMenuNav(MenuNav nav, bool repeat) {
       if (!repeat) {
         EndValueHold();
         ClearSectionResetArm();
-        if(!SlotReturnFromAdvanced())s_submenu_open = false;
+        if (!SaveSlotMenu_ReturnFromEditor()) s_submenu_open = false;
+        else s_status[0] = 0;
       }
       break;
     case kMenuNav_Close:
@@ -2492,7 +2545,7 @@ static bool DrawUnicodeText(const MenuLayout *layout, int x, int y,
       ArUiTextRenderer_Draw(&s_ui_text, &run);
 }
 
-static void DrawTextN(const MenuLayout *layout, int x, int y,
+void DrawTextN(const MenuLayout *layout, int x, int y,
                       const char *text, int max_chars, TextStyle style) {
   if (!text || max_chars <= 0) return;
   if (DrawUnicodeText(layout, x, y, text, max_chars, kGlyphSize,
@@ -2619,7 +2672,7 @@ void SettingsOverlay_DrawGameText(int x, int y, int scale, uint8_t alpha,
         glyph_count * kIndicesPerGlyph, &draw_state);
 }
 
-static int CappedTextLength(const char *text, int max_chars) {
+int CappedTextLength(const char *text, int max_chars) {
   return OverlayCellCount(text, max_chars);
 }
 
@@ -2681,7 +2734,7 @@ void DrawSmallText(const MenuLayout *layout, int x, int y,
   DrawSmallTextN(layout, x, y, text, 512, color);
 }
 
-static int SmallTextWidth(const char *text) {
+int SmallTextWidth(const char *text) {
   return OverlayCellCount(text, INT32_MAX) * kDebugGlyphWidth;
 }
 
@@ -2689,12 +2742,12 @@ static int SmallTextWidth(const char *text) {
  * nearest-neighbour keeps integer multiples crisp. `selected` picks the
  * colored game palette (the highlighted slot) over the grey one, and `alpha`
  * fades an unselected, un-focused nav row so it reads as recessive. */
-static void DrawSectionIcon(const MenuLayout *layout, int x, int y, int size,
-                            int section, bool selected, int alpha) {
+void DrawOverlayIcon(const MenuLayout *layout, int x, int y, int size,
+                            SettingsOverlayIcon icon, bool selected, int alpha) {
   if (!ArRenderTexture_IsValid(SettingsOverlayArtwork_Get()->icons) ||
-      section < 0 || section >= kSectionCount) return;
+      icon < 0 || icon >= kOverlayIcon_Count) return;
   const ArRenderRectF source = {
-    (float)(kSections[section].icon * kIconSize), selected ? (float)kIconSize : 0.0f,
+    (float)(icon * kIconSize), selected ? (float)kIconSize : 0.0f,
     (float)kIconSize, (float)kIconSize,
   };
   const ArRenderRectF destination = ToRenderRect(
@@ -2704,12 +2757,18 @@ static void DrawSectionIcon(const MenuLayout *layout, int x, int y, int size,
       (ArRenderColorF){1.0f, 1.0f, 1.0f, (float)alpha / 255.0f});
 }
 
+static void DrawSectionIcon(const MenuLayout *layout, int x, int y, int size,
+                            int section, bool selected, int alpha) {
+  if (section < 0 || section >= kSectionCount) return;
+  DrawOverlayIcon(layout, x, y, size, kSections[section].icon, selected, alpha);
+}
+
 /* A slim track with a proportional thumb, drawn in the panel's inner gutter.
  * Replaces the pair of blinking ^ / v glyphs the lists used to carry: those
  * cost a full 8px text cell out of the value column and only said "there is
  * more", never how much more or where you are in it. Draws nothing when the
  * whole list already fits. */
-static void DrawScrollBar(const MenuLayout *layout, int x, int y, int height,
+void DrawScrollBar(const MenuLayout *layout, int x, int y, int height,
                           int total, int visible, int top, uint32_t accent) {
   if (total <= visible || visible <= 0 || height <= 0) return;
   FillLogicalRect(layout, x, y, 3, height, ARGB(90, 60, 84, 106));
@@ -2826,7 +2885,7 @@ void DrawDebugHighlightedLine(const MenuLayout *layout,
  * caller can place something underneath. The description panel uses this: at
  * 6px per character it fits the longest tooltips in the table without the
  * truncation the 8px menu font used to force. */
-static int DrawWrappedSmallText(const MenuLayout *layout, int x, int y,
+int DrawWrappedSmallText(const MenuLayout *layout, int x, int y,
                                 const char *text, int max_chars,
                                 int max_lines, uint32_t color) {
   const char *cursor = text;
@@ -2849,7 +2908,7 @@ static int DrawWrappedSmallText(const MenuLayout *layout, int x, int y,
 }
 
 /* Compact preview never grows the footer. An ellipsis points to Details. */
-static void DrawSmallTextPreview(const MenuLayout *layout, int x, int y,
+void DrawSmallTextPreview(const MenuLayout *layout, int x, int y,
     const char *text, int columns, int lines, uint32_t color) {
   if (!text || columns < 4) return;
   if (columns > 127) columns = 127;
@@ -2872,13 +2931,7 @@ static void DrawSmallTextPreview(const MenuLayout *layout, int x, int y,
   }
 }
 
-enum { kMenuHintMax = 7 };
-typedef struct MenuHints {
-  int count;
-  struct { const char *key, *label; } items[kMenuHintMax];
-} MenuHints;
-
-static void AddMenuHint(MenuHints *hints, const char *key, const char *label) {
+void AddMenuHint(MenuHints *hints, const char *key, const char *label) {
   if (!key || !*key || hints->count >= kMenuHintMax) return;
   hints->items[hints->count].key = key;
   hints->items[hints->count++].label = label;
@@ -2893,7 +2946,7 @@ static void DrawHintText(const MenuLayout *layout, int x, int y,
     DrawSmallTextPreview(layout, x, y, text, columns, 1, color);
 }
 
-static void DrawMenuHints(const MenuLayout *layout, int x, int y, int width,
+void DrawMenuHints(const MenuLayout *layout, int x, int y, int width,
                           const MenuHints *hints, uint32_t key_color, uint32_t label_color) {
   if (!hints->count || width <= 0) return;
   enum { kKeyGap = 5, kHintGap = 11 };
@@ -3225,7 +3278,7 @@ static int DrawMenuHeader(const MenuLayout *layout, const MenuChrome *c,
     snprintf(position, sizeof(position), "%d/%d", ActiveVisibleTabPosition() + 1, visible_tabs);
   const int position_x = value_right - SmallTextWidth(position);
   DrawTextN(layout, right_text_x + kIconSize + 6, right_title_y,
-            SlotAdvancedTitle() ? SlotAdvancedTitle() : Ui(section->label),
+            SaveSlotMenu_EditorTitle() ? SaveSlotMenu_EditorTitle() : Ui(section->label),
             (position_x - right_text_x - kIconSize - 14) / kGlyphSize, kText_Normal);
   DrawSmallText(layout, position_x, right_title_y + 1, position, kMutedText);
   /* Translated feedback belongs in the full-width description panel below,
@@ -3841,7 +3894,7 @@ static void DrawMenuFooter(const MenuLayout *layout, const MenuChrome *c,
   } else {
     HINT(select, "overlay.hint.section");
     if (VisibleTabCount(s_section) > 1 &&
-        !(section->icon == kOverlayIcon_Save && SlotMenuAvailable()))
+        !(section->icon == kOverlayIcon_Save && SaveSlotMenu_Available()))
       HINT(tabs, "overlay.hint.tab");
     HINT(confirm, "overlay.hint.open");
     HINT(back, "overlay.hint.close");
@@ -3873,7 +3926,7 @@ static void DrawMenu(const MenuLayout *layout) {
   const bool custom_rows = ActiveSectionIsCustom() || ActiveTabIsRegional();
 
   DrawMenuNavColumn(layout, &chrome);
-  if(!s_submenu_open && section->icon==kOverlayIcon_Save && SlotMenuAvailable()) {
+  if(!s_submenu_open && section->icon==kOverlayIcon_Save && SaveSlotMenu_Available()) {
     DrawSectionIcon(layout,chrome.right_text_x,chrome.top_y+8,kIconSize,s_section,true,255);
     DrawTextN(layout,chrome.right_text_x+kIconSize+6,chrome.top_y+10,
         Ui("slots.title"),(chrome.right_width-56)/kGlyphSize,kText_Normal);
@@ -3889,7 +3942,6 @@ static void DrawMenu(const MenuLayout *layout) {
   DrawMenuFooter(layout, &chrome, section);
 }
 
-#include "settings_overlay/save_slots/slot_view.inc"
 
 void SettingsOverlay_Render(ArRenderRectI game_viewport) {
   SettingsOverlay_Refresh();
@@ -3935,7 +3987,7 @@ void SettingsOverlay_Render(ArRenderRectI game_viewport) {
     DrawDetails(&layout);
     return;
   }
-  if(SlotMenuActive() || SlotDecisionActive()){SlotMenuRender(&layout);return;}
+  if(SaveSlotMenu_Active() || SaveSlotMenu_DecisionActive()){SaveSlotMenu_Draw(&layout);return;}
   DrawMenu(&layout);
   SettingsOverlayPalette_Draw(&layout);
 }

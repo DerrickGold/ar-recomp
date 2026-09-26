@@ -26,7 +26,6 @@
 #include "snesrecomp/game_runtime.h"
 #include "snesrecomp/game/runtime.h" /* g_ram */
 #include "present/frame_timing.h"
-#include "replacements/hd_replacement_host.h"
 #include "snesrecomp/runner.h"
 
 typedef struct FramePpuView {

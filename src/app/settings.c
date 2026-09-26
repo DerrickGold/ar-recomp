@@ -1142,14 +1142,6 @@ static bool RandoRuntimeAvailable(void) {
 static bool RandoEnemyTypesOn(void) {
   return RandoAvailable() && g_settings.rando_enemy_types != kRandomMode_Off;
 }
-/* Title-draft randomizer changes re-run the whole transform. It restores the
- * pristine image first, so re-applying is idempotent and toggling a row off
- * genuinely gives back stock data. */
-static void RandoChanged(const SettingDesc *desc) {
-  (void)desc;
-  Randomizer_Apply();
-}
-
 #define BOOL_SETTING(id, env_name, text, help, cat, def, is_sticky, active, changed) \
   { #id, env_name, text, help, kSettingType_Bool, kApply_Passive, cat, \
     &g_settings.id, def, 0, 1, 1, is_sticky, NULL, 0, active, changed, \
@@ -2413,48 +2405,66 @@ const SettingDesc g_setting_descs[] = {
     kSettingType_Action, kApply_Action, kSettingCat_RandoSeed,
     NULL, 0, 0, 0, 0, false, NULL, 0, NULL, NULL, NULL, NULL,
     .action = kSettingAction_NewRandomizedGame },
-  BOOL_SETTING(rando_enable, "AR_RANDO", "Randomizer",
-               "Choose a randomizer setup before New Game. The seed and options "
-               "are saved with that campaign and restored on Continue. Return "
-               "to the title screen to configure a different run.",
-               kSettingCat_RandoSeed, 0, false, RandoRuntimeAvailable,
-               RandoChanged),
-  INT_SETTING(rando_seed, "AR_RANDO_SEED", "Seed",
-              "The seed determines the next campaign's rolls. The same seed, "
-              "options and starting regional rules reproduce the same setup. "
-              "Continue restores the saved seed without rerolling.",
-              kSettingCat_RandoSeed, 1, 0, 999999999, NULL, RandoAvailable),
+  { "rando_enable", "AR_RANDO", "Randomizer",
+    "Choose a randomizer setup before New Game. The seed and options "
+    "are saved with that campaign and restored on Continue. Return "
+    "to the title screen to configure a different run.",
+    kSettingType_Bool, kApply_Passive, kSettingCat_RandoSeed,
+    &g_settings.rando_enable, 0, 0, 1, 1, false, NULL, 0,
+    RandoRuntimeAvailable, Randomizer_DraftSettingChanged, NULL, NULL,
+    .can_change = Randomizer_CanEditDraft },
+  { "rando_seed", "AR_RANDO_SEED", "Seed",
+    "The seed determines the next campaign's rolls. The same seed, "
+    "options and starting regional rules reproduce the same setup. "
+    "Continue restores the saved seed without rerolling.",
+    kSettingType_Int, kApply_Passive, kSettingCat_RandoSeed,
+    &g_settings.rando_seed, 1, 0, 999999999, 1, false, NULL, 0,
+    RandoAvailable, Randomizer_DraftSettingChanged, NULL, NULL,
+    .can_change = Randomizer_CanEditDraft },
   { "rando_reroll", NULL, "New seed",
     "Draw a fresh seed for the next New Game. Existing saves keep their own seed.",
     kSettingType_Action, kApply_Action, kSettingCat_RandoSeed,
     NULL, 0, 0, 0, 0, false, NULL, 0, RandoAvailable, NULL, NULL, NULL,
     .action = kSettingAction_Reroll },
 
-  BOOL_SETTING(rando_regional_action, "AR_RANDO_REGIONAL_ACTION", "Regional action rules",
-               "Roll each action gameplay rule between US, Japanese and European "
-               "versions at New Game. HP and damage multipliers apply afterward. "
-               "Difficulty, title access, controls and artwork stay as selected.",
-               kSettingCat_RandoSeed, 0, false, RandoAvailable, RandoChanged),
-  BOOL_SETTING(rando_regional_towns, "AR_RANDO_REGIONAL_TOWNS", "Regional town rules",
-               "Roll town gameplay rules at New Game, including construction, "
-               "lairs and miracles. Population support and story goals stay "
-               "compatible. Continue never rerolls developed towns.",
-               kSettingCat_RandoSeed, 0, false, RandoAvailable, RandoChanged),
+  { "rando_regional_action", "AR_RANDO_REGIONAL_ACTION", "Regional action rules",
+    "Roll each action gameplay rule between US, Japanese and European "
+    "versions at New Game. HP and damage multipliers apply afterward. "
+    "Difficulty, title access, controls and artwork stay as selected.",
+    kSettingType_Bool, kApply_Passive, kSettingCat_RandoSeed,
+    &g_settings.rando_regional_action, 0, 0, 1, 1, false, NULL, 0,
+    RandoAvailable, Randomizer_DraftSettingChanged, NULL, NULL,
+    .can_change = Randomizer_CanEditDraft },
+  { "rando_regional_towns", "AR_RANDO_REGIONAL_TOWNS", "Regional town rules",
+    "Roll town gameplay rules at New Game, including construction, "
+    "lairs and miracles. Population support and story goals stay "
+    "compatible. Continue never rerolls developed towns.",
+    kSettingType_Bool, kApply_Passive, kSettingCat_RandoSeed,
+    &g_settings.rando_regional_towns, 0, 0, 1, 1, false, NULL, 0,
+    RandoAvailable, Randomizer_DraftSettingChanged, NULL, NULL,
+    .can_change = Randomizer_CanEditDraft },
 
-  INT_SETTING(rando_enemy_hp, "AR_RANDO_ENEMY_HP", "Enemy health",
-              "Scales each enemy's selected regional base HP. Applied at spawn "
-              "before difficulty adjustments; some bosses later replace their own HP.",
-              kSettingCat_RandoEnemies, 100, 10, 1000, NULL, RandoAvailable),
-  INT_SETTING(rando_enemy_atk, "AR_RANDO_ENEMY_ATK", "Enemy damage",
-              "Scales each enemy's selected regional base contact and attack damage. "
-              "Applied at spawn before difficulty adjustments; terrain damage is separate.",
-              kSettingCat_RandoEnemies, 100, 10, 1000, NULL, RandoAvailable),
+  { "rando_enemy_hp", "AR_RANDO_ENEMY_HP", "Enemy health",
+    "Scales each enemy's selected regional base HP. Applied at spawn "
+    "before difficulty adjustments; some bosses later replace their own HP.",
+    kSettingType_Int, kApply_Passive, kSettingCat_RandoEnemies,
+    &g_settings.rando_enemy_hp, 100, 10, 1000, 1, false, NULL, 0,
+    RandoAvailable, Randomizer_DraftSettingChanged, NULL, NULL,
+    .can_change = Randomizer_CanEditDraft },
+  { "rando_enemy_atk", "AR_RANDO_ENEMY_ATK", "Enemy damage",
+    "Scales each enemy's selected regional base contact and attack damage. "
+    "Applied at spawn before difficulty adjustments; terrain damage is separate.",
+    kSettingType_Int, kApply_Passive, kSettingCat_RandoEnemies,
+    &g_settings.rando_enemy_atk, 100, 10, 1000, 1, false, NULL, 0,
+    RandoAvailable, Randomizer_DraftSettingChanged, NULL, NULL,
+    .can_change = Randomizer_CanEditDraft },
   { "rando_enemy_types", "AR_RANDO_ENEMY_TYPES", "Enemy types",
     "Shuffle which enemy stands where. Bosses and item statues are left alone.",
     kSettingType_Enum, kApply_Passive, kSettingCat_RandoEnemies,
     &g_settings.rando_enemy_types, kRandomMode_Off, kRandomMode_Off,
     kRandomMode_Shuffle, 1, false, kRandoShuffleLabels, 2,
-    RandoAvailable, RandoChanged, NULL, NULL },
+    RandoAvailable, Randomizer_DraftSettingChanged, NULL, NULL,
+    .can_change = Randomizer_CanEditDraft },
   { "rando_enemy_scope", "AR_RANDO_ENEMY_SCOPE", "Enemy shuffle range",
     "How far an enemy may move. Act is the widest safe range: every map of an "
     "act shares one animation set, so a type moved inside an act still draws "
@@ -2462,7 +2472,8 @@ const SettingDesc g_setting_descs[] = {
     kSettingType_Enum, kApply_Passive, kSettingCat_RandoEnemies,
     &g_settings.rando_enemy_scope, kRandomScope_Act, kRandomScope_Map,
     kRandomScope_Act, 1, false, kRandoScopeLabels, kRandomScope_Count,
-    RandoEnemyTypesOn, RandoChanged, NULL, NULL },
+    RandoEnemyTypesOn, Randomizer_DraftSettingChanged, NULL, NULL,
+    .can_change = Randomizer_CanEditDraft },
 
   { "rando_statue_drops", "AR_RANDO_DROPS", "Statue drops",
     "What the breakable statues hold. Shuffle redistributes the items a map "
@@ -2470,14 +2481,16 @@ const SettingDesc g_setting_descs[] = {
     kSettingType_Enum, kApply_Passive, kSettingCat_RandoItems,
     &g_settings.rando_statue_drops, kRandomMode_Off, kRandomMode_Off,
     kRandomMode_Random, 1, false, kRandoModeLabels, kRandomMode_Count,
-    RandoAvailable, RandoChanged, NULL, NULL },
+    RandoAvailable, Randomizer_DraftSettingChanged, NULL, NULL,
+    .can_change = Randomizer_CanEditDraft },
   { "rando_statue_spots", "AR_RANDO_STATUES", "Statue placement",
     "Swap the statues of a map between each other's positions. Every result is "
     "somewhere a statue already stood, so none can end up unreachable.",
     kSettingType_Enum, kApply_Passive, kSettingCat_RandoItems,
     &g_settings.rando_statue_spots, kRandomMode_Off, kRandomMode_Off,
     kRandomMode_Shuffle, 1, false, kRandoShuffleLabels, 2,
-    RandoAvailable, RandoChanged, NULL, NULL },
+    RandoAvailable, Randomizer_DraftSettingChanged, NULL, NULL,
+    .can_change = Randomizer_CanEditDraft },
 
   { "rando_lair_spots", "AR_RANDO_LAIRS", "Lair positions",
     "Swap each town's four monster lairs between their own positions. Kept "
@@ -2485,13 +2498,15 @@ const SettingDesc g_setting_descs[] = {
     kSettingType_Enum, kApply_Passive, kSettingCat_RandoSim,
     &g_settings.rando_lair_spots, kRandomMode_Off, kRandomMode_Off,
     kRandomMode_Shuffle, 1, false, kRandoShuffleLabels, 2,
-    RandoAvailable, RandoChanged, NULL, NULL },
+    RandoAvailable, Randomizer_DraftSettingChanged, NULL, NULL,
+    .can_change = Randomizer_CanEditDraft },
   { "rando_lair_types", "AR_RANDO_LAIR_TYPES", "Lair monsters",
     "Which monster each lair sends out. Any town can host any of the four.",
     kSettingType_Enum, kApply_Passive, kSettingCat_RandoSim,
     &g_settings.rando_lair_types, kRandomMode_Off, kRandomMode_Off,
     kRandomMode_Random, 1, false, kRandoModeLabels, kRandomMode_Count,
-    RandoAvailable, RandoChanged, NULL, NULL },
+    RandoAvailable, Randomizer_DraftSettingChanged, NULL, NULL,
+    .can_change = Randomizer_CanEditDraft },
 
   BOOL_SETTING(scene_inspector, "AR_SCENE_INSPECTOR", "Scene inspector",
                "Click the game to pause and identify BG tiles, OAM sprites, "
@@ -2999,7 +3014,6 @@ static SettingChangeResult FinishChange(const SettingDesc *desc,
   if (g_settings.localization_content != 0)
     g_settings.localization_presentation = 1;
   if (desc->on_change) desc->on_change(desc);
-  else if(Settings_IsRandomizer(desc))Randomizer_Apply();
   SettingChangeResult result = sticky_disable
       ? kSettingChange_AppliedStickyDisable
       : desc->apply == kApply_Restart
@@ -3010,7 +3024,8 @@ static SettingChangeResult FinishChange(const SettingDesc *desc,
 }
 
 SettingChangeResult Settings_SetLong(const SettingDesc *desc, long value) {
-  if(Settings_IsRandomizer(desc) && Randomizer_CampaignBound())return kSettingChange_Rejected;
+  if (desc && desc->can_change && !desc->can_change())
+    return kSettingChange_Rejected;
   long old_value;
   if (!Settings_GetLong(desc, &old_value)) return kSettingChange_Rejected;
   value = NormalizeLong(desc, value);
@@ -3040,6 +3055,8 @@ SettingChangeResult Settings_SetText(const SettingDesc *desc,
   if (desc->type == kSettingType_Action) return kSettingChange_Rejected;
   if (desc->type == kSettingType_Custom ||
       desc->type == kSettingType_Binding) {
+    if (desc->can_change && !desc->can_change())
+      return kSettingChange_Rejected;
     if (!desc->parse) return kSettingChange_Rejected;
     char before[512], after[512];
     Settings_FormatValue(desc, before, sizeof(before));
