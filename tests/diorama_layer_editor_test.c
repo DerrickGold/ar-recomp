@@ -836,19 +836,9 @@ static void TestUpperIsBoundedAndTerminated(void) {
   }
 }
 
-/* A fully authored room must FIT the buffer diorama.c formats it into, or
- * Diorama_SaveLayerManifest skips the room and the author's work is gone on the
- * next save. That buffer was 1024 and the true worst case is 1488, so this pins
- * the number rather than trusting a guess.
- *
- * Every key at its widest rendering, which is what a HAND-EDITED manifest can
- * hold -- the editor itself authors one shape per plane and stays near 640. */
-static void TestWorstCaseRoomFitsTheSaveBuffer(void) {
-  /* Must track the `char text[]` in Diorama_SaveLayerManifest. Not shared as a
-   * constant because that file is in no test binary; the comment there names this
-   * test, so the two cannot drift silently. */
-  enum { kSaveBufferBytes = 2048 };
-
+/* Every key at its widest rendering must survive formatting and reparsing.
+ * Persistence sizes its output dynamically through MergeManifest. */
+static void TestFullyAuthoredRoomRoundTrips(void) {
   DioramaRoomOverride room;
   memset(&room, 0, sizeof(room));
   room.used = true;
@@ -878,7 +868,6 @@ static void TestWorstCaseRoomFitsTheSaveBuffer(void) {
   size_t need = DioramaLayerOrder_FormatRoom(&room, text, sizeof(text));
   CHECK(need > 0);
   CHECK(need < sizeof(text));          /* the probe's own buffer sufficed */
-  CHECK(need < (size_t)kSaveBufferBytes);   /* THE assertion */
 
   /* And it must reload: a room that fits but does not parse back is no better. */
   DioramaRoomOverride reloaded;
@@ -1032,7 +1021,7 @@ int main(void) {
   TestSteppingNeverDisagreesWithTheRenderer();
   TestSteppingToZeroClearsTheShape();
   TestStackCopiesNeverStepsBelowTwo();
-  TestWorstCaseRoomFitsTheSaveBuffer();
+  TestFullyAuthoredRoomRoundTrips();
   TestUpperIsBoundedAndTerminated();
   TestEachStrategyResolvesToItself();
   TestCycleWrapsThroughEveryStrategy();

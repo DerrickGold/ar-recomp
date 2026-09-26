@@ -247,7 +247,7 @@ int RegionalMenu_DrawRows(const MenuLayout *layout, OverlayRegionPage page,
   }
   for (int row = 0; row < count; ++row) {
     if (row < viewport->top || row >= viewport->top + viewport->visible) continue;
-    const int y = first_row_y + (row - viewport->top) * 13;
+    const int y = first_row_y + (row - viewport->top) * kMenuRowHeight;
     if (!s_regional_valid) {
       DrawSmallTextN(layout, label_x, y, Ui("overlay.region.enter_campaign"),
                      (value_right - label_x) / kDebugGlyphWidth, kMutedText);

@@ -1,6 +1,6 @@
 #include "settings_overlay/settings_overlay_internal.h"
 #include "settings_overlay/settings_overlay.h"
-#include "settings_overlay/settings_overlay_palette.h"
+#include "settings_overlay/layers/layer_palette.h"
 
 #include <string.h>
 

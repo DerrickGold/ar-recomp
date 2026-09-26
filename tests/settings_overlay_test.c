@@ -14,7 +14,7 @@
 #include "settings_overlay/regional/regional_menu.h"
 #include "settings_overlay/settings_overlay_artwork.h"
 #include "settings_overlay/settings_overlay_localization.h"
-#include "settings_overlay/settings_overlay_layers_localization.h"
+#include "settings_overlay/layers/layer_localization.h"
 #include "localization/interface_text.h"
 #include "app/performance_overlay.h"
 #include "platform/sdl/render_sdl_internal.h"

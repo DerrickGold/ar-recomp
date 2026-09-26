@@ -1,5 +1,5 @@
-#ifndef AR_SETTINGS_OVERLAY_LAYERS_LOCALIZATION_H
-#define AR_SETTINGS_OVERLAY_LAYERS_LOCALIZATION_H
+#ifndef AR_LAYER_LOCALIZATION_H
+#define AR_LAYER_LOCALIZATION_H
 
 #include "action/action_bg_tuner.h"
 #include "diorama/diorama_layer_editor.h"

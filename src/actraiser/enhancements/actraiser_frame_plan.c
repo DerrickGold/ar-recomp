@@ -1,3 +1,4 @@
+#include "diorama/diorama_layer_manifest.h"
 /* ActRaiser frame plan: the per-frame presentation decisions for widescreen
  * and diorama (action-BG plans, canvas and vertical margins), the widescreen
  * policy that resolves them before scanout, and the pending/live latch the rest
@@ -369,7 +370,7 @@ static void ActRaiser_ResolveVerticalMarginPolicy(
 const DioramaRoomOverride *ActRaiser_CurrentVirtualLayerRoom(void) {
   if (!g_settings.diorama_mode) return NULL;
   const DioramaRoomOverride *room = DioramaLayerOrder_Find(
-      Diorama_LayerOverrides(), g_ram[kActRaiserWram_MapGroup],
+      DioramaLayerManifest_Table(), g_ram[kActRaiserWram_MapGroup],
       g_ram[kActRaiserWram_CurrentMap]);
   /* Raw map 0701 is reused after the final boss. The face scene owns BG2SC
    * $70; the sky/cloud return scene switches it to $74. The manifest's virtual

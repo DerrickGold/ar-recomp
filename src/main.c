@@ -1,3 +1,4 @@
+#include "diorama/diorama_layer_manifest.h"
 #include "snesrecomp/support/utf8_fs.h"
 
 #include <stdio.h>
@@ -504,7 +505,7 @@ static void AppBoot_InstallSubsystems(AppBoot *app) {
     fprintf(stderr, "[action-room-scene] immutable loader unavailable\n");
   /* Per-room diorama layer overrides. Absent file is the normal case and leaves
    * every room drawing as built. */
-  Diorama_LoadLayerManifest();
+  DioramaLayerManifest_Load();
   SettingsOverlay_SetInspectorInfoProvider(
       HostDevTools_FormatInspectorInfo);
   SettingsOverlayRegionalHost_InstallHooks();

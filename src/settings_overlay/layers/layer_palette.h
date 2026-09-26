@@ -1,5 +1,5 @@
-#ifndef AR_SETTINGS_OVERLAY_PALETTE_H
-#define AR_SETTINGS_OVERLAY_PALETTE_H
+#ifndef AR_LAYER_PALETTE_H
+#define AR_LAYER_PALETTE_H
 #include "settings_overlay/settings_overlay_internal.h"
 #include "settings_overlay/settings_overlay.h"
 #include "diorama/diorama_layer_editor.h"

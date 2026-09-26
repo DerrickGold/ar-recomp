@@ -1,3 +1,4 @@
+#include "diorama/diorama_layer_manifest.h"
 #include "diorama.h"
 
 #include <string.h>
@@ -94,8 +95,8 @@ static bool LayerEditorLiveCgram(
 }
 
 void Diorama_InstallLayerEditor(void) {
-  SettingsOverlay_SetLayerEditorHooks(Diorama_LayerOverrides, Diorama_LiveRoom,
-                                      Diorama_SaveLayerManifest);
+  SettingsOverlay_SetLayerEditorHooks(DioramaLayerManifest_Edit, Diorama_LiveRoom,
+                                      DioramaLayerManifest_Save);
   SettingsOverlay_SetLayerPaletteProvider(LayerEditorLiveCgram);
 }
 

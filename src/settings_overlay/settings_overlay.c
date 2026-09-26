@@ -4,9 +4,9 @@
 #include "settings_overlay/settings_overlay_internal.h"
 #include "settings_overlay/save_slots/save_slot_menu.h"
 #include "settings_overlay/settings_overlay_artwork.h"
-#include "settings_overlay/settings_overlay_palette.h"
+#include "settings_overlay/layers/layer_palette.h"
 #include "settings_overlay/settings_overlay_localization.h"
-#include "settings_overlay/settings_overlay_layers_localization.h"
+#include "settings_overlay/layers/layer_menu.h"
 #include "settings_overlay/regional/regional_panel.h"
 
 #include <stdint.h>
@@ -16,7 +16,6 @@
 
 #include "constants.h"
 #include "diorama/diorama_layer_editor.h"
-#include "action/action_bg_tuner.h"
 #include "host/host_clock.h"
 #include "app/input_map.h"
 #include "render/render_output.h"
@@ -25,7 +24,6 @@
 #include "app/user_data_dir.h"
 
 enum {
-  kRowHeight = 13,
   kMatchGameMaximumScalePercent = 400,
   /* Nav rows are as tall as a section icon; the eight sections then fill the
    * column without scrolling at any ordinary window size. */
@@ -84,7 +82,7 @@ typedef struct MenuSection {
   SettingsOverlayIcon icon;
   const MenuTab *tabs;
   int tab_count;
-  /* Rows built by this file rather than enumerated from the settings registry.
+  /* Rows built by the layer feature rather than enumerated from the settings registry.
    * Only the layer editor uses it: its rows depend on the room the player is
    * standing in, so they cannot be static descriptors. A custom section's tabs
    * carry an index rather than a SettingCategory. */
@@ -211,7 +209,7 @@ _Static_assert((int)(sizeof(kTabsLayers) / sizeof(kTabsLayers[0])) ==
   { .icon = kOverlayIcon_##icon_, .label = (name_), .blurb = (blurb_), .tabs = (tabs_), \
     .tab_count = (int)(sizeof(tabs_) / sizeof((tabs_)[0])), \
     .debug_only = true }
-/* A section whose rows this file builds, and which is developer-only. */
+/* A section whose feature owns its rows, and which is developer-only. */
 #define CUSTOM_DEBUG_SECTION(icon_, name_, blurb_, tabs_) \
   { .icon = kOverlayIcon_##icon_, .label = (name_), .blurb = (blurb_), .tabs = (tabs_), \
     .tab_count = (int)(sizeof(tabs_) / sizeof((tabs_)[0])), \
@@ -365,28 +363,6 @@ InputClass SettingsOverlay_MenuInputDevice(void) {
 static const SettingDesc *s_capture_desc;
 static SettingsOverlayInspectorInfoProvider s_inspector_info_provider;
 
-/* ── Layer editor state ─────────────────────────────────────────────────
- *
- * The rows are rebuilt from diorama_layer_editor.c every time the list is
- * enumerated, so the only state kept here is what the player has chosen: which
- * plane is expanded. The override table itself lives in diorama.c and is
- * reached through the two hooks below.
- *
- * WHY HOOKS RATHER THAN CALLING diorama.c DIRECTLY. This file's test target
- * (CMakeLists.txt:377) links five sources and not diorama.c -- deliberately,
- * since diorama.c drags in the PPU and SDL render path. Calling
- * Diorama_LayerOverrides() here would force that whole closure into the test or
- * force the test to stub it. Injecting the accessor keeps the overlay testable
- * and follows the precedent already set by s_inspector_info_provider, which
- * exists for the same reason. */
-static SettingsOverlayLayerTableFn s_layer_table_provider;
-static SettingsOverlayLayerRoomFn s_layer_room_provider;
-static SettingsOverlayLayerSaveFn s_layer_save_provider;
-static SettingsOverlayLayerPaletteFn s_layer_palette_provider;
-/* Which plane's parameters are expanded, or -1. Held rather than derived from
- * the cursor so the expansion does not collapse while the player steps DOWN
- * through its own parameter rows. */
-static int s_layer_plane = -1;
 static void ClearSectionResetArm(void) {
   s_reset_armed_section = -1;
   s_reset_armed_until = 0;
@@ -415,22 +391,7 @@ static bool ManualAvailable(void) {
   return s_manual_hooks.available && s_manual_hooks.available();
 }
 
-void SettingsOverlay_SetLayerEditorHooks(SettingsOverlayLayerTableFn table,
-                                         SettingsOverlayLayerRoomFn room,
-                                         SettingsOverlayLayerSaveFn save) {
-  s_layer_table_provider = table;
-  s_layer_room_provider = room;
-  s_layer_save_provider = save;
-}
 
-void SettingsOverlay_SetLayerPaletteProvider(
-    SettingsOverlayLayerPaletteFn provider) {
-  s_layer_palette_provider = provider;
-  if (!provider) {
-    SettingsOverlayPalette_Close();
-    SettingsOverlayPalette_ReleaseTexture();
-  }
-}
 
 /* SDL3 SDL_StartTextInput/SDL_StopTextInput require the target window. A
  * headless or non-SDL presentation host supplies none, so these become no-ops. */
@@ -573,12 +534,6 @@ static bool RowBelongsToActiveTab(const SettingDesc *desc) {
          Settings_IsMenuVisible(desc);
 }
 
-/* ── Layer editor rows ───────────────────────────────────────────────────
- *
- * Rebuilt on demand rather than cached. The list depends on the live room, which
- * changes as the player walks, and on which plane is expanded -- caching it
- * would need invalidation on both, and the build is a few dozen snprintf calls
- * on a menu that is only open while the game is paused. */
 static bool ActiveSectionIsCustom(void) {
   return ActiveSection()->custom_rows;
 }
@@ -658,139 +613,10 @@ static SettingMenuRow RegistryMenuRowAt(int index) {
                                                     : (SettingMenuRow){0};
 }
 
-/* Row-name suffix for SettingsOverlay_SelectedKey, so a test can navigate to
- * "bg2hi.copies" rather than counting keypresses through a list whose shape
- * changes with the active shape. These names are a TEST seam, not the manifest
- * grammar -- the file's own keys live in diorama_layer_order.c -- but they are
- * spelled the same so a failure message reads against the file. */
-static const char kLayerResetRoomKey[] = "layer_reset_room";
-static const char *LayerParamKey(DioramaEditorParam param) {
-  switch (param) {
-    case kDioramaEditorParam_Depth:     return "depth";
-    case kDioramaEditorParam_Copies:    return "copies";
-    case kDioramaEditorParam_Density:   return "density";
-    case kDioramaEditorParam_Direction: return "dir";
-    case kDioramaEditorParam_Z:         return "z";
-    case kDioramaEditorParam_Alpha:     return "alpha";
-    case kDioramaEditorParam_TransparentFill: return "transparent";
-    case kDioramaEditorParam_Source:    return "source";
-    case kDioramaEditorParam_Order:     return "order";
-    case kDioramaEditorParam_None:
-    default:                            return "";
-  }
-}
-
-enum { kLayerMenuRowMax = kDioramaEditorRowMax };
-_Static_assert(kActionBgTunerRowMax <= kLayerMenuRowMax,
-               "shared Layers row buffer must fit the BG tuner");
-
-typedef enum LayerMenuRowOwner {
-  kLayerMenuRow_Diorama = 0,
-  kLayerMenuRow_ActionBg,
-} LayerMenuRowOwner;
-
-typedef struct LayerMenuRow {
-  LayerMenuRowOwner owner;
-  char key[48];
-  bool nested;
-  bool selectable;
-  bool separator_before;
-  union {
-    DioramaEditorRow diorama;
-    ActionBgTunerRow action_bg;
-  } source;
-} LayerMenuRow;
-
-static bool ActiveLayerTabIsBgTuner(void) {
-  return ActiveSectionIsCustom() &&
-      ActiveTabIndex() == kDioramaEditorLevelCount;
-}
-
-static int LayerEditorRows(DioramaEditorRow *rows, int capacity) {
-  if (!ActiveSectionIsCustom()) return 0;
-  DioramaEditorContext context;
-  memset(&context, 0, sizeof(context));
-  context.selected_plane = s_layer_plane;
-  if (s_layer_room_provider)
-    context.room_live = s_layer_room_provider(&context.map_group,
-                                              &context.map_number,
-                                              &context.section);
-  const DioramaLayerOrderTable *table =
-      s_layer_table_provider ? s_layer_table_provider() : NULL;
-  return DioramaLayerEditor_BuildRows(
-      table, &context, ActiveTabIndex(), rows, capacity);
-}
-
-static int LayerMenuRows(LayerMenuRow *out, int capacity) {
-  if (!ActiveSectionIsCustom() || !out || capacity <= 0) return 0;
-  int count = 0;
-  if (ActiveLayerTabIsBgTuner()) {
-    ActionBgTunerRow rows[kActionBgTunerRowMax];
-    int n = ActionBgTuner_BuildRows(rows, kActionBgTunerRowMax);
-    for (int i = 0; i < n && count < capacity; i++) {
-      LayerMenuRow *dst = &out[count++];
-      *dst = (LayerMenuRow) { .owner = kLayerMenuRow_ActionBg };
-      dst->source.action_bg = rows[i];
-      snprintf(dst->key, sizeof(dst->key), "%s", rows[i].key);
-      dst->nested = rows[i].nested;
-      dst->selectable = rows[i].selectable;
-      dst->separator_before = rows[i].separator_before;
-    }
-    return count;
-  }
-
-  DioramaEditorRow rows[kDioramaEditorRowMax];
-  int n = LayerEditorRows(rows, kDioramaEditorRowMax);
-  for (int i = 0; i < n && count < capacity; i++) {
-    LayerMenuRow *dst = &out[count++];
-    *dst = (LayerMenuRow) { .owner = kLayerMenuRow_Diorama };
-    dst->source.diorama = rows[i];
-    dst->nested = rows[i].nested;
-    dst->selectable = rows[i].selectable;
-    dst->separator_before =
-        rows[i].kind == kDioramaEditorRow_ResetRoom;
-    if (rows[i].kind == kDioramaEditorRow_ResetRoom) {
-      snprintf(dst->key, sizeof(dst->key), "%s", kLayerResetRoomKey);
-    } else if (rows[i].kind != kDioramaEditorRow_Header) {
-      const char *token = DioramaLayerOrder_PlaneToken(rows[i].plane);
-      if (token && rows[i].kind == kDioramaEditorRow_Plane)
-        snprintf(dst->key, sizeof(dst->key), "%s", token);
-      else if (token)
-        snprintf(dst->key, sizeof(dst->key), "%s.%s", token,
-                 LayerParamKey(rows[i].param));
-    }
-  }
-  return count;
-}
-
-/* Resolve captions only for rows actually drawn, not every navigation/count
- * probe. The immutable source row remains the authority for both text and edits. */
-static void LocalizeLayerRow(const LayerMenuRow *row, SettingsOverlayLayerText *text) {
-  if (row->owner == kLayerMenuRow_ActionBg)
-    SettingsOverlay_LocalizedActionBgRow(SettingsOverlay_InterfaceLocale(), &row->source.action_bg,
-                                         text);
-  else
-    SettingsOverlay_LocalizedDioramaRow(SettingsOverlay_InterfaceLocale(), &row->source.diorama,
-                                        text);
-}
-
-/* The selected row, or NULL when the cursor is on a header (which is not
- * selectable) or the section is not the editor. */
-static const LayerMenuRow *SelectedLayerRow(LayerMenuRow *rows,
-                                            int capacity, int *out_count) {
-  int n = LayerMenuRows(rows, capacity);
-  if (out_count) *out_count = n;
-  if (s_row < 0 || s_row >= n) return NULL;
-  return &rows[s_row];
-}
-
 static int TabSettingRowCount(void) {
   if (ActiveTabIsRegional())
     return RegionalMenu_Count(ActiveTab()->regional_page);
-  if (ActiveSectionIsCustom()) {
-    LayerMenuRow rows[kLayerMenuRowMax];
-    return LayerMenuRows(rows, kLayerMenuRowMax);
-  }
+  if (ActiveSectionIsCustom()) return LayerMenu_Count(ActiveTabIndex());
   return RegistryMenuRowCount();
 }
 
@@ -1089,166 +915,16 @@ static void BeginValueHold(const SettingDesc *desc, int direction,
   if (StepNumeric(desc, direction, 1, false)) EndValueHold();
 }
 
-/* ── Layer editor dispatch ───────────────────────────────────────────────
- *
- * Key handling and drawing run synchronously on the main thread, so an override
- * edit is ordered before the next frame reads it. This is what makes live A/B
- * editing safe without locking.
- *
- * Returns true when the row belonged to the editor, so the ordinary descriptor
- * paths are skipped. */
-static DioramaPlaneOverride *LayerPlaneForRow(const DioramaEditorRow *row,
-                                              bool create) {
-  if (!row || row->plane < 0 || !s_layer_table_provider) return NULL;
-  DioramaLayerOrderTable *table = s_layer_table_provider();
-  if (!table) return NULL;
-  DioramaRoomOverride *room = NULL;
-  if (create) {
-    /* The first committed edit creates its room entry. A full table returns
-     * NULL and is reported rather than dropping the edit silently. */
-    room = DioramaLayerOrder_FindOrAddSection(
-        table, row->map_group, row->map_number, row->section);
-  } else {
-    /* Clear only an already-existing record; reset/preview paths must not
-     * allocate one of the bounded section slots. */
-    room = DioramaLayerOrder_FindMutableSection(
-        table, row->map_group, row->map_number, row->section);
-  }
-  if (!room) return NULL;
-  return &room->planes[row->plane];
-}
-
-static void LayerPruneEmptySection(const DioramaEditorRow *row) {
-  if (!row || !s_layer_table_provider) return;
-  DioramaLayerOrderTable *table = s_layer_table_provider();
-  if (!table) return;
-  const DioramaRoomOverride *room = DioramaLayerOrder_FindSection(
-      table, row->map_group, row->map_number, row->section);
-  if (room && !DioramaLayerOrder_RoomIsActive(room))
-    DioramaLayerOrder_ResetSection(
-        table, row->map_group, row->map_number, row->section);
-}
-
-static void LayerSaveEdit(void) {
-  if (s_layer_save_provider && !s_layer_save_provider())
-    SetStatus(Ui("overlay.status.save_failed"));
-}
-
-static void CommitLayerPalette(const DioramaEditorRow *row, bool reset, uint8_t index) {
-  DioramaPlaneOverride *plane = LayerPlaneForRow(row, !reset);
-  if (reset) {
-    if (plane) {
-      DioramaLayerEditor_ClearParam(plane, kDioramaEditorParam_TransparentFill);
-      LayerPruneEmptySection(row);
-      LayerSaveEdit();
-      SetStatus(Ui("overlay.status.fill_cleared"));
-    } else {
-      SetStatus(Ui("overlay.status.inherited"));
-    }
-    return;
-  }
-  if (!plane) {
-    SetStatus(Ui("overlay.status.no_room"));
-    return;
-  }
-  plane->set_transparent_fill = true;
-  plane->transparent_fill_kind = kDioramaTransparentFill_Cgram;
-  plane->transparent_fill_cgram = index;
-  LayerSaveEdit();
-  SetStatus(Ui("overlay.status.fill_applied"));
-}
-
-static bool LayerOpenPalette(const DioramaEditorRow *row) {
-  uint16_t palette[kSettingsOverlayLayerPaletteEntries];
-  if (!row || row->param != kDioramaEditorParam_TransparentFill || !s_layer_palette_provider ||
-      !s_layer_palette_provider(palette)) {
-    SetStatus(Ui("overlay.status.palette_unavailable"));
-    return false;
-  }
-  SettingsOverlayPalette_Open(row, palette, CommitLayerPalette);
-  return true;
-}
-
-static void ReportActionBgTunerResult(ActionBgTunerResult result) {
-  switch (result) {
-    case kActionBgTunerResult_Changed: SetStatus(Ui("overlay.status.draft_updated")); break;
-    case kActionBgTunerResult_AtLimit: SetStatus(Ui("overlay.status.at_limit")); break;
-    case kActionBgTunerResult_Printed: SetStatus(Ui("overlay.status.printed")); break;
-    case kActionBgTunerResult_Reset: SetStatus(Ui("overlay.status.draft_reset")); break;
-    case kActionBgTunerResult_Unchanged:
-    default: break;
-  }
-}
-
-static bool LayerChangeSelected(int direction) {
-  if (!ActiveSectionIsCustom()) return false;
-  LayerMenuRow rows[kLayerMenuRowMax];
-  const LayerMenuRow *row =
-      SelectedLayerRow(rows, kLayerMenuRowMax, NULL);
-  if (!row || !row->selectable) return true;   /* owned, nothing to do */
-  if (row->owner == kLayerMenuRow_ActionBg) {
-    if (row->source.action_bg.kind == kActionBgTunerRow_Print ||
-        row->source.action_bg.kind == kActionBgTunerRow_Reset) {
-      SetStatus(Ui("overlay.status.activate"));
-      return true;
-    }
-    ReportActionBgTunerResult(
-        ActionBgTuner_Change(&row->source.action_bg, direction));
-    return true;
-  }
-  const DioramaEditorRow *diorama = &row->source.diorama;
-
-  if (diorama->kind == kDioramaEditorRow_ResetRoom) {
-    SetStatus(Ui("overlay.status.reset_room"));
-    return true;
-  }
-
-  DioramaPlaneOverride *plane = LayerPlaneForRow(diorama, true);
-  if (!plane) {
-    SetStatus(Ui("overlay.status.no_room"));
-    return true;
-  }
-
-  if (diorama->kind == kDioramaEditorRow_Plane) {
-    DioramaDepthStrategy next =
-        DioramaLayerEditor_CycleStrategy(plane, direction);
-    /* Expanding the plane the player just changed puts its parameters under the
-     * cursor immediately, which is the next thing they want. */
-    s_layer_plane = diorama->plane;
-    char key[64];
-    snprintf(key, sizeof(key), "overlay.layer.diorama.shape.%d", next);
-    SetStatus(ArUiCatalog_Text(SettingsOverlay_InterfaceLocale(), key,
-                               DioramaLayerOrder_StrategyName(next)));
-    LayerSaveEdit();
-    return true;
-  }
-
-  /* A scoped row displays the renderer-resolved source, which may be inherited
-   * from its base room. Seed a first local edit from that displayed value so
-   * Right means "next source" rather than jumping from hidden Captured state. */
-  if (diorama->param == kDioramaEditorParam_Source && !plane->set_source) {
-    plane->source = diorama->effective_source;
-    plane->set_source = true;
-  }
-
-  if (!DioramaLayerEditor_StepParam(plane, diorama->param, direction)) {
-    SetStatus(Ui("overlay.status.at_limit"));
-    return true;
-  }
-  LayerSaveEdit();
-  return true;
-}
-
-
-
-
 static void ChangeSelectedValue(int direction) {
   if (ActiveTabIsRegional()) {
     EndValueHold();
     RegionalMenu_Change(ActiveTab()->regional_page, s_row, direction, false, false);
     return;
   }
-  if (LayerChangeSelected(direction)) return;
+  if (ActiveSectionIsCustom()) {
+    LayerMenu_Change(ActiveTabIndex(), s_row, direction);
+    return;
+  }
   if (SelectedRowIsSectionReset()) {
     SetStatus(Ui("overlay.status.reset_section"));
     return;
@@ -1301,50 +977,6 @@ static void ChangeSelectedValue(int direction) {
   }
 }
 
-/* Confirm on an editor row. A plane row toggles its parameter block rather than
- * stepping the shape -- stepping is Left/Right, and a confirm that also stepped
- * would make it impossible to expand a plane without changing it. */
-static bool LayerActivateSelected(void) {
-  if (!ActiveSectionIsCustom()) return false;
-  LayerMenuRow rows[kLayerMenuRowMax];
-  const LayerMenuRow *row =
-      SelectedLayerRow(rows, kLayerMenuRowMax, NULL);
-  if (!row || !row->selectable) return true;
-  if (row->owner == kLayerMenuRow_ActionBg) {
-    ReportActionBgTunerResult(
-        ActionBgTuner_Activate(&row->source.action_bg));
-    return true;
-  }
-  const DioramaEditorRow *diorama = &row->source.diorama;
-
-  if (diorama->kind == kDioramaEditorRow_ResetRoom) {
-    DioramaLayerOrderTable *table =
-        s_layer_table_provider ? s_layer_table_provider() : NULL;
-    if (!table) {
-      SetStatus(Ui("overlay.status.no_reset_room"));
-      return true;
-    }
-    DioramaLayerOrder_ResetPlaneOverridesSection(
-        table, diorama->map_group, diorama->map_number, diorama->section);
-    s_layer_plane = -1;
-    SetStatus(Ui("overlay.status.planes_reset"));
-    LayerSaveEdit();
-    return true;
-  }
-
-  if (diorama->kind == kDioramaEditorRow_Plane) {
-    s_layer_plane = (s_layer_plane == diorama->plane)
-        ? -1 : diorama->plane;
-    return true;
-  }
-  if (diorama->param == kDioramaEditorParam_TransparentFill) {
-    (void)LayerOpenPalette(diorama);
-    return true;
-  }
-  /* A parameter row: confirm is one fine step up, matching what an Int
-   * descriptor row does elsewhere in this menu. */
-  return LayerChangeSelected(+1);
-}
 
 static void ActivateSelectedRow(void) {
   if (ActiveTabIsRegional()) {
@@ -1352,7 +984,10 @@ static void ActivateSelectedRow(void) {
     RegionalMenu_Change(ActiveTab()->regional_page, s_row, 1, false, true);
     return;
   }
-  if (LayerActivateSelected()) return;
+  if (ActiveSectionIsCustom()) {
+    LayerMenu_Activate(ActiveTabIndex(), s_row);
+    return;
+  }
   if (SelectedRowIsSectionReset()) {
     ConfirmOrResetActiveSection();
     return;
@@ -1375,40 +1010,6 @@ static void ActivateSelectedRow(void) {
   }
 }
 
-/* Reset (Y) on an editor row: clear exactly what the row names. A plane row
- * clears the whole plane, a parameter row only its own key -- so backing out one
- * experiment does not discard the rest of the room. */
-static bool LayerResetSelected(void) {
-  if (!ActiveSectionIsCustom()) return false;
-  LayerMenuRow rows[kLayerMenuRowMax];
-  const LayerMenuRow *row =
-      SelectedLayerRow(rows, kLayerMenuRowMax, NULL);
-  if (!row || !row->selectable) return true;
-  if (row->owner == kLayerMenuRow_ActionBg) {
-    ReportActionBgTunerResult(
-        ActionBgTuner_ResetRow(&row->source.action_bg));
-    return true;
-  }
-  const DioramaEditorRow *diorama = &row->source.diorama;
-  if (diorama->kind == kDioramaEditorRow_ResetRoom)
-    return LayerActivateSelected();
-
-  DioramaPlaneOverride *plane = LayerPlaneForRow(diorama, false);
-  if (!plane) {
-    SetStatus(Ui("overlay.status.inherited"));
-    return true;
-  }
-  if (diorama->kind == kDioramaEditorRow_Plane) {
-    DioramaLayerEditor_ClearPlane(plane);
-    SetStatus(Ui("overlay.status.plane_cleared"));
-  } else {
-    DioramaLayerEditor_ClearParam(plane, diorama->param);
-    SetStatus(Ui("overlay.status.cleared"));
-  }
-  LayerPruneEmptySection(diorama);
-  LayerSaveEdit();
-  return true;
-}
 
 static void ResetSelectedValue(void) {
   if (ActiveTabIsRegional()) {
@@ -1416,7 +1017,10 @@ static void ResetSelectedValue(void) {
     RegionalMenu_Change(ActiveTab()->regional_page, s_row, 1, true, false);
     return;
   }
-  if (LayerResetSelected()) return;
+  if (ActiveSectionIsCustom()) {
+    LayerMenu_Reset(ActiveTabIndex(), s_row);
+    return;
+  }
   if (SelectedRowIsSectionReset()) {
     ConfirmOrResetActiveSection();
     return;
@@ -1443,7 +1047,7 @@ static void MoveSection(int direction) {
   s_row = 0;
   s_top_row = 0;
   s_tab_scroll = 0;
-  s_layer_plane = -1;
+  LayerMenu_ResetNavigation();
   SettingsOverlay_Refresh();
   EnsureSelectedNavVisible();
 }
@@ -1469,10 +1073,7 @@ static bool RowIsUnselectable(int index) {
     if (index < 0 || index >= TabSettingRowCount()) return false;
     return RegistryMenuRowAt(index).desc == NULL;
   }
-  LayerMenuRow rows[kLayerMenuRowMax];
-  int n = LayerMenuRows(rows, kLayerMenuRowMax);
-  if (index < 0 || index >= n) return false;
-  return !rows[index].selectable;
+  return !LayerMenu_RowSelectable(ActiveTabIndex(), index);
 }
 
 /* Pull the cursor off an unselectable row, forwards. Called wherever the row
@@ -1499,7 +1100,7 @@ void SettingsOverlay_Refresh(void) {
     s_row = 0;
     s_top_row = 0;
     s_tab_scroll = 0;
-    s_layer_plane = -1;
+    LayerMenu_ResetNavigation();
   }
   SyncActiveTabPage();
   if (ActiveTabIsRegional())
@@ -1546,7 +1147,7 @@ static void MoveTab(int direction) {
   s_row = 0;
   s_top_row = 0;
   /* A new level tab means a different room, so no plane stays expanded. */
-  s_layer_plane = -1;
+  LayerMenu_ResetNavigation();
   StopEditing();
   s_capture_desc = NULL;
   SettingsOverlay_Refresh();
@@ -1703,21 +1304,7 @@ const char *SettingsOverlay_SelectedKey(void) {
   if (!s_open) return "";
   if(SaveSlotMenu_Active() || SaveSlotMenu_DecisionActive())return SaveSlotMenu_SelectedKey();
   if (ActiveTabIsRegional()) return RegionalMenu_Key(ActiveTab()->regional_page, s_row);
-  /* The layer editor's rows have no descriptor key, so they report a synthesized
-   * one: the plane token for a plane row ("bg2hi"), the token plus the parameter
-   * for a nested row ("bg2hi.copies"), and a fixed name for the room reset. The
-   * point is the same as for descriptor rows -- a test navigates to a row BY
-   * NAME instead of counting keypresses, which otherwise breaks every time the
-   * list's shape changes (and the shape here changes with the active shape). */
-  if (ActiveSectionIsCustom()) {
-    static char key[48];
-    LayerMenuRow rows[kLayerMenuRowMax];
-    const LayerMenuRow *row =
-        SelectedLayerRow(rows, kLayerMenuRowMax, NULL);
-    if (!row || !row->key[0]) return "";
-    snprintf(key, sizeof(key), "%s", row->key);
-    return key;
-  }
+  if (ActiveSectionIsCustom()) return LayerMenu_Key(ActiveTabIndex(), s_row);
   if (SelectedRowIsSectionReset()) return kSectionResetKey;
   const SettingDesc *desc = SelectedDesc();
   return desc && desc->key ? desc->key : "";
@@ -2407,7 +1994,7 @@ static void DrawMenuRows(const MenuLayout *layout, const MenuChrome *c,
    * the rest of that reservation. */
   const int value_chars = 18;
 
-  s_visible_rows = (top_y + top_height - 6 - first_row_y) / kRowHeight;
+  s_visible_rows = (top_y + top_height - 6 - first_row_y) / kMenuRowHeight;
   if (s_visible_rows < 1) s_visible_rows = 1;
   EnsureSelectedRowVisible();
 
@@ -2418,75 +2005,15 @@ static void DrawMenuRows(const MenuLayout *layout, const MenuChrome *c,
   /* The layer editor draws its own rows and then skips the descriptor loop and
    * the synthetic section-reset row entirely: it has no descriptors, and its
    * reset is per-room and already in the list. */
+  const MenuRowViewport viewport = {
+    .x = right_x, .width = right_width, .first_y = first_row_y, .value_right = value_right,
+    .top = s_top_row, .visible = s_visible_rows, .selected = s_row,
+    .cursor_offset = CursorBlinkOffset(), .focused = s_submenu_open,
+  };
   if (ActiveTabIsRegional()) {
-    const MenuRowViewport viewport = {
-      .x = right_x, .width = right_width, .first_y = first_row_y, .value_right = value_right,
-      .top = s_top_row, .visible = s_visible_rows, .selected = s_row,
-      .cursor_offset = CursorBlinkOffset(), .focused = s_submenu_open,
-    };
     row_index = RegionalMenu_DrawRows(layout, ActiveTab()->regional_page, &viewport);
   } else if (custom_rows) {
-    LayerMenuRow rows[kLayerMenuRowMax];
-    int n = LayerMenuRows(rows, kLayerMenuRowMax);
-    for (int i = 0; i < n; i++) {
-      int row = row_index++;
-      if (row < s_top_row || row >= s_top_row + s_visible_rows) continue;
-      drawn_rows++;
-      int y = first_row_y + (row - s_top_row) * kRowHeight;
-      const LayerMenuRow *entry = &rows[i];
-      SettingsOverlayLayerText text;
-      LocalizeLayerRow(entry, &text);
-      /* An unselectable row is never drawn as selected, even when the cursor sits
-       * on it -- which happens on a tab whose every row is a notice, since there
-       * is nothing for SkipUnselectableRow to move to. Highlighting it with the
-       * blinking cursor would invite a keypress that does nothing. */
-      const bool selected =
-          s_submenu_open && row == s_row && entry->selectable;
-
-      /* A rule above the reset row, matching how the Save and Extras tabs fence
-       * their destructive commands off from the settings above them. */
-      if (entry->separator_before)
-        FillLogicalRect(layout, right_x + 12, y - 3, right_width - 24, 1,
-                        ARGB(160, 190, 96, 76));
-      if (selected) {
-        FillLogicalRect(layout, right_x + 9, y - 2, right_width - 18, 11,
-                        kHighlight);
-        FillLogicalRect(layout, right_x + 9, y - 2, 2, 11, kSelectYellow);
-        DrawGlyph(layout, selector_x + CursorBlinkOffset(), y, '>',
-                  kText_Warning);
-      }
-
-      /* A caption is structure, not a control, so it takes the panel's structure
-       * color and no value styling. A nested parameter indents under its plane
-       * and dims, so the eye reads the grouping without a box. */
-      TextStyle style = s_submenu_open ? kText_Normal : kText_Dim;
-      int row_label_x = label_x + (entry->nested ? 3 * kGlyphSize : 0);
-      if (!entry->selectable) {
-        int shown = CappedTextLength(text.value, value_chars);
-        int value_x = value_right - shown * kDebugGlyphWidth;
-        DrawSmallTextN(layout, row_label_x, y + 1, text.label,
-                        (value_x - row_label_x - 8) / kDebugGlyphWidth, structure);
-        if (shown)
-          DrawSmallTextN(layout, value_x, y + 1, text.value, shown, kGameGold);
-        continue;
-      }
-
-      int shown = CappedTextLength(text.value, value_chars);
-      int label_chars = (value_right - shown * kGlyphSize - 12 -
-                         row_label_x - 4) / kGlyphSize;
-      if (label_chars < 1) label_chars = 1;
-      DrawTextN(layout, row_label_x, y, text.label, label_chars,
-                entry->nested && !selected ? kText_Dim : style);
-      bool reset_row =
-          (entry->owner == kLayerMenuRow_Diorama &&
-           entry->source.diorama.kind == kDioramaEditorRow_ResetRoom) ||
-          (entry->owner == kLayerMenuRow_ActionBg &&
-           entry->source.action_bg.kind == kActionBgTunerRow_Reset);
-      DrawTextRight(layout, value_right, y, text.value, value_chars,
-                    reset_row
-                        ? (s_submenu_open ? kText_Warning : kText_Dim)
-                        : (style == kText_Normal ? kText_Value : style));
-    }
+    row_index = LayerMenu_DrawRows(layout, ActiveTabIndex(), &viewport);
   }
 
   const int registry_rows = custom_rows ? 0 : RegistryMenuRowCount();
@@ -2495,7 +2022,7 @@ static void DrawMenuRows(const MenuLayout *layout, const MenuChrome *c,
     int row = row_index++;
     if (row < s_top_row || row >= s_top_row + s_visible_rows) continue;
     drawn_rows++;
-    int y = first_row_y + (row - s_top_row) * kRowHeight;
+    int y = first_row_y + (row - s_top_row) * kMenuRowHeight;
     if (entry.heading != kSettingGameChange_None) {
       const char *heading = SettingsOverlay_LocalizedGameChangeHeading(
           SettingsOverlay_InterfaceLocale(), entry.heading);
@@ -2573,7 +2100,7 @@ static void DrawMenuRows(const MenuLayout *layout, const MenuChrome *c,
     int row = row_index++;
     if (row >= s_top_row && row < s_top_row + s_visible_rows) {
       drawn_rows++;
-      int y = first_row_y + (row - s_top_row) * kRowHeight;
+      int y = first_row_y + (row - s_top_row) * kMenuRowHeight;
       FillLogicalRect(layout, right_x + 12, y - 3, right_width - 24, 1,
                       ARGB(160, 190, 96, 76));
       bool selected = s_submenu_open && row == s_row;
@@ -2597,7 +2124,7 @@ static void DrawMenuRows(const MenuLayout *layout, const MenuChrome *c,
   }
 
   DrawScrollBar(layout, scroll_x, first_row_y - 2,
-                s_visible_rows * kRowHeight, row_index, s_visible_rows,
+                s_visible_rows * kMenuRowHeight, row_index, s_visible_rows,
                 s_top_row, structure);
 
   if (row_index == 0)
@@ -2605,7 +2132,7 @@ static void DrawMenuRows(const MenuLayout *layout, const MenuChrome *c,
                   Ui("overlay.empty_tab"), kMutedText);
 
   if (category == kSettingCat_Inspector) {
-    int info_y = first_row_y + drawn_rows * kRowHeight + 5;
+    int info_y = first_row_y + drawn_rows * kMenuRowHeight + 5;
     FillLogicalRect(layout, right_x + 12, info_y - 4, right_width - 24, 1,
                     structure_dim);
     DrawSmallText(layout, right_text_x, info_y, Ui("overlay.scene.live"), structure);
@@ -2635,10 +2162,8 @@ static void DrawMenuFooter(const MenuLayout *layout, const MenuChrome *c,
   /* The editor's rows are not descriptors, so they carry their own header and
    * help. Handled before the descriptor branches, which would otherwise fall
    * through to the section blurb and say nothing about the selected row. */
-  LayerMenuRow help_rows[kLayerMenuRowMax];
-  const LayerMenuRow *help_row =
-      (ActiveSectionIsCustom() && s_submenu_open)
-          ? SelectedLayerRow(help_rows, kLayerMenuRowMax, NULL) : NULL;
+  const bool layer_help = ActiveSectionIsCustom() && s_submenu_open &&
+      LayerMenu_RowExists(ActiveTabIndex(), s_row);
   if (s_status[0]) {
     DrawSmallText(layout, description_x, header_y, Ui("overlay.tab.status"), kGameGold);
     FillLogicalRect(layout, description_x, header_y + 10,
@@ -2648,29 +2173,9 @@ static void DrawMenuFooter(const MenuLayout *layout, const MenuChrome *c,
   } else if (ActiveTabIsRegional() && s_submenu_open) {
     RegionalMenu_DrawDescription(layout, ActiveTab()->regional_page, s_row,
                                  description_x, header_y, bottom_width - 24);
-  } else if (help_row) {
-    SettingsOverlayLayerText text;
-    LocalizeLayerRow(help_row, &text);
-    const DioramaEditorRow *diorama = help_row->owner == kLayerMenuRow_Diorama
-        ? &help_row->source.diorama : NULL;
-    char label[2 * kOverlayLayerCaptionBytes + 8];
-    if (diorama && diorama->kind == kDioramaEditorRow_Plane)
-      snprintf(label, sizeof(label), "%s -- %s", text.label, text.value);
-    else
-      snprintf(label, sizeof(label), "%s", text.label);
-    /* The right-hand slug says WHEN a change takes effect, which for these is
-     * always "the next frame" -- that immediacy is the point of the tool. */
-    const char *kApplyNow = Ui("overlay.apply.0");
-    int apply_x = panel_right - 12 - SmallTextWidth(kApplyNow);
-    DrawSmallTextN(layout, description_x, header_y, label,
-                   (apply_x - description_x - 8) / kDebugGlyphWidth, structure);
-    DrawSmallTextN(layout, panel_right - 12 - SmallTextWidth(kApplyNow),
-                   header_y, kApplyNow, description_chars, kMutedText);
-    FillLogicalRect(layout, description_x, header_y + 10,
-                    bottom_width - 24, 1, structure_dim);
-    DrawWrappedSmallText(layout, description_x, header_y + 14,
-                         text.help,
-                         description_chars, 4, ARGB(255, 208, 220, 232));
+  } else if (layer_help) {
+    LayerMenu_DrawDescription(layout, ActiveTabIndex(), s_row,
+                              description_x, header_y, bottom_width - 24);
   } else if (reset_selected) {
     char label[256], help[1024];
     FormatSectionMessage(label, sizeof(label), "overlay.reset_section", section->label);
@@ -2752,55 +2257,11 @@ static void DrawMenuFooter(const MenuLayout *layout, const MenuChrome *c,
   } else if (s_submenu_open) {
     /* Omitted when the only row is a notice: there is nothing to select, and
      * offering the verb would suggest otherwise. */
-    if (!help_row || help_row->selectable) HINT(select, "overlay.hint.select");
-    if (help_row) {
-      /* The editor's verbs differ enough to be worth spelling out: Left/Right
-       * cycles the SHAPE on a plane row but steps a number on a parameter row,
-       * and B expands rather than edits. */
-      if (help_row->owner == kLayerMenuRow_ActionBg) {
-        switch (help_row->source.action_bg.kind) {
-          case kActionBgTunerRow_Layer:
-            HINT(confirm, "overlay.hint.settings");
-            HINT(reset, "overlay.hint.clear_layer");
-            break;
-          case kActionBgTunerRow_BandHeader:
-            HINT(confirm, "overlay.hint.settings");
-            HINT(reset, "overlay.hint.canonical_bands");
-            break;
-          case kActionBgTunerRow_Print:
-            HINT(confirm, "overlay.hint.print");
-            break;
-          case kActionBgTunerRow_Reset:
-            HINT(confirm, "overlay.hint.reset_draft");
-            break;
-          case kActionBgTunerRow_Header:
-            break;
-          default:
-            HINT(change, "overlay.hint.adjust");
-            HINT(reset, "overlay.hint.canonical");
-            break;
-        }
-      } else {
-        switch (help_row->source.diorama.kind) {
-          case kDioramaEditorRow_Plane:
-            HINT(change, "overlay.hint.shape");
-            HINT(confirm, "overlay.hint.settings");
-            HINT(reset, "overlay.hint.clear_plane");
-            break;
-          case kDioramaEditorRow_ResetRoom:
-            HINT(confirm, "overlay.hint.reset_room");
-            break;
-          case kDioramaEditorRow_Header:
-            break;
-          default:
-            HINT(change, "overlay.hint.adjust");
-            HINT(reset, "overlay.hint.clear");
-            break;
-        }
-      }
-      if (VisibleTabCount(s_section) > 1)
-        HINT(tabs, help_row->owner == kLayerMenuRow_ActionBg
-                        ? "overlay.hint.tab" : "overlay.hint.level");
+    if (!layer_help || LayerMenu_RowSelectable(ActiveTabIndex(), s_row))
+      HINT(select, "overlay.hint.select");
+    if (layer_help) {
+      LayerMenu_AddHints(&hints, ActiveTabIndex(), s_row, VisibleTabCount(s_section) > 1,
+                        change, confirm, tabs, reset);
     } else if (ActiveTabIsRegional()) {
       RegionalMenu_AddHints(&hints, ActiveTab()->regional_page,
                             change, confirm, tabs, reset, details);

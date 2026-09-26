@@ -1,4 +1,4 @@
-#include "settings_overlay/settings_overlay_palette.h"
+#include "settings_overlay/layers/layer_palette.h"
 #include "settings_overlay/settings_overlay.h"
 #include "settings_overlay/settings_overlay_artwork.h"
 #include "localization/ui_catalog.h"

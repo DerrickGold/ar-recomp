@@ -10,18 +10,9 @@
 #include "present/presentation_outcome.h"
 #include "render/render_device.h"
 
-/* The per-room ($18,$19) layer override table the editor edits and the draw
- * loop reads. Never NULL. Empty means "every room draws as built". */
-struct DioramaLayerOrderTable *Diorama_LayerOverrides(void);
-
 /* Decode deterministic named backdrop sources from immutable cart data. A
  * failed source remains unavailable and authored uses fall back to captured. */
 bool Diorama_InitRomBackdrops(const uint8_t *rom_data, size_t rom_size);
-
-/* Load / write `diorama-layers.ini` (beside settings.ini). Load is called once
- * at boot; save is the editor's "Export manifest". Absent file = no overrides. */
-void Diorama_LoadLayerManifest(void);
-bool Diorama_SaveLayerManifest(void);
 
 /* Install the live-room, override, persistence and CGRAM hooks after loading
  * the manifest. The editor snapshots the palette only when its picker opens. */

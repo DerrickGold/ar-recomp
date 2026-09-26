@@ -2390,7 +2390,7 @@ if(BUILD_TESTING)
         src/settings_overlay/regional/regional_ui.c
         src/app/performance_metrics.c src/app/performance_overlay.c
         src/settings_overlay/settings_overlay_localization.c
-        src/settings_overlay/settings_overlay_layers_localization.c
+        src/settings_overlay/layers/layer_localization.c
         src/localization/ui_catalog.c
         src/app/config.c
         src/actraiser/quintet_lzss.c
@@ -2399,12 +2399,13 @@ if(BUILD_TESTING)
         src/host/atomic_replace.c
         src/randomizer/randomizer.c src/randomizer/randomizer_config.c src/action/action_placements.c
         src/settings_overlay/settings_overlay.c
+        src/settings_overlay/layers/layer_menu.c
         src/settings_overlay/regional/regional_panel.c
         src/settings_overlay/settings_overlay_widgets.c
         src/settings_overlay/save_slots/save_slot_menu.c
         src/settings_overlay/menu_input.c
         src/settings_overlay/settings_overlay_artwork.c
-        src/settings_overlay/settings_overlay_palette.c
+        src/settings_overlay/layers/layer_palette.c
         src/localization/interface_text.c
         src/render/ui_text_renderer.c
         src/render/text_surface_cache.c
@@ -3732,6 +3733,16 @@ if(BUILD_TESTING)
     )
     add_test(NAME actraiser_diorama_layer_order
         COMMAND actraiser_diorama_layer_order_test)
+
+    # Persistence has no renderer dependency; exercise real files and failed replacement.
+    add_executable(actraiser_diorama_layer_manifest_test
+        tests/diorama_layer_manifest_test.c
+        src/diorama/diorama_layer_manifest.c
+        src/diorama/diorama_layer_order.c)
+    target_include_directories(actraiser_diorama_layer_manifest_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src)
+    target_link_libraries(actraiser_diorama_layer_manifest_test PRIVATE snesrecomp::sdk)
+    add_test(NAME actraiser_diorama_layer_manifest COMMAND actraiser_diorama_layer_manifest_test)
 
     # ROM backdrop HLE uses the stock asset script and compressed-asset format.
     # This exercises command inheritance plus literal/back-reference decoding

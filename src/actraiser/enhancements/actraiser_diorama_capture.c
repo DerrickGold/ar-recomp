@@ -1,3 +1,4 @@
+#include "diorama/diorama_layer_manifest.h"
 /* ActRaiser diorama capture: prepares the diorama's captures each frame: HUD
  * and priority-band bindings, the OBJ apron, scene masks, and the town and
  * skybox views.
@@ -340,7 +341,7 @@ void ActRaiser_PrepareDioramaCapture(const SrPpuStateSnapshot *ppu) {
         DioramaTransparentFill fill = kDioramaTransparentFill_None;
         uint8_t fill_cgram = 0;
         if (DioramaLayerOrder_ResolveTransparentFill(
-                Diorama_LayerOverrides(), layer_group, layer_map, layer_section,
+                DioramaLayerManifest_Table(), layer_group, layer_map, layer_section,
                 src, &fill, &fill_cgram)) {
           SrPpuTransparentFillMode mode = SR_PPU_TRANSPARENT_FILL_NONE;
           if (fill == kDioramaTransparentFill_Black)

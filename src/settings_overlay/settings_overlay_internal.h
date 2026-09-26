@@ -20,6 +20,7 @@
    (uint32_t)(g) << 8 | (uint32_t)(b))
 
 enum {
+  kMenuRowHeight = 13,
   kDebugGlyphWidth = 6,
   kDebugGlyphHeight = 8,
   kDebugLineHeight = 10,
