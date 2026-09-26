@@ -115,7 +115,9 @@ func TestRegionalDescriptionStructure(t *testing.T) {
 
 func TestGeneratedCAndExplicitOverlayKeys(t *testing.T) {
 	root := filepath.Join("..", "..", "..")
-	if _, err := os.Stat(filepath.Join(root, "src", "settings_overlay", "settings_overlay.c")); os.IsNotExist(err) {
+	// Key the skip on the game source manifest, not on one source file, so a
+	// moved file fails the read below instead of silently skipping the test.
+	if _, err := os.Stat(filepath.Join(root, "snesbuild.ini")); os.IsNotExist(err) {
 		t.Skip("standalone Go source tree")
 	}
 	cmd := exec.Command("go", "run", "./cmd/generate", "-check", "-output", filepath.Join(root, "src/localization/ui_catalog_data.inc"))

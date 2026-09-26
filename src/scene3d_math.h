@@ -125,9 +125,9 @@ bool Scene3D_GroundDepthDirection(const float matrix[16], float aspect,
                                   float *out_x, float *out_y,
                                   float *out_length);
 
-/* GPU depth for the same projection, normalized to SDL_GPU's portable [0, 1]
- * NDC convention (zero near, one far). This retains the Z component that the
- * legacy SDL_RenderGeometry projection discarded. */
+/* GPU depth for the same projection, normalized to the GPU backend's portable
+ * [0, 1] NDC convention (zero near, one far). This retains the Z component
+ * that the legacy 2D renderer's geometry path discarded. */
 bool Scene3D_NormalizedDepth(const float matrix[16],
                              float x, float y, float z,
                              float *out_depth);
