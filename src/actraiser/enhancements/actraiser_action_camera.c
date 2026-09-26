@@ -16,7 +16,7 @@
  * motion that actually fit. */
 
 #include "action/action_camera_bounds.h"
-#include "actraiser_action_bg.h"
+#include "actraiser/actraiser_action_bg.h"
 #include "actraiser_game.h"
 #include "present/display_geometry.h"
 #include "snesrecomp/game/cpu.h"

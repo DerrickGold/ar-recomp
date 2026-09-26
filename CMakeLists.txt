@@ -526,6 +526,15 @@ if(BUILD_TESTING)
                 ${CMAKE_SOURCE_DIR}/tools/check_source_manifest.py)
         set_tests_properties(actraiser_source_manifest PROPERTIES
             ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
+        # Private *_internal.h headers stay inside the family they serve.
+        add_test(NAME actraiser_private_headers
+            COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_SOURCE_DIR}/tools/check_private_headers.py)
+        add_test(NAME actraiser_private_headers_negative
+            COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_SOURCE_DIR}/tools/check_private_headers.py --self-test)
+        set_tests_properties(actraiser_private_headers actraiser_private_headers_negative
+            PROPERTIES ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
         # Layout ratchet: no authored file may gain style violations.
         add_test(NAME actraiser_style
             COMMAND ${Python3_EXECUTABLE}
@@ -3526,7 +3535,7 @@ if(BUILD_TESTING)
     # fill. Pure, so it needs neither SDL nor the PPU.
     add_executable(actraiser_ws_gap_test
         tests/actraiser_ws_gap_test.c
-        src/actraiser/actraiser_ws_gap.c
+        src/actraiser/enhancements/actraiser_ws_gap.c
     )
     target_include_directories(actraiser_ws_gap_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src

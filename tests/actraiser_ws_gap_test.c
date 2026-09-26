@@ -4,7 +4,7 @@
  * "wrote the fill colour", "left the pixel alone", and "wrote something else"
  * apart — a memset-based check could not distinguish the last two.
  */
-#include "actraiser_ws_gap.h"
+#include "actraiser/enhancements/actraiser_ws_gap.h"
 
 #include <stdio.h>
 #include <stdlib.h>
