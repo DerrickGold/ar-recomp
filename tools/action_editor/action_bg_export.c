@@ -27,23 +27,21 @@ static struct {
   unsigned char *bytes;
   size_t size;
 } g_blobs[kMaxBlobs];
-static int g_blob_count;
+static int s_blob_count;
 
 static int InternBlob(const unsigned char *bytes, size_t size) {
-  for (int i = 0; i < g_blob_count; i++)
-    if (g_blobs[i].size == size && !memcmp(g_blobs[i].bytes, bytes, size))
-      return i;
-  if (g_blob_count >= kMaxBlobs) return -1;
+  for (int i = 0; i < s_blob_count; i++)
+    if (g_blobs[i].size == size && !memcmp(g_blobs[i].bytes, bytes, size)) return i;
+  if (s_blob_count >= kMaxBlobs) return -1;
   unsigned char *copy = malloc(size);
   if (!copy) return -1;
   memcpy(copy, bytes, size);
-  g_blobs[g_blob_count].bytes = copy;
-  g_blobs[g_blob_count].size = size;
-  return g_blob_count++;
+  g_blobs[s_blob_count].bytes = copy;
+  g_blobs[s_blob_count].size = size;
+  return s_blob_count++;
 }
 
-static const char kB64[] =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+static const char kB64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 static void WriteBase64(FILE *out, const unsigned char *bytes, size_t size) {
   for (size_t i = 0; i < size; i += 3) {
@@ -64,7 +62,10 @@ int main(int argc, char **argv) {
     return 2;
   }
   FILE *rom_file = fopen(argv[1], "rb");
-  if (!rom_file) { perror(argv[1]); return 1; }
+  if (!rom_file) {
+    perror(argv[1]);
+    return 1;
+  }
   fseek(rom_file, 0, SEEK_END);
   const long rom_size = ftell(rom_file);
   fseek(rom_file, 0, SEEK_SET);
@@ -76,9 +77,11 @@ int main(int argc, char **argv) {
   fclose(rom_file);
 
   FILE *out = fopen(argv[2], "wb");
-  if (!out) { perror(argv[2]); return 1; }
-  uint32_t *native_pixels = malloc(
-      kActionRoomSceneFramePixels * sizeof(*native_pixels));
+  if (!out) {
+    perror(argv[2]);
+    return 1;
+  }
+  uint32_t *native_pixels = malloc(kActionRoomSceneFramePixels * sizeof(*native_pixels));
   if (!native_pixels) {
     fprintf(stderr, "could not allocate native-frame oracle\n");
     return 1;
@@ -91,56 +94,50 @@ int main(int argc, char **argv) {
     for (unsigned map = 1; map <= 8; map++) {
       if (!ActRaiser_IsActionMap((uint8_t)group, (uint8_t)map)) continue;
       static ActionRoomScene scene;
-      if (!ActionRoomScene_Load(&scene, rom, (size_t)rom_size,
-                                (uint8_t)group, (uint8_t)map)) {
+      if (!ActionRoomScene_Load(&scene, rom, (size_t)rom_size, (uint8_t)group, (uint8_t)map)) {
         fprintf(stderr, "[export] %u:%u asset script failed\n", group, map);
         failures++;
         continue;
       }
       const ActionRoomSceneFrameRequest golden_request = {
-        .camera_x = 0,
-        .camera_y = 0,
-        .game_frame = 37,
-        .animation_phase = -1,
-        .page_phase = -1,
+          .camera_x = 0,
+          .camera_y = 0,
+          .game_frame = 37,
+          .animation_phase = -1,
+          .page_phase = -1,
       };
       ActionRoomSceneFrameState golden_state;
-      if (!ActionRoomScene_BuildFrameState(
-              &scene, &golden_request, &golden_state) ||
-          !ActionRoomScene_RenderNativeFrame(
-              &scene, &golden_state, native_pixels,
-              kActionRoomSceneFramePixels)) {
+      if (!ActionRoomScene_BuildFrameState(&scene, &golden_request, &golden_state) ||
+          !ActionRoomScene_RenderNativeFrame(&scene, &golden_state, native_pixels,
+                                             kActionRoomSceneFramePixels)) {
         fprintf(stderr, "[export] %u:%u native oracle failed\n", group, map);
         failures++;
         continue;
       }
       uint32_t native_hash = DETERMINISTIC_HASH_FNV1A32_OFFSET;
       for (size_t i = 0; i < kActionRoomSceneFramePixels; i++)
-        native_hash = DeterministicHash_Fnv1a32Word(
-            native_hash, native_pixels[i]);
+        native_hash = DeterministicHash_Fnv1a32Word(native_hash, native_pixels[i]);
       if (rooms) fprintf(out, ",\n");
       if (scene.have_raster_waveform)
-        raster_waveform_blob = InternBlob(
-            scene.raster_waveform, kActionRoomSceneRasterWaveformBytes);
+        raster_waveform_blob =
+            InternBlob(scene.raster_waveform, kActionRoomSceneRasterWaveformBytes);
       if (scene.have_raster_mosaic_wave_window)
-        raster_mosaic_wave_window_blob = InternBlob(
-            scene.raster_mosaic_wave_window,
-            kActionRoomSceneRasterMosaicWaveWindowBytes);
+        raster_mosaic_wave_window_blob = InternBlob(scene.raster_mosaic_wave_window,
+                                                    kActionRoomSceneRasterMosaicWaveWindowBytes);
       fprintf(out,
               "{\"group\":%u,\"map\":%u,\"chars\":%d,\"extraChars\":%d,"
               "\"palette\":%d,\"rasterWorkspace\":%d,\"bg\":[",
               group, map,
               scene.have_character_bank[0]
-                  ? InternBlob(scene.characters,
-                               kActionRoomSceneCharacterBytes) : -1,
+                  ? InternBlob(scene.characters, kActionRoomSceneCharacterBytes)
+                  : -1,
               scene.have_extra_characters
-                  ? InternBlob(scene.extra_characters,
-                               kActionRoomSceneExtraCharacterBytes) : -1,
-              scene.have_palette
-                  ? InternBlob(scene.palette, kActionRoomScenePaletteBytes) : -1,
+                  ? InternBlob(scene.extra_characters, kActionRoomSceneExtraCharacterBytes)
+                  : -1,
+              scene.have_palette ? InternBlob(scene.palette, kActionRoomScenePaletteBytes) : -1,
               scene.have_raster_workspace
-                  ? InternBlob(scene.raster_workspace,
-                               kActionRoomSceneRasterWorkspaceBytes) : -1);
+                  ? InternBlob(scene.raster_workspace, kActionRoomSceneRasterWorkspaceBytes)
+                  : -1);
       for (unsigned bg = 0; bg < 2; bg++) {
         if (bg) fputc(',', out);
         const ActionRoomSceneBg *layer = &scene.bg[bg];
@@ -151,10 +148,8 @@ int main(int argc, char **argv) {
         fprintf(out,
                 "{\"metatiles\":%d,\"map\":%d,\"pagesWide\":%u,"
                 "\"pagesHigh\":%u}",
-                InternBlob(layer->metatiles,
-                           kActionRoomSceneMetatileBytes),
-                InternBlob(layer->map, layer->map_size),
-                layer->pages_wide, layer->pages_high);
+                InternBlob(layer->metatiles, kActionRoomSceneMetatileBytes),
+                InternBlob(layer->map, layer->map_size), layer->pages_wide, layer->pages_high);
       }
       fprintf(out, "],\"videoProfile\":%d,\"video\":[",
               scene.have_video_profile ? scene.video_profile_index : -1);
@@ -173,15 +168,13 @@ int main(int argc, char **argv) {
                 ActionRoomScene_CharacterAnimationStride(&scene),
                 ActionRoomScene_CharacterAnimationPhaseCount(&scene),
                 ActionRoomScene_CharacterAnimationCadence(&scene),
-                ActionRoomScene_CharacterAnimationContinues(&scene)
-                    ? "true" : "false");
+                ActionRoomScene_CharacterAnimationContinues(&scene) ? "true" : "false");
       } else {
         fprintf(out, "null");
       }
       fprintf(out, ",\"bg2PageCycle\":");
       if (ActionRoomScene_HasBg2PageCycle(&scene))
-        fprintf(out,
-                "{\"phases\":4,\"cadence\":5,\"order\":[1,2,3,0]}");
+        fprintf(out, "{\"phases\":4,\"cadence\":5,\"order\":[1,2,3,0]}");
       else
         fprintf(out, "null");
       fprintf(out,
@@ -198,17 +191,16 @@ int main(int argc, char **argv) {
     }
   }
 
-  fprintf(out, "\n],\n\"tileWordMask\":%u,\"bg1Attributes\":%u,"
-               "\"bg2Attributes\":%u,\"rasterWaveform\":%d,"
-               "\"rasterR4Window\":%d,"
-               "\"frameWidth\":%u,\"frameHeight\":%u,\n\"blobs\":[\n",
-          kActionRoomSceneTileWordMask,
-          kActionRoomSceneBg1AttributeByte,
-          kActionRoomSceneBg2AttributeByte, raster_waveform_blob,
-          raster_mosaic_wave_window_blob,
+  fprintf(out,
+          "\n],\n\"tileWordMask\":%u,\"bg1Attributes\":%u,"
+          "\"bg2Attributes\":%u,\"rasterWaveform\":%d,"
+          "\"rasterR4Window\":%d,"
+          "\"frameWidth\":%u,\"frameHeight\":%u,\n\"blobs\":[\n",
+          kActionRoomSceneTileWordMask, kActionRoomSceneBg1AttributeByte,
+          kActionRoomSceneBg2AttributeByte, raster_waveform_blob, raster_mosaic_wave_window_blob,
           kActionRoomSceneFrameWidth, kActionRoomSceneFrameHeight);
   size_t blob_bytes = 0;
-  for (int i = 0; i < g_blob_count; i++) {
+  for (int i = 0; i < s_blob_count; i++) {
     if (i) fprintf(out, ",\n");
     fputc('"', out);
     WriteBase64(out, g_blobs[i].bytes, g_blobs[i].size);
@@ -218,8 +210,7 @@ int main(int argc, char **argv) {
   fprintf(out, "\n]\n}\n");
   fclose(out);
   free(native_pixels);
-  fprintf(stderr,
-          "[export] %d rooms, %d failures, %d pooled blobs, %zu KiB raw\n",
-          rooms, failures, g_blob_count, blob_bytes / 1024);
+  fprintf(stderr, "[export] %d rooms, %d failures, %d pooled blobs, %zu KiB raw\n", rooms, failures,
+          s_blob_count, blob_bytes / 1024);
   return failures ? 1 : 0;
 }

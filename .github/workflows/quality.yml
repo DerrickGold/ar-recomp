@@ -1,0 +1,41 @@
+name: Code quality
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quality-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rom-free:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.26.3'
+          cache-dependency-path: installer/desktop-shell/go.sum
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Install development dependencies
+        run: |
+          brew install ninja pkg-config sdl3 sdl3_ttf
+          python -m pip install -r tools/requirements-quality.txt
+      - name: Authored code and developer tools
+        run: make check-quality
+      - name: ROM-free C and Python tests
+        run: make check-c CHECK_JOBS=3
+      - name: Recompiler, Builder and desktop shell tests
+        run: make check-go

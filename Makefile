@@ -32,7 +32,7 @@
 #   release preset first, so newly promoted feature defaults cannot remain
 #   stale in an existing CMake cache.
 #
-#   make check        run every check that needs no ROM: check-constants, the
+#   make check        run every check that needs no ROM: check-quality, the
 #                     C/Python test suite (Debug, in build-check/), the Go tests
 #                     of all three modules, and the shader header check when its
 #                     tools are installed (it prints SKIPPED otherwise). The
@@ -41,6 +41,8 @@
 #                     Without a ROM this cannot prove the game links: run
 #                     `snesbuild build --hermetic` or `make check-cross` for the
 #                     shipped build path.
+#   make check-quality   require language tooling and enforce authored-code checks.
+#                     Setup and conventions: CONTRIBUTING.md.
 #   make check-constants  reject high-risk duplicate literals in authored code.
 #   make check-render CONTROL=/path/to/baseline CANDIDATE=/path/to/game
 #                     compare exact pixels and WRAM in Action, Diorama, Town
@@ -90,11 +92,26 @@ CLEAN_RELEASE    := release
 # The ROM-free gate, built as Debug in a tree of its own so it never disturbs
 # the play or dev presets.
 CHECK_BUILD := build-check
+PYTHON ?= python3
 CHECK_JOBS ?= $(shell getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)
 GO_MODULES := snesrecomp-go installer installer/desktop-shell
 
-check: check-constants check-c check-go check-shaders
+check: check-quality check-c check-go check-shaders
 	@echo "make check: every check that ran passed (any SKIPPED check is named above)"
+
+.PHONY: check-quality check-go-vet
+check-quality: check-constants check-go-vet
+	$(PYTHON) tools/check_tooling.py
+	$(PYTHON) tools/check_style.py
+	$(PYTHON) tools/check_private_headers.py
+	$(PYTHON) tools/check_global_owners.py
+	$(PYTHON) tools/check_source_manifest.py
+
+check-go-vet:
+	@for m in $(GO_MODULES); do \
+	  echo "go vet $$m"; \
+	  go -C $$m vet ./... || exit 1; \
+	done
 
 check-c:
 	cmake -S . -B $(CHECK_BUILD) -G Ninja -DAR_TESTS_ONLY=ON -DCMAKE_BUILD_TYPE=Debug

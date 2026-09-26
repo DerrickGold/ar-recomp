@@ -540,15 +540,13 @@ and packaged builds.
 | `asan` | Enables AddressSanitizer and UndefinedBehaviorSanitizer for corruption testing. |
 | `control` | Produces an optimized A/B control build with flat town terrain. |
 
-After the initial source build, configure the test-enabled preset and run the
-C and Go suites:
+For the shared quality gate, development conventions, and tooling setup, see
+[CONTRIBUTING.md](CONTRIBUTING.md). The ROM-free checks cover the game, developer
+tools, Builder, and recompiler:
 
 ```sh
-cmake --preset dev
-cmake --build --preset dev
-ctest --preset dev
-go -C installer test ./...
-go -C snesrecomp-go test ./...
+make check-quality
+make check
 ```
 
 Regression testing combines CTest, Go tests, and recorded gameplay replays.

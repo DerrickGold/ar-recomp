@@ -185,8 +185,7 @@ static BenchPool *PoolCreate(int helper_count, bool pin, int pin_stride) {
     for (int i = 0; i < helper_count; i++) {
       pool->helpers[i].pool = pool;
       pool->helpers[i].index = i;
-      if (pthread_create(&pool->threads[i], NULL, HelperMain,
-                         &pool->helpers[i]) != 0) {
+      if (pthread_create(&pool->threads[i], NULL, HelperMain, &pool->helpers[i]) != 0) {
         pool->helper_count = i;
         break;
       }
@@ -213,8 +212,7 @@ static void PoolDestroy(BenchPool *pool) {
 
 /* Owner takes the first part and participates, exactly as HostParallelWork
  * does, so the measured parallelism includes the owner's share. */
-static void PoolRun(BenchPool *pool, size_t count, RangeFn range,
-                    void *context) {
+static void PoolRun(BenchPool *pool, size_t count, RangeFn range, void *context) {
   const int helpers = pool ? pool->helper_count : 0;
   const size_t parts = (size_t)helpers + 1;
   if (!count || !range) return;
@@ -261,20 +259,25 @@ typedef struct {
 } BenchPlane;
 
 typedef enum {
-  kDirtyStatic,  /* nothing changed: the mirror's best case */
-  kDirtyRegion,  /* one contiguous block: bounding rect is tight and correct */
-  kDirtySparse,  /* scattered sprite-sized blocks: bounding rect is near-full */
-  kDirtyScroll,  /* every row differs: camera panning, the action-mode case */
+  kDirtyStatic, /* nothing changed: the mirror's best case */
+  kDirtyRegion, /* one contiguous block: bounding rect is tight and correct */
+  kDirtySparse, /* scattered sprite-sized blocks: bounding rect is near-full */
+  kDirtyScroll, /* every row differs: camera panning, the action-mode case */
   kDirtyModeCount,
 } DirtyMode;
 
 static const char *DirtyModeName(DirtyMode mode) {
   switch (mode) {
-    case kDirtyStatic: return "static";
-    case kDirtyRegion: return "region";
-    case kDirtySparse: return "sparse";
-    case kDirtyScroll: return "scroll";
-    default: return "unknown";
+  case kDirtyStatic:
+    return "static";
+  case kDirtyRegion:
+    return "region";
+  case kDirtySparse:
+    return "sparse";
+  case kDirtyScroll:
+    return "scroll";
+  default:
+    return "unknown";
   }
 }
 
@@ -343,48 +346,50 @@ static void PlaneSetApplyDirty(PlaneSet *set, DirtyMode mode, int dirty_pct) {
     memcpy(plane->current, plane->mirror, set->bytes_per_plane);
     uint32_t seed = 0x85EBCA6Bu ^ (uint32_t)(i + 1) ^ ((uint32_t)mode << 16);
     switch (mode) {
-      case kDirtyStatic:
-        break;
-      case kDirtyScroll: {
-        /* A panning camera shifts every row, so every row differs across the
-         * full width. This is the situation the bounding-rect mirror cannot
-         * help with, and it is the normal case for a moving action screen. */
-        for (int y = 0; y < plane->height; y++) {
+    case kDirtyStatic:
+      break;
+    case kDirtyScroll: {
+      /* A panning camera shifts every row, so every row differs across the
+       * full width. This is the situation the bounding-rect mirror cannot
+       * help with, and it is the normal case for a moving action screen. */
+      for (int y = 0; y < plane->height; y++) {
+        uint32_t *row = (uint32_t *)(plane->current + (size_t)y * plane->pitch);
+        for (int x = 0; x < plane->width; x++)
+          row[x] += 1u;
+      }
+      break;
+    }
+    case kDirtyRegion: {
+      const int rows = plane->height * dirty_pct / 100;
+      const int y0 = (plane->height - rows) / 2;
+      for (int y = y0; y < y0 + rows; y++) {
+        uint32_t *row = (uint32_t *)(plane->current + (size_t)y * plane->pitch);
+        for (int x = 0; x < plane->width; x++)
+          row[x] += 1u;
+      }
+      break;
+    }
+    case kDirtySparse: {
+      /* Sprite-sized blocks scattered across the plane. Few changed pixels,
+       * but their bounding rectangle covers most of the surface -- the
+       * pathology that makes a single dirty rect the wrong granularity. */
+      const int block = 16;
+      const long total_blocks = ((long)plane->width / block) * ((long)plane->height / block);
+      long touched = total_blocks * dirty_pct / 100;
+      if (touched < 1) touched = 1;
+      for (long b = 0; b < touched; b++) {
+        const int bx = (int)(NextRandom(&seed) % (uint32_t)(plane->width / block)) * block;
+        const int by = (int)(NextRandom(&seed) % (uint32_t)(plane->height / block)) * block;
+        for (int y = by; y < by + block && y < plane->height; y++) {
           uint32_t *row = (uint32_t *)(plane->current + (size_t)y * plane->pitch);
-          for (int x = 0; x < plane->width; x++) row[x] += 1u;
+          for (int x = bx; x < bx + block && x < plane->width; x++)
+            row[x] += 1u;
         }
-        break;
       }
-      case kDirtyRegion: {
-        const int rows = plane->height * dirty_pct / 100;
-        const int y0 = (plane->height - rows) / 2;
-        for (int y = y0; y < y0 + rows; y++) {
-          uint32_t *row = (uint32_t *)(plane->current + (size_t)y * plane->pitch);
-          for (int x = 0; x < plane->width; x++) row[x] += 1u;
-        }
-        break;
-      }
-      case kDirtySparse: {
-        /* Sprite-sized blocks scattered across the plane. Few changed pixels,
-         * but their bounding rectangle covers most of the surface -- the
-         * pathology that makes a single dirty rect the wrong granularity. */
-        const int block = 16;
-        const long total_blocks =
-            ((long)plane->width / block) * ((long)plane->height / block);
-        long touched = total_blocks * dirty_pct / 100;
-        if (touched < 1) touched = 1;
-        for (long b = 0; b < touched; b++) {
-          const int bx = (int)(NextRandom(&seed) % (uint32_t)(plane->width / block)) * block;
-          const int by = (int)(NextRandom(&seed) % (uint32_t)(plane->height / block)) * block;
-          for (int y = by; y < by + block && y < plane->height; y++) {
-            uint32_t *row = (uint32_t *)(plane->current + (size_t)y * plane->pitch);
-            for (int x = bx; x < bx + block && x < plane->width; x++) row[x] += 1u;
-          }
-        }
-        break;
-      }
-      default:
-        break;
+      break;
+    }
+    default:
+      break;
     }
   }
 }
@@ -410,9 +415,8 @@ static void ScanRange(void *context, size_t first, size_t end) {
     ArRenderRectI dirty = {0};
     if (job->partition == kPartitionPlane) {
       BenchPlane *plane = &job->set->planes[index];
-      if (PresentationUploadMirror_FindDirtyRect(
-              plane->current, plane->pitch, plane->mirror, plane->pitch,
-              plane->width, plane->height, &dirty))
+      if (PresentationUploadMirror_FindDirtyRect(plane->current, plane->pitch, plane->mirror,
+                                                 plane->pitch, plane->width, plane->height, &dirty))
         local += (uint64_t)dirty.w * (uint64_t)dirty.h;
     } else {
       /* Row bands span the whole plane set so each part gets equal BYTES --
@@ -424,13 +428,12 @@ static void ScanRange(void *context, size_t first, size_t end) {
       const int band = (int)(index % (size_t)bands);
       const int rows = plane->height / bands;
       const int y0 = band * rows;
-      const int height =
-          (band == bands - 1) ? (plane->height - y0) : rows;
+      const int height = (band == bands - 1) ? (plane->height - y0) : rows;
       if (height <= 0) continue;
-      if (PresentationUploadMirror_FindDirtyRect(
-              plane->current + (size_t)y0 * plane->pitch, plane->pitch,
-              plane->mirror + (size_t)y0 * plane->pitch, plane->pitch,
-              plane->width, height, &dirty))
+      if (PresentationUploadMirror_FindDirtyRect(plane->current + (size_t)y0 * plane->pitch,
+                                                 plane->pitch,
+                                                 plane->mirror + (size_t)y0 * plane->pitch,
+                                                 plane->pitch, plane->width, height, &dirty))
         local += (uint64_t)dirty.w * (uint64_t)dirty.h;
     }
   }
@@ -446,9 +449,8 @@ static uint64_t ComputeDirtyArea(PlaneSet *set) {
   for (int i = 0; i < set->count; i++) {
     BenchPlane *plane = &set->planes[i];
     ArRenderRectI dirty = {0};
-    if (PresentationUploadMirror_FindDirtyRect(
-            plane->current, plane->pitch, plane->mirror, plane->pitch,
-            plane->width, plane->height, &dirty))
+    if (PresentationUploadMirror_FindDirtyRect(plane->current, plane->pitch, plane->mirror,
+                                               plane->pitch, plane->width, plane->height, &dirty))
       area += (uint64_t)dirty.w * (uint64_t)dirty.h;
   }
   return area;
@@ -468,7 +470,9 @@ static void CopyRange(void *context, size_t first, size_t end) {
   }
 }
 
-typedef struct { volatile uint64_t sink; } EmptyJob;
+typedef struct {
+  volatile uint64_t sink;
+} EmptyJob;
 
 static void EmptyRange(void *context, size_t first, size_t end) {
   EmptyJob *job = context;
@@ -477,46 +481,44 @@ static void EmptyRange(void *context, size_t first, size_t end) {
 
 /* ----------------------------------------------------------------- output -- */
 
-static FILE *g_json;
-static bool g_first_result = true;
+static FILE *s_json;
+static bool s_first_result = true;
 
 /* `bytes_exact` says whether bytes_touched is the real traffic. The dirty scan
  * short-circuits: memcmp stops at a row's first difference, and the edge scans
  * are skipped once the horizontal bounds saturate. So only the static case
  * actually reads both buffers in full, and a GB/s figure is meaningful only
  * there. Every other mode reports null rather than an invented rate. */
-static void EmitResult(const char *test, const char *mode, int dirty_pct,
-                       int planes, int width, int height, int threads,
-                       bool pinned, const char *partition,
+static void EmitResult(const char *test, const char *mode, int dirty_pct, int planes, int width,
+                       int height, int threads, bool pinned, const char *partition,
                        uint64_t bytes_touched, bool bytes_exact, Stats stats,
                        uint64_t dirty_area_px, uint64_t full_area_px) {
-  if (!g_json) return;
-  if (!g_first_result) fprintf(g_json, ",\n");
-  g_first_result = false;
+  if (!s_json) return;
+  if (!s_first_result) fprintf(s_json, ",\n");
+  s_first_result = false;
   const double seconds = (double)stats.median / 1e9;
-  const double drift =
-      stats.first_half ? ((double)stats.second_half - (double)stats.first_half) *
-                             100.0 / (double)stats.first_half
-                       : 0.0;
-  fprintf(g_json,
+  const double drift = stats.first_half ? ((double)stats.second_half - (double)stats.first_half) *
+                                              100.0 / (double)stats.first_half
+                                        : 0.0;
+  fprintf(s_json,
           "    {\"test\":\"%s\",\"mode\":\"%s\",\"dirty_pct\":%d,"
           "\"planes\":%d,\"width\":%d,\"height\":%d,"
           "\"working_set_bytes\":%" PRIu64 ",\"threads\":%d,\"pinned\":%s,"
           "\"partition\":\"%s\",\"bytes_touched\":%" PRIu64 ","
           "\"ns_median\":%" PRIu64 ",\"ns_min\":%" PRIu64 ",\"ns_max\":%" PRIu64 ",",
           test, mode, dirty_pct, planes, width, height,
-          (uint64_t)planes * (uint64_t)width * 4u * (uint64_t)height * 2u,
-          threads, pinned ? "true" : "false", partition, bytes_touched,
-          stats.median, stats.min, stats.max);
+          (uint64_t)planes * (uint64_t)width * 4u * (uint64_t)height * 2u, threads,
+          pinned ? "true" : "false", partition, bytes_touched, stats.median, stats.min, stats.max);
   if (bytes_exact && seconds > 0.0)
-    fprintf(g_json, "\"gbps\":%.3f,", (double)bytes_touched / seconds / 1e9);
+    fprintf(s_json, "\"gbps\":%.3f,", (double)bytes_touched / seconds / 1e9);
   else
-    fprintf(g_json, "\"gbps\":null,");
-  fprintf(g_json, "\"drift_pct\":%.2f,\"dirty_area_px\":%" PRIu64
-          ",\"full_area_px\":%" PRIu64 ",\"dirty_frac\":%.4f}",
+    fprintf(s_json, "\"gbps\":null,");
+  fprintf(s_json,
+          "\"drift_pct\":%.2f,\"dirty_area_px\":%" PRIu64 ",\"full_area_px\":%" PRIu64
+          ",\"dirty_frac\":%.4f}",
           drift, dirty_area_px, full_area_px,
           full_area_px ? (double)dirty_area_px / (double)full_area_px : 0.0);
-  fflush(g_json);
+  fflush(s_json);
 }
 
 /* ------------------------------------------------------------------- main -- */
@@ -533,17 +535,17 @@ typedef struct {
 
 static void Usage(const char *program) {
   fprintf(stderr,
-      "usage: %s [options]\n"
-      "  --preset NAME     l2 | l3 | real | large   (default: real)\n"
-      "  --planes N        plane count (default from preset)\n"
-      "  --width N         surface width in pixels\n"
-      "  --height N        surface height in pixels\n"
-      "  --iterations N    timed repeats per configuration (default 30)\n"
-      "  --warmup N        untimed repeats first, to fault pages in (default 3)\n"
-      "  --threads a,b,c   total workers incl. owner (default 1,2,3,4)\n"
-      "  --no-pin          do not pin threads to physical cores (Linux only)\n"
-      "  --json PATH       write results as JSON (default stdout summary only)\n",
-      program);
+          "usage: %s [options]\n"
+          "  --preset NAME     l2 | l3 | real | large   (default: real)\n"
+          "  --planes N        plane count (default from preset)\n"
+          "  --width N         surface width in pixels\n"
+          "  --height N        surface height in pixels\n"
+          "  --iterations N    timed repeats per configuration (default 30)\n"
+          "  --warmup N        untimed repeats first, to fault pages in (default 3)\n"
+          "  --threads a,b,c   total workers incl. owner (default 1,2,3,4)\n"
+          "  --no-pin          do not pin threads to physical cores (Linux only)\n"
+          "  --json PATH       write results as JSON (default stdout summary only)\n",
+          program);
 }
 
 /* Presets target the Deck's actual cache tiers: 512 KiB L2 per core and a
@@ -551,13 +553,21 @@ static void Usage(const char *program) {
  * 256 display columns + widescreen margins + a 64-column apron per side. */
 static void ApplyPreset(Options *options, const char *preset) {
   if (!strcmp(preset, "l2")) {
-    options->planes = 2; options->width = 128; options->height = 112;
+    options->planes = 2;
+    options->width = 128;
+    options->height = 112;
   } else if (!strcmp(preset, "l3")) {
-    options->planes = 4; options->width = 256; options->height = 224;
+    options->planes = 4;
+    options->width = 256;
+    options->height = 224;
   } else if (!strcmp(preset, "real")) {
-    options->planes = 12; options->width = 486; options->height = 224;
+    options->planes = 12;
+    options->width = 486;
+    options->height = 224;
   } else if (!strcmp(preset, "large")) {
-    options->planes = 12; options->width = 640; options->height = 352;
+    options->planes = 12;
+    options->width = 640;
+    options->height = 352;
   }
 }
 
@@ -576,12 +586,12 @@ static void ParseThreadList(Options *options, const char *list) {
 
 int main(int argc, char **argv) {
   Options options = {
-    .iterations = 30,
-    .warmup = 3,
-    .pin = true,
-    .preset = "real",
-    .thread_counts = {1, 2, 3, 4},
-    .thread_count_count = 4,
+      .iterations = 30,
+      .warmup = 3,
+      .pin = true,
+      .preset = "real",
+      .thread_counts = {1, 2, 3, 4},
+      .thread_count_count = 4,
   };
   ApplyPreset(&options, options.preset);
 
@@ -589,31 +599,39 @@ int main(int argc, char **argv) {
     const char *argument = argv[i];
     const char *value = (i + 1 < argc) ? argv[i + 1] : NULL;
     if (!strcmp(argument, "--preset") && value) {
-      options.preset = value; ApplyPreset(&options, value); i++;
+      options.preset = value;
+      ApplyPreset(&options, value);
+      i++;
     } else if (!strcmp(argument, "--planes") && value) {
-      options.planes = atoi(value); i++;
+      options.planes = atoi(value);
+      i++;
     } else if (!strcmp(argument, "--width") && value) {
-      options.width = atoi(value); i++;
+      options.width = atoi(value);
+      i++;
     } else if (!strcmp(argument, "--height") && value) {
-      options.height = atoi(value); i++;
+      options.height = atoi(value);
+      i++;
     } else if (!strcmp(argument, "--iterations") && value) {
-      options.iterations = atoi(value); i++;
+      options.iterations = atoi(value);
+      i++;
     } else if (!strcmp(argument, "--warmup") && value) {
-      options.warmup = atoi(value); i++;
+      options.warmup = atoi(value);
+      i++;
     } else if (!strcmp(argument, "--threads") && value) {
-      ParseThreadList(&options, value); i++;
+      ParseThreadList(&options, value);
+      i++;
     } else if (!strcmp(argument, "--no-pin")) {
       options.pin = false;
     } else if (!strcmp(argument, "--json") && value) {
-      options.json_path = value; i++;
+      options.json_path = value;
+      i++;
     } else {
       Usage(argv[0]);
       return 2;
     }
   }
-  if (options.planes <= 0 || options.width <= 0 || options.height <= 0 ||
-      options.iterations <= 0 || options.warmup < 0 ||
-      options.thread_count_count <= 0) {
+  if (options.planes <= 0 || options.width <= 0 || options.height <= 0 || options.iterations <= 0 ||
+      options.warmup < 0 || options.thread_count_count <= 0) {
     Usage(argv[0]);
     return 2;
   }
@@ -623,14 +641,12 @@ int main(int argc, char **argv) {
     fprintf(stderr, "deckbench-cpu: out of memory allocating planes\n");
     return 1;
   }
-  const uint64_t working_set =
-      (uint64_t)set.bytes_per_plane * (uint64_t)options.planes * 2u;
+  const uint64_t working_set = (uint64_t)set.bytes_per_plane * (uint64_t)options.planes * 2u;
 
   if (options.json_path) {
-    g_json = fopen(options.json_path, "w");
-    if (!g_json) {
-      fprintf(stderr, "deckbench-cpu: cannot write %s: %s\n",
-              options.json_path, strerror(errno));
+    s_json = fopen(options.json_path, "w");
+    if (!s_json) {
+      fprintf(stderr, "deckbench-cpu: cannot write %s: %s\n", options.json_path, strerror(errno));
       PlaneSetFree(&set);
       return 1;
     }
@@ -641,38 +657,39 @@ int main(int argc, char **argv) {
   online_cpus = sysconf(_SC_NPROCESSORS_ONLN);
 #endif
 
-  if (g_json) {
-    fprintf(g_json,
-        "{\n  \"tool\": \"deckbench-cpu\",\n  \"version\": 1,\n"
-        "  \"host\": {\"os\": \"%s\", \"online_cpus\": %ld},\n"
-        "  \"config\": {\"preset\": \"%s\", \"planes\": %d, \"width\": %d,"
-        " \"height\": %d, \"iterations\": %d, \"warmup\": %d, \"pin\": %s,"
-        " \"working_set_bytes\": %" PRIu64 "},\n  \"results\": [\n",
+  if (s_json) {
+    fprintf(s_json,
+            "{\n  \"tool\": \"deckbench-cpu\",\n  \"version\": 1,\n"
+            "  \"host\": {\"os\": \"%s\", \"online_cpus\": %ld},\n"
+            "  \"config\": {\"preset\": \"%s\", \"planes\": %d, \"width\": %d,"
+            " \"height\": %d, \"iterations\": %d, \"warmup\": %d, \"pin\": %s,"
+            " \"working_set_bytes\": %" PRIu64 "},\n  \"results\": [\n",
 #if defined(__linux__)
-        "linux",
+            "linux",
 #elif defined(__APPLE__)
-        "macos",
+            "macos",
 #else
-        "other",
+            "other",
 #endif
-        online_cpus, options.preset, options.planes, options.width,
-        options.height, options.iterations, options.warmup,
-        options.pin ? "true" : "false", working_set);
+            online_cpus, options.preset, options.planes, options.width, options.height,
+            options.iterations, options.warmup, options.pin ? "true" : "false", working_set);
   }
 
-  printf("deckbench-cpu: %d planes %dx%d, working set %.2f MiB, %d iterations\n",
-         options.planes, options.width, options.height,
-         (double)working_set / (1024.0 * 1024.0), options.iterations);
-  printf("%-10s %-8s %4s %3s %-8s %10s %10s %8s %8s\n",
-         "test", "mode", "dpct", "thr", "part", "median_us", "GB/s",
-         "dirty%", "drift%");
+  printf("deckbench-cpu: %d planes %dx%d, working set %.2f MiB, %d iterations\n", options.planes,
+         options.width, options.height, (double)working_set / (1024.0 * 1024.0),
+         options.iterations);
+  printf("%-10s %-8s %4s %3s %-8s %10s %10s %8s %8s\n", "test", "mode", "dpct", "thr", "part",
+         "median_us", "GB/s", "dirty%", "drift%");
 
   uint64_t *samples = malloc((size_t)options.iterations * sizeof(*samples));
-  if (!samples) { PlaneSetFree(&set); return 1; }
+  if (!samples) {
+    PlaneSetFree(&set);
+    return 1;
+  }
 
   const DirtyMode modes[] = {kDirtyStatic, kDirtyRegion, kDirtySparse, kDirtyScroll};
-  const int sparse_pct = 5;   /* a few dozen sprite blocks */
-  const int region_pct = 25;  /* a quarter of the surface */
+  const int sparse_pct = 5;  /* a few dozen sprite blocks */
+  const int region_pct = 25; /* a quarter of the surface */
 
   for (int t = 0; t < options.thread_count_count; t++) {
     const int threads = options.thread_counts[t];
@@ -685,23 +702,22 @@ int main(int argc, char **argv) {
 
     for (size_t m = 0; m < sizeof(modes) / sizeof(modes[0]); m++) {
       const DirtyMode mode = modes[m];
-      const int dirty_pct = (mode == kDirtySparse) ? sparse_pct
-                          : (mode == kDirtyRegion) ? region_pct : 0;
+      const int dirty_pct = (mode == kDirtySparse)   ? sparse_pct
+                            : (mode == kDirtyRegion) ? region_pct
+                                                     : 0;
 
       for (int p = 0; p < 2; p++) {
         const Partition partition = p ? kPartitionRowBand : kPartitionPlane;
         /* Enough bands that four workers can be fed evenly from one plane set
          * without splitting rows below a useful size. */
         const int bands = 8;
-        ScanJob job = {.set = &set, .partition = partition,
-                       .bands_per_plane = bands};
-        const size_t count = (partition == kPartitionPlane)
-            ? (size_t)set.count : (size_t)set.count * (size_t)bands;
+        ScanJob job = {.set = &set, .partition = partition, .bands_per_plane = bands};
+        const size_t count =
+            (partition == kPartitionPlane) ? (size_t)set.count : (size_t)set.count * (size_t)bands;
 
         PlaneSetApplyDirty(&set, mode, dirty_pct);
         const uint64_t full_area =
-            (uint64_t)options.width * (uint64_t)options.height *
-            (uint64_t)set.count;
+            (uint64_t)options.width * (uint64_t)options.height * (uint64_t)set.count;
         const uint64_t dirty_area = ComputeDirtyArea(&set);
 
         /* Untimed first: the initial pass over a freshly malloc'd working
@@ -716,22 +732,19 @@ int main(int argc, char **argv) {
         }
         const Stats stats = Summarize(samples, (size_t)options.iterations);
         /* Only the static case reads both buffers end to end; see EmitResult. */
-        const uint64_t touched =
-            (uint64_t)set.bytes_per_plane * (uint64_t)set.count * 2u;
+        const uint64_t touched = (uint64_t)set.bytes_per_plane * (uint64_t)set.count * 2u;
         const bool exact = (mode == kDirtyStatic);
-        printf("%-10s %-8s %4d %3d %-8s %10.1f %10s %8.1f %8.1f\n",
-               "scan", DirtyModeName(mode), dirty_pct, threads,
-               partition == kPartitionPlane ? "plane" : "rowband",
-               (double)stats.median / 1000.0,
-               exact ? "exact" : "n/a",
+        printf("%-10s %-8s %4d %3d %-8s %10.1f %10s %8.1f %8.1f\n", "scan", DirtyModeName(mode),
+               dirty_pct, threads, partition == kPartitionPlane ? "plane" : "rowband",
+               (double)stats.median / 1000.0, exact ? "exact" : "n/a",
                100.0 * (double)dirty_area / (double)full_area,
-               stats.first_half ? ((double)stats.second_half -
-                                   (double)stats.first_half) * 100.0 /
-                                      (double)stats.first_half : 0.0);
-        EmitResult("scan", DirtyModeName(mode), dirty_pct, options.planes,
-                   options.width, options.height, threads, options.pin,
-                   partition == kPartitionPlane ? "plane" : "rowband",
-                   touched, exact, stats, dirty_area, full_area);
+               stats.first_half ? ((double)stats.second_half - (double)stats.first_half) * 100.0 /
+                                      (double)stats.first_half
+                                : 0.0);
+        EmitResult("scan", DirtyModeName(mode), dirty_pct, options.planes, options.width,
+                   options.height, threads, options.pin,
+                   partition == kPartitionPlane ? "plane" : "rowband", touched, exact, stats,
+                   dirty_area, full_area);
       }
     }
 
@@ -747,20 +760,16 @@ int main(int argc, char **argv) {
         samples[iteration] = NowNanos() - started;
       }
       const Stats stats = Summarize(samples, (size_t)options.iterations);
-      const uint64_t touched =
-          (uint64_t)set.bytes_per_plane * (uint64_t)set.count * 2u;
+      const uint64_t touched = (uint64_t)set.bytes_per_plane * (uint64_t)set.count * 2u;
       char rate[16];
-      snprintf(rate, sizeof(rate), "%.2f",
-               (double)touched / ((double)stats.median / 1e9) / 1e9);
-      printf("%-10s %-8s %4d %3d %-8s %10.1f %10s %8s %8.1f\n",
-             "copy", "full", 100, threads, "plane",
-             (double)stats.median / 1000.0, rate, "-",
-             stats.first_half ? ((double)stats.second_half -
-                                 (double)stats.first_half) * 100.0 /
-                                    (double)stats.first_half : 0.0);
-      EmitResult("copy", "full", 100, options.planes, options.width,
-                 options.height, threads, options.pin, "plane", touched,
-                 true, stats, 0, 0);
+      snprintf(rate, sizeof(rate), "%.2f", (double)touched / ((double)stats.median / 1e9) / 1e9);
+      printf("%-10s %-8s %4d %3d %-8s %10.1f %10s %8s %8.1f\n", "copy", "full", 100, threads,
+             "plane", (double)stats.median / 1000.0, rate, "-",
+             stats.first_half ? ((double)stats.second_half - (double)stats.first_half) * 100.0 /
+                                    (double)stats.first_half
+                              : 0.0);
+      EmitResult("copy", "full", 100, options.planes, options.width, options.height, threads,
+                 options.pin, "plane", touched, true, stats, 0, 0);
     }
 
     /* Dispatch + join with no work, which is what decides the smallest job
@@ -776,23 +785,21 @@ int main(int argc, char **argv) {
         samples[iteration] = (NowNanos() - started) / 100;
       }
       const Stats stats = Summarize(samples, (size_t)options.iterations);
-      printf("%-10s %-8s %4d %3d %-8s %10.3f %10s %8s %8.1f\n",
-             "forkjoin", "empty", 0, threads, "-",
-             (double)stats.median / 1000.0, "-", "-",
-             stats.first_half ? ((double)stats.second_half -
-                                 (double)stats.first_half) * 100.0 /
-                                    (double)stats.first_half : 0.0);
-      EmitResult("forkjoin", "empty", 0, options.planes, options.width,
-                 options.height, threads, options.pin, "-", 0, false,
-                 stats, 0, 0);
+      printf("%-10s %-8s %4d %3d %-8s %10.3f %10s %8s %8.1f\n", "forkjoin", "empty", 0, threads,
+             "-", (double)stats.median / 1000.0, "-", "-",
+             stats.first_half ? ((double)stats.second_half - (double)stats.first_half) * 100.0 /
+                                    (double)stats.first_half
+                              : 0.0);
+      EmitResult("forkjoin", "empty", 0, options.planes, options.width, options.height, threads,
+                 options.pin, "-", 0, false, stats, 0, 0);
     }
 
     PoolDestroy(pool);
   }
 
-  if (g_json) {
-    fprintf(g_json, "\n  ]\n}\n");
-    fclose(g_json);
+  if (s_json) {
+    fprintf(s_json, "\n  ]\n}\n");
+    fclose(s_json);
   }
   free(samples);
   PlaneSetFree(&set);

@@ -636,7 +636,6 @@ def read_d1_metadata(path: Path,
                           f"effect {effect_index} source index is out of bounds")
                     continue
                 source = sources[source_index]
-                world = [int(value) for value in effect.get("world", [])]
                 geometry = effect.get("geometry", {})
                 if int(effect.get("record", -1)) != int(source["record"]) or \
                         int(effect.get("composition", -1)) != int(

@@ -1,0 +1,8 @@
+# Correctness checks apply to all authored Python, including developer tools.
+# Formatting is available explicitly without rewriting established fixtures.
+target-version = "py310"
+line-length = 100
+extend-exclude = ["third_party", "src/gen", "src/generated", "build", "build-*"]
+
+[lint]
+select = ["E9", "F"]

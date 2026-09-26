@@ -23,7 +23,9 @@ violations each file had when it was adopted. A file may never gain
 violations, and a new file must have none. When a cleanup removes some, run
 with --update-baseline to lock the improvement in; that refuses any increase
 once a baseline exists.
-Generated code is not checked: src/gen, src/generated, src/shaders/*.h,
+The same rules cover src/, tests/, tools/, benchmarks/, and installer/ C/C++.
+Vendored tools/oracle/libretro.h and generated code are not checked: src/gen,
+src/generated, src/shaders/*.h,
 *_data.inc, and any file whose first two lines say it is generated ("Generated
 by", "Generated from", "GENERATED FILE" or "DO NOT EDIT"). Fix a generated file
 in its generator, never by hand.
@@ -43,6 +45,8 @@ BASELINE = ROOT / 'tools/style_baseline.json'
 RULES = ('tab-indent', 'trailing-space', 'long-line', 'packed', 'static-g-prefix',
          'header-guard', 'header-comment')
 MAX_COLUMNS = 100
+SOURCE_ROOTS = ('src', 'tests', 'tools', 'benchmarks', 'installer')
+VENDORED = {'tools/oracle/libretro.h'}
 STATIC_G = re.compile(
     r'^static\s+(?!const\b)(?!inline\b)[^;(){}=]*?\bg_\w+\s*(\[[^\]]*\])*\s*(=[^;]*)?;')
 CASE_LABEL = re.compile(r'\s*(case\b.*?:|default\s*:)')
@@ -60,14 +64,14 @@ def checked_files(root):
     try:
         listed = subprocess.run(
             ['git', 'ls-files', '--cached', '--others', '--exclude-standard',
-             'src', 'tests'],
+             *SOURCE_ROOTS],
             cwd=root, capture_output=True, text=True, check=True).stdout.split()
     except (OSError, subprocess.CalledProcessError):
         # Not a git checkout: every file on disk counts.
         listed = [path.relative_to(root).as_posix()
-                  for top in ('src', 'tests') for path in (root / top).rglob('*')]
+                  for top in SOURCE_ROOTS for path in (root / top).rglob('*')]
     for name in sorted(set(listed)):
-        if not name.endswith(('.c', '.h', '.inc')):
+        if name in VENDORED or not name.endswith(('.c', '.h', '.inc', '.cpp')):
             continue
         if name.startswith(('src/gen/', 'src/generated/', 'src/shaders/')):
             continue

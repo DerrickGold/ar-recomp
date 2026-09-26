@@ -44,7 +44,9 @@ static int CompareU64(const void *a, const void *b) {
   return x < y ? -1 : (x > y ? 1 : 0);
 }
 
-typedef struct { uint64_t median, min, max; } Stats;
+typedef struct {
+  uint64_t median, min, max;
+} Stats;
 
 static Stats Summarize(uint64_t *samples, size_t count) {
   Stats s = {0};
@@ -58,26 +60,25 @@ static Stats Summarize(uint64_t *samples, size_t count) {
 
 /* ----------------------------------------------------------------- output -- */
 
-static FILE *g_json;
-static bool g_first = true;
+static FILE *s_json;
+static bool s_first = true;
 
-static void Emit(const char *test, const char *variant, int calls,
-                 uint64_t bytes_per_call, Stats submit, Stats total) {
-  if (!g_json) return;
-  if (!g_first) fprintf(g_json, ",\n");
-  g_first = false;
+static void Emit(const char *test, const char *variant, int calls, uint64_t bytes_per_call,
+                 Stats submit, Stats total) {
+  if (!s_json) return;
+  if (!s_first) fprintf(s_json, ",\n");
+  s_first = false;
   const uint64_t bytes = (uint64_t)calls * bytes_per_call;
-  fprintf(g_json,
-      "    {\"test\":\"%s\",\"variant\":\"%s\",\"calls\":%d,"
-      "\"bytes_per_call\":%" PRIu64 ",\"total_bytes\":%" PRIu64 ","
-      "\"update_ns_median\":%" PRIu64 ",\"update_ns_min\":%" PRIu64 ","
-      "\"frame_ns_median\":%" PRIu64 ",\"frame_ns_min\":%" PRIu64 ","
-      "\"update_us_per_call\":%.4f,\"frame_gbps\":%.3f}",
-      test, variant, calls, bytes_per_call, bytes,
-      submit.median, submit.min, total.median, total.min,
-      calls ? (double)submit.median / 1000.0 / calls : 0.0,
-      total.median ? (double)bytes / ((double)total.median / 1e9) / 1e9 : 0.0);
-  fflush(g_json);
+  fprintf(s_json,
+          "    {\"test\":\"%s\",\"variant\":\"%s\",\"calls\":%d,"
+          "\"bytes_per_call\":%" PRIu64 ",\"total_bytes\":%" PRIu64 ","
+          "\"update_ns_median\":%" PRIu64 ",\"update_ns_min\":%" PRIu64 ","
+          "\"frame_ns_median\":%" PRIu64 ",\"frame_ns_min\":%" PRIu64 ","
+          "\"update_us_per_call\":%.4f,\"frame_gbps\":%.3f}",
+          test, variant, calls, bytes_per_call, bytes, submit.median, submit.min, total.median,
+          total.min, calls ? (double)submit.median / 1000.0 / calls : 0.0,
+          total.median ? (double)bytes / ((double)total.median / 1e9) / 1e9 : 0.0);
+  fflush(s_json);
 }
 
 /* ------------------------------------------------------------------ state -- */
@@ -86,7 +87,7 @@ typedef struct {
   SDL_GPUDevice *device;
   SDL_Renderer *renderer;
   int iterations;
-  uint8_t *staging;          /* source pixels, CPU side */
+  uint8_t *staging; /* source pixels, CPU side */
   size_t staging_bytes;
   uint64_t *samples_update;
   uint64_t *samples_frame;
@@ -98,9 +99,8 @@ typedef struct {
  * Update time and whole-frame time are reported separately on purpose: on a
  * deferred backend SDL_UpdateTexture can look nearly free while the real cost
  * lands at submission. Reporting only the first would flatter the API. */
-static void RunUploadFrame(Bench *b, SDL_Texture **textures, int texture_count,
-                           int calls, int rect_w, int rect_h, int texture_h,
-                           int pitch,
+static void RunUploadFrame(Bench *b, SDL_Texture **textures, int texture_count, int calls,
+                           int rect_w, int rect_h, int texture_h, int pitch,
                            uint64_t *out_update_ns, uint64_t *out_frame_ns) {
   const uint64_t frame_start = NowNanos();
 
@@ -128,18 +128,15 @@ static void RunUploadFrame(Bench *b, SDL_Texture **textures, int texture_count,
   *out_frame_ns = NowNanos() - frame_start;
 }
 
-static void MeasureUpload(Bench *b, const char *test, const char *variant,
-                          SDL_Texture **textures, int texture_count,
-                          int calls, int rect_w, int rect_h, int texture_h,
+static void MeasureUpload(Bench *b, const char *test, const char *variant, SDL_Texture **textures,
+                          int texture_count, int calls, int rect_w, int rect_h, int texture_h,
                           int pitch) {
   for (int w = 0; w < 3; w++) {
     uint64_t a = 0, c = 0;
-    RunUploadFrame(b, textures, texture_count, calls, rect_w, rect_h,
-                   texture_h, pitch, &a, &c);
+    RunUploadFrame(b, textures, texture_count, calls, rect_w, rect_h, texture_h, pitch, &a, &c);
   }
   for (int i = 0; i < b->iterations; i++)
-    RunUploadFrame(b, textures, texture_count, calls, rect_w, rect_h,
-                   texture_h, pitch,
+    RunUploadFrame(b, textures, texture_count, calls, rect_w, rect_h, texture_h, pitch,
                    &b->samples_update[i], &b->samples_frame[i]);
 
   uint64_t *update_copy = malloc((size_t)b->iterations * sizeof(uint64_t));
@@ -152,11 +149,9 @@ static void MeasureUpload(Bench *b, const char *test, const char *variant,
   free(frame_copy);
 
   const uint64_t bytes_per_call = (uint64_t)rect_w * (uint64_t)rect_h * 4u;
-  printf("%-14s %-16s %5d %10" PRIu64 " %11.1f %11.1f %10.2f\n",
-         test, variant, calls, bytes_per_call,
-         (double)update.median / 1000.0, (double)frame.median / 1000.0,
-         frame.median ? (double)calls * bytes_per_call /
-                            ((double)frame.median / 1e9) / 1e9 : 0.0);
+  printf("%-14s %-16s %5d %10" PRIu64 " %11.1f %11.1f %10.2f\n", test, variant, calls,
+         bytes_per_call, (double)update.median / 1000.0, (double)frame.median / 1000.0,
+         frame.median ? (double)calls * bytes_per_call / ((double)frame.median / 1e9) / 1e9 : 0.0);
   Emit(test, variant, calls, bytes_per_call, update, frame);
 }
 
@@ -164,10 +159,12 @@ static void MeasureUpload(Bench *b, const char *test, const char *variant,
  * whether a producer may write straight into GPU-visible memory: if reads come
  * back an order of magnitude below writes, that memory is write-combined and
  * every CPU reader of it must be moved elsewhere first. */
-static void MeasureTransferBuffer(Bench *b, SDL_GPUTransferBufferUsage usage,
-                                  const char *label, size_t bytes) {
+static void MeasureTransferBuffer(Bench *b, SDL_GPUTransferBufferUsage usage, const char *label,
+                                  size_t bytes) {
   SDL_GPUTransferBufferCreateInfo info = {
-    .usage = usage, .size = (Uint32)bytes, .props = 0,
+      .usage = usage,
+      .size = (Uint32)bytes,
+      .props = 0,
   };
   SDL_GPUTransferBuffer *buffer = SDL_CreateGPUTransferBuffer(b->device, &info);
   if (!buffer) {
@@ -193,7 +190,8 @@ static void MeasureTransferBuffer(Bench *b, SDL_GPUTransferBufferUsage usage,
     const uint64_t read_start = NowNanos();
     const uint64_t *words = mapped;
     uint64_t accumulator = 0;
-    for (size_t w = 0; w < bytes / sizeof(uint64_t); w++) accumulator += words[w];
+    for (size_t w = 0; w < bytes / sizeof(uint64_t); w++)
+      accumulator += words[w];
     const uint64_t read_ns = NowNanos() - read_start;
     sink += accumulator;
 
@@ -210,19 +208,18 @@ static void MeasureTransferBuffer(Bench *b, SDL_GPUTransferBufferUsage usage,
   const double write_gbps = write.median ? (double)bytes / ((double)write.median / 1e9) / 1e9 : 0.0;
   const double read_gbps = read.median ? (double)bytes / ((double)read.median / 1e9) / 1e9 : 0.0;
 
-  printf("  %-22s write %7.2f GB/s   read %7.2f GB/s   ratio %5.1fx\n",
-         label, write_gbps, read_gbps,
-         read_gbps > 0.0 ? write_gbps / read_gbps : 0.0);
+  printf("  %-22s write %7.2f GB/s   read %7.2f GB/s   ratio %5.1fx\n", label, write_gbps,
+         read_gbps, read_gbps > 0.0 ? write_gbps / read_gbps : 0.0);
 
-  if (g_json) {
-    if (!g_first) fprintf(g_json, ",\n");
-    g_first = false;
-    fprintf(g_json,
-        "    {\"test\":\"transfer_buffer\",\"variant\":\"%s\","
-        "\"bytes\":%zu,\"write_ns_median\":%" PRIu64 ",\"read_ns_median\":%" PRIu64 ","
-        "\"write_gbps\":%.3f,\"read_gbps\":%.3f}",
-        label, bytes, write.median, read.median, write_gbps, read_gbps);
-    fflush(g_json);
+  if (s_json) {
+    if (!s_first) fprintf(s_json, ",\n");
+    s_first = false;
+    fprintf(s_json,
+            "    {\"test\":\"transfer_buffer\",\"variant\":\"%s\","
+            "\"bytes\":%zu,\"write_ns_median\":%" PRIu64 ",\"read_ns_median\":%" PRIu64 ","
+            "\"write_gbps\":%.3f,\"read_gbps\":%.3f}",
+            label, bytes, write.median, read.median, write_gbps, read_gbps);
+    fflush(s_json);
   }
   free(write_samples);
   free(read_samples);
@@ -238,33 +235,32 @@ static void MeasureTransferBuffer(Bench *b, SDL_GPUTransferBufferUsage usage,
  * The texture is not recreated: SDL_PROP_TEXTURE_GPU_TEXTURE_POINTER hands
  * back the SDL_GPUTexture behind an ordinary SDL_Texture, so the compositor
  * keeps drawing the same object. */
-static void MeasureManualUpload(Bench *b, SDL_Texture **textures,
-                                int texture_count, int width, int height) {
+static void MeasureManualUpload(Bench *b, SDL_Texture **textures, int texture_count, int width,
+                                int height) {
   SDL_GPUTransferBuffer *transfer = NULL;
   SDL_GPUTexture **gpu_textures = calloc((size_t)texture_count, sizeof(*gpu_textures));
   if (!gpu_textures) return;
   bool usable = true;
   for (int i = 0; i < texture_count && usable; i++) {
     SDL_PropertiesID props = SDL_GetTextureProperties(textures[i]);
-    gpu_textures[i] = props ? SDL_GetPointerProperty(
-        props, SDL_PROP_TEXTURE_GPU_TEXTURE_POINTER, NULL) : NULL;
+    gpu_textures[i] =
+        props ? SDL_GetPointerProperty(props, SDL_PROP_TEXTURE_GPU_TEXTURE_POINTER, NULL) : NULL;
     usable = gpu_textures[i] != NULL;
   }
   if (!usable) {
-    printf("%-14s %-16s  unavailable (no GPU texture behind SDL_Texture)\n",
-           "manual", "transfer-buf");
+    printf("%-14s %-16s  unavailable (no GPU texture behind SDL_Texture)\n", "manual",
+           "transfer-buf");
     free(gpu_textures);
     return;
   }
   SDL_GPUTransferBufferCreateInfo info = {
-    .usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,
-    .size = (Uint32)((size_t)width * (size_t)height * 4u),
-    .props = 0,
+      .usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,
+      .size = (Uint32)((size_t)width * (size_t)height * 4u),
+      .props = 0,
   };
   transfer = SDL_CreateGPUTransferBuffer(b->device, &info);
   if (!transfer) {
-    printf("%-14s %-16s  unavailable (%s)\n", "manual", "transfer-buf",
-           SDL_GetError());
+    printf("%-14s %-16s  unavailable (%s)\n", "manual", "transfer-buf", SDL_GetError());
     free(gpu_textures);
     return;
   }
@@ -284,13 +280,21 @@ static void MeasureManualUpload(Bench *b, SDL_Texture **textures,
       SDL_GPUCopyPass *pass = SDL_BeginGPUCopyPass(commands);
       if (pass) {
         const SDL_GPUTextureTransferInfo source = {
-          .transfer_buffer = transfer, .offset = 0,
-          .pixels_per_row = (Uint32)width, .rows_per_layer = (Uint32)height,
+            .transfer_buffer = transfer,
+            .offset = 0,
+            .pixels_per_row = (Uint32)width,
+            .rows_per_layer = (Uint32)height,
         };
         const SDL_GPUTextureRegion destination = {
-          .texture = gpu_textures[i], .mip_level = 0, .layer = 0,
-          .x = 0, .y = 0, .z = 0,
-          .w = (Uint32)width, .h = (Uint32)height, .d = 1,
+            .texture = gpu_textures[i],
+            .mip_level = 0,
+            .layer = 0,
+            .x = 0,
+            .y = 0,
+            .z = 0,
+            .w = (Uint32)width,
+            .h = (Uint32)height,
+            .d = 1,
         };
         SDL_UploadToGPUTexture(pass, &source, &destination, false);
         SDL_EndGPUCopyPass(pass);
@@ -304,11 +308,10 @@ static void MeasureManualUpload(Bench *b, SDL_Texture **textures,
   const Stats frame = Summarize(copy, (size_t)b->iterations);
   free(copy);
   const uint64_t bytes_per_call = (uint64_t)width * (uint64_t)height * 4u;
-  printf("%-14s %-16s %5d %10" PRIu64 " %11s %11.1f %10.2f\n",
-         "manual", "transfer-buf", texture_count, bytes_per_call, "-",
-         (double)frame.median / 1000.0,
-         frame.median ? (double)texture_count * bytes_per_call /
-             ((double)frame.median / 1e9) / 1e9 : 0.0);
+  printf("%-14s %-16s %5d %10" PRIu64 " %11s %11.1f %10.2f\n", "manual", "transfer-buf",
+         texture_count, bytes_per_call, "-", (double)frame.median / 1000.0,
+         frame.median ? (double)texture_count * bytes_per_call / ((double)frame.median / 1e9) / 1e9
+                      : 0.0);
   Emit("manual", "transfer-buf", texture_count, bytes_per_call, frame, frame);
   SDL_ReleaseGPUTransferBuffer(b->device, transfer);
   free(gpu_textures);
@@ -323,14 +326,26 @@ int main(int argc, char **argv) {
   for (int i = 1; i < argc; i++) {
     const char *a = argv[i];
     const char *v = (i + 1 < argc) ? argv[i + 1] : NULL;
-    if (!strcmp(a, "--width") && v) { width = atoi(v); i++; }
-    else if (!strcmp(a, "--height") && v) { height = atoi(v); i++; }
-    else if (!strcmp(a, "--planes") && v) { planes = atoi(v); i++; }
-    else if (!strcmp(a, "--iterations") && v) { iterations = atoi(v); i++; }
-    else if (!strcmp(a, "--json") && v) { json_path = v; i++; }
-    else {
-      fprintf(stderr, "usage: %s [--width N] [--height N] [--planes N]"
-                      " [--iterations N] [--json PATH]\n", argv[0]);
+    if (!strcmp(a, "--width") && v) {
+      width = atoi(v);
+      i++;
+    } else if (!strcmp(a, "--height") && v) {
+      height = atoi(v);
+      i++;
+    } else if (!strcmp(a, "--planes") && v) {
+      planes = atoi(v);
+      i++;
+    } else if (!strcmp(a, "--iterations") && v) {
+      iterations = atoi(v);
+      i++;
+    } else if (!strcmp(a, "--json") && v) {
+      json_path = v;
+      i++;
+    } else {
+      fprintf(stderr,
+              "usage: %s [--width N] [--height N] [--planes N]"
+              " [--iterations N] [--json PATH]\n",
+              argv[0]);
       return 2;
     }
   }
@@ -348,8 +363,8 @@ int main(int argc, char **argv) {
   }
 
   SDL_GPUDevice *device = SDL_CreateGPUDevice(
-      SDL_GPU_SHADERFORMAT_SPIRV | SDL_GPU_SHADERFORMAT_MSL |
-      SDL_GPU_SHADERFORMAT_DXIL, false, NULL);
+      SDL_GPU_SHADERFORMAT_SPIRV | SDL_GPU_SHADERFORMAT_MSL | SDL_GPU_SHADERFORMAT_DXIL, false,
+      NULL);
   if (!device) {
     fprintf(stderr, "SDL_CreateGPUDevice failed: %s\n", SDL_GetError());
     return 1;
@@ -362,17 +377,17 @@ int main(int argc, char **argv) {
   }
 
   printf("deckbench-gpu: SDL %d.%d.%d, GPU driver \"%s\", renderer \"%s\"\n",
-         SDL_VERSIONNUM_MAJOR(SDL_GetVersion()),
-         SDL_VERSIONNUM_MINOR(SDL_GetVersion()),
-         SDL_VERSIONNUM_MICRO(SDL_GetVersion()),
-         SDL_GetGPUDeviceDriver(device), SDL_GetRendererName(renderer));
-  printf("geometry: %d planes of %dx%d ARGB8888 (%.2f MiB total), %d iterations\n\n",
-         planes, width, height,
-         (double)planes * width * height * 4.0 / 1048576.0, iterations);
+         SDL_VERSIONNUM_MAJOR(SDL_GetVersion()), SDL_VERSIONNUM_MINOR(SDL_GetVersion()),
+         SDL_VERSIONNUM_MICRO(SDL_GetVersion()), SDL_GetGPUDeviceDriver(device),
+         SDL_GetRendererName(renderer));
+  printf("geometry: %d planes of %dx%d ARGB8888 (%.2f MiB total), %d iterations\n\n", planes, width,
+         height, (double)planes * width * height * 4.0 / 1048576.0, iterations);
 
   Bench bench = {
-    .device = device, .renderer = renderer, .iterations = iterations,
-    .staging_bytes = (size_t)width * (size_t)height * 4u,
+      .device = device,
+      .renderer = renderer,
+      .iterations = iterations,
+      .staging_bytes = (size_t)width * (size_t)height * 4u,
   };
   bench.staging = malloc(bench.staging_bytes);
   bench.samples_update = malloc((size_t)iterations * sizeof(uint64_t));
@@ -382,21 +397,21 @@ int main(int argc, char **argv) {
     bench.staging[i] = (uint8_t)(i * 31u + 7u);
 
   if (json_path) {
-    g_json = fopen(json_path, "w");
-    if (g_json)
-      fprintf(g_json,
-          "{\n  \"tool\": \"deckbench-gpu\",\n  \"version\": 1,\n"
-          "  \"gpu_driver\": \"%s\",\n  \"renderer\": \"%s\",\n"
-          "  \"config\": {\"width\": %d, \"height\": %d, \"planes\": %d,"
-          " \"iterations\": %d},\n  \"results\": [\n",
-          SDL_GetGPUDeviceDriver(device), SDL_GetRendererName(renderer),
-          width, height, planes, iterations);
+    s_json = fopen(json_path, "w");
+    if (s_json)
+      fprintf(s_json,
+              "{\n  \"tool\": \"deckbench-gpu\",\n  \"version\": 1,\n"
+              "  \"gpu_driver\": \"%s\",\n  \"renderer\": \"%s\",\n"
+              "  \"config\": {\"width\": %d, \"height\": %d, \"planes\": %d,"
+              " \"iterations\": %d},\n  \"results\": [\n",
+              SDL_GetGPUDeviceDriver(device), SDL_GetRendererName(renderer), width, height, planes,
+              iterations);
   }
 
   SDL_Texture **textures = calloc((size_t)planes, sizeof(*textures));
   for (int i = 0; i < planes; i++) {
-    textures[i] = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888,
-                                    SDL_TEXTUREACCESS_STREAMING, width, height);
+    textures[i] = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
+                                    width, height);
     if (!textures[i]) {
       fprintf(stderr, "SDL_CreateTexture failed: %s\n", SDL_GetError());
       return 1;
@@ -404,8 +419,8 @@ int main(int argc, char **argv) {
     SDL_SetTextureBlendMode(textures[i], SDL_BLENDMODE_NONE);
   }
 
-  printf("%-14s %-16s %5s %10s %11s %11s %10s\n",
-         "test", "variant", "calls", "bytes/call", "update_us", "frame_us", "GB/s");
+  printf("%-14s %-16s %5s %10s %11s %11s %10s\n", "test", "variant", "calls", "bytes/call",
+         "update_us", "frame_us", "GB/s");
 
   /* --- Per-call cost: hold bytes-per-call at a full plane, vary the count.
    * A flat frame time across counts means ALPHA dominates; linear growth in
@@ -414,8 +429,8 @@ int main(int argc, char **argv) {
   for (size_t i = 0; i < sizeof(call_counts) / sizeof(call_counts[0]); i++) {
     const int calls = call_counts[i];
     const int used = calls < planes ? calls : planes;
-    MeasureUpload(&bench, "call-sweep", "full-plane", textures, used, calls,
-                  width, height, height, width * 4);
+    MeasureUpload(&bench, "call-sweep", "full-plane", textures, used, calls, width, height, height,
+                  width * 4);
   }
 
   /* --- Per-byte cost: hold the call count at one per plane, shrink the region.
@@ -426,37 +441,36 @@ int main(int argc, char **argv) {
     if (rows <= 0) continue;
     char variant[32];
     snprintf(variant, sizeof(variant), "%d-rows", rows);
-    MeasureUpload(&bench, "byte-sweep", variant, textures, planes, planes,
-                  width, rows, height, width * 4);
+    MeasureUpload(&bench, "byte-sweep", variant, textures, planes, planes, width, rows, height,
+                  width * 4);
   }
 
   /* --- One atlas versus many textures, at equal total bytes: the practical
    * question behind consolidating resources. */
-  SDL_Texture *atlas = SDL_CreateTexture(
-      renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
-      width, height * planes);
+  SDL_Texture *atlas = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888,
+                                         SDL_TEXTUREACCESS_STREAMING, width, height * planes);
   if (atlas) {
     SDL_SetTextureBlendMode(atlas, SDL_BLENDMODE_NONE);
-    MeasureUpload(&bench, "consolidate", "atlas-subrects", &atlas, 1, planes,
-                  width, height, height * planes, width * 4);
+    MeasureUpload(&bench, "consolidate", "atlas-subrects", &atlas, 1, planes, width, height,
+                  height * planes, width * 4);
     SDL_DestroyTexture(atlas);
   }
 
   /* Head-to-head with the call-sweep row at the same call count and bytes. */
   MeasureManualUpload(&bench, textures, planes, width, height);
 
-  printf("\ntransfer buffers (%.2f MiB):\n",
-         (double)bench.staging_bytes / 1048576.0);
-  MeasureTransferBuffer(&bench, SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,
-                        "upload (CPU->GPU)", bench.staging_bytes);
-  MeasureTransferBuffer(&bench, SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD,
-                        "download (GPU->CPU)", bench.staging_bytes);
+  printf("\ntransfer buffers (%.2f MiB):\n", (double)bench.staging_bytes / 1048576.0);
+  MeasureTransferBuffer(&bench, SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD, "upload (CPU->GPU)",
+                        bench.staging_bytes);
+  MeasureTransferBuffer(&bench, SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD, "download (GPU->CPU)",
+                        bench.staging_bytes);
 
-  if (g_json) {
-    fprintf(g_json, "\n  ]\n}\n");
-    fclose(g_json);
+  if (s_json) {
+    fprintf(s_json, "\n  ]\n}\n");
+    fclose(s_json);
   }
-  for (int i = 0; i < planes; i++) SDL_DestroyTexture(textures[i]);
+  for (int i = 0; i < planes; i++)
+    SDL_DestroyTexture(textures[i]);
   free(textures);
   free(bench.staging);
   free(bench.samples_update);

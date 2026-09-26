@@ -1,0 +1,2 @@
+# Keep local and CI diagnostics identical; update deliberately.
+ruff==0.16.9

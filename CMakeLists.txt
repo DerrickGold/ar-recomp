@@ -527,7 +527,8 @@ endif()
 endif() # NOT AR_TESTS_ONLY
 
 if(BUILD_TESTING)
-    find_package(Python3 QUIET COMPONENTS Interpreter)
+    # Quality and generator-contract checks must never disappear silently.
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
     if(Python3_Interpreter_FOUND)
         add_test(NAME ar_text_template_contract
             COMMAND ${Python3_EXECUTABLE}
@@ -536,6 +537,11 @@ if(BUILD_TESTING)
                 ${CMAKE_SOURCE_DIR}/tests/fixtures/text_template.json)
     endif()
     if(Python3_Interpreter_FOUND)
+        add_test(NAME actraiser_tooling_quality
+            COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_SOURCE_DIR}/tests/tooling_quality_test.py)
+        set_tests_properties(actraiser_tooling_quality PROPERTIES
+            ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
         add_test(NAME actraiser_pipeline_performance_tool
             COMMAND ${Python3_EXECUTABLE}
                 ${CMAKE_SOURCE_DIR}/tests/pipeline_performance_tool_test.py)
@@ -1056,6 +1062,16 @@ if(BUILD_TESTING)
         src/actraiser/actraiser_hle_fatal.c)
     target_include_directories(actraiser_hle_fatal_test_support PUBLIC
         ${CMAKE_SOURCE_DIR}/src)
+
+    # HLE tests share CPU entry/stack/flag helpers and their fatal-path dependency.
+    # Static archives let focused tests provide their own narrow stubs without
+    # pulling unrelated helpers into the link. Neither source has per-test flags.
+    add_library(actraiser_cpu_hle_test_support STATIC
+        src/actraiser/actraiser_cpu_hle_internal.c)
+    target_include_directories(actraiser_cpu_hle_test_support PUBLIC
+        ${CMAKE_SOURCE_DIR}/src)
+    target_link_libraries(actraiser_cpu_hle_test_support PUBLIC
+        snesrecomp::sdk actraiser_hle_fatal_test_support)
 
     # Tests using the real save store share its complete dependency closure.
     # Narrow adapters can still substitute SaveSystem functions by omitting this
@@ -1886,10 +1902,11 @@ if(BUILD_TESTING)
     # HLE, including their distinct geometry and stack/register/flag effects.
     add_executable(actraiser_action_metatile_hle_test
         tests/actraiser_action_metatile_hle_test.c
-        src/actraiser/actraiser_cpu_hle_internal.c
         src/actraiser/actraiser_action_metatile.c
         src/actraiser/cpu_65816_math.c
     )
+    target_link_libraries(actraiser_action_metatile_hle_test PRIVATE
+        actraiser_cpu_hle_test_support)
     target_include_directories(actraiser_action_metatile_hle_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${CMAKE_SOURCE_DIR}/src/action
@@ -1905,9 +1922,10 @@ if(BUILD_TESTING)
         tests/actraiser_action_room_loader_hle_test.c
         src/actraiser/quintet_lzss.c
         src/actraiser/actraiser_lzss.c
-        src/actraiser/actraiser_cpu_hle_internal.c
         src/actraiser/actraiser_action_room_loader.c
     )
+    target_link_libraries(actraiser_action_room_loader_hle_test PRIVATE
+        actraiser_cpu_hle_test_support)
     target_include_directories(actraiser_action_room_loader_hle_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${CMAKE_SOURCE_DIR}/src/actraiser
@@ -1922,13 +1940,12 @@ if(BUILD_TESTING)
         tests/actraiser_action_room_graphics_hle_test.c
         src/actraiser/quintet_lzss.c
         src/actraiser/actraiser_lzss.c
-        src/actraiser/actraiser_cpu_hle_internal.c
         src/actraiser/actraiser_action_room_graphics.c
         src/actraiser/regional/actraiser_actor_art.c
-        src/actraiser/actraiser_hle_fatal.c
         src/actraiser/regional/actraiser_regional_media.c
         ${SNESRECOMP_RUNNER_ROOT}/src/support/sha256.c)
-    target_link_libraries(actraiser_action_room_graphics_hle_test PRIVATE actraiser_regional_rules)
+    target_link_libraries(actraiser_action_room_graphics_hle_test PRIVATE
+        actraiser_cpu_hle_test_support actraiser_regional_rules)
     target_include_directories(actraiser_action_room_graphics_hle_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${CMAKE_SOURCE_DIR}/src/actraiser
@@ -1941,10 +1958,10 @@ if(BUILD_TESTING)
     # the action-only command-3 28-byte video-profile applicator.
     add_executable(actraiser_action_video_config_hle_test
         tests/actraiser_action_video_config_hle_test.c
-        src/actraiser/actraiser_cpu_hle_internal.c
         src/actraiser/actraiser_action_video_config.c
-        src/actraiser/actraiser_hle_fatal.c
     )
+    target_link_libraries(actraiser_action_video_config_hle_test PRIVATE
+        actraiser_cpu_hle_test_support)
     target_include_directories(actraiser_action_video_config_hle_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${CMAKE_SOURCE_DIR}/src/actraiser
@@ -1957,10 +1974,11 @@ if(BUILD_TESTING)
     # its six operations, stack writes, registers, and final flags.
     add_executable(actraiser_town_lair_bits_hle_test
         tests/actraiser_town_lair_bits_hle_test.c
-        src/actraiser/actraiser_cpu_hle_internal.c
         src/actraiser/actraiser_town_lair_bits.c
         src/actraiser/cpu_65816_math.c
     )
+    target_link_libraries(actraiser_town_lair_bits_hle_test PRIVATE
+        actraiser_cpu_hle_test_support)
     target_include_directories(actraiser_town_lair_bits_hle_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
@@ -2196,10 +2214,9 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_lair_history_test
         tests/actraiser_lair_history_test.c src/actraiser/actraiser_lair_history.c
-        src/actraiser/actraiser_cpu_hle_internal.c src/actraiser/actraiser_hle_fatal.c
     )
     target_link_libraries(actraiser_lair_history_test PRIVATE
-        actraiser_regional_rules actraiser_save_test_support)
+        actraiser_cpu_hle_test_support actraiser_regional_rules actraiser_save_test_support)
     target_include_directories(actraiser_lair_history_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_lair_history COMMAND actraiser_lair_history_test)
@@ -2227,39 +2244,44 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_score_feedback_test tests/actraiser_score_feedback_test.c
         src/actraiser/actraiser_score_feedback.c
-        src/actraiser/actraiser_cpu_hle_internal.c src/actraiser/actraiser_hle_fatal.c)
-    target_link_libraries(actraiser_score_feedback_test PRIVATE actraiser_regional_rules)
+       )
+    target_link_libraries(actraiser_score_feedback_test PRIVATE
+        actraiser_cpu_hle_test_support actraiser_regional_rules)
     target_include_directories(actraiser_score_feedback_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_score_feedback COMMAND actraiser_score_feedback_test)
 
     add_executable(actraiser_lives_display_test tests/actraiser_lives_display_test.c
-        src/actraiser/actraiser_lives_display.c src/actraiser/actraiser_hle_fatal.c)
+        src/actraiser/actraiser_lives_display.c)
+    target_link_libraries(actraiser_lives_display_test PRIVATE
+        actraiser_hle_fatal_test_support)
     target_include_directories(actraiser_lives_display_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_lives_display COMMAND actraiser_lives_display_test)
 
     add_executable(actraiser_sources_test tests/actraiser_sources_test.c
         src/actraiser/actraiser_sources.c
-        src/actraiser/actraiser_cpu_hle_internal.c src/actraiser/actraiser_hle_fatal.c)
-    target_link_libraries(actraiser_sources_test PRIVATE actraiser_regional_rules)
+       )
+    target_link_libraries(actraiser_sources_test PRIVATE
+        actraiser_cpu_hle_test_support actraiser_regional_rules)
     target_include_directories(actraiser_sources_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_sources COMMAND actraiser_sources_test)
 
     add_executable(actraiser_story_prerequisites_test tests/actraiser_story_prerequisites_test.c
         src/actraiser/actraiser_story_prerequisites.c
-        src/actraiser/actraiser_cpu_hle_internal.c src/actraiser/actraiser_hle_fatal.c)
-    target_link_libraries(actraiser_story_prerequisites_test PRIVATE actraiser_regional_rules)
+       )
+    target_link_libraries(actraiser_story_prerequisites_test PRIVATE
+        actraiser_cpu_hle_test_support actraiser_regional_rules)
     target_include_directories(actraiser_story_prerequisites_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_story_prerequisites COMMAND actraiser_story_prerequisites_test)
 
     add_executable(actraiser_town_status_test tests/actraiser_town_status_test.c
         src/actraiser/actraiser_town_status.c src/actraiser/regional/actraiser_regional_town_status.c
-        src/actraiser/actraiser_cpu_hle_internal.c
-        src/actraiser/actraiser_hle_fatal.c)
-    target_link_libraries(actraiser_town_status_test PRIVATE actraiser_regional_rules)
+       )
+    target_link_libraries(actraiser_town_status_test PRIVATE
+        actraiser_cpu_hle_test_support actraiser_regional_rules)
     target_include_directories(actraiser_town_status_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_town_status COMMAND actraiser_town_status_test)
@@ -2267,18 +2289,18 @@ if(BUILD_TESTING)
     add_executable(actraiser_construction_test tests/actraiser_construction_test.c
         src/actraiser/regional/actraiser_regional_construction.c
         src/actraiser/actraiser_town_status.c src/actraiser/regional/actraiser_regional_town_status.c
-        src/actraiser/actraiser_cpu_hle_internal.c
-        src/actraiser/actraiser_hle_fatal.c)
-    target_link_libraries(actraiser_construction_test PRIVATE actraiser_regional_rules)
+       )
+    target_link_libraries(actraiser_construction_test PRIVATE
+        actraiser_cpu_hle_test_support actraiser_regional_rules)
     target_include_directories(actraiser_construction_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_construction COMMAND actraiser_construction_test)
 
     add_executable(actraiser_sim_combat_test tests/actraiser_sim_combat_test.c
         src/actraiser/actraiser_sim_combat.c src/actraiser/regional/actraiser_regional_sim_combat.c src/actraiser/actraiser_sim_actor.c
-        src/actraiser/actraiser_cpu_hle_internal.c
-        src/actraiser/actraiser_hle_fatal.c)
-    target_link_libraries(actraiser_sim_combat_test PRIVATE actraiser_regional_rules)
+       )
+    target_link_libraries(actraiser_sim_combat_test PRIVATE
+        actraiser_cpu_hle_test_support actraiser_regional_rules)
     target_include_directories(actraiser_sim_combat_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_sim_combat COMMAND actraiser_sim_combat_test)
@@ -2287,8 +2309,9 @@ if(BUILD_TESTING)
         src/actraiser/actraiser_sim_ai.c src/actraiser/regional/actraiser_regional_sim_ai.c
         src/actraiser/actraiser_sim_actor.c
         src/actraiser/actraiser_native_call.c
-        src/actraiser/actraiser_cpu_hle_internal.c src/actraiser/actraiser_hle_fatal.c)
-    target_link_libraries(actraiser_sim_ai_test PRIVATE actraiser_regional_rules)
+       )
+    target_link_libraries(actraiser_sim_ai_test PRIVATE
+        actraiser_cpu_hle_test_support actraiser_regional_rules)
     target_include_directories(actraiser_sim_ai_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_sim_ai COMMAND actraiser_sim_ai_test)
@@ -2297,25 +2320,27 @@ if(BUILD_TESTING)
         src/actraiser/actraiser_town_census.c
         src/actraiser/actraiser_bugfixes.c src/actraiser/actraiser_cell_map.c
         src/actraiser/actraiser_town_metatile.c src/actraiser/actraiser_town_structure_steps.c
-        src/actraiser/actraiser_cpu_hle_internal.c src/actraiser/actraiser_hle_fatal.c src/actraiser/cpu_65816_math.c)
-    target_link_libraries(actraiser_town_census_test PRIVATE actraiser_regional_rules)
+        src/actraiser/cpu_65816_math.c)
+    target_link_libraries(actraiser_town_census_test PRIVATE
+        actraiser_cpu_hle_test_support actraiser_regional_rules)
     target_include_directories(actraiser_town_census_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_town_census COMMAND actraiser_town_census_test)
 
     add_executable(actraiser_town_redevelopment_test tests/actraiser_town_redevelopment_test.c
         src/actraiser/actraiser_town_redevelopment.c src/actraiser/actraiser_cell_map.c
-        src/actraiser/actraiser_cpu_hle_internal.c src/actraiser/actraiser_hle_fatal.c src/actraiser/cpu_65816_math.c)
-    target_link_libraries(actraiser_town_redevelopment_test PRIVATE actraiser_regional_rules)
+        src/actraiser/cpu_65816_math.c)
+    target_link_libraries(actraiser_town_redevelopment_test PRIVATE
+        actraiser_cpu_hle_test_support actraiser_regional_rules)
     target_include_directories(actraiser_town_redevelopment_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_town_redevelopment COMMAND actraiser_town_redevelopment_test)
 
     add_executable(actraiser_level_goals_test tests/actraiser_level_goals_test.c
         src/actraiser/actraiser_level_goals.c src/actraiser/regional/actraiser_regional_level_goals.c
-        src/actraiser/actraiser_cpu_hle_internal.c
-        src/actraiser/actraiser_hle_fatal.c)
-    target_link_libraries(actraiser_level_goals_test PRIVATE actraiser_regional_rules)
+       )
+    target_link_libraries(actraiser_level_goals_test PRIVATE
+        actraiser_cpu_hle_test_support actraiser_regional_rules)
     target_include_directories(actraiser_level_goals_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_level_goals COMMAND actraiser_level_goals_test)
@@ -2833,9 +2858,9 @@ if(BUILD_TESTING)
     add_executable(actraiser_save_transaction_test
         tests/actraiser_save_transaction_test.c
         src/actraiser/actraiser_save_transaction.c
-        src/actraiser/actraiser_hle_fatal.c
     )
-    target_link_libraries(actraiser_save_transaction_test PRIVATE actraiser_save_test_support)
+    target_link_libraries(actraiser_save_transaction_test PRIVATE
+        actraiser_hle_fatal_test_support actraiser_save_test_support)
     target_include_directories(actraiser_save_transaction_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_save_transaction COMMAND actraiser_save_transaction_test)
@@ -2903,24 +2928,27 @@ if(BUILD_TESTING)
         src/actraiser/regional/actraiser_population_conversion.c
         src/actraiser/actraiser_story_snapshot.c src/actraiser/actraiser_town_redevelopment.c
         src/actraiser/actraiser_town_census.c src/actraiser/actraiser_level_goals.c
-        src/actraiser/actraiser_cell_map.c src/actraiser/actraiser_cpu_hle_internal.c
-        src/actraiser/actraiser_hle_fatal.c src/actraiser/cpu_65816_math.c)
+        src/actraiser/actraiser_cell_map.c
+        src/actraiser/cpu_65816_math.c)
     target_link_libraries(actraiser_population_conversion_test PRIVATE
-        actraiser_regional_rules actraiser_save_test_support)
+        actraiser_cpu_hle_test_support actraiser_regional_rules actraiser_save_test_support)
     target_include_directories(actraiser_population_conversion_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_population_conversion COMMAND actraiser_population_conversion_test)
 
     add_executable(actraiser_regional_arrival_test tests/actraiser_regional_arrival_test.c
-        src/actraiser/regional/actraiser_regional_arrival.c src/actraiser/actraiser_cpu_hle_internal.c
-        src/actraiser/actraiser_hle_fatal.c)
+        src/actraiser/regional/actraiser_regional_arrival.c
+       )
+    target_link_libraries(actraiser_regional_arrival_test PRIVATE
+        actraiser_cpu_hle_test_support)
     target_include_directories(actraiser_regional_arrival_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     add_test(NAME actraiser_regional_arrival COMMAND actraiser_regional_arrival_test)
 
     add_executable(actraiser_statue_volley_test tests/actraiser_statue_volley_test.c
-        src/actraiser/actraiser_statue_volley.c src/actraiser/actraiser_cpu_hle_internal.c
-        src/actraiser/actraiser_hle_fatal.c  src/actraiser/quintet_lzss.c)
-    target_link_libraries(actraiser_statue_volley_test PRIVATE actraiser_regional_rules)
+        src/actraiser/actraiser_statue_volley.c
+         src/actraiser/quintet_lzss.c)
+    target_link_libraries(actraiser_statue_volley_test PRIVATE
+        actraiser_cpu_hle_test_support actraiser_regional_rules)
     target_include_directories(actraiser_statue_volley_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     add_test(NAME actraiser_statue_volley COMMAND actraiser_statue_volley_test)
 
@@ -2928,44 +2956,50 @@ if(BUILD_TESTING)
         src/randomizer/randomizer.c src/randomizer/randomizer_config.c src/action/action_placements.c
         src/actraiser/actraiser_difficulty.c
         src/actraiser/actraiser_actor_stats.c src/actraiser/actraiser_platform_skull.c src/actraiser/actraiser_cast_hold.c
-        src/actraiser/actraiser_cpu_hle_internal.c src/actraiser/actraiser_hle_fatal.c)
-    target_link_libraries(actraiser_actor_stats_test PRIVATE actraiser_regional_rules)
+       )
+    target_link_libraries(actraiser_actor_stats_test PRIVATE
+        actraiser_cpu_hle_test_support actraiser_regional_rules)
     target_include_directories(actraiser_actor_stats_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     add_test(NAME actraiser_actor_stats COMMAND actraiser_actor_stats_test)
 
     add_executable(actraiser_platform_skull_test tests/actraiser_platform_skull_test.c
-        src/actraiser/actraiser_platform_skull.c src/actraiser/actraiser_cpu_hle_internal.c
-        src/actraiser/actraiser_hle_fatal.c)
-    target_link_libraries(actraiser_platform_skull_test PRIVATE actraiser_regional_rules)
+        src/actraiser/actraiser_platform_skull.c
+       )
+    target_link_libraries(actraiser_platform_skull_test PRIVATE
+        actraiser_cpu_hle_test_support actraiser_regional_rules)
     target_include_directories(actraiser_platform_skull_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     add_test(NAME actraiser_platform_skull COMMAND actraiser_platform_skull_test)
 
     add_executable(actraiser_difficulty_test tests/actraiser_difficulty_test.c
         src/actraiser/quintet_lzss.c
         src/actraiser/actraiser_difficulty.c
-        src/actraiser/actraiser_cpu_hle_internal.c src/actraiser/actraiser_hle_fatal.c)
-    target_link_libraries(actraiser_difficulty_test PRIVATE actraiser_regional_rules)
+       )
+    target_link_libraries(actraiser_difficulty_test PRIVATE
+        actraiser_cpu_hle_test_support actraiser_regional_rules)
     target_include_directories(actraiser_difficulty_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     add_test(NAME actraiser_difficulty COMMAND actraiser_difficulty_test)
 
     add_executable(actraiser_score_lives_test tests/actraiser_score_lives_test.c
         src/actraiser/actraiser_score_lives.c
-        src/actraiser/actraiser_hle_fatal.c src/actraiser/cpu_65816_math.c)
-    target_link_libraries(actraiser_score_lives_test PRIVATE actraiser_regional_rules)
+        src/actraiser/cpu_65816_math.c)
+    target_link_libraries(actraiser_score_lives_test PRIVATE
+        actraiser_hle_fatal_test_support actraiser_regional_rules)
     target_include_directories(actraiser_score_lives_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     add_test(NAME actraiser_score_lives COMMAND actraiser_score_lives_test)
 
     add_executable(actraiser_action_start_test tests/actraiser_action_start_test.c
         src/actraiser/actraiser_action_start.c
-        src/actraiser/actraiser_cpu_hle_internal.c src/actraiser/actraiser_hle_fatal.c)
-    target_link_libraries(actraiser_action_start_test PRIVATE actraiser_regional_rules)
+       )
+    target_link_libraries(actraiser_action_start_test PRIVATE
+        actraiser_cpu_hle_test_support actraiser_regional_rules)
     target_include_directories(actraiser_action_start_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     add_test(NAME actraiser_action_start COMMAND actraiser_action_start_test)
 
     add_executable(actraiser_mode_entry_test tests/actraiser_mode_entry_test.c
         src/actraiser/actraiser_mode_entry.c
-        src/actraiser/actraiser_cpu_hle_internal.c src/actraiser/actraiser_hle_fatal.c)
-    target_link_libraries(actraiser_mode_entry_test PRIVATE actraiser_regional_rules)
+       )
+    target_link_libraries(actraiser_mode_entry_test PRIVATE
+        actraiser_cpu_hle_test_support actraiser_regional_rules)
     target_include_directories(actraiser_mode_entry_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     add_test(NAME actraiser_mode_entry COMMAND actraiser_mode_entry_test)
 
@@ -2978,24 +3012,26 @@ if(BUILD_TESTING)
         src/actraiser/actraiser_action_inventory.c src/actraiser/actraiser_scroll_cast.c
         src/actraiser/regional/actraiser_regional_media.c
         ${SNESRECOMP_RUNNER_ROOT}/src/support/sha256.c
-        src/actraiser/actraiser_cpu_hle_internal.c
-        src/actraiser/actraiser_hle_fatal.c)
-    target_link_libraries(actraiser_action_inventory_test PRIVATE actraiser_regional_rules)
+       )
+    target_link_libraries(actraiser_action_inventory_test PRIVATE
+        actraiser_cpu_hle_test_support actraiser_regional_rules)
     target_include_directories(actraiser_action_inventory_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     add_test(NAME actraiser_action_inventory COMMAND actraiser_action_inventory_test)
 
     add_executable(actraiser_stage_hazards_test tests/actraiser_stage_hazards_test.c
         src/actraiser/actraiser_stage_hazards.c
-        src/actraiser/actraiser_hle_fatal.c)
-    target_link_libraries(actraiser_stage_hazards_test PRIVATE actraiser_regional_rules)
+       )
+    target_link_libraries(actraiser_stage_hazards_test PRIVATE
+        actraiser_hle_fatal_test_support actraiser_regional_rules)
     target_include_directories(actraiser_stage_hazards_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     add_test(NAME actraiser_stage_hazards COMMAND actraiser_stage_hazards_test)
 
     add_executable(actraiser_stage_terrain_test tests/actraiser_stage_terrain_test.c
         src/actraiser/actraiser_stage_terrain.c
         src/action/action_room_scene.c src/action/action_room_terrain.c src/action/action_room_mosaic.c
-        src/actraiser/quintet_lzss.c src/actraiser/actraiser_hle_fatal.c)
-    target_link_libraries(actraiser_stage_terrain_test PRIVATE actraiser_regional_rules)
+        src/actraiser/quintet_lzss.c)
+    target_link_libraries(actraiser_stage_terrain_test PRIVATE
+        actraiser_hle_fatal_test_support actraiser_regional_rules)
     target_include_directories(actraiser_stage_terrain_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     add_test(NAME actraiser_stage_terrain COMMAND actraiser_stage_terrain_test)
 
@@ -3003,8 +3039,9 @@ if(BUILD_TESTING)
         ${SNESRECOMP_RUNNER_ROOT}/src/support/sha256.c
         src/actraiser/actraiser_stage_placements.c
         src/action/action_placements.c
-        src/actraiser/actraiser_hle_fatal.c)
-    target_link_libraries(actraiser_stage_placements_test PRIVATE actraiser_regional_rules)
+       )
+    target_link_libraries(actraiser_stage_placements_test PRIVATE
+        actraiser_hle_fatal_test_support actraiser_regional_rules)
     target_include_directories(actraiser_stage_placements_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     add_test(NAME actraiser_stage_placements COMMAND actraiser_stage_placements_test)
 
@@ -3029,27 +3066,30 @@ if(BUILD_TESTING)
     add_test(NAME regional_media COMMAND regional_media_test)
 
     add_executable(actraiser_town_art_test tests/actraiser_town_art_test.c
-        src/actraiser/regional/actraiser_town_art.c src/actraiser/actraiser_cpu_hle_internal.c
-        src/actraiser/actraiser_hle_fatal.c src/actraiser/regional/actraiser_regional_media.c
+        src/actraiser/regional/actraiser_town_art.c
+        src/actraiser/regional/actraiser_regional_media.c
           ${SNESRECOMP_RUNNER_ROOT}/src/support/sha256.c)
-    target_link_libraries(actraiser_town_art_test PRIVATE actraiser_regional_rules)
+    target_link_libraries(actraiser_town_art_test PRIVATE
+        actraiser_cpu_hle_test_support actraiser_regional_rules)
     target_include_directories(actraiser_town_art_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_town_art COMMAND actraiser_town_art_test)
 
     add_executable(actraiser_title_art_test tests/actraiser_title_art_test.c
-        src/actraiser/regional/actraiser_title_art.c src/actraiser/actraiser_cpu_hle_internal.c
-        src/actraiser/actraiser_hle_fatal.c src/actraiser/regional/actraiser_regional_media.c
+        src/actraiser/regional/actraiser_title_art.c
+        src/actraiser/regional/actraiser_regional_media.c
           ${SNESRECOMP_RUNNER_ROOT}/src/support/sha256.c)
-    target_link_libraries(actraiser_title_art_test PRIVATE actraiser_regional_rules)
+    target_link_libraries(actraiser_title_art_test PRIVATE
+        actraiser_cpu_hle_test_support actraiser_regional_rules)
     target_include_directories(actraiser_title_art_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_title_art COMMAND actraiser_title_art_test)
 
     add_executable(actraiser_regional_mosaic_test tests/actraiser_regional_mosaic_test.c
-        src/actraiser/regional/actraiser_regional_mosaic.c src/actraiser/actraiser_hle_fatal.c
+        src/actraiser/regional/actraiser_regional_mosaic.c
         src/action/action_room_mosaic.c src/action/action_room_scene.c src/actraiser/quintet_lzss.c)
-    target_link_libraries(actraiser_regional_mosaic_test PRIVATE actraiser_regional_rules)
+    target_link_libraries(actraiser_regional_mosaic_test PRIVATE
+        actraiser_hle_fatal_test_support actraiser_regional_rules)
     target_include_directories(actraiser_regional_mosaic_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     add_test(NAME actraiser_regional_mosaic COMMAND actraiser_regional_mosaic_test)
 
@@ -3072,35 +3112,41 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_scene_music_test tests/actraiser_scene_music_test.c
         src/actraiser/actraiser_scene_music.c
-        src/actraiser/actraiser_hle_fatal.c)
-    target_link_libraries(actraiser_scene_music_test PRIVATE actraiser_regional_rules)
+       )
+    target_link_libraries(actraiser_scene_music_test PRIVATE
+        actraiser_hle_fatal_test_support actraiser_regional_rules)
     target_include_directories(actraiser_scene_music_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     add_test(NAME actraiser_scene_music COMMAND actraiser_scene_music_test)
 
     add_executable(actraiser_boss_rules_test tests/actraiser_boss_rules_test.c
-        src/actraiser/actraiser_boss_rules.c src/actraiser/actraiser_cpu_hle_internal.c
-        src/actraiser/actraiser_hle_fatal.c  src/actraiser/quintet_lzss.c)
-    target_link_libraries(actraiser_boss_rules_test PRIVATE actraiser_regional_rules)
+        src/actraiser/actraiser_boss_rules.c
+         src/actraiser/quintet_lzss.c)
+    target_link_libraries(actraiser_boss_rules_test PRIVATE
+        actraiser_cpu_hle_test_support actraiser_regional_rules)
     target_include_directories(actraiser_boss_rules_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     add_test(NAME actraiser_boss_rules COMMAND actraiser_boss_rules_test)
 
     add_executable(actraiser_fire_enemy_test tests/actraiser_fire_enemy_test.c
-        src/actraiser/actraiser_fire_enemy.c src/actraiser/actraiser_cpu_hle_internal.c
-        src/actraiser/actraiser_hle_fatal.c  src/actraiser/quintet_lzss.c)
-    target_link_libraries(actraiser_fire_enemy_test PRIVATE actraiser_regional_rules)
+        src/actraiser/actraiser_fire_enemy.c
+         src/actraiser/quintet_lzss.c)
+    target_link_libraries(actraiser_fire_enemy_test PRIVATE
+        actraiser_cpu_hle_test_support actraiser_regional_rules)
     target_include_directories(actraiser_fire_enemy_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     add_test(NAME actraiser_fire_enemy COMMAND actraiser_fire_enemy_test)
 
     add_executable(actraiser_tree_attack_test tests/actraiser_tree_attack_test.c
-        src/actraiser/actraiser_tree_attack.c src/actraiser/actraiser_hle_fatal.c
+        src/actraiser/actraiser_tree_attack.c
         src/actraiser/quintet_lzss.c ${SNESRECOMP_RUNNER_ROOT}/src/core/native_leaf.c)
+    target_link_libraries(actraiser_tree_attack_test PRIVATE
+        actraiser_hle_fatal_test_support)
     target_include_directories(actraiser_tree_attack_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     add_test(NAME actraiser_tree_attack COMMAND actraiser_tree_attack_test)
 
     add_executable(actraiser_action_motion_test tests/actraiser_action_motion_test.c
-        src/actraiser/actraiser_action_motion.c src/actraiser/actraiser_hle_fatal.c src/actraiser/actraiser_cpu_hle_internal.c
+        src/actraiser/actraiser_action_motion.c
         src/actraiser/quintet_lzss.c)
-    target_link_libraries(actraiser_action_motion_test PRIVATE actraiser_regional_rules)
+    target_link_libraries(actraiser_action_motion_test PRIVATE
+        actraiser_cpu_hle_test_support actraiser_regional_rules)
     target_include_directories(actraiser_action_motion_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     add_test(NAME actraiser_action_motion COMMAND actraiser_action_motion_test)
 
@@ -3131,13 +3177,11 @@ if(BUILD_TESTING)
         src/actraiser/actraiser_town_wait.c
         src/actraiser/actraiser_fishing.c
         src/actraiser/actraiser_native_call.c
-        src/actraiser/actraiser_cpu_hle_internal.c
-        src/actraiser/actraiser_hle_fatal.c
         src/randomizer/randomizer_config.c
         src/save/save_checkpoint.c
         ${SNESRECOMP_RUNNER_ROOT}/src/support/sha256.c)
     target_link_libraries(actraiser_regional_runtime_test PRIVATE
-        actraiser_regional_rules actraiser_save_test_support)
+        actraiser_cpu_hle_test_support actraiser_regional_rules actraiser_save_test_support)
     target_include_directories(actraiser_regional_runtime_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_regional_runtime COMMAND actraiser_regional_runtime_test)
@@ -3163,76 +3207,91 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_regional_families COMMAND actraiser_regional_families_test)
 
     add_executable(actraiser_scroll_cast_test tests/actraiser_scroll_cast_test.c
-        src/actraiser/actraiser_scroll_cast.c src/actraiser/actraiser_cpu_hle_internal.c
-        src/actraiser/actraiser_hle_fatal.c)
-    target_link_libraries(actraiser_scroll_cast_test PRIVATE actraiser_regional_rules)
+        src/actraiser/actraiser_scroll_cast.c
+       )
+    target_link_libraries(actraiser_scroll_cast_test PRIVATE
+        actraiser_cpu_hle_test_support actraiser_regional_rules)
     target_include_directories(actraiser_scroll_cast_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_scroll_cast COMMAND actraiser_scroll_cast_test)
 
     add_executable(actraiser_retry_test tests/actraiser_retry_test.c
-        src/actraiser/actraiser_retry.c src/actraiser/actraiser_cpu_hle_internal.c
-        src/actraiser/actraiser_hle_fatal.c)
-    target_link_libraries(actraiser_retry_test PRIVATE actraiser_regional_rules)
+        src/actraiser/actraiser_retry.c
+       )
+    target_link_libraries(actraiser_retry_test PRIVATE
+        actraiser_cpu_hle_test_support actraiser_regional_rules)
     target_include_directories(actraiser_retry_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_retry COMMAND actraiser_retry_test)
 
     add_executable(actraiser_town_wait_test tests/actraiser_town_wait_test.c
-        src/actraiser/actraiser_town_wait.c src/actraiser/actraiser_cpu_hle_internal.c
-        src/actraiser/actraiser_hle_fatal.c)
+        src/actraiser/actraiser_town_wait.c
+       )
+    target_link_libraries(actraiser_town_wait_test PRIVATE
+        actraiser_cpu_hle_test_support)
     target_include_directories(actraiser_town_wait_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_town_wait COMMAND actraiser_town_wait_test)
 
     add_executable(actraiser_fishing_test tests/actraiser_fishing_test.c
         src/actraiser/actraiser_fishing.c src/actraiser/actraiser_native_call.c
-        src/actraiser/actraiser_cpu_hle_internal.c src/actraiser/actraiser_hle_fatal.c)
+       )
+    target_link_libraries(actraiser_fishing_test PRIVATE
+        actraiser_cpu_hle_test_support)
     target_include_directories(actraiser_fishing_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_fishing COMMAND actraiser_fishing_test)
 
     add_executable(actraiser_development_test tests/actraiser_development_test.c
         src/actraiser/actraiser_development.c src/actraiser/actraiser_native_call.c
-        src/actraiser/actraiser_cpu_hle_internal.c src/actraiser/actraiser_hle_fatal.c)
-    target_link_libraries(actraiser_development_test PRIVATE actraiser_regional_rules)
+       )
+    target_link_libraries(actraiser_development_test PRIVATE
+        actraiser_cpu_hle_test_support actraiser_regional_rules)
     target_include_directories(actraiser_development_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_development COMMAND actraiser_development_test)
 
     add_executable(actraiser_recovery_test tests/actraiser_recovery_test.c
         src/actraiser/actraiser_recovery.c src/actraiser/actraiser_native_call.c
-        src/actraiser/actraiser_cpu_hle_internal.c src/actraiser/actraiser_hle_fatal.c)
-    target_link_libraries(actraiser_recovery_test PRIVATE actraiser_regional_rules)
+       )
+    target_link_libraries(actraiser_recovery_test PRIVATE
+        actraiser_cpu_hle_test_support actraiser_regional_rules)
     target_include_directories(actraiser_recovery_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_recovery COMMAND actraiser_recovery_test)
 
     add_executable(actraiser_quake_test tests/actraiser_quake_test.c
         src/actraiser/actraiser_quake.c src/actraiser/actraiser_native_call.c
-        src/actraiser/actraiser_cpu_hle_internal.c src/actraiser/actraiser_hle_fatal.c)
-    target_link_libraries(actraiser_quake_test PRIVATE actraiser_regional_rules)
+       )
+    target_link_libraries(actraiser_quake_test PRIVATE
+        actraiser_cpu_hle_test_support actraiser_regional_rules)
     target_include_directories(actraiser_quake_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_quake COMMAND actraiser_quake_test)
 
     add_executable(actraiser_report_command_test tests/actraiser_report_command_test.c
         src/actraiser/actraiser_report_command.c src/actraiser/actraiser_native_call.c
-        src/actraiser/actraiser_cpu_hle_internal.c src/actraiser/actraiser_hle_fatal.c)
+       )
+    target_link_libraries(actraiser_report_command_test PRIVATE
+        actraiser_cpu_hle_test_support)
     target_include_directories(actraiser_report_command_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_report_command COMMAND actraiser_report_command_test)
 
     add_executable(actraiser_magic_gesture_test tests/actraiser_magic_gesture_test.c
         src/actraiser/actraiser_magic_gesture.c
-        src/actraiser/actraiser_cpu_hle_internal.c src/actraiser/actraiser_hle_fatal.c)
+       )
+    target_link_libraries(actraiser_magic_gesture_test PRIVATE
+        actraiser_cpu_hle_test_support)
     target_include_directories(actraiser_magic_gesture_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_magic_gesture COMMAND actraiser_magic_gesture_test)
 
     add_executable(actraiser_speed_selector_test tests/actraiser_speed_selector_test.c
         src/actraiser/actraiser_speed_selector.c
-        src/actraiser/actraiser_cpu_hle_internal.c src/actraiser/actraiser_hle_fatal.c)
+       )
+    target_link_libraries(actraiser_speed_selector_test PRIVATE
+        actraiser_cpu_hle_test_support)
     target_include_directories(actraiser_speed_selector_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_speed_selector COMMAND actraiser_speed_selector_test)
@@ -3241,9 +3300,9 @@ if(BUILD_TESTING)
         tests/actraiser_miracle_test.c
         src/actraiser/actraiser_miracle.c
         src/actraiser/actraiser_native_call.c
-        src/actraiser/actraiser_cpu_hle_internal.c
-        src/actraiser/actraiser_hle_fatal.c)
-    target_link_libraries(actraiser_miracle_test PRIVATE actraiser_regional_rules)
+       )
+    target_link_libraries(actraiser_miracle_test PRIVATE
+        actraiser_cpu_hle_test_support actraiser_regional_rules)
     target_include_directories(actraiser_miracle_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_miracle COMMAND actraiser_miracle_test)
@@ -3285,7 +3344,8 @@ if(BUILD_TESTING)
         src/actraiser/actraiser_save_checksum.c
         src/actraiser/cpu_65816_math.c
     )
-    target_link_libraries(actraiser_save_checksum_hle_test PRIVATE actraiser_save_test_support)
+    target_link_libraries(actraiser_save_checksum_hle_test PRIVATE
+        actraiser_hle_fatal_test_support actraiser_save_test_support)
     target_include_directories(actraiser_save_checksum_hle_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
@@ -3378,10 +3438,11 @@ if(BUILD_TESTING)
     # HLEs. Raw-width and decimal-mode cases pin instruction-level edges too.
     add_executable(actraiser_cell_map_hle_test
         tests/actraiser_cell_map_hle_test.c
-        src/actraiser/actraiser_cpu_hle_internal.c
         src/actraiser/actraiser_cell_map.c
         src/actraiser/cpu_65816_math.c
     )
+    target_link_libraries(actraiser_cell_map_hle_test PRIVATE
+        actraiser_cpu_hle_test_support)
     target_include_directories(actraiser_cell_map_hle_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
@@ -3393,10 +3454,11 @@ if(BUILD_TESTING)
     # CPU contracts for $03:9B5A, $03:9C43, and $03:A591.
     add_executable(actraiser_town_metatile_hle_test
         tests/actraiser_town_metatile_hle_test.c
-        src/actraiser/actraiser_cpu_hle_internal.c
         src/actraiser/actraiser_town_metatile.c
         src/actraiser/cpu_65816_math.c
     )
+    target_link_libraries(actraiser_town_metatile_hle_test PRIVATE
+        actraiser_cpu_hle_test_support)
     target_include_directories(actraiser_town_metatile_hle_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
@@ -3408,10 +3470,11 @@ if(BUILD_TESTING)
     # complete CPU contracts for rebuild $03:A4A8 and construction $03:A4B8.
     add_executable(actraiser_town_structure_steps_hle_test
         tests/actraiser_town_structure_steps_hle_test.c
-        src/actraiser/actraiser_cpu_hle_internal.c
         src/actraiser/actraiser_town_structure_steps.c
         src/actraiser/cpu_65816_math.c
     )
+    target_link_libraries(actraiser_town_structure_steps_hle_test PRIVATE
+        actraiser_cpu_hle_test_support)
     target_include_directories(actraiser_town_structure_steps_hle_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
@@ -3706,6 +3769,8 @@ if(BUILD_TESTING)
         src/actraiser/quintet_lzss.c
         src/actraiser/actraiser_lzss.c
     )
+    target_link_libraries(actraiser_lzss_hle_test PRIVATE
+        actraiser_hle_fatal_test_support)
     target_include_directories(actraiser_lzss_hle_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
@@ -3795,21 +3860,6 @@ if(BUILD_TESTING)
         ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_spc_upload_adapter
         COMMAND actraiser_spc_upload_adapter_test)
-
-    foreach(_ar_hle_target IN ITEMS
-            actraiser_action_metatile_hle_test
-            actraiser_action_room_loader_hle_test
-            actraiser_action_room_graphics_hle_test
-            actraiser_action_video_config_hle_test
-            actraiser_town_lair_bits_hle_test
-            actraiser_save_checksum_hle_test
-            actraiser_cell_map_hle_test
-            actraiser_town_metatile_hle_test
-            actraiser_town_structure_steps_hle_test
-            actraiser_lzss_hle_test)
-        target_link_libraries(${_ar_hle_target} PRIVATE
-            actraiser_hle_fatal_test_support)
-    endforeach()
 endif()
 
 # ROM-free targets are authored consumers of the SDK unless they explicitly

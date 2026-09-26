@@ -113,7 +113,7 @@ def decode_state(data: bytes, base: int, state: int) -> dict:
             }
         )
         if visual not in visuals:
-            pointer = u16(
+            pointer = read_le16(
                 data,
                 base_file + composition_table_relative + visual * 2,
             )
