@@ -1169,6 +1169,11 @@ if(BUILD_TESTING)
         src/sim/sim3d/sim3d_performance.c
         src/sim/sim3d/present_sim3d_environment.c
         src/sim/world_nav/present_world_nav.c
+        src/sim/world_nav/present_world_nav_terrain.c
+        src/sim/world_nav/present_world_nav_ground.c
+        src/sim/world_nav/present_world_nav_models.c
+        src/sim/world_nav/present_world_nav_weather.c
+        src/sim/world_nav/present_sim_globe.c
         src/sim/world_nav/present_world_nav_composition.c
         src/sim/world_nav/present_sim_globe_mapping.c
         src/sim/world_nav/present_world_nav_geometry.c
@@ -1301,7 +1306,9 @@ if(BUILD_TESTING)
         src/sim/mountains/sim_background_mountain_render.c
         src/platform/sdl/sim_cloud_effect_backend_sdl.c
         src/platform/sdl/render_sdl.c
-        src/platform/sdl/sim3d_depth_pass_sdl.c)
+        src/platform/sdl/sim3d_depth_pass_sdl.c
+        src/platform/sdl/sim3d_depth_pass_pipelines_sdl.c
+        src/platform/sdl/sim3d_depth_pass_meshes_sdl.c)
     target_include_directories(actraiser_present_world_nav_gpu_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     target_link_libraries(actraiser_present_world_nav_gpu_test PRIVATE
@@ -1937,6 +1944,8 @@ if(BUILD_TESTING)
     add_executable(actraiser_action_effect_render_test
         tests/action_effect_render_test.c
         src/action/action_effect_render.c
+        src/action/action_scene_effect_render.c
+        src/action/action_scene_lightning_render.c
         src/action/action_effect_projection.c
         src/diorama/diorama_projection.c
         src/diorama/diorama_depth_shapes.c
@@ -3469,6 +3478,8 @@ if(BUILD_TESTING)
         src/render/render_device.c
         src/platform/sdl/render_sdl.c
         src/platform/sdl/sim3d_depth_pass_sdl.c
+        src/platform/sdl/sim3d_depth_pass_pipelines_sdl.c
+        src/platform/sdl/sim3d_depth_pass_meshes_sdl.c
         src/app/performance_metrics.c
     )
     target_include_directories(actraiser_sim3d_depth_pass_gpu_test PRIVATE
@@ -3491,6 +3502,8 @@ if(BUILD_TESTING)
         src/render/render_device.c
         src/platform/sdl/render_sdl.c
         src/platform/sdl/sim3d_depth_pass_sdl.c
+        src/platform/sdl/sim3d_depth_pass_pipelines_sdl.c
+        src/platform/sdl/sim3d_depth_pass_meshes_sdl.c
         src/platform/sdl/parallel_work_sdl.c
         src/platform/sdl/host_clock_sdl.c
         src/app/performance_metrics.c

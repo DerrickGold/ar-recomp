@@ -80,6 +80,7 @@ list(APPEND _portable_render_files
     "${GAME_SOURCE_ROOT}/present/present_frame.c"
     "${GAME_SOURCE_ROOT}/present/present_internal.h"
     "${GAME_SOURCE_ROOT}/sim/world_nav/present_world_nav.c"
+    "${GAME_SOURCE_ROOT}/sim/world_nav/present_sim_globe.c"
     "${GAME_SOURCE_ROOT}/sim/sim3d/present_sim3d.c"
     "${GAME_SOURCE_ROOT}/sim/sim3d/present_sim3d_internal.h"
     "${GAME_SOURCE_ROOT}/sim/sim3d/present_sim3d_environment.c"
@@ -100,6 +101,9 @@ list(APPEND _portable_render_files
     # public contract and pure batch builder portable even while the diorama
     # projection adapter still calls the native compositor implementation.
     "${GAME_SOURCE_ROOT}/action/action_effect_render.c"
+    "${GAME_SOURCE_ROOT}/action/action_scene_effect_render.c"
+    "${GAME_SOURCE_ROOT}/action/action_scene_lightning_render.c"
+    "${GAME_SOURCE_ROOT}/action/action_effect_render_internal.h"
     "${GAME_SOURCE_ROOT}/action/action_effect_render.h"
     "${GAME_SOURCE_ROOT}/action/action_effect_projection.h"
     "${GAME_SOURCE_ROOT}/sim/sim3d/sim_backdrop_render.c"

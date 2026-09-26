@@ -23,6 +23,8 @@ cc -std=c11 -O2 -Isrc -Isrc/sim -I/opt/homebrew/include \
   src/render/render_device.c \
   src/platform/sdl/render_sdl.c \
   src/platform/sdl/sim3d_depth_pass_sdl.c \
+  src/platform/sdl/sim3d_depth_pass_pipelines_sdl.c \
+  src/platform/sdl/sim3d_depth_pass_meshes_sdl.c \
   src/sim/voxels/sim_background_voxel_biome.c \
   src/sim/voxels/sim_background_voxel_lighting.c \
   src/sim/voxels/sim_background_voxel_model_cache.c \

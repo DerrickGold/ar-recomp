@@ -20,9 +20,6 @@
  "src/main.c": {
   "long-line": 4
  },
- "src/platform/sdl/sim3d_depth_pass_sdl.c": {
-  "long-line": 1
- },
  "src/save/save_paths.c": {
   "long-line": 1
  },
@@ -37,9 +34,6 @@
  },
  "src/sim/menu/sim_menu_help.c": {
   "long-line": 9
- },
- "src/sim/world_nav/present_world_nav.c": {
-  "long-line": 1
  },
  "tests/action_effect_render_test.c": {
   "static-g-prefix": 1
