@@ -9,7 +9,7 @@ Workshop, debug utilities, benchmarks, and build scripts. Start with the
 ## Developer checks
 
 Install the [native build dependencies](README.md#build-from-source), Ninja,
-Python 3.10+, Node.js 24+, and Go 1.26.3+ for the full repository checks. Native
+Python 3.10+, Node.js 24+, and Go 1.25+ for the full repository checks. Native
 desktop-shell tests also need the host libraries described in
 [desktop packaging](docs/desktop-packaging.md). Set up Python tooling once:
 
@@ -34,9 +34,15 @@ when they skip. Individual targets are `check-c`, `check-go`, and
 `check-shaders`; `CHECK_JOBS=3` limits CTest parallelism. CMake requires Python
 when tests are enabled so the ownership and generator checks cannot disappear.
 
-[CI](.github/workflows/quality.yml) runs the mandatory quality gate and ROM-free
-C/Python and Go tests on macOS. It does not substitute for a game build, GPU
-acceptance, regional-ROM tests, or platform packaging checks. For gameplay or
+`make release` and `make release-<platform>` run `make check` locally before
+packaging. A failed check stops packaging, and multiple release targets in one
+invocation share a single check run, including with `make -j`. Use the activated
+Python environment above, or pass `PYTHON=/path/to/venv/bin/python` to Make.
+The lower-level CMake packaging workflow only packages; run `make check` first
+when invoking it directly. No GitHub Actions setup is required.
+
+These checks do not substitute for a game build, GPU acceptance, regional-ROM
+tests, or platform packaging checks. For gameplay or
 rendering changes, build the game and use `make check-render CONTROL=/path/to/old
 CANDIDATE=/path/to/new` with your own ROM and a GPU. See the root Makefile for
 the separate cross-platform and regional-ROM gates.

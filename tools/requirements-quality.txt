@@ -1,2 +1,2 @@
-# Keep local and CI diagnostics identical; update deliberately.
+# Keep developer diagnostics reproducible; update deliberately.
 ruff==0.16.9

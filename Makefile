@@ -1,8 +1,9 @@
 # Root convenience targets for producing desktop and generic Linux Builders.
 #
-# `make release` cross-builds every platform's self-contained bundle and
-# writes them (plus SHA-256 sidecars) into ./release/: macOS .app.zip, Windows
-# .exe, Steam Deck .AppImage, and generic Linux .tar.xz. Requires Go and CMake; the C
+# `make release` runs the local `make check` gate, then cross-builds every
+# platform's self-contained bundle (plus SHA-256 sidecars) into ./release/:
+# macOS .app.zip, Windows .exe, Steam Deck .AppImage, and generic Linux .tar.xz.
+# Requires Go, CMake, and the local check dependencies in CONTRIBUTING.md; the C
 # toolchain and supported SDL3 redistributables are downloaded and bundled by
 # the packaging project. Desktop releases also need native host packaging tools;
 # macOS can cross-build all release targets without a VM.
@@ -10,10 +11,11 @@
 # DESKTOP=0 explicitly requests legacy archives instead of the default matrix.
 # Steam Deck enforces glibc 2.36; full device/game qualification is separate.
 #
-# The equivalent pure-CMake command (run from the packaging directory) is:
+# The lower-level packaging-only CMake command (run from the packaging directory) is:
 #   cd installer/packaging && cmake --workflow --preset release
 # Individual platforms: `make release-macos-arm64`, `make release-steam-deck`,
-# etc.
+# etc. These use the same local gate, once per make invocation even when
+# several release targets are requested. Check dependencies: CONTRIBUTING.md.
 #
 # Each platform's CMake build tree (which holds a freshly extracted ~180 MB Zig
 # toolchain) is removed as soon as that bundle is staged into release/, so the
@@ -164,10 +166,10 @@ dev: config.ini
 
 RELEASE_OPTIONS = -DBUILDER_LEGACY_ARCHIVES=$(if $(filter 0,$(DESKTOP)),ON,OFF) -DBUILDER_KEEP_BUILD=$(if $(KEEP_BUILD),ON,OFF)
 
-release:
+release: check
 	cmake "-DBUILDER_PLATFORMS=$(PLATFORMS)" $(RELEASE_OPTIONS) -P $(PACKAGING)/release.cmake
 
-$(addprefix release-,$(PLATFORMS)): release-%:
+$(addprefix release-,$(PLATFORMS)): release-%: check
 	cmake -DBUILDER_PLATFORMS=$* $(RELEASE_OPTIONS) -P $(PACKAGING)/release.cmake
 
 # Cross-target link check. `zig cc` carries libc headers and a linker for every
