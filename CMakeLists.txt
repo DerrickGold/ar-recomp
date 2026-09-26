@@ -527,6 +527,8 @@ endif()
 endif() # NOT AR_TESTS_ONLY
 
 if(BUILD_TESTING)
+    include(cmake/TestSupport.cmake)
+
     # Quality and generator-contract checks must never disappear silently.
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
     if(Python3_Interpreter_FOUND)
@@ -600,8 +602,9 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_unicode_grapheme_test
         tests/unicode_grapheme_test.c
-        src/localization/interface_text.c
-        src/localization/unicode_grapheme.c)
+        src/localization/interface_text.c)
+    target_link_libraries(actraiser_unicode_grapheme_test PRIVATE
+        actraiser_text_test_support)
     target_include_directories(actraiser_unicode_grapheme_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src)
     add_test(NAME actraiser_unicode_grapheme
@@ -614,16 +617,17 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_ui_catalog COMMAND actraiser_ui_catalog_test)
 
     add_executable(actraiser_text_backend_test
-        tests/text_backend_test.c
-        src/localization/text_backend.c
-        src/localization/text_rasterizer.c)
+        tests/text_backend_test.c)
+    target_link_libraries(actraiser_text_backend_test PRIVATE
+        actraiser_text_test_support)
     target_include_directories(actraiser_text_backend_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src)
     add_test(NAME actraiser_text_backend COMMAND actraiser_text_backend_test)
 
     add_executable(actraiser_text_bitmap_effects_test
-        tests/text_bitmap_effects_test.c
-        src/localization/text_rasterizer.c)
+        tests/text_bitmap_effects_test.c)
+    target_link_libraries(actraiser_text_bitmap_effects_test PRIVATE
+        actraiser_text_test_support)
     target_include_directories(actraiser_text_bitmap_effects_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src)
     add_test(NAME actraiser_text_bitmap_effects
@@ -637,16 +641,18 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_font_resource COMMAND actraiser_font_resource_test)
 
     add_executable(actraiser_text_backend_no_ttf_test
-        tests/text_backend_no_ttf_test.c src/platform/sdl/text_rasterizer_sdl.c src/platform/sdl/text_fonts_sdl.c
-        src/localization/text_backend.c src/localization/text_rasterizer.c)
+        tests/text_backend_no_ttf_test.c src/platform/sdl/text_rasterizer_sdl.c src/platform/sdl/text_fonts_sdl.c)
+    target_link_libraries(actraiser_text_backend_no_ttf_test PRIVATE
+        actraiser_text_test_support)
     target_link_libraries(actraiser_text_backend_no_ttf_test PRIVATE actraiser_font_resources)
     target_compile_definitions(actraiser_text_backend_no_ttf_test PRIVATE AR_HAS_SDL3_TTF=0)
     add_test(NAME actraiser_text_backend_no_ttf COMMAND actraiser_text_backend_no_ttf_test)
 
     add_executable(actraiser_enhanced_text_settings_test
         tests/enhanced_text_settings_test.c
-        src/localization/enhanced_text_settings.c
-        src/localization/text_rasterizer.c)
+        src/localization/enhanced_text_settings.c)
+    target_link_libraries(actraiser_enhanced_text_settings_test PRIVATE
+        actraiser_text_test_support)
     target_include_directories(actraiser_enhanced_text_settings_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src)
     add_test(NAME actraiser_enhanced_text_settings
@@ -655,11 +661,11 @@ if(BUILD_TESTING)
     add_executable(actraiser_text_surface_cache_test
         tests/text_surface_cache_test.c
         src/render/ui_text_renderer.c
-        src/localization/text_backend.c
-        src/localization/text_rasterizer.c
-        src/render/text_surface_cache.c
-        src/render/render_device.c
-        src/app/performance_metrics.c)
+        src/render/text_surface_cache.c)
+    target_link_libraries(actraiser_text_surface_cache_test PRIVATE
+        actraiser_performance_test_support
+        actraiser_render_test_support
+        actraiser_text_test_support)
     target_include_directories(actraiser_text_surface_cache_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src)
     target_link_libraries(actraiser_text_surface_cache_test PRIVATE
@@ -678,10 +684,9 @@ if(BUILD_TESTING)
     if(TARGET SDL3_ttf::SDL3_ttf)
         add_executable(actraiser_text_rasterizer_sdl_test
             tests/text_rasterizer_sdl_test.c
-            src/localization/text_backend.c
-            src/localization/text_rasterizer.c
-            src/localization/unicode_grapheme.c
             src/platform/sdl/text_rasterizer_sdl.c src/platform/sdl/text_fonts_sdl.c)
+        target_link_libraries(actraiser_text_rasterizer_sdl_test PRIVATE
+            actraiser_text_test_support)
         target_include_directories(actraiser_text_rasterizer_sdl_test PRIVATE
             ${CMAKE_SOURCE_DIR}/src)
         target_compile_definitions(actraiser_text_rasterizer_sdl_test PRIVATE
@@ -698,11 +703,10 @@ if(BUILD_TESTING)
 
         add_executable(ar_styled_text_sdl_test
             tests/styled_text_sdl_test.c
-            src/localization/text_backend.c
-            src/localization/text_rasterizer.c
-            src/localization/unicode_grapheme.c
             src/platform/sdl/text_rasterizer_sdl.c
             src/platform/sdl/text_fonts_sdl.c)
+        target_link_libraries(ar_styled_text_sdl_test PRIVATE
+            actraiser_text_test_support)
         target_include_directories(ar_styled_text_sdl_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
         target_compile_definitions(ar_styled_text_sdl_test PRIVATE
             AR_HAS_SDL3_TTF=1
@@ -717,9 +721,6 @@ if(BUILD_TESTING)
         add_executable(actraiser_localized_text_presenter_test
             tests/localized_text_presenter_test.c
             src/render/hud_layout.c
-            src/localization/text_rasterizer.c
-            src/localization/unicode_grapheme.c
-            src/localization/text_backend.c
             src/localization/localization_frame.c
             src/localization/enhanced_text_settings.c
             src/render/text_surface_cache.c
@@ -729,14 +730,14 @@ if(BUILD_TESTING)
             src/render/localized_text_artwork.c
             src/localization/text_cell_record.c
             src/render/text_cell_composite.c
-            src/render/render_device.c
             src/platform/sdl/text_rasterizer_sdl.c src/platform/sdl/text_fonts_sdl.c
             # The renderer itself never links this: the test uses the game's
             # own menu geometry so its layout results stay comparable, and
             # separately checks a hand-built grid the game never publishes.
             src/actraiser/actraiser_localization_grid.c
-            src/localization/language_row_shape.c
-        src/app/performance_metrics.c)
+            src/localization/language_row_shape.c)
+        target_link_libraries(actraiser_localized_text_presenter_test PRIVATE
+            actraiser_performance_test_support actraiser_render_test_support actraiser_text_test_support)
         target_include_directories(actraiser_localized_text_presenter_test PRIVATE
             ${CMAKE_SOURCE_DIR}/src)
         target_compile_definitions(actraiser_localized_text_presenter_test PRIVATE
@@ -751,9 +752,6 @@ if(BUILD_TESTING)
         add_executable(actraiser_localized_text_live_line_test
             tests/localized_text_live_line_test.c
             src/render/hud_layout.c
-            src/localization/text_rasterizer.c
-            src/localization/unicode_grapheme.c
-            src/localization/text_backend.c
             src/localization/localization_frame.c
             src/localization/enhanced_text_settings.c
             src/render/text_surface_cache.c
@@ -763,9 +761,9 @@ if(BUILD_TESTING)
             src/render/localized_text_artwork.c
             src/localization/text_cell_record.c
             src/render/text_cell_composite.c
-            src/render/render_device.c
-            src/platform/sdl/text_rasterizer_sdl.c src/platform/sdl/text_fonts_sdl.c
-            src/app/performance_metrics.c)
+            src/platform/sdl/text_rasterizer_sdl.c src/platform/sdl/text_fonts_sdl.c)
+        target_link_libraries(actraiser_localized_text_live_line_test PRIVATE
+            actraiser_performance_test_support actraiser_render_test_support actraiser_text_test_support)
         target_include_directories(actraiser_localized_text_live_line_test PRIVATE
             ${CMAKE_SOURCE_DIR}/src)
         target_compile_definitions(actraiser_localized_text_live_line_test PRIVATE
@@ -777,20 +775,11 @@ if(BUILD_TESTING)
             COMMAND actraiser_localized_text_live_line_test)
     endif()
 
-    # The portable contract a frame snapshot needs on its own: the frame, the
-    # cells it claims, the enhanced-text settings it carries and the rasterizer
-    # contract those name. Tests that build a frame need exactly this set.
-    set(AR_LOCALIZATION_FRAME_SOURCES
-        src/localization/localization_frame.c
-        src/localization/enhanced_text_settings.c
-        src/localization/text_rasterizer.c
-        src/localization/text_cell_record.c)
-
     add_executable(actraiser_localization_grid_test
         tests/actraiser_localization_grid_test.c
         src/actraiser/actraiser_localization_grid.c
-        src/localization/language_row_shape.c
-        ${AR_LOCALIZATION_FRAME_SOURCES})
+        src/localization/language_row_shape.c)
+    target_link_libraries(actraiser_localization_grid_test PRIVATE actraiser_localization_frame_test_support)
     target_include_directories(actraiser_localization_grid_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src)
     add_test(NAME actraiser_localization_grid
@@ -798,19 +787,23 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_language_pack_runtime_test
         tests/language_pack_test.c
-        src/localization/language_pack.c src/localization/text_template.c
         src/localization/language_keyboard.c
-        src/localization/unicode_grapheme.c
         src/localization/language_contract.c
         src/localization/language_row_shape.c)
+    target_link_libraries(actraiser_language_pack_runtime_test PRIVATE
+        actraiser_text_test_support)
     add_executable(actraiser_language_pack_discovery_test
         tests/language_pack_discovery_test.c
-        src/localization/pack_discovery.c src/localization/language_pack.c src/localization/text_template.c)
+        src/localization/pack_discovery.c)
+    target_link_libraries(actraiser_language_pack_discovery_test PRIVATE
+        actraiser_text_test_support)
     target_include_directories(actraiser_language_pack_discovery_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     add_test(NAME actraiser_language_pack_discovery COMMAND actraiser_language_pack_discovery_test)
     add_executable(actraiser_language_pack_desktop_test
         tests/language_pack_desktop_test.c src/localization/pack_discovery.c
-        src/localization/language_pack.c src/localization/text_template.c src/platform/sdl/pack_discovery_sdl.c)
+        src/platform/sdl/pack_discovery_sdl.c)
+    target_link_libraries(actraiser_language_pack_desktop_test PRIVATE
+        actraiser_text_test_support)
     target_include_directories(actraiser_language_pack_desktop_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     target_link_libraries(actraiser_language_pack_desktop_test PRIVATE SDL3::SDL3)
     target_include_directories(actraiser_language_pack_runtime_test PRIVATE
@@ -822,11 +815,11 @@ if(BUILD_TESTING)
         tests/dialogue_session_test.c
         src/localization/dialogue_session.c
         src/actraiser/actraiser_dialogue_adapter.c
-        src/localization/language_pack.c src/localization/text_template.c
         src/localization/language_keyboard.c
         src/localization/language_contract.c
-        src/localization/language_row_shape.c
-        src/localization/unicode_grapheme.c)
+        src/localization/language_row_shape.c)
+    target_link_libraries(actraiser_dialogue_session_test PRIVATE
+        actraiser_text_test_support)
     target_include_directories(actraiser_dialogue_session_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src)
     add_test(NAME actraiser_dialogue_session
@@ -834,9 +827,9 @@ if(BUILD_TESTING)
 
     add_executable(ar_dialogue_portability_test
         tests/dialogue_portability_test.c
-        src/localization/dialogue_session.c
-        src/localization/language_pack.c src/localization/text_template.c
-        src/localization/unicode_grapheme.c)
+        src/localization/dialogue_session.c)
+    target_link_libraries(ar_dialogue_portability_test PRIVATE
+        actraiser_text_test_support)
     target_include_directories(ar_dialogue_portability_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     add_test(NAME ar_dialogue_portability COMMAND ar_dialogue_portability_test)
 
@@ -861,8 +854,8 @@ if(BUILD_TESTING)
         COMMAND actraiser_text_cell_composite_test)
 
     add_executable(actraiser_localization_frame_test
-        tests/localization_frame_test.c
-        ${AR_LOCALIZATION_FRAME_SOURCES})
+        tests/localization_frame_test.c)
+    target_link_libraries(actraiser_localization_frame_test PRIVATE actraiser_localization_frame_test_support)
     target_include_directories(actraiser_localization_frame_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src)
     add_test(NAME actraiser_localization_frame
@@ -870,19 +863,17 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_localization_text_style_test
         tests/actraiser_localization_text_style_test.c
-        src/localization/language_pack.c
         src/localization/dialogue_session.c
         src/actraiser/actraiser_localization_name_compose.c
-        src/actraiser/actraiser_localization_text_normalize.c
-        src/localization/unicode_grapheme.c
-        ${AR_LOCALIZATION_FRAME_SOURCES})
+        src/actraiser/actraiser_localization_text_normalize.c)
+    target_link_libraries(actraiser_localization_text_style_test PRIVATE actraiser_localization_frame_test_support)
     target_link_libraries(actraiser_localization_text_style_test PRIVATE actraiser_text_style)
     add_test(NAME actraiser_localization_text_style COMMAND actraiser_localization_text_style_test)
 
     add_executable(actraiser_localization_world_navigation_test
         tests/actraiser_localization_world_navigation_test.c
-        src/actraiser/actraiser_localization_world_navigation.c
-        ${AR_LOCALIZATION_FRAME_SOURCES})
+        src/actraiser/actraiser_localization_world_navigation.c)
+    target_link_libraries(actraiser_localization_world_navigation_test PRIVATE actraiser_localization_frame_test_support)
     target_link_libraries(actraiser_localization_world_navigation_test PRIVATE actraiser_text_style)
     target_include_directories(actraiser_localization_world_navigation_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
@@ -903,14 +894,13 @@ if(BUILD_TESTING)
         src/actraiser/actraiser_localization_compose_state.c
         src/actraiser/actraiser_localization_speed_text.c
         src/actraiser/actraiser_localization_grid.c
-        src/localization/language_pack.c src/localization/text_template.c
         src/localization/language_contract.c
-        src/localization/language_keyboard.c src/localization/unicode_grapheme.c
+        src/localization/language_keyboard.c
         src/localization/language_row_shape.c
         src/actraiser/actraiser_localization_hud.c
         src/actraiser/actraiser_localization_art.c
-        src/actraiser/actraiser_localization_routes.c
-        ${AR_LOCALIZATION_FRAME_SOURCES})
+        src/actraiser/actraiser_localization_routes.c)
+    target_link_libraries(actraiser_localization_compose_state_test PRIVATE actraiser_localization_frame_test_support)
     target_link_libraries(actraiser_localization_compose_state_test PRIVATE actraiser_text_style)
     target_include_directories(actraiser_localization_compose_state_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
@@ -922,11 +912,11 @@ if(BUILD_TESTING)
         tests/actraiser_localization_values_test.c
         src/actraiser/actraiser_miracle_translation.c
         src/actraiser/actraiser_localization_values.c
-        src/localization/language_pack.c src/localization/text_template.c
         src/localization/language_keyboard.c
-        src/localization/unicode_grapheme.c
         src/localization/language_contract.c
         src/localization/language_row_shape.c)
+    target_link_libraries(actraiser_localization_values_test PRIVATE
+        actraiser_text_test_support)
     target_link_libraries(actraiser_localization_values_test PRIVATE actraiser_regional_rules)
     target_include_directories(actraiser_localization_values_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
@@ -937,9 +927,9 @@ if(BUILD_TESTING)
     add_executable(actraiser_localization_name_entry_test
         tests/actraiser_localization_name_entry_test.c
         src/actraiser/actraiser_localization_name_entry.c
-        src/localization/language_keyboard.c
-        src/localization/language_pack.c src/localization/text_template.c
-        src/localization/unicode_grapheme.c)
+        src/localization/language_keyboard.c)
+    target_link_libraries(actraiser_localization_name_entry_test PRIVATE
+        actraiser_text_test_support)
     target_include_directories(actraiser_localization_name_entry_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src)
     add_test(NAME actraiser_localization_name_entry
@@ -981,9 +971,8 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_localization_credits_test
         tests/actraiser_localization_credits_test.c
-        src/actraiser/actraiser_localization_credits.c
-        src/localization/unicode_grapheme.c
-        ${AR_LOCALIZATION_FRAME_SOURCES})
+        src/actraiser/actraiser_localization_credits.c)
+    target_link_libraries(actraiser_localization_credits_test PRIVATE actraiser_localization_frame_test_support)
     target_link_libraries(actraiser_localization_credits_test PRIVATE actraiser_text_style)
     target_include_directories(actraiser_localization_credits_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
@@ -1060,38 +1049,12 @@ if(BUILD_TESTING)
             PROPERTIES ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
     endif()
 
-    # The production HLE fatal path escapes through the game coroutine. Unit
-    # targets link only the formatter/trampoline core; invalid direct calls
-    # retain abort semantics unless a focused test registers its own escape.
-    add_library(actraiser_hle_fatal_test_support STATIC
-        src/actraiser/actraiser_hle_fatal.c)
-    target_include_directories(actraiser_hle_fatal_test_support PUBLIC
-        ${CMAKE_SOURCE_DIR}/src)
-
-    # HLE tests share CPU entry/stack/flag helpers and their fatal-path dependency.
-    # Static archives let focused tests provide their own narrow stubs without
-    # pulling unrelated helpers into the link. Neither source has per-test flags.
-    add_library(actraiser_cpu_hle_test_support STATIC
-        src/actraiser/actraiser_cpu_hle_internal.c)
-    target_include_directories(actraiser_cpu_hle_test_support PUBLIC
-        ${CMAKE_SOURCE_DIR}/src)
-    target_link_libraries(actraiser_cpu_hle_test_support PUBLIC
-        snesrecomp::sdk actraiser_hle_fatal_test_support)
-
-    # Tests using the real save store share its complete dependency closure.
-    # Narrow adapters can still substitute SaveSystem functions by omitting this
-    # target, as save_editor_test does. Production uses the shipping manifest.
-    add_library(actraiser_save_test_support STATIC
-        src/save/save_system.c src/save/save_paths.c
-        src/host/atomic_replace.c src/localization/unicode_grapheme.c)
-    target_include_directories(actraiser_save_test_support PUBLIC
-        ${CMAKE_SOURCE_DIR}/src)
-
     add_executable(actraiser_consolidated_utils_test
         tests/consolidated_utils_test.c
         src/replacements/manifest_utils.c
-        src/app/performance_metrics.c
     )
+    target_link_libraries(actraiser_consolidated_utils_test PRIVATE
+        actraiser_performance_test_support)
     target_include_directories(actraiser_consolidated_utils_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
     )
@@ -1181,8 +1144,9 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_scene3d_math_test
         tests/scene3d_math_test.c
-        src/render/scene3d_math.c
     )
+    target_link_libraries(actraiser_scene3d_math_test PRIVATE
+        actraiser_scene_math_test_support)
     target_include_directories(actraiser_scene3d_math_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
     )
@@ -1192,9 +1156,10 @@ if(BUILD_TESTING)
     add_executable(actraiser_presentation_upload_mirror_test
         tests/presentation_upload_mirror_test.c
         src/present/presentation_upload_mirror.c
-        src/render/render_device.c
-        src/app/performance_metrics.c
     )
+    target_link_libraries(actraiser_presentation_upload_mirror_test PRIVATE
+        actraiser_performance_test_support
+        actraiser_render_test_support)
     target_include_directories(actraiser_presentation_upload_mirror_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
     )
@@ -1214,11 +1179,12 @@ if(BUILD_TESTING)
     add_executable(actraiser_render_device_test
         tests/render_device_test.c
         src/present/presentation_upload_mirror.c
-        src/render/render_device.c
         src/render/presentation_layout.c
         src/render/render_output.c
-        src/app/performance_metrics.c
     )
+    target_link_libraries(actraiser_render_device_test PRIVATE
+        actraiser_performance_test_support
+        actraiser_render_test_support)
     target_include_directories(actraiser_render_device_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
     )
@@ -1255,7 +1221,6 @@ if(BUILD_TESTING)
         src/present/presentation_upload_mirror.c
         src/sim/sim_render_visibility.c
         src/sim/sim3d/sim3d_mesh_set.c
-        src/app/performance_metrics.c
         src/platform/sdl/parallel_work_sdl.c
         src/sim/sim3d/sim3d_performance.c
         src/sim/sim3d/present_sim3d_environment.c
@@ -1278,39 +1243,33 @@ if(BUILD_TESTING)
         src/sim/world_nav/sim_world_navigation_sky_clouds.c
         src/sim/mountains/sim_background_mountain_mesh.c
         src/sim/mountains/sim_background_mountain_objects.c
-        src/sim/mountains/sim_background_mountain_relief.c
-        src/sim/mountains/sim_background_mountain_silhouette.c
-        src/render/render_device.c
         src/render/presentation_layout.c
         src/render/render_output.c
-        src/render/scene3d_math.c
         src/sim/sim_world_map.c
         src/sim/world_nav/sim_world_navigation_scene.c
         src/actraiser/actraiser_sprite_ownership.c
         src/sim/world_nav/sim_world_navigation_art.c
         src/sim/town/sim_town_ground_art.c
-        src/sim/mountains/sim_background_mountains.c
         src/sim/world_nav/sim_world_navigation_towns.c
-        src/sim/voxels/sim_background_voxel_landmarks.c
-        src/sim/voxels/sim_background_voxel_models.c
         src/sim/voxels/sim_background_voxel_model_cache.c
-        src/sim/voxels/sim_background_voxel_region.c
         src/sim/voxels/sim_background_voxel_biome.c
         src/sim/voxels/sim_background_voxel_lighting.c
         src/sim/voxels/sim_background_voxel_surface.c
         src/sim/voxels/sim_background_voxel_palette.c
         src/sim/voxels/sim_background_voxel_proportions.c
-        src/sim/town/sim_town_layout.c
         src/sim/world_nav/sim_world_navigation_terrain.c
         src/sim/world_nav/sim_world_navigation_cliffs.c
-        src/sim/town/sim_town_terrain.c
     )
     add_executable(actraiser_present_world_nav_test
         tests/present_world_nav_test.c tests/present_world_nav_sim_stubs.c
         ${AR_WORLD_NAV_TEST_SOURCES})
+    target_link_libraries(actraiser_present_world_nav_test PRIVATE
+        actraiser_performance_test_support actraiser_render_test_support actraiser_scene_math_test_support actraiser_town_model_test_support)
     add_executable(actraiser_present_sim_globe_mapping_test
         tests/present_sim_globe_mapping_test.c src/sim/world_nav/present_sim_globe_mapping.c
-        src/sim/world_nav/sim_world_navigation_globe.c src/sim/town/sim_town_terrain.c)
+        src/sim/world_nav/sim_world_navigation_globe.c)
+    target_link_libraries(actraiser_present_sim_globe_mapping_test PRIVATE
+        actraiser_town_model_test_support)
     target_include_directories(actraiser_present_sim_globe_mapping_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     target_link_libraries(actraiser_present_sim_globe_mapping_test PRIVATE actraiser_math)
     add_test(NAME actraiser_present_sim_globe_mapping COMMAND actraiser_present_sim_globe_mapping_test)
@@ -1321,15 +1280,19 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_present_sim_globe_focus COMMAND actraiser_present_sim_globe_focus_test)
     add_executable(actraiser_present_sim_globe_water_test
         tests/present_sim_globe_water_test.c src/sim/world_nav/present_sim_globe_water.c
-        src/sim/world_nav/present_sim_globe_mapping.c src/sim/world_nav/sim_world_navigation_globe.c
-        src/sim/town/sim_town_terrain.c)
+        src/sim/world_nav/present_sim_globe_mapping.c src/sim/world_nav/sim_world_navigation_globe.c)
+    target_link_libraries(actraiser_present_sim_globe_water_test PRIVATE
+        actraiser_town_model_test_support)
     target_include_directories(actraiser_present_sim_globe_water_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     target_link_libraries(actraiser_present_sim_globe_water_test PRIVATE actraiser_math)
     add_test(NAME actraiser_present_sim_globe_water COMMAND actraiser_present_sim_globe_water_test)
     add_executable(actraiser_present_sim_globe_project_test
         tests/present_sim_globe_project_test.c src/sim/world_nav/present_sim_globe_project.c
-        src/sim/world_nav/present_sim_globe_mapping.c src/render/scene3d_math.c
-        src/sim/world_nav/sim_world_navigation_globe.c src/sim/town/sim_town_terrain.c)
+        src/sim/world_nav/present_sim_globe_mapping.c
+        src/sim/world_nav/sim_world_navigation_globe.c)
+    target_link_libraries(actraiser_present_sim_globe_project_test PRIVATE
+        actraiser_scene_math_test_support
+        actraiser_town_model_test_support)
     target_include_directories(actraiser_present_sim_globe_project_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     target_link_libraries(actraiser_present_sim_globe_project_test PRIVATE actraiser_math)
     add_test(NAME actraiser_present_sim_globe_project COMMAND actraiser_present_sim_globe_project_test)
@@ -1337,10 +1300,13 @@ if(BUILD_TESTING)
     add_executable(actraiser_present_sim3d_project_test
         tests/present_sim3d_project_test.c src/sim/sim3d/present_sim3d_project.c
         src/sim/sim3d/present_sim3d_geometry.c src/sim/world_nav/present_sim_globe_project.c
-        src/sim/world_nav/present_sim_globe_mapping.c src/render/scene3d_math.c src/render/render_device.c
+        src/sim/world_nav/present_sim_globe_mapping.c
         src/sim/sim_render_visibility.c src/sim/sim_world_map.c
-        src/sim/world_nav/sim_world_navigation_globe.c src/sim/world_nav/sim_world_navigation_terrain.c
-        src/sim/town/sim_town_terrain.c)
+        src/sim/world_nav/sim_world_navigation_globe.c src/sim/world_nav/sim_world_navigation_terrain.c)
+    target_link_libraries(actraiser_present_sim3d_project_test PRIVATE
+        actraiser_render_test_support
+        actraiser_scene_math_test_support
+        actraiser_town_model_test_support)
     target_include_directories(actraiser_present_sim3d_project_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     target_compile_definitions(actraiser_present_sim3d_project_test PRIVATE AR_SIM3D_TERRAIN_ELEVATION=1)
     target_link_libraries(actraiser_present_sim3d_project_test PRIVATE actraiser_math)
@@ -1387,19 +1353,19 @@ if(BUILD_TESTING)
         src/sim/sim_world_map_compose.c
         src/sim/sim3d/present_sim3d_terrain.c
         src/sim/sim3d/present_sim3d_clouds.c
-        src/sim/town/sim_town_canvas.c
-        src/sim/town/sim_structure_visuals.c
-        src/sim/voxels/sim_background_voxels.c
         src/sim/voxels/sim_background_voxel_lod.c
         src/sim/voxels/sim_background_voxel_renderer.c
         src/render/upload_rect_run.c
         src/sim/voxels/sim_background_voxel_terrain_depth.c
         src/sim/mountains/sim_background_mountain_render.c
         src/platform/sdl/sim_cloud_effect_backend_sdl.c
-        src/platform/sdl/render_sdl.c
         src/platform/sdl/sim3d_depth_pass_sdl.c
         src/platform/sdl/sim3d_depth_pass_pipelines_sdl.c
         src/platform/sdl/sim3d_depth_pass_meshes_sdl.c)
+    target_link_libraries(actraiser_present_world_nav_gpu_test PRIVATE
+        actraiser_scene_math_test_support actraiser_town_model_test_support)
+    target_link_libraries(actraiser_present_world_nav_gpu_test PRIVATE
+        actraiser_render_sdl_test_support)
     target_include_directories(actraiser_present_world_nav_gpu_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     target_link_libraries(actraiser_present_world_nav_gpu_test PRIVATE
@@ -1413,23 +1379,30 @@ if(BUILD_TESTING)
         ENVIRONMENT "SDL_AUDIODRIVER=dummy" SKIP_RETURN_CODE 77)
 
     add_executable(actraiser_parallel_work_test tests/parallel_work_test.c
-        src/platform/sdl/parallel_work_sdl.c src/app/performance_metrics.c
+        src/platform/sdl/parallel_work_sdl.c
         src/platform/sdl/host_clock_sdl.c)
+    target_link_libraries(actraiser_parallel_work_test PRIVATE
+        actraiser_performance_test_support)
     target_include_directories(actraiser_parallel_work_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     target_link_libraries(actraiser_parallel_work_test PRIVATE SDL3::SDL3)
     add_test(NAME actraiser_parallel_work COMMAND actraiser_parallel_work_test)
 
     add_executable(actraiser_performance_metrics_test
-        tests/performance_metrics_test.c src/app/performance_metrics.c
-        src/app/performance_overlay.c src/render/render_device.c)
+        tests/performance_metrics_test.c
+        src/app/performance_overlay.c)
+    target_link_libraries(actraiser_performance_metrics_test PRIVATE
+        actraiser_performance_test_support
+        actraiser_render_test_support)
     target_include_directories(actraiser_performance_metrics_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     target_link_libraries(actraiser_performance_metrics_test PRIVATE SDL3::SDL3 actraiser_math)
     add_test(NAME actraiser_performance_metrics COMMAND actraiser_performance_metrics_test)
 
     add_executable(actraiser_present_sim3d_clouds_test
         tests/present_sim3d_clouds_test.c src/sim/sim3d/present_sim3d_clouds.c
-        src/sim/sim3d/present_sim3d_environment.c src/render/scene3d_math.c
+        src/sim/sim3d/present_sim3d_environment.c
         src/sim/world_nav/sim_world_navigation_globe.c)
+    target_link_libraries(actraiser_present_sim3d_clouds_test PRIVATE
+        actraiser_scene_math_test_support)
     target_include_directories(actraiser_present_sim3d_clouds_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     target_link_libraries(actraiser_present_sim3d_clouds_test PRIVATE actraiser_math)
@@ -1454,8 +1427,9 @@ if(BUILD_TESTING)
         src/sim/sim_world_map.c
         src/sim/world_nav/sim_world_navigation_terrain.c
         src/sim/world_nav/sim_world_navigation_cliffs.c
-        src/sim/town/sim_town_terrain.c
     )
+    target_link_libraries(actraiser_sim_world_navigation_terrain_test PRIVATE
+        actraiser_town_model_test_support)
     target_include_directories(actraiser_sim_world_navigation_terrain_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
@@ -1470,10 +1444,9 @@ if(BUILD_TESTING)
         src/sim/world_nav/sim_world_navigation_art.c
         src/sim/sim_world_map.c
         src/sim/town/sim_town_ground_art.c
-        src/sim/mountains/sim_background_mountains.c
-        src/sim/town/sim_town_layout.c
-        src/sim/town/sim_town_terrain.c
     )
+    target_link_libraries(actraiser_sim_world_navigation_art_test PRIVATE
+        actraiser_town_model_test_support)
     target_include_directories(actraiser_sim_world_navigation_art_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
     )
@@ -1485,8 +1458,9 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_sim_town_ground_art_test
         tests/sim_town_ground_art_test.c
-        src/sim/town/sim_town_ground_art.c
-        src/sim/town/sim_town_canvas.c)
+        src/sim/town/sim_town_ground_art.c)
+    target_link_libraries(actraiser_sim_town_ground_art_test PRIVATE
+        actraiser_town_model_test_support)
     target_include_directories(actraiser_sim_town_ground_art_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
@@ -1495,10 +1469,9 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_render_sdl_state_test
         tests/render_sdl_state_test.c
-        src/render/render_device.c
-        src/platform/sdl/render_sdl.c
-        src/app/performance_metrics.c
     )
+    target_link_libraries(actraiser_render_sdl_state_test PRIVATE
+        actraiser_render_sdl_test_support)
     target_include_directories(actraiser_render_sdl_state_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
     )
@@ -1510,17 +1483,20 @@ if(BUILD_TESTING)
         COMMAND actraiser_render_sdl_state_test)
 
     add_executable(actraiser_render_sdl_present_test
-        tests/render_sdl_present_test.c
-        src/render/render_device.c src/app/performance_metrics.c)
+        tests/render_sdl_present_test.c)
+    target_link_libraries(actraiser_render_sdl_present_test PRIVATE
+        actraiser_performance_test_support
+        actraiser_render_test_support)
     target_include_directories(actraiser_render_sdl_present_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     target_link_libraries(actraiser_render_sdl_present_test PRIVATE SDL3::SDL3 actraiser_math)
     add_test(NAME actraiser_render_sdl_present COMMAND actraiser_render_sdl_present_test)
 
     add_executable(actraiser_render_upload_metrics_test
         tests/render_upload_metrics_test.c
-        src/platform/sdl/render_sdl.c src/render/render_device.c
-        src/present/presentation_upload_mirror.c src/app/performance_metrics.c
+        src/present/presentation_upload_mirror.c
         src/sim/sim3d/sim3d_performance.c src/diorama/diorama_performance.c)
+    target_link_libraries(actraiser_render_upload_metrics_test PRIVATE
+        actraiser_render_sdl_test_support)
     target_include_directories(actraiser_render_upload_metrics_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     target_link_libraries(actraiser_render_upload_metrics_test PRIVATE SDL3::SDL3 actraiser_math)
     add_test(NAME actraiser_render_upload_metrics COMMAND actraiser_render_upload_metrics_test)
@@ -1531,7 +1507,9 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_present_sim3d_canvas_test
         tests/present_sim3d_canvas_test.c src/sim/sim3d/present_sim3d_canvas.c
-        src/render/render_device.c src/render/upload_rect_run.c)
+        src/render/upload_rect_run.c)
+    target_link_libraries(actraiser_present_sim3d_canvas_test PRIVATE
+        actraiser_render_test_support)
     target_include_directories(actraiser_present_sim3d_canvas_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     target_link_libraries(actraiser_present_sim3d_canvas_test PRIVATE actraiser_math)
@@ -1556,7 +1534,9 @@ if(BUILD_TESTING)
     add_executable(actraiser_sim3d_camera_test
         tests/sim3d_camera_test.c src/sim/sim3d/sim3d_camera.c
         src/sim/sim3d/sim3d_camera_motion.c
-        src/render/camera_orbit.c src/render/scene3d_math.c)
+        src/render/camera_orbit.c)
+    target_link_libraries(actraiser_sim3d_camera_test PRIVATE
+        actraiser_scene_math_test_support)
     target_include_directories(actraiser_sim3d_camera_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     target_link_libraries(actraiser_sim3d_camera_test PRIVATE actraiser_math)
@@ -1570,8 +1550,9 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_sim_town_canvas_test
         tests/sim_town_canvas_test.c
-        src/sim/town/sim_town_canvas.c
     )
+    target_link_libraries(actraiser_sim_town_canvas_test PRIVATE
+        actraiser_town_model_test_support)
     target_include_directories(actraiser_sim_town_canvas_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
@@ -1581,8 +1562,9 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_sim_town_terrain_test
         tests/sim_town_terrain_test.c
-        src/sim/town/sim_town_terrain.c
     )
+    target_link_libraries(actraiser_sim_town_terrain_test PRIVATE
+        actraiser_town_model_test_support)
     target_include_directories(actraiser_sim_town_terrain_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
     )
@@ -1594,8 +1576,9 @@ if(BUILD_TESTING)
     add_executable(actraiser_sim_backdrop_render_test
         tests/sim_backdrop_render_test.c
         src/sim/sim3d/sim_backdrop_render.c
-        src/render/scene3d_math.c
     )
+    target_link_libraries(actraiser_sim_backdrop_render_test PRIVATE
+        actraiser_scene_math_test_support)
     target_include_directories(actraiser_sim_backdrop_render_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
     )
@@ -1606,18 +1589,9 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_sim_background_voxels_test
         tests/sim_background_voxels_test.c
-        src/sim/town/sim_town_layout.c
-        src/sim/voxels/sim_background_voxels.c
-        src/sim/town/sim_structure_visuals.c
-        src/sim/voxels/sim_background_voxel_models.c
-        src/sim/voxels/sim_background_voxel_landmarks.c
-        src/sim/mountains/sim_background_mountains.c
-        src/sim/mountains/sim_background_mountain_silhouette.c
-        src/sim/mountains/sim_background_mountain_relief.c
-        src/sim/voxels/sim_background_voxel_region.c
-        src/sim/town/sim_town_canvas.c
-        src/sim/town/sim_town_terrain.c
     )
+    target_link_libraries(actraiser_sim_background_voxels_test PRIVATE
+        actraiser_town_model_test_support)
     target_include_directories(actraiser_sim_background_voxels_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
@@ -1631,12 +1605,13 @@ if(BUILD_TESTING)
 
     # Exercise every pixel-publication fixture with real host helpers too;
     # the normal classification test and domain module stay platform-free.
-    get_target_property(SIM_BACKGROUND_TEST_SOURCES
-        actraiser_sim_background_voxels_test SOURCES)
     add_executable(actraiser_sim_background_parallel_test
-        ${SIM_BACKGROUND_TEST_SOURCES}
-        src/platform/sdl/parallel_work_sdl.c src/app/performance_metrics.c
+        tests/sim_background_voxels_test.c
+        src/platform/sdl/parallel_work_sdl.c
         src/platform/sdl/host_clock_sdl.c)
+    target_link_libraries(actraiser_sim_background_parallel_test PRIVATE
+        actraiser_performance_test_support
+        actraiser_town_model_test_support)
     target_compile_definitions(actraiser_sim_background_parallel_test PRIVATE
         AR_TEST_THREADED_ROWS=1)
     target_include_directories(actraiser_sim_background_parallel_test PRIVATE
@@ -1649,9 +1624,9 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_sim_background_voxel_landmarks_test
         tests/sim_background_voxel_landmarks_test.c
-        src/sim/town/sim_town_layout.c
-        src/sim/voxels/sim_background_voxel_landmarks.c
     )
+    target_link_libraries(actraiser_sim_background_voxel_landmarks_test PRIVATE
+        actraiser_town_model_test_support)
     target_include_directories(
         actraiser_sim_background_voxel_landmarks_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
@@ -1661,10 +1636,10 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_sim_background_mountains_test
         tests/sim_background_mountains_test.c
-        src/sim/town/sim_town_layout.c
-        src/sim/mountains/sim_background_mountains.c
         src/sim/mountains/sim_background_mountain_objects.c
     )
+    target_link_libraries(actraiser_sim_background_mountains_test PRIVATE
+        actraiser_town_model_test_support)
     target_include_directories(actraiser_sim_background_mountains_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
     )
@@ -1673,8 +1648,9 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_sim_background_mountain_relief_test
         tests/sim_background_mountain_relief_test.c
-        src/sim/mountains/sim_background_mountain_relief.c
     )
+    target_link_libraries(actraiser_sim_background_mountain_relief_test PRIVATE
+        actraiser_town_model_test_support)
     target_include_directories(
         actraiser_sim_background_mountain_relief_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
@@ -1685,21 +1661,18 @@ if(BUILD_TESTING)
     add_executable(actraiser_sim_world_navigation_materials_test
         tests/sim_world_navigation_materials_test.c
         src/sim/world_nav/sim_world_navigation_terrain.c
-        src/sim/town/sim_town_terrain.c
         src/sim/world_nav/sim_world_navigation_clouds.c
         src/sim/world_nav/sim_world_navigation_sky_clouds.c
         src/sim/world_nav/sim_world_navigation_globe.c
         src/sim/world_nav/sim_world_navigation_mountains.c
         src/sim/world_nav/sim_world_navigation_mountain_transition.c
         src/sim/mountains/sim_background_mountain_mesh.c
-        src/sim/mountains/sim_background_mountain_relief.c
-        src/sim/mountains/sim_background_mountain_silhouette.c
         src/sim/mountains/sim_background_mountain_objects.c
-        src/sim/mountains/sim_background_mountains.c
         src/sim/town/sim_town_ground_art.c
-        src/sim/town/sim_town_layout.c
         src/sim/sim_world_map.c
     )
+    target_link_libraries(actraiser_sim_world_navigation_materials_test PRIVATE
+        actraiser_town_model_test_support)
     target_include_directories(actraiser_sim_world_navigation_materials_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     target_link_libraries(actraiser_sim_world_navigation_materials_test PRIVATE actraiser_math)
@@ -1708,10 +1681,9 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_sim_background_voxel_models_test
         tests/sim_background_voxel_models_test.c
-        src/sim/voxels/sim_background_voxel_models.c
-        src/sim/voxels/sim_background_voxel_region.c
-        src/sim/town/sim_structure_visuals.c
     )
+    target_link_libraries(actraiser_sim_background_voxel_models_test PRIVATE
+        actraiser_town_model_test_support)
     target_include_directories(actraiser_sim_background_voxel_models_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
@@ -1736,12 +1708,12 @@ if(BUILD_TESTING)
     add_executable(actraiser_sim_background_voxel_model_cache_test
         tests/sim_background_voxel_model_cache_test.c
         src/sim/voxels/sim_background_voxel_model_cache.c
-        src/sim/voxels/sim_background_voxel_models.c
-        src/sim/voxels/sim_background_voxel_region.c
         src/sim/voxels/sim_background_voxel_lighting.c
         src/sim/voxels/sim_background_voxel_surface.c
         src/sim/voxels/sim_background_voxel_biome.c
     )
+    target_link_libraries(actraiser_sim_background_voxel_model_cache_test PRIVATE
+        actraiser_town_model_test_support)
     target_include_directories(actraiser_sim_background_voxel_model_cache_test
         PRIVATE
         ${CMAKE_SOURCE_DIR}/src
@@ -1753,11 +1725,11 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_sim_background_voxel_model_cache_storage_test
         tests/sim_background_voxel_model_cache_storage_test.c
-        src/sim/voxels/sim_background_voxel_models.c
-        src/sim/voxels/sim_background_voxel_region.c
         src/sim/voxels/sim_background_voxel_lighting.c
         src/sim/voxels/sim_background_voxel_surface.c
         src/sim/voxels/sim_background_voxel_biome.c)
+    target_link_libraries(actraiser_sim_background_voxel_model_cache_storage_test PRIVATE
+        actraiser_town_model_test_support)
     target_include_directories(actraiser_sim_background_voxel_model_cache_storage_test
         PRIVATE ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     target_link_libraries(actraiser_sim_background_voxel_model_cache_storage_test PRIVATE actraiser_math)
@@ -1787,8 +1759,9 @@ if(BUILD_TESTING)
     add_executable(actraiser_sim_background_voxel_palette_test
         tests/sim_background_voxel_palette_test.c
         src/sim/voxels/sim_background_voxel_palette.c
-        src/sim/voxels/sim_background_voxel_region.c
     )
+    target_link_libraries(actraiser_sim_background_voxel_palette_test PRIVATE
+        actraiser_town_model_test_support)
     target_include_directories(actraiser_sim_background_voxel_palette_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
@@ -1813,10 +1786,10 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_sim_background_voxel_proportions_test
         tests/sim_background_voxel_proportions_test.c
-        src/sim/voxels/sim_background_voxel_models.c
         src/sim/voxels/sim_background_voxel_proportions.c
-        src/sim/voxels/sim_background_voxel_region.c
     )
+    target_link_libraries(actraiser_sim_background_voxel_proportions_test PRIVATE
+        actraiser_town_model_test_support)
     target_include_directories(actraiser_sim_background_voxel_proportions_test
         PRIVATE
         ${CMAKE_SOURCE_DIR}/src
@@ -1828,8 +1801,9 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_sim_background_voxel_region_test
         tests/sim_background_voxel_region_test.c
-        src/sim/voxels/sim_background_voxel_region.c
     )
+    target_link_libraries(actraiser_sim_background_voxel_region_test PRIVATE
+        actraiser_town_model_test_support)
     target_include_directories(actraiser_sim_background_voxel_region_test
         PRIVATE
         ${CMAKE_SOURCE_DIR}/src
@@ -1925,10 +1899,11 @@ if(BUILD_TESTING)
     # LoROM conversion, WRAM outputs, byte order, scratch, registers and RTS.
     add_executable(actraiser_action_room_loader_hle_test
         tests/actraiser_action_room_loader_hle_test.c
-        src/actraiser/quintet_lzss.c
         src/actraiser/actraiser_lzss.c
         src/actraiser/actraiser_action_room_loader.c
     )
+    target_link_libraries(actraiser_action_room_loader_hle_test PRIVATE
+        actraiser_rom_decode_test_support)
     target_link_libraries(actraiser_action_room_loader_hle_test PRIVATE
         actraiser_cpu_hle_test_support)
     target_include_directories(actraiser_action_room_loader_hle_test PRIVATE
@@ -1943,12 +1918,13 @@ if(BUILD_TESTING)
     # action-only command-7/6 character and palette staging handlers.
     add_executable(actraiser_action_room_graphics_hle_test
         tests/actraiser_action_room_graphics_hle_test.c
-        src/actraiser/quintet_lzss.c
         src/actraiser/actraiser_lzss.c
         src/actraiser/actraiser_action_room_graphics.c
         src/actraiser/regional/actraiser_actor_art.c
         src/actraiser/regional/actraiser_regional_media.c
         ${SNESRECOMP_RUNNER_ROOT}/src/support/sha256.c)
+    target_link_libraries(actraiser_action_room_graphics_hle_test PRIVATE
+        actraiser_rom_decode_test_support)
     target_link_libraries(actraiser_action_room_graphics_hle_test PRIVATE
         actraiser_cpu_hle_test_support actraiser_regional_rules)
     target_include_directories(actraiser_action_room_graphics_hle_test PRIVATE
@@ -2030,12 +2006,13 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_action_bg_test
         tests/actraiser_action_bg_test.c
-        src/actraiser/quintet_lzss.c
         src/action/action_bg_plan.c
         src/action/action_bg_world.c
         src/action/action_room_scene.c src/action/action_room_terrain.c src/action/action_room_mosaic.c
         src/actraiser/actraiser_action_bg.c
         src/diorama/diorama_layer_order.c)
+    target_link_libraries(actraiser_action_bg_test PRIVATE
+        actraiser_rom_decode_test_support)
     target_link_libraries(actraiser_action_bg_test PRIVATE actraiser_regional_rules)
     target_include_directories(actraiser_action_bg_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
@@ -2080,15 +2057,18 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_sim3d_textures_test
         tests/sim3d_textures_test.c src/sim/sim3d/sim3d_textures.c
-        src/present/presentation_upload_mirror.c src/render/render_device.c
-        src/app/performance_metrics.c)
+        src/present/presentation_upload_mirror.c)
+    target_link_libraries(actraiser_sim3d_textures_test PRIVATE
+        actraiser_performance_test_support
+        actraiser_render_test_support)
     target_include_directories(actraiser_sim3d_textures_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_sim3d_textures COMMAND actraiser_sim3d_textures_test)
 
     add_executable(actraiser_present_hd_replacements_test
-        tests/present_hd_replacements_test.c src/replacements/present_hd_replacements.c
-        src/render/render_device.c)
+        tests/present_hd_replacements_test.c src/replacements/present_hd_replacements.c)
+    target_link_libraries(actraiser_present_hd_replacements_test PRIVATE
+        actraiser_render_test_support)
     target_include_directories(actraiser_present_hd_replacements_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     target_link_libraries(actraiser_present_hd_replacements_test PRIVATE actraiser_math)
@@ -2096,8 +2076,11 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_present_hud_test
         tests/present_hud_test.c src/render/present_hud.c
-        src/render/hud_layout.c src/render/text_cell_composite.c src/render/render_device.c
-        src/present/presentation_upload_mirror.c src/app/performance_metrics.c)
+        src/render/hud_layout.c src/render/text_cell_composite.c
+        src/present/presentation_upload_mirror.c)
+    target_link_libraries(actraiser_present_hud_test PRIVATE
+        actraiser_performance_test_support
+        actraiser_render_test_support)
     target_include_directories(actraiser_present_hud_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     target_link_libraries(actraiser_present_hud_test PRIVATE actraiser_math)
@@ -2108,11 +2091,12 @@ if(BUILD_TESTING)
         src/action/present_action_effects.c
         ${AR_ACTION_EFFECT_TEST_SOURCES}
         src/render/effect_batch.c
-        src/render/render_device.c
         src/render/render_output.c
         src/render/presentation_layout.c
-        src/present/presentation_upload_mirror.c
-        src/app/performance_metrics.c)
+        src/present/presentation_upload_mirror.c)
+    target_link_libraries(actraiser_present_action_effects_test PRIVATE
+        actraiser_performance_test_support
+        actraiser_render_test_support)
     target_include_directories(actraiser_present_action_effects_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     target_link_libraries(actraiser_present_action_effects_test PRIVATE actraiser_math)
@@ -2128,8 +2112,9 @@ if(BUILD_TESTING)
         tests/diorama_projection_test.c
         src/diorama/diorama_projection.c
         src/diorama/diorama_depth_shapes.c
-        src/render/scene3d_math.c
     )
+    target_link_libraries(actraiser_diorama_projection_test PRIVATE
+        actraiser_scene_math_test_support)
     target_include_directories(actraiser_diorama_projection_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${CMAKE_SOURCE_DIR}/src/diorama
@@ -2161,9 +2146,9 @@ if(BUILD_TESTING)
         src/sim/world_nav/sim_world_navigation_scene.c
         src/actraiser/actraiser_sprite_ownership.c
         src/sim/world_nav/sim_world_navigation_towns.c
-        src/sim/voxels/sim_background_voxel_landmarks.c
-        src/sim/town/sim_town_layout.c
     )
+    target_link_libraries(actraiser_sim_render_metadata_test PRIVATE
+        actraiser_town_model_test_support)
     target_include_directories(actraiser_sim_render_metadata_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
@@ -2201,10 +2186,12 @@ if(BUILD_TESTING)
         # settings.c's randomizer rows call into the transform for their
         # availability gate and their on-change refresh. It is pure ROM-buffer
         # work with no SDL/PPU closure, so linking it here costs nothing.
-        src/randomizer/randomizer.c src/randomizer/randomizer_config.c src/action/action_placements.c
+        src/randomizer/randomizer.c src/action/action_placements.c
         src/app/input_map.c
         src/app/user_data_dir.c
     )
+    target_link_libraries(actraiser_settings_test PRIVATE
+        actraiser_campaign_test_support)
     # settings.c owns the input-binding descriptors, so the registry test now
     # links the SDL-backed key/button naming they serialize through.
     target_link_libraries(actraiser_settings_test PRIVATE
@@ -2393,16 +2380,15 @@ if(BUILD_TESTING)
         src/settings_overlay/regional/regional_menu.c
         tests/settings_overlay_test.c
         src/settings_overlay/regional/regional_ui.c
-        src/app/performance_metrics.c src/app/performance_overlay.c
+        src/app/performance_overlay.c
         src/settings_overlay/settings_overlay_localization.c
         src/settings_overlay/layers/layer_localization.c
         src/localization/ui_catalog.c
         src/app/config.c
-        src/actraiser/quintet_lzss.c
         src/app/settings.c
         src/present/display_geometry.c
         src/host/atomic_replace.c
-        src/randomizer/randomizer.c src/randomizer/randomizer_config.c src/action/action_placements.c
+        src/randomizer/randomizer.c src/action/action_placements.c
         src/settings_overlay/settings_overlay.c
         src/settings_overlay/layers/layer_menu.c
         src/settings_overlay/regional/regional_panel.c
@@ -2414,14 +2400,9 @@ if(BUILD_TESTING)
         src/localization/interface_text.c
         src/render/ui_text_renderer.c
         src/render/text_surface_cache.c
-        src/localization/text_rasterizer.c
-        src/localization/text_backend.c
-        src/localization/unicode_grapheme.c
         src/settings_overlay/settings_overlay_debug_panel.c
-        src/render/render_device.c
         src/render/presentation_layout.c
         src/render/render_output.c
-        src/platform/sdl/render_sdl.c
         tests/host_clock_stub.c
         src/host/host_display_status.c
         src/app/input_map.c
@@ -2435,6 +2416,8 @@ if(BUILD_TESTING)
         # injection happens through its session singleton; no PPU/SDL closure.
         src/action/action_bg_plan.c
         src/action/action_bg_tuner.c)
+    target_link_libraries(actraiser_settings_overlay_test PRIVATE
+        actraiser_render_sdl_test_support actraiser_text_test_support actraiser_rom_decode_test_support actraiser_campaign_test_support)
     target_link_libraries(actraiser_settings_overlay_test PRIVATE actraiser_regional_rules)
     target_include_directories(actraiser_settings_overlay_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
@@ -2504,8 +2487,9 @@ if(BUILD_TESTING)
     # and GPU-free while guarding the order that keeps UI above pillar bars.
     add_executable(actraiser_presentation_view_test
         tests/presentation_view_test.c src/present/presentation_view.c
-        src/sim/world_nav/present_sky_palace.c src/sim/world_nav/sim_world_navigation_palace.c
-        src/render/render_device.c)
+        src/sim/world_nav/present_sky_palace.c src/sim/world_nav/sim_world_navigation_palace.c)
+    target_link_libraries(actraiser_presentation_view_test PRIVATE
+        actraiser_render_test_support)
     target_include_directories(actraiser_presentation_view_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_presentation_view COMMAND actraiser_presentation_view_test)
@@ -2517,12 +2501,14 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_present_frame_order_test
         tests/present_frame_order_test.c
-        src/app/performance_metrics.c src/platform/sdl/host_clock_sdl.c
+        src/platform/sdl/host_clock_sdl.c
         src/present/present_frame.c
         src/localization/text_presentation.c
         src/present/render_comparison.c
         src/app/session_fatal.c
     )
+    target_link_libraries(actraiser_present_frame_order_test PRIVATE
+        actraiser_performance_test_support)
     target_include_directories(actraiser_present_frame_order_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
@@ -2677,11 +2663,10 @@ if(BUILD_TESTING)
         src/platform/sdl/diorama_effect_backend_sdl.c
         src/platform/sdl/sim_shadow_effect_backend_sdl.c
         src/platform/sdl/sim_cloud_effect_backend_sdl.c
-        src/platform/sdl/render_sdl.c
-        src/render/render_device.c
         src/app/session_fatal.c
-        src/app/performance_metrics.c
     )
+    target_link_libraries(actraiser_render_effect_backends_sdl_test PRIVATE
+        actraiser_render_sdl_test_support)
     target_include_directories(actraiser_render_effect_backends_sdl_test
         PRIVATE ${CMAKE_SOURCE_DIR}/src)
     target_link_libraries(actraiser_render_effect_backends_sdl_test PRIVATE
@@ -2714,7 +2699,7 @@ if(BUILD_TESTING)
     # BLENDMODE_BLEND black-screen regression with genuine emulator output.
     add_executable(actraiser_ppu_render_pipeline_test
         tests/ppu_render_pipeline_test.c
-        src/app/performance_metrics.c src/platform/sdl/host_clock_sdl.c
+        src/platform/sdl/host_clock_sdl.c
         src/sim/sim3d/sim3d.c
         src/sim/voxels/sim_background_voxel_preset.c
         src/sim/sim_render_metadata.c
@@ -2726,16 +2711,6 @@ if(BUILD_TESTING)
         src/sim/world_nav/sim_world_navigation_towns.c
         src/sim/world_nav/sim_world_navigation_capture.c
         src/sim/world_nav/sim_world_navigation_palace.c
-        src/sim/town/sim_town_canvas.c
-        src/sim/town/sim_town_terrain.c
-        src/sim/town/sim_town_layout.c
-        src/sim/voxels/sim_background_voxels.c
-        src/sim/town/sim_structure_visuals.c
-        src/sim/voxels/sim_background_voxel_landmarks.c
-        src/sim/mountains/sim_background_mountains.c
-        src/sim/mountains/sim_background_mountain_silhouette.c
-        src/sim/mountains/sim_background_mountain_relief.c
-        src/sim/voxels/sim_background_voxel_region.c
         src/sim/sim_render_atlas.c
         ${SNESRECOMP_RUNNER_ROOT}/src/runner/runner.c
         ${SNESRECOMP_RUNNER_ROOT}/src/runner/runner_audio_trace.c
@@ -2748,6 +2723,9 @@ if(BUILD_TESTING)
         ${SNESRECOMP_RUNNER_DEVICE_ROOT}/src/snes/ppu.c
         ${SNESRECOMP_RUNNER_SAVELOAD_SOURCE}
     )
+    target_link_libraries(actraiser_ppu_render_pipeline_test PRIVATE
+        actraiser_performance_test_support
+        actraiser_town_model_test_support)
     target_include_directories(actraiser_ppu_render_pipeline_test PRIVATE
         ${CMAKE_SOURCE_DIR}
         ${CMAKE_SOURCE_DIR}/src
@@ -2802,9 +2780,9 @@ if(BUILD_TESTING)
         src/sim/world_nav/sim_world_navigation_scene.c
         src/actraiser/actraiser_sprite_ownership.c
         src/sim/world_nav/sim_world_navigation_towns.c
-        src/sim/voxels/sim_background_voxel_landmarks.c
-        src/sim/town/sim_town_layout.c
     )
+    target_link_libraries(actraiser_scene_inspector_test PRIVATE
+        actraiser_town_model_test_support)
     target_include_directories(actraiser_scene_inspector_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${CMAKE_SOURCE_DIR}/src/dev
@@ -2828,13 +2806,14 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_music_manifest_test
         tests/music_manifest_test.c
-        src/app/performance_metrics.c
         src/replacements/manifest_utils.c
         src/replacements/music_replacements.c
         src/replacements/asset_condition.c
         src/replacements/hd_replacements.c
         third_party/stb/stb_vorbis.c
     )
+    target_link_libraries(actraiser_music_manifest_test PRIVATE
+        actraiser_performance_test_support)
     target_include_directories(actraiser_music_manifest_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${CMAKE_SOURCE_DIR}/third_party/stb
@@ -2886,9 +2865,9 @@ if(BUILD_TESTING)
         tests/regional_profiles_checks.c
         tests/regional_randomizer_checks.c
         tests/regional_session_test.c
-        src/randomizer/randomizer_config.c
-        src/save/save_checkpoint.c
     )
+    target_link_libraries(actraiser_regional_session_test PRIVATE
+        actraiser_campaign_test_support)
     target_link_libraries(actraiser_regional_session_test PRIVATE
         actraiser_regional_rules actraiser_save_test_support)
     target_include_directories(actraiser_regional_session_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
@@ -2901,10 +2880,9 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_regional_campaign_test
         tests/regional_campaign_test.c
-        src/randomizer/randomizer_config.c
-        src/host/campaign_identity.c
-        src/save/save_checkpoint.c
     )
+    target_link_libraries(actraiser_regional_campaign_test PRIVATE
+        actraiser_campaign_test_support)
     target_link_libraries(actraiser_regional_campaign_test PRIVATE
         actraiser_regional_rules actraiser_save_test_support)
     target_include_directories(actraiser_regional_campaign_test PRIVATE
@@ -2916,12 +2894,12 @@ if(BUILD_TESTING)
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_save_paths COMMAND actraiser_save_paths_test)
 
-    get_target_property(AR_SAVE_SLOT_TEST_SOURCES actraiser_regional_campaign_test SOURCES)
-    list(REMOVE_ITEM AR_SAVE_SLOT_TEST_SOURCES tests/regional_campaign_test.c)
     add_executable(actraiser_save_slots_test tests/save_slots_test.c
-        ${AR_SAVE_SLOT_TEST_SOURCES} src/save/save_slots.c src/save/save_slot_manager.c
+        src/save/save_slots.c src/save/save_slot_manager.c
         src/actraiser/regional/actraiser_regional_editor.c
         src/actraiser/regional/actraiser_regional_choices.c)
+    target_link_libraries(actraiser_save_slots_test PRIVATE
+        actraiser_campaign_test_support)
     target_link_libraries(actraiser_save_slots_test PRIVATE
         actraiser_regional_rules actraiser_save_test_support)
     target_include_directories(actraiser_save_slots_test PRIVATE
@@ -2929,15 +2907,15 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_save_slots COMMAND actraiser_save_slots_test)
 
     # Exercise the conversion against the same complete campaign/save stack.
-    get_target_property(AR_POPULATION_TEST_SOURCES actraiser_regional_campaign_test SOURCES)
-    list(REMOVE_ITEM AR_POPULATION_TEST_SOURCES tests/regional_campaign_test.c)
     add_executable(actraiser_population_conversion_test
-        tests/actraiser_population_conversion_test.c ${AR_POPULATION_TEST_SOURCES}
+        tests/actraiser_population_conversion_test.c
         src/actraiser/regional/actraiser_population_conversion.c
         src/actraiser/actraiser_story_snapshot.c src/actraiser/actraiser_town_redevelopment.c
         src/actraiser/actraiser_town_census.c src/actraiser/actraiser_level_goals.c
         src/actraiser/actraiser_cell_map.c
         src/actraiser/cpu_65816_math.c)
+    target_link_libraries(actraiser_population_conversion_test PRIVATE
+        actraiser_campaign_test_support)
     target_link_libraries(actraiser_population_conversion_test PRIVATE
         actraiser_cpu_hle_test_support actraiser_regional_rules actraiser_save_test_support)
     target_include_directories(actraiser_population_conversion_test PRIVATE
@@ -2953,18 +2931,21 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_regional_arrival COMMAND actraiser_regional_arrival_test)
 
     add_executable(actraiser_statue_volley_test tests/actraiser_statue_volley_test.c
-        src/actraiser/actraiser_statue_volley.c
-         src/actraiser/quintet_lzss.c)
+        src/actraiser/actraiser_statue_volley.c)
+    target_link_libraries(actraiser_statue_volley_test PRIVATE
+        actraiser_rom_decode_test_support)
     target_link_libraries(actraiser_statue_volley_test PRIVATE
         actraiser_cpu_hle_test_support actraiser_regional_rules)
     target_include_directories(actraiser_statue_volley_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     add_test(NAME actraiser_statue_volley COMMAND actraiser_statue_volley_test)
 
     add_executable(actraiser_actor_stats_test tests/actraiser_actor_stats_test.c
-        src/randomizer/randomizer.c src/randomizer/randomizer_config.c src/action/action_placements.c
+        src/randomizer/randomizer.c src/action/action_placements.c
         src/actraiser/actraiser_difficulty.c
         src/actraiser/actraiser_actor_stats.c src/actraiser/actraiser_platform_skull.c src/actraiser/actraiser_cast_hold.c
        )
+    target_link_libraries(actraiser_actor_stats_test PRIVATE
+        actraiser_campaign_test_support)
     target_link_libraries(actraiser_actor_stats_test PRIVATE
         actraiser_cpu_hle_test_support actraiser_regional_rules)
     target_include_directories(actraiser_actor_stats_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
@@ -2979,9 +2960,10 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_platform_skull COMMAND actraiser_platform_skull_test)
 
     add_executable(actraiser_difficulty_test tests/actraiser_difficulty_test.c
-        src/actraiser/quintet_lzss.c
         src/actraiser/actraiser_difficulty.c
        )
+    target_link_libraries(actraiser_difficulty_test PRIVATE
+        actraiser_rom_decode_test_support)
     target_link_libraries(actraiser_difficulty_test PRIVATE
         actraiser_cpu_hle_test_support actraiser_regional_rules)
     target_include_directories(actraiser_difficulty_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
@@ -3036,8 +3018,9 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_stage_terrain_test tests/actraiser_stage_terrain_test.c
         src/actraiser/actraiser_stage_terrain.c
-        src/action/action_room_scene.c src/action/action_room_terrain.c src/action/action_room_mosaic.c
-        src/actraiser/quintet_lzss.c)
+        src/action/action_room_scene.c src/action/action_room_terrain.c src/action/action_room_mosaic.c)
+    target_link_libraries(actraiser_stage_terrain_test PRIVATE
+        actraiser_rom_decode_test_support)
     target_link_libraries(actraiser_stage_terrain_test PRIVATE
         actraiser_hle_fatal_test_support actraiser_regional_rules)
     target_include_directories(actraiser_stage_terrain_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
@@ -3095,19 +3078,25 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_regional_mosaic_test tests/actraiser_regional_mosaic_test.c
         src/actraiser/regional/actraiser_regional_mosaic.c
-        src/action/action_room_mosaic.c src/action/action_room_scene.c src/actraiser/quintet_lzss.c)
+        src/action/action_room_mosaic.c src/action/action_room_scene.c)
+    target_link_libraries(actraiser_regional_mosaic_test PRIVATE
+        actraiser_rom_decode_test_support)
     target_link_libraries(actraiser_regional_mosaic_test PRIVATE
         actraiser_hle_fatal_test_support actraiser_regional_rules)
     target_include_directories(actraiser_regional_mosaic_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     add_test(NAME actraiser_regional_mosaic COMMAND actraiser_regional_mosaic_test)
 
     add_executable(randomizer_stats_test tests/randomizer_stats_test.c
-        src/randomizer/randomizer.c src/randomizer/randomizer_config.c src/action/action_placements.c)
+        src/randomizer/randomizer.c src/action/action_placements.c)
+    target_link_libraries(randomizer_stats_test PRIVATE
+        actraiser_campaign_test_support)
     target_include_directories(randomizer_stats_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     add_test(NAME randomizer_stats COMMAND randomizer_stats_test)
 
     add_executable(randomizer_placements_test tests/randomizer_placements_test.c
-        src/randomizer/randomizer.c src/randomizer/randomizer_config.c src/action/action_placements.c)
+        src/randomizer/randomizer.c src/action/action_placements.c)
+    target_link_libraries(randomizer_placements_test PRIVATE
+        actraiser_campaign_test_support)
     target_link_libraries(randomizer_placements_test PRIVATE actraiser_regional_rules)
     target_include_directories(randomizer_placements_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     add_test(NAME randomizer_placements COMMAND randomizer_placements_test)
@@ -3127,16 +3116,18 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_scene_music COMMAND actraiser_scene_music_test)
 
     add_executable(actraiser_boss_rules_test tests/actraiser_boss_rules_test.c
-        src/actraiser/actraiser_boss_rules.c
-         src/actraiser/quintet_lzss.c)
+        src/actraiser/actraiser_boss_rules.c)
+    target_link_libraries(actraiser_boss_rules_test PRIVATE
+        actraiser_rom_decode_test_support)
     target_link_libraries(actraiser_boss_rules_test PRIVATE
         actraiser_cpu_hle_test_support actraiser_regional_rules)
     target_include_directories(actraiser_boss_rules_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     add_test(NAME actraiser_boss_rules COMMAND actraiser_boss_rules_test)
 
     add_executable(actraiser_fire_enemy_test tests/actraiser_fire_enemy_test.c
-        src/actraiser/actraiser_fire_enemy.c
-         src/actraiser/quintet_lzss.c)
+        src/actraiser/actraiser_fire_enemy.c)
+    target_link_libraries(actraiser_fire_enemy_test PRIVATE
+        actraiser_rom_decode_test_support)
     target_link_libraries(actraiser_fire_enemy_test PRIVATE
         actraiser_cpu_hle_test_support actraiser_regional_rules)
     target_include_directories(actraiser_fire_enemy_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
@@ -3144,15 +3135,18 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_tree_attack_test tests/actraiser_tree_attack_test.c
         src/actraiser/actraiser_tree_attack.c
-        src/actraiser/quintet_lzss.c ${SNESRECOMP_RUNNER_ROOT}/src/core/native_leaf.c)
+        ${SNESRECOMP_RUNNER_ROOT}/src/core/native_leaf.c)
+    target_link_libraries(actraiser_tree_attack_test PRIVATE
+        actraiser_rom_decode_test_support)
     target_link_libraries(actraiser_tree_attack_test PRIVATE
         actraiser_hle_fatal_test_support)
     target_include_directories(actraiser_tree_attack_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     add_test(NAME actraiser_tree_attack COMMAND actraiser_tree_attack_test)
 
     add_executable(actraiser_action_motion_test tests/actraiser_action_motion_test.c
-        src/actraiser/actraiser_action_motion.c
-        src/actraiser/quintet_lzss.c)
+        src/actraiser/actraiser_action_motion.c)
+    target_link_libraries(actraiser_action_motion_test PRIVATE
+        actraiser_rom_decode_test_support)
     target_link_libraries(actraiser_action_motion_test PRIVATE
         actraiser_cpu_hle_test_support actraiser_regional_rules)
     target_include_directories(actraiser_action_motion_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
@@ -3185,9 +3179,9 @@ if(BUILD_TESTING)
         src/actraiser/actraiser_town_wait.c
         src/actraiser/actraiser_fishing.c
         src/actraiser/actraiser_native_call.c
-        src/randomizer/randomizer_config.c
-        src/save/save_checkpoint.c
         ${SNESRECOMP_RUNNER_ROOT}/src/support/sha256.c)
+    target_link_libraries(actraiser_regional_runtime_test PRIVATE
+        actraiser_campaign_test_support)
     target_link_libraries(actraiser_regional_runtime_test PRIVATE
         actraiser_cpu_hle_test_support actraiser_regional_rules actraiser_save_test_support)
     target_include_directories(actraiser_regional_runtime_test PRIVATE
@@ -3196,10 +3190,10 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_regional_characterization_test
         tests/regional_characterization_test.c
-        src/randomizer/randomizer_config.c
         src/actraiser/regional/actraiser_regional_choices.c
-        src/save/save_checkpoint.c
         ${SNESRECOMP_RUNNER_ROOT}/src/support/sha256.c)
+    target_link_libraries(actraiser_regional_characterization_test PRIVATE
+        actraiser_campaign_test_support)
     target_link_libraries(actraiser_regional_characterization_test PRIVATE
         actraiser_regional_rules actraiser_save_test_support)
     target_include_directories(actraiser_regional_characterization_test PRIVATE
@@ -3370,7 +3364,9 @@ if(BUILD_TESTING)
     target_include_directories(sim_menu_model_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     add_test(NAME sim_menu_model COMMAND sim_menu_model_test)
     add_executable(sim_menu_help_test tests/sim_menu_help_test.c
-        src/sim/menu/sim_menu_help.c src/localization/unicode_grapheme.c)
+        src/sim/menu/sim_menu_help.c)
+    target_link_libraries(sim_menu_help_test PRIVATE
+        actraiser_text_test_support)
     target_include_directories(sim_menu_help_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     add_test(NAME sim_menu_help COMMAND sim_menu_help_test)
     add_executable(sim_menu_capture_test
@@ -3386,7 +3382,9 @@ if(BUILD_TESTING)
     add_test(NAME sim_menu_art COMMAND sim_menu_art_test)
     add_executable(actraiser_sim_menu_test tests/actraiser_sim_menu_test.c
         src/actraiser/actraiser_sim_menu.c src/sim/menu/sim_menu_model.c
-        src/sim/menu/sim_menu_help.c src/localization/unicode_grapheme.c)
+        src/sim/menu/sim_menu_help.c)
+    target_link_libraries(actraiser_sim_menu_test PRIVATE
+        actraiser_text_test_support)
     target_include_directories(actraiser_sim_menu_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_sim_menu COMMAND actraiser_sim_menu_test)
@@ -3424,11 +3422,10 @@ if(BUILD_TESTING)
         src/actraiser/actraiser_localization_art.c
         src/localization/dialogue_session.c
         src/actraiser/actraiser_dialogue_adapter.c
-        src/localization/language_pack.c src/localization/text_template.c
         src/localization/language_keyboard.c
         src/localization/language_contract.c
-        src/localization/language_row_shape.c
-        ${AR_LOCALIZATION_FRAME_SOURCES})
+        src/localization/language_row_shape.c)
+    target_link_libraries(actraiser_localization_schedule_test PRIVATE actraiser_localization_frame_test_support)
     target_link_libraries(actraiser_localization_schedule_test PRIVATE
         actraiser_regional_rules actraiser_save_test_support)
     target_include_directories(actraiser_localization_schedule_test PRIVATE
@@ -3528,11 +3525,10 @@ if(BUILD_TESTING)
         src/platform/sdl/diorama_frame_generation_sdl.c
         src/present/presentation_frame_generation.c
         src/platform/sdl/presentation_geometry_sdl.c
-        src/render/render_device.c
         src/render/presentation_layout.c
-        src/platform/sdl/render_sdl.c
-        src/app/performance_metrics.c
     )
+    target_link_libraries(actraiser_diorama_frame_generation_test PRIVATE
+        actraiser_render_sdl_test_support)
     target_include_directories(actraiser_diorama_frame_generation_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
@@ -3557,15 +3553,13 @@ if(BUILD_TESTING)
     add_executable(actraiser_sim3d_depth_pass_gpu_test
         src/sim/sim3d/sim3d_mesh_set.c
         tests/sim3d_depth_pass_gpu_test.c
-        src/render/scene3d_math.c
         src/sim/world_nav/present_world_nav_geometry.c
-        src/render/render_device.c
-        src/platform/sdl/render_sdl.c
         src/platform/sdl/sim3d_depth_pass_sdl.c
         src/platform/sdl/sim3d_depth_pass_pipelines_sdl.c
         src/platform/sdl/sim3d_depth_pass_meshes_sdl.c
-        src/app/performance_metrics.c
     )
+    target_link_libraries(actraiser_sim3d_depth_pass_gpu_test PRIVATE
+        actraiser_render_sdl_test_support actraiser_scene_math_test_support)
     target_include_directories(actraiser_sim3d_depth_pass_gpu_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/tests/support)
     target_compile_definitions(actraiser_sim3d_depth_pass_gpu_test PRIVATE
@@ -3581,25 +3575,21 @@ if(BUILD_TESTING)
     # Opt-in architectural benchmark; not used by shipping game views.
     add_executable(actraiser_model_projection_benchmark
         tools/benchmark_model_projection.c
-        src/render/scene3d_math.c
         src/sim/world_nav/present_world_nav_geometry.c
-        src/render/render_device.c
-        src/platform/sdl/render_sdl.c
         src/platform/sdl/sim3d_depth_pass_sdl.c
         src/platform/sdl/sim3d_depth_pass_pipelines_sdl.c
         src/platform/sdl/sim3d_depth_pass_meshes_sdl.c
         src/platform/sdl/parallel_work_sdl.c
         src/platform/sdl/host_clock_sdl.c
-        src/app/performance_metrics.c
         src/sim/voxels/sim_background_voxel_model_cache.c
-        src/sim/voxels/sim_background_voxel_models.c
-        src/sim/voxels/sim_background_voxel_region.c
         src/sim/voxels/sim_background_voxel_lighting.c
         src/sim/voxels/sim_background_voxel_surface.c
         src/sim/voxels/sim_background_voxel_biome.c
         src/sim/voxels/sim_background_voxel_palette.c
         src/sim/voxels/sim_background_voxel_proportions.c
         src/sim/world_nav/sim_world_navigation_globe.c)
+    target_link_libraries(actraiser_model_projection_benchmark PRIVATE
+        actraiser_render_sdl_test_support actraiser_scene_math_test_support actraiser_town_model_test_support)
     target_include_directories(actraiser_model_projection_benchmark PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/tests/support ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     target_compile_definitions(actraiser_model_projection_benchmark PRIVATE
@@ -3755,10 +3745,11 @@ if(BUILD_TESTING)
     # binary also accepts an optional local ROM path for a 98-source census.
     add_executable(actraiser_diorama_rom_backdrop_test
         tests/diorama_rom_backdrop_test.c
-        src/actraiser/quintet_lzss.c
         src/action/action_room_scene.c
         src/diorama/diorama_rom_backdrop.c
     )
+    target_link_libraries(actraiser_diorama_rom_backdrop_test PRIVATE
+        actraiser_rom_decode_test_support)
     target_include_directories(actraiser_diorama_rom_backdrop_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${CMAKE_SOURCE_DIR}/src/diorama
@@ -3772,8 +3763,9 @@ if(BUILD_TESTING)
     # truncation, and the native scratch metadata without requiring the ROM.
     add_executable(actraiser_quintet_lzss_test
         tests/quintet_lzss_test.c
-        src/actraiser/quintet_lzss.c
     )
+    target_link_libraries(actraiser_quintet_lzss_test PRIVATE
+        actraiser_rom_decode_test_support)
     target_include_directories(actraiser_quintet_lzss_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
     )
@@ -3784,9 +3776,10 @@ if(BUILD_TESTING)
     # bytes plus all caller-visible DP scratch, registers, and RTL stack pop.
     add_executable(actraiser_lzss_hle_test
         tests/actraiser_lzss_hle_test.c
-        src/actraiser/quintet_lzss.c
         src/actraiser/actraiser_lzss.c
     )
+    target_link_libraries(actraiser_lzss_hle_test PRIVATE
+        actraiser_rom_decode_test_support)
     target_link_libraries(actraiser_lzss_hle_test PRIVATE
         actraiser_hle_fatal_test_support)
     target_include_directories(actraiser_lzss_hle_test PRIVATE
@@ -3838,8 +3831,9 @@ if(BUILD_TESTING)
         # ManualTurn_SheetExtents solves the sheet's world extents by probing the
         # projection, so the module depends on scene3d_math -- the one place the
         # settled page and the turning leaf are guaranteed to agree.
-        src/render/scene3d_math.c
     )
+    target_link_libraries(actraiser_manual_pages_test PRIVATE
+        actraiser_scene_math_test_support)
     target_include_directories(actraiser_manual_pages_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${CMAKE_SOURCE_DIR}/src/manual
@@ -3857,8 +3851,9 @@ if(BUILD_TESTING)
         src/manual/manual_caption.c
         src/localization/ui_catalog.c
         src/localization/interface_text.c
-        src/localization/unicode_grapheme.c
     )
+    target_link_libraries(actraiser_manual_input_test PRIVATE
+        actraiser_text_test_support)
     target_include_directories(actraiser_manual_input_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${CMAKE_SOURCE_DIR}/src/manual

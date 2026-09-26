@@ -236,8 +236,8 @@ static void CommitLayerPalette(const DioramaEditorRow *row, bool reset, uint8_t 
     if (plane) {
       DioramaLayerEditor_ClearParam(plane, kDioramaEditorParam_TransparentFill);
       LayerPruneEmptySection(row);
-      LayerSaveEdit();
       SettingsOverlay_SetStatus(Ui("overlay.status.fill_cleared"));
+      LayerSaveEdit();
     } else {
       SettingsOverlay_SetStatus(Ui("overlay.status.inherited"));
     }
@@ -250,8 +250,8 @@ static void CommitLayerPalette(const DioramaEditorRow *row, bool reset, uint8_t 
   plane->set_transparent_fill = true;
   plane->transparent_fill_kind = kDioramaTransparentFill_Cgram;
   plane->transparent_fill_cgram = index;
-  LayerSaveEdit();
   SettingsOverlay_SetStatus(Ui("overlay.status.fill_applied"));
+  LayerSaveEdit();
 }
 
 static bool LayerOpenPalette(const DioramaEditorRow *row) {

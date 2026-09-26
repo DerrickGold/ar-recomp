@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -115,8 +116,8 @@ func TestRegionalDescriptionStructure(t *testing.T) {
 
 func TestGeneratedCAndExplicitOverlayKeys(t *testing.T) {
 	root := filepath.Join("..", "..", "..")
-	// Key the skip on the game source manifest, not on one source file, so a
-	// moved file fails the read below instead of silently skipping the test.
+	// Only standalone Go trees skip this contract. In a full checkout, missing
+	// game source directories must fail the scan below instead of skipping it.
 	if _, err := os.Stat(filepath.Join(root, "snesbuild.ini")); os.IsNotExist(err) {
 		t.Skip("standalone Go source tree")
 	}
@@ -132,17 +133,32 @@ func TestGeneratedCAndExplicitOverlayKeys(t *testing.T) {
 	for _, entry := range entries {
 		keys[entry.Key] = true
 	}
-	for _, file := range []string{
-		"settings_overlay/settings_overlay.c", "settings_overlay/settings_overlay_localization.c",
-		"settings_overlay/settings_overlay_layers_localization.c",
-		"settings_overlay/regional/regional_ui.c", "settings_overlay/regional/regional_menu.c",
-		"manual/manual_caption.c",
-	} {
+	// Scan feature directories too, so moving menu ownership does not leave
+	// newly extracted commands or presentation outside catalog validation.
+	files := []string{"manual/manual_caption.c"}
+	err = filepath.WalkDir(filepath.Join(root, "src", "settings_overlay"), func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !entry.IsDir() && filepath.Ext(path) == ".c" {
+			file, err := filepath.Rel(filepath.Join(root, "src"), path)
+			if err != nil {
+				return err
+			}
+			files = append(files, file)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyPattern := regexp.MustCompile(`"((?:overlay|common|setting)\.[a-z0-9_.]+)"`)
+	for _, file := range files {
 		data, err := os.ReadFile(filepath.Join(root, "src", file))
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, match := range regexp.MustCompile(`"((?:overlay|common|setting)\.[a-z0-9_.]+)"`).FindAllSubmatch(data, -1) {
+		for _, match := range keyPattern.FindAllSubmatch(data, -1) {
 			if !keys[string(match[1])] {
 				t.Errorf("%s references missing catalog key %s", file, match[1])
 			}
