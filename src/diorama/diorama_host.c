@@ -15,6 +15,20 @@
 
 bool g_diorama_frame_active;
 
+static DioramaCameraObserver s_camera_observer = DIORAMA_CAMERA_OBSERVER_INIT;
+
+void DioramaCamera_CaptureFrame(DioramaCameraFrame *frame, int elapsed_ticks) {
+  Diorama_CaptureCameraPresentationState(&frame->controls);
+  frame->reactive_strength = g_settings.diorama_reactive_strength;
+  const DioramaCameraObservation input = {
+    .velocity_x = (int16_t)ActRaiser_ReadWram16(kActRaiserWram_PlayerVelocityX),
+    .velocity_y = (int16_t)ActRaiser_ReadWram16(kActRaiserWram_PlayerVelocityY),
+    .hp = g_ram[kActRaiserWram_PlayerHp],
+    .boost = g_ram[kActRaiserWram_PlayerBoost] != 0,
+  };
+  frame->motion = DioramaCamera_Observe(&s_camera_observer, &input, elapsed_ticks);
+}
+
 /* The single diorama gate: capture and rendering both call this definition, so
  * mode and map-group policy cannot drift apart. The renderer capability that
  * used to be a third term here is gone: the PPU has one path now, so it was

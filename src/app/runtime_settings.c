@@ -1,6 +1,8 @@
 #include "snesrecomp/support/utf8_fs.h"
 
 #include "app/runtime_settings.h"
+#include "audio/audio_session.h"
+#include "host/host_localization.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -9,23 +11,18 @@
 #include <SDL3/SDL.h>
 
 #include "actraiser/actraiser_rtl.h"
-#include "actraiser/actraiser_localization_runtime.h"
 #include "diorama/diorama.h"
 #include "present/display_geometry.h"
-#include "host/host_audio.h"
 #include "dev/debug_state.h"
 #include "dev/host_dev_tools.h"
 #include "randomizer/randomizer.h"
 #include "host/host_display.h"
 #include "host/host_input.h"
 #include "manual/manual_reader.h"
-#include "replacements/music_replacements.h"
-#include "audio/native_audio_mixer.h"
 #include "save/save_system.h"
 #include "app/session_fatal.h"
 #include "settings_overlay/settings_overlay.h"
 #include "app/user_data_dir.h"
-#include "host/host_video.h"
 #include "present/presentation_textures.h"
 
 static RuntimeLifecycleRequest s_lifecycle_request;
@@ -279,71 +276,16 @@ static void OnRuntimeSettingChanged(const SettingDesc *desc,
                                     SettingChangeResult result) {
   (void)result;
 
-  if (desc->category == kSettingCat_Localization)
-    ActRaiserLocalizationRuntime_ApplySettings();
-
-  if (desc->field == &g_settings.audio_master_volume)
-    HostAudio_SetMasterVolumePercent(g_settings.audio_master_volume);
-  if (desc->field == &g_settings.audio_music_volume ||
-      desc->field == &g_settings.audio_sfx_volume)
-    NativeAudioMixer_ApplySettings();
-  if (desc->field == &g_settings.audio_enabled)
-    (void)HostAudio_SetEnabled(g_settings.audio_enabled);
-  if (desc->field == &g_settings.music_replacements)
-    MusicReplacements_ApplySetting();
-  if (desc->field == &g_settings.scene_inspector &&
-      !g_settings.scene_inspector)
-    HostInput_CloseInspectorSelection();
-  if (desc->field == &g_settings.window_mode && g_window) {
-    HostDisplay_ApplyWindowMode();
-    HostDisplay_UpdateProperties();
-    HostDisplay_ApplyWindowScale();
-  }
-  if ((desc->field == &g_settings.refresh_mode ||
-       desc->field == &g_settings.uncapped_framerate) && g_window)
-    HostDisplay_ApplyRefreshVsync();
-  if (desc->field == &g_settings.extended_aspect ||
-      desc->field == &g_settings.pixel_aspect ||
-      desc->field == &g_settings.ignore_aspect_ratio) {
-    HostDisplay_ResolveVideoGeometry(true);
-    HostInput_RequestPausedRedraw();
+  /* Owners interpret their own fields; this is only the application wiring.
+   * A geometry edit is disjoint from the camera/texture edits, and display
+   * invalidation still follows successful subsystem updates. */
+  HostLocalization_ApplySetting(desc);
+  AudioSession_ApplySetting(desc);
+  HostInput_ApplySetting(desc);
+  Diorama_ApplySetting(desc);
+  if (!PresentationTextures_ValidateSetting(desc))
     return;
-  }
-  if (desc->field == &g_settings.diorama_tilt_x_mrad ||
-      desc->field == &g_settings.diorama_tilt_y_mrad ||
-      desc->field == &g_settings.diorama_distance_x100)
-    Diorama_SeedCameraFromSettings();
-  if (g_settings.sim3d_mode &&
-      (desc->field == &g_settings.sim3d_mode ||
-       desc->field == &g_settings.sim3d_object_billboards)) {
-    if (!g_sim3d_textures_ready) {
-      SessionFatal_Request(
-          "Simulation town 3D was selected, but its core renderer textures "
-          "are unavailable. Restart after checking graphics memory and driver "
-          "stability, or leave Simulation town 3D disabled.");
-      return;
-    } else if (g_settings.sim3d_object_billboards &&
-               !g_sim3d_billboard_renderer_ready) {
-      SessionFatal_Request(
-          "Simulation object billboards were selected, but their renderer "
-          "atlas is unavailable. Restart after checking graphics memory and "
-          "driver stability, or leave object billboards disabled.");
-      return;
-    }
-  }
-  if (desc->field == &g_settings.window_scale)
-    HostDisplay_ApplyWindowScale();
-  else if (desc->field == &g_settings.display_mode ||
-           desc->category == kSettingCat_Widescreen)
-    HostDisplay_ApplyWindowScale();
-  if (desc->category == kSettingCat_Display ||
-      desc->category == kSettingCat_Localization ||
-      desc->category == kSettingCat_LocalizationFont ||
-      desc->category == kSettingCat_Widescreen ||
-      Settings_CategoryIsSim3D(desc->category))
-    HostInput_RequestPausedRedraw();
-
-  HostDisplay_InvalidatePresentHistory();
+  HostDisplay_ApplySetting(desc);
 }
 
 void RuntimeSettings_Install(void) {

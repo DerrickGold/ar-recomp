@@ -5,24 +5,16 @@
 #include <string.h>
 #include <stdint.h>
 #include <stdbool.h>
-#include <signal.h>
 #include <errno.h>
-#include <limits.h>
-#include <math.h>
 #include <SDL3/SDL.h>
 
 #ifdef _WIN32
 #include <SDL3/SDL_main.h> /* SDL supplies UTF-8 argv from the wide command line. */
 #include <process.h>
-#include <direct.h>
-#include <sys/stat.h>
-#define mkdir(path, mode) sr_mkdir(path)
 #else
-#include <sys/stat.h>
 #include <unistd.h>
 #endif
 
-#include "action/action_obj_apron.h"
 #include "actraiser/actraiser_action_bg.h"
 #include "actraiser/actraiser_localization_runtime.h"
 #include "actraiser_game.h"
@@ -31,59 +23,46 @@
 #include "app/config.h"
 #include "constants.h"
 #include "render/crt_post.h"
+#include "dev/dev_automation.h"
 #include "dev/host_dev_tools.h"
 #include "dev/native_audio_trace.h"
 #include "dev/oracle_trace.h"
-#include "dev/scene_inspector.h"
 #include "dev/sfx_census.h"
 #include "diorama/diorama.h"
 #include "diorama/diorama_frame_generation.h"
 #include "diorama/diorama_performance.h"
 #include "present/display_geometry.h"
 #include "app/forced_input.h"
-#include "present/frame_slot.h"
 #include "replacements/hd_replacement_host.h"
-#include "host/font_resources.h"
-#include "host/regional_media_files.h"
 #include "actraiser/regional/actraiser_regional_media.h"
 #include "actraiser/regional/actraiser_actor_art.h"
-#include "host/host_audio.h"
+#include "audio/audio_session.h"
 #include "host/host_display.h"
 #include "host/host_display_pacing.h"
 #include "host/host_frame_surfaces.h"
 #include "host/host_input.h"
+#include "host/host_localization.h"
 #include "host/host_video.h"
-#include "host/parallel_work.h"
 #include "app/ini_upgrade_apply.h"
 #include "app/input_map.h"
 #include "app/input_replay.h"
-#include "localization/language_pack.h"
-#include "localization/pack_discovery.h"
 #include "manual/manual_reader.h"
-#include "replacements/music_replacements.h"
-#include "audio/native_audio_extension.h"
-#include "audio/native_audio_mixer.h"
 #include "app/performance_metrics.h"
 #include "platform/sdl/font_coverage_cli.h"
-#include "platform/sdl/render_sdl.h"
-#include "platform/sdl/settings_persistence_sdl.h"
+#include "app/settings_session.h"
 #include "platform/sdl/text_preview_cli.h"
-#include "platform/sdl/text_rasterizer_sdl.h"
 #include "app/portable_paths.h"
 #include "present/present.h"
 #include "present/presentation_frame_generation.h"
 #include "present/presentation_textures.h"
-#include "render/localized_text_presenter.h"
 #include "present/render_comparison.h"
 #include "present/render_preparation.h"
 #include "app/run_dir.h"
 #include "app/runtime_diagnostics.h"
 #include "app/runtime_settings.h"
 #include "save/save_system.h"
-#include "save/save_slot_manager.h"
+#include "save/save_slot_host.h"
 #include "save/save_paths.h"
-#include "randomizer/randomizer.h"
-#include "host/campaign_identity.h"
 #include "actraiser/regional/actraiser_regional_runtime.h"
 #include "app/scheduled_settings.h"
 #include "app/session_fatal.h"
@@ -91,16 +70,12 @@
 #include "app/settings.h"
 #include "settings_overlay/settings_overlay.h"
 #include "sim/sim3d/sim3d.h"
-#include "sim/sim3d/sim3d_depth_pass.h"
-#include "sim/voxels/sim_background_voxels.h"
 #include "sim/sim_phase0_trace.h"
-#include "sim/sim_render_atlas.h"
+#include "sim/sim_frame_capture.h"
 #include "sim/sim_render_metadata.h"
-#include "sim/town/sim_town_canvas.h"
 #include "sim/town/sim_town_ground_art.h"
 #include "sim/sim_world_map.h"
 #include "sim/sim_world_map_build.h"
-#include "sim/world_nav/sim_world_navigation_capture.h"
 #include "snesrecomp/game/bootstrap.h"
 #include "snesrecomp/game/cpu.h"
 #include "snesrecomp/game/generated_support.h"
@@ -114,12 +89,9 @@
 
 static const char kWindowTitle[] = "ActRaiser (Recompiled)";
 enum {
-  kDefaultPowerOnWramFill = 0x55,
   kDefaultPowerOnSramFill = 0x60,
   kUninitializedEnvironmentOption = -2,
   kPerformanceReportIntervalMs = kMillisecondsPerSecond,
-  kPowerOnGameFrameSentinel =
-      kDefaultPowerOnWramFill | (kDefaultPowerOnWramFill << 8),
 };
 /* Reverse-domain app identifier: compositors key window grouping and icon
  * lookup off this, and a shipped .desktop file must share its basename. */
@@ -144,31 +116,6 @@ static bool SettingsOverlayLiveCgram(
   memcpy(out_cgram, cgram.data,
          sizeof(uint16_t) * kSettingsOverlayLayerPaletteEntries);
   return true;
-}
-
-static bool CaptureTownCanvasPpuView(SrPpuStateSnapshot *ppu,
-                                     SrBorrowedU16Span *vram,
-                                     SrBorrowedU16Span *cgram) {
-  const SnesRunnerApi *api = sr_runner_get_api(SR_RUNNER_ABI_VERSION);
-  SrRunnerHandle *runner = RtlGameRunner();
-  const uint64_t required_caps =
-      SR_RUNNER_CAP_PPU_STATE | SR_RUNNER_CAP_BORROWED_U16_SPANS;
-  if (!api || !runner || !ppu || !vram || !cgram ||
-      api->struct_size < SNES_RUNNER_API_PPU_STATE_SIZE ||
-      (api->capabilities & required_caps) != required_caps)
-    return false;
-  *ppu = (SrPpuStateSnapshot){.struct_size = sizeof(*ppu)};
-  *vram = (SrBorrowedU16Span){.struct_size = sizeof(*vram)};
-  *cgram = (SrBorrowedU16Span){.struct_size = sizeof(*cgram)};
-  return api->query_ppu_state(runner, ppu) == SR_RESULT_OK &&
-      api->borrow_u16_memory(runner, SR_MEMORY_VRAM, vram) ==
-             SR_RESULT_OK &&
-      api->borrow_u16_memory(runner, SR_MEMORY_CGRAM, cgram) ==
-             SR_RESULT_OK &&
-      vram->element_count >= SR_PPU_VRAM_WORD_COUNT &&
-      cgram->element_count >= SR_PPU_CGRAM_WORD_COUNT &&
-      vram->lifetime_generation == ppu->lifetime_generation &&
-      cgram->lifetime_generation == ppu->lifetime_generation;
 }
 
 static ArUiLocale RecoveryLocale(void) {
@@ -390,22 +337,6 @@ static void RunOneEmulatedTick(bool *stop_running) {
  * one-tick-per-iteration cadence (§3.6):
  * pure headless skips submission, while headless-video submits that tick to
  * its unpaced hidden compositor. */
-/* Producer-side work is owned here, not by the pure SIM classifier or the
- * render backend. This group is independent of presentation's helpers; both
- * stages synchronously join, so their jobs cannot oversubscribe one another. */
-static HostParallelWork *s_town_pixel_work;
-static bool s_town_pixel_work_attempted;
-
-static void DispatchTownPixelRows(void *context, size_t count,
-    SimBackgroundRowRange range, void *work) {
-  (void)context;
-  if (!s_town_pixel_work_attempted) {
-    s_town_pixel_work_attempted = true;
-    s_town_pixel_work = HostParallelWork_Create(3);
-  }
-  HostParallelWork_Run(s_town_pixel_work, count, 64, range, work);
-}
-
 static void DrawAndPresentFrame(HostDisplayPresentMode present_mode,
                                 float alpha) {
   static int perf_on = -1;
@@ -417,95 +348,11 @@ static void DrawAndPresentFrame(HostDisplayPresentMode present_mode,
   if (Diorama_IsActiveThisFrame())
     host_post_performance =
         DioramaPerformance_Begin(kDioramaPerformance_HostPost);
-  /* Own the developed world tilemap instead of observing $7E:C000, which acts
-   * and towns both reuse as unrelated scratch. This runs only on the game
-   * thread, after an emulated tick reached a stable frame boundary. */
-  PerformanceScope pipeline = PerformanceMetrics_Begin(kPerformance_WorldMap);
-  SimWorldMap_BuildIfNeeded(
-      g_settings.sim3d_world_navigation && g_settings.sim3d_sky_palace);
-  PerformanceMetrics_End(pipeline);
   /* This annotation is reused by frame submission after the host work below. */
   SimFrameData sim;
-  pipeline = PerformanceMetrics_Begin(kPerformance_Metadata);
-  {
-    SimPhase0Trace_Frame((uint32)snes_frame_counter, g_ram,
-                         RtlGameRunner());
-    SimRenderMetadata_CaptureFrame(
-        &sim, g_ram, g_settings.sim3d_mode,
-        g_settings.sim3d_world_navigation,
-        Settings_Sim3DRequestedFeatures(),
-        g_settings.sim3d_diagnostic_layers, Sim3D_ImplementedFeatures());
-    SimRenderMetadata_CaptureSkyPalaceFrame(&sim, g_ram,
-        g_settings.sim3d_world_navigation && g_settings.sim3d_sky_palace);
-    Sim3DTuning tuning = BuildSim3DTuning();
-    Sim3D_AnnotateFrame(&sim, &tuning);
-    SimWorldNavigationCapture_Capture(&sim, RtlGameRunner());
-    PerformanceMetrics_End(pipeline);
-    pipeline = PerformanceMetrics_Begin(kPerformance_TownCanvas);
-    /* This site runs for every drawn frame, including headless runs that never
-     * call HostDisplay_SubmitFrame or FrameSlot_Capture. */
-    SrPpuStateSnapshot town_ppu;
-    SrBorrowedU16Span town_vram;
-    SrBorrowedU16Span town_cgram;
-    const bool have_town_ppu_view =
-        Sim3D_TownCanvasNeedsPpuView(&sim) &&
-        CaptureTownCanvasPpuView(&town_ppu, &town_vram, &town_cgram);
-    Sim3D_RenderTownCanvas(
-        &sim, g_ram,
-        have_town_ppu_view ? &town_ppu : NULL,
-        have_town_ppu_view ? &town_vram : NULL,
-        have_town_ppu_view ? &town_cgram : NULL,
-        DispatchTownPixelRows, NULL);
-    sim.town_canvas_serial = SimTownCanvas_Serial();
-    sim.background_voxel_serial = SimBackgroundVoxels_Serial();
-    PerformanceMetrics_End(pipeline);
-    Sim3D_LogViewTransition(&sim);
-    SceneInspector_SetSimFrameData(&sim);
-    /* g_pixels is bound apron-wide; offset past the apron so the trace sees
-     * the authentic frame at column 0, as it always has. */
-    const size_t trace_pitch =
-        ActionApron_SurfacePitch(g_snes_width, SR_PPU_OBJ_APRON);
-    if (trace_pitch <= INT_MAX) {
-      SimRenderMetadata_TraceFrame(
-          (uint32)snes_frame_counter, &sim,
-          g_pixels + ActionApron_DisplayOffset(SR_PPU_OBJ_APRON),
-          g_snes_width, g_snes_height, (int)trace_pitch);
-    }
-  }
-  /* AR_DIORAMA_DUMP_GF=<gf>[,<gf>...]: arm the Shift+D layer dump from a replay
-   * instead of the keyboard, so a diorama frame can be inspected headlessly.
-   * The PNGs keep the captured ALPHA, which is what makes F4's half-add
-   * annotation verifiable without looking at the screen. Same shape as
-   * AR_VRAMDUMP_GF. */
-  {
-    static const char *dump_list = NULL;
-    static bool dump_list_read;
-    static unsigned last_dumped_gf = (unsigned)-1;
-    if (!dump_list_read) {
-      dump_list_read = true;
-      dump_list = getenv("AR_DIORAMA_DUMP_GF");
-    }
-    if (dump_list && dump_list[0]) {
-      const unsigned gf = ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
-      if (gf != last_dumped_gf) {
-        for (const char *at = dump_list; at && *at;) {
-          if ((unsigned)strtoul(at, NULL, 0) == gf) {
-            last_dumped_gf = gf;
-            g_diorama_dump_pending = true;
-            break;
-          }
-          const char *comma = strchr(at, ',');
-          at = comma ? comma + 1 : NULL;
-        }
-      }
-    }
-  }
-  if (g_diorama_dump_pending) {
-    HostDevTools_DumpDioramaLayers();
-    g_diorama_dump_pending = false;
-    if (!g_settings.diorama_mode)
-      ActRaiser_RebindPpuOutputSurfaces();
-  }
+  SimFrameCapture_Produce(&sim);
+  DevAutomation_ArmScheduledDioramaDump();
+  HostDevTools_ServiceDioramaDump();
   DioramaPerformance_End(host_post_performance);
   HostInput_MarkFrameDrawn();
   if (perf_on) {
@@ -533,90 +380,7 @@ static void DrawAndPresentFrame(HostDisplayPresentMode present_mode,
     }
   }
 
-  /* Framebuffer capture to PPM (works headless — g_pixels is always populated).
-   * AR_SHOT_AT_GF=N      : one shot to saves/shot.ppm at game-frame >= N.
-   * AR_SHOT_EVERY=N      : a SERIES — saves/shot_<gf>.ppm every N game-frames,
-   *   optionally bounded by AR_SHOT_FROM / AR_SHOT_TO. Lets us compare steady
-   *   state vs bug state frame by frame.
-   * AR_SHOT_REQUIRE_COMPOSITE=1: fail the run instead of using raw PPU fallback. */
-  {
-    static bool schedule_initialized;
-    static bool shot_done;
-    static bool shot_at_enabled;
-    static bool shot_series_enabled;
-    static unsigned shot_at;
-    static unsigned shot_every;
-    static unsigned shot_from;
-    static unsigned shot_to;
-    if (!schedule_initialized) {
-      /* The parse is gated by the local pointer, never by the static that
-       * recorded the test: a static is shared storage, and only the pointer
-       * itself is evidence that it is safe to dereference. */
-      const char *value = getenv("AR_SHOT_AT_GF");
-      shot_at_enabled = false;
-      shot_at = 0u;
-      if (value && value[0]) {
-        shot_at_enabled = true;
-        shot_at = (unsigned)strtoul(value, NULL, 0);
-      }
-      value = getenv("AR_SHOT_EVERY");
-      shot_series_enabled = false;
-      shot_every = 0u;
-      if (value && value[0]) {
-        shot_series_enabled = true;
-        shot_every = (unsigned)strtoul(value, NULL, 0);
-        if (!shot_every) shot_every = 1u;
-      }
-      value = getenv("AR_SHOT_FROM");
-      shot_from = value ? (unsigned)strtoul(value, NULL, 0) : 0u;
-      value = getenv("AR_SHOT_TO");
-      shot_to = value
-          ? (unsigned)strtoul(value, NULL, 0) : UINT_MAX;
-      schedule_initialized = true;
-    }
-    const unsigned gf =
-        ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
-    int want = 0;
-    char fname[320];
-    fname[0] = 0;
-    if (shot_at_enabled && !shot_done && gf >= shot_at) {
-      shot_done = true;
-      want = 1;
-      RunDirFile(fname, sizeof(fname), "shot.ppm");
-    } else if (shot_series_enabled && gf >= shot_from && gf <= shot_to &&
-               (gf % shot_every) == 0) {
-      want = 1;
-      RunDirFile(fname, sizeof(fname), "shot_%u.ppm", gf);
-    }
-    if (want) {
-      const char *strict = getenv("AR_SHOT_REQUIRE_COMPOSITE");
-      const bool require_composite = strict && strict[0] && strcmp(strict, "0");
-      FILE *pf = sr_fopen(fname, "wb");
-      if (pf) {
-        DevToolsCaptureResult shot_size =
-            HostDevTools_WriteFramebufferPpm(pf, require_composite);
-        const bool closed = fclose(pf) == 0;
-        if (!closed) shot_size.kind = kDevToolsCapture_Failed;
-        if (shot_size.kind == kDevToolsCapture_Failed) {
-          fprintf(stderr, "[shot] capture=failed path=%s\n", fname);
-          if (require_composite)
-            SessionFatal_Request("Required final-composite screenshot could not be captured.");
-        }
-        int margin_left = 0;
-        int margin_right = 0;
-        ActRaiser_LiveMargins(&margin_left, &margin_right);
-        fprintf(stderr, "[shot] %s at gf=%u (%dx%d) margins=%d/%d mode=%s capture=%s\n",
-                fname, gf, shot_size.width, shot_size.height,
-                margin_left, margin_right,
-                Settings_DisplayModeName(g_settings.display_mode),
-                DevToolsCaptureKind_Name(shot_size.kind));
-      } else {
-        fprintf(stderr, "[shot] capture=failed cannot open %s\n", fname);
-        if (require_composite)
-          SessionFatal_Request("Required screenshot file could not be opened.");
-      }
-    }
-  }
+  DevAutomation_CaptureScheduledScreenshot();
 
   if (present_mode != kHostDisplayPresent_None) {
     (void)HostDisplay_SubmitFrame(present_mode, alpha, &sim);
@@ -628,342 +392,24 @@ static void DrawAndPresentFrame(HostDisplayPresentMode present_mode,
  * host presentation can outpace emulation (dramatically in Unlimited), and
  * multiplying SRAM scans or host/APU policy checks by presentation throughput
  * both wastes work and contaminates the rendering measurement. */
-static SettingsPersistence *s_settings_writer;
-static SaveSlots s_save_slots;
-static bool s_managed_slots;
-
-static bool SlotValidateActive(void *context,SaveError *error);
-static bool SlotBeforeCommit(void *context,SaveError *error) {
-  SaveSlots *slots=context;
-  if(slots->records[slots->active].checkpoint_required &&
-      slots->records[slots->active].ever_saved && !slots->first_write_in_progress &&
-      !SlotValidateActive(context,error))return false;
-  return SaveSlots_BeforeCommit(context,error);
-}
-static void SlotDidCommit(void *context,const uint8_t *image) {
-  SaveSlots_DidCommit(context,image);
-}
-static bool SlotValidateActive(void *context,SaveError *error) {
-  SaveSlots *slots = context;
-  SaveSlotDetails details;
-  if(!SaveSlots_ObserveCheckpoints(slots,error))return false;
-  if(SaveSlotManager_Inspect(slots,slots->active,&details))return true;
-  if (error) *error = details.error;
-  return false;
-}
-static bool SlotScan(SaveSlotCollection *out) {
-  if(!out)return false;
-  *out=(SaveSlotCollection){.active=s_save_slots.active,
-    .writable=s_managed_slots && InputReplay_PolicyChangesAllowed() && !s_save_slots.pending};
-  if(!s_managed_slots) {
-    snprintf(out->error.message, sizeof(out->error.message),
-             "External save: slot switching is unavailable for diagnostic paths and recordings.");
-    for(unsigned i=0;i<kSaveSlotCount;++i)out->slots[i].state=kSaveSlot_Unavailable;
-    return true;
-  }
-  if (!out->writable)
-    snprintf(out->error.message, sizeof(out->error.message),
-             "Save slots are read-only during recording, replay or a pending restart.");
-  for (unsigned i = 0; i < kSaveSlotCount; ++i)
-    (void)SaveSlotManager_Inspect(&s_save_slots, i, &out->slots[i]);
-  return true;
-}
-static bool SlotDraft(unsigned slot,ArRegionalSession *out,SaveError *error) {
-  if(!s_managed_slots || slot>=kSaveSlotCount) {
-    snprintf(error->message, sizeof(error->message), "This save slot is unavailable.");
-    return false;
-  }
-  if(s_save_slots.records[slot].prepared)
-    return SaveSlotManager_ReadDraft(&s_save_slots,slot,out,error);
-  uint8_t id[16];
-  if(!HostCampaignIdentity_Create(NULL,id)) {
-    snprintf(error->message, sizeof(error->message), "Cannot create a new campaign identity.");
-    return false;
-  }
-  ActRaiserRegionalRulesView current;
-  ArRegionalSession baseline;
-  const ArRegionalCostPolicy costs={{0}};
-  if(!ArRegionalSession_NewGame(&baseline,slot,id,&costs))return false;
-  const ArRegionalRules *rules =
-      ActRaiserRegional_CopyRulesView(&current) ? &current.requested : &baseline.requested;
-  RandomizerConfig recipe=Randomizer_CurrentConfig();
-  if(!SaveSlotManager_Draft(out,slot,id,rules,&recipe)) {
-    snprintf(error->message, sizeof(error->message), "Cannot prepare this new-game setup.");
-    return false;
-  }
-  return true;
-}
-static bool SlotDraftView(const ArRegionalSession *draft,ActRaiserRegionalRulesView *out) {
-  if(!SaveSlotManager_View(draft,true,out))return false;
-  ActRaiserRegionalRulesView current;
-  if(ActRaiserRegional_CopyRulesView(&current)) {
-    out->artwork_available = current.artwork_available;
-    out->sequences_available = current.sequences_available;
-    out->actor_artwork_available=current.actor_artwork_available;
-  }
-  return true;
-}
-static bool SlotSaveRegionalSettings(void *context,const ArRegionalSession *before,
-    const ArRegionalSession *after,SaveError *error) {
-  SaveSlots *slots=context;
-  if(!InputReplay_PolicyChangesAllowed() || slots->pending || before->slot!=slots->active ||
-      RuntimeSettings_LifecycleRequest()!=kRuntimeLifecycle_None) {
-    snprintf(error->message, sizeof(error->message),
-             "Save routing is not ready for regional settings.");
-    return false;
-  }
-  /* Finish any already-completed native save first. Never take a new gameplay
-   * snapshot just because a menu setting changed. */
-  if(!SaveSystem_FlushForSwitch(error) || !SaveSystem_ValidateActive(error))return false;
-  uint8_t image[kActRaiserSramSize];
-  if(SaveSystem_CopyDurableImage(image)) {
-    SaveFileFormat format = SaveSystem_ActiveBackend() == kSaveBackend_Ini
-        ? kSaveFileFormat_Ini
-        : kSaveFileFormat_NativeSrm;
-    if (!ArRegionalCampaign_SaveSettings(before, after, format, SaveSystem_ActivePath(), image,
-                                         error))
-      return false;
-    /* The companion is already durable. A failed index refresh is retryable
-     * by normal validation; don't report the committed edit as rolled back. */
-    SaveError index_error={{0}};
-    if(!SaveSlots_ObserveCheckpoints(slots,&index_error))
-      fprintf(stderr,"[regional] checkpoint index refresh pending: %s\n",index_error.message);
-    return true;
-  }
-  ArRegionalSession draft;
-  const RandomizerConfig recipe=Randomizer_CurrentConfig();
-  uint8_t bytes[kSaveSlotDraftCapacity];
-  size_t size;
-  if(!SaveSlotManager_Draft(&draft,after->slot,after->campaign,&after->requested,&recipe) ||
-      !ArRegionalSession_Encode(&draft,bytes,sizeof(bytes),&size)) {
-    snprintf(error->message, sizeof(error->message), "Cannot prepare the new-game settings.");
-    return false;
-  }
-  return SaveSlots_UpdateDraft(slots,bytes,size,error);
-}
-static bool SlotStart(unsigned slot, uint64_t fingerprint, const ArRegionalSession *draft,
-                      SaveError *error) {
-  ActRaiserRegionalRulesView current;
-  if (!s_managed_slots || !InputReplay_PolicyChangesAllowed() || s_save_slots.pending ||
-      RuntimeSettings_LifecycleRequest() != kRuntimeLifecycle_None ||
-      (ActRaiserRegional_CopyRulesView(&current) &&
-       (current.population_pending || current.miracle_in_progress))) {
-    snprintf(error->message, sizeof(error->message),
-             "Finish the current game operation before changing saves.");
-    return false;
-  }
-  SaveSlotDetails target;
-  if(!SaveSlotManager_Inspect(&s_save_slots,slot,&target)){*error=target.error;return false;}
-  if (target.fingerprint != fingerprint) {
-    snprintf(error->message, sizeof(error->message),
-             "The slot changed. Close and reopen Saves to review it.");
-    return false;
-  }
-  uint8_t bytes[kSaveSlotDraftCapacity];
-  size_t size = 0;
-  if(draft) {
-    ArRegionalSession validated;
-    if (draft->slot != slot ||
-        !SaveSlotManager_Draft(&validated, slot, draft->campaign, &draft->requested,
-                               &draft->randomizer) ||
-        !ArRegionalSession_Encode(&validated, bytes, sizeof(bytes), &size)) {
-      snprintf(error->message, sizeof(error->message), "The new-game configuration is invalid.");
-      return false;
-    }
-  }
-  if(!SaveSystem_FlushForSwitch(error) || !SaveSlots_Flush(&s_save_slots,error))return false;
-  char settings_path[kHostPathCapacity];
-  const char *path=getenv("AR_SETTINGS_PATH");
-  if(!path || !*path)path=UserDataFile(settings_path,sizeof(settings_path),"settings.ini");
-  /* Global editor overrides have no destination identity. Disarm them before
-   * persisting the restart; manual editor actions remain available per slot. */
-  g_settings.save_edit_armed=false;
-  if (!Settings_Save(path)) {
-    snprintf(error->message, sizeof(error->message),
-             "Could not save preferences. The current slot remains active.");
-    return false;
-  }
-  if (!SaveSlots_Request(&s_save_slots, slot, fingerprint, draft ? bytes : NULL, size,
-                         (SaveBackend)g_settings.save_backend, error))
-    return false;
-  RuntimeSettings_RequestPreparedRestart();
-  return true;
-}
-
-static void SlotValidateBoot(void) {
-  for(;;) {
-    SaveError error={{0}};SaveSlotDetails details;
-    bool valid=SaveSlots_ValidateDestination(&s_save_slots,&error);
-    if(valid && !SaveSlotManager_Inspect(&s_save_slots,s_save_slots.destination,&details)) {
-      error = details.error;
-      valid = false;
-    }
-    if(valid)return;
-    const SDL_MessageBoxButtonData buttons[]={
-      {SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT,0,"Exit"},
-      {0,1,"Return to previous slot"},{SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT,2,"Retry"}};
-    char message[512];
-    snprintf(message, sizeof(message),
-             "Slot %u could not be opened.\n%s\n\nYour saves have been preserved.",
-             s_save_slots.destination + 1, error.message);
-    SDL_MessageBoxData box = {
-      SDL_MESSAGEBOX_ERROR, g_window, "Save recovery", message, 3, buttons, NULL
-    };
-    int choice = 0;
-    if(!SDL_ShowMessageBox(&box,&choice) || choice<=0)Die(message);
-    if(choice==1 && !SaveSlots_ReturnToPrevious(&s_save_slots,&error))Die(error.message);
-  }
-}
-
 static void RunPostTickHousekeeping(void) {
   const PerformanceScope performance = PerformanceMetrics_Begin(kPerformance_Housekeeping);
-  /* Surface audio-chunk drops the callback counted (R12). Reported here, off
-   * the audio thread, and coalesced so a sustained problem cannot spam. */
-  {
-    int dropped = HostAudio_TakeRejectedChunkCount();
-    if (dropped) {
-      static int total;
-      total += dropped;
-      fprintf(stderr, "[audio] %d chunk(s) rejected by SDL_PutAudioStreamData "
-                      "(%d total this session) — audio glitched\n",
-              dropped, total);
-    }
-  }
+  AudioSession_AfterTicks();
 
-  /* Complete the SPC engine's resident uploader once it enters the $CC-wait,
-   * for the case where the CPU's HLEd $9A56 ran before the engine got there
-   * (takes its own APU lock — must be outside the lock above). */
-  ActRaiser_SpcUploaderCompleteTick();
-
-  /* Music replacement live policy (setting toggled off mid-song). Takes
-   * its own APU lock — also outside the lock above. */
-  MusicReplacements_FrameTick();
-
-  /* AR_WARP_AT=<gameframe>: fire the AR_WARP target automatically once the
-   * 16-bit game-frame counter reaches the value. Headless runs can't press
-   * F6; used e.g. to sweep the warp table capturing each level's music src
-   * (AR_MUSICLOG). Same transition-capable-state caveats as F6. */
-  {
-    static long warp_at = kUninitializedEnvironmentOption;
-    static bool warp_fired;
-    if (warp_at == kUninitializedEnvironmentOption) {
-      const char *at = getenv("AR_WARP_AT");
-      warp_at = (at && at[0]) ? strtol(at, NULL, 0) : -1;
-    }
-    if (warp_at >= 0 && !warp_fired) {
-      const unsigned gf =
-          ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
-      /* The power-on fill value is numerically above ordinary scheduled
-       * frames. Ignore it just like AR_DIORAMA_AT below, or windowed startup
-       * can stage a warp before the game has initialized its transition
-       * state. */
-      if (gf != kPowerOnGameFrameSentinel && gf >= (unsigned)warp_at) {
-        warp_fired = true;
-        (void)RuntimeSettings_HandleAction(Settings_Find("warp_now"));
-      }
-    }
-  }
-
-  /* AR_DIORAMA_AT=<gameframe>: flip Diorama 3D on once the game-frame counter
-   * reaches the value, through the same descriptor path the D hotkey uses.
-   * Booting straight into diorama changes the widescreen margin budget and
-   * changes the rendered baseline, so a visual-regression run should replay
-   * flat into the stage and only then switch. Canonical input is host-tick
-   * ordered; the game-frame value here is only the deterministic trigger. */
-  {
-    static long diorama_at = kUninitializedEnvironmentOption;
-    static bool diorama_fired;
-    if (diorama_at == kUninitializedEnvironmentOption) {
-      const char *at = getenv("AR_DIORAMA_AT");
-      diorama_at = (at && at[0]) ? strtol(at, NULL, 0) : -1;
-    }
-    if (diorama_at >= 0 && !diorama_fired) {
-      const unsigned gf =
-          ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
-      /* $0088 is $5555-filled before the game initialises it; ignore that
-       * boot sentinel or every target fires on frame 0. */
-      if (gf != kPowerOnGameFrameSentinel &&
-          gf >= (unsigned)diorama_at) {
-        diorama_fired = true;
-        const SettingDesc *mode = Settings_Find("diorama_mode");
-        if (mode && Settings_IsAvailable(mode) && !g_settings.diorama_mode) {
-          Settings_SetLong(mode, 1);
-          fprintf(stderr, "[diorama] ON via AR_DIORAMA_AT at gf=%u\n", gf);
-        }
-      }
-    }
-  }
+  DevAutomation_AfterTicks();
 
   Diorama_FlushSettingsIfDirty();
   Sim3DCamera_FlushSettingsIfDirty();
-  const SettingsPersistenceReport written = SettingsPersistence_TakeReport(s_settings_writer);
-  PerformanceMetrics_RecordBatch(PerformanceMetrics_Epoch(), kPerformance_SettingsWrite,
-      written.elapsed_ns, written.maximum_ns, written.writes);
-  if (written.failed)
-    fprintf(
-        stderr,
-        "[settings] latest settings write failed; it will be retried by the next save or on exit\n");
+  SettingsSession_PollWrites();
 
-  /* Auto-persist battery SRAM the moment the game writes a save, so progress
-   * survives a freeze/force-quit (the clean-exit save-system write never runs
-   * if the game hangs). Cheap: only writes when the 8KB SRAM actually changes.
-   * SKIPPED during input replay: letting a diagnostic run overwrite save.srm
-   * would change the initial state of the NEXT replay and invalidate canonical
-   * initial-state/checkpoint digests as well as legacy frame alignment. */
-  if (!InputReplay_ShouldProtectSaveData()) {
-    static bool write_error_reported;
-    static uint64_t first_write_failure_ms;
-    SaveError error = {{0}};
-    const PerformanceScope save_scope = PerformanceMetrics_Begin(kPerformance_SaveWrite);
-    const bool saved = SaveSystem_AutoPersistIfChanged(&error);
-    PerformanceMetrics_End(save_scope);
-    if (!saved) {
-      if (!write_error_reported)
-        fprintf(stderr, "[saves] auto-persist failed: %s\n", error.message);
-      write_error_reported = true;
-      const uint64_t now_ms = SDL_GetTicks();
-      if (!first_write_failure_ms) first_write_failure_ms = now_ms;
-      if (now_ms - first_write_failure_ms >= 5000) {
-        SessionFatal_RequestKind(kSessionFailure_BatterySave,
-            "battery auto-persist failed for five seconds: %s; path: %s",
-            error.message, SaveSystem_ActivePath());
-      }
-    } else {
-      write_error_reported = false;
-      first_write_failure_ms = 0;
-    }
-  }
+  SaveSlotHost_AfterTicks();
   PerformanceMetrics_End(performance);
 }
 
-/* One application-level host-pause edge owns both transport layers. The order
- * matters: stop the device before latching the OGG decoder, then release the
- * decoder before resuming the device, so no callback can advance only one
- * source across the edge. */
-static void ApplyHostAudioPause(bool paused) {
-  static bool initialized;
-  static bool applied_pause;
-  if (initialized && applied_pause == paused) return;
-  initialized = true;
-  applied_pause = paused;
-  bool success = true;
-  if (paused) success = HostAudio_SetHostPaused(true);
-  MusicReplacements_SetHostPaused(paused);
-  if (!paused) success = HostAudio_SetHostPaused(false);
-  if (!success) {
-    SessionFatal_RequestKind(kSessionFailure_AudioDevice,
-        "audio stream rejected by device: %s",
-        SDL_GetError());
-  }
-}
 
 
 /* ---------------------------------------------------------------------------
  * Boot decomposition.
- *
- * main() was a single 1,311-line function: argument parsing, config, SDL and
- * window/renderer/texture creation, subsystem injection, the frame loop, and
- * teardown, all inline. It is now a sequence of named phases over one context.
  *
  * ORDER IS THE CONTRACT HERE. Nearly every phase below documents something that
  * must happen before or after something else -- the portable chdir before any
@@ -982,7 +428,6 @@ typedef struct AppBoot {
   bool headless_video;  /* headless, but with a hidden-window renderer */
   bool video;           /* !headless || headless_video */
   bool ws_headless;     /* opt a headless run into the configured wide geometry */
-  bool localization_exit_requested;
   Snes *snes;
 } AppBoot;
 
@@ -1202,24 +647,7 @@ static void AppBoot_ResolveDisplayAndSettings(AppBoot *app) {
   if (!settings_path || !settings_path[0])
     settings_path = UserDataFile(settings_file, sizeof settings_file,
                                  "settings.ini");
-  /* The launcher has resolved the runtime working directory (utils/ in a
-   * bundle). Catalog scanning does not move it to the executable directory. */
-  ArLanguagePackCatalog *catalog = calloc(1, sizeof(*catalog));
-  SettingsLocalizationPack *choices = calloc(kSettingsLocalizationMaximumPacks, sizeof(*choices));
-  if (catalog && choices &&
-      ArLanguagePackCatalog_ScanDesktop(catalog, "game-assets/languages/packs")) {
-    for (size_t i = 0; i < catalog->count; ++i) {
-      const ArLanguagePackCatalogEntry *entry = &catalog->entries[i];
-      snprintf(choices[i].id, sizeof(choices[i].id), "%s", entry->metadata.package_id);
-      snprintf(choices[i].name, sizeof(choices[i].name), "%s", entry->metadata.display_name);
-      snprintf(choices[i].locale, sizeof(choices[i].locale), "%s", entry->metadata.locale);
-      snprintf(choices[i].manifest, sizeof(choices[i].manifest), "%s", entry->manifest);
-    }
-    if (!Settings_SetLocalizationPacks(choices, catalog->count))
-      fprintf(stderr, "[localization] installed pack catalog has conflicting identities\n");
-  }
-  free(choices);
-  free(catalog);
+  HostLocalization_PublishInstalledPacks();
   Settings_InitWithFile(settings_path);
   HostDisplay_ResolveVideoGeometry(false);
 
@@ -1300,181 +728,15 @@ static int AppBoot_CreateVideo(AppBoot *app) {
   return -1;
 }
 
-static ArHostFontResources s_font_resources;
-static ArHostRegionalMediaFiles s_regional_media;
-
-static void LoadRegionalMedia(void) {
-  static const char *const donors[]={"us","jp","eu-en","de","fr"};
-  for(unsigned i=0;i<sizeof(donors)/sizeof(donors[0]);++i) {
-    char path[128],error[192];
-    snprintf(path,sizeof(path),"game-assets/regions/%s.armedia",donors[i]);
-    if(!sr_path_exists(path))continue;
-    if (!ArHostRegionalMediaFiles_Load(&s_regional_media, path, (ArRegionalMediaRelease)(i + 1),
-                                       error, sizeof(error))) {
-      fprintf(stderr, "[regional-media] %s: %s; US graphics retained\n", path, error);
-      continue;
-    }
-    const ArRegionalMediaView *view =
-        ArHostRegionalMediaFiles_View(&s_regional_media, (ArRegionalMediaRelease)(i + 1));
-    if(!ActRaiserRegionalMedia_AddDonor(view)) {
-      fprintf(stderr, "[regional-media] %s: donor does not match filename; US graphics retained\n",
-              path);
-      continue;
-    }
-    fprintf(stderr,"[regional-media] loaded %s (%zu reviewed resources)\n",donors[i],view->count);
-  }
-}
-
-static ArFontResourceId RegisterLocalizedFont(
-    void *context, const char *manifest, const char *member,
-    char *error, size_t capacity) {
-  (void)context;
-  char path[1024];
-  if (member && !strcmp(member, "builtin:actraiser-sans"))
-    snprintf(path, sizeof(path),
-             "game-assets/fonts/noto/NotoSans-SemiCondensedExtraBold.ttf");
-  else if (!member || !strncmp(member, "builtin:", 8) ||
-           !ArLanguagePack_ResolveMemberPath(manifest, member, path, sizeof(path))) {
-    if (error && capacity) snprintf(error, capacity, "font member is unavailable");
-    return 0;
-  }
-  return ArHostFontResources_RegisterFile(&s_font_resources, path, error, capacity);
-}
-
-static void RetireLocalizedFont(void *context, ArFontResourceId font) {
-  (void)context;
-  ArHostFontResources_Retire(&s_font_resources, font);
-}
-
-static bool PrepareLocalizedFont(void *context,
-                                 const ArTextPresentationFont *font,
-                                 char *error, size_t error_capacity) {
-  return ArLocalizedTextPresenter_PrepareFont(context, font, error,
-                                              error_capacity);
-}
-
-static void DiscardPreparedLocalizedFont(void *context) {
-  ArLocalizedTextPresenter_DiscardPreparedFont(context);
-}
-
-static void ExplainLegacyLanguagePack(void *context, const char *manifest,
-                                      const ArLanguagePackMetadata *metadata,
-                                      bool native) {
-  AppBoot *app = context;
-  const ArUiLocale locale = (ArUiLocale)g_settings.interface_language;
-  const char *instructions = ArUiCatalog_Text(
-      locale,
-      native ? "localization.upgrade.native" : "localization.upgrade.pack",
-      NULL);
-  char message[4096];
-  const ArUiTextArgument arguments[] = {{"name", metadata->display_name},
-                                        {"instructions", instructions},
-                                        {"path", manifest}};
-  if (!ArUiCatalog_Format(
-          message, sizeof(message),
-          ArUiCatalog_Text(locale, "localization.upgrade.message", NULL),
-          arguments, 3))
-    snprintf(message, sizeof(message), "%s\n%s\n%s", metadata->display_name,
-             instructions, manifest);
-  fprintf(stderr, "[localization] %s\n", message);
-  if (app->headless)
-    return;
-  const SDL_MessageBoxButtonData buttons[] = {
-      {SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT, 1,
-       ArUiCatalog_Text(locale, "localization.upgrade.continue", NULL)},
-      {SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, 0,
-       ArUiCatalog_Text(locale, "localization.upgrade.exit", NULL)}};
-  const SDL_MessageBoxData dialog = {
-      .flags = SDL_MESSAGEBOX_WARNING,
-      .window = g_window,
-      .title = ArUiCatalog_Text(locale, "localization.upgrade.title", NULL),
-      .message = message,
-      .numbuttons = 2,
-      .buttons = buttons};
-  int answer = -1;
-  if (!SDL_ShowMessageBox(&dialog, &answer))
-    fprintf(stderr, "[localization] cannot show upgrade window: %s\n",
-            SDL_GetError());
-  app->localization_exit_requested = answer != 1;
-}
-
 /* Overlay, world map, diorama manifest, the injected overlay hooks (layer editor,
  * manual), input, and music. Injection rather than direct calls is what keeps
  * settings_overlay.c testable with no renderer at all -- see settings_overlay.h. */
 static void AppBoot_InstallSubsystems(AppBoot *app) {
-  static ArTextBackend localized_text_backend;
-  ArSdlTextBackend_Init(&localized_text_backend);
-  ArLocalizedTextPresenter_SetBackend(&localized_text_backend);
-  const ArFontResources font_resources = ArHostFontResources_Provider(&s_font_resources);
-  ArLocalizedTextPresenter_SetFontResources(&font_resources);
-  ArLanguagePackIo pack_io;
-  ArLanguagePackFileIo_Init(&pack_io);
-  const char *native_manifest = getenv("AR_LOCALIZATION_NATIVE_PACK");
-  if (!native_manifest || !native_manifest[0])
-    native_manifest = "game-assets/languages/native-us/pack.ini";
-  const ActRaiserLocalizationPackHost pack_host = {
-      .struct_size = sizeof(pack_host),
-      .abi_version = ACTRAISER_LOCALIZATION_PACK_HOST_ABI_VERSION,
-      .io = pack_io,
-      .native_manifest = native_manifest,
-      .require_v2 = true,
-      .context = app,
-      .legacy_pack = ExplainLegacyLanguagePack,
-  };
-  ActRaiserLocalizationRuntime_SetPackHost(&pack_host);
-  const ArTextPresentationHost text_host = {
-      .struct_size = sizeof(text_host),
-      .abi_version = AR_TEXT_PRESENTATION_ABI_VERSION,
-      .context = &g_render_device,
-      .prepare_font = PrepareLocalizedFont,
-      .register_font = RegisterLocalizedFont,
-      .retire_font = RetireLocalizedFont,
-      .discard_prepared_font = DiscardPreparedLocalizedFont,
-  };
-  ActRaiserLocalizationRuntime_SetPresentationHost(&text_host);
+  HostLocalization_Install(app->headless);
   if (!SettingsOverlay_Init(&g_render_device, g_window,
                             app->rom_data, app->rom_size))
     Die("font atlas creation for settings overlay failed");
-  /* Interface text has its own font/cache lifetime, independent of whichever
-   * game language pack is selected. Resources are resolved by this host. */
-  char ui_font_error[kArTextRasterErrorCapacity] = {0};
-  const ArFontResourceId ui_primary = ArTextBackend_IsReady(&localized_text_backend)
-      ? ArHostFontResources_RegisterFile(
-            &s_font_resources,
-            "game-assets/fonts/noto/NotoSans-SemiCondensedExtraBold.ttf",
-            ui_font_error, sizeof(ui_font_error)) : 0;
-  const ArFontResourceId ui_fallbacks[] = {
-      ui_primary ? ArHostFontResources_RegisterFile(
-          &s_font_resources, "game-assets/fonts/noto/NotoSansJP-Bold.otf",
-          ui_font_error, sizeof(ui_font_error)) : 0,
-      ui_primary ? ArHostFontResources_RegisterFile(
-          &s_font_resources, "game-assets/fonts/noto/NotoSansArabic-Bold.ttf",
-          ui_font_error, sizeof(ui_font_error)) : 0,
-      ui_primary ? ArHostFontResources_RegisterFile(
-          &s_font_resources, "game-assets/fonts/noto/NotoSansHebrew-Bold.ttf",
-          ui_font_error, sizeof(ui_font_error)) : 0};
-  const size_t ui_fallback_count = sizeof(ui_fallbacks) / sizeof(ui_fallbacks[0]);
-  bool ui_fonts_ready = ui_primary != 0;
-  for (size_t i = 0; i < ui_fallback_count; ++i)
-    ui_fonts_ready = ui_fonts_ready && ui_fallbacks[i] != 0;
-  const ArTextBackendConfig ui_fonts = {
-      .struct_size = sizeof(ui_fonts),
-      .abi_version = AR_TEXT_BACKEND_CONFIG_ABI_VERSION,
-      .font_stack_id = "system-interface",
-      .resources = font_resources, .primary_font = ui_primary,
-      .fallback_fonts = ui_fallbacks, .fallback_font_count = ui_fallback_count,
-      .font_revision = 2, .cached_size_capacity = 16,
-  };
-  if (ArTextBackend_IsReady(&localized_text_backend) &&
-      ArRenderDevice_IsReady(&g_render_device) &&
-      (!ui_fonts_ready ||
-       !SettingsOverlay_SetTextBackend(&localized_text_backend, &ui_fonts,
-                                        ui_font_error, sizeof(ui_font_error))))
-    fprintf(stderr, "[settings-menu] Unicode font unavailable; keeping native interface: %s\n",
-            ui_font_error);
-  ArHostFontResources_Retire(&s_font_resources, ui_primary);
-  for (size_t i = 0; i < ui_fallback_count; ++i)
-    ArHostFontResources_Retire(&s_font_resources, ui_fallbacks[i]);
+  HostLocalization_InstallInterfaceFonts();
   /* The world-map image and pure development-builder tables are immutable ROM
    * data. Failure is not fatal: consumers retain the authentic presentation. */
   if (SimWorldMap_Init(app->rom_data, app->rom_size))
@@ -1483,7 +745,7 @@ static void AppBoot_InstallSubsystems(AppBoot *app) {
     fprintf(stderr, "[world-navigation] native town ground unavailable\n");
   if (!Diorama_InitRomBackdrops(app->rom_data, app->rom_size))
     fprintf(stderr, "[diorama] named ROM backdrops unavailable\n");
-  LoadRegionalMedia();
+  HostLocalization_LoadRegionalMedia();
   ActRaiserActorArt_Initialize(ActRaiserRegionalMedia_ActorArt());
   if (!ActRaiserActionBg_InitRoomScenes(app->rom_data, app->rom_size))
     fprintf(stderr, "[action-room-scene] immutable loader unavailable\n");
@@ -1532,19 +794,7 @@ static void AppBoot_InstallSubsystems(AppBoot *app) {
   RenderComparison_Reset();
   Diorama_SeedCameraFromSettings();
 
-  /* Music replacement is audio-side and works headless too (unlike the HD
-   * manifest load above, which needs the renderer for textures). Same
-   * manifest file; [music:] sections. AR_MUSIC_MANIFEST overrides. */
-  {
-    const char *music_manifest = getenv("AR_MUSIC_MANIFEST");
-    if (!music_manifest || !music_manifest[0])
-      music_manifest = "game-assets/manifest.ini";
-    MusicReplacements_Load(music_manifest);
-    MusicReplacements_InstallHooks();
-    NativeAudioExtension_Install();
-    NativeAudioMixer_Install();
-    AudioPresentationPolicy_Reset();
-  }
+  AudioSession_Install();
 
   /* After music: the census chains the APU port seam music installs. */
   SfxCensus_Init();
@@ -1599,7 +849,7 @@ static void AppBoot_StartGame(AppBoot *app) {
     const char *fenv = getenv("AR_WRAM_FILL");
     int fill = fenv
         ? (int)strtoul(fenv, NULL, 0)
-        : kDefaultPowerOnWramFill;
+        : kActRaiserPowerOnWramFill;
     memset(g_ram, fill, kActRaiserWramSize);
     const char *wp0 = getenv("AR_WRAM_INIT");
     if (wp0 && wp0[0]) {
@@ -1623,109 +873,17 @@ static void AppBoot_StartGame(AppBoot *app) {
     if (g_sram && g_sram_size > 0) memset(g_sram, sfill, g_sram_size);
   }
 
-  /* Load persisted battery save (overrides the fresh-cart fill if present).
-   * Portable builds use saves/ beside the executable after the bundle anchor;
-   * developer runs use saves/ under their launch directory. */
-  char saves_dir[kHostPathCapacity], save_srm[kHostPathCapacity],
-      save_ini[kHostPathCapacity], legacy_srm[kHostPathCapacity];
-  UserDataFile(saves_dir, sizeof saves_dir, "saves");
-  mkdir(saves_dir, 0755);
-  {
-    SaveError error = {{0}};
-    const char *native_path = getenv("AR_SAVE_NATIVE_PATH");
-    const char *ini_path = getenv("AR_SAVE_INI_PATH");
-    s_managed_slots=!app->headless && !(native_path && *native_path) && !(ini_path && *ini_path) &&
-        !getenv("AR_SAVE_BACKEND") && !getenv("AR_INPUT_REPLAY") && !getenv("AR_INPUT_RECORD");
-    SaveBackend backend=(SaveBackend)g_settings.save_backend;
-    if(s_managed_slots) {
-      if(!SaveSlots_Open(&s_save_slots,saves_dir,backend,&error))Die(error.message);
-      SlotValidateBoot();
-      if (!SaveSlots_Paths(&s_save_slots, s_save_slots.destination, save_srm, save_ini,
-                           sizeof(save_srm)))
-        Die("Save slot path is too long.");
-      native_path = save_srm;
-      ini_path = save_ini;
-      backend=SaveSlots_DestinationBackend(&s_save_slots);
-    }
-    if (!native_path || !native_path[0]) {
-      UserDataFile(save_srm, sizeof save_srm, "saves/save.srm");
-      native_path = save_srm;
-    }
-    if (!ini_path || !ini_path[0]) {
-      UserDataFile(save_ini, sizeof save_ini, "saves/save.ini");
-      ini_path = save_ini;
-    }
-    if (!SaveSystem_Attach(g_sram, (size_t)g_sram_size,
-                           backend,
-                           native_path, ini_path, &error))
-      Die(error.message);
-    if (!SaveSystem_SetStorageRoot(saves_dir, s_managed_slots ? (int)s_save_slots.destination : -1,
-                                   &error))
-      Die(error.message);
-    snprintf(legacy_srm, sizeof(legacy_srm), "%s/%s.srm",
-             saves_dir, RtlGameIdentifier());
-    if(!s_managed_slots && !SaveSystem_MigrateLegacyNative(legacy_srm,&error))Die(error.message);
-    if (!SaveSystem_LoadActive(&error)) {
-      char message[512];
-      snprintf(message, sizeof(message),
-               "The active save could not be loaded: %s\n\nThe game will "
-               "not start with fresh SRAM because doing so could overwrite "
-               "recoverable progress. Repair, restore, or move %s and try "
-               "again.",
-               error.message, SaveSystem_ActivePath());
-      Die(message);
-    }
-
-    SaveEditRequest edits;
-    if(s_managed_slots)g_settings.save_edit_armed=false;
-    bool staged = RuntimeSettings_BuildSaveEditRequest(&edits);
-    if (staged && g_settings.save_edit_armed) {
-      if (!SaveSystem_ApplyEdits(
-              &edits, true, false, g_settings.save_autobackup, &error))
-        fprintf(stderr, "[save-editor] boot edits rejected: %s\n",
-                error.message);
-      else
-        fprintf(stderr, "[save-editor] boot edits applied for this session\n");
-    } else if (staged) {
-      fprintf(stderr,
-              "[save-editor] staged boot edits ignored; save editing is not armed\n");
-    }
-  }
+  SaveSlotHost_AttachBatterySave(app->headless);
 
   OracleTrace_Init(RtlGameRunner());
   ForcedInput_Init();
   InputReplay_Init();
-  if (!ActRaiserRegional_InitializeSlot(s_managed_slots ? s_save_slots.destination : 0,
-                                        HostCampaignIdentity_Create, NULL))
-    Die("Regional campaign storage could not be initialized; saves preserved.");
-  if(s_managed_slots) {
-    SaveSlotDetails details;
-    if (!SaveSlotManager_Inspect(&s_save_slots, s_save_slots.destination, &details))
-      Die(details.error.message);
-    if(details.state==kSaveSlot_Empty && details.prepared) {
-      ArRegionalSession draft;
-      SaveError error = { { 0 } };
-      if (!SaveSlotManager_ReadDraft(&s_save_slots, s_save_slots.destination, &draft, &error) ||
-          !ActRaiserRegional_StageNewGame(&draft))
-        Die("Cannot stage the prepared new game; saves preserved.");
-    }
-  }
+  SaveSlotHost_InitializeRegionalCampaign();
   ActRaiserRegional_SetContinuePrompt(RegionalContinuePrompt, app);
   ActRaiserRegional_SetPopulationPrompt(RegionalPopulationPrompt, app);
   if (!InputReplay_SetPolicyDigest(ActRaiserRegional_ReplayDigest, NULL))
     Die("Regional replay identity could not be initialized.");
-  /* A replay must not mutate the player's configuration, for the same reason it
-   * refuses to persist SRAM. Set from the same predicate so the two protections
-   * cannot drift apart. */
-  Settings_SetPersistenceEnabled(!InputReplay_ShouldProtectSaveData());
-  if (!InputReplay_ShouldProtectSaveData()) {
-    s_settings_writer = SettingsPersistence_Create();
-    const SettingsSaveHost host = SettingsPersistence_Host(s_settings_writer);
-    Settings_SetSaveHost(&host);
-    if (!s_settings_writer)
-      fprintf(stderr,
-              "[settings] background writer unavailable; using durable synchronous saves\n");
-  }
+  SettingsSession_Start();
   ScheduledSettings_Init();
 
   /* Do not silently run a debug replay from power-on when its requested start
@@ -1743,24 +901,8 @@ static void AppBoot_StartGame(AppBoot *app) {
   if (!InputReplay_BeginSession(RtlGameRunner(), RtlGameIdentifier()))
     Die(InputReplay_LastError());
 
-  if (!HostAudio_Init(Settings_AudioFrequencyHz(), g_settings.audio_samples,
-                      g_settings.audio_master_volume,
-                      g_settings.audio_enabled)) {
-    Die("The selected audio output could not be opened. Check the system "
-        "output device, then restart the game. You can also change the "
-        "audio buffer or sample-rate setting before launching again.");
-  }
-  if(s_managed_slots) {
-    SaveError error={{0}};
-    if(!SaveSlots_Acknowledge(&s_save_slots,&error))Die(error.message);
-    const SaveStorageHooks storage = { &s_save_slots, SlotBeforeCommit, SlotDidCommit,
-                                       SlotValidateActive };
-    SaveSystem_SetStorageHooks(&storage);
-    ActRaiserRegional_SetSettingsWriter(SlotSaveRegionalSettings,&s_save_slots);
-  }
-  const SettingsOverlaySaveSlotHooks slots = { SlotScan, SlotDraft, SaveSlotManager_Edit,
-                                               SlotDraftView, SlotStart };
-  SettingsOverlay_SetSaveSlotHooks(&slots);
+  AudioSession_StartOutput();
+  SaveSlotHost_InstallHooks();
 }
 
 /* Drop resource caches before checking the rebuilt feature set. A retained
@@ -1794,217 +936,13 @@ static void AppLoop_HandleGraphicsReset(AppBoot *app, Uint32 event_type) {
   HostDisplay_InvalidatePresentHistory();
 }
 
-/* Capture wins over hotkeys; then the active menu device gets first use.
- * Suppression applies only to key-down. Key-up remains in the event pump so
- * previously accepted keys can always be released. */
-static void AppLoop_HandleKeyDown(const SDL_Event *event) {
-  if (SettingsOverlay_HandleCaptureEvent(event))
-    return;
-  if (HostInput_KeyboardIsSuppressed())
-    return;
-  if (SettingsOverlay_IsOpen()) {
-    if (HostInput_MenuKeyboardIsActive()) {
-      bool was_open = true;
-      bool consumed = SettingsOverlay_HandleKey(event->key.key, true,
-                                                event->key.repeat != 0);
-      if (was_open && !SettingsOverlay_IsOpen())
-        HostInput_ClearHeld();
-      if (consumed)
-        return;
-    } else {
-      return;
-    }
-  }
-  if (!event->key.repeat &&
-      (event->key.key == SDLK_ESCAPE || event->key.key == SDLK_F1)) {
-    HostInput_ClearHeld();
-    SettingsOverlay_Open();
-  } else if (event->key.key == SDLK_P) {
-    if (SceneInspector_HasSelection()) {
-      const bool inspector_owned_pause = HostInput_InspectorOwnsPause();
-      HostInput_CloseInspectorSelection();
-      if (!inspector_owned_pause)
-        HostInput_TogglePause();
-    } else {
-      HostInput_TogglePause();
-    }
-  } else if (event->key.key == SDLK_T) {
-    HostInput_ToggleTurbo();
-  } else if (event->key.key == SDLK_F3) {
-    if (!event->key.repeat) {
-      const SettingDesc *inspector = Settings_Find("scene_inspector");
-      SettingChangeResult result =
-          Settings_SetLong(inspector, !g_settings.scene_inspector);
-      char settings_path[kHostPathCapacity];
-      UserDataFile(settings_path, sizeof settings_path, "settings.ini");
-      if (result > kSettingChange_Unchanged && !Settings_Save(settings_path))
-        fprintf(stderr, "[scene-inspector] could not save settings.ini\n");
-      fprintf(stderr, "[scene-inspector] %s (%s)\n",
-              g_settings.scene_inspector ? "enabled — click the game to inspect"
-                                         : "disabled",
-              Settings_ChangeResultName(result));
-    }
-  } else if (event->key.key == SDLK_MINUS || event->key.key == SDLK_KP_MINUS) {
-    if (!event->key.repeat)
-      HostDevTools_AdjustHudOutputScale(-25);
-  } else if (event->key.key == SDLK_EQUALS || event->key.key == SDLK_PLUS ||
-             event->key.key == SDLK_KP_PLUS) {
-    if (!event->key.repeat)
-      HostDevTools_AdjustHudOutputScale(25);
-  } else if (event->key.key == SDLK_F5) {
-    (void)RuntimeSettings_HandleAction(Settings_Find("save_state"));
-  } else if (event->key.key == SDLK_F7) {
-    (void)RuntimeSettings_HandleAction(Settings_Find("load_state"));
-  } else if (event->key.key == SDLK_F9) {
-    if (event->key.repeat) {
-    } else if (event->key.mod & SDL_KMOD_SHIFT) {
-      DumpDiagState("hotkey");
-    } else if (!g_ws_active) {
-      fprintf(stderr, "[display] F9 needs ExtendedAspectRatio "
-                      "(e.g. 16:9) in config.ini; staying 4:3\n");
-    } else {
-      int m = Settings_CycleDisplayMode();
-      fprintf(stderr, "[display] mode %d/%d -> %s\n", m + 1,
-              kDisplayMode_PresetCount, Settings_DisplayModeName(m));
-    }
-  } else if (event->key.key == SDLK_F6) {
-    (void)RuntimeSettings_HandleAction(Settings_Find("warp_now"));
-  } else if (event->key.key == SDLK_F2 || event->key.key == SDLK_C) {
-    HostDevTools_TakeFullSnapshot();
-  } else if (event->key.key == SDLK_D && !event->key.repeat) {
-    if (event->key.mod & SDL_KMOD_SHIFT) {
-      if (!ActRaiser_IsActionMapGroup(g_ram[kActRaiserWram_MapGroup])) {
-        fprintf(stderr,
-                "[diorama] layer dump requires an action stage "
-                "($18=%02x)\n",
-                g_ram[kActRaiserWram_MapGroup]);
-      } else {
-        g_diorama_dump_pending = true;
-        fprintf(stderr, "[diorama] layer capture armed for next frame\n");
-      }
-    } else {
-      const SettingDesc *mode = Settings_Find("diorama_mode");
-      if (mode && !Settings_IsAvailable(mode)) {
-        fprintf(stderr, "[diorama] requires the new renderer\n");
-      } else if (mode) {
-        Settings_SetLong(mode, !g_settings.diorama_mode);
-        fprintf(stderr, "[diorama] %s\n",
-                g_settings.diorama_mode ? "ON" : "OFF");
-      }
-    }
-  } else if (g_settings.diorama_mode && !event->key.repeat &&
-             event->key.key >= SDLK_1 && event->key.key <= SDLK_5) {
-    static const char *const kLayerKeys[] = {
-        "diorama_layer_backdrop", "diorama_layer_bg2", "diorama_layer_bg1",
-        "diorama_layer_obj",      "diorama_layer_bg3",
-    };
-    int index = (int)(event->key.key - SDLK_1);
-    const SettingDesc *row = Settings_Find(kLayerKeys[index]);
-    long value = 0;
-    if (row && Settings_GetLong(row, &value)) {
-      Settings_SetLong(row, !value);
-      fprintf(stderr, "[diorama] %s %s\n", row->label,
-              value ? "hidden" : "shown");
-      HostInput_RequestPausedRedraw();
-    }
-  } else {
-    HostInput_HandleKeyboard((int)event->key.scancode, true,
-                             event->key.repeat != 0);
-  }
-}
-
-/* Manual-reader mouse input is modal. Otherwise camera controls precede
- * flat scene inspection; mouse-up releases drags independently of eligibility.
- */
-static void AppLoop_HandleMouse(const SDL_Event *event) {
-  switch (event->type) {
-  case SDL_EVENT_MOUSE_BUTTON_DOWN:
-    if (ManualReader_IsOpen()) {
-      (void)ManualReader_HandleMouse(event);
-      break;
-    }
-    if (!SettingsOverlay_IsOpen() && !RenderComparison_FreezesGameplay() &&
-        Diorama_IsActiveThisFrame()) {
-      if (event->button.button == SDL_BUTTON_RIGHT)
-        Diorama_SetDragging(true);
-      else if (event->button.button == SDL_BUTTON_MIDDLE)
-        Diorama_ResetCamera();
-    } else if (!SettingsOverlay_IsOpen() &&
-               !RenderComparison_FreezesGameplay() &&
-               Sim3DCamera_ControlsAvailable(g_sim3d_textures_ready)) {
-      if (event->button.button == SDL_BUTTON_RIGHT)
-        Sim3DCamera_SetDragging(true);
-      else if (event->button.button == SDL_BUTTON_MIDDLE)
-        HostInput_ResetSim3DCamera();
-    } else if (!SettingsOverlay_IsOpen() && g_settings.scene_inspector) {
-      if (event->button.button == SDL_BUTTON_RIGHT) {
-        HostInput_CloseInspectorSelection();
-      } else if (event->button.button == SDL_BUTTON_LEFT) {
-        int event_x = (int)event->button.x;
-        int event_y = (int)event->button.y;
-        int output_x = 0, output_y = 0;
-        if (!HostDisplay_WindowPointToOutput(event_x, event_y, &output_x,
-                                             &output_y) ||
-            !SettingsOverlay_BeginDebugPanelDrag(output_x, output_y))
-          (void)HostDevTools_InspectWindowPoint(event_x, event_y);
-      }
-    }
-    break;
-  case SDL_EVENT_MOUSE_MOTION:
-    if (ManualReader_IsOpen()) {
-      (void)ManualReader_HandleMouse(event);
-      break;
-    }
-    if (!RenderComparison_FreezesGameplay() && Diorama_IsDragging() &&
-        Diorama_IsActiveThisFrame()) {
-      Diorama_AdjustCamera(event->motion.xrel * Diorama_DragRadPerPx(),
-                           event->motion.yrel * Diorama_DragRadPerPx(), 0.0f);
-    } else if (!RenderComparison_FreezesGameplay() &&
-               Sim3DCamera_IsDragging() &&
-               Sim3DCamera_ControlsAvailable(g_sim3d_textures_ready)) {
-      HostInput_AdjustSim3DCamera(event->motion.xrel * Diorama_DragRadPerPx(),
-                                  event->motion.yrel * Diorama_DragRadPerPx(),
-                                  0.0f);
-    } else if (SettingsOverlay_IsDebugPanelDragging()) {
-      int output_x = 0, output_y = 0;
-      if (HostDisplay_WindowPointToOutput(
-              (int)event->motion.x, (int)event->motion.y, &output_x, &output_y))
-        SettingsOverlay_DragDebugPanel(output_x, output_y);
-    }
-    break;
-  case SDL_EVENT_MOUSE_WHEEL:
-    if (ManualReader_IsOpen()) {
-      (void)ManualReader_HandleMouse(event);
-      break;
-    }
-    if (!SettingsOverlay_IsOpen() && !RenderComparison_FreezesGameplay() &&
-        Diorama_IsActiveThisFrame())
-      Diorama_AdjustCamera(0.0f, 0.0f, -event->wheel.y * Diorama_ZoomStep());
-    else if (!SettingsOverlay_IsOpen() && !RenderComparison_FreezesGameplay() &&
-             Sim3DCamera_ControlsAvailable(g_sim3d_textures_ready))
-      HostInput_AdjustSim3DCamera(0.0f, 0.0f,
-                                  -event->wheel.y * Diorama_ZoomStep());
-    break;
-  case SDL_EVENT_MOUSE_BUTTON_UP:
-    if (ManualReader_IsOpen()) {
-      (void)ManualReader_HandleMouse(event);
-      break;
-    }
-    if (event->button.button == SDL_BUTTON_RIGHT) {
-      Diorama_SetDragging(false);
-      Sim3DCamera_SetDragging(false);
-    }
-    if (event->button.button == SDL_BUTTON_LEFT)
-      SettingsOverlay_EndDebugPanelDrag();
-    break;
-  }
-}
-
 /* Event routing stays flat; helpers own resource reset and modal input
  * precedence. Device add/remove and key release always reach their owners. */
 static void AppLoop_PumpEvents(AppBoot *app, bool *running) {
   SDL_Event event;
   while (SDL_PollEvent(&event)) {
+    if (HostInput_HandleEvent(&event))
+      continue;
     switch (event.type) {
     case SDL_EVENT_QUIT:
       *running = false;
@@ -2058,60 +996,9 @@ static void AppLoop_PumpEvents(AppBoot *app, bool *running) {
       SessionFatal_RequestKind(kSessionFailure_GraphicsLost,
                                "graphics device lost: %s", SDL_GetError());
       break;
-    case SDL_EVENT_KEY_DOWN:
-      AppLoop_HandleKeyDown(&event);
-      break;
-    case SDL_EVENT_TEXT_INPUT:
-      if (SettingsOverlay_IsOpen())
-        (void)SettingsOverlay_HandleText(event.text.text);
-      break;
-    case SDL_EVENT_MOUSE_BUTTON_DOWN:
-    case SDL_EVENT_MOUSE_MOTION:
-    case SDL_EVENT_MOUSE_WHEEL:
-    case SDL_EVENT_MOUSE_BUTTON_UP:
-      AppLoop_HandleMouse(&event);
-      break;
-    case SDL_EVENT_GAMEPAD_ADDED:
-    case SDL_EVENT_GAMEPAD_REMOVED:
-      InputMap_HandleEvent(&event);
-      break;
-    case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
-    case SDL_EVENT_GAMEPAD_BUTTON_UP:
-    case SDL_EVENT_GAMEPAD_AXIS_MOTION:
 
-      if (SettingsOverlay_IsOpen() &&
-          SettingsOverlay_HandleCaptureEvent(&event))
-        break;
-
-      if (SettingsOverlay_IsOpen()) {
-        if (HostInput_MenuGamepadIsActive())
-          (void)SettingsOverlay_HandleGamepadEvent(&event);
-        break;
-      }
-      InputMap_HandleEvent(&event);
-      break;
-    case SDL_EVENT_KEY_UP:
-      if (SettingsOverlay_IsOpen()) {
-        if (HostInput_MenuKeyboardIsActive())
-          (void)SettingsOverlay_HandleKey(event.key.key, false, false);
-      } else {
-        HostInput_HandleKeyboard((int)event.key.scancode, false, false);
-      }
-      break;
     }
   }
-}
-
-/* Keep automated runs bounded in either presentation path. This used to be
- * checked only inside the headless branch, which meant an otherwise identical
- * real-compositor capture could not exit cleanly after writing its artifact. */
-static bool DevTools_ShouldAutoQuit(void) {
-  static int quit_frames = kUninitializedEnvironmentOption;
-  if (quit_frames == kUninitializedEnvironmentOption) {
-    const char *value = getenv("AR_QUIT_FRAMES");
-    quit_frames = value ? atoi(value) : -1;
-  }
-  return quit_frames > 0 && snes_frame_counter >= quit_frames;
 }
 
 /* The frame loop: pump events, then either service a host pause, step uncapped
@@ -2146,7 +1033,7 @@ static void AppRunMainLoop(AppBoot *app) {
     AppLoop_PumpEvents(app, &running);
     PerformanceMetrics_End(events);
 
-    if (app->localization_exit_requested ||
+    if (HostLocalization_ExitRequested() ||
         RuntimeSettings_LifecycleRequest() != kRuntimeLifecycle_None ||
         SessionFatal_Requested()) {
       running = false;
@@ -2163,7 +1050,7 @@ static void AppRunMainLoop(AppBoot *app) {
     const bool host_paused =
         HostInput_IsPaused() || SettingsOverlay_IsOpen() ||
         HostInput_RenderComparisonOwnsPause();
-    ApplyHostAudioPause(host_paused);
+    AudioSession_SetPaused(host_paused);
     AudioPresentationPolicy_SetAuthentic(
         RenderComparison_UsesAuthenticAudio());
 
@@ -2226,7 +1113,7 @@ static void AppRunMainLoop(AppBoot *app) {
       DrawAndPresentFrame(emulated_frame_present_mode,
                           kPresentationFrameGenerationPhaseNone);
 
-      if (DevTools_ShouldAutoQuit()) running = false;
+      if (DevAutomation_ShouldQuit()) running = false;
       /* AR_PACE=1: throttle headless to ~60fps for real-time listening and
        * observation. The default turbo path advances the serialized APU target
        * with each game tick, so handshake timing remains emulated-time
@@ -2284,7 +1171,7 @@ static void AppRunMainLoop(AppBoot *app) {
         accumulator -= emulation_frame_interval_ns;
         produced_frame = true;
       }
-      if (DevTools_ShouldAutoQuit()) running = false;
+      if (DevAutomation_ShouldQuit()) running = false;
       // A replay/fatal stop can leave undrained catch-up ticks. They must not
       // execute after its final transaction or become an invalid alpha.
       if (!running) accumulator = 0;
@@ -2352,38 +1239,9 @@ static void AppRunMainLoop(AppBoot *app) {
  * shader, or render state goes before the renderer that created it. */
 static int AppShutdown(AppBoot *app, char **argv) {
   const bool fatal_session = SessionFatal_Requested();
-  bool settings_flush_failed = false;
-  bool save_flush_failed = false;
+  const bool settings_flush_failed = !SettingsSession_Finish(fatal_session);
+  bool save_flush_failed = !SaveSlotHost_FlushBatterySave();
 
-  /* Drain accepted settings snapshots before any fatal/failure-recovery save.
-   * A normal exit must not newly persist unrelated session-only overrides. */
-  const bool settings_save_ok = SettingsPersistence_Destroy(s_settings_writer);
-  s_settings_writer = NULL;
-  Settings_SetSaveHost(NULL);
-  if (!settings_save_ok)
-    fprintf(stderr, "[settings] retrying failed settings save during shutdown\n");
-  if ((fatal_session || !settings_save_ok) && !InputReplay_ShouldProtectSaveData()) {
-    char settings_path[kHostPathCapacity];
-    UserDataFile(settings_path, sizeof(settings_path), "settings.ini");
-    settings_flush_failed = !Settings_Save(settings_path);
-    if (settings_flush_failed)
-      fprintf(stderr,
-              "[settings] shutdown write failed; recent preferences may not have been saved\n");
-  }
-
-  /* Rendering is synchronous, so nothing can be mid-render during the reverse-
-   * dependency teardown below. Flush only game-originated battery changes on
-   * exit. Deliberate session-only editor changes re-sync the save-system shadow;
-   * Restart/Exit after one must not turn it into a persistent edit. Skip the
-   * flush during replay so a replayed run never mutates the active save (see
-   * the auto-persist note above — it would break the next replay's alignment). */
-  if (!InputReplay_ShouldProtectSaveData()) {
-    SaveError error = {{0}};
-    if (!SaveSystem_AutoPersistIfChanged(&error)) {
-      save_flush_failed = true;
-      fprintf(stderr, "[saves] shutdown flush failed: %s\n", error.message);
-    }
-  }
   DumpDiagState(fatal_session
                     ? "fatal"
                     : RuntimeSettings_LifecycleRequest() ==
@@ -2391,21 +1249,14 @@ static int AppShutdown(AppBoot *app, char **argv) {
                           ? "restart" : "exit");
   SimPhase0Trace_Close();
   SimRenderMetadata_TraceClose();
-  HostParallelWork_Destroy(s_town_pixel_work);
-  s_town_pixel_work = NULL;
-  s_town_pixel_work_attempted = false;
+  SimFrameCapture_Shutdown();
   ActRaiserActionBg_Shutdown();
   ActRaiserActorArt_Shutdown();
-  ActRaiserRegionalMedia_ClearDonors();
-  ArHostRegionalMediaFiles_Destroy(&s_regional_media);
-  ActRaiserLocalizationRuntime_Shutdown();
-  ActRaiserLocalizationRuntime_SetPresentationHost(NULL);
-  ActRaiserLocalizationRuntime_SetPackHost(NULL);
+  HostLocalization_Shutdown();
 
   /* Stop the sole audio producer before reading observer-owned capture state
    * or removing subscriptions. The run directory remains live for reports. */
-  HostAudio_Shutdown();
-  MusicReplacements_Shutdown();
+  AudioSession_Shutdown();
   SfxCensus_Report();
   NativeAudioTrace_Report();
 
@@ -2419,9 +1270,7 @@ static int AppShutdown(AppBoot *app, char **argv) {
   Diorama_Shutdown(&g_render_device);
   ManualReader_DestroyTextures();
   SettingsOverlay_Destroy();
-  ArLocalizedTextPresenter_SetFontResources(NULL);
-  if (!ArHostFontResources_Destroy(&s_font_resources))
-    fprintf(stderr, "[localized-text] font resources still leased at shutdown\n");
+  HostLocalization_ReleaseFonts();
   /* Release the game coroutine's stack mapping / fiber. Safe here: the game
    * thread is this thread and the main loop has exited, so nothing can be
    * running on that stack. */
@@ -2453,11 +1302,7 @@ static int AppShutdown(AppBoot *app, char **argv) {
   }
   SDL_Quit();
   free(app->rom_data);
-  if(s_managed_slots) {
-    SaveError error={{0}};
-    if(!SaveSlots_Flush(&s_save_slots,&error))save_flush_failed=true;
-    SaveSlots_Close(&s_save_slots);
-  }
+  if (!SaveSlotHost_Close()) save_flush_failed = true;
 
   if (RuntimeSettings_LifecycleRequest() == kRuntimeLifecycle_Restart) {
     if(save_flush_failed || settings_flush_failed || fatal_session) {
@@ -2498,7 +1343,7 @@ int main(int argc, char **argv) {
   AppBoot_InstallSubsystems(&app);
   AppBoot_StartGame(&app);
   ActRaiserLocalizationRuntime_ApplySettings();
-  if (!app.localization_exit_requested)
+  if (!HostLocalization_ExitRequested())
     AppRunMainLoop(&app);
   return AppShutdown(&app, argv);
 }

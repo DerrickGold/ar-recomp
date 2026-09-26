@@ -5,6 +5,9 @@ from pathlib import Path
 import unittest
 import sys
 import tempfile
+import json
+import struct
+import hashlib
 
 spec = importlib.util.spec_from_file_location(
     "compare_pipeline", Path(__file__).resolve().parents[1] /
@@ -27,6 +30,50 @@ def sample(frames, cost, scene="Town 3D"):
 
 
 class PipelinePerformanceTest(unittest.TestCase):
+    def test_missing_or_empty_capture_pairs_are_not_evidence(self):
+        empty = {"final_wram_sha256": "a", "images": {}}
+        for runs in ([], [empty], [empty, empty]):
+            with self.assertRaises(ValueError):
+                module.verify_runs(runs, captures=True)
+
+    def test_truncated_images_cannot_match_as_valid_captures(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)
+            for bad in (b"", b"P6\n1 1\n255\n", b"P6\n0 0\n255\n"):
+                (path / "shot_20.ppm").write_bytes(bad)
+                with self.assertRaises(ValueError):
+                    module.capture_evidence(path, 20, 20, 10)
+            with self.assertRaises(ValueError):
+                module.capture_evidence(path, 20, 20, 0)
+
+    def test_text_replays_release_buttons_and_reject_overlapping_pulses(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "inputs.json"
+            path.write_text(json.dumps({"frames": 5, "pulses": [[2, 2, 32]]}))
+            self.assertEqual(list(struct.iter_unpack("<II", module.replay_bytes(path))),
+                             [(0, 0), (1, 0), (2, 32), (3, 32), (4, 0), (5, 0)])
+            for pulses in ([[-1, 1, 1]], [[5, 2, 1]], [[2, 2, 1], [3, 1, 32]]):
+                path.write_text(json.dumps({"frames": 5, "pulses": pulses}))
+                with self.assertRaises(ValueError):
+                    module.replay_bytes(path)
+
+    def test_render_suite_replays_are_self_contained_and_preserve_legacy_inputs(self):
+        root = Path(__file__).resolve().parents[1]
+        suite = json.loads((root / "tests/fixtures/benchmark/render-regression.json").read_text())
+        for name, case in suite["cases"].items():
+            checkpoint = json.loads((root / case["manifest"]).read_text())["checkpoints"][case["checkpoint"]]
+            path = root / case.get("replay", checkpoint["replay"])
+            with self.subTest(case=name):
+                self.assertTrue(path.is_relative_to(root / "tests/fixtures"))
+                recipe = json.loads(path.read_text())
+                table = [0] * 65536
+                for frame, buttons in struct.iter_unpack("<II", module.replay_bytes(path)):
+                    table[frame] = buttons
+                self.assertTrue(any(table))
+                if "input_table_sha256" in recipe:
+                    self.assertEqual(hashlib.sha256(struct.pack("<65536I", *table)).hexdigest(),
+                                     recipe["input_table_sha256"])
+
     def test_numbered_run_directory_collision_suffix(self):
         original_root = module.ROOT
         try:
@@ -35,7 +82,7 @@ class PipelinePerformanceTest(unittest.TestCase):
                 for name in ('20260912-163604', '20260912-163604-1', '20260912-163604-12'):
                     path = module.ROOT / 'runs' / name
                     path.mkdir(parents=True)
-                    (path / 'dump_wram.bin').write_bytes(b'fixture')
+                    (path / 'dump_wram.bin').write_bytes(bytes(0x20000))
                     result = module.run_evidence(f'[run-dir] runs/{name} (console.log)\n')
                     self.assertEqual(result['run_dir'], str(path))
                 for name in ('20260912-163604-junk', '20260912-163604-1suffix', '20260912-163604/../escape'):

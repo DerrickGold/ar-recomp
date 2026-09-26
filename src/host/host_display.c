@@ -42,6 +42,7 @@
 #include "app/performance_metrics.h"
 #include "present/render_comparison.h"
 #include "host/host_video.h"
+#include "host/host_input.h"
 #include "present/presentation_textures.h"
 #include "host/host_frame_surfaces.h"
 
@@ -101,13 +102,7 @@ static void RefreshRetainedSimCamera(FrameSlot *slot) {
  * every game/PPU field stay paired with the retained tick that captured them. */
 static void RefreshRetainedDioramaCamera(FrameSlot *slot) {
   if (!slot || !slot->diorama_active) return;
-  DioramaCameraPresentationState camera;
-  Diorama_CaptureCameraPresentationState(&camera);
-  slot->diorama_camera_mode = camera.mode;
-  slot->diorama_free_pose = camera.free_pose;
-  slot->diorama_dyncam_baseline = camera.dynamic_baseline;
-  slot->diorama_manual_orbit_yaw = camera.orbit_yaw;
-  slot->diorama_manual_orbit_pitch = camera.orbit_pitch;
+  Diorama_CaptureCameraPresentationState(&slot->diorama_camera.controls);
 }
 
 double HostDisplay_FramesPerSecond(void) {
@@ -751,4 +746,35 @@ PresentCadenceMetrics PresentCadence_GetMetrics(void) {
       .no_present_no_sleep_iteration_count =
           s_no_present_no_sleep_iteration_count,
   };
+}
+
+void HostDisplay_ApplySetting(const SettingDesc *desc) {
+  if (desc->field == &g_settings.window_mode && g_window) {
+    HostDisplay_ApplyWindowMode();
+    HostDisplay_UpdateProperties();
+    HostDisplay_ApplyWindowScale();
+  }
+  if ((desc->field == &g_settings.refresh_mode ||
+       desc->field == &g_settings.uncapped_framerate) && g_window)
+    HostDisplay_ApplyRefreshVsync();
+  if (desc->field == &g_settings.extended_aspect ||
+      desc->field == &g_settings.pixel_aspect ||
+      desc->field == &g_settings.ignore_aspect_ratio) {
+    HostDisplay_ResolveVideoGeometry(true);
+    HostInput_RequestPausedRedraw();
+    return;
+  }
+  if (desc->field == &g_settings.window_scale)
+    HostDisplay_ApplyWindowScale();
+  else if (desc->field == &g_settings.display_mode ||
+           desc->category == kSettingCat_Widescreen)
+    HostDisplay_ApplyWindowScale();
+  if (desc->category == kSettingCat_Display ||
+      desc->category == kSettingCat_Localization ||
+      desc->category == kSettingCat_LocalizationFont ||
+      desc->category == kSettingCat_Widescreen ||
+      Settings_CategoryIsSim3D(desc->category))
+    HostInput_RequestPausedRedraw();
+
+  HostDisplay_InvalidatePresentHistory();
 }

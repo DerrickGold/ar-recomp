@@ -96,4 +96,8 @@ void HostDisplay_YieldIfNoPresent(bool presented,
                                   bool window_hidden,
                                   bool produced_frame);
 
+/* Apply live settings here, beside the subsystem they configure. */
+struct SettingDesc;
+void HostDisplay_ApplySetting(const struct SettingDesc *desc);
+
 #endif /* AR_HOST_DISPLAY_H */

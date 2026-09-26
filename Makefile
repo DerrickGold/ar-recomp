@@ -42,6 +42,10 @@
 #                     `snesbuild build --hermetic` or `make check-cross` for the
 #                     shipped build path.
 #   make check-constants  reject high-risk duplicate literals in authored code.
+#   make check-render CONTROL=/path/to/baseline CANDIDATE=/path/to/game
+#                     compare exact pixels and WRAM in Action, Diorama, Town
+#                     and world navigation. Requires the ROM and a GPU;
+#                     preserves evidence in a new temp directory.
 #   make check-appimage   Linux-only, ROM-free finished AppImage acceptance.
 #                     Uses the same packaging code and pinned tools shipped in
 #                     the portable Builder; see docs/desktop-packaging.md.
@@ -108,6 +112,13 @@ check-shaders:
 
 check-constants:
 	@sh tools/check_constants.sh
+
+.PHONY: check-render
+check-render:
+	@test -n "$(CONTROL)" -a -n "$(CANDIDATE)" || \
+	  { echo 'Set CONTROL and CANDIDATE to the two game binaries.'; exit 1; }
+	python3 tools/check_render_regression.py --control "$(CONTROL)" \
+	  --candidate "$(CANDIDATE)" --rom "$(ROM)"
 
 check-appimage:
 	cmake -S $(PACKAGING)/appimage-check -B build-appimage-check

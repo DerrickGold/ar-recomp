@@ -1,9 +1,7 @@
 /* The sole FrameSlot producer. FrameSlot_Capture runs immediately after
  * RtlDrawPpuFrame, snapshots live game state, and hands presentation an
  * isolated value copy. */
-#include <math.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 
 #include "present/frame_slot.h"
@@ -35,19 +33,10 @@
 #include "snesrecomp/game_runtime.h"
 #include "snesrecomp/game/runtime.h" /* g_ram */
 #include "present/frame_timing.h"
+#include "render/camera_velocity.h"
 #include "app/session_fatal.h"
 #include "replacements/hd_replacement_host.h"
 #include "snesrecomp/runner.h"
-
-/* Self-calibrating velocity normalization uses a recent-activity EMA, not a
- * running or decaying peak. Live traces showed ordinary horizontal velocity at
- * only ~1-2 raw units, while a four-frame stage-entry fall dominated the
- * vertical peak and made later jumps nearly invisible. A ~0.8 s average lets
- * sustained movement set the scale while a scripted one-frame outlier changes
- * it by only kEmaAlpha. kNormMultiple leaves headroom for bursts above typical
- * recent motion. */
-static float s_diorama_velx_avg = 4.0f;
-static float s_diorama_vely_avg = 4.0f;
 
 /* Captures are per PRESENTED frame, not per emulated tick: gameplay can batch
  * catch-up ticks into one capture below 60Hz present rates. Host pause/menu
@@ -64,32 +53,9 @@ void FrameSlot_ResetActionEffects(void) {
   ActionEffectTickClock_Reset(&s_action_effect_tick_clock);
 }
 
-static float NormalizeReactiveVelocity(int16_t v, float *avg,
-                                       int elapsed_ticks) {
-  static const float kFloor = 4.0f;
-  static const float kEmaAlpha = 0.02f;      /* ~0.8s time constant, per-tick */
-  static const float kNormMultiple = 3.0f;   /* "full lean" = 3x recent avg */
-  float av = fabsf((float)v);
-  for (int t = 0; t < elapsed_ticks; t++)
-    *avg += (av - *avg) * kEmaAlpha;
-  float ref = *avg * kNormMultiple;
-  if (ref < kFloor) ref = kFloor;
-  float norm = (float)v / ref;
-  if (norm > 1.0f) norm = 1.0f;
-  if (norm < -1.0f) norm = -1.0f;
-  return norm;
-}
-
-/* B4-kick (followup doc): rising-edge detection for the three event
- * triggers. Game-thread-only state (FrameSlot_Capture's exclusive caller) —
- * present.c only ever sees the resulting one-shot FrameSlot flags. */
-static bool s_diorama_prev_boost;
-static int16_t s_diorama_prev_vely;
-static uint8_t s_diorama_prev_hp;
-
-/* Sim-town reactive camera. Separate averages from the action-stage pair
- * above: the two modes measure different actors moving at different scales,
- * and sharing an accumulator would make every town entry re-calibrate against
+/* Sim-town reactive camera. Keep calibration separate from the action camera:
+ * the two modes measure different actors moving at different scales, and
+ * sharing an accumulator would make every town entry re-calibrate against
  * whatever the last action stage was doing. */
 static float s_sim_velx_avg = 4.0f;
 static float s_sim_vely_avg = 4.0f;
@@ -324,9 +290,9 @@ static void CaptureSimDynamicCamera(FrameSlot *dst, bool in_town,
   int16_t vel_y = (int16_t)ActRaiser_ReadWram16(
       kActRaiserWram_SimAngelRecord + kSimRecordVelocityY);
   dst->sim_dyncam_lean_yaw =
-      NormalizeReactiveVelocity(vel_x, &s_sim_velx_avg, elapsed_ticks);
+      CameraVelocity_Normalize(vel_x, &s_sim_velx_avg, elapsed_ticks);
   dst->sim_dyncam_lean_pitch =
-      NormalizeReactiveVelocity(vel_y, &s_sim_vely_avg, elapsed_ticks);
+      CameraVelocity_Normalize(vel_y, &s_sim_vely_avg, elapsed_ticks);
 
   /* Damage taken, on the frame it applies. Same reasoning as the action
    * stage's revision: an HP decrease is the instant damage lands, whereas an
@@ -537,7 +503,7 @@ void FrameSlot_Capture(FrameSlot *dst, const SimFrameData *annotated_sim) {
     InputMap_GameActionHint(dst->sim_menu.describe_binding,
         sizeof(dst->sim_menu.describe_binding), kInputAction_SimDescribe);
     if (dst->sim_menu.model.phase == kSimMenu_Confirm)
-      dst->sim_menu.model.yes = g_ram[0x0a] == 0;
+      dst->sim_menu.model.yes = g_ram[kActRaiserWram_MenuChoiceScratch] == 0;
     if (!SimMenuArt_Capture(&dst->sim_menu, ppu_view.api, ppu_view.runner))
       SessionFatal_Request("SIM menu artwork capture failed after its native preflight.");
   }
@@ -603,38 +569,7 @@ void FrameSlot_Capture(FrameSlot *dst, const SimFrameData *annotated_sim) {
   dst->diorama_hud_flat = g_settings.diorama_hud_flat;
   /* Tick and retained-frame presentation share the same camera units and mode.
    */
-  DioramaCameraPresentationState diorama_camera;
-  Diorama_CaptureCameraPresentationState(&diorama_camera);
-  dst->diorama_camera_mode = diorama_camera.mode;
-  dst->diorama_free_pose = diorama_camera.free_pose;
-  dst->diorama_dyncam_baseline = diorama_camera.dynamic_baseline;
-  dst->diorama_manual_orbit_yaw = diorama_camera.orbit_yaw;
-  dst->diorama_manual_orbit_pitch = diorama_camera.orbit_pitch;
-  dst->diorama_reactive_strength = g_settings.diorama_reactive_strength;
-  int16_t vel_x = (int16_t)ActRaiser_ReadWram16(kActRaiserWram_PlayerVelocityX);
-  int16_t vel_y = (int16_t)ActRaiser_ReadWram16(kActRaiserWram_PlayerVelocityY);
-  dst->diorama_dyncam_lean_yaw =
-      NormalizeReactiveVelocity(vel_x, &s_diorama_velx_avg, elapsed_ticks);
-  dst->diorama_dyncam_lean_pitch =
-      NormalizeReactiveVelocity(vel_y, &s_diorama_vely_avg, elapsed_ticks);
-
-  /* HP decreases identify the damage frame; the native invulnerability flag
-   * arrives later. Landing is inferred from a fall settling near zero velocity,
-   * using the recent motion average. Boost is a rising edge of the native byte.
-   */
-  uint8_t hp = g_ram[kActRaiserWram_PlayerHp];
-  dst->diorama_dyncam_event_hit = hp < s_diorama_prev_hp;
-  s_diorama_prev_hp = hp;
-
-  bool was_falling =
-      s_diorama_prev_vely > (int16_t)(s_diorama_vely_avg * 0.5f);
-  bool now_settled = abs((int)vel_y) < (int)(s_diorama_vely_avg * 0.15f);
-  dst->diorama_dyncam_event_land = was_falling && now_settled;
-  s_diorama_prev_vely = vel_y;
-
-  bool boost = g_ram[kActRaiserWram_PlayerBoost] != 0;
-  dst->diorama_dyncam_event_boost = boost && !s_diorama_prev_boost;
-  s_diorama_prev_boost = boost;
+  DioramaCamera_CaptureFrame(&dst->diorama_camera, elapsed_ticks);
 
   CaptureSimDynamicCamera(
       dst,

@@ -1,12 +1,19 @@
 #ifndef AR_HOST_INPUT_H
 #define AR_HOST_INPUT_H
+/* Host-owned controls sit above the physical input mapper. They own event
+ * routing, pause, turbo, and redraw requests while emulation is frozen. */
 
 #include <stdbool.h>
 #include <stdint.h>
 
-/* Host-owned controls sit above the physical input mapper. They own pause,
- * turbo, the held joypad word, and the one-shot redraw request used while
- * emulation is frozen. */
+union SDL_Event;
+
+/* Keyboard, mouse, text and gamepad routing, including modal menu/capture
+ * precedence. Returns false for non-input events (window, graphics, quit),
+ * which remain the application loop's responsibility. Device changes and
+ * releases retain their existing routes even when presses are suppressed. */
+bool HostInput_HandleEvent(const union SDL_Event *event);
+
 void HostInput_HandleKeyboard(int scancode, bool pressed, bool repeated);
 void HostInput_ClearHeld(void);
 /* Sample frontend input and apply host-frame scripted overrides. Replay
@@ -51,5 +58,9 @@ bool HostInput_RenderComparisonCaptureRequired(void);
 
 /* Installs the gamepad edge-action bridge after InputMap_Init. */
 void HostInput_InstallActionHandler(void);
+
+/* Apply live settings here, beside the subsystem they configure. */
+struct SettingDesc;
+void HostInput_ApplySetting(const struct SettingDesc *desc);
 
 #endif /* AR_HOST_INPUT_H */

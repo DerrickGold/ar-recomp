@@ -228,7 +228,7 @@ void ActRaiser_PrepareDioramaCapture(const SrPpuStateSnapshot *ppu) {
    * above — mutual exclusion for this frame. */
   bool active = Diorama_IsActiveThisFrame();
   bool want_capture =
-      active || (g_diorama_dump_pending &&
+      active || (HostDevTools_DioramaDumpArmed() &&
                  ActRaiser_IsActionMapGroup(g_ram[kActRaiserWram_MapGroup]));
   g_diorama_frame_active = active;
   if (want_capture) {
@@ -383,7 +383,7 @@ void ActRaiser_PrepareSceneMasks(uint8_t map_group, uint8_t map_number) {
   const bool action_effects_enabled =
       g_settings.action_effect_lighting || g_settings.action_effect_particles;
   if (action_effects_enabled && !g_diorama_frame_active &&
-      !g_diorama_dump_pending &&
+      !HostDevTools_DioramaDumpArmed() &&
       ActionSceneEffects_RoomUsesBg1Decorations(g_ram, kActRaiserWramSize)) {
     const SrPpuOverlayCaptureState *bg1 =
         ActRaiser_PpuCapture(SR_PPU_OVERLAY_BG1);
@@ -400,7 +400,7 @@ void ActRaiser_PrepareSceneMasks(uint8_t map_group, uint8_t map_number) {
     }
   }
   if (action_effects_enabled && !g_diorama_frame_active &&
-      !g_diorama_dump_pending && map_group == kActRaiserMapGroup_Aitos &&
+      !HostDevTools_DioramaDumpArmed() && map_group == kActRaiserMapGroup_Aitos &&
       map_number >= 2 && map_number <= 3) {
     const SrPpuOverlayCaptureState *bg2 =
         ActRaiser_PpuCapture(SR_PPU_OVERLAY_BG2);
@@ -420,7 +420,7 @@ void ActRaiser_PrepareSceneMasks(uint8_t map_group, uint8_t map_number) {
    * leaves native scanout/HUD untouched and never takes an existing HD/dump
    * claim. Binding/capture policy is owned here, before the normal scanout. */
   if (g_settings.sim3d_world_navigation && g_settings.sim3d_sky_palace &&
-      !g_diorama_frame_active && !g_diorama_dump_pending &&
+      !g_diorama_frame_active && !HostDevTools_DioramaDumpArmed() &&
       map_group == kActRaiserMapGroup_NonAction &&
       map_number == kActRaiserNonActionMap_SkyPalace) {
     const SrPpuOverlayCaptureState *bg1 =

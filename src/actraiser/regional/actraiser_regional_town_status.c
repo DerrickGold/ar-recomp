@@ -1,7 +1,6 @@
 #include "actraiser/regional/actraiser_regional_town_status.h"
 #include "actraiser/actraiser_hle_fatal.h"
 
-extern RecompReturn bank_03_82DB_M0X0(CpuState *cpu);
 extern RecompReturn bank_03_BF8C_M0X0(CpuState *cpu);
 extern RecompReturn bank_03_BF8C_M1X0(CpuState *cpu);
 extern RecompReturn bank_03_91AE_M0X0(CpuState *cpu);
@@ -30,9 +29,6 @@ RecompReturn ActRaiserRegionalTownStatus_Run(CpuState *cpu, RecompReturn (*nativ
   const RecompReturn result=native(cpu);
   s_active=false;
   return result;
-}
-RecompReturn ActRaiser_RegionalTownStatusCycle(CpuState *cpu) {
-  return ActRaiserRegionalTownStatus_Run(cpu, bank_03_82DB_M0X0);
 }
 RecompReturn ActRaiser_RegionalTownStatusPlot(CpuState *cpu) {
   return ActRaiserRegionalTownStatus_Run(cpu, bank_03_91AE_M0X0);

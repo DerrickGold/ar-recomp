@@ -17,11 +17,12 @@ bool HostDevTools_DumpSceneAssets(void);
 void HostDevTools_TakeFullSnapshot(void);
 void HostDevTools_AdjustHudOutputScale(int delta_percent);
 bool HostDevTools_InspectWindowPoint(int window_x, int window_y);
-void HostDevTools_DumpDioramaLayers(void);
-/* A one-shot diorama layer dump is armed (Shift+D or AR_DIORAMA_DUMP_GF):
- * the next frame draw captures every diorama plane even with diorama mode
- * off, and the host dumps and clears it after that frame. */
-extern bool g_diorama_dump_pending;
+/* A one-shot diorama layer dump (Shift+D or AR_DIORAMA_DUMP_GF). Arming it
+ * makes the next frame draw capture every diorama plane even with diorama
+ * mode off; the service after that draw writes the layers and disarms. */
+void HostDevTools_ArmDioramaDump(void);
+bool HostDevTools_DioramaDumpArmed(void);
+void HostDevTools_ServiceDioramaDump(void);
 DevToolsCaptureResult HostDevTools_WriteFramebufferPpm(FILE *file, bool require_composite);
 
 /* The inspector selection the renderer highlights; FrameSlot_Capture copies it

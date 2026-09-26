@@ -7,8 +7,8 @@
 #include "present/present.h"   /* FrameSlot */
 #include "sim/sim3d/sim3d.h"     /* Sim3DTuning */
 
-/* Shared by DrawAndPresentFrame's canonical annotation and FrameSlot_Capture's
- * fallback annotation. */
+/* Shared by SimFrameCapture_Produce's canonical annotation and
+ * FrameSlot_Capture's fallback annotation. */
 Sim3DTuning BuildSim3DTuning(void);
 
 /* Clear presentation-only action-effect lifecycle history at discontinuities

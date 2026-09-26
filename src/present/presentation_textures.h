@@ -37,4 +37,8 @@ void PresentationTextures_Create(void);
 void PresentationTextures_HandleDeviceReset(void);
 void PresentationTextures_Destroy(void);
 
+/* Apply live settings here, beside the subsystem they configure. */
+struct SettingDesc;
+bool PresentationTextures_ValidateSetting(const struct SettingDesc *desc);
+
 #endif  /* AR_PRESENTATION_TEXTURES_H */

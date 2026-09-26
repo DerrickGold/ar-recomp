@@ -3228,3 +3228,10 @@ void Diorama_Shutdown(ArRenderDevice *device) {
   DioramaUpload_Reset();
   DioramaEffectBackend_Reset(device);
 }
+
+void Diorama_ApplySetting(const SettingDesc *desc) {
+  if (desc->field == &g_settings.diorama_tilt_x_mrad ||
+      desc->field == &g_settings.diorama_tilt_y_mrad ||
+      desc->field == &g_settings.diorama_distance_x100)
+    Diorama_SeedCameraFromSettings();
+}

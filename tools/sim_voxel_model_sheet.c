@@ -16,9 +16,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "platform/sdl/render_sdl.h"
+/* This SDL diagnostic needs native texture readback for its BMP output. */
+#include "platform/sdl/render_sdl_internal.h"
 #include "render/scene3d_math.h"
 #include "sim/sim3d/sim3d_depth_pass.h"
+#include "sim/sim3d/sim3d_performance.h"
 #include "sim/voxels/sim_background_bridge.h"
 #include "sim/voxels/sim_background_voxel_biome.h"
 #include "sim/voxels/sim_background_voxel_model_cache.h"
@@ -32,8 +34,7 @@ enum {
   kSourcePixels = 52,
 };
 
-static ArRenderDevice g_render_device;
-static ArSdlRenderBackend g_render_backend;
+static ArRenderDevice s_render_device;
 
 static const float kContactLiftPixels = 0.06f;
 
@@ -56,24 +57,6 @@ void Sim3DPerformance_AddDraw(uint64_t vertices, uint64_t indices) {
 void Sim3DPerformance_AddGeometryUpload(uint64_t bytes) { (void)bytes; }
 void Sim3DPerformance_AddGeometryCopy(uint64_t bytes, uint64_t calls) { (void)bytes; (void)calls; }
 void Sim3DPerformance_AddAtlasCopy(uint64_t bytes) { (void)bytes; }
-
-static SDL_Renderer *CreateProductionRenderer(SDL_Window *window) {
-  SDL_PropertiesID properties = SDL_CreateProperties();
-  if (!properties) return NULL;
-  SDL_SetStringProperty(properties,
-      SDL_PROP_RENDERER_CREATE_NAME_STRING, SDL_GPU_RENDERER);
-  SDL_SetPointerProperty(properties,
-      SDL_PROP_RENDERER_CREATE_WINDOW_POINTER, window);
-  SDL_SetBooleanProperty(properties,
-      SDL_PROP_RENDERER_CREATE_GPU_SHADERS_SPIRV_BOOLEAN, true);
-  SDL_SetBooleanProperty(properties,
-      SDL_PROP_RENDERER_CREATE_GPU_SHADERS_DXIL_BOOLEAN, true);
-  SDL_SetBooleanProperty(properties,
-      SDL_PROP_RENDERER_CREATE_GPU_SHADERS_MSL_BOOLEAN, true);
-  SDL_Renderer *renderer = SDL_CreateRendererWithProperties(properties);
-  SDL_DestroyProperties(properties);
-  return renderer;
-}
 
 static float FootprintWidth(const SimBackgroundVoxelObject *object) {
   if (object->kind == kSimBackgroundVoxel_Bridge)
@@ -180,8 +163,7 @@ static void AppendContact(
 }
 
 static bool AppendModel(const SimBackgroundVoxelObject *object,
-                        const SimBackgroundVoxelRenderParams *params,
-                        uint32_t stamp) {
+                        const SimBackgroundVoxelRenderParams *params) {
   const SimBackgroundVoxelBiome biome =
       SimBackgroundVoxelBiome_ForTown(object->town);
   const SimBackgroundVoxelModelShadingKey shading_key = {
@@ -191,9 +173,9 @@ static bool AppendModel(const SimBackgroundVoxelObject *object,
     .biome = (uint8_t)biome,
   };
   const SimBackgroundVoxelModelShading *shading = NULL;
-  const SimBackgroundVoxelModel *model = SimBackgroundVoxelModelCache_Get(
+  const SimBackgroundVoxelModelView *model = SimBackgroundVoxelModelCache_Get(
       object, kSimBackgroundVoxelDetail_Ultra,
-      kSimBackgroundVoxelStyle_Varied, stamp,
+      kSimBackgroundVoxelStyle_Varied,
       &shading_key, &shading);
   if (!model || !model->face_count || model->overflow || !shading)
     return false;
@@ -252,17 +234,23 @@ static bool AppendModel(const SimBackgroundVoxelObject *object,
 
 static bool SaveCurrentPass(SDL_Renderer *renderer, const char *path) {
   ArRenderTexture output_handle = Sim3DDepthPass_Submit(
-      &g_render_device, ArRenderTexture_Invalid());
-  SDL_Texture *output = ArSdlRenderBackend_UnwrapTexture(output_handle);
-  if (!output || !SDL_SetRenderTarget(renderer, output)) return false;
+      &s_render_device, ArRenderTexture_Invalid());
+  ArRenderTargetState previous;
+  if (!ArRenderTexture_IsValid(output_handle) ||
+      ArRenderDevice_BeginTarget(&s_render_device, output_handle, &previous) !=
+          kArRenderTargetBegin_Ready)
+    return false;
   SDL_Surface *readback = SDL_RenderReadPixels(renderer, NULL);
+  if (!ArRenderDevice_EndTarget(&s_render_device, &previous)) {
+    SDL_DestroySurface(readback);
+    return false;
+  }
   if (!readback) return false;
   SDL_Surface *argb = SDL_ConvertSurface(readback, SDL_PIXELFORMAT_ARGB8888);
   SDL_DestroySurface(readback);
   if (!argb) return false;
   const bool saved = SDL_SaveBMP(argb, path);
   SDL_DestroySurface(argb);
-  SDL_SetRenderTarget(renderer, NULL);
   return saved;
 }
 
@@ -310,19 +298,18 @@ static bool RenderEntry(SDL_Renderer *renderer,
                         const SimBackgroundVoxelRenderParams *base_params,
                         const char *output_dir,
                         const AuditEntry *entry,
-                        FILE *manifest,
-                        uint32_t stamp) {
+                        FILE *manifest) {
   SimBackgroundVoxelRenderParams params = *base_params;
   params.town = entry->object.town;
   SimBackgroundVoxelProject_Prepare(&params);
   if (!Sim3DDepthPass_Begin(
-          &g_render_device, kRenderWidth, kRenderHeight,
+          &s_render_device, kRenderWidth, kRenderHeight,
           kArRenderFilter_Nearest)) {
     fprintf(stderr, "depth begin failed: %s\n",
             Sim3DDepthPass_LastError());
     return false;
   }
-  if (!AppendModel(&entry->object, &params, stamp)) {
+  if (!AppendModel(&entry->object, &params)) {
     fprintf(stderr, "model build failed: %s\n", entry->label);
     return false;
   }
@@ -340,13 +327,11 @@ static bool RenderEntry(SDL_Renderer *renderer,
 static bool EmitEntry(SDL_Renderer *renderer,
                       const SimBackgroundVoxelRenderParams *params,
                       const char *output_dir, FILE *manifest,
-                      uint32_t *stamp,
                       const char *section, const char *filename,
                       const char *label,
                       SimBackgroundVoxelObject object) {
   const AuditEntry entry = {section, filename, label, object};
-  return RenderEntry(renderer, params, output_dir, &entry, manifest,
-                     (*stamp)++);
+  return RenderEntry(renderer, params, output_dir, &entry, manifest);
 }
 
 static bool RenderAll(SDL_Renderer *renderer, const char *output_dir,
@@ -374,7 +359,6 @@ static bool RenderAll(SDL_Renderer *renderer, const char *output_dir,
     .viewport = {0, 0, kRenderWidth, kRenderHeight},
     .matrix = matrix,
   };
-  uint32_t stamp = 1;
   static const char *town_names[6] = {
     "Fillmore", "Bloodpool", "Kasandora",
     "Aitos", "Marahna", "Northwall",
@@ -398,16 +382,16 @@ static bool RenderAll(SDL_Renderer *renderer, const char *output_dir,
         object.development_level = (uint8_t)level;
         object.flags = alternate
             ? kSimBackgroundVoxel_AlternateFacing : 0;
-        if (!EmitEntry(renderer, &params, output_dir, manifest, &stamp,
+        if (!EmitEntry(renderer, &params, output_dir, manifest,
                        "Regional houses", filename, label, object))
           return false;
       }
     }
   }
 
-#define EMIT(section_, filename_, label_, object_)                       \
+#define EMIT(section_, filename_, label_, object_)                         \
   do {                                                                   \
-    if (!EmitEntry(renderer, &params, output_dir, manifest, &stamp,      \
+    if (!EmitEntry(renderer, &params, output_dir, manifest,                \
                    section_, filename_, label_, object_))                \
       return false;                                                      \
   } while (0)
@@ -558,25 +542,17 @@ int main(int argc, char **argv) {
     SDL_Quit();
     return 1;
   }
-  SDL_Renderer *renderer = CreateProductionRenderer(window);
-  if (!renderer) {
+  if (!ArSdlRenderBackend_CreateForWindow(&s_render_device, window, NULL)) {
     fprintf(stderr, "GPU renderer creation failed: %s\n", SDL_GetError());
     SDL_DestroyWindow(window);
     SDL_Quit();
     return 1;
   }
-  if (!ArSdlRenderBackend_Bind(
-          &g_render_device, &g_render_backend, renderer)) {
-    fprintf(stderr, "render-device binding failed: %s\n", SDL_GetError());
-    SDL_DestroyRenderer(renderer);
-    SDL_DestroyWindow(window);
-    SDL_Quit();
-    return 1;
-  }
-  if (!Sim3DDepthPass_Require(&g_render_device)) {
+  SDL_Renderer *renderer = ArSdlRenderBackend_Renderer(&s_render_device);
+  if (!Sim3DDepthPass_Require(&s_render_device)) {
     fprintf(stderr, "D32 pass unavailable: %s\n",
             Sim3DDepthPass_LastError());
-    SDL_DestroyRenderer(renderer);
+    ArSdlRenderBackend_Destroy(&s_render_device);
     SDL_DestroyWindow(window);
     SDL_Quit();
     return 1;
@@ -588,7 +564,7 @@ int main(int argc, char **argv) {
   FILE *manifest = fopen(manifest_path, "w");
   if (!manifest) {
     perror(manifest_path);
-    SDL_DestroyRenderer(renderer);
+    ArSdlRenderBackend_Destroy(&s_render_device);
     SDL_DestroyWindow(window);
     SDL_Quit();
     return 1;
@@ -598,9 +574,8 @@ int main(int argc, char **argv) {
   fclose(manifest);
 
   SimBackgroundVoxelModelCache_Reset();
-  Sim3DDepthPass_Reset(&g_render_device);
-  ArRenderDevice_Reset(&g_render_device);
-  SDL_DestroyRenderer(renderer);
+  Sim3DDepthPass_Reset(&s_render_device);
+  ArSdlRenderBackend_Destroy(&s_render_device);
   SDL_DestroyWindow(window);
   SDL_Quit();
   return rendered ? 0 : 1;

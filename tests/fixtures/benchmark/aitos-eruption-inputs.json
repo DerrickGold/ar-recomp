@@ -1,0 +1,27 @@
+{
+  "description": "Controller inputs from aitos-eruption. Pulses are [game frame, duration, SNES input bits]; repeated legacy records resolve to the last input for that frame.",
+  "frames": 21845,
+  "input_table_sha256": "4460c4ac6e5c72188ce6050987747caebbf1e1f6db0f15a3ef3c3dfee24ebf14",
+  "pulses": [
+    [140, 9, 1],
+    [180, 7, 1],
+    [198, 7, 1],
+    [213, 7, 1],
+    [303, 6, 1],
+    [319, 8, 1],
+    [372, 79, 64],
+    [451, 47, 80],
+    [498, 116, 64],
+    [617, 7, 1],
+    [671, 4, 128],
+    [681, 5, 128],
+    [697, 9, 1],
+    [758, 9, 1],
+    [832, 8, 1],
+    [855, 9, 1],
+    [877, 9, 1],
+    [927, 21, 64],
+    [948, 16, 80],
+    [964, 68, 16]
+  ]
+}

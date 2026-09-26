@@ -1,0 +1,22 @@
+{
+  "schema": "actraiser-render-checkpoints-v1",
+  "checkpoints": {
+    "world-navigation": {
+      "description": "Town menu to the enhanced world map, Palace movement and menu handoff.",
+      "replay": "tests/fixtures/benchmark/world-navigation-inputs.json",
+      "sram_base64": "tests/fixtures/sim3d/sim-actions-seed.srm.b64",
+      "sram_sha256": "1a6f35b3c8ba771633b86f07bc924eb1b45dceede5f6c8543442bc511ec86749",
+      "settings": "tests/fixtures/sim3d/world-navigation-settings.ini",
+      "quit_frames": 2200,
+      "env": {
+        "AR_SIM3D": "1",
+        "AR_SIM_MENU_STYLE": "1",
+        "AR_SIM3D_WORLD_NAV": "1",
+        "AR_SIM3D_WORLD_NAV_CLOUDS": "0",
+        "AR_SIM3D_WORLD_NAV_CLOUD_SHADOWS": "0",
+        "AR_SIM3D_CLOUD_DRIFT": "0",
+        "AR_SIM3D_WORLD_NAV_ATMOSPHERE": "0"
+      }
+    }
+  }
+}

@@ -2,6 +2,16 @@ if(NOT DEFINED GAME_SOURCE_ROOT)
     message(FATAL_ERROR "GAME_SOURCE_ROOT is required")
 endif()
 
+# The reactive camera receives its game observations and clocks explicitly.
+# Keeping live reads in diorama_host.c prevents retained presents from sampling
+# a newer game tick or a second, inconsistent clock inside the response model.
+file(READ "${GAME_SOURCE_ROOT}/diorama/diorama_camera.c" _camera_contents)
+if(_camera_contents MATCHES
+   "(^|[^A-Za-z0-9_])(g_settings|g_ram|g_ppu|ActRaiser_ReadWram16|HostClock_Nanoseconds|HostClock_Milliseconds)([^A-Za-z0-9_]|$)")
+    message(FATAL_ERROR
+        "Reactive camera bypasses its captured inputs: diorama/diorama_camera.c")
+endif()
+
 # Every pattern below must match at least one file. A pattern that matches
 # nothing is almost always a file that was moved or renamed, and it would let
 # this check pass while checking nothing. The explicit file lists need no such
@@ -66,6 +76,8 @@ list(APPEND _portable_render_files
     "${GAME_SOURCE_ROOT}/diorama/diorama_aperture.h"
     "${GAME_SOURCE_ROOT}/diorama/diorama_effect_backend.h"
     "${GAME_SOURCE_ROOT}/diorama/diorama.c"
+    "${GAME_SOURCE_ROOT}/diorama/diorama_camera.c"
+    "${GAME_SOURCE_ROOT}/diorama/diorama_camera.h"
     "${GAME_SOURCE_ROOT}/diorama/diorama_performance.c"
     "${GAME_SOURCE_ROOT}/diorama/diorama_performance.h"
     "${GAME_SOURCE_ROOT}/host/host_clock.h"

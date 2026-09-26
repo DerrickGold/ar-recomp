@@ -15,6 +15,16 @@ _Static_assert(kActRaiserWramSize == kSnesWramSize,
 
 extern uint8 g_ram[kActRaiserWramSize];
 
+/* The SNES does not clear WRAM at power-on. The reference emulator fills it
+ * with $55 and the title sequence depends on that, so boot fills g_ram the
+ * same way; until the game initializes its frame counter,
+ * kActRaiserWram_GameFrame therefore reads kActRaiserPowerOnGameFrame. */
+enum {
+  kActRaiserPowerOnWramFill = 0x55,
+  kActRaiserPowerOnGameFrame =
+      kActRaiserPowerOnWramFill | (kActRaiserPowerOnWramFill << 8),
+};
+
 typedef enum ActRaiserMapGroup {
   kActRaiserMapGroup_NonAction = 0x00,
   kActRaiserMapGroup_Fillmore = 0x01,
@@ -57,6 +67,9 @@ enum {
 /* Stable low-WRAM state addresses. These are offsets within g_ram's $7E bank
  * mirror, not general SNES bus addresses. */
 enum {
+  /* Native menu scratch: item-slot selection and yes/no choice, depending on
+   * the active menu transaction. The confirmation's low byte is zero for Yes. */
+  kActRaiserWram_MenuChoiceScratch = 0x000a,
   kActRaiserWram_MapGroup = 0x0018,
   kActRaiserWram_CurrentMap = 0x0019,
   kActRaiserWram_DestinationMap = 0x001A,

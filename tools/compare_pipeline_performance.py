@@ -14,7 +14,9 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import statistics
+import struct
 import subprocess
 import tempfile
 
@@ -76,6 +78,28 @@ def digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def replay_bytes(path: Path) -> bytes:
+    """Controller pulses only; `frames` is the final index, including boot frame 0."""
+    if path.suffix != ".json":
+        return path.read_bytes()
+    recipe = json.loads(path.read_text())
+    frames = recipe["frames"]
+    if type(frames) is not int or not 1 <= frames <= 65535:
+        raise ValueError("Replay must contain 1..65535 game frames")
+    inputs = [0] * (frames + 1)
+    for start, length, buttons in recipe["pulses"]:
+        if (any(type(n) is not int for n in (start, length, buttons)) or
+                start < 0 or length < 1 or start + length > frames + 1 or
+                not 0 < buttons <= 0xffff):
+            raise ValueError("Invalid controller pulse")
+        for frame in range(start, start + length):
+            if inputs[frame]:
+                raise ValueError("Overlapping controller pulses")
+            inputs[frame] = buttons
+    return b"".join(struct.pack("<II", frame, inputs[frame])
+                    for frame in range(frames + 1))
+
+
 def resolve(path: str) -> Path:
     candidate = Path(path)
     return (candidate if candidate.is_absolute() else ROOT / candidate).resolve()
@@ -96,28 +120,45 @@ def validate_run_completion(log: str, expected_ticks: int) -> dict:
     return {"tick_presents": expected_ticks, "re_presents": 0}
 
 
-def run_evidence(log: str) -> dict:
+def run_evidence(log: str, root: Path | None = None) -> dict:
     match = re.search(r"\[run-dir\] (runs/\d+-\d+(?:-\d+)?)(?:\s|$)", log)
     if not match:
         raise ValueError("Missing run bundle")
-    run_dir = ROOT / match[1]
+    run_dir = (ROOT if root is None else root) / match[1]
+    if (run_dir / "dump_wram.bin").stat().st_size != 0x20000:
+        raise ValueError("Incomplete final WRAM dump")
     return {"run_dir": str(run_dir),
             "final_wram_sha256": digest(run_dir / "dump_wram.bin")}
 
 
 def capture_evidence(run_dir: Path, start: int, end: int, every: int) -> dict:
+    if start < 0 or end < start or end > 65535 or every < 1:
+        raise ValueError("Invalid composite capture schedule")
     expected = {f"shot_{frame}.ppm" for frame in range(start, end + 1)
                 if frame % every == 0}
     images = {path.name: digest(path) for path in run_dir.glob("shot_*.ppm")}
     if not expected or images.keys() != expected:
-        raise ValueError("Composite capture schedule incomplete or unexpected")
+        missing = sorted(expected - images.keys())
+        extra = sorted(images.keys() - expected)
+        raise ValueError("Composite capture schedule incomplete or unexpected: "
+                         f"{len(missing)} missing {missing[:10]}, "
+                         f"{len(extra)} extra {extra[:10]}")
+    for name in images:
+        parts = (run_dir / name).read_bytes().split(b"\n", 3)
+        if len(parts) != 4 or parts[0] != b"P6" or parts[2] != b"255":
+            raise ValueError(f"Invalid composite PPM: {name}")
+        width, height = map(int, parts[1].split())
+        if width <= 0 or height <= 0 or len(parts[3]) != width * height * 3:
+            raise ValueError(f"Incomplete composite PPM: {name}")
     return images
 
 
 def verify_runs(results: list[dict], captures: bool = False) -> None:
-    if not results or len({r["final_wram_sha256"] for r in results}) != 1:
+    if (len(results) < 2 or not results[0]["final_wram_sha256"] or
+            len({r["final_wram_sha256"] for r in results}) != 1):
         raise ValueError("Simulation state differs; discard comparison")
-    if captures and any(r["images"] != results[0]["images"] for r in results[1:]):
+    if captures and (not results[0]["images"] or
+                     any(r["images"] != results[0]["images"] for r in results[1:])):
         raise ValueError("Final composite pixels differ; inspect captures")
 
 
@@ -130,12 +171,14 @@ def main() -> None:
     parser.add_argument("--manifest", type=Path,
                         default=ROOT / "tests/fixtures/sim3d/checkpoints.json")
     parser.add_argument("--checkpoint", default="D7-voxel-town")
+    parser.add_argument("--replay", type=Path, help="Override the checkpoint's controller-input fixture")
     parser.add_argument("--scene", default="Town 3D")
     parser.add_argument("--control-scene", help="Previous label when comparing an instrumentation rename")
     parser.add_argument("--map", dest="map_id", help="Exact hexadecimal group/room, e.g. 04/04")
     parser.add_argument("--quit-frames", type=int, default=1800)
     parser.add_argument("--verify-only", action="store_true",
                         help="Two untimed runs comparing exact composite pixels and WRAM")
+    parser.add_argument("--require-scene", help="Require this exact scene in the pipeline log")
     parser.add_argument("--capture-from", type=int, default=400)
     parser.add_argument("--capture-to", type=int, default=1700)
     parser.add_argument("--capture-every", type=int, default=100)
@@ -162,7 +205,7 @@ def main() -> None:
         map_id = map_id.lower()
     if args.control_scene and map_id is None:
         parser.error("--control-scene requires a room filter to exclude unrelated scenes")
-    replay = resolve(checkpoint["replay"])
+    replay = resolve(str(args.replay)) if args.replay else resolve(checkpoint["replay"])
     settings = resolve(checkpoint["settings"])
     seed_path = resolve(checkpoint.get("sram_base64") or checkpoint["sram"])
     seed = seed_path.read_bytes()
@@ -173,7 +216,8 @@ def main() -> None:
         raise ValueError("SRAM fixture length/hash mismatch")
     binaries = {"control": args.control.resolve(), "candidate": args.candidate.resolve()}
     inputs = [*binaries.values(), args.rom.resolve(), args.config.resolve(),
-              args.manifest.resolve(), replay, settings, seed_path, Path(__file__).resolve()]
+              args.manifest.resolve(), replay, settings, seed_path,
+              ROOT / "diorama-layers.ini", Path(__file__).resolve()]
     hashes = {str(path): digest(path) for path in inputs}
     overrides = {}
     for item in args.set:
@@ -186,19 +230,13 @@ def main() -> None:
         output.mkdir(parents=True, exist_ok=False)
     else:
         output = Path(tempfile.mkdtemp(prefix="actraiser-pipeline-"))
-    # Keep private fixture copies even though replay mode also protects saves.
-    isolated_seed = output / "seed.srm"
-    isolated_settings = output / "settings.ini"
-    isolated_seed.write_bytes(seed)
-    isolated_settings.write_bytes(settings.read_bytes())
     env = {k: v for k, v in os.environ.items()
            if not k.startswith(("AR_", "SNESRECOMP_"))}
     env.update(checkpoint.get("env", {}))
     env.update(overrides)
     # Safety and measurement invariants cannot be overridden through --set.
     env.update(AR_HEADLESS="1", AR_HEADLESS_VIDEO="1", AR_ENABLE_RUN_DIR="1",
-               AR_INPUT_REPLAY=str(replay), AR_SAVE_NATIVE_PATH=str(isolated_seed),
-               AR_SETTINGS_PATH=str(isolated_settings), AR_PIPELINE_PERF="1",
+               AR_REPLAY_NOSTOP="1", AR_PIPELINE_PERF="1",
                AR_PERFORMANCE_OVERLAY="Off", AR_REFRESH_MODE="Unlimited",
                AR_QUIT_FRAMES=str(args.quit_frames))
     for name in tuple(env):
@@ -207,7 +245,8 @@ def main() -> None:
     for name in ("AR_INPUT_RECORD", "AR_PERF", "AR_ACTION_PERF", "AR_SIM3D_PERF", "AR_DUMP_EVERY"):
         env.pop(name, None)
     if args.verify_only:
-        env.pop("AR_PIPELINE_PERF")
+        if not args.require_scene:
+            env.pop("AR_PIPELINE_PERF")
         env.update(AR_SIM3D_CLOUD_DRIFT="0", AR_SHOT_REQUIRE_COMPOSITE="1",
                    AR_SHOT_FROM=str(args.capture_from), AR_SHOT_TO=str(args.capture_to),
                    AR_SHOT_EVERY=str(args.capture_every))
@@ -226,8 +265,20 @@ def main() -> None:
         if any(digest(Path(path)) != expected for path, expected in hashes.items()):
             raise RuntimeError("Benchmark inputs changed; discard this comparison")
         env["AR_RENDER_WORKERS"] = str(report["workers"][variant])
+        # Keep all runtime outputs and campaigns private, including paths not
+        # covered by the replay's battery/settings persistence protection.
+        work = output / f"{index}-{variant}"
+        work.mkdir()
+        (work / "game-assets").symlink_to(ROOT / "game-assets", target_is_directory=True)
+        shutil.copyfile(ROOT / "diorama-layers.ini", work / "diorama-layers.ini")
+        isolated_seed = work / "seed.srm"
+        isolated_settings = work / "settings.ini"
         isolated_seed.write_bytes(seed)
         isolated_settings.write_bytes(settings.read_bytes())
+        isolated_replay = work / "input.rec"
+        isolated_replay.write_bytes(replay_bytes(replay))
+        env.update(AR_USER_DATA_DIR=str(work), AR_SAVE_NATIVE_PATH=str(isolated_seed),
+                   AR_SETTINGS_PATH=str(isolated_settings), AR_INPUT_REPLAY=str(isolated_replay))
         log_path = output / f"{index}-{variant}.log"
         with log_path.open("w") as log:
             subprocess.run([str(binaries[variant]), str(args.rom.resolve()),
@@ -239,7 +290,10 @@ def main() -> None:
         scene = args.control_scene if variant == "control" and args.control_scene else args.scene
         log = log_path.read_text()
         completion = validate_run_completion(log, args.quit_frames)
-        result = run_evidence(log)
+        if args.require_scene and not re.search(
+                rf"\[pipeline-perf\] scene={re.escape(args.require_scene)} ", log):
+            raise ValueError(f"Required scene was never presented: {args.require_scene}")
+        result = run_evidence(log, work)
         result.update(completion)
         if args.verify_only:
             if "capture=failed" in log or "capture=native-framebuffer" in log:

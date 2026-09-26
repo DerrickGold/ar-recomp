@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "diorama_coverage.h"
+#include "diorama_camera.h"
 #include "diorama_planes.h"
 #include "diorama_skybox_uv.h"
 #include "present/presentation_outcome.h"
@@ -47,34 +48,6 @@ float Diorama_DragRadPerPx(void);
 float Diorama_ZoomStep(void);
 bool Diorama_IsDragging(void);
 void Diorama_SetDragging(bool dragging);
-
-/* B4-split (followup doc): the camera pose Diorama_Composite renders with,
- * passed in by the caller instead of Composite reading producer-owned
- * s_diorama_cam directly. Free Cam mode: the caller passes the authored pose
- * (snapshotted through FrameSlot). Dynamic Cam mode: the caller passes the
- * presentation-owned render camera with damped sway—see present.c's
- * s_diorama_render_cam. fov_y isn't
- * part of this: it's a fixed camera constant (kDioramaFovY, diorama.c),
- * never authored per-mode. */
-typedef struct DioramaCameraPose {
-  float tilt_x;
-  float tilt_y;
-  float distance;
-} DioramaCameraPose;
-
-/* Host-owned camera fields that may change between emulation ticks. Retained
- * action frames refresh only this snapshot; game/PPU state and reactive camera
- * inputs remain the immutable values captured with the frame. */
-typedef struct DioramaCameraPresentationState {
-  int mode;
-  DioramaCameraPose free_pose;
-  DioramaCameraPose dynamic_baseline;
-  float orbit_yaw;
-  float orbit_pitch;
-} DioramaCameraPresentationState;
-
-void Diorama_CaptureCameraPresentationState(
-    DioramaCameraPresentationState *state);
 
 /* Shared by focal framing and the rendered layer mesh. */
 enum { kDioramaPlaneSubdivY = 6 };
@@ -259,5 +232,9 @@ void Diorama_ResetRendererResources(ArRenderDevice *device);
 void Diorama_Shutdown(ArRenderDevice *device);
 
 void Diorama_FlushSettingsIfDirty(void);
+
+/* Apply live settings here, beside the subsystem they configure. */
+struct SettingDesc;
+void Diorama_ApplySetting(const struct SettingDesc *desc);
 
 #endif  /* AR_DIORAMA_H */

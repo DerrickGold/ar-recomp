@@ -17,8 +17,9 @@ cd "$repo_root"
 mkdir -p "$render_dir" "$card_dir" "$section_dir" \
   "$(dirname "$output_path")"
 
-cc -std=c11 -O2 -Isrc -Isrc/sim -I/opt/homebrew/include \
+cc -std=c11 -O2 -Isrc -Isnesrecomp-go/runtime/include -I/opt/homebrew/include \
   tools/sim_voxel_model_sheet.c \
+  src/app/performance_metrics.c \
   src/render/scene3d_math.c \
   src/render/render_device.c \
   src/platform/sdl/render_sdl.c \

@@ -12,7 +12,6 @@ void ActRaiserRegionalTownStatus_Reset(void);
 RecompReturn ActRaiserRegionalTownStatus_Run(CpuState *cpu, RecompReturn (*native)(CpuState *));
 bool ActRaiser_RegionalTownStatusCycleEntry(CpuState *cpu);
 bool ActRaiser_RegionalTownStatusReportEntry(CpuState *cpu);
-RecompReturn ActRaiser_RegionalTownStatusCycle(CpuState *cpu);
 RecompReturn ActRaiser_RegionalTownStatusReport(CpuState *cpu);
 RecompReturn ActRaiser_RegionalTownStatusPlot(CpuState *cpu);
 RecompReturn ActRaiser_RegionalTownStatusVisiblePlot(CpuState *cpu);

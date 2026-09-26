@@ -20,6 +20,8 @@ if(NOT _result STREQUAL "0")
 endif()
 
 set(_cases
+    "diorama/diorama_camera.c"
+    "diorama/diorama_camera.h"
     "app/performance_metrics.c"
     "app/performance_overlay.c"
     "app/performance_boundary_probe.h"
@@ -69,6 +71,20 @@ foreach(_relative IN LISTS _cases)
         file(REMOVE "${_path}")
     endif()
 endforeach()
+set(_camera_path "${_scratch}/diorama/diorama_camera.c")
+file(READ "${_camera_path}" _original)
+foreach(_probe IN ITEMS "g_settings.diorama_camera_mode" "g_ram[0]" "HostClock_Nanoseconds()")
+    file(WRITE "${_camera_path}" "${_original}\nvoid camera_probe(void) { (void)${_probe}; }\n")
+    execute_process(
+        COMMAND "${CMAKE_COMMAND}" "-DGAME_SOURCE_ROOT=${_scratch}" -P "${BOUNDARY_CHECK}"
+        RESULT_VARIABLE _result OUTPUT_VARIABLE _stdout ERROR_VARIABLE _stderr)
+    if(_result STREQUAL "0" OR NOT _stderr MATCHES "Reactive camera bypasses its captured inputs")
+        file(REMOVE_RECURSE "${_scratch}")
+        message(FATAL_ERROR "Camera boundary accepted or misclassified ${_probe}: ${_stdout}${_stderr}")
+    endif()
+endforeach()
+file(WRITE "${_camera_path}" "${_original}")
+
 set(_font_cases
     "localization/text_backend.h"
     "localization/font_resource.c"

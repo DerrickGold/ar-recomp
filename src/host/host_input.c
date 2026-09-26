@@ -1,4 +1,4 @@
-#include "host_input.h"
+#include "host/host_input.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -14,6 +14,8 @@
 #include "app/input_map.h"
 #include "present/present.h"
 #include "app/runtime_settings.h"
+#include "app/runtime_diagnostics.h"
+#include "present/display_geometry.h"
 #include "present/render_comparison.h"
 #include "app/session_fatal.h"
 #include "dev/host_dev_tools.h"
@@ -22,6 +24,12 @@
 #include "settings_overlay/settings_overlay.h"
 #include "sim/sim3d/sim3d.h"
 #include "constants.h"
+#include "host/host_display.h"
+#include "app/user_data_dir.h"
+#include "manual/manual_reader.h"
+#include "actraiser_game.h"
+#include "snesrecomp/game/runtime.h"
+
 #include "present/presentation_textures.h"
 
 static bool s_turbo;
@@ -313,4 +321,264 @@ static void OnGamepadHostAction(InputAction action) {
 
 void HostInput_InstallActionHandler(void) {
   InputMap_SetActionHandler(OnGamepadHostAction);
+}
+
+/* Capture wins over hotkeys; then the active menu device gets first use.
+ * Suppression applies only to key-down. Key-up remains in the event pump so
+ * previously accepted keys can always be released. */
+static void HandleKeyDown(const SDL_Event *event) {
+  if (SettingsOverlay_HandleCaptureEvent(event))
+    return;
+  if (HostInput_KeyboardIsSuppressed())
+    return;
+  if (SettingsOverlay_IsOpen()) {
+    if (HostInput_MenuKeyboardIsActive()) {
+      bool was_open = true;
+      bool consumed = SettingsOverlay_HandleKey(event->key.key, true,
+                                                event->key.repeat != 0);
+      if (was_open && !SettingsOverlay_IsOpen())
+        HostInput_ClearHeld();
+      if (consumed)
+        return;
+    } else {
+      return;
+    }
+  }
+  if (!event->key.repeat &&
+      (event->key.key == SDLK_ESCAPE || event->key.key == SDLK_F1)) {
+    HostInput_ClearHeld();
+    SettingsOverlay_Open();
+  } else if (event->key.key == SDLK_P) {
+    if (SceneInspector_HasSelection()) {
+      const bool inspector_owned_pause = HostInput_InspectorOwnsPause();
+      HostInput_CloseInspectorSelection();
+      if (!inspector_owned_pause)
+        HostInput_TogglePause();
+    } else {
+      HostInput_TogglePause();
+    }
+  } else if (event->key.key == SDLK_T) {
+    HostInput_ToggleTurbo();
+  } else if (event->key.key == SDLK_F3) {
+    if (!event->key.repeat) {
+      const SettingDesc *inspector = Settings_Find("scene_inspector");
+      SettingChangeResult result =
+          Settings_SetLong(inspector, !g_settings.scene_inspector);
+      char settings_path[kHostPathCapacity];
+      UserDataFile(settings_path, sizeof settings_path, "settings.ini");
+      if (result > kSettingChange_Unchanged && !Settings_Save(settings_path))
+        fprintf(stderr, "[scene-inspector] could not save settings.ini\n");
+      fprintf(stderr, "[scene-inspector] %s (%s)\n",
+              g_settings.scene_inspector ? "enabled — click the game to inspect"
+                                         : "disabled",
+              Settings_ChangeResultName(result));
+    }
+  } else if (event->key.key == SDLK_MINUS || event->key.key == SDLK_KP_MINUS) {
+    if (!event->key.repeat)
+      HostDevTools_AdjustHudOutputScale(-25);
+  } else if (event->key.key == SDLK_EQUALS || event->key.key == SDLK_PLUS ||
+             event->key.key == SDLK_KP_PLUS) {
+    if (!event->key.repeat)
+      HostDevTools_AdjustHudOutputScale(25);
+  } else if (event->key.key == SDLK_F5) {
+    (void)RuntimeSettings_HandleAction(Settings_Find("save_state"));
+  } else if (event->key.key == SDLK_F7) {
+    (void)RuntimeSettings_HandleAction(Settings_Find("load_state"));
+  } else if (event->key.key == SDLK_F9) {
+    if (event->key.repeat) {
+    } else if (event->key.mod & SDL_KMOD_SHIFT) {
+      DumpDiagState("hotkey");
+    } else if (!g_ws_active) {
+      fprintf(stderr, "[display] F9 needs ExtendedAspectRatio "
+                      "(e.g. 16:9) in config.ini; staying 4:3\n");
+    } else {
+      int m = Settings_CycleDisplayMode();
+      fprintf(stderr, "[display] mode %d/%d -> %s\n", m + 1,
+              kDisplayMode_PresetCount, Settings_DisplayModeName(m));
+    }
+  } else if (event->key.key == SDLK_F6) {
+    (void)RuntimeSettings_HandleAction(Settings_Find("warp_now"));
+  } else if (event->key.key == SDLK_F2 || event->key.key == SDLK_C) {
+    HostDevTools_TakeFullSnapshot();
+  } else if (event->key.key == SDLK_D && !event->key.repeat) {
+    if (event->key.mod & SDL_KMOD_SHIFT) {
+      if (!ActRaiser_IsActionMapGroup(g_ram[kActRaiserWram_MapGroup])) {
+        fprintf(stderr,
+                "[diorama] layer dump requires an action stage "
+                "($18=%02x)\n",
+                g_ram[kActRaiserWram_MapGroup]);
+      } else {
+        HostDevTools_ArmDioramaDump();
+        fprintf(stderr, "[diorama] layer capture armed for next frame\n");
+      }
+    } else {
+      const SettingDesc *mode = Settings_Find("diorama_mode");
+      if (mode && !Settings_IsAvailable(mode)) {
+        fprintf(stderr, "[diorama] requires the new renderer\n");
+      } else if (mode) {
+        Settings_SetLong(mode, !g_settings.diorama_mode);
+        fprintf(stderr, "[diorama] %s\n",
+                g_settings.diorama_mode ? "ON" : "OFF");
+      }
+    }
+  } else if (g_settings.diorama_mode && !event->key.repeat &&
+             event->key.key >= SDLK_1 && event->key.key <= SDLK_5) {
+    static const char *const kLayerKeys[] = {
+        "diorama_layer_backdrop", "diorama_layer_bg2", "diorama_layer_bg1",
+        "diorama_layer_obj",      "diorama_layer_bg3",
+    };
+    int index = (int)(event->key.key - SDLK_1);
+    const SettingDesc *row = Settings_Find(kLayerKeys[index]);
+    long value = 0;
+    if (row && Settings_GetLong(row, &value)) {
+      Settings_SetLong(row, !value);
+      fprintf(stderr, "[diorama] %s %s\n", row->label,
+              value ? "hidden" : "shown");
+      HostInput_RequestPausedRedraw();
+    }
+  } else {
+    HostInput_HandleKeyboard((int)event->key.scancode, true,
+                             event->key.repeat != 0);
+  }
+}
+
+/* Manual-reader mouse input is modal. Otherwise camera controls precede
+ * flat scene inspection; mouse-up releases drags independently of eligibility.
+ */
+static void HandleMouse(const SDL_Event *event) {
+  switch (event->type) {
+  case SDL_EVENT_MOUSE_BUTTON_DOWN:
+    if (ManualReader_IsOpen()) {
+      (void)ManualReader_HandleMouse(event);
+      break;
+    }
+    if (!SettingsOverlay_IsOpen() && !RenderComparison_FreezesGameplay() &&
+        Diorama_IsActiveThisFrame()) {
+      if (event->button.button == SDL_BUTTON_RIGHT)
+        Diorama_SetDragging(true);
+      else if (event->button.button == SDL_BUTTON_MIDDLE)
+        Diorama_ResetCamera();
+    } else if (!SettingsOverlay_IsOpen() &&
+               !RenderComparison_FreezesGameplay() &&
+               Sim3DCamera_ControlsAvailable(g_sim3d_textures_ready)) {
+      if (event->button.button == SDL_BUTTON_RIGHT)
+        Sim3DCamera_SetDragging(true);
+      else if (event->button.button == SDL_BUTTON_MIDDLE)
+        HostInput_ResetSim3DCamera();
+    } else if (!SettingsOverlay_IsOpen() && g_settings.scene_inspector) {
+      if (event->button.button == SDL_BUTTON_RIGHT) {
+        HostInput_CloseInspectorSelection();
+      } else if (event->button.button == SDL_BUTTON_LEFT) {
+        int event_x = (int)event->button.x;
+        int event_y = (int)event->button.y;
+        int output_x = 0, output_y = 0;
+        if (!HostDisplay_WindowPointToOutput(event_x, event_y, &output_x,
+                                             &output_y) ||
+            !SettingsOverlay_BeginDebugPanelDrag(output_x, output_y))
+          (void)HostDevTools_InspectWindowPoint(event_x, event_y);
+      }
+    }
+    break;
+  case SDL_EVENT_MOUSE_MOTION:
+    if (ManualReader_IsOpen()) {
+      (void)ManualReader_HandleMouse(event);
+      break;
+    }
+    if (!RenderComparison_FreezesGameplay() && Diorama_IsDragging() &&
+        Diorama_IsActiveThisFrame()) {
+      Diorama_AdjustCamera(event->motion.xrel * Diorama_DragRadPerPx(),
+                           event->motion.yrel * Diorama_DragRadPerPx(), 0.0f);
+    } else if (!RenderComparison_FreezesGameplay() &&
+               Sim3DCamera_IsDragging() &&
+               Sim3DCamera_ControlsAvailable(g_sim3d_textures_ready)) {
+      HostInput_AdjustSim3DCamera(event->motion.xrel * Diorama_DragRadPerPx(),
+                                  event->motion.yrel * Diorama_DragRadPerPx(),
+                                  0.0f);
+    } else if (SettingsOverlay_IsDebugPanelDragging()) {
+      int output_x = 0, output_y = 0;
+      if (HostDisplay_WindowPointToOutput(
+              (int)event->motion.x, (int)event->motion.y, &output_x, &output_y))
+        SettingsOverlay_DragDebugPanel(output_x, output_y);
+    }
+    break;
+  case SDL_EVENT_MOUSE_WHEEL:
+    if (ManualReader_IsOpen()) {
+      (void)ManualReader_HandleMouse(event);
+      break;
+    }
+    if (!SettingsOverlay_IsOpen() && !RenderComparison_FreezesGameplay() &&
+        Diorama_IsActiveThisFrame())
+      Diorama_AdjustCamera(0.0f, 0.0f, -event->wheel.y * Diorama_ZoomStep());
+    else if (!SettingsOverlay_IsOpen() && !RenderComparison_FreezesGameplay() &&
+             Sim3DCamera_ControlsAvailable(g_sim3d_textures_ready))
+      HostInput_AdjustSim3DCamera(0.0f, 0.0f,
+                                  -event->wheel.y * Diorama_ZoomStep());
+    break;
+  case SDL_EVENT_MOUSE_BUTTON_UP:
+    if (ManualReader_IsOpen()) {
+      (void)ManualReader_HandleMouse(event);
+      break;
+    }
+    if (event->button.button == SDL_BUTTON_RIGHT) {
+      Diorama_SetDragging(false);
+      Sim3DCamera_SetDragging(false);
+    }
+    if (event->button.button == SDL_BUTTON_LEFT)
+      SettingsOverlay_EndDebugPanelDrag();
+    break;
+  }
+}
+
+bool HostInput_HandleEvent(const SDL_Event *event) {
+  switch (event->type) {
+    case SDL_EVENT_KEY_DOWN:
+      HandleKeyDown(event);
+      break;
+    case SDL_EVENT_TEXT_INPUT:
+      if (SettingsOverlay_IsOpen())
+        (void)SettingsOverlay_HandleText(event->text.text);
+      break;
+    case SDL_EVENT_MOUSE_BUTTON_DOWN:
+    case SDL_EVENT_MOUSE_MOTION:
+    case SDL_EVENT_MOUSE_WHEEL:
+    case SDL_EVENT_MOUSE_BUTTON_UP:
+      HandleMouse(event);
+      break;
+    case SDL_EVENT_GAMEPAD_ADDED:
+    case SDL_EVENT_GAMEPAD_REMOVED:
+      InputMap_HandleEvent(event);
+      break;
+    case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
+    case SDL_EVENT_GAMEPAD_BUTTON_UP:
+    case SDL_EVENT_GAMEPAD_AXIS_MOTION:
+
+      if (SettingsOverlay_IsOpen() &&
+          SettingsOverlay_HandleCaptureEvent(event))
+        break;
+
+      if (SettingsOverlay_IsOpen()) {
+        if (HostInput_MenuGamepadIsActive())
+          (void)SettingsOverlay_HandleGamepadEvent(event);
+        break;
+      }
+      InputMap_HandleEvent(event);
+      break;
+    case SDL_EVENT_KEY_UP:
+      if (SettingsOverlay_IsOpen()) {
+        if (HostInput_MenuKeyboardIsActive())
+          (void)SettingsOverlay_HandleKey(event->key.key, false, false);
+      } else {
+        HostInput_HandleKeyboard((int)event->key.scancode, false, false);
+      }
+      break;
+    default:
+      return false;
+  }
+  return true;
+}
+
+void HostInput_ApplySetting(const SettingDesc *desc) {
+  if (desc->field == &g_settings.scene_inspector &&
+      !g_settings.scene_inspector)
+    HostInput_CloseInspectorSelection();
 }

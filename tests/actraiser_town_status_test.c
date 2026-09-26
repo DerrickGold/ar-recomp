@@ -55,7 +55,6 @@ static RecompReturn Native(CpuState *cpu) {
   }
   return result;
 }
-RecompReturn bank_03_82DB_M0X0(CpuState *cpu) { return Native(cpu); }
 RecompReturn bank_03_91AE_M0X0(CpuState *cpu) { return Native(cpu); }
 RecompReturn bank_03_91BC_M0X0(CpuState *cpu) { return Native(cpu); }
 RecompReturn bank_03_BF8C_M0X0(CpuState *cpu) { assert(!cpu->m_flag);return Native(cpu); }
@@ -112,15 +111,15 @@ int main(void) {
     if(grouped) assert((source==1)==!!snapshot.japanese[0]);
   }
   CheckAdapter();
-  RecompReturn (*wrappers[])(CpuState *)={ActRaiser_RegionalTownStatusCycle,ActRaiser_RegionalTownStatusPlot,
+  RecompReturn (*wrappers[])(CpuState *)={ActRaiser_RegionalTownStatusPlot,
       ActRaiser_RegionalTownStatusVisiblePlot,ActRaiser_RegionalTownStatusReport};
   const RecompReturn tokens[]={RECOMP_RETURN_NORMAL,RECOMP_RETURN_SKIP_1,RECOMP_RETURN_SKIP_2,
       RECOMP_RETURN_SKIP_3,RECOMP_RETURN_TAILCALL,RECOMP_RETURN_PARKED_WAIT,RECOMP_RETURN_OWNED_UNWIND};
-  for(unsigned w=0;w<4;++w)for(unsigned source=0;source<3;++source)for(unsigned token=0;token<sizeof(tokens)/sizeof(tokens[0]);++token)for(unsigned m=0;m<2;++m) {
-    if(m && w!=3)continue;
+  for(unsigned w=0;w<3;++w)for(unsigned source=0;source<3;++source)for(unsigned token=0;token<sizeof(tokens)/sizeof(tokens[0]);++token)for(unsigned m=0;m<2;++m) {
+    if(m && w!=2)continue;
     ActRaiserRegionalTownStatus_Reset();ArRegionalTownStatus_Init(&requested,(ArRegionalSource)source);
-    CpuState cpu={.PB=3,.DB=w==3?1:0x7f,.m_flag=m};
-    assert(w==3?ActRaiser_RegionalTownStatusReportEntry(&cpu):ActRaiser_RegionalTownStatusCycleEntry(&cpu));
+    CpuState cpu={.PB=3,.DB=w==2?1:0x7f,.m_flag=m};
+    assert(w==2?ActRaiser_RegionalTownStatusReportEntry(&cpu):ActRaiser_RegionalTownStatusCycleEntry(&cpu));
     result=tokens[token];activations=native_calls=0;
     assert(wrappers[w](&cpu)==result && activations==1 && native_calls==1);
     assert(!ActRaiser_RegionalTownStatusLowEntry(&cpu) && !ActRaiser_RegionalTownStatusFoodEntry(&cpu));

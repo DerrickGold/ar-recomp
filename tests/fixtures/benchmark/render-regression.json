@@ -1,0 +1,85 @@
+{
+  "cases": {
+    "aitos-flat": {
+      "manifest": "tests/fixtures/benchmark/action-render-checkpoints.json",
+      "checkpoint": "aitos-flat",
+      "quit_frames": 3000,
+      "capture_from": 1400,
+      "capture_to": 2400,
+      "capture_every": 100,
+      "replay": "tests/fixtures/benchmark/aitos-r4-natural-inputs.json"
+    },
+    "aitos-diorama": {
+      "manifest": "tests/fixtures/benchmark/action-render-checkpoints.json",
+      "checkpoint": "aitos-diorama",
+      "quit_frames": 3000,
+      "capture_from": 1400,
+      "capture_to": 2400,
+      "capture_every": 100,
+      "replay": "tests/fixtures/benchmark/aitos-r4-natural-inputs.json"
+    },
+    "death-heim-flat": {
+      "manifest": "tests/fixtures/benchmark/action-render-checkpoints.json",
+      "checkpoint": "death-heim-flat",
+      "quit_frames": 3000,
+      "capture_from": 1400,
+      "capture_to": 2400,
+      "capture_every": 100,
+      "replay": "tests/fixtures/benchmark/death-heim-r8-r10-natural-inputs.json"
+    },
+    "death-heim-diorama": {
+      "manifest": "tests/fixtures/benchmark/action-render-checkpoints.json",
+      "checkpoint": "death-heim-diorama",
+      "quit_frames": 3000,
+      "capture_from": 1400,
+      "capture_to": 2400,
+      "capture_every": 100,
+      "replay": "tests/fixtures/benchmark/death-heim-r8-r10-natural-inputs.json"
+    },
+    "aitos-vertical-32": {
+      "manifest": "tests/fixtures/benchmark/action-vertical-checkpoints.json",
+      "checkpoint": "aitos-vertical-32",
+      "quit_frames": 3000,
+      "capture_from": 1400,
+      "capture_to": 2400,
+      "capture_every": 100,
+      "replay": "tests/fixtures/benchmark/aitos-r4-natural-inputs.json"
+    },
+    "aitos-vertical-64": {
+      "manifest": "tests/fixtures/benchmark/action-vertical-checkpoints.json",
+      "checkpoint": "aitos-vertical-64",
+      "quit_frames": 3000,
+      "capture_from": 1400,
+      "capture_to": 2400,
+      "capture_every": 100,
+      "replay": "tests/fixtures/benchmark/aitos-r4-natural-inputs.json"
+    },
+    "town-actions": {
+      "manifest": "tests/fixtures/sim3d/checkpoints.json",
+      "checkpoint": "D2-flat-actions",
+      "quit_frames": 2800,
+      "capture_from": 700,
+      "capture_to": 2300,
+      "capture_every": 100,
+      "replay": "tests/fixtures/benchmark/sim-actions-inputs.json"
+    },
+    "voxel-town": {
+      "manifest": "tests/fixtures/sim3d/checkpoints.json",
+      "checkpoint": "D7-voxel-town",
+      "quit_frames": 2200,
+      "capture_from": 900,
+      "capture_to": 1700,
+      "capture_every": 100,
+      "replay": "tests/fixtures/benchmark/aitos-eruption-inputs.json"
+    },
+    "world-navigation": {
+      "manifest": "tests/fixtures/benchmark/world-navigation-checkpoints.json",
+      "checkpoint": "world-navigation",
+      "quit_frames": 2200,
+      "capture_from": 1200,
+      "capture_to": 1800,
+      "capture_every": 100,
+      "require_scene": "World 3D"
+    }
+  }
+}

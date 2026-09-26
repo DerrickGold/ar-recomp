@@ -1184,47 +1184,8 @@ void PresentUpload(const FrameSlot *slot) {
   Sim3DPerformance_End(performance);
 }
 
-/* Presentation-owned effective camera. Free Cam uses the persisted pose from
- * the FrameSlot. Dynamic Cam eases reactive lean and event kicks around its
- * dedicated baseline. Diorama_Composite receives that resolved pose and never
- * reads producer-owned s_diorama_cam. */
-static DioramaCameraPose s_diorama_render_cam;
-static int s_diorama_render_cam_mode = -1;    /* -1: no frame composited yet */
-static uint64_t s_diorama_render_cam_last_ns;
-
-/* Dynamic-camera response constants. */
-static const float kDioramaDampTau = 0.15f;    /* seconds, 1-exp(-dt/tau) */
-static const float kDioramaLeanYaw = 0.10f;    /* rad, max yaw lean @ full run speed */
-/* Doc's provisional 0.06 rad (half of yaw's 0.10) turned out imperceptible
- * in play (AR_DYNCAM_LOG confirmed the render camera genuinely swings
- * ~2.4 deg during a jump — this isn't a pipeline bug), most likely because
- * pitch reads far less visually salient than yaw in this 3/4 view (weaker
- * differential parallax between layers than a lateral sway produces) and a
- * running jump has both swinging at once, with yaw dominating. Raised to
- * match yaw's peak so a jump reads as clearly as running does. */
-static const float kDioramaLeanPitch = 0.12f;  /* rad, max pitch lean @ full vertical speed */
-
-/* B4-kick (followup doc): event-triggered impulses, decaying independently
- * of the baseline+lean damping above (a jolt should feel crisp, not get
- * folded into the slower position-ease target) — added on top of a LOCAL
- * copy of s_diorama_render_cam each frame, never baked into the persisted
- * render-cam state itself. kDioramaKickPitch/kDioramaKickTau are the doc's
- * literal event_kick_magnitude/event_kick_decay.
- *
- * The zoom-punch (kDioramaKickZoom) was originally spec'd for the boost
- * event, but PlayerBoost turned out not to be a clean trigger (fired
- * constantly just holding a direction — disabled, see event_hit/event_land
- * below). Repurposed onto the HIT event instead (live design call, 2026-07-21
- * — the effect itself read well, it just needed a reliable source): a hit
- * uses the reliable invuln-bit edge already relied on elsewhere
- * (AR_NO_KNOCKBACK), and now gets BOTH the jolt and the zoom-punch, making
- * it read as more dramatic than a routine landing (jolt only). */
-static float s_diorama_kick_pitch;       /* rad, landing/hit jolt, decays to 0 */
-static float s_diorama_kick_zoom; /* fraction, hit zoom-punch, decays to 0 (negative = closer) */
-static uint64_t s_diorama_last_slot_ns;  /* detects a genuinely NEW FrameSlot capture */
-static const float kDioramaKickPitch = 0.05f;  /* rad */
-static const float kDioramaKickZoom = -0.15f;  /* fraction; "slight" zoom-in */
-static const float kDioramaKickTau = 0.20f;    /* seconds, wall-clock exp decay */
+/* Session history survives retained frames, room changes and GPU resets. */
+static DioramaCameraPresenter s_diorama_camera = DIORAMA_CAMERA_PRESENTER_INIT;
 
 /* Host effects use the renderer abstraction's standard additive/alpha blend
  * modes and untextured geometry, not a backend shader. Those are portable
@@ -2180,128 +2141,9 @@ void PresentCompositeScene(const FrameSlot *slot, float alpha) {
     /* The existing graphics setting now selects frame-space generation.
      * Prepare fails individual planes closed when either endpoint or pair
      * continuity is unavailable, leaving their current raw textures intact. */
-    /* B4-split (followup doc): resolve which authored pose is active this
-     * frame. Free Cam: the live authored pose, unchanged from B4-split.
-     * Dynamic Cam (B4-vellean): baseline + a small velocity-driven lean —
-     * yaw toward horizontal run direction, pitch with vertical velocity —
-     * scaled by reactive_strength/kPercentScale (0 disables sway, reproducing
-     * B4-baseline's "snaps to the fixed pose" test). */
-    bool dynamic = slot->diorama_camera_mode == kDioramaCam_Dynamic;
-    DioramaCameraPose target;
-    if (dynamic) {
-      float gain =
-          (float)slot->diorama_reactive_strength / (float)kPercentScale;
-      target = slot->diorama_dyncam_baseline;
-      target.tilt_y += kDioramaLeanYaw * gain * slot->diorama_dyncam_lean_yaw;
-      target.tilt_x += kDioramaLeanPitch * gain * slot->diorama_dyncam_lean_pitch;
-    } else {
-      target = slot->diorama_free_pose;
-    }
-
-    /* B4-damp: Free Cam stays a direct snap (manual orbit must feel
-     * immediate, and this preserves B4-split's byte-identical regression
-     * test). Dynamic Cam eases toward the target with a wall-clock
-     * exponential — NOT a fixed per-frame factor, since B1a makes the
-     * present rate monitor-dependent and a fixed factor would be twice as
-     * stiff at 120Hz as at 60Hz. The one exception: the frame a mode change
-     * lands on (or the very first composited frame) snaps immediately —
-     * that's what makes switching TO Dynamic Cam snap straight to the
-     * baseline pose (already verified in B4-baseline) rather than easing in
-     * from wherever Free Cam was left. */
-    bool mode_changed = s_diorama_render_cam_mode != slot->diorama_camera_mode;
-    s_diorama_render_cam_mode = slot->diorama_camera_mode;
-    uint64_t now_ns = HostClock_Nanoseconds();
-    float dt = 0.0f;
-    if (s_diorama_render_cam_last_ns != 0) {
-      dt = (float)(now_ns - s_diorama_render_cam_last_ns) / 1e9f;
-      if (dt < 0.0f) dt = 0.0f;
-      if (dt > 1.0f) dt = 1.0f;   /* sanity clamp (e.g. resuming after a pause) */
-    }
-    if (!dynamic || mode_changed || s_diorama_render_cam_last_ns == 0) {
-      s_diorama_render_cam = target;
-    } else {
-      float damping_alpha = 1.0f - expf(-dt / kDioramaDampTau);
-      s_diorama_render_cam.tilt_x +=
-          (target.tilt_x - s_diorama_render_cam.tilt_x) * damping_alpha;
-      s_diorama_render_cam.tilt_y +=
-          (target.tilt_y - s_diorama_render_cam.tilt_y) * damping_alpha;
-      s_diorama_render_cam.distance +=
-          (target.distance - s_diorama_render_cam.distance) * damping_alpha;
-    }
-    s_diorama_render_cam_last_ns = now_ns;
-
-    /* B4-kick: trigger a fresh impulse only on a genuinely NEW FrameSlot
-     * capture (not a re-presentation of one already processed—see
-     * the FrameSlot field comment, present.h), and only in Dynamic Cam
-     * (event kicks are part of the reactive system, same scoping as
-     * vellean/pan). Impulses stack additively (a hit while already mid-jolt
-     * gets stronger, not replaced) so back-to-back events still read. Decay
-     * runs every present frame regardless, on the same wall-clock exponential
-     * basis as the position damping above. */
-    bool new_slot = dynamic && slot->timestamp_ns != s_diorama_last_slot_ns;
-    s_diorama_last_slot_ns = slot->timestamp_ns;
-    if (new_slot) {
-      float gain =
-          (float)slot->diorama_reactive_strength / (float)kPercentScale;
-      if (slot->diorama_dyncam_event_hit || slot->diorama_dyncam_event_land)
-        s_diorama_kick_pitch += kDioramaKickPitch * gain;
-      /* Hit gets the zoom-punch too (see the section comment above) — a
-       * discrete, reliable edge, unlike PlayerBoost. */
-      if (slot->diorama_dyncam_event_hit)
-        s_diorama_kick_zoom += kDioramaKickZoom * gain;
-      /* DISABLED (2026-07-21, live report): PlayerBoost ($08C4) fired
-       * constantly while just holding a direction — it isn't a clean
-       * "boost activated" edge the way the invuln bit is for hits; more
-       * likely a counter/cycling value that's nonzero (or repeatedly
-       * revisits zero) during ordinary movement, not a discrete ability
-       * trigger. slot->diorama_dyncam_event_boost is still captured
-       * (FrameSlot/AR_DYNCAM_LOG's evt(boost=...) field) for whenever this
-       * gets revisited with real investigation into what the byte means. */
-    }
-    if (!dynamic) {
-      s_diorama_kick_pitch = 0.0f;
-      s_diorama_kick_zoom = 0.0f;
-    } else if (dt > 0.0f) {
-      float kick_decay = expf(-dt / kDioramaKickTau);
-      s_diorama_kick_pitch *= kick_decay;
-      s_diorama_kick_zoom *= kick_decay;
-    }
-    DioramaCameraPose final_cam = s_diorama_render_cam;
-    float distance_scale = 1.0f;
-    if (dynamic) {
-      final_cam.tilt_x += s_diorama_kick_pitch +
-          slot->diorama_manual_orbit_pitch;
-      final_cam.tilt_y += slot->diorama_manual_orbit_yaw;
-      distance_scale = 1.0f + s_diorama_kick_zoom;
-    }
-
-    /* AR_DYNCAM_LOG=1: diagnose "no visible sway" reports — prints the raw
-     * self-calibrated lean signal, the gain, the computed target, and the
-     * actual (possibly still-damping) render camera every present, same
-     * pattern as AR_INTERP_LOG above. */
-    static int dyncam_log_on = -1;
-    if (dyncam_log_on < 0) {
-      const char *e = getenv("AR_DYNCAM_LOG");
-      dyncam_log_on = (e && e[0] && e[0] != '0') ? 1 : 0;
-    }
-    if (dyncam_log_on && dynamic) {
-      fprintf(stderr,
-        "[dyncam] mode=%d gain=%.3f lean_yaw=%.3f lean_pitch=%.3f "
-        "target(x=%.4f y=%.4f d=%.3f) render(x=%.4f y=%.4f d=%.3f) "
-        "kick(pitch=%.4f zoom=%.4f) evt(hit=%d land=%d boost=%d)\n",
-        slot->diorama_camera_mode,
-        (double)slot->diorama_reactive_strength / (double)kPercentScale,
-        (double)slot->diorama_dyncam_lean_yaw,
-        (double)slot->diorama_dyncam_lean_pitch,
-        (double)target.tilt_x, (double)target.tilt_y,
-        (double)target.distance,
-        (double)s_diorama_render_cam.tilt_x,
-        (double)s_diorama_render_cam.tilt_y,
-        (double)s_diorama_render_cam.distance,
-        (double)s_diorama_kick_pitch, (double)s_diorama_kick_zoom,
-        slot->diorama_dyncam_event_hit, slot->diorama_dyncam_event_land,
-        slot->diorama_dyncam_event_boost);
-    }
+    const DioramaCameraView camera = DioramaCamera_Present(
+        &s_diorama_camera, &slot->diorama_camera,
+        slot->timestamp_ns, HostClock_Nanoseconds());
 
     /* Fix B/BH6: resolve BG2's row-banded valid capture spans from the slot
      * alone (D6 — this file never reads live g_ppu). ws_extra, not
@@ -2378,9 +2220,9 @@ void PresentCompositeScene(const FrameSlot *slot, float alpha) {
             (generated_plane_mask & (UINT32_C(1) << SR_PPU_OVERLAY_BG2)) != 0,
     };
     const DioramaView view = {
-        .camera = final_cam,
-        .distance_scale = distance_scale,
-        .center_camera_vertically = dynamic,
+        .camera = camera.pose,
+        .distance_scale = camera.distance_scale,
+        .center_camera_vertically = camera.center_vertically,
         .pixel_aspect = slot->pixel_aspect,
         .ignore_aspect_ratio = slot->ignore_aspect_ratio,
         .visible_width = slot->visible_width,

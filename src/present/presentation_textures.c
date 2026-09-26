@@ -4,6 +4,7 @@
 #include <stdlib.h>
 
 #include "app/settings.h"
+#include "app/session_fatal.h"
 #include "host/host_display.h"
 #include "host/host_video.h"
 #include "render/render_device.h"
@@ -248,4 +249,26 @@ void PresentationTextures_Destroy(void) {
   g_authentic_texture = ArRenderTexture_Invalid();
   ArRenderDevice_DestroyTexture(&g_render_device, g_texture);
   g_texture = ArRenderTexture_Invalid();
+}
+
+bool PresentationTextures_ValidateSetting(const SettingDesc *desc) {
+  if (g_settings.sim3d_mode &&
+      (desc->field == &g_settings.sim3d_mode ||
+       desc->field == &g_settings.sim3d_object_billboards)) {
+    if (!g_sim3d_textures_ready) {
+      SessionFatal_Request(
+          "Simulation town 3D was selected, but its core renderer textures "
+          "are unavailable. Restart after checking graphics memory and driver "
+          "stability, or leave Simulation town 3D disabled.");
+      return false;
+    } else if (g_settings.sim3d_object_billboards &&
+               !g_sim3d_billboard_renderer_ready) {
+      SessionFatal_Request(
+          "Simulation object billboards were selected, but their renderer "
+          "atlas is unavailable. Restart after checking graphics memory and "
+          "driver stability, or leave object billboards disabled.");
+      return false;
+    }
+  }
+  return true;
 }

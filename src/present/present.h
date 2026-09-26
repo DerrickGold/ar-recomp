@@ -237,48 +237,12 @@ typedef struct FrameSlot {
    * left in the game-thread capture instead (actraiser_rtl.c), so it
    * renders as diorama.c's ordinary tilted BG3 layer. */
   bool diorama_hud_flat;
-  /* B4-split (followup doc): DioramaCameraMode (settings.h) plus both
-   * candidate authored poses, resolved at present-composite time into
-   * whichever is active this frame — see present.c's s_diorama_render_cam
-   * and the DioramaCameraPose comment (diorama.h) for the full rationale.
-   * Snapshotting both poses rather than resolving during capture keeps
-   * FrameSlot_Capture a plain field-by-field mirror of g_settings, matching
-   * every other row here. Presentation selects the pose and applies the
-   * captured reactive strength. */
-  int diorama_camera_mode;
-  DioramaCameraPose diorama_free_pose;
-  DioramaCameraPose diorama_dyncam_baseline;
-  /* Host-input orbit layered over the dynamic baseline. Unlike the baseline
-   * zoom, these offsets are not persisted and return to zero after release. */
-  float diorama_manual_orbit_yaw;
-  float diorama_manual_orbit_pitch;
-  int diorama_reactive_strength;
-  /* B4-vellean (followup doc): PlayerVelocityX/Y, self-calibrated against a
-   * running per-session max and clamped to [-1,1] — see FrameSlot_Capture
-   * (frame_slot.c) for why normalization happens there (it owns the WRAM read and
-   * the running-max state) rather than here. yaw follows horizontal
-   * velocity (running), pitch follows vertical velocity (jump/fall), naming
-   * matches which DioramaCameraPose field each drives. These fields are the
-   * normalized signals; present.c applies response constants and strength. */
-  float diorama_dyncam_lean_yaw;
-  float diorama_dyncam_lean_pitch;
-  /* B4-kick (followup doc): rising-edge event flags, computed on the game
-   * thread (FrameSlot_Capture, frame_slot.c — it owns the WRAM reads and the
-   * prior-state needed to detect an edge). True only on the ONE FrameSlot
-   * capture where the underlying signal transitioned; present.c triggers a
-   * fresh decaying impulse only when it sees a slot whose timestamp_ns it
-   * hasn't already processed (a present redraw of the same slot must not
-   * re-trigger). event_hit: PlayerFlags invuln bit rising edge (taking a
-   * hit). event_land: PlayerVelocityY falling-then-settled in one tick.
-   * event_boost: PlayerBoost 0-to-nonzero rising edge. */
-  bool diorama_dyncam_event_hit;
-  bool diorama_dyncam_event_land;
-  bool diorama_dyncam_event_boost;
+  /* Captured motion and host controls have separate lifetimes. Retained
+   * presents refresh only controls; diorama_camera.c owns response behavior. */
+  DioramaCameraFrame diorama_camera;
 
-  /* Sim-town dynamic camera. Same shape as the diorama fields above and for
-   * the same reasons: the game thread owns the WRAM reads and the per-frame
-   * state an edge or a running average needs, present.c owns the actual
-   * camera formula.
+  /* Sim-town dynamic camera. Capture owns the WRAM observations and history;
+   * sim/sim3d/present_sim3d.c applies the camera response.
    *
    * The signals differ from action mode's because the mode does. There is no
    * jump and no ground, so "vertical velocity" is just the other axis of a

@@ -7,6 +7,7 @@
 #include "snesrecomp/game/bootstrap.h"
 #include "snesrecomp/game/runtime.h"
 #include "app/settings.h"
+#include "constants.h"
 
 enum {
   kEventTrack = 0x10,
@@ -162,7 +163,7 @@ typedef struct SourceObservation {
  * be the only observation of a freed record before it is reused. */
 static bool ReadSourceObservation(const uint8_t *ram, size_t size,
                                   SourceObservation *observation) {
-  if (!ram || size < 0x20000u) return false;
+  if (!ram || size < kActRaiserWramSize) return false;
   memset(observation, 0, sizeof(*observation));
   observation->scene = ReadWord(ram, 0x18);
   observation->miracle_active = ram[0x190e9] != 0;

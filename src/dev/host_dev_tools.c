@@ -3,6 +3,7 @@
 
 #include <string.h>
 
+#include "actraiser/actraiser_rtl.h"
 #include "dev_tools.h"
 #include "present/display_geometry.h"
 #include "host/host_display.h"
@@ -23,7 +24,6 @@
  * InspectorPresentationSelection lives in present.h. Both are shared by the
  * live hit-test and the FrameSlot-fed renderer. */
 static InspectorPresentationSelection s_inspector_presentation;
-bool g_diorama_dump_pending;
 
 const InspectorPresentationSelection *HostDevTools_InspectorPresentation(void) {
   return &s_inspector_presentation;
@@ -125,9 +125,25 @@ bool HostDevTools_InspectWindowPoint(int window_x, int window_y) {
   return true;
 }
 
-void HostDevTools_DumpDioramaLayers(void) {
+static bool s_diorama_dump_armed;
+
+void HostDevTools_ArmDioramaDump(void) {
+  s_diorama_dump_armed = true;
+}
+
+bool HostDevTools_DioramaDumpArmed(void) {
+  return s_diorama_dump_armed;
+}
+
+/* The dump frame borrowed the diorama bindings; with diorama mode off, give
+ * the flat frame its own bindings back. */
+void HostDevTools_ServiceDioramaDump(void) {
+  if (!s_diorama_dump_armed) return;
   const DevToolsContext context = CurrentContext();
   DevTools_DumpDioramaLayers(&context);
+  s_diorama_dump_armed = false;
+  if (!g_settings.diorama_mode)
+    ActRaiser_RebindPpuOutputSurfaces();
 }
 
 DevToolsCaptureResult HostDevTools_WriteFramebufferPpm(FILE *file, bool require_composite) {
