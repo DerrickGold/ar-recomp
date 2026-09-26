@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_LIVES_DISPLAY_H
-#define ACTRAISER_LIVES_DISPLAY_H
+#ifndef AR_ACTRAISER_LIVES_DISPLAY_H
+#define AR_ACTRAISER_LIVES_DISPLAY_H
 
 #include "snesrecomp/game/cpu.h"
 #include <stdbool.h>

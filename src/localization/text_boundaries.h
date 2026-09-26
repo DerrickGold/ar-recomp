@@ -1,5 +1,5 @@
-#ifndef AR_LOCALIZATION_TEXT_BOUNDARIES_H
-#define AR_LOCALIZATION_TEXT_BOUNDARIES_H
+#ifndef AR_TEXT_BOUNDARIES_H
+#define AR_TEXT_BOUNDARIES_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -21,4 +21,4 @@ static inline void ArTextBoundary_Set(uint8_t *bits, size_t offset, bool value) 
   else bits[offset / 8u] &= (uint8_t)~mask;
 }
 
-#endif /* AR_LOCALIZATION_TEXT_BOUNDARIES_H */
+#endif /* AR_TEXT_BOUNDARIES_H */

@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_LEVEL_GOALS_H
-#define ACTRAISER_LEVEL_GOALS_H
+#ifndef AR_ACTRAISER_LEVEL_GOALS_H
+#define AR_ACTRAISER_LEVEL_GOALS_H
 #include "snesrecomp/game/cpu.h"
 #include "regional/towns/regional_level_goals.h"
 

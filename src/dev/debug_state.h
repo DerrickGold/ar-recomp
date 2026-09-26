@@ -1,5 +1,5 @@
-#ifndef DEBUG_STATE_H
-#define DEBUG_STATE_H
+#ifndef AR_DEBUG_STATE_H
+#define AR_DEBUG_STATE_H
 
 #include <stdbool.h>
 

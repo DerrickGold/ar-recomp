@@ -1,5 +1,5 @@
-#ifndef DIORAMA_ROM_BACKDROP_H
-#define DIORAMA_ROM_BACKDROP_H
+#ifndef AR_DIORAMA_ROM_BACKDROP_H
+#define AR_DIORAMA_ROM_BACKDROP_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -53,4 +53,4 @@ bool DioramaRomBackdrop_LoadActionBgSparse(
     uint32_t *out_argb, size_t out_pixel_count,
     uint32_t *out_default_fill_argb);
 
-#endif  /* DIORAMA_ROM_BACKDROP_H */
+#endif  /* AR_DIORAMA_ROM_BACKDROP_H */

@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_DIALOGUE_ADAPTER_H
-#define ACTRAISER_DIALOGUE_ADAPTER_H
+#ifndef AR_ACTRAISER_DIALOGUE_ADAPTER_H
+#define AR_ACTRAISER_DIALOGUE_ADAPTER_H
 
 #include "localization/dialogue_session.h"
 

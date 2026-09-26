@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_REPORT_COMMAND_H
-#define ACTRAISER_REPORT_COMMAND_H
+#ifndef AR_ACTRAISER_REPORT_COMMAND_H
+#define AR_ACTRAISER_REPORT_COMMAND_H
 
 #include "snesrecomp/game/cpu.h"
 #include <stdbool.h>

@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_LOCALIZATION_NAME_COMPOSE_H
-#define ACTRAISER_LOCALIZATION_NAME_COMPOSE_H
+#ifndef AR_ACTRAISER_LOCALIZATION_NAME_COMPOSE_H
+#define AR_ACTRAISER_LOCALIZATION_NAME_COMPOSE_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -35,4 +35,4 @@ bool ActRaiserLocalizationNameCompose_InsertPageIndicator(
  * and page-indicator insertions occur after this field, so its range is stable. */
 bool ActRaiserLocalizationNameCompose_PrepareField(ActRaiserResolvedText *text);
 
-#endif /* ACTRAISER_LOCALIZATION_NAME_COMPOSE_H */
+#endif /* AR_ACTRAISER_LOCALIZATION_NAME_COMPOSE_H */

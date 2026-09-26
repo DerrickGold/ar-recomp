@@ -1,5 +1,5 @@
-#ifndef DIORAMA_PLANES_H
-#define DIORAMA_PLANES_H
+#ifndef AR_DIORAMA_PLANES_H
+#define AR_DIORAMA_PLANES_H
 
 #include <stdbool.h>
 
@@ -113,4 +113,4 @@ static inline bool DioramaPlaneCaptureRegion_Resolve(
   return region->width > 0;
 }
 
-#endif  /* DIORAMA_PLANES_H */
+#endif  /* AR_DIORAMA_PLANES_H */

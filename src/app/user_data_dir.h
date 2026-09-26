@@ -1,5 +1,5 @@
-#ifndef USER_DATA_DIR_H
-#define USER_DATA_DIR_H
+#ifndef AR_USER_DATA_DIR_H
+#define AR_USER_DATA_DIR_H
 
 #include <stddef.h>
 
@@ -10,4 +10,4 @@
  * Returns buf; an undersized buffer is cleared rather than silently truncated. */
 char *UserDataFile(char *buf, size_t size, const char *leaf);
 
-#endif /* USER_DATA_DIR_H */
+#endif /* AR_USER_DATA_DIR_H */

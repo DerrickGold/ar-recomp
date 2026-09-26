@@ -1,5 +1,5 @@
-#ifndef AR_LOCALIZATION_LANGUAGE_CONTRACT_H
-#define AR_LOCALIZATION_LANGUAGE_CONTRACT_H
+#ifndef AR_LANGUAGE_CONTRACT_H
+#define AR_LANGUAGE_CONTRACT_H
 
 #include "localization/language_pack.h"
 
@@ -66,4 +66,4 @@ ArLanguagePlaceholderKind ArLanguageContract_PlaceholderKind(
 bool ArLanguageContract_Presentation(const char *semantic_id,
                                      ArLanguagePresentationContract *out);
 
-#endif /* AR_LOCALIZATION_LANGUAGE_CONTRACT_H */
+#endif /* AR_LANGUAGE_CONTRACT_H */

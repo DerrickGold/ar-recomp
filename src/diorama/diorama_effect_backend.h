@@ -1,5 +1,5 @@
-#ifndef DIORAMA_EFFECT_BACKEND_H
-#define DIORAMA_EFFECT_BACKEND_H
+#ifndef AR_DIORAMA_EFFECT_BACKEND_H
+#define AR_DIORAMA_EFFECT_BACKEND_H
 
 #include <stdbool.h>
 
@@ -60,4 +60,4 @@ bool DioramaEffectBackend_Unbind(ArRenderDevice *device);
  * replaced. Effects are recreated lazily on the next availability query. */
 void DioramaEffectBackend_Reset(ArRenderDevice *device);
 
-#endif /* DIORAMA_EFFECT_BACKEND_H */
+#endif /* AR_DIORAMA_EFFECT_BACKEND_H */

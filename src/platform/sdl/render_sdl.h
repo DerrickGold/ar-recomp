@@ -1,5 +1,5 @@
-#ifndef AR_PLATFORM_SDL_RENDER_SDL_H
-#define AR_PLATFORM_SDL_RENDER_SDL_H
+#ifndef AR_RENDER_SDL_H
+#define AR_RENDER_SDL_H
 
 #include "render/render_device.h"
 
@@ -29,4 +29,4 @@ bool ArSdlRenderBackend_SetAllowedFramesInFlight(ArRenderDevice *device,
                                                  uint32_t requested,
                                                  bool *changed);
 
-#endif /* AR_PLATFORM_SDL_RENDER_SDL_H */
+#endif /* AR_RENDER_SDL_H */

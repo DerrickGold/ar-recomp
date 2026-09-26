@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_SIM_MENU_H
-#define ACTRAISER_SIM_MENU_H
+#ifndef AR_ACTRAISER_SIM_MENU_H
+#define AR_ACTRAISER_SIM_MENU_H
 
 #include "sim/menu/sim_menu_model.h"
 #include "sim/menu/sim_menu_help.h"

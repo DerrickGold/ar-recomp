@@ -1,5 +1,5 @@
-#ifndef BYTE_ORDER_H
-#define BYTE_ORDER_H
+#ifndef AR_BYTE_ORDER_H
+#define AR_BYTE_ORDER_H
 
 #include <stdint.h>
 

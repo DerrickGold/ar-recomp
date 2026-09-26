@@ -1,5 +1,5 @@
-#ifndef HD_REPLACEMENT_HOST_H
-#define HD_REPLACEMENT_HOST_H
+#ifndef AR_HD_REPLACEMENT_HOST_H
+#define AR_HD_REPLACEMENT_HOST_H
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -26,4 +26,4 @@ bool ActRaiser_AuthenticCaptureEnabled(void);
 void ActRaiser_AuthenticCaptureFrameCompleted(bool frame_valid);
 uint64_t ActRaiser_AuthenticFrameSerial(void);
 
-#endif /* HD_REPLACEMENT_HOST_H */
+#endif /* AR_HD_REPLACEMENT_HOST_H */

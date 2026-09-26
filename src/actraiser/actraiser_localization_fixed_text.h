@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_LOCALIZATION_FIXED_TEXT_H
-#define ACTRAISER_LOCALIZATION_FIXED_TEXT_H
+#ifndef AR_ACTRAISER_LOCALIZATION_FIXED_TEXT_H
+#define AR_ACTRAISER_LOCALIZATION_FIXED_TEXT_H
 
 #include "actraiser/actraiser_localization_resolved_text.h"
 

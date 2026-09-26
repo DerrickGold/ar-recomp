@@ -1,5 +1,5 @@
-#ifndef DIORAMA_DEPTH_SHAPES_H
-#define DIORAMA_DEPTH_SHAPES_H
+#ifndef AR_DIORAMA_DEPTH_SHAPES_H
+#define AR_DIORAMA_DEPTH_SHAPES_H
 
 #include <stdbool.h>
 
@@ -64,4 +64,4 @@ void DioramaStackCopyShaped(int index, int copies, float z_base, float depth,
  * which exists only for an ODD count. Keeping this rule here rather than at the
  * call site is what stops the two from disagreeing. */
 bool DioramaStackCopyIsRedundant(int index, int copies, int direction);
-#endif /* DIORAMA_DEPTH_SHAPES_H */
+#endif /* AR_DIORAMA_DEPTH_SHAPES_H */

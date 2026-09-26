@@ -1,5 +1,5 @@
-#ifndef ACTION_EFFECT_RENDER_H
-#define ACTION_EFFECT_RENDER_H
+#ifndef AR_ACTION_EFFECT_RENDER_H
+#define AR_ACTION_EFFECT_RENDER_H
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -301,4 +301,4 @@ bool ActionHeatRender_Build(uint16_t game_frame,
                             int source_width,
                             ActionHeatRenderMesh *mesh);
 
-#endif  /* ACTION_EFFECT_RENDER_H */
+#endif  /* AR_ACTION_EFFECT_RENDER_H */

@@ -1,5 +1,5 @@
-#ifndef AR_LOCALIZATION_FONT_RESOURCE_H
-#define AR_LOCALIZATION_FONT_RESOURCE_H
+#ifndef AR_FONT_RESOURCE_H
+#define AR_FONT_RESOURCE_H
 
 #include <stdbool.h>
 #include <stddef.h>

@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_STORY_SNAPSHOT_H
-#define ACTRAISER_STORY_SNAPSHOT_H
+#ifndef AR_ACTRAISER_STORY_SNAPSHOT_H
+#define AR_ACTRAISER_STORY_SNAPSHOT_H
 
 #include "save/save_system.h"
 #include "snesrecomp/game/cpu.h"

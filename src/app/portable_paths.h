@@ -1,5 +1,5 @@
-#ifndef PORTABLE_PATHS_H
-#define PORTABLE_PATHS_H
+#ifndef AR_PORTABLE_PATHS_H
+#define AR_PORTABLE_PATHS_H
 
 #include <stdbool.h>
 
@@ -8,4 +8,4 @@
  * process to the executable directory. */
 bool PortablePaths_IsBundle(void);
 
-#endif /* PORTABLE_PATHS_H */
+#endif /* AR_PORTABLE_PATHS_H */

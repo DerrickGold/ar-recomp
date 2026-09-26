@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_LOCALIZATION_NAME_ENTRY_H
-#define ACTRAISER_LOCALIZATION_NAME_ENTRY_H
+#ifndef AR_ACTRAISER_LOCALIZATION_NAME_ENTRY_H
+#define AR_ACTRAISER_LOCALIZATION_NAME_ENTRY_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -109,4 +109,4 @@ bool ActRaiserLocalizationNameEntryTracker_SynchronizeNative(
     ActRaiserLocalizationNameEntryTracker *tracker,
     const ActRaiserLocalizationNameEntryState *native_state);
 
-#endif /* ACTRAISER_LOCALIZATION_NAME_ENTRY_H */
+#endif /* AR_ACTRAISER_LOCALIZATION_NAME_ENTRY_H */

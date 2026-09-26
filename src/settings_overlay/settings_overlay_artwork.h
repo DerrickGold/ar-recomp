@@ -1,5 +1,5 @@
-#ifndef SETTINGS_OVERLAY_ARTWORK_H
-#define SETTINGS_OVERLAY_ARTWORK_H
+#ifndef AR_SETTINGS_OVERLAY_ARTWORK_H
+#define AR_SETTINGS_OVERLAY_ARTWORK_H
 
 #include "render/render_device.h"
 

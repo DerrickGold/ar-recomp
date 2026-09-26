@@ -1,5 +1,5 @@
-#ifndef DIORAMA_H
-#define DIORAMA_H
+#ifndef AR_DIORAMA_H
+#define AR_DIORAMA_H
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -255,4 +255,4 @@ void Diorama_Shutdown(ArRenderDevice *device);
 
 void Diorama_FlushSettingsIfDirty(void);
 
-#endif  /* DIORAMA_H */
+#endif  /* AR_DIORAMA_H */

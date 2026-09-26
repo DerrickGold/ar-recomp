@@ -1,5 +1,5 @@
-#ifndef AR_LANGUAGE_PACK_DISCOVERY_H
-#define AR_LANGUAGE_PACK_DISCOVERY_H
+#ifndef AR_PACK_DISCOVERY_H
+#define AR_PACK_DISCOVERY_H
 
 #include <stdbool.h>
 #include <stddef.h>

@@ -1,5 +1,5 @@
-#ifndef SNES_BGR555_H
-#define SNES_BGR555_H
+#ifndef AR_SNES_BGR555_H
+#define AR_SNES_BGR555_H
 
 #include <stdint.h>
 
@@ -11,4 +11,4 @@ static inline uint8_t ExpandColor5(uint32_t value, int brightness) {
   return (uint8_t)(expanded * (uint32_t)brightness / 15);
 }
 
-#endif  /* SNES_BGR555_H */
+#endif  /* AR_SNES_BGR555_H */

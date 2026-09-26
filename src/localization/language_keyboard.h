@@ -1,5 +1,5 @@
-#ifndef AR_LOCALIZATION_LANGUAGE_KEYBOARD_H
-#define AR_LOCALIZATION_LANGUAGE_KEYBOARD_H
+#ifndef AR_LANGUAGE_KEYBOARD_H
+#define AR_LANGUAGE_KEYBOARD_H
 
 #include "localization/language_pack.h"
 #include "localization/language_keyboard_shape.h"

@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_HLE_FATAL_H
-#define ACTRAISER_HLE_FATAL_H
+#ifndef AR_ACTRAISER_HLE_FATAL_H
+#define AR_ACTRAISER_HLE_FATAL_H
 
 #if defined(_MSC_VER)
 #define AR_HLE_NORETURN __declspec(noreturn)
@@ -23,4 +23,4 @@ AR_HLE_NORETURN void ActRaiserHleFatal(const char *format, ...)
 #endif
     ;
 
-#endif /* ACTRAISER_HLE_FATAL_H */
+#endif /* AR_ACTRAISER_HLE_FATAL_H */

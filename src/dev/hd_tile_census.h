@@ -1,5 +1,5 @@
-#ifndef HD_TILE_CENSUS_H
-#define HD_TILE_CENSUS_H
+#ifndef AR_HD_TILE_CENSUS_H
+#define AR_HD_TILE_CENSUS_H
 
 #include "snesrecomp/runner.h"
 
@@ -8,4 +8,4 @@
  * through it to concrete emulator state. */
 void HdTileCensus_Frame(SrRunnerHandle *runner);
 
-#endif /* HD_TILE_CENSUS_H */
+#endif /* AR_HD_TILE_CENSUS_H */

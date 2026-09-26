@@ -1,5 +1,5 @@
-#ifndef AR_LOCALIZATION_INTERFACE_TEXT_H
-#define AR_LOCALIZATION_INTERFACE_TEXT_H
+#ifndef AR_INTERFACE_TEXT_H
+#define AR_INTERFACE_TEXT_H
 
 #include <stdbool.h>
 #include <stddef.h>

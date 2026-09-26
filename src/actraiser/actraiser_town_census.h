@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_TOWN_CENSUS_H
-#define ACTRAISER_TOWN_CENSUS_H
+#ifndef AR_ACTRAISER_TOWN_CENSUS_H
+#define AR_ACTRAISER_TOWN_CENSUS_H
 #include "regional/towns/regional_support.h"
 #include "snesrecomp/game/cpu.h"
 /* Existing $03:C07E owner, parameterized only by support coefficients. Keeps

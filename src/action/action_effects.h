@@ -1,5 +1,5 @@
-#ifndef ACTION_EFFECTS_H
-#define ACTION_EFFECTS_H
+#ifndef AR_ACTION_EFFECTS_H
+#define AR_ACTION_EFFECTS_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -341,4 +341,4 @@ void ActionSceneEffects_CaptureFrame(ActionEffectObserver *observer,
 bool ActionSceneEffects_RoomUsesBg1Decorations(
     const uint8_t *wram, size_t wram_size);
 
-#endif  /* ACTION_EFFECTS_H */
+#endif  /* AR_ACTION_EFFECTS_H */

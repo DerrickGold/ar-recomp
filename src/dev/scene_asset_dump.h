@@ -1,5 +1,5 @@
-#ifndef SCENE_ASSET_DUMP_H
-#define SCENE_ASSET_DUMP_H
+#ifndef AR_SCENE_ASSET_DUMP_H
+#define AR_SCENE_ASSET_DUMP_H
 
 #include <stdbool.h>
 #include <stdint.h>

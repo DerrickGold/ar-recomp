@@ -1,5 +1,5 @@
-#ifndef CONSTANTS_H
-#define CONSTANTS_H
+#ifndef AR_CONSTANTS_H
+#define AR_CONSTANTS_H
 
 #include "snesrecomp/game/runtime_constants.h"
 
@@ -54,4 +54,4 @@
  * though both currently have the same numeric value. */
 #define kPermilleScale 1000
 
-#endif  /* CONSTANTS_H */
+#endif  /* AR_CONSTANTS_H */

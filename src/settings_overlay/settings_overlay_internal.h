@@ -1,5 +1,5 @@
-#ifndef SETTINGS_OVERLAY_INTERNAL_H
-#define SETTINGS_OVERLAY_INTERNAL_H
+#ifndef AR_SETTINGS_OVERLAY_INTERNAL_H
+#define AR_SETTINGS_OVERLAY_INTERNAL_H
 
 /* Private UI vocabulary shared by the menu, diagnostic panel and palette
  * picker. settings_overlay.h is the public API. The menu owns navigation and
@@ -82,4 +82,4 @@ void DrawSmallText(const MenuLayout *layout, int x, int y,
  * SettingsOverlay_Destroy so teardown owns no panel internals directly. */
 void SettingsOverlayDebugPanel_Reset(void);
 
-#endif  /* SETTINGS_OVERLAY_INTERNAL_H */
+#endif  /* AR_SETTINGS_OVERLAY_INTERNAL_H */

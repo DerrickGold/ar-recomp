@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_SOURCES_H
-#define ACTRAISER_SOURCES_H
+#ifndef AR_ACTRAISER_SOURCES_H
+#define AR_ACTRAISER_SOURCES_H
 
 #include "snesrecomp/game/cpu.h"
 

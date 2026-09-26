@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_LOCALIZATION_TEXT_BACKEND_H
-#define ACTRAISER_LOCALIZATION_TEXT_BACKEND_H
+#ifndef AR_TEXT_BACKEND_H
+#define AR_TEXT_BACKEND_H
 
 #include <stdbool.h>
 #include <stddef.h>

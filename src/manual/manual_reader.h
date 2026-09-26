@@ -1,5 +1,5 @@
-#ifndef MANUAL_READER_H
-#define MANUAL_READER_H
+#ifndef AR_MANUAL_READER_H
+#define AR_MANUAL_READER_H
 
 #include <SDL3/SDL.h>
 
@@ -77,4 +77,4 @@ bool ManualReader_HandleMouse(const SDL_Event *event);
  * page turn from the presentation clock. */
 void ManualReader_Render(ArRenderRectI viewport);
 
-#endif  /* MANUAL_READER_H */
+#endif  /* AR_MANUAL_READER_H */

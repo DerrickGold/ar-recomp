@@ -1,5 +1,5 @@
-#ifndef AR_LOCALIZATION_LANGUAGE_ROW_SHAPE_H
-#define AR_LOCALIZATION_LANGUAGE_ROW_SHAPE_H
+#ifndef AR_LANGUAGE_ROW_SHAPE_H
+#define AR_LANGUAGE_ROW_SHAPE_H
 
 #include <stdbool.h>
 #include <stdint.h>

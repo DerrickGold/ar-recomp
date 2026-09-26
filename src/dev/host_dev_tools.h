@@ -1,5 +1,5 @@
-#ifndef HOST_DEV_TOOLS_H
-#define HOST_DEV_TOOLS_H
+#ifndef AR_HOST_DEV_TOOLS_H
+#define AR_HOST_DEV_TOOLS_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -16,4 +16,4 @@ bool HostDevTools_InspectWindowPoint(int window_x, int window_y);
 void HostDevTools_DumpDioramaLayers(void);
 DevToolsCaptureResult HostDevTools_WriteFramebufferPpm(FILE *file, bool require_composite);
 
-#endif /* HOST_DEV_TOOLS_H */
+#endif /* AR_HOST_DEV_TOOLS_H */

@@ -1,5 +1,5 @@
-#ifndef FRAME_SLOT_H
-#define FRAME_SLOT_H
+#ifndef AR_FRAME_SLOT_H
+#define AR_FRAME_SLOT_H
 
 /* Internal dependencies of the sole FrameSlot producer. The public capture API
  * and FrameSlot type remain in present.h. */
@@ -24,4 +24,4 @@ Sim3DTuning BuildSim3DTuning(void);
  * such as savestate loads. The next capture starts fresh from restored WRAM. */
 void FrameSlot_ResetActionEffects(void);
 
-#endif /* FRAME_SLOT_H */
+#endif /* AR_FRAME_SLOT_H */

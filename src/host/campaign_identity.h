@@ -1,5 +1,5 @@
-#ifndef AR_HOST_CAMPAIGN_IDENTITY_H
-#define AR_HOST_CAMPAIGN_IDENTITY_H
+#ifndef AR_CAMPAIGN_IDENTITY_H
+#define AR_CAMPAIGN_IDENTITY_H
 
 #include <stdbool.h>
 #include <stdint.h>

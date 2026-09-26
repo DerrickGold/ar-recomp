@@ -1,5 +1,5 @@
-#ifndef AR_HOST_FONT_RESOURCES_H
-#define AR_HOST_FONT_RESOURCES_H
+#ifndef AR_FONT_RESOURCES_H
+#define AR_FONT_RESOURCES_H
 
 #include "localization/font_resource.h"
 

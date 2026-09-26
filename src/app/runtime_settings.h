@@ -1,5 +1,5 @@
-#ifndef RUNTIME_SETTINGS_H
-#define RUNTIME_SETTINGS_H
+#ifndef AR_RUNTIME_SETTINGS_H
+#define AR_RUNTIME_SETTINGS_H
 
 #include <stdbool.h>
 
@@ -22,4 +22,4 @@ RuntimeLifecycleRequest RuntimeSettings_LifecycleRequest(void);
 /* Caller has already durably staged and validated a slot restart. */
 void RuntimeSettings_RequestPreparedRestart(void);
 
-#endif /* RUNTIME_SETTINGS_H */
+#endif /* AR_RUNTIME_SETTINGS_H */

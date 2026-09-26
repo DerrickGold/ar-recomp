@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_LAIR_RELOADS_H
-#define ACTRAISER_LAIR_RELOADS_H
+#ifndef AR_ACTRAISER_LAIR_RELOADS_H
+#define AR_ACTRAISER_LAIR_RELOADS_H
 
 #include "regional/towns/regional_lair_reloads.h"
 #include "snesrecomp/game/cpu.h"

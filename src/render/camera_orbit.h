@@ -1,5 +1,5 @@
-#ifndef CAMERA_ORBIT_H
-#define CAMERA_ORBIT_H
+#ifndef AR_CAMERA_ORBIT_H
+#define AR_CAMERA_ORBIT_H
 
 #include <stdbool.h>
 
@@ -24,4 +24,4 @@ bool CameraOrbit_Update(CameraOrbit *orbit, float elapsed_seconds,
 
 void CameraOrbit_Reset(CameraOrbit *orbit);
 
-#endif  /* CAMERA_ORBIT_H */
+#endif  /* AR_CAMERA_ORBIT_H */

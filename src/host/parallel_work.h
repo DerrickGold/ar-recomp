@@ -1,5 +1,5 @@
-#ifndef AR_HOST_PARALLEL_WORK_H
-#define AR_HOST_PARALLEL_WORK_H
+#ifndef AR_PARALLEL_WORK_H
+#define AR_PARALLEL_WORK_H
 
 #include <stddef.h>
 

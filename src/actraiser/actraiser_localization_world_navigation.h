@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_LOCALIZATION_WORLD_NAVIGATION_H
-#define ACTRAISER_LOCALIZATION_WORLD_NAVIGATION_H
+#ifndef AR_ACTRAISER_LOCALIZATION_WORLD_NAVIGATION_H
+#define AR_ACTRAISER_LOCALIZATION_WORLD_NAVIGATION_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -42,4 +42,4 @@ bool ActRaiserLocalizationWorldNavigation_Append(
     ActRaiserLocalizationFieldResolver resolve_label, void *resolve_context,
     char *error, size_t error_capacity);
 
-#endif /* ACTRAISER_LOCALIZATION_WORLD_NAVIGATION_H */
+#endif /* AR_ACTRAISER_LOCALIZATION_WORLD_NAVIGATION_H */

@@ -1,5 +1,5 @@
-#ifndef PRESENTATION_FRAME_GENERATION_H
-#define PRESENTATION_FRAME_GENERATION_H
+#ifndef AR_PRESENTATION_FRAME_GENERATION_H
+#define AR_PRESENTATION_FRAME_GENERATION_H
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -85,4 +85,4 @@ void PresentationFrameGeneration_MotionAt(
 float PresentationFrameGeneration_PairPhase(float alpha,
                                              uint8_t capture_ticks);
 
-#endif  /* PRESENTATION_FRAME_GENERATION_H */
+#endif  /* AR_PRESENTATION_FRAME_GENERATION_H */

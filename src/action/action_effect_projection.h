@@ -1,5 +1,5 @@
-#ifndef ACTION_EFFECT_PROJECTION_H
-#define ACTION_EFFECT_PROJECTION_H
+#ifndef AR_ACTION_EFFECT_PROJECTION_H
+#define AR_ACTION_EFFECT_PROJECTION_H
 
 #include <stdint.h>
 
@@ -56,4 +56,4 @@ bool ActionEffectProjection_IntersectsFlatViewport(
     const ActionEffectProjectionContext *context,
     const ActionEffectInstance *effect);
 
-#endif  /* ACTION_EFFECT_PROJECTION_H */
+#endif  /* AR_ACTION_EFFECT_PROJECTION_H */

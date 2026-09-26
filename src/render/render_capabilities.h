@@ -1,5 +1,5 @@
-#ifndef RENDER_CAPABILITIES_H
-#define RENDER_CAPABILITIES_H
+#ifndef AR_RENDER_CAPABILITIES_H
+#define AR_RENDER_CAPABILITIES_H
 
 #include <stdbool.h>
 #include <stdint.h>

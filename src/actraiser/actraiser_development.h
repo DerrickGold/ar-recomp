@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_DEVELOPMENT_H
-#define ACTRAISER_DEVELOPMENT_H
+#ifndef AR_ACTRAISER_DEVELOPMENT_H
+#define AR_ACTRAISER_DEVELOPMENT_H
 #include "regional/towns/regional_development.h"
 #include "snesrecomp/game/cpu.h"
 

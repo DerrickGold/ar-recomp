@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_LOCALIZATION_TEXT_H
-#define ACTRAISER_LOCALIZATION_TEXT_H
+#ifndef AR_ACTRAISER_LOCALIZATION_TEXT_H
+#define AR_ACTRAISER_LOCALIZATION_TEXT_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -131,4 +131,4 @@ bool ActRaiserLocalizationText_CopyComposeObservations(
     bool *dropped);
 void ActRaiserLocalizationText_ResetObservation(void);
 
-#endif /* ACTRAISER_LOCALIZATION_TEXT_H */
+#endif /* AR_ACTRAISER_LOCALIZATION_TEXT_H */

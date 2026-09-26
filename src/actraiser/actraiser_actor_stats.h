@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_ACTOR_STATS_H
-#define ACTRAISER_ACTOR_STATS_H
+#ifndef AR_ACTRAISER_ACTOR_STATS_H
+#define AR_ACTRAISER_ACTOR_STATS_H
 #include "snesrecomp/game/cpu.h"
 /* Fresh base-stat seam: regional base -> applied randomizer scale -> existing
  * mode/difficulty promotion. Composes with the independently selected

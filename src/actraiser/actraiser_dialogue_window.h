@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_DIALOGUE_WINDOW_H
-#define ACTRAISER_DIALOGUE_WINDOW_H
+#ifndef AR_ACTRAISER_DIALOGUE_WINDOW_H
+#define AR_ACTRAISER_DIALOGUE_WINDOW_H
 
 #include "actraiser/actraiser_localization_text_style.h"
 

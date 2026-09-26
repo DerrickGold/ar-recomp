@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_FISHING_H
-#define ACTRAISER_FISHING_H
+#ifndef AR_ACTRAISER_FISHING_H
+#define AR_ACTRAISER_FISHING_H
 
 #include "snesrecomp/game/cpu.h"
 

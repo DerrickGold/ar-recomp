@@ -1,5 +1,5 @@
-#ifndef DEV_TOOLS_H
-#define DEV_TOOLS_H
+#ifndef AR_DEV_TOOLS_H
+#define AR_DEV_TOOLS_H
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -57,4 +57,4 @@ void DevTools_AdjustHudOutputScale(const DevToolsContext *context,
 bool DevTools_InspectWindowPoint(const DevToolsContext *context,
                                  int window_x, int window_y);
 
-#endif /* DEV_TOOLS_H */
+#endif /* AR_DEV_TOOLS_H */

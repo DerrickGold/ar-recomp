@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_NATIVE_CALL_H
-#define ACTRAISER_NATIVE_CALL_H
+#ifndef AR_ACTRAISER_NATIVE_CALL_H
+#define AR_ACTRAISER_NATIVE_CALL_H
 
 #include "snesrecomp/game/cpu.h"
 

@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_ACTION_BG_H
-#define ACTRAISER_ACTION_BG_H
+#ifndef AR_ACTRAISER_ACTION_BG_H
+#define AR_ACTRAISER_ACTION_BG_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -282,4 +282,4 @@ void ActRaiserActionBg_BeginRoomVariants(uint8_t terrain,uint8_t mosaic,ArRegion
 void ActRaiserActionBg_Shutdown(void);
 const ActRaiserActionBgDiagnostics *ActRaiserActionBg_GetDiagnostics(void);
 
-#endif  /* ACTRAISER_ACTION_BG_H */
+#endif  /* AR_ACTRAISER_ACTION_BG_H */

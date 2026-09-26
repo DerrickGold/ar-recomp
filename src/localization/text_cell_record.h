@@ -1,5 +1,5 @@
-#ifndef AR_LOCALIZATION_TEXT_CELL_RECORD_H
-#define AR_LOCALIZATION_TEXT_CELL_RECORD_H
+#ifndef AR_TEXT_CELL_RECORD_H
+#define AR_TEXT_CELL_RECORD_H
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -69,4 +69,4 @@ bool ArTextCellDestinationsEqual(ArTextCellDestination a,
                                  ArTextCellDestination b);
 bool ArTextCellRegionsIntersect(ArTextCellRegion a, ArTextCellRegion b);
 
-#endif /* AR_LOCALIZATION_TEXT_CELL_RECORD_H */
+#endif /* AR_TEXT_CELL_RECORD_H */

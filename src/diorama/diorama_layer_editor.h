@@ -1,5 +1,5 @@
-#ifndef DIORAMA_LAYER_EDITOR_H
-#define DIORAMA_LAYER_EDITOR_H
+#ifndef AR_DIORAMA_LAYER_EDITOR_H
+#define AR_DIORAMA_LAYER_EDITOR_H
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -230,4 +230,4 @@ void DioramaLayerEditor_ClearParam(DioramaPlaneOverride *plane,
                                    DioramaEditorParam param);
 void DioramaLayerEditor_ClearPlane(DioramaPlaneOverride *plane);
 
-#endif /* DIORAMA_LAYER_EDITOR_H */
+#endif /* AR_DIORAMA_LAYER_EDITOR_H */

@@ -1,5 +1,5 @@
-#ifndef TESTS_FIXTURES_SIM_BRIDGE_BUILD_PROGRAMS_H
-#define TESTS_FIXTURES_SIM_BRIDGE_BUILD_PROGRAMS_H
+#ifndef AR_SIM_BRIDGE_BUILD_PROGRAMS_H
+#define AR_SIM_BRIDGE_BUILD_PROGRAMS_H
 
 #include <stdint.h>
 
@@ -30,4 +30,4 @@ static const SimBridgeBuildProgramFixture kBridgeBuildProgramFrames[] = {
   {6, 0xE1, 0xE3, kSimStructureVisualState_Finished,      0xD77E, 0xDC34},
 };
 
-#endif  /* TESTS_FIXTURES_SIM_BRIDGE_BUILD_PROGRAMS_H */
+#endif  /* AR_SIM_BRIDGE_BUILD_PROGRAMS_H */

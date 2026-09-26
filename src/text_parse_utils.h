@@ -1,5 +1,5 @@
-#ifndef TEXT_PARSE_UTILS_H
-#define TEXT_PARSE_UTILS_H
+#ifndef AR_TEXT_PARSE_UTILS_H
+#define AR_TEXT_PARSE_UTILS_H
 
 #include <string.h>
 

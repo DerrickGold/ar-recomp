@@ -1,5 +1,5 @@
-#ifndef MANUAL_PAGES_H
-#define MANUAL_PAGES_H
+#ifndef AR_MANUAL_PAGES_H
+#define AR_MANUAL_PAGES_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -555,4 +555,4 @@ typedef struct ManualTurnFrame {
 bool ManualTurn_ResolveFrame(const ManualView *view, int page_count,
                              bool spread_mode, ManualTurnFrame *out);
 
-#endif  /* MANUAL_PAGES_H */
+#endif  /* AR_MANUAL_PAGES_H */

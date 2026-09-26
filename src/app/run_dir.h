@@ -1,5 +1,5 @@
-#ifndef RUN_DIR_H
-#define RUN_DIR_H
+#ifndef AR_RUN_DIR_H
+#define AR_RUN_DIR_H
 
 #include <stddef.h>
 

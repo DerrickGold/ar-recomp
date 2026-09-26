@@ -1,5 +1,5 @@
-#ifndef ORACLE_TRACE_H
-#define ORACLE_TRACE_H
+#ifndef AR_ORACLE_TRACE_H
+#define AR_ORACLE_TRACE_H
 
 #include "snesrecomp/runner.h"
 
@@ -13,4 +13,4 @@ void OracleTrace_CompleteTick(void);
 /* Flush and close trace streams. */
 void OracleTrace_Shutdown(void);
 
-#endif /* ORACLE_TRACE_H */
+#endif /* AR_ORACLE_TRACE_H */

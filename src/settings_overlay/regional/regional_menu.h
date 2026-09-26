@@ -1,5 +1,5 @@
-#ifndef SETTINGS_OVERLAY_REGIONAL_MENU_H
-#define SETTINGS_OVERLAY_REGIONAL_MENU_H
+#ifndef AR_REGIONAL_MENU_H
+#define AR_REGIONAL_MENU_H
 
 #include "settings_overlay/regional/regional_ui.h"
 

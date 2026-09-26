@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_LOCALIZATION_ROUTES_H
-#define ACTRAISER_LOCALIZATION_ROUTES_H
+#ifndef AR_ACTRAISER_LOCALIZATION_ROUTES_H
+#define AR_ACTRAISER_LOCALIZATION_ROUTES_H
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -82,4 +82,4 @@ bool ActRaiserLocalizationRoute_TextBounds(const char *semantic_id,
                                            ArTextCellRegion *region,
                                            uint8_t *font_pixels);
 
-#endif /* ACTRAISER_LOCALIZATION_ROUTES_H */
+#endif /* AR_ACTRAISER_LOCALIZATION_ROUTES_H */

@@ -1,5 +1,5 @@
-#ifndef AR_LOCALIZATION_DIALOGUE_SESSION_H
-#define AR_LOCALIZATION_DIALOGUE_SESSION_H
+#ifndef AR_DIALOGUE_SESSION_H
+#define AR_DIALOGUE_SESSION_H
 
 #include "localization/language_pack.h"
 #include "localization/text_bidi.h"
@@ -272,4 +272,4 @@ bool ArDialogueSession_RestoreSource(ArDialogueSession *session,
                                      const ArDialogueValueResolver *resolver,
                                      ArLanguagePackError *error);
 
-#endif /* AR_LOCALIZATION_DIALOGUE_SESSION_H */
+#endif /* AR_DIALOGUE_SESSION_H */

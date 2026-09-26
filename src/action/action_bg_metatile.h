@@ -1,5 +1,5 @@
-#ifndef ACTION_BG_METATILE_H
-#define ACTION_BG_METATILE_H
+#ifndef AR_ACTION_BG_METATILE_H
+#define AR_ACTION_BG_METATILE_H
 
 #include <stdint.h>
 
@@ -13,4 +13,4 @@ static inline uint16_t ActionBg_ComposeTilemapWord(
                     common_attribute_bits);
 }
 
-#endif /* ACTION_BG_METATILE_H */
+#endif /* AR_ACTION_BG_METATILE_H */

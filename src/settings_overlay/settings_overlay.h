@@ -1,5 +1,5 @@
-#ifndef SETTINGS_OVERLAY_H
-#define SETTINGS_OVERLAY_H
+#ifndef AR_SETTINGS_OVERLAY_H
+#define AR_SETTINGS_OVERLAY_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -191,4 +191,4 @@ void SettingsOverlay_EndDebugPanelDrag(void);
 bool SettingsOverlay_IsDebugPanelDragging(void);
 bool SettingsOverlay_GetDebugPanelRect(ArRenderRectI *rect);
 
-#endif  /* SETTINGS_OVERLAY_H */
+#endif  /* AR_SETTINGS_OVERLAY_H */

@@ -1,5 +1,5 @@
-#ifndef AR_LOCALIZATION_TEXT_RASTERIZER_H
-#define AR_LOCALIZATION_TEXT_RASTERIZER_H
+#ifndef AR_TEXT_RASTERIZER_H
+#define AR_TEXT_RASTERIZER_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -327,4 +327,4 @@ bool ArTextBitmap_ApplyClusterAccent(void *pixels, int width, int height,
 uint32_t ArTextStyle_BandColor(uint32_t band_rgb, uint32_t body_rgb, int row,
                                int last_row);
 
-#endif /* AR_LOCALIZATION_TEXT_RASTERIZER_H */
+#endif /* AR_TEXT_RASTERIZER_H */

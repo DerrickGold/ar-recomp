@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_PLATFORM_SKULL_H
-#define ACTRAISER_PLATFORM_SKULL_H
+#ifndef AR_ACTRAISER_PLATFORM_SKULL_H
+#define AR_ACTRAISER_PLATFORM_SKULL_H
 #include "snesrecomp/game/cpu.h"
 bool ActRaiser_PlatformSkullSpawnEntry(CpuState *cpu);
 RecompReturn ActRaiser_PlatformSkullSpawn(CpuState *cpu);

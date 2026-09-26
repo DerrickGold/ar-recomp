@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_LOCALIZATION_VALUES_H
-#define ACTRAISER_LOCALIZATION_VALUES_H
+#ifndef AR_ACTRAISER_LOCALIZATION_VALUES_H
+#define AR_ACTRAISER_LOCALIZATION_VALUES_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -50,4 +50,4 @@ bool ActRaiserLocalizationValues_Resolve(
 uint64_t ActRaiserLocalizationValues_ReportRevision(
     const ActRaiserLocalizationValues *values);
 
-#endif /* ACTRAISER_LOCALIZATION_VALUES_H */
+#endif /* AR_ACTRAISER_LOCALIZATION_VALUES_H */

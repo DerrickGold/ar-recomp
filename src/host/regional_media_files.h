@@ -1,5 +1,5 @@
-#ifndef AR_HOST_REGIONAL_MEDIA_FILES_H
-#define AR_HOST_REGIONAL_MEDIA_FILES_H
+#ifndef AR_REGIONAL_MEDIA_FILES_H
+#define AR_REGIONAL_MEDIA_FILES_H
 
 #include "regional/media/regional_media.h"
 

@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_QUAKE_H
-#define ACTRAISER_QUAKE_H
+#ifndef AR_ACTRAISER_QUAKE_H
+#define AR_ACTRAISER_QUAKE_H
 
 #include "regional/towns/regional_quake.h"
 #include "snesrecomp/game/cpu.h"

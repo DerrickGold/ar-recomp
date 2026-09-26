@@ -1,5 +1,5 @@
-#ifndef SAVE_SYSTEM_H
-#define SAVE_SYSTEM_H
+#ifndef AR_SAVE_SYSTEM_H
+#define AR_SAVE_SYSTEM_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -257,4 +257,4 @@ bool SaveSystem_Export(SaveFileFormat format, const char *path,
  * together while the game is closed. Native SRAM remains emulator compatible. */
 bool SaveSystem_CreateRecoveryCopy(const char *directory, SaveError *error);
 
-#endif  /* SAVE_SYSTEM_H */
+#endif  /* AR_SAVE_SYSTEM_H */

@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_SCROLL_CAST_H
-#define ACTRAISER_SCROLL_CAST_H
+#ifndef AR_ACTRAISER_SCROLL_CAST_H
+#define AR_ACTRAISER_SCROLL_CAST_H
 
 #include "regional/regional_costs.h"
 #include "snesrecomp/game/cpu.h"

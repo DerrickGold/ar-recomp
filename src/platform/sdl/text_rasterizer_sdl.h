@@ -1,5 +1,5 @@
-#ifndef AR_PLATFORM_SDL_TEXT_RASTERIZER_H
-#define AR_PLATFORM_SDL_TEXT_RASTERIZER_H
+#ifndef AR_TEXT_RASTERIZER_SDL_H
+#define AR_TEXT_RASTERIZER_SDL_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -32,4 +32,4 @@ const ArTextRasterizer *ArSdlTextRasterizer_Get(
  * ArTextBackend; this SDL-specific constructor stays at the host boundary. */
 void ArSdlTextBackend_Init(ArTextBackend *backend);
 
-#endif /* AR_PLATFORM_SDL_TEXT_RASTERIZER_H */
+#endif /* AR_TEXT_RASTERIZER_SDL_H */

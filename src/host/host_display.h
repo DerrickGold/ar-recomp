@@ -1,5 +1,5 @@
-#ifndef HOST_DISPLAY_H
-#define HOST_DISPLAY_H
+#ifndef AR_HOST_DISPLAY_H
+#define AR_HOST_DISPLAY_H
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -82,4 +82,4 @@ void HostDisplay_YieldIfNoPresent(bool presented,
                                   bool window_hidden,
                                   bool produced_frame);
 
-#endif /* HOST_DISPLAY_H */
+#endif /* AR_HOST_DISPLAY_H */

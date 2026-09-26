@@ -1,5 +1,5 @@
-#ifndef MANUAL_INPUT_H
-#define MANUAL_INPUT_H
+#ifndef AR_MANUAL_INPUT_H
+#define AR_MANUAL_INPUT_H
 
 #include <SDL3/SDL.h>
 #include <stdbool.h>
@@ -103,4 +103,4 @@ const char *ManualInput_HintText(ManualHintDevice device, bool zoomed);
  * instant it engages, so there is no slow pan available at all. */
 float ManualInput_StickAxis(int raw, int deadzone_percent);
 
-#endif  /* MANUAL_INPUT_H */
+#endif  /* AR_MANUAL_INPUT_H */

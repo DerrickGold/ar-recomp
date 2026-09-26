@@ -1,5 +1,5 @@
-#ifndef SETTINGS_OVERLAY_MENU_INPUT_H
-#define SETTINGS_OVERLAY_MENU_INPUT_H
+#ifndef AR_MENU_INPUT_H
+#define AR_MENU_INPUT_H
 
 #include "app/input_map.h"
 

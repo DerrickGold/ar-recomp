@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_LOCALIZATION_COMPOSE_STATE_H
-#define ACTRAISER_LOCALIZATION_COMPOSE_STATE_H
+#ifndef AR_ACTRAISER_LOCALIZATION_COMPOSE_STATE_H
+#define AR_ACTRAISER_LOCALIZATION_COMPOSE_STATE_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -107,4 +107,4 @@ const ActRaiserLocalizationComposeSnapshot *
 ActRaiserLocalizationComposeState_FindObserved(
     const ActRaiserLocalizationComposeState *state, uint32_t surface_id);
 
-#endif /* ACTRAISER_LOCALIZATION_COMPOSE_STATE_H */
+#endif /* AR_ACTRAISER_LOCALIZATION_COMPOSE_STATE_H */

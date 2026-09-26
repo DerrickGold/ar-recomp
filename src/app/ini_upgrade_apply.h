@@ -1,5 +1,5 @@
-#ifndef INI_UPGRADE_APPLY_H
-#define INI_UPGRADE_APPLY_H
+#ifndef AR_INI_UPGRADE_APPLY_H
+#define AR_INI_UPGRADE_APPLY_H
 
 /* Merge the bundle's shipped defaults (defaults/<leaf>) into the user's live
  * config files, once at startup, before anything reads them.
@@ -13,4 +13,4 @@
  * will not start is far worse than a setting that has not appeared yet. */
 void IniUpgrade_ApplyShippedDefaults(void);
 
-#endif /* INI_UPGRADE_APPLY_H */
+#endif /* AR_INI_UPGRADE_APPLY_H */

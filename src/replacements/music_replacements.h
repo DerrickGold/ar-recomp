@@ -1,5 +1,5 @@
-#ifndef MUSIC_REPLACEMENTS_H
-#define MUSIC_REPLACEMENTS_H
+#ifndef AR_MUSIC_REPLACEMENTS_H
+#define AR_MUSIC_REPLACEMENTS_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -156,4 +156,4 @@ bool MusicPlay_IsRedundantRestart(const MusicReplacement *live,
 int MusicLoop_NextRun(uint32 pos, int want, uint32 loop_start,
                       uint32 loop_end, unsigned total, bool *hit_loop_point);
 
-#endif /* MUSIC_REPLACEMENTS_H */
+#endif /* AR_MUSIC_REPLACEMENTS_H */

@@ -1,5 +1,5 @@
-#ifndef ACTION_BG_WORLD_H
-#define ACTION_BG_WORLD_H
+#ifndef AR_ACTION_BG_WORLD_H
+#define AR_ACTION_BG_WORLD_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -139,4 +139,4 @@ unsigned ActionBgWorld_TileWidth(const ActionBgWorld *world);
 unsigned ActionBgWorld_TileHeight(const ActionBgWorld *world);
 size_t ActionBgWorld_TileCount(const ActionBgWorld *world);
 
-#endif  /* ACTION_BG_WORLD_H */
+#endif  /* AR_ACTION_BG_WORLD_H */

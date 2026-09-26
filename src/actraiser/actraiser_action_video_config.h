@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_ACTION_VIDEO_CONFIG_H
-#define ACTRAISER_ACTION_VIDEO_CONFIG_H
+#ifndef AR_ACTRAISER_ACTION_VIDEO_CONFIG_H
+#define AR_ACTRAISER_ACTION_VIDEO_CONFIG_H
 
 #include <stdbool.h>
 
@@ -15,4 +15,4 @@ RecompReturn ActRaiser_ApplyActionVideoConfig(CpuState *cpu);
 bool ActRaiser_ActionVideoConfigEntry(CpuState *cpu);
 RecompReturn ActRaiser_RunActionVideoConfig(CpuState *cpu);
 
-#endif /* ACTRAISER_ACTION_VIDEO_CONFIG_H */
+#endif /* AR_ACTRAISER_ACTION_VIDEO_CONFIG_H */

@@ -1,5 +1,5 @@
-#ifndef DIORAMA_UPLOAD_H
-#define DIORAMA_UPLOAD_H
+#ifndef AR_DIORAMA_UPLOAD_H
+#define AR_DIORAMA_UPLOAD_H
 
 #include <stddef.h>
 #include <stdint.h>
@@ -32,4 +32,4 @@ DioramaUploadResult Diorama_Upload(
 /* Forget retained upload hashes after a render-device reset or shutdown. */
 void DioramaUpload_Reset(void);
 
-#endif /* DIORAMA_UPLOAD_H */
+#endif /* AR_DIORAMA_UPLOAD_H */

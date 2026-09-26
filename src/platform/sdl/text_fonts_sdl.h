@@ -1,5 +1,5 @@
-#ifndef AR_PLATFORM_SDL_TEXT_FONTS_H
-#define AR_PLATFORM_SDL_TEXT_FONTS_H
+#ifndef AR_TEXT_FONTS_SDL_H
+#define AR_TEXT_FONTS_SDL_H
 
 #include "localization/text_backend.h"
 #include <SDL3/SDL.h>

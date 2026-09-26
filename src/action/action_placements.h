@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_ACTION_PLACEMENTS_H
-#define ACTRAISER_ACTION_PLACEMENTS_H
+#ifndef AR_ACTION_PLACEMENTS_H
+#define AR_ACTION_PLACEMENTS_H
 
 #include <stdbool.h>
 #include <stddef.h>

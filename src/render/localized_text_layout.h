@@ -1,5 +1,5 @@
-#ifndef AR_RENDER_LOCALIZED_TEXT_LAYOUT_H
-#define AR_RENDER_LOCALIZED_TEXT_LAYOUT_H
+#ifndef AR_LOCALIZED_TEXT_LAYOUT_H
+#define AR_LOCALIZED_TEXT_LAYOUT_H
 
 #include "render/text_surface_cache.h"
 #include "localization/localization_frame.h"

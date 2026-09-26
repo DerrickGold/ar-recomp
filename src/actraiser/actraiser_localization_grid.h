@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_LOCALIZATION_GRID_H
-#define ACTRAISER_LOCALIZATION_GRID_H
+#ifndef AR_ACTRAISER_LOCALIZATION_GRID_H
+#define AR_ACTRAISER_LOCALIZATION_GRID_H
 
 #include <stdbool.h>
 
@@ -31,4 +31,4 @@ bool ActRaiserLocalizationGrid_Build(ActRaiserLocalizationMenu menu,
                                      ArTextCellRegion region,
                                      ArLocalizationTextGrid *grid);
 
-#endif /* ACTRAISER_LOCALIZATION_GRID_H */
+#endif /* AR_ACTRAISER_LOCALIZATION_GRID_H */

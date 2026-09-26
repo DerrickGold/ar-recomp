@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_MIRACLE_TRANSLATION_H
-#define ACTRAISER_MIRACLE_TRANSLATION_H
+#ifndef AR_ACTRAISER_MIRACLE_TRANSLATION_H
+#define AR_ACTRAISER_MIRACLE_TRANSLATION_H
 #include "actraiser/actraiser_dialogue_adapter.h"
 #include "regional/regional_costs.h"
 

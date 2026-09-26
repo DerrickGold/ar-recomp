@@ -1,5 +1,5 @@
-#ifndef AR_LOCALIZATION_ENHANCED_TEXT_SETTINGS_H
-#define AR_LOCALIZATION_ENHANCED_TEXT_SETTINGS_H
+#ifndef AR_ENHANCED_TEXT_SETTINGS_H
+#define AR_ENHANCED_TEXT_SETTINGS_H
 
 #include "localization/text_rasterizer.h"
 
@@ -42,4 +42,4 @@ bool ArEnhancedTextSettings_Apply(const ArEnhancedTextSettings *settings,
                                   int base_pixels, int minimum_base_pixels,
                                   ArTextRasterRequest *request);
 
-#endif /* AR_LOCALIZATION_ENHANCED_TEXT_SETTINGS_H */
+#endif /* AR_ENHANCED_TEXT_SETTINGS_H */

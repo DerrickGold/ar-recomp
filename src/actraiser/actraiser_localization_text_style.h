@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_LOCALIZATION_TEXT_STYLE_H
-#define ACTRAISER_LOCALIZATION_TEXT_STYLE_H
+#ifndef AR_ACTRAISER_LOCALIZATION_TEXT_STYLE_H
+#define AR_ACTRAISER_LOCALIZATION_TEXT_STYLE_H
 
 #include "actraiser/actraiser_text_ink_bindings.h"
 #include "localization/dialogue_session.h"

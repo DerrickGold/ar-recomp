@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_RECOVERY_H
-#define ACTRAISER_RECOVERY_H
+#ifndef AR_ACTRAISER_RECOVERY_H
+#define AR_ACTRAISER_RECOVERY_H
 
 #include "regional/towns/regional_recovery.h"
 #include "snesrecomp/game/cpu.h"

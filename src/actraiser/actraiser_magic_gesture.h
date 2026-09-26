@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_MAGIC_GESTURE_H
-#define ACTRAISER_MAGIC_GESTURE_H
+#ifndef AR_ACTRAISER_MAGIC_GESTURE_H
+#define AR_ACTRAISER_MAGIC_GESTURE_H
 
 #include "snesrecomp/game/cpu.h"
 

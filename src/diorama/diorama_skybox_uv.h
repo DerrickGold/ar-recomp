@@ -1,5 +1,5 @@
-#ifndef DIORAMA_SKYBOX_UV_H
-#define DIORAMA_SKYBOX_UV_H
+#ifndef AR_DIORAMA_SKYBOX_UV_H
+#define AR_DIORAMA_SKYBOX_UV_H
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -95,4 +95,4 @@ void DioramaSkyboxUvRange(int tex_width, int valid_x0, int valid_x1,
 void DioramaRomSkyboxUvRange(int display_width, int source_width,
                              float *out_u0, float *out_u1);
 
-#endif /* DIORAMA_SKYBOX_UV_H */
+#endif /* AR_DIORAMA_SKYBOX_UV_H */

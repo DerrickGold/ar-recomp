@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_DIFFICULTY_H
-#define ACTRAISER_DIFFICULTY_H
+#ifndef AR_ACTRAISER_DIFFICULTY_H
+#define AR_ACTRAISER_DIFFICULTY_H
 #include "snesrecomp/game/cpu.h"
 bool ActRaiser_DifficultySpawnEntry(CpuState *cpu);
 RecompReturn ActRaiser_DifficultySpawn(CpuState *cpu);

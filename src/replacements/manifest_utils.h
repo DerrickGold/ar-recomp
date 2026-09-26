@@ -1,5 +1,5 @@
-#ifndef MANIFEST_UTILS_H
-#define MANIFEST_UTILS_H
+#ifndef AR_MANIFEST_UTILS_H
+#define AR_MANIFEST_UTILS_H
 
 #include <stddef.h>
 

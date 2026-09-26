@@ -1,5 +1,5 @@
-#ifndef ASSET_CONDITION_H
-#define ASSET_CONDITION_H
+#ifndef AR_ASSET_CONDITION_H
+#define AR_ASSET_CONDITION_H
 
 #include <stdbool.h>
 #include "snesrecomp/game/types.h"

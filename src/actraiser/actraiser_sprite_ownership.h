@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_SPRITE_OWNERSHIP_H
-#define ACTRAISER_SPRITE_OWNERSHIP_H
+#ifndef AR_ACTRAISER_SPRITE_OWNERSHIP_H
+#define AR_ACTRAISER_SPRITE_OWNERSHIP_H
 
 #include <stdbool.h>
 #include <stdint.h>

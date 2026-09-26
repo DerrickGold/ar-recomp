@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_ACTION_ROOM_MOSAIC_H
-#define ACTRAISER_ACTION_ROOM_MOSAIC_H
+#ifndef AR_ACTION_ROOM_MOSAIC_H
+#define AR_ACTION_ROOM_MOSAIC_H
 #include "action_room_scene.h"
 
 /* Three normalized, measured patterns, not foreign executable bytes. The

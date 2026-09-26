@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_RETRY_H
-#define ACTRAISER_RETRY_H
+#ifndef AR_ACTRAISER_RETRY_H
+#define AR_ACTRAISER_RETRY_H
 
 #include "snesrecomp/game/cpu.h"
 

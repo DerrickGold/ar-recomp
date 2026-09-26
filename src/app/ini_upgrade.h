@@ -1,5 +1,5 @@
-#ifndef INI_UPGRADE_H
-#define INI_UPGRADE_H
+#ifndef AR_INI_UPGRADE_H
+#define AR_INI_UPGRADE_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -24,4 +24,4 @@ size_t IniUpgrade_Merge(const char *live, const char *shipped,
 bool IniUpgrade_NeedsMerge(const char *live, const char *shipped,
                            IniUpgradeSectionKind kind);
 
-#endif /* INI_UPGRADE_H */
+#endif /* AR_INI_UPGRADE_H */

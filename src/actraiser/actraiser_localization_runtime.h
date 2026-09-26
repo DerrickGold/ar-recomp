@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_LOCALIZATION_RUNTIME_H
-#define ACTRAISER_LOCALIZATION_RUNTIME_H
+#ifndef AR_ACTRAISER_LOCALIZATION_RUNTIME_H
+#define AR_ACTRAISER_LOCALIZATION_RUNTIME_H
 
 #include <stddef.h>
 #include <stdint.h>
@@ -84,4 +84,4 @@ void ActRaiserLocalizationRuntime_AppendMenuHelp(
 bool ActRaiserLocalizationRuntime_PrepareMenuHelpStyle(
     const ArDialoguePageSnapshot *source, const SimMenuHelpPage *help);
 
-#endif /* ACTRAISER_LOCALIZATION_RUNTIME_H */
+#endif /* AR_ACTRAISER_LOCALIZATION_RUNTIME_H */

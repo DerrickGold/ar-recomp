@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_BRIDGE_EXTENSION_H
-#define ACTRAISER_BRIDGE_EXTENSION_H
+#ifndef AR_ACTRAISER_BRIDGE_EXTENSION_H
+#define AR_ACTRAISER_BRIDGE_EXTENSION_H
 #include "snesrecomp/game/cpu.h"
 /* Completed extension bridges not duplicated by a native record. Read-only,
  * independent of the current bridge-limit setting; owns extension validation

@@ -1,5 +1,5 @@
-#ifndef DETERMINISTIC_HASH_H
-#define DETERMINISTIC_HASH_H
+#ifndef AR_DETERMINISTIC_HASH_H
+#define AR_DETERMINISTIC_HASH_H
 
 #include <stddef.h>
 #include <stdint.h>

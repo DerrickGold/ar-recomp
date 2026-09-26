@@ -1,5 +1,5 @@
-#ifndef AR_LOCALIZATION_TEXT_BIDI_H
-#define AR_LOCALIZATION_TEXT_BIDI_H
+#ifndef AR_TEXT_BIDI_H
+#define AR_TEXT_BIDI_H
 
 #include <stdbool.h>
 #include <stddef.h>

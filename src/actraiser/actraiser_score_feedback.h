@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_SCORE_FEEDBACK_H
-#define ACTRAISER_SCORE_FEEDBACK_H
+#ifndef AR_ACTRAISER_SCORE_FEEDBACK_H
+#define AR_ACTRAISER_SCORE_FEEDBACK_H
 
 #include "snesrecomp/game/cpu.h"
 

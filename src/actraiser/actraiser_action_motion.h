@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_ACTION_MOTION_H
-#define ACTRAISER_ACTION_MOTION_H
+#ifndef AR_ACTRAISER_ACTION_MOTION_H
+#define AR_ACTRAISER_ACTION_MOTION_H
 #include "snesrecomp/game/cpu.h"
 bool ActRaiser_PlantTendrilEntry(CpuState *cpu);
 RecompReturn ActRaiser_PlantTendril(CpuState *cpu);

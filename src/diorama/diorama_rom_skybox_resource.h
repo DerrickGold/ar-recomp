@@ -1,5 +1,5 @@
-#ifndef DIORAMA_ROM_SKYBOX_RESOURCE_H
-#define DIORAMA_ROM_SKYBOX_RESOURCE_H
+#ifndef AR_DIORAMA_ROM_SKYBOX_RESOURCE_H
+#define AR_DIORAMA_ROM_SKYBOX_RESOURCE_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -25,4 +25,4 @@ ArRenderTexture DioramaRomSkyboxResource_Resolve(
 /* Drop device-owned handles while retaining decoded source pixels. */
 void DioramaRomSkyboxResource_Reset(ArRenderDevice *device);
 
-#endif /* DIORAMA_ROM_SKYBOX_RESOURCE_H */
+#endif /* AR_DIORAMA_ROM_SKYBOX_RESOURCE_H */

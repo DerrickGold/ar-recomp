@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_LOCALIZATION_ART_H
-#define ACTRAISER_LOCALIZATION_ART_H
+#ifndef AR_ACTRAISER_LOCALIZATION_ART_H
+#define AR_ACTRAISER_LOCALIZATION_ART_H
 
 #include "localization/localization_frame.h"
 

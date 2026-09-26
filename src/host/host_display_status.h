@@ -1,5 +1,5 @@
-#ifndef HOST_DISPLAY_STATUS_H
-#define HOST_DISPLAY_STATUS_H
+#ifndef AR_HOST_DISPLAY_STATUS_H
+#define AR_HOST_DISPLAY_STATUS_H
 
 #include <stdbool.h>
 
@@ -12,4 +12,4 @@ int HostDisplayStatus_NominalRefreshHz(void);
 void HostDisplayStatus_SetVsyncActive(bool active);
 bool HostDisplayStatus_VsyncActive(void);
 
-#endif /* HOST_DISPLAY_STATUS_H */
+#endif /* AR_HOST_DISPLAY_STATUS_H */

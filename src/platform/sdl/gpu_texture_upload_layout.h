@@ -1,5 +1,5 @@
-#ifndef AR_SDL_GPU_TEXTURE_UPLOAD_LAYOUT_H
-#define AR_SDL_GPU_TEXTURE_UPLOAD_LAYOUT_H
+#ifndef AR_GPU_TEXTURE_UPLOAD_LAYOUT_H
+#define AR_GPU_TEXTURE_UPLOAD_LAYOUT_H
 
 #include <stdbool.h>
 #include <stdint.h>

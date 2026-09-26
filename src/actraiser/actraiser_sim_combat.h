@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_SIM_COMBAT_H
-#define ACTRAISER_SIM_COMBAT_H
+#ifndef AR_ACTRAISER_SIM_COMBAT_H
+#define AR_ACTRAISER_SIM_COMBAT_H
 #include "regional/towns/regional_sim_combat.h"
 #include "snesrecomp/game/cpu.h"
 bool ActRaiserSimCombat_CacheTown(CpuState *cpu,unsigned *town);

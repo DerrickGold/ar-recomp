@@ -1,5 +1,5 @@
-#ifndef INPUT_REPLAY_H
-#define INPUT_REPLAY_H
+#ifndef AR_INPUT_REPLAY_H
+#define AR_INPUT_REPLAY_H
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -55,4 +55,4 @@ bool InputReplay_PolicyChangesAllowed(void);
 
 void InputReplay_Shutdown(void);
 
-#endif /* INPUT_REPLAY_H */
+#endif /* AR_INPUT_REPLAY_H */

@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_WS_GAP_H
-#define ACTRAISER_WS_GAP_H
+#ifndef AR_ACTRAISER_WS_GAP_H
+#define AR_ACTRAISER_WS_GAP_H
 
 #include <stddef.h>
 #include <stdint.h>
@@ -39,4 +39,4 @@ void ActRaiserFillMarginGaps(uint8_t *rows, size_t pitch, int height,
                              int budget, int live_left, int live_right,
                              uint32_t fill_argb);
 
-#endif /* ACTRAISER_WS_GAP_H */
+#endif /* AR_ACTRAISER_WS_GAP_H */

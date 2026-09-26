@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_STAGE_TERRAIN_H
-#define ACTRAISER_STAGE_TERRAIN_H
+#ifndef AR_ACTRAISER_STAGE_TERRAIN_H
+#define AR_ACTRAISER_STAGE_TERRAIN_H
 #include "snesrecomp/game/cpu.h"
 bool ActRaiser_StageTerrainEntry(CpuState *cpu);
 RecompReturn ActRaiser_StageTerrain(CpuState *cpu);

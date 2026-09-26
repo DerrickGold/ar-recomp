@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_STORY_PREREQUISITES_H
-#define ACTRAISER_STORY_PREREQUISITES_H
+#ifndef AR_ACTRAISER_STORY_PREREQUISITES_H
+#define AR_ACTRAISER_STORY_PREREQUISITES_H
 
 #include "snesrecomp/game/cpu.h"
 #include "regional/towns/regional_story_prerequisites.h"

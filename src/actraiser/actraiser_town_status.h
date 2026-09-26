@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_TOWN_STATUS_H
-#define ACTRAISER_TOWN_STATUS_H
+#ifndef AR_ACTRAISER_TOWN_STATUS_H
+#define AR_ACTRAISER_TOWN_STATUS_H
 
 #include "regional/towns/regional_town_status.h"
 #include "snesrecomp/game/cpu.h"

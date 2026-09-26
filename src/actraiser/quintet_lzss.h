@@ -1,5 +1,5 @@
-#ifndef QUINTET_LZSS_H
-#define QUINTET_LZSS_H
+#ifndef AR_QUINTET_LZSS_H
+#define AR_QUINTET_LZSS_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -51,4 +51,4 @@ bool QuintetLzss_DecompressAsset(const uint8_t *packed, size_t packed_size,
                                  uint8_t *output, size_t expected_size,
                                  QuintetLzssState *state);
 
-#endif /* QUINTET_LZSS_H */
+#endif /* AR_QUINTET_LZSS_H */

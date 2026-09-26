@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_TOWN_WAIT_H
-#define ACTRAISER_TOWN_WAIT_H
+#ifndef AR_ACTRAISER_TOWN_WAIT_H
+#define AR_ACTRAISER_TOWN_WAIT_H
 
 #include "snesrecomp/game/cpu.h"
 

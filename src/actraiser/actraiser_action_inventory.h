@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_ACTION_INVENTORY_H
-#define ACTRAISER_ACTION_INVENTORY_H
+#ifndef AR_ACTRAISER_ACTION_INVENTORY_H
+#define AR_ACTRAISER_ACTION_INVENTORY_H
 #include "snesrecomp/game/cpu.h"
 bool ActRaiser_InventoryPickupEntry(CpuState *cpu);
 RecompReturn ActRaiser_InventoryPickup(CpuState *cpu);

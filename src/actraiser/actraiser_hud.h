@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_HUD_H
-#define ACTRAISER_HUD_H
+#ifndef AR_ACTRAISER_HUD_H
+#define AR_ACTRAISER_HUD_H
 
 #include "snesrecomp/game/cpu.h"
 

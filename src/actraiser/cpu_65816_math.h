@@ -1,5 +1,5 @@
-#ifndef CPU_65816_MATH_H
-#define CPU_65816_MATH_H
+#ifndef AR_CPU_65816_MATH_H
+#define AR_CPU_65816_MATH_H
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -15,4 +15,4 @@ typedef struct Cpu65816Add16Result {
 Cpu65816Add16Result Cpu65816_Add16(uint16_t left, uint16_t right,
                                   bool carry_in, bool decimal);
 
-#endif /* CPU_65816_MATH_H */
+#endif /* AR_CPU_65816_MATH_H */

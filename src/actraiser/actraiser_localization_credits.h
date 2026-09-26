@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_LOCALIZATION_CREDITS_H
-#define ACTRAISER_LOCALIZATION_CREDITS_H
+#ifndef AR_ACTRAISER_LOCALIZATION_CREDITS_H
+#define AR_ACTRAISER_LOCALIZATION_CREDITS_H
 
 #include "actraiser/actraiser_localization_compose_state.h"
 #include "actraiser/actraiser_credits.h"

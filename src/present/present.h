@@ -1,5 +1,5 @@
-#ifndef PRESENT_H
-#define PRESENT_H
+#ifndef AR_PRESENT_H
+#define AR_PRESENT_H
 
 #include <stdbool.h>
 #include <stdint.h>

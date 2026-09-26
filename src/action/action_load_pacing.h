@@ -1,5 +1,5 @@
-#ifndef ACTION_LOAD_PACING_H
-#define ACTION_LOAD_PACING_H
+#ifndef AR_ACTION_LOAD_PACING_H
+#define AR_ACTION_LOAD_PACING_H
 
 #include <stdint.h>
 
@@ -73,4 +73,4 @@ static inline int ActionLoadPacing_ShouldReleaseForOneShot(
          latched_token == current_token && current_completed;
 }
 
-#endif  // ACTION_LOAD_PACING_H
+#endif  // AR_ACTION_LOAD_PACING_H

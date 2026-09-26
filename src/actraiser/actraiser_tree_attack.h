@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_TREE_ATTACK_H
-#define ACTRAISER_TREE_ATTACK_H
+#ifndef AR_ACTRAISER_TREE_ATTACK_H
+#define AR_ACTRAISER_TREE_ATTACK_H
 #include "snesrecomp/game/cpu.h"
 #include <stdbool.h>
 bool ActRaiser_TreePrepareEntry(CpuState *cpu);

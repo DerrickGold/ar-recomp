@@ -1,5 +1,5 @@
-#ifndef DIORAMA_LAYER_ORDER_H
-#define DIORAMA_LAYER_ORDER_H
+#ifndef AR_DIORAMA_LAYER_ORDER_H
+#define AR_DIORAMA_LAYER_ORDER_H
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -432,4 +432,4 @@ size_t DioramaLayerOrder_MergeManifest(const DioramaLayerOrderTable *table,
                                        const char *default_preamble,
                                        char *buffer, size_t size);
 
-#endif /* DIORAMA_LAYER_ORDER_H */
+#endif /* AR_DIORAMA_LAYER_ORDER_H */

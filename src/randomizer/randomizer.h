@@ -1,5 +1,5 @@
-#ifndef RANDOMIZER_H
-#define RANDOMIZER_H
+#ifndef AR_RANDOMIZER_H
+#define AR_RANDOMIZER_H
 #include "snesrecomp/game/types.h"
 #include "action/action_placements.h"
 #include "randomizer/randomizer_config.h"
@@ -130,4 +130,4 @@ typedef struct RandomizerPlacementMap {
 bool Randomizer_ApplyPlacementPrograms(const RandomizerPlacementMap *maps, size_t count,
                                      RandomizerSummary *summary);
 
-#endif /* RANDOMIZER_H */
+#endif /* AR_RANDOMIZER_H */

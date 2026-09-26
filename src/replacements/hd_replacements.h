@@ -1,5 +1,5 @@
-#ifndef HD_REPLACEMENTS_H
-#define HD_REPLACEMENTS_H
+#ifndef AR_HD_REPLACEMENTS_H
+#define AR_HD_REPLACEMENTS_H
 
 #include <stdbool.h>
 #include "replacements/asset_condition.h"
@@ -103,4 +103,4 @@ void HdReplacements_BindRunner(SrRunnerHandle *runner);
  * rather than clobbered. */
 void HdReplacements_EvaluateFrame(void);
 
-#endif /* HD_REPLACEMENTS_H */
+#endif /* AR_HD_REPLACEMENTS_H */

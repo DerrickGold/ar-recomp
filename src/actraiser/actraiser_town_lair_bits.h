@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_TOWN_LAIR_BITS_H
-#define ACTRAISER_TOWN_LAIR_BITS_H
+#ifndef AR_ACTRAISER_TOWN_LAIR_BITS_H
+#define AR_ACTRAISER_TOWN_LAIR_BITS_H
 
 #include "snesrecomp/game/cpu.h"
 
@@ -17,4 +17,4 @@ RecompReturn ActRaiser_TownGlobalFlagSet(CpuState *cpu);
 RecompReturn ActRaiser_TownGlobalFlagClear(CpuState *cpu);
 RecompReturn ActRaiser_TownGlobalFlagResolveBit(CpuState *cpu);
 
-#endif /* ACTRAISER_TOWN_LAIR_BITS_H */
+#endif /* AR_ACTRAISER_TOWN_LAIR_BITS_H */

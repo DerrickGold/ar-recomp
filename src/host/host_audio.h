@@ -1,5 +1,5 @@
-#ifndef HOST_AUDIO_H
-#define HOST_AUDIO_H
+#ifndef AR_HOST_AUDIO_H
+#define AR_HOST_AUDIO_H
 
 #include <stdbool.h>
 
@@ -40,4 +40,4 @@ int HostAudio_TakeRejectedChunkCount(void);
 void RtlApuLock(void);
 void RtlApuUnlock(void);
 
-#endif /* HOST_AUDIO_H */
+#endif /* AR_HOST_AUDIO_H */

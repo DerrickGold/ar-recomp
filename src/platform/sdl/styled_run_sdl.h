@@ -1,5 +1,5 @@
-#ifndef AR_PLATFORM_SDL_STYLED_RUN_H
-#define AR_PLATFORM_SDL_STYLED_RUN_H
+#ifndef AR_STYLED_RUN_SDL_H
+#define AR_STYLED_RUN_SDL_H
 
 #include "platform/sdl/text_fonts_sdl.h"
 #include <SDL3_ttf/SDL_textengine.h>

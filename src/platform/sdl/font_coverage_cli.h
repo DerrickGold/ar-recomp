@@ -1,5 +1,5 @@
-#ifndef AR_SDL_FONT_COVERAGE_CLI_H
-#define AR_SDL_FONT_COVERAGE_CLI_H
+#ifndef AR_FONT_COVERAGE_CLI_H
+#define AR_FONT_COVERAGE_CLI_H
 
 /* Versioned host CLI, not a pack parser. argv[1..] are primary then ordered
  * fallback paths; stdin is one Unicode scalar per line in ASCII hexadecimal.
@@ -8,4 +8,4 @@
  * Scalar coverage does not certify shaping or layout. */
 int ArSdlFontCoverage_Run(int argc, char **argv);
 
-#endif /* AR_SDL_FONT_COVERAGE_CLI_H */
+#endif /* AR_FONT_COVERAGE_CLI_H */

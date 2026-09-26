@@ -1,5 +1,5 @@
-#ifndef HOST_DISPLAY_PACING_H
-#define HOST_DISPLAY_PACING_H
+#ifndef AR_HOST_DISPLAY_PACING_H
+#define AR_HOST_DISPLAY_PACING_H
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -114,4 +114,4 @@ int HostDisplayPacing_WindowAxisToOutput(int window_position,
                                          int window_extent,
                                          int output_extent);
 
-#endif /* HOST_DISPLAY_PACING_H */
+#endif /* AR_HOST_DISPLAY_PACING_H */

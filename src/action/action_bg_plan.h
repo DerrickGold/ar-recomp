@@ -1,5 +1,5 @@
-#ifndef ACTION_BG_PLAN_H
-#define ACTION_BG_PLAN_H
+#ifndef AR_ACTION_BG_PLAN_H
+#define AR_ACTION_BG_PLAN_H
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -228,4 +228,4 @@ const char *ActionBgMotionMode_Name(ActionBgMotionMode motion);
 const char *ActionBgBandAnchor_Name(ActionBgBandAnchor anchor);
 const char *ActionBgExtentMode_Name(ActionBgExtentMode mode);
 
-#endif  /* ACTION_BG_PLAN_H */
+#endif  /* AR_ACTION_BG_PLAN_H */

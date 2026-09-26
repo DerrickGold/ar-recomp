@@ -1,5 +1,5 @@
-#ifndef SETTINGS_H
-#define SETTINGS_H
+#ifndef AR_SETTINGS_H
+#define AR_SETTINGS_H
 #include "constants.h"
 #include "snesrecomp/game/types.h"
 #include "sim/voxels/sim_background_voxel_quality.h"
@@ -871,4 +871,4 @@ int Settings_ScalePercentToOutput(int percent);
  * persisted, so this is the single conversion point. */
 SimRenderFeatureMask Settings_Sim3DRequestedFeatures(void);
 
-#endif  /* SETTINGS_H */
+#endif  /* AR_SETTINGS_H */

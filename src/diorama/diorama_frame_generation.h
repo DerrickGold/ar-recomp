@@ -1,5 +1,5 @@
-#ifndef DIORAMA_FRAME_GENERATION_H
-#define DIORAMA_FRAME_GENERATION_H
+#ifndef AR_DIORAMA_FRAME_GENERATION_H
+#define AR_DIORAMA_FRAME_GENERATION_H
 
 #include <stddef.h>
 #include <stdint.h>
@@ -57,4 +57,4 @@ uint32_t DioramaFrameGeneration_PrepareWithSkybox(
 void DioramaFrameGeneration_Reset(void);
 void DioramaFrameGeneration_Shutdown(void);
 
-#endif  /* DIORAMA_FRAME_GENERATION_H */
+#endif  /* AR_DIORAMA_FRAME_GENERATION_H */

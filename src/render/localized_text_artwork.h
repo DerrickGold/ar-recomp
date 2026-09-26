@@ -1,5 +1,5 @@
-#ifndef AR_RENDER_LOCALIZED_TEXT_ARTWORK_H
-#define AR_RENDER_LOCALIZED_TEXT_ARTWORK_H
+#ifndef AR_LOCALIZED_TEXT_ARTWORK_H
+#define AR_LOCALIZED_TEXT_ARTWORK_H
 
 #include "render/localized_text_presenter.h"
 
@@ -42,4 +42,4 @@ ArRenderRectI ArLocalizedTextArtwork_Ink(ArLocalizationArtworkKind kind);
 /* Releases every artwork and selector texture this module owns. */
 void ArLocalizedTextArtwork_Reset(ArRenderDevice *device);
 
-#endif /* AR_RENDER_LOCALIZED_TEXT_ARTWORK_H */
+#endif /* AR_LOCALIZED_TEXT_ARTWORK_H */

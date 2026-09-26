@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_LOCALIZATION_STYLE_H
-#define ACTRAISER_LOCALIZATION_STYLE_H
+#ifndef AR_ACTRAISER_LOCALIZATION_STYLE_H
+#define AR_ACTRAISER_LOCALIZATION_STYLE_H
 
 #include "localization/localization_frame.h"
 #include "snes_bgr555.h"

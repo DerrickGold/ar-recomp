@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_TOWN_METATILE_H
-#define ACTRAISER_TOWN_METATILE_H
+#ifndef AR_ACTRAISER_TOWN_METATILE_H
+#define AR_ACTRAISER_TOWN_METATILE_H
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -37,4 +37,4 @@ RecompReturn ActRaiser_TownCopyStructureMetatile(CpuState *cpu);
 /* Whole-body HLE for the structure rebuild draw-list interpreter. */
 RecompReturn ActRaiser_TownExecuteDrawList(CpuState *cpu);
 
-#endif /* ACTRAISER_TOWN_METATILE_H */
+#endif /* AR_ACTRAISER_TOWN_METATILE_H */

@@ -1,5 +1,5 @@
-#ifndef FORCED_INPUT_H
-#define FORCED_INPUT_H
+#ifndef AR_FORCED_INPUT_H
+#define AR_FORCED_INPUT_H
 
 #include <stdint.h>
 
@@ -9,4 +9,4 @@ void ForcedInput_Init(void);
 /* Add configured held or pulsed buttons for the current host frame. */
 uint32_t ForcedInput_Apply(uint32_t live_inputs, int host_frame);
 
-#endif /* FORCED_INPUT_H */
+#endif /* AR_FORCED_INPUT_H */

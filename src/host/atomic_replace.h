@@ -1,5 +1,5 @@
-#ifndef ATOMIC_REPLACE_H
-#define ATOMIC_REPLACE_H
+#ifndef AR_ATOMIC_REPLACE_H
+#define AR_ATOMIC_REPLACE_H
 
 #include <stdbool.h>
 
@@ -32,4 +32,4 @@
  * is true. Callers remove the temp file themselves. */
 bool AtomicReplaceFile(const char *temporary, const char *path);
 
-#endif /* ATOMIC_REPLACE_H */
+#endif /* AR_ATOMIC_REPLACE_H */

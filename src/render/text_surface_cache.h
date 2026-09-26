@@ -1,5 +1,5 @@
-#ifndef AR_RENDER_TEXT_SURFACE_CACHE_H
-#define AR_RENDER_TEXT_SURFACE_CACHE_H
+#ifndef AR_TEXT_SURFACE_CACHE_H
+#define AR_TEXT_SURFACE_CACHE_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -174,4 +174,4 @@ const ArTextSurfaceCacheStats *ArTextSurfaceCache_GetStats(
  * current live size. Does not release resources, failures, or frame pins. */
 void ArTextSurfaceCache_ResetStats(ArTextSurfaceCache *cache);
 
-#endif /* AR_RENDER_TEXT_SURFACE_CACHE_H */
+#endif /* AR_TEXT_SURFACE_CACHE_H */

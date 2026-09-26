@@ -1,5 +1,5 @@
-#ifndef HOST_INPUT_H
-#define HOST_INPUT_H
+#ifndef AR_HOST_INPUT_H
+#define AR_HOST_INPUT_H
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -52,4 +52,4 @@ bool HostInput_RenderComparisonCaptureRequired(void);
 /* Installs the gamepad edge-action bridge after InputMap_Init. */
 void HostInput_InstallActionHandler(void);
 
-#endif /* HOST_INPUT_H */
+#endif /* AR_HOST_INPUT_H */

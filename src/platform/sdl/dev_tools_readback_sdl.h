@@ -1,5 +1,5 @@
-#ifndef AR_PLATFORM_SDL_DEV_TOOLS_READBACK_H
-#define AR_PLATFORM_SDL_DEV_TOOLS_READBACK_H
+#ifndef AR_DEV_TOOLS_READBACK_SDL_H
+#define AR_DEV_TOOLS_READBACK_SDL_H
 
 #include "dev/dev_tools_readback.h"
 #include "render/render_device.h"
@@ -9,4 +9,4 @@
 bool ArSdlDevTools_CaptureRgb24(void *device_context,
                                 DevToolsRgb24Capture *capture);
 
-#endif /* AR_PLATFORM_SDL_DEV_TOOLS_READBACK_H */
+#endif /* AR_DEV_TOOLS_READBACK_SDL_H */

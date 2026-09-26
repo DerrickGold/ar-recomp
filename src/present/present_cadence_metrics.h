@@ -1,5 +1,5 @@
-#ifndef PRESENT_CADENCE_METRICS_H
-#define PRESENT_CADENCE_METRICS_H
+#ifndef AR_PRESENT_CADENCE_METRICS_H
+#define AR_PRESENT_CADENCE_METRICS_H
 
 typedef struct PresentCadenceMetrics {
   unsigned long tick_present_count;
@@ -10,4 +10,4 @@ typedef struct PresentCadenceMetrics {
 
 PresentCadenceMetrics PresentCadence_GetMetrics(void);
 
-#endif /* PRESENT_CADENCE_METRICS_H */
+#endif /* AR_PRESENT_CADENCE_METRICS_H */

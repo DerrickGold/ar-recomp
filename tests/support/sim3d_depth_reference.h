@@ -1,5 +1,5 @@
-#ifndef SIM3D_DEPTH_REFERENCE_H
-#define SIM3D_DEPTH_REFERENCE_H
+#ifndef AR_SIM3D_DEPTH_REFERENCE_H
+#define AR_SIM3D_DEPTH_REFERENCE_H
 
 #if !defined(AR_SIM3D_DEPTH_TEST_REFERENCE)
 #error "Depth reference models belong only to focused tests and benchmarks"

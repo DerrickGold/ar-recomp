@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_CELL_MAP_H
-#define ACTRAISER_CELL_MAP_H
+#ifndef AR_ACTRAISER_CELL_MAP_H
+#define AR_ACTRAISER_CELL_MAP_H
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -44,4 +44,4 @@ RecompReturn ActRaiser_WriteTownStructureMarkBlock(CpuState *cpu);
 /* Whole-body HLE for the stock traversal predicate at $03:96EF. */
 RecompReturn ActRaiser_TownCellTestTraversalBlocked(CpuState *cpu);
 
-#endif /* ACTRAISER_CELL_MAP_H */
+#endif /* AR_ACTRAISER_CELL_MAP_H */

@@ -1,5 +1,5 @@
-#ifndef ACTION_BG_TUNER_H
-#define ACTION_BG_TUNER_H
+#ifndef AR_ACTION_BG_TUNER_H
+#define AR_ACTION_BG_TUNER_H
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -121,4 +121,4 @@ const char *ActionBgTuner_RowHelp(const ActionBgTunerRow *row);
 int ActionBgTuner_BuildGuides(const ActionBgPlan *plan,
                               ActionBgTunerGuide *out, int capacity);
 
-#endif  /* ACTION_BG_TUNER_H */
+#endif  /* AR_ACTION_BG_TUNER_H */

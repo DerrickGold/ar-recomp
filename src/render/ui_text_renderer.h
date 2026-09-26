@@ -1,5 +1,5 @@
-#ifndef AR_RENDER_UI_TEXT_RENDERER_H
-#define AR_RENDER_UI_TEXT_RENDERER_H
+#ifndef AR_UI_TEXT_RENDERER_H
+#define AR_UI_TEXT_RENDERER_H
 
 #include "localization/text_backend.h"
 #include "render/text_surface_cache.h"

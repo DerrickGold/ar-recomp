@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_STAGE_PLACEMENTS_H
-#define ACTRAISER_STAGE_PLACEMENTS_H
+#ifndef AR_ACTRAISER_STAGE_PLACEMENTS_H
+#define AR_ACTRAISER_STAGE_PLACEMENTS_H
 #include "snesrecomp/game/cpu.h"
 #include "regional/action/regional_placements.h"
 

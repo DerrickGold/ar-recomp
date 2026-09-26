@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_ACTION_ROOM_GRAPHICS_H
-#define ACTRAISER_ACTION_ROOM_GRAPHICS_H
+#ifndef AR_ACTRAISER_ACTION_ROOM_GRAPHICS_H
+#define AR_ACTRAISER_ACTION_ROOM_GRAPHICS_H
 
 #include <stdbool.h>
 
@@ -14,4 +14,4 @@ RecompReturn ActRaiser_LoadActionCharacters(CpuState *cpu);
 bool ActRaiser_ActionPaletteLoadHleEnabled(CpuState *cpu);
 RecompReturn ActRaiser_LoadActionPalette(CpuState *cpu);
 
-#endif /* ACTRAISER_ACTION_ROOM_GRAPHICS_H */
+#endif /* AR_ACTRAISER_ACTION_ROOM_GRAPHICS_H */

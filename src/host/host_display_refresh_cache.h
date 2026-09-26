@@ -1,5 +1,5 @@
-#ifndef HOST_DISPLAY_REFRESH_CACHE_H
-#define HOST_DISPLAY_REFRESH_CACHE_H
+#ifndef AR_HOST_DISPLAY_REFRESH_CACHE_H
+#define AR_HOST_DISPLAY_REFRESH_CACHE_H
 
 #include <stdint.h>
 
@@ -25,4 +25,4 @@ int HostDisplayRefreshCache_Get(
 void HostDisplayRefreshCache_Forget(
     HostDisplayRefreshCache *cache, uint32_t display_id);
 
-#endif /* HOST_DISPLAY_REFRESH_CACHE_H */
+#endif /* AR_HOST_DISPLAY_REFRESH_CACHE_H */

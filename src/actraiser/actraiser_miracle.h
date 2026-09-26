@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_MIRACLE_H
-#define ACTRAISER_MIRACLE_H
+#ifndef AR_ACTRAISER_MIRACLE_H
+#define AR_ACTRAISER_MIRACLE_H
 
 #include "regional/regional_costs.h"
 #include "snesrecomp/game/cpu.h"

@@ -1,5 +1,5 @@
-#ifndef AR_RENDER_LOCALIZED_TEXT_PRESENTER_H
-#define AR_RENDER_LOCALIZED_TEXT_PRESENTER_H
+#ifndef AR_LOCALIZED_TEXT_PRESENTER_H
+#define AR_LOCALIZED_TEXT_PRESENTER_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -142,4 +142,4 @@ bool ArLocalizedTextPresenter_DrawWithBrightness(
     ArRenderDevice *device, const ArLocalizedPreparedFrame *prepared, float brightness);
 void ArLocalizedTextPresenter_Reset(ArRenderDevice *device);
 
-#endif /* AR_RENDER_LOCALIZED_TEXT_PRESENTER_H */
+#endif /* AR_LOCALIZED_TEXT_PRESENTER_H */

@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_CREDITS_H
-#define ACTRAISER_CREDITS_H
+#ifndef AR_ACTRAISER_CREDITS_H
+#define AR_ACTRAISER_CREDITS_H
 
 #include "snesrecomp/game/cpu.h"
 

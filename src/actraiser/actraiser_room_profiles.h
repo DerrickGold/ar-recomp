@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_ROOM_PROFILES_H
-#define ACTRAISER_ROOM_PROFILES_H
+#ifndef AR_ACTRAISER_ROOM_PROFILES_H
+#define AR_ACTRAISER_ROOM_PROFILES_H
 
 #include "actraiser_game.h"
 

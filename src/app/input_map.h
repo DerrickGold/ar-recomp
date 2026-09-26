@@ -1,5 +1,5 @@
-#ifndef INPUT_MAP_H
-#define INPUT_MAP_H
+#ifndef AR_INPUT_MAP_H
+#define AR_INPUT_MAP_H
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -248,4 +248,4 @@ bool InputMap_ParseBinding(const char *text, uint32 *binding);
 int InputMap_GamepadCount(void);
 const char *InputMap_GamepadName(int slot);
 
-#endif  /* INPUT_MAP_H */
+#endif  /* AR_INPUT_MAP_H */

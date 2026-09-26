@@ -1,5 +1,5 @@
-#ifndef SETTINGS_OVERLAY_REGIONAL_UI_H
-#define SETTINGS_OVERLAY_REGIONAL_UI_H
+#ifndef AR_REGIONAL_UI_H
+#define AR_REGIONAL_UI_H
 
 #include "localization/ui_catalog.h"
 #include "regional/regional_costs.h"

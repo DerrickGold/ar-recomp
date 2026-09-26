@@ -1,5 +1,5 @@
-#ifndef AR_RENDER_TEXT_CELL_COMPOSITE_H
-#define AR_RENDER_TEXT_CELL_COMPOSITE_H
+#ifndef AR_TEXT_CELL_COMPOSITE_H
+#define AR_TEXT_CELL_COMPOSITE_H
 
 #include <stddef.h>
 #include <stdint.h>
@@ -36,4 +36,4 @@ bool ArTextCellComposite_ProjectToOutput(
     const HudPresentationChunk *chunk, ArRenderRectI screen_region,
     ArRenderRectI *output_region);
 
-#endif /* AR_RENDER_TEXT_CELL_COMPOSITE_H */
+#endif /* AR_TEXT_CELL_COMPOSITE_H */

@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_NATIVE_AUDIO_PCM_CAPTURE_H
-#define ACTRAISER_NATIVE_AUDIO_PCM_CAPTURE_H
+#ifndef AR_NATIVE_AUDIO_PCM_CAPTURE_H
+#define AR_NATIVE_AUDIO_PCM_CAPTURE_H
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -28,4 +28,4 @@ bool NativeAudioPcmCapture_Append(NativeAudioPcmCapture *capture,
 bool NativeAudioPcmCapture_WriteWav(const NativeAudioPcmCapture *capture,
                                     const char *path);
 
-#endif /* ACTRAISER_NATIVE_AUDIO_PCM_CAPTURE_H */
+#endif /* AR_NATIVE_AUDIO_PCM_CAPTURE_H */

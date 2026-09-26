@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_BG3_UPLOAD_H
-#define ACTRAISER_BG3_UPLOAD_H
+#ifndef AR_ACTRAISER_BG3_UPLOAD_H
+#define AR_ACTRAISER_BG3_UPLOAD_H
 
 #include "snesrecomp/game/cpu.h"
 

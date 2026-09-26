@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_TOWN_STRUCTURE_STEPS_H
-#define ACTRAISER_TOWN_STRUCTURE_STEPS_H
+#ifndef AR_ACTRAISER_TOWN_STRUCTURE_STEPS_H
+#define AR_ACTRAISER_TOWN_STRUCTURE_STEPS_H
 
 #include <stdint.h>
 
@@ -27,4 +27,4 @@ void ActRaiser_ArmTownStructureStepProgram(
 RecompReturn ActRaiser_TownArmRebuildStepProgram(CpuState *cpu);
 RecompReturn ActRaiser_TownArmConstructionStepProgram(CpuState *cpu);
 
-#endif /* ACTRAISER_TOWN_STRUCTURE_STEPS_H */
+#endif /* AR_ACTRAISER_TOWN_STRUCTURE_STEPS_H */

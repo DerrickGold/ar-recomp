@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_MODE_ENTRY_H
-#define ACTRAISER_MODE_ENTRY_H
+#ifndef AR_ACTRAISER_MODE_ENTRY_H
+#define AR_ACTRAISER_MODE_ENTRY_H
 #include "snesrecomp/game/cpu.h"
 bool ActRaiser_ModeTitleGateEntry(CpuState *cpu);
 RecompReturn ActRaiser_ModeTitleGate(CpuState *cpu);

@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_LOCALIZATION_TEXT_NORMALIZE_H
-#define ACTRAISER_LOCALIZATION_TEXT_NORMALIZE_H
+#ifndef AR_ACTRAISER_LOCALIZATION_TEXT_NORMALIZE_H
+#define AR_ACTRAISER_LOCALIZATION_TEXT_NORMALIZE_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -52,4 +52,4 @@ bool ActRaiserLocalizationText_MapBidiSpans(
     const char *normalized, size_t normalized_bytes, size_t destination_base,
     ArTextBidiSpans *destination);
 
-#endif /* ACTRAISER_LOCALIZATION_TEXT_NORMALIZE_H */
+#endif /* AR_ACTRAISER_LOCALIZATION_TEXT_NORMALIZE_H */

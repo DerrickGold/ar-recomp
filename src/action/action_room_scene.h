@@ -1,5 +1,5 @@
-#ifndef ACTION_ROOM_SCENE_H
-#define ACTION_ROOM_SCENE_H
+#ifndef AR_ACTION_ROOM_SCENE_H
+#define AR_ACTION_ROOM_SCENE_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -216,4 +216,4 @@ bool ActionRoomScene_RenderNativeFrame(
     const ActionRoomSceneFrameState *state,
     uint32_t *argb, size_t pixel_count);
 
-#endif  /* ACTION_ROOM_SCENE_H */
+#endif  /* AR_ACTION_ROOM_SCENE_H */

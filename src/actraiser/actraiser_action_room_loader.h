@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_ACTION_ROOM_LOADER_H
-#define ACTRAISER_ACTION_ROOM_LOADER_H
+#ifndef AR_ACTRAISER_ACTION_ROOM_LOADER_H
+#define AR_ACTRAISER_ACTION_ROOM_LOADER_H
 
 #include <stdbool.h>
 
@@ -14,4 +14,4 @@ RecompReturn ActRaiser_LoadActionMetatiles(CpuState *cpu);
 bool ActRaiser_ActionMapLoadHleEnabled(CpuState *cpu);
 RecompReturn ActRaiser_LoadActionMap(CpuState *cpu);
 
-#endif /* ACTRAISER_ACTION_ROOM_LOADER_H */
+#endif /* AR_ACTRAISER_ACTION_ROOM_LOADER_H */

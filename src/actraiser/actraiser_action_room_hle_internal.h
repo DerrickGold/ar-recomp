@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_ACTION_ROOM_HLE_INTERNAL_H
-#define ACTRAISER_ACTION_ROOM_HLE_INTERNAL_H
+#ifndef AR_ACTRAISER_ACTION_ROOM_HLE_INTERNAL_H
+#define AR_ACTRAISER_ACTION_ROOM_HLE_INTERNAL_H
 
 #include <stdint.h>
 
@@ -45,4 +45,4 @@ static inline uint8_t ActionRoomHle_ReadLongIndexed(
   return cpu_read8(cpu, (uint8_t)(address >> 16), (uint16_t)address);
 }
 
-#endif /* ACTRAISER_ACTION_ROOM_HLE_INTERNAL_H */
+#endif /* AR_ACTRAISER_ACTION_ROOM_HLE_INTERNAL_H */

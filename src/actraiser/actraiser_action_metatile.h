@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_ACTION_METATILE_H
-#define ACTRAISER_ACTION_METATILE_H
+#ifndef AR_ACTRAISER_ACTION_METATILE_H
+#define AR_ACTRAISER_ACTION_METATILE_H
 
 #include "snesrecomp/game/cpu.h"
 
@@ -7,4 +7,4 @@
 RecompReturn ActRaiser_ExpandActionBgMetatileColumn(CpuState *cpu);
 RecompReturn ActRaiser_ExpandActionBgMetatileRow(CpuState *cpu);
 
-#endif /* ACTRAISER_ACTION_METATILE_H */
+#endif /* AR_ACTRAISER_ACTION_METATILE_H */

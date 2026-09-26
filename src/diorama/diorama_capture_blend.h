@@ -1,5 +1,5 @@
-#ifndef DIORAMA_CAPTURE_BLEND_H
-#define DIORAMA_CAPTURE_BLEND_H
+#ifndef AR_DIORAMA_CAPTURE_BLEND_H
+#define AR_DIORAMA_CAPTURE_BLEND_H
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -93,4 +93,4 @@ bool DioramaCaptureBlend_LayerUsesFixedColorSubtract(
     uint8_t cgwsel, uint8_t cgadsub, uint16_t fixed_color,
     uint8_t layer_bit);
 
-#endif /* DIORAMA_CAPTURE_BLEND_H */
+#endif /* AR_DIORAMA_CAPTURE_BLEND_H */

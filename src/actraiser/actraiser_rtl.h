@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_RTL_H
-#define ACTRAISER_RTL_H
+#ifndef AR_ACTRAISER_RTL_H
+#define AR_ACTRAISER_RTL_H
 
 #include "action/action_obj_apron.h"
 #include "action/action_bg_plan.h"
@@ -112,4 +112,4 @@ void ActRaiser_WidescreenSkyPalacePrepare(SrRunnerHandle *runner);
 void ActRaiser_WidescreenSkyPalaceRestore(SrRunnerHandle *runner);
 void ActRaiser_WidescreenSpriteActivationProbe(void);
 
-#endif  // ACTRAISER_RTL_H
+#endif  // AR_ACTRAISER_RTL_H

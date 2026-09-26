@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_SPEED_SELECTOR_H
-#define ACTRAISER_SPEED_SELECTOR_H
+#ifndef AR_ACTRAISER_SPEED_SELECTOR_H
+#define AR_ACTRAISER_SPEED_SELECTOR_H
 
 #include "snesrecomp/game/cpu.h"
 

@@ -1,5 +1,5 @@
-#ifndef ACTION_CAMERA_BOUNDS_H
-#define ACTION_CAMERA_BOUNDS_H
+#ifndef AR_ACTION_CAMERA_BOUNDS_H
+#define AR_ACTION_CAMERA_BOUNDS_H
 
 #include <stdbool.h>
 #include <stdint.h>

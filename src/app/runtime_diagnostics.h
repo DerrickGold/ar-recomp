@@ -1,5 +1,5 @@
-#ifndef RUNTIME_DIAGNOSTICS_H
-#define RUNTIME_DIAGNOSTICS_H
+#ifndef AR_RUNTIME_DIAGNOSTICS_H
+#define AR_RUNTIME_DIAGNOSTICS_H
 
 #include <stdbool.h>
 
@@ -15,4 +15,4 @@ void RuntimeDiagnostics_Unbind(void);
  * weak watchdog hook and therefore remains part of the runtime ABI. */
 void DumpDiagState(const char *tag);
 
-#endif /* RUNTIME_DIAGNOSTICS_H */
+#endif /* AR_RUNTIME_DIAGNOSTICS_H */

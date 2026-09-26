@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_SIM_ACTOR_H
-#define ACTRAISER_SIM_ACTOR_H
+#ifndef AR_ACTRAISER_SIM_ACTOR_H
+#define AR_ACTRAISER_SIM_ACTOR_H
 #include "snesrecomp/game/cpu.h"
 #include <stdbool.h>
 /* Game-owned native address mapping, shared by combat and AI adapters.

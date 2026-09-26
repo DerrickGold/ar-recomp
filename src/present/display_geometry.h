@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_DISPLAY_GEOMETRY_H
-#define ACTRAISER_DISPLAY_GEOMETRY_H
+#ifndef AR_DISPLAY_GEOMETRY_H
+#define AR_DISPLAY_GEOMETRY_H
 
 #include <stdbool.h>
 
@@ -31,4 +31,4 @@ void DisplayGeometry_SetVertical(int extra_top, int extra_bottom);
 #define g_ws_extra_top (g_actraiser_display_geometry->extra_top)
 #define g_ws_extra_bottom (g_actraiser_display_geometry->extra_bottom)
 
-#endif /* ACTRAISER_DISPLAY_GEOMETRY_H */
+#endif /* AR_DISPLAY_GEOMETRY_H */

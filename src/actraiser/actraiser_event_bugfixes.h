@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_EVENT_BUGFIXES_H
-#define ACTRAISER_EVENT_BUGFIXES_H
+#ifndef AR_ACTRAISER_EVENT_BUGFIXES_H
+#define AR_ACTRAISER_EVENT_BUGFIXES_H
 
 #include <stdbool.h>
 #include <stddef.h>

@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_GAME_H
-#define ACTRAISER_GAME_H
+#ifndef AR_ACTRAISER_GAME_H
+#define AR_ACTRAISER_GAME_H
 
 /* Semantic names for ActRaiser state that has already been established in
  * docs/ram-map.md, docs/SEAMS.md, and docs/rendering-engine.md. Keep uncertain
@@ -479,4 +479,4 @@ static inline int ActRaiser_SimMapPickerActive(void) {
       ActRaiser_ReadWramMirror16(kActRaiserWram_SimMapPickerFlag));
 }
 
-#endif  /* ACTRAISER_GAME_H */
+#endif  /* AR_ACTRAISER_GAME_H */

@@ -1,5 +1,5 @@
-#ifndef AR_PLATFORM_SDL_BIDI_TEXT_H
-#define AR_PLATFORM_SDL_BIDI_TEXT_H
+#ifndef AR_BIDI_TEXT_SDL_H
+#define AR_BIDI_TEXT_SDL_H
 
 #include "localization/text_rasterizer.h"
 #include "platform/sdl/styled_paint_sdl.h"

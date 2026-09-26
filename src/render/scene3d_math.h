@@ -1,5 +1,5 @@
-#ifndef SCENE3D_MATH_H
-#define SCENE3D_MATH_H
+#ifndef AR_SCENE3D_MATH_H
+#define AR_SCENE3D_MATH_H
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -162,4 +162,4 @@ bool Scene3D_GroundDepthBoundaryY(const float matrix[16], float x,
 bool Scene3D_GroundHorizonScreenY(const float matrix[16], int output_height,
                                   float *screen_y);
 
-#endif  /* SCENE3D_MATH_H */
+#endif  /* AR_SCENE3D_MATH_H */

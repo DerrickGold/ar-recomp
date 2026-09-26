@@ -1,5 +1,5 @@
-#ifndef AR_LOCALIZATION_LANGUAGE_PACK_H
-#define AR_LOCALIZATION_LANGUAGE_PACK_H
+#ifndef AR_LANGUAGE_PACK_H
+#define AR_LANGUAGE_PACK_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -269,4 +269,4 @@ const ArLanguageOperation *ArLanguagePack_GetOperation(
 const char *ArLanguagePack_GetString(const ArLanguagePack *pack,
                                      ArLanguageString string);
 
-#endif /* AR_LOCALIZATION_LANGUAGE_PACK_H */
+#endif /* AR_LANGUAGE_PACK_H */

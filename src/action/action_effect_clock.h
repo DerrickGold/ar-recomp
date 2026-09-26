@@ -1,5 +1,5 @@
-#ifndef ACTION_EFFECT_CLOCK_H
-#define ACTION_EFFECT_CLOCK_H
+#ifndef AR_ACTION_EFFECT_CLOCK_H
+#define AR_ACTION_EFFECT_CLOCK_H
 
 #include <stdint.h>
 
@@ -19,4 +19,4 @@ uint32_t ActionEffectGameplayClock_Serial(void);
 void ActionEffectTickClock_Reset(ActionEffectTickClock *clock);
 unsigned ActionEffectTickClock_Capture(ActionEffectTickClock *clock);
 
-#endif  /* ACTION_EFFECT_CLOCK_H */
+#endif  /* AR_ACTION_EFFECT_CLOCK_H */

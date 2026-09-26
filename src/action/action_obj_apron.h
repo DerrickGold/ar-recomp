@@ -1,5 +1,5 @@
-#ifndef ACTION_OBJ_APRON_H
-#define ACTION_OBJ_APRON_H
+#ifndef AR_ACTION_OBJ_APRON_H
+#define AR_ACTION_OBJ_APRON_H
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -122,4 +122,4 @@ int ActionApron_Overflow(void);
 int ActionApron_PeakCount(void);
 const SrPpuObjPart *ActionApron_Parts(void);
 
-#endif  /* ACTION_OBJ_APRON_H */
+#endif  /* AR_ACTION_OBJ_APRON_H */

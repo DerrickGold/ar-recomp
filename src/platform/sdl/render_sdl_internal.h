@@ -1,5 +1,5 @@
-#ifndef AR_PLATFORM_SDL_RENDER_SDL_INTERNAL_H
-#define AR_PLATFORM_SDL_RENDER_SDL_INTERNAL_H
+#ifndef AR_RENDER_SDL_INTERNAL_H
+#define AR_RENDER_SDL_INTERNAL_H
 
 #include <SDL3/SDL.h>
 
@@ -47,4 +47,4 @@ bool ArSdlRenderBackend_Bind(ArRenderDevice *device,
                              ArSdlRenderBackend *backend,
                              SDL_Renderer *renderer);
 
-#endif /* AR_PLATFORM_SDL_RENDER_SDL_INTERNAL_H */
+#endif /* AR_RENDER_SDL_INTERNAL_H */

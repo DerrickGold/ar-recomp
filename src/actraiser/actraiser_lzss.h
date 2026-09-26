@@ -1,5 +1,5 @@
-#ifndef ACTRAISER_LZSS_H
-#define ACTRAISER_LZSS_H
+#ifndef AR_ACTRAISER_LZSS_H
+#define AR_ACTRAISER_LZSS_H
 
 #include "snesrecomp/game/cpu.h"
 #include <stddef.h>
@@ -16,4 +16,4 @@ void ActRaiserLzss_SetObserver(ActRaiserLzssObserver observer,void *context);
 /* Whole-body HLE for the stock Quintet LZSS driver at $02:C5C9. */
 RecompReturn ActRaiser_LzssDecompress(CpuState *cpu);
 
-#endif /* ACTRAISER_LZSS_H */
+#endif /* AR_ACTRAISER_LZSS_H */
