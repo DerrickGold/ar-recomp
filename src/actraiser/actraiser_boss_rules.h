@@ -1,5 +1,10 @@
 #ifndef AR_ACTRAISER_BOSS_RULES_H
 #define AR_ACTRAISER_BOSS_RULES_H
+/* ActRaiser boss hooks: boss behavior (the Wizard's pause, the Minotaur's axe,
+ * Tanzra's clock, the Antlion's trigger, decisions and volleys, the dragon's
+ * flight) under the regional boss rules.
+ * Phase: game (native CPU hooks).
+ * Tests: tests/actraiser_boss_rules_test.c */
 #include "snesrecomp/game/cpu.h"
 bool ActRaiser_WizardPauseEntry(CpuState *cpu);
 RecompReturn ActRaiser_WizardPause(CpuState *cpu);

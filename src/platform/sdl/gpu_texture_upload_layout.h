@@ -1,5 +1,10 @@
 #ifndef AR_GPU_TEXTURE_UPLOAD_LAYOUT_H
 #define AR_GPU_TEXTURE_UPLOAD_LAYOUT_H
+/* ArSdlTextureUploadLayout: packs texture uploads into a staging buffer with
+ * the row and offset alignment each GPU backend needs (256-byte rows on
+ * D3D12, tight packing elsewhere).
+ * Phase: pure.
+ * Tests: tests/gpu_texture_upload_layout_test.c */
 
 #include <stdbool.h>
 #include <stdint.h>

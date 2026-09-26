@@ -1,5 +1,10 @@
 #ifndef AR_LOCALIZED_TEXT_PRESENTER_H
 #define AR_LOCALIZED_TEXT_PRESENTER_H
+/* ArLocalizedTextPresenter: turns a localization frame into prepared text,
+ * indicators, inline objects and decorations to draw, and redraws a live text
+ * line in place when it can instead of rebuilding the page.
+ * Phase: present.
+ * Tests: tests/localized_text_presenter_test.c */
 
 #include <stdbool.h>
 #include <stddef.h>

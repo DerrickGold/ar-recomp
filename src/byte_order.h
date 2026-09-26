@@ -1,5 +1,9 @@
 #ifndef AR_BYTE_ORDER_H
 #define AR_BYTE_ORDER_H
+/* ByteOrder: explicit little- and big-endian reads and writes of fixed-width
+ * integers in byte buffers, independent of the host's byte order.
+ * Phase: pure.
+ * Tests: tests/consolidated_utils_test.c */
 
 #include <stdint.h>
 

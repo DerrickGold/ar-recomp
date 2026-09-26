@@ -278,7 +278,7 @@ if(_diorama_contents MATCHES
         "${GAME_SOURCE_ROOT}/diorama/diorama.c (native effect state)")
 endif()
 if(_diorama_contents MATCHES
-   "SDL_Texture[ \t]*\\*[ \t]*(art_texture|target_texture|g_diorama_ss_texture)")
+   "SDL_Texture[ \t]*\\*[ \t]*(art_texture|target_texture|s_diorama_ss_texture)")
     list(APPEND _native_resource_violations
         "${GAME_SOURCE_ROOT}/diorama/diorama.c (ROM skybox cache)")
 endif()

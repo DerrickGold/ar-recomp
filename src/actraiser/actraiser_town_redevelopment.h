@@ -1,5 +1,10 @@
 #ifndef AR_ACTRAISER_TOWN_REDEVELOPMENT_H
 #define AR_ACTRAISER_TOWN_REDEVELOPMENT_H
+/* ActRaiserTownRedevelopment: previews and applies a change of construction
+ * rules to already-developed towns (their records and cell marks), as the
+ * mutation core of a confirmed transaction.
+ * Phase: game side.
+ * Tests: tests/actraiser_town_redevelopment_test.c */
 
 #include "snesrecomp/game/cpu.h"
 

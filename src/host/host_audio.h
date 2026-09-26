@@ -1,5 +1,10 @@
 #ifndef AR_HOST_AUDIO_H
 #define AR_HOST_AUDIO_H
+/* HostAudio: the SDL audio stream that carries the authentic SPC output and
+ * replacement music. Opens it at the requested rate and buffer size, and mutes
+ * or pauses the final output without desynchronizing playback cursors.
+ * Phase: host (main thread; SDL runs the stream on its audio thread).
+ * Tests: tests/host_audio_pause_test.c */
 
 #include <stdbool.h>
 

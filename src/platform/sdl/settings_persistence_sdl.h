@@ -1,5 +1,10 @@
 #ifndef AR_SETTINGS_PERSISTENCE_SDL_H
 #define AR_SETTINGS_PERSISTENCE_SDL_H
+/* SettingsPersistence: writes settings.ini on a background worker, one
+ * destination per writer with at most one active and one pending snapshot,
+ * and reports completed write timings without waiting on disk I/O.
+ * Phase: host (lifecycle on the main thread, writes on a worker).
+ * Tests: tests/settings_persistence_test.c */
 #include "app/settings.h"
 
 typedef struct SettingsPersistence SettingsPersistence;

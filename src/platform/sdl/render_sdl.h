@@ -1,5 +1,10 @@
 #ifndef AR_RENDER_SDL_H
 #define AR_RENDER_SDL_H
+/* ArSdlRenderBackend: creates the production SDL GPU renderer behind the
+ * portable render device, choosing the GPU driver (D3D12, Vulkan, Metal) and
+ * falling back to SDL's own order.
+ * Phase: host (video boot and shutdown).
+ * Tests: tests/render_sdl_present_test.c */
 
 #include "render/render_device.h"
 

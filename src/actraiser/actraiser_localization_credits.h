@@ -1,5 +1,10 @@
 #ifndef AR_ACTRAISER_LOCALIZATION_CREDITS_H
 #define AR_ACTRAISER_LOCALIZATION_CREDITS_H
+/* ActRaiserLocalizationCredits: places localized credits rows and their frame
+ * for the presented native credits page, shared by live playback and
+ * authoring.
+ * Phase: pure.
+ * Tests: tests/actraiser_localization_credits_test.c */
 
 #include "actraiser/actraiser_localization_compose_state.h"
 #include "actraiser/actraiser_credits.h"

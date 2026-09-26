@@ -1,5 +1,10 @@
 #ifndef AR_ACTRAISER_LOCALIZATION_VALUES_H
 #define AR_ACTRAISER_LOCALIZATION_VALUES_H
+/* ActRaiserLocalizationValues: captures the game values localized messages
+ * print (names, counts, HUD fields) on the game thread and resolves them for
+ * dialogue sessions.
+ * Phase: capture.
+ * Tests: tests/actraiser_localization_values_test.c */
 
 #include <stdbool.h>
 #include <stddef.h>

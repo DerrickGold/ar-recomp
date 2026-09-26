@@ -1,5 +1,10 @@
 #ifndef AR_ACTRAISER_HUD_H
 #define AR_ACTRAISER_HUD_H
+/* ActRaiserHud: tracks which native producer owns the HUD's BG3 rows (visible
+ * only after their upload), independent of language and font, for the
+ * localized HUD.
+ * Phase: game (native CPU hooks).
+ * Tests: tests/actraiser_hud_test.c */
 
 #include "snesrecomp/game/cpu.h"
 

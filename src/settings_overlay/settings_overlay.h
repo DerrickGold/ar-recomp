@@ -1,5 +1,11 @@
 #ifndef AR_SETTINGS_OVERLAY_H
 #define AR_SETTINGS_OVERLAY_H
+/* SettingsOverlay: the host-owned settings menu drawn over the game. It takes
+ * SDL input before the SNES joypad sees it, owns its fonts and atlases, and
+ * reaches game features (save slots, regional rules, the layer editor, the
+ * manual) only through hooks the game installs.
+ * Phase: host (main thread, between frames).
+ * Tests: tests/settings_overlay_test.c */
 
 #include <stdbool.h>
 #include <stddef.h>

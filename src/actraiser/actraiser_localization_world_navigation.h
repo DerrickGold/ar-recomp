@@ -1,5 +1,9 @@
 #ifndef AR_ACTRAISER_LOCALIZATION_WORLD_NAVIGATION_H
 #define AR_ACTRAISER_LOCALIZATION_WORLD_NAVIGATION_H
+/* ActRaiserLocalizationWorldNavigation: the localized location label on the
+ * world-navigation screen, in native screen geometry.
+ * Phase: game side.
+ * Tests: tests/actraiser_localization_world_navigation_test.c */
 
 #include <stdbool.h>
 #include <stddef.h>

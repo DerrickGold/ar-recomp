@@ -1,5 +1,10 @@
 #ifndef AR_ACTRAISER_SPRITE_OWNERSHIP_H
 #define AR_ACTRAISER_SPRITE_OWNERSHIP_H
+/* ActRaiserSpriteOwnership: records which game object emitted each OAM range
+ * (action and SIM), visible once the native OAM DMA completes, so presenters
+ * can find one object's sprites.
+ * Phase: capture.
+ * Tests: tests/actraiser_sprite_ownership_test.c */
 
 #include <stdbool.h>
 #include <stdint.h>

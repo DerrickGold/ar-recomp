@@ -1,5 +1,10 @@
 #ifndef AR_TEXT_FONTS_SDL_H
 #define AR_TEXT_FONTS_SDL_H
+/* ArSdlTextFonts: the SDL_ttf font registry for enhanced text: font roles and
+ * leases over a bounded shared cache, where each active layout pins the
+ * variants it uses so shaping one run cannot evict another's font.
+ * Phase: present (single-threaded per backend).
+ * Tests: tests/styled_text_sdl_test.c */
 
 #include "localization/text_backend.h"
 #include <SDL3/SDL.h>

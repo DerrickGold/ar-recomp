@@ -1,5 +1,9 @@
 #ifndef AR_ACTRAISER_MAGIC_GESTURE_H
 #define AR_ACTRAISER_MAGIC_GESTURE_H
+/* ActRaiserMagicGesture: the Japanese ground-attack magic gesture, translated
+ * onto the US memory and continuation, reading raw joypad bits.
+ * Phase: game (native CPU hooks).
+ * Tests: tests/actraiser_magic_gesture_test.c */
 
 #include "snesrecomp/game/cpu.h"
 

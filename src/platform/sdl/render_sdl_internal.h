@@ -1,5 +1,9 @@
 #ifndef AR_RENDER_SDL_INTERNAL_H
 #define AR_RENDER_SDL_INTERNAL_H
+/* ArSdlRenderBackend internals: native renderer and shader access for
+ * SDL-owned adapters and their focused tests only. Game-side code goes
+ * through ArRenderDevice and opaque textures.
+ * Phase: present (render owner thread). */
 
 #include <SDL3/SDL.h>
 

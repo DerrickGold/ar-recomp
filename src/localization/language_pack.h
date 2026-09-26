@@ -1,5 +1,10 @@
 #ifndef AR_LANGUAGE_PACK_H
 #define AR_LANGUAGE_PACK_H
+/* ArLanguagePack: loads a language pack (metadata, strings, messages,
+ * treatments, operations and coverage) and answers the lookups dialogue and
+ * interface text make against it.
+ * Phase: host (load), then read-only.
+ * Tests: tests/language_pack_test.c */
 
 #include <stdbool.h>
 #include <stddef.h>

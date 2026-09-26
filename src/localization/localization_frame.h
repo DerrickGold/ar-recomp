@@ -1,5 +1,10 @@
 #ifndef AR_LOCALIZATION_FRAME_H
 #define AR_LOCALIZATION_FRAME_H
+/* ArLocalizationFrame: the per-frame snapshot of localized text the game
+ * publishes for the renderer, described as rendering shapes (not screens):
+ * rows, cells and text grids, with owned text released each frame.
+ * Phase: the capture-to-present contract.
+ * Tests: tests/localization_frame_test.c */
 
 #include <stdbool.h>
 #include <stddef.h>

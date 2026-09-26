@@ -1,5 +1,10 @@
 #ifndef AR_INPUT_REPLAY_H
 #define AR_INPUT_REPLAY_H
+/* InputReplay: records and plays back controller input per runner tick
+ * (AR_INPUT_RECORD, AR_INPUT_REPLAY) in the canonical runner replay
+ * container, and still reads legacy game-frame recordings.
+ * Phase: game side, once per tick (no I/O on a tick).
+ * Tests: tests/input_replay_test.c */
 
 #include <stdbool.h>
 #include <stdint.h>

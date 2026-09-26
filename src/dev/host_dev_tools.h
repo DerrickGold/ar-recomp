@@ -1,5 +1,9 @@
 #ifndef AR_HOST_DEV_TOOLS_H
 #define AR_HOST_DEV_TOOLS_H
+/* HostDevTools: developer actions the host offers the settings overlay and
+ * hotkeys: inspector info, scene asset dumps, full snapshots, HUD scale,
+ * point inspection, diorama layer dumps and framebuffer PPM capture.
+ * Phase: host (developer tools only). */
 
 #include <stdbool.h>
 #include <stddef.h>

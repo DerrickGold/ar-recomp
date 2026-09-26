@@ -1,5 +1,10 @@
 #ifndef AR_NATIVE_AUDIO_PCM_CAPTURE_H
 #define AR_NATIVE_AUDIO_PCM_CAPTURE_H
+/* NativeAudioPcmCapture: collects the native audio output as contiguous S16
+ * stereo segments (a gap or rate change starts a new one) and writes them out
+ * as WAV files for audio tracing.
+ * Phase: developer tools.
+ * Tests: tests/native_audio_pcm_capture_test.c */
 
 #include <stdbool.h>
 #include <stdint.h>

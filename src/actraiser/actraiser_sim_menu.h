@@ -1,5 +1,10 @@
 #ifndef AR_ACTRAISER_SIM_MENU_H
 #define AR_ACTRAISER_SIM_MENU_H
+/* ActRaiserSimMenu: the game adapter for the modern SIM menu. Drives the menu
+ * model from native input, copies the model and help pages for the
+ * presenter, and runs description dialogue.
+ * Phase: game side.
+ * Tests: tests/actraiser_sim_menu_test.c */
 
 #include "sim/menu/sim_menu_model.h"
 #include "sim/menu/sim_menu_help.h"

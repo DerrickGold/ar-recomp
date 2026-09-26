@@ -1,5 +1,9 @@
 #ifndef AR_HD_REPLACEMENT_HOST_H
 #define AR_HD_REPLACEMENT_HOST_H
+/* HdReplacementHost: host resources for HD replacements. Loads and reloads
+ * the replacement textures, owns the Mode-7 overlay surface present.c draws,
+ * and gates the authentic PPU scanout the replacements are matched against.
+ * Phase: host (main thread, between frames). */
 
 #include <stdbool.h>
 #include <stdint.h>

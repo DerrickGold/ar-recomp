@@ -1,5 +1,8 @@
 #ifndef AR_STYLED_PAINT_SDL_H
 #define AR_STYLED_PAINT_SDL_H
+/* ArSdlStyledPaint: applies each text cluster's run appearance to a rendered
+ * SDL text surface and records which cluster owns each pixel.
+ * Phase: present (text rendering). */
 
 #include "localization/text_rasterizer.h"
 #include <SDL3/SDL.h>

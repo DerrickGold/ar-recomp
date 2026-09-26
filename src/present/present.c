@@ -1196,10 +1196,10 @@ void PresentUpload(const FrameSlot *slot) {
 /* Presentation-owned effective camera. Free Cam uses the persisted pose from
  * the FrameSlot. Dynamic Cam eases reactive lean and event kicks around its
  * dedicated baseline. Diorama_Composite receives that resolved pose and never
- * reads producer-owned g_diorama_cam. */
-static DioramaCameraPose g_diorama_render_cam;
-static int g_diorama_render_cam_mode = -1;    /* -1: no frame composited yet */
-static uint64_t g_diorama_render_cam_last_ns;
+ * reads producer-owned s_diorama_cam. */
+static DioramaCameraPose s_diorama_render_cam;
+static int s_diorama_render_cam_mode = -1;    /* -1: no frame composited yet */
+static uint64_t s_diorama_render_cam_last_ns;
 
 /* Dynamic-camera response constants. */
 static const float kDioramaDampTau = 0.15f;    /* seconds, 1-exp(-dt/tau) */
@@ -1216,7 +1216,7 @@ static const float kDioramaLeanPitch = 0.12f;  /* rad, max pitch lean @ full ver
 /* B4-kick (followup doc): event-triggered impulses, decaying independently
  * of the baseline+lean damping above (a jolt should feel crisp, not get
  * folded into the slower position-ease target) — added on top of a LOCAL
- * copy of g_diorama_render_cam each frame, never baked into the persisted
+ * copy of s_diorama_render_cam each frame, never baked into the persisted
  * render-cam state itself. kDioramaKickPitch/kDioramaKickTau are the doc's
  * literal event_kick_magnitude/event_kick_decay.
  *
@@ -1228,9 +1228,9 @@ static const float kDioramaLeanPitch = 0.12f;  /* rad, max pitch lean @ full ver
  * uses the reliable invuln-bit edge already relied on elsewhere
  * (AR_NO_KNOCKBACK), and now gets BOTH the jolt and the zoom-punch, making
  * it read as more dramatic than a routine landing (jolt only). */
-static float g_diorama_kick_pitch;       /* rad, landing/hit jolt, decays to 0 */
-static float g_diorama_kick_zoom; /* fraction, hit zoom-punch, decays to 0 (negative = closer) */
-static uint64_t g_diorama_last_slot_ns;  /* detects a genuinely NEW FrameSlot capture */
+static float s_diorama_kick_pitch;       /* rad, landing/hit jolt, decays to 0 */
+static float s_diorama_kick_zoom; /* fraction, hit zoom-punch, decays to 0 (negative = closer) */
+static uint64_t s_diorama_last_slot_ns;  /* detects a genuinely NEW FrameSlot capture */
 static const float kDioramaKickPitch = 0.05f;  /* rad */
 static const float kDioramaKickZoom = -0.15f;  /* fraction; "slight" zoom-in */
 static const float kDioramaKickTau = 0.20f;    /* seconds, wall-clock exp decay */
@@ -2217,27 +2217,27 @@ void PresentCompositeScene(const FrameSlot *slot, float alpha) {
      * that's what makes switching TO Dynamic Cam snap straight to the
      * baseline pose (already verified in B4-baseline) rather than easing in
      * from wherever Free Cam was left. */
-    bool mode_changed = g_diorama_render_cam_mode != slot->diorama_camera_mode;
-    g_diorama_render_cam_mode = slot->diorama_camera_mode;
+    bool mode_changed = s_diorama_render_cam_mode != slot->diorama_camera_mode;
+    s_diorama_render_cam_mode = slot->diorama_camera_mode;
     uint64_t now_ns = HostClock_Nanoseconds();
     float dt = 0.0f;
-    if (g_diorama_render_cam_last_ns != 0) {
-      dt = (float)(now_ns - g_diorama_render_cam_last_ns) / 1e9f;
+    if (s_diorama_render_cam_last_ns != 0) {
+      dt = (float)(now_ns - s_diorama_render_cam_last_ns) / 1e9f;
       if (dt < 0.0f) dt = 0.0f;
       if (dt > 1.0f) dt = 1.0f;   /* sanity clamp (e.g. resuming after a pause) */
     }
-    if (!dynamic || mode_changed || g_diorama_render_cam_last_ns == 0) {
-      g_diorama_render_cam = target;
+    if (!dynamic || mode_changed || s_diorama_render_cam_last_ns == 0) {
+      s_diorama_render_cam = target;
     } else {
       float damping_alpha = 1.0f - expf(-dt / kDioramaDampTau);
-      g_diorama_render_cam.tilt_x +=
-          (target.tilt_x - g_diorama_render_cam.tilt_x) * damping_alpha;
-      g_diorama_render_cam.tilt_y +=
-          (target.tilt_y - g_diorama_render_cam.tilt_y) * damping_alpha;
-      g_diorama_render_cam.distance +=
-          (target.distance - g_diorama_render_cam.distance) * damping_alpha;
+      s_diorama_render_cam.tilt_x +=
+          (target.tilt_x - s_diorama_render_cam.tilt_x) * damping_alpha;
+      s_diorama_render_cam.tilt_y +=
+          (target.tilt_y - s_diorama_render_cam.tilt_y) * damping_alpha;
+      s_diorama_render_cam.distance +=
+          (target.distance - s_diorama_render_cam.distance) * damping_alpha;
     }
-    g_diorama_render_cam_last_ns = now_ns;
+    s_diorama_render_cam_last_ns = now_ns;
 
     /* B4-kick: trigger a fresh impulse only on a genuinely NEW FrameSlot
      * capture (not a re-presentation of one already processed—see
@@ -2247,17 +2247,17 @@ void PresentCompositeScene(const FrameSlot *slot, float alpha) {
      * gets stronger, not replaced) so back-to-back events still read. Decay
      * runs every present frame regardless, on the same wall-clock exponential
      * basis as the position damping above. */
-    bool new_slot = dynamic && slot->timestamp_ns != g_diorama_last_slot_ns;
-    g_diorama_last_slot_ns = slot->timestamp_ns;
+    bool new_slot = dynamic && slot->timestamp_ns != s_diorama_last_slot_ns;
+    s_diorama_last_slot_ns = slot->timestamp_ns;
     if (new_slot) {
       float gain =
           (float)slot->diorama_reactive_strength / (float)kPercentScale;
       if (slot->diorama_dyncam_event_hit || slot->diorama_dyncam_event_land)
-        g_diorama_kick_pitch += kDioramaKickPitch * gain;
+        s_diorama_kick_pitch += kDioramaKickPitch * gain;
       /* Hit gets the zoom-punch too (see the section comment above) — a
        * discrete, reliable edge, unlike PlayerBoost. */
       if (slot->diorama_dyncam_event_hit)
-        g_diorama_kick_zoom += kDioramaKickZoom * gain;
+        s_diorama_kick_zoom += kDioramaKickZoom * gain;
       /* DISABLED (2026-07-21, live report): PlayerBoost ($08C4) fired
        * constantly while just holding a direction — it isn't a clean
        * "boost activated" edge the way the invuln bit is for hits; more
@@ -2268,20 +2268,20 @@ void PresentCompositeScene(const FrameSlot *slot, float alpha) {
        * gets revisited with real investigation into what the byte means. */
     }
     if (!dynamic) {
-      g_diorama_kick_pitch = 0.0f;
-      g_diorama_kick_zoom = 0.0f;
+      s_diorama_kick_pitch = 0.0f;
+      s_diorama_kick_zoom = 0.0f;
     } else if (dt > 0.0f) {
       float kick_decay = expf(-dt / kDioramaKickTau);
-      g_diorama_kick_pitch *= kick_decay;
-      g_diorama_kick_zoom *= kick_decay;
+      s_diorama_kick_pitch *= kick_decay;
+      s_diorama_kick_zoom *= kick_decay;
     }
-    DioramaCameraPose final_cam = g_diorama_render_cam;
+    DioramaCameraPose final_cam = s_diorama_render_cam;
     float distance_scale = 1.0f;
     if (dynamic) {
-      final_cam.tilt_x += g_diorama_kick_pitch +
+      final_cam.tilt_x += s_diorama_kick_pitch +
           slot->diorama_manual_orbit_pitch;
       final_cam.tilt_y += slot->diorama_manual_orbit_yaw;
-      distance_scale = 1.0f + g_diorama_kick_zoom;
+      distance_scale = 1.0f + s_diorama_kick_zoom;
     }
 
     /* AR_DYNCAM_LOG=1: diagnose "no visible sway" reports — prints the raw
@@ -2304,10 +2304,10 @@ void PresentCompositeScene(const FrameSlot *slot, float alpha) {
         (double)slot->diorama_dyncam_lean_pitch,
         (double)target.tilt_x, (double)target.tilt_y,
         (double)target.distance,
-        (double)g_diorama_render_cam.tilt_x,
-        (double)g_diorama_render_cam.tilt_y,
-        (double)g_diorama_render_cam.distance,
-        (double)g_diorama_kick_pitch, (double)g_diorama_kick_zoom,
+        (double)s_diorama_render_cam.tilt_x,
+        (double)s_diorama_render_cam.tilt_y,
+        (double)s_diorama_render_cam.distance,
+        (double)s_diorama_kick_pitch, (double)s_diorama_kick_zoom,
         slot->diorama_dyncam_event_hit, slot->diorama_dyncam_event_land,
         slot->diorama_dyncam_event_boost);
     }

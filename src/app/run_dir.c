@@ -14,8 +14,8 @@
 extern char **environ;
 #endif
 
-static char g_run_dir[256] = "saves";
-static int g_enabled;
+static char s_run_dir[256] = "saves";
+static int s_enabled;
 
 #ifndef AR_RUN_DIR_DEFAULT_ENABLED
 #define AR_RUN_DIR_DEFAULT_ENABLED 1
@@ -36,13 +36,13 @@ static int run_dir_enabled_for_launch(void) {
  * run, ready to zip and hand over for investigation. */
 static void print_artifact_hint(void) {
   fprintf(stderr, "[run-dir] all diagnostics from this run: %s/  "
-                  "(share with: zip -r report.zip %s)\n", g_run_dir, g_run_dir);
+                  "(share with: zip -r report.zip %s)\n", s_run_dir, s_run_dir);
 }
 
-const char *RunDirPath(void) { return g_run_dir; }
+const char *RunDirPath(void) { return s_run_dir; }
 
 void RunDirFile(char *buf, size_t n, const char *fmt, ...) {
-  int off = snprintf(buf, n, "%s/", g_run_dir);
+  int off = snprintf(buf, n, "%s/", s_run_dir);
   va_list ap;
   va_start(ap, fmt);
   vsnprintf(buf + off, n - off, fmt, ap);
@@ -50,7 +50,7 @@ void RunDirFile(char *buf, size_t n, const char *fmt, ...) {
 }
 
 void RunDirRecordTraceStatus(const char *status) {
-  if (!g_enabled || !status) return;
+  if (!s_enabled || !status) return;
   char path[300];
   RunDirFile(path, sizeof path, "run_info.txt");
   FILE *f = sr_fopen(path, "a");
@@ -121,25 +121,25 @@ void RunDirInit(int argc, char **argv) {
     if (n > 99) return;
     snprintf(dir, sizeof dir, "runs/%s-%d", ts, n);
   }
-  snprintf(g_run_dir, sizeof g_run_dir, "%s", dir);
-  g_enabled = 1;
+  snprintf(s_run_dir, sizeof s_run_dir, "%s", dir);
+  s_enabled = 1;
 
   char log[300];
   RunDirFile(log, sizeof log, "console.log");
   tee_console(log);
 
   /* Engine-side writers (fn_census, crash dispatch log) key off this. */
-  setenv("AR_RUN_DIR", g_run_dir, 1);
+  setenv("AR_RUN_DIR", s_run_dir, 1);
 
   write_run_info(argc, argv);
 
   unlink("runs/latest");
-  symlink(g_run_dir + strlen("runs/"), "runs/latest");   /* relative link */
+  symlink(s_run_dir + strlen("runs/"), "runs/latest");   /* relative link */
 
   fprintf(stderr, "[run-dir] %s (console.log + dumps ringfenced here; "
-                  "AR_NO_RUN_DIR=1 disables)\n", g_run_dir);
+                  "AR_NO_RUN_DIR=1 disables)\n", s_run_dir);
   atexit(print_artifact_hint);
-  (void)g_enabled;
+  (void)s_enabled;
 }
 
 void RunDirRebaseEnvOutputs(void) {
@@ -206,22 +206,22 @@ void RunDirInit(int argc, char **argv) {
     if (n > 99) return;
     snprintf(dir, sizeof dir, "runs/%s-%d", ts, n);
   }
-  snprintf(g_run_dir, sizeof g_run_dir, "%s", dir);
-  g_enabled = 1;
+  snprintf(s_run_dir, sizeof s_run_dir, "%s", dir);
+  s_enabled = 1;
 
   /* No tee (console stays on the OS console) and no symlink on Windows. */
 
   /* Engine-side writers (fn_census, crash dispatch log) key off this. */
-  _putenv_s("AR_RUN_DIR", g_run_dir);
+  _putenv_s("AR_RUN_DIR", s_run_dir);
 
   /* Trace capture is opt-in on every platform. */
 
   write_run_info(argc, argv);
 
   fprintf(stderr, "[run-dir] %s (dumps ringfenced here; "
-                  "AR_NO_RUN_DIR=1 disables)\n", g_run_dir);
+                  "AR_NO_RUN_DIR=1 disables)\n", s_run_dir);
   atexit(print_artifact_hint);
-  (void)g_enabled;
+  (void)s_enabled;
 }
 
 void RunDirRebaseEnvOutputs(void) {

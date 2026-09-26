@@ -1,5 +1,10 @@
 #ifndef AR_SCENE_INSPECTOR_H
 #define AR_SCENE_INSPECTOR_H
+/* SceneInspector: read-only inspection of the rendered PPU state at a screen
+ * point (including widescreen margins), filtered to the plane an overlay
+ * actually composited there.
+ * Phase: developer tools (snapshot supplied after scanout).
+ * Tests: tests/scene_inspector_test.c */
 
 #include <stdbool.h>
 

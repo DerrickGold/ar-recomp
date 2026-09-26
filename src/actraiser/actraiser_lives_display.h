@@ -1,5 +1,9 @@
 #ifndef AR_ACTRAISER_LIVES_DISPLAY_H
 #define AR_ACTRAISER_LIVES_DISPLAY_H
+/* ActRaiserLivesDisplay: the Japanese zero-based lives display inside the US
+ * tile writer ($02:C280), changing only the two digits it draws.
+ * Phase: game (native CPU hooks).
+ * Tests: tests/actraiser_lives_display_test.c */
 
 #include "snesrecomp/game/cpu.h"
 #include <stdbool.h>

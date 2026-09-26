@@ -141,7 +141,7 @@ ArRenderTexture g_hud_obj_texture;
  * live hit-test and the FrameSlot-fed renderer. */
 /* external: read by FrameSlot_Capture (frame_slot.c) */
 InspectorPresentationSelection g_scene_inspector_presentation;
-static bool g_window_hidden;  /* true while MINIMIZED or HIDDEN: skip present */
+static bool s_window_hidden;  /* true while MINIMIZED or HIDDEN: skip present */
 /* external: read by FrameSlot_Capture (frame_slot.c) */
 int g_snes_width = kActRaiserAuthenticWidth,
     g_snes_height = kActRaiserAuthenticHeight;
@@ -2497,11 +2497,11 @@ static void AppLoop_PumpEvents(AppBoot *app, bool *running) {
       break;
     case SDL_EVENT_WINDOW_MINIMIZED:
     case SDL_EVENT_WINDOW_HIDDEN:
-      g_window_hidden = true;
+      s_window_hidden = true;
       break;
     case SDL_EVENT_WINDOW_RESTORED:
     case SDL_EVENT_WINDOW_SHOWN:
-      g_window_hidden = false;
+      s_window_hidden = false;
       HostDisplay_ResetVsyncPacing();
       HostInput_RequestPausedRedraw();
       break;
@@ -2653,7 +2653,7 @@ static void AppRunMainLoop(AppBoot *app) {
        * game_tick=false: no tick ran, so this must not capture a new image
        * endpoint or advance pair timing. */
       bool presented = false;
-      if (!app->headless && !g_window_hidden) {
+      if (!app->headless && !s_window_hidden) {
         const HostDisplayPresentMode present_mode =
             SettingsOverlay_IsOpen()
                 ? kHostDisplayPresent_Menu
@@ -2784,7 +2784,7 @@ static void AppRunMainLoop(AppBoot *app) {
        * kPresentationFrameGenerationPhaseNone and must never
        * collapse Vsync/Uncapped/Limit/Unlimited presentation back to ~60 Hz. */
       bool presented = false;
-      if (!g_window_hidden) {
+      if (!s_window_hidden) {
         if (produced_frame) {
           DrawAndPresentFrame(emulated_frame_present_mode, alpha);
           presented = true;
@@ -2805,7 +2805,7 @@ static void AppRunMainLoop(AppBoot *app) {
        * to a sleep" is precisely the kind of structural invariant this codebase
        * has now lost five times. The no-present/no-sleep counter must stay 0. */
       HostDisplay_YieldIfNoPresent(
-          presented, g_window_hidden, produced_frame);
+          presented, s_window_hidden, produced_frame);
     }
   }
 }

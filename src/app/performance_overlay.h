@@ -1,5 +1,10 @@
 #ifndef AR_PERFORMANCE_OVERLAY_H
 #define AR_PERFORMANCE_OVERLAY_H
+/* PerformanceOverlay: lays out and draws the on-screen performance readout
+ * from a metrics snapshot, detailed or compact by output size, as the last
+ * pass after CRT.
+ * Phase: present.
+ * Tests: tests/performance_metrics_test.c */
 
 #include "app/performance_metrics.h"
 #include "render/render_device.h"

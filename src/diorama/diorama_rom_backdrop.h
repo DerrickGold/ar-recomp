@@ -1,5 +1,10 @@
 #ifndef AR_DIORAMA_ROM_BACKDROP_H
 #define AR_DIORAMA_ROM_BACKDROP_H
+/* DioramaRomBackdrop: decodes the ROM's compressed assets and rasterizes an
+ * action room's first background page into an opaque backdrop plane for the
+ * diorama view. New room consumers should use action/action_room_scene.h.
+ * Phase: pure.
+ * Tests: tests/diorama_rom_backdrop_test.c */
 
 #include <stdbool.h>
 #include <stddef.h>

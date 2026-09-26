@@ -1,5 +1,9 @@
 #ifndef AR_ACTRAISER_LOCALIZATION_HUD_H
 #define AR_ACTRAISER_LOCALIZATION_HUD_H
+/* ActRaiserLocalizationHud: localized HUD fields in the native field geometry,
+ * and the displayed HUD owner's palette exported for dialogue inks.
+ * Phase: game side.
+ * Tests: tests/actraiser_localization_schedule_test.c */
 
 #include "actraiser/actraiser_localization_compose_state.h"
 #include "actraiser/actraiser_hud.h"

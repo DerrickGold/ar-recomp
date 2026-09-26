@@ -1,5 +1,10 @@
 #ifndef AR_ACTION_EFFECT_RENDER_H
 #define AR_ACTION_EFFECT_RENDER_H
+/* ActionEffectRender: builds backend-neutral geometry batches for the action
+ * stages' host-drawn effects (spells, scene effects, decorations, heat
+ * shimmer) from the effect frames the game publishes.
+ * Phase: pure.
+ * Tests: tests/action_effect_render_test.c */
 
 #include <stdbool.h>
 #include <stdint.h>

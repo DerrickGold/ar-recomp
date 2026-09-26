@@ -1,5 +1,10 @@
 #ifndef AR_ACTRAISER_TOWN_STRUCTURE_STEPS_H
 #define AR_ACTRAISER_TOWN_STRUCTURE_STEPS_H
+/* ActRaiser town structure steps: HLE of resolving and arming a town
+ * structure's visual step program (construction and rebuild) from the
+ * ROM bank $03 tables.
+ * Phase: game (HLE).
+ * Tests: tests/actraiser_town_structure_steps_hle_test.c */
 
 #include <stdint.h>
 

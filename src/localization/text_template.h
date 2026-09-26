@@ -1,5 +1,10 @@
 #ifndef AR_TEXT_TEMPLATE_H
 #define AR_TEXT_TEMPLATE_H
+/* ArTextTemplate: inline style markup for localized text: parsed spans,
+ * treatments, inks (host-provided binding names) and the resolved run
+ * appearance.
+ * Phase: pure.
+ * Tests: tests/text_appearance_test.c */
 
 #include <stdbool.h>
 #include <stddef.h>

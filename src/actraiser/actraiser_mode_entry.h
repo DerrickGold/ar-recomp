@@ -1,5 +1,9 @@
 #ifndef AR_ACTRAISER_MODE_ENTRY_H
 #define AR_ACTRAISER_MODE_ENTRY_H
+/* ActRaiser mode-entry hooks: the title and game-over menus (initial choice
+ * and label, next choice, late menu, game over) under the regional mode rules.
+ * Phase: game (native CPU hooks).
+ * Tests: tests/actraiser_mode_entry_test.c */
 #include "snesrecomp/game/cpu.h"
 bool ActRaiser_ModeTitleGateEntry(CpuState *cpu);
 RecompReturn ActRaiser_ModeTitleGate(CpuState *cpu);

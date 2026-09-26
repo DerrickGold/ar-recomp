@@ -1,5 +1,8 @@
 #ifndef AR_ACTRAISER_NATIVE_CALL_H
 #define AR_ACTRAISER_NATIVE_CALL_H
+/* ActRaiserNativeCall: calls an audited generated routine from a game HLE with
+ * the native call frame, including the caller's real return address.
+ * Phase: game (HLE). */
 
 #include "snesrecomp/game/cpu.h"
 

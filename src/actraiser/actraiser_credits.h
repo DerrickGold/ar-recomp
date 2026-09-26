@@ -1,5 +1,10 @@
 #ifndef AR_ACTRAISER_CREDITS_H
 #define AR_ACTRAISER_CREDITS_H
+/* ActRaiserCredits: follows which native credits page is on screen (a page
+ * counts as presented only after its BG3 DMA), independent of language and
+ * font, for the localized credits. Its observers never change native state.
+ * Phase: game (native CPU hooks).
+ * Tests: tests/actraiser_credits_test.c */
 
 #include "snesrecomp/game/cpu.h"
 

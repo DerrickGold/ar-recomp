@@ -1,5 +1,10 @@
 #ifndef AR_ACTRAISER_LOCALIZATION_TEXT_STYLE_H
 #define AR_ACTRAISER_LOCALIZATION_TEXT_STYLE_H
+/* ActRaiserTextStyle: snapshots the styles a message uses (interned, entry zero
+ * the default) and the palettes its inks bind to (dialogue, credits, OBJ,
+ * HUD) for the renderer.
+ * Phase: game side.
+ * Tests: tests/actraiser_localization_schedule_test.c */
 
 #include "actraiser/actraiser_text_ink_bindings.h"
 #include "localization/dialogue_session.h"

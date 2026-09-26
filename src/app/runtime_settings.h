@@ -1,5 +1,9 @@
 #ifndef AR_RUNTIME_SETTINGS_H
 #define AR_RUNTIME_SETTINGS_H
+/* RuntimeSettings: settings that act on the running game. Installs the
+ * settings observers, runs action settings, builds save-edit requests and
+ * reports the restart or shutdown a setting asked for.
+ * Phase: host (main thread). */
 
 #include <stdbool.h>
 

@@ -1,5 +1,10 @@
 #ifndef AR_DIORAMA_STACK_GROUP_H
 #define AR_DIORAMA_STACK_GROUP_H
+/* DioramaStackGroup: bounds a projected layer stack and decides when drawing
+ * its repeated slices through a half-resolution intermediate is cheaper than
+ * blending each one at full size.
+ * Phase: pure.
+ * Tests: tests/diorama_stack_group_test.c */
 
 #include <stdbool.h>
 

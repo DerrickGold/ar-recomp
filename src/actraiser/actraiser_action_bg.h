@@ -1,5 +1,11 @@
 #ifndef AR_ACTRAISER_ACTION_BG_H
 #define AR_ACTRAISER_ACTION_BG_H
+/* ActRaiserActionBg: the game adapter for the action background HLE
+ * (SPEC-bg-hle). Captures the action stage's BG layers from the game's
+ * low-WRAM layout and 64 x 64 tilemap rings, builds and binds the level plan,
+ * and compares the pure world decoder against the native rings.
+ * Phase: capture.
+ * Tests: tests/actraiser_action_bg_test.c */
 
 #include <stdbool.h>
 #include <stddef.h>

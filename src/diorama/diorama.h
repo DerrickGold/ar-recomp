@@ -45,10 +45,10 @@ void Diorama_SetDragging(bool dragging);
 
 /* B4-split (followup doc): the camera pose Diorama_Composite renders with,
  * passed in by the caller instead of Composite reading producer-owned
- * g_diorama_cam directly. Free Cam mode: the caller passes the authored pose
+ * s_diorama_cam directly. Free Cam mode: the caller passes the authored pose
  * (snapshotted through FrameSlot). Dynamic Cam mode: the caller passes the
  * presentation-owned render camera with damped sway—see present.c's
- * g_diorama_render_cam. fov_y isn't
+ * s_diorama_render_cam. fov_y isn't
  * part of this: it's a fixed camera constant (kDioramaFovY, diorama.c),
  * never authored per-mode. */
 typedef struct DioramaCameraPose {

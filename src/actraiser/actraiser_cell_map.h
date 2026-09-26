@@ -1,5 +1,10 @@
 #ifndef AR_ACTRAISER_CELL_MAP_H
 #define AR_ACTRAISER_CELL_MAP_H
+/* ActRaiser cell map: HLE of the town cell-mark map at $7F:2000: its
+ * quadrant-paged cell indices ($03:9710), structure marks and the
+ * traversal-blocked test.
+ * Phase: game (HLE).
+ * Tests: tests/actraiser_cell_map_hle_test.c */
 
 #include <stdbool.h>
 #include <stdint.h>

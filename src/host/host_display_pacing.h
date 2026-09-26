@@ -1,5 +1,10 @@
 #ifndef AR_HOST_DISPLAY_PACING_H
 #define AR_HOST_DISPLAY_PACING_H
+/* HostDisplayPacing: presentation pacing policy: the emulation frame
+ * interval, a guard that notices when VSync stops pacing presents, and the
+ * rolling FPS counter the player sees.
+ * Phase: pure.
+ * Tests: tests/host_display_pacing_test.c */
 
 #include <stdbool.h>
 #include <stdint.h>

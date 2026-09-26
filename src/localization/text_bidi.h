@@ -1,5 +1,10 @@
 #ifndef AR_TEXT_BIDI_H
 #define AR_TEXT_BIDI_H
+/* ArTextBidiSpans: bidirectional-text annotations over logical UTF-8 source
+ * (isolated names, left-to-right numbers, directional terms), kept valid
+ * across edits of that source.
+ * Phase: pure.
+ * Tests: tests/actraiser_localization_schedule_test.c */
 
 #include <stdbool.h>
 #include <stddef.h>

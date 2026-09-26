@@ -1,5 +1,10 @@
 #ifndef AR_DIALOGUE_SESSION_H
 #define AR_DIALOGUE_SESSION_H
+/* ArDialogueSession: runs one localized dialogue independently of any game:
+ * compiles a source message with its values, pages and reveals it, waits on
+ * control codes, and exports the stable state a save needs.
+ * Phase: game side (portable core).
+ * Tests: tests/dialogue_session_test.c */
 
 #include "localization/language_pack.h"
 #include "localization/text_bidi.h"

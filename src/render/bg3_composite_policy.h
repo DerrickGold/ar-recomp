@@ -1,5 +1,10 @@
 #ifndef AR_BG3_COMPOSITE_POLICY_H
 #define AR_BG3_COMPOSITE_POLICY_H
+/* ArBg3Composite: how many BG3 rows the host captures for its own text layer
+ * (zero keeps BG3 entirely in native scanout), shared by the ordinary, Wide
+ * Raw and flat diorama setups.
+ * Phase: pure.
+ * Tests: tests/bg3_composite_policy_test.c */
 
 #include <stdbool.h>
 

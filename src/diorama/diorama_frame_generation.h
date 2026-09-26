@@ -1,5 +1,10 @@
 #ifndef AR_DIORAMA_FRAME_GENERATION_H
 #define AR_DIORAMA_FRAME_GENERATION_H
+/* DioramaFrameGeneration: captures the action planes after each emulation
+ * tick and builds motion fields between consecutive captures, so frame
+ * generation can synthesize in-between frames for the diorama view.
+ * Phase: present (FrameSlot and already-uploaded textures only).
+ * Tests: tests/diorama_frame_generation_test.c */
 
 #include <stddef.h>
 #include <stdint.h>

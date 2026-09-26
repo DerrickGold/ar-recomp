@@ -1,5 +1,10 @@
 #ifndef AR_ACTION_EFFECT_PROJECTION_H
 #define AR_ACTION_EFFECT_PROJECTION_H
+/* ActionEffectProjection: maps action-world effect points to the screen
+ * (camera, widescreen and diorama projection) from a small immutable context,
+ * and reports which OBJ priority bands and BG planes current effects need.
+ * Phase: pure.
+ * Tests: tests/action_effect_render_test.c */
 
 #include <stdint.h>
 

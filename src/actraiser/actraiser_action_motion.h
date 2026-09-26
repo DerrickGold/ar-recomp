@@ -1,5 +1,10 @@
 #ifndef AR_ACTRAISER_ACTION_MOTION_H
 #define AR_ACTRAISER_ACTION_MOTION_H
+/* ActRaiser action-motion hooks: actor motion and animation rows
+ * ($00:8E2F), collision births, emitter cadence and position, and plant
+ * tendrils, under the regional motion, pose, boss and fire rules.
+ * Phase: game (native CPU hooks).
+ * Tests: tests/actraiser_action_motion_test.c */
 #include "snesrecomp/game/cpu.h"
 bool ActRaiser_PlantTendrilEntry(CpuState *cpu);
 RecompReturn ActRaiser_PlantTendril(CpuState *cpu);

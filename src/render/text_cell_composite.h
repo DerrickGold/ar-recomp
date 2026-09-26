@@ -1,5 +1,10 @@
 #ifndef AR_TEXT_CELL_COMPOSITE_H
 #define AR_TEXT_CELL_COMPOSITE_H
+/* ArTextCellComposite: projects the tilemap cells enhanced text claims through
+ * the PPU's BG scroll into screen rectangles and cuts those areas out of HUD
+ * chunks, so native and replacement text never overlap.
+ * Phase: pure.
+ * Tests: tests/text_cell_composite_test.c */
 
 #include <stddef.h>
 #include <stdint.h>

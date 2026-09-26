@@ -239,7 +239,7 @@ typedef struct FrameSlot {
   bool diorama_hud_flat;
   /* B4-split (followup doc): DioramaCameraMode (settings.h) plus both
    * candidate authored poses, resolved at present-composite time into
-   * whichever is active this frame — see present.c's g_diorama_render_cam
+   * whichever is active this frame — see present.c's s_diorama_render_cam
    * and the DioramaCameraPose comment (diorama.h) for the full rationale.
    * Snapshotting both poses rather than resolving during capture keeps
    * FrameSlot_Capture a plain field-by-field mirror of g_settings, matching

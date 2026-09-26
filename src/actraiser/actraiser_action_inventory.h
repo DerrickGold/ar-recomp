@@ -1,5 +1,10 @@
 #ifndef AR_ACTRAISER_ACTION_INVENTORY_H
 #define AR_ACTRAISER_ACTION_INVENTORY_H
+/* ActRaiser inventory hooks: item pickups, spell-inventory debits, pickup art,
+ * the HUD icon and the health DMA, under the regional spell-inventory rules
+ * and media.
+ * Phase: game (native CPU hooks).
+ * Tests: tests/actraiser_action_inventory_test.c */
 #include "snesrecomp/game/cpu.h"
 bool ActRaiser_InventoryPickupEntry(CpuState *cpu);
 RecompReturn ActRaiser_InventoryPickup(CpuState *cpu);

@@ -1,5 +1,10 @@
 #ifndef AR_SESSION_FATAL_H
 #define AR_SESSION_FATAL_H
+/* SessionFatal: a latched request for an orderly, user-visible shutdown after
+ * a runtime failure. The first failure wins, and its kind selects the
+ * translated recovery text.
+ * Phase: main/game thread.
+ * Tests: tests/session_fatal_test.c */
 
 #include <stdbool.h>
 

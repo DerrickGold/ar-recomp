@@ -1,5 +1,10 @@
 #ifndef AR_SCENE_ASSET_DUMP_H
 #define AR_SCENE_ASSET_DUMP_H
+/* SceneAssetDump: writes a point-in-time package of the resident SNES scene
+ * (PPU state, VRAM, CGRAM, OAM, WRAM) into a new directory while emulation
+ * is paused, for offline asset work.
+ * Phase: developer tools (emulation paused).
+ * Tests: tests/scene_asset_dump_test.c */
 
 #include <stdbool.h>
 #include <stdint.h>

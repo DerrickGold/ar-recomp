@@ -1,5 +1,10 @@
 #ifndef AR_SAVE_SYSTEM_H
 #define AR_SAVE_SYSTEM_H
+/* SaveSystem: the cartridge save (SRAM): checksum, region states and the save
+ * editor's fields; loading and writing .srm, .ini and .arsave files; and the
+ * active slot's storage (attach, validate, flush, legacy migration).
+ * Phase: host I/O.
+ * Tests: tests/save_system_test.c */
 
 #include <stdbool.h>
 #include <stddef.h>

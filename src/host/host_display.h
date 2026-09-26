@@ -1,5 +1,9 @@
 #ifndef AR_HOST_DISPLAY_H
 #define AR_HOST_DISPLAY_H
+/* HostDisplay: the display side of the host frame loop. Decides whether each
+ * emulated tick is dropped, presented or sent to the headless compositor,
+ * sizes the host frame surfaces, and presents at the display's cadence.
+ * Phase: host (main thread). */
 
 #include <stdbool.h>
 #include <stdint.h>

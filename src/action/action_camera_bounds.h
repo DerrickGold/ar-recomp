@@ -1,5 +1,10 @@
 #ifndef AR_ACTION_CAMERA_BOUNDS_H
 #define AR_ACTION_CAMERA_BOUNDS_H
+/* ActionCameraAxisBounds: the action camera's range on one axis. Applies the
+ * ROM's native camera motion and clamp, and widens the range for widescreen
+ * margins only when the level is big enough to show them in full.
+ * Phase: pure.
+ * Tests: tests/action_camera_bounds_test.c */
 
 #include <stdbool.h>
 #include <stdint.h>

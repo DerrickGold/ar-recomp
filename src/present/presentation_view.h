@@ -1,5 +1,10 @@
 #ifndef AR_PRESENTATION_VIEW_H
 #define AR_PRESENTATION_VIEW_H
+/* PresentationView: decides which scene the compositor actually shows this
+ * frame, and whether the native image appeared unexpectedly, by matching the
+ * top-level compositor rather than the producer's requested view.
+ * Phase: present (FrameSlot only).
+ * Tests: tests/presentation_view_test.c */
 
 #include "present/frame_slot.h"
 #include "app/performance_metrics.h"

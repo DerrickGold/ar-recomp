@@ -1,5 +1,9 @@
 #ifndef AR_TEXT_RASTERIZER_SDL_H
 #define AR_TEXT_RASTERIZER_SDL_H
+/* ArSdlTextRasterizer: the SDL_ttf implementation of the portable text
+ * rasterizer, handed to renderer-independent code only as an ArTextBackend.
+ * Phase: present.
+ * Tests: tests/text_rasterizer_sdl_test.c */
 
 #include <stdbool.h>
 #include <stddef.h>

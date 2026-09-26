@@ -1,5 +1,10 @@
 #ifndef AR_ACTION_PLACEMENTS_H
 #define AR_ACTION_PLACEMENTS_H
+/* ActionPlacements: a room's object and enemy-wave placement program as plain
+ * values (cells, triggers, reservations), with structural validation against
+ * the format's capacity.
+ * Phase: pure.
+ * Tests: tests/actraiser_stage_placements_test.c */
 
 #include <stdbool.h>
 #include <stddef.h>

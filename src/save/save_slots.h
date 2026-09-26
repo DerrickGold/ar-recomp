@@ -1,5 +1,10 @@
 #ifndef AR_SAVE_SLOTS_H
 #define AR_SAVE_SLOTS_H
+/* SaveSlots: the ten campaign slots on disk, owned by one locked collection
+ * per process with pinned paths and backend: per-slot inspection, new-game
+ * drafts and checkpoint companions.
+ * Phase: host I/O.
+ * Tests: tests/save_slots_test.c */
 
 #include "save/save_system.h"
 

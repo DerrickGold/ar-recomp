@@ -1,5 +1,10 @@
 #ifndef AR_ACTRAISER_LOCALIZATION_RESOLVED_TEXT_H
 #define AR_ACTRAISER_LOCALIZATION_RESOLVED_TEXT_H
+/* ActRaiserLocalizationResolvedText: one owned result of resolving a semantic
+ * message (text, source language, boundaries and annotations) for
+ * normalization, caching and publication.
+ * Phase: game side.
+ * Tests: tests/actraiser_localization_text_style_test.c */
 
 #include "actraiser/actraiser_localization_text_style.h"
 

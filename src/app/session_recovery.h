@@ -1,5 +1,10 @@
 #ifndef AR_SESSION_RECOVERY_H
 #define AR_SESSION_RECOVERY_H
+/* SessionRecovery: the title and text of the recovery screen shown after a
+ * fatal session failure, in the interface language, with bounded literal
+ * technical details.
+ * Phase: pure.
+ * Tests: tests/session_recovery_test.c */
 
 #include "app/session_fatal.h"
 #include "localization/ui_catalog.h"

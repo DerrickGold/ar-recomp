@@ -1,5 +1,11 @@
 #ifndef AR_REGIONAL_MENU_H
 #define AR_REGIONAL_MENU_H
+/* OverlayRegionMenu: the rows of the regional-rules pages in the settings
+ * overlay (presets, action, towns, controls, presentation) with their labels,
+ * values, descriptions, previews and pending-change notes, all read from a
+ * copied rules view.
+ * Phase: pure.
+ * Tests: tests/regional_policy_test.c */
 
 #include "settings_overlay/regional/regional_ui.h"
 

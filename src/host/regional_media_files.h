@@ -1,5 +1,10 @@
 #ifndef AR_REGIONAL_MEDIA_FILES_H
 #define AR_REGIONAL_MEDIA_FILES_H
+/* ArHostRegionalMediaFiles: loads the regional media donor files at startup
+ * and serves them to the regional media core as immutable borrowed views; the
+ * core never sees a path.
+ * Phase: host (startup).
+ * Tests: tests/regional_media_test.c */
 
 #include "regional/media/regional_media.h"
 

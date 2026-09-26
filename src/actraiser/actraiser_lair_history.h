@@ -1,5 +1,10 @@
 #ifndef AR_ACTRAISER_LAIR_HISTORY_H
 #define AR_ACTRAISER_LAIR_HISTORY_H
+/* ActRaiserLairHistory: records each town's monster-lair events and stocks for
+ * the regional lair rules, checks them against native state and projects them
+ * for saves; also supplies the Japanese fixed house-unit count.
+ * Phase: game (native CPU hooks).
+ * Tests: tests/actraiser_lair_history_test.c */
 
 #include "regional/towns/regional_lair_history.h"
 #include "snesrecomp/game/cpu.h"

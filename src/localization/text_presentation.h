@@ -1,5 +1,10 @@
 #ifndef AR_TEXT_PRESENTATION_H
 #define AR_TEXT_PRESENTATION_H
+/* ArTextPresentation: the handshake between the dialogue runtime and the
+ * host's font presentation: font identity, readiness after a probe, and
+ * per-frame begin and end.
+ * Phase: game/presenter thread.
+ * Tests: tests/actraiser_localization_schedule_test.c */
 
 #include <stdbool.h>
 #include <stddef.h>

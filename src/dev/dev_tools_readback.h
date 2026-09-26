@@ -1,5 +1,8 @@
 #ifndef AR_DEV_TOOLS_READBACK_H
 #define AR_DEV_TOOLS_READBACK_H
+/* DevTools readback: the capture kinds and provider callbacks the developer
+ * tools use to read rendered frames back as RGB for screenshots and dumps.
+ * Phase: present (developer tools only). */
 
 #include <stdbool.h>
 #include <stdint.h>

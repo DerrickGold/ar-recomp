@@ -1,5 +1,9 @@
 #ifndef AR_QUINTET_LZSS_H
 #define AR_QUINTET_LZSS_H
+/* QuintetLzss: decoder for Quintet's LZSS-compressed ROM assets, from a buffer
+ * or a reader.
+ * Phase: pure.
+ * Tests: tests/quintet_lzss_test.c */
 
 #include <stdbool.h>
 #include <stddef.h>

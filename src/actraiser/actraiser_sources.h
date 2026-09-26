@@ -1,5 +1,9 @@
 #ifndef AR_ACTRAISER_SOURCES_H
 #define AR_ACTRAISER_SOURCES_H
+/* ActRaiserSources: the regional rules for Source items: the compare at
+ * collection and whether a carried Source is kept.
+ * Phase: game (native CPU hooks).
+ * Tests: tests/actraiser_sources_test.c */
 
 #include "snesrecomp/game/cpu.h"
 

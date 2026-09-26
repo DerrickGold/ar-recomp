@@ -95,18 +95,18 @@ typedef struct GroupDynamics {
   uint16 last_change_gf, run_length, max_run;
 } GroupDynamics;
 
-static GroupDynamics g_group_dynamics[16];
-static uint16 g_prev_cgram[SR_PPU_CGRAM_WORD_COUNT];
-static uint16 g_prev_cgram_gf;
-static int g_prev_cgram_valid;
+static GroupDynamics s_group_dynamics[16];
+static uint16 s_prev_cgram[SR_PPU_CGRAM_WORD_COUNT];
+static uint16 s_prev_cgram_gf;
+static int s_prev_cgram_valid;
 
-static TileRecord *g_records;
-static int g_record_count;
-static int32_t *g_hash_slots; /* -1 empty, else record index */
-static int g_enabled = -1;
-static int g_mode7_dump_enabled = -1;
-static uint32 g_frames_surveyed;
-static uint32 g_skipped_mode_mask;
+static TileRecord *s_records;
+static int s_record_count;
+static int32_t *s_hash_slots; /* -1 empty, else record index */
+static int s_enabled = -1;
+static int s_mode7_dump_enabled = -1;
+static uint32 s_frames_surveyed;
+static uint32 s_skipped_mode_mask;
 
 static bool CapturePpuView(HdTileCensusPpuView *view,
                            SrRunnerHandle *runner, bool include_objects) {
@@ -147,20 +147,20 @@ static bool CapturePpuView(HdTileCensusPpuView *view,
 static TileRecord *FindOrAddRecord(uint64 hash, CensusClass class_) {
   uint32 slot = (uint32)hash & ((1u << kCensusHashBits) - 1);
   for (;;) {
-    int32_t index = g_hash_slots[slot];
+    int32_t index = s_hash_slots[slot];
     if (index < 0) {
-      if (g_record_count >= kCensusMaxRecords) return NULL;
-      TileRecord *record = &g_records[g_record_count];
+      if (s_record_count >= kCensusMaxRecords) return NULL;
+      TileRecord *record = &s_records[s_record_count];
       memset(record, 0, sizeof(*record));
       record->hash = hash;
       record->class_ = (uint8)class_;
       record->first_gf =
           ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
-      g_hash_slots[slot] = g_record_count++;
+      s_hash_slots[slot] = s_record_count++;
       return record;
     }
-    if (g_records[index].hash == hash && g_records[index].class_ == class_)
-      return &g_records[index];
+    if (s_records[index].hash == hash && s_records[index].class_ == class_)
+      return &s_records[index];
     slot = (slot + 1) & ((1u << kCensusHashBits) - 1);
   }
 }
@@ -323,14 +323,14 @@ static int GroupIsPermutation(const uint16 *prev, const uint16 *cur) {
  * classifying so scene transitions don't pollute the statistics. */
 static void ClassifyPaletteWrites(const HdTileCensusPpuView *view) {
   uint16 gf = ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
-  if (g_prev_cgram_valid && gf == g_prev_cgram_gf) return;
-  int classify = g_prev_cgram_valid && (uint16)(gf - g_prev_cgram_gf) == 1;
+  if (s_prev_cgram_valid && gf == s_prev_cgram_gf) return;
+  int classify = s_prev_cgram_valid && (uint16)(gf - s_prev_cgram_gf) == 1;
   if (classify) {
     for (int group = 0; group < 16; group++) {
-      const uint16 *prev = &g_prev_cgram[group * 16];
+      const uint16 *prev = &s_prev_cgram[group * 16];
       const uint16 *cur = &view->cgram.data[group * 16];
       if (!memcmp(prev, cur, 16 * sizeof(uint16))) continue;
-      GroupDynamics *dyn = &g_group_dynamics[group];
+      GroupDynamics *dyn = &s_group_dynamics[group];
       dyn->change_frames++;
       if ((uint16)(gf - dyn->last_change_gf) == 1) {
         dyn->run_length++;
@@ -346,9 +346,9 @@ static void ClassifyPaletteWrites(const HdTileCensusPpuView *view) {
       else dyn->other++;
     }
   }
-  memcpy(g_prev_cgram, view->cgram.data, sizeof(g_prev_cgram));
-  g_prev_cgram_gf = gf;
-  g_prev_cgram_valid = 1;
+  memcpy(s_prev_cgram, view->cgram.data, sizeof(s_prev_cgram));
+  s_prev_cgram_gf = gf;
+  s_prev_cgram_valid = 1;
 }
 
 /* ---- per-frame walkers -------------------------------------------------- */
@@ -472,10 +472,10 @@ static void WriteContactSheet(CensusClass class_, const int *indices,
       int cell = (py / 16) * kCensusSheetColumns + (px / 16);
       uint8 rgb[3] = { 24, 24, 24 };
       if (cell < count) {
-        const TileRecord *record = &g_records[indices[cell]];
+        const TileRecord *record = &s_records[indices[cell]];
         uint8 pixel = record->pixels[(py % 16) / 2 * 8 + (px % 16) / 2];
         if (record->class_ == kCensusClass_Mode7) {
-          uint16 xbgr = g_prev_cgram[pixel];
+          uint16 xbgr = s_prev_cgram[pixel];
           rgb[0] = (uint8)(((xbgr >> 0) & 0x1f) << 3);
           rgb[1] = (uint8)(((xbgr >> 5) & 0x1f) << 3);
           rgb[2] = (uint8)(((xbgr >> 10) & 0x1f) << 3);
@@ -502,8 +502,8 @@ static void CensusDump(void) {
   static int indices[kCensusClass_Count][kCensusMaxRecords];
 
   int flash_suspects = 0;
-  for (int i = 0; i < g_record_count; i++) {
-    const TileRecord *record = &g_records[i];
+  for (int i = 0; i < s_record_count; i++) {
+    const TileRecord *record = &s_records[i];
     int class_ = record->class_;
     int sheet_index = class_counts[class_];
     indices[class_][class_counts[class_]++] = i;
@@ -541,7 +541,7 @@ static void CensusDump(void) {
   /* CGRAM group dynamics: one record per group that ever changed. */
   if (jsonl)
     for (int group = 0; group < 16; group++) {
-      const GroupDynamics *dyn = &g_group_dynamics[group];
+      const GroupDynamics *dyn = &s_group_dynamics[group];
       if (!dyn->change_frames) continue;
       fprintf(jsonl, "{\"cgram_group\":%d,\"changes\":%u,\"fade\":%u,"
               "\"flash\":%u,\"cycle\":%u,\"other\":%u,\"bursts\":%u,"
@@ -558,8 +558,8 @@ static void CensusDump(void) {
   FILE *summary = sr_fopen(path, "w");
   if (summary) {
     fprintf(summary, "frames surveyed: %u\nunique tiles: %d%s\n",
-            g_frames_surveyed, g_record_count,
-            g_record_count >= kCensusMaxRecords ? " (CAP HIT)" : "");
+            s_frames_surveyed, s_record_count,
+            s_record_count >= kCensusMaxRecords ? " (CAP HIT)" : "");
     for (int c = 0; c < kCensusClass_Count; c++)
       fprintf(summary, "%-8s: %5d unique, %d with >1 palette variant, "
               "%d with >%d variants\n", kClassNames[c], class_counts[c],
@@ -569,7 +569,7 @@ static void CensusDump(void) {
             flash_suspects);
     fprintf(summary, "\nCGRAM group dynamics (per-frame change shapes):\n");
     for (int group = 0; group < 16; group++) {
-      const GroupDynamics *dyn = &g_group_dynamics[group];
+      const GroupDynamics *dyn = &s_group_dynamics[group];
       if (!dyn->change_frames) continue;
       fprintf(summary, "  %s group %2d: %5u changes  fade=%u flash=%u "
               "cycle=%u other=%u  bursts=%u max_run=%u\n",
@@ -577,13 +577,13 @@ static void CensusDump(void) {
               dyn->fade_like, dyn->flash_like, dyn->cycle_like, dyn->other,
               dyn->bursts, dyn->max_run);
     }
-    if (g_skipped_mode_mask)
+    if (s_skipped_mode_mask)
       fprintf(summary, "skipped BG modes (mask): %02x\n",
-              g_skipped_mode_mask);
+              s_skipped_mode_mask);
     fclose(summary);
   }
   fprintf(stderr, "[tile-census] %u frames, %d unique tiles -> "
-          "tile_census.{txt,jsonl}\n", g_frames_surveyed, g_record_count);
+          "tile_census.{txt,jsonl}\n", s_frames_surveyed, s_record_count);
 }
 
 /* ---- Mode-7 canvas dump -------------------------------------------------
@@ -595,7 +595,7 @@ static void CensusDump(void) {
 
 static void HdMode7Dump_Frame(const HdTileCensusPpuView *view) {
   static uint64 last_hash;
-  if (!g_mode7_dump_enabled || view->state.bg_mode != 7 ||
+  if (!s_mode7_dump_enabled || view->state.bg_mode != 7 ||
       (view->state.flags & SR_PPU_STATE_FORCED_BLANK))
     return;
   /* Canvas content = the high byte (pixels) of all 128*128 tile words plus
@@ -640,37 +640,37 @@ static void HdMode7Dump_Frame(const HdTileCensusPpuView *view) {
 /* ---- entry point -------------------------------------------------------- */
 
 void HdTileCensus_Frame(SrRunnerHandle *runner) {
-  if (g_enabled < 0) {
+  if (s_enabled < 0) {
     const char *env = getenv("AR_TILE_CENSUS");
-    g_enabled = env && env[0] && env[0] != '0';
+    s_enabled = env && env[0] && env[0] != '0';
     env = getenv("AR_M7_DUMP");
-    g_mode7_dump_enabled = env && env[0] && env[0] != '0';
-    if (g_enabled) {
-      g_records = calloc(kCensusMaxRecords, sizeof(TileRecord));
-      g_hash_slots = malloc(sizeof(int32_t) << kCensusHashBits);
-      if (!g_records || !g_hash_slots) {
-        free(g_records);
-        free(g_hash_slots);
-        g_records = NULL;
-        g_hash_slots = NULL;
-        g_enabled = 0;
+    s_mode7_dump_enabled = env && env[0] && env[0] != '0';
+    if (s_enabled) {
+      s_records = calloc(kCensusMaxRecords, sizeof(TileRecord));
+      s_hash_slots = malloc(sizeof(int32_t) << kCensusHashBits);
+      if (!s_records || !s_hash_slots) {
+        free(s_records);
+        free(s_hash_slots);
+        s_records = NULL;
+        s_hash_slots = NULL;
+        s_enabled = 0;
       }
     }
-    if (g_enabled) {
-      memset(g_hash_slots, 0xff, sizeof(int32_t) << kCensusHashBits);
+    if (s_enabled) {
+      memset(s_hash_slots, 0xff, sizeof(int32_t) << kCensusHashBits);
       atexit(CensusDump);
       fprintf(stderr, "[tile-census] enabled\n");
     }
   }
-  if (!g_enabled && !g_mode7_dump_enabled) return;
+  if (!s_enabled && !s_mode7_dump_enabled) return;
 
   HdTileCensusPpuView view;
-  if (!CapturePpuView(&view, runner, g_enabled != 0)) return;
+  if (!CapturePpuView(&view, runner, s_enabled != 0)) return;
   HdMode7Dump_Frame(&view);
-  if (!g_enabled || (view.state.flags & SR_PPU_STATE_FORCED_BLANK)) return;
+  if (!s_enabled || (view.state.flags & SR_PPU_STATE_FORCED_BLANK)) return;
 
   ClassifyPaletteWrites(&view);
-  g_frames_surveyed++;
+  s_frames_surveyed++;
   int mode = view.state.bg_mode;
   switch (mode) {
     case 0:
@@ -686,7 +686,7 @@ void HdTileCensus_Frame(SrRunnerHandle *runner) {
       SurveyMode7(&view);
       break;
     default:
-      g_skipped_mode_mask |= (uint32)(1u << mode);
+      s_skipped_mode_mask |= (uint32)(1u << mode);
       break;
   }
   SurveyObjects(&view);

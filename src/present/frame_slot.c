@@ -46,8 +46,8 @@ extern bool g_diorama_frame_active;
  * sustained movement set the scale while a scripted one-frame outlier changes
  * it by only kEmaAlpha. kNormMultiple leaves headroom for bursts above typical
  * recent motion. */
-static float g_diorama_velx_avg = 4.0f;
-static float g_diorama_vely_avg = 4.0f;
+static float s_diorama_velx_avg = 4.0f;
+static float s_diorama_vely_avg = 4.0f;
 
 /* Captures are per PRESENTED frame, not per emulated tick: gameplay can batch
  * catch-up ticks into one capture below 60Hz present rates. Host pause/menu
@@ -83,18 +83,18 @@ static float NormalizeReactiveVelocity(int16_t v, float *avg,
 /* B4-kick (followup doc): rising-edge detection for the three event
  * triggers. Game-thread-only state (FrameSlot_Capture's exclusive caller) —
  * present.c only ever sees the resulting one-shot FrameSlot flags. */
-static bool g_diorama_prev_boost;
-static int16_t g_diorama_prev_vely;
-static uint8_t g_diorama_prev_hp;
+static bool s_diorama_prev_boost;
+static int16_t s_diorama_prev_vely;
+static uint8_t s_diorama_prev_hp;
 
 /* Sim-town reactive camera. Separate averages from the action-stage pair
  * above: the two modes measure different actors moving at different scales,
  * and sharing an accumulator would make every town entry re-calibrate against
  * whatever the last action stage was doing. */
-static float g_sim_velx_avg = 4.0f;
-static float g_sim_vely_avg = 4.0f;
-static uint8_t g_sim_prev_hp;
-static bool g_sim_prev_in_town;
+static float s_sim_velx_avg = 4.0f;
+static float s_sim_vely_avg = 4.0f;
+static uint8_t s_sim_prev_hp;
+static bool s_sim_prev_in_town;
 
 /* Sim world-record planar velocities. The catalogue keeps every world record
  * on one flat map, so these are the whole of the angel's motion -- there is no
@@ -315,7 +315,7 @@ static void CaptureSimDynamicCamera(FrameSlot *dst, bool in_town,
     dst->sim_dyncam_lean_yaw = 0.0f;
     dst->sim_dyncam_lean_pitch = 0.0f;
     dst->sim_dyncam_event_hit = false;
-    g_sim_prev_in_town = false;
+    s_sim_prev_in_town = false;
     return;
   }
 
@@ -324,9 +324,9 @@ static void CaptureSimDynamicCamera(FrameSlot *dst, bool in_town,
   int16_t vel_y = (int16_t)ActRaiser_ReadWram16(
       kActRaiserWram_SimAngelRecord + kSimRecordVelocityY);
   dst->sim_dyncam_lean_yaw =
-      NormalizeReactiveVelocity(vel_x, &g_sim_velx_avg, elapsed_ticks);
+      NormalizeReactiveVelocity(vel_x, &s_sim_velx_avg, elapsed_ticks);
   dst->sim_dyncam_lean_pitch =
-      NormalizeReactiveVelocity(vel_y, &g_sim_vely_avg, elapsed_ticks);
+      NormalizeReactiveVelocity(vel_y, &s_sim_vely_avg, elapsed_ticks);
 
   /* Damage taken, on the frame it applies. Same reasoning as the action
    * stage's revision: an HP decrease is the instant damage lands, whereas an
@@ -336,9 +336,9 @@ static void CaptureSimDynamicCamera(FrameSlot *dst, bool in_town,
    * less HP than the last one ended with is not a hit, and without this the
    * camera jolts on arrival. */
   uint8_t hp = g_ram[kActRaiserWram_AngelCurrentHp];
-  dst->sim_dyncam_event_hit = g_sim_prev_in_town && hp < g_sim_prev_hp;
-  g_sim_prev_hp = hp;
-  g_sim_prev_in_town = true;
+  dst->sim_dyncam_event_hit = s_sim_prev_in_town && hp < s_sim_prev_hp;
+  s_sim_prev_hp = hp;
+  s_sim_prev_in_town = true;
 }
 
 /* The first frame and a counter reset each contribute one tick. A host-paused
@@ -615,27 +615,27 @@ void FrameSlot_Capture(FrameSlot *dst, const SimFrameData *annotated_sim) {
   int16_t vel_x = (int16_t)ActRaiser_ReadWram16(kActRaiserWram_PlayerVelocityX);
   int16_t vel_y = (int16_t)ActRaiser_ReadWram16(kActRaiserWram_PlayerVelocityY);
   dst->diorama_dyncam_lean_yaw =
-      NormalizeReactiveVelocity(vel_x, &g_diorama_velx_avg, elapsed_ticks);
+      NormalizeReactiveVelocity(vel_x, &s_diorama_velx_avg, elapsed_ticks);
   dst->diorama_dyncam_lean_pitch =
-      NormalizeReactiveVelocity(vel_y, &g_diorama_vely_avg, elapsed_ticks);
+      NormalizeReactiveVelocity(vel_y, &s_diorama_vely_avg, elapsed_ticks);
 
   /* HP decreases identify the damage frame; the native invulnerability flag
    * arrives later. Landing is inferred from a fall settling near zero velocity,
    * using the recent motion average. Boost is a rising edge of the native byte.
    */
   uint8_t hp = g_ram[kActRaiserWram_PlayerHp];
-  dst->diorama_dyncam_event_hit = hp < g_diorama_prev_hp;
-  g_diorama_prev_hp = hp;
+  dst->diorama_dyncam_event_hit = hp < s_diorama_prev_hp;
+  s_diorama_prev_hp = hp;
 
   bool was_falling =
-      g_diorama_prev_vely > (int16_t)(g_diorama_vely_avg * 0.5f);
-  bool now_settled = abs((int)vel_y) < (int)(g_diorama_vely_avg * 0.15f);
+      s_diorama_prev_vely > (int16_t)(s_diorama_vely_avg * 0.5f);
+  bool now_settled = abs((int)vel_y) < (int)(s_diorama_vely_avg * 0.15f);
   dst->diorama_dyncam_event_land = was_falling && now_settled;
-  g_diorama_prev_vely = vel_y;
+  s_diorama_prev_vely = vel_y;
 
   bool boost = g_ram[kActRaiserWram_PlayerBoost] != 0;
-  dst->diorama_dyncam_event_boost = boost && !g_diorama_prev_boost;
-  g_diorama_prev_boost = boost;
+  dst->diorama_dyncam_event_boost = boost && !s_diorama_prev_boost;
+  s_diorama_prev_boost = boost;
 
   CaptureSimDynamicCamera(
       dst,

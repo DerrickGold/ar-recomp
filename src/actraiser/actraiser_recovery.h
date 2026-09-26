@@ -1,5 +1,9 @@
 #ifndef AR_ACTRAISER_RECOVERY_H
 #define AR_ACTRAISER_RECOVERY_H
+/* ActRaiser recovery hooks: prefixes for the HP and SP recovery cycle, drain
+ * and motion under the regional recovery rules, keeping native stack frames.
+ * Phase: game (native CPU hooks).
+ * Tests: tests/actraiser_recovery_test.c */
 
 #include "regional/towns/regional_recovery.h"
 #include "snesrecomp/game/cpu.h"

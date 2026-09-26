@@ -1,5 +1,11 @@
 #ifndef AR_NATIVE_AUDIO_MIXER_H
 #define AR_NATIVE_AUDIO_MIXER_H
+/* NativeAudioMixer: splits the authentic SPC music and effects into separate
+ * volume buses by tracing each DSP register write back to the voice and track
+ * that made it, applies the player's bus gains, and mutes native music while
+ * a replacement track plays.
+ * Phase: runner audio callbacks (game side).
+ * Tests: tests/native_audio_mixer_test.c */
 
 #include <stdbool.h>
 #include <stdint.h>

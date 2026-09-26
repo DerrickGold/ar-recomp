@@ -1,5 +1,10 @@
 #ifndef AR_SAVE_PATHS_H
 #define AR_SAVE_PATHS_H
+/* SavePaths: the layout of the saves folder under the launcher's data root:
+ * per-slot files, imports, exports reserved under unique names, backups and
+ * recovery copies. No absolute path is ever stored in a slot.
+ * Phase: host I/O.
+ * Tests: tests/save_paths_test.c */
 #include <stdbool.h>
 #include <stddef.h>
 #include "constants.h"

@@ -1,5 +1,10 @@
 #ifndef AR_SAVE_SLOT_MANAGER_H
 #define AR_SAVE_SLOT_MANAGER_H
+/* SaveSlotManager: what the settings overlay's save-slot pages need: slot
+ * details, new-game drafts and their regional-rule edits, handed over as
+ * copies and host operations, never live SRAM or paths.
+ * Phase: host.
+ * Tests: tests/save_slots_test.c */
 #include "save/save_slots.h"
 #include "regional/session/regional_session.h"
 #include "settings_overlay/regional/regional_menu.h"

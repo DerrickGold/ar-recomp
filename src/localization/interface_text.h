@@ -1,5 +1,9 @@
 #ifndef AR_INTERFACE_TEXT_H
 #define AR_INTERFACE_TEXT_H
+/* ArInterfaceText: bounded editing and single-line wrapping of host interface
+ * text (not game dialogue) by whole graphemes.
+ * Phase: pure.
+ * Tests: tests/unicode_grapheme_test.c */
 
 #include <stdbool.h>
 #include <stddef.h>

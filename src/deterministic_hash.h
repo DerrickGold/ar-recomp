@@ -1,5 +1,10 @@
 #ifndef AR_DETERMINISTIC_HASH_H
 #define AR_DETERMINISTIC_HASH_H
+/* DeterministicHash: fixed, platform-independent hashes (a 32-bit integer
+ * mixer and FNV-1a over bytes and words) for values that are persisted or
+ * compared across machines.
+ * Phase: pure.
+ * Tests: tests/consolidated_utils_test.c */
 
 #include <stddef.h>
 #include <stdint.h>

@@ -1,5 +1,11 @@
 #ifndef AR_SCENE3D_MATH_H
 #define AR_SCENE3D_MATH_H
+/* Scene3D math: the 3D projection shared by the diorama, the SIM town and the
+ * manual: a view-projection from an orbit camera, world-to-screen with depth,
+ * frustum clipping, shadow and billboard projection, and the ground horizon
+ * and depth boundaries.
+ * Phase: pure.
+ * Tests: tests/scene3d_math_test.c */
 
 #include <stdbool.h>
 #include <stdint.h>

@@ -1,5 +1,10 @@
 #ifndef AR_ACTRAISER_LAIR_RELOADS_H
 #define AR_ACTRAISER_LAIR_RELOADS_H
+/* ActRaiserLairReloads: lair reload state for the regional reload rules,
+ * initialized from native state or adopted from a save, then checked and
+ * projected while native code keeps every write.
+ * Phase: game (native CPU hooks).
+ * Tests: tests/actraiser_lair_reloads_test.c */
 
 #include "regional/towns/regional_lair_reloads.h"
 #include "snesrecomp/game/cpu.h"

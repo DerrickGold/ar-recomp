@@ -1,5 +1,10 @@
 #ifndef AR_TEXT_SURFACE_CACHE_H
 #define AR_TEXT_SURFACE_CACHE_H
+/* ArTextSurfaceCache: caches rendered text surfaces by content, style and
+ * size, with reveal pieces for typed-out text, a byte limit per request and
+ * failure bookkeeping.
+ * Phase: present.
+ * Tests: tests/text_surface_cache_test.c */
 
 #include <stdbool.h>
 #include <stddef.h>

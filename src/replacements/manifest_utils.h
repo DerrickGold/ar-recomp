@@ -1,5 +1,9 @@
 #ifndef AR_MANIFEST_UTILS_H
 #define AR_MANIFEST_UTILS_H
+/* Manifest utils: helpers shared by the HD and music replacement manifests:
+ * trim a value and resolve a path relative to the manifest file.
+ * Phase: pure.
+ * Tests: tests/consolidated_utils_test.c */
 
 #include <stddef.h>
 

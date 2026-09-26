@@ -1,5 +1,9 @@
 #ifndef AR_TEXT_BACKEND_H
 #define AR_TEXT_BACKEND_H
+/* ArTextBackend: the portable contract for creating a text backend from an
+ * ordered font stack and getting its renderer-neutral rasterizer.
+ * Phase: host (create), present (use).
+ * Tests: tests/text_backend_test.c */
 
 #include <stdbool.h>
 #include <stddef.h>

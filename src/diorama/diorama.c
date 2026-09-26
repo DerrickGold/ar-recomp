@@ -181,97 +181,97 @@ static bool LayerUsesFocalAperture(int plane) {
  * layer gets one texture-filtering path or the other, never both. */
 enum { kDioramaSupersample = 4 };
 
-static ArRenderTexture g_diorama_ss_texture;
-static int g_diorama_ss_w, g_diorama_ss_h;
-static bool g_diorama_ss_unavailable;
-static ArRenderTexture g_diorama_dof_source_texture;
-static int g_diorama_dof_source_w, g_diorama_dof_source_h;
-static bool g_diorama_dof_source_unavailable;
-static ArRenderTexture g_diorama_stack_group_texture;
-static int g_diorama_stack_group_w, g_diorama_stack_group_h;
-static bool g_diorama_stack_group_unavailable;
-static ArRenderTexture g_diorama_skybox_prefilter_texture;
-static int g_diorama_skybox_prefilter_w, g_diorama_skybox_prefilter_h;
-static bool g_diorama_skybox_prefilter_unavailable;
-static bool g_diorama_skybox_prefilter_valid;
-static ArRenderTexture g_diorama_skybox_prefilter_source;
-static uint64_t g_diorama_skybox_prefilter_revision;
-static float g_diorama_skybox_prefilter_radius;
-static ArRenderColorF g_diorama_skybox_prefilter_tint;
-static bool g_diorama_skybox_prefilter_rom_source;
+static ArRenderTexture s_diorama_ss_texture;
+static int s_diorama_ss_w, s_diorama_ss_h;
+static bool s_diorama_ss_unavailable;
+static ArRenderTexture s_diorama_dof_source_texture;
+static int s_diorama_dof_source_w, s_diorama_dof_source_h;
+static bool s_diorama_dof_source_unavailable;
+static ArRenderTexture s_diorama_stack_group_texture;
+static int s_diorama_stack_group_w, s_diorama_stack_group_h;
+static bool s_diorama_stack_group_unavailable;
+static ArRenderTexture s_diorama_skybox_prefilter_texture;
+static int s_diorama_skybox_prefilter_w, s_diorama_skybox_prefilter_h;
+static bool s_diorama_skybox_prefilter_unavailable;
+static bool s_diorama_skybox_prefilter_valid;
+static ArRenderTexture s_diorama_skybox_prefilter_source;
+static uint64_t s_diorama_skybox_prefilter_revision;
+static float s_diorama_skybox_prefilter_radius;
+static ArRenderColorF s_diorama_skybox_prefilter_tint;
+static bool s_diorama_skybox_prefilter_rom_source;
 
 static void ResetDioramaSupersample(ArRenderDevice *device) {
-  ArRenderDevice_DestroyTexture(device, g_diorama_ss_texture);
-  g_diorama_ss_texture = ArRenderTexture_Invalid();
-  g_diorama_ss_w = 0;
-  g_diorama_ss_h = 0;
-  g_diorama_ss_unavailable = false;
+  ArRenderDevice_DestroyTexture(device, s_diorama_ss_texture);
+  s_diorama_ss_texture = ArRenderTexture_Invalid();
+  s_diorama_ss_w = 0;
+  s_diorama_ss_h = 0;
+  s_diorama_ss_unavailable = false;
 }
 
 static void DisableDioramaSupersample(ArRenderDevice *device) {
   ResetDioramaSupersample(device);
-  g_diorama_ss_unavailable = true;
+  s_diorama_ss_unavailable = true;
 }
 
 static void ResetDioramaDofSource(ArRenderDevice *device) {
-  ArRenderDevice_DestroyTexture(device, g_diorama_dof_source_texture);
-  g_diorama_dof_source_texture = ArRenderTexture_Invalid();
-  g_diorama_dof_source_w = 0;
-  g_diorama_dof_source_h = 0;
-  g_diorama_dof_source_unavailable = false;
+  ArRenderDevice_DestroyTexture(device, s_diorama_dof_source_texture);
+  s_diorama_dof_source_texture = ArRenderTexture_Invalid();
+  s_diorama_dof_source_w = 0;
+  s_diorama_dof_source_h = 0;
+  s_diorama_dof_source_unavailable = false;
 }
 
 static void DisableDioramaDofSource(ArRenderDevice *device) {
   ResetDioramaDofSource(device);
-  g_diorama_dof_source_unavailable = true;
+  s_diorama_dof_source_unavailable = true;
 }
 
 static void ResetDioramaStackGroup(ArRenderDevice *device) {
-  ArRenderDevice_DestroyTexture(device, g_diorama_stack_group_texture);
-  g_diorama_stack_group_texture = ArRenderTexture_Invalid();
-  g_diorama_stack_group_w = 0;
-  g_diorama_stack_group_h = 0;
-  g_diorama_stack_group_unavailable = false;
+  ArRenderDevice_DestroyTexture(device, s_diorama_stack_group_texture);
+  s_diorama_stack_group_texture = ArRenderTexture_Invalid();
+  s_diorama_stack_group_w = 0;
+  s_diorama_stack_group_h = 0;
+  s_diorama_stack_group_unavailable = false;
 }
 
 static void DisableDioramaStackGroup(ArRenderDevice *device) {
   ResetDioramaStackGroup(device);
-  g_diorama_stack_group_unavailable = true;
+  s_diorama_stack_group_unavailable = true;
 }
 
 static void ResetDioramaSkyboxPrefilter(ArRenderDevice *device) {
   ArRenderDevice_DestroyTexture(
-      device, g_diorama_skybox_prefilter_texture);
-  g_diorama_skybox_prefilter_texture = ArRenderTexture_Invalid();
-  g_diorama_skybox_prefilter_w = 0;
-  g_diorama_skybox_prefilter_h = 0;
-  g_diorama_skybox_prefilter_unavailable = false;
-  g_diorama_skybox_prefilter_valid = false;
-  g_diorama_skybox_prefilter_source = ArRenderTexture_Invalid();
-  g_diorama_skybox_prefilter_revision = 0;
-  g_diorama_skybox_prefilter_radius = 0.0f;
-  g_diorama_skybox_prefilter_tint = (ArRenderColorF){0};
-  g_diorama_skybox_prefilter_rom_source = false;
+      device, s_diorama_skybox_prefilter_texture);
+  s_diorama_skybox_prefilter_texture = ArRenderTexture_Invalid();
+  s_diorama_skybox_prefilter_w = 0;
+  s_diorama_skybox_prefilter_h = 0;
+  s_diorama_skybox_prefilter_unavailable = false;
+  s_diorama_skybox_prefilter_valid = false;
+  s_diorama_skybox_prefilter_source = ArRenderTexture_Invalid();
+  s_diorama_skybox_prefilter_revision = 0;
+  s_diorama_skybox_prefilter_radius = 0.0f;
+  s_diorama_skybox_prefilter_tint = (ArRenderColorF){0};
+  s_diorama_skybox_prefilter_rom_source = false;
 }
 
 static void DisableDioramaSkyboxPrefilter(ArRenderDevice *device) {
   ResetDioramaSkyboxPrefilter(device);
-  g_diorama_skybox_prefilter_unavailable = true;
+  s_diorama_skybox_prefilter_unavailable = true;
 }
 
 static ArRenderTexture EnsureDioramaSkyboxPrefilterTexture(
     ArRenderDevice *device, int width, int height) {
   if (!ArRenderDevice_IsReady(device) || width <= 0 || height <= 0 ||
-      g_diorama_skybox_prefilter_unavailable)
+      s_diorama_skybox_prefilter_unavailable)
     return ArRenderTexture_Invalid();
-  if (ArRenderTexture_IsValid(g_diorama_skybox_prefilter_texture) &&
-      g_diorama_skybox_prefilter_w == width &&
-      g_diorama_skybox_prefilter_h == height)
-    return g_diorama_skybox_prefilter_texture;
+  if (ArRenderTexture_IsValid(s_diorama_skybox_prefilter_texture) &&
+      s_diorama_skybox_prefilter_w == width &&
+      s_diorama_skybox_prefilter_h == height)
+    return s_diorama_skybox_prefilter_texture;
   ArRenderDevice_DestroyTexture(
-      device, g_diorama_skybox_prefilter_texture);
-  g_diorama_skybox_prefilter_texture = ArRenderTexture_Invalid();
-  g_diorama_skybox_prefilter_valid = false;
+      device, s_diorama_skybox_prefilter_texture);
+  s_diorama_skybox_prefilter_texture = ArRenderTexture_Invalid();
+  s_diorama_skybox_prefilter_valid = false;
   const ArRenderTextureDesc desc = {
     .width = width,
     .height = height,
@@ -281,29 +281,29 @@ static ArRenderTexture EnsureDioramaSkyboxPrefilterTexture(
     .blend = kArRenderBlendMode_Alpha,
   };
   if (!ArRenderDevice_CreateTexture(
-          device, &desc, &g_diorama_skybox_prefilter_texture)) {
+          device, &desc, &s_diorama_skybox_prefilter_texture)) {
     fprintf(stderr,
             "[diorama] skybox prefilter target unavailable; using direct "
             "full-resolution blur: %s\n", ArRenderDevice_LastError(device));
     DisableDioramaSkyboxPrefilter(device);
     return ArRenderTexture_Invalid();
   }
-  g_diorama_skybox_prefilter_w = width;
-  g_diorama_skybox_prefilter_h = height;
-  return g_diorama_skybox_prefilter_texture;
+  s_diorama_skybox_prefilter_w = width;
+  s_diorama_skybox_prefilter_h = height;
+  return s_diorama_skybox_prefilter_texture;
 }
 
 static ArRenderTexture EnsureDioramaStackGroupTexture(
     ArRenderDevice *device, int width, int height) {
   if (!ArRenderDevice_IsReady(device) || width <= 0 || height <= 0 ||
-      g_diorama_stack_group_unavailable)
+      s_diorama_stack_group_unavailable)
     return ArRenderTexture_Invalid();
-  if (ArRenderTexture_IsValid(g_diorama_stack_group_texture) &&
-      g_diorama_stack_group_w == width &&
-      g_diorama_stack_group_h == height)
-    return g_diorama_stack_group_texture;
-  ArRenderDevice_DestroyTexture(device, g_diorama_stack_group_texture);
-  g_diorama_stack_group_texture = ArRenderTexture_Invalid();
+  if (ArRenderTexture_IsValid(s_diorama_stack_group_texture) &&
+      s_diorama_stack_group_w == width &&
+      s_diorama_stack_group_h == height)
+    return s_diorama_stack_group_texture;
+  ArRenderDevice_DestroyTexture(device, s_diorama_stack_group_texture);
+  s_diorama_stack_group_texture = ArRenderTexture_Invalid();
   const ArRenderTextureDesc desc = {
     .width = width,
     .height = height,
@@ -313,16 +313,16 @@ static ArRenderTexture EnsureDioramaStackGroupTexture(
     .blend = kArRenderBlendMode_AlphaPremultiplied,
   };
   if (!ArRenderDevice_CreateTexture(
-          device, &desc, &g_diorama_stack_group_texture)) {
+          device, &desc, &s_diorama_stack_group_texture)) {
     fprintf(stderr,
             "[diorama] stack-group target unavailable; using direct stack "
             "draws: %s\n", ArRenderDevice_LastError(device));
     DisableDioramaStackGroup(device);
     return ArRenderTexture_Invalid();
   }
-  g_diorama_stack_group_w = width;
-  g_diorama_stack_group_h = height;
-  return g_diorama_stack_group_texture;
+  s_diorama_stack_group_w = width;
+  s_diorama_stack_group_h = height;
+  return s_diorama_stack_group_texture;
 }
 
 /* Default-on implementation toggle retained for controlled A/B captures. The
@@ -365,12 +365,12 @@ static ArRenderTexture EnsureDioramaSupersampleTexture(
     ArRenderDevice *device, int w, int h) {
   if (!ArRenderDevice_IsReady(device) || w <= 0 || h <= 0)
     return ArRenderTexture_Invalid();
-  if (ArRenderTexture_IsValid(g_diorama_ss_texture) &&
-      g_diorama_ss_w == w && g_diorama_ss_h == h)
-    return g_diorama_ss_texture;
-  if (g_diorama_ss_unavailable) return ArRenderTexture_Invalid();
-  ArRenderDevice_DestroyTexture(device, g_diorama_ss_texture);
-  g_diorama_ss_texture = ArRenderTexture_Invalid();
+  if (ArRenderTexture_IsValid(s_diorama_ss_texture) &&
+      s_diorama_ss_w == w && s_diorama_ss_h == h)
+    return s_diorama_ss_texture;
+  if (s_diorama_ss_unavailable) return ArRenderTexture_Invalid();
+  ArRenderDevice_DestroyTexture(device, s_diorama_ss_texture);
+  s_diorama_ss_texture = ArRenderTexture_Invalid();
   const ArRenderTextureDesc desc = {
     .width = w,
     .height = h,
@@ -380,7 +380,7 @@ static ArRenderTexture EnsureDioramaSupersampleTexture(
     .blend = kArRenderBlendMode_Alpha,
   };
   if (!ArRenderDevice_CreateTexture(
-          device, &desc, &g_diorama_ss_texture)) {
+          device, &desc, &s_diorama_ss_texture)) {
     fprintf(stderr,
             "[diorama] supersample target unavailable; optional crisp AA "
             "disabled for this renderer: %s\n",
@@ -388,22 +388,22 @@ static ArRenderTexture EnsureDioramaSupersampleTexture(
     DisableDioramaSupersample(device);
     return ArRenderTexture_Invalid();
   }
-  g_diorama_ss_w = w;
-  g_diorama_ss_h = h;
-  return g_diorama_ss_texture;
+  s_diorama_ss_w = w;
+  s_diorama_ss_h = h;
+  return s_diorama_ss_texture;
 }
 
 static ArRenderTexture EnsureDioramaDofSourceTexture(
     ArRenderDevice *device, int width, int height) {
   if (!ArRenderDevice_IsReady(device) || width <= 0 || height <= 0 ||
-      g_diorama_dof_source_unavailable)
+      s_diorama_dof_source_unavailable)
     return ArRenderTexture_Invalid();
-  if (ArRenderTexture_IsValid(g_diorama_dof_source_texture) &&
-      g_diorama_dof_source_w == width &&
-      g_diorama_dof_source_h == height)
-    return g_diorama_dof_source_texture;
-  ArRenderDevice_DestroyTexture(device, g_diorama_dof_source_texture);
-  g_diorama_dof_source_texture = ArRenderTexture_Invalid();
+  if (ArRenderTexture_IsValid(s_diorama_dof_source_texture) &&
+      s_diorama_dof_source_w == width &&
+      s_diorama_dof_source_h == height)
+    return s_diorama_dof_source_texture;
+  ArRenderDevice_DestroyTexture(device, s_diorama_dof_source_texture);
+  s_diorama_dof_source_texture = ArRenderTexture_Invalid();
   const ArRenderTextureDesc desc = {
     .width = width,
     .height = height,
@@ -413,16 +413,16 @@ static ArRenderTexture EnsureDioramaDofSourceTexture(
     .blend = kArRenderBlendMode_Alpha,
   };
   if (!ArRenderDevice_CreateTexture(
-          device, &desc, &g_diorama_dof_source_texture)) {
+          device, &desc, &s_diorama_dof_source_texture)) {
     fprintf(stderr,
             "[diorama] compact DOF source unavailable; using crisp layer "
             "fallback: %s\n", ArRenderDevice_LastError(device));
     DisableDioramaDofSource(device);
     return ArRenderTexture_Invalid();
   }
-  g_diorama_dof_source_w = width;
-  g_diorama_dof_source_h = height;
-  return g_diorama_dof_source_texture;
+  s_diorama_dof_source_w = width;
+  s_diorama_dof_source_h = height;
+  return s_diorama_dof_source_texture;
 }
 
 /* Renders `source` (an ABI-max-width x snes_height layer texture, already
@@ -594,10 +594,10 @@ typedef Scene3DCamera DioramaCamera;
  * before first render (boot, camera-row menu edits, and Reset Camera all
  * call it), so the settings descriptors are the single source of truth for
  * defaults. A literal here would look load-bearing despite never being used. */
-static DioramaCamera g_diorama_cam;
-static float g_diorama_auto_distance = 5.0f;
-static bool g_diorama_settings_dirty;
-static uint64_t g_diorama_settings_dirty_at;
+static DioramaCamera s_diorama_cam;
+static float s_diorama_auto_distance = 5.0f;
+static bool s_diorama_settings_dirty;
+static uint64_t s_diorama_settings_dirty_at;
 static bool s_diorama_dragging;
 static CameraOrbit s_diorama_dynamic_orbit;
 static const float kDioramaOrbitReturnTimeSeconds = 0.35f;
@@ -612,13 +612,13 @@ static float Clampf(float v, float lo, float hi) {
 /* ── Camera operations ───────────────────────────────────────────────── */
 
 void Diorama_SeedCameraFromSettings(void) {
-  g_diorama_cam.tilt_x =
+  s_diorama_cam.tilt_x =
       (float)g_settings.diorama_tilt_x_mrad / (float)kPermilleScale;
-  g_diorama_cam.tilt_y =
+  s_diorama_cam.tilt_y =
       (float)g_settings.diorama_tilt_y_mrad / (float)kPermilleScale;
-  g_diorama_cam.distance =
+  s_diorama_cam.distance =
       (float)g_settings.diorama_distance_x100 / (float)kPercentScale;
-  g_diorama_cam.fov_y = kDioramaFovY;
+  s_diorama_cam.fov_y = kDioramaFovY;
 }
 
 void Diorama_CaptureCameraPresentationState(
@@ -667,34 +667,34 @@ void Diorama_AdjustCamera(float d_yaw, float d_pitch, float d_zoom) {
     float distance = g_settings.diorama_dyncam_baseline_distance_x100 > 0
         ? (float)g_settings.diorama_dyncam_baseline_distance_x100 /
               (float)kPercentScale
-        : g_diorama_auto_distance;
+        : s_diorama_auto_distance;
     distance = Clampf(distance + d_zoom,
                       kDioramaDistMin, kDioramaDistMax);
     g_settings.diorama_dyncam_baseline_distance_x100 =
         (int)(distance * (float)kPercentScale);
-    g_diorama_settings_dirty = true;
-    g_diorama_settings_dirty_at = HostClock_Milliseconds();
+    s_diorama_settings_dirty = true;
+    s_diorama_settings_dirty_at = HostClock_Milliseconds();
     return;
   }
 
-  g_diorama_cam.tilt_y = Clampf(g_diorama_cam.tilt_y + d_yaw,
+  s_diorama_cam.tilt_y = Clampf(s_diorama_cam.tilt_y + d_yaw,
                                 kDioramaTiltMin, kDioramaTiltMax);
-  g_diorama_cam.tilt_x = Clampf(g_diorama_cam.tilt_x + d_pitch,
+  s_diorama_cam.tilt_x = Clampf(s_diorama_cam.tilt_x + d_pitch,
                                 kDioramaTiltMin, kDioramaTiltMax);
   if (d_zoom != 0.0f) {
-    float base = (g_diorama_cam.distance > 0.0f) ? g_diorama_cam.distance
-                                                 : g_diorama_auto_distance;
-    g_diorama_cam.distance = Clampf(base + d_zoom,
+    float base = (s_diorama_cam.distance > 0.0f) ? s_diorama_cam.distance
+                                                 : s_diorama_auto_distance;
+    s_diorama_cam.distance = Clampf(base + d_zoom,
                                     kDioramaDistMin, kDioramaDistMax);
   }
   g_settings.diorama_tilt_x_mrad =
-      (int)(g_diorama_cam.tilt_x * (float)kPermilleScale);
+      (int)(s_diorama_cam.tilt_x * (float)kPermilleScale);
   g_settings.diorama_tilt_y_mrad =
-      (int)(g_diorama_cam.tilt_y * (float)kPermilleScale);
+      (int)(s_diorama_cam.tilt_y * (float)kPermilleScale);
   g_settings.diorama_distance_x100 =
-      (int)(g_diorama_cam.distance * (float)kPercentScale);
-  g_diorama_settings_dirty = true;
-  g_diorama_settings_dirty_at = HostClock_Milliseconds();
+      (int)(s_diorama_cam.distance * (float)kPercentScale);
+  s_diorama_settings_dirty = true;
+  s_diorama_settings_dirty_at = HostClock_Milliseconds();
 }
 
 bool Diorama_UpdateDynamicCamera(float elapsed_seconds, bool orbit_held) {
@@ -737,19 +737,19 @@ void Diorama_ResetCamera(void) {
   }
   CameraOrbit_Reset(&s_diorama_dynamic_orbit);
   Diorama_SeedCameraFromSettings();
-  g_diorama_settings_dirty = true;
-  g_diorama_settings_dirty_at = HostClock_Milliseconds();
+  s_diorama_settings_dirty = true;
+  s_diorama_settings_dirty_at = HostClock_Milliseconds();
 }
 
 void Diorama_FlushSettingsIfDirty(void) {
-  if (g_diorama_settings_dirty && !s_diorama_dragging &&
-      HostClock_Milliseconds() - g_diorama_settings_dirty_at > 500) {
+  if (s_diorama_settings_dirty && !s_diorama_dragging &&
+      HostClock_Milliseconds() - s_diorama_settings_dirty_at > 500) {
     char settings_path[kHostPathCapacity];
     UserDataFile(settings_path, sizeof settings_path, "settings.ini");
     if (Settings_SaveDeferred(settings_path))
-      g_diorama_settings_dirty = false;
+      s_diorama_settings_dirty = false;
     else {
-      g_diorama_settings_dirty_at = HostClock_Milliseconds();
+      s_diorama_settings_dirty_at = HostClock_Milliseconds();
       fprintf(stderr, "[diorama] failed to persist camera settings\n");
     }
   }
@@ -825,10 +825,10 @@ enum {
  * reads it. Empty by default, and DioramaLayerOrder_Resolve on an empty table
  * returns the defaults verbatim in built-in order, so an unedited game is
  * bit-identical to before this existed. */
-static DioramaLayerOrderTable g_layer_overrides;
+static DioramaLayerOrderTable s_layer_overrides;
 
 DioramaLayerOrderTable *Diorama_LayerOverrides(void) {
-  return &g_layer_overrides;
+  return &s_layer_overrides;
 }
 
 static const DioramaLayerDesc *DioramaDescForPlane(int plane) {
@@ -909,7 +909,7 @@ void Diorama_LoadLayerManifest(void) {
     return;
   }
 
-  memset(&g_layer_overrides, 0, sizeof(g_layer_overrides));
+  memset(&s_layer_overrides, 0, sizeof(s_layer_overrides));
   DioramaRoomOverride *room = NULL;
   char line[512];
   int rooms = 0, planes = 0, bad = 0, line_number = 0;
@@ -970,7 +970,7 @@ void Diorama_LoadLayerManifest(void) {
         continue;
       }
       room = DioramaLayerOrder_FindOrAddSection(
-          &g_layer_overrides, group, map, section);
+          &s_layer_overrides, group, map, section);
       if (!room) {
         fprintf(stderr, "[diorama-layers] %s:%d: table full, room dropped\n",
                 kLayerManifestLeaf, line_number);
@@ -1070,7 +1070,7 @@ bool Diorama_SaveLayerManifest(void) {
    * cheaper and safer than guessing a bound -- and the merge preserves the whole
    * input, so its size is roughly the file's size plus a room or two. */
   size_t need = DioramaLayerOrder_MergeManifest(
-      &g_layer_overrides, existing, kLayerManifestPreamble, NULL, 0);
+      &s_layer_overrides, existing, kLayerManifestPreamble, NULL, 0);
   char *out = (char *)malloc(need + 1);
   if (!out) {
     free(existing);
@@ -1078,7 +1078,7 @@ bool Diorama_SaveLayerManifest(void) {
     return false;
   }
   size_t wrote = DioramaLayerOrder_MergeManifest(
-      &g_layer_overrides, existing, kLayerManifestPreamble, out, need + 1);
+      &s_layer_overrides, existing, kLayerManifestPreamble, out, need + 1);
   free(existing);
 
   /* Write to a temp file and rename, so a crash mid-write cannot leave the
@@ -1117,8 +1117,8 @@ bool Diorama_SaveLayerManifest(void) {
   }
 
   int active = 0;
-  for (int i = 0; i < g_layer_overrides.count; i++)
-    if (DioramaLayerOrder_RoomIsActive(&g_layer_overrides.rooms[i])) active++;
+  for (int i = 0; i < s_layer_overrides.count; i++)
+    if (DioramaLayerOrder_RoomIsActive(&s_layer_overrides.rooms[i])) active++;
   fprintf(stderr, "[diorama-layers] wrote %s (%d room(s), comments preserved)\n",
           path, active);
   return true;
@@ -1707,13 +1707,13 @@ static ArRenderTexture BuildDioramaSkyboxPrefilter(
     if (outcome) *outcome = kPresentationOutcome_OptionalOmitted;
     return ArRenderTexture_Invalid();
   }
-  if (!source_dynamic && g_diorama_skybox_prefilter_valid &&
-      ArRenderTexture_Equals(source, g_diorama_skybox_prefilter_source) &&
-      source_revision == g_diorama_skybox_prefilter_revision &&
-      blur_radius == g_diorama_skybox_prefilter_radius &&
-      rom_source == g_diorama_skybox_prefilter_rom_source &&
+  if (!source_dynamic && s_diorama_skybox_prefilter_valid &&
+      ArRenderTexture_Equals(source, s_diorama_skybox_prefilter_source) &&
+      source_revision == s_diorama_skybox_prefilter_revision &&
+      blur_radius == s_diorama_skybox_prefilter_radius &&
+      rom_source == s_diorama_skybox_prefilter_rom_source &&
       DioramaSkyboxPrefilterColorEquals(
-          tint, g_diorama_skybox_prefilter_tint))
+          tint, s_diorama_skybox_prefilter_tint))
     return target;
 
   ArRenderTargetState target_state;
@@ -1780,12 +1780,12 @@ static ArRenderTexture BuildDioramaSkyboxPrefilter(
     return ArRenderTexture_Invalid();
   }
 
-  g_diorama_skybox_prefilter_valid = true;
-  g_diorama_skybox_prefilter_source = source;
-  g_diorama_skybox_prefilter_revision = source_revision;
-  g_diorama_skybox_prefilter_radius = blur_radius;
-  g_diorama_skybox_prefilter_tint = tint;
-  g_diorama_skybox_prefilter_rom_source = rom_source;
+  s_diorama_skybox_prefilter_valid = true;
+  s_diorama_skybox_prefilter_source = source;
+  s_diorama_skybox_prefilter_revision = source_revision;
+  s_diorama_skybox_prefilter_radius = blur_radius;
+  s_diorama_skybox_prefilter_tint = tint;
+  s_diorama_skybox_prefilter_rom_source = rom_source;
   return target;
 }
 
@@ -2300,7 +2300,7 @@ ResolveDioramaLayers(const DioramaScene *scene,
       defaults[i].stack_solid = false;
     }
     return DioramaLayerOrder_ResolveSection(
-        &g_layer_overrides, scene->map_group, scene->map_number,
+        &s_layer_overrides, scene->map_group, scene->map_number,
         scene->layer_section, defaults, kDioramaLayerCount, resolved,
         kDioramaLayerCount);
   }
@@ -2426,13 +2426,13 @@ static void PrepareDioramaView(const DioramaCapture *capture,
   float fit_h = 0.5f / tan_half;
   float fit_w = vis_half_w / (tan_half * screen_aspect);
   static const float kDioramaZ_Hud = 0.95f;
-  g_diorama_auto_distance =
+  s_diorama_auto_distance =
       fmaxf(fit_h, fit_w) * 1.02f + (kDioramaZ_Hud - 0.5f);
 
   geometry->camera = (DioramaCamera){view->camera.tilt_x, view->camera.tilt_y,
                                      view->camera.distance, kDioramaFovY};
   if (geometry->camera.distance <= 0.0f)
-    geometry->camera.distance = g_diorama_auto_distance;
+    geometry->camera.distance = s_diorama_auto_distance;
 
   else if (geometry->camera.distance < kDioramaDistMin)
     geometry->camera.distance = kDioramaDistMin;

@@ -1,5 +1,10 @@
 #ifndef AR_ACTRAISER_LOCALIZATION_NAME_ENTRY_H
 #define AR_ACTRAISER_LOCALIZATION_NAME_ENTRY_H
+/* ActRaiserLocalizationNameEntry: the localized name-entry screen: keyboard
+ * pages in native cells, and the tracker that keeps the entered name in step
+ * with the native one.
+ * Phase: game side.
+ * Tests: tests/actraiser_localization_name_entry_test.c */
 
 #include <stdbool.h>
 #include <stddef.h>

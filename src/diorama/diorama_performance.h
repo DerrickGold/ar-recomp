@@ -1,5 +1,9 @@
 #ifndef AR_DIORAMA_PERFORMANCE_H
 #define AR_DIORAMA_PERFORMANCE_H
+/* DioramaPerformance: the diorama compositor's stage profiler (AR_ACTION_PERF
+ * or AR_PERF) with plane-sync and coverage counters for recorded A/B runs.
+ * Phase: present.
+ * Tests: tests/render_upload_metrics_test.c */
 
 #include <stdbool.h>
 #include <stdint.h>

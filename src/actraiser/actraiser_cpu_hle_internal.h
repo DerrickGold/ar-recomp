@@ -1,5 +1,9 @@
 #ifndef AR_ACTRAISER_CPU_HLE_INTERNAL_H
 #define AR_ACTRAISER_CPU_HLE_INTERNAL_H
+/* ActRaiserCpuHle: CPU helpers shared by the game's HLEs: an entry-mode gate
+ * that names the caller when the m/x widths are wrong, stack pushes and pops,
+ * and N/Z flag updates.
+ * Phase: game (HLE). */
 
 #include <stdint.h>
 

@@ -1,5 +1,10 @@
 #ifndef AR_ACTRAISER_TOWN_METATILE_H
 #define AR_ACTRAISER_TOWN_METATILE_H
+/* ActRaiser town metatiles: HLE of copying 2 x 2 metatiles into the
+ * quadrant-paged SIM town tilemap and of running the structure-atlas draw
+ * lists in ROM bank $03.
+ * Phase: game (HLE).
+ * Tests: tests/actraiser_town_metatile_hle_test.c */
 
 #include <stdbool.h>
 #include <stdint.h>

@@ -1,5 +1,9 @@
 #ifndef AR_TEXT_PARSE_UTILS_H
 #define AR_TEXT_PARSE_UTILS_H
+/* TextParse: in-place helpers for line-oriented config files: trim whitespace
+ * and strip an INI comment that starts a line or follows whitespace.
+ * Phase: pure.
+ * Tests: tests/consolidated_utils_test.c */
 
 #include <string.h>
 

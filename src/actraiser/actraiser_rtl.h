@@ -1,5 +1,9 @@
 #ifndef AR_ACTRAISER_RTL_H
 #define AR_ACTRAISER_RTL_H
+/* ActRaiser runtime: binds the game to the runner: game initialization and
+ * coroutine lifecycle, the runner handle, PPU frame drawing, snapshots, and
+ * the capture views the presenters read.
+ * Phase: game (main thread). */
 
 #include "action/action_obj_apron.h"
 #include "action/action_bg_plan.h"

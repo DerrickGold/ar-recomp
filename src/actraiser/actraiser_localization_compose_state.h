@@ -1,5 +1,10 @@
 #ifndef AR_ACTRAISER_LOCALIZATION_COMPOSE_STATE_H
 #define AR_ACTRAISER_LOCALIZATION_COMPOSE_STATE_H
+/* ActRaiserLocalizationComposeState: which localized surfaces are live, which
+ * native sources they replace, and when a replaced dialogue can be restored,
+ * so enhanced text can be switched on or recovered without a native redraw.
+ * Phase: game side.
+ * Tests: tests/actraiser_localization_compose_state_test.c */
 
 #include <stdbool.h>
 #include <stddef.h>

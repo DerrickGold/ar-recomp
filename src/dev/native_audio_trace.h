@@ -1,5 +1,14 @@
 #ifndef AR_NATIVE_AUDIO_TRACE_H
 #define AR_NATIVE_AUDIO_TRACE_H
+/* NativeAudioTrace: behavior-neutral provenance trace for ActRaiser's native
+ * audio requests.
+ *
+ * The model API is deliberately independent of the emulator. Unit tests feed
+ * it the same observations that native_audio_trace_runtime.c receives from
+ * the CPU/APU/SPC hooks. The runtime wrapper is opt-in through
+ * AR_NATIVE_AUDIO_TRACE=1 and never changes a request or DSP write.
+ * Phase: developer tools (opt-in).
+ * Tests: tests/native_audio_trace_test.c */
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -7,12 +16,6 @@
 
 struct SrRunnerHandle;
 
-/* Behavior-neutral provenance trace for ActRaiser's native audio requests.
- *
- * The model API is deliberately independent of the emulator. Unit tests feed
- * it the same observations that native_audio_trace_runtime.c receives from
- * the CPU/APU/SPC hooks. The runtime wrapper is opt-in through
- * AR_NATIVE_AUDIO_TRACE=1 and never changes a request or DSP write. */
 
 typedef enum NativeAudioRequestKind {
   kNativeAudioRequest_Event = 2, /* COP -> $035A -> port 2 -> track $10 */

@@ -1,5 +1,10 @@
 #ifndef AR_HUD_LAYOUT_H
 #define AR_HUD_LAYOUT_H
+/* ArHudLayout: splits the HUD into the chunks the presenter draws (top band,
+ * player rows, enemy row, optional lower BG3 body and OBJ icon) and projects
+ * them to the output; the inspector hit-tests with the same projection.
+ * Phase: pure.
+ * Tests: tests/hud_layout_test.c */
 
 #include <stdbool.h>
 #include <stdint.h>

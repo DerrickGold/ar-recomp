@@ -538,27 +538,27 @@ static void ActRaiser_PpuShapeTraceLine(
 }
 
 #ifdef _WIN32
-static void *g_host_fiber;   /* ConvertThreadToFiber result (driver thread) */
-static void *g_game_fiber;   /* CreateFiber result (game coroutine) */
+static void *s_host_fiber;   /* ConvertThreadToFiber result (driver thread) */
+static void *s_game_fiber;   /* CreateFiber result (game coroutine) */
 #else
-static ucontext_t g_host_ctx;
-static ucontext_t g_game_ctx;
-static char *g_game_stack;        /* usable stack (guard page excluded) */
-static void  *g_game_stack_map;   /* mmap base, including the guard page */
-static size_t g_game_stack_map_len;
+static ucontext_t s_host_ctx;
+static ucontext_t s_game_ctx;
+static char *s_game_stack;        /* usable stack (guard page excluded) */
+static void  *s_game_stack_map;   /* mmap base, including the guard page */
+static size_t s_game_stack_map_len;
 #endif
-static bool g_game_started;
-static bool g_game_coroutine_executing;
+static bool s_game_started;
+static bool s_game_coroutine_executing;
 
 static void SuspendGameCoroutine(void *unused) {
   (void)unused;
 #ifdef _WIN32
-  SwitchToFiber(g_host_fiber);
+  SwitchToFiber(s_host_fiber);
 #else
   /* swapcontext can fail with ENOMEM ("Insufficient stack space left"). An
    * unchecked failure would silently return and keep running on a stack the
    * host believes it owns; there is no recovery, so abort loudly instead. */
-  if (swapcontext(&g_game_ctx, &g_host_ctx) != 0) {
+  if (swapcontext(&s_game_ctx, &s_host_ctx) != 0) {
     fprintf(stderr, "FATAL: swapcontext (game -> host) failed\n");
     abort();
   }
@@ -586,7 +586,7 @@ static void ActRaiser_HleFatalEscapeToHost(const char *message) {
       "if the same event repeats, report the room and active gameplay "
       "settings.",
       message && message[0] ? message : "unspecified HLE invariant failure");
-  if (!g_game_coroutine_executing) {
+  if (!s_game_coroutine_executing) {
     /* This escape is valid only while RunOneFrameOfGame is blocked in the
      * matching SwitchToFiber/swapcontext. Calling it from host-side NMI/IRQ or
      * a standalone helper would overwrite/switch to the wrong context. */
@@ -605,9 +605,9 @@ static void ActRaiser_HleFatalEscapeToHost(const char *message) {
  * verified $00:843E force-blank write for a non-action -> action transition;
  * ordinary fades, action restarts, and non-action loads keep their existing
  * cadence. */
-static unsigned g_action_load_armed_frames;
-static unsigned g_action_load_hold_frames;
-static uint64_t g_action_load_one_shot_token;
+static unsigned s_action_load_armed_frames;
+static unsigned s_action_load_hold_frames;
+static uint64_t s_action_load_one_shot_token;
 extern volatile int g_sr_in_interrupt;
 /* diagnostic.h declares the 2- and 3-argument variants but not this one;
  * both callers below need it, and one of them precedes the local extern
@@ -624,7 +624,7 @@ void ActRaiser_OnInidispWrite(uint8_t value) {
                      kActRaiserDeveloperFlag_DisableActionLoadPacing))
     return;
 
-  g_action_load_armed_frames = frames;
+  s_action_load_armed_frames = frames;
   /* The loader's many APU-port polls are statically collapsed into this one
    * host call. Converting their synthetic touch credit into SPC cycles fills
    * the DSP ring and drops roughly five seconds of authentic Advent audio
@@ -639,8 +639,8 @@ void ActRaiser_OnInidispWrite(uint8_t value) {
       MusicReplacements_GetOneShotSnapshot(&one_shot_completed);
   if (ActionLoadPacing_ShouldReleaseForOneShot(
           frames, one_shot_token, one_shot_token, one_shot_completed)) {
-    g_action_load_armed_frames = 0;
-    g_action_load_one_shot_token = 0;
+    s_action_load_armed_frames = 0;
+    s_action_load_one_shot_token = 0;
     RtlSetApuCatchupSuppressed(false);
     if (ActRaiser_DeveloperFlagEnabled(
             kActRaiserDeveloperFlag_LoadPacingLog)) {
@@ -652,8 +652,8 @@ void ActRaiser_OnInidispWrite(uint8_t value) {
     }
     return;
   }
-  g_action_load_one_shot_token = one_shot_token;
-  g_action_load_hold_frames = frames - 1;
+  s_action_load_one_shot_token = one_shot_token;
+  s_action_load_hold_frames = frames - 1;
   if (ActRaiser_DeveloperFlagEnabled(
           kActRaiserDeveloperFlag_LoadPacingLog)) {
     fprintf(stderr,
@@ -674,7 +674,7 @@ void ActRaiser_OnApuPortPace(uint8_t port, uint8_t value) {
       RTL_GAME_PPU_DISPLAY_CONTROL(ppu_display);
   const ActionLoadPacingTriggerDecision decision =
       ActionLoadPacing_EvaluateTrigger(
-          g_action_load_armed_frames,
+          s_action_load_armed_frames,
           g_ram[kActRaiserWram_MapGroup], display_control,
           port, value, g_sr_in_interrupt);
   if (decision == kActionLoadPacingTrigger_Ignore)
@@ -693,16 +693,16 @@ void ActRaiser_OnApuPortPace(uint8_t port, uint8_t value) {
               g_ram[kActRaiserWram_CurrentMap],
               display_control);
     }
-    g_action_load_armed_frames = 0;
-    g_action_load_one_shot_token = 0;
+    s_action_load_armed_frames = 0;
+    s_action_load_one_shot_token = 0;
     RtlSetApuCatchupSuppressed(false);
     return;
   }
 
-  const unsigned frames = g_action_load_armed_frames;
-  g_action_load_armed_frames = 0;
+  const unsigned frames = s_action_load_armed_frames;
+  s_action_load_armed_frames = 0;
   RtlSetApuCatchupSuppressed(false);
-  g_action_load_one_shot_token = 0;
+  s_action_load_one_shot_token = 0;
   if (ActRaiser_DeveloperFlagEnabled(
           kActRaiserDeveloperFlag_LoadPacingLog)) {
     fprintf(stderr,
@@ -1172,9 +1172,9 @@ void ActRaiser_FullSnapshot(const char *prefix) {
 }
 
 static void game_coroutine(void) {
-  g_action_load_armed_frames = 0;
-  g_action_load_hold_frames = 0;
-  g_action_load_one_shot_token = 0;
+  s_action_load_armed_frames = 0;
+  s_action_load_hold_frames = 0;
+  s_action_load_one_shot_token = 0;
   RtlSetApuCatchupSuppressed(false);
   cpu_state_init(&g_cpu, g_ram);
   g_cpu_brk_hook = ActRaiser_BrkHook;
@@ -4582,27 +4582,27 @@ static bool CreateGameCoroutine(void) {
    * resample phase). Committing 64KB of the 2MB reserve up front instead of the
    * whole thing keeps the fiber cheap to (re)create while still reserving the
    * full stack; the recompiled dispatch stack can go 64 frames deep. */
-  if (!g_host_fiber) {
-    g_host_fiber = ConvertThreadToFiberEx(NULL, FIBER_FLAG_FLOAT_SWITCH);
-    if (!g_host_fiber) {
+  if (!s_host_fiber) {
+    s_host_fiber = ConvertThreadToFiberEx(NULL, FIBER_FLAG_FLOAT_SWITCH);
+    if (!s_host_fiber) {
       fprintf(stderr, "Failed to convert driver thread to fiber\n");
       return false;
     }
   }
-  if (g_game_fiber) {
-    DeleteFiber(g_game_fiber);
-    g_game_fiber = NULL;
+  if (s_game_fiber) {
+    DeleteFiber(s_game_fiber);
+    s_game_fiber = NULL;
   }
-  g_game_fiber = CreateFiberEx(kGameCoroutineStackCommitBytes,
+  s_game_fiber = CreateFiberEx(kGameCoroutineStackCommitBytes,
                                kGameCoroutineStackReserveBytes,
                                FIBER_FLAG_FLOAT_SWITCH,
                                game_coroutine_fiber, NULL);
-  if (!g_game_fiber) {
+  if (!s_game_fiber) {
     fprintf(stderr, "Failed to create game coroutine fiber\n");
     return false;
   }
 #else
-  if (!g_game_stack) {
+  if (!s_game_stack) {
     /* mmap with a PROT_NONE GUARD PAGE below the stack rather than malloc.
      * makecontext requires the caller to supply the stack, and with an
      * app-supplied stack "it is the application's responsibility to handle
@@ -4631,22 +4631,22 @@ static bool CreateGameCoroutine(void) {
       munmap(map, total);
       return false;
     }
-    g_game_stack_map = map;
-    g_game_stack_map_len = total;
-    g_game_stack = (char *)map + guard;
+    s_game_stack_map = map;
+    s_game_stack_map_len = total;
+    s_game_stack = (char *)map + guard;
   }
   /* The abandoned context is just register state pointing into this stack;
    * re-running makecontext over the SAME buffer resets the entry point, so no
    * unmap/remap is needed (and none would be safe while the old context's
    * frames still nominally live there). */
-  if (getcontext(&g_game_ctx) != 0) {
+  if (getcontext(&s_game_ctx) != 0) {
     fprintf(stderr, "Failed to capture game coroutine context\n");
     return false;
   }
-  g_game_ctx.uc_stack.ss_sp = g_game_stack;
-  g_game_ctx.uc_stack.ss_size = kGameCoroutineStackReserveBytes;
-  g_game_ctx.uc_link = &g_host_ctx;
-  makecontext(&g_game_ctx, game_coroutine, 0);
+  s_game_ctx.uc_stack.ss_sp = s_game_stack;
+  s_game_ctx.uc_stack.ss_size = kGameCoroutineStackReserveBytes;
+  s_game_ctx.uc_link = &s_host_ctx;
+  makecontext(&s_game_ctx, game_coroutine, 0);
 #endif
   return true;
 }
@@ -4658,21 +4658,21 @@ void ActRaiser_DestroyGameCoroutine(void) {
   ActRaiserBg3Upload_Reset();
   ActRaiserSpriteOwnership_Reset();
   ActRaiserHleFatal_RegisterHostEscape(NULL);
-  g_game_coroutine_executing = false;
+  s_game_coroutine_executing = false;
 #ifdef _WIN32
-  if (g_game_fiber) {
-    DeleteFiber(g_game_fiber);
-    g_game_fiber = NULL;
+  if (s_game_fiber) {
+    DeleteFiber(s_game_fiber);
+    s_game_fiber = NULL;
   }
 #else
-  if (g_game_stack_map) {
-    munmap(g_game_stack_map, g_game_stack_map_len);
-    g_game_stack_map = NULL;
-    g_game_stack_map_len = 0;
-    g_game_stack = NULL;
+  if (s_game_stack_map) {
+    munmap(s_game_stack_map, s_game_stack_map_len);
+    s_game_stack_map = NULL;
+    s_game_stack_map_len = 0;
+    s_game_stack = NULL;
   }
 #endif
-  g_game_started = false;
+  s_game_started = false;
 }
 
 static bool ActRaiser_ControlGameTiming(
@@ -4696,10 +4696,10 @@ void RunOneFrameOfGame(void) {
   ActRaiserCredits_ObserveScene(g_ram[kActRaiserWram_MapGroup],
                                g_ram[kActRaiserWram_CurrentMap]);
   NativeAudioExtension_ObserveGameState(g_ram, kSnesWramSize);
-  if (!g_game_started) {
+  if (!s_game_started) {
     /* config.ini and process environment layers are final by this point. */
     (void)ActRaiser_GetDeveloperEnvironment();
-    g_game_started = true;
+    s_game_started = true;
 #if SNESRECOMP_WATCHDOG
     /* Give the runtime watchdog the coroutine yield to escape a stuck frame
      * with (the old longjmp out of this coroutine was UB / fiber-forbidden). */
@@ -4723,45 +4723,45 @@ void RunOneFrameOfGame(void) {
 
   ActRaiser_ApplyCheats();   /* host-side cheats (live settings, default off) */
 
-  if (g_action_load_hold_frames) {
+  if (s_action_load_hold_frames) {
     bool one_shot_completed = false;
     uint64_t one_shot_token = 0;
-    if (g_action_load_one_shot_token) {
+    if (s_action_load_one_shot_token) {
       one_shot_token =
           MusicReplacements_GetOneShotSnapshot(&one_shot_completed);
     }
     if (ActionLoadPacing_ShouldReleaseForOneShot(
-            g_action_load_hold_frames, g_action_load_one_shot_token,
+            s_action_load_hold_frames, s_action_load_one_shot_token,
             one_shot_token, one_shot_completed)) {
       if (ActRaiser_DeveloperFlagEnabled(
               kActRaiserDeveloperFlag_LoadPacingLog)) {
         fprintf(stderr,
                 "[load-pace] f=%d HD one-shot complete; released forced "
                 "blank %u frame(s) early\n",
-                snes_frame_counter, g_action_load_hold_frames);
+                snes_frame_counter, s_action_load_hold_frames);
       }
-      g_action_load_hold_frames = 0;
-      g_action_load_one_shot_token = 0;
+      s_action_load_hold_frames = 0;
+      s_action_load_one_shot_token = 0;
       /* A short enhanced cue is allowed to end the accuracy hold. Its muted
        * authentic sequencer may not have reached the loader acknowledgement,
        * so restore touch catch-up for the remaining collapsed work. */
       RtlSetApuCatchupSuppressed(false);
     } else {
-      g_action_load_hold_frames--;
-      if (!g_action_load_hold_frames)
-        g_action_load_one_shot_token = 0;
+      s_action_load_hold_frames--;
+      if (!s_action_load_hold_frames)
+        s_action_load_one_shot_token = 0;
       return;
     }
   }
   if (!ActRaiser_ControlGameTiming(
           true, 0u, NULL))
     return;
-  g_game_coroutine_executing = true;
+  s_game_coroutine_executing = true;
 #ifdef _WIN32
-  SwitchToFiber(g_game_fiber);
+  SwitchToFiber(s_game_fiber);
 #else
-  if (swapcontext(&g_host_ctx, &g_game_ctx) != 0) {
-    g_game_coroutine_executing = false;
+  if (swapcontext(&s_host_ctx, &s_game_ctx) != 0) {
+    s_game_coroutine_executing = false;
     (void)ActRaiser_ControlGameTiming(
         false, 0u, NULL);
     SessionFatal_Request(
@@ -4772,7 +4772,7 @@ void RunOneFrameOfGame(void) {
     return;
   }
 #endif
-  g_game_coroutine_executing = false;
+  s_game_coroutine_executing = false;
   if (SessionFatal_Requested()) {
     (void)ActRaiser_ControlGameTiming(
         false, 0u, NULL);

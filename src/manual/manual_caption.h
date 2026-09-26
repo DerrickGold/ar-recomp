@@ -1,5 +1,10 @@
 #ifndef AR_MANUAL_CAPTION_H
 #define AR_MANUAL_CAPTION_H
+/* ManualCaption: builds the caption under a manual page (page number and the
+ * control hints for the current device), wrapped by grapheme and scaled down
+ * to fit the view.
+ * Phase: pure.
+ * Tests: tests/manual_input_test.c */
 
 #include "manual_input.h"
 #include "localization/ui_catalog.h"

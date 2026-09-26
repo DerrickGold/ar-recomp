@@ -1,5 +1,9 @@
 #ifndef AR_ENHANCED_TEXT_SETTINGS_H
 #define AR_ENHANCED_TEXT_SETTINGS_H
+/* ArEnhancedTextSettings: the player's enhanced-text options (size, sampling,
+ * pixelation) with defaults, validation and scaled pixel sizes.
+ * Phase: pure.
+ * Tests: tests/enhanced_text_settings_test.c */
 
 #include "localization/text_rasterizer.h"
 

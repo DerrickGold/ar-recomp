@@ -1,5 +1,10 @@
 #ifndef AR_TEXT_APPEARANCE_H
 #define AR_TEXT_APPEARANCE_H
+/* ArTextAppearance: validation of styled-text appearance spans over UTF-8
+ * source (ordered, in range, on character boundaries), including views that
+ * borrow spans from a larger source.
+ * Phase: pure.
+ * Tests: tests/text_appearance_test.c */
 
 #include "localization/text_template.h"
 #include <string.h>

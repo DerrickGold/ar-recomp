@@ -1,5 +1,9 @@
 #ifndef AR_HOST_DISPLAY_REFRESH_CACHE_H
 #define AR_HOST_DISPLAY_REFRESH_CACHE_H
+/* HostDisplayRefreshCache: remembers each display's last valid refresh rate so
+ * a transient failed query does not change pacing.
+ * Phase: pure.
+ * Tests: tests/host_display_refresh_cache_test.c */
 
 #include <stdint.h>
 

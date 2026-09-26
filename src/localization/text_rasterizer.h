@@ -1,5 +1,10 @@
 #ifndef AR_TEXT_RASTERIZER_H
 #define AR_TEXT_RASTERIZER_H
+/* ArTextRasterizer: the renderer-neutral text rasterization contract: styled
+ * runs in, bitmaps and reveal clusters out, with enhanced-font treatments
+ * (low resolution, mosaic) and style colors.
+ * Phase: present.
+ * Tests: tests/text_backend_test.c */
 
 #include <stdbool.h>
 #include <stddef.h>

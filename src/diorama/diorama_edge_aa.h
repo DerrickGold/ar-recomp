@@ -1,5 +1,10 @@
 #ifndef AR_DIORAMA_EDGE_AA_H
 #define AR_DIORAMA_EDGE_AA_H
+/* DioramaEdgeAa: builds a thin screen-space coverage fringe around a projected
+ * diorama plane so its edges are antialiased without sampling transparent
+ * texture padding.
+ * Phase: pure.
+ * Tests: tests/diorama_edge_aa_test.c */
 
 #include <stdbool.h>
 #include <stdint.h>

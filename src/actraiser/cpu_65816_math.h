@@ -1,5 +1,9 @@
 #ifndef AR_CPU_65816_MATH_H
 #define AR_CPU_65816_MATH_H
+/* Cpu65816 math: models the 65816's 16-bit ADC (binary and decimal) without
+ * touching CpuState, for HLEs that must reproduce its flags.
+ * Phase: pure.
+ * Tests: tests/cpu_65816_math_test.c */
 
 #include <stdbool.h>
 #include <stdint.h>
