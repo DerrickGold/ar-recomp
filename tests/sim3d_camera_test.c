@@ -1,5 +1,5 @@
-#include "sim/sim3d.h"
-#include "sim/sim3d_camera_limits.h"
+#include "sim/sim3d/sim3d.h"
+#include "sim/sim3d/sim3d_camera_limits.h"
 #include "actraiser_game.h"
 #include "app/settings.h"
 #include "app/user_data_dir.h"

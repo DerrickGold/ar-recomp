@@ -1,7 +1,7 @@
-#include "present_sim3d_clouds.h"
-#include "present_sim3d_project.h"
-#include "sim/sim_cloud_effect_backend.h"
-#include "sim/sim3d_performance.h"
+#include "sim/sim3d/present_sim3d_clouds.h"
+#include "sim/sim3d/present_sim3d_project.h"
+#include "sim/sim3d/sim_cloud_effect_backend.h"
+#include "sim/sim3d/sim3d_performance.h"
 
 #include <assert.h>
 #include <math.h>

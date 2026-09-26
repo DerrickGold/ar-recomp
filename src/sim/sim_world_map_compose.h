@@ -1,11 +1,11 @@
-#ifndef SIM_WORLD_MAP_COMPOSE_H
-#define SIM_WORLD_MAP_COMPOSE_H
+#ifndef AR_SIM_WORLD_MAP_COMPOSE_H
+#define AR_SIM_WORLD_MAP_COMPOSE_H
 
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
-#include "sim_world_map.h"
+#include "sim/sim_world_map.h"
 
 enum {
   kSimWorldMapTownCount = kSimTownCount,
@@ -47,4 +47,4 @@ bool SimWorldMap_ComposeDeveloped(
     uint8_t world_flags,
     const SimWorldMapRomTables *tables);
 
-#endif /* SIM_WORLD_MAP_COMPOSE_H */
+#endif /* AR_SIM_WORLD_MAP_COMPOSE_H */

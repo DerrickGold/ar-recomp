@@ -8,10 +8,10 @@
 #include <string.h>
 
 #include "platform/sdl/render_sdl_internal.h"
-#include "sim/sim3d_depth_pass.h"
-#include "sim/sim3d_mesh_set.h"
+#include "sim/sim3d/sim3d_depth_pass.h"
+#include "sim/sim3d/sim3d_mesh_set.h"
 #include "sim3d_depth_reference.h"
-#include "present_world_nav_geometry.h"
+#include "sim/world_nav/present_world_nav_geometry.h"
 #include "app/performance_metrics.h"
 
 enum {

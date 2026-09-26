@@ -1,6 +1,6 @@
 #include "snesrecomp/support/utf8_fs.h"
 
-#include "sim_render_metadata.h"
+#include "sim/sim_render_metadata.h"
 
 #include <stdio.h>
 #include <stdlib.h>

@@ -1,0 +1,155 @@
+#ifndef AR_SIM_BACKGROUND_VOXELS_H
+#define AR_SIM_BACKGROUND_VOXELS_H
+
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+
+#include "sim/mountains/sim_background_mountains.h"
+#include "sim/town/sim_town_canvas.h"
+#include "sim/voxels/sim_background_voxel_types.h"
+
+enum { kSimBackgroundMaxUnmatchedVisuals = 128 };
+
+typedef struct SimBackgroundUnmatchedVisual {
+  uint8_t family;
+  uint8_t cell_x, cell_y;
+  uint8_t record_slot;
+} SimBackgroundUnmatchedVisual;
+
+typedef struct SimBackgroundVoxelScene {
+  uint8_t town;
+  bool overflow;
+  uint16_t object_count;
+  uint16_t tree_cell_count;
+  uint16_t tree_group_count;
+  /* Clearable single-cell brush: round bushes and Marahna's palms. */
+  uint16_t brush_cell_count;
+  /* A live plot owned by an enhanced replacement whose current structure
+   * metatile was absent from the audited ROM catalog. Such plots deliberately
+   * remain authentic instead of silently becoming completed geometry. */
+  uint16_t unmatched_visual_count;
+  bool unmatched_visual_overflow;
+  SimBackgroundUnmatchedVisual
+      unmatched_visuals[kSimBackgroundMaxUnmatchedVisuals];
+  SimBackgroundMountainField mountains;
+  SimBackgroundMountainCaps mountain_caps;
+  SimBackgroundVoxelObject objects[kSimBackgroundMaxObjects];
+} SimBackgroundVoxelScene;
+
+/* Pure classification seam, used by the game-thread builder and ROM-free
+ * tests. Every object comes from town state - structure records, the cell map's
+ * terrain metatile identities and its reserved landmark plots - so the result
+ * does not depend on the current palette, brightness or fade.
+ *
+ * `wind_stops_all` is the Extras enhancement: the "no wind" story event stills
+ * only the windmills that existed when it fired, so a mill the town builds
+ * afterwards keeps turning through it. True holds every mill in the town for
+ * the duration; false reproduces the original game. It changes nothing else -
+ * a windmill's built-versus-scaffold state always comes from the frame its
+ * plot is drawing, under either setting. */
+void SimBackgroundVoxels_Classify(uint8_t town, const uint8_t *wram,
+                                  bool wind_stops_all,
+                                  SimBackgroundVoxelScene *out);
+
+void SimBackgroundVoxels_Reset(void);
+/* Publishes scene topology and pixels independently. `canvas_layout_serial`
+ * advances only for displayed tilemap changes; character animation, palette
+ * cycling and fades can therefore refresh enhanced pixels without rescanning
+ * structure records, mountains, bridges and foliage. The original canvas is
+ * never modified: this owns a cutout atlas plus an inpainted ground copy used
+ * only by enhanced SIM presentation. `canvas_source_opacity` is the paired
+ * row-major 0/1 source plane from the canvas producer; NULL is a fail-closed
+ * transparent plane for synthetic consumers that do not model source alpha. */
+void SimBackgroundVoxels_Build(uint8_t town, const uint8_t *wram,
+                               const uint32_t *canvas_pixels,
+                               const uint8_t *canvas_source_opacity,
+                               uint32_t canvas_serial,
+                               uint32_t canvas_layout_serial,
+                               bool wind_stops_all);
+
+/* Optional synchronous row execution supplied by the application owner. Each
+ * index must run exactly once in disjoint ranges, and all callbacks must join
+ * before dispatch returns. The builder prepares immutable pixel/mask inputs;
+ * workers only write their own output rows, never read WRAM, mutate caches or
+ * publish serials. No callback may re-enter Build/Reset. NULL uses the same
+ * row kernel serially. This seam owns no threads or platform resources. */
+typedef void (*SimBackgroundRowRange)(void *work, size_t first, size_t end);
+typedef void (*SimBackgroundRowDispatch)(void *context, size_t count,
+    SimBackgroundRowRange range, void *work);
+void SimBackgroundVoxels_BuildWithRows(uint8_t town, const uint8_t *wram,
+    const uint32_t *canvas_pixels, const uint8_t *canvas_source_opacity,
+    uint32_t canvas_serial, uint32_t canvas_layout_serial, bool wind_stops_all,
+    SimBackgroundRowDispatch dispatch, void *context);
+
+uint32_t SimBackgroundVoxels_Serial(void);
+uint32_t SimBackgroundVoxels_SceneSerial(void);
+uint32_t SimBackgroundVoxels_GroundSerial(void);
+uint32_t SimBackgroundVoxels_AtlasSerial(void);
+const SimBackgroundVoxelScene *SimBackgroundVoxels_Scene(void);
+const uint32_t *SimBackgroundVoxels_AtlasPixels(void);
+const uint32_t *SimBackgroundVoxels_GroundPixels(void);
+/* Render-thread upload cursor for the enhanced ground. Regions accumulate
+ * until drained, independently of SimTownCanvas's authentic-canvas cursor. */
+bool SimBackgroundVoxels_TakeGroundDirtyRect(
+    int *x, int *y, int *width, int *height);
+/* Takes one coalesced row region whose final cutout-atlas pixels changed
+ * since the previous drain. Atlas storage ownership is internal; consumers
+ * receive only pixel-space publication regions. */
+bool SimBackgroundVoxels_TakeAtlasDirtyRect(
+    int *x, int *y, int *width, int *height);
+
+typedef struct SimBackgroundVoxelBuildStats {
+  uint64_t build_calls;
+  uint64_t scene_rebuilds;
+  uint64_t pixel_refreshes;
+  uint64_t ground_pixels_changed;
+  uint64_t atlas_pixels_changed;
+} SimBackgroundVoxelBuildStats;
+
+SimBackgroundVoxelBuildStats SimBackgroundVoxels_BuildStats(void);
+void SimBackgroundVoxels_ResetBuildStats(void);
+
+/* Is this town cell mountain terrain in the published scene?
+ *
+ * The 2D town already answers "is this actor on a mountain?" -- it stands on a
+ * mountain metatile or it stands on ground -- and that is exactly the question
+ * of whether a mountain drawn in front of it should hide it. Presentation uses
+ * this to split actors into the band drawn under the mountain art and the band
+ * drawn over it. Out-of-range cells and a town with no published scene answer
+ * false, so an actor defaults to the occluded band. */
+bool SimBackgroundVoxels_CellIsMountain(int cell_x, int cell_y);
+
+/* Is there mountain terrain BETWEEN this cell and the camera -- that is, south
+ * of it in the same column? Only such a mountain can hide what stands here.
+ * The camera looks from the south, so a mass north of an actor is behind it,
+ * and a mass the actor stands south of cannot occlude it however tall the art
+ * reaches up the screen. Without this test a villager standing in front of a
+ * peak keeps his feet but loses his head, because the sprite's upper rows
+ * reach into screen space the mountain's sheared art occupies. */
+bool SimBackgroundVoxels_MountainInFrontOf(int cell_x, int cell_y);
+
+/* Where the mountain art's surface sits at a town-map position, for placing an
+ * actor the 2D game draws standing on it. The renderer shears a mountain out of
+ * its own authentic art -- height is `(baseline - y) * face_height_scale` and
+ * the art is pulled toward its base by `face_depth_scale` -- so an actor put
+ * through the same transform lands exactly on the drawn slope instead of at
+ * the mass's foot. `out_map_y` is the displaced town-pixel Y, `out_height` the
+ * altitude in town pixels. False when the position is not mountain. */
+bool SimBackgroundVoxels_MountainSurface(int map_x, int map_y,
+                                         float *out_map_y, float *out_height);
+
+/* Height in town pixels of the structure model standing on a town-map
+ * position, for art the ROM anchors to a building's record cell. Zero when no
+ * structure covers it, so an unattached bubble simply stays put. Trees and
+ * foliage are excluded: nothing is anchored to them, and a bubble that drifted
+ * onto a forest cell should not climb it. */
+float SimBackgroundVoxels_StructureHeight(int map_x, int map_y);
+
+/* Resolves a clean terrain-metatile source synthesized in the mountain atlas.
+ * Unlike SimBackgroundMountains_TileSource, this is independent of whether a
+ * pristine instance happens to be visible in the town's composed cell map. */
+bool SimBackgroundVoxels_MountainTileSource(uint8_t tile,
+                                            int *cell_x, int *cell_y);
+
+#endif  /* AR_SIM_BACKGROUND_VOXELS_H */

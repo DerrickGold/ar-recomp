@@ -11,7 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "sim_town_canvas.h"
+#include "sim/town/sim_town_canvas.h"
 #include "snes_bgr555.h"
 
 static int s_failures;

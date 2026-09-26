@@ -1,5 +1,5 @@
-#include "present_sim_globe_mapping.h"
-#include "sim/sim_town_terrain.h"
+#include "sim/world_nav/present_sim_globe_mapping.h"
+#include "sim/town/sim_town_terrain.h"
 /* Keep checks and fixture setup active in release-configured test builds. */
 #undef NDEBUG
 #include <assert.h>

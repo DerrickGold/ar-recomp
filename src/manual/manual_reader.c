@@ -14,7 +14,7 @@
 #include "manual_caption.h"
 #include "manual_pages.h"
 #include "render/render_device.h"
-#include "scene3d_math.h"
+#include "render/scene3d_math.h"
 #include "app/settings.h"
 /* For the game's own menu font: the overlay owns the atlases. */
 #include "settings_overlay/settings_overlay_render.h"

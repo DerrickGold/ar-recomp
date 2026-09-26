@@ -17,14 +17,14 @@
 #include <string.h>
 
 #include "platform/sdl/render_sdl.h"
-#include "scene3d_math.h"
-#include "sim/sim3d_depth_pass.h"
-#include "sim/sim_background_bridge.h"
-#include "sim/sim_background_voxel_biome.h"
-#include "sim/sim_background_voxel_model_cache.h"
-#include "sim/sim_background_voxel_palette.h"
-#include "sim/sim_background_voxel_project.h"
-#include "sim/sim_background_voxel_proportions.h"
+#include "render/scene3d_math.h"
+#include "sim/sim3d/sim3d_depth_pass.h"
+#include "sim/voxels/sim_background_bridge.h"
+#include "sim/voxels/sim_background_voxel_biome.h"
+#include "sim/voxels/sim_background_voxel_model_cache.h"
+#include "sim/voxels/sim_background_voxel_palette.h"
+#include "sim/voxels/sim_background_voxel_project.h"
+#include "sim/voxels/sim_background_voxel_proportions.h"
 
 enum {
   kRenderWidth = 420,

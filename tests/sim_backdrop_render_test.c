@@ -1,7 +1,7 @@
 #include <math.h>
 #include <stdio.h>
 
-#include "sim/sim_backdrop_render.h"
+#include "sim/sim3d/sim_backdrop_render.h"
 
 static int s_failures;
 #define CHECK(expression)                                                  \

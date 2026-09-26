@@ -1,4 +1,4 @@
-#include "sim/sim_shadow_effect_backend.h"
+#include "sim/sim3d/sim_shadow_effect_backend.h"
 
 #include <SDL3/SDL.h>
 #include <stdio.h>

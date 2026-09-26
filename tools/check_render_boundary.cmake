@@ -29,9 +29,9 @@ endfunction()
 ar_glob_required(_portable_render_files GLOB_RECURSE
     "${GAME_SOURCE_ROOT}/app/performance*.c"
     "${GAME_SOURCE_ROOT}/app/performance*.h"
-    "${GAME_SOURCE_ROOT}/present_world_nav*.c"
-    "${GAME_SOURCE_ROOT}/present_world_nav*.h"
-    "${GAME_SOURCE_ROOT}/present_sky_palace*.[ch]"
+    "${GAME_SOURCE_ROOT}/sim/world_nav/present_world_nav*.c"
+    "${GAME_SOURCE_ROOT}/sim/world_nav/present_world_nav*.h"
+    "${GAME_SOURCE_ROOT}/sim/world_nav/present_sky_palace*.[ch]"
     "${GAME_SOURCE_ROOT}/present/presentation_view*.[ch]"
     "${GAME_SOURCE_ROOT}/present/render_preparation*.[ch]"
     "${GAME_SOURCE_ROOT}/render/render_capabilities.h"
@@ -41,15 +41,15 @@ ar_glob_required(_portable_render_files GLOB_RECURSE
     "${GAME_SOURCE_ROOT}/localization/*.h"
     # Navigation owns game geometry/art, not backend resources. Include the
     # entire helper families so a newly added file cannot bypass this check.
-    "${GAME_SOURCE_ROOT}/sim/sim_world_navigation_*.c"
-    "${GAME_SOURCE_ROOT}/sim/sim_world_navigation_*.h"
-    "${GAME_SOURCE_ROOT}/sim/sim_town_ground_art.c"
-    "${GAME_SOURCE_ROOT}/sim/sim_town_ground_art.h"
-    "${GAME_SOURCE_ROOT}/sim/sim_background_voxel_*.c"
-    "${GAME_SOURCE_ROOT}/sim/sim_background_voxel_*.h")
+    "${GAME_SOURCE_ROOT}/sim/world_nav/sim_world_navigation_*.c"
+    "${GAME_SOURCE_ROOT}/sim/world_nav/sim_world_navigation_*.h"
+    "${GAME_SOURCE_ROOT}/sim/town/sim_town_ground_art.c"
+    "${GAME_SOURCE_ROOT}/sim/town/sim_town_ground_art.h"
+    "${GAME_SOURCE_ROOT}/sim/voxels/sim_background_voxel_*.c"
+    "${GAME_SOURCE_ROOT}/sim/voxels/sim_background_voxel_*.h")
 list(APPEND _portable_render_files
-    "${GAME_SOURCE_ROOT}/sim/sim_background_voxels.c"
-    "${GAME_SOURCE_ROOT}/sim/sim_background_voxels.h"
+    "${GAME_SOURCE_ROOT}/sim/voxels/sim_background_voxels.c"
+    "${GAME_SOURCE_ROOT}/sim/voxels/sim_background_voxels.h"
     "${GAME_SOURCE_ROOT}/present/presentation_upload_mirror.c"
     "${GAME_SOURCE_ROOT}/present/presentation_upload_mirror.h"
     "${GAME_SOURCE_ROOT}/replacements/hd_replacement_host.c"
@@ -79,22 +79,22 @@ list(APPEND _portable_render_files
     "${GAME_SOURCE_ROOT}/present/present.c"
     "${GAME_SOURCE_ROOT}/present/present_frame.c"
     "${GAME_SOURCE_ROOT}/present/present_internal.h"
-    "${GAME_SOURCE_ROOT}/present_world_nav.c"
-    "${GAME_SOURCE_ROOT}/present_sim3d.c"
-    "${GAME_SOURCE_ROOT}/present_sim3d_internal.h"
-    "${GAME_SOURCE_ROOT}/present_sim3d_environment.c"
-    "${GAME_SOURCE_ROOT}/present_sim3d_clouds.c"
-    "${GAME_SOURCE_ROOT}/present_sim3d_clouds.h"
-    "${GAME_SOURCE_ROOT}/present_sim3d_underlay.c"
-    "${GAME_SOURCE_ROOT}/present_sim3d_underlay.h"
-    "${GAME_SOURCE_ROOT}/present_sim3d_effects.c"
-    "${GAME_SOURCE_ROOT}/present_sim3d_effects.h"
-    "${GAME_SOURCE_ROOT}/present_sim3d_project.c"
-    "${GAME_SOURCE_ROOT}/present_sim3d_project.h"
-    "${GAME_SOURCE_ROOT}/present_sim3d_shadows.c"
-    "${GAME_SOURCE_ROOT}/present_sim3d_shadows.h"
-    "${GAME_SOURCE_ROOT}/present_sim3d_terrain.c"
-    "${GAME_SOURCE_ROOT}/present_sim3d_terrain.h"
+    "${GAME_SOURCE_ROOT}/sim/world_nav/present_world_nav.c"
+    "${GAME_SOURCE_ROOT}/sim/sim3d/present_sim3d.c"
+    "${GAME_SOURCE_ROOT}/sim/sim3d/present_sim3d_internal.h"
+    "${GAME_SOURCE_ROOT}/sim/sim3d/present_sim3d_environment.c"
+    "${GAME_SOURCE_ROOT}/sim/sim3d/present_sim3d_clouds.c"
+    "${GAME_SOURCE_ROOT}/sim/sim3d/present_sim3d_clouds.h"
+    "${GAME_SOURCE_ROOT}/sim/sim3d/present_sim3d_underlay.c"
+    "${GAME_SOURCE_ROOT}/sim/sim3d/present_sim3d_underlay.h"
+    "${GAME_SOURCE_ROOT}/sim/sim3d/present_sim3d_effects.c"
+    "${GAME_SOURCE_ROOT}/sim/sim3d/present_sim3d_effects.h"
+    "${GAME_SOURCE_ROOT}/sim/sim3d/present_sim3d_project.c"
+    "${GAME_SOURCE_ROOT}/sim/sim3d/present_sim3d_project.h"
+    "${GAME_SOURCE_ROOT}/sim/sim3d/present_sim3d_shadows.c"
+    "${GAME_SOURCE_ROOT}/sim/sim3d/present_sim3d_shadows.h"
+    "${GAME_SOURCE_ROOT}/sim/sim3d/present_sim3d_terrain.c"
+    "${GAME_SOURCE_ROOT}/sim/sim3d/present_sim3d_terrain.h"
     "${GAME_SOURCE_ROOT}/settings_overlay/settings_overlay_render.h"
     # Action effect construction is game-side geometry generation. Keep its
     # public contract and pure batch builder portable even while the diorama
@@ -102,26 +102,26 @@ list(APPEND _portable_render_files
     "${GAME_SOURCE_ROOT}/action/action_effect_render.c"
     "${GAME_SOURCE_ROOT}/action/action_effect_render.h"
     "${GAME_SOURCE_ROOT}/action/action_effect_projection.h"
-    "${GAME_SOURCE_ROOT}/sim/sim_backdrop_render.c"
-    "${GAME_SOURCE_ROOT}/sim/sim_backdrop_render.h"
+    "${GAME_SOURCE_ROOT}/sim/sim3d/sim_backdrop_render.c"
+    "${GAME_SOURCE_ROOT}/sim/sim3d/sim_backdrop_render.h"
     # The enhanced SIM scene's depth contract is game-side; its current GPU
     # implementation belongs to the SDL platform adapter.
-    "${GAME_SOURCE_ROOT}/sim/sim3d_depth_pass.h"
-    "${GAME_SOURCE_ROOT}/sim/sim3d_mesh_set.h"
-    "${GAME_SOURCE_ROOT}/sim/sim3d_mesh_set.c"
-    "${GAME_SOURCE_ROOT}/sim/sim3d_camera.c"
-    "${GAME_SOURCE_ROOT}/sim/sim3d_performance.c"
-    "${GAME_SOURCE_ROOT}/sim/sim3d_performance.h"
-    "${GAME_SOURCE_ROOT}/sim/sim_shadow_effect_backend.h"
-    "${GAME_SOURCE_ROOT}/sim/sim_cloud_effect_backend.h"
-    "${GAME_SOURCE_ROOT}/sim/sim_background_mountain_render.c"
-    "${GAME_SOURCE_ROOT}/sim/sim_background_mountain_render.h"
-    "${GAME_SOURCE_ROOT}/sim/sim_background_voxel_renderer.c"
-    "${GAME_SOURCE_ROOT}/sim/sim_background_voxel_renderer.h"
-    "${GAME_SOURCE_ROOT}/sim/sim_background_voxel_project.c"
-    "${GAME_SOURCE_ROOT}/sim/sim_background_voxel_project.h"
-    "${GAME_SOURCE_ROOT}/sim/sim_background_voxel_terrain_depth.c"
-    "${GAME_SOURCE_ROOT}/sim/sim_background_voxel_terrain_depth.h"
+    "${GAME_SOURCE_ROOT}/sim/sim3d/sim3d_depth_pass.h"
+    "${GAME_SOURCE_ROOT}/sim/sim3d/sim3d_mesh_set.h"
+    "${GAME_SOURCE_ROOT}/sim/sim3d/sim3d_mesh_set.c"
+    "${GAME_SOURCE_ROOT}/sim/sim3d/sim3d_camera.c"
+    "${GAME_SOURCE_ROOT}/sim/sim3d/sim3d_performance.c"
+    "${GAME_SOURCE_ROOT}/sim/sim3d/sim3d_performance.h"
+    "${GAME_SOURCE_ROOT}/sim/sim3d/sim_shadow_effect_backend.h"
+    "${GAME_SOURCE_ROOT}/sim/sim3d/sim_cloud_effect_backend.h"
+    "${GAME_SOURCE_ROOT}/sim/mountains/sim_background_mountain_render.c"
+    "${GAME_SOURCE_ROOT}/sim/mountains/sim_background_mountain_render.h"
+    "${GAME_SOURCE_ROOT}/sim/voxels/sim_background_voxel_renderer.c"
+    "${GAME_SOURCE_ROOT}/sim/voxels/sim_background_voxel_renderer.h"
+    "${GAME_SOURCE_ROOT}/sim/voxels/sim_background_voxel_project.c"
+    "${GAME_SOURCE_ROOT}/sim/voxels/sim_background_voxel_project.h"
+    "${GAME_SOURCE_ROOT}/sim/voxels/sim_background_voxel_terrain_depth.c"
+    "${GAME_SOURCE_ROOT}/sim/voxels/sim_background_voxel_terrain_depth.h"
     # Diorama callers and the compositor share only opaque texture handles,
     # portable geometry, and render-device output/viewport operations. Frame
     # synthesis remains a separate optional platform adapter.
@@ -256,10 +256,10 @@ endif()
 set(_resource_owner_files
     "${GAME_SOURCE_ROOT}/main.c"
     "${GAME_SOURCE_ROOT}/present/present.c"
-    "${GAME_SOURCE_ROOT}/present_sim3d.c"
-    "${GAME_SOURCE_ROOT}/present_sim3d_internal.h"
-    "${GAME_SOURCE_ROOT}/present_sim3d_effects.c"
-    "${GAME_SOURCE_ROOT}/present_sim3d_shadows.c")
+    "${GAME_SOURCE_ROOT}/sim/sim3d/present_sim3d.c"
+    "${GAME_SOURCE_ROOT}/sim/sim3d/present_sim3d_internal.h"
+    "${GAME_SOURCE_ROOT}/sim/sim3d/present_sim3d_effects.c"
+    "${GAME_SOURCE_ROOT}/sim/sim3d/present_sim3d_shadows.c")
 set(_native_resource_violations "")
 foreach(_file IN LISTS _resource_owner_files)
     file(READ "${_file}" _contents)
@@ -288,12 +288,12 @@ if(_diorama_contents MATCHES
         "${GAME_SOURCE_ROOT}/diorama/diorama.c (native mesh/resource submission)")
 endif()
 
-file(READ "${GAME_SOURCE_ROOT}/present_sim3d_shadows.c"
+file(READ "${GAME_SOURCE_ROOT}/sim/sim3d/present_sim3d_shadows.c"
      _sim_shadow_contents)
 if(_sim_shadow_contents MATCHES
    "SDL_GPU(Shader|RenderState|Device)|SDL_SetGPURenderState")
     list(APPEND _native_resource_violations
-        "${GAME_SOURCE_ROOT}/present_sim3d_shadows.c (native effect state)")
+        "${GAME_SOURCE_ROOT}/sim/sim3d/present_sim3d_shadows.c (native effect state)")
 endif()
 
 # Fullscreen post-processing exposes only semantic parameters and opaque
@@ -318,7 +318,7 @@ endif()
 
 # Shared presentation helpers are part of the game-side seam even while their
 # implementation translation units still contain transitional SDL paths.
-file(READ "${GAME_SOURCE_ROOT}/present_sim3d_internal.h"
+file(READ "${GAME_SOURCE_ROOT}/sim/sim3d/present_sim3d_internal.h"
      _sim3d_internal_contents)
 if(_sim3d_internal_contents MATCHES
    "SDL_Texture[ 	]*\\*[ 	]*(EnsureSimUnderlayTexture|SimUnderlayBlurTexture)")

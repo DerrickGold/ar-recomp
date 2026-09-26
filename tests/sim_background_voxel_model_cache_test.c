@@ -1,4 +1,4 @@
-#include "sim/sim_background_voxel_model_cache.h"
+#include "sim/voxels/sim_background_voxel_model_cache.h"
 
 #include <stdio.h>
 #include <string.h>

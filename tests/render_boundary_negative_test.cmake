@@ -24,24 +24,24 @@ set(_cases
     "app/performance_overlay.c"
     "app/performance_boundary_probe.h"
     "host/parallel_work.h"
-    "sim/sim_cloud_effect_backend.h"
-    "present_sim3d_underlay.c"
-    "present_world_nav_geometry.c"
-    "present_world_nav_sky.c"
-    "present_world_nav_model_mesh.c"
-    "present_world_nav_model_mesh.h"
-    "present_sky_palace.c"
+    "sim/sim3d/sim_cloud_effect_backend.h"
+    "sim/sim3d/present_sim3d_underlay.c"
+    "sim/world_nav/present_world_nav_geometry.c"
+    "sim/world_nav/present_world_nav_sky.c"
+    "sim/world_nav/present_world_nav_model_mesh.c"
+    "sim/world_nav/present_world_nav_model_mesh.h"
+    "sim/world_nav/present_sky_palace.c"
     "present/presentation_view.c"
     "present/render_preparation.c"
     "present/render_preparation_boundary_probe.h"
-    "present_world_nav_boundary_probe.h"
-    "sim/sim_world_navigation_globe.c"
+    "sim/world_nav/present_world_nav_boundary_probe.h"
+    "sim/world_nav/sim_world_navigation_globe.c"
     # New headers must be covered without adding an explicit filename.
-    "sim/sim_world_navigation_boundary_probe.h"
-    "sim/sim_town_ground_art.c"
-    "sim/sim_background_voxels.c"
-    "sim/sim_background_voxels.h"
-    "sim/sim_background_voxel_model_cache.h")
+    "sim/world_nav/sim_world_navigation_boundary_probe.h"
+    "sim/town/sim_town_ground_art.c"
+    "sim/voxels/sim_background_voxels.c"
+    "sim/voxels/sim_background_voxels.h"
+    "sim/voxels/sim_background_voxel_model_cache.h")
 foreach(_relative IN LISTS _cases)
     set(_path "${_scratch}/${_relative}")
     set(_existed false)
@@ -91,7 +91,7 @@ foreach(_relative IN LISTS _font_cases)
 endforeach()
 # A moved or renamed file must fail the check instead of silently dropping out
 # of a glob. present_sky_palace.[ch] are the only files one pattern covers.
-set(_moved_files "present_sky_palace.c" "present_sky_palace.h")
+set(_moved_files "sim/world_nav/present_sky_palace.c" "sim/world_nav/present_sky_palace.h")
 foreach(_relative IN LISTS _moved_files)
     file(RENAME "${_scratch}/${_relative}" "${_scratch}/${_relative}.moved")
 endforeach()
@@ -106,7 +106,7 @@ endif()
 foreach(_relative IN LISTS _moved_files)
     file(RENAME "${_scratch}/${_relative}.moved" "${_scratch}/${_relative}")
 endforeach()
-set(_reference_path "${_scratch}/sim/sim3d_depth_pass.h")
+set(_reference_path "${_scratch}/sim/sim3d/sim3d_depth_pass.h")
 file(READ "${_reference_path}" _original)
 foreach(_probe IN ITEMS "#include \"sim3d_depth_reference.h\"" "void *Sim3DDepthPass_CreateModelMesh(void)")
     file(WRITE "${_reference_path}" "${_original}\n${_probe}\n")

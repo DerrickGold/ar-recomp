@@ -1,6 +1,6 @@
-#include "present_sim3d_underlay.h"
+#include "sim/sim3d/present_sim3d_underlay.h"
 #include "sim/sim_world_map.h"
-#include "sim/sim3d_performance.h"
+#include "sim/sim3d/sim3d_performance.h"
 
 #include <assert.h>
 #include <stdio.h>

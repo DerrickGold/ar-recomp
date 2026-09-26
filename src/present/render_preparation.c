@@ -4,9 +4,9 @@
 #include "render/crt_post.h"
 #include "app/session_fatal.h"
 #include "diorama/diorama_effect_backend.h"
-#include "sim/sim3d_depth_pass.h"
-#include "sim/sim_cloud_effect_backend.h"
-#include "sim/sim_shadow_effect_backend.h"
+#include "sim/sim3d/sim3d_depth_pass.h"
+#include "sim/sim3d/sim_cloud_effect_backend.h"
+#include "sim/sim3d/sim_shadow_effect_backend.h"
 
 static bool ProbeBlend(ArRenderDevice *device, ArRenderTexture texture,
                        ArRenderBlendMode blend) {

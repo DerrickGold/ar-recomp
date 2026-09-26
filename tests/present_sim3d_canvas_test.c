@@ -1,8 +1,8 @@
 #ifdef NDEBUG
 #undef NDEBUG
 #endif
-#include "present_sim3d_canvas.h"
-#include "sim/sim_town_canvas.h"
+#include "sim/sim3d/present_sim3d_canvas.h"
+#include "sim/town/sim_town_canvas.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>

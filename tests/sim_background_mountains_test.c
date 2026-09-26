@@ -1,5 +1,5 @@
-#include "sim/sim_background_mountains.h"
-#include "sim/sim_background_mountain_objects.h"
+#include "sim/mountains/sim_background_mountains.h"
+#include "sim/mountains/sim_background_mountain_objects.h"
 
 #include <stdio.h>
 #include <string.h>

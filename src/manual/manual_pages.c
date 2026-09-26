@@ -3,7 +3,7 @@
 #include <math.h>
 
 #include "constants.h"
-#include "scene3d_math.h"
+#include "render/scene3d_math.h"
 #include <string.h>
 
 /* ── Album carving ─────────────────────────────────────────────────────────── */

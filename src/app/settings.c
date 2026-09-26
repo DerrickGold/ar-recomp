@@ -10,8 +10,8 @@
 #include "present/display_geometry.h"
 #include "app/input_map.h"
 #include "host/atomic_replace.h"
-#include "sim/sim3d_camera_limits.h"
-#include "sim/sim_town_terrain.h"
+#include "sim/sim3d/sim3d_camera_limits.h"
+#include "sim/town/sim_town_terrain.h"
 #include <errno.h>
 #include <limits.h>
 #include <stdio.h>

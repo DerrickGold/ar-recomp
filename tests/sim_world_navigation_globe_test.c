@@ -3,7 +3,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
-#include "sim/sim_world_navigation_globe.h"
+#include "sim/world_nav/sim_world_navigation_globe.h"
 
 static float Dot(const float a[3], const float b[3]) {
   return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];

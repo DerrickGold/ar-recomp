@@ -1,6 +1,6 @@
 #include "snesrecomp/support/utf8_fs.h"
 
-#include "sim_phase0_trace.h"
+#include "sim/sim_phase0_trace.h"
 
 #include <stdio.h>
 #include <stdlib.h>

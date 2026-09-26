@@ -1,5 +1,5 @@
 #include "present/presentation_view.h"
-#include "present_sky_palace.h"
+#include "sim/world_nav/present_sky_palace.h"
 #undef NDEBUG
 #include <assert.h>
 #include <stdio.h>

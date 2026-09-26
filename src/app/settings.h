@@ -2,7 +2,7 @@
 #define SETTINGS_H
 #include "constants.h"
 #include "snesrecomp/game/types.h"
-#include "sim/sim_background_voxel_quality.h"
+#include "sim/voxels/sim_background_voxel_quality.h"
 #include "sim/sim_render_metadata.h"
 
 /* Live runtime settings. Existing cheat and widescreen behavior gates are

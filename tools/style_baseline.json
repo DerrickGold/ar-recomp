@@ -382,6 +382,10 @@
   "static-g-prefix": 12,
   "trailing-space": 3
  },
+ "src/actraiser/actraiser_rtl.h": {
+  "header-comment": 1,
+  "header-guard": 1
+ },
  "src/actraiser/actraiser_save_checksum.h": {
   "header-guard": 1
  },
@@ -546,24 +550,15 @@
  "src/actraiser/actraiser_ws_gap.h": {
   "header-guard": 1
  },
+ "src/actraiser/cpu_65816_math.h": {
+  "header-comment": 1,
+  "header-guard": 1
+ },
+ "src/actraiser/quintet_lzss.h": {
+  "header-comment": 1,
+  "header-guard": 1
+ },
  "src/actraiser_game.h": {
-  "header-guard": 1
- },
- "src/actraiser/actraiser_rtl.h": {
-  "header-comment": 1,
-  "header-guard": 1
- },
- "src/replacements/asset_condition.h": {
-  "header-guard": 1
- },
- "src/host/atomic_replace.h": {
-  "header-guard": 1
- },
- "src/byte_order.h": {
-  "header-comment": 1,
-  "header-guard": 1
- },
- "src/camera_orbit.h": {
   "header-guard": 1
  },
  "src/app/config.c": {
@@ -572,11 +567,81 @@
  "src/app/config.h": {
   "header-guard": 1
  },
- "src/constants.h": {
+ "src/app/forced_input.h": {
   "header-guard": 1
  },
- "src/actraiser/cpu_65816_math.h": {
+ "src/app/ini_upgrade.h": {
+  "header-guard": 1
+ },
+ "src/app/ini_upgrade_apply.h": {
+  "header-guard": 1
+ },
+ "src/app/input_map.h": {
+  "header-guard": 1
+ },
+ "src/app/input_replay.h": {
   "header-comment": 1,
+  "header-guard": 1
+ },
+ "src/app/performance_metrics.c": {
+  "long-line": 14,
+  "packed": 1
+ },
+ "src/app/performance_overlay.c": {
+  "long-line": 14
+ },
+ "src/app/performance_overlay.h": {
+  "header-comment": 1
+ },
+ "src/app/portable_paths.h": {
+  "header-guard": 1
+ },
+ "src/app/run_dir.c": {
+  "static-g-prefix": 2
+ },
+ "src/app/run_dir.h": {
+  "header-guard": 1
+ },
+ "src/app/runtime_diagnostics.h": {
+  "header-guard": 1
+ },
+ "src/app/runtime_settings.c": {
+  "long-line": 1,
+  "packed": 4
+ },
+ "src/app/runtime_settings.h": {
+  "header-comment": 1,
+  "header-guard": 1
+ },
+ "src/app/scheduled_settings.h": {
+  "header-guard": 1
+ },
+ "src/app/session_fatal.h": {
+  "header-comment": 1
+ },
+ "src/app/session_recovery.c": {
+  "long-line": 2
+ },
+ "src/app/session_recovery.h": {
+  "header-comment": 1
+ },
+ "src/app/settings.c": {
+  "long-line": 12
+ },
+ "src/app/settings.h": {
+  "header-guard": 1
+ },
+ "src/app/user_data_dir.h": {
+  "header-guard": 1
+ },
+ "src/audio/native_audio_mixer.h": {
+  "header-comment": 1
+ },
+ "src/byte_order.h": {
+  "header-comment": 1,
+  "header-guard": 1
+ },
+ "src/constants.h": {
   "header-guard": 1
  },
  "src/deterministic_hash.h": {
@@ -678,27 +743,7 @@
  "src/diorama/diorama_upload.h": {
   "header-guard": 1
  },
- "src/present/display_geometry.h": {
-  "header-guard": 1
- },
- "src/app/forced_input.h": {
-  "header-guard": 1
- },
- "src/present/frame_slot.c": {
-  "packed": 3,
-  "static-g-prefix": 9
- },
- "src/present/frame_slot.h": {
-  "header-guard": 1
- },
- "src/present/frame_timing.h": {
-  "header-guard": 1
- },
- "src/replacements/hd_replacement_host.h": {
-  "header-comment": 1,
-  "header-guard": 1
- },
- "src/replacements/hd_replacements.h": {
+ "src/host/atomic_replace.h": {
   "header-guard": 1
  },
  "src/host/campaign_identity.h": {
@@ -741,19 +786,6 @@
   "header-comment": 1,
   "header-guard": 1,
   "long-line": 1
- },
- "src/app/ini_upgrade.h": {
-  "header-guard": 1
- },
- "src/app/ini_upgrade_apply.h": {
-  "header-guard": 1
- },
- "src/app/input_map.h": {
-  "header-guard": 1
- },
- "src/app/input_replay.h": {
-  "header-comment": 1,
-  "header-guard": 1
  },
  "src/localization/dialogue_session.c": {
   "long-line": 3
@@ -840,10 +872,6 @@
   "packed": 34,
   "static-g-prefix": 1
  },
- "src/replacements/manifest_utils.h": {
-  "header-comment": 1,
-  "header-guard": 1
- },
  "src/manual/manual_caption.h": {
   "header-comment": 1
  },
@@ -858,25 +886,6 @@
  },
  "src/manual/manual_reader.h": {
   "header-guard": 1
- },
- "src/replacements/music_replacements.c": {
-  "long-line": 3
- },
- "src/replacements/music_replacements.h": {
-  "header-guard": 1
- },
- "src/audio/native_audio_mixer.h": {
-  "header-comment": 1
- },
- "src/app/performance_metrics.c": {
-  "long-line": 14,
-  "packed": 1
- },
- "src/app/performance_overlay.c": {
-  "long-line": 14
- },
- "src/app/performance_overlay.h": {
-  "header-comment": 1
  },
  "src/platform/sdl/bidi_text_sdl.c": {
   "long-line": 1,
@@ -944,7 +953,17 @@
   "header-comment": 1,
   "header-guard": 1
  },
- "src/app/portable_paths.h": {
+ "src/present/display_geometry.h": {
+  "header-guard": 1
+ },
+ "src/present/frame_slot.c": {
+  "packed": 3,
+  "static-g-prefix": 9
+ },
+ "src/present/frame_slot.h": {
+  "header-guard": 1
+ },
+ "src/present/frame_timing.h": {
   "header-guard": 1
  },
  "src/present/present.c": {
@@ -958,88 +977,6 @@
   "header-comment": 1,
   "header-guard": 1
  },
- "src/present_sim3d.c": {
-  "long-line": 3,
-  "packed": 4,
-  "static-g-prefix": 1
- },
- "src/present_sim3d_clouds.c": {
-  "long-line": 1
- },
- "src/present_sim3d_geometry.c": {
-  "packed": 1
- },
- "src/present_sim3d_project.c": {
-  "long-line": 1,
-  "packed": 3
- },
- "src/present_sim3d_underlay.h": {
-  "header-comment": 1
- },
- "src/present_sim_globe_focus.h": {
-  "header-guard": 1,
-  "long-line": 2
- },
- "src/present_sim_globe_mapping.c": {
-  "packed": 3
- },
- "src/present_sim_globe_mapping.h": {
-  "header-guard": 1
- },
- "src/present_sim_globe_mountains.c": {
-  "long-line": 1,
-  "packed": 11
- },
- "src/present_sim_globe_terrain.c": {
-  "long-line": 1,
-  "packed": 10
- },
- "src/present_sim_globe_water.c": {
-  "long-line": 1,
-  "packed": 3
- },
- "src/present_sim_globe_water.h": {
-  "header-guard": 1
- },
- "src/present_sim_menu.c": {
-  "packed": 7
- },
- "src/present_sim_menu.h": {
-  "header-comment": 1,
-  "header-guard": 1
- },
- "src/present_world_nav.c": {
-  "long-line": 93,
-  "packed": 42
- },
- "src/present_world_nav_composition.h": {
-  "header-guard": 1
- },
- "src/present_world_nav_geometry.c": {
-  "long-line": 4,
-  "packed": 6
- },
- "src/present_world_nav_geometry.h": {
-  "header-guard": 1
- },
- "src/present_world_nav_model_mesh.c": {
-  "long-line": 10,
-  "packed": 5
- },
- "src/present_world_nav_model_mesh.h": {
-  "header-guard": 1
- },
- "src/present_world_nav_sky.c": {
-  "long-line": 3,
-  "packed": 4
- },
- "src/present_world_nav_sky.h": {
-  "header-guard": 1,
-  "long-line": 3
- },
- "src/present_world_nav_test.h": {
-  "header-guard": 1
- },
  "src/present/presentation_frame_generation.h": {
   "header-guard": 1
  },
@@ -1048,10 +985,6 @@
  },
  "src/present/presentation_view.h": {
   "header-comment": 1
- },
- "src/actraiser/quintet_lzss.h": {
-  "header-comment": 1,
-  "header-guard": 1
  },
  "src/randomizer/randomizer.c": {
   "long-line": 5,
@@ -1067,6 +1000,9 @@
  },
  "src/render/bg3_composite_policy.h": {
   "header-comment": 1
+ },
+ "src/render/camera_orbit.h": {
+  "header-guard": 1
  },
  "src/render/hud_layout.h": {
   "header-comment": 1
@@ -1087,6 +1023,13 @@
   "header-comment": 1,
   "header-guard": 1
  },
+ "src/render/render_capabilities.h": {
+  "header-guard": 1
+ },
+ "src/render/scene3d_math.h": {
+  "header-comment": 1,
+  "header-guard": 1
+ },
  "src/render/text_cell_composite.h": {
   "header-comment": 1,
   "header-guard": 1
@@ -1101,24 +1044,24 @@
  "src/render/ui_text_renderer.h": {
   "header-guard": 1
  },
- "src/render/render_capabilities.h": {
+ "src/replacements/asset_condition.h": {
   "header-guard": 1
  },
- "src/app/run_dir.c": {
-  "static-g-prefix": 2
- },
- "src/app/run_dir.h": {
-  "header-guard": 1
- },
- "src/app/runtime_diagnostics.h": {
-  "header-guard": 1
- },
- "src/app/runtime_settings.c": {
-  "long-line": 1,
-  "packed": 4
- },
- "src/app/runtime_settings.h": {
+ "src/replacements/hd_replacement_host.h": {
   "header-comment": 1,
+  "header-guard": 1
+ },
+ "src/replacements/hd_replacements.h": {
+  "header-guard": 1
+ },
+ "src/replacements/manifest_utils.h": {
+  "header-comment": 1,
+  "header-guard": 1
+ },
+ "src/replacements/music_replacements.c": {
+  "long-line": 3
+ },
+ "src/replacements/music_replacements.h": {
   "header-guard": 1
  },
  "src/save/save_campaign_archive.inc": {
@@ -1164,36 +1107,6 @@
   "header-comment": 1,
   "header-guard": 1
  },
- "src/scene3d_math.h": {
-  "header-comment": 1,
-  "header-guard": 1
- },
- "src/app/scheduled_settings.h": {
-  "header-guard": 1
- },
- "src/app/session_fatal.h": {
-  "header-comment": 1
- },
- "src/app/session_recovery.c": {
-  "long-line": 2
- },
- "src/app/session_recovery.h": {
-  "header-comment": 1
- },
- "src/app/settings.c": {
-  "long-line": 12
- },
- "src/app/settings.h": {
-  "header-guard": 1
- },
- "src/settings_overlay/settings_overlay.c": {
-  "long-line": 51,
-  "packed": 2
- },
- "src/settings_overlay/settings_overlay.h": {
-  "header-comment": 1,
-  "header-guard": 1
- },
  "src/settings_overlay/menu_input.c": {
   "long-line": 1
  },
@@ -1223,6 +1136,14 @@
   "long-line": 29,
   "packed": 9
  },
+ "src/settings_overlay/settings_overlay.c": {
+  "long-line": 51,
+  "packed": 2
+ },
+ "src/settings_overlay/settings_overlay.h": {
+  "header-comment": 1,
+  "header-guard": 1
+ },
  "src/settings_overlay/settings_overlay_artwork.c": {
   "long-line": 3
  },
@@ -1239,286 +1160,161 @@
  "src/settings_overlay/settings_overlay_palette.h": {
   "header-guard": 1
  },
- "src/sim/sim3d.c": {
+ "src/sim/menu/present_sim_menu.h": {
+  "header-comment": 1
+ },
+ "src/sim/menu/sim_menu_art.h": {
+  "header-comment": 1
+ },
+ "src/sim/menu/sim_menu_help.c": {
+  "long-line": 9
+ },
+ "src/sim/menu/sim_menu_help.h": {
+  "header-comment": 1
+ },
+ "src/sim/menu/sim_menu_model.h": {
+  "header-comment": 1
+ },
+ "src/sim/mountains/sim_background_mountain_mesh.c": {
+  "static-g-prefix": 1
+ },
+ "src/sim/mountains/sim_background_mountain_mesh.h": {
+  "header-comment": 1
+ },
+ "src/sim/mountains/sim_background_mountain_objects.h": {
+  "header-comment": 1
+ },
+ "src/sim/mountains/sim_background_mountain_relief.h": {
+  "header-comment": 1
+ },
+ "src/sim/mountains/sim_background_mountain_render.c": {
+  "static-g-prefix": 1
+ },
+ "src/sim/mountains/sim_background_mountains.h": {
+  "header-comment": 1
+ },
+ "src/sim/sim3d/present_sim3d.c": {
+  "static-g-prefix": 1
+ },
+ "src/sim/sim3d/present_sim3d_underlay.h": {
+  "header-comment": 1
+ },
+ "src/sim/sim3d/sim3d.c": {
   "static-g-prefix": 2
  },
- "src/sim/sim3d.h": {
-  "header-comment": 1,
-  "header-guard": 1
- },
- "src/sim/sim3d_camera_limits.h": {
-  "header-guard": 1
- },
- "src/sim/sim3d_depth_pass.h": {
-  "header-comment": 1,
-  "header-guard": 1
- },
- "src/sim/sim3d_mesh_set.c": {
-  "long-line": 1,
-  "packed": 1
- },
- "src/sim/sim3d_mesh_set.h": {
-  "header-guard": 1
- },
- "src/sim/sim3d_performance.c": {
-  "long-line": 1
- },
- "src/sim/sim3d_planes.h": {
-  "header-guard": 1
- },
- "src/sim/sim_backdrop_render.h": {
+ "src/sim/sim3d/sim3d.h": {
   "header-comment": 1
  },
- "src/sim/sim_background_bridge.h": {
-  "header-guard": 1
- },
- "src/sim/sim_background_mountain_mesh.c": {
-  "static-g-prefix": 1
- },
- "src/sim/sim_background_mountain_mesh.h": {
-  "header-comment": 1,
-  "header-guard": 1
- },
- "src/sim/sim_background_mountain_objects.h": {
-  "header-comment": 1,
-  "header-guard": 1
- },
- "src/sim/sim_background_mountain_relief.h": {
-  "header-comment": 1,
-  "header-guard": 1
- },
- "src/sim/sim_background_mountain_render.c": {
-  "long-line": 1,
-  "static-g-prefix": 1
- },
- "src/sim/sim_background_mountain_render.h": {
-  "header-guard": 1
- },
- "src/sim/sim_background_mountain_silhouette.h": {
-  "header-guard": 1
- },
- "src/sim/sim_background_mountains.h": {
-  "header-comment": 1,
-  "header-guard": 1
- },
- "src/sim/sim_background_voxel_biome.h": {
-  "header-comment": 1,
-  "header-guard": 1
- },
- "src/sim/sim_background_voxel_landmarks.h": {
-  "header-guard": 1
- },
- "src/sim/sim_background_voxel_lighting.h": {
-  "header-comment": 1,
-  "header-guard": 1
- },
- "src/sim/sim_background_voxel_lod.h": {
-  "header-guard": 1
- },
- "src/sim/sim_background_voxel_model_cache.h": {
-  "header-comment": 1,
-  "header-guard": 1
- },
- "src/sim/sim_background_voxel_models.h": {
-  "header-comment": 1,
-  "header-guard": 1
- },
- "src/sim/sim_background_voxel_palette.h": {
-  "header-comment": 1,
-  "header-guard": 1
- },
- "src/sim/sim_background_voxel_preset.h": {
-  "header-comment": 1,
-  "header-guard": 1
- },
- "src/sim/sim_background_voxel_project.h": {
-  "header-guard": 1,
-  "packed": 1
- },
- "src/sim/sim_background_voxel_proportions.h": {
-  "header-comment": 1,
-  "header-guard": 1
- },
- "src/sim/sim_background_voxel_quality.h": {
-  "header-comment": 1,
-  "header-guard": 1
- },
- "src/sim/sim_background_voxel_region.h": {
-  "header-comment": 1,
-  "header-guard": 1
- },
- "src/sim/sim_background_voxel_renderer.c": {
-  "long-line": 2
- },
- "src/sim/sim_background_voxel_renderer.h": {
-  "header-comment": 1,
-  "header-guard": 1
- },
- "src/sim/sim_background_voxel_surface.h": {
-  "header-comment": 1,
-  "header-guard": 1
- },
- "src/sim/sim_background_voxel_terrain_depth.h": {
-  "header-guard": 1
- },
- "src/sim/sim_background_voxel_types.h": {
-  "header-comment": 1,
-  "header-guard": 1
- },
- "src/sim/sim_background_voxels.c": {
-  "static-g-prefix": 4
- },
- "src/sim/sim_background_voxels.h": {
-  "header-comment": 1,
-  "header-guard": 1
- },
- "src/sim/sim_cloud_effect_backend.h": {
+ "src/sim/sim3d/sim3d_depth_pass.h": {
   "header-comment": 1
  },
- "src/sim/sim_menu_art.c": {
-  "packed": 1
- },
- "src/sim/sim_menu_art.h": {
+ "src/sim/sim3d/sim_backdrop_render.h": {
   "header-comment": 1
  },
- "src/sim/sim_menu_help.c": {
-  "long-line": 14,
-  "packed": 11
- },
- "src/sim/sim_menu_help.h": {
-  "header-comment": 1
- },
- "src/sim/sim_menu_model.c": {
-  "packed": 3
- },
- "src/sim/sim_menu_model.h": {
+ "src/sim/sim3d/sim_cloud_effect_backend.h": {
   "header-comment": 1
  },
  "src/sim/sim_phase0_trace.c": {
   "static-g-prefix": 5
  },
- "src/sim/sim_phase0_trace.h": {
-  "header-guard": 1
- },
  "src/sim/sim_render_atlas.h": {
-  "header-comment": 1,
-  "header-guard": 1
+  "header-comment": 1
  },
  "src/sim/sim_render_metadata.c": {
-  "packed": 3,
   "static-g-prefix": 9
- },
- "src/sim/sim_render_metadata.h": {
-  "header-guard": 1
  },
  "src/sim/sim_render_metadata_trace.c": {
   "static-g-prefix": 2
  },
- "src/sim/sim_structure_visuals.h": {
-  "header-guard": 1
- },
- "src/sim/sim_town_canvas.h": {
-  "header-guard": 1
- },
- "src/sim/sim_town_ground_art.h": {
-  "header-guard": 1
- },
- "src/sim/sim_town_layout.h": {
-  "header-comment": 1,
-  "header-guard": 1
- },
- "src/sim/sim_town_terrain.h": {
-  "header-guard": 1
- },
- "src/sim/sim_visual_patches.h": {
-  "header-guard": 1
- },
- "src/sim/sim_world_map.h": {
-  "header-guard": 1
- },
- "src/sim/sim_world_map_build.h": {
-  "header-guard": 1
- },
  "src/sim/sim_world_map_compose.h": {
-  "header-comment": 1,
-  "header-guard": 1
+  "header-comment": 1
  },
- "src/sim/sim_world_navigation_art.c": {
-  "long-line": 4,
-  "packed": 5
+ "src/sim/town/sim_town_layout.h": {
+  "header-comment": 1
  },
- "src/sim/sim_world_navigation_art.h": {
-  "header-comment": 1,
-  "header-guard": 1
+ "src/sim/voxels/sim_background_voxel_biome.h": {
+  "header-comment": 1
  },
- "src/sim/sim_world_navigation_capture.h": {
-  "header-comment": 1,
-  "header-guard": 1
+ "src/sim/voxels/sim_background_voxel_lighting.h": {
+  "header-comment": 1
  },
- "src/sim/sim_world_navigation_cliffs.c": {
-  "packed": 3
+ "src/sim/voxels/sim_background_voxel_model_cache.h": {
+  "header-comment": 1
  },
- "src/sim/sim_world_navigation_cliffs.h": {
-  "header-comment": 1,
-  "header-guard": 1
+ "src/sim/voxels/sim_background_voxel_models.h": {
+  "header-comment": 1
  },
- "src/sim/sim_world_navigation_clouds.c": {
-  "packed": 2
+ "src/sim/voxels/sim_background_voxel_palette.h": {
+  "header-comment": 1
  },
- "src/sim/sim_world_navigation_clouds.h": {
-  "header-comment": 1,
-  "header-guard": 1
+ "src/sim/voxels/sim_background_voxel_preset.h": {
+  "header-comment": 1
  },
- "src/sim/sim_world_navigation_globe.h": {
-  "header-comment": 1,
-  "header-guard": 1
+ "src/sim/voxels/sim_background_voxel_proportions.h": {
+  "header-comment": 1
  },
- "src/sim/sim_world_navigation_mountain_transition.c": {
-  "long-line": 8,
-  "packed": 3
+ "src/sim/voxels/sim_background_voxel_quality.h": {
+  "header-comment": 1
  },
- "src/sim/sim_world_navigation_mountain_transition.h": {
-  "header-comment": 1,
-  "header-guard": 1
+ "src/sim/voxels/sim_background_voxel_region.h": {
+  "header-comment": 1
  },
- "src/sim/sim_world_navigation_mountains.c": {
-  "long-line": 3,
-  "packed": 8
+ "src/sim/voxels/sim_background_voxel_renderer.h": {
+  "header-comment": 1
  },
- "src/sim/sim_world_navigation_mountains.h": {
-  "header-comment": 1,
-  "header-guard": 1
+ "src/sim/voxels/sim_background_voxel_surface.h": {
+  "header-comment": 1
  },
- "src/sim/sim_world_navigation_palace.h": {
-  "header-comment": 1,
-  "header-guard": 1
+ "src/sim/voxels/sim_background_voxel_types.h": {
+  "header-comment": 1
  },
- "src/sim/sim_world_navigation_scene.h": {
-  "header-comment": 1,
-  "header-guard": 1
+ "src/sim/voxels/sim_background_voxels.c": {
+  "static-g-prefix": 4
  },
- "src/sim/sim_world_navigation_sky_clouds.h": {
-  "header-comment": 1,
-  "header-guard": 1
+ "src/sim/voxels/sim_background_voxels.h": {
+  "header-comment": 1
  },
- "src/sim/sim_world_navigation_terrain.c": {
-  "packed": 2
+ "src/sim/world_nav/present_world_nav.c": {
+  "long-line": 1
  },
- "src/sim/sim_world_navigation_terrain.h": {
-  "header-guard": 1
+ "src/sim/world_nav/sim_world_navigation_art.h": {
+  "header-comment": 1
  },
- "src/sim/sim_world_navigation_towns.h": {
-  "header-comment": 1,
-  "header-guard": 1
+ "src/sim/world_nav/sim_world_navigation_capture.h": {
+  "header-comment": 1
+ },
+ "src/sim/world_nav/sim_world_navigation_cliffs.h": {
+  "header-comment": 1
+ },
+ "src/sim/world_nav/sim_world_navigation_clouds.h": {
+  "header-comment": 1
+ },
+ "src/sim/world_nav/sim_world_navigation_globe.h": {
+  "header-comment": 1
+ },
+ "src/sim/world_nav/sim_world_navigation_mountain_transition.h": {
+  "header-comment": 1
+ },
+ "src/sim/world_nav/sim_world_navigation_mountains.h": {
+  "header-comment": 1
+ },
+ "src/sim/world_nav/sim_world_navigation_palace.h": {
+  "header-comment": 1
+ },
+ "src/sim/world_nav/sim_world_navigation_scene.h": {
+  "header-comment": 1
+ },
+ "src/sim/world_nav/sim_world_navigation_sky_clouds.h": {
+  "header-comment": 1
+ },
+ "src/sim/world_nav/sim_world_navigation_towns.h": {
+  "header-comment": 1
  },
  "src/snes_bgr555.h": {
   "header-guard": 1
  },
  "src/text_parse_utils.h": {
   "header-comment": 1,
-  "header-guard": 1
- },
- "src/app/user_data_dir.h": {
   "header-guard": 1
  },
  "tests/action_effect_render_test.c": {

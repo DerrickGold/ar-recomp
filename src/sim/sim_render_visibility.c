@@ -1,4 +1,4 @@
-#include "sim_render_metadata.h"
+#include "sim/sim_render_metadata.h"
 #include <math.h>
 
 /* Pure, classified placement policy shared by capture and both renderers. */

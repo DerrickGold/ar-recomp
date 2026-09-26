@@ -28,7 +28,7 @@
 #include "platform/sdl/render_sdl_internal.h"
 #include "platform/sdl/text_rasterizer_sdl.h"
 #include "render/localized_text_presenter.h"
-#include "sim/sim_world_navigation_scene.h"
+#include "sim/world_nav/sim_world_navigation_scene.h"
 
 enum {
   kFramesPerSheet = 32,

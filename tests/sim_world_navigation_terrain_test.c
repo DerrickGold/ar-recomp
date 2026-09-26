@@ -4,9 +4,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "sim/sim_world_navigation_terrain.h"
-#include "sim/sim_town_terrain.h"
-#include "sim/sim_world_navigation_cliffs.h"
+#include "sim/world_nav/sim_world_navigation_terrain.h"
+#include "sim/town/sim_town_terrain.h"
+#include "sim/world_nav/sim_world_navigation_cliffs.h"
 
 enum { kRomBytes = 0x100000, kMapOffset = 0x33341, kChrOffset = 0x70000 };
 

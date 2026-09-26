@@ -4,7 +4,7 @@
 #include <string.h>
 
 #include "actraiser/actraiser_localization_style.h"
-#include "sim/sim_world_navigation_scene.h"
+#include "sim/world_nav/sim_world_navigation_scene.h"
 
 enum {
   kFirstLocation = 1,

@@ -3,11 +3,11 @@
  * must fail loudly rather than accidentally validate a partial town scene. */
 #undef NDEBUG
 #include <assert.h>
-#include "present_sim3d_project.h"
-#include "present_sim_globe_mountains.h"
-#include "present_sim_globe_terrain.h"
-#include "present_sim_globe_water.h"
-#include "sim/sim_background_voxels.h"
+#include "sim/sim3d/present_sim3d_project.h"
+#include "sim/world_nav/present_sim_globe_mountains.h"
+#include "sim/world_nav/present_sim_globe_terrain.h"
+#include "sim/world_nav/present_sim_globe_water.h"
+#include "sim/voxels/sim_background_voxels.h"
 
 SimBackgroundVoxelRenderParams SimVoxelRenderParams(const FrameSlot *slot,
     ArRenderRectI source, ArRenderRectI viewport, const float matrix[16]) {

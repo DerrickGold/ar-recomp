@@ -5,8 +5,8 @@
 #include "render/render_capabilities.h"
 #include "app/settings.h"
 #include "platform/sdl/settings_persistence_sdl.h"
-#include "sim/sim3d_camera_limits.h"
-#include "sim/sim_town_terrain.h"
+#include "sim/sim3d/sim3d_camera_limits.h"
+#include "sim/town/sim_town_terrain.h"
 #include "app/user_data_dir.h"
 
 #include <stdio.h>

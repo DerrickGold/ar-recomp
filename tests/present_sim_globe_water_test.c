@@ -1,9 +1,9 @@
 /* CPU source oracle: semantic coverage, diagonal conformity and publication
  * lifetime. Only the resource sink and art providers are substituted. The
  * water planner and radial encoding are production code. */
-#include "present_sim_globe_water.h"
-#include "sim/sim3d_mesh_set.h"
-#include "sim/sim_town_ground_art.h"
+#include "sim/world_nav/present_sim_globe_water.h"
+#include "sim/sim3d/sim3d_mesh_set.h"
+#include "sim/town/sim_town_ground_art.h"
 #undef NDEBUG
 #include <assert.h>
 #include <math.h>

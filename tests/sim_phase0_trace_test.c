@@ -1,6 +1,6 @@
 #define _POSIX_C_SOURCE 200809L
 
-#include "sim_phase0_trace.h"
+#include "sim/sim_phase0_trace.h"
 
 #include <stdio.h>
 #include <stdlib.h>

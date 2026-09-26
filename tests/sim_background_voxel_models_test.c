@@ -1,6 +1,6 @@
-#include "sim/sim_background_voxel_models.h"
-#include "sim/sim_background_bridge.h"
-#include "sim/sim_background_voxel_region.h"
+#include "sim/voxels/sim_background_voxel_models.h"
+#include "sim/voxels/sim_background_bridge.h"
+#include "sim/voxels/sim_background_voxel_region.h"
 
 #include <stdio.h>
 #include <string.h>

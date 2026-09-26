@@ -1,5 +1,5 @@
-#include "sim/sim_background_voxel_proportions.h"
-#include "sim/sim_background_voxel_models.h"
+#include "sim/voxels/sim_background_voxel_proportions.h"
+#include "sim/voxels/sim_background_voxel_models.h"
 
 #include <stdio.h>
 

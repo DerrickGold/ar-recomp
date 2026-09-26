@@ -1,4 +1,4 @@
-#include "sim/sim_menu_model.h"
+#include "sim/menu/sim_menu_model.h"
 #include <assert.h>
 #include <stdio.h>
 

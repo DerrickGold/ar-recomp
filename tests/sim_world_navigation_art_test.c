@@ -1,11 +1,11 @@
-#include "sim/sim_world_navigation_art.h"
+#include "sim/world_nav/sim_world_navigation_art.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include "sim/sim_town_ground_art.h"
-#include "sim/sim_town_terrain.h"
+#include "sim/town/sim_town_ground_art.h"
+#include "sim/town/sim_town_terrain.h"
 
 static int failures;
 

@@ -4,8 +4,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "sim_world_map.h"
-#include "sim_world_map_compose.h"
+#include "sim/sim_world_map.h"
+#include "sim/sim_world_map_compose.h"
 
 static int s_failures;
 #define CHECK(expression)                                                  \

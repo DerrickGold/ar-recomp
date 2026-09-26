@@ -13,10 +13,10 @@
 #include "diorama_rom_skybox_resource.h"
 #include "diorama_skybox_uv.h"
 #include "diorama_stack_group.h"
-#include "camera_orbit.h"
+#include "render/camera_orbit.h"
 #include "diorama_depth_shapes.h" /* rake/bow/thick/stack/voxel arithmetic */
 #include "diorama_performance.h"
-#include "scene3d_math.h"
+#include "render/scene3d_math.h"
 #include "host/host_clock.h"
 #include "render/render_output.h"
 #include "diorama_upload.h"

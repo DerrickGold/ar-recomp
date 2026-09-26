@@ -1,4 +1,4 @@
-#include "sim/sim_background_voxel_biome.h"
+#include "sim/voxels/sim_background_voxel_biome.h"
 
 #include <stdio.h>
 

@@ -1,7 +1,7 @@
 #include "gpu_texture_upload_layout.h"
 #include "app/performance_metrics.h"
-#include "sim/sim3d_depth_pass.h"
-#include "sim/sim3d_performance.h"
+#include "sim/sim3d/sim3d_depth_pass.h"
+#include "sim/sim3d/sim3d_performance.h"
 
 #include <SDL3/SDL.h>
 #include <stddef.h>

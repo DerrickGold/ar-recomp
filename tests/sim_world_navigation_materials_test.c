@@ -1,13 +1,13 @@
-#include "sim/sim_world_navigation_clouds.h"
-#include "sim/sim_world_navigation_sky_clouds.h"
-#include "sim/sim_world_navigation_globe.h"
-#include "sim/sim_world_navigation_mountains.h"
-#include "sim/sim_world_navigation_mountain_transition.h"
-#include "sim/sim_world_navigation_terrain.h"
-#include "sim/sim_town_ground_art.h"
-#include "sim/sim_town_layout.h"
-#include "sim/sim_background_mountain_objects.h"
-#include "sim/sim_background_mountain_silhouette.h"
+#include "sim/world_nav/sim_world_navigation_clouds.h"
+#include "sim/world_nav/sim_world_navigation_sky_clouds.h"
+#include "sim/world_nav/sim_world_navigation_globe.h"
+#include "sim/world_nav/sim_world_navigation_mountains.h"
+#include "sim/world_nav/sim_world_navigation_mountain_transition.h"
+#include "sim/world_nav/sim_world_navigation_terrain.h"
+#include "sim/town/sim_town_ground_art.h"
+#include "sim/town/sim_town_layout.h"
+#include "sim/mountains/sim_background_mountain_objects.h"
+#include "sim/mountains/sim_background_mountain_silhouette.h"
 
 /* These expressions execute the test operations as well as checking them. */
 #ifdef NDEBUG

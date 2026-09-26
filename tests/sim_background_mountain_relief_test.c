@@ -1,4 +1,4 @@
-#include "sim/sim_background_mountain_relief.h"
+#include "sim/mountains/sim_background_mountain_relief.h"
 
 #include <stdio.h>
 

@@ -1,8 +1,8 @@
 #include <math.h>
 #include <stdio.h>
 
-#include "sim_town_terrain.h"
-#include "sim_background_bridge.h"
+#include "sim/town/sim_town_terrain.h"
+#include "sim/voxels/sim_background_bridge.h"
 
 static int s_failures;
 static const float kVisibleEdgeTestEpsilonUnits = 0.004f;

@@ -17,7 +17,7 @@
 #include "localization/interface_text.h"
 #include "app/performance_overlay.h"
 #include "platform/sdl/render_sdl_internal.h"
-#include "sim/sim_town_terrain.h"
+#include "sim/town/sim_town_terrain.h"
 #ifdef AR_OVERLAY_UI_FONT
 #include "platform/sdl/text_rasterizer_sdl.h"
 #include "host/font_resources.h"

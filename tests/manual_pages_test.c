@@ -12,7 +12,7 @@
  */
 
 #include "manual_pages.h"
-#include "scene3d_math.h"
+#include "render/scene3d_math.h"
 
 #include <math.h>
 #include <stdio.h>

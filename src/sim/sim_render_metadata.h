@@ -1,13 +1,13 @@
-#ifndef SIM_RENDER_METADATA_H
-#define SIM_RENDER_METADATA_H
+#ifndef AR_SIM_RENDER_METADATA_H
+#define AR_SIM_RENDER_METADATA_H
 
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
 #include "constants.h"
-#include "sim_world_navigation_scene.h"
-#include "sim_world_navigation_towns.h"
+#include "sim/world_nav/sim_world_navigation_scene.h"
+#include "sim/world_nav/sim_world_navigation_towns.h"
 #include "snesrecomp/runner.h"
 #include "snesrecomp/game/types.h"
 
@@ -1254,4 +1254,4 @@ const char *Sim3D_ViewName(SimViewKind view);
 SimPresentationDecision Sim3D_PresentationDecision(const SimFrameData *frame);
 const char *Sim3D_CaptureStatusName(Sim3DCaptureStatus status);
 
-#endif  /* SIM_RENDER_METADATA_H */
+#endif  /* AR_SIM_RENDER_METADATA_H */

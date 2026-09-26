@@ -1,4 +1,4 @@
-#include "sim_render_metadata.h"
+#include "sim/sim_render_metadata.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -7,7 +7,7 @@
 
 #include "actraiser_game.h"
 #include "constants.h"
-#include "sim_world_map.h"
+#include "sim/sim_world_map.h"
 
 _Static_assert(kSimMaxSourceRecords ==
                    kActRaiserSimFixedRecordCount +
@@ -2392,12 +2392,9 @@ SimPresentationDecision Sim3D_PresentationDecision(const SimFrameData *frame) {
     case kSimViewReason_Enabled: reason = "enabled"; break;
     case kSimViewReason_Disabled: reason = "disabled"; break;
     case kSimViewReason_Picker: reason = "position_picker"; break;
-    case kSimViewReason_WorldMapUnavailable:
-      reason = "world_map_unavailable"; break;
-    case kSimViewReason_InvalidWorldTransform:
-      reason = "invalid_world_transform"; break;
-    case kSimViewReason_InvalidPalaceScene:
-      reason = "invalid_palace_scene"; break;
+    case kSimViewReason_WorldMapUnavailable: reason = "world_map_unavailable"; break;
+    case kSimViewReason_InvalidWorldTransform: reason = "invalid_world_transform"; break;
+    case kSimViewReason_InvalidPalaceScene: reason = "invalid_palace_scene"; break;
   }
   return (SimPresentationDecision){frame->view, reason};
 }

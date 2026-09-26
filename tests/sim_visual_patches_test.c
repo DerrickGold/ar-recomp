@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "sim_visual_patches.h"
+#include "sim/sim_visual_patches.h"
 
 enum {
   kRomSize = 0xA843,

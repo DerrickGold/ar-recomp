@@ -41,7 +41,7 @@ import (
 //	EOF
 //	cc -std=c11 -I src -I src/manual -I snesrecomp-go/runtime/include \
 //	   -o /tmp/xcheck/probe /tmp/xcheck/main.c src/manual/manual_pages.c \
-//	   src/scene3d_math.c -lm
+//	   src/render/scene3d_math.c -lm
 //	mkdir -p /tmp/xcheck/fx
 //	(cd installer && AR_XCHECK_DIR=/tmp/xcheck/fx go test ./internal/builder/ \
 //	   -run TestDumpAlbumFixturesForCrossCheck -v) | grep '^GO ' | sort

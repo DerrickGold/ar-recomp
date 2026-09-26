@@ -7,8 +7,8 @@
 #include "localization/localization_frame.h"
 #include "localization/language_pack.h"
 #include "localization/text_presentation.h"
-#include "sim/sim_menu_model.h"
-#include "sim/sim_menu_help.h"
+#include "sim/menu/sim_menu_model.h"
+#include "sim/menu/sim_menu_help.h"
 #include "localization/dialogue_session.h"
 
 #define ACTRAISER_LOCALIZATION_PACK_HOST_ABI_VERSION UINT32_C(2)

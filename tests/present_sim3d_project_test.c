@@ -1,8 +1,8 @@
 /* Actor/effect placement with actual audited town heights and registration.
  * Renderer readiness and unused upload telemetry are substituted; no GPU or runner. */
-#include "present_sim3d_project.h"
-#include "sim/sim_world_navigation_terrain.h"
-#include "sim/sim_town_terrain.h"
+#include "sim/sim3d/present_sim3d_project.h"
+#include "sim/world_nav/sim_world_navigation_terrain.h"
+#include "sim/town/sim_town_terrain.h"
 #include "app/performance_metrics.h"
 #undef NDEBUG
 #include <assert.h>

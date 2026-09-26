@@ -3,7 +3,7 @@
 #include <math.h>
 
 #include "diorama_depth_shapes.h"
-#include "scene3d_math.h"
+#include "render/scene3d_math.h"
 
 /* A projected triangle reaches its Y extrema at its vertices while entirely
  * in front of the camera. Across each mesh row only the two side vertices are

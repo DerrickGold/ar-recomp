@@ -46,8 +46,8 @@
 #include "dev/hd_tile_census.h"
 #include "dev/sfx_census.h"
 #include "sim/sim_render_atlas.h"
-#include "sim/sim3d.h"
-#include "sim/sim_world_navigation_capture.h"
+#include "sim/sim3d/sim3d.h"
+#include "sim/world_nav/sim_world_navigation_capture.h"
 #include "sim/sim_visual_patches.h"
 #include "snesrecomp/game/cpu.h"
 #include "snesrecomp/game/generated_support.h"
@@ -55,7 +55,7 @@
 #include "snesrecomp/game/trace.h"
 #include <stdio.h>
 #include "actraiser/actraiser_sim_menu.h"
-#include "sim/sim_menu_art.h"
+#include "sim/menu/sim_menu_art.h"
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <errno.h>

@@ -20,11 +20,11 @@
 
 #include "snes/ppu.h"
 #include "actraiser_game.h"
-#include "sim3d.h"
-#include "sim_town_terrain.h"
-#include "sim_render_atlas.h"
-#include "sim_render_metadata.h"
-#include "sim_world_navigation_capture.h"
+#include "sim/sim3d/sim3d.h"
+#include "sim/town/sim_town_terrain.h"
+#include "sim/sim_render_atlas.h"
+#include "sim/sim_render_metadata.h"
+#include "sim/world_nav/sim_world_navigation_capture.h"
 #include "runner_internal.h"
 #include "snes/snes.h"
 

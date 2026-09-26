@@ -13,7 +13,7 @@
  * differential diagnosis, but normal loading no longer depends on a synthetic
  * CPU call or its fake $19/$AA preconditions. */
 
-#include "sim_world_map_build.h"
+#include "sim/sim_world_map_build.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -23,8 +23,8 @@
 #include "snesrecomp/game/runtime.h"
 #include "snesrecomp/game/cpu.h"
 #include "funcs.h"
-#include "sim_world_map.h"
-#include "sim_world_map_compose.h"
+#include "sim/sim_world_map.h"
+#include "sim/sim_world_map_compose.h"
 
 RecompReturn bank_02_865C_M0X0(CpuState *cpu);
 

@@ -1,4 +1,4 @@
-#include "sim_render_metadata.h"
+#include "sim/sim_render_metadata.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -6,8 +6,8 @@
 #include <string.h>
 
 #include "actraiser_game.h"
-#include "sim_town_layout.h"
-#include "sim_world_map.h"
+#include "sim/town/sim_town_layout.h"
+#include "sim/sim_world_map.h"
 
 static int failures;
 

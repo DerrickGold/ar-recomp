@@ -1,8 +1,8 @@
 #ifndef ACTRAISER_SIM_MENU_H
 #define ACTRAISER_SIM_MENU_H
 
-#include "sim/sim_menu_model.h"
-#include "sim/sim_menu_help.h"
+#include "sim/menu/sim_menu_model.h"
+#include "sim/menu/sim_menu_help.h"
 #include "snesrecomp/game/cpu.h"
 
 bool ActRaiserSimMenu_OwnsInput(void);

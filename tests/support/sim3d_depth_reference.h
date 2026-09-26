@@ -5,7 +5,7 @@
 #error "Depth reference models belong only to focused tests and benchmarks"
 #endif
 
-#include "sim/sim3d_depth_pass.h"
+#include "sim/sim3d/sim3d_depth_pass.h"
 
 /* Independent untextured model references, not shipping renderer contracts.
  * Both copy vertices and transforms and obey the depth pass's opaque ordering,

@@ -1,4 +1,4 @@
-#include "sim/sim_background_voxel_landmarks.h"
+#include "sim/voxels/sim_background_voxel_landmarks.h"
 
 #include <stdio.h>
 #include <string.h>

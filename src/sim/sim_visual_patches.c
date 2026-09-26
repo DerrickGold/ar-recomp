@@ -1,4 +1,4 @@
-#include "sim_visual_patches.h"
+#include "sim/sim_visual_patches.h"
 
 #include "byte_order.h"
 

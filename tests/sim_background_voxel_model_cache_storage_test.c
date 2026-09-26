@@ -26,7 +26,7 @@ static void CacheFree(void *p) {
 #define malloc CacheMalloc
 #define calloc CacheCalloc
 #define free CacheFree
-#include "../src/sim/sim_background_voxel_model_cache.c"
+#include "../src/sim/voxels/sim_background_voxel_model_cache.c"
 #undef malloc
 #undef calloc
 #undef free

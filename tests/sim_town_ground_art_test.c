@@ -1,5 +1,5 @@
-#include "sim/sim_town_ground_art.h"
-#include "sim/sim_town_canvas.h"
+#include "sim/town/sim_town_ground_art.h"
+#include "sim/town/sim_town_canvas.h"
 
 #include <stdio.h>
 #include <stdlib.h>

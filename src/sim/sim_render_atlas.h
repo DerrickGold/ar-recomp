@@ -1,5 +1,5 @@
-#ifndef SIM_RENDER_ATLAS_H
-#define SIM_RENDER_ATLAS_H
+#ifndef AR_SIM_RENDER_ATLAS_H
+#define AR_SIM_RENDER_ATLAS_H
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -24,4 +24,4 @@ extern uint32_t g_sim_obj_atlas_pixels[
 bool SimRenderAtlas_Build(SrRunnerHandle *runner,
                           uint16 camera_x, uint16 camera_y);
 
-#endif  /* SIM_RENDER_ATLAS_H */
+#endif  /* AR_SIM_RENDER_ATLAS_H */

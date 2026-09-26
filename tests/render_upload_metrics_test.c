@@ -7,7 +7,7 @@
 #include "platform/sdl/render_sdl_internal.h"
 #include "present/presentation_upload_mirror.h"
 #include "app/performance_metrics.h"
-#include "sim/sim3d_performance.h"
+#include "sim/sim3d/sim3d_performance.h"
 #include "diorama/diorama_performance.h"
 
 uint64_t HostClock_Nanoseconds(void) { return 1; }

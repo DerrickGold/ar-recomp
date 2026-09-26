@@ -4,7 +4,7 @@
  * headless machine with no renderer or GPU. */
 #include "present/present.h"
 #include "present/present_internal.h"
-#include "present_sim_menu.h"
+#include "sim/menu/present_sim_menu.h"
 #include "render/crt_post.h"
 #include "present/render_comparison.h"
 #include "app/session_fatal.h"

@@ -1,5 +1,5 @@
-#include "sim/sim_background_voxel_lighting.h"
-#include "sim/sim_background_voxel_surface.h"
+#include "sim/voxels/sim_background_voxel_lighting.h"
+#include "sim/voxels/sim_background_voxel_surface.h"
 
 #include <stdio.h>
 

@@ -1,5 +1,5 @@
-#ifndef SIM_WORLD_MAP_BUILD_H
-#define SIM_WORLD_MAP_BUILD_H
+#ifndef AR_SIM_WORLD_MAP_BUILD_H
+#define AR_SIM_WORLD_MAP_BUILD_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -26,4 +26,4 @@ bool SimWorldMapBuild_Init(const uint8_t *rom_data, size_t rom_size);
 /* Palace reuse is explicitly requested by the application settings gate. */
 void SimWorldMap_BuildIfNeeded(bool sky_palace_enabled);
 
-#endif /* SIM_WORLD_MAP_BUILD_H */
+#endif /* AR_SIM_WORLD_MAP_BUILD_H */

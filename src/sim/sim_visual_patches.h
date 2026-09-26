@@ -1,5 +1,5 @@
-#ifndef SIM_VISUAL_PATCHES_H
-#define SIM_VISUAL_PATCHES_H
+#ifndef AR_SIM_VISUAL_PATCHES_H
+#define AR_SIM_VISUAL_PATCHES_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -11,4 +11,4 @@
  * on mismatch. */
 bool SimVisualPatches_Apply(uint8_t *rom_data, size_t rom_size);
 
-#endif /* SIM_VISUAL_PATCHES_H */
+#endif /* AR_SIM_VISUAL_PATCHES_H */

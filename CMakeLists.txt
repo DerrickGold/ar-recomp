@@ -1090,7 +1090,7 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_scene3d_math_test
         tests/scene3d_math_test.c
-        src/scene3d_math.c
+        src/render/scene3d_math.c
     )
     target_include_directories(actraiser_scene3d_math_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
@@ -1154,7 +1154,7 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_sim_world_navigation_palace_test
         tests/sim_world_navigation_palace_test.c
-        src/sim/sim_world_navigation_palace.c)
+        src/sim/world_nav/sim_world_navigation_palace.c)
     target_include_directories(actraiser_sim_world_navigation_palace_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_sim_world_navigation_palace
@@ -1163,58 +1163,58 @@ if(BUILD_TESTING)
     set(AR_WORLD_NAV_TEST_SOURCES
         src/present/presentation_upload_mirror.c
         src/sim/sim_render_visibility.c
-        src/sim/sim3d_mesh_set.c
+        src/sim/sim3d/sim3d_mesh_set.c
         src/app/performance_metrics.c
         src/platform/sdl/parallel_work_sdl.c
-        src/sim/sim3d_performance.c
-        src/present_sim3d_environment.c
-        src/present_world_nav.c
-        src/present_world_nav_composition.c
-        src/present_sim_globe_mapping.c
-        src/present_world_nav_geometry.c
-        src/present_world_nav_model_mesh.c
-        src/sim/sim_background_voxel_project.c
-        src/present_world_nav_sky.c
-        src/sim/sim_world_navigation_globe.c
-        src/sim/sim_world_navigation_mountains.c
-        src/sim/sim_world_navigation_mountain_transition.c
-        src/sim/sim_world_navigation_clouds.c
-        src/sim/sim_world_navigation_sky_clouds.c
-        src/sim/sim_background_mountain_mesh.c
-        src/sim/sim_background_mountain_objects.c
-        src/sim/sim_background_mountain_relief.c
-        src/sim/sim_background_mountain_silhouette.c
+        src/sim/sim3d/sim3d_performance.c
+        src/sim/sim3d/present_sim3d_environment.c
+        src/sim/world_nav/present_world_nav.c
+        src/sim/world_nav/present_world_nav_composition.c
+        src/sim/world_nav/present_sim_globe_mapping.c
+        src/sim/world_nav/present_world_nav_geometry.c
+        src/sim/world_nav/present_world_nav_model_mesh.c
+        src/sim/voxels/sim_background_voxel_project.c
+        src/sim/world_nav/present_world_nav_sky.c
+        src/sim/world_nav/sim_world_navigation_globe.c
+        src/sim/world_nav/sim_world_navigation_mountains.c
+        src/sim/world_nav/sim_world_navigation_mountain_transition.c
+        src/sim/world_nav/sim_world_navigation_clouds.c
+        src/sim/world_nav/sim_world_navigation_sky_clouds.c
+        src/sim/mountains/sim_background_mountain_mesh.c
+        src/sim/mountains/sim_background_mountain_objects.c
+        src/sim/mountains/sim_background_mountain_relief.c
+        src/sim/mountains/sim_background_mountain_silhouette.c
         src/render/render_device.c
         src/render/presentation_layout.c
         src/render/render_output.c
-        src/scene3d_math.c
+        src/render/scene3d_math.c
         src/sim/sim_world_map.c
-        src/sim/sim_world_navigation_scene.c
+        src/sim/world_nav/sim_world_navigation_scene.c
         src/actraiser/actraiser_sprite_ownership.c
-        src/sim/sim_world_navigation_art.c
-        src/sim/sim_town_ground_art.c
-        src/sim/sim_background_mountains.c
-        src/sim/sim_world_navigation_towns.c
-        src/sim/sim_background_voxel_landmarks.c
-        src/sim/sim_background_voxel_models.c
-        src/sim/sim_background_voxel_model_cache.c
-        src/sim/sim_background_voxel_region.c
-        src/sim/sim_background_voxel_biome.c
-        src/sim/sim_background_voxel_lighting.c
-        src/sim/sim_background_voxel_surface.c
-        src/sim/sim_background_voxel_palette.c
-        src/sim/sim_background_voxel_proportions.c
-        src/sim/sim_town_layout.c
-        src/sim/sim_world_navigation_terrain.c
-        src/sim/sim_world_navigation_cliffs.c
-        src/sim/sim_town_terrain.c
+        src/sim/world_nav/sim_world_navigation_art.c
+        src/sim/town/sim_town_ground_art.c
+        src/sim/mountains/sim_background_mountains.c
+        src/sim/world_nav/sim_world_navigation_towns.c
+        src/sim/voxels/sim_background_voxel_landmarks.c
+        src/sim/voxels/sim_background_voxel_models.c
+        src/sim/voxels/sim_background_voxel_model_cache.c
+        src/sim/voxels/sim_background_voxel_region.c
+        src/sim/voxels/sim_background_voxel_biome.c
+        src/sim/voxels/sim_background_voxel_lighting.c
+        src/sim/voxels/sim_background_voxel_surface.c
+        src/sim/voxels/sim_background_voxel_palette.c
+        src/sim/voxels/sim_background_voxel_proportions.c
+        src/sim/town/sim_town_layout.c
+        src/sim/world_nav/sim_world_navigation_terrain.c
+        src/sim/world_nav/sim_world_navigation_cliffs.c
+        src/sim/town/sim_town_terrain.c
     )
     add_executable(actraiser_present_world_nav_test
         tests/present_world_nav_test.c tests/present_world_nav_sim_stubs.c
         ${AR_WORLD_NAV_TEST_SOURCES})
     add_executable(actraiser_present_sim_globe_mapping_test
-        tests/present_sim_globe_mapping_test.c src/present_sim_globe_mapping.c
-        src/sim/sim_world_navigation_globe.c src/sim/sim_town_terrain.c)
+        tests/present_sim_globe_mapping_test.c src/sim/world_nav/present_sim_globe_mapping.c
+        src/sim/world_nav/sim_world_navigation_globe.c src/sim/town/sim_town_terrain.c)
     target_include_directories(actraiser_present_sim_globe_mapping_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     target_link_libraries(actraiser_present_sim_globe_mapping_test PRIVATE actraiser_math)
     add_test(NAME actraiser_present_sim_globe_mapping COMMAND actraiser_present_sim_globe_mapping_test)
@@ -1224,27 +1224,27 @@ if(BUILD_TESTING)
     target_link_libraries(actraiser_present_sim_globe_focus_test PRIVATE actraiser_math)
     add_test(NAME actraiser_present_sim_globe_focus COMMAND actraiser_present_sim_globe_focus_test)
     add_executable(actraiser_present_sim_globe_water_test
-        tests/present_sim_globe_water_test.c src/present_sim_globe_water.c
-        src/present_sim_globe_mapping.c src/sim/sim_world_navigation_globe.c
-        src/sim/sim_town_terrain.c)
+        tests/present_sim_globe_water_test.c src/sim/world_nav/present_sim_globe_water.c
+        src/sim/world_nav/present_sim_globe_mapping.c src/sim/world_nav/sim_world_navigation_globe.c
+        src/sim/town/sim_town_terrain.c)
     target_include_directories(actraiser_present_sim_globe_water_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     target_link_libraries(actraiser_present_sim_globe_water_test PRIVATE actraiser_math)
     add_test(NAME actraiser_present_sim_globe_water COMMAND actraiser_present_sim_globe_water_test)
     add_executable(actraiser_present_sim_globe_project_test
-        tests/present_sim_globe_project_test.c src/present_sim_globe_project.c
-        src/present_sim_globe_mapping.c src/scene3d_math.c
-        src/sim/sim_world_navigation_globe.c src/sim/sim_town_terrain.c)
+        tests/present_sim_globe_project_test.c src/sim/world_nav/present_sim_globe_project.c
+        src/sim/world_nav/present_sim_globe_mapping.c src/render/scene3d_math.c
+        src/sim/world_nav/sim_world_navigation_globe.c src/sim/town/sim_town_terrain.c)
     target_include_directories(actraiser_present_sim_globe_project_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     target_link_libraries(actraiser_present_sim_globe_project_test PRIVATE actraiser_math)
     add_test(NAME actraiser_present_sim_globe_project COMMAND actraiser_present_sim_globe_project_test)
 
     add_executable(actraiser_present_sim3d_project_test
-        tests/present_sim3d_project_test.c src/present_sim3d_project.c
-        src/present_sim3d_geometry.c src/present_sim_globe_project.c
-        src/present_sim_globe_mapping.c src/scene3d_math.c src/render/render_device.c
+        tests/present_sim3d_project_test.c src/sim/sim3d/present_sim3d_project.c
+        src/sim/sim3d/present_sim3d_geometry.c src/sim/world_nav/present_sim_globe_project.c
+        src/sim/world_nav/present_sim_globe_mapping.c src/render/scene3d_math.c src/render/render_device.c
         src/sim/sim_render_visibility.c src/sim/sim_world_map.c
-        src/sim/sim_world_navigation_globe.c src/sim/sim_world_navigation_terrain.c
-        src/sim/sim_town_terrain.c)
+        src/sim/world_nav/sim_world_navigation_globe.c src/sim/world_nav/sim_world_navigation_terrain.c
+        src/sim/town/sim_town_terrain.c)
     target_include_directories(actraiser_present_sim3d_project_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     target_compile_definitions(actraiser_present_sim3d_project_test PRIVATE AR_SIM3D_TERRAIN_ELEVATION=1)
     target_link_libraries(actraiser_present_sim3d_project_test PRIVATE actraiser_math)
@@ -1280,25 +1280,25 @@ if(BUILD_TESTING)
     # with shared model/mountain/cloud rendering and frozen captures.
     add_executable(actraiser_present_world_nav_gpu_test
         tests/present_world_nav_gpu_test.c ${AR_WORLD_NAV_TEST_SOURCES}
-        src/present_sim3d_geometry.c
-        src/present_sim3d_backdrop.c
-        src/sim/sim_backdrop_render.c
-        src/present_sim_globe_mountains.c
-        src/present_sim_globe_terrain.c
-        src/present_sim_globe_water.c
-        src/present_sim_globe_project.c
+        src/sim/sim3d/present_sim3d_geometry.c
+        src/sim/sim3d/present_sim3d_backdrop.c
+        src/sim/sim3d/sim_backdrop_render.c
+        src/sim/world_nav/present_sim_globe_mountains.c
+        src/sim/world_nav/present_sim_globe_terrain.c
+        src/sim/world_nav/present_sim_globe_water.c
+        src/sim/world_nav/present_sim_globe_project.c
         src/app/session_fatal.c
         src/sim/sim_world_map_compose.c
-        src/present_sim3d_terrain.c
-        src/present_sim3d_clouds.c
-        src/sim/sim_town_canvas.c
-        src/sim/sim_structure_visuals.c
-        src/sim/sim_background_voxels.c
-        src/sim/sim_background_voxel_lod.c
-        src/sim/sim_background_voxel_renderer.c
+        src/sim/sim3d/present_sim3d_terrain.c
+        src/sim/sim3d/present_sim3d_clouds.c
+        src/sim/town/sim_town_canvas.c
+        src/sim/town/sim_structure_visuals.c
+        src/sim/voxels/sim_background_voxels.c
+        src/sim/voxels/sim_background_voxel_lod.c
+        src/sim/voxels/sim_background_voxel_renderer.c
         src/render/upload_rect_run.c
-        src/sim/sim_background_voxel_terrain_depth.c
-        src/sim/sim_background_mountain_render.c
+        src/sim/voxels/sim_background_voxel_terrain_depth.c
+        src/sim/mountains/sim_background_mountain_render.c
         src/platform/sdl/sim_cloud_effect_backend_sdl.c
         src/platform/sdl/render_sdl.c
         src/platform/sdl/sim3d_depth_pass_sdl.c)
@@ -1329,22 +1329,22 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_performance_metrics COMMAND actraiser_performance_metrics_test)
 
     add_executable(actraiser_present_sim3d_clouds_test
-        tests/present_sim3d_clouds_test.c src/present_sim3d_clouds.c
-        src/present_sim3d_environment.c src/scene3d_math.c
-        src/sim/sim_world_navigation_globe.c)
+        tests/present_sim3d_clouds_test.c src/sim/sim3d/present_sim3d_clouds.c
+        src/sim/sim3d/present_sim3d_environment.c src/render/scene3d_math.c
+        src/sim/world_nav/sim_world_navigation_globe.c)
     target_include_directories(actraiser_present_sim3d_clouds_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     target_link_libraries(actraiser_present_sim3d_clouds_test PRIVATE actraiser_math)
     add_test(NAME actraiser_present_sim3d_clouds COMMAND actraiser_present_sim3d_clouds_test)
 
     add_executable(actraiser_present_sim3d_underlay_test
-        tests/present_sim3d_underlay_test.c src/present_sim3d_underlay.c)
+        tests/present_sim3d_underlay_test.c src/sim/sim3d/present_sim3d_underlay.c)
     target_include_directories(actraiser_present_sim3d_underlay_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     add_test(NAME actraiser_present_sim3d_underlay COMMAND actraiser_present_sim3d_underlay_test)
 
     add_executable(actraiser_sim_world_navigation_globe_test
         tests/sim_world_navigation_globe_test.c
-        src/sim/sim_world_navigation_globe.c)
+        src/sim/world_nav/sim_world_navigation_globe.c)
     target_include_directories(actraiser_sim_world_navigation_globe_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src)
     target_link_libraries(actraiser_sim_world_navigation_globe_test PRIVATE actraiser_math)
@@ -1354,9 +1354,9 @@ if(BUILD_TESTING)
     add_executable(actraiser_sim_world_navigation_terrain_test
         tests/sim_world_navigation_terrain_test.c
         src/sim/sim_world_map.c
-        src/sim/sim_world_navigation_terrain.c
-        src/sim/sim_world_navigation_cliffs.c
-        src/sim/sim_town_terrain.c
+        src/sim/world_nav/sim_world_navigation_terrain.c
+        src/sim/world_nav/sim_world_navigation_cliffs.c
+        src/sim/town/sim_town_terrain.c
     )
     target_include_directories(actraiser_sim_world_navigation_terrain_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
@@ -1369,12 +1369,12 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_sim_world_navigation_art_test
         tests/sim_world_navigation_art_test.c
-        src/sim/sim_world_navigation_art.c
+        src/sim/world_nav/sim_world_navigation_art.c
         src/sim/sim_world_map.c
-        src/sim/sim_town_ground_art.c
-        src/sim/sim_background_mountains.c
-        src/sim/sim_town_layout.c
-        src/sim/sim_town_terrain.c
+        src/sim/town/sim_town_ground_art.c
+        src/sim/mountains/sim_background_mountains.c
+        src/sim/town/sim_town_layout.c
+        src/sim/town/sim_town_terrain.c
     )
     target_include_directories(actraiser_sim_world_navigation_art_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
@@ -1387,8 +1387,8 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_sim_town_ground_art_test
         tests/sim_town_ground_art_test.c
-        src/sim/sim_town_ground_art.c
-        src/sim/sim_town_canvas.c)
+        src/sim/town/sim_town_ground_art.c
+        src/sim/town/sim_town_canvas.c)
     target_include_directories(actraiser_sim_town_ground_art_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
@@ -1422,7 +1422,7 @@ if(BUILD_TESTING)
         tests/render_upload_metrics_test.c
         src/platform/sdl/render_sdl.c src/render/render_device.c
         src/present/presentation_upload_mirror.c src/app/performance_metrics.c
-        src/sim/sim3d_performance.c src/diorama/diorama_performance.c)
+        src/sim/sim3d/sim3d_performance.c src/diorama/diorama_performance.c)
     target_include_directories(actraiser_render_upload_metrics_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     target_link_libraries(actraiser_render_upload_metrics_test PRIVATE SDL3::SDL3 actraiser_math)
     add_test(NAME actraiser_render_upload_metrics COMMAND actraiser_render_upload_metrics_test)
@@ -1432,7 +1432,7 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_gpu_texture_upload_layout COMMAND actraiser_gpu_texture_upload_layout_test)
 
     add_executable(actraiser_present_sim3d_canvas_test
-        tests/present_sim3d_canvas_test.c src/present_sim3d_canvas.c
+        tests/present_sim3d_canvas_test.c src/sim/sim3d/present_sim3d_canvas.c
         src/render/render_device.c src/render/upload_rect_run.c)
     target_include_directories(actraiser_present_sim3d_canvas_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
@@ -1441,7 +1441,7 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_camera_orbit_test
         tests/camera_orbit_test.c
-        src/camera_orbit.c
+        src/render/camera_orbit.c
     )
     target_include_directories(actraiser_camera_orbit_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
@@ -1450,8 +1450,8 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_camera_orbit COMMAND actraiser_camera_orbit_test)
 
     add_executable(actraiser_sim3d_camera_test
-        tests/sim3d_camera_test.c src/sim/sim3d_camera.c
-        src/camera_orbit.c src/scene3d_math.c)
+        tests/sim3d_camera_test.c src/sim/sim3d/sim3d_camera.c
+        src/render/camera_orbit.c src/render/scene3d_math.c)
     target_include_directories(actraiser_sim3d_camera_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     target_link_libraries(actraiser_sim3d_camera_test PRIVATE actraiser_math)
@@ -1459,11 +1459,10 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_sim_town_canvas_test
         tests/sim_town_canvas_test.c
-        src/sim/sim_town_canvas.c
+        src/sim/town/sim_town_canvas.c
     )
     target_include_directories(actraiser_sim_town_canvas_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
-        ${CMAKE_SOURCE_DIR}/src/sim
         ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
     )
     add_test(NAME actraiser_sim_town_canvas
@@ -1471,11 +1470,10 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_sim_town_terrain_test
         tests/sim_town_terrain_test.c
-        src/sim/sim_town_terrain.c
+        src/sim/town/sim_town_terrain.c
     )
     target_include_directories(actraiser_sim_town_terrain_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
-        ${CMAKE_SOURCE_DIR}/src/sim
     )
     target_link_libraries(actraiser_sim_town_terrain_test PRIVATE
         actraiser_math)
@@ -1484,8 +1482,8 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_sim_backdrop_render_test
         tests/sim_backdrop_render_test.c
-        src/sim/sim_backdrop_render.c
-        src/scene3d_math.c
+        src/sim/sim3d/sim_backdrop_render.c
+        src/render/scene3d_math.c
     )
     target_include_directories(actraiser_sim_backdrop_render_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
@@ -1497,21 +1495,20 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_sim_background_voxels_test
         tests/sim_background_voxels_test.c
-        src/sim/sim_town_layout.c
-        src/sim/sim_background_voxels.c
-        src/sim/sim_structure_visuals.c
-        src/sim/sim_background_voxel_models.c
-        src/sim/sim_background_voxel_landmarks.c
-        src/sim/sim_background_mountains.c
-        src/sim/sim_background_mountain_silhouette.c
-        src/sim/sim_background_mountain_relief.c
-        src/sim/sim_background_voxel_region.c
-        src/sim/sim_town_canvas.c
-        src/sim/sim_town_terrain.c
+        src/sim/town/sim_town_layout.c
+        src/sim/voxels/sim_background_voxels.c
+        src/sim/town/sim_structure_visuals.c
+        src/sim/voxels/sim_background_voxel_models.c
+        src/sim/voxels/sim_background_voxel_landmarks.c
+        src/sim/mountains/sim_background_mountains.c
+        src/sim/mountains/sim_background_mountain_silhouette.c
+        src/sim/mountains/sim_background_mountain_relief.c
+        src/sim/voxels/sim_background_voxel_region.c
+        src/sim/town/sim_town_canvas.c
+        src/sim/town/sim_town_terrain.c
     )
     target_include_directories(actraiser_sim_background_voxels_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
-        ${CMAKE_SOURCE_DIR}/src/sim
         ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
     )
     target_link_libraries(actraiser_sim_background_voxels_test PRIVATE
@@ -1532,7 +1529,7 @@ if(BUILD_TESTING)
     target_compile_definitions(actraiser_sim_background_parallel_test PRIVATE
         AR_TEST_THREADED_ROWS=1)
     target_include_directories(actraiser_sim_background_parallel_test PRIVATE
-        ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src/sim
+        ${CMAKE_SOURCE_DIR}/src
         ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     target_link_libraries(actraiser_sim_background_parallel_test PRIVATE
         SDL3::SDL3 actraiser_math)
@@ -1541,58 +1538,55 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_sim_background_voxel_landmarks_test
         tests/sim_background_voxel_landmarks_test.c
-        src/sim/sim_town_layout.c
-        src/sim/sim_background_voxel_landmarks.c
+        src/sim/town/sim_town_layout.c
+        src/sim/voxels/sim_background_voxel_landmarks.c
     )
     target_include_directories(
         actraiser_sim_background_voxel_landmarks_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
-        ${CMAKE_SOURCE_DIR}/src/sim
     )
     add_test(NAME actraiser_sim_background_voxel_landmarks
         COMMAND actraiser_sim_background_voxel_landmarks_test)
 
     add_executable(actraiser_sim_background_mountains_test
         tests/sim_background_mountains_test.c
-        src/sim/sim_town_layout.c
-        src/sim/sim_background_mountains.c
-        src/sim/sim_background_mountain_objects.c
+        src/sim/town/sim_town_layout.c
+        src/sim/mountains/sim_background_mountains.c
+        src/sim/mountains/sim_background_mountain_objects.c
     )
     target_include_directories(actraiser_sim_background_mountains_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
-        ${CMAKE_SOURCE_DIR}/src/sim
     )
     add_test(NAME actraiser_sim_background_mountains
         COMMAND actraiser_sim_background_mountains_test)
 
     add_executable(actraiser_sim_background_mountain_relief_test
         tests/sim_background_mountain_relief_test.c
-        src/sim/sim_background_mountain_relief.c
+        src/sim/mountains/sim_background_mountain_relief.c
     )
     target_include_directories(
         actraiser_sim_background_mountain_relief_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
-        ${CMAKE_SOURCE_DIR}/src/sim
     )
     add_test(NAME actraiser_sim_background_mountain_relief
         COMMAND actraiser_sim_background_mountain_relief_test)
 
     add_executable(actraiser_sim_world_navigation_materials_test
         tests/sim_world_navigation_materials_test.c
-        src/sim/sim_world_navigation_terrain.c
-        src/sim/sim_town_terrain.c
-        src/sim/sim_world_navigation_clouds.c
-        src/sim/sim_world_navigation_sky_clouds.c
-        src/sim/sim_world_navigation_globe.c
-        src/sim/sim_world_navigation_mountains.c
-        src/sim/sim_world_navigation_mountain_transition.c
-        src/sim/sim_background_mountain_mesh.c
-        src/sim/sim_background_mountain_relief.c
-        src/sim/sim_background_mountain_silhouette.c
-        src/sim/sim_background_mountain_objects.c
-        src/sim/sim_background_mountains.c
-        src/sim/sim_town_ground_art.c
-        src/sim/sim_town_layout.c
+        src/sim/world_nav/sim_world_navigation_terrain.c
+        src/sim/town/sim_town_terrain.c
+        src/sim/world_nav/sim_world_navigation_clouds.c
+        src/sim/world_nav/sim_world_navigation_sky_clouds.c
+        src/sim/world_nav/sim_world_navigation_globe.c
+        src/sim/world_nav/sim_world_navigation_mountains.c
+        src/sim/world_nav/sim_world_navigation_mountain_transition.c
+        src/sim/mountains/sim_background_mountain_mesh.c
+        src/sim/mountains/sim_background_mountain_relief.c
+        src/sim/mountains/sim_background_mountain_silhouette.c
+        src/sim/mountains/sim_background_mountain_objects.c
+        src/sim/mountains/sim_background_mountains.c
+        src/sim/town/sim_town_ground_art.c
+        src/sim/town/sim_town_layout.c
         src/sim/sim_world_map.c
     )
     target_include_directories(actraiser_sim_world_navigation_materials_test PRIVATE
@@ -1603,13 +1597,12 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_sim_background_voxel_models_test
         tests/sim_background_voxel_models_test.c
-        src/sim/sim_background_voxel_models.c
-        src/sim/sim_background_voxel_region.c
-        src/sim/sim_structure_visuals.c
+        src/sim/voxels/sim_background_voxel_models.c
+        src/sim/voxels/sim_background_voxel_region.c
+        src/sim/town/sim_structure_visuals.c
     )
     target_include_directories(actraiser_sim_background_voxel_models_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
-        ${CMAKE_SOURCE_DIR}/src/sim
         ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
     )
     target_link_libraries(actraiser_sim_background_voxel_models_test PRIVATE actraiser_math)
@@ -1618,11 +1611,10 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_sim_background_voxel_biome_test
         tests/sim_background_voxel_biome_test.c
-        src/sim/sim_background_voxel_biome.c
+        src/sim/voxels/sim_background_voxel_biome.c
     )
     target_include_directories(actraiser_sim_background_voxel_biome_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
-        ${CMAKE_SOURCE_DIR}/src/sim
         ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
     )
     target_link_libraries(actraiser_sim_background_voxel_biome_test PRIVATE
@@ -1632,17 +1624,16 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_sim_background_voxel_model_cache_test
         tests/sim_background_voxel_model_cache_test.c
-        src/sim/sim_background_voxel_model_cache.c
-        src/sim/sim_background_voxel_models.c
-        src/sim/sim_background_voxel_region.c
-        src/sim/sim_background_voxel_lighting.c
-        src/sim/sim_background_voxel_surface.c
-        src/sim/sim_background_voxel_biome.c
+        src/sim/voxels/sim_background_voxel_model_cache.c
+        src/sim/voxels/sim_background_voxel_models.c
+        src/sim/voxels/sim_background_voxel_region.c
+        src/sim/voxels/sim_background_voxel_lighting.c
+        src/sim/voxels/sim_background_voxel_surface.c
+        src/sim/voxels/sim_background_voxel_biome.c
     )
     target_include_directories(actraiser_sim_background_voxel_model_cache_test
         PRIVATE
         ${CMAKE_SOURCE_DIR}/src
-        ${CMAKE_SOURCE_DIR}/src/sim
         ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
     )
     target_link_libraries(actraiser_sim_background_voxel_model_cache_test PRIVATE actraiser_math)
@@ -1651,11 +1642,11 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_sim_background_voxel_model_cache_storage_test
         tests/sim_background_voxel_model_cache_storage_test.c
-        src/sim/sim_background_voxel_models.c
-        src/sim/sim_background_voxel_region.c
-        src/sim/sim_background_voxel_lighting.c
-        src/sim/sim_background_voxel_surface.c
-        src/sim/sim_background_voxel_biome.c)
+        src/sim/voxels/sim_background_voxel_models.c
+        src/sim/voxels/sim_background_voxel_region.c
+        src/sim/voxels/sim_background_voxel_lighting.c
+        src/sim/voxels/sim_background_voxel_surface.c
+        src/sim/voxels/sim_background_voxel_biome.c)
     target_include_directories(actraiser_sim_background_voxel_model_cache_storage_test
         PRIVATE ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     target_link_libraries(actraiser_sim_background_voxel_model_cache_storage_test PRIVATE actraiser_math)
@@ -1664,34 +1655,31 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_sim_background_voxel_lod_test
         tests/sim_background_voxel_lod_test.c
-        src/sim/sim_background_voxel_lod.c
+        src/sim/voxels/sim_background_voxel_lod.c
     )
     target_include_directories(actraiser_sim_background_voxel_lod_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
-        ${CMAKE_SOURCE_DIR}/src/sim
     )
     add_test(NAME actraiser_sim_background_voxel_lod
         COMMAND actraiser_sim_background_voxel_lod_test)
 
     add_executable(actraiser_sim_background_voxel_preset_test
         tests/sim_background_voxel_preset_test.c
-        src/sim/sim_background_voxel_preset.c
+        src/sim/voxels/sim_background_voxel_preset.c
     )
     target_include_directories(actraiser_sim_background_voxel_preset_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
-        ${CMAKE_SOURCE_DIR}/src/sim
     )
     add_test(NAME actraiser_sim_background_voxel_preset
         COMMAND actraiser_sim_background_voxel_preset_test)
 
     add_executable(actraiser_sim_background_voxel_palette_test
         tests/sim_background_voxel_palette_test.c
-        src/sim/sim_background_voxel_palette.c
-        src/sim/sim_background_voxel_region.c
+        src/sim/voxels/sim_background_voxel_palette.c
+        src/sim/voxels/sim_background_voxel_region.c
     )
     target_include_directories(actraiser_sim_background_voxel_palette_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
-        ${CMAKE_SOURCE_DIR}/src/sim
         ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
     )
     add_test(NAME actraiser_sim_background_voxel_palette
@@ -1699,13 +1687,12 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_sim_background_voxel_lighting_test
         tests/sim_background_voxel_lighting_test.c
-        src/sim/sim_background_voxel_lighting.c
-        src/sim/sim_background_voxel_surface.c
+        src/sim/voxels/sim_background_voxel_lighting.c
+        src/sim/voxels/sim_background_voxel_surface.c
     )
     target_include_directories(actraiser_sim_background_voxel_lighting_test
         PRIVATE
         ${CMAKE_SOURCE_DIR}/src
-        ${CMAKE_SOURCE_DIR}/src/sim
         ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
     )
     target_link_libraries(actraiser_sim_background_voxel_lighting_test PRIVATE
@@ -1715,14 +1702,13 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_sim_background_voxel_proportions_test
         tests/sim_background_voxel_proportions_test.c
-        src/sim/sim_background_voxel_models.c
-        src/sim/sim_background_voxel_proportions.c
-        src/sim/sim_background_voxel_region.c
+        src/sim/voxels/sim_background_voxel_models.c
+        src/sim/voxels/sim_background_voxel_proportions.c
+        src/sim/voxels/sim_background_voxel_region.c
     )
     target_include_directories(actraiser_sim_background_voxel_proportions_test
         PRIVATE
         ${CMAKE_SOURCE_DIR}/src
-        ${CMAKE_SOURCE_DIR}/src/sim
         ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
     )
     target_link_libraries(actraiser_sim_background_voxel_proportions_test PRIVATE actraiser_math)
@@ -1731,12 +1717,11 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_sim_background_voxel_region_test
         tests/sim_background_voxel_region_test.c
-        src/sim/sim_background_voxel_region.c
+        src/sim/voxels/sim_background_voxel_region.c
     )
     target_include_directories(actraiser_sim_background_voxel_region_test
         PRIVATE
         ${CMAKE_SOURCE_DIR}/src
-        ${CMAKE_SOURCE_DIR}/src/sim
     )
     add_test(NAME actraiser_sim_background_voxel_region
         COMMAND actraiser_sim_background_voxel_region_test)
@@ -1748,7 +1733,6 @@ if(BUILD_TESTING)
     )
     target_include_directories(actraiser_sim_world_map_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
-        ${CMAKE_SOURCE_DIR}/src/sim
         ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
     )
     add_test(NAME actraiser_sim_world_map COMMAND actraiser_sim_world_map_test)
@@ -1956,7 +1940,7 @@ if(BUILD_TESTING)
         src/action/action_effect_projection.c
         src/diorama/diorama_projection.c
         src/diorama/diorama_depth_shapes.c
-        src/scene3d_math.c
+        src/render/scene3d_math.c
     )
     target_include_directories(actraiser_action_effect_render_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
@@ -1975,7 +1959,7 @@ if(BUILD_TESTING)
         tests/diorama_projection_test.c
         src/diorama/diorama_projection.c
         src/diorama/diorama_depth_shapes.c
-        src/scene3d_math.c
+        src/render/scene3d_math.c
     )
     target_include_directories(actraiser_diorama_projection_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
@@ -1995,7 +1979,6 @@ if(BUILD_TESTING)
     )
     target_include_directories(actraiser_sim_phase0_trace_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
-        ${CMAKE_SOURCE_DIR}/src/sim
         ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
     )
     add_test(NAME actraiser_sim_phase0_trace
@@ -2006,15 +1989,14 @@ if(BUILD_TESTING)
         src/sim/sim_render_metadata.c
         src/sim/sim_render_visibility.c
         src/sim/sim_world_map.c
-        src/sim/sim_world_navigation_scene.c
+        src/sim/world_nav/sim_world_navigation_scene.c
         src/actraiser/actraiser_sprite_ownership.c
-        src/sim/sim_world_navigation_towns.c
-        src/sim/sim_background_voxel_landmarks.c
-        src/sim/sim_town_layout.c
+        src/sim/world_nav/sim_world_navigation_towns.c
+        src/sim/voxels/sim_background_voxel_landmarks.c
+        src/sim/town/sim_town_layout.c
     )
     target_include_directories(actraiser_sim_render_metadata_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
-        ${CMAKE_SOURCE_DIR}/src/sim
         ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
     )
     target_link_libraries(actraiser_sim_render_metadata_test PRIVATE
@@ -2036,7 +2018,6 @@ if(BUILD_TESTING)
     )
     target_include_directories(actraiser_sim_visual_patches_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
-        ${CMAKE_SOURCE_DIR}/src/sim
     )
     add_test(NAME actraiser_sim_visual_patches
         COMMAND actraiser_sim_visual_patches_test)
@@ -2364,7 +2345,7 @@ if(BUILD_TESTING)
     # orchestrator is linked against test stubs so this remains deterministic
     # and GPU-free while guarding the order that keeps UI above pillar bars.
     add_executable(actraiser_presentation_view_test
-        tests/presentation_view_test.c src/present/presentation_view.c src/present_sky_palace.c)
+        tests/presentation_view_test.c src/present/presentation_view.c src/sim/world_nav/present_sky_palace.c)
     target_include_directories(actraiser_presentation_view_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_presentation_view COMMAND actraiser_presentation_view_test)
@@ -2572,27 +2553,27 @@ if(BUILD_TESTING)
     add_executable(actraiser_ppu_render_pipeline_test
         tests/ppu_render_pipeline_test.c
         src/app/performance_metrics.c src/platform/sdl/host_clock_sdl.c
-        src/sim/sim3d.c
-        src/sim/sim_background_voxel_preset.c
+        src/sim/sim3d/sim3d.c
+        src/sim/voxels/sim_background_voxel_preset.c
         src/sim/sim_render_metadata.c
         src/sim/sim_render_visibility.c
         src/sim/sim_render_metadata_trace.c
         src/sim/sim_world_map.c
-        src/sim/sim_world_navigation_scene.c
+        src/sim/world_nav/sim_world_navigation_scene.c
         src/actraiser/actraiser_sprite_ownership.c
-        src/sim/sim_world_navigation_towns.c
-        src/sim/sim_world_navigation_capture.c
-        src/sim/sim_world_navigation_palace.c
-        src/sim/sim_town_canvas.c
-        src/sim/sim_town_terrain.c
-        src/sim/sim_town_layout.c
-        src/sim/sim_background_voxels.c
-        src/sim/sim_structure_visuals.c
-        src/sim/sim_background_voxel_landmarks.c
-        src/sim/sim_background_mountains.c
-        src/sim/sim_background_mountain_silhouette.c
-        src/sim/sim_background_mountain_relief.c
-        src/sim/sim_background_voxel_region.c
+        src/sim/world_nav/sim_world_navigation_towns.c
+        src/sim/world_nav/sim_world_navigation_capture.c
+        src/sim/world_nav/sim_world_navigation_palace.c
+        src/sim/town/sim_town_canvas.c
+        src/sim/town/sim_town_terrain.c
+        src/sim/town/sim_town_layout.c
+        src/sim/voxels/sim_background_voxels.c
+        src/sim/town/sim_structure_visuals.c
+        src/sim/voxels/sim_background_voxel_landmarks.c
+        src/sim/mountains/sim_background_mountains.c
+        src/sim/mountains/sim_background_mountain_silhouette.c
+        src/sim/mountains/sim_background_mountain_relief.c
+        src/sim/voxels/sim_background_voxel_region.c
         src/sim/sim_render_atlas.c
         ${SNESRECOMP_RUNNER_ROOT}/src/runner/runner.c
         ${SNESRECOMP_RUNNER_ROOT}/src/runner/runner_audio_trace.c
@@ -2608,7 +2589,6 @@ if(BUILD_TESTING)
     target_include_directories(actraiser_ppu_render_pipeline_test PRIVATE
         ${CMAKE_SOURCE_DIR}
         ${CMAKE_SOURCE_DIR}/src
-        ${CMAKE_SOURCE_DIR}/src/sim
         ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
         ${SNESRECOMP_RUNNER_PRIVATE_INCLUDE_DIRS}
     )
@@ -2657,15 +2637,14 @@ if(BUILD_TESTING)
         src/sim/sim_render_metadata.c
         src/sim/sim_render_visibility.c
         src/sim/sim_world_map.c
-        src/sim/sim_world_navigation_scene.c
+        src/sim/world_nav/sim_world_navigation_scene.c
         src/actraiser/actraiser_sprite_ownership.c
-        src/sim/sim_world_navigation_towns.c
-        src/sim/sim_background_voxel_landmarks.c
-        src/sim/sim_town_layout.c
+        src/sim/world_nav/sim_world_navigation_towns.c
+        src/sim/voxels/sim_background_voxel_landmarks.c
+        src/sim/town/sim_town_layout.c
     )
     target_include_directories(actraiser_scene_inspector_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
-        ${CMAKE_SOURCE_DIR}/src/sim
         ${CMAKE_SOURCE_DIR}/src/dev
         ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
         ${SNESRECOMP_RUNNER_PRIVATE_INCLUDE_DIRS}
@@ -3302,20 +3281,20 @@ if(BUILD_TESTING)
         src/actraiser/actraiser_localization_text.c
         src/actraiser/actraiser_hud.c)
     add_executable(sim_menu_model_test
-        tests/sim_menu_model_test.c src/sim/sim_menu_model.c)
+        tests/sim_menu_model_test.c src/sim/menu/sim_menu_model.c)
     target_include_directories(sim_menu_model_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     add_test(NAME sim_menu_model COMMAND sim_menu_model_test)
     add_executable(sim_menu_help_test tests/sim_menu_help_test.c
-        src/sim/sim_menu_help.c src/localization/unicode_grapheme.c)
+        src/sim/menu/sim_menu_help.c src/localization/unicode_grapheme.c)
     target_include_directories(sim_menu_help_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     add_test(NAME sim_menu_help COMMAND sim_menu_help_test)
-    add_executable(sim_menu_art_test tests/sim_menu_art_test.c src/sim/sim_menu_art.c)
+    add_executable(sim_menu_art_test tests/sim_menu_art_test.c src/sim/menu/sim_menu_art.c)
     target_include_directories(sim_menu_art_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME sim_menu_art COMMAND sim_menu_art_test)
     add_executable(actraiser_sim_menu_test tests/actraiser_sim_menu_test.c
-        src/actraiser/actraiser_sim_menu.c src/sim/sim_menu_model.c
-        src/sim/sim_menu_help.c src/localization/unicode_grapheme.c)
+        src/actraiser/actraiser_sim_menu.c src/sim/menu/sim_menu_model.c
+        src/sim/menu/sim_menu_help.c src/localization/unicode_grapheme.c)
     target_include_directories(actraiser_sim_menu_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_sim_menu COMMAND actraiser_sim_menu_test)
@@ -3327,8 +3306,8 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_localization_schedule_test
         tests/actraiser_localization_schedule_test.c
-        src/sim/sim_menu_model.c
-        src/sim/sim_menu_help.c
+        src/sim/menu/sim_menu_model.c
+        src/sim/menu/sim_menu_help.c
         src/save/save_system.c src/save/save_paths.c
         src/host/atomic_replace.c
         src/localization/text_presentation.c
@@ -3483,10 +3462,10 @@ if(BUILD_TESTING)
     # A host with no GPU renderer skips; Metal/Vulkan/D3D12 runners exercise
     # their native shader blob and synchronization path.
     add_executable(actraiser_sim3d_depth_pass_gpu_test
-        src/sim/sim3d_mesh_set.c
+        src/sim/sim3d/sim3d_mesh_set.c
         tests/sim3d_depth_pass_gpu_test.c
-        src/scene3d_math.c
-        src/present_world_nav_geometry.c
+        src/render/scene3d_math.c
+        src/sim/world_nav/present_world_nav_geometry.c
         src/render/render_device.c
         src/platform/sdl/render_sdl.c
         src/platform/sdl/sim3d_depth_pass_sdl.c
@@ -3507,23 +3486,23 @@ if(BUILD_TESTING)
     # Opt-in architectural benchmark; not used by shipping game views.
     add_executable(actraiser_model_projection_benchmark
         tools/benchmark_model_projection.c
-        src/scene3d_math.c
-        src/present_world_nav_geometry.c
+        src/render/scene3d_math.c
+        src/sim/world_nav/present_world_nav_geometry.c
         src/render/render_device.c
         src/platform/sdl/render_sdl.c
         src/platform/sdl/sim3d_depth_pass_sdl.c
         src/platform/sdl/parallel_work_sdl.c
         src/platform/sdl/host_clock_sdl.c
         src/app/performance_metrics.c
-        src/sim/sim_background_voxel_model_cache.c
-        src/sim/sim_background_voxel_models.c
-        src/sim/sim_background_voxel_region.c
-        src/sim/sim_background_voxel_lighting.c
-        src/sim/sim_background_voxel_surface.c
-        src/sim/sim_background_voxel_biome.c
-        src/sim/sim_background_voxel_palette.c
-        src/sim/sim_background_voxel_proportions.c
-        src/sim/sim_world_navigation_globe.c)
+        src/sim/voxels/sim_background_voxel_model_cache.c
+        src/sim/voxels/sim_background_voxel_models.c
+        src/sim/voxels/sim_background_voxel_region.c
+        src/sim/voxels/sim_background_voxel_lighting.c
+        src/sim/voxels/sim_background_voxel_surface.c
+        src/sim/voxels/sim_background_voxel_biome.c
+        src/sim/voxels/sim_background_voxel_palette.c
+        src/sim/voxels/sim_background_voxel_proportions.c
+        src/sim/world_nav/sim_world_navigation_globe.c)
     target_include_directories(actraiser_model_projection_benchmark PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/tests/support ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     target_compile_definitions(actraiser_model_projection_benchmark PRIVATE
@@ -3744,7 +3723,7 @@ if(BUILD_TESTING)
         # ManualTurn_SheetExtents solves the sheet's world extents by probing the
         # projection, so the module depends on scene3d_math -- the one place the
         # settled page and the turning leaf are guaranteed to agree.
-        src/scene3d_math.c
+        src/render/scene3d_math.c
     )
     target_include_directories(actraiser_manual_pages_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src

@@ -9,8 +9,8 @@
 #include "diorama/diorama_effect_backend.h"
 #include "platform/sdl/render_sdl_internal.h"
 #include "app/session_fatal.h"
-#include "sim/sim_shadow_effect_backend.h"
-#include "sim/sim_cloud_effect_backend.h"
+#include "sim/sim3d/sim_shadow_effect_backend.h"
+#include "sim/sim3d/sim_cloud_effect_backend.h"
 
 enum { kSkip = 77 };
 

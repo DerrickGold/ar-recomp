@@ -1,5 +1,5 @@
-#ifndef SIM_PHASE0_TRACE_H
-#define SIM_PHASE0_TRACE_H
+#ifndef AR_SIM_PHASE0_TRACE_H
+#define AR_SIM_PHASE0_TRACE_H
 
 #include <stdbool.h>
 
@@ -15,4 +15,4 @@ void SimPhase0Trace_Frame(uint32 host_frame, const uint8 *wram,
                           SrRunnerHandle *runner);
 void SimPhase0Trace_Close(void);
 
-#endif  /* SIM_PHASE0_TRACE_H */
+#endif  /* AR_SIM_PHASE0_TRACE_H */

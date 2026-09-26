@@ -1,5 +1,5 @@
-#include "scene3d_math.h"
-#include "sim/sim3d_camera_limits.h"
+#include "render/scene3d_math.h"
+#include "sim/sim3d/sim3d_camera_limits.h"
 
 #include <math.h>
 #include <stdbool.h>

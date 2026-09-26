@@ -15,15 +15,15 @@
 
 #include "host/parallel_work.h"
 #include "platform/sdl/render_sdl_internal.h"
-#include "scene3d_math.h"
-#include "present_world_nav_geometry.h"
-#include "sim/sim3d_depth_pass.h"
+#include "render/scene3d_math.h"
+#include "sim/world_nav/present_world_nav_geometry.h"
+#include "sim/sim3d/sim3d_depth_pass.h"
 #include "sim3d_depth_reference.h"
-#include "sim/sim_background_voxel_biome.h"
-#include "sim/sim_background_voxel_model_cache.h"
-#include "sim/sim_background_voxel_palette.h"
-#include "sim/sim_background_voxel_proportions.h"
-#include "sim/sim_world_navigation_globe.h"
+#include "sim/voxels/sim_background_voxel_biome.h"
+#include "sim/voxels/sim_background_voxel_model_cache.h"
+#include "sim/voxels/sim_background_voxel_palette.h"
+#include "sim/voxels/sim_background_voxel_proportions.h"
+#include "sim/world_nav/sim_world_navigation_globe.h"
 
 enum { kObjects = 512, kMaxVertices = 256 * 1024, kWarmup = 120 };
 /* Immutable during a worker job; verification changes viewport between jobs. */

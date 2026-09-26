@@ -1,8 +1,8 @@
-#include "sim_render_atlas.h"
+#include "sim/sim_render_atlas.h"
 
 #include <string.h>
 
-#include "sim_render_metadata.h"
+#include "sim/sim_render_metadata.h"
 
 enum { kAtlasPadding = 1 };
 

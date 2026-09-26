@@ -1,5 +1,5 @@
-#ifndef SIM_WORLD_MAP_H
-#define SIM_WORLD_MAP_H
+#ifndef AR_SIM_WORLD_MAP_H
+#define AR_SIM_WORLD_MAP_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -170,4 +170,4 @@ const uint32_t *SimWorldMap_BakedPixels(void);
  * image this reads, which is what the caller's lock was a copy OF. */
 bool SimWorldMap_Downsample(uint32_t *pixels, int pitch_pixels, int divisor);
 
-#endif  /* SIM_WORLD_MAP_H */
+#endif  /* AR_SIM_WORLD_MAP_H */

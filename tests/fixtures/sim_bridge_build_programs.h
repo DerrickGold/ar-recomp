@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-#include "sim/sim_structure_visuals.h"
+#include "sim/town/sim_structure_visuals.h"
 
 /* Exact visual-class-2 producer fixture decoded from ar.sfc
  * SHA-256 b8055844825653210d252d29a2229f9a3e7e512004e83940620173c57d8723f0.
