@@ -26,9 +26,6 @@
  "src/save/save_slots.c": {
   "long-line": 1
  },
- "src/settings_overlay/settings_overlay.c": {
-  "long-line": 5
- },
  "src/settings_overlay/settings_overlay_artwork.c": {
   "long-line": 3
  },

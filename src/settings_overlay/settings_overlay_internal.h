@@ -2,8 +2,9 @@
 #define AR_SETTINGS_OVERLAY_INTERNAL_H
 
 /* Private UI vocabulary shared by the menu, diagnostic panel and palette
- * picker. settings_overlay.h is the public API. The menu owns navigation and
- * draw primitives; settings_overlay_artwork.c owns fonts and atlas lifetimes. */
+ * picker. settings_overlay.h is the public API. The menu owns navigation;
+ * settings_overlay_widgets.c owns drawing and coordinates resource lifetimes;
+ * settings_overlay_artwork.c builds the ROM fonts and atlases. */
 
 #include <stdint.h>
 #include <SDL3/SDL.h>
@@ -23,10 +24,11 @@ enum {
   kDebugLineHeight = 10,
   kGlyphSize = 8,
   kSmallLineHeight = 9,
+  kMinimumScalePercent = 25,
+  kScaleStepPercent = 25,
 };
 
-/* Debug/inspector text roles, mapped to kDebugTextColors in settings_overlay.c.
- * Shared because DrawDebugTextN (core) takes one and the panel passes them. */
+/* Debug/inspector text roles, mapped by settings_overlay_widgets.c. */
 typedef enum DebugTextStyle {
   kDebugText_Normal,
   kDebugText_Label,
@@ -51,13 +53,17 @@ typedef struct MenuLayout {
   int origin_y;
 } MenuLayout;
 
-/* Presentation resources owned by settings_overlay.c (created in
- * SettingsOverlay_Init). The panel reads these; it does not create or free
- * them. */
-extern ArRenderDevice *s_render_device;
+/* The widget owner borrows the host device and owns the text cache/artwork
+ * lifecycle. The accessor can return NULL; callers never replace the device.
+ * Init/reload/destroy are sequenced only by the overlay shell. */
+bool SettingsOverlayWidgets_Init(ArRenderDevice *device, const uint8_t *rom, size_t size);
+bool SettingsOverlayWidgets_ReloadTextures(const uint8_t *rom, size_t size);
+void SettingsOverlayWidgets_Destroy(void);
+ArRenderDevice *SettingsOverlayWidgets_RenderDevice(void);
+bool SettingsOverlayWidgets_HasTextBackend(void);
 
-/* Layout + draw primitives defined in settings_overlay.c, reused by the panel
- * so both surfaces scale and render text identically. */
+/* The shell resolves the user's scale preference and remembers automatic
+ * scale for its setting row. The widget owner provides the pure geometry. */
 MenuLayout BuildLayout(int output_width, int output_height);
 MenuLayout BuildLayoutAtScale(int output_width, int output_height, int scale);
 int SnappedFitScale(int output_width, int output_height);
@@ -86,6 +92,9 @@ int CappedTextLength(const char *text, int max_chars);
 int SmallTextWidth(const char *text);
 void DrawTextN(const MenuLayout *layout, int x, int y,
                const char *text, int max_chars, TextStyle style);
+void DrawGlyph(const MenuLayout *layout, int x, int y, unsigned char ch, TextStyle style);
+void DrawTextRight(const MenuLayout *layout, int right, int y,
+                   const char *text, int max_chars, TextStyle style);
 void DrawOverlayIcon(const MenuLayout *layout, int x, int y, int size,
                      SettingsOverlayIcon icon, bool selected, int alpha);
 void DrawScrollBar(const MenuLayout *layout, int x, int y, int height,

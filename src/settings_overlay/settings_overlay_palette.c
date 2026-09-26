@@ -27,7 +27,7 @@ static const char *Ui(const char *key) {
 void SettingsOverlayPalette_Close(void) { s_layer_palette_open = false; }
 
 void SettingsOverlayPalette_ReleaseTexture(void) {
-  ArRenderDevice_DestroyTexture(s_render_device, s_layer_palette_texture);
+  ArRenderDevice_DestroyTexture(SettingsOverlayWidgets_RenderDevice(), s_layer_palette_texture);
   s_layer_palette_texture = ArRenderTexture_Invalid();
 }
 
@@ -44,7 +44,7 @@ void SettingsOverlayPalette_Open(const DioramaEditorRow *row,
           : 0;
   /* Snapshot CGRAM at modal open; moving the cursor never resamples the game. */
   SettingsOverlayPalette_ReleaseTexture();
-  if (s_render_device) (void)RebuildLayerPaletteTexture();
+  if (SettingsOverlayWidgets_RenderDevice()) (void)RebuildLayerPaletteTexture();
   s_layer_palette_open = true;
 }
 
@@ -92,7 +92,7 @@ static uint32_t LayerPaletteColor(uint16_t bgr555) {
 }
 
 static bool RebuildLayerPaletteTexture(void) {
-  if (!s_render_device) return false;
+  if (!SettingsOverlayWidgets_RenderDevice()) return false;
   uint32_t *pixels =
       calloc((size_t)kLayerPaletteGridPixels * kLayerPaletteGridPixels, sizeof(*pixels));
   if (!pixels) return false;
@@ -105,8 +105,9 @@ static bool RebuildLayerPaletteTexture(void) {
         pixels[(size_t)(y0 + y) * kLayerPaletteGridPixels + x0 + x] = color;
   }
 
-  const ArRenderTexture texture = SettingsOverlayArtwork_CreateAtlas(
-      s_render_device, kLayerPaletteGridPixels, kLayerPaletteGridPixels, pixels);
+  const ArRenderTexture texture =
+      SettingsOverlayArtwork_CreateAtlas(SettingsOverlayWidgets_RenderDevice(),
+                                         kLayerPaletteGridPixels, kLayerPaletteGridPixels, pixels);
   const bool ready = ArRenderTexture_IsValid(texture);
   free(pixels);
   if (!ready) {
@@ -135,7 +136,8 @@ void SettingsOverlayPalette_Draw(const MenuLayout *layout) {
     const ArRenderRectF destination =
         ToRenderRect(LogicalRect(layout, x + kPickerGridX, y + kPickerGridY,
                                  kLayerPaletteGridPixels, kLayerPaletteGridPixels));
-    (void)ArRenderDevice_DrawTexture(s_render_device, s_layer_palette_texture, NULL, &destination);
+    (void)ArRenderDevice_DrawTexture(SettingsOverlayWidgets_RenderDevice(), s_layer_palette_texture,
+                                     NULL, &destination);
   } else {
     /* Texture creation failure should not make the editor unusable. This slow
      * fallback is exceptional; the normal path submits the entire grid once. */

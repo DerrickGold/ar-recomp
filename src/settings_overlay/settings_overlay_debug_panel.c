@@ -11,9 +11,8 @@
 /* The draggable, resizable F-key diagnostic panel (scene inspector output,
  * live report text). A distinct feature from the settings menu, sharing only
  * the overlay render device, debug font, layout math and low-level draw
- * primitives declared in settings_overlay_internal.h. Split out of
- * settings_overlay.c so the menu core is not 3900 lines. State below is private
- * to the panel. */
+ * primitives owned by settings_overlay_widgets.c. Dragging, resizing and
+ * visibility state below belong to this panel. */
 
 enum {
   kDebugPanelMinimumScalePercent = 50,
@@ -69,12 +68,12 @@ void SettingsOverlayDebugPanel_Reset(void) {
 
 void SettingsOverlay_RenderDebugPanel(const char *title, const char *text,
                                       ArRenderPointI avoid_point) {
-  if (!s_render_device || !ArRenderTexture_IsValid(SettingsOverlayArtwork_Get()->debug_font) ||
-      !text || !text[0])
+  if (!SettingsOverlayWidgets_RenderDevice() ||
+      !ArRenderTexture_IsValid(SettingsOverlayArtwork_Get()->debug_font) || !text || !text[0])
     return;
   int output_width = 0, output_height = 0;
   if (!ArRenderOutput_UseFull(
-          s_render_device, &output_width, &output_height))
+          SettingsOverlayWidgets_RenderDevice(), &output_width, &output_height))
     return;
 
   MenuLayout layout = BuildLayout(output_width, output_height);
@@ -235,7 +234,7 @@ bool SettingsOverlay_BeginDebugPanelDrag(int output_x, int output_y) {
 
 void SettingsOverlay_DragDebugPanel(int output_x, int output_y) {
   if ((!s_debug_panel_dragging && !s_debug_panel_resizing) ||
-      !s_render_device)
+      !SettingsOverlayWidgets_RenderDevice())
     return;
   if (s_debug_panel_resizing) {
     int dx = output_x - s_debug_panel_resize_start_x;
@@ -259,7 +258,7 @@ void SettingsOverlay_DragDebugPanel(int output_x, int output_y) {
   }
   int output_width = 0, output_height = 0;
   if (!ArRenderDevice_GetOutputSize(
-          s_render_device, &output_width, &output_height) ||
+          SettingsOverlayWidgets_RenderDevice(), &output_width, &output_height) ||
       output_width <= 0 || output_height <= 0)
     return;
   int x = output_x - s_debug_panel_drag_offset_x;
